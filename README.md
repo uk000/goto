@@ -1,3 +1,4 @@
+#
 # goto
 
 ## What is it?
@@ -16,6 +17,7 @@ Or build it locally on your machine
 go build -o goto .
 ```
 
+#
 # Features
 
 It's an HTTP client and server built into a single application. 
@@ -40,6 +42,7 @@ One the server is up and running, rest of the interactions and configurations ar
 
 Let's look at the APIs for server features.
 
+#
 # Server Features
 
 ## Listeners
@@ -56,7 +59,7 @@ It exposes listener APIs to let you manage additional HTTP listeners (TCP suppor
 | POST, PUT  | /listeners/{port}/close  | Close an added listener|
 | GET        | /listeners               | Get a list of listeners |
 
-### Listener JSON Schema
+#### Listener JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
 |label    |string | Label to be applied to the listener. This can also be set/changed via REST API later|
@@ -64,7 +67,7 @@ It exposes listener APIs to let you manage additional HTTP listeners (TCP suppor
 |protocol |string | Currently only `http`. TCP support will come soon.|
 
 
-### Listener API Examples:
+#### Listener API Examples:
 ```
 curl localhost:8080/listeners/add --data '{"port":8081, "protocol":"http", "label":"Server-8081"}'
 
@@ -87,7 +90,7 @@ By default, a listener adds a header `Server: <port>` to each response it sends.
 | PUT       | /label/clear/remove | Remove label for this port |
 | GET       | /label              | Get current label of this port |
 
-### Listener Label API Examples:
+#### Listener Label API Examples:
 ```
 curl -X PUT localhost:8080/label/set/Server-8080
 
@@ -108,7 +111,7 @@ curl localhost:8080/label
 |POST     | /request/headers/track/counts/clear						|Clear counts for all tracked headers|
 |GET      | /request/headers/track/counts									|Get counts for all tracked headers|
 
-### Request Headers Tracking API Examples:
+#### Request Headers Tracking API Examples:
 ```
 curl -X POST localhost:8080/request/headers/track/clear
 
@@ -125,7 +128,7 @@ curl localhost:8080/request/headers/track/counts/x
 curl -X POST localhost:8080/request/headers/track/counts/clear
 ```
 
-### Request Tracking Results Example
+#### Request Tracking Results Example
 ```
 {
   "x": {
@@ -177,7 +180,7 @@ The APIs allow proxy targets to be configured, and those can also be invoked man
 |GET 	    |	/request/proxy/targets                  | Invoke all proxy targets |
 
 
-### Proxy Target JSON Schema
+#### Proxy Target JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
 | name         | string                                 | Name for this target |
@@ -189,7 +192,7 @@ The APIs allow proxy targets to be configured, and those can also be invoked man
 | enable       | string     | Whether or not the proxy target is currently active |
 
 
-### Request Proxying API Examples:
+#### Request Proxying API Examples:
 ```
 curl -s -X POST localhost:8080/request/proxy/targets/clear
 
@@ -219,7 +222,7 @@ curl -s localhost:8080/request/proxy/targets
 |POST     |	/request/timeout/status                   | Add target for proxying requests to |
 
 
-### Request Timeout API Examples
+#### Request Timeout API Examples
 ```
 curl -X POST localhost:8080/request/timeout/track/headers/x,y
 
@@ -245,7 +248,7 @@ curl localhost:8080/request/timeout/status
 |GET      |	/request/uri/bypass/counts?uri={uri}    | Get request counts for a given bypass URI |
 
 
-### Request Timeout API Examples
+#### Request Timeout API Examples
 ```
 curl -X POST localhost:8080/request/uri/bypass/clear
 
@@ -275,7 +278,7 @@ curl localhost:8080/request/uri/bypass/counts\?uri=/foo
 
 * Delay is specified as duration, e.g. 1s
 
-### Examples
+#### Response Delay API Examples
 
 ```
 curl -X POST localhost:8080/response/delay/clear
@@ -295,7 +298,7 @@ curl localhost:8080/response/delay
 | GET       |	/response/headers/list                  | Get list of configured custom response headers |
 | GET       |	/response/headers                       | Get list of configured custom response headers |
 
-### Examples
+#### Response Headers API Examples
 ```
 curl -X POST localhost:8080/response/headers/clear
 
@@ -320,7 +323,7 @@ curl localhost:8080/response/headers
 | GET       |	/response/status/counts           | Get request counts for all response statuses so far |
 | GET       |	/response/status                  | Get the currently configured forced response status |
 
-### Response Status API Examples
+#### Response Status API Examples
 ```
 curl -X POST localhost:8080/response/status/counts/clear
 
@@ -337,7 +340,7 @@ curl localhost:8080/response/status/counts
 curl localhost:8080/response/status/counts/502
 ```
 
-### Response Status Tracking Result Example
+#### Response Status Tracking Result Example
 ```
 {
   "countsByRequestedStatus": {
@@ -353,13 +356,13 @@ curl localhost:8080/response/status/counts/502
 ```
 
 
-## Status
+## Status API
 
 |METHOD|URI|Description|
 |---|---|---|
 | GET       |	/status/{status}                  | This call either receives the given status, or the forced response status if one is set |
 
-### Status Call Examples
+#### Status Call Examples
 ```
 curl -I  localhost:8080/status/418
 ```
@@ -369,7 +372,7 @@ curl -I  localhost:8080/status/418
 
 Any request that doesn't match any of the defined management APIs, and also doesn't match any proxy targets, gets treated by a catch-all response that sends HTTP 200 response by default (unless an override response code is set)
 
-
+#
 # Client Features
 As a client tool, the server allows targets to be configured and invoked via REST APIs. Headers can be set to track results for target invocations, and APIs make those results available for consumption as JSON output. the invocation results get accumulated across multiple invocations until cleard explicitly.
 
@@ -394,7 +397,7 @@ As a client tool, the server allows targets to be configured and invoked via RES
 | POST      | /client/results/clear                 | Clear previously accumulated invocation results |
 
 
-### Client Target JSON Schema
+#### Client Target JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
 | name         | string         | Name for this target |
@@ -407,7 +410,7 @@ As a client tool, the server allows targets to be configured and invoked via RES
 | delay        | duration       | Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation |
 | sendId       | bool           | Whether or not a unique ID be sent with each client request. If this flag is set, a query param 'id' will be added to each request, which can help with tracing requests on the target servers |
 
-### Client API Examples
+#### Client API Examples
 ```
 curl -s localhost:8080/client/targets/add --data '{"name": "t1", "method":"GET", "url":"http://localhost:8080/status/418", "headers":[["foo", "bar"],["x", "x1"],["y", "y1"]], "replicas": 2, "delay": "1s", "requestCount": 5, "keepOpen": "10s", "sendId": true}'
 
@@ -438,7 +441,7 @@ curl -X POST localhost:8080/client/results/clear
 curl -s localhost:8080/client/results
 ```
 
-### Sample Client Invocation Result (including error reporting example)
+#### Sample Client Invocation Result (including error reporting example)
 ```
 {
   "CountsByStatus": {
