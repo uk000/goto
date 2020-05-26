@@ -17,6 +17,8 @@ Or build it locally on your machine
 go build -o goto .
 ```
 
+<br/>
+
 #
 # Features
 
@@ -42,14 +44,20 @@ One the server is up and running, rest of the interactions and configurations ar
 
 Let's look at the APIs for server features.
 
+<br/>
+
 #
 # Server Features
+The server is useful to be run as a test server for testing some client application, proxy/sidecar, gateway, etc. Or, the server can also be used as a proxy to be put in between a client and a target server application, so that traffic flows through this server where headers can be inspected/tracked before proxying the requests further. The server can add headers, replace request URI with some other URI, add artificial delays to the response, respond with a specific status, monitor request/connection timeouts, etc. The server tracks all the configured parameters, applying those to runtime traffic and building metrics, which can be viewed via various APIs.
 
+<br/>
+
+#
 ## Listeners
+#
 
-The server starts with a single http listener on port given to it as command line arg (defaults to 8080).
+The server starts with a single http listener on port given to it as command line arg (defaults to 8080). It exposes listener APIs to let you manage additional HTTP listeners (TCP support will come in the future). The ability to launch and shutdown listeners lets you do some chaos testing. All listener ports respond to the same set of API calls, so any of the APIs described below as well as runtime traffic proxying can be done via any active listener.
 
-It exposes listener APIs to let you manage additional HTTP listeners (TCP support will come in the future):
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -80,7 +88,12 @@ curl -X PUT localhost:8080/listeners/8081/close
 curl localhost:8081/listeners
 ```
 
+<br/>
+<br/>
+
+#
 ## Listener Label
+#
 
 By default, a listener adds a header `Server: <port>` to each response it sends. A custom label can be added to a listener using these APIs.
 
@@ -99,7 +112,12 @@ curl -X PUT localhost:8080/label/clear
 curl localhost:8080/label
 ```
 
+<br/>
+<br/>
+
+#
 ## Request Headers Tracking
+#
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -164,7 +182,12 @@ curl -X POST localhost:8080/request/headers/track/counts/clear
 }
 ```
 
+<br/>
+<br/>
+
+#
 ## Request Proxying
+#
 
 The APIs allow proxy targets to be configured, and those can also be invoked manually for testing the configuration. However, the real fun happens when the proxy targets are matched with runtime traffic based on the match criteria specified in a proxy target's spec (based on headers or URIs), and one or more matching targets get invoked for a given request.
 
@@ -212,7 +235,13 @@ curl -s localhost:8080/request/proxy/targets
 ```
 
 
+
+<br/>
+<br/>
+
+#
 ## Request Timeout
+#
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -234,7 +263,13 @@ curl localhost:8080/request/timeout/status
 ```
 
 
+
+<br/>
+<br/>
+
+#
 ## Request URI Bypass
+#
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -248,7 +283,7 @@ curl localhost:8080/request/timeout/status
 |GET      |	/request/uri/bypass/counts?uri={uri}    | Get request counts for a given bypass URI |
 
 
-#### Request Timeout API Examples
+#### Request URI Bypass API Examples
 ```
 curl -X POST localhost:8080/request/uri/bypass/clear
 
@@ -268,7 +303,13 @@ curl localhost:8080/request/uri/bypass/counts\?uri=/foo
 ```
 
 
+
+<br/>
+<br/>
+
+#
 ## Response Delay
+#
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -288,7 +329,13 @@ curl -X PUT localhost:8080/response/delay/set/2s
 curl localhost:8080/response/delay
 ```
 
+
+<br/>
+<br/>
+
+#
 ## Response Headers
+#
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -312,7 +359,13 @@ curl localhost:8080/response/headers
 ```
 
 
+
+<br/>
+<br/>
+
+#
 ## Response Status
+#
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -356,7 +409,13 @@ curl localhost:8080/response/status/counts/502
 ```
 
 
+
+<br/>
+<br/>
+
+#
 ## Status API
+#
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -368,9 +427,20 @@ curl -I  localhost:8080/status/418
 ```
 
 
+
+<br/>
+<br/>
+
+#
 ## CatchAll
+#
 
 Any request that doesn't match any of the defined management APIs, and also doesn't match any proxy targets, gets treated by a catch-all response that sends HTTP 200 response by default (unless an override response code is set)
+
+
+<br/>
+<br/>
+<br/>
 
 #
 # Client Features
