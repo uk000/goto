@@ -12,16 +12,16 @@ import (
 )
 
 var (
-	Handler          util.ServerHandler   = util.ServerHandler{"response", SetRoutes, Middleware}
-	responseHandlers []util.ServerHandler = []util.ServerHandler{
-		header.Handler, delay.Handler, status.Handler}
+  Handler          util.ServerHandler   = util.ServerHandler{"response", SetRoutes, Middleware}
+  responseHandlers []util.ServerHandler = []util.ServerHandler{
+    header.Handler, delay.Handler, status.Handler}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router) {
-	responseRouter := r.PathPrefix("/response").Subrouter()
-	util.AddRoutes(responseRouter, r, responseHandlers...)
+  responseRouter := r.PathPrefix("/response").Subrouter()
+  util.AddRoutes(responseRouter, r, responseHandlers...)
 }
 
 func Middleware(next http.Handler) http.Handler {
-	return util.AddMiddlewares(next, responseHandlers...)
+  return util.AddMiddlewares(next, responseHandlers...)
 }

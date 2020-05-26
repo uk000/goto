@@ -15,7 +15,7 @@ import (
 )
 
 func Run(listenPort int) {
-	runner.RunHttpServer(listenPort, "/", label.Handler, conn.Handler, request.Handler,
-		response.Handler, listeners.Handler, client.Handler, echo.Handler, catchall.Handler)
-	os.Exit(0)
+  runner.RunHttpServer(listenPort, "/", label.Handler, conn.Handler, request.Handler,
+    response.Handler, listeners.Handler, client.Handler, echo.Handler, catchall.Handler)
+  os.Exit(0)
 }

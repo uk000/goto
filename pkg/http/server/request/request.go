@@ -13,16 +13,16 @@ import (
 )
 
 var (
-	Handler         util.ServerHandler   = util.ServerHandler{"request", SetRoutes, Middleware}
-	requestHandlers []util.ServerHandler = []util.ServerHandler{uri.Handler, timeout.Handler, header.Handler,
-		proxy.Handler}
+  Handler         util.ServerHandler   = util.ServerHandler{"request", SetRoutes, Middleware}
+  requestHandlers []util.ServerHandler = []util.ServerHandler{uri.Handler, timeout.Handler, header.Handler,
+    proxy.Handler}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router) {
-	requestRouter := r.PathPrefix("/request").Subrouter()
-	util.AddRoutes(requestRouter, r, requestHandlers...)
+  requestRouter := r.PathPrefix("/request").Subrouter()
+  util.AddRoutes(requestRouter, r, requestHandlers...)
 }
 
 func Middleware(next http.Handler) http.Handler {
-	return util.AddMiddlewares(next, requestHandlers...)
+  return util.AddMiddlewares(next, requestHandlers...)
 }

@@ -36,8 +36,8 @@ Say you want to monitor/track how often a client (or proxy/sidecar) performs a r
    ```
 3. Run the client application with its configured timeout. The example below shows curl, but this would be a real application being investigated
     ```
-    curl -v -m 5 localhost:8080/debug
-    curl -v -m 5 localhost:8080/debug
+    curl -v -m 5 localhost:8080/someuri
+    curl -v -m 5 localhost:8080/someuri
     ```
 4. Check the timeout stats tracked by the server
     ```
@@ -294,7 +294,7 @@ curl -s localhost:8080/request/proxy/targets
 
 #
 ## Request Timeout
-#
+
 
 |METHOD|URI|Description|
 |---|---|---|
