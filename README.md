@@ -20,6 +20,62 @@ go build -o goto .
 <br/>
 
 #
+# Scenarios
+## Track Request/Connection Timeouts
+Say you want to monitor/track how often a client (or proxy/sidecar) performs a request/connection timeout, and the client/server/proxy/sidecar behavior when the request or connection times out. This tool provides a deterministic way to simulate the timeout behavior.
+<br/>
+1. With this application running as the server, enable timeout tracking on the server side either for all requests or for certain headers.
+   ```
+   #enable timeout tracking for all requests
+   curl -X POST localhost:8080/request/timeout/track/all
+
+   ```
+2. Set a large delay on all responses on the server. Make sure the delay duration is larger than the timeout config on the client application or sidecar that you intend to test.
+   ```
+   curl -X PUT localhost:8080/response/delay/set/10s
+   ```
+3. Run the client application with its configured timeout. The example below shows curl, but this would be a real application being investigated
+    ```
+    curl -v -m 5 localhost:8080/debug
+    curl -v -m 5 localhost:8080/debug
+    ```
+4. Check the timeout stats tracked by the server
+    ```
+    curl localhost:8080/request/timeout/status
+    ```
+    The timeout stats would look like this:
+    ```
+    {
+      "all": {
+        "ConnectionClosed": 8,
+        "RequestCompleted": 2
+      },
+      "headers": {
+        "x": {
+          "x1": {
+            "ConnectionClosed": 2,
+            "RequestCompleted": 0
+          }
+        },
+        "y": {
+          "y2": {
+            "ConnectionClosed": 2,
+            "RequestCompleted": 1
+          }
+        }
+      }
+    }
+    ```
+
+<br/>
+
+  <span style="color:red">
+  TBD: More scenarios to be added here to show how this tool can be used for various kinds of investigations.
+  </span>
+
+<br/>
+
+#
 # Features
 
 It's an HTTP client and server built into a single application. 
@@ -245,10 +301,10 @@ curl -s localhost:8080/request/proxy/targets
 
 |METHOD|URI|Description|
 |---|---|---|
-|PUT, POST| /request/timeout/track/headers/{headers}  | Remove a proxy traget |
-|PUT, POST| /request/timeout/track/all                | Remove a proxy traget |
-|POST     |	/request/timeout/track/clear              | Add target for proxying requests to |
-|POST     |	/request/timeout/status                   | Add target for proxying requests to |
+|PUT, POST| /request/timeout/track/headers/{headers}  | Add one or more headers. Requests carrying these headers will be tracked for timeouts and reported |
+|PUT, POST| /request/timeout/track/all                | Enable request timeout tracking for all requests |
+|POST     |	/request/timeout/track/clear              | Clear timeout tracking configs |
+|POST     |	/request/timeout/status                   | Get a report of tracked request timeouts so far |
 
 
 #### Request Timeout API Examples

@@ -125,14 +125,21 @@ func reportTimeoutTracking(w http.ResponseWriter, r *http.Request) {
 	defer timeoutTrackingLock.RUnlock()
 	util.AddLogMessage("Reporting timeout tracking counts", r)
 	tt := getTimeoutTracking(r)
-	result := util.ToJSON(tt.headersMap)
-	util.AddLogMessage(string(result), r)
+	result := map[string]interface{}{}
+	result["headers"] = tt.headersMap
+	result["all"] = tt.allTimeouts
+	output := util.ToJSON(result)
+	util.AddLogMessage(output, r)
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, string(result))
+	fmt.Fprintln(w, output)
 }
 
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if util.IsAdminRequest(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		trackedHeaders := [][]string{}
 		timeoutTrackingLock.RLock()
 		tt := getTimeoutTracking(r)
