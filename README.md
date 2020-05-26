@@ -21,7 +21,7 @@ go build -o goto .
 
 #
 # Scenarios
-## Track Request/Connection Timeouts
+### Track Request/Connection Timeouts
 Say you want to monitor/track how often a client (or proxy/sidecar) performs a request/connection timeout, and the client/server/proxy/sidecar behavior when the request or connection times out. This tool provides a deterministic way to simulate the timeout behavior.
 <br/>
 1. With this application running as the server, enable timeout tracking on the server side either for all requests or for certain headers.
@@ -110,7 +110,7 @@ The server is useful to be run as a test server for testing some client applicat
 
 #
 ## Listeners
-#
+
 
 The server starts with a single http listener on port given to it as command line arg (defaults to 8080). It exposes listener APIs to let you manage additional HTTP listeners (TCP support will come in the future). The ability to launch and shutdown listeners lets you do some chaos testing. All listener ports respond to the same set of API calls, so any of the APIs described below as well as runtime traffic proxying can be done via any active listener.
 
@@ -149,7 +149,6 @@ curl localhost:8081/listeners
 
 #
 ## Listener Label
-#
 
 By default, a listener adds a header `Server: <port>` to each response it sends. A custom label can be added to a listener using these APIs.
 
@@ -173,7 +172,6 @@ curl localhost:8080/label
 
 #
 ## Request Headers Tracking
-#
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -243,7 +241,6 @@ curl -X POST localhost:8080/request/headers/track/counts/clear
 
 #
 ## Request Proxying
-#
 
 The APIs allow proxy targets to be configured, and those can also be invoked manually for testing the configuration. However, the real fun happens when the proxy targets are matched with runtime traffic based on the match criteria specified in a proxy target's spec (based on headers or URIs), and one or more matching targets get invoked for a given request.
 
@@ -325,7 +322,6 @@ curl localhost:8080/request/timeout/status
 
 #
 ## Request URI Bypass
-#
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -365,7 +361,6 @@ curl localhost:8080/request/uri/bypass/counts\?uri=/foo
 
 #
 ## Response Delay
-#
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -391,7 +386,6 @@ curl localhost:8080/response/delay
 
 #
 ## Response Headers
-#
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -421,7 +415,7 @@ curl localhost:8080/response/headers
 
 #
 ## Response Status
-#
+
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -471,7 +465,6 @@ curl localhost:8080/response/status/counts/502
 
 #
 ## Status API
-#
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -489,7 +482,6 @@ curl -I  localhost:8080/status/418
 
 #
 ## CatchAll
-#
 
 Any request that doesn't match any of the defined management APIs, and also doesn't match any proxy targets, gets treated by a catch-all response that sends HTTP 200 response by default (unless an override response code is set)
 
