@@ -231,7 +231,7 @@ func (pc *PortClient) stopTarget(target *invocation.InvocationSpec) {
   for _, c := range pc.invocationChannels {
     done := false
     select {
-    case done = <- c.DoneChannel:
+    case done = <-c.DoneChannel:
     default:
     }
     if !done {
@@ -239,7 +239,6 @@ func (pc *PortClient) stopTarget(target *invocation.InvocationSpec) {
     }
   }
 }
-
 
 func (pc *PortClient) stopTargets(targetNames string) bool {
   pc.targetsLock.Lock()
@@ -264,7 +263,6 @@ func (pc *PortClient) stopTargets(targetNames string) bool {
   }
   return stopped
 }
-
 
 func getPortClient(r *http.Request) *PortClient {
   listenerPort := util.GetListenerPort(r)
@@ -394,7 +392,7 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func invokeTargetsAndStoreResults(pc *PortClient, targetsToInvoke []*invocation.InvocationSpec, 
+func invokeTargetsAndStoreResults(pc *PortClient, targetsToInvoke []*invocation.InvocationSpec,
   invocationChannels *invocation.InvocationChannels, reportResponse bool) []*invocation.InvocationResult {
   results := invocation.InvokeTargets(targetsToInvoke, invocationChannels, reportResponse)
   pc.deregisterInvocation(invocationChannels)

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type InvocationSpec struct {
@@ -30,13 +32,15 @@ type InvocationSpec struct {
 }
 
 type InvocationChannels struct {
-  Index int
+  Index       int
   StopChannel chan string
   DoneChannel chan bool
 }
 
 type InvocationStatus struct {
-  target                string
+  target                *InvocationSpec
+  url                   string
+  client                *http.Client
   completedRequestCount int
   stopRequested         bool
   stopped               bool
@@ -90,13 +94,30 @@ func ValidateSpec(spec *InvocationSpec) error {
   return nil
 }
 
+func prepareInvocation(target *InvocationSpec) *InvocationStatus {
+  invocationStatus := &InvocationStatus{}
+  tr := &http.Transport{
+    MaxIdleConns:       1,
+    IdleConnTimeout:    30 * time.Second,
+    DisableCompression: true,
+    Proxy:              http.ProxyFromEnvironment,
+    Dial: (&net.Dialer{
+      Timeout:   30 * time.Second,
+      KeepAlive: time.Minute,
+    }).Dial,
+    TLSHandshakeTimeout: 10 * time.Second,
+  }
+  invocationStatus.client = &http.Client{Transport: tr}
+  return invocationStatus
+}
+
 func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChannels, reportBody bool) []*InvocationResult {
   var responses []*InvocationResult
-  invocationStatus := map[string]*InvocationStatus{}
+  invocationStatuses := map[string]*InvocationStatus{}
   if len(targets) > 0 {
     targetRequestCount := 0
     for _, target := range targets {
-      invocationStatus[target.Name] = &InvocationStatus{}
+      invocationStatuses[target.Name] = prepareInvocation(target)
       targetRequestCount += (target.Replicas * target.RequestCount)
     }
     log.Printf("Invocation[%d]: Started with target count: %d, total requests to make: %d\n", invocationChannels.Index, len(targets), targetRequestCount)
@@ -105,12 +126,12 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
         for {
           stopTarget := ""
           select {
-          case stopTarget = <- invocationChannels.StopChannel:
+          case stopTarget = <-invocationChannels.StopChannel:
           default:
           }
           if stopTarget != "" {
-            if invocationStatus[stopTarget] != nil {
-              invocationStatus[stopTarget].stopRequested = true
+            if invocationStatuses[stopTarget] != nil {
+              invocationStatuses[stopTarget].stopRequested = true
             }
           } else {
             break
@@ -119,18 +140,18 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
       }
       batchSize := 0
       for _, target := range targets {
-        if invocationStatus[target.Name].stopRequested  {
-          if invocationStatus[target.Name].stopped {
+        if invocationStatuses[target.Name].stopRequested {
+          if invocationStatuses[target.Name].stopped {
             log.Printf("Invocation[%d]: Received stop request for target = %s that is already stopped\n", invocationChannels.Index, target.Name)
-            invocationStatus[target.Name].stopRequested = false
+            invocationStatuses[target.Name].stopRequested = false
           } else {
-            remaining := (target.RequestCount * target.Replicas) - (invocationStatus[target.Name].completedRequestCount * target.Replicas)
+            remaining := (target.RequestCount * target.Replicas) - (invocationStatuses[target.Name].completedRequestCount * target.Replicas)
             log.Printf("Invocation[%d]: Received stop request for target = %s with remaining requests %d\n", invocationChannels.Index, target.Name, remaining)
             targetRequestCount -= remaining
-            invocationStatus[target.Name].stopped = true
-            invocationStatus[target.Name].stopRequested = false
+            invocationStatuses[target.Name].stopped = true
+            invocationStatuses[target.Name].stopRequested = false
           }
-        } else if !invocationStatus[target.Name].stopped && invocationStatus[target.Name].completedRequestCount < target.RequestCount {
+        } else if !invocationStatuses[target.Name].stopped && invocationStatuses[target.Name].completedRequestCount < target.RequestCount {
           batchSize += target.Replicas
         }
       }
@@ -139,19 +160,12 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
       index := 0
       delay := 10 * time.Millisecond
       for _, target := range targets {
-        if !invocationStatus[target.Name].stopped && invocationStatus[target.Name].completedRequestCount < target.RequestCount {
+        if !invocationStatuses[target.Name].stopped && invocationStatuses[target.Name].completedRequestCount < target.RequestCount {
           if target.delayD > delay {
             delay = target.delayD
           }
           for i := 0; i < target.Replicas; i++ {
-            targetReplicaIndex := (invocationStatus[target.Name].completedRequestCount * target.Replicas) + i + 1
-            targetRequestCount--
-            responseChannels[index] = make(chan *InvocationResult)
-            cases[index] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(responseChannels[index])}
-            bodyReader := target.BodyReader
-            if invocationStatus[target.Name].completedRequestCount > 0 && i == 0 {
-              bodyReader = strings.NewReader(target.Body)
-            }
+            targetReplicaIndex := (invocationStatuses[target.Name].completedRequestCount * target.Replicas) + i + 1
             targetId := target.Name + "[" + strconv.Itoa(targetReplicaIndex) + "]"
             url := target.Url
             if target.SendId {
@@ -161,12 +175,20 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
                 url += "&"
               }
               url += "x-request-id="
-              url += targetId
+              url += uuid.New().String()
             }
-            go InvokeTarget(invocationChannels.Index, target.Name, targetId, url, target.Method, target.Headers, bodyReader, reportBody, responseChannels[index])
+            targetRequestCount--
+            responseChannels[index] = make(chan *InvocationResult)
+            cases[index] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(responseChannels[index])}
+            bodyReader := target.BodyReader
+            if invocationStatuses[target.Name].completedRequestCount > 0 && i == 0 {
+              bodyReader = strings.NewReader(target.Body)
+            }
+            go InvokeTarget(invocationChannels.Index, target.Name, targetId, url, target.Method, target.Headers,
+              bodyReader, reportBody, invocationStatuses[target.Name].client, responseChannels[index])
             index++
           }
-          invocationStatus[target.Name].completedRequestCount++
+          invocationStatuses[target.Name].completedRequestCount++
         }
       }
       for len(cases) > 0 {
@@ -184,7 +206,7 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
     }
     if invocationChannels.StopChannel != nil {
       select {
-      case <- invocationChannels.StopChannel:
+      case <-invocationChannels.StopChannel:
       default:
       }
     }
@@ -193,24 +215,7 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
   return responses
 }
 
-func InvokeTarget(index int, targetName string, targetId string, url string, method string, headers [][]string, body io.Reader, reportBody bool, c chan *InvocationResult) {
-  defer close(c)
-  tr := &http.Transport{
-    MaxIdleConns:       1,
-    IdleConnTimeout:    30 * time.Second,
-    DisableCompression: true,
-    Proxy:              http.ProxyFromEnvironment,
-    Dial: (&net.Dialer{
-      Timeout:   30 * time.Second,
-      KeepAlive: time.Minute,
-    }).Dial,
-    TLSHandshakeTimeout: 10 * time.Second,
-  }
-  client := &http.Client{Transport: tr}
-  var result InvocationResult
-  result.TargetName = targetName
-  result.TargetId = targetId
-  result.Headers = map[string][]string{}
+func newClientRequest(method string, url string, headers [][]string, body io.Reader) (*http.Request, error) {
   if req, err := http.NewRequest(method, url, body); err == nil {
     for _, h := range headers {
       if strings.EqualFold(h[0], "host") {
@@ -219,6 +224,19 @@ func InvokeTarget(index int, targetName string, targetId string, url string, met
         req.Header.Add(h[0], h[1])
       }
     }
+    return req, nil
+  } else {
+    return nil, err
+  }
+}
+
+func InvokeTarget(index int, targetName string, targetId string, url string, method string, headers [][]string, body io.Reader, reportBody bool, client *http.Client, c chan *InvocationResult) {
+  defer close(c)
+  var result InvocationResult
+  result.TargetName = targetName
+  result.TargetId = targetId
+  result.Headers = map[string][]string{}
+  if req, err := newClientRequest(method, url, headers, body); err == nil {
     if resp, err := client.Do(req); err == nil {
       defer resp.Body.Close()
       for header, values := range resp.Header {
