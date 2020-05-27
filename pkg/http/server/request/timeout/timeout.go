@@ -84,6 +84,8 @@ func (tt *TimeoutTracking) clear(w http.ResponseWriter, r *http.Request) {
 
 func getTimeoutTracking(r *http.Request) *TimeoutTracking {
   listenerPort := util.GetListenerPort(r)
+  timeoutTrackingLock.Lock()
+  defer timeoutTrackingLock.Unlock()
   tt, present := timeoutTrackingByPort[listenerPort]
   if !present {
     tt = &TimeoutTracking{}
@@ -94,15 +96,11 @@ func getTimeoutTracking(r *http.Request) *TimeoutTracking {
 }
 
 func trackHeaders(w http.ResponseWriter, r *http.Request) {
-  timeoutTrackingLock.Lock()
-  defer timeoutTrackingLock.Unlock()
   tt := getTimeoutTracking(r)
   tt.addHeaders(w, r)
 }
 
 func trackAll(w http.ResponseWriter, r *http.Request) {
-  timeoutTrackingLock.Lock()
-  defer timeoutTrackingLock.Unlock()
   tt := getTimeoutTracking(r)
   tt.trackAll(w, r)
 }
@@ -121,10 +119,10 @@ func clearTimeoutTracking(w http.ResponseWriter, r *http.Request) {
 }
 
 func reportTimeoutTracking(w http.ResponseWriter, r *http.Request) {
-  timeoutTrackingLock.RLock()
-  defer timeoutTrackingLock.RUnlock()
   util.AddLogMessage("Reporting timeout tracking counts", r)
   tt := getTimeoutTracking(r)
+  timeoutTrackingLock.RLock()
+  defer timeoutTrackingLock.RUnlock()
   result := map[string]interface{}{}
   result["headers"] = tt.headersMap
   result["all"] = tt.allTimeouts
@@ -141,8 +139,8 @@ func Middleware(next http.Handler) http.Handler {
       return
     }
     trackedHeaders := [][]string{}
-    timeoutTrackingLock.RLock()
     tt := getTimeoutTracking(r)
+    timeoutTrackingLock.RLock()
     for header, valueMap := range tt.headersMap {
       headerValue := r.Header.Get(header)
       if len(headerValue) > 0 {

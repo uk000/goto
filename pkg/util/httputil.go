@@ -121,23 +121,26 @@ func CopyHeaders(w http.ResponseWriter, headers http.Header, host string) {
   }
 }
 
+func GetHeadersLog(h http.Header) string {
+  var s strings.Builder
+  s.Grow(128)
+  for k, v := range h {
+    fmt.Fprintf(&s, "{%s:%v} ", k, v)
+  }
+  return s.String()
+}
+
 func GetResponseHeadersLog(w http.ResponseWriter) string {
   var s strings.Builder
   s.Grow(128)
-  fmt.Fprintf(&s, "Response Headers: ")
-  for k, v := range w.Header() {
-    fmt.Fprintf(&s, "{%s:%v} ", k, v)
-  }
+  fmt.Fprintf(&s, "Response Headers: %s", GetHeadersLog(w.Header()))
   return s.String()
 }
 
 func GetRequestHeadersLog(r *http.Request) string {
   var s strings.Builder
   s.Grow(128)
-  fmt.Fprintf(&s, "Request Headers: ")
-  for k, v := range r.Header {
-    fmt.Fprintf(&s, "{%s:%v} ", k, v)
-  }
+  fmt.Fprintf(&s, "Request Headers: %s", GetHeadersLog(r.Header))
   fmt.Fprintf(&s, "{Host:%s}", r.Host)
   return s.String()
 }
@@ -158,7 +161,7 @@ func WriteJsonPayload(w http.ResponseWriter, t interface{}) {
 
 func IsAdminRequest(r *http.Request) bool {
   return strings.HasPrefix(r.RequestURI, "/request") || strings.HasPrefix(r.RequestURI, "/response") ||
-    strings.HasPrefix(r.RequestURI, "/listeners")
+    strings.HasPrefix(r.RequestURI, "/listeners") || strings.HasPrefix(r.RequestURI, "/client")
 }
 
 func AddRoute(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), methods ...string) {

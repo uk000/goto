@@ -117,6 +117,7 @@ func toInvocationSpec(target *ProxyTarget) (*invocation.InvocationSpec, error) {
   is.Method = "GET"
   is.Url = target.Url
   is.Replicas = target.Replicas
+  is.SendId = true
   return is, invocation.ValidateSpec(is)
 }
 
@@ -295,7 +296,9 @@ func (pt *ProxyTargets) invokeTargets(targets map[string]*ProxyTarget, w http.Re
       updateInvocationSpec(target, r)
       invocationSpecs = append(invocationSpecs, target.invocationSpec)
     }
-    responses := invocation.InvokeTargets(invocationSpecs, true)
+    i := invocation.InvocationChannels{}
+    i.Index = util.GetListenerPortNum(r)
+    responses := invocation.InvokeTargets(invocationSpecs, &i, true)
     if len(responses) == 1 {
       util.CopyHeaders(w, responses[0].Headers, "")
       if responses[0].StatusCode == 0 {
