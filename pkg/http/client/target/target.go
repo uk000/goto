@@ -176,6 +176,7 @@ func (pc *PortClient) clearResults() {
 }
 
 func (pc *PortClient) addTargetResult(result *invocation.InvocationResult) {
+  pc.initTargetResults()
   pc.resultsLock.Lock()
   defer pc.resultsLock.Unlock()
   if pc.targetResults.CountsByTargetStatusCode[result.TargetName] == nil {
@@ -212,7 +213,7 @@ func (pc *PortClient) registerInvocation() *invocation.InvocationChannels {
   defer pc.targetsLock.Unlock()
   pc.invocationCounter++
   pc.invocationChannels[pc.invocationCounter] = &invocation.InvocationChannels{}
-  pc.invocationChannels[pc.invocationCounter].Index = pc.invocationCounter
+  pc.invocationChannels[pc.invocationCounter].ID = pc.invocationCounter
   pc.invocationChannels[pc.invocationCounter].StopChannel = make(chan string, 10)
   pc.invocationChannels[pc.invocationCounter].DoneChannel = make(chan bool, 10)
   return pc.invocationChannels[pc.invocationCounter]
@@ -221,9 +222,9 @@ func (pc *PortClient) registerInvocation() *invocation.InvocationChannels {
 func (pc *PortClient) deregisterInvocation(i *invocation.InvocationChannels) {
   pc.targetsLock.Lock()
   defer pc.targetsLock.Unlock()
-  if pc.invocationChannels[i.Index] != nil {
+  if pc.invocationChannels[i.ID] != nil {
     close(i.StopChannel)
-    delete(pc.invocationChannels, i.Index)
+    delete(pc.invocationChannels, i.ID)
   }
 }
 
@@ -393,10 +394,9 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
 }
 
 func invokeTargetsAndStoreResults(pc *PortClient, targetsToInvoke []*invocation.InvocationSpec,
-  invocationChannels *invocation.InvocationChannels, reportResponse bool) []*invocation.InvocationResult {
-  results := invocation.InvokeTargets(targetsToInvoke, invocationChannels, reportResponse)
+  invocationChannels *invocation.InvocationChannels) []*invocation.InvocationResult {
+  results := invocation.InvokeTargets(targetsToInvoke, invocationChannels, pc.reportResponse)
   pc.deregisterInvocation(invocationChannels)
-  pc.initTargetResults()
   for _, result := range results {
     pc.addTargetResult(result)
   }
@@ -410,11 +410,11 @@ func invokeTargets(w http.ResponseWriter, r *http.Request) {
     invocationChannels := pc.registerInvocation()
     var results []*invocation.InvocationResult
     if pc.reportResponse {
-      results = invokeTargetsAndStoreResults(pc, targetsToInvoke, invocationChannels, pc.reportResponse)
+      results = invokeTargetsAndStoreResults(pc, targetsToInvoke, invocationChannels)
       w.WriteHeader(http.StatusAlreadyReported)
       fmt.Fprintln(w, util.ToJSON(results))
     } else {
-      go invokeTargetsAndStoreResults(pc, targetsToInvoke, invocationChannels, pc.reportResponse)
+      go invokeTargetsAndStoreResults(pc, targetsToInvoke, invocationChannels)
       w.WriteHeader(http.StatusOK)
       fmt.Fprintln(w, "Targets invoked")
     }

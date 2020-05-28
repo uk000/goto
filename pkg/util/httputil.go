@@ -50,7 +50,9 @@ func AddLogMessage(msg string, r *http.Request) {
 
 func PrintLogMessages(r *http.Request) {
   m := r.Context().Value(logmessagesKey).(*messagestore)
-  log.Println(strings.Join(m.messages, " --> "))
+  if !IsAdminRequest(r) {
+    log.Println(strings.Join(m.messages, " --> "))
+  }
   m.messages = m.messages[:0]
 }
 
@@ -161,7 +163,8 @@ func WriteJsonPayload(w http.ResponseWriter, t interface{}) {
 
 func IsAdminRequest(r *http.Request) bool {
   return strings.HasPrefix(r.RequestURI, "/request") || strings.HasPrefix(r.RequestURI, "/response") ||
-    strings.HasPrefix(r.RequestURI, "/listeners") || strings.HasPrefix(r.RequestURI, "/client")
+    strings.HasPrefix(r.RequestURI, "/listeners") || strings.HasPrefix(r.RequestURI, "/client") ||
+    strings.HasPrefix(r.RequestURI, "/label")
 }
 
 func AddRoute(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), methods ...string) {

@@ -17,7 +17,7 @@ type PortStatus struct {
   alwaysReportStatus      int
   alwaysReportStatusCount int
   countsByRequestedStatus map[int]int
-  countsByReportedStatus  map[int]int
+  countsByResponseStatus  map[int]int
   lock                    sync.RWMutex
 }
 
@@ -40,9 +40,11 @@ func SetRoutes(r *mux.Router, parent *mux.Router) {
 
 func getOrCreatePortStatus(r *http.Request) *PortStatus {
   listenerPort := util.GetListenerPort(r)
+  statusLock.Lock()
+  defer statusLock.Unlock()
   portStatus := portStatusMap[listenerPort]
   if portStatus == nil {
-    portStatus = &PortStatus{countsByRequestedStatus: map[int]int{}, countsByReportedStatus: map[int]int{}}
+    portStatus = &PortStatus{countsByRequestedStatus: map[int]int{}, countsByResponseStatus: map[int]int{}}
     portStatusMap[listenerPort] = portStatus
   }
   return portStatus
@@ -51,9 +53,9 @@ func getOrCreatePortStatus(r *http.Request) *PortStatus {
 func setStatus(w http.ResponseWriter, r *http.Request) {
   vars := mux.Vars(r)
   status := strings.Split(vars["status"], ":")
+  portStatus := getOrCreatePortStatus(r)
   statusLock.Lock()
   defer statusLock.Unlock()
-  portStatus := getOrCreatePortStatus(r)
   portStatus.alwaysReportStatusCount = -1
   portStatus.alwaysReportStatus = 200
   if len(status[0]) > 0 {
@@ -80,7 +82,10 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
-func computeResponseStatus(originalStatus int, portStatus *PortStatus) int {
+func computeResponseStatus(originalStatus int, r *http.Request) int {
+  portStatus := getOrCreatePortStatus(r)
+  statusLock.Lock()
+  defer statusLock.Unlock()
   responseStatus := originalStatus
   if portStatus.alwaysReportStatus > 0 && portStatus.alwaysReportStatusCount >= 0 {
     responseStatus = portStatus.alwaysReportStatus
@@ -96,13 +101,13 @@ func computeResponseStatus(originalStatus int, portStatus *PortStatus) int {
 }
 
 func getStatus(w http.ResponseWriter, r *http.Request) {
-  statusLock.Lock()
-  defer statusLock.Unlock()
-  requestedStatus, _ := util.GetIntParam(r, "status", 200)
   portStatus := getOrCreatePortStatus(r)
+  requestedStatus, _ := util.GetIntParam(r, "status", 200)
+  reportedStatus := computeResponseStatus(requestedStatus, r)
+  statusLock.Lock()
   portStatus.countsByRequestedStatus[requestedStatus]++
+  statusLock.Unlock()
   util.AddLogMessage(fmt.Sprintf("Requested status: [%d]", requestedStatus), r)
-  reportedStatus := computeResponseStatus(requestedStatus, portStatus)
   w.WriteHeader(reportedStatus)
 }
 
@@ -112,16 +117,16 @@ func getStatusCount(w http.ResponseWriter, r *http.Request) {
   if portStatus := portStatusMap[util.GetListenerPort(r)]; portStatus != nil {
     if status, present := util.GetIntParam(r, "status"); present {
       util.AddLogMessage(fmt.Sprintf("Status: %d, Request count: %d, Response count: %d",
-        status, portStatus.countsByRequestedStatus[status], portStatus.countsByReportedStatus[status]), r)
+        status, portStatus.countsByRequestedStatus[status], portStatus.countsByResponseStatus[status]), r)
       w.WriteHeader(http.StatusOK)
       fmt.Fprintf(w, "{\"status\": %d, \"requestCount\": %d, \"responseCount\": %d}\n",
-        status, portStatus.countsByRequestedStatus[status], portStatus.countsByReportedStatus[status])
+        status, portStatus.countsByRequestedStatus[status], portStatus.countsByResponseStatus[status])
     } else {
       util.AddLogMessage("Reporting count for all statuses", r)
       countsByRequestedStatus := util.ToJSON(portStatus.countsByRequestedStatus)
-      countsByReportedStatus := util.ToJSON(portStatus.countsByReportedStatus)
-      msg := fmt.Sprintf("{\"countsByRequestedStatus\": %s, \"countsByReportedStatus\": %s}",
-        countsByRequestedStatus, countsByReportedStatus)
+      countsByResponseStatus := util.ToJSON(portStatus.countsByResponseStatus)
+      msg := fmt.Sprintf("{\"countsByRequestedStatus\": %s, \"countsByResponseStatus\": %s}",
+        countsByRequestedStatus, countsByResponseStatus)
       util.AddLogMessage(msg, r)
       w.WriteHeader(http.StatusOK)
       fmt.Fprintln(w, msg)
@@ -133,14 +138,21 @@ func getStatusCount(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearStatusCounts(w http.ResponseWriter, r *http.Request) {
+  portStatus := getOrCreatePortStatus(r)
   statusLock.Lock()
   defer statusLock.Unlock()
-  portStatus := getOrCreatePortStatus(r)
   portStatus.countsByRequestedStatus = map[int]int{}
-  portStatus.countsByReportedStatus = map[int]int{}
+  portStatus.countsByResponseStatus = map[int]int{}
   util.AddLogMessage("Clearing status counts", r)
   w.WriteHeader(http.StatusAccepted)
   fmt.Fprintln(w, "Status counts cleared")
+}
+
+func IncrementStatusCount(statusCode int, r *http.Request) {
+  portStatus := getOrCreatePortStatus(r)
+  statusLock.Lock()
+  defer statusLock.Unlock()
+  portStatus.countsByResponseStatus[statusCode]++
 }
 
 func Middleware(next http.Handler) http.Handler {
@@ -148,11 +160,8 @@ func Middleware(next http.Handler) http.Handler {
     if !util.IsAdminRequest(r) {
       crw := intercept.NewInterceptResponseWriter(w, true)
       next.ServeHTTP(crw, r)
-      statusLock.Lock()
-      defer statusLock.Unlock()
-      portStatus := getOrCreatePortStatus(r)
-      crw.StatusCode = computeResponseStatus(crw.StatusCode, portStatus)
-      portStatus.countsByReportedStatus[crw.StatusCode]++
+      crw.StatusCode = computeResponseStatus(crw.StatusCode, r)
+      IncrementStatusCount(crw.StatusCode, r)
       util.AddLogMessage(fmt.Sprintf("Reporting status: [%d]", crw.StatusCode), r)
       crw.Proceed()
     } else {

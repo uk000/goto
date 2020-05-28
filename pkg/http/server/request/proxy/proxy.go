@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"goto/pkg/http/invocation"
+	"goto/pkg/http/server/response/status"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
@@ -297,13 +298,16 @@ func (pt *ProxyTargets) invokeTargets(targets map[string]*ProxyTarget, w http.Re
       invocationSpecs = append(invocationSpecs, target.invocationSpec)
     }
     i := invocation.InvocationChannels{}
-    i.Index = util.GetListenerPortNum(r)
+    i.ID = util.GetListenerPortNum(r)
     responses := invocation.InvokeTargets(invocationSpecs, &i, true)
-    if len(responses) == 1 {
-      util.CopyHeaders(w, responses[0].Headers, "")
-      if responses[0].StatusCode == 0 {
-        responses[0].StatusCode = 503
+    for _, response := range responses {
+      util.CopyHeaders(w, response.Headers, "")
+      if response.StatusCode == 0 {
+        response.StatusCode = 503
       }
+      status.IncrementStatusCount(response.StatusCode, r)
+    }
+    if len(responses) == 1 {
       w.WriteHeader(responses[0].StatusCode)
       fmt.Fprintln(w, responses[0].Body)
     } else {

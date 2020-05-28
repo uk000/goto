@@ -32,7 +32,7 @@ type InvocationSpec struct {
 }
 
 type InvocationChannels struct {
-  Index       int
+  ID          int
   StopChannel chan string
   DoneChannel chan bool
 }
@@ -48,7 +48,7 @@ type InvocationStatus struct {
 
 type InvocationResult struct {
   TargetName string
-  TargetId   string
+  TargetID   string
   Status     string
   StatusCode int
   Headers    map[string][]string
@@ -95,6 +95,11 @@ func ValidateSpec(spec *InvocationSpec) error {
 }
 
 func prepareInvocation(target *InvocationSpec) *InvocationStatus {
+  if target.BodyReader != nil && (target.Replicas > 1 || target.RequestCount > 1) {
+    body, _ := ioutil.ReadAll(target.BodyReader)
+    target.Body = string(body)
+    target.BodyReader = nil
+  }
   invocationStatus := &InvocationStatus{}
   tr := &http.Transport{
     MaxIdleConns:       1,
@@ -111,46 +116,74 @@ func prepareInvocation(target *InvocationSpec) *InvocationStatus {
   return invocationStatus
 }
 
+func prepareTargetURL(target *InvocationSpec) string {
+  url := target.Url
+  if target.SendId && !strings.Contains(url, "x-request-id") {
+    if !strings.Contains(url, "?") {
+      url += "?"
+    } else {
+      pieces := strings.Split(url, "?")
+      if len(pieces) > 1 && len(pieces[1]) > 0 && strings.Contains(pieces[1], "&") {
+        url += "&"
+      }
+    }
+    url += "x-request-id="
+    url += uuid.New().String()
+  }
+  return url
+}
+
+func collectStopRequests(invocationChannels *InvocationChannels, invocationStatuses map[string]*InvocationStatus) {
+  if invocationChannels.StopChannel != nil {
+    for {
+      stopTarget := ""
+      select {
+      case stopTarget = <-invocationChannels.StopChannel:
+      default:
+      }
+      if stopTarget != "" {
+        if invocationStatuses[stopTarget] != nil {
+          invocationStatuses[stopTarget].stopRequested = true
+        }
+      } else {
+        break
+      }
+    }
+  }
+}
+
+func processTargetStopRequest(index int, target *InvocationSpec, invocationStatus *InvocationStatus) int {
+  if invocationStatus.stopped {
+    log.Printf("Invocation[%d]: Received stop request for target = %s that is already stopped\n", index, target.Name)
+    invocationStatus.stopRequested = false
+    return 0
+  } else {
+    remaining := (target.RequestCount * target.Replicas) - (invocationStatus.completedRequestCount * target.Replicas)
+    log.Printf("Invocation[%d]: Received stop request for target = %s with remaining requests %d\n", index, target.Name, remaining)
+    invocationStatus.stopped = true
+    invocationStatus.stopRequested = false
+    return remaining
+  }
+}
+
 func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChannels, reportBody bool) []*InvocationResult {
   var responses []*InvocationResult
+  invocationID := invocationChannels.ID
   invocationStatuses := map[string]*InvocationStatus{}
   if len(targets) > 0 {
-    targetRequestCount := 0
+    totalRemainingRequestCount := 0
     for _, target := range targets {
       invocationStatuses[target.Name] = prepareInvocation(target)
-      targetRequestCount += (target.Replicas * target.RequestCount)
+      totalRemainingRequestCount += (target.Replicas * target.RequestCount)
     }
-    log.Printf("Invocation[%d]: Started with target count: %d, total requests to make: %d\n", invocationChannels.Index, len(targets), targetRequestCount)
+    log.Printf("Invocation[%d]: Started with target count: %d, total requests to make: %d\n", invocationID, len(targets), totalRemainingRequestCount)
     for {
-      if invocationChannels.StopChannel != nil {
-        for {
-          stopTarget := ""
-          select {
-          case stopTarget = <-invocationChannels.StopChannel:
-          default:
-          }
-          if stopTarget != "" {
-            if invocationStatuses[stopTarget] != nil {
-              invocationStatuses[stopTarget].stopRequested = true
-            }
-          } else {
-            break
-          }
-        }
-      }
+      collectStopRequests(invocationChannels, invocationStatuses)
       batchSize := 0
       for _, target := range targets {
         if invocationStatuses[target.Name].stopRequested {
-          if invocationStatuses[target.Name].stopped {
-            log.Printf("Invocation[%d]: Received stop request for target = %s that is already stopped\n", invocationChannels.Index, target.Name)
-            invocationStatuses[target.Name].stopRequested = false
-          } else {
-            remaining := (target.RequestCount * target.Replicas) - (invocationStatuses[target.Name].completedRequestCount * target.Replicas)
-            log.Printf("Invocation[%d]: Received stop request for target = %s with remaining requests %d\n", invocationChannels.Index, target.Name, remaining)
-            targetRequestCount -= remaining
-            invocationStatuses[target.Name].stopped = true
-            invocationStatuses[target.Name].stopRequested = false
-          }
+          remainingRequestCountForTarget := processTargetStopRequest(invocationID, target, invocationStatuses[target.Name])
+          totalRemainingRequestCount -= remainingRequestCountForTarget
         } else if !invocationStatuses[target.Name].stopped && invocationStatuses[target.Name].completedRequestCount < target.RequestCount {
           batchSize += target.Replicas
         }
@@ -166,25 +199,17 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
           }
           for i := 0; i < target.Replicas; i++ {
             targetReplicaIndex := (invocationStatuses[target.Name].completedRequestCount * target.Replicas) + i + 1
-            targetId := target.Name + "[" + strconv.Itoa(targetReplicaIndex) + "]"
-            url := target.Url
-            if target.SendId {
-              if !strings.Contains(url, "?") {
-                url += "?"
-              } else if strings.Contains(url, "&") {
-                url += "&"
-              }
-              url += "x-request-id="
-              url += uuid.New().String()
-            }
-            targetRequestCount--
+            targetID := target.Name + "[" + strconv.Itoa(targetReplicaIndex) + "]"
+            url := prepareTargetURL(target)
+            totalRemainingRequestCount--
             responseChannels[index] = make(chan *InvocationResult)
             cases[index] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(responseChannels[index])}
             bodyReader := target.BodyReader
-            if invocationStatuses[target.Name].completedRequestCount > 0 && i == 0 {
+            target.BodyReader = nil
+            if bodyReader == nil {
               bodyReader = strings.NewReader(target.Body)
             }
-            go InvokeTarget(invocationChannels.Index, target.Name, targetId, url, target.Method, target.Headers,
+            go InvokeTarget(invocationID, target.Name, targetID, url, target.Method, target.Headers,
               bodyReader, reportBody, invocationStatuses[target.Name].client, responseChannels[index])
             index++
           }
@@ -196,7 +221,7 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
         cases = append(cases[:i], cases[i+1:]...)
         responses = append(responses, v.Interface().(*InvocationResult))
       }
-      if targetRequestCount == 0 {
+      if totalRemainingRequestCount == 0 {
         break
       }
       time.Sleep(delay)
@@ -211,7 +236,7 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
       }
     }
   }
-  log.Printf("Invocation[%d]: Finished with responses %d\n", invocationChannels.Index, len(responses))
+  log.Printf("Invocation[%d]: Finished with responses %d\n", invocationID, len(responses))
   return responses
 }
 
@@ -230,12 +255,14 @@ func newClientRequest(method string, url string, headers [][]string, body io.Rea
   }
 }
 
-func InvokeTarget(index int, targetName string, targetId string, url string, method string, headers [][]string, body io.Reader, reportBody bool, client *http.Client, c chan *InvocationResult) {
+func InvokeTarget(index int, targetName string, targetID string, url string, method string, headers [][]string, body io.Reader, reportBody bool, client *http.Client, c chan *InvocationResult) {
   defer close(c)
+  log.Printf("Invocation[%d]: Invoking targetID: %s, url: %s, method: %s, headers: %+v\n", index, targetID, url, method, headers)
   var result InvocationResult
   result.TargetName = targetName
-  result.TargetId = targetId
+  result.TargetID = targetID
   result.Headers = map[string][]string{}
+  headers = append(headers, []string{"TargetID", targetID})
   if req, err := newClientRequest(method, url, headers, body); err == nil {
     if resp, err := client.Do(req); err == nil {
       defer resp.Body.Close()
@@ -251,11 +278,11 @@ func InvokeTarget(index int, targetName string, targetId string, url string, met
         }
       }
     } else {
-      log.Printf("Invocation[%d]: Target %s, url [%s] invocation failed with error: %s\n", index, targetId, url, err.Error())
+      log.Printf("Invocation[%d]: Target %s, url [%s] invocation failed with error: %s\n", index, targetID, url, err.Error())
       result.Status = err.Error()
     }
   } else {
-    log.Printf("Invocation[%d]: Target %s, url [%s] failed to create request with error: %s\n", index, targetId, url, err.Error())
+    log.Printf("Invocation[%d]: Target %s, url [%s] failed to create request with error: %s\n", index, targetID, url, err.Error())
     result.Status = err.Error()
   }
   c <- &result

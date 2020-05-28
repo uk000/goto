@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"goto/pkg/http/server/listeners"
-	"goto/pkg/http/server/request/proxy"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
@@ -28,7 +27,7 @@ func setLabel(w http.ResponseWriter, r *http.Request) {
   if label := listeners.SetListenerLabel(r); label == "" {
     msg = "Label cleared"
   } else {
-    msg = fmt.Sprintf("Will add header 'Server: %s' to all responses", label)
+    msg = fmt.Sprintf("Will add header 'Server: %s' to all responses on port %s", label, util.GetListenerPort(r))
   }
   util.AddLogMessage(msg, r)
   w.WriteHeader(http.StatusAccepted)
@@ -59,11 +58,8 @@ func Middleware(next http.Handler) http.Handler {
     }
     hostLabel := fmt.Sprintf("%s.%s@%s", pod, ns, ip)
     util.AddLogMessage(fmt.Sprintf("[%s] [%s]", hostLabel, label), r)
-    willProxy, _ := proxy.WillProxy(r)
-    if !willProxy {
-      w.Header().Add("Server", label)
-      w.Header().Add("Server-Host", hostLabel)
-    }
+    w.Header().Add("Server", label)
+    w.Header().Add("Server-Host", hostLabel)
     next.ServeHTTP(w, r)
     util.AddLogMessage(util.GetResponseHeadersLog(w), r)
   })
