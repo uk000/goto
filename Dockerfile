@@ -1,5 +1,15 @@
-FROM golang:alpine3.11
+FROM golang:alpine3.11 as builder
 
+RUN mkdir /app
+ADD ./cmd/ /app/cmd
+ADD ./pkg/ /app/pkg
+ADD ./go.mod /app/go.mod
+ADD ./main.go /app/main.go
+
+WORKDIR /app
+RUN go build -o goto .
+
+FROM alpine:3.11 as release
 RUN echo 'https://nl.alpinelinux.org/alpine/v3.11/main' > /etc/apk/repositories
 
 RUN apk add --no-cache --update \
@@ -20,15 +30,8 @@ RUN apk add --no-cache --update \
   busybox \
   busybox-extras
 
-
-RUN mkdir /app
-ADD ./cmd/ /app/cmd
-ADD ./pkg/ /app/pkg
-ADD ./go.mod /app/go.mod
-ADD ./main.go /app/main.go
-
 WORKDIR /app
-RUN go build -o goto .
+COPY --from=builder /app/goto .
 
 EXPOSE 8080
 
