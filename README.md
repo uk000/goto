@@ -96,7 +96,7 @@ go build -o goto .
 ./goto
 ```
 
-One the server is up and running, rest of the interactions and configurations are done purely via REST APIs.
+Once the server is up and running, rest of the interactions and configurations are done purely via REST APIs.
 
 Let's look at the APIs for server features.
 
@@ -155,7 +155,7 @@ By default, a listener adds a header `Server: <port>` to each response it sends.
 |METHOD|URI|Description|
 |---|---|---|
 | POST, PUT | /label/set/{label}  | Set label for this port |
-| PUT       | /label/clear/remove | Remove label for this port |
+| PUT       | /label/clear        | Remove label for this port |
 | GET       | /label              | Get current label of this port |
 
 #### Listener Label API Examples:
@@ -195,13 +195,13 @@ curl -X POST localhost:8080/request/headers/track/counts/clear/x
 
 curl -X POST localhost:8080/request/headers/track/counts/clear
 
-curl localhost:8080/request/headers/track/counts/x
-
 curl -X POST localhost:8080/request/headers/track/counts/clear
 ```
 
 #### Request Tracking Results Example
 ```
+$ curl localhost:8080/request/headers/track/counts
+
 {
   "x": {
     "RequestCountsByHeaderValue": {
