@@ -82,6 +82,13 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
+func IsForcedStatus(r *http.Request) bool {
+  portStatus := getOrCreatePortStatus(r)
+  statusLock.RLock()
+  defer statusLock.RUnlock()
+  return portStatus.alwaysReportStatus > 0 && portStatus.alwaysReportStatusCount >= 0
+}
+
 func computeResponseStatus(originalStatus int, r *http.Request) int {
   portStatus := getOrCreatePortStatus(r)
   statusLock.Lock()

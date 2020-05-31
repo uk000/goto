@@ -21,7 +21,61 @@ go build -o goto .
 
 #
 # Scenarios
-### Track Request/Connection Timeouts
+
+Before we look into detailed features and APIs exposed by the tool, let's look at how this tool can be used in a few scenarios to understand it better.
+
+### Scenario: Test a  client's behavior upon service failure
+Suppose you have a client applicaiton that connects to a service for some API (`/my/api`). Either the client, or a sidecar/proxy (e.g. envoy), has some in-built resiliency capability so that it retries upon certain kind of failures (e.g. if the service responds with `HTTP 503`). The client or the proxy (e.g. envoy) may possibly even attempt to reconnect to a different endpoint of the service.
+
+This `goto` tool is the ideal tool to goto [yeah, intended :)] to test such resiliency behavior of the client or the proxy, in two possible ways:
+1) Run `goto` as a server that the client/proxy sends requests to, and `goto` can be configured to respond with various kinds of responses.
+2) Run `goto` as a forwarding proxy layer in front of real server application, let it intercept all the calls and forward those to the server application. When you want to fail the service temporarily, ask `goto` to temporarily respond with a failure code, e.g. `HTTP 503`.
+
+Let's look at the second setup in more details as that's more exciting of the two. 
+1. Assume the real service application is accessible over URL `http://realserver`. Currently your client app connects to this server, and you want to test the resiliency behavior between this pair for URI `/my/fancy/api`.
+   ```
+   curl -v http://realserver/my/fancy/api
+   ```
+2. Run `goto` server somewhere (local machine, a pod, a VM). Let's suppose the `goto` tool is accessible over URL `http://goto:8080`. You configure the client to connect to goto's url now.
+    ```
+    #run goto
+    goto --port 8080
+
+    #confirm it's responding
+    curl -v http://goto:8080
+    ```
+
+3. Add a forwarding proxy target on `goto` to intercept traffic for URI `/my/fancy/api` and forward it to real server application at `http://realserver`
+    ```
+    curl http://goto:8080/request/proxy/targets/add --data \
+    '{"name": "myServer", "match":{"uris":["/my/fancy/api"]}, "url":"http://realserver", "enabled":true}'
+    ```
+    Now `goto` will proxy all requests to the server application. Confirm it:
+    ```
+    curl -v http://goto:8080/my/fancy/api
+    ```
+
+4. Reconfigure your client app to connect to this new URL: `http://goto:8080/my/fancy/api`. Client requests will be forwarded to the server with all headers and payload, and response sent back to the client. Some additional response headers are added by `goto` to show that the request was indeed proxied via it. These response headers are described later in this document.
+<br/>
+5. Now it's time to introduce some chaos. We'll ask the `goto` to respond with `HTTP 503` response code for exactly next 2 requests.
+    ```
+    curl -X PUT http://goto:8080/response/status/set/503:2
+    ```
+    The path parameter `503:2` has a syntax of `<Status Code>:<Number of Responses>`. So, `503:2` tells `goto` to respond with `503` status for next 2 requests of any non-admin URI calls. Admin URIs are the ones that are used to configure `goto`, like the one we just used: `/response/status/set`. You can find out more about various admin URIs later in the doc. 
+<br/>
+6. Now the client will receive `HTTP 503` for next 2 requests. Have the client send requests now, and observe client's behavior for next 2 failures followed by subsequent successes.
+    ```
+    curl -v http://goto:8080/my/fancy/api
+    curl -v http://goto:8080/my/fancy/api
+    curl -v http://goto:8080/my/fancy/api
+    ```
+
+
+As this small scenario demonstrated, `goto` lets you inject controlled failure on the fly in the traffic flow between a client and a service for some complex chaos testing. The above scenario was still relatively simpler, as we didn't even test against multiple service pods/instances. We could have run one `goto` for each service pod, and each of those `goto` could be configured to respond with some specific response codes for a specific number of times, and then you'd run your traffic and observe some coordinated failures and recoveries. The possibilities of such chaos testing are endless. The `goto` tool makes is possible to script such controlled chaos testing.
+
+<br/>
+
+### Scenario: Track Request/Connection Timeouts
 Say you want to monitor/track how often a client (or proxy/sidecar) performs a request/connection timeout, and the client/server/proxy/sidecar behavior when the request or connection times out. This tool provides a deterministic way to simulate the timeout behavior.
 <br/>
 1. With this application running as the server, enable timeout tracking on the server side either for all requests or for certain headers.
@@ -70,7 +124,7 @@ Say you want to monitor/track how often a client (or proxy/sidecar) performs a r
 <br/>
 
   <span style="color:red">
-  TBD: More scenarios to be added here to show how this tool can be used for various kinds of investigations.
+  TODO: There are many more possible scenarios to describe here, to show how this tool can be used for various kinds of chaos testing and investigations.
   </span>
 
 <br/>
@@ -115,6 +169,7 @@ The server is useful to be run as a test server for testing some client applicat
 The server starts with a single http listener on port given to it as command line arg (defaults to 8080). It exposes listener APIs to let you manage additional HTTP listeners (TCP support will come in the future). The ability to launch and shutdown listeners lets you do some chaos testing. All listener ports respond to the same set of API calls, so any of the APIs described below as well as runtime traffic proxying can be done via any active listener.
 
 
+#### APIs
 |METHOD|URI|Description|
 |---|---|---|
 | POST       | /listeners/add           | Add a listener|
@@ -150,8 +205,9 @@ curl localhost:8081/listeners
 #
 ## Listener Label
 
-By default, a listener adds a header `Server: <port>` to each response it sends. A custom label can be added to a listener using these APIs.
+By default, each listener adds a header `Via-Goto: <port>` to each response it sends, where <port> is the port on which the listener is running (default being 8080). A custom label can be added to a listener using the label APIs described below. In addition to `Via-Goto`, each listener also adds another header `Goto-Host` that carries the pod/host name, pod namespace (or `local` if not running as a kubernetes pod), and pod/host IP address to identify where the response came from.
 
+#### APIs
 |METHOD|URI|Description|
 |---|---|---|
 | POST, PUT | /label/set/{label}  | Set label for this port |
@@ -173,6 +229,7 @@ curl localhost:8080/label
 #
 ## Request Headers Tracking
 
+#### APIs
 |METHOD|URI|Description|
 |---|---|---|
 |POST     | /request/headers/track/clear									|Remove all tracked headers|
@@ -244,6 +301,7 @@ $ curl localhost:8080/request/headers/track/counts
 
 The APIs allow proxy targets to be configured, and those can also be invoked manually for testing the configuration. However, the real fun happens when the proxy targets are matched with runtime traffic based on the match criteria specified in a proxy target's spec (based on headers or URIs), and one or more matching targets get invoked for a given request.
 
+#### APIs
 |METHOD|URI|Description|
 |---|---|---|
 |POST     |	/request/proxy/targets/add              | Add target for proxying requests |
@@ -259,24 +317,84 @@ The APIs allow proxy targets to be configured, and those can also be invoked man
 #### Proxy Target JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
-| name         | string                                 | Name for this target |
-| url          | string                                 | URL for the target. Request's URI or Override URI gets added to the URL for each proxied request. |
-| overrideUri  | string                                 | URI to be used in place of the original request URI.|
-| addHeaders   | [][]string                             | Additional headers to add to the request before proxying |
-| match        | {headers: [][]string, uris: []string}     | Match criteria based on which runtime traffic gets proxied to this target |
-| replicas     | string     | Number of parallel replicated calls to be made to this target for each matched request. This allows each request to result in multiple calls to be made to a target if needed for some test scenarios |
-| enable       | string     | Whether or not the proxy target is currently active |
+| name          | string                                | Name for this target |
+| url           | string                                | URL for the target. Request's URI or Override URI gets added to the URL for each proxied request. |
+| sendId        | bool           | Whether or not a unique ID be sent with each request. If this flag is set, a query param 'id' will be added to each request, which can help with tracing requests on the target servers |
+| replaceURI    | string                                | URI to be used in place of the original request URI.|
+| addHeaders    | `[][]string`                            | Additional headers to add to the request before proxying |
+| removeHeaders | `[]string `                             | Headers to remove from the original request before proxying |
+| addQuery      | `[][]string`                            | Additional query parameters to add to the request before proxying |
+| removeQuery   | `[]string`                              | Query parametes to remove from the original request before proxying |
+| match        | `{headers: [][]string, uris: []string, , query: [][]string}`     | Match criteria based on which runtime traffic gets proxied to this target. See detailed explanation below |
+| replicas     | int     | Number of parallel replicated calls to be made to this target for each matched request. This allows each request to result in multiple calls to be made to a target if needed for some test scenarios |
+| enabled       | bool     | Whether or not the proxy target is currently active |
+
+
+##### Proxy Target Match Criteria
+Proxy target match criteria specify the URIs, headers and query parameters, matching either of which will cause the request to be proxied to the target.
+
+- URIs: specified as a list of URIs, with `{foo}` to be used for variable portion of a URI. E.g., `/foo/{f}/bar/{b}` will match URIs like `/foo/123/bar/abc`, `/foo/something/bar/otherthing`, etc. The variables are captured under the given labels (f and b in previous example). If the target is configured with `replaceURI` to proxy the request to a different URI than the original request, the `replaceURI` can refer to those capturing variables using the syntax described in this example:
+  ```
+  curl http://goto:8080/request/proxy/targets/add --data \
+  '{"name": "target1", "url":"http://somewhere", \
+  "match":{"uris":["/foo/{x}/bar/{y}"]}, \
+  "replaceURI":"/abc/{y:.*}/def/{x:.*}", \
+  "enabled":true, "sendID": true}'
+  ```
+  This target will be triggerd for requests with the pattern `/foo/<somex>/bar/<somey>` and the request will be forwarded to the target as `http://somewhere/abc/somey/def/somex`, where the values `somex` and `somey` are extracted from the original request and injected into the replacement URI.  
+<br/>
+- Headers: specified as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addHeaders` list. A target is triggered if any of the headers in the match list are present in the request (headers are matched using OR instead of AND). The variable to capture header value is specified as `{foo}`, and can be referenced in the `addHeaders` list again as `{foo}`. This example will make it clear:
+  ```
+  curl http://goto:8080/request/proxy/targets/add --data \
+  '{"name": "target2", "url":"http://somewhere", \
+  "match":{"headers":[["foo", "{x}"], ["bar", "{y}"]]}, \
+  "addHeaders":[["abc","{x}"], ["def","{y}"]], "removeHeaders":["foo"], \
+  "enabled":true, "sendID": true}'
+  ```
+  This target will be triggered for requests carrying headers `foo` or `bar`. On the proxied request, additional headers will be set: `abc` with value copied from `foo`, an `def` with value copied from `bar`. Also, header `foo` will be removed from the proxied request.
+<br/>
+- Query: specified as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addQuery` list. A target is triggered if any of the query parameters in the match list are present in the request (matched using OR instead of AND). The variable to capture query parameter value is specified as `{foo}`, and can be referenced in the `addQuery` list again as `{foo}`. Example:
+    ```
+  curl http://goto:8080/request/proxy/targets/add --data \
+  '{"name": "target3", "url":"http://somewhere", \
+  "match":{"query":[["foo", "{x}"], ["bar", "{y}"]]}, \
+  "addQuery":[["abc","{x}"], ["def","{y}"]], "removeQuery":["foo"], \
+  "enabled":true, "sendID": true}'
+  ```
+  This target will be triggered for requests with carrying query params `foo` or `bar`. On the proxied request, query param `foo` will be removed, and additional query params will be set: `abc` with value copied from `foo`, an `def` with value copied from `bar`. For incoming request `http://goto:8080?foo=123&bar=456` gets proxied as `http://somewhere?abc=123&def=456&bar=456`. 
+<br/>
+
 
 
 #### Request Proxying API Examples:
 ```
 curl -s -X POST localhost:8080/request/proxy/targets/clear
 
-curl -s localhost:8080/request/proxy/targets/add --data '{"name": "t1", "match":{"headers":[["foo"]]}, "url":"http://localhost:8082", "addHeaders":[["z","z1"]], "replicas":1}'
+curl -s localhost:8081/request/proxy/targets/add --data '{"name": "t1", \
+"match":{"uris":["/x/{x}/y/{y}"], "query":[["foo", "{f}"]]}, \
+"url":"http://localhost:8083", \
+"replaceURI":"/abc/{y:.*}/def/{x:.*}", \
+"addHeaders":[["z","z1"]], \
+"addQuery":[["bar","{f}"]], \
+"removeQuery":["foo"], \
+"replicas":1, "enabled":true, "sendID": true}'
 
-curl -s localhost:8080/request/proxy/targets/add --data '{"name": "t2", "match":{"headers":[["y", "y2"]], "uris":["/debug"]}, "url":"http://localhost:8082", "overrideUri":"/echo", "addHeaders":[["z","z2"]], "replicas":1}'
+curl -s localhost:8081/request/proxy/targets/add --data '{"name": "t2", \
+"match":{"headers":[["foo"]]}, \
+"url":"http://localhost:8083", \
+"replaceURI":"/echo", \
+"addHeaders":[["z","z2"]], \
+"replicas":1, "enabled":true, "sendID": false}'
 
-curl -s -X PUT localhost:8080/request/proxy/targets/t2/remove
+curl -s localhost:8082/request/proxy/targets/add --data '{"name": "t3", \
+"match":{"headers":[["x", "{x}"], ["y", "{y}"]], "uris":["/foo"]}, \
+"url":"http://localhost:8083", \
+"replaceURI":"/echo", \
+"addHeaders":[["z","{x}"], ["z","{y}"]], \
+"removeHeaders":["x", "y"], \
+"replicas":1, "enabled":true, "sendID": true}'
+
+curl -s -X PUT localhost:8080/request/proxy/targets/t1/remove
 
 curl -s -X PUT localhost:8080/request/proxy/targets/t2/disable
 
@@ -287,15 +405,13 @@ curl -v -X POST localhost:8080/request/proxy/targets/t1/invoke
 curl -s localhost:8080/request/proxy/targets
 ```
 
-
-
-<br/>
 <br/>
 
 #
 ## Request Timeout
 
 
+#### APIs
 |METHOD|URI|Description|
 |---|---|---|
 |PUT, POST| /request/timeout/track/headers/{headers}  | Add one or more headers. Requests carrying these headers will be tracked for timeouts and reported |
@@ -323,6 +439,7 @@ curl localhost:8080/request/timeout/status
 #
 ## Request URI Bypass
 
+#### APIs
 |METHOD|URI|Description|
 |---|---|---|
 |PUT, POST| /request/uri/bypass/add?uri={uri}       | Add a bypass URI |
@@ -362,6 +479,7 @@ curl localhost:8080/request/uri/bypass/counts\?uri=/foo
 #
 ## Response Delay
 
+#### APIs
 |METHOD|URI|Description|
 |---|---|---|
 | PUT, POST | /response/delay/set/{delay} | Set a delay for non-management requests (i.e. runtime traffic) |
@@ -387,6 +505,7 @@ curl localhost:8080/response/delay
 #
 ## Response Headers
 
+#### APIs
 |METHOD|URI|Description|
 |---|---|---|
 | PUT, POST | /response/headers/add/{header}/{value}  | Add a custom header to be sent with all resopnses |
@@ -417,6 +536,7 @@ curl localhost:8080/response/headers
 ## Response Status
 
 
+#### APIs
 |METHOD|URI|Description|
 |---|---|---|
 | PUT, POST | /response/status/set/{status}     | Set a forced response status that all non-proxied and non-management requests will be responded with |
@@ -466,6 +586,7 @@ curl localhost:8080/response/status/counts/502
 #
 ## Status API
 
+#### APIs
 |METHOD|URI|Description|
 |---|---|---|
 | GET       |	/status/{status}                  | This call either receives the given status, or the forced response status if one is set |
@@ -495,12 +616,15 @@ Any request that doesn't match any of the defined management APIs, and also does
 As a client tool, the server allows targets to be configured and invoked via REST APIs. Headers can be set to track results for target invocations, and APIs make those results available for consumption as JSON output. the invocation results get accumulated across multiple invocations until cleard explicitly.
 
 
+#### APIs
 |METHOD|URI|Description|
 |---|---|---|
 | POST      | /client/targets/add                   | Add a target for invocation |
 | PUT, POST |	/client/targets/{target}/remove       | Remove a target |
 | POST      | /client/targets/{targets}/invoke      | Invoke given targets |
 | POST      |	/client/targets/invoke/all            | Invoke all targets |
+| POST      | /client/targets/{targets}/stop        | Stops a running target |
+| POST      | /client/targets/stop/all              | Stops all running targets |
 | GET       |	/client/targets/list                  | Get list of currently configured targets |
 | GET       |	/client/targets                       | Get list of currently configured targets |
 | POST      |	/client/targets/clear                 | Remove all targets |
@@ -530,7 +654,10 @@ As a client tool, the server allows targets to be configured and invoked via RES
 
 #### Client API Examples
 ```
-curl -s localhost:8080/client/targets/add --data '{"name": "t1", "method":"GET", "url":"http://localhost:8080/status/418", "headers":[["foo", "bar"],["x", "x1"],["y", "y1"]], "replicas": 2, "delay": "1s", "requestCount": 5, "keepOpen": "10s", "sendId": true}'
+curl -s localhost:8080/client/targets/add --data '{"name": "t1", \
+"method":"GET", "url":"http://localhost:8080/status/418", \
+"headers":[["foo", "bar"],["x", "x1"],["y", "y1"]], \
+"replicas": 2, "delay": "1s", "requestCount": 5, "sendId": true}'
 
 curl -X PUT localhost:8080/client/targets/t3/remove
 
@@ -540,6 +667,10 @@ curl -X POST localhost:8080/client/targets/t2,t3/invoke
 
 curl -X POST localhost:8080/client/targets/invoke/all
 
+curl -X POST localhost:8080/client/targets/t2,t3/stop
+
+curl -X POST localhost:8080/client/targets/stop/all
+
 curl -X POST localhost:8080/client/targets/clear
 
 curl -X PUT localhost:8080/client/reporting/set/n
@@ -548,7 +679,7 @@ curl localhost:8080/client/reporting
 
 curl -X POST localhost:8080/client/track/headers/clear
 
-curl -X PUT localhost:8080/client/track/headers/add/Server-Host,Server,x,y,z,foo
+curl -X PUT localhost:8080/client/track/headers/add/Goto-Host,Via-Goto,x,y,z,foo
 
 curl -X PUT localhost:8080/client/track/headers/remove/foo
 

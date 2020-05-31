@@ -70,30 +70,40 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(targetsRouter, "", getProxyTargets)
 }
 
-func (pt *Proxy) init() {
-  pt.lock.Lock()
-  defer pt.lock.Unlock()
-  if pt.Targets == nil {
-    pt.Targets = map[string]*ProxyTarget{}
-    pt.TargetsByHeaders = map[string]map[string]map[string]*ProxyTarget{}
-    pt.TargetsByUris = map[string]map[string]*ProxyTarget{}
-    pt.TargetsByQuery = map[string]map[string]map[string]*ProxyTarget{}
+func (p *Proxy) init() {
+  p.lock.Lock()
+  defer p.lock.Unlock()
+  if p.Targets == nil {
+    p.Targets = map[string]*ProxyTarget{}
+    p.TargetsByHeaders = map[string]map[string]map[string]*ProxyTarget{}
+    p.TargetsByUris = map[string]map[string]*ProxyTarget{}
+    p.TargetsByQuery = map[string]map[string]map[string]*ProxyTarget{}
   }
 }
 
-func (pt *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
-  pt.lock.Lock()
-  defer pt.lock.Unlock()
+func toInvocationSpec(target *ProxyTarget) (*invocation.InvocationSpec, error) {
+  is := &invocation.InvocationSpec{}
+  is.Name = target.Name
+  is.Method = "GET"
+  is.URL = target.URL
+  is.Replicas = target.Replicas
+  is.SendID = target.SendID
+  return is, invocation.ValidateSpec(is)
+}
+
+func (p *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
+  p.lock.Lock()
+  defer p.lock.Unlock()
   var target ProxyTarget
   var err error
   if err = util.ReadJsonPayload(r, &target); err == nil {
     target.invocationSpec, err = toInvocationSpec(&target)
   }
   if err == nil {
-    pt.Targets[target.Name] = &target
-    pt.addHeaderMatch(&target)
-    pt.addQueryMatch(&target)
-    if err := pt.addURIMatch(&target); err == nil {
+    p.Targets[target.Name] = &target
+    p.addHeaderMatch(&target)
+    p.addQueryMatch(&target)
+    if err := p.addURIMatch(&target); err == nil {
       util.AddLogMessage(fmt.Sprintf("Added proxy target: %+v", target), r)
       w.WriteHeader(http.StatusAccepted)
       fmt.Fprintf(w, "Added proxy target: %s\n", util.ToJSON(target))
@@ -107,7 +117,7 @@ func (pt *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func (pt *Proxy) addHeaderMatch(target *ProxyTarget) {
+func (p *Proxy) addHeaderMatch(target *ProxyTarget) {
   for _, h := range target.Match.Headers {
     header := strings.ToLower(strings.Trim(h[0], " "))
     headerValue := ""
@@ -123,10 +133,10 @@ func (pt *Proxy) addHeaderMatch(target *ProxyTarget) {
         headerValue = ""
       }
     }
-    targetsByHeaders, present := pt.TargetsByHeaders[header]
+    targetsByHeaders, present := p.TargetsByHeaders[header]
     if !present {
       targetsByHeaders = map[string]map[string]*ProxyTarget{}
-      pt.TargetsByHeaders[header] = targetsByHeaders
+      p.TargetsByHeaders[header] = targetsByHeaders
     }
     targetsByValue, present := targetsByHeaders[headerValue]
     if !present {
@@ -137,7 +147,7 @@ func (pt *Proxy) addHeaderMatch(target *ProxyTarget) {
   }
 }
 
-func (pt *Proxy) addQueryMatch(target *ProxyTarget) {
+func (p *Proxy) addQueryMatch(target *ProxyTarget) {
   for _, q := range target.Match.Query {
     key := strings.ToLower(strings.Trim(q[0], " "))
     value := ""
@@ -153,10 +163,10 @@ func (pt *Proxy) addQueryMatch(target *ProxyTarget) {
         value = ""
       }
     }
-    targetsByQuery, present := pt.TargetsByQuery[key]
+    targetsByQuery, present := p.TargetsByQuery[key]
     if !present {
       targetsByQuery = map[string]map[string]*ProxyTarget{}
-      pt.TargetsByQuery[key] = targetsByQuery
+      p.TargetsByQuery[key] = targetsByQuery
     }
     targetsByValue, present := targetsByQuery[key]
     if !present {
@@ -167,15 +177,15 @@ func (pt *Proxy) addQueryMatch(target *ProxyTarget) {
   }
 }
 
-func (pt *Proxy) addURIMatch(target *ProxyTarget) error {
+func (p *Proxy) addURIMatch(target *ProxyTarget) error {
   for _, uri := range target.Match.Uris {
     uri = strings.ToLower(uri)
-    uriTargets, present := pt.TargetsByUris[uri]
+    uriTargets, present := p.TargetsByUris[uri]
     if !present {
       uriTargets = map[string]*ProxyTarget{}
-      pt.TargetsByUris[uri] = uriTargets
+      p.TargetsByUris[uri] = uriTargets
     }
-    route := forwardRouter.Path(uri) //.Name(uri).MatcherFunc(matchURI).HandlerFunc(routeByURI)
+    route := forwardRouter.Path(uri).MatcherFunc(matchURI)
     if re, err := route.GetPathRegexp(); err == nil {
       target.uriRegExp = regexp.MustCompile(re)
     } else {
@@ -187,31 +197,34 @@ func (pt *Proxy) addURIMatch(target *ProxyTarget) error {
   return nil
 }
 
-func toInvocationSpec(target *ProxyTarget) (*invocation.InvocationSpec, error) {
-  is := &invocation.InvocationSpec{}
-  is.Name = target.Name
-  is.Method = "GET"
-  is.URL = target.URL
-  is.Replicas = target.Replicas
-  is.SendID = target.SendID
-  return is, invocation.ValidateSpec(is)
+func matchURI(r *http.Request, rm *mux.RouteMatch) bool {
+  if status.IsForcedStatus(r) {
+    return false
+  }
+  p := getPortProxy(r)
+  for _, target := range p.Targets {
+    if target.Enabled && target.uriRegExp != nil && target.uriRegExp.MatchString(r.RequestURI) {
+      return true
+    }
+  }
+  return false
 }
 
-func (pt *Proxy) getRequestedProxyTarget(r *http.Request) *ProxyTarget {
-  pt.lock.RLock()
-  defer pt.lock.RUnlock()
+func (p *Proxy) getRequestedProxyTarget(r *http.Request) *ProxyTarget {
+  p.lock.RLock()
+  defer p.lock.RUnlock()
   if tname, present := util.GetStringParam(r, "target"); present {
-    return pt.Targets[tname]
+    return p.Targets[tname]
   }
   return nil
 }
 
-func (pt *Proxy) removeProxyTarget(w http.ResponseWriter, r *http.Request) {
-  if t := pt.getRequestedProxyTarget(r); t != nil {
-    pt.lock.Lock()
-    defer pt.lock.Unlock()
-    delete(pt.Targets, t.Name)
-    for h, valueMap := range pt.TargetsByHeaders {
+func (p *Proxy) removeProxyTarget(w http.ResponseWriter, r *http.Request) {
+  if t := p.getRequestedProxyTarget(r); t != nil {
+    p.lock.Lock()
+    defer p.lock.Unlock()
+    delete(p.Targets, t.Name)
+    for h, valueMap := range p.TargetsByHeaders {
       for hv, valueTargets := range valueMap {
         for name := range valueTargets {
           if name == t.Name {
@@ -223,10 +236,10 @@ func (pt *Proxy) removeProxyTarget(w http.ResponseWriter, r *http.Request) {
         }
       }
       if len(valueMap) == 0 {
-        delete(pt.TargetsByHeaders, h)
+        delete(p.TargetsByHeaders, h)
       }
     }
-    for h, valueMap := range pt.TargetsByQuery {
+    for h, valueMap := range p.TargetsByQuery {
       for hv, valueTargets := range valueMap {
         for name := range valueTargets {
           if name == t.Name {
@@ -238,17 +251,17 @@ func (pt *Proxy) removeProxyTarget(w http.ResponseWriter, r *http.Request) {
         }
       }
       if len(valueMap) == 0 {
-        delete(pt.TargetsByQuery, h)
+        delete(p.TargetsByQuery, h)
       }
     }
-    for uri, uriTargets := range pt.TargetsByUris {
+    for uri, uriTargets := range p.TargetsByUris {
       for name := range uriTargets {
         if name == t.Name {
           delete(uriTargets, name)
         }
       }
       if len(uriTargets) == 0 {
-        delete(pt.TargetsByUris, uri)
+        delete(p.TargetsByUris, uri)
       }
     }
     util.AddLogMessage(fmt.Sprintf("Removed proxy target: %+v", t), r)
@@ -260,10 +273,10 @@ func (pt *Proxy) removeProxyTarget(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func (pt *Proxy) enableProxyTarget(w http.ResponseWriter, r *http.Request) {
-  if t := pt.getRequestedProxyTarget(r); t != nil {
-    pt.lock.Lock()
-    defer pt.lock.Unlock()
+func (p *Proxy) enableProxyTarget(w http.ResponseWriter, r *http.Request) {
+  if t := p.getRequestedProxyTarget(r); t != nil {
+    p.lock.Lock()
+    defer p.lock.Unlock()
     t.Enabled = true
     util.AddLogMessage(fmt.Sprintf("Enabled proxy target: %+v", t), r)
     w.WriteHeader(http.StatusAccepted)
@@ -274,10 +287,10 @@ func (pt *Proxy) enableProxyTarget(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func (pt *Proxy) disableProxyTarget(w http.ResponseWriter, r *http.Request) {
-  if t := pt.getRequestedProxyTarget(r); t != nil {
-    pt.lock.Lock()
-    defer pt.lock.Unlock()
+func (p *Proxy) disableProxyTarget(w http.ResponseWriter, r *http.Request) {
+  if t := p.getRequestedProxyTarget(r); t != nil {
+    p.lock.Lock()
+    defer p.lock.Unlock()
     t.Enabled = false
     util.AddLogMessage(fmt.Sprintf("Disbled proxy target: %+v", t), r)
     w.WriteHeader(http.StatusAccepted)
@@ -288,19 +301,19 @@ func (pt *Proxy) disableProxyTarget(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func (pt *Proxy) getRequestedTargets(r *http.Request) map[string]*ProxyTarget {
-  pt.lock.RLock()
-  defer pt.lock.RUnlock()
+func (p *Proxy) getRequestedTargets(r *http.Request) map[string]*ProxyTarget {
+  p.lock.RLock()
+  defer p.lock.RUnlock()
   var targets map[string]*ProxyTarget = map[string]*ProxyTarget{}
   if tnamesParam, present := util.GetStringParam(r, "targets"); present {
     tnames := strings.Split(tnamesParam, ",")
     for _, tname := range tnames {
-      if target, found := pt.Targets[tname]; found {
+      if target, found := p.Targets[tname]; found {
         targets[target.Name] = target
       }
     }
   } else {
-    targets = pt.Targets
+    targets = p.Targets
   }
   return targets
 }
@@ -417,9 +430,9 @@ func updateInvocationSpec(target *ProxyTarget, r *http.Request) {
   target.invocationSpec.BodyReader = r.Body
 }
 
-func (pt *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWriter, r *http.Request) {
-  pt.lock.Lock()
-  defer pt.lock.Unlock()
+func (p *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWriter, r *http.Request) {
+  p.lock.Lock()
+  defer p.lock.Unlock()
   if len(targets) > 0 {
     invocationSpecs := []*invocation.InvocationSpec{}
     for _, target := range targets {
@@ -566,7 +579,7 @@ func (pt *Proxy) getMatchingTargetsForRequest(r *http.Request) map[string]*Proxy
 }
 
 func WillProxy(r *http.Request) (bool, map[string]*ProxyTarget) {
-  if util.IsAdminRequest(r) {
+  if util.IsAdminRequest(r) || status.IsForcedStatus(r) {
     return false, nil
   }
 

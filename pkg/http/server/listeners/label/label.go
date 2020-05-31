@@ -58,8 +58,8 @@ func Middleware(next http.Handler) http.Handler {
     }
     hostLabel := fmt.Sprintf("%s.%s@%s", pod, ns, ip)
     util.AddLogMessage(fmt.Sprintf("[%s] [%s]", hostLabel, label), r)
-    w.Header().Add("Server", label)
-    w.Header().Add("Server-Host", hostLabel)
+    w.Header().Add("Via-Goto", label)
+    w.Header().Add("Goto-Host", hostLabel)
     next.ServeHTTP(w, r)
     util.AddLogMessage(util.GetResponseHeadersLog(w), r)
   })
