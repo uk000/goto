@@ -28,15 +28,20 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 Suppose you have a client applicaiton that connects to a service for some API (`/my/api`). Either the client, or a sidecar/proxy (e.g. envoy), has some in-built resiliency capability so that it retries upon certain kind of failures (e.g. if the service responds with `HTTP 503`). The client or the proxy (e.g. envoy) may possibly even attempt to reconnect to a different endpoint of the service.
 
 This `goto` tool is the ideal tool to goto [yeah, intended :)] to test such resiliency behavior of the client or the proxy, in two possible ways:
+
 1) Run `goto` as a server that the client/proxy sends requests to, and `goto` can be configured to respond with various kinds of responses.
 2) Run `goto` as a forwarding proxy layer in front of real server application, let it intercept all the calls and forward those to the server application. When you want to fail the service temporarily, ask `goto` to temporarily respond with a failure code, e.g. `HTTP 503`.
 
 Let's look at the second setup in more details as that's more exciting of the two. 
+
 1. Assume the real service application is accessible over URL `http://realserver`. Currently your client app connects to this server, and you want to test the resiliency behavior between this pair for URI `/my/fancy/api`.
+
    ```
    curl -v http://realserver/my/fancy/api
    ```
+
 2. Run `goto` server somewhere (local machine, a pod, a VM). Let's suppose the `goto` tool is accessible over URL `http://goto:8080`. You configure the client to connect to goto's url now.
+
     ```
     #run goto
     goto --port 8080
@@ -46,58 +51,81 @@ Let's look at the second setup in more details as that's more exciting of the tw
     ```
 
 3. Add a forwarding proxy target on `goto` to intercept traffic for URI `/my/fancy/api` and forward it to real server application at `http://realserver`
+
     ```
     curl http://goto:8080/request/proxy/targets/add --data \
     '{"name": "myServer", "match":{"uris":["/my/fancy/api"]}, "url":"http://realserver", "enabled":true}'
     ```
+
     Now `goto` will proxy all requests to the server application. Confirm it:
+
     ```
     curl -v http://goto:8080/my/fancy/api
     ```
 
 4. Reconfigure your client app to connect to this new URL: `http://goto:8080/my/fancy/api`. Client requests will be forwarded to the server with all headers and payload, and response sent back to the client. Some additional response headers are added by `goto` to show that the request was indeed proxied via it. These response headers are described later in this document.
+
 <br/>
+
 5. Now it's time to introduce some chaos. We'll ask the `goto` to respond with `HTTP 503` response code for exactly next 2 requests.
+   
     ```
     curl -X PUT http://goto:8080/response/status/set/503:2
     ```
+   
     The path parameter `503:2` has a syntax of `<Status Code>:<Number of Responses>`. So, `503:2` tells `goto` to respond with `503` status for next 2 requests of any non-admin URI calls. Admin URIs are the ones that are used to configure `goto`, like the one we just used: `/response/status/set`. You can find out more about various admin URIs later in the doc. 
+
 <br/>
+
 6. Now the client will receive `HTTP 503` for next 2 requests. Have the client send requests now, and observe client's behavior for next 2 failures followed by subsequent successes.
+   
     ```
     curl -v http://goto:8080/my/fancy/api
     curl -v http://goto:8080/my/fancy/api
     curl -v http://goto:8080/my/fancy/api
     ```
 
+<br/>
 
 As this small scenario demonstrated, `goto` lets you inject controlled failure on the fly in the traffic flow between a client and a service for some complex chaos testing. The above scenario was still relatively simpler, as we didn't even test against multiple service pods/instances. We could have run one `goto` for each service pod, and each of those `goto` could be configured to respond with some specific response codes for a specific number of times, and then you'd run your traffic and observe some coordinated failures and recoveries. The possibilities of such chaos testing are endless. The `goto` tool makes is possible to script such controlled chaos testing.
 
 <br/>
 
 ### Scenario: Track Request/Connection Timeouts
+
 Say you want to monitor/track how often a client (or proxy/sidecar) performs a request/connection timeout, and the client/server/proxy/sidecar behavior when the request or connection times out. This tool provides a deterministic way to simulate the timeout behavior.
+
 <br/>
+
 1. With this application running as the server, enable timeout tracking on the server side either for all requests or for certain headers.
+
    ```
    #enable timeout tracking for all requests
    curl -X POST localhost:8080/request/timeout/track/all
 
    ```
+
 2. Set a large delay on all responses on the server. Make sure the delay duration is larger than the timeout config on the client application or sidecar that you intend to test.
+
    ```
    curl -X PUT localhost:8080/response/delay/set/10s
    ```
+
 3. Run the client application with its configured timeout. The example below shows curl, but this would be a real application being investigated
+
     ```
     curl -v -m 5 localhost:8080/someuri
     curl -v -m 5 localhost:8080/someuri
     ```
+
 4. Check the timeout stats tracked by the server
+
     ```
     curl localhost:8080/request/timeout/status
     ```
+
     The timeout stats would look like this:
+
     ```
     {
       "all": {
@@ -334,6 +362,7 @@ The APIs allow proxy targets to be configured, and those can also be invoked man
 Proxy target match criteria specify the URIs, headers and query parameters, matching either of which will cause the request to be proxied to the target.
 
 - URIs: specified as a list of URIs, with `{foo}` to be used for variable portion of a URI. E.g., `/foo/{f}/bar/{b}` will match URIs like `/foo/123/bar/abc`, `/foo/something/bar/otherthing`, etc. The variables are captured under the given labels (f and b in previous example). If the target is configured with `replaceURI` to proxy the request to a different URI than the original request, the `replaceURI` can refer to those capturing variables using the syntax described in this example:
+  
   ```
   curl http://goto:8080/request/proxy/targets/add --data \
   '{"name": "target1", "url":"http://somewhere", \
@@ -341,9 +370,13 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
   "replaceURI":"/abc/{y:.*}/def/{x:.*}", \
   "enabled":true, "sendID": true}'
   ```
+  
   This target will be triggerd for requests with the pattern `/foo/<somex>/bar/<somey>` and the request will be forwarded to the target as `http://somewhere/abc/somey/def/somex`, where the values `somex` and `somey` are extracted from the original request and injected into the replacement URI.  
+
 <br/>
+
 - Headers: specified as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addHeaders` list. A target is triggered if any of the headers in the match list are present in the request (headers are matched using OR instead of AND). The variable to capture header value is specified as `{foo}`, and can be referenced in the `addHeaders` list again as `{foo}`. This example will make it clear:
+
   ```
   curl http://goto:8080/request/proxy/targets/add --data \
   '{"name": "target2", "url":"http://somewhere", \
@@ -351,9 +384,13 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
   "addHeaders":[["abc","{x}"], ["def","{y}"]], "removeHeaders":["foo"], \
   "enabled":true, "sendID": true}'
   ```
+
   This target will be triggered for requests carrying headers `foo` or `bar`. On the proxied request, additional headers will be set: `abc` with value copied from `foo`, an `def` with value copied from `bar`. Also, header `foo` will be removed from the proxied request.
+
 <br/>
+
 - Query: specified as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addQuery` list. A target is triggered if any of the query parameters in the match list are present in the request (matched using OR instead of AND). The variable to capture query parameter value is specified as `{foo}`, and can be referenced in the `addQuery` list again as `{foo}`. Example:
+
     ```
   curl http://goto:8080/request/proxy/targets/add --data \
   '{"name": "target3", "url":"http://somewhere", \
@@ -361,10 +398,10 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
   "addQuery":[["abc","{x}"], ["def","{y}"]], "removeQuery":["foo"], \
   "enabled":true, "sendID": true}'
   ```
+
   This target will be triggered for requests with carrying query params `foo` or `bar`. On the proxied request, query param `foo` will be removed, and additional query params will be set: `abc` with value copied from `foo`, an `def` with value copied from `bar`. For incoming request `http://goto:8080?foo=123&bar=456` gets proxied as `http://somewhere?abc=123&def=456&bar=456`. 
+
 <br/>
-
-
 
 #### Request Proxying API Examples:
 ```
