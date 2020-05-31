@@ -24,8 +24,8 @@ type ProxyTargetMatch struct {
 
 type ProxyTarget struct {
   Name           string
-  Url            string
-  XYZ            string
+  URL            string
+  SendID         bool
   ReplaceURI     string
   AddHeaders     [][]string
   RemoveHeaders  []string
@@ -191,9 +191,9 @@ func toInvocationSpec(target *ProxyTarget) (*invocation.InvocationSpec, error) {
   is := &invocation.InvocationSpec{}
   is.Name = target.Name
   is.Method = "GET"
-  is.Url = target.Url
+  is.URL = target.URL
   is.Replicas = target.Replicas
-  is.SendId = true
+  is.SendID = target.SendID
   return is, invocation.ValidateSpec(is)
 }
 
@@ -342,7 +342,7 @@ func prepareTargetHeaders(target *ProxyTarget, r *http.Request) [][]string {
 }
 
 func prepareTargetURL(target *ProxyTarget, r *http.Request) string {
-  url := target.Url
+  url := target.URL
   if len(target.ReplaceURI) > 0 {
     forwardRoute := forwardRouter.NewRoute().BuildOnly().Path(target.ReplaceURI)
     vars := mux.Vars(r)
@@ -411,7 +411,7 @@ func prepareTargetQuery(url string, target *ProxyTarget, r *http.Request) string
 }
 
 func updateInvocationSpec(target *ProxyTarget, r *http.Request) {
-  target.invocationSpec.Url = prepareTargetURL(target, r)
+  target.invocationSpec.URL = prepareTargetURL(target, r)
   target.invocationSpec.Headers = prepareTargetHeaders(target, r)
   target.invocationSpec.Method = r.Method
   target.invocationSpec.BodyReader = r.Body

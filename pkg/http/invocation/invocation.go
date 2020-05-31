@@ -18,17 +18,17 @@ import (
 type InvocationSpec struct {
   Name         string
   Method       string
-  Url          string
+  URL          string
   Headers      [][]string
   Body         string
   BodyReader   io.Reader
   Replicas     int
   RequestCount int
   Delay        string
-  delayD       time.Duration
   KeepOpen     string
+  SendID       bool
+  delayD       time.Duration
   keepOpenD    time.Duration
-  SendId       bool
 }
 
 type InvocationChannels struct {
@@ -62,7 +62,7 @@ func ValidateSpec(spec *InvocationSpec) error {
   if spec.Method == "" {
     return fmt.Errorf("Method is required")
   }
-  if spec.Url == "" {
+  if spec.URL == "" {
     return fmt.Errorf("URL is required")
   }
   if spec.Replicas < 0 {
@@ -117,8 +117,8 @@ func prepareInvocation(target *InvocationSpec) *InvocationStatus {
 }
 
 func prepareTargetURL(target *InvocationSpec) string {
-  url := target.Url
-  if target.SendId && !strings.Contains(url, "x-request-id") {
+  url := target.URL
+  if target.SendID && !strings.Contains(url, "x-request-id") {
     if !strings.Contains(url, "?") {
       url += "?"
     } else {
