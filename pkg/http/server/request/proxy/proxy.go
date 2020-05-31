@@ -203,8 +203,15 @@ func matchURI(r *http.Request, rm *mux.RouteMatch) bool {
   }
   p := getPortProxy(r)
   for _, target := range p.Targets {
-    if target.Enabled && target.uriRegExp != nil && target.uriRegExp.MatchString(r.RequestURI) {
-      return true
+    if target.Enabled {
+      if target.uriRegExp != nil && target.uriRegExp.MatchString(r.RequestURI) {
+        return true
+      }
+      for _, uri := range target.Match.Uris {
+        if uri == "/" {
+          return true
+        }
+      }
     }
   }
   return false
@@ -572,7 +579,18 @@ func (pt *Proxy) getMatchingTargetsForRequest(r *http.Request) map[string]*Proxy
   }
   for _, target := range pt.Targets {
     if target.Enabled && target.uriRegExp != nil && target.uriRegExp.MatchString(r.RequestURI) {
-      targets[target.Name] = target
+      
+    }
+    if target.Enabled {
+      if target.uriRegExp != nil && target.uriRegExp.MatchString(r.RequestURI) {
+        targets[target.Name] = target
+      } else {
+        for _, uri := range target.Match.Uris {
+          if uri == "/" {
+            targets[target.Name] = target
+          }
+        }
+      }
     }
   }
   return targets

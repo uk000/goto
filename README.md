@@ -24,8 +24,8 @@ go build -o goto .
 
 Before we look into detailed features and APIs exposed by the tool, let's look at how this tool can be used in a few scenarios to understand it better.
 
-### Scenario: Test a  client's behavior upon service failure
-Suppose you have a client applicaiton that connects to a service for some API (`/my/api`). Either the client, or a sidecar/proxy (e.g. envoy), has some in-built resiliency capability so that it retries upon certain kind of failures (e.g. if the service responds with `HTTP 503`). The client or the proxy (e.g. envoy) may possibly even attempt to reconnect to a different endpoint of the service.
+### Scenario: Test a client's behavior upon service failure
+Suppose you have a client application that connects to a service for some API (`/my/api`). Either the client, or a sidecar/proxy (e.g. envoy), has some in-built resiliency capability so that it retries upon certain kind of failures (e.g. if the service responds with `HTTP 503`). The client or the proxy (e.g. envoy) may possibly even attempt to reconnect to a different endpoint of the service.
 
 This `goto` tool is the ideal tool to goto [yeah, intended :)] to test such resiliency behavior of the client or the proxy, in two possible ways:
 
@@ -88,6 +88,106 @@ Let's look at the second setup in more details as that's more exciting of the tw
 <br/>
 
 As this small scenario demonstrated, `goto` lets you inject controlled failure on the fly in the traffic flow between a client and a service for some complex chaos testing. The above scenario was still relatively simpler, as we didn't even test against multiple service pods/instances. We could have run one `goto` for each service pod, and each of those `goto` could be configured to respond with some specific response codes for a specific number of times, and then you'd run your traffic and observe some coordinated failures and recoveries. The possibilities of such chaos testing are endless. The `goto` tool makes is possible to script such controlled chaos testing.
+
+<br/>
+
+### Scenario: Count number of requests received at each service instance (Pod/VM) for certain headers
+One of the basic things we may want to track is, to observe a client's or proxy's behavior in terms of distributing traffic load across various endpoints of a service. While many clients/proxies may provide metrics to inform you about the number of requests it sent per service endpoint (IP), but what if you wanted to track it by headers: i.e., how many requests received per service endpoint per header.
+
+The `goto` tool can be used to achieve this simply by putting a `goto` instance in proxy mode in front of each service instance, and enable tracking for the specific headers you wish to track. Let's look at the sample API calls with the assumption of two service instances `http://service-1` and `http://service-2`, and a `goto` instance in front of each service, `http://goto-1` and `http://goto-2`.
+
+Clear and add tracking headers to `goto` instances:
+
+```
+curl -X POST http://goto-1:8080/request/headers/track/clear
+
+curl -X PUT http://goto-1:8080/request/headers/track/add/foo,bar
+
+curl -X POST http://goto-2:8080/request/headers/track/clear
+
+curl -X PUT http://goto-2:8080/request/headers/track/add/foo,bar
+```
+
+The above API calls configure the `goto` instances to track headers `foo` and `bar`. 
+
+Now add proxy target(s) with the relevant match criteria to each `goto` instance:
+
+```
+  curl http://goto-1:8080/request/proxy/targets/add --data '{"name": "service-1", \
+  "url":"http://service-1", \
+  "match":{"uris":["/"]}, \
+  "enabled":true}'
+
+  curl http://goto-2:8080/request/proxy/targets/add --data '{"name": "service-2", \
+  "url":"http://service-2", \
+  "match":{"uris":["/"]}, \
+  "enabled":true}'
+```
+
+Both `goto` instances have now been configured to forward all traffic (URI match `/`) to the corresponding service instances. Now we send some traffic with various headers:
+
+```
+  curl http://goto-1:8080/some/uri -Hfoo:foo1
+  curl http://goto-1:8080/some/uri -Hfoo:foo1 -Hbar:bar1
+  curl http://goto-2:8080/some/uri -Hbar:bar2
+  curl http://goto-2:8080/some/uri -Hfoo:foo2 -Hbar:bar2
+```
+
+Once the traffic we want to observe has flown, we ask the `goto` instances to give us counts for the tracked headers:
+
+```
+  curl http://goto-1:8080/request/headers/track/counts |  jq
+  curl http://goto-2:8080/request/headers/track/counts |  jq
+```
+
+Header tracking counts results payload from a `goto` instance will look like this:
+
+```
+{
+  "foo": {
+    "RequestCountsByHeaderValue": {
+      "1": 8
+    },
+    "RequestCountsByHeaderValueAndRequestedStatus": {},
+    "RequestCountsByHeaderValueAndResponseStatus": {
+      "1": {
+        "200": 8
+      }
+    }
+  },
+  "x": {
+    "RequestCountsByHeaderValue": {
+      "x1": 2,
+      "x2": 1
+    },
+    "RequestCountsByHeaderValueAndRequestedStatus": {},
+    "RequestCountsByHeaderValueAndResponseStatus": {
+      "x1": {
+        "200": 2
+      },
+      "x2": {
+        "200": 1
+      }
+    }
+  },
+  "y": {
+    "RequestCountsByHeaderValue": {},
+    "RequestCountsByHeaderValueAndRequestedStatus": {},
+    "RequestCountsByHeaderValueAndResponseStatus": {}
+  },
+  "z": {
+    "RequestCountsByHeaderValue": {
+      "z4": 12
+    },
+    "RequestCountsByHeaderValueAndRequestedStatus": {},
+    "RequestCountsByHeaderValueAndResponseStatus": {
+      "z4": {
+        "200": 12
+      }
+    }
+  }
+}
+```
 
 <br/>
 
@@ -371,7 +471,9 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
   "enabled":true, "sendID": true}'
   ```
   
-  This target will be triggerd for requests with the pattern `/foo/<somex>/bar/<somey>` and the request will be forwarded to the target as `http://somewhere/abc/somey/def/somex`, where the values `somex` and `somey` are extracted from the original request and injected into the replacement URI.  
+  This target will be triggerd for requests with the pattern `/foo/<somex>/bar/<somey>` and the request will be forwarded to the target as `http://somewhere/abc/somey/def/somex`, where the values `somex` and `somey` are extracted from the original request and injected into the replacement URI.
+
+  URI match `/` has the special behavior of matching all traffic.
 
 <br/>
 
