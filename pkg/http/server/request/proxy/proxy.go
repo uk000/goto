@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"goto/pkg/http/invocation"
-	"goto/pkg/http/server/request/proxy/urimatcher"
 	"goto/pkg/http/server/response/status"
 	"goto/pkg/util"
 
@@ -60,7 +59,6 @@ var (
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   forwardRouter = root.NewRoute().Subrouter()
   proxyRouter := r.PathPrefix("/proxy").Subrouter()
-  urimatcher.SetRoutes(proxyRouter, r, root)
   targetsRouter := proxyRouter.PathPrefix("/targets").Subrouter()
   util.AddRoute(targetsRouter, "/add", addProxyTarget, "POST")
   util.AddRoute(targetsRouter, "/{target}/remove", removeProxyTarget, "PUT", "POST")
