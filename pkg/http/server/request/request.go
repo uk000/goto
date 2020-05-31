@@ -18,9 +18,9 @@ var (
     proxy.Handler}
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router) {
+func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   requestRouter := r.PathPrefix("/request").Subrouter()
-  util.AddRoutes(requestRouter, r, requestHandlers...)
+  util.AddRoutes(requestRouter, r, root, requestHandlers...)
 }
 
 func Middleware(next http.Handler) http.Handler {

@@ -17,7 +17,7 @@ var (
   headersLock           sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router) {
+func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   headersRouter := r.PathPrefix("/headers").Subrouter()
   util.AddRoute(headersRouter, "/add/{header}/{value}", addResponseHeader, "PUT", "POST")
   util.AddRoute(headersRouter, "/remove/{header}", removeResponseHeader, "PUT", "POST")

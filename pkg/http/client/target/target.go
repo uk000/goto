@@ -41,7 +41,7 @@ var (
   portClientsLock sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router) {
+func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   targetsRouter := r.PathPrefix("/targets").Subrouter()
   util.AddRoute(targetsRouter, "/add", addTarget, "POST")
   util.AddRoute(targetsRouter, "/{target}/remove", removeTarget, "POST", "PUT")

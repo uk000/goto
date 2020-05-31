@@ -123,7 +123,7 @@ func prepareTargetURL(target *InvocationSpec) string {
       url += "?"
     } else {
       pieces := strings.Split(url, "?")
-      if len(pieces) > 1 && len(pieces[1]) > 0 && strings.Contains(pieces[1], "&") {
+      if len(pieces) > 1 && len(pieces[1]) > 0 && !strings.HasSuffix(pieces[1], "&") {
         url += "&"
       }
     }

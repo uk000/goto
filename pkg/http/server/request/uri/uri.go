@@ -15,9 +15,9 @@ var (
   internalHandler util.ServerHandler = util.ServerHandler{Name: "uri", Middleware: middleware}
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router) {
+func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   uriRouter := r.PathPrefix("/uri").Subrouter()
-  bypass.SetRoutes(uriRouter, parent)
+  bypass.SetRoutes(uriRouter, parent, root)
 }
 
 func middleware(next http.Handler) http.Handler {

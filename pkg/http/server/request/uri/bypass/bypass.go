@@ -22,7 +22,7 @@ var (
   bypassLock   sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router) {
+func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   bypassRouter := r.PathPrefix("/bypass").Subrouter()
   util.AddRouteQ(bypassRouter, "/add", addBypassURI, "uri", "{uri}", "PUT", "POST")
   util.AddRouteQ(bypassRouter, "/remove", removeBypassURI, "uri", "{uri}", "PUT", "POST")

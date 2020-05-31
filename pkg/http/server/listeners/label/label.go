@@ -15,7 +15,7 @@ var (
   Handler util.ServerHandler = util.ServerHandler{"delay", SetRoutes, Middleware}
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router) {
+func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   labelRouter := r.PathPrefix("/label").Subrouter()
   util.AddRoute(labelRouter, "/set/{label}", setLabel, "PUT", "POST")
   util.AddRoute(labelRouter, "/clear", setLabel, "POST")

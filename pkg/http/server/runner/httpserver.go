@@ -25,7 +25,7 @@ func RunHttpServer(port int, root string, handlers ...util.ServerHandler) {
   r.Use(util.LoggingMiddleware)
   for _, h := range handlers {
     if h.SetRoutes != nil {
-      h.SetRoutes(r, nil)
+      h.SetRoutes(r, nil, r)
     }
     if h.Middleware != nil {
       r.Use(h.Middleware)

@@ -34,7 +34,7 @@ var (
   requestTracking RequestTracking = RequestTracking{requestTrackingByPort: map[string]*RequestTrackingData{}}
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router) {
+func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   headerTrackingRouter := r.PathPrefix("/track").Subrouter()
   util.AddRoute(headerTrackingRouter, "/clear", clearHeaders, "POST")
   util.AddRoute(headerTrackingRouter, "/add/{headers}", addHeaders, "PUT", "POST")
@@ -43,6 +43,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router) {
   util.AddRoute(headerTrackingRouter, "/counts/clear/{headers}", clearHeaderCounts, "PUT", "POST")
   util.AddRoute(headerTrackingRouter, "/counts/clear", clearHeaderCounts, "POST")
   util.AddRoute(headerTrackingRouter, "/counts", getHeaderCount, "GET")
+  util.AddRoute(headerTrackingRouter, "/list", getHeaders, "GET")
+  util.AddRoute(headerTrackingRouter, "", getHeaders, "GET")
 }
 
 func (hd *HeaderData) init() {
@@ -124,6 +126,18 @@ func (rtd *RequestTrackingData) getHeaderData(header string) *HeaderData {
   return rtd.headerMap[header]
 }
 
+func (rtd *RequestTrackingData) getHeaders() []string {
+  rtd.lock.RLock()
+  defer rtd.lock.RUnlock()
+  headers := make([]string, len(rtd.headerMap))
+  i := 0
+  for h := range rtd.headerMap {
+    headers[i] = h
+    i++
+  }
+  return headers
+}
+
 func (rt *RequestTracking) getPortRequestTrackingData(r *http.Request) *RequestTrackingData {
   rt.lock.Lock()
   defer rt.lock.Unlock()
@@ -178,6 +192,10 @@ func (rt *RequestTracking) getHeaderCounts(r *http.Request) (header string, head
     return header, rtd.getHeaderData(header)
   }
   return "", nil
+}
+
+func (rt *RequestTracking) getHeaders(r *http.Request) []string {
+  return rt.getPortRequestTrackingData(r).getHeaders()
 }
 
 func addHeaders(w http.ResponseWriter, r *http.Request) {
@@ -248,6 +266,10 @@ func getHeaderCount(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusOK)
     fmt.Fprintln(w, result)
   }
+}
+
+func getHeaders(w http.ResponseWriter, r *http.Request) {
+  fmt.Fprintln(w, util.ToJSON(requestTracking.getHeaders(r)));
 }
 
 func trackRequestHeaders(r *http.Request) {

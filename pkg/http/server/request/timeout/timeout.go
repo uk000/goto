@@ -28,7 +28,7 @@ var (
   timeoutTrackingLock   sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router) {
+func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   timeoutRouter := r.PathPrefix("/timeout").Subrouter()
   util.AddRoute(timeoutRouter, "/track/headers/{headers}", trackHeaders, "PUT", "POST")
   util.AddRoute(timeoutRouter, "/track/all", trackAll, "PUT", "POST")

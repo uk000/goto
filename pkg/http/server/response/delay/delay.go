@@ -17,7 +17,7 @@ var (
   delayLock   sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router) {
+func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   delayRouter := r.PathPrefix("/delay").Subrouter()
   util.AddRoute(delayRouter, "/set/{delay}", setDelay, "POST", "PUT")
   util.AddRoute(delayRouter, "/clear", setDelay, "POST", "PUT")

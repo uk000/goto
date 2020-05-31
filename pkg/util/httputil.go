@@ -16,7 +16,7 @@ import (
 
 type ServerHandler struct {
   Name       string
-  SetRoutes  func(r *mux.Router, parent *mux.Router)
+  SetRoutes  func(r *mux.Router, parent *mux.Router, root *mux.Router)
   Middleware mux.MiddlewareFunc
 }
 
@@ -110,6 +110,21 @@ func GetHeaderValues(r *http.Request) map[string]map[string]int {
   return headerValuesMap
 }
 
+func GetQueryParams(r *http.Request) map[string]map[string]int {
+  queryParamsMap := map[string]map[string]int{}
+  for key, values := range r.URL.Query() {
+    key = strings.ToLower(key)
+    if queryParamsMap[key] == nil {
+      queryParamsMap[key] = map[string]int{}
+    }
+    for _, value := range values {
+      value = strings.ToLower(value)
+      queryParamsMap[key][value]++
+    }
+  }
+  return queryParamsMap
+}
+
 func CopyHeaders(w http.ResponseWriter, headers http.Header, host string) {
   for h, values := range headers {
     if !strings.Contains(h, "content") && !strings.Contains(h, "Content") {
@@ -182,10 +197,10 @@ func AddRouteQ(r *mux.Router, route string, f func(http.ResponseWriter, *http.Re
   r.HandleFunc(route+"/", f).Queries(queryParamName, queryKey).Methods(methods...)
 }
 
-func AddRoutes(r *mux.Router, parent *mux.Router, handlers ...ServerHandler) {
+func AddRoutes(r *mux.Router, parent *mux.Router, root *mux.Router, handlers ...ServerHandler) {
   for _, h := range handlers {
     if h.SetRoutes != nil {
-      h.SetRoutes(r, parent)
+      h.SetRoutes(r, parent, root)
     }
   }
 }

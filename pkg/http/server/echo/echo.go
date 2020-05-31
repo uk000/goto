@@ -14,23 +14,24 @@ var (
   Handler util.ServerHandler = util.ServerHandler{Name: "echo", SetRoutes: SetRoutes}
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router) {
+func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   echoRouter := r.PathPrefix("/echo").Subrouter()
-  util.AddRoute(echoRouter, "/headers", echoHeaders)
-  util.AddRoute(echoRouter, "", echo)
+  util.AddRoute(echoRouter, "/headers", EchoHeaders)
+  util.AddRoute(echoRouter, "", Echo)
 }
 
-func echoHeaders(w http.ResponseWriter, r *http.Request) {
+func EchoHeaders(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("Echoing headers back", r)
   util.CopyHeaders(w, r.Header, r.Host)
   w.WriteHeader(http.StatusOK)
   fmt.Fprintf(w, "%s", util.GetRequestHeadersLog(r))
 }
 
-func echo(w http.ResponseWriter, r *http.Request) {
+func Echo(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("Echoing back", r)
   util.CopyHeaders(w, r.Header, r.Host)
   w.WriteHeader(http.StatusOK)
+  fmt.Fprintf(w, "Request URI: %s\n", r.RequestURI)
   fmt.Fprintln(w, util.GetRequestHeadersLog(r))
   body, _ := ioutil.ReadAll(r.Body)
   fmt.Fprintln(w, "Request Body:")

@@ -29,7 +29,7 @@ var (
   Handler       util.ServerHandler = util.ServerHandler{Name: "listeners", SetRoutes: SetRoutes}
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router) {
+func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   lRouter := r.PathPrefix("/listeners").Subrouter()
   util.AddRoute(lRouter, "/add", addListener, "POST")
   util.AddRoute(lRouter, "/{port}/remove", removeListener, "PUT", "POST")
