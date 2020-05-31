@@ -36,7 +36,7 @@ type ProxyTarget struct {
   Enabled        bool
   uriRegExp      *regexp.Regexp
   captureHeaders map[string]string
-  captureQuery map[string]string
+  captureQuery   map[string]string
   invocationSpec *invocation.InvocationSpec
 }
 
@@ -287,48 +287,6 @@ func (pt *Proxy) disableProxyTarget(w http.ResponseWriter, r *http.Request) {
     fmt.Fprintln(w, "Proxy target not found")
   }
 }
-
-// func (pt *Proxy) getTargetsForURI(uri string) map[string]*ProxyTarget {
-//   pt.lock.RLock()
-//   defer pt.lock.RUnlock()
-//   targets := map[string]*ProxyTarget{}
-//   for _, target := range pt.Targets {
-//     if target.Enabled && target.uriRegExp != nil && target.uriRegExp.MatchString(uri) {
-//       targets[target.Name] = target
-//     }
-//   }
-//   return targets
-// }
-
-// func (pt *Proxy) getTargetsForHeaders(r *http.Request) map[string]*ProxyTarget {
-//   pt.lock.RLock()
-//   defer pt.lock.RUnlock()
-//   targets := map[string]*ProxyTarget{}
-//   headerValuesMap := util.GetHeaderValues(r)
-//   for header, valueMap := range pt.TargetsByHeaders {
-//     if headerValues, present := headerValuesMap[header]; present {
-//       if valueTargets, found := valueMap[""]; found {
-//         for name, target := range valueTargets {
-//           if target.Enabled {
-//             targets[name] = target
-//           }
-//         }
-//       }
-//       for headerValue := range headerValues {
-//         if len(headerValue) > 0 {
-//           if valueTargets, found := valueMap[headerValue]; found {
-//             for name, target := range valueTargets {
-//               if target.Enabled {
-//                 targets[name] = target
-//               }
-//             }
-//           }
-//         }
-//       }
-//     }
-//   }
-//   return targets
-// }
 
 func (pt *Proxy) getRequestedTargets(r *http.Request) map[string]*ProxyTarget {
   pt.lock.RLock()
