@@ -126,40 +126,32 @@ func GetQueryParams(r *http.Request) map[string]map[string]int {
 }
 
 func CopyHeaders(w http.ResponseWriter, headers http.Header, host string) {
+  hostCopied := false
   for h, values := range headers {
     if !strings.Contains(h, "content") && !strings.Contains(h, "Content") {
       for _, v := range values {
         w.Header().Add(h, v)
       }
     }
+    if strings.EqualFold(h, "host") {
+      hostCopied = true
+    }
   }
-  if host != "" {
+  if !hostCopied && host != "" {
     w.Header().Add("Host", host)
   }
-}
-
-func GetHeadersLog(h http.Header) string {
-  var s strings.Builder
-  s.Grow(128)
-  for k, v := range h {
-    fmt.Fprintf(&s, "{%s:%v} ", k, v)
-  }
-  return s.String()
 }
 
 func GetResponseHeadersLog(w http.ResponseWriter) string {
   var s strings.Builder
   s.Grow(128)
-  fmt.Fprintf(&s, "Response Headers: %s", GetHeadersLog(w.Header()))
+  fmt.Fprintf(&s, "{\"ResponseHeaders\": %s}", ToJSON(w.Header()))
   return s.String()
 }
 
 func GetRequestHeadersLog(r *http.Request) string {
-  var s strings.Builder
-  s.Grow(128)
-  fmt.Fprintf(&s, "Request Headers: %s", GetHeadersLog(r.Header))
-  fmt.Fprintf(&s, "{Host:%s}", r.Host)
-  return s.String()
+  r.Header["Host"] = []string{r.Host}
+  return ToJSON(r.Header)
 }
 
 func ReadJsonPayload(r *http.Request, t interface{}) error {

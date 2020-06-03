@@ -20,7 +20,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    util.AddLogMessage(util.GetRequestHeadersLog(r), r)
+    util.AddLogMessage("Request Headers: " + util.GetRequestHeadersLog(r), r)
     tracking.Middleware(next).ServeHTTP(w, r)
   })
 }

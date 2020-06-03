@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"goto/pkg/http/server/intercept"
+	"goto/pkg/http/server/response/trigger"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
@@ -75,7 +76,7 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
   } else if portStatus.alwaysReportStatusCount == 0 {
     msg = fmt.Sprintf("Will respond with forced status: %d forever", portStatus.alwaysReportStatus)
   } else {
-    msg = fmt.Sprintf("Will respond with given status")
+    msg = fmt.Sprintf("Will respond normally")
   }
   util.AddLogMessage(msg, r)
   w.WriteHeader(http.StatusAccepted)
@@ -110,12 +111,30 @@ func computeResponseStatus(originalStatus int, r *http.Request) int {
 func getStatus(w http.ResponseWriter, r *http.Request) {
   portStatus := getOrCreatePortStatus(r)
   requestedStatus, _ := util.GetIntParam(r, "status", 200)
-  reportedStatus := computeResponseStatus(requestedStatus, r)
-  statusLock.Lock()
-  portStatus.countsByRequestedStatus[requestedStatus]++
-  statusLock.Unlock()
-  util.AddLogMessage(fmt.Sprintf("Requested status: [%d]", requestedStatus), r)
-  w.WriteHeader(reportedStatus)
+  if !util.IsAdminRequest(r) {
+    statusLock.Lock()
+    portStatus.countsByRequestedStatus[requestedStatus]++
+    statusLock.Unlock()
+    util.AddLogMessage(fmt.Sprintf("Requested status: [%d]", requestedStatus), r)
+    if !IsForcedStatus(r) {
+      reportedStatus := computeResponseStatus(requestedStatus, r)
+      w.WriteHeader(reportedStatus)
+    }
+  } else {
+    msg := ""
+    status := 200
+    if portStatus.alwaysReportStatusCount > 0 {
+      status = portStatus.alwaysReportStatus
+      msg = fmt.Sprintf("Responding with forced status: %d times %d", portStatus.alwaysReportStatus, portStatus.alwaysReportStatusCount)
+    } else if portStatus.alwaysReportStatusCount == 0 {
+      status = portStatus.alwaysReportStatus
+      msg = fmt.Sprintf("Responding with forced status: %d forever", portStatus.alwaysReportStatus)
+    } else {
+      msg = fmt.Sprintf("Responding normally")
+    }
+    w.WriteHeader(status)
+    fmt.Fprintln(w, msg)
+  }
 }
 
 func getStatusCount(w http.ResponseWriter, r *http.Request) {
@@ -170,6 +189,7 @@ func Middleware(next http.Handler) http.Handler {
       crw.StatusCode = computeResponseStatus(crw.StatusCode, r)
       IncrementStatusCount(crw.StatusCode, r)
       util.AddLogMessage(fmt.Sprintf("Reporting status: [%d]", crw.StatusCode), r)
+      trigger.RunTriggers(r, crw, crw.StatusCode)
       crw.Proceed()
     } else {
       next.ServeHTTP(w, r)

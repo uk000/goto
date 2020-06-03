@@ -10,6 +10,7 @@ import (
 
 	"goto/pkg/http/invocation"
 	"goto/pkg/http/server/response/status"
+	"goto/pkg/http/server/response/trigger"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
@@ -37,7 +38,6 @@ type ProxyTarget struct {
   uriRegExp      *regexp.Regexp
   captureHeaders map[string]string
   captureQuery   map[string]string
-  invocationSpec *invocation.InvocationSpec
 }
 
 type Proxy struct {
@@ -81,29 +81,20 @@ func (p *Proxy) init() {
   }
 }
 
-func toInvocationSpec(target *ProxyTarget) (*invocation.InvocationSpec, error) {
-  is := &invocation.InvocationSpec{}
-  is.Name = target.Name
-  is.Method = "GET"
-  is.URL = target.URL
-  is.Replicas = target.Replicas
-  is.SendID = target.SendID
-  return is, invocation.ValidateSpec(is)
-}
-
 func (p *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
-  p.lock.Lock()
-  defer p.lock.Unlock()
-  var target ProxyTarget
+  target := &ProxyTarget{}
   var err error
-  if err = util.ReadJsonPayload(r, &target); err == nil {
-    target.invocationSpec, err = toInvocationSpec(&target)
+  if err = util.ReadJsonPayload(r, target); err == nil {
+    _, err = toInvocationSpec(target, nil)
   }
   if err == nil {
-    p.Targets[target.Name] = &target
-    p.addHeaderMatch(&target)
-    p.addQueryMatch(&target)
-    if err := p.addURIMatch(&target); err == nil {
+    p.deleteProxyTarget(target.Name)
+    p.lock.Lock()
+    defer p.lock.Unlock()
+    p.Targets[target.Name] = target
+    p.addHeaderMatch(target)
+    p.addQueryMatch(target)
+    if err := p.addURIMatch(target); err == nil {
       util.AddLogMessage(fmt.Sprintf("Added proxy target: %+v", target), r)
       w.WriteHeader(http.StatusAccepted)
       fmt.Fprintf(w, "Added proxy target: %s\n", util.ToJSON(target))
@@ -226,56 +217,60 @@ func (p *Proxy) getRequestedProxyTarget(r *http.Request) *ProxyTarget {
   return nil
 }
 
+func (p *Proxy) deleteProxyTarget(targetName string) {
+  p.lock.Lock()
+  defer p.lock.Unlock()
+  delete(p.Targets, targetName)
+  for h, valueMap := range p.TargetsByHeaders {
+    for hv, valueTargets := range valueMap {
+      for name := range valueTargets {
+        if name == targetName {
+          delete(valueTargets, name)
+        }
+      }
+      if len(valueTargets) == 0 {
+        delete(valueMap, hv)
+      }
+    }
+    if len(valueMap) == 0 {
+      delete(p.TargetsByHeaders, h)
+    }
+  }
+  for h, valueMap := range p.TargetsByQuery {
+    for hv, valueTargets := range valueMap {
+      for name := range valueTargets {
+        if name == targetName {
+          delete(valueTargets, name)
+        }
+      }
+      if len(valueTargets) == 0 {
+        delete(valueMap, hv)
+      }
+    }
+    if len(valueMap) == 0 {
+      delete(p.TargetsByQuery, h)
+    }
+  }
+  for uri, uriTargets := range p.TargetsByUris {
+    for name := range uriTargets {
+      if name == targetName {
+        delete(uriTargets, name)
+      }
+    }
+    if len(uriTargets) == 0 {
+      delete(p.TargetsByUris, uri)
+    }
+  }
+}
+
 func (p *Proxy) removeProxyTarget(w http.ResponseWriter, r *http.Request) {
   if t := p.getRequestedProxyTarget(r); t != nil {
-    p.lock.Lock()
-    defer p.lock.Unlock()
-    delete(p.Targets, t.Name)
-    for h, valueMap := range p.TargetsByHeaders {
-      for hv, valueTargets := range valueMap {
-        for name := range valueTargets {
-          if name == t.Name {
-            delete(valueTargets, name)
-          }
-        }
-        if len(valueTargets) == 0 {
-          delete(valueMap, hv)
-        }
-      }
-      if len(valueMap) == 0 {
-        delete(p.TargetsByHeaders, h)
-      }
-    }
-    for h, valueMap := range p.TargetsByQuery {
-      for hv, valueTargets := range valueMap {
-        for name := range valueTargets {
-          if name == t.Name {
-            delete(valueTargets, name)
-          }
-        }
-        if len(valueTargets) == 0 {
-          delete(valueMap, hv)
-        }
-      }
-      if len(valueMap) == 0 {
-        delete(p.TargetsByQuery, h)
-      }
-    }
-    for uri, uriTargets := range p.TargetsByUris {
-      for name := range uriTargets {
-        if name == t.Name {
-          delete(uriTargets, name)
-        }
-      }
-      if len(uriTargets) == 0 {
-        delete(p.TargetsByUris, uri)
-      }
-    }
+    p.deleteProxyTarget(t.Name)
     util.AddLogMessage(fmt.Sprintf("Removed proxy target: %+v", t), r)
     w.WriteHeader(http.StatusAccepted)
     fmt.Fprintf(w, "Removed proxy target: %s\n", util.ToJSON(t))
   } else {
-    w.WriteHeader(http.StatusNotFound)
+    w.WriteHeader(http.StatusBadRequest)
     fmt.Fprintln(w, "No targets")
   }
 }
@@ -289,7 +284,7 @@ func (p *Proxy) enableProxyTarget(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusAccepted)
     fmt.Fprintf(w, "Enabled proxy target: %s\n", util.ToJSON(t))
   } else {
-    w.WriteHeader(http.StatusNotFound)
+    w.WriteHeader(http.StatusBadRequest)
     fmt.Fprintln(w, "Proxy target not found")
   }
 }
@@ -303,7 +298,7 @@ func (p *Proxy) disableProxyTarget(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusAccepted)
     fmt.Fprintf(w, "Disabled proxy target: %s\n", util.ToJSON(t))
   } else {
-    w.WriteHeader(http.StatusNotFound)
+    w.WriteHeader(http.StatusBadRequest)
     fmt.Fprintln(w, "Proxy target not found")
   }
 }
@@ -311,7 +306,7 @@ func (p *Proxy) disableProxyTarget(w http.ResponseWriter, r *http.Request) {
 func (p *Proxy) getRequestedTargets(r *http.Request) map[string]*ProxyTarget {
   p.lock.RLock()
   defer p.lock.RUnlock()
-  var targets map[string]*ProxyTarget = map[string]*ProxyTarget{}
+  targets := map[string]*ProxyTarget{}
   if tnamesParam, present := util.GetStringParam(r, "targets"); present {
     tnames := strings.Split(tnamesParam, ",")
     for _, tname := range tnames {
@@ -430,11 +425,20 @@ func prepareTargetQuery(url string, target *ProxyTarget, r *http.Request) string
   return url
 }
 
-func updateInvocationSpec(target *ProxyTarget, r *http.Request) {
-  target.invocationSpec.URL = prepareTargetURL(target, r)
-  target.invocationSpec.Headers = prepareTargetHeaders(target, r)
-  target.invocationSpec.Method = r.Method
-  target.invocationSpec.BodyReader = r.Body
+func toInvocationSpec(target *ProxyTarget, r *http.Request) (*invocation.InvocationSpec, error) {
+  is := &invocation.InvocationSpec{}
+  is.Name = target.Name
+  is.Method = "GET"
+  is.URL = target.URL
+  is.Replicas = target.Replicas
+  is.SendID = target.SendID
+  if r != nil {
+    is.URL = prepareTargetURL(target, r)
+    is.Headers = prepareTargetHeaders(target, r)
+    is.Method = r.Method
+    is.BodyReader = r.Body
+  }
+  return is, invocation.ValidateSpec(is)
 }
 
 func (p *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWriter, r *http.Request) {
@@ -443,18 +447,19 @@ func (p *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWr
   if len(targets) > 0 {
     invocationSpecs := []*invocation.InvocationSpec{}
     for _, target := range targets {
-      updateInvocationSpec(target, r)
-      invocationSpecs = append(invocationSpecs, target.invocationSpec)
+      is, _ := toInvocationSpec(target, r)
+      invocationSpecs = append(invocationSpecs, is)
     }
-    i := invocation.InvocationChannels{}
-    i.ID = util.GetListenerPortNum(r)
-    responses := invocation.InvokeTargets(invocationSpecs, &i, true)
+    ic := &invocation.InvocationChannels{}
+    ic.ID = util.GetListenerPortNum(r)
+    responses := invocation.InvokeTargets(invocationSpecs, ic, true)
     for _, response := range responses {
       util.CopyHeaders(w, response.Headers, "")
       if response.StatusCode == 0 {
         response.StatusCode = 503
       }
       status.IncrementStatusCount(response.StatusCode, r)
+      trigger.RunTriggers(r, w, response.StatusCode)
     }
     if len(responses) == 1 {
       w.WriteHeader(responses[0].StatusCode)
@@ -467,14 +472,13 @@ func (p *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWr
 }
 
 func getPortProxy(r *http.Request) *Proxy {
-  proxyLock.Lock()
+  proxyLock.RLock()
   listenerPort := util.GetListenerPort(r)
   proxy := proxyByPort[listenerPort]
-  proxyLock.Unlock()
+  proxyLock.RUnlock()
   if proxy == nil {
     proxyLock.Lock()
     defer proxyLock.Unlock()
-    listenerPort := util.GetListenerPort(r)
     proxy = &Proxy{}
     proxy.init()
     proxyByPort[listenerPort] = proxy
@@ -503,7 +507,11 @@ func disableProxyTarget(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearProxyTargets(w http.ResponseWriter, r *http.Request) {
-  getPortProxy(r).init()
+  listenerPort := util.GetListenerPort(r)
+  proxyLock.Lock()
+  defer proxyLock.Unlock()
+  proxyByPort[listenerPort] = &Proxy{}
+  proxyByPort[listenerPort].init()
   w.WriteHeader(http.StatusAccepted)
   util.AddLogMessage("Proxy targets cleared", r)
   fmt.Fprintln(w, "Proxy targets cleared")

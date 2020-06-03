@@ -29,7 +29,7 @@ type PortClient struct {
   invocationChannels map[int]*invocation.InvocationChannels
   invocationCounter  int
   targetsLock        sync.RWMutex
-  reportResponse     bool
+  blockForResponse     bool
   trackingHeaders    map[string]int
   targetResults      *TargetResults
   resultsLock        sync.RWMutex
@@ -53,8 +53,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(targetsRouter, "", getTargets, "GET")
   util.AddRoute(targetsRouter, "/clear", clearTargets, "POST")
 
-  util.AddRoute(r, "/reporting/set/{flag}", setOrGetReportingFlag, "POST", "PUT")
-  util.AddRoute(r, "/reporting", setOrGetReportingFlag, "GET")
+  util.AddRoute(r, "/blocking/set/{flag}", setOrGetBlocking, "POST", "PUT")
+  util.AddRoute(r, "/blocking", setOrGetBlocking, "GET")
   util.AddRoute(r, "/track/headers/add/{headers}", addTrackingHeaders, "POST", "PUT")
   util.AddRoute(r, "/track/headers/remove/{header}", removeTrackingHeader, "POST", "PUT")
   util.AddRoute(r, "/track/headers/list", getTrackingHeaders, "GET")
@@ -70,7 +70,7 @@ func (pc *PortClient) init() {
   pc.targets = map[string]*invocation.InvocationSpec{}
   pc.invocationChannels = map[int]*invocation.InvocationChannels{}
   pc.invocationCounter = 0
-  pc.reportResponse = false
+  pc.blockForResponse = false
   pc.trackingHeaders = map[string]int{}
   pc.targetResults = &TargetResults{}
 }
@@ -129,7 +129,7 @@ func (pc *PortClient) getTargetsToInvoke(names string) []*invocation.InvocationS
 func (pc *PortClient) setReportResponse(flag bool) {
   pc.resultsLock.Lock()
   defer pc.resultsLock.Unlock()
-  pc.reportResponse = flag
+  pc.blockForResponse = flag
 }
 
 func (pc *PortClient) addTrackingHeaders(headers string) {
@@ -322,17 +322,25 @@ func getTargets(w http.ResponseWriter, r *http.Request) {
   util.WriteJsonPayload(w, getPortClient(r).targets)
 }
 
-func setOrGetReportingFlag(w http.ResponseWriter, r *http.Request) {
+func setOrGetBlocking(w http.ResponseWriter, r *http.Request) {
   pc := getPortClient(r)
   if flag, present := util.GetStringParam(r, "flag"); present {
     pc.setReportResponse(
       strings.EqualFold(flag, "y") || strings.EqualFold(flag, "yes") ||
         strings.EqualFold(flag, "true") || strings.EqualFold(flag, "1"))
     w.WriteHeader(http.StatusAccepted)
-    fmt.Fprintf(w, "Reporting set to: %t\n", pc.reportResponse)
+    if pc.blockForResponse {
+      fmt.Fprintln(w, "Invocation will block for results")
+    } else {
+      fmt.Fprintln(w, "Invocation will not block for results")
+    }
   } else {
     w.WriteHeader(http.StatusOK)
-    fmt.Fprintf(w, "Reporting: %t\n", pc.reportResponse)
+    if pc.blockForResponse {
+      fmt.Fprintln(w, "Invocation will block for results")
+    } else {
+      fmt.Fprintln(w, "Invocation will not block for results")
+    }
   }
 }
 
@@ -395,7 +403,7 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
 
 func invokeTargetsAndStoreResults(pc *PortClient, targetsToInvoke []*invocation.InvocationSpec,
   invocationChannels *invocation.InvocationChannels) []*invocation.InvocationResult {
-  results := invocation.InvokeTargets(targetsToInvoke, invocationChannels, pc.reportResponse)
+  results := invocation.InvokeTargets(targetsToInvoke, invocationChannels, pc.blockForResponse)
   pc.deregisterInvocation(invocationChannels)
   for _, result := range results {
     pc.addTargetResult(result)
@@ -409,7 +417,7 @@ func invokeTargets(w http.ResponseWriter, r *http.Request) {
   if len(targetsToInvoke) > 0 {
     invocationChannels := pc.registerInvocation()
     var results []*invocation.InvocationResult
-    if pc.reportResponse {
+    if pc.blockForResponse {
       results = invokeTargetsAndStoreResults(pc, targetsToInvoke, invocationChannels)
       w.WriteHeader(http.StatusAlreadyReported)
       fmt.Fprintln(w, util.ToJSON(results))

@@ -24,16 +24,18 @@ func EchoHeaders(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("Echoing headers back", r)
   util.CopyHeaders(w, r.Header, r.Host)
   w.WriteHeader(http.StatusOK)
-  fmt.Fprintf(w, "%s", util.GetRequestHeadersLog(r))
+  fmt.Fprintf(w, "{\"RequestHeaders\": %s}", util.GetRequestHeadersLog(r))
 }
 
 func Echo(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("Echoing back", r)
   util.CopyHeaders(w, r.Header, r.Host)
   w.WriteHeader(http.StatusOK)
-  fmt.Fprintf(w, "Request URI: %s\n", r.RequestURI)
-  fmt.Fprintln(w, util.GetRequestHeadersLog(r))
+  response := map[string]interface{}{}
+  response["RequestURI"] = r.RequestURI
+  response["RequestHeaders"] = r.Header
+  response["RequestQuery"] = r.URL.Query()
   body, _ := ioutil.ReadAll(r.Body)
-  fmt.Fprintln(w, "Request Body:")
-  fmt.Fprintln(w, string(body))
+  response["RequestBody"] = string(body)
+  fmt.Fprintln(w, util.ToJSON(response))
 }
