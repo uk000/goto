@@ -26,7 +26,7 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 
 ### Scenario: [Use HTTP client to send requests and track results](scenarios.md#scenario-use-http-client-to-send-requests-and-track-results)
 
-### Scenario: [Bit more complex client testing](scenarios.md#bit_more_complex_client_testing)
+### Scenario: [Bit more complex client testing](scenarios.md#scenario-bit-more-complex-client-testing)
 
 ### Scenario: [Test a client's behavior upon service failure](scenarios.md#scenario-test-a-clients-behavior-upon-service-failure)
 
