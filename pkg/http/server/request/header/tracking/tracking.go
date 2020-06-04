@@ -14,9 +14,9 @@ import (
 )
 
 type HeaderData struct {
-  RequestCountsByHeaderValue                   map[string]int
-  RequestCountsByHeaderValueAndRequestedStatus map[string]map[string]int
-  RequestCountsByHeaderValueAndResponseStatus  map[string]map[string]int
+  RequestCountsByHeaderValue                   map[string]int            `json:requestCountsByHeaderValue`
+  RequestCountsByHeaderValueAndRequestedStatus map[string]map[string]int `json:requestCountsByHeaderValueAndRequestedStatus`
+  RequestCountsByHeaderValueAndResponseStatus  map[string]map[string]int `json:requestCountsByHeaderValueAndResponseStatus`
   lock                                         sync.RWMutex
 }
 
@@ -269,7 +269,7 @@ func getHeaderCount(w http.ResponseWriter, r *http.Request) {
 }
 
 func getHeaders(w http.ResponseWriter, r *http.Request) {
-  fmt.Fprintln(w, util.ToJSON(requestTracking.getHeaders(r)));
+  fmt.Fprintln(w, util.ToJSON(requestTracking.getHeaders(r)))
 }
 
 func trackRequestHeaders(r *http.Request) {

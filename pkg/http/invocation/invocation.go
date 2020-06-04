@@ -16,17 +16,17 @@ import (
 )
 
 type InvocationSpec struct {
-  Name         string
-  Method       string
-  URL          string
-  Headers      [][]string
-  Body         string
-  BodyReader   io.Reader
-  Replicas     int
-  RequestCount int
-  Delay        string
-  KeepOpen     string
-  SendID       bool
+  Name         string     `json:"name"`
+  Method       string     `json:"method"`
+  URL          string     `json:"url"`
+  Headers      [][]string `json:"headers"`
+  Body         string     `json:"body"`
+  BodyReader   io.Reader  `json:"bodyReader"`
+  Replicas     int        `json:"replicas"`
+  RequestCount int        `json:"requestCount"`
+  Delay        string     `json:"delay"`
+  KeepOpen     string     `json:"keepOpen"`
+  SendID       bool       `json:"sendID"`
   delayD       time.Duration
   keepOpenD    time.Duration
 }

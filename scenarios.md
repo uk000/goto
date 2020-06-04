@@ -65,73 +65,374 @@ A very simple use case is to send HTTP traffic to one or more servers for a peri
     Targets invoked
     ```
 5. Now we get some coffee, sit back and relax. Once the job finishes, we ask `goto` for results. Assume that the servers responded with headers x (values x1 and x2) and y (values y1), and all responses were successful with HTTP 200 status, the results would look like this:
-    ```
-    $ curl -s goto:8080/client/results | jq
-    {
-      "CountsByStatus": {
-        "200 OK": 400
-      },
-      "CountsByStatusCodes": {
-        "200": 400
-      },
-      "CountsByHeaders": {
-        "x": 400,
-        "y": 200
-      },
-      "CountsByHeaderValues": {
-        "x": {
-          "x1": 200,
-          "x2": 200
-        },
-        "y": {
-          "y1": 200
-        }
-      },
-      "CountsByTargetStatus": {
-        "target1": {
-          "200 OK": 200
-        },
-        "target2": {
-          "200 OK": 200
-        }
-      },
-      "CountsByTargetStatusCode": {
-        "target1": {
-          "200": 200
-        },
-        "target2": {
-          "200": 200
-        }
-      },
-      "CountsByTargetHeaders": {
-        "target1": {
-          "x": 200,
-          "y": 200
-        },
-        "target2": {
-          "x": 200
-        }
-      },
-      "CountsByTargetHeaderValues": {
-        "target1": {
-          "x": {
-            "x1": 200
+
+    <details>
+    <summary>Results</summary>
+    <p>
+
+      ```json
+        
+        $ curl -s goto:8080/client/results | jq
+        {
+          "CountsByStatus": {
+            "200 OK": 400
           },
-          "y": {
-            "y1": 200
-          }
-        },
-        "target2": {
-          "x": {
-            "x2": 200
+          "CountsByStatusCodes": {
+            "200": 400
+          },
+          "CountsByHeaders": {
+            "x": 400,
+            "y": 200
+          },
+          "CountsByHeaderValues": {
+            "x": {
+              "x1": 200,
+              "x2": 200
+            },
+            "y": {
+              "y1": 200
+            }
+          },
+          "CountsByTargetStatus": {
+            "target1": {
+              "200 OK": 200
+            },
+            "target2": {
+              "200 OK": 200
+            }
+          },
+          "CountsByTargetStatusCode": {
+            "target1": {
+              "200": 200
+            },
+            "target2": {
+              "200": 200
+            }
+          },
+          "CountsByTargetHeaders": {
+            "target1": {
+              "x": 200,
+              "y": 200
+            },
+            "target2": {
+              "x": 200
+            }
+          },
+          "CountsByTargetHeaderValues": {
+            "target1": {
+              "x": {
+                "x1": 200
+              },
+              "y": {
+                "y1": 200
+              }
+            },
+            "target2": {
+              "x": {
+                "x2": 200
+              }
+            }
           }
         }
-      }
-    }
-    ```
+
+      ```
+      
+    </p>
+    </details>
+
+<br/>
 
 The scenario showed how `goto` can be used for simple traffic tracing and verifying server health/availability. It's not meant to perform load testing (there are good tools available for that, like fortio), so it doesn't track latencies etc. But this
 
+
+## Scenario: Bit more complex client testing
+
+Perhaps the previous client scenario was too simple. Let's try to setup more client targets and also, this time have the target servers respond with HTTP errors for some requests. 
+
+1. Let's start with 2 targets, ask client to track headers, and also not block upon invocation
+    ```
+    $ curl -X POST http://goto:8080/client/targets/clear
+    Targets cleared
+    
+    $ curl -s goto:8080/client/targets/add --data '
+      { 
+      "name": "target1",
+      "method":	"POST",
+      "url": "http://Server8081/some/api",
+      "headers":[["x", "x1"],["y", "y1"]],
+      "body": "{\"test\":\"this\"}",
+      "replicas": 2, "requestCount": 200, 
+      "delay": "200ms", "sendID": true
+      }'
+   Added target: {"name":"target1","method":"POST","url":"http://Server8081/some/api","headers":[["x","x1"],["y","y1"]],"body":"{\"test\":\"this\"}","bodyReader":null,"replicas":2,"requestCount":200,"delay":"200ms","keepOpen":"","sendID":true}
+
+    $ curl -s goto:8080/client/targets/add --data '
+      { 
+      "name": "target2",
+      "method":	"PUT",
+      "url": "http://Server8082/another/api",
+      "headers":[["x", "x2"], ["y", "y2"]],
+      "body": "{\"some\":\"thing\"}",
+      "replicas": 1, "requestCount": 200, 
+      "delay": "200ms", "sendID": true
+      }'
+    Added target: {"name":"target2","method":"PUT","url":"http://Server8082/another/api","headers":[["x","x2"],["y","y2"]],"body":"{\"some\":\"thing\"}","bodyReader":null,"replicas":1,"requestCount":200,"delay":"200ms","keepOpen":"","sendID":true}
+
+    $ curl -X PUT goto:8080/client/track/headers/add/x,y,z,foo,Goto-Host,Via-Goto
+    Header x,y,z,foo,Goto-Host,Via-Goto will be tracked
+
+    $ curl -X PUT goto:8080/client/blocking/set/N
+    Invocation will not block for results
+   ```
+2. Note that this time the targets are other `goto` servers (`goto:8081` and `goto:8082`). The advantage of using goto servers as targets for this experiment is that we can ask those server instances to respond with HTTP error codes some of the times. Let's do just that. You can learn more about this specific `goto` server feature in other scenarios as well as from API docs.
+    ```
+    $ curl -X PUT Server8081/response/status/set/502:20
+    Will respond with forced status: 502 times 20
+    
+    $ curl -X PUT Server8082/response/status/set/503:20
+    Will respond with forced status: 503 times 20
+    ```
+3. Let's invoke the two targets
+    ```
+    $ curl -X POST goto:8080/client/targets/invoke/all
+    Targets invoked
+    ```
+4. While these two targets are running, we add another target. Why? Just because we can.
+    ```
+    $ curl -s goto:8080/client/targets/add --data '
+      { 
+      "name": "target3",
+      "method":	"OPTIONS",
+      "url": "http://Server8083/foo",
+      "headers":[["foo", "bar1"], ["x", "x1"], ["y", "y1"]],
+      "body": "{\"some\":\"thing\"}",
+      "replicas": 3, "requestCount": 100, 
+      "delay": "20ms", "sendID": true
+      }'
+    Added target: {"name":"target3","method":"OPTIONS","url":"http://Server8083/foo","headers":[["foo","bar1"],["x","x1"],["y","y1"]],"body":"{\"some\":\"thing\"}","bodyReader":null,"replicas":3,"requestCount":100,"delay":"20ms","keepOpen":"","sendID":true}
+    ```
+5. Now we invoke this third target separately. This will start on its own while the previous two were also running.
+    ```
+    $ curl -X POST goto:8080/client/targets/target3/invoke
+    Targets invoked
+    ```
+6. Now we have 3 targets running. Let's stop the first two in their tracks. Why? You know, just because...
+    ```
+    $ curl -X POST goto:8080/client/targets/target1,target2/stop
+    Targets stopped
+    ```
+7. Let's add fourth target, which goes to the same URL as the third one (showing that you can have same destination as multiple targets)
+    ```
+    $ curl -s goto:8080/client/targets/add --data '
+      { 
+      "name": "target4",
+      "method":	"GET",
+      "url": "http://Server8083/foo",
+      "headers":[["foo", "bar2"], ["y", "x2"]],
+      "body": "{\"some\":\"thing\"}",
+      "replicas": 3, "requestCount": 100,
+      "delay": "20ms", "sendID": true
+      }'
+    Added target: {"name":"target4","method":"GET","url":"http://Server8083/foo","headers":[["foo","bar2"],["y","x2"]],"body":"{\"some\":\"thing\"}","bodyReader":null,"replicas":3,"requestCount":100,"delay":"20ms","keepOpen":"","sendID":true}
+    ```
+8. Let's ask the three `goto` servers to send some more bad responses
+    ```
+    $ curl -X PUT Server8081/response/status/set/502:20
+    Will respond with forced status: 502 times 20
+
+    $ curl -X PUT Server8082/response/status/set/503:20
+    Will respond with forced status: 503 times 20
+
+    $ curl -X PUT Server8083/response/status/set/403:20
+    Will respond with forced status: 403 times 20
+    ```
+
+9. We invoke two targets again
+    ```
+    $ curl -X POST goto:8080/client/targets/target3,target4/invoke
+    Targets invoked
+    ```
+
+10. Once these invocations finish, we gather the results
+      <details>
+      <summary>Results</summary>
+      <p>
+
+      ```json
+
+        $ curl -s goto:8080/client/results | jq
+          {
+            "countsByStatus": {
+              "200 OK": 880,
+              "403 Forbidden": 40,
+              "502 Bad Gateway": 20,
+              "503 Service Unavailable": 20
+            },
+            "countsByStatusCodes": {
+              "200": 880,
+              "403": 40,
+              "502": 20,
+              "503": 20
+            },
+            "countsByHeaders": {
+              "foo": 900,
+              "goto-host": 960,
+              "via-goto": 960,
+              "x": 660,
+              "y": 960
+            },
+            "countsByHeaderValues": {
+              "foo": {
+                "bar1": 600,
+                "bar2": 300
+              },
+              "goto-host": {
+                "1.1.1.1": 40
+                "2.2.2.2": 20
+                "3.3.3.3": 960
+              },
+              "via-goto": {
+                "Server8081": 40,
+                "Server8082": 20,
+                "Server8083": 900
+              },
+              "x": {
+                "x1": 640,
+                "x2": 20
+              },
+              "y": {
+                "x2": 300,
+                "y1": 640,
+                "y2": 20
+              }
+            },
+            "countsByTargetStatus": {
+              "target1": {
+                "200 OK": 20,
+                "502 Bad Gateway": 20
+              },
+              "target2": {
+                "503 Service Unavailable": 20
+              },
+              "target3": {
+                "200 OK": 570,
+                "403 Forbidden": 30
+              },
+              "target4": {
+                "200 OK": 290,
+                "403 Forbidden": 10
+              }
+            },
+            "countsByTargetStatusCode": {
+              "target1": {
+                "200": 20,
+                "502": 20
+              },
+              "target2": {
+                "503": 20
+              },
+              "target3": {
+                "200": 570,
+                "403": 30
+              },
+              "target4": {
+                "200": 290,
+                "403": 10
+              }
+            },
+            "countsByTargetHeaders": {
+              "target1": {
+                "goto-host": 40,
+                "via-goto": 40,
+                "x": 40,
+                "y": 40
+              },
+              "target2": {
+                "goto-host": 20,
+                "via-goto": 20,
+                "x": 20,
+                "y": 20
+              },
+              "target3": {
+                "foo": 600,
+                "goto-host": 600,
+                "via-goto": 600,
+                "x": 600,
+                "y": 600
+              },
+              "target4": {
+                "foo": 300,
+                "goto-host": 300,
+                "via-goto": 300,
+                "y": 300
+              }
+            },
+            "countsByTargetHeaderValues": {
+              "target1": {
+                "goto-host": {
+                  "1.1.1.1": 40
+                },
+                "via-goto": {
+                  "Server8081": 40
+                },
+                "x": {
+                  "x1": 40
+                },
+                "y": {
+                  "y1": 40
+                }
+              },
+              "target2": {
+                "goto-host": {
+                  "2.2.2.2": 20
+                },
+                "via-goto": {
+                  "Server8082": 20
+                },
+                "x": {
+                  "x2": 20
+                },
+                "y": {
+                  "y2": 20
+                }
+              },
+              "target3": {
+                "foo": {
+                  "bar1": 600
+                },
+                "goto-host": {
+                  "3.3.3.3": 600
+                },
+                "via-goto": {
+                  "Server8083": 600
+                },
+                "x": {
+                  "x1": 600
+                },
+                "y": {
+                  "y1": 600
+                }
+              },
+              "target4": {
+                "foo": {
+                  "bar2": 300
+                },
+                "goto-host": {
+                  "3.3.3.3": 300
+                },
+                "via-goto": {
+                  "Server8083": 300
+                },
+                "y": {
+                  "x2": 300
+                }
+              }
+            }
+          }
+      ```
+        
+      </p>
+      </details>
 
 ## Scenario: Test a client's behavior upon service failure
 
@@ -252,52 +553,62 @@ Once the traffic we want to observe has flown, we ask the `goto` instances to gi
 
 Header tracking counts results payload from a `goto` instance will look like this:
 
-```
-{
-  "foo": {
-    "RequestCountsByHeaderValue": {
-      "1": 8
-    },
-    "RequestCountsByHeaderValueAndRequestedStatus": {},
-    "RequestCountsByHeaderValueAndResponseStatus": {
-      "1": {
-        "200": 8
+
+  <details>
+  <summary>Results</summary>
+  <p>
+
+  ```json
+
+      {
+        "foo": {
+          "RequestCountsByHeaderValue": {
+            "1": 8
+          },
+          "RequestCountsByHeaderValueAndRequestedStatus": {},
+          "RequestCountsByHeaderValueAndResponseStatus": {
+            "1": {
+              "200": 8
+            }
+          }
+        },
+        "x": {
+          "RequestCountsByHeaderValue": {
+            "x1": 2,
+            "x2": 1
+          },
+          "RequestCountsByHeaderValueAndRequestedStatus": {},
+          "RequestCountsByHeaderValueAndResponseStatus": {
+            "x1": {
+              "200": 2
+            },
+            "x2": {
+              "200": 1
+            }
+          }
+        },
+        "y": {
+          "RequestCountsByHeaderValue": {},
+          "RequestCountsByHeaderValueAndRequestedStatus": {},
+          "RequestCountsByHeaderValueAndResponseStatus": {}
+        },
+        "z": {
+          "RequestCountsByHeaderValue": {
+            "z4": 12
+          },
+          "RequestCountsByHeaderValueAndRequestedStatus": {},
+          "RequestCountsByHeaderValueAndResponseStatus": {
+            "z4": {
+              "200": 12
+            }
+          }
+        }
       }
-    }
-  },
-  "x": {
-    "RequestCountsByHeaderValue": {
-      "x1": 2,
-      "x2": 1
-    },
-    "RequestCountsByHeaderValueAndRequestedStatus": {},
-    "RequestCountsByHeaderValueAndResponseStatus": {
-      "x1": {
-        "200": 2
-      },
-      "x2": {
-        "200": 1
-      }
-    }
-  },
-  "y": {
-    "RequestCountsByHeaderValue": {},
-    "RequestCountsByHeaderValueAndRequestedStatus": {},
-    "RequestCountsByHeaderValueAndResponseStatus": {}
-  },
-  "z": {
-    "RequestCountsByHeaderValue": {
-      "z4": 12
-    },
-    "RequestCountsByHeaderValueAndRequestedStatus": {},
-    "RequestCountsByHeaderValueAndResponseStatus": {
-      "z4": {
-        "200": 12
-      }
-    }
-  }
-}
-```
+
+  ```
+  
+  </p>
+  </details>
 
 <br/>
 
@@ -311,27 +622,27 @@ Say you want to monitor/track how often a client (or proxy/sidecar) performs a r
 
    ```
    #enable timeout tracking for all requests
-   curl -X POST localhost:8080/request/timeout/track/all
+   curl -X POST goto:8080/request/timeout/track/all
 
    ```
 
 2. Set a large delay on all responses on the server. Make sure the delay duration is larger than the timeout config on the client application or sidecar that you intend to test.
 
    ```
-   curl -X PUT localhost:8080/response/delay/set/10s
+   curl -X PUT goto:8080/response/delay/set/10s
    ```
 
 3. Run the client application with its configured timeout. The example below shows curl, but this would be a real application being investigated
 
     ```
-    curl -v -m 5 localhost:8080/someuri
-    curl -v -m 5 localhost:8080/someuri
+    curl -v -m 5 goto:8080/someuri
+    curl -v -m 5 goto:8080/someuri
     ```
 
 4. Check the timeout stats tracked by the server
 
     ```
-    curl localhost:8080/request/timeout/status
+    curl goto:8080/request/timeout/status
     ```
 
     The timeout stats would look like this:

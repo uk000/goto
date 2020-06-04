@@ -24,17 +24,17 @@ type ProxyTargetMatch struct {
 }
 
 type ProxyTarget struct {
-  Name           string
-  URL            string
-  SendID         bool
-  ReplaceURI     string
-  AddHeaders     [][]string
-  RemoveHeaders  []string
-  AddQuery       [][]string
-  RemoveQuery    []string
-  Match          ProxyTargetMatch
-  Replicas       int
-  Enabled        bool
+  Name           string           `json:name`
+  URL            string           `json:url`
+  SendID         bool             `json:sendID`
+  ReplaceURI     string           `json:replaceURI`
+  AddHeaders     [][]string       `json:addHeaders`
+  RemoveHeaders  []string         `json:removeHeaders`
+  AddQuery       [][]string       `json:addQuery`
+  RemoveQuery    []string         `json:removeQuery`
+  Match          ProxyTargetMatch `json:match`
+  Replicas       int              `json:replicas`
+  Enabled        bool             `json:enabled`
   uriRegExp      *regexp.Regexp
   captureHeaders map[string]string
   captureQuery   map[string]string
@@ -587,7 +587,7 @@ func (pt *Proxy) getMatchingTargetsForRequest(r *http.Request) map[string]*Proxy
   }
   for _, target := range pt.Targets {
     if target.Enabled && target.uriRegExp != nil && target.uriRegExp.MatchString(r.RequestURI) {
-      
+
     }
     if target.Enabled {
       if target.uriRegExp != nil && target.uriRegExp.MatchString(r.RequestURI) {

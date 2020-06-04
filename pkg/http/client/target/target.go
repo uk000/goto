@@ -14,14 +14,14 @@ import (
 )
 
 type TargetResults struct {
-  CountsByStatus             map[string]int
-  CountsByStatusCodes        map[int]int
-  CountsByHeaders            map[string]int
-  CountsByHeaderValues       map[string]map[string]int
-  CountsByTargetStatus       map[string]map[string]int
-  CountsByTargetStatusCode   map[string]map[int]int
-  CountsByTargetHeaders      map[string]map[string]int
-  CountsByTargetHeaderValues map[string]map[string]map[string]int
+  CountsByStatus             map[string]int                       `json:"countsByStatus"`
+  CountsByStatusCodes        map[int]int                          `json:"countsByStatusCodes"`
+  CountsByHeaders            map[string]int                       `json:"countsByHeaders"`
+  CountsByHeaderValues       map[string]map[string]int            `json:"countsByHeaderValues"`
+  CountsByTargetStatus       map[string]map[string]int            `json:"countsByTargetStatus"`
+  CountsByTargetStatusCode   map[string]map[int]int               `json:"countsByTargetStatusCode"`
+  CountsByTargetHeaders      map[string]map[string]int            `json:"countsByTargetHeaders"`
+  CountsByTargetHeaderValues map[string]map[string]map[string]int `json:"countsByTargetHeaderValues"`
 }
 
 type PortClient struct {
@@ -29,7 +29,7 @@ type PortClient struct {
   invocationChannels map[int]*invocation.InvocationChannels
   invocationCounter  int
   targetsLock        sync.RWMutex
-  blockForResponse     bool
+  blockForResponse   bool
   trackingHeaders    map[string]int
   targetResults      *TargetResults
   resultsLock        sync.RWMutex

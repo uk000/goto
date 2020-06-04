@@ -615,107 +615,169 @@ curl -s localhost:8080/client/results
 #### Sample Client Invocation Result (including error reporting example)
 ```
 {
-  "CountsByStatus": {
-    "200 OK": 3,
-    "418 I'm a teapot": 2,
-    "Put \"http://localhost:8082/debug?x-request-id=t3[1]\": dial tcp [::1]:8082: connect: connection refused": 1,
+  "countsByStatus": {
+    "200 OK": 880,
+    "403 Forbidden": 40,
+    "502 Bad Gateway": 20,
+    "503 Service Unavailable": 20
   },
-  "CountsByStatusCodes": {
-    "0": 1,
-    "200": 3,
-    "418": 2
+  "countsByStatusCodes": {
+    "200": 880,
+    "403": 40,
+    "502": 20,
+    "503": 20
   },
-  "CountsByHeaders": {
-    "server": 4,
-    "server-host": 4,
-    "x": 2,
-    "y": 2
+  "countsByHeaders": {
+    "foo": 900,
+    "goto-host": 960,
+    "via-goto": 960,
+    "x": 660,
+    "y": 960
   },
-  "CountsByHeaderValues": {
-    "server": {
-      "8080": 2,
-      "8081": 2,
+  "countsByHeaderValues": {
+    "foo": {
+      "bar1": 600,
+      "bar2": 300
     },
-    "server-host": {
-      "ServerA": 4,
-      "ServerB": 1
+    "goto-host": {
+      "1.1.1.1": 40
+      "2.2.2.2": 20
+      "3.3.3.3": 960
+    },
+    "via-goto": {
+      "Server8081": 40,
+      "Server8082": 20,
+      "Server8083": 900
     },
     "x": {
-      "x2": 2
+      "x1": 640,
+      "x2": 20
     },
     "y": {
-      "y2": 2
+      "x2": 300,
+      "y1": 640,
+      "y2": 20
     }
   },
-  "CountsByTargetStatus": {
-    "t1": {
-      "418 I'm a teapot": 2
+  "countsByTargetStatus": {
+    "target1": {
+      "200 OK": 20,
+      "502 Bad Gateway": 20
     },
-    "t2": {
-      "200 OK": 2
+    "target2": {
+      "503 Service Unavailable": 20
     },
-    "t3": {
-      "200 OK": 1,
-      "Put \"http://localhost:8082/debug?x-request-id=t3[1]\": dial tcp [::1]:8082: connect: connection refused": 1,
+    "target3": {
+      "200 OK": 570,
+      "403 Forbidden": 30
+    },
+    "target4": {
+      "200 OK": 290,
+      "403 Forbidden": 10
     }
   },
-  "CountsByTargetStatusCode": {
-    "t1": {
-      "418": 2
+  "countsByTargetStatusCode": {
+    "target1": {
+      "200": 20,
+      "502": 20
     },
-    "t2": {
-      "200": 2
+    "target2": {
+      "503": 20
     },
-    "t3": {
-      "0": 1,
-      "200": 1
+    "target3": {
+      "200": 570,
+      "403": 30
+    },
+    "target4": {
+      "200": 290,
+      "403": 10
     }
   },
-  "CountsByTargetHeaders": {
-    "t1": {
-      "server": 2,
-      "server-host": 2
+  "countsByTargetHeaders": {
+    "target1": {
+      "goto-host": 40,
+      "via-goto": 40,
+      "x": 40,
+      "y": 40
     },
-    "t2": {
-      "server": 2,
-      "server-host": 2,
-      "x": 2,
-      "y": 2
+    "target2": {
+      "goto-host": 20,
+      "via-goto": 20,
+      "x": 20,
+      "y": 20
     },
-    "t3": {
-      "server": 1,
-      "server-host": 1
+    "target3": {
+      "foo": 600,
+      "goto-host": 600,
+      "via-goto": 600,
+      "x": 600,
+      "y": 600
+    },
+    "target4": {
+      "foo": 300,
+      "goto-host": 300,
+      "via-goto": 300,
+      "y": 300
     }
   },
-  "CountsByTargetHeaderValues": {
-    "t1": {
-      "server": {
-        "8080": 2
+  "countsByTargetHeaderValues": {
+    "target1": {
+      "goto-host": {
+        "1.1.1.1": 40
       },
-      "server-host": {
-        "ServerA": 2
-      }
-    },
-    "t2": {
-      "server": {
-        "8081": 2
-      },
-      "server-host": {
-        "ServerA": 2
+      "via-goto": {
+        "Server8081": 40
       },
       "x": {
-        "x2": 2
+        "x1": 40
       },
       "y": {
-        "y2": 2
+        "y1": 40
       }
     },
-    "t3": {
-      "server": {
-        "8082": 1
+    "target2": {
+      "goto-host": {
+        "2.2.2.2": 20
       },
-      "server-host": {
-        "ServerB": 1
+      "via-goto": {
+        "Server8082": 20
+      },
+      "x": {
+        "x2": 20
+      },
+      "y": {
+        "y2": 20
+      }
+    },
+    "target3": {
+      "foo": {
+        "bar1": 600
+      },
+      "goto-host": {
+        "3.3.3.3": 600
+      },
+      "via-goto": {
+        "Server8083": 600
+      },
+      "x": {
+        "x1": 600
+      },
+      "y": {
+        "y1": 600
+      }
+    },
+    "target4": {
+      "foo": {
+        "bar2": 300
+      },
+      "goto-host": {
+        "3.3.3.3": 300
+      },
+      "via-goto": {
+        "Server8083": 300
+      },
+      "y": {
+        "x2": 300
       }
     }
   }
