@@ -66,6 +66,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(r, "/track/headers/clear", clearTrackingHeaders, "POST")
   util.AddRoute(r, "/track/headers", getTrackingHeaders, "GET")
   util.AddRoute(r, "/results", getResults, "GET")
+  util.AddRoute(r, "/results/{targets}/clear", clearResults, "POST")
   util.AddRoute(r, "/results/clear", clearResults, "POST")
 }
 
@@ -437,7 +438,52 @@ func getResults(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearResults(w http.ResponseWriter, r *http.Request) {
-  getPortClient(r).clearResults()
+  pc := getPortClient(r)
+  targetsToInvoke := pc.getTargetsToInvoke(r)
+  pc.resultsLock.Lock()
+  defer pc.resultsLock.Unlock()
+  // reverting what addTargetResult did
+  if len(targetsToInvoke) > 0 {
+    for _, t := range targetsToInvoke {
+      statuses :=pc.targetResults.CountsByTargetStatus[t.Name]
+      if statuses != nil {
+        for k, v := range statuses {
+          pc.targetResults.CountsByStatus[k] -= v
+        }
+        delete(pc.targetResults.CountsByTargetStatus, t.Name)
+      }
+
+      codes := pc.targetResults.CountsByTargetStatusCode[t.Name]
+      if codes != nil {
+        for k, v := range codes {
+          pc.targetResults.CountsByStatusCodes[k] -= v
+        }
+        delete(pc.targetResults.CountsByTargetStatusCode, t.Name)
+      }
+
+      headers := pc.targetResults.CountsByTargetHeaders[t.Name]
+      if headers != nil {
+        for k, v := range headers {
+          pc.targetResults.CountsByHeaders[k] -= v
+        }
+        delete(pc.targetResults.CountsByTargetHeaders, t.Name)
+      }
+
+      headerValues := pc.targetResults.CountsByTargetHeaderValues[t.Name]
+      if headerValues != nil {
+        for h, values := range headerValues {
+          if values != nil {
+            for k, v := range values {
+              pc.targetResults.CountsByHeaderValues[h][k] -= v
+            }
+          }
+        }
+        delete(pc.targetResults.CountsByTargetHeaderValues, t.Name)
+      }
+    }
+  } else {
+    pc.targetResults = &TargetResults{}
+  }
   w.WriteHeader(http.StatusOK)
   fmt.Fprintln(w, "Results cleared")
 }

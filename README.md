@@ -571,6 +571,7 @@ As a client tool, the server allows targets to be configured and invoked via RES
 | GET       |	/client/track/headers/list            | Get list of tracked headers |
 | GET       |	/client/track/headers                 | Get list of tracked headers |
 | GET       |	/client/results                       | Get invocation results in JSON format. |
+| POST      | /client/results/{targets}/clear         | Clear previously accumulated invocation results for specific targets |
 | POST      | /client/results/clear                 | Clear previously accumulated invocation results |
 
 
