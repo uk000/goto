@@ -65,7 +65,36 @@ go build -o goto .
 
 Once the server is up and running, rest of the interactions and configurations are done purely via REST APIs.
 
-Let's look at the APIs for server features.
+<br/>
+
+#
+# Registry Features
+Any `goto` instance can act as a registry of other `goto` instances, and other worker `goto` instances can be configured to register themselves with the registry. You can pick any instance as registry and pass its URL to other instances as a command line argument, which tells other instances to register themselves with the given registry at startup.
+
+A `goto` instance can be passed command line arguments '`--registry <url>`' to point it to the `goto` instance acting as a registry. When a `goto` instance receives this command line argument, it invokes the registration API on the registry instance passing its `label` and `IP:Port` to the registry server. The `label` a `goto` instance uses can also be passed to it as a command line argument '`--label <label>`'. Multiple worker `goto` instances can register using the same label but different IP addresses, which would be the case for pods of the same deployment in kubernetes. The worker instances that register with a registry instance at startup, also deregister themselves with the registry upon shutdown.
+
+By registering a worker instance to a registry instance, we get a few benefits:
+1. You can pre-register a list of invocation targets at the registry instance that should be handed out to the worker instances. These invocation targets are registered by labels, and the worker instances receive the matching targets for the labels they register with.
+2. The targets registered at the registry can also be marked for `auto-invocation`. When a worker instance receives a target from registry at startup that's marked for auto-invocation, it immediately invokes that target's traffic at startup. Additionally, the target is retained in the worker instance for later invocation via API as well.
+3. In addition to sending targets to worker instances at the time of registration, the registry instance also pushes targets to the worker instances as and when more targets get added to the registry. This has the added benefit of just using the registry instance as the single point of configuration, where you add targets and those get pushed to all worker instances. Removal of targets from the registry also gets pushed, so the targets get removed from the corresponding worker instances. Even targets that are pushed later can be marked for `auto-invocation`, and the worker instances that receive the target will invoke it immediately upon receipt.
+
+#### Registry APIs
+|METHOD|URI|Description|
+|---|---|---|
+| POST       | /registry/peers/add           | Register a worker instance (referred to as peer). JSON payload described below|
+| POST, PUT  | /registry/peers/{peer}/remove/{address} | Deregister a peer by its label and IP address |
+| POST  | /registry/peers/clear   | Remove all registered peers|
+| POST  | /registry/peers/{peer}/targets/add | Add a target to be sent to a peer. JSON Payload same as client targets API described later in the document. |
+| POST, PUT  | /registry/peers/{peer}/targets/{target}/remove | Remove a target for a peer |
+| POST  | /registry/peers/{peer}/targets/clear   | Remove all targets for a peer|
+| GET  | /registry/peers/{peer}/targets   | Get all targets of a peer |
+| GET  | /registry/peers   | Get all registered peers |
+
+#### Peer JSON Schema
+|Field|Data Type|Description|
+|---|---|---|
+| Name    | string | Name/Label of a peer |
+| Address | string | IP address of the peer instance |
 
 <br/>
 
@@ -113,7 +142,6 @@ curl localhost:8081/listeners
 ```
 
 <br/>
-<br/>
 
 #
 ## Listener Label
@@ -136,7 +164,6 @@ curl -X PUT localhost:8080/label/clear
 curl localhost:8080/label
 ```
 
-<br/>
 <br/>
 
 #
@@ -207,10 +234,197 @@ $ curl localhost:8080/request/headers/track/counts
 ```
 
 <br/>
+
+#
+## Request Timeout
+
+
+#### APIs
+|METHOD|URI|Description|
+|---|---|---|
+|PUT, POST| /request/timeout/track/headers/{headers}  | Add one or more headers. Requests carrying these headers will be tracked for timeouts and reported |
+|PUT, POST| /request/timeout/track/all                | Enable request timeout tracking for all requests |
+|POST     |	/request/timeout/track/clear              | Clear timeout tracking configs |
+|POST     |	/request/timeout/status                   | Get a report of tracked request timeouts so far |
+
+
+#### Request Timeout API Examples
+```
+curl -X POST localhost:8080/request/timeout/track/headers/x,y
+
+curl -X POST localhost:8080/request/timeout/track/headers/all
+
+curl -X POST localhost:8080/request/timeout/track/clear
+
+curl localhost:8080/request/timeout/status
+```
+
+
 <br/>
 
 #
-## Request Proxying
+## Request URI Bypass
+
+#### APIs
+|METHOD|URI|Description|
+|---|---|---|
+|PUT, POST| /request/uri/bypass/add?uri={uri}       | Add a bypass URI |
+|PUT, POST| /request/uri/bypass/remove?uri={uri}    | Remove a bypass URI |
+|PUT, POST| /request/uri/bypass/clear               | Remove all bypass URIs |
+|PUT, POST| /request/uri/bypass/status/set/{status} | Set status code to be returned for bypass URI requests |
+|GET      |	/request/uri/bypass/list                | Get list of bypass URIs |
+|GET      |	/request/uri/bypass                     | Get list of bypass URIs |
+|GET      |	/request/uri/bypass/status              | Get current bypass URI status code |
+|GET      |	/request/uri/bypass/counts?uri={uri}    | Get request counts for a given bypass URI |
+
+
+#### Request URI Bypass API Examples
+```
+curl -X POST localhost:8080/request/uri/bypass/clear
+
+curl -X PUT localhost:8080/request/uri/bypass/add\?uri=/foo
+
+curl -X PUT localhost:8081/request/uri/bypass/remove\?uri=/bar
+
+curl -X PUT localhost:8080/request/uri/bypass/status/set/418
+
+curl localhost:8081/request/uri/bypass/list
+
+curl localhost:8080/request/uri/bypass
+
+curl localhost:8080/request/uri/bypass/status
+
+curl localhost:8080/request/uri/bypass/counts\?uri=/foo
+```
+
+
+<br/>
+
+#
+## Response Delay
+
+#### APIs
+|METHOD|URI|Description|
+|---|---|---|
+| PUT, POST | /response/delay/set/{delay} | Set a delay for non-management requests (i.e. runtime traffic) |
+| PUT, POST | /response/delay/clear       | Remove currently set delay |
+| GET       |	/response/delay             | Get currently set delay |
+
+* Delay is specified as duration, e.g. 1s
+
+#### Response Delay API Examples
+
+```
+curl -X POST localhost:8080/response/delay/clear
+
+curl -X PUT localhost:8080/response/delay/set/2s
+
+curl localhost:8080/response/delay
+```
+
+<br/>
+
+#
+## Response Headers
+
+#### APIs
+|METHOD|URI|Description|
+|---|---|---|
+| PUT, POST | /response/headers/add/{header}/{value}  | Add a custom header to be sent with all resopnses |
+| PUT, POST | /response/headers/remove/{header}       | Remove a previously added custom response header |
+| POST      |	/response/headers/clear                 | Remove all configured custom response headers |
+| GET       |	/response/headers/list                  | Get list of configured custom response headers |
+| GET       |	/response/headers                       | Get list of configured custom response headers |
+
+#### Response Headers API Examples
+```
+curl -X POST localhost:8080/response/headers/clear
+
+curl -X POST localhost:8080/response/headers/add/x/x1
+
+curl localhost:8080/response/headers/list
+
+curl -X POST localhost:8080/response/headers/remove/x
+
+curl localhost:8080/response/headers
+```
+
+
+<br/>
+
+#
+## Response Status
+
+
+#### APIs
+|METHOD|URI|Description|
+|---|---|---|
+| PUT, POST | /response/status/set/{status}     | Set a forced response status that all non-proxied and non-management requests will be responded with |
+| PUT, POST |	/response/status/clear            | Remove currently configured forced response status, so that all subsequent calls will receive their original deemed response |
+| PUT, POST | /response/status/counts/clear     | Clear counts tracked for response statuses |
+| GET       |	/response/status/counts/{status}  | Get request counts for a given status |
+| GET       |	/response/status/counts           | Get request counts for all response statuses so far |
+| GET       |	/response/status                  | Get the currently configured forced response status |
+
+#### Response Status API Examples
+```
+curl -X POST localhost:8080/response/status/counts/clear
+
+curl -X POST localhost:8080/response/status/clear
+
+curl -X PUT localhost:8080/response/status/set/502
+
+curl -X PUT localhost:8080/response/status/set/0
+
+curl -X POST localhost:8080/response/status/counts/clear
+
+curl localhost:8080/response/status/counts
+
+curl localhost:8080/response/status/counts/502
+```
+
+#### Response Status Tracking Result Example
+```
+{
+  "countsByRequestedStatus": {
+    "418": 20
+  },
+  "countsByReportedStatus": {
+    "200": 15,
+    "202": 4,
+    "208": 5,
+    "418": 20
+  }
+}
+```
+
+<br/>
+
+#
+## Status API
+
+#### APIs
+|METHOD|URI|Description|
+|---|---|---|
+| GET       |	/status/{status}                  | This call either receives the given status, or the forced response status if one is set |
+
+#### Status Call Examples
+```
+curl -I  localhost:8080/status/418
+```
+<br/>
+
+#
+## CatchAll
+
+Any request that doesn't match any of the defined management APIs, and also doesn't match any proxy targets, gets treated by a catch-all response that sends HTTP 200 response by default (unless an override response code is set)
+
+
+<br/>
+<br/>
+
+#
+# Proxy Features
 
 The APIs allow proxy targets to be configured, and those can also be invoked manually for testing the configuration. However, the real fun happens when the proxy targets are matched with runtime traffic based on the match criteria specified in a proxy target's spec (based on headers or URIs), and one or more matching targets get invoked for a given request.
 
@@ -330,209 +544,6 @@ curl -s localhost:8080/request/proxy/targets
 ```
 
 <br/>
-
-#
-## Request Timeout
-
-
-#### APIs
-|METHOD|URI|Description|
-|---|---|---|
-|PUT, POST| /request/timeout/track/headers/{headers}  | Add one or more headers. Requests carrying these headers will be tracked for timeouts and reported |
-|PUT, POST| /request/timeout/track/all                | Enable request timeout tracking for all requests |
-|POST     |	/request/timeout/track/clear              | Clear timeout tracking configs |
-|POST     |	/request/timeout/status                   | Get a report of tracked request timeouts so far |
-
-
-#### Request Timeout API Examples
-```
-curl -X POST localhost:8080/request/timeout/track/headers/x,y
-
-curl -X POST localhost:8080/request/timeout/track/headers/all
-
-curl -X POST localhost:8080/request/timeout/track/clear
-
-curl localhost:8080/request/timeout/status
-```
-
-
-
-<br/>
-<br/>
-
-#
-## Request URI Bypass
-
-#### APIs
-|METHOD|URI|Description|
-|---|---|---|
-|PUT, POST| /request/uri/bypass/add?uri={uri}       | Add a bypass URI |
-|PUT, POST| /request/uri/bypass/remove?uri={uri}    | Remove a bypass URI |
-|PUT, POST| /request/uri/bypass/clear               | Remove all bypass URIs |
-|PUT, POST| /request/uri/bypass/status/set/{status} | Set status code to be returned for bypass URI requests |
-|GET      |	/request/uri/bypass/list                | Get list of bypass URIs |
-|GET      |	/request/uri/bypass                     | Get list of bypass URIs |
-|GET      |	/request/uri/bypass/status              | Get current bypass URI status code |
-|GET      |	/request/uri/bypass/counts?uri={uri}    | Get request counts for a given bypass URI |
-
-
-#### Request URI Bypass API Examples
-```
-curl -X POST localhost:8080/request/uri/bypass/clear
-
-curl -X PUT localhost:8080/request/uri/bypass/add\?uri=/foo
-
-curl -X PUT localhost:8081/request/uri/bypass/remove\?uri=/bar
-
-curl -X PUT localhost:8080/request/uri/bypass/status/set/418
-
-curl localhost:8081/request/uri/bypass/list
-
-curl localhost:8080/request/uri/bypass
-
-curl localhost:8080/request/uri/bypass/status
-
-curl localhost:8080/request/uri/bypass/counts\?uri=/foo
-```
-
-
-
-<br/>
-<br/>
-
-#
-## Response Delay
-
-#### APIs
-|METHOD|URI|Description|
-|---|---|---|
-| PUT, POST | /response/delay/set/{delay} | Set a delay for non-management requests (i.e. runtime traffic) |
-| PUT, POST | /response/delay/clear       | Remove currently set delay |
-| GET       |	/response/delay             | Get currently set delay |
-
-* Delay is specified as duration, e.g. 1s
-
-#### Response Delay API Examples
-
-```
-curl -X POST localhost:8080/response/delay/clear
-
-curl -X PUT localhost:8080/response/delay/set/2s
-
-curl localhost:8080/response/delay
-```
-
-
-<br/>
-<br/>
-
-#
-## Response Headers
-
-#### APIs
-|METHOD|URI|Description|
-|---|---|---|
-| PUT, POST | /response/headers/add/{header}/{value}  | Add a custom header to be sent with all resopnses |
-| PUT, POST | /response/headers/remove/{header}       | Remove a previously added custom response header |
-| POST      |	/response/headers/clear                 | Remove all configured custom response headers |
-| GET       |	/response/headers/list                  | Get list of configured custom response headers |
-| GET       |	/response/headers                       | Get list of configured custom response headers |
-
-#### Response Headers API Examples
-```
-curl -X POST localhost:8080/response/headers/clear
-
-curl -X POST localhost:8080/response/headers/add/x/x1
-
-curl localhost:8080/response/headers/list
-
-curl -X POST localhost:8080/response/headers/remove/x
-
-curl localhost:8080/response/headers
-```
-
-
-
-<br/>
-<br/>
-
-#
-## Response Status
-
-
-#### APIs
-|METHOD|URI|Description|
-|---|---|---|
-| PUT, POST | /response/status/set/{status}     | Set a forced response status that all non-proxied and non-management requests will be responded with |
-| PUT, POST |	/response/status/clear            | Remove currently configured forced response status, so that all subsequent calls will receive their original deemed response |
-| PUT, POST | /response/status/counts/clear     | Clear counts tracked for response statuses |
-| GET       |	/response/status/counts/{status}  | Get request counts for a given status |
-| GET       |	/response/status/counts           | Get request counts for all response statuses so far |
-| GET       |	/response/status                  | Get the currently configured forced response status |
-
-#### Response Status API Examples
-```
-curl -X POST localhost:8080/response/status/counts/clear
-
-curl -X POST localhost:8080/response/status/clear
-
-curl -X PUT localhost:8080/response/status/set/502
-
-curl -X PUT localhost:8080/response/status/set/0
-
-curl -X POST localhost:8080/response/status/counts/clear
-
-curl localhost:8080/response/status/counts
-
-curl localhost:8080/response/status/counts/502
-```
-
-#### Response Status Tracking Result Example
-```
-{
-  "countsByRequestedStatus": {
-    "418": 20
-  },
-  "countsByReportedStatus": {
-    "200": 15,
-    "202": 4,
-    "208": 5,
-    "418": 20
-  }
-}
-```
-
-
-
-<br/>
-<br/>
-
-#
-## Status API
-
-#### APIs
-|METHOD|URI|Description|
-|---|---|---|
-| GET       |	/status/{status}                  | This call either receives the given status, or the forced response status if one is set |
-
-#### Status Call Examples
-```
-curl -I  localhost:8080/status/418
-```
-
-
-
-<br/>
-<br/>
-
-#
-## CatchAll
-
-Any request that doesn't match any of the defined management APIs, and also doesn't match any proxy targets, gets treated by a catch-all response that sends HTTP 200 response by default (unless an override response code is set)
-
-
-<br/>
-<br/>
 <br/>
 
 #
@@ -614,8 +625,13 @@ curl -X POST localhost:8080/client/results/clear
 curl -s localhost:8080/client/results
 ```
 
-#### Sample Client Invocation Result (including error reporting example)
-```
+
+<details>
+<summary>Sample Client Invocation Result (including error reporting example)</summary>
+<p>
+
+  ```json
+
 {
   "countsByStatus": {
     "200 OK": 880,
@@ -784,4 +800,5 @@ curl -s localhost:8080/client/results
     }
   }
 }
+
 ```
