@@ -24,7 +24,7 @@ type Listener struct {
 
 var (
   listeners     map[int]*Listener = map[int]*Listener{}
-  defaultLabel  string
+  DefaultLabel  string
   listenersLock sync.RWMutex
   Handler       util.ServerHandler = util.ServerHandler{Name: "listeners", SetRoutes: SetRoutes}
 )
@@ -90,8 +90,8 @@ func GetListenerLabel(r *http.Request) string {
   defer listenersLock.RUnlock()
   if l := listeners[port]; l != nil {
     return l.Label
-  } else if defaultLabel != "" {
-    return defaultLabel
+  } else if DefaultLabel != "" {
+    return DefaultLabel
   }
   return strconv.Itoa(port)
 }
@@ -104,7 +104,7 @@ func SetListenerLabel(r *http.Request) string {
     if l, present := listeners[port]; present {
       l.Label = label
     } else {
-      defaultLabel = label
+      DefaultLabel = label
     }
     return label
   }

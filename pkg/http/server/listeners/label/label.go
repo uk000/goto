@@ -52,10 +52,7 @@ func Middleware(next http.Handler) http.Handler {
     if !present {
       ns = "local"
     }
-    ip, present := os.LookupEnv("POD_IP")
-    if !present {
-      ip = util.GetHostIP()
-    }
+    ip := util.GetHostIP()
     hostLabel := fmt.Sprintf("%s.%s@%s", pod, ns, ip)
     util.AddLogMessage(fmt.Sprintf("[%s] [%s]", hostLabel, label), r)
     w.Header().Add("Via-Goto", label)

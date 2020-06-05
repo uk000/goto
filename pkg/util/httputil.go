@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -57,6 +59,9 @@ func PrintLogMessages(r *http.Request) {
 }
 
 func GetHostIP() string {
+  if ip, present := os.LookupEnv("POD_IP"); present {
+    return ip
+  }
   conn, err := net.Dial("udp", "8.8.8.8:80")
   if err == nil {
     defer conn.Close()
@@ -155,7 +160,11 @@ func GetRequestHeadersLog(r *http.Request) string {
 }
 
 func ReadJsonPayload(r *http.Request, t interface{}) error {
-  if body, err := ioutil.ReadAll(r.Body); err != nil {
+  return ReadJsonPayloadFromBody(r.Body, t)
+}
+
+func ReadJsonPayloadFromBody(body io.ReadCloser, t interface{}) error {
+  if body, err := ioutil.ReadAll(body); err != nil {
     return err
   } else {
     return json.Unmarshal([]byte(body), t)
@@ -231,4 +240,13 @@ func ToJSON(o interface{}) string {
     return string(output)
   }
   return fmt.Sprintf("%+v", o)
+}
+
+func Read(r io.Reader) string {
+  if body, err := ioutil.ReadAll(r); err == nil {
+    return string(body)
+  } else {
+    log.Println(err.Error())
+  }
+  return ""
 }

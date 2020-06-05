@@ -2,6 +2,7 @@ package invocation
 
 import (
 	"fmt"
+	"goto/pkg/util"
 	"io"
 	"io/ioutil"
 	"log"
@@ -16,19 +17,26 @@ import (
 )
 
 type InvocationSpec struct {
-  Name         string     `json:"name"`
-  Method       string     `json:"method"`
-  URL          string     `json:"url"`
-  Headers      [][]string `json:"headers"`
-  Body         string     `json:"body"`
-  BodyReader   io.Reader  `json:"bodyReader"`
-  Replicas     int        `json:"replicas"`
-  RequestCount int        `json:"requestCount"`
-  Delay        string     `json:"delay"`
-  KeepOpen     string     `json:"keepOpen"`
-  SendID       bool       `json:"sendID"`
-  delayD       time.Duration
-  keepOpenD    time.Duration
+  Name             string     `json:"name"`
+  Method           string     `json:"method"`
+  URL              string     `json:"url"`
+  Headers          [][]string `json:"headers"`
+  Body             string     `json:"body"`
+  BodyReader       io.Reader  `json:"bodyReader"`
+  Replicas         int        `json:"replicas"`
+  RequestCount     int        `json:"requestCount"`
+  Delay            string     `json:"delay"`
+  KeepOpen         string     `json:"keepOpen"`
+  SendID           bool       `json:"sendID"`
+  ConnTimeout      string     `json:"connTimeout"`
+  ConnIdleTimeout  string     `json:"connIdleTimeout"`
+  RequestTimeout   string     `json:"requestTimeout"`
+  AutoInvoke       bool       `json:"autoInvoke"`
+  connTimeoutD     time.Duration
+  connIdleTimeoutD time.Duration
+  requestTimeoutD  time.Duration
+  delayD           time.Duration
+  keepOpenD        time.Duration
 }
 
 type InvocationChannels struct {
@@ -83,6 +91,27 @@ func ValidateSpec(spec *InvocationSpec) error {
   } else {
     spec.delayD = 10 * time.Millisecond
   }
+  if spec.ConnTimeout != "" {
+    if spec.connTimeoutD, err = time.ParseDuration(spec.ConnTimeout); err != nil {
+      return fmt.Errorf("Invalid ConnectionTimeout")
+    }
+  } else {
+    spec.connTimeoutD = 30 * time.Second
+  }
+  if spec.ConnIdleTimeout != "" {
+    if spec.connIdleTimeoutD, err = time.ParseDuration(spec.ConnIdleTimeout); err != nil {
+      return fmt.Errorf("Invalid ConnectionIdleTimeout")
+    }
+  } else {
+    spec.connIdleTimeoutD = 5 * time.Minute
+  }
+  if spec.RequestTimeout != "" {
+    if spec.requestTimeoutD, err = time.ParseDuration(spec.RequestTimeout); err != nil {
+      return fmt.Errorf("Invalid RequestIdleTimeout")
+    }
+  } else {
+    spec.requestTimeoutD = 30 * time.Second
+  }
   if spec.KeepOpen != "" {
     if spec.keepOpenD, err = time.ParseDuration(spec.KeepOpen); err != nil {
       return fmt.Errorf("Invalid keepOpen")
@@ -102,14 +131,14 @@ func prepareInvocation(target *InvocationSpec) *InvocationStatus {
   }
   invocationStatus := &InvocationStatus{}
   tr := &http.Transport{
-    MaxIdleConns:       1,
-    IdleConnTimeout:    30 * time.Second,
+    MaxIdleConns:       2,
+    IdleConnTimeout:    target.connIdleTimeoutD,
     DisableCompression: true,
     Proxy:              http.ProxyFromEnvironment,
-    Dial: (&net.Dialer{
-      Timeout:   30 * time.Second,
+    DialContext: (&net.Dialer{
+      Timeout:   target.connTimeoutD,
       KeepAlive: time.Minute,
-    }).Dial,
+    }).DialContext,
     TLSHandshakeTimeout: 10 * time.Second,
   }
   invocationStatus.client = &http.Client{Transport: tr}
@@ -273,9 +302,7 @@ func InvokeTarget(index int, targetName string, targetID string, url string, met
       result.Status = resp.Status
       result.StatusCode = resp.StatusCode
       if reportBody {
-        if body, err := ioutil.ReadAll(resp.Body); err == nil {
-          result.Body = string(body)
-        }
+        result.Body = util.Read(body)
       }
     } else {
       log.Printf("Invocation[%d]: Target %s, url [%s] invocation failed with error: %s\n", index, targetID, url, err.Error())

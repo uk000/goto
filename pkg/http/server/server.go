@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"goto/pkg/http/client"
+	"goto/pkg/http/registry"
 	"goto/pkg/http/server/catchall"
 	"goto/pkg/http/server/conn"
 	"goto/pkg/http/server/echo"
@@ -16,6 +17,6 @@ import (
 
 func Run(listenPort int) {
   runner.RunHttpServer(listenPort, "/", label.Handler, conn.Handler, request.Handler,
-    response.Handler, listeners.Handler, client.Handler, echo.Handler, catchall.Handler)
+    response.Handler, listeners.Handler, registry.Handler, client.Handler, echo.Handler, catchall.Handler)
   os.Exit(0)
 }

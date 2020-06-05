@@ -8,10 +8,15 @@ import (
 	"sync"
 
 	"goto/pkg/http/invocation"
+	"goto/pkg/http/registry"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
 )
+
+type Target struct {
+  invocation.InvocationSpec
+}
 
 type TargetResults struct {
   CountsByStatus             map[string]int                       `json:"countsByStatus"`
@@ -25,7 +30,7 @@ type TargetResults struct {
 }
 
 type PortClient struct {
-  targets            map[string]*invocation.InvocationSpec
+  targets            map[string]*Target
   invocationChannels map[int]*invocation.InvocationChannels
   invocationCounter  int
   targetsLock        sync.RWMutex
@@ -67,7 +72,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 func (pc *PortClient) init() {
   pc.targetsLock.Lock()
   defer pc.targetsLock.Unlock()
-  pc.targets = map[string]*invocation.InvocationSpec{}
+  pc.targets = map[string]*Target{}
   pc.invocationChannels = map[int]*invocation.InvocationChannels{}
   pc.invocationCounter = 0
   pc.blockForResponse = false
@@ -90,7 +95,7 @@ func (pc *PortClient) initTargetResults() {
   }
 }
 
-func (pc *PortClient) addTarget(t *invocation.InvocationSpec) {
+func (pc *PortClient) AddTarget(t *Target) {
   pc.targetsLock.Lock()
   defer pc.targetsLock.Unlock()
   pc.targets[t.Name] = t
@@ -106,24 +111,59 @@ func (pc *PortClient) removeTarget(name string) bool {
   return present
 }
 
-func (pc *PortClient) getTargetsToInvoke(names string) []*invocation.InvocationSpec {
+func prepareTargetsForPeers(targets []*invocation.InvocationSpec, r *http.Request) []*invocation.InvocationSpec {
+  targetsToInvoke := []*invocation.InvocationSpec{}
+  for _, t := range targets {
+    targetsForTarget := []*invocation.InvocationSpec{}
+    if strings.HasPrefix(t.Name, "{") && strings.HasSuffix(t.Name, "}") {
+      p := strings.TrimLeft(t.Name, "{")
+      p = strings.TrimRight(p, "}")
+      if r != nil {
+        if peer := registry.GetPeer(p, r); peer != nil {
+          if strings.Contains(t.URL, "{") && strings.Contains(t.URL, "}") {
+            urlPre := strings.Split(t.URL, "{")[0]
+            urlPost := strings.Split(t.URL, "}")[1]
+            for address := range peer.Addresses {
+              var target = *t
+              target.Name = peer.Name
+              target.URL = urlPre + address + urlPost
+              targetsForTarget = append(targetsForTarget, &target)
+            }
+          }
+        }
+      }
+    }
+    if len(targetsForTarget) > 0 {
+      targetsToInvoke = append(targetsToInvoke, targetsForTarget...)
+    } else {
+      targetsToInvoke = append(targetsToInvoke, t)
+    }
+  }
+  return targetsToInvoke
+}
+
+func (pc *PortClient) getTargetsToInvoke(r *http.Request) []*invocation.InvocationSpec {
+  names := ""
+  if r != nil {
+    names = util.GetStringParamValue(r, "targets")
+  }
   pc.targetsLock.RLock()
   defer pc.targetsLock.RUnlock()
   var targetsToInvoke []*invocation.InvocationSpec
   if tnames := strings.Split(names, ","); len(tnames) > 0 && len(tnames[0]) > 0 {
     for _, tname := range tnames {
       if target, found := pc.targets[tname]; found {
-        targetsToInvoke = append(targetsToInvoke, target)
+        targetsToInvoke = append(targetsToInvoke, &target.InvocationSpec)
       }
     }
   } else {
     if len(pc.targets) > 0 {
       for _, target := range pc.targets {
-        targetsToInvoke = append(targetsToInvoke, target)
+        targetsToInvoke = append(targetsToInvoke, &target.InvocationSpec)
       }
     }
   }
-  return targetsToInvoke
+  return prepareTargetsForPeers(targetsToInvoke, r)
 }
 
 func (pc *PortClient) setReportResponse(flag bool) {
@@ -228,7 +268,7 @@ func (pc *PortClient) deregisterInvocation(i *invocation.InvocationChannels) {
   }
 }
 
-func (pc *PortClient) stopTarget(target *invocation.InvocationSpec) {
+func (pc *PortClient) stopTarget(target *Target) {
   for _, c := range pc.invocationChannels {
     done := false
     select {
@@ -265,28 +305,39 @@ func (pc *PortClient) stopTargets(targetNames string) bool {
   return stopped
 }
 
-func getPortClient(r *http.Request) *PortClient {
-  listenerPort := util.GetListenerPort(r)
+func GetClientForPort(port string) *PortClient {
   portClientsLock.Lock()
   defer portClientsLock.Unlock()
-  pc := portClients[listenerPort]
+  pc := portClients[port]
   if pc == nil {
     pc = &PortClient{}
     pc.init()
-    portClients[listenerPort] = pc
+    portClients[port] = pc
   }
   return pc
 }
 
+func getPortClient(r *http.Request) *PortClient {
+  return GetClientForPort(util.GetListenerPort(r))
+}
+
 func addTarget(w http.ResponseWriter, r *http.Request) {
-  var t invocation.InvocationSpec
-  if err := util.ReadJsonPayload(r, &t); err == nil {
-    if err := invocation.ValidateSpec(&t); err != nil {
+  t := &Target{}
+  if err := util.ReadJsonPayload(r, t); err == nil {
+    if err := invocation.ValidateSpec(&t.InvocationSpec); err != nil {
       w.WriteHeader(http.StatusBadRequest)
       fmt.Fprintf(w, "Invalid target spec: %s\n", err.Error())
       log.Println(err)
     } else {
-      getPortClient(r).addTarget(&t)
+      pc := getPortClient(r)
+      pc.AddTarget(t)
+      if t.AutoInvoke {
+        go func(){
+          invocationChannels := pc.registerInvocation()
+          invokeTargetsAndStoreResults(pc, []*invocation.InvocationSpec{&t.InvocationSpec}, invocationChannels)
+        }()
+      }
+      log.Printf("Added target: %s\n", util.ToJSON(t))
       w.WriteHeader(http.StatusOK)
       fmt.Fprintf(w, "Added target: %s\n", util.ToJSON(t))
     }
@@ -302,6 +353,7 @@ func removeTarget(w http.ResponseWriter, r *http.Request) {
     if getPortClient(r).removeTarget(tname) {
       w.WriteHeader(http.StatusOK)
       fmt.Fprintf(w, "Target Removed: %s\n", tname)
+      log.Printf("Removed target: %s\n", tname)
     } else {
       w.WriteHeader(http.StatusOK)
       fmt.Fprintf(w, "Target not found: %s\n", tname)
@@ -316,6 +368,7 @@ func clearTargets(w http.ResponseWriter, r *http.Request) {
   getPortClient(r).init()
   w.WriteHeader(http.StatusOK)
   fmt.Fprintln(w, "Targets cleared")
+  log.Println("Targets cleared")
 }
 
 func getTargets(w http.ResponseWriter, r *http.Request) {
@@ -413,7 +466,7 @@ func invokeTargetsAndStoreResults(pc *PortClient, targetsToInvoke []*invocation.
 
 func invokeTargets(w http.ResponseWriter, r *http.Request) {
   pc := getPortClient(r)
-  targetsToInvoke := pc.getTargetsToInvoke(util.GetStringParamValue(r, "targets"))
+  targetsToInvoke := pc.getTargetsToInvoke(r)
   if len(targetsToInvoke) > 0 {
     invocationChannels := pc.registerInvocation()
     var results []*invocation.InvocationResult
@@ -429,5 +482,13 @@ func invokeTargets(w http.ResponseWriter, r *http.Request) {
   } else {
     w.WriteHeader(http.StatusOK)
     fmt.Fprintln(w, "No targets to invoke")
+  }
+}
+
+func InvokeTargets(pc *PortClient) {
+  targetsToInvoke := pc.getTargetsToInvoke(nil)
+  if len(targetsToInvoke) > 0 {
+    invocationChannels := pc.registerInvocation()
+    invokeTargetsAndStoreResults(pc, targetsToInvoke, invocationChannels)
   }
 }
