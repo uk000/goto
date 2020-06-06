@@ -439,46 +439,14 @@ func getResults(w http.ResponseWriter, r *http.Request) {
 
 func clearResults(w http.ResponseWriter, r *http.Request) {
   pc := getPortClient(r)
-  targetsToInvoke := pc.getTargetsToInvoke(r)
   pc.resultsLock.Lock()
   defer pc.resultsLock.Unlock()
   // reverting what addTargetResult did
-  if len(targetsToInvoke) > 0 {
-    for _, t := range targetsToInvoke {
-      statuses :=pc.targetResults.CountsByTargetStatus[t.Name]
-      if statuses != nil {
-        for k, v := range statuses {
-          pc.targetResults.CountsByStatus[k] -= v
-        }
-        delete(pc.targetResults.CountsByTargetStatus, t.Name)
-      }
-
-      codes := pc.targetResults.CountsByTargetStatusCode[t.Name]
-      if codes != nil {
-        for k, v := range codes {
-          pc.targetResults.CountsByStatusCodes[k] -= v
-        }
-        delete(pc.targetResults.CountsByTargetStatusCode, t.Name)
-      }
-
-      headers := pc.targetResults.CountsByTargetHeaders[t.Name]
-      if headers != nil {
-        for k, v := range headers {
-          pc.targetResults.CountsByHeaders[k] -= v
-        }
-        delete(pc.targetResults.CountsByTargetHeaders, t.Name)
-      }
-
-      headerValues := pc.targetResults.CountsByTargetHeaderValues[t.Name]
-      if headerValues != nil {
-        for h, values := range headerValues {
-          if values != nil {
-            for k, v := range values {
-              pc.targetResults.CountsByHeaderValues[h][k] -= v
-            }
-          }
-        }
-        delete(pc.targetResults.CountsByTargetHeaderValues, t.Name)
+  names := util.GetStringParamValue(r, "targets")
+  if tnames := strings.Split(names, ","); len(tnames) > 0 && len(tnames[0]) > 0 {
+    for _, tname := range tnames {
+      if target, found := pc.targets[tname]; found {
+        clearSingleResult(pc, &target.InvocationSpec)
       }
     }
   } else {
@@ -486,6 +454,41 @@ func clearResults(w http.ResponseWriter, r *http.Request) {
   }
   w.WriteHeader(http.StatusOK)
   fmt.Fprintln(w, "Results cleared")
+}
+
+func clearSingleResult(pc *PortClient, t *invocation.InvocationSpec) {
+  statuses := pc.targetResults.CountsByTargetStatus[t.Name]
+  if statuses != nil {
+    for k, v := range statuses {
+      pc.targetResults.CountsByStatus[k] -= v
+    }
+    delete(pc.targetResults.CountsByTargetStatus, t.Name)
+  }
+  codes := pc.targetResults.CountsByTargetStatusCode[t.Name]
+  if codes != nil {
+    for k, v := range codes {
+      pc.targetResults.CountsByStatusCodes[k] -= v
+    }
+    delete(pc.targetResults.CountsByTargetStatusCode, t.Name)
+  }
+  headers := pc.targetResults.CountsByTargetHeaders[t.Name]
+  if headers != nil {
+    for k, v := range headers {
+      pc.targetResults.CountsByHeaders[k] -= v
+    }
+    delete(pc.targetResults.CountsByTargetHeaders, t.Name)
+  }
+  headerValues := pc.targetResults.CountsByTargetHeaderValues[t.Name]
+  if headerValues != nil {
+    for h, values := range headerValues {
+      if values != nil {
+        for k, v := range values {
+          pc.targetResults.CountsByHeaderValues[h][k] -= v
+        }
+      }
+    }
+    delete(pc.targetResults.CountsByTargetHeaderValues, t.Name)
+  }
 }
 
 func stopTargets(w http.ResponseWriter, r *http.Request) {
