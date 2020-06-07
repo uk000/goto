@@ -52,9 +52,7 @@ func AddLogMessage(msg string, r *http.Request) {
 
 func PrintLogMessages(r *http.Request) {
   m := r.Context().Value(logmessagesKey).(*messagestore)
-  if !IsAdminRequest(r) {
-    log.Println(strings.Join(m.messages, " --> "))
-  }
+  log.Println(strings.Join(m.messages, " --> "))
   m.messages = m.messages[:0]
 }
 
@@ -288,11 +286,13 @@ func MatchURI(uri1 string, uri2 string) bool {
 }
 
 func FindURIInMap(uri string, m map[string]interface{}) string {
-  uriPieces1 := getURIPieces(uri)
-  for uri2 := range m {
-    uriPieces2 := getURIPieces(uri2)
-    if matchPieces(uriPieces1, uriPieces2) {
-      return uri2
+  if m != nil {
+    uriPieces1 := getURIPieces(uri)
+    for uri2 := range m {
+      uriPieces2 := getURIPieces(uri2)
+      if matchPieces(uriPieces1, uriPieces2) {
+        return uri2
+      }
     }
   }
   return ""
@@ -300,4 +300,9 @@ func FindURIInMap(uri string, m map[string]interface{}) string {
 
 func IsURIInMap(uri string, m map[string]interface{}) bool {
   return FindURIInMap(uri, m) != ""
+}
+
+func IsYes(flag string) bool {
+  return strings.EqualFold(flag, "y") || strings.EqualFold(flag, "yes") ||
+        strings.EqualFold(flag, "true") || strings.EqualFold(flag, "1")
 }

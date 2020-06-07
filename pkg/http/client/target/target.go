@@ -53,7 +53,7 @@ var (
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   targetsRouter := r.PathPrefix("/targets").Subrouter()
   util.AddRoute(targetsRouter, "/add", addTarget, "POST")
-  util.AddRoute(targetsRouter, "/{target}/remove", removeTarget, "POST", "PUT")
+  util.AddRoute(targetsRouter, "/{targets}/remove", removeTargets, "POST")
   util.AddRoute(targetsRouter, "/{targets}/invoke", invokeTargets, "POST")
   util.AddRoute(targetsRouter, "/invoke/all", invokeTargets, "POST")
   util.AddRoute(targetsRouter, "/{targets}/stop", stopTargets, "POST")
@@ -66,8 +66,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(r, "/blocking", setOrGetBlocking, "GET")
   util.AddRoute(r, "/track/headers/add/{headers}", addTrackingHeaders, "POST", "PUT")
   util.AddRoute(r, "/track/headers/remove/{header}", removeTrackingHeader, "POST", "PUT")
-  util.AddRoute(r, "/track/headers/list", getTrackingHeaders, "GET")
   util.AddRoute(r, "/track/headers/clear", clearTrackingHeaders, "POST")
+  util.AddRoute(r, "/track/headers/list", getTrackingHeaders, "GET")
   util.AddRoute(r, "/track/headers", getTrackingHeaders, "GET")
   util.AddRoute(r, "/results", getResults, "GET")
   util.AddRoute(r, "/results/{targets}/clear", clearResults, "POST")
@@ -114,14 +114,12 @@ func (pc *PortClient) AddTarget(t *Target) {
   }
 }
 
-func (pc *PortClient) removeTarget(name string) bool {
+func (pc *PortClient) removeTargets(targets []string) {
   pc.targetsLock.Lock()
   defer pc.targetsLock.Unlock()
-  present := false
-  if _, present = pc.targets[name]; present {
-    delete(pc.targets, name)
+  for _, t := range targets {
+    delete(pc.targets, t)
   }
-  return present
 }
 
 func prepareTargetsForPeers(targets []*invocation.InvocationSpec, r *http.Request) []*invocation.InvocationSpec {
@@ -145,11 +143,13 @@ func prepareTargetsForPeers(targets []*invocation.InvocationSpec, r *http.Reques
           }
         }
       }
+    } else {
+      targetsToInvoke = append(targetsToInvoke, t)
     }
     if len(targetsForTarget) > 0 {
       targetsToInvoke = append(targetsToInvoke, targetsForTarget...)
     } else {
-      targetsToInvoke = append(targetsToInvoke, t)
+      log.Printf("No peers available for target %s", t.Name)
     }
   }
   return targetsToInvoke
@@ -161,7 +161,11 @@ func (pc *PortClient) PrepareTargetsToInvoke(names []string) []*invocation.Invoc
   var targetsToInvoke []*invocation.InvocationSpec
   if len(names) > 0 {
     for _, tname := range names {
-      if target, found := pc.targets[tname]; found {
+      target, found := pc.targets[tname]
+      if !found {
+        target, found = pc.targets["{"+tname+"}"]
+      }
+      if found {
         targetsToInvoke = append(targetsToInvoke, &target.InvocationSpec)
       }
     }
@@ -361,12 +365,12 @@ func (pc *PortClient) stopTarget(target *Target) {
   }
 }
 
-func (pc *PortClient) stopTargets(targetNames string) bool {
+func (pc *PortClient) stopTargets(targetNames []string) bool {
   pc.targetsLock.Lock()
   defer pc.targetsLock.Unlock()
   stopped := false
-  if tnames := strings.Split(targetNames, ","); len(tnames) > 0 && len(tnames[0]) > 0 {
-    for _, tname := range tnames {
+  if len(targetNames) > 0 {
+    for _, tname := range targetNames {
       if len(tname) > 0 {
         if target, found := pc.targets[tname]; found {
           pc.stopTarget(target)
@@ -402,137 +406,156 @@ func getPortClient(r *http.Request) *PortClient {
 }
 
 func addTarget(w http.ResponseWriter, r *http.Request) {
+  msg := ""
   t := &Target{}
   if err := util.ReadJsonPayload(r, t); err == nil {
     if err := invocation.ValidateSpec(&t.InvocationSpec); err != nil {
       w.WriteHeader(http.StatusBadRequest)
-      fmt.Fprintf(w, "Invalid target spec: %s\n", err.Error())
-      log.Println(err)
+      msg = fmt.Sprintf("Invalid target spec: %s", err.Error())
     } else {
       t.Headers = append(t.Headers, []string{"Goto-Client", listeners.DefaultLabel})
       pc := getPortClient(r)
       pc.AddTarget(t)
-      log.Printf("Added target: %s\n", util.ToJSON(t))
       w.WriteHeader(http.StatusOK)
-      fmt.Fprintf(w, "Added target: %s\n", util.ToJSON(t))
+      msg = fmt.Sprintf("Added target: %s", util.ToJSON(t))
     }
   } else {
     w.WriteHeader(http.StatusBadRequest)
-    fmt.Fprintf(w, "Failed to parse json\n")
-    log.Println(err)
+    msg = "Failed to parse json"
   }
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
 }
 
-func removeTarget(w http.ResponseWriter, r *http.Request) {
-  if tname, present := util.GetStringParam(r, "target"); present {
-    if getPortClient(r).removeTarget(tname) {
-      w.WriteHeader(http.StatusOK)
-      fmt.Fprintf(w, "Target Removed: %s\n", tname)
-      log.Printf("Removed target: %s\n", tname)
-    } else {
-      w.WriteHeader(http.StatusOK)
-      fmt.Fprintf(w, "Target not found: %s\n", tname)
-    }
+func removeTargets(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  if targets, present := util.GetListParam(r, "targets"); present {
+    getPortClient(r).removeTargets(targets)
+    w.WriteHeader(http.StatusOK)
+    msg = fmt.Sprintf("Targets Removed: %+v", targets)
   } else {
     w.WriteHeader(http.StatusBadRequest)
-    fmt.Fprintln(w, "No target given")
+    msg = "No target given"
   }
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
 }
 
 func clearTargets(w http.ResponseWriter, r *http.Request) {
   getPortClient(r).init()
   w.WriteHeader(http.StatusOK)
-  fmt.Fprintln(w, "Targets cleared")
-  log.Println("Targets cleared")
+  msg := "Targets cleared"
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
 }
 
 func getTargets(w http.ResponseWriter, r *http.Request) {
   util.WriteJsonPayload(w, getPortClient(r).targets)
+  util.AddLogMessage("Reporting targets", r)
 }
 
 func setOrGetBlocking(w http.ResponseWriter, r *http.Request) {
+  msg := ""
   pc := getPortClient(r)
   if flag, present := util.GetStringParam(r, "flag"); present {
-    pc.setReportResponse(
-      strings.EqualFold(flag, "y") || strings.EqualFold(flag, "yes") ||
-        strings.EqualFold(flag, "true") || strings.EqualFold(flag, "1"))
+    pc.setReportResponse(util.IsYes(flag))
     w.WriteHeader(http.StatusAccepted)
     if pc.blockForResponse {
-      fmt.Fprintln(w, "Invocation will block for results")
+      msg = "Invocation will block for results"
     } else {
-      fmt.Fprintln(w, "Invocation will not block for results")
+      msg = "Invocation will not block for results"
     }
   } else {
     w.WriteHeader(http.StatusOK)
     if pc.blockForResponse {
-      fmt.Fprintln(w, "Invocation will block for results")
+      msg = "Invocation will block for results"
     } else {
-      fmt.Fprintln(w, "Invocation will not block for results")
+      msg = "Invocation will not block for results"
     }
   }
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
 }
 
 func addTrackingHeaders(w http.ResponseWriter, r *http.Request) {
+  msg := ""
   if h, present := util.GetStringParam(r, "headers"); present {
     getPortClient(r).addTrackingHeaders(h)
     w.WriteHeader(http.StatusAccepted)
-    fmt.Fprintf(w, "Header %s will be tracked\n", h)
+    msg = fmt.Sprintf("Header %s will be tracked", h)
   } else {
     w.WriteHeader(http.StatusBadRequest)
-    fmt.Fprintf(w, "Invalid header name")
+    msg = "Invalid header name"
   }
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
 }
 
 func removeTrackingHeader(w http.ResponseWriter, r *http.Request) {
+  msg := ""
   if header, present := util.GetStringParam(r, "header"); present {
     getPortClient(r).removeTrackingHeader(header)
     w.WriteHeader(http.StatusAccepted)
-    fmt.Fprintf(w, "Header %s removed from tracking\n", header)
+    msg = fmt.Sprintf("Header %s removed from tracking", header)
   } else {
     w.WriteHeader(http.StatusBadRequest)
-    fmt.Fprintf(w, "Invalid header name")
+    msg = "Invalid header name"
   }
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
 }
 
 func clearTrackingHeaders(w http.ResponseWriter, r *http.Request) {
   getPortClient(r).clearTrackingHeaders()
   w.WriteHeader(http.StatusAccepted)
-  fmt.Fprintln(w, "All tracking headers cleared")
+  msg := "All tracking headers cleared"
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
 }
 
 func getTrackingHeaders(w http.ResponseWriter, r *http.Request) {
   w.WriteHeader(http.StatusOK)
-  fmt.Fprintln(w, strings.Join(getPortClient(r).getTrackingHeaders(), ","))
+  msg := fmt.Sprintf("Tracking headers: %s", strings.Join(getPortClient(r).getTrackingHeaders(), ","))
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
 }
 
 func getResults(w http.ResponseWriter, r *http.Request) {
   output := getPortClient(r).getResults()
   w.WriteHeader(http.StatusAlreadyReported)
   fmt.Fprintln(w, output)
+  util.AddLogMessage("Reporting results", r)
 }
 
 func clearResults(w http.ResponseWriter, r *http.Request) {
+  msg := ""
   if targets, present := util.GetListParam(r, "targets"); present {
     getPortClient(r).removeResultsForTargets(targets)
     w.WriteHeader(http.StatusOK)
-    fmt.Fprintf(w, "Results cleared for targets: %+v\n", targets)
+    msg = fmt.Sprintf("Results cleared for targets: %+v", targets)
   } else {
     getPortClient(r).clearResults()
     w.WriteHeader(http.StatusOK)
-    fmt.Fprintln(w, "Results cleared")
+    msg = "Results cleared"
   }
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
 }
 
 func stopTargets(w http.ResponseWriter, r *http.Request) {
+  msg := ""
   pc := getPortClient(r)
-  stopped := pc.stopTargets(util.GetStringParamValue(r, "targets"))
+  targets, _ := util.GetListParam(r, "targets")
+  stopped := pc.stopTargets(targets)
   if stopped {
     w.WriteHeader(http.StatusOK)
-    fmt.Fprintln(w, "Targets stopped")
+    msg = fmt.Sprintf("Targets %+v stopped", targets)
   } else {
     w.WriteHeader(http.StatusOK)
-    fmt.Fprintln(w, "No targets to stop")
+    msg = "No targets to stop"
   }
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
 }
 
 func invokeTargetsAndStoreResults(pc *PortClient, targets []*invocation.InvocationSpec, ic *invocation.InvocationChannels) []*invocation.InvocationResult {
@@ -571,14 +594,17 @@ func invokeTargets(w http.ResponseWriter, r *http.Request) {
       results = invokeTargetsAndStoreResults(pc, targetsToInvoke, invocationChannels)
       w.WriteHeader(http.StatusAlreadyReported)
       fmt.Fprintln(w, util.ToJSON(results))
+      util.AddLogMessage("Targets invoked", r)
     } else {
       go invokeTargetsAndStoreResults(pc, targetsToInvoke, invocationChannels)
       w.WriteHeader(http.StatusOK)
       fmt.Fprintln(w, "Targets invoked")
+      util.AddLogMessage("Targets invoked", r)
     }
   } else {
     w.WriteHeader(http.StatusOK)
     fmt.Fprintln(w, "No targets to invoke")
+    util.AddLogMessage("No targets to invoke", r)
   }
 }
 

@@ -119,6 +119,12 @@ A very simple use case is to send HTTP traffic to one or more servers for a peri
 
         $ curl -s goto-client:8080/client/results | jq
           {
+            "targetInvocationCounts": {
+              "target1": 41,
+              "target2": 20,
+              "target3": 600,
+              "target4": 300
+            },
             "countsByStatus": {
               "200 OK": 880,
               "403 Forbidden": 40,
@@ -168,7 +174,8 @@ A very simple use case is to send HTTP traffic to one or more servers for a peri
             "countsByTargetStatus": {
               "target1": {
                 "200 OK": 20,
-                "502 Bad Gateway": 20
+                "502 Bad Gateway": 20,
+                "Post \"http://goto-server-1:8080/some/api?x-request-id=9fb6462c-85ff-4b51-9a1d-2da28f8fefc5\": dial tcp 1.1.1.1:8080: connect: connection refused": 1
               },
               "target2": {
                 "503 Service Unavailable": 20

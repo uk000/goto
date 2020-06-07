@@ -31,7 +31,6 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(payloadRouter, "/set/header/{header}", setResponsePayload, "POST")
   util.AddRoute(payloadRouter, "/set/header/{header}/value/{value}", setResponsePayload, "POST")
   util.AddRoute(payloadRouter, "/clear", clearResponsePayload, "POST")
-
   util.AddRoute(payloadRouter, "", getResponsePayload, "GET")
 }
 

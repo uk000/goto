@@ -92,7 +92,7 @@ func ParseJobFromPayload(payload string) (*Job, error) {
       return nil, fmt.Errorf("Invalid Task: %s", err.Error())
     }
   } else {
-    return nil, fmt.Errorf("Failed to parse json")
+    return nil, fmt.Errorf("Failed to parse json with error: %s", err.Error())
   }
 }
 

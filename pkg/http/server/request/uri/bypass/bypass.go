@@ -170,10 +170,9 @@ func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     b := getBypassForPort(r)
     b.lock.RLock()
-    uri := strings.ToLower(r.RequestURI)
-    _, present := b.Uris[uri]
+    uri := util.FindURIInMap(r.RequestURI, b.Uris)
     b.lock.RUnlock()
-    if present {
+    if uri != "" {
       b.lock.Lock()
       b.Uris[uri] = b.Uris[uri].(int)+1
       w.WriteHeader(b.BypassStatus)

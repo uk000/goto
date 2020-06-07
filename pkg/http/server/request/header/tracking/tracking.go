@@ -152,8 +152,7 @@ func (rt *RequestTracking) getPortRequestTrackingData(r *http.Request) *RequestT
 }
 
 func (rt *RequestTracking) initHeaders(r *http.Request) []string {
-  if headersP, hp := util.GetStringParam(r, "headers"); hp {
-    headers := strings.Split(headersP, ",")
+  if headers, present := util.GetListParam(r, "headers"); present {
     rtd := rt.getPortRequestTrackingData(r)
     rtd.initHeaders(headers)
     return headers
@@ -161,13 +160,15 @@ func (rt *RequestTracking) initHeaders(r *http.Request) []string {
   return nil
 }
 
-func (rt *RequestTracking) removeHeader(r *http.Request) (header string, present bool) {
-  if header, hp := util.GetStringParam(r, "header"); hp {
+func (rt *RequestTracking) removeHeaders(r *http.Request) (headers []string, present bool) {
+  if headers, present := util.GetListParam(r, "headers"); present {
     rtd := rt.getPortRequestTrackingData(r)
-    present := rtd.removeHeader(header)
-    return header, present
+    for _, h := range headers {
+      rtd.removeHeader(h)
+    }
+    return headers, present
   } else {
-    return "", false
+    return nil, false
   }
 }
 
@@ -214,12 +215,12 @@ func addHeaders(w http.ResponseWriter, r *http.Request) {
 
 func removeHeader(w http.ResponseWriter, r *http.Request) {
   msg := ""
-  header, present := requestTracking.removeHeader(r)
+  headers, present := requestTracking.removeHeaders(r)
   if present {
-    msg = fmt.Sprintf("Header %s removed", header)
+    msg = fmt.Sprintf("Header %+v removed", headers)
     w.WriteHeader(http.StatusAccepted)
   } else {
-    msg = "Cannot remove. Invalid header"
+    msg = "No headers to remove"
     w.WriteHeader(http.StatusBadRequest)
   }
   util.AddLogMessage(msg, r)

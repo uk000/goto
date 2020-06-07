@@ -396,69 +396,86 @@ func StopJobs(jobs []string, port string) {
 }
 
 func addJob(w http.ResponseWriter, r *http.Request) {
+  msg := ""
   if job, err := jobtypes.ParseJob(r); err == nil {
     pj := getPortJobs(r)
     pj.AddJob(job)
-    log.Printf("Added Job: %+v\n", job)
-    fmt.Fprintf(w, "Added Job: %s\n", util.ToJSON(job))
+    msg = fmt.Sprintf("Added Job: %s\n", util.ToJSON(job))
     w.WriteHeader(http.StatusOK)
   } else {
     w.WriteHeader(http.StatusBadRequest)
-    fmt.Fprintf(w, "Failed to add job with error: %s\n", err.Error())
-    log.Printf("Failed to add job with error: %s\n", err.Error())
+    msg = fmt.Sprintf("Failed to add job with error: %s\n", err.Error())
   }
+  fmt.Fprintln(w, msg)
+  util.AddLogMessage(msg, r)
 }
 
 func removeJob(w http.ResponseWriter, r *http.Request) {
+  msg := ""
   if jobs, present := util.GetListParam(r, "jobs"); present {
     getPortJobs(r).removeJobs(jobs)
     w.WriteHeader(http.StatusOK)
-    fmt.Fprintf(w, "Jobs Removed: %s\n", jobs)
-    log.Printf("Jobs Removed: %s\n", jobs)
+    msg = fmt.Sprintf("Jobs Removed: %s\n", jobs)
+  } else {
+    w.WriteHeader(http.StatusBadRequest)
+    msg = "No jobs"
   }
+  fmt.Fprintln(w, msg)
+  util.AddLogMessage(msg, r)
 }
 
 func clearJobs(w http.ResponseWriter, r *http.Request) {
   getPortJobs(r).init()
   w.WriteHeader(http.StatusOK)
-  fmt.Fprintln(w, "Jobs cleared")
-  log.Println("Jobs cleared")
+  msg := "Jobs cleared"
+  fmt.Fprintln(w, msg)
+  util.AddLogMessage(msg, r)
 }
 
 func getJobs(w http.ResponseWriter, r *http.Request) {
+  util.AddLogMessage("Reporting jobs", r)
   util.WriteJsonPayload(w, getPortJobs(r).jobs)
 }
 
 func runJobs(w http.ResponseWriter, r *http.Request) {
+  msg := ""
   pj := getPortJobs(r)
   names, _ := util.GetListParam(r, "jobs")
   jobsToRun := pj.getJobsToRun(names)
   if len(jobsToRun) > 0 {
     pj.runJobs(jobsToRun)
     w.WriteHeader(http.StatusOK)
-    fmt.Fprintf(w, "Jobs %+v started\n", names)
+    msg = fmt.Sprintf("Jobs %+v started\n", names)
   } else {
-    w.WriteHeader(http.StatusOK)
-    fmt.Fprintln(w, "No jobs to run")
+    w.WriteHeader(http.StatusNotModified)
+    msg = "No jobs to run"
   }
+  fmt.Fprintln(w, msg)
+  util.AddLogMessage(msg, r)
 }
 
 func stopJobs(w http.ResponseWriter, r *http.Request) {
+  msg := ""
   if jobs, present := util.GetListParam(r, "jobs"); present {
     getPortJobs(r).stopJobs(jobs)
     w.WriteHeader(http.StatusOK)
-    fmt.Fprintf(w, "Jobs %+v stopped\n", jobs)
+    msg = fmt.Sprintf("Jobs %+v stopped\n", jobs)
   } else {
-    w.WriteHeader(http.StatusOK)
-    fmt.Fprintln(w, "No jobs to stop")
+    w.WriteHeader(http.StatusNotModified)
+    msg = "No jobs to stop"
   }
+  fmt.Fprintln(w, msg)
+  util.AddLogMessage(msg, r)
 }
 
 func getJobResults(w http.ResponseWriter, r *http.Request) {
+  msg := ""
   if job, present := util.GetStringParam(r, "job"); present {
-    fmt.Fprintln(w, util.ToJSON(getPortJobs(r).getJobResults(job)))
+    msg = fmt.Sprintf(util.ToJSON(getPortJobs(r).getJobResults(job)))
   } else {
-    fmt.Fprintln(w, "[]")
+    msg = "[]"
   }
   w.WriteHeader(http.StatusOK)
+  fmt.Fprintln(w, msg)
+  util.AddLogMessage(msg, r)
 }
