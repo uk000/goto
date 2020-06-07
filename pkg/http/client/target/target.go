@@ -9,6 +9,8 @@ import (
 
 	"goto/pkg/http/invocation"
 	"goto/pkg/http/registry"
+	"goto/pkg/http/registry/peer"
+	"goto/pkg/http/server/listeners"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
@@ -19,6 +21,7 @@ type Target struct {
 }
 
 type TargetResults struct {
+  TargetInvocationCounts     map[string]int                       `json:"targetInvocationCounts"`
   CountsByStatus             map[string]int                       `json:"countsByStatus"`
   CountsByStatusCodes        map[int]int                          `json:"countsByStatusCodes"`
   CountsByHeaders            map[string]int                       `json:"countsByHeaders"`
@@ -41,7 +44,8 @@ type PortClient struct {
 }
 
 var (
-  Handler         util.ServerHandler     = util.ServerHandler{Name: "client", SetRoutes: SetRoutes}
+  Handler         util.ServerHandler = util.ServerHandler{Name: "client", SetRoutes: SetRoutes}
+  GetPeer func(name string, r *http.Request) *peer.Peers
   portClients     map[string]*PortClient = map[string]*PortClient{}
   portClientsLock sync.RWMutex
 )
@@ -84,7 +88,8 @@ func (pc *PortClient) init() {
 func (pc *PortClient) initTargetResults() {
   pc.resultsLock.Lock()
   defer pc.resultsLock.Unlock()
-  if pc.targetResults.CountsByStatusCodes == nil {
+  if pc.targetResults.TargetInvocationCounts == nil {
+    pc.targetResults.TargetInvocationCounts = map[string]int{}
     pc.targetResults.CountsByStatusCodes = map[int]int{}
     pc.targetResults.CountsByStatus = map[string]int{}
     pc.targetResults.CountsByHeaders = map[string]int{}
@@ -100,6 +105,13 @@ func (pc *PortClient) AddTarget(t *Target) {
   pc.targetsLock.Lock()
   defer pc.targetsLock.Unlock()
   pc.targets[t.Name] = t
+  if t.AutoInvoke {
+    go func() {
+      log.Printf("Auto-invoking target: %s\n", t.Name)
+      invocationChannels := pc.RegisterInvocation()
+      invokeTargetsAndStoreResults(pc, []*invocation.InvocationSpec{&t.InvocationSpec}, invocationChannels)
+    }()
+  }
 }
 
 func (pc *PortClient) removeTarget(name string) bool {
@@ -143,16 +155,12 @@ func prepareTargetsForPeers(targets []*invocation.InvocationSpec, r *http.Reques
   return targetsToInvoke
 }
 
-func (pc *PortClient) getTargetsToInvoke(r *http.Request) []*invocation.InvocationSpec {
-  names := ""
-  if r != nil {
-    names = util.GetStringParamValue(r, "targets")
-  }
+func (pc *PortClient) PrepareTargetsToInvoke(names []string) []*invocation.InvocationSpec {
   pc.targetsLock.RLock()
   defer pc.targetsLock.RUnlock()
   var targetsToInvoke []*invocation.InvocationSpec
-  if tnames := strings.Split(names, ","); len(tnames) > 0 && len(tnames[0]) > 0 {
-    for _, tname := range tnames {
+  if len(names) > 0 {
+    for _, tname := range names {
       if target, found := pc.targets[tname]; found {
         targetsToInvoke = append(targetsToInvoke, &target.InvocationSpec)
       }
@@ -164,7 +172,15 @@ func (pc *PortClient) getTargetsToInvoke(r *http.Request) []*invocation.Invocati
       }
     }
   }
-  return prepareTargetsForPeers(targetsToInvoke, r)
+  return targetsToInvoke
+}
+
+func (pc *PortClient) getTargetsToInvoke(r *http.Request) []*invocation.InvocationSpec {
+  var names []string
+  if r != nil {
+    names, _ = util.GetListParam(r, "targets")
+  }
+  return prepareTargetsForPeers(pc.PrepareTargetsToInvoke(names), r)
 }
 
 func (pc *PortClient) setReportResponse(flag bool) {
@@ -212,12 +228,12 @@ func (pc *PortClient) getResults() string {
 
 func (pc *PortClient) clearResults() {
   pc.resultsLock.Lock()
-  defer pc.resultsLock.Unlock()
   pc.targetResults = &TargetResults{}
+  pc.resultsLock.Unlock()
+  pc.initTargetResults()
 }
 
 func (pc *PortClient) addTargetResult(result *invocation.InvocationResult) {
-  pc.initTargetResults()
   pc.resultsLock.Lock()
   defer pc.resultsLock.Unlock()
   if pc.targetResults.CountsByTargetStatusCode[result.TargetName] == nil {
@@ -226,6 +242,7 @@ func (pc *PortClient) addTargetResult(result *invocation.InvocationResult) {
     pc.targetResults.CountsByTargetHeaders[result.TargetName] = map[string]int{}
     pc.targetResults.CountsByTargetHeaderValues[result.TargetName] = map[string]map[string]int{}
   }
+  pc.targetResults.TargetInvocationCounts[result.TargetName]++
   pc.targetResults.CountsByStatus[result.Status]++
   pc.targetResults.CountsByStatusCodes[result.StatusCode]++
   pc.targetResults.CountsByTargetStatus[result.TargetName][result.Status]++
@@ -249,23 +266,85 @@ func (pc *PortClient) addTargetResult(result *invocation.InvocationResult) {
   }
 }
 
-func (pc *PortClient) registerInvocation() *invocation.InvocationChannels {
+func (pc *PortClient) removeResultsForTargets(targets []string) {
+  pc.resultsLock.Lock()
+  defer pc.resultsLock.Unlock()
+  for _, target := range targets {
+    delete(pc.targetResults.TargetInvocationCounts, target)
+    statuses := pc.targetResults.CountsByTargetStatus[target]
+    if statuses != nil {
+      for k, v := range statuses {
+        pc.targetResults.CountsByStatus[k] -= v
+        if pc.targetResults.CountsByStatus[k] == 0 {
+          delete(pc.targetResults.CountsByStatus, k)
+        }
+      }
+      delete(pc.targetResults.CountsByTargetStatus, target)
+    }
+
+    codes := pc.targetResults.CountsByTargetStatusCode[target]
+    if codes != nil {
+      for k, v := range codes {
+        pc.targetResults.CountsByStatusCodes[k] -= v
+        if pc.targetResults.CountsByStatusCodes[k] == 0 {
+          delete(pc.targetResults.CountsByStatusCodes, k)
+        }
+      }
+      delete(pc.targetResults.CountsByTargetStatusCode, target)
+    }
+
+    headers := pc.targetResults.CountsByTargetHeaders[target]
+    if headers != nil {
+      for k, v := range headers {
+        pc.targetResults.CountsByHeaders[k] -= v
+        if pc.targetResults.CountsByHeaders[k] == 0 {
+          delete(pc.targetResults.CountsByHeaders, k)
+        }
+      }
+      delete(pc.targetResults.CountsByTargetHeaders, target)
+    }
+
+    headerValues := pc.targetResults.CountsByTargetHeaderValues[target]
+    if headerValues != nil {
+      for h, values := range headerValues {
+        if values != nil {
+          for k, v := range values {
+            pc.targetResults.CountsByHeaderValues[h][k] -= v
+            if pc.targetResults.CountsByHeaderValues[h][k] == 0 {
+              delete(pc.targetResults.CountsByHeaderValues[h], k)
+            }
+          }
+        }
+        if len(pc.targetResults.CountsByHeaderValues[h]) == 0 {
+          delete(pc.targetResults.CountsByHeaderValues, h)
+        }
+      }
+      delete(pc.targetResults.CountsByTargetHeaderValues, target)
+    }
+  }
+}
+
+func (pc *PortClient) RegisterInvocation() *invocation.InvocationChannels {
   pc.targetsLock.Lock()
   defer pc.targetsLock.Unlock()
   pc.invocationCounter++
-  pc.invocationChannels[pc.invocationCounter] = &invocation.InvocationChannels{}
-  pc.invocationChannels[pc.invocationCounter].ID = pc.invocationCounter
-  pc.invocationChannels[pc.invocationCounter].StopChannel = make(chan string, 10)
-  pc.invocationChannels[pc.invocationCounter].DoneChannel = make(chan bool, 10)
-  return pc.invocationChannels[pc.invocationCounter]
+  ic := &invocation.InvocationChannels{}
+  ic.ID = pc.invocationCounter
+  ic.StopChannel = make(chan string, 10)
+  ic.DoneChannel = make(chan bool, 10)
+  ic.ResultChannel = make(chan *invocation.InvocationResult, 10)
+  pc.invocationChannels[pc.invocationCounter] = ic
+  return ic
 }
 
-func (pc *PortClient) deregisterInvocation(i *invocation.InvocationChannels) {
+func (pc *PortClient) DeregisterInvocation(ic *invocation.InvocationChannels) {
   pc.targetsLock.Lock()
   defer pc.targetsLock.Unlock()
-  if pc.invocationChannels[i.ID] != nil {
-    close(i.StopChannel)
-    delete(pc.invocationChannels, i.ID)
+  if pc.invocationChannels[ic.ID] != nil {
+    close(ic.StopChannel)
+    close(ic.DoneChannel)
+    close(ic.ResultChannel)
+    delete(pc.invocationChannels, ic.ID)
   }
 }
 
@@ -330,14 +409,9 @@ func addTarget(w http.ResponseWriter, r *http.Request) {
       fmt.Fprintf(w, "Invalid target spec: %s\n", err.Error())
       log.Println(err)
     } else {
+      t.Headers = append(t.Headers, []string{"Goto-Client", listeners.DefaultLabel})
       pc := getPortClient(r)
       pc.AddTarget(t)
-      if t.AutoInvoke {
-        go func(){
-          invocationChannels := pc.registerInvocation()
-          invokeTargetsAndStoreResults(pc, []*invocation.InvocationSpec{&t.InvocationSpec}, invocationChannels)
-        }()
-      }
       log.Printf("Added target: %s\n", util.ToJSON(t))
       w.WriteHeader(http.StatusOK)
       fmt.Fprintf(w, "Added target: %s\n", util.ToJSON(t))
@@ -438,54 +512,15 @@ func getResults(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearResults(w http.ResponseWriter, r *http.Request) {
-  pc := getPortClient(r)
-  targetsToInvoke := pc.getTargetsToInvoke(r)
-  pc.resultsLock.Lock()
-  defer pc.resultsLock.Unlock()
-  // reverting what addTargetResult did
-  if len(targetsToInvoke) > 0 {
-    for _, t := range targetsToInvoke {
-      statuses :=pc.targetResults.CountsByTargetStatus[t.Name]
-      if statuses != nil {
-        for k, v := range statuses {
-          pc.targetResults.CountsByStatus[k] -= v
-        }
-        delete(pc.targetResults.CountsByTargetStatus, t.Name)
-      }
-
-      codes := pc.targetResults.CountsByTargetStatusCode[t.Name]
-      if codes != nil {
-        for k, v := range codes {
-          pc.targetResults.CountsByStatusCodes[k] -= v
-        }
-        delete(pc.targetResults.CountsByTargetStatusCode, t.Name)
-      }
-
-      headers := pc.targetResults.CountsByTargetHeaders[t.Name]
-      if headers != nil {
-        for k, v := range headers {
-          pc.targetResults.CountsByHeaders[k] -= v
-        }
-        delete(pc.targetResults.CountsByTargetHeaders, t.Name)
-      }
-
-      headerValues := pc.targetResults.CountsByTargetHeaderValues[t.Name]
-      if headerValues != nil {
-        for h, values := range headerValues {
-          if values != nil {
-            for k, v := range values {
-              pc.targetResults.CountsByHeaderValues[h][k] -= v
-            }
-          }
-        }
-        delete(pc.targetResults.CountsByTargetHeaderValues, t.Name)
-      }
-    }
+  if targets, present := util.GetListParam(r, "targets"); present {
+    getPortClient(r).removeResultsForTargets(targets)
+    w.WriteHeader(http.StatusOK)
+    fmt.Fprintf(w, "Results cleared for targets: %+v\n", targets)
   } else {
-    pc.targetResults = &TargetResults{}
+    getPortClient(r).clearResults()
+    w.WriteHeader(http.StatusOK)
+    fmt.Fprintln(w, "Results cleared")
   }
-  w.WriteHeader(http.StatusOK)
-  fmt.Fprintln(w, "Results cleared")
 }
 
 func stopTargets(w http.ResponseWriter, r *http.Request) {
@@ -500,13 +535,29 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func invokeTargetsAndStoreResults(pc *PortClient, targetsToInvoke []*invocation.InvocationSpec,
-  invocationChannels *invocation.InvocationChannels) []*invocation.InvocationResult {
-  results := invocation.InvokeTargets(targetsToInvoke, invocationChannels, pc.blockForResponse)
-  pc.deregisterInvocation(invocationChannels)
-  for _, result := range results {
-    pc.addTargetResult(result)
+func invokeTargetsAndStoreResults(pc *PortClient, targets []*invocation.InvocationSpec, ic *invocation.InvocationChannels) []*invocation.InvocationResult {
+  pc.initTargetResults()
+  results := []*invocation.InvocationResult{}
+  c := make(chan bool)
+  go func() {
+    results = invocation.InvokeTargets(targets, ic, pc.blockForResponse)
+    pc.DeregisterInvocation(ic)
+    c <- true
+  }()
+  Results:
+  for {
+    select {
+    case <-ic.DoneChannel:
+      break Results
+    case <-ic.StopChannel:
+      break Results
+    case result := <-ic.ResultChannel:
+      if result != nil {
+        pc.addTargetResult(result)
+      }
+    }
   }
+  <-c
   return results
 }
 
@@ -514,7 +565,7 @@ func invokeTargets(w http.ResponseWriter, r *http.Request) {
   pc := getPortClient(r)
   targetsToInvoke := pc.getTargetsToInvoke(r)
   if len(targetsToInvoke) > 0 {
-    invocationChannels := pc.registerInvocation()
+    invocationChannels := pc.RegisterInvocation()
     var results []*invocation.InvocationResult
     if pc.blockForResponse {
       results = invokeTargetsAndStoreResults(pc, targetsToInvoke, invocationChannels)
@@ -531,10 +582,17 @@ func invokeTargets(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func InvokeTargets(pc *PortClient) {
-  targetsToInvoke := pc.getTargetsToInvoke(nil)
+func InvokeTargetsByNames(pc *PortClient, targets []string) {
+  targetsToInvoke := pc.PrepareTargetsToInvoke(targets)
   if len(targetsToInvoke) > 0 {
-    invocationChannels := pc.registerInvocation()
-    invokeTargetsAndStoreResults(pc, targetsToInvoke, invocationChannels)
+    invocationChannels := pc.RegisterInvocation()
+    go invokeTargetsAndStoreResults(pc, targetsToInvoke, invocationChannels)
+  }
+}
+
+func InvokeTargets(pc *PortClient, targets []*invocation.InvocationSpec) {
+  if len(targets) > 0 {
+    invocationChannels := pc.RegisterInvocation()
+    go invokeTargetsAndStoreResults(pc, targets, invocationChannels)
   }
 }

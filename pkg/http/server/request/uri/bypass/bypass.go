@@ -5,13 +5,14 @@ import (
 	"goto/pkg/util"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/mux"
 )
 
 type Bypass struct {
-  Uris         map[string]int
+  Uris         map[string]interface{}
   BypassStatus int
   lock         sync.RWMutex
 }
@@ -35,7 +36,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 }
 
 func (b *Bypass) init() {
-  b.Uris = map[string]int{}
+  b.Uris = map[string]interface{}{}
   b.BypassStatus = http.StatusOK
 }
 
@@ -44,6 +45,7 @@ func (b *Bypass) addURI(w http.ResponseWriter, r *http.Request) {
   if uri, present := util.GetStringParam(r, "uri"); present {
     b.lock.Lock()
     defer b.lock.Unlock()
+    uri = strings.ToLower(uri)
     b.Uris[uri] = 0
     msg = fmt.Sprintf("Bypass URI %s added", uri)
     w.WriteHeader(http.StatusAccepted)
@@ -60,6 +62,7 @@ func (b *Bypass) removeURI(w http.ResponseWriter, r *http.Request) {
   if uri, present := util.GetStringParam(r, "uri"); present {
     b.lock.Lock()
     defer b.lock.Unlock()
+    uri = strings.ToLower(uri)
     delete(b.Uris, uri)
     msg = fmt.Sprintf("Bypass URI %s removed", uri)
     w.WriteHeader(http.StatusAccepted)
@@ -90,7 +93,7 @@ func (b *Bypass) setStatus(w http.ResponseWriter, r *http.Request) {
 func (b *Bypass) clear(w http.ResponseWriter, r *http.Request) {
   b.lock.Lock()
   defer b.lock.Unlock()
-  b.Uris = map[string]int{}
+  b.Uris = map[string]interface{}{}
   msg := "Bypass URIs cleared"
   w.WriteHeader(http.StatusAccepted)
   util.AddLogMessage(msg, r)
@@ -104,7 +107,7 @@ func (b *Bypass) getCallCounts(w http.ResponseWriter, r *http.Request) {
     defer b.lock.RUnlock()
     msg = fmt.Sprintf("Reporting call counts for uri %s = %d", uri, b.Uris[uri])
     w.WriteHeader(http.StatusOK)
-    fmt.Fprintf(w, "%s\n", strconv.Itoa(b.Uris[uri]))
+    fmt.Fprintf(w, "%s\n", strconv.Itoa(b.Uris[uri].(int)))
   } else {
     msg = "Invalid Bypass URI"
     w.WriteHeader(http.StatusBadRequest)
@@ -159,20 +162,20 @@ func getBypassList(w http.ResponseWriter, r *http.Request) {
 func IsBypassURI(r *http.Request) bool {
   b := getBypassForPort(r)
   b.lock.RLock()
-  _, present := b.Uris[r.RequestURI]
-  b.lock.RUnlock()
-  return present
+  defer b.lock.RUnlock()
+  return util.IsURIInMap(r.RequestURI, b.Uris)
 }
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     b := getBypassForPort(r)
     b.lock.RLock()
-    _, present := b.Uris[r.RequestURI]
+    uri := strings.ToLower(r.RequestURI)
+    _, present := b.Uris[uri]
     b.lock.RUnlock()
     if present {
       b.lock.Lock()
-      b.Uris[r.RequestURI]++
+      b.Uris[uri] = b.Uris[uri].(int)+1
       w.WriteHeader(b.BypassStatus)
       b.lock.Unlock()
       util.AddLogMessage("Bypassing URI", r)

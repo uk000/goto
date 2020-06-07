@@ -26,8 +26,6 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 
 ### Scenario: [Use HTTP client to send requests and track results](scenarios.md#scenario-use-http-client-to-send-requests-and-track-results)
 
-### Scenario: [Bit more complex client testing](scenarios.md#scenario-bit-more-complex-client-testing)
-
 ### Scenario: [Test a client's behavior upon service failure](scenarios.md#scenario-test-a-clients-behavior-upon-service-failure)
 
 ### Scenario: [Count number of requests received at each service instance (Pod/VM) for certain headers](scenarios.md#scenario-count-number-of-requests-received-at-each-service-instance-podvm-for-certain-headers)
@@ -68,44 +66,13 @@ Once the server is up and running, rest of the interactions and configurations a
 <br/>
 
 #
-# Registry Features
-Any `goto` instance can act as a registry of other `goto` instances, and other worker `goto` instances can be configured to register themselves with the registry. You can pick any instance as registry and pass its URL to other instances as a command line argument, which tells other instances to register themselves with the given registry at startup.
-
-A `goto` instance can be passed command line arguments '`--registry <url>`' to point it to the `goto` instance acting as a registry. When a `goto` instance receives this command line argument, it invokes the registration API on the registry instance passing its `label` and `IP:Port` to the registry server. The `label` a `goto` instance uses can also be passed to it as a command line argument '`--label <label>`'. Multiple worker `goto` instances can register using the same label but different IP addresses, which would be the case for pods of the same deployment in kubernetes. The worker instances that register with a registry instance at startup, also deregister themselves with the registry upon shutdown.
-
-By registering a worker instance to a registry instance, we get a few benefits:
-1. You can pre-register a list of invocation targets at the registry instance that should be handed out to the worker instances. These invocation targets are registered by labels, and the worker instances receive the matching targets for the labels they register with.
-2. The targets registered at the registry can also be marked for `auto-invocation`. When a worker instance receives a target from registry at startup that's marked for auto-invocation, it immediately invokes that target's traffic at startup. Additionally, the target is retained in the worker instance for later invocation via API as well.
-3. In addition to sending targets to worker instances at the time of registration, the registry instance also pushes targets to the worker instances as and when more targets get added to the registry. This has the added benefit of just using the registry instance as the single point of configuration, where you add targets and those get pushed to all worker instances. Removal of targets from the registry also gets pushed, so the targets get removed from the corresponding worker instances. Even targets that are pushed later can be marked for `auto-invocation`, and the worker instances that receive the target will invoke it immediately upon receipt.
-
-#### Registry APIs
-|METHOD|URI|Description|
-|---|---|---|
-| POST       | /registry/peers/add           | Register a worker instance (referred to as peer). JSON payload described below|
-| POST, PUT  | /registry/peers/{peer}/remove/{address} | Deregister a peer by its label and IP address |
-| POST  | /registry/peers/clear   | Remove all registered peers|
-| POST  | /registry/peers/{peer}/targets/add | Add a target to be sent to a peer. JSON Payload same as client targets API described later in the document. |
-| POST, PUT  | /registry/peers/{peer}/targets/{target}/remove | Remove a target for a peer |
-| POST  | /registry/peers/{peer}/targets/clear   | Remove all targets for a peer|
-| GET  | /registry/peers/{peer}/targets   | Get all targets of a peer |
-| GET  | /registry/peers   | Get all registered peers |
-
-#### Peer JSON Schema
-|Field|Data Type|Description|
-|---|---|---|
-| Name    | string | Name/Label of a peer |
-| Address | string | IP address of the peer instance |
-
-<br/>
-
-#
 # Server Features
 The server is useful to be run as a test server for testing some client application, proxy/sidecar, gateway, etc. Or, the server can also be used as a proxy to be put in between a client and a target server application, so that traffic flows through this server where headers can be inspected/tracked before proxying the requests further. The server can add headers, replace request URI with some other URI, add artificial delays to the response, respond with a specific status, monitor request/connection timeouts, etc. The server tracks all the configured parameters, applying those to runtime traffic and building metrics, which can be viewed via various APIs.
 
 <br/>
 
 #
-## Listeners
+## > Listeners
 
 
 The server starts with a single http listener on port given to it as command line arg (defaults to 8080). It exposes listener APIs to let you manage additional HTTP listeners (TCP support will come in the future). The ability to launch and shutdown listeners lets you do some chaos testing. All listener ports respond to the same set of API calls, so any of the APIs described below as well as runtime traffic proxying can be done via any active listener.
@@ -144,7 +111,7 @@ curl localhost:8081/listeners
 <br/>
 
 #
-## Listener Label
+## > Listener Label
 
 By default, each listener adds a header `Via-Goto: <port>` to each response it sends, where <port> is the port on which the listener is running (default being 8080). A custom label can be added to a listener using the label APIs described below. In addition to `Via-Goto`, each listener also adds another header `Goto-Host` that carries the pod/host name, pod namespace (or `local` if not running as a kubernetes pod), and pod/host IP address to identify where the response came from.
 
@@ -167,7 +134,7 @@ curl localhost:8080/label
 <br/>
 
 #
-## Request Headers Tracking
+## > Request Headers Tracking
 
 #### APIs
 |METHOD|URI|Description|
@@ -195,7 +162,7 @@ curl -X POST localhost:8080/request/headers/track/counts/clear
 curl -X POST localhost:8080/request/headers/track/counts/clear
 ```
 
-#### Request Tracking Results Example
+#### Request Header Tracking Results Example
 ```
 $ curl localhost:8080/request/headers/track/counts
 
@@ -236,7 +203,7 @@ $ curl localhost:8080/request/headers/track/counts
 <br/>
 
 #
-## Request Timeout
+## > Request Timeout
 
 
 #### APIs
@@ -263,7 +230,7 @@ curl localhost:8080/request/timeout/status
 <br/>
 
 #
-## Request URI Bypass
+## > URI Bypass
 
 #### APIs
 |METHOD|URI|Description|
@@ -278,7 +245,7 @@ curl localhost:8080/request/timeout/status
 |GET      |	/request/uri/bypass/counts?uri={uri}    | Get request counts for a given bypass URI |
 
 
-#### Request URI Bypass API Examples
+#### URI Bypass API Examples
 ```
 curl -X POST localhost:8080/request/uri/bypass/clear
 
@@ -301,7 +268,7 @@ curl localhost:8080/request/uri/bypass/counts\?uri=/foo
 <br/>
 
 #
-## Response Delay
+## > Response Delay
 
 #### APIs
 |METHOD|URI|Description|
@@ -325,7 +292,7 @@ curl localhost:8080/response/delay
 <br/>
 
 #
-## Response Headers
+## > Response Headers
 
 #### APIs
 |METHOD|URI|Description|
@@ -353,7 +320,7 @@ curl localhost:8080/response/headers
 <br/>
 
 #
-## Response Status
+## > Response Status
 
 
 #### APIs
@@ -401,7 +368,7 @@ curl localhost:8080/response/status/counts/502
 <br/>
 
 #
-## Status API
+## > Status API
 
 #### APIs
 |METHOD|URI|Description|
@@ -415,7 +382,7 @@ curl -I  localhost:8080/status/418
 <br/>
 
 #
-## CatchAll
+## > CatchAll
 
 Any request that doesn't match any of the defined management APIs, and also doesn't match any proxy targets, gets treated by a catch-all response that sends HTTP 200 response by default (unless an override response code is set)
 
@@ -457,7 +424,7 @@ The APIs allow proxy targets to be configured, and those can also be invoked man
 | enabled       | bool     | Whether or not the proxy target is currently active |
 
 
-##### Proxy Target Match Criteria
+#### Proxy Target Match Criteria
 Proxy target match criteria specify the URIs, headers and query parameters, matching either of which will cause the request to be proxied to the target.
 
 - URIs: specified as a list of URIs, with `{foo}` to be used for variable portion of a URI. E.g., `/foo/{f}/bar/{b}` will match URIs like `/foo/123/bar/abc`, `/foo/something/bar/otherthing`, etc. The variables are captured under the given labels (f and b in previous example). If the target is configured with `replaceURI` to proxy the request to a different URI than the original request, the `replaceURI` can refer to those capturing variables using the syntax described in this example:
@@ -588,8 +555,24 @@ As a client tool, the server allows targets to be configured and invoked via RES
 | delay        | duration       | Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation |
 | sendId       | bool           | Whether or not a unique ID be sent with each client request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
 
-#### Client API Examples
+
+#### Client Results Schema
+|Field|Data Type|Description|
+|---|---|---|
+| countsByStatus              | string->int                 | Response counts across all targets grouped by HTTP Status |
+| countsByStatusCodes         | string->int                 | Response counts across all targets grouped by HTTP Status Code |
+| countsByHeaders             | string->int                 | Response counts across all targets grouped by header names   |
+| countsByHeaderValues        | string->string->int         | Response counts across all targets grouped by header names and values |
+| countsByTargetStatus        | string->string->int         | Response counts by each target grouped by HTTP Status |
+| countsByTargetStatusCode    | string->string->int         | Response counts by each target grouped by HTTP Status Code |
+| countsByTargetHeaders       | string->string->int         | Response counts by each target grouped by header names |
+| countsByTargetHeaderValues  | string->string->string->int | Response counts by each target grouped by header names and header values |
+
+
+#### Client API and Results Examples
+
 ```
+
 curl -s localhost:8080/client/targets/add --data '{"name": "t1", \
 "method":"GET", "url":"http://localhost:8080/status/418", \
 "headers":[["foo", "bar"],["x", "x1"],["y", "y1"]], \
@@ -626,12 +609,11 @@ curl -X POST localhost:8080/client/results/clear
 curl -s localhost:8080/client/results
 ```
 
-
 <details>
 <summary>Sample Client Invocation Result (including error reporting example)</summary>
 <p>
 
-  ```json
+```json
 
 {
   "countsByStatus": {
@@ -803,3 +785,37 @@ curl -s localhost:8080/client/results
 }
 
 ```
+</p>
+</details>
+
+#
+# Registry Features
+
+Any `goto` instance can act as a registry of other `goto` instances, and other worker `goto` instances can be configured to register themselves with the registry. You can pick any instance as registry and pass its URL to other instances as a command line argument, which tells other instances to register themselves with the given registry at startup.
+
+A `goto` instance can be passed command line arguments '`--registry <url>`' to point it to the `goto` instance acting as a registry. When a `goto` instance receives this command line argument, it invokes the registration API on the registry instance passing its `label` and `IP:Port` to the registry server. The `label` a `goto` instance uses can also be passed to it as a command line argument '`--label <label>`'. Multiple worker `goto` instances can register using the same label but different IP addresses, which would be the case for pods of the same deployment in kubernetes. The worker instances that register with a registry instance at startup, also deregister themselves with the registry upon shutdown.
+
+By registering a worker instance to a registry instance, we get a few benefits:
+1. You can pre-register a list of invocation targets at the registry instance that should be handed out to the worker instances. These invocation targets are registered by labels, and the worker instances receive the matching targets for the labels they register with.
+2. The targets registered at the registry can also be marked for `auto-invocation`. When a worker instance receives a target from registry at startup that's marked for auto-invocation, it immediately invokes that target's traffic at startup. Additionally, the target is retained in the worker instance for later invocation via API as well.
+3. In addition to sending targets to worker instances at the time of registration, the registry instance also pushes targets to the worker instances as and when more targets get added to the registry. This has the added benefit of just using the registry instance as the single point of configuration, where you add targets and those get pushed to all worker instances. Removal of targets from the registry also gets pushed, so the targets get removed from the corresponding worker instances. Even targets that are pushed later can be marked for `auto-invocation`, and the worker instances that receive the target will invoke it immediately upon receipt.
+
+#### Registry APIs
+|METHOD|URI|Description|
+|---|---|---|
+| POST       | /registry/peers/add           | Register a worker instance (referred to as peer). JSON payload described below|
+| POST, PUT  | /registry/peers/{peer}/remove/{address} | Deregister a peer by its label and IP address |
+| POST  | /registry/peers/clear   | Remove all registered peers|
+| POST  | /registry/peers/{peer}/targets/add | Add a target to be sent to a peer. JSON Payload same as client targets API described later in the document. |
+| POST, PUT  | /registry/peers/{peer}/targets/{target}/remove | Remove a target for a peer |
+| POST  | /registry/peers/{peer}/targets/clear   | Remove all targets for a peer|
+| GET  | /registry/peers/{peer}/targets   | Get all targets of a peer |
+| GET  | /registry/peers   | Get all registered peers |
+
+#### Peer JSON Schema
+|Field|Data Type|Description|
+|---|---|---|
+| Name    | string | Name/Label of a peer |
+| Address | string | IP address of the peer instance |
+
+<br/>

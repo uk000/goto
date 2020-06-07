@@ -5,6 +5,7 @@ import (
 
 	"goto/pkg/http/server/response/delay"
 	"goto/pkg/http/server/response/header"
+	"goto/pkg/http/server/response/payload"
 	"goto/pkg/http/server/response/status"
 	"goto/pkg/http/server/response/trigger"
 	"goto/pkg/util"
@@ -15,7 +16,7 @@ import (
 var (
   Handler          util.ServerHandler   = util.ServerHandler{"response", SetRoutes, Middleware}
   responseHandlers []util.ServerHandler = []util.ServerHandler{
-    header.Handler, delay.Handler, trigger.Handler, status.Handler}
+    header.Handler, delay.Handler, trigger.Handler, status.Handler, payload.Handler}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {

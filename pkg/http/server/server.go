@@ -13,10 +13,12 @@ import (
 	"goto/pkg/http/server/request"
 	"goto/pkg/http/server/response"
 	"goto/pkg/http/server/runner"
+	"goto/pkg/job/jobrunner"
 )
 
 func Run(listenPort int) {
-  runner.RunHttpServer(listenPort, "/", label.Handler, conn.Handler, request.Handler,
-    response.Handler, listeners.Handler, registry.Handler, client.Handler, echo.Handler, catchall.Handler)
+	listeners.SetListenerServer(runner.ServeListener)
+  runner.RunHttpServer(listenPort, "/", label.Handler, conn.Handler, jobrunner.Handler, request.Handler,
+		response.Handler, listeners.Handler, registry.Handler, client.Handler, echo.Handler, catchall.Handler)
   os.Exit(0)
 }

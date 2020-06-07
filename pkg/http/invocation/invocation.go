@@ -40,9 +40,10 @@ type InvocationSpec struct {
 }
 
 type InvocationChannels struct {
-  ID          int
-  StopChannel chan string
-  DoneChannel chan bool
+  ID            int
+  StopChannel   chan string
+  DoneChannel   chan bool
+  ResultChannel chan *InvocationResult
 }
 
 type InvocationStatus struct {
@@ -228,7 +229,7 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
           }
           for i := 0; i < target.Replicas; i++ {
             targetReplicaIndex := (invocationStatuses[target.Name].completedRequestCount * target.Replicas) + i + 1
-            targetID := target.Name + "[" + strconv.Itoa(targetReplicaIndex) + "]"
+            targetID := target.Name + "[" + strconv.Itoa(i+1) + "]" + "[" + strconv.Itoa(targetReplicaIndex) + "]"
             url := prepareTargetURL(target)
             totalRemainingRequestCount--
             responseChannels[index] = make(chan *InvocationResult)
@@ -238,7 +239,7 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
             if bodyReader == nil {
               bodyReader = strings.NewReader(target.Body)
             }
-            go InvokeTarget(invocationID, target.Name, targetID, url, target.Method, target.Headers,
+            go invokeTarget(invocationID, target.Name, targetID, url, target.Method, target.Headers,
               bodyReader, reportBody, invocationStatuses[target.Name].client, responseChannels[index])
             index++
           }
@@ -248,7 +249,11 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
       for len(cases) > 0 {
         i, v, _ := reflect.Select(cases)
         cases = append(cases[:i], cases[i+1:]...)
-        responses = append(responses, v.Interface().(*InvocationResult))
+        result := v.Interface().(*InvocationResult)
+        responses = append(responses, result)
+        if invocationChannels.ResultChannel != nil {
+          invocationChannels.ResultChannel <- result
+        }
       }
       if totalRemainingRequestCount == 0 {
         break
@@ -284,7 +289,7 @@ func newClientRequest(method string, url string, headers [][]string, body io.Rea
   }
 }
 
-func InvokeTarget(index int, targetName string, targetID string, url string, method string, headers [][]string, body io.Reader, reportBody bool, client *http.Client, c chan *InvocationResult) {
+func invokeTarget(index int, targetName string, targetID string, url string, method string, headers [][]string, body io.Reader, reportBody bool, client *http.Client, c chan *InvocationResult) {
   defer close(c)
   log.Printf("Invocation[%d]: Invoking targetID: %s, url: %s, method: %s, headers: %+v\n", index, targetID, url, method, headers)
   var result InvocationResult
@@ -302,7 +307,7 @@ func InvokeTarget(index int, targetName string, targetID string, url string, met
       result.Status = resp.Status
       result.StatusCode = resp.StatusCode
       if reportBody {
-        result.Body = util.Read(body)
+        result.Body = util.Read(resp.Body)
       }
     } else {
       log.Printf("Invocation[%d]: Target %s, url [%s] invocation failed with error: %s\n", index, targetID, url, err.Error())

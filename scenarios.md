@@ -1,190 +1,69 @@
 # Goto Usage Scenarios
 
-## Scenario: Use HTTP client to send requests and track results
+# Scenario: Use HTTP client to send requests and track results
 
-A very simple use case is to send HTTP traffic to one or more servers for a period of time, and collect the results per destination. To add more to it, you may want to send different kinds of HTTP requests (methods, headers), receive same/different response headers from those destinations, and track how the various destinations responded over the duration of the test in terms of response count per status code, per header, etc.
+A very simple use case is to send HTTP traffic to one or more servers for a period of time, and collect the results per destination. To add more to it, you may want to send different kinds of HTTP requests (methods, headers), receive same/different response headers from those destinations, and track how the various destinations responded over the duration of the test in terms of response counts by status code, by header, etc.
 
-`Goto` as a client tool allows you to achieve this via some simple API calls.
+`Goto` as a client tool allows you to script a test like. You can run multiple instances of `goto` as clients and servers, and then use APIs tO;
+- configure requests and responses, 
+- trigger tests in multiple steps/iterations, and 
+- get results
 
-1. Let's assume `goto` is running somewhere, accessible via `http://goto:8080`
+1. Let's use one `goto` client instance and multiple `goto` server instances for the setup. You could run multiple clients as well if needed, to trigger traffic from multiple sources. We'll assume the following URLs represent the running `goto` instances:
+   - Client: `http://goto-client:8080`
+   - Server 1: `http://goto-server-1:8080`
+   - Server 2: `http://goto-server-2:8080`
+   - Server 3: `http://goto-server-3:8080`
 
-2. We'll start with adding target destinations to the `goto` client. It might be a good idea to clear any previously added targets before adding new ones.
+2. We'll start with two servers as target destinations. It might be a good idea to clear any previously added targets before adding new ones.
     ```
-    $ curl -X POST http://goto:8080/client/targets/clear
+    $ curl -X POST http://goto-client:8080/client/targets/clear
     Targets cleared
+    
+    $ curl -s goto-client:8080/client/targets/add --data '
+      { 
+      "name": "target1",
+      "method":	"POST",
+      "url": "http://goto-server-1:8080/some/api",
+      "headers":[["x", "x1"],["y", "y1"]],
+      "body": "{\"test\":\"this\"}",
+      "replicas": 2, "requestCount": 200, 
+      "delay": "200ms", "sendID": true
+      }'
+   Added target: {"name":"target1","method":"POST","url":"http://goto-server-1:8080/some/api","headers":[["x","x1"],["y","y1"]],"body":"{\"test\":\"this\"}","bodyReader":null,"replicas":2,"requestCount":200,"delay":"200ms","keepOpen":"","sendID":true}
 
-    $ curl -s goto:8080/client/targets/add --data '
-              { 
-              "name": "target1",
-              "method":	"POST",
-              "url": "http://server-1/some/api",
-              "headers":[["a", "a1"],["b", "b1"]],
-              "body": "{\"test\":\"this\"}",
-              "replicas": 2, "requestCount": 100, 
-              "delay": "50ms", "sendID": true
-              }'
-    Added target: {"Name":"target1","Method":"POST","URL":"http://server-1/some/api","Headers":[["x","x1"],["y","y1"]],"Body":"{\"test\":\"this\"}","BodyReader":null,"Replicas":2,"RequestCount":100,"Delay":"50ms","SendID":true}
-
-    $ curl -s goto:8080/client/targets/add --data '
-              { 
-              "name": "target2",
-              "method":	"PUT",
-              "url": "http://server-2/another/api",
-              "headers":[["c", "c2"]],
-              "body": "{\"some\":\"thing\"}",
-              "replicas": 1, "requestCount": 200, 
-              "delay": "30ms", "sendID": true
-              }'
-    Added target: {"Name":"target2","Method":"PUT","URL":"http://server-1/another/api","Headers":[["x","x2"]],"Body":"{\"some\":\"thing\"}","BodyReader":null,"Replicas":1,"RequestCount":200,"Delay":"30ms","SendID":true}
+    $ curl -s goto-client:8080/client/targets/add --data '
+      { 
+      "name": "target2",
+      "method":	"PUT",
+      "url": "http://goto-server-2:8080/another/api",
+      "headers":[["x", "x2"], ["y", "y2"]],
+      "body": "{\"some\":\"thing\"}",
+      "replicas": 1, "requestCount": 200, 
+      "delay": "200ms", "sendID": true
+      }'
+    Added target: {"name":"target2","method":"PUT","url":"http://goto-server-2:8080/another/api","headers":[["x","x2"],["y","y2"]],"body":"{\"some\":\"thing\"}","bodyReader":null,"replicas":1,"requestCount":200,"delay":"200ms","keepOpen":"","sendID":true}
 
     #verify the targets were added
-    $ curl -s goto:8080/client/targets | jq
+    $ curl -s goto-client:8080/client/targets | jq
     ```
 
     The client allows targets to be invoked with custom headers and body. Additionally, `replicas` field controls concurrency per target, allowing you to send multiple requests in parallel to each target. The above example asks for 2 concurrent requests for target1 and 1 concurrent request for target2. Field `requestCount` configures how many total requests to send per replica of a target. So, target1 with 2 `replicas` and 100 `requestCount` means a total of 200 requests, where 2 requests are sent in parallel, then next 2, and so on. Field `delay` controls the amount of time the client should wait before sending next replica requests. In the above example, the client will wait for 100ms after each pair of concurrent requests to target1. A combination of these three fields allow you to come up with many variety of traffic patterns, spreading the traffic over a period of time while also keeping a certain concurrency level.  
 
 3. With the targets in place, let's ask `goto` client to track some response headers.
     ```
-    $ curl -X POST goto:8080/client/track/headers/clear
+    $ curl -X POST goto-client:8080/client/track/headers/clear
     All tracking headers cleared
 
-    $ curl -X PUT goto:8080/client/track/headers/add/x,y,z,foo
+    $ curl -X PUT goto-client:8080/client/track/headers/add/x,y,z,foo
     Header x,y,z,foo will be tracked
 
     #check the tracked headers
-    $ curl goto:8080/client/track/headers
+    $ curl goto-client:8080/client/track/headers
     x,y,z,foo
     ```
 
-4. Time to start the traffic. But before that, let's ask `goto` to run the load in async mode without blocking the invocation call. We'll get the results later via another API call.
-    ```
-    $ curl -X PUT goto:8080/client/blocking/set/N
-    Invocation will not block for results
-
-    $ curl -X POST goto:8080/client/targets/invoke/all
-    Targets invoked
-    ```
-5. Now we get some coffee, sit back and relax. Once the job finishes, we ask `goto` for results. Assume that the servers responded with headers x (values x1 and x2) and y (values y1), and all responses were successful with HTTP 200 status, the results would look like this:
-
-    <details>
-    <summary>Results</summary>
-    <p>
-
-      ```json
-        
-        $ curl -s goto:8080/client/results | jq
-        {
-          "CountsByStatus": {
-            "200 OK": 400
-          },
-          "CountsByStatusCodes": {
-            "200": 400
-          },
-          "CountsByHeaders": {
-            "x": 400,
-            "y": 200
-          },
-          "CountsByHeaderValues": {
-            "x": {
-              "x1": 200,
-              "x2": 200
-            },
-            "y": {
-              "y1": 200
-            }
-          },
-          "CountsByTargetStatus": {
-            "target1": {
-              "200 OK": 200
-            },
-            "target2": {
-              "200 OK": 200
-            }
-          },
-          "CountsByTargetStatusCode": {
-            "target1": {
-              "200": 200
-            },
-            "target2": {
-              "200": 200
-            }
-          },
-          "CountsByTargetHeaders": {
-            "target1": {
-              "x": 200,
-              "y": 200
-            },
-            "target2": {
-              "x": 200
-            }
-          },
-          "CountsByTargetHeaderValues": {
-            "target1": {
-              "x": {
-                "x1": 200
-              },
-              "y": {
-                "y1": 200
-              }
-            },
-            "target2": {
-              "x": {
-                "x2": 200
-              }
-            }
-          }
-        }
-
-      ```
-      
-    </p>
-    </details>
-
-<br/>
-
-The scenario showed how `goto` can be used for simple traffic tracing and verifying server health/availability. It's not meant to perform load testing (there are good tools available for that, like fortio), so it doesn't track latencies etc. But this
-
-
-## Scenario: Bit more complex client testing
-
-Perhaps the previous client scenario was too simple. Let's try to setup more client targets and also, this time have the target servers respond with HTTP errors for some requests. 
-
-1. Let's start with 2 targets, ask client to track headers, and also not block upon invocation
-    ```
-    $ curl -X POST http://goto:8080/client/targets/clear
-    Targets cleared
-    
-    $ curl -s goto:8080/client/targets/add --data '
-      { 
-      "name": "target1",
-      "method":	"POST",
-      "url": "http://Server8081/some/api",
-      "headers":[["x", "x1"],["y", "y1"]],
-      "body": "{\"test\":\"this\"}",
-      "replicas": 2, "requestCount": 200, 
-      "delay": "200ms", "sendID": true
-      }'
-   Added target: {"name":"target1","method":"POST","url":"http://Server8081/some/api","headers":[["x","x1"],["y","y1"]],"body":"{\"test\":\"this\"}","bodyReader":null,"replicas":2,"requestCount":200,"delay":"200ms","keepOpen":"","sendID":true}
-
-    $ curl -s goto:8080/client/targets/add --data '
-      { 
-      "name": "target2",
-      "method":	"PUT",
-      "url": "http://Server8082/another/api",
-      "headers":[["x", "x2"], ["y", "y2"]],
-      "body": "{\"some\":\"thing\"}",
-      "replicas": 1, "requestCount": 200, 
-      "delay": "200ms", "sendID": true
-      }'
-    Added target: {"name":"target2","method":"PUT","url":"http://Server8082/another/api","headers":[["x","x2"],["y","y2"]],"body":"{\"some\":\"thing\"}","bodyReader":null,"replicas":1,"requestCount":200,"delay":"200ms","keepOpen":"","sendID":true}
-
-    $ curl -X PUT goto:8080/client/track/headers/add/x,y,z,foo,Goto-Host,Via-Goto
-    Header x,y,z,foo,Goto-Host,Via-Goto will be tracked
-
-    $ curl -X PUT goto:8080/client/blocking/set/N
-    Invocation will not block for results
-   ```
-2. Note that this time the targets are other `goto` servers (`goto:8081` and `goto:8082`). The advantage of using goto servers as targets for this experiment is that we can ask those server instances to respond with HTTP error codes some of the times. Let's do just that. You can learn more about this specific `goto` server feature in other scenarios as well as from API docs.
+4. The advantage of using goto servers as targets for this experiment is that we can ask those server instances to respond with HTTP error codes some of the times. Let's do just that. You can learn more about this specific `goto` server feature in other scenarios as well as from API docs.
     ```
     $ curl -X PUT Server8081/response/status/set/502:20
     Will respond with forced status: 502 times 20
@@ -192,87 +71,67 @@ Perhaps the previous client scenario was too simple. Let's try to setup more cli
     $ curl -X PUT Server8082/response/status/set/503:20
     Will respond with forced status: 503 times 20
     ```
-3. Let's invoke the two targets
+
+
+5. Time to start the traffic. But before that, let's ask `goto` to run the load in async mode without blocking the invocation call. We'll get the results later via another API call.
     ```
-    $ curl -X POST goto:8080/client/targets/invoke/all
+    $ curl -X PUT goto-client:8080/client/blocking/set/N
+    Invocation will not block for results
+
+    $ curl -X POST goto-client:8080/client/targets/invoke/all
     Targets invoked
     ```
-4. While these two targets are running, we add another target. Why? Just because we can.
+
+6. While these two targets are running, we add another target. Why? Just because we can.
     ```
-    $ curl -s goto:8080/client/targets/add --data '
+    $ curl -s goto-client:8080/client/targets/add --data '
       { 
       "name": "target3",
       "method":	"OPTIONS",
-      "url": "http://Server8083/foo",
+      "url": "http://goto-server-3:8080/foo",
       "headers":[["foo", "bar1"], ["x", "x1"], ["y", "y1"]],
       "body": "{\"some\":\"thing\"}",
       "replicas": 3, "requestCount": 100, 
       "delay": "20ms", "sendID": true
       }'
-    Added target: {"name":"target3","method":"OPTIONS","url":"http://Server8083/foo","headers":[["foo","bar1"],["x","x1"],["y","y1"]],"body":"{\"some\":\"thing\"}","bodyReader":null,"replicas":3,"requestCount":100,"delay":"20ms","keepOpen":"","sendID":true}
+    Added target: {"name":"target3","method":"OPTIONS","url":"http://goto-server-3:8080/foo","headers":[["foo","bar1"],["x","x1"],["y","y1"]],"body":"{\"some\":\"thing\"}","bodyReader":null,"replicas":3,"requestCount":100,"delay":"20ms","keepOpen":"","sendID":true}
     ```
-5. Now we invoke this third target separately. This will start on its own while the previous two were also running.
+
+7. Now we invoke this third target separately. This will start on its own while the previous two were also running.
     ```
-    $ curl -X POST goto:8080/client/targets/target3/invoke
+    $ curl -X POST goto-client:8080/client/targets/target3/invoke
     Targets invoked
     ```
-6. Now we have 3 targets running. Let's stop the first two in their tracks. Why? You know, just because...
+
+8. Now we have 3 targets running. Let's stop the first two in their tracks. Why? You know, just because...
     ```
-    $ curl -X POST goto:8080/client/targets/target1,target2/stop
+    $ curl -X POST goto-client:8080/client/targets/target1,target2/stop
     Targets stopped
     ```
-7. Let's add fourth target, which goes to the same URL as the third one (showing that you can have same destination as multiple targets)
-    ```
-    $ curl -s goto:8080/client/targets/add --data '
-      { 
-      "name": "target4",
-      "method":	"GET",
-      "url": "http://Server8083/foo",
-      "headers":[["foo", "bar2"], ["y", "x2"]],
-      "body": "{\"some\":\"thing\"}",
-      "replicas": 3, "requestCount": 100,
-      "delay": "20ms", "sendID": true
-      }'
-    Added target: {"name":"target4","method":"GET","url":"http://Server8083/foo","headers":[["foo","bar2"],["y","x2"]],"body":"{\"some\":\"thing\"}","bodyReader":null,"replicas":3,"requestCount":100,"delay":"20ms","keepOpen":"","sendID":true}
-    ```
-8. Let's ask the three `goto` servers to send some more bad responses
-    ```
-    $ curl -X PUT Server8081/response/status/set/502:20
-    Will respond with forced status: 502 times 20
 
-    $ curl -X PUT Server8082/response/status/set/503:20
-    Will respond with forced status: 503 times 20
+9. We could do more of these add/remove/stop/start operations on the targets until we get tired. Once we're done, we collect the results
 
-    $ curl -X PUT Server8083/response/status/set/403:20
-    Will respond with forced status: 403 times 20
-    ```
-
-9. We invoke two targets again
-    ```
-    $ curl -X POST goto:8080/client/targets/target3,target4/invoke
-    Targets invoked
-    ```
-
-10. Once these invocations finish, we gather the results
       <details>
-      <summary>Results</summary>
+      <summary>Collect Results</summary>
       <p>
 
       ```json
 
-        $ curl -s goto:8080/client/results | jq
+        $ curl -s goto-client:8080/client/results | jq
           {
             "countsByStatus": {
               "200 OK": 880,
               "403 Forbidden": 40,
               "502 Bad Gateway": 20,
-              "503 Service Unavailable": 20
+              "503 Service Unavailable": 20,
+              "Post \"http://goto-server-1:8080/some/api?x-request-id=9fb6462c-85ff-4b51-9a1d-2da28f8fefc5\": dial tcp 1.1.1.1:8080: connect: connection refused": 1
             },
             "countsByStatusCodes": {
               "200": 880,
               "403": 40,
               "502": 20,
-              "503": 20
+              "503": 20,
+              "0": 1
             },
             "countsByHeaders": {
               "foo": 900,
@@ -326,7 +185,8 @@ Perhaps the previous client scenario was too simple. Let's try to setup more cli
             "countsByTargetStatusCode": {
               "target1": {
                 "200": 20,
-                "502": 20
+                "502": 20,
+                "0": 1,
               },
               "target2": {
                 "503": 20
@@ -434,7 +294,20 @@ Perhaps the previous client scenario was too simple. Let's try to setup more cli
       </p>
       </details>
 
-## Scenario: Test a client's behavior upon service failure
+The results are counted overall and per-target, grouped by status, status code, header names, and header name + value. The detailed description of of these result fields can be found in the Client API documentation in Readme.
+- `countsByStatus`
+- `countsByStatusCodes`
+- `countsByHeaders`
+- `countsByHeaderValues`
+- `countsByTargetStatus`
+- `countsByTargetStatusCode`
+- `countsByTargetHeaders`
+- `countsByTargetHeaderValues`
+
+
+
+
+# Scenario: Test a client's behavior upon service failure
 
 Suppose you have a client application that connects to a service for some API (`/my/api`). Either the client, or a sidecar/proxy (e.g. envoy), has some in-built resiliency capability so that it retries upon certain kind of failures (e.g. if the service responds with `HTTP 503`). The client or the proxy (e.g. envoy) may possibly even attempt to reconnect to a different endpoint of the service.
 
@@ -502,7 +375,7 @@ As this small scenario demonstrated, `goto` lets you inject controlled failure o
 
 <br/>
 
-## Scenario: Count number of requests received at each service instance (Pod/VM) for certain headers
+# Scenario: Count number of requests received at each service instance (Pod/VM) for certain headers
 One of the basic things we may want to track is, to observe a client's or proxy's behavior in terms of distributing traffic load across various endpoints of a service. While many clients/proxies may provide metrics to inform you about the number of requests it sent per service endpoint (IP), but what if you wanted to track it by headers: i.e., how many requests received per service endpoint per header.
 
 The `goto` tool can be used to achieve this simply by putting a `goto` instance in proxy mode in front of each service instance, and enable tracking for the specific headers you wish to track. Let's look at the sample API calls with the assumption of two service instances `http://service-1` and `http://service-2`, and a `goto` instance in front of each service, `http://goto-1` and `http://goto-2`.
@@ -612,7 +485,7 @@ Header tracking counts results payload from a `goto` instance will look like thi
 
 <br/>
 
-## Scenario: Track Request/Connection Timeouts
+# Scenario: Track Request/Connection Timeouts
 
 Say you want to monitor/track how often a client (or proxy/sidecar) performs a request/connection timeout, and the client/server/proxy/sidecar behavior when the request or connection times out. This tool provides a deterministic way to simulate the timeout behavior.
 

@@ -36,7 +36,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(statusRouter, "/counts", getStatusCount, "GET")
   util.AddRoute(statusRouter, "/clear", setStatus, "PUT", "POST")
   util.AddRoute(statusRouter, "", getStatus, "GET")
-  util.AddRoute(parent, "/status/{status}", getStatus, "GET")
+  util.AddRoute(parent, "/status/{status}", getStatus, "GET", "PUT", "POST", "OPTIONS", "HEAD")
 }
 
 func getOrCreatePortStatus(r *http.Request) *PortStatus {

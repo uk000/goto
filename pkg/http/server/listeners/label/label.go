@@ -27,7 +27,7 @@ func setLabel(w http.ResponseWriter, r *http.Request) {
   if label := listeners.SetListenerLabel(r); label == "" {
     msg = "Label cleared"
   } else {
-    msg = fmt.Sprintf("Will add header 'Server: %s' to all responses on port %s", label, util.GetListenerPort(r))
+    msg = fmt.Sprintf("Will use label %s for all responses on port %s", label, util.GetListenerPort(r))
   }
   util.AddLogMessage(msg, r)
   w.WriteHeader(http.StatusAccepted)

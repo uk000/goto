@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"goto/pkg/http/client/target"
 	"goto/pkg/http/registry"
+	"goto/pkg/http/registry/peer"
 	"goto/pkg/http/server/conn"
+	"goto/pkg/job/jobrunner"
+	"goto/pkg/job/jobtypes"
 	"goto/pkg/util"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -71,42 +75,59 @@ func ServeListener(l net.Listener) {
   }()
 }
 
+func setupStartupTasks(payload io.ReadCloser) {
+  data := map[string]interface{}{}
+  if err := util.ReadJsonPayloadFromBody(payload, &data); err == nil {
+    targets := peer.PeerTargets{}
+    if data["targets"] != nil {
+      targetsData := util.ToJSON(data["targets"])
+      if err := util.ReadJson(targetsData, &targets); err != nil {
+        log.Println(err.Error())
+        return
+      }
+    }
+    jobs := peer.PeerJobs{}
+    if data["jobs"] != nil {
+      for _, jobData := range data["jobs"].(map[string]interface {}) {
+        if job, err := jobtypes.ParseJobFromPayload(util.ToJSON(jobData)); err != nil {
+          log.Println(err.Error())
+          return
+        } else {
+          jobs[job.ID] = &peer.PeerJob{*job}
+        }
+      }
+    }
+    log.Printf("Got %d targets and %d jobs from registry:\n", len(targets), len(jobs))
+    port := strconv.Itoa(serverPort)
+    pc := target.GetClientForPort(port)
+    pj := jobrunner.GetPortJobs(port)
+
+    for _, job := range jobs {
+      log.Printf("%+v\n", job)
+      pj.AddJob(&job.Job)
+    }
+
+    for _, t := range targets {
+      log.Printf("%+v\n", t)
+      pc.AddTarget(&target.Target{t.InvocationSpec})
+    }
+  } else {
+    log.Printf("Failed to read peer targets with error: %s\n", err.Error())
+  }
+}
+
 func registerPeer() {
   if registry.RegistryURL != "" {
     registered := false
     retries := 0
     for !registered && retries < 3 {
-      peer := registry.Peer{registry.PeerName, util.GetHostIP()+":"+strconv.Itoa(serverPort)}
+      peer := peer.Peer{registry.PeerName, util.GetHostIP()+":"+strconv.Itoa(serverPort)}
       if resp, err := http.Post(registry.RegistryURL+"/registry/peers/add", "application/json", 
                             strings.NewReader(util.ToJSON(peer))); err == nil {
         defer resp.Body.Close()
-        log.Printf("Register as peer [%s] with registry [%s]\n", registry.PeerName, registry.RegistryURL)
-        targets := registry.PeerTargets{}
-        if err := util.ReadJsonPayloadFromBody(resp.Body, &targets); err == nil {
-          log.Printf("Got %d targets from registry:\n", len(targets))
-          pc := target.GetClientForPort(strconv.Itoa(serverPort))
-          autoInvoke := false
-          for _, t := range targets {
-            log.Printf("%+v\n", t)
-            if t.AutoInvoke {
-              log.Printf("Target %s marked for auto invoke\n", t.Name)
-              pc.AddTarget(&target.Target{t.InvocationSpec})
-              autoInvoke = true
-            }
-          }
-          if autoInvoke {
-            go target.InvokeTargets(pc)
-          }
-          for _, t := range targets {
-            if !t.AutoInvoke {
-              log.Printf("Target %s added without auto invoke\n", t.Name)
-              pc.AddTarget(&target.Target{t.InvocationSpec})
-            }
-          }
-        } else {
-          log.Printf("Failed to read peer targets with error: %s\n", err.Error())
-        }
+        log.Printf("Registered as peer [%s] with registry [%s]\n", registry.PeerName, registry.RegistryURL)
         registered = true
+        setupStartupTasks(resp.Body)
       } else {
         retries++
         log.Printf("Failed to register as peer to registry, retries: %d, error: %s\n", retries, err.Error())
@@ -123,7 +144,7 @@ func registerPeer() {
 
 func deregisterPeer() {
   if registry.RegistryURL != "" {
-    url := registry.RegistryURL+"/registry/peers/"+registry.PeerName+"/remove/"+util.GetHostIP()
+    url := registry.RegistryURL+"/registry/peers/"+registry.PeerName+"/remove/"+util.GetHostIP()+":"+strconv.Itoa(serverPort)
     if resp, err := http.Post(url, "plain/text", nil); err == nil {
       defer resp.Body.Close()
       log.Println(util.Read(resp.Body))
@@ -142,8 +163,8 @@ func WaitForHttpServer(server *http.Server) {
 
 func StopHttpServer(server *http.Server) {
   ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-  deregisterPeer()
   defer cancel()
+  deregisterPeer()
   server.Shutdown(ctx)
   log.Printf("HTTP Server %s shutting down", server.Addr)
 }

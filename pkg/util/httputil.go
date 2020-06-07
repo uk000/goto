@@ -100,6 +100,14 @@ func GetStringParamValue(r *http.Request, param string, defaultVal ...string) st
   return val
 }
 
+func GetListParam(r *http.Request, param string) ([]string, bool) {
+  values := []string{}
+  if v, present := GetStringParam(r, param); present {
+    values = strings.Split(v, ",")
+  }
+  return values, len(values) > 0 && len(values[0]) > 0
+}
+
 func GetHeaderValues(r *http.Request) map[string]map[string]int {
   headerValuesMap := map[string]map[string]int{}
   for h, values := range r.Header {
@@ -159,6 +167,10 @@ func GetRequestHeadersLog(r *http.Request) string {
   return ToJSON(r.Header)
 }
 
+func ReadJson(s string, t interface{}) error {
+  return json.Unmarshal([]byte(s), t)
+}
+
 func ReadJsonPayload(r *http.Request, t interface{}) error {
   return ReadJsonPayloadFromBody(r.Body, t)
 }
@@ -167,7 +179,7 @@ func ReadJsonPayloadFromBody(body io.ReadCloser, t interface{}) error {
   if body, err := ioutil.ReadAll(body); err != nil {
     return err
   } else {
-    return json.Unmarshal([]byte(body), t)
+    return json.Unmarshal(body, t)
   }
 }
 
@@ -249,4 +261,43 @@ func Read(r io.Reader) string {
     log.Println(err.Error())
   }
   return ""
+}
+
+func matchPieces(pieces1 []string, pieces2 []string) bool {
+  if len(pieces1) != len(pieces2) {
+    return false
+  }
+  for i, piece1 := range pieces1 {
+    piece2 := pieces2[i]
+    if piece1 != piece2 && 
+      !((strings.HasPrefix(piece1, "{") && strings.HasSuffix(piece1, "}")) || 
+        (strings.HasPrefix(piece2, "{") && strings.HasSuffix(piece2, "}"))) {
+      return false
+    }
+  }
+  return true
+}
+
+func getURIPieces(uri string) []string {
+  uri = strings.ToLower(uri)
+  return strings.Split(strings.Split(uri, "?")[0], "/")
+}
+
+func MatchURI(uri1 string, uri2 string) bool {
+  return matchPieces(getURIPieces(uri1), getURIPieces(uri2))
+}
+
+func FindURIInMap(uri string, m map[string]interface{}) string {
+  uriPieces1 := getURIPieces(uri)
+  for uri2 := range m {
+    uriPieces2 := getURIPieces(uri2)
+    if matchPieces(uriPieces1, uriPieces2) {
+      return uri2
+    }
+  }
+  return ""
+}
+
+func IsURIInMap(uri string, m map[string]interface{}) bool {
+  return FindURIInMap(uri, m) != ""
 }

@@ -4,6 +4,7 @@ import (
 	"flag"
 	"goto/pkg/http/registry"
 	"goto/pkg/http/server"
+	"goto/pkg/http/server/listeners"
 	"goto/pkg/util"
 	"log"
 )
@@ -22,8 +23,11 @@ func Execute() {
   if registry.PeerName == "" {
     registry.PeerName = "Goto-" + util.GetHostIP()
   }
+  listeners.DefaultLabel = registry.PeerName
   log.Printf("Version: %s, Commit: %s\n", Version, Commit)
   log.Printf("Server [%s] Listen on port [%d]\n", registry.PeerName, serverListenPort)
-  log.Printf("Registry [%s]\n", registry.RegistryURL)
+  if registry.RegistryURL != "" {
+    log.Printf("Registry [%s]\n", registry.RegistryURL)
+  }
   server.Run(serverListenPort)
 }

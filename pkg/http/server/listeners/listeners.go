@@ -2,7 +2,6 @@ package listeners
 
 import (
 	"fmt"
-	"goto/pkg/http/server/runner"
 	"goto/pkg/util"
 	"log"
 	"net"
@@ -23,10 +22,11 @@ type Listener struct {
 }
 
 var (
-  listeners     map[int]*Listener = map[int]*Listener{}
-  DefaultLabel  string
-  listenersLock sync.RWMutex
-  Handler       util.ServerHandler = util.ServerHandler{Name: "listeners", SetRoutes: SetRoutes}
+  listeners      map[int]*Listener = map[int]*Listener{}
+  listenerServer func(net.Listener)
+  DefaultLabel   string
+  listenersLock  sync.RWMutex
+  Handler        util.ServerHandler = util.ServerHandler{Name: "listeners", SetRoutes: SetRoutes}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -110,6 +110,9 @@ func SetListenerLabel(r *http.Request) string {
   }
   return ""
 }
+func SetListenerServer(server func(net.Listener)) {
+  listenerServer = server
+}
 
 func openListener(w http.ResponseWriter, r *http.Request) {
   listenersLock.RLock()
@@ -118,7 +121,7 @@ func openListener(w http.ResponseWriter, r *http.Request) {
     if l, present := listeners[port]; present {
       if l.listener == nil {
         if listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", l.Port)); err == nil {
-          runner.ServeListener(listener)
+          listenerServer(listener)
           l.listener = listener
           l.Open = true
           w.WriteHeader(http.StatusOK)
