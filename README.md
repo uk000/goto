@@ -564,7 +564,7 @@ This feature allows tracking request counts by URIs
 |POST     |	/request/uri/counts/clear               | Clear request counts for all URIs |
 
 
-#### URI Bypass API Examples
+#### URI API Examples
 ```
 curl -X POST localhost:8080/request/uri/counts
 
@@ -678,7 +678,7 @@ This feature allows setting custom response payload to be sent with server respo
 | POST | /response/payload/clear  | Clear all configured custom response payloads |
 | GET  |	/response/payload                      | Get configured custom payloads |
 
-#### Response Headers API Examples
+#### Response Payload API Examples
 ```
 curl -X POST localhost:8080/response/payload/set/default --data '{"test": "default payload"}'
 
@@ -752,7 +752,7 @@ This URI allows client to ask for a specific status as response code. The given 
 |---|---|---|
 | GET       |	/status/{status}                  | This call either receives the given status, or the forced response status if one is set |
 
-#### Status Call Examples
+#### Status API Examples
 ```
 curl -I  localhost:8080/status/418
 ```
@@ -768,7 +768,7 @@ This URI echoes back the headers and payload sent by client. The response is als
 |---|---|---|
 | GET       |	/echo                  | Sends response back with request headers and body, with added custom response headers and forced status |
 
-#### Status Call Examples
+#### Echo API Examples
 ```
 curl -I  localhost:8080/echo
 ```
@@ -947,11 +947,11 @@ curl localhost:8080/request/proxy/targets
 
 <br/>
 
-#### Job API Examples:
+#### Trigger API Examples:
 ```
 curl -X POST localhost:8080/response/trigger/clear
 
-curl -s localhost:8080/response/trigger/add --data '{
+curl localhost:8080/response/trigger/add --data '{
 	"name": "t1", 
 	"method":"POST", 
 	"url":"http://localhost:8082/response/status/clear", 
@@ -970,7 +970,7 @@ curl -X POST localhost:8080/response/trigger/t1/disable
 
 curl -X POST localhost:8080/response/trigger/t1/invoke
 
-curl -s localhost:8080/response/trigger/list
+curl localhost:8080/response/trigger/list
 
 ```
 
@@ -1030,7 +1030,7 @@ curl -s localhost:8080/response/trigger/list
 
 <br/>
 
-#### Job API Examples:
+#### Job APIs Examples:
 ```
 curl -X POST http://localhost:8080/jobs/clear
 
@@ -1067,7 +1067,7 @@ curl localhost:8080/jobs/add --data '
 
 curl -X POST http://localhost:8080/jobs/job1,job2/remove
 
-curl http://localhost:8080/jobs | jq
+curl http://localhost:8080/jobs
 
 curl -X POST http://localhost:8080/jobs/job1,job2/run
 
@@ -1129,4 +1129,88 @@ By registering a worker instance to a registry instance, we get a few benefits:
 #### Peer Job JSON Schema
 ** Same as [Jobs JSON Schema](#job-json-schema)
 
+<br/>
+
+#### Registry APIs Examples:
+```
+curl -X POST http://localhost:8080/registry/peers/clear
+
+curl localhost:8080/registry/peers/add --data '
+{ 
+"name": "peer1",
+"address":	"1.1.1.1:8081"
+}'
+curl -X POST http://localhost:8080/registry/peers/peer1/remove/1.1.1.1:8081
+
+curl localhost:8080/registry/peers
+
+curl -X POST http://localhost:8080/registry/peers/peer1/targets/clear
+
+curl localhost:8080/registry/peers/peer1/targets/add --data '
+{ 
+"name": "t1",
+"method":	"POST",
+"url": "http://somewhere/foo",
+"headers":[["x", "x1"],["y", "y1"]],
+"body": "{\"test\":\"this\"}",
+"replicas": 2, 
+"requestCount": 2, 
+"delay": "200ms", 
+"sendID": true,
+"autoInvoke": true
+}'
+
+curl -X POST http://localhost:8080/registry/peers/peer1/targets/t1,t2/remove
+
+curl http://localhost:8080/registry/peers/peer1/targets
+
+curl -X POST http://localhost:8080/registry/peers/peer1/targets/t1,t2/invoke
+
+curl -X POST http://localhost:8080/registry/peers/peer1/targets/invoke/all
+
+curl -X POST http://localhost:8080/registry/peers/peer1/jobs/clear
+
+curl localhost:8080/registry/peers/peer1/jobs/add --data '
+{ 
+"id": "job1",
+"task": {
+	"name": "job1",
+	"method":	"POST",
+	"url": "http://somewhere/echo",
+	"headers":[["x", "x1"],["y", "y1"]],
+	"body": "{\"test\":\"this\"}",
+	"replicas": 1, 
+  "requestCount": 1, 
+	"delay": "200ms",
+	"parseJSON": true
+},
+"auto": true,
+"count": 10,
+"keepFirst": true,
+"maxResults": 5,
+"delay": "1s"
+}'
+
+curl localhost:8080/registry/peers/peer1/jobs/add --data '
+{ 
+"id": "job2",
+"task": {"cmd": "sh", "args": ["-c", "date +%s; echo Hello; sleep 1;"]},
+"auto": true,
+"count": 10,
+"keepFirst": true,
+"maxResults": 5,
+"delay": "1s"
+}'
+
+curl -X POST http://localhost:8080/registry/peers/peer1/jobs/job1,job2/remove
+
+curl http://localhost:8080/registry/peers/jobs
+
+curl http://localhost:8080/registry/peers/peer1/jobs
+
+curl -X POST http://localhost:8080/registry/peers/peer1/jobs/job1,job2/invoke
+
+curl -X POST http://localhost:8080/registry/peers/peer1/jobs/invoke/all
+
+```
 <br/>
