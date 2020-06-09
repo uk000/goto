@@ -24,20 +24,35 @@ type ProxyTargetMatch struct {
 }
 
 type ProxyTarget struct {
-  Name           string           `json:name`
-  URL            string           `json:url`
-  SendID         bool             `json:sendID`
-  ReplaceURI     string           `json:replaceURI`
-  AddHeaders     [][]string       `json:addHeaders`
-  RemoveHeaders  []string         `json:removeHeaders`
-  AddQuery       [][]string       `json:addQuery`
-  RemoveQuery    []string         `json:removeQuery`
-  Match          ProxyTargetMatch `json:match`
-  Replicas       int              `json:replicas`
-  Enabled        bool             `json:enabled`
+  Name           string           `json:"name"`
+  URL            string           `json:"url"`
+  SendID         bool             `json:"sendID"`
+  ReplaceURI     string           `json:"replaceURI"`
+  AddHeaders     [][]string       `json:"addHeaders"`
+  RemoveHeaders  []string         `json:"removeHeaders"`
+  AddQuery       [][]string       `json:"addQuery"`
+  RemoveQuery    []string         `json:"removeQuery"`
+  Match          ProxyTargetMatch `json:"match"`
+  Replicas       int              `json:"replicas"`
+  Enabled        bool             `json:"enabled"`
   uriRegExp      *regexp.Regexp
   captureHeaders map[string]string
   captureQuery   map[string]string
+}
+
+type ProxyMatchCounts struct {
+  CountsByTargets            map[string]int                       `json:"countsByTargets"`
+  CountsByHeaders            map[string]int                       `json:"countsByHeaders"`
+  CountsByHeaderValues       map[string]map[string]int            `json:"countsByHeaderValues"`
+  CountsByHeaderTargets      map[string]map[string]int            `json:"countsByHeaderTargets"`
+  CountsByHeaderValueTargets map[string]map[string]map[string]int `json:"countsByHeaderValueTargets"`
+  CountsByUris               map[string]int                       `json:"countsByUris"`
+  CountsByUriTargets         map[string]map[string]int            `json:"countsByUriTargets"`
+  CountsByQuery              map[string]int                       `json:"countsByQuery"`
+  CountsByQueryValues        map[string]map[string]int            `json:"countsByQueryValues"`
+  CountsByQueryTargets       map[string]map[string]int            `json:"countsByQueryTargets"`
+  CountsByQueryValueTargets  map[string]map[string]map[string]int `json:"countsByQueryValueTargets"`
+  lock                       sync.RWMutex
 }
 
 type Proxy struct {
@@ -45,6 +60,7 @@ type Proxy struct {
   TargetsByHeaders map[string]map[string]map[string]*ProxyTarget
   TargetsByUris    map[string]map[string]*ProxyTarget
   TargetsByQuery   map[string]map[string]map[string]*ProxyTarget
+  proxyMatchCounts *ProxyMatchCounts
   lock             sync.RWMutex
 }
 
@@ -66,6 +82,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(targetsRouter, "/{target}/disable", disableProxyTarget, "PUT", "POST")
   util.AddRoute(targetsRouter, "/{targets}/invoke", invokeProxyTargets, "POST")
   util.AddRoute(targetsRouter, "/invoke/{targets}", invokeProxyTargets, "POST")
+  util.AddRoute(targetsRouter, "/counts", getProxyTargetMatchCounts, "GET")
+  util.AddRoute(targetsRouter, "/counts/clear", clearProxyTargetMatchCounts, "POST")
   util.AddRoute(targetsRouter, "/clear", clearProxyTargets, "POST")
   util.AddRoute(targetsRouter, "", getProxyTargets)
 }
@@ -78,6 +96,80 @@ func (p *Proxy) init() {
     p.TargetsByHeaders = map[string]map[string]map[string]*ProxyTarget{}
     p.TargetsByUris = map[string]map[string]*ProxyTarget{}
     p.TargetsByQuery = map[string]map[string]map[string]*ProxyTarget{}
+    p.initResults()
+  }
+}
+
+func (p *Proxy) initResults() {
+  p.proxyMatchCounts = &ProxyMatchCounts{}
+  p.proxyMatchCounts.CountsByTargets = map[string]int{}
+  p.proxyMatchCounts.CountsByUris = map[string]int{}
+  p.proxyMatchCounts.CountsByUriTargets = map[string]map[string]int{}
+  p.proxyMatchCounts.CountsByHeaders = map[string]int{}
+  p.proxyMatchCounts.CountsByHeaderValues = map[string]map[string]int{}
+  p.proxyMatchCounts.CountsByHeaderTargets = map[string]map[string]int{}
+  p.proxyMatchCounts.CountsByHeaderValueTargets = map[string]map[string]map[string]int{}
+  p.proxyMatchCounts.CountsByQuery = map[string]int{}
+  p.proxyMatchCounts.CountsByQueryValues = map[string]map[string]int{}
+  p.proxyMatchCounts.CountsByQueryTargets = map[string]map[string]int{}
+  p.proxyMatchCounts.CountsByQueryValueTargets = map[string]map[string]map[string]int{}
+}
+
+func (p *Proxy) incrementTargetMatchCounts(t *ProxyTarget) {
+  p.proxyMatchCounts.lock.Lock()
+  defer p.proxyMatchCounts.lock.Unlock()
+  p.proxyMatchCounts.CountsByTargets[t.Name]++
+}
+
+func (p *Proxy) incrementMatchCounts(t *ProxyTarget, uri string, header string, headerValue string, query string, queryValue string) {
+  p.proxyMatchCounts.lock.Lock()
+  defer p.proxyMatchCounts.lock.Unlock()
+  if uri != "" {
+    p.proxyMatchCounts.CountsByUris[uri]++
+    if p.proxyMatchCounts.CountsByUriTargets[uri] == nil {
+      p.proxyMatchCounts.CountsByUriTargets[uri] = map[string]int{}
+    }
+    p.proxyMatchCounts.CountsByUriTargets[uri][t.Name]++
+  }
+  if header != "" {
+    p.proxyMatchCounts.CountsByHeaders[header]++
+    if p.proxyMatchCounts.CountsByHeaderTargets[header] == nil {
+      p.proxyMatchCounts.CountsByHeaderTargets[header] = map[string]int{}
+    }
+    p.proxyMatchCounts.CountsByHeaderTargets[header][t.Name]++
+    if headerValue != "" {
+      if p.proxyMatchCounts.CountsByHeaderValues[header] == nil {
+        p.proxyMatchCounts.CountsByHeaderValues[header] = map[string]int{}
+      }
+      p.proxyMatchCounts.CountsByHeaderValues[header][headerValue]++
+      if p.proxyMatchCounts.CountsByHeaderValueTargets[header] == nil {
+        p.proxyMatchCounts.CountsByHeaderValueTargets[header] = map[string]map[string]int{}
+      }
+      if p.proxyMatchCounts.CountsByHeaderValueTargets[header][headerValue] == nil {
+        p.proxyMatchCounts.CountsByHeaderValueTargets[header][headerValue] = map[string]int{}
+      }
+      p.proxyMatchCounts.CountsByHeaderValueTargets[header][headerValue][t.Name]++
+    }
+  }
+  if query != "" {
+    p.proxyMatchCounts.CountsByQuery[query]++
+    if p.proxyMatchCounts.CountsByQueryTargets[query] == nil {
+      p.proxyMatchCounts.CountsByQueryTargets[query] = map[string]int{}
+    }
+    p.proxyMatchCounts.CountsByQueryTargets[query][t.Name]++
+    if queryValue != "" {
+      if p.proxyMatchCounts.CountsByQueryValues[query] == nil {
+        p.proxyMatchCounts.CountsByQueryValues[query] = map[string]int{}
+      }
+      p.proxyMatchCounts.CountsByQueryValues[query][queryValue]++
+      if p.proxyMatchCounts.CountsByQueryValueTargets[query] == nil {
+        p.proxyMatchCounts.CountsByQueryValueTargets[query] = map[string]map[string]int{}
+      }
+      if p.proxyMatchCounts.CountsByQueryValueTargets[query][queryValue] == nil {
+        p.proxyMatchCounts.CountsByQueryValueTargets[query][queryValue] = map[string]int{}
+      }
+      p.proxyMatchCounts.CountsByQueryValueTargets[query][queryValue][t.Name]++
+    }
   }
 }
 
@@ -159,10 +251,10 @@ func (p *Proxy) addQueryMatch(target *ProxyTarget) {
       targetsByQuery = map[string]map[string]*ProxyTarget{}
       p.TargetsByQuery[key] = targetsByQuery
     }
-    targetsByValue, present := targetsByQuery[key]
+    targetsByValue, present := targetsByQuery[value]
     if !present {
       targetsByValue = map[string]*ProxyTarget{}
-      targetsByQuery[key] = targetsByValue
+      targetsByQuery[value] = targetsByValue
     }
     targetsByValue[target.Name] = target
   }
@@ -450,9 +542,9 @@ func (p *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWr
       is, _ := toInvocationSpec(target, r)
       invocationSpecs = append(invocationSpecs, is)
     }
-    ic := &invocation.InvocationChannels{}
-    ic.ID = util.GetListenerPortNum(r)
+    ic := invocation.RegisterInvocation(util.GetListenerPortNum(r))
     responses := invocation.InvokeTargets(invocationSpecs, ic, true)
+    invocation.DeregisterInvocation(ic)
     for _, response := range responses {
       util.CopyHeaders(w, response.Headers, "")
       if response.StatusCode == 0 {
@@ -518,9 +610,23 @@ func clearProxyTargets(w http.ResponseWriter, r *http.Request) {
 }
 
 func getProxyTargets(w http.ResponseWriter, r *http.Request) {
-  pt := getPortProxy(r)
-  util.AddLogMessage(fmt.Sprintf("Get proxy target: %+v", pt), r)
-  util.WriteJsonPayload(w, pt)
+  p := getPortProxy(r)
+  util.AddLogMessage("Reporting proxy targets", r)
+  util.WriteJsonPayload(w, p)
+}
+
+func getProxyTargetMatchCounts(w http.ResponseWriter, r *http.Request) {
+  p := getPortProxy(r)
+  util.AddLogMessage("Reporting proxy target match counts", r)
+  util.WriteJsonPayload(w, p.proxyMatchCounts)
+}
+
+func clearProxyTargetMatchCounts(w http.ResponseWriter, r *http.Request) {
+  p := getPortProxy(r)
+  p.initResults()
+  w.WriteHeader(http.StatusAccepted)
+  util.AddLogMessage("Proxy target match counts cleared", r)
+  fmt.Fprintln(w, "Proxy target match counts cleared")
 }
 
 func invokeProxyTargets(w http.ResponseWriter, r *http.Request) {
@@ -535,17 +641,28 @@ func invokeProxyTargets(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func (pt *Proxy) getMatchingTargetsForRequest(r *http.Request) map[string]*ProxyTarget {
-  pt.lock.RLock()
-  defer pt.lock.RUnlock()
+type targetMatchInfo struct {
+  headers map[string]string
+  query   map[string]string
+  uris    []string
+}
+
+func (p *Proxy) getMatchingTargetsForRequest(r *http.Request) map[string]*ProxyTarget {
+  p.lock.RLock()
+  defer p.lock.RUnlock()
   targets := map[string]*ProxyTarget{}
+  matchInfo := map[string]*targetMatchInfo{}
   headerValuesMap := util.GetHeaderValues(r)
-  for header, valueMap := range pt.TargetsByHeaders {
+  for header, valueMap := range p.TargetsByHeaders {
     if headerValues, present := headerValuesMap[header]; present {
       if valueTargets, found := valueMap[""]; found {
         for name, target := range valueTargets {
           if target.Enabled {
             targets[name] = target
+            if matchInfo[target.Name] == nil {
+              matchInfo[target.Name] = &targetMatchInfo{headers: map[string]string{}, query: map[string]string{}, uris: []string{}}
+            }
+            matchInfo[target.Name].headers[header] = ""
           }
         }
       }
@@ -555,6 +672,10 @@ func (pt *Proxy) getMatchingTargetsForRequest(r *http.Request) map[string]*Proxy
             for name, target := range valueTargets {
               if target.Enabled {
                 targets[name] = target
+                if matchInfo[target.Name] == nil {
+                  matchInfo[target.Name] = &targetMatchInfo{headers: map[string]string{}, query: map[string]string{}, uris: []string{}}
+                }
+                matchInfo[target.Name].headers[header] = headerValue
               }
             }
           }
@@ -563,12 +684,16 @@ func (pt *Proxy) getMatchingTargetsForRequest(r *http.Request) map[string]*Proxy
     }
   }
   queryParamsMap := util.GetQueryParams(r)
-  for key, valueMap := range pt.TargetsByQuery {
+  for key, valueMap := range p.TargetsByQuery {
     if queryValues, present := queryParamsMap[key]; present {
       if valueTargets, found := valueMap[""]; found {
         for name, target := range valueTargets {
           if target.Enabled {
             targets[name] = target
+            if matchInfo[target.Name] == nil {
+              matchInfo[target.Name] = &targetMatchInfo{headers: map[string]string{}, query: map[string]string{}, uris: []string{}}
+            }
+            matchInfo[target.Name].query[key] = ""
           }
         }
       }
@@ -578,6 +703,10 @@ func (pt *Proxy) getMatchingTargetsForRequest(r *http.Request) map[string]*Proxy
             for name, target := range valueTargets {
               if target.Enabled {
                 targets[name] = target
+                if matchInfo[target.Name] == nil {
+                  matchInfo[target.Name] = &targetMatchInfo{headers: map[string]string{}, query: map[string]string{}, uris: []string{}}
+                }
+                matchInfo[target.Name].query[key] = queryValue
               }
             }
           }
@@ -585,19 +714,46 @@ func (pt *Proxy) getMatchingTargetsForRequest(r *http.Request) map[string]*Proxy
       }
     }
   }
-  for _, target := range pt.Targets {
-    if target.Enabled && target.uriRegExp != nil && target.uriRegExp.MatchString(r.RequestURI) {
-
-    }
+  for _, target := range p.Targets {
     if target.Enabled {
       if target.uriRegExp != nil && target.uriRegExp.MatchString(r.RequestURI) {
         targets[target.Name] = target
+        if matchInfo[target.Name] == nil {
+          matchInfo[target.Name] = &targetMatchInfo{headers: map[string]string{}, query: map[string]string{}, uris: []string{}}
+        }
+        matchInfo[target.Name].uris = append(matchInfo[target.Name].uris, r.RequestURI)
       } else {
         for _, uri := range target.Match.Uris {
           if uri == "/" {
             targets[target.Name] = target
+            if matchInfo[target.Name] == nil {
+              matchInfo[target.Name] = &targetMatchInfo{headers: map[string]string{}, query: map[string]string{}, uris: []string{}}
+            }
+            matchInfo[target.Name].uris = append(matchInfo[target.Name].uris, "/")
           }
         }
+      }
+    }
+  }
+  for _, t := range targets {
+    p.incrementTargetMatchCounts(t)
+    reported := false
+    for _, uri := range matchInfo[t.Name].uris {
+      if !reported {
+        p.incrementMatchCounts(t, uri, "", "", "", "")
+        reported = true
+      }
+    }
+    for h, v := range matchInfo[t.Name].headers {
+      if !reported {
+        p.incrementMatchCounts(t, "", h, v, "", "")
+        reported = true
+      }
+    }
+    for q, v := range matchInfo[t.Name].query {
+      if !reported {
+        p.incrementMatchCounts(t, "", "", "", q, v)
+        reported = true
       }
     }
   }

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -54,6 +55,22 @@ func PrintLogMessages(r *http.Request) {
   m := r.Context().Value(logmessagesKey).(*messagestore)
   log.Println(strings.Join(m.messages, " --> "))
   m.messages = m.messages[:0]
+}
+
+func GetPodName() string {
+  pod, present := os.LookupEnv("POD_NAME")
+  if !present {
+    pod, _ = os.Hostname()
+  }
+  return pod
+}
+
+func GetNamespace() string {
+  ns, present := os.LookupEnv("NAMESPACE")
+  if !present {
+    ns = "local"
+  }
+  return ns
 }
 
 func GetHostIP() string {
@@ -174,23 +191,28 @@ func ReadJsonPayload(r *http.Request, t interface{}) error {
 }
 
 func ReadJsonPayloadFromBody(body io.ReadCloser, t interface{}) error {
-  if body, err := ioutil.ReadAll(body); err != nil {
-    return err
-  } else {
+  if body, err := ioutil.ReadAll(body); err == nil {
     return json.Unmarshal(body, t)
+  } else {
+    return err
   }
 }
 
 func WriteJsonPayload(w http.ResponseWriter, t interface{}) {
   w.WriteHeader(http.StatusOK)
-  bytes, _ := json.Marshal(t)
-  fmt.Fprintf(w, "%s\n", string(bytes))
+  if reflect.ValueOf(t).IsNil() {
+    fmt.Fprintln(w, "")
+  } else {
+    bytes, _ := json.Marshal(t)
+    fmt.Fprintln(w, string(bytes))
+  }
 }
 
 func IsAdminRequest(r *http.Request) bool {
   return strings.HasPrefix(r.RequestURI, "/request") || strings.HasPrefix(r.RequestURI, "/response") ||
     strings.HasPrefix(r.RequestURI, "/listeners") || strings.HasPrefix(r.RequestURI, "/client") ||
-    strings.HasPrefix(r.RequestURI, "/label")
+    strings.HasPrefix(r.RequestURI, "/label") || strings.HasPrefix(r.RequestURI, "/job")|| 
+    strings.HasPrefix(r.RequestURI, "/registry")
 }
 
 func AddRoute(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), methods ...string) {

@@ -3,12 +3,11 @@ package runner
 import (
 	"context"
 	"fmt"
+	"goto/pkg/global"
 	"goto/pkg/http/client/target"
 	"goto/pkg/http/registry"
-	"goto/pkg/http/registry/peer"
 	"goto/pkg/http/server/conn"
-	"goto/pkg/job/jobrunner"
-	"goto/pkg/job/jobtypes"
+	"goto/pkg/job"
 	"goto/pkg/util"
 	"io"
 	"log"
@@ -78,7 +77,7 @@ func ServeListener(l net.Listener) {
 func setupStartupTasks(payload io.ReadCloser) {
   data := map[string]interface{}{}
   if err := util.ReadJsonPayloadFromBody(payload, &data); err == nil {
-    targets := peer.PeerTargets{}
+    targets := registry.PeerTargets{}
     if data["targets"] != nil {
       targetsData := util.ToJSON(data["targets"])
       if err := util.ReadJson(targetsData, &targets); err != nil {
@@ -86,21 +85,21 @@ func setupStartupTasks(payload io.ReadCloser) {
         return
       }
     }
-    jobs := peer.PeerJobs{}
+    jobs := registry.PeerJobs{}
     if data["jobs"] != nil {
       for _, jobData := range data["jobs"].(map[string]interface {}) {
-        if job, err := jobtypes.ParseJobFromPayload(util.ToJSON(jobData)); err != nil {
+        if job, err := job.ParseJobFromPayload(util.ToJSON(jobData)); err != nil {
           log.Println(err.Error())
           return
         } else {
-          jobs[job.ID] = &peer.PeerJob{*job}
+          jobs[job.ID] = &registry.PeerJob{*job}
         }
       }
     }
     log.Printf("Got %d targets and %d jobs from registry:\n", len(targets), len(jobs))
     port := strconv.Itoa(serverPort)
     pc := target.GetClientForPort(port)
-    pj := jobrunner.GetPortJobs(port)
+    pj := job.GetPortJobs(port)
 
     for _, job := range jobs {
       log.Printf("%+v\n", job)
@@ -117,15 +116,20 @@ func setupStartupTasks(payload io.ReadCloser) {
 }
 
 func registerPeer() {
-  if registry.RegistryURL != "" {
+  if global.RegistryURL != "" {
     registered := false
     retries := 0
     for !registered && retries < 3 {
-      peer := peer.Peer{registry.PeerName, util.GetHostIP()+":"+strconv.Itoa(serverPort)}
-      if resp, err := http.Post(registry.RegistryURL+"/registry/peers/add", "application/json", 
+      peer := registry.Peer{
+        Name: global.PeerName, 
+        Address: util.GetHostIP()+":"+strconv.Itoa(serverPort),
+        Pod: util.GetPodName(),
+        Namespace: util.GetNamespace(),
+      }
+      if resp, err := http.Post(global.RegistryURL+"/registry/peers/add", "application/json", 
                             strings.NewReader(util.ToJSON(peer))); err == nil {
         defer resp.Body.Close()
-        log.Printf("Registered as peer [%s] with registry [%s]\n", registry.PeerName, registry.RegistryURL)
+        log.Printf("Registered as peer [%s] with registry [%s]\n", global.PeerName, global.RegistryURL)
         registered = true
         setupStartupTasks(resp.Body)
       } else {
@@ -143,8 +147,8 @@ func registerPeer() {
 }
 
 func deregisterPeer() {
-  if registry.RegistryURL != "" {
-    url := registry.RegistryURL+"/registry/peers/"+registry.PeerName+"/remove/"+util.GetHostIP()+":"+strconv.Itoa(serverPort)
+  if global.RegistryURL != "" {
+    url := global.RegistryURL+"/registry/peers/"+global.PeerName+"/remove/"+util.GetHostIP()+":"+strconv.Itoa(serverPort)
     if resp, err := http.Post(url, "plain/text", nil); err == nil {
       defer resp.Body.Close()
       log.Println(util.Read(resp.Body))

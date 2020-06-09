@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -62,6 +63,34 @@ type InvocationResult struct {
   StatusCode int
   Headers    map[string][]string
   Body       string
+}
+
+var (
+  invocationChannels map[int]*InvocationChannels = map[int]*InvocationChannels{}
+  channelsLock       sync.Mutex
+)
+
+func RegisterInvocation(index int) *InvocationChannels {
+  channelsLock.Lock()
+  defer channelsLock.Unlock()
+  ic := &InvocationChannels{}
+  ic.ID = index
+  ic.StopChannel = make(chan string, 10)
+  ic.DoneChannel = make(chan bool, 10)
+  ic.ResultChannel = make(chan *InvocationResult, 10)
+  invocationChannels[index] = ic
+  return ic
+}
+
+func DeregisterInvocation(ic *InvocationChannels) {
+  channelsLock.Lock()
+  defer channelsLock.Unlock()
+  if invocationChannels[ic.ID] != nil {
+    close(ic.StopChannel)
+    close(ic.DoneChannel)
+    close(ic.ResultChannel)
+    delete(invocationChannels, ic.ID)
+  }
 }
 
 func ValidateSpec(spec *InvocationSpec) error {

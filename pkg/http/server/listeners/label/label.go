@@ -3,7 +3,6 @@ package label
 import (
 	"fmt"
 	"net/http"
-	"os"
 
 	"goto/pkg/http/server/listeners"
 	"goto/pkg/util"
@@ -44,14 +43,8 @@ func getLabel(w http.ResponseWriter, r *http.Request) {
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     label := listeners.GetListenerLabel(r)
-    pod, present := os.LookupEnv("POD_NAME")
-    if !present {
-      pod, _ = os.Hostname()
-    }
-    ns, present := os.LookupEnv("NAMESPACE")
-    if !present {
-      ns = "local"
-    }
+    pod := util.GetPodName()
+    ns := util.GetNamespace()
     ip := util.GetHostIP()
     hostLabel := fmt.Sprintf("%s.%s@%s", pod, ns, ip)
     util.AddLogMessage(fmt.Sprintf("[%s] [%s]", hostLabel, label), r)
