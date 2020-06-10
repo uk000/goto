@@ -29,9 +29,10 @@ type HttpJobTask struct {
 }
 
 type JobResult struct {
-  Index    string
-  Finished bool
-  Data     interface{}
+  Index       string
+  Finished    bool
+  ResultTime  time.Time
+  Data        interface{}
 }
 
 type JobRunInfo struct {
@@ -160,7 +161,7 @@ func (pj *PortJobs) getJobsToRun(names []string) []*Job {
 
 func storeJobResultsInRegistryLocker(job *Job) {
   if global.UseLocker && global.RegistryURL != "" {
-    key := job.ID + "_" + strconv.Itoa(job.jobRun.index)
+    key := "job_"+job.ID + "_" + strconv.Itoa(job.jobRun.index)
     url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/locker/store/" + key
     if resp, err := http.Post(url, "application/json",
       strings.NewReader(util.ToJSON(job.jobResults))); err == nil {
@@ -175,7 +176,7 @@ func storeCommandResult(data string, job *Job, last bool) {
   defer job.lock.Unlock()
   job.resultCount++
   index := strconv.Itoa(job.jobRun.index) + "." + strconv.Itoa(job.resultCount)
-  jobResult := &JobResult{Index: index, Finished: last, Data: data}
+  jobResult := &JobResult{Index: index, Finished: last, ResultTime: time.Now(), Data: data}
   job.jobResults = append(job.jobResults, jobResult)
   if len(job.jobResults) > job.MaxResults {
     if job.KeepFirst {
@@ -291,7 +292,7 @@ func storeHttpResult(result *invocation.InvocationResult, jobs []*Job, last bool
     if job.httpTask != nil && job.httpTask.Name == result.TargetName {
       job.resultCount++
       index := strconv.Itoa(job.jobRun.index) + "." + strconv.Itoa(job.resultCount)
-      jobResult := &JobResult{Index: index, Finished: last}
+      jobResult := &JobResult{Index: index, Finished: last, ResultTime: time.Now()}
       if job.httpTask.ParseJSON {
         json := map[string]interface{}{}
         if err := util.ReadJson(result.Body, &json); err != nil {
@@ -332,7 +333,7 @@ func invokeHttpTargets(jobs []*Job, last bool) {
       c <- true
     }()
     done := false
-    Results:
+  Results:
     for {
       select {
       case done = <-ic.DoneChannel:

@@ -28,6 +28,8 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 
 ### Scenario: [Run dynamic traffic from K8s pods at startup](scenarios.md#scenario-run-dynamic-traffic-from-k8s-pods-at-startup)
 
+### Scenario: [Capture results from transient pods](scenarios.md#scenario-capture-results-from-transient-pods)
+
 ### Scenario: [HTTPS traffic with certificate validation](scenarios.md#scenario-https-traffic-with-certificate-validation)
 
 ### Scenario: [Test a client's behavior upon service failure](scenarios.md#scenario-test-a-clients-behavior-upon-service-failure)
@@ -1334,12 +1336,12 @@ curl -X POST http://localhost:8080/registry/peers/peer1/jobs/invoke/all
           "FirstReported": "2020-06-09T18:28:17.889567-07:00",
           "LastReported": "2020-06-09T18:28:29.945121-07:00"
         },
-        "job1_1": {
+        "job_job1_1": {
           "Data": "[{\"Index\":\"1.1\",\"Finished\":false,\"Data\":{...}]",
           "FirstReported": "2020-06-09T18:28:17.879195-07:00",
           "LastReported": "2020-06-09T18:28:27.529454-07:00"
         },
-        "job2_2": {
+        "job_job2_2": {
           "Data": "[{\"Index\":\"2.1\",\"Finished\":false,\"Data\":\"1...}]",
           "FirstReported": "2020-06-09T18:28:18.985445-07:00",
           "LastReported": "2020-06-09T18:28:37.428542-07:00"
@@ -1356,13 +1358,13 @@ curl -X POST http://localhost:8080/registry/peers/peer1/jobs/invoke/all
           "FirstReported": "2020-06-09T18:28:19.91232-07:00",
           "LastReported": "2020-06-09T18:28:20.027295-07:00"
         },
-        "job1_1": {
-          "Data": "[{\"Index\":\"1.1\",\"Finished\":false...}]",
+        "job_job1_1": {
+          "Data": "[{\"Index\":\"1.1\",\"Finished\":false,\"ResultTime\":\"2020...\",\"Data\":\"...}]",
           "FirstReported": "2020-06-09T18:28:19.699578-07:00",
           "LastReported": "2020-06-09T18:28:22.778416-07:00"
         },
-        "job2_2": {
-          "Data": "[{\"Index\":\"2.1\",\"Finished\":false,\"Data\":\"...}]",
+        "job_job2_2": {
+          "Data": "[{\"Index\":\"2.1\",\"Finished\":false,\"ResultTime\":\"2020-0...\",\"Data\":\"...}]",
           "FirstReported": "2020-06-09T18:28:20.79828-07:00",
           "LastReported": "2020-06-09T18:28:59.698923-07:00"
         }

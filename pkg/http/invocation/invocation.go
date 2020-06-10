@@ -74,6 +74,7 @@ type InvocationResult struct {
 
 var (
   invocationChannels map[int]*InvocationChannels = map[int]*InvocationChannels{}
+  rootCAs           *x509.CertPool
   channelsLock       sync.Mutex
 )
 
@@ -160,12 +161,8 @@ func ValidateSpec(spec *InvocationSpec) error {
   return nil
 }
 
-func tlsConfig(target *InvocationSpec) *tls.Config {
-  cfg := &tls.Config{
-    ServerName:         target.host,
-    InsecureSkipVerify: !target.VerifyTLS,
-  }
-  rootCAs := x509.NewCertPool()
+func LoadCerts() {
+  rootCAs = x509.NewCertPool()
   found := false
   if certs, err := filepath.Glob(global.CertPath + "/*.crt"); err == nil {
     for _, c := range certs {
@@ -183,7 +180,17 @@ func tlsConfig(target *InvocationSpec) *tls.Config {
       }
     }
   }
-  if found {
+  if !found {
+    rootCAs = nil
+  }
+}
+
+func tlsConfig(target *InvocationSpec) *tls.Config {
+  cfg := &tls.Config{
+    ServerName:         target.host,
+    InsecureSkipVerify: !target.VerifyTLS,
+  }
+  if rootCAs != nil {
     cfg.RootCAs = rootCAs
   }
   return cfg
@@ -318,7 +325,7 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
             if bodyReader == nil {
               bodyReader = strings.NewReader(target.Body)
             }
-            go invokeTarget(invocationID, target.Name, targetID, url, target.Method, target.Headers,
+            go invokeTarget(invocationID, target.Name, targetID, url, target.Method, target.host, target.Headers,
               bodyReader, reportBody, invocationStatuses[target.Name].client, responseChannels[index])
             index++
           }
@@ -368,7 +375,7 @@ func newClientRequest(method string, url string, headers [][]string, body io.Rea
   }
 }
 
-func invokeTarget(index int, targetName string, targetID string, url string, method string, headers [][]string, body io.Reader, reportBody bool, client *http.Client, c chan *InvocationResult) {
+func invokeTarget(index int, targetName string, targetID string, url string, method string, host string, headers [][]string, body io.Reader, reportBody bool, client *http.Client, c chan *InvocationResult) {
   defer close(c)
   log.Printf("Invocation[%d]: Invoking targetID: %s, url: %s, method: %s, headers: %+v\n", index, targetID, url, method, headers)
   var result InvocationResult
@@ -377,6 +384,7 @@ func invokeTarget(index int, targetName string, targetID string, url string, met
   result.Headers = map[string][]string{}
   headers = append(headers, []string{"TargetID", targetID})
   if req, err := newClientRequest(method, url, headers, body); err == nil {
+    req.Host = host
     if resp, err := client.Do(req); err == nil {
       defer resp.Body.Close()
       for header, values := range resp.Header {

@@ -75,8 +75,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "/{peer}/locker/store/{key}", storeInPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/remove/{key}", removeFromPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/clear", clearLocker, "POST")
+  util.AddRoute(peersRouter, "/lockers/clear", clearLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker", getPeerLocker, "GET")
-  util.AddRoute(peersRouter, "/lockers/clear", clearLocker, "GET")
   util.AddRoute(peersRouter, "/lockers", getPeerLocker, "GET")
 
   util.AddRoute(peersRouter, "/{peer}/targets/add", addPeerTarget, "POST")
