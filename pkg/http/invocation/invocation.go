@@ -1,13 +1,18 @@
 package invocation
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"goto/pkg/global"
 	"goto/pkg/util"
 	"io"
 	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -32,7 +37,9 @@ type InvocationSpec struct {
   ConnTimeout      string     `json:"connTimeout"`
   ConnIdleTimeout  string     `json:"connIdleTimeout"`
   RequestTimeout   string     `json:"requestTimeout"`
+  VerifyTLS        bool       `json:"verifyTLS"`
   AutoInvoke       bool       `json:"autoInvoke"`
+  host             string
   connTimeoutD     time.Duration
   connIdleTimeoutD time.Duration
   requestTimeoutD  time.Duration
@@ -153,6 +160,35 @@ func ValidateSpec(spec *InvocationSpec) error {
   return nil
 }
 
+func tlsConfig(target *InvocationSpec) *tls.Config {
+  cfg := &tls.Config{
+    ServerName:         target.host,
+    InsecureSkipVerify: !target.VerifyTLS,
+  }
+  rootCAs := x509.NewCertPool()
+  found := false
+  if certs, err := filepath.Glob(global.CertPath + "/*.crt"); err == nil {
+    for _, c := range certs {
+      if cert, err := ioutil.ReadFile(c); err == nil {
+        rootCAs.AppendCertsFromPEM(cert)
+        found = true
+      }
+    }
+  }
+  if certs, err := filepath.Glob(global.CertPath + "/*.pem"); err == nil {
+    for _, c := range certs {
+      if cert, err := ioutil.ReadFile(c); err == nil {
+        rootCAs.AppendCertsFromPEM(cert)
+        found = true
+      }
+    }
+  }
+  if found {
+    cfg.RootCAs = rootCAs
+  }
+  return cfg
+}
+
 func prepareInvocation(target *InvocationSpec) *InvocationStatus {
   if target.BodyReader != nil && (target.Replicas > 1 || target.RequestCount > 1) {
     body, _ := ioutil.ReadAll(target.BodyReader)
@@ -170,6 +206,7 @@ func prepareInvocation(target *InvocationSpec) *InvocationStatus {
       KeepAlive: time.Minute,
     }).DialContext,
     TLSHandshakeTimeout: 10 * time.Second,
+    TLSClientConfig:     tlsConfig(target),
   }
   invocationStatus.client = &http.Client{Transport: tr}
   return invocationStatus
@@ -232,6 +269,19 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
   if len(targets) > 0 {
     totalRemainingRequestCount := 0
     for _, target := range targets {
+      target.host = ""
+      for _, kv := range target.Headers {
+        if strings.EqualFold(kv[0], "Host") {
+          target.host = kv[1]
+        }
+      }
+      if target.host == "" {
+        if url, err := url.Parse(target.URL); err == nil {
+          target.host = url.Host
+        } else {
+          log.Printf("Failed to parse target URL: %s\n", target.URL)
+        }
+      }
       invocationStatuses[target.Name] = prepareInvocation(target)
       totalRemainingRequestCount += (target.Replicas * target.RequestCount)
     }

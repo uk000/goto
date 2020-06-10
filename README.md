@@ -61,6 +61,72 @@ go build -o goto .
 ./goto
 ```
 
+<br/>
+
+
+#
+# Startup Command Arguments
+The application accepts the following command arguments:
+
+<table>
+    <thead>
+        <tr>
+            <th>Arguemnt</th>
+            <th>Description</th>
+            <th>Default Value</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td rowspan="3">--port</td>
+          <td>Initial port the server listens on. </td>
+          <td rowspan="3">8080</td>
+        </tr>
+        <tr>
+          <td>* Additional ports can be opened by making listener API calls on this port.</td>
+        </tr>
+        <tr>
+          <td>* See [Listeners]() featuer later in the doc.</td>
+        </tr>
+        <tr>
+          <td rowspan="2">--labels</td>
+          <td>Label this server instance will use to identify itself. </td>
+          <td rowspan="2">Goto-`IPAddress` </td>
+        </tr>
+        <tr>
+          <td>* This is used both for setting `Goto`'s default response headers as well as when registering with registry.</td>
+        </tr>
+        <tr>
+          <td rowspan="3">--registry</td>
+          <td>URL of the Goto Registry instance that this instance should connect to. </td>
+          <td rowspan="3"> "" </td>
+        </tr>
+        <tr>
+          <td>* This is used to getting initial configs and optionally report results to registry.</td>
+        </tr>
+        <tr>
+          <td>* See [Registry]() feature later in the doc.</td>
+        </tr>
+        <tr>
+          <td rowspan="2">--locker</td>
+          <td> Whether this instance should report its results back to the Goto Registry instance. </td>
+          <td rowspan="2"> false </td>
+        </tr>
+        <tr>
+          <td>* An instance can be asked to report its results to registry in case the  instance is transient, e.g. pods.</td>
+        </tr>
+        <tr>
+          <td rowspan="2">--certs</td>
+          <td> Directory path from where to load TLS root certificates. </td>
+          <td rowspan="2"> "/etc/certs" </td>
+        </tr>
+        <tr>
+          <td>* The loaded root certificates are used if available, otherwise system default root certs are used.</td>
+        </tr>
+    </tbody>
+</table>
+
+
 Once the server is up and running, rest of the interactions and configurations are done purely via REST APIs.
 
 <br/>
@@ -77,7 +143,7 @@ As a client tool, `goto` offers the following features:
 - Control the minimum wait time after each replica set invocation per target via `delay` field
 - Control the minimum duration over which total requests are sent to a client using combination of `requestCount` and `delay`
 - 
-allows targets to be configured and invoked via REST APIs. Headers can be set to track results for target invocations, and APIs make those results available for consumption as JSON output. the invocation results get accumulated across multiple invocations until cleard explicitly.
+allows targets to be configured and invoked via REST APIs. Headers can be set to track results for target invocations, and APIs make those results available for consumption as JSON output. The invocation results get accumulated across multiple invocations until cleard explicitly. In addition to keeping the results in the `goto` client instance, those are also stored in locker on registry instance if enabled. (See `--locker` command arg)
 
 
 #### APIs
@@ -110,6 +176,7 @@ allows targets to be configured and invoked via REST APIs. Headers can be set to
 | name         | string         | Name for this target |
 | method       | string         | HTTP method to use for this target |
 | url          | string         | URL for this target   |
+| verifyTLS    | bool           | Whether the TLS certificate presented by the target is verified. (Also see `--certs` command arg) |
 | headers      | [][]string     | Headers to be sent to this target |
 | body         | string         | Request body to use for this target|
 | replicas     | int            | Number of parallel invocations to be done for this target |
@@ -123,6 +190,8 @@ allows targets to be configured and invoked via REST APIs. Headers can be set to
 |Field|Data Type|Description|
 |---|---|---|
 | targetInvocationCounts      | string->int                 | Total requests sent per target |
+| targetFirstResponses        | string->time                | Time of first reponse received from the target |
+| targetLastResponses         | string->time                | Time of last reponse received from the target |
 | countsByStatus              | string->int                 | Response counts across all targets grouped by HTTP Status |
 | countsByStatusCodes         | string->int                 | Response counts across all targets grouped by HTTP Status Code |
 | countsByHeaders             | string->int                 | Response counts across all targets grouped by header names   |
@@ -209,6 +278,18 @@ curl localhost:8080/client/results
     "target2": 20,
     "target3": 600,
     "target4": 300
+  },
+  "targetFirstResponses": {
+    "target1": "2020-06-09T17:54:42.966245-07:00",
+    "target2": "2020-06-09T17:54:42.966888-07:00",
+    "target3": "2020-06-09T17:54:45.027159-07:00",
+    "target4": "2020-06-09T17:54:51.330125-07:00"
+  },
+  "targetLastResponses": {
+    "target1": "2020-06-09T17:54:47.016191-07:00",
+    "target2": "2020-06-09T17:54:47.014026-07:00",
+    "target3": "2020-06-09T17:54:52.113565-07:00",
+    "target4": "2020-06-09T17:54:52.113164-07:00"
   },
   "countsByStatus": {
     "200 OK": 880,
@@ -798,6 +879,8 @@ Any request that doesn't match any of the defined management APIs, and also does
 |PUT, POST| /request/proxy/targets/{target}/disable | Disable a proxy target |
 |POST     |	/request/proxy/targets/{targets}/invoke | Invoke proxy targets by name |
 |POST     |	/request/proxy/targets/invoke/{targets} | Invoke proxy targets by name |
+|GET      |	/request/proxy/targets/counts           | Get proxy target match/invocation stats, by uri, header and query params |
+|POST     |	/request/proxy/targets/counts/clear     | Remove all proxy target match/invocation stats |
 |POST     |	/request/proxy/targets/clear            | Remove all proxy targets |
 |GET 	    |	/request/proxy/targets                  | List all proxy targets |
 
@@ -980,6 +1063,7 @@ curl localhost:8080/response/trigger/list
 `Goto` allow jobs to be configured that can be run manually or auto-start upon addition. Two kinds of jobs are supported:
 - HTTP requests to be made to some target URL
 - Command execution on local OS
+The job results can be retrieved via API from the `goto` instance, and also stored in locker on registry instance if enabled. (See `--locker` command arg)
 
 #### Jobs APIs
 |METHOD|URI|Description|
@@ -1102,6 +1186,11 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST, PUT | /registry/peers/{peer}/remove/{address} | Deregister a peer by its label and IP address |
 | POST      | /registry/peers/clear   | Remove all registered peers|
 | GET       | /registry/peers         | Get all registered peers |
+| POST      | /registry/peers/{peer}/locker/store/{key} | Store any arbitrary value for the given key in the locker of the given peer |
+| POST      | /registry/peers/{peer}/locker/remove/{key} | Remove stored data for the given key from the locker of the given peer |
+| GET       | /registry/peers/{peer}/locker | Get locker's data for the given peer |
+| POST      | /registry/peers/{peer}/locker/clear | Clear the locker for the given peer |
+| POST      | /registry/peers/lockers/clear | Clear all lockers |
 | GET       | /registry/peers/targets | Get all registered targets for all peers |
 | POST      | /registry/peers/{peer}/targets/add | Add a target to be sent to a peer. See [Peer Target JSON Schema](#peer-target-json-schema) |
 | POST, PUT | /registry/peers/{peer}/targets/{targets}/remove | Remove given targets for a peer |
@@ -1120,8 +1209,10 @@ By registering a worker instance to a registry instance, we get a few benefits:
 #### Peer JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
-| Name    | string | Name/Label of a peer |
-| Address | string | IP address of the peer instance |
+| Name      | string | Name/Label of a peer |
+| Namespace | string | Namespace of the peer instance (if available, else `local`) |
+| Pod       | string | Pod/Hostname of the peer instance |
+| Address   | string | IP address of the peer instance |
 
 #### Peer Target JSON Schema
 ** Same as [Client Target JSON Schema](#client-target-json-schema)
@@ -1138,6 +1229,8 @@ curl -X POST http://localhost:8080/registry/peers/clear
 curl localhost:8080/registry/peers/add --data '
 { 
 "name": "peer1",
+"namespace": "test",
+"pod": "podXYZ",
 "address":	"1.1.1.1:8081"
 }'
 curl -X POST http://localhost:8080/registry/peers/peer1/remove/1.1.1.1:8081
@@ -1214,3 +1307,64 @@ curl -X POST http://localhost:8080/registry/peers/peer1/jobs/invoke/all
 
 ```
 <br/>
+
+<details>
+<summary>Registry Locker Store Example</summary>
+<p>
+
+```
+    {
+      "peer1": {
+        "client": {
+          "Data": "{\"targetInvocationCounts\":{\"t11\":400,\"t12\":400},...",
+          "FirstReported": "2020-06-09T18:28:17.877231-07:00",
+          "LastReported": "2020-06-09T18:28:29.955605-07:00"
+        },
+        "client_1": {
+          "Data": "{\"targetInvocationCounts\":{\"t11\":400},\"target...",
+          "FirstReported": "2020-06-09T18:28:17.879187-07:00",
+          "LastReported": "2020-06-09T18:28:29.958954-07:00"
+        },
+        "client_2": {
+          "Data": "{\"targetInvocationCounts\":{\"t12\":400}...",
+          "FirstReported": "2020-06-09T18:28:17.889567-07:00",
+          "LastReported": "2020-06-09T18:28:29.945121-07:00"
+        },
+        "job1_1": {
+          "Data": "[{\"Index\":\"1.1\",\"Finished\":false,\"Data\":{...}]",
+          "FirstReported": "2020-06-09T18:28:17.879195-07:00",
+          "LastReported": "2020-06-09T18:28:27.529454-07:00"
+        },
+        "job2_2": {
+          "Data": "[{\"Index\":\"2.1\",\"Finished\":false,\"Data\":\"1...}]",
+          "FirstReported": "2020-06-09T18:28:18.985445-07:00",
+          "LastReported": "2020-06-09T18:28:37.428542-07:00"
+        }
+      },
+      "peer2": {
+        "client": {
+          "Data": "{\"targetInvocationCounts\":{\"t22\":4}...}",
+          "FirstReported": "2020-06-09T18:28:19.782433-07:00",
+          "LastReported": "2020-06-09T18:28:20.023149-07:00"
+        },
+        "client_1": {
+          "Data": "{\"targetInvocationCounts\":{\"t22\":4}...}",
+          "FirstReported": "2020-06-09T18:28:19.91232-07:00",
+          "LastReported": "2020-06-09T18:28:20.027295-07:00"
+        },
+        "job1_1": {
+          "Data": "[{\"Index\":\"1.1\",\"Finished\":false...}]",
+          "FirstReported": "2020-06-09T18:28:19.699578-07:00",
+          "LastReported": "2020-06-09T18:28:22.778416-07:00"
+        },
+        "job2_2": {
+          "Data": "[{\"Index\":\"2.1\",\"Finished\":false,\"Data\":\"...}]",
+          "FirstReported": "2020-06-09T18:28:20.79828-07:00",
+          "LastReported": "2020-06-09T18:28:59.698923-07:00"
+        }
+      }
+    }
+```
+
+</p>
+</details>

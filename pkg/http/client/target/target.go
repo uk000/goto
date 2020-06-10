@@ -3,10 +3,12 @@ package target
 import (
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"goto/pkg/global"
 	"goto/pkg/http/invocation"
@@ -21,8 +23,15 @@ type Target struct {
   invocation.InvocationSpec
 }
 
+type TargetResponseTimes struct {
+  FirstResponse time.Time
+  LastResponse  time.Time
+}
+
 type TargetResults struct {
   TargetInvocationCounts     map[string]int                       `json:"targetInvocationCounts"`
+  TargetFirstResponses       map[string]time.Time                 `json:"targetFirstResponses"`
+  TargetLastResponses        map[string]time.Time                 `json:"targetLastResponses"`
   CountsByStatus             map[string]int                       `json:"countsByStatus"`
   CountsByStatusCodes        map[int]int                          `json:"countsByStatusCodes"`
   CountsByHeaders            map[string]int                       `json:"countsByHeaders"`
@@ -49,6 +58,7 @@ var (
   Handler         util.ServerHandler     = util.ServerHandler{Name: "client", SetRoutes: SetRoutes}
   portClients     map[string]*PortClient = map[string]*PortClient{}
   portClientsLock sync.RWMutex
+  InvocationResultsRetention int = 10
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -92,6 +102,8 @@ func (pc *PortClient) initTargetResults(index ...int) {
   defer pc.resultsLock.Unlock()
   if pc.targetResults.TargetInvocationCounts == nil {
     pc.targetResults.TargetInvocationCounts = map[string]int{}
+    pc.targetResults.TargetFirstResponses = map[string]time.Time{}
+    pc.targetResults.TargetLastResponses = map[string]time.Time{}
     pc.targetResults.CountsByStatusCodes = map[int]int{}
     pc.targetResults.CountsByStatus = map[string]int{}
     pc.targetResults.CountsByHeaders = map[string]int{}
@@ -105,6 +117,8 @@ func (pc *PortClient) initTargetResults(index ...int) {
     invocationIndex := index[0]
     pc.targetResultsByInvocation[invocationIndex] = &TargetResults{}
     pc.targetResultsByInvocation[invocationIndex].TargetInvocationCounts = map[string]int{}
+    pc.targetResultsByInvocation[invocationIndex].TargetFirstResponses = map[string]time.Time{}
+    pc.targetResultsByInvocation[invocationIndex].TargetLastResponses = map[string]time.Time{}
     pc.targetResultsByInvocation[invocationIndex].CountsByStatusCodes = map[int]int{}
     pc.targetResultsByInvocation[invocationIndex].CountsByStatus = map[string]int{}
     pc.targetResultsByInvocation[invocationIndex].CountsByHeaders = map[string]int{}
@@ -256,11 +270,13 @@ func (pc *PortClient) clearResults() {
 }
 
 func storeJobResultsInRegistryLocker(key string, targetResults *TargetResults) {
-  url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/locker/store/" + key
-  if resp, err := http.Post(url, "application/json",
-    strings.NewReader(util.ToJSON(targetResults))); err == nil {
-    defer resp.Body.Close()
-    log.Printf("Stored invocation results under locker key %s for peer [%s] with registry [%s]\n", key, global.PeerName, global.RegistryURL)
+  if global.UseLocker && global.RegistryURL != "" {
+    url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/locker/store/" + key
+    if resp, err := http.Post(url, "application/json",
+      strings.NewReader(util.ToJSON(targetResults))); err == nil {
+      defer resp.Body.Close()
+      log.Printf("Stored invocation results under locker key %s for peer [%s] with registry [%s]\n", key, global.PeerName, global.RegistryURL)
+    }
   }
 }
 
@@ -272,6 +288,11 @@ func (pc *PortClient) storeResults(result *invocation.InvocationResult, targetRe
     targetResults.CountsByTargetHeaderValues[result.TargetName] = map[string]map[string]int{}
   }
   targetResults.TargetInvocationCounts[result.TargetName]++
+  now := time.Now()
+  if targetResults.TargetFirstResponses[result.TargetName].IsZero() {
+    targetResults.TargetFirstResponses[result.TargetName] = now
+  }
+  targetResults.TargetLastResponses[result.TargetName] = now
   targetResults.CountsByStatus[result.Status]++
   targetResults.CountsByStatusCodes[result.StatusCode]++
   targetResults.CountsByTargetStatus[result.TargetName][result.Status]++
@@ -299,6 +320,15 @@ func (pc *PortClient) storeTargetResult(invocationIndex int, result *invocation.
   pc.resultsLock.Lock()
   defer pc.resultsLock.Unlock()
   pc.storeResults(result, pc.targetResults)
+  for len(pc.targetResultsByInvocation) >= InvocationResultsRetention {
+    oldest := math.MaxInt32
+    for i := range pc.targetResultsByInvocation {
+      if i < oldest {
+        oldest = i
+      }
+    }
+    delete(pc.targetResultsByInvocation, oldest)
+  }
   if pc.targetResultsByInvocation[invocationIndex] == nil {
     pc.targetResultsByInvocation[invocationIndex] = &TargetResults{}
   }
@@ -597,7 +627,7 @@ Results:
   }
   <-c
   if done {
-    MoreResults:
+  MoreResults:
     for {
       select {
       case result := <-ic.ResultChannel:

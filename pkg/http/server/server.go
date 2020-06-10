@@ -16,9 +16,9 @@ import (
 	"goto/pkg/job"
 )
 
-func Run(listenPort int) {
+func Run() {
 	listeners.SetListenerServer(runner.ServeListener)
-  runner.RunHttpServer(listenPort, "/", label.Handler, conn.Handler, job.Handler, request.Handler,
+  runner.RunHttpServer("/", label.Handler, conn.Handler, job.Handler, request.Handler,
 		response.Handler, listeners.Handler, registry.Handler, client.Handler, echo.Handler, catchall.Handler)
   os.Exit(0)
 }

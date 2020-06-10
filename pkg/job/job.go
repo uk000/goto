@@ -159,12 +159,14 @@ func (pj *PortJobs) getJobsToRun(names []string) []*Job {
 }
 
 func storeJobResultsInRegistryLocker(job *Job) {
-  key := job.ID + "_" + strconv.Itoa(job.jobRun.index)
-  url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/locker/store/" + key
-  if resp, err := http.Post(url, "application/json",
-    strings.NewReader(util.ToJSON(job.jobResults))); err == nil {
-    defer resp.Body.Close()
-    log.Printf("Stored job results under locker key %s for peer [%s] with registry [%s]\n", key, global.PeerName, global.RegistryURL)
+  if global.UseLocker && global.RegistryURL != "" {
+    key := job.ID + "_" + strconv.Itoa(job.jobRun.index)
+    url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/locker/store/" + key
+    if resp, err := http.Post(url, "application/json",
+      strings.NewReader(util.ToJSON(job.jobResults))); err == nil {
+      defer resp.Body.Close()
+      log.Printf("Stored job results under locker key %s for peer [%s] with registry [%s]\n", key, global.PeerName, global.RegistryURL)
+    }
   }
 }
 

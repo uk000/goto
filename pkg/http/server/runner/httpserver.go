@@ -25,11 +25,9 @@ import (
 
 var (
   server *http.Server
-  serverPort int
 )
 
-func RunHttpServer(port int, root string, handlers ...util.ServerHandler) {
-  serverPort = port
+func RunHttpServer(root string, handlers ...util.ServerHandler) {
   r := mux.NewRouter()
   r.Use(util.ContextMiddleware)
   r.Use(util.LoggingMiddleware)
@@ -43,7 +41,7 @@ func RunHttpServer(port int, root string, handlers ...util.ServerHandler) {
   }
   http.Handle(root, r)
   server = &http.Server{
-    Addr:         fmt.Sprintf("0.0.0.0:%d", port),
+    Addr:         fmt.Sprintf("0.0.0.0:%d", global.ServerPort),
     WriteTimeout: 60 * time.Second,
     ReadTimeout:  60 * time.Second,
     IdleTimeout:  60 * time.Second,
@@ -97,7 +95,7 @@ func setupStartupTasks(payload io.ReadCloser) {
       }
     }
     log.Printf("Got %d targets and %d jobs from registry:\n", len(targets), len(jobs))
-    port := strconv.Itoa(serverPort)
+    port := strconv.Itoa(global.ServerPort)
     pc := target.GetClientForPort(port)
     pj := job.GetPortJobs(port)
 
@@ -122,7 +120,7 @@ func registerPeer() {
     for !registered && retries < 3 {
       peer := registry.Peer{
         Name: global.PeerName, 
-        Address: util.GetHostIP()+":"+strconv.Itoa(serverPort),
+        Address: util.GetHostIP()+":"+strconv.Itoa(global.ServerPort),
         Pod: util.GetPodName(),
         Namespace: util.GetNamespace(),
       }
@@ -148,7 +146,7 @@ func registerPeer() {
 
 func deregisterPeer() {
   if global.RegistryURL != "" {
-    url := global.RegistryURL+"/registry/peers/"+global.PeerName+"/remove/"+util.GetHostIP()+":"+strconv.Itoa(serverPort)
+    url := global.RegistryURL+"/registry/peers/"+global.PeerName+"/remove/"+util.GetHostIP()+":"+strconv.Itoa(global.ServerPort)
     if resp, err := http.Post(url, "plain/text", nil); err == nil {
       defer resp.Body.Close()
       log.Println(util.Read(resp.Body))

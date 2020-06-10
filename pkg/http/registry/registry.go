@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -44,7 +45,13 @@ type PeerJob struct {
 
 type PeerJobs map[string]*PeerJob
 
-type PeerLocker map[string]string
+type LockerData struct {
+  Data          string
+  FirstReported time.Time
+  LastReported  time.Time
+}
+
+type PeerLocker map[string]*LockerData
 
 type PortRegistry struct {
   peers       map[string]*Peers
@@ -151,7 +158,13 @@ func (pr *PortRegistry) storeInPeerLocker(name string, key string, value string)
   if pr.peerLocker[name] == nil {
     pr.peerLocker[name] = PeerLocker{}
   }
-  pr.peerLocker[name][key] = value
+  now := time.Now()
+  if pr.peerLocker[name][key] == nil {
+    pr.peerLocker[name][key] = &LockerData{}
+    pr.peerLocker[name][key].FirstReported = now
+  }
+  pr.peerLocker[name][key].Data = value
+  pr.peerLocker[name][key].LastReported = now
 }
 
 func (pr *PortRegistry) removeFromPeerLocker(name string, key string) {

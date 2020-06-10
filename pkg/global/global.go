@@ -1,6 +1,9 @@
 package global
 
 var (
-  PeerName     string
-  RegistryURL  string
+  ServerPort  int
+  PeerName    string
+  RegistryURL string
+  CertPath    string
+  UseLocker   bool
 )
