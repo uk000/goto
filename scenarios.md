@@ -2,9 +2,9 @@
 
 # Scenario: Use HTTP client to send requests and track results
 
-A very simple use case is to send HTTP traffic to one or more servers for a period of time, and collect the results per destination. To add more to it, you may want to send different kinds of HTTP requests (methods, headers), receive same/different response headers from those destinations, and track how the various destinations responded over the duration of the test in terms of response counts by status code, by header, etc.
+A very simple use case is to send HTTP traffic to one or more servers for a period of time and collect the results per destination. To add more to it, you may want to send different kinds of HTTP requests (methods, headers), receive same/different response headers from those destinations, and track how the various destinations responded over the duration of the test in terms of response counts by status code, by header, etc.
 
-`Goto` as a client tool allows you to script a test like. You can run multiple instances of `goto` as clients and servers, and then use APIs tO;
+`Goto` as a client tool allows you to script a test like. You can run multiple instances of `goto` as clients and servers, and then use APIs to:
 - configure requests and responses, 
 - trigger tests in multiple steps/iterations, and 
 - get results
@@ -301,7 +301,7 @@ A very simple use case is to send HTTP traffic to one or more servers for a peri
       </p>
       </details>
 
-The results are counted overall and per-target, grouped by status, status code, header names, and header name + value. The detailed description of of these result fields can be found in the Client API documentation in Readme.
+The results are counted overall and per-target, grouped by status, status code, header names, and header name + value. The detailed description of these result fields can be found in the Client API documentation in Readme.
 - `countsByStatus`
 - `countsByStatusCodes`
 - `countsByHeaders`
@@ -312,6 +312,83 @@ The results are counted overall and per-target, grouped by status, status code, 
 - `countsByTargetHeaderValues`
 
 
+# Scenario: Run dynamic traffic from K8s pods at startup
+
+What if you want to test traffic flowing to/from pods amid chaos where pods keep dying and getting respawned? Or what if you're testing in the presence of a canary deployment tool like `flagger`, where canary pods get spawned on the fly and later get terminated, and you need those canary pods to send/receive traffic.
+
+Sending traffic to such ephemeral pods is straight-forward, but getting traffic to originate from those pods automatically as soon as the pods come up? Clearly that can only happen if you put an application there that starts sending traffic as soon as it starts. But what if that traffic has to be controlled dynamically based on your current testing scenario? It's not a fixed set of traffic that needs to originate from those pods, but instead the traffic changes based on some other external conditions. 
+
+Now it gets tricky, because you need to be able to tell the pod where to send the traffic once it's up. But remember, the pod is not even up yet, flagger is still in the middle on spawning your canary pods. Or perhaps K8s is in the middle of recycling pod. What do you do now? Keep polling K8s for the pod availability, and once the pod is available, connect to it via IP and configure the current traffic configs/targets there so that it can start sending traffic per the current testing requirement? Exactly this is what `goto` can do, but automatically? How? Glad that you asked.
+
+`Goto` has a `Registry` feature, where one or more `goto` instances can act as registry, and other `goto` instances can be configured to connect to the registry at startup. You can configure traffic details at registry, to be passed to all pods based on their labels. As soon as a `goto` instance comes up and connects to the registry, the registry sends it its share of current traffic configs. And some/all of that traffic may be configured to be run automatically. So, as soon as the `goto` instances receive a traffic config from registry and notice that it's meant to be auto invoked, they start running that traffic like there's no tomorrow.
+
+Let's see the APIs involved to achieve this scenario:
+
+1. Let's run one goto instance as registry. We run it on port 8000 and give it a label `registry` just for run. This instance is not meant to send/receive real traffic. Note that there's nothing special about a registry instance, any `goto` instance can act as a registry. Let's assume this instance is available at `http://goto-registry`
+   ```
+   $ goto --port 8000 --label registry
+   ```
+2. On this registry instance, we configure some traffic that would be passed on to any `goto` instances that connect to registry with label `peer1`. All these worker instances that connect to registry are called `peers`. In the API below, `peer1` is the label to be used by some such peers.
+   ```
+   $ curl -s localhost:8080/registry/peers/peer1/targets/add --data '
+      { 
+      "name": "t1",
+      "method":	"POST",
+      "url": "http://somewhere/foo",
+      "headers":[["x", "x1"],["y", "y1"]],
+      "body": "{\"test\":\"this\"}",
+      "replicas": 2,
+      "requestCount": 200, 
+      "delay": "50ms", 
+      "sendID": false,
+      "autoInvoke": true
+      }'
+   ```
+   Quite simply, we configured a target for `peer1` instances. Go ahead and add some more for other peers too. Note that this target `t1` was marked for auto invocation via flag `autoInvoke`. We'll see how this plays out soon.
+
+3. Now the basic registry work is done. Time to configure `peer1` instances. This could be a K8s deployment, but for now we'll just look at simple command line examples. A peer instance is passed a couple of additional things as command line args: its own label and the URL of the registry it must connect to.
+   ```
+   $ goto --port 8080 --label peer1 --registry http://goto-registry 
+   ```
+   I'm sure you're connecting the dots already by now. This instance is told that it's called `peer1` and it should talk to registry at `http://goto-registry` for further instructions. `Goto` instances are good subordinates, they do as told, so this one will indeed connect to the registry at startup. What's not obvious from above command line example is that if you put these cmd args in K8s deployment's pod spec, all pods of that deployment will automatically fall in line and connect to this same registry with the same label, and hence receive the same set of configs. 
+   
+   Let's assume that this `goto` instance is available at `http://goto-peer1`
+4. Once `peer1` pods are up and running, we can check all of them for the targets they received from registry
+   ```
+   $ curl http://goto-peer1/client/targets
+   ```
+   The above API call should show the target t1 that we configured at the registry. Additionally, remember that target `t1` was marked for auto invocation? Let's check the `peer1` instance for some results already at startup.
+   ```
+   $ curl http://goto-peer1/client/results
+   ``` 
+   If all goes as planned (which it usually does with `goto`), you should see that the `peer1` instance already ran the traffic as requested in target config `t1` and got some results for you.
+5. Nice already, isn't it? But it keeps getting better. Not only `peer1` received the configs at startup, but any new config you add at the registry will automatically get pushed to all registered instances for that peer label. And not just client targets, but also jobs. What are jobs? Well, that's the story for another scenario. Or checkout [Job feature documentation](README.md#jobs-features)
+
+
+# Scenario: HTTPS traffic with certificate validation
+
+`Goto` client tool can be used to send HTTPS traffic and verify TLS certificates for some targets while skipping TLS validation for some other targets.
+
+To perform TLS cert validation, `goto` needs to be given Root CA certificates. Generally, `goto`'s philosophy is to configure everything via APIs, but there are a few things that must be configured at startup. You saw some of those in the previous scenario (port, label, registry url). Root certificates location is one of them, and for good reason: if some HTTPS traffic must be invoked at a goto instance at startup (as described in previous scenario), it would need the TLS certificates right at startup.
+
+Configuring Root CA certificates location is a simple command line argument:
+```
+$ goto --certs /some/location/on/local/filesystem
+```
+`Goto` will look for all files with extensions `.crt` and `.pem` in this directory and add those to a root cert bundle that it'd use later for HTTPS traffic. If no directory is given at startup, it looks at `/etc/certs` by default.
+
+Additionally, for each HTTPS target, you can use the `verifyTLS` field to control whether or not the target's TLS certificate should be verified. Another relevant piece of config is the `Host` header. For non-TLS traffic, `Host` header can be used if you're sending traffic via a gateway/proxy that routes traffic based on host header. For HTTPS traffic, such gateways rely on SNI authority instead of Host header. However, `goto` will look at the `Host` header and put that as the ServerName for SNI identification (SNI stands for `Server Name Indication`, so "SNI Identification" becomes "Server Name Indication Identification"... hmmm, weird.). Let's see an example payload with both `verifyTLS` and `Host` header.
+```
+$ curl -v http://goto-instance/client/targets/add --data '
+{ 
+"name": "t1",
+"method":	"GET",
+"url": "https://somewhere.com",
+"headers":[["Host", "somewhere.else.com"]],
+"verifyTLS": true
+}'
+```
+This config would lead to HTTPS traffic being sent to `somewhere.com`, but SNI authority set to `somewhere.else.com`, and it would verify the TLS certificates presented by the target server against `somewhere.else.com` host and using the Root CAs read from the command line arg location. Sweet!
 
 
 # Scenario: Test a client's behavior upon service failure
@@ -368,7 +445,7 @@ Let's look at the second setup in more details as that's more exciting of the tw
 
 <br/>
 
-6. Now the client will receive `HTTP 503` for next 2 requests. Have the client send requests now, and observe client's behavior for next 2 failures followed by subsequent successes.
+6. Now the client will receive `HTTP 503` for next 2 requests. Have the client send requests and observe client's behavior for next 2 failures followed by subsequent successes.
    
     ```
     curl -v http://goto:8080/my/fancy/api
@@ -385,7 +462,7 @@ As this small scenario demonstrated, `goto` lets you inject controlled failure o
 # Scenario: Count number of requests received at each service instance (Pod/VM) for certain headers
 One of the basic things we may want to track is, to observe a client's or proxy's behavior in terms of distributing traffic load across various endpoints of a service. While many clients/proxies may provide metrics to inform you about the number of requests it sent per service endpoint (IP), but what if you wanted to track it by headers: i.e., how many requests received per service endpoint per header.
 
-The `goto` tool can be used to achieve this simply by putting a `goto` instance in proxy mode in front of each service instance, and enable tracking for the specific headers you wish to track. Let's look at the sample API calls with the assumption of two service instances `http://service-1` and `http://service-2`, and a `goto` instance in front of each service, `http://goto-1` and `http://goto-2`.
+The `goto` tool can be used to achieve this simply by putting a `goto` instance in proxy mode in front of each service instance and enable tracking for the specific headers you wish to track. Let's look at the sample API calls with the assumption of two service instances `http://service-1` and `http://service-2`, and a `goto` instance in front of each service, `http://goto-1` and `http://goto-2`.
 
 Clear and add tracking headers to `goto` instances:
 

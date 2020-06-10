@@ -26,6 +26,10 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 
 ### Scenario: [Use HTTP client to send requests and track results](scenarios.md#scenario-use-http-client-to-send-requests-and-track-results)
 
+### Scenario: [Run dynamic traffic from K8s pods at startup](scenarios.md#run-dynamic-traffic-from-k8s-pods-at-startup)
+
+### Scenario: [HTTPS traffic with certificate validation](scenarios.md#https-traffic-with-certificate-validation)
+
 ### Scenario: [Test a client's behavior upon service failure](scenarios.md#scenario-test-a-clients-behavior-upon-service-failure)
 
 ### Scenario: [Count number of requests received at each service instance (Pod/VM) for certain headers](scenarios.md#scenario-count-number-of-requests-received-at-each-service-instance-podvm-for-certain-headers)
