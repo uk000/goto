@@ -71,7 +71,7 @@ The application accepts the following command arguments:
 <table>
     <thead>
         <tr>
-            <th>Arguemnt</th>
+            <th>Argument</th>
             <th>Description</th>
             <th>Default Value</th>
         </tr>
@@ -86,10 +86,10 @@ The application accepts the following command arguments:
           <td>* Additional ports can be opened by making listener API calls on this port.</td>
         </tr>
         <tr>
-          <td>* See [Listeners]() featuer later in the doc.</td>
+          <td>* See [Listeners](#-listeners) feature later in the doc.</td>
         </tr>
         <tr>
-          <td rowspan="2">--labels</td>
+          <td rowspan="2">--label</td>
           <td>Label this server instance will use to identify itself. </td>
           <td rowspan="2">Goto-`IPAddress` </td>
         </tr>
@@ -105,7 +105,7 @@ The application accepts the following command arguments:
           <td>* This is used to getting initial configs and optionally report results to registry.</td>
         </tr>
         <tr>
-          <td>* See [Registry]() feature later in the doc.</td>
+          <td>* See [Registry](#registry-features) feature later in the doc.</td>
         </tr>
         <tr>
           <td rowspan="2">--locker</td>
@@ -139,11 +139,11 @@ As a client tool, `goto` offers the following features:
 - Invoke selective targets or all configured targets in batches
 - Multiple concurrent invocations of batches of targets
 - Control the number of concurrent requests per target via `replicas` field
-- Control the total number of requests per taget via `requestCount` field
+- Control the total number of requests per target via `requestCount` field
 - Control the minimum wait time after each replica set invocation per target via `delay` field
 - Control the minimum duration over which total requests are sent to a client using combination of `requestCount` and `delay`
 - 
-allows targets to be configured and invoked via REST APIs. Headers can be set to track results for target invocations, and APIs make those results available for consumption as JSON output. The invocation results get accumulated across multiple invocations until cleard explicitly. In addition to keeping the results in the `goto` client instance, those are also stored in locker on registry instance if enabled. (See `--locker` command arg)
+allows targets to be configured and invoked via REST APIs. Headers can be set to track results for target invocations, and APIs make those results available for consumption as JSON output. The invocation results get accumulated across multiple invocations until cleared explicitly. In addition to keeping the results in the `goto` client instance, those are also stored in locker on registry instance if enabled. (See `--locker` command arg)
 
 
 #### APIs
@@ -182,7 +182,7 @@ allows targets to be configured and invoked via REST APIs. Headers can be set to
 | replicas     | int            | Number of parallel invocations to be done for this target |
 | requestCount | int            | Number of requests to be made per replicas for this target. The final request count becomes replicas * requestCount  |
 | delay        | duration       | Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
-| sendId       | bool           | Whether or not a unique ID be sent with each client request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
+| sendID       | bool           | Whether or not a unique ID be sent with each client request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
 | autoInvoke   | bool           | Whether this target should be invoked as soon as it's added |
 
 
@@ -190,8 +190,8 @@ allows targets to be configured and invoked via REST APIs. Headers can be set to
 |Field|Data Type|Description|
 |---|---|---|
 | targetInvocationCounts      | string->int                 | Total requests sent per target |
-| targetFirstResponses        | string->time                | Time of first reponse received from the target |
-| targetLastResponses         | string->time                | Time of last reponse received from the target |
+| targetFirstResponses        | string->time                | Time of first response received from the target |
+| targetLastResponses         | string->time                | Time of last response received from the target |
 | countsByStatus              | string->int                 | Response counts across all targets grouped by HTTP Status |
 | countsByStatusCodes         | string->int                 | Response counts across all targets grouped by HTTP Status Code |
 | countsByHeaders             | string->int                 | Response counts across all targets grouped by header names   |
@@ -514,7 +514,7 @@ curl localhost:8081/listeners
 #
 ## > Listener Label
 
-By default, each listener adds a header `Via-Goto: <port>` to each response it sends, where <port> is the port on which the listener is running (default being 8080). A custom label can be added to a listener using the label APIs described below. In addition to `Via-Goto`, each listener also adds another header `Goto-Host` that carries the pod/host name, pod namespace (or `local` if not running as a kubernetes pod), and pod/host IP address to identify where the response came from.
+By default, each listener adds a header `Via-Goto: <port>` to each response it sends, where <port> is the port on which the listener is running (default being 8080). A custom label can be added to a listener using the label APIs described below. In addition to `Via-Goto`, each listener also adds another header `Goto-Host` that carries the pod/host name, pod namespace (or `local` if not running as a K8s pod), and pod/host IP address to identify where the response came from.
 
 #### APIs
 |METHOD|URI|Description|
@@ -723,7 +723,7 @@ This feature allows adding custom response headers to all responses sent by the 
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
-| PUT, POST | /response/headers/add/{header}/{value}  | Add a custom header to be sent with all resopnses |
+| PUT, POST | /response/headers/add/{header}/{value}  | Add a custom header to be sent with all responses |
 | PUT, POST | /response/headers/remove/{header}       | Remove a previously added custom response header |
 | POST      |	/response/headers/clear                 | Remove all configured custom response headers |
 | GET       |	/response/headers/list                  | Get list of configured custom response headers |
@@ -842,7 +842,7 @@ curl -I  localhost:8080/status/418
 
 #
 ## > Echo API
-This URI echoes back the headers and payload sent by client. The response is also subject to any forced response status, and will carry custom headers if any are configured.
+This URI echoes back the headers and payload sent by client. The response is also subject to any forced response status and will carry custom headers if any are configured.
 
 #### APIs
 |METHOD|URI|Description|
@@ -874,7 +874,7 @@ Any request that doesn't match any of the defined management APIs, and also does
 |METHOD|URI|Description|
 |---|---|---|
 |POST     |	/request/proxy/targets/add              | Add target for proxying requests [see `Proxy Target JSON Schema`](#proxy-target-json-schema) |
-|PUT, POST| /request/proxy/targets/{target}/remove  | Remove a proxy traget |
+|PUT, POST| /request/proxy/targets/{target}/remove  | Remove a proxy target |
 |PUT, POST| /request/proxy/targets/{target}/enable  | Enable a proxy target |
 |PUT, POST| /request/proxy/targets/{target}/disable | Disable a proxy target |
 |POST     |	/request/proxy/targets/{targets}/invoke | Invoke proxy targets by name |
@@ -890,12 +890,12 @@ Any request that doesn't match any of the defined management APIs, and also does
 |---|---|---|
 | name          | string                                | Name for this target |
 | url           | string                                | URL for the target. Request's URI or Override URI gets added to the URL for each proxied request. |
-| sendId        | bool           | Whether or not a unique ID be sent with each request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
+| sendID        | bool           | Whether or not a unique ID be sent with each request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
 | replaceURI    | string                                | URI to be used in place of the original request URI.|
 | addHeaders    | `[][]string`                            | Additional headers to add to the request before proxying |
 | removeHeaders | `[]string `                             | Headers to remove from the original request before proxying |
 | addQuery      | `[][]string`                            | Additional query parameters to add to the request before proxying |
-| removeQuery   | `[]string`                              | Query parametes to remove from the original request before proxying |
+| removeQuery   | `[]string`                              | Query parameters to remove from the original request before proxying |
 | match        | JSON     | Match criteria based on which runtime traffic gets proxied to this target. See [JSON Schema](#proxy-target-match-criteria-json-schema) and [detailed explanation](#proxy-target-match-criteria) below |
 | replicas     | int      | Number of parallel replicated calls to be made to this target for each matched request. This allows each request to result in multiple calls to be made to a target if needed for some test scenarios |
 | enabled       | bool     | Whether or not the proxy target is currently active |
@@ -921,7 +921,7 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
   "enabled":true, "sendID": true}'
   ```
   
-  This target will be triggerd for requests with the pattern `/foo/<somex>/bar/<somey>` and the request will be forwarded to the target as `http://somewhere/abc/somey/def/somex`, where the values `somex` and `somey` are extracted from the original request and injected into the replacement URI.
+  This target will be triggered for requests with the pattern `/foo/<somex>/bar/<somey>` and the request will be forwarded to the target as `http://somewhere/abc/somey/def/somex`, where the values `somex` and `somey` are extracted from the original request and injected into the replacement URI.
 
   URI match `/` has the special behavior of matching all traffic.
 
@@ -1007,7 +1007,7 @@ curl localhost:8080/request/proxy/targets
 |METHOD|URI|Description|
 |---|---|---|
 |POST     |	/response/trigger/add              | Add a trigger target. See [Trigger Target JSON Schema](#trigger-target-json-schema) |
-|PUT, POST| /response/trigger/{target}/remove  | Remove a trigger traget |
+|PUT, POST| /response/trigger/{target}/remove  | Remove a trigger target |
 |PUT, POST| /response/trigger/{target}/enable  | Enable a trigger target |
 |PUT, POST| /response/trigger/{target}/disable | Disable a trigger target |
 |POST     |	/response/trigger/{targets}/invoke | Invoke trigger targets by name for manual testing |
@@ -1023,7 +1023,7 @@ curl localhost:8080/request/proxy/targets
 | url           | string                                | URL for the target. |
 | headers       | `[][]string`                          | request headers to send with this trigger request |
 | body          | `string`                              | request body to send with this trigger request |
-| sendId        | bool           | Whether or not a unique ID be sent with each request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
+| sendID        | bool           | Whether or not a unique ID be sent with each request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
 | enabled       | bool     | Whether or not the trigger is currently active |
 | triggerOnResponseStatuses | []int     | List of response statuses for which this target will be triggered |
 
@@ -1084,7 +1084,7 @@ The job results can be retrieved via API from the `goto` instance, and also stor
 |---|---|---|
 | id            | string        | ID for this job |
 | task          | JSON          | Task to be executed for this job. Can be an [HTTP Task](#job-http-task-json-schema) or [Command Task](#job-command-task-json-schema) |
-| delay         | duration      | Minimum delay to be added per iternation of the job. Actual delay may be higher than this. |
+| delay         | duration      | Minimum delay to be added per iteration of the job. Actual delay may be higher than this. |
 | count         | int           | Number of times this job should be executed during a single invocation |
 | maxResults    | int           | Number of results to be retained from all the executions of this job during an invocation |
 | keepFirst     | bool          | Indicates whether the first invocation result should be retained, reducing the slots for capturing remaining results by (maxResults-1) |
@@ -1172,7 +1172,7 @@ curl -X POST http://localhost:8080/jobs/job1/results
 
 Any `goto` instance can act as a registry of other `goto` instances, and other worker `goto` instances can be configured to register themselves with the registry. You can pick any instance as registry and pass its URL to other instances as a command line argument, which tells other instances to register themselves with the given registry at startup.
 
-A `goto` instance can be passed command line arguments '`--registry <url>`' to point it to the `goto` instance acting as a registry. When a `goto` instance receives this command line argument, it invokes the registration API on the registry instance passing its `label` and `IP:Port` to the registry server. The `label` a `goto` instance uses can also be passed to it as a command line argument '`--label <label>`'. Multiple worker `goto` instances can register using the same label but different IP addresses, which would be the case for pods of the same deployment in kubernetes. The worker instances that register with a registry instance at startup, also deregister themselves with the registry upon shutdown.
+A `goto` instance can be passed command line arguments '`--registry <url>`' to point it to the `goto` instance acting as a registry. When a `goto` instance receives this command line argument, it invokes the registration API on the registry instance passing its `label` and `IP:Port` to the registry server. The `label` a `goto` instance uses can also be passed to it as a command line argument '`--label <label>`'. Multiple worker `goto` instances can register using the same label but different IP addresses, which would be the case for pods of the same deployment in K8s. The worker instances that register with a registry instance at startup, also deregister themselves with the registry upon shutdown.
 
 By registering a worker instance to a registry instance, we get a few benefits:
 1. You can pre-register a list of invocation targets and jobs at the registry instance that should be handed out to the worker instances. These targets/jobs are registered by labels, and the worker instances receive the matching targets+jobs for the labels they register with.
