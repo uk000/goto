@@ -74,7 +74,7 @@ type InvocationResult struct {
 
 var (
   invocationChannels map[int]*InvocationChannels = map[int]*InvocationChannels{}
-  rootCAs           *x509.CertPool
+  rootCAs            *x509.CertPool
   channelsLock       sync.Mutex
 )
 
@@ -236,12 +236,12 @@ func prepareTargetURL(target *InvocationSpec) string {
   return url
 }
 
-func collectStopRequests(invocationChannels *InvocationChannels, invocationStatuses map[string]*InvocationStatus) {
-  if invocationChannels.StopChannel != nil {
+func collectStopRequests(ic *InvocationChannels, invocationStatuses map[string]*InvocationStatus) {
+  if ic.StopChannel != nil {
     for {
       stopTarget := ""
       select {
-      case stopTarget = <-invocationChannels.StopChannel:
+      case stopTarget = <-ic.StopChannel:
       default:
       }
       if stopTarget != "" {

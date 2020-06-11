@@ -29,10 +29,10 @@ type HttpJobTask struct {
 }
 
 type JobResult struct {
-  Index       string
-  Finished    bool
-  ResultTime  time.Time
-  Data        interface{}
+  Index      string
+  Finished   bool
+  ResultTime time.Time
+  Data       interface{}
 }
 
 type JobRunInfo struct {
@@ -161,7 +161,7 @@ func (pj *PortJobs) getJobsToRun(names []string) []*Job {
 
 func storeJobResultsInRegistryLocker(job *Job) {
   if global.UseLocker && global.RegistryURL != "" {
-    key := "job_"+job.ID + "_" + strconv.Itoa(job.jobRun.index)
+    key := "job_" + job.ID + "_" + strconv.Itoa(job.jobRun.index)
     url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/locker/store/" + key
     if resp, err := http.Post(url, "application/json",
       strings.NewReader(util.ToJSON(job.jobResults))); err == nil {

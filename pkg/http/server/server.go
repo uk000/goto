@@ -18,9 +18,9 @@ import (
 )
 
 func Run() {
-	listeners.SetListenerServer(runner.ServeListener)
-	invocation.LoadCerts()
+  listeners.SetListenerServer(runner.ServeListener)
+  invocation.LoadCerts()
   runner.RunHttpServer("/", label.Handler, conn.Handler, job.Handler, request.Handler,
-		response.Handler, listeners.Handler, registry.Handler, client.Handler, echo.Handler, catchall.Handler)
+    response.Handler, listeners.Handler, registry.Handler, client.Handler, echo.Handler, catchall.Handler)
   os.Exit(0)
 }

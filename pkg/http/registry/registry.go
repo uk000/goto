@@ -89,8 +89,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
   util.AddRoute(peersRouter, "/{peer}/jobs/add", addPeerJob, "POST")
   util.AddRoute(peersRouter, "/{peer}/jobs/{jobs}/remove", removePeerJobs, "PUT", "POST")
-  util.AddRoute(peersRouter, "/{peer}/jobs/{jobs}/invoke", invokePeerJobs, "PUT", "POST")
-  util.AddRoute(peersRouter, "/{peer}/jobs/invoke/all", invokePeerJobs, "PUT", "POST")
+  util.AddRoute(peersRouter, "/{peer}/jobs/{jobs}/run", runPeerJobs, "PUT", "POST")
+  util.AddRoute(peersRouter, "/{peer}/jobs/run/all", runPeerJobs, "PUT", "POST")
   util.AddRoute(peersRouter, "/{peer}/jobs/clear", clearPeerJobs, "POST")
   util.AddRoute(peersRouter, "/{peer}/jobs", getPeerJobs, "GET")
   util.AddRoute(peersRouter, "/jobs", getPeerJobs, "GET")
@@ -310,9 +310,9 @@ func (pr *PortRegistry) invokePeerJobs(peerName string, jobs string) error {
       var resp *http.Response
       var err error
       if len(jobs) > 0 {
-        resp, err = http.Post("http://"+a+"/jobs/"+jobs+"/invoke", "plain/text", nil)
+        resp, err = http.Post("http://"+a+"/jobs/"+jobs+"/run", "plain/text", nil)
       } else {
-        resp, err = http.Post("http://"+a+"/jobs/invoke/all", "plain/text", nil)
+        resp, err = http.Post("http://"+a+"/jobs/run/all", "plain/text", nil)
       }
       if err == nil {
         defer resp.Body.Close()
@@ -395,7 +395,7 @@ func removePeer(w http.ResponseWriter, r *http.Request) {
         w.WriteHeader(http.StatusOK)
         msg = fmt.Sprintf("Peer Removed: %s", peerName)
       } else {
-        w.WriteHeader(http.StatusNotModified)
+        w.WriteHeader(http.StatusNotAcceptable)
         msg = fmt.Sprintf("Peer not found: %s", peerName)
       }
     } else {
@@ -513,7 +513,7 @@ func removePeerTargets(w http.ResponseWriter, r *http.Request) {
         w.WriteHeader(http.StatusOK)
         msg = fmt.Sprintf("Peer %s targets %+v removed", peerName, targets)
       } else {
-        w.WriteHeader(http.StatusNotModified)
+        w.WriteHeader(http.StatusNotAcceptable)
         msg = fmt.Sprintf("Peer %s targets %+v not found", peerName, targets)
       }
     } else {
@@ -556,7 +556,7 @@ func removePeerJobs(w http.ResponseWriter, r *http.Request) {
         w.WriteHeader(http.StatusOK)
         msg = fmt.Sprintf("Peer %s jobs %+v removed\n", peerName, jobs)
       } else {
-        w.WriteHeader(http.StatusNotModified)
+        w.WriteHeader(http.StatusNotAcceptable)
         msg = fmt.Sprintf("Peer %s jobs %+v not found\n", peerName, jobs)
       }
     } else {
@@ -579,7 +579,7 @@ func invokePeerTargets(w http.ResponseWriter, r *http.Request) {
       w.WriteHeader(http.StatusOK)
       msg = fmt.Sprintf("Targets [%s] invoked on peer [%s]\n", targets, peerName)
     } else {
-      w.WriteHeader(http.StatusNotModified)
+      w.WriteHeader(http.StatusNotAcceptable)
       msg = fmt.Sprintf("Could not invoke targets [%s] on peer [%s]\n", targets, peerName)
     }
   } else {
@@ -590,7 +590,7 @@ func invokePeerTargets(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
-func invokePeerJobs(w http.ResponseWriter, r *http.Request) {
+func runPeerJobs(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if peerName, present := util.GetStringParam(r, "peer"); present {
     jobs := util.GetStringParamValue(r, "jobs")
@@ -598,7 +598,7 @@ func invokePeerJobs(w http.ResponseWriter, r *http.Request) {
       w.WriteHeader(http.StatusOK)
       msg = fmt.Sprintf("Jobs [%s] invoked on peer [%s]\n", jobs, peerName)
     } else {
-      w.WriteHeader(http.StatusNotModified)
+      w.WriteHeader(http.StatusNotAcceptable)
       msg = fmt.Sprintf("Count not invoke jobs [%s] on peer [%s]\n", jobs, peerName)
     }
   } else {
@@ -665,7 +665,7 @@ func clearPeerTargets(w http.ResponseWriter, r *http.Request) {
       w.WriteHeader(http.StatusOK)
       msg = fmt.Sprintf("Peer targets removed: %s\n", peerName)
     } else {
-      w.WriteHeader(http.StatusNotModified)
+      w.WriteHeader(http.StatusNotAcceptable)
       msg = fmt.Sprintf("No targets for peer %s\n", peerName)
     }
   } else {
@@ -683,7 +683,7 @@ func clearPeerJobs(w http.ResponseWriter, r *http.Request) {
       w.WriteHeader(http.StatusOK)
       msg = fmt.Sprintf("Peer jobs removed: %s\n", peerName)
     } else {
-      w.WriteHeader(http.StatusNotModified)
+      w.WriteHeader(http.StatusNotAcceptable)
       msg = fmt.Sprintf("No jobs for peer %s\n", peerName)
     }
   } else {

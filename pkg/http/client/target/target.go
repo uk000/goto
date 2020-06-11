@@ -55,9 +55,9 @@ type PortClient struct {
 }
 
 var (
-  Handler         util.ServerHandler     = util.ServerHandler{Name: "client", SetRoutes: SetRoutes}
-  portClients     map[string]*PortClient = map[string]*PortClient{}
-  portClientsLock sync.RWMutex
+  Handler                    util.ServerHandler     = util.ServerHandler{Name: "client", SetRoutes: SetRoutes}
+  portClients                map[string]*PortClient = map[string]*PortClient{}
+  portClientsLock            sync.RWMutex
   InvocationResultsRetention int = 10
 )
 
@@ -81,6 +81,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(r, "/track/headers/list", getTrackingHeaders, "GET")
   util.AddRoute(r, "/track/headers", getTrackingHeaders, "GET")
   util.AddRoute(r, "/results", getResults, "GET")
+  util.AddRoute(r, "/results/invocations", getInvocationResults, "GET")
   util.AddRoute(r, "/results/{targets}/clear", clearResults, "POST")
   util.AddRoute(r, "/results/clear", clearResults, "POST")
 }
@@ -261,8 +262,15 @@ func (pc *PortClient) getResults() string {
   return util.ToJSON(pc.targetResults)
 }
 
+func (pc *PortClient) getInvocationResults() string {
+  pc.resultsLock.RLock()
+  defer pc.resultsLock.RUnlock()
+  return util.ToJSON(pc.targetResultsByInvocation)
+}
+
 func (pc *PortClient) clearResults() {
   pc.resultsLock.Lock()
+  pc.invocationCounter = 0
   pc.targetResults = &TargetResults{}
   pc.targetResultsByInvocation = map[int]*TargetResults{}
   pc.resultsLock.Unlock()
@@ -297,9 +305,12 @@ func (pc *PortClient) storeResults(result *invocation.InvocationResult, targetRe
   targetResults.CountsByStatusCodes[result.StatusCode]++
   targetResults.CountsByTargetStatus[result.TargetName][result.Status]++
   targetResults.CountsByTargetStatusCode[result.TargetName][result.StatusCode]++
+  pc.targetsLock.Lock()
+  trackingHeaders := pc.trackingHeaders
+  pc.targetsLock.Unlock()
   for h, values := range result.Headers {
     h = strings.ToLower(h)
-    if _, present := pc.trackingHeaders[h]; present {
+    if _, present := trackingHeaders[h]; present {
       targetResults.CountsByHeaders[h]++
       targetResults.CountsByTargetHeaders[result.TargetName][h]++
       if targetResults.CountsByHeaderValues[h] == nil {
@@ -334,9 +345,7 @@ func (pc *PortClient) storeTargetResult(invocationIndex int, result *invocation.
   }
   pc.storeResults(result, pc.targetResultsByInvocation[invocationIndex])
   storeJobResultsInRegistryLocker("client", pc.targetResults)
-  log.Printf("All Results: %+v\n", pc.targetResults)
   storeJobResultsInRegistryLocker("client_"+strconv.Itoa(invocationIndex), pc.targetResultsByInvocation[invocationIndex])
-  log.Printf("Invocation Results: %+v\n", pc.targetResultsByInvocation[invocationIndex])
 }
 
 func (pc *PortClient) removeResultsForTargets(targets []string) {
@@ -565,6 +574,14 @@ func getTrackingHeaders(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
+
+func getInvocationResults(w http.ResponseWriter, r *http.Request) {
+  output := getPortClient(r).getInvocationResults()
+  w.WriteHeader(http.StatusAlreadyReported)
+  fmt.Fprintln(w, output)
+  util.AddLogMessage("Reporting results", r)
+}
+
 func getResults(w http.ResponseWriter, r *http.Request) {
   output := getPortClient(r).getResults()
   w.WriteHeader(http.StatusAlreadyReported)
@@ -617,8 +634,6 @@ Results:
     select {
     case done = <-ic.DoneChannel:
       break Results
-    case <-ic.StopChannel:
-      break Results
     case result := <-ic.ResultChannel:
       if result != nil {
         pc.storeTargetResult(ic.ID, result)
@@ -648,9 +663,11 @@ func invokeTargets(w http.ResponseWriter, r *http.Request) {
   pc := getPortClient(r)
   targetsToInvoke := pc.getTargetsToInvoke(r)
   if len(targetsToInvoke) > 0 {
+    pc.resultsLock.Lock()
     pc.invocationCounter++
     ic := invocation.RegisterInvocation(pc.invocationCounter)
     pc.activeInvocations[ic.ID] = ic
+    pc.resultsLock.Unlock()
     var results []*invocation.InvocationResult
     if pc.blockForResponse {
       results = invokeTargetsAndStoreResults(pc, targetsToInvoke, ic)
