@@ -9,9 +9,9 @@ GO_FILES := $(shell find . -name '*.go' | grep -v /vendor/)
 
 GOOS=darwin
 COMMIT := $(shell git log -1 --pretty=tformat:%h)
-VERSION := 1.0.0
+VERSION := 0.0.6
 
-IMAGE := uk000/goto
+IMAGE := uk0000/goto
 
 all: build
 
@@ -26,7 +26,8 @@ run: build
 	./$(OUT) --port 8080
 
 docker-build: Dockerfile $(GO_FILES)
-	docker build -t $(IMAGE):$(VERSION) .
+	docker build --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) .
+	docker build --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):latest .
 
 docker-run: docker-build
 	docker run -d --rm --name goto -p8080:8080 -it $(IMAGE):$(VERSION) /app/goto --port 8080

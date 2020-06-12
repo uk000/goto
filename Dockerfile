@@ -1,5 +1,8 @@
 FROM golang:alpine3.11 as builder
 
+ARG COMMIT 
+ARG VERSION 
+
 RUN mkdir /app
 ADD ./cmd/ /app/cmd
 ADD ./pkg/ /app/pkg
@@ -7,7 +10,7 @@ ADD ./go.mod /app/go.mod
 ADD ./main.go /app/main.go
 
 WORKDIR /app
-RUN go build -o goto .
+RUN go build -o goto -ldflags="-extldflags \"-static\" -w -s -X goto/cmd.Version=$VERSION -X goto/cmd.Commit=$COMMIT" .
 
 FROM alpine:3.11 as release
 RUN echo 'https://nl.alpinelinux.org/alpine/v3.11/main' > /etc/apk/repositories
