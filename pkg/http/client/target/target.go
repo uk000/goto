@@ -98,36 +98,41 @@ func (pc *PortClient) init() {
   pc.targetResultsByInvocation = map[int]*TargetResults{}
 }
 
-func (pc *PortClient) initTargetResults(index ...int) {
-  pc.resultsLock.Lock()
-  defer pc.resultsLock.Unlock()
-  if pc.targetResults.TargetInvocationCounts == nil {
-    pc.targetResults.TargetInvocationCounts = map[string]int{}
-    pc.targetResults.TargetFirstResponses = map[string]time.Time{}
-    pc.targetResults.TargetLastResponses = map[string]time.Time{}
-    pc.targetResults.CountsByStatusCodes = map[int]int{}
-    pc.targetResults.CountsByStatus = map[string]int{}
-    pc.targetResults.CountsByHeaders = map[string]int{}
-    pc.targetResults.CountsByHeaderValues = map[string]map[string]int{}
-    pc.targetResults.CountsByTargetStatus = map[string]map[string]int{}
-    pc.targetResults.CountsByTargetStatusCode = map[string]map[int]int{}
-    pc.targetResults.CountsByTargetHeaders = map[string]map[string]int{}
-    pc.targetResults.CountsByTargetHeaderValues = map[string]map[string]map[string]int{}
+func initResults(targetResults *TargetResults) {
+  targetResults.TargetInvocationCounts = map[string]int{}
+  targetResults.TargetFirstResponses = map[string]time.Time{}
+  targetResults.TargetLastResponses = map[string]time.Time{}
+  targetResults.CountsByStatusCodes = map[int]int{}
+  targetResults.CountsByStatus = map[string]int{}
+  targetResults.CountsByHeaders = map[string]int{}
+  targetResults.CountsByHeaderValues = map[string]map[string]int{}
+  targetResults.CountsByTargetStatus = map[string]map[string]int{}
+  targetResults.CountsByTargetStatusCode = map[string]map[int]int{}
+  targetResults.CountsByTargetHeaders = map[string]map[string]int{}
+  targetResults.CountsByTargetHeaderValues = map[string]map[string]map[string]int{}
+}
+
+func (pc *PortClient) isTargetResultsInitialized(index ...int) bool {
+  if pc.targetResults == nil || pc.targetResults.TargetInvocationCounts == nil {
+    return false
   }
-  if len(index) > 0 && pc.targetResultsByInvocation[index[0]] == nil {
-    invocationIndex := index[0]
-    pc.targetResultsByInvocation[invocationIndex] = &TargetResults{}
-    pc.targetResultsByInvocation[invocationIndex].TargetInvocationCounts = map[string]int{}
-    pc.targetResultsByInvocation[invocationIndex].TargetFirstResponses = map[string]time.Time{}
-    pc.targetResultsByInvocation[invocationIndex].TargetLastResponses = map[string]time.Time{}
-    pc.targetResultsByInvocation[invocationIndex].CountsByStatusCodes = map[int]int{}
-    pc.targetResultsByInvocation[invocationIndex].CountsByStatus = map[string]int{}
-    pc.targetResultsByInvocation[invocationIndex].CountsByHeaders = map[string]int{}
-    pc.targetResultsByInvocation[invocationIndex].CountsByHeaderValues = map[string]map[string]int{}
-    pc.targetResultsByInvocation[invocationIndex].CountsByTargetStatus = map[string]map[string]int{}
-    pc.targetResultsByInvocation[invocationIndex].CountsByTargetStatusCode = map[string]map[int]int{}
-    pc.targetResultsByInvocation[invocationIndex].CountsByTargetHeaders = map[string]map[string]int{}
-    pc.targetResultsByInvocation[invocationIndex].CountsByTargetHeaderValues = map[string]map[string]map[string]int{}
+  if pc.targetResultsByInvocation == nil || (len(index) > 0 && pc.targetResultsByInvocation[index[0]] == nil) {
+    return false
+  }
+  return true
+}
+
+func (pc *PortClient) initTargetResults(index ...int) {
+  if ! pc.isTargetResultsInitialized() {
+    pc.targetResults = &TargetResults{}
+    initResults(pc.targetResults)
+  }
+  if !pc.isTargetResultsInitialized(index...) {
+    if pc.targetResultsByInvocation == nil {
+      pc.targetResultsByInvocation = map[int]*TargetResults{}
+    }
+    pc.targetResultsByInvocation[index[0]] = &TargetResults{}
+    initResults(pc.targetResultsByInvocation[index[0]])
   }
 }
 
@@ -157,7 +162,7 @@ func (pc *PortClient) removeTargets(targets []string) {
 func prepareTargetsForPeers(targets []*invocation.InvocationSpec, r *http.Request) []*invocation.InvocationSpec {
   targetsToInvoke := []*invocation.InvocationSpec{}
   for _, t := range targets {
-    targetsForTarget := []*invocation.InvocationSpec{}
+    added := false
     if strings.HasPrefix(t.Name, "{") && strings.HasSuffix(t.Name, "}") {
       p := strings.TrimLeft(t.Name, "{")
       p = strings.TrimRight(p, "}")
@@ -170,18 +175,15 @@ func prepareTargetsForPeers(targets []*invocation.InvocationSpec, r *http.Reques
               var target = *t
               target.Name = peer.Name
               target.URL = urlPre + address + urlPost
-              targetsForTarget = append(targetsForTarget, &target)
+              targetsToInvoke = append(targetsToInvoke, &target)
+              added = true
             }
           }
         }
       }
-    } else {
+    } 
+    if !added {
       targetsToInvoke = append(targetsToInvoke, t)
-    }
-    if len(targetsForTarget) > 0 {
-      targetsToInvoke = append(targetsToInvoke, targetsForTarget...)
-    } else {
-      log.Printf("No peers available for target %s", t.Name)
     }
   }
   return targetsToInvoke
@@ -269,12 +271,12 @@ func (pc *PortClient) getInvocationResults() string {
 }
 
 func (pc *PortClient) clearResults() {
-  pc.resultsLock.Lock()
+  pc.targetsLock.Lock()
   pc.invocationCounter = 0
   pc.targetResults = &TargetResults{}
   pc.targetResultsByInvocation = map[int]*TargetResults{}
-  pc.resultsLock.Unlock()
-  pc.initTargetResults(0)
+  pc.initTargetResults()
+  pc.targetsLock.Unlock()
 }
 
 func storeJobResultsInRegistryLocker(key string, targetResults *TargetResults) {
@@ -305,9 +307,7 @@ func (pc *PortClient) storeResults(result *invocation.InvocationResult, targetRe
   targetResults.CountsByStatusCodes[result.StatusCode]++
   targetResults.CountsByTargetStatus[result.TargetName][result.Status]++
   targetResults.CountsByTargetStatusCode[result.TargetName][result.StatusCode]++
-  pc.targetsLock.Lock()
   trackingHeaders := pc.trackingHeaders
-  pc.targetsLock.Unlock()
   for h, values := range result.Headers {
     h = strings.ToLower(h)
     if _, present := trackingHeaders[h]; present {
@@ -328,8 +328,9 @@ func (pc *PortClient) storeResults(result *invocation.InvocationResult, targetRe
 }
 
 func (pc *PortClient) storeTargetResult(invocationIndex int, result *invocation.InvocationResult) {
-  pc.resultsLock.Lock()
-  defer pc.resultsLock.Unlock()
+  pc.targetsLock.Lock()
+  defer pc.targetsLock.Unlock()
+  pc.initTargetResults(invocationIndex)
   pc.storeResults(result, pc.targetResults)
   for len(pc.targetResultsByInvocation) >= InvocationResultsRetention {
     oldest := math.MaxInt32
@@ -349,8 +350,8 @@ func (pc *PortClient) storeTargetResult(invocationIndex int, result *invocation.
 }
 
 func (pc *PortClient) removeResultsForTargets(targets []string) {
-  pc.resultsLock.Lock()
-  defer pc.resultsLock.Unlock()
+  pc.targetsLock.Lock()
+  defer pc.targetsLock.Unlock()
   for _, target := range targets {
     delete(pc.targetResults.TargetInvocationCounts, target)
     statuses := pc.targetResults.CountsByTargetStatus[target]
@@ -621,7 +622,9 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
 }
 
 func invokeTargetsAndStoreResults(pc *PortClient, targets []*invocation.InvocationSpec, ic *invocation.InvocationChannels) []*invocation.InvocationResult {
+  pc.targetsLock.Lock()
   pc.initTargetResults(ic.ID)
+  pc.targetsLock.Unlock()
   results := []*invocation.InvocationResult{}
   c := make(chan bool)
   go func() {
@@ -629,7 +632,7 @@ func invokeTargetsAndStoreResults(pc *PortClient, targets []*invocation.Invocati
     c <- true
   }()
   done := false
-Results:
+  Results:
   for {
     select {
     case done = <-ic.DoneChannel:
@@ -663,11 +666,11 @@ func invokeTargets(w http.ResponseWriter, r *http.Request) {
   pc := getPortClient(r)
   targetsToInvoke := pc.getTargetsToInvoke(r)
   if len(targetsToInvoke) > 0 {
-    pc.resultsLock.Lock()
+    pc.targetsLock.Lock()
     pc.invocationCounter++
     ic := invocation.RegisterInvocation(pc.invocationCounter)
     pc.activeInvocations[ic.ID] = ic
-    pc.resultsLock.Unlock()
+    pc.targetsLock.Unlock()
     var results []*invocation.InvocationResult
     if pc.blockForResponse {
       results = invokeTargetsAndStoreResults(pc, targetsToInvoke, ic)
