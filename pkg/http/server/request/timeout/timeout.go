@@ -12,8 +12,8 @@ import (
 )
 
 type TimeoutData struct {
-  ConnectionClosed int
-  RequestCompleted int
+  ConnectionClosed int `json:"connectionClosed"`
+  RequestCompleted int `json:"requestCompleted"`
 }
 
 type TimeoutTracking struct {

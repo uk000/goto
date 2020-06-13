@@ -141,6 +141,7 @@ Once the server is up and running, rest of the interactions and configurations a
 #
 # Client Features
 As a client tool, `goto` offers the following features:
+- Allows targets to be configured and invoked via REST APIs
 - Configure targets to be invoked ahead of time before invocation
 - Invoke selective targets or all configured targets in batches
 - Multiple concurrent invocations of batches of targets
@@ -148,8 +149,11 @@ As a client tool, `goto` offers the following features:
 - Control the total number of requests per target via `requestCount` field
 - Control the minimum wait time after each replica set invocation per target via `delay` field
 - Control the minimum duration over which total requests are sent to a client using combination of `requestCount` and `delay`
-- 
-allows targets to be configured and invoked via REST APIs. Headers can be set to track results for target invocations, and APIs make those results available for consumption as JSON output. The invocation results get accumulated across multiple invocations until cleared explicitly. In addition to keeping the results in the `goto` client instance, those are also stored in locker on registry instance if enabled. (See `--locker` command arg)
+- Headers can be set to track results for target invocations, and APIs make those results available for consumption as JSON output. 
+
+The invocation results get accumulated across multiple invocations until cleared explicitly. The invocation results can be read back as overall totals, or totals per invocation. Invocations are tracked via a sequential numeric counter starting with 1. An invocation may involve one or more targets (depending on how it was triggered). The result of an invocation includes totals for targets included in that invocation, whereas the overall totals are summed across all invocations. Clearing of all results resets the invocation counter too, causing the next invocation to start at counter 1 again.
+
+In addition to keeping the results in the `goto` client instance, those are also stored in locker on registry instance if enabled. (See `--locker` command arg)
 
 
 #### APIs
@@ -171,7 +175,8 @@ allows targets to be configured and invoked via REST APIs. Headers can be set to
 | POST      | /client/track/headers/clear           | Remove all tracked headers |
 | GET       |	/client/track/headers/list            | Get list of tracked headers |
 | GET       |	/client/track/headers                 | Get list of tracked headers |
-| GET       |	/client/results                       | Get invocation results in JSON format. See [`Results Schema`](#client-results-schema) |
+| GET       |	/client/results                       | Get combined results for all invocations since last time results were cleared. See [`Results Schema`](#client-results-schema) |
+| GET       |	/client/results/invocations           | Get invocation results broken down for each invocation that was triggered since last time results were cleared |
 | POST      | /client/results/{targets}/clear       | Clear previously accumulated invocation results for specific targets |
 | POST      | /client/results/clear                 | Clear previously accumulated invocation results |
 
@@ -268,12 +273,20 @@ curl localhost:8080/client/track/headers/list
 #Clear results
 curl -X POST localhost:8080/client/results/clear
 
+#Remove results for specific targets
+curl -X POST localhost:8080/client/results/t1,t2/clear
+
+#Get results per invocation
+curl localhost:8080/client/results/invocations
+
 #Get results
 curl localhost:8080/client/results
 ```
 
+#### Sample Client Invocation Result (including error reporting example)
+
 <details>
-<summary>Sample Client Invocation Result (including error reporting example)</summary>
+<summary>Example</summary>
 <p>
 
 ```json
@@ -515,12 +528,38 @@ curl -X PUT localhost:8080/listeners/8081/close
 curl localhost:8081/listeners
 ```
 
+#### Listener Output Example
+
+<details>
+<summary>Example</summary>
+<p>
+
+```
+$ curl -s localhost:8080/listeners
+{
+  "8081": {
+    "label": "Server-8081",
+    "port": 8081,
+    "protocol": "http",
+    "open": true
+  },
+  "8082": {
+    "label": "8082",
+    "port": 8082,
+    "protocol": "http",
+    "open": false
+  }
+}
+```
+</p>
+</details>
+
 <br/>
 
 #
 ## > Listener Label
 
-By default, each listener adds a header `Via-Goto: <port>` to each response it sends, where <port> is the port on which the listener is running (default being 8080). A custom label can be added to a listener using the label APIs described below. In addition to `Via-Goto`, each listener also adds another header `Goto-Host` that carries the pod/host name, pod namespace (or `local` if not running as a K8s pod), and pod/host IP address to identify where the response came from.
+By default, each listener adds a header `Via-Goto: <port>` to each response it sends, where `<port>` is the port on which the listener is running (default being 8080). A custom label can be added to a listener using the label APIs described below. In addition to `Via-Goto`, each listener also adds another header `Goto-Host` that carries the pod/host name, pod namespace (or `local` if not running as a K8s pod), and pod/host IP address to identify where the response came from.
 
 #### APIs
 |METHOD|URI|Description|
@@ -575,35 +614,40 @@ curl localhost:8080/request/headers/track/list
 ```
 
 #### Request Header Tracking Results Example
+<details>
+<summary>Example</summary>
+<p>
+
+
 ```
 $ curl localhost:8080/request/headers/track/counts
 
 {
   "x": {
-    "RequestCountsByHeaderValue": {
+    "requestCountsByHeaderValue": {
       "x1": 20
     },
-    "RequestCountsByHeaderValueAndRequestedStatus": {
+    "requestCountsByHeaderValueAndRequestedStatus": {
       "x1": {
         "418": 20
       }
     },
-    "RequestCountsByHeaderValueAndResponseStatus": {
+    "requestCountsByHeaderValueAndResponseStatus": {
       "x1": {
         "418": 20
       }
     }
   },
   "y": {
-    "RequestCountsByHeaderValue": {
+    "requestCountsByHeaderValue": {
       "y1": 20
     },
-    "RequestCountsByHeaderValueAndRequestedStatus": {
+    "requestCountsByHeaderValueAndRequestedStatus": {
       "y1": {
         "418": 20
       }
     },
-    "RequestCountsByHeaderValueAndResponseStatus": {
+    "requestCountsByHeaderValueAndResponseStatus": {
       "y1": {
         "418": 20
       }
@@ -611,6 +655,9 @@ $ curl localhost:8080/request/headers/track/counts
   }
 }
 ```
+
+</p>
+</details>
 
 <br/>
 
@@ -624,7 +671,7 @@ This feature allows tracking request timeouts by headers.
 |PUT, POST| /request/timeout/track/headers/{headers}  | Add one or more headers. Requests carrying these headers will be tracked for timeouts and reported |
 |PUT, POST| /request/timeout/track/all                | Enable request timeout tracking for all requests |
 |POST     |	/request/timeout/track/clear              | Clear timeout tracking configs |
-|POST     |	/request/timeout/status                   | Get a report of tracked request timeouts so far |
+|GET      |	/request/timeout/status                   | Get a report of tracked request timeouts so far |
 
 
 #### Request Timeout API Examples
@@ -638,25 +685,86 @@ curl -X POST localhost:8080/request/timeout/track/clear
 curl localhost:8080/request/timeout/status
 ```
 
+#### Request Timeout Status Result Example
+<details>
+<summary>Example</summary>
+<p>
+
+```
+{
+  "all": {
+    "connectionClosed": 1,
+    "requestCompleted": 0
+  },
+  "headers": {
+    "x": {
+      "x1": {
+        "connectionClosed": 1,
+        "requestCompleted": 5
+      },
+      "x2": {
+        "connectionClosed": 1,
+        "requestCompleted": 4
+      }
+    },
+    "y": {
+      "y1": {
+        "connectionClosed": 0,
+        "requestCompleted": 2
+      },
+      "y2": {
+        "connectionClosed": 1,
+        "requestCompleted": 4
+      }
+    }
+  }
+}
+```
+</p>
+</details>
+
 <br/>
 
 #
 ## > URIs
-This feature allows tracking request counts by URIs
+This feature allows tracking request counts by URIs (ignoring query parameters).
 
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
 |GET      |	/request/uri/counts                     | Get request counts for all URIs |
+|POST     |	/request/uri/counts/enable              | Enable tracking request counts for all URIs |
+|POST     |	/request/uri/counts/disable             | Disable tracking request counts for all URIs |
 |POST     |	/request/uri/counts/clear               | Clear request counts for all URIs |
 
 
 #### URI API Examples
 ```
-curl -X POST localhost:8080/request/uri/counts
+curl localhost:8080/request/uri/counts
+
+curl -X POST localhost:8080/request/uri/counts/enable
+
+curl -X POST localhost:8080/request/uri/counts/disable
 
 curl -X POST localhost:8080/request/uri/counts/clear
 ```
+
+#### URI Counts Result Example
+<details>
+<summary>Example</summary>
+<p>
+
+```
+{
+  "/debug": 18,
+  "/echo": 5,
+  "/foo": 4,
+  "/foo/3/bar/4": 10,
+  "/foo/4/bar/5": 10
+}
+```
+</p>
+</details>
 
 <br/>
 
@@ -696,6 +804,22 @@ curl localhost:8080/request/uri/bypass/status
 curl localhost:8080/request/uri/bypass/counts\?uri=/foo
 ```
 
+#### URI Bypass Status Result Example
+<details>
+<summary>Example</summary>
+<p>
+
+```
+{
+  "uris": {
+    "/foo": 3,
+    "/health": 6
+  },
+  "bypassStatus": 200
+}
+```
+</p>
+</details>
 
 <br/>
 
@@ -758,7 +882,7 @@ This feature allows setting custom response payload to be sent with server respo
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
-| POST | /response/payload/set/default  | Add a custom payload to be sent with all resopnses |
+| POST | /response/payload/set/default  | Add a custom payload to be sent with all responses |
 | POST | /response/payload/set/uri?uri={uri}  | Add a custom payload to be sent for requests matching the given URI. URI can contain placeholders |
 | POST | /response/payload/set/header/{header}  | Add a custom payload to be sent for requests matching the given header name |
 | POST | /response/payload/set/header/{header}/value/{value}  | Add a custom payload to be sent for requests matching the given header name and value |
@@ -779,6 +903,29 @@ curl -X POST localhost:8080/response/payload/clear
 
 curl localhost:8080/response/payload
 ```
+
+#### Response Payload Status Result Example
+<details>
+<summary>Example</summary>
+<p>
+
+```
+{
+  "responseContentType": "application/x-www-form-urlencoded",
+  "defaultResponsePayload": "{\"test\": \"default payload\"}n",
+  "responsePayloadByURIs": {
+    "/foo/f/barb": "{\"test\": \"uri was /foo/{}/bar/{}\"}n"
+  },
+  "responsePayloadByHeaders": {
+    "foo": {
+      "": "{\"test\": \"header was foo\"}",
+      "bar": "{\"test\": \"header was foo with value bar\"}"
+    }
+  }
+}
+```
+</p>
+</details>
 
 <br/>
 
@@ -814,6 +961,10 @@ curl localhost:8080/response/status/counts/502
 ```
 
 #### Response Status Tracking Result Example
+<details>
+<summary>Example</summary>
+<p>
+
 ```
 {
   "countsByRequestedStatus": {
@@ -827,6 +978,8 @@ curl localhost:8080/response/status/counts/502
   }
 }
 ```
+</p>
+</details>
 
 <br/>
 
@@ -863,7 +1016,7 @@ curl -I  localhost:8080/echo
 <br/>
 
 #
-## > CatchAll
+## > Catch All
 
 Any request that doesn't match any of the defined management APIs, and also doesn't match any proxy targets, gets treated by a catch-all response that sends HTTP 200 response by default (unless an override response code is set)
 
@@ -885,10 +1038,10 @@ Any request that doesn't match any of the defined management APIs, and also does
 |PUT, POST| /request/proxy/targets/{target}/disable | Disable a proxy target |
 |POST     |	/request/proxy/targets/{targets}/invoke | Invoke proxy targets by name |
 |POST     |	/request/proxy/targets/invoke/{targets} | Invoke proxy targets by name |
-|GET      |	/request/proxy/targets/counts           | Get proxy target match/invocation stats, by uri, header and query params |
-|POST     |	/request/proxy/targets/counts/clear     | Remove all proxy target match/invocation stats |
 |POST     |	/request/proxy/targets/clear            | Remove all proxy targets |
 |GET 	    |	/request/proxy/targets                  | List all proxy targets |
+|GET      |	/request/proxy/counts                   | Get proxy match/invocation counts, by uri, header and query params |
+|POST     |	/request/proxy/counts/clear             | Clear proxy match/invocation counts |
 
 
 #### Proxy Target JSON Schema
@@ -998,7 +1151,79 @@ curl -X PUT localhost:8080/request/proxy/targets/t2/enable
 curl -v -X POST localhost:8080/request/proxy/targets/t1/invoke
 
 curl localhost:8080/request/proxy/targets
+
+curl localhost:8080/request/proxy/counts
+
 ```
+
+#### Proxy Target Counts Result Example
+
+<details>
+<summary>Example</summary>
+<p>
+
+```
+{
+  "countsByTargets": {
+    "t1": 4,
+    "t2": 3,
+    "t3": 3
+  },
+  "countsByHeaders": {
+    "foo": 2,
+    "x": 1,
+    "y": 1
+  },
+  "countsByHeaderValues": {},
+  "countsByHeaderTargets": {
+    "foo": {
+      "t1": 2
+    },
+    "x": {
+      "t2": 1
+    },
+    "y": {
+      "t3": 1
+    }
+  },
+  "countsByHeaderValueTargets": {},
+  "countsByUris": {
+    "/debug": 1,
+    "/foo": 2,
+    "/x/22/y/33": 1,
+    "/x/22/y/33?foo=123&bar=456": 1
+  },
+  "countsByUriTargets": {
+    "/debug": {
+      "pt4": 1
+    },
+    "/foo": {
+      "pt3": 2
+    },
+    "/x/22/y/33": {
+      "t1": 1
+    },
+    "/x/22/y/33?foo=123&bar=456": {
+      "t1": 1
+    }
+  },
+  "countsByQuery": {
+    "foo": 4
+  },
+  "countsByQueryValues": {},
+  "countsByQueryTargets": {
+    "foo": {
+      "pt1": 1,
+      "pt5": 3
+    }
+  },
+  "countsByQueryValueTargets": {}
+}
+```
+
+</p>
+</details>
+
 
 <br/>
 
@@ -1019,6 +1244,7 @@ curl localhost:8080/request/proxy/targets
 |POST     |	/response/trigger/{targets}/invoke | Invoke trigger targets by name for manual testing |
 |POST     |	/response/trigger/clear            | Remove all trigger targets |
 |GET 	    |	/response/trigger/list             | List all trigger targets |
+|GET 	    |	/response/trigger/counts             | List all trigger targets |
 
 
 #### Trigger Target JSON Schema
@@ -1059,9 +1285,30 @@ curl -X POST localhost:8080/response/trigger/t1/disable
 
 curl -X POST localhost:8080/response/trigger/t1/invoke
 
+curl localhost:8080/response/trigger/counts
+
 curl localhost:8080/response/trigger/list
 
 ```
+
+#### Trigger Counts Result Example
+<details>
+<summary>Example</summary>
+<p>
+
+```
+{
+  "t1": {
+    "202": 2
+  },
+  "t3": {
+    "200": 3
+  }
+}
+```
+</p>
+</details>
+
 
 #
 # Jobs Features
@@ -1070,6 +1317,8 @@ curl localhost:8080/response/trigger/list
 - HTTP requests to be made to some target URL
 - Command execution on local OS
 The job results can be retrieved via API from the `goto` instance, and also stored in locker on registry instance if enabled. (See `--locker` command arg)
+
+Jobs can also trigger another job for each line of output produced, as well as upon completion. For command jobs, the output produced is split by newline, and each line of output can be used as input to trigger another command job. The triggered job's command args can specify positional references, e.g. `{1}, {2}`, where `{1}` will be replaced by the first word (space-separated) from the line output of the source job. This feature can be used to trigger complex chains of jobs, where each job uses output of the previous job to do something else.
 
 #### Jobs APIs
 |METHOD|URI|Description|
@@ -1090,10 +1339,15 @@ The job results can be retrieved via API from the `goto` instance, and also stor
 |---|---|---|
 | id            | string        | ID for this job |
 | task          | JSON          | Task to be executed for this job. Can be an [HTTP Task](#job-http-task-json-schema) or [Command Task](#job-command-task-json-schema) |
-| delay         | duration      | Minimum delay to be added per iteration of the job. Actual delay may be higher than this. |
+| auto          | bool          | Whether the job should be started automatically as soon as it's posted. |
+| delay         | duration      | Minimum delay at start of each iteration of the job. Actual delay may be higher than this. |
 | count         | int           | Number of times this job should be executed during a single invocation |
-| maxResults    | int           | Number of results to be retained from all the executions of this job during an invocation |
+| maxResults    | int           | Number of max results to be received from the job, after which the job is stopped |
+| keepResults   | int           | Number of results to be retained from an invocation of the job |
 | keepFirst     | bool          | Indicates whether the first invocation result should be retained, reducing the slots for capturing remaining results by (maxResults-1) |
+| timeout       | duration      | Duration after which the job is forcefully stopped if not finished |
+| outputTrigger | string        | ID of another job to trigger for each output produced by this job. For command jobs, words from this job's output can be injected into the command of the next job using positional references (described above) |
+| finishTrigger | string        | ID of another job to trigger upon completion of this job |
 
 
 #### Job HTTP Task JSON Schema
@@ -1102,6 +1356,7 @@ The job results can be retrieved via API from the `goto` instance, and also stor
 | name         | string         | Name for this target |
 | method       | string         | HTTP method to use for this target |
 | url          | string         | URL for this target   |
+| verifyTLS    | bool           | Whether the TLS certificate presented by the target is verified. (Also see `--certs` command arg) |
 | headers      | [][]string     | Headers to be sent to this target |
 | body         | string         | Request body to use for this target|
 | replicas     | int            | Number of parallel invocations to be done for this target |
@@ -1117,6 +1372,16 @@ The job results can be retrieved via API from the `goto` instance, and also stor
 | cmd       | string         | Command to be executed on the OS. Use `sh` as command if shell features are to be used (e.g. pipe) |
 | args      | []string       | Arguments to be passed to the OS command |
 
+
+#### Job Result JSON Schema
+|Field|Data Type|Description|
+|---|---|---|
+| index     | string     | index uniquely identifies a result item within a job run, using format `<JobRunCounter>.<JobIteration>.<ResultCount>`.  |
+| finished  | bool       | whether the job run has finished at the time of producing this result |
+| stopped   | bool       | whether the job was stopped at the time of producing this result |
+| last      | bool       | whether this result is an output of the last iteration of this job run |
+| time      | time       | time when this result was produced |
+| data      | string     | Result data |
 
 <br/>
 
@@ -1170,6 +1435,67 @@ curl -X POST http://localhost:8080/jobs/stop/all
 curl -X POST http://localhost:8080/jobs/job1/results
 ```
 
+#### Job Result Example
+
+<details>
+<summary>Example</summary>
+<p>
+
+```
+[
+  {
+    "index": "1.0.1",
+    "finished": false,
+    "stopped": false,
+    "last": false,
+    "time": "2020-06-13T13:05:58.438626-07:00",
+    "data": "1592078758 Hello"
+  },
+  {
+    "index": "1.0.2",
+    "finished": false,
+    "stopped": false,
+    "last": false,
+    "time": "2020-06-13T13:05:59.452852-07:00",
+    "data": "1592078759 Hi"
+  },
+  {
+    "index": "1.1.3",
+    "finished": false,
+    "stopped": false,
+    "last": true,
+    "time": "2020-06-13T13:06:01.470182-07:00",
+    "data": "1592078761 Hello"
+  },
+  {
+    "index": "1.1.4",
+    "finished": true,
+    "stopped": false,
+    "last": true,
+    "time": "2020-06-13T13:06:02.483314-07:00",
+    "data": ""
+  },
+  {
+    "index": "2.0.1",
+    "finished": false,
+    "stopped": false,
+    "last": false,
+    "time": "2020-06-13T13:06:25.813542-07:00",
+    "data": "1592078785 Hello"
+  },
+  {
+    "index": "2.1.1",
+    "finished": true,
+    "stopped": false,
+    "last": true,
+    "time": "2020-06-13T13:06:29.858443-07:00",
+    "data": ""
+  }
+]
+```
+</p>
+</details>
+
 <br/>
 
 
@@ -1204,13 +1530,17 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET       | /registry/peers/{peer}/targets   | Get all targets of a peer |
 | POST, PUT | /registry/peers/{peer}/targets/{targets}/invoke | Invoke given targets on the given peer |
 | POST, PUT | /registry/peers/{peer}/targets/invoke/all | Invoke all targets on the given peer |
+| POST, PUT | /registry/peers/{peer}/targets/{targets}/stop | Stop given targets on the given peer |
+| POST      | /registry/peers/targets/clear   | Remove all targets from all peers |
 | GET       | /registry/peers/jobs | Get all registered jobs for all peers |
 | POST      | /registry/peers/{peer}/jobs/add | Add a job to be sent to a peer. See [Peer Job JSON Schema](#peer-job-json-schema) |
 | POST, PUT | /registry/peers/{peer}/jobs/{jobs}/remove | Remove given jobs for a peer |
 | POST      | /registry/peers/{peer}/jobs/clear   | Remove all jobs for a peer|
 | GET       | /registry/peers/{peer}/jobs   | Get all jobs of a peer |
-| POST, PUT | /registry/peers/{peer}/jobs/{jobs}/invoke | Invoke given jobs on the given peer |
-| POST, PUT | /registry/peers/{peer}/jobs/invoke/all | Invoke all jobs on the given peer |
+| POST, PUT | /registry/peers/{peer}/jobs/{jobs}/run | Run given jobs on the given peer |
+| POST, PUT | /registry/peers/{peer}/jobs/run/all | Run all jobs on the given peer |
+| POST, PUT | /registry/peers/{peer}/jobs/{jobs}/stop | Stop given jobs on the given peer |
+| POST      | /registry/peers/jobs/clear   | Remove all jobs from all peers |
 
 #### Peer JSON Schema
 |Field|Data Type|Description|
@@ -1225,6 +1555,13 @@ By registering a worker instance to a registry instance, we get a few benefits:
 
 #### Peer Job JSON Schema
 ** Same as [Jobs JSON Schema](#job-json-schema)
+
+#### Locker Data JSON Schema
+|Field|Data Type|Description|
+|---|---|---|
+| Data          | string  | Data posted by a peer |
+| firstReported | time    | Time when this data was first reported by the peer |
+| lastReported  | time    | Time when this data was last reported by the peer (if peer overwrote the data after first reporting) |
 
 <br/>
 
@@ -1312,10 +1649,49 @@ curl -X POST http://localhost:8080/registry/peers/peer1/jobs/job1,job2/invoke
 curl -X POST http://localhost:8080/registry/peers/peer1/jobs/invoke/all
 
 ```
-<br/>
+
+#### Registry Peers List Example
+<details>
+<summary>Example</summary>
+<p>
+
+```
+{
+  "peer1": {
+    "name": "peer1",
+    "namespace": "local",
+    "pods": {
+      "1.0.0.1:8081": {
+        "name": "peer1",
+        "address": "1.0.0.1:8081"
+      },
+      "1.0.0.2:8081": {
+        "name": "peer1",
+        "address": "1.0.0.2:8081"
+      }
+    }
+  },
+  "peer2": {
+    "name": "peer2",
+    "namespace": "local",
+    "pods": {
+      "2.2.2.2:8082": {
+        "name": "peer2",
+        "address": "2.2.2.2:8082"
+      }
+    }
+  }
+}
+```
+</p>
+</details>
+
+
+
+#### Registry Locker Store Example
 
 <details>
-<summary>Registry Locker Store Example</summary>
+<summary>Example</summary>
 <p>
 
 ```
@@ -1371,6 +1747,5 @@ curl -X POST http://localhost:8080/registry/peers/peer1/jobs/invoke/all
       }
     }
 ```
-
 </p>
 </details>

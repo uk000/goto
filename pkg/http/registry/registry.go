@@ -46,9 +46,9 @@ type PeerJob struct {
 type PeerJobs map[string]*PeerJob
 
 type LockerData struct {
-  Data          string
-  FirstReported time.Time
-  LastReported  time.Time
+  Data          string    `json:"data"`
+  FirstReported time.Time `json:"firstReported"`
+  LastReported  time.Time `json:"lastReported"`
 }
 
 type PeerLocker map[string]*LockerData

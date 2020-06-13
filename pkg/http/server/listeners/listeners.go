@@ -14,10 +14,10 @@ import (
 )
 
 type Listener struct {
-  Label    string
-  Port     int
-  Protocol string
-  Open     bool
+  Label    string `json:"label"`
+  Port     int    `json:"port"`
+  Protocol string `json:"protocol"`
+  Open     bool   `json:"open"`
   listener net.Listener
 }
 

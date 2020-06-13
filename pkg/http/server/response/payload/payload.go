@@ -11,10 +11,10 @@ import (
 )
 
 type PortResponse struct {
-  ResponseContentType      string
-  DefaultResponsePayload   string
-  ResponsePayloadByURIs    map[string]interface{}
-  ResponsePayloadByHeaders map[string]map[string]string
+  ResponseContentType      string                       `json:"responseContentType"`
+  DefaultResponsePayload   string                       `json:"defaultResponsePayload"`
+  ResponsePayloadByURIs    map[string]interface{}       `json:"responsePayloadByURIs"`
+  ResponsePayloadByHeaders map[string]map[string]string `json:"responsePayloadByHeaders"`
   lock                     sync.RWMutex
 }
 

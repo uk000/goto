@@ -30,15 +30,18 @@ type HttpJobTask struct {
 }
 
 type JobResult struct {
-  Index      string
-  Finished   bool
-  ResultTime time.Time
-  Data       interface{}
+  Index      string      `json:"index"`
+  Finished   bool        `json:"finished"`
+  Stopped    bool        `json:"stopped"`
+  Last       bool        `json:"last"`
+  ResultTime time.Time   `json:"time"`
+  Data       interface{} `json:"data"`
 }
 
 type JobRun struct {
   index        int
-  running      bool
+  finished     bool
+  stopped      bool
   stopChannel  chan bool
   doneChannel  chan bool
   resultCount  int
@@ -104,10 +107,8 @@ func (pj *PortJobs) AddJob(job *Job) {
   defer pj.lock.Unlock()
   pj.jobs[job.ID] = job
   if job.Auto {
-    go func() {
-      log.Printf("Auto-invoking Job: %s\n", job.ID)
-      pj.runJob(job)
-    }()
+    log.Printf("Auto-invoking Job: %s\n", job.ID)
+    go pj.runJob(job)
   }
 }
 
@@ -164,32 +165,241 @@ func (pj *PortJobs) getJobsToRun(names []string) []*Job {
   return jobsToRun
 }
 
-func storeJobResultsInRegistryLocker(job *Job, jobRun *JobRun) {
+func storeJobResultsInRegistryLocker(jobID string, runIndex int, jobResults []*JobResult) {
   if global.UseLocker && global.RegistryURL != "" {
-    key := "job_" + job.ID + "_" + strconv.Itoa(jobRun.index)
+    key := "job_" + jobID + "_" + strconv.Itoa(runIndex)
     url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/locker/store/" + key
     if resp, err := http.Post(url, "application/json",
-      strings.NewReader(util.ToJSON(jobRun.jobResults))); err == nil {
+      strings.NewReader(util.ToJSON(jobResults))); err == nil {
       defer resp.Body.Close()
     }
   }
 }
 
-func storeCommandResult(data string, job *Job, jobRun *JobRun, last bool) {
-  job.lock.Lock()
-  defer job.lock.Unlock()
+func storeJobResult(job *Job, jobRun *JobRun, iteration int, data interface{}, last bool) {
+  job.lock.RLock()
+  jobID := job.ID
+  keepResults := job.KeepResults
+  keepFirst := job.KeepFirst
+  job.lock.RUnlock()
+  jobRun.lock.Lock()
+  defer jobRun.lock.Unlock()
   jobRun.resultCount++
-  index := strconv.Itoa(jobRun.index) + "." + strconv.Itoa(jobRun.resultCount)
-  jobResult := &JobResult{Index: index, Finished: last, ResultTime: time.Now(), Data: data}
+  index := strconv.Itoa(jobRun.index) + "." + strconv.Itoa(iteration) + "." + strconv.Itoa(jobRun.resultCount)
+  jobResult := &JobResult{Index: index, Last: last, Stopped: jobRun.stopped,
+    Finished: jobRun.finished, ResultTime: time.Now(), Data: data}
   jobRun.jobResults = append(jobRun.jobResults, jobResult)
-  if len(jobRun.jobResults) > job.KeepResults {
-    if job.KeepFirst {
+  if len(jobRun.jobResults) > keepResults {
+    if keepFirst {
       jobRun.jobResults = append(jobRun.jobResults[:1], jobRun.jobResults[2:]...)
     } else {
       jobRun.jobResults = jobRun.jobResults[1:]
     }
   }
-  storeJobResultsInRegistryLocker(job, jobRun)
+  storeJobResultsInRegistryLocker(jobID, jobRun.index, jobRun.jobResults)
+
+}
+
+func (pj *PortJobs) runCommandJob(job *Job, jobRun *JobRun, iteration int, last bool) {
+  runLlock := sync.Mutex{}
+  job.lock.RLock()
+  jobRun.lock.RLock()
+  realCmd := strings.Join(jobRun.preparedArgs, " ")
+  cmd := exec.Command(job.commandTask.Cmd, jobRun.preparedArgs...)
+  outputTrigger := job.OutputTrigger
+  maxResults := job.MaxResults
+  stopChannel := jobRun.stopChannel
+  doneChannel := jobRun.doneChannel
+  jobRun.lock.RUnlock()
+  job.lock.RUnlock()
+  stdout, err1 := cmd.StdoutPipe()
+  stderr, err2 := cmd.StderrPipe()
+  if err1 != nil || err2 != nil {
+    log.Printf("Failed to open output stream from command: %s\n", realCmd)
+    return
+  }
+  outScanner := bufio.NewScanner(stdout)
+  errScanner := bufio.NewScanner(stderr)
+
+  if err := cmd.Start(); err != nil {
+    msg := fmt.Sprintf("Failed to execute command [%s] with error [%s]", realCmd, err.Error())
+    log.Println(msg)
+    storeJobResult(job, jobRun, iteration, msg, last)
+    return
+  }
+  outputChannel := make(chan string)
+  stop := false
+  resultCount := 0
+
+  readOutput := func(scanner *bufio.Scanner) {
+    for scanner.Scan() {
+      runLlock.Lock()
+      if !stop {
+        out := scanner.Text()
+        if len(out) > 0 {
+          outputChannel <- out
+        }
+      }
+      runLlock.Unlock()
+      if stop {
+        break
+      }
+    }
+  }
+
+  go func() {
+    wg := sync.WaitGroup{}
+    wg.Add(1)
+    go func() {
+      readOutput(outScanner)
+      wg.Done()
+    }()
+    wg.Add(1)
+    go func() {
+      readOutput(errScanner)
+      wg.Done()
+    }()
+    wg.Wait()
+    close(outputChannel)
+    doneChannel <- true
+  }()
+
+  stopCommand := func() {
+    runLlock.Lock()
+    stop = true
+    jobRun.lock.Lock()
+    jobRun.stopped = true
+    jobRun.lock.Unlock()
+    if err := cmd.Process.Kill(); err != nil {
+      log.Printf("Failed to stop command [%s] with error [%s]\n", job.commandTask.Cmd, err.Error())
+    }
+    runLlock.Unlock()
+  }
+
+Done:
+  for {
+    select {
+    case <-time.After(job.Timeout):
+      stopCommand()
+      break Done
+    case <-stopChannel:
+      stopCommand()
+      break Done
+    case <-doneChannel:
+      break Done
+    case out := <-outputChannel:
+      if resultCount < maxResults {
+        if out != "" {
+          resultCount++
+          storeJobResult(job, jobRun, iteration, out, last)
+          if outputTrigger != "" {
+            go pj.runJobWithInput(outputTrigger, out)
+          }
+        }
+      } else {
+        stopCommand()
+      }
+    }
+  }
+  cmd.Wait()
+  if last {
+    jobRun.lock.Lock()
+    jobRun.finished = true
+    jobRun.lock.Unlock()
+    storeJobResult(job, jobRun, iteration, "", last)
+  }
+}
+
+func storeHttpResult(result *invocation.InvocationResult, job *Job, iteration int, jobRun *JobRun, last bool) {
+  job.lock.RLock()
+  httpTask := job.httpTask
+  job.lock.RUnlock()
+  if httpTask == nil || httpTask.Name != result.TargetName {
+    return
+  }
+  var data interface{}
+  if httpTask.ParseJSON {
+    json := map[string]interface{}{}
+    if err := util.ReadJson(result.Body, &json); err != nil {
+      log.Printf("Failed reading response JSON: %s\n", err.Error())
+      data = result.Body
+    } else {
+      data = json
+    }
+  } else {
+    data = result.Body
+  }
+  storeJobResult(job, jobRun, iteration, data, last)
+}
+
+func (pj *PortJobs) invokeHttpTarget(job *Job, jobRun *JobRun, iteration int, last bool) {
+  job.lock.RLock()
+  target := &job.httpTask.InvocationSpec
+  targets := []*invocation.InvocationSpec{target}
+  outputTrigger := job.OutputTrigger
+  maxResults := job.MaxResults
+  job.lock.RUnlock()
+  jobRun.lock.RLock()
+  runIndex := jobRun.index
+  stopChannel := jobRun.stopChannel
+  doneChannel := jobRun.doneChannel
+  jobRun.lock.RUnlock()
+
+  resultCount := 0
+  ic := invocation.RegisterInvocation(runIndex)
+
+  go func() {
+    invocation.InvokeTargets(targets, ic, true)
+    doneChannel <- true
+  }()
+
+  sendStopSignal := func() {
+    ic.StopChannel <- target.Name
+    jobRun.lock.Lock()
+    jobRun.stopped = true
+    jobRun.lock.Unlock()
+  }
+
+  storeResult := func(result *invocation.InvocationResult) bool {
+    if resultCount < maxResults {
+      if result != nil {
+        resultCount++
+        storeHttpResult(result, job, iteration, jobRun, last)
+        if outputTrigger != "" {
+          pj.runJobWithInput(outputTrigger, "")
+        }
+        return true
+      }
+    }
+    return false
+  }
+
+Done:
+  for {
+    select {
+    case <-time.After(job.Timeout):
+      sendStopSignal()
+      break Done
+    case <-stopChannel:
+      sendStopSignal()
+      break Done
+    case <-doneChannel:
+      break Done
+    case result := <-ic.ResultChannel:
+      if !storeResult(result) {
+        sendStopSignal()
+      }
+    }
+  }
+  jobRun.lock.Lock()
+  jobRun.finished = true
+  jobRun.lock.Unlock()
+  for result := range ic.ResultChannel {
+    if !storeResult(result) {
+      break
+    }
+  }
+  invocation.DeregisterInvocation(ic)
 }
 
 func (pj *PortJobs) runJobWithInput(jobName string, input string) {
@@ -227,220 +437,11 @@ func (pj *PortJobs) runCommandWithInput(job *Job, input string) {
   if jobRun == nil {
     return
   }
+  jobRun.lock.Lock()
   jobRun.preparedArgs = args
+  jobRun.lock.Unlock()
   pj.executeJobRun(job, jobRun)
 }
-
-func (pj *PortJobs) runCommandAndStoreResult(job *Job, jobRun *JobRun, last bool) {
-  runLlock := sync.Mutex{}
-  job.lock.RLock()
-  realCmd := strings.Join(jobRun.preparedArgs, " ")
-  cmd := exec.Command(job.commandTask.Cmd, jobRun.preparedArgs...)
-  job.lock.RUnlock()
-  stdout, err1 := cmd.StdoutPipe()
-  stderr, err2 := cmd.StderrPipe()
-  if err1 != nil || err2 != nil {
-    log.Printf("Failed to open output stream from command: %s\n", realCmd)
-    return
-  }
-  outScanner := bufio.NewScanner(stdout)
-  errScanner := bufio.NewScanner(stderr)
-
-  if err := cmd.Start(); err != nil {
-    msg := fmt.Sprintf("Failed to execute command [%s] with error [%s]", realCmd, err.Error())
-    log.Println(msg)
-    storeCommandResult(msg, job, jobRun, last)
-    return
-  }
-  outputChannel := make(chan string)
-  finishChannel := make(chan bool)
-  stop := false
-  readOutput := func(scanner *bufio.Scanner) {
-    for scanner.Scan() {
-      runLlock.Lock()
-      if !stop {
-        out := scanner.Text()
-        if len(out) > 0 {
-          outputChannel <- out
-        }
-      }
-      runLlock.Unlock()
-      if stop {
-        break
-      }
-    }
-  }
-  go func() {
-    wg := sync.WaitGroup{}
-    wg.Add(1)
-    go func() {
-      readOutput(outScanner)
-      wg.Done()
-    }()
-    wg.Add(1)
-    go func() {
-      readOutput(errScanner)
-      wg.Done()
-    }()
-    wg.Wait()
-    runLlock.Lock()
-    if !stop {
-      jobRun.doneChannel <- true
-    }
-    runLlock.Unlock()
-    close(outputChannel)
-    finishChannel <- true
-  }()
-  stopCommand := func() {
-    runLlock.Lock()
-    stop = true
-    jobRun.lock.Lock()
-    jobRun.running = false
-    jobRun.lock.Unlock()
-    if err := cmd.Process.Kill(); err != nil {
-      log.Printf("Failed to stop command [%s] with error [%s]\n", job.commandTask.Cmd, err.Error())
-    }
-    runLlock.Unlock()
-  }
-  var stopChannel chan bool
-  job.lock.RLock()
-  stopChannel = jobRun.stopChannel
-  job.lock.RUnlock()
-  done := false
-  resultCount := 0
-  go func() {
-  Done:
-    for {
-      select {
-      case <-time.After(job.Timeout):
-        if !done {
-          stopCommand()
-        }
-        break Done
-      case <-stopChannel:
-        if !done {
-          stopCommand()
-        }
-        break Done
-      case done = <-jobRun.doneChannel:
-        if last {
-          storeCommandResult("", job, jobRun, true)
-        }
-        break Done
-      case out := <-outputChannel:
-        if resultCount < job.MaxResults {
-          if out != "" {
-            resultCount++
-            storeCommandResult(out, job, jobRun, done && last)
-            if job.OutputTrigger != "" {
-              go pj.runJobWithInput(job.OutputTrigger, out)
-            }
-          }
-        } else {
-          stopCommand()
-        }
-      }
-    }
-  }()
-  cmd.Wait()
-  <-finishChannel
-  done = true
-}
-
-func storeHttpResult(result *invocation.InvocationResult, job *Job, jobRun *JobRun, last bool) {
-  job.lock.Lock()
-  if job.httpTask != nil && job.httpTask.Name == result.TargetName {
-    jobRun.resultCount++
-    index := strconv.Itoa(jobRun.index) + "." + strconv.Itoa(jobRun.resultCount)
-    jobResult := &JobResult{Index: index, Finished: last, ResultTime: time.Now()}
-    if job.httpTask.ParseJSON {
-      json := map[string]interface{}{}
-      if err := util.ReadJson(result.Body, &json); err != nil {
-        log.Printf("Failed reading response JSON: %s\n", err.Error())
-        jobResult.Data = result.Body
-      } else {
-        jobResult.Data = json
-      }
-    } else {
-      jobResult.Data = result.Body
-    }
-    jobRun.jobResults = append(jobRun.jobResults, jobResult)
-    if len(jobRun.jobResults) > job.KeepResults {
-      if job.KeepFirst {
-        jobRun.jobResults = append(jobRun.jobResults[:1], jobRun.jobResults[2:]...)
-      } else {
-        jobRun.jobResults = jobRun.jobResults[1:]
-      }
-    }
-  }
-  storeJobResultsInRegistryLocker(job, jobRun)
-  job.lock.Unlock()
-}
-
-func (pj *PortJobs) invokeHttpTarget(job *Job, jobRun *JobRun, last bool) {
-  job.lock.RLock()
-  target := &job.httpTask.InvocationSpec
-  targets := []*invocation.InvocationSpec{target}
-  job.lock.RUnlock()
-  ic := invocation.RegisterInvocation(jobRun.index)
-  finishChannel := make(chan bool)
-  go func() {
-    invocation.InvokeTargets(targets, ic, true)
-    finishChannel <- true
-  }()
-  done := false
-  resultCount := 0
-Done:
-  for {
-    select {
-    case <-time.After(job.Timeout):
-      ic.StopChannel <- target.Name
-      break Done
-    case done = <-ic.DoneChannel:
-      break Done
-    case <-jobRun.stopChannel:
-      ic.StopChannel <- target.Name
-      break Done
-    case result := <-ic.ResultChannel:
-      if result != nil {
-        if resultCount < job.MaxResults {
-          resultCount++
-          storeHttpResult(result, job, jobRun, last)
-          if job.OutputTrigger != "" {
-            pj.runJobWithInput(job.OutputTrigger, "")
-          }
-        } else {
-          ic.StopChannel <- target.Name
-        }
-      }
-    }
-  }
-  <-finishChannel
-  jobRun.lock.Lock()
-  jobRun.running = false
-  jobRun.lock.Unlock()
-
-  if done {
-  MoreResults:
-    for {
-      select {
-      case result := <-ic.ResultChannel:
-        if result != nil {
-          if resultCount <= job.MaxResults {
-            storeHttpResult(result, job, jobRun, last)
-            if job.OutputTrigger != "" {
-              pj.runJobWithInput(job.OutputTrigger, "")
-            }
-          }
-        }
-      default:
-        break MoreResults
-      }
-    }
-  }
-  invocation.DeregisterInvocation(ic)
-}
-
 func (pj *PortJobs) runHttpJobWithInput(job *Job, input string) {
   pj.runJob(job)
 }
@@ -457,19 +458,15 @@ func (pj *PortJobs) executeJobRun(job *Job, jobRun *JobRun) {
   }
   job.lock.Unlock()
 
-  jobRun.lock.Lock()
-  jobRun.running = true
-  jobRun.lock.Unlock()
-
   for i := 0; i < count; i++ {
     time.Sleep(delay)
     if job.commandTask != nil {
-      pj.runCommandAndStoreResult(job, jobRun, i == count-1)
+      pj.runCommandJob(job, jobRun, i, i == count-1)
     } else if job.httpTask != nil {
-      pj.invokeHttpTarget(job, jobRun, i == count-1)
+      pj.invokeHttpTarget(job, jobRun, i, i == count-1)
     }
     jobRun.lock.RLock()
-    running := jobRun.running
+    running := !jobRun.stopped && !jobRun.finished
     jobRun.lock.RUnlock()
     if !running {
       break
@@ -519,7 +516,7 @@ func (pj *PortJobs) runJob(job *Job) {
 
 func (pj *PortJobs) runJobs(jobs []*Job) {
   for _, job := range jobs {
-    pj.runJob(job)
+    go pj.runJob(job)
   }
 }
 

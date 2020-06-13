@@ -13,15 +13,18 @@ import (
 )
 
 var (
-  Handler         util.ServerHandler = util.ServerHandler{"uri", SetRoutes, Middleware}
-  internalHandler util.ServerHandler = util.ServerHandler{Name: "uri", Middleware: middleware}
-  uriCountsByPort map[string]map[string]int
-  uriLock         sync.RWMutex
+  Handler            util.ServerHandler = util.ServerHandler{"uri", SetRoutes, Middleware}
+  internalHandler    util.ServerHandler = util.ServerHandler{Name: "uri", Middleware: middleware}
+  uriCountsByPort    map[string]map[string]int
+  trackURICallCounts bool
+  uriLock            sync.RWMutex
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   uriRouter := r.PathPrefix("/uri").Subrouter()
   bypass.SetRoutes(uriRouter, parent, root)
+  util.AddRoute(uriRouter, "/counts/enable", enableURICallCounts, "POST")
+  util.AddRoute(uriRouter, "/counts/disable", disableURICallCounts, "POST")
   util.AddRoute(uriRouter, "/counts", getURICallCounts, "GET")
   util.AddRoute(uriRouter, "/counts/clear", clearURICallCounts, "POST")
 }
@@ -58,16 +61,40 @@ func clearURICallCounts(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("URI Call Counts Cleared", r)
 }
 
+func enableURICallCounts(w http.ResponseWriter, r *http.Request) {
+  uriLock.Lock()
+  trackURICallCounts = true
+  uriLock.Unlock()
+  w.WriteHeader(http.StatusOK)
+  fmt.Fprintln(w, "URI Call Counts Enabled")
+  util.AddLogMessage("URI Call Counts Enabled", r)
+}
+
+func disableURICallCounts(w http.ResponseWriter, r *http.Request) {
+  uriLock.Lock()
+  trackURICallCounts = false
+  uriLock.Unlock()
+  w.WriteHeader(http.StatusOK)
+  fmt.Fprintln(w, "URI Call Counts Disabled")
+  util.AddLogMessage("URI Call Counts Disabled", r)
+}
+
 func middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     util.AddLogMessage(fmt.Sprintf("Request URI: [%s], Method: [%s]", r.RequestURI, r.Method), r)
     if !util.IsAdminRequest(r) {
-      initPort(r)
-      port := util.GetListenerPort(r)
-      uri := strings.ToLower(r.RequestURI)
-      uriLock.Lock()
-      uriCountsByPort[port][uri]++
-      uriLock.Unlock()
+      track := false
+      uriLock.RLock()
+      track = trackURICallCounts
+      uriLock.RUnlock()
+      if track {
+        initPort(r)
+        port := util.GetListenerPort(r)
+        uri := strings.ToLower(r.URL.Path)
+        uriLock.Lock()
+        uriCountsByPort[port][uri]++
+        uriLock.Unlock()
+      }
     }
     next.ServeHTTP(w, r)
   })

@@ -43,6 +43,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(triggerRouter, "/{target}/disable", disableTriggerTarget, "PUT", "POST")
   util.AddRoute(triggerRouter, "/{targets}/invoke", invokeTriggers, "POST")
   util.AddRoute(triggerRouter, "/clear", clearTriggers, "POST")
+  util.AddRoute(triggerRouter, "/counts", getTriggerCounts)
   util.AddRoute(triggerRouter, "/list", getTriggers)
 }
 
@@ -139,8 +140,8 @@ func (t *Trigger) removeTriggerTarget(w http.ResponseWriter, r *http.Request) {
 func (t *Trigger) enableTriggerTarget(w http.ResponseWriter, r *http.Request) {
   if tt := t.getRequestedTriggerTarget(r); tt != nil {
     t.lock.Lock()
-    defer t.lock.Unlock()
     tt.Enabled = true
+    t.lock.Unlock()
     util.AddLogMessage(fmt.Sprintf("Enabled trigger target: %s", tt.Name), r)
     w.WriteHeader(http.StatusAccepted)
     fmt.Fprintf(w, "Enabled trigger target: %s\n", util.ToJSON(tt))
@@ -153,8 +154,8 @@ func (t *Trigger) enableTriggerTarget(w http.ResponseWriter, r *http.Request) {
 func (t *Trigger) disableTriggerTarget(w http.ResponseWriter, r *http.Request) {
   if tt := t.getRequestedTriggerTarget(r); tt != nil {
     t.lock.Lock()
-    defer t.lock.Unlock()
     tt.Enabled = false
+    t.lock.Unlock()
     util.AddLogMessage(fmt.Sprintf("Disbled trigger target: %s", tt.Name), r)
     w.WriteHeader(http.StatusAccepted)
     fmt.Fprintf(w, "Disbled trigger target: %s\n", util.ToJSON(tt))
@@ -266,8 +267,18 @@ func clearTriggers(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, "Triggers cleared")
 }
 
+func getTriggerCounts(w http.ResponseWriter, r *http.Request) {
+  t := getPortTrigger(r)
+  triggerLock.Lock()
+  defer triggerLock.Unlock()
+  util.AddLogMessage(fmt.Sprintf("Get trigger counts: %+v", t), r)
+  util.WriteJsonPayload(w, t.TriggerResults)
+}
+
 func getTriggers(w http.ResponseWriter, r *http.Request) {
   t := getPortTrigger(r)
+  triggerLock.Lock()
+  defer triggerLock.Unlock()
   util.AddLogMessage(fmt.Sprintf("Get triggers: %+v", t), r)
   util.WriteJsonPayload(w, t)
 }

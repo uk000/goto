@@ -56,10 +56,10 @@ type ProxyMatchCounts struct {
 }
 
 type Proxy struct {
-  Targets          map[string]*ProxyTarget
-  TargetsByHeaders map[string]map[string]map[string]*ProxyTarget
-  TargetsByUris    map[string]map[string]*ProxyTarget
-  TargetsByQuery   map[string]map[string]map[string]*ProxyTarget
+  Targets          map[string]*ProxyTarget                       `json:"targets"`
+  TargetsByHeaders map[string]map[string]map[string]*ProxyTarget `json:"targetsByHeaders"`
+  TargetsByUris    map[string]map[string]*ProxyTarget            `json:"targetsByUris"`
+  TargetsByQuery   map[string]map[string]map[string]*ProxyTarget `json:"targetsByQuery"`
   proxyMatchCounts *ProxyMatchCounts
   lock             sync.RWMutex
 }
@@ -82,10 +82,10 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(targetsRouter, "/{target}/disable", disableProxyTarget, "PUT", "POST")
   util.AddRoute(targetsRouter, "/{targets}/invoke", invokeProxyTargets, "POST")
   util.AddRoute(targetsRouter, "/invoke/{targets}", invokeProxyTargets, "POST")
-  util.AddRoute(targetsRouter, "/counts", getProxyTargetMatchCounts, "GET")
-  util.AddRoute(targetsRouter, "/counts/clear", clearProxyTargetMatchCounts, "POST")
   util.AddRoute(targetsRouter, "/clear", clearProxyTargets, "POST")
   util.AddRoute(targetsRouter, "", getProxyTargets)
+  util.AddRoute(proxyRouter, "/counts", getProxyMatchCounts, "GET")
+  util.AddRoute(proxyRouter, "/counts/clear", clearProxyMatchCounts, "POST")
 }
 
 func (p *Proxy) init() {
@@ -615,13 +615,13 @@ func getProxyTargets(w http.ResponseWriter, r *http.Request) {
   util.WriteJsonPayload(w, p)
 }
 
-func getProxyTargetMatchCounts(w http.ResponseWriter, r *http.Request) {
+func getProxyMatchCounts(w http.ResponseWriter, r *http.Request) {
   p := getPortProxy(r)
   util.AddLogMessage("Reporting proxy target match counts", r)
   util.WriteJsonPayload(w, p.proxyMatchCounts)
 }
 
-func clearProxyTargetMatchCounts(w http.ResponseWriter, r *http.Request) {
+func clearProxyMatchCounts(w http.ResponseWriter, r *http.Request) {
   p := getPortProxy(r)
   p.initResults()
   w.WriteHeader(http.StatusAccepted)

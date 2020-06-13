@@ -12,8 +12,8 @@ import (
 )
 
 type Bypass struct {
-  Uris         map[string]interface{}
-  BypassStatus int
+  Uris         map[string]interface{} `json:"uris"`
+  BypassStatus int                    `json:"bypassStatus"`
   lock         sync.RWMutex
 }
 
@@ -174,7 +174,7 @@ func Middleware(next http.Handler) http.Handler {
     b.lock.RUnlock()
     if uri != "" {
       b.lock.Lock()
-      b.Uris[uri] = b.Uris[uri].(int)+1
+      b.Uris[uri] = b.Uris[uri].(int) + 1
       w.WriteHeader(b.BypassStatus)
       b.lock.Unlock()
       util.AddLogMessage("Bypassing URI", r)
