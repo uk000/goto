@@ -1,7 +1,7 @@
 package job
 
 import (
-	"bytes"
+	"bufio"
 	"errors"
 	"fmt"
 	"goto/pkg/global"
@@ -19,8 +19,9 @@ import (
 )
 
 type CommandJobTask struct {
-  Cmd  string   `json:"cmd"`
-  Args []string `json."args"`
+  Cmd     string   `json:"cmd"`
+  Args    []string `json:"args"`
+  fillers map[int]int
 }
 
 type HttpJobTask struct {
@@ -35,36 +36,41 @@ type JobResult struct {
   Data       interface{}
 }
 
-type JobRunInfo struct {
-  index       int
-  running     bool
-  stopChannel chan bool
-  doneChannel chan bool
-  lock        sync.RWMutex
+type JobRun struct {
+  index        int
+  running      bool
+  stopChannel  chan bool
+  doneChannel  chan bool
+  resultCount  int
+  preparedArgs []string
+  jobResults   []*JobResult
+  lock         sync.RWMutex
 }
 
 type Job struct {
-  ID          string          `json:"id"`
-  Task        interface{}     `json:"task"`
-  Auto        bool            `json:"auto"`
-  Delay       string          `json:"delay"`
-  Count       int             `json:"count"`
-  MaxResults  int             `json:"maxResults"`
-  KeepFirst   bool            `json:"keepFirst"`
-  delayD      time.Duration   `json:"-"`
-  httpTask    *HttpJobTask    `json:"-"`
-  commandTask *CommandJobTask `json:"-"`
-  jobRun      *JobRunInfo     `json:"-"`
-  jobResults  []*JobResult    `json:"-"`
-  resultCount int             `json:"-"`
-  lock        sync.RWMutex    `json:"-"`
+  ID            string        `json:"id"`
+  Task          interface{}   `json:"task"`
+  Auto          bool          `json:"auto"`
+  Delay         string        `json:"delay"`
+  Count         int           `json:"count"`
+  MaxResults    int           `json:"maxResults"`
+  KeepResults   int           `json:"keepResults"`
+  KeepFirst     bool          `json:"keepFirst"`
+  Timeout       time.Duration `json:"timeout"`
+  OutputTrigger string        `json:"outputTrigger"`
+  FinishTrigger string        `json:"finishTrigger"`
+  delayD        time.Duration
+  httpTask      *HttpJobTask
+  commandTask   *CommandJobTask
+  jobRunCounter int
+  lock          sync.RWMutex
 }
 
 type PortJobs struct {
-  jobs          map[string]*Job
-  jobRunCounter int
-  listenerPort  string
-  lock          sync.RWMutex
+  jobs         map[string]*Job
+  jobRuns      map[string]map[int]*JobRun
+  listenerPort string
+  lock         sync.RWMutex
 }
 
 var (
@@ -90,23 +96,17 @@ func (pj *PortJobs) init() {
   pj.lock.Lock()
   defer pj.lock.Unlock()
   pj.jobs = map[string]*Job{}
+  pj.jobRuns = map[string]map[int]*JobRun{}
 }
 
 func (pj *PortJobs) AddJob(job *Job) {
   pj.lock.Lock()
   defer pj.lock.Unlock()
-  job.delayD, _ = time.ParseDuration(job.Delay)
-  if job.Count == 0 {
-    job.Count = 1
-  }
-  if job.MaxResults <= 0 {
-    job.MaxResults = 3
-  }
   pj.jobs[job.ID] = job
   if job.Auto {
     go func() {
       log.Printf("Auto-invoking Job: %s\n", job.ID)
-      pj.runJobs([]*Job{job})
+      pj.runJob(job)
     }()
   }
 }
@@ -125,16 +125,21 @@ func (pj *PortJobs) removeJobs(jobs []string) {
 }
 
 func (pj *PortJobs) getJobResults(name string) []interface{} {
-  pj.lock.RLock()
-  defer pj.lock.RUnlock()
   results := []interface{}{}
+
+  pj.lock.RLock()
   job := pj.jobs[name]
-  if job != nil {
-    job.lock.RLock()
-    for _, r := range job.jobResults {
-      results = append(results, r)
+  jobRuns := pj.jobRuns[name]
+  pj.lock.RUnlock()
+
+  if job != nil && jobRuns != nil {
+    for _, jobRun := range jobRuns {
+      jobRun.lock.RLock()
+      for _, r := range jobRun.jobResults {
+        results = append(results, r)
+      }
+      jobRun.lock.RUnlock()
     }
-    job.lock.RUnlock()
   }
   return results
 }
@@ -159,285 +164,362 @@ func (pj *PortJobs) getJobsToRun(names []string) []*Job {
   return jobsToRun
 }
 
-func storeJobResultsInRegistryLocker(job *Job) {
+func storeJobResultsInRegistryLocker(job *Job, jobRun *JobRun) {
   if global.UseLocker && global.RegistryURL != "" {
-    key := "job_" + job.ID + "_" + strconv.Itoa(job.jobRun.index)
+    key := "job_" + job.ID + "_" + strconv.Itoa(jobRun.index)
     url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/locker/store/" + key
     if resp, err := http.Post(url, "application/json",
-      strings.NewReader(util.ToJSON(job.jobResults))); err == nil {
+      strings.NewReader(util.ToJSON(jobRun.jobResults))); err == nil {
       defer resp.Body.Close()
-      log.Printf("Stored job results under locker key %s for peer [%s] with registry [%s]\n", key, global.PeerName, global.RegistryURL)
     }
   }
 }
 
-func storeCommandResult(data string, job *Job, last bool) {
+func storeCommandResult(data string, job *Job, jobRun *JobRun, last bool) {
   job.lock.Lock()
   defer job.lock.Unlock()
-  job.resultCount++
-  index := strconv.Itoa(job.jobRun.index) + "." + strconv.Itoa(job.resultCount)
+  jobRun.resultCount++
+  index := strconv.Itoa(jobRun.index) + "." + strconv.Itoa(jobRun.resultCount)
   jobResult := &JobResult{Index: index, Finished: last, ResultTime: time.Now(), Data: data}
-  job.jobResults = append(job.jobResults, jobResult)
-  if len(job.jobResults) > job.MaxResults {
+  jobRun.jobResults = append(jobRun.jobResults, jobResult)
+  if len(jobRun.jobResults) > job.KeepResults {
     if job.KeepFirst {
-      job.jobResults = append(job.jobResults[:1], job.jobResults[2:]...)
+      jobRun.jobResults = append(jobRun.jobResults[:1], jobRun.jobResults[2:]...)
     } else {
-      job.jobResults = job.jobResults[1:]
+      jobRun.jobResults = jobRun.jobResults[1:]
     }
   }
-  storeJobResultsInRegistryLocker(job)
+  storeJobResultsInRegistryLocker(job, jobRun)
 }
 
-func runCommandAndStoreResult(job *Job, last bool) {
-  runLlock := sync.Mutex{}
-  job.lock.RLock()
-  cmd := exec.Command(job.commandTask.Cmd, job.commandTask.Args...)
-  job.lock.RUnlock()
-  var stdout bytes.Buffer
-  var stderr bytes.Buffer
-  cmd.Stdout = &stdout
-  cmd.Stderr = &stderr
-  if err := cmd.Run(); err != nil {
-    msg := fmt.Sprintf("Failed to execute command [%s] with error [%s] [%s]", job.commandTask.Cmd, stderr.String(), err.Error())
-    log.Println(msg)
-    storeCommandResult(msg, job, last)
+func (pj *PortJobs) runJobWithInput(jobName string, input string) {
+  pj.lock.RLock()
+  job := pj.jobs[jobName]
+  pj.lock.RUnlock()
+  if job == nil {
     return
   }
-  c := make(chan string)
-  defer close(c)
-  stop := false
-  go func() {
-    cmd.Wait()
-    runLlock.Lock()
-    if !stop {
-      out := stdout.String()
-      err := stderr.String()
-      if len(out) > 0 {
-        c <- out
-      } else {
-        c <- err
+  if job.commandTask != nil {
+    pj.runCommandWithInput(job, input)
+  } else if job.httpTask != nil {
+    pj.runHttpJobWithInput(job, input)
+  }
+}
+
+func (pj *PortJobs) runCommandWithInput(job *Job, input string) {
+  job.lock.Lock()
+  args := []string{}
+  for _, a := range job.commandTask.Args {
+    args = append(args, a)
+  }
+  if len(job.commandTask.fillers) > 0 {
+    inputs := strings.Split(input, " ")
+    for f := range job.commandTask.fillers {
+      if len(inputs) >= f {
+        for a := range args {
+          args[a] = strings.ReplaceAll(args[a], util.GetFillerMarker(strconv.Itoa(f)), inputs[f-1])
+        }
       }
     }
-    runLlock.Unlock()
-  }()
-  var stopChannel chan bool
+  }
+  job.lock.Unlock()
+  jobRun := pj.initJobRun(job)
+  if jobRun == nil {
+    return
+  }
+  jobRun.preparedArgs = args
+  pj.executeJobRun(job, jobRun)
+}
+
+func (pj *PortJobs) runCommandAndStoreResult(job *Job, jobRun *JobRun, last bool) {
+  runLlock := sync.Mutex{}
   job.lock.RLock()
-  stopChannel = job.jobRun.stopChannel
+  realCmd := strings.Join(jobRun.preparedArgs, " ")
+  cmd := exec.Command(job.commandTask.Cmd, jobRun.preparedArgs...)
   job.lock.RUnlock()
-  select {
-  case <-stopChannel:
+  stdout, err1 := cmd.StdoutPipe()
+  stderr, err2 := cmd.StderrPipe()
+  if err1 != nil || err2 != nil {
+    log.Printf("Failed to open output stream from command: %s\n", realCmd)
+    return
+  }
+  outScanner := bufio.NewScanner(stdout)
+  errScanner := bufio.NewScanner(stderr)
+
+  if err := cmd.Start(); err != nil {
+    msg := fmt.Sprintf("Failed to execute command [%s] with error [%s]", realCmd, err.Error())
+    log.Println(msg)
+    storeCommandResult(msg, job, jobRun, last)
+    return
+  }
+  outputChannel := make(chan string)
+  finishChannel := make(chan bool)
+  stop := false
+  readOutput := func(scanner *bufio.Scanner) {
+    for scanner.Scan() {
+      runLlock.Lock()
+      if !stop {
+        out := scanner.Text()
+        if len(out) > 0 {
+          outputChannel <- out
+        }
+      }
+      runLlock.Unlock()
+      if stop {
+        break
+      }
+    }
+  }
+  go func() {
+    wg := sync.WaitGroup{}
+    wg.Add(1)
+    go func() {
+      readOutput(outScanner)
+      wg.Done()
+    }()
+    wg.Add(1)
+    go func() {
+      readOutput(errScanner)
+      wg.Done()
+    }()
+    wg.Wait()
+    runLlock.Lock()
+    if !stop {
+      jobRun.doneChannel <- true
+    }
+    runLlock.Unlock()
+    close(outputChannel)
+    finishChannel <- true
+  }()
+  stopCommand := func() {
     runLlock.Lock()
     stop = true
-    job.lock.Lock()
-    job.jobRun.running = false
-    job.lock.Unlock()
+    jobRun.lock.Lock()
+    jobRun.running = false
+    jobRun.lock.Unlock()
     if err := cmd.Process.Kill(); err != nil {
       log.Printf("Failed to stop command [%s] with error [%s]\n", job.commandTask.Cmd, err.Error())
     }
     runLlock.Unlock()
-  case out := <-c:
-    storeCommandResult(out, job, last)
   }
+  var stopChannel chan bool
+  job.lock.RLock()
+  stopChannel = jobRun.stopChannel
+  job.lock.RUnlock()
+  done := false
+  resultCount := 0
+  go func() {
+  Done:
+    for {
+      select {
+      case <-time.After(job.Timeout):
+        if !done {
+          stopCommand()
+        }
+        break Done
+      case <-stopChannel:
+        if !done {
+          stopCommand()
+        }
+        break Done
+      case done = <-jobRun.doneChannel:
+        if last {
+          storeCommandResult("", job, jobRun, true)
+        }
+        break Done
+      case out := <-outputChannel:
+        if resultCount < job.MaxResults {
+          if out != "" {
+            resultCount++
+            storeCommandResult(out, job, jobRun, done && last)
+            if job.OutputTrigger != "" {
+              go pj.runJobWithInput(job.OutputTrigger, out)
+            }
+          }
+        } else {
+          stopCommand()
+        }
+      }
+    }
+  }()
+  cmd.Wait()
+  <-finishChannel
+  done = true
 }
 
-func initJobRun(job *Job, index int) bool {
-  if job == nil || job.jobRun != nil || (job.commandTask == nil && job.httpTask == nil) {
-    return false
-  }
+func storeHttpResult(result *invocation.InvocationResult, job *Job, jobRun *JobRun, last bool) {
   job.lock.Lock()
-  defer job.lock.Unlock()
-  job.jobResults = []*JobResult{}
-  job.resultCount = 0
-  job.jobRun = &JobRunInfo{}
-  job.jobRun.index = index
-  job.jobRun.stopChannel = make(chan bool)
-  job.jobRun.doneChannel = make(chan bool, 10)
-  return true
+  if job.httpTask != nil && job.httpTask.Name == result.TargetName {
+    jobRun.resultCount++
+    index := strconv.Itoa(jobRun.index) + "." + strconv.Itoa(jobRun.resultCount)
+    jobResult := &JobResult{Index: index, Finished: last, ResultTime: time.Now()}
+    if job.httpTask.ParseJSON {
+      json := map[string]interface{}{}
+      if err := util.ReadJson(result.Body, &json); err != nil {
+        log.Printf("Failed reading response JSON: %s\n", err.Error())
+        jobResult.Data = result.Body
+      } else {
+        jobResult.Data = json
+      }
+    } else {
+      jobResult.Data = result.Body
+    }
+    jobRun.jobResults = append(jobRun.jobResults, jobResult)
+    if len(jobRun.jobResults) > job.KeepResults {
+      if job.KeepFirst {
+        jobRun.jobResults = append(jobRun.jobResults[:1], jobRun.jobResults[2:]...)
+      } else {
+        jobRun.jobResults = jobRun.jobResults[1:]
+      }
+    }
+  }
+  storeJobResultsInRegistryLocker(job, jobRun)
+  job.lock.Unlock()
 }
 
-func runCommandJob(job *Job) {
-  log.Printf("Starting Command job: %s\n", job.ID)
-  jobRun := job.jobRun
+func (pj *PortJobs) invokeHttpTarget(job *Job, jobRun *JobRun, last bool) {
+  job.lock.RLock()
+  target := &job.httpTask.InvocationSpec
+  targets := []*invocation.InvocationSpec{target}
+  job.lock.RUnlock()
+  ic := invocation.RegisterInvocation(jobRun.index)
+  finishChannel := make(chan bool)
+  go func() {
+    invocation.InvokeTargets(targets, ic, true)
+    finishChannel <- true
+  }()
+  done := false
+  resultCount := 0
+Done:
+  for {
+    select {
+    case <-time.After(job.Timeout):
+      ic.StopChannel <- target.Name
+      break Done
+    case done = <-ic.DoneChannel:
+      break Done
+    case <-jobRun.stopChannel:
+      ic.StopChannel <- target.Name
+      break Done
+    case result := <-ic.ResultChannel:
+      if result != nil {
+        if resultCount < job.MaxResults {
+          resultCount++
+          storeHttpResult(result, job, jobRun, last)
+          if job.OutputTrigger != "" {
+            pj.runJobWithInput(job.OutputTrigger, "")
+          }
+        } else {
+          ic.StopChannel <- target.Name
+        }
+      }
+    }
+  }
+  <-finishChannel
+  jobRun.lock.Lock()
+  jobRun.running = false
+  jobRun.lock.Unlock()
+
+  if done {
+  MoreResults:
+    for {
+      select {
+      case result := <-ic.ResultChannel:
+        if result != nil {
+          if resultCount <= job.MaxResults {
+            storeHttpResult(result, job, jobRun, last)
+            if job.OutputTrigger != "" {
+              pj.runJobWithInput(job.OutputTrigger, "")
+            }
+          }
+        }
+      default:
+        break MoreResults
+      }
+    }
+  }
+  invocation.DeregisterInvocation(ic)
+}
+
+func (pj *PortJobs) runHttpJobWithInput(job *Job, input string) {
+  pj.runJob(job)
+}
+
+func (pj *PortJobs) executeJobRun(job *Job, jobRun *JobRun) {
+  job.lock.Lock()
+  log.Printf("job [%s] Run [%d] Started \n", job.ID, jobRun.index)
+  id := job.ID
+  count := job.Count
+  delay := job.delayD
+  finishTrigger := job.FinishTrigger
+  if job.commandTask != nil && jobRun.preparedArgs == nil {
+    jobRun.preparedArgs = job.commandTask.Args
+  }
+  job.lock.Unlock()
+
   jobRun.lock.Lock()
   jobRun.running = true
   jobRun.lock.Unlock()
-  for i := 0; i < job.Count; i++ {
-    runCommandAndStoreResult(job, i == job.Count-1)
-    if !jobRun.running {
+
+  for i := 0; i < count; i++ {
+    time.Sleep(delay)
+    if job.commandTask != nil {
+      pj.runCommandAndStoreResult(job, jobRun, i == count-1)
+    } else if job.httpTask != nil {
+      pj.invokeHttpTarget(job, jobRun, i == count-1)
+    }
+    jobRun.lock.RLock()
+    running := jobRun.running
+    jobRun.lock.RUnlock()
+    if !running {
       break
     }
-    time.Sleep(job.delayD)
   }
   job.lock.Lock()
   jobRun.lock.Lock()
-  job.jobResults[len(job.jobResults)-1].Finished = true
-  jobRun.doneChannel <- true
   close(jobRun.stopChannel)
   close(jobRun.doneChannel)
+  log.Printf("job [%s] Run [%d] Finished \n", id, jobRun.index)
   jobRun.lock.Unlock()
-  job.jobRun = nil
   job.lock.Unlock()
-  log.Printf("job [%s] Finished \n", job.ID)
-}
 
-func runCommandJobs(jobs []*Job) {
-  for _, job := range jobs {
-    go runCommandJob(job)
+  if finishTrigger != "" {
+    pj.runJobWithInput(finishTrigger, "")
   }
 }
 
-func storeHttpResult(result *invocation.InvocationResult, jobs []*Job, last bool) {
-  for _, job := range jobs {
-    job.lock.Lock()
-    if job.httpTask != nil && job.httpTask.Name == result.TargetName {
-      job.resultCount++
-      index := strconv.Itoa(job.jobRun.index) + "." + strconv.Itoa(job.resultCount)
-      jobResult := &JobResult{Index: index, Finished: last, ResultTime: time.Now()}
-      if job.httpTask.ParseJSON {
-        json := map[string]interface{}{}
-        if err := util.ReadJson(result.Body, &json); err != nil {
-          log.Printf("Failed reading response JSON: %s\n", err.Error())
-          jobResult.Data = result.Body
-        } else {
-          jobResult.Data = json
-        }
-      } else {
-        jobResult.Data = result.Body
-      }
-      job.jobResults = append(job.jobResults, jobResult)
-      if len(job.jobResults) > job.MaxResults {
-        if job.KeepFirst {
-          job.jobResults = append(job.jobResults[:1], job.jobResults[2:]...)
-        } else {
-          job.jobResults = job.jobResults[1:]
-        }
-      }
-    }
-    storeJobResultsInRegistryLocker(job)
-    job.lock.Unlock()
+func (pj *PortJobs) initJobRun(job *Job) *JobRun {
+  if job == nil || (job.commandTask == nil && job.httpTask == nil) {
+    return nil
   }
+  pj.lock.Lock()
+  defer pj.lock.Unlock()
+  job.lock.Lock()
+  defer job.lock.Unlock()
+  job.jobRunCounter++
+  jobRun := &JobRun{}
+  jobRun.jobResults = []*JobResult{}
+  jobRun.index = job.jobRunCounter
+  jobRun.stopChannel = make(chan bool)
+  jobRun.doneChannel = make(chan bool, 10)
+  if pj.jobRuns[job.ID] == nil {
+    pj.jobRuns[job.ID] = map[int]*JobRun{}
+  }
+  pj.jobRuns[job.ID][job.jobRunCounter] = jobRun
+  return jobRun
 }
 
-func invokeHttpTargets(jobs []*Job, last bool) {
-  targets := []*invocation.InvocationSpec{}
-  for _, job := range jobs {
-    job.lock.RLock()
-    targets = append(targets, &job.httpTask.InvocationSpec)
-    job.lock.RUnlock()
+func (pj *PortJobs) runJob(job *Job) {
+  jobRun := pj.initJobRun(job)
+  if jobRun == nil {
+    return
   }
-  if len(targets) > 0 {
-    ic := invocation.RegisterInvocation(jobs[len(jobs)-1].jobRun.index)
-    c := make(chan bool)
-    go func() {
-      invocation.InvokeTargets(targets, ic, true)
-      c <- true
-    }()
-    done := false
-  Results:
-    for {
-      select {
-      case done = <-ic.DoneChannel:
-        break Results
-      case <-ic.StopChannel:
-        break Results
-      case result := <-ic.ResultChannel:
-        if result != nil {
-          storeHttpResult(result, jobs, last)
-        }
-      }
-    }
-    <-c
-    if done {
-    MoreResults:
-      for {
-        select {
-        case result := <-ic.ResultChannel:
-          if result != nil {
-            storeHttpResult(result, jobs, last)
-          }
-        default:
-          break MoreResults
-        }
-      }
-    }
-    invocation.DeregisterInvocation(ic)
-  }
-}
-
-func runHttpJobs(jobs []*Job, listenerPort string) {
-  for _, job := range jobs {
-    job.lock.Lock()
-    job.jobRun.running = true
-    job.lock.Unlock()
-  }
-  jobsToRun := jobs
-  for {
-    targetNames := []string{}
-    delay := 10 * time.Millisecond
-    isLastRound := true
-    for i, job := range jobsToRun {
-      job.lock.RLock()
-      job.jobRun.lock.Lock()
-      select {
-      case <-job.jobRun.stopChannel:
-        job.jobRun.running = false
-      default:
-      }
-      if !job.jobRun.running || job.resultCount >= job.Count {
-        jobsToRun = append(jobsToRun[:i], jobsToRun[i+1:]...)
-      } else {
-        targetNames = append(targetNames, job.httpTask.Name)
-        if job.delayD > delay {
-          delay = job.delayD
-        }
-        if job.Count > job.resultCount+1 {
-          isLastRound = false
-        }
-      }
-      job.jobRun.lock.Unlock()
-      job.lock.RUnlock()
-    }
-    if len(targetNames) > 0 {
-      log.Printf("Starting HTTP jobs: %+v\n", targetNames)
-      invokeHttpTargets(jobsToRun, isLastRound)
-    } else {
-      break
-    }
-    time.Sleep(delay)
-  }
-  for _, job := range jobs {
-    job.lock.Lock()
-    job.jobRun.lock.Lock()
-    job.jobResults[len(job.jobResults)-1].Finished = true
-    job.jobRun.doneChannel <- true
-    close(job.jobRun.stopChannel)
-    close(job.jobRun.doneChannel)
-    job.jobRun.lock.Unlock()
-    job.jobRun = nil
-    job.lock.Unlock()
-  }
+  pj.executeJobRun(job, jobRun)
 }
 
 func (pj *PortJobs) runJobs(jobs []*Job) {
-  httpJobs := []*Job{}
-  cmdJobs := []*Job{}
-  pj.lock.Lock()
-  pj.jobRunCounter++
   for _, job := range jobs {
-    if initJobRun(job, pj.jobRunCounter) {
-      if job.httpTask != nil {
-        httpJobs = append(httpJobs, job)
-      } else {
-        cmdJobs = append(cmdJobs, job)
-      }
-    }
-  }
-  pj.lock.Unlock()
-  if len(cmdJobs) > 0 {
-    go runCommandJobs(cmdJobs)
-  }
-  if len(httpJobs) > 0 {
-    go runHttpJobs(httpJobs, pj.listenerPort)
+    pj.runJob(job)
   }
 }
 
@@ -445,22 +527,22 @@ func (pj *PortJobs) stopJob(j string) bool {
   pj.lock.Lock()
   defer pj.lock.Unlock()
   job := pj.jobs[j]
-  if job == nil || job.jobRun == nil {
+  jobRuns := pj.jobRuns[j]
+  if job == nil || jobRuns == nil {
     return false
   }
   done := false
-  job.jobRun.lock.Lock()
-  select {
-  case done = <-job.jobRun.doneChannel:
-  default:
+  for _, jobRun := range jobRuns {
+    jobRun.lock.Lock()
+    select {
+    case done = <-jobRun.doneChannel:
+    default:
+    }
+    if !done {
+      jobRun.stopChannel <- true
+    }
+    jobRun.lock.Unlock()
   }
-  if !done {
-    job.jobRun.stopChannel <- true
-  }
-  job.jobRun.lock.Unlock()
-  job.lock.Lock()
-  job.jobRun = nil
-  job.lock.Unlock()
   return true
 }
 
@@ -554,7 +636,7 @@ func runJobs(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusOK)
     msg = fmt.Sprintf("Jobs %+v started\n", names)
   } else {
-    w.WriteHeader(http.StatusNotModified)
+    w.WriteHeader(http.StatusNotAcceptable)
     msg = "No jobs to run"
   }
   fmt.Fprintln(w, msg)
@@ -568,7 +650,7 @@ func stopJobs(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusOK)
     msg = fmt.Sprintf("Jobs %+v stopped\n", jobs)
   } else {
-    w.WriteHeader(http.StatusNotModified)
+    w.WriteHeader(http.StatusNotAcceptable)
     msg = "No jobs to stop"
   }
   fmt.Fprintln(w, msg)
@@ -590,9 +672,22 @@ func getJobResults(w http.ResponseWriter, r *http.Request) {
 func ParseJobFromPayload(payload string) (*Job, error) {
   job := &Job{}
   if err := util.ReadJson(payload, job); err == nil {
+    job.delayD, _ = time.ParseDuration(job.Delay)
+    if job.Count == 0 {
+      job.Count = 1
+    }
+    if job.KeepResults <= 0 {
+      job.KeepResults = 5
+    }
+    if job.MaxResults <= 0 {
+      job.MaxResults = 20
+    }
+    if job.Timeout <= 0 {
+      job.Timeout = 10 * time.Minute
+    }
     if job.Task != nil {
       var httpTask HttpJobTask
-      var commandTask CommandJobTask
+      commandTask := CommandJobTask{fillers: map[int]int{}}
       var httpTaskError error
       var cmdTaskError error
       task := util.ToJSON(job.Task)
@@ -604,7 +699,14 @@ func ParseJobFromPayload(payload string) (*Job, error) {
       if httpTaskError != nil {
         if cmdTaskError = util.ReadJson(task, &commandTask); cmdTaskError == nil {
           if commandTask.Cmd != "" {
-            job.commandTask = &commandTask
+            for _, arg := range commandTask.Args {
+              for i := 1; i <= 9; i++ {
+                if strings.Contains(arg, util.GetFillerMarker(strconv.Itoa(i))) {
+                  commandTask.fillers[i]++
+                }
+              }
+              job.commandTask = &commandTask
+            }
           } else {
             cmdTaskError = errors.New("Missing command in command task")
           }

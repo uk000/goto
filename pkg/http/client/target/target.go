@@ -86,9 +86,12 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(r, "/results/clear", clearResults, "POST")
 }
 
-func (pc *PortClient) init() {
+func (pc *PortClient) init() bool {
   pc.targetsLock.Lock()
   defer pc.targetsLock.Unlock()
+  if len(pc.activeInvocations) > 0 {
+    return false
+  }
   pc.targets = map[string]*Target{}
   pc.activeInvocations = map[int]*invocation.InvocationChannels{}
   pc.invocationCounter = 0
@@ -96,6 +99,7 @@ func (pc *PortClient) init() {
   pc.trackingHeaders = map[string]int{}
   pc.targetResults = &TargetResults{}
   pc.targetResultsByInvocation = map[int]*TargetResults{}
+  return true
 }
 
 func initResults(targetResults *TargetResults) {
@@ -123,7 +127,7 @@ func (pc *PortClient) isTargetResultsInitialized(index ...int) bool {
 }
 
 func (pc *PortClient) initTargetResults(index ...int) {
-  if ! pc.isTargetResultsInitialized() {
+  if !pc.isTargetResultsInitialized() {
     pc.targetResults = &TargetResults{}
     initResults(pc.targetResults)
   }
@@ -151,12 +155,16 @@ func (pc *PortClient) AddTarget(t *Target) {
   }
 }
 
-func (pc *PortClient) removeTargets(targets []string) {
+func (pc *PortClient) removeTargets(targets []string) bool {
   pc.targetsLock.Lock()
   defer pc.targetsLock.Unlock()
+  if len(pc.activeInvocations) > 0 {
+    return false
+  }
   for _, t := range targets {
     delete(pc.targets, t)
   }
+  return true
 }
 
 func prepareTargetsForPeers(targets []*invocation.InvocationSpec, r *http.Request) []*invocation.InvocationSpec {
@@ -181,7 +189,7 @@ func prepareTargetsForPeers(targets []*invocation.InvocationSpec, r *http.Reques
           }
         }
       }
-    } 
+    }
     if !added {
       targetsToInvoke = append(targetsToInvoke, t)
     }
@@ -285,7 +293,6 @@ func storeJobResultsInRegistryLocker(key string, targetResults *TargetResults) {
     if resp, err := http.Post(url, "application/json",
       strings.NewReader(util.ToJSON(targetResults))); err == nil {
       defer resp.Body.Close()
-      log.Printf("Stored invocation results under locker key %s for peer [%s] with registry [%s]\n", key, global.PeerName, global.RegistryURL)
     }
   }
 }
@@ -469,8 +476,7 @@ func addTarget(w http.ResponseWriter, r *http.Request) {
       msg = fmt.Sprintf("Invalid target spec: %s", err.Error())
     } else {
       t.Headers = append(t.Headers, []string{"Goto-Client", listeners.DefaultLabel})
-      pc := getPortClient(r)
-      pc.AddTarget(t)
+      getPortClient(r).AddTarget(t)
       w.WriteHeader(http.StatusOK)
       msg = fmt.Sprintf("Added target: %s", util.ToJSON(t))
     }
@@ -485,9 +491,13 @@ func addTarget(w http.ResponseWriter, r *http.Request) {
 func removeTargets(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if targets, present := util.GetListParam(r, "targets"); present {
-    getPortClient(r).removeTargets(targets)
-    w.WriteHeader(http.StatusOK)
-    msg = fmt.Sprintf("Targets Removed: %+v", targets)
+    if getPortClient(r).removeTargets(targets) {
+      w.WriteHeader(http.StatusOK)
+      msg = fmt.Sprintf("Targets Removed: %+v", targets)
+    } else {
+      w.WriteHeader(http.StatusNotAcceptable)
+      msg = fmt.Sprintf("Targets cannot be removed while traffic is running")
+    }
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = "No target given"
@@ -497,9 +507,14 @@ func removeTargets(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearTargets(w http.ResponseWriter, r *http.Request) {
-  getPortClient(r).init()
-  w.WriteHeader(http.StatusOK)
-  msg := "Targets cleared"
+  msg := ""
+  if getPortClient(r).init() {
+    w.WriteHeader(http.StatusOK)
+    msg = "Targets cleared"
+  } else {
+    w.WriteHeader(http.StatusNotAcceptable)
+    msg = fmt.Sprintf("Targets cannot be cleared while traffic is running")
+  }
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
@@ -575,7 +590,6 @@ func getTrackingHeaders(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
-
 func getInvocationResults(w http.ResponseWriter, r *http.Request) {
   output := getPortClient(r).getInvocationResults()
   w.WriteHeader(http.StatusAlreadyReported)
@@ -632,7 +646,7 @@ func invokeTargetsAndStoreResults(pc *PortClient, targets []*invocation.Invocati
     c <- true
   }()
   done := false
-  Results:
+Results:
   for {
     select {
     case done = <-ic.DoneChannel:

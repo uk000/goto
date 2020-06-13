@@ -1,4 +1,5 @@
 go.sum
 .vscode
+.history
 .idea/
-goto
+goto*

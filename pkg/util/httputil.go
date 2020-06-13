@@ -211,7 +211,7 @@ func WriteJsonPayload(w http.ResponseWriter, t interface{}) {
 func IsAdminRequest(r *http.Request) bool {
   return strings.HasPrefix(r.RequestURI, "/request") || strings.HasPrefix(r.RequestURI, "/response") ||
     strings.HasPrefix(r.RequestURI, "/listeners") || strings.HasPrefix(r.RequestURI, "/client") ||
-    strings.HasPrefix(r.RequestURI, "/label") || strings.HasPrefix(r.RequestURI, "/job")|| 
+    strings.HasPrefix(r.RequestURI, "/label") || strings.HasPrefix(r.RequestURI, "/job") ||
     strings.HasPrefix(r.RequestURI, "/registry")
 }
 
@@ -289,8 +289,8 @@ func matchPieces(pieces1 []string, pieces2 []string) bool {
   }
   for i, piece1 := range pieces1 {
     piece2 := pieces2[i]
-    if piece1 != piece2 && 
-      !((strings.HasPrefix(piece1, "{") && strings.HasSuffix(piece1, "}")) || 
+    if piece1 != piece2 &&
+      !((strings.HasPrefix(piece1, "{") && strings.HasSuffix(piece1, "}")) ||
         (strings.HasPrefix(piece2, "{") && strings.HasSuffix(piece2, "}"))) {
       return false
     }
@@ -326,5 +326,9 @@ func IsURIInMap(uri string, m map[string]interface{}) bool {
 
 func IsYes(flag string) bool {
   return strings.EqualFold(flag, "y") || strings.EqualFold(flag, "yes") ||
-        strings.EqualFold(flag, "true") || strings.EqualFold(flag, "1")
+    strings.EqualFold(flag, "true") || strings.EqualFold(flag, "1")
+}
+
+func GetFillerMarker(label string) string {
+  return "{" + label + "}"
 }
