@@ -9,7 +9,7 @@ GO_FILES := $(shell find . -name '*.go' | grep -v /vendor/)
 
 GOOS=darwin
 COMMIT := $(shell git log -1 --pretty=tformat:%h)
-VERSION := 0.0.6
+VERSION := 0.0.0
 
 IMAGE := uk0000/goto
 
