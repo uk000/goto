@@ -461,9 +461,9 @@ func (pj *PortJobs) executeJobRun(job *Job, jobRun *JobRun) {
   for i := 0; i < count; i++ {
     time.Sleep(delay)
     if job.commandTask != nil {
-      pj.runCommandJob(job, jobRun, i, i == count-1)
+      pj.runCommandJob(job, jobRun, i+1, i == count-1)
     } else if job.httpTask != nil {
-      pj.invokeHttpTarget(job, jobRun, i, i == count-1)
+      pj.invokeHttpTarget(job, jobRun, i+1, i == count-1)
     }
     jobRun.lock.RLock()
     running := !jobRun.stopped && !jobRun.finished

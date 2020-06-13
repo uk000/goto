@@ -1698,51 +1698,51 @@ curl -X POST http://localhost:8080/registry/peers/peer1/jobs/invoke/all
     {
       "peer1": {
         "client": {
-          "Data": "{\"targetInvocationCounts\":{\"t11\":400,\"t12\":400},...",
-          "FirstReported": "2020-06-09T18:28:17.877231-07:00",
-          "LastReported": "2020-06-09T18:28:29.955605-07:00"
+          "data": "{\"targetInvocationCounts\":{\"t11\":400,\"t12\":400},...",
+          "firstReported": "2020-06-09T18:28:17.877231-07:00",
+          "lastReported": "2020-06-09T18:28:29.955605-07:00"
         },
         "client_1": {
-          "Data": "{\"targetInvocationCounts\":{\"t11\":400},\"target...",
-          "FirstReported": "2020-06-09T18:28:17.879187-07:00",
-          "LastReported": "2020-06-09T18:28:29.958954-07:00"
+          "data": "{\"targetInvocationCounts\":{\"t11\":400},\"target...",
+          "firstReported": "2020-06-09T18:28:17.879187-07:00",
+          "lastReported": "2020-06-09T18:28:29.958954-07:00"
         },
         "client_2": {
-          "Data": "{\"targetInvocationCounts\":{\"t12\":400}...",
-          "FirstReported": "2020-06-09T18:28:17.889567-07:00",
-          "LastReported": "2020-06-09T18:28:29.945121-07:00"
+          "data": "{\"targetInvocationCounts\":{\"t12\":400}...",
+          "firstReported": "2020-06-09T18:28:17.889567-07:00",
+          "lastReported": "2020-06-09T18:28:29.945121-07:00"
         },
         "job_job1_1": {
-          "Data": "[{\"Index\":\"1.1\",\"Finished\":false,\"Data\":{...}]",
-          "FirstReported": "2020-06-09T18:28:17.879195-07:00",
-          "LastReported": "2020-06-09T18:28:27.529454-07:00"
+          "data": "[{\"Index\":\"1.1.1\",\"Finished\":false,\"Data\":{...}]",
+          "firstReported": "2020-06-09T18:28:17.879195-07:00",
+          "lastReported": "2020-06-09T18:28:27.529454-07:00"
         },
         "job_job2_2": {
-          "Data": "[{\"Index\":\"2.1\",\"Finished\":false,\"Data\":\"1...}]",
-          "FirstReported": "2020-06-09T18:28:18.985445-07:00",
-          "LastReported": "2020-06-09T18:28:37.428542-07:00"
+          "data": "[{\"Index\":\"2.2.1\",\"Finished\":false,\"Data\":\"1...}]",
+          "firstReported": "2020-06-09T18:28:18.985445-07:00",
+          "lastReported": "2020-06-09T18:28:37.428542-07:00"
         }
       },
       "peer2": {
         "client": {
-          "Data": "{\"targetInvocationCounts\":{\"t22\":4}...}",
-          "FirstReported": "2020-06-09T18:28:19.782433-07:00",
-          "LastReported": "2020-06-09T18:28:20.023149-07:00"
+          "data": "{\"targetInvocationCounts\":{\"t22\":4}...}",
+          "firstReported": "2020-06-09T18:28:19.782433-07:00",
+          "lastReported": "2020-06-09T18:28:20.023149-07:00"
         },
         "client_1": {
-          "Data": "{\"targetInvocationCounts\":{\"t22\":4}...}",
-          "FirstReported": "2020-06-09T18:28:19.91232-07:00",
-          "LastReported": "2020-06-09T18:28:20.027295-07:00"
+          "data": "{\"targetInvocationCounts\":{\"t22\":4}...}",
+          "firstReported": "2020-06-09T18:28:19.91232-07:00",
+          "lastReported": "2020-06-09T18:28:20.027295-07:00"
         },
         "job_job1_1": {
-          "Data": "[{\"Index\":\"1.1\",\"Finished\":false,\"ResultTime\":\"2020...\",\"Data\":\"...}]",
-          "FirstReported": "2020-06-09T18:28:19.699578-07:00",
-          "LastReported": "2020-06-09T18:28:22.778416-07:00"
+          "data": "[{\"Index\":\"1.1.1\",\"Finished\":false,\"ResultTime\":\"2020...\",\"Data\":\"...}]",
+          "firstReported": "2020-06-09T18:28:19.699578-07:00",
+          "lastReported": "2020-06-09T18:28:22.778416-07:00"
         },
-        "job_job2_2": {
-          "Data": "[{\"Index\":\"2.1\",\"Finished\":false,\"ResultTime\":\"2020-0...\",\"Data\":\"...}]",
-          "FirstReported": "2020-06-09T18:28:20.79828-07:00",
-          "LastReported": "2020-06-09T18:28:59.698923-07:00"
+        "job_job1_2": {
+          "data": "[{\"Index\":\"1.2.1\",\"Finished\":false,\"ResultTime\":\"2020-0...\",\"Data\":\"...}]",
+          "firstReported": "2020-06-09T18:28:20.79828-07:00",
+          "lastReported": "2020-06-09T18:28:59.698923-07:00"
         }
       }
     }
