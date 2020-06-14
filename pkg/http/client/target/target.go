@@ -140,18 +140,28 @@ func (pc *PortClient) initTargetResults(index ...int) {
   }
 }
 
-func (pc *PortClient) AddTarget(t *Target) {
-  pc.targetsLock.Lock()
-  defer pc.targetsLock.Unlock()
-  pc.targets[t.Name] = t
-  if t.AutoInvoke {
-    go func() {
-      log.Printf("Auto-invoking target: %s\n", t.Name)
-      pc.invocationCounter++
-      ic := invocation.RegisterInvocation(pc.invocationCounter)
-      pc.activeInvocations[ic.ID] = ic
-      invokeTargetsAndStoreResults(pc, []*invocation.InvocationSpec{&t.InvocationSpec}, ic)
-    }()
+func (pc *PortClient) AddTarget(t *Target, r ...*http.Request) error {
+  if err := invocation.ValidateSpec(&t.InvocationSpec); err == nil {
+    pc.targetsLock.Lock()
+    defer pc.targetsLock.Unlock()
+    t.Headers = append(t.Headers, []string{"Goto-Client", listeners.DefaultLabel})
+    pc.targets[t.Name] = t
+    if t.AutoInvoke {
+      go func() {
+        log.Printf("Auto-invoking target: %s\n", t.Name)
+        targetsToInvoke := []*invocation.InvocationSpec{&t.InvocationSpec}
+        if len(r) > 0 {
+          targetsToInvoke = prepareTargetsForPeers(targetsToInvoke, r[0])
+        }
+        pc.invocationCounter++
+        ic := invocation.RegisterInvocation(pc.invocationCounter)
+        pc.activeInvocations[ic.ID] = ic
+        invokeTargetsAndStoreResults(pc, targetsToInvoke, ic)
+      }()
+    }
+    return nil
+  } else {
+    return err
   }
 }
 
@@ -471,12 +481,10 @@ func addTarget(w http.ResponseWriter, r *http.Request) {
   msg := ""
   t := &Target{}
   if err := util.ReadJsonPayload(r, t); err == nil {
-    if err := invocation.ValidateSpec(&t.InvocationSpec); err != nil {
+    if err := getPortClient(r).AddTarget(t, r); err != nil {
       w.WriteHeader(http.StatusBadRequest)
       msg = fmt.Sprintf("Invalid target spec: %s", err.Error())
     } else {
-      t.Headers = append(t.Headers, []string{"Goto-Client", listeners.DefaultLabel})
-      getPortClient(r).AddTarget(t)
       w.WriteHeader(http.StatusOK)
       msg = fmt.Sprintf("Added target: %s", util.ToJSON(t))
     }
