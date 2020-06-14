@@ -58,6 +58,7 @@ type Job struct {
   Task          interface{}   `json:"task"`
   Auto          bool          `json:"auto"`
   Delay         string        `json:"delay"`
+  InitialDelay  string        `json:"initialDelay"`
   Count         int           `json:"count"`
   MaxResults    int           `json:"maxResults"`
   KeepResults   int           `json:"keepResults"`
@@ -66,6 +67,7 @@ type Job struct {
   OutputTrigger string        `json:"outputTrigger"`
   FinishTrigger string        `json:"finishTrigger"`
   delayD        time.Duration
+  initialDelayD time.Duration
   httpTask      *HttpJobTask
   commandTask   *CommandJobTask
   jobRunCounter int
@@ -438,7 +440,7 @@ func prepareMarkers(output string, sourceCommand *CommandJobTask, jobRun *JobRun
       separator = " "
     }
     jobRun.lock.RLock()
-    for k,v := range jobRun.markers {
+    for k, v := range jobRun.markers {
       markers[k] = v
     }
     jobRun.lock.RUnlock()
@@ -450,7 +452,7 @@ func prepareMarkers(output string, sourceCommand *CommandJobTask, jobRun *JobRun
     }
   }
   return markers
-} 
+}
 
 func (pj *PortJobs) runJobWithInput(jobName string, markers map[string]string) {
   pj.lock.RLock()
@@ -496,12 +498,13 @@ func (pj *PortJobs) executeJobRun(job *Job, jobRun *JobRunContext) {
   id := job.ID
   count := job.Count
   delay := job.delayD
+  initialDelay := job.initialDelayD
   finishTrigger := job.FinishTrigger
   if job.commandTask != nil && jobRun.jobArgs == nil {
     jobRun.jobArgs = job.commandTask.Args
   }
   job.lock.Unlock()
-
+  time.Sleep(initialDelay)
   for i := 0; i < count; i++ {
     time.Sleep(delay)
     if job.commandTask != nil {
@@ -709,7 +712,7 @@ func getJobResults(w http.ResponseWriter, r *http.Request) {
   if job, present := util.GetStringParam(r, "job"); present {
     msg = fmt.Sprintf("Results reported for job: %s", job)
     util.WriteJsonPayload(w, getPortJobs(r).getJobResults(job))
-    } else {
+  } else {
     msg = "Results reported for all jobs"
     util.WriteJsonPayload(w, getPortJobs(r).getAllJobsResults())
   }
@@ -720,7 +723,12 @@ func getJobResults(w http.ResponseWriter, r *http.Request) {
 func ParseJobFromPayload(payload string) (*Job, error) {
   job := &Job{}
   if err := util.ReadJson(payload, job); err == nil {
-    job.delayD, _ = time.ParseDuration(job.Delay)
+    if job.delayD, _ = time.ParseDuration(job.Delay); job.delayD == 0 {
+      job.delayD = 10 * time.Millisecond
+    }
+    if job.initialDelayD, _ = time.ParseDuration(job.InitialDelay); job.initialDelayD == 0 {
+      job.initialDelayD = 1 * time.Second
+    }
     if job.Count == 0 {
       job.Count = 1
     }

@@ -31,6 +31,7 @@ type InvocationSpec struct {
   BodyReader       io.Reader  `json:"bodyReader"`
   Replicas         int        `json:"replicas"`
   RequestCount     int        `json:"requestCount"`
+  InitialDelay     string     `json:"initialDelay"`
   Delay            string     `json:"delay"`
   KeepOpen         string     `json:"keepOpen"`
   SendID           bool       `json:"sendID"`
@@ -43,6 +44,7 @@ type InvocationSpec struct {
   connTimeoutD     time.Duration
   connIdleTimeoutD time.Duration
   requestTimeoutD  time.Duration
+  initialDelayD    time.Duration
   delayD           time.Duration
   keepOpenD        time.Duration
 }
@@ -122,6 +124,13 @@ func ValidateSpec(spec *InvocationSpec) error {
     spec.RequestCount = 1
   }
   var err error
+  if spec.InitialDelay != "" {
+    if spec.initialDelayD, err = time.ParseDuration(spec.InitialDelay); err != nil {
+      return fmt.Errorf("Invalid initial delay")
+    }
+  } else {
+    spec.initialDelayD = 1 * time.Second
+  }
   if spec.Delay != "" {
     if spec.delayD, err = time.ParseDuration(spec.Delay); err != nil {
       return fmt.Errorf("Invalid delay")
@@ -274,6 +283,7 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
   invocationID := invocationChannels.ID
   invocationStatuses := map[string]*InvocationStatus{}
   if len(targets) > 0 {
+    initialDelay := time.Millisecond
     totalRemainingRequestCount := 0
     for _, target := range targets {
       target.host = ""
@@ -291,7 +301,11 @@ func InvokeTargets(targets []*InvocationSpec, invocationChannels *InvocationChan
       }
       invocationStatuses[target.Name] = prepareInvocation(target)
       totalRemainingRequestCount += (target.Replicas * target.RequestCount)
+      if target.initialDelayD > initialDelay {
+        initialDelay = target.initialDelayD
+      }
     }
+    time.Sleep(initialDelay)
     log.Printf("Invocation[%d]: Started with target count: %d, total requests to make: %d\n", invocationID, len(targets), totalRemainingRequestCount)
     for {
       collectStopRequests(invocationChannels, invocationStatuses)
