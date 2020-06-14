@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -26,7 +27,8 @@ type ServerHandler struct {
 type ContextKey struct{ Key string }
 
 var (
-  logmessagesKey *ContextKey = &ContextKey{"logmessages"}
+  logmessagesKey *ContextKey    = &ContextKey{"logmessages"}
+  fillerRegExp   *regexp.Regexp = regexp.MustCompile("({.+?})")
 )
 
 type messagestore struct {
@@ -331,4 +333,17 @@ func IsYes(flag string) bool {
 
 func GetFillerMarker(label string) string {
   return "{" + label + "}"
+}
+
+func GetFillers(text string) []string {
+  return fillerRegExp.FindAllString(text, -1)
+}
+
+func GetFillerUnmarked(text string) []string {
+  matches := GetFillers(text)
+  for i, m := range matches {
+    m = strings.TrimLeft(m, "{")
+    matches[i] = strings.TrimRight(m, "}")
+  }
+  return matches
 }

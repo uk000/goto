@@ -1318,7 +1318,7 @@ curl localhost:8080/response/trigger/list
 - Command execution on local OS
 The job results can be retrieved via API from the `goto` instance, and also stored in locker on registry instance if enabled. (See `--locker` command arg)
 
-Jobs can also trigger another job for each line of output produced, as well as upon completion. For command jobs, the output produced is split by newline, and each line of output can be used as input to trigger another command job. The triggered job's command args can specify positional references, e.g. `{1}, {2}`, where `{1}` will be replaced by the first word (space-separated) from the line output of the source job. This feature can be used to trigger complex chains of jobs, where each job uses output of the previous job to do something else.
+Jobs can also trigger another job for each line of output produced, as well as upon completion. For command jobs, the output produced is split by newline, and each line of output can be used as input to trigger another command job. A job can specify markers for output fields (split using specificed separator), and these markers can be referenced by successor jobs. The markers from a job's output are carried over to all its successor jobs, so a job can use output from a parent job multiple generations in the past. The triggered job's command args specifies marker references as `{foo}`, which gets replaced by the value extracted from any predecessor job's output with that marker key. This feature can be used to trigger complex chains of jobs, where each job uses output of the previous job to do something else.
 
 #### Jobs APIs
 |METHOD|URI|Description|
@@ -1330,7 +1330,8 @@ Jobs can also trigger another job for each line of output produced, as well as u
 | POST  | /jobs/run/all       | Run all configured jobs |
 | POST  | /jobs/{jobs}/stop   | Stop given jobs if running |
 | POST  | /jobs/stop/all      | Stop all running jobs |
-| GET   | /jobs/{job}/results | Get results for the given job |
+| GET   | /jobs/{job}/results | Get results for the given job's runs |
+| GET   | /jobs/results       | Get results for all jobs |
 | GET   | /jobs/              | Get a list of all configured jobs |
 
 
@@ -1369,8 +1370,10 @@ Jobs can also trigger another job for each line of output produced, as well as u
 #### Job Command Task JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
-| cmd       | string         | Command to be executed on the OS. Use `sh` as command if shell features are to be used (e.g. pipe) |
-| args      | []string       | Arguments to be passed to the OS command |
+| cmd             | string         | Command to be executed on the OS. Use `sh` as command if shell features are to be used (e.g. pipe) |
+| args            | []string       | Arguments to be passed to the OS command |
+| outputMarkers   | map[int]string | Specifies marker keys to use to reference the output fields from each line of output. Output is split using the specified separator to extract its keys. Positioning starts at 1 for first piece of split output. |
+| outputSeparator | string         | Text to be used as separator to split each line of output of this command to extract its fields, which are then used by markers |
 
 
 #### Job Result JSON Schema
@@ -1409,14 +1412,34 @@ curl localhost:8080/jobs/add --data '
 "delay": "1s"
 }'
 
-curl localhost:8080/jobs/add --data '
+curl -s localhost:8080/jobs/add --data '
 { 
 "id": "job2",
-"task": {"cmd": "sh", "args": ["-c", "date +%s; echo Hello; sleep 1;"]},
+"task": {
+	"cmd": "sh", 
+	"args": ["-c", "printf `date +%s`; echo \" Say Hello\"; sleep 1; printf `date +%s`; echo \" Say Hi\""],
+	"outputMarkers": {"1":"date","3":"msg"}
+},
 "auto": false,
-"count": 10,
+"count": 1,
 "keepFirst": true,
 "maxResults": 5,
+"delay": "1s",
+"outputTrigger": "job3"
+}'
+
+
+curl -s localhost:8080/jobs/add --data '
+{ 
+"id": "job3",
+"task": {
+	"cmd": "sh", 
+	"args": ["-c", "printf `date +%s`; printf \" Output {date} {msg} Processed\"; sleep 1;"]
+},
+"auto": false,
+"count": 1,
+"keepFirst": true,
+"maxResults": 10,
 "delay": "1s"
 }'
 
@@ -1432,7 +1455,9 @@ curl -X POST http://localhost:8080/jobs/job1,job2/stop
 
 curl -X POST http://localhost:8080/jobs/stop/all
 
-curl -X POST http://localhost:8080/jobs/job1/results
+curl http://localhost:8080/jobs/job1/results
+
+curl http://localhost:8080/jobs/results
 ```
 
 #### Job Result Example
@@ -1442,56 +1467,61 @@ curl -X POST http://localhost:8080/jobs/job1/results
 <p>
 
 ```
-[
-  {
-    "index": "1.0.1",
-    "finished": false,
-    "stopped": false,
-    "last": false,
-    "time": "2020-06-13T13:05:58.438626-07:00",
-    "data": "1592078758 Hello"
-  },
-  {
-    "index": "1.0.2",
-    "finished": false,
-    "stopped": false,
-    "last": false,
-    "time": "2020-06-13T13:05:59.452852-07:00",
-    "data": "1592078759 Hi"
-  },
-  {
-    "index": "1.1.3",
-    "finished": false,
-    "stopped": false,
-    "last": true,
-    "time": "2020-06-13T13:06:01.470182-07:00",
-    "data": "1592078761 Hello"
-  },
-  {
-    "index": "1.1.4",
-    "finished": true,
-    "stopped": false,
-    "last": true,
-    "time": "2020-06-13T13:06:02.483314-07:00",
-    "data": ""
-  },
-  {
-    "index": "2.0.1",
-    "finished": false,
-    "stopped": false,
-    "last": false,
-    "time": "2020-06-13T13:06:25.813542-07:00",
-    "data": "1592078785 Hello"
-  },
-  {
-    "index": "2.1.1",
-    "finished": true,
-    "stopped": false,
-    "last": true,
-    "time": "2020-06-13T13:06:29.858443-07:00",
-    "data": ""
-  }
-]
+$ curl http://localhost:8080/jobs/job1/results
+{
+  "1": [
+    {
+      "index": "1.1.1",
+      "finished": false,
+      "stopped": false,
+      "last": true,
+      "time": "2020-06-13T22:04:28.995178-07:00",
+      "data": "1592111068 Say Hello"
+    },
+    {
+      "index": "1.1.2",
+      "finished": false,
+      "stopped": false,
+      "last": true,
+      "time": "2020-06-13T22:04:30.006885-07:00",
+      "data": "1592111070 Say Hi"
+    },
+    {
+      "index": "1.1.3",
+      "finished": true,
+      "stopped": false,
+      "last": true,
+      "time": "2020-06-13T22:04:30.007281-07:00",
+      "data": ""
+    }
+  ],
+  "2": [
+    {
+      "index": "2.1.1",
+      "finished": false,
+      "stopped": false,
+      "last": true,
+      "time": "2020-06-13T22:04:35.600331-07:00",
+      "data": "1592111075 Say Hello"
+    },
+    {
+      "index": "2.1.2",
+      "finished": false,
+      "stopped": false,
+      "last": true,
+      "time": "2020-06-13T22:04:36.610472-07:00",
+      "data": "1592111076 Say Hi"
+    },
+    {
+      "index": "2.1.3",
+      "finished": true,
+      "stopped": false,
+      "last": true,
+      "time": "2020-06-13T22:04:36.610759-07:00",
+      "data": ""
+    }
+  ]
+}
 ```
 </p>
 </details>
