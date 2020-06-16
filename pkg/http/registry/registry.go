@@ -47,6 +47,7 @@ type PeerJobs map[string]*PeerJob
 
 type LockerData struct {
   Data          string    `json:"data"`
+  Locked        bool
   FirstReported time.Time `json:"firstReported"`
   LastReported  time.Time `json:"lastReported"`
 }
@@ -74,6 +75,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "/{peer}/remove/{address}", removePeer, "PUT", "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/store/{key}", storeInPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/remove/{key}", removeFromPeerLocker, "POST")
+  util.AddRoute(peersRouter, "/{peer}/locker/lock/{key}", lockKeyInPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/clear", clearLocker, "POST")
   util.AddRoute(peersRouter, "/lockers/clear", clearLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker", getPeerLocker, "GET")
@@ -172,6 +174,10 @@ func (pr *PortRegistry) storeInPeerLocker(name string, key string, value string)
     pr.peerLocker[name] = PeerLocker{}
   }
   now := time.Now()
+  if pr.peerLocker[name][key] != nil && pr.peerLocker[name][key].Locked {
+    pr.peerLocker[name][key+"_last"] = pr.peerLocker[name][key]
+    pr.peerLocker[name][key] = nil
+  }
   if pr.peerLocker[name][key] == nil {
     pr.peerLocker[name][key] = &LockerData{}
     pr.peerLocker[name][key].FirstReported = now
@@ -185,6 +191,14 @@ func (pr *PortRegistry) removeFromPeerLocker(name string, key string) {
   defer pr.lock.Unlock()
   if pr.peerLocker[name] != nil {
     delete(pr.peerLocker[name], key)
+  }
+}
+
+func (pr *PortRegistry) lockKeyInPeerLocker(name string, key string) {
+  pr.lock.Lock()
+  defer pr.lock.Unlock()
+  if pr.peerLocker[name] != nil && pr.peerLocker[name][key] != nil {
+    pr.peerLocker[name][key].Locked = true
   }
 }
 
@@ -604,6 +618,25 @@ func removeFromPeerLocker(w http.ResponseWriter, r *http.Request) {
       getPortRegistry(r).removeFromPeerLocker(peerName, key)
       w.WriteHeader(http.StatusOK)
       msg = fmt.Sprintf("Peer %s data removed for Key: %s", peerName, key)
+    } else {
+      w.WriteHeader(http.StatusBadRequest)
+      msg = "No key given"
+    }
+  } else {
+    w.WriteHeader(http.StatusBadRequest)
+    msg = "No peer given"
+  }
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
+}
+
+func lockKeyInPeerLocker(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  if peerName, present := util.GetStringParam(r, "peer"); present {
+    if key, present := util.GetStringParam(r, "key"); present {
+      getPortRegistry(r).lockKeyInPeerLocker(peerName, key)
+      w.WriteHeader(http.StatusOK)
+      msg = fmt.Sprintf("Peer %s data for key: %s is locked", peerName, key)
     } else {
       w.WriteHeader(http.StatusBadRequest)
       msg = "No key given"

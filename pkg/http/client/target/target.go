@@ -42,6 +42,11 @@ type TargetResults struct {
   CountsByTargetHeaderValues map[string]map[string]map[string]int `json:"countsByTargetHeaderValues"`
 }
 
+type TargetInvocationResults struct {
+  Results  *TargetResults `json:"results"`
+  Finished bool           `json:"finished"`
+}
+
 type PortClient struct {
   targets                   map[string]*Target
   activeInvocations         map[int]*invocation.InvocationChannels
@@ -50,7 +55,7 @@ type PortClient struct {
   blockForResponse          bool
   trackingHeaders           map[string]int
   targetResults             *TargetResults
-  targetResultsByInvocation map[int]*TargetResults
+  targetResultsByInvocation map[int]*TargetInvocationResults
   resultsLock               sync.RWMutex
 }
 
@@ -58,7 +63,7 @@ var (
   Handler                    util.ServerHandler     = util.ServerHandler{Name: "client", SetRoutes: SetRoutes}
   portClients                map[string]*PortClient = map[string]*PortClient{}
   portClientsLock            sync.RWMutex
-  InvocationResultsRetention int = 10
+  InvocationResultsRetention int = 100
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -98,7 +103,7 @@ func (pc *PortClient) init() bool {
   pc.blockForResponse = false
   pc.trackingHeaders = map[string]int{}
   pc.targetResults = &TargetResults{}
-  pc.targetResultsByInvocation = map[int]*TargetResults{}
+  pc.targetResultsByInvocation = map[int]*TargetInvocationResults{}
   return true
 }
 
@@ -114,30 +119,6 @@ func initResults(targetResults *TargetResults) {
   targetResults.CountsByTargetStatusCode = map[string]map[int]int{}
   targetResults.CountsByTargetHeaders = map[string]map[string]int{}
   targetResults.CountsByTargetHeaderValues = map[string]map[string]map[string]int{}
-}
-
-func (pc *PortClient) isTargetResultsInitialized(index ...int) bool {
-  if pc.targetResults == nil || pc.targetResults.TargetInvocationCounts == nil {
-    return false
-  }
-  if pc.targetResultsByInvocation == nil || (len(index) > 0 && pc.targetResultsByInvocation[index[0]] == nil) {
-    return false
-  }
-  return true
-}
-
-func (pc *PortClient) initTargetResults(index ...int) {
-  if !pc.isTargetResultsInitialized() {
-    pc.targetResults = &TargetResults{}
-    initResults(pc.targetResults)
-  }
-  if !pc.isTargetResultsInitialized(index...) {
-    if pc.targetResultsByInvocation == nil {
-      pc.targetResultsByInvocation = map[int]*TargetResults{}
-    }
-    pc.targetResultsByInvocation[index[0]] = &TargetResults{}
-    initResults(pc.targetResultsByInvocation[index[0]])
-  }
 }
 
 func (pc *PortClient) AddTarget(t *Target, r ...*http.Request) error {
@@ -292,22 +273,59 @@ func (pc *PortClient) clearResults() {
   pc.targetsLock.Lock()
   pc.invocationCounter = 0
   pc.targetResults = &TargetResults{}
-  pc.targetResultsByInvocation = map[int]*TargetResults{}
+  pc.targetResultsByInvocation = map[int]*TargetInvocationResults{}
   pc.initTargetResults()
   pc.targetsLock.Unlock()
 }
 
-func storeJobResultsInRegistryLocker(key string, targetResults *TargetResults) {
+func storeInvocationResultsInRegistryLocker(key string, results interface{}) {
   if global.UseLocker && global.RegistryURL != "" {
     url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/locker/store/" + key
     if resp, err := http.Post(url, "application/json",
-      strings.NewReader(util.ToJSON(targetResults))); err == nil {
+      strings.NewReader(util.ToJSON(results))); err == nil {
       defer resp.Body.Close()
     }
   }
 }
 
+func lockInovcationRegistryLocker(invocationIndex int) {
+  if global.UseLocker && global.RegistryURL != "" {
+    url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/locker/lock/" + "client_" + strconv.Itoa(invocationIndex)
+    if resp, err := http.Post(url, "application/json", nil); err == nil {
+      defer resp.Body.Close()
+    }
+  }
+}
+
+func (pc *PortClient) isTargetResultsInitialized(index ...int) bool {
+  if pc.targetResults == nil || pc.targetResults.TargetInvocationCounts == nil {
+    return false
+  }
+  if pc.targetResultsByInvocation == nil || (len(index) > 0 && pc.targetResultsByInvocation[index[0]] == nil) {
+    return false
+  }
+  return true
+}
+
+func (pc *PortClient) initTargetResults(index ...int) {
+  if !pc.isTargetResultsInitialized() {
+    pc.targetResults = &TargetResults{}
+    initResults(pc.targetResults)
+  }
+  if !pc.isTargetResultsInitialized(index...) {
+    if pc.targetResultsByInvocation == nil {
+      pc.targetResultsByInvocation = map[int]*TargetInvocationResults{}
+    }
+    pc.targetResultsByInvocation[index[0]] = &TargetInvocationResults{Results: &TargetResults{}}
+    initResults(pc.targetResultsByInvocation[index[0]].Results)
+  }
+}
+
 func (pc *PortClient) storeResults(result *invocation.InvocationResult, targetResults *TargetResults) {
+  if targetResults.CountsByTargetStatusCode == nil {
+    //This shouldn't happen, but initialize anyway
+    initResults(targetResults)
+  }
   if targetResults.CountsByTargetStatusCode[result.TargetName] == nil {
     targetResults.CountsByTargetStatus[result.TargetName] = map[string]int{}
     targetResults.CountsByTargetStatusCode[result.TargetName] = map[int]int{}
@@ -344,11 +362,7 @@ func (pc *PortClient) storeResults(result *invocation.InvocationResult, targetRe
   }
 }
 
-func (pc *PortClient) storeTargetResult(invocationIndex int, result *invocation.InvocationResult) {
-  pc.targetsLock.Lock()
-  defer pc.targetsLock.Unlock()
-  pc.initTargetResults(invocationIndex)
-  pc.storeResults(result, pc.targetResults)
+func (pc *PortClient) checkRetentionLimit() {
   for len(pc.targetResultsByInvocation) >= InvocationResultsRetention {
     oldest := math.MaxInt32
     for i := range pc.targetResultsByInvocation {
@@ -358,12 +372,21 @@ func (pc *PortClient) storeTargetResult(invocationIndex int, result *invocation.
     }
     delete(pc.targetResultsByInvocation, oldest)
   }
+}
+
+func (pc *PortClient) storeTargetResult(invocationIndex int, result *invocation.InvocationResult) {
+  pc.targetsLock.Lock()
+  defer pc.targetsLock.Unlock()
+  pc.initTargetResults(invocationIndex)
+  pc.storeResults(result, pc.targetResults)
   if pc.targetResultsByInvocation[invocationIndex] == nil {
-    pc.targetResultsByInvocation[invocationIndex] = &TargetResults{}
+    //This shouldn't happen
+    pc.targetResultsByInvocation[invocationIndex] = &TargetInvocationResults{Results: &TargetResults{}}
+    initResults(pc.targetResultsByInvocation[invocationIndex].Results)
   }
-  pc.storeResults(result, pc.targetResultsByInvocation[invocationIndex])
-  storeJobResultsInRegistryLocker("client", pc.targetResults)
-  storeJobResultsInRegistryLocker("client_"+strconv.Itoa(invocationIndex), pc.targetResultsByInvocation[invocationIndex])
+  pc.storeResults(result, pc.targetResultsByInvocation[invocationIndex].Results)
+  storeInvocationResultsInRegistryLocker("client", pc.targetResults)
+  storeInvocationResultsInRegistryLocker("client_"+strconv.Itoa(invocationIndex), pc.targetResultsByInvocation[invocationIndex])
 }
 
 func (pc *PortClient) removeResultsForTargets(targets []string) {
@@ -654,6 +677,7 @@ func invokeTargetsAndStoreResults(pc *PortClient, targets []*invocation.Invocati
     c <- true
   }()
   done := false
+  var lastResult interface{} = nil
 Results:
   for {
     select {
@@ -661,6 +685,7 @@ Results:
       break Results
     case result := <-ic.ResultChannel:
       if result != nil {
+        lastResult = result
         pc.storeTargetResult(ic.ID, result)
       }
     }
@@ -672,6 +697,7 @@ Results:
       select {
       case result := <-ic.ResultChannel:
         if result != nil {
+          lastResult = result
           pc.storeTargetResult(ic.ID, result)
         }
       default:
@@ -679,6 +705,10 @@ Results:
       }
     }
   }
+  if lastResult != nil {
+    pc.targetResultsByInvocation[ic.ID].Finished = true
+  }
+  lockInovcationRegistryLocker(ic.ID)
   delete(pc.activeInvocations, ic.ID)
   invocation.DeregisterInvocation(ic)
   return results

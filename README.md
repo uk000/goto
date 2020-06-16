@@ -191,8 +191,9 @@ In addition to keeping the results in the `goto` client instance, those are also
 | headers      | [][]string     | Headers to be sent to this target |
 | body         | string         | Request body to use for this target|
 | replicas     | int            | Number of parallel invocations to be done for this target |
-| requestCount | int            | Number of requests to be made per replicas for this target. The final request count becomes replicas * requestCount  |
+| requestCount | int            | Number of requests to be made per replicas for this target. The final request count becomes replicas * requestCount   |
 | delay        | duration       | Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
+| initialDelay | duration       | Minimum delay to wait before starting traffic to a target. Actual delay will be the max of all the targets being invoked in a given round of invocation. |
 | sendID       | bool           | Whether or not a unique ID be sent with each client request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
 | autoInvoke   | bool           | Whether this target should be invoked as soon as it's added |
 
@@ -225,7 +226,8 @@ curl localhost:8080/client/targets/add --data '
   "headers":[["x", "x1"],["y", "y1"]],
   "body": "{\"test\":\"this\"}",
   "replicas": 2, 
-  "requestCount": 2, 
+  "requestCount": 2,
+  "initialDelay": "1s",
   "delay": "200ms", 
   "sendID": true,
   "autoInvoke": true
@@ -1341,7 +1343,8 @@ Jobs can also trigger another job for each line of output produced, as well as u
 | id            | string        | ID for this job |
 | task          | JSON          | Task to be executed for this job. Can be an [HTTP Task](#job-http-task-json-schema) or [Command Task](#job-command-task-json-schema) |
 | auto          | bool          | Whether the job should be started automatically as soon as it's posted. |
-| delay         | duration      | Minimum delay at start of each iteration of the job. Actual delay may be higher than this. |
+| delay         | duration      | Minimum delay at start of each iteration of the job. Actual effective delay may be higher than this. |
+| initialDelay  | duration       | Minimum delay to wait before starting a job. Actual effective delay may be higher than this. |
 | count         | int           | Number of times this job should be executed during a single invocation |
 | maxResults    | int           | Number of max results to be received from the job, after which the job is stopped |
 | keepResults   | int           | Number of results to be retained from an invocation of the job |
@@ -1424,6 +1427,7 @@ curl -s localhost:8080/jobs/add --data '
 "count": 1,
 "keepFirst": true,
 "maxResults": 5,
+"initialDelay": "1s",
 "delay": "1s",
 "outputTrigger": "job3"
 }'
