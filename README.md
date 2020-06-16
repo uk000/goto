@@ -196,13 +196,13 @@ In addition to keeping the results in the `goto` client instance, those are also
 | delay        | duration       | Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
 | initialDelay | duration       | Minimum delay to wait before starting traffic to a target. Actual delay will be the max of all the targets being invoked in a given round of invocation. |
 | sendID       | bool           | Whether or not a unique ID be sent with each client request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
-| ConnTimeout  | duration       | Timeout for opening target connection |
-| ConnIdleTimeout | duration    | Idle Timeout for target connection |
-| RequestTimeout | duration     | Timeout for HTTP requests to the target (not implemented at present) |
+| connTimeout  | duration       | Timeout for opening target connection |
+| connIdleTimeout | duration    | Idle Timeout for target connection |
+| requestTimeout | duration     | Timeout for HTTP requests to the target (not implemented at present) |
 | autoInvoke   | bool           | Whether this target should be invoked as soon as it's added |
 
 
-#### Client Results Schema
+#### Client Results Schema (output of API /client/results)
 |Field|Data Type|Description|
 |---|---|---|
 | targetInvocationCounts      | string->int                 | Total requests sent per target |
@@ -217,8 +217,17 @@ In addition to keeping the results in the `goto` client instance, those are also
 | countsByTargetHeaders       | string->string->int         | Response counts per target grouped by header names |
 | countsByTargetHeaderValues  | string->string->string->int | Response counts per target grouped by header names and header values |
 
-#### Invocation Results Schema
-* Map from invocation index to Invocation Results, where the results report all fields of `Client Results Schema` for that invocation, and additional bool flag `finished`. See example below.
+#### Invocation Results Schema (output of API /client/results/invocations)
+* Reports results for all invocations since last clearing of results, as an Object with invocation numner as key and invocation's results as value. The results for each invocation have same schema as `Client Results Schema`, with an additional bool flag `finished` to indicate whether the invocation is still running or has finished. See example below.
+
+#### Active Targets Schema (output of API /client/targets/active)
+* Reports set of targets for which traffic is running at the time of API invocation. Result is an object with invocation number as key, and value as object that has status for all active targets in that invocation. For each active target, the following data is reported. Also see example below.
+|Field|Data Type|Description|
+|---|---|---|
+| target                | Client Target                | Target details as described in `Client Target JSON Schema`  |
+| completedRequestCount | int                 | Number of requests completed for this target in this invocation |
+| stopRequested         | bool                | Has stop been requested for this target |
+| stopped               | bool                | Has the target been stopped yet. Quite likely this will not show up as true, because the target gets removed from active set soon after it's stopped |
 
 #### Client API and Results Examples
 
@@ -578,7 +587,93 @@ curl localhost:8080/client/results
 
 
 
+#### Sample Active Targets Results
+
+<details>
+<summary>Example</summary>
+<p>
+
+```json
+{
+  "1": {
+    "t1": {
+      "target": {
+        "name": "t1",
+        "method": "GET",
+        "url": "http://localhost:8081/status/418",
+        "headers": [],
+        "body": "",
+        "replicas": 2,
+        "requestCount": 1000,
+        "initialDelay": "",
+        "delay": "10ms",
+        "keepOpen": "10s",
+        "sendID": true,
+        "connTimeout": "",
+        "connIdleTimeout": "",
+        "requestTimeout": "",
+        "verifyTLS": false,
+        "autoInvoke": false
+      },
+      "completedRequestCount": 545,
+      "stopRequested": false,
+      "stopped": false
+    },
+    "t2": {
+      "target": {
+        "name": "t2",
+        "method": "POST",
+        "url": "http://localhost:8081/echo",
+        "headers": [["x", "x2"]],
+        "body": "{\"test\":\"this\"}",
+        "replicas": 2,
+        "requestCount": 1000,
+        "initialDelay": "",
+        "delay": "10ms",
+        "keepOpen": "20s",
+        "sendID": true,
+        "connTimeout": "",
+        "connIdleTimeout": "",
+        "requestTimeout": "",
+        "verifyTLS": false,
+        "autoInvoke": false
+      },
+      "completedRequestCount": 545,
+      "stopRequested": false,
+      "stopped": false
+    }
+  },
+  "2": {
+    "t1": {
+      "target": {
+        "name": "t1",
+        "method": "GET",
+        "url": "http://localhost:8081/status/418",
+        "headers": [],
+        "body": "",
+        "replicas": 2,
+        "requestCount": 1000,
+        "initialDelay": "",
+        "delay": "10ms",
+        "keepOpen": "10s",
+        "sendID": true,
+        "connTimeout": "",
+        "connIdleTimeout": "",
+        "requestTimeout": "",
+        "verifyTLS": false,
+        "autoInvoke": false
+      },
+      "completedRequestCount": 210,
+      "stopRequested": false,
+      "stopped": false
+    }
+  }
+}
+```
+
 <br/>
+</p>
+</details>
 
 #
 # Server Features

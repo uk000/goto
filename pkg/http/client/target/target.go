@@ -646,7 +646,11 @@ func getActiveTargets(w http.ResponseWriter, r *http.Request) {
   pc := getPortClient(r)
   pc.targetsLock.RLock()
   defer pc.targetsLock.RUnlock()
-  util.WriteJsonPayload(w, pc.activeInvocations)
+  results := map[int]map[string]*invocation.InvocationStatus{}
+  for _, tracker := range pc.activeInvocations {
+    results[tracker.ID] = tracker.Status
+  }
+  util.WriteJsonPayload(w, results)
   w.WriteHeader(http.StatusAlreadyReported)
   util.AddLogMessage("Reporting active invocations", r)
 }
