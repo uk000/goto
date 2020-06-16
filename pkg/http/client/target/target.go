@@ -449,14 +449,20 @@ func (pc *PortClient) removeResultsForTargets(targets []string) {
 }
 
 func (pc *PortClient) stopTarget(target *Target) {
-  for _, c := range pc.activeInvocations {
+  for _, tracker := range pc.activeInvocations {
     done := false
     select {
-    case done = <-c.DoneChannel:
+    case done = <-tracker.DoneChannel:
     default:
     }
     if !done {
-      c.StopChannel <- target.Name
+      for _, status := range tracker.Status {
+        if status.Target.Name == target.Name {
+          if !status.StopRequested && !status.Stopped {
+            tracker.StopChannel <- target.Name
+          }
+        }
+      }
     }
   }
 }
