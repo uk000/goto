@@ -43,13 +43,13 @@ type TargetResults struct {
 }
 
 type TargetInvocationResults struct {
-  Results  *TargetResults `json:"results"`
+  TargetResults
   Finished bool           `json:"finished"`
 }
 
 type PortClient struct {
   targets                   map[string]*Target
-  activeInvocations         map[int]*invocation.InvocationChannels
+  activeInvocations         map[int]*invocation.InvocationTracker
   invocationCounter         int
   targetsLock               sync.RWMutex
   blockForResponse          bool
@@ -77,6 +77,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(targetsRouter, "/list", getTargets, "GET")
   util.AddRoute(targetsRouter, "", getTargets, "GET")
   util.AddRoute(targetsRouter, "/clear", clearTargets, "POST")
+  util.AddRoute(targetsRouter, "/active", getActiveTargets, "GET")
 
   util.AddRoute(r, "/blocking/set/{flag}", setOrGetBlocking, "POST", "PUT")
   util.AddRoute(r, "/blocking", setOrGetBlocking, "GET")
@@ -98,7 +99,7 @@ func (pc *PortClient) init() bool {
     return false
   }
   pc.targets = map[string]*Target{}
-  pc.activeInvocations = map[int]*invocation.InvocationChannels{}
+  pc.activeInvocations = map[int]*invocation.InvocationTracker{}
   pc.invocationCounter = 0
   pc.blockForResponse = false
   pc.trackingHeaders = map[string]int{}
@@ -316,8 +317,8 @@ func (pc *PortClient) initTargetResults(index ...int) {
     if pc.targetResultsByInvocation == nil {
       pc.targetResultsByInvocation = map[int]*TargetInvocationResults{}
     }
-    pc.targetResultsByInvocation[index[0]] = &TargetInvocationResults{Results: &TargetResults{}}
-    initResults(pc.targetResultsByInvocation[index[0]].Results)
+    pc.targetResultsByInvocation[index[0]] = &TargetInvocationResults{}
+    initResults(&pc.targetResultsByInvocation[index[0]].TargetResults)
   }
 }
 
@@ -381,10 +382,10 @@ func (pc *PortClient) storeTargetResult(invocationIndex int, result *invocation.
   pc.storeResults(result, pc.targetResults)
   if pc.targetResultsByInvocation[invocationIndex] == nil {
     //This shouldn't happen
-    pc.targetResultsByInvocation[invocationIndex] = &TargetInvocationResults{Results: &TargetResults{}}
-    initResults(pc.targetResultsByInvocation[invocationIndex].Results)
+    pc.targetResultsByInvocation[invocationIndex] = &TargetInvocationResults{}
+    initResults(&pc.targetResultsByInvocation[invocationIndex].TargetResults)
   }
-  pc.storeResults(result, pc.targetResultsByInvocation[invocationIndex].Results)
+  pc.storeResults(result, &pc.targetResultsByInvocation[invocationIndex].TargetResults)
   storeInvocationResultsInRegistryLocker("client", pc.targetResults)
   storeInvocationResultsInRegistryLocker("client_"+strconv.Itoa(invocationIndex), pc.targetResultsByInvocation[invocationIndex])
 }
@@ -468,7 +469,7 @@ func (pc *PortClient) stopTargets(targetNames []string) bool {
     for _, tname := range targetNames {
       if len(tname) > 0 {
         if target, found := pc.targets[tname]; found {
-          pc.stopTarget(target)
+          go pc.stopTarget(target)
           stopped = true
         }
       }
@@ -476,7 +477,7 @@ func (pc *PortClient) stopTargets(targetNames []string) bool {
   } else {
     if len(pc.targets) > 0 {
       for _, target := range pc.targets {
-        pc.stopTarget(target)
+        go pc.stopTarget(target)
         stopped = true
       }
     }
@@ -635,6 +636,15 @@ func getResults(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("Reporting results", r)
 }
 
+func getActiveTargets(w http.ResponseWriter, r *http.Request) {
+  pc := getPortClient(r)
+  pc.targetsLock.RLock()
+  defer pc.targetsLock.RUnlock()
+  util.WriteJsonPayload(w, pc.activeInvocations)
+  w.WriteHeader(http.StatusAlreadyReported)
+  util.AddLogMessage("Reporting active invocations", r)
+}
+
 func clearResults(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if targets, present := util.GetListParam(r, "targets"); present {
@@ -666,7 +676,7 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
-func invokeTargetsAndStoreResults(pc *PortClient, targets []*invocation.InvocationSpec, ic *invocation.InvocationChannels) []*invocation.InvocationResult {
+func invokeTargetsAndStoreResults(pc *PortClient, targets []*invocation.InvocationSpec, ic *invocation.InvocationTracker) []*invocation.InvocationResult {
   pc.targetsLock.Lock()
   pc.initTargetResults(ic.ID)
   pc.targetsLock.Unlock()

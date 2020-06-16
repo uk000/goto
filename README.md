@@ -168,6 +168,7 @@ In addition to keeping the results in the `goto` client instance, those are also
 | GET       |	/client/targets/list                  | Get list of currently configured targets |
 | GET       |	/client/targets                       | Get list of currently configured targets |
 | POST      |	/client/targets/clear                 | Remove all targets |
+| GET       |	/client/targets/active                | Get list of currently active (running) targets |
 | PUT, POST |	/client/blocking/set/{flag}           | Set whether calls to invoke will block and receive full target responses  |
 | GET       |	/client/blocking                      | Get current state of the blocking flag |
 | PUT, POST |	/client/track/headers/add/{headers}   | Add headers for tracking response counts per target |
@@ -195,6 +196,9 @@ In addition to keeping the results in the `goto` client instance, those are also
 | delay        | duration       | Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
 | initialDelay | duration       | Minimum delay to wait before starting traffic to a target. Actual delay will be the max of all the targets being invoked in a given round of invocation. |
 | sendID       | bool           | Whether or not a unique ID be sent with each client request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
+| ConnTimeout  | duration       | Timeout for opening target connection |
+| ConnIdleTimeout | duration    | Idle Timeout for target connection |
+| RequestTimeout | duration     | Timeout for HTTP requests to the target (not implemented at present) |
 | autoInvoke   | bool           | Whether this target should be invoked as soon as it's added |
 
 
@@ -213,6 +217,8 @@ In addition to keeping the results in the `goto` client instance, those are also
 | countsByTargetHeaders       | string->string->int         | Response counts per target grouped by header names |
 | countsByTargetHeaderValues  | string->string->string->int | Response counts per target grouped by header names and header values |
 
+#### Invocation Results Schema
+* Map from invocation index to Invocation Results, where the results report all fields of `Client Results Schema` for that invocation, and additional bool flag `finished`. See example below.
 
 #### Client API and Results Examples
 
@@ -285,7 +291,7 @@ curl localhost:8080/client/results/invocations
 curl localhost:8080/client/results
 ```
 
-#### Sample Client Invocation Result (including error reporting example)
+#### Sample Client Results (including error reporting example)
 
 <details>
 <summary>Example</summary>
@@ -483,6 +489,93 @@ curl localhost:8080/client/results
 ```
 </p>
 </details>
+
+
+#### Sample Invocation Results
+
+<details>
+<summary>Example</summary>
+<p>
+
+```json
+{
+  "1": {
+    "targetInvocationCounts": {
+      "target1": 200
+    },
+    "targetFirstResponses": {
+      "target1": "2020-06-15T21:34:25.628174-07:00"
+    },
+    "targetLastResponses": {
+      "target1": "2020-06-15T21:36:08.068387-07:00"
+    },
+    "countsByStatus": {
+      "200 OK": 200
+    },
+    "countsByStatusCodes": {
+      "200": 200
+    },
+    "countsByHeaders": {},
+    "countsByHeaderValues": {},
+    "countsByTargetStatus": {
+      "target1": {
+        "200 OK": 200
+      }
+    },
+    "countsByTargetStatusCode": {
+      "target1": {
+        "200": 200
+      }
+    },
+    "countsByTargetHeaders": {
+      "target1": {}
+    },
+    "countsByTargetHeaderValues": {
+      "target1": {}
+    },
+    "finished": true
+  },
+  "2": {
+    "targetInvocationCounts": {
+      "target1": 200
+    },
+    "targetFirstResponses": {
+      "target1": "2020-06-15T21:34:25.628174-07:00"
+    },
+    "targetLastResponses": {
+      "target1": "2020-06-15T21:36:08.068387-07:00"
+    },
+    "countsByStatus": {
+      "200 OK": 200
+    },
+    "countsByStatusCodes": {
+      "200": 200
+    },
+    "countsByHeaders": {},
+    "countsByHeaderValues": {},
+    "countsByTargetStatus": {
+      "target1": {
+        "200 OK": 200
+      }
+    },
+    "countsByTargetStatusCode": {
+      "target1": {
+        "200": 200
+      }
+    },
+    "countsByTargetHeaders": {
+      "target1": {}
+    },
+    "countsByTargetHeaderValues": {
+      "target1": {}
+    },
+    "finished": true
+  }
+}
+```
+</p>
+</details>
+
 
 
 <br/>
@@ -1544,6 +1637,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 1. You can pre-register a list of invocation targets and jobs at the registry instance that should be handed out to the worker instances. These targets/jobs are registered by labels, and the worker instances receive the matching targets+jobs for the labels they register with.
 2. The targets and jobs registered at the registry can also be marked for `auto-invocation`. When a worker instance receives a target/job from registry at startup that's marked for auto-invocation, it immediately invokes that target/job at startup. Additionally, the target/job is retained in the worker instance for later invocation via API as well.
 3. In addition to sending targets/jobs to worker instances at the time of registration, the registry instance also pushes targets/jobs to the worker instances as and when more targets/jobs get added to the registry. This has the added benefit of just using the registry instance as the single point of configuration, where you add targets/jobs and those get pushed to all worker instances. Removal of targets/jobs from the registry also gets pushed, so the targets/jobs get removed from the corresponding worker instances. Even targets/jobs that are pushed later can be marked for `auto-invocation`, and the worker instances that receive the target/job will invoke it immediately upon receipt.
+4. Instances can store their results into their corresponding lockers in the registry. A peer instance also locks its locker data once an invocation completes. Currently, locking preserves the data by moving it to another key named `<key>_last` when new data is reported for that key, thus it preserves last reported data as immutable once locked, while still allowing the peer to store more data for the same key in the locker.
 
 #### Registry APIs
 |METHOD|URI|Description|
@@ -1554,6 +1648,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET       | /registry/peers         | Get all registered peers |
 | POST      | /registry/peers/{peer}/locker/store/{key} | Store any arbitrary value for the given key in the locker of the given peer |
 | POST      | /registry/peers/{peer}/locker/remove/{key} | Remove stored data for the given key from the locker of the given peer |
+| POST      | /registry/peers/{peer}/locker/lock/{key} | Locks the data stored under the given key in the locker.  |
 | GET       | /registry/peers/{peer}/locker | Get locker's data for the given peer |
 | POST      | /registry/peers/{peer}/locker/clear | Clear the locker for the given peer |
 | POST      | /registry/peers/lockers/clear | Clear all lockers |
@@ -1565,6 +1660,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST, PUT | /registry/peers/{peer}/targets/{targets}/invoke | Invoke given targets on the given peer |
 | POST, PUT | /registry/peers/{peer}/targets/invoke/all | Invoke all targets on the given peer |
 | POST, PUT | /registry/peers/{peer}/targets/{targets}/stop | Stop given targets on the given peer |
+| POST, PUT | /registry/peers/{peer}/targets/stop/all | Stop all targets on the given peer |
 | POST      | /registry/peers/targets/clear   | Remove all targets from all peers |
 | GET       | /registry/peers/jobs | Get all registered jobs for all peers |
 | POST      | /registry/peers/{peer}/jobs/add | Add a job to be sent to a peer. See [Peer Job JSON Schema](#peer-job-json-schema) |
@@ -1574,6 +1670,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST, PUT | /registry/peers/{peer}/jobs/{jobs}/run | Run given jobs on the given peer |
 | POST, PUT | /registry/peers/{peer}/jobs/run/all | Run all jobs on the given peer |
 | POST, PUT | /registry/peers/{peer}/jobs/{jobs}/stop | Stop given jobs on the given peer |
+| POST, PUT | /registry/peers/{peer}/jobs/stop/all | Stop all jobs on the given peer |
 | POST      | /registry/peers/jobs/clear   | Remove all jobs from all peers |
 
 #### Peer JSON Schema

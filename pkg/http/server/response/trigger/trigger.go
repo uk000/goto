@@ -208,9 +208,9 @@ func (t *Trigger) invokeTargets(targets map[string]*TriggerTarget, w http.Respon
       is, _ := tt.toInvocationSpec(r, w)
       invocationSpecs = append(invocationSpecs, is)
     }
-    ic := &invocation.InvocationChannels{}
-    ic.ID = util.GetListenerPortNum(r)
-    responses := invocation.InvokeTargets(invocationSpecs, ic, false)
+    tracker := &invocation.InvocationTracker{}
+    tracker.ID = util.GetListenerPortNum(r)
+    responses := invocation.InvokeTargets(invocationSpecs, tracker, false)
     for _, response := range responses {
       if response.StatusCode == 0 {
         response.StatusCode = 503

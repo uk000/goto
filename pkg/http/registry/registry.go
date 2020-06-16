@@ -84,8 +84,9 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "/{peer}/targets/add", addPeerTarget, "POST")
   util.AddRoute(peersRouter, "/{peer}/targets/{targets}/remove", removePeerTargets, "PUT", "POST")
   util.AddRoute(peersRouter, "/{peer}/targets/{targets}/invoke", invokePeerTargets, "PUT", "POST")
-  util.AddRoute(peersRouter, "/{peer}/targets/{targets}/stop", stopPeerTargets, "PUT", "POST")
   util.AddRoute(peersRouter, "/{peer}/targets/invoke/all", invokePeerTargets, "PUT", "POST")
+  util.AddRoute(peersRouter, "/{peer}/targets/{targets}/stop", stopPeerTargets, "PUT", "POST")
+  util.AddRoute(peersRouter, "/{peer}/targets/stop/all", stopPeerTargets, "PUT", "POST")
   util.AddRoute(peersRouter, "/{peer}/targets/clear", clearPeerTargets, "POST")
   util.AddRoute(peersRouter, "/{peer}/targets", getPeerTargets, "GET")
   util.AddRoute(peersRouter, "/targets/clear", clearPeerTargets, "POST")
@@ -94,8 +95,9 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "/{peer}/jobs/add", addPeerJob, "POST")
   util.AddRoute(peersRouter, "/{peer}/jobs/{jobs}/remove", removePeerJobs, "PUT", "POST")
   util.AddRoute(peersRouter, "/{peer}/jobs/{jobs}/run", runPeerJobs, "PUT", "POST")
-  util.AddRoute(peersRouter, "/{peer}/jobs/{jobs}/stop", stopPeerJobs, "PUT", "POST")
   util.AddRoute(peersRouter, "/{peer}/jobs/run/all", runPeerJobs, "PUT", "POST")
+  util.AddRoute(peersRouter, "/{peer}/jobs/{jobs}/stop", stopPeerJobs, "PUT", "POST")
+  util.AddRoute(peersRouter, "/{peer}/jobs/stop/all", stopPeerJobs, "PUT", "POST")
   util.AddRoute(peersRouter, "/{peer}/jobs/clear", clearPeerJobs, "POST")
   util.AddRoute(peersRouter, "/{peer}/jobs", getPeerJobs, "GET")
   util.AddRoute(peersRouter, "/jobs/clear", clearPeerJobs, "POST")
@@ -275,7 +277,7 @@ func (pr *PortRegistry) removePeerTargets(peerName string, targets []string) boo
   return removed
 }
 
-func (pr *PortRegistry) stopPeerTargets(peerName string, targets []string) {
+func (pr *PortRegistry) stopPeerTargets(peerName string, targets string) {
   pr.lock.Lock()
   peerPods := map[string]Pod{}
   if pr.peerTargets[peerName] != nil {
@@ -284,11 +286,17 @@ func (pr *PortRegistry) stopPeerTargets(peerName string, targets []string) {
     }
   }
   pr.lock.Unlock()
-  targetList := strings.Join(targets, ",")
   for a := range peerPods {
-    if resp, err := http.Post("http://"+a+"/client/targets/"+targetList+"/stop", "plain/text", nil); err == nil {
+    var resp *http.Response
+    var err error
+    if len(targets) > 0 {
+      resp, err = http.Post("http://"+a+"/client/targets/"+targets+"/stop", "plain/text", nil)
+    } else {
+      resp, err = http.Post("http://"+a+"/client/targets/stop/all", "plain/text", nil)
+    }
+    if err == nil {
       defer resp.Body.Close()
-      log.Printf("Stopped targets %s from peer %s address %s\n", targetList, peerName, a)
+      log.Printf("Stopped targets %s from peer %s address %s\n", targets, peerName, a)
     } else {
       log.Println(err.Error())
     }
@@ -358,7 +366,7 @@ func (pr *PortRegistry) removePeerJobs(peerName string, jobs []string) bool {
   return removed
 }
 
-func (pr *PortRegistry) stopPeerJobs(peerName string, jobs []string) {
+func (pr *PortRegistry) stopPeerJobs(peerName string, jobs string) {
   pr.lock.Lock()
   peerPods := map[string]Pod{}
   if pr.peerJobs[peerName] != nil {
@@ -367,11 +375,17 @@ func (pr *PortRegistry) stopPeerJobs(peerName string, jobs []string) {
     }
   }
   pr.lock.Unlock()
-  jobList := strings.Join(jobs, ",")
   for a := range peerPods {
-    if resp, err := http.Post("http://"+a+"/jobs/"+jobList+"/stop", "plain/text", nil); err == nil {
+    var resp *http.Response
+    var err error
+    if len(jobs) > 0 {
+      resp, err = http.Post("http://"+a+"/jobs/"+jobs+"/stop", "plain/text", nil)
+    } else {
+      resp, err = http.Post("http://"+a+"/jobs/stop/all", "plain/text", nil)
+    }
+    if err == nil {
       defer resp.Body.Close()
-      log.Printf("Stopped jobs %s from peer %s address %s\n", jobList, peerName, a)
+      log.Printf("Stopped jobs %s from peer %s address %s\n", jobs, peerName, a)
     } else {
       log.Println(err.Error())
     }
@@ -735,14 +749,10 @@ func removePeerTargets(w http.ResponseWriter, r *http.Request) {
 func stopPeerTargets(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if peerName, present := util.GetStringParam(r, "peer"); present {
-    if targets, present := util.GetListParam(r, "targets"); present {
-      getPortRegistry(r).stopPeerTargets(peerName, targets)
-      w.WriteHeader(http.StatusOK)
-      msg = fmt.Sprintf("Peer %s targets %+v stopped", peerName, targets)
-    } else {
-      w.WriteHeader(http.StatusBadRequest)
-      msg = "No targets given"
-    }
+    targets := util.GetStringParamValue(r, "targets")
+    getPortRegistry(r).stopPeerTargets(peerName, targets)
+    w.WriteHeader(http.StatusOK)
+    msg = fmt.Sprintf("Peer %s targets %+v stopped", peerName, targets)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = "No peer given"
@@ -797,14 +807,10 @@ func removePeerJobs(w http.ResponseWriter, r *http.Request) {
 func stopPeerJobs(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if peerName, present := util.GetStringParam(r, "peer"); present {
-    if jobs, present := util.GetListParam(r, "jobs"); present {
-      getPortRegistry(r).stopPeerJobs(peerName, jobs)
-      w.WriteHeader(http.StatusOK)
-      msg = fmt.Sprintf("Peer %s jobs %+v stopped\n", peerName, jobs)
-    } else {
-      w.WriteHeader(http.StatusBadRequest)
-      msg = "No jobs given"
-    }
+    jobs := util.GetStringParamValue(r, "jobs")
+    getPortRegistry(r).stopPeerJobs(peerName, jobs)
+    w.WriteHeader(http.StatusOK)
+    msg = fmt.Sprintf("Peer %s jobs %+v stopped\n", peerName, jobs)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = "No peer given"

@@ -546,7 +546,7 @@ func (pj *PortJobs) initJobRun(job *Job, jobArgs []string, markers map[string]st
   jobRun.index = job.jobRunCounter
   jobRun.jobArgs = jobArgs
   jobRun.markers = markers
-  jobRun.stopChannel = make(chan bool)
+  jobRun.stopChannel = make(chan bool, 10)
   jobRun.doneChannel = make(chan bool, 10)
   if pj.jobRuns[job.ID] == nil {
     pj.jobRuns[job.ID] = map[int]*JobRunContext{}
@@ -588,7 +588,7 @@ func (pj *PortJobs) stopJob(j string) bool {
     case done = <-jobRun.doneChannel:
     default:
     }
-    if !done {
+    if !done && !jobRun.finished && !jobRun.stopped {
       jobRun.stopChannel <- true
     }
     jobRun.lock.Unlock()
@@ -694,15 +694,18 @@ func runJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func stopJobs(w http.ResponseWriter, r *http.Request) {
-  msg := ""
-  if jobs, present := util.GetListParam(r, "jobs"); present {
-    getPortJobs(r).stopJobs(jobs)
-    w.WriteHeader(http.StatusOK)
-    msg = fmt.Sprintf("Jobs %+v stopped\n", jobs)
-  } else {
-    w.WriteHeader(http.StatusNotAcceptable)
-    msg = "No jobs to stop"
+  jobs, present := util.GetListParam(r, "jobs")
+  pj := getPortJobs(r)
+  pj.lock.RLock()
+  if !present {
+    for j := range getPortJobs(r).jobs {
+      jobs = append(jobs, j)
+    }
   }
+  pj.lock.RUnlock()
+  pj.stopJobs(jobs)
+  w.WriteHeader(http.StatusOK)
+  msg := fmt.Sprintf("Jobs %+v stopped\n", jobs)
   fmt.Fprintln(w, msg)
   util.AddLogMessage(msg, r)
 }
