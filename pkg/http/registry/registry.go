@@ -73,6 +73,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   peersRouter := registryRouter.PathPrefix("/peers").Subrouter()
   util.AddRoute(peersRouter, "/add", addPeer, "POST")
   util.AddRoute(peersRouter, "/{peer}/remove/{address}", removePeer, "PUT", "POST")
+  util.AddRoute(peersRouter, "/{peer}/health/{address}", checkPeerHealth, "GET")
   util.AddRoute(peersRouter, "/{peer}/locker/store/{key}", storeInPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/remove/{key}", removeFromPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/lock/{key}", lockKeyInPeerLocker, "POST")
@@ -167,6 +168,23 @@ func (pr *PortRegistry) removePeer(name string, address string) bool {
     }
   }
   return present
+}
+
+func (pr *PortRegistry) checkPeerHealth(name string, address string) bool {
+  pr.lock.Lock()
+  defer pr.lock.Unlock()
+  if pr.peers[name] != nil {
+    if _, present := pr.peers[name].Pods[address]; present {
+      client := http.Client{Timeout: 2*time.Second,}
+      if resp, err := client.Get("http://"+address+"/health");  err == nil {
+        defer resp.Body.Close()
+        log.Printf("Peer %s Address %s is healthy\n", name, address)
+        return true
+      }
+    }
+  }
+  log.Printf("Peer %s Address %s is unhealthy or unavailable\n", name, address)
+  return false
 }
 
 func (pr *PortRegistry) storeInPeerLocker(name string, key string, value string) {
@@ -592,6 +610,29 @@ func removePeer(w http.ResponseWriter, r *http.Request) {
       } else {
         w.WriteHeader(http.StatusNotAcceptable)
         msg = fmt.Sprintf("Peer not found: %s", peerName)
+      }
+    } else {
+      w.WriteHeader(http.StatusBadRequest)
+      msg = "No address given"
+    }
+  } else {
+    w.WriteHeader(http.StatusBadRequest)
+    msg = "No peer given"
+  }
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
+}
+
+func checkPeerHealth(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  if peerName, present := util.GetStringParam(r, "peer"); present {
+    if address, present := util.GetStringParam(r, "address"); present {
+      if getPortRegistry(r).checkPeerHealth(peerName, address) {
+        w.WriteHeader(http.StatusOK)
+        msg = fmt.Sprintf("Peer is healthy: %s", peerName)
+      } else {
+        w.WriteHeader(http.StatusExpectationFailed)
+        msg = fmt.Sprintf("Peer is unhealthy: %s", peerName)
       }
     } else {
       w.WriteHeader(http.StatusBadRequest)
