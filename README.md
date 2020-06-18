@@ -1740,6 +1740,8 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST      | /registry/peers/add     | Register a worker instance (referred to as peer). See [Peer JSON Schema](#peer-json-schema)|
 | POST, PUT | /registry/peers/{peer}/remove/{address} | Deregister a peer by its label and IP address |
 | GET       | /registry/peers/{peer}/health/{address} | Check and report if a peer is up or not based on label and IP address |
+| POST      | /registry/peers/{peer}/health/cleanup | Check health of all instances of the given peer label and remove IP addresses that are unresponsive |
+| POST      | /registry/peers/health/cleanup | Check health of all instances of all peers and remove IP addresses that are unresponsive |
 | POST      | /registry/peers/clear   | Remove all registered peers|
 | GET       | /registry/peers         | Get all registered peers |
 | POST      | /registry/peers/{peer}/locker/store/{key} | Store any arbitrary value for the given key in the locker of the given peer |
@@ -1806,6 +1808,10 @@ curl localhost:8080/registry/peers/add --data '
 curl -X POST http://localhost:8080/registry/peers/peer1/remove/1.1.1.1:8081
 
 curl http://localhost:8080/registry/peers/peer1/health/1.1.1.1:8081
+
+curl -X POST http://localhost:8080/registry/peers/peer1/health/cleanup
+
+curl -X POST http://localhost:8080/registry/peers/health/cleanup
 
 curl localhost:8080/registry/peers
 

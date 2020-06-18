@@ -74,6 +74,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "/add", addPeer, "POST")
   util.AddRoute(peersRouter, "/{peer}/remove/{address}", removePeer, "PUT", "POST")
   util.AddRoute(peersRouter, "/{peer}/health/{address}", checkPeerHealth, "GET")
+  util.AddRoute(peersRouter, "/{peer}/health/cleanup", cleanupUnhealthyPeers, "POST")
+  util.AddRoute(peersRouter, "/health/cleanup", cleanupUnhealthyPeers, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/store/{key}", storeInPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/remove/{key}", removeFromPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/lock/{key}", lockKeyInPeerLocker, "POST")
@@ -171,8 +173,8 @@ func (pr *PortRegistry) removePeer(name string, address string) bool {
 }
 
 func (pr *PortRegistry) checkPeerHealth(name string, address string) bool {
-  pr.lock.Lock()
-  defer pr.lock.Unlock()
+  pr.lock.RLock()
+  defer pr.lock.RUnlock()
   if pr.peers[name] != nil {
     if _, present := pr.peers[name].Pods[address]; present {
       client := http.Client{Timeout: 2*time.Second,}
@@ -185,6 +187,29 @@ func (pr *PortRegistry) checkPeerHealth(name string, address string) bool {
   }
   log.Printf("Peer %s Address %s is unhealthy or unavailable\n", name, address)
   return false
+}
+
+func (pr *PortRegistry) cleanupUnhealthyPeers(name string) {
+  pr.lock.Lock()
+  defer pr.lock.Unlock()
+  client := http.Client{Timeout: 2*time.Second,}
+  for peerName, peers := range pr.peers {
+    if name == "" || name == peerName {
+      pods := peers.Pods
+      for address := range pods {
+        if resp, err := client.Get("http://"+address+"/health");  err == nil {
+          defer resp.Body.Close()
+          log.Printf("Peer %s Address %s is healthy\n", peerName, address)
+        } else {
+          log.Printf("Peer %s Address %s is unhealthy or unavailable\n", peerName, address)
+          delete(pr.peers[peerName].Pods, address)
+          if len(pr.peers[peerName].Pods) == 0 {
+            delete(pr.peers, peerName)
+          }
+        }
+      }
+    }
+  }
 }
 
 func (pr *PortRegistry) storeInPeerLocker(name string, key string, value string) {
@@ -642,6 +667,14 @@ func checkPeerHealth(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusBadRequest)
     msg = "No peer given"
   }
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
+}
+
+func cleanupUnhealthyPeers(w http.ResponseWriter, r *http.Request) {
+  getPortRegistry(r).cleanupUnhealthyPeers(util.GetStringParamValue(r, "peer"))
+  w.WriteHeader(http.StatusOK)
+  msg := "Cleaned up unhealthy peers"
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
