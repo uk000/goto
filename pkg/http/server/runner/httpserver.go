@@ -120,7 +120,7 @@ func registerPeer() {
     for !registered && retries < 3 {
       peer := registry.Peer{
         Name: global.PeerName, 
-        Address: util.GetHostIP()+":"+strconv.Itoa(global.ServerPort),
+        Address: global.PeerAddress,
         Pod: util.GetPodName(),
         Namespace: util.GetNamespace(),
       }
@@ -146,7 +146,7 @@ func registerPeer() {
 
 func deregisterPeer() {
   if global.RegistryURL != "" {
-    url := global.RegistryURL+"/registry/peers/"+global.PeerName+"/remove/"+util.GetHostIP()+":"+strconv.Itoa(global.ServerPort)
+    url := global.RegistryURL+"/registry/peers/"+global.PeerName+"/remove/"+global.PeerAddress
     if resp, err := http.Post(url, "plain/text", nil); err == nil {
       defer resp.Body.Close()
       log.Println(util.Read(resp.Body))

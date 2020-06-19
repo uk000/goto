@@ -195,7 +195,7 @@ func (pj *PortJobs) getJobsToRun(names []string) []*Job {
 func storeJobResultsInRegistryLocker(jobID string, runIndex int, jobResults []*JobResult) {
   if global.UseLocker && global.RegistryURL != "" {
     key := "job_" + jobID + "_" + strconv.Itoa(runIndex)
-    url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/locker/store/" + key
+    url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/" + global.PeerAddress + "/locker/store/" + key
     if resp, err := http.Post(url, "application/json",
       strings.NewReader(util.ToJSON(jobResults))); err == nil {
       defer resp.Body.Close()

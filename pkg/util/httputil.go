@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"goto/pkg/global"
 	"io"
 	"io/ioutil"
 	"log"
@@ -55,7 +56,9 @@ func AddLogMessage(msg string, r *http.Request) {
 
 func PrintLogMessages(r *http.Request) {
   m := r.Context().Value(logmessagesKey).(*messagestore)
-  log.Println(strings.Join(m.messages, " --> "))
+  if !IsAdminRequest(r) || global.EnableAdminLogging {
+    log.Println(strings.Join(m.messages, " --> "))
+  }
   m.messages = m.messages[:0]
 }
 

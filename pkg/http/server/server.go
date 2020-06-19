@@ -2,7 +2,9 @@ package server
 
 import (
 	"os"
+	"strconv"
 
+	"goto/pkg/global"
 	"goto/pkg/http/client"
 	"goto/pkg/http/invocation"
 	"goto/pkg/http/registry"
@@ -15,9 +17,12 @@ import (
 	"goto/pkg/http/server/response"
 	"goto/pkg/http/server/runner"
 	"goto/pkg/job"
+	"goto/pkg/util"
 )
 
 func Run() {
+	global.PeerAddress = util.GetHostIP()+":"+strconv.Itoa(global.ServerPort)
+	global.GetPeers = registry.GetPeers
   listeners.SetListenerServer(runner.ServeListener)
   invocation.LoadCerts()
   runner.RunHttpServer("/", label.Handler, conn.Handler, job.Handler, request.Handler,

@@ -1744,12 +1744,16 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST      | /registry/peers/health/cleanup | Check health of all instances of all peers and remove IP addresses that are unresponsive |
 | POST      | /registry/peers/clear   | Remove all registered peers|
 | GET       | /registry/peers         | Get all registered peers |
-| POST      | /registry/peers/{peer}/locker/store/{key} | Store any arbitrary value for the given key in the locker of the given peer |
-| POST      | /registry/peers/{peer}/locker/remove/{key} | Remove stored data for the given key from the locker of the given peer |
-| POST      | /registry/peers/{peer}/locker/lock/{key} | Locks the data stored under the given key in the locker.  |
-| GET       | /registry/peers/{peer}/locker | Get locker's data for the given peer |
-| POST      | /registry/peers/{peer}/locker/clear | Clear the locker for the given peer |
+| POST      | /registry/peers/{peer}/{address}/locker/store/{key} | Store any arbitrary value for the given key in the locker of the peer instance |
+| POST      | /registry/peers/{peer}/{address}/locker/remove/{key} | Remove stored data for the given key from the locker of the peer instance |
+| POST      | /registry/peers/{peer}/{address}/locker/lock/{key} | Locks the data stored under the given key in the locker of the peer instance.  |
+| POST      | /registry/peers/{peer}/{address}/locker/clear | Clear the locker for the peer instance |
+| POST      | /registry/peers/{peer}/locker/clear | Clear the locker for all instances of the given peer |
 | POST      | /registry/peers/lockers/clear | Clear all lockers |
+| GET       | /registry/peers/{peer}/{address}/locker | Get locker's data for the peer instance |
+| GET       | /registry/peers/{peer}/locker | Get locker's data for all instances of the peer |
+| GET       | /registry/peers/lockers | Get locker's data for all peers |
+| GET       | /registry/peers/lockers/summary | Get summary locker data for all peers |
 | GET       | /registry/peers/targets | Get all registered targets for all peers |
 | POST      | /registry/peers/{peer}/targets/add | Add a target to be sent to a peer. See [Peer Target JSON Schema](#peer-target-json-schema) |
 | POST, PUT | /registry/peers/{peer}/targets/{targets}/remove | Remove given targets for a peer |
@@ -1757,8 +1761,10 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET       | /registry/peers/{peer}/targets   | Get all targets of a peer |
 | POST, PUT | /registry/peers/{peer}/targets/{targets}/invoke | Invoke given targets on the given peer |
 | POST, PUT | /registry/peers/{peer}/targets/invoke/all | Invoke all targets on the given peer |
+| POST, PUT | /registry/peers/targets/invoke/all | Invoke all targets on the given peer |
 | POST, PUT | /registry/peers/{peer}/targets/{targets}/stop | Stop given targets on the given peer |
 | POST, PUT | /registry/peers/{peer}/targets/stop/all | Stop all targets on the given peer |
+| POST, PUT | /registry/peers/targets/stop/all | Stop all targets on the given peer |
 | POST      | /registry/peers/targets/clear   | Remove all targets from all peers |
 | GET       | /registry/peers/jobs | Get all registered jobs for all peers |
 | POST      | /registry/peers/{peer}/jobs/add | Add a job to be sent to a peer. See [Peer Job JSON Schema](#peer-job-json-schema) |

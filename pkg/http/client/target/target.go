@@ -12,7 +12,6 @@ import (
 
 	"goto/pkg/global"
 	"goto/pkg/http/invocation"
-	"goto/pkg/http/registry"
 	"goto/pkg/http/server/listeners"
 	"goto/pkg/util"
 
@@ -37,7 +36,7 @@ type TargetResults struct {
   CountsByHeaders            map[string]int                       `json:"countsByHeaders"`
   CountsByHeaderValues       map[string]map[string]int            `json:"countsByHeaderValues"`
   CountsByTargetStatus       map[string]map[string]int            `json:"countsByTargetStatus"`
-  CountsByTargetStatusCode   map[string]map[int]int               `json:"countsByTargetStatusCode"`
+  CountsByTargetStatusCodes   map[string]map[int]int               `json:"countsByTargetStatusCode"`
   CountsByTargetHeaders      map[string]map[string]int            `json:"countsByTargetHeaders"`
   CountsByTargetHeaderValues map[string]map[string]map[string]int `json:"countsByTargetHeaderValues"`
 }
@@ -108,7 +107,7 @@ func (pc *PortClient) init() bool {
   return true
 }
 
-func initResults(targetResults *TargetResults) {
+func InitResults(targetResults *TargetResults) {
   targetResults.TargetInvocationCounts = map[string]int{}
   targetResults.TargetFirstResponses = map[string]time.Time{}
   targetResults.TargetLastResponses = map[string]time.Time{}
@@ -117,7 +116,7 @@ func initResults(targetResults *TargetResults) {
   targetResults.CountsByHeaders = map[string]int{}
   targetResults.CountsByHeaderValues = map[string]map[string]int{}
   targetResults.CountsByTargetStatus = map[string]map[string]int{}
-  targetResults.CountsByTargetStatusCode = map[string]map[int]int{}
+  targetResults.CountsByTargetStatusCodes = map[string]map[int]int{}
   targetResults.CountsByTargetHeaders = map[string]map[string]int{}
   targetResults.CountsByTargetHeaderValues = map[string]map[string]map[string]int{}
 }
@@ -164,16 +163,16 @@ func prepareTargetsForPeers(targets []*invocation.InvocationSpec, r *http.Reques
   for _, t := range targets {
     added := false
     if strings.HasPrefix(t.Name, "{") && strings.HasSuffix(t.Name, "}") {
-      p := strings.TrimLeft(t.Name, "{")
-      p = strings.TrimRight(p, "}")
+      peerName := strings.TrimLeft(t.Name, "{")
+      peerName = strings.TrimRight(peerName, "}")
       if r != nil {
-        if peer := registry.GetPeer(p, r); peer != nil {
+        if peers := global.GetPeers(peerName, r); peers != nil {
           if strings.Contains(t.URL, "{") && strings.Contains(t.URL, "}") {
             urlPre := strings.Split(t.URL, "{")[0]
             urlPost := strings.Split(t.URL, "}")[1]
-            for address := range peer.Pods {
+            for _, address := range peers {
               var target = *t
-              target.Name = peer.Name
+              target.Name = peerName
               target.URL = urlPre + address + urlPost
               targetsToInvoke = append(targetsToInvoke, &target)
               added = true
@@ -281,7 +280,7 @@ func (pc *PortClient) clearResults() {
 
 func storeInvocationResultsInRegistryLocker(key string, results interface{}) {
   if global.UseLocker && global.RegistryURL != "" {
-    url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/locker/store/" + key
+    url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/" + global.PeerAddress + "/locker/store/" + key
     if resp, err := http.Post(url, "application/json",
       strings.NewReader(util.ToJSON(results))); err == nil {
       defer resp.Body.Close()
@@ -291,7 +290,7 @@ func storeInvocationResultsInRegistryLocker(key string, results interface{}) {
 
 func lockInovcationRegistryLocker(invocationIndex int) {
   if global.UseLocker && global.RegistryURL != "" {
-    url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/locker/lock/" + "client_" + strconv.Itoa(invocationIndex)
+    url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/" + global.PeerAddress + "/locker/lock/" + "client_" + strconv.Itoa(invocationIndex)
     if resp, err := http.Post(url, "application/json", nil); err == nil {
       defer resp.Body.Close()
     }
@@ -311,25 +310,85 @@ func (pc *PortClient) isTargetResultsInitialized(index ...int) bool {
 func (pc *PortClient) initTargetResults(index ...int) {
   if !pc.isTargetResultsInitialized() {
     pc.targetResults = &TargetResults{}
-    initResults(pc.targetResults)
+    InitResults(pc.targetResults)
   }
   if !pc.isTargetResultsInitialized(index...) {
     if pc.targetResultsByInvocation == nil {
       pc.targetResultsByInvocation = map[int]*TargetInvocationResults{}
     }
     pc.targetResultsByInvocation[index[0]] = &TargetInvocationResults{}
-    initResults(&pc.targetResultsByInvocation[index[0]].TargetResults)
+    InitResults(&pc.targetResultsByInvocation[index[0]].TargetResults)
+  }
+}
+
+func AddDeltaResults(results, delta *TargetResults) {
+  for k, v := range delta.TargetInvocationCounts {
+    results.TargetInvocationCounts[k] += v
+  }
+  for k, v := range delta.CountsByStatus {
+    results.CountsByStatus[k] += v
+  }
+  for k, v := range delta.CountsByStatusCodes {
+    results.CountsByStatusCodes[k] += v
+  }
+  for k, v := range delta.CountsByHeaders {
+    results.CountsByHeaders[k] += v
+  }
+  for h, values := range delta.CountsByHeaderValues {
+    if results.CountsByHeaderValues[h] == nil {
+      results.CountsByHeaderValues[h] = map[string]int{}
+    }
+    for hv, v := range values {
+      results.CountsByHeaderValues[h][hv] += v
+    }
+  }
+  for target, statusCounts := range delta.CountsByTargetStatus {
+    if results.CountsByTargetStatus[target] == nil {
+      results.CountsByTargetStatus[target] = map[string]int{}
+    }
+    for k, v := range statusCounts {
+      results.CountsByTargetStatus[target][k] += v
+    }
+  }
+  for target, statusCounts := range delta.CountsByTargetStatusCodes {
+    if results.CountsByTargetStatusCodes[target] == nil {
+      results.CountsByTargetStatusCodes[target] = map[int]int{}
+    }
+    for k, v := range statusCounts {
+      results.CountsByTargetStatusCodes[target][k] += v
+    }
+  }
+  for target, headerCounts := range delta.CountsByTargetHeaders {
+    if results.CountsByTargetHeaders[target] == nil {
+      results.CountsByTargetHeaders[target] = map[string]int{}
+    }
+    for k, v := range headerCounts {
+      results.CountsByTargetHeaders[target][k] += v
+    }
+  }
+  for target, headerValueCounts := range delta.CountsByTargetHeaderValues {
+    if results.CountsByTargetHeaderValues[target] == nil {
+      results.CountsByTargetHeaderValues[target] = map[string]map[string]int{}
+    }
+    for h, valueCounts := range headerValueCounts {
+      if results.CountsByTargetHeaderValues[target][h] == nil {
+        results.CountsByTargetHeaderValues[target][h] = map[string]int{}
+      }
+      for k, v := range valueCounts {
+        results.CountsByTargetHeaderValues[target][h][k] += v
+      }
+    }
   }
 }
 
 func (pc *PortClient) storeResults(result *invocation.InvocationResult, targetResults *TargetResults) {
-  if targetResults.CountsByTargetStatusCode == nil {
+  if targetResults.CountsByTargetStatusCodes == nil {
     //This shouldn't happen, but initialize anyway
-    initResults(targetResults)
+    InitResults(targetResults)
   }
-  if targetResults.CountsByTargetStatusCode[result.TargetName] == nil {
+  if targetResults.CountsByTargetStatusCodes[result.TargetName] == nil {
     targetResults.CountsByTargetStatus[result.TargetName] = map[string]int{}
-    targetResults.CountsByTargetStatusCode[result.TargetName] = map[int]int{}
+    targetResults.CountsByTargetStatusCodes[result.TargetName] = map[int]int{}
     targetResults.CountsByTargetHeaders[result.TargetName] = map[string]int{}
     targetResults.CountsByTargetHeaderValues[result.TargetName] = map[string]map[string]int{}
   }
@@ -342,7 +401,7 @@ func (pc *PortClient) storeResults(result *invocation.InvocationResult, targetRe
   targetResults.CountsByStatus[result.Status]++
   targetResults.CountsByStatusCodes[result.StatusCode]++
   targetResults.CountsByTargetStatus[result.TargetName][result.Status]++
-  targetResults.CountsByTargetStatusCode[result.TargetName][result.StatusCode]++
+  targetResults.CountsByTargetStatusCodes[result.TargetName][result.StatusCode]++
   trackingHeaders := pc.trackingHeaders
   for h, values := range result.Headers {
     h = strings.ToLower(h)
@@ -383,7 +442,7 @@ func (pc *PortClient) storeTargetResult(invocationIndex int, result *invocation.
   if pc.targetResultsByInvocation[invocationIndex] == nil {
     //This shouldn't happen
     pc.targetResultsByInvocation[invocationIndex] = &TargetInvocationResults{}
-    initResults(&pc.targetResultsByInvocation[invocationIndex].TargetResults)
+    InitResults(&pc.targetResultsByInvocation[invocationIndex].TargetResults)
   }
   pc.storeResults(result, &pc.targetResultsByInvocation[invocationIndex].TargetResults)
   storeInvocationResultsInRegistryLocker("client", pc.targetResults)
@@ -406,7 +465,7 @@ func (pc *PortClient) removeResultsForTargets(targets []string) {
       delete(pc.targetResults.CountsByTargetStatus, target)
     }
 
-    codes := pc.targetResults.CountsByTargetStatusCode[target]
+    codes := pc.targetResults.CountsByTargetStatusCodes[target]
     if codes != nil {
       for k, v := range codes {
         pc.targetResults.CountsByStatusCodes[k] -= v
@@ -414,7 +473,7 @@ func (pc *PortClient) removeResultsForTargets(targets []string) {
           delete(pc.targetResults.CountsByStatusCodes, k)
         }
       }
-      delete(pc.targetResults.CountsByTargetStatusCode, target)
+      delete(pc.targetResults.CountsByTargetStatusCodes, target)
     }
 
     headers := pc.targetResults.CountsByTargetHeaders[target]
