@@ -88,7 +88,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "/{peer}/{address}/locker", getPeerLocker, "GET")
   util.AddRoute(peersRouter, "/{peer}/locker", getPeerLocker, "GET")
   util.AddRoute(peersRouter, "/lockers", getPeerLocker, "GET")
-  util.AddRoute(peersRouter, "/lockers/summary", getLockerClientResultsSummary, "GET")
+  util.AddRoute(peersRouter, "/lockers/targets/results", getLockerTargetResultsSummary, "GET")
 
   util.AddRoute(peersRouter, "/{peer}/targets/add", addPeerTarget, "POST")
   util.AddRoute(peersRouter, "/{peer}/targets/{targets}/remove", removePeerTargets, "PUT", "POST")
@@ -935,7 +935,7 @@ func getPeerLocker(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage(msg, r)
 }
 
-func getLockerClientResultsSummary(w http.ResponseWriter, r *http.Request) {
+func getLockerTargetResultsSummary(w http.ResponseWriter, r *http.Request) {
   w.WriteHeader(http.StatusOK)
   util.WriteJsonPayload(w, getPortRegistry(r).getLockerClientResultsSummary())
   util.AddLogMessage("Reported client results summary", r)

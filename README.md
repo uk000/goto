@@ -213,7 +213,7 @@ In addition to keeping the results in the `goto` client instance, those are also
 | countsByHeaders             | string->int                 | Response counts across all targets grouped by header names   |
 | countsByHeaderValues        | string->string->int         | Response counts across all targets grouped by header names and values |
 | countsByTargetStatus        | string->string->int         | Response counts per target grouped by HTTP Status |
-| countsByTargetStatusCode    | string->string->int         | Response counts per target grouped by HTTP Status Code |
+| countsByTargetStatusCodes    | string->string->int         | Response counts per target grouped by HTTP Status Code |
 | countsByTargetHeaders       | string->string->int         | Response counts per target grouped by header names |
 | countsByTargetHeaderValues  | string->string->string->int | Response counts per target grouped by header names and header values |
 
@@ -224,7 +224,7 @@ In addition to keeping the results in the `goto` client instance, those are also
 * Reports set of targets for which traffic is running at the time of API invocation. Result is an object with invocation number as key, and value as object that has status for all active targets in that invocation. For each active target, the following data is reported. Also see example below.
 |Field|Data Type|Description|
 |---|---|---|
-| target                | Client Target                | Target details as described in `Client Target JSON Schema`  |
+| target                | Client Target       | Target details as described in `Client Target JSON Schema`  |
 | completedRequestCount | int                 | Number of requests completed for this target in this invocation |
 | stopRequested         | bool                | Has stop been requested for this target |
 | stopped               | bool                | Has the target been stopped yet. Quite likely this will not show up as true, because the target gets removed from active set soon after it's stopped |
@@ -388,7 +388,7 @@ curl localhost:8080/client/results
       "403 Forbidden": 10
     }
   },
-  "countsByTargetStatusCode": {
+  "countsByTargetStatusCodes": {
     "target1": {
       "200": 20,
       "502": 20
@@ -531,7 +531,7 @@ curl localhost:8080/client/results
         "200 OK": 200
       }
     },
-    "countsByTargetStatusCode": {
+    "countsByTargetStatusCodes": {
       "target1": {
         "200": 200
       }
@@ -567,7 +567,7 @@ curl localhost:8080/client/results
         "200 OK": 200
       }
     },
-    "countsByTargetStatusCode": {
+    "countsByTargetStatusCodes": {
       "target1": {
         "200": 200
       }
@@ -1753,7 +1753,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET       | /registry/peers/{peer}/{address}/locker | Get locker's data for the peer instance |
 | GET       | /registry/peers/{peer}/locker | Get locker's data for all instances of the peer |
 | GET       | /registry/peers/lockers | Get locker's data for all peers |
-| GET       | /registry/peers/lockers/summary | Get summary locker data for all peers |
+| GET       | /registry/peers/lockers/targets/results | Get client target invocation results for all peers, aggregated from all instances of a peer |
 | GET       | /registry/peers/targets | Get all registered targets for all peers |
 | POST      | /registry/peers/{peer}/targets/add | Add a target to be sent to a peer. See [Peer Target JSON Schema](#peer-target-json-schema) |
 | POST, PUT | /registry/peers/{peer}/targets/{targets}/remove | Remove given targets for a peer |
@@ -1897,6 +1897,7 @@ curl -X POST http://localhost:8080/registry/peers/peer1/jobs/invoke/all
 <p>
 
 ```
+$ curl -s localhost:8080/registry/peers | jq
 {
   "peer1": {
     "name": "peer1",
@@ -1929,64 +1930,179 @@ curl -X POST http://localhost:8080/registry/peers/peer1/jobs/invoke/all
 
 
 
-#### Registry Locker Store Example
+#### Registry Locker Example
 
 <details>
 <summary>Example</summary>
 <p>
 
 ```
-    {
-      "peer1": {
-        "client": {
-          "data": "{\"targetInvocationCounts\":{\"t11\":400,\"t12\":400},...",
-          "firstReported": "2020-06-09T18:28:17.877231-07:00",
-          "lastReported": "2020-06-09T18:28:29.955605-07:00"
-        },
-        "client_1": {
-          "data": "{\"targetInvocationCounts\":{\"t11\":400},\"target...",
-          "firstReported": "2020-06-09T18:28:17.879187-07:00",
-          "lastReported": "2020-06-09T18:28:29.958954-07:00"
-        },
-        "client_2": {
-          "data": "{\"targetInvocationCounts\":{\"t12\":400}...",
-          "firstReported": "2020-06-09T18:28:17.889567-07:00",
-          "lastReported": "2020-06-09T18:28:29.945121-07:00"
-        },
-        "job_job1_1": {
-          "data": "[{\"Index\":\"1.1.1\",\"Finished\":false,\"Data\":{...}]",
-          "firstReported": "2020-06-09T18:28:17.879195-07:00",
-          "lastReported": "2020-06-09T18:28:27.529454-07:00"
-        },
-        "job_job2_2": {
-          "data": "[{\"Index\":\"2.2.1\",\"Finished\":false,\"Data\":\"1...}]",
-          "firstReported": "2020-06-09T18:28:18.985445-07:00",
-          "lastReported": "2020-06-09T18:28:37.428542-07:00"
-        }
+$ curl -s localhost:8080/registry/peers/lockers | jq
+{
+  "peer1": {
+    "1.0.0.1:8081": {
+      "client": {
+        "data": "{\"targetInvocationCounts\":{\"t11\":400,\"t12\":400},...}",
+        "Locked": false,
+        "firstReported": "2020-06-09T18:28:17.877231-07:00",
+        "lastReported": "2020-06-09T18:28:29.955605-07:00"
       },
-      "peer2": {
-        "client": {
-          "data": "{\"targetInvocationCounts\":{\"t22\":4}...}",
-          "firstReported": "2020-06-09T18:28:19.782433-07:00",
-          "lastReported": "2020-06-09T18:28:20.023149-07:00"
-        },
-        "client_1": {
-          "data": "{\"targetInvocationCounts\":{\"t22\":4}...}",
-          "firstReported": "2020-06-09T18:28:19.91232-07:00",
-          "lastReported": "2020-06-09T18:28:20.027295-07:00"
-        },
-        "job_job1_1": {
-          "data": "[{\"Index\":\"1.1.1\",\"Finished\":false,\"ResultTime\":\"2020...\",\"Data\":\"...}]",
-          "firstReported": "2020-06-09T18:28:19.699578-07:00",
-          "lastReported": "2020-06-09T18:28:22.778416-07:00"
-        },
-        "job_job1_2": {
-          "data": "[{\"Index\":\"1.2.1\",\"Finished\":false,\"ResultTime\":\"2020-0...\",\"Data\":\"...}]",
-          "firstReported": "2020-06-09T18:28:20.79828-07:00",
-          "lastReported": "2020-06-09T18:28:59.698923-07:00"
-        }
+      "client_1": {
+        "data": "{\"targetInvocationCounts\":{\"t11\":400},\"target...}",
+        "Locked": true,
+        "firstReported": "2020-06-09T18:28:17.879187-07:00",
+        "lastReported": "2020-06-09T18:28:29.958954-07:00"
+      },
+      "client_2": {
+        "data": "{\"targetInvocationCounts\":{\"t12\":400}...}",
+        "Locked": true,
+        "firstReported": "2020-06-09T18:28:17.889567-07:00",
+        "lastReported": "2020-06-09T18:28:29.945121-07:00"
+      },
+      "job_job1_1": {
+        "data": "[{\"Index\":\"1.1.1\",\"Finished\":false,\"Data\":...}]",
+        "firstReported": "2020-06-09T18:28:17.879195-07:00",
+        "lastReported": "2020-06-09T18:28:27.529454-07:00"
+      },
+      "job_job2_2": {
+        "data": "[{\"Index\":\"2.2.1\",\"Finished\":false,\"Data\":\"1...}]",
+        "Locked": true,
+        "firstReported": "2020-06-09T18:28:18.985445-07:00",
+        "lastReported": "2020-06-09T18:28:37.428542-07:00"
+      }
+    },
+    "1.0.0.2:8081": {
+      "client": {
+        "data": "{\"targetInvocationCounts\":{\"t11\":400,\"t12\":400},...}",
+        "Locked": false,
+        "firstReported": "2020-06-09T18:28:17.877231-07:00",
+        "lastReported": "2020-06-09T18:28:29.955605-07:00"
+      },
+      "client_1": {
+        "data": "{\"targetInvocationCounts\":{\"t11\":400},\"target...}",
+        "Locked": true,
+        "firstReported": "2020-06-09T18:28:17.879187-07:00",
+        "lastReported": "2020-06-09T18:28:29.958954-07:00"
       }
     }
+  },
+  "peer2": {
+    "2.0.0.1:8082": {
+      "client": {
+        "data": "{\"targetInvocationCounts\":{\"t11\":400,\"t12\":400},...}",
+        "Locked": false,
+        "firstReported": "2020-06-09T18:28:17.877231-07:00",
+        "lastReported": "2020-06-09T18:28:29.955605-07:00"
+      },
+      "client_1": {
+        "data": "{\"targetInvocationCounts\":{\"t11\":400},\"target...}",
+        "Locked": true,
+        "firstReported": "2020-06-09T18:28:17.879187-07:00",
+        "lastReported": "2020-06-09T18:28:29.958954-07:00"
+      }
+    },
+    "2.0.0.2:8082": {
+      "client": {
+        "data": "{\"targetInvocationCounts\":{\"t11\":400,\"t12\":400},...}",
+        "Locked": false,
+        "firstReported": "2020-06-09T18:28:17.877231-07:00",
+        "lastReported": "2020-06-09T18:28:29.955605-07:00"
+      },
+      "client_1": {
+        "data": "{\"targetInvocationCounts\":{\"t11\":400},\"target...}",
+        "Locked": true,
+        "firstReported": "2020-06-09T18:28:17.879187-07:00",
+        "lastReported": "2020-06-09T18:28:29.958954-07:00"
+      }
+    }
+  }
+}
+```
+</p>
+</details>
+
+
+#### Registry Locker Client Invocations Summary Results Example
+
+<details>
+<summary>Example</summary>
+<p>
+
+```
+$ curl -s localhost:8080/registry/peers/lockers/targets/results | jq
+{
+  "peer1": {
+    "targetInvocationCounts": {
+      "t11": 16,
+      "t12": 44
+    },
+    "targetFirstResponses": {},
+    "targetLastResponses": {},
+    "countsByStatus": {
+      "200 OK": 60
+    },
+    "countsByStatusCodes": {
+      "200": 60
+    },
+    "countsByHeaders": {},
+    "countsByHeaderValues": {},
+    "countsByTargetStatus": {
+      "t11": {
+        "200 OK": 16
+      },
+      "t12": {
+        "200 OK": 44
+      }
+    },
+    "countsByTargetStatusCode": {
+      "t11": {
+        "200": 16
+      },
+      "t12": {
+        "200": 44
+      }
+    },
+    "countsByTargetHeaders": {
+      "t11": {},
+      "t12": {}
+    },
+    "countsByTargetHeaderValues": {
+      "t11": {},
+      "t12": {}
+    }
+  },
+  "peer2": {
+    "targetInvocationCounts": {
+      "t22": 160
+    },
+    "targetFirstResponses": {},
+    "targetLastResponses": {},
+    "countsByStatus": {
+      "200 OK": 160
+    },
+    "countsByStatusCodes": {
+      "200": 160
+    },
+    "countsByHeaders": {},
+    "countsByHeaderValues": {},
+    "countsByTargetStatus": {
+      "t22": {
+        "200 OK": 160
+      }
+    },
+    "countsByTargetStatusCode": {
+      "t22": {
+        "200": 160
+      }
+    },
+    "countsByTargetHeaders": {
+      "t22": {}
+    },
+    "countsByTargetHeaderValues": {
+      "t22": {}
+    }
+  }
+}
 ```
 </p>
 </details>
