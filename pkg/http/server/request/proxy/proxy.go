@@ -28,6 +28,7 @@ type ProxyTarget struct {
   URL            string           `json:"url"`
   SendID         bool             `json:"sendID"`
   ReplaceURI     string           `json:"replaceURI"`
+  StripURI       string           `json:"stripURI"`
   AddHeaders     [][]string       `json:"addHeaders"`
   RemoveHeaders  []string         `json:"removeHeaders"`
   AddQuery       [][]string       `json:"addQuery"`
@@ -36,6 +37,7 @@ type ProxyTarget struct {
   Replicas       int              `json:"replicas"`
   Enabled        bool             `json:"enabled"`
   uriRegExp      *regexp.Regexp
+  stripURIRegExp *regexp.Regexp
   captureHeaders map[string]string
   captureQuery   map[string]string
 }
@@ -183,6 +185,9 @@ func (p *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
     p.deleteProxyTarget(target.Name)
     p.lock.Lock()
     defer p.lock.Unlock()
+    if target.StripURI != "" {
+      target.stripURIRegExp = regexp.MustCompile("^(.*)("+target.StripURI + ")(/.+).*$")
+    }
     p.Targets[target.Name] = target
     p.addHeaderMatch(target)
     p.addQueryMatch(target)
@@ -270,6 +275,7 @@ func (p *Proxy) addURIMatch(target *ProxyTarget) error {
     }
     route := forwardRouter.Path(uri).MatcherFunc(matchURI)
     if re, err := route.GetPathRegexp(); err == nil {
+      re = strings.ReplaceAll(re, "$", "(/.*)?$")
       target.uriRegExp = regexp.MustCompile(re)
     } else {
       log.Printf("Failed to add URI match %s with error: %s\n", uri, err.Error())
@@ -450,6 +456,7 @@ func prepareTargetHeaders(target *ProxyTarget, r *http.Request) [][]string {
 
 func prepareTargetURL(target *ProxyTarget, r *http.Request) string {
   url := target.URL
+  path := r.URL.Path
   if len(target.ReplaceURI) > 0 {
     forwardRoute := forwardRouter.NewRoute().BuildOnly().Path(target.ReplaceURI)
     vars := mux.Vars(r)
@@ -459,18 +466,19 @@ func prepareTargetURL(target *ProxyTarget, r *http.Request) string {
         targetVars = append(targetVars, k, vars[k])
       }
       if netURL, err := forwardRoute.URLPath(targetVars...); err == nil {
-        url += netURL.Path
+        path = netURL.Path
       } else {
         log.Printf("Failed to set vars on ReplaceURI %s with error: %s. Using ReplaceURI as is.", target.ReplaceURI, err.Error())
-        url += target.ReplaceURI
+        path = target.ReplaceURI
       }
     } else {
       log.Printf("Failed to parse path vars from ReplaceURI %s with error: %s. Using ReplaceURI as is.", target.ReplaceURI, err.Error())
-      url += target.ReplaceURI
+      path = target.ReplaceURI
     }
-  } else {
-    url += r.URL.Path
+  } else if len(target.StripURI) > 0 {
+    path = target.stripURIRegExp.ReplaceAllString(path, "$1$3")
   }
+  url += path
   url = prepareTargetQuery(url, target, r)
   return url
 }
@@ -530,6 +538,7 @@ func toInvocationSpec(target *ProxyTarget, r *http.Request) (*invocation.Invocat
     is.Method = r.Method
     is.BodyReader = r.Body
   }
+  is.CollectResponse = true
   return is, invocation.ValidateSpec(is)
 }
 
@@ -537,14 +546,13 @@ func (p *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWr
   p.lock.Lock()
   defer p.lock.Unlock()
   if len(targets) > 0 {
-    invocationSpecs := []*invocation.InvocationSpec{}
+    responses := []*invocation.InvocationResult{}
     for _, target := range targets {
       is, _ := toInvocationSpec(target, r)
-      invocationSpecs = append(invocationSpecs, is)
+      tracker := invocation.RegisterInvocation(is)
+      response := invocation.StartInvocation(tracker, true)
+      responses = append(responses, response...)
     }
-    ic := invocation.RegisterInvocation(util.GetListenerPortNum(r))
-    responses := invocation.InvokeTargets(invocationSpecs, ic, true)
-    invocation.DeregisterInvocation(ic)
     for _, response := range responses {
       util.CopyHeaders(w, response.Headers, "")
       if response.StatusCode == 0 {

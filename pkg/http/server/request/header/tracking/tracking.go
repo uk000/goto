@@ -289,9 +289,13 @@ func trackResponseForRequestHeaders(r *http.Request, statusCode int) {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    trackRequestHeaders(r)
-    crw := intercept.NewInterceptResponseWriter(w, false)
-    next.ServeHTTP(crw, r)
-    trackResponseForRequestHeaders(r, crw.StatusCode)
+    if !util.IsAdminRequest(r) {
+      trackRequestHeaders(r)
+      crw := intercept.NewInterceptResponseWriter(w, false)
+      next.ServeHTTP(crw, r)
+      trackResponseForRequestHeaders(r, crw.StatusCode)
+    } else {
+      next.ServeHTTP(w, r)
+    }
   })
 }

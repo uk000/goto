@@ -1,6 +1,8 @@
 package intercept
 
-import "net/http"
+import (
+	"net/http"
+)
 
 type InterceptResponseWriter struct {
   http.ResponseWriter

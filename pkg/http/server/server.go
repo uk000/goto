@@ -6,6 +6,7 @@ import (
 
 	"goto/pkg/global"
 	"goto/pkg/http/client"
+	"goto/pkg/http/client/results"
 	"goto/pkg/http/invocation"
 	"goto/pkg/http/registry"
 	"goto/pkg/http/server/catchall"
@@ -24,8 +25,10 @@ func Run() {
 	global.PeerAddress = util.GetHostIP()+":"+strconv.Itoa(global.ServerPort)
 	global.GetPeers = registry.GetPeers
   listeners.SetListenerServer(runner.ServeListener)
-  invocation.LoadCerts()
+  invocation.Startup()
   runner.RunHttpServer("/", label.Handler, conn.Handler, job.Handler, request.Handler,
-    response.Handler, listeners.Handler, registry.Handler, client.Handler, echo.Handler, catchall.Handler)
+		response.Handler, listeners.Handler, registry.Handler, client.Handler, echo.Handler, catchall.Handler)
+	invocation.Shutdown()
+	results.StopRegistrySender()
   os.Exit(0)
 }

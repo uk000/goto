@@ -198,7 +198,7 @@ func storeJobResultsInRegistryLocker(jobID string, runIndex int, jobResults []*J
     url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/" + global.PeerAddress + "/locker/store/" + key
     if resp, err := http.Post(url, "application/json",
       strings.NewReader(util.ToJSON(jobResults))); err == nil {
-      defer resp.Body.Close()
+        util.CloseResponse(resp)
     }
   }
 }
@@ -364,26 +364,24 @@ func storeHttpResult(result *invocation.InvocationResult, job *Job, iteration in
 func (pj *PortJobs) invokeHttpTarget(job *Job, jobRun *JobRunContext, iteration int, last bool) {
   job.lock.RLock()
   target := &job.httpTask.InvocationSpec
-  targets := []*invocation.InvocationSpec{target}
   outputTrigger := job.OutputTrigger
   maxResults := job.MaxResults
   job.lock.RUnlock()
   jobRun.lock.RLock()
-  runIndex := jobRun.index
   stopChannel := jobRun.stopChannel
   doneChannel := jobRun.doneChannel
   jobRun.lock.RUnlock()
 
   resultCount := 0
-  ic := invocation.RegisterInvocation(runIndex)
+  tracker := invocation.RegisterInvocation(target)
 
   go func() {
-    invocation.InvokeTargets(targets, ic, true)
+    invocation.StartInvocation(tracker)
     doneChannel <- true
   }()
 
   sendStopSignal := func() {
-    ic.StopChannel <- target.Name
+    tracker.StopChannel <- true
     jobRun.lock.Lock()
     jobRun.stopped = true
     jobRun.lock.Unlock()
@@ -414,7 +412,7 @@ Done:
       break Done
     case <-doneChannel:
       break Done
-    case result := <-ic.ResultChannel:
+    case result := <-tracker.ResultChannel:
       if !storeResult(result) {
         sendStopSignal()
       }
@@ -423,12 +421,11 @@ Done:
   jobRun.lock.Lock()
   jobRun.finished = true
   jobRun.lock.Unlock()
-  for result := range ic.ResultChannel {
+  for result := range tracker.ResultChannel {
     if !storeResult(result) {
       break
     }
   }
-  invocation.DeregisterInvocation(ic)
 }
 
 func prepareMarkers(output string, sourceCommand *CommandJobTask, jobRun *JobRunContext) map[string]string {
@@ -640,7 +637,7 @@ func addJob(w http.ResponseWriter, r *http.Request) {
     pj := getPortJobs(r)
     pj.AddJob(job)
     msg = fmt.Sprintf("Added Job: %s\n", util.ToJSON(job))
-    w.WriteHeader(http.StatusOK)
+    w.WriteHeader(http.StatusAccepted)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = fmt.Sprintf("Failed to add job with error: %s\n", err.Error())
@@ -653,10 +650,10 @@ func removeJob(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if jobs, present := util.GetListParam(r, "jobs"); present {
     getPortJobs(r).removeJobs(jobs)
-    w.WriteHeader(http.StatusOK)
+    w.WriteHeader(http.StatusAccepted)
     msg = fmt.Sprintf("Jobs Removed: %s\n", jobs)
   } else {
-    w.WriteHeader(http.StatusBadRequest)
+    w.WriteHeader(http.StatusNotAcceptable)
     msg = "No jobs"
   }
   fmt.Fprintln(w, msg)
@@ -665,7 +662,7 @@ func removeJob(w http.ResponseWriter, r *http.Request) {
 
 func clearJobs(w http.ResponseWriter, r *http.Request) {
   getPortJobs(r).init()
-  w.WriteHeader(http.StatusOK)
+  w.WriteHeader(http.StatusAccepted)
   msg := "Jobs cleared"
   fmt.Fprintln(w, msg)
   util.AddLogMessage(msg, r)
@@ -683,7 +680,7 @@ func runJobs(w http.ResponseWriter, r *http.Request) {
   jobsToRun := pj.getJobsToRun(names)
   if len(jobsToRun) > 0 {
     pj.runJobs(jobsToRun)
-    w.WriteHeader(http.StatusOK)
+    w.WriteHeader(http.StatusAccepted)
     msg = fmt.Sprintf("Jobs %+v started\n", names)
   } else {
     w.WriteHeader(http.StatusNotAcceptable)
@@ -704,7 +701,7 @@ func stopJobs(w http.ResponseWriter, r *http.Request) {
   }
   pj.lock.RUnlock()
   pj.stopJobs(jobs)
-  w.WriteHeader(http.StatusOK)
+  w.WriteHeader(http.StatusAccepted)
   msg := fmt.Sprintf("Jobs %+v stopped\n", jobs)
   fmt.Fprintln(w, msg)
   util.AddLogMessage(msg, r)
@@ -752,6 +749,7 @@ func ParseJobFromPayload(payload string) (*Job, error) {
       task := util.ToJSON(job.Task)
       if httpTaskError = util.ReadJson(task, &httpTask); httpTaskError == nil {
         if httpTaskError = invocation.ValidateSpec(&httpTask.InvocationSpec); httpTaskError == nil {
+          httpTask.CollectResponse = true
           job.httpTask = &httpTask
         }
       }

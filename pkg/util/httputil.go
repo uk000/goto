@@ -56,7 +56,7 @@ func AddLogMessage(msg string, r *http.Request) {
 
 func PrintLogMessages(r *http.Request) {
   m := r.Context().Value(logmessagesKey).(*messagestore)
-  if !IsAdminRequest(r) || global.EnableAdminLogging {
+  if !IsLockerRequest(r) && (!IsAdminRequest(r) || global.EnableAdminLogging) {
     log.Println(strings.Join(m.messages, " --> "))
   }
   m.messages = m.messages[:0]
@@ -88,6 +88,10 @@ func GetHostIP() string {
     return conn.LocalAddr().(*net.UDPAddr).IP.String()
   }
   return "localhost"
+}
+
+func GetHostLabel() string {
+  return fmt.Sprintf("%s.%s@%s", GetPodName(), GetNamespace(), global.PeerAddress)
 }
 
 func GetIntParam(r *http.Request, param string, defaultVal ...int) (int, bool) {
@@ -204,7 +208,6 @@ func ReadJsonPayloadFromBody(body io.ReadCloser, t interface{}) error {
 }
 
 func WriteJsonPayload(w http.ResponseWriter, t interface{}) {
-  w.WriteHeader(http.StatusOK)
   if reflect.ValueOf(t).IsNil() {
     fmt.Fprintln(w, "")
   } else {
@@ -218,6 +221,10 @@ func IsAdminRequest(r *http.Request) bool {
     strings.HasPrefix(r.RequestURI, "/listeners") || strings.HasPrefix(r.RequestURI, "/client") ||
     strings.HasPrefix(r.RequestURI, "/label") || strings.HasPrefix(r.RequestURI, "/job") ||
     strings.HasPrefix(r.RequestURI, "/registry")
+}
+
+func IsLockerRequest(r *http.Request) bool {
+  return strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker") 
 }
 
 func AddRoute(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), methods ...string) {
@@ -288,6 +295,11 @@ func Read(r io.Reader) string {
   return ""
 }
 
+func CloseResponse(r *http.Response) {
+  defer r.Body.Close()
+  io.Copy(ioutil.Discard, r.Body)
+}
+
 func matchPieces(pieces1 []string, pieces2 []string) bool {
   if len(pieces1) != len(pieces2) {
     return false
@@ -342,11 +354,19 @@ func GetFillers(text string) []string {
   return fillerRegExp.FindAllString(text, -1)
 }
 
-func GetFillerUnmarked(text string) []string {
+func GetFillersUnmarked(text string) []string {
   matches := GetFillers(text)
   for i, m := range matches {
     m = strings.TrimLeft(m, "{")
     matches[i] = strings.TrimRight(m, "}")
   }
   return matches
+}
+
+func GetFillerUnmarked(text string) string {
+  fillers := GetFillersUnmarked(text)
+  if len(fillers) > 0 {
+    return fillers[0]
+  }
+  return ""
 }

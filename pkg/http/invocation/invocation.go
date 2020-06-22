@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -39,6 +40,7 @@ type InvocationSpec struct {
   ConnIdleTimeout  string     `json:"connIdleTimeout"`
   RequestTimeout   string     `json:"requestTimeout"`
   VerifyTLS        bool       `json:"verifyTLS"`
+  CollectResponse  bool       `json:"collectResponse"`
   AutoInvoke       bool       `json:"autoInvoke"`
   host             string
   connTimeoutD     time.Duration
@@ -49,19 +51,11 @@ type InvocationSpec struct {
   keepOpenD        time.Duration
 }
 
-type InvocationTracker struct {
-  ID            int                          `json:"id"`
-  Status        map[string]*InvocationStatus `json:"status"`
-  StopChannel   chan string                  `json:"-"`
-  DoneChannel   chan bool                    `json:"-"`
-  ResultChannel chan *InvocationResult       `json:"-"`
-}
-
 type InvocationStatus struct {
-  Target                *InvocationSpec `json:"target"`
-  CompletedRequestCount int             `json:"completedRequestCount"`
-  StopRequested         bool            `json:"stopRequested"`
-  Stopped               bool            `json:"stopped"`
+  CompletedRequestCount int  `json:"completedRequestCount"`
+  StopRequested         bool `json:"stopRequested"`
+  Stopped               bool `json:"stopped"`
+  Closed                bool `json:"closed"`
   client                *http.Client
 }
 
@@ -70,37 +64,51 @@ type InvocationResult struct {
   TargetID   string
   Status     string
   StatusCode int
+  URI        string
   Headers    map[string][]string
   Body       string
 }
 
-var (
-  invocationChannels map[int]*InvocationTracker = map[int]*InvocationTracker{}
-  rootCAs            *x509.CertPool
-  channelsLock       sync.Mutex
-)
+type ResultSink func(*InvocationResult)
+type ResultSinkFactory func(*InvocationTracker) ResultSink
 
-func RegisterInvocation(index int) *InvocationTracker {
-  channelsLock.Lock()
-  defer channelsLock.Unlock()
-  ic := &InvocationTracker{}
-  ic.ID = index
-  ic.StopChannel = make(chan string, 10)
-  ic.DoneChannel = make(chan bool, 10)
-  ic.ResultChannel = make(chan *InvocationResult, 10)
-  invocationChannels[index] = ic
-  return ic
+type InvocationTracker struct {
+  ID            uint32                 `json:"id"`
+  Target        *InvocationSpec        `json:"target"`
+  Status        *InvocationStatus      `json:"status"`
+  StopChannel   chan bool              `json:"-"`
+  DoneChannel   chan bool              `json:"-"`
+  ResultChannel chan *InvocationResult `json:"-"`
+  sinks         []ResultSink
+  lock          sync.RWMutex
 }
 
-func DeregisterInvocation(ic *InvocationTracker) {
-  channelsLock.Lock()
-  defer channelsLock.Unlock()
-  if invocationChannels[ic.ID] != nil {
-    close(ic.StopChannel)
-    close(ic.DoneChannel)
-    close(ic.ResultChannel)
-    delete(invocationChannels, ic.ID)
-  }
+type TargetInvocations struct {
+  trackers map[uint32]*InvocationTracker
+  lock     sync.RWMutex
+}
+
+const (
+  maxIdleClientDuration = 120 * time.Second
+)
+
+var (
+  invocationCounter  uint32
+  activeInvocations  map[uint32]*InvocationTracker = map[uint32]*InvocationTracker{}
+  activeTargets      map[string]*TargetInvocations = map[string]*TargetInvocations{}
+  targetClients      map[string]*http.Client       = map[string]*http.Client{}
+  chanStopCleanup    chan bool                     = make(chan bool)
+  rootCAs            *x509.CertPool
+  invocationsLock    sync.RWMutex
+)
+
+func Startup() {
+  loadCerts()
+  go monitorHttpClients()
+}
+
+func Shutdown() {
+  chanStopCleanup <- true
 }
 
 func ValidateSpec(spec *InvocationSpec) error {
@@ -128,8 +136,6 @@ func ValidateSpec(spec *InvocationSpec) error {
     if spec.initialDelayD, err = time.ParseDuration(spec.InitialDelay); err != nil {
       return fmt.Errorf("Invalid initial delay")
     }
-  } else {
-    spec.initialDelayD = 1 * time.Second
   }
   if spec.Delay != "" {
     if spec.delayD, err = time.ParseDuration(spec.Delay); err != nil {
@@ -170,7 +176,7 @@ func ValidateSpec(spec *InvocationSpec) error {
   return nil
 }
 
-func LoadCerts() {
+func loadCerts() {
   rootCAs = x509.NewCertPool()
   found := false
   if certs, err := filepath.Glob(global.CertPath + "/*.crt"); err == nil {
@@ -205,28 +211,186 @@ func tlsConfig(target *InvocationSpec) *tls.Config {
   return cfg
 }
 
-func prepareInvocation(target *InvocationSpec) *InvocationStatus {
+func monitorHttpClients() {
+  watchListForRemoval := map[string]int{}
+  for {
+    select {
+    case <-chanStopCleanup:
+      return
+    case <-time.Tick(maxIdleClientDuration):
+      invocationsLock.Lock()
+      for target, client := range targetClients {
+        if activeTargets[target] == nil {
+          if watchListForRemoval[target] < 3 {
+            watchListForRemoval[target]++
+          } else {
+            client.CloseIdleConnections()
+            delete(targetClients, target)
+            delete(watchListForRemoval, target)
+          }
+        } else {
+          if watchListForRemoval[target] > 0 {
+            delete(watchListForRemoval, target)
+          }
+        }
+      }
+      invocationsLock.Unlock()
+    }
+  }
+}
+
+func getHttpClientForTarget(target *InvocationSpec) *http.Client {
+  invocationsLock.RLock()
+  client := targetClients[target.Name]
+  invocationsLock.RUnlock()
+  if client == nil {
+    tr := &http.Transport{
+      MaxIdleConns:       200,
+      MaxIdleConnsPerHost: 100,
+      IdleConnTimeout:    target.connIdleTimeoutD,
+      DisableCompression: true,
+      Proxy:              http.ProxyFromEnvironment,
+      DialContext: (&net.Dialer{
+        Timeout:   target.connTimeoutD,
+        KeepAlive: time.Minute,
+      }).DialContext,
+      TLSHandshakeTimeout: 10 * time.Second,
+      TLSClientConfig:     tlsConfig(target),
+    }
+    client = &http.Client{Transport: tr}
+    invocationsLock.Lock()
+    targetClients[target.Name] = client
+    invocationsLock.Unlock()
+  }
+  return client
+}
+
+func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) *InvocationTracker {
+  tracker := &InvocationTracker{}
+  tracker.ID = id
+  tracker.Status = &InvocationStatus{}
+  tracker.Target = target
+  tracker.StopChannel = make(chan bool, 10)
+  tracker.DoneChannel = make(chan bool, 10)
+  tracker.ResultChannel = make(chan *InvocationResult, 100)
+  for _, sinkFactory := range sinks {
+    if sink := sinkFactory(tracker); sink != nil {
+      tracker.sinks = append(tracker.sinks, sink)
+    }
+  }
+  tracker.Status.client = getHttpClientForTarget(target)
   if target.BodyReader != nil && (target.Replicas > 1 || target.RequestCount > 1) {
     body, _ := ioutil.ReadAll(target.BodyReader)
     target.Body = string(body)
     target.BodyReader = nil
   }
-  invocationStatus := &InvocationStatus{}
-  invocationStatus.Target = target
-  tr := &http.Transport{
-    MaxIdleConns:       2,
-    IdleConnTimeout:    target.connIdleTimeoutD,
-    DisableCompression: true,
-    Proxy:              http.ProxyFromEnvironment,
-    DialContext: (&net.Dialer{
-      Timeout:   target.connTimeoutD,
-      KeepAlive: time.Minute,
-    }).DialContext,
-    TLSHandshakeTimeout: 10 * time.Second,
-    TLSClientConfig:     tlsConfig(target),
+  return tracker
+}
+
+func RegisterInvocation(target *InvocationSpec, sinks ...ResultSinkFactory) *InvocationTracker {
+  return newTracker(atomic.AddUint32(&invocationCounter, 1), target, sinks...)
+}
+
+func CloseInvocation(tracker *InvocationTracker) {
+  tracker.lock.Lock()
+  if tracker.StopChannel != nil {
+    close(tracker.StopChannel)
+    tracker.StopChannel = nil
   }
-  invocationStatus.client = &http.Client{Transport: tr}
-  return invocationStatus
+  if tracker.DoneChannel != nil {
+    close(tracker.DoneChannel)
+    tracker.DoneChannel = nil
+  }
+  if tracker.ResultChannel != nil {
+    close(tracker.ResultChannel)
+    tracker.ResultChannel = nil
+  }
+  tracker.Status.client = nil
+  tracker.Status.Closed = true
+  tracker.lock.Unlock()
+}
+
+func DeregisterInvocation(tracker *InvocationTracker) {
+  CloseInvocation(tracker)
+  tracker.lock.RLock()
+  trackerID := tracker.ID
+  target := tracker.Target.Name
+  tracker.lock.RUnlock()
+  invocationsLock.RLock()
+  activeTracker := activeInvocations[trackerID]
+  invocationsLock.RUnlock()
+  if activeTracker != nil {
+    invocationsLock.Lock()
+    delete(activeInvocations, trackerID)
+    invocationsLock.Unlock()
+    removeTargetTracker(trackerID, target)
+  }
+}
+
+func removeTargetTracker(id uint32, target string) {
+  invocationsLock.Lock()
+  targetInvocations := activeTargets[target]
+  invocationsLock.Unlock()
+  if targetInvocations != nil {
+    targetInvocations.lock.Lock()
+    delete(targetInvocations.trackers, id)
+    if len(targetInvocations.trackers) == 0 {
+      invocationsLock.Lock()
+      delete(activeTargets, target)
+      invocationsLock.Unlock()
+    }
+    targetInvocations.lock.Unlock()
+  }
+}
+
+func GetActiveInvocations() map[string]map[uint32]*InvocationStatus {
+  results := map[string]map[uint32]*InvocationStatus{}
+  invocationsLock.RLock()
+  defer invocationsLock.RUnlock()
+  for target, targetInvocations := range activeTargets {
+    results[target] = map[uint32]*InvocationStatus{}
+    for _, tracker := range targetInvocations.trackers {
+      tracker.lock.RLock()
+      results[target][tracker.ID] = tracker.Status
+      tracker.lock.RUnlock()
+    }
+  }
+  return results
+}
+
+func IsAnyTargetActive(targets []string) bool {
+  invocationsLock.RLock()
+  defer invocationsLock.RUnlock()
+  for _, target := range targets {
+    if activeTargets[target] != nil {
+      return true
+    }
+  }
+  return false
+}
+
+func StopTarget(target string) {
+  invocationsLock.RLock()
+  targetInvocations := activeTargets[target]
+  invocationsLock.RUnlock()
+  if targetInvocations != nil {
+    targetInvocations.lock.RLock()
+    for _, tracker := range targetInvocations.trackers {
+      tracker.lock.Lock()
+      done := false
+      select {
+      case done = <-tracker.DoneChannel:
+      default:
+      }
+      if !done {
+        if !tracker.Status.StopRequested && !tracker.Status.Stopped {
+          tracker.StopChannel <- true
+        }
+      }
+      tracker.lock.Unlock()
+    }
+    targetInvocations.lock.RUnlock()
+  }
 }
 
 func prepareTargetURL(target *InvocationSpec) string {
@@ -246,133 +410,150 @@ func prepareTargetURL(target *InvocationSpec) string {
   return url
 }
 
-func collectStopRequests(tracker *InvocationTracker) {
+func processStopRequest(tracker *InvocationTracker) bool {
+  tracker.lock.Lock()
+  defer tracker.lock.Unlock()
   if tracker.StopChannel != nil {
-    for {
-      stopTarget := ""
-      select {
-      case stopTarget = <-tracker.StopChannel:
-      default:
-      }
-      if stopTarget != "" {
-        if tracker.Status[stopTarget] != nil {
-          tracker.Status[stopTarget].StopRequested = true
-        }
+    select {
+    case tracker.Status.StopRequested = <-tracker.StopChannel:
+    default:
+    }
+    if tracker.Status.StopRequested {
+      if tracker.Status.Stopped {
+        log.Printf("Invocation[%d]: Received stop request for target = %s that is already stopped\n", tracker.ID, tracker.Target.Name)
+        return true
       } else {
-        break
+        remaining := (tracker.Target.RequestCount * tracker.Target.Replicas) - (tracker.Status.CompletedRequestCount * tracker.Target.Replicas)
+        log.Printf("Invocation[%d]: Received stop request for target = %s with remaining requests %d\n", tracker.ID, tracker.Target.Name, remaining)
+        tracker.Status.Stopped = true
+        removeTargetTracker(tracker.ID, tracker.Target.Name)
+        return true
       }
+    }
+  }
+  return false
+}
+
+func activateTracker(tracker *InvocationTracker) {
+  tracker.lock.RLock()
+  defer tracker.lock.RUnlock()
+  invocationsLock.Lock()
+  activeInvocations[tracker.ID] = tracker
+  targetInvocations := activeTargets[tracker.Target.Name]
+  if targetInvocations == nil {
+    targetInvocations = &TargetInvocations{trackers: map[uint32]*InvocationTracker{}}
+    activeTargets[tracker.Target.Name] = targetInvocations
+  }
+  invocationsLock.Unlock()
+  targetInvocations.lock.Lock()
+  targetInvocations.trackers[tracker.ID] = tracker
+  targetInvocations.lock.Unlock()
+}
+
+func extractTargetHost(target *InvocationSpec) {
+  target.host = ""
+  for _, kv := range target.Headers {
+    if strings.EqualFold(kv[0], "Host") {
+      target.host = kv[1]
+    }
+  }
+  if target.host == "" {
+    if url, err := url.Parse(target.URL); err == nil {
+      target.host = url.Host
+    } else {
+      log.Printf("Failed to parse target URL: %s\n", target.URL)
     }
   }
 }
 
-func processTargetStopRequest(index int, target *InvocationSpec, tracker *InvocationTracker) int {
-  if tracker.Status[target.Name].Stopped {
-    log.Printf("Invocation[%d]: Received stop request for target = %s that is already stopped\n", index, target.Name)
-    tracker.Status[target.Name].StopRequested = false
-    return 0
-  } else {
-    remaining := (target.RequestCount * target.Replicas) - (tracker.Status[target.Name].CompletedRequestCount * target.Replicas)
-    log.Printf("Invocation[%d]: Received stop request for target = %s with remaining requests %d\n", index, target.Name, remaining)
-    tracker.Status[target.Name].Stopped = true
-    tracker.Status[target.Name].StopRequested = false
-    return remaining
-  }
-}
+func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*InvocationResult {
+  activateTracker(tracker)
 
-func InvokeTargets(targets []*InvocationSpec, tracker *InvocationTracker, reportBody bool) []*InvocationResult {
-  var responses []*InvocationResult
-  invocationID := tracker.ID
-  tracker.Status = map[string]*InvocationStatus{}
-  if len(targets) > 0 {
-    initialDelay := time.Millisecond
-    totalRemainingRequestCount := 0
-    for _, target := range targets {
-      target.host = ""
-      for _, kv := range target.Headers {
-        if strings.EqualFold(kv[0], "Host") {
-          target.host = kv[1]
-        }
-      }
-      if target.host == "" {
-        if url, err := url.Parse(target.URL); err == nil {
-          target.host = url.Host
-        } else {
-          log.Printf("Failed to parse target URL: %s\n", target.URL)
-        }
-      }
-      tracker.Status[target.Name] = prepareInvocation(target)
-      totalRemainingRequestCount += (target.Replicas * target.RequestCount)
-      if target.initialDelayD > initialDelay {
-        initialDelay = target.initialDelayD
-      }
+  tracker.lock.RLock()
+  target := tracker.Target
+  trackerID := tracker.ID
+  httpClient := tracker.Status.client
+  sinks := tracker.sinks
+  resultChannel := tracker.ResultChannel
+  doneChannel := tracker.DoneChannel
+  stopChannel := tracker.StopChannel
+  tracker.lock.RUnlock()
+
+  extractTargetHost(target)
+  completedCount := 0
+  time.Sleep(target.initialDelayD)
+  log.Printf("Invocation[%d]: Started with target %s and total requests %d\n", trackerID, target.Name, (target.Replicas * target.RequestCount))
+  activeTargets := []string{}
+  for k := range targetClients {
+    activeTargets = append(activeTargets, k)
+  }
+
+  responseChannels := make([]chan *InvocationResult, target.Replicas)
+  cases := make([]reflect.SelectCase, target.Replicas)
+  resultCount := 0
+  var results []*InvocationResult
+  for {
+    if stopped := processStopRequest(tracker); stopped {
+      break
     }
-    time.Sleep(initialDelay)
-    log.Printf("Invocation[%d]: Started with target count: %d, total requests to make: %d\n", invocationID, len(targets), totalRemainingRequestCount)
-    for {
-      collectStopRequests(tracker)
-      batchSize := 0
-      for _, target := range targets {
-        if tracker.Status[target.Name].StopRequested {
-          remainingRequestCountForTarget := processTargetStopRequest(invocationID, target, tracker)
-          totalRemainingRequestCount -= remainingRequestCountForTarget
-        } else if !tracker.Status[target.Name].Stopped && tracker.Status[target.Name].CompletedRequestCount < target.RequestCount {
-          batchSize += target.Replicas
-        }
+    for i := 0; i < target.Replicas; i++ {
+      callCounter := (completedCount * target.Replicas) + i + 1
+      targetID := target.Name + "[" + strconv.Itoa(i+1) + "]" + "[" + strconv.Itoa(callCounter) + "]"
+      url := prepareTargetURL(target)
+      bodyReader := target.BodyReader
+      target.BodyReader = nil
+      if bodyReader == nil {
+        bodyReader = strings.NewReader(target.Body)
       }
-      responseChannels := make([]chan *InvocationResult, batchSize)
-      cases := make([]reflect.SelectCase, batchSize)
-      index := 0
-      delay := 10 * time.Millisecond
-      for _, target := range targets {
-        if !tracker.Status[target.Name].Stopped && tracker.Status[target.Name].CompletedRequestCount < target.RequestCount {
-          if target.delayD > delay {
-            delay = target.delayD
-          }
-          for i := 0; i < target.Replicas; i++ {
-            targetReplicaIndex := (tracker.Status[target.Name].CompletedRequestCount * target.Replicas) + i + 1
-            targetID := target.Name + "[" + strconv.Itoa(i+1) + "]" + "[" + strconv.Itoa(targetReplicaIndex) + "]"
-            url := prepareTargetURL(target)
-            totalRemainingRequestCount--
-            responseChannels[index] = make(chan *InvocationResult)
-            cases[index] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(responseChannels[index])}
-            bodyReader := target.BodyReader
-            target.BodyReader = nil
-            if bodyReader == nil {
-              bodyReader = strings.NewReader(target.Body)
-            }
-            go invokeTarget(invocationID, target.Name, targetID, url, target.Method, target.host, target.Headers,
-              bodyReader, reportBody, tracker.Status[target.Name].client, responseChannels[index])
-            index++
-          }
-          tracker.Status[target.Name].CompletedRequestCount++
-        }
-      }
-      for len(cases) > 0 {
-        i, v, _ := reflect.Select(cases)
-        cases = append(cases[:i], cases[i+1:]...)
+      responseChannels[i] = make(chan *InvocationResult)
+      cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(responseChannels[i])}
+      go invokeTarget(trackerID, target.Name, targetID, url, target.Method, target.host, target.Headers,
+        bodyReader, target.CollectResponse, httpClient, responseChannels[i])
+    }
+    for i := 0; i < target.Replicas; i++ {
+      if _, v, ok := reflect.Select(cases); ok {
         result := v.Interface().(*InvocationResult)
-        responses = append(responses, result)
-        if tracker.ResultChannel != nil {
-          tracker.ResultChannel <- result
+        resultCount++
+        if len(sinks) > 0 {
+          for _, sink := range sinks {
+            sink(result)
+          }
+        } else if resultChannel != nil {
+          resultChannel <- result
+        }
+        if len(waitForResponse) > 0 && waitForResponse[0] {
+          results = append(results, result)
         }
       }
-      if totalRemainingRequestCount == 0 {
-        break
-      }
+    }
+    delay := 10 * time.Millisecond
+    if target.delayD > delay {
+      delay = target.delayD
+    }
+    completedCount++
+    if completedCount < target.RequestCount {
       time.Sleep(delay)
-    }
-    if tracker.DoneChannel != nil {
-      tracker.DoneChannel <- true
-    }
-    if tracker.StopChannel != nil {
-      select {
-      case <-tracker.StopChannel:
-      default:
-      }
+    } else {
+      break
     }
   }
-  log.Printf("Invocation[%d]: Finished with responses %d\n", invocationID, len(responses))
-  return responses
+  if doneChannel != nil {
+    doneChannel <- true
+  }
+  if stopChannel != nil {
+    select {
+    case <-stopChannel:
+    default:
+    }
+  }
+  DeregisterInvocation(tracker)
+  log.Printf("Invocation[%d]: Finished with responses %d\n", trackerID, resultCount)
+
+  activeTargets = []string{}
+  for k := range targetClients {
+    activeTargets = append(activeTargets, k)
+  }
+  return results
 }
 
 func newClientRequest(method string, url string, headers [][]string, body io.Reader) (*http.Request, error) {
@@ -390,7 +571,7 @@ func newClientRequest(method string, url string, headers [][]string, body io.Rea
   }
 }
 
-func invokeTarget(index int, targetName string, targetID string, url string, method string, host string, headers [][]string, body io.Reader, reportBody bool, client *http.Client, c chan *InvocationResult) {
+func invokeTarget(index uint32, targetName string, targetID string, url string, method string, host string, headers [][]string, body io.Reader, reportBody bool, client *http.Client, c chan *InvocationResult) {
   defer close(c)
   log.Printf("Invocation[%d]: Invoking targetID: %s, url: %s, method: %s, headers: %+v\n", index, targetID, url, method, headers)
   var result InvocationResult
@@ -400,8 +581,10 @@ func invokeTarget(index int, targetName string, targetID string, url string, met
   headers = append(headers, []string{"TargetID", targetID})
   if req, err := newClientRequest(method, url, headers, body); err == nil {
     req.Host = host
+    result.URI = req.URL.Path
     if resp, err := client.Do(req); err == nil {
       defer resp.Body.Close()
+      log.Printf("Invocation[%d]: Target %s Response Status: %s\n", index, targetID, resp.Status)
       for header, values := range resp.Header {
         result.Headers[header] = values
       }
@@ -410,6 +593,8 @@ func invokeTarget(index int, targetName string, targetID string, url string, met
       result.StatusCode = resp.StatusCode
       if reportBody {
         result.Body = util.Read(resp.Body)
+      } else {
+        io.Copy(ioutil.Discard, resp.Body)
       }
     } else {
       log.Printf("Invocation[%d]: Target %s, url [%s] invocation failed with error: %s\n", index, targetID, url, err.Error())

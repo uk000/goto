@@ -43,10 +43,7 @@ func getLabel(w http.ResponseWriter, r *http.Request) {
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     label := listeners.GetListenerLabel(r)
-    pod := util.GetPodName()
-    ns := util.GetNamespace()
-    ip := util.GetHostIP()
-    hostLabel := fmt.Sprintf("%s.%s@%s", pod, ns, ip)
+    hostLabel := util.GetHostLabel()
     util.AddLogMessage(fmt.Sprintf("[%s] [%s]", hostLabel, label), r)
     w.Header().Add("Via-Goto", label)
     w.Header().Add("Goto-Host", hostLabel)

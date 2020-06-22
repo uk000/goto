@@ -202,15 +202,14 @@ func (tt *TriggerTarget) toInvocationSpec(r *http.Request, w http.ResponseWriter
 func (t *Trigger) invokeTargets(targets map[string]*TriggerTarget, w http.ResponseWriter, r *http.Request) []*invocation.InvocationResult {
   t.lock.Lock()
   defer t.lock.Unlock()
+  responses := []*invocation.InvocationResult{}
   if len(targets) > 0 {
-    invocationSpecs := []*invocation.InvocationSpec{}
-    for _, tt := range targets {
-      is, _ := tt.toInvocationSpec(r, w)
-      invocationSpecs = append(invocationSpecs, is)
+    for _, target := range targets {
+      is, _ := target.toInvocationSpec(r, w)
+      tracker := invocation.RegisterInvocation(is)
+      results := invocation.StartInvocation(tracker, true)
+      responses = append(responses, results...)
     }
-    tracker := &invocation.InvocationTracker{}
-    tracker.ID = util.GetListenerPortNum(r)
-    responses := invocation.InvokeTargets(invocationSpecs, tracker, false)
     for _, response := range responses {
       if response.StatusCode == 0 {
         response.StatusCode = 503
@@ -220,7 +219,7 @@ func (t *Trigger) invokeTargets(targets map[string]*TriggerTarget, w http.Respon
       }
       t.TriggerResults[response.TargetName][response.StatusCode]++
     }
-    return responses
+  return responses
   }
   return nil
 }

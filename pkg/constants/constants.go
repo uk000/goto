@@ -1,5 +1,7 @@
 package constants
 
 const (
-	ClientResultsKey string = "client"
+  LockerClientKey        string = "client"
+  LockerClientResultsKey string = "results"
+  LockerInvocationsKey   string = "invocations"
 )

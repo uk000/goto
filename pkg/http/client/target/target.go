@@ -3,14 +3,13 @@ package target
 import (
 	"fmt"
 	"log"
-	"math"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"goto/pkg/global"
+	"goto/pkg/http/client/results"
 	"goto/pkg/http/invocation"
 	"goto/pkg/http/server/listeners"
 	"goto/pkg/util"
@@ -22,40 +21,11 @@ type Target struct {
   invocation.InvocationSpec
 }
 
-type TargetResponseTimes struct {
-  FirstResponse time.Time
-  LastResponse  time.Time
-}
-
-type TargetResults struct {
-  TargetInvocationCounts     map[string]int                       `json:"targetInvocationCounts"`
-  TargetFirstResponses       map[string]time.Time                 `json:"targetFirstResponses"`
-  TargetLastResponses        map[string]time.Time                 `json:"targetLastResponses"`
-  CountsByStatus             map[string]int                       `json:"countsByStatus"`
-  CountsByStatusCodes        map[int]int                          `json:"countsByStatusCodes"`
-  CountsByHeaders            map[string]int                       `json:"countsByHeaders"`
-  CountsByHeaderValues       map[string]map[string]int            `json:"countsByHeaderValues"`
-  CountsByTargetStatus       map[string]map[string]int            `json:"countsByTargetStatus"`
-  CountsByTargetStatusCodes   map[string]map[int]int               `json:"countsByTargetStatusCode"`
-  CountsByTargetHeaders      map[string]map[string]int            `json:"countsByTargetHeaders"`
-  CountsByTargetHeaderValues map[string]map[string]map[string]int `json:"countsByTargetHeaderValues"`
-}
-
-type TargetInvocationResults struct {
-  TargetResults
-  Finished bool           `json:"finished"`
-}
-
 type PortClient struct {
   targets                   map[string]*Target
-  activeInvocations         map[int]*invocation.InvocationTracker
-  invocationCounter         int
+  activeTargetsCount        int         
   targetsLock               sync.RWMutex
-  blockForResponse          bool
-  trackingHeaders           map[string]int
-  targetResults             *TargetResults
-  targetResultsByInvocation map[int]*TargetInvocationResults
-  resultsLock               sync.RWMutex
+  trackingHeaders           []string
 }
 
 var (
@@ -78,66 +48,43 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(targetsRouter, "/clear", clearTargets, "POST")
   util.AddRoute(targetsRouter, "/active", getActiveTargets, "GET")
 
-  util.AddRoute(r, "/blocking/set/{flag}", setOrGetBlocking, "POST", "PUT")
-  util.AddRoute(r, "/blocking", setOrGetBlocking, "GET")
   util.AddRoute(r, "/track/headers/add/{headers}", addTrackingHeaders, "POST", "PUT")
   util.AddRoute(r, "/track/headers/remove/{header}", removeTrackingHeader, "POST", "PUT")
   util.AddRoute(r, "/track/headers/clear", clearTrackingHeaders, "POST")
   util.AddRoute(r, "/track/headers/list", getTrackingHeaders, "GET")
   util.AddRoute(r, "/track/headers", getTrackingHeaders, "GET")
+  util.AddRoute(r, "/results/all/{enable}", enableAllTargetsResultsCollection, "POST", "PUT")
+  util.AddRoute(r, "/results/invocations/{enable}", enableInvocationResultsCollection, "POST", "PUT")
   util.AddRoute(r, "/results", getResults, "GET")
   util.AddRoute(r, "/results/invocations", getInvocationResults, "GET")
-  util.AddRoute(r, "/results/{targets}/clear", clearResults, "POST")
   util.AddRoute(r, "/results/clear", clearResults, "POST")
 }
 
 func (pc *PortClient) init() bool {
   pc.targetsLock.Lock()
   defer pc.targetsLock.Unlock()
-  if len(pc.activeInvocations) > 0 {
+  if pc.activeTargetsCount > 0 {
     return false
   }
   pc.targets = map[string]*Target{}
-  pc.activeInvocations = map[int]*invocation.InvocationTracker{}
-  pc.invocationCounter = 0
-  pc.blockForResponse = false
-  pc.trackingHeaders = map[string]int{}
-  pc.targetResults = &TargetResults{}
-  pc.targetResultsByInvocation = map[int]*TargetInvocationResults{}
+  pc.trackingHeaders = []string{}
   return true
 }
 
-func InitResults(targetResults *TargetResults) {
-  targetResults.TargetInvocationCounts = map[string]int{}
-  targetResults.TargetFirstResponses = map[string]time.Time{}
-  targetResults.TargetLastResponses = map[string]time.Time{}
-  targetResults.CountsByStatusCodes = map[int]int{}
-  targetResults.CountsByStatus = map[string]int{}
-  targetResults.CountsByHeaders = map[string]int{}
-  targetResults.CountsByHeaderValues = map[string]map[string]int{}
-  targetResults.CountsByTargetStatus = map[string]map[string]int{}
-  targetResults.CountsByTargetStatusCodes = map[string]map[int]int{}
-  targetResults.CountsByTargetHeaders = map[string]map[string]int{}
-  targetResults.CountsByTargetHeaderValues = map[string]map[string]map[string]int{}
-}
-
 func (pc *PortClient) AddTarget(t *Target, r ...*http.Request) error {
-  if err := invocation.ValidateSpec(&t.InvocationSpec); err == nil {
+  invocationSpec := &t.InvocationSpec
+  if err := invocation.ValidateSpec(invocationSpec); err == nil {
     pc.targetsLock.Lock()
-    defer pc.targetsLock.Unlock()
-    t.Headers = append(t.Headers, []string{"Goto-Client", listeners.DefaultLabel})
     pc.targets[t.Name] = t
+    pc.targetsLock.Unlock()
+    t.Headers = append(t.Headers, []string{"Goto-Client", listeners.DefaultLabel})
     if t.AutoInvoke {
       go func() {
         log.Printf("Auto-invoking target: %s\n", t.Name)
-        targetsToInvoke := []*invocation.InvocationSpec{&t.InvocationSpec}
         if len(r) > 0 {
-          targetsToInvoke = prepareTargetsForPeers(targetsToInvoke, r[0])
+          invocationSpec = pc.prepareTargetForPeer(invocationSpec, r[0])
         }
-        pc.invocationCounter++
-        ic := invocation.RegisterInvocation(pc.invocationCounter)
-        pc.activeInvocations[ic.ID] = ic
-        invokeTargetsAndStoreResults(pc, targetsToInvoke, ic)
+        pc.invokeTarget(invocationSpec)
       }()
     }
     return nil
@@ -149,7 +96,7 @@ func (pc *PortClient) AddTarget(t *Target, r ...*http.Request) error {
 func (pc *PortClient) removeTargets(targets []string) bool {
   pc.targetsLock.Lock()
   defer pc.targetsLock.Unlock()
-  if len(pc.activeInvocations) > 0 {
+  if pc.activeTargetsCount > 0 {
     return false
   }
   for _, t := range targets {
@@ -158,58 +105,39 @@ func (pc *PortClient) removeTargets(targets []string) bool {
   return true
 }
 
-func prepareTargetsForPeers(targets []*invocation.InvocationSpec, r *http.Request) []*invocation.InvocationSpec {
-  targetsToInvoke := []*invocation.InvocationSpec{}
-  for _, t := range targets {
-    added := false
-    if strings.HasPrefix(t.Name, "{") && strings.HasSuffix(t.Name, "}") {
-      peerName := strings.TrimLeft(t.Name, "{")
-      peerName = strings.TrimRight(peerName, "}")
-      if r != nil {
-        if peers := global.GetPeers(peerName, r); peers != nil {
-          if strings.Contains(t.URL, "{") && strings.Contains(t.URL, "}") {
-            urlPre := strings.Split(t.URL, "{")[0]
-            urlPost := strings.Split(t.URL, "}")[1]
-            for _, address := range peers {
-              var target = *t
-              target.Name = peerName
-              target.URL = urlPre + address + urlPost
-              targetsToInvoke = append(targetsToInvoke, &target)
-              added = true
-            }
-          }
+func (pc *PortClient) prepareTargetForPeer(target *invocation.InvocationSpec, r *http.Request) *invocation.InvocationSpec {
+  peerName := util.GetFillerUnmarked(target.Name)
+  if peerName != "" && r != nil {
+    if peers := global.GetPeers(peerName, r); peers != nil {
+      if strings.Contains(target.URL, "{") && strings.Contains(target.URL, "}") {
+        urlPre := strings.Split(target.URL, "{")[0]
+        urlPost := strings.Split(target.URL, "}")[1]
+        for _, address := range peers {
+          var newTarget = *target
+          newTarget.Name = peerName
+          newTarget.URL = urlPre + address + urlPost
+          target = &newTarget
         }
       }
     }
-    if !added {
-      targetsToInvoke = append(targetsToInvoke, t)
-    }
   }
-  return targetsToInvoke
+  return target
 }
 
-func (pc *PortClient) PrepareTargetsToInvoke(names []string) []*invocation.InvocationSpec {
-  pc.targetsLock.RLock()
-  defer pc.targetsLock.RUnlock()
-  var targetsToInvoke []*invocation.InvocationSpec
-  if len(names) > 0 {
-    for _, tname := range names {
-      target, found := pc.targets[tname]
-      if !found {
-        target, found = pc.targets["{"+tname+"}"]
-      }
-      if found {
-        targetsToInvoke = append(targetsToInvoke, &target.InvocationSpec)
-      }
+func (pc *PortClient) PrepareTarget(name string) *invocation.InvocationSpec {
+  var targetToInvoke *invocation.InvocationSpec
+  if name != "" {
+    pc.targetsLock.RLock()
+    target, found := pc.targets[name]
+    if !found {
+      target, found = pc.targets["{"+name+"}"]
     }
-  } else {
-    if len(pc.targets) > 0 {
-      for _, target := range pc.targets {
-        targetsToInvoke = append(targetsToInvoke, &target.InvocationSpec)
-      }
+    pc.targetsLock.RUnlock()
+    if found {
+      targetToInvoke = &target.InvocationSpec
     }
   }
-  return targetsToInvoke
+  return targetToInvoke
 }
 
 func (pc *PortClient) getTargetsToInvoke(r *http.Request) []*invocation.InvocationSpec {
@@ -217,337 +145,87 @@ func (pc *PortClient) getTargetsToInvoke(r *http.Request) []*invocation.Invocati
   if r != nil {
     names, _ = util.GetListParam(r, "targets")
   }
-  return prepareTargetsForPeers(pc.PrepareTargetsToInvoke(names), r)
-}
-
-func (pc *PortClient) setReportResponse(flag bool) {
-  pc.resultsLock.Lock()
-  defer pc.resultsLock.Unlock()
-  pc.blockForResponse = flag
+  var targetsToInvoke []*invocation.InvocationSpec
+  if len(names) > 0 {
+    for _, name := range names {
+      t := pc.prepareTargetForPeer(pc.PrepareTarget(name), r)
+      targetsToInvoke = append(targetsToInvoke, t)
+    }
+  } else {
+    for _, target := range pc.targets {
+      targetsToInvoke = append(targetsToInvoke, &target.InvocationSpec)
+    }
+  }
+  return targetsToInvoke
 }
 
 func (pc *PortClient) addTrackingHeaders(headers string) {
-  pc.resultsLock.Lock()
-  defer pc.resultsLock.Unlock()
   pieces := strings.Split(headers, ",")
-  for _, h := range pieces {
-    pc.trackingHeaders[strings.ToLower(h)] = 1
-  }
-}
-
-func (pc *PortClient) removeTrackingHeader(header string) {
-  pc.resultsLock.Lock()
-  defer pc.resultsLock.Unlock()
-  delete(pc.trackingHeaders, strings.ToLower(header))
-}
-
-func (pc *PortClient) clearTrackingHeaders() {
-  pc.resultsLock.Lock()
-  defer pc.resultsLock.Unlock()
-  pc.trackingHeaders = map[string]int{}
-}
-
-func (pc *PortClient) getTrackingHeaders() []string {
-  pc.resultsLock.RLock()
-  defer pc.resultsLock.RUnlock()
-  headers := []string{}
-  for h := range pc.trackingHeaders {
-    headers = append(headers, h)
-  }
-  return headers
-}
-
-func (pc *PortClient) getResults() string {
-  pc.resultsLock.RLock()
-  defer pc.resultsLock.RUnlock()
-  return util.ToJSON(pc.targetResults)
-}
-
-func (pc *PortClient) getInvocationResults() string {
-  pc.resultsLock.RLock()
-  defer pc.resultsLock.RUnlock()
-  return util.ToJSON(pc.targetResultsByInvocation)
-}
-
-func (pc *PortClient) clearResults() {
   pc.targetsLock.Lock()
-  pc.invocationCounter = 0
-  pc.targetResults = &TargetResults{}
-  pc.targetResultsByInvocation = map[int]*TargetInvocationResults{}
-  pc.initTargetResults()
+  for _, h := range pieces {
+    pc.trackingHeaders = append(pc.trackingHeaders, strings.ToLower(h))
+  }
   pc.targetsLock.Unlock()
 }
 
-func storeInvocationResultsInRegistryLocker(key string, results interface{}) {
-  if global.UseLocker && global.RegistryURL != "" {
-    url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/" + global.PeerAddress + "/locker/store/" + key
-    if resp, err := http.Post(url, "application/json",
-      strings.NewReader(util.ToJSON(results))); err == nil {
-      defer resp.Body.Close()
-    }
-  }
-}
-
-func lockInovcationRegistryLocker(invocationIndex int) {
-  if global.UseLocker && global.RegistryURL != "" {
-    url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/" + global.PeerAddress + "/locker/lock/" + "client_" + strconv.Itoa(invocationIndex)
-    if resp, err := http.Post(url, "application/json", nil); err == nil {
-      defer resp.Body.Close()
-    }
-  }
-}
-
-func (pc *PortClient) isTargetResultsInitialized(index ...int) bool {
-  if pc.targetResults == nil || pc.targetResults.TargetInvocationCounts == nil {
-    return false
-  }
-  if pc.targetResultsByInvocation == nil || (len(index) > 0 && pc.targetResultsByInvocation[index[0]] == nil) {
-    return false
-  }
-  return true
-}
-
-func (pc *PortClient) initTargetResults(index ...int) {
-  if !pc.isTargetResultsInitialized() {
-    pc.targetResults = &TargetResults{}
-    InitResults(pc.targetResults)
-  }
-  if !pc.isTargetResultsInitialized(index...) {
-    if pc.targetResultsByInvocation == nil {
-      pc.targetResultsByInvocation = map[int]*TargetInvocationResults{}
-    }
-    pc.targetResultsByInvocation[index[0]] = &TargetInvocationResults{}
-    InitResults(&pc.targetResultsByInvocation[index[0]].TargetResults)
-  }
-}
-
-func AddDeltaResults(results, delta *TargetResults) {
-  for k, v := range delta.TargetInvocationCounts {
-    results.TargetInvocationCounts[k] += v
-  }
-  for k, v := range delta.CountsByStatus {
-    results.CountsByStatus[k] += v
-  }
-  for k, v := range delta.CountsByStatusCodes {
-    results.CountsByStatusCodes[k] += v
-  }
-  for k, v := range delta.CountsByHeaders {
-    results.CountsByHeaders[k] += v
-  }
-  for h, values := range delta.CountsByHeaderValues {
-    if results.CountsByHeaderValues[h] == nil {
-      results.CountsByHeaderValues[h] = map[string]int{}
-    }
-    for hv, v := range values {
-      results.CountsByHeaderValues[h][hv] += v
-    }
-  }
-  for target, statusCounts := range delta.CountsByTargetStatus {
-    if results.CountsByTargetStatus[target] == nil {
-      results.CountsByTargetStatus[target] = map[string]int{}
-    }
-    for k, v := range statusCounts {
-      results.CountsByTargetStatus[target][k] += v
-    }
-  }
-  for target, statusCounts := range delta.CountsByTargetStatusCodes {
-    if results.CountsByTargetStatusCodes[target] == nil {
-      results.CountsByTargetStatusCodes[target] = map[int]int{}
-    }
-    for k, v := range statusCounts {
-      results.CountsByTargetStatusCodes[target][k] += v
-    }
-  }
-  for target, headerCounts := range delta.CountsByTargetHeaders {
-    if results.CountsByTargetHeaders[target] == nil {
-      results.CountsByTargetHeaders[target] = map[string]int{}
-    }
-    for k, v := range headerCounts {
-      results.CountsByTargetHeaders[target][k] += v
-    }
-  }
-  for target, headerValueCounts := range delta.CountsByTargetHeaderValues {
-    if results.CountsByTargetHeaderValues[target] == nil {
-      results.CountsByTargetHeaderValues[target] = map[string]map[string]int{}
-    }
-    for h, valueCounts := range headerValueCounts {
-      if results.CountsByTargetHeaderValues[target][h] == nil {
-        results.CountsByTargetHeaderValues[target][h] = map[string]int{}
-      }
-      for k, v := range valueCounts {
-        results.CountsByTargetHeaderValues[target][h][k] += v
-      }
-    }
-  }
-}
-
-func (pc *PortClient) storeResults(result *invocation.InvocationResult, targetResults *TargetResults) {
-  if targetResults.CountsByTargetStatusCodes == nil {
-    //This shouldn't happen, but initialize anyway
-    InitResults(targetResults)
-  }
-  if targetResults.CountsByTargetStatusCodes[result.TargetName] == nil {
-    targetResults.CountsByTargetStatus[result.TargetName] = map[string]int{}
-    targetResults.CountsByTargetStatusCodes[result.TargetName] = map[int]int{}
-    targetResults.CountsByTargetHeaders[result.TargetName] = map[string]int{}
-    targetResults.CountsByTargetHeaderValues[result.TargetName] = map[string]map[string]int{}
-  }
-  targetResults.TargetInvocationCounts[result.TargetName]++
-  now := time.Now()
-  if targetResults.TargetFirstResponses[result.TargetName].IsZero() {
-    targetResults.TargetFirstResponses[result.TargetName] = now
-  }
-  targetResults.TargetLastResponses[result.TargetName] = now
-  targetResults.CountsByStatus[result.Status]++
-  targetResults.CountsByStatusCodes[result.StatusCode]++
-  targetResults.CountsByTargetStatus[result.TargetName][result.Status]++
-  targetResults.CountsByTargetStatusCodes[result.TargetName][result.StatusCode]++
-  trackingHeaders := pc.trackingHeaders
-  for h, values := range result.Headers {
-    h = strings.ToLower(h)
-    if _, present := trackingHeaders[h]; present {
-      targetResults.CountsByHeaders[h]++
-      targetResults.CountsByTargetHeaders[result.TargetName][h]++
-      if targetResults.CountsByHeaderValues[h] == nil {
-        targetResults.CountsByHeaderValues[h] = map[string]int{}
-      }
-      if targetResults.CountsByTargetHeaderValues[result.TargetName][h] == nil {
-        targetResults.CountsByTargetHeaderValues[result.TargetName][h] = map[string]int{}
-      }
-      for _, v := range values {
-        targetResults.CountsByHeaderValues[h][v]++
-        targetResults.CountsByTargetHeaderValues[result.TargetName][h][v]++
-      }
-    }
-  }
-}
-
-func (pc *PortClient) checkRetentionLimit() {
-  for len(pc.targetResultsByInvocation) >= InvocationResultsRetention {
-    oldest := math.MaxInt32
-    for i := range pc.targetResultsByInvocation {
-      if i < oldest {
-        oldest = i
-      }
-    }
-    delete(pc.targetResultsByInvocation, oldest)
-  }
-}
-
-func (pc *PortClient) storeTargetResult(invocationIndex int, result *invocation.InvocationResult) {
+func (pc *PortClient) removeTrackingHeader(header string) {
   pc.targetsLock.Lock()
-  defer pc.targetsLock.Unlock()
-  pc.initTargetResults(invocationIndex)
-  pc.storeResults(result, pc.targetResults)
-  if pc.targetResultsByInvocation[invocationIndex] == nil {
-    //This shouldn't happen
-    pc.targetResultsByInvocation[invocationIndex] = &TargetInvocationResults{}
-    InitResults(&pc.targetResultsByInvocation[invocationIndex].TargetResults)
+  for i, h := range pc.trackingHeaders {
+    if strings.EqualFold(header, h) {
+      pc.trackingHeaders = append(pc.trackingHeaders[:i], pc.trackingHeaders[i+1:]...)
+    }
   }
-  pc.storeResults(result, &pc.targetResultsByInvocation[invocationIndex].TargetResults)
-  storeInvocationResultsInRegistryLocker("client", pc.targetResults)
-  storeInvocationResultsInRegistryLocker("client_"+strconv.Itoa(invocationIndex), pc.targetResultsByInvocation[invocationIndex])
+  pc.targetsLock.Unlock()
 }
 
-func (pc *PortClient) removeResultsForTargets(targets []string) {
+func (pc *PortClient) clearTrackingHeaders() {
   pc.targetsLock.Lock()
-  defer pc.targetsLock.Unlock()
-  for _, target := range targets {
-    delete(pc.targetResults.TargetInvocationCounts, target)
-    statuses := pc.targetResults.CountsByTargetStatus[target]
-    if statuses != nil {
-      for k, v := range statuses {
-        pc.targetResults.CountsByStatus[k] -= v
-        if pc.targetResults.CountsByStatus[k] == 0 {
-          delete(pc.targetResults.CountsByStatus, k)
-        }
-      }
-      delete(pc.targetResults.CountsByTargetStatus, target)
-    }
-
-    codes := pc.targetResults.CountsByTargetStatusCodes[target]
-    if codes != nil {
-      for k, v := range codes {
-        pc.targetResults.CountsByStatusCodes[k] -= v
-        if pc.targetResults.CountsByStatusCodes[k] == 0 {
-          delete(pc.targetResults.CountsByStatusCodes, k)
-        }
-      }
-      delete(pc.targetResults.CountsByTargetStatusCodes, target)
-    }
-
-    headers := pc.targetResults.CountsByTargetHeaders[target]
-    if headers != nil {
-      for k, v := range headers {
-        pc.targetResults.CountsByHeaders[k] -= v
-        if pc.targetResults.CountsByHeaders[k] == 0 {
-          delete(pc.targetResults.CountsByHeaders, k)
-        }
-      }
-      delete(pc.targetResults.CountsByTargetHeaders, target)
-    }
-
-    headerValues := pc.targetResults.CountsByTargetHeaderValues[target]
-    if headerValues != nil {
-      for h, values := range headerValues {
-        if values != nil {
-          for k, v := range values {
-            pc.targetResults.CountsByHeaderValues[h][k] -= v
-            if pc.targetResults.CountsByHeaderValues[h][k] == 0 {
-              delete(pc.targetResults.CountsByHeaderValues[h], k)
-            }
-          }
-        }
-        if len(pc.targetResults.CountsByHeaderValues[h]) == 0 {
-          delete(pc.targetResults.CountsByHeaderValues, h)
-        }
-      }
-      delete(pc.targetResults.CountsByTargetHeaderValues, target)
-    }
-  }
+  pc.trackingHeaders = []string{}
+  pc.targetsLock.Unlock()
 }
 
-func (pc *PortClient) stopTarget(target *Target) {
-  for _, tracker := range pc.activeInvocations {
-    done := false
-    select {
-    case done = <-tracker.DoneChannel:
-    default:
-    }
-    if !done {
-      for _, status := range tracker.Status {
-        if status.Target.Name == target.Name {
-          if !status.StopRequested && !status.Stopped {
-            tracker.StopChannel <- target.Name
-          }
-        }
-      }
-    }
+func (pc *PortClient) getTrackingHeaders() []string {
+  headers := []string{}
+  pc.targetsLock.RLock()
+  for _, h := range pc.trackingHeaders {
+    headers = append(headers, h)
   }
+  pc.targetsLock.RUnlock()
+  return headers
 }
 
-func (pc *PortClient) stopTargets(targetNames []string) bool {
-  pc.targetsLock.Lock()
-  defer pc.targetsLock.Unlock()
-  stopped := false
+func (pc *PortClient) stopTargets(targetNames []string) (bool, bool) {
+  pc.targetsLock.RLock()
+  defer pc.targetsLock.RUnlock()
+  stoppingTargets := []string{}
   if len(targetNames) > 0 {
     for _, tname := range targetNames {
       if len(tname) > 0 {
         if target, found := pc.targets[tname]; found {
-          go pc.stopTarget(target)
-          stopped = true
+          go invocation.StopTarget(target.Name)
+          stoppingTargets = append(stoppingTargets, target.Name)
         }
       }
     }
   } else {
     if len(pc.targets) > 0 {
       for _, target := range pc.targets {
-        go pc.stopTarget(target)
-        stopped = true
+        go invocation.StopTarget(target.Name)
+        stoppingTargets = append(stoppingTargets, target.Name)
       }
     }
   }
-  return stopped
+  stopped := len(stoppingTargets) == 0
+  if !stopped {
+    for i := 0; i < 5; i++ {
+      if !invocation.IsAnyTargetActive(stoppingTargets) {
+        stopped = true
+        break
+      }
+      time.Sleep(time.Second*1)
+    }
+  }
+  return len(stoppingTargets) > 0, stopped
 }
 
 func GetClientForPort(port string) *PortClient {
@@ -574,7 +252,7 @@ func addTarget(w http.ResponseWriter, r *http.Request) {
       w.WriteHeader(http.StatusBadRequest)
       msg = fmt.Sprintf("Invalid target spec: %s", err.Error())
     } else {
-      w.WriteHeader(http.StatusOK)
+      w.WriteHeader(http.StatusAccepted)
       msg = fmt.Sprintf("Added target: %s", util.ToJSON(t))
     }
   } else {
@@ -589,7 +267,7 @@ func removeTargets(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if targets, present := util.GetListParam(r, "targets"); present {
     if getPortClient(r).removeTargets(targets) {
-      w.WriteHeader(http.StatusOK)
+      w.WriteHeader(http.StatusAccepted)
       msg = fmt.Sprintf("Targets Removed: %+v", targets)
     } else {
       w.WriteHeader(http.StatusNotAcceptable)
@@ -606,7 +284,7 @@ func removeTargets(w http.ResponseWriter, r *http.Request) {
 func clearTargets(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if getPortClient(r).init() {
-    w.WriteHeader(http.StatusOK)
+    w.WriteHeader(http.StatusAccepted)
     msg = "Targets cleared"
   } else {
     w.WriteHeader(http.StatusNotAcceptable)
@@ -617,31 +295,9 @@ func clearTargets(w http.ResponseWriter, r *http.Request) {
 }
 
 func getTargets(w http.ResponseWriter, r *http.Request) {
+  w.WriteHeader(http.StatusAlreadyReported)
   util.WriteJsonPayload(w, getPortClient(r).targets)
   util.AddLogMessage("Reporting targets", r)
-}
-
-func setOrGetBlocking(w http.ResponseWriter, r *http.Request) {
-  msg := ""
-  pc := getPortClient(r)
-  if flag, present := util.GetStringParam(r, "flag"); present {
-    pc.setReportResponse(util.IsYes(flag))
-    w.WriteHeader(http.StatusAccepted)
-    if pc.blockForResponse {
-      msg = "Invocation will block for results"
-    } else {
-      msg = "Invocation will not block for results"
-    }
-  } else {
-    w.WriteHeader(http.StatusOK)
-    if pc.blockForResponse {
-      msg = "Invocation will block for results"
-    } else {
-      msg = "Invocation will not block for results"
-    }
-  }
-  util.AddLogMessage(msg, r)
-  fmt.Fprintln(w, msg)
 }
 
 func addTrackingHeaders(w http.ResponseWriter, r *http.Request) {
@@ -681,50 +337,57 @@ func clearTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 }
 
 func getTrackingHeaders(w http.ResponseWriter, r *http.Request) {
-  w.WriteHeader(http.StatusOK)
+  w.WriteHeader(http.StatusAlreadyReported)
   msg := fmt.Sprintf("Tracking headers: %s", strings.Join(getPortClient(r).getTrackingHeaders(), ","))
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
 
 func getInvocationResults(w http.ResponseWriter, r *http.Request) {
-  output := getPortClient(r).getInvocationResults()
   w.WriteHeader(http.StatusAlreadyReported)
-  fmt.Fprintln(w, output)
+  fmt.Fprintln(w, results.GetInvocationResultsJSON())
   util.AddLogMessage("Reporting results", r)
 }
 
 func getResults(w http.ResponseWriter, r *http.Request) {
-  output := getPortClient(r).getResults()
   w.WriteHeader(http.StatusAlreadyReported)
-  fmt.Fprintln(w, output)
+  fmt.Fprintln(w, results.GetTargetsResultsJSON())
   util.AddLogMessage("Reporting results", r)
 }
 
 func getActiveTargets(w http.ResponseWriter, r *http.Request) {
+  util.AddLogMessage("Reporting active invocations", r)
+  w.WriteHeader(http.StatusAlreadyReported)
+  result := map[string]interface{}{}
   pc := getPortClient(r)
   pc.targetsLock.RLock()
-  defer pc.targetsLock.RUnlock()
-  results := map[int]map[string]*invocation.InvocationStatus{}
-  for _, tracker := range pc.activeInvocations {
-    results[tracker.ID] = tracker.Status
-  }
-  util.WriteJsonPayload(w, results)
-  w.WriteHeader(http.StatusAlreadyReported)
-  util.AddLogMessage("Reporting active invocations", r)
+  result["activeCount"] = pc.activeTargetsCount
+  pc.targetsLock.RUnlock()
+  result["activeInvocations"] = invocation.GetActiveInvocations()
+  util.WriteJsonPayload(w, result)
 }
 
 func clearResults(w http.ResponseWriter, r *http.Request) {
-  msg := ""
-  if targets, present := util.GetListParam(r, "targets"); present {
-    getPortClient(r).removeResultsForTargets(targets)
-    w.WriteHeader(http.StatusOK)
-    msg = fmt.Sprintf("Results cleared for targets: %+v", targets)
-  } else {
-    getPortClient(r).clearResults()
-    w.WriteHeader(http.StatusOK)
-    msg = "Results cleared"
-  }
+  results.ClearResults()
+  w.WriteHeader(http.StatusAccepted)
+  msg := "Results cleared"
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
+}
+
+func enableAllTargetsResultsCollection(w http.ResponseWriter, r *http.Request) {
+  enable := util.GetStringParamValue(r, "enable")
+  results.EnableAllTargetResults(util.IsYes(enable))
+  w.WriteHeader(http.StatusAccepted)
+  msg := "Changed all targets summary results collection"
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
+}
+
+func enableInvocationResultsCollection(w http.ResponseWriter, r *http.Request) {
+  results.EnableInvocationResults(util.IsYes(util.GetStringParamValue(r, "enable")))
+  w.WriteHeader(http.StatusAccepted)
+  msg := "Changed invocation results collection"
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
@@ -733,10 +396,15 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
   msg := ""
   pc := getPortClient(r)
   targets, _ := util.GetListParam(r, "targets")
-  stopped := pc.stopTargets(targets)
-  if stopped {
-    w.WriteHeader(http.StatusOK)
-    msg = fmt.Sprintf("Targets %+v stopped", targets)
+  hasActive, stopped := pc.stopTargets(targets)
+  if hasActive {
+    if stopped {
+      w.WriteHeader(http.StatusAccepted)
+      msg = fmt.Sprintf("Targets %+v stopped", targets)
+    } else {
+      w.WriteHeader(http.StatusNotAcceptable)
+      msg = fmt.Sprintf("Failed to stop targets %+v", targets)
+    }
   } else {
     w.WriteHeader(http.StatusOK)
     msg = "No targets to stop"
@@ -745,77 +413,29 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
-func invokeTargetsAndStoreResults(pc *PortClient, targets []*invocation.InvocationSpec, ic *invocation.InvocationTracker) []*invocation.InvocationResult {
+func (pc *PortClient) invokeTarget(target *invocation.InvocationSpec) {
+  tracker := invocation.RegisterInvocation(target, results.ResultChannelSinkFactory(target, pc.trackingHeaders))
   pc.targetsLock.Lock()
-  pc.initTargetResults(ic.ID)
+  pc.activeTargetsCount++
   pc.targetsLock.Unlock()
-  results := []*invocation.InvocationResult{}
-  c := make(chan bool)
-  go func() {
-    results = invocation.InvokeTargets(targets, ic, pc.blockForResponse)
-    c <- true
-  }()
-  done := false
-  var lastResult interface{} = nil
-Results:
-  for {
-    select {
-    case done = <-ic.DoneChannel:
-      break Results
-    case result := <-ic.ResultChannel:
-      if result != nil {
-        lastResult = result
-        pc.storeTargetResult(ic.ID, result)
-      }
-    }
-  }
-  <-c
-  if done {
-  MoreResults:
-    for {
-      select {
-      case result := <-ic.ResultChannel:
-        if result != nil {
-          lastResult = result
-          pc.storeTargetResult(ic.ID, result)
-        }
-      default:
-        break MoreResults
-      }
-    }
-  }
-  if lastResult != nil {
-    pc.targetResultsByInvocation[ic.ID].Finished = true
-  }
-  lockInovcationRegistryLocker(ic.ID)
-  delete(pc.activeInvocations, ic.ID)
-  invocation.DeregisterInvocation(ic)
-  return results
+  invocation.StartInvocation(tracker)
+  pc.targetsLock.Lock()
+  pc.activeTargetsCount--
+  pc.targetsLock.Unlock()
 }
 
 func invokeTargets(w http.ResponseWriter, r *http.Request) {
   pc := getPortClient(r)
   targetsToInvoke := pc.getTargetsToInvoke(r)
   if len(targetsToInvoke) > 0 {
-    pc.targetsLock.Lock()
-    pc.invocationCounter++
-    ic := invocation.RegisterInvocation(pc.invocationCounter)
-    pc.activeInvocations[ic.ID] = ic
-    pc.targetsLock.Unlock()
-    var results []*invocation.InvocationResult
-    if pc.blockForResponse {
-      results = invokeTargetsAndStoreResults(pc, targetsToInvoke, ic)
-      w.WriteHeader(http.StatusAlreadyReported)
-      fmt.Fprintln(w, util.ToJSON(results))
-      util.AddLogMessage("Targets invoked", r)
-    } else {
-      go invokeTargetsAndStoreResults(pc, targetsToInvoke, ic)
-      w.WriteHeader(http.StatusOK)
-      fmt.Fprintln(w, "Targets invoked")
-      util.AddLogMessage("Targets invoked", r)
+    for _, target := range targetsToInvoke {
+      go pc.invokeTarget(target)
     }
+    w.WriteHeader(http.StatusAccepted)
+    fmt.Fprintln(w, "Targets invoked")
+    util.AddLogMessage("Targets invoked", r)
   } else {
-    w.WriteHeader(http.StatusOK)
+    w.WriteHeader(http.StatusNotAcceptable)
     fmt.Fprintln(w, "No targets to invoke")
     util.AddLogMessage("No targets to invoke", r)
   }
