@@ -18,7 +18,7 @@ type TargetResults struct {
   InvocationCounts     int                       `json:"invocationCounts"`
   FirstResponse        time.Time                 `json:"firstResponses"`
   LastResponse         time.Time                 `json:"lastResponses"`
-  CountsByStatus       map[string]int            `json:"couuntsByStatus"`
+  CountsByStatus       map[string]int            `json:"countsByStatus"`
   CountsByStatusCodes  map[int]int               `json:"countsByStatusCodes"`
   CountsByHeaders      map[string]int            `json:"countsByHeaders"`
   CountsByHeaderValues map[string]map[string]int `json:"countsByHeaderValues"`
