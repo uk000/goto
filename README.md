@@ -1754,8 +1754,8 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET       | /registry/peers/{peer}/{address}/locker | Get locker's data for the peer instance |
 | GET       | /registry/peers/{peer}/locker | Get locker's data for all instances of the peer |
 | GET       | /registry/peers/lockers | Get locker's data for all peers |
-| GET       | /registry/peers/lockers/targets/results | Get client target invocation results for all peers, aggregated from all instances of a peer |
-| GET       | /registry/peers/lockers/targets/countsByStatus | Get client target counts by status for all peers, aggregated from all instances of a peer |
+| GET       | /registry/peers/lockers/targets/results | Get target invocation summary results for all peer instances |
+| GET       | /registry/peers/lockers/targets/results?detailed=Y | Get invocation results broken down by targets for all peer instances |
 | GET       | /registry/peers/targets | Get all registered targets for all peers |
 | POST      | /registry/peers/{peer}/targets/add | Add a target to be sent to a peer. See [Peer Target JSON Schema](#peer-target-json-schema) |
 | POST, PUT | /registry/peers/{peer}/targets/{targets}/remove | Remove given targets for a peer |
@@ -1901,7 +1901,7 @@ curl -X POST http://localhost:8080/registry/peers/peer1/jobs/invoke/all
 <summary>Example</summary>
 <p>
 
-```
+```json
 $ curl -s localhost:8080/registry/peers | jq
 {
   "peer1": {
@@ -1942,7 +1942,7 @@ $ curl -s localhost:8080/registry/peers | jq
 <p>
 
 ```
-$ curl -s localhost:8080/registry/peers/lockers | jq
+$ curl -s localhost:8080/registry/peers/lockers
 {
   "peer1": {
     "1.0.0.1:8081": {
@@ -2027,22 +2027,28 @@ $ curl -s localhost:8080/registry/peers/lockers | jq
 </details>
 
 
-#### Registry Locker Client Invocations Summary Results Example
+#### Targets Summary Results Example
 
 <details>
 <summary>Example</summary>
 <p>
 
 ```
-$ curl -s localhost:8080/registry/peers/lockers/targets/results | jq
+$ curl -s localhost:8080/registry/peers/lockers/targets/results
 {
   "peer1": {
     "targetInvocationCounts": {
-      "t11": 16,
-      "t12": 44
+      "t1": 16,
+      "t2": 44
     },
-    "targetFirstResponses": {},
-    "targetLastResponses": {},
+    "targetFirstResponses": {
+      "t1": "2020-06-20T08:00:33.056578-07:00",
+      "t2": "2020-06-20T08:00:48.126786-07:00"
+    },
+    "targetLastResponses": {
+      "t1": "2020-06-20T08:00:52.11908-07:00",
+      "t2": "2020-06-20T08:01:07.183041-07:00"
+    },
     "countsByStatus": {
       "200 OK": 60
     },
@@ -2052,36 +2058,40 @@ $ curl -s localhost:8080/registry/peers/lockers/targets/results | jq
     "countsByHeaders": {},
     "countsByHeaderValues": {},
     "countsByTargetStatus": {
-      "t11": {
+      "t1": {
         "200 OK": 16
       },
-      "t12": {
+      "t2": {
         "200 OK": 44
       }
     },
     "countsByTargetStatusCode": {
-      "t11": {
+      "t1": {
         "200": 16
       },
-      "t12": {
+      "t2": {
         "200": 44
       }
     },
     "countsByTargetHeaders": {
-      "t11": {},
-      "t12": {}
+      "t1": {},
+      "t2": {}
     },
     "countsByTargetHeaderValues": {
-      "t11": {},
-      "t12": {}
+      "t1": {},
+      "t2": {}
     }
   },
   "peer2": {
     "targetInvocationCounts": {
-      "t22": 160
+      "t2": 160
     },
-    "targetFirstResponses": {},
-    "targetLastResponses": {},
+    "targetFirstResponses": {
+     "t2": "2020-06-20T08:00:48.126786-07:00"
+    },
+    "targetLastResponses": {
+      "t2": "2020-06-20T08:01:07.183041-07:00"
+    },
     "countsByStatus": {
       "200 OK": 160
     },
@@ -2091,23 +2101,109 @@ $ curl -s localhost:8080/registry/peers/lockers/targets/results | jq
     "countsByHeaders": {},
     "countsByHeaderValues": {},
     "countsByTargetStatus": {
-      "t22": {
+      "t2": {
         "200 OK": 160
       }
     },
     "countsByTargetStatusCode": {
-      "t22": {
+      "t2": {
         "200": 160
       }
     },
     "countsByTargetHeaders": {
-      "t22": {}
+      "t2": {}
     },
     "countsByTargetHeaderValues": {
-      "t22": {}
+      "t2": {}
     }
   }
 }
 ```
 </p>
 </details>
+
+
+#### Targets Detailed Results Example
+<details>
+<summary>Example</summary>
+<p>
+
+```json
+{
+  "peer1": {
+    "t1": {
+      "target": "t1",
+      "invocationCounts": 40,
+      "firstResponses": "2020-06-23T08:30:29.719768-07:00",
+      "lastResponses": "2020-06-23T08:30:48.780715-07:00",
+      "couuntsByStatus": {
+        "200 OK": 40
+      },
+      "countsByStatusCodes": {
+        "200": 40
+      },
+      "countsByHeaders": {},
+      "countsByHeaderValues": {},
+      "countsByURIs": {
+        "/echo": 40
+      }
+    },
+    "t2-2": {
+      "target": "t2",
+      "invocationCounts": 31,
+      "firstResponses": "2020-06-23T08:30:44.816036-07:00",
+      "lastResponses": "2020-06-23T08:30:59.868265-07:00",
+      "couuntsByStatus": {
+        "200 OK": 31
+      },
+      "countsByStatusCodes": {
+        "200": 31
+      },
+      "countsByHeaders": {},
+      "countsByHeaderValues": {},
+      "countsByURIs": {
+        "/echo": 31
+      }
+    }
+  },
+  "peer2": {
+    "t1": {
+      "target": "t1",
+      "invocationCounts": 40,
+      "firstResponses": "2020-06-23T08:30:29.719768-07:00",
+      "lastResponses": "2020-06-23T08:30:48.780715-07:00",
+      "couuntsByStatus": {
+        "200 OK": 40
+      },
+      "countsByStatusCodes": {
+        "200": 40
+      },
+      "countsByHeaders": {},
+      "countsByHeaderValues": {},
+      "countsByURIs": {
+        "/echo": 40
+      }
+    },
+    "t2-2": {
+      "target": "t2",
+      "invocationCounts": 31,
+      "firstResponses": "2020-06-23T08:30:44.816036-07:00",
+      "lastResponses": "2020-06-23T08:30:59.868265-07:00",
+      "couuntsByStatus": {
+        "200 OK": 31
+      },
+      "countsByStatusCodes": {
+        "200": 31
+      },
+      "countsByHeaders": {},
+      "countsByHeaderValues": {},
+      "countsByURIs": {
+        "/echo": 31
+      }
+    }
+  }
+}
+```
+</p>
+</details>
+

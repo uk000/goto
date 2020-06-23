@@ -3,9 +3,9 @@ package registry
 import (
 	"errors"
 	"fmt"
-	"goto/pkg/constants"
 	"goto/pkg/http/client/results"
 	"goto/pkg/http/invocation"
+	"goto/pkg/http/registry/locker"
 	"goto/pkg/job"
 	"goto/pkg/util"
 	"log"
@@ -50,29 +50,12 @@ type PeerJob struct {
 
 type PeerJobs map[string]*PeerJob
 
-type LockerData struct {
-  Data          string                 `json:"data"`
-  SubKeys       map[string]*LockerData `json:"subKeys"`
-  FirstReported time.Time              `json:"firstReported"`
-  LastReported  time.Time              `json:"lastReported"`
-  Locked        bool                   `json:"locked"`
-}
-
-type InstanceLocker struct {
-  Locker map[string]*LockerData `json:"locker"`
-  lock   sync.RWMutex
-}
-
-type PeerLocker struct {
-  Locker map[string]*InstanceLocker `json:"locker"`
-  lock   sync.RWMutex
-}
 
 type PortRegistry struct {
   peers       map[string]*Peers
   peerTargets map[string]PeerTargets
   peerJobs    map[string]PeerJobs
-  peerLocker  map[string]*PeerLocker
+  peerLocker  *locker.PeersLockers
   peersLock   sync.RWMutex
   lockersLock sync.RWMutex
 }
@@ -102,8 +85,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "/{peer}/{address}/locker", getPeerLocker, "GET")
   util.AddRoute(peersRouter, "/{peer}/locker", getPeerLocker, "GET")
   util.AddRoute(peersRouter, "/lockers", getPeerLocker, "GET")
-  util.AddRoute(peersRouter, "/lockers/targets/results", getLockerTargetResultsSummary, "GET")
-  util.AddRoute(peersRouter, "/lockers/targets/countsByStatus", getLockerTargetCountsByStatus, "GET")
+  util.AddRouteQ(peersRouter, "/lockers/targets/results", getTargetsSummaryResults, "detailed", "{detailed}", "GET")
+  util.AddRoute(peersRouter, "/lockers/targets/results", getTargetsSummaryResults, "GET")
 
   util.AddRoute(peersRouter, "/{peer}/targets/add", addPeerTarget, "POST")
   util.AddRoute(peersRouter, "/targets/add", addPeerTarget, "POST")
@@ -152,6 +135,10 @@ func getPortRegistry(r *http.Request) *PortRegistry {
   return pr
 }
 
+func getPortRegistryLocker(r *http.Request) *locker.PeersLockers {
+  return getPortRegistry(r).peerLocker
+}
+
 func (pr *PortRegistry) reset() {
   pr.peersLock.Lock()
   pr.peers = map[string]*Peers{}
@@ -159,7 +146,7 @@ func (pr *PortRegistry) reset() {
   pr.peerJobs = map[string]PeerJobs{}
   pr.peersLock.Unlock()
   pr.lockersLock.Lock()
-  pr.peerLocker = map[string]*PeerLocker{}
+  pr.peerLocker = locker.NewPeersLocker()
   pr.lockersLock.Unlock()
 }
 
@@ -187,11 +174,7 @@ func (pr *PortRegistry) addPeer(peer *Peer) {
   if pr.peerJobs[peer.Name] == nil {
     pr.peerJobs[peer.Name] = PeerJobs{}
   }
-  pr.lockersLock.Lock()
-  if pr.peerLocker[peer.Name] == nil {
-    pr.peerLocker[peer.Name] = &PeerLocker{Locker: map[string]*InstanceLocker{}}
-  }
-  pr.lockersLock.Unlock()
+  pr.peerLocker.InitPeerLocker(peer.Name)
 }
 
 func (pr *PortRegistry) removePeer(name string, address string) bool {
@@ -204,6 +187,7 @@ func (pr *PortRegistry) removePeer(name string, address string) bool {
       delete(pr.peers, name)
     }
   }
+  pr.peerLocker.RemovePeerLocker(name)
   return present
 }
 
@@ -371,138 +355,18 @@ func (pr *PortRegistry) cleanupUnhealthyPeers(peerName string) map[string]map[st
     })
 }
 
-func (pr *PortRegistry) getInstanceLocker(peerName string, peerAddress string) *InstanceLocker {
-  pr.lockersLock.Lock()
-  peerLocker := pr.peerLocker[peerName]
-  if peerLocker == nil {
-    peerLocker = &PeerLocker{Locker: map[string]*InstanceLocker{}}
-    pr.peerLocker[peerName] = peerLocker
-  }
-  pr.lockersLock.Unlock()
-
-  peerLocker.lock.Lock()
-  instanceLocker := peerLocker.Locker[peerAddress]
-  if instanceLocker == nil {
-    instanceLocker = &InstanceLocker{Locker: map[string]*LockerData{}}
-    peerLocker.Locker[peerAddress] = instanceLocker
-  }
-  peerLocker.lock.Unlock()
-
-  return instanceLocker
-}
-
-func (pr *PortRegistry) storeInPeerLocker(peerName string, peerAddress string, keys []string, value string) {
-  if len(keys) == 0 {
-    return
-  }
-  instanceLocker := pr.getInstanceLocker(peerName, peerAddress)
-  instanceLocker.lock.Lock()
-  defer instanceLocker.lock.Unlock()
-  rootKey := keys[0]
-  lockerData := instanceLocker.Locker[rootKey]
-  now := time.Now()
-  if lockerData != nil && lockerData.Locked {
-    instanceLocker.Locker[rootKey+"_last"] = lockerData
-    instanceLocker.Locker[rootKey] = nil
-  }
-  lockerData = instanceLocker.Locker[rootKey]
-  if lockerData == nil {
-    lockerData = &LockerData{SubKeys: map[string]*LockerData{}, FirstReported: now}
-    instanceLocker.Locker[rootKey] = lockerData
-  }
-  for i := 1; i < len(keys); i++ {
-    if lockerData.SubKeys[keys[i]] == nil {
-      lockerData.SubKeys[keys[i]] = &LockerData{SubKeys: map[string]*LockerData{}, FirstReported: now}
-    }
-    lockerData = lockerData.SubKeys[keys[i]]
-  }
-  lockerData.Data = value
-  lockerData.LastReported = now
-}
-
-func removeSubKey(lockerData *LockerData, keys []string, index int) {
-  if index >= len(keys) {
-    return
-  }
-  currentKey := keys[index]
-  if lockerData.SubKeys[currentKey] != nil {
-    nextLockerData := lockerData.SubKeys[currentKey]
-    removeSubKey(nextLockerData, keys, index+1)
-    if len(nextLockerData.SubKeys) == 0 {
-      delete(lockerData.SubKeys, currentKey)
-    }
-  }
-}
-
-func (pr *PortRegistry) removeFromPeerLocker(peerName string, peerAddress string, keys []string) {
-  instanceLocker := pr.getInstanceLocker(peerName, peerAddress)
-  instanceLocker.lock.Lock()
-  defer instanceLocker.lock.Unlock()
-  rootKey := keys[0]
-  lockerData := instanceLocker.Locker[rootKey]
-  if lockerData != nil {
-    removeSubKey(lockerData, keys, 1)
-    if len(lockerData.SubKeys) == 0 {
-      delete(instanceLocker.Locker, rootKey)
-    }
-  }
-}
-
-func (pr *PortRegistry) lockInPeerLocker(peerName string, peerAddress string, keys []string) {
-  instanceLocker := pr.getInstanceLocker(peerName, peerAddress)
-  instanceLocker.lock.Lock()
-  defer instanceLocker.lock.Unlock()
-  if instanceLocker.Locker[keys[0]] != nil {
-    lockerData := instanceLocker.Locker[keys[0]]
-    for i := 1; i < len(keys); i++ {
-      if lockerData.SubKeys[keys[i]] != nil {
-        lockerData = lockerData.SubKeys[keys[i]]
-      }
-    }
-    lockerData.Locked = true
-  }
-}
-
-func (pr *PortRegistry) clearInstanceLocker(peerName string, peerAddress string) bool {
-  pr.lockersLock.Lock()
-  peerLocker := pr.peerLocker[peerName]
-  pr.lockersLock.Unlock()
-  if peerLocker != nil {
-    peerLocker.lock.Lock()
-    instanceLocker := peerLocker.Locker[peerAddress]
-    peerLocker.lock.Unlock()
-    if instanceLocker != nil {
-      peerLocker.Locker[peerAddress] = &InstanceLocker{Locker: map[string]*LockerData{}}
-      return true
-    }
-  }
-  return false
-}
-
-func (pr *PortRegistry) clearPeerLocker(peerName string) bool {
-  if peerName != "" {
-    pr.lockersLock.Lock()
-    pr.peerLocker[peerName] = &PeerLocker{Locker: map[string]*InstanceLocker{}}
-    pr.lockersLock.Unlock()
-    return true
-  }
-  return false
-}
-
 func (pr *PortRegistry) clearLocker(peerName, peerAddress string) map[string]map[string]bool {
   peersToClear := map[string][]*Pod{}
   if peerName != "" && peerAddress != "" {
-    if pr.clearInstanceLocker(peerName, peerAddress) {
+    if pr.peerLocker.ClearInstanceLocker(peerName, peerAddress) {
       peersToClear = pr.loadPeerPods(peerName, peerAddress)
     }
   } else if peerName != "" && peerAddress == "" {
-    if pr.clearPeerLocker(peerName) {
+    if pr.peerLocker.InitPeerLocker(peerName) {
       peersToClear = pr.loadPeerPods(peerName, "")
     }
   } else {
-    pr.lockersLock.Lock()
-    pr.peerLocker = map[string]*PeerLocker{}
-    pr.lockersLock.Unlock()
+    pr.peerLocker.Init()
     peersToClear = pr.loadPeerPods("", "")
   }
   return invokeForPods(peersToClear, "POST", "/client/results/clear", "", http.StatusAccepted, 
@@ -514,76 +378,6 @@ func (pr *PortRegistry) clearLocker(peerName, peerAddress string) map[string]map
         log.Printf("Failed to clear results on peer %s address %s with error %s\n", peer, pod.Address, err.Error())
       }
     })
-}
-
-func (pr *PortRegistry) getPeerLocker(name, address string) interface{} {
-  if name == "" {
-    return pr.peerLocker
-  }
-  pr.lockersLock.RLock()
-  peerLocker := pr.peerLocker[name]
-  pr.lockersLock.RUnlock()
-  if address == "" {
-    return peerLocker
-  }
-  if peerLocker != nil {
-    peerLocker.lock.RLock()
-    instanceLocker := peerLocker.Locker[address]
-    peerLocker.lock.RUnlock()
-    return instanceLocker
-  }
-  return nil
-}
-
-func (pr *PortRegistry) getLockerClientResultsSummary() map[string]map[string]*results.TargetResults {
-  pr.lockersLock.RLock()
-  defer pr.lockersLock.RUnlock()
-  summary := map[string]map[string]*results.TargetResults{}
-  for peer, peerLocker := range pr.peerLocker {
-    summary[peer] = map[string]*results.TargetResults{}
-    peerLocker.lock.RLock()
-    for _, instanceLocker := range peerLocker.Locker {
-      instanceLocker.lock.RLock()
-      lockerData := instanceLocker.Locker[constants.LockerClientKey]
-      if lockerData != nil {
-        for target, targetData := range lockerData.SubKeys {
-          if strings.EqualFold(target, constants.LockerInvocationsKey) {
-            continue
-          }
-          if summary[peer][target] == nil {
-            summary[peer][target] = &results.TargetResults{Target: target}
-            summary[peer][target].Init()
-          }
-          if data := targetData.Data; data != "" {
-            result := &results.TargetResults{}
-            if err := util.ReadJson(data, result); err == nil {
-              results.AddDeltaResults(summary[peer][target], result)
-            }
-          }
-        }
-      }
-      instanceLocker.lock.RUnlock()
-    }
-    peerLocker.lock.RUnlock()
-  }
-  return summary
-}
-
-func (pr *PortRegistry) getLockerTargetCountsByStatus() map[string]map[string]map[int]int {
-  clientResultsSummary := pr.getLockerClientResultsSummary()
-  pr.lockersLock.RLock()
-  defer pr.lockersLock.RUnlock()
-  result := map[string]map[string]map[int]int{}
-  for peer, targetsResults := range clientResultsSummary {
-    result[peer] = map[string]map[int]int{}
-    for target, targetResult := range targetsResults {
-      result[peer][target] = map[int]int{}
-      for status, count := range targetResult.CountsByStatusCodes {
-        result[peer][target][status] = count
-      }
-    }
-  }
-  return result
 }
 
 func (pr *PortRegistry) addPeerTarget(peerName string, target *PeerTarget) map[string]map[string]bool {
@@ -939,7 +733,7 @@ func storeInPeerLocker(w http.ResponseWriter, r *http.Request) {
   keys, _ := util.GetListParam(r, "keys")
   if peerName != "" && address != "" && len(keys) > 0 {
     data := util.Read(r.Body)
-    getPortRegistry(r).storeInPeerLocker(peerName, address, keys, data)
+    getPortRegistryLocker(r).Store(peerName, address, keys, data)
     w.WriteHeader(http.StatusAccepted)
     msg = fmt.Sprintf("Peer %s data stored for keys %+v", peerName, keys)
   } else {
@@ -956,7 +750,7 @@ func removeFromPeerLocker(w http.ResponseWriter, r *http.Request) {
   address := util.GetStringParamValue(r, "address")
   keys, _ := util.GetListParam(r, "keys")
   if peerName != "" && address != "" && len(keys) > 0 {
-    getPortRegistry(r).removeFromPeerLocker(peerName, address, keys)
+    getPortRegistryLocker(r).Remove(peerName, address, keys)
     w.WriteHeader(http.StatusAccepted)
     msg = fmt.Sprintf("Peer %s data removed for keys %+v", peerName, keys)
   } else {
@@ -973,7 +767,7 @@ func lockInPeerLocker(w http.ResponseWriter, r *http.Request) {
   address := util.GetStringParamValue(r, "address")
   keys, _ := util.GetListParam(r, "keys")
   if peerName != "" && address != "" && len(keys) > 0 {
-    getPortRegistry(r).lockInPeerLocker(peerName, address, keys)
+    getPortRegistryLocker(r).LockKeys(peerName, address, keys)
     w.WriteHeader(http.StatusAccepted)
     msg = fmt.Sprintf("Peer %s data for keys %+v is locked", peerName, keys)
   } else {
@@ -1008,7 +802,7 @@ func getPeerLocker(w http.ResponseWriter, r *http.Request) {
   peerName := util.GetStringParamValue(r, "peer")
   address := util.GetStringParamValue(r, "address")
   w.WriteHeader(http.StatusOK)
-  util.WriteJsonPayload(w, getPortRegistry(r).getPeerLocker(peerName, address))
+  util.WriteJsonPayload(w, getPortRegistryLocker(r).GetPeerLocker(peerName, address))
   if peerName != "" {
     msg = fmt.Sprintf("Peer %s data reported", peerName)
   } else {
@@ -1017,15 +811,16 @@ func getPeerLocker(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage(msg, r)
 }
 
-func getLockerTargetResultsSummary(w http.ResponseWriter, r *http.Request) {
-  w.WriteHeader(http.StatusOK)
-  util.WriteJsonPayload(w, getPortRegistry(r).getLockerClientResultsSummary())
-  util.AddLogMessage("Reported locker targets results summary", r)
-}
-
-func getLockerTargetCountsByStatus(w http.ResponseWriter, r *http.Request) {
-  w.WriteHeader(http.StatusOK)
-  util.WriteJsonPayload(w, getPortRegistry(r).getLockerTargetCountsByStatus())
+func getTargetsSummaryResults(w http.ResponseWriter, r *http.Request) {
+  detailed := util.IsYes(util.GetStringParamValue(r, "detailed"))
+  var result interface{}
+  if detailed {
+    result = getPortRegistryLocker(r).GetTargetsResults()
+  } else {
+    result = getPortRegistryLocker(r).GetTargetsSummaryResults()
+  }
+  w.WriteHeader(http.StatusAlreadyReported)
+  util.WriteJsonPayload(w, result)
   util.AddLogMessage("Reported locker targets results summary", r)
 }
 

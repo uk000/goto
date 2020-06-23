@@ -26,6 +26,18 @@ type TargetResults struct {
   lock                 sync.RWMutex
 }
 
+type TargetsSummaryResults struct {
+  TargetInvocationCounts     map[string]int                       `json:"targetInvocationCounts"`
+  TargetFirstResponses       map[string]time.Time                 `json:"targetFirstResponses"`
+  TargetLastResponses        map[string]time.Time                 `json:"targetLastResponses"`
+  CountsByStatusCodes        map[int]int                          `json:"countsByStatusCodes"`
+  CountsByHeaders            map[string]int                       `json:"countsByHeaders"`
+  CountsByHeaderValues       map[string]map[string]int            `json:"countsByHeaderValues"`
+  CountsByTargetStatusCodes  map[string]map[int]int               `json:"countsByTargetStatusCodes"`
+  CountsByTargetHeaders      map[string]map[string]int            `json:"countsByTargetHeaders"`
+  CountsByTargetHeaderValues map[string]map[string]map[string]int `json:"countsByTargetHeaderValues"`
+}
+
 type TargetsResults struct {
   Results map[string]*TargetResults `json:"results"`
   lock    sync.RWMutex
@@ -281,6 +293,12 @@ func GetInvocationResultsJSON() string {
 }
 
 func AddDeltaResults(results, delta *TargetResults) {
+  if results.FirstResponse.IsZero() || results.FirstResponse.After(delta.FirstResponse) {
+    results.FirstResponse = delta.FirstResponse
+  }
+  if results.LastResponse.IsZero() || results.LastResponse.Before(delta.LastResponse) {
+    results.LastResponse = delta.LastResponse
+  }
   results.InvocationCounts += delta.InvocationCounts
   for k, v := range delta.CountsByStatus {
     results.CountsByStatus[k] += v
@@ -301,6 +319,57 @@ func AddDeltaResults(results, delta *TargetResults) {
   }
   for k, v := range delta.CountsByURIs {
     results.CountsByURIs[k] += v
+  }
+}
+
+func (tsr *TargetsSummaryResults) Init() {
+  tsr.TargetInvocationCounts = map[string]int{}
+  tsr.TargetFirstResponses = map[string]time.Time{}
+  tsr.TargetLastResponses = map[string]time.Time{}
+  tsr.CountsByStatusCodes = map[int]int{}
+  tsr.CountsByHeaders = map[string]int{}
+  tsr.CountsByHeaderValues = map[string]map[string]int{}
+  tsr.CountsByTargetStatusCodes = map[string]map[int]int{}
+  tsr.CountsByTargetHeaders = map[string]map[string]int{}
+  tsr.CountsByTargetHeaderValues = map[string]map[string]map[string]int{}
+}
+
+func (tsr *TargetsSummaryResults) AddTargetResult(tr *TargetResults) {
+  tsr.TargetInvocationCounts[tr.Target] += tr.InvocationCounts
+  if tsr.TargetFirstResponses[tr.Target].IsZero() || tsr.TargetFirstResponses[tr.Target].After(tr.FirstResponse) {
+    tsr.TargetFirstResponses[tr.Target] = tr.FirstResponse
+  }
+  if tsr.TargetLastResponses[tr.Target].IsZero() || tsr.TargetLastResponses[tr.Target].Before(tr.LastResponse) {
+    tsr.TargetLastResponses[tr.Target] = tr.LastResponse
+  }
+  if tsr.CountsByTargetStatusCodes[tr.Target] == nil {
+    tsr.CountsByTargetStatusCodes[tr.Target] = map[int]int{}
+  }
+  for k, v := range tr.CountsByStatusCodes {
+    tsr.CountsByStatusCodes[k] += v
+    tsr.CountsByTargetStatusCodes[tr.Target][k] += v
+  }
+  if tsr.CountsByTargetHeaders[tr.Target] == nil {
+    tsr.CountsByTargetHeaders[tr.Target] = map[string]int{}
+  }
+  for k, v := range tr.CountsByHeaders {
+    tsr.CountsByHeaders[k] += v
+    tsr.CountsByTargetHeaders[tr.Target][k] += v
+  }
+  if tsr.CountsByTargetHeaderValues[tr.Target] == nil {
+    tsr.CountsByTargetHeaderValues[tr.Target] = map[string]map[string]int{}
+  }
+  for h, values := range tr.CountsByHeaderValues {
+    if tsr.CountsByHeaderValues[h] == nil {
+      tsr.CountsByHeaderValues[h] = map[string]int{}
+    }
+    if tsr.CountsByTargetHeaderValues[tr.Target][h] == nil {
+      tsr.CountsByTargetHeaderValues[tr.Target][h] = map[string]int{}
+    }
+      for hv, v := range values {
+      tsr.CountsByHeaderValues[h][hv] += v
+      tsr.CountsByTargetHeaderValues[tr.Target][h][hv] += v
+    }
   }
 }
 
