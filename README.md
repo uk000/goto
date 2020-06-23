@@ -299,201 +299,146 @@ curl localhost:8080/client/results/invocations
 curl localhost:8080/client/results
 ```
 
-#### Sample Client Results (including error reporting example)
+#### Sample Client Results
 
 <details>
 <summary>Example</summary>
 <p>
 
 ```json
-
 {
-  "targetInvocationCounts": {
-    "target1": 40,
-    "target2": 20,
-    "target3": 600,
-    "target4": 300
-  },
-  "targetFirstResponses": {
-    "target1": "2020-06-09T17:54:42.966245-07:00",
-    "target2": "2020-06-09T17:54:42.966888-07:00",
-    "target3": "2020-06-09T17:54:45.027159-07:00",
-    "target4": "2020-06-09T17:54:51.330125-07:00"
-  },
-  "targetLastResponses": {
-    "target1": "2020-06-09T17:54:47.016191-07:00",
-    "target2": "2020-06-09T17:54:47.014026-07:00",
-    "target3": "2020-06-09T17:54:52.113565-07:00",
-    "target4": "2020-06-09T17:54:52.113164-07:00"
-  },
-  "countsByStatus": {
-    "200 OK": 880,
-    "403 Forbidden": 40,
-    "502 Bad Gateway": 20,
-    "503 Service Unavailable": 20
-  },
-  "countsByStatusCodes": {
-    "200": 880,
-    "403": 40,
-    "502": 20,
-    "503": 20
-  },
-  "countsByHeaders": {
-    "foo": 900,
-    "goto-host": 960,
-    "via-goto": 960,
-    "x": 660,
-    "y": 960
-  },
-  "countsByHeaderValues": {
-    "foo": {
-      "bar1": 600,
-      "bar2": 300
-    },
-    "goto-host": {
-      "1.1.1.1": 40
-      "2.2.2.2": 20
-      "3.3.3.3": 960
-    },
-    "via-goto": {
-      "Server8081": 40,
-      "Server8082": 20,
-      "Server8083": 900
-    },
-    "x": {
-      "x1": 640,
-      "x2": 20
-    },
-    "y": {
-      "x2": 300,
-      "y1": 640,
-      "y2": 20
-    }
-  },
-  "countsByTargetStatus": {
-    "target1": {
-      "200 OK": 20,
-      "502 Bad Gateway": 20
-    },
-    "target2": {
-      "503 Service Unavailable": 20
-    },
-    "target3": {
-      "200 OK": 570,
-      "403 Forbidden": 30
-    },
-    "target4": {
-      "200 OK": 290,
-      "403 Forbidden": 10
-    }
-  },
-  "countsByTargetStatusCodes": {
-    "target1": {
-      "200": 20,
-      "502": 20
-    },
-    "target2": {
-      "503": 20
-    },
-    "target3": {
-      "200": 570,
-      "403": 30
-    },
-    "target4": {
-      "200": 290,
-      "403": 10
-    }
-  },
-  "countsByTargetHeaders": {
-    "target1": {
-      "goto-host": 40,
-      "via-goto": 40,
-      "x": 40,
-      "y": 40
-    },
-    "target2": {
-      "goto-host": 20,
-      "via-goto": 20,
-      "x": 20,
-      "y": 20
-    },
-    "target3": {
-      "foo": 600,
-      "goto-host": 600,
-      "via-goto": 600,
-      "x": 600,
-      "y": 600
-    },
-    "target4": {
-      "foo": 300,
-      "goto-host": 300,
-      "via-goto": 300,
-      "y": 300
-    }
-  },
-  "countsByTargetHeaderValues": {
-    "target1": {
-      "goto-host": {
-        "1.1.1.1": 40
+  "peer1": {
+    "": {
+      "target": "",
+      "invocationCounts": 120,
+      "firstResponses": "2020-06-23T13:43:02.72879-07:00",
+      "lastResponses": "2020-06-23T13:43:16.817572-07:00",
+      "countsByStatus": {
+        "200 OK": 120
       },
-      "via-goto": {
-        "Server8081": 40
+      "countsByStatusCodes": {
+        "200": 120
       },
-      "x": {
-        "x1": 40
+      "countsByHeaders": {
+        "goto-host": 120,
+        "via-goto": 120,
+        "x": 30,
+        "y": 40
       },
-      "y": {
-        "y1": 40
+      "countsByHeaderValues": {
+        "goto-host": {
+          "1.0.0.1": 30,
+          "1.0.0.2": 30,
+          "1.0.0.3": 30,
+          "1.0.0.4": 30
+        },
+        "via-goto": {
+          "peer2": 30,
+          "peer3": 30,
+          "peer4": 30,
+          "peer5": 30
+        },
+        "x": {
+          "x1": 10,
+          "x2": 20
+        }
+      },
+      "countsByURIs": {
+        "/echo": 120
       }
     },
-    "target2": {
-      "goto-host": {
-        "2.2.2.2": 20
+    "peer1_to_peer2": {
+      "target": "peer1_to_peer2",
+      "invocationCounts": 30,
+      "firstResponses": "2020-06-23T13:43:02.772523-07:00",
+      "lastResponses": "2020-06-23T13:43:16.81756-07:00",
+      "countsByStatus": {
+        "200 OK": 30
       },
-      "via-goto": {
-        "Server8082": 20
+      "countsByStatusCodes": {
+        "200": 30
       },
-      "x": {
-        "x2": 20
+      "countsByHeaders": {
+        "goto-host": 30,
+        "via-goto": 30
       },
-      "y": {
-        "y2": 20
+      "countsByHeaderValues": {
+        "goto-host": {
+          "1.0.0.2": 30
+        },
+        "via-goto": {
+          "peer2": 30
+        }
+      },
+      "countsByURIs": {
+        "/echo": 30
       }
     },
-    "target3": {
-      "foo": {
-        "bar1": 600
+    "peer1_to_peer3": {
+      "target": "peer1_to_peer3",
+      "invocationCounts": 30,
+      "firstResponses": "2020-06-23T13:43:02.728872-07:00",
+      "lastResponses": "2020-06-23T13:43:16.777478-07:00",
+      "countsByStatus": {
+        "200 OK": 30
       },
-      "goto-host": {
-        "3.3.3.3": 600
+      "countsByStatusCodes": {
+        "200": 30
       },
-      "via-goto": {
-        "Server8083": 600
+      "countsByHeaders": {
+        "goto-host": 30,
+        "via-goto": 30
       },
-      "x": {
-        "x1": 600
+      "countsByHeaderValues": {
+        "goto-host": {
+          "1.0.0.3": 30
+        },
+        "via-goto": {
+          "peer3": 30
+        }
       },
-      "y": {
-        "y1": 600
+      "countsByURIs": {
+        "/echo": 30
+      }
+    }
+  }
+  "peer2": {
+    "": {
+      "target": "",
+      "invocationCounts": 455,
+      "firstResponses": "2020-06-23T13:39:03.431856-07:00",
+      "lastResponses": "2020-06-23T13:40:19.502769-07:00",
+      "countsByStatus": {
+        "200 OK": 455
+      },
+      "countsByStatusCodes": {
+        "200": 455
+      },
+      "countsByHeaders": {},
+      "countsByHeaderValues": {},
+      "countsByURIs": {
+        "/echo": 455
       }
     },
-    "target4": {
-      "foo": {
-        "bar2": 300
+    "peer2_to_peer1": {
+      "target": "peer2_to_peer1",
+      "invocationCounts": 80,
+      "firstResponses": "2020-06-23T13:37:06.477455-07:00",
+      "lastResponses": "2020-06-23T13:39:22.507463-07:00",
+      "countsByStatus": {
+        "200 OK": 80
       },
-      "goto-host": {
-        "3.3.3.3": 300
+      "countsByStatusCodes": {
+        "200": 80
       },
-      "via-goto": {
-        "Server8083": 300
-      },
-      "y": {
-        "x2": 300
+      "countsByHeaders": {},
+      "countsByHeaderValues": {},
+      "countsByURIs": {
+        "/echo": 80
       }
     }
   }
 }
-
 ```
 </p>
 </details>
@@ -508,74 +453,124 @@ curl localhost:8080/client/results
 ```json
 {
   "1": {
-    "targetInvocationCounts": {
-      "target1": 200
+    "invocationIndex": 1,
+    "target": {
+      "name": "peer1_to_peer4",
+      "method": "GET",
+      "url": "http://1.0.0.4/echo",
+      "headers": [
+        [
+          "Goto-Client",
+          "peer1"
+        ]
+      ],
+      "body": "",
+      "replicas": 2,
+      "requestCount": 20,
+      "initialDelay": "2s",
+      "delay": "1s",
+      "keepOpen": "",
+      "sendID": false,
+      "connTimeout": "",
+      "connIdleTimeout": "",
+      "requestTimeout": "",
+      "verifyTLS": false,
+      "collectResponse": false,
+      "autoInvoke": true
     },
-    "targetFirstResponses": {
-      "target1": "2020-06-15T21:34:25.628174-07:00"
+    "status": {
+      "completedRequestCount": 13,
+      "stopRequested": true,
+      "stopped": true,
+      "closed": true
     },
-    "targetLastResponses": {
-      "target1": "2020-06-15T21:36:08.068387-07:00"
-    },
-    "countsByStatus": {
-      "200 OK": 200
-    },
-    "countsByStatusCodes": {
-      "200": 200
-    },
-    "countsByHeaders": {},
-    "countsByHeaderValues": {},
-    "countsByTargetStatus": {
-      "target1": {
-        "200 OK": 200
+    "results": {
+      "target": "",
+      "invocationCounts": 13,
+      "firstResponses": "2020-06-23T13:52:33.546148-07:00",
+      "lastResponses": "2020-06-23T13:52:45.561606-07:00",
+      "countsByStatus": {
+        "200 OK": 13
+      },
+      "countsByStatusCodes": {
+        "200": 13
+      },
+      "countsByHeaders": {
+        "goto-host": 13,
+        "via-goto": 13
+      },
+      "countsByHeaderValues": {
+        "goto-host": {
+          "1.0.0.4": 13
+        },
+        "via-goto": {
+          "peer4": 13
+        }
+      },
+      "countsByURIs": {
+        "/echo": 13
       }
-    },
-    "countsByTargetStatusCodes": {
-      "target1": {
-        "200": 200
-      }
-    },
-    "countsByTargetHeaders": {
-      "target1": {}
-    },
-    "countsByTargetHeaderValues": {
-      "target1": {}
     },
     "finished": true
   },
   "2": {
-    "targetInvocationCounts": {
-      "target1": 200
+    "invocationIndex": 2,
+    "target": {
+      "name": "peer1_to_peer3",
+      "method": "GET",
+      "url": "http://1.0.0.3/echo",
+      "headers": [
+        [
+          "Goto-Client",
+          "peer1"
+        ]
+      ],
+      "body": "",
+      "replicas": 2,
+      "requestCount": 20,
+      "initialDelay": "2s",
+      "delay": "1s",
+      "keepOpen": "",
+      "sendID": false,
+      "connTimeout": "",
+      "connIdleTimeout": "",
+      "requestTimeout": "",
+      "verifyTLS": false,
+      "collectResponse": false,
+      "autoInvoke": true
     },
-    "targetFirstResponses": {
-      "target1": "2020-06-15T21:34:25.628174-07:00"
+    "status": {
+      "completedRequestCount": 13,
+      "stopRequested": true,
+      "stopped": true,
+      "closed": true
     },
-    "targetLastResponses": {
-      "target1": "2020-06-15T21:36:08.068387-07:00"
-    },
-    "countsByStatus": {
-      "200 OK": 200
-    },
-    "countsByStatusCodes": {
-      "200": 200
-    },
-    "countsByHeaders": {},
-    "countsByHeaderValues": {},
-    "countsByTargetStatus": {
-      "target1": {
-        "200 OK": 200
+    "results": {
+      "target": "",
+      "invocationCounts": 13,
+      "firstResponses": "2020-06-23T13:52:33.546295-07:00",
+      "lastResponses": "2020-06-23T13:52:45.562684-07:00",
+      "countsByStatus": {
+        "200 OK": 13
+      },
+      "countsByStatusCodes": {
+        "200": 13
+      },
+      "countsByHeaders": {
+        "goto-host": 13,
+        "via-goto": 13
+      },
+      "countsByHeaderValues": {
+        "goto-host": {
+          "1.0.0.3": 13
+        },
+        "via-goto": {
+          "peer3": 13
+        }
+      },
+      "countsByURIs": {
+        "/echo": 13
       }
-    },
-    "countsByTargetStatusCodes": {
-      "target1": {
-        "200": 200
-      }
-    },
-    "countsByTargetHeaders": {
-      "target1": {}
-    },
-    "countsByTargetHeaderValues": {
-      "target1": {}
     },
     "finished": true
   }
@@ -594,80 +589,43 @@ curl localhost:8080/client/results
 
 ```json
 {
-  "1": {
-    "t1": {
-      "target": {
-        "name": "t1",
-        "method": "GET",
-        "url": "http://localhost:8081/status/418",
-        "headers": [],
-        "body": "",
-        "replicas": 2,
-        "requestCount": 1000,
-        "initialDelay": "",
-        "delay": "10ms",
-        "keepOpen": "10s",
-        "sendID": true,
-        "connTimeout": "",
-        "connIdleTimeout": "",
-        "requestTimeout": "",
-        "verifyTLS": false,
-        "autoInvoke": false
-      },
-      "completedRequestCount": 545,
-      "stopRequested": false,
-      "stopped": false
+  "activeCount": 4,
+  "activeInvocations": {
+    "peer1_to_peer2": {
+      "1": {
+        "completedRequestCount": 4,
+        "stopRequested": false,
+        "stopped": false,
+        "closed": false
+      }
     },
-    "t2": {
-      "target": {
-        "name": "t2",
-        "method": "POST",
-        "url": "http://localhost:8081/echo",
-        "headers": [["x", "x2"]],
-        "body": "{\"test\":\"this\"}",
-        "replicas": 2,
-        "requestCount": 1000,
-        "initialDelay": "",
-        "delay": "10ms",
-        "keepOpen": "20s",
-        "sendID": true,
-        "connTimeout": "",
-        "connIdleTimeout": "",
-        "requestTimeout": "",
-        "verifyTLS": false,
-        "autoInvoke": false
-      },
-      "completedRequestCount": 545,
-      "stopRequested": false,
-      "stopped": false
-    }
-  },
-  "2": {
-    "t1": {
-      "target": {
-        "name": "t1",
-        "method": "GET",
-        "url": "http://localhost:8081/status/418",
-        "headers": [],
-        "body": "",
-        "replicas": 2,
-        "requestCount": 1000,
-        "initialDelay": "",
-        "delay": "10ms",
-        "keepOpen": "10s",
-        "sendID": true,
-        "connTimeout": "",
-        "connIdleTimeout": "",
-        "requestTimeout": "",
-        "verifyTLS": false,
-        "autoInvoke": false
-      },
-      "completedRequestCount": 210,
-      "stopRequested": false,
-      "stopped": false
+    "peer1_to_peer3": {
+      "2": {
+        "completedRequestCount": 6,
+        "stopRequested": false,
+        "stopped": false,
+        "closed": false
+      }
+    },
+    "peer1_to_peer4": {
+      "3": {
+        "completedRequestCount": 5,
+        "stopRequested": false,
+        "stopped": false,
+        "closed": false
+      }
+    },
+    "peer1_to_peer5": {
+      "4": {
+        "completedRequestCount": 4,
+        "stopRequested": false,
+        "stopped": false,
+        "closed": false
+      }
     }
   }
 }
+
 ```
 
 <br/>
@@ -2033,7 +1991,7 @@ $ curl -s localhost:8080/registry/peers/lockers
 <summary>Example</summary>
 <p>
 
-```
+```json
 $ curl -s localhost:8080/registry/peers/lockers/targets/results
 {
   "peer1": {
@@ -2049,23 +2007,12 @@ $ curl -s localhost:8080/registry/peers/lockers/targets/results
       "t1": "2020-06-20T08:00:52.11908-07:00",
       "t2": "2020-06-20T08:01:07.183041-07:00"
     },
-    "countsByStatus": {
-      "200 OK": 60
-    },
     "countsByStatusCodes": {
       "200": 60
     },
     "countsByHeaders": {},
     "countsByHeaderValues": {},
-    "countsByTargetStatus": {
-      "t1": {
-        "200 OK": 16
-      },
-      "t2": {
-        "200 OK": 44
-      }
-    },
-    "countsByTargetStatusCode": {
+    "countsByTargetStatusCodes": {
       "t1": {
         "200": 16
       },
@@ -2092,20 +2039,12 @@ $ curl -s localhost:8080/registry/peers/lockers/targets/results
     "targetLastResponses": {
       "t2": "2020-06-20T08:01:07.183041-07:00"
     },
-    "countsByStatus": {
-      "200 OK": 160
-    },
     "countsByStatusCodes": {
       "200": 160
     },
     "countsByHeaders": {},
     "countsByHeaderValues": {},
-    "countsByTargetStatus": {
-      "t2": {
-        "200 OK": 160
-      }
-    },
-    "countsByTargetStatusCode": {
+    "countsByTargetStatusCodes": {
       "t2": {
         "200": 160
       }
@@ -2129,6 +2068,7 @@ $ curl -s localhost:8080/registry/peers/lockers/targets/results
 <p>
 
 ```json
+$ curl -s localhost:8080/registry/peers/lockers/targets/results?detailed=Y
 {
   "peer1": {
     "t1": {
@@ -2136,7 +2076,7 @@ $ curl -s localhost:8080/registry/peers/lockers/targets/results
       "invocationCounts": 40,
       "firstResponses": "2020-06-23T08:30:29.719768-07:00",
       "lastResponses": "2020-06-23T08:30:48.780715-07:00",
-      "couuntsByStatus": {
+      "countsByStatus": {
         "200 OK": 40
       },
       "countsByStatusCodes": {
@@ -2153,7 +2093,7 @@ $ curl -s localhost:8080/registry/peers/lockers/targets/results
       "invocationCounts": 31,
       "firstResponses": "2020-06-23T08:30:44.816036-07:00",
       "lastResponses": "2020-06-23T08:30:59.868265-07:00",
-      "couuntsByStatus": {
+      "countsByStatus": {
         "200 OK": 31
       },
       "countsByStatusCodes": {
@@ -2172,7 +2112,7 @@ $ curl -s localhost:8080/registry/peers/lockers/targets/results
       "invocationCounts": 40,
       "firstResponses": "2020-06-23T08:30:29.719768-07:00",
       "lastResponses": "2020-06-23T08:30:48.780715-07:00",
-      "couuntsByStatus": {
+      "countsByStatus": {
         "200 OK": 40
       },
       "countsByStatusCodes": {
@@ -2189,7 +2129,7 @@ $ curl -s localhost:8080/registry/peers/lockers/targets/results
       "invocationCounts": 31,
       "firstResponses": "2020-06-23T08:30:44.816036-07:00",
       "lastResponses": "2020-06-23T08:30:59.868265-07:00",
-      "couuntsByStatus": {
+      "countsByStatus": {
         "200 OK": 31
       },
       "countsByStatusCodes": {

@@ -193,8 +193,8 @@ func (pr *PortRegistry) removePeer(name string, address string) bool {
 
 func (pr *PortRegistry) initHttpClientForPeerPod(pod *Pod) {
   tr := &http.Transport{
-    MaxIdleConns:        10,
-    MaxIdleConnsPerHost: 10,
+    MaxIdleConns:        100,
+    MaxIdleConnsPerHost: 100,
     IdleConnTimeout:     time.Minute*10,
     DisableCompression:  true,
     Proxy:               http.ProxyFromEnvironment,
@@ -203,7 +203,7 @@ func (pr *PortRegistry) initHttpClientForPeerPod(pod *Pod) {
       KeepAlive: time.Minute,
     }).DialContext,
   }
-  pod.client = &http.Client{Transport: tr, Timeout: 10*time.Second}
+  pod.client = &http.Client{Transport: tr, Timeout: 30*time.Second}
 }
 
 func invokePeerAPI(pod *Pod, method, api string, payload string, expectedStatus int) (bool, error) {

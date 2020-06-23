@@ -531,6 +531,7 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
       delay = target.delayD
     }
     completedCount++
+    tracker.Status.CompletedRequestCount = completedCount
     if completedCount < target.RequestCount {
       time.Sleep(delay)
     } else {
