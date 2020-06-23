@@ -406,7 +406,7 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
       msg = fmt.Sprintf("Failed to stop targets %+v", targets)
     }
   } else {
-    w.WriteHeader(http.StatusOK)
+    w.WriteHeader(http.StatusNotAcceptable)
     msg = "No targets to stop"
   }
   util.AddLogMessage(msg, r)

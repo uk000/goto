@@ -178,7 +178,6 @@ In addition to keeping the results in the `goto` client instance, those are also
 | GET       |	/client/track/headers                 | Get list of tracked headers |
 | GET       |	/client/results                       | Get combined results for all invocations since last time results were cleared. See [`Results Schema`](#client-results-schema) |
 | GET       |	/client/results/invocations           | Get invocation results broken down for each invocation that was triggered since last time results were cleared |
-| POST      | /client/results/{targets}/clear       | Clear previously accumulated invocation results for specific targets |
 | POST      | /client/results/clear                 | Clear previously accumulated invocation results |
 
 
@@ -1739,7 +1738,9 @@ By registering a worker instance to a registry instance, we get a few benefits:
 |---|---|---|
 | POST      | /registry/peers/add     | Register a worker instance (referred to as peer). See [Peer JSON Schema](#peer-json-schema)|
 | POST, PUT | /registry/peers/{peer}/remove/{address} | Deregister a peer by its label and IP address |
-| GET       | /registry/peers/{peer}/health/{address} | Check and report if a peer is up or not based on label and IP address |
+| GET       | /registry/peers/{peer}/health/{address} | Check and report health of a specific peer instance based on label and IP address |
+| GET       | /registry/peers/{peer}/health | Check and report health of all instances of a peer |
+| GET       | /registry/peers/health | Check and report health of all instances of all peers |
 | POST      | /registry/peers/{peer}/health/cleanup | Check health of all instances of the given peer label and remove IP addresses that are unresponsive |
 | POST      | /registry/peers/health/cleanup | Check health of all instances of all peers and remove IP addresses that are unresponsive |
 | POST      | /registry/peers/clear   | Remove all registered peers|
@@ -1754,6 +1755,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET       | /registry/peers/{peer}/locker | Get locker's data for all instances of the peer |
 | GET       | /registry/peers/lockers | Get locker's data for all peers |
 | GET       | /registry/peers/lockers/targets/results | Get client target invocation results for all peers, aggregated from all instances of a peer |
+| GET       | /registry/peers/lockers/targets/countsByStatus | Get client target counts by status for all peers, aggregated from all instances of a peer |
 | GET       | /registry/peers/targets | Get all registered targets for all peers |
 | POST      | /registry/peers/{peer}/targets/add | Add a target to be sent to a peer. See [Peer Target JSON Schema](#peer-target-json-schema) |
 | POST, PUT | /registry/peers/{peer}/targets/{targets}/remove | Remove given targets for a peer |
@@ -1765,6 +1767,9 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST, PUT | /registry/peers/{peer}/targets/{targets}/stop | Stop given targets on the given peer |
 | POST, PUT | /registry/peers/{peer}/targets/stop/all | Stop all targets on the given peer |
 | POST, PUT | /registry/peers/targets/stop/all | Stop all targets on the given peer |
+| POST, PUT | /registry/peers/targets/results/all/{enable}  | Controls whether results should be summarized across all targets. Disabling this when not needed can improve performance. Disabled by default. |
+| POST, PUT | /registry/peers/targets/results/invocations/{enable}  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
+| POST, PUT | /registry/peers/track/headers/{headers} | Configure headers to be tracked by client invocations on all connected peers |
 | POST      | /registry/peers/targets/clear   | Remove all targets from all peers |
 | GET       | /registry/peers/jobs | Get all registered jobs for all peers |
 | POST      | /registry/peers/{peer}/jobs/add | Add a job to be sent to a peer. See [Peer Job JSON Schema](#peer-job-json-schema) |
