@@ -280,12 +280,16 @@ func invokeForPods(peerPods map[string][]*Pod, method string, uri string, payloa
   for p := range peerPods {
     peer := p
     pods := peerPods[p]
+    resultLock.Lock()
     result[peer] = map[string]bool{}
+    resultLock.Unlock()
     for i := range pods {
       pod := pods[i]
       if !useUnhealthy && !pod.Healthy {
         log.Printf("Skipping bad pod %s for peer %s for URI %s.\n", pod.Address, peer, uri)
+        resultLock.Lock()
         result[peer][pod.Address] = false
+        resultLock.Unlock()
         continue
       }
       wg.Add(1)
