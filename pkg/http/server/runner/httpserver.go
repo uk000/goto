@@ -56,7 +56,6 @@ func RunHttpServer(root string, handlers ...util.ServerHandler) {
 func StartHttpServer(server *http.Server) {
   go func() {
     if err := server.ListenAndServe(); err != nil {
-      log.Println("http server start failed")
       log.Println(err)
     }
   }()
@@ -66,7 +65,6 @@ func ServeListener(l net.Listener) {
   go func() {
     log.Printf("starting listener %s\n", l.Addr())
     if err := server.Serve(l); err != nil {
-      log.Println("listener start failed")
       log.Println(err)
     }
   }()

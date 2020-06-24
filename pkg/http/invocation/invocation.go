@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -248,11 +247,10 @@ func getHttpClientForTarget(target *InvocationSpec) *http.Client {
       MaxIdleConns:       200,
       MaxIdleConnsPerHost: 100,
       IdleConnTimeout:    target.connIdleTimeoutD,
-      DisableCompression: true,
       Proxy:              http.ProxyFromEnvironment,
       DialContext: (&net.Dialer{
         Timeout:   target.connTimeoutD,
-        KeepAlive: time.Minute,
+        KeepAlive: time.Minute*10,
       }).DialContext,
       TLSHandshakeTimeout: 10 * time.Second,
       TLSClientConfig:     tlsConfig(target),
@@ -270,9 +268,9 @@ func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) *
   tracker.ID = id
   tracker.Status = &InvocationStatus{}
   tracker.Target = target
-  tracker.StopChannel = make(chan bool, 10)
-  tracker.DoneChannel = make(chan bool, 10)
-  tracker.ResultChannel = make(chan *InvocationResult, 100)
+  tracker.StopChannel = make(chan bool, 20)
+  tracker.DoneChannel = make(chan bool, 2)
+  tracker.ResultChannel = make(chan *InvocationResult, 200)
   for _, sinkFactory := range sinks {
     if sink := sinkFactory(tracker); sink != nil {
       tracker.sinks = append(tracker.sinks, sink)
@@ -420,11 +418,15 @@ func processStopRequest(tracker *InvocationTracker) bool {
     }
     if tracker.Status.StopRequested {
       if tracker.Status.Stopped {
-        log.Printf("Invocation[%d]: Received stop request for target = %s that is already stopped\n", tracker.ID, tracker.Target.Name)
+        if global.EnableInvocationLogs {
+          log.Printf("Invocation[%d]: Received stop request for target = %s that is already stopped\n", tracker.ID, tracker.Target.Name)
+        }
         return true
       } else {
         remaining := (tracker.Target.RequestCount * tracker.Target.Replicas) - (tracker.Status.CompletedRequestCount * tracker.Target.Replicas)
-        log.Printf("Invocation[%d]: Received stop request for target = %s with remaining requests %d\n", tracker.ID, tracker.Target.Name, remaining)
+        if global.EnableInvocationLogs {
+          log.Printf("Invocation[%d]: Received stop request for target = %s with remaining requests %d\n", tracker.ID, tracker.Target.Name, remaining)
+        }
         tracker.Status.Stopped = true
         removeTargetTracker(tracker.ID, tracker.Target.Name)
         return true
@@ -482,20 +484,28 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
   extractTargetHost(target)
   completedCount := 0
   time.Sleep(target.initialDelayD)
-  log.Printf("Invocation[%d]: Started with target %s and total requests %d\n", trackerID, target.Name, (target.Replicas * target.RequestCount))
+  if global.EnableInvocationLogs {
+    log.Printf("Invocation[%d]: Started with target %s and total requests %d\n", trackerID, target.Name, (target.Replicas * target.RequestCount))
+  }
   activeTargets := []string{}
   for k := range targetClients {
     activeTargets = append(activeTargets, k)
   }
 
-  responseChannels := make([]chan *InvocationResult, target.Replicas)
-  cases := make([]reflect.SelectCase, target.Replicas)
   resultCount := 0
   var results []*InvocationResult
+
+  if len(waitForResponse) > 0 && waitForResponse[0] {
+    sinks = append(sinks, func(result *InvocationResult){
+      results = append(results, result)
+    })
+  }
+
   for {
     if stopped := processStopRequest(tracker); stopped {
       break
     }
+    wg := &sync.WaitGroup{}
     for i := 0; i < target.Replicas; i++ {
       callCounter := (completedCount * target.Replicas) + i + 1
       targetID := target.Name + "[" + strconv.Itoa(i+1) + "]" + "[" + strconv.Itoa(callCounter) + "]"
@@ -505,27 +515,11 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
       if bodyReader == nil {
         bodyReader = strings.NewReader(target.Body)
       }
-      responseChannels[i] = make(chan *InvocationResult)
-      cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(responseChannels[i])}
+      wg.Add(1)
       go invokeTarget(trackerID, target.Name, targetID, url, target.Method, target.host, target.Headers,
-        bodyReader, target.CollectResponse, httpClient, responseChannels[i])
+        bodyReader, target.CollectResponse, httpClient, sinks, resultChannel, wg)
     }
-    for i := 0; i < target.Replicas; i++ {
-      if _, v, ok := reflect.Select(cases); ok {
-        result := v.Interface().(*InvocationResult)
-        resultCount++
-        if len(sinks) > 0 {
-          for _, sink := range sinks {
-            sink(result)
-          }
-        } else if resultChannel != nil {
-          resultChannel <- result
-        }
-        if len(waitForResponse) > 0 && waitForResponse[0] {
-          results = append(results, result)
-        }
-      }
-    }
+    wg.Wait()
     delay := 10 * time.Millisecond
     if target.delayD > delay {
       delay = target.delayD
@@ -548,7 +542,9 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
     }
   }
   DeregisterInvocation(tracker)
-  log.Printf("Invocation[%d]: Finished with responses %d\n", trackerID, resultCount)
+  if global.EnableInvocationLogs {
+    log.Printf("Invocation[%d]: Finished with responses %d\n", trackerID, resultCount)
+  }
 
   activeTargets = []string{}
   for k := range targetClients {
@@ -572,10 +568,13 @@ func newClientRequest(method string, url string, headers [][]string, body io.Rea
   }
 }
 
-func invokeTarget(index uint32, targetName string, targetID string, url string, method string, host string, headers [][]string, body io.Reader, reportBody bool, client *http.Client, c chan *InvocationResult) {
-  defer close(c)
-  log.Printf("Invocation[%d]: Invoking targetID: %s, url: %s, method: %s, headers: %+v\n", index, targetID, url, method, headers)
-  var result InvocationResult
+func invokeTarget(index uint32, targetName string, targetID string, url string, method string, 
+  host string, headers [][]string, body io.Reader, reportBody bool, client *http.Client, 
+  sinks []ResultSink, resultChannel chan *InvocationResult, wg *sync.WaitGroup) {
+  if global.EnableInvocationLogs {
+    log.Printf("Invocation[%d]: Invoking targetID: %s, url: %s, method: %s, headers: %+v\n", index, targetID, url, method, headers)
+  }
+  result := &InvocationResult{}
   result.TargetName = targetName
   result.TargetID = targetID
   result.Headers = map[string][]string{}
@@ -585,7 +584,9 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
     result.URI = req.URL.Path
     if resp, err := client.Do(req); err == nil {
       defer resp.Body.Close()
-      log.Printf("Invocation[%d]: Target %s Response Status: %s\n", index, targetID, resp.Status)
+      if global.EnableInvocationLogs {
+        log.Printf("Invocation[%d]: Target %s Response Status: %s\n", index, targetID, resp.Status)
+      }
       for header, values := range resp.Header {
         result.Headers[header] = values
       }
@@ -605,5 +606,16 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
     log.Printf("Invocation[%d]: Target %s, url [%s] failed to create request with error: %s\n", index, targetID, url, err.Error())
     result.Status = err.Error()
   }
-  c <- &result
+
+  if len(sinks) > 0 {
+    for _, sink := range sinks {
+      sink(result)
+    }
+  } else if resultChannel != nil {
+    if len(resultChannel) > 50 {
+      log.Printf("Invocation[%d]: Target %s ResultChannel length %d\n", index, targetID, len(resultChannel))
+    }
+    resultChannel <- result
+  }
+  wg.Done()
 }

@@ -6,6 +6,7 @@ import (
 	"goto/pkg/global"
 	"goto/pkg/http/invocation"
 	"goto/pkg/util"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -60,10 +61,10 @@ type InvocationsResults struct {
 var (
   targetsResults               *TargetsResults         = &TargetsResults{}
   invocationsResults           *InvocationsResults     = &InvocationsResults{}
-  chanSendTargetsToRegistry    chan *TargetResults     = make(chan *TargetResults, 10)
-  chanSendInvocationToRegistry chan *InvocationResults = make(chan *InvocationResults, 10)
-  chanLockInvocationInRegistry chan uint32             = make(chan uint32, 10)
-  stopRegistrySender           chan bool               = make(chan bool, 1)
+  chanSendTargetsToRegistry    chan *TargetResults     = make(chan *TargetResults, 200)
+  chanSendInvocationToRegistry chan *InvocationResults = make(chan *InvocationResults, 200)
+  chanLockInvocationInRegistry chan uint32             = make(chan uint32, 100)
+  stopRegistrySender           chan bool               = make(chan bool, 10)
   sendingToRegistry            bool
   registryClient               *http.Client
   registrySendLock             sync.Mutex
@@ -366,7 +367,7 @@ func (tsr *TargetsSummaryResults) AddTargetResult(tr *TargetResults) {
     if tsr.CountsByTargetHeaderValues[tr.Target][h] == nil {
       tsr.CountsByTargetHeaderValues[tr.Target][h] = map[string]int{}
     }
-      for hv, v := range values {
+    for hv, v := range values {
       tsr.CountsByHeaderValues[h][hv] += v
       tsr.CountsByTargetHeaderValues[tr.Target][h][hv] += v
     }
@@ -406,11 +407,20 @@ func storeInvocationResultsInRegistryLocker(keys []string, data interface{}) {
   }
 }
 
-func registrySender() {
+func registrySender(id int) {
   stopSender := false
   for {
   RegistrySend:
     for {
+      if len(chanSendTargetsToRegistry) > 50 {
+        log.Printf("registrySender[%d]: chanSendTargetsToRegistry length %d\n", id, len(chanSendTargetsToRegistry))
+      }
+      if len(chanSendInvocationToRegistry) > 50 {
+        log.Printf("registrySender[%d]: chanSendInvocationToRegistry length %d\n", id, len(chanSendInvocationToRegistry))
+      }
+      if len(chanLockInvocationInRegistry) > 50 {
+        log.Printf("registrySender[%d]: chanLockInvocationInRegistry length %d\n", id, len(chanLockInvocationInRegistry))
+      }
       select {
       case targetResults := <-chanSendTargetsToRegistry:
         targetResults.lock.RLock()
@@ -439,12 +449,16 @@ func startRegistrySender() {
   if !sendingToRegistry {
     initRegistryHttpClient()
     sendingToRegistry = true
-    go registrySender()
+    for i := 1; i < 10; i++ {
+      go registrySender(i)
+    }
   }
 }
 
 func StopRegistrySender() {
-  stopRegistrySender <- true
+  for i := 1; i < 10; i++ {
+    stopRegistrySender <- true
+  }
 }
 
 func EnableAllTargetResults(enable bool) {

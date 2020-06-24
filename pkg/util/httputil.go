@@ -56,7 +56,7 @@ func AddLogMessage(msg string, r *http.Request) {
 
 func PrintLogMessages(r *http.Request) {
   m := r.Context().Value(logmessagesKey).(*messagestore)
-  if !IsLockerRequest(r) && (!IsAdminRequest(r) || global.EnableAdminLogging) {
+  if !IsLockerRequest(r) && (!IsAdminRequest(r) || global.EnableAdminLogs) && global.EnableTrackingLogs {
     log.Println(strings.Join(m.messages, " --> "))
   }
   m.messages = m.messages[:0]
