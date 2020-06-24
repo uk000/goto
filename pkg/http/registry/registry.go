@@ -240,47 +240,67 @@ func invokePeerAPI(pod *Pod, method, api string, payload string, expectedStatus 
   }
 }
 
+func invokePod(peer string, pod *Pod, peerPodCount int, method string, uri string, payload string, 
+      expectedStatus int, retryCount int, onPodDone func(string, *Pod, error)) bool {
+  var success bool
+  var err error
+  for i := 0; i < retryCount; i++ {
+    success, err = invokePeerAPI(pod, method, uri, payload, expectedStatus)
+    if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+      log.Printf("Peer %s Pod %s timed out for URI %s. Retrying... %d\n", peer, pod.Address, uri, i+1)
+      continue
+    } else {
+      break
+    }
+  }
+  if success && err == nil {
+    onPodDone(peer, pod, nil)
+  } else if err != nil {
+    if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+      if peerPodCount > 1 {
+        log.Printf("Peer %s Pod %s has too many timouts. Marking pod as bad and removing from future operations\n", peer, pod.Address)
+        pod.Healthy = false
+      } else {
+        log.Printf("Peer %s Pod %s has timed out but not marking pod as bad since it's the only pod available for the peer\n", peer, pod.Address)
+        pod.Healthy = true
+      }
+    }
+    onPodDone(peer, pod, err)
+  } else {
+    onPodDone(peer, pod, errors.New(""))
+  }
+  return success
+}
+
 func invokeForPods(peerPods map[string][]*Pod, method string, uri string, payload string, expectedStatus int, retryCount int, useUnhealthy bool,
   onPodDone func(string, *Pod, error), onPeerDone ...func(string)) map[string]map[string]bool {
   result := map[string]map[string]bool{}
-  for peer, pods := range peerPods {
+  resultLock := sync.Mutex{}
+  wg := &sync.WaitGroup{}
+  for p := range peerPods {
+    peer := p
+    pods := peerPods[p]
     result[peer] = map[string]bool{}
-    for _, pod := range pods {
+    for i := range pods {
+      pod := pods[i]
       if !useUnhealthy && !pod.Healthy {
         log.Printf("Skipping bad pod %s for peer %s for URI %s.\n", pod.Address, peer, uri)
         result[peer][pod.Address] = false
         continue
       }
-      var success bool
-      var err error
-      for i := 0; i < retryCount; i++ {
-        success, err = invokePeerAPI(pod, method, uri, payload, expectedStatus)
-        if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-          log.Printf("Peer %s Pod %s timed out for URI %s. Retrying... %d\n", peer, pod.Address, uri, i+1)
-          continue
-        } else {
-          break
-        }
-      }
-      result[peer][pod.Address] = success
-      if success && err == nil {
-        onPodDone(peer, pod, nil)
-      } else if err != nil {
-        if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-          if len(pods) > 1 {
-            log.Printf("Peer %s Pod %s has too many timouts. Marking pod as bad and removing from future operations\n", peer, pod.Address)
-            pod.Healthy = false
-          } else {
-            log.Printf("Peer %s Pod %s has timed out but not marking pod as bad since it's the only pod available for the peer\n", peer, pod.Address)
-            pod.Healthy = true
-          }
-        }
-        onPodDone(peer, pod, err)
-      } else {
-        onPodDone(peer, pod, errors.New(""))
-      }
+      wg.Add(1)
+      go func(){
+        success := invokePod(peer, pod, len(pods), method,uri, payload, expectedStatus, retryCount, onPodDone)
+        resultLock.Lock()
+        result[peer][pod.Address] = success
+        resultLock.Unlock()
+        wg.Done()
+      }()
     }
-    if len(onPeerDone) > 0 {
+  }
+  wg.Wait()
+  if len(onPeerDone) > 0 {
+    for peer := range peerPods {
       onPeerDone[0](peer)
     }
   }
