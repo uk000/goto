@@ -783,9 +783,9 @@ func checkPeerHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func cleanupUnhealthyPeers(w http.ResponseWriter, r *http.Request) {
-  getPortRegistry(r).cleanupUnhealthyPeers(util.GetStringParamValue(r, "peer"))
+  result := getPortRegistry(r).cleanupUnhealthyPeers(util.GetStringParamValue(r, "peer"))
   w.WriteHeader(http.StatusOK)
-  msg := "Cleaned up unhealthy peers"
+  msg := util.ToJSON(result)
   if global.EnableRegistryLogs {
     util.AddLogMessage(msg, r)
   }
