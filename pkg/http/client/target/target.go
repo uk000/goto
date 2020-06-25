@@ -219,7 +219,7 @@ func (pc *PortClient) stopTargets(targetNames []string) (bool, bool) {
   }
   stopped := len(stoppingTargets) == 0
   if !stopped {
-    for i := 0; i < 5; i++ {
+    for i := 0; i < 10; i++ {
       if !invocation.IsAnyTargetActive(stoppingTargets) {
         stopped = true
         break
@@ -434,7 +434,7 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
       msg = fmt.Sprintf("Failed to stop targets %+v", targets)
     }
   } else {
-    w.WriteHeader(http.StatusNotAcceptable)
+    w.WriteHeader(http.StatusAccepted)
     msg = "No targets to stop"
   }
   if global.EnableClientLogs {

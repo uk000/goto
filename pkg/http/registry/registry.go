@@ -248,6 +248,7 @@ func invokePod(peer string, pod *Pod, peerPodCount int, method string, uri strin
     success, err = invokePeerAPI(pod, method, uri, payload, expectedStatus)
     if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
       log.Printf("Peer %s Pod %s timed out for URI %s. Retrying... %d\n", peer, pod.Address, uri, i+1)
+      time.Sleep(2*time.Second)
       continue
     } else {
       break
@@ -378,7 +379,7 @@ func (pr *PortRegistry) loadPodsForPeerWithData(peerName string, jobs ...bool) m
 }
 
 func (pr *PortRegistry) checkPeerHealth(peerName string, peerAddress string) map[string]map[string]bool {
-  return invokeForPods(pr.loadPeerPods(peerName, peerAddress), "GET", "/health", "", http.StatusOK, 2, true,
+  return invokeForPods(pr.loadPeerPods(peerName, peerAddress), "GET", "/health", "", http.StatusOK, 1, true,
     func(peer string, pod *Pod, err error) {
       if err == nil {
         pod.Healthy = true
@@ -391,7 +392,7 @@ func (pr *PortRegistry) checkPeerHealth(peerName string, peerAddress string) map
 }
 
 func (pr *PortRegistry) cleanupUnhealthyPeers(peerName string) map[string]map[string]bool {
-  return invokeForPods(pr.loadPeerPods(peerName, ""), "GET", "/health", "", http.StatusOK, 2, true,
+  return invokeForPods(pr.loadPeerPods(peerName, ""), "GET", "/health", "", http.StatusOK, 1, true,
     func(peer string, pod *Pod, err error) {
       if err == nil {
         pod.Healthy = true
@@ -420,7 +421,7 @@ func (pr *PortRegistry) clearLocker(peerName, peerAddress string) map[string]map
     pr.peerLocker.Init()
     peersToClear = pr.loadPeerPods("", "")
   }
-  return invokeForPods(peersToClear, "POST", "/client/results/clear", "", http.StatusAccepted, 3, false,
+  return invokeForPods(peersToClear, "POST", "/client/results/clear", "", http.StatusAccepted, 2, false,
     func(peer string, pod *Pod, err error) {
       if err == nil {
         log.Printf("Results cleared on peer %s address %s\n", peer, pod.Address)
@@ -458,7 +459,7 @@ func (pr *PortRegistry) addPeerTarget(peerName string, target *PeerTarget) map[s
     }
   }
   pr.peersLock.Unlock()
-  return invokeForPods(peerPods, "POST", "/client/targets/add", util.ToJSON(target), http.StatusAccepted, 3, false,
+  return invokeForPods(peerPods, "POST", "/client/targets/add", util.ToJSON(target), http.StatusAccepted, 1, false,
     func(peer string, pod *Pod, err error) {
       if err == nil {
         if global.EnableRegistryLogs {
@@ -594,7 +595,7 @@ func (pr *PortRegistry) addPeerJob(peerName string, job *PeerJob) map[string]map
     }
   }
   pr.peersLock.Unlock()
-  return invokeForPods(peerPods, "POST", "/jobs/add", util.ToJSON(job), http.StatusAccepted, 3, false,
+  return invokeForPods(peerPods, "POST", "/jobs/add", util.ToJSON(job), http.StatusAccepted, 1, false,
     func(peer string, pod *Pod, err error) {
       if err == nil {
         log.Printf("Pushed job %s to peer %s address %s\n", job.ID, peer, pod.Address)
