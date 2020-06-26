@@ -96,7 +96,7 @@ var (
   activeInvocations  map[uint32]*InvocationTracker = map[uint32]*InvocationTracker{}
   activeTargets      map[string]*TargetInvocations = map[string]*TargetInvocations{}
   targetClients      map[string]*http.Client       = map[string]*http.Client{}
-  chanStopCleanup    chan bool                     = make(chan bool)
+  chanStopCleanup    chan bool                     = make(chan bool, 1)
   rootCAs            *x509.CertPool
   invocationsLock    sync.RWMutex
 )

@@ -71,6 +71,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   registryRouter := r.PathPrefix("/registry").Subrouter()
   peersRouter := registryRouter.PathPrefix("/peers").Subrouter()
   util.AddRoute(peersRouter, "/add", addPeer, "POST")
+  util.AddRoute(peersRouter, "/{peer}/remember", addPeer, "POST")
   util.AddRoute(peersRouter, "/{peer}/remove/{address}", removePeer, "PUT", "POST")
   util.AddRoute(peersRouter, "/{peer}/health/{address}", checkPeerHealth, "GET")
   util.AddRoute(peersRouter, "/{peer}/health", checkPeerHealth, "GET")
@@ -160,9 +161,7 @@ func (pr *PortRegistry) init() {
   }
 }
 
-func (pr *PortRegistry) addPeer(peer *Peer) {
-  pr.peersLock.Lock()
-  defer pr.peersLock.Unlock()
+func (pr *PortRegistry) unsafeAddPeer(peer *Peer) {
   if pr.peers[peer.Name] == nil {
     pr.peers[peer.Name] = &Peers{Name: peer.Name, Namespace: peer.Namespace, Pods: map[string]*Pod{}}
   }
@@ -175,7 +174,27 @@ func (pr *PortRegistry) addPeer(peer *Peer) {
   if pr.peerJobs[peer.Name] == nil {
     pr.peerJobs[peer.Name] = PeerJobs{}
   }
+}
+
+func (pr *PortRegistry) addPeer(peer *Peer) {
+  pr.peersLock.Lock()
+  defer pr.peersLock.Unlock()
+  pr.unsafeAddPeer(peer)
   pr.peerLocker.InitPeerLocker(peer.Name)
+}
+func (pr *PortRegistry) HasPeer(peerName, peerAddress string) bool {
+  pr.peersLock.RLock()
+  defer pr.peersLock.RUnlock()
+  return pr.peers[peerName] != nil && pr.peers[peerName].Pods[peerAddress] != nil
+}
+
+func (pr *PortRegistry) rememberPeer(peer *Peer) {
+  if pr.HasPeer(peer.Name, peer.Address) {
+    return
+  }
+  pr.peersLock.Lock()
+  defer pr.peersLock.Unlock()
+  pr.unsafeAddPeer(peer)
 }
 
 func (pr *PortRegistry) removePeer(name string, address string) bool {
@@ -724,22 +743,31 @@ func (pr *PortRegistry) addPeersTrackingHeaders(headers string) map[string]map[s
 }
 
 func addPeer(w http.ResponseWriter, r *http.Request) {
+  peerName := util.GetStringParamValue(r, "peer")
   p := &Peer{}
+  response := map[string]interface{}{}
   msg := ""
   if err := util.ReadJsonPayload(r, p); err == nil {
     pr := getPortRegistry(r)
-    pr.addPeer(p)
+    if peerName == "" {
+      pr.addPeer(p)
+      pr.peersLock.RLock()
+      response["targets"] = pr.peerTargets[p.Name]
+      response["jobs"] = pr.peerJobs[p.Name]
+      pr.peersLock.RUnlock()
+      msg = fmt.Sprintf("Added Peer: %+v", *p)
+    } else {
+      pr.rememberPeer(p)
+      msg = fmt.Sprintf("Remembered Peer: %+v", *p)
+      response["message"] = msg
+    }
     w.WriteHeader(http.StatusAccepted)
-    msg = fmt.Sprintf("Added Peer: %+v", *p)
-    pr.peersLock.RLock()
-    payload := map[string]interface{}{"targets": pr.peerTargets[p.Name], "jobs": pr.peerJobs[p.Name]}
-    pr.peersLock.RUnlock()
-    fmt.Fprintln(w, util.ToJSON(payload))
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = fmt.Sprintf("Failed to parse json with error: %s", err.Error())
-    fmt.Fprintln(w, msg)
+    response["message"] = msg
   }
+  fmt.Fprintln(w, util.ToJSON(response))
   if global.EnableRegistryLogs {
     util.AddLogMessage(msg, r)
   }

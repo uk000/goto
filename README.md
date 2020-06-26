@@ -1691,10 +1691,13 @@ By registering a worker instance to a registry instance, we get a few benefits:
 3. In addition to sending targets/jobs to worker instances at the time of registration, the registry instance also pushes targets/jobs to the worker instances as and when more targets/jobs get added to the registry. This has the added benefit of just using the registry instance as the single point of configuration, where you add targets/jobs and those get pushed to all worker instances. Removal of targets/jobs from the registry also gets pushed, so the targets/jobs get removed from the corresponding worker instances. Even targets/jobs that are pushed later can be marked for `auto-invocation`, and the worker instances that receive the target/job will invoke it immediately upon receipt.
 4. Instances can store their results into their corresponding lockers in the registry. A peer instance also locks its locker data once an invocation completes. Currently, locking preserves the data by moving it to another key named `<key>_last` when new data is reported for that key, thus it preserves last reported data as immutable once locked, while still allowing the peer to store more data for the same key in the locker.
 
+Peer instances periodically re-register themselves with registry in case registry was restarted and lost all peers info. Re-registering is different from startup registration in that peers don't receive targets and jobs from registry when they remind registry about themselves, and hence no auto-invocation happens.
+
 #### Registry APIs
 |METHOD|URI|Description|
 |---|---|---|
 | POST      | /registry/peers/add     | Register a worker instance (referred to as peer). See [Peer JSON Schema](#peer-json-schema)|
+| POST      | /registry/peers/{peer}/remember | Re-register a peer. Accepts same request payload as /peers/add API, but doesn't respond back with targets and jobs. |
 | POST, PUT | /registry/peers/{peer}/remove/{address} | Deregister a peer by its label and IP address |
 | GET       | /registry/peers/{peer}/health/{address} | Check and report health of a specific peer instance based on label and IP address |
 | GET       | /registry/peers/{peer}/health | Check and report health of all instances of a peer |
