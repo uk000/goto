@@ -488,10 +488,11 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
     log.Printf("Invocation[%d]: Started with target %s and total requests %d\n", trackerID, target.Name, (target.Replicas * target.RequestCount))
   }
   activeTargets := []string{}
+  invocationsLock.Lock()
   for k := range targetClients {
     activeTargets = append(activeTargets, k)
   }
-
+  invocationsLock.Unlock()
   resultCount := 0
   var results []*InvocationResult
 
@@ -547,9 +548,11 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
   }
 
   activeTargets = []string{}
+  invocationsLock.Lock()
   for k := range targetClients {
     activeTargets = append(activeTargets, k)
   }
+  invocationsLock.Unlock()
   return results
 }
 

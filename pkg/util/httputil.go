@@ -73,6 +73,12 @@ func GetPodName() string {
 func GetNamespace() string {
   ns, present := os.LookupEnv("NAMESPACE")
   if !present {
+    if data, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+      ns = string(data)
+      present = true
+    }
+  }
+  if !present {
     ns = "local"
   }
   return ns
