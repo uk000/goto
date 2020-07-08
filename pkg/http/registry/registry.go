@@ -26,12 +26,21 @@ type Peer struct {
   Namespace string `json:"namespace"`
 }
 
+type PodEpoch struct {
+  Epoch               int `json:"epoch"`
+  FirstContact         time.Time `json:"firstContact"`
+  LastContact          time.Time `json:"lastContact"`
+}
+
 type Pod struct {
-  Name    string `json:"name"`
-  Address string `json:"address"`
-  Healthy bool   `json:"healthy"`
-  host    string
-  client  *http.Client
+  Name                 string    `json:"name"`
+  Address              string    `json:"address"`
+  Healthy              bool      `json:"healthy"`
+  CurrentEpoch         PodEpoch   `json:"currentEpoch"`
+  PastEpochs           []PodEpoch `json:"pastEpochs"`
+  host                 string
+  client               *http.Client
+  lock                 sync.RWMutex
 }
 
 type Peers struct {
@@ -162,11 +171,22 @@ func (pr *PortRegistry) init() {
 }
 
 func (pr *PortRegistry) unsafeAddPeer(peer *Peer) {
+  now := time.Now()
   if pr.peers[peer.Name] == nil {
     pr.peers[peer.Name] = &Peers{Name: peer.Name, Namespace: peer.Namespace, Pods: map[string]*Pod{}}
   }
+  podEpoch := PodEpoch{FirstContact: now, LastContact: now}
   pod := &Pod{Name: peer.Pod, Address: peer.Address, host: "http://" + peer.Address, Healthy: true}
   pr.initHttpClientForPeerPod(pod)
+  if oldPod := pr.peers[peer.Name].Pods[peer.Address]; oldPod != nil {
+    for _, oldEpoch := range oldPod.PastEpochs {
+      pod.PastEpochs = append(pod.PastEpochs, oldEpoch)
+    }
+    pod.PastEpochs = append(pod.PastEpochs, oldPod.CurrentEpoch)
+    podEpoch.Epoch = oldPod.CurrentEpoch.Epoch+1
+  }
+  pod.CurrentEpoch = podEpoch
+
   pr.peers[peer.Name].Pods[peer.Address] = pod
   if pr.peerTargets[peer.Name] == nil {
     pr.peerTargets[peer.Name] = PeerTargets{}
@@ -182,19 +202,26 @@ func (pr *PortRegistry) addPeer(peer *Peer) {
   pr.unsafeAddPeer(peer)
   pr.peerLocker.InitPeerLocker(peer.Name)
 }
-func (pr *PortRegistry) HasPeer(peerName, peerAddress string) bool {
+func (pr *PortRegistry) GetPeer(peerName, peerAddress string) *Pod {
   pr.peersLock.RLock()
   defer pr.peersLock.RUnlock()
-  return pr.peers[peerName] != nil && pr.peers[peerName].Pods[peerAddress] != nil
+  if pr.peers[peerName] != nil && pr.peers[peerName].Pods[peerAddress] != nil {
+    return pr.peers[peerName].Pods[peerAddress]
+  }
+  return nil
 }
 
 func (pr *PortRegistry) rememberPeer(peer *Peer) {
-  if pr.HasPeer(peer.Name, peer.Address) {
-    return
+  if pod := pr.GetPeer(peer.Name, peer.Address); pod != nil {
+    pod.lock.Lock()
+    pod.Healthy = true
+    pod.CurrentEpoch.LastContact = time.Now()
+    pod.lock.Unlock()
+  } else {
+    pr.peersLock.Lock()
+    defer pr.peersLock.Unlock()
+    pr.unsafeAddPeer(peer)
   }
-  pr.peersLock.Lock()
-  defer pr.peersLock.Unlock()
-  pr.unsafeAddPeer(peer)
 }
 
 func (pr *PortRegistry) removePeer(name string, address string) bool {
@@ -259,15 +286,15 @@ func invokePeerAPI(pod *Pod, method, api string, payload string, expectedStatus 
   }
 }
 
-func invokePod(peer string, pod *Pod, peerPodCount int, method string, uri string, payload string, 
-      expectedStatus int, retryCount int, onPodDone func(string, *Pod, error)) bool {
+func invokePod(peer string, pod *Pod, peerPodCount int, method string, uri string, payload string,
+  expectedStatus int, retryCount int, onPodDone func(string, *Pod, error)) bool {
   var success bool
   var err error
   for i := 0; i < retryCount; i++ {
     success, err = invokePeerAPI(pod, method, uri, payload, expectedStatus)
     if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
       log.Printf("Peer %s Pod %s timed out for URI %s. Retrying... %d\n", peer, pod.Address, uri, i+1)
-      time.Sleep(2*time.Second)
+      time.Sleep(2 * time.Second)
       continue
     } else {
       break
@@ -277,13 +304,10 @@ func invokePod(peer string, pod *Pod, peerPodCount int, method string, uri strin
     onPodDone(peer, pod, nil)
   } else if err != nil {
     if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-      if peerPodCount > 1 {
-        log.Printf("Peer %s Pod %s has too many timouts. Marking pod as bad and removing from future operations\n", peer, pod.Address)
-        pod.Healthy = false
-      } else {
-        log.Printf("Peer %s Pod %s has timed out but not marking pod as bad since it's the only pod available for the peer\n", peer, pod.Address)
-        pod.Healthy = true
-      }
+      log.Printf("Peer %s Pod %s has too many timouts. Marking pod as bad and removing from future operations\n", peer, pod.Address)
+      pod.lock.Lock()
+      pod.Healthy = false
+      pod.lock.Unlock()
     }
     onPodDone(peer, pod, err)
   } else {
@@ -305,7 +329,10 @@ func invokeForPods(peerPods map[string][]*Pod, method string, uri string, payloa
     resultLock.Unlock()
     for i := range pods {
       pod := pods[i]
-      if !useUnhealthy && !pod.Healthy {
+      pod.lock.RLock()
+      healthy := pod.Healthy
+      pod.lock.RUnlock()
+      if !useUnhealthy && !healthy {
         log.Printf("Skipping bad pod %s for peer %s for URI %s.\n", pod.Address, peer, uri)
         resultLock.Lock()
         result[peer][pod.Address] = false
@@ -313,8 +340,8 @@ func invokeForPods(peerPods map[string][]*Pod, method string, uri string, payloa
         continue
       }
       wg.Add(1)
-      go func(){
-        success := invokePod(peer, pod, len(pods), method,uri, payload, expectedStatus, retryCount, onPodDone)
+      go func() {
+        success := invokePod(peer, pod, len(pods), method, uri, payload, expectedStatus, retryCount, onPodDone)
         resultLock.Lock()
         result[peer][pod.Address] = success
         resultLock.Unlock()
@@ -400,11 +427,12 @@ func (pr *PortRegistry) loadPodsForPeerWithData(peerName string, jobs ...bool) m
 func (pr *PortRegistry) checkPeerHealth(peerName string, peerAddress string) map[string]map[string]bool {
   return invokeForPods(pr.loadPeerPods(peerName, peerAddress), "GET", "/health", "", http.StatusOK, 1, true,
     func(peer string, pod *Pod, err error) {
+      pod.lock.Lock()
+      pod.Healthy = err == nil
+      pod.lock.Unlock()
       if err == nil {
-        pod.Healthy = true
         log.Printf("Peer %s Address %s is healthy\n", peer, pod.Address)
       } else {
-        pod.Healthy = false
         log.Printf("Peer %s Address %s is unhealthy, error: %s\n", peer, pod.Address, err.Error())
       }
     })
@@ -414,14 +442,14 @@ func (pr *PortRegistry) cleanupUnhealthyPeers(peerName string) map[string]map[st
   return invokeForPods(pr.loadPeerPods(peerName, ""), "GET", "/health", "", http.StatusOK, 1, true,
     func(peer string, pod *Pod, err error) {
       if err == nil {
+        pod.lock.Lock()
         pod.Healthy = true
+        pod.PastEpochs = nil
+        pod.lock.Unlock()
         log.Printf("Peer %s Address %s is healthy\n", peer, pod.Address)
       } else {
         log.Printf("Peer %s Address %s is unhealthy or unavailable, error: %s\n", peer, pod.Address, err.Error())
-        delete(pr.peers[peer].Pods, pod.Address)
-        if len(pr.peers[peer].Pods) == 0 {
-          delete(pr.peers, peer)
-        }
+        pr.removePeer(peer, pod.Address)
       }
     })
 }
