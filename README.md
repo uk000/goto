@@ -221,6 +221,7 @@ In addition to keeping the results in the `goto` client instance, those are also
 
 #### Active Targets Schema (output of API /client/targets/active)
 * Reports set of targets for which traffic is running at the time of API invocation. Result is an object with invocation number as key, and value as object that has status for all active targets in that invocation. For each active target, the following data is reported. Also see example below.
+  
 |Field|Data Type|Description|
 |---|---|---|
 | target                | Client Target       | Target details as described in `Client Target JSON Schema`  |
@@ -1705,7 +1706,7 @@ Peer instances periodically re-register themselves with registry in case registr
 | POST      | /registry/peers/{peer}/health/cleanup | Check health of all instances of the given peer label and remove IP addresses that are unresponsive |
 | POST      | /registry/peers/health/cleanup | Check health of all instances of all peers and remove IP addresses that are unresponsive |
 | POST      | /registry/peers/clear   | Remove all registered peers|
-| GET       | /registry/peers         | Get all registered peers |
+| GET       | /registry/peers         | Get all registered peers. See [Peers JSON Schema](#peers-json-schema) |
 | POST      | /registry/peers/{peer}/{address}/locker/store/{key} | Store any arbitrary value for the given key in the locker of the peer instance |
 | POST      | /registry/peers/{peer}/{address}/locker/remove/{key} | Remove stored data for the given key from the locker of the peer instance |
 | POST      | /registry/peers/{peer}/{address}/locker/lock/{key} | Locks the data stored under the given key in the locker of the peer instance.  |
@@ -1743,7 +1744,39 @@ Peer instances periodically re-register themselves with registry in case registr
 | POST, PUT | /registry/peers/{peer}/jobs/stop/all | Stop all jobs on the given peer |
 | POST      | /registry/peers/jobs/clear   | Remove all jobs from all peers |
 
-#### Peer JSON Schema
+#### Peers JSON Schema 
+Map of peer labels to peer details, where each peer details include the following info
+(output of /registry/peers)
+
+|Field|Data Type|Description|
+|---|---|---|
+| Name      | string | Name/Label of a peer |
+| Namespace | string | Namespace of the peer instance (if available, else `local`) |
+| Pods      | map string->PodDetails | Map of Pod Addresses to Pod Details. See [Pod Details JSON Schema] below(#pod-details-json-schema) |
+
+
+#### Pod Details JSON Schema 
+
+|Field|Data Type|Description|
+|---|---|---|
+| Name      | string | Pod/Host Name |
+| Address   | string | Pod Address |
+| Healthy   | bool   | Whether the pod was found to be healthy at last interaction |
+| CurrentEpoch | PodEpoch   | Current lifetime details of this pod |
+| PastEpochs | []PodEpoch   | Past lives of this pod since last cleanup. |
+
+
+#### Pod Epoch JSON Schema 
+
+|Field|Data Type|Description|
+|---|---|---|
+| Epoch      | int | Epoch count of this pod |
+| FirstContact   | time | First time this pod connected (at registration) |
+| LastContact   | time | Last time this pod sent its reminder |
+
+#### Peer JSON Schema 
+(to register a peer via /registry/peers/add)
+
 |Field|Data Type|Description|
 |---|---|---|
 | Name      | string | Name/Label of a peer |
@@ -1871,11 +1904,36 @@ $ curl -s localhost:8080/registry/peers | jq
     "pods": {
       "1.0.0.1:8081": {
         "name": "peer1",
-        "address": "1.0.0.1:8081"
+        "address": "1.0.0.1:8081",
+        "healthy": true,
+        "currentEpoch": {
+          "epoch": 2,
+          "firstContact": "2020-07-08T12:29:03.076479-07:00",
+          "lastContact": "2020-07-08T12:29:03.076479-07:00"
+        },
+        "pastEpochs": [
+          {
+            "epoch": 0,
+            "firstContact": "2020-07-08T12:28:06.986875-07:00",
+            "lastContact": "2020-07-08T12:28:06.986875-07:00"
+          },
+          {
+            "epoch": 1,
+            "firstContact": "2020-07-08T12:28:45.276196-07:00",
+            "lastContact": "2020-07-08T12:28:45.276196-07:00"
+          }
+        ]
       },
       "1.0.0.2:8081": {
         "name": "peer1",
-        "address": "1.0.0.2:8081"
+        "address": "1.0.0.2:8081",
+        "healthy": false,
+        "currentEpoch": {
+          "epoch": 0,
+          "firstContact": "2020-07-08T12:29:00.066019-07:00",
+          "lastContact": "2020-07-08T12:29:00.066019-07:00"
+        },
+        "pastEpochs": null
       }
     }
   },
@@ -1885,7 +1943,20 @@ $ curl -s localhost:8080/registry/peers | jq
     "pods": {
       "2.2.2.2:8082": {
         "name": "peer2",
-        "address": "2.2.2.2:8082"
+        "address": "2.2.2.2:8082",
+        "healthy": true,
+        "currentEpoch": {
+          "epoch": 1,
+          "firstContact": "2020-07-08T12:29:00.066019-07:00",
+          "lastContact": "2020-07-08T12:29:00.066019-07:00"
+        },
+        "pastEpochs": [
+          {
+            "epoch": 0,
+            "firstContact": "2020-07-08T12:28:06.986736-07:00",
+            "lastContact": "2020-07-08T12:28:36.993819-07:00"
+          }
+        ]
       }
     }
   }
