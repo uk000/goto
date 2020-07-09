@@ -168,12 +168,16 @@ func GetQueryParams(r *http.Request) map[string]map[string]int {
   return queryParamsMap
 }
 
-func CopyHeaders(w http.ResponseWriter, headers http.Header, host string) {
+func CopyHeaders(prefix string, w http.ResponseWriter, headers http.Header, host string) {
   hostCopied := false
   for h, values := range headers {
     if !strings.Contains(h, "content") && !strings.Contains(h, "Content") {
+      h2 := h
+      if prefix != "" {
+        h2 = prefix+"-"+h
+      }
       for _, v := range values {
-        w.Header().Add(h, v)
+        w.Header().Add(h2, v)
       }
     }
     if strings.EqualFold(h, "host") {
@@ -181,7 +185,11 @@ func CopyHeaders(w http.ResponseWriter, headers http.Header, host string) {
     }
   }
   if !hostCopied && host != "" {
-    w.Header().Add("Host", host)
+    hostHeader := "Host"
+    if prefix != "" {
+      hostHeader = prefix+"-"+hostHeader
+    }
+    w.Header().Add(hostHeader, host)
   }
 }
 
@@ -194,6 +202,7 @@ func GetResponseHeadersLog(w http.ResponseWriter) string {
 
 func GetRequestHeadersLog(r *http.Request) string {
   r.Header["Host"] = []string{r.Host}
+  r.Header["Protocol"] = []string{r.Proto}
   return ToJSON(r.Header)
 }
 

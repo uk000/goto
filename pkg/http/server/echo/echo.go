@@ -22,15 +22,16 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
 func EchoHeaders(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("Echoing headers back", r)
-  util.CopyHeaders(w, r.Header, r.Host)
+  util.CopyHeaders("Request", w, r.Header, r.Host)
   fmt.Fprintf(w, "{\"RequestHeaders\": %s}", util.GetRequestHeadersLog(r))
 }
 
 func Echo(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("Echoing back", r)
-  util.CopyHeaders(w, r.Header, r.Host)
+  util.CopyHeaders("Request", w, r.Header, r.Host)
   w.Header().Add("Content-Type", "application/json")
   response := map[string]interface{}{}
+  response["RequestProtocol"] = r.Proto
   response["RequestURI"] = r.RequestURI
   response["RequestHeaders"] = r.Header
   response["RequestQuery"] = r.URL.Query()

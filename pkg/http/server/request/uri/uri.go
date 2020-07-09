@@ -81,7 +81,7 @@ func disableURICallCounts(w http.ResponseWriter, r *http.Request) {
 
 func middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    util.AddLogMessage(fmt.Sprintf("Request URI: [%s], Method: [%s]", r.RequestURI, r.Method), r)
+    util.AddLogMessage(fmt.Sprintf("Request URI: [%s], Protocol: [%s], Method: [%s]", r.RequestURI, r.Proto, r.Method), r)
     if !util.IsAdminRequest(r) {
       track := false
       uriLock.RLock()

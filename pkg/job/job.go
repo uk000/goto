@@ -228,7 +228,6 @@ func storeJobResult(job *Job, jobRun *JobRunContext, iteration int, data interfa
 }
 
 func (pj *PortJobs) runCommandJob(job *Job, jobRun *JobRunContext, iteration int, last bool) {
-  runLlock := sync.Mutex{}
   job.lock.RLock()
   jobRun.lock.RLock()
   commandTask := job.commandTask
@@ -261,14 +260,12 @@ func (pj *PortJobs) runCommandJob(job *Job, jobRun *JobRunContext, iteration int
 
   readOutput := func(scanner *bufio.Scanner) {
     for scanner.Scan() {
-      runLlock.Lock()
       if !stop {
         out := scanner.Text()
         if len(out) > 0 {
           outputChannel <- out
         }
       }
-      runLlock.Unlock()
       if stop {
         break
       }
@@ -293,7 +290,6 @@ func (pj *PortJobs) runCommandJob(job *Job, jobRun *JobRunContext, iteration int
   }()
 
   stopCommand := func() {
-    runLlock.Lock()
     stop = true
     jobRun.lock.Lock()
     jobRun.stopped = true
@@ -301,7 +297,6 @@ func (pj *PortJobs) runCommandJob(job *Job, jobRun *JobRunContext, iteration int
     if err := cmd.Process.Kill(); err != nil {
       log.Printf("Failed to stop command [%s] with error [%s]\n", job.commandTask.Cmd, err.Error())
     }
-    runLlock.Unlock()
   }
 
 Done:

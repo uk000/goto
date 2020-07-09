@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 )
 
 var (
@@ -35,13 +37,14 @@ func RunHttpServer(root string, handlers ...util.ServerHandler) {
     }
   }
   http.Handle(root, r)
+  h2s := &http2.Server{}
   server = &http.Server{
     Addr:         fmt.Sprintf("0.0.0.0:%d", global.ServerPort),
     WriteTimeout: 60 * time.Second,
     ReadTimeout:  60 * time.Second,
     IdleTimeout:  60 * time.Second,
     ConnContext:  conn.SaveConnInContext,
-    Handler:      r,
+    Handler:      h2c.NewHandler(r, h2s),
   }
   StartHttpServer(server)
   peer.RegisterPeer(global.PeerName, global.PeerAddress)

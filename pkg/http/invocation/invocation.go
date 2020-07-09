@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/net/http2"
 )
 
 type InvocationSpec struct {
@@ -29,6 +30,8 @@ type InvocationSpec struct {
   Headers          [][]string `json:"headers"`
   Body             string     `json:"body"`
   BodyReader       io.Reader  `json:"-"`
+  Protocol         string     `json:"protocol"`
+  AutoUpgrade       bool      `json:"autoUpgrade"`
   Replicas         int        `json:"replicas"`
   RequestCount     int        `json:"requestCount"`
   InitialDelay     string     `json:"initialDelay"`
@@ -41,6 +44,9 @@ type InvocationSpec struct {
   VerifyTLS        bool       `json:"verifyTLS"`
   CollectResponse  bool       `json:"collectResponse"`
   AutoInvoke       bool       `json:"autoInvoke"`
+  httpVersionMajor int 
+  httpVersionMinor int 
+  https             bool
   host             string
   connTimeoutD     time.Duration
   connIdleTimeoutD time.Duration
@@ -120,6 +126,25 @@ func ValidateSpec(spec *InvocationSpec) error {
   if spec.URL == "" {
     return fmt.Errorf("URL is required")
   }
+  if strings.Contains(strings.ToLower(spec.URL), "https") {
+    spec.https = true
+  }
+  if spec.Protocol != "" {
+    if major, minor, ok := http.ParseHTTPVersion(spec.Protocol); ok {
+      if major == 1 && (minor == 0 || minor == 1) {
+        spec.httpVersionMajor = major
+        spec.httpVersionMinor = minor
+      } else if major == 2 {
+        spec.httpVersionMajor = major
+        spec.httpVersionMinor = 0
+      }
+    }
+  }
+  if spec.httpVersionMajor == 0 {
+    spec.httpVersionMajor = 1
+    spec.httpVersionMinor = 1
+  }
+  spec.Protocol = fmt.Sprintf("HTTP/%d.%d", spec.httpVersionMajor, spec.httpVersionMinor)
   if spec.Replicas < 0 {
     return fmt.Errorf("Invalid replicas")
   } else if spec.Replicas == 0 {
@@ -210,6 +235,62 @@ func tlsConfig(target *InvocationSpec) *tls.Config {
   return cfg
 }
 
+func httpTransport(target *InvocationSpec) http.RoundTripper {
+  var transport http.RoundTripper
+  if target.httpVersionMajor == 1 {
+    transport = &http.Transport{
+      MaxIdleConns:       200,
+      MaxIdleConnsPerHost: 100,
+      IdleConnTimeout:    target.connIdleTimeoutD,
+      Proxy:              http.ProxyFromEnvironment,
+      DialContext: (&net.Dialer{
+        Timeout:   target.connTimeoutD,
+        KeepAlive: time.Minute*10,
+      }).DialContext,
+      TLSHandshakeTimeout: 10 * time.Second,
+      TLSClientConfig:     tlsConfig(target),
+      ForceAttemptHTTP2: target.AutoUpgrade,
+    }
+  } else {
+    tr := &http2.Transport{
+      ReadIdleTimeout: target.connIdleTimeoutD,
+      PingTimeout: target.connTimeoutD,
+      TLSClientConfig: tlsConfig(target),
+      AllowHTTP:           true,
+    }
+    tr.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+      if target.https {
+        return tls.Dial(network, addr, cfg)
+      }
+      return net.Dial(network, addr)
+    }
+    transport = tr
+  }
+  return transport
+}
+
+func getHttpClientForTarget(target *InvocationSpec) *http.Client {
+  invocationsLock.RLock()
+  client := targetClients[target.Name]
+  invocationsLock.RUnlock()
+  if client == nil {
+    client = &http.Client{Transport: httpTransport(target)}
+    invocationsLock.Lock()
+    targetClients[target.Name] = client
+    invocationsLock.Unlock()
+  }
+  return client
+}
+
+func RemoveHttpClientForTarget(target string) {
+  invocationsLock.Lock()
+  if client := targetClients[target]; client != nil {
+    client.CloseIdleConnections()
+    delete(targetClients, target)
+  }
+  invocationsLock.Unlock()
+}
+
 func monitorHttpClients() {
   watchListForRemoval := map[string]int{}
   for {
@@ -236,31 +317,6 @@ func monitorHttpClients() {
       invocationsLock.Unlock()
     }
   }
-}
-
-func getHttpClientForTarget(target *InvocationSpec) *http.Client {
-  invocationsLock.RLock()
-  client := targetClients[target.Name]
-  invocationsLock.RUnlock()
-  if client == nil {
-    tr := &http.Transport{
-      MaxIdleConns:       200,
-      MaxIdleConnsPerHost: 100,
-      IdleConnTimeout:    target.connIdleTimeoutD,
-      Proxy:              http.ProxyFromEnvironment,
-      DialContext: (&net.Dialer{
-        Timeout:   target.connTimeoutD,
-        KeepAlive: time.Minute*10,
-      }).DialContext,
-      TLSHandshakeTimeout: 10 * time.Second,
-      TLSClientConfig:     tlsConfig(target),
-    }
-    client = &http.Client{Transport: tr}
-    invocationsLock.Lock()
-    targetClients[target.Name] = client
-    invocationsLock.Unlock()
-  }
-  return client
 }
 
 func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) *InvocationTracker {
