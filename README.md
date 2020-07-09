@@ -190,6 +190,8 @@ In addition to keeping the results in the `goto` client instance, those are also
 | verifyTLS    | bool           | Whether the TLS certificate presented by the target is verified. (Also see `--certs` command arg) |
 | headers      | [][]string     | Headers to be sent to this target |
 | body         | string         | Request body to use for this target|
+| protocol     | string         | Request Protocol to use. Supports `HTTP/1.1` and `HTTP/2.0`|
+| autoUpgrade  | bool           | Whether client should negotiate auto-upgrade from http/1.1 to http/2 |
 | replicas     | int            | Number of parallel invocations to be done for this target |
 | requestCount | int            | Number of requests to be made per replicas for this target. The final request count becomes replicas * requestCount   |
 | delay        | duration       | Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
@@ -238,6 +240,7 @@ curl localhost:8080/client/targets/add --data '
   "name": "t1",
   "method":	"POST",
   "url": "http://somewhere:8080/foo",
+  "protocol":"HTTP/2.0",
   "headers":[["x", "x1"],["y", "y1"]],
   "body": "{\"test\":\"this\"}",
   "replicas": 2, 
