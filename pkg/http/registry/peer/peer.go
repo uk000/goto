@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"goto/pkg/constants"
 	"goto/pkg/global"
 	"goto/pkg/http/client/target"
 	"goto/pkg/http/registry"
@@ -85,16 +86,16 @@ func startRegistryReminder(peer *registry.Peer) {
 
 func setupStartupTasks(data map[string]interface{}) {
   targets := registry.PeerTargets{}
-  if data["targets"] != nil {
-    targetsData := util.ToJSON(data["targets"])
+  if data[constants.PeerDataTargets] != nil {
+    targetsData := util.ToJSON(data[constants.PeerDataTargets])
     if err := util.ReadJson(targetsData, &targets); err != nil {
       log.Println(err.Error())
       return
     }
   }
   jobs := registry.PeerJobs{}
-  if data["jobs"] != nil {
-    for _, jobData := range data["jobs"].(map[string]interface{}) {
+  if data[constants.PeerDataJobs] != nil {
+    for _, jobData := range data[constants.PeerDataJobs].(map[string]interface{}) {
       if job, err := job.ParseJobFromPayload(util.ToJSON(jobData)); err != nil {
         log.Println(err.Error())
         return
@@ -103,10 +104,15 @@ func setupStartupTasks(data map[string]interface{}) {
       }
     }
   }
-  log.Printf("Got %d targets and %d jobs from registry:\n", len(targets), len(jobs))
+  trackingHeaders := data[constants.PeerDataTrackingHeaders].(string)
+  log.Printf("Got %d targets, %d jobs, %s trackingHeaders from registry:\n", len(targets), len(jobs), trackingHeaders)
   port := strconv.Itoa(global.ServerPort)
   pc := target.GetClientForPort(port)
   pj := job.GetPortJobs(port)
+
+  if trackingHeaders != "" {
+    pc.AddTrackingHeaders(trackingHeaders)
+  }
 
   for _, job := range jobs {
     log.Printf("%+v\n", job)

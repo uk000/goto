@@ -162,7 +162,7 @@ func (pc *PortClient) getTargetsToInvoke(r *http.Request) []*invocation.Invocati
   return targetsToInvoke
 }
 
-func (pc *PortClient) addTrackingHeaders(headers string) {
+func (pc *PortClient) AddTrackingHeaders(headers string) {
   pieces := strings.Split(headers, ",")
   pc.targetsLock.Lock()
   for _, h := range pieces {
@@ -314,7 +314,7 @@ func getTargets(w http.ResponseWriter, r *http.Request) {
 func addTrackingHeaders(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if h, present := util.GetStringParam(r, "headers"); present {
-    getPortClient(r).addTrackingHeaders(h)
+    getPortClient(r).AddTrackingHeaders(h)
     w.WriteHeader(http.StatusAccepted)
     msg = fmt.Sprintf("Header %s will be tracked", h)
   } else {

@@ -1,19 +1,23 @@
 package intercept
 
 import (
+	"bufio"
+	"net"
 	"net/http"
 )
 
 type InterceptResponseWriter struct {
   http.ResponseWriter
+  http.Hijacker
   StatusCode int
   Data       []byte
   Hold       bool
+  Hijacked   bool
 }
 
 func (rw *InterceptResponseWriter) WriteHeader(statusCode int) {
   rw.StatusCode = statusCode
-  if !rw.Hold {
+  if !rw.Hijacked && !rw.Hold {
     rw.ResponseWriter.WriteHeader(statusCode)
   }
 }
@@ -27,7 +31,7 @@ func (rw *InterceptResponseWriter) Write(b []byte) (int, error) {
 }
 
 func (rw *InterceptResponseWriter) Proceed() {
-  if rw.Hold {
+  if !rw.Hijacked && rw.Hold {
     if rw.StatusCode <= 0 {
       rw.StatusCode = 200
     }
@@ -36,6 +40,11 @@ func (rw *InterceptResponseWriter) Proceed() {
   }
 }
 
+func (rw *InterceptResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+  rw.Hijacked = true
+  return rw.Hijacker.Hijack()
+}
+
 func NewInterceptResponseWriter(w http.ResponseWriter, hold bool) *InterceptResponseWriter {
-  return &InterceptResponseWriter{ResponseWriter: w, Hold: hold}
+  return &InterceptResponseWriter{ResponseWriter: w, Hijacker: w.(http.Hijacker), Hold: hold}
 }

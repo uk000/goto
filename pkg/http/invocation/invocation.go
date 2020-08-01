@@ -243,6 +243,9 @@ func httpTransport(target *InvocationSpec) http.RoundTripper {
       MaxIdleConnsPerHost: 100,
       IdleConnTimeout:    target.connIdleTimeoutD,
       Proxy:              http.ProxyFromEnvironment,
+      DisableCompression:    true,
+      ExpectContinueTimeout: 5 * time.Second,
+      ResponseHeaderTimeout: 10 * time.Second,
       DialContext: (&net.Dialer{
         Timeout:   target.connTimeoutD,
         KeepAlive: time.Minute*10,

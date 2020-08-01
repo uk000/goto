@@ -2,12 +2,14 @@ package echo
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
+	"golang.org/x/net/websocket"
 )
 
 var (
@@ -17,6 +19,7 @@ var (
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   echoRouter := r.PathPrefix("/echo").Subrouter()
   util.AddRoute(echoRouter, "/headers", EchoHeaders)
+  util.AddRoute(echoRouter, "/ws", echoHandler, "GET", "POST")
   util.AddRoute(echoRouter, "", Echo)
 }
 
@@ -38,4 +41,13 @@ func Echo(w http.ResponseWriter, r *http.Request) {
   body, _ := ioutil.ReadAll(r.Body)
   response["RequestBody"] = string(body)
   fmt.Fprintln(w, util.ToJSON(response))
+}
+
+func echoHandler(w http.ResponseWriter, r *http.Request) {
+  headers := util.GetRequestHeadersLog(r)
+  s := websocket.Server{Handler: websocket.Handler(func(ws *websocket.Conn){
+    ws.Write([]byte(headers))
+    io.Copy(ws, ws)
+  })}
+  s.ServeHTTP(w, r)
 }

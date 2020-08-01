@@ -3,6 +3,7 @@ package registry
 import (
 	"errors"
 	"fmt"
+	"goto/pkg/constants"
 	"goto/pkg/global"
 	"goto/pkg/http/client/results"
 	"goto/pkg/http/invocation"
@@ -27,20 +28,20 @@ type Peer struct {
 }
 
 type PodEpoch struct {
-  Epoch               int `json:"epoch"`
-  FirstContact         time.Time `json:"firstContact"`
-  LastContact          time.Time `json:"lastContact"`
+  Epoch        int       `json:"epoch"`
+  FirstContact time.Time `json:"firstContact"`
+  LastContact  time.Time `json:"lastContact"`
 }
 
 type Pod struct {
-  Name                 string    `json:"name"`
-  Address              string    `json:"address"`
-  Healthy              bool      `json:"healthy"`
-  CurrentEpoch         PodEpoch   `json:"currentEpoch"`
-  PastEpochs           []PodEpoch `json:"pastEpochs"`
-  host                 string
-  client               *http.Client
-  lock                 sync.RWMutex
+  Name         string     `json:"name"`
+  Address      string     `json:"address"`
+  Healthy      bool       `json:"healthy"`
+  CurrentEpoch PodEpoch   `json:"currentEpoch"`
+  PastEpochs   []PodEpoch `json:"pastEpochs"`
+  host         string
+  client       *http.Client
+  lock         sync.RWMutex
 }
 
 type Peers struct {
@@ -62,12 +63,13 @@ type PeerJob struct {
 type PeerJobs map[string]*PeerJob
 
 type PortRegistry struct {
-  peers       map[string]*Peers
-  peerTargets map[string]PeerTargets
-  peerJobs    map[string]PeerJobs
-  peerLocker  *locker.PeersLockers
-  peersLock   sync.RWMutex
-  lockersLock sync.RWMutex
+  peers               map[string]*Peers
+  peerTargets         map[string]PeerTargets
+  peerJobs            map[string]PeerJobs
+  peerTrackingHeaders string
+  peerLocker          *locker.PeersLockers
+  peersLock           sync.RWMutex
+  lockersLock         sync.RWMutex
 }
 
 var (
@@ -183,7 +185,7 @@ func (pr *PortRegistry) unsafeAddPeer(peer *Peer) {
       pod.PastEpochs = append(pod.PastEpochs, oldEpoch)
     }
     pod.PastEpochs = append(pod.PastEpochs, oldPod.CurrentEpoch)
-    podEpoch.Epoch = oldPod.CurrentEpoch.Epoch+1
+    podEpoch.Epoch = oldPod.CurrentEpoch.Epoch + 1
   }
   pod.CurrentEpoch = podEpoch
 
@@ -760,6 +762,7 @@ func (pr *PortRegistry) clearPeerJobs(peerName string) map[string]map[string]boo
 }
 
 func (pr *PortRegistry) addPeersTrackingHeaders(headers string) map[string]map[string]bool {
+  pr.peerTrackingHeaders = headers
   return invokeForPods(pr.loadAllPeerPods(), "POST", "/client/track/headers/add/"+headers, "", http.StatusAccepted, 3, false,
     func(peer string, pod *Pod, err error) {
       if err == nil {
@@ -780,8 +783,9 @@ func addPeer(w http.ResponseWriter, r *http.Request) {
     if peerName == "" {
       pr.addPeer(p)
       pr.peersLock.RLock()
-      response["targets"] = pr.peerTargets[p.Name]
-      response["jobs"] = pr.peerJobs[p.Name]
+      response[constants.PeerDataTargets] = pr.peerTargets[p.Name]
+      response[constants.PeerDataJobs] = pr.peerJobs[p.Name]
+      response[constants.PeerDataTrackingHeaders] = pr.peerTrackingHeaders
       pr.peersLock.RUnlock()
       msg = fmt.Sprintf("Added Peer: %+v", *p)
     } else {
