@@ -29,6 +29,8 @@ type Peer struct {
 
 type PodEpoch struct {
   Epoch        int       `json:"epoch"`
+  Name         string     `json:"name"`
+  Address      string     `json:"address"`
   FirstContact time.Time `json:"firstContact"`
   LastContact  time.Time `json:"lastContact"`
 }
@@ -133,6 +135,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
   util.AddRoute(peersRouter, "/track/headers/{headers}", addPeersTrackingHeaders, "POST", "PUT")
 
+  util.AddRoute(peersRouter, "/clear/epochs", clearPeerEpochs, "POST")
   util.AddRoute(peersRouter, "/clear", clearPeers, "POST")
   util.AddRoute(peersRouter, "", getPeers, "GET")
 }
@@ -179,16 +182,15 @@ func (pr *PortRegistry) unsafeAddPeer(peer *Peer) {
   if pr.peers[peer.Name] == nil {
     pr.peers[peer.Name] = &Peers{Name: peer.Name, Namespace: peer.Namespace, Pods: map[string]*Pod{}, PodEpochs: map[string][]*PodEpoch{}}
   }
-  podEpoch := PodEpoch{FirstContact: now, LastContact: now}
-  pod := &Pod{Name: peer.Pod, Address: peer.Address, host: "http://" + peer.Address, Healthy: true}
+  pod := &Pod{Name: peer.Pod, Address: peer.Address, host: "http://" + peer.Address, Healthy: true,
+              CurrentEpoch: PodEpoch{Name: peer.Pod, Address: peer.Address, FirstContact: now, LastContact: now}}
   pr.initHttpClientForPeerPod(pod)
   if podEpochs := pr.peers[peer.Name].PodEpochs[peer.Address]; podEpochs != nil {
     for _, oldEpoch := range podEpochs {
       pod.PastEpochs = append(pod.PastEpochs, oldEpoch)
     }
-    podEpoch.Epoch = len(podEpochs)
+    pod.CurrentEpoch.Epoch = len(podEpochs)
   }
-  pod.CurrentEpoch = podEpoch
   pr.peers[peer.Name].PodEpochs[peer.Address] = append(pr.peers[peer.Name].PodEpochs[peer.Address], &pod.CurrentEpoch)
 
   pr.peers[peer.Name].Pods[peer.Address] = pod
@@ -206,6 +208,7 @@ func (pr *PortRegistry) addPeer(peer *Peer) {
   pr.unsafeAddPeer(peer)
   pr.peerLocker.InitPeerLocker(peer.Name, peer.Address)
 }
+
 func (pr *PortRegistry) GetPeer(peerName, peerAddress string) *Pod {
   pr.peersLock.RLock()
   defer pr.peersLock.RUnlock()
@@ -237,6 +240,29 @@ func (pr *PortRegistry) removePeer(name string, address string) bool {
   }
   pr.peerLocker.LockPeerLocker(name, address)
   return present
+}
+
+func (pr *PortRegistry) clearPeerEpochs() {
+  pr.peersLock.Lock()
+  defer pr.peersLock.Unlock()
+  for name, peers := range pr.peers {
+    for address, podEpochs := range peers.PodEpochs {
+      currentPod := peers.Pods[address]
+      if currentPod == nil {
+        delete(peers.PodEpochs, address)
+      } else {
+        for i, podEpoch := range podEpochs {
+          if podEpoch.Epoch != currentPod.CurrentEpoch.Epoch {
+            peers.PodEpochs[address] = append(podEpochs[:i], podEpochs[i+1:]...)
+          }
+        }
+      }
+    }
+    if len(peers.Pods) == 0 {
+      delete(pr.peers, name)
+      pr.peerLocker.RemovePeerLocker(name)
+    }
+  }
 }
 
 func (pr *PortRegistry) initHttpClientForPeerPod(pod *Pod) {
@@ -1181,6 +1207,16 @@ func getPeerJobs(w http.ResponseWriter, r *http.Request) {
   if global.EnableRegistryLogs {
     util.AddLogMessage(msg, r)
   }
+}
+
+func clearPeerEpochs(w http.ResponseWriter, r *http.Request) {
+  getPortRegistry(r).clearPeerEpochs()
+  w.WriteHeader(http.StatusAccepted)
+  msg := "Peers epochs cleared"
+  if global.EnableRegistryLogs {
+    util.AddLogMessage(msg, r)
+  }
+  fmt.Fprintln(w, msg)
 }
 
 func clearPeers(w http.ResponseWriter, r *http.Request) {

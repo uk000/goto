@@ -38,7 +38,7 @@ type InvocationSpec struct {
   Delay                string     `json:"delay"`
   Retries              int        `json:"retries"`
   RetryDelay           string     `json:"retryDelay"`
-  RetriableStatusCodes []string   `json:"retriableStatusCodes"`
+  RetriableStatusCodes []int      `json:"retriableStatusCodes"`
   KeepOpen             string     `json:"keepOpen"`
   SendID               bool       `json:"sendID"`
   ConnTimeout          string     `json:"connTimeout"`
@@ -651,7 +651,7 @@ func newClientRequest(method string, url string, headers [][]string, body io.Rea
 
 func invokeTarget(index uint32, targetName string, targetID string, url string, method string,
   host string, headers [][]string, body io.Reader, reportBody bool,
-  retries int, retryDelayD time.Duration, retriableStatusCodes []string,
+  retries int, retryDelayD time.Duration, retriableStatusCodes []int,
   client *http.Client, sinks []ResultSink, resultChannel chan *InvocationResult, wg *sync.WaitGroup) {
   if global.EnableInvocationLogs {
     log.Printf("Invocation[%d]: Invoking targetID: %s, url: %s, method: %s, headers: %+v\n", index, targetID, url, method, headers)
@@ -675,7 +675,7 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
       retry := reqError != nil
       if !retry && retriableStatusCodes != nil {
         for _, retriableCode := range retriableStatusCodes {
-          if strings.EqualFold(retriableCode, strconv.Itoa(resp.StatusCode)) {
+          if retriableCode == resp.StatusCode {
             retry = true
           }
         }
