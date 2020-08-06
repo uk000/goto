@@ -46,5 +46,8 @@ func (rw *InterceptResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error)
 }
 
 func NewInterceptResponseWriter(w http.ResponseWriter, hold bool) *InterceptResponseWriter {
-  return &InterceptResponseWriter{ResponseWriter: w, Hijacker: w.(http.Hijacker), Hold: hold}
+  if h, ok := w.(http.Hijacker); ok {
+    return &InterceptResponseWriter{ResponseWriter: w, Hijacker: h, Hold: hold}
+  }
+  return &InterceptResponseWriter{ResponseWriter: w, Hold: hold}
 }

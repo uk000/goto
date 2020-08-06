@@ -82,7 +82,7 @@ func Middleware(next http.Handler) http.Handler {
     delayCount := delayCountByPort[listenerPort]
     delayLock.RUnlock()
     if delay > 0 && delayCount >= 0 && !util.IsAdminRequest(r) {
-      util.AddLogMessage(fmt.Sprintf("Delaying for = %s", delay.String()), r)
+      util.AddLogMessage(fmt.Sprintf("Delaying for %s", delay.String()), r)
       if delayCount > 0 {
         if delayCount == 1 {
           delayCount = -1

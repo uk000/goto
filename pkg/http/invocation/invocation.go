@@ -24,36 +24,40 @@ import (
 )
 
 type InvocationSpec struct {
-  Name             string     `json:"name"`
-  Method           string     `json:"method"`
-  URL              string     `json:"url"`
-  Headers          [][]string `json:"headers"`
-  Body             string     `json:"body"`
-  BodyReader       io.Reader  `json:"-"`
-  Protocol         string     `json:"protocol"`
-  AutoUpgrade       bool      `json:"autoUpgrade"`
-  Replicas         int        `json:"replicas"`
-  RequestCount     int        `json:"requestCount"`
-  InitialDelay     string     `json:"initialDelay"`
-  Delay            string     `json:"delay"`
-  KeepOpen         string     `json:"keepOpen"`
-  SendID           bool       `json:"sendID"`
-  ConnTimeout      string     `json:"connTimeout"`
-  ConnIdleTimeout  string     `json:"connIdleTimeout"`
-  RequestTimeout   string     `json:"requestTimeout"`
-  VerifyTLS        bool       `json:"verifyTLS"`
-  CollectResponse  bool       `json:"collectResponse"`
-  AutoInvoke       bool       `json:"autoInvoke"`
-  httpVersionMajor int 
-  httpVersionMinor int 
-  https             bool
-  host             string
-  connTimeoutD     time.Duration
-  connIdleTimeoutD time.Duration
-  requestTimeoutD  time.Duration
-  initialDelayD    time.Duration
-  delayD           time.Duration
-  keepOpenD        time.Duration
+  Name                 string     `json:"name"`
+  Method               string     `json:"method"`
+  URL                  string     `json:"url"`
+  Headers              [][]string `json:"headers"`
+  Body                 string     `json:"body"`
+  BodyReader           io.Reader  `json:"-"`
+  Protocol             string     `json:"protocol"`
+  AutoUpgrade          bool       `json:"autoUpgrade"`
+  Replicas             int        `json:"replicas"`
+  RequestCount         int        `json:"requestCount"`
+  InitialDelay         string     `json:"initialDelay"`
+  Delay                string     `json:"delay"`
+  Retries              int        `json:"retries"`
+  RetryDelay           string     `json:"retryDelay"`
+  RetriableStatusCodes []string   `json:"retriableStatusCodes"`
+  KeepOpen             string     `json:"keepOpen"`
+  SendID               bool       `json:"sendID"`
+  ConnTimeout          string     `json:"connTimeout"`
+  ConnIdleTimeout      string     `json:"connIdleTimeout"`
+  RequestTimeout       string     `json:"requestTimeout"`
+  VerifyTLS            bool       `json:"verifyTLS"`
+  CollectResponse      bool       `json:"collectResponse"`
+  AutoInvoke           bool       `json:"autoInvoke"`
+  httpVersionMajor     int
+  httpVersionMinor     int
+  https                bool
+  host                 string
+  connTimeoutD         time.Duration
+  connIdleTimeoutD     time.Duration
+  requestTimeoutD      time.Duration
+  initialDelayD        time.Duration
+  delayD               time.Duration
+  retryDelayD          time.Duration
+  keepOpenD            time.Duration
 }
 
 type InvocationStatus struct {
@@ -98,13 +102,13 @@ const (
 )
 
 var (
-  invocationCounter  uint32
-  activeInvocations  map[uint32]*InvocationTracker = map[uint32]*InvocationTracker{}
-  activeTargets      map[string]*TargetInvocations = map[string]*TargetInvocations{}
-  targetClients      map[string]*http.Client       = map[string]*http.Client{}
-  chanStopCleanup    chan bool                     = make(chan bool, 1)
-  rootCAs            *x509.CertPool
-  invocationsLock    sync.RWMutex
+  invocationCounter uint32
+  activeInvocations map[uint32]*InvocationTracker = map[uint32]*InvocationTracker{}
+  activeTargets     map[string]*TargetInvocations = map[string]*TargetInvocations{}
+  targetClients     map[string]*http.Client       = map[string]*http.Client{}
+  chanStopCleanup   chan bool                     = make(chan bool, 1)
+  rootCAs           *x509.CertPool
+  invocationsLock   sync.RWMutex
 )
 
 func Startup() {
@@ -138,6 +142,9 @@ func ValidateSpec(spec *InvocationSpec) error {
         spec.httpVersionMajor = major
         spec.httpVersionMinor = 0
       }
+    } else if strings.EqualFold(spec.Protocol, "HTTP/2") {
+      spec.httpVersionMajor = 2
+      spec.httpVersionMinor = 0
     }
   }
   if spec.httpVersionMajor == 0 {
@@ -167,6 +174,15 @@ func ValidateSpec(spec *InvocationSpec) error {
     }
   } else {
     spec.delayD = 10 * time.Millisecond
+    spec.Delay = "10ms"
+  }
+  if spec.RetryDelay != "" {
+    if spec.retryDelayD, err = time.ParseDuration(spec.RetryDelay); err != nil {
+      return fmt.Errorf("Invalid retryDelay")
+    }
+  } else {
+    spec.retryDelayD = 1 * time.Second
+    spec.RetryDelay = "1s"
   }
   if spec.ConnTimeout != "" {
     if spec.connTimeoutD, err = time.ParseDuration(spec.ConnTimeout); err != nil {
@@ -174,6 +190,7 @@ func ValidateSpec(spec *InvocationSpec) error {
     }
   } else {
     spec.connTimeoutD = 30 * time.Second
+    spec.ConnTimeout = "30s"
   }
   if spec.ConnIdleTimeout != "" {
     if spec.connIdleTimeoutD, err = time.ParseDuration(spec.ConnIdleTimeout); err != nil {
@@ -181,6 +198,7 @@ func ValidateSpec(spec *InvocationSpec) error {
     }
   } else {
     spec.connIdleTimeoutD = 5 * time.Minute
+    spec.ConnIdleTimeout = "5m"
   }
   if spec.RequestTimeout != "" {
     if spec.requestTimeoutD, err = time.ParseDuration(spec.RequestTimeout); err != nil {
@@ -188,6 +206,7 @@ func ValidateSpec(spec *InvocationSpec) error {
     }
   } else {
     spec.requestTimeoutD = 30 * time.Second
+    spec.RequestTimeout = "30s"
   }
   if spec.KeepOpen != "" {
     if spec.keepOpenD, err = time.ParseDuration(spec.KeepOpen); err != nil {
@@ -239,27 +258,27 @@ func httpTransport(target *InvocationSpec) http.RoundTripper {
   var transport http.RoundTripper
   if target.httpVersionMajor == 1 {
     transport = &http.Transport{
-      MaxIdleConns:       200,
-      MaxIdleConnsPerHost: 100,
-      IdleConnTimeout:    target.connIdleTimeoutD,
-      Proxy:              http.ProxyFromEnvironment,
+      MaxIdleConns:          200,
+      MaxIdleConnsPerHost:   100,
+      IdleConnTimeout:       target.connIdleTimeoutD,
+      Proxy:                 http.ProxyFromEnvironment,
       DisableCompression:    true,
       ExpectContinueTimeout: 5 * time.Second,
       ResponseHeaderTimeout: 10 * time.Second,
       DialContext: (&net.Dialer{
         Timeout:   target.connTimeoutD,
-        KeepAlive: time.Minute*10,
+        KeepAlive: time.Minute * 10,
       }).DialContext,
       TLSHandshakeTimeout: 10 * time.Second,
       TLSClientConfig:     tlsConfig(target),
-      ForceAttemptHTTP2: target.AutoUpgrade,
+      ForceAttemptHTTP2:   target.AutoUpgrade,
     }
   } else {
     tr := &http2.Transport{
       ReadIdleTimeout: target.connIdleTimeoutD,
-      PingTimeout: target.connTimeoutD,
+      PingTimeout:     target.connTimeoutD,
       TLSClientConfig: tlsConfig(target),
-      AllowHTTP:           true,
+      AllowHTTP:       true,
     }
     tr.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
       if target.https {
@@ -277,7 +296,7 @@ func getHttpClientForTarget(target *InvocationSpec) *http.Client {
   client := targetClients[target.Name]
   invocationsLock.RUnlock()
   if client == nil {
-    client = &http.Client{Transport: httpTransport(target)}
+    client = &http.Client{Timeout: target.requestTimeoutD, Transport: httpTransport(target)}
     invocationsLock.Lock()
     targetClients[target.Name] = client
     invocationsLock.Unlock()
@@ -552,11 +571,10 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
     activeTargets = append(activeTargets, k)
   }
   invocationsLock.Unlock()
-  resultCount := 0
   var results []*InvocationResult
 
   if len(waitForResponse) > 0 && waitForResponse[0] {
-    sinks = append(sinks, func(result *InvocationResult){
+    sinks = append(sinks, func(result *InvocationResult) {
       results = append(results, result)
     })
   }
@@ -577,7 +595,8 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
       }
       wg.Add(1)
       go invokeTarget(trackerID, target.Name, targetID, url, target.Method, target.host, target.Headers,
-        bodyReader, target.CollectResponse, httpClient, sinks, resultChannel, wg)
+        bodyReader, target.CollectResponse, target.Retries, target.retryDelayD, target.RetriableStatusCodes,
+        httpClient, sinks, resultChannel, wg)
     }
     wg.Wait()
     delay := 10 * time.Millisecond
@@ -603,7 +622,7 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
   }
   DeregisterInvocation(tracker)
   if global.EnableInvocationLogs {
-    log.Printf("Invocation[%d]: Finished with responses %d\n", trackerID, resultCount)
+    log.Printf("Invocation[%d]: Finished\n", trackerID)
   }
 
   activeTargets = []string{}
@@ -630,9 +649,10 @@ func newClientRequest(method string, url string, headers [][]string, body io.Rea
   }
 }
 
-func invokeTarget(index uint32, targetName string, targetID string, url string, method string, 
-  host string, headers [][]string, body io.Reader, reportBody bool, client *http.Client, 
-  sinks []ResultSink, resultChannel chan *InvocationResult, wg *sync.WaitGroup) {
+func invokeTarget(index uint32, targetName string, targetID string, url string, method string,
+  host string, headers [][]string, body io.Reader, reportBody bool,
+  retries int, retryDelayD time.Duration, retriableStatusCodes []string,
+  client *http.Client, sinks []ResultSink, resultChannel chan *InvocationResult, wg *sync.WaitGroup) {
   if global.EnableInvocationLogs {
     log.Printf("Invocation[%d]: Invoking targetID: %s, url: %s, method: %s, headers: %+v\n", index, targetID, url, method, headers)
   }
@@ -644,7 +664,37 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
   if req, err := newClientRequest(method, url, headers, body); err == nil {
     req.Host = host
     result.URI = req.URL.Path
-    if resp, err := client.Do(req); err == nil {
+    var resp *http.Response
+    var reqError error
+    for i := 0; i <= retries; i++ {
+      if resp != nil {
+        resp.Body.Close()
+        time.Sleep(retryDelayD)
+      }
+      resp, reqError = client.Do(req)
+      retry := reqError != nil
+      if !retry && retriableStatusCodes != nil {
+        for _, retriableCode := range retriableStatusCodes {
+          if strings.EqualFold(retriableCode, strconv.Itoa(resp.StatusCode)) {
+            retry = true
+          }
+        }
+      }
+      if !retry {
+        break
+      } else if i < retries {
+        reason := ""
+        if reqError != nil {
+          reason = reqError.Error()
+        }
+        if reason == "" {
+          reason = resp.Status
+        }
+        log.Printf("Invocation[%d]: Target [%s] url [%s] invocation requires retry due to [%s]. Retries left [%d]. \n",
+          index, targetID, url, reason, retries-i)
+      }
+    }
+    if reqError == nil {
       defer resp.Body.Close()
       if global.EnableInvocationLogs {
         log.Printf("Invocation[%d]: Target %s Response Status: %s\n", index, targetID, resp.Status)
@@ -661,8 +711,8 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
         io.Copy(ioutil.Discard, resp.Body)
       }
     } else {
-      log.Printf("Invocation[%d]: Target %s, url [%s] invocation failed with error: %s\n", index, targetID, url, err.Error())
-      result.Status = err.Error()
+      log.Printf("Invocation[%d]: Target %s, url [%s] invocation failed with error: %s\n", index, targetID, url, reqError.Error())
+      result.Status = reqError.Error()
     }
   } else {
     log.Printf("Invocation[%d]: Target %s, url [%s] failed to create request with error: %s\n", index, targetID, url, err.Error())

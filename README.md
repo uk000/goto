@@ -182,24 +182,27 @@ In addition to keeping the results in the `goto` client instance, those are also
 
 
 #### Client Target JSON Schema
-|Field|Data Type|Description|
+|Field|Data Type|Default Value|Description|
 |---|---|---|
-| name         | string         | Name for this target |
-| method       | string         | HTTP method to use for this target |
-| url          | string         | URL for this target   |
-| verifyTLS    | bool           | Whether the TLS certificate presented by the target is verified. (Also see `--certs` command arg) |
-| headers      | [][]string     | Headers to be sent to this target |
-| body         | string         | Request body to use for this target|
-| protocol     | string         | Request Protocol to use. Supports `HTTP/1.1` and `HTTP/2.0`|
-| autoUpgrade  | bool           | Whether client should negotiate auto-upgrade from http/1.1 to http/2 |
-| replicas     | int            | Number of parallel invocations to be done for this target |
-| requestCount | int            | Number of requests to be made per replicas for this target. The final request count becomes replicas * requestCount   |
-| delay        | duration       | Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
-| initialDelay | duration       | Minimum delay to wait before starting traffic to a target. Actual delay will be the max of all the targets being invoked in a given round of invocation. |
+| name         | string         || Name for this target |
+| method       | string         || HTTP method to use for this target |
+| url          | string         || URL for this target   |
+| verifyTLS    | bool           |false| Whether the TLS certificate presented by the target is verified. (Also see `--certs` command arg) |
+| headers      | [][]string     || Headers to be sent to this target |
+| body         | string         || Request body to use for this target|
+| protocol     | string         |`HTTP/1.1`| Request Protocol to use. Supports `HTTP/1.1` (default) and `HTTP/2.0`|
+| autoUpgrade  | bool           |false| Whether client should negotiate auto-upgrade from http/1.1 to http/2. |
+| replicas     | int            |1| Number of parallel invocations to be done for this target. |
+| requestCount | int            |1| Number of requests to be made per replicas for this target. The final request count becomes replicas * requestCount   |
+| initialDelay | duration       || Minimum delay to wait before starting traffic to a target. Actual delay will be the max of all the targets being invoked in a given round of invocation. |
+| delay        | duration       |10ms| Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
+| retries      | int            |0| Number of retries to perform for requests to this target for connection errors or for `retriableStatusCodes`.|
+| retryDelay   | duration       |1s| Time to wait between retries.|
+| retriableStatusCodes| []string|| HTTP response status codes for which requests should be retried |
 | sendID       | bool           | Whether or not a unique ID be sent with each client request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
 | connTimeout  | duration       | Timeout for opening target connection |
 | connIdleTimeout | duration    | Idle Timeout for target connection |
-| requestTimeout | duration     | Timeout for HTTP requests to the target (not implemented at present) |
+| requestTimeout | duration     | Timeout for HTTP requests to the target |
 | autoInvoke   | bool           | Whether this target should be invoked as soon as it's added |
 
 
