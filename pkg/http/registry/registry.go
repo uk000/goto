@@ -38,7 +38,7 @@ type Pod struct {
   Address      string     `json:"address"`
   Healthy      bool       `json:"healthy"`
   CurrentEpoch PodEpoch   `json:"currentEpoch"`
-  PastEpochs   []PodEpoch `json:"pastEpochs"`
+  PastEpochs   []*PodEpoch `json:"pastEpochs"`
   host         string
   client       *http.Client
   lock         sync.RWMutex
@@ -48,6 +48,7 @@ type Peers struct {
   Name      string          `json:"name"`
   Namespace string          `json:"namespace"`
   Pods      map[string]*Pod `json:"pods"`
+  PodEpochs map[string][]*PodEpoch      `json:"podEpochs"`
 }
 
 type PeerTarget struct {
@@ -92,6 +93,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "/{peer}/{address}/locker/store/{keys}", storeInPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/{address}/locker/remove/{keys}", removeFromPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/{address}/locker/lock/{keys}", lockInPeerLocker, "POST")
+  util.AddRoute(peersRouter, "/{peer}/{address}/locker/lock", lockPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/{address}/locker/clear", clearLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/clear", clearLocker, "POST")
   util.AddRoute(peersRouter, "/lockers/clear", clearLocker, "POST")
@@ -175,19 +177,19 @@ func (pr *PortRegistry) init() {
 func (pr *PortRegistry) unsafeAddPeer(peer *Peer) {
   now := time.Now()
   if pr.peers[peer.Name] == nil {
-    pr.peers[peer.Name] = &Peers{Name: peer.Name, Namespace: peer.Namespace, Pods: map[string]*Pod{}}
+    pr.peers[peer.Name] = &Peers{Name: peer.Name, Namespace: peer.Namespace, Pods: map[string]*Pod{}, PodEpochs: map[string][]*PodEpoch{}}
   }
   podEpoch := PodEpoch{FirstContact: now, LastContact: now}
   pod := &Pod{Name: peer.Pod, Address: peer.Address, host: "http://" + peer.Address, Healthy: true}
   pr.initHttpClientForPeerPod(pod)
-  if oldPod := pr.peers[peer.Name].Pods[peer.Address]; oldPod != nil {
-    for _, oldEpoch := range oldPod.PastEpochs {
+  if podEpochs := pr.peers[peer.Name].PodEpochs[peer.Address]; podEpochs != nil {
+    for _, oldEpoch := range podEpochs {
       pod.PastEpochs = append(pod.PastEpochs, oldEpoch)
     }
-    pod.PastEpochs = append(pod.PastEpochs, oldPod.CurrentEpoch)
-    podEpoch.Epoch = oldPod.CurrentEpoch.Epoch + 1
+    podEpoch.Epoch = len(podEpochs)
   }
   pod.CurrentEpoch = podEpoch
+  pr.peers[peer.Name].PodEpochs[peer.Address] = append(pr.peers[peer.Name].PodEpochs[peer.Address], &pod.CurrentEpoch)
 
   pr.peers[peer.Name].Pods[peer.Address] = pod
   if pr.peerTargets[peer.Name] == nil {
@@ -202,7 +204,7 @@ func (pr *PortRegistry) addPeer(peer *Peer) {
   pr.peersLock.Lock()
   defer pr.peersLock.Unlock()
   pr.unsafeAddPeer(peer)
-  pr.peerLocker.InitPeerLocker(peer.Name)
+  pr.peerLocker.InitPeerLocker(peer.Name, peer.Address)
 }
 func (pr *PortRegistry) GetPeer(peerName, peerAddress string) *Pod {
   pr.peersLock.RLock()
@@ -232,11 +234,8 @@ func (pr *PortRegistry) removePeer(name string, address string) bool {
   present := false
   if _, present = pr.peers[name]; present {
     delete(pr.peers[name].Pods, address)
-    if len(pr.peers[name].Pods) == 0 {
-      delete(pr.peers, name)
-    }
   }
-  pr.peerLocker.RemovePeerLocker(name)
+  pr.peerLocker.LockPeerLocker(name, address)
   return present
 }
 
@@ -463,7 +462,7 @@ func (pr *PortRegistry) clearLocker(peerName, peerAddress string) map[string]map
       peersToClear = pr.loadPeerPods(peerName, peerAddress)
     }
   } else if peerName != "" && peerAddress == "" {
-    if pr.peerLocker.InitPeerLocker(peerName) {
+    if pr.peerLocker.InitPeerLocker(peerName, "") {
       peersToClear = pr.loadPeerPods(peerName, "")
     }
   } else {
@@ -897,9 +896,27 @@ func lockInPeerLocker(w http.ResponseWriter, r *http.Request) {
   address := util.GetStringParamValue(r, "address")
   keys, _ := util.GetListParam(r, "keys")
   if peerName != "" && address != "" && len(keys) > 0 {
-    getPortRegistryLocker(r).LockKeys(peerName, address, keys)
+    getPortRegistryLocker(r).LockKeysInPeerLocker(peerName, address, keys)
     w.WriteHeader(http.StatusAccepted)
     msg = fmt.Sprintf("Peer %s data for keys %+v is locked", peerName, keys)
+  } else {
+    w.WriteHeader(http.StatusBadRequest)
+    msg = "Not enough parameters to access locker"
+  }
+  if global.EnableRegistryLogs {
+    util.AddLogMessage(msg, r)
+  }
+  fmt.Fprintln(w, msg)
+}
+
+func lockPeerLocker(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  peerName := util.GetStringParamValue(r, "peer")
+  address := util.GetStringParamValue(r, "address")
+  if peerName != "" && address != "" {
+    getPortRegistryLocker(r).LockPeerLocker(peerName, address)
+    w.WriteHeader(http.StatusAccepted)
+    msg = fmt.Sprintf("Peer %s locker is locked", peerName)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = "Not enough parameters to access locker"

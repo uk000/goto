@@ -4,6 +4,7 @@ import (
 	"goto/pkg/constants"
 	"goto/pkg/http/client/results"
 	"goto/pkg/util"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ type InstanceLocker struct {
 
 type PeerLocker struct {
   Locker map[string]*InstanceLocker `json:"locker"`
+  lockedCounter int
   lock   sync.RWMutex
 }
 
@@ -110,6 +112,14 @@ func (il *InstanceLocker) lockKeys(keys []string) {
   }
 }
 
+func (il *InstanceLocker) Lock() {
+  il.lock.Lock()
+  defer il.lock.Unlock()
+  for _, lockerData := range il.Locker {
+    lockerData.Locked = true
+  }
+}
+
 func newPeerLocker() *PeerLocker {
 	peerLocker := &PeerLocker{}
 	peerLocker.init()
@@ -139,6 +149,12 @@ func (pl *PeerLocker) clearInstanceLocker(peerAddress string) bool {
 	return present
 }
 
+func (pl *PeerLocker) removeInstanceLocker(peerAddress string) {
+	pl.lock.Lock()
+	defer pl.lock.Unlock()
+	delete(pl.Locker, peerAddress)
+}
+
 func NewPeersLocker() *PeersLockers {
 	pl := &PeersLockers{}
 	pl.Init()
@@ -151,10 +167,14 @@ func (pl *PeersLockers) Init() {
 	pl.peerLocker = map[string]*PeerLocker{}
 }
 
-func (pl *PeersLockers) InitPeerLocker(peerName string) bool {
+func (pl *PeersLockers) InitPeerLocker(peerName string, peerAddress string) bool {
   if peerName != "" {
     pl.lock.Lock()
-    pl.peerLocker[peerName] = newPeerLocker()
+    if peerAddress == "" || pl.peerLocker[peerName] == nil {
+      pl.peerLocker[peerName] = newPeerLocker()
+    } else {
+      pl.peerLocker[peerName].clearInstanceLocker(peerAddress)
+    }
     pl.lock.Unlock()
     return true
   }
@@ -183,8 +203,17 @@ func (pl *PeersLockers) Remove(peerName string, peerAddress string, keys []strin
   pl.getInstanceLocker(peerName, peerAddress).remove(keys)
 }
 
-func (pl *PeersLockers) LockKeys(peerName string, peerAddress string, keys []string) {
+func (pl *PeersLockers) LockKeysInPeerLocker(peerName string, peerAddress string, keys []string) {
   pl.getInstanceLocker(peerName, peerAddress).lockKeys(keys)
+}
+
+func (pl *PeersLockers) LockPeerLocker(peerName string, peerAddress string) {
+  il := pl.getInstanceLocker(peerName, peerAddress)
+  il.Lock()
+  peerLocker := pl.peerLocker[peerName]
+  peerLocker.lockedCounter++
+  peerLocker.Locker[peerAddress+"-"+strconv.Itoa(peerLocker.lockedCounter)] = il
+  peerLocker.removeInstanceLocker(peerAddress)
 }
 
 func (pl *PeersLockers) ClearInstanceLocker(peerName string, peerAddress string) bool {
