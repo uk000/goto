@@ -186,7 +186,7 @@ In addition to keeping the results in the `goto` client instance, those are also
 
 #### Client Target JSON Schema
 |Field|Data Type|Default Value|Description|
-|---|---|---|
+|---|---|---|---|
 | name         | string         || Name for this target |
 | method       | string         || HTTP method to use for this target |
 | url          | string         || URL for this target   |
@@ -202,11 +202,11 @@ In addition to keeping the results in the `goto` client instance, those are also
 | retries      | int            |0| Number of retries to perform for requests to this target for connection errors or for `retriableStatusCodes`.|
 | retryDelay   | duration       |1s| Time to wait between retries.|
 | retriableStatusCodes| []string|| HTTP response status codes for which requests should be retried |
-| sendID       | bool           | Whether or not a unique ID be sent with each client request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
-| connTimeout  | duration       | Timeout for opening target connection |
-| connIdleTimeout | duration    | Idle Timeout for target connection |
-| requestTimeout | duration     | Timeout for HTTP requests to the target |
-| autoInvoke   | bool           | Whether this target should be invoked as soon as it's added |
+| sendID       | bool           |false| Whether or not a unique ID be sent with each client request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
+| connTimeout  | duration       |30s| Timeout for opening target connection |
+| connIdleTimeout | duration    |5m| Idle Timeout for target connection |
+| requestTimeout | duration     |30s| Timeout for HTTP requests to the target |
+| autoInvoke   | bool           |false| Whether this target should be invoked as soon as it's added |
 
 
 #### Client Results Schema (output of API /client/results)
