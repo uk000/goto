@@ -365,6 +365,172 @@ Let's see the APIs involved to achieve this scenario:
 5. Nice already, isn't it? But it keeps getting better. Not only `peer1` received the configs at startup, but any new config you add at the registry will automatically get pushed to all registered instances for that peer label. And not just client targets, but also jobs. What are jobs? Well, that's the story for another scenario. Or checkout [Job feature documentation](README.md#jobs-features)
 
 
+# Scenario: Deal with transient pods
+
+On the subject of transient pods that come up and go down randomly (due to chaos testing or canary deployment testing), testing your application's behavior in the presence of such transiency is challenging. Due to canary deployment or K8S HPA scaling, pods may come up and go down at random points non-deterministically. To be able to perform some deterministic testing among such non-determinism is a challenge. In order to connect the dots and reason about some behavior of a traffic that originates from a non-deterministic source, and receives response from a non-deterministic destination, you'd (or your test harness would) need to know which K8S pod started at what point and shut down at which point.
+
+If `goto` is added as a container to your deployment (or `goto` was the primary container for testing purpose), the `goto` instances can help you record the timeline of your pod lifecycles and correlate it with the test results. 
+
+When a `goto` instance is told to connect and work with a `goto` registry, the instances reports to the registry at startup, periodic pings (every 30s), and reports at death too. Registry `goto` instance serves as the book-keeper of this info, building a timeline of the lifecycle of pods of a deployment as well as container restarts for a pod. The `/peers` API in the registry instance returns the collective results of all the `goto` instances that connected to it.
+
+Let's see it in action to understand it better. Just like previous scenario, we have a registry instance and a `goto` worker instance connected to the registry.
+
+   ```
+   $ goto --port 8080 --label registry
+   ```
+   ```
+   $ goto --port 8081 --label peer1 --registry http://goto-registry:8080
+   ```
+
+When the `peer1` instance comes up, it registers itself with the registry. After this point, the peer details can be seen on the registry:
+   ```
+   $ curl -s http://goto-registry:8080/registry/peers
+    {
+      "peer1": {
+        "name": "peer1",
+        "namespace": "local",
+        "pods": {
+          "172.28.255.164:8081": {
+            "name": "peer1-host",
+            "address": "1.0.0.1:8081",
+            "healthy": true,
+            "currentEpoch": {
+              "epoch": 0,
+              "name": "peer1-host",
+              "address": "1.0.0.1:8081",
+              "firstContact": "2020-08-06T14:48:26.001994-07:00",
+              "lastContact": "2020-08-06T14:48:26.001994-07:00"
+            },
+            "pastEpochs": null
+          }
+        },
+        "podEpochs": {
+          "1.0.0.1:8081": [
+            {
+              "epoch": 0,
+              "name": "peer1-host",
+              "address": "1.0.0.1:8081",
+              "firstContact": "2020-08-06T14:48:26.001994-07:00",
+              "lastContact": "2020-08-06T14:48:26.001994-07:00"
+            }
+          ]
+        }
+      }
+    }
+   ```
+
+For a peer (named `peer1` in the example above), registry records the following details:
+- `name`: peer's name (governed by the label passed to the peer at startup, or defaults to peer's hostname)
+- `namespace`: K8s namespace when peer is running on k8s, otherwise uses `local` by default
+- `pods`: list of instances connected to registry using this peer name. For each instance, it records the IP address, port, host name, flag telling whether this instance was found to be healthy at last interaction. `currentEpoch` and `pastEpochs` record the various lifetimes of this instance. If the instance only connects once, there'll just be one epoch shown as `currentEpoch`. If the instance gets restarted without getting a change to de-registre, and reconnects at startup again with the same IP, the old `currentEpoch` is moved to `pastEpochs`, and new epoch is recorded under `currentEpoch`. For an epoch, there's in index that tells the sequence number of this epoch, while `firstContact` and `lastContact` records when this instance connected for the first time, and the last time this instance reminded registry of its presence.
+- `podEpochs`: records all appearances of various instances for a peer name. When an instance de-registers, it's removed from the `pods` list but all its past appearances are kept `podEpochs`. These `podEpochs` stay around until explicitly cleaned using API `/registry/peeers/clear/epochs`.
+
+The peer1 instance keeps pinging the registry, reminding registry of its presence. This way, if registry instance restarted for some reason, the instances re-register with the registry. When an instance goes down, it attempts to de-register from the registry. However, sometimes the instance might be unable to de-register (e.g. due to pod running with envoy sidecar, and the sidecar becoming unavailable or being unable to route traffic). When registry receives the notification from the instance about the imminent shutdown, it removes the peer instance from the `pods` list but the instance details remain in the `podEpochs` list. So `podEpochs` records the complete timeline of all pods/instances of a peer. Another example of the list:
+
+```
+{
+  "peer1": {
+    "name": "peer1",
+    "namespace": "local",
+    "pods": {
+      "1.0.0.1:8081": {
+        "name": "peer1-host1",
+        "address": "1.0.0.1:8081",
+        "healthy": true,
+        "currentEpoch": {
+          "epoch": 2,
+          "name": "peer1-host1",
+          "address": "1.0.0.1:8081",
+          "firstContact": "2020-08-06T17:57:05.650996-07:00",
+          "lastContact": "2020-08-06T17:57:05.650996-07:00"
+        },
+        "pastEpochs": [
+          {
+            "epoch": 0,
+            "name": "peer1-host1",
+            "address": "1.0.0.1:8081",
+            "firstContact": "2020-08-06T14:48:26.001994-07:00",
+            "lastContact": "2020-08-06T17:46:28.163734-07:00"
+          },
+          {
+            "epoch": 1,
+            "name": "peer1-host1",
+            "address": "1.0.0.1:8081",
+            "firstContact": "2020-08-06T17:46:35.637055-07:00",
+            "lastContact": "2020-08-06T17:56:35.688563-07:00"
+          }
+        ]
+      },
+      "1.0.0.2:9091": {
+        "name": "peer1-host2",
+        "address": "1.0.0.2:9091",
+        "healthy": true,
+        "currentEpoch": {
+          "epoch": 1,
+          "name": "peer1-host2",
+          "address": "1.0.0.2:9091",
+          "firstContact": "2020-08-06T17:57:03.412247-07:00",
+          "lastContact": "2020-08-06T17:57:03.412247-07:00"
+        },
+        "pastEpochs": [
+          {
+            "epoch": 0,
+            "name": "peer1-host2",
+            "address": "1.0.0.2:9091",
+            "firstContact": "2020-08-06T17:56:57.866404-07:00",
+            "lastContact": "2020-08-06T17:56:57.866404-07:00"
+          }
+        ]
+      }
+    },
+    "podEpochs": {
+      "1.0.0.1:8081": [
+        {
+          "epoch": 0,
+          "name": "peer1-host1",
+          "address": "1.0.0.1:8081",
+          "firstContact": "2020-08-06T14:48:26.001994-07:00",
+          "lastContact": "2020-08-06T17:46:28.163734-07:00"
+        },
+        {
+          "epoch": 1,
+          "name": "peer1-host1",
+          "address": "1.0.0.1:8081",
+          "firstContact": "2020-08-06T17:46:35.637055-07:00",
+          "lastContact": "2020-08-06T17:56:35.688563-07:00"
+        },
+        {
+          "epoch": 2,
+          "name": "peer1-host1",
+          "address": "1.0.0.1:8081",
+          "firstContact": "2020-08-06T17:57:05.650996-07:00",
+          "lastContact": "2020-08-06T17:57:05.650996-07:00"
+        }
+      ],
+      "1.0.0.2:9091": [
+        {
+          "epoch": 0,
+          "name": "peer1-host2",
+          "address": "1.0.0.2:9091",
+          "firstContact": "2020-08-06T17:56:57.866404-07:00",
+          "lastContact": "2020-08-06T17:56:57.866404-07:00"
+        },
+        {
+          "epoch": 1,
+          "name": "peer1-host2",
+          "address": "1.0.0.2:9091",
+          "firstContact": "2020-08-06T17:57:03.412247-07:00",
+          "lastContact": "2020-08-06T17:57:03.412247-07:00"
+        }
+      ]
+    }
+  }
+}
+
+```
+
+
+
 # Scenario: Capture results from transient pods
 
 On the subject of transient pods that come up and go down randomly (due to chaos testing or canary deployment testing), another challenge is to collect results from such instances. You could keep polling the pods for results until they go down. However, `goto` as a client testing tool can help with this too just as in the previous scenario.
@@ -490,6 +656,25 @@ $ curl -v http://goto-instance/client/targets/add --data '
 }'
 ```
 This config would lead to HTTPS traffic being sent to `somewhere.com`, but SNI authority set to `somewhere.else.com`, and it would verify the TLS certificates presented by the target server against `somewhere.else.com` host and using the Root CAs read from the command line arg location. Sweet!
+
+
+# Scenario: Use HTTP server to respond to any arbitrary client HTTP requests
+
+
+A simple testing need is to have an HTTP application that can respond to some custom REST API calls with a given payload, so that we don't have to write custom code for the server application. You may need such server application during development time, as a stand-in for the real server application that you want to defer building but need it now to build the UI/client. Or, you may need such server application to test some existing client application, to inspect its requests (URIs invoked, headers passed, payload, etc.).
+
+As an http server application, `goto` responds to all arbitrary URI requests, with either default status of 200, or a custom response status you configure. It also logs the details of the incoming requests: HTTP method, request URI, request headers, remote client address, etc. You can set custom response headers to be sent back for all requests, and also custom response payload. You can configure some URIs to bypass the custom response setup, in which case those URIs will respond with the default 200 status. You can even specify a default bypass response status!
+
+Let's see some of these features in action.
+
+1. Let's assume `goto` instance is running at `http://goto:8080`
+
+2. 
+- Certain HTTP response codes for a specific number of requests.
+- Certain HTTP response headers to be added to each response
+- Add a delay to responses 
+`Goto` as a server application allows y
+
 
 
 # Scenario: Test a client's behavior upon service failure

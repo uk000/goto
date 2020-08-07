@@ -120,6 +120,7 @@ func Middleware(next http.Handler) http.Handler {
     if !util.IsAdminRequest(r) {
       setResponseHeaders(w, r)
     }
+    w.Header().Add("Content-Type", "application/json")
     next.ServeHTTP(w, r)
   })
 }

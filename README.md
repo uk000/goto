@@ -7,15 +7,16 @@ An HTTP server+client testing tool in one.
 ## Why?
 It's hard to find some of these features together in a single tool
 
-## What Features?
-See below
-
 ## How to use it?
 It's available as a docker image: https://hub.docker.com/repository/docker/uk0000/goto.
 Or build it locally on your machine
 ```
 go build -o goto .
 ```
+
+## Show me the money!
+Keep reading...
+
 
 <br/>
 
@@ -27,6 +28,8 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 ### Scenario: [Use HTTP client to send requests and track results](scenarios.md#scenario-use-http-client-to-send-requests-and-track-results)
 
 ### Scenario: [Run dynamic traffic from K8s pods at startup](scenarios.md#scenario-run-dynamic-traffic-from-k8s-pods-at-startup)
+
+### Scenario: [Deal with transient pods](scenarios.md#scenario-deal-with-transient-pods)
 
 ### Scenario: [Capture results from transient pods](scenarios.md#scenario-capture-results-from-transient-pods)
 
@@ -1711,6 +1714,7 @@ Peer instances periodically re-register themselves with registry in case registr
 | GET       | /registry/peers/health | Check and report health of all instances of all peers |
 | POST      | /registry/peers/{peer}/health/cleanup | Check health of all instances of the given peer label and remove IP addresses that are unresponsive |
 | POST      | /registry/peers/health/cleanup | Check health of all instances of all peers and remove IP addresses that are unresponsive |
+| POST      | /registry/peers/clear/epochs   | Remove epochs for disconnected peers|
 | POST      | /registry/peers/clear   | Remove all registered peers|
 | GET       | /registry/peers         | Get all registered peers. See [Peers JSON Schema](#peers-json-schema) |
 | POST      | /registry/peers/{peer}/{address}/locker/store/{key} | Store any arbitrary value for the given key in the locker of the peer instance |
