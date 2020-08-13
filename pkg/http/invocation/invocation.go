@@ -669,6 +669,8 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
     for i := 0; i <= retries; i++ {
       if resp != nil {
         resp.Body.Close()
+      }
+      if i > 0 {
         time.Sleep(retryDelayD)
       }
       resp, reqError = client.Do(req)
