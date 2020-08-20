@@ -172,16 +172,17 @@ In addition to keeping the results in the `goto` client instance, those are also
 | GET       |	/client/targets                       | Get list of currently configured targets |
 | POST      |	/client/targets/clear                 | Remove all targets |
 | GET       |	/client/targets/active                | Get list of currently active (running) targets |
-| PUT, POST |	/client/blocking/set/{flag}           | Set whether calls to invoke will block and receive full target responses  |
-| GET       |	/client/blocking                      | Get current state of the blocking flag |
 | PUT, POST |	/client/track/headers/add/{headers}   | Add headers for tracking response counts per target |
-| PUT, POST |	/client/track/headers/remove/{headers}| Remove headers from tracking set |
+| PUT, POST |	/client/track/headers/remove/{header}| Remove header (single) from tracking set |
 | POST      | /client/track/headers/clear           | Remove all tracked headers |
 | GET       |	/client/track/headers/list            | Get list of tracked headers |
 | GET       |	/client/track/headers                 | Get list of tracked headers |
 | GET       |	/client/results                       | Get combined results for all invocations since last time results were cleared. See [`Results Schema`](#client-results-schema) |
 | GET       |	/client/results/invocations           | Get invocation results broken down for each invocation that was triggered since last time results were cleared |
 | POST      | /client/results/clear                 | Clear previously accumulated invocation results |
+| POST      | /client/results/clear                 | Clear previously accumulated invocation results |
+| POST      | /client/results/all/{enable}          | Enable/disable collection of cumulative results across all targets. This gives high level overview of all traffic, but at a performance overhead. Disabled by default. |
+| POST      | /client/results/invocations/{enable}          | Enable/disable collection of results by invocations. This gives more detailed visibility into results per invocation, but has performance overhead. Disabled by default. |
 
 
 #### Client Target JSON Schema
@@ -201,7 +202,7 @@ In addition to keeping the results in the `goto` client instance, those are also
 | delay        | duration       |10ms| Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
 | retries      | int            |0| Number of retries to perform for requests to this target for connection errors or for `retriableStatusCodes`.|
 | retryDelay   | duration       |1s| Time to wait between retries.|
-| retriableStatusCodes| []string|| HTTP response status codes for which requests should be retried |
+| retriableStatusCodes| []int|| HTTP response status codes for which requests should be retried |
 | sendID       | bool           |false| Whether or not a unique ID be sent with each client request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
 | connTimeout  | duration       |30s| Timeout for opening target connection |
 | connIdleTimeout | duration    |5m| Idle Timeout for target connection |
@@ -210,19 +211,48 @@ In addition to keeping the results in the `goto` client instance, those are also
 
 
 #### Client Results Schema (output of API /client/results)
+The results are keyed by targets, with an empty key "" used to capture all results (across all targets) if "capturing of all results" is enabled (via API `/client/results/all/{enable}`).
+The schema below describes fields per target (including the all targets data)
+
 |Field|Data Type|Description|
 |---|---|---|
-| targetInvocationCounts      | string->int                 | Total requests sent per target |
-| targetFirstResponses        | string->time                | Time of first response received from the target |
-| targetLastResponses         | string->time                | Time of last response received from the target |
-| countsByStatus              | string->int                 | Response counts across all targets grouped by HTTP Status |
-| countsByStatusCodes         | string->int                 | Response counts across all targets grouped by HTTP Status Code |
-| countsByHeaders             | string->int                 | Response counts across all targets grouped by header names   |
-| countsByHeaderValues        | string->string->int         | Response counts across all targets grouped by header names and values |
-| countsByTargetStatus        | string->string->int         | Response counts per target grouped by HTTP Status |
-| countsByTargetStatusCodes    | string->string->int         | Response counts per target grouped by HTTP Status Code |
-| countsByTargetHeaders       | string->string->int         | Response counts per target grouped by header names |
-| countsByTargetHeaderValues  | string->string->string->int | Response counts per target grouped by header names and header values |
+| target            | string | Target for which these results are captured |
+| invocationCounts      | >int                 | Total requests sent to this target |
+| firstResponse        | time                | Time of first response received from the target |
+| lastResponse         | time                | Time of last response received from the target |
+| retriedInvocationCounts | int | Total requests to this target that were retried at least once |
+| countsByStatus       | string->int   | Response counts by HTTP Status |
+| countsByStatusCodes  | string->int   | Response counts by HTTP Status Code |
+| countsByURIs         | string->int   | Response counts by URIs |
+| countsByHeaders      | string->HeaderCounts   | Response counts by header, with detailed info captured in `HeaderCounts` object described below |
+
+
+#### HeaderCounts schema
+The schema below describes fields per target (including the all targets data)
+
+|Field|Data Type|Description|
+|---|---|---|
+| target            | string | Target for which these results are captured |
+| count       | CountInfo   | request counts info for this header |
+| countsByValues | string->CountInfo   | request counts info per header value for this header |
+| countsByStatusCodes | int->CountInfo   | request counts info per status code for this header |
+| countsByValuesStatusCodes | string->int->CountInfo   | request counts info per status code per header value for this header |
+| crossHeaders | string->HeaderCounts   | HeaderCounts for each cross-header for this header |
+| crossHeadersByValues | string->string->HeaderCounts   | HeaderCounts for each cross-header per heder value for this header |
+| firstResponse        | time | Time of first response received for this header |
+| lastResponse         | time | Time of last response received for this header |
+
+
+#### CountInfo schema
+The schema below describes fields per target (including the all targets data)
+
+|Field|Data Type|Description|
+|---|---|---|
+| value       | int | number of responses in this set  |
+| retries     | int | number of requests that were retried in this set |
+| firstResponse | time | Time of first response in this set  |
+| lastResponse  | time | Time of last response received in this set |
+
 
 #### Invocation Results Schema (output of API /client/results/invocations)
 * Reports results for all invocations since last clearing of results, as an Object with invocation numner as key and invocation's results as value. The results for each invocation have same schema as `Client Results Schema`, with an additional bool flag `finished` to indicate whether the invocation is still running or has finished. See example below.
@@ -349,7 +379,7 @@ curl localhost:8080/client/results
     },
     "countsByHeaders": {
       "goto-host": {
-        "Header": "goto-host",
+        "header": "goto-host",
         "count": {
           "count": 20,
           "retries": 4,
@@ -434,7 +464,7 @@ curl localhost:8080/client/results
         },
         "crossHeaders": {
           "request-from-goto-host": {
-            "Header": "request-from-goto-host",
+            "header": "request-from-goto-host",
             "count": {
               "count": 20,
               "retries": 4,
@@ -512,7 +542,7 @@ curl localhost:8080/client/results
         "crossHeadersByValues": {
           "pod.local@1.0.0.1:8082": {
             "request-from-goto-host": {
-              "Header": "request-from-goto-host",
+              "header": "request-from-goto-host",
               "count": {
                 "count": 12,
                 "retries": 2,
@@ -565,7 +595,7 @@ curl localhost:8080/client/results
           },
           "pod.local@1.0.0.1:9092": {
             "request-from-goto-host": {
-              "Header": "request-from-goto-host",
+              "header": "request-from-goto-host",
               "count": {
                 "count": 8,
                 "retries": 2,
@@ -633,7 +663,7 @@ curl localhost:8080/client/results
         "lastResponse": "2020-08-20T14:36:28.740768-07:00"
       },
       "request-from-goto-host": {
-        "Header": "request-from-goto-host",
+        "header": "request-from-goto-host",
         "count": {
           "count": 20,
           "retries": 4,
@@ -704,7 +734,7 @@ curl localhost:8080/client/results
         },
         "crossHeaders": {
           "goto-host": {
-            "Header": "goto-host",
+            "header": "goto-host",
             "count": {
               "count": 20,
               "retries": 4,
@@ -796,7 +826,7 @@ curl localhost:8080/client/results
         "crossHeadersByValues": {
           "pod.local@1.0.0.1:8081": {
             "goto-host": {
-              "Header": "goto-host",
+              "header": "goto-host",
               "count": {
                 "count": 20,
                 "retries": 4,

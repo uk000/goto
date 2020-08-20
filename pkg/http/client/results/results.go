@@ -14,19 +14,19 @@ import (
 	"time"
 )
 
-type HeaderCount struct {
-  Value         int       `json:"count"`
+type CountInfo struct {
+  Value         int       `json:"value"`
   Retries       int       `json:"retries"`
   FirstResponse time.Time `json:"firstResponse"`
   LastResponse  time.Time `json:"lastResponse"`
 }
 
 type HeaderCounts struct {
-  Header                    string
-  Count                     *HeaderCount                        `json:"count"`
-  CountsByValues            map[string]*HeaderCount             `json:"countsByValues"`
-  CountsByStatusCodes       map[int]*HeaderCount                `json:"countsByStatusCodes"`
-  CountsByValuesStatusCodes map[string]map[int]*HeaderCount     `json:"countsByValuesStatusCodes"`
+  Header                    string                              `json:"header"`
+  Count                     *CountInfo                          `json:"count"`
+  CountsByValues            map[string]*CountInfo               `json:"countsByValues"`
+  CountsByStatusCodes       map[int]*CountInfo                  `json:"countsByStatusCodes"`
+  CountsByValuesStatusCodes map[string]map[int]*CountInfo       `json:"countsByValuesStatusCodes"`
   CrossHeaders              map[string]*HeaderCounts            `json:"crossHeaders"`
   CrossHeadersByValues      map[string]map[string]*HeaderCounts `json:"crossHeadersByValues"`
   FirstResponse             time.Time                           `json:"firstResponse"`
@@ -120,10 +120,10 @@ func (tr *TargetResults) Init(trackingHeaders []string, crossTrackingHeaders map
 func newHeaderCounts(header string) *HeaderCounts {
   return &HeaderCounts{
     Header:                    header,
-    Count:                     &HeaderCount{},
-    CountsByValues:            map[string]*HeaderCount{},
-    CountsByStatusCodes:       map[int]*HeaderCount{},
-    CountsByValuesStatusCodes: map[string]map[int]*HeaderCount{},
+    Count:                     &CountInfo{},
+    CountsByValues:            map[string]*CountInfo{},
+    CountsByStatusCodes:       map[int]*CountInfo{},
+    CountsByValuesStatusCodes: map[string]map[int]*CountInfo{},
     CrossHeaders:              map[string]*HeaderCounts{},
     CrossHeadersByValues:      map[string]map[string]*HeaderCounts{},
   }
@@ -137,7 +137,7 @@ func setTimestamps(h *HeaderCounts) {
   h.LastResponse = now
 }
 
-func incrementHeaderCount(h *HeaderCount, retries int, by ...*HeaderCount) {
+func incrementHeaderCount(h *CountInfo, retries int, by ...*CountInfo) {
   if len(by) > 0 {
     h.Value += by[0].Value
     h.Retries += by[0].Retries
@@ -158,16 +158,16 @@ func incrementHeaderCount(h *HeaderCount, retries int, by ...*HeaderCount) {
   }
 }
 
-func incrementHeaderCountForStatus(m map[int]*HeaderCount, statusCode int, retries int, by ...*HeaderCount) {
+func incrementHeaderCountForStatus(m map[int]*CountInfo, statusCode int, retries int, by ...*CountInfo) {
   if m[statusCode] == nil {
-    m[statusCode] = &HeaderCount{}
+    m[statusCode] = &CountInfo{}
   }
   incrementHeaderCount(m[statusCode], retries, by...)
 }
 
-func incrementHeaderCountForValue(m map[string]*HeaderCount, value string, retries int, by ...*HeaderCount) {
+func incrementHeaderCountForValue(m map[string]*CountInfo, value string, retries int, by ...*CountInfo) {
   if m[value] == nil {
-    m[value] = &HeaderCount{}
+    m[value] = &CountInfo{}
   }
   incrementHeaderCount(m[value], retries, by...)
 }
@@ -200,7 +200,7 @@ func processSubCrossHeadersForHeader(header string, values []string, statusCode 
     for _, crossValue := range crossValues {
       incrementHeaderCountForValue(crossHeaderCounts.CountsByValues, crossValue, retries)
       if crossHeaderCounts.CountsByValuesStatusCodes[crossValue] == nil {
-        crossHeaderCounts.CountsByValuesStatusCodes[crossValue] = map[int]*HeaderCount{}
+        crossHeaderCounts.CountsByValuesStatusCodes[crossValue] = map[int]*CountInfo{}
       }
       incrementHeaderCountForStatus(crossHeaderCounts.CountsByValuesStatusCodes[crossValue], statusCode, retries)
     }
@@ -220,7 +220,7 @@ func processSubCrossHeadersForHeader(header string, values []string, statusCode 
       for _, crossValue := range crossValues {
         incrementHeaderCountForValue(crossHeaderCountsByValue.CountsByValues, crossValue, retries)
         if crossHeaderCountsByValue.CountsByValuesStatusCodes[crossValue] == nil {
-          crossHeaderCountsByValue.CountsByValuesStatusCodes[crossValue] = map[int]*HeaderCount{}
+          crossHeaderCountsByValue.CountsByValuesStatusCodes[crossValue] = map[int]*CountInfo{}
         }
         incrementHeaderCountForStatus(crossHeaderCountsByValue.CountsByValuesStatusCodes[crossValue], statusCode, retries)
       }
@@ -242,7 +242,7 @@ func (tr *TargetResults) addHeaderResult(header string, values []string, statusC
   for _, value := range values {
     incrementHeaderCountForValue(headerCounts.CountsByValues, value, retries)
     if headerCounts.CountsByValuesStatusCodes[value] == nil {
-      headerCounts.CountsByValuesStatusCodes[value] = map[int]*HeaderCount{}
+      headerCounts.CountsByValuesStatusCodes[value] = map[int]*CountInfo{}
     }
     incrementHeaderCountForStatus(headerCounts.CountsByValuesStatusCodes[value], statusCode, retries)
   }
@@ -489,20 +489,20 @@ func addDeltaHeaderCounts(result, delta *HeaderCounts, crossTrackingHeaders map[
   setTimestamps(result)
   incrementHeaderCount(result.Count, 0, delta.Count)
   if result.CountsByValues == nil {
-    result.CountsByValues = map[string]*HeaderCount{}
+    result.CountsByValues = map[string]*CountInfo{}
   }
   for value, count := range delta.CountsByValues {
     incrementHeaderCountForValue(result.CountsByValues, value, 0, count)
   }
   if result.CountsByStatusCodes == nil {
-    result.CountsByStatusCodes = map[int]*HeaderCount{}
+    result.CountsByStatusCodes = map[int]*CountInfo{}
   }
   for statusCode, count := range delta.CountsByStatusCodes {
     incrementHeaderCountForStatus(result.CountsByStatusCodes, statusCode, 0, count)
   }
   for value, valueCounts := range delta.CountsByValuesStatusCodes {
     if result.CountsByValuesStatusCodes[value] == nil {
-      result.CountsByValuesStatusCodes[value] = map[int]*HeaderCount{}
+      result.CountsByValuesStatusCodes[value] = map[int]*CountInfo{}
     }
     for statusCode, count := range valueCounts {
       incrementHeaderCountForStatus(result.CountsByValuesStatusCodes[value], statusCode, 0, count)
