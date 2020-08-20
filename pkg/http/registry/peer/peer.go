@@ -73,7 +73,7 @@ func startRegistryReminder(peer *registry.Peer) {
     select {
     case <-chanStopReminder:
       return
-    case <-time.Tick(30 * time.Second):
+    case <-time.Tick(5 * time.Second):
       url := global.RegistryURL + "/registry/peers/" + peer.Name + "/remember"
       if resp, err := http.Post(url, "application/json", strings.NewReader(util.ToJSON(peer))); err == nil {
         util.CloseResponse(resp)

@@ -164,31 +164,9 @@ func (pc *PortClient) getTargetsToInvoke(r *http.Request) []*invocation.Invocati
 }
 
 func (pc *PortClient) AddTrackingHeaders(headers string) {
-  pieces := strings.Split(headers, ",")
   pc.targetsLock.Lock()
-  pc.trackingHeaders = []string{}
-  pc.crossTrackingHeaders = map[string][]string{}
-  for _, piece := range pieces {
-    crossHeaders := strings.Split(piece, "|")
-    for i, h := range crossHeaders {
-      crossHeaders[i] = strings.ToLower(h)
-    }
-    if len(crossHeaders) > 1 {
-      pc.crossTrackingHeaders[crossHeaders[0]] = append(pc.crossTrackingHeaders[crossHeaders[0]], crossHeaders[1:]...)
-    }
-    for _, h := range crossHeaders {
-      exists := false
-      for _, eh := range pc.trackingHeaders {
-        if strings.EqualFold(h, eh) {
-          exists = true
-        }
-      }
-      if !exists {
-        pc.trackingHeaders = append(pc.trackingHeaders, strings.ToLower(h))
-      }
-    }
-  }
-  pc.targetsLock.Unlock()
+  defer pc.targetsLock.Unlock()
+  pc.trackingHeaders, pc.crossTrackingHeaders = util.ParseTrackingHeaders(headers)
 }
 
 func (pc *PortClient) removeTrackingHeader(header string) {

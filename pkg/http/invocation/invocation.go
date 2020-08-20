@@ -73,6 +73,7 @@ type InvocationResult struct {
   TargetID   string
   Status     string
   StatusCode int
+  Retries    int
   URI        string
   Headers    map[string][]string
   Body       string
@@ -671,6 +672,7 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
         resp.Body.Close()
       }
       if i > 0 {
+        result.Retries++
         time.Sleep(retryDelayD)
       }
       resp, reqError = client.Do(req)
@@ -712,7 +714,7 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
       if global.EnableInvocationLogs {
         headerLogs := []string{}
         for header, values := range resp.Header {
-          headerLogs = append(headerLogs, header + ":[" + strings.Join(values, ",") + "]")
+          headerLogs = append(headerLogs, header+":["+strings.Join(values, ",")+"]")
         }
         headerLog := strings.Join(headerLogs, ",")
         log.Printf("Invocation[%d]: Target %s Response Status: %s\n, Headers: [%s]", index, targetID, resp.Status, headerLog)

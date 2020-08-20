@@ -248,7 +248,7 @@ func (pl *PeersLockers) GetPeerLocker(peerName, peerAddress string) interface{} 
   return nil
 }
 
-func (pl *PeersLockers) GetTargetsResults() map[string]map[string]*results.TargetResults {
+func (pl *PeersLockers) GetTargetsResults(trackingHeaders []string, crossTrackingHeaders map[string][]string) map[string]map[string]*results.TargetResults {
   pl.lock.RLock()
   defer pl.lock.RUnlock()
   summary := map[string]map[string]*results.TargetResults{}
@@ -265,7 +265,7 @@ func (pl *PeersLockers) GetTargetsResults() map[string]map[string]*results.Targe
           }
           if summary[peer][target] == nil {
             summary[peer][target] = &results.TargetResults{Target: target}
-            summary[peer][target].Init()
+            summary[peer][target].Init(trackingHeaders, crossTrackingHeaders)
           }
           if data := targetData.Data; data != "" {
             result := &results.TargetResults{}
@@ -282,8 +282,8 @@ func (pl *PeersLockers) GetTargetsResults() map[string]map[string]*results.Targe
   return summary
 }
 
-func (pl *PeersLockers) GetTargetsSummaryResults() map[string]*results.TargetsSummaryResults {
-  clientResultsSummary := pl.GetTargetsResults()
+func (pl *PeersLockers) GetTargetsSummaryResults(trackingHeaders []string, crossTrackingHeaders map[string][]string) map[string]*results.TargetsSummaryResults {
+  clientResultsSummary := pl.GetTargetsResults(trackingHeaders, crossTrackingHeaders)
   pl.lock.RLock()
   defer pl.lock.RUnlock()
   result := map[string]*results.TargetsSummaryResults{}

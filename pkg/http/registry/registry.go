@@ -66,13 +66,15 @@ type PeerJob struct {
 type PeerJobs map[string]*PeerJob
 
 type PortRegistry struct {
-  peers               map[string]*Peers
-  peerTargets         map[string]PeerTargets
-  peerJobs            map[string]PeerJobs
-  peerTrackingHeaders string
-  peerLocker          *locker.PeersLockers
-  peersLock           sync.RWMutex
-  lockersLock         sync.RWMutex
+  peers                map[string]*Peers
+  peerTargets          map[string]PeerTargets
+  peerJobs             map[string]PeerJobs
+  peerTrackingHeaders  string
+  trackingHeaders      []string
+  crossTrackingHeaders map[string][]string
+  peerLocker           *locker.PeersLockers
+  peersLock            sync.RWMutex
+  lockersLock          sync.RWMutex
 }
 
 var (
@@ -788,6 +790,7 @@ func (pr *PortRegistry) clearPeerJobs(peerName string) map[string]map[string]boo
 
 func (pr *PortRegistry) addPeersTrackingHeaders(headers string) map[string]map[string]bool {
   pr.peerTrackingHeaders = headers
+  pr.trackingHeaders, pr.crossTrackingHeaders = util.ParseTrackingHeaders(headers)
   return invokeForPods(pr.loadAllPeerPods(), "POST", "/client/track/headers/add/"+headers, "", http.StatusAccepted, 3, false,
     func(peer string, pod *Pod, err error) {
       if err == nil {
@@ -993,10 +996,11 @@ func getPeerLocker(w http.ResponseWriter, r *http.Request) {
 func getTargetsSummaryResults(w http.ResponseWriter, r *http.Request) {
   detailed := util.IsYes(util.GetStringParamValue(r, "detailed"))
   var result interface{}
+  pr := getPortRegistry(r)
   if detailed {
-    result = getPortRegistryLocker(r).GetTargetsResults()
+    result = getPortRegistryLocker(r).GetTargetsResults(pr.trackingHeaders, pr.crossTrackingHeaders)
   } else {
-    result = getPortRegistryLocker(r).GetTargetsSummaryResults()
+    result = getPortRegistryLocker(r).GetTargetsSummaryResults(pr.trackingHeaders, pr.crossTrackingHeaders)
   }
   w.WriteHeader(http.StatusAlreadyReported)
   util.WriteJsonPayload(w, result)

@@ -56,7 +56,8 @@ func AddLogMessage(msg string, r *http.Request) {
 
 func PrintLogMessages(r *http.Request) {
   m := r.Context().Value(logmessagesKey).(*messagestore)
-  if !IsLockerRequest(r) && (!IsAdminRequest(r) || global.EnableAdminLogs) && global.EnableTrackingLogs {
+  if !IsLockerRequest(r) && (!IsAdminRequest(r) || global.EnableAdminLogs) && 
+        (!IsReminderRequest(r) || global.EnableRegistryReminderLogs) && global.EnableTrackingLogs {
     log.Println(strings.Join(m.messages, " --> "))
   }
   m.messages = m.messages[:0]
@@ -246,6 +247,10 @@ func IsAdminRequest(r *http.Request) bool {
     strings.HasPrefix(r.RequestURI, "/registry")
 }
 
+func IsReminderRequest(r *http.Request) bool {
+  return strings.Contains(r.RequestURI, "/remember")
+}
+
 func IsLockerRequest(r *http.Request) bool {
   return strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker") 
 }
@@ -392,4 +397,41 @@ func GetFillerUnmarked(text string) string {
     return fillers[0]
   }
   return ""
+}
+
+func ParseTrackingHeaders(headers string) ([]string, map[string][]string) {
+  trackingHeaders := []string{}
+  crossTrackingHeaders := map[string][]string{}
+  pieces := strings.Split(headers, ",")
+  for _, piece := range pieces {
+    crossHeaders := strings.Split(piece, "|")
+    for i, h := range crossHeaders {
+      crossHeaders[i] = strings.ToLower(h)
+    }
+    if len(crossHeaders) > 1 {
+      crossTrackingHeaders[crossHeaders[0]] = append(crossTrackingHeaders[crossHeaders[0]], crossHeaders[1:]...)
+    }
+    for _, h := range crossHeaders {
+      exists := false
+      for _, eh := range trackingHeaders {
+        if strings.EqualFold(h, eh) {
+          exists = true
+        }
+      }
+      if !exists {
+        trackingHeaders = append(trackingHeaders, strings.ToLower(h))
+      }
+    }
+  }
+  return trackingHeaders, crossTrackingHeaders
+}
+
+func BuildCrossHeadersMap(crossTrackingHeaders map[string][]string) (map[string]string) {
+  crossHeadersMap := map[string]string{}
+  for header, subheaders := range crossTrackingHeaders {
+    for _, subheader := range subheaders {
+      crossHeadersMap[subheader] = header
+    }
+  }
+  return crossHeadersMap
 }
