@@ -29,17 +29,17 @@ type Peer struct {
 
 type PodEpoch struct {
   Epoch        int       `json:"epoch"`
-  Name         string     `json:"name"`
-  Address      string     `json:"address"`
+  Name         string    `json:"name"`
+  Address      string    `json:"address"`
   FirstContact time.Time `json:"firstContact"`
   LastContact  time.Time `json:"lastContact"`
 }
 
 type Pod struct {
-  Name         string     `json:"name"`
-  Address      string     `json:"address"`
-  Healthy      bool       `json:"healthy"`
-  CurrentEpoch PodEpoch   `json:"currentEpoch"`
+  Name         string      `json:"name"`
+  Address      string      `json:"address"`
+  Healthy      bool        `json:"healthy"`
+  CurrentEpoch PodEpoch    `json:"currentEpoch"`
   PastEpochs   []*PodEpoch `json:"pastEpochs"`
   host         string
   client       *http.Client
@@ -47,10 +47,10 @@ type Pod struct {
 }
 
 type Peers struct {
-  Name      string          `json:"name"`
-  Namespace string          `json:"namespace"`
-  Pods      map[string]*Pod `json:"pods"`
-  PodEpochs map[string][]*PodEpoch      `json:"podEpochs"`
+  Name      string                 `json:"name"`
+  Namespace string                 `json:"namespace"`
+  Pods      map[string]*Pod        `json:"pods"`
+  PodEpochs map[string][]*PodEpoch `json:"podEpochs"`
 }
 
 type PeerTarget struct {
@@ -183,7 +183,7 @@ func (pr *PortRegistry) unsafeAddPeer(peer *Peer) {
     pr.peers[peer.Name] = &Peers{Name: peer.Name, Namespace: peer.Namespace, Pods: map[string]*Pod{}, PodEpochs: map[string][]*PodEpoch{}}
   }
   pod := &Pod{Name: peer.Pod, Address: peer.Address, host: "http://" + peer.Address, Healthy: true,
-              CurrentEpoch: PodEpoch{Name: peer.Pod, Address: peer.Address, FirstContact: now, LastContact: now}}
+    CurrentEpoch: PodEpoch{Name: peer.Pod, Address: peer.Address, FirstContact: now, LastContact: now}}
   pr.initHttpClientForPeerPod(pod)
   if podEpochs := pr.peers[peer.Name].PodEpochs[peer.Address]; podEpochs != nil {
     for _, oldEpoch := range podEpochs {

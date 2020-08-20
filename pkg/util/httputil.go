@@ -193,6 +193,14 @@ func CopyHeaders(prefix string, w http.ResponseWriter, headers http.Header, host
   }
 }
 
+func ToLowerHeaders(headers map[string][]string) map[string][]string {
+  newHeaders := map[string][]string{}
+  for h, v := range headers {
+    newHeaders[strings.ToLower(h)] = v
+  }
+  return newHeaders
+}
+
 func GetResponseHeadersLog(w http.ResponseWriter) string {
   var s strings.Builder
   s.Grow(128)

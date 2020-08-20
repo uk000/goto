@@ -11,7 +11,6 @@ import (
 	"goto/pkg/global"
 	"goto/pkg/http/client/results"
 	"goto/pkg/http/invocation"
-	"goto/pkg/http/server/listeners"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
@@ -22,10 +21,11 @@ type Target struct {
 }
 
 type PortClient struct {
-  targets                   map[string]*Target
-  activeTargetsCount        int         
-  targetsLock               sync.RWMutex
-  trackingHeaders           []string
+  targets              map[string]*Target
+  activeTargetsCount   int
+  targetsLock          sync.RWMutex
+  trackingHeaders      []string
+  crossTrackingHeaders map[string][]string
 }
 
 var (
@@ -68,6 +68,7 @@ func (pc *PortClient) init() bool {
   }
   pc.targets = map[string]*Target{}
   pc.trackingHeaders = []string{}
+  pc.crossTrackingHeaders = map[string][]string{}
   return true
 }
 
@@ -78,7 +79,7 @@ func (pc *PortClient) AddTarget(t *Target, r ...*http.Request) error {
     pc.targets[t.Name] = t
     pc.targetsLock.Unlock()
     invocation.RemoveHttpClientForTarget(t.Name)
-    t.Headers = append(t.Headers, []string{"Goto-Client", listeners.DefaultLabel})
+    t.Headers = append(t.Headers, []string{"From-Goto", global.PeerName}, []string{"From-Goto-Host", util.GetHostLabel()})
     if t.AutoInvoke {
       go func() {
         if global.EnableClientLogs {
@@ -165,8 +166,27 @@ func (pc *PortClient) getTargetsToInvoke(r *http.Request) []*invocation.Invocati
 func (pc *PortClient) AddTrackingHeaders(headers string) {
   pieces := strings.Split(headers, ",")
   pc.targetsLock.Lock()
-  for _, h := range pieces {
-    pc.trackingHeaders = append(pc.trackingHeaders, strings.ToLower(h))
+  pc.trackingHeaders = []string{}
+  pc.crossTrackingHeaders = map[string][]string{}
+  for _, piece := range pieces {
+    crossHeaders := strings.Split(piece, "|")
+    for i, h := range crossHeaders {
+      crossHeaders[i] = strings.ToLower(h)
+    }
+    if len(crossHeaders) > 1 {
+      pc.crossTrackingHeaders[crossHeaders[0]] = append(pc.crossTrackingHeaders[crossHeaders[0]], crossHeaders[1:]...)
+    }
+    for _, h := range crossHeaders {
+      exists := false
+      for _, eh := range pc.trackingHeaders {
+        if strings.EqualFold(h, eh) {
+          exists = true
+        }
+      }
+      if !exists {
+        pc.trackingHeaders = append(pc.trackingHeaders, strings.ToLower(h))
+      }
+    }
   }
   pc.targetsLock.Unlock()
 }
@@ -177,6 +197,9 @@ func (pc *PortClient) removeTrackingHeader(header string) {
     if strings.EqualFold(header, h) {
       pc.trackingHeaders = append(pc.trackingHeaders[:i], pc.trackingHeaders[i+1:]...)
     }
+    if _, present := pc.crossTrackingHeaders[h]; present {
+      delete(pc.crossTrackingHeaders, h)
+    }
   }
   pc.targetsLock.Unlock()
 }
@@ -184,6 +207,7 @@ func (pc *PortClient) removeTrackingHeader(header string) {
 func (pc *PortClient) clearTrackingHeaders() {
   pc.targetsLock.Lock()
   pc.trackingHeaders = []string{}
+  pc.crossTrackingHeaders = map[string][]string{}
   pc.targetsLock.Unlock()
 }
 
@@ -191,6 +215,9 @@ func (pc *PortClient) getTrackingHeaders() []string {
   headers := []string{}
   pc.targetsLock.RLock()
   for _, h := range pc.trackingHeaders {
+    if crossHeaders := pc.crossTrackingHeaders[h]; crossHeaders != nil {
+      headers = append(headers, strings.Join([]string{h, strings.Join(crossHeaders, "|")}, "|"))
+    }
     headers = append(headers, h)
   }
   pc.targetsLock.RUnlock()
@@ -225,7 +252,7 @@ func (pc *PortClient) stopTargets(targetNames []string) (bool, bool) {
         stopped = true
         break
       }
-      time.Sleep(time.Second*1)
+      time.Sleep(time.Second * 1)
     }
   }
   return len(stoppingTargets) > 0, stopped
@@ -445,7 +472,7 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (pc *PortClient) invokeTarget(target *invocation.InvocationSpec) {
-  tracker := invocation.RegisterInvocation(target, results.ResultChannelSinkFactory(target, pc.trackingHeaders))
+  tracker := invocation.RegisterInvocation(target, results.ResultChannelSinkFactory(target, pc.trackingHeaders, pc.crossTrackingHeaders))
   pc.targetsLock.Lock()
   pc.activeTargetsCount++
   pc.targetsLock.Unlock()

@@ -24,26 +24,26 @@ type InstanceLocker struct {
 }
 
 type PeerLocker struct {
-  Locker map[string]*InstanceLocker `json:"locker"`
+  Locker        map[string]*InstanceLocker `json:"locker"`
   lockedCounter int
-  lock   sync.RWMutex
+  lock          sync.RWMutex
 }
 
 type PeersLockers struct {
-  peerLocker  map[string]*PeerLocker
-  lock sync.RWMutex
+  peerLocker map[string]*PeerLocker
+  lock       sync.RWMutex
 }
 
 func newInstanceLocker() *InstanceLocker {
-	instanceLocker := &InstanceLocker{}
-	instanceLocker.init()
-	return instanceLocker
+  instanceLocker := &InstanceLocker{}
+  instanceLocker.init()
+  return instanceLocker
 }
 
 func (il *InstanceLocker) init() {
-	il.lock.Lock()
-	defer il.lock.Unlock()
-	il.Locker = map[string]*LockerData{}
+  il.lock.Lock()
+  defer il.lock.Unlock()
+  il.Locker = map[string]*LockerData{}
 }
 
 func (il *InstanceLocker) store(keys []string, value string) {
@@ -121,50 +121,50 @@ func (il *InstanceLocker) Lock() {
 }
 
 func newPeerLocker() *PeerLocker {
-	peerLocker := &PeerLocker{}
-	peerLocker.init()
-	return peerLocker
+  peerLocker := &PeerLocker{}
+  peerLocker.init()
+  return peerLocker
 }
 
 func (pl *PeerLocker) init() {
-	pl.Locker = map[string]*InstanceLocker{}
+  pl.Locker = map[string]*InstanceLocker{}
 }
 
 func (pl *PeerLocker) getInstanceLocker(peerAddress string) *InstanceLocker {
   pl.lock.Lock()
   defer pl.lock.Unlock()
   if pl.Locker[peerAddress] == nil {
-		pl.Locker[peerAddress] = newInstanceLocker()
+    pl.Locker[peerAddress] = newInstanceLocker()
   }
   return pl.Locker[peerAddress]
 }
 
 func (pl *PeerLocker) clearInstanceLocker(peerAddress string) bool {
-	pl.lock.Lock()
-	defer pl.lock.Unlock()
-	_, present := pl.Locker[peerAddress]
-	if present {
-		pl.Locker[peerAddress] = newInstanceLocker()
-	}
-	return present
+  pl.lock.Lock()
+  defer pl.lock.Unlock()
+  _, present := pl.Locker[peerAddress]
+  if present {
+    pl.Locker[peerAddress] = newInstanceLocker()
+  }
+  return present
 }
 
 func (pl *PeerLocker) removeInstanceLocker(peerAddress string) {
-	pl.lock.Lock()
-	defer pl.lock.Unlock()
-	delete(pl.Locker, peerAddress)
+  pl.lock.Lock()
+  defer pl.lock.Unlock()
+  delete(pl.Locker, peerAddress)
 }
 
 func NewPeersLocker() *PeersLockers {
-	pl := &PeersLockers{}
-	pl.Init()
-	return pl
+  pl := &PeersLockers{}
+  pl.Init()
+  return pl
 }
 
 func (pl *PeersLockers) Init() {
-	pl.lock.Lock()
-	defer pl.lock.Unlock()
-	pl.peerLocker = map[string]*PeerLocker{}
+  pl.lock.Lock()
+  defer pl.lock.Unlock()
+  pl.peerLocker = map[string]*PeerLocker{}
 }
 
 func (pl *PeersLockers) InitPeerLocker(peerName string, peerAddress string) bool {
@@ -221,15 +221,15 @@ func (pl *PeersLockers) ClearInstanceLocker(peerName string, peerAddress string)
   peerLocker := pl.peerLocker[peerName]
   pl.lock.Unlock()
   if peerLocker != nil {
-		return peerLocker.clearInstanceLocker(peerAddress)
-	}
-	return false
+    return peerLocker.clearInstanceLocker(peerAddress)
+  }
+  return false
 }
 
 func (pl *PeersLockers) RemovePeerLocker(peerName string) {
-	pl.lock.Lock()
-	delete(pl.peerLocker, peerName)
-	pl.lock.Unlock()
+  pl.lock.Lock()
+  delete(pl.peerLocker, peerName)
+  pl.lock.Unlock()
 }
 
 func (pl *PeersLockers) GetPeerLocker(peerName, peerAddress string) interface{} {
@@ -243,7 +243,7 @@ func (pl *PeersLockers) GetPeerLocker(peerName, peerAddress string) interface{} 
     return peerLocker
   }
   if peerLocker != nil {
-		return peerLocker.getInstanceLocker(peerAddress)
+    return peerLocker.getInstanceLocker(peerAddress)
   }
   return nil
 }
@@ -286,12 +286,12 @@ func (pl *PeersLockers) GetTargetsSummaryResults() map[string]*results.TargetsSu
   clientResultsSummary := pl.GetTargetsResults()
   pl.lock.RLock()
   defer pl.lock.RUnlock()
-	result := map[string]*results.TargetsSummaryResults{}
+  result := map[string]*results.TargetsSummaryResults{}
   for peer, targetsResults := range clientResultsSummary {
-		result[peer] = &results.TargetsSummaryResults{}
-		result[peer].Init()
+    result[peer] = &results.TargetsSummaryResults{}
+    result[peer].Init()
     for _, targetResult := range targetsResults {
-			result[peer].AddTargetResult(targetResult)
+      result[peer].AddTargetResult(targetResult)
     }
   }
   return result

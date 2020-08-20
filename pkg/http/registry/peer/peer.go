@@ -58,7 +58,7 @@ func RegisterPeer(peerName, peerAddress string) {
 
 func DeregisterPeer(peerName, peerAddress string) {
   if global.RegistryURL != "" {
-    chanStopReminder<-true
+    chanStopReminder <- true
     url := global.RegistryURL + "/registry/peers/" + peerName + "/remove/" + peerAddress
     if resp, err := http.Post(url, "plain/text", nil); err == nil {
       util.CloseResponse(resp)

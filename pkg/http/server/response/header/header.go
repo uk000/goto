@@ -107,12 +107,14 @@ func getResponseHeaders(w http.ResponseWriter, r *http.Request) {
 func setResponseHeaders(w http.ResponseWriter, r *http.Request) {
   headersLock.RLock()
   defer headersLock.RUnlock()
+  util.CopyHeaders("Request", w, r.Header, r.Host)
   headerMap := responseHeadersByPort[util.GetListenerPort(r)]
   for header, values := range headerMap {
     for _, value := range values {
       w.Header().Add(header, value)
     }
   }
+  w.Header().Add("Content-Type", "application/json")
 }
 
 func Middleware(next http.Handler) http.Handler {
@@ -120,7 +122,6 @@ func Middleware(next http.Handler) http.Handler {
     if !util.IsAdminRequest(r) {
       setResponseHeaders(w, r)
     }
-    w.Header().Add("Content-Type", "application/json")
     next.ServeHTTP(w, r)
   })
 }

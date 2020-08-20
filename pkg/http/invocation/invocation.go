@@ -698,9 +698,6 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
     }
     if reqError == nil {
       defer resp.Body.Close()
-      if global.EnableInvocationLogs {
-        log.Printf("Invocation[%d]: Target %s Response Status: %s\n", index, targetID, resp.Status)
-      }
       for header, values := range resp.Header {
         result.Headers[header] = values
       }
@@ -711,6 +708,14 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
         result.Body = util.Read(resp.Body)
       } else {
         io.Copy(ioutil.Discard, resp.Body)
+      }
+      if global.EnableInvocationLogs {
+        headerLogs := []string{}
+        for header, values := range resp.Header {
+          headerLogs = append(headerLogs, header + ":[" + strings.Join(values, ",") + "]")
+        }
+        headerLog := strings.Join(headerLogs, ",")
+        log.Printf("Invocation[%d]: Target %s Response Status: %s\n, Headers: [%s]", index, targetID, resp.Status, headerLog)
       }
     } else {
       log.Printf("Invocation[%d]: Target %s, url [%s] invocation failed with error: %s\n", index, targetID, url, reqError.Error())

@@ -31,8 +31,6 @@ func EchoHeaders(w http.ResponseWriter, r *http.Request) {
 
 func Echo(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("Echoing back", r)
-  util.CopyHeaders("Request", w, r.Header, r.Host)
-  w.Header().Add("Content-Type", "application/json")
   response := map[string]interface{}{}
   response["RequestProtocol"] = r.Proto
   response["RequestURI"] = r.RequestURI
