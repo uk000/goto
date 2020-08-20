@@ -317,138 +317,492 @@ curl localhost:8080/client/results
 
 ```json
 {
-  "peer1": {
-    "": {
-      "target": "",
-      "invocationCounts": 120,
-      "firstResponses": "2020-06-23T13:43:02.72879-07:00",
-      "lastResponses": "2020-06-23T13:43:16.817572-07:00",
-      "countsByStatus": {
-        "200 OK": 120
-      },
-      "countsByStatusCodes": {
-        "200": 120
-      },
-      "countsByHeaders": {
-        "goto-host": 120,
-        "via-goto": 120,
-        "x": 30,
-        "y": 40
-      },
-      "countsByHeaderValues": {
-        "goto-host": {
-          "1.0.0.1": 30,
-          "1.0.0.2": 30,
-          "1.0.0.3": 30,
-          "1.0.0.4": 30
-        },
-        "via-goto": {
-          "peer2": 30,
-          "peer3": 30,
-          "peer4": 30,
-          "peer5": 30
-        },
-        "x": {
-          "x1": 10,
-          "x2": 20
-        }
-      },
-      "countsByURIs": {
-        "/echo": 120
-      }
+  "": {
+    "target": "",
+    "invocationCounts": 0,
+    "firstResponse": "0001-01-01T00:00:00Z",
+    "lastResponse": "0001-01-01T00:00:00Z",
+    "countsByStatus": {},
+    "countsByStatusCodes": {},
+    "countsByHeaders": {},
+    "countsByURIs": {}
+  },
+  "t1": {
+    "target": "t1",
+    "invocationCounts": 8,
+    "firstResponse": "2020-08-20T01:00:09.445548-07:00",
+    "lastResponse": "2020-08-20T01:04:21.184044-07:00",
+    "countsByStatus": {
+      "418 I'm a teapot": 7,
+      "502 Bad Gateway": 1
     },
-    "peer1_to_peer2": {
-      "target": "peer1_to_peer2",
-      "invocationCounts": 30,
-      "firstResponses": "2020-06-23T13:43:02.772523-07:00",
-      "lastResponses": "2020-06-23T13:43:16.81756-07:00",
-      "countsByStatus": {
-        "200 OK": 30
-      },
-      "countsByStatusCodes": {
-        "200": 30
-      },
-      "countsByHeaders": {
-        "goto-host": 30,
-        "via-goto": 30
-      },
-      "countsByHeaderValues": {
-        "goto-host": {
-          "1.0.0.2": 30
-        },
-        "via-goto": {
-          "peer2": 30
-        }
-      },
-      "countsByURIs": {
-        "/echo": 30
-      }
+    "countsByStatusCodes": {
+      "418": 7,
+      "502": 1
     },
-    "peer1_to_peer3": {
-      "target": "peer1_to_peer3",
-      "invocationCounts": 30,
-      "firstResponses": "2020-06-23T13:43:02.728872-07:00",
-      "lastResponses": "2020-06-23T13:43:16.777478-07:00",
-      "countsByStatus": {
-        "200 OK": 30
-      },
-      "countsByStatusCodes": {
-        "200": 30
-      },
-      "countsByHeaders": {
-        "goto-host": 30,
-        "via-goto": 30
-      },
-      "countsByHeaderValues": {
-        "goto-host": {
-          "1.0.0.3": 30
+    "countsByHeaders": {
+      "goto-host": {
+        "Header": "goto-host",
+        "count": {
+          "count": 8,
+          "firstResponse": "2020-08-20T01:00:09.445563-07:00",
+          "lastResponse": "2020-08-20T01:04:21.184051-07:00"
         },
-        "via-goto": {
-          "peer3": 30
-        }
+        "countsByValues": {
+          "pod.local@1.0.0.1:8081": {
+            "count": 2,
+            "firstResponse": "2020-08-20T01:04:20.179485-07:00",
+            "lastResponse": "2020-08-20T01:04:21.184052-07:00"
+          },
+          "pod.local@1.0.0.1:8082": {
+            "count": 6,
+            "firstResponse": "2020-08-20T01:00:09.445564-07:00",
+            "lastResponse": "2020-08-20T01:01:25.163367-07:00"
+          }
+        },
+        "countsByStatusCodes": {
+          "418": {
+            "count": 7,
+            "firstResponse": "2020-08-20T01:00:09.445564-07:00",
+            "lastResponse": "2020-08-20T01:04:21.184052-07:00"
+          },
+          "502": {
+            "count": 1,
+            "firstResponse": "2020-08-20T01:01:04.743484-07:00",
+            "lastResponse": "2020-08-20T01:01:04.743484-07:00"
+          }
+        },
+        "countsByValuesStatusCodes": {
+          "pod.local@1.0.0.1:8081": {
+            "418": {
+              "count": 2,
+              "firstResponse": "2020-08-20T01:04:20.179485-07:00",
+              "lastResponse": "2020-08-20T01:04:21.184052-07:00"
+            }
+          },
+          "pod.local@1.0.0.1:8082": {
+            "418": {
+              "count": 5,
+              "firstResponse": "2020-08-20T01:00:09.445564-07:00",
+              "lastResponse": "2020-08-20T01:01:25.163367-07:00"
+            },
+            "502": {
+              "count": 1,
+              "firstResponse": "2020-08-20T01:01:04.743485-07:00",
+              "lastResponse": "2020-08-20T01:01:04.743485-07:00"
+            }
+          }
+        },
+        "firstResponse": "2020-08-20T01:00:09.445563-07:00",
+        "lastResponse": "2020-08-20T01:04:21.184051-07:00"
       },
-      "countsByURIs": {
-        "/echo": 30
-      }
+      "request-from-goto-host": {
+        "Header": "request-from-goto-host",
+        "count": {
+          "count": 8,
+          "firstResponse": "2020-08-20T01:00:09.44557-07:00",
+          "lastResponse": "2020-08-20T01:04:21.184057-07:00"
+        },
+        "countsByValues": {
+          "pod.local@1.0.0.1:8081": {
+            "count": 8,
+            "firstResponse": "2020-08-20T01:00:09.445571-07:00",
+            "lastResponse": "2020-08-20T01:04:21.184057-07:00"
+          }
+        },
+        "countsByStatusCodes": {
+          "418": {
+            "count": 7,
+            "firstResponse": "2020-08-20T01:00:09.445571-07:00",
+            "lastResponse": "2020-08-20T01:04:21.184057-07:00"
+          },
+          "502": {
+            "count": 1,
+            "firstResponse": "2020-08-20T01:01:04.743491-07:00",
+            "lastResponse": "2020-08-20T01:01:04.743491-07:00"
+          }
+        },
+        "countsByValuesStatusCodes": {
+          "pod.local@1.0.0.1:8081": {
+            "418": {
+              "count": 7,
+              "firstResponse": "2020-08-20T01:00:09.445571-07:00",
+              "lastResponse": "2020-08-20T01:04:21.184057-07:00"
+            },
+            "502": {
+              "count": 1,
+              "firstResponse": "2020-08-20T01:01:04.743491-07:00",
+              "lastResponse": "2020-08-20T01:01:04.743491-07:00"
+            }
+          }
+        },
+        "crossHeaders": {
+          "goto-host": {
+            "Header": "goto-host",
+            "count": {
+              "count": 8,
+              "firstResponse": "2020-08-20T01:00:09.445572-07:00",
+              "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+            },
+            "countsByValues": {
+              "pod.local@1.0.0.1:8081": {
+                "count": 2,
+                "firstResponse": "2020-08-20T01:04:20.179498-07:00",
+                "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+              },
+              "pod.local@1.0.0.1:8082": {
+                "count": 6,
+                "firstResponse": "2020-08-20T01:00:09.445573-07:00",
+                "lastResponse": "2020-08-20T01:01:25.163375-07:00"
+              }
+            },
+            "countsByStatusCodes": {
+              "418": {
+                "count": 7,
+                "firstResponse": "2020-08-20T01:00:09.445572-07:00",
+                "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+              },
+              "502": {
+                "count": 1,
+                "firstResponse": "2020-08-20T01:01:04.743492-07:00",
+                "lastResponse": "2020-08-20T01:01:04.743492-07:00"
+              }
+            },
+            "countsByValuesStatusCodes": {
+              "pod.local@1.0.0.1:8081": {
+                "418": {
+                  "count": 2,
+                  "firstResponse": "2020-08-20T01:04:20.179498-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+                }
+              },
+              "pod.local@1.0.0.1:8082": {
+                "418": {
+                  "count": 5,
+                  "firstResponse": "2020-08-20T01:00:09.445573-07:00",
+                  "lastResponse": "2020-08-20T01:01:25.163376-07:00"
+                },
+                "502": {
+                  "count": 1,
+                  "firstResponse": "2020-08-20T01:01:04.743493-07:00",
+                  "lastResponse": "2020-08-20T01:01:04.743493-07:00"
+                }
+              }
+            },
+            "crossHeaders": {},
+            "crossHeadersByValues": {},
+            "firstResponse": "2020-08-20T01:00:09.445572-07:00",
+            "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+          }
+        },
+        "crossHeadersByValues": {
+          "pod.local@1.0.0.1:8081": {
+            "goto-host": {
+              "Header": "goto-host",
+              "count": {
+                "count": 8,
+                "firstResponse": "2020-08-20T01:00:09.445574-07:00",
+                "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+              },
+              "countsByValues": {
+                "pod.local@1.0.0.1:8081": {
+                  "count": 2,
+                  "firstResponse": "2020-08-20T01:04:20.1795-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.184059-07:00"
+                },
+                "pod.local@1.0.0.1:8082": {
+                  "count": 6,
+                  "firstResponse": "2020-08-20T01:00:09.445574-07:00",
+                  "lastResponse": "2020-08-20T01:01:25.163385-07:00"
+                }
+              },
+              "countsByStatusCodes": {
+                "418": {
+                  "count": 7,
+                  "firstResponse": "2020-08-20T01:00:09.445574-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+                },
+                "502": {
+                  "count": 1,
+                  "firstResponse": "2020-08-20T01:01:04.743493-07:00",
+                  "lastResponse": "2020-08-20T01:01:04.743493-07:00"
+                }
+              },
+              "countsByValuesStatusCodes": {
+                "pod.local@1.0.0.1:8081": {
+                  "418": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:04:20.1795-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.184059-07:00"
+                  }
+                },
+                "pod.local@1.0.0.1:8082": {
+                  "418": {
+                    "count": 5,
+                    "firstResponse": "2020-08-20T01:00:09.445575-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.163385-07:00"
+                  },
+                  "502": {
+                    "count": 1,
+                    "firstResponse": "2020-08-20T01:01:04.743494-07:00",
+                    "lastResponse": "2020-08-20T01:01:04.743494-07:00"
+                  }
+                }
+              },
+              "crossHeaders": {},
+              "crossHeadersByValues": {},
+              "firstResponse": "2020-08-20T01:00:09.445574-07:00",
+              "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+            }
+          }
+        },
+        "firstResponse": "2020-08-20T01:00:09.44557-07:00",
+        "lastResponse": "2020-08-20T01:04:21.184056-07:00"
+      },
+    },
+    "countsByURIs": {
+      "/status/418": 8
     }
-  }
-  "peer2": {
-    "": {
-      "target": "",
-      "invocationCounts": 455,
-      "firstResponses": "2020-06-23T13:39:03.431856-07:00",
-      "lastResponses": "2020-06-23T13:40:19.502769-07:00",
-      "countsByStatus": {
-        "200 OK": 455
-      },
-      "countsByStatusCodes": {
-        "200": 455
-      },
-      "countsByHeaders": {},
-      "countsByHeaderValues": {},
-      "countsByURIs": {
-        "/echo": 455
-      }
+  },
+  "t2": {
+    "target": "t2",
+    "invocationCounts": 8,
+    "firstResponse": "2020-08-20T01:00:09.460941-07:00",
+    "lastResponse": "2020-08-20T01:04:21.19769-07:00",
+    "countsByStatus": {
+      "200 OK": 7,
+      "400 Bad Request": 1
     },
-    "peer2_to_peer1": {
-      "target": "peer2_to_peer1",
-      "invocationCounts": 80,
-      "firstResponses": "2020-06-23T13:37:06.477455-07:00",
-      "lastResponses": "2020-06-23T13:39:22.507463-07:00",
-      "countsByStatus": {
-        "200 OK": 80
+    "countsByStatusCodes": {
+      "200": 7,
+      "400": 1
+    },
+    "countsByHeaders": {
+      "goto-host": {
+        "Header": "goto-host",
+        "count": {
+          "count": 8,
+          "firstResponse": "2020-08-20T01:00:09.460956-07:00",
+          "lastResponse": "2020-08-20T01:04:21.197697-07:00"
+        },
+        "countsByValues": {
+          "pod.local@1.0.0.1:9091": {
+            "count": 2,
+            "firstResponse": "2020-08-20T01:04:20.196029-07:00",
+            "lastResponse": "2020-08-20T01:04:21.197698-07:00"
+          },
+          "pod.local@1.0.0.1:9092": {
+            "count": 6,
+            "firstResponse": "2020-08-20T01:00:09.460957-07:00",
+            "lastResponse": "2020-08-20T01:01:25.180523-07:00"
+          }
+        },
+        "countsByStatusCodes": {
+          "200": {
+            "count": 7,
+            "firstResponse": "2020-08-20T01:00:09.460956-07:00",
+            "lastResponse": "2020-08-20T01:04:21.197697-07:00"
+          },
+          "400": {
+            "count": 1,
+            "firstResponse": "2020-08-20T01:01:04.765979-07:00",
+            "lastResponse": "2020-08-20T01:01:04.765979-07:00"
+          }
+        },
+        "countsByValuesStatusCodes": {
+          "pod.local@1.0.0.1:9091": {
+            "200": {
+              "count": 2,
+              "firstResponse": "2020-08-20T01:04:20.196029-07:00",
+              "lastResponse": "2020-08-20T01:04:21.197698-07:00"
+            }
+          },
+          "pod.local@1.0.0.1:9092": {
+            "200": {
+              "count": 5,
+              "firstResponse": "2020-08-20T01:00:09.460958-07:00",
+              "lastResponse": "2020-08-20T01:01:25.180523-07:00"
+            },
+            "400": {
+              "count": 1,
+              "firstResponse": "2020-08-20T01:01:04.765979-07:00",
+              "lastResponse": "2020-08-20T01:01:04.765979-07:00"
+            }
+          }
+        },
+        "firstResponse": "2020-08-20T01:00:09.460956-07:00",
+        "lastResponse": "2020-08-20T01:04:21.197697-07:00"
       },
-      "countsByStatusCodes": {
-        "200": 80
+      "request-from-goto-host": {
+        "Header": "request-from-goto-host",
+        "count": {
+          "count": 8,
+          "firstResponse": "2020-08-20T01:00:09.460968-07:00",
+          "lastResponse": "2020-08-20T01:04:21.197703-07:00"
+        },
+        "countsByValues": {
+          "pod.local@1.0.0.1:8081": {
+            "count": 8,
+            "firstResponse": "2020-08-20T01:00:09.460968-07:00",
+            "lastResponse": "2020-08-20T01:04:21.197703-07:00"
+          }
+        },
+        "countsByStatusCodes": {
+          "200": {
+            "count": 7,
+            "firstResponse": "2020-08-20T01:00:09.460968-07:00",
+            "lastResponse": "2020-08-20T01:04:21.197703-07:00"
+          },
+          "400": {
+            "count": 1,
+            "firstResponse": "2020-08-20T01:01:04.765983-07:00",
+            "lastResponse": "2020-08-20T01:01:04.765983-07:00"
+          }
+        },
+        "countsByValuesStatusCodes": {
+          "pod.local@1.0.0.1:8081": {
+            "200": {
+              "count": 7,
+              "firstResponse": "2020-08-20T01:00:09.460969-07:00",
+              "lastResponse": "2020-08-20T01:04:21.197703-07:00"
+            },
+            "400": {
+              "count": 1,
+              "firstResponse": "2020-08-20T01:01:04.765983-07:00",
+              "lastResponse": "2020-08-20T01:01:04.765983-07:00"
+            }
+          }
+        },
+        "crossHeaders": {
+          "goto-host": {
+            "Header": "goto-host",
+            "count": {
+              "count": 8,
+              "firstResponse": "2020-08-20T01:00:09.460971-07:00",
+              "lastResponse": "2020-08-20T01:04:21.197704-07:00"
+            },
+            "countsByValues": {
+              "pod.local@1.0.0.1:9091": {
+                "count": 2,
+                "firstResponse": "2020-08-20T01:04:20.196041-07:00",
+                "lastResponse": "2020-08-20T01:04:21.197704-07:00"
+              },
+              "pod.local@1.0.0.1:9092": {
+                "count": 6,
+                "firstResponse": "2020-08-20T01:00:09.460972-07:00",
+                "lastResponse": "2020-08-20T01:01:25.180528-07:00"
+              }
+            },
+            "countsByStatusCodes": {
+              "200": {
+                "count": 7,
+                "firstResponse": "2020-08-20T01:00:09.460972-07:00",
+                "lastResponse": "2020-08-20T01:04:21.197704-07:00"
+              },
+              "400": {
+                "count": 1,
+                "firstResponse": "2020-08-20T01:01:04.765984-07:00",
+                "lastResponse": "2020-08-20T01:01:04.765984-07:00"
+              }
+            },
+            "countsByValuesStatusCodes": {
+              "pod.local@1.0.0.1:9091": {
+                "200": {
+                  "count": 2,
+                  "firstResponse": "2020-08-20T01:04:20.196041-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.197705-07:00"
+                }
+              },
+              "pod.local@1.0.0.1:9092": {
+                "200": {
+                  "count": 5,
+                  "firstResponse": "2020-08-20T01:00:09.460973-07:00",
+                  "lastResponse": "2020-08-20T01:01:25.180529-07:00"
+                },
+                "400": {
+                  "count": 1,
+                  "firstResponse": "2020-08-20T01:01:04.765984-07:00",
+                  "lastResponse": "2020-08-20T01:01:04.765984-07:00"
+                }
+              }
+            },
+            "crossHeaders": {},
+            "crossHeadersByValues": {},
+            "firstResponse": "2020-08-20T01:00:09.460971-07:00",
+            "lastResponse": "2020-08-20T01:04:21.197704-07:00"
+          }
+        },
+        "crossHeadersByValues": {
+          "pod.local@1.0.0.1:8081": {
+            "goto-host": {
+              "Header": "goto-host",
+              "count": {
+                "count": 8,
+                "firstResponse": "2020-08-20T01:00:09.460975-07:00",
+                "lastResponse": "2020-08-20T01:04:21.197705-07:00"
+              },
+              "countsByValues": {
+                "pod.local@1.0.0.1:9091": {
+                  "count": 2,
+                  "firstResponse": "2020-08-20T01:04:20.196042-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.197705-07:00"
+                },
+                "pod.local@1.0.0.1:9092": {
+                  "count": 6,
+                  "firstResponse": "2020-08-20T01:00:09.460976-07:00",
+                  "lastResponse": "2020-08-20T01:01:25.180529-07:00"
+                }
+              },
+              "countsByStatusCodes": {
+                "200": {
+                  "count": 7,
+                  "firstResponse": "2020-08-20T01:00:09.460975-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.197705-07:00"
+                },
+                "400": {
+                  "count": 1,
+                  "firstResponse": "2020-08-20T01:01:04.765984-07:00",
+                  "lastResponse": "2020-08-20T01:01:04.765984-07:00"
+                }
+              },
+              "countsByValuesStatusCodes": {
+                "pod.local@1.0.0.1:9091": {
+                  "200": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:04:20.196043-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.197706-07:00"
+                  }
+                },
+                "pod.local@1.0.0.1:9092": {
+                  "200": {
+                    "count": 5,
+                    "firstResponse": "2020-08-20T01:00:09.460982-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.180529-07:00"
+                  },
+                  "400": {
+                    "count": 1,
+                    "firstResponse": "2020-08-20T01:01:04.765985-07:00",
+                    "lastResponse": "2020-08-20T01:01:04.765985-07:00"
+                  }
+                }
+              },
+              "crossHeaders": {},
+              "crossHeadersByValues": {},
+              "firstResponse": "2020-08-20T01:00:09.460974-07:00",
+              "lastResponse": "2020-08-20T01:04:21.197705-07:00"
+            }
+          }
+        },
+        "firstResponse": "2020-08-20T01:00:09.460967-07:00",
+        "lastResponse": "2020-08-20T01:04:21.197703-07:00"
       },
-      "countsByHeaders": {},
-      "countsByHeaderValues": {},
-      "countsByURIs": {
-        "/echo": 80
-      }
+    },
+    "countsByURIs": {
+      "/": 8
     }
   }
 }
+
 ```
 </p>
 </details>
@@ -2077,70 +2431,1147 @@ $ curl -s localhost:8080/registry/peers/lockers
 
 ```json
 $ curl -s localhost:8080/registry/peers/lockers/targets/results
+
 {
   "peer1": {
     "targetInvocationCounts": {
       "t1": 16,
-      "t2": 44
+      "t2": 16,
+      "t3": 16
     },
     "targetFirstResponses": {
-      "t1": "2020-06-20T08:00:33.056578-07:00",
-      "t2": "2020-06-20T08:00:48.126786-07:00"
+      "t1": "2020-08-20T01:00:09.445548-07:00",
+      "t2": "2020-08-20T01:00:09.460907-07:00",
+      "t3": "2020-08-20T01:00:09.479488-07:00"
     },
     "targetLastResponses": {
-      "t1": "2020-06-20T08:00:52.11908-07:00",
-      "t2": "2020-06-20T08:01:07.183041-07:00"
+      "t1": "2020-08-20T01:04:21.184044-07:00",
+      "t2": "2020-08-20T01:04:21.19769-07:00",
+      "t3": "2020-08-20T01:04:21.216238-07:00"
     },
     "countsByStatusCodes": {
-      "200": 60
+      "200": 28,
+      "400": 3,
+      "418": 13,
+      "500": 1,
+      "502": 3
     },
-    "countsByHeaders": {},
-    "countsByHeaderValues": {},
+    "countsByHeaders": {
+      "goto-host": 48,
+      "request-from-goto": 48,
+      "request-from-goto-host": 48,
+      "via-goto": 48
+    },
+    "countsByHeaderValues": {
+      "goto-host": {
+        "pod.local@1.0.0.1:8081": 4,
+        "pod.local@1.0.0.1:8082": 12,
+        "pod.local@1.0.0.1:8083": 16,
+        "pod.local@1.0.0.1:9091": 4,
+        "pod.local@1.0.0.1:9092": 12
+      },
+      "request-from-goto": {
+        "peer1": 48
+      },
+      "request-from-goto-host": {
+        "pod.local@1.0.0.1:8081": 24,
+        "pod.local@1.0.0.1:9091": 24
+      },
+      "via-goto": {
+        "peer1": 8,
+        "peer2": 24,
+        "peer3": 16
+      }
+    },
     "countsByTargetStatusCodes": {
       "t1": {
-        "200": 16
+        "418": 13,
+        "502": 3
       },
       "t2": {
-        "200": 44
+        "200": 13,
+        "400": 3
+      },
+      "t3": {
+        "200": 15,
+        "500": 1
       }
     },
     "countsByTargetHeaders": {
-      "t1": {},
-      "t2": {}
+      "t1": {
+        "goto-host": 16,
+        "request-from-goto": 16,
+        "request-from-goto-host": 16,
+        "via-goto": 16
+      },
+      "t2": {
+        "goto-host": 16,
+        "request-from-goto": 16,
+        "request-from-goto-host": 16,
+        "via-goto": 16
+      },
+      "t3": {
+        "goto-host": 16,
+        "request-from-goto": 16,
+        "request-from-goto-host": 16,
+        "via-goto": 16
+      }
     },
     "countsByTargetHeaderValues": {
-      "t1": {},
-      "t2": {}
+      "t1": {
+        "goto-host": {
+          "pod.local@1.0.0.1:8081": 4,
+          "pod.local@1.0.0.1:8082": 12
+        },
+        "request-from-goto": {
+          "peer1": 16
+        },
+        "request-from-goto-host": {
+          "pod.local@1.0.0.1:8081": 8,
+          "pod.local@1.0.0.1:9091": 8
+        },
+        "via-goto": {
+          "peer1": 4,
+          "peer2": 12
+        }
+      },
+      "t2": {
+        "goto-host": {
+          "pod.local@1.0.0.1:9091": 4,
+          "pod.local@1.0.0.1:9092": 12
+        },
+        "request-from-goto": {
+          "peer1": 16
+        },
+        "request-from-goto-host": {
+          "pod.local@1.0.0.1:8081": 8,
+          "pod.local@1.0.0.1:9091": 8
+        },
+        "via-goto": {
+          "peer1": 4,
+          "peer2": 12
+        }
+      }
+    },
+    "countsByCrossHeaders": {
+      "request-from-goto-host": {
+        "Header": "request-from-goto-host",
+        "count": {
+          "count": 48,
+          "firstResponse": "2020-08-20T01:00:09.44557-07:00",
+          "lastResponse": "2020-08-20T01:04:21.21625-07:00"
+        },
+        "countsByValues": {
+          "pod.local@1.0.0.1:8081": {
+            "count": 24,
+            "firstResponse": "2020-08-20T01:00:09.445571-07:00",
+            "lastResponse": "2020-08-20T01:04:21.216251-07:00"
+          },
+          "pod.local@1.0.0.1:9091": {
+            "count": 24,
+            "firstResponse": "2020-08-20T01:00:09.445971-07:00",
+            "lastResponse": "2020-08-20T01:04:21.215758-07:00"
+          }
+        },
+        "countsByStatusCodes": {
+          "200": {
+            "count": 28,
+            "firstResponse": "2020-08-20T01:00:09.460944-07:00",
+            "lastResponse": "2020-08-20T01:04:21.216251-07:00"
+          },
+          "400": {
+            "count": 3,
+            "firstResponse": "2020-08-20T01:01:04.762281-07:00",
+            "lastResponse": "2020-08-20T01:01:05.763288-07:00"
+          },
+          "418": {
+            "count": 13,
+            "firstResponse": "2020-08-20T01:00:09.445571-07:00",
+            "lastResponse": "2020-08-20T01:04:21.184057-07:00"
+          },
+          "500": {
+            "count": 1,
+            "firstResponse": "2020-08-20T01:01:04.786827-07:00",
+            "lastResponse": "2020-08-20T01:01:04.786827-07:00"
+          },
+          "502": {
+            "count": 3,
+            "firstResponse": "2020-08-20T01:01:04.743491-07:00",
+            "lastResponse": "2020-08-20T01:01:05.74783-07:00"
+          }
+        },
+        "countsByValuesStatusCodes": {
+          "pod.local@1.0.0.1:8081": {
+            "200": {
+              "count": 16,
+              "firstResponse": "2020-08-20T01:00:09.460968-07:00",
+              "lastResponse": "2020-08-20T01:04:21.216251-07:00"
+            },
+            "400": {
+              "count": 8,
+              "firstResponse": "2020-08-20T01:00:09.460968-07:00",
+              "lastResponse": "2020-08-20T01:04:21.197703-07:00"
+            },
+            "418": {
+              "count": 8,
+              "firstResponse": "2020-08-20T01:00:09.445571-07:00",
+              "lastResponse": "2020-08-20T01:04:21.184057-07:00"
+            },
+            "500": {
+              "count": 8,
+              "firstResponse": "2020-08-20T01:00:09.47952-07:00",
+              "lastResponse": "2020-08-20T01:04:21.216251-07:00"
+            },
+            "502": {
+              "count": 8,
+              "firstResponse": "2020-08-20T01:00:09.445571-07:00",
+              "lastResponse": "2020-08-20T01:04:21.184057-07:00"
+            }
+          },
+          "pod.local@1.0.0.1:9091": {
+            "200": {
+              "count": 16,
+              "firstResponse": "2020-08-20T01:00:09.460945-07:00",
+              "lastResponse": "2020-08-20T01:04:21.215758-07:00"
+            },
+            "400": {
+              "count": 8,
+              "firstResponse": "2020-08-20T01:00:09.460945-07:00",
+              "lastResponse": "2020-08-20T01:04:21.1977-07:00"
+            },
+            "418": {
+              "count": 8,
+              "firstResponse": "2020-08-20T01:00:09.445971-07:00",
+              "lastResponse": "2020-08-20T01:04:21.184026-07:00"
+            },
+            "500": {
+              "count": 8,
+              "firstResponse": "2020-08-20T01:00:09.479562-07:00",
+              "lastResponse": "2020-08-20T01:04:21.215758-07:00"
+            },
+            "502": {
+              "count": 8,
+              "firstResponse": "2020-08-20T01:00:09.445971-07:00",
+              "lastResponse": "2020-08-20T01:04:21.184026-07:00"
+            }
+          }
+        },
+        "crossHeaders": {
+          "goto-host": {
+            "Header": "goto-host",
+            "count": {
+              "count": 48,
+              "firstResponse": "2020-08-20T01:00:09.445572-07:00",
+              "lastResponse": "2020-08-20T01:04:21.216252-07:00"
+            },
+            "countsByValues": {
+              "pod.local@1.0.0.1:8081": {
+                "count": 4,
+                "firstResponse": "2020-08-20T01:04:20.179498-07:00",
+                "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+              },
+              "pod.local@1.0.0.1:8082": {
+                "count": 12,
+                "firstResponse": "2020-08-20T01:00:09.445573-07:00",
+                "lastResponse": "2020-08-20T01:01:25.171664-07:00"
+              },
+              "pod.local@1.0.0.1:8083": {
+                "count": 16,
+                "firstResponse": "2020-08-20T01:00:09.479522-07:00",
+                "lastResponse": "2020-08-20T01:04:21.216252-07:00"
+              },
+              "pod.local@1.0.0.1:9091": {
+                "count": 4,
+                "firstResponse": "2020-08-20T01:04:20.196041-07:00",
+                "lastResponse": "2020-08-20T01:04:21.197704-07:00"
+              },
+              "pod.local@1.0.0.1:9092": {
+                "count": 12,
+                "firstResponse": "2020-08-20T01:00:09.46095-07:00",
+                "lastResponse": "2020-08-20T01:01:25.180617-07:00"
+              }
+            },
+            "countsByStatusCodes": {
+              "200": {
+                "count": 28,
+                "firstResponse": "2020-08-20T01:00:09.46095-07:00",
+                "lastResponse": "2020-08-20T01:04:21.216252-07:00"
+              },
+              "400": {
+                "count": 3,
+                "firstResponse": "2020-08-20T01:01:04.762283-07:00",
+                "lastResponse": "2020-08-20T01:01:05.76329-07:00"
+              },
+              "418": {
+                "count": 13,
+                "firstResponse": "2020-08-20T01:00:09.445572-07:00",
+                "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+              },
+              "500": {
+                "count": 1,
+                "firstResponse": "2020-08-20T01:01:04.786837-07:00",
+                "lastResponse": "2020-08-20T01:01:04.786837-07:00"
+              },
+              "502": {
+                "count": 3,
+                "firstResponse": "2020-08-20T01:01:04.743492-07:00",
+                "lastResponse": "2020-08-20T01:01:05.747832-07:00"
+              }
+            },
+            "countsByValuesStatusCodes": {
+              "pod.local@1.0.0.1:8081": {
+                "418": {
+                  "count": 4,
+                  "firstResponse": "2020-08-20T01:04:20.179498-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+                },
+                "502": {
+                  "count": 4,
+                  "firstResponse": "2020-08-20T01:04:20.179498-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+                }
+              },
+              "pod.local@1.0.0.1:8082": {
+                "418": {
+                  "count": 12,
+                  "firstResponse": "2020-08-20T01:00:09.445573-07:00",
+                  "lastResponse": "2020-08-20T01:01:25.171664-07:00"
+                },
+                "502": {
+                  "count": 12,
+                  "firstResponse": "2020-08-20T01:00:09.445573-07:00",
+                  "lastResponse": "2020-08-20T01:01:25.171664-07:00"
+                }
+              },
+              "pod.local@1.0.0.1:8083": {
+                "200": {
+                  "count": 16,
+                  "firstResponse": "2020-08-20T01:00:09.479522-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.216252-07:00"
+                },
+                "500": {
+                  "count": 16,
+                  "firstResponse": "2020-08-20T01:00:09.479522-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.216252-07:00"
+                }
+              },
+              "pod.local@1.0.0.1:9091": {
+                "200": {
+                  "count": 4,
+                  "firstResponse": "2020-08-20T01:04:20.196041-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.197704-07:00"
+                },
+                "400": {
+                  "count": 4,
+                  "firstResponse": "2020-08-20T01:04:20.196041-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.197704-07:00"
+                }
+              },
+              "pod.local@1.0.0.1:9092": {
+                "200": {
+                  "count": 12,
+                  "firstResponse": "2020-08-20T01:00:09.46095-07:00",
+                  "lastResponse": "2020-08-20T01:01:25.180617-07:00"
+                },
+                "400": {
+                  "count": 12,
+                  "firstResponse": "2020-08-20T01:00:09.46095-07:00",
+                  "lastResponse": "2020-08-20T01:01:25.180617-07:00"
+                }
+              }
+            },
+            "crossHeaders": {},
+            "crossHeadersByValues": {},
+            "firstResponse": "2020-08-20T01:11:05.666784-07:00",
+            "lastResponse": "2020-08-20T01:11:05.66714-07:00"
+          }
+        },
+        "crossHeadersByValues": {
+          "pod.local@1.0.0.1:8081": {
+            "goto-host": {
+              "Header": "goto-host",
+              "count": {
+                "count": 24,
+                "firstResponse": "2020-08-20T01:00:09.445574-07:00",
+                "lastResponse": "2020-08-20T01:04:21.216253-07:00"
+              },
+              "countsByValues": {
+                "pod.local@1.0.0.1:8081": {
+                  "count": 2,
+                  "firstResponse": "2020-08-20T01:04:20.1795-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.184059-07:00"
+                },
+                "pod.local@1.0.0.1:8082": {
+                  "count": 6,
+                  "firstResponse": "2020-08-20T01:00:09.445574-07:00",
+                  "lastResponse": "2020-08-20T01:01:25.163385-07:00"
+                },
+                "pod.local@1.0.0.1:8083": {
+                  "count": 8,
+                  "firstResponse": "2020-08-20T01:00:09.479523-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.216253-07:00"
+                },
+                "pod.local@1.0.0.1:9091": {
+                  "count": 2,
+                  "firstResponse": "2020-08-20T01:04:20.196042-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.197705-07:00"
+                },
+                "pod.local@1.0.0.1:9092": {
+                  "count": 6,
+                  "firstResponse": "2020-08-20T01:00:09.460976-07:00",
+                  "lastResponse": "2020-08-20T01:01:25.180529-07:00"
+                }
+              },
+              "countsByStatusCodes": {
+                "200": {
+                  "count": 14,
+                  "firstResponse": "2020-08-20T01:00:09.460975-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.216253-07:00"
+                },
+                "400": {
+                  "count": 1,
+                  "firstResponse": "2020-08-20T01:01:04.765984-07:00",
+                  "lastResponse": "2020-08-20T01:01:04.765984-07:00"
+                },
+                "418": {
+                  "count": 7,
+                  "firstResponse": "2020-08-20T01:00:09.445574-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+                },
+                "500": {
+                  "count": 1,
+                  "firstResponse": "2020-08-20T01:01:04.786839-07:00",
+                  "lastResponse": "2020-08-20T01:01:04.786839-07:00"
+                },
+                "502": {
+                  "count": 1,
+                  "firstResponse": "2020-08-20T01:01:04.743493-07:00",
+                  "lastResponse": "2020-08-20T01:01:04.743493-07:00"
+                }
+              },
+              "countsByValuesStatusCodes": {
+                "pod.local@1.0.0.1:8081": {
+                  "418": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:04:20.1795-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.184059-07:00"
+                  },
+                  "502": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:04:20.1795-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.184059-07:00"
+                  }
+                },
+                "pod.local@1.0.0.1:8082": {
+                  "418": {
+                    "count": 6,
+                    "firstResponse": "2020-08-20T01:00:09.445574-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.163385-07:00"
+                  },
+                  "502": {
+                    "count": 6,
+                    "firstResponse": "2020-08-20T01:00:09.445574-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.163385-07:00"
+                  }
+                },
+                "pod.local@1.0.0.1:8083": {
+                  "200": {
+                    "count": 8,
+                    "firstResponse": "2020-08-20T01:00:09.479523-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.216253-07:00"
+                  },
+                  "500": {
+                    "count": 8,
+                    "firstResponse": "2020-08-20T01:00:09.479523-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.216253-07:00"
+                  }
+                },
+                "pod.local@1.0.0.1:9091": {
+                  "200": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:04:20.196042-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.197705-07:00"
+                  },
+                  "400": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:04:20.196042-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.197705-07:00"
+                  }
+                },
+                "pod.local@1.0.0.1:9092": {
+                  "200": {
+                    "count": 6,
+                    "firstResponse": "2020-08-20T01:00:09.460976-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.180529-07:00"
+                  },
+                  "400": {
+                    "count": 6,
+                    "firstResponse": "2020-08-20T01:00:09.460976-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.180529-07:00"
+                  }
+                }
+              },
+              "crossHeaders": {},
+              "crossHeadersByValues": {},
+              "firstResponse": "2020-08-20T01:11:05.666791-07:00",
+              "lastResponse": "2020-08-20T01:11:05.667146-07:00"
+            }
+          },
+          "pod.local@1.0.0.1:9091": {
+            "goto-host": {
+              "Header": "goto-host",
+              "count": {
+                "count": 24,
+                "firstResponse": "2020-08-20T01:00:09.445977-07:00",
+                "lastResponse": "2020-08-20T01:04:21.21576-07:00"
+              },
+              "countsByValues": {
+                "pod.local@1.0.0.1:8081": {
+                  "count": 2,
+                  "firstResponse": "2020-08-20T01:04:20.179614-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.184028-07:00"
+                },
+                "pod.local@1.0.0.1:8082": {
+                  "count": 6,
+                  "firstResponse": "2020-08-20T01:00:09.445978-07:00",
+                  "lastResponse": "2020-08-20T01:01:25.171665-07:00"
+                },
+                "pod.local@1.0.0.1:8083": {
+                  "count": 8,
+                  "firstResponse": "2020-08-20T01:00:09.479565-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.21576-07:00"
+                },
+                "pod.local@1.0.0.1:9091": {
+                  "count": 2,
+                  "firstResponse": "2020-08-20T01:04:20.196052-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.197702-07:00"
+                },
+                "pod.local@1.0.0.1:9092": {
+                  "count": 6,
+                  "firstResponse": "2020-08-20T01:00:09.460957-07:00",
+                  "lastResponse": "2020-08-20T01:01:25.180619-07:00"
+                }
+              },
+              "countsByStatusCodes": {
+                "200": {
+                  "count": 14,
+                  "firstResponse": "2020-08-20T01:00:09.460956-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.21576-07:00"
+                },
+                "400": {
+                  "count": 2,
+                  "firstResponse": "2020-08-20T01:01:04.762284-07:00",
+                  "lastResponse": "2020-08-20T01:01:05.763291-07:00"
+                },
+                "418": {
+                  "count": 6,
+                  "firstResponse": "2020-08-20T01:00:09.445978-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.184027-07:00"
+                },
+                "502": {
+                  "count": 2,
+                  "firstResponse": "2020-08-20T01:01:04.744635-07:00",
+                  "lastResponse": "2020-08-20T01:01:05.747835-07:00"
+                }
+              },
+              "countsByValuesStatusCodes": {
+                "pod.local@1.0.0.1:8081": {
+                  "418": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:04:20.179614-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.184028-07:00"
+                  },
+                  "502": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:04:20.179614-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.184028-07:00"
+                  }
+                },
+                "pod.local@1.0.0.1:8082": {
+                  "418": {
+                    "count": 6,
+                    "firstResponse": "2020-08-20T01:00:09.445978-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.171665-07:00"
+                  },
+                  "502": {
+                    "count": 6,
+                    "firstResponse": "2020-08-20T01:00:09.445978-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.171665-07:00"
+                  }
+                },
+                "pod.local@1.0.0.1:8083": {
+                  "200": {
+                    "count": 8,
+                    "firstResponse": "2020-08-20T01:00:09.479565-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.21576-07:00"
+                  }
+                },
+                "pod.local@1.0.0.1:9091": {
+                  "200": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:04:20.196052-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.197702-07:00"
+                  },
+                  "400": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:04:20.196052-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.197702-07:00"
+                  }
+                },
+                "pod.local@1.0.0.1:9092": {
+                  "200": {
+                    "count": 6,
+                    "firstResponse": "2020-08-20T01:00:09.460957-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.180619-07:00"
+                  },
+                  "400": {
+                    "count": 6,
+                    "firstResponse": "2020-08-20T01:00:09.460957-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.180619-07:00"
+                  }
+                }
+              },
+              "crossHeaders": {},
+              "crossHeadersByValues": {},
+              "firstResponse": "2020-08-20T01:11:05.666812-07:00",
+              "lastResponse": "2020-08-20T01:11:05.667343-07:00"
+            }
+          }
+        },
+        "firstResponse": "2020-08-20T01:11:05.666747-07:00",
+        "lastResponse": "2020-08-20T01:11:05.667132-07:00"
+      }
+    },
+    "countsByTargetCrossHeaders": {
+      "t1": {
+        "request-from-goto-host": {
+          "Header": "request-from-goto-host",
+          "count": {
+            "count": 16,
+            "firstResponse": "2020-08-20T01:00:09.44557-07:00",
+            "lastResponse": "2020-08-20T01:04:21.184057-07:00"
+          },
+          "countsByValues": {
+            "pod.local@1.0.0.1:8081": {
+              "count": 8,
+              "firstResponse": "2020-08-20T01:00:09.445571-07:00",
+              "lastResponse": "2020-08-20T01:04:21.184057-07:00"
+            },
+            "pod.local@1.0.0.1:9091": {
+              "count": 8,
+              "firstResponse": "2020-08-20T01:00:09.445971-07:00",
+              "lastResponse": "2020-08-20T01:04:21.184026-07:00"
+            }
+          },
+          "countsByStatusCodes": {
+            "418": {
+              "count": 13,
+              "firstResponse": "2020-08-20T01:00:09.445571-07:00",
+              "lastResponse": "2020-08-20T01:04:21.184057-07:00"
+            },
+            "502": {
+              "count": 3,
+              "firstResponse": "2020-08-20T01:01:04.743491-07:00",
+              "lastResponse": "2020-08-20T01:01:05.74783-07:00"
+            }
+          },
+          "countsByValuesStatusCodes": {
+            "pod.local@1.0.0.1:8081": {
+              "418": {
+                "count": 8,
+                "firstResponse": "2020-08-20T01:00:09.445571-07:00",
+                "lastResponse": "2020-08-20T01:04:21.184057-07:00"
+              },
+              "502": {
+                "count": 8,
+                "firstResponse": "2020-08-20T01:00:09.445571-07:00",
+                "lastResponse": "2020-08-20T01:04:21.184057-07:00"
+              }
+            },
+            "pod.local@1.0.0.1:9091": {
+              "418": {
+                "count": 8,
+                "firstResponse": "2020-08-20T01:00:09.445971-07:00",
+                "lastResponse": "2020-08-20T01:04:21.184026-07:00"
+              },
+              "502": {
+                "count": 8,
+                "firstResponse": "2020-08-20T01:00:09.445971-07:00",
+                "lastResponse": "2020-08-20T01:04:21.184026-07:00"
+              }
+            }
+          },
+          "crossHeaders": {
+            "goto-host": {
+              "Header": "goto-host",
+              "count": {
+                "count": 16,
+                "firstResponse": "2020-08-20T01:00:09.445572-07:00",
+                "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+              },
+              "countsByValues": {
+                "pod.local@1.0.0.1:8081": {
+                  "count": 4,
+                  "firstResponse": "2020-08-20T01:04:20.179498-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+                },
+                "pod.local@1.0.0.1:8082": {
+                  "count": 12,
+                  "firstResponse": "2020-08-20T01:00:09.445573-07:00",
+                  "lastResponse": "2020-08-20T01:01:25.171664-07:00"
+                }
+              },
+              "countsByStatusCodes": {
+                "418": {
+                  "count": 13,
+                  "firstResponse": "2020-08-20T01:00:09.445572-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+                },
+                "502": {
+                  "count": 3,
+                  "firstResponse": "2020-08-20T01:01:04.743492-07:00",
+                  "lastResponse": "2020-08-20T01:01:05.747832-07:00"
+                }
+              },
+              "countsByValuesStatusCodes": {
+                "pod.local@1.0.0.1:8081": {
+                  "418": {
+                    "count": 4,
+                    "firstResponse": "2020-08-20T01:04:20.179498-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+                  },
+                  "502": {
+                    "count": 4,
+                    "firstResponse": "2020-08-20T01:04:20.179498-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+                  }
+                },
+                "pod.local@1.0.0.1:8082": {
+                  "418": {
+                    "count": 12,
+                    "firstResponse": "2020-08-20T01:00:09.445573-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.171664-07:00"
+                  },
+                  "502": {
+                    "count": 12,
+                    "firstResponse": "2020-08-20T01:00:09.445573-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.171664-07:00"
+                  }
+                }
+              },
+              "crossHeaders": {},
+              "crossHeadersByValues": {},
+              "firstResponse": "2020-08-20T01:11:05.667599-07:00",
+              "lastResponse": "2020-08-20T01:11:05.667599-07:00"
+            }
+          },
+          "crossHeadersByValues": {
+            "pod.local@1.0.0.1:8081": {
+              "goto-host": {
+                "Header": "goto-host",
+                "count": {
+                  "count": 8,
+                  "firstResponse": "2020-08-20T01:00:09.445574-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+                },
+                "countsByValues": {
+                  "pod.local@1.0.0.1:8081": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:04:20.1795-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.184059-07:00"
+                  },
+                  "pod.local@1.0.0.1:8082": {
+                    "count": 6,
+                    "firstResponse": "2020-08-20T01:00:09.445574-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.163385-07:00"
+                  }
+                },
+                "countsByStatusCodes": {
+                  "418": {
+                    "count": 7,
+                    "firstResponse": "2020-08-20T01:00:09.445574-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.184058-07:00"
+                  },
+                  "502": {
+                    "count": 1,
+                    "firstResponse": "2020-08-20T01:01:04.743493-07:00",
+                    "lastResponse": "2020-08-20T01:01:04.743493-07:00"
+                  }
+                },
+                "countsByValuesStatusCodes": {
+                  "pod.local@1.0.0.1:8081": {
+                    "418": {
+                      "count": 2,
+                      "firstResponse": "2020-08-20T01:04:20.1795-07:00",
+                      "lastResponse": "2020-08-20T01:04:21.184059-07:00"
+                    },
+                    "502": {
+                      "count": 2,
+                      "firstResponse": "2020-08-20T01:04:20.1795-07:00",
+                      "lastResponse": "2020-08-20T01:04:21.184059-07:00"
+                    }
+                  },
+                  "pod.local@1.0.0.1:8082": {
+                    "418": {
+                      "count": 6,
+                      "firstResponse": "2020-08-20T01:00:09.445574-07:00",
+                      "lastResponse": "2020-08-20T01:01:25.163385-07:00"
+                    },
+                    "502": {
+                      "count": 6,
+                      "firstResponse": "2020-08-20T01:00:09.445574-07:00",
+                      "lastResponse": "2020-08-20T01:01:25.163385-07:00"
+                    }
+                  }
+                },
+                "crossHeaders": {},
+                "crossHeadersByValues": {},
+                "firstResponse": "2020-08-20T01:11:05.667603-07:00",
+                "lastResponse": "2020-08-20T01:11:05.667603-07:00"
+              }
+            },
+            "pod.local@1.0.0.1:9091": {
+              "goto-host": {
+                "Header": "goto-host",
+                "count": {
+                  "count": 8,
+                  "firstResponse": "2020-08-20T01:00:09.445977-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.184027-07:00"
+                },
+                "countsByValues": {
+                  "pod.local@1.0.0.1:8081": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:04:20.179614-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.184028-07:00"
+                  },
+                  "pod.local@1.0.0.1:8082": {
+                    "count": 6,
+                    "firstResponse": "2020-08-20T01:00:09.445978-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.171665-07:00"
+                  }
+                },
+                "countsByStatusCodes": {
+                  "418": {
+                    "count": 6,
+                    "firstResponse": "2020-08-20T01:00:09.445978-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.184027-07:00"
+                  },
+                  "502": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:01:04.744635-07:00",
+                    "lastResponse": "2020-08-20T01:01:05.747835-07:00"
+                  }
+                },
+                "countsByValuesStatusCodes": {
+                  "pod.local@1.0.0.1:8081": {
+                    "418": {
+                      "count": 2,
+                      "firstResponse": "2020-08-20T01:04:20.179614-07:00",
+                      "lastResponse": "2020-08-20T01:04:21.184028-07:00"
+                    },
+                    "502": {
+                      "count": 2,
+                      "firstResponse": "2020-08-20T01:04:20.179614-07:00",
+                      "lastResponse": "2020-08-20T01:04:21.184028-07:00"
+                    }
+                  },
+                  "pod.local@1.0.0.1:8082": {
+                    "418": {
+                      "count": 6,
+                      "firstResponse": "2020-08-20T01:00:09.445978-07:00",
+                      "lastResponse": "2020-08-20T01:01:25.171665-07:00"
+                    },
+                    "502": {
+                      "count": 6,
+                      "firstResponse": "2020-08-20T01:00:09.445978-07:00",
+                      "lastResponse": "2020-08-20T01:01:25.171665-07:00"
+                    }
+                  }
+                },
+                "crossHeaders": {},
+                "crossHeadersByValues": {},
+                "firstResponse": "2020-08-20T01:11:05.667608-07:00",
+                "lastResponse": "2020-08-20T01:11:05.667608-07:00"
+              }
+            }
+          },
+          "firstResponse": "2020-08-20T01:11:05.667591-07:00",
+          "lastResponse": "2020-08-20T01:11:05.667591-07:00"
+        }
+      },
+      "t2": {
+        "request-from-goto-host": {
+          "Header": "request-from-goto-host",
+          "count": {
+            "count": 16,
+            "firstResponse": "2020-08-20T01:00:09.460943-07:00",
+            "lastResponse": "2020-08-20T01:04:21.197703-07:00"
+          },
+          "countsByValues": {
+            "pod.local@1.0.0.1:8081": {
+              "count": 8,
+              "firstResponse": "2020-08-20T01:00:09.460968-07:00",
+              "lastResponse": "2020-08-20T01:04:21.197703-07:00"
+            },
+            "pod.local@1.0.0.1:9091": {
+              "count": 8,
+              "firstResponse": "2020-08-20T01:00:09.460945-07:00",
+              "lastResponse": "2020-08-20T01:04:21.1977-07:00"
+            }
+          },
+          "countsByStatusCodes": {
+            "200": {
+              "count": 13,
+              "firstResponse": "2020-08-20T01:00:09.460944-07:00",
+              "lastResponse": "2020-08-20T01:04:21.197703-07:00"
+            },
+            "400": {
+              "count": 3,
+              "firstResponse": "2020-08-20T01:01:04.762281-07:00",
+              "lastResponse": "2020-08-20T01:01:05.763288-07:00"
+            }
+          },
+          "countsByValuesStatusCodes": {
+            "pod.local@1.0.0.1:8081": {
+              "200": {
+                "count": 8,
+                "firstResponse": "2020-08-20T01:00:09.460968-07:00",
+                "lastResponse": "2020-08-20T01:04:21.197703-07:00"
+              },
+              "400": {
+                "count": 8,
+                "firstResponse": "2020-08-20T01:00:09.460968-07:00",
+                "lastResponse": "2020-08-20T01:04:21.197703-07:00"
+              }
+            },
+            "pod.local@1.0.0.1:9091": {
+              "200": {
+                "count": 8,
+                "firstResponse": "2020-08-20T01:00:09.460945-07:00",
+                "lastResponse": "2020-08-20T01:04:21.1977-07:00"
+              },
+              "400": {
+                "count": 8,
+                "firstResponse": "2020-08-20T01:00:09.460945-07:00",
+                "lastResponse": "2020-08-20T01:04:21.1977-07:00"
+              }
+            }
+          },
+          "crossHeaders": {
+            "goto-host": {
+              "Header": "goto-host",
+              "count": {
+                "count": 16,
+                "firstResponse": "2020-08-20T01:00:09.460948-07:00",
+                "lastResponse": "2020-08-20T01:04:21.197704-07:00"
+              },
+              "countsByValues": {
+                "pod.local@1.0.0.1:9091": {
+                  "count": 4,
+                  "firstResponse": "2020-08-20T01:04:20.196041-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.197704-07:00"
+                },
+                "pod.local@1.0.0.1:9092": {
+                  "count": 12,
+                  "firstResponse": "2020-08-20T01:00:09.46095-07:00",
+                  "lastResponse": "2020-08-20T01:01:25.180617-07:00"
+                }
+              },
+              "countsByStatusCodes": {
+                "200": {
+                  "count": 13,
+                  "firstResponse": "2020-08-20T01:00:09.46095-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.197704-07:00"
+                },
+                "400": {
+                  "count": 3,
+                  "firstResponse": "2020-08-20T01:01:04.762283-07:00",
+                  "lastResponse": "2020-08-20T01:01:05.76329-07:00"
+                }
+              },
+              "countsByValuesStatusCodes": {
+                "pod.local@1.0.0.1:9091": {
+                  "200": {
+                    "count": 4,
+                    "firstResponse": "2020-08-20T01:04:20.196041-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.197704-07:00"
+                  },
+                  "400": {
+                    "count": 4,
+                    "firstResponse": "2020-08-20T01:04:20.196041-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.197704-07:00"
+                  }
+                },
+                "pod.local@1.0.0.1:9092": {
+                  "200": {
+                    "count": 12,
+                    "firstResponse": "2020-08-20T01:00:09.46095-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.180617-07:00"
+                  },
+                  "400": {
+                    "count": 12,
+                    "firstResponse": "2020-08-20T01:00:09.46095-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.180617-07:00"
+                  }
+                }
+              },
+              "crossHeaders": {},
+              "crossHeadersByValues": {},
+              "firstResponse": "2020-08-20T01:11:05.666861-07:00",
+              "lastResponse": "2020-08-20T01:11:05.666861-07:00"
+            }
+          },
+          "crossHeadersByValues": {
+            "pod.local@1.0.0.1:8081": {
+              "goto-host": {
+                "Header": "goto-host",
+                "count": {
+                  "count": 8,
+                  "firstResponse": "2020-08-20T01:00:09.460975-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.197705-07:00"
+                },
+                "countsByValues": {
+                  "pod.local@1.0.0.1:9091": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:04:20.196042-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.197705-07:00"
+                  },
+                  "pod.local@1.0.0.1:9092": {
+                    "count": 6,
+                    "firstResponse": "2020-08-20T01:00:09.460976-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.180529-07:00"
+                  }
+                },
+                "countsByStatusCodes": {
+                  "200": {
+                    "count": 7,
+                    "firstResponse": "2020-08-20T01:00:09.460975-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.197705-07:00"
+                  },
+                  "400": {
+                    "count": 1,
+                    "firstResponse": "2020-08-20T01:01:04.765984-07:00",
+                    "lastResponse": "2020-08-20T01:01:04.765984-07:00"
+                  }
+                },
+                "countsByValuesStatusCodes": {
+                  "pod.local@1.0.0.1:9091": {
+                    "200": {
+                      "count": 2,
+                      "firstResponse": "2020-08-20T01:04:20.196042-07:00",
+                      "lastResponse": "2020-08-20T01:04:21.197705-07:00"
+                    },
+                    "400": {
+                      "count": 2,
+                      "firstResponse": "2020-08-20T01:04:20.196042-07:00",
+                      "lastResponse": "2020-08-20T01:04:21.197705-07:00"
+                    }
+                  },
+                  "pod.local@1.0.0.1:9092": {
+                    "200": {
+                      "count": 6,
+                      "firstResponse": "2020-08-20T01:00:09.460976-07:00",
+                      "lastResponse": "2020-08-20T01:01:25.180529-07:00"
+                    },
+                    "400": {
+                      "count": 6,
+                      "firstResponse": "2020-08-20T01:00:09.460976-07:00",
+                      "lastResponse": "2020-08-20T01:01:25.180529-07:00"
+                    }
+                  }
+                },
+                "crossHeaders": {},
+                "crossHeadersByValues": {},
+                "firstResponse": "2020-08-20T01:11:05.666868-07:00",
+                "lastResponse": "2020-08-20T01:11:05.666868-07:00"
+              }
+            },
+            "pod.local@1.0.0.1:9091": {
+              "goto-host": {
+                "Header": "goto-host",
+                "count": {
+                  "count": 8,
+                  "firstResponse": "2020-08-20T01:00:09.460955-07:00",
+                  "lastResponse": "2020-08-20T01:04:21.197701-07:00"
+                },
+                "countsByValues": {
+                  "pod.local@1.0.0.1:9091": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:04:20.196052-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.197702-07:00"
+                  },
+                  "pod.local@1.0.0.1:9092": {
+                    "count": 6,
+                    "firstResponse": "2020-08-20T01:00:09.460957-07:00",
+                    "lastResponse": "2020-08-20T01:01:25.180619-07:00"
+                  }
+                },
+                "countsByStatusCodes": {
+                  "200": {
+                    "count": 6,
+                    "firstResponse": "2020-08-20T01:00:09.460956-07:00",
+                    "lastResponse": "2020-08-20T01:04:21.197702-07:00"
+                  },
+                  "400": {
+                    "count": 2,
+                    "firstResponse": "2020-08-20T01:01:04.762284-07:00",
+                    "lastResponse": "2020-08-20T01:01:05.763291-07:00"
+                  }
+                },
+                "countsByValuesStatusCodes": {
+                  "pod.local@1.0.0.1:9091": {
+                    "200": {
+                      "count": 2,
+                      "firstResponse": "2020-08-20T01:04:20.196052-07:00",
+                      "lastResponse": "2020-08-20T01:04:21.197702-07:00"
+                    },
+                    "400": {
+                      "count": 2,
+                      "firstResponse": "2020-08-20T01:04:20.196052-07:00",
+                      "lastResponse": "2020-08-20T01:04:21.197702-07:00"
+                    }
+                  },
+                  "pod.local@1.0.0.1:9092": {
+                    "200": {
+                      "count": 6,
+                      "firstResponse": "2020-08-20T01:00:09.460957-07:00",
+                      "lastResponse": "2020-08-20T01:01:25.180619-07:00"
+                    },
+                    "400": {
+                      "count": 6,
+                      "firstResponse": "2020-08-20T01:00:09.460957-07:00",
+                      "lastResponse": "2020-08-20T01:01:25.180619-07:00"
+                    }
+                  }
+                },
+                "crossHeaders": {},
+                "crossHeadersByValues": {},
+                "firstResponse": "2020-08-20T01:11:05.666875-07:00",
+                "lastResponse": "2020-08-20T01:11:05.666875-07:00"
+              }
+            }
+          },
+          "firstResponse": "2020-08-20T01:11:05.666838-07:00",
+          "lastResponse": "2020-08-20T01:11:05.666838-07:00"
+        }
+      }
     }
   },
   "peer2": {
-    "targetInvocationCounts": {
-      "t2": 160
-    },
-    "targetFirstResponses": {
-     "t2": "2020-06-20T08:00:48.126786-07:00"
-    },
-    "targetLastResponses": {
-      "t2": "2020-06-20T08:01:07.183041-07:00"
-    },
-    "countsByStatusCodes": {
-      "200": 160
-    },
+    "targetInvocationCounts": {},
+    "targetFirstResponses": {},
+    "targetLastResponses": {},
+    "countsByStatusCodes": {},
     "countsByHeaders": {},
     "countsByHeaderValues": {},
-    "countsByTargetStatusCodes": {
-      "t2": {
-        "200": 160
-      }
-    },
-    "countsByTargetHeaders": {
-      "t2": {}
-    },
-    "countsByTargetHeaderValues": {
-      "t2": {}
-    }
+    "countsByTargetStatusCodes": {},
+    "countsByTargetHeaders": {},
+    "countsByTargetHeaderValues": {},
+    "countsByCrossHeaders": {},
+    "countsByTargetCrossHeaders": {}
   }
 }
+
 ```
 </p>
 </details>
