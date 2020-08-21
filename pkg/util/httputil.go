@@ -38,7 +38,11 @@ type messagestore struct {
 
 func ContextMiddleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), logmessagesKey, &messagestore{})))
+    if global.Stopping && IsReadinessProbe(r) {
+      w.WriteHeader(http.StatusNotFound)
+    } else {
+      next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), logmessagesKey, &messagestore{})))
+    }
   })
 }
 
@@ -434,4 +438,12 @@ func BuildCrossHeadersMap(crossTrackingHeaders map[string][]string) (map[string]
     }
   }
   return crossHeadersMap
+}
+
+func IsReadinessProbe(r *http.Request) bool {
+  return strings.EqualFold(r.RequestURI, global.ReadinessProbe)
+}
+
+func IsLivenessProbe(r *http.Request) bool {
+  return strings.EqualFold(r.RequestURI, global.LivenessProbe)
 }

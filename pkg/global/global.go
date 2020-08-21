@@ -1,6 +1,8 @@
 package global
 
-import "net/http"
+import (
+	"net/http"
+)
 
 var (
   ServerPort                 int
@@ -9,6 +11,10 @@ var (
   RegistryURL                string
   CertPath                   string
   UseLocker                  bool
+  ReadinessProbe  string
+  LivenessProbe   string
+
+  Stopping                   bool = false
   EnableTrackingLogs         bool = true
   EnableAdminLogs            bool = true
   EnableInvocationLogs       bool = true

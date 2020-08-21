@@ -1402,6 +1402,39 @@ curl -X POST localhost:8080/request/uri/counts/clear
 </p>
 </details>
 
+
+<br/>
+
+#
+## > Probes
+This feature allows setting readiness and liveness probe URIs, statuses to be returned for those probes, and tracking counts for how many times the probes have been called. When the server starts shutting down, it waits for 30s grace period to serve existing traffic. During this period, the server will return 404 for the readiness probe if one is configured.
+
+#### APIs
+|METHOD|URI|Description|
+|---|---|---|
+|PUT, POST| /probe/readiness/set?uri={uri} | Set readiness probe URI. Also clears its counts |
+|PUT, POST| /probe/liveness/set?uri={uri} | Set readiness probe URI. Also clears its counts |
+|PUT, POST| /probe/readiness/staus/set/{status} | Set HTTP response status to be returned for readiness URI calls. Default 200. |
+|PUT, POST| /probe/liveness/staus/set/{status} | Set HTTP response status to be returned for liveness URI calls. Default 200. |
+|POST| /probe/counts/clear               | Clear probe counts URIs |
+|GET      |	/probe                     | Get current config and counts for both probes |
+
+
+#### URI Bypass API Examples
+```
+curl -X POST localhost:8080/probe/readiness/set?uri=/ready
+
+curl -X POST localhost:8080/probe/liveness/set?uri=/live
+
+curl -X PUT localhost:8080/probe/readiness/status/set/404
+
+curl -X PUT localhost:8080/probe/liveness/status/set/200
+
+curl -X POST localhost:8080/probe/counts/clear
+
+curl localhost:8080/probe
+```
+
 <br/>
 
 #

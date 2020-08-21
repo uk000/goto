@@ -14,6 +14,7 @@ import (
 	"goto/pkg/http/server/echo"
 	"goto/pkg/http/server/listeners"
 	"goto/pkg/http/server/listeners/label"
+	"goto/pkg/http/server/probe"
 	"goto/pkg/http/server/request"
 	"goto/pkg/http/server/response"
 	"goto/pkg/http/server/runner"
@@ -26,7 +27,7 @@ func Run() {
 	global.GetPeers = registry.GetPeers
   listeners.SetListenerServer(runner.ServeListener)
   invocation.Startup()
-  runner.RunHttpServer("/", label.Handler, conn.Handler, job.Handler, request.Handler,
+  runner.RunHttpServer("/", label.Handler, conn.Handler, probe.Handler, job.Handler, request.Handler,
 		response.Handler, listeners.Handler, registry.Handler, client.Handler, echo.Handler, catchall.Handler)
 	invocation.Shutdown()
 	results.StopRegistrySender()

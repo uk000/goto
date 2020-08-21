@@ -76,9 +76,12 @@ func WaitForHttpServer(server *http.Server) {
 }
 
 func StopHttpServer(server *http.Server) {
+  global.Stopping = true
+  log.Printf("HTTP Server %s started shutting down", server.Addr)
+  time.Sleep(30*time.Second)
   ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
   defer cancel()
   peer.DeregisterPeer(global.PeerName, global.PeerAddress)
   server.Shutdown(ctx)
-  log.Printf("HTTP Server %s shutting down", server.Addr)
+  log.Printf("HTTP Server %s finished shutting down", server.Addr)
 }
