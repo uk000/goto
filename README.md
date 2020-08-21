@@ -238,7 +238,7 @@ The schema below describes fields per target (including the all targets data)
 | countsByStatusCodes | int->CountInfo   | request counts info per status code for this header |
 | countsByValuesStatusCodes | string->int->CountInfo   | request counts info per status code per header value for this header |
 | crossHeaders | string->HeaderCounts   | HeaderCounts for each cross-header for this header |
-| crossHeadersByValues | string->string->HeaderCounts   | HeaderCounts for each cross-header per heder value for this header |
+| crossHeadersByValues | string->string->HeaderCounts   | HeaderCounts for each cross-header per header value for this header |
 | firstResponse        | time | Time of first response received for this header |
 | lastResponse         | time | Time of last response received for this header |
 
@@ -255,10 +255,10 @@ The schema below describes fields per target (including the all targets data)
 
 
 #### Invocation Results Schema (output of API /client/results/invocations)
-* Reports results for all invocations since last clearing of results, as an Object with invocation numner as key and invocation's results as value. The results for each invocation have same schema as `Client Results Schema`, with an additional bool flag `finished` to indicate whether the invocation is still running or has finished. See example below.
+* Reports results for all invocations since last clearing of results, as an Object with invocation counter as key and invocation's results as value. The results for each invocation have same schema as `Client Results Schema`, with an additional bool flag `finished` to indicate whether the invocation is still running or has finished. See example below.
 
 #### Active Targets Schema (output of API /client/targets/active)
-* Reports set of targets for which traffic is running at the time of API invocation. Result is an object with invocation number as key, and value as object that has status for all active targets in that invocation. For each active target, the following data is reported. Also see example below.
+* Reports set of targets for which traffic is running at the time of API invocation. Result is an object with invocation counter as key, and value as object that has status for all active targets in that invocation. For each active target, the following data is reported. Also see example below.
   
 |Field|Data Type|Description|
 |---|---|---|
@@ -1414,8 +1414,8 @@ This feature allows setting readiness and liveness probe URIs, statuses to be re
 |---|---|---|
 |PUT, POST| /probe/readiness/set?uri={uri} | Set readiness probe URI. Also clears its counts |
 |PUT, POST| /probe/liveness/set?uri={uri} | Set readiness probe URI. Also clears its counts |
-|PUT, POST| /probe/readiness/staus/set/{status} | Set HTTP response status to be returned for readiness URI calls. Default 200. |
-|PUT, POST| /probe/liveness/staus/set/{status} | Set HTTP response status to be returned for liveness URI calls. Default 200. |
+|PUT, POST| /probe/readiness/status/set/{status} | Set HTTP response status to be returned for readiness URI calls. Default 200. |
+|PUT, POST| /probe/liveness/status/set/{status} | Set HTTP response status to be returned for liveness URI calls. Default 200. |
 |POST| /probe/counts/clear               | Clear probe counts URIs |
 |GET      |	/probe                     | Get current config and counts for both probes |
 
@@ -1987,7 +1987,7 @@ curl localhost:8080/response/trigger/list
 - Command execution on local OS
 The job results can be retrieved via API from the `goto` instance, and also stored in locker on registry instance if enabled. (See `--locker` command arg)
 
-Jobs can also trigger another job for each line of output produced, as well as upon completion. For command jobs, the output produced is split by newline, and each line of output can be used as input to trigger another command job. A job can specify markers for output fields (split using specificed separator), and these markers can be referenced by successor jobs. The markers from a job's output are carried over to all its successor jobs, so a job can use output from a parent job multiple generations in the past. The triggered job's command args specifies marker references as `{foo}`, which gets replaced by the value extracted from any predecessor job's output with that marker key. This feature can be used to trigger complex chains of jobs, where each job uses output of the previous job to do something else.
+Jobs can also trigger another job for each line of output produced, as well as upon completion. For command jobs, the output produced is split by newline, and each line of output can be used as input to trigger another command job. A job can specify markers for output fields (split using specified separator), and these markers can be referenced by successor jobs. The markers from a job's output are carried over to all its successor jobs, so a job can use output from a parent job multiple generations in the past. The triggered job's command args specifies marker references as `{foo}`, which gets replaced by the value extracted from any predecessor job's output with that marker key. This feature can be used to trigger complex chains of jobs, where each job uses output of the previous job to do something else.
 
 #### Jobs APIs
 |METHOD|URI|Description|
@@ -2253,7 +2253,6 @@ Peer instances periodically re-register themselves with registry in case registr
 | POST, PUT | /registry/peers/targets/stop/all | Stop all targets on the given peer |
 | POST, PUT | /registry/peers/targets/results/all/{enable}  | Controls whether results should be summarized across all targets. Disabling this when not needed can improve performance. Disabled by default. |
 | POST, PUT | /registry/peers/targets/results/invocations/{enable}  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
-| POST, PUT | /registry/peers/track/headers/{headers} | Configure headers to be tracked by client invocations on all connected peers |
 | POST      | /registry/peers/targets/clear   | Remove all targets from all peers |
 | GET       | /registry/peers/jobs | Get all registered jobs for all peers |
 | POST      | /registry/peers/{peer}/jobs/add | Add a job to be sent to a peer. See [Peer Job JSON Schema](#peer-job-json-schema) |
@@ -2265,6 +2264,11 @@ Peer instances periodically re-register themselves with registry in case registr
 | POST, PUT | /registry/peers/{peer}/jobs/{jobs}/stop | Stop given jobs on the given peer |
 | POST, PUT | /registry/peers/{peer}/jobs/stop/all | Stop all jobs on the given peer |
 | POST      | /registry/peers/jobs/clear   | Remove all jobs from all peers |
+| POST, PUT | /registry/peers/track/headers/{headers} | Configure headers to be tracked by client invocations on peers |
+| POST, PUT | /registry/peers/probe/readiness/set?uri={uri} | Configure readiness probe URI for peers |
+| POST, PUT | /registry/peers/probe/liveness/set?uri={uri} | Configure liveness probe URI for peers |
+| POST, PUT | /registry/peers/probe/readiness/status/set/{status} | Configure readiness probe status for peers |
+| POST, PUT | /registry/peers/probe/liveness/status/set/{status} | Configure readiness probe status for peers |
 
 #### Peers JSON Schema 
 Map of peer labels to peer details, where each peer details include the following info
