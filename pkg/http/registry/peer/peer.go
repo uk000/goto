@@ -1,10 +1,10 @@
 package peer
 
 import (
-	"goto/pkg/constants"
 	"goto/pkg/global"
 	"goto/pkg/http/client/target"
 	"goto/pkg/http/registry"
+	"goto/pkg/http/server/probe"
 	"goto/pkg/job"
 	"goto/pkg/util"
 	"log"
@@ -34,8 +34,9 @@ func RegisterPeer(peerName, peerAddress string) {
         defer resp.Body.Close()
         log.Printf("Registered as peer [%s] with registry [%s]\n", global.PeerName, global.RegistryURL)
         registered = true
-        data := map[string]interface{}{}
-        if err := util.ReadJsonPayloadFromBody(resp.Body, &data); err == nil {
+        data := &registry.PeerData{}
+        if err := util.ReadJsonPayloadFromBody(resp.Body, data); err == nil {
+          log.Printf("Read startup data from registry: %+v\n", *data)
           go setupStartupTasks(data)
         } else {
           log.Printf("Failed to read peer targets with error: %s\n", err.Error())
@@ -84,34 +85,42 @@ func startRegistryReminder(peer *registry.Peer) {
   }
 }
 
-func setupStartupTasks(data map[string]interface{}) {
+func setupStartupTasks(peerData *registry.PeerData) {
   targets := registry.PeerTargets{}
-  if data[constants.PeerDataTargets] != nil {
-    targetsData := util.ToJSON(data[constants.PeerDataTargets])
+  if peerData.Targets != nil {
+    targetsData := util.ToJSON(peerData.Targets)
     if err := util.ReadJson(targetsData, &targets); err != nil {
       log.Println(err.Error())
       return
     }
   }
   jobs := registry.PeerJobs{}
-  if data[constants.PeerDataJobs] != nil {
-    for _, jobData := range data[constants.PeerDataJobs].(map[string]interface{}) {
-      if job, err := job.ParseJobFromPayload(util.ToJSON(jobData)); err != nil {
-        log.Println(err.Error())
-        return
-      } else {
-        jobs[job.ID] = &registry.PeerJob{*job}
-      }
+  if peerData.Jobs != nil {
+    for _, peerJob := range peerData.Jobs {
+      jobs[peerJob.ID] = peerJob
     }
   }
-  trackingHeaders := data[constants.PeerDataTrackingHeaders].(string)
-  log.Printf("Got %d targets, %d jobs, %s trackingHeaders from registry:\n", len(targets), len(jobs), trackingHeaders)
   port := strconv.Itoa(global.ServerPort)
   pc := target.GetClientForPort(port)
   pj := job.GetPortJobs(port)
 
-  if trackingHeaders != "" {
-    pc.AddTrackingHeaders(trackingHeaders)
+  log.Printf("Got %d targets, %d jobs\n", len(targets), len(jobs))
+
+  if peerData.TrackingHeaders != "" {
+    log.Printf("Got %s trackingHeaders\n", peerData.TrackingHeaders)
+    pc.AddTrackingHeaders(peerData.TrackingHeaders)
+  }
+
+  if peerData.ReadinessProbe != "" {
+    log.Printf("Got Readiness probe %s, status: %d\n", peerData.ReadinessProbe, peerData.ReadinessStatus)
+    global.ReadinessProbe = peerData.ReadinessProbe
+    probe.ReadinessStatus = peerData.ReadinessStatus
+  }
+
+  if peerData.LivenessProbe != "" {
+    log.Printf("Got Liveness probe: %s, status: %d\n", peerData.LivenessProbe, peerData.LivenessStatus)
+    global.LivenessProbe = peerData.LivenessProbe
+    probe.LivenessStatus = peerData.LivenessStatus
   }
 
   for _, job := range jobs {

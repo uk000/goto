@@ -72,13 +72,22 @@ func WaitForHttpServer(server *http.Server) {
   c := make(chan os.Signal, 1)
   signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
   <-c
+  global.Stopping = true
+  log.Printf("Sleeping 30s before stopping.")
+  signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+  select {
+  case <-c:
+    log.Printf("Received 2nd Interrupt. Really stopping now.")
+      break
+  case <-time.After(30 * time.Second):
+    log.Printf("Slept long enough. Stopping now.")
+    break
+  }
   StopHttpServer(server)
 }
 
 func StopHttpServer(server *http.Server) {
-  global.Stopping = true
   log.Printf("HTTP Server %s started shutting down", server.Addr)
-  time.Sleep(30*time.Second)
   ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
   defer cancel()
   peer.DeregisterPeer(global.PeerName, global.PeerAddress)

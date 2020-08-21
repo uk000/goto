@@ -11,9 +11,8 @@ var (
   RegistryURL                string
   CertPath                   string
   UseLocker                  bool
-  ReadinessProbe  string
-  LivenessProbe   string
-
+  ReadinessProbe             string
+  LivenessProbe              string
   Stopping                   bool = false
   EnableTrackingLogs         bool = true
   EnableAdminLogs            bool = true

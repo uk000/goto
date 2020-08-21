@@ -39,6 +39,7 @@ type messagestore struct {
 func ContextMiddleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     if global.Stopping && IsReadinessProbe(r) {
+      CopyHeaders("Stopping-Readiness-Request", w, r.Header, r.Host)
       w.WriteHeader(http.StatusNotFound)
     } else {
       next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), logmessagesKey, &messagestore{})))
@@ -60,8 +61,8 @@ func AddLogMessage(msg string, r *http.Request) {
 
 func PrintLogMessages(r *http.Request) {
   m := r.Context().Value(logmessagesKey).(*messagestore)
-  if !IsLockerRequest(r) && (!IsAdminRequest(r) || global.EnableAdminLogs) && 
-        (!IsReminderRequest(r) || global.EnableRegistryReminderLogs) && global.EnableTrackingLogs {
+  if !IsLockerRequest(r) && (!IsAdminRequest(r) || global.EnableAdminLogs) &&
+    (!IsReminderRequest(r) || global.EnableRegistryReminderLogs) && global.EnableTrackingLogs {
     log.Println(strings.Join(m.messages, " --> "))
   }
   m.messages = m.messages[:0]
@@ -179,7 +180,7 @@ func CopyHeaders(prefix string, w http.ResponseWriter, headers http.Header, host
     if !strings.Contains(h, "content") && !strings.Contains(h, "Content") {
       h2 := h
       if prefix != "" {
-        h2 = prefix+"-"+h
+        h2 = prefix + "-" + h
       }
       for _, v := range values {
         w.Header().Add(h2, v)
@@ -192,7 +193,7 @@ func CopyHeaders(prefix string, w http.ResponseWriter, headers http.Header, host
   if !hostCopied && host != "" {
     hostHeader := "Host"
     if prefix != "" {
-      hostHeader = prefix+"-"+hostHeader
+      hostHeader = prefix + "-" + hostHeader
     }
     w.Header().Add(hostHeader, host)
   }
@@ -256,7 +257,7 @@ func IsReminderRequest(r *http.Request) bool {
 }
 
 func IsLockerRequest(r *http.Request) bool {
-  return strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker") 
+  return strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker")
 }
 
 func AddRoute(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), methods ...string) {
@@ -430,7 +431,7 @@ func ParseTrackingHeaders(headers string) ([]string, map[string][]string) {
   return trackingHeaders, crossTrackingHeaders
 }
 
-func BuildCrossHeadersMap(crossTrackingHeaders map[string][]string) (map[string]string) {
+func BuildCrossHeadersMap(crossTrackingHeaders map[string][]string) map[string]string {
   crossHeadersMap := map[string]string{}
   for header, subheaders := range crossTrackingHeaders {
     for _, subheader := range subheaders {

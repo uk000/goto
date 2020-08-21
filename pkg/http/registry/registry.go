@@ -3,7 +3,6 @@ package registry
 import (
 	"errors"
 	"fmt"
-	"goto/pkg/constants"
 	"goto/pkg/global"
 	"goto/pkg/http/client/results"
 	"goto/pkg/http/invocation"
@@ -65,6 +64,17 @@ type PeerJob struct {
 
 type PeerJobs map[string]*PeerJob
 
+type PeerData struct {
+  Targets         PeerTargets
+  Jobs            PeerJobs
+  TrackingHeaders string
+  ReadinessProbe  string
+  LivenessProbe   string
+  ReadinessStatus int
+  LivenessStatus  int
+  Message         string
+}
+
 type PortRegistry struct {
   peers                map[string]*Peers
   peerTargets          map[string]PeerTargets
@@ -72,6 +82,8 @@ type PortRegistry struct {
   peerTrackingHeaders  string
   trackingHeaders      []string
   crossTrackingHeaders map[string][]string
+  readinessStatus      int
+  livenessStatus       int
   peerLocker           *locker.PeersLockers
   peersLock            sync.RWMutex
   lockersLock          sync.RWMutex
@@ -136,6 +148,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "/jobs", getPeerJobs, "GET")
 
   util.AddRoute(peersRouter, "/track/headers/{headers}", addPeersTrackingHeaders, "POST", "PUT")
+  util.AddRouteQ(peersRouter, "/probe/{type}/set", setProbe, "uri", "{uri}", "POST", "PUT")
+  util.AddRoute(peersRouter, "/probe/{type}/status/set/{status}", setProbeStatus, "POST", "PUT")
 
   util.AddRoute(peersRouter, "/clear/epochs", clearPeerEpochs, "POST")
   util.AddRoute(peersRouter, "/clear", clearPeers, "POST")
@@ -801,33 +815,63 @@ func (pr *PortRegistry) addPeersTrackingHeaders(headers string) map[string]map[s
     })
 }
 
+func (pr *PortRegistry) setProbe(probeType, uri string) map[string]map[string]bool {
+  return invokeForPods(pr.loadAllPeerPods(), "POST", fmt.Sprintf("/probe/%s/set?uri=%s", probeType, uri), "", http.StatusAccepted, 3, false,
+    func(peer string, pod *Pod, err error) {
+      if err == nil {
+        log.Printf("Pushed %s URI %s to peer %s address %s\n", probeType, uri, peer, pod.Address)
+      } else {
+        log.Printf("Failed to push %s URI %s to peer %s address %s with error %s\n", probeType, uri, peer, pod.Address, err.Error())
+      }
+    })
+}
+
+func (pr *PortRegistry) setProbeStatus(probeType string, status int) map[string]map[string]bool {
+  return invokeForPods(pr.loadAllPeerPods(), "POST", fmt.Sprintf("/probe/%s/status/set/%d", probeType, status), "", http.StatusAccepted, 3, false,
+    func(peer string, pod *Pod, err error) {
+      if err == nil {
+        log.Printf("Pushed %s Status %d to peer %s address %s\n", probeType, status, peer, pod.Address)
+      } else {
+        log.Printf("Failed to push %s Status %d to peer %s address %s with error %s\n", probeType, status, peer, pod.Address, err.Error())
+      }
+    })
+}
+
+func (pr *PortRegistry) preparePeerStartupData(peer *Peer, peerData *PeerData) {
+  peerData.Targets = pr.peerTargets[peer.Name]
+  peerData.Jobs = pr.peerJobs[peer.Name]
+  peerData.TrackingHeaders = pr.peerTrackingHeaders
+  peerData.LivenessProbe = global.LivenessProbe
+  peerData.LivenessStatus = pr.livenessStatus
+  peerData.ReadinessProbe = global.ReadinessProbe
+  peerData.ReadinessStatus = pr.readinessStatus
+}
+
 func addPeer(w http.ResponseWriter, r *http.Request) {
   peerName := util.GetStringParamValue(r, "peer")
-  p := &Peer{}
-  response := map[string]interface{}{}
+  peer := &Peer{}
+  peerData := &PeerData{}
   msg := ""
-  if err := util.ReadJsonPayload(r, p); err == nil {
+  if err := util.ReadJsonPayload(r, peer); err == nil {
     pr := getPortRegistry(r)
     if peerName == "" {
-      pr.addPeer(p)
+      pr.addPeer(peer)
       pr.peersLock.RLock()
-      response[constants.PeerDataTargets] = pr.peerTargets[p.Name]
-      response[constants.PeerDataJobs] = pr.peerJobs[p.Name]
-      response[constants.PeerDataTrackingHeaders] = pr.peerTrackingHeaders
+      pr.preparePeerStartupData(peer, peerData)
       pr.peersLock.RUnlock()
-      msg = fmt.Sprintf("Added Peer: %+v", *p)
+      msg = fmt.Sprintf("Added Peer: %+v", *peer)
     } else {
-      pr.rememberPeer(p)
-      msg = fmt.Sprintf("Remembered Peer: %+v", *p)
-      response["message"] = msg
+      pr.rememberPeer(peer)
+      msg = fmt.Sprintf("Remembered Peer: %+v", *peer)
+      peerData.Message = msg
     }
     w.WriteHeader(http.StatusAccepted)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = fmt.Sprintf("Failed to parse json with error: %s", err.Error())
-    response["message"] = msg
+    peerData.Message = msg
   }
-  fmt.Fprintln(w, util.ToJSON(response))
+  fmt.Fprintln(w, util.ToJSON(peerData))
   if global.EnableRegistryLogs {
     util.AddLogMessage(msg, r)
   }
@@ -1264,6 +1308,71 @@ func addPeersTrackingHeaders(w http.ResponseWriter, r *http.Request) {
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = "{\"error\":\"No headers given\"}"
+  }
+  if global.EnableRegistryLogs {
+    util.AddLogMessage(msg, r)
+  }
+  fmt.Fprintln(w, msg)
+}
+
+func setProbe(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  probeType := util.GetStringParamValue(r, "type")
+  isReadiness := strings.EqualFold(probeType, "readiness")
+  isLiveness := strings.EqualFold(probeType, "liveness")
+  if !isReadiness && !isLiveness {
+    msg = "Cannot add. Invalid probe type"
+    w.WriteHeader(http.StatusBadRequest)
+  } else if uri, present := util.GetStringParam(r, "uri"); !present {
+    msg = "Cannot add. Invalid URI"
+    w.WriteHeader(http.StatusBadRequest)
+  } else {
+    pr := getPortRegistry(r)
+    if isReadiness {
+      global.ReadinessProbe = uri
+      if pr.readinessStatus <= 0 {
+        pr.readinessStatus = 200
+      }
+    } else if isLiveness {
+      global.LivenessProbe = uri
+      if pr.livenessStatus <= 0 {
+        pr.livenessStatus = 200
+      }
+    }
+    result := getPortRegistry(r).setProbe(probeType, uri)
+    checkBadPods(result, w)
+    msg = util.ToJSON(result)
+  }
+  if global.EnableRegistryLogs {
+    util.AddLogMessage(msg, r)
+  }
+  fmt.Fprintln(w, msg)
+}
+
+func setProbeStatus(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  probeType := util.GetStringParamValue(r, "type")
+  isReadiness := strings.EqualFold(probeType, "readiness")
+  isLiveness := strings.EqualFold(probeType, "liveness")
+  if !isReadiness && !isLiveness {
+    msg = "Cannot add. Invalid probe type"
+    w.WriteHeader(http.StatusBadRequest)
+  } else if status, present := util.GetIntParam(r, "status", 200); !present {
+    msg = "Cannot set. Invalid status code"
+    w.WriteHeader(http.StatusBadRequest)
+  } else {
+    if status <= 0 {
+      status = 200
+    }
+    pr := getPortRegistry(r)
+    if isReadiness {
+      pr.readinessStatus = status
+    } else if isLiveness {
+      pr.livenessStatus = status
+    }
+    result := pr.setProbeStatus(probeType, status)
+    checkBadPods(result, w)
+    msg = util.ToJSON(result)
   }
   if global.EnableRegistryLogs {
     util.AddLogMessage(msg, r)

@@ -12,7 +12,8 @@ import (
 )
 
 var (
-  Handler         util.ServerHandler = util.ServerHandler{"probe", SetRoutes, Middleware}
+  Handler util.ServerHandler = util.ServerHandler{"probe", SetRoutes, Middleware}
+
   ReadinessStatus int = 200
   ReadinessCount  int
   LivenessStatus  int = 200
@@ -89,8 +90,8 @@ func setProbeStatus(w http.ResponseWriter, r *http.Request) {
 func getProbes(w http.ResponseWriter, r *http.Request) {
   lock.RLock()
   lock.RUnlock()
-  output := fmt.Sprintf("{\"readiness\": {\"probe\": \"%s\", \"status\": %d, \"count\": %d}, \"liveness\": {\"probe\": \"%s\", \"status\": %d, \"count\": %d}}", 
-  global.ReadinessProbe, ReadinessStatus, ReadinessCount, global.LivenessProbe, LivenessStatus, LivenessCount)
+  output := fmt.Sprintf("{\"readiness\": {\"probe\": \"%s\", \"status\": %d, \"count\": %d}, \"liveness\": {\"probe\": \"%s\", \"status\": %d, \"count\": %d}}",
+    global.ReadinessProbe, ReadinessStatus, ReadinessCount, global.LivenessProbe, LivenessStatus, LivenessCount)
   util.AddLogMessage(fmt.Sprintf("Reporting probe counts: %s", output), r)
   w.WriteHeader(http.StatusOK)
   fmt.Fprintln(w, output)
@@ -110,11 +111,13 @@ func clearProbeCounts(w http.ResponseWriter, r *http.Request) {
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     if util.IsReadinessProbe(r) {
+      util.CopyHeaders("Readiness-Request", w, r.Header, r.Host)
       w.WriteHeader(ReadinessStatus)
       lock.Lock()
       ReadinessCount++
       lock.Unlock()
     } else if util.IsLivenessProbe(r) {
+      util.CopyHeaders("Liveness-Request", w, r.Header, r.Host)
       w.WriteHeader(LivenessStatus)
       lock.Lock()
       LivenessCount++
