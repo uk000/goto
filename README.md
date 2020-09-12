@@ -1413,14 +1413,14 @@ This feature allows setting readiness and liveness probe URIs, statuses to be re
 |METHOD|URI|Description|
 |---|---|---|
 |PUT, POST| /probe/readiness/set?uri={uri} | Set readiness probe URI. Also clears its counts |
-|PUT, POST| /probe/liveness/set?uri={uri} | Set readiness probe URI. Also clears its counts |
+|PUT, POST| /probe/liveness/set?uri={uri} | Set liveness probe URI. Also clears its counts |
 |PUT, POST| /probe/readiness/status/set/{status} | Set HTTP response status to be returned for readiness URI calls. Default 200. |
 |PUT, POST| /probe/liveness/status/set/{status} | Set HTTP response status to be returned for liveness URI calls. Default 200. |
 |POST| /probe/counts/clear               | Clear probe counts URIs |
 |GET      |	/probe                     | Get current config and counts for both probes |
 
 
-#### URI Bypass API Examples
+#### Probes API Examples
 ```
 curl -X POST localhost:8080/probe/readiness/set?uri=/ready
 
