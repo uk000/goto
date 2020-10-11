@@ -182,6 +182,7 @@ func Middleware(next http.Handler) http.Handler {
     if uri != "" {
       b.lock.Lock()
       b.Uris[uri] = b.Uris[uri].(int) + 1
+      util.CopyHeaders("Bypass-Request", w, r.Header, r.Host)
       w.WriteHeader(b.BypassStatus)
       b.lock.Unlock()
       util.AddLogMessage("Bypassing URI", r)

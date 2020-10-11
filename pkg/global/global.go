@@ -16,13 +16,13 @@ var (
   ShutdownDelay              time.Duration
   ReadinessProbe             string = "/ready"
   LivenessProbe              string = "/live"
-  Stopping                   bool = false
-  EnableTrackingLogs         bool = true
-  EnableAdminLogs            bool = true
-  EnableInvocationLogs       bool = true
-  EnableRegistryLogs         bool = true
-  EnableRegistryReminderLogs bool = false
-  EnableClientLogs           bool = true
-  EnableServerLogs           bool = true
+  Stopping                   bool   = false
+  EnableTrackingLogs         bool   = true
+  EnableAdminLogs            bool   = true
+  EnableInvocationLogs       bool   = true
+  EnableRegistryLogs         bool   = true
+  EnableRegistryReminderLogs bool   = false
+  EnableClientLogs           bool   = true
+  EnableServerLogs           bool   = true
   GetPeers                   func(string, *http.Request) map[string]string
 )

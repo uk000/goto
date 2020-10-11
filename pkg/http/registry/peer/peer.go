@@ -124,7 +124,7 @@ func setupStartupTasks(peerData *registry.PeerData) {
       probe.LivenessStatus = peerData.Probes.LivenessStatus
     }
   }
-  
+
   for _, job := range jobs {
     log.Printf("%+v\n", job)
     pj.AddJob(&job.Job)

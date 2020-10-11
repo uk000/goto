@@ -14,11 +14,13 @@ import (
 var (
   Handler util.ServerHandler = util.ServerHandler{"probe", SetRoutes, Middleware}
 
-  ReadinessStatus int = 200
-  ReadinessCount  int
-  LivenessStatus  int = 200
-  LivenessCount   int
-  lock            sync.RWMutex
+  ReadinessStatus        int = 200
+  ReadinessCount         uint64
+  ReadinessOverflowCount uint64
+  LivenessStatus         int = 200
+  LivenessCount          uint64
+  LivenessOverflowCount  uint64
+  lock                   sync.RWMutex
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -111,17 +113,27 @@ func clearProbeCounts(w http.ResponseWriter, r *http.Request) {
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     if util.IsReadinessProbe(r) {
-      util.CopyHeaders("Readiness-Request", w, r.Header, r.Host)
-      w.WriteHeader(ReadinessStatus)
       lock.Lock()
       ReadinessCount++
+      if ReadinessCount == 0 {
+        ReadinessOverflowCount++
+      }
       lock.Unlock()
+      util.CopyHeaders("Readiness-Request", w, r.Header, r.Host)
+      w.Header().Add("Readiness-Request-Count", fmt.Sprint(ReadinessCount))
+      w.Header().Add("Readiness-Overflow-Count", fmt.Sprint(ReadinessOverflowCount))
+      w.WriteHeader(ReadinessStatus)
     } else if util.IsLivenessProbe(r) {
-      util.CopyHeaders("Liveness-Request", w, r.Header, r.Host)
-      w.WriteHeader(LivenessStatus)
       lock.Lock()
       LivenessCount++
+      if LivenessCount == 0 {
+        LivenessOverflowCount++
+      }
       lock.Unlock()
+      util.CopyHeaders("Liveness-Request", w, r.Header, r.Host)
+      w.Header().Add("Liveness-Request-Count", fmt.Sprint(LivenessCount))
+      w.Header().Add("Liveness-Overflow-Count", fmt.Sprint(LivenessOverflowCount))
+      w.WriteHeader(LivenessStatus)
     } else {
       next.ServeHTTP(w, r)
     }

@@ -1420,7 +1420,13 @@ curl -X POST localhost:8080/request/uri/counts/clear
 
 #
 ## > Probes
-This feature allows setting readiness and liveness probe URIs, statuses to be returned for those probes, and tracking counts for how many times the probes have been called. By default, liveness probe URI is set to `/live` and readiness probe URI is set to `/ready`.
+This feature allows setting readiness and liveness probe URIs, statuses to be returned for those probes, and tracking counts for how many times the probes have been called. `Goto` also tracks when the probe call counts overflow, keeping separate overflow counts. A `goto` instance can be queried for its probe details via `/probe` API.
+
+The probe URIs response includes the request headers echoed back with `Readiness-Request-` or `Liveness-Request-` prefixes, and include the following additional headers:
+- `Readiness-Request-Count` and `Readiness-Overflow-Count` for `readiness` probe calls
+- `Liveness-Request-Count` and `Liveness-Overflow-Count` for `liveness` probe calls
+
+By default, liveness probe URI is set to `/live` and readiness probe URI is set to `/ready`.
 
 When the server starts shutting down, it waits for a configured grace period (default 5s) to serve existing traffic. During this period, the server will return 404 for the readiness probe if one is configured.
 
@@ -1563,11 +1569,16 @@ curl localhost:8080/response/headers
 ## > Response Payload
 This feature allows setting either custom or random generated response payload to be sent with server responses. 
 
-Custom response payload can be set for all requests (default), for specific URIs, or for specific headers. If response is set for all three, URI response payload gets highest priority if matched with request URI, followed by payload for matching request headers, and otherwise default payload is used as fallback if configured.
+Custom response payload can be set for all requests (`default` payload), for specific URIs, or for specific headers. If response is set for all three, URI match gets highest priority, followed by request headers match, and otherwise default payload is used as fallback if configured.
 
-Random payload generation can be configured for the `default` payload that applies to all URIs that don't have a custom payload defined. Random payload generation is configured by specifying a payload size using URI `/set/default/{size}` and not setting any payload. If a custom default payload is set as well as the size is configured, the custom payload will be adjusted to match the set size by either trimming the custom payload or appending more characters to the custom payload. Payload size can be a numeric value or use common byte size conventions: K, KB, M, MB
+Random payload generation can be configured for the `default` payload that applies to all URIs that don't have a custom payload defined. Random payload generation is configured by specifying a payload size using URI `/response/payload/set/default/{size}` and not setting any payload. If a custom default payload is set as well as the size is configured, the custom payload will be adjusted to match the set size by either trimming the custom payload or appending more characters to the custom payload. Payload size can be a numeric value or use common byte size conventions: `K`, `KB`, `M`, `MB`. There is no limit on the payload size as such, it's only limited by the memory available to the `goto` process.
 
-If no custom payload is configured, the request continues with its normal processing, in which case it may receive the "catch all" echo response. When a custom or default payload is set, request is not processed further except for the `/status` call asking for specific response status codes which is still processed to give it the requested status code.
+If no custom payload is configured, the request continues with its normal processing. When response payload is configured, the following receive are not matched against payload rules and never receive configured payload:
+- `Goto` admin requests
+- Probe URIs (`readiness` and `liveness`)
+- Bypass URIs
+
+When a request is matched with a configured payload (custom or default), the request is not processed further except for assigning the configured or requested response status code (either requested via `/status/{status}` call or configured via `/response/status/set/{status}`).
 
 
 #### APIs

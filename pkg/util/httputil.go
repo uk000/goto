@@ -33,12 +33,14 @@ var (
   logmessagesKey *ContextKey    = &ContextKey{"logmessages"}
   fillerRegExp   *regexp.Regexp = regexp.MustCompile("({.+?})")
 )
+
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=~`{}[];:,.<>/?"
+
 var sizes map[string]uint64 = map[string]uint64{
-	"K":  1000,
-	"KB": 1000,
-	"M":  1000000,
-	"MB": 1000000,
+  "K":  1000,
+  "KB": 1000,
+  "M":  1000000,
+  "MB": 1000000,
 }
 
 type messagestore struct {
@@ -203,7 +205,6 @@ func GetSizeParam(r *http.Request, name string) int {
   size = size * multiplier
   return size
 }
-
 
 func GetHeaderValues(r *http.Request) map[string]map[string]int {
   headerValuesMap := map[string]map[string]int{}

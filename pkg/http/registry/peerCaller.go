@@ -34,7 +34,7 @@ func newPeerRequest(method string, url string, headers map[string][]string, payl
 }
 
 func invokePeerAPI(pod *Pod, method, uri string, headers map[string][]string, payload string, expectedStatus int) (bool, string, error) {
-  if req, err := newPeerRequest(method, pod.host + uri, headers, payload); err == nil {
+  if req, err := newPeerRequest(method, pod.host+uri, headers, payload); err == nil {
     if resp, err := pod.client.Do(req); err == nil {
       data := util.Read(resp.Body)
       defer resp.Body.Close()
@@ -128,6 +128,6 @@ func invokeForPodsWithHeadersAndPayload(peerPods map[string][]*Pod, method strin
 
 func invokeForPods(peerPods map[string][]*Pod, method string, uri string, expectedStatus int, retryCount int, useUnhealthy bool,
   onPodDone func(string, *Pod, string, error), onPeerDone ...func(string)) map[string]map[string]bool {
-    return invokeForPodsWithHeadersAndPayload(peerPods, method, uri, nil, "", expectedStatus, retryCount, useUnhealthy,
-      onPodDone, onPeerDone...)
+  return invokeForPodsWithHeadersAndPayload(peerPods, method, uri, nil, "", expectedStatus, retryCount, useUnhealthy,
+    onPodDone, onPeerDone...)
 }

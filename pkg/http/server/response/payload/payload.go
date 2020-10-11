@@ -53,7 +53,6 @@ func (pr *PortResponse) setResponseContentType(contentType string) {
   }
 }
 
-
 func (pr *PortResponse) setDefaultResponsePayload(payload string, size int) {
   pr.lock.Lock()
   defer pr.lock.Unlock()
@@ -61,7 +60,7 @@ func (pr *PortResponse) setDefaultResponsePayload(payload string, size int) {
     if payload == "" {
       payload = util.GenerateRandomString(size)
     } else if len(payload) < size {
-      payload = strings.Join([]string{payload, util.GenerateRandomString(size-len(payload))}, "")
+      payload = strings.Join([]string{payload, util.GenerateRandomString(size - len(payload))}, "")
     } else if len(payload) > size {
       a := []rune(payload)
       payload = string(a[:size])
