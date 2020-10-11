@@ -111,18 +111,20 @@ func setupStartupTasks(peerData *registry.PeerData) {
     pc.AddTrackingHeaders(peerData.TrackingHeaders)
   }
 
-  if peerData.ReadinessProbe != "" {
-    log.Printf("Got Readiness probe %s, status: %d\n", peerData.ReadinessProbe, peerData.ReadinessStatus)
-    global.ReadinessProbe = peerData.ReadinessProbe
-    probe.ReadinessStatus = peerData.ReadinessStatus
-  }
+  if peerData.Probes != nil {
+    if peerData.Probes.ReadinessProbe != "" {
+      log.Printf("Got Readiness probe %s, status: %d\n", peerData.Probes.ReadinessProbe, peerData.Probes.ReadinessStatus)
+      global.ReadinessProbe = peerData.Probes.ReadinessProbe
+      probe.ReadinessStatus = peerData.Probes.ReadinessStatus
+    }
 
-  if peerData.LivenessProbe != "" {
-    log.Printf("Got Liveness probe: %s, status: %d\n", peerData.LivenessProbe, peerData.LivenessStatus)
-    global.LivenessProbe = peerData.LivenessProbe
-    probe.LivenessStatus = peerData.LivenessStatus
+    if peerData.Probes.LivenessProbe != "" {
+      log.Printf("Got Liveness probe: %s, status: %d\n", peerData.Probes.LivenessProbe, peerData.Probes.LivenessStatus)
+      global.LivenessProbe = peerData.Probes.LivenessProbe
+      probe.LivenessStatus = peerData.Probes.LivenessStatus
+    }
   }
-
+  
   for _, job := range jobs {
     log.Printf("%+v\n", job)
     pj.AddJob(&job.Job)

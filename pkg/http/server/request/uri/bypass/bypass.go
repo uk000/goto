@@ -14,6 +14,7 @@ import (
 type Bypass struct {
   Uris         map[string]interface{} `json:"uris"`
   BypassStatus int                    `json:"bypassStatus"`
+  statusCount  int
   lock         sync.RWMutex
 }
 
@@ -76,11 +77,17 @@ func (b *Bypass) removeURI(w http.ResponseWriter, r *http.Request) {
 
 func (b *Bypass) setStatus(w http.ResponseWriter, r *http.Request) {
   msg := ""
-  if status, present := util.GetIntParam(r, "status"); present {
+  statusCode, times, present := util.GetStatusParam(r)
+  if present {
     b.lock.Lock()
     defer b.lock.Unlock()
-    b.BypassStatus = status
-    msg = fmt.Sprintf("Bypass Status set to %d", status)
+    b.BypassStatus = statusCode
+    b.statusCount = times
+    if times > 0 {
+      msg = fmt.Sprintf("Bypass Status set to %d for next %d calls", statusCode, times)
+    } else {
+      msg = fmt.Sprintf("Bypass Status set to %d forever", statusCode)
+    }
     w.WriteHeader(http.StatusAccepted)
   } else {
     msg = fmt.Sprintf("Bypass Status %d", b.BypassStatus)

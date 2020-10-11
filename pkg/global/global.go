@@ -2,6 +2,7 @@ package global
 
 import (
 	"net/http"
+	"time"
 )
 
 var (
@@ -11,8 +12,10 @@ var (
   RegistryURL                string
   CertPath                   string
   UseLocker                  bool
-  ReadinessProbe             string
-  LivenessProbe              string
+  StartupDelay               time.Duration
+  ShutdownDelay              time.Duration
+  ReadinessProbe             string = "/ready"
+  LivenessProbe              string = "/live"
   Stopping                   bool = false
   EnableTrackingLogs         bool = true
   EnableAdminLogs            bool = true

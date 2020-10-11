@@ -52,7 +52,12 @@ func RunHttpServer(root string, handlers ...util.ServerHandler) {
 }
 
 func StartHttpServer(server *http.Server) {
+  if global.StartupDelay > 0 {
+    log.Printf("Sleeping %s before starting", global.StartupDelay)
+    time.Sleep(global.StartupDelay)
+  }
   go func() {
+    log.Printf("Server %s ready", server.Addr)
     if err := server.ListenAndServe(); err != nil {
       log.Println(err)
     }
@@ -61,7 +66,7 @@ func StartHttpServer(server *http.Server) {
 
 func ServeListener(l net.Listener) {
   go func() {
-    log.Printf("starting listener %s\n", l.Addr())
+    log.Printf("Starting listener %s\n", l.Addr())
     if err := server.Serve(l); err != nil {
       log.Println(err)
     }
@@ -73,15 +78,17 @@ func WaitForHttpServer(server *http.Server) {
   signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
   <-c
   global.Stopping = true
-  log.Printf("Sleeping 30s before stopping.")
-  signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-  select {
-  case <-c:
-    log.Printf("Received 2nd Interrupt. Really stopping now.")
+  if global.ShutdownDelay > 0 {
+    log.Printf("Sleeping %s before stopping", global.ShutdownDelay)
+    signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+    select {
+    case <-c:
+      log.Printf("Received 2nd Interrupt. Really stopping now.")
       break
-  case <-time.After(30 * time.Second):
-    log.Printf("Slept long enough. Stopping now.")
-    break
+    case <-time.After(global.ShutdownDelay):
+      log.Printf("Slept long enough. Stopping now.")
+      break
+    }
   }
   StopHttpServer(server)
 }

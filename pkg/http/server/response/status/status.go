@@ -3,8 +3,6 @@ package status
 import (
 	"fmt"
 	"net/http"
-	"strconv"
-	"strings"
 	"sync"
 
 	"goto/pkg/http/server/intercept"
@@ -52,22 +50,17 @@ func getOrCreatePortStatus(r *http.Request) *PortStatus {
 }
 
 func setStatus(w http.ResponseWriter, r *http.Request) {
-  vars := mux.Vars(r)
-  status := strings.Split(vars["status"], ":")
+  statusCode, times, _ := util.GetStatusParam(r)
   portStatus := getOrCreatePortStatus(r)
   statusLock.Lock()
   defer statusLock.Unlock()
   portStatus.alwaysReportStatusCount = -1
   portStatus.alwaysReportStatus = 200
-  if len(status[0]) > 0 {
-    s, _ := strconv.ParseInt(status[0], 10, 32)
-    if s > 0 {
-      portStatus.alwaysReportStatus = int(s)
-      portStatus.alwaysReportStatusCount = 0
-      if len(status) > 1 {
-        s, _ := strconv.ParseInt(status[1], 10, 32)
-        portStatus.alwaysReportStatusCount = int(s)
-      }
+  if statusCode > 0 {
+    portStatus.alwaysReportStatus = statusCode
+    portStatus.alwaysReportStatusCount = 0
+    if times > 1 {
+      portStatus.alwaysReportStatusCount = times
     }
   }
   msg := ""
@@ -122,17 +115,14 @@ func getStatus(w http.ResponseWriter, r *http.Request) {
     }
   } else {
     msg := ""
-    status := 200
     if portStatus.alwaysReportStatusCount > 0 {
-      status = portStatus.alwaysReportStatus
       msg = fmt.Sprintf("Responding with forced status: %d times %d", portStatus.alwaysReportStatus, portStatus.alwaysReportStatusCount)
     } else if portStatus.alwaysReportStatusCount == 0 {
-      status = portStatus.alwaysReportStatus
       msg = fmt.Sprintf("Responding with forced status: %d forever", portStatus.alwaysReportStatus)
     } else {
       msg = fmt.Sprintf("Responding normally")
     }
-    w.WriteHeader(status)
+    w.WriteHeader(http.StatusOK)
     fmt.Fprintln(w, msg)
   }
 }
@@ -187,9 +177,11 @@ func Middleware(next http.Handler) http.Handler {
       crw := intercept.NewInterceptResponseWriter(w, true)
       next.ServeHTTP(crw, r)
       crw.StatusCode = computeResponseStatus(crw.StatusCode, r)
-      IncrementStatusCount(crw.StatusCode, r)
-      util.AddLogMessage(fmt.Sprintf("Reporting status: [%d]", crw.StatusCode), r)
-      trigger.RunTriggers(r, crw, crw.StatusCode)
+      if crw.StatusCode > 0 {
+        IncrementStatusCount(crw.StatusCode, r)
+        util.AddLogMessage(fmt.Sprintf("Reporting status: [%d]", crw.StatusCode), r)
+        trigger.RunTriggers(r, crw, crw.StatusCode)
+      }
       crw.Proceed()
     } else {
       next.ServeHTTP(w, r)

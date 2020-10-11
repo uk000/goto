@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"goto/pkg/util"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -26,10 +27,11 @@ var (
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   payloadRouter := r.PathPrefix("/payload").Subrouter()
+  util.AddRoute(payloadRouter, "/set/default/{size}", setResponsePayload, "POST")
   util.AddRoute(payloadRouter, "/set/default", setResponsePayload, "POST")
   util.AddRouteQ(payloadRouter, "/set/uri", setResponsePayload, "uri", "{uri}", "POST")
-  util.AddRoute(payloadRouter, "/set/header/{header}", setResponsePayload, "POST")
   util.AddRoute(payloadRouter, "/set/header/{header}/value/{value}", setResponsePayload, "POST")
+  util.AddRoute(payloadRouter, "/set/header/{header}", setResponsePayload, "POST")
   util.AddRoute(payloadRouter, "/clear", clearResponsePayload, "POST")
   util.AddRoute(payloadRouter, "", getResponsePayload, "GET")
 }
@@ -51,9 +53,20 @@ func (pr *PortResponse) setResponseContentType(contentType string) {
   }
 }
 
-func (pr *PortResponse) setDefaultResponsePayload(payload string) {
+
+func (pr *PortResponse) setDefaultResponsePayload(payload string, size int) {
   pr.lock.Lock()
   defer pr.lock.Unlock()
+  if size > 0 {
+    if payload == "" {
+      payload = util.GenerateRandomString(size)
+    } else if len(payload) < size {
+      payload = strings.Join([]string{payload, util.GenerateRandomString(size-len(payload))}, "")
+    } else if len(payload) > size {
+      a := []rune(payload)
+      payload = string(a[:size])
+    }
+  }
   pr.DefaultResponsePayload = payload
 }
 
@@ -104,17 +117,23 @@ func getPortResponse(r *http.Request) *PortResponse {
 func setResponsePayload(w http.ResponseWriter, r *http.Request) {
   msg := ""
   payload := util.Read(r.Body)
-  getPortResponse(r).setResponseContentType(r.Header.Get("Content-Type"))
+  pr := getPortResponse(r)
+  pr.setResponseContentType(r.Header.Get("Content-Type"))
   if header, present := util.GetStringParam(r, "header"); present {
     value, _ := util.GetStringParam(r, "value")
-    getPortResponse(r).setHeaderResponsePayload(header, value, payload)
+    pr.setHeaderResponsePayload(header, value, payload)
     msg = fmt.Sprintf("Payload set for Response header [%s : %s] : %s", header, value, payload)
   } else if uri, present := util.GetStringParam(r, "uri"); present {
-    getPortResponse(r).setURIResponsePayload(uri, payload)
+    pr.setURIResponsePayload(uri, payload)
     msg = fmt.Sprintf("Payload set for Response URI [%s] : %s", uri, payload)
   } else {
-    getPortResponse(r).setDefaultResponsePayload(payload)
-    msg = fmt.Sprintf("Default Payload set : %s", payload)
+    size := util.GetSizeParam(r, "size")
+    pr.setDefaultResponsePayload(payload, size)
+    if size > 0 {
+      msg = fmt.Sprintf("Default Payload set with size: %d", size)
+    } else {
+      msg = fmt.Sprintf("Default Payload set : %s", pr.DefaultResponsePayload)
+    }
   }
   w.WriteHeader(http.StatusAccepted)
   util.AddLogMessage(msg, r)
@@ -137,12 +156,13 @@ func getResponsePayload(w http.ResponseWriter, r *http.Request) {
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     responseSet := false
+    payload := ""
     pr := getPortResponse(r)
     if !util.IsAdminRequest(r) {
       pr.lock.RLock()
       defer pr.lock.RUnlock()
       if uri := util.FindURIInMap(r.RequestURI, pr.ResponsePayloadByURIs); uri != "" {
-        fmt.Fprintln(w, pr.ResponsePayloadByURIs[uri].(string))
+        payload = pr.ResponsePayloadByURIs[uri].(string)
         responseSet = true
       } else {
         for h, hv := range r.Header {
@@ -151,13 +171,13 @@ func Middleware(next http.Handler) http.Handler {
             for _, v := range hv {
               v = strings.ToLower(v)
               if pr.ResponsePayloadByHeaders[h][v] != "" {
-                fmt.Fprintln(w, pr.ResponsePayloadByHeaders[h][v])
+                payload = pr.ResponsePayloadByHeaders[h][v]
                 responseSet = true
                 break
               }
             }
             if !responseSet && pr.ResponsePayloadByHeaders[h][""] != "" {
-              fmt.Fprintln(w, pr.ResponsePayloadByHeaders[h][""])
+              payload = pr.ResponsePayloadByHeaders[h][""]
               responseSet = true
               break
             }
@@ -165,14 +185,17 @@ func Middleware(next http.Handler) http.Handler {
         }
       }
       if !responseSet && pr.DefaultResponsePayload != "" {
-        fmt.Fprintln(w, pr.DefaultResponsePayload)
+        payload = pr.DefaultResponsePayload
         responseSet = true
       }
       if responseSet {
+        fmt.Fprint(w, payload)
+        w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
         w.Header().Set("Content-Type", pr.ResponseContentType)
+        util.AddLogMessage("Responding with configured payload", r)
       }
     }
-    if !responseSet {
+    if !responseSet || util.IsStatusRequest(r) {
       next.ServeHTTP(w, r)
     }
   })

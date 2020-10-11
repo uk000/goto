@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -31,6 +33,13 @@ var (
   logmessagesKey *ContextKey    = &ContextKey{"logmessages"}
   fillerRegExp   *regexp.Regexp = regexp.MustCompile("({.+?})")
 )
+const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=~`{}[];:,.<>/?"
+var sizes map[string]uint64 = map[string]uint64{
+	"K":  1000,
+	"KB": 1000,
+	"M":  1000000,
+	"MB": 1000000,
+}
 
 type messagestore struct {
   messages []string
@@ -119,6 +128,11 @@ func GetIntParam(r *http.Request, param string, defaultVal ...int) (int, bool) {
   }
 }
 
+func GetIntParamValue(r *http.Request, param string, defaultVal ...int) int {
+  val, _ := GetIntParam(r, param, defaultVal...)
+  return val
+}
+
 func GetStringParam(r *http.Request, param string, defaultVal ...string) (string, bool) {
   vars := mux.Vars(r)
   switch {
@@ -143,6 +157,53 @@ func GetListParam(r *http.Request, param string) ([]string, bool) {
   }
   return values, len(values) > 0 && len(values[0]) > 0
 }
+
+func GetStatusParam(r *http.Request) (int, int, bool) {
+  vars := mux.Vars(r)
+  status := vars["status"]
+  if len(status) == 0 {
+    return 0, 0, false
+  }
+  pieces := strings.Split(status, ":")
+  var statusCode, times int
+  if len(pieces[0]) > 0 {
+    s, _ := strconv.ParseInt(pieces[0], 10, 32)
+    statusCode = int(s)
+    if statusCode > 0 {
+      if len(pieces) > 1 {
+        s, _ := strconv.ParseInt(pieces[1], 10, 32)
+        times = int(s)
+      }
+    }
+  }
+  return statusCode, times, true
+}
+
+func GetSizeParam(r *http.Request, name string) int {
+  vars := mux.Vars(r)
+  param := vars[name]
+  size := 0
+  multiplier := 1
+  if len(param) == 0 {
+    return 0
+  }
+  for k, v := range sizes {
+    if strings.Contains(param, k) {
+      multiplier = int(v)
+      param = strings.Split(param, k)[0]
+      break
+    }
+  }
+  if len(param) > 0 {
+    s, _ := strconv.ParseInt(param, 10, 32)
+    size = int(s)
+  } else {
+    size = 1
+  }
+  size = size * multiplier
+  return size
+}
+
 
 func GetHeaderValues(r *http.Request) map[string]map[string]int {
   headerValuesMap := map[string]map[string]int{}
@@ -260,6 +321,10 @@ func IsLockerRequest(r *http.Request) bool {
   return strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker")
 }
 
+func IsStatusRequest(r *http.Request) bool {
+  return !IsAdminRequest(r) && strings.Contains(r.RequestURI, "/status")
+}
+
 func AddRoute(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), methods ...string) {
   if len(methods) > 0 {
     r.HandleFunc(route, f).Methods(methods...)
@@ -273,6 +338,11 @@ func AddRoute(r *mux.Router, route string, f func(http.ResponseWriter, *http.Req
 func AddRouteQ(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), queryParamName string, queryKey string, methods ...string) {
   r.HandleFunc(route, f).Queries(queryParamName, queryKey).Methods(methods...)
   r.HandleFunc(route+"/", f).Queries(queryParamName, queryKey).Methods(methods...)
+}
+
+func AddRouteMultiQ(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
+  r.HandleFunc(route, f).Queries(queryParams...).Methods(method)
+  r.HandleFunc(route+"/", f).Queries(queryParams...).Methods(method)
 }
 
 func AddRoutes(r *mux.Router, parent *mux.Router, root *mux.Router, handlers ...ServerHandler) {
@@ -447,4 +517,13 @@ func IsReadinessProbe(r *http.Request) bool {
 
 func IsLivenessProbe(r *http.Request) bool {
   return strings.EqualFold(r.RequestURI, global.LivenessProbe)
+}
+
+func GenerateRandomString(size int) string {
+  r := rand.New(rand.NewSource(time.Now().UnixNano()))
+  b := make([]byte, size)
+  for i := range b {
+    b[i] = charset[r.Intn(len(charset))]
+  }
+  return string(b)
 }

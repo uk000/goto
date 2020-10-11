@@ -106,6 +106,16 @@ The application accepts the following command arguments:
           <td>* This is used both for setting `Goto`'s default response headers as well as when registering with registry.</td>
         </tr>
         <tr>
+          <td rowspan="1">--startupDelay</td>
+          <td>Delay the startup by this duration. </td>
+          <td rowspan="1">1s</td>
+        </tr>
+        <tr>
+          <td rowspan="1">--shutdownDelay</td>
+          <td>Delay the shutdown by this duration after receiving SIGTERM. </td>
+          <td rowspan="1">5s</td>
+        </tr>
+        <tr>
           <td rowspan="3">--registry</td>
           <td>URL of the Goto Registry instance that this instance should connect to. </td>
           <td rowspan="3"> "" </td>
@@ -1368,6 +1378,7 @@ This feature allows tracking request counts by URIs (ignoring query parameters).
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
+|POST     |	/request/uri/status/set?uri={uri}&status={status:count} | Set forced response status that the server will use for a given request URI, either for all subsequent calls until cleared, or for specific number of subsequent calls |
 |GET      |	/request/uri/counts                     | Get request counts for all URIs |
 |POST     |	/request/uri/counts/enable              | Enable tracking request counts for all URIs |
 |POST     |	/request/uri/counts/disable             | Disable tracking request counts for all URIs |
@@ -1376,6 +1387,8 @@ This feature allows tracking request counts by URIs (ignoring query parameters).
 
 #### URI API Examples
 ```
+curl -X POST localhost:8080/request/uri/status/set?uri=/foo&status=418:2
+
 curl localhost:8080/request/uri/counts
 
 curl -X POST localhost:8080/request/uri/counts/enable
@@ -1407,13 +1420,15 @@ curl -X POST localhost:8080/request/uri/counts/clear
 
 #
 ## > Probes
-This feature allows setting readiness and liveness probe URIs, statuses to be returned for those probes, and tracking counts for how many times the probes have been called. When the server starts shutting down, it waits for 30s grace period to serve existing traffic. During this period, the server will return 404 for the readiness probe if one is configured.
+This feature allows setting readiness and liveness probe URIs, statuses to be returned for those probes, and tracking counts for how many times the probes have been called. By default, liveness probe URI is set to `/live` and readiness probe URI is set to `/ready`.
+
+When the server starts shutting down, it waits for a configured grace period (default 5s) to serve existing traffic. During this period, the server will return 404 for the readiness probe if one is configured.
 
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
-|PUT, POST| /probe/readiness/set?uri={uri} | Set readiness probe URI. Also clears its counts |
-|PUT, POST| /probe/liveness/set?uri={uri} | Set liveness probe URI. Also clears its counts |
+|PUT, POST| /probe/readiness/set?uri={uri} | Set readiness probe URI. Also clears its counts. If not explicitly set, the readiness URI is set to `/ready`.  |
+|PUT, POST| /probe/liveness/set?uri={uri} | Set liveness probe URI. Also clears its counts If not explicitly set, the liveness URI is set to `/live`. |
 |PUT, POST| /probe/readiness/status/set/{status} | Set HTTP response status to be returned for readiness URI calls. Default 200. |
 |PUT, POST| /probe/liveness/status/set/{status} | Set HTTP response status to be returned for liveness URI calls. Default 200. |
 |POST| /probe/counts/clear               | Clear probe counts URIs |
@@ -1447,7 +1462,7 @@ This feature allows adding bypass URIs that will not be subject to other configu
 |PUT, POST| /request/uri/bypass/add?uri={uri}       | Add a bypass URI |
 |PUT, POST| /request/uri/bypass/remove?uri={uri}    | Remove a bypass URI |
 |PUT, POST| /request/uri/bypass/clear               | Remove all bypass URIs |
-|PUT, POST| /request/uri/bypass/status/set/{status} | Set status code to be returned for bypass URI requests |
+|PUT, POST| /request/uri/bypass/status/set/{status:count} | Set status code to be returned for bypass URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
 |GET      |	/request/uri/bypass/list                | Get list of bypass URIs |
 |GET      |	/request/uri/bypass                     | Get list of bypass URIs |
 |GET      |	/request/uri/bypass/status              | Get current bypass URI status code |
@@ -1462,7 +1477,7 @@ curl -X PUT localhost:8080/request/uri/bypass/add\?uri=/foo
 
 curl -X PUT localhost:8081/request/uri/bypass/remove\?uri=/bar
 
-curl -X PUT localhost:8080/request/uri/bypass/status/set/418
+curl -X PUT localhost:8080/request/uri/bypass/status/set/418:2
 
 curl localhost:8081/request/uri/bypass/list
 
@@ -1546,12 +1561,20 @@ curl localhost:8080/response/headers
 
 #
 ## > Response Payload
-This feature allows setting custom response payload to be sent with server responses. Response payload can be set for all requests (default), for specific URIs, or for specific headers. If response is set for all three, URI response payload gets highest priority if matched with request URI, followed by payload for matching request headers, and otherwise default payload is used as fallback if configured. If no custom payload is configured, the request continues with its normal processing, in which case it may receive the "catch all" echo response.
+This feature allows setting either custom or random generated response payload to be sent with server responses. 
+
+Custom response payload can be set for all requests (default), for specific URIs, or for specific headers. If response is set for all three, URI response payload gets highest priority if matched with request URI, followed by payload for matching request headers, and otherwise default payload is used as fallback if configured.
+
+Random payload generation can be configured for the `default` payload that applies to all URIs that don't have a custom payload defined. Random payload generation is configured by specifying a payload size using URI `/set/default/{size}` and not setting any payload. If a custom default payload is set as well as the size is configured, the custom payload will be adjusted to match the set size by either trimming the custom payload or appending more characters to the custom payload. Payload size can be a numeric value or use common byte size conventions: K, KB, M, MB
+
+If no custom payload is configured, the request continues with its normal processing, in which case it may receive the "catch all" echo response. When a custom or default payload is set, request is not processed further except for the `/status` call asking for specific response status codes which is still processed to give it the requested status code.
+
 
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
-| POST | /response/payload/set/default  | Add a custom payload to be sent with all responses |
+| POST | /response/payload/set/default  | Add a custom payload to be used for ALL URI responses except those explicitly configured with another payload |
+| POST | /response/payload/set/default/{size}  | Respond with a random generated payload of the given size for all URIs except those explicitly configured with another payload. Size can be a numeric value or use common byte size conventions: K, KB, M, MB |
 | POST | /response/payload/set/uri?uri={uri}  | Add a custom payload to be sent for requests matching the given URI. URI can contain placeholders |
 | POST | /response/payload/set/header/{header}  | Add a custom payload to be sent for requests matching the given header name |
 | POST | /response/payload/set/header/{header}/value/{value}  | Add a custom payload to be sent for requests matching the given header name and value |
@@ -1561,6 +1584,8 @@ This feature allows setting custom response payload to be sent with server respo
 #### Response Payload API Examples
 ```
 curl -X POST localhost:8080/response/payload/set/default --data '{"test": "default payload"}'
+
+curl -X POST localhost:8080/response/payload/set/default/10K
 
 curl -X POST localhost:8080/response/payload/set/uri?uri=/foo/{f}/bar{b} --data '{"test": "uri was /foo/{}/bar/{}"}'
 
@@ -2241,7 +2266,7 @@ Peer instances periodically re-register themselves with registry in case registr
 | GET       | /registry/peers/lockers/targets/results | Get target invocation summary results for all peer instances |
 | GET       | /registry/peers/lockers/targets/results?detailed=Y | Get invocation results broken down by targets for all peer instances |
 | GET       | /registry/peers/targets | Get all registered targets for all peers |
-| POST      | /registry/peers/{peer}/targets/add | Add a target to be sent to a peer. See [Peer Target JSON Schema](#peer-target-json-schema) |
+| POST      | /registry/peers/{peer}/targets/add | Add a target to be sent to a peer. See [Peer Target JSON Schema](#peer-target-json-schema). Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/{peer}/targets/{targets}/remove | Remove given targets for a peer |
 | POST      | /registry/peers/{peer}/targets/clear   | Remove all targets for a peer|
 | GET       | /registry/peers/{peer}/targets   | Get all targets of a peer |
@@ -2255,20 +2280,22 @@ Peer instances periodically re-register themselves with registry in case registr
 | POST, PUT | /registry/peers/targets/results/invocations/{enable}  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
 | POST      | /registry/peers/targets/clear   | Remove all targets from all peers |
 | GET       | /registry/peers/jobs | Get all registered jobs for all peers |
-| POST      | /registry/peers/{peer}/jobs/add | Add a job to be sent to a peer. See [Peer Job JSON Schema](#peer-job-json-schema) |
-| POST, PUT | /registry/peers/{peer}/jobs/{jobs}/remove | Remove given jobs for a peer |
-| POST      | /registry/peers/{peer}/jobs/clear   | Remove all jobs for a peer|
+| POST      | /registry/peers/{peer}/jobs/add | Add a job to be sent to a peer. See [Peer Job JSON Schema](#peer-job-json-schema). Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/{peer}/jobs/{jobs}/remove | Remove given jobs for a peer. |
+| POST      | /registry/peers/{peer}/jobs/clear   | Remove all jobs for a peer.|
 | GET       | /registry/peers/{peer}/jobs   | Get all jobs of a peer |
 | POST, PUT | /registry/peers/{peer}/jobs/{jobs}/run | Run given jobs on the given peer |
 | POST, PUT | /registry/peers/{peer}/jobs/run/all | Run all jobs on the given peer |
 | POST, PUT | /registry/peers/{peer}/jobs/{jobs}/stop | Stop given jobs on the given peer |
 | POST, PUT | /registry/peers/{peer}/jobs/stop/all | Stop all jobs on the given peer |
-| POST      | /registry/peers/jobs/clear   | Remove all jobs from all peers |
-| POST, PUT | /registry/peers/track/headers/{headers} | Configure headers to be tracked by client invocations on peers |
-| POST, PUT | /registry/peers/probe/readiness/set?uri={uri} | Configure readiness probe URI for peers |
-| POST, PUT | /registry/peers/probe/liveness/set?uri={uri} | Configure liveness probe URI for peers |
-| POST, PUT | /registry/peers/probe/readiness/status/set/{status} | Configure readiness probe status for peers |
-| POST, PUT | /registry/peers/probe/liveness/status/set/{status} | Configure readiness probe status for peers |
+| POST      | /registry/peers/jobs/clear   | Remove all jobs from all peers. |
+| POST, PUT | /registry/peers/track/headers/{headers} | Configure headers to be tracked by client invocations on peers. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/probe/readiness/set?uri={uri} | Configure readiness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/probe/liveness/set?uri={uri} | Configure liveness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/probe/readiness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/probe/liveness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
+| GET, POST, PUT | /registry/peers/{peer}/call?uri={uri} | Invoke the given `URI` on the given `peer`, using the HTTP method and payload from this request |
+| GET, POST, PUT | /registry/peers/call?uri={uri} | Invoke the given `URI` on all `peers`, using the HTTP method and payload from this request |
 
 #### Peers JSON Schema 
 Map of peer labels to peer details, where each peer details include the following info
@@ -2413,6 +2440,12 @@ curl http://localhost:8080/registry/peers/peer1/jobs
 curl -X POST http://localhost:8080/registry/peers/peer1/jobs/job1,job2/invoke
 
 curl -X POST http://localhost:8080/registry/peers/peer1/jobs/invoke/all
+
+curl -X POST http://localhost:8080/registry/peers/peer1/call?uri=/request/headers/track/add/x
+
+curl -X POST http://localhost:8080/registry/peers/call?uri=/request/headers/track/add/y
+
+curl -s http://localhost:8080/registry/peers/call?uri=/request/headers/track
 
 ```
 
