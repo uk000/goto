@@ -1,4 +1,4 @@
-FROM golang:alpine3.11 as builder
+FROM golang:1.15.2-alpine3.12 as builder
 
 ARG COMMIT 
 ARG VERSION 
@@ -10,28 +10,26 @@ ADD ./go.mod /app/go.mod
 ADD ./main.go /app/main.go
 
 WORKDIR /app
-RUN go build -o goto -ldflags="-extldflags \"-static\" -w -s -X goto/cmd.Version=$VERSION -X goto/cmd.Commit=$COMMIT" .
+RUN go env -w GOINSECURE=* && go build -o goto -ldflags="-extldflags \"-static\" -w -s -X goto/cmd.Version=$VERSION -X goto/cmd.Commit=$COMMIT" .
 
-FROM alpine:3.11 as release
-RUN echo 'https://nl.alpinelinux.org/alpine/v3.11/main' > /etc/apk/repositories
-
-RUN apk add --no-cache --update \
+FROM alpine:3.12 as release
+RUN echo 'https://nl.alpinelinux.org/alpine/v3.12/main' > /etc/apk/repositories \
+  && \
+  apk add --no-cache --update \
   curl \
   wget \
-  jq \
-  netcat-openbsd \
   bash \
   nmap \
   iputils  \
-  mtr \
   tcpdump \
   conntrack-tools \
   tcpflow \
   iftop \
-  net-tools \
   bind-tools \
   busybox \
-  busybox-extras
+  busybox-extras\
+  netcat-openbsd \
+  jq
 
 WORKDIR /app
 COPY --from=builder /app/goto .
