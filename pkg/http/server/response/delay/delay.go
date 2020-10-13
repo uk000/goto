@@ -81,7 +81,6 @@ func delay(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusBadRequest)
   }
   util.AddLogMessage(msg, r)
-  fmt.Fprintln(w, msg)
 }
 
 func getDelay(w http.ResponseWriter, r *http.Request) {

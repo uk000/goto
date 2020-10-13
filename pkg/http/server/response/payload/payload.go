@@ -194,7 +194,7 @@ func Middleware(next http.Handler) http.Handler {
         util.AddLogMessage("Responding with configured payload", r)
       }
     }
-    if !responseSet || util.IsStatusRequest(r) {
+    if !responseSet || util.IsStatusRequest(r) || util.IsDelayRequest(r) {
       next.ServeHTTP(w, r)
     }
   })
