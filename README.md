@@ -1584,7 +1584,9 @@ If no custom payload is configured, the request continues with its normal proces
 - Probe URIs (`readiness` and `liveness`)
 - Bypass URIs
 
-When a request is matched with a configured payload (custom or default), the request is not processed further except for assigning the configured or requested response status code (either requested via `/status/{status}` call or configured via `/response/status/set/{status}`).
+When a request is matched with a configured payload (custom or default), the request is not processed further except:
+- assigning the configured or requested response status code (either requested via `/status/{status}` call or configured via `/response/status/set/{status}`)
+- applying response delay, either requested via `/delay` call or configured via `/response/delay/set/{delay}` API.
 
 
 #### APIs
