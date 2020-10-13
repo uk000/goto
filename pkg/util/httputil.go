@@ -326,6 +326,10 @@ func IsStatusRequest(r *http.Request) bool {
   return !IsAdminRequest(r) && strings.Contains(r.RequestURI, "/status")
 }
 
+func IsDelayRequest(r *http.Request) bool {
+  return !IsAdminRequest(r) && strings.Contains(r.RequestURI, "/delay")
+}
+
 func AddRoute(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), methods ...string) {
   if len(methods) > 0 {
     r.HandleFunc(route, f).Methods(methods...)

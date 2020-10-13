@@ -25,6 +25,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(delayRouter, "/set/{delay}", setDelay, "POST", "PUT")
   util.AddRoute(delayRouter, "/clear", setDelay, "POST", "PUT")
   util.AddRoute(delayRouter, "", getDelay, "GET")
+  util.AddRoute(parent, "/delay/{delay}", delay, "GET", "PUT", "POST", "OPTIONS", "HEAD")
+  util.AddRoute(parent, "/delay", delay, "GET", "PUT", "POST", "OPTIONS", "HEAD")
 }
 
 func setDelay(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +66,24 @@ func setDelay(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
+func delay(w http.ResponseWriter, r *http.Request) {
+  delayLock.RLock()
+  defer delayLock.RUnlock()
+  msg := ""
+  delayParam := util.GetStringParamValue(r, "delay")
+  if delay, err := time.ParseDuration(delayParam); err == nil {
+    msg = fmt.Sprintf("Delayed by: %s\n", delay.String())
+    time.Sleep(delay)
+    w.Header().Add("Response-Delay", delay.String())
+    w.WriteHeader(http.StatusOK)
+  } else if delayParam != "" {
+    msg = err.Error()
+    w.WriteHeader(http.StatusBadRequest)
+  }
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
+}
+
 func getDelay(w http.ResponseWriter, r *http.Request) {
   delayLock.RLock()
   defer delayLock.RUnlock()
@@ -81,7 +101,7 @@ func Middleware(next http.Handler) http.Handler {
     delay := delayByPort[listenerPort]
     delayCount := delayCountByPort[listenerPort]
     delayLock.RUnlock()
-    if delay > 0 && delayCount >= 0 && !util.IsAdminRequest(r) {
+    if delay > 0 && delayCount >= 0 && !util.IsAdminRequest(r) && !util.IsDelayRequest(r) {
       util.AddLogMessage(fmt.Sprintf("Delaying for %s", delay.String()), r)
       if delayCount > 0 {
         if delayCount == 1 {
@@ -93,6 +113,7 @@ func Middleware(next http.Handler) http.Handler {
         util.AddLogMessage(fmt.Sprintf("Remaining delay count = %d", delayCount), r)
         delayCountByPort[listenerPort] = delayCount
       }
+      w.Header().Add("Response-Delay", delay.String())
       time.Sleep(delay)
     }
     next.ServeHTTP(w, r)

@@ -1515,7 +1515,13 @@ curl localhost:8080/request/uri/bypass/counts\?uri=/foo
 
 #
 ## > Response Delay
-This feature allows adding a delay to all requests except bypass URIs and proxy requests. Delay is specified as duration, e.g. 1s
+This feature allows adding a delay to all requests except bypass URIs and proxy requests. Delay is specified as duration, e.g. 1s. 
+
+Delay is not applied to the following requests:
+- `Goto` admin calls and
+- Delay API `/delay`
+
+When a delay is applied to a request, the response carries a header `Response-Delay` with the value of the applied delay.
 
 #### APIs
 |METHOD|URI|Description|
@@ -1573,7 +1579,7 @@ Custom response payload can be set for all requests (`default` payload), for spe
 
 Random payload generation can be configured for the `default` payload that applies to all URIs that don't have a custom payload defined. Random payload generation is configured by specifying a payload size using URI `/response/payload/set/default/{size}` and not setting any payload. If a custom default payload is set as well as the size is configured, the custom payload will be adjusted to match the set size by either trimming the custom payload or appending more characters to the custom payload. Payload size can be a numeric value or use common byte size conventions: `K`, `KB`, `M`, `MB`. There is no limit on the payload size as such, it's only limited by the memory available to the `goto` process.
 
-If no custom payload is configured, the request continues with its normal processing. When response payload is configured, the following receive are not matched against payload rules and never receive configured payload:
+If no custom payload is configured, the request continues with its normal processing. When response payload is configured, the following requests are not matched against payload rules and never receive the configured payload:
 - `Goto` admin requests
 - Probe URIs (`readiness` and `liveness`)
 - Bypass URIs
@@ -1690,16 +1696,33 @@ curl localhost:8080/response/status/counts/502
 
 #
 ## > Status API
-This URI allows client to ask for a specific status as response code. The given status is reported back, except when forced status is configured in which case the forced status is sent as response.
+The URI `/status/{status}` allows client to ask for a specific status as response code. The given status is reported back, except when forced status is configured in which case the forced status is sent as response.
 
-#### APIs
+#### API
 |METHOD|URI|Description|
 |---|---|---|
 | GET       |	/status/{status}                  | This call either receives the given status, or the forced response status if one is set |
 
-#### Status API Examples
+#### Status API Example
 ```
 curl -I  localhost:8080/status/418
+```
+
+<br/>
+
+#
+## > Delay API
+The URI `/delay/{delay}` allows client to ask for a specific delay to be applied to the current request. The delay API is not subject to the response delay that may be configured for all responses. Calling the URI as `/delay` responds with no delay, and so does the call as `/delay/0`, `/delay/0s`, etc.
+When a delay is passed to this API, the response carries a header `Response-Delay` with the value of the applied delay.
+
+#### API
+|METHOD|URI|Description|
+|---|---|---|
+| GET, POST, PUT, OPTIONS, HEAD |	/delay/{delay} | Responds after the given delay |
+
+#### Delay API Example
+```
+curl -I  localhost:8080/delay/2s
 ```
 
 <br/>
@@ -1708,12 +1731,12 @@ curl -I  localhost:8080/status/418
 ## > Echo API
 This URI echoes back the headers and payload sent by client. The response is also subject to any forced response status and will carry custom headers if any are configured.
 
-#### APIs
+#### API
 |METHOD|URI|Description|
 |---|---|---|
 | GET       |	/echo                  | Sends response back with request headers and body, with added custom response headers and forced status |
 
-#### Echo API Examples
+#### Echo API Example
 ```
 curl -I  localhost:8080/echo
 ```
