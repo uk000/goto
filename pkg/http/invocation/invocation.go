@@ -706,10 +706,12 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
       result.Headers["Status"] = []string{resp.Status}
       result.Status = resp.Status
       result.StatusCode = resp.StatusCode
+      var responseLength int64
       if reportBody {
         result.Body = util.Read(resp.Body)
+        responseLength = int64(len(result.Body))
       } else {
-        io.Copy(ioutil.Discard, resp.Body)
+        responseLength, _ = io.Copy(ioutil.Discard, resp.Body)
       }
       if global.EnableInvocationLogs {
         headerLogs := []string{}
@@ -717,7 +719,7 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
           headerLogs = append(headerLogs, header+":["+strings.Join(values, ",")+"]")
         }
         headerLog := strings.Join(headerLogs, ",")
-        log.Printf("Invocation[%d]: Target %s Response Status: %s\n, Headers: [%s]", index, targetID, resp.Status, headerLog)
+        log.Printf("Invocation[%d]: Target %s Response Status: %s, Headers: [%s], Payload Length: [%d]", index, targetID, resp.Status, headerLog, responseLength)
       }
     } else {
       log.Printf("Invocation[%d]: Target %s, url [%s] invocation failed with error: %s\n", index, targetID, url, reqError.Error())

@@ -241,7 +241,6 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
         end = payloadSize
       }
       chunkResponse := string(payload[start : end])
-      fmt.Println(chunkResponse)
       fmt.Fprint(w, chunkResponse)
       flusher.Flush()
       payloadIndex++
