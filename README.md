@@ -1648,6 +1648,14 @@ curl localhost:8080/response/payload
 ## > Stream (Chunked) Response API
 This URI responds with either pre-configured or random-generated payload where response behavior is controlled by the parameters passed to the API. The feature allows requesting a custom payload size, custom response duration over which to stream the payload, custom chunk size to be used for splitting the payload into chunks, and custom delay to be used in-between chunked responses. Combination of these parameters define the total payload size and the total duration of the response.
 
+Stream responses carry following headers:
+`Goto-Stream-Length: <total payload size>`
+`Goto-Stream-Duration: <total response duration>`
+`Goto-Chunk-Length: <per-chunk size>`
+`Goto-Chunk-Delay: <per-chunk delay>`
+`X-Content-Type-Options: nosniff`
+`Transfer-Encoding: chunked`
+
 #### API
 |METHOD|URI|Description|
 |---|---|---|

@@ -13,6 +13,7 @@ type InterceptResponseWriter struct {
   Data       []byte
   Hold       bool
   Hijacked   bool
+  Chunked    bool
 }
 
 func (rw *InterceptResponseWriter) WriteHeader(statusCode int) {
@@ -31,11 +32,12 @@ func (rw *InterceptResponseWriter) Write(b []byte) (int, error) {
 }
 
 func (rw *InterceptResponseWriter) Flush() {
+  rw.Chunked = true
   rw.ResponseWriter.(http.Flusher).Flush()
 }
 
 func (rw *InterceptResponseWriter) Proceed() {
-  if !rw.Hijacked && rw.Hold {
+  if !rw.Hijacked && !rw.Chunked && rw.Hold {
     if rw.StatusCode <= 0 {
       rw.StatusCode = 200
     }
