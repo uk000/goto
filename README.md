@@ -1373,12 +1373,14 @@ curl localhost:8080/request/timeout/status
 
 #
 ## > URIs
-This feature allows tracking request counts by URIs (ignoring query parameters).
+This feature allows responding with custom status code and delays for specific URIs, and tracking request counts for calls made to specific URIs (ignoring query parameters).
+Note: To configure server to respond with custom/random response payloads for specific URIs, see [`Response Payload`](#response-payload) feature.
 
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
-|POST     |	/request/uri/status/set?uri={uri}&status={status:count} | Set forced response status that the server will use for a given request URI, either for all subsequent calls until cleared, or for specific number of subsequent calls |
+|POST     |	/request/uri/status/set?uri={uri}&status={status:count} | Set forced response status to respond with for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls |
+|POST     |	/request/uri/delay/set?uri={uri}&delay={delay:count} | Set forced delay for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls |
 |GET      |	/request/uri/counts                     | Get request counts for all URIs |
 |POST     |	/request/uri/counts/enable              | Enable tracking request counts for all URIs |
 |POST     |	/request/uri/counts/disable             | Disable tracking request counts for all URIs |
@@ -1572,7 +1574,7 @@ curl localhost:8080/response/headers
 <br/>
 
 #
-## > Response Payload
+## > <a name="response-payload"></a> Response Payload
 This feature allows setting either custom or random generated response payload to be sent with server responses. 
 
 Custom response payload can be set for all requests (`default` payload), for specific URIs, or for specific headers. If response is set for all three, URI match gets highest priority, followed by request headers match, and otherwise default payload is used as fallback if configured.
@@ -1639,6 +1641,28 @@ curl localhost:8080/response/payload
 ```
 </p>
 </details>
+
+<br/>
+
+#
+## > Stream (Chunked) Response API
+This URI responds with either pre-configured or random-generated payload where response behavior is controlled by the parameters passed to the API. The feature allows requesting a custom payload size, custom response duration over which to stream the payload, custom chunk size to be used for splitting the payload into chunks, and custom delay to be used in-between chunked responses. Combination of these parameters define the total payload size and the total duration of the response.
+
+#### API
+|METHOD|URI|Description|
+|---|---|---|
+| GET, PUT, POST  |	/stream/size/{size}/duration/{duration} | Respond with a payload of given size over the given duration |
+| GET, PUT, POST  |	/stream/size/{size}/chunk/{chunk}/delay/{delay} | Respond with a payload of given size, split into chunks of given chunk size, and each chunk to be delivered with the given delay |
+| GET, PUT, POST  |	/stream/size/{size}/chunk/{chunk} | Respond with a payload of given size, split into chunks of given chunk size, and each chunk to be delivered with a default delay of 100ms |
+
+#### Stream Response API Example
+```
+curl -v localhost:8080/stream/size/10K/duration/20s
+
+curl -v localhost:8080/stream/size/5K/chunk/100
+
+curl -v localhost:8080/stream/size/500/chunk/100/delay/500ms
+```
 
 <br/>
 

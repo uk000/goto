@@ -14,10 +14,10 @@ import (
 )
 
 var (
-  Handler     util.ServerHandler       = util.ServerHandler{"delay", SetRoutes, Middleware}
-  delayByPort map[string]time.Duration = map[string]time.Duration{}
-  delayCountByPort map[string]int = map[string]int{}
-  delayLock   sync.RWMutex
+  Handler          util.ServerHandler       = util.ServerHandler{"delay", SetRoutes, Middleware}
+  delayByPort      map[string]time.Duration = map[string]time.Duration{}
+  delayCountByPort map[string]int           = map[string]int{}
+  delayLock        sync.RWMutex
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {

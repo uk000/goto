@@ -30,6 +30,10 @@ func (rw *InterceptResponseWriter) Write(b []byte) (int, error) {
   return 0, nil
 }
 
+func (rw *InterceptResponseWriter) Flush() {
+  rw.ResponseWriter.(http.Flusher).Flush()
+}
+
 func (rw *InterceptResponseWriter) Proceed() {
   if !rw.Hijacked && rw.Hold {
     if rw.StatusCode <= 0 {

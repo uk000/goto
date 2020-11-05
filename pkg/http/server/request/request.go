@@ -14,8 +14,8 @@ import (
 
 var (
   Handler         util.ServerHandler   = util.ServerHandler{"request", SetRoutes, Middleware}
-  requestHandlers []util.ServerHandler = []util.ServerHandler{uri.Handler, timeout.Handler, header.Handler,
-    proxy.Handler}
+  requestHandlers []util.ServerHandler = []util.ServerHandler{header.Handler,
+		uri.Handler, timeout.Handler, proxy.Handler}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {

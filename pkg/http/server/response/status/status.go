@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"goto/pkg/http/server/intercept"
+	"goto/pkg/http/server/request/uri"
 	"goto/pkg/http/server/response/trigger"
 	"goto/pkg/util"
 
@@ -177,7 +178,7 @@ func Middleware(next http.Handler) http.Handler {
       crw := intercept.NewInterceptResponseWriter(w, true)
       next.ServeHTTP(crw, r)
       crw.StatusCode = computeResponseStatus(crw.StatusCode, r)
-      if crw.StatusCode > 0 {
+      if crw.StatusCode > 0 && !uri.HasURIStatus(r) {
         IncrementStatusCount(crw.StatusCode, r)
         util.AddLogMessage(fmt.Sprintf("Reporting status: [%d]", crw.StatusCode), r)
         trigger.RunTriggers(r, crw, crw.StatusCode)

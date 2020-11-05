@@ -206,6 +206,15 @@ func GetSizeParam(r *http.Request, name string) int {
   return size
 }
 
+func GetDurationParam(r *http.Request, name string) time.Duration {
+  vars := mux.Vars(r)
+  param := vars[name]
+  if d, err := time.ParseDuration(param); err == nil {
+    return d
+  }
+  return 0
+}
+
 func GetHeaderValues(r *http.Request) map[string]map[string]int {
   headerValuesMap := map[string]map[string]int{}
   for h, values := range r.Header {
@@ -328,6 +337,10 @@ func IsStatusRequest(r *http.Request) bool {
 
 func IsDelayRequest(r *http.Request) bool {
   return !IsAdminRequest(r) && strings.Contains(r.RequestURI, "/delay")
+}
+
+func IsStreamRequest(r *http.Request) bool {
+  return !IsAdminRequest(r) && strings.Contains(r.RequestURI, "/stream")
 }
 
 func AddRoute(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), methods ...string) {

@@ -10,10 +10,12 @@ ADD ./go.mod /app/go.mod
 ADD ./main.go /app/main.go
 
 WORKDIR /app
-RUN go env -w GOINSECURE=* && go build -o goto -ldflags="-extldflags \"-static\" -w -s -X goto/cmd.Version=$VERSION -X goto/cmd.Commit=$COMMIT" .
+RUN echo 'http://nl.alpinelinux.org/alpine/v3.12/main' > /etc/apk/repositories \
+  && apk add --no-cache git ca-certificates
+RUN go env -w GOPROXY=direct && go env -w GOINSECURE=* && go build -o goto -ldflags="-extldflags \"-static\" -w -s -X goto/cmd.Version=$VERSION -X goto/cmd.Commit=$COMMIT" .
 
 FROM alpine:3.12 as release
-RUN echo 'https://nl.alpinelinux.org/alpine/v3.12/main' > /etc/apk/repositories \
+RUN echo 'http://nl.alpinelinux.org/alpine/v3.12/main' > /etc/apk/repositories \
   && \
   apk add --no-cache --update \
   curl \

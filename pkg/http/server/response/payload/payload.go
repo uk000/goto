@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -34,6 +35,9 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(payloadRouter, "/set/header/{header}", setResponsePayload, "POST")
   util.AddRoute(payloadRouter, "/clear", clearResponsePayload, "POST")
   util.AddRoute(payloadRouter, "", getResponsePayload, "GET")
+  util.AddRoute(parent, "/stream/size/{size}/duration/{duration}", streamResponse, "GET", "PUT", "POST")
+  util.AddRoute(parent, "/stream/size/{size}/chunk/{chunk}/delay/{delay}", streamResponse, "GET", "PUT", "POST")
+  util.AddRoute(parent, "/stream/size/{size}/chunk/{chunk}", streamResponse, "GET", "PUT", "POST")
 }
 
 func (pr *PortResponse) init() {
@@ -53,9 +57,7 @@ func (pr *PortResponse) setResponseContentType(contentType string) {
   }
 }
 
-func (pr *PortResponse) setDefaultResponsePayload(payload string, size int) {
-  pr.lock.Lock()
-  defer pr.lock.Unlock()
+func fixPayload(payload string, size int) string {
   if size > 0 {
     if payload == "" {
       payload = util.GenerateRandomString(size)
@@ -65,6 +67,15 @@ func (pr *PortResponse) setDefaultResponsePayload(payload string, size int) {
       a := []rune(payload)
       payload = string(a[:size])
     }
+  }
+  return payload
+}
+
+func (pr *PortResponse) setDefaultResponsePayload(payload string, size int) {
+  pr.lock.Lock()
+  defer pr.lock.Unlock()
+  if size > 0 {
+    payload = fixPayload(payload, size)
   }
   pr.DefaultResponsePayload = payload
 }
@@ -152,12 +163,67 @@ func getResponsePayload(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, util.ToJSON(getPortResponse(r)))
 }
 
+func streamResponse(w http.ResponseWriter, r *http.Request) {
+  size := util.GetSizeParam(r, "size")
+  chunk := util.GetSizeParam(r, "chunk")
+  duration := util.GetDurationParam(r, "duration")
+  delay := util.GetDurationParam(r, "delay")
+  if delay == 0 {
+    count := 10
+    if chunk > 0 {
+      count = size / chunk
+    }
+    if duration > 0 {
+      delay = time.Duration(int(duration.Milliseconds())/count) * time.Millisecond
+    } else {
+      delay = 100 * time.Millisecond
+    }
+  }
+  if chunk == 0 {
+    chunk = size / int(duration.Truncate(time.Second).Seconds())
+  }
+  chunkCount := size / chunk
+  pr := getPortResponse(r)
+  pr.lock.RLock()
+  payload := pr.DefaultResponsePayload
+  pr.lock.RUnlock()
+  if size > 0 {
+    payload = fixPayload(payload, size)
+  }
+  contentType := "plain/text"
+  if pr.ResponseContentType != "" {
+    contentType = pr.ResponseContentType
+  }
+  if flusher, ok := w.(http.Flusher); ok {
+    util.AddLogMessage("Responding with streaming payload", r)
+    w.Header().Set("Content-Type", contentType)
+    w.Header().Set("X-Content-Type-Options", "nosniff")
+    w.Header().Set("Goto-Stream-Length", strconv.Itoa(size))
+    w.Header().Set("Goto-Chunk-Length", strconv.Itoa(chunk))
+    w.Header().Set("Goto-Chunk-Delay", delay.String())
+    if duration > 0 {
+      w.Header().Set("Goto-Stream-Duration", duration.String())
+    }
+    for i := 0; i < chunkCount; i++ {
+      fmt.Fprint(w, string(payload[i*chunk:(i+1)*chunk]))
+      flusher.Flush()
+      if i < chunk-1 {
+        time.Sleep(delay)
+      }
+    }
+    fmt.Fprintln(w)
+  } else {
+    w.WriteHeader(http.StatusInternalServerError)
+    fmt.Fprintln(w, "Cannot stream")
+  }
+}
+
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     responseSet := false
     payload := ""
     pr := getPortResponse(r)
-    if !util.IsAdminRequest(r) {
+    if !util.IsAdminRequest(r) && !util.IsStreamRequest(r) {
       pr.lock.RLock()
       defer pr.lock.RUnlock()
       if uri := util.FindURIInMap(r.RequestURI, pr.ResponsePayloadByURIs); uri != "" {
