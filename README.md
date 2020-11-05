@@ -1646,30 +1646,37 @@ curl localhost:8080/response/payload
 
 #
 ## > Stream (Chunked) Response API
-This URI responds with either pre-configured or random-generated payload where response behavior is controlled by the parameters passed to the API. The feature allows requesting a custom payload size, custom response duration over which to stream the payload, custom chunk size to be used for splitting the payload into chunks, and custom delay to be used in-between chunked responses. Combination of these parameters define the total payload size and the total duration of the response.
+This URI responds with either pre-configured or random-generated payload where response behavior is controlled by the parameters passed to the API. The feature allows requesting a custom payload size, custom response duration over which to stream the payload, custom chunk size to be used for splitting the payload into chunks, and custom delay to be used in-between chunked responses. Combination of these parameters define the total payload size and the total duration of the response. 
 
 Stream responses carry following headers:
-`Goto-Stream-Length: <total payload size>`
-`Goto-Stream-Duration: <total response duration>`
-`Goto-Chunk-Length: <per-chunk size>`
-`Goto-Chunk-Delay: <per-chunk delay>`
-`X-Content-Type-Options: nosniff`
-`Transfer-Encoding: chunked`
+- `Goto-Stream-Length: <total payload size>`
+- `Goto-Stream-Duration: <total response duration>`
+- `Goto-Chunk-Count: <total number of chunks>`
+- `Goto-Chunk-Length: <per-chunk size>`
+- `Goto-Chunk-Delay: <per-chunk delay>`
+- `X-Content-Type-Options: nosniff`
+- `Transfer-Encoding: chunked`
 
 #### API
 |METHOD|URI|Description|
 |---|---|---|
-| GET, PUT, POST  |	/stream/size/{size}/duration/{duration} | Respond with a payload of given size over the given duration |
-| GET, PUT, POST  |	/stream/size/{size}/chunk/{chunk}/delay/{delay} | Respond with a payload of given size, split into chunks of given chunk size, and each chunk to be delivered with the given delay |
-| GET, PUT, POST  |	/stream/size/{size}/chunk/{chunk} | Respond with a payload of given size, split into chunks of given chunk size, and each chunk to be delivered with a default delay of 100ms |
+| GET, PUT, POST  |	/stream/size/{size}/duration/{duration}/delay/{delay} | Respond with a payload of given size delivered over the given duration with given delay per chunk |
+| GET, PUT, POST  |	/stream/chunk/{chunk}/duration/{duration}/delay/{delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered over the given duration with given delay per chunk |
+| GET, PUT, POST  |	/stream/chunk/{chunk}/count/{count}/delay/{delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered the given count of times with given delay per chunk|
+| GET, PUT, POST  |	/stream/duration/{duration}/delay/{delay} | Respond with pre-configured default payload split into enough chunks to spread out over the given duration with given delay per chunk. This URI requires a default payload to be set via payload API. |
+| GET, PUT, POST  |	/stream/count/{count}/delay/{delay} | Respond with pre-configured default payload split into given count of chunks with given delay per chunk. This URI requires a default payload to be set via payload API. |
 
 #### Stream Response API Example
 ```
-curl -v localhost:8080/stream/size/10K/duration/20s
+curl -v localhost:8080/stream/size/10K/duration/15s/delay/1s
 
-curl -v localhost:8080/stream/size/5K/chunk/100
+curl -v localhost:8080/stream/chunk/100/duration/5s/delay/500ms
 
-curl -v localhost:8080/stream/size/500/chunk/100/delay/500ms
+curl -v localhost:8080/stream/chunk/100/count/5/delay/200ms
+
+curl -v localhost:8080/stream/duration/5s/delay/100ms
+
+curl -v localhost:8080/stream/count/10/delay/300ms
 ```
 
 <br/>

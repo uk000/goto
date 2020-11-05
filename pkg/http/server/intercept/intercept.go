@@ -24,9 +24,14 @@ func (rw *InterceptResponseWriter) WriteHeader(statusCode int) {
 }
 
 func (rw *InterceptResponseWriter) Write(b []byte) (int, error) {
-  rw.Data = append(rw.Data, b...)
-  if !rw.Hold {
+  if !rw.Hold || rw.Chunked  {
+    if len(rw.Data) > 0 {
+      rw.ResponseWriter.Write(rw.Data)
+      rw.Data = []byte{}
+    }
     return rw.ResponseWriter.Write(b)
+  } else {
+    rw.Data = append(rw.Data, b...)
   }
   return 0, nil
 }

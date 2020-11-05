@@ -2,6 +2,7 @@ package payload
 
 import (
 	"fmt"
+	"goto/pkg/http/server/intercept"
 	"goto/pkg/util"
 	"net/http"
 	"strconv"
@@ -35,14 +36,18 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(payloadRouter, "/set/header/{header}", setResponsePayload, "POST")
   util.AddRoute(payloadRouter, "/clear", clearResponsePayload, "POST")
   util.AddRoute(payloadRouter, "", getResponsePayload, "GET")
-  util.AddRoute(parent, "/stream/size/{size}/duration/{duration}", streamResponse, "GET", "PUT", "POST")
-  util.AddRoute(parent, "/stream/size/{size}/chunk/{chunk}/delay/{delay}", streamResponse, "GET", "PUT", "POST")
-  util.AddRoute(parent, "/stream/size/{size}/chunk/{chunk}", streamResponse, "GET", "PUT", "POST")
+  util.AddRoute(parent, "/stream/size/{size}/duration/{duration}/delay/{delay}", streamResponse, "GET", "PUT", "POST")
+  util.AddRoute(parent, "/stream/chunk/{chunk}/duration/{duration}/delay/{delay}", streamResponse, "GET", "PUT", "POST")
+  util.AddRoute(parent, "/stream/chunk/{chunk}/count/{count}/delay/{delay}", streamResponse, "GET", "PUT", "POST")
+  util.AddRoute(parent, "/stream/duration/{duration}/delay/{delay}", streamResponse, "GET", "PUT", "POST")
+  util.AddRoute(parent, "/stream/count/{count}/delay/{delay}", streamResponse, "GET", "PUT", "POST")
 }
 
 func (pr *PortResponse) init() {
   pr.lock.Lock()
   defer pr.lock.Unlock()
+  pr.ResponseContentType = ""
+  pr.DefaultResponsePayload = ""
   pr.ResponsePayloadByURIs = map[string]interface{}{}
   pr.ResponsePayloadByHeaders = map[string]map[string]string{}
 }
@@ -168,46 +173,86 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
   chunk := util.GetSizeParam(r, "chunk")
   duration := util.GetDurationParam(r, "duration")
   delay := util.GetDurationParam(r, "delay")
-  if delay == 0 {
-    count := 10
-    if chunk > 0 {
-      count = size / chunk
-    }
-    if duration > 0 {
-      delay = time.Duration(int(duration.Milliseconds())/count) * time.Millisecond
-    } else {
-      delay = 100 * time.Millisecond
-    }
-  }
-  if chunk == 0 {
-    chunk = size / int(duration.Truncate(time.Second).Seconds())
-  }
-  chunkCount := size / chunk
+  count := util.GetIntParamValue(r, "count")
+  repeat := false
+
   pr := getPortResponse(r)
   pr.lock.RLock()
   payload := pr.DefaultResponsePayload
   pr.lock.RUnlock()
-  if size > 0 {
-    payload = fixPayload(payload, size)
+
+  if duration > 0 {
+    count = int((duration.Milliseconds()/delay.Milliseconds()))
   }
+  if size > 0 {
+    repeat = true
+    chunk = size/count
+    payload = util.GenerateRandomString(chunk)
+  } else {
+    size = len(payload)
+    repeat = size == 0
+  }
+  if size < chunk {
+    payload = fixPayload(payload, chunk)
+  }
+  if delay == 0 {
+    delay = 10 * time.Millisecond
+  }
+  if chunk == 0 && count > 0 && size > 0 {
+    chunk = size/count + 1
+  }
+  if chunk == 0 || count == 0 {
+    w.WriteHeader(http.StatusBadRequest)
+    util.AddLogMessage("Invalid parameters for streaming or no payload", r)
+    fmt.Fprintln(w, "{error: 'Invalid parameters for streaming'}")
+    return
+  }
+
   contentType := "plain/text"
   if pr.ResponseContentType != "" {
     contentType = pr.ResponseContentType
   }
   if flusher, ok := w.(http.Flusher); ok {
+    if irw, ok := w.(*intercept.InterceptResponseWriter); ok {
+      irw.Chunked = true
+    }
     util.AddLogMessage("Responding with streaming payload", r)
     w.Header().Set("Content-Type", contentType)
     w.Header().Set("X-Content-Type-Options", "nosniff")
-    w.Header().Set("Goto-Stream-Length", strconv.Itoa(size))
+    w.Header().Set("Goto-Chunk-Count", strconv.Itoa(count))
     w.Header().Set("Goto-Chunk-Length", strconv.Itoa(chunk))
     w.Header().Set("Goto-Chunk-Delay", delay.String())
+    if size > 0 {
+      w.Header().Set("Goto-Stream-Length", strconv.Itoa(size))
+    }
     if duration > 0 {
       w.Header().Set("Goto-Stream-Duration", duration.String())
     }
-    for i := 0; i < chunkCount; i++ {
-      fmt.Fprint(w, string(payload[i*chunk:(i+1)*chunk]))
+    payloadIndex := 0
+    payloadSize := len(payload)
+    payloadChunkCount := payloadSize/chunk
+    if payloadSize%chunk > 0 {
+      payloadChunkCount++
+    }
+    for i := 0; i < count; i++ {
+      start := payloadIndex*chunk
+      end := (payloadIndex+1)*chunk
+      if end > payloadSize {
+        end = payloadSize
+      }
+      chunkResponse := string(payload[start : end])
+      fmt.Println(chunkResponse)
+      fmt.Fprint(w, chunkResponse)
       flusher.Flush()
-      if i < chunk-1 {
+      payloadIndex++
+      if payloadIndex == payloadChunkCount {
+        if repeat {
+          payloadIndex = 0
+        } else {
+          break
+        }
+      }
+      if i < count-1 {
         time.Sleep(delay)
       }
     }
