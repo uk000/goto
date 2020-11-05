@@ -11,7 +11,7 @@ ADD ./main.go /app/main.go
 
 WORKDIR /app
 RUN echo 'http://nl.alpinelinux.org/alpine/v3.12/main' > /etc/apk/repositories \
-  && apk add --no-cache git ca-certificates
+  && apk add --no-cache git ca-certificates && update-ca-certificates
 RUN go env -w GOPROXY=direct && go env -w GOINSECURE=* && go build -o goto -ldflags="-extldflags \"-static\" -w -s -X goto/cmd.Version=$VERSION -X goto/cmd.Commit=$COMMIT" .
 
 FROM alpine:3.12 as release

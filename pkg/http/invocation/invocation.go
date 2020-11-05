@@ -719,7 +719,7 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
           headerLogs = append(headerLogs, header+":["+strings.Join(values, ",")+"]")
         }
         headerLog := strings.Join(headerLogs, ",")
-        log.Printf("Invocation[%d]: Target %s Response Status: %s, Headers: [%s], Payload Length: [%d]", index, targetID, resp.Status, headerLog, responseLength)
+        log.Printf("Invocation[%d]: Target %s Response Status: %s, URL: [%s], Headers: [%s], Payload Length: [%d]", index, targetID, resp.Status, url, headerLog, responseLength)
       }
     } else {
       log.Printf("Invocation[%d]: Target %s, url [%s] invocation failed with error: %s\n", index, targetID, url, reqError.Error())
