@@ -75,6 +75,9 @@ func PrintLogMessages(r *http.Request) {
   if !IsLockerRequest(r) && (!IsAdminRequest(r) || global.EnableAdminLogs) &&
     (!IsReminderRequest(r) || global.EnableRegistryReminderLogs) && global.EnableTrackingLogs {
     log.Println(strings.Join(m.messages, " --> "))
+    if flusher, ok := log.Writer().(http.Flusher); ok {
+      flusher.Flush()
+    }
   }
   m.messages = m.messages[:0]
 }
