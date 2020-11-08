@@ -40,9 +40,9 @@ func RunHttpServer(root string, handlers ...util.ServerHandler) {
   h2s := &http2.Server{}
   server = &http.Server{
     Addr:         fmt.Sprintf("0.0.0.0:%d", global.ServerPort),
-    WriteTimeout: 60 * time.Second,
-    ReadTimeout:  60 * time.Second,
-    IdleTimeout:  60 * time.Second,
+    WriteTimeout: 60 * time.Minute,
+    ReadTimeout:  60 * time.Minute,
+    IdleTimeout:  60 * time.Minute,
     ConnContext:  conn.SaveConnInContext,
     Handler:      h2c.NewHandler(r, h2s),
   }
