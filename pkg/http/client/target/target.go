@@ -110,17 +110,19 @@ func (pc *PortClient) removeTargets(targets []string) bool {
 }
 
 func (pc *PortClient) prepareTargetForPeer(target *invocation.InvocationSpec, r *http.Request) *invocation.InvocationSpec {
-  peerName := util.GetFillerUnmarked(target.Name)
-  if peerName != "" && r != nil {
-    if peers := global.GetPeers(peerName, r); peers != nil {
-      if strings.Contains(target.URL, "{") && strings.Contains(target.URL, "}") {
-        urlPre := strings.Split(target.URL, "{")[0]
-        urlPost := strings.Split(target.URL, "}")[1]
-        for _, address := range peers {
-          var newTarget = *target
-          newTarget.Name = peerName
-          newTarget.URL = urlPre + address + urlPost
-          target = &newTarget
+  if target != nil {
+    peerName := util.GetFillerUnmarked(target.Name)
+    if peerName != "" && r != nil {
+      if peers := global.GetPeers(peerName, r); peers != nil {
+        if strings.Contains(target.URL, "{") && strings.Contains(target.URL, "}") {
+          urlPre := strings.Split(target.URL, "{")[0]
+          urlPost := strings.Split(target.URL, "}")[1]
+          for _, address := range peers {
+            var newTarget = *target
+            newTarget.Name = peerName
+            newTarget.URL = urlPre + address + urlPost
+            target = &newTarget
+          }
         }
       }
     }
@@ -152,8 +154,9 @@ func (pc *PortClient) getTargetsToInvoke(r *http.Request) []*invocation.Invocati
   var targetsToInvoke []*invocation.InvocationSpec
   if len(names) > 0 {
     for _, name := range names {
-      t := pc.prepareTargetForPeer(pc.PrepareTarget(name), r)
-      targetsToInvoke = append(targetsToInvoke, t)
+      if t := pc.prepareTargetForPeer(pc.PrepareTarget(name), r); t != nil {
+        targetsToInvoke = append(targetsToInvoke, t)
+      }
     }
   } else {
     for _, target := range pc.targets {

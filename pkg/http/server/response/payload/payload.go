@@ -36,6 +36,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(payloadRouter, "/set/header/{header}", setResponsePayload, "POST")
   util.AddRoute(payloadRouter, "/clear", clearResponsePayload, "POST")
   util.AddRoute(payloadRouter, "", getResponsePayload, "GET")
+  util.AddRoute(parent, "/payload/{size}", respondWithPayload, "GET", "PUT", "POST")
   util.AddRoute(parent, "/stream/size/{size}/duration/{duration}/delay/{delay}", streamResponse, "GET", "PUT", "POST")
   util.AddRoute(parent, "/stream/chunk/{chunk}/duration/{duration}/delay/{delay}", streamResponse, "GET", "PUT", "POST")
   util.AddRoute(parent, "/stream/chunk/{chunk}/count/{count}/delay/{delay}", streamResponse, "GET", "PUT", "POST")
@@ -168,6 +169,16 @@ func getResponsePayload(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, util.ToJSON(getPortResponse(r)))
 }
 
+func respondWithPayload(w http.ResponseWriter, r *http.Request) {
+  size := util.GetSizeParam(r, "size")
+  payload := util.GenerateRandomString(size)
+  fmt.Fprint(w, payload)
+  w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+  w.Header().Set("Content-Type", "plain/text")
+  w.Header().Set("Goto-Payload-Length", strconv.Itoa(size))
+  util.AddLogMessage(fmt.Sprintf("Responding with requested payload of length %d", size), r)
+}
+
 func streamResponse(w http.ResponseWriter, r *http.Request) {
   size := util.GetSizeParam(r, "size")
   chunk := util.GetSizeParam(r, "chunk")
@@ -255,7 +266,6 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
         time.Sleep(delay)
       }
     }
-    fmt.Fprintln(w)
   } else {
     w.WriteHeader(http.StatusInternalServerError)
     fmt.Fprintln(w, "Cannot stream")
@@ -267,7 +277,7 @@ func Middleware(next http.Handler) http.Handler {
     responseSet := false
     payload := ""
     pr := getPortResponse(r)
-    if !util.IsAdminRequest(r) && !util.IsStreamRequest(r) {
+    if !util.IsAdminRequest(r) && !util.IsPayloadRequest(r) {
       pr.lock.RLock()
       defer pr.lock.RUnlock()
       if uri := util.FindURIInMap(r.RequestURI, pr.ResponsePayloadByURIs); uri != "" {

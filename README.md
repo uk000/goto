@@ -1575,7 +1575,7 @@ curl localhost:8080/response/headers
 
 #
 ## > <a name="response-payload"></a> Response Payload
-This feature allows setting either custom or random generated response payload to be sent with server responses. 
+This feature allows setting either custom or random generated response payload to be sent with server responses.
 
 Custom response payload can be set for all requests (`default` payload), for specific URIs, or for specific headers. If response is set for all three, URI match gets highest priority, followed by request headers match, and otherwise default payload is used as fallback if configured.
 
@@ -1645,7 +1645,26 @@ curl localhost:8080/response/payload
 <br/>
 
 #
-## > Stream (Chunked) Response API
+## > Ad-hoc Payload API
+This URI responds with a random-generated payload of the requested size. Payload size can be a numeric value or use common byte size conventions: `K`, `KB`, `M`, `MB`. Payload size is only limited by the memory available to the `goto` process. The response carries an additional header `Goto-Payload-Length` in additionl to the standard header `Content-Length` to identify the size of the response payload.
+
+#### API
+|METHOD|URI|Description|
+|---|---|---|
+| GET, PUT, POST  |	/payload/{size} | Respond with a payload of given size |
+
+#### Ad-hoc Payload API Example
+```
+curl -v localhost:8080/payload/10K
+
+curl -v localhost:8080/payload/100
+
+```
+
+<br/>
+
+#
+## > Stream (Chunked) Payload API
 This URI responds with either pre-configured or random-generated payload where response behavior is controlled by the parameters passed to the API. The feature allows requesting a custom payload size, custom response duration over which to stream the payload, custom chunk size to be used for splitting the payload into chunks, and custom delay to be used in-between chunked responses. Combination of these parameters define the total payload size and the total duration of the response. 
 
 Stream responses carry following headers:

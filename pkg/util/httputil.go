@@ -342,8 +342,8 @@ func IsDelayRequest(r *http.Request) bool {
   return !IsAdminRequest(r) && strings.Contains(r.RequestURI, "/delay")
 }
 
-func IsStreamRequest(r *http.Request) bool {
-  return !IsAdminRequest(r) && strings.Contains(r.RequestURI, "/stream")
+func IsPayloadRequest(r *http.Request) bool {
+  return !IsAdminRequest(r) && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload"))
 }
 
 func AddRoute(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), methods ...string) {
