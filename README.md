@@ -136,7 +136,7 @@ The application accepts the following command arguments:
     </thead>
     <tbody>
         <tr>
-          <td rowspan="3">--port {port}</td>
+          <td rowspan="3"><pre>--port {port}</pre></td>
           <td>Initial port the server listens on. </td>
           <td rowspan="3">8080</td>
         </tr>
@@ -147,7 +147,7 @@ The application accepts the following command arguments:
           <td>* See [Listeners](#-listeners) feature later in the doc.</td>
         </tr>
         <tr>
-          <td rowspan="2">--label {label}</td>
+          <td rowspan="2"><pre>--label {label}</pre></td>
           <td>Label this server instance will use to identify itself. </td>
           <td rowspan="2">Goto-`IPAddress` </td>
         </tr>
@@ -155,17 +155,17 @@ The application accepts the following command arguments:
           <td>* This is used both for setting `Goto`'s default response headers as well as when registering with registry.</td>
         </tr>
         <tr>
-          <td rowspan="1">--startupDelay {delay}</td>
+          <td rowspan="1"><pre>--startupDelay {delay}</pre></td>
           <td>Delay the startup by this duration. </td>
           <td rowspan="1">1s</td>
         </tr>
         <tr>
-          <td rowspan="1">--shutdownDelay {delay}</td>
+          <td rowspan="1"><pre>--shutdownDelay {delay}</pre></td>
           <td>Delay the shutdown by this duration after receiving SIGTERM. </td>
           <td rowspan="1">5s</td>
         </tr>
         <tr>
-          <td rowspan="3">--registry {url}</td>
+          <td rowspan="3"><pre>--registry {url}</pre></td>
           <td>URL of the Goto Registry instance that this instance should connect to. </td>
           <td rowspan="3"> "" </td>
         </tr>
@@ -176,7 +176,7 @@ The application accepts the following command arguments:
           <td>* See [Registry](#registry-features) feature later in the doc.</td>
         </tr>
         <tr>
-          <td rowspan="2">--locker={true|false}</td>
+          <td rowspan="2"><pre>--locker={true|false}</pre></td>
           <td> Whether this instance should report its results back to the Goto Registry instance. </td>
           <td rowspan="2"> false </td>
         </tr>
@@ -184,12 +184,12 @@ The application accepts the following command arguments:
           <td>* An instance can be asked to report its results to registry in case the  instance is transient, e.g. pods.</td>
         </tr>
         <tr>
-          <td rowspan="1">--reminderLogs={true|false}</td>
+          <td rowspan="1"><pre>--reminderLogs={true|false}</pre></td>
           <td>Enable/Disable Registry Reminder Logs </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="2">--certs {path}</td>
+          <td rowspan="2"><pre>--certs {path}</pre></td>
           <td> Directory path from where to load TLS root certificates. </td>
           <td rowspan="2"> "/etc/certs" </td>
         </tr>
@@ -258,7 +258,8 @@ In addition to keeping the results in the `goto` client instance, those are also
 | verifyTLS    | bool           |false| Whether the TLS certificate presented by the target is verified. (Also see `--certs` command arg) |
 | headers      | [][]string     || Headers to be sent to this target |
 | body         | string         || Request body to use for this target|
-| protocol     | string         |`HTTP/1.1`| Request Protocol to use. Supports `HTTP/1.1` (default) and `HTTP/2.0`|
+| autoPayload  | string         || Auto-generate payload of this size when making calls to this target. This field supports numeric sizes (e.g. `1000`) as well as byte size suffixes `K`, `KB`, `M` and `MB` (e.g. `1K`). If auto payload is specified, `body` field is ignored. |
+| protocol     | string         |`HTTP/1.1`| Request Protocol to use. Supports `HTTP/1.1` (default) and `HTTP/2.0`.|
 | autoUpgrade  | bool           |false| Whether client should negotiate auto-upgrade from http/1.1 to http/2. |
 | replicas     | int            |1| Number of parallel invocations to be done for this target. |
 | requestCount | int            |1| Number of requests to be made per replicas for this target. The final request count becomes replicas * requestCount   |
@@ -283,7 +284,7 @@ The schema below describes fields per target (including the all targets data)
 |Field|Data Type|Description|
 |---|---|---|
 | target            | string | Target for which these results are captured |
-| invocationCounts      | >int                 | Total requests sent to this target |
+| invocationCounts      | int                 | Total requests sent to this target |
 | firstResponse        | time                | Time of first response received from the target |
 | lastResponse         | time                | Time of last response received from the target |
 | retriedInvocationCounts | int | Total requests to this target that were retried at least once |

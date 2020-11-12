@@ -48,6 +48,7 @@ type InvocationSpec struct {
   VerifyTLS            bool       `json:"verifyTLS"`
   CollectResponse      bool       `json:"collectResponse"`
   AutoInvoke           bool       `json:"autoInvoke"`
+  AutoPayload          string     `json:"autoPayload"`
   Fallback             bool       `json:"fallback"`
   ABMode               bool       `json:"abMode"`
   httpVersionMajor     int
@@ -61,6 +62,8 @@ type InvocationSpec struct {
   delayD               time.Duration
   retryDelayD          time.Duration
   keepOpenD            time.Duration
+  autoPayloadSize      int
+  payloadBody          string
 }
 
 type InvocationStatus struct {
@@ -230,7 +233,20 @@ func ValidateSpec(spec *InvocationSpec) error {
   if spec.BodyReader != nil && spec.Body == "" && spec.Replicas > 1 {
     return fmt.Errorf("Streaming request body can only be forwarded to one target whereas replicas is %d", spec.Replicas)
   }
+  if spec.AutoPayload != "" {
+    spec.autoPayloadSize = util.ParseSize(spec.AutoPayload)
+    if spec.autoPayloadSize <= 0 {
+      return fmt.Errorf("Invalid AutoPayload, must be a valid size like 100, 10K, etc.")
+    }
+  }
   return nil
+}
+
+func PrepareAutoPayload(i *InvocationSpec) {
+  if i.autoPayloadSize > 0 {
+    i.payloadBody = util.GenerateRandomString(i.autoPayloadSize)
+    i.Body = ""
+  }
 }
 
 func loadCerts() {
@@ -371,7 +387,7 @@ func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) *
   tracker.Status.client = getHttpClientForTarget(target)
   if target.BodyReader != nil && (target.Replicas > 1 || target.RequestCount > 1) {
     body, _ := ioutil.ReadAll(target.BodyReader)
-    target.Body = string(body)
+    target.payloadBody = string(body)
     target.BodyReader = nil
   }
   return tracker
@@ -603,8 +619,10 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
     for i := 0; i < target.Replicas; i++ {
       callCounter := (completedCount * target.Replicas) + i + 1
       targetID := target.Name + "[" + strconv.Itoa(i+1) + "]" + "[" + strconv.Itoa(callCounter) + "]"
-      if target.Body == "" && target.BodyReader != nil {
-        target.Body = util.Read(target.BodyReader)
+      if target.Body != "" && target.autoPayloadSize <= 0 {
+        target.payloadBody = target.Body
+      } else if target.Body == "" && target.BodyReader != nil {
+        target.payloadBody = util.Read(target.BodyReader)
         target.BodyReader = nil
       }
       wg.Add(1)
@@ -671,7 +689,7 @@ func doInvoke(index uint32, targetID string, target *InvocationSpec,
   }
   result.URL, result.RequestID = prepareTargetURL(result.URL, target.SendID, result.RequestID)
   originalRequestId := result.RequestID
-  if req, err := newClientRequest(target.Method, result.URL, headers, strings.NewReader(target.Body)); err == nil {
+  if req, err := newClientRequest(target.Method, result.URL, headers, strings.NewReader(target.payloadBody)); err == nil {
     req.Host = target.host
     result.URI = req.URL.Path
     var resp *http.Response
@@ -707,7 +725,7 @@ func doInvoke(index uint32, targetID string, target *InvocationSpec,
           hostLabel, index, targetID, result.URL, reason, target.Retries-i)
         if target.Fallback && len(target.BURLS) > i {
           result.URL, result.RequestID = prepareTargetURL(target.BURLS[i], target.SendID, originalRequestId+"-"+strconv.Itoa(i+1))
-          if req2, err := newClientRequest(target.Method, result.URL, headers, strings.NewReader(target.Body)); err == nil {
+          if req2, err := newClientRequest(target.Method, result.URL, headers, strings.NewReader(target.payloadBody)); err == nil {
             req = req2
           } else {
             log.Printf("[%s]: Invocation[%d]: Target [%s] failed to create request for fallback url [%s]. Continuing with retry to original url [%s] \n",

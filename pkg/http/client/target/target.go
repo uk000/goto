@@ -51,6 +51,7 @@ func (pc *PortClient) AddTarget(t *Target, r ...*http.Request) error {
     pc.targets[t.Name] = t
     pc.targetsLock.Unlock()
     invocation.RemoveHttpClientForTarget(t.Name)
+    invocation.PrepareAutoPayload(invocationSpec)
     t.Headers = append(t.Headers, []string{"From-Goto", global.PeerName}, []string{"From-Goto-Host", util.GetHostLabel()})
     if t.AutoInvoke {
       go func() {

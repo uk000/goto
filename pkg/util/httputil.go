@@ -184,29 +184,32 @@ func GetStatusParam(r *http.Request) (int, int, bool) {
   return statusCode, times, true
 }
 
-func GetSizeParam(r *http.Request, name string) int {
-  vars := mux.Vars(r)
-  param := vars[name]
+func ParseSize(value string) int {
   size := 0
   multiplier := 1
-  if len(param) == 0 {
+  if len(value) == 0 {
     return 0
   }
   for k, v := range sizes {
-    if strings.Contains(param, k) {
+    if strings.Contains(value, k) {
       multiplier = int(v)
-      param = strings.Split(param, k)[0]
+      value = strings.Split(value, k)[0]
       break
     }
   }
-  if len(param) > 0 {
-    s, _ := strconv.ParseInt(param, 10, 32)
+  if len(value) > 0 {
+    s, _ := strconv.ParseInt(value, 10, 32)
     size = int(s)
   } else {
     size = 1
   }
   size = size * multiplier
   return size
+}
+
+func GetSizeParam(r *http.Request, name string) int {
+  vars := mux.Vars(r)
+  return ParseSize(vars[name])
 }
 
 func GetDurationParam(r *http.Request, name string) time.Duration {
