@@ -21,7 +21,7 @@ var (
   EnableAdminLogs            bool   = true
   EnableInvocationLogs       bool   = true
   EnableRegistryLogs         bool   = true
-  EnableRegistryReminderLogs bool   = false
+  EnableRegistryReminderLogs bool   = true
   EnableClientLogs           bool   = true
   EnableServerLogs           bool   = true
   GetPeers                   func(string, *http.Request) map[string]string

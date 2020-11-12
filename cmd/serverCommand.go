@@ -22,6 +22,7 @@ func Execute() {
   flag.StringVar(&global.RegistryURL, "registry", "", "Registry URL for Peer Registration")
   flag.StringVar(&global.CertPath, "certs", "/etc/certs", "Directory Path for TLS Certificates")
   flag.BoolVar(&global.UseLocker, "locker", false, "Store Results in Registry Locker")
+  flag.BoolVar(&global.EnableRegistryReminderLogs, "reminderLogs", false, "Enable/Disable Registry Reminder Logs")
   flag.DurationVar(&global.StartupDelay, "startupDelay", 1*time.Second, "Delay Server Startup (seconds)")
   flag.DurationVar(&global.ShutdownDelay, "shutdownDelay", 5*time.Second, "Delay Server Shutdown (seconds)")
   flag.Parse()
@@ -36,6 +37,9 @@ func Execute() {
   }
   if global.UseLocker {
     log.Printf("Will Store Results in Locker at Registry [%s]\n", global.RegistryURL)
+  }
+  if global.EnableRegistryReminderLogs {
+    log.Println("Will Print Registry Reminder Logs")
   }
   if global.CertPath != "" {
     log.Printf("Will read certs from [%s]\n", global.CertPath)

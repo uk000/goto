@@ -78,6 +78,9 @@ func startRegistryReminder(peer *registry.Peer) {
       url := global.RegistryURL + "/registry/peers/" + peer.Name + "/remember"
       if resp, err := http.Post(url, "application/json", strings.NewReader(util.ToJSON(peer))); err == nil {
         util.CloseResponse(resp)
+        if global.EnableRegistryReminderLogs {
+          log.Printf("Sent reminder to registry at [%s] as peer %s address %s\n", global.RegistryURL, peer.Name, peer.Address)
+        }
       } else {
         log.Printf("Failed to remind registry as peer %s address %s, error: %s\n", peer.Name, peer.Address, err.Error())
       }

@@ -27,6 +27,7 @@ type InvocationSpec struct {
   Name                 string     `json:"name"`
   Method               string     `json:"method"`
   URL                  string     `json:"url"`
+  BURLS                []string   `json:"burls"`
   Headers              [][]string `json:"headers"`
   Body                 string     `json:"body"`
   BodyReader           io.Reader  `json:"-"`
@@ -47,6 +48,8 @@ type InvocationSpec struct {
   VerifyTLS            bool       `json:"verifyTLS"`
   CollectResponse      bool       `json:"collectResponse"`
   AutoInvoke           bool       `json:"autoInvoke"`
+  Fallback             bool       `json:"fallback"`
+  ABMode               bool       `json:"abMode"`
   httpVersionMajor     int
   httpVersionMinor     int
   https                bool
@@ -74,7 +77,9 @@ type InvocationResult struct {
   Status     string
   StatusCode int
   Retries    int
+  URL        string
   URI        string
+  RequestID  string
   Headers    map[string][]string
   Body       string
 }
@@ -132,6 +137,12 @@ func ValidateSpec(spec *InvocationSpec) error {
   }
   if spec.URL == "" {
     return fmt.Errorf("URL is required")
+  }
+  if spec.ABMode && spec.Fallback {
+    return fmt.Errorf("A target cannot have both ABMode and Fallback enabled simultaneously.")
+  }
+  if (spec.ABMode || spec.Fallback) && len(spec.BURLS) == 0 {
+    return fmt.Errorf("At least one B-URL is required for Fallback or ABMode")
   }
   if strings.Contains(strings.ToLower(spec.URL), "https") {
     spec.https = true
@@ -192,8 +203,8 @@ func ValidateSpec(spec *InvocationSpec) error {
       return fmt.Errorf("Invalid ConnectionTimeout")
     }
   } else {
-    spec.connTimeoutD = 30 * time.Second
-    spec.ConnTimeout = "30s"
+    spec.connTimeoutD = 10 * time.Second
+    spec.ConnTimeout = "10s"
   }
   if spec.ConnIdleTimeout != "" {
     if spec.connIdleTimeoutD, err = time.ParseDuration(spec.ConnIdleTimeout); err != nil {
@@ -472,9 +483,8 @@ func StopTarget(target string) {
   }
 }
 
-func prepareTargetURL(target *InvocationSpec) string {
-  url := target.URL
-  if target.SendID && !strings.Contains(url, "x-request-id") {
+func prepareTargetURL(url string, sendID bool, requestId string) (string, string) {
+  if sendID && !strings.Contains(url, "x-request-id") {
     if !strings.Contains(url, "?") {
       url += "?"
     } else {
@@ -484,9 +494,12 @@ func prepareTargetURL(target *InvocationSpec) string {
       }
     }
     url += "x-request-id="
-    url += uuid.New().String()
+    if requestId == "" {
+      requestId = uuid.New().String()
+    }
+    url += requestId
   }
-  return url
+  return url, requestId
 }
 
 func processStopRequest(tracker *InvocationTracker) bool {
@@ -590,16 +603,12 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
     for i := 0; i < target.Replicas; i++ {
       callCounter := (completedCount * target.Replicas) + i + 1
       targetID := target.Name + "[" + strconv.Itoa(i+1) + "]" + "[" + strconv.Itoa(callCounter) + "]"
-      url := prepareTargetURL(target)
-      bodyReader := target.BodyReader
-      target.BodyReader = nil
-      if bodyReader == nil {
-        bodyReader = strings.NewReader(target.Body)
+      if target.Body == "" && target.BodyReader != nil {
+        target.Body = util.Read(target.BodyReader)
+        target.BodyReader = nil
       }
       wg.Add(1)
-      go invokeTarget(trackerID, target.Name, targetID, url, target.Method, target.host, target.Headers,
-        bodyReader, target.CollectResponse, target.Retries, target.retryDelayD, target.RetriableStatusCodes,
-        httpClient, sinks, resultChannel, wg)
+      go invokeTarget(trackerID, targetID, target, httpClient, sinks, resultChannel, wg)
     }
     wg.Wait()
     delay := 10 * time.Millisecond
@@ -652,35 +661,33 @@ func newClientRequest(method string, url string, headers [][]string, body io.Rea
   }
 }
 
-func invokeTarget(index uint32, targetName string, targetID string, url string, method string,
-  host string, headers [][]string, body io.Reader, reportBody bool,
-  retries int, retryDelayD time.Duration, retriableStatusCodes []int,
-  client *http.Client, sinks []ResultSink, resultChannel chan *InvocationResult, wg *sync.WaitGroup) {
-  if global.EnableInvocationLogs {
-    log.Printf("[%s]: Invocation[%d]: Invoking targetID: %s, url: %s, method: %s, headers: %+v\n", hostLabel, index, targetID, url, method, headers)
-  }
-  result := &InvocationResult{}
-  result.TargetName = targetName
-  result.TargetID = targetID
-  result.Headers = map[string][]string{}
+func doInvoke(index uint32, targetID string, target *InvocationSpec,
+  client *http.Client, result *InvocationResult) (*http.Response, error) {
+  headers := target.Headers
   headers = append(headers, []string{"TargetID", targetID})
-  if req, err := newClientRequest(method, url, headers, body); err == nil {
-    req.Host = host
+  if global.EnableInvocationLogs {
+    log.Printf("[%s]: Invocation[%d]: Invoking targetID: %s, url: %s, method: %s, headers: %+v\n",
+      hostLabel, index, targetID, result.URL, target.Method, target.Headers)
+  }
+  result.URL, result.RequestID = prepareTargetURL(result.URL, target.SendID, result.RequestID)
+  originalRequestId := result.RequestID
+  if req, err := newClientRequest(target.Method, result.URL, headers, strings.NewReader(target.Body)); err == nil {
+    req.Host = target.host
     result.URI = req.URL.Path
     var resp *http.Response
     var reqError error
-    for i := 0; i <= retries; i++ {
+    for i := 0; i <= target.Retries; i++ {
       if resp != nil {
         resp.Body.Close()
       }
       if i > 0 {
         result.Retries++
-        time.Sleep(retryDelayD)
+        time.Sleep(target.retryDelayD)
       }
       resp, reqError = client.Do(req)
       retry := reqError != nil
-      if !retry && retriableStatusCodes != nil {
-        for _, retriableCode := range retriableStatusCodes {
+      if !retry && target.RetriableStatusCodes != nil {
+        for _, retriableCode := range target.RetriableStatusCodes {
           if retriableCode == resp.StatusCode {
             retry = true
           }
@@ -688,7 +695,7 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
       }
       if !retry {
         break
-      } else if i < retries {
+      } else if i < target.Retries {
         reason := ""
         if reqError != nil {
           reason = reqError.Error()
@@ -697,41 +704,51 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
           reason = resp.Status
         }
         log.Printf("[%s]: Invocation[%d]: Target [%s] url [%s] invocation requires retry due to [%s]. Retries left [%d]. \n",
-          hostLabel, index, targetID, url, reason, retries-i)
-      }
-    }
-    if reqError == nil {
-      defer resp.Body.Close()
-      for header, values := range resp.Header {
-        result.Headers[header] = values
-      }
-      result.Headers["Status"] = []string{resp.Status}
-      result.Status = resp.Status
-      result.StatusCode = resp.StatusCode
-      var responseLength int64
-      if reportBody {
-        result.Body = util.Read(resp.Body)
-        responseLength = int64(len(result.Body))
-      } else {
-        responseLength, _ = io.Copy(ioutil.Discard, resp.Body)
-      }
-      if global.EnableInvocationLogs {
-        headerLogs := []string{}
-        for header, values := range resp.Header {
-          headerLogs = append(headerLogs, header+":["+strings.Join(values, ",")+"]")
+          hostLabel, index, targetID, result.URL, reason, target.Retries-i)
+        if target.Fallback && len(target.BURLS) > i {
+          result.URL, result.RequestID = prepareTargetURL(target.BURLS[i], target.SendID, originalRequestId+"-"+strconv.Itoa(i+1))
+          if req2, err := newClientRequest(target.Method, result.URL, headers, strings.NewReader(target.Body)); err == nil {
+            req = req2
+          } else {
+            log.Printf("[%s]: Invocation[%d]: Target [%s] failed to create request for fallback url [%s]. Continuing with retry to original url [%s] \n",
+              hostLabel, index, targetID, target.BURLS[i], target.URL)
+          }
         }
-        headerLog := strings.Join(headerLogs, ",")
-        log.Printf("[%s]: Invocation[%d]: Target %s Response Status: %s, URL: [%s], Headers: [%s], Payload Length: [%d]", hostLabel, index, targetID, resp.Status, url, headerLog, responseLength)
       }
-    } else {
-      log.Printf("[%s]: Invocation[%d]: Target %s, url [%s] invocation failed with error: %s\n", hostLabel, index, targetID, url, reqError.Error())
-      result.Status = reqError.Error()
     }
+    return resp, reqError
   } else {
-    log.Printf("[%s]: Invocation[%d]: Target %s, url [%s] failed to create request with error: %s\n", hostLabel, index, targetID, url, err.Error())
-    result.Status = err.Error()
+    return nil, err
   }
+}
 
+func doProcessResponse(index uint32, targetID string, target *InvocationSpec, resp *http.Response, result *InvocationResult) {
+  defer resp.Body.Close()
+  for header, values := range resp.Header {
+    result.Headers[header] = values
+  }
+  result.Headers["Status"] = []string{resp.Status}
+  result.Status = resp.Status
+  result.StatusCode = resp.StatusCode
+  var responseLength int64
+  if target.CollectResponse {
+    result.Body = util.Read(resp.Body)
+    responseLength = int64(len(result.Body))
+  } else {
+    responseLength, _ = io.Copy(ioutil.Discard, resp.Body)
+  }
+  if global.EnableInvocationLogs {
+    headerLogs := []string{}
+    for header, values := range resp.Header {
+      headerLogs = append(headerLogs, header+":["+strings.Join(values, ",")+"]")
+    }
+    headerLog := strings.Join(headerLogs, ",")
+    log.Printf("[%s]: Invocation[%d]: Target %s Response Status: %s, URL: [%s], Headers: [%s], Payload Length: [%d]",
+      hostLabel, index, targetID, resp.Status, result.URL, headerLog, responseLength)
+  }
+}
+
+func publishResult(index uint32, targetID string, result *InvocationResult, sinks []ResultSink, resultChannel chan *InvocationResult) {
   if len(sinks) > 0 {
     for _, sink := range sinks {
       sink(result)
@@ -742,5 +759,46 @@ func invokeTarget(index uint32, targetName string, targetID string, url string, 
     }
     resultChannel <- result
   }
+}
+
+func processError(index uint32, targetID string, result *InvocationResult, err error) {
+  log.Printf("[%s]: Invocation[%d]: Target %s, url [%s] failed to invoke with error: %s\n",
+    hostLabel, index, targetID, result.URL, err.Error())
+  result.Status = err.Error()
+}
+
+func handleABCall(index uint32, targetID string, target *InvocationSpec, aRequestId string, client *http.Client,
+  sinks []ResultSink, resultChannel chan *InvocationResult) {
+  for i, burl := range target.BURLS {
+    result := &InvocationResult{}
+    result.TargetName = target.Name
+    result.Headers = map[string][]string{}
+    result.URL = burl
+    result.RequestID = aRequestId + "-B-" + strconv.Itoa(i+1)
+    if resp, err := doInvoke(index, targetID, target, client, result); err == nil {
+      doProcessResponse(index, targetID, target, resp, result)
+    } else {
+      processError(index, targetID, result, err)
+    }
+    publishResult(index, targetID, result, sinks, resultChannel)
+  }
+}
+
+func invokeTarget(index uint32, targetID string, target *InvocationSpec, client *http.Client,
+  sinks []ResultSink, resultChannel chan *InvocationResult, wg *sync.WaitGroup) {
+  result := &InvocationResult{}
+  result.TargetName = target.Name
+  result.TargetID = targetID
+  result.URL = target.URL
+  result.Headers = map[string][]string{}
+  if resp, err := doInvoke(index, targetID, target, client, result); err == nil {
+    doProcessResponse(index, targetID, target, resp, result)
+    if target.ABMode {
+      handleABCall(index, targetID, target, result.RequestID, client, sinks, resultChannel)
+    }
+  } else {
+    processError(index, targetID, result, err)
+  }
+  publishResult(index, targetID, result, sinks, resultChannel)
   wg.Done()
 }

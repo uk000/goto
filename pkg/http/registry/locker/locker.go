@@ -16,6 +16,7 @@ type LockerData struct {
   FirstReported time.Time              `json:"firstReported"`
   LastReported  time.Time              `json:"lastReported"`
   Locked        bool                   `json:"locked"`
+  lockCounter   int
 }
 
 type InstanceLocker struct {
@@ -24,7 +25,8 @@ type InstanceLocker struct {
 }
 
 type PeerLocker struct {
-  Locker        map[string]*InstanceLocker `json:"locker"`
+  InstanceLockers        map[string]*InstanceLocker `json:"instanceLockers"`
+  Locker                 map[string]*LockerData `json:"locker"`
   lockedCounter int
   lock          sync.RWMutex
 }
@@ -32,6 +34,71 @@ type PeerLocker struct {
 type PeersLockers struct {
   peerLocker map[string]*PeerLocker
   lock       sync.RWMutex
+}
+
+func createOrCopyLockerData(locker map[string]*LockerData, key string, now time.Time) *LockerData {
+  lockCounter := 0
+  lockerData := locker[key]
+  if lockerData != nil && lockerData.Locked {
+    lockCounter = lockerData.lockCounter+1
+    locker[key+"_"+strconv.Itoa(lockCounter)] = lockerData
+    locker[key] = nil
+    lockerData = nil
+  }
+  if lockerData == nil {
+    lockerData = &LockerData{SubKeys: map[string]*LockerData{}, FirstReported: now, lockCounter: lockCounter}
+    locker[key] = lockerData
+  }
+  return lockerData
+}
+
+func unsafeStoreKeysInLocker(locker map[string]*LockerData, keys []string, value string) {
+  rootKey := keys[0]
+  now := time.Now()
+  lockerData := createOrCopyLockerData(locker, rootKey, now)
+  for i := 1; i < len(keys); i++ {
+    lockerData.SubKeys[keys[i]] = createOrCopyLockerData(lockerData.SubKeys, keys[i], now)
+    lockerData = lockerData.SubKeys[keys[i]]
+  }
+  lockerData.Data = value
+  lockerData.LastReported = now
+}
+
+func unsafeRemoveSubKeys(lockerData *LockerData, keys []string, index int) {
+  if index >= len(keys) {
+    return
+  }
+  currentKey := keys[index]
+  if lockerData.SubKeys[currentKey] != nil {
+    nextLockerData := lockerData.SubKeys[currentKey]
+    unsafeRemoveSubKeys(nextLockerData, keys, index+1)
+    if len(nextLockerData.SubKeys) == 0 {
+      delete(lockerData.SubKeys, currentKey)
+    }
+  }
+}
+
+func unsafeRemoveKeysFromLocker(locker map[string]*LockerData, keys []string) {
+  rootKey := keys[0]
+  lockerData := locker[rootKey]
+  if lockerData != nil {
+    unsafeRemoveSubKeys(lockerData, keys, 1)
+    if len(lockerData.SubKeys) == 0 {
+      delete(locker, rootKey)
+    }
+  }
+}
+
+func unsafeLockKeys(locker map[string]*LockerData, keys []string) {
+  if locker[keys[0]] != nil {
+    lockerData := locker[keys[0]]
+    for i := 1; i < len(keys); i++ {
+      if lockerData.SubKeys[keys[i]] != nil {
+        lockerData = lockerData.SubKeys[keys[i]]
+      }
+    }
+    lockerData.Locked = true
+  }
 }
 
 func newInstanceLocker() *InstanceLocker {
@@ -49,70 +116,22 @@ func (il *InstanceLocker) init() {
 func (il *InstanceLocker) store(keys []string, value string) {
   il.lock.Lock()
   defer il.lock.Unlock()
-  rootKey := keys[0]
-  lockerData := il.Locker[rootKey]
-  now := time.Now()
-  if lockerData != nil && lockerData.Locked {
-    il.Locker[rootKey+"_last"] = lockerData
-    il.Locker[rootKey] = nil
-  }
-  lockerData = il.Locker[rootKey]
-  if lockerData == nil {
-    lockerData = &LockerData{SubKeys: map[string]*LockerData{}, FirstReported: now}
-    il.Locker[rootKey] = lockerData
-  }
-  for i := 1; i < len(keys); i++ {
-    if lockerData.SubKeys[keys[i]] == nil {
-      lockerData.SubKeys[keys[i]] = &LockerData{SubKeys: map[string]*LockerData{}, FirstReported: now}
-    }
-    lockerData = lockerData.SubKeys[keys[i]]
-  }
-  lockerData.Data = value
-  lockerData.LastReported = now
-}
-
-func removeSubKey(lockerData *LockerData, keys []string, index int) {
-  if index >= len(keys) {
-    return
-  }
-  currentKey := keys[index]
-  if lockerData.SubKeys[currentKey] != nil {
-    nextLockerData := lockerData.SubKeys[currentKey]
-    removeSubKey(nextLockerData, keys, index+1)
-    if len(nextLockerData.SubKeys) == 0 {
-      delete(lockerData.SubKeys, currentKey)
-    }
-  }
+  unsafeStoreKeysInLocker(il.Locker, keys, value)
 }
 
 func (il *InstanceLocker) remove(keys []string) {
   il.lock.Lock()
   defer il.lock.Unlock()
-  rootKey := keys[0]
-  lockerData := il.Locker[rootKey]
-  if lockerData != nil {
-    removeSubKey(lockerData, keys, 1)
-    if len(lockerData.SubKeys) == 0 {
-      delete(il.Locker, rootKey)
-    }
-  }
+  unsafeRemoveKeysFromLocker(il.Locker, keys)
 }
 
 func (il *InstanceLocker) lockKeys(keys []string) {
   il.lock.Lock()
   defer il.lock.Unlock()
-  if il.Locker[keys[0]] != nil {
-    lockerData := il.Locker[keys[0]]
-    for i := 1; i < len(keys); i++ {
-      if lockerData.SubKeys[keys[i]] != nil {
-        lockerData = lockerData.SubKeys[keys[i]]
-      }
-    }
-    lockerData.Locked = true
-  }
+  unsafeLockKeys(il.Locker, keys)
 }
 
-func (il *InstanceLocker) Lock() {
+func (il *InstanceLocker) lockLocker() {
   il.lock.Lock()
   defer il.lock.Unlock()
   for _, lockerData := range il.Locker {
@@ -127,24 +146,25 @@ func newPeerLocker() *PeerLocker {
 }
 
 func (pl *PeerLocker) init() {
-  pl.Locker = map[string]*InstanceLocker{}
+  pl.InstanceLockers = map[string]*InstanceLocker{}
+  pl.Locker = map[string]*LockerData{}
 }
 
 func (pl *PeerLocker) getInstanceLocker(peerAddress string) *InstanceLocker {
   pl.lock.Lock()
   defer pl.lock.Unlock()
-  if pl.Locker[peerAddress] == nil {
-    pl.Locker[peerAddress] = newInstanceLocker()
+  if pl.InstanceLockers[peerAddress] == nil {
+    pl.InstanceLockers[peerAddress] = newInstanceLocker()
   }
-  return pl.Locker[peerAddress]
+  return pl.InstanceLockers[peerAddress]
 }
 
 func (pl *PeerLocker) clearInstanceLocker(peerAddress string) bool {
   pl.lock.Lock()
   defer pl.lock.Unlock()
-  _, present := pl.Locker[peerAddress]
+  _, present := pl.InstanceLockers[peerAddress]
   if present {
-    pl.Locker[peerAddress] = newInstanceLocker()
+    pl.InstanceLockers[peerAddress] = newInstanceLocker()
   }
   return present
 }
@@ -152,7 +172,46 @@ func (pl *PeerLocker) clearInstanceLocker(peerAddress string) bool {
 func (pl *PeerLocker) removeInstanceLocker(peerAddress string) {
   pl.lock.Lock()
   defer pl.lock.Unlock()
-  delete(pl.Locker, peerAddress)
+  delete(pl.InstanceLockers, peerAddress)
+}
+
+func (pl *PeerLocker) store(keys []string, value string) {
+  pl.lock.Lock()
+  defer pl.lock.Unlock()
+  unsafeStoreKeysInLocker(pl.Locker, keys, value)
+}
+
+func (pl *PeerLocker) remove(keys []string) {
+  pl.lock.Lock()
+  defer pl.lock.Unlock()
+  unsafeRemoveKeysFromLocker(pl.Locker, keys)
+}
+
+func (pl *PeerLocker) lockInstanceLocker(peerAddress string) {
+  il := pl.getInstanceLocker(peerAddress)
+  il.lockLocker()
+  pl.lock.Lock()
+  defer pl.lock.Unlock()
+  pl.lockedCounter++
+  pl.InstanceLockers[peerAddress+"-"+strconv.Itoa(pl.lockedCounter)] = il
+  delete(pl.InstanceLockers, peerAddress)
+}
+
+func (pl *PeerLocker) lockKeys(keys []string) {
+  pl.lock.Lock()
+  defer pl.lock.Unlock()
+  unsafeLockKeys(pl.Locker, keys)
+}
+
+func (pl *PeerLocker) lockLocker() {
+  pl.lock.Lock()
+  defer pl.lock.Unlock()
+  pl.lockedCounter++
+  lockedIndex := strconv.Itoa(pl.lockedCounter)
+  for key := range pl.Locker {
+    pl.Locker[key+"-"+lockedIndex] = pl.Locker[key]
+    delete(pl.Locker, key)
+  }
 }
 
 func NewPeersLocker() *PeersLockers {
@@ -181,7 +240,7 @@ func (pl *PeersLockers) InitPeerLocker(peerName string, peerAddress string) bool
   return false
 }
 
-func (pl *PeersLockers) getInstanceLocker(peerName string, peerAddress string) *InstanceLocker {
+func (pl *PeersLockers) getPeerLocker(peerName string) *PeerLocker {
   pl.lock.Lock()
   peerLocker := pl.peerLocker[peerName]
   if peerLocker == nil {
@@ -189,34 +248,55 @@ func (pl *PeersLockers) getInstanceLocker(peerName string, peerAddress string) *
     pl.peerLocker[peerName] = peerLocker
   }
   pl.lock.Unlock()
-  return peerLocker.getInstanceLocker(peerAddress)
+  return peerLocker
 }
 
-func (pl *PeersLockers) Store(peerName string, peerAddress string, keys []string, value string) {
+func (pl *PeersLockers) getInstanceLocker(peerName string, peerAddress string) *InstanceLocker {
+  return pl.getPeerLocker(peerName).getInstanceLocker(peerAddress)
+}
+
+func (pl *PeersLockers) Store(peerName, peerAddress string, keys []string, value string) {
   if len(keys) == 0 {
     return
   }
-  pl.getInstanceLocker(peerName, peerAddress).store(keys, value)
+  if peerAddress == "" {
+    pl.getPeerLocker(peerName).store(keys, value)
+  } else {
+    pl.getInstanceLocker(peerName, peerAddress).store(keys, value)
+  }
 }
 
-func (pl *PeersLockers) Remove(peerName string, peerAddress string, keys []string) {
-  pl.getInstanceLocker(peerName, peerAddress).remove(keys)
+func (pl *PeersLockers) Remove(peerName, peerAddress string, keys []string) {
+  if len(keys) == 0 {
+    return
+  }
+  if peerAddress == "" {
+    pl.getPeerLocker(peerName).remove(keys)
+  } else {
+    pl.getInstanceLocker(peerName, peerAddress).remove(keys)
+  }
 }
 
-func (pl *PeersLockers) LockKeysInPeerLocker(peerName string, peerAddress string, keys []string) {
-  pl.getInstanceLocker(peerName, peerAddress).lockKeys(keys)
+func (pl *PeersLockers) LockKeysInPeerLocker(peerName, peerAddress string, keys []string) {
+  if len(keys) == 0 {
+    return
+  }
+  if peerAddress == "" {
+    pl.getPeerLocker(peerName).lockKeys(keys)
+  } else {
+    pl.getInstanceLocker(peerName, peerAddress).lockKeys(keys)
+  }
 }
 
-func (pl *PeersLockers) LockPeerLocker(peerName string, peerAddress string) {
-  il := pl.getInstanceLocker(peerName, peerAddress)
-  il.Lock()
-  peerLocker := pl.peerLocker[peerName]
-  peerLocker.lockedCounter++
-  peerLocker.Locker[peerAddress+"-"+strconv.Itoa(peerLocker.lockedCounter)] = il
-  peerLocker.removeInstanceLocker(peerAddress)
+func (pl *PeersLockers) LockPeerLocker(peerName,  peerAddress string) {
+  if peerAddress == "" {
+    pl.getPeerLocker(peerName).lockLocker()
+  } else {
+    pl.getPeerLocker(peerName).lockInstanceLocker(peerAddress)
+  }
 }
 
-func (pl *PeersLockers) ClearInstanceLocker(peerName string, peerAddress string) bool {
+func (pl *PeersLockers) ClearInstanceLocker(peerName, peerAddress string) bool {
   pl.lock.Lock()
   peerLocker := pl.peerLocker[peerName]
   pl.lock.Unlock()
@@ -255,7 +335,7 @@ func (pl *PeersLockers) GetTargetsResults(trackingHeaders []string, crossTrackin
   for peer, peerLocker := range pl.peerLocker {
     summary[peer] = map[string]*results.TargetResults{}
     peerLocker.lock.RLock()
-    for _, instanceLocker := range peerLocker.Locker {
+    for _, instanceLocker := range peerLocker.InstanceLockers {
       instanceLocker.lock.RLock()
       lockerData := instanceLocker.Locker[constants.LockerClientKey]
       if lockerData != nil {

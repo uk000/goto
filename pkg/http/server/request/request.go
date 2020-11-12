@@ -1,21 +1,22 @@
 package request
 
 import (
-	"net/http"
+  "net/http"
 
-	"goto/pkg/http/server/request/header"
-	"goto/pkg/http/server/request/proxy"
-	"goto/pkg/http/server/request/timeout"
-	"goto/pkg/http/server/request/uri"
-	"goto/pkg/util"
+  "goto/pkg/http/server/request/body"
+  "goto/pkg/http/server/request/header"
+  "goto/pkg/http/server/request/proxy"
+  "goto/pkg/http/server/request/timeout"
+  "goto/pkg/http/server/request/uri"
+  "goto/pkg/util"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
 
 var (
   Handler         util.ServerHandler   = util.ServerHandler{"request", SetRoutes, Middleware}
-  requestHandlers []util.ServerHandler = []util.ServerHandler{header.Handler,
-		uri.Handler, timeout.Handler, proxy.Handler}
+  requestHandlers []util.ServerHandler = []util.ServerHandler{header.Handler, uri.Handler,
+    body.Handler, timeout.Handler, proxy.Handler}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {

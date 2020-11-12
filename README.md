@@ -25,21 +25,32 @@ Keep reading...
 
 Before we look into detailed features and APIs exposed by the tool, let's look at how this tool can be used in a few scenarios to understand it better.
 
-### Scenario: [Use HTTP client to send requests and track results](scenarios.md#scenario-use-http-client-to-send-requests-and-track-results)
+## Basic Scenarios
 
-### Scenario: [Run dynamic traffic from K8s pods at startup](scenarios.md#scenario-run-dynamic-traffic-from-k8s-pods-at-startup)
+### Scenario: [Use HTTP client to send requests and track results](docs/scenarios-basic.md#basic-client-usage)
 
-### Scenario: [Deal with transient pods](scenarios.md#scenario-deal-with-transient-pods)
+### Scenario: [Use HTTP server to respond to any arbitrary client HTTP requests](docs/scenarios-basic.md#basic-server-usage)
 
-### Scenario: [Capture results from transient pods](scenarios.md#scenario-capture-results-from-transient-pods)
+### Scenario: [HTTPS traffic with certificate validation](docs/scenarios-basic.md#basic-https-usage)
 
-### Scenario: [HTTPS traffic with certificate validation](scenarios.md#scenario-https-traffic-with-certificate-validation)
+### Scenario: [Count number of requests received at each server instance for certain headers](docs/scenarios-basic.md#basic-header-tracking)
 
-### Scenario: [Test a client's behavior upon service failure](scenarios.md#scenario-test-a-clients-behavior-upon-service-failure)
 
-### Scenario: [Count number of requests received at each service instance (Pod/VM) for certain headers](scenarios.md#scenario-count-number-of-requests-received-at-each-service-instance-podvm-for-certain-headers)
+## K8S Scenarios
 
-### Scenario: [Track Request/Connection Timeouts](scenarios.md#scenario-track-requestconnection-timeouts)
+### Scenario: [Run dynamic traffic from K8s pods at startup](docs/scenarios-k8s.md#k8s-traffic-at-startup)
+
+### Scenario: [Deal with transient pods](docs/scenarios-k8s.md#k8s-transient-pods)
+
+### Scenario: [Capture results from pods that may terminate anytime](docs/scenarios-k8s.md#k8s-capture-transient-pod-results)
+
+
+## Resiliency Scenarios
+
+### Scenario: [Test a client's behavior upon service failure](docs/scenarios-resiliency.md#scenario-test-a-clients-behavior-upon-service-failure)
+
+
+### Scenario: [Track client hangups on server via request/connection timeouts](docs/scenarios-resiliency.md#server-resiliency-client-hangups)
 
 <br/>
 
@@ -60,6 +71,49 @@ As a client, it allows sending requests to various destinations and tracking res
 
 The application exposes both client and server features via various management REST APIs as described below. Additionally, it can respond to all undefined URIs with a configurable status code.
 
+## Features TOC
+
+### [Startup](#startup)
+
+### Client Features
+* [HTTP Targets and Traffic](#client-http-traffic)
+
+### Server Features
+* [Server Logging](#server-logging)
+* [Server Listeners](#server-listeners)
+* [Server Listener Label](#server-listener-label)
+* [Request Headers Tracking](#server-request-headers-tracking)
+* [Request Timeout](#server-request-timeout)
+* [URIs](#server-uris)
+* [Probes](#server-probes)
+* [URIs Bypass](#server-uris-bypass)
+* [Response Delay](#server-response-delay)
+* [Response Headers](#server-response-headers)
+* [Response Payload](#server-response-payload)
+* [Ad-hoc Payload](#server-ad-hoc-payload)
+* [Stream (Chunked) Payload](#server-stream-payload)
+* [Response Status](#server-response-status)
+* [Status API](#server-status)
+* [Delay API](#server-delay)
+* [Echo API](#server-echo)
+* [Catch All](#server-catch-all)
+
+### Proxy
+* [Proxy Features](#proxy-features)
+
+### Trigger
+* [Trigger Features](#trigger-features)
+
+### Jobs
+* [Jobs Features](#jobs-features)
+
+### Registry
+* [Registry Features](#registry-features)
+
+<br/>
+
+# <a name="startup"></a>
+# Startup Command Arguments
 First things first, run the application:
 ```
 go run main.go --port 8080
@@ -70,11 +124,6 @@ go build -o goto .
 ./goto
 ```
 
-<br/>
-
-
-#
-# Startup Command Arguments
 The application accepts the following command arguments:
 
 <table>
@@ -87,7 +136,7 @@ The application accepts the following command arguments:
     </thead>
     <tbody>
         <tr>
-          <td rowspan="3">--port</td>
+          <td rowspan="3">--port {port}</td>
           <td>Initial port the server listens on. </td>
           <td rowspan="3">8080</td>
         </tr>
@@ -98,7 +147,7 @@ The application accepts the following command arguments:
           <td>* See [Listeners](#-listeners) feature later in the doc.</td>
         </tr>
         <tr>
-          <td rowspan="2">--label</td>
+          <td rowspan="2">--label {label}</td>
           <td>Label this server instance will use to identify itself. </td>
           <td rowspan="2">Goto-`IPAddress` </td>
         </tr>
@@ -106,17 +155,17 @@ The application accepts the following command arguments:
           <td>* This is used both for setting `Goto`'s default response headers as well as when registering with registry.</td>
         </tr>
         <tr>
-          <td rowspan="1">--startupDelay</td>
+          <td rowspan="1">--startupDelay {delay}</td>
           <td>Delay the startup by this duration. </td>
           <td rowspan="1">1s</td>
         </tr>
         <tr>
-          <td rowspan="1">--shutdownDelay</td>
+          <td rowspan="1">--shutdownDelay {delay}</td>
           <td>Delay the shutdown by this duration after receiving SIGTERM. </td>
           <td rowspan="1">5s</td>
         </tr>
         <tr>
-          <td rowspan="3">--registry</td>
+          <td rowspan="3">--registry {url}</td>
           <td>URL of the Goto Registry instance that this instance should connect to. </td>
           <td rowspan="3"> "" </td>
         </tr>
@@ -127,7 +176,7 @@ The application accepts the following command arguments:
           <td>* See [Registry](#registry-features) feature later in the doc.</td>
         </tr>
         <tr>
-          <td rowspan="2">--locker</td>
+          <td rowspan="2">--locker={true|false}</td>
           <td> Whether this instance should report its results back to the Goto Registry instance. </td>
           <td rowspan="2"> false </td>
         </tr>
@@ -135,7 +184,12 @@ The application accepts the following command arguments:
           <td>* An instance can be asked to report its results to registry in case the  instance is transient, e.g. pods.</td>
         </tr>
         <tr>
-          <td rowspan="2">--certs</td>
+          <td rowspan="1">--reminderLogs={true|false}</td>
+          <td>Enable/Disable Registry Reminder Logs </td>
+          <td rowspan="1">true</td>
+        </tr>
+        <tr>
+          <td rowspan="2">--certs {path}</td>
           <td> Directory path from where to load TLS root certificates. </td>
           <td rowspan="2"> "/etc/certs" </td>
         </tr>
@@ -145,26 +199,25 @@ The application accepts the following command arguments:
     </tbody>
 </table>
 
-
 Once the server is up and running, rest of the interactions and configurations are done purely via REST APIs.
 
 <br/>
 
 
-#
+# <a name="client-features"></a>
 # Client Features
-As a client tool, `goto` offers the following features:
-- Allows targets to be configured and invoked via REST APIs
-- Configure targets to be invoked ahead of time before invocation
-- Invoke selective targets or all configured targets in batches
-- Multiple concurrent invocations of batches of targets
-- Control the number of concurrent requests per target via `replicas` field
-- Control the total number of requests per target via `requestCount` field
-- Control the minimum wait time after each replica set invocation per target via `delay` field
-- Control the minimum duration over which total requests are sent to a client using combination of `requestCount` and `delay`
-- Headers can be set to track results for target invocations, and APIs make those results available for consumption as JSON output. 
 
-The invocation results get accumulated across multiple invocations until cleared explicitly. The invocation results can be read back as overall totals, or totals per invocation. Invocations are tracked via a sequential numeric counter starting with 1. An invocation may involve one or more targets (depending on how it was triggered). The result of an invocation includes totals for targets included in that invocation, whereas the overall totals are summed across all invocations. Clearing of all results resets the invocation counter too, causing the next invocation to start at counter 1 again.
+## <a name="client-http-traffic"></a> HTTP Targets and Traffic
+As a client tool, `goto` offers the feature to configure multiple targets and send http traffic:
+- Allows targets to be configured and invoked via REST APIs
+- Configure targets to be invoked ahead of time before invocation, as well as auto-invoke targets upon configuration
+- Invoke selective targets or all configured targets in batches
+- Control various parameters for a target: number of concurrent, total number of requests, minimum wait time after each replica set invocation per target, various timeouts, etc
+- Headers can be set to track results for target invocations, and APIs make those results available for consumption as JSON output.
+- Retry requests for specific response codes, and option to use a fallback URL for retries
+- Make simultaneous calls to two URLs to perform an A-B comparison of responses. In AB mode, the same request ID (enabled via sendID flag) are used for both A and B calls, but with a suffix `-B` used for B calls. This allows tracking the A and B calls in logs.
+
+The invocation results get accumulated across multiple invocations until cleared explicitly. Various results APIs can be used to read the accumulated results. Clearing of all results resets the invocation counter too, causing the next invocation to start at counter 1 again.
 
 In addition to keeping the results in the `goto` client instance, those are also stored in locker on registry instance if enabled. (See `--locker` command arg)
 
@@ -201,6 +254,7 @@ In addition to keeping the results in the `goto` client instance, those are also
 | name         | string         || Name for this target |
 | method       | string         || HTTP method to use for this target |
 | url          | string         || URL for this target   |
+| burls        | []string       || Secondary URLs to use for `fallback` or `AB Mode` (see below)   |
 | verifyTLS    | bool           |false| Whether the TLS certificate presented by the target is verified. (Also see `--certs` command arg) |
 | headers      | [][]string     || Headers to be sent to this target |
 | body         | string         || Request body to use for this target|
@@ -218,6 +272,8 @@ In addition to keeping the results in the `goto` client instance, those are also
 | connIdleTimeout | duration    |5m| Idle Timeout for target connection |
 | requestTimeout | duration     |30s| Timeout for HTTP requests to the target |
 | autoInvoke   | bool           |false| Whether this target should be invoked as soon as it's added |
+| fallback     | bool           |false| If enabled, retry attempts will use secondary urls (`burls`) instead of the primary url. The query param `x-request-id` will carry suffixes of `-<counter>` for each retry attempt. |
+| abMode       | bool           |false| If enabled, each request will simultaneously be sent to all secondary urls (`burls`) in addition to the primary url. The query param `x-request-id` will carry suffixes of `-B-<index>` for each secondary URL. |
 
 
 #### Client Results Schema (output of API /client/results)
@@ -296,6 +352,33 @@ curl localhost:8080/client/targets/add --data '
   "sendID": true,
   "autoInvoke": true
 }'
+
+curl -s localhost:8080/client/targets/add --data '
+{
+  "name": "ab",
+  "method": "POST",
+  "url": "http://localhost:8081/foo",
+  "burls": ["http://localhost:8080/b1", "http://localhost:8080/b2", "http://localhost:8080/b3"],
+  "body": "some body",
+  "abMode": true,
+  "replicas": 2,
+  "requestCount": 2,
+  "sendID": true
+}'
+
+curl -s localhost:8080/client/targets/add --data '
+{
+  "name": "ab",
+  "method": "POST",
+  "url": "http://localhost:8081/foo",
+  "burls": ["http://localhost:8080/bar"]
+  "body": "some body",
+  "fallback": true,
+  "replicas": 2,
+  "requestCount": 2,
+  "sendID": true
+}'
+
 
 #List targets
 curl localhost:8080/client/targets
@@ -1131,14 +1214,32 @@ curl localhost:8080/client/results
 </p>
 </details>
 
-#
+# <a name="server-features"></a>
 # Server Features
 The server is useful to be run as a test server for testing some client application, proxy/sidecar, gateway, etc. Or, the server can also be used as a proxy to be put in between a client and a target server application, so that traffic flows through this server where headers can be inspected/tracked before proxying the requests further. The server can add headers, replace request URI with some other URI, add artificial delays to the response, respond with a specific status, monitor request/connection timeouts, etc. The server tracks all the configured parameters, applying those to runtime traffic and building metrics, which can be viewed via various APIs.
 
 <br/>
 
+### <a name="server-logging"></a> Server Logging
+`goto` server logs are generated with a useful pattern to help figuring out the steps `goto` took for a request. Each log line tells the complete story about request details, how the request was processed, and response sent. Each log line contains the following segments separated by `-->`:
+- Request Timestamp, Host Id (host where the request was processed), and Server label (assigned via --label startup arg)
+- Local and Remote addresses (if available)
+- Request Headers, including Host
+- Request URI, Protocol and Method
+- Request Body (first 100 bytes)
+- Action(s) taken by `goto` (e.g. delaying a request)
+- Final Response code determination
+- Response Headers
+
+Sample log line:
+```
+2020/11/09 16:59:54 [localhost@1.2.3.4:8080] [Registry] --> LocalAddr: [::1]:8080, RemoteAddr: [::1]:64342 --> Request Headers: {"Content-Length":["80"],"From-Goto":["peer1"],"From-Goto-Host":["localhost@1.2.3.4:8081"],"Host":["localhost:8080"],"Protocol":["HTTP/1.1"],"Targetid":["ab[1][1]"],"User-Agent":["Go-http-client/1.1"]} --> Request URI: [/bar?x-request-id=466c822c-231c-4ea5-aab6-125b73da1612-B], Protocol: [HTTP/1.1], Method: [POST] --> Request Body: [thisisaverylongbody] --> Delaying for 2s --> Echoing back --> Reporting status: [200] --> {"ResponseHeaders": {"Content-Type":["application/json"],"Goto-Host":["localhost@1.2.3.4:8080"],"Request-From-Goto":["peer1"],"Request-From-Goto-Host":["localhost@1.2.3.4:8080"],"Request-Host":["localhost:8080"],"Request-Protocol":["HTTP/1.1"],"Request-Targetid":["ab[1][1]"],"Request-User-Agent":["Go-http-client/1.1"],"Via-Goto":["Registry"]}}
+```
+
+<br/>
+
 #
-## > Listeners
+## <a name="server-listeners"></a>  > Listeners
 
 
 The server starts with a single http listener on port given to it as command line arg (defaults to 8080). It exposes listener APIs to let you manage additional HTTP listeners (TCP support will come in the future). The ability to launch and shutdown listeners lets you do some chaos testing. All listener ports respond to the same set of API calls, so any of the APIs described below as well as runtime traffic proxying can be done via any active listener.
@@ -1202,7 +1303,7 @@ $ curl -s localhost:8080/listeners
 
 <br/>
 
-#
+# <a name="server-listener-label"></a>
 ## > Listener Label
 
 By default, each listener adds a header `Via-Goto: <port>` to each response it sends, where `<port>` is the port on which the listener is running (default being 8080). A custom label can be added to a listener using the label APIs described below. In addition to `Via-Goto`, each listener also adds another header `Goto-Host` that carries the pod/host name, pod namespace (or `local` if not running as a K8s pod), and pod/host IP address to identify where the response came from.
@@ -1225,7 +1326,7 @@ curl localhost:8080/label
 
 <br/>
 
-#
+# <a name="server-request-headers-tracking"></a>
 ## > Request Headers Tracking
 This feature allows tracking request counts by headers.
 
@@ -1307,7 +1408,7 @@ $ curl localhost:8080/request/headers/track/counts
 
 <br/>
 
-#
+# <a name="server-request-timeout"></a>
 ## > Request Timeout
 This feature allows tracking request timeouts by headers.
 
@@ -1371,10 +1472,10 @@ curl localhost:8080/request/timeout/status
 
 <br/>
 
-#
+# <a name="server-uris"></a>
 ## > URIs
 This feature allows responding with custom status code and delays for specific URIs, and tracking request counts for calls made to specific URIs (ignoring query parameters).
-Note: To configure server to respond with custom/random response payloads for specific URIs, see [`Response Payload`](#response-payload) feature.
+Note: To configure server to respond with custom/random response payloads for specific URIs, see [`Response Payload`](#server-response-payload) feature.
 
 #### APIs
 |METHOD|URI|Description|
@@ -1420,7 +1521,7 @@ curl -X POST localhost:8080/request/uri/counts/clear
 
 <br/>
 
-#
+# <a name="server-probes"></a>
 ## > Probes
 This feature allows setting readiness and liveness probe URIs, statuses to be returned for those probes, and tracking counts for how many times the probes have been called. `Goto` also tracks when the probe call counts overflow, keeping separate overflow counts. A `goto` instance can be queried for its probe details via `/probe` API.
 
@@ -1460,7 +1561,7 @@ curl localhost:8080/probe
 
 <br/>
 
-#
+# <a name="server-uris-bypass"></a>
 ## > URIs Bypass
 This feature allows adding bypass URIs that will not be subject to other configurations, e.g. forced status codes. Request counts are tracked for bypass URIs, and specific status can be configured to respond for bypass URI requests.
 
@@ -1515,7 +1616,7 @@ curl localhost:8080/request/uri/bypass/counts\?uri=/foo
 
 <br/>
 
-#
+# <a name="server-response-delay"></a>
 ## > Response Delay
 This feature allows adding a delay to all requests except bypass URIs and proxy requests. Delay is specified as duration, e.g. 1s. 
 
@@ -1544,7 +1645,7 @@ curl localhost:8080/response/delay
 
 <br/>
 
-#
+# <a name="server-response-headers"></a>
 ## > Response Headers
 This feature allows adding custom response headers to all responses sent by the server.
 
@@ -1573,8 +1674,8 @@ curl localhost:8080/response/headers
 
 <br/>
 
-#
-## > <a name="response-payload"></a> Response Payload
+# <a name="server-response-payload"></a>
+## > Response Payload
 This feature allows setting either custom or random generated response payload to be sent with server responses.
 
 Custom response payload can be set for all requests (`default` payload), for specific URIs, or for specific headers. If response is set for all three, URI match gets highest priority, followed by request headers match, and otherwise default payload is used as fallback if configured.
@@ -1644,8 +1745,8 @@ curl localhost:8080/response/payload
 
 <br/>
 
-#
-## > Ad-hoc Payload API
+# <a name="server-ad-hoc-payload"></a>
+## > Ad-hoc Payload
 This URI responds with a random-generated payload of the requested size. Payload size can be a numeric value or use common byte size conventions: `K`, `KB`, `M`, `MB`. Payload size is only limited by the memory available to the `goto` process. The response carries an additional header `Goto-Payload-Length` in additionl to the standard header `Content-Length` to identify the size of the response payload.
 
 #### API
@@ -1663,8 +1764,8 @@ curl -v localhost:8080/payload/100
 
 <br/>
 
-#
-## > Stream (Chunked) Payload API
+# <a name="server-stream-payload"></a>
+## > Stream (Chunked) Payload
 This URI responds with either pre-configured or random-generated payload where response behavior is controlled by the parameters passed to the API. The feature allows requesting a custom payload size, custom response duration over which to stream the payload, custom chunk size to be used for splitting the payload into chunks, and custom delay to be used in-between chunked responses. Combination of these parameters define the total payload size and the total duration of the response. 
 
 Stream responses carry following headers:
@@ -1700,7 +1801,7 @@ curl -v localhost:8080/stream/count/10/delay/300ms
 
 <br/>
 
-#
+# <a name="server-response-status"></a>
 ## > Response Status
 This feature allows setting a forced response status for all requests except bypass URIs. Server also tracks number of status requests received (via /status URI) and number of responses send per status code.
 
@@ -1754,7 +1855,7 @@ curl localhost:8080/response/status/counts/502
 
 <br/>
 
-#
+# <a name="server-status"></a>
 ## > Status API
 The URI `/status/{status}` allows client to ask for a specific status as response code. The given status is reported back, except when forced status is configured in which case the forced status is sent as response.
 
@@ -1770,7 +1871,7 @@ curl -I  localhost:8080/status/418
 
 <br/>
 
-#
+# <a name="server-delay"></a>
 ## > Delay API
 The URI `/delay/{delay}` allows client to ask for a specific delay to be applied to the current request. The delay API is not subject to the response delay that may be configured for all responses. Calling the URI as `/delay` responds with no delay, and so does the call as `/delay/0`, `/delay/0s`, etc.
 When a delay is passed to this API, the response carries a header `Response-Delay` with the value of the applied delay.
@@ -1787,7 +1888,7 @@ curl -I  localhost:8080/delay/2s
 
 <br/>
 
-#
+# <a name="server-echo"></a>
 ## > Echo API
 This URI echoes back the headers and payload sent by client. The response is also subject to any forced response status and will carry custom headers if any are configured.
 
@@ -1803,7 +1904,7 @@ curl -I  localhost:8080/echo
 
 <br/>
 
-#
+# <a name="server-catch-all"></a>
 ## > Catch All
 
 Any request that doesn't match any of the defined management APIs, and also doesn't match any proxy targets, gets treated by a catch-all response that sends HTTP 200 response by default (unless an override response code is set)
@@ -1812,7 +1913,7 @@ Any request that doesn't match any of the defined management APIs, and also does
 <br/>
 <br/>
 
-#
+# <a name="proxy-features"></a>
 # Proxy Features
 
 `Goto` proxy feature allows targets to be configured that are triggered based on matching criteria against requests. The targets can also be invoked manually for testing the configuration. However, the real fun happens when the proxy targets are matched with runtime traffic based on the match criteria specified in a proxy target's spec (based on headers, URIs, and query parameters), and one or more matching targets get invoked for a given request.
@@ -2017,7 +2118,7 @@ curl localhost:8080/request/proxy/counts
 
 
 
-#
+# <a name="trigger-features"></a>
 # Trigger Features
 
 `Goto` allow targets to be configured that are triggered based on response status. The triggers can be invoked manually for testing, but their real value is when they get triggered based on response status. Even more valuable when the request was proxied to another upstream service, in which case the trigger is based on the response status of the upstream service.
@@ -2098,7 +2199,7 @@ curl localhost:8080/response/trigger/list
 </details>
 
 
-#
+# <a name="jobs-features"></a>
 # Jobs Features
 
 `Goto` allow jobs to be configured that can be run manually or auto-start upon addition. Two kinds of jobs are supported:
@@ -2319,7 +2420,7 @@ $ curl http://localhost:8080/jobs/job1/results
 <br/>
 
 
-#
+# <a name="registry-features"></a>
 # Registry Features
 
 Any `goto` instance can act as a registry of other `goto` instances, and other worker `goto` instances can be configured to register themselves with the registry. You can pick any instance as registry and pass its URL to other instances as a command line argument, which tells other instances to register themselves with the given registry at startup.
@@ -2330,7 +2431,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 1. You can pre-register a list of invocation targets and jobs at the registry instance that should be handed out to the worker instances. These targets/jobs are registered by labels, and the worker instances receive the matching targets+jobs for the labels they register with.
 2. The targets and jobs registered at the registry can also be marked for `auto-invocation`. When a worker instance receives a target/job from registry at startup that's marked for auto-invocation, it immediately invokes that target/job at startup. Additionally, the target/job is retained in the worker instance for later invocation via API as well.
 3. In addition to sending targets/jobs to worker instances at the time of registration, the registry instance also pushes targets/jobs to the worker instances as and when more targets/jobs get added to the registry. This has the added benefit of just using the registry instance as the single point of configuration, where you add targets/jobs and those get pushed to all worker instances. Removal of targets/jobs from the registry also gets pushed, so the targets/jobs get removed from the corresponding worker instances. Even targets/jobs that are pushed later can be marked for `auto-invocation`, and the worker instances that receive the target/job will invoke it immediately upon receipt.
-4. Instances can store their results into their corresponding lockers in the registry. A peer instance also locks its locker data once an invocation completes. Currently, locking preserves the data by moving it to another key named `<key>_last` when new data is reported for that key, thus it preserves last reported data as immutable once locked, while still allowing the peer to store more data for the same key in the locker.
+4. Instances can store their results into their corresponding lockers in the registry. A peer instance also locks its locker data once an invocation completes. Locking a key in the locker results in a copy-on-write for that key's data upon next write for the key, when the old data is moved under a new key named `<key>_<counter>`. This ensures that a locked data is treated as immutable while still allowing client/peer to keep writing more data for the same key.
 
 Peer instances periodically re-register themselves with registry in case registry was restarted and lost all peers info. Re-registering is different from startup registration in that peers don't receive targets and jobs from registry when they remind registry about themselves, and hence no auto-invocation happens.
 
@@ -2348,9 +2449,13 @@ Peer instances periodically re-register themselves with registry in case registr
 | POST      | /registry/peers/clear/epochs   | Remove epochs for disconnected peers|
 | POST      | /registry/peers/clear   | Remove all registered peers|
 | GET       | /registry/peers         | Get all registered peers. See [Peers JSON Schema](#peers-json-schema) |
-| POST      | /registry/peers/{peer}/{address}/locker/store/{key} | Store any arbitrary value for the given key in the locker of the peer instance |
-| POST      | /registry/peers/{peer}/{address}/locker/remove/{key} | Remove stored data for the given key from the locker of the peer instance |
-| POST      | /registry/peers/{peer}/{address}/locker/lock/{key} | Locks the data stored under the given key in the locker of the peer instance.  |
+| POST      | /registry/peers/{peer}/{address}/locker/store/{keys} | Store any arbitrary value for the given `keys` in the locker of the peer instance. `keys` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
+| POST      | /registry/peers/{peer}/{address}/locker/remove/{keys} | Remove stored data for the given `keys` from the locker of the peer instance. `keys` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
+| POST      | /registry/peers/{peer}/{address}/locker/lock/{keys} | Locks the data stored under the given `keys` in the locker of the peer instance. `keys` can be a comma-separated list of subkeys, in which case data at the leaf key gets locked. |
+| POST      | /registry/peers/{peer}/locker/store/{keys} | Store any arbitrary value for the given key in the peer locker without associating data to a peer instance. `keys` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
+| POST      | /registry/peers/{peer}/locker/remove/{keys} | Remove stored data for the given key from the peer locker. `keys` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
+| POST      | /registry/peers/{peer}/locker/lock/{keys} | Locks the data stored under the given key in the peer locker. `keys` can be a comma-separated list of subkeys, in which case data at the leaf key gets locked.  |
+| POST      | /registry/peers/{peer}/locker/lock | Locks the peer locker (all sub-keys).  |
 | POST      | /registry/peers/{peer}/{address}/locker/clear | Clear the locker for the peer instance |
 | POST      | /registry/peers/{peer}/locker/clear | Clear the locker for all instances of the given peer |
 | POST      | /registry/peers/lockers/clear | Clear all lockers |
@@ -2535,9 +2640,11 @@ curl -X POST http://localhost:8080/registry/peers/peer1/jobs/job1,job2/invoke
 
 curl -X POST http://localhost:8080/registry/peers/peer1/jobs/invoke/all
 
-curl -X POST http://localhost:8080/registry/peers/peer1/call?uri=/request/headers/track/add/x
+#store data in the peer1 locker under subkeys A->B->C
+curl -X POST http://localhost:8080/registry/peers/peer1/locker/store/A,B,C --data '{"some":"data"}'
 
-curl -X POST http://localhost:8080/registry/peers/call?uri=/request/headers/track/add/y
+#call URI `/request/headers/track/add/x` on all instances of peer1
+curl -X POST http://localhost:8080/registry/peers/peer1/call?uri=/request/headers/track/add/x
 
 curl -s http://localhost:8080/registry/peers/call?uri=/request/headers/track
 
