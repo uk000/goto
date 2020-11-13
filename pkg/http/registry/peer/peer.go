@@ -23,6 +23,7 @@ func RegisterPeer(peerName, peerAddress string) {
     Name:      peerName,
     Address:   peerAddress,
     Pod:       util.GetPodName(),
+    Node:      util.GetNodeName(),
     Namespace: util.GetNamespace(),
   }
   if global.RegistryURL != "" {

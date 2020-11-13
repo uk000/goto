@@ -20,6 +20,7 @@ type Peer struct {
   Name      string `json:"name"`
   Address   string `json:"address"`
   Pod       string `json:"pod"`
+  Node      string `json:"node"`
   Namespace string `json:"namespace"`
 }
 
@@ -34,6 +35,7 @@ type PodEpoch struct {
 type Pod struct {
   Name         string      `json:"name"`
   Address      string      `json:"address"`
+  Node         string      `json:"node"`
   Healthy      bool        `json:"healthy"`
   CurrentEpoch PodEpoch    `json:"currentEpoch"`
   PastEpochs   []*PodEpoch `json:"pastEpochs"`
@@ -140,7 +142,7 @@ func (pr *PortRegistry) unsafeAddPeer(peer *Peer) {
   if pr.peers[peer.Name] == nil {
     pr.peers[peer.Name] = &Peers{Name: peer.Name, Namespace: peer.Namespace, Pods: map[string]*Pod{}, PodEpochs: map[string][]*PodEpoch{}}
   }
-  pod := &Pod{Name: peer.Pod, Address: peer.Address, host: "http://" + peer.Address, Healthy: true,
+  pod := &Pod{Name: peer.Pod, Address: peer.Address, host: "http://" + peer.Address, Node: peer.Node, Healthy: true,
     CurrentEpoch: PodEpoch{Name: peer.Pod, Address: peer.Address, FirstContact: now, LastContact: now}}
   pr.initHttpClientForPeerPod(pod)
   if podEpochs := pr.peers[peer.Name].PodEpochs[peer.Address]; podEpochs != nil {
@@ -976,7 +978,6 @@ func getTargetsSummaryResults(w http.ResponseWriter, r *http.Request) {
   } else {
     result = getCurrentLocker(r).GetTargetsSummaryResults(pr.trackingHeaders, pr.crossTrackingHeaders)
   }
-  w.WriteHeader(http.StatusAlreadyReported)
   util.WriteJsonPayload(w, result)
   if global.EnableRegistryLogs {
     util.AddLogMessage("Reported locker targets results summary", r)

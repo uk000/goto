@@ -90,6 +90,14 @@ func GetPodName() string {
   return pod
 }
 
+func GetNodeName() string {
+  node, present := os.LookupEnv("NODE_NAME")
+  if !present {
+    node = "N/A"
+  }
+  return node
+}
+
 func GetNamespace() string {
   ns, present := os.LookupEnv("NAMESPACE")
   if !present {
@@ -117,7 +125,7 @@ func GetHostIP() string {
 }
 
 func GetHostLabel() string {
-  return fmt.Sprintf("%s.%s@%s", GetPodName(), GetNamespace(), global.PeerAddress)
+  return fmt.Sprintf("%s.%s@%s[%s]", GetPodName(), GetNamespace(), global.PeerAddress, GetNodeName())
 }
 
 func GetIntParam(r *http.Request, param string, defaultVal ...int) (int, bool) {
@@ -314,6 +322,7 @@ func ReadJsonPayloadFromBody(body io.ReadCloser, t interface{}) error {
 }
 
 func WriteJsonPayload(w http.ResponseWriter, t interface{}) {
+  w.Header().Add("Content-Type", "application/json")
   if reflect.ValueOf(t).IsNil() {
     fmt.Fprintln(w, "")
   } else {
