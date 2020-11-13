@@ -334,7 +334,10 @@ The schema below describes fields per target (including the all targets data)
 | stopRequested         | bool                | Has stop been requested for this target |
 | stopped               | bool                | Has the target been stopped yet. Quite likely this will not show up as true, because the target gets removed from active set soon after it's stopped |
 
-#### Client API and Results Examples
+
+#### Client API Examples
+<details>
+<summary>API Examples</summary>
 
 ```
 #Add target
@@ -432,11 +435,12 @@ curl localhost:8080/client/results/invocations
 #Get results
 curl localhost:8080/client/results
 ```
+</details>
 
 #### Sample Client Results
 
 <details>
-<summary>Example</summary>
+<summary>Result Example</summary>
 <p>
 
 ```json
@@ -1027,10 +1031,10 @@ curl localhost:8080/client/results
 </details>
 
 
-#### Sample Invocation Results
+#### Sample Invocation Result
 
 <details>
-<summary>Example</summary>
+<summary>Result Example</summary>
 <p>
 
 ```json
@@ -1164,10 +1168,10 @@ curl localhost:8080/client/results
 
 
 
-#### Sample Active Targets Results
+#### Sample Active Targets Result
 
 <details>
-<summary>Example</summary>
+<summary>Result Example</summary>
 <p>
 
 ```json
@@ -1264,6 +1268,9 @@ The server starts with a single http listener on port given to it as command lin
 
 
 #### Listener API Examples:
+<details>
+<summary>API Examples</summary>
+
 ```
 curl localhost:8080/listeners/add --data '{"port":8081, "protocol":"http", "label":"Server-8081"}'
 
@@ -1275,6 +1282,7 @@ curl -X PUT localhost:8080/listeners/8081/close
 
 curl localhost:8081/listeners
 ```
+</details>
 
 #### Listener Output Example
 
@@ -1317,6 +1325,9 @@ By default, each listener adds a header `Via-Goto: <port>` to each response it s
 | GET       | /label              | Get current label of this port |
 
 #### Listener Label API Examples:
+<details>
+<summary>API Examples</summary>
+
 ```
 curl -X PUT localhost:8080/label/set/Server-8080
 
@@ -1324,6 +1335,8 @@ curl -X PUT localhost:8080/label/clear
 
 curl localhost:8080/label
 ```
+
+</details>
 
 <br/>
 
@@ -1345,6 +1358,9 @@ This feature allows tracking request counts by headers.
 |GET      | /request/headers/track									      | Get list of tracked headers |
 
 #### Request Headers Tracking API Examples:
+<details>
+<summary>API Examples</summary>
+
 ```
 curl -X POST localhost:8080/request/headers/track/clear
 
@@ -1360,6 +1376,7 @@ curl -X POST localhost:8080/request/headers/track/counts/clear
 
 curl localhost:8080/request/headers/track/list
 ```
+</details>
 
 #### Request Header Tracking Results Example
 <details>
@@ -1423,6 +1440,9 @@ This feature allows tracking request timeouts by headers.
 
 
 #### Request Timeout API Examples
+<details>
+<summary>API Examples</summary>
+
 ```
 curl -X POST localhost:8080/request/timeout/track/headers/x,y
 
@@ -1432,6 +1452,8 @@ curl -X POST localhost:8080/request/timeout/track/clear
 
 curl localhost:8080/request/timeout/status
 ```
+
+</details>
 
 #### Request Timeout Status Result Example
 <details>
@@ -1490,6 +1512,9 @@ Note: To configure server to respond with custom/random response payloads for sp
 
 
 #### URI API Examples
+<details>
+<summary>API Examples</summary>
+
 ```
 curl -X POST localhost:8080/request/uri/status/set?uri=/foo&status=418:2
 
@@ -1501,6 +1526,8 @@ curl -X POST localhost:8080/request/uri/counts/disable
 
 curl -X POST localhost:8080/request/uri/counts/clear
 ```
+
+</details>
 
 #### URI Counts Result Example
 <details>
@@ -1546,6 +1573,9 @@ When the server starts shutting down, it waits for a configured grace period (de
 
 
 #### Probes API Examples
+<details>
+<summary>API Examples</summary>
+
 ```
 curl -X POST localhost:8080/probe/readiness/set?uri=/ready
 
@@ -1559,6 +1589,7 @@ curl -X POST localhost:8080/probe/counts/clear
 
 curl localhost:8080/probe
 ```
+</details>
 
 <br/>
 
@@ -1580,6 +1611,9 @@ This feature allows adding bypass URIs that will not be subject to other configu
 
 
 #### URI Bypass API Examples
+<details>
+<summary>API Examples</summary>
+
 ```
 curl -X POST localhost:8080/request/uri/bypass/clear
 
@@ -1597,6 +1631,7 @@ curl localhost:8080/request/uri/bypass/status
 
 curl localhost:8080/request/uri/bypass/counts\?uri=/foo
 ```
+</details>
 
 #### URI Bypass Status Result Example
 <details>
@@ -1635,6 +1670,8 @@ When a delay is applied to a request, the response carries a header `Response-De
 | GET       |	/response/delay             | Get currently set delay |
 
 #### Response Delay API Examples
+<details>
+<summary>API Examples</summary>
 
 ```
 curl -X POST localhost:8080/response/delay/clear
@@ -1643,6 +1680,7 @@ curl -X PUT localhost:8080/response/delay/set/2s
 
 curl localhost:8080/response/delay
 ```
+</details>
 
 <br/>
 
@@ -1660,6 +1698,9 @@ This feature allows adding custom response headers to all responses sent by the 
 | GET       |	/response/headers                       | Get list of configured custom response headers |
 
 #### Response Headers API Examples
+<details>
+<summary>API Examples</summary>
+
 ```
 curl -X POST localhost:8080/response/headers/clear
 
@@ -1671,6 +1712,7 @@ curl -X POST localhost:8080/response/headers/remove/x
 
 curl localhost:8080/response/headers
 ```
+</details>
 
 
 <br/>
@@ -1705,6 +1747,9 @@ When a request is matched with a configured payload (custom or default), the req
 | GET  |	/response/payload                      | Get configured custom payloads |
 
 #### Response Payload API Examples
+<details>
+<summary>API Examples</summary>
+
 ```
 curl -X POST localhost:8080/response/payload/set/default --data '{"test": "default payload"}'
 
@@ -1720,6 +1765,7 @@ curl -X POST localhost:8080/response/payload/clear
 
 curl localhost:8080/response/payload
 ```
+</details>
 
 #### Response Payload Status Result Example
 <details>
@@ -1756,12 +1802,16 @@ This URI responds with a random-generated payload of the requested size. Payload
 | GET, PUT, POST  |	/payload/{size} | Respond with a payload of given size |
 
 #### Ad-hoc Payload API Example
+<details>
+<summary>API Examples</summary>
+
 ```
 curl -v localhost:8080/payload/10K
 
 curl -v localhost:8080/payload/100
 
 ```
+</details>
 
 <br/>
 
@@ -1788,6 +1838,9 @@ Stream responses carry following headers:
 | GET, PUT, POST  |	/stream/count/{count}/delay/{delay} | Respond with pre-configured default payload split into given count of chunks with given delay per chunk. This URI requires a default payload to be set via payload API. |
 
 #### Stream Response API Example
+<details>
+<summary>API Examples</summary>
+
 ```
 curl -v localhost:8080/stream/size/10K/duration/15s/delay/1s
 
@@ -1799,6 +1852,7 @@ curl -v localhost:8080/stream/duration/5s/delay/100ms
 
 curl -v localhost:8080/stream/count/10/delay/300ms
 ```
+</details>
 
 <br/>
 
@@ -1817,6 +1871,9 @@ This feature allows setting a forced response status for all requests except byp
 | GET       |	/response/status                  | Get the currently configured forced response status |
 
 #### Response Status API Examples
+<details>
+<summary>API Examples</summary>
+
 ```
 curl -X POST localhost:8080/response/status/counts/clear
 
@@ -1832,6 +1889,7 @@ curl localhost:8080/response/status/counts
 
 curl localhost:8080/response/status/counts/502
 ```
+</details>
 
 #### Response Status Tracking Result Example
 <details>
@@ -2005,6 +2063,9 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
 <br/>
 
 #### Request Proxying API Examples:
+<details>
+<summary>API Examples</summary>
+
 ```
 curl -X POST localhost:8080/request/proxy/targets/clear
 
@@ -2045,6 +2106,7 @@ curl localhost:8080/request/proxy/targets
 curl localhost:8080/request/proxy/counts
 
 ```
+</details>
 
 #### Proxy Target Counts Result Example
 
@@ -2153,6 +2215,9 @@ curl localhost:8080/request/proxy/counts
 <br/>
 
 #### Trigger API Examples:
+<details>
+<summary>API Examples</summary>
+
 ```
 curl -X POST localhost:8080/response/trigger/clear
 
@@ -2180,6 +2245,7 @@ curl localhost:8080/response/trigger/counts
 curl localhost:8080/response/trigger/list
 
 ```
+</details>
 
 #### Trigger Counts Result Example
 <details>
@@ -2280,6 +2346,9 @@ Jobs can also trigger another job for each line of output produced, as well as u
 <br/>
 
 #### Job APIs Examples:
+<details>
+<summary>API Examples</summary>
+
 ```
 curl -X POST http://localhost:8080/jobs/clear
 
@@ -2351,6 +2420,7 @@ curl http://localhost:8080/jobs/job1/results
 
 curl http://localhost:8080/jobs/results
 ```
+</details>
 
 #### Job Result Example
 
@@ -2433,6 +2503,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 2. The targets and jobs registered at the registry can also be marked for `auto-invocation`. When a worker instance receives a target/job from registry at startup that's marked for auto-invocation, it immediately invokes that target/job at startup. Additionally, the target/job is retained in the worker instance for later invocation via API as well.
 3. In addition to sending targets/jobs to worker instances at the time of registration, the registry instance also pushes targets/jobs to the worker instances as and when more targets/jobs get added to the registry. This has the added benefit of just using the registry instance as the single point of configuration, where you add targets/jobs and those get pushed to all worker instances. Removal of targets/jobs from the registry also gets pushed, so the targets/jobs get removed from the corresponding worker instances. Even targets/jobs that are pushed later can be marked for `auto-invocation`, and the worker instances that receive the target/job will invoke it immediately upon receipt.
 4. Instances can store their results into their corresponding lockers in the registry. A peer instance also locks its locker data once an invocation completes. Locking a key in the locker results in a copy-on-write for that key's data upon next write for the key, when the old data is moved under a new key named `<key>_<counter>`. This ensures that a locked data is treated as immutable while still allowing client/peer to keep writing more data for the same key.
+5. Lockers in registry can be used to store any arbitrary data, not just results that peer report to registry. Additionally, multiple lockers can be filled and kept around in order to preserve some data. A locker can be opening in the registry by assigning it a label. A newly opened labeled locker becomes the currently active locker where all peer-reproted data gets stored. Previously active locker gets locked and preserved automatically until explicitly removed via `/close` API (see APIs below). Lockers present a very flexible in-memory store for capturing any kind of data for debugging purposes.
 
 Peer instances periodically re-register themselves with registry in case registry was restarted and lost all peers info. Re-registering is different from startup registration in that peers don't receive targets and jobs from registry when they remind registry about themselves, and hence no auto-invocation happens.
 
@@ -2450,21 +2521,30 @@ Peer instances periodically re-register themselves with registry in case registr
 | POST      | /registry/peers/clear/epochs   | Remove epochs for disconnected peers|
 | POST      | /registry/peers/clear   | Remove all registered peers|
 | GET       | /registry/peers         | Get all registered peers. See [Peers JSON Schema](#peers-json-schema) |
-| POST      | /registry/peers/{peer}/{address}/locker/store/{keys} | Store any arbitrary value for the given `keys` in the locker of the peer instance. `keys` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
-| POST      | /registry/peers/{peer}/{address}/locker/remove/{keys} | Remove stored data for the given `keys` from the locker of the peer instance. `keys` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
-| POST      | /registry/peers/{peer}/{address}/locker/lock/{keys} | Locks the data stored under the given `keys` in the locker of the peer instance. `keys` can be a comma-separated list of subkeys, in which case data at the leaf key gets locked. |
-| POST      | /registry/peers/{peer}/locker/store/{keys} | Store any arbitrary value for the given key in the peer locker without associating data to a peer instance. `keys` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
-| POST      | /registry/peers/{peer}/locker/remove/{keys} | Remove stored data for the given key from the peer locker. `keys` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
-| POST      | /registry/peers/{peer}/locker/lock/{keys} | Locks the data stored under the given key in the peer locker. `keys` can be a comma-separated list of subkeys, in which case data at the leaf key gets locked.  |
-| POST      | /registry/peers/{peer}/locker/lock | Locks the peer locker (all sub-keys).  |
-| POST      | /registry/peers/{peer}/{address}/locker/clear | Clear the locker for the peer instance |
-| POST      | /registry/peers/{peer}/locker/clear | Clear the locker for all instances of the given peer |
-| POST      | /registry/peers/lockers/clear | Clear all lockers |
-| GET       | /registry/peers/{peer}/{address}/locker | Get locker's data for the peer instance |
-| GET       | /registry/peers/{peer}/locker | Get locker's data for all instances of the peer |
-| GET       | /registry/peers/lockers | Get locker's data for all peers |
-| GET       | /registry/peers/lockers/targets/results | Get target invocation summary results for all peer instances |
-| GET       | /registry/peers/lockers/targets/results?detailed=Y | Get invocation results broken down by targets for all peer instances |
+||||
+| POST      | /registry/lockers/open/{label} | Setup a locker with the given label and make it the current locker where peer results get stored.  |
+| POST      | /registry/lockers/close/{label} | Remove the locker for the given label.  |
+| POST      | /registry/lockers/close | Remove all labeled lockers and empty the default locker.  |
+| POST      | /registry/lockers/clear | Remove all labeled lockers and empty the default locker.  |
+| GET       | /registry/lockers/current | Get data from currently active labeled locker |
+| GET       | /registry/lockers/{label} | Get data from the given label's locker |
+| GET       | /registry/lockers | Get all lockers data |
+| POST      | /registry/peers/{peer}/{address}/locker/store/{keys} | Store any arbitrary value for the given `keys` in the locker of the peer instance under currently active labeled locker. `keys` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
+| POST      | /registry/peers/{peer}/{address}/locker/remove/{keys} | Remove stored data for the given `keys` from the locker of the peer instance under currently active labeled locker. `keys` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
+| POST      | /registry/peers/{peer}/{address}/locker/lock/{keys} | Locks the data stored under the given `keys` in the locker of the peer instance under currently active labeled locker. `keys` can be a comma-separated list of subkeys, in which case data at the leaf key gets locked. |
+| POST      | /registry/peers/{peer}/locker/store/{keys} | Store any arbitrary value for the given key in the peer locker without associating data to a peer instance under currently active labeled locker. `keys` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
+| POST      | /registry/peers/{peer}/locker/remove/{keys} | Remove stored data for the given key from the peer locker under currently active labeled locker. `keys` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
+| POST      | /registry/peers/{peer}/locker/lock/{keys} | Locks the data stored under the given key in the peer locker under currently active labeled locker. `keys` can be a comma-separated list of subkeys, in which case data at the leaf key gets locked.  |
+| POST      | /registry/peers/{peer}/locker/lock | Locks the peer locker (all sub-keys) under currently active labeled locker.  |
+| POST      | /registry/peers/{peer}/{address}/locker/clear | Clear the locker for the peer instance under currently active labeled locker |
+| POST      | /registry/peers/{peer}/locker/clear | Clear the locker for all instances of the given peer under currently active labeled locker |
+| POST      | /registry/peers/lockers/clear | Clear all peer lockers under currently active labeled locker |
+| GET       | /registry/peers/{peer}/{address}/locker | Get locker's data for the peer instance from currently active labeled locker |
+| GET       | /registry/peers/{peer}/locker | Get locker's data for all instances of the peer from currently active labeled locker |
+| GET       | /registry/peers/lockers | Get locker's data for all peers from currently active labeled locker |
+| GET       | /registry/peers/lockers/targets/results | Get target invocation summary results for all peer instances from currently active labeled locker |
+| GET       | /registry/peers/lockers/targets/results?detailed=Y | Get invocation results broken down by targets for all peer instances from currently active labeled locker |
+||||
 | GET       | /registry/peers/targets | Get all registered targets for all peers |
 | POST      | /registry/peers/{peer}/targets/add | Add a target to be sent to a peer. See [Peer Target JSON Schema](#peer-target-json-schema). Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/{peer}/targets/{targets}/remove | Remove given targets for a peer |
@@ -2479,6 +2559,7 @@ Peer instances periodically re-register themselves with registry in case registr
 | POST, PUT | /registry/peers/targets/results/all/{enable}  | Controls whether results should be summarized across all targets. Disabling this when not needed can improve performance. Disabled by default. |
 | POST, PUT | /registry/peers/targets/results/invocations/{enable}  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
 | POST      | /registry/peers/targets/clear   | Remove all targets from all peers |
+||||
 | GET       | /registry/peers/jobs | Get all registered jobs for all peers |
 | POST      | /registry/peers/{peer}/jobs/add | Add a job to be sent to a peer. See [Peer Job JSON Schema](#peer-job-json-schema). Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/{peer}/jobs/{jobs}/remove | Remove given jobs for a peer. |
@@ -2489,11 +2570,14 @@ Peer instances periodically re-register themselves with registry in case registr
 | POST, PUT | /registry/peers/{peer}/jobs/{jobs}/stop | Stop given jobs on the given peer |
 | POST, PUT | /registry/peers/{peer}/jobs/stop/all | Stop all jobs on the given peer |
 | POST      | /registry/peers/jobs/clear   | Remove all jobs from all peers. |
+||||
 | POST, PUT | /registry/peers/track/headers/{headers} | Configure headers to be tracked by client invocations on peers. Pushed immediately as well as upon start of a new peer instance. |
+||||
 | POST, PUT | /registry/peers/probe/readiness/set?uri={uri} | Configure readiness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probe/liveness/set?uri={uri} | Configure liveness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probe/readiness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probe/liveness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
+||||
 | GET, POST, PUT | /registry/peers/{peer}/call?uri={uri} | Invoke the given `URI` on the given `peer`, using the HTTP method and payload from this request |
 | GET, POST, PUT | /registry/peers/call?uri={uri} | Invoke the given `URI` on all `peers`, using the HTTP method and payload from this request |
 
@@ -2553,6 +2637,9 @@ Map of peer labels to peer details, where each peer details include the followin
 <br/>
 
 #### Registry APIs Examples:
+<details>
+<summary>API Examples</summary>
+
 ```
 curl -X POST http://localhost:8080/registry/peers/clear
 
@@ -2650,6 +2737,7 @@ curl -X POST http://localhost:8080/registry/peers/peer1/call?uri=/request/header
 curl -s http://localhost:8080/registry/peers/call?uri=/request/headers/track
 
 ```
+</details>
 
 #### Registry Peers List Example
 <details>

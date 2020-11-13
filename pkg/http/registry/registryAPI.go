@@ -20,6 +20,15 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "/health", checkPeerHealth, "GET")
   util.AddRoute(peersRouter, "/{peer}/health/cleanup", cleanupUnhealthyPeers, "POST")
   util.AddRoute(peersRouter, "/health/cleanup", cleanupUnhealthyPeers, "POST")
+
+  util.AddRoute(registryRouter, "/lockers/open/{label}", openLabeledLocker, "POST")
+  util.AddRoute(registryRouter, "/lockers/close/{label}", closeLabeledLocker, "POST")
+  util.AddRoute(registryRouter, "/lockers/close", closeLabeledLocker, "POST")
+  util.AddRoute(registryRouter, "/lockers/clear", closeLabeledLocker, "POST")
+  util.AddRoute(registryRouter, "/lockers/current", getPeerLocker, "GET")
+  util.AddRoute(registryRouter, "/lockers/{label}", getLabeledLocker, "GET")
+  util.AddRoute(registryRouter, "/lockers", getLabeledLocker, "GET")
+  
   util.AddRoute(peersRouter, "/{peer}/{address}/locker/store/{keys}", storeInPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/{address}/locker/remove/{keys}", removeFromPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/{address}/locker/lock/{keys}", lockInPeerLocker, "POST")

@@ -28,31 +28,36 @@ func RegisterPeer(peerName, peerAddress string) {
   if global.RegistryURL != "" {
     registered := false
     retries := 0
-    for !registered && retries < 3 {
+    for !registered && retries < 6 {
       if resp, err := http.Post(global.RegistryURL+"/registry/peers/add", "application/json",
         strings.NewReader(util.ToJSON(peer))); err == nil {
         defer resp.Body.Close()
-        log.Printf("Registered as peer [%s] with registry [%s]\n", global.PeerName, global.RegistryURL)
-        registered = true
-        data := &registry.PeerData{}
-        if err := util.ReadJsonPayloadFromBody(resp.Body, data); err == nil {
-          log.Printf("Read startup data from registry: %+v\n", *data)
-          go setupStartupTasks(data)
+        if resp.StatusCode == 200 || resp.StatusCode == 202 {
+          data := &registry.PeerData{}
+          if err := util.ReadJsonPayloadFromBody(resp.Body, data); err == nil {
+            registered = true
+            log.Printf("Registered as peer [%s] with registry [%s]\n", global.PeerName, global.RegistryURL)
+            log.Printf("Read startup data from registry: %+v\n", *data)
+            go setupStartupTasks(data)
+            go startRegistryReminder(peer)
+          } else {
+            log.Printf("Failed to read peer targets with error: %s\n", err.Error())
+          }
         } else {
-          log.Printf("Failed to read peer targets with error: %s\n", err.Error())
+          log.Printf("Failed to register as peer to registry due to response code %d\n", resp.StatusCode)
         }
       } else {
+        log.Printf("Failed to register as peer to registry due to error: %s\n", err.Error())
+      }
+      if !registered {
         retries++
-        log.Printf("Failed to register as peer to registry, retries: %d, error: %s\n", retries, err.Error())
-        if retries < 3 {
+        if retries < 6 {
+          log.Printf("Will retry registering with registry, retries: %d\n", retries)
           time.Sleep(10 * time.Second)
+        } else {
+          log.Printf("Failed to register as peer to registry after %d retries. Giving up.\n", retries)
         }
       }
-    }
-    if registered {
-      go startRegistryReminder(peer)
-    } else {
-      log.Printf("Failed to register as peer to registry after %d retries\n", retries)
     }
   }
 }
