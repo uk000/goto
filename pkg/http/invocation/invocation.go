@@ -597,14 +597,7 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
   if global.EnableInvocationLogs {
     log.Printf("[%s]: Invocation[%d]: Started with target %s and total requests %d\n", hostLabel, trackerID, target.Name, (target.Replicas * target.RequestCount))
   }
-  activeTargets := []string{}
-  invocationsLock.Lock()
-  for k := range targetClients {
-    activeTargets = append(activeTargets, k)
-  }
-  invocationsLock.Unlock()
   var results []*InvocationResult
-
   if len(waitForResponse) > 0 && waitForResponse[0] {
     sinks = append(sinks, func(result *InvocationResult) {
       results = append(results, result)
@@ -654,13 +647,6 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
   if global.EnableInvocationLogs {
     log.Printf("[%s]: Invocation[%d]: Finished\n", hostLabel, trackerID)
   }
-
-  activeTargets = []string{}
-  invocationsLock.Lock()
-  for k := range targetClients {
-    activeTargets = append(activeTargets, k)
-  }
-  invocationsLock.Unlock()
   return results
 }
 
