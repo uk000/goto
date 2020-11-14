@@ -855,7 +855,6 @@ func closeLabeledLocker(w http.ResponseWriter, r *http.Request) {
 func getLabeledLocker(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
-  w.WriteHeader(http.StatusOK)
   if label != "" {
     util.WriteJsonPayload(w, getPortRegistry(r).getLabeledLocker(label))
     msg = fmt.Sprintf("Labeled locker %s reported", label)
@@ -986,7 +985,6 @@ func getPeerLocker(w http.ResponseWriter, r *http.Request) {
   msg := ""
   peerName := util.GetStringParamValue(r, "peer")
   address := util.GetStringParamValue(r, "address")
-  w.WriteHeader(http.StatusOK)
   util.WriteJsonPayload(w, getCurrentLocker(r).GetPeerLocker(peerName, address))
   if peerName != "" {
     msg = fmt.Sprintf("Peer %s data reported", peerName)
