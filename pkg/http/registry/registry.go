@@ -86,7 +86,7 @@ type PortRegistry struct {
   trackingHeaders      []string
   crossTrackingHeaders map[string][]string
   peerProbes           *PeerProbes
-  labeledLockers       *locker.LabeledPeersLockers
+  labeledLockers       *locker.LabeledLockers
   peersLock            sync.RWMutex
   lockersLock          sync.RWMutex
 }
@@ -109,8 +109,12 @@ func getPortRegistry(r *http.Request) *PortRegistry {
   return pr
 }
 
-func getCurrentLocker(r *http.Request) *locker.PeersLockers {
+func getCurrentLocker(r *http.Request) *locker.CombiLocker {
   return getPortRegistry(r).getCurrentLocker()
+}
+
+func getLockerForLabel(r *http.Request, label string) *locker.CombiLocker {
+  return getPortRegistry(r).getLabeledLocker(label)
 }
 
 func (pr *PortRegistry) reset() {
@@ -133,8 +137,16 @@ func (pr *PortRegistry) init() {
   }
 }
 
-func (pr *PortRegistry) getCurrentLocker() *locker.PeersLockers {
-  return pr.labeledLockers.CurrentLocker
+func (pr *PortRegistry) getCurrentLocker() *locker.CombiLocker {
+  return pr.labeledLockers.GetCurrentLocker()
+}
+
+func (pr *PortRegistry) getLabeledLocker(label string) *locker.CombiLocker {
+  return pr.labeledLockers.GetLocker(label)
+}
+
+func (pr *PortRegistry) getAllLockers() map[string]*locker.CombiLocker {
+  return pr.labeledLockers.GetAllLockers()
 }
 
 func (pr *PortRegistry) unsafeAddPeer(peer *Peer) {
@@ -198,7 +210,7 @@ func (pr *PortRegistry) removePeer(name string, address string) bool {
   if _, present = pr.peers[name]; present {
     delete(pr.peers[name].Pods, address)
   }
-  pr.getCurrentLocker().LockPeerLocker(name, address)
+  pr.getCurrentLocker().DeactivateInstanceLocker(name, address)
   return present
 }
 
@@ -845,15 +857,69 @@ func getLabeledLocker(w http.ResponseWriter, r *http.Request) {
   label := util.GetStringParamValue(r, "label")
   w.WriteHeader(http.StatusOK)
   if label != "" {
-    util.WriteJsonPayload(w, getPortRegistry(r).labeledLockers.PeerLockers[label])
+    util.WriteJsonPayload(w, getPortRegistry(r).getLabeledLocker(label))
     msg = fmt.Sprintf("Labeled locker %s reported", label)
   } else {
-    util.WriteJsonPayload(w, getPortRegistry(r).labeledLockers.PeerLockers)
+    util.WriteJsonPayload(w, getPortRegistry(r).getAllLockers())
     msg = "All labeled lockers reported"
   }
   if global.EnableRegistryLogs {
     util.AddLogMessage(msg, r)
   }
+}
+
+func storeInLabeledLocker(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  label := util.GetStringParamValue(r, "label")
+  keys, _ := util.GetListParam(r, "keys")
+  if label != "" && len(keys) > 0 {
+    data := util.Read(r.Body)
+    getLockerForLabel(r, label).Store(keys, data)
+    w.WriteHeader(http.StatusAccepted)
+    msg = fmt.Sprintf("Data stored in labeled locker %s for keys %+v", label, keys)
+  } else {
+    w.WriteHeader(http.StatusBadRequest)
+    msg = "Not enough parameters to access locker"
+  }
+  if global.EnableRegistryLogs {
+    util.AddLogMessage(msg, r)
+  }
+  fmt.Fprintln(w, msg)
+}
+
+func removeFromLabeledLocker(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  label := util.GetStringParamValue(r, "label")
+  keys, _ := util.GetListParam(r, "keys")
+  if label != "" && len(keys) > 0 {
+    getLockerForLabel(r, label).Remove(keys)
+    w.WriteHeader(http.StatusAccepted)
+    msg = fmt.Sprintf("Data removed from labeled locker %s for keys %+v", label, keys)
+  } else {
+    w.WriteHeader(http.StatusBadRequest)
+    msg = "Not enough parameters to access locker"
+  }
+  if global.EnableRegistryLogs {
+    util.AddLogMessage(msg, r)
+  }
+  fmt.Fprintln(w, msg)
+}
+
+func getFromLabeledLocker(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  label := util.GetStringParamValue(r, "label")
+  keys, _ := util.GetListParam(r, "keys")
+  if label != "" && len(keys) > 0 {
+    msg = getLockerForLabel(r, label).Get(keys)
+    w.WriteHeader(http.StatusAccepted)
+  } else {
+    w.WriteHeader(http.StatusBadRequest)
+    msg = "Not enough parameters to access locker"
+  }
+  if global.EnableRegistryLogs {
+    util.AddLogMessage(msg, r)
+  }
+  fmt.Fprint(w, msg)
 }
 
 func storeInPeerLocker(w http.ResponseWriter, r *http.Request) {
@@ -863,7 +929,7 @@ func storeInPeerLocker(w http.ResponseWriter, r *http.Request) {
   keys, _ := util.GetListParam(r, "keys")
   if peerName != "" && len(keys) > 0 {
     data := util.Read(r.Body)
-    getCurrentLocker(r).Store(peerName, address, keys, data)
+    getCurrentLocker(r).StorePeerData(peerName, address, keys, data)
     w.WriteHeader(http.StatusAccepted)
     msg = fmt.Sprintf("Peer %s data stored for keys %+v", peerName, keys)
   } else {
@@ -882,46 +948,9 @@ func removeFromPeerLocker(w http.ResponseWriter, r *http.Request) {
   address := util.GetStringParamValue(r, "address")
   keys, _ := util.GetListParam(r, "keys")
   if peerName != "" && len(keys) > 0 {
-    getCurrentLocker(r).Remove(peerName, address, keys)
+    getCurrentLocker(r).RemovePeerData(peerName, address, keys)
     w.WriteHeader(http.StatusAccepted)
     msg = fmt.Sprintf("Peer %s data removed for keys %+v", peerName, keys)
-  } else {
-    w.WriteHeader(http.StatusBadRequest)
-    msg = "Not enough parameters to access locker"
-  }
-  if global.EnableRegistryLogs {
-    util.AddLogMessage(msg, r)
-  }
-  fmt.Fprintln(w, msg)
-}
-
-func lockInPeerLocker(w http.ResponseWriter, r *http.Request) {
-  msg := ""
-  peerName := util.GetStringParamValue(r, "peer")
-  address := util.GetStringParamValue(r, "address")
-  keys, _ := util.GetListParam(r, "keys")
-  if peerName != "" && len(keys) > 0 {
-    getCurrentLocker(r).LockKeysInPeerLocker(peerName, address, keys)
-    w.WriteHeader(http.StatusAccepted)
-    msg = fmt.Sprintf("Peer %s data for keys %+v is locked", peerName, keys)
-  } else {
-    w.WriteHeader(http.StatusBadRequest)
-    msg = "Not enough parameters to access locker"
-  }
-  if global.EnableRegistryLogs {
-    util.AddLogMessage(msg, r)
-  }
-  fmt.Fprintln(w, msg)
-}
-
-func lockPeerLocker(w http.ResponseWriter, r *http.Request) {
-  msg := ""
-  peerName := util.GetStringParamValue(r, "peer")
-  address := util.GetStringParamValue(r, "address")
-  if peerName != "" {
-    getCurrentLocker(r).LockPeerLocker(peerName, address)
-    w.WriteHeader(http.StatusAccepted)
-    msg = fmt.Sprintf("Peer %s locker is locked", peerName)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = "Not enough parameters to access locker"

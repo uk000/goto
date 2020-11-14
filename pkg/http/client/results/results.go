@@ -506,8 +506,6 @@ func addDeltaHeaderCounts(result, delta *HeaderCounts, crossTrackingHeaders map[
     }
     for statusCode, count := range valueCounts {
       incrementHeaderCountForStatus(result.CountsByValuesStatusCodes[value], statusCode, 0, count)
-      log.Printf("CountsByValuesStatusCodes: header [%s] value [%s] statusCode: [%d] deltaCount [%d], finalCount: [%d]\n",
-        result.Header, value, statusCode, count.Value, result.CountsByValuesStatusCodes[value][statusCode].Value)
     }
   }
   if crossTrackingHeaders[result.Header] != nil || crossHeadersMap[result.Header] != "" {

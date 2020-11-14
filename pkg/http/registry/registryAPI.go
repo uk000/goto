@@ -22,6 +22,9 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "/health/cleanup", cleanupUnhealthyPeers, "POST")
 
   util.AddRoute(registryRouter, "/lockers/open/{label}", openLabeledLocker, "POST")
+  util.AddRoute(registryRouter, "/lockers/{label}/store/{keys}", storeInLabeledLocker, "POST")
+  util.AddRoute(registryRouter, "/lockers/{label}/remove/{keys}", removeFromLabeledLocker, "POST")
+  util.AddRoute(registryRouter, "/lockers/{label}/get/{keys}", getFromLabeledLocker, "GET")
   util.AddRoute(registryRouter, "/lockers/close/{label}", closeLabeledLocker, "POST")
   util.AddRoute(registryRouter, "/lockers/close", closeLabeledLocker, "POST")
   util.AddRoute(registryRouter, "/lockers/clear", closeLabeledLocker, "POST")
@@ -31,13 +34,9 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   
   util.AddRoute(peersRouter, "/{peer}/{address}/locker/store/{keys}", storeInPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/{address}/locker/remove/{keys}", removeFromPeerLocker, "POST")
-  util.AddRoute(peersRouter, "/{peer}/{address}/locker/lock/{keys}", lockInPeerLocker, "POST")
-  util.AddRoute(peersRouter, "/{peer}/{address}/locker/lock", lockPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/{address}/locker/clear", clearLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/store/{keys}", storeInPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/remove/{keys}", removeFromPeerLocker, "POST")
-  util.AddRoute(peersRouter, "/{peer}/locker/lock/{keys}", lockInPeerLocker, "POST")
-  util.AddRoute(peersRouter, "/{peer}/locker/lock", lockPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/clear", clearLocker, "POST")
   util.AddRoute(peersRouter, "/lockers/clear", clearLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/{address}/locker", getPeerLocker, "GET")
