@@ -209,6 +209,9 @@ func (pc *PortClient) stopTargets(targetNames []string) (bool, bool) {
       time.Sleep(time.Second * 1)
     }
   }
+  if len(targetNames) == 0 {//Reset active invocations if all targets were stopped
+    invocation.ResetActiveInvocations()
+  }
   return len(stoppingTargets) > 0, stopped
 }
 
@@ -285,7 +288,6 @@ func clearTargets(w http.ResponseWriter, r *http.Request) {
 }
 
 func getTargets(w http.ResponseWriter, r *http.Request) {
-  w.WriteHeader(http.StatusAlreadyReported)
   util.WriteJsonPayload(w, getPortClient(r).targets)
   if global.EnableClientLogs {
     util.AddLogMessage("Reporting targets", r)
@@ -363,7 +365,6 @@ func getActiveTargets(w http.ResponseWriter, r *http.Request) {
   if global.EnableClientLogs {
     util.AddLogMessage("Reporting active invocations", r)
   }
-  w.WriteHeader(http.StatusAlreadyReported)
   result := map[string]interface{}{}
   pc := getPortClient(r)
   pc.targetsLock.RLock()

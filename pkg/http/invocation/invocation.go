@@ -249,6 +249,14 @@ func PrepareAutoPayload(i *InvocationSpec) {
   }
 }
 
+func ResetActiveInvocations() {
+  invocationsLock.Lock()
+  invocationCounter = 0
+  activeInvocations = map[uint32]*InvocationTracker{}
+  activeTargets = map[string]*TargetInvocations{}
+  invocationsLock.Unlock()
+}
+
 func loadCerts() {
   rootCAs = x509.NewCertPool()
   found := false
@@ -434,26 +442,31 @@ func DeregisterInvocation(tracker *InvocationTracker) {
 }
 
 func removeTargetTracker(id uint32, target string) {
-  invocationsLock.Lock()
+  invocationsLock.RLock()
   targetInvocations := activeTargets[target]
-  invocationsLock.Unlock()
+  invocationsLock.RUnlock()
   if targetInvocations != nil {
     targetInvocations.lock.Lock()
     delete(targetInvocations.trackers, id)
-    if len(targetInvocations.trackers) == 0 {
+    size := len(targetInvocations.trackers)
+    targetInvocations.lock.Unlock()
+    if size == 0 {
       invocationsLock.Lock()
       delete(activeTargets, target)
       invocationsLock.Unlock()
     }
-    targetInvocations.lock.Unlock()
   }
 }
 
 func GetActiveInvocations() map[string]map[uint32]*InvocationStatus {
   results := map[string]map[uint32]*InvocationStatus{}
+  currentActiveTargets := map[string]*TargetInvocations{}
   invocationsLock.RLock()
-  defer invocationsLock.RUnlock()
   for target, targetInvocations := range activeTargets {
+    currentActiveTargets[target] = targetInvocations
+  }
+  invocationsLock.RUnlock()
+  for target, targetInvocations := range currentActiveTargets {
     results[target] = map[uint32]*InvocationStatus{}
     for _, tracker := range targetInvocations.trackers {
       tracker.lock.RLock()
@@ -481,7 +494,9 @@ func StopTarget(target string) {
   invocationsLock.RUnlock()
   if targetInvocations != nil {
     targetInvocations.lock.RLock()
-    for _, tracker := range targetInvocations.trackers {
+    trackers := targetInvocations.trackers
+    targetInvocations.lock.RUnlock()
+    for _, tracker := range trackers {
       tracker.lock.Lock()
       done := false
       select {
@@ -495,7 +510,6 @@ func StopTarget(target string) {
       }
       tracker.lock.Unlock()
     }
-    targetInvocations.lock.RUnlock()
   }
 }
 
@@ -519,25 +533,33 @@ func prepareTargetURL(url string, sendID bool, requestId string) (string, string
 }
 
 func processStopRequest(tracker *InvocationTracker) bool {
-  tracker.lock.Lock()
-  defer tracker.lock.Unlock()
-  if tracker.StopChannel != nil {
+  tracker.lock.RLock()
+  stopChannel := tracker.StopChannel
+  tracker.lock.RUnlock()
+  if stopChannel != nil {
+    tracker.lock.Lock()
     select {
-    case tracker.Status.StopRequested = <-tracker.StopChannel:
+    case tracker.Status.StopRequested = <-stopChannel:
     default:
     }
-    if tracker.Status.StopRequested {
-      if tracker.Status.Stopped {
+    stopRequested := tracker.Status.StopRequested
+    stopped := tracker.Status.Stopped
+    tracker.lock.Unlock()
+
+    if stopRequested {
+      if stopped {
         if global.EnableInvocationLogs {
           log.Printf("[%s]: Invocation[%d]: Received stop request for target = %s that is already stopped\n", hostLabel, tracker.ID, tracker.Target.Name)
         }
         return true
       } else {
+        tracker.lock.Lock()
+        tracker.Status.Stopped = true
         remaining := (tracker.Target.RequestCount * tracker.Target.Replicas) - (tracker.Status.CompletedRequestCount * tracker.Target.Replicas)
+        tracker.lock.Unlock()
         if global.EnableInvocationLogs {
           log.Printf("[%s]: Invocation[%d]: Received stop request for target = %s with remaining requests %d\n", hostLabel, tracker.ID, tracker.Target.Name, remaining)
         }
-        tracker.Status.Stopped = true
         removeTargetTracker(tracker.ID, tracker.Target.Name)
         return true
       }
@@ -547,8 +569,6 @@ func processStopRequest(tracker *InvocationTracker) bool {
 }
 
 func activateTracker(tracker *InvocationTracker) {
-  tracker.lock.RLock()
-  defer tracker.lock.RUnlock()
   invocationsLock.Lock()
   activeInvocations[tracker.ID] = tracker
   targetInvocations := activeTargets[tracker.Target.Name]
@@ -557,6 +577,7 @@ func activateTracker(tracker *InvocationTracker) {
     activeTargets[tracker.Target.Name] = targetInvocations
   }
   invocationsLock.Unlock()
+
   targetInvocations.lock.Lock()
   targetInvocations.trackers[tracker.ID] = tracker
   targetInvocations.lock.Unlock()
@@ -627,7 +648,9 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
       delay = target.delayD
     }
     completedCount++
+    tracker.lock.Lock()
     tracker.Status.CompletedRequestCount = completedCount
+    tracker.lock.Unlock()
     if completedCount < target.RequestCount {
       time.Sleep(delay)
     } else {
