@@ -407,17 +407,12 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
   msg := ""
   pc := getPortClient(r)
   targets, _ := util.GetListParam(r, "targets")
-  hasActive, stopped := pc.stopTargets(targets)
+  hasActive, _ := pc.stopTargets(targets)
   if hasActive {
-    if stopped {
-      w.WriteHeader(http.StatusAccepted)
-      msg = fmt.Sprintf("Targets %+v stopped", targets)
-    } else {
-      w.WriteHeader(http.StatusNotAcceptable)
-      msg = fmt.Sprintf("Failed to stop targets %+v", targets)
-    }
+    w.WriteHeader(http.StatusOK)
+    msg = fmt.Sprintf("Targets %+v stopped", targets)
   } else {
-    w.WriteHeader(http.StatusAccepted)
+    w.WriteHeader(http.StatusOK)
     msg = "No targets to stop"
   }
   if global.EnableClientLogs {
