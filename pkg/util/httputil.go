@@ -73,7 +73,9 @@ func AddLogMessage(msg string, r *http.Request) {
 func PrintLogMessages(r *http.Request) {
   m := r.Context().Value(logmessagesKey).(*messagestore)
   if !IsLockerRequest(r) && (!IsAdminRequest(r) || global.EnableAdminLogs) &&
-    (!IsReminderRequest(r) || global.EnableRegistryReminderLogs) && global.EnableTrackingLogs {
+    (!IsReminderRequest(r) || global.EnableRegistryReminderLogs) && 
+    (!IsProbeRequest(r) || global.EnableProbeLogs) && 
+    global.EnableTrackingLogs {
     log.Println(strings.Join(m.messages, " --> "))
     if flusher, ok := log.Writer().(http.Flusher); ok {
       flusher.Flush()
@@ -550,6 +552,10 @@ func IsReadinessProbe(r *http.Request) bool {
 
 func IsLivenessProbe(r *http.Request) bool {
   return strings.EqualFold(r.RequestURI, global.LivenessProbe)
+}
+
+func IsProbeRequest(r *http.Request) bool {
+  return IsReadinessProbe(r) || IsLivenessProbe(r)
 }
 
 func GenerateRandomString(size int) string {

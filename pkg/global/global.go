@@ -24,5 +24,6 @@ var (
   EnableRegistryReminderLogs bool   = true
   EnableClientLogs           bool   = true
   EnableServerLogs           bool   = true
+  EnableProbeLogs            bool   = true
   GetPeers                   func(string, *http.Request) map[string]string
 )
