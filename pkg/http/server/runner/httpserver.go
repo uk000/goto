@@ -78,6 +78,8 @@ func WaitForHttpServer(server *http.Server) {
   signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
   <-c
   global.Stopping = true
+  log.Printf("Received stop signal. Deregistering peer [%s : %s] from registry", global.PeerName, global.PeerAddress)
+  peer.DeregisterPeer(global.PeerName, global.PeerAddress)
   if global.ShutdownDelay > 0 {
     log.Printf("Sleeping %s before stopping", global.ShutdownDelay)
     signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
@@ -97,7 +99,6 @@ func StopHttpServer(server *http.Server) {
   log.Printf("HTTP Server %s started shutting down", server.Addr)
   ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
   defer cancel()
-  peer.DeregisterPeer(global.PeerName, global.PeerAddress)
   server.Shutdown(ctx)
   log.Printf("HTTP Server %s finished shutting down", server.Addr)
 }
