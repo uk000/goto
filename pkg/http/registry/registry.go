@@ -487,7 +487,7 @@ func (pr *PortRegistry) stopPeerTargets(peerName string, targets string) map[str
   } else {
     uri = "/client/targets/stop/all"
   }
-  return invokeForPods(pr.loadPodsForPeerWithData(peerName), "POST", uri, http.StatusAccepted, 3, false,
+  return invokeForPods(pr.loadPodsForPeerWithData(peerName), "POST", uri, http.StatusOK, 3, false,
     func(peer string, pod *Pod, response string, err error) {
       if err == nil {
         log.Printf("Stopped targets %s from peer %s address %s\n", targets, peer, pod.Address)

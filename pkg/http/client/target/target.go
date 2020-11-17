@@ -1,17 +1,17 @@
 package target
 
 import (
-	"fmt"
-	"log"
-	"net/http"
-	"strings"
-	"sync"
-	"time"
+  "fmt"
+  "log"
+  "net/http"
+  "strings"
+  "sync"
+  "time"
 
-	"goto/pkg/global"
-	"goto/pkg/http/client/results"
-	"goto/pkg/http/invocation"
-	"goto/pkg/util"
+  "goto/pkg/global"
+  "goto/pkg/http/client/results"
+  "goto/pkg/http/invocation"
+  "goto/pkg/util"
 )
 
 type Target struct {
@@ -209,7 +209,7 @@ func (pc *PortClient) stopTargets(targetNames []string) (bool, bool) {
       time.Sleep(time.Second * 1)
     }
   }
-  if len(targetNames) == 0 {//Reset active invocations if all targets were stopped
+  if len(targetNames) == 0 { //Reset active invocations if all targets were stopped
     invocation.ResetActiveInvocations()
   }
   return len(stoppingTargets) > 0, stopped
