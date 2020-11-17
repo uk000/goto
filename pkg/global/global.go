@@ -9,6 +9,10 @@ var (
   ServerPort                 int
   PeerName                   string
   PeerAddress                string
+  PodName                    string
+  Namespace                  string
+  NodeName                   string
+  Cluster                    string
   RegistryURL                string
   CertPath                   string
   UseLocker                  bool

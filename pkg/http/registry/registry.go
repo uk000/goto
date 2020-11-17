@@ -20,14 +20,17 @@ type Peer struct {
   Name      string `json:"name"`
   Address   string `json:"address"`
   Pod       string `json:"pod"`
-  Node      string `json:"node"`
   Namespace string `json:"namespace"`
+  Node      string `json:"node"`
+  Cluster   string `json:"cluster"`
 }
 
 type PodEpoch struct {
   Epoch        int       `json:"epoch"`
   Name         string    `json:"name"`
   Address      string    `json:"address"`
+  Node         string    `json:"node"`
+  Cluster      string    `json:"cluster"`
   FirstContact time.Time `json:"firstContact"`
   LastContact  time.Time `json:"lastContact"`
 }
@@ -36,6 +39,7 @@ type Pod struct {
   Name         string      `json:"name"`
   Address      string      `json:"address"`
   Node         string      `json:"node"`
+  Cluster      string      `json:"cluster"`
   Healthy      bool        `json:"healthy"`
   CurrentEpoch PodEpoch    `json:"currentEpoch"`
   PastEpochs   []*PodEpoch `json:"pastEpochs"`
@@ -154,8 +158,9 @@ func (pr *PortRegistry) unsafeAddPeer(peer *Peer) {
   if pr.peers[peer.Name] == nil {
     pr.peers[peer.Name] = &Peers{Name: peer.Name, Namespace: peer.Namespace, Pods: map[string]*Pod{}, PodEpochs: map[string][]*PodEpoch{}}
   }
-  pod := &Pod{Name: peer.Pod, Address: peer.Address, host: "http://" + peer.Address, Node: peer.Node, Healthy: true,
-    CurrentEpoch: PodEpoch{Name: peer.Pod, Address: peer.Address, FirstContact: now, LastContact: now}}
+  pod := &Pod{Name: peer.Pod, Address: peer.Address, host: "http://" + peer.Address,
+    Node: peer.Node, Cluster: peer.Cluster, Healthy: true,
+    CurrentEpoch: PodEpoch{Name: peer.Pod, Address: peer.Address, Node: peer.Node, Cluster: peer.Cluster, FirstContact: now, LastContact: now}}
   pr.initHttpClientForPeerPod(pod)
   if podEpochs := pr.peers[peer.Name].PodEpochs[peer.Address]; podEpochs != nil {
     for _, oldEpoch := range podEpochs {

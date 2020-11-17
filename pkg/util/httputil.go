@@ -85,33 +85,53 @@ func PrintLogMessages(r *http.Request) {
 }
 
 func GetPodName() string {
-  pod, present := os.LookupEnv("POD_NAME")
-  if !present {
-    pod, _ = os.Hostname()
+  if global.PodName == "" {
+    pod, present := os.LookupEnv("POD_NAME")
+    if !present {
+      pod, _ = os.Hostname()
+    }
+    global.PodName = pod
   }
-  return pod
+  return global.PodName
 }
 
 func GetNodeName() string {
-  node, present := os.LookupEnv("NODE_NAME")
-  if !present {
-    node = "N/A"
+  if global.NodeName == "" {
+    node, present := os.LookupEnv("NODE_NAME")
+    if !present {
+      node = "N/A"
+    }
+    global.NodeName = node
   }
-  return node
+  return global.NodeName
+}
+
+func GetCluster() string {
+  if global.Cluster == "" {
+    cluster, present := os.LookupEnv("CLUSTER")
+    if !present {
+      cluster = "N/A"
+    }
+    global.Cluster = cluster
+  }
+  return global.Cluster
 }
 
 func GetNamespace() string {
-  ns, present := os.LookupEnv("NAMESPACE")
-  if !present {
-    if data, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
-      ns = string(data)
-      present = true
+  if global.Namespace == "" {
+    ns, present := os.LookupEnv("NAMESPACE")
+    if !present {
+      if data, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+        ns = string(data)
+        present = true
+      }
     }
+    if !present {
+      ns = "local"
+    }
+    global.Namespace = ns
   }
-  if !present {
-    ns = "local"
-  }
-  return ns
+  return global.Namespace
 }
 
 func GetHostIP() string {
@@ -127,7 +147,7 @@ func GetHostIP() string {
 }
 
 func GetHostLabel() string {
-  return fmt.Sprintf("%s.%s@%s[%s]", GetPodName(), GetNamespace(), global.PeerAddress, GetNodeName())
+  return fmt.Sprintf("%s.%s@%s[%s:%s]", GetPodName(), GetNamespace(), global.PeerAddress, GetNodeName(), GetCluster())
 }
 
 func GetIntParam(r *http.Request, param string, defaultVal ...int) (int, bool) {
