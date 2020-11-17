@@ -368,13 +368,10 @@ func (pr *PortRegistry) clearLocker(peerName, peerAddress string) map[string]map
     if pr.getCurrentLocker().ClearInstanceLocker(peerName, peerAddress) {
       peersToClear = pr.loadPeerPods(peerName, peerAddress)
     }
-  } else if peerName != "" && peerAddress == "" {
+  } else {
     if pr.getCurrentLocker().InitPeerLocker(peerName, "") {
       peersToClear = pr.loadPeerPods(peerName, "")
     }
-  } else {
-    pr.getCurrentLocker().Init()
-    peersToClear = pr.loadPeerPods("", "")
   }
   return invokeForPods(peersToClear, "POST", "/client/results/clear", http.StatusAccepted, 2, false,
     func(peer string, pod *Pod, response string, err error) {

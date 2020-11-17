@@ -251,9 +251,10 @@ func (cl *CombiLocker) InitPeerLocker(peerName string, peerAddress string) bool 
       cl.PeerLockers[peerName].clearInstanceLocker(peerAddress)
     }
     cl.lock.Unlock()
-    return true
+  } else {
+    cl.PeerLockers = map[string]*PeerLocker{}
   }
-  return false
+  return true
 }
 
 func (cl *CombiLocker) createOrGetPeerLocker(peerName string) *PeerLocker {
