@@ -867,6 +867,20 @@ func getLabeledLocker(w http.ResponseWriter, r *http.Request) {
   }
 }
 
+func getLockerLabels(w http.ResponseWriter, r *http.Request) {
+  util.WriteJsonPayload(w, getPortRegistry(r).labeledLockers.GetLockerLabels())
+  if global.EnableRegistryLogs {
+    util.AddLogMessage("Locker labels reported", r)
+  }
+}
+
+func getDataLockerKeys(w http.ResponseWriter, r *http.Request) {
+  util.WriteJsonPayload(w, getPortRegistry(r).labeledLockers.GetDataLockerKeys())
+  if global.EnableRegistryLogs {
+    util.AddLogMessage("Data Locker keys reported", r)
+  }
+}
+
 func storeInLabeledLocker(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")

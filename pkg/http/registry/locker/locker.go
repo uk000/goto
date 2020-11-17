@@ -29,7 +29,7 @@ type PeerLocker struct {
 }
 
 type CombiLocker struct {
-  Label       string
+  Label       string                 `json:"label"`
   PeerLockers map[string]*PeerLocker `json:"peerLockers"`
   DataLocker  *DataLocker            `json:"dataLocker"`
   Current     bool                   `json:"current"`
@@ -107,6 +107,30 @@ func unsafeReadKeys(locker map[string]*LockerData, keys []string) string {
     return lockerData.Data
   }
   return ""
+}
+
+func unsafeGetKeys(locker map[string]*LockerData) [][]string {
+  keys := [][]string{}
+  if locker != nil {
+    for key, ld := range locker {
+      if ld != nil {
+        subKeys := unsafeGetKeys(ld.SubKeys)
+        currentKeys := [][]string{}
+        if len(subKeys) > 0 {
+          for _, sub := range subKeys {
+            currentSubKeys := []string{key}
+            currentSubKeys = append(currentSubKeys, sub...)
+            currentKeys = append(currentKeys, currentSubKeys)
+          }
+        }
+        if ld.Data != "" {
+          currentKeys = append(currentKeys, []string{key})
+        }
+        keys = append(keys, currentKeys...)
+      }
+    }
+  }
+  return keys
 }
 
 func newDataLocker() *DataLocker {
@@ -423,6 +447,28 @@ func (ll *LabeledLockers) GetLocker(label string) *CombiLocker {
     ll.lockers[label] = NewCombiLocker(label)
   }
   return ll.lockers[label]
+}
+
+func (ll *LabeledLockers) GetLockerLabels() []string {
+  ll.lock.RLock()
+  defer ll.lock.RUnlock()
+  labels := []string{}
+  for label := range ll.lockers {
+    labels = append(labels, label)
+  }
+  return labels
+}
+
+func (ll *LabeledLockers) GetDataLockerKeys() map[string][][]string {
+  ll.lock.RLock()
+  defer ll.lock.RUnlock()
+  lockerKeysByLabels := map[string][][]string{}
+  for label, cl := range ll.lockers {
+    if cl.DataLocker != nil && cl.DataLocker.Locker != nil && len(cl.DataLocker.Locker) > 0 {
+      lockerKeysByLabels[label] = unsafeGetKeys(cl.DataLocker.Locker)
+    }
+  }
+  return lockerKeysByLabels
 }
 
 func (ll *LabeledLockers) GetCurrentLocker() *CombiLocker {

@@ -28,6 +28,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(registryRouter, "/lockers/close/{label}", closeLabeledLocker, "POST")
   util.AddRoute(registryRouter, "/lockers/close", closeLabeledLocker, "POST")
   util.AddRoute(registryRouter, "/lockers/clear", closeLabeledLocker, "POST")
+  util.AddRoute(registryRouter, "/lockers/labels", getLockerLabels, "GET")
+  util.AddRoute(registryRouter, "/lockers/data/keys", getDataLockerKeys, "GET")
   util.AddRoute(registryRouter, "/lockers/current", getPeerLocker, "GET")
   util.AddRoute(registryRouter, "/lockers/{label}", getLabeledLocker, "GET")
   util.AddRoute(registryRouter, "/lockers", getLabeledLocker, "GET")
