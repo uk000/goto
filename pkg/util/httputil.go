@@ -73,8 +73,8 @@ func AddLogMessage(msg string, r *http.Request) {
 func PrintLogMessages(r *http.Request) {
   m := r.Context().Value(logmessagesKey).(*messagestore)
   if !IsLockerRequest(r) && (!IsAdminRequest(r) || global.EnableAdminLogs) &&
-    (!IsReminderRequest(r) || global.EnableRegistryReminderLogs) && 
-    (!IsProbeRequest(r) || global.EnableProbeLogs) && 
+    (!IsReminderRequest(r) || global.EnableRegistryReminderLogs) &&
+    (!IsProbeRequest(r) || global.EnableProbeLogs) &&
     global.EnableTrackingLogs {
     log.Println(strings.Join(m.messages, " --> "))
     if flusher, ok := log.Writer().(http.Flusher); ok {
@@ -97,22 +97,14 @@ func GetPodName() string {
 
 func GetNodeName() string {
   if global.NodeName == "" {
-    node, present := os.LookupEnv("NODE_NAME")
-    if !present {
-      node = "N/A"
-    }
-    global.NodeName = node
+    global.NodeName, _ = os.LookupEnv("NODE_NAME")
   }
   return global.NodeName
 }
 
 func GetCluster() string {
   if global.Cluster == "" {
-    cluster, present := os.LookupEnv("CLUSTER")
-    if !present {
-      cluster = "N/A"
-    }
-    global.Cluster = cluster
+    global.Cluster, _ = os.LookupEnv("CLUSTER")
   }
   return global.Cluster
 }
@@ -147,7 +139,16 @@ func GetHostIP() string {
 }
 
 func GetHostLabel() string {
-  return fmt.Sprintf("%s.%s@%s[%s:%s]", GetPodName(), GetNamespace(), global.PeerAddress, GetNodeName(), GetCluster())
+  if global.HostLabel == "" {
+    node := GetNodeName()
+    cluster := GetCluster()
+    if node != "" || cluster != "" {
+      global.HostLabel = fmt.Sprintf("%s.%s@%s(%s@%s)", GetPodName(), GetNamespace(), global.PeerAddress, node, cluster)
+    } else {
+      global.HostLabel = fmt.Sprintf("%s.%s@%s", GetPodName(), GetNamespace(), global.PeerAddress)
+    }
+  }
+  return global.HostLabel
 }
 
 func GetIntParam(r *http.Request, param string, defaultVal ...int) (int, bool) {

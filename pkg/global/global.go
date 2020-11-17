@@ -13,6 +13,7 @@ var (
   Namespace                  string
   NodeName                   string
   Cluster                    string
+  HostLabel                  string
   RegistryURL                string
   CertPath                   string
   UseLocker                  bool
