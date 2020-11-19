@@ -21,12 +21,34 @@ Keep reading...
 <br/>
 
 ---
+
+# Flow Diagrams
+
+<style>
+img[src*="#thumbnail"] {
+   width:100px;
+   height:100px;
+   vertical-align: middle;
+}
+</style>
+
+Check these flow diagrams to get a visual overview of Goto behavior and usage.
+
+### Flow: [Use Goto client APIs to register and invoke traffic to targets](docs/scenarios-client-targets.md) [![thumbnail](docs/Goto-Client-Targets-Thumb.png#thumbnail)](docs/scenarios-client-targets.md)
+
+### Flow: [Interactions between Goto peer instances and registry instance during startup and shutdown](docs/scenarios-registry-peers.md) [![thumbnail](docs/Goto-Registry-Peers-Thumb.png#thumbnail)](docs/scenarios-registry-peers.md)
+
+### Flow: [Managing targets and invoking traffic from multiple Goto clients via Goto registry](docs/scenarios-registry-peer-targets.md) [![thumbnail](docs/Goto-Registry-Peer-Targets-Thumb.png#thumbnail)](docs/scenarios-registry-peer-targets.md)
+
+<br/>
+
+---
 # Scenarios
 
 Before we look into detailed features and APIs exposed by the tool, let's look at how this tool can be used in a few scenarios to understand it better.
 
 ## Basic Scenarios
-
+#
 ### Scenario: [Use HTTP client to send requests and track results](docs/scenarios-basic.md#basic-client-usage)
 
 ### Scenario: [Use HTTP server to respond to any arbitrary client HTTP requests](docs/scenarios-basic.md#basic-server-usage)
@@ -185,7 +207,12 @@ The application accepts the following command arguments:
         </tr>
         <tr>
           <td rowspan="1"><pre>--reminderLogs={true|false}</pre></td>
-          <td>Enable/Disable Registry Reminder Logs </td>
+          <td>Enable/Disable reminder logs received from various peer instances (applicable to goto instance acting as registry). </td>
+          <td rowspan="1">true</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--probeLogs={true|false}</pre></td>
+          <td>Enable/Disable logging of requests received for URIs configured as liveness and readiness probes (See [Probes](#server-probes). </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>

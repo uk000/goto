@@ -1199,13 +1199,6 @@ func runPeerJobs(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
-func getPeers(w http.ResponseWriter, r *http.Request) {
-  pr := getPortRegistry(r)
-  pr.peersLock.RLock()
-  defer pr.peersLock.RUnlock()
-  util.WriteJsonPayload(w, pr.peers)
-}
-
 func getPeerJobs(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if peerName, present := util.GetStringParam(r, "peer"); present {
@@ -1356,6 +1349,23 @@ func callPeer(w http.ResponseWriter, r *http.Request) {
     util.AddLogMessage(msg, r)
   }
   fmt.Fprintln(w, msg)
+}
+
+func copyPeersToLocker(w http.ResponseWriter, r *http.Request) {
+  pr := getPortRegistry(r)
+  pr.peersLock.RLock()
+  defer pr.peersLock.RUnlock()
+  currentLocker := getCurrentLocker(r)
+  currentLocker.Store([]string{"peers"}, util.ToJSON(pr.peers))
+  w.WriteHeader(http.StatusAccepted)
+  fmt.Fprintf(w, "Peers info stored in labeled locker %s under keys 'peers'\n", currentLocker.Label)
+}
+
+func getPeers(w http.ResponseWriter, r *http.Request) {
+  pr := getPortRegistry(r)
+  pr.peersLock.RLock()
+  defer pr.peersLock.RUnlock()
+  util.WriteJsonPayload(w, pr.peers)
 }
 
 func GetPeers(name string, r *http.Request) map[string]string {
