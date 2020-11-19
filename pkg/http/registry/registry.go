@@ -223,16 +223,13 @@ func (pr *PortRegistry) clearPeerEpochs() {
   pr.peersLock.Lock()
   defer pr.peersLock.Unlock()
   for name, peers := range pr.peers {
-    for address, podEpochs := range peers.PodEpochs {
+    for address := range peers.PodEpochs {
       currentPod := peers.Pods[address]
       if currentPod == nil {
         delete(peers.PodEpochs, address)
       } else {
-        for i, podEpoch := range podEpochs {
-          if podEpoch.Epoch != currentPod.CurrentEpoch.Epoch {
-            peers.PodEpochs[address] = append(podEpochs[:i], podEpochs[i+1:]...)
-          }
-        }
+        peers.PodEpochs[address] = []*PodEpoch{&currentPod.CurrentEpoch}
+        currentPod.PastEpochs = []*PodEpoch{}
       }
     }
     if len(peers.Pods) == 0 {
@@ -924,9 +921,20 @@ func getFromLabeledLocker(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
   keys, _ := util.GetListParam(r, "keys")
-  if label != "" && len(keys) > 0 {
-    msg = getLockerForLabel(r, label).Get(keys)
-    w.WriteHeader(http.StatusAccepted)
+  if len(keys) > 0 {
+    var locker *locker.CombiLocker
+    if label != "" {
+      locker = getLockerForLabel(r, label)
+    } else {
+      locker = getCurrentLocker(r)
+    }
+    if locker != nil {
+      msg = locker.Get(keys)
+      w.WriteHeader(http.StatusAccepted)
+    } else {
+      msg = "Locker not found"
+      w.WriteHeader(http.StatusNotFound)
+    }
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = "Not enough parameters to access locker"

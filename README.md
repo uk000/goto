@@ -24,21 +24,15 @@ Keep reading...
 
 # Flow Diagrams
 
-<style>
-img[src*="#thumbnail"] {
-   width:100px;
-   height:100px;
-   vertical-align: middle;
-}
-</style>
+Check these flow diagrams to get a visual overview of `Goto` behavior and usage.
 
-Check these flow diagrams to get a visual overview of Goto behavior and usage.
+### Flow: <a href="docs/Goto-Client-Targets.png" width="auto" height="auto"> Use <small>`Goto`</small> client APIs to register and invoke traffic to targets <img src="docs/Goto-Client-Targets-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;"/> </a>
 
-### Flow: [Use Goto client APIs to register and invoke traffic to targets](docs/scenarios-client-targets.md) [![thumbnail](docs/Goto-Client-Targets-Thumb.png#thumbnail)](docs/scenarios-client-targets.md)
+### Flow: <a href="docs/Goto-Registry-Peers.png" width="auto" height="auto"> Interactions between <small>`Goto`</small> peer instances and registry instance during startup and shutdown <img src="docs/Goto-Registry-Peers-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;" /></a>
 
-### Flow: [Interactions between Goto peer instances and registry instance during startup and shutdown](docs/scenarios-registry-peers.md) [![thumbnail](docs/Goto-Registry-Peers-Thumb.png#thumbnail)](docs/scenarios-registry-peers.md)
+### Flow: <a href="docs/Goto-Registry-Peer-Targets-Overview.png"> Managing targets and invoking traffic on multiple <small>`Goto`</small> clients via <small>`Goto`</small> registry <img src="docs/Goto-Registry-Peer-Targets-Overview-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;" /></a>
 
-### Flow: [Managing targets and invoking traffic from multiple Goto clients via Goto registry](docs/scenarios-registry-peer-targets.md) [![thumbnail](docs/Goto-Registry-Peer-Targets-Thumb.png#thumbnail)](docs/scenarios-registry-peer-targets.md)
+### Flow: <a href="docs/Goto-Registry-Peer-Targets-APIs.png"> Registry APIs for peer targets management and invocation <img src="docs/Goto-Registry-Peer-Targets-APIs-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;" /></a>
 
 <br/>
 
@@ -2548,6 +2542,7 @@ Peer instances periodically re-register themselves with registry in case registr
 | POST      | /registry/peers/health/cleanup | Check health of all instances of all peers and remove IP addresses that are unresponsive |
 | POST      | /registry/peers/clear/epochs   | Remove epochs for disconnected peers|
 | POST      | /registry/peers/clear   | Remove all registered peers|
+| POST      | /registry/peers/copyToLocker   | Copy current set of peers info to current labeled locker under key `peers` |
 | GET       | /registry/peers         | Get all registered peers. See [Peers JSON Schema](#peers-json-schema) |
 ||||
 | POST      | /registry/lockers/open/{label} | Setup a locker with the given label and make it the current locker where peer results get stored.  |

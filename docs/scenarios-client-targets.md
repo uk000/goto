@@ -1,1 +1,0 @@
-![Goto-Client-Targets](Goto-Client-Targets.png)
