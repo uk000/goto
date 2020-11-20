@@ -133,6 +133,22 @@ func unsafeGetKeys(locker map[string]*LockerData) [][]string {
   return keys
 }
 
+func unsafeGetLockerView(locker map[string]*LockerData, lockerView map[string]*LockerData) {
+  if locker != nil && lockerView != nil {
+    for key, ld := range locker {
+      if ld != nil {
+        ldView := createOrGetLockerData(lockerView, key, ld.FirstReported)
+        if ld.Data != "" {
+          ldView.Data = "..."
+        }
+        ldView.LastReported = ld.LastReported
+        unsafeGetLockerView(ld.SubKeys, ldView.SubKeys)
+      } else {
+        lockerView[key] = nil
+      }
+    }
+  }
+}
 func newDataLocker() *DataLocker {
   dataLocker := &DataLocker{}
   dataLocker.init()
@@ -227,6 +243,20 @@ func (pl *PeerLocker) Remove(keys []string) {
   dl := pl.Locker
   pl.lock.Unlock()
   dl.Remove(keys)
+}
+
+func (pl *PeerLocker) GetLockerView() *PeerLocker {
+  pl.lock.RLock()
+  defer pl.lock.RUnlock()
+  plView := newPeerLocker()
+  unsafeGetLockerView(pl.Locker.Locker, plView.Locker.Locker)
+  plView.Locker.Active = pl.Locker.Active
+  for address, il := range pl.InstanceLockers {
+    ilView := plView.createOrGetInstanceLocker(address)
+    unsafeGetLockerView(il.Locker, ilView.Locker)
+    ilView.Active = il.Active
+  }
+  return plView
 }
 
 func NewCombiLocker(label string) *CombiLocker {
@@ -347,6 +377,20 @@ func (cl *CombiLocker) GetPeerLocker(peerName, peerAddress string) interface{} {
     return peerLocker.createOrGetInstanceLocker(peerAddress)
   }
   return nil
+}
+
+func (cl *CombiLocker) GetLockerView() *CombiLocker {
+  cl.lock.RLock()
+  defer cl.lock.RUnlock()
+  combiView := NewCombiLocker(cl.Label)
+  combiView.PeerLockers = map[string]*PeerLocker{}
+  for peer, pl := range cl.PeerLockers {
+    combiView.PeerLockers[peer] = pl.GetLockerView()
+  }
+  combiView.Current = cl.Current
+  combiView.DataLocker.Active = cl.DataLocker.Active
+  unsafeGetLockerView(cl.DataLocker.Locker, combiView.DataLocker.Locker)
+  return combiView
 }
 
 func (cl *CombiLocker) GetTargetsResults(trackingHeaders []string, crossTrackingHeaders map[string][]string) map[string]map[string]*results.TargetResults {
@@ -475,6 +519,19 @@ func (ll *LabeledLockers) GetDataLockerKeys() map[string][][]string {
 func (ll *LabeledLockers) GetCurrentLocker() *CombiLocker {
   return ll.currentLocker
 }
+
 func (ll *LabeledLockers) GetAllLockers() map[string]*CombiLocker {
   return ll.lockers
+}
+
+func (ll *LabeledLockers) GetAllLockersView() map[string]*CombiLocker {
+  ll.lock.Lock()
+  defer ll.lock.Unlock()
+  view := map[string]*CombiLocker{}
+  for label, cl := range ll.lockers {
+    if cl != nil {
+      view[label] = cl.GetLockerView()
+    }
+  }
+  return view
 }

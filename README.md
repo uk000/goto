@@ -2552,9 +2552,12 @@ Peer instances periodically re-register themselves with registry in case registr
 | POST      | /registry/lockers/close/{label} | Remove the locker for the given label.  |
 | POST      | /registry/lockers/close | Remove all labeled lockers and empty the default locker.  |
 | POST      | /registry/lockers/clear | Remove all labeled lockers and empty the default locker.  |
-| GET       | /registry/lockers/current | Get data from currently active labeled locker |
-| GET       | /registry/lockers/{label} | Get data from the given label's locker |
-| GET       | /registry/lockers | Get all lockers data |
+| GET       | /registry/lockers/current | Get currently active locker with stored keys, but without stored data |
+| GET       | /registry/lockers/current?data=y | Get currently active locker with stored data |
+| GET       | /registry/lockers/{label} | Get given label's locker with stored keys, but without stored data |
+| GET       | /registry/lockers/{label}?data=y | Get given label's locker with stored data |
+| GET       | /registry/lockers | Get all lockers with stored keys but without stored data |
+| GET       | /registry/lockers?data=y | Get all lockers with stored data |
 | POST      | /registry/peers/{peer}/{address}/locker/store/{keys} | Store any arbitrary value for the given `keys` in the locker of the peer instance under currently active labeled locker. `keys` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
 | POST      | /registry/peers/{peer}/{address}/locker/remove/{keys} | Remove stored data for the given `keys` from the locker of the peer instance under currently active labeled locker. `keys` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
 | POST      | /registry/peers/{peer}/locker/store/{keys} | Store any arbitrary value for the given key in the peer locker without associating data to a peer instance under currently active labeled locker. `keys` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |

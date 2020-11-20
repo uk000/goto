@@ -149,10 +149,6 @@ func (pr *PortRegistry) getLabeledLocker(label string) *locker.CombiLocker {
   return pr.labeledLockers.GetLocker(label)
 }
 
-func (pr *PortRegistry) getAllLockers() map[string]*locker.CombiLocker {
-  return pr.labeledLockers.GetAllLockers()
-}
-
 func (pr *PortRegistry) unsafeAddPeer(peer *Peer) {
   now := time.Now()
   if pr.peers[peer.Name] == nil {
@@ -854,13 +850,46 @@ func closeLabeledLocker(w http.ResponseWriter, r *http.Request) {
 func getLabeledLocker(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
+  getData := util.GetBoolParamValue(r, "data")
+  pr := getPortRegistry(r)
+  var locker interface{}
   if label != "" {
-    util.WriteJsonPayload(w, getPortRegistry(r).getLabeledLocker(label))
-    msg = fmt.Sprintf("Labeled locker %s reported", label)
+    if getData {
+      locker = pr.getLabeledLocker(label)
+      msg = fmt.Sprintf("Labeled locker %s reported with data", label)
+    } else {
+      locker = pr.getLabeledLocker(label).GetLockerView()
+      msg = fmt.Sprintf("Labeled locker %s view reported without data", label)
+    }
   } else {
-    util.WriteJsonPayload(w, getPortRegistry(r).getAllLockers())
+    if getData {
+      locker = pr.getCurrentLocker()
+      msg = fmt.Sprintf("Labeled locker %s reported with data", label)
+    } else {
+      locker = pr.getCurrentLocker().GetLockerView()
+      msg = fmt.Sprintf("Labeled locker %s view reported without data", label)
+    }
     msg = "All labeled lockers reported"
   }
+  util.WriteJsonPayload(w, locker)
+  if global.EnableRegistryLogs {
+    util.AddLogMessage(msg, r)
+  }
+}
+
+func getAllLockers(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  getData := util.GetBoolParamValue(r, "data")
+  pr := getPortRegistry(r)
+  var locker interface{}
+  if getData {
+    locker = pr.labeledLockers.GetAllLockers()
+    msg = "All labeled locker reported with data"
+  } else {
+    locker = pr.labeledLockers.GetAllLockersView()
+    msg = "All labeled lockers view reported without data"
+  }
+  util.WriteJsonPayload(w, locker)
   if global.EnableRegistryLogs {
     util.AddLogMessage(msg, r)
   }

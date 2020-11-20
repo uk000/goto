@@ -186,6 +186,17 @@ func GetStringParamValue(r *http.Request, param string, defaultVal ...string) st
   return val
 }
 
+func GetBoolParamValue(r *http.Request, param string, defaultVal ...bool) bool {
+  val, _ := GetStringParam(r, param)
+  if val != "" {
+    return IsYes(val)
+  }
+  if len(defaultVal) > 0 {
+    return defaultVal[0]
+  }
+  return false
+}
+
 func GetListParam(r *http.Request, param string) ([]string, bool) {
   values := []string{}
   if v, present := GetStringParam(r, param); present {
