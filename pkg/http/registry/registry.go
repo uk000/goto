@@ -2,6 +2,7 @@ package registry
 
 import (
   "fmt"
+  "goto/pkg/constants"
   "goto/pkg/global"
   "goto/pkg/http/client/results"
   "goto/pkg/http/invocation"
@@ -43,7 +44,8 @@ type Pod struct {
   Healthy      bool        `json:"healthy"`
   CurrentEpoch PodEpoch    `json:"currentEpoch"`
   PastEpochs   []*PodEpoch `json:"pastEpochs"`
-  host         string
+  URL          string      `json:"url"`
+  Offline      bool        `json:"offline"`
   client       *http.Client
   lock         sync.RWMutex
 }
@@ -142,10 +144,14 @@ func (pr *PortRegistry) init() {
 }
 
 func (pr *PortRegistry) getCurrentLocker() *locker.CombiLocker {
+  pr.lockersLock.RLock()
+  defer pr.lockersLock.RUnlock()
   return pr.labeledLockers.GetCurrentLocker()
 }
 
 func (pr *PortRegistry) getLabeledLocker(label string) *locker.CombiLocker {
+  pr.lockersLock.RLock()
+  defer pr.lockersLock.RUnlock()
   return pr.labeledLockers.GetLocker(label)
 }
 
@@ -154,7 +160,7 @@ func (pr *PortRegistry) unsafeAddPeer(peer *Peer) {
   if pr.peers[peer.Name] == nil {
     pr.peers[peer.Name] = &Peers{Name: peer.Name, Namespace: peer.Namespace, Pods: map[string]*Pod{}, PodEpochs: map[string][]*PodEpoch{}}
   }
-  pod := &Pod{Name: peer.Pod, Address: peer.Address, host: "http://" + peer.Address,
+  pod := &Pod{Name: peer.Pod, Address: peer.Address, URL: "http://" + peer.Address,
     Node: peer.Node, Cluster: peer.Cluster, Healthy: true,
     CurrentEpoch: PodEpoch{Name: peer.Pod, Address: peer.Address, Node: peer.Node, Cluster: peer.Cluster, FirstContact: now, LastContact: now}}
   pr.initHttpClientForPeerPod(pod)
@@ -195,7 +201,11 @@ func (pr *PortRegistry) rememberPeer(peer *Peer) {
   if pod := pr.GetPeer(peer.Name, peer.Address); pod != nil {
     pod.lock.Lock()
     pod.Healthy = true
+    pod.Offline = false
     pod.CurrentEpoch.LastContact = time.Now()
+    if pod.client == nil {
+      pr.initHttpClientForPeerPod(pod)
+    }
     pod.lock.Unlock()
   } else {
     pr.peersLock.Lock()
@@ -256,7 +266,9 @@ func (pr *PortRegistry) loadAllPeerPods() map[string][]*Pod {
   for name, peer := range pr.peers {
     peerPods[name] = []*Pod{}
     for _, pod := range peer.Pods {
-      peerPods[name] = append(peerPods[name], pod)
+      if pod.client != nil {
+        peerPods[name] = append(peerPods[name], pod)
+      }
     }
   }
   return peerPods
@@ -271,13 +283,17 @@ func (pr *PortRegistry) loadPeerPods(peerName string, peerAddress string) map[st
     if peerAddress != "" {
       if pr.peers[peerName] != nil {
         if pod := pr.peers[peerName].Pods[peerAddress]; pod != nil {
-          peerPods[peerName] = append(peerPods[peerName], pod)
+          if pod.client != nil {
+            peerPods[peerName] = append(peerPods[peerName], pod)
+          }
         }
       }
     } else {
       if pr.peers[peerName] != nil {
         for _, pod := range pr.peers[peerName].Pods {
-          peerPods[peerName] = append(peerPods[peerName], pod)
+          if pod.client != nil {
+            peerPods[peerName] = append(peerPods[peerName], pod)
+          }
         }
       }
     }
@@ -285,7 +301,9 @@ func (pr *PortRegistry) loadPeerPods(peerName string, peerAddress string) map[st
     for name, peer := range pr.peers {
       peerPods[name] = []*Pod{}
       for _, pod := range peer.Pods {
-        peerPods[name] = append(peerPods[name], pod)
+        if pod.client != nil {
+          peerPods[name] = append(peerPods[name], pod)
+        }
       }
     }
   }
@@ -307,7 +325,9 @@ func (pr *PortRegistry) loadPodsForPeerWithData(peerName string, jobs ...bool) m
     if hasData {
       peerPods[peerName] = []*Pod{}
       for _, pod := range pr.peers[peerName].Pods {
-        peerPods[peerName] = append(peerPods[peerName], pod)
+        if pod.client != nil {
+          peerPods[peerName] = append(peerPods[peerName], pod)
+        }
       }
     }
     return peerPods
@@ -732,6 +752,108 @@ func (pr *PortRegistry) preparePeerStartupData(peer *Peer, peerData *PeerData) {
   peerData.Probes = pr.peerProbes
 }
 
+func (pr *PortRegistry) clonePeersFrom(registryURL string) error {
+  if resp, err := http.Get(registryURL + "/registry/peers"); err == nil {
+    peers := map[string]*Peers{}
+    if err := util.ReadJsonPayloadFromBody(resp.Body, &peers); err == nil {
+      for _, peer := range peers {
+        for _, pod := range peer.Pods {
+          pod.Offline = true
+        }
+      }
+      pr.peersLock.Lock()
+      pr.peers = peers
+      pr.peersLock.Unlock()
+      return nil
+    } else {
+      return err
+    }
+  } else {
+    return err
+  }
+}
+
+func (pr *PortRegistry) cloneLockersFrom(registryURL string) error {
+  if resp, err := http.Get(registryURL + "/registry/lockers?data=y"); err == nil {
+    lockers := map[string]*locker.CombiLocker{}
+    if err := util.ReadJsonPayloadFromBody(resp.Body, &lockers); err == nil {
+      pr.lockersLock.Lock()
+      pr.labeledLockers.ReplaceLockers(lockers)
+      pr.lockersLock.Unlock()
+      return nil
+    } else {
+      return err
+    }
+  } else {
+    return err
+  }
+}
+
+func (pr *PortRegistry) clonePeersTargetsFrom(registryURL string) error {
+  if resp, err := http.Get(registryURL + "/registry/peers/targets"); err == nil {
+    peerTargets := map[string]PeerTargets{}
+    if err := util.ReadJsonPayloadFromBody(resp.Body, &peerTargets); err == nil {
+      pr.peersLock.Lock()
+      pr.peerTargets = peerTargets
+      pr.peersLock.Unlock()
+      return nil
+    } else {
+      return err
+    }
+  } else {
+    return err
+  }
+}
+
+func (pr *PortRegistry) clonePeersJobsFrom(registryURL string) error {
+  if resp, err := http.Get(registryURL + "/registry/peers/jobs"); err == nil {
+    peerJobs := map[string]PeerJobs{}
+    if err := util.ReadJsonPayloadFromBody(resp.Body, &peerJobs); err == nil {
+      pr.peersLock.Lock()
+      pr.peerJobs = peerJobs
+      pr.peersLock.Unlock()
+      return nil
+    } else {
+      return err
+    }
+  } else {
+    return err
+  }
+}
+
+func (pr *PortRegistry) clonePeersTrackingHeadersFrom(registryURL string) error {
+  if resp, err := http.Get(registryURL + "/registry/peers/track/headers"); err == nil {
+    peerTrackingHeaders := ""
+    if err := util.ReadJsonPayloadFromBody(resp.Body, &peerTrackingHeaders); err == nil {
+      pr.peersLock.Lock()
+      pr.peerTrackingHeaders = peerTrackingHeaders
+      pr.trackingHeaders, pr.crossTrackingHeaders = util.ParseTrackingHeaders(peerTrackingHeaders)
+      pr.peersLock.Unlock()
+      return nil
+    } else {
+      return err
+    }
+  } else {
+    return err
+  }
+}
+
+func (pr *PortRegistry) clonePeersProbesFrom(registryURL string) error {
+  if resp, err := http.Get(registryURL + "/registry/peers/probes"); err == nil {
+    peerProbes := &PeerProbes{}
+    if err := util.ReadJsonPayloadFromBody(resp.Body, peerProbes); err == nil {
+      pr.peersLock.Lock()
+      pr.peerProbes = peerProbes
+      pr.peersLock.Unlock()
+      return nil
+    } else {
+      return err
+    }
+  } else {
+    return err
+  }
+}
+
 func addPeer(w http.ResponseWriter, r *http.Request) {
   peerName := util.GetStringParamValue(r, "peer")
   peer := &Peer{}
@@ -809,11 +931,30 @@ func cleanupUnhealthyPeers(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
+func getPeers(w http.ResponseWriter, r *http.Request) {
+  pr := getPortRegistry(r)
+  pr.peersLock.RLock()
+  defer pr.peersLock.RUnlock()
+  util.WriteJsonPayload(w, pr.peers)
+}
+
+func GetPeers(name string, r *http.Request) map[string]string {
+  peers := getPortRegistry(r).peers[name]
+  data := map[string]string{}
+  for _, pod := range peers.Pods {
+    data[pod.Name] = pod.Address
+  }
+  return data
+}
+
 func openLabeledLocker(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
   if label != "" {
-    getPortRegistry(r).labeledLockers.OpenLocker(label)
+    pr := getPortRegistry(r)
+    pr.lockersLock.Lock()
+    pr.labeledLockers.OpenLocker(label)
+    pr.lockersLock.Unlock()
     w.WriteHeader(http.StatusAccepted)
     msg = fmt.Sprintf("Locker %s is open and active", label)
   } else {
@@ -829,16 +970,22 @@ func openLabeledLocker(w http.ResponseWriter, r *http.Request) {
 func closeLabeledLocker(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
-  if strings.EqualFold(label, locker.DefaultLocker) {
+  if strings.EqualFold(label, constants.LockerDefaultLabel) {
     w.WriteHeader(http.StatusBadRequest)
     msg = "Default locker cannot be closed"
   } else if label != "" {
-    getPortRegistry(r).labeledLockers.CloseLocker(label)
+    pr := getPortRegistry(r)
+    pr.lockersLock.Lock()
+    pr.labeledLockers.CloseLocker(label)
+    pr.lockersLock.Unlock()
     w.WriteHeader(http.StatusAccepted)
     msg = fmt.Sprintf("Locker %s is emptied and closed", label)
   } else {
     w.WriteHeader(http.StatusAccepted)
-    getPortRegistry(r).labeledLockers.Init()
+    pr := getPortRegistry(r)
+    pr.lockersLock.Lock()
+    pr.labeledLockers.Init()
+    pr.lockersLock.Unlock()
     msg = "All lockers are emptied and closed"
   }
   if global.EnableRegistryLogs {
@@ -881,12 +1028,15 @@ func getAllLockers(w http.ResponseWriter, r *http.Request) {
   msg := ""
   getData := util.GetBoolParamValue(r, "data")
   pr := getPortRegistry(r)
+  pr.lockersLock.RLock()
+  labeledLockers := pr.labeledLockers
+  pr.lockersLock.RUnlock()
   var locker interface{}
   if getData {
-    locker = pr.labeledLockers.GetAllLockers()
+    locker = labeledLockers.GetAllLockers()
     msg = "All labeled locker reported with data"
   } else {
-    locker = pr.labeledLockers.GetAllLockersView()
+    locker = labeledLockers.GetAllLockersView()
     msg = "All labeled lockers view reported without data"
   }
   util.WriteJsonPayload(w, locker)
@@ -896,28 +1046,55 @@ func getAllLockers(w http.ResponseWriter, r *http.Request) {
 }
 
 func getLockerLabels(w http.ResponseWriter, r *http.Request) {
-  util.WriteJsonPayload(w, getPortRegistry(r).labeledLockers.GetLockerLabels())
+  pr := getPortRegistry(r)
+  pr.lockersLock.RLock()
+  labeledLockers := pr.labeledLockers
+  pr.lockersLock.RUnlock()
+  util.WriteJsonPayload(w, labeledLockers.GetLockerLabels())
   if global.EnableRegistryLogs {
     util.AddLogMessage("Locker labels reported", r)
   }
 }
 
-func getDataLockerKeys(w http.ResponseWriter, r *http.Request) {
-  util.WriteJsonPayload(w, getPortRegistry(r).labeledLockers.GetDataLockerKeys())
+func getDataLockerPaths(w http.ResponseWriter, r *http.Request) {
+  pr := getPortRegistry(r)
+  pr.lockersLock.RLock()
+  labeledLockers := pr.labeledLockers
+  pr.lockersLock.RUnlock()
+  util.WriteJsonPayload(w, labeledLockers.GetDataLockerPaths())
   if global.EnableRegistryLogs {
-    util.AddLogMessage("Data Locker keys reported", r)
+    util.AddLogMessage("Data Locker paths reported", r)
+  }
+}
+
+func findDataLockerKey(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  key := util.GetStringParamValue(r, "text")
+  pr := getPortRegistry(r)
+  pr.lockersLock.RLock()
+  labeledLockers := pr.labeledLockers
+  pr.lockersLock.RUnlock()
+  if key != "" {
+    util.WriteJsonPayload(w, labeledLockers.FindDataLockerKey(key))
+    msg = fmt.Sprintf("Reported results for key %s lookup", key)
+  } else {
+    msg = "Cannot find. No key given."
+    fmt.Fprintln(w, msg)
+  }
+  if global.EnableRegistryLogs {
+    util.AddLogMessage(msg, r)
   }
 }
 
 func storeInLabeledLocker(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
-  keys, _ := util.GetListParam(r, "keys")
-  if label != "" && len(keys) > 0 {
+  path, _ := util.GetListParam(r, "path")
+  if label != "" && len(path) > 0 {
     data := util.Read(r.Body)
-    getLockerForLabel(r, label).Store(keys, data)
+    getLockerForLabel(r, label).Store(path, data)
     w.WriteHeader(http.StatusAccepted)
-    msg = fmt.Sprintf("Data stored in labeled locker %s for keys %+v", label, keys)
+    msg = fmt.Sprintf("Data stored in labeled locker %s for path %+v", label, path)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = "Not enough parameters to access locker"
@@ -931,11 +1108,11 @@ func storeInLabeledLocker(w http.ResponseWriter, r *http.Request) {
 func removeFromLabeledLocker(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
-  keys, _ := util.GetListParam(r, "keys")
-  if label != "" && len(keys) > 0 {
-    getLockerForLabel(r, label).Remove(keys)
+  path, _ := util.GetListParam(r, "path")
+  if label != "" && len(path) > 0 {
+    getLockerForLabel(r, label).Remove(path)
     w.WriteHeader(http.StatusAccepted)
-    msg = fmt.Sprintf("Data removed from labeled locker %s for keys %+v", label, keys)
+    msg = fmt.Sprintf("Data removed from labeled locker %s for path %+v", label, path)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = "Not enough parameters to access locker"
@@ -949,8 +1126,9 @@ func removeFromLabeledLocker(w http.ResponseWriter, r *http.Request) {
 func getFromLabeledLocker(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
-  keys, _ := util.GetListParam(r, "keys")
-  if len(keys) > 0 {
+  val := util.GetStringParamValue(r, "path")
+  path, _ := util.GetListParam(r, "path")
+  if len(path) > 0 {
     var locker *locker.CombiLocker
     if label != "" {
       locker = getLockerForLabel(r, label)
@@ -958,32 +1136,38 @@ func getFromLabeledLocker(w http.ResponseWriter, r *http.Request) {
       locker = getCurrentLocker(r)
     }
     if locker != nil {
-      msg = locker.Get(keys)
-      w.WriteHeader(http.StatusAccepted)
+      data, dataAtKey := locker.Get(path)
+      if dataAtKey {
+        fmt.Fprint(w, data)
+      } else {
+        util.WriteJsonPayload(w, data)
+      }
+      msg = fmt.Sprintf("Reported data from path [%s]\n", val)
     } else {
       msg = "Locker not found"
       w.WriteHeader(http.StatusNotFound)
+      fmt.Fprint(w, msg)
     }
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = "Not enough parameters to access locker"
+    fmt.Fprint(w, msg)
   }
   if global.EnableRegistryLogs {
     util.AddLogMessage(msg, r)
   }
-  fmt.Fprint(w, msg)
 }
 
 func storeInPeerLocker(w http.ResponseWriter, r *http.Request) {
   msg := ""
   peerName := util.GetStringParamValue(r, "peer")
   address := util.GetStringParamValue(r, "address")
-  keys, _ := util.GetListParam(r, "keys")
-  if peerName != "" && len(keys) > 0 {
+  path, _ := util.GetListParam(r, "path")
+  if peerName != "" && len(path) > 0 {
     data := util.Read(r.Body)
-    getCurrentLocker(r).StorePeerData(peerName, address, keys, data)
+    getCurrentLocker(r).StorePeerData(peerName, address, path, data)
     w.WriteHeader(http.StatusAccepted)
-    msg = fmt.Sprintf("Peer %s data stored for keys %+v", peerName, keys)
+    msg = fmt.Sprintf("Peer %s data stored for path %+v", peerName, path)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = "Not enough parameters to access locker"
@@ -998,11 +1182,11 @@ func removeFromPeerLocker(w http.ResponseWriter, r *http.Request) {
   msg := ""
   peerName := util.GetStringParamValue(r, "peer")
   address := util.GetStringParamValue(r, "address")
-  keys, _ := util.GetListParam(r, "keys")
-  if peerName != "" && len(keys) > 0 {
-    getCurrentLocker(r).RemovePeerData(peerName, address, keys)
+  path, _ := util.GetListParam(r, "path")
+  if peerName != "" && len(path) > 0 {
+    getCurrentLocker(r).RemovePeerData(peerName, address, path)
     w.WriteHeader(http.StatusAccepted)
-    msg = fmt.Sprintf("Peer %s data removed for keys %+v", peerName, keys)
+    msg = fmt.Sprintf("Peer %s data removed for path %+v", peerName, path)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = "Not enough parameters to access locker"
@@ -1319,7 +1503,18 @@ func addPeersTrackingHeaders(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
-func setProbe(w http.ResponseWriter, r *http.Request) {
+func getPeersTrackingHeaders(w http.ResponseWriter, r *http.Request) {
+  pr := getPortRegistry(r)
+  pr.peersLock.RLock()
+  defer pr.peersLock.RUnlock()
+  w.WriteHeader(http.StatusOK)
+  fmt.Fprintln(w, util.ToJSON(pr.peerTrackingHeaders))
+  if global.EnableRegistryLogs {
+    util.AddLogMessage("Reported peer tracking headers", r)
+  }
+}
+
+func setPeersProbe(w http.ResponseWriter, r *http.Request) {
   msg := ""
   probeType := util.GetStringParamValue(r, "type")
   isReadiness := strings.EqualFold(probeType, "readiness")
@@ -1343,7 +1538,7 @@ func setProbe(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
-func setProbeStatus(w http.ResponseWriter, r *http.Request) {
+func setPeersProbeStatus(w http.ResponseWriter, r *http.Request) {
   msg := ""
   probeType := util.GetStringParamValue(r, "type")
   isReadiness := strings.EqualFold(probeType, "readiness")
@@ -1368,6 +1563,17 @@ func setProbeStatus(w http.ResponseWriter, r *http.Request) {
     util.AddLogMessage(msg, r)
   }
   fmt.Fprintln(w, msg)
+}
+
+func getPeersProbes(w http.ResponseWriter, r *http.Request) {
+  pr := getPortRegistry(r)
+  pr.peersLock.RLock()
+  defer pr.peersLock.RUnlock()
+  w.WriteHeader(http.StatusOK)
+  fmt.Fprintln(w, util.ToJSON(pr.peerProbes))
+  if global.EnableRegistryLogs {
+    util.AddLogMessage("Reported peer probes", r)
+  }
 }
 
 func callPeer(w http.ResponseWriter, r *http.Request) {
@@ -1395,21 +1601,183 @@ func copyPeersToLocker(w http.ResponseWriter, r *http.Request) {
   currentLocker := getCurrentLocker(r)
   currentLocker.Store([]string{"peers"}, util.ToJSON(pr.peers))
   w.WriteHeader(http.StatusAccepted)
-  fmt.Fprintf(w, "Peers info stored in labeled locker %s under keys 'peers'\n", currentLocker.Label)
-}
-
-func getPeers(w http.ResponseWriter, r *http.Request) {
-  pr := getPortRegistry(r)
-  pr.peersLock.RLock()
-  defer pr.peersLock.RUnlock()
-  util.WriteJsonPayload(w, pr.peers)
-}
-
-func GetPeers(name string, r *http.Request) map[string]string {
-  peers := getPortRegistry(r).peers[name]
-  data := map[string]string{}
-  for _, pod := range peers.Pods {
-    data[pod.Name] = pod.Address
+  msg := fmt.Sprintf("Peers info stored in labeled locker %s under path 'peers'", currentLocker.Label)
+  fmt.Fprintln(w, msg)
+  if global.EnableRegistryLogs {
+    util.AddLogMessage(msg, r)
   }
-  return data
+}
+
+func cloneFromRegistry(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  url := util.GetStringParamValue(r, "url")
+  if url == "" {
+    msg = "Cannot clone. Invalid URI"
+    w.WriteHeader(http.StatusBadRequest)
+  } else {
+    pr := getPortRegistry(r)
+    var err error
+    if err = pr.clonePeersFrom(url); err != nil {
+      msg = fmt.Sprintf("Failed to clone peers data from registry [%s], error: %s", err.Error())
+      w.WriteHeader(http.StatusInternalServerError)
+    }
+    if err = pr.cloneLockersFrom(url); err != nil {
+      msg = fmt.Sprintf("Failed to clone lockers data from registry [%s], error: %s", err.Error())
+      w.WriteHeader(http.StatusInternalServerError)
+    }
+    if err = pr.clonePeersTargetsFrom(url); err != nil {
+      msg = fmt.Sprintf("Failed to clone peers targets from registry [%s], error: %s", err.Error())
+      w.WriteHeader(http.StatusInternalServerError)
+    }
+    if err = pr.clonePeersJobsFrom(url); err != nil {
+      msg = fmt.Sprintf("Failed to clone peers jobs from registry [%s], error: %s", err.Error())
+      w.WriteHeader(http.StatusInternalServerError)
+    }
+    if err = pr.clonePeersTrackingHeadersFrom(url); err != nil {
+      msg = fmt.Sprintf("Failed to clone peers tracking headers from registry [%s], error: %s", err.Error())
+      w.WriteHeader(http.StatusInternalServerError)
+    }
+    if err = pr.clonePeersProbesFrom(url); err != nil {
+      msg = fmt.Sprintf("Failed to clone peers probes from registry [%s], error: %s", err.Error())
+      w.WriteHeader(http.StatusInternalServerError)
+    }
+    msg = fmt.Sprintf("Cloned data from registry [%s]", url)
+  }
+  fmt.Fprintln(w, msg)
+  if global.EnableRegistryLogs {
+    util.AddLogMessage(msg, r)
+  }
+}
+
+func dumpLockerData(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  pr := getPortRegistry(r)
+  label := util.GetStringParamValue(r, "label")
+  val := util.GetStringParamValue(r, "path")
+  path, _ := util.GetListParam(r, "path")
+
+  if label != "" {
+    var locker *locker.CombiLocker
+    if strings.EqualFold(label, constants.LockerCurrent) {
+      locker = getCurrentLocker(r)
+    } else {
+      locker = getLockerForLabel(r, label)
+    }
+    if strings.EqualFold(val, constants.LockerPeers) {
+      util.WriteJsonPayload(w, locker.PeerLockers)
+      msg = fmt.Sprintf("Dumped peer lockers [%s]\n", label)
+    } else if len(path) > 0 {
+      data, dataAtKey := locker.Get(path)
+      if dataAtKey {
+        fmt.Fprint(w, data)
+      } else {
+        util.WriteJsonPayload(w, data)
+      }
+      msg = fmt.Sprintf("Dumped data from locker [%s] path [%s]\n", label, val)
+    } else {
+      util.WriteJsonPayload(w, locker)
+      msg = fmt.Sprintf("Dumped locker [%s]\n", label)
+    }
+  } else {
+    util.WriteJsonPayload(w, pr.labeledLockers.GetAllLockers())
+    msg = "Dumped all lockers\n"
+  }
+  if global.EnableRegistryLogs {
+    util.AddLogMessage(msg, r)
+  }
+}
+
+func dumpRegistry(w http.ResponseWriter, r *http.Request) {
+  pr := getPortRegistry(r)
+  dump := map[string]interface{}{}
+  pr.lockersLock.RLock()
+  dump["lockers"] = pr.labeledLockers.GetAllLockers()
+  pr.lockersLock.RUnlock()
+  pr.peersLock.RLock()
+  dump["peers"] = pr.peers
+  dump["peerTargets"] = pr.peerTargets
+  dump["peerJobs"] = pr.peerJobs
+  dump["peerTrackingHeaders"] = pr.peerTrackingHeaders
+  dump["peerProbes"] = pr.peerProbes
+  pr.peersLock.RUnlock()
+  fmt.Fprintln(w, util.ToJSON(dump))
+  msg := "Registry data dumped"
+  if global.EnableRegistryLogs {
+    util.AddLogMessage(msg, r)
+  }
+}
+
+func loadRegistryDump(w http.ResponseWriter, r *http.Request) {
+  dump := map[string]interface{}{}
+  if err := util.ReadJsonPayload(r, &dump); err != nil {
+    fmt.Fprintf(w, "failed to load data with error: %s", err.Error())
+    w.WriteHeader(http.StatusInternalServerError)
+    return
+  }
+  pr := getPortRegistry(r)
+
+  msg := ""
+  if dump["lockers"] != nil {
+    lockersData := util.ToJSON(dump["lockers"])
+    if lockersData != "" {
+      lockers := map[string]*locker.CombiLocker{}
+      if err := util.ReadJson(lockersData, &lockers); err == nil {
+        pr.lockersLock.Lock()
+        pr.labeledLockers.ReplaceLockers(lockers)
+        pr.lockersLock.Unlock()
+      } else {
+        msg += fmt.Sprintf("[failed to load lockers with error: %s]", err.Error())
+      }
+    }
+  }
+  pr.peersLock.Lock()
+  defer pr.peersLock.Unlock()
+
+  if dump["peers"] != nil {
+    peersData := util.ToJSON(dump["peers"])
+    if peersData != "" {
+      pr.peers = map[string]*Peers{}
+      if err := util.ReadJson(peersData, &pr.peers); err != nil {
+        msg += fmt.Sprintf("[failed to load peers with error: %s]", err.Error())
+      }
+    }
+  }
+  if dump["peerTargets"] != nil {
+    peerTargetsData := util.ToJSON(dump["peerTargets"])
+    if peerTargetsData != "" {
+      pr.peerTargets = map[string]PeerTargets{}
+      if err := util.ReadJson(peerTargetsData, &pr.peerTargets); err != nil {
+        msg += fmt.Sprintf("[failed to load peer targets with error: %s]", err.Error())
+      }
+    }
+  }
+  if dump["peerJobs"] != nil {
+    peerJobsData := util.ToJSON(dump["peerJobs"])
+    if peerJobsData != "" {
+      pr.peerJobs = map[string]PeerJobs{}
+      if err := util.ReadJson(peerJobsData, &pr.peerJobs); err != nil {
+        msg += fmt.Sprintf("[failed to load peer jobs with error: %s]", err.Error())
+      }
+    }
+  }
+  if dump["peerTrackingHeaders"] != nil {
+    pr.peerTrackingHeaders = dump["peerTrackingHeaders"].(string)
+    pr.trackingHeaders, pr.crossTrackingHeaders = util.ParseTrackingHeaders(pr.peerTrackingHeaders)
+  }
+  if dump["peerProbes"] != nil {
+    peerProbesData := util.ToJSON(dump["peerProbes"])
+    if peerProbesData != "" {
+      pr.peerProbes = &PeerProbes{}
+      if err := util.ReadJson(peerProbesData, &pr.peerProbes); err != nil {
+        msg += fmt.Sprintf("[failed to load peer probes with error: %s]", err.Error())
+      }
+    }
+  }
+  if msg == "" {
+    msg = "Registry data loaded"
+  }
+  fmt.Fprintln(w, msg)
+  if global.EnableRegistryLogs {
+    util.AddLogMessage(msg, r)
+  }
 }

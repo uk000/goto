@@ -34,7 +34,7 @@ func newPeerRequest(method string, url string, headers map[string][]string, payl
 }
 
 func invokePeerAPI(pod *Pod, method, uri string, headers map[string][]string, payload string, expectedStatus int) (bool, string, error) {
-  if req, err := newPeerRequest(method, pod.host+uri, headers, payload); err == nil {
+  if req, err := newPeerRequest(method, pod.URL+uri, headers, payload); err == nil {
     if resp, err := pod.client.Do(req); err == nil {
       data := util.Read(resp.Body)
       defer resp.Body.Close()
@@ -53,6 +53,10 @@ func invokePeerAPI(pod *Pod, method, uri string, headers map[string][]string, pa
 
 func invokePod(peer string, pod *Pod, peerPodCount int, method string, uri string, headers map[string][]string, payload string,
   expectedStatus int, retryCount int, onPodDone func(string, *Pod, string, error)) bool {
+  if pod.client == nil || pod.Offline {
+    log.Printf("Skipping offline/loaded/cloned Pod %s for Peer %s\n", pod.Address, peer)
+    return true
+  }
   var success bool
   var err error
   var response string

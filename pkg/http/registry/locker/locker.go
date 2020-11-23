@@ -42,8 +42,6 @@ type LabeledLockers struct {
   lock          sync.RWMutex
 }
 
-const DefaultLocker string = "default"
-
 func createOrGetLockerData(locker map[string]*LockerData, key string, now time.Time) *LockerData {
   lockerData := locker[key]
   if lockerData == nil {
@@ -96,7 +94,7 @@ func unsafeRemoveKeysFromLocker(locker map[string]*LockerData, keys []string) {
   }
 }
 
-func unsafeReadKeys(locker map[string]*LockerData, keys []string) string {
+func unsafeReadKeys(locker map[string]*LockerData, keys []string) (interface{}, bool) {
   if len(keys) > 0 && locker[keys[0]] != nil {
     lockerData := locker[keys[0]]
     for i := 1; i < len(keys); i++ {
@@ -104,33 +102,60 @@ func unsafeReadKeys(locker map[string]*LockerData, keys []string) string {
         lockerData = lockerData.SubKeys[keys[i]]
       }
     }
-    return lockerData.Data
+    if lockerData != nil {
+      if lockerData.Data != "" {
+        return lockerData.Data, true
+      } else {
+        return lockerData, false
+      }
+    }
   }
-  return ""
+  return "", false
 }
 
-func unsafeGetKeys(locker map[string]*LockerData) [][]string {
-  keys := [][]string{}
+func unsafeGetPaths(locker map[string]*LockerData) [][]string {
+  paths := [][]string{}
   if locker != nil {
     for key, ld := range locker {
       if ld != nil {
-        subKeys := unsafeGetKeys(ld.SubKeys)
-        currentKeys := [][]string{}
+        subKeys := unsafeGetPaths(ld.SubKeys)
+        currentPaths := [][]string{}
         if len(subKeys) > 0 {
           for _, sub := range subKeys {
             currentSubKeys := []string{key}
             currentSubKeys = append(currentSubKeys, sub...)
-            currentKeys = append(currentKeys, currentSubKeys)
+            currentPaths = append(currentPaths, currentSubKeys)
           }
         }
         if ld.Data != "" {
-          currentKeys = append(currentKeys, []string{key})
+          currentPaths = append(currentPaths, []string{key})
         }
-        keys = append(keys, currentKeys...)
+        paths = append(paths, currentPaths...)
       }
     }
   }
-  return keys
+  return paths
+}
+
+func unsafeFindKey(locker map[string]*LockerData, keyToFind string) []string {
+  results := []string{}
+  if locker != nil {
+    lower := strings.ToLower(keyToFind)
+    for key, ld := range locker {
+      if strings.Contains(strings.ToLower(key), lower) {
+        results = append(results, key)
+      }
+      if ld != nil {
+        subPaths := unsafeFindKey(ld.SubKeys, keyToFind)
+        for _, subPath := range subPaths {
+          if subPath != "" {
+            results = append(results, key+","+subPath)
+          }
+        }
+      }
+    }
+  }
+  return results
 }
 
 func unsafeGetLockerView(locker map[string]*LockerData, lockerView map[string]*LockerData) {
@@ -149,6 +174,7 @@ func unsafeGetLockerView(locker map[string]*LockerData, lockerView map[string]*L
     }
   }
 }
+
 func newDataLocker() *DataLocker {
   dataLocker := &DataLocker{}
   dataLocker.init()
@@ -177,7 +203,7 @@ func (dl *DataLocker) Remove(keys []string) {
   unsafeRemoveKeysFromLocker(dl.Locker, keys)
 }
 
-func (dl *DataLocker) Get(keys []string) string {
+func (dl *DataLocker) Get(keys []string) (interface{}, bool) {
   dl.lock.RLock()
   defer dl.lock.RUnlock()
   return unsafeReadKeys(dl.Locker, keys)
@@ -342,11 +368,18 @@ func (cl *CombiLocker) Remove(keys []string) {
   dl.Remove(keys)
 }
 
-func (cl *CombiLocker) Get(keys []string) string {
+func (cl *CombiLocker) Get(keys []string) (interface{}, bool) {
+  if len(keys) == 0 {
+    return nil, false
+  }
   cl.lock.Lock()
   dl := cl.DataLocker
   cl.lock.Unlock()
-  return dl.Get(keys)
+  result, dataAtKey := dl.Get(keys)
+  if dataAtKey {
+    return result, dataAtKey
+  }
+  return map[string]interface{}{strings.Join(keys, ","): result}, dataAtKey
 }
 
 func (cl *CombiLocker) ClearInstanceLocker(peerName, peerAddress string) bool {
@@ -452,8 +485,8 @@ func (ll *LabeledLockers) Init() {
   ll.lock.Lock()
   defer ll.lock.Unlock()
   ll.lockers = map[string]*CombiLocker{}
-  ll.lockers[DefaultLocker] = NewCombiLocker(DefaultLocker)
-  ll.currentLocker = ll.lockers[DefaultLocker]
+  ll.lockers[constants.LockerDefaultLabel] = NewCombiLocker(constants.LockerDefaultLabel)
+  ll.currentLocker = ll.lockers[constants.LockerDefaultLabel]
   ll.currentLocker.Current = true
 }
 
@@ -479,8 +512,20 @@ func (ll *LabeledLockers) CloseLocker(label string) {
   if locker != nil {
     delete(ll.lockers, label)
     if locker == ll.currentLocker {
-      ll.currentLocker = ll.lockers[DefaultLocker]
+      ll.currentLocker = ll.lockers[constants.LockerDefaultLabel]
       ll.currentLocker.Current = true
+    }
+  }
+}
+
+func (ll *LabeledLockers) ReplaceLockers(lockers map[string]*CombiLocker) {
+  ll.lock.Lock()
+  defer ll.lock.Unlock()
+  ll.lockers = lockers
+  for _, l := range lockers {
+    if l.Current {
+      ll.currentLocker = l
+      break
     }
   }
 }
@@ -504,16 +549,33 @@ func (ll *LabeledLockers) GetLockerLabels() []string {
   return labels
 }
 
-func (ll *LabeledLockers) GetDataLockerKeys() map[string][][]string {
+func (ll *LabeledLockers) GetDataLockerPaths() map[string][][]string {
   ll.lock.RLock()
   defer ll.lock.RUnlock()
-  lockerKeysByLabels := map[string][][]string{}
+  lockerPathsByLabels := map[string][][]string{}
   for label, cl := range ll.lockers {
     if cl.DataLocker != nil && cl.DataLocker.Locker != nil && len(cl.DataLocker.Locker) > 0 {
-      lockerKeysByLabels[label] = unsafeGetKeys(cl.DataLocker.Locker)
+      lockerPathsByLabels[label] = unsafeGetPaths(cl.DataLocker.Locker)
     }
   }
-  return lockerKeysByLabels
+  return lockerPathsByLabels
+}
+
+func (ll *LabeledLockers) FindDataLockerKey(key string) []string {
+  ll.lock.RLock()
+  defer ll.lock.RUnlock()
+  keyPaths := []string{}
+  for label, cl := range ll.lockers {
+    if cl.DataLocker != nil && cl.DataLocker.Locker != nil && len(cl.DataLocker.Locker) > 0 {
+      subPaths := unsafeFindKey(cl.DataLocker.Locker, key)
+      for _, subPath := range subPaths {
+        if subPath != "" {
+          keyPaths = append(keyPaths, "/registry/lockers/"+label+"/get/"+subPath)
+        }
+      }
+    }
+  }
+  return keyPaths
 }
 
 func (ll *LabeledLockers) GetCurrentLocker() *CombiLocker {

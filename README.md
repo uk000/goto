@@ -2523,11 +2523,10 @@ By registering a worker instance to a registry instance, we get a few benefits:
 1. You can pre-register a list of invocation targets and jobs at the registry instance that should be handed out to the worker instances. These targets/jobs are registered by labels, and the worker instances receive the matching targets+jobs for the labels they register with.
 2. The targets and jobs registered at the registry can also be marked for `auto-invocation`. When a worker instance receives a target/job from registry at startup that's marked for auto-invocation, it immediately invokes that target/job at startup. Additionally, the target/job is retained in the worker instance for later invocation via API as well.
 3. In addition to sending targets/jobs to worker instances at the time of registration, the registry instance also pushes targets/jobs to the worker instances as and when more targets/jobs get added to the registry. This has the added benefit of just using the registry instance as the single point of configuration, where you add targets/jobs and those get pushed to all worker instances. Removal of targets/jobs from the registry also gets pushed, so the targets/jobs get removed from the corresponding worker instances. Even targets/jobs that are pushed later can be marked for `auto-invocation`, and the worker instances that receive the target/job will invoke it immediately upon receipt.
-4. Registry provides `labeled lockers` as a flexible in-memory data store for capturing any kind of data for debugging purposes. Registry starts with a locker labeled `default`. A new locker can be opened using the `/open` API, and lockers can be closed (discarded) using the `/close` API. The most recently opened locker becomes current and captures data reported from peer instances, whereas other named lockers stay around and can be interacted with using `/store`, `/remove` and `/get` APIs.
-
-When peer instances connect to the registry, they store their client invocation results into `peer instance` lockers under the current named locker in the registry.
-
-Peer instances periodically re-register themselves with registry in case registry was restarted and lost all peers info. Re-registering is different from startup registration in that peers don't receive targets and jobs from registry when they remind registry about themselves, and hence no auto-invocation happens.
+4. Registry provides `labeled lockers` as a flexible in-memory data store for capturing any kind of data for debugging purposes. Registry starts with a locker labeled `default`. A new locker can be opened using the `/open` API, and lockers can be closed (discarded) using the `/close` API. The most recently opened locker becomes current and captures data reported from peer instances, whereas other named lockers stay around and can be interacted with using `/store`, `/remove` and `/get` APIs. The `/find` API can find a given search phrase across all keys across all available lockers.
+5. When peer instances connect to the registry, they store their client invocation results into `peer instance` lockers under the current named locker in the registry. 
+6. Peer instances periodically re-register themselves with registry in case registry was restarted and lost all peers info. Re-registering is different from startup registration in that peers don't receive targets and jobs from registry when they remind registry about themselves, and hence no auto-invocation happens.
+7. A registry instance can be asked to clone data from another registry instance using the `/cloneFrom` API. This allows for quick boot-strapping of a new registry instance based on configuration from an existing registry instance, whether for data analysis purpose or for performing further operations. The pods cloned from the other registry are not used by this registry for any operations. Any new pods connecting to this registry using the same labels cloned from the other registry will be able to use the existing configs.
 
 #### Registry APIs
 |METHOD|URI|Description|
@@ -2546,22 +2545,26 @@ Peer instances periodically re-register themselves with registry in case registr
 | GET       | /registry/peers         | Get all registered peers. See [Peers JSON Schema](#peers-json-schema) |
 ||||
 | POST      | /registry/lockers/open/{label} | Setup a locker with the given label and make it the current locker where peer results get stored.  |
-| POST      | /registry/lockers/{label}/store/{keys} | Store payload (body) as data in the given labeled locker at the leaf of the given key path.  |
-| POST      | /registry/lockers/{label}/remove/{keys} | Remove stored data, if any, from the given key path in the given labeled locker.  |
-| GET      | /registry/lockers/{label}/get/{keys} | Read stored data, if any, at the given key path in the given labeled locker.  |
 | POST      | /registry/lockers/close/{label} | Remove the locker for the given label.  |
 | POST      | /registry/lockers/close | Remove all labeled lockers and empty the default locker.  |
 | POST      | /registry/lockers/clear | Remove all labeled lockers and empty the default locker.  |
+| GET       | /registry/lockers/labels | Remove all labeled lockers and empty the default locker.  |
+| POST      | /registry/lockers/{label}/store/{path} | Store payload (body) as data in the given labeled locker at the leaf of the given key path. `path` can be a single key or a comma-separated list of subkeys, in which case data gets stored in the tree under the given path. |
+| POST      | /registry/lockers/{label}/remove/{path} | Remove stored data, if any, from the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data gets removed from the leaf of the given path. |
+| GET      | /registry/lockers/{label}/get/{path} | Read stored data, if any, at the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
+| GET      | /registry/lockers/current/get/{path} | Read stored data, if any, at the given key path in the current locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
+| GET      | /registry/lockers/data/paths| Get a list of key paths where some data is stored, from all lockers.  |
+| GET      | /registry/lockers/find/{text} | Get a list of all valid URI paths containing the given text. The returned URIs container the locker label and key, and can be invoked directly against the base URL of the registry. |
 | GET       | /registry/lockers/current | Get currently active locker with stored keys, but without stored data |
 | GET       | /registry/lockers/current?data=y | Get currently active locker with stored data |
 | GET       | /registry/lockers/{label} | Get given label's locker with stored keys, but without stored data |
 | GET       | /registry/lockers/{label}?data=y | Get given label's locker with stored data |
 | GET       | /registry/lockers | Get all lockers with stored keys but without stored data |
 | GET       | /registry/lockers?data=y | Get all lockers with stored data |
-| POST      | /registry/peers/{peer}/{address}/locker/store/{keys} | Store any arbitrary value for the given `keys` in the locker of the peer instance under currently active labeled locker. `keys` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
-| POST      | /registry/peers/{peer}/{address}/locker/remove/{keys} | Remove stored data for the given `keys` from the locker of the peer instance under currently active labeled locker. `keys` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
-| POST      | /registry/peers/{peer}/locker/store/{keys} | Store any arbitrary value for the given key in the peer locker without associating data to a peer instance under currently active labeled locker. `keys` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
-| POST      | /registry/peers/{peer}/locker/remove/{keys} | Remove stored data for the given key from the peer locker under currently active labeled locker. `keys` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
+| POST      | /registry/peers/{peer}/{address}/locker/store/{path} | Store any arbitrary value for the given `path` in the locker of the peer instance under currently active labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
+| POST      | /registry/peers/{peer}/{address}/locker/remove/{path} | Remove stored data for the given `path` from the locker of the peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
+| POST      | /registry/peers/{peer}/locker/store/{path} | Store any arbitrary value for the given key in the peer locker without associating data to a peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
+| POST      | /registry/peers/{peer}/locker/remove/{path} | Remove stored data for the given key from the peer locker under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
 | POST      | /registry/peers/{peer}/{address}/locker/clear | Clear the locker for the peer instance under currently active labeled locker |
 | POST      | /registry/peers/{peer}/locker/clear | Clear the locker for all instances of the given peer under currently active labeled locker |
 | POST      | /registry/peers/lockers/clear | Clear all peer lockers under currently active labeled locker |
@@ -2598,14 +2601,37 @@ Peer instances periodically re-register themselves with registry in case registr
 | POST      | /registry/peers/jobs/clear   | Remove all jobs from all peers. |
 ||||
 | POST, PUT | /registry/peers/track/headers/{headers} | Configure headers to be tracked by client invocations on peers. Pushed immediately as well as upon start of a new peer instance. |
+| GET | /registry/peers/track/headers | Get a list of headers configured for tracking by the above `POST` API. |
 ||||
 | POST, PUT | /registry/peers/probe/readiness/set?uri={uri} | Configure readiness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probe/liveness/set?uri={uri} | Configure liveness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probe/readiness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probe/liveness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
+| GET | /registry/peers/probes | Get probe configuration given to registry via any of the above 4 probe APIs. |
 ||||
 | GET, POST, PUT | /registry/peers/{peer}/call?uri={uri} | Invoke the given `URI` on the given `peer`, using the HTTP method and payload from this request |
 | GET, POST, PUT | /registry/peers/call?uri={uri} | Invoke the given `URI` on all `peers`, using the HTTP method and payload from this request |
+||||
+| POST | /registry/cloneFrom?url={url} | Clone data from another registry instance at the given URL. The current goto instance will download `peers`, `lockers`, `targets`, `jobs`, `tracking headers` and `probes`. The peer pods downloaded from other registry are not used for any invocation by this registry, it just becomes available locally for information purpose. Any new pods connecting to this registry using the same peer labels will use the downloaded targets, jobs, etc. |
+| GET | /lockers/{label}/dump/{path} | Dump data stored at the given key path in the given labeled locker. |
+| GET | /lockers/current/dump/{path} | Dump data stored at the given key path from the current labeled locker. |
+| GET | /lockers/{label}/dump | Dump contents of the given labeled locker. |
+| GET | /lockers/current/dump | Dump contents of the current labeled locker. |
+| GET | /lockers/all/dump | Dump contents of all labeled lockers. |
+| GET | /registry/dump | Dump current registry configs and locker data in json format. |
+| POST | /registry/load | Load registry configs and locker data from json dump produced via `/dump` API. |
+
+#### Peer JSON Schema 
+(to register a peer via /registry/peers/add)
+
+|Field|Data Type|Description|
+|---|---|---|
+| name      | string | Name/Label of a peer |
+| namespace | string | Namespace of the peer instance (if available, else `local`) |
+| pod       | string | Pod/Hostname of the peer instance |
+| address   | string | IP address of the peer instance |
+| node      | string | Host node where the peer is located |
+| cluster   | string | Cluster/DC ID where the peer is located |
 
 #### Peers JSON Schema 
 Map of peer labels to peer details, where each peer details include the following info
@@ -2613,52 +2639,44 @@ Map of peer labels to peer details, where each peer details include the followin
 
 |Field|Data Type|Description|
 |---|---|---|
-| Name      | string | Name/Label of a peer |
-| Namespace | string | Namespace of the peer instance (if available, else `local`) |
-| Pods      | map string->PodDetails | Map of Pod Addresses to Pod Details. See [Pod Details JSON Schema] below(#pod-details-json-schema) |
+| name      | string | Name/Label of a peer |
+| namespace | string | Namespace of the peer instance (if available, else `local`) |
+| pods      | map string->PodDetails | Map of Pod Addresses to Pod Details. See [Pod Details JSON Schema] below(#pod-details-json-schema) |
+| podEpochs | map string->[]PodEpoch   | Past lives of this pod since last cleanup. |
 
 
 #### Pod Details JSON Schema 
 
 |Field|Data Type|Description|
 |---|---|---|
-| Name      | string | Pod/Host Name |
-| Address   | string | Pod Address |
-| Healthy   | bool   | Whether the pod was found to be healthy at last interaction |
-| CurrentEpoch | PodEpoch   | Current lifetime details of this pod |
-| PastEpochs | []PodEpoch   | Past lives of this pod since last cleanup. |
+| name      | string | Pod/Host Name |
+| address   | string | Pod Address |
+| node      | string | Host node where the peer is located |
+| cluster   | string | Cluster/DC ID where the peer is located |
+| url       | string | URL where this peer is reachable |
+| healthy   | bool   | Whether the pod was found to be healthy at last interaction |
+| offline   | bool   | Whether the pod is determined to be offline. Cloned and dump-loaded pods are marked as offline until they reconnect to the registry |
+| currentEpoch | PodEpoch   | Current lifetime details of this pod |
+| pastEpochs | []PodEpoch   | Past lives of this pod since last cleanup. |
 
 
 #### Pod Epoch JSON Schema 
 
 |Field|Data Type|Description|
 |---|---|---|
-| Epoch      | int | Epoch count of this pod |
-| FirstContact   | time | First time this pod connected (at registration) |
-| LastContact   | time | Last time this pod sent its reminder |
-
-#### Peer JSON Schema 
-(to register a peer via /registry/peers/add)
-
-|Field|Data Type|Description|
-|---|---|---|
-| Name      | string | Name/Label of a peer |
-| Namespace | string | Namespace of the peer instance (if available, else `local`) |
-| Pod       | string | Pod/Hostname of the peer instance |
-| Address   | string | IP address of the peer instance |
+| epoch      | int | Epoch count of this pod |
+| name      | string | Pod/Host Name |
+| address   | string | Pod Address |
+| node      | string | Host node where the peer is located |
+| cluster   | string | Cluster/DC ID where the peer is located |
+| firstContact   | time | First time this pod connected (at registration) |
+| lastContact   | time | Last time this pod sent its reminder |
 
 #### Peer Target JSON Schema
 ** Same as [Client Target JSON Schema](#client-target-json-schema)
 
 #### Peer Job JSON Schema
 ** Same as [Jobs JSON Schema](#job-json-schema)
-
-#### Locker Data JSON Schema
-|Field|Data Type|Description|
-|---|---|---|
-| Data          | string  | Data posted by a peer |
-| firstReported | time    | Time when this data was first reported by the peer |
-| lastReported  | time    | Time when this data was last reported by the peer (if peer overwrote the data after first reporting) |
 
 <br/>
 
@@ -2762,6 +2780,33 @@ curl -X POST http://localhost:8080/registry/peers/peer1/call?uri=/request/header
 
 curl -s http://localhost:8080/registry/peers/call?uri=/request/headers/track
 
+#store data in the `current` locker under path `A->B->C`
+curl -X POST http://localhost:8080/registry/lockers/current/store/A,B,C --data '{"some":"data"}'
+
+#store data in a locker named `lockerA` under path `A->B->C`
+curl -X POST http://localhost:8080/registry/lockers/lockerA/store/A,B,C --data '{"some":"data"}'
+
+#see paths where data is stored in all lockers
+curl -s localhost:8080/registry/lockers/data/paths
+
+#find all paths where text `foo` appears
+curl -s localhost:8080/registry/lockers/find/foo
+
+#get data from lockerA at path A->B->C
+curl -v localhost:8080/registry/lockers/lockerA/get/XX,1,2
+
+#dump all contents of lockerA
+curl -s localhost:8080/registry/lockers/lockerA/dump
+
+#dump all contents of all lockers
+curl -s localhost:8080/registry/lockers/all/dump
+
+#generate a dump of registry
+curl -s localhost:8080/registry/dump
+
+#Load registry data from a previously generated dump
+curl -X POST http://localhost:8080/registry/load --data-binary @registry.dump
+
 ```
 </details>
 
@@ -2780,20 +2825,36 @@ $ curl -s localhost:8080/registry/peers | jq
       "1.0.0.1:8081": {
         "name": "peer1",
         "address": "1.0.0.1:8081",
+        "node": "vm-1",
+        "cluster": "cluster-1",
+        "url": "http://1.0.0.1:8081",
         "healthy": true,
+        "offline": false,
         "currentEpoch": {
           "epoch": 2,
+          "name": "peer1",
+          "address": "1.0.0.1:8081",
+          "node": "vm-1",
+          "cluster": "cluster-1",
           "firstContact": "2020-07-08T12:29:03.076479-07:00",
           "lastContact": "2020-07-08T12:29:03.076479-07:00"
         },
         "pastEpochs": [
           {
             "epoch": 0,
+            "name": "peer1",
+            "address": "1.0.0.1:8081",
+            "node": "vm-1",
+            "cluster": "cluster-1",
             "firstContact": "2020-07-08T12:28:06.986875-07:00",
             "lastContact": "2020-07-08T12:28:06.986875-07:00"
           },
           {
             "epoch": 1,
+            "name": "peer1",
+            "address": "1.0.0.1:8081",
+            "node": "vm-1",
+            "cluster": "cluster-1",
             "firstContact": "2020-07-08T12:28:45.276196-07:00",
             "lastContact": "2020-07-08T12:28:45.276196-07:00"
           }
@@ -2802,9 +2863,17 @@ $ curl -s localhost:8080/registry/peers | jq
       "1.0.0.2:8081": {
         "name": "peer1",
         "address": "1.0.0.2:8081",
-        "healthy": false,
+        "node": "vm-1",
+        "cluster": "cluster-1",
+        "url": "http://1.0.0.2:8081",
+        "healthy": true,
+        "offline": false,
         "currentEpoch": {
           "epoch": 0,
+          "name": "peer1",
+          "address": "1.0.0.2:8081",
+          "node": "vm-1",
+          "cluster": "cluster-1",
           "firstContact": "2020-07-08T12:29:00.066019-07:00",
           "lastContact": "2020-07-08T12:29:00.066019-07:00"
         },
@@ -2819,15 +2888,27 @@ $ curl -s localhost:8080/registry/peers | jq
       "2.2.2.2:8082": {
         "name": "peer2",
         "address": "2.2.2.2:8082",
+        "node": "vm-2",
+        "cluster": "cluster-2",
+        "url": "http://2.2.2.2:8082",
         "healthy": true,
+        "offline": false,
         "currentEpoch": {
           "epoch": 1,
+          "name": "peer2",
+          "address": "2.2.2.2:8082",
+          "node": "vm-2",
+          "cluster": "cluster-2",
           "firstContact": "2020-07-08T12:29:00.066019-07:00",
           "lastContact": "2020-07-08T12:29:00.066019-07:00"
         },
         "pastEpochs": [
           {
             "epoch": 0,
+            "name": "peer2",
+            "address": "2.2.2.2:8082",
+            "node": "vm-2",
+            "cluster": "cluster-2",
             "firstContact": "2020-07-08T12:28:06.986736-07:00",
             "lastContact": "2020-07-08T12:28:36.993819-07:00"
           }
@@ -2848,87 +2929,156 @@ $ curl -s localhost:8080/registry/peers | jq
 <summary>Example</summary>
 <p>
 
-```
+```json
 $ curl -s localhost:8080/registry/peers/lockers
+
 {
-  "peer1": {
-    "1.0.0.1:8081": {
-      "client": {
-        "data": "{\"targetInvocationCounts\":{\"t11\":400,\"t12\":400},...}",
-        "Locked": false,
-        "firstReported": "2020-06-09T18:28:17.877231-07:00",
-        "lastReported": "2020-06-09T18:28:29.955605-07:00"
+  "default": {
+    "label": "default",
+    "peerLockers": {
+      "peer1": {
+        "instanceLockers": {
+          "1.0.0.1:8081": {
+            "locker": {
+              "client": {
+                "data": "",
+                "subKeys": {
+                  "peer1_to_peer2": {
+                    "data": "...",
+                    "subKeys": {},
+                    "firstReported": "2020-11-20T23:34:58.059154-08:00",
+                    "lastReported": "2020-11-20T23:35:02.299239-08:00"
+                  },
+                  "peer1_to_peer3": {
+                    "data": "...",
+                    "subKeys": {},
+                    "firstReported": "2020-11-20T23:34:58.057888-08:00",
+                    "lastReported": "2020-11-20T23:35:02.297347-08:00"
+                  }
+                },
+                "firstReported": "2020-11-20T23:34:58.052197-08:00",
+                "lastReported": "0001-01-01T00:00:00Z"
+              }
+            },
+            "active": true
+          },
+          "1.0.0.1:9091": {
+            "locker": {
+              "client": {
+                "data": "",
+                "subKeys": {
+                  "peer1_to_peer2": {
+                    "data": "...",
+                    "subKeys": {},
+                    "firstReported": "2020-11-20T23:34:58.057506-08:00",
+                    "lastReported": "2020-11-20T23:35:02.281845-08:00"
+                  },
+                  "peer1_to_peer4": {
+                    "data": "...",
+                    "subKeys": {},
+                    "firstReported": "2020-11-20T23:34:58.053469-08:00",
+                    "lastReported": "2020-11-20T23:35:02.276481-08:00"
+                  }
+                },
+                "firstReported": "2020-11-20T23:34:58.053469-08:00",
+                "lastReported": "0001-01-01T00:00:00Z"
+              }
+            },
+            "active": true
+          }
+        },
+        "locker": {
+          "locker": {},
+          "active": true
+        }
       },
-      "client_1": {
-        "data": "{\"targetInvocationCounts\":{\"t11\":400},\"target...}",
-        "Locked": true,
-        "firstReported": "2020-06-09T18:28:17.879187-07:00",
-        "lastReported": "2020-06-09T18:28:29.958954-07:00"
-      },
-      "client_2": {
-        "data": "{\"targetInvocationCounts\":{\"t12\":400}...}",
-        "Locked": true,
-        "firstReported": "2020-06-09T18:28:17.889567-07:00",
-        "lastReported": "2020-06-09T18:28:29.945121-07:00"
-      },
-      "job_job1_1": {
-        "data": "[{\"Index\":\"1.1.1\",\"Finished\":false,\"Data\":...}]",
-        "firstReported": "2020-06-09T18:28:17.879195-07:00",
-        "lastReported": "2020-06-09T18:28:27.529454-07:00"
-      },
-      "job_job2_2": {
-        "data": "[{\"Index\":\"2.2.1\",\"Finished\":false,\"Data\":\"1...}]",
-        "Locked": true,
-        "firstReported": "2020-06-09T18:28:18.985445-07:00",
-        "lastReported": "2020-06-09T18:28:37.428542-07:00"
+      "peer2": {
+        "instanceLockers": {
+          "1.0.0.1:8082": {
+            "locker": {
+              "client": {
+                "data": "",
+                "subKeys": {
+                  "peer2_to_peer1": {
+                    "data": "...",
+                    "subKeys": {},
+                    "firstReported": "2020-11-20T23:34:58.068331-08:00",
+                    "lastReported": "2020-11-20T23:35:02.301491-08:00"
+                  },
+                  "peer2_to_peer5": {
+                    "data": "...",
+                    "subKeys": {},
+                    "firstReported": "2020-11-20T23:34:58.055716-08:00",
+                    "lastReported": "2020-11-20T23:35:02.27662-08:00"
+                  }
+                },
+                "firstReported": "2020-11-20T23:34:58.052091-08:00",
+                "lastReported": "0001-01-01T00:00:00Z"
+              }
+            },
+            "active": true
+          },
+        },
+        "locker": {
+          "locker": {},
+          "active": true
+        }
       }
     },
-    "1.0.0.2:8081": {
-      "client": {
-        "data": "{\"targetInvocationCounts\":{\"t11\":400,\"t12\":400},...}",
-        "Locked": false,
-        "firstReported": "2020-06-09T18:28:17.877231-07:00",
-        "lastReported": "2020-06-09T18:28:29.955605-07:00"
-      },
-      "client_1": {
-        "data": "{\"targetInvocationCounts\":{\"t11\":400},\"target...}",
-        "Locked": true,
-        "firstReported": "2020-06-09T18:28:17.879187-07:00",
-        "lastReported": "2020-06-09T18:28:29.958954-07:00"
-      }
-    }
+    "dataLocker": {
+      "locker": {},
+      "active": true
+    },
+    "current": true
   },
-  "peer2": {
-    "2.0.0.1:8082": {
-      "client": {
-        "data": "{\"targetInvocationCounts\":{\"t11\":400,\"t12\":400},...}",
-        "Locked": false,
-        "firstReported": "2020-06-09T18:28:17.877231-07:00",
-        "lastReported": "2020-06-09T18:28:29.955605-07:00"
+  "lockerA": {
+    "label": "lockerA",
+    "peerLockers": {},
+    "dataLocker": {
+      "locker": {
+        "AA": {
+          "data": "",
+          "subKeys": {
+            "B": {
+              "data": "...",
+              "subKeys": {},
+              "firstReported": "2020-11-20T23:47:17.564845-08:00",
+              "lastReported": "2020-11-20T23:47:17.564845-08:00"
+            }
+          },
+          "firstReported": "2020-11-20T23:47:17.564845-08:00",
+          "lastReported": "0001-01-01T00:00:00Z"
+        }
       },
-      "client_1": {
-        "data": "{\"targetInvocationCounts\":{\"t11\":400},\"target...}",
-        "Locked": true,
-        "firstReported": "2020-06-09T18:28:17.879187-07:00",
-        "lastReported": "2020-06-09T18:28:29.958954-07:00"
-      }
+      "active": true
     },
-    "2.0.0.2:8082": {
-      "client": {
-        "data": "{\"targetInvocationCounts\":{\"t11\":400,\"t12\":400},...}",
-        "Locked": false,
-        "firstReported": "2020-06-09T18:28:17.877231-07:00",
-        "lastReported": "2020-06-09T18:28:29.955605-07:00"
+    "current": false
+  },
+  "lockerB": {
+    "label": "lockerB",
+    "peerLockers": {},
+    "dataLocker": {
+      "locker": {
+        "XX": {
+          "data": "",
+          "subKeys": {
+            "XY": {
+              "data": "...",
+              "subKeys": {},
+              "firstReported": "2020-11-20T23:46:52.861559-08:00",
+              "lastReported": "0001-01-01T00:00:00Z"
+            }
+          },
+          "firstReported": "2020-11-20T23:46:52.861559-08:00",
+          "lastReported": "0001-01-01T00:00:00Z"
+        }
       },
-      "client_1": {
-        "data": "{\"targetInvocationCounts\":{\"t11\":400},\"target...}",
-        "Locked": true,
-        "firstReported": "2020-06-09T18:28:17.879187-07:00",
-        "lastReported": "2020-06-09T18:28:29.958954-07:00"
-      }
-    }
+      "active": true
+    },
+    "current": false
   }
 }
+
 ```
 </p>
 </details>

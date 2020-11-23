@@ -1,8 +1,8 @@
 package global
 
 import (
-	"net/http"
-	"time"
+  "net/http"
+  "time"
 )
 
 var (
@@ -27,6 +27,7 @@ var (
   EnableInvocationLogs       bool   = true
   EnableRegistryLogs         bool   = true
   EnableRegistryReminderLogs bool   = true
+  EnableRegistryLockerLogs   bool   = false
   EnableClientLogs           bool   = true
   EnableServerLogs           bool   = true
   EnableProbeLogs            bool   = true
