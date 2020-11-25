@@ -3,6 +3,7 @@ package status
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 
 	"goto/pkg/http/server/intercept"
@@ -110,6 +111,7 @@ func getStatus(w http.ResponseWriter, r *http.Request) {
     portStatus.countsByRequestedStatus[requestedStatus]++
     statusLock.Unlock()
     util.AddLogMessage(fmt.Sprintf("Requested status: [%d]", requestedStatus), r)
+    w.Header().Add("Requested-Status", strconv.Itoa(requestedStatus))
     if !IsForcedStatus(r) {
       reportedStatus := computeResponseStatus(requestedStatus, r)
       w.WriteHeader(reportedStatus)

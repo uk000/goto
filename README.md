@@ -34,6 +34,8 @@ Check these flow diagrams to get a visual overview of `Goto` behavior and usage.
 
 ### Flow: <a href="docs/Goto-Registry-Peer-Targets-APIs.png"> Registry APIs for peer targets management and invocation <img src="docs/Goto-Registry-Peer-Targets-APIs-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;" /></a>
 
+### Overview: [Goto Lockers](docs/goto-lockers.md) <img src="docs/Goto-Lockers-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;" /></a>
+
 <br/>
 
 ---
@@ -2529,9 +2531,10 @@ By registering a worker instance to a registry instance, we get a few benefits:
 6. Peer instances periodically re-register themselves with registry in case registry was restarted and lost all peers info. Re-registering is different from startup registration in that peers don't receive targets and jobs from registry when they remind registry about themselves, and hence no auto-invocation happens.
 7. A registry instance can be asked to clone data from another registry instance using the `/cloneFrom` API. This allows for quick boot-strapping of a new registry instance based on configuration from an existing registry instance, whether for data analysis purpose or for performing further operations. The pods cloned from the other registry are not used by this registry for any operations. Any new pods connecting to this registry using the same labels cloned from the other registry will be able to use the existing configs.
 
-#### Registry APIs
+#### <a name="registry-apis"></a> Registry APIs
 |METHOD|URI|Description|
 |---|---|---|
+|<a name="registry-peers-apis"></a>|||
 | POST      | /registry/peers/add     | Register a worker instance (referred to as peer). See [Peer JSON Schema](#peer-json-schema)|
 | POST      | /registry/peers/{peer}/remember | Re-register a peer. Accepts same request payload as /peers/add API, but doesn't respond back with targets and jobs. |
 | POST, PUT | /registry/peers/{peer}/remove/{address} | Deregister a peer by its label and IP address |
@@ -2544,6 +2547,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST      | /registry/peers/clear   | Remove all registered peers|
 | POST      | /registry/peers/copyToLocker   | Copy current set of peers info to current labeled locker under key `peers` |
 | GET       | /registry/peers         | Get all registered peers. See [Peers JSON Schema](#peers-json-schema) |
+|<a name="registry-lockers-apis"></a>|||
 ||||
 | POST      | /registry/lockers/open/{label} | Setup a locker with the given label and make it the current locker where peer results get stored.  |
 | POST      | /registry/lockers/close/{label} | Remove the locker for the given label.  |
@@ -2574,6 +2578,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET       | /registry/peers/lockers | Get locker's data for all peers from currently active labeled locker |
 | GET       | /registry/peers/lockers/targets/results | Get target invocation summary results for all peer instances from currently active labeled locker |
 | GET       | /registry/peers/lockers/targets/results?detailed=Y | Get invocation results broken down by targets for all peer instances from currently active labeled locker |
+|<a name="registry-peers-targets-apis"></a>|||
 ||||
 | GET       | /registry/peers/targets | Get all registered targets for all peers |
 | POST      | /registry/peers/{peer}/targets/add | Add a target to be sent to a peer. See [Peer Target JSON Schema](#peer-target-json-schema). Pushed immediately as well as upon start of a new peer instance. |
@@ -2589,6 +2594,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST, PUT | /registry/peers/targets/results/all/{enable}  | Controls whether results should be summarized across all targets. Disabling this when not needed can improve performance. Disabled by default. |
 | POST, PUT | /registry/peers/targets/results/invocations/{enable}  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
 | POST      | /registry/peers/targets/clear   | Remove all targets from all peers |
+|<a name="registry-peers-jobs-apis"></a>|||
 ||||
 | GET       | /registry/peers/jobs | Get all registered jobs for all peers |
 | POST      | /registry/peers/{peer}/jobs/add | Add a job to be sent to a peer. See [Peer Job JSON Schema](#peer-job-json-schema). Pushed immediately as well as upon start of a new peer instance. |
@@ -2600,18 +2606,22 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST, PUT | /registry/peers/{peer}/jobs/{jobs}/stop | Stop given jobs on the given peer |
 | POST, PUT | /registry/peers/{peer}/jobs/stop/all | Stop all jobs on the given peer |
 | POST      | /registry/peers/jobs/clear   | Remove all jobs from all peers. |
+|<a name="registry-peers-trackheaders-apis"></a>|||
 ||||
 | POST, PUT | /registry/peers/track/headers/{headers} | Configure headers to be tracked by client invocations on peers. Pushed immediately as well as upon start of a new peer instance. |
 | GET | /registry/peers/track/headers | Get a list of headers configured for tracking by the above `POST` API. |
+|<a name="registry-peers-probes-apis"></a>|||
 ||||
 | POST, PUT | /registry/peers/probe/readiness/set?uri={uri} | Configure readiness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probe/liveness/set?uri={uri} | Configure liveness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probe/readiness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probe/liveness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
 | GET | /registry/peers/probes | Get probe configuration given to registry via any of the above 4 probe APIs. |
+|<a name="registry-peers-call-apis"></a>|||
 ||||
 | GET, POST, PUT | /registry/peers/{peer}/call?uri={uri} | Invoke the given `URI` on the given `peer`, using the HTTP method and payload from this request |
 | GET, POST, PUT | /registry/peers/call?uri={uri} | Invoke the given `URI` on all `peers`, using the HTTP method and payload from this request |
+|<a name="registry-dump-apis"></a>|||
 ||||
 | POST | /registry/cloneFrom?url={url} | Clone data from another registry instance at the given URL. The current goto instance will download `peers`, `lockers`, `targets`, `jobs`, `tracking headers` and `probes`. The peer pods downloaded from other registry are not used for any invocation by this registry, it just becomes available locally for information purpose. Any new pods connecting to this registry using the same peer labels will use the downloaded targets, jobs, etc. |
 | GET | /lockers/{label}/dump/{path} | Dump data stored at the given key path in the given labeled locker. |
