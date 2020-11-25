@@ -1,23 +1,23 @@
 package runner
 
 import (
-	"context"
-	"fmt"
-	"goto/pkg/global"
-	"goto/pkg/http/registry/peer"
-	"goto/pkg/http/server/conn"
-	"goto/pkg/util"
-	"log"
-	"net"
-	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
+  "context"
+  "fmt"
+  "goto/pkg/global"
+  "goto/pkg/http/registry/peer"
+  "goto/pkg/http/server/conn"
+  "goto/pkg/util"
+  "log"
+  "net"
+  "net/http"
+  "os"
+  "os/signal"
+  "syscall"
+  "time"
 
-	"github.com/gorilla/mux"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
+  "github.com/gorilla/mux"
+  "golang.org/x/net/http2"
+  "golang.org/x/net/http2/h2c"
 )
 
 var (
@@ -65,6 +65,15 @@ func StartHttpServer(server *http.Server) {
 }
 
 func ServeListener(l net.Listener) {
+  go func() {
+    log.Printf("Starting listener %s\n", l.Addr())
+    if err := server.Serve(l); err != nil {
+      log.Println(err)
+    }
+  }()
+}
+
+func ServeTLSListener(l net.Listener) {
   go func() {
     log.Printf("Starting listener %s\n", l.Addr())
     if err := server.Serve(l); err != nil {

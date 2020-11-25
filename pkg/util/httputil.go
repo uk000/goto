@@ -466,6 +466,15 @@ func Read(r io.Reader) string {
   return ""
 }
 
+func ReadBytes(r io.Reader) []byte {
+  if body, err := ioutil.ReadAll(r); err == nil {
+    return body
+  } else {
+    log.Println(err.Error())
+  }
+  return nil
+}
+
 func CloseResponse(r *http.Response) {
   defer r.Body.Close()
   io.Copy(ioutil.Discard, r.Body)

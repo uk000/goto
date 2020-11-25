@@ -152,15 +152,12 @@ The application accepts the following command arguments:
     </thead>
     <tbody>
         <tr>
-          <td rowspan="3"><pre>--port {port}</pre></td>
+          <td rowspan="2"><pre>--port {port}</pre></td>
           <td>Initial port the server listens on. </td>
-          <td rowspan="3">8080</td>
+          <td rowspan="2">8080</td>
         </tr>
         <tr>
-          <td>* Additional ports can be opened by making listener API calls on this port.</td>
-        </tr>
-        <tr>
-          <td>* See [Listeners](#-listeners) feature later in the doc.</td>
+          <td>* Additional ports can be opened by making listener API calls on this port. See <a href="#server-listeners">Listeners</a> feature for more details.</td>
         </tr>
         <tr>
           <td rowspan="2"><pre>--label {label}</pre></td>
@@ -181,15 +178,12 @@ The application accepts the following command arguments:
           <td rowspan="1">5s</td>
         </tr>
         <tr>
-          <td rowspan="3"><pre>--registry {url}</pre></td>
+          <td rowspan="2"><pre>--registry {url}</pre></td>
           <td>URL of the Goto Registry instance that this instance should connect to. </td>
-          <td rowspan="3"> "" </td>
+          <td rowspan="2"> "" </td>
         </tr>
         <tr>
-          <td>* This is used to getting initial configs and optionally report results to registry.</td>
-        </tr>
-        <tr>
-          <td>* See [Registry](#registry-features) feature later in the doc.</td>
+          <td>* This is used to getting initial configs and optionally report results to registry. See <a href="#registry-features">Registry</a> feature for more details.</td>
         </tr>
         <tr>
           <td rowspan="2"><pre>--locker={true|false}</pre></td>
@@ -206,7 +200,7 @@ The application accepts the following command arguments:
         </tr>
         <tr>
           <td rowspan="1"><pre>--probeLogs={true|false}</pre></td>
-          <td>Enable/Disable logging of requests received for URIs configured as liveness and readiness probes (See [Probes](#server-probes). </td>
+          <td>Enable/Disable logging of requests received for URIs configured as liveness and readiness probes. See <a href="#server-probes">Probes</a> for more details. </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
@@ -1270,13 +1264,20 @@ Sample log line:
 
 The server starts with a single http listener on port given to it as command line arg (defaults to 8080). It exposes listener APIs to let you manage additional HTTP listeners (TCP support will come in the future). The ability to launch and shutdown listeners lets you do some chaos testing. All listener ports respond to the same set of API calls, so any of the APIs described below as well as runtime traffic proxying can be done via any active listener.
 
+Adding TLS cert and key for a listener using `/cert` and `/key` API will configure the listener for serving HTTPS traffic when it's opened/reopened. An already opened HTTP listener can be reopened as HTTPS listener by configuring TLS certs for it and calling `/reopen`.
+
 
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
 | POST       | /listeners/add           | Add a listener. [See Payload JSON Schema](#listener-json-schema)|
+| POST       | /listeners/update        | Update an existing listener.|
+| POST, PUT  | /listeners/{port}/cert/add   | Add/update certificate for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
+| POST, PUT  | /listeners/{port}/key/add   | Add/update private key for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
+| POST, PUT  | /listeners/{port}/cert/remove   | Remove certificate and key for a listener, and reopen it to serve HTTP traffic instead of HTTPS. |
 | POST, PUT  | /listeners/{port}/remove | Remove a listener|
 | POST, PUT  | /listeners/{port}/open   | Open an added listener to accept traffic|
+| POST, PUT  | /listeners/{port}/reopen | Close and reopen an existing listener if already opened, otherwise open it |
 | POST, PUT  | /listeners/{port}/close  | Close an added listener|
 | GET        | /listeners               | Get a list of listeners |
 
@@ -2548,7 +2549,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST      | /registry/lockers/close/{label} | Remove the locker for the given label.  |
 | POST      | /registry/lockers/close | Remove all labeled lockers and empty the default locker.  |
 | POST      | /registry/lockers/clear | Remove all labeled lockers and empty the default locker.  |
-| GET       | /registry/lockers/labels | Remove all labeled lockers and empty the default locker.  |
+| GET       | /registry/lockers/labels | Get a list of all existing locker labels, regardless of whether or not it has data.  |
 | POST      | /registry/lockers/{label}/store/{path} | Store payload (body) as data in the given labeled locker at the leaf of the given key path. `path` can be a single key or a comma-separated list of subkeys, in which case data gets stored in the tree under the given path. |
 | POST      | /registry/lockers/{label}/remove/{path} | Remove stored data, if any, from the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data gets removed from the leaf of the given path. |
 | GET      | /registry/lockers/{label}/get/{path} | Read stored data, if any, at the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
