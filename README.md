@@ -26,15 +26,14 @@ Keep reading...
 
 Check these flow diagrams to get a visual overview of `Goto` behavior and usage.
 
-### Flow: <a href="docs/Goto-Client-Targets.png" width="auto" height="auto"> Use <small>`Goto`</small> client APIs to register and invoke traffic to targets <img src="docs/Goto-Client-Targets-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;"/> </a>
+### Flow: [Use client APIs to register and invoke traffic to targets ](docs/goto-client-targets.md) <a href="docs/goto-client-targets.md"><img src="docs/Goto-Client-Targets-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;" /></a>
 
-### Flow: <a href="docs/Goto-Registry-Peers.png" width="auto" height="auto"> Interactions between <small>`Goto`</small> peer instances and registry instance during startup and shutdown <img src="docs/Goto-Registry-Peers-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;" /></a>
+### Flow: [Configuring Server Listeners](docs/goto-listeners.md) <a href="docs/goto-listeners.md"><img src="docs/Goto-Listeners-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;" /></a>
 
-### Flow: <a href="docs/Goto-Registry-Peer-Targets-Overview.png"> Managing targets and invoking traffic on multiple <small>`Goto`</small> clients via <small>`Goto`</small> registry <img src="docs/Goto-Registry-Peer-Targets-Overview-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;" /></a>
+### Flow: [<small>`Goto`</small> Registry - Peer interactions](docs/goto-registry-peers-interactions.md) <a href="docs/goto-registry-peers-interactions.md"><img src="docs/Goto-Registry-Peers-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;" /></a>
 
-### Flow: <a href="docs/Goto-Registry-Peer-Targets-APIs.png"> Registry APIs for peer targets management and invocation <img src="docs/Goto-Registry-Peer-Targets-APIs-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;" /></a>
+### Overview: [Goto Lockers](docs/goto-lockers.md) <a href="docs/goto-lockers.md"><img src="docs/Goto-Lockers-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;" /></a>
 
-### Overview: [Goto Lockers](docs/goto-lockers.md) <img src="docs/Goto-Lockers-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;" /></a>
 
 <br/>
 
@@ -68,7 +67,7 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 ### Scenario: [Test a client's behavior upon service failure](docs/scenarios-resiliency.md#scenario-test-a-clients-behavior-upon-service-failure)
 
 
-### Scenario: [Track client hangups on server via request/connection timeouts](docs/scenarios-resiliency.md#server-resiliency-client-hangups)
+### Scenario: [Track client hang-ups on server via request/connection timeouts](docs/scenarios-resiliency.md#server-resiliency-client-hangups)
 
 <br/>
 
@@ -94,7 +93,7 @@ The application exposes both client and server features via various management R
 ### [Startup](#startup)
 
 ### Client Features
-* [HTTP Targets and Traffic](#client-http-traffic)
+* [Targets and Traffic](#client-http-traffic)
 
 ### Server Features
 * [Server Logging](#server-logging)
@@ -224,7 +223,7 @@ Once the server is up and running, rest of the interactions and configurations a
 # <a name="client-features"></a>
 # Client Features
 
-## <a name="client-http-traffic"></a> HTTP Targets and Traffic
+## <a name="client-http-traffic"></a> Targets and Traffic
 As a client tool, `goto` offers the feature to configure multiple targets and send http traffic:
 - Allows targets to be configured and invoked via REST APIs
 - Configure targets to be invoked ahead of time before invocation, as well as auto-invoke targets upon configuration
@@ -262,7 +261,7 @@ In addition to keeping the results in the `goto` client instance, those are also
 | POST      | /client/results/clear                 | Clear previously accumulated invocation results |
 | POST      | /client/results/clear                 | Clear previously accumulated invocation results |
 | POST      | /client/results/all/{enable}          | Enable/disable collection of cumulative results across all targets. This gives high level overview of all traffic, but at a performance overhead. Disabled by default. |
-| POST      | /client/results/invocations/{enable}          | Enable/disable collection of results by invocations. This gives more detailed visibility into results per invocation, but has performance overhead. Disabled by default. |
+| POST      | /client/results/invocations/{enable}          | Enable/disable collection of results by invocations. This gives more detailed visibility into results per invocation but has performance overhead. Disabled by default. |
 
 
 #### Client Target JSON Schema
@@ -296,7 +295,7 @@ In addition to keeping the results in the `goto` client instance, those are also
 
 #### Client Results Schema (output of API /client/results)
 The results are keyed by targets, with an empty key "" used to capture all results (across all targets) if "capturing of all results" is enabled (via API `/client/results/all/{enable}`).
-The schema below describes fields per target (including the all targets data)
+The schema below describes fields per target.
 
 |Field|Data Type|Description|
 |---|---|---|
@@ -312,7 +311,7 @@ The schema below describes fields per target (including the all targets data)
 
 
 #### HeaderCounts schema
-The schema below describes fields per target (including the all targets data)
+The schema below describes fields per target.
 
 |Field|Data Type|Description|
 |---|---|---|
@@ -328,7 +327,7 @@ The schema below describes fields per target (including the all targets data)
 
 
 #### CountInfo schema
-The schema below describes fields per target (including the all targets data)
+The schema below describes fields per target.
 
 |Field|Data Type|Description|
 |---|---|---|
@@ -348,8 +347,8 @@ The schema below describes fields per target (including the all targets data)
 |---|---|---|
 | target                | Client Target       | Target details as described in `Client Target JSON Schema`  |
 | completedRequestCount | int                 | Number of requests completed for this target in this invocation |
-| stopRequested         | bool                | Has stop been requested for this target |
-| stopped               | bool                | Has the target been stopped yet. Quite likely this will not show up as true, because the target gets removed from active set soon after it's stopped |
+| stopRequested         | bool                | Whether `stop` has been requested for this target |
+| stopped               | bool                | Whether the target has already stopped. Quite likely this will not show up as true, because the target gets removed from active set soon after it's stopped |
 
 
 #### Client API Examples
@@ -1276,7 +1275,7 @@ Adding TLS cert and key for a listener using `/cert` and `/key` API will configu
 | POST       | /listeners/update        | Update an existing listener.|
 | POST, PUT  | /listeners/{port}/cert/add   | Add/update certificate for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
 | POST, PUT  | /listeners/{port}/key/add   | Add/update private key for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
-| POST, PUT  | /listeners/{port}/cert/remove   | Remove certificate and key for a listener, and reopen it to serve HTTP traffic instead of HTTPS. |
+| POST, PUT  | /listeners/{port}/cert/remove   | Remove certificate and key for a listener and reopen it to serve HTTP traffic instead of HTTPS. |
 | POST, PUT  | /listeners/{port}/remove | Remove a listener|
 | POST, PUT  | /listeners/{port}/open   | Open an added listener to accept traffic|
 | POST, PUT  | /listeners/{port}/reopen | Close and reopen an existing listener if already opened, otherwise open it |
@@ -1818,7 +1817,7 @@ curl localhost:8080/response/payload
 
 # <a name="server-ad-hoc-payload"></a>
 ## > Ad-hoc Payload
-This URI responds with a random-generated payload of the requested size. Payload size can be a numeric value or use common byte size conventions: `K`, `KB`, `M`, `MB`. Payload size is only limited by the memory available to the `goto` process. The response carries an additional header `Goto-Payload-Length` in additionl to the standard header `Content-Length` to identify the size of the response payload.
+This URI responds with a random-generated payload of the requested size. Payload size can be a numeric value or use common byte size conventions: `K`, `KB`, `M`, `MB`. Payload size is only limited by the memory available to the `goto` process. The response carries an additional header `Goto-Payload-Length` in addition to the standard header `Content-Length` to identify the size of the response payload.
 
 #### API
 |METHOD|URI|Description|
@@ -2058,7 +2057,7 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
 
 <br/>
 
-- Headers: specified as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addHeaders` list. A target is triggered if any of the headers in the match list are present in the request (headers are matched using OR instead of AND). The variable to capture header value is specified as `{foo}`, and can be referenced in the `addHeaders` list again as `{foo}`. This example will make it clear:
+- Headers: specified as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addHeaders` list. A target is triggered if any of the headers in the match list are present in the request (headers are matched using OR instead of AND). The variable to capture header value is specified as `{foo}` and can be referenced in the `addHeaders` list again as `{foo}`. This example will make it clear:
 
   ```
   curl http://goto:8080/request/proxy/targets/add --data \
@@ -2072,7 +2071,7 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
 
 <br/>
 
-- Query: specified as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addQuery` list. A target is triggered if any of the query parameters in the match list are present in the request (matched using OR instead of AND). The variable to capture query parameter value is specified as `{foo}`, and can be referenced in the `addQuery` list again as `{foo}`. Example:
+- Query: specified as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addQuery` list. A target is triggered if any of the query parameters in the match list are present in the request (matched using OR instead of AND). The variable to capture query parameter value is specified as `{foo}` and can be referenced in the `addQuery` list again as `{foo}`. Example:
 
     ```
   curl http://goto:8080/request/proxy/targets/add --data \
@@ -2298,7 +2297,7 @@ curl localhost:8080/response/trigger/list
 - Command execution on local OS
 The job results can be retrieved via API from the `goto` instance, and also stored in locker on registry instance if enabled. (See `--locker` command arg)
 
-Jobs can also trigger another job for each line of output produced, as well as upon completion. For command jobs, the output produced is split by newline, and each line of output can be used as input to trigger another command job. A job can specify markers for output fields (split using specified separator), and these markers can be referenced by successor jobs. The markers from a job's output are carried over to all its successor jobs, so a job can use output from a parent job multiple generations in the past. The triggered job's command args specifies marker references as `{foo}`, which gets replaced by the value extracted from any predecessor job's output with that marker key. This feature can be used to trigger complex chains of jobs, where each job uses output of the previous job to do something else.
+Jobs can also trigger another job for each line of output produced, as well as upon completion. For command jobs, the output produced is split by newline, and each line of output can be used as input to trigger another command job. A job can specify markers for output fields (split using specified separator), and these markers can be referenced by successor jobs. The markers from a job's output are carried over to all its successor jobs, so a job can use output from a parent job that might be several generations in the past. The triggered job's command args specifies marker references as `{foo}`, which gets replaced by the value extracted from any predecessor job's output with that marker key. This feature can be used to trigger complex chains of jobs, where each job uses output of the previous job to do something else.
 
 #### Jobs APIs
 |METHOD|URI|Description|
@@ -2529,14 +2528,14 @@ By registering a worker instance to a registry instance, we get a few benefits:
 4. Registry provides `labeled lockers` as a flexible in-memory data store for capturing any kind of data for debugging purposes. Registry starts with a locker labeled `default`. A new locker can be opened using the `/open` API, and lockers can be closed (discarded) using the `/close` API. The most recently opened locker becomes current and captures data reported from peer instances, whereas other named lockers stay around and can be interacted with using `/store`, `/remove` and `/get` APIs. The `/find` API can find a given search phrase across all keys across all available lockers.
 5. When peer instances connect to the registry, they store their client invocation results into `peer instance` lockers under the current named locker in the registry. 
 6. Peer instances periodically re-register themselves with registry in case registry was restarted and lost all peers info. Re-registering is different from startup registration in that peers don't receive targets and jobs from registry when they remind registry about themselves, and hence no auto-invocation happens.
-7. A registry instance can be asked to clone data from another registry instance using the `/cloneFrom` API. This allows for quick boot-strapping of a new registry instance based on configuration from an existing registry instance, whether for data analysis purpose or for performing further operations. The pods cloned from the other registry are not used by this registry for any operations. Any new pods connecting to this registry using the same labels cloned from the other registry will be able to use the existing configs.
+7. A registry instance can be asked to clone data from another registry instance using the `/cloneFrom` API. This allows for quick bootstrapping of a new registry instance based on configuration from an existing registry instance, whether for data analysis purpose or for performing further operations. The pods cloned from the other registry are not used by this registry for any operations. Any new pods connecting to this registry using the same labels cloned from the other registry will be able to use the existing configs.
 
 #### <a name="registry-apis"></a> Registry APIs
 |METHOD|URI|Description|
 |---|---|---|
 |<a name="registry-peers-apis"></a>|||
 | POST      | /registry/peers/add     | Register a worker instance (referred to as peer). See [Peer JSON Schema](#peer-json-schema)|
-| POST      | /registry/peers/{peer}/remember | Re-register a peer. Accepts same request payload as /peers/add API, but doesn't respond back with targets and jobs. |
+| POST      | /registry/peers/{peer}/remember | Re-register a peer. Accepts same request payload as /peers/add API but doesn't respond back with targets and jobs. |
 | POST, PUT | /registry/peers/{peer}/remove/{address} | Deregister a peer by its label and IP address |
 | GET       | /registry/peers/{peer}/health/{address} | Check and report health of a specific peer instance based on label and IP address |
 | GET       | /registry/peers/{peer}/health | Check and report health of all instances of a peer |
@@ -2545,7 +2544,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST      | /registry/peers/health/cleanup | Check health of all instances of all peers and remove IP addresses that are unresponsive |
 | POST      | /registry/peers/clear/epochs   | Remove epochs for disconnected peers|
 | POST      | /registry/peers/clear   | Remove all registered peers|
-| POST      | /registry/peers/copyToLocker   | Copy current set of peers info to current labeled locker under key `peers` |
+| POST      | /registry/peers/copyToLocker   | Copy current set of `Peers JSON` data (output of `/registry/peers` API) to current locker under a pre-defined key named `peers` |
 | GET       | /registry/peers         | Get all registered peers. See [Peers JSON Schema](#peers-json-schema) |
 |<a name="registry-lockers-apis"></a>|||
 ||||
@@ -2559,7 +2558,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET      | /registry/lockers/{label}/get/{path} | Read stored data, if any, at the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
 | GET      | /registry/lockers/current/get/{path} | Read stored data, if any, at the given key path in the current locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
 | GET      | /registry/lockers/data/paths| Get a list of key paths where some data is stored, from all lockers.  |
-| GET      | /registry/lockers/find/{text} | Get a list of all valid URI paths containing the given text. The returned URIs container the locker label and key, and can be invoked directly against the base URL of the registry. |
+| GET      | /registry/lockers/find/{text} | Get a list of all valid URI paths containing the locker label and keys where the given text was found. The returned URIs are valid for invocation against the base URL of the registry. |
 | GET       | /registry/lockers/current | Get currently active locker with stored keys, but without stored data |
 | GET       | /registry/lockers/current?data=y | Get currently active locker with stored data |
 | GET       | /registry/lockers/{label} | Get given label's locker with stored keys, but without stored data |
