@@ -1,24 +1,24 @@
 package util
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"goto/pkg/global"
-	"io"
-	"io/ioutil"
-	"log"
-	"math/rand"
-	"net"
-	"net/http"
-	"os"
-	"reflect"
-	"regexp"
-	"strconv"
-	"strings"
-	"time"
+  "context"
+  "encoding/json"
+  "fmt"
+  "goto/pkg/global"
+  "io"
+  "io/ioutil"
+  "log"
+  "math/rand"
+  "net"
+  "net/http"
+  "os"
+  "reflect"
+  "regexp"
+  "strconv"
+  "strings"
+  "time"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
 
 type ServerHandler struct {
@@ -251,17 +251,18 @@ func ParseSize(value string) int {
 }
 
 func GetSizeParam(r *http.Request, name string) int {
-  vars := mux.Vars(r)
-  return ParseSize(vars[name])
+  return ParseSize(mux.Vars(r)[name])
 }
 
-func GetDurationParam(r *http.Request, name string) time.Duration {
-  vars := mux.Vars(r)
-  param := vars[name]
-  if d, err := time.ParseDuration(param); err == nil {
+func ParseDuration(value string) time.Duration {
+  if d, err := time.ParseDuration(value); err == nil {
     return d
   }
   return 0
+}
+
+func GetDurationParam(r *http.Request, name string) time.Duration {
+  return ParseDuration(mux.Vars(r)[name])
 }
 
 func GetHeaderValues(r *http.Request) map[string]map[string]int {

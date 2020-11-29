@@ -38,7 +38,9 @@ func (rw *InterceptResponseWriter) Write(b []byte) (int, error) {
 
 func (rw *InterceptResponseWriter) Flush() {
   rw.Chunked = true
-  rw.ResponseWriter.(http.Flusher).Flush()
+  if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
+    flusher.Flush()
+  }
 }
 
 func (rw *InterceptResponseWriter) Proceed() {

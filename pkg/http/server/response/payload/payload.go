@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"goto/pkg/http/server/intercept"
 	"goto/pkg/util"
+	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -223,52 +225,73 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
   if pr.ResponseContentType != "" {
     contentType = pr.ResponseContentType
   }
-  if flusher, ok := w.(http.Flusher); ok {
-    if irw, ok := w.(*intercept.InterceptResponseWriter); ok {
-      irw.Chunked = true
+  w.Header().Set("Content-Type", contentType)
+  w.Header().Set("X-Content-Type-Options", "nosniff")
+  w.Header().Set("Goto-Chunk-Count", strconv.Itoa(count))
+  w.Header().Set("Goto-Chunk-Length", strconv.Itoa(chunk))
+  w.Header().Set("Goto-Chunk-Delay", delay.String())
+  if size > 0 {
+    w.Header().Set("Goto-Stream-Length", strconv.Itoa(size))
+  }
+  if duration > 0 {
+    w.Header().Set("Goto-Stream-Duration", duration.String())
+  }
+
+  var conn net.Conn
+  var flusher http.Flusher
+  var writer io.Writer
+  if h, ok := w.(http.Hijacker); ok {
+    if conn, _, _ = h.Hijack(); conn != nil {
+      conn.SetWriteDeadline(time.Time{})
+      writer = conn
     }
-    util.AddLogMessage("Responding with streaming payload", r)
-    w.Header().Set("Content-Type", contentType)
-    w.Header().Set("X-Content-Type-Options", "nosniff")
-    w.Header().Set("Goto-Chunk-Count", strconv.Itoa(count))
-    w.Header().Set("Goto-Chunk-Length", strconv.Itoa(chunk))
-    w.Header().Set("Goto-Chunk-Delay", delay.String())
-    if size > 0 {
-      w.Header().Set("Goto-Stream-Length", strconv.Itoa(size))
-    }
-    if duration > 0 {
-      w.Header().Set("Goto-Stream-Duration", duration.String())
-    }
-    payloadIndex := 0
-    payloadSize := len(payload)
-    payloadChunkCount := payloadSize/chunk
-    if payloadSize%chunk > 0 {
-      payloadChunkCount++
-    }
-    for i := 0; i < count; i++ {
-      start := payloadIndex*chunk
-      end := (payloadIndex+1)*chunk
-      if end > payloadSize {
-        end = payloadSize
+  }
+  if conn == nil {
+    if f, ok := w.(http.Flusher); ok {
+      flusher = f
+      if irw, ok := w.(*intercept.InterceptResponseWriter); ok {
+        irw.Chunked = true
       }
-      chunkResponse := string(payload[start : end])
-      fmt.Fprint(w, chunkResponse)
-      flusher.Flush()
-      payloadIndex++
-      if payloadIndex == payloadChunkCount {
-        if repeat {
-          payloadIndex = 0
-        } else {
-          break
-        }
-      }
-      if i < count-1 {
-        time.Sleep(delay)
-      }
+      writer = w
     }
-  } else {
+  }
+  if conn == nil && flusher == nil {
     w.WriteHeader(http.StatusInternalServerError)
     fmt.Fprintln(w, "Cannot stream")
+    return
+  }
+  util.AddLogMessage("Responding with streaming payload", r)
+  payloadIndex := 0
+  payloadSize := len(payload)
+  payloadChunkCount := payloadSize/chunk
+  if payloadSize%chunk > 0 {
+    payloadChunkCount++
+  }
+  for i := 0; i < count; i++ {
+    start := payloadIndex*chunk
+    end := (payloadIndex+1)*chunk
+    if end > payloadSize {
+      end = payloadSize
+    }
+    chunkResponse := string(payload[start : end])
+    fmt.Fprint(writer, chunkResponse)
+    if flusher != nil {
+      flusher.Flush()
+    }
+    payloadIndex++
+    if payloadIndex == payloadChunkCount {
+      if repeat {
+        payloadIndex = 0
+      } else {
+        break
+      }
+    }
+    if i < count-1 {
+      time.Sleep(delay)
+    }
+  }
+  if conn != nil {
+    conn.Close()
   }
 }
 

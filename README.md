@@ -1263,10 +1263,17 @@ Sample log line:
 ## <a name="server-listeners"></a>  > Listeners
 
 
-The server starts with a single http listener on port given to it as command line arg (defaults to 8080). It exposes listener APIs to let you manage additional HTTP listeners (TCP support will come in the future). The ability to launch and shutdown listeners lets you do some chaos testing. All listener ports respond to the same set of API calls, so any of the APIs described below as well as runtime traffic proxying can be done via any active listener.
+The server starts with a single http listener on the bootstrap port (given as a command line arg, defaults to 8080). It exposes listener APIs to let you add/manage additional HTTP/TCP listeners. The ability to launch and shutdown listeners lets you do some chaos testing. All listener ports respond to the same set of API calls, so any of the HTTP APIs described below as well as runtime traffic proxying can be done via any active HTTP listener, and any TCP operation can be performed on any active TCP listener.
 
 Adding TLS cert and key for a listener using `/cert` and `/key` API will configure the listener for serving HTTPS traffic when it's opened/reopened. An already opened HTTP listener can be reopened as HTTPS listener by configuring TLS certs for it and calling `/reopen`.
 
+#### TCP
+While the rest of the documentation describes various HTTP operations in various sections, operations supported by TCP listeners are summarized here:
+1. A TCP port can be configured with various timeouts that control either the connection lifetime (regardless of activity) and idle timeouts.
+2. By default, a TCP listener executes in `silent` mode. In this mode, the behavior of the listener depends on the `connectionLife`. If `connectionLife` is set to a non-zero value, the listener waits for the configured lifetime and closes the client connection, and never responds to any bytes received. If `connectionLife` is set to zero, the listener waits for the first byte to arrive and then closes the client connection.
+3. If `Echo` mode is enabled on a TCP listener, the listener echoes back the bytes received from the client. The `echoPacketSize` configures the echo buffer size, which is the number of bytes that the listener will need to receive from the client before echoing back. If more data is received than the `echoPacketSize`, it'll echo multiple chunks each of `echoPacketSize` size. In `echo` mode, the connection enforces `readTimeout` and `connIdleTimeout` based on the activity: any new bytes recevied reset the read/idle timeouts. It applies `writeTimeout` when sending the echo response to the client. If `connectionLife` is set, it controls the overall lifetime of the connection and the connection will close upon reaching the max life regardless of the activity.
+4. `Stream` operation can be enabled on a TCP listener via the APIs described below. If `stream` is enabled, it takes precedence over `echo` mode, and the connection starts streaming TCP bytes per the given configuration as soon as a client connects. None of the timeouts or max life applies in streaming mode, and the client connection closes automatically once the streaming completes.
+5. In all cases, client may close the connection proactively causing the ongoing operation to abort.
 
 #### APIs
 |METHOD|URI|Description|
@@ -1281,13 +1288,39 @@ Adding TLS cert and key for a listener using `/cert` and `/key` API will configu
 | POST, PUT  | /listeners/{port}/reopen | Close and reopen an existing listener if already opened, otherwise open it |
 | POST, PUT  | /listeners/{port}/close  | Close an added listener|
 | GET        | /listeners               | Get a list of listeners |
+| POST, PUT  | /listeners/{port}/response/delay/{duration}  | Set TCP response delay for the port (applies to TCP echo mode) |
+| POST, PUT  | /listeners/{port}/timeout/read/{duration}  | Set TCP read timeout for the port (applies to TCP echo mode) |
+| POST, PUT  | /listeners/{port}/timeout/write/{duration}  | Set TCP write timeout for the port (applies to TCP echo mode) |
+| POST, PUT  | /listeners/{port}/timeout/idle/{duration}  | Set TCP connection idle timeout for the port (applies to TCP echo mode) |
+| POST, PUT  | /listeners/{port}/connection/life/{duration}  | Set TCP connection lifetime duration for the port (applies to all TCP connection modes except streaming) |
+| POST, PUT  | /listeners/{port}/stream/size/{payloadSize}/duration/{duration}/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with the given total payload size delivered over the given duration with the given delay per chunk |
+| POST, PUT  | /listeners/{port}/stream/chunk/{chunkSize}/duration/{duration}/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with chunks of the given chunk size delivered over the given duration with the given delay per chunk |
+| POST, PUT  | /listeners/{port}/stream/chunk/{chunkSize}/count/{chunkCount}/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with total chunks matching the given chunk count of the given chunk size delivered with the given delay per chunk |
+| POST, PUT  | /listeners/{port}/mode/stream/{enable}  | Enable or disable streaming on a port without having to restart the listener (useful to disable streaming while retaining the stream congiuration) |
+| POST, PUT  | /listeners/{port}/mode/echo/{enable} | Enable/disable echo mode on a port to let the port be tested in silent mode (see overview for details) |
 
 #### Listener JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
-|label    |string | Label to be applied to the listener. This can also be set/changed via REST API later|
-|port     |int    | Port on which the new listener will listen on|
-|protocol |string | Currently only `http`. TCP support will come soon.|
+| label    | string | Label to be applied to the listener. This can also be set/changed via REST API later. |
+| port     | int    | Port on which the new listener will listen on. |
+| protocol | string | `http` or `tcp`|
+| open | bool | Controls whether the listener should be opened as soon as it's added. Also reflects listener's current status when queried. |
+| readTimeout | duration | Read timeout to apply when reading data sent by client. |
+| writeTimeout | duration | Write timeout to apply when sending data to the client. |
+| connectTimeout | duration | Max period that the server will wait during connection handshake. |
+| connIdleTimeout | duration | Max period of inactivity (no bytes traveled) on the connection that would trigger closure of the client connection. |
+| connectionLife | duration | Max lifetime after which the client connection will be terminated proactively by the server. |
+| echo | bool | Controls whether the listener should act in echo mode. |
+| echoPacketSize | int | Configures the size of payload to be echoed back to client. Server will continuously buffer these many bytes from client and stream them back. |
+| responseDelay | duration | Delay to apply when sending response back to the client in echo mode. |
+| stream | bool | Controls whether streaming should be enabled for the listener. |
+| streamPayloadSize | int | Configures the total payload size to be stream via chunks if streaming is enabled for the listener. |
+| streamChunkSize | int | Configures the size of each chunk of data to stream if streaming is enabled for the listener. |
+| streamChunkCount | int | Configures the total number of chunks to stream if streaming is enabled for the listener. |
+| streamChunkDelay | duration | Configures the delay to be added before sending each chunk back if streaming is enabled for the listener. |
+| streamDuration | duration | Configures the total duration of stream if streaming is enabled for the listener. |
+| tls | bool | Reports whether the listener has been configured for TLS. This flag is read-only, the value of which is determined based on whether TLS cert and key have been added for the listener using the APIs. |
 
 
 #### Listener API Examples:

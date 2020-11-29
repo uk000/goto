@@ -11,7 +11,7 @@ import (
 )
 
 var (
-  Handler util.ServerHandler = util.ServerHandler{Name: "status", SetRoutes: SetRoutes}
+  Handler util.ServerHandler = util.ServerHandler{Name: "catchall", SetRoutes: SetRoutes}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {

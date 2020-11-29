@@ -6,6 +6,7 @@ import (
   "goto/pkg/global"
   "goto/pkg/http/registry/peer"
   "goto/pkg/http/server/conn"
+  "goto/pkg/http/server/listeners"
   "goto/pkg/util"
   "log"
   "net"
@@ -40,9 +41,9 @@ func RunHttpServer(root string, handlers ...util.ServerHandler) {
   h2s := &http2.Server{}
   server = &http.Server{
     Addr:         fmt.Sprintf("0.0.0.0:%d", global.ServerPort),
-    WriteTimeout: 60 * time.Minute,
-    ReadTimeout:  60 * time.Minute,
-    IdleTimeout:  60 * time.Minute,
+    WriteTimeout: 1 * time.Minute,
+    ReadTimeout:  1 * time.Minute,
+    IdleTimeout:  1 * time.Minute,
     ConnContext:  conn.SaveConnInContext,
     Handler:      h2c.NewHandler(r, h2s),
   }
@@ -64,10 +65,10 @@ func StartHttpServer(server *http.Server) {
   }()
 }
 
-func ServeListener(l net.Listener) {
+func ServeHTTPListener(l *listeners.Listener) {
   go func() {
-    log.Printf("Starting listener %s\n", l.Addr())
-    if err := server.Serve(l); err != nil {
+    log.Printf("Starting listener %s\n", l.Label)
+    if err := server.Serve(l.Listener); err != nil {
       log.Println(err)
     }
   }()

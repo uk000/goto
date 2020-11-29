@@ -19,7 +19,7 @@ var (
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   echoRouter := r.PathPrefix("/echo").Subrouter()
   util.AddRoute(echoRouter, "/headers", EchoHeaders)
-  util.AddRoute(echoRouter, "/ws", echoHandler, "GET", "POST")
+  util.AddRoute(echoRouter, "/ws", wsEchoHandler, "GET", "POST")
   util.AddRoute(echoRouter, "", Echo)
 }
 
@@ -41,7 +41,7 @@ func Echo(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, util.ToJSON(response))
 }
 
-func echoHandler(w http.ResponseWriter, r *http.Request) {
+func wsEchoHandler(w http.ResponseWriter, r *http.Request) {
   headers := util.GetRequestHeadersLog(r)
   s := websocket.Server{Handler: websocket.Handler(func(ws *websocket.Conn){
     ws.Write([]byte(headers))
