@@ -1273,7 +1273,8 @@ While the rest of the documentation describes various HTTP operations in various
 2. By default, a TCP listener executes in `silent` mode. In this mode, the behavior of the listener depends on the `connectionLife`. If `connectionLife` is set to a non-zero value, the listener waits for the configured lifetime and closes the client connection, and never responds to any bytes received. If `connectionLife` is set to zero, the listener waits for the first byte to arrive and then closes the client connection.
 3. If `Echo` mode is enabled on a TCP listener, the listener echoes back the bytes received from the client. The `echoPacketSize` configures the echo buffer size, which is the number of bytes that the listener will need to receive from the client before echoing back. If more data is received than the `echoPacketSize`, it'll echo multiple chunks each of `echoPacketSize` size. In `echo` mode, the connection enforces `readTimeout` and `connIdleTimeout` based on the activity: any new bytes recevied reset the read/idle timeouts. It applies `writeTimeout` when sending the echo response to the client. If `connectionLife` is set, it controls the overall lifetime of the connection and the connection will close upon reaching the max life regardless of the activity.
 4. `Stream` operation can be enabled on a TCP listener via the APIs described below. If `stream` is enabled, it takes precedence over `echo` mode, and the connection starts streaming TCP bytes per the given configuration as soon as a client connects. None of the timeouts or max life applies in streaming mode, and the client connection closes automatically once the streaming completes.
-5. In all cases, client may close the connection proactively causing the ongoing operation to abort.
+5. In `conversation` mode, the server waits for the client to send a TCP payload with text `HELLO` to which server also responds back with `HELLO`. All subsequent packets from client should follow the format `BEGIN/{text}/END`, and server echoes the received text back in the format of `ACK/{text}/END`. Client can initiate connection closure by sending text `GOODBYE`, or else the connection can close based on various timeouts and connection lifetime config.
+6. In all cases, client may close the connection proactively causing the ongoing operation to abort.
 
 #### APIs
 |METHOD|URI|Description|
@@ -1293,15 +1294,17 @@ While the rest of the documentation describes various HTTP operations in various
 | POST, PUT  | /listeners/{port}/timeout/write/{duration}  | Set TCP write timeout for the port (applies to TCP echo mode) |
 | POST, PUT  | /listeners/{port}/timeout/idle/{duration}  | Set TCP connection idle timeout for the port (applies to TCP echo mode) |
 | POST, PUT  | /listeners/{port}/connection/life/{duration}  | Set TCP connection lifetime duration for the port (applies to all TCP connection modes except streaming) |
-| POST, PUT  | /listeners/{port}/stream/size/{payloadSize}/duration/{duration}/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with the given total payload size delivered over the given duration with the given delay per chunk |
-| POST, PUT  | /listeners/{port}/stream/chunk/{chunkSize}/duration/{duration}/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with chunks of the given chunk size delivered over the given duration with the given delay per chunk |
-| POST, PUT  | /listeners/{port}/stream/chunk/{chunkSize}/count/{chunkCount}/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with total chunks matching the given chunk count of the given chunk size delivered with the given delay per chunk |
+| POST, PUT  | /listeners/{port}/stream<br/>/size/{payloadSize}<br/>/duration/{duration}<br/>/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with the given total payload size delivered over the given duration with the given delay per chunk |
+| POST, PUT  | /listeners/{port}/stream<br/>/chunk/{chunkSize}<br/>/duration/{duration}<br/>/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with chunks of the given chunk size delivered over the given duration with the given delay per chunk |
+| POST, PUT  | /listeners/{port}/stream<br/>/chunk/{chunkSize}<br/>/count/{chunkCount}<br/>/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with total chunks matching the given chunk count of the given chunk size delivered with the given delay per chunk |
 | POST, PUT  | /listeners/{port}/mode/stream/{enable}  | Enable or disable streaming on a port without having to restart the listener (useful to disable streaming while retaining the stream congiuration) |
 | POST, PUT  | /listeners/{port}/mode/echo/{enable} | Enable/disable echo mode on a port to let the port be tested in silent mode (see overview for details) |
+| POST, PUT  | /listeners/{port}/mode/conversation/{enable} | Enable/disable conversation mode on a port to support send-receive payload verification (see overview for details) |
 
 #### Listener JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
+| listenerID    | string | Read-only field identifying the listener's port and current generation. |
 | label    | string | Label to be applied to the listener. This can also be set/changed via REST API later. |
 | port     | int    | Port on which the new listener will listen on. |
 | protocol | string | `http` or `tcp`|
@@ -1311,10 +1314,11 @@ While the rest of the documentation describes various HTTP operations in various
 | connectTimeout | duration | Max period that the server will wait during connection handshake. |
 | connIdleTimeout | duration | Max period of inactivity (no bytes traveled) on the connection that would trigger closure of the client connection. |
 | connectionLife | duration | Max lifetime after which the client connection will be terminated proactively by the server. |
-| echo | bool | Controls whether the listener should act in echo mode. |
+| echo | bool | Controls whether the listener should operate in echo mode. |
+| stream | bool | Controls whether the listener should operate in streaming mode. |
+| conversation | bool | Controls whether the listener should operate in conversation mode. |
 | echoPacketSize | int | Configures the size of payload to be echoed back to client. Server will continuously buffer these many bytes from client and stream them back. |
 | responseDelay | duration | Delay to apply when sending response back to the client in echo mode. |
-| stream | bool | Controls whether streaming should be enabled for the listener. |
 | streamPayloadSize | int | Configures the total payload size to be stream via chunks if streaming is enabled for the listener. |
 | streamChunkSize | int | Configures the size of each chunk of data to stream if streaming is enabled for the listener. |
 | streamChunkCount | int | Configures the total number of chunks to stream if streaming is enabled for the listener. |
@@ -1798,7 +1802,7 @@ When a request is matched with a configured payload (custom or default), the req
 | POST | /response/payload/set/default/{size}  | Respond with a random generated payload of the given size for all URIs except those explicitly configured with another payload. Size can be a numeric value or use common byte size conventions: K, KB, M, MB |
 | POST | /response/payload/set/uri?uri={uri}  | Add a custom payload to be sent for requests matching the given URI. URI can contain placeholders |
 | POST | /response/payload/set/header/{header}  | Add a custom payload to be sent for requests matching the given header name |
-| POST | /response/payload/set/header/{header}/value/{value}  | Add a custom payload to be sent for requests matching the given header name and value |
+| POST | /response/payload<br/>/set/header/{header}/value/{value}  | Add a custom payload to be sent for requests matching the given header name and value |
 | POST | /response/payload/clear  | Clear all configured custom response payloads |
 | GET  |	/response/payload                      | Get configured custom payloads |
 
@@ -1887,9 +1891,9 @@ Stream responses carry following headers:
 #### API
 |METHOD|URI|Description|
 |---|---|---|
-| GET, PUT, POST  |	/stream/size/{size}/duration/{duration}/delay/{delay} | Respond with a payload of given size delivered over the given duration with given delay per chunk |
-| GET, PUT, POST  |	/stream/chunk/{chunk}/duration/{duration}/delay/{delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered over the given duration with given delay per chunk |
-| GET, PUT, POST  |	/stream/chunk/{chunk}/count/{count}/delay/{delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered the given count of times with given delay per chunk|
+| GET, PUT, POST  |	/stream/size/{size}<br/>/duration/{duration}/delay/{delay} | Respond with a payload of given size delivered over the given duration with given delay per chunk |
+| GET, PUT, POST  |	/stream/chunk/{chunk}<br/>/duration/{duration}/delay/{delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered over the given duration with given delay per chunk |
+| GET, PUT, POST  |	/stream/chunk/{chunk}<br/>/count/{count}/delay/{delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered the given count of times with given delay per chunk|
 | GET, PUT, POST  |	/stream/duration/{duration}/delay/{delay} | Respond with pre-configured default payload split into enough chunks to spread out over the given duration with given delay per chunk. This URI requires a default payload to be set via payload API. |
 | GET, PUT, POST  |	/stream/count/{count}/delay/{delay} | Respond with pre-configured default payload split into given count of chunks with given delay per chunk. This URI requires a default payload to be set via payload API. |
 
@@ -2598,10 +2602,10 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET       | /registry/lockers/{label}?data=y | Get given label's locker with stored data |
 | GET       | /registry/lockers | Get all lockers with stored keys but without stored data |
 | GET       | /registry/lockers?data=y | Get all lockers with stored data |
-| POST      | /registry/peers/{peer}/{address}/locker/store/{path} | Store any arbitrary value for the given `path` in the locker of the peer instance under currently active labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
-| POST      | /registry/peers/{peer}/{address}/locker/remove/{path} | Remove stored data for the given `path` from the locker of the peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
-| POST      | /registry/peers/{peer}/locker/store/{path} | Store any arbitrary value for the given key in the peer locker without associating data to a peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
-| POST      | /registry/peers/{peer}/locker/remove/{path} | Remove stored data for the given key from the peer locker under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
+| POST      | /registry/peers/{peer}/{address}<br/>/locker/store/{path} | Store any arbitrary value for the given `path` in the locker of the peer instance under currently active labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
+| POST      | /registry/peers/{peer}/{address}<br/>/locker/remove/{path} | Remove stored data for the given `path` from the locker of the peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
+| POST      | /registry/peers/{peer}<br/>/locker/store/{path} | Store any arbitrary value for the given key in the peer locker without associating data to a peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
+| POST      | /registry/peers/{peer}<br/>/locker/remove/{path} | Remove stored data for the given key from the peer locker under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
 | POST      | /registry/peers/{peer}/{address}/locker/clear | Clear the locker for the peer instance under currently active labeled locker |
 | POST      | /registry/peers/{peer}/locker/clear | Clear the locker for all instances of the given peer under currently active labeled locker |
 | POST      | /registry/peers/lockers/clear | Clear all peer lockers under currently active labeled locker |
@@ -2609,7 +2613,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET       | /registry/peers/{peer}/locker | Get locker's data for all instances of the peer from currently active labeled locker |
 | GET       | /registry/peers/lockers | Get locker's data for all peers from currently active labeled locker |
 | GET       | /registry/peers/lockers/targets/results | Get target invocation summary results for all peer instances from currently active labeled locker |
-| GET       | /registry/peers/lockers/targets/results?detailed=Y | Get invocation results broken down by targets for all peer instances from currently active labeled locker |
+| GET       | /registry/peers/lockers/targets<br/>/results?detailed=Y | Get invocation results broken down by targets for all peer instances from currently active labeled locker |
 |<a name="registry-peers-targets-apis"></a>|||
 ||||
 | GET       | /registry/peers/targets | Get all registered targets for all peers |
@@ -2623,8 +2627,8 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST, PUT | /registry/peers/{peer}/targets/{targets}/stop | Stop given targets on the given peer |
 | POST, PUT | /registry/peers/{peer}/targets/stop/all | Stop all targets on the given peer |
 | POST, PUT | /registry/peers/targets/stop/all | Stop all targets on the given peer |
-| POST, PUT | /registry/peers/targets/results/all/{enable}  | Controls whether results should be summarized across all targets. Disabling this when not needed can improve performance. Disabled by default. |
-| POST, PUT | /registry/peers/targets/results/invocations/{enable}  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
+| POST, PUT | /registry/peers/targets<br/>/results/all/{enable}  | Controls whether results should be summarized across all targets. Disabling this when not needed can improve performance. Disabled by default. |
+| POST, PUT | /registry/peers/targets<br/>/results/invocations/{enable}  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
 | POST      | /registry/peers/targets/clear   | Remove all targets from all peers |
 |<a name="registry-peers-jobs-apis"></a>|||
 ||||
@@ -2646,8 +2650,8 @@ By registering a worker instance to a registry instance, we get a few benefits:
 ||||
 | POST, PUT | /registry/peers/probe/readiness/set?uri={uri} | Configure readiness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probe/liveness/set?uri={uri} | Configure liveness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
-| POST, PUT | /registry/peers/probe/readiness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
-| POST, PUT | /registry/peers/probe/liveness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/probe<br/>/readiness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/probe<br/>/liveness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
 | GET | /registry/peers/probes | Get probe configuration given to registry via any of the above 4 probe APIs. |
 |<a name="registry-peers-call-apis"></a>|||
 ||||

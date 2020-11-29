@@ -609,3 +609,27 @@ func GenerateRandomString(size int) string {
   }
   return string(b)
 }
+
+func GetConnectionRemainingLife(startTime time.Time, connectionLife, readTimeout, connIdleTimeout time.Duration) time.Duration {
+  now := time.Now()
+  remainingLife := 0 * time.Second
+  if connectionLife > 0 {
+    remainingLife = connectionLife - (now.Sub(startTime))
+  }
+  if readTimeout > 0 {
+    if connectionLife == 0 || readTimeout < remainingLife {
+      remainingLife = readTimeout
+    }
+  }
+  if connIdleTimeout > 0 {
+    if connectionLife == 0 && readTimeout == 0 || connIdleTimeout < remainingLife {
+      remainingLife = connIdleTimeout
+    }
+  }
+  return remainingLife
+}
+
+func GetConnectionReadTimeout(startTime time.Time, connectionLife, readTimeout, connIdleTimeout time.Duration) time.Time {
+  now := time.Now()
+  return now.Add(GetConnectionRemainingLife(startTime, connectionLife, readTimeout, connIdleTimeout))
+}

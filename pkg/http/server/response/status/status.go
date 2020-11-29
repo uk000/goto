@@ -1,17 +1,17 @@
 package status
 
 import (
-	"fmt"
-	"net/http"
-	"strconv"
-	"sync"
+  "fmt"
+  "net/http"
+  "strconv"
+  "sync"
 
-	"goto/pkg/http/server/intercept"
-	"goto/pkg/http/server/request/uri"
-	"goto/pkg/http/server/response/trigger"
-	"goto/pkg/util"
+  "goto/pkg/http/server/intercept"
+  "goto/pkg/http/server/request/uri"
+  "goto/pkg/http/server/response/trigger"
+  "goto/pkg/util"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
 
 type PortStatus struct {
@@ -176,9 +176,9 @@ func IncrementStatusCount(statusCode int, r *http.Request) {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    crw := intercept.NewInterceptResponseWriter(w, true)
+    next.ServeHTTP(crw, r)
     if !util.IsAdminRequest(r) {
-      crw := intercept.NewInterceptResponseWriter(w, true)
-      next.ServeHTTP(crw, r)
       crw.StatusCode = computeResponseStatus(crw.StatusCode, r)
       if crw.StatusCode > 0 && !uri.HasURIStatus(r) {
         IncrementStatusCount(crw.StatusCode, r)
@@ -187,7 +187,11 @@ func Middleware(next http.Handler) http.Handler {
       }
       crw.Proceed()
     } else {
-      next.ServeHTTP(w, r)
+      statusCode := crw.StatusCode
+      if statusCode == 0 {
+        statusCode = 200
+      }
+      util.AddLogMessage(fmt.Sprintf("Reporting status: [%d]", statusCode), r)
     }
   })
 }

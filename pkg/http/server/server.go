@@ -28,8 +28,8 @@ func Run() {
   listeners.SetHTTPServer(runner.ServeHTTPListener)
   listeners.SetTCPServer(runner.StartTCPServer)
   invocation.Startup()
-  runner.RunHttpServer("/", label.Handler, conn.Handler, probe.Handler, job.Handler, request.Handler,
-    response.Handler, listeners.Handler, registry.Handler, client.Handler, echo.Handler, catchall.Handler)
+  runner.RunHttpServer("/", label.Handler, conn.Handler, listeners.Handler, probe.Handler, job.Handler, request.Handler,
+    response.Handler, registry.Handler, client.Handler, echo.Handler, catchall.Handler)
   invocation.Shutdown()
   results.StopRegistrySender()
   os.Exit(0)

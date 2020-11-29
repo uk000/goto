@@ -28,9 +28,10 @@ type Listener struct {
   ConnIdleTimeout    string        `json:"connIdleTimeout"`
   ConnectionLife     string        `json:"connectionLife"`
   Echo               bool          `json:"echo"`
+  Conversation       bool          `json:"conversation"`
+  Stream             bool          `json:"stream"`
   EchoPacketSize     int           `json:"echoPacketSize"`
   ResponseDelay      string        `json:"responseDelay"`
-  Stream             bool          `json:"stream"`
   StreamPayloadSize  string        `json:"streamPayloadSize"`
   StreamChunkSize    string        `json:"streamChunkSize"`
   StreamChunkCount   int           `json:"streamChunkCount"`
@@ -90,6 +91,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(lRouter, "/{port}/stream/chunk/{chunkSize}/count/{chunkCount}/delay/{delay}", setStreamConfig, "PUT", "POST")
   util.AddRoute(lRouter, "/{port}/mode/stream/{enable}", setModes, "PUT", "POST")
   util.AddRoute(lRouter, "/{port}/mode/echo/{enable}", setModes, "PUT", "POST")
+  util.AddRoute(lRouter, "/{port}/mode/conversation/{enable}", setModes, "PUT", "POST")
   util.AddRoute(lRouter, "", getListeners, "GET")
 }
 
@@ -192,7 +194,16 @@ func (l *Listener) reopenListener() bool {
     old.Lock.Unlock()
     old.closeListener()
   }
-  return l.openListener()
+  for i := 0; i < 5; i++ {
+    if l.openListener() {
+      log.Printf("Reopened listener %s on port %d.", l.ListenerID, l.Port)
+      return true
+    } else {
+      log.Printf("Couldn't reopen listener %s on port %d since previous listener is still running. Retrying...", l.ListenerID, l.Port)
+      time.Sleep(5 * time.Second)
+    }
+  }
+  return false
 }
 
 func computeChunkCount(payloadSize, chunkSize int, chunkDelay, streamDuration time.Duration) int {
@@ -421,9 +432,16 @@ func addOrUpdateListener(w http.ResponseWriter, r *http.Request, update bool) {
   listenersLock.RUnlock()
   if exists {
     if update {
-      msg = fmt.Sprintf("Listener %d already present, restarting.", l.Port)
+      if l.reopenListener() {
+        msg = fmt.Sprintf("Listener %d already present, restarted.", l.Port)
+        listenersLock.Lock()
+        listeners[l.Port] = l
+        listenersLock.Unlock()
+      } else {
+        w.WriteHeader(http.StatusInternalServerError)
+        msg = fmt.Sprintf("Listener %d already present, failed to restart.", l.Port)
+      }
       fmt.Fprintln(w, msg)
-      l.reopenListener()
     } else {
       w.WriteHeader(http.StatusBadRequest)
       msg = fmt.Sprintf("Listener %d already present, cannot add.", l.Port)
@@ -431,17 +449,24 @@ func addOrUpdateListener(w http.ResponseWriter, r *http.Request, update bool) {
     }
   } else {
     if l.Open {
-      msg = fmt.Sprintf("Listener %d added and opened.", l.Port)
+      if l.openListener() {
+        msg = fmt.Sprintf("Listener %d added and opened.", l.Port)
+        listenersLock.Lock()
+        listeners[l.Port] = l
+        listenersLock.Unlock()
+      } else {
+        w.WriteHeader(http.StatusInternalServerError)
+        msg = fmt.Sprintf("Listener %d added but failed to open.", l.Port)
+      }
       fmt.Fprintln(w, msg)
-      l.reopenListener()
     } else {
+      listenersLock.Lock()
+      listeners[l.Port] = l
+      listenersLock.Unlock()
       msg = fmt.Sprintf("Listener %d added.", l.Port)
       fmt.Fprintln(w, msg)
     }
   }
-  listenersLock.Lock()
-  listeners[l.Port] = l
-  listenersLock.Unlock()
   util.AddLogMessage(msg, r)
 }
 
@@ -450,8 +475,8 @@ func addListenerCertOrKey(w http.ResponseWriter, r *http.Request, cert bool) {
   listenersLock.Lock()
   l := listeners[port]
   listenersLock.Unlock()
-  if l != nil {
-    data := util.ReadBytes(r.Body)
+  data := util.ReadBytes(r.Body)
+  if l != nil && len(data) > 0 {
     l.Lock.Lock()
     defer l.Lock.Unlock()
     if cert {
@@ -463,7 +488,7 @@ func addListenerCertOrKey(w http.ResponseWriter, r *http.Request, cert bool) {
     }
   } else {
     w.WriteHeader(http.StatusBadRequest)
-    fmt.Fprintf(w, "No listener present or invalid port %d\n", port)
+    fmt.Fprintln(w, "No listener, invalid port, or no cert")
   }
 }
 
@@ -486,8 +511,12 @@ func removeListenerCertAndKey(w http.ResponseWriter, r *http.Request) {
     l.Cert = nil
     l.TLS = false
     l.Lock.Unlock()
-    l.reopenListener()
-    fmt.Fprintf(w, "Cert and Key removed for listener %d, and reopened\n", l.Port)
+    if l.reopenListener() {
+      fmt.Fprintf(w, "Cert and Key removed for listener %d, and reopened\n", l.Port)
+    } else {
+      w.WriteHeader(http.StatusInternalServerError)
+      fmt.Fprintf(w, "Cert and Key removed for listener %d but failed to reopen\n", l.Port)
+    }
   } else {
     w.WriteHeader(http.StatusBadRequest)
     fmt.Fprintf(w, "No listener present or invalid port %d\n", port)
@@ -679,17 +708,21 @@ func setModes(w http.ResponseWriter, r *http.Request) {
     fmt.Fprintf(w, "No listener present or invalid port %d\n", port)
   } else {
     enable := util.GetBoolParamValue(r, "enable")
-    stream := strings.Contains(r.RequestURI, "stream")
     echo := strings.Contains(r.RequestURI, "echo")
+    conversation := strings.Contains(r.RequestURI, "conversation")
+    stream := strings.Contains(r.RequestURI, "stream")
     if stream {
       l.Stream = enable
       if l.Stream {
         l.configureStream()
       }
-      fmt.Fprintf(w, "Streaming set to [%t] for listener %d\n", enable, port)
+      fmt.Fprintf(w, "Streaming mode set to [%t] for listener %d\n", enable, port)
     } else if echo {
       l.Echo = enable
-      fmt.Fprintf(w, "Echo set to [%t] for listener %d\n", enable, port)
+      fmt.Fprintf(w, "Echo mode set to [%t] for listener %d\n", enable, port)
+    } else if conversation {
+      l.Conversation = enable
+      fmt.Fprintf(w, "Conversation mode set to [%t] for listener %d\n", enable, port)
     }
   }
 }
