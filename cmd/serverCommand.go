@@ -3,8 +3,8 @@ package cmd
 import (
 	"flag"
 	"goto/pkg/global"
-	"goto/pkg/http/server"
-	"goto/pkg/http/server/listeners"
+	"goto/pkg/server"
+	"goto/pkg/server/listeners"
 	"goto/pkg/util"
 	"log"
 	"time"

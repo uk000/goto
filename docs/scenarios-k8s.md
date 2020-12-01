@@ -59,7 +59,7 @@ On the subject of transient pods that come up and go down randomly (due to chaos
 
 If `goto` is added as a container to your deployment (or `goto` was the primary container for testing purpose), the `goto` instances can help you record the timeline of your pod lifecycles and correlate it with the test results. 
 
-When a `goto` instance is told to connect and work with a `goto` registry, the instances reports to the registry at startup, periodic pings (every 30s), and reports at death too. Registry `goto` instance serves as the book-keeper of this info, building a timeline of the lifecycle of pods of a deployment as well as container restarts for a pod. The `/peers` API in the registry instance returns the collective results of all the `goto` instances that connected to it.
+When a `goto` instance is told to connect and work with a `goto` registry, the instances reports to the registry at startup, periodic pings (every 5s), and reports at death too. Registry `goto` instance serves as the book-keeper of this info, building a timeline of the lifecycle of pods of a deployment as well as container restarts for a pod. The `/peers` API in the registry instance returns the collective results of all the `goto` instances that connected to it.
 
 Let's see it in action to understand it better. Just like previous scenario, we have a registry instance and a `goto` worker instance connected to the registry.
 

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"goto/pkg/global"
-	"goto/pkg/http/invocation"
+	"goto/pkg/invocation"
 	"goto/pkg/util"
 	"log"
 	"net/http"

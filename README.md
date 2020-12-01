@@ -251,6 +251,8 @@ In addition to keeping the results in the `goto` client instance, those are also
 | GET       |	/client/targets                       | Get list of currently configured targets |
 | POST      |	/client/targets/clear                 | Remove all targets |
 | GET       |	/client/targets/active                | Get list of currently active (running) targets |
+| POST      |	/client/targets/cacert/add            | Store CA cert to use for all target invocations |
+| POST      |	/client/targets/cacert/remove         | Remove stored CA cert |
 | PUT, POST |	/client/track/headers/add/{headers}   | Add headers for tracking response counts per target |
 | PUT, POST |	/client/track/headers/remove/{header}| Remove header (single) from tracking set |
 | POST      | /client/track/headers/clear           | Remove all tracked headers |
@@ -285,7 +287,7 @@ In addition to keeping the results in the `goto` client instance, those are also
 | retryDelay   | duration       |1s| Time to wait between retries.|
 | retriableStatusCodes| []int|| HTTP response status codes for which requests should be retried |
 | sendID       | bool           |false| Whether or not a unique ID be sent with each client request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
-| connTimeout  | duration       |30s| Timeout for opening target connection |
+| connTimeout  | duration       |10s| Timeout for opening target connection |
 | connIdleTimeout | duration    |5m| Idle Timeout for target connection |
 | requestTimeout | duration     |30s| Timeout for HTTP requests to the target |
 | autoInvoke   | bool           |false| Whether this target should be invoked as soon as it's added |
@@ -1267,20 +1269,14 @@ The server starts with a single http listener on the bootstrap port (given as a 
 
 Adding TLS cert and key for a listener using `/cert` and `/key` API will configure the listener for serving HTTPS traffic when it's opened/reopened. An already opened HTTP listener can be reopened as HTTPS listener by configuring TLS certs for it and calling `/reopen`.
 
-#### TCP
-While the rest of the documentation describes various HTTP operations in various sections, operations supported by TCP listeners are summarized here:
-1. A TCP port can be configured with various timeouts that control either the connection lifetime (regardless of activity) and idle timeouts.
-2. By default, a TCP listener executes in `silent` mode. In this mode, the behavior of the listener depends on the `connectionLife`. If `connectionLife` is set to a non-zero value, the listener waits for the configured lifetime and closes the client connection, and never responds to any bytes received. If `connectionLife` is set to zero, the listener waits for the first byte to arrive and then closes the client connection.
-3. If `Echo` mode is enabled on a TCP listener, the listener echoes back the bytes received from the client. The `echoPacketSize` configures the echo buffer size, which is the number of bytes that the listener will need to receive from the client before echoing back. If more data is received than the `echoPacketSize`, it'll echo multiple chunks each of `echoPacketSize` size. In `echo` mode, the connection enforces `readTimeout` and `connIdleTimeout` based on the activity: any new bytes recevied reset the read/idle timeouts. It applies `writeTimeout` when sending the echo response to the client. If `connectionLife` is set, it controls the overall lifetime of the connection and the connection will close upon reaching the max life regardless of the activity.
-4. `Stream` operation can be enabled on a TCP listener via the APIs described below. If `stream` is enabled, it takes precedence over `echo` mode, and the connection starts streaming TCP bytes per the given configuration as soon as a client connects. None of the timeouts or max life applies in streaming mode, and the client connection closes automatically once the streaming completes.
-5. In `conversation` mode, the server waits for the client to send a TCP payload with text `HELLO` to which server also responds back with `HELLO`. All subsequent packets from client should follow the format `BEGIN/{text}/END`, and server echoes the received text back in the format of `ACK/{text}/END`. Client can initiate connection closure by sending text `GOODBYE`, or else the connection can close based on various timeouts and connection lifetime config.
-6. In all cases, client may close the connection proactively causing the ongoing operation to abort.
+#### See TCP Listeners section later for details of TCP features
 
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
 | POST       | /listeners/add           | Add a listener. [See Payload JSON Schema](#listener-json-schema)|
 | POST       | /listeners/update        | Update an existing listener.|
+| POST, PUT  | /listeners/{port}/configure/tcp   | Reconfigure details of a TCP listener without having to close and restart. Accepts TCP portion of the listener payload JSON. |
 | POST, PUT  | /listeners/{port}/cert/add   | Add/update certificate for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
 | POST, PUT  | /listeners/{port}/key/add   | Add/update private key for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
 | POST, PUT  | /listeners/{port}/cert/remove   | Remove certificate and key for a listener and reopen it to serve HTTP traffic instead of HTTPS. |
@@ -1289,7 +1285,6 @@ While the rest of the documentation describes various HTTP operations in various
 | POST, PUT  | /listeners/{port}/reopen | Close and reopen an existing listener if already opened, otherwise open it |
 | POST, PUT  | /listeners/{port}/close  | Close an added listener|
 | GET        | /listeners               | Get a list of listeners |
-| POST, PUT  | /listeners/{port}/response/delay/{duration}  | Set TCP response delay for the port (applies to TCP echo mode) |
 | POST, PUT  | /listeners/{port}/timeout/read/{duration}  | Set TCP read timeout for the port (applies to TCP echo mode) |
 | POST, PUT  | /listeners/{port}/timeout/write/{duration}  | Set TCP write timeout for the port (applies to TCP echo mode) |
 | POST, PUT  | /listeners/{port}/timeout/idle/{duration}  | Set TCP connection idle timeout for the port (applies to TCP echo mode) |
@@ -1297,9 +1292,13 @@ While the rest of the documentation describes various HTTP operations in various
 | POST, PUT  | /listeners/{port}/stream<br/>/size/{payloadSize}<br/>/duration/{duration}<br/>/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with the given total payload size delivered over the given duration with the given delay per chunk |
 | POST, PUT  | /listeners/{port}/stream<br/>/chunk/{chunkSize}<br/>/duration/{duration}<br/>/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with chunks of the given chunk size delivered over the given duration with the given delay per chunk |
 | POST, PUT  | /listeners/{port}/stream<br/>/chunk/{chunkSize}<br/>/count/{chunkCount}<br/>/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with total chunks matching the given chunk count of the given chunk size delivered with the given delay per chunk |
-| POST, PUT  | /listeners/{port}/mode/stream/{enable}  | Enable or disable streaming on a port without having to restart the listener (useful to disable streaming while retaining the stream congiuration) |
-| POST, PUT  | /listeners/{port}/mode/echo/{enable} | Enable/disable echo mode on a port to let the port be tested in silent mode (see overview for details) |
-| POST, PUT  | /listeners/{port}/mode/conversation/{enable} | Enable/disable conversation mode on a port to support send-receive payload verification (see overview for details) |
+| POST, PUT  | /listeners/{port}/expect/payload/{length}  | Set expected payload length for payload verification mode (to only validate payload length, not content) |
+| POST, PUT  | /listeners/{port}/expect/payload  | Set expected payload for payload verification mode, to validate both payload length and content. Expected payload must be sent as request body. |
+| POST, PUT  | /listeners/{port}/echo/response/delay/{duration}  | Set response delay for TCP echo mode for the listener |
+| POST, PUT  | /listeners/{port}/stream/{enable}  | Enable or disable streaming on a port without having to restart the listener (useful to disable streaming while retaining the stream congiuration) |
+| POST, PUT  | /listeners/{port}/echo/{enable} | Enable/disable echo mode on a port to let the port be tested in silent mode (see overview for details) |
+| POST, PUT  | /listeners/{port}/conversation/{enable} | Enable/disable conversation mode on a port to support multiple packets verification (see overview for details) |
+| POST, PUT  | /listeners/{port}/validate/payload/{enable} | Enable/disable payload validation mode on a port to support payload length/content validation over connection lifetime (see overview for details) |
 
 #### Listener JSON Schema
 |Field|Data Type|Description|
@@ -1309,22 +1308,30 @@ While the rest of the documentation describes various HTTP operations in various
 | port     | int    | Port on which the new listener will listen on. |
 | protocol | string | `http` or `tcp`|
 | open | bool | Controls whether the listener should be opened as soon as it's added. Also reflects listener's current status when queried. |
+| tls | bool | Reports whether the listener has been configured for TLS. This flag is read-only, the value of which is determined based on whether TLS cert and key have been added for the listener using the APIs. |
+| tcp | TCPConfig | Supplemental TCP config for a TCP listener. |
+
+#### TCP Config JSON Schema
+|Field|Data Type|Description|
+|---|---|---|
 | readTimeout | duration | Read timeout to apply when reading data sent by client. |
 | writeTimeout | duration | Write timeout to apply when sending data to the client. |
 | connectTimeout | duration | Max period that the server will wait during connection handshake. |
 | connIdleTimeout | duration | Max period of inactivity (no bytes traveled) on the connection that would trigger closure of the client connection. |
 | connectionLife | duration | Max lifetime after which the client connection will be terminated proactively by the server. |
-| echo | bool | Controls whether the listener should operate in echo mode. |
 | stream | bool | Controls whether the listener should operate in streaming mode. |
+| echo | bool | Controls whether the listener should operate in echo mode. |
 | conversation | bool | Controls whether the listener should operate in conversation mode. |
-| echoPacketSize | int | Configures the size of payload to be echoed back to client. Server will continuously buffer these many bytes from client and stream them back. |
-| responseDelay | duration | Delay to apply when sending response back to the client in echo mode. |
+| validatePayloadLength | bool | Controls whether the listener should operate in payload length validation mode. |
+| validatePayloadContent | bool | Controls whether the listener should operate in payload content validation mode. |
+| expectedPayloadLength | int | Set the expected payload length explicitly for length verification. Also used to auto-store the expected payload content length when validating content. |
+| echoResponseSize | int | Configures the size of payload to be echoed back to client. Server will only echo back when it has these many bytes received from the client. |
+| echoResponseDelay | duration | Delay to apply when sending response back to the client in echo mode. |
 | streamPayloadSize | int | Configures the total payload size to be stream via chunks if streaming is enabled for the listener. |
 | streamChunkSize | int | Configures the size of each chunk of data to stream if streaming is enabled for the listener. |
 | streamChunkCount | int | Configures the total number of chunks to stream if streaming is enabled for the listener. |
 | streamChunkDelay | duration | Configures the delay to be added before sending each chunk back if streaming is enabled for the listener. |
 | streamDuration | duration | Configures the total duration of stream if streaming is enabled for the listener. |
-| tls | bool | Reports whether the listener has been configured for TLS. This flag is read-only, the value of which is determined based on whether TLS cert and key have been added for the listener using the APIs. |
 
 
 #### Listener API Examples:
@@ -1334,6 +1341,10 @@ While the rest of the documentation describes various HTTP operations in various
 ```
 curl localhost:8080/listeners/add --data '{"port":8081, "protocol":"http", "label":"Server-8081"}'
 
+curl -s localhost:8080/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true}'
+
+curl -s localhost:8080/listeners/9000/configure/tcp --data '{"readTimeout":"15s","writeTimeout":"15s","connectTimeout":"15s","connIdleTimeout":"20s","responseDelay":"1s", "connectionLife":"20s"}'
+
 curl -X POST localhost:8080/listeners/8081/remove
 
 curl -X PUT localhost:8080/listeners/8081/open
@@ -1341,6 +1352,15 @@ curl -X PUT localhost:8080/listeners/8081/open
 curl -X PUT localhost:8080/listeners/8081/close
 
 curl localhost:8081/listeners
+
+curl -X PUT localhost:8080/listeners/9000/echo/n
+
+curl -X PUT localhost:8080/listeners/9000/stream/y
+
+curl -X PUT localhost:8080/listeners/9000/expect/payload/10
+
+curl -X PUT localhost:8080/listeners/9000/expect/payload --data 'SomePayload'
+
 ```
 </details>
 
@@ -1369,6 +1389,30 @@ $ curl -s localhost:8080/listeners
 ```
 </p>
 </details>
+
+
+<br/>
+
+#
+## <a name="server-tcp-listeners"></a>  > TCP Listeners
+
+`Goto` providers features for testing server-side TCP behavior via TCP listeners (client side TCP features are described under client section).
+
+The primary HTTP port that `goto` starts with exposes listeners REST APIs that can be used to open additional ports on the `goto` instance. These additional ports can be either `HTTP` or `TCP`. For TCP listeners, additional configs can be provided using listener's `tcp` schema, which allows for configuring various timeouts, connection lifetime, packet sizes, etc.
+
+A TCP listener can operate in the following modes to faciliate different kinds of testing:
+
+1. By default, a TCP listener executes in `silent` mode. In this mode, the behavior of the listener depends on the `connectionLife`. If `connectionLife` is set to a non-zero value, the listener waits for the configured lifetime and closes the client connection, and never responds to any bytes received. If `connectionLife` is set to zero, the listener waits for the first byte to arrive and then closes the client connection.
+2. If `Echo` mode is enabled on a TCP listener, the listener echoes back the bytes received from the client. The `echoPacketSize` configures the echo buffer size, which is the number of bytes that the listener will need to receive from the client before echoing back. If more data is received than the `echoPacketSize`, it'll echo multiple chunks each of `echoPacketSize` size. In `echo` mode, the connection enforces `readTimeout` and `connIdleTimeout` based on the activity: any new bytes recevied reset the read/idle timeouts. It applies `writeTimeout` when sending the echo response to the client. If `connectionLife` is set, it controls the overall lifetime of the connection and the connection will close upon reaching the max life regardless of the activity.
+3. `Stream` operation can be enabled on a TCP listener via the APIs described below. If `stream` is enabled, it takes precedence over `echo` mode, and the connection starts streaming TCP bytes per the given configuration as soon as a client connects. None of the timeouts or max life applies in streaming mode, and the client connection closes automatically once the streaming completes.
+4. In `payload validation` mode, client should first set the payload expectation by calling either `/listeners/{port}/expect/payload/{length}` or `/listeners/{port}/expect/payload/{length}`, depending on whether server should just validate payload length or the payload content. The server then waits for the duration of the connection lifetime (if not set explicitly for the listener, this feature defaults to `30s` of total connection life), and buffers bytes received from client. If at any point during the connection life the number of received bytes exceed the expected payload length, the server responds with error and closes connection. If at the end of the connection life, the number of bytes match the payload expectations (either length or both length and content), then the server responds with success message. The messages returned by the server are one of the following:
+   - `[SUCCESS]: Received pyload matches expected payload of length [l] on port [p]`
+   - `[ERROR:EXCEEDED] - Payload length [l] exceeded expected length [e] on port [p]`
+   - `[ERROR:CONTENT] - Payload content of length [l] didn't match expected payload of length [e] on port [p]`
+   - `[ERROR:TIMEOUT] - Timed out before receiving payload of expected length [l] on port [p]`
+5. In `conversation` mode, the server waits for the client to send a TCP payload with text `HELLO` to which server also responds back with `HELLO`. All subsequent packets from client should follow the format `BEGIN/{text}/END`, and server echoes the received text back in the format of `ACK/{text}/END`. Client can initiate connection closure by sending text `GOODBYE`, or else the connection can close based on various timeouts and connection lifetime config.
+6. In all cases, client may close the connection proactively causing the ongoing operation to abort.
+
 
 <br/>
 

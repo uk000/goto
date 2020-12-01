@@ -610,8 +610,11 @@ func GenerateRandomString(size int) string {
   return string(b)
 }
 
-func GetConnectionRemainingLife(startTime time.Time, connectionLife, readTimeout, connIdleTimeout time.Duration) time.Duration {
+func GetConnectionRemainingLife(startTime, atTime time.Time, connectionLife, readTimeout, connIdleTimeout time.Duration) time.Duration {
   now := time.Now()
+  if connectionLife <= 0 && readTimeout <= 0 && connIdleTimeout <= 0 {
+    return 24 * time.Hour
+  }
   remainingLife := 0 * time.Second
   if connectionLife > 0 {
     remainingLife = connectionLife - (now.Sub(startTime))
@@ -629,7 +632,7 @@ func GetConnectionRemainingLife(startTime time.Time, connectionLife, readTimeout
   return remainingLife
 }
 
-func GetConnectionReadTimeout(startTime time.Time, connectionLife, readTimeout, connIdleTimeout time.Duration) time.Time {
+func GetConnectionReadWriteTimeout(startTime time.Time, connectionLife, readWriteTimeout, connIdleTimeout time.Duration) time.Time {
   now := time.Now()
-  return now.Add(GetConnectionRemainingLife(startTime, connectionLife, readTimeout, connIdleTimeout))
+  return now.Add(GetConnectionRemainingLife(startTime, now, connectionLife, readWriteTimeout, connIdleTimeout))
 }
