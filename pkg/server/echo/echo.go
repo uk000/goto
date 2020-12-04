@@ -25,7 +25,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
 func EchoHeaders(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("Echoing headers back", r)
-  util.CopyHeaders("Request", w, r.Header, r.Host)
+  util.CopyHeaders("Request", w, r.Header, r.Host, r.RequestURI)
   fmt.Fprintf(w, "{\"RequestHeaders\": %s}", util.GetRequestHeadersLog(r))
 }
 

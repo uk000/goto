@@ -122,16 +122,17 @@ func setupStartupTasks(peerData *registry.PeerData) {
   }
 
   if peerData.Probes != nil {
+    probeStatus := probe.GetPortProbes(strconv.Itoa(global.ServerPort))
     if peerData.Probes.ReadinessProbe != "" {
       log.Printf("Got Readiness probe %s, status: %d\n", peerData.Probes.ReadinessProbe, peerData.Probes.ReadinessStatus)
-      global.ReadinessProbe = peerData.Probes.ReadinessProbe
-      probe.ReadinessStatus = peerData.Probes.ReadinessStatus
+      probeStatus.ReadinessProbe = peerData.Probes.ReadinessProbe
+      probeStatus.ReadinessStatus = peerData.Probes.ReadinessStatus
     }
 
     if peerData.Probes.LivenessProbe != "" {
       log.Printf("Got Liveness probe: %s, status: %d\n", peerData.Probes.LivenessProbe, peerData.Probes.LivenessStatus)
-      global.LivenessProbe = peerData.Probes.LivenessProbe
-      probe.LivenessStatus = peerData.Probes.LivenessStatus
+      probeStatus.LivenessProbe = peerData.Probes.LivenessProbe
+      probeStatus.LivenessStatus = peerData.Probes.LivenessStatus
     }
   }
 

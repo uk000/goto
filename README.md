@@ -98,6 +98,7 @@ The application exposes both client and server features via various management R
 ### Server Features
 * [Server Logging](#server-logging)
 * [Server Listeners](#server-listeners)
+* [TCP Listeners](#server-tcp-listeners)
 * [Server Listener Label](#server-listener-label)
 * [Request Headers Tracking](#server-request-headers-tracking)
 * [Request Timeout](#server-request-timeout)

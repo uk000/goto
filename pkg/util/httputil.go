@@ -49,8 +49,8 @@ type messagestore struct {
 
 func ContextMiddleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    if global.Stopping && IsReadinessProbe(r) {
-      CopyHeaders("Stopping-Readiness-Request", w, r.Header, r.Host)
+    if global.Stopping && global.IsReadinessProbe(r) {
+      CopyHeaders("Stopping-Readiness-Request", w, r.Header, r.Host, r.RequestURI)
       w.WriteHeader(http.StatusNotFound)
     } else {
       next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), logmessagesKey, &messagestore{})))
@@ -295,28 +295,32 @@ func GetQueryParams(r *http.Request) map[string]map[string]int {
   return queryParamsMap
 }
 
-func CopyHeaders(prefix string, w http.ResponseWriter, headers http.Header, host string) {
+func AddHeaderWithPrefix(prefix, header, value string, headers http.Header) {
+  if prefix != "" {
+    header = prefix + "-" + header
+  }
+  headers.Add(header, value)
+}
+
+func CopyHeaders(prefix string, w http.ResponseWriter, headers http.Header, host, uri string) {
   hostCopied := false
+  responseHeaders := w.Header()
   for h, values := range headers {
-    if !strings.Contains(h, "content") && !strings.Contains(h, "Content") {
-      h2 := h
-      if prefix != "" {
-        h2 = prefix + "-" + h
-      }
+    lowerh := strings.ToLower(h)
+    if !strings.Contains(lowerh, "content") {
       for _, v := range values {
-        w.Header().Add(h2, v)
+        AddHeaderWithPrefix(prefix, h, v, responseHeaders)
       }
     }
-    if strings.EqualFold(h, "host") {
+    if strings.EqualFold(lowerh, "host") {
       hostCopied = true
     }
   }
   if !hostCopied && host != "" {
-    hostHeader := "Host"
-    if prefix != "" {
-      hostHeader = prefix + "-" + hostHeader
-    }
-    w.Header().Add(hostHeader, host)
+    AddHeaderWithPrefix(prefix, "Host", host, responseHeaders)
+  }
+  if uri != "" {
+    AddHeaderWithPrefix(prefix, "URI", uri, responseHeaders)
   }
 }
 
@@ -589,16 +593,8 @@ func BuildCrossHeadersMap(crossTrackingHeaders map[string][]string) map[string]s
   return crossHeadersMap
 }
 
-func IsReadinessProbe(r *http.Request) bool {
-  return strings.EqualFold(r.RequestURI, global.ReadinessProbe)
-}
-
-func IsLivenessProbe(r *http.Request) bool {
-  return strings.EqualFold(r.RequestURI, global.LivenessProbe)
-}
-
 func IsProbeRequest(r *http.Request) bool {
-  return IsReadinessProbe(r) || IsLivenessProbe(r)
+  return global.IsReadinessProbe(r) || global.IsLivenessProbe(r)
 }
 
 func GenerateRandomString(size int) string {

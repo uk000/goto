@@ -1,26 +1,32 @@
 package probe
 
 import (
-	"fmt"
-	"goto/pkg/global"
-	"goto/pkg/util"
-	"net/http"
-	"strings"
-	"sync"
+  "fmt"
+  "goto/pkg/global"
+  "goto/pkg/util"
+  "net/http"
+  "strings"
+  "sync"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
 
-var (
-  Handler util.ServerHandler = util.ServerHandler{"probe", SetRoutes, Middleware}
-
-  ReadinessStatus        int = 200
-  ReadinessCount         uint64
-  ReadinessOverflowCount uint64
-  LivenessStatus         int = 200
-  LivenessCount          uint64
-  LivenessOverflowCount  uint64
+type PortProbes struct {
+  ReadinessProbe         string `json:"readinessProbe"`
+  ReadinessStatus        int    `json:"readinessStatus"`
+  ReadinessCount         uint64 `json:"readinessCount"`
+  ReadinessOverflowCount uint64 `json:"readinessOverflowCount"`
+  LivenessProbe          string `json:"livenessProbe"`
+  LivenessStatus         int    `json:"livenessStatus"`
+  LivenessCount          uint64 `json:"livenessCount"`
+  LivenessOverflowCount  uint64 `json:"livenessOverflowCount"`
   lock                   sync.RWMutex
+}
+
+var (
+  Handler      util.ServerHandler     = util.ServerHandler{"probe", SetRoutes, Middleware}
+  probesByPort map[string]*PortProbes = map[string]*PortProbes{}
+  lock         sync.RWMutex
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -29,6 +35,28 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(probeRouter, "/{type}/status/set/{status}", setProbeStatus, "PUT", "POST")
   util.AddRoute(probeRouter, "/counts/clear", clearProbeCounts, "POST")
   util.AddRoute(probeRouter, "", getProbes, "GET")
+  global.IsLivenessProbe = IsLivenessProbe
+  global.IsReadinessProbe = IsReadinessProbe
+}
+
+func IsLivenessProbe(r *http.Request) bool {
+  return strings.EqualFold(r.RequestURI, initPortProbes(r).LivenessProbe)
+}
+func IsReadinessProbe(r *http.Request) bool {
+  return strings.EqualFold(r.RequestURI, initPortProbes(r).ReadinessProbe)
+}
+
+func GetPortProbes(port string) *PortProbes {
+  lock.Lock()
+  defer lock.Unlock()
+  if probesByPort[port] == nil {
+    probesByPort[port] = &PortProbes{ReadinessProbe: "/ready", ReadinessStatus: 200, LivenessProbe: "/live", LivenessStatus: 200}
+  }
+  return probesByPort[port]
+}
+
+func initPortProbes(r *http.Request) *PortProbes {
+  return GetPortProbes(util.GetListenerPort(r))
 }
 
 func setProbe(w http.ResponseWriter, r *http.Request) {
@@ -43,18 +71,18 @@ func setProbe(w http.ResponseWriter, r *http.Request) {
     msg = "Cannot add. Invalid URI"
     w.WriteHeader(http.StatusBadRequest)
   } else {
-    lock.Lock()
-    defer lock.Unlock()
+    probeStatus := initPortProbes(r)
     uri = strings.ToLower(uri)
+    probeStatus.lock.Lock()
     if isReadiness {
-      global.ReadinessProbe = uri
-      ReadinessCount = 0
+      probeStatus.ReadinessProbe = uri
+      probeStatus.ReadinessCount = 0
     } else if isLiveness {
-      global.LivenessProbe = uri
-      LivenessCount = 0
+      probeStatus.LivenessProbe = uri
+      probeStatus.LivenessCount = 0
     }
+    probeStatus.lock.Unlock()
     msg = fmt.Sprintf("%s URI %s added, count reset", probeType, uri)
-    w.WriteHeader(http.StatusAccepted)
   }
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
@@ -72,70 +100,70 @@ func setProbeStatus(w http.ResponseWriter, r *http.Request) {
     msg = "Cannot set. Invalid status code"
     w.WriteHeader(http.StatusBadRequest)
   } else {
-    lock.Lock()
-    defer lock.Unlock()
+    probeStatus := initPortProbes(r)
     if status <= 0 {
       status = 200
     }
+    probeStatus.lock.Lock()
     if isReadiness {
-      ReadinessStatus = status
+      probeStatus.ReadinessStatus = status
     } else if isLiveness {
-      LivenessStatus = status
+      probeStatus.LivenessStatus = status
     }
+    probeStatus.lock.Unlock()
     msg = fmt.Sprintf("%s status %d set", probeType, status)
-    w.WriteHeader(http.StatusAccepted)
   }
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
 
 func getProbes(w http.ResponseWriter, r *http.Request) {
-  lock.RLock()
-  lock.RUnlock()
-  output := fmt.Sprintf("{\"readiness\": {\"probe\": \"%s\", \"status\": %d, \"count\": %d}, \"liveness\": {\"probe\": \"%s\", \"status\": %d, \"count\": %d}}",
-    global.ReadinessProbe, ReadinessStatus, ReadinessCount, global.LivenessProbe, LivenessStatus, LivenessCount)
+  probeStatus := initPortProbes(r)
+  probeStatus.lock.RLock()
+  output := util.ToJSON(probeStatus)
+  probeStatus.lock.RUnlock()
   util.AddLogMessage(fmt.Sprintf("Reporting probe counts: %s", output), r)
-  w.WriteHeader(http.StatusOK)
   fmt.Fprintln(w, output)
 }
 
 func clearProbeCounts(w http.ResponseWriter, r *http.Request) {
-  lock.Lock()
-  defer lock.Unlock()
-  ReadinessCount = 0
-  LivenessCount = 0
+  probeStatus := initPortProbes(r)
+  probeStatus.lock.Lock()
+  probeStatus.ReadinessCount = 0
+  probeStatus.LivenessCount = 0
+  probeStatus.lock.Unlock()
   msg := "Probe counts cleared"
-  w.WriteHeader(http.StatusAccepted)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    if util.IsReadinessProbe(r) {
-      lock.Lock()
-      ReadinessCount++
-      if ReadinessCount == 0 {
-        ReadinessOverflowCount++
+    probeStatus := initPortProbes(r)
+    if IsReadinessProbe(r) {
+      probeStatus.lock.Lock()
+      probeStatus.ReadinessCount++
+      if probeStatus.ReadinessCount == 0 {
+        probeStatus.ReadinessOverflowCount++
       }
-      lock.Unlock()
-      util.CopyHeaders("Readiness-Request", w, r.Header, r.Host)
-      w.Header().Add("Readiness-Request-Count", fmt.Sprint(ReadinessCount))
-      w.Header().Add("Readiness-Overflow-Count", fmt.Sprint(ReadinessOverflowCount))
-      w.WriteHeader(ReadinessStatus)
-      util.AddLogMessage(fmt.Sprintf("Serving Readiness Probe: [%s]", global.ReadinessProbe), r)
-    } else if util.IsLivenessProbe(r) {
-      lock.Lock()
-      LivenessCount++
-      if LivenessCount == 0 {
-        LivenessOverflowCount++
+      probeStatus.lock.Unlock()
+      util.CopyHeaders("Readiness-Request", w, r.Header, r.Host, r.RequestURI)
+      w.Header().Add("Readiness-Request-Count", fmt.Sprint(probeStatus.ReadinessCount))
+      w.Header().Add("Readiness-Overflow-Count", fmt.Sprint(probeStatus.ReadinessOverflowCount))
+      w.WriteHeader(probeStatus.ReadinessStatus)
+      util.AddLogMessage(fmt.Sprintf("Serving Readiness Probe: [%s]", probeStatus.ReadinessProbe), r)
+    } else if IsLivenessProbe(r) {
+      probeStatus.lock.Lock()
+      probeStatus.LivenessCount++
+      if probeStatus.LivenessCount == 0 {
+        probeStatus.LivenessOverflowCount++
       }
-      lock.Unlock()
-      util.CopyHeaders("Liveness-Request", w, r.Header, r.Host)
-      w.Header().Add("Liveness-Request-Count", fmt.Sprint(LivenessCount))
-      w.Header().Add("Liveness-Overflow-Count", fmt.Sprint(LivenessOverflowCount))
-      w.WriteHeader(LivenessStatus)
-      util.AddLogMessage(fmt.Sprintf("Serving Liveness Probe: [%s]", global.LivenessProbe), r)
+      probeStatus.lock.Unlock()
+      util.CopyHeaders("Liveness-Request", w, r.Header, r.Host, r.RequestURI)
+      w.Header().Add("Liveness-Request-Count", fmt.Sprint(probeStatus.LivenessCount))
+      w.Header().Add("Liveness-Overflow-Count", fmt.Sprint(probeStatus.LivenessOverflowCount))
+      w.WriteHeader(probeStatus.LivenessStatus)
+      util.AddLogMessage(fmt.Sprintf("Serving Liveness Probe: [%s]", probeStatus.LivenessProbe), r)
     } else {
       next.ServeHTTP(w, r)
     }

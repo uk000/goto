@@ -554,7 +554,7 @@ func (p *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWr
       responses = append(responses, response...)
     }
     for _, response := range responses {
-      util.CopyHeaders("", w, response.Headers, "")
+      util.CopyHeaders("", w, response.Headers, "", "")
       if response.StatusCode == 0 {
         response.StatusCode = 503
       }
