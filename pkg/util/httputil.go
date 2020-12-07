@@ -76,6 +76,7 @@ func PrintLogMessages(r *http.Request) {
     (!IsAdminRequest(r) || global.EnableAdminLogs) &&
     (!IsReminderRequest(r) || global.EnableRegistryReminderLogs) &&
     (!IsProbeRequest(r) || global.EnableProbeLogs) &&
+    (!IsHealthRequest(r) || global.EnablePeerHealthLogs) &&
     global.EnableTrackingLogs {
     log.Println(strings.Join(m.messages, " --> "))
     if flusher, ok := log.Writer().(http.Flusher); ok {
@@ -373,8 +374,9 @@ func WriteJsonPayload(w http.ResponseWriter, t interface{}) {
 
 func IsAdminRequest(r *http.Request) bool {
   return strings.HasPrefix(r.RequestURI, "/request") || strings.HasPrefix(r.RequestURI, "/response") ||
-    strings.HasPrefix(r.RequestURI, "/listeners") || strings.HasPrefix(r.RequestURI, "/client") ||
-    strings.HasPrefix(r.RequestURI, "/label") || strings.HasPrefix(r.RequestURI, "/job") ||
+    strings.HasPrefix(r.RequestURI, "/listeners") || strings.HasPrefix(r.RequestURI, "/label") ||
+    strings.HasPrefix(r.RequestURI, "/client") || strings.HasPrefix(r.RequestURI, "/job") ||
+    strings.HasPrefix(r.RequestURI, "/probe") || strings.HasPrefix(r.RequestURI, "/tcp") || 
     strings.HasPrefix(r.RequestURI, "/registry")
 }
 
@@ -396,6 +398,14 @@ func IsDelayRequest(r *http.Request) bool {
 
 func IsPayloadRequest(r *http.Request) bool {
   return !IsAdminRequest(r) && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload"))
+}
+
+func IsProbeRequest(r *http.Request) bool {
+  return global.IsReadinessProbe(r) || global.IsLivenessProbe(r)
+}
+
+func IsHealthRequest(r *http.Request) bool {
+  return !IsAdminRequest(r) && strings.Contains(r.RequestURI, "/health")
 }
 
 func AddRoute(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), methods ...string) {
@@ -591,10 +601,6 @@ func BuildCrossHeadersMap(crossTrackingHeaders map[string][]string) map[string]s
     }
   }
   return crossHeadersMap
-}
-
-func IsProbeRequest(r *http.Request) bool {
-  return global.IsReadinessProbe(r) || global.IsLivenessProbe(r)
 }
 
 func GenerateRandomString(size int) string {

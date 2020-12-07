@@ -16,6 +16,7 @@ var (
 )
 
 func Execute() {
+  log.SetFlags(log.LstdFlags | log.Lmicroseconds)
   global.ServerPort = 8080
   flag.IntVar(&global.ServerPort, "port", 8080, "Main HTTP Server Listen Port")
   flag.StringVar(&global.PeerName, "label", "", "Default Server Label")

@@ -1,12 +1,13 @@
 package registry
 
 import (
-	"goto/pkg/util"
+  "goto/pkg/util"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
+
 var (
-  Handler      util.ServerHandler       = util.ServerHandler{Name: "registry", SetRoutes: SetRoutes}
+  Handler util.ServerHandler = util.ServerHandler{Name: "registry", SetRoutes: SetRoutes}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -32,27 +33,44 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(registryRouter, "/lockers/labels", getLockerLabels, "GET")
   util.AddRoute(registryRouter, "/lockers/{label}/store/{path}", storeInLabeledLocker, "POST")
   util.AddRoute(registryRouter, "/lockers/{label}/remove/{path}", removeFromLabeledLocker, "POST")
-  util.AddRoute(registryRouter, "/lockers/{label}/get/{path}", getFromLabeledLocker, "GET")
-  util.AddRoute(registryRouter, "/lockers/current/get/{path}", getFromLabeledLocker, "GET")
+  util.AddRoute(registryRouter, "/lockers/{label}/get/{path}", getFromDataLocker, "GET")
+  util.AddRoute(registryRouter, "/lockers/current/get/{path}", getFromDataLocker, "GET")
+  util.AddRoute(registryRouter, "/lockers/{label}/data/paths", getDataLockerPaths, "GET")
   util.AddRoute(registryRouter, "/lockers/data/paths", getDataLockerPaths, "GET")
-  util.AddRoute(registryRouter, "/lockers/find/{text}", findDataLockerKey, "GET")
+  util.AddRoute(registryRouter, "/lockers/{label}/find/{text}", findInDataLockers, "GET")
+  util.AddRoute(registryRouter, "/lockers/find/{text}", findInDataLockers, "GET")
   util.AddRouteQ(registryRouter, "/lockers/current", getLabeledLocker, "data", "{data}", "GET")
   util.AddRoute(registryRouter, "/lockers/current", getLabeledLocker, "GET")
   util.AddRouteQ(registryRouter, "/lockers/{label}", getLabeledLocker, "data", "{data}", "GET")
   util.AddRoute(registryRouter, "/lockers/{label}", getLabeledLocker, "GET")
   util.AddRouteQ(registryRouter, "/lockers", getAllLockers, "data", "{data}", "GET")
   util.AddRoute(registryRouter, "/lockers", getAllLockers, "GET")
+
+  lockerPeersRouter := registryRouter.PathPrefix("/lockers/{label}/peers").Subrouter()
   
   util.AddRoute(peersRouter, "/{peer}/{address}/locker/store/{path}", storeInPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/{address}/locker/remove/{path}", removeFromPeerLocker, "POST")
-  util.AddRoute(peersRouter, "/{peer}/{address}/locker/clear", clearLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/store/{path}", storeInPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/remove/{path}", removeFromPeerLocker, "POST")
+  util.AddRoute(peersRouter, "/{peer}/{address}/locker/clear", clearLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/clear", clearLocker, "POST")
   util.AddRoute(peersRouter, "/lockers/clear", clearLocker, "POST")
+  util.AddRoute(lockerPeersRouter, "/{peer}/{address}/locker/get/{path}", getFromPeerLocker, "GET")
+  util.AddRoute(peersRouter, "/{peer}/{address}/locker/get/{path}", getFromPeerLocker, "GET")
+  util.AddRouteQ(lockerPeersRouter, "/{peer}/{address}", getPeerLocker, "data", "{data}", "GET")
+  util.AddRoute(lockerPeersRouter, "/{peer}/{address}", getPeerLocker, "GET")
+  util.AddRouteQ(peersRouter, "/{peer}/{address}/locker", getPeerLocker, "data", "{data}", "GET")
   util.AddRoute(peersRouter, "/{peer}/{address}/locker", getPeerLocker, "GET")
+  util.AddRouteQ(lockerPeersRouter, "/{peer}", getPeerLocker, "data", "{data}", "GET")
+  util.AddRoute(lockerPeersRouter, "/{peer}", getPeerLocker, "GET")
+  util.AddRouteQ(peersRouter, "/{peer}/locker", getPeerLocker, "data", "{data}", "GET")
   util.AddRoute(peersRouter, "/{peer}/locker", getPeerLocker, "GET")
+  util.AddRouteQ(lockerPeersRouter, "", getPeerLocker, "data", "{data}", "GET")
+  util.AddRoute(lockerPeersRouter, "", getPeerLocker, "GET")
   util.AddRoute(peersRouter, "/lockers", getPeerLocker, "GET")
+  util.AddRouteQ(peersRouter, "/lockers", getPeerLocker, "data", "{data}", "GET")
+  util.AddRouteQ(lockerPeersRouter, "/targets/results", getTargetsSummaryResults, "detailed", "{detailed}", "GET")
+  util.AddRoute(lockerPeersRouter, "/targets/results", getTargetsSummaryResults, "GET")
   util.AddRouteQ(peersRouter, "/lockers/targets/results", getTargetsSummaryResults, "detailed", "{detailed}", "GET")
   util.AddRoute(peersRouter, "/lockers/targets/results", getTargetsSummaryResults, "GET")
 
@@ -86,7 +104,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
   util.AddRoute(peersRouter, "/track/headers/{headers}", addPeersTrackingHeaders, "POST", "PUT")
   util.AddRoute(peersRouter, "/track/headers", getPeersTrackingHeaders, "GET")
-  
+
   util.AddRouteQ(peersRouter, "/probe/{type}/set", setPeersProbe, "uri", "{uri}", "POST", "PUT")
   util.AddRoute(peersRouter, "/probe/{type}/status/set/{status}", setPeersProbeStatus, "POST", "PUT")
   util.AddRoute(peersRouter, "/probes", getPeersProbes, "GET")

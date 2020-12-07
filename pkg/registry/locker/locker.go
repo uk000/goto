@@ -1,8 +1,8 @@
 package locker
 
 import (
-  "goto/pkg/constants"
   "goto/pkg/client/results"
+  "goto/pkg/constants"
   "goto/pkg/util"
   "strings"
   "sync"
@@ -398,7 +398,30 @@ func (cl *CombiLocker) RemovePeerLocker(peerName string) {
   delete(cl.PeerLockers, peerName)
 }
 
-func (cl *CombiLocker) GetPeerLocker(peerName, peerAddress string) interface{} {
+func (cl *CombiLocker) GetFromPeerInstanceLocker(peerName, peerAddress string, keys []string) (interface{}, bool) {
+  if len(keys) == 0 || peerName == "" || peerAddress == "" {
+    return nil, false
+  }
+  cl.lock.RLock()
+  pl := cl.PeerLockers[peerName]
+  cl.lock.RUnlock()
+  if pl == nil {
+    return nil, false
+  }
+  pl.lock.RLock()
+  il := pl.InstanceLockers[peerAddress]
+  pl.lock.RUnlock()
+  if il == nil {
+    return nil, false
+  }
+  result, dataAtKey := il.Get(keys)
+  if dataAtKey {
+    return result, dataAtKey
+  }
+  return map[string]interface{}{strings.Join(keys, ","): result}, false
+}
+
+func (cl *CombiLocker) GetPeerOrAllLockers(peerName, peerAddress string) interface{} {
   if peerName == "" {
     return cl
   }
@@ -410,6 +433,23 @@ func (cl *CombiLocker) GetPeerLocker(peerName, peerAddress string) interface{} {
     return peerLocker.createOrGetInstanceLocker(peerAddress)
   }
   return nil
+}
+
+func (cl *CombiLocker) GetPeerOrAllLockersView(peerName, peerAddress string) interface{} {
+  if peerName == "" {
+    return cl.GetLockerView()
+  }
+  cl.lock.RLock()
+  pl := cl.PeerLockers[peerName]
+  cl.lock.RUnlock()
+  if pl == nil {
+    return nil
+  }
+  plView := pl.GetLockerView()
+  if peerAddress == "" {
+    return plView
+  }
+  return plView.createOrGetInstanceLocker(peerAddress)
 }
 
 func (cl *CombiLocker) GetLockerView() *CombiLocker {
@@ -549,23 +589,31 @@ func (ll *LabeledLockers) GetLockerLabels() []string {
   return labels
 }
 
-func (ll *LabeledLockers) GetDataLockerPaths() map[string][][]string {
+func (ll *LabeledLockers) GetDataLockerPaths(locker string) map[string][][]string {
   ll.lock.RLock()
   defer ll.lock.RUnlock()
   lockerPathsByLabels := map[string][][]string{}
-  for label, cl := range ll.lockers {
-    if cl.DataLocker != nil && cl.DataLocker.Locker != nil && len(cl.DataLocker.Locker) > 0 {
-      lockerPathsByLabels[label] = unsafeGetPaths(cl.DataLocker.Locker)
+  if locker != "" {
+    if strings.EqualFold(locker, constants.LockerCurrent) {
+      lockerPathsByLabels[locker] = unsafeGetPaths(ll.currentLocker.DataLocker.Locker)
+    } else if ll.lockers[locker] != nil {
+      lockerPathsByLabels[locker] = unsafeGetPaths(ll.lockers[locker].DataLocker.Locker)
+    }
+  } else {
+    for label, cl := range ll.lockers {
+      if cl.DataLocker != nil && cl.DataLocker.Locker != nil && len(cl.DataLocker.Locker) > 0 {
+        lockerPathsByLabels[label] = unsafeGetPaths(cl.DataLocker.Locker)
+      }
     }
   }
   return lockerPathsByLabels
 }
 
-func (ll *LabeledLockers) FindDataLockerKey(key string) []string {
+func (ll *LabeledLockers) findInLockers(lockers map[string]*CombiLocker, key string) []string {
   ll.lock.RLock()
   defer ll.lock.RUnlock()
   keyPaths := []string{}
-  for label, cl := range ll.lockers {
+  for label, cl := range lockers {
     if cl.DataLocker != nil && cl.DataLocker.Locker != nil && len(cl.DataLocker.Locker) > 0 {
       subPaths := unsafeFindKey(cl.DataLocker.Locker, key)
       for _, subPath := range subPaths {
@@ -576,6 +624,22 @@ func (ll *LabeledLockers) FindDataLockerKey(key string) []string {
     }
   }
   return keyPaths
+}
+
+func (ll *LabeledLockers) FindInDataLockers(locker string, key string) []string {
+  ll.lock.RLock()
+  lockersToSearch := map[string]*CombiLocker{}
+  if locker != "" {
+    if strings.EqualFold(locker, constants.LockerCurrent) {
+      lockersToSearch[ll.currentLocker.Label] = ll.currentLocker
+    } else if ll.lockers[locker] != nil {
+      lockersToSearch[locker] = ll.lockers[locker]
+    }
+  } else {
+    lockersToSearch = ll.lockers
+  }
+  ll.lock.RUnlock()
+  return ll.findInLockers(lockersToSearch, key)
 }
 
 func (ll *LabeledLockers) GetCurrentLocker() *CombiLocker {

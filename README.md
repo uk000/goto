@@ -98,8 +98,8 @@ The application exposes both client and server features via various management R
 ### Server Features
 * [Server Logging](#server-logging)
 * [Server Listeners](#server-listeners)
-* [TCP Listeners](#server-tcp-listeners)
 * [Server Listener Label](#server-listener-label)
+* [TCP Server](#server-tcp)
 * [Request Headers Tracking](#server-request-headers-tracking)
 * [Request Timeout](#server-request-timeout)
 * [URIs](#server-uris)
@@ -1268,7 +1268,7 @@ Sample log line:
 
 The server starts with a single http listener on the bootstrap port (given as a command line arg, defaults to 8080). It exposes listener APIs to let you add/manage additional HTTP/TCP listeners. The ability to launch and shutdown listeners lets you do some chaos testing. All listener ports respond to the same set of API calls, so any of the HTTP APIs described below as well as runtime traffic proxying can be done via any active HTTP listener, and any TCP operation can be performed on any active TCP listener.
 
-Adding TLS cert and key for a listener using `/cert` and `/key` API will configure the listener for serving HTTPS traffic when it's opened/reopened. An already opened HTTP listener can be reopened as HTTPS listener by configuring TLS certs for it and calling `/reopen`.
+Adding TLS cert and key for a listener using `/cert` and `/key` API will configure the listener for serving HTTPS traffic when it's opened/reopened. An already opened listener can be reopened as a TLS listener by configuring TLS certs for it and calling `/reopen`.
 
 #### See TCP Listeners section later for details of TCP features
 
@@ -1277,7 +1277,6 @@ Adding TLS cert and key for a listener using `/cert` and `/key` API will configu
 |---|---|---|
 | POST       | /listeners/add           | Add a listener. [See Payload JSON Schema](#listener-json-schema)|
 | POST       | /listeners/update        | Update an existing listener.|
-| POST, PUT  | /listeners/{port}/configure/tcp   | Reconfigure details of a TCP listener without having to close and restart. Accepts TCP portion of the listener payload JSON. |
 | POST, PUT  | /listeners/{port}/cert/add   | Add/update certificate for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
 | POST, PUT  | /listeners/{port}/key/add   | Add/update private key for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
 | POST, PUT  | /listeners/{port}/cert/remove   | Remove certificate and key for a listener and reopen it to serve HTTP traffic instead of HTTPS. |
@@ -1286,20 +1285,6 @@ Adding TLS cert and key for a listener using `/cert` and `/key` API will configu
 | POST, PUT  | /listeners/{port}/reopen | Close and reopen an existing listener if already opened, otherwise open it |
 | POST, PUT  | /listeners/{port}/close  | Close an added listener|
 | GET        | /listeners               | Get a list of listeners |
-| POST, PUT  | /listeners/{port}/timeout/read/{duration}  | Set TCP read timeout for the port (applies to TCP echo mode) |
-| POST, PUT  | /listeners/{port}/timeout/write/{duration}  | Set TCP write timeout for the port (applies to TCP echo mode) |
-| POST, PUT  | /listeners/{port}/timeout/idle/{duration}  | Set TCP connection idle timeout for the port (applies to TCP echo mode) |
-| POST, PUT  | /listeners/{port}/connection/life/{duration}  | Set TCP connection lifetime duration for the port (applies to all TCP connection modes except streaming) |
-| POST, PUT  | /listeners/{port}/stream<br/>/size/{payloadSize}<br/>/duration/{duration}<br/>/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with the given total payload size delivered over the given duration with the given delay per chunk |
-| POST, PUT  | /listeners/{port}/stream<br/>/chunk/{chunkSize}<br/>/duration/{duration}<br/>/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with chunks of the given chunk size delivered over the given duration with the given delay per chunk |
-| POST, PUT  | /listeners/{port}/stream<br/>/chunk/{chunkSize}<br/>/count/{chunkCount}<br/>/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with total chunks matching the given chunk count of the given chunk size delivered with the given delay per chunk |
-| POST, PUT  | /listeners/{port}/expect/payload/{length}  | Set expected payload length for payload verification mode (to only validate payload length, not content) |
-| POST, PUT  | /listeners/{port}/expect/payload  | Set expected payload for payload verification mode, to validate both payload length and content. Expected payload must be sent as request body. |
-| POST, PUT  | /listeners/{port}/echo/response/delay/{duration}  | Set response delay for TCP echo mode for the listener |
-| POST, PUT  | /listeners/{port}/stream/{enable}  | Enable or disable streaming on a port without having to restart the listener (useful to disable streaming while retaining the stream congiuration) |
-| POST, PUT  | /listeners/{port}/echo/{enable} | Enable/disable echo mode on a port to let the port be tested in silent mode (see overview for details) |
-| POST, PUT  | /listeners/{port}/conversation/{enable} | Enable/disable conversation mode on a port to support multiple packets verification (see overview for details) |
-| POST, PUT  | /listeners/{port}/validate/payload/{enable} | Enable/disable payload validation mode on a port to support payload length/content validation over connection lifetime (see overview for details) |
 
 #### Listener JSON Schema
 |Field|Data Type|Description|
@@ -1310,29 +1295,7 @@ Adding TLS cert and key for a listener using `/cert` and `/key` API will configu
 | protocol | string | `http` or `tcp`|
 | open | bool | Controls whether the listener should be opened as soon as it's added. Also reflects listener's current status when queried. |
 | tls | bool | Reports whether the listener has been configured for TLS. This flag is read-only, the value of which is determined based on whether TLS cert and key have been added for the listener using the APIs. |
-| tcp | TCPConfig | Supplemental TCP config for a TCP listener. |
-
-#### TCP Config JSON Schema
-|Field|Data Type|Description|
-|---|---|---|
-| readTimeout | duration | Read timeout to apply when reading data sent by client. |
-| writeTimeout | duration | Write timeout to apply when sending data to the client. |
-| connectTimeout | duration | Max period that the server will wait during connection handshake. |
-| connIdleTimeout | duration | Max period of inactivity (no bytes traveled) on the connection that would trigger closure of the client connection. |
-| connectionLife | duration | Max lifetime after which the client connection will be terminated proactively by the server. |
-| stream | bool | Controls whether the listener should operate in streaming mode. |
-| echo | bool | Controls whether the listener should operate in echo mode. |
-| conversation | bool | Controls whether the listener should operate in conversation mode. |
-| validatePayloadLength | bool | Controls whether the listener should operate in payload length validation mode. |
-| validatePayloadContent | bool | Controls whether the listener should operate in payload content validation mode. |
-| expectedPayloadLength | int | Set the expected payload length explicitly for length verification. Also used to auto-store the expected payload content length when validating content. |
-| echoResponseSize | int | Configures the size of payload to be echoed back to client. Server will only echo back when it has these many bytes received from the client. |
-| echoResponseDelay | duration | Delay to apply when sending response back to the client in echo mode. |
-| streamPayloadSize | int | Configures the total payload size to be stream via chunks if streaming is enabled for the listener. |
-| streamChunkSize | int | Configures the size of each chunk of data to stream if streaming is enabled for the listener. |
-| streamChunkCount | int | Configures the total number of chunks to stream if streaming is enabled for the listener. |
-| streamChunkDelay | duration | Configures the delay to be added before sending each chunk back if streaming is enabled for the listener. |
-| streamDuration | duration | Configures the total duration of stream if streaming is enabled for the listener. |
+| tcp | TCPConfig | Supplemental TCP config for a TCP listener. See TCP Config JSON schema under `TCP Server` section. |
 
 
 #### Listener API Examples:
@@ -1342,25 +1305,17 @@ Adding TLS cert and key for a listener using `/cert` and `/key` API will configu
 ```
 curl localhost:8080/listeners/add --data '{"port":8081, "protocol":"http", "label":"Server-8081"}'
 
-curl -s localhost:8080/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true}'
-
-curl -s localhost:8080/listeners/9000/configure/tcp --data '{"readTimeout":"15s","writeTimeout":"15s","connectTimeout":"15s","connIdleTimeout":"20s","responseDelay":"1s", "connectionLife":"20s"}'
+curl -s localhost:8080/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true, "tcp": {"readTimeout":"15s","writeTimeout":"15s","connectTimeout":"15s","connIdleTimeout":"20s","responseDelay":"1s", "connectionLife":"20s"}}'
 
 curl -X POST localhost:8080/listeners/8081/remove
 
-curl -X PUT localhost:8080/listeners/8081/open
+curl -X PUT localhost:8080/listeners/9000/open
 
-curl -X PUT localhost:8080/listeners/8081/close
+curl -X PUT localhost:8080/listeners/9000/close
 
-curl localhost:8081/listeners
+curl -X PUT localhost:8080/listeners/9000/reopen
 
-curl -X PUT localhost:8080/listeners/9000/echo/n
-
-curl -X PUT localhost:8080/listeners/9000/stream/y
-
-curl -X PUT localhost:8080/listeners/9000/expect/payload/10
-
-curl -X PUT localhost:8080/listeners/9000/expect/payload --data 'SomePayload'
+curl localhost:8080/listeners
 
 ```
 </details>
@@ -1373,46 +1328,58 @@ curl -X PUT localhost:8080/listeners/9000/expect/payload --data 'SomePayload'
 
 ```
 $ curl -s localhost:8080/listeners
+
 {
   "8081": {
-    "label": "Server-8081",
+    "listenerID": "8081-1",
+    "label": "http-8081",
     "port": 8081,
     "protocol": "http",
-    "open": true
+    "open": true,
+    "tls": false
   },
   "8082": {
-    "label": "8082",
+    "listenerID": "",
+    "label": "http-8082",
     "port": 8082,
     "protocol": "http",
-    "open": false
+    "open": false,
+    "tls": true
+  },
+  "9000": {
+    "listenerID": "9000-1",
+    "label": "tcp-9000",
+    "port": 9000,
+    "protocol": "tcp",
+    "open": true,
+    "tls": false,
+    "tcp": {
+      "readTimeout": "1m",
+      "writeTimeout": "1m",
+      "connectTimeout": "15s",
+      "connIdleTimeout": "1m",
+      "connectionLife": "2m",
+      "stream": false,
+      "echo": false,
+      "conversation": false,
+      "silentLife": false,
+      "closeAtFirstByte": false,
+      "validatePayloadLength": true,
+      "validatePayloadContent": true,
+      "expectedPayloadLength": 13,
+      "echoResponseSize": 10,
+      "echoResponseDelay": "1s",
+      "streamPayloadSize": "",
+      "streamChunkSize": "0",
+      "streamChunkCount": 0,
+      "streamChunkDelay": "0s",
+      "streamDuration": "0s"
+    }
   }
 }
 ```
 </p>
 </details>
-
-
-<br/>
-
-#
-## <a name="server-tcp-listeners"></a>  > TCP Listeners
-
-`Goto` providers features for testing server-side TCP behavior via TCP listeners (client side TCP features are described under client section).
-
-The primary HTTP port that `goto` starts with exposes listeners REST APIs that can be used to open additional ports on the `goto` instance. These additional ports can be either `HTTP` or `TCP`. For TCP listeners, additional configs can be provided using listener's `tcp` schema, which allows for configuring various timeouts, connection lifetime, packet sizes, etc.
-
-A TCP listener can operate in the following modes to faciliate different kinds of testing:
-
-1. By default, a TCP listener executes in `silent` mode. In this mode, the behavior of the listener depends on the `connectionLife`. If `connectionLife` is set to a non-zero value, the listener waits for the configured lifetime and closes the client connection, and never responds to any bytes received. If `connectionLife` is set to zero, the listener waits for the first byte to arrive and then closes the client connection.
-2. If `Echo` mode is enabled on a TCP listener, the listener echoes back the bytes received from the client. The `echoPacketSize` configures the echo buffer size, which is the number of bytes that the listener will need to receive from the client before echoing back. If more data is received than the `echoPacketSize`, it'll echo multiple chunks each of `echoPacketSize` size. In `echo` mode, the connection enforces `readTimeout` and `connIdleTimeout` based on the activity: any new bytes recevied reset the read/idle timeouts. It applies `writeTimeout` when sending the echo response to the client. If `connectionLife` is set, it controls the overall lifetime of the connection and the connection will close upon reaching the max life regardless of the activity.
-3. `Stream` operation can be enabled on a TCP listener via the APIs described below. If `stream` is enabled, it takes precedence over `echo` mode, and the connection starts streaming TCP bytes per the given configuration as soon as a client connects. None of the timeouts or max life applies in streaming mode, and the client connection closes automatically once the streaming completes.
-4. In `payload validation` mode, client should first set the payload expectation by calling either `/listeners/{port}/expect/payload/{length}` or `/listeners/{port}/expect/payload/{length}`, depending on whether server should just validate payload length or the payload content. The server then waits for the duration of the connection lifetime (if not set explicitly for the listener, this feature defaults to `30s` of total connection life), and buffers bytes received from client. If at any point during the connection life the number of received bytes exceed the expected payload length, the server responds with error and closes connection. If at the end of the connection life, the number of bytes match the payload expectations (either length or both length and content), then the server responds with success message. The messages returned by the server are one of the following:
-   - `[SUCCESS]: Received pyload matches expected payload of length [l] on port [p]`
-   - `[ERROR:EXCEEDED] - Payload length [l] exceeded expected length [e] on port [p]`
-   - `[ERROR:CONTENT] - Payload content of length [l] didn't match expected payload of length [e] on port [p]`
-   - `[ERROR:TIMEOUT] - Timed out before receiving payload of expected length [l] on port [p]`
-5. In `conversation` mode, the server waits for the client to send a TCP payload with text `HELLO` to which server also responds back with `HELLO`. All subsequent packets from client should follow the format `BEGIN/{text}/END`, and server echoes the received text back in the format of `ACK/{text}/END`. Client can initiate connection closure by sending text `GOODBYE`, or else the connection can close based on various timeouts and connection lifetime config.
-6. In all cases, client may close the connection proactively causing the ongoing operation to abort.
 
 
 <br/>
@@ -1441,6 +1408,220 @@ curl -X PUT localhost:8080/label/clear
 curl localhost:8080/label
 ```
 
+</details>
+
+
+<br/>
+
+#
+## <a name="server-tcp"></a>  > TCP Server
+
+`Goto` providers features for testing server-side TCP behavior via TCP listeners (client side TCP features are described under client section).
+
+The primary HTTP port that `goto` starts with exposes listeners REST APIs that can be used to open additional ports on the `goto` instance. These additional ports can be either `HTTP` or `TCP`. For TCP listeners, additional configs can be provided using listener's `tcp` schema, which allows for configuring various timeouts, connection lifetime, packet sizes, etc. The TCP configurations of a TCP listener can be supplied at the time of listener creation, and it can also be reconfigured at anytime via the `/tcp/{port}/configure` API. 
+
+A TCP listener can operate in the following modes to faciliate different kinds of testing:
+
+1. By default, a TCP listener executes in one of the two `silent` mode. 
+   a) If the listener is configured with a `connectionLife` that limits its lifetime, the listener operates in `SilentLife` mode where it waits for the configured lifetime and closes the client connection. In this mode, the listener receives and counts the bytes received, but never responds. 
+   b) If the listener's `connectionLife` is set to zero, the listener operates in `CloseAtFirstByte` mode where it waits for the first byte to arrive and then closes the client connection.
+2. If `Echo` mode is enabled on a TCP listener, the listener echoes back the bytes received from the client. The `echoResponseSize` configures the echo buffer size, which is the number of bytes that the listener will need to receive from the client before echoing back. If more data is received than the `echoResponseSize`, it'll echo multiple chunks each of `echoResponseSize` size. The config `echoResponseDelay` configures the delay server should apply before sending each echo response packets. In `echo` mode, the connection enforces `readTimeout` and `connIdleTimeout` based on the activity: any new bytes recevied reset the read/idle timeouts. It applies `writeTimeout` when sending the echo response to the client. If `connectionLife` is set, it controls the overall lifetime of the connection and the connection will close upon reaching the max life regardless of the activity.
+3. If `Stream` mode is enabled, the connection starts streaming TCP bytes per the given configuration as soon as a client connects. None of the timeouts or max life applies in streaming mode, and the client connection closes automatically once the streaming completes. The stream behavior is controlled via the following configs: `streamPayloadSize`, `streamChunkSize`, `streamChunkCount`, `streamChunkDelay`, `streamDuration`. Not all of these configs are required, and a combination of some may lead to ambiguity that the server resolves by picking the most sensible combinations of these config params.
+4. In `payload validation` mode, client should first set the payload expectation by calling either `/listeners/{port}/expect/payload/{length}` or `/listeners/{port}/expect/payload/{length}`, depending on whether server should just validate payload length or the payload content. The server then waits for the duration of the connection lifetime (if not set explicitly for the listener, this feature defaults to `30s` of total connection life), and buffers bytes received from client. If at any point during the connection life the number of received bytes exceed the expected payload length, the server responds with error and closes connection. If at the end of the connection life, the number of bytes match the payload expectations (either length or both length and content), then the server responds with success message. The messages returned by the server are one of the following:
+   - `[SUCCESS]: Received pyload matches expected payload of length [l] on port [p]`
+   - `[ERROR:EXCEEDED] - Payload length [l] exceeded expected length [e] on port [p]`
+   - `[ERROR:CONTENT] - Payload content of length [l] didn't match expected payload of length [e] on port [p]`
+   - `[ERROR:TIMEOUT] - Timed out before receiving payload of expected length [l] on port [p]`
+5. In `conversation` mode, the server waits for the client to send a TCP payload with text `HELLO` to which server also responds back with `HELLO`. All subsequent packets from client should follow the format `BEGIN/{text}/END`, and server echoes the received text back in the format of `ACK/{text}/END`. Client can initiate connection closure by sending text `GOODBYE`, or else the connection can close based on various timeouts and connection lifetime config.
+6. In all cases, client may close the connection proactively causing the ongoing operation to abort.
+
+
+#### APIs
+|METHOD|URI|Description|
+|---|---|---|
+| POST, PUT  | /tcp/{port}/configure   | Reconfigure details of a TCP listener without having to close and restart. Accepts TCP Config JSON as payload. |
+| POST, PUT  | /tcp/{port}/timeout/read/{duration}  | Set TCP read timeout for the port (applies to TCP echo mode) |
+| POST, PUT  | /tcp/{port}/timeout/write/{duration}  | Set TCP write timeout for the port (applies to TCP echo mode) |
+| POST, PUT  | /tcp/{port}/timeout/idle/{duration}  | Set TCP connection idle timeout for the port (applies to TCP echo mode) |
+| POST, PUT  | /tcp/{port}/connection/life/{duration}  | Set TCP connection lifetime duration for the port (applies to all TCP connection modes except streaming) |
+| POST, PUT  | /tcp/{port}/echo<br/>/response/delay/{duration}  | Set response delay for TCP echo mode for the listener |
+| POST, PUT  | /tcp/{port}/stream<br/>/size/{payloadSize}<br/>/duration/{duration}<br/>/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with the given total payload size delivered over the given duration with the given delay per chunk |
+| POST, PUT  | /tcp/{port}/stream<br/>/chunk/{chunkSize}<br/>/duration/{duration}<br/>/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with chunks of the given chunk size delivered over the given duration with the given delay per chunk |
+| POST, PUT  | /tcp/{port}/stream<br/>/chunk/{chunkSize}<br/>/count/{chunkCount}<br/>/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with total chunks matching the given chunk count of the given chunk size delivered with the given delay per chunk |
+| POST, PUT  | /tcp/{port}/expect/payload/{length}  | Set expected payload length for payload verification mode (to only validate payload length, not content) |
+| POST, PUT  | /tcp/{port}/expect/payload  | Set expected payload for payload verification mode, to validate both payload length and content. Expected payload must be sent as request body. |
+| POST, PUT  | /tcp/{port}/validate/payload/{enable} | Enable/disable payload validation mode on a port to support payload length/content validation over connection lifetime (see overview for details) |
+| POST, PUT  | /tcp/{port}/stream/{enable}  | Enable or disable streaming on a port without having to restart the listener (useful to disable streaming while retaining the stream congiuration) |
+| POST, PUT  | /tcp/{port}/echo/{enable} | Enable/disable echo mode on a port to let the port be tested in silent mode (see overview for details) |
+| POST, PUT  | /tcp/{port}/conversation/{enable} | Enable/disable conversation mode on a port to support multiple packets verification (see overview for details) |
+| POST, PUT  | /tcp/{port}/silentlife/{enable} | Enable/disable silent life mode on a port (see overview for details) |
+| POST, PUT  | /tcp/{port}/closeatfirst/{enable} | Enable/disable `close at first byte` mode on a port (see overview for details) |
+| GET  | /tcp/{port}/active | Get a list of active client connections for a TCP listener port |
+| GET  | /tcp/active | Get a list of active client connections for all TCP listener ports |
+| GET  | /tcp/{port}/history/{mode} | Get history list of client connections for a TCP listener port for the given mode (one of the supported modes given as text: `SilentLife`, `CloseAtFirstByte`, `Echo`, `Stream`, `Conversation`, `PayloadValidation`) |
+| GET  | /tcp/{port}/history | Get history list of client connections for a TCP listener port |
+| GET  | /tcp/history/{mode} | Get history list of client connections for all TCP listener ports for the given mode (see above) |
+| GET  | /tcp/history | Get history list of client connections for all TCP listener ports |
+| POST  | /tcp/{port}/history/clear | Clear history of client connections for a TCP listener port |
+| POST  | /tcp/history/clear | Clear history of client connections for all TCP listener ports |
+
+
+
+#### TCP Config JSON Schema
+|Field|Data Type|Description|
+|---|---|---|
+| readTimeout | duration | Read timeout to apply when reading data sent by client. |
+| writeTimeout | duration | Write timeout to apply when sending data to the client. |
+| connectTimeout | duration | Max period that the server will wait during connection handshake. |
+| connIdleTimeout | duration | Max period of inactivity (no bytes traveled) on the connection that would trigger closure of the client connection. |
+| connectionLife | duration | Max lifetime after which the client connection will be terminated proactively by the server. |
+| stream | bool | Controls whether the listener should operate in `Stream` mode. |
+| echo | bool | Controls whether the listener should operate in `Echo` mode. |
+| conversation | bool | Controls whether the listener should operate in `Conversation` mode. |
+| silentLife | bool | Controls whether the listener should operate in `SilentLife` mode. |
+| closeAtFirstByte | bool | Controls whether the listener should operate in `CloseAtFirstByte` mode. |
+| validatePayloadLength | bool | Controls whether the listener should operate in `Payload Validation` mode for length. |
+| validatePayloadContent | bool | Controls whether the listener should operate in `Payload Validation` mode for both content and length. |
+| expectedPayloadLength | int | Set the expected payload length explicitly for length verification. Also used to auto-store the expected payload content length when validating content. See API for providing expected payload content. |
+| echoResponseSize | int | Configures the size of payload to be echoed back to client. Server will only echo back when it has these many bytes received from the client. |
+| echoResponseDelay | duration | Delay to apply when sending response back to the client in echo mode. |
+| streamPayloadSize | int | Configures the total payload size to be stream via chunks if streaming is enabled for the listener. |
+| streamChunkSize | int | Configures the size of each chunk of data to stream if streaming is enabled for the listener. |
+| streamChunkCount | int | Configures the total number of chunks to stream if streaming is enabled for the listener. |
+| streamChunkDelay | duration | Configures the delay to be added before sending each chunk back if streaming is enabled for the listener. |
+| streamDuration | duration | Configures the total duration of stream if streaming is enabled for the listener. |
+
+
+
+#### TCP API Examples:
+<details>
+<summary>API Examples</summary>
+
+```
+curl -s localhost:8080/tcp/9000/configure --data '{"readTimeout":"1m","writeTimeout":"1m","connectTimeout":"15s","connIdleTimeout":"1m", "connectionLife":"2m", "echo":true, "echoResponseSize":10, "echoResponseDelay": "1s"}'
+
+curl -s localhost:8080/tcp/9000/configure --data '{"stream": true, "streamDuration":"5s", "streamChunkDelay":"1s", "streamPayloadSize": "2K", "streamChunkSize":"250", "streamChunkCount":15}'
+
+curl -X PUT localhost:8080/tcp/9000/echo/n
+
+curl -X PUT localhost:8080/tcp/9000/stream/y
+
+curl -X POST localhost:8080/tcp/9000/stream/size/1K/duration/30s/delay/1s
+
+curl -X PUT localhost:8080/tcp/9000/expect/payload/10
+
+curl -X PUT localhost:8080/tcp/9000/expect/payload --data 'SomePayload'
+```
+</details>
+
+#### TCP Status APIs Output Example
+
+<details>
+<summary>Example</summary>
+<p>
+
+```
+curl -s localhost:8080/tcp/history | jq
+{
+  "9000": {
+    "1": {
+      "config": {
+        "readTimeout": "",
+        "writeTimeout": "",
+        "connectTimeout": "",
+        "connIdleTimeout": "",
+        "connectionLife": "",
+        "stream": false,
+        "echo": false,
+        "conversation": false,
+        "silentLife": false,
+        "closeAtFirstByte": false,
+        "validatePayloadLength": true,
+        "validatePayloadContent": false,
+        "expectedPayloadLength": 10,
+        "echoResponseSize": 100,
+        "echoResponseDelay": "",
+        "streamPayloadSize": "",
+        "streamChunkSize": "0",
+        "streamChunkCount": 0,
+        "streamChunkDelay": "0s",
+        "streamDuration": "0s"
+      },
+      "status": {
+        "port": 9000,
+        "listenerID": "9000-1",
+        "requestID": 1,
+        "connStartTime": "2020-12-05T15:05:50.748382-08:00",
+        "connCloseTime": "2020-12-05T15:06:20.754224-08:00",
+        "firstByteInAt": "2020-12-05T15:05:56.078853-08:00",
+        "lastByteInAt": "2020-12-05T15:05:56.078853-08:00",
+        "firstByteOutAt": "2020-12-05T15:06:20.754152-08:00",
+        "lastByteOutAt": "2020-12-05T15:06:20.754152-08:00",
+        "totalBytesRead": 10,
+        "totalBytesSent": 81,
+        "totalReads": 2,
+        "totalWrites": 1,
+        "closed": true,
+        "clientClosed": false,
+        "serverClosed": true,
+        "errorClosed": false,
+        "readTimeout": false,
+        "idleTimeout": false,
+        "lifeTimeout": true,
+        "writeErrors": 0
+      }
+    },
+    "2": {
+      "config": {
+        "readTimeout": "1m",
+        "writeTimeout": "1m",
+        "connectTimeout": "15s",
+        "connIdleTimeout": "1m",
+        "connectionLife": "1m",
+        "stream": false,
+        "echo": false,
+        "conversation": true,
+        "silentLife": false,
+        "closeAtFirstByte": false,
+        "validatePayloadLength": false,
+        "validatePayloadContent": false,
+        "expectedPayloadLength": 0,
+        "echoResponseSize": 100,
+        "echoResponseDelay": "",
+        "streamPayloadSize": "",
+        "streamChunkSize": "0",
+        "streamChunkCount": 0,
+        "streamChunkDelay": "0s",
+        "streamDuration": "0s"
+      },
+      "status": {
+        "port": 9000,
+        "listenerID": "9000-1",
+        "requestID": 2,
+        "connStartTime": "2020-12-05T15:06:14.669709-08:00",
+        "connCloseTime": "2020-12-05T15:06:19.247841-08:00",
+        "firstByteInAt": "2020-12-05T15:06:16.51267-08:00",
+        "lastByteInAt": "2020-12-05T15:06:19.247753-08:00",
+        "firstByteOutAt": "2020-12-05T15:06:16.512726-08:00",
+        "lastByteOutAt": "2020-12-05T15:06:19.247801-08:00",
+        "totalBytesRead": 12,
+        "totalBytesSent": 12,
+        "totalReads": 2,
+        "totalWrites": 2,
+        "closed": true,
+        "clientClosed": false,
+        "serverClosed": false,
+        "errorClosed": false,
+        "readTimeout": false,
+        "idleTimeout": false,
+        "lifeTimeout": false,
+        "writeErrors": 0
+      }
+    }
+  }
+}
+```
+</p>
 </details>
 
 <br/>
@@ -1538,7 +1719,7 @@ This feature allows tracking request timeouts by headers.
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
-|PUT, POST| /request/timeout/track/headers/{headers}  | Add one or more headers. Requests carrying these headers will be tracked for timeouts and reported |
+|PUT, POST| /request/timeout/<br/>track/headers/{headers}  | Add one or more headers. Requests carrying these headers will be tracked for timeouts and reported |
 |PUT, POST| /request/timeout/track/all                | Enable request timeout tracking for all requests |
 |POST     |	/request/timeout/track/clear              | Clear timeout tracking configs |
 |GET      |	/request/timeout/status                   | Get a report of tracked request timeouts so far |
@@ -1708,7 +1889,7 @@ This feature allows adding bypass URIs that will not be subject to other configu
 |PUT, POST| /request/uri/bypass/add?uri={uri}       | Add a bypass URI |
 |PUT, POST| /request/uri/bypass/remove?uri={uri}    | Remove a bypass URI |
 |PUT, POST| /request/uri/bypass/clear               | Remove all bypass URIs |
-|PUT, POST| /request/uri/bypass/status/set/{status:count} | Set status code to be returned for bypass URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
+|PUT, POST| /request/uri/bypass<br/>/status/set/{status:count} | Set status code to be returned for bypass URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
 |GET      |	/request/uri/bypass/list                | Get list of bypass URIs |
 |GET      |	/request/uri/bypass                     | Get list of bypass URIs |
 |GET      |	/request/uri/bypass/status              | Get current bypass URI status code |
@@ -2615,7 +2796,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 #### <a name="registry-apis"></a> Registry APIs
 |METHOD|URI|Description|
 |---|---|---|
-|<a name="registry-peers-apis"></a>|||
+|<a name="registry-peers-apis"></a>| ** Peer APIs ** ||
 | POST      | /registry/peers/add     | Register a worker instance (referred to as peer). See [Peer JSON Schema](#peer-json-schema)|
 | POST      | /registry/peers/{peer}/remember | Re-register a peer. Accepts same request payload as /peers/add API but doesn't respond back with targets and jobs. |
 | POST, PUT | /registry/peers/{peer}/remove/{address} | Deregister a peer by its label and IP address |
@@ -2628,7 +2809,8 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST      | /registry/peers/clear   | Remove all registered peers|
 | POST      | /registry/peers/copyToLocker   | Copy current set of `Peers JSON` data (output of `/registry/peers` API) to current locker under a pre-defined key named `peers` |
 | GET       | /registry/peers         | Get all registered peers. See [Peers JSON Schema](#peers-json-schema) |
-|<a name="registry-lockers-apis"></a>|||
+||||
+|<a name="registry-lockers-apis"></a>| ** Locker APIs ** ||
 ||||
 | POST      | /registry/lockers/open/{label} | Setup a locker with the given label and make it the current locker where peer results get stored.  |
 | POST      | /registry/lockers/close/{label} | Remove the locker for the given label.  |
@@ -2639,8 +2821,10 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST      | /registry/lockers/{label}/remove/{path} | Remove stored data, if any, from the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data gets removed from the leaf of the given path. |
 | GET      | /registry/lockers/{label}/get/{path} | Read stored data, if any, at the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
 | GET      | /registry/lockers/current/get/{path} | Read stored data, if any, at the given key path in the current locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
+| GET      | /registry/lockers/{label}/data/paths| Get a list of key paths where some data is stored, from the given locker.  |
 | GET      | /registry/lockers/data/paths| Get a list of key paths where some data is stored, from all lockers.  |
-| GET      | /registry/lockers/find/{text} | Get a list of all valid URI paths containing the locker label and keys where the given text was found. The returned URIs are valid for invocation against the base URL of the registry. |
+| GET      | /registry/lockers/{label}/find/{text} | Get a list of all valid URI paths where the given text exists in the given locker. The returned URIs are valid for invocation against the base URL of the registry. |
+| GET      | /registry/lockers/find/{text} | Get a list of all valid URI paths (containing the locker label and keys) where the given text exists, across all lockers. The returned URIs are valid for invocation against the base URL of the registry. |
 | GET       | /registry/lockers/current | Get currently active locker with stored keys, but without stored data |
 | GET       | /registry/lockers/current?data=y | Get currently active locker with stored data |
 | GET       | /registry/lockers/{label} | Get given label's locker with stored keys, but without stored data |
@@ -2651,58 +2835,77 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST      | /registry/peers/{peer}/{address}<br/>/locker/remove/{path} | Remove stored data for the given `path` from the locker of the peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
 | POST      | /registry/peers/{peer}<br/>/locker/store/{path} | Store any arbitrary value for the given key in the peer locker without associating data to a peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
 | POST      | /registry/peers/{peer}<br/>/locker/remove/{path} | Remove stored data for the given key from the peer locker under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
-| POST      | /registry/peers/{peer}/{address}/locker/clear | Clear the locker for the peer instance under currently active labeled locker |
+| POST      | /registry/peers/{peer}/{address}<br/>/locker/clear | Clear the locker for the peer instance under currently active labeled locker |
 | POST      | /registry/peers/{peer}/locker/clear | Clear the locker for all instances of the given peer under currently active labeled locker |
 | POST      | /registry/peers/lockers/clear | Clear all peer lockers under currently active labeled locker |
-| GET       | /registry/peers/{peer}/{address}/locker | Get locker's data for the peer instance from currently active labeled locker |
-| GET       | /registry/peers/{peer}/locker | Get locker's data for all instances of the peer from currently active labeled locker |
-| GET       | /registry/peers/lockers | Get locker's data for all peers from currently active labeled locker |
-| GET       | /registry/peers/lockers/targets/results | Get target invocation summary results for all peer instances from currently active labeled locker |
-| GET       | /registry/peers/lockers/targets<br/>/results?detailed=Y | Get invocation results broken down by targets for all peer instances from currently active labeled locker |
-|<a name="registry-peers-targets-apis"></a>|||
+| GET       | /registry/lockers/{label}<br/>/peers/{peer}/{address}/locker/get/{path} | Get the data stored at the given path under the peer instance's locker under the given labeled locker. Using label `current` fetches data from the current labeled locker. |
+| GET       | /registry/peers/{peer}<br/>/{address}/locker/get/{path} | Get the data stored at the given path under the peer instance's locker under the current labeled locker |
+| GET       | /registry/lockers/{label}<br/>/peers/{peer}/{address} | Get the peer instance's locker under the given labeled locker, using `...` placeholder for stored data to reduce the download size (to just fetch locker metadata). |
+| GET       | /registry/lockers/{label}<br/>/peers/{peer}/{address}?data=y | Get the peer instance's locker under the given labeled locker with all stored data included. |
+| GET       | /registry/peers/{peer}/{address}/locker | Get the peer instance's locker under the current active labeled locker, using `...` placeholder for stored data to just fetch locker metadata |
+| GET       | /registry/peers/{peer}/{address}/locker?data=y | Get the peer instance's locker under the current active labeled locker with all stored data included. |
+| GET       | /registry/lockers/{label}/peers/{peer} | Get the lockers of all instances of the given peer under the given labeled locker, using `...` placeholder for stored data to just fetch locker metadata. |
+| GET       | /registry/lockers/{label}/peers/{peer}?data=y | Get the lockers of all instances of the given peer under the given labeled locker with all stored data included. |
+| GET       | /registry/peers/{peer}/locker | Get locker's data for all instances of the peer from currently active labeled locker, using `...` placeholder for stored data to just fetch locker metadata |
+| GET       | /registry/peers/{peer}/locker?data=y | Get locker's data for all instances of the peer from currently active labeled locker with all stored data included |
+| GET       | /registry/lockers/{label}/peers | Get the lockers of all peers under the given labeled locker, using `...` placeholder for stored data to just fetch locker metadata. |
+| GET       | /registry/lockers/{label}/peers?data=y | Get the lockers of all peers under the given labeled locker with all stored data included. |
+| GET       | /registry/peers/lockers | Get the lockers of all peers from currently active labeled locker, using `...` placeholder for stored data to just fetch locker metadata. |
+| GET       | /registry/peers/lockers?data=y | Get the lockers of all peers from currently active labeled locker with all stored data included. |
+| GET       | /registry/lockers/{label}<br/>/peers/targets/results | Get target invocation summary results for all client peer instances from the given labeled locker |
+| GET       | /registry/peers/lockers/targets/results | Get target invocation summary results for all client peer instances from currently active labeled locker |
+| GET       | /registry/lockers/{label}<br/>/peers/targets/results?detailed=Y | Get invocation results broken down by targets for all client peer instances from the given labeled locker |
+| GET       | /registry/peers/lockers<br/>/targets/results?detailed=Y | Get invocation results broken down by targets for all client peer instances from currently active labeled locker |
+||||
+|<a name="registry-peers-targets-apis"></a>| ** Peer Targets APIs ** ||
 ||||
 | GET       | /registry/peers/targets | Get all registered targets for all peers |
 | POST      | /registry/peers/{peer}/targets/add | Add a target to be sent to a peer. See [Peer Target JSON Schema](#peer-target-json-schema). Pushed immediately as well as upon start of a new peer instance. |
-| POST, PUT | /registry/peers/{peer}/targets/{targets}/remove | Remove given targets for a peer |
+| POST, PUT | /registry/peers/{peer}<br/>/targets/{targets}/remove | Remove given targets for a peer |
 | POST      | /registry/peers/{peer}/targets/clear   | Remove all targets for a peer|
 | GET       | /registry/peers/{peer}/targets   | Get all targets of a peer |
-| POST, PUT | /registry/peers/{peer}/targets/{targets}/invoke | Invoke given targets on the given peer |
-| POST, PUT | /registry/peers/{peer}/targets/invoke/all | Invoke all targets on the given peer |
+| POST, PUT | /registry/peers/{peer}<br/>/targets/{targets}/invoke | Invoke given targets on the given peer |
+| POST, PUT | /registry/peers/{peer}<br/>/targets/invoke/all | Invoke all targets on the given peer |
 | POST, PUT | /registry/peers/targets/invoke/all | Invoke all targets on the given peer |
-| POST, PUT | /registry/peers/{peer}/targets/{targets}/stop | Stop given targets on the given peer |
-| POST, PUT | /registry/peers/{peer}/targets/stop/all | Stop all targets on the given peer |
+| POST, PUT | /registry/peers/{peer}<br/>/targets/{targets}/stop | Stop given targets on the given peer |
+| POST, PUT | /registry/peers/{peer}<br/>/targets/stop/all | Stop all targets on the given peer |
 | POST, PUT | /registry/peers/targets/stop/all | Stop all targets on the given peer |
 | POST, PUT | /registry/peers/targets<br/>/results/all/{enable}  | Controls whether results should be summarized across all targets. Disabling this when not needed can improve performance. Disabled by default. |
 | POST, PUT | /registry/peers/targets<br/>/results/invocations/{enable}  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
 | POST      | /registry/peers/targets/clear   | Remove all targets from all peers |
-|<a name="registry-peers-jobs-apis"></a>|||
+||||
+|<a name="registry-peers-jobs-apis"></a>| ** Peer Jobs APIs ** ||
 ||||
 | GET       | /registry/peers/jobs | Get all registered jobs for all peers |
 | POST      | /registry/peers/{peer}/jobs/add | Add a job to be sent to a peer. See [Peer Job JSON Schema](#peer-job-json-schema). Pushed immediately as well as upon start of a new peer instance. |
-| POST, PUT | /registry/peers/{peer}/jobs/{jobs}/remove | Remove given jobs for a peer. |
+| POST, PUT | /registry/peers/{peer}<br/>/jobs/{jobs}/remove | Remove given jobs for a peer. |
 | POST      | /registry/peers/{peer}/jobs/clear   | Remove all jobs for a peer.|
 | GET       | /registry/peers/{peer}/jobs   | Get all jobs of a peer |
 | POST, PUT | /registry/peers/{peer}/jobs/{jobs}/run | Run given jobs on the given peer |
 | POST, PUT | /registry/peers/{peer}/jobs/run/all | Run all jobs on the given peer |
-| POST, PUT | /registry/peers/{peer}/jobs/{jobs}/stop | Stop given jobs on the given peer |
-| POST, PUT | /registry/peers/{peer}/jobs/stop/all | Stop all jobs on the given peer |
+| POST, PUT | /registry/peers/{peer}<br/>/jobs/{jobs}/stop | Stop given jobs on the given peer |
+| POST, PUT | /registry/peers/{peer}<br/>/jobs/stop/all | Stop all jobs on the given peer |
 | POST      | /registry/peers/jobs/clear   | Remove all jobs from all peers. |
-|<a name="registry-peers-trackheaders-apis"></a>|||
 ||||
-| POST, PUT | /registry/peers/track/headers/{headers} | Configure headers to be tracked by client invocations on peers. Pushed immediately as well as upon start of a new peer instance. |
+|<a name="registry-peers-trackheaders-apis"></a>| ** Peer Track Headers APIs *** ||
+||||
+| POST, PUT | /registry/peers<br/>/track/headers/{headers} | Configure headers to be tracked by client invocations on peers. Pushed immediately as well as upon start of a new peer instance. |
 | GET | /registry/peers/track/headers | Get a list of headers configured for tracking by the above `POST` API. |
-|<a name="registry-peers-probes-apis"></a>|||
 ||||
-| POST, PUT | /registry/peers/probe/readiness/set?uri={uri} | Configure readiness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
-| POST, PUT | /registry/peers/probe/liveness/set?uri={uri} | Configure liveness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
+|<a name="registry-peers-probes-apis"></a>| ** Peer Probes APIs ** ||
+||||
+| POST, PUT | /registry/peers/probe<br/>/readiness/set?uri={uri} | Configure readiness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/probe<br/>/liveness/set?uri={uri} | Configure liveness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probe<br/>/readiness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probe<br/>/liveness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
 | GET | /registry/peers/probes | Get probe configuration given to registry via any of the above 4 probe APIs. |
-|<a name="registry-peers-call-apis"></a>|||
+||||
+|<a name="registry-peers-call-apis"></a>| ** APIs to call any API on Peers ** ||
 ||||
 | GET, POST, PUT | /registry/peers/{peer}/call?uri={uri} | Invoke the given `URI` on the given `peer`, using the HTTP method and payload from this request |
 | GET, POST, PUT | /registry/peers/call?uri={uri} | Invoke the given `URI` on all `peers`, using the HTTP method and payload from this request |
-|<a name="registry-dump-apis"></a>|||
+||||
+|<a name="registry-dump-apis"></a>| ** Registry clone, dump and load APIs ** ||
 ||||
 | POST | /registry/cloneFrom?url={url} | Clone data from another registry instance at the given URL. The current goto instance will download `peers`, `lockers`, `targets`, `jobs`, `tracking headers` and `probes`. The peer pods downloaded from other registry are not used for any invocation by this registry, it just becomes available locally for information purpose. Any new pods connecting to this registry using the same peer labels will use the downloaded targets, jobs, etc. |
 | GET | /lockers/{label}/dump/{path} | Dump data stored at the given key path in the given labeled locker. |
@@ -2712,6 +2915,8 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET | /lockers/all/dump | Dump contents of all labeled lockers. |
 | GET | /registry/dump | Dump current registry configs and locker data in json format. |
 | POST | /registry/load | Load registry configs and locker data from json dump produced via `/dump` API. |
+
+<br/>
 
 #### Peer JSON Schema 
 (to register a peer via /registry/peers/add)
