@@ -20,7 +20,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
 func respond(w http.ResponseWriter, r *http.Request) {
   w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, "{\"CatchAll\": ")
+	fmt.Fprint(w, "{\"CatchAll\": ")
 	echo.Echo(w, r)
 	fmt.Fprintln(w, "}")
 }

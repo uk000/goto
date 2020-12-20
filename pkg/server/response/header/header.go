@@ -122,6 +122,8 @@ func Middleware(next http.Handler) http.Handler {
     if !util.IsAdminRequest(r) {
       setResponseHeaders(w, r)
     }
-    next.ServeHTTP(w, r)
+    if next != nil {
+      next.ServeHTTP(w, r)
+    }
   })
 }

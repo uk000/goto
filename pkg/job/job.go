@@ -439,7 +439,7 @@ func prepareMarkers(output string, sourceCommand *CommandJobTask, jobRun *JobRun
     pieces := strings.Split(output, separator)
     for i, piece := range pieces {
       if outputMarkers[i+1] != "" {
-        markers[util.GetFillerMarker(outputMarkers[i+1])] = piece
+        markers[util.GetFillerMarked(outputMarkers[i+1])] = piece
       }
     }
   }

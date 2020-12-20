@@ -47,7 +47,9 @@ func Middleware(next http.Handler) http.Handler {
     util.AddLogMessage(fmt.Sprintf("[%s] [%s]", hostLabel, label), r)
     w.Header().Add("Via-Goto", label)
     w.Header().Add("Goto-Host", hostLabel)
-    next.ServeHTTP(w, r)
+    if next != nil {
+      next.ServeHTTP(w, r)
+    }
     util.AddLogMessage(util.GetResponseHeadersLog(w), r)
   })
 }

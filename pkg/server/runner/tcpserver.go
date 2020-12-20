@@ -3,6 +3,7 @@ package runner
 import (
   "goto/pkg/global"
   "goto/pkg/server/tcp"
+  "goto/pkg/util"
   "log"
   "net"
   "sync"
@@ -29,7 +30,7 @@ func serveTCPRequests(listenerID string, port int, listener net.Listener) {
       requestCounter++
       lock.Unlock()
       go tcp.ServeClientConnection(port, requestCounter, conn.(*net.TCPConn))
-    } else if !tcp.IsConnectionCloseError(err) {
+    } else if !util.IsConnectionCloseError(err) {
       log.Println(err)
       continue
     } else {

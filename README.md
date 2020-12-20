@@ -2005,10 +2005,31 @@ curl localhost:8080/response/headers
 
 # <a name="server-response-payload"></a>
 ## > Response Payload
-This feature allows setting either custom or random generated response payload to be sent with server responses.
+This feature allows setting either a specfic custom payload to be delivered based on request match criteria, or otherwise configure serve to send random auto-generated response payloads.
 
-Custom response payload can be set for all requests (`default` payload), for specific URIs, or for specific headers. If response is set for all three, URI match gets highest priority, followed by request headers match, and otherwise default payload is used as fallback if configured.
+A payload configuration can also `capture` values from the URI/Header/Query that it matches, as described in a section below.
 
+### Custom payload based on request matching
+Custom response payload can be set for any of the following request categories:
+1. All requests (`default` payload), 
+2. Requests matching certain URI patterns, 
+3. Requests matching certain headers (keys, and optionally values).
+4. Requests matching certain query params (names, and optionally values)
+5. Requests matching URI + header combinations
+6. Requests matching URI + query combinations
+7. Requests matching URI + one or more keywords in request body
+   
+If a request matches more than one configured responses, a response is picked based on the following priority order:
+1. URI + headers combination match 
+2. URI + query combination match
+3. URI + body keywords combination match
+4. URI match
+5. Headers match
+6. Query match
+7. If no other match found and a default payload is configured, the default payload is served
+8. If no match found and no default payload is configured, the request proceeds for eventual catch-all response.
+
+### Auto-generated random response payload
 Random payload generation can be configured for the `default` payload that applies to all URIs that don't have a custom payload defined. Random payload generation is configured by specifying a payload size using URI `/response/payload/set/default/{size}` and not setting any payload. If a custom default payload is set as well as the size is configured, the custom payload will be adjusted to match the set size by either trimming the custom payload or appending more characters to the custom payload. Payload size can be a numeric value or use common byte size conventions: `K`, `KB`, `M`, `MB`. There is no limit on the payload size as such, it's only limited by the memory available to the `goto` process.
 
 If no custom payload is configured, the request continues with its normal processing. When response payload is configured, the following requests are not matched against payload rules and never receive the configured payload:
@@ -2021,14 +2042,44 @@ When a request is matched with a configured payload (custom or default), the req
 - applying response delay, either requested via `/delay` call or configured via `/response/delay/set/{delay}` API.
 
 
+### Capturing values from the request to use in the response payload
+
+ To capture a value from URI/Header/Query, use the `{var}` syntax in the match criteria as well as in the payload. The occurrences of `{var}` in the response payload will be replaced with the value of that var as captured from the URI/Header/Query. Additionally, `{var}` allows for URIs to be specified such that some ports of the URI can vary.
+
+ For example, for a configured response payload that matches on request URI:
+ ```
+ /response/payload/set/uri?uri=/foo/{f}/bar{b} 
+  --data '{"result": "uri had foo={f}, bar={b}"}'
+ ```
+when a request comes for URI `/foo/hi/bar123`, the response payload will be `{"result": "uri had foo=hi, bar=123"}`
+
+Similarly, for a configured response payload that matches on request header:
+```
+/response/payload/set/header/foo/{x} --data '{"result": "header was foo with value {x}"}'
+```
+when a request comes with header `foo:123`, the response payload will be `{"result": "header was foo with value 123"}`
+
+Same kind of capture can be done on query params, e.g.:
+```
+/response/payload/set/query/qq/{v} --data '{"test": "query qq was set to {v}"}'
+```
+
+
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
-| POST | /response/payload/set/default  | Add a custom payload to be used for ALL URI responses except those explicitly configured with another payload |
-| POST | /response/payload/set/default/{size}  | Respond with a random generated payload of the given size for all URIs except those explicitly configured with another payload. Size can be a numeric value or use common byte size conventions: K, KB, M, MB |
-| POST | /response/payload/set/uri?uri={uri}  | Add a custom payload to be sent for requests matching the given URI. URI can contain placeholders |
-| POST | /response/payload/set/header/{header}  | Add a custom payload to be sent for requests matching the given header name |
-| POST | /response/payload<br/>/set/header/{header}/value/{value}  | Add a custom payload to be sent for requests matching the given header name and value |
+| POST | /response/payload<br/>/set/default  | Add a custom payload to be used for ALL URI responses except those explicitly configured with another payload |
+| POST | /response/payload<br/>/set/default/{size}  | Respond with a random generated payload of the given size for all URIs except those explicitly configured with another payload. Size can be a numeric value or use common byte size conventions: K, KB, M, MB |
+| POST | /response/payload<br/>/set/uri?uri={uri}  | Add a custom payload to be sent for requests matching the given URI. URI can contain variable placeholders. |
+| POST | /response/payload<br/>/set/header/{header}  | Add a custom payload to be sent for requests matching the given header name |
+| POST | /response/payload<br/>/set/header/{header}?uri={uri}  | Add a custom payload to be sent for requests matching the given header name and the given URI |
+| POST | /response/payload<br/>/set/header/{header}/{value}  | Add a custom payload to be sent for requests matching the given header name and value |
+| POST | /response/payload<br/>/set/header/{header}/{value}?uri={uri}  | Add a custom payload to be sent for requests matching the given header name and value along with the given URI. |
+| POST | /response/payload<br/>/set/query/{q}  | Add a custom payload to be sent for requests matching the given query param name |
+| POST | /response/payload<br/>/set/query/{q}?uri={uri}  | Add a custom payload to be sent for requests matching the given query param name and the given URI |
+| POST | /response/payload<br/>/set/query/{q}/{value}  | Add a custom payload to be sent for requests matching the given query param name and value |
+| POST | /response/payload<br/>/set/query/{q}/{value}<br/>?uri={uri}  | Add a custom payload to be sent for requests matching the given query param name and value along with the given URI. |
+| POST | /response/payload<br/>/set/body/contains<br/>/{keywords}?uri={uri}  | Add a custom payload to be sent for requests matching the given URI where the body contains the given keywords (comma-separated list) in the given order (second keyword in the list must appear after the first, and so on) |
 | POST | /response/payload/clear  | Clear all configured custom response payloads |
 | GET  |	/response/payload                      | Get configured custom payloads |
 
@@ -2046,6 +2097,8 @@ curl -X POST localhost:8080/response/payload/set/uri?uri=/foo/{f}/bar{b} --data 
 curl -X POST localhost:8080/response/payload/set/header/foo --data '{"test": "header was foo"}'
 
 curl -X POST localhost:8080/response/payload/set/header/foo/value/bar --data '{"test": "header was foo with value bar"}'
+
+curl -g -X POST localhost:8080/response/payload/set/body/contains/AA,BB,CC?uri=/foo --data '{"test": "body contains AA,BB,CC"}' -HContent-Type:application/json
 
 curl -X POST localhost:8080/response/payload/clear
 
@@ -2289,7 +2342,8 @@ Any request that doesn't match any of the defined management APIs, and also does
 | removeHeaders | `[]string `                             | Headers to remove from the original request before proxying |
 | addQuery      | `[][]string`                            | Additional query parameters to add to the request before proxying |
 | removeQuery   | `[]string`                              | Query parameters to remove from the original request before proxying |
-| match        | JSON     | Match criteria based on which runtime traffic gets proxied to this target. See [JSON Schema](#proxy-target-match-criteria-json-schema) and [detailed explanation](#proxy-target-match-criteria) below |
+| matchAny        | JSON     | Match criteria based on which runtime traffic gets proxied to this target. See [JSON Schema](#proxy-target-match-criteria-json-schema) and [detailed explanation](#proxy-target-match-criteria) below |
+| matchAll        | JSON     | Match criteria based on which runtime traffic gets proxied to this target. See [JSON Schema](#proxy-target-match-criteria-json-schema) and [detailed explanation](#proxy-target-match-criteria) below |
 | replicas     | int      | Number of parallel replicated calls to be made to this target for each matched request. This allows each request to result in multiple calls to be made to a target if needed for some test scenarios |
 | enabled       | bool     | Whether or not the proxy target is currently active |
 
@@ -2821,8 +2875,12 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST      | /registry/lockers/{label}/remove/{path} | Remove stored data, if any, from the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data gets removed from the leaf of the given path. |
 | GET      | /registry/lockers/{label}/get/{path} | Read stored data, if any, at the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
 | GET      | /registry/lockers/current/get/{path} | Read stored data, if any, at the given key path in the current locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
-| GET      | /registry/lockers/{label}/data/paths| Get a list of key paths where some data is stored, from the given locker.  |
-| GET      | /registry/lockers/data/paths| Get a list of key paths where some data is stored, from all lockers.  |
+| GET      | /registry/lockers/{label}/data/keys| Get a list of keys where some data is stored, from the given locker.  |
+| GET      | /registry/lockers/{label}/data/paths| Get a list of key paths (URIs) where some data is stored, from the given locker. The returned URIs are valid for invocation against the base URL of the registry. |
+| GET      | /registry/lockers/current/data/keys| Get a list of keys where some data is stored, from the current locker.  |
+| GET      | /registry/lockers/current/data/paths| Get a list of key paths (URIs) where some data is stored, from the current locker. The returned URIs are valid for invocation against the base URL of the registry. |
+| GET      | /registry/lockers/data/keys| Get a list of keys where some data is stored, from all lockers.  |
+| GET      | /registry/lockers/data/paths| Get a list of key paths (URIs) where some data is stored, from all lockers. The returned URIs are valid for invocation against the base URL of the registry. |
 | GET      | /registry/lockers/{label}/find/{text} | Get a list of all valid URI paths where the given text exists in the given locker. The returned URIs are valid for invocation against the base URL of the registry. |
 | GET      | /registry/lockers/find/{text} | Get a list of all valid URI paths (containing the locker label and keys) where the given text exists, across all lockers. The returned URIs are valid for invocation against the base URL of the registry. |
 | GET       | /registry/lockers/current | Get currently active locker with stored keys, but without stored data |

@@ -36,6 +36,8 @@ func Middleware(next http.Handler) http.Handler {
       localAddr = global.PeerAddress
     }
     util.AddLogMessage(fmt.Sprintf("LocalAddr: %s, RemoteAddr: %s", localAddr, r.RemoteAddr), r)
-    next.ServeHTTP(w, r)
+    if next != nil {
+      next.ServeHTTP(w, r)
+    }
   })
 }

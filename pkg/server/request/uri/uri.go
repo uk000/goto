@@ -215,7 +215,9 @@ func middleware(next http.Handler) http.Handler {
       }
       if statusToReport > 0 {
         crw := intercept.NewInterceptResponseWriter(w, true)
-        next.ServeHTTP(crw, r)
+        if next != nil {
+          next.ServeHTTP(crw, r)
+        }
         uriLock.Lock()
         if uriStatusByPort[port][uri][1] >= 1 {
           uriStatusByPort[port][uri][1]--
@@ -228,10 +230,10 @@ func middleware(next http.Handler) http.Handler {
         util.AddLogMessage(fmt.Sprintf("Remaining status count = %d", statusTimesLeft-1), r)
         crw.StatusCode = statusToReport
         crw.Proceed()
-      } else {
+      } else if next != nil {
         next.ServeHTTP(w, r)
       }
-    } else {
+    } else if next != nil {
       next.ServeHTTP(w, r)
     }
   })

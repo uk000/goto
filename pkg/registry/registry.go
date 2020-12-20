@@ -1058,11 +1058,12 @@ func getLockerLabels(w http.ResponseWriter, r *http.Request) {
 
 func getDataLockerPaths(w http.ResponseWriter, r *http.Request) {
   label := util.GetStringParamValue(r, "label")
+  paths := strings.Contains(r.RequestURI, "paths")
   pr := getPortRegistry(r)
   pr.lockersLock.RLock()
   labeledLockers := pr.labeledLockers
   pr.lockersLock.RUnlock()
-  util.WriteJsonPayload(w, labeledLockers.GetDataLockerPaths(label))
+  util.WriteJsonPayload(w, labeledLockers.GetDataLockerPaths(label, paths))
   if global.EnableRegistryLogs {
     util.AddLogMessage("Data Locker paths reported", r)
   }

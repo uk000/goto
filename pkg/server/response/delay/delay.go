@@ -115,6 +115,8 @@ func Middleware(next http.Handler) http.Handler {
       w.Header().Add("Response-Delay", delay.String())
       time.Sleep(delay)
     }
-    next.ServeHTTP(w, r)
+    if next != nil {
+      next.ServeHTTP(w, r)
+    }
   })
 }

@@ -52,7 +52,7 @@ func ContextMiddleware(next http.Handler) http.Handler {
     if global.Stopping && global.IsReadinessProbe(r) {
       CopyHeaders("Stopping-Readiness-Request", w, r.Header, r.Host, r.RequestURI)
       w.WriteHeader(http.StatusNotFound)
-    } else {
+    } else if next != nil {
       next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), logmessagesKey, &messagestore{})))
     }
   })
@@ -60,7 +60,9 @@ func ContextMiddleware(next http.Handler) http.Handler {
 
 func LoggingMiddleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    next.ServeHTTP(w, r)
+    if next != nil {
+      next.ServeHTTP(w, r)
+    }
     PrintLogMessages(r)
   })
 }
@@ -376,7 +378,7 @@ func IsAdminRequest(r *http.Request) bool {
   return strings.HasPrefix(r.RequestURI, "/request") || strings.HasPrefix(r.RequestURI, "/response") ||
     strings.HasPrefix(r.RequestURI, "/listeners") || strings.HasPrefix(r.RequestURI, "/label") ||
     strings.HasPrefix(r.RequestURI, "/client") || strings.HasPrefix(r.RequestURI, "/job") ||
-    strings.HasPrefix(r.RequestURI, "/probe") || strings.HasPrefix(r.RequestURI, "/tcp") || 
+    strings.HasPrefix(r.RequestURI, "/probe") || strings.HasPrefix(r.RequestURI, "/tcp") ||
     strings.HasPrefix(r.RequestURI, "/registry")
 }
 
@@ -406,6 +408,11 @@ func IsProbeRequest(r *http.Request) bool {
 
 func IsHealthRequest(r *http.Request) bool {
   return !IsAdminRequest(r) && strings.Contains(r.RequestURI, "/health")
+}
+
+func IsKnownRequest(r *http.Request) bool {
+  return IsProbeRequest(r) || IsReminderRequest(r) || IsHealthRequest(r) || IsLockerRequest(r) ||
+    IsAdminRequest(r) || IsStatusRequest(r) || IsDelayRequest(r) || IsPayloadRequest(r)
 }
 
 func AddRoute(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), methods ...string) {
@@ -519,10 +526,11 @@ func MatchURI(uri1 string, uri2 string) bool {
   return matchPieces(getURIPieces(uri1), getURIPieces(uri2))
 }
 
-func FindURIInMap(uri string, m map[string]interface{}) string {
-  if m != nil {
+func FindURIInMap(uri string, i interface{}) string {
+  if m := reflect.ValueOf(i); m.Kind() == reflect.Map {
     uriPieces1 := getURIPieces(uri)
-    for uri2 := range m {
+    for _, k := range m.MapKeys() {
+      uri2 := k.String()
       uriPieces2 := getURIPieces(uri2)
       if matchPieces(uriPieces1, uriPieces2) {
         return uri2
@@ -541,8 +549,8 @@ func IsYes(flag string) bool {
     strings.EqualFold(flag, "true") || strings.EqualFold(flag, "1")
 }
 
-func GetFillerMarker(label string) string {
-  return "{" + label + "}"
+func GetFillerMarked(key string) string {
+  return "{" + key + "}"
 }
 
 func GetFillers(text string) []string {
@@ -558,12 +566,32 @@ func GetFillersUnmarked(text string) []string {
   return matches
 }
 
-func GetFillerUnmarked(text string) string {
+func GetFillerUnmarked(text string) (string, bool) {
   fillers := GetFillersUnmarked(text)
   if len(fillers) > 0 {
-    return fillers[0]
+    return fillers[0], true
   }
-  return ""
+  return "", false
+}
+
+func RegisterURIRouteAndGetRegex(uri string, router *mux.Router, handler func(http.ResponseWriter, *http.Request)) (*mux.Router, *regexp.Regexp, error) {
+  if uri != "" {
+    vars := fillerRegExp.FindAllString(uri, -1)
+    for _, v := range vars {
+      v2, _ := GetFillerUnmarked(v)
+      v2 = GetFillerMarked(v2 + ":.*")
+      uri = strings.ReplaceAll(uri, v, v2)
+    }
+    subRouter := router.NewRoute().Subrouter()
+    route := subRouter.PathPrefix(uri).HandlerFunc(handler)
+    if re, err := route.GetPathRegexp(); err == nil {
+      re = strings.ReplaceAll(re, "$", "(/.*)?$")
+      return subRouter, regexp.MustCompile(re), nil
+    } else {
+      return nil, nil, err
+    }
+  }
+  return nil, nil, fmt.Errorf("Empty URI")
 }
 
 func ParseTrackingHeaders(headers string) ([]string, map[string][]string) {
@@ -610,31 +638,4 @@ func GenerateRandomString(size int) string {
     b[i] = charset[r.Intn(len(charset))]
   }
   return string(b)
-}
-
-func GetConnectionRemainingLife(startTime, atTime time.Time, connectionLife, readTimeout, connIdleTimeout time.Duration) time.Duration {
-  now := time.Now()
-  if connectionLife <= 0 && readTimeout <= 0 && connIdleTimeout <= 0 {
-    return 24 * time.Hour
-  }
-  remainingLife := 0 * time.Second
-  if connectionLife > 0 {
-    remainingLife = connectionLife - (now.Sub(startTime))
-  }
-  if readTimeout > 0 {
-    if connectionLife == 0 || readTimeout < remainingLife {
-      remainingLife = readTimeout
-    }
-  }
-  if connIdleTimeout > 0 {
-    if connectionLife == 0 && readTimeout == 0 || connIdleTimeout < remainingLife {
-      remainingLife = connIdleTimeout
-    }
-  }
-  return remainingLife
-}
-
-func GetConnectionReadWriteTimeout(startTime time.Time, connectionLife, readWriteTimeout, connIdleTimeout time.Duration) time.Time {
-  now := time.Now()
-  return now.Add(GetConnectionRemainingLife(startTime, now, connectionLife, readWriteTimeout, connIdleTimeout))
 }

@@ -292,9 +292,11 @@ func Middleware(next http.Handler) http.Handler {
     if !util.IsAdminRequest(r) {
       trackRequestHeaders(r)
       crw := intercept.NewInterceptResponseWriter(w, false)
-      next.ServeHTTP(crw, r)
+      if next != nil {
+        next.ServeHTTP(crw, r)
+      }
       trackResponseForRequestHeaders(r, crw.StatusCode)
-    } else {
+    } else if next != nil {
       next.ServeHTTP(w, r)
     }
   })

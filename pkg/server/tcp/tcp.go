@@ -242,10 +242,10 @@ func (tcp *TCPConnectionHandler) processConnectionError(err error, whatFor strin
     tcp.status.ClientClosed = true
   default:
     tcp.status.ServerClosed = true
-    if IsConnectionCloseError(err) {
+    if util.IsConnectionCloseError(err) {
       log.Printf("[Listener: %s][Request: %d][%s]: Connection closed by server on port [%d]",
         tcp.ListenerID, tcp.requestID, whatFor, tcp.Port)
-    } else if IsConnectionTimeoutError(err) {
+    } else if util.IsConnectionTimeoutError(err) {
       balanceLife := util.GetConnectionRemainingLife(tcp.status.ConnStartTime, time.Now(), tcp.ConnectionLifeD, tcp.ReadTimeoutD, tcp.ConnIdleTimeoutD)
       if balanceLife < 0 {
         log.Printf("[Listener: %s][Request: %d][%s]: Max connection life [%s] reached. Closing connection on port [%d]",
@@ -656,25 +656,17 @@ func (tcp *TCPConnectionHandler) sendDataToClientWithDeadline(data []byte, whatF
 }
 
 func (tcp *TCPConnectionHandler) updateReadDeadline() {
-  tcp.conn.SetReadDeadline(util.GetConnectionReadWriteTimeout(tcp.status.ConnStartTime, tcp.ConnectionLifeD, tcp.ReadTimeoutD, tcp.ConnIdleTimeoutD))
+  util.UpdateReadDeadline(tcp.conn, tcp.status.ConnStartTime, tcp.ConnectionLifeD, tcp.ReadTimeoutD, tcp.ConnIdleTimeoutD)
 }
 
 func (tcp *TCPConnectionHandler) updateWriteDeadline() {
-  tcp.conn.SetWriteDeadline(util.GetConnectionReadWriteTimeout(tcp.status.ConnStartTime, tcp.ConnectionLifeD, tcp.WriteTimeoutD, tcp.ConnIdleTimeoutD))
+  util.UpdateWriteDeadline(tcp.conn, tcp.status.ConnStartTime, tcp.ConnectionLifeD, tcp.WriteTimeoutD, tcp.ConnIdleTimeoutD)
 }
 
 func (tcp *TCPConnectionHandler) copyInputHeadToOutput(inHead, outFrom, outTo int) {
-  copy(tcp.writeBuffer[outFrom:outTo], tcp.readBuffer[:inHead])
+  util.CopyInputHeadToOutput(tcp.writeBuffer, tcp.readBuffer, inHead, outFrom, outTo)
 }
 
 func (tcp *TCPConnectionHandler) copyInputTailToOutput(tail, outFrom, outTo int) {
-  copy(tcp.writeBuffer[outFrom:outTo], tcp.readBuffer[tail:])
-}
-
-func IsConnectionCloseError(err error) bool {
-  return strings.Contains(err.Error(), "closed network connection")
-}
-
-func IsConnectionTimeoutError(err error) bool {
-  return strings.Contains(err.Error(), "timeout")
+  util.CopyInputTailToOutput(tcp.writeBuffer, tcp.readBuffer, tail, outFrom, outTo)
 }

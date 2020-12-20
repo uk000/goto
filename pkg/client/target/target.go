@@ -84,7 +84,7 @@ func (pc *PortClient) removeTargets(targets []string) bool {
 
 func (pc *PortClient) prepareTargetForPeer(target *invocation.InvocationSpec, r *http.Request) *invocation.InvocationSpec {
   if target != nil {
-    peerName := util.GetFillerUnmarked(target.Name)
+    peerName, _ := util.GetFillerUnmarked(target.Name)
     if peerName != "" && r != nil {
       if peers := global.GetPeers(peerName, r); peers != nil {
         if strings.Contains(target.URL, "{") && strings.Contains(target.URL, "}") {

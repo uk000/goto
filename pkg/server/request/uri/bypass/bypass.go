@@ -189,6 +189,8 @@ func Middleware(next http.Handler) http.Handler {
       util.PrintLogMessages(r)
       return
     }
-    next.ServeHTTP(w, r)
+    if next != nil {
+      next.ServeHTTP(w, r)
+    }
   })
 }

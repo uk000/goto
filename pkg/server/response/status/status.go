@@ -177,7 +177,9 @@ func IncrementStatusCount(statusCode int, r *http.Request) {
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     crw := intercept.NewInterceptResponseWriter(w, true)
-    next.ServeHTTP(crw, r)
+    if next != nil {
+      next.ServeHTTP(crw, r)
+    }
     if !util.IsAdminRequest(r) {
       crw.StatusCode = computeResponseStatus(crw.StatusCode, r)
       if crw.StatusCode > 0 && !uri.HasURIStatus(r) {

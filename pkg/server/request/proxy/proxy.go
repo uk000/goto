@@ -1,45 +1,48 @@
 package proxy
 
 import (
-	"fmt"
-	"log"
-	"net/http"
-	"regexp"
-	"strings"
-	"sync"
+  "fmt"
+  "log"
+  "net/http"
+  "regexp"
+  "strings"
+  "sync"
 
-	"goto/pkg/invocation"
-	"goto/pkg/server/response/status"
-	"goto/pkg/server/response/trigger"
-	"goto/pkg/util"
+  "goto/pkg/invocation"
+  "goto/pkg/server/response/status"
+  "goto/pkg/server/response/trigger"
+  "goto/pkg/util"
 
-	"github.com/gorilla/mux"
-	"github.com/gorilla/reverse"
+  "github.com/gorilla/mux"
+  "github.com/gorilla/reverse"
 )
 
 type ProxyTargetMatch struct {
-  Headers [][]string
-  Uris    []string
-  Query   [][]string
+  Headers      [][]string
+  Uris         []string
+  Query        [][]string
+  MatchAllURIs bool
 }
 
 type ProxyTarget struct {
-  Name           string           `json:"name"`
-  URL            string           `json:"url"`
-  SendID         bool             `json:"sendID"`
-  ReplaceURI     string           `json:"replaceURI"`
-  StripURI       string           `json:"stripURI"`
-  AddHeaders     [][]string       `json:"addHeaders"`
-  RemoveHeaders  []string         `json:"removeHeaders"`
-  AddQuery       [][]string       `json:"addQuery"`
-  RemoveQuery    []string         `json:"removeQuery"`
-  Match          ProxyTargetMatch `json:"match"`
-  Replicas       int              `json:"replicas"`
-  Enabled        bool             `json:"enabled"`
+  Name           string            `json:"name"`
+  URL            string            `json:"url"`
+  SendID         bool              `json:"sendID"`
+  ReplaceURI     string            `json:"replaceURI"`
+  StripURI       string            `json:"stripURI"`
+  AddHeaders     [][]string        `json:"addHeaders"`
+  RemoveHeaders  []string          `json:"removeHeaders"`
+  AddQuery       [][]string        `json:"addQuery"`
+  RemoveQuery    []string          `json:"removeQuery"`
+  MatchAny       *ProxyTargetMatch `json:"matchAny"`
+  MatchAll       *ProxyTargetMatch `json:"matchAll"`
+  Replicas       int               `json:"replicas"`
+  Enabled        bool              `json:"enabled"`
   uriRegExp      *regexp.Regexp
   stripURIRegExp *regexp.Regexp
   captureHeaders map[string]string
   captureQuery   map[string]string
+  router         *mux.Router
 }
 
 type ProxyMatchCounts struct {
@@ -63,19 +66,20 @@ type Proxy struct {
   TargetsByUris    map[string]map[string]*ProxyTarget            `json:"targetsByUris"`
   TargetsByQuery   map[string]map[string]map[string]*ProxyTarget `json:"targetsByQuery"`
   proxyMatchCounts *ProxyMatchCounts
+  router           *mux.Router
   lock             sync.RWMutex
 }
 
 var (
   Handler         util.ServerHandler = util.ServerHandler{Name: "proxy", SetRoutes: SetRoutes, Middleware: Middleware}
   internalHandler util.ServerHandler = util.ServerHandler{Name: "uri", Middleware: middleware}
-  forwardRouter   *mux.Router
+  rootRouter      *mux.Router
   proxyByPort     map[string]*Proxy = map[string]*Proxy{}
   proxyLock       sync.RWMutex
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  forwardRouter = root.NewRoute().Subrouter()
+  rootRouter = root
   proxyRouter := r.PathPrefix("/proxy").Subrouter()
   targetsRouter := proxyRouter.PathPrefix("/targets").Subrouter()
   util.AddRoute(targetsRouter, "/add", addProxyTarget, "POST")
@@ -90,16 +94,15 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(proxyRouter, "/counts/clear", clearProxyMatchCounts, "POST")
 }
 
-func (p *Proxy) init() {
-  p.lock.Lock()
-  defer p.lock.Unlock()
-  if p.Targets == nil {
-    p.Targets = map[string]*ProxyTarget{}
-    p.TargetsByHeaders = map[string]map[string]map[string]*ProxyTarget{}
-    p.TargetsByUris = map[string]map[string]*ProxyTarget{}
-    p.TargetsByQuery = map[string]map[string]map[string]*ProxyTarget{}
-    p.initResults()
-  }
+func newProxy() *Proxy {
+  p := &Proxy{}
+  p.Targets = map[string]*ProxyTarget{}
+  p.TargetsByHeaders = map[string]map[string]map[string]*ProxyTarget{}
+  p.TargetsByUris = map[string]map[string]*ProxyTarget{}
+  p.TargetsByQuery = map[string]map[string]map[string]*ProxyTarget{}
+  p.initResults()
+  p.router = rootRouter.NewRoute().Subrouter()
+  return p
 }
 
 func (p *Proxy) initResults() {
@@ -177,16 +180,24 @@ func (p *Proxy) incrementMatchCounts(t *ProxyTarget, uri string, header string, 
 
 func (p *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
   target := &ProxyTarget{}
-  var err error
-  if err = util.ReadJsonPayload(r, target); err == nil {
-    _, err = toInvocationSpec(target, nil)
+  err := util.ReadJsonPayload(r, target)
+  if err != nil {
+    w.WriteHeader(http.StatusBadRequest)
+    fmt.Fprintf(w, "Invalid target: %s\n", err.Error())
+    return
   }
+  if target.MatchAll != nil && target.MatchAny != nil {
+    w.WriteHeader(http.StatusBadRequest)
+    fmt.Fprintln(w, "Only one of matchAll and matchAny should be specified")
+    return
+  }
+  _, err = p.toInvocationSpec(target, nil)
   if err == nil {
     p.deleteProxyTarget(target.Name)
     p.lock.Lock()
     defer p.lock.Unlock()
     if target.StripURI != "" {
-      target.stripURIRegExp = regexp.MustCompile("^(.*)("+target.StripURI + ")(/.+).*$")
+      target.stripURIRegExp = regexp.MustCompile("^(.*)(" + target.StripURI + ")(/.+).*$")
     }
     p.Targets[target.Name] = target
     p.addHeaderMatch(target)
@@ -206,18 +217,23 @@ func (p *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) addHeaderMatch(target *ProxyTarget) {
-  for _, h := range target.Match.Headers {
+  matchHeaders := [][]string{}
+  if target.MatchAny != nil {
+    matchHeaders = append(matchHeaders, target.MatchAny.Headers...)
+  }
+  if target.MatchAll != nil {
+    matchHeaders = append(matchHeaders, target.MatchAll.Headers...)
+  }
+  for _, h := range matchHeaders {
     header := strings.ToLower(strings.Trim(h[0], " "))
     headerValue := ""
     if len(h) > 1 {
       headerValue = strings.ToLower(strings.Trim(h[1], " "))
-      if strings.HasPrefix(headerValue, "{") && strings.HasSuffix(headerValue, "}") {
-        headerValue = strings.TrimLeft(headerValue, "{")
-        headerValue = strings.TrimRight(headerValue, "}")
+      if captureKey, found := util.GetFillerUnmarked(headerValue); found {
         if target.captureHeaders == nil {
           target.captureHeaders = map[string]string{}
         }
-        target.captureHeaders[header] = headerValue
+        target.captureHeaders[header] = captureKey
         headerValue = ""
       }
     }
@@ -236,18 +252,24 @@ func (p *Proxy) addHeaderMatch(target *ProxyTarget) {
 }
 
 func (p *Proxy) addQueryMatch(target *ProxyTarget) {
-  for _, q := range target.Match.Query {
+  matchQuery := [][]string{}
+  if target.MatchAny != nil {
+    matchQuery = append(matchQuery, target.MatchAny.Query...)
+  }
+  if target.MatchAll != nil {
+    matchQuery = append(matchQuery, target.MatchAll.Query...)
+  }
+
+  for _, q := range matchQuery {
     key := strings.ToLower(strings.Trim(q[0], " "))
     value := ""
     if len(q) > 1 {
       value = strings.ToLower(strings.Trim(q[1], " "))
-      if strings.HasPrefix(value, "{") && strings.HasSuffix(value, "}") {
-        value = strings.TrimLeft(value, "{")
-        value = strings.TrimRight(value, "}")
+      if filler, found := util.GetFillerUnmarked(value); found {
         if target.captureQuery == nil {
           target.captureQuery = map[string]string{}
         }
-        target.captureQuery[key] = value
+        target.captureQuery[key] = filler
         value = ""
       }
     }
@@ -266,17 +288,34 @@ func (p *Proxy) addQueryMatch(target *ProxyTarget) {
 }
 
 func (p *Proxy) addURIMatch(target *ProxyTarget) error {
-  for _, uri := range target.Match.Uris {
+  matchURIs := []string{}
+  if target.MatchAny != nil {
+    matchURIs = append(matchURIs, target.MatchAny.Uris...)
+    for _, uri := range target.MatchAny.Uris {
+      if strings.EqualFold(uri, "/") {
+        target.MatchAny.MatchAllURIs = true
+      }
+    }
+  }
+  if target.MatchAll != nil {
+    matchURIs = append(matchURIs, target.MatchAll.Uris...)
+    for _, uri := range target.MatchAll.Uris {
+      if strings.EqualFold(uri, "/") {
+        target.MatchAll.MatchAllURIs = true
+      }
+    }
+  }
+
+  for _, uri := range matchURIs {
     uri = strings.ToLower(uri)
     uriTargets, present := p.TargetsByUris[uri]
     if !present {
       uriTargets = map[string]*ProxyTarget{}
       p.TargetsByUris[uri] = uriTargets
     }
-    route := forwardRouter.Path(uri).MatcherFunc(matchURI)
-    if re, err := route.GetPathRegexp(); err == nil {
-      re = strings.ReplaceAll(re, "$", "(/.*)?$")
-      target.uriRegExp = regexp.MustCompile(re)
+    if router, re, err := util.RegisterURIRouteAndGetRegex(uri, p.router, handleURI); err == nil {
+      target.uriRegExp = re
+      target.router = router
     } else {
       log.Printf("Failed to add URI match %s with error: %s\n", uri, err.Error())
       return err
@@ -284,26 +323,6 @@ func (p *Proxy) addURIMatch(target *ProxyTarget) error {
     uriTargets[target.Name] = target
   }
   return nil
-}
-
-func matchURI(r *http.Request, rm *mux.RouteMatch) bool {
-  if status.IsForcedStatus(r) {
-    return false
-  }
-  p := getPortProxy(r)
-  for _, target := range p.Targets {
-    if target.Enabled {
-      if target.uriRegExp != nil && target.uriRegExp.MatchString(r.RequestURI) {
-        return true
-      }
-      for _, uri := range target.Match.Uris {
-        if uri == "/" {
-          return true
-        }
-      }
-    }
-  }
-  return false
 }
 
 func (p *Proxy) getRequestedProxyTarget(r *http.Request) *ProxyTarget {
@@ -418,7 +437,7 @@ func (p *Proxy) getRequestedTargets(r *http.Request) map[string]*ProxyTarget {
   return targets
 }
 
-func prepareTargetHeaders(target *ProxyTarget, r *http.Request) [][]string {
+func (p *Proxy) prepareTargetHeaders(target *ProxyTarget, r *http.Request) [][]string {
   var headers [][]string = [][]string{}
   for k, values := range r.Header {
     for _, v := range values {
@@ -431,9 +450,7 @@ func prepareTargetHeaders(target *ProxyTarget, r *http.Request) [][]string {
     if len(h) > 1 {
       headerValue = strings.Trim(h[1], " ")
     }
-    if strings.HasPrefix(headerValue, "{") && strings.HasSuffix(headerValue, "}") {
-      captureKey := strings.TrimLeft(headerValue, "{")
-      captureKey = strings.TrimRight(captureKey, "}")
+    if captureKey, found := util.GetFillerUnmarked(headerValue); found {
       for requestHeader, requestCaptureKey := range target.captureHeaders {
         if strings.EqualFold(captureKey, requestCaptureKey) &&
           r.Header.Get(requestHeader) != "" {
@@ -454,11 +471,11 @@ func prepareTargetHeaders(target *ProxyTarget, r *http.Request) [][]string {
   return headers
 }
 
-func prepareTargetURL(target *ProxyTarget, r *http.Request) string {
+func (p *Proxy) prepareTargetURL(target *ProxyTarget, r *http.Request) string {
   url := target.URL
   path := r.URL.Path
   if len(target.ReplaceURI) > 0 {
-    forwardRoute := forwardRouter.NewRoute().BuildOnly().Path(target.ReplaceURI)
+    forwardRoute := target.router.NewRoute().BuildOnly().Path(target.ReplaceURI)
     vars := mux.Vars(r)
     targetVars := []string{}
     if rep, err := reverse.NewGorillaPath(target.ReplaceURI, false); err == nil {
@@ -479,11 +496,11 @@ func prepareTargetURL(target *ProxyTarget, r *http.Request) string {
     path = target.stripURIRegExp.ReplaceAllString(path, "$1$3")
   }
   url += path
-  url = prepareTargetQuery(url, target, r)
+  url = p.prepareTargetQuery(url, target, r)
   return url
 }
 
-func prepareTargetQuery(url string, target *ProxyTarget, r *http.Request) string {
+func (p *Proxy) prepareTargetQuery(url string, target *ProxyTarget, r *http.Request) string {
   var params [][]string = [][]string{}
   for k, values := range r.URL.Query() {
     for _, v := range values {
@@ -496,9 +513,7 @@ func prepareTargetQuery(url string, target *ProxyTarget, r *http.Request) string
     if len(q) > 1 {
       addValue = strings.Trim(q[1], " ")
     }
-    if strings.HasPrefix(addValue, "{") && strings.HasSuffix(addValue, "}") {
-      captureKey := strings.TrimLeft(addValue, "{")
-      captureKey = strings.TrimRight(captureKey, "}")
+    if captureKey, found := util.GetFillerUnmarked(addValue); found {
       for reqKey, requestCaptureKey := range target.captureQuery {
         if strings.EqualFold(captureKey, requestCaptureKey) && r.URL.Query().Get(reqKey) != "" {
           addValue = r.URL.Query().Get(reqKey)
@@ -525,7 +540,7 @@ func prepareTargetQuery(url string, target *ProxyTarget, r *http.Request) string
   return url
 }
 
-func toInvocationSpec(target *ProxyTarget, r *http.Request) (*invocation.InvocationSpec, error) {
+func (p *Proxy) toInvocationSpec(target *ProxyTarget, r *http.Request) (*invocation.InvocationSpec, error) {
   is := &invocation.InvocationSpec{}
   is.Name = target.Name
   is.Method = "GET"
@@ -533,8 +548,8 @@ func toInvocationSpec(target *ProxyTarget, r *http.Request) (*invocation.Invocat
   is.Replicas = target.Replicas
   is.SendID = target.SendID
   if r != nil {
-    is.URL = prepareTargetURL(target, r)
-    is.Headers = prepareTargetHeaders(target, r)
+    is.URL = p.prepareTargetURL(target, r)
+    is.Headers = p.prepareTargetHeaders(target, r)
     is.Method = r.Method
     is.BodyReader = r.Body
   }
@@ -548,7 +563,7 @@ func (p *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWr
   if len(targets) > 0 {
     responses := []*invocation.InvocationResult{}
     for _, target := range targets {
-      is, _ := toInvocationSpec(target, r)
+      is, _ := p.toInvocationSpec(target, r)
       tracker := invocation.RegisterInvocation(is)
       response := invocation.StartInvocation(tracker, true)
       responses = append(responses, response...)
@@ -579,8 +594,7 @@ func getPortProxy(r *http.Request) *Proxy {
   if proxy == nil {
     proxyLock.Lock()
     defer proxyLock.Unlock()
-    proxy = &Proxy{}
-    proxy.init()
+    proxy = newProxy()
     proxyByPort[listenerPort] = proxy
   }
   return proxy
@@ -610,8 +624,7 @@ func clearProxyTargets(w http.ResponseWriter, r *http.Request) {
   listenerPort := util.GetListenerPort(r)
   proxyLock.Lock()
   defer proxyLock.Unlock()
-  proxyByPort[listenerPort] = &Proxy{}
-  proxyByPort[listenerPort].init()
+  proxyByPort[listenerPort] = newProxy()
   w.WriteHeader(http.StatusAccepted)
   util.AddLogMessage("Proxy targets cleared", r)
   fmt.Fprintln(w, "Proxy targets cleared")
@@ -730,18 +743,29 @@ func (p *Proxy) getMatchingTargetsForRequest(r *http.Request) map[string]*ProxyT
           matchInfo[target.Name] = &targetMatchInfo{headers: map[string]string{}, query: map[string]string{}, uris: []string{}}
         }
         matchInfo[target.Name].uris = append(matchInfo[target.Name].uris, r.RequestURI)
-      } else {
-        for _, uri := range target.Match.Uris {
-          if uri == "/" {
-            targets[target.Name] = target
-            if matchInfo[target.Name] == nil {
-              matchInfo[target.Name] = &targetMatchInfo{headers: map[string]string{}, query: map[string]string{}, uris: []string{}}
-            }
-            matchInfo[target.Name].uris = append(matchInfo[target.Name].uris, "/")
-          }
+      } else if target.MatchAny != nil && target.MatchAny.MatchAllURIs ||
+        target.MatchAll != nil && target.MatchAll.MatchAllURIs {
+        targets[target.Name] = target
+        if matchInfo[target.Name] == nil {
+          matchInfo[target.Name] = &targetMatchInfo{headers: map[string]string{}, query: map[string]string{}, uris: []string{}}
         }
+        matchInfo[target.Name].uris = append(matchInfo[target.Name].uris, "/")
       }
     }
+  }
+  targetsToBeRemoved := []string{}
+  for _, t := range targets {
+    m := matchInfo[t.Name]
+    if t.MatchAll != nil {
+      if len(t.MatchAll.Uris) > 0 && len(m.uris) == 0 ||
+        len(t.MatchAll.Headers) > 0 && len(m.headers) == 0 ||
+        len(t.MatchAll.Query) > 0 && len(m.query) == 0 {
+        targetsToBeRemoved = append(targetsToBeRemoved, t.Name)
+      }
+    }
+  }
+  for _, t := range targetsToBeRemoved {
+    delete(targets, t)
   }
   for _, t := range targets {
     p.incrementTargetMatchCounts(t)
@@ -768,27 +792,27 @@ func (p *Proxy) getMatchingTargetsForRequest(r *http.Request) map[string]*ProxyT
   return targets
 }
 
-func WillProxy(r *http.Request) (bool, map[string]*ProxyTarget) {
-  if util.IsAdminRequest(r) || status.IsForcedStatus(r) {
-    return false, nil
-  }
-
-  targets := getPortProxy(r).getMatchingTargetsForRequest(r)
+func handleURI(w http.ResponseWriter, r *http.Request) {
+  p := getPortProxy(r)
+  targets := p.getMatchingTargetsForRequest(r)
   if len(targets) > 0 {
-    return true, targets
+    util.AddLogMessage(fmt.Sprintf("Proxying to matching targets %s", util.ToJSON(targets)), r)
+    p.invokeTargets(targets, w, r)
   }
-  return false, nil
 }
 
 func middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    willProxy, targets := WillProxy(r)
-    if !willProxy {
-      next.ServeHTTP(w, r)
-      return
+    p := getPortProxy(r)
+    willProxy := false
+    if !util.IsAdminRequest(r) && !status.IsForcedStatus(r) && len(p.getMatchingTargetsForRequest(r)) > 0 {
+      willProxy = true
     }
-    util.AddLogMessage(fmt.Sprintf("Proxying to matching targets %s", util.ToJSON(targets)), r)
-    getPortProxy(r).invokeTargets(targets, w, r)
+    if willProxy {
+      p.router.ServeHTTP(w, r)
+    } else if next != nil {
+      next.ServeHTTP(w, r)
+    }
   })
 }
 

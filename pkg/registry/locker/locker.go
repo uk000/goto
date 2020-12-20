@@ -4,6 +4,7 @@ import (
   "goto/pkg/client/results"
   "goto/pkg/constants"
   "goto/pkg/util"
+  "sort"
   "strings"
   "sync"
   "time"
@@ -586,10 +587,11 @@ func (ll *LabeledLockers) GetLockerLabels() []string {
   for label := range ll.lockers {
     labels = append(labels, label)
   }
+  sort.Strings(labels)
   return labels
 }
 
-func (ll *LabeledLockers) GetDataLockerPaths(locker string) map[string][][]string {
+func (ll *LabeledLockers) GetDataLockerPaths(locker string, pathURIs bool) interface{} {
   ll.lock.RLock()
   defer ll.lock.RUnlock()
   lockerPathsByLabels := map[string][][]string{}
@@ -606,7 +608,18 @@ func (ll *LabeledLockers) GetDataLockerPaths(locker string) map[string][][]strin
       }
     }
   }
-  return lockerPathsByLabels
+  if !pathURIs {
+    return lockerPathsByLabels
+  }
+  dataPathURIs := map[string][]string{}
+  for label, dataPaths := range lockerPathsByLabels {
+    for _, pathKeys := range dataPaths {
+      if len(pathKeys) > 0 {
+        dataPathURIs[label] = append(dataPathURIs[label], "/registry/lockers/"+label+"/get/"+strings.Join(pathKeys, ","))
+      }
+    }
+  }
+  return dataPathURIs
 }
 
 func (ll *LabeledLockers) findInLockers(lockers map[string]*CombiLocker, key string) []string {
@@ -616,13 +629,14 @@ func (ll *LabeledLockers) findInLockers(lockers map[string]*CombiLocker, key str
   for label, cl := range lockers {
     if cl.DataLocker != nil && cl.DataLocker.Locker != nil && len(cl.DataLocker.Locker) > 0 {
       subPaths := unsafeFindKey(cl.DataLocker.Locker, key)
-      for _, subPath := range subPaths {
-        if subPath != "" {
-          keyPaths = append(keyPaths, "/registry/lockers/"+label+"/get/"+subPath)
+      for i, dataPath := range subPaths {
+        if dataPath != "" {
+          subPaths[i] = "/registry/lockers/"+label+"/get/"+dataPath
         }
       }
     }
   }
+  sort.Strings(keyPaths)
   return keyPaths
 }
 

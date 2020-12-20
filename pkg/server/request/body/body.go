@@ -27,7 +27,9 @@ func Middleware(next http.Handler) http.Handler {
     miniBody = strings.ReplaceAll(miniBody, "\n", "")
     util.AddLogMessage(fmt.Sprintf("Request Body: [%s]", miniBody), r)
     r.Body = ioutil.NopCloser(strings.NewReader(body))
-    next.ServeHTTP(w, r)
+    if next != nil {
+      next.ServeHTTP(w, r)
+    }
     io.Copy(ioutil.Discard, r.Body)
   })
 }

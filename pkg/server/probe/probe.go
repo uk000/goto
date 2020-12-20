@@ -164,7 +164,7 @@ func Middleware(next http.Handler) http.Handler {
       w.Header().Add("Liveness-Overflow-Count", fmt.Sprint(probeStatus.LivenessOverflowCount))
       w.WriteHeader(probeStatus.LivenessStatus)
       util.AddLogMessage(fmt.Sprintf("Serving Liveness Probe: [%s]", probeStatus.LivenessProbe), r)
-    } else {
+    } else if next != nil {
       next.ServeHTTP(w, r)
     }
   })

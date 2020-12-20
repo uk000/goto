@@ -135,7 +135,9 @@ func reportTimeoutTracking(w http.ResponseWriter, r *http.Request) {
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     if util.IsAdminRequest(r) {
-      next.ServeHTTP(w, r)
+      if next != nil {
+        next.ServeHTTP(w, r)
+      }
       return
     }
     trackedHeaders := [][]string{}
@@ -180,6 +182,8 @@ func Middleware(next http.Handler) http.Handler {
       }(trackedHeaders)
     }
     timeoutTrackingLock.RUnlock()
-    next.ServeHTTP(w, r)
+    if next != nil {
+      next.ServeHTTP(w, r)
+    }
   })
 }
