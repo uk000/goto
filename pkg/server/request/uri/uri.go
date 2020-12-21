@@ -1,18 +1,19 @@
 package uri
 
 import (
-	"fmt"
-	"net/http"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
+  "fmt"
+  "net/http"
+  "strconv"
+  "strings"
+  "sync"
+  "time"
 
-	"goto/pkg/server/intercept"
-	"goto/pkg/server/request/uri/bypass"
-	"goto/pkg/util"
+  "goto/pkg/server/intercept"
+  "goto/pkg/server/request/uri/bypass"
+  "goto/pkg/server/request/uri/ignore"
+  "goto/pkg/util"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
 
 type DelayConfig struct {
@@ -33,6 +34,7 @@ var (
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   uriRouter := r.PathPrefix("/uri").Subrouter()
   bypass.SetRoutes(uriRouter, parent, root)
+  ignore.SetRoutes(uriRouter, parent, root)
   util.AddRouteMultiQ(uriRouter, "/status/set", setStatus, "POST", "uri", "{uri}", "status", "{status}")
   util.AddRouteMultiQ(uriRouter, "/delay/set", setDelay, "POST", "uri", "{uri}", "delay", "{delay}")
   util.AddRoute(uriRouter, "/counts/enable", enableURICallCounts, "POST")
@@ -240,5 +242,5 @@ func middleware(next http.Handler) http.Handler {
 }
 
 func Middleware(next http.Handler) http.Handler {
-  return util.AddMiddlewares(next, internalHandler, bypass.Handler)
+  return util.AddMiddlewares(next, internalHandler, bypass.Handler, ignore.Handler)
 }

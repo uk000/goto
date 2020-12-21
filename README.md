@@ -105,6 +105,7 @@ The application exposes both client and server features via various management R
 * [URIs](#server-uris)
 * [Probes](#server-probes)
 * [URIs Bypass](#server-uris-bypass)
+* [Ignore URIs](#server-uris-ignore)
 * [Response Delay](#server-response-delay)
 * [Response Headers](#server-response-headers)
 * [Response Payload](#server-response-payload)
@@ -1935,6 +1936,63 @@ curl localhost:8080/request/uri/bypass/counts\?uri=/foo
 ```
 </p>
 </details>
+
+<br/>
+
+# <a name="server-uris-ignore"></a>
+## > Ignore URIs
+This feature allows marking some URIs as `ignored` so that those don't generate any logs. Ignored URIs are different from `bypass` URIs in that while `bypass` URIs get logs but are not subject to additional processing, `ignored` URIs are subject to all other processing but don't get logged. Request counts are tracked for ignored URIs, and specific status can be configured to respond for ignored URI requests.
+
+#### APIs
+|METHOD|URI|Description|
+|---|---|---|
+|PUT, POST| /request/uri/ignore/add?uri={uri}       | Add a ignored URI |
+|PUT, POST| /request/uri/ignore/remove?uri={uri}    | Remove a ignored URI |
+|PUT, POST| /request/uri/ignore/clear               | Remove all ignored URIs |
+|PUT, POST| /request/uri/ignore<br/>/status/set/{status:count} | Set status code to be returned for ignored URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
+|GET      |	/request/uri/ignore                     | Get list of ignored URIs |
+|GET      |	/request/uri/ignore/status              | Get current ignored URI status code |
+|GET      |	/request/uri/ignore/counts?uri={uri}    | Get request counts for a given ignored URI |
+
+
+#### Ignore URI API Examples
+<details>
+<summary>API Examples</summary>
+
+```
+curl -X POST localhost:8080/request/uri/ignore/clear
+
+curl -X PUT localhost:8080/request/uri/ignore/add\?uri=/foo
+
+curl -X PUT localhost:8081/request/uri/ignore/remove\?uri=/bar
+
+curl -X PUT localhost:8080/request/uri/ignore/status/set/418:2
+
+curl localhost:8080/request/uri/ignore
+
+curl localhost:8080/request/uri/ignore/status
+
+curl localhost:8080/request/uri/ignore/counts\?uri=/foo
+```
+</details>
+
+#### Ignore URI Status Result Example
+<details>
+<summary>Example</summary>
+<p>
+
+```
+{
+  "uris": {
+    "/foo": 3,
+    "/health": 6
+  },
+  "ignoreStatus": 200
+}
+```
+</p>
+</details>
+
 
 <br/>
 

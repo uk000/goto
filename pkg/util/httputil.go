@@ -79,7 +79,7 @@ func PrintLogMessages(r *http.Request) {
     (!IsReminderRequest(r) || global.EnableRegistryReminderLogs) &&
     (!IsProbeRequest(r) || global.EnableProbeLogs) &&
     (!IsHealthRequest(r) || global.EnablePeerHealthLogs) &&
-    global.EnableTrackingLogs {
+    !global.IsIgnoredURI(r) && global.EnableTrackingLogs {
     log.Println(strings.Join(m.messages, " --> "))
     if flusher, ok := log.Writer().(http.Flusher); ok {
       flusher.Flush()

@@ -36,4 +36,5 @@ var (
   IsListenerPresent          func(int) bool
   IsListenerOpen             func(int) bool
   GetListenerID              func(int) string
+  IsIgnoredURI               func(*http.Request) bool
 )
