@@ -2926,7 +2926,9 @@ By registering a worker instance to a registry instance, we get a few benefits:
 ||||
 | POST      | /registry/lockers/open/{label} | Setup a locker with the given label and make it the current locker where peer results get stored.  |
 | POST      | /registry/lockers/close/{label} | Remove the locker for the given label.  |
+| POST      | /registry/lockers/{label}/close | Remove the locker for the given label.  |
 | POST      | /registry/lockers/close | Remove all labeled lockers and empty the default locker.  |
+| POST      | /registry/lockers/{label}/clear | Clear the contents of the locker for the given label but keep the locker.  |
 | POST      | /registry/lockers/clear | Remove all labeled lockers and empty the default locker.  |
 | GET       | /registry/lockers/labels | Get a list of all existing locker labels, regardless of whether or not it has data.  |
 | POST      | /registry/lockers/{label}/store/{path} | Store payload (body) as data in the given labeled locker at the leaf of the given key path. `path` can be a single key or a comma-separated list of subkeys, in which case data gets stored in the tree under the given path. |

@@ -546,15 +546,19 @@ func (ll *LabeledLockers) OpenLocker(label string) {
   ll.currentLocker.Current = true
 }
 
-func (ll *LabeledLockers) CloseLocker(label string) {
+func (ll *LabeledLockers) ClearLocker(label string, close bool) {
   ll.lock.Lock()
   defer ll.lock.Unlock()
   locker := ll.lockers[label]
   if locker != nil {
-    delete(ll.lockers, label)
-    if locker == ll.currentLocker {
-      ll.currentLocker = ll.lockers[constants.LockerDefaultLabel]
-      ll.currentLocker.Current = true
+    if close {
+      delete(ll.lockers, label)
+      if locker == ll.currentLocker {
+        ll.currentLocker = ll.lockers[constants.LockerDefaultLabel]
+        ll.currentLocker.Current = true
+      }
+    } else {
+      ll.lockers[label].Init()
     }
   }
 }
@@ -631,7 +635,7 @@ func (ll *LabeledLockers) findInLockers(lockers map[string]*CombiLocker, key str
       subPaths := unsafeFindKey(cl.DataLocker.Locker, key)
       for i, dataPath := range subPaths {
         if dataPath != "" {
-          subPaths[i] = "/registry/lockers/"+label+"/get/"+dataPath
+          subPaths[i] = "/registry/lockers/" + label + "/get/" + dataPath
         }
       }
     }

@@ -27,9 +27,11 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "", getPeers, "GET")
 
   util.AddRoute(registryRouter, "/lockers/open/{label}", openLabeledLocker, "POST")
-  util.AddRoute(registryRouter, "/lockers/close/{label}", closeLabeledLocker, "POST")
-  util.AddRoute(registryRouter, "/lockers/close", closeLabeledLocker, "POST")
-  util.AddRoute(registryRouter, "/lockers/clear", closeLabeledLocker, "POST")
+  util.AddRoute(registryRouter, "/lockers/close/{label}", closeOrClearLabeledLocker, "POST")
+  util.AddRoute(registryRouter, "/lockers/{label}/close", closeOrClearLabeledLocker, "POST")
+  util.AddRoute(registryRouter, "/lockers/close", closeOrClearLabeledLocker, "POST")
+  util.AddRoute(registryRouter, "/lockers/{label}/clear", closeOrClearLabeledLocker, "POST")
+  util.AddRoute(registryRouter, "/lockers/clear", closeOrClearLabeledLocker, "POST")
   util.AddRoute(registryRouter, "/lockers/labels", getLockerLabels, "GET")
   util.AddRoute(registryRouter, "/lockers/{label}/store/{path}", storeInLabeledLocker, "POST")
   util.AddRoute(registryRouter, "/lockers/{label}/remove/{path}", removeFromLabeledLocker, "POST")
@@ -49,7 +51,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(registryRouter, "/lockers", getAllLockers, "GET")
 
   lockerPeersRouter := registryRouter.PathPrefix("/lockers/{label}/peers").Subrouter()
-  
+
   util.AddRoute(peersRouter, "/{peer}/{address}/locker/store/{path}", storeInPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/{address}/locker/remove/{path}", removeFromPeerLocker, "POST")
   util.AddRoute(peersRouter, "/{peer}/locker/store/{path}", storeInPeerLocker, "POST")

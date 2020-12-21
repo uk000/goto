@@ -967,19 +967,24 @@ func openLabeledLocker(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
-func closeLabeledLocker(w http.ResponseWriter, r *http.Request) {
+func closeOrClearLabeledLocker(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
+  close := strings.Contains(r.RequestURI, "close")
   if strings.EqualFold(label, constants.LockerDefaultLabel) {
     w.WriteHeader(http.StatusBadRequest)
     msg = "Default locker cannot be closed"
   } else if label != "" {
     pr := getPortRegistry(r)
     pr.lockersLock.Lock()
-    pr.labeledLockers.CloseLocker(label)
+    pr.labeledLockers.ClearLocker(label, close)
     pr.lockersLock.Unlock()
     w.WriteHeader(http.StatusAccepted)
-    msg = fmt.Sprintf("Locker %s is emptied and closed", label)
+    if close {
+      msg = fmt.Sprintf("Locker %s is closed", label)
+    } else {
+      msg = fmt.Sprintf("Locker %s is cleared", label)
+    }
   } else {
     w.WriteHeader(http.StatusAccepted)
     pr := getPortRegistry(r)
