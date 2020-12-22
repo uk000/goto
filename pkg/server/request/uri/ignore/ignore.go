@@ -5,7 +5,6 @@ import (
   "goto/pkg/global"
   "goto/pkg/util"
   "net/http"
-  "strconv"
   "strings"
   "sync"
 
@@ -20,7 +19,7 @@ type Ignore struct {
 }
 
 var (
-  Handler      util.ServerHandler = util.ServerHandler{Name: "ignore", SetRoutes: SetRoutes}
+  Handler      util.ServerHandler = util.ServerHandler{"ignore", SetRoutes, Middleware}
   ignoreByPort map[string]*Ignore = map[string]*Ignore{}
   lock         sync.RWMutex
 )
@@ -33,22 +32,23 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(ignoreRouter, "/status", setOrGetIgnoreStatus)
   util.AddRoute(ignoreRouter, "/clear", clearIgnoreURIs, "PUT", "POST")
   util.AddRouteQ(ignoreRouter, "/counts", getIgnoreCallCount, "uri", "{uri}", "GET")
+  util.AddRoute(ignoreRouter, "/counts", getIgnoreCallCount, "GET")
   util.AddRoute(ignoreRouter, "", getIgnoreList, "GET")
   global.IsIgnoredURI = IsIgnoredURI
 }
 
-func (b *Ignore) init() {
-  b.Uris = map[string]interface{}{}
-  b.IgnoreStatus = http.StatusOK
+func (i *Ignore) init() {
+  i.Uris = map[string]interface{}{}
+  i.IgnoreStatus = 0
 }
 
-func (b *Ignore) addURI(w http.ResponseWriter, r *http.Request) {
+func (i *Ignore) addURI(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if uri, present := util.GetStringParam(r, "uri"); present {
-    b.lock.Lock()
-    defer b.lock.Unlock()
+    i.lock.Lock()
+    defer i.lock.Unlock()
     uri = strings.ToLower(uri)
-    b.Uris[uri] = 0
+    i.Uris[uri] = 0
     msg = fmt.Sprintf("Ignore URI %s added", uri)
     w.WriteHeader(http.StatusAccepted)
   } else {
@@ -59,13 +59,13 @@ func (b *Ignore) addURI(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
-func (b *Ignore) removeURI(w http.ResponseWriter, r *http.Request) {
+func (i *Ignore) removeURI(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if uri, present := util.GetStringParam(r, "uri"); present {
-    b.lock.Lock()
-    defer b.lock.Unlock()
+    i.lock.Lock()
+    defer i.lock.Unlock()
     uri = strings.ToLower(uri)
-    delete(b.Uris, uri)
+    delete(i.Uris, uri)
     msg = fmt.Sprintf("Ignore URI %s removed", uri)
     w.WriteHeader(http.StatusAccepted)
   } else {
@@ -76,14 +76,14 @@ func (b *Ignore) removeURI(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
-func (b *Ignore) setStatus(w http.ResponseWriter, r *http.Request) {
+func (i *Ignore) setStatus(w http.ResponseWriter, r *http.Request) {
   msg := ""
   statusCode, times, present := util.GetStatusParam(r)
   if present {
-    b.lock.Lock()
-    defer b.lock.Unlock()
-    b.IgnoreStatus = statusCode
-    b.statusCount = times
+    i.lock.Lock()
+    defer i.lock.Unlock()
+    i.IgnoreStatus = statusCode
+    i.statusCount = times
     if times > 0 {
       msg = fmt.Sprintf("Ignore Status set to %d for next %d calls", statusCode, times)
     } else {
@@ -91,35 +91,39 @@ func (b *Ignore) setStatus(w http.ResponseWriter, r *http.Request) {
     }
     w.WriteHeader(http.StatusAccepted)
   } else {
-    msg = fmt.Sprintf("Ignore Status %d", b.IgnoreStatus)
+    msg = fmt.Sprintf("Ignore Status %d", i.IgnoreStatus)
     w.WriteHeader(http.StatusOK)
   }
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
 
-func (b *Ignore) clear(w http.ResponseWriter, r *http.Request) {
-  b.lock.Lock()
-  defer b.lock.Unlock()
-  b.Uris = map[string]interface{}{}
+func (i *Ignore) clear(w http.ResponseWriter, r *http.Request) {
+  i.lock.Lock()
+  defer i.lock.Unlock()
+  i.Uris = map[string]interface{}{}
   msg := "Ignore URIs cleared"
   w.WriteHeader(http.StatusAccepted)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
 
-func (b *Ignore) getCallCounts(w http.ResponseWriter, r *http.Request) {
+func (i *Ignore) getCallCounts(w http.ResponseWriter, r *http.Request) {
+  i.lock.RLock()
+  defer i.lock.RUnlock()
   msg := ""
   if uri, present := util.GetStringParam(r, "uri"); present {
-    b.lock.RLock()
-    defer b.lock.RUnlock()
-    msg = fmt.Sprintf("Reporting call counts for uri %s = %d", uri, b.Uris[uri])
-    w.WriteHeader(http.StatusOK)
-    fmt.Fprintf(w, "%s\n", strconv.Itoa(b.Uris[uri].(int)))
+    if ignoreURI := i.Uris[uri]; ignoreURI != nil {
+      msg = fmt.Sprintf("Reporting call counts for ignored uri %s = %d", uri, ignoreURI)
+      fmt.Fprintf(w, "{\"%s\": %d}", uri, ignoreURI.(int))
+    } else {
+      msg = fmt.Sprintf("Invalid ignored uri %s", uri)
+      w.WriteHeader(http.StatusBadRequest)
+      fmt.Fprintf(w, "{\"error\": \"%s\"}", msg)
+    }
   } else {
-    msg = "Invalid Ignore URI"
-    w.WriteHeader(http.StatusBadRequest)
-    fmt.Fprintln(w, msg)
+    msg = "Reporting call counts for all ignored uris"
+    fmt.Fprintln(w, util.ToJSON(i.Uris))
   }
   util.AddLogMessage(msg, r)
 }
@@ -128,13 +132,13 @@ func getIgnoreForPort(r *http.Request) *Ignore {
   lock.Lock()
   defer lock.Unlock()
   listenerPort := util.GetListenerPort(r)
-  b, present := ignoreByPort[listenerPort]
+  i, present := ignoreByPort[listenerPort]
   if !present {
-    b = &Ignore{}
-    b.init()
-    ignoreByPort[listenerPort] = b
+    i = &Ignore{}
+    i.init()
+    ignoreByPort[listenerPort] = i
   }
-  return b
+  return i
 }
 
 func addIgnoreURI(w http.ResponseWriter, r *http.Request) {
@@ -172,4 +176,29 @@ func IsIgnoredURI(r *http.Request) bool {
   ignore.lock.RLock()
   defer ignore.lock.RUnlock()
   return util.IsURIInMap(r.RequestURI, ignore.Uris)
+}
+
+func Middleware(next http.Handler) http.Handler {
+  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    if !util.IsAdminRequest(r) {
+      ignore := getIgnoreForPort(r)
+      ignore.lock.RLock()
+      uri := util.FindURIInMap(r.RequestURI, ignore.Uris)
+      ignore.lock.RUnlock()
+      if uri != "" {
+        ignore.lock.Lock()
+        ignore.Uris[uri] = ignore.Uris[uri].(int) + 1
+        ignore.lock.Unlock()
+        w.Header().Add("Ignored-Request", "true")
+        if ignore.IgnoreStatus > 0 {
+          util.CopyHeaders("Ignore-Request", w, r.Header, r.Host, r.RequestURI)
+          w.WriteHeader(ignore.IgnoreStatus)
+          return
+        }
+      }
+    }
+    if next != nil {
+      next.ServeHTTP(w, r)
+    }
+  })
 }

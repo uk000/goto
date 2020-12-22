@@ -88,6 +88,8 @@ As a client, it allows sending requests to various destinations and tracking res
 
 The application exposes both client and server features via various management REST APIs as described below. Additionally, it can respond to all undefined URIs with a configurable status code.
 
+The docker image is built with several useful utilities included: `curl`, `wget`, `nmap`, `iputils`, `openssl`, `jq`, etc.
+
 ## Features TOC
 
 ### [Startup](#startup)
@@ -1891,10 +1893,10 @@ This feature allows adding bypass URIs that will not be subject to other configu
 |PUT, POST| /request/uri/bypass/remove?uri={uri}    | Remove a bypass URI |
 |PUT, POST| /request/uri/bypass/clear               | Remove all bypass URIs |
 |PUT, POST| /request/uri/bypass<br/>/status/set/{status:count} | Set status code to be returned for bypass URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
-|GET      |	/request/uri/bypass/list                | Get list of bypass URIs |
 |GET      |	/request/uri/bypass                     | Get list of bypass URIs |
 |GET      |	/request/uri/bypass/status              | Get current bypass URI status code |
 |GET      |	/request/uri/bypass/counts?uri={uri}    | Get request counts for a given bypass URI |
+|GET      |	/request/uri/bypass/counts                | Get request counts for all bypass URIs |
 
 
 #### URI Bypass API Examples
@@ -1953,6 +1955,7 @@ This feature allows marking some URIs as `ignored` so that those don't generate 
 |GET      |	/request/uri/ignore                     | Get list of ignored URIs |
 |GET      |	/request/uri/ignore/status              | Get current ignored URI status code |
 |GET      |	/request/uri/ignore/counts?uri={uri}    | Get request counts for a given ignored URI |
+|GET      |	/request/uri/ignore/counts                | Get request counts for all ignored URIs |
 
 
 #### Ignore URI API Examples

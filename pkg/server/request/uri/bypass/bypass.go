@@ -1,14 +1,13 @@
 package bypass
 
 import (
-	"fmt"
-	"goto/pkg/util"
-	"net/http"
-	"strconv"
-	"strings"
-	"sync"
+  "fmt"
+  "goto/pkg/util"
+  "net/http"
+  "strings"
+  "sync"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
 
 type Bypass struct {
@@ -32,7 +31,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(bypassRouter, "/status", setOrGetBypassStatus)
   util.AddRoute(bypassRouter, "/clear", clearBypassURIs, "PUT", "POST")
   util.AddRouteQ(bypassRouter, "/counts", getBypassCallCount, "uri", "{uri}", "GET")
-  util.AddRoute(bypassRouter, "/list", getBypassList, "GET")
+  util.AddRoute(bypassRouter, "/counts", getBypassCallCount, "GET")
   util.AddRoute(bypassRouter, "", getBypassList, "GET")
 }
 
@@ -49,7 +48,7 @@ func (b *Bypass) addURI(w http.ResponseWriter, r *http.Request) {
     uri = strings.ToLower(uri)
     b.Uris[uri] = 0
     msg = fmt.Sprintf("Bypass URI %s added", uri)
-    w.WriteHeader(http.StatusAccepted)
+    w.WriteHeader(http.StatusOK)
   } else {
     msg = "Cannot add. Invalid Bypass URI"
     w.WriteHeader(http.StatusBadRequest)
@@ -66,7 +65,7 @@ func (b *Bypass) removeURI(w http.ResponseWriter, r *http.Request) {
     uri = strings.ToLower(uri)
     delete(b.Uris, uri)
     msg = fmt.Sprintf("Bypass URI %s removed", uri)
-    w.WriteHeader(http.StatusAccepted)
+    w.WriteHeader(http.StatusOK)
   } else {
     msg = "Cannot remove. Invalid Bypass URI"
     w.WriteHeader(http.StatusBadRequest)
@@ -88,7 +87,7 @@ func (b *Bypass) setStatus(w http.ResponseWriter, r *http.Request) {
     } else {
       msg = fmt.Sprintf("Bypass Status set to %d forever", statusCode)
     }
-    w.WriteHeader(http.StatusAccepted)
+    w.WriteHeader(http.StatusOK)
   } else {
     msg = fmt.Sprintf("Bypass Status %d", b.BypassStatus)
     w.WriteHeader(http.StatusOK)
@@ -102,23 +101,27 @@ func (b *Bypass) clear(w http.ResponseWriter, r *http.Request) {
   defer b.lock.Unlock()
   b.Uris = map[string]interface{}{}
   msg := "Bypass URIs cleared"
-  w.WriteHeader(http.StatusAccepted)
+  w.WriteHeader(http.StatusOK)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
 
 func (b *Bypass) getCallCounts(w http.ResponseWriter, r *http.Request) {
+  b.lock.RLock()
+  defer b.lock.RUnlock()
   msg := ""
   if uri, present := util.GetStringParam(r, "uri"); present {
-    b.lock.RLock()
-    defer b.lock.RUnlock()
-    msg = fmt.Sprintf("Reporting call counts for uri %s = %d", uri, b.Uris[uri])
-    w.WriteHeader(http.StatusOK)
-    fmt.Fprintf(w, "%s\n", strconv.Itoa(b.Uris[uri].(int)))
+    if bypassURI := b.Uris[uri]; bypassURI != nil {
+      msg = fmt.Sprintf("Reporting call counts for bypass uri %s = %d", uri, bypassURI)
+      fmt.Fprintf(w, "{\"%s\": %d}", uri, bypassURI.(int))
+    } else {
+      msg = fmt.Sprintf("Invalid bypass uri %s", uri)
+      w.WriteHeader(http.StatusBadRequest)
+      fmt.Fprintf(w, "{\"error\": \"%s\"}", msg)
+    }
   } else {
-    msg = "Invalid Bypass URI"
-    w.WriteHeader(http.StatusBadRequest)
-    fmt.Fprintln(w, msg)
+    msg = "Reporting call counts for all bypass uris"
+    fmt.Fprintln(w, util.ToJSON(b.Uris))
   }
   util.AddLogMessage(msg, r)
 }

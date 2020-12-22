@@ -31,6 +31,7 @@ RUN echo 'http://nl.alpinelinux.org/alpine/v3.12/main' > /etc/apk/repositories \
   busybox \
   busybox-extras\
   netcat-openbsd \
+  openssl \
   jq
 
 WORKDIR /app
