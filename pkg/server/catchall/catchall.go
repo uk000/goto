@@ -1,13 +1,14 @@
 package catchall
 
 import (
-	"fmt"
-	"net/http"
+  "fmt"
+  "net/http"
 
-	"goto/pkg/server/echo"
-	"goto/pkg/util"
+  "goto/pkg/metrics"
+  "goto/pkg/server/echo"
+  "goto/pkg/util"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
 
 var (
@@ -19,8 +20,9 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 }
 
 func respond(w http.ResponseWriter, r *http.Request) {
+  metrics.UpdateRequestCount("catchAll")
   w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, "{\"CatchAll\": ")
-	echo.Echo(w, r)
-	fmt.Fprintln(w, "}")
+  fmt.Fprint(w, "{\"CatchAll\": ")
+  echo.Echo(w, r)
+  fmt.Fprintln(w, "}")
 }

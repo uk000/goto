@@ -20,7 +20,7 @@ var (
   StartupDelay               time.Duration
   ShutdownDelay              time.Duration
   Stopping                   bool = false
-  EnableTrackingLogs         bool = true
+  EnableServerLogs           bool = true
   EnableAdminLogs            bool = true
   EnableInvocationLogs       bool = true
   EnableRegistryLogs         bool = true
@@ -28,8 +28,8 @@ var (
   EnableRegistryReminderLogs bool = false
   EnablePeerHealthLogs       bool = false
   EnableClientLogs           bool = true
-  EnableServerLogs           bool = true
   EnableProbeLogs            bool = true
+  EnableMetricsLogs          bool = true
   GetPeers                   func(string, *http.Request) map[string]string
   IsReadinessProbe           func(*http.Request) bool
   IsLivenessProbe            func(*http.Request) bool

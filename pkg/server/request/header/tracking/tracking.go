@@ -1,16 +1,17 @@
 package tracking
 
 import (
-	"fmt"
-	"net/http"
-	"strconv"
-	"strings"
-	"sync"
+  "fmt"
+  "net/http"
+  "strconv"
+  "strings"
+  "sync"
 
-	"goto/pkg/server/intercept"
-	"goto/pkg/util"
+  "goto/pkg/metrics"
+  "goto/pkg/server/intercept"
+  "goto/pkg/util"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
 
 type HeaderData struct {
@@ -276,26 +277,32 @@ func getHeaders(w http.ResponseWriter, r *http.Request) {
 func trackRequestHeaders(r *http.Request) {
   rtd := requestTracking.getPortRequestTrackingData(r)
   for header, headerData := range rtd.headerMap {
-    headerData.trackRequest(r.Header.Get(header), util.GetStringParamValue(r, "status"))
+    if hv := r.Header.Get(header); hv != "" {
+      metrics.UpdateHeaderRequestCount(header)
+      headerData.trackRequest(hv, util.GetStringParamValue(r, "status"))
+    }
   }
 }
 
 func trackResponseForRequestHeaders(r *http.Request, statusCode int) {
   rtd := requestTracking.getPortRequestTrackingData(r)
   for header, headerData := range rtd.headerMap {
-    headerData.trackResponse(r.Header.Get(header), strconv.Itoa(statusCode))
+    if hv := r.Header.Get(header); hv != "" {
+      headerData.trackResponse(hv, strconv.Itoa(statusCode))
+    }
   }
 }
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    if !util.IsAdminRequest(r) {
+    if !util.IsAdminRequest(r) && !util.IsMetricsRequest(r) {
       trackRequestHeaders(r)
       crw := intercept.NewInterceptResponseWriter(w, false)
       if next != nil {
         next.ServeHTTP(crw, r)
       }
       trackResponseForRequestHeaders(r, crw.StatusCode)
+      crw.Proceed()
     } else if next != nil {
       next.ServeHTTP(w, r)
     }

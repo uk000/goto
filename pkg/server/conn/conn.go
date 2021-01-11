@@ -1,13 +1,14 @@
 package conn
 
 import (
-	"context"
-	"fmt"
-	"net"
-	"net/http"
+  "context"
+  "fmt"
+  "net"
+  "net/http"
 
-	"goto/pkg/global"
-	"goto/pkg/util"
+  "goto/pkg/global"
+  "goto/pkg/metrics"
+  "goto/pkg/util"
 )
 
 var (
@@ -28,7 +29,7 @@ func GetConn(r *http.Request) net.Conn {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    //log.Printf("Number of goroutines: %d\n", runtime.NumGoroutine())
+    metrics.UpdateConnCount("http")
     localAddr := ""
     if conn := GetConn(r); conn != nil {
       localAddr = conn.LocalAddr().String()

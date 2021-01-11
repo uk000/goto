@@ -1,15 +1,16 @@
 package echo
 
 import (
-	"fmt"
-	"io"
-	"io/ioutil"
-	"net/http"
+  "fmt"
+  "io"
+  "io/ioutil"
+  "net/http"
 
-	"goto/pkg/util"
+  "goto/pkg/metrics"
+  "goto/pkg/util"
 
-	"github.com/gorilla/mux"
-	"golang.org/x/net/websocket"
+  "github.com/gorilla/mux"
+  "golang.org/x/net/websocket"
 )
 
 var (
@@ -20,13 +21,18 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   echoRouter := r.PathPrefix("/echo").Subrouter()
   util.AddRoute(echoRouter, "/headers", EchoHeaders)
   util.AddRoute(echoRouter, "/ws", wsEchoHandler, "GET", "POST")
-  util.AddRoute(echoRouter, "", Echo)
+  util.AddRoute(echoRouter, "", echo)
 }
 
 func EchoHeaders(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("Echoing headers back", r)
   util.CopyHeaders("Request", w, r.Header, r.Host, r.RequestURI)
   fmt.Fprintf(w, "{\"RequestHeaders\": %s}", util.GetRequestHeadersLog(r))
+}
+
+func echo(w http.ResponseWriter, r *http.Request) {
+  metrics.UpdateRequestCount("echo")
+  Echo(w, r)
 }
 
 func Echo(w http.ResponseWriter, r *http.Request) {
@@ -42,8 +48,9 @@ func Echo(w http.ResponseWriter, r *http.Request) {
 }
 
 func wsEchoHandler(w http.ResponseWriter, r *http.Request) {
+  metrics.UpdateRequestCount("wsecho")
   headers := util.GetRequestHeadersLog(r)
-  s := websocket.Server{Handler: websocket.Handler(func(ws *websocket.Conn){
+  s := websocket.Server{Handler: websocket.Handler(func(ws *websocket.Conn) {
     ws.Write([]byte(headers))
     io.Copy(ws, ws)
   })}

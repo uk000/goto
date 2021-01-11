@@ -30,8 +30,8 @@ type ServerHandler struct {
 type ContextKey struct{ Key string }
 
 var (
-  logmessagesKey *ContextKey    = &ContextKey{"logmessages"}
-  fillerRegExp   *regexp.Regexp = regexp.MustCompile("({.+?})")
+  logmessagesKey = &ContextKey{"logmessages"}
+  fillerRegExp   = regexp.MustCompile("({.+?})")
 )
 
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=~`{}[];:,.<>/?"
@@ -79,7 +79,8 @@ func PrintLogMessages(r *http.Request) {
     (!IsReminderRequest(r) || global.EnableRegistryReminderLogs) &&
     (!IsProbeRequest(r) || global.EnableProbeLogs) &&
     (!IsHealthRequest(r) || global.EnablePeerHealthLogs) &&
-    !global.IsIgnoredURI(r) && global.EnableTrackingLogs {
+    (!IsMetricsRequest(r) || global.EnableMetricsLogs) &&
+    !global.IsIgnoredURI(r) && global.EnableServerLogs {
     log.Println(strings.Join(m.messages, " --> "))
     if flusher, ok := log.Writer().(http.Flusher); ok {
       flusher.Flush()
@@ -380,6 +381,10 @@ func IsAdminRequest(r *http.Request) bool {
     strings.HasPrefix(r.RequestURI, "/client") || strings.HasPrefix(r.RequestURI, "/job") ||
     strings.HasPrefix(r.RequestURI, "/probe") || strings.HasPrefix(r.RequestURI, "/tcp") ||
     strings.HasPrefix(r.RequestURI, "/registry")
+}
+
+func IsMetricsRequest(r *http.Request) bool {
+  return strings.Contains(r.RequestURI, "/metrics")
 }
 
 func IsReminderRequest(r *http.Request) bool {

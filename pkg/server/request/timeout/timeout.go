@@ -1,14 +1,15 @@
 package timeout
 
 import (
-	"fmt"
-	"net/http"
-	"strings"
-	"sync"
+  "fmt"
+  "net/http"
+  "strings"
+  "sync"
 
-	"goto/pkg/util"
+  "goto/pkg/metrics"
+  "goto/pkg/util"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
 
 type TimeoutData struct {
@@ -168,6 +169,9 @@ func Middleware(next http.Handler) http.Handler {
           connectionClosed++
         case <-r.Context().Done():
           requestCompleted++
+        }
+        if connectionClosed > 0 {
+          metrics.UpdateRequestCount("timeout")
         }
         timeoutTrackingLock.Lock()
         for _, kv := range trackedHeaders {

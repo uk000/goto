@@ -6,6 +6,7 @@ import (
   "errors"
   "fmt"
   "goto/pkg/global"
+  "goto/pkg/metrics"
   "goto/pkg/util"
   "io"
   "log"
@@ -157,6 +158,7 @@ func getTCPConfig(port int) *TCPConfig {
 }
 
 func ServeClientConnection(port, requestID int, conn *net.TCPConn) bool {
+  metrics.UpdateConnCount("tcp")
   tcpConfig := getTCPConfig(port)
   if tcpConfig == nil {
     log.Printf("Cannot serve TCP on port %d without any config", port)
@@ -274,16 +276,22 @@ func (tcp *TCPConnectionHandler) processRequest() {
     tcp.ListenerID, tcp.requestID, tcp.Port, tcp.Echo, tcp.Stream, tcp.Conversation, tcp.ReadTimeout, tcp.WriteTimeout, tcp.ConnIdleTimeout, tcp.ConnectionLife)
 
   if tcp.Stream {
+    metrics.UpdateTCPConnCount(Stream)
     tcp.doStream()
   } else if tcp.Echo {
+    metrics.UpdateTCPConnCount(Echo)
     tcp.doEcho()
   } else if tcp.Conversation {
+    metrics.UpdateTCPConnCount(Conversation)
     tcp.doConversation()
   } else if tcp.ValidatePayloadLength || tcp.ValidatePayloadLength {
+    metrics.UpdateTCPConnCount(PayloadValidation)
     tcp.doPayloadValidation()
   } else if tcp.ConnectionLifeD > 0 {
+    metrics.UpdateTCPConnCount(SilentLife)
     tcp.doSilentLife()
   } else {
+    metrics.UpdateTCPConnCount(CloseAtFirstByte)
     tcp.doCloseAtFirstByte()
   }
   if !global.IsListenerOpen(tcp.Port) {

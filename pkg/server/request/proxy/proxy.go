@@ -9,6 +9,7 @@ import (
   "sync"
 
   "goto/pkg/invocation"
+  "goto/pkg/metrics"
   "goto/pkg/server/response/status"
   "goto/pkg/server/response/trigger"
   "goto/pkg/util"
@@ -563,6 +564,7 @@ func (p *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWr
   if len(targets) > 0 {
     responses := []*invocation.InvocationResult{}
     for _, target := range targets {
+      metrics.UpdateProxiedRequestCount(target.Name)
       is, _ := p.toInvocationSpec(target, r)
       tracker := invocation.RegisterInvocation(is)
       response := invocation.StartInvocation(tracker, true)

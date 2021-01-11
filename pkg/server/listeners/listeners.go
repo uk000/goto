@@ -38,11 +38,13 @@ type Listener struct {
 }
 
 var (
-  listeners           map[int]*Listener = map[int]*Listener{}
-  listenerGenerations map[int]int       = map[int]int{}
+  listeners           = map[int]*Listener{}
+  listenerGenerations = map[int]int{}
+  initialListeners    = []*Listener{}
   httpServer          func(*Listener)
   tcpServer           func(string, int, net.Listener)
   DefaultLabel        string
+  serverStarted       bool
   listenersLock       sync.RWMutex
   Handler             util.ServerHandler = util.ServerHandler{Name: "listeners", SetRoutes: SetRoutes}
 )
@@ -70,6 +72,46 @@ func SetHTTPServer(server func(*Listener)) {
 
 func SetTCPServer(server func(string, int, net.Listener)) {
   tcpServer = server
+}
+
+func StartInitialListeners() {
+  serverStarted = true
+  time.Sleep(1 * time.Second)
+  for _, l := range initialListeners {
+    addOrUpdateListener(l, false)
+  }
+}
+
+func AddInitialListeners(portList []string) {
+  ports := map[int]bool{}
+  for i, p := range portList {
+    portInfo := strings.Split(p, "/")
+    if port, err := strconv.Atoi(portInfo[0]); err == nil && port > 0 && port <= 65535 {
+      if !ports[port] {
+        protocol := "http"
+        if len(portInfo) > 1 && portInfo[1] != "" {
+          portInfo[1] = strings.ToLower(portInfo[1])
+          if strings.EqualFold(portInfo[1], "http") || strings.EqualFold(portInfo[1], "tcp") || strings.EqualFold(portInfo[1], "udp") {
+            protocol = portInfo[1]
+          } else {
+            log.Fatalf("Error: Invalid protocol [%s]\n", portInfo[1])
+          }
+        }
+        ports[port] = true
+        if i == 0 {
+          global.ServerPort = port
+        } else {
+          listenersLock.Lock()
+          initialListeners = append(initialListeners, &Listener{Port: port, Protocol: protocol, Open: true})
+          listenersLock.Unlock()
+        }
+      } else {
+        log.Fatalf("Error: Duplicate port [%d]\n", port)
+      }
+    } else {
+      log.Fatalf("Error: Invalid port [%d]\n", port)
+    }
+  }
 }
 
 func IsListenerPresent(port int) bool {
@@ -145,7 +187,7 @@ func (l *Listener) openListener() bool {
     listenerGenerations[l.Port] = listenerGenerations[l.Port] + 1
     l.Generation = listenerGenerations[l.Port]
     l.ListenerID = fmt.Sprintf("%d-%d", l.Port, l.Generation)
-    log.Printf("Opening listener %s.", l.ListenerID)
+    log.Printf("Opening listener [%s] on port [%d].", l.ListenerID, l.Port)
     if l.isHTTP {
       httpServer(l)
     } else if l.isTCP {
@@ -206,14 +248,14 @@ func validateListener(w http.ResponseWriter, r *http.Request) *Listener {
 }
 
 func addListener(w http.ResponseWriter, r *http.Request) {
-  addOrUpdateListener(w, r, false)
+  addOrUpdateListenerAndRespond(w, r, false)
 }
 
 func updateListener(w http.ResponseWriter, r *http.Request) {
-  addOrUpdateListener(w, r, true)
+  addOrUpdateListenerAndRespond(w, r, true)
 }
 
-func addOrUpdateListener(w http.ResponseWriter, r *http.Request, update bool) {
+func addOrUpdateListenerAndRespond(w http.ResponseWriter, r *http.Request, update bool) {
   msg := ""
   l := &Listener{}
   if err := util.ReadJsonPayload(r, l); err != nil {
@@ -223,32 +265,37 @@ func addOrUpdateListener(w http.ResponseWriter, r *http.Request, update bool) {
     fmt.Fprintln(w, msg)
     return
   }
-  if l.Port <= 0 || l.Port > 65535 {
-    msg += fmt.Sprintf("[Invalid port number: %d]", l.Port)
+  errorCode := 0
+  if errorCode, msg = addOrUpdateListener(l, update); errorCode > 0 {
+    w.WriteHeader(errorCode)
+  }
+  fmt.Fprintln(w, msg)
+  util.AddLogMessage(msg, r)
+}
+
+func addOrUpdateListener(l *Listener, update bool) (int, string) {
+  msg := ""
+  errorCode := 0
+  if l.Label == "" {
+    l.Label = strconv.Itoa(l.Port)
   }
   l.Protocol = strings.ToLower(l.Protocol)
-  if !strings.EqualFold(l.Protocol, "http") && !strings.EqualFold(l.Protocol, "tcp") && !strings.EqualFold(l.Protocol, "udp") {
-    msg += fmt.Sprintf("[Invalid protocol: %s]", l.Protocol)
+  if l.Port <= 0 || l.Port > 65535 {
+    msg = fmt.Sprintf("[Invalid port number: %d]", l.Port)
+  } else if !strings.EqualFold(l.Protocol, "http") && !strings.EqualFold(l.Protocol, "tcp") && !strings.EqualFold(l.Protocol, "udp") {
+    msg = fmt.Sprintf("[Invalid protocol: %s]", l.Protocol)
   } else if strings.EqualFold(l.Protocol, "udp") {
     l.isUDP = true
   } else if strings.EqualFold(l.Protocol, "http") {
     l.isHTTP = true
   } else {
     l.isTCP = true
-    tcpmsg := ""
-    l.TCP, tcpmsg = tcp.InitTCPConfig(l.Port, l.TCP)
-    msg += tcpmsg
+    l.TCP, msg = tcp.InitTCPConfig(l.Port, l.TCP)
   }
   if msg != "" {
-    w.WriteHeader(http.StatusBadRequest)
-    util.AddLogMessage(msg, r)
-    fmt.Fprintln(w, msg)
-    return
+    return http.StatusBadRequest, msg
   }
 
-  if l.Label == "" {
-    l.Label = strconv.Itoa(l.Port)
-  }
   listenersLock.RLock()
   _, exists := listeners[l.Port]
   listenersLock.RUnlock()
@@ -260,11 +307,11 @@ func addOrUpdateListener(w http.ResponseWriter, r *http.Request, update bool) {
         listenersLock.Unlock()
         msg = fmt.Sprintf("Listener %d already present, restarted.", l.Port)
       } else {
-        w.WriteHeader(http.StatusInternalServerError)
+        errorCode = http.StatusInternalServerError
         msg = fmt.Sprintf("Listener %d already present, failed to restart.", l.Port)
       }
     } else {
-      w.WriteHeader(http.StatusBadRequest)
+      errorCode = http.StatusBadRequest
       msg = fmt.Sprintf("Listener %d already present, cannot add.", l.Port)
     }
   } else {
@@ -275,7 +322,7 @@ func addOrUpdateListener(w http.ResponseWriter, r *http.Request, update bool) {
         listenersLock.Unlock()
         msg = fmt.Sprintf("Listener %d added and opened.", l.Port)
       } else {
-        w.WriteHeader(http.StatusInternalServerError)
+        errorCode = http.StatusInternalServerError
         msg = fmt.Sprintf("Listener %d added but failed to open.", l.Port)
       }
     } else {
@@ -285,8 +332,7 @@ func addOrUpdateListener(w http.ResponseWriter, r *http.Request, update bool) {
       msg = fmt.Sprintf("Listener %d added.", l.Port)
     }
   }
-  fmt.Fprintln(w, msg)
-  util.AddLogMessage(msg, r)
+  return errorCode, msg
 }
 
 func addListenerCertOrKey(w http.ResponseWriter, r *http.Request, cert bool) {

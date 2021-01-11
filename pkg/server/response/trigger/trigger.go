@@ -3,6 +3,7 @@ package trigger
 import (
 	"fmt"
 	"goto/pkg/invocation"
+	"goto/pkg/metrics"
 	"goto/pkg/util"
 	"net/http"
 	"strings"
@@ -205,6 +206,7 @@ func (t *Trigger) invokeTargets(targets map[string]*TriggerTarget, w http.Respon
   responses := []*invocation.InvocationResult{}
   if len(targets) > 0 {
     for _, target := range targets {
+      metrics.UpdateTriggerCount(target.Name)
       is, _ := target.toInvocationSpec(r, w)
       tracker := invocation.RegisterInvocation(is)
       results := invocation.StartInvocation(tracker, true)

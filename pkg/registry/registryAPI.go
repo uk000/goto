@@ -96,6 +96,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "/targets", getPeerTargets, "GET")
 
   util.AddRoute(peersRouter, "/{peer}/jobs/add", addPeerJob, "POST")
+  util.AddRoute(peersRouter, "/jobs/add", addPeerJob, "POST")
   util.AddRoute(peersRouter, "/{peer}/jobs/{jobs}/remove", removePeerJobs, "PUT", "POST")
   util.AddRoute(peersRouter, "/{peer}/jobs/{jobs}/run", runPeerJobs, "PUT", "POST")
   util.AddRoute(peersRouter, "/{peer}/jobs/run/all", runPeerJobs, "PUT", "POST")

@@ -9,13 +9,14 @@ import (
   "goto/pkg/global"
   "goto/pkg/invocation"
   "goto/pkg/job"
+  "goto/pkg/metrics"
   "goto/pkg/registry"
   "goto/pkg/server/catchall"
   "goto/pkg/server/conn"
   "goto/pkg/server/echo"
   "goto/pkg/server/listeners"
   "goto/pkg/server/listeners/label"
-  "goto/pkg/server/probe"
+  "goto/pkg/server/probes"
   "goto/pkg/server/request"
   "goto/pkg/server/response"
   "goto/pkg/server/runner"
@@ -29,7 +30,7 @@ func Run() {
   listeners.SetHTTPServer(runner.ServeHTTPListener)
   listeners.SetTCPServer(runner.StartTCPServer)
   invocation.Startup()
-  runner.RunHttpServer("/", label.Handler, conn.Handler, listeners.Handler, probe.Handler, job.Handler, request.Handler,
+  runner.RunHttpServer("/", label.Handler, conn.Handler, metrics.Handler, listeners.Handler, probes.Handler, job.Handler, request.Handler,
     response.Handler, registry.Handler, client.Handler, tcp.Handler, echo.Handler, catchall.Handler)
   invocation.Shutdown()
   results.StopRegistrySender()

@@ -48,6 +48,7 @@ func RunHttpServer(root string, handlers ...util.ServerHandler) {
     Handler:      h2c.NewHandler(r, h2s),
   }
   StartHttpServer(server)
+  listeners.StartInitialListeners()
   peer.RegisterPeer(global.PeerName, global.PeerAddress)
   WaitForHttpServer(server)
 }

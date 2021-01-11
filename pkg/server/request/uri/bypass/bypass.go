@@ -2,6 +2,7 @@ package bypass
 
 import (
   "fmt"
+  "goto/pkg/metrics"
   "goto/pkg/util"
   "net/http"
   "strings"
@@ -183,6 +184,7 @@ func Middleware(next http.Handler) http.Handler {
     uri := util.FindURIInMap(r.RequestURI, b.Uris)
     b.lock.RUnlock()
     if uri != "" {
+      metrics.UpdateURIRequestCount(uri)
       b.lock.Lock()
       b.Uris[uri] = b.Uris[uri].(int) + 1
       util.CopyHeaders("Bypass-Request", w, r.Header, r.Host, r.RequestURI)

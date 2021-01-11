@@ -1,14 +1,15 @@
-package probe
+package probes
 
 import (
-  "fmt"
-  "goto/pkg/global"
-  "goto/pkg/util"
-  "net/http"
-  "strings"
-  "sync"
+	"fmt"
+	"goto/pkg/global"
+	"goto/pkg/metrics"
+	"goto/pkg/util"
+	"net/http"
+	"strings"
+	"sync"
 
-  "github.com/gorilla/mux"
+	"github.com/gorilla/mux"
 )
 
 type PortProbes struct {
@@ -24,7 +25,7 @@ type PortProbes struct {
 }
 
 var (
-  Handler      util.ServerHandler     = util.ServerHandler{"probe", SetRoutes, Middleware}
+  Handler      util.ServerHandler     = util.ServerHandler{"probes", SetRoutes, Middleware}
   probesByPort map[string]*PortProbes = map[string]*PortProbes{}
   lock         sync.RWMutex
 )
@@ -141,6 +142,7 @@ func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     probeStatus := initPortProbes(r)
     if IsReadinessProbe(r) {
+      metrics.UpdateRequestCount("readinessProbe")
       probeStatus.lock.Lock()
       probeStatus.ReadinessCount++
       if probeStatus.ReadinessCount == 0 {
@@ -153,6 +155,7 @@ func Middleware(next http.Handler) http.Handler {
       w.WriteHeader(probeStatus.ReadinessStatus)
       util.AddLogMessage(fmt.Sprintf("Serving Readiness Probe: [%s]", probeStatus.ReadinessProbe), r)
     } else if IsLivenessProbe(r) {
+      metrics.UpdateRequestCount("livenessProbe")
       probeStatus.lock.Lock()
       probeStatus.LivenessCount++
       if probeStatus.LivenessCount == 0 {

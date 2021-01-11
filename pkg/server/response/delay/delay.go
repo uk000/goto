@@ -1,16 +1,17 @@
 package delay
 
 import (
-	"fmt"
-	"net/http"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
+  "fmt"
+  "net/http"
+  "strconv"
+  "strings"
+  "sync"
+  "time"
 
-	"goto/pkg/util"
+  "goto/pkg/metrics"
+  "goto/pkg/util"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
 
 var (
@@ -67,6 +68,7 @@ func setDelay(w http.ResponseWriter, r *http.Request) {
 }
 
 func delay(w http.ResponseWriter, r *http.Request) {
+  metrics.UpdateRequestCount("delay")
   delayLock.RLock()
   defer delayLock.RUnlock()
   msg := ""

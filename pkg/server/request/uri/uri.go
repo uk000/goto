@@ -8,6 +8,7 @@ import (
   "sync"
   "time"
 
+  "goto/pkg/metrics"
   "goto/pkg/server/intercept"
   "goto/pkg/server/request/uri/bypass"
   "goto/pkg/server/request/uri/ignore"
@@ -176,7 +177,7 @@ func HasURIStatus(r *http.Request) bool {
 func middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     util.AddLogMessage(fmt.Sprintf("Request URI: [%s], Protocol: [%s], Method: [%s]", r.RequestURI, r.Proto, r.Method), r)
-    if !util.IsAdminRequest(r) {
+    if !util.IsAdminRequest(r) && !util.IsMetricsRequest(r) {
       track := false
       port := initPort(r)
       uri := strings.ToLower(r.URL.Path)
@@ -197,6 +198,7 @@ func middleware(next http.Handler) http.Handler {
       }
       uriLock.RUnlock()
       if track {
+        metrics.UpdateURIRequestCount(uri)
         uriLock.Lock()
         uriCountsByPort[port][uri]++
         uriLock.Unlock()

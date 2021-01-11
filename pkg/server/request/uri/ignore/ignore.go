@@ -3,6 +3,7 @@ package ignore
 import (
   "fmt"
   "goto/pkg/global"
+  "goto/pkg/metrics"
   "goto/pkg/util"
   "net/http"
   "strings"
@@ -186,6 +187,7 @@ func Middleware(next http.Handler) http.Handler {
       uri := util.FindURIInMap(r.RequestURI, ignore.Uris)
       ignore.lock.RUnlock()
       if uri != "" {
+        metrics.UpdateURIRequestCount(uri)
         ignore.lock.Lock()
         ignore.Uris[uri] = ignore.Uris[uri].(int) + 1
         ignore.lock.Unlock()

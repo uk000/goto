@@ -1,17 +1,17 @@
 package peer
 
 import (
-	"goto/pkg/global"
-	"goto/pkg/client/target"
-	"goto/pkg/registry"
-	"goto/pkg/server/probe"
-	"goto/pkg/job"
-	"goto/pkg/util"
-	"log"
-	"net/http"
-	"strconv"
-	"strings"
-	"time"
+  "goto/pkg/client/target"
+  "goto/pkg/global"
+  "goto/pkg/job"
+  "goto/pkg/registry"
+  "goto/pkg/server/probes"
+  "goto/pkg/util"
+  "log"
+  "net/http"
+  "strconv"
+  "strings"
+  "time"
 )
 
 var (
@@ -122,7 +122,7 @@ func setupStartupTasks(peerData *registry.PeerData) {
   }
 
   if peerData.Probes != nil {
-    probeStatus := probe.GetPortProbes(strconv.Itoa(global.ServerPort))
+    probeStatus := probes.GetPortProbes(strconv.Itoa(global.ServerPort))
     if peerData.Probes.ReadinessProbe != "" {
       log.Printf("Got Readiness probe %s, status: %d\n", peerData.Probes.ReadinessProbe, peerData.Probes.ReadinessStatus)
       probeStatus.ReadinessProbe = peerData.Probes.ReadinessProbe

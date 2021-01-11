@@ -6,6 +6,7 @@ import (
   "strconv"
   "sync"
 
+  "goto/pkg/metrics"
   "goto/pkg/server/intercept"
   "goto/pkg/server/request/uri"
   "goto/pkg/server/response/trigger"
@@ -107,6 +108,7 @@ func getStatus(w http.ResponseWriter, r *http.Request) {
   portStatus := getOrCreatePortStatus(r)
   requestedStatus, _ := util.GetIntParam(r, "status", 200)
   if !util.IsAdminRequest(r) {
+    metrics.UpdateRequestCount("status")
     statusLock.Lock()
     portStatus.countsByRequestedStatus[requestedStatus]++
     statusLock.Unlock()
@@ -176,6 +178,12 @@ func IncrementStatusCount(statusCode int, r *http.Request) {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    if util.IsMetricsRequest(r) {
+      if next != nil {
+        next.ServeHTTP(w, r)
+      }
+      return
+    }
     crw := intercept.NewInterceptResponseWriter(w, true)
     if next != nil {
       next.ServeHTTP(crw, r)

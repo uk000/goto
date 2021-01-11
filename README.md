@@ -99,6 +99,7 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 
 ### Server Features
 * [Server Logging](#server-logging)
+* [Server Metrics](#server-metrics)
 * [Server Listeners](#server-listeners)
 * [Server Listener Label](#server-listener-label)
 * [TCP Server](#server-tcp)
@@ -158,11 +159,19 @@ The application accepts the following command arguments:
     <tbody>
         <tr>
           <td rowspan="2"><pre>--port {port}</pre></td>
-          <td>Initial port the server listens on. </td>
+          <td>Primary port the server listens on. One of <strong>--port</strong> or <strong>--ports</strong> must be given. </td>
           <td rowspan="2">8080</td>
         </tr>
         <tr>
-          <td>* Additional ports can be opened by making listener API calls on this port. See <a href="#server-listeners">Listeners</a> feature for more details.</td>
+          <td>* Alternately, `--ports` can be used for multiple ports. Additional ports can be opened by making listener API calls on this port. See <a href="#server-listeners">Listeners</a> feature for more details.</td>
+        </tr>
+        <tr>
+          <td rowspan="2"><pre>--ports {ports}</pre></td>
+          <td>Initial list of ports that the server should start with. Port list is given as comma-separated list of <pre>{port1}/{protocol1},{port2}/{protocol2},...</pre> The first port in the list is used as primary port. </td>
+          <td rowspan="2">""</td>
+        </tr>
+        <tr>
+          <td>* For example: <pre>--ports 8080/http,8081/http,9000/tcp</pre> Protocol is optional, and defaults to http. E.g., to open multiple http ports: <pre>--ports 8080,8081,8082</pre>  Additional ports can be opened by making listener API calls on this port. See <a href="#server-listeners">Listeners</a> feature for more details.</td>
         </tr>
         <tr>
           <td rowspan="2"><pre>--label {label}</pre></td>
@@ -199,22 +208,47 @@ The application accepts the following command arguments:
           <td>* An instance can be asked to report its results to registry in case the  instance is transient, e.g. pods.</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--reminderLogs={true|false}</pre></td>
-          <td>Enable/Disable reminder logs received from various peer instances (applicable to goto instance acting as registry). </td>
-          <td rowspan="1">true</td>
-        </tr>
-        <tr>
-          <td rowspan="1"><pre>--probeLogs={true|false}</pre></td>
-          <td>Enable/Disable logging of requests received for URIs configured as liveness and readiness probes. See <a href="#server-probes">Probes</a> for more details. </td>
-          <td rowspan="1">true</td>
-        </tr>
-        <tr>
           <td rowspan="2"><pre>--certs {path}</pre></td>
           <td> Directory path from where to load TLS root certificates. </td>
           <td rowspan="2"> "/etc/certs" </td>
         </tr>
         <tr>
           <td>* The loaded root certificates are used if available, otherwise system default root certs are used.</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--serverLogs={true|false}</pre></td>
+          <td>Enable/Disable all goto server logging. </td>
+          <td rowspan="1">true</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--adminLogs={true|false}</pre></td>
+          <td>Enable/Disable logging of admin calls to configure goto. </td>
+          <td rowspan="1">true</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--metricsLogs={true|false}</pre></td>
+          <td>Enable/Disable logging of calls to metrics URIs. </td>
+          <td rowspan="1">true</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--probeLogs={true|false}</pre></td>
+          <td>Enable/Disable logging of requests received for URIs configured as liveness and readiness probes. See <a href="#server-probes">Probes</a> for more details. </td>
+          <td rowspan="1">false</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--peerHealthLogs={true|false}</pre></td>
+          <td>Enable/Disable logging of requests received from Registry for peer health checks </td>
+          <td rowspan="1">true</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--lockerLogs={true|false}</pre></td>
+          <td>Enable/Disable logging of locker requests on Registry instance. </td>
+          <td rowspan="1">false</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--reminderLogs={true|false}</pre></td>
+          <td>Enable/Disable reminder logs received from various peer instances (applicable to goto instance acting as registry). </td>
+          <td rowspan="1">false</td>
         </tr>
     </tbody>
 </table>
@@ -1258,9 +1292,45 @@ The server is useful to be run as a test server for testing some client applicat
 - Final Response code determination
 - Response Headers
 
-Sample log line:
+#### Sample log line:
 ```
 2020/11/09 16:59:54 [localhost@1.2.3.4:8080] [Registry] --> LocalAddr: [::1]:8080, RemoteAddr: [::1]:64342 --> Request Headers: {"Content-Length":["80"],"From-Goto":["peer1"],"From-Goto-Host":["localhost@1.2.3.4:8081"],"Host":["localhost:8080"],"Protocol":["HTTP/1.1"],"Targetid":["ab[1][1]"],"User-Agent":["Go-http-client/1.1"]} --> Request URI: [/bar?x-request-id=466c822c-231c-4ea5-aab6-125b73da1612-B], Protocol: [HTTP/1.1], Method: [POST] --> Request Body: [thisisaverylongbody] --> Delaying for 2s --> Echoing back --> Reporting status: [200] --> {"ResponseHeaders": {"Content-Type":["application/json"],"Goto-Host":["localhost@1.2.3.4:8080"],"Request-From-Goto":["peer1"],"Request-From-Goto-Host":["localhost@1.2.3.4:8080"],"Request-Host":["localhost:8080"],"Request-Protocol":["HTTP/1.1"],"Request-Targetid":["ab[1][1]"],"Request-User-Agent":["Go-http-client/1.1"],"Via-Goto":["Registry"]}}
+```
+
+<br/>
+
+### <a name="server-metrics"></a> Server Metrics
+`goto` exposes both custom server metrics and golang VM metrics in prometheus format. The following custom metrics are exposed:
+- `goto_requests_by_type` (vector): Number of requests by type (dimension: requestType)
+- `goto_requests_by_headers` (vector): Number of requests by headers (dimension: requestHeader)
+- `goto_requests_by_uris` (vector): Number of requests by URIs (dimension: requestURI)
+- `goto_proxied_requests` (vector): Number of proxied requests (dimension: proxyTarget)
+- `goto_triggers` (vector): Number of triggered requests (dimension: triggerTarget)
+- `goto_connections`: Number of connections by type (dimension: connType)
+- `goto_tcp_connections`: Number of TCP connections by type (dimension: tcpType)
+
+#### APIs
+|METHOD|URI|Description|
+|---|---|---|
+| GET       | /metrics           | Custom metrics in prometheus format |
+| GET       | /metrics/go        | Go VM metrics in prometheus format |
+| POST       | /metrics/clear    | Clear custom metrics |
+
+#### Metrics API Output Example
+```
+# HELP goto_connections Number of connections by type
+# TYPE goto_connections counter
+goto_connections{connType="http"} 9
+# HELP goto_requests_by_headers Number of requests by headers
+# TYPE goto_requests_by_headers counter
+goto_requests_by_headers{requestHeader="foo"} 3
+# HELP goto_requests_by_type Number of requests by type
+# TYPE goto_requests_by_type counter
+goto_requests_by_type{requestType="catchAll"} 4
+# HELP goto_requests_by_uris Number of requests by URIs
+# TYPE goto_requests_by_uris counter
+goto_requests_by_uris{requestURI="/bar"} 1
+goto_requests_by_uris{requestURI="/foo"} 3
 ```
 
 <br/>
