@@ -42,11 +42,20 @@ func getLabel(w http.ResponseWriter, r *http.Request) {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    label := listeners.GetListenerLabel(r)
+    l := listeners.GetListener(r)
+    if l == nil {
+      l = listeners.DefaultListener
+    }
     hostLabel := util.GetHostLabel()
-    util.AddLogMessage(fmt.Sprintf("[%s] [%s]", hostLabel, label), r)
-    w.Header().Add("Via-Goto", label)
+    util.AddLogMessage(fmt.Sprintf("[%s] [%s]", hostLabel, l.Label), r)
+    w.Header().Add("Via-Goto", l.Label)
     w.Header().Add("Goto-Host", hostLabel)
+    w.Header().Add("Goto-Port", util.GetListenerPort(r))
+    if l.TLS {
+      w.Header().Add("Goto-Protocol", "HTTPS")
+    } else {
+      w.Header().Add("Goto-Protocol", "HTTP")
+    }
     if next != nil {
       next.ServeHTTP(w, r)
     }

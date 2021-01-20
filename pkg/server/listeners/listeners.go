@@ -38,6 +38,7 @@ type Listener struct {
 }
 
 var (
+  DefaultListener     = &Listener{}
   listeners           = map[int]*Listener{}
   listenerGenerations = map[int]int{}
   initialListeners    = []*Listener{}
@@ -66,12 +67,15 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   global.GetListenerID = GetListenerID
 }
 
-func SetHTTPServer(server func(*Listener)) {
-  httpServer = server
-}
-
-func SetTCPServer(server func(string, int, net.Listener)) {
-  tcpServer = server
+func Configure(hs func(*Listener), ts func(string, int, net.Listener)) {
+  DefaultListener.Label = util.GetHostLabel()
+  DefaultListener.Port = global.ServerPort
+  DefaultListener.Protocol = "HTTP"
+  DefaultListener.isHTTP = true
+  DefaultListener.TLS  =false
+  DefaultListener.Open = true
+  httpServer = hs
+  tcpServer = ts
 }
 
 func StartInitialListeners() {

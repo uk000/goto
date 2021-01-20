@@ -1281,6 +1281,15 @@ The server is useful to be run as a test server for testing some client applicat
 
 <br/>
 
+### Goto Response Headers
+`Goto` adds the following common response headers to all http responses it sends:
+- `Goto-Server`: identifies the goto instance. This header's value will include hostname, IP, Port, Namespace and Cluster information if available to `Goto` from the following Environment variables: `POD_NAME`, `POD_IP`, `NODE_NAME`, `CLUSTER`, `NAMESPACE`. It falls back to using local compute's IP address if `POD_IP` is not defined. For other fields, it defaults to fixed value `local`.
+- `Via-Goto`: carries the label given to `goto` as startup param, or otherwise defaults to using port number as label.
+- `Goto-Port`: carries the port number on which the request was received
+- `Goto-Protocol`: identifies whether the request was received over `HTTP` or `HTTPS`
+
+<br/>
+
 ### <a name="server-logging"></a> Server Logging
 `goto` server logs are generated with a useful pattern to help figuring out the steps `goto` took for a request. Each log line tells the complete story about request details, how the request was processed, and response sent. Each log line contains the following segments separated by `-->`:
 - Request Timestamp, Host Id (host where the request was processed), and Server label (assigned via --label startup arg)

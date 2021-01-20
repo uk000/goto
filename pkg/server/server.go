@@ -27,8 +27,7 @@ import (
 func Run() {
   global.PeerAddress = util.GetHostIP() + ":" + strconv.Itoa(global.ServerPort)
   global.GetPeers = registry.GetPeers
-  listeners.SetHTTPServer(runner.ServeHTTPListener)
-  listeners.SetTCPServer(runner.StartTCPServer)
+  listeners.Configure(runner.ServeHTTPListener, runner.StartTCPServer)
   invocation.Startup()
   runner.RunHttpServer("/", label.Handler, conn.Handler, metrics.Handler, listeners.Handler, probes.Handler, job.Handler, request.Handler,
     response.Handler, registry.Handler, client.Handler, tcp.Handler, echo.Handler, catchall.Handler)

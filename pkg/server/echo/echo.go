@@ -33,6 +33,7 @@ func EchoHeaders(w http.ResponseWriter, r *http.Request) {
 func echo(w http.ResponseWriter, r *http.Request) {
   metrics.UpdateRequestCount("echo")
   Echo(w, r)
+  fmt.Fprintln(w)
 }
 
 func Echo(w http.ResponseWriter, r *http.Request) {
@@ -44,7 +45,7 @@ func Echo(w http.ResponseWriter, r *http.Request) {
   response["RequestQuery"] = r.URL.Query()
   body, _ := ioutil.ReadAll(r.Body)
   response["RequestBody"] = string(body)
-  fmt.Fprintln(w, util.ToJSON(response))
+  fmt.Fprint(w, util.ToJSON(response))
 }
 
 func wsEchoHandler(w http.ResponseWriter, r *http.Request) {
