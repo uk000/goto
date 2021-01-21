@@ -1352,6 +1352,8 @@ The server starts with a single http listener on the bootstrap port (given as a 
 
 Adding TLS cert and key for a listener using `/cert` and `/key` API will configure the listener for serving HTTPS traffic when it's opened/reopened. An already opened listener can be reopened as a TLS listener by configuring TLS certs for it and calling `/reopen`.
 
+`/listeners` API output includes the default startup port for view, but the default port cannot be mutated by other listener APIs.
+
 #### See TCP Listeners section later for details of TCP features
 
 #### APIs
@@ -1366,7 +1368,7 @@ Adding TLS cert and key for a listener using `/cert` and `/key` API will configu
 | POST, PUT  | /listeners/{port}/open   | Open an added listener to accept traffic|
 | POST, PUT  | /listeners/{port}/reopen | Close and reopen an existing listener if already opened, otherwise open it |
 | POST, PUT  | /listeners/{port}/close  | Close an added listener|
-| GET        | /listeners               | Get a list of listeners |
+| GET        | /listeners               | Get a list of listeners. The list of listeners in the output includes the default startup port even though the default port cannot be mutated by other listener APIs. |
 
 #### Listener JSON Schema
 |Field|Data Type|Description|

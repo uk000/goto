@@ -72,7 +72,7 @@ func Configure(hs func(*Listener), ts func(string, int, net.Listener)) {
   DefaultListener.Port = global.ServerPort
   DefaultListener.Protocol = "HTTP"
   DefaultListener.isHTTP = true
-  DefaultListener.TLS  =false
+  DefaultListener.TLS = false
   DefaultListener.Open = true
   httpServer = hs
   tcpServer = ts
@@ -245,7 +245,7 @@ func validateListener(w http.ResponseWriter, r *http.Request) *Listener {
   listenersLock.Unlock()
   if l == nil {
     w.WriteHeader(http.StatusBadRequest)
-    fmt.Fprintf(w, "Port %d: no listener/invalid port/not removable\n", port)
+    fmt.Fprintf(w, "Port %d: No listener on the port, or listener not closeable\n", port)
     return nil
   }
   return l
@@ -392,7 +392,12 @@ func removeListenerCertAndKey(w http.ResponseWriter, r *http.Request) {
 func getListeners(w http.ResponseWriter, r *http.Request) {
   listenersLock.RLock()
   defer listenersLock.RUnlock()
-  util.WriteJsonPayload(w, listeners)
+  listenersView := map[int]*Listener{}
+  listenersView[DefaultListener.Port] = DefaultListener
+  for port, l := range listeners {
+    listenersView[port] = l
+  }
+  util.WriteJsonPayload(w, listenersView)
 }
 
 func GetListener(r *http.Request) *Listener {
