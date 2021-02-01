@@ -2,6 +2,7 @@ package payload
 
 import (
   "fmt"
+  "goto/pkg/events"
   "goto/pkg/server/intercept"
   "goto/pkg/util"
   "io"
@@ -407,17 +408,19 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
       msg = fmt.Sprintf("Default Payload set : [%s: %s]", pr.DefaultResponsePayload.ContentType, pr.DefaultResponsePayload.Payload)
     }
   }
-  w.WriteHeader(http.StatusAccepted)
+  w.WriteHeader(http.StatusOK)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
+  events.SendRequestEvent("Response Payload Configured", msg, r)
 }
 
 func clearResponsePayload(w http.ResponseWriter, r *http.Request) {
   getPortResponse(r).init()
-  msg := "Response payload cleared"
-  w.WriteHeader(http.StatusAccepted)
+  msg := "Response Payload Cleared"
+  w.WriteHeader(http.StatusOK)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
+  events.SendRequestEvent(msg, "", r)
 }
 
 func getResponsePayload(w http.ResponseWriter, r *http.Request) {
@@ -672,7 +675,9 @@ func handleURI(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Length", strconv.Itoa(length))
     w.Header().Set("Content-Type", rp.ContentType)
     fmt.Fprint(w, payload)
-    util.AddLogMessage(fmt.Sprintf("Responding with configured payload of length [%d] and content type [%s]", length, rp.ContentType), r)
+    msg := fmt.Sprintf("Responding with configured payload of length [%d] and content type [%s] for URI [%s]", length, rp.ContentType, r.RequestURI)
+    util.AddLogMessage(msg, r)
+    events.SendRequestEvent("Response Payload Applied", msg, r)
   }
 }
 

@@ -1,14 +1,14 @@
 package header
 
 import (
-	"fmt"
-	"net/http"
-	"strings"
-	"sync"
+  "fmt"
+  "net/http"
+  "strings"
+  "sync"
 
-	"goto/pkg/util"
+  "goto/pkg/util"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
 
 var (
@@ -44,7 +44,7 @@ func addResponseHeader(w http.ResponseWriter, r *http.Request) {
     }
     headerMap[header] = append(values, value)
     msg = fmt.Sprintf("Response header [%s : %s] added", header, value)
-    w.WriteHeader(http.StatusAccepted)
+    w.WriteHeader(http.StatusOK)
   } else {
     msg = "Cannot add. Invalid header"
     w.WriteHeader(http.StatusBadRequest)
@@ -63,7 +63,7 @@ func removeResponseHeader(w http.ResponseWriter, r *http.Request) {
       delete(headerMap, header)
     }
     msg = fmt.Sprintf("Response header [%s] removed", header)
-    w.WriteHeader(http.StatusAccepted)
+    w.WriteHeader(http.StatusOK)
   } else {
     msg = "Cannot remove. Invalid header"
     w.WriteHeader(http.StatusBadRequest)
@@ -77,7 +77,7 @@ func clearResponseHeader(w http.ResponseWriter, r *http.Request) {
   defer headersLock.Unlock()
   responseHeadersByPort[util.GetListenerPort(r)] = map[string][]string{}
   msg := "Response headers cleared"
-  w.WriteHeader(http.StatusAccepted)
+  w.WriteHeader(http.StatusOK)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }

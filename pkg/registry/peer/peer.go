@@ -1,7 +1,9 @@
 package peer
 
 import (
+  "fmt"
   "goto/pkg/client/target"
+  "goto/pkg/events"
   "goto/pkg/global"
   "goto/pkg/job"
   "goto/pkg/registry"
@@ -35,10 +37,12 @@ func RegisterPeer(peerName, peerAddress string) {
         strings.NewReader(util.ToJSON(peer))); err == nil {
         defer resp.Body.Close()
         if resp.StatusCode == 200 || resp.StatusCode == 202 {
+          events.SendEventJSONDirect("Peer Registered", peer)
+          registered = true
+          log.Printf("Registered as peer [%s] with registry [%s]\n", global.PeerName, global.RegistryURL)
           data := &registry.PeerData{}
           if err := util.ReadJsonPayloadFromBody(resp.Body, data); err == nil {
-            registered = true
-            log.Printf("Registered as peer [%s] with registry [%s]\n", global.PeerName, global.RegistryURL)
+            events.SendEventJSONDirect("Peer Startup Data", data)
             log.Printf("Read startup data from registry: %+v\n", *data)
             go setupStartupTasks(data)
             go startRegistryReminder(peer)
@@ -65,6 +69,7 @@ func RegisterPeer(peerName, peerAddress string) {
 }
 
 func DeregisterPeer(peerName, peerAddress string) {
+  events.SendEventDirect("Peer Deregistered", fmt.Sprintf("%s - %s", peerName, peerAddress))
   if global.RegistryURL != "" {
     chanStopReminder <- true
     url := global.RegistryURL + "/registry/peers/" + peerName + "/remove/" + peerAddress
@@ -110,7 +115,7 @@ func setupStartupTasks(peerData *registry.PeerData) {
       jobs[peerJob.ID] = peerJob
     }
   }
-  port := strconv.Itoa(global.ServerPort)
+  port := global.ServerPort
   pc := target.GetClientForPort(port)
   pj := job.GetPortJobs(port)
 

@@ -1,13 +1,13 @@
 package label
 
 import (
-	"fmt"
-	"net/http"
+  "fmt"
+  "net/http"
 
-	"goto/pkg/server/listeners"
-	"goto/pkg/util"
+  "goto/pkg/server/listeners"
+  "goto/pkg/util"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
 
 var (
@@ -29,7 +29,7 @@ func setLabel(w http.ResponseWriter, r *http.Request) {
     msg = fmt.Sprintf("Will use label %s for all responses on port %s", label, util.GetListenerPort(r))
   }
   util.AddLogMessage(msg, r)
-  w.WriteHeader(http.StatusAccepted)
+  w.WriteHeader(http.StatusOK)
   fmt.Fprintln(w, msg)
 }
 
@@ -42,12 +42,9 @@ func getLabel(w http.ResponseWriter, r *http.Request) {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    l := listeners.GetListener(r)
-    if l == nil {
-      l = listeners.DefaultListener
-    }
+    l := listeners.GetCurrentListener(r)
     hostLabel := util.GetHostLabel()
-    util.AddLogMessage(fmt.Sprintf("[%s] [%s]", hostLabel, l.Label), r)
+    util.AddLogMessage(fmt.Sprintf("[%s]", l.Label), r)
     w.Header().Add("Via-Goto", l.Label)
     w.Header().Add("Goto-Host", hostLabel)
     w.Header().Add("Goto-Port", util.GetListenerPort(r))

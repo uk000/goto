@@ -1,15 +1,16 @@
 package trigger
 
 import (
-	"fmt"
-	"goto/pkg/invocation"
-	"goto/pkg/metrics"
-	"goto/pkg/util"
-	"net/http"
-	"strings"
-	"sync"
+  "fmt"
+  "goto/pkg/events"
+  "goto/pkg/invocation"
+  "goto/pkg/metrics"
+  "goto/pkg/util"
+  "net/http"
+  "strings"
+  "sync"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
 
 type TriggerTarget struct {
@@ -76,8 +77,9 @@ func (t *Trigger) addTriggerTarget(w http.ResponseWriter, r *http.Request) {
       t.TargetsByResponseStatus[triggerStatus][tt.Name] = tt
     }
     util.AddLogMessage(fmt.Sprintf("Added trigger target: %+v", tt), r)
-    w.WriteHeader(http.StatusAccepted)
+    w.WriteHeader(http.StatusOK)
     fmt.Fprintf(w, "Added trigger target: %s\n", util.ToJSON(tt))
+    events.SendRequestEventJSON("Trigger Target Added", tt, r)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     fmt.Fprintf(w, "Invalid trigger target: %s\n", err.Error())
@@ -129,9 +131,11 @@ func (t *Trigger) deleteTriggerTarget(targetName string) {
 func (t *Trigger) removeTriggerTarget(w http.ResponseWriter, r *http.Request) {
   if tt := t.getRequestedTriggerTarget(r); tt != nil {
     t.deleteTriggerTarget(tt.Name)
-    util.AddLogMessage(fmt.Sprintf("Removed trigger target: %+v", tt), r)
-    w.WriteHeader(http.StatusAccepted)
-    fmt.Fprintf(w, "Removed trigger target: %s\n", util.ToJSON(tt))
+    msg := fmt.Sprintf("Trigger Target Removed: %s", tt.Name)
+    util.AddLogMessage(msg, r)
+    w.WriteHeader(http.StatusOK)
+    fmt.Fprintln(w, msg)
+    events.SendRequestEvent("Trigger Target Removed", msg, r)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     fmt.Fprintln(w, "No targets")
@@ -143,9 +147,11 @@ func (t *Trigger) enableTriggerTarget(w http.ResponseWriter, r *http.Request) {
     t.lock.Lock()
     tt.Enabled = true
     t.lock.Unlock()
-    util.AddLogMessage(fmt.Sprintf("Enabled trigger target: %s", tt.Name), r)
-    w.WriteHeader(http.StatusAccepted)
-    fmt.Fprintf(w, "Enabled trigger target: %s\n", util.ToJSON(tt))
+    msg := fmt.Sprintf("Trigger Target Enabled: %s", tt.Name)
+    util.AddLogMessage(msg, r)
+    w.WriteHeader(http.StatusOK)
+    fmt.Fprintln(w, msg)
+    events.SendRequestEvent("Trigger Target Enabled", msg, r)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     fmt.Fprintln(w, "Trigger target not found")
@@ -157,9 +163,11 @@ func (t *Trigger) disableTriggerTarget(w http.ResponseWriter, r *http.Request) {
     t.lock.Lock()
     tt.Enabled = false
     t.lock.Unlock()
-    util.AddLogMessage(fmt.Sprintf("Disbled trigger target: %s", tt.Name), r)
-    w.WriteHeader(http.StatusAccepted)
-    fmt.Fprintf(w, "Disbled trigger target: %s\n", util.ToJSON(tt))
+    msg := fmt.Sprintf("Trigger Target Disabled: %s", tt.Name)
+    util.AddLogMessage(msg, r)
+    w.WriteHeader(http.StatusOK)
+    fmt.Fprintln(w, msg)
+    events.SendRequestEvent("Trigger Target Disabled", msg, r)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     fmt.Fprintln(w, "Trigger target not found")
@@ -206,6 +214,7 @@ func (t *Trigger) invokeTargets(targets map[string]*TriggerTarget, w http.Respon
   responses := []*invocation.InvocationResult{}
   if len(targets) > 0 {
     for _, target := range targets {
+      events.SendRequestEventJSON("Trigger Target Invoked", target, r)
       metrics.UpdateTriggerCount(target.Name)
       is, _ := target.toInvocationSpec(r, w)
       tracker := invocation.RegisterInvocation(is)
@@ -221,7 +230,7 @@ func (t *Trigger) invokeTargets(targets map[string]*TriggerTarget, w http.Respon
       }
       t.TriggerResults[response.TargetName][response.StatusCode]++
     }
-  return responses
+    return responses
   }
   return nil
 }
@@ -263,7 +272,7 @@ func clearTriggers(w http.ResponseWriter, r *http.Request) {
   defer triggerLock.Unlock()
   portTriggers[listenerPort] = &Trigger{}
   portTriggers[listenerPort].init()
-  w.WriteHeader(http.StatusAccepted)
+  w.WriteHeader(http.StatusOK)
   util.AddLogMessage("Triggers cleared", r)
   fmt.Fprintln(w, "Triggers cleared")
 }

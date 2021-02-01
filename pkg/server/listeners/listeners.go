@@ -3,6 +3,7 @@ package listeners
 import (
   "crypto/tls"
   "fmt"
+  "goto/pkg/events"
   "goto/pkg/global"
   "goto/pkg/server/tcp"
   "goto/pkg/util"
@@ -65,6 +66,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   global.IsListenerPresent = IsListenerPresent
   global.IsListenerOpen = IsListenerOpen
   global.GetListenerID = GetListenerID
+  global.GetListenerLabel = GetListenerLabel
+  global.GetListenerLabelForPort = GetListenerLabelForPort
 }
 
 func Configure(hs func(*Listener), ts func(string, int, net.Listener)) {
@@ -116,28 +119,6 @@ func AddInitialListeners(portList []string) {
       log.Fatalf("Error: Invalid port [%d]\n", port)
     }
   }
-}
-
-func IsListenerPresent(port int) bool {
-  listenersLock.RLock()
-  defer listenersLock.RUnlock()
-  return listeners[port] != nil
-}
-
-func IsListenerOpen(port int) bool {
-  listenersLock.RLock()
-  defer listenersLock.RUnlock()
-  l := listeners[port]
-  return l != nil && l.Open
-}
-
-func GetListenerID(port int) string {
-  listenersLock.RLock()
-  defer listenersLock.RUnlock()
-  if l := listeners[port]; l != nil {
-    return l.ListenerID
-  }
-  return ""
 }
 
 func (l *Listener) initListener() bool {
@@ -262,9 +243,11 @@ func updateListener(w http.ResponseWriter, r *http.Request) {
 func addOrUpdateListenerAndRespond(w http.ResponseWriter, r *http.Request, update bool) {
   msg := ""
   l := &Listener{}
-  if err := util.ReadJsonPayload(r, l); err != nil {
+  body := util.Read(r.Body)
+  if err := util.ReadJson(body, l); err != nil {
     w.WriteHeader(http.StatusBadRequest)
     msg = fmt.Sprintf("Failed to parse json with error: %s", err.Error())
+    events.SendRequestEventJSON("Listener Rejected", map[string]interface{}{"error": err.Error(), "payload": body}, r)
     util.AddLogMessage(msg, r)
     fmt.Fprintln(w, msg)
     return
@@ -281,7 +264,7 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
   msg := ""
   errorCode := 0
   if l.Label == "" {
-    l.Label = strconv.Itoa(l.Port)
+    l.Label = util.BuildHostLabel(l.Port)
   }
   l.Protocol = strings.ToLower(l.Protocol)
   if l.Port <= 0 || l.Port > 65535 {
@@ -297,6 +280,7 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
     l.TCP, msg = tcp.InitTCPConfig(l.Port, l.TCP)
   }
   if msg != "" {
+    events.SendEventJSON("Listener Rejected", map[string]interface{}{"error": msg, "payload": l})
     return http.StatusBadRequest, msg
   }
 
@@ -310,13 +294,16 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
         listeners[l.Port] = l
         listenersLock.Unlock()
         msg = fmt.Sprintf("Listener %d already present, restarted.", l.Port)
+        events.SendEventJSON("Listener Updated", map[string]interface{}{"listener": l, "status": msg})
       } else {
         errorCode = http.StatusInternalServerError
         msg = fmt.Sprintf("Listener %d already present, failed to restart.", l.Port)
+        events.SendEventJSON("Listener Updated", map[string]interface{}{"listener": l, "status": msg})
       }
     } else {
       errorCode = http.StatusBadRequest
       msg = fmt.Sprintf("Listener %d already present, cannot add.", l.Port)
+      events.SendEventJSON("Listener Rejected", map[string]interface{}{"error": msg, "payload": l})
     }
   } else {
     if l.Open {
@@ -325,15 +312,18 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
         listeners[l.Port] = l
         listenersLock.Unlock()
         msg = fmt.Sprintf("Listener %d added and opened.", l.Port)
+        events.SendEventJSON("Listener Added", map[string]interface{}{"listener": l, "status": msg})
       } else {
         errorCode = http.StatusInternalServerError
         msg = fmt.Sprintf("Listener %d added but failed to open.", l.Port)
+        events.SendEventJSON("Listener Added", map[string]interface{}{"listener": l, "status": msg})
       }
     } else {
       listenersLock.Lock()
       listeners[l.Port] = l
       listenersLock.Unlock()
       msg = fmt.Sprintf("Listener %d added.", l.Port)
+      events.SendEventJSON("Listener Added", map[string]interface{}{"listener": l, "status": msg})
     }
   }
   return errorCode, msg
@@ -349,9 +339,11 @@ func addListenerCertOrKey(w http.ResponseWriter, r *http.Request, cert bool) {
       if cert {
         l.Cert = data
         msg = fmt.Sprintf("Cert added for listener %d\n", l.Port)
+        events.SendRequestEvent("Listener Cert Added", msg, r)
       } else {
         l.Key = data
         msg = fmt.Sprintf("Key added for listener %d\n", l.Port)
+        events.SendRequestEvent("Listener Key Added", msg, r)
       }
     } else {
       w.WriteHeader(http.StatusBadRequest)
@@ -384,20 +376,25 @@ func removeListenerCertAndKey(w http.ResponseWriter, r *http.Request) {
       w.WriteHeader(http.StatusInternalServerError)
       msg = fmt.Sprintf("Cert and Key removed for listener %d but failed to reopen\n", l.Port)
     }
+    events.SendRequestEvent("Listener Cert Removed", msg, r)
     fmt.Fprintln(w, msg)
     util.AddLogMessage(msg, r)
   }
 }
 
-func getListeners(w http.ResponseWriter, r *http.Request) {
-  listenersLock.RLock()
-  defer listenersLock.RUnlock()
+func GetListeners() map[int]*Listener {
   listenersView := map[int]*Listener{}
   listenersView[DefaultListener.Port] = DefaultListener
   for port, l := range listeners {
     listenersView[port] = l
   }
-  util.WriteJsonPayload(w, listenersView)
+  return listenersView
+}
+
+func getListeners(w http.ResponseWriter, r *http.Request) {
+  listenersLock.RLock()
+  defer listenersLock.RUnlock()
+  util.WriteJsonPayload(w, GetListeners())
 }
 
 func GetListener(r *http.Request) *Listener {
@@ -407,14 +404,48 @@ func GetListener(r *http.Request) *Listener {
   return listeners[port]
 }
 
-func GetListenerLabel(r *http.Request) string {
-  port := util.GetListenerPortNum(r)
+func GetCurrentListener(r *http.Request) *Listener {
+  l := GetListener(r)
+  if l == nil {
+    l = DefaultListener
+  }
+  return l
+}
+
+func IsListenerPresent(port int) bool {
+  listenersLock.RLock()
+  defer listenersLock.RUnlock()
+  return listeners[port] != nil
+}
+
+func IsListenerOpen(port int) bool {
+  listenersLock.RLock()
+  defer listenersLock.RUnlock()
+  l := listeners[port]
+  return l != nil && l.Open
+}
+
+func GetListenerID(port int) string {
   listenersLock.RLock()
   defer listenersLock.RUnlock()
   if l := listeners[port]; l != nil {
+    return l.ListenerID
+  }
+  return ""
+}
+
+func GetListenerLabel(r *http.Request) string {
+  return GetListenerLabelForPort(util.GetListenerPortNum(r))
+}
+
+func GetListenerLabelForPort(port int) string {
+  listenersLock.RLock()
+  l := listeners[port]
+  listenersLock.RUnlock()
+  if l != nil {
     return l.Label
-  } else if DefaultLabel != "" {
-    return DefaultLabel
+  } else if port == global.ServerPort {
+    return util.GetHostLabel()
   }
   return strconv.Itoa(port)
 }
@@ -432,6 +463,7 @@ func SetListenerLabel(r *http.Request) string {
   } else if label != "" {
     DefaultLabel = label
   }
+  events.SendRequestEvent("Listener Label Updated", label, r)
   return label
 }
 
@@ -445,6 +477,7 @@ func openListener(w http.ResponseWriter, r *http.Request) {
         } else {
           msg = fmt.Sprintf("Listener opened on port %d\n", l.Port)
         }
+        events.SendRequestEventJSON("Listener Opened", map[string]interface{}{"listener": l, "status": msg}, r)
       } else {
         w.WriteHeader(http.StatusInternalServerError)
         msg = fmt.Sprintf("Failed to listen on port %d\n", l.Port)
@@ -456,6 +489,7 @@ func openListener(w http.ResponseWriter, r *http.Request) {
       } else {
         msg = fmt.Sprintf("Listener reopened on port %d\n", l.Port)
       }
+      events.SendRequestEventJSON("Listener Reopened", map[string]interface{}{"listener": l, "status": msg}, r)
     }
     fmt.Fprintln(w, msg)
     util.AddLogMessage(msg, r)
@@ -471,6 +505,7 @@ func closeListener(w http.ResponseWriter, r *http.Request) {
     } else {
       l.closeListener()
       msg = fmt.Sprintf("Listener on port %d closed\n", l.Port)
+      events.SendRequestEvent("Listener Closed", msg, r)
     }
     fmt.Fprintln(w, msg)
     util.AddLogMessage(msg, r)
@@ -489,6 +524,7 @@ func removeListener(w http.ResponseWriter, r *http.Request) {
     delete(listeners, l.Port)
     listenersLock.Unlock()
     msg := fmt.Sprintf("Listener on port %d removed", l.Port)
+    events.SendRequestEvent("Listener Removed", msg, r)
     fmt.Fprintln(w, msg)
     util.AddLogMessage(msg, r)
   }

@@ -2,6 +2,7 @@ package bypass
 
 import (
   "fmt"
+  "goto/pkg/events"
   "goto/pkg/metrics"
   "goto/pkg/util"
   "net/http"
@@ -49,6 +50,7 @@ func (b *Bypass) addURI(w http.ResponseWriter, r *http.Request) {
     uri = strings.ToLower(uri)
     b.Uris[uri] = 0
     msg = fmt.Sprintf("Bypass URI %s added", uri)
+    events.SendRequestEvent("Bypass URI Added", msg, r)
     w.WriteHeader(http.StatusOK)
   } else {
     msg = "Cannot add. Invalid Bypass URI"
@@ -66,6 +68,7 @@ func (b *Bypass) removeURI(w http.ResponseWriter, r *http.Request) {
     uri = strings.ToLower(uri)
     delete(b.Uris, uri)
     msg = fmt.Sprintf("Bypass URI %s removed", uri)
+    events.SendRequestEvent("Bypass URI Removed", msg, r)
     w.WriteHeader(http.StatusOK)
   } else {
     msg = "Cannot remove. Invalid Bypass URI"
@@ -88,6 +91,7 @@ func (b *Bypass) setStatus(w http.ResponseWriter, r *http.Request) {
     } else {
       msg = fmt.Sprintf("Bypass Status set to %d forever", statusCode)
     }
+    events.SendRequestEvent("Bypass Status Configured", msg, r)
     w.WriteHeader(http.StatusOK)
   } else {
     msg = fmt.Sprintf("Bypass Status %d", b.BypassStatus)
@@ -101,10 +105,11 @@ func (b *Bypass) clear(w http.ResponseWriter, r *http.Request) {
   b.lock.Lock()
   defer b.lock.Unlock()
   b.Uris = map[string]interface{}{}
-  msg := "Bypass URIs cleared"
+  msg := "Bypass URIs Cleared"
   w.WriteHeader(http.StatusOK)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
+  events.SendRequestEvent(msg, "", r)
 }
 
 func (b *Bypass) getCallCounts(w http.ResponseWriter, r *http.Request) {

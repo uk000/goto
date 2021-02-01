@@ -18,13 +18,12 @@ func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     body := util.Read(r.Body)
     miniBody := ""
-    if len(body) > 100 {
-      miniBody = body[:100]
-      miniBody += "..."
+    if len(body) > 20 {
+      miniBody = fmt.Sprintf("%s...[length:%d]", body[:20], len(body))
     } else {
       miniBody = body
     }
-    miniBody = strings.ReplaceAll(miniBody, "\n", "")
+    miniBody = strings.ReplaceAll(miniBody, "\n", " ")
     util.AddLogMessage(fmt.Sprintf("Request Body: [%s]", miniBody), r)
     r.Body = ioutil.NopCloser(strings.NewReader(body))
     if next != nil {

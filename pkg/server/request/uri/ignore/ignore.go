@@ -2,6 +2,7 @@ package ignore
 
 import (
   "fmt"
+  "goto/pkg/events"
   "goto/pkg/global"
   "goto/pkg/metrics"
   "goto/pkg/util"
@@ -51,7 +52,8 @@ func (i *Ignore) addURI(w http.ResponseWriter, r *http.Request) {
     uri = strings.ToLower(uri)
     i.Uris[uri] = 0
     msg = fmt.Sprintf("Ignore URI %s added", uri)
-    w.WriteHeader(http.StatusAccepted)
+    events.SendRequestEvent("Ignore URI Added", msg, r)
+    w.WriteHeader(http.StatusOK)
   } else {
     msg = "Cannot add. Invalid Ignore URI"
     w.WriteHeader(http.StatusBadRequest)
@@ -68,7 +70,8 @@ func (i *Ignore) removeURI(w http.ResponseWriter, r *http.Request) {
     uri = strings.ToLower(uri)
     delete(i.Uris, uri)
     msg = fmt.Sprintf("Ignore URI %s removed", uri)
-    w.WriteHeader(http.StatusAccepted)
+    events.SendRequestEvent("Ignore URI Removed", msg, r)
+    w.WriteHeader(http.StatusOK)
   } else {
     msg = "Cannot remove. Invalid Ignore URI"
     w.WriteHeader(http.StatusBadRequest)
@@ -90,7 +93,8 @@ func (i *Ignore) setStatus(w http.ResponseWriter, r *http.Request) {
     } else {
       msg = fmt.Sprintf("Ignore Status set to %d forever", statusCode)
     }
-    w.WriteHeader(http.StatusAccepted)
+    events.SendRequestEvent("Ignore Status Configured", msg, r)
+    w.WriteHeader(http.StatusOK)
   } else {
     msg = fmt.Sprintf("Ignore Status %d", i.IgnoreStatus)
     w.WriteHeader(http.StatusOK)
@@ -103,10 +107,11 @@ func (i *Ignore) clear(w http.ResponseWriter, r *http.Request) {
   i.lock.Lock()
   defer i.lock.Unlock()
   i.Uris = map[string]interface{}{}
-  msg := "Ignore URIs cleared"
-  w.WriteHeader(http.StatusAccepted)
+  msg := "Ignore URIs Cleared"
+  w.WriteHeader(http.StatusOK)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
+  events.SendRequestEvent(msg, "", r)
 }
 
 func (i *Ignore) getCallCounts(w http.ResponseWriter, r *http.Request) {

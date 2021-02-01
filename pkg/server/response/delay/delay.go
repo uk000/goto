@@ -8,6 +8,7 @@ import (
   "sync"
   "time"
 
+  "goto/pkg/events"
   "goto/pkg/metrics"
   "goto/pkg/util"
 
@@ -51,18 +52,24 @@ func setDelay(w http.ResponseWriter, r *http.Request) {
       }
       if delayCountByPort[listenerPort] > 0 {
         msg = fmt.Sprintf("Will delay next %d requests with %s", delayCountByPort[listenerPort], delayByPort[listenerPort])
+        events.SendRequestEvent("Delay Configured", msg, r)
       } else if delayCountByPort[listenerPort] == 0 {
         msg = fmt.Sprintf("Will delay requests with %s until reset", delayByPort[listenerPort])
+        events.SendRequestEvent("Delay Configured", msg, r)
       } else {
-        msg = "Delay cleared"
+        msg = "Delay Cleared"
+        events.SendRequestEvent(msg, "", r)
       }
+      w.WriteHeader(http.StatusOK)
     } else {
       msg = "Invalid delay param"
+      w.WriteHeader(http.StatusBadRequest)
     }
   } else {
-    msg = "Delay cleared"
+    msg = "Delay Cleared"
+    w.WriteHeader(http.StatusOK)
+    events.SendRequestEvent(msg, "", r)
   }
-  w.WriteHeader(http.StatusAccepted)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
@@ -103,7 +110,6 @@ func Middleware(next http.Handler) http.Handler {
     delayCount := delayCountByPort[listenerPort]
     delayLock.RUnlock()
     if delay > 0 && delayCount >= 0 && !util.IsAdminRequest(r) && !util.IsDelayRequest(r) {
-      util.AddLogMessage(fmt.Sprintf("Delaying for %s", delay.String()), r)
       if delayCount > 0 {
         if delayCount == 1 {
           delayCount = -1
@@ -111,7 +117,9 @@ func Middleware(next http.Handler) http.Handler {
         } else {
           delayCount--
         }
-        util.AddLogMessage(fmt.Sprintf("Remaining delay count = %d", delayCount), r)
+        msg := fmt.Sprintf("Delaying [%s] for [%s]. Remaining delay count [%d].", r.RequestURI, delay.String(), delayCount)
+        util.AddLogMessage(msg, r)
+        events.SendRequestEvent("Response Delay Applied", msg, r)
         delayCountByPort[listenerPort] = delayCount
       }
       w.Header().Add("Response-Delay", delay.String())

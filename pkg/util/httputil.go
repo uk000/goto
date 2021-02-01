@@ -30,7 +30,8 @@ type ServerHandler struct {
 type ContextKey struct{ Key string }
 
 var (
-  logmessagesKey = &ContextKey{"logmessages"}
+  logMessagesKey = &ContextKey{"logMessagesKey"}
+  currentPortKey = &ContextKey{"currentPort"}
   fillerRegExp   = regexp.MustCompile("({.+?})")
 )
 
@@ -43,7 +44,7 @@ var sizes map[string]uint64 = map[string]uint64{
   "MB": 1000000,
 }
 
-type messagestore struct {
+type MessageStore struct {
   messages []string
 }
 
@@ -53,7 +54,8 @@ func ContextMiddleware(next http.Handler) http.Handler {
       CopyHeaders("Stopping-Readiness-Request", w, r.Header, r.Host, r.RequestURI)
       w.WriteHeader(http.StatusNotFound)
     } else if next != nil {
-      next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), logmessagesKey, &messagestore{})))
+      next.ServeHTTP(w, r.WithContext(context.WithValue(
+        context.WithValue(r.Context(), logMessagesKey, &MessageStore{}), currentPortKey, GetListenerPortNum(r))))
     }
   })
 }
@@ -68,13 +70,14 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 }
 
 func AddLogMessage(msg string, r *http.Request) {
-  m := r.Context().Value(logmessagesKey).(*messagestore)
+  m := r.Context().Value(logMessagesKey).(*MessageStore)
   m.messages = append(m.messages, msg)
 }
 
 func PrintLogMessages(r *http.Request) {
-  m := r.Context().Value(logmessagesKey).(*messagestore)
+  m := r.Context().Value(logMessagesKey).(*MessageStore)
   if (!IsLockerRequest(r) || global.EnableRegistryLockerLogs) &&
+    (!IsPeerEventsRequest(r) || global.EnableRegistryEventsLogs) &&
     (!IsAdminRequest(r) || global.EnableAdminLogs) &&
     (!IsReminderRequest(r) || global.EnableRegistryReminderLogs) &&
     (!IsProbeRequest(r) || global.EnableProbeLogs) &&
@@ -87,6 +90,14 @@ func PrintLogMessages(r *http.Request) {
     }
   }
   m.messages = m.messages[:0]
+}
+
+func GetCurrentPort(r *http.Request) int {
+  return r.Context().Value(currentPortKey).(int)
+}
+
+func GetCurrentListenerLabel(r *http.Request) string {
+  return global.GetListenerLabelForPort(GetCurrentPort(r))
 }
 
 func GetPodName() string {
@@ -132,26 +143,37 @@ func GetNamespace() string {
 }
 
 func GetHostIP() string {
-  if ip, present := os.LookupEnv("POD_IP"); present {
-    return ip
+  if global.HostIP == "" {
+    if ip, present := os.LookupEnv("POD_IP"); present {
+      global.HostIP = ip
+    } else {
+      conn, err := net.Dial("udp", "8.8.8.8:80")
+      if err == nil {
+        defer conn.Close()
+        global.HostIP = conn.LocalAddr().(*net.UDPAddr).IP.String()
+      } else {
+        global.HostIP = "localhost"
+      }
+    }
   }
-  conn, err := net.Dial("udp", "8.8.8.8:80")
-  if err == nil {
-    defer conn.Close()
-    return conn.LocalAddr().(*net.UDPAddr).IP.String()
+  return global.HostIP
+}
+
+func BuildHostLabel(port int) string {
+  hostLabel := ""
+  node := GetNodeName()
+  cluster := GetCluster()
+  if node != "" || cluster != "" {
+    hostLabel = fmt.Sprintf("%s.%s@%s:%d(%s@%s)", GetPodName(), GetNamespace(), GetHostIP(), port, node, cluster)
+  } else {
+    hostLabel = fmt.Sprintf("%s.%s@%s:%d", GetPodName(), GetNamespace(), GetHostIP(), port)
   }
-  return "localhost"
+  return hostLabel
 }
 
 func GetHostLabel() string {
   if global.HostLabel == "" {
-    node := GetNodeName()
-    cluster := GetCluster()
-    if node != "" || cluster != "" {
-      global.HostLabel = fmt.Sprintf("%s.%s@%s(%s@%s)", GetPodName(), GetNamespace(), global.PeerAddress, node, cluster)
-    } else {
-      global.HostLabel = fmt.Sprintf("%s.%s@%s", GetPodName(), GetNamespace(), global.PeerAddress)
-    }
+    global.HostLabel = BuildHostLabel(global.ServerPort)
   }
   return global.HostLabel
 }
@@ -380,7 +402,7 @@ func IsAdminRequest(r *http.Request) bool {
     strings.HasPrefix(r.RequestURI, "/listeners") || strings.HasPrefix(r.RequestURI, "/label") ||
     strings.HasPrefix(r.RequestURI, "/client") || strings.HasPrefix(r.RequestURI, "/job") ||
     strings.HasPrefix(r.RequestURI, "/probe") || strings.HasPrefix(r.RequestURI, "/tcp") ||
-    strings.HasPrefix(r.RequestURI, "/registry")
+    strings.HasPrefix(r.RequestURI, "/events") || strings.HasPrefix(r.RequestURI, "/registry")
 }
 
 func IsMetricsRequest(r *http.Request) bool {
@@ -393,6 +415,10 @@ func IsReminderRequest(r *http.Request) bool {
 
 func IsLockerRequest(r *http.Request) bool {
   return strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker")
+}
+
+func IsPeerEventsRequest(r *http.Request) bool {
+  return strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/events")
 }
 
 func IsStatusRequest(r *http.Request) bool {
@@ -455,11 +481,6 @@ func AddMiddlewares(next http.Handler, handlers ...ServerHandler) http.Handler {
       handler = handlers[i].Middleware(handler)
     }
   }
-  // for _, h := range handlers {
-  // 	if h.Middleware != nil {
-  // 		handler = h.Middleware(handler)
-  // 	}
-  // }
   return handler
 }
 
@@ -643,4 +664,17 @@ func GenerateRandomString(size int) string {
     b[i] = charset[r.Intn(len(charset))]
   }
   return string(b)
+}
+
+func CreateHttpClient() *http.Client {
+  tr := &http.Transport{
+    MaxIdleConns: 10,
+    Proxy:        http.ProxyFromEnvironment,
+    DialContext: (&net.Dialer{
+      Timeout:   15 * time.Second,
+      KeepAlive: 3 * time.Minute,
+    }).DialContext,
+    TLSHandshakeTimeout: 10 * time.Second,
+  }
+  return &http.Client{Transport: tr}
 }

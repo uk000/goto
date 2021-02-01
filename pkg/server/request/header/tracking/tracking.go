@@ -7,6 +7,7 @@ import (
   "strings"
   "sync"
 
+  "goto/pkg/events"
   "goto/pkg/metrics"
   "goto/pkg/server/intercept"
   "goto/pkg/util"
@@ -202,10 +203,10 @@ func (rt *RequestTracking) getHeaders(r *http.Request) []string {
 
 func addHeaders(w http.ResponseWriter, r *http.Request) {
   msg := ""
-
   if headers := requestTracking.initHeaders(r); headers != nil {
     msg = fmt.Sprintf("Header %s will be tracked", headers)
-    w.WriteHeader(http.StatusAccepted)
+    events.SendRequestEvent("Tracking Headers Added", msg, r)
+    w.WriteHeader(http.StatusOK)
   } else {
     msg = "Cannot add. Invalid header"
     w.WriteHeader(http.StatusBadRequest)
@@ -219,7 +220,8 @@ func removeHeader(w http.ResponseWriter, r *http.Request) {
   headers, present := requestTracking.removeHeaders(r)
   if present {
     msg = fmt.Sprintf("Header %+v removed", headers)
-    w.WriteHeader(http.StatusAccepted)
+    events.SendRequestEvent("Tracking Headers Removed", msg, r)
+    w.WriteHeader(http.StatusOK)
   } else {
     msg = "No headers to remove"
     w.WriteHeader(http.StatusBadRequest)
@@ -230,18 +232,21 @@ func removeHeader(w http.ResponseWriter, r *http.Request) {
 
 func clearHeaders(w http.ResponseWriter, r *http.Request) {
   requestTracking.clear(r)
-  util.AddLogMessage("Headers cleared", r)
-  w.WriteHeader(http.StatusAccepted)
-  fmt.Fprintf(w, "Headers cleared\n")
+  msg := "Tracking Headers Cleared"
+  util.AddLogMessage(msg, r)
+  events.SendRequestEvent(msg, "", r)
+  w.WriteHeader(http.StatusOK)
+  fmt.Fprintln(w, msg)
 }
 
 func clearHeaderCounts(w http.ResponseWriter, r *http.Request) {
   msg := ""
-
   if headers := requestTracking.clearHeaderCounts(r); headers != nil {
     msg = fmt.Sprintf("Header %s count reset", headers)
+    events.SendRequestEvent("Tracked Header Counts Cleared", msg, r)
   } else {
     msg = "Clearing counts for all headers"
+    events.SendRequestEvent("All Tracked Header Counts Cleared", msg, r)
   }
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)

@@ -13,10 +13,13 @@ var (
   Namespace                  string
   NodeName                   string
   Cluster                    string
+  HostIP                     string
   HostLabel                  string
   RegistryURL                string
   CertPath                   string
   UseLocker                  bool
+  EnableEvents               bool
+  PublishEvents              bool
   StartupDelay               time.Duration
   ShutdownDelay              time.Duration
   Stopping                   bool = false
@@ -25,6 +28,7 @@ var (
   EnableInvocationLogs       bool = true
   EnableRegistryLogs         bool = true
   EnableRegistryLockerLogs   bool = true
+  EnableRegistryEventsLogs   bool = true
   EnableRegistryReminderLogs bool = false
   EnablePeerHealthLogs       bool = false
   EnableClientLogs           bool = true
@@ -36,5 +40,7 @@ var (
   IsListenerPresent          func(int) bool
   IsListenerOpen             func(int) bool
   GetListenerID              func(int) string
+  GetListenerLabel           func(*http.Request) string
+  GetListenerLabelForPort    func(int) string
   IsIgnoredURI               func(*http.Request) bool
 )

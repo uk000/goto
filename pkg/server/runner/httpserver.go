@@ -3,6 +3,7 @@ package runner
 import (
   "context"
   "fmt"
+  "goto/pkg/events"
   "goto/pkg/global"
   "goto/pkg/registry/peer"
   "goto/pkg/server/conn"
@@ -50,6 +51,7 @@ func RunHttpServer(root string, handlers ...util.ServerHandler) {
   StartHttpServer(server)
   listeners.StartInitialListeners()
   peer.RegisterPeer(global.PeerName, global.PeerAddress)
+  events.SendEventJSONDirect("Server Started", listeners.GetListeners())
   WaitForHttpServer(server)
 }
 
@@ -60,6 +62,7 @@ func StartHttpServer(server *http.Server) {
   }
   go func() {
     log.Printf("Server %s ready", server.Addr)
+    events.StartSender()
     if err := server.ListenAndServe(); err != nil {
       log.Println(err)
     }
@@ -89,8 +92,7 @@ func WaitForHttpServer(server *http.Server) {
   signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
   <-c
   global.Stopping = true
-  log.Printf("Received stop signal. Deregistering peer [%s : %s] from registry", global.PeerName, global.PeerAddress)
-  peer.DeregisterPeer(global.PeerName, global.PeerAddress)
+  log.Println("Received stop signal.")
   if global.ShutdownDelay > 0 {
     log.Printf("Sleeping %s before stopping", global.ShutdownDelay)
     signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
@@ -110,6 +112,11 @@ func StopHttpServer(server *http.Server) {
   log.Printf("HTTP Server %s started shutting down", server.Addr)
   ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
   defer cancel()
+  events.StopSender()
+  time.Sleep(time.Second)
+  log.Printf("Deregistering peer [%s : %s] from registry", global.PeerName, global.PeerAddress)
+  peer.DeregisterPeer(global.PeerName, global.PeerAddress)
+  events.SendEventJSONDirect("Server Stopped", listeners.GetListeners())
   server.Shutdown(ctx)
   log.Printf("HTTP Server %s finished shutting down", server.Addr)
 }

@@ -5,7 +5,6 @@ import (
 
   "goto/pkg/server/request/body"
   "goto/pkg/server/request/header"
-  "goto/pkg/server/request/proxy"
   "goto/pkg/server/request/timeout"
   "goto/pkg/server/request/uri"
   "goto/pkg/util"
@@ -15,8 +14,7 @@ import (
 
 var (
   Handler         util.ServerHandler   = util.ServerHandler{"request", SetRoutes, Middleware}
-  requestHandlers []util.ServerHandler = []util.ServerHandler{header.Handler, uri.Handler,
-    body.Handler, timeout.Handler, proxy.Handler}
+  requestHandlers []util.ServerHandler = []util.ServerHandler{body.Handler, header.Handler, timeout.Handler, uri.Handler}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {

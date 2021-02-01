@@ -99,6 +99,7 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 
 ### Server Features
 * [Server Logging](#server-logging)
+* [Events](#server-events)
 * [Server Metrics](#server-metrics)
 * [Server Listeners](#server-listeners)
 * [Server Listener Label](#server-listener-label)
@@ -124,7 +125,7 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 * [Proxy Features](#proxy-features)
 
 ### Trigger
-* [Trigger Features](#trigger-features)
+* [Trigger Features](#triggers-features)
 
 ### Jobs
 * [Jobs Features](#jobs-features)
@@ -208,6 +209,22 @@ The application accepts the following command arguments:
           <td>* An instance can be asked to report its results to registry in case the  instance is transient, e.g. pods.</td>
         </tr>
         <tr>
+          <td rowspan="2"><pre>--events={true|false}</pre></td>
+          <td> Whether this instance should generate events and build a timeline locally. </td>
+          <td rowspan="2"> true </td>
+        </tr>
+        <tr>
+          <td>* Events timeline can be helpful in observing how various operations and traffic were interleaved, and help reason about some outcome.</td>
+        </tr>
+        <tr>
+          <td rowspan="2"><pre>--publishEvents={true|false}</pre></td>
+          <td> Whether this instance should publish its events to the registry to let registry build a unified timeline of events collected from various peer instances. This flag takes effect only if a registry URL is specified to let this instance connect to a registry instance. </td>
+          <td rowspan="2"> false </td>
+        </tr>
+        <tr>
+          <td>* Events timeline can be helpful in observing how various operations and traffic were interleaved, and help reason about some outcome.</td>
+        </tr>
+        <tr>
           <td rowspan="2"><pre>--certs {path}</pre></td>
           <td> Directory path from where to load TLS root certificates. </td>
           <td rowspan="2"> "/etc/certs" </td>
@@ -246,6 +263,11 @@ The application accepts the following command arguments:
           <td rowspan="1">false</td>
         </tr>
         <tr>
+          <td rowspan="1"><pre>--eventsLogs={true|false}</pre></td>
+          <td>Enable/Disable logging of store event calls from peers on Registry instance. </td>
+          <td rowspan="1">false</td>
+        </tr>
+        <tr>
           <td rowspan="1"><pre>--reminderLogs={true|false}</pre></td>
           <td>Enable/Disable reminder logs received from various peer instances (applicable to goto instance acting as registry). </td>
           <td rowspan="1">false</td>
@@ -273,7 +295,7 @@ As a client tool, `goto` offers the feature to configure multiple targets and se
 
 The invocation results get accumulated across multiple invocations until cleared explicitly. Various results APIs can be used to read the accumulated results. Clearing of all results resets the invocation counter too, causing the next invocation to start at counter 1 again.
 
-In addition to keeping the results in the `goto` client instance, those are also stored in locker on registry instance if enabled. (See `--locker` command arg)
+In addition to keeping the results in the `goto` client instance, those are also stored in locker on registry instance if enabled. (See `--locker` command arg). Various events are added to the peer timeline related to target invocations it performs, which are also reported to the registry. These events can be seen in the event timeline on the peer instance as well as its event timeline from the registry.
 
 
 #### APIs
@@ -302,6 +324,26 @@ In addition to keeping the results in the `goto` client instance, those are also
 | POST      | /client/results/clear                 | Clear previously accumulated invocation results |
 | POST      | /client/results/all/{enable}          | Enable/disable collection of cumulative results across all targets. This gives high level overview of all traffic, but at a performance overhead. Disabled by default. |
 | POST      | /client/results/invocations/{enable}          | Enable/disable collection of results by invocations. This gives more detailed visibility into results per invocation but has performance overhead. Disabled by default. |
+
+
+#### Timeline Events related to target invocation
+- `Target Added`: an invocation target was added
+- `Targets Removed`: one or more invocation targets were removed
+- `Targets Cleared`: all invocation targets were removed
+- `Tracking Headers Added`: headers added for tracking against invocation responses
+- `Tracking Headers Removed`: one or more tracking headers were removed
+- `Tracking Headers Cleared`: all tracking headers were removed
+- `CA Cert Stored`: CA cert was added for validating TLS cert presented by target
+- `CA Cert Removed`: CA cert was removed
+- `Results Cleared`: all collected invocation results were cleared
+- `Target Invoked`: one or more invocation targets were invoked
+- `Targets Stopped`: one or more invocation targets were stopped
+- `Invocation Started`: invocation started for a target
+- `Invocation Finished`: invocation finished for a target
+- `Invocation Response Status`: Either first invocation response received, or the HTTP response status was different from previous response from a target during an invocation
+- `Invocation Repeated Response Status`: All HTTP responses after the first response from a target where the response status code was same as previous are accumulated and reported in summary. This event is sent out when the next response is found to carry a different response status code, or if all requests to a target completed for an invocation.
+- `Invocation Failure`: Event reported upon first failed request, or if a request fails after previous successful request.
+- `Invocation Repeated Failure`: All request failures after a failed request are accumulated and reported in summary, either when the next request succeeds or when the invocation completes.
 
 
 #### Client Target JSON Schema
@@ -1308,15 +1350,223 @@ The server is useful to be run as a test server for testing some client applicat
 
 <br/>
 
+### <a name="server-events"></a> Events
+`goto` logs various events as it performs operations, responds to admin requests and serves traffic. The Events APIs can be used to read and clear events on a `goto` instance. Additionally, if the `goto` instance is configured to report to a registry, it sends the events to the registry. On registry, events from various peer instances are collected and merged by peer labels. Registry exposes additional APIs to get the event timeline either for a peer (by peer label) or across all connected peers as a single unified timeline. Registry also allows clearing of events timeline on all connected instances through a single API call. See Registry APIs for additional info.
+
+#### APIs
+|METHOD|URI|Description|
+|---|---|---|
+| GET       | /events          | Get events timeline of a `goto` instance. This reports instance's own timeline, as opposed to the Registry's peers events APIs that expose events collected from multiple instances.  |
+| POST      | /events/flush    | Publish any pending events to the registry, and clear local events timeline. |
+| POST      | /events/clear    | Clear the local events timeline. |
+
+
+#### Server Events
+Each `goto` instance publishes these events at startup and shutdown
+- `Server Started`
+- `Server Stopped`
+
+A `goto` peer that's configured to connect to a `goto` registry publishes the following additional events at startup and shutdown:
+- `Peer Registered`
+- `Peer Startup Data`
+- `Peer Deregistered`
+
+A server generates event `URI First Request` upon receiving first request for a URI. Subsequent requsts for that URI are tracked and counted as long as it produces the same response status. Once the response status code changes for a URI, it generates event `Repeated URI Status` to log the accumulated summary of the URI so far, and the logs `URI Status Changed` to report the new status code. The accumulation and tracking logic then continues with this new status code, reporting once the status changes again for that URI.
+
+Various other events are published by `goto` peer instances acting as client and server, and by the `goto` registry instance, which are listed in other sections in this Readme.
+
+#### Events API Output Example
+
+<details>
+<summary>Example</summary>
+<p>
+
+```
+curl -s localhost:8081/events
+
+[
+  {
+    "title": "Listener Added",
+    "data": {
+      "listener": {"...":"..."},
+      "status": "Listener 9091 added and opened."
+    },
+    "at": "2021-01-30T19:33:10.58548-08:00",
+    "peer": "peer1",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "Peer Registered",
+    "data": {"...":"..."},
+    "at": "2021-01-30T19:33:10.589635-08:00",
+    "peer": "peer1",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "Peer Startup Data",
+    "data": {
+      "Targets": {"...":"..."},
+      "Jobs": {"...":"..."},
+      "TrackingHeaders": "",
+      "Probes": null,
+      "Message": ""
+    },
+    "at": "2021-01-30T19:33:10.590423-08:00",
+    "peer": "peer1",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "Server Started",
+    "data": {
+      "8081": {
+        "listenerID": "",
+        "label": "local.local@1.1.1.1:8081",
+        "port": 8081,
+        "protocol": "HTTP",
+        "open": true,
+        "tls": false
+      },
+      "9091": {
+        "listenerID": "9091-1",
+        "label": "9091",
+        "port": 9091,
+        "protocol": "http",
+        "open": true,
+        "tls": false
+      }
+    },
+    "at": "2021-01-30T19:33:10.590837-08:00",
+    "peer": "peer1",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "Target Added",
+    "data": {"...": "..."},
+    "at": "2021-01-30T19:35:51.015874-08:00",
+    "peer": "peer1",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "Target Invoked",
+    "data": {"...": "..."},
+    "at": "2021-01-30T19:35:53.040253-08:00",
+    "peer": "peer1",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "Invocation Started",
+    "data": {"...": "..."},
+    "at": "2021-01-30T19:35:53.040272-08:00",
+    "peer": "peer1",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "URI First Request",
+    "data": {"...": "..."},
+    "at": "2021-01-30T19:35:53.041489-08:00",
+    "peer": "peer1",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "Invocation Response",
+    "data": {"...": "..."},
+    "at": "2021-01-30T19:35:57.119397-08:00",
+    "peer": "peer1",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "Invocation Repeated Response Status",
+    "data": {"...": "..."},
+    "at": "2021-01-30T19:44:10.39711-08:00",
+    "peer": "peer1",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "Invocation Failure Response",
+    "data": {"...": "..."},
+    "at": "2021-01-30T19:44:11.198778-08:00",
+    "peer": "peer2",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "Invocation Repeated Failure Response",
+    "data": {"...": "..."},
+    "at": "2021-01-30T19:44:20.343305-08:00",
+    "peer": "peer2",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "Invocation Finished",
+    "data": {"...": "..."},
+    "at": "2021-01-30T19:35:57.119409-08:00",
+    "peer": "peer1",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "URI First Request",
+    "data": {
+      "details": "Port [8081] URI [/status/201] First Request with Status [201]"
+    },
+    "at": "2021-02-01T09:45:26.187747-08:00",
+    "peer": "peer1",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "Port [9091] Flushed Traffic Report: URI [/status/418] Repeated x[3]",
+    "data": {
+      "port": 9091,
+      "uri": "/status/418",
+      "statusCode": 418,
+      "statusRepeatCount": 1,
+      "firstEventAt": "2021-02-01T10:16:48.223972-08:00",
+      "lastEventAt": "2021-02-01T10:16:48.223972-08:00"
+    },
+    "at": "2021-02-01T10:17:20.650217-08:00",
+    "peer": "peer1",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "Port [8081] Flushed Traffic Report: URI [/status/503] Repeated x[2]",
+    "data": {
+      "port": 8081,
+      "uri": "/status/503",
+      "statusCode": 503,
+      "statusRepeatCount": 1,
+      "firstEventAt": "2021-02-01T10:16:45.220416-08:00",
+      "lastEventAt": "2021-02-01T10:16:45.220416-08:00"
+    },
+    "at": "2021-02-01T10:17:20.650218-08:00",
+    "peer": "peer1",
+    "peerHost": "local.local@1.1.1.1:8081"
+  },
+  {
+    "title": "Events Flushed",
+    "data": {
+      "details": ""
+    },
+    "at": "2021-02-01T10:17:20.650219-08:00",
+    "peer": "peer1",
+    "peerHost": "local.local@1.1.1.1:8081"
+  }
+]
+```
+</p>
+</details>
+
+<br/>
+
 ### <a name="server-metrics"></a> Server Metrics
 `goto` exposes both custom server metrics and golang VM metrics in prometheus format. The following custom metrics are exposed:
 - `goto_requests_by_type` (vector): Number of requests by type (dimension: requestType)
 - `goto_requests_by_headers` (vector): Number of requests by headers (dimension: requestHeader)
 - `goto_requests_by_uris` (vector): Number of requests by URIs (dimension: requestURI)
+- `goto_client_requests_by_targets` (vector): Number of client requests by target
+- `goto_client_failures_by_targets` (vector): Number of failed client requests by target
 - `goto_proxied_requests` (vector): Number of proxied requests (dimension: proxyTarget)
 - `goto_triggers` (vector): Number of triggered requests (dimension: triggerTarget)
-- `goto_connections`: Number of connections by type (dimension: connType)
-- `goto_tcp_connections`: Number of TCP connections by type (dimension: tcpType)
+- `goto_conn_counts` (vector): Number of connections by type (dimension: connType)
+- `goto_active_client_conn_counts_by_targets` (gauge): Number of active client connections by targets
+- `goto_tcp_conn_counts` (vector): Number of TCP connections by type (dimension: tcpType)
 
 #### APIs
 |METHOD|URI|Description|
@@ -1327,6 +1577,17 @@ The server is useful to be run as a test server for testing some client applicat
 
 #### Metrics API Output Example
 ```
+# HELP goto_active_client_conn_counts_by_targets Number of active client connections by targets# TYPE goto_active_client_conn_counts_by_targets gauge
+goto_active_client_conn_counts_by_targets{target="test-1.1"} 4
+goto_active_client_conn_counts_by_targets{target="test-1.2"} 4
+# HELP goto_client_failures_by_targets Number of failed client requests by target
+# TYPE goto_client_failures_by_targets counter
+goto_client_failures_by_targets{target="peer1_to_peer2"} 2
+goto_client_failures_by_targets{target="peer1_to_peer3"} 2
+# HELP goto_client_requests_by_targets Number of client requests by target
+# TYPE goto_client_requests_by_targets counter
+goto_client_requests_by_targets{target="test-1.1"} 80
+goto_client_requests_by_targets{target="test-1.2"} 80
 # HELP goto_connections Number of connections by type
 # TYPE goto_connections counter
 goto_connections{connType="http"} 9
@@ -1381,6 +1642,18 @@ Adding TLS cert and key for a listener using `/cert` and `/key` API will configu
 | tls | bool | Reports whether the listener has been configured for TLS. This flag is read-only, the value of which is determined based on whether TLS cert and key have been added for the listener using the APIs. |
 | tcp | TCPConfig | Supplemental TCP config for a TCP listener. See TCP Config JSON schema under `TCP Server` section. |
 
+#### Listener Events
+- `Listener Rejected`
+- `Listener Added`
+- `Listener Updated`
+- `Listener Removed`
+- `Listener Cert Added`
+- `Listener Key Added`
+- `Listener Cert Removed`
+- `Listener Label Updated`
+- `Listener Opened`
+- `Listener Reopened`
+- `Listener Closed`
 
 #### Listener API Examples:
 <details>
@@ -1502,17 +1775,17 @@ curl localhost:8080/label
 
 `Goto` providers features for testing server-side TCP behavior via TCP listeners (client side TCP features are described under client section).
 
-The primary HTTP port that `goto` starts with exposes listeners REST APIs that can be used to open additional ports on the `goto` instance. These additional ports can be either `HTTP` or `TCP`. For TCP listeners, additional configs can be provided using listener's `tcp` schema, which allows for configuring various timeouts, connection lifetime, packet sizes, etc. The TCP configurations of a TCP listener can be supplied at the time of listener creation, and it can also be reconfigured at anytime via the `/tcp/{port}/configure` API. 
+The primary HTTP port that `goto` starts with exposes listeners REST APIs that can be used to open additional ports on the `goto` instance. These additional ports can be either `HTTP` or `TCP`. For TCP listeners, additional configs can be provided using listener's `tcp` schema, which allows for configuring various timeouts, connection lifetime, packet sizes, etc. The TCP configurations of a TCP listener can be supplied at the time of listener creation, and it can also be reconfigured at any time via the `/tcp/{port}/configure` API. 
 
-A TCP listener can operate in the following modes to faciliate different kinds of testing:
+A TCP listener can operate in the following modes to facilitate different kinds of testing:
 
 1. By default, a TCP listener executes in one of the two `silent` mode. 
    a) If the listener is configured with a `connectionLife` that limits its lifetime, the listener operates in `SilentLife` mode where it waits for the configured lifetime and closes the client connection. In this mode, the listener receives and counts the bytes received, but never responds. 
    b) If the listener's `connectionLife` is set to zero, the listener operates in `CloseAtFirstByte` mode where it waits for the first byte to arrive and then closes the client connection.
-2. If `Echo` mode is enabled on a TCP listener, the listener echoes back the bytes received from the client. The `echoResponseSize` configures the echo buffer size, which is the number of bytes that the listener will need to receive from the client before echoing back. If more data is received than the `echoResponseSize`, it'll echo multiple chunks each of `echoResponseSize` size. The config `echoResponseDelay` configures the delay server should apply before sending each echo response packets. In `echo` mode, the connection enforces `readTimeout` and `connIdleTimeout` based on the activity: any new bytes recevied reset the read/idle timeouts. It applies `writeTimeout` when sending the echo response to the client. If `connectionLife` is set, it controls the overall lifetime of the connection and the connection will close upon reaching the max life regardless of the activity.
+2. If `Echo` mode is enabled on a TCP listener, the listener echoes back the bytes received from the client. The `echoResponseSize` configures the echo buffer size, which is the number of bytes that the listener will need to receive from the client before echoing back. If more data is received than the `echoResponseSize`, it'll echo multiple chunks each of `echoResponseSize` size. The config `echoResponseDelay` configures the delay server should apply before sending each echo response packets. In `echo` mode, the connection enforces `readTimeout` and `connIdleTimeout` based on the activity: any new bytes received reset the read/idle timeouts. It applies `writeTimeout` when sending the echo response to the client. If `connectionLife` is set, it controls the overall lifetime of the connection and the connection will close upon reaching the max life regardless of the activity.
 3. If `Stream` mode is enabled, the connection starts streaming TCP bytes per the given configuration as soon as a client connects. None of the timeouts or max life applies in streaming mode, and the client connection closes automatically once the streaming completes. The stream behavior is controlled via the following configs: `streamPayloadSize`, `streamChunkSize`, `streamChunkCount`, `streamChunkDelay`, `streamDuration`. Not all of these configs are required, and a combination of some may lead to ambiguity that the server resolves by picking the most sensible combinations of these config params.
 4. In `payload validation` mode, client should first set the payload expectation by calling either `/listeners/{port}/expect/payload/{length}` or `/listeners/{port}/expect/payload/{length}`, depending on whether server should just validate payload length or the payload content. The server then waits for the duration of the connection lifetime (if not set explicitly for the listener, this feature defaults to `30s` of total connection life), and buffers bytes received from client. If at any point during the connection life the number of received bytes exceed the expected payload length, the server responds with error and closes connection. If at the end of the connection life, the number of bytes match the payload expectations (either length or both length and content), then the server responds with success message. The messages returned by the server are one of the following:
-   - `[SUCCESS]: Received pyload matches expected payload of length [l] on port [p]`
+   - `[SUCCESS]: Received payload matches expected payload of length [l] on port [p]`
    - `[ERROR:EXCEEDED] - Payload length [l] exceeded expected length [e] on port [p]`
    - `[ERROR:CONTENT] - Payload content of length [l] didn't match expected payload of length [e] on port [p]`
    - `[ERROR:TIMEOUT] - Timed out before receiving payload of expected length [l] on port [p]`
@@ -1535,7 +1808,7 @@ A TCP listener can operate in the following modes to faciliate different kinds o
 | POST, PUT  | /tcp/{port}/expect/payload/{length}  | Set expected payload length for payload verification mode (to only validate payload length, not content) |
 | POST, PUT  | /tcp/{port}/expect/payload  | Set expected payload for payload verification mode, to validate both payload length and content. Expected payload must be sent as request body. |
 | POST, PUT  | /tcp/{port}/validate/payload/{enable} | Enable/disable payload validation mode on a port to support payload length/content validation over connection lifetime (see overview for details) |
-| POST, PUT  | /tcp/{port}/stream/{enable}  | Enable or disable streaming on a port without having to restart the listener (useful to disable streaming while retaining the stream congiuration) |
+| POST, PUT  | /tcp/{port}/stream/{enable}  | Enable or disable streaming on a port without having to restart the listener (useful to disable streaming while retaining the stream configuration) |
 | POST, PUT  | /tcp/{port}/echo/{enable} | Enable/disable echo mode on a port to let the port be tested in silent mode (see overview for details) |
 | POST, PUT  | /tcp/{port}/conversation/{enable} | Enable/disable conversation mode on a port to support multiple packets verification (see overview for details) |
 | POST, PUT  | /tcp/{port}/silentlife/{enable} | Enable/disable silent life mode on a port (see overview for details) |
@@ -1568,7 +1841,7 @@ A TCP listener can operate in the following modes to faciliate different kinds o
 | validatePayloadContent | bool | Controls whether the listener should operate in `Payload Validation` mode for both content and length. |
 | expectedPayloadLength | int | Set the expected payload length explicitly for length verification. Also used to auto-store the expected payload content length when validating content. See API for providing expected payload content. |
 | echoResponseSize | int | Configures the size of payload to be echoed back to client. Server will only echo back when it has these many bytes received from the client. |
-| echoResponseDelay | duration | Delay to apply when sending response back to the client in echo mode. |
+| echoResponseDelay | duration | Delay to be applied when sending response back to the client in echo mode. |
 | streamPayloadSize | int | Configures the total payload size to be stream via chunks if streaming is enabled for the listener. |
 | streamChunkSize | int | Configures the size of each chunk of data to stream if streaming is enabled for the listener. |
 | streamChunkCount | int | Configures the total number of chunks to stream if streaming is enabled for the listener. |
@@ -1576,6 +1849,17 @@ A TCP listener can operate in the following modes to faciliate different kinds o
 | streamDuration | duration | Configures the total duration of stream if streaming is enabled for the listener. |
 
 
+#### TCP Events
+- `TCP Configuration Rejected`
+- `TCP Configured`
+- `TCP Connection Duration Configured`
+- `TCP Streaming Configured`
+- `TCP Expected Payload Configured`
+- `TCP Payload Validation Configured`
+- `TCP Mode Configured`
+- `TCP Connection History Cleared`
+- `New TCP Client Connection`
+- `TCP Client Connection Closed`
 
 #### TCP API Examples:
 <details>
@@ -1727,6 +2011,14 @@ This feature allows tracking request counts by headers.
 |GET      | /request/headers/track/list									  | Get list of tracked headers |
 |GET      | /request/headers/track									      | Get list of tracked headers |
 
+
+#### Request Headers Tracking Events
+- `Tracking Headers Added`
+- `Tracking Headers Removed`
+- `Tracking Headers Cleared`
+- `Tracked Header Counts Cleared`
+- `All Tracked Header Counts Cleared`
+
 #### Request Headers Tracking API Examples:
 <details>
 <summary>API Examples</summary>
@@ -1797,7 +2089,7 @@ $ curl localhost:8080/request/headers/track/counts
 <br/>
 
 # <a name="server-request-timeout"></a>
-## > Request Timeout
+## > Request Timeout Tracking
 This feature allows tracking request timeouts by headers.
 
 #### APIs
@@ -1809,7 +2101,14 @@ This feature allows tracking request timeouts by headers.
 |GET      |	/request/timeout/status                   | Get a report of tracked request timeouts so far |
 
 
-#### Request Timeout API Examples
+
+#### Request Timeout Tracking Events
+- `Timeout Tracking Headers Added`
+- `All Timeout Tracking Enabled`
+- `Timeout Tracking Headers Cleared`
+- `Timeout Tracked`
+
+#### Request Timeout Tracking API Examples
 <details>
 <summary>API Examples</summary>
 
@@ -1880,6 +2179,17 @@ Note: To configure server to respond with custom/random response payloads for sp
 |POST     |	/request/uri/counts/disable             | Disable tracking request counts for all URIs |
 |POST     |	/request/uri/counts/clear               | Clear request counts for all URIs |
 
+
+#### URIs Events
+- `URI Status Configured`
+- `URI Status Cleared`
+- `URI Delay Configured`
+- `URI Delay Cleared`
+- `URI Call Counts Cleared`
+- `URI Call Counts Enabled`
+- `URI Call Counts Disabled`
+- `URI Delay Applied`
+- `URI Status Applied`
 
 #### URI API Examples
 <details>
@@ -1979,6 +2289,12 @@ This feature allows adding bypass URIs that will not be subject to other configu
 |GET      |	/request/uri/bypass/counts?uri={uri}    | Get request counts for a given bypass URI |
 |GET      |	/request/uri/bypass/counts                | Get request counts for all bypass URIs |
 
+#### URI Bypass Events
+- `Bypass URI Added`
+- `Bypass URI Removed`
+- `Bypass Status Configured`
+- `Bypass URIs Cleared`
+
 
 #### URI Bypass API Examples
 <details>
@@ -2029,8 +2345,8 @@ This feature allows marking some URIs as `ignored` so that those don't generate 
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
-|PUT, POST| /request/uri/ignore/add?uri={uri}       | Add a ignored URI |
-|PUT, POST| /request/uri/ignore/remove?uri={uri}    | Remove a ignored URI |
+|PUT, POST| /request/uri/ignore/add?uri={uri}       | Add an ignored URI |
+|PUT, POST| /request/uri/ignore/remove?uri={uri}    | Remove an ignored URI |
 |PUT, POST| /request/uri/ignore/clear               | Remove all ignored URIs |
 |PUT, POST| /request/uri/ignore<br/>/status/set/{status:count} | Set status code to be returned for ignored URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
 |GET      |	/request/uri/ignore                     | Get list of ignored URIs |
@@ -2039,7 +2355,13 @@ This feature allows marking some URIs as `ignored` so that those don't generate 
 |GET      |	/request/uri/ignore/counts                | Get request counts for all ignored URIs |
 
 
-#### Ignore URI API Examples
+#### Ignore URIs Events
+- `Ignore URI Added`
+- `Ignore URI Removed`
+- `Ignore Status Configured`
+- `Ignore URIs Cleared`
+
+#### Ignore URIs API Examples
 <details>
 <summary>API Examples</summary>
 
@@ -2097,6 +2419,12 @@ When a delay is applied to a request, the response carries a header `Response-De
 | PUT, POST | /response/delay/clear       | Remove currently set delay |
 | GET       |	/response/delay             | Get currently set delay |
 
+
+#### Response Delay Events
+- `Delay Configured`
+- `Delay Cleared`
+- `Response Delay Applied`: generated when a configured response delay is applied to requests not explicitly asking for a delay, i.e. not generated for `/delay` API call.
+
 #### Response Delay API Examples
 <details>
 <summary>API Examples</summary>
@@ -2147,7 +2475,7 @@ curl localhost:8080/response/headers
 
 # <a name="server-response-payload"></a>
 ## > Response Payload
-This feature allows setting either a specfic custom payload to be delivered based on request match criteria, or otherwise configure serve to send random auto-generated response payloads.
+This feature allows setting either a specific custom payload to be delivered based on request match criteria, or otherwise configure serve to send random auto-generated response payloads.
 
 A payload configuration can also `capture` values from the URI/Header/Query that it matches, as described in a section below.
 
@@ -2161,7 +2489,7 @@ Custom response payload can be set for any of the following request categories:
 6. Requests matching URI + query combinations
 7. Requests matching URI + one or more keywords in request body
    
-If a request matches more than one configured responses, a response is picked based on the following priority order:
+If a request matches multiple configured responses, a response is picked based on the following priority order:
 1. URI + headers combination match 
 2. URI + query combination match
 3. URI + body keywords combination match
@@ -2224,6 +2552,12 @@ Same kind of capture can be done on query params, e.g.:
 | POST | /response/payload<br/>/set/body/contains<br/>/{keywords}?uri={uri}  | Add a custom payload to be sent for requests matching the given URI where the body contains the given keywords (comma-separated list) in the given order (second keyword in the list must appear after the first, and so on) |
 | POST | /response/payload/clear  | Clear all configured custom response payloads |
 | GET  |	/response/payload                      | Get configured custom payloads |
+
+
+#### Response Payload Events
+- `Response Payload Configured`
+- `Response Payload Cleared`
+- `Response Payload Applied`: generated when a configured response payload is applied to a request that wasn't explicitly asking for a custom payload (i.e. not for `/payload` and `/stream` URIs).
 
 #### Response Payload API Examples
 <details>
@@ -2350,6 +2684,13 @@ This feature allows setting a forced response status for all requests except byp
 | GET       |	/response/status/counts/{status}  | Get request counts for a given status |
 | GET       |	/response/status/counts           | Get request counts for all response statuses so far |
 | GET       |	/response/status                  | Get the currently configured forced response status |
+
+
+#### Response Status Events
+- `Response Status Configured`
+- `Response Status Cleared`
+- `Response Status Counts Cleared`
+
 
 #### Response Status API Examples
 <details>
@@ -2544,6 +2885,16 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
 
 <br/>
 
+#### Proxy Events
+- `Proxy Target Rejected`
+- `Proxy Target Added`
+- `Proxy Target Removed`
+- `Proxy Target Enabled`
+- `Proxy Target Disabled`
+- `Proxy Target Invoked`
+
+<br/>
+
 #### Request Proxying API Examples:
 <details>
 <summary>API Examples</summary>
@@ -2663,8 +3014,8 @@ curl localhost:8080/request/proxy/counts
 
 
 
-# <a name="trigger-features"></a>
-# Trigger Features
+# <a name="triggers-features"></a>
+# Triggers Feature
 
 `Goto` allow targets to be configured that are triggered based on response status. The triggers can be invoked manually for testing, but their real value is when they get triggered based on response status. Even more valuable when the request was proxied to another upstream service, in which case the trigger is based on the response status of the upstream service.
 
@@ -2694,6 +3045,13 @@ curl localhost:8080/request/proxy/counts
 | triggerOnResponseStatuses | []int     | List of response statuses for which this target will be triggered |
 
 
+#### Triggers Events
+- `Trigger Target Added`
+- `Trigger Target Removed`
+- `Trigger Target Enabled`
+- `Trigger Target Disabled`
+- `Trigger Target Invoked`
+
 <br/>
 
 #### Trigger API Examples:
@@ -2709,7 +3067,7 @@ curl localhost:8080/response/trigger/add --data '{
 	"url":"http://localhost:8082/response/status/clear", 
 	"headers":[["foo", "bar"],["x", "x1"],["y", "y1"]], 
 	"body": "{\"test\":\"this\"}", 
-	"sendId": true, 
+	"sendID": true, 
 	"enabled": true, 
 	"triggerOnResponseStatuses": [502, 503]
 }'
@@ -2757,6 +3115,7 @@ curl localhost:8080/response/trigger/list
 The job results can be retrieved via API from the `goto` instance, and also stored in locker on registry instance if enabled. (See `--locker` command arg)
 
 Jobs can also trigger another job for each line of output produced, as well as upon completion. For command jobs, the output produced is split by newline, and each line of output can be used as input to trigger another command job. A job can specify markers for output fields (split using specified separator), and these markers can be referenced by successor jobs. The markers from a job's output are carried over to all its successor jobs, so a job can use output from a parent job that might be several generations in the past. The triggered job's command args specifies marker references as `{foo}`, which gets replaced by the value extracted from any predecessor job's output with that marker key. This feature can be used to trigger complex chains of jobs, where each job uses output of the previous job to do something else.
+
 
 #### Jobs APIs
 |METHOD|URI|Description|
@@ -2824,6 +3183,15 @@ Jobs can also trigger another job for each line of output produced, as well as u
 | last      | bool       | whether this result is an output of the last iteration of this job run |
 | time      | time       | time when this result was produced |
 | data      | string     | Result data |
+
+
+#### Jobs Timeline Events
+- `Job Added`
+- `Jobs Removed`
+- `Jobs Cleared`
+- `Job Started`
+- `Job Finished`
+- `Job Stopped`
 
 <br/>
 
@@ -2985,7 +3353,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 2. The targets and jobs registered at the registry can also be marked for `auto-invocation`. When a worker instance receives a target/job from registry at startup that's marked for auto-invocation, it immediately invokes that target/job at startup. Additionally, the target/job is retained in the worker instance for later invocation via API as well.
 3. In addition to sending targets/jobs to worker instances at the time of registration, the registry instance also pushes targets/jobs to the worker instances as and when more targets/jobs get added to the registry. This has the added benefit of just using the registry instance as the single point of configuration, where you add targets/jobs and those get pushed to all worker instances. Removal of targets/jobs from the registry also gets pushed, so the targets/jobs get removed from the corresponding worker instances. Even targets/jobs that are pushed later can be marked for `auto-invocation`, and the worker instances that receive the target/job will invoke it immediately upon receipt.
 4. Registry provides `labeled lockers` as a flexible in-memory data store for capturing any kind of data for debugging purposes. Registry starts with a locker labeled `default`. A new locker can be opened using the `/open` API, and lockers can be closed (discarded) using the `/close` API. The most recently opened locker becomes current and captures data reported from peer instances, whereas other named lockers stay around and can be interacted with using `/store`, `/remove` and `/get` APIs. The `/find` API can find a given search phrase across all keys across all available lockers.
-5. When peer instances connect to the registry, they store their client invocation results into `peer instance` lockers under the current named locker in the registry. 
+5. If peer instances are configured to connect to a registry, they store their events and client invocation results into the current labeled locker in the registry. Registry provides APIs to get summary invocation results and a timeline of events across all peers. 
 6. Peer instances periodically re-register themselves with registry in case registry was restarted and lost all peers info. Re-registering is different from startup registration in that peers don't receive targets and jobs from registry when they remind registry about themselves, and hence no auto-invocation happens.
 7. A registry instance can be asked to clone data from another registry instance using the `/cloneFrom` API. This allows for quick bootstrapping of a new registry instance based on configuration from an existing registry instance, whether for data analysis purpose or for performing further operations. The pods cloned from the other registry are not used by this registry for any operations. Any new pods connecting to this registry using the same labels cloned from the other registry will be able to use the existing configs.
 
@@ -3033,13 +3401,29 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET       | /registry/lockers/{label}?data=y | Get given label's locker with stored data |
 | GET       | /registry/lockers | Get all lockers with stored keys but without stored data |
 | GET       | /registry/lockers?data=y | Get all lockers with stored data |
+||||
+|<a name="registry-peer-lockers-apis"></a>| ** Locker APIs ** ||
+||||
 | POST      | /registry/peers/{peer}/{address}<br/>/locker/store/{path} | Store any arbitrary value for the given `path` in the locker of the peer instance under currently active labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
 | POST      | /registry/peers/{peer}/{address}<br/>/locker/remove/{path} | Remove stored data for the given `path` from the locker of the peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
 | POST      | /registry/peers/{peer}<br/>/locker/store/{path} | Store any arbitrary value for the given key in the peer locker without associating data to a peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
 | POST      | /registry/peers/{peer}<br/>/locker/remove/{path} | Remove stored data for the given key from the peer locker under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
+| POST      | /registry/peers/{peer}/{address}<br/>/events/store | API invoked by peers to publish their events to the currently active locker. Event timeline can be retrieved from registry via various `/events` GET APIs. |
 | POST      | /registry/peers/{peer}/{address}<br/>/locker/clear | Clear the locker for the peer instance under currently active labeled locker |
 | POST      | /registry/peers/{peer}/locker/clear | Clear the locker for all instances of the given peer under currently active labeled locker |
 | POST      | /registry/peers/lockers/clear | Clear all peer lockers under currently active labeled locker |
+| POST      | /registry/peers/events/flush | Requests all peer instances to publish any pending events to registry, and clears events timeline on the peer instances. Registry still retains the peers events in the current locker. |
+| POST      | /registry/peers/events/clear | Requests all peer instances to clear their events timeline, and also removes the peers events from the current registry locker. |
+| GET       | /registry/lockers/{label}<br/>/peers/{peer}/events | Get the events timeline for all instances of a peer from the given labeled locker. Using label `current` fetches data from the current labeled locker. |
+| GET       | /registry/lockers/{label}<br/>/peers/events | Get the events timeline for all instances of all peer from the given labeled locker, grouped by peer label. |
+| GET       | /registry/lockers/{label}<br/>/peers/events/unified | Get the events timeline for all instances of all peer from the given labeled locker, merged into a single timeline by time order. |
+| GET       | /registry/peers/{peer}/events | Get the events timeline for all instances of a peer from the current locker. |
+| GET       | /registry/peers/events | Get the events timeline for all instances of all peer from the current locker, grouped by peer label. |
+| GET       | /registry/peers/events/unified | Get the events timeline for all instances of all peer from the current locker, merged into a single timeline by time order. |
+| GET       | /registry/lockers/{label}<br/>/peers/targets/results | Get target invocation summary results for all client peer instances from the given labeled locker |
+| GET       | /registry/lockers/{label}<br/>/peers/targets/results?detailed=Y | Get invocation results broken down by targets for all client peer instances from the given labeled locker |
+| GET       | /registry/peers/lockers/targets/results | Get target invocation summary results for all client peer instances from current locker |
+| GET       | /registry/peers/lockers<br/>/targets/results?detailed=Y | Get invocation results broken down by targets for all client peer instances from the current locker |
 | GET       | /registry/lockers/{label}<br/>/peers/{peer}/{address}/locker/get/{path} | Get the data stored at the given path under the peer instance's locker under the given labeled locker. Using label `current` fetches data from the current labeled locker. |
 | GET       | /registry/peers/{peer}<br/>/{address}/locker/get/{path} | Get the data stored at the given path under the peer instance's locker under the current labeled locker |
 | GET       | /registry/lockers/{label}<br/>/peers/{peer}/{address} | Get the peer instance's locker under the given labeled locker, using `...` placeholder for stored data to reduce the download size (to just fetch locker metadata). |
@@ -3054,10 +3438,6 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET       | /registry/lockers/{label}/peers?data=y | Get the lockers of all peers under the given labeled locker with all stored data included. |
 | GET       | /registry/peers/lockers | Get the lockers of all peers from currently active labeled locker, using `...` placeholder for stored data to just fetch locker metadata. |
 | GET       | /registry/peers/lockers?data=y | Get the lockers of all peers from currently active labeled locker with all stored data included. |
-| GET       | /registry/lockers/{label}<br/>/peers/targets/results | Get target invocation summary results for all client peer instances from the given labeled locker |
-| GET       | /registry/peers/lockers/targets/results | Get target invocation summary results for all client peer instances from currently active labeled locker |
-| GET       | /registry/lockers/{label}<br/>/peers/targets/results?detailed=Y | Get invocation results broken down by targets for all client peer instances from the given labeled locker |
-| GET       | /registry/peers/lockers<br/>/targets/results?detailed=Y | Get invocation results broken down by targets for all client peer instances from currently active labeled locker |
 ||||
 |<a name="registry-peers-targets-apis"></a>| ** Peer Targets APIs ** ||
 ||||
@@ -3119,6 +3499,52 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST | /registry/load | Load registry configs and locker data from json dump produced via `/dump` API. |
 
 <br/>
+
+#### Registry Timeline Events
+- `Registry: Peer Added`
+- `Registry: Peer Rejected`
+- `Registry: Peer Removed`
+- `Registry: Checked Peers Health`
+- `Registry: Cleaned Up Unhealthy Peers`
+- `Registry: Locker Opened`
+- `Registry: Locker Closed`
+- `Registry: Locker Cleared`
+- `Registry: All Lockers Cleared`
+- `Registry: Locker Data Stored`
+- `Registry: Locker Data Removed`
+- `Registry: Peer Instance Locker Cleared`
+- `Registry: Peer Locker Cleared`
+- `Registry: All Peer Lockers Cleared`
+- `Registry: Peer Events Cleared`
+- `Registry: Peer Results Cleared`
+- `Registry: Peer Target Rejected`
+- `Registry: Peer Target Added`
+- `Registry: Peer Targets Removed`
+- `Registry: Peer Targets Stopped`
+- `Registry: Peer Targets Invoked`
+- `Registry: Peer Job Rejected`
+- `Registry: Peer Job Added`
+- `Registry: Peer Jobs Removed`
+- `Registry: Peer Jobs Stopped`
+- `Registry: Peer Jobs Invoked`
+- `Registry: Peers Epochs Cleared`
+- `Registry: Peers Cleared`
+- `Registry: Peer Targets Cleared`
+- `Registry: Peer Jobs Cleared`
+- `Registry: Peer Tracking Headers Added`
+- `Registry: Peer Probe Set`
+- `Registry: Peer Probe Status Set`
+- `Registry: Peer Called`
+- `Registry: Peers Copied`
+- `Registry: Lockers Dumped`
+- `Registry: Dumped`
+- `Registry: Dump Loaded`
+- `Registry: Cloned`
+
+#### Peer Timeline Events for registry interactions
+- `Peer Registered`
+- `Peer Startup Data`
+- `Peer Deregistered`
 
 #### Peer JSON Schema 
 (to register a peer via /registry/peers/add)

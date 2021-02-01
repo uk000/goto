@@ -2,6 +2,7 @@ package tcp
 
 import (
   "fmt"
+  "goto/pkg/events"
   "goto/pkg/global"
   "goto/pkg/util"
   "math"
@@ -53,6 +54,7 @@ func validateListener(w http.ResponseWriter, r *http.Request) bool {
     msg := fmt.Sprintf("No listener for port %d", port)
     fmt.Fprintln(w, msg)
     util.AddLogMessage(msg, r)
+    events.SendRequestEvent("TCP Configuration Rejected", msg, r)
     return false
   }
   return true
@@ -68,6 +70,7 @@ func validateTCPListener(w http.ResponseWriter, r *http.Request) bool {
     msg := fmt.Sprintf("Port %d is not a TCP listener", port)
     fmt.Fprintln(w, msg)
     util.AddLogMessage(msg, r)
+    events.SendRequestEvent("TCP Configuration Rejected", msg, r)
     return false
   }
   return true
@@ -81,12 +84,14 @@ func configureTCP(w http.ResponseWriter, r *http.Request) {
     if err := util.ReadJsonPayload(r, tcpConfig); err == nil {
       if _, msg = InitTCPConfig(port, tcpConfig); msg == "" {
         msg = fmt.Sprintf("TCP configuration applied to port %d", port)
+        events.SendRequestEventJSON("TCP Configured", tcpConfig, r)
       } else {
         w.WriteHeader(http.StatusBadRequest)
       }
     } else {
       w.WriteHeader(http.StatusBadRequest)
       msg = fmt.Sprintf("Failed to parse json with error: %s", err.Error())
+      events.SendRequestEvent("TCP Configuration Rejected", msg, r)
     }
     fmt.Fprintln(w, msg)
     util.AddLogMessage(msg, r)
@@ -306,8 +311,9 @@ func setConnectionDurationConfig(w http.ResponseWriter, r *http.Request) {
       }
     } else {
       w.WriteHeader(http.StatusBadRequest)
-      msg = fmt.Sprintf("Invalid duration: %s", dur)
+      msg = fmt.Sprintf("Port [%d]: Invalid duration: %s", port, dur)
     }
+    events.SendRequestEvent("TCP Connection Duration Configured", msg, r)
     fmt.Fprintln(w, msg)
     util.AddLogMessage(msg, r)
   }
@@ -335,6 +341,7 @@ func setStreamConfig(w http.ResponseWriter, r *http.Request) {
     }
     fmt.Fprintln(w, msg)
     util.AddLogMessage(msg, r)
+    events.SendRequestEvent("TCP Streaming Configured", msg, r)
   }
 }
 
@@ -346,9 +353,10 @@ func setExpectedPayloadLength(w http.ResponseWriter, r *http.Request) {
     turnOffAllModes(tcpConfig)
     tcpConfig.ValidatePayloadLength = true
     tcpConfig.ExpectedPayload = nil
-    msg := fmt.Sprintf("Stored expected echo payload length [%d]", tcpConfig.ExpectedPayloadLength)
+    msg := fmt.Sprintf("Stored expected payload length [%d]", tcpConfig.ExpectedPayloadLength)
     fmt.Fprintln(w, msg)
     util.AddLogMessage(msg, r)
+    events.SendRequestEvent("TCP Expected Payload Configured", msg, r)
   }
 }
 
@@ -361,9 +369,10 @@ func setExpectedPayload(w http.ResponseWriter, r *http.Request) {
     turnOffAllModes(tcpConfig)
     tcpConfig.ValidatePayloadLength = true
     tcpConfig.ValidatePayloadContent = true
-    msg := fmt.Sprintf("Stored expected echo payload of length [%d]", tcpConfig.ExpectedPayloadLength)
+    msg := fmt.Sprintf("Stored expected payload content of length [%d]", tcpConfig.ExpectedPayloadLength)
     fmt.Fprintln(w, msg)
     util.AddLogMessage(msg, r)
+    events.SendRequestEvent("TCP Expected Payload Configured", msg, r)
   }
 }
 
@@ -389,6 +398,7 @@ func configurePayloadValidation(w http.ResponseWriter, r *http.Request) {
     }
     fmt.Fprintln(w, msg)
     util.AddLogMessage(msg, r)
+    events.SendRequestEvent("TCP Payload Validation Configured", msg, r)
   }
 }
 
@@ -430,6 +440,7 @@ func setModes(w http.ResponseWriter, r *http.Request) {
     }
     fmt.Fprintln(w, msg)
     util.AddLogMessage(msg, r)
+    events.SendRequestEvent("TCP Mode Configured", msg, r)
   }
 }
 
@@ -506,7 +517,7 @@ func getConnectionHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearConnectionHistory(w http.ResponseWriter, r *http.Request) {
-  msg := "Connection history cleared"
+  msg := "TCP Connection History Cleared"
   port := util.GetIntParamValue(r, "port")
   lock.Lock()
   if port > 0 {
@@ -518,6 +529,7 @@ func clearConnectionHistory(w http.ResponseWriter, r *http.Request) {
   lock.Unlock()
   fmt.Fprintln(w, msg)
   util.AddLogMessage(msg, r)
+  events.SendRequestEvent(msg, "", r)
 }
 
 func turnOffAllModes(tcpConfig *TCPConfig) {

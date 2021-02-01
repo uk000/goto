@@ -5,6 +5,7 @@ import (
   "bytes"
   "errors"
   "fmt"
+  "goto/pkg/events"
   "goto/pkg/global"
   "goto/pkg/metrics"
   "goto/pkg/util"
@@ -167,6 +168,7 @@ func ServeClientConnection(port, requestID int, conn *net.TCPConn) bool {
   connectionStatus := &ConnectionStatus{Port: port, ListenerID: tcpConfig.ListenerID, RequestID: requestID, ConnStartTime: time.Now()}
   tcpHandler := &TCPConnectionHandler{conn: conn, requestID: requestID, status: connectionStatus}
   tcpHandler.TCPConfig = *tcpConfig
+  events.SendEventJSONForPort(port, "New TCP Client Connection", tcpHandler)
   lock.Lock()
   connectionHistory[port] = append(connectionHistory[port], &ConnectionHistory{Config: &tcpHandler.TCPConfig, Status: connectionStatus})
   if activeConnections[tcpConfig.ListenerID] == nil {
@@ -297,6 +299,7 @@ func (tcp *TCPConnectionHandler) processRequest() {
   if !global.IsListenerOpen(tcp.Port) {
     log.Printf("[Listener: %s][Request: %d]: Listener is closed for port [%d]", tcp.ListenerID, tcp.requestID, tcp.Port)
   }
+  events.SendEventJSONForPort(tcp.Port, "TCP Client Connection Closed", tcp.status)
 }
 
 func (tcp *TCPConnectionHandler) doSilentLife() {
@@ -401,7 +404,7 @@ func (tcp *TCPConnectionHandler) doPayloadValidation() {
     !(bytes.Equal(receivedPayload[:tcp.ExpectedPayloadLength], tcp.expectedPayload) && tcp.readBuffer[tcp.ExpectedPayloadLength] == 0) {
     msg = fmt.Sprintf("[ERROR:CONTENT] - Payload content of length [%d] didn't match expected payload of length [%d] on port [%d]", tcp.status.TotalBytesRead, tcp.ExpectedPayloadLength, tcp.Port)
   } else {
-    msg = fmt.Sprintf("[SUCCESS]: Received pyload matches expected payload of length [%d] on port [%d]", tcp.status.TotalBytesRead, tcp.Port)
+    msg = fmt.Sprintf("[SUCCESS]: Received payload matches expected payload of length [%d] on port [%d]", tcp.status.TotalBytesRead, tcp.Port)
   }
   log.Printf("[Listener: %s][Request: %d][%s]: Sending validation result: %s.", tcp.ListenerID, tcp.requestID, PayloadValidation, msg)
   tcp.sendMessageWithDeadline(msg, PayloadValidation, false)

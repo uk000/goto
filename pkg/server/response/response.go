@@ -1,22 +1,22 @@
 package response
 
 import (
-	"net/http"
+  "net/http"
 
-	"goto/pkg/server/response/delay"
-	"goto/pkg/server/response/header"
-	"goto/pkg/server/response/payload"
-	"goto/pkg/server/response/status"
-	"goto/pkg/server/response/trigger"
-	"goto/pkg/util"
+  "goto/pkg/server/response/delay"
+  "goto/pkg/server/response/header"
+  "goto/pkg/server/response/payload"
+  "goto/pkg/server/response/status"
+  "goto/pkg/server/response/trigger"
+  "goto/pkg/util"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
 
 var (
   Handler          util.ServerHandler   = util.ServerHandler{"response", SetRoutes, Middleware}
   responseHandlers []util.ServerHandler = []util.ServerHandler{
-    header.Handler, delay.Handler, trigger.Handler, status.Handler, payload.Handler}
+    status.Handler, delay.Handler, header.Handler, payload.Handler, trigger.Handler}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {

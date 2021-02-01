@@ -4,7 +4,9 @@ import (
   "crypto/tls"
   "crypto/x509"
   "fmt"
+  "goto/pkg/events"
   "goto/pkg/global"
+  "goto/pkg/metrics"
   "goto/pkg/util"
   "io"
   "io/ioutil"
@@ -68,38 +70,49 @@ type InvocationSpec struct {
 }
 
 type InvocationStatus struct {
-  CompletedRequestCount int  `json:"completedRequestCount"`
-  StopRequested         bool `json:"stopRequested"`
-  Stopped               bool `json:"stopped"`
-  Closed                bool `json:"closed"`
-  client                *http.Client
+  CompletedReplicas int  `json:"completedReplicas"`
+  SuccessCount      int  `json:"successCount"`
+  FailureCount      int  `json:"failureCount"`
+  RetriesCount      int  `json:"retriesCount"`
+  ABCount           int  `json:"abCount"`
+  TotalRequests     int  `json:"totalRequests"`
+  StopRequested     bool `json:"stopRequested"`
+  Stopped           bool `json:"stopped"`
+  Closed            bool `json:"closed"`
+  client            *HTTPClientTracker
 }
 
 type InvocationResult struct {
-  TargetName string
-  TargetID   string
-  Status     string
-  StatusCode int
-  Retries    int
-  URL        string
-  URI        string
-  RequestID  string
-  Headers    map[string][]string
-  Body       string
+  TargetName      string
+  TargetID        string
+  Status          string
+  StatusCode      int
+  Retries         int
+  URL             string
+  URI             string
+  RequestID       string
+  Headers         map[string][]string
+  Body            string
+  RetryURL        string
+  LastRetryReason string
 }
 
 type ResultSink func(*InvocationResult)
 type ResultSinkFactory func(*InvocationTracker) ResultSink
 
 type InvocationTracker struct {
-  ID            uint32                 `json:"id"`
-  Target        *InvocationSpec        `json:"target"`
-  Status        *InvocationStatus      `json:"status"`
-  StopChannel   chan bool              `json:"-"`
-  DoneChannel   chan bool              `json:"-"`
-  ResultChannel chan *InvocationResult `json:"-"`
-  sinks         []ResultSink
-  lock          sync.RWMutex
+  ID              uint32                 `json:"id"`
+  Target          *InvocationSpec        `json:"target"`
+  Status          *InvocationStatus      `json:"status"`
+  StopChannel     chan bool              `json:"-"`
+  DoneChannel     chan bool              `json:"-"`
+  ResultChannel   chan *InvocationResult `json:"-"`
+  sinks           []ResultSink
+  lastStatusCode  int
+  lastStatusCount int
+  lastError       string
+  lastErrorCount  int
+  lock            sync.RWMutex
 }
 
 type TargetInvocations struct {
@@ -108,16 +121,17 @@ type TargetInvocations struct {
 }
 
 const (
-  maxIdleClientDuration = 120 * time.Second
+  maxIdleClientDuration    = 60 * time.Second
+  clientConnReportDuration = 5 * time.Second
 )
 
 var (
   hostLabel         string
   invocationCounter uint32
-  activeInvocations map[uint32]*InvocationTracker = map[uint32]*InvocationTracker{}
-  activeTargets     map[string]*TargetInvocations = map[string]*TargetInvocations{}
-  targetClients     map[string]*http.Client       = map[string]*http.Client{}
-  chanStopCleanup   chan bool                     = make(chan bool, 1)
+  activeInvocations = map[uint32]*InvocationTracker{}
+  activeTargets     = map[string]*TargetInvocations{}
+  targetClients     = map[string]*HTTPClientTracker{}
+  chanStopCleanup   = make(chan bool, 2)
   rootCAs           *x509.CertPool
   caCert            []byte
   invocationsLock   sync.RWMutex
@@ -310,10 +324,11 @@ func tlsConfig(target *InvocationSpec) *tls.Config {
   return cfg
 }
 
-func httpTransport(target *InvocationSpec) http.RoundTripper {
+func httpTransport(target *InvocationSpec) (http.RoundTripper, *TransportTracker) {
   var transport http.RoundTripper
+  var tracker *TransportTracker
   if target.httpVersionMajor == 1 {
-    transport = &http.Transport{
+    ht := NewHTTPTransportTracker(&http.Transport{
       MaxIdleConns:          200,
       MaxIdleConnsPerHost:   100,
       IdleConnTimeout:       target.connIdleTimeoutD,
@@ -323,12 +338,14 @@ func httpTransport(target *InvocationSpec) http.RoundTripper {
       ResponseHeaderTimeout: target.requestTimeoutD,
       DialContext: (&net.Dialer{
         Timeout:   target.connTimeoutD,
-        KeepAlive: time.Minute * 60,
+        KeepAlive: target.connIdleTimeoutD,
       }).DialContext,
       TLSHandshakeTimeout: target.connTimeoutD,
       TLSClientConfig:     tlsConfig(target),
       ForceAttemptHTTP2:   target.AutoUpgrade,
-    }
+    })
+    tracker = &ht.TransportTracker
+    transport = ht.Transport
   } else {
     tr := &http2.Transport{
       ReadIdleTimeout: target.connIdleTimeoutD,
@@ -342,17 +359,20 @@ func httpTransport(target *InvocationSpec) http.RoundTripper {
       }
       return net.Dial(network, addr)
     }
-    transport = tr
+    h2t := NewHTTP2TransportTracker(tr)
+    tracker = &h2t.TransportTracker
+    transport = h2t.Transport
   }
-  return transport
+  return transport, tracker
 }
 
-func getHttpClientForTarget(target *InvocationSpec) *http.Client {
+func getHttpClientForTarget(target *InvocationSpec) *HTTPClientTracker {
   invocationsLock.RLock()
   client := targetClients[target.Name]
   invocationsLock.RUnlock()
   if client == nil {
-    client = &http.Client{Timeout: target.requestTimeoutD, Transport: httpTransport(target)}
+    transport, tracker := httpTransport(target)
+    client = NewHTTPClientTracker(&http.Client{Timeout: target.requestTimeoutD, Transport: transport}, tracker)
     invocationsLock.Lock()
     targetClients[target.Name] = client
     invocationsLock.Unlock()
@@ -375,10 +395,16 @@ func monitorHttpClients() {
     select {
     case <-chanStopCleanup:
       return
+    case <-time.Tick(clientConnReportDuration):
+      invocationsLock.RLock()
+      for target, client := range targetClients {
+        metrics.UpdateTargetConnCount(target, client.tracker.GetOpenConnectionCount())
+      }
+      invocationsLock.RUnlock()
     case <-time.Tick(maxIdleClientDuration):
       invocationsLock.Lock()
       for target, client := range targetClients {
-        if activeTargets[target] == nil {
+        if activeTargets[target] == nil && client.tracker.GetOpenConnectionCount() > 0 {
           if watchListForRemoval[target] < 3 {
             watchListForRemoval[target]++
           } else {
@@ -386,10 +412,8 @@ func monitorHttpClients() {
             delete(targetClients, target)
             delete(watchListForRemoval, target)
           }
-        } else {
-          if watchListForRemoval[target] > 0 {
-            delete(watchListForRemoval, target)
-          }
+        } else if watchListForRemoval[target] > 0 {
+          delete(watchListForRemoval, target)
         }
       }
       invocationsLock.Unlock()
@@ -416,6 +440,7 @@ func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) *
     target.payloadBody = string(body)
     target.BodyReader = nil
   }
+  tracker.lastStatusCode = -1
   return tracker
 }
 
@@ -425,6 +450,7 @@ func RegisterInvocation(target *InvocationSpec, sinks ...ResultSinkFactory) *Inv
 
 func CloseInvocation(tracker *InvocationTracker) {
   tracker.lock.Lock()
+  defer tracker.lock.Unlock()
   if tracker.StopChannel != nil {
     close(tracker.StopChannel)
     tracker.StopChannel = nil
@@ -439,7 +465,6 @@ func CloseInvocation(tracker *InvocationTracker) {
   }
   tracker.Status.client = nil
   tracker.Status.Closed = true
-  tracker.lock.Unlock()
 }
 
 func DeregisterInvocation(tracker *InvocationTracker) {
@@ -515,18 +540,22 @@ func StopTarget(target string) {
     trackers := targetInvocations.trackers
     targetInvocations.lock.RUnlock()
     for _, tracker := range trackers {
-      tracker.lock.Lock()
       done := false
+      tracker.lock.RLock()
+      doneChannel := tracker.DoneChannel
+      stopChannel := tracker.StopChannel
+      stopRequested := tracker.Status.StopRequested
+      stopped := tracker.Status.Stopped
+      tracker.lock.RUnlock()
       select {
-      case done = <-tracker.DoneChannel:
+      case done = <-doneChannel:
       default:
       }
       if !done {
-        if !tracker.Status.StopRequested && !tracker.Status.Stopped {
-          tracker.StopChannel <- true
+        if !stopRequested && !stopped {
+          stopChannel <- true
         }
       }
-      tracker.lock.Unlock()
     }
   }
 }
@@ -555,16 +584,16 @@ func processStopRequest(tracker *InvocationTracker) bool {
   stopChannel := tracker.StopChannel
   tracker.lock.RUnlock()
   if stopChannel != nil {
-    tracker.lock.Lock()
+    stopRequested := false
     select {
-    case tracker.Status.StopRequested = <-stopChannel:
+    case stopRequested = <-stopChannel:
     default:
     }
-    stopRequested := tracker.Status.StopRequested
-    stopped := tracker.Status.Stopped
-    tracker.lock.Unlock()
-
     if stopRequested {
+      tracker.lock.Lock()
+      tracker.Status.StopRequested = true
+      stopped := tracker.Status.Stopped
+      tracker.lock.Unlock()
       if stopped {
         if global.EnableInvocationLogs {
           log.Printf("[%s]: Invocation[%d]: Received stop request for target = %s that is already stopped\n", hostLabel, tracker.ID, tracker.Target.Name)
@@ -573,7 +602,7 @@ func processStopRequest(tracker *InvocationTracker) bool {
       } else {
         tracker.lock.Lock()
         tracker.Status.Stopped = true
-        remaining := (tracker.Target.RequestCount * tracker.Target.Replicas) - (tracker.Status.CompletedRequestCount * tracker.Target.Replicas)
+        remaining := (tracker.Target.RequestCount * tracker.Target.Replicas) - tracker.Status.CompletedReplicas
         tracker.lock.Unlock()
         if global.EnableInvocationLogs {
           log.Printf("[%s]: Invocation[%d]: Received stop request for target = %s with remaining requests %d\n", hostLabel, tracker.ID, tracker.Target.Name, remaining)
@@ -633,6 +662,7 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
   extractTargetHost(target)
   completedCount := 0
   time.Sleep(target.initialDelayD)
+  events.SendEventJSON("Invocation Started", target)
   if global.EnableInvocationLogs {
     log.Printf("[%s]: Invocation[%d]: Started with target %s and total requests %d\n", hostLabel, trackerID, target.Name, (target.Replicas * target.RequestCount))
   }
@@ -649,7 +679,7 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
     }
     wg := &sync.WaitGroup{}
     for i := 0; i < target.Replicas; i++ {
-      callCounter := (completedCount * target.Replicas) + i + 1
+      callCounter := completedCount + i + 1
       targetID := target.Name + "[" + strconv.Itoa(i+1) + "]" + "[" + strconv.Itoa(callCounter) + "]"
       if target.Body != "" && target.autoPayloadSize <= 0 {
         target.payloadBody = target.Body
@@ -658,23 +688,27 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
         target.BodyReader = nil
       }
       wg.Add(1)
-      go invokeTarget(trackerID, targetID, target, httpClient, sinks, resultChannel, wg)
+      go invokeTarget(tracker, targetID, target, httpClient, sinks, resultChannel, wg)
     }
     wg.Wait()
     delay := 10 * time.Millisecond
     if target.delayD > delay {
       delay = target.delayD
     }
-    completedCount++
+    completedCount += target.Replicas
     tracker.lock.Lock()
-    tracker.Status.CompletedRequestCount = completedCount
+    tracker.Status.CompletedReplicas = completedCount
     tracker.lock.Unlock()
-    if completedCount < target.RequestCount {
+    if completedCount < (target.RequestCount * target.Replicas) {
       time.Sleep(delay)
     } else {
       break
     }
   }
+  tracker.lock.Lock()
+  unsafeReportRepeatedResponse(tracker)
+  tracker.lock.Unlock()
+
   if doneChannel != nil {
     doneChannel <- true
   }
@@ -685,6 +719,7 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
     }
   }
   DeregisterInvocation(tracker)
+  events.SendEventJSON("Invocation Finished", map[string]interface{}{"target": target.Name, "status": tracker.Status})
   if global.EnableInvocationLogs {
     log.Printf("[%s]: Invocation[%d]: Finished\n", hostLabel, trackerID)
   }
@@ -707,7 +742,7 @@ func newClientRequest(method string, url string, headers [][]string, body io.Rea
 }
 
 func doInvoke(index uint32, targetID string, target *InvocationSpec,
-  client *http.Client, result *InvocationResult) (*http.Response, error) {
+  client *HTTPClientTracker, result *InvocationResult, tracker *InvocationTracker) (*http.Response, error) {
   headers := target.Headers
   headers = append(headers, []string{"TargetID", targetID})
   if global.EnableInvocationLogs {
@@ -729,6 +764,10 @@ func doInvoke(index uint32, targetID string, target *InvocationSpec,
         result.Retries++
         time.Sleep(target.retryDelayD)
       }
+      tracker.lock.Lock()
+      tracker.Status.TotalRequests++
+      metrics.UpdateTargetRequestCount(tracker.Target.Name)
+      tracker.lock.Unlock()
       resp, reqError = client.Do(req)
       retry := reqError != nil
       if !retry && target.RetriableStatusCodes != nil {
@@ -748,17 +787,23 @@ func doInvoke(index uint32, targetID string, target *InvocationSpec,
         if reason == "" {
           reason = resp.Status
         }
-        log.Printf("[%s]: Invocation[%d]: Target [%s] url [%s] invocation requires retry due to [%s]. Retries left [%d]. \n",
-          hostLabel, index, targetID, result.URL, reason, target.Retries-i)
         if target.Fallback && len(target.BURLS) > i {
-          result.URL, result.RequestID = prepareTargetURL(target.BURLS[i], target.SendID, originalRequestId+"-"+strconv.Itoa(i+1))
-          if req2, err := newClientRequest(target.Method, result.URL, headers, strings.NewReader(target.payloadBody)); err == nil {
+          newURL, newRequestID := prepareTargetURL(target.BURLS[i], target.SendID, originalRequestId+"-"+strconv.Itoa(i+1))
+          if req2, err := newClientRequest(target.Method, newURL, headers, strings.NewReader(target.payloadBody)); err == nil {
             req = req2
+            result.RetryURL = newURL
+            result.RequestID = newRequestID
           } else {
-            log.Printf("[%s]: Invocation[%d]: Target [%s] failed to create request for fallback url [%s]. Continuing with retry to original url [%s] \n",
-              hostLabel, index, targetID, target.BURLS[i], target.URL)
+            log.Printf("[%s]: Invocation[%d]: Target [%s] failed to create request for fallback url [%s]. Continuing with retry to previous url [%s] \n",
+              hostLabel, index, targetID, target.BURLS[i], result.URL)
           }
         }
+        result.LastRetryReason = reason
+        log.Printf("[%s]: Invocation[%d]: Target [%s] url [%s] invocation requires retry due to [%s]. Retries left [%d].",
+          hostLabel, index, targetID, result.URL, reason, target.Retries-i)
+        tracker.lock.Lock()
+        tracker.Status.RetriesCount++
+        tracker.lock.Unlock()
       }
     }
     return resp, reqError
@@ -767,7 +812,25 @@ func doInvoke(index uint32, targetID string, target *InvocationSpec,
   }
 }
 
-func doProcessResponse(index uint32, targetID string, target *InvocationSpec, resp *http.Response, result *InvocationResult) {
+func unsafeReportRepeatedResponse(tracker *InvocationTracker) {
+  target := tracker.Target
+  if tracker.lastStatusCount > 1 {
+    msg := fmt.Sprintf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Response Status [%d] Repeated x[%d]",
+      hostLabel, tracker.ID, target.Name, target.URL, target.BURLS, tracker.lastStatusCode, tracker.lastStatusCount)
+    events.SendEvent("Invocation Repeated Response Status", msg)
+    tracker.lastStatusCount = 0
+    tracker.lastStatusCode = -1
+  }
+  if tracker.lastErrorCount > 1 {
+    msg := fmt.Sprintf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Failiure [%s] Repeated x[%d]",
+      hostLabel, tracker.ID, target.Name, target.URL, target.BURLS, tracker.lastError, tracker.lastErrorCount)
+    events.SendEvent("Invocation Repeated Failure", msg)
+    tracker.lastErrorCount = 0
+    tracker.lastError = ""
+  }
+}
+
+func doProcessResponse(index uint32, targetID string, resp *http.Response, result *InvocationResult, tracker *InvocationTracker) {
   defer resp.Body.Close()
   for header, values := range resp.Header {
     result.Headers[header] = values
@@ -775,6 +838,25 @@ func doProcessResponse(index uint32, targetID string, target *InvocationSpec, re
   result.Headers["Status"] = []string{resp.Status}
   result.Status = resp.Status
   result.StatusCode = resp.StatusCode
+
+  tracker.lock.Lock()
+  target := tracker.Target
+  isRepeatStatus := tracker.lastStatusCode == result.StatusCode
+  if !isRepeatStatus && tracker.lastStatusCount > 1 || tracker.lastErrorCount > 1 {
+    unsafeReportRepeatedResponse(tracker)
+    tracker.lastStatusCode = -1
+  }
+  if tracker.lastStatusCode >= 0 && isRepeatStatus {
+    tracker.lastStatusCount++
+  } else {
+    tracker.lastStatusCount = 1
+    tracker.lastStatusCode = result.StatusCode
+  }
+  tracker.lastError = ""
+  tracker.lastErrorCount = 0
+  tracker.Status.SuccessCount++
+  tracker.lock.Unlock()
+
   var responseLength int64
   if target.CollectResponse {
     result.Body = util.Read(resp.Body)
@@ -788,8 +870,20 @@ func doProcessResponse(index uint32, targetID string, target *InvocationSpec, re
       headerLogs = append(headerLogs, header+":["+strings.Join(values, ",")+"]")
     }
     headerLog := strings.Join(headerLogs, ",")
-    log.Printf("[%s]: Invocation[%d]: Target %s Response Status: %s, URL: [%s], Headers: [%s], Payload Length: [%d]",
-      hostLabel, index, targetID, resp.Status, result.URL, headerLog, responseLength)
+    url := result.URL
+    if result.RetryURL != "" {
+      url = result.RetryURL
+    }
+    msg := fmt.Sprintf("[%s]: Invocation[%d]: Target %s Response Status: %s, URL: [%s], Headers: [%s], Payload Length: [%d]",
+      hostLabel, index, targetID, resp.Status, url, headerLog, responseLength)
+    log.Println(msg)
+
+    tracker.lock.Lock()
+    if !isRepeatStatus {
+      events.SendEvent("Invocation Response Status", fmt.Sprintf("[%s]: Invocation[%d]: Target %s Response Status: %s, URL: [%s], Payload Length: [%d]",
+        hostLabel, index, targetID, resp.Status, url, responseLength))
+    }
+    tracker.lock.Unlock()
   }
 }
 
@@ -806,44 +900,66 @@ func publishResult(index uint32, targetID string, result *InvocationResult, sink
   }
 }
 
-func processError(index uint32, targetID string, result *InvocationResult, err error) {
-  log.Printf("[%s]: Invocation[%d]: Target %s, url [%s] failed to invoke with error: %s\n",
-    hostLabel, index, targetID, result.URL, err.Error())
+func processError(index uint32, targetID string, result *InvocationResult, err error, tracker *InvocationTracker) {
+  tracker.lock.Lock()
+  if tracker.lastStatusCount > 0 {
+    unsafeReportRepeatedResponse(tracker)
+  }
+  msg := fmt.Sprintf("[%s]: Invocation[%d]: Target %s, url [%s] failed to invoke with error: %s, repeat count: [%d]",
+    hostLabel, index, targetID, result.URL, err.Error(), tracker.lastErrorCount)
+  if tracker.lastErrorCount == 0 {
+    events.SendEvent("Invocation Failure", msg)
+  }
+  tracker.lastError = err.Error()
+  tracker.lastErrorCount++
+  tracker.lastStatusCode = 0
+  tracker.lastStatusCount = 0
+  tracker.Status.FailureCount++
+  metrics.UpdateTargetFailureCount(tracker.Target.Name)
+  tracker.lock.Unlock()
   result.Status = err.Error()
+  log.Println(msg)
 }
 
-func handleABCall(index uint32, targetID string, target *InvocationSpec, aRequestId string, client *http.Client,
-  sinks []ResultSink, resultChannel chan *InvocationResult) {
+func handleABCall(index uint32, targetID string, target *InvocationSpec, aRequestId string, client *HTTPClientTracker,
+  sinks []ResultSink, resultChannel chan *InvocationResult, tracker *InvocationTracker) {
   for i, burl := range target.BURLS {
     result := &InvocationResult{}
     result.TargetName = target.Name
     result.Headers = map[string][]string{}
     result.URL = burl
     result.RequestID = aRequestId + "-B-" + strconv.Itoa(i+1)
-    if resp, err := doInvoke(index, targetID, target, client, result); err == nil {
-      doProcessResponse(index, targetID, target, resp, result)
+    if resp, err := doInvoke(index, targetID, target, client, result, tracker); err == nil {
+      doProcessResponse(index, targetID, resp, result, tracker)
     } else {
-      processError(index, targetID, result, err)
+      processError(index, targetID, result, err, tracker)
     }
     publishResult(index, targetID, result, sinks, resultChannel)
+    tracker.lock.Lock()
+    tracker.Status.ABCount++
+    tracker.lock.Unlock()
+
   }
 }
 
-func invokeTarget(index uint32, targetID string, target *InvocationSpec, client *http.Client,
+func invokeTarget(tracker *InvocationTracker, targetID string, target *InvocationSpec, client *HTTPClientTracker,
   sinks []ResultSink, resultChannel chan *InvocationResult, wg *sync.WaitGroup) {
+  tracker.lock.RLock()
+  trackerID := tracker.ID
+  tracker.lock.RUnlock()
   result := &InvocationResult{}
   result.TargetName = target.Name
   result.TargetID = targetID
   result.URL = target.URL
   result.Headers = map[string][]string{}
-  if resp, err := doInvoke(index, targetID, target, client, result); err == nil {
-    doProcessResponse(index, targetID, target, resp, result)
+  if resp, err := doInvoke(trackerID, targetID, target, client, result, tracker); err == nil {
+    doProcessResponse(trackerID, targetID, resp, result, tracker)
     if target.ABMode {
-      handleABCall(index, targetID, target, result.RequestID, client, sinks, resultChannel)
+      handleABCall(trackerID, targetID, target, result.RequestID, client, sinks, resultChannel, tracker)
     }
   } else {
-    processError(index, targetID, result, err)
+    processError(trackerID, targetID, result, err, tracker)
   }
-  publishResult(index, targetID, result, sinks, resultChannel)
+  publishResult(trackerID, targetID, result, sinks, resultChannel)
   wg.Done()
 }

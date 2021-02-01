@@ -6,6 +6,7 @@ import (
   "strconv"
   "sync"
 
+  "goto/pkg/events"
   "goto/pkg/metrics"
   "goto/pkg/server/intercept"
   "goto/pkg/server/request/uri"
@@ -69,13 +70,16 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if portStatus.alwaysReportStatusCount > 0 {
     msg = fmt.Sprintf("Will respond with forced status: %d times %d", portStatus.alwaysReportStatus, portStatus.alwaysReportStatusCount)
+    events.SendRequestEvent("Response Status Configured", msg, r)
   } else if portStatus.alwaysReportStatusCount == 0 {
     msg = fmt.Sprintf("Will respond with forced status: %d forever", portStatus.alwaysReportStatus)
+    events.SendRequestEvent("Response Status Configured", msg, r)
   } else {
     msg = fmt.Sprintf("Will respond normally")
+    events.SendRequestEvent("Response Status Cleared", msg, r)
   }
   util.AddLogMessage(msg, r)
-  w.WriteHeader(http.StatusAccepted)
+  w.WriteHeader(http.StatusOK)
   fmt.Fprintln(w, msg)
 }
 
@@ -164,9 +168,11 @@ func clearStatusCounts(w http.ResponseWriter, r *http.Request) {
   defer statusLock.Unlock()
   portStatus.countsByRequestedStatus = map[int]int{}
   portStatus.countsByResponseStatus = map[int]int{}
-  util.AddLogMessage("Clearing status counts", r)
-  w.WriteHeader(http.StatusAccepted)
-  fmt.Fprintln(w, "Status counts cleared")
+  msg := "Response Status Counts Cleared"
+  util.AddLogMessage(msg, r)
+  w.WriteHeader(http.StatusOK)
+  fmt.Fprintln(w, msg)
+  events.SendRequestEvent(msg, "", r)
 }
 
 func IncrementStatusCount(statusCode int, r *http.Request) {
@@ -189,10 +195,12 @@ func Middleware(next http.Handler) http.Handler {
       next.ServeHTTP(crw, r)
     }
     if !util.IsAdminRequest(r) {
+      ps := getOrCreatePortStatus(r)
       crw.StatusCode = computeResponseStatus(crw.StatusCode, r)
       if crw.StatusCode > 0 && !uri.HasURIStatus(r) {
         IncrementStatusCount(crw.StatusCode, r)
-        util.AddLogMessage(fmt.Sprintf("Reporting status: [%d]", crw.StatusCode), r)
+        msg := fmt.Sprintf("Reporting status: [%d] for URI [%s]. Remaining status count [%d].", crw.StatusCode, r.RequestURI, ps.alwaysReportStatusCount)
+        util.AddLogMessage(msg, r)
         trigger.RunTriggers(r, crw, crw.StatusCode)
       }
     } else {

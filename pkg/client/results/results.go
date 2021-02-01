@@ -1,17 +1,15 @@
 package results
 
 import (
-	"fmt"
-	"goto/pkg/constants"
-	"goto/pkg/global"
-	"goto/pkg/invocation"
-	"goto/pkg/util"
-	"log"
-	"net"
-	"net/http"
-	"strings"
-	"sync"
-	"time"
+  "fmt"
+  "goto/pkg/constants"
+  "goto/pkg/global"
+  "goto/pkg/invocation"
+  "goto/pkg/util"
+  "log"
+  "strings"
+  "sync"
+  "time"
 )
 
 type CountInfo struct {
@@ -83,14 +81,14 @@ type InvocationsResults struct {
 }
 
 var (
-  targetsResults               *TargetsResults         = &TargetsResults{}
-  invocationsResults           *InvocationsResults     = &InvocationsResults{}
-  chanSendTargetsToRegistry    chan *TargetResults     = make(chan *TargetResults, 200)
-  chanSendInvocationToRegistry chan *InvocationResults = make(chan *InvocationResults, 200)
-  chanLockInvocationInRegistry chan uint32             = make(chan uint32, 100)
-  stopRegistrySender           chan bool               = make(chan bool, 10)
+  targetsResults               = &TargetsResults{}
+  invocationsResults           = &InvocationsResults{}
+  chanSendTargetsToRegistry    = make(chan *TargetResults, 200)
+  chanSendInvocationToRegistry = make(chan *InvocationResults, 200)
+  chanLockInvocationInRegistry = make(chan uint32, 100)
+  stopRegistrySender           = make(chan bool, 10)
+  registryClient               = util.CreateHttpClient()
   sendingToRegistry            bool
-  registryClient               *http.Client
   registrySendLock             sync.Mutex
   collectTargetsResults        bool = true
   collectAllTargetsResults     bool = false
@@ -616,19 +614,6 @@ func (tsr *TargetsSummaryResults) Init() {
   tsr.TargetHeaderCounts = map[string]map[string]*HeaderCounts{}
 }
 
-func initRegistryHttpClient() {
-  tr := &http.Transport{
-    MaxIdleConns: 1,
-    Proxy:        http.ProxyFromEnvironment,
-    DialContext: (&net.Dialer{
-      Timeout:   10 * time.Second,
-      KeepAlive: time.Minute,
-    }).DialContext,
-    TLSHandshakeTimeout: 10 * time.Second,
-  }
-  registryClient = &http.Client{Transport: tr}
-}
-
 func lockInvocationRegistryLocker(invocationIndex uint32) {
   if global.UseLocker && global.RegistryURL != "" {
     url := fmt.Sprintf("%s/registry/peers/%s/%s/locker/lock/%s_%d", global.RegistryURL,
@@ -689,7 +674,6 @@ func startRegistrySender() {
   registrySendLock.Lock()
   defer registrySendLock.Unlock()
   if !sendingToRegistry {
-    initRegistryHttpClient()
     sendingToRegistry = true
     for i := 1; i < 10; i++ {
       go registrySender(i)
