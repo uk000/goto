@@ -13,51 +13,62 @@ import (
   "goto/pkg/server/intercept"
   "goto/pkg/server/request/uri/bypass"
   "goto/pkg/server/request/uri/ignore"
+  "goto/pkg/server/response/trigger"
   "goto/pkg/util"
 
   "github.com/gorilla/mux"
 )
 
 type DelayConfig struct {
-  delay time.Duration
-  times int
+  URI   string
+  Glob  bool
+  Delay time.Duration
+  Times int
+}
+
+type URIStatusConfig struct {
+  URI    string
+  Glob   bool
+  Status int
+  Times  int
 }
 
 var (
   Handler            util.ServerHandler = util.ServerHandler{"uri", SetRoutes, Middleware}
   internalHandler    util.ServerHandler = util.ServerHandler{Name: "uri", Middleware: middleware}
   uriCountsByPort    map[string]map[string]int
-  uriStatusByPort    map[string]map[string][]int
-  uriDelayByPort     map[string]map[string]*DelayConfig
+  uriStatusByPort    map[string]map[string]interface{}
+  uriDelayByPort     map[string]map[string]interface{}
   trackURICallCounts bool
   uriLock            sync.RWMutex
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  uriRouter := r.PathPrefix("/uri").Subrouter()
+  uriRouter := util.PathRouter(r, "/uri")
   bypass.SetRoutes(uriRouter, parent, root)
   ignore.SetRoutes(uriRouter, parent, root)
-  util.AddRouteMultiQ(uriRouter, "/status/set", setStatus, "POST", "uri", "{uri}", "status", "{status}")
-  util.AddRouteMultiQ(uriRouter, "/delay/set", setDelay, "POST", "uri", "{uri}", "delay", "{delay}")
-  util.AddRoute(uriRouter, "/counts/enable", enableURICallCounts, "POST")
-  util.AddRoute(uriRouter, "/counts/disable", disableURICallCounts, "POST")
-  util.AddRoute(uriRouter, "/counts", getURICallCounts, "GET")
-  util.AddRoute(uriRouter, "/counts/clear", clearURICallCounts, "POST")
+  util.AddRouteQWithPort(uriRouter, "/set/status={status}", setStatus, "uri", "{uri}", "POST")
+  util.AddRouteQWithPort(uriRouter, "/set/delay={delay}", setDelay, "uri", "{uri}", "POST")
+  util.AddRouteWithPort(uriRouter, "/counts/enable", enableURICallCounts, "POST")
+  util.AddRouteWithPort(uriRouter, "/counts/disable", disableURICallCounts, "POST")
+  util.AddRouteWithPort(uriRouter, "/counts", getURICallCounts, "GET")
+  util.AddRouteWithPort(uriRouter, "/counts/clear", clearURICallCounts, "POST")
+  util.AddRouteWithPort(uriRouter, "", getURIConfigs, "GET")
 }
 
 func initPort(r *http.Request) string {
-  port := util.GetListenerPort(r)
+  port := util.GetRequestOrListenerPort(r)
   uriLock.Lock()
   defer uriLock.Unlock()
   if uriCountsByPort == nil {
     uriCountsByPort = map[string]map[string]int{}
-    uriStatusByPort = map[string]map[string][]int{}
-    uriDelayByPort = map[string]map[string]*DelayConfig{}
+    uriStatusByPort = map[string]map[string]interface{}{}
+    uriDelayByPort = map[string]map[string]interface{}{}
   }
   if uriCountsByPort[port] == nil {
     uriCountsByPort[port] = map[string]int{}
-    uriStatusByPort[port] = map[string][]int{}
-    uriDelayByPort[port] = map[string]*DelayConfig{}
+    uriStatusByPort[port] = map[string]interface{}{}
+    uriDelayByPort[port] = map[string]interface{}{}
   }
   return port
 }
@@ -69,18 +80,24 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
   defer uriLock.Unlock()
   if uri, present := util.GetStringParam(r, "uri"); present {
     uri = strings.ToLower(uri)
+    glob := false
+    matchURI := uri
+    if strings.HasSuffix(uri, "*") {
+      matchURI = strings.ReplaceAll(uri, "*", "")
+      glob = true
+    }
     if statusCode, times, statusCodePresent := util.GetStatusParam(r); statusCodePresent && statusCode > 0 {
-      uriStatusByPort[port][uri] = []int{statusCode, times}
+      uriStatusByPort[port][matchURI] = &URIStatusConfig{URI: matchURI, Glob: glob, Status: statusCode, Times: times}
       if times > 0 {
-        msg = fmt.Sprintf("URI %s status set to %d for next %d calls", uri, statusCode, times)
+        msg = fmt.Sprintf("Port [%s] URI [%s] status set to [%d] for next [%d] calls", port, uri, statusCode, times)
         events.SendRequestEvent("URI Status Configured", msg, r)
       } else {
-        msg = fmt.Sprintf("URI %s status set to %d forever", uri, statusCode)
+        msg = fmt.Sprintf("Port [%s] URI [%s] status set to [%d] forever", port, uri, statusCode)
         events.SendRequestEvent("URI Status Configured", msg, r)
       }
     } else {
-      delete(uriStatusByPort[port], uri)
-      msg = fmt.Sprintf("URI %s status cleared", uri)
+      delete(uriStatusByPort[port], matchURI)
+      msg = fmt.Sprintf("Port [%s] URI [%s] status cleared", port, uri)
       events.SendRequestEvent("URI Status Cleared", msg, r)
     }
     w.WriteHeader(http.StatusOK)
@@ -112,18 +129,24 @@ func setDelay(w http.ResponseWriter, r *http.Request) {
         }
       }
     }
+    glob := false
+    matchURI := uri
+    if strings.HasSuffix(uri, "*") {
+      matchURI = strings.ReplaceAll(uri, "*", "")
+      glob = true
+    }
     if delay > 0 {
-      uriDelayByPort[port][uri] = &DelayConfig{delay, times}
+      uriDelayByPort[port][matchURI] = &DelayConfig{URI: matchURI, Glob: glob, Delay: delay, Times: times}
       if times > 0 {
-        msg = fmt.Sprintf("Will delay next %d requests for URI %s by %s", times, uri, delay)
+        msg = fmt.Sprintf("Port [%s] will delay next [%d] requests for URI [%s] by [%s]", port, times, uri, delay)
         events.SendRequestEvent("URI Delay Configured", msg, r)
       } else {
-        msg = fmt.Sprintf("Will delay all requests for URI %s by %s forever", uri, delay)
+        msg = fmt.Sprintf("Port [%s] will delay all requests for URI [%s] by [%s] forever", port, uri, delay)
         events.SendRequestEvent("URI Delay Configured", msg, r)
       }
     } else {
-      delete(uriDelayByPort[port], uri)
-      msg = fmt.Sprintf("URI %s delay cleared", uri)
+      delete(uriDelayByPort[port], matchURI)
+      msg = fmt.Sprintf("Port [%s] URI [%s] delay cleared", port, uri)
       events.SendRequestEvent("URI Delay Cleared", msg, r)
     }
     w.WriteHeader(http.StatusOK)
@@ -135,53 +158,110 @@ func setDelay(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
-func getURICallCounts(w http.ResponseWriter, r *http.Request) {
-  initPort(r)
+func getURIConfigs(w http.ResponseWriter, r *http.Request) {
+  port := initPort(r)
   uriLock.RLock()
   defer uriLock.RUnlock()
-  w.WriteHeader(http.StatusOK)
-  result := util.ToJSON(uriCountsByPort[util.GetListenerPort(r)])
-  util.AddLogMessage(fmt.Sprintf("Reporting URI Call Counts: %s", result), r)
+  result := util.ToJSON(map[string]interface{}{
+    "uriDelayByPort":  uriDelayByPort[port],
+    "uriStatusByPort": uriStatusByPort[port],
+    "uriCountsByPort": uriCountsByPort[port],
+  })
+  util.AddLogMessage(fmt.Sprintf("Port [%s] Reporting URI Configs: %s", port, result), r)
+  fmt.Fprintf(w, "%s\n", result)
+}
+
+func getURICallCounts(w http.ResponseWriter, r *http.Request) {
+  port := initPort(r)
+  uriLock.RLock()
+  defer uriLock.RUnlock()
+  result := util.ToJSON(uriCountsByPort[port])
+  util.AddLogMessage(fmt.Sprintf("Port [%s] Reporting URI Call Counts: %s", port, result), r)
   fmt.Fprintf(w, "%s\n", result)
 }
 
 func clearURICallCounts(w http.ResponseWriter, r *http.Request) {
-  initPort(r)
+  port := initPort(r)
   uriLock.Lock()
   defer uriLock.Unlock()
-  uriCountsByPort[util.GetListenerPort(r)] = map[string]int{}
-  msg := "URI Call Counts Cleared"
+  uriCountsByPort[port] = map[string]int{}
+  msg := fmt.Sprintf("Port [%s] URI Call Counts Cleared", port)
   fmt.Fprintln(w, msg)
   util.AddLogMessage(msg, r)
-  events.SendRequestEvent(msg, "", r)
+  events.SendRequestEvent("URI Call Counts Cleared", msg, r)
 }
 
 func enableURICallCounts(w http.ResponseWriter, r *http.Request) {
   uriLock.Lock()
   trackURICallCounts = true
   uriLock.Unlock()
-  msg := "URI Call Counts Enabled"
+  msg := fmt.Sprintf("Port [%s] URI Call Counts Enabled", util.GetRequestOrListenerPort(r))
   fmt.Fprintln(w, msg)
   util.AddLogMessage(msg, r)
-  events.SendRequestEvent(msg, "", r)
+  events.SendRequestEvent("URI Call Counts Enabled", msg, r)
 }
 
 func disableURICallCounts(w http.ResponseWriter, r *http.Request) {
   uriLock.Lock()
   trackURICallCounts = false
   uriLock.Unlock()
-  msg := "URI Call Counts Disabled"
+  msg := fmt.Sprintf("Port [%s] URI Call Counts Disabled", util.GetRequestOrListenerPort(r))
   fmt.Fprintln(w, msg)
   util.AddLogMessage(msg, r)
-  events.SendRequestEvent(msg, "", r)
+  events.SendRequestEvent("URI Call Counts Disabled", msg, r)
 }
 
-func HasURIStatus(r *http.Request) bool {
+func hasURIConfig(r *http.Request, uriMap map[string]map[string]interface{}) (bool, bool, interface{}) {
   port := initPort(r)
   uri := strings.ToLower(r.URL.Path)
   uriLock.RLock()
   defer uriLock.RUnlock()
-  return uriStatusByPort[port][uri] != nil && uriStatusByPort[port][uri][0] > 0 && uriStatusByPort[port][uri][1] >= 0
+  portURIMap := uriMap[port]
+  if portURIMap == nil {
+    return false, false, nil
+  }
+  if uriConfig, present := portURIMap[uri]; present {
+    return true, false, uriConfig
+  }
+  var uriConfig interface{}
+  for k, v := range portURIMap {
+    if strings.HasPrefix(uri, k) {
+      uriConfig = v
+      break
+    }
+  }
+  if uriConfig != nil {
+    return true, true, uriConfig
+  }
+  return false, false, nil
+}
+
+func HasURIStatus(r *http.Request) bool {
+  if present, glob, v := hasURIConfig(r, uriStatusByPort); present {
+    uriStatus := v.(*URIStatusConfig)
+    return uriStatus.Status > 0 && uriStatus.Times >= 0 && (!glob || uriStatus.Glob)
+  }
+  return false
+}
+
+func GetURIStatus(r *http.Request) *URIStatusConfig {
+  if present, glob, v := hasURIConfig(r, uriStatusByPort); present {
+    uriStatus := v.(*URIStatusConfig)
+    if uriStatus.Status > 0 && uriStatus.Times >= 0 && (!glob || uriStatus.Glob) {
+      return uriStatus
+    }
+  }
+  return nil
+}
+
+func GetURIDelay(r *http.Request) *DelayConfig {
+  if present, glob, v := hasURIConfig(r, uriDelayByPort); present {
+    delayConfig := v.(*DelayConfig)
+    if delayConfig.Delay > 0 && delayConfig.Times >= 0 && (!glob || delayConfig.Glob) {
+      return delayConfig
+    }
+  }
+  return nil
 }
 
 func middleware(next http.Handler) http.Handler {
@@ -196,18 +276,19 @@ func middleware(next http.Handler) http.Handler {
     port := initPort(r)
     uri := strings.ToLower(r.URL.Path)
     statusToReport := 0
-    hasURIStatus := HasURIStatus(r)
+    uriStatus := GetURIStatus(r)
+    uriDelay := GetURIDelay(r)
     var delay time.Duration = 0
     delayTimesLeft := 0
     statusTimesLeft := 0
     uriLock.RLock()
-    if hasURIStatus {
-      statusToReport = uriStatusByPort[port][uri][0]
-      statusTimesLeft = uriStatusByPort[port][uri][1]
+    if uriStatus != nil {
+      statusToReport = uriStatus.Status
+      statusTimesLeft = uriStatus.Times
     }
-    if uriDelayByPort[port][uri] != nil && uriDelayByPort[port][uri].delay > 0 {
-      delay = uriDelayByPort[port][uri].delay
-      delayTimesLeft = uriDelayByPort[port][uri].times
+    if uriDelay != nil {
+      delay = uriDelay.Delay
+      delayTimesLeft = uriDelay.Times
     }
     uriLock.RUnlock()
     if trackURICallCounts {
@@ -218,17 +299,17 @@ func middleware(next http.Handler) http.Handler {
     }
     if delay > 0 {
       uriLock.Lock()
-      if uriDelayByPort[port][uri].times >= 1 {
-        uriDelayByPort[port][uri].times--
-        if uriDelayByPort[port][uri].times == 0 {
-          delete(uriDelayByPort[port], uri)
+      if uriDelay.Times >= 1 {
+        uriDelay.Times--
+        if uriDelay.Times == 0 {
+          delete(uriDelayByPort[port], uriDelay.URI)
         }
       }
       uriLock.Unlock()
       msg := fmt.Sprintf("Delaying URI [%s] by [%s]. Remaining delay count [%d]", uri, delay, delayTimesLeft-1)
       util.AddLogMessage(msg, r)
       events.SendRequestEvent("URI Delay Applied", msg, r)
-      w.Header().Add("Response-Delay", delay.String())
+      w.Header().Add("Goto-Response-Delay", delay.String())
       time.Sleep(delay)
     }
     crw := intercept.NewInterceptResponseWriter(w, true)
@@ -237,20 +318,27 @@ func middleware(next http.Handler) http.Handler {
     }
     if statusToReport > 0 {
       uriLock.Lock()
-      if uriStatusByPort[port][uri][1] >= 1 {
-        uriStatusByPort[port][uri][1]--
-        if uriStatusByPort[port][uri][1] == 0 {
-          delete(uriStatusByPort[port], uri)
+      if uriStatus.Times >= 1 {
+        uriStatus.Times--
+        if uriStatus.Times == 0 {
+          delete(uriStatusByPort[port], uriStatus.URI)
         }
       }
       uriLock.Unlock()
-      msg := fmt.Sprintf("Reporting URI status: [%d] for URI [%s]. Remaining status count [%d].", statusToReport, uri, statusTimesLeft-1)
+      msg := ""
+      if statusTimesLeft-1 > 0 {
+        msg = fmt.Sprintf("Reporting URI status: [%d] for URI [%s]. Remaining status count [%d].", statusToReport, uri, statusTimesLeft-1)
+      } else {
+        msg = fmt.Sprintf("Reporting URI status: [%d] for URI [%s].", statusToReport, uri)
+      }
       util.AddLogMessage(msg, r)
       events.SendRequestEvent("URI Status Applied", msg, r)
       crw.StatusCode = statusToReport
     }
+    w.Header().Add("Goto-Response-Status", strconv.Itoa(crw.StatusCode))
     crw.Proceed()
     events.TrackTrafficEvent(crw.StatusCode, r)
+    trigger.RunTriggers(r, crw, crw.StatusCode)
   })
 }
 

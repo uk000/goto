@@ -6,6 +6,7 @@ import (
   "strings"
   "sync"
 
+  "goto/pkg/events"
   "goto/pkg/util"
 
   "github.com/gorilla/mux"
@@ -18,21 +19,19 @@ var (
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  headersRouter := r.PathPrefix("/headers").Subrouter()
-  util.AddRoute(headersRouter, "/add/{header}/{value}", addResponseHeader, "PUT", "POST")
-  util.AddRoute(headersRouter, "/remove/{header}", removeResponseHeader, "PUT", "POST")
-  util.AddRoute(headersRouter, "/clear", clearResponseHeader, "PUT", "POST")
-  util.AddRoute(headersRouter, "/list", getResponseHeaders, "GET")
-  util.AddRoute(headersRouter, "", getResponseHeaders, "GET")
+  headersRouter := util.PathRouter(r, "/headers")
+  util.AddRouteWithPort(headersRouter, "/add/{header}={value}", addResponseHeader, "PUT", "POST")
+  util.AddRouteWithPort(headersRouter, "/remove/{header}", removeResponseHeader, "PUT", "POST")
+  util.AddRouteWithPort(headersRouter, "/clear", clearResponseHeader, "PUT", "POST")
+  util.AddRouteWithPort(headersRouter, "", getResponseHeaders, "GET")
 }
 
 func addResponseHeader(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if header, present := util.GetStringParam(r, "header"); present {
-    headersLock.Lock()
-    defer headersLock.Unlock()
     value, _ := util.GetStringParam(r, "value")
-    listenerPort := util.GetListenerPort(r)
+    listenerPort := util.GetRequestOrListenerPort(r)
+    headersLock.Lock()
     headerMap := responseHeadersByPort[listenerPort]
     if headerMap == nil {
       headerMap = map[string][]string{}
@@ -43,8 +42,9 @@ func addResponseHeader(w http.ResponseWriter, r *http.Request) {
       values = []string{}
     }
     headerMap[header] = append(values, value)
-    msg = fmt.Sprintf("Response header [%s : %s] added", header, value)
-    w.WriteHeader(http.StatusOK)
+    headersLock.Unlock()
+    msg = fmt.Sprintf("Port [%s] Response header [%s : %s] added", listenerPort, header, value)
+    events.SendRequestEvent("Response Header Added", msg, r)
   } else {
     msg = "Cannot add. Invalid header"
     w.WriteHeader(http.StatusBadRequest)
@@ -57,13 +57,13 @@ func removeResponseHeader(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if header, present := util.GetStringParam(r, "header"); present {
     headersLock.Lock()
-    defer headersLock.Unlock()
-    listenerPort := util.GetListenerPort(r)
+    listenerPort := util.GetRequestOrListenerPort(r)
     if headerMap := responseHeadersByPort[listenerPort]; headerMap != nil {
       delete(headerMap, header)
     }
-    msg = fmt.Sprintf("Response header [%s] removed", header)
-    w.WriteHeader(http.StatusOK)
+    headersLock.Unlock()
+    msg = fmt.Sprintf("Port [%s] Response header [%s] removed", listenerPort, header)
+    events.SendRequestEvent("Response Header Removed", msg, r)
   } else {
     msg = "Cannot remove. Invalid header"
     w.WriteHeader(http.StatusBadRequest)
@@ -73,11 +73,12 @@ func removeResponseHeader(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearResponseHeader(w http.ResponseWriter, r *http.Request) {
+  listenerPort := util.GetRequestOrListenerPort(r)
   headersLock.Lock()
-  defer headersLock.Unlock()
-  responseHeadersByPort[util.GetListenerPort(r)] = map[string][]string{}
-  msg := "Response headers cleared"
-  w.WriteHeader(http.StatusOK)
+  responseHeadersByPort[listenerPort] = map[string][]string{}
+  headersLock.Unlock()
+  msg := fmt.Sprintf("Port [%s] Response header cleared", listenerPort)
+  events.SendRequestEvent("Response Header Cleared", msg, r)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
@@ -85,7 +86,8 @@ func clearResponseHeader(w http.ResponseWriter, r *http.Request) {
 func getResponseHeaders(w http.ResponseWriter, r *http.Request) {
   headersLock.RLock()
   defer headersLock.RUnlock()
-  headerMap := responseHeadersByPort[util.GetListenerPort(r)]
+  listenerPort := util.GetRequestOrListenerPort(r)
+  headerMap := responseHeadersByPort[util.GetRequestOrListenerPort(r)]
   if len(headerMap) > 0 {
     var s strings.Builder
     s.Grow(128)
@@ -97,10 +99,11 @@ func getResponseHeaders(w http.ResponseWriter, r *http.Request) {
     }
     msg := s.String()
     fmt.Fprintln(w, msg)
-    util.AddLogMessage("Response headers returned: "+msg, r)
+    util.AddLogMessage(fmt.Sprintf("Port [%s] Response headers returned: %s", listenerPort, msg), r)
   } else {
-    fmt.Fprintln(w, "No response headers set")
-    util.AddLogMessage("No response headers set", r)
+    msg := fmt.Sprintf("Port [%s] No response headers set", listenerPort)
+    fmt.Fprintln(w, msg)
+    util.AddLogMessage(msg, r)
   }
 }
 
@@ -108,7 +111,7 @@ func setResponseHeaders(w http.ResponseWriter, r *http.Request) {
   headersLock.RLock()
   defer headersLock.RUnlock()
   util.CopyHeaders("Request", w, r.Header, r.Host, r.RequestURI)
-  headerMap := responseHeadersByPort[util.GetListenerPort(r)]
+  headerMap := responseHeadersByPort[util.GetRequestOrListenerPort(r)]
   for header, values := range headerMap {
     for _, value := range values {
       w.Header().Add(header, value)

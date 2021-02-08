@@ -56,6 +56,8 @@ type InvocationSpec struct {
   httpVersionMajor     int
   httpVersionMinor     int
   tcp                  bool
+  grpc                 bool
+  http                 bool
   tls                  bool
   host                 string
   connTimeoutD         time.Duration
@@ -79,7 +81,7 @@ type InvocationStatus struct {
   StopRequested     bool `json:"stopRequested"`
   Stopped           bool `json:"stopped"`
   Closed            bool `json:"closed"`
-  client            *HTTPClientTracker
+  httpClient        *HTTPClientTracker
 }
 
 type InvocationResult struct {
@@ -167,8 +169,15 @@ func ValidateSpec(spec *InvocationSpec) error {
     spec.tls = true
   }
   if spec.Protocol != "" {
-    if strings.EqualFold(strings.ToLower(spec.Protocol), "tcp") {
+    lowerProto := strings.ToLower(spec.Protocol)
+    if strings.EqualFold(lowerProto, "tcp") {
       spec.tcp = true
+      spec.httpVersionMajor = 0
+      spec.httpVersionMinor = 0
+    } else if strings.EqualFold(lowerProto, "grpc") {
+      spec.grpc = true
+      spec.httpVersionMajor = 2
+      spec.httpVersionMinor = 0
     } else if major, minor, ok := http.ParseHTTPVersion(spec.Protocol); ok {
       if major == 1 && (minor == 0 || minor == 1) {
         spec.httpVersionMajor = major
@@ -186,6 +195,9 @@ func ValidateSpec(spec *InvocationSpec) error {
     spec.httpVersionMajor = 1
     spec.httpVersionMinor = 1
     spec.Protocol = fmt.Sprintf("HTTP/%d.%d", spec.httpVersionMajor, spec.httpVersionMinor)
+  }
+  if !spec.tcp && !spec.grpc {
+    spec.http = true
   }
   if spec.Replicas < 0 {
     return fmt.Errorf("Invalid replicas")
@@ -434,7 +446,9 @@ func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) *
       tracker.sinks = append(tracker.sinks, sink)
     }
   }
-  tracker.Status.client = getHttpClientForTarget(target)
+  if target.http {
+    tracker.Status.httpClient = getHttpClientForTarget(target)
+  }
   if target.BodyReader != nil && (target.Replicas > 1 || target.RequestCount > 1) {
     body, _ := ioutil.ReadAll(target.BodyReader)
     target.payloadBody = string(body)
@@ -463,7 +477,7 @@ func CloseInvocation(tracker *InvocationTracker) {
     close(tracker.ResultChannel)
     tracker.ResultChannel = nil
   }
-  tracker.Status.client = nil
+  tracker.Status.httpClient = nil
   tracker.Status.Closed = true
 }
 
@@ -652,7 +666,7 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
   tracker.lock.RLock()
   target := tracker.Target
   trackerID := tracker.ID
-  httpClient := tracker.Status.client
+  httpClient := tracker.Status.httpClient
   sinks := tracker.sinks
   resultChannel := tracker.ResultChannel
   doneChannel := tracker.DoneChannel

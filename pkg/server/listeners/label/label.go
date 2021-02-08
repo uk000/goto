@@ -4,6 +4,7 @@ import (
   "fmt"
   "net/http"
 
+  "goto/pkg/events"
   "goto/pkg/server/listeners"
   "goto/pkg/util"
 
@@ -11,32 +12,33 @@ import (
 )
 
 var (
-  Handler util.ServerHandler = util.ServerHandler{"delay", SetRoutes, Middleware}
+  Handler util.ServerHandler = util.ServerHandler{"label", SetRoutes, Middleware}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  labelRouter := r.PathPrefix("/label").Subrouter()
-  util.AddRoute(labelRouter, "/set/{label}", setLabel, "PUT", "POST")
-  util.AddRoute(labelRouter, "/clear", setLabel, "POST")
-  util.AddRoute(labelRouter, "", getLabel)
+  labelRouter := util.PathRouter(r, "/label")
+  util.AddRouteWithPort(labelRouter, "/set/{label}", setLabel, "PUT", "POST")
+  util.AddRouteWithPort(labelRouter, "/clear", setLabel, "POST")
+  util.AddRouteWithPort(labelRouter, "", getLabel)
 }
 
 func setLabel(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if label := listeners.SetListenerLabel(r); label == "" {
-    msg = "Label cleared"
+    msg := fmt.Sprintf("Port [%s] Label Cleared", util.GetRequestOrListenerPort(r))
+    events.SendRequestEvent("Label Cleared", msg, r)
   } else {
-    msg = fmt.Sprintf("Will use label %s for all responses on port %s", label, util.GetListenerPort(r))
+    msg = fmt.Sprintf("Will use label %s for all responses on port %s", label, util.GetRequestOrListenerPort(r))
+    events.SendRequestEvent("Label Set", msg, r)
   }
   util.AddLogMessage(msg, r)
-  w.WriteHeader(http.StatusOK)
   fmt.Fprintln(w, msg)
 }
 
 func getLabel(w http.ResponseWriter, r *http.Request) {
   label := listeners.GetListenerLabel(r)
-  util.AddLogMessage("Server Label: "+label, r)
-  w.WriteHeader(http.StatusOK)
+  msg := fmt.Sprintf("Port [%s] Label [%s]", util.GetRequestOrListenerPort(r), label)
+  util.AddLogMessage(msg, r)
   fmt.Fprintln(w, "Server Label: "+label)
 }
 
@@ -48,14 +50,19 @@ func Middleware(next http.Handler) http.Handler {
     w.Header().Add("Via-Goto", l.Label)
     w.Header().Add("Goto-Host", hostLabel)
     w.Header().Add("Goto-Port", util.GetListenerPort(r))
+    protocol := "HTTP"
     if l.TLS {
-      w.Header().Add("Goto-Protocol", "HTTPS")
-    } else {
-      w.Header().Add("Goto-Protocol", "HTTP")
+      if r.ProtoMajor == 2 {
+        protocol = "HTTP/2"
+      } else {
+        protocol = "HTTPS"
+      }
+    } else if r.ProtoMajor == 2 {
+      protocol = "H2C"
     }
+    w.Header().Add("Goto-Protocol", protocol)
     if next != nil {
       next.ServeHTTP(w, r)
     }
-    util.AddLogMessage(util.GetResponseHeadersLog(w), r)
   })
 }

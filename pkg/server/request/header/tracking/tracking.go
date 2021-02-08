@@ -37,16 +37,15 @@ var (
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  headerTrackingRouter := r.PathPrefix("/track").Subrouter()
-  util.AddRoute(headerTrackingRouter, "/clear", clearHeaders, "POST")
-  util.AddRoute(headerTrackingRouter, "/add/{headers}", addHeaders, "PUT", "POST")
-  util.AddRoute(headerTrackingRouter, "/{header}/remove", removeHeader, "PUT", "POST")
-  util.AddRoute(headerTrackingRouter, "/{header}/counts", getHeaderCount, "GET")
-  util.AddRoute(headerTrackingRouter, "/counts/clear/{headers}", clearHeaderCounts, "PUT", "POST")
-  util.AddRoute(headerTrackingRouter, "/counts/clear", clearHeaderCounts, "POST")
-  util.AddRoute(headerTrackingRouter, "/counts", getHeaderCount, "GET")
-  util.AddRoute(headerTrackingRouter, "/list", getHeaders, "GET")
-  util.AddRoute(headerTrackingRouter, "", getHeaders, "GET")
+  headerTrackingRouter := util.PathRouter(r, "/track")
+  util.AddRouteWithPort(headerTrackingRouter, "/clear", clearHeaders, "POST")
+  util.AddRouteWithPort(headerTrackingRouter, "/add/{headers}", addHeaders, "PUT", "POST")
+  util.AddRouteWithPort(headerTrackingRouter, "/{header}/remove", removeHeader, "PUT", "POST")
+  util.AddRouteWithPort(headerTrackingRouter, "/{header}/counts", getHeaderCount, "GET")
+  util.AddRouteWithPort(headerTrackingRouter, "/counts/clear/{headers}", clearHeaderCounts, "PUT", "POST")
+  util.AddRouteWithPort(headerTrackingRouter, "/counts/clear", clearHeaderCounts, "POST")
+  util.AddRouteWithPort(headerTrackingRouter, "/counts", getHeaderCount, "GET")
+  util.AddRouteWithPort(headerTrackingRouter, "", getHeaders, "GET")
 }
 
 func (hd *HeaderData) init() {
@@ -143,7 +142,7 @@ func (rtd *RequestTrackingData) getHeaders() []string {
 func (rt *RequestTracking) getPortRequestTrackingData(r *http.Request) *RequestTrackingData {
   rt.lock.Lock()
   defer rt.lock.Unlock()
-  listenerPort := util.GetListenerPort(r)
+  listenerPort := util.GetRequestOrListenerPort(r)
   rtd, present := rt.requestTrackingByPort[listenerPort]
   if !present {
     rtd = &RequestTrackingData{}
@@ -204,7 +203,7 @@ func (rt *RequestTracking) getHeaders(r *http.Request) []string {
 func addHeaders(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if headers := requestTracking.initHeaders(r); headers != nil {
-    msg = fmt.Sprintf("Header %s will be tracked", headers)
+    msg = fmt.Sprintf("Port [%s] will track headers %s", util.GetRequestOrListenerPort(r), headers)
     events.SendRequestEvent("Tracking Headers Added", msg, r)
     w.WriteHeader(http.StatusOK)
   } else {
@@ -219,7 +218,7 @@ func removeHeader(w http.ResponseWriter, r *http.Request) {
   msg := ""
   headers, present := requestTracking.removeHeaders(r)
   if present {
-    msg = fmt.Sprintf("Header %+v removed", headers)
+    msg = fmt.Sprintf("Port [%s] tracking headers %s removed", util.GetRequestOrListenerPort(r), headers)
     events.SendRequestEvent("Tracking Headers Removed", msg, r)
     w.WriteHeader(http.StatusOK)
   } else {
@@ -232,9 +231,9 @@ func removeHeader(w http.ResponseWriter, r *http.Request) {
 
 func clearHeaders(w http.ResponseWriter, r *http.Request) {
   requestTracking.clear(r)
-  msg := "Tracking Headers Cleared"
+  msg := fmt.Sprintf("Port [%s] tracking headers cleared", util.GetRequestOrListenerPort(r))
   util.AddLogMessage(msg, r)
-  events.SendRequestEvent(msg, "", r)
+  events.SendRequestEvent("Tracking Headers Cleared", msg, r)
   w.WriteHeader(http.StatusOK)
   fmt.Fprintln(w, msg)
 }
@@ -242,12 +241,11 @@ func clearHeaders(w http.ResponseWriter, r *http.Request) {
 func clearHeaderCounts(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if headers := requestTracking.clearHeaderCounts(r); headers != nil {
-    msg = fmt.Sprintf("Header %s count reset", headers)
-    events.SendRequestEvent("Tracked Header Counts Cleared", msg, r)
+    msg = fmt.Sprintf("Port [%s] tracking counts reset for headers %s", util.GetRequestOrListenerPort(r), headers)
   } else {
-    msg = "Clearing counts for all headers"
-    events.SendRequestEvent("All Tracked Header Counts Cleared", msg, r)
+    msg = fmt.Sprintf("Port [%s] tracking counts reset for all headers", util.GetRequestOrListenerPort(r))
   }
+  events.SendRequestEvent("Tracked Header Counts Cleared", msg, r)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
@@ -255,19 +253,19 @@ func clearHeaderCounts(w http.ResponseWriter, r *http.Request) {
 func getHeaderCount(w http.ResponseWriter, r *http.Request) {
   header, headerData := requestTracking.getHeaderCounts(r)
   if header != "" {
-    util.AddLogMessage(fmt.Sprintf("Reporting counts for header %s", header), r)
+    util.AddLogMessage(fmt.Sprintf("Port [%s] reporting counts for header %s", util.GetRequestOrListenerPort(r), header), r)
     if headerData != nil {
       result := util.ToJSON(headerData)
       util.AddLogMessage(result, r)
       w.WriteHeader(http.StatusOK)
       fmt.Fprintln(w, result)
     } else {
-      util.AddLogMessage("No data to report", r)
+      util.AddLogMessage(fmt.Sprintf("Port [%s] No header tracking data to report", util.GetRequestOrListenerPort(r)), r)
       w.WriteHeader(http.StatusOK)
       fmt.Fprintln(w, "{}")
     }
   } else {
-    util.AddLogMessage(fmt.Sprintf("Reporting counts for all headers"), r)
+    util.AddLogMessage(fmt.Sprintf("Port [%s] reporting counts for all headers", util.GetRequestOrListenerPort(r)), r)
     result := util.ToJSON(requestTracking.getPortRequestTrackingData(r).headerMap)
     util.AddLogMessage(result, r)
     w.WriteHeader(http.StatusOK)

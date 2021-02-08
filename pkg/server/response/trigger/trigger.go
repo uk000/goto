@@ -14,14 +14,19 @@ import (
 )
 
 type TriggerTarget struct {
-  Name                      string
-  Method                    string
-  URL                       string
-  Headers                   [][]string
-  Body                      string
-  SendID                    bool
-  Enabled                   bool
-  TriggerOnResponseStatuses []int
+  Name         string     `json:"name"`
+  Method       string     `json:"method"`
+  URL          string     `json:"url"`
+  Headers      [][]string `json:"headers"`
+  Body         string     `json:"body"`
+  SendID       bool       `json:"sendID"`
+  Enabled      bool       `json:"enabled"`
+  TriggerOn    []int      `json:"triggerOn"`
+  StartFrom    int        `json:"startFrom"`
+  StopAt       int        `json:"stopAt"`
+  StatusCount  int        `json:"statusCount"`
+  TriggerCount int        `json:"triggerCount"`
+  lock         sync.RWMutex
 }
 
 type Trigger struct {
@@ -38,15 +43,15 @@ var (
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  triggerRouter := r.PathPrefix("/trigger").Subrouter()
-  util.AddRoute(triggerRouter, "/add", addTriggerTarget, "POST")
-  util.AddRoute(triggerRouter, "/{target}/remove", removeTriggerTarget, "PUT", "POST")
-  util.AddRoute(triggerRouter, "/{target}/enable", enableTriggerTarget, "PUT", "POST")
-  util.AddRoute(triggerRouter, "/{target}/disable", disableTriggerTarget, "PUT", "POST")
-  util.AddRoute(triggerRouter, "/{targets}/invoke", invokeTriggers, "POST")
-  util.AddRoute(triggerRouter, "/clear", clearTriggers, "POST")
-  util.AddRoute(triggerRouter, "/counts", getTriggerCounts)
-  util.AddRoute(triggerRouter, "/list", getTriggers)
+  triggerRouter := util.PathRouter(r, "/triggers")
+  util.AddRouteWithPort(triggerRouter, "/add", addTriggerTarget, "POST")
+  util.AddRouteWithPort(triggerRouter, "/{target}/remove", removeTriggerTarget, "PUT", "POST")
+  util.AddRouteWithPort(triggerRouter, "/{target}/enable", enableTriggerTarget, "PUT", "POST")
+  util.AddRouteWithPort(triggerRouter, "/{target}/disable", disableTriggerTarget, "PUT", "POST")
+  util.AddRouteWithPort(triggerRouter, "/{targets}/invoke", invokeTriggers, "POST")
+  util.AddRouteWithPort(triggerRouter, "/clear", clearTriggers, "POST")
+  util.AddRouteWithPort(triggerRouter, "/counts", getTriggerCounts)
+  util.AddRouteWithPort(triggerRouter, "", getTriggers)
 }
 
 func (t *Trigger) init() {
@@ -68,17 +73,18 @@ func (t *Trigger) addTriggerTarget(w http.ResponseWriter, r *http.Request) {
   if err == nil {
     t.deleteTriggerTarget(tt.Name)
     t.lock.Lock()
-    defer t.lock.Unlock()
     t.Targets[tt.Name] = tt
-    for _, triggerStatus := range tt.TriggerOnResponseStatuses {
+    for _, triggerStatus := range tt.TriggerOn {
       if t.TargetsByResponseStatus[triggerStatus] == nil {
         t.TargetsByResponseStatus[triggerStatus] = map[string]*TriggerTarget{}
       }
       t.TargetsByResponseStatus[triggerStatus][tt.Name] = tt
     }
-    util.AddLogMessage(fmt.Sprintf("Added trigger target: %+v", tt), r)
+    t.lock.Unlock()
+    msg := fmt.Sprintf("Port [%s] Added trigger target: %s", util.GetRequestOrListenerPort(r), tt.Name)
+    util.AddLogMessage(msg, r)
     w.WriteHeader(http.StatusOK)
-    fmt.Fprintf(w, "Added trigger target: %s\n", util.ToJSON(tt))
+    fmt.Fprintln(w, msg)
     events.SendRequestEventJSON("Trigger Target Added", tt, r)
   } else {
     w.WriteHeader(http.StatusBadRequest)
@@ -131,7 +137,7 @@ func (t *Trigger) deleteTriggerTarget(targetName string) {
 func (t *Trigger) removeTriggerTarget(w http.ResponseWriter, r *http.Request) {
   if tt := t.getRequestedTriggerTarget(r); tt != nil {
     t.deleteTriggerTarget(tt.Name)
-    msg := fmt.Sprintf("Trigger Target Removed: %s", tt.Name)
+    msg := fmt.Sprintf("Port [%s] Trigger Target Removed: %s", util.GetRequestOrListenerPort(r), tt.Name)
     util.AddLogMessage(msg, r)
     w.WriteHeader(http.StatusOK)
     fmt.Fprintln(w, msg)
@@ -147,7 +153,7 @@ func (t *Trigger) enableTriggerTarget(w http.ResponseWriter, r *http.Request) {
     t.lock.Lock()
     tt.Enabled = true
     t.lock.Unlock()
-    msg := fmt.Sprintf("Trigger Target Enabled: %s", tt.Name)
+    msg := fmt.Sprintf("Port [%s] Trigger Target Enabled: %s", util.GetRequestOrListenerPort(r), tt.Name)
     util.AddLogMessage(msg, r)
     w.WriteHeader(http.StatusOK)
     fmt.Fprintln(w, msg)
@@ -163,7 +169,7 @@ func (t *Trigger) disableTriggerTarget(w http.ResponseWriter, r *http.Request) {
     t.lock.Lock()
     tt.Enabled = false
     t.lock.Unlock()
-    msg := fmt.Sprintf("Trigger Target Disabled: %s", tt.Name)
+    msg := fmt.Sprintf("Port [%s] Trigger Target Disabled: %s", util.GetRequestOrListenerPort(r), tt.Name)
     util.AddLogMessage(msg, r)
     w.WriteHeader(http.StatusOK)
     fmt.Fprintln(w, msg)
@@ -209,11 +215,12 @@ func (tt *TriggerTarget) toInvocationSpec(r *http.Request, w http.ResponseWriter
 }
 
 func (t *Trigger) invokeTargets(targets map[string]*TriggerTarget, w http.ResponseWriter, r *http.Request) []*invocation.InvocationResult {
-  t.lock.Lock()
-  defer t.lock.Unlock()
   responses := []*invocation.InvocationResult{}
   if len(targets) > 0 {
     for _, target := range targets {
+      target.lock.Lock()
+      target.TriggerCount++
+      target.lock.Unlock()
       events.SendRequestEventJSON("Trigger Target Invoked", target, r)
       metrics.UpdateTriggerCount(target.Name)
       is, _ := target.toInvocationSpec(r, w)
@@ -225,10 +232,12 @@ func (t *Trigger) invokeTargets(targets map[string]*TriggerTarget, w http.Respon
       if response.StatusCode == 0 {
         response.StatusCode = 503
       }
+      t.lock.Lock()
       if t.TriggerResults[response.TargetName] == nil {
         t.TriggerResults[response.TargetName] = map[int]int{}
       }
       t.TriggerResults[response.TargetName][response.StatusCode]++
+      t.lock.Unlock()
     }
     return responses
   }
@@ -237,7 +246,7 @@ func (t *Trigger) invokeTargets(targets map[string]*TriggerTarget, w http.Respon
 
 func getPortTrigger(r *http.Request) *Trigger {
   triggerLock.RLock()
-  listenerPort := util.GetListenerPort(r)
+  listenerPort := util.GetRequestOrListenerPort(r)
   trigger := portTriggers[listenerPort]
   triggerLock.RUnlock()
   if trigger == nil {
@@ -267,21 +276,23 @@ func disableTriggerTarget(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearTriggers(w http.ResponseWriter, r *http.Request) {
-  listenerPort := util.GetListenerPort(r)
+  listenerPort := util.GetRequestOrListenerPort(r)
   triggerLock.Lock()
   defer triggerLock.Unlock()
   portTriggers[listenerPort] = &Trigger{}
   portTriggers[listenerPort].init()
   w.WriteHeader(http.StatusOK)
-  util.AddLogMessage("Triggers cleared", r)
-  fmt.Fprintln(w, "Triggers cleared")
+  msg := fmt.Sprintf("Port [%s] Triggers Cleared", util.GetRequestOrListenerPort(r))
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
+  events.SendRequestEvent("Triggers Cleared", msg, r)
 }
 
 func getTriggerCounts(w http.ResponseWriter, r *http.Request) {
   t := getPortTrigger(r)
   triggerLock.Lock()
   defer triggerLock.Unlock()
-  util.AddLogMessage(fmt.Sprintf("Get trigger counts: %+v", t), r)
+  util.AddLogMessage(fmt.Sprintf("Port [%s] Get trigger counts", util.GetRequestOrListenerPort(r)), r)
   util.WriteJsonPayload(w, t.TriggerResults)
 }
 
@@ -289,7 +300,7 @@ func getTriggers(w http.ResponseWriter, r *http.Request) {
   t := getPortTrigger(r)
   triggerLock.Lock()
   defer triggerLock.Unlock()
-  util.AddLogMessage(fmt.Sprintf("Get triggers: %+v", t), r)
+  util.AddLogMessage(fmt.Sprintf("Port [%s] Get triggers", util.GetRequestOrListenerPort(r)), r)
   util.WriteJsonPayload(w, t)
 }
 
@@ -299,7 +310,7 @@ func invokeTriggers(w http.ResponseWriter, r *http.Request) {
   if len(targets) > 0 {
     responses := t.invokeTargets(targets, w, r)
     w.WriteHeader(http.StatusOK)
-    util.AddLogMessage("Trigger targets invoked", r)
+    util.AddLogMessage(fmt.Sprintf("Port [%s] Trigger targets invoked", util.GetRequestOrListenerPort(r)), r)
     fmt.Fprintln(w, util.ToJSON(responses))
   } else {
     w.WriteHeader(http.StatusNotFound)
@@ -314,15 +325,24 @@ func (t *Trigger) getMatchingTargets(r *http.Request, statusCode int) map[string
   targets := map[string]*TriggerTarget{}
   if t.TargetsByResponseStatus[statusCode] != nil {
     for _, tt := range t.TargetsByResponseStatus[statusCode] {
-      targets[tt.Name] = tt
+      tt.lock.RLock()
+      if tt.StatusCount >= tt.StartFrom && tt.StatusCount <= tt.StopAt {
+        targets[tt.Name] = tt
+      }
+      tt.lock.RUnlock()
     }
   }
   return targets
 }
 
 func RunTriggers(r *http.Request, w http.ResponseWriter, statusCode int) {
-  if !util.IsAdminRequest(r) {
+  if !util.IsAdminRequest(r) && !util.IsMetricsRequest(r) {
     t := getPortTrigger(r)
+    for _, tt := range t.TargetsByResponseStatus[statusCode] {
+      tt.lock.Lock()
+      tt.StatusCount++
+      tt.lock.Unlock()
+    }
     t.invokeTargets(t.getMatchingTargets(r, statusCode), w, r)
   }
 }

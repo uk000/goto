@@ -5,6 +5,7 @@ import (
   "encoding/json"
   "fmt"
   "goto/pkg/global"
+  "goto/pkg/server/intercept"
   "io"
   "io/ioutil"
   "log"
@@ -19,6 +20,7 @@ import (
   "time"
 
   "github.com/gorilla/mux"
+  "google.golang.org/grpc/metadata"
 )
 
 type ServerHandler struct {
@@ -30,9 +32,11 @@ type ServerHandler struct {
 type ContextKey struct{ Key string }
 
 var (
-  logMessagesKey = &ContextKey{"logMessagesKey"}
-  currentPortKey = &ContextKey{"currentPort"}
-  fillerRegExp   = regexp.MustCompile("({.+?})")
+  portRouter             *mux.Router
+  listenerPathSubRouters = map[string]*mux.Router{}
+  logMessagesKey         = &ContextKey{"logMessagesKey"}
+  currentPortKey         = &ContextKey{"currentPort"}
+  fillerRegExp           = regexp.MustCompile("({.+?})")
 )
 
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=~`{}[];:,.<>/?"
@@ -48,23 +52,34 @@ type MessageStore struct {
   messages []string
 }
 
+func InitListenerRouter(root *mux.Router) {
+  portRouter = root.PathPrefix("/port={port}").Subrouter()
+}
+
 func ContextMiddleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     if global.Stopping && global.IsReadinessProbe(r) {
       CopyHeaders("Stopping-Readiness-Request", w, r.Header, r.Host, r.RequestURI)
       w.WriteHeader(http.StatusNotFound)
     } else if next != nil {
-      next.ServeHTTP(w, r.WithContext(context.WithValue(
-        context.WithValue(r.Context(), logMessagesKey, &MessageStore{}), currentPortKey, GetListenerPortNum(r))))
+      next.ServeHTTP(w, r.WithContext(ContextWithPort(
+        context.WithValue(r.Context(), logMessagesKey, &MessageStore{}), GetListenerPortNum(r))))
     }
   })
 }
 
+func ContextWithPort(ctx context.Context, port int) context.Context {
+  return context.WithValue(ctx, currentPortKey, port)
+}
+
 func LoggingMiddleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    crw := intercept.NewInterceptResponseWriter(w, false)
     if next != nil {
-      next.ServeHTTP(w, r)
+      next.ServeHTTP(crw, r)
     }
+    AddLogMessage(GetResponseHeadersLog(w), r)
+    AddLogMessage(fmt.Sprintf("Response Body Length: %d", crw.BodyLength), r)
     PrintLogMessages(r)
   })
 }
@@ -92,8 +107,26 @@ func PrintLogMessages(r *http.Request) {
   m.messages = m.messages[:0]
 }
 
+func GetPortNumFromGRPCAuthority(ctx context.Context) int {
+  if headers, ok := metadata.FromIncomingContext(ctx); ok && len(headers[":authority"]) > 0 {
+    if pieces := strings.Split(headers[":authority"][0], ":"); len(pieces) > 1 {
+      if portNum, err := strconv.Atoi(pieces[1]); err == nil {
+        return portNum
+      }
+    }
+  }
+  return global.ServerPort
+}
+
+func GetContextPort(ctx context.Context) int {
+  if val := ctx.Value(currentPortKey); val != nil {
+    return val.(int)
+  }
+  return GetPortNumFromGRPCAuthority(ctx)
+}
+
 func GetCurrentPort(r *http.Request) int {
-  return r.Context().Value(currentPortKey).(int)
+  return GetContextPort(r.Context())
 }
 
 func GetCurrentListenerLabel(r *http.Request) string {
@@ -398,10 +431,11 @@ func WriteJsonPayload(w http.ResponseWriter, t interface{}) {
 }
 
 func IsAdminRequest(r *http.Request) bool {
-  return strings.HasPrefix(r.RequestURI, "/request") || strings.HasPrefix(r.RequestURI, "/response") ||
+  return strings.HasPrefix(r.RequestURI, "/port") || 
+    strings.HasPrefix(r.RequestURI, "/request") || strings.HasPrefix(r.RequestURI, "/response") ||
     strings.HasPrefix(r.RequestURI, "/listeners") || strings.HasPrefix(r.RequestURI, "/label") ||
     strings.HasPrefix(r.RequestURI, "/client") || strings.HasPrefix(r.RequestURI, "/job") ||
-    strings.HasPrefix(r.RequestURI, "/probe") || strings.HasPrefix(r.RequestURI, "/tcp") ||
+    strings.HasPrefix(r.RequestURI, "/probes") || strings.HasPrefix(r.RequestURI, "/tcp") ||
     strings.HasPrefix(r.RequestURI, "/events") || strings.HasPrefix(r.RequestURI, "/registry")
 }
 
@@ -442,8 +476,18 @@ func IsHealthRequest(r *http.Request) bool {
 }
 
 func IsKnownRequest(r *http.Request) bool {
-  return IsProbeRequest(r) || IsReminderRequest(r) || IsHealthRequest(r) || IsLockerRequest(r) ||
-    IsAdminRequest(r) || IsStatusRequest(r) || IsDelayRequest(r) || IsPayloadRequest(r)
+  return IsProbeRequest(r) || IsReminderRequest(r) || IsHealthRequest(r) || IsMetricsRequest(r) || 
+    IsLockerRequest(r) || IsAdminRequest(r) || IsStatusRequest(r) || IsDelayRequest(r) || IsPayloadRequest(r)
+}
+
+func PathRouter(r *mux.Router, path string) *mux.Router {
+  if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil {
+    lpath = lpath + path
+    listenerPathSubRouters[lpath] = portRouter.PathPrefix(lpath).Subrouter()
+  } else {
+    listenerPathSubRouters[path] = portRouter.PathPrefix(path).Subrouter()
+  }
+  return r.PathPrefix(path).Subrouter()
 }
 
 func AddRoute(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), methods ...string) {
@@ -456,14 +500,35 @@ func AddRoute(r *mux.Router, route string, f func(http.ResponseWriter, *http.Req
   }
 }
 
+func AddRouteWithPort(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), methods ...string) {
+  AddRoute(r, route, f, methods...)
+  if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && listenerPathSubRouters[lpath] != nil {
+    AddRoute(listenerPathSubRouters[lpath], route, f, methods...)
+  }
+}
+
 func AddRouteQ(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), queryParamName string, queryKey string, methods ...string) {
   r.HandleFunc(route, f).Queries(queryParamName, queryKey).Methods(methods...)
   r.HandleFunc(route+"/", f).Queries(queryParamName, queryKey).Methods(methods...)
 }
 
+func AddRouteQWithPort(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), queryParamName string, queryKey string, methods ...string) {
+  AddRouteQ(r, route, f, queryParamName, queryKey, methods...)
+  if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && listenerPathSubRouters[lpath] != nil {
+    AddRouteQ(listenerPathSubRouters[lpath], route, f, queryParamName, queryKey, methods...)
+  }
+}
+
 func AddRouteMultiQ(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
   r.HandleFunc(route, f).Queries(queryParams...).Methods(method)
   r.HandleFunc(route+"/", f).Queries(queryParams...).Methods(method)
+}
+
+func AddRouteMultiQWithPort(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
+  AddRouteMultiQ(r, route, f, method, queryParams...)
+  if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && listenerPathSubRouters[lpath] != nil {
+    AddRouteMultiQ(listenerPathSubRouters[lpath], route, f, method, queryParams...)
+  }
 }
 
 func AddRoutes(r *mux.Router, parent *mux.Router, root *mux.Router, handlers ...ServerHandler) {
@@ -496,6 +561,22 @@ func GetListenerPortNum(r *http.Request) int {
     return port
   }
   return 0
+}
+
+func GetRequestOrListenerPort(r *http.Request) string {
+  port, ok := GetStringParam(r, "port")
+  if !ok {
+    port = GetListenerPort(r)
+  }
+  return port
+}
+
+func GetRequestOrListenerPortNum(r *http.Request) int {
+  port, ok := GetIntParam(r, "port")
+  if !ok {
+    port = GetListenerPortNum(r)
+  }
+  return port
 }
 
 func ToJSON(o interface{}) string {

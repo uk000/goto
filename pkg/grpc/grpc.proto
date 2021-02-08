@@ -1,0 +1,27 @@
+syntax = "proto3";
+option go_package=".;pb";
+
+message Input {
+  string payload = 1;
+}
+
+message StreamConfig {
+  int32  chunkSize = 1;
+  int32  chunkCount = 2;
+  string interval = 3;
+  string payload = 4;
+}
+
+message Output {
+  string payload = 1;
+  string at = 2;
+  string gotoHost = 3;
+  int32  gotoPort = 4;
+  string viaGoto = 5;
+}
+
+service Goto {
+  rpc echo(Input) returns (Output) {}
+  rpc streamOut(StreamConfig) returns (stream Output) {}
+  rpc streamInOut(stream StreamConfig) returns (stream Output) {}
+}

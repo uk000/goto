@@ -23,18 +23,18 @@ var (
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  delayRouter := r.PathPrefix("/delay").Subrouter()
-  util.AddRoute(delayRouter, "/set/{delay}", setDelay, "POST", "PUT")
-  util.AddRoute(delayRouter, "/clear", setDelay, "POST", "PUT")
-  util.AddRoute(delayRouter, "", getDelay, "GET")
-  util.AddRoute(parent, "/delay/{delay}", delay, "GET", "PUT", "POST", "OPTIONS", "HEAD")
-  util.AddRoute(parent, "/delay", delay, "GET", "PUT", "POST", "OPTIONS", "HEAD")
+  delayRouter := util.PathRouter(r, "/delay")
+  util.AddRouteWithPort(delayRouter, "/set/{delay}", setDelay, "POST", "PUT")
+  util.AddRouteWithPort(delayRouter, "/clear", setDelay, "POST", "PUT")
+  util.AddRouteWithPort(delayRouter, "", getDelay, "GET")
+  util.AddRoute(root, "/delay/{delay}", delay, "GET", "PUT", "POST", "OPTIONS", "HEAD")
+  util.AddRoute(root, "/delay", delay, "GET", "PUT", "POST", "OPTIONS", "HEAD")
 }
 
 func setDelay(w http.ResponseWriter, r *http.Request) {
   vars := mux.Vars(r)
   delayParam := strings.Split(vars["delay"], ":")
-  listenerPort := util.GetListenerPort(r)
+  listenerPort := util.GetRequestOrListenerPort(r)
   delayLock.Lock()
   defer delayLock.Unlock()
   delayCountByPort[listenerPort] = -1
@@ -51,24 +51,24 @@ func setDelay(w http.ResponseWriter, r *http.Request) {
         delayCountByPort[listenerPort] = int(times)
       }
       if delayCountByPort[listenerPort] > 0 {
-        msg = fmt.Sprintf("Will delay next %d requests with %s", delayCountByPort[listenerPort], delayByPort[listenerPort])
+        msg = fmt.Sprintf("Port [%s] will delay next %d requests with %s",
+          listenerPort, delayCountByPort[listenerPort], delayByPort[listenerPort])
         events.SendRequestEvent("Delay Configured", msg, r)
       } else if delayCountByPort[listenerPort] == 0 {
-        msg = fmt.Sprintf("Will delay requests with %s until reset", delayByPort[listenerPort])
+        msg = fmt.Sprintf("Port [%s] will delay requests with %s until reset",
+          listenerPort, delayByPort[listenerPort])
         events.SendRequestEvent("Delay Configured", msg, r)
       } else {
-        msg = "Delay Cleared"
-        events.SendRequestEvent(msg, "", r)
+        msg = fmt.Sprintf("Port [%s] delay cleared", listenerPort)
+        events.SendRequestEvent("Delay Cleared", msg, r)
       }
-      w.WriteHeader(http.StatusOK)
     } else {
       msg = "Invalid delay param"
       w.WriteHeader(http.StatusBadRequest)
     }
   } else {
-    msg = "Delay Cleared"
-    w.WriteHeader(http.StatusOK)
-    events.SendRequestEvent(msg, "", r)
+    msg = fmt.Sprintf("Port [%s] delay cleared", listenerPort)
+    events.SendRequestEvent("Delay Cleared", msg, r)
   }
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
@@ -83,7 +83,7 @@ func delay(w http.ResponseWriter, r *http.Request) {
   if delay, err := time.ParseDuration(delayParam); err == nil {
     msg = fmt.Sprintf("Delayed by: %s", delay.String())
     time.Sleep(delay)
-    w.Header().Add("Response-Delay", delay.String())
+    w.Header().Add("Goto-Response-Delay", delay.String())
     w.WriteHeader(http.StatusOK)
   } else if delayParam != "" {
     msg = err.Error()
@@ -95,9 +95,9 @@ func delay(w http.ResponseWriter, r *http.Request) {
 func getDelay(w http.ResponseWriter, r *http.Request) {
   delayLock.RLock()
   defer delayLock.RUnlock()
-  delay := delayByPort[util.GetListenerPort(r)]
-  msg := fmt.Sprintf("Current delay: %s\n", delay.String())
-  w.WriteHeader(http.StatusOK)
+  listenerPort := util.GetRequestOrListenerPort(r)
+  delay := delayByPort[listenerPort]
+  msg := fmt.Sprintf("Port [%s] Current delay: %s", listenerPort, delay.String())
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
@@ -105,7 +105,7 @@ func getDelay(w http.ResponseWriter, r *http.Request) {
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     delayLock.RLock()
-    listenerPort := util.GetListenerPort(r)
+    listenerPort := util.GetRequestOrListenerPort(r)
     delay := delayByPort[listenerPort]
     delayCount := delayCountByPort[listenerPort]
     delayLock.RUnlock()
@@ -122,7 +122,7 @@ func Middleware(next http.Handler) http.Handler {
         events.SendRequestEvent("Response Delay Applied", msg, r)
         delayCountByPort[listenerPort] = delayCount
       }
-      w.Header().Add("Response-Delay", delay.String())
+      w.Header().Add("Goto-Response-Delay", delay.String())
       time.Sleep(delay)
     }
     if next != nil {

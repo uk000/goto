@@ -10,7 +10,6 @@ import (
   "goto/pkg/server/listeners"
   "goto/pkg/util"
   "log"
-  "net"
   "net/http"
   "os"
   "os/signal"
@@ -23,11 +22,12 @@ import (
 )
 
 var (
-  server *http.Server
+  httpServer *http.Server
 )
 
-func RunHttpServer(root string, handlers ...util.ServerHandler) {
+func RunHttpServer(handlers ...util.ServerHandler) {
   r := mux.NewRouter()
+  util.InitListenerRouter(r)
   r.Use(util.ContextMiddleware)
   r.Use(util.LoggingMiddleware)
   for _, h := range handlers {
@@ -38,21 +38,20 @@ func RunHttpServer(root string, handlers ...util.ServerHandler) {
       r.Use(h.Middleware)
     }
   }
-  http.Handle(root, r)
   h2s := &http2.Server{}
-  server = &http.Server{
+  httpServer = &http.Server{
     Addr:         fmt.Sprintf("0.0.0.0:%d", global.ServerPort),
     WriteTimeout: 1 * time.Minute,
     ReadTimeout:  1 * time.Minute,
     IdleTimeout:  1 * time.Minute,
     ConnContext:  conn.SaveConnInContext,
-    Handler:      h2c.NewHandler(r, h2s),
+    Handler:      h2c.NewHandler(GRPCHandler(r), h2s),
   }
-  StartHttpServer(server)
+  StartHttpServer(httpServer)
   listeners.StartInitialListeners()
   peer.RegisterPeer(global.PeerName, global.PeerAddress)
   events.SendEventJSONDirect("Server Started", listeners.GetListeners())
-  WaitForHttpServer(server)
+  WaitForHttpServer(httpServer)
 }
 
 func StartHttpServer(server *http.Server) {
@@ -71,17 +70,8 @@ func StartHttpServer(server *http.Server) {
 
 func ServeHTTPListener(l *listeners.Listener) {
   go func() {
-    log.Printf("Starting listener %s\n", l.Label)
-    if err := server.Serve(l.Listener); err != nil {
-      log.Println(err)
-    }
-  }()
-}
-
-func ServeTLSListener(l net.Listener) {
-  go func() {
-    log.Printf("Starting listener %s\n", l.Addr())
-    if err := server.Serve(l); err != nil {
+    log.Printf("Starting HTTP Listener %s\n", l.ListenerID)
+    if err := httpServer.Serve(l.Listener); err != nil {
       log.Println(err)
     }
   }()
@@ -109,6 +99,7 @@ func WaitForHttpServer(server *http.Server) {
 }
 
 func StopHttpServer(server *http.Server) {
+  StopGRPCServer()
   log.Printf("HTTP Server %s started shutting down", server.Addr)
   ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
   defer cancel()

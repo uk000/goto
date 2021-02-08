@@ -82,18 +82,18 @@ var (
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   rootRouter = root
-  proxyRouter := r.PathPrefix("/proxy").Subrouter()
-  targetsRouter := proxyRouter.PathPrefix("/targets").Subrouter()
-  util.AddRoute(targetsRouter, "/add", addProxyTarget, "POST")
-  util.AddRoute(targetsRouter, "/{target}/remove", removeProxyTarget, "PUT", "POST")
-  util.AddRoute(targetsRouter, "/{target}/enable", enableProxyTarget, "PUT", "POST")
-  util.AddRoute(targetsRouter, "/{target}/disable", disableProxyTarget, "PUT", "POST")
-  util.AddRoute(targetsRouter, "/{targets}/invoke", invokeProxyTargets, "POST")
-  util.AddRoute(targetsRouter, "/invoke/{targets}", invokeProxyTargets, "POST")
-  util.AddRoute(targetsRouter, "/clear", clearProxyTargets, "POST")
-  util.AddRoute(targetsRouter, "", getProxyTargets)
-  util.AddRoute(proxyRouter, "/counts", getProxyMatchCounts, "GET")
-  util.AddRoute(proxyRouter, "/counts/clear", clearProxyMatchCounts, "POST")
+  proxyRouter := util.PathRouter(r, "/proxy")
+  targetsRouter := util.PathRouter(r, "/proxy/targets")
+  util.AddRouteWithPort(targetsRouter, "/add", addProxyTarget, "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/remove", removeProxyTarget, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/enable", enableProxyTarget, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/disable", disableProxyTarget, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{targets}/invoke", invokeProxyTargets, "POST")
+  util.AddRouteWithPort(targetsRouter, "/invoke/{targets}", invokeProxyTargets, "POST")
+  util.AddRouteWithPort(targetsRouter, "/clear", clearProxyTargets, "POST")
+  util.AddRouteWithPort(targetsRouter, "", getProxyTargets)
+  util.AddRouteWithPort(proxyRouter, "/counts", getProxyMatchCounts, "GET")
+  util.AddRouteWithPort(proxyRouter, "/counts/clear", clearProxyMatchCounts, "POST")
 }
 
 func newProxy() *Proxy {
@@ -606,7 +606,7 @@ func (p *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWr
 
 func getPortProxy(r *http.Request) *Proxy {
   proxyLock.RLock()
-  listenerPort := util.GetListenerPort(r)
+  listenerPort := util.GetRequestOrListenerPort(r)
   proxy := proxyByPort[listenerPort]
   proxyLock.RUnlock()
   if proxy == nil {
@@ -639,7 +639,7 @@ func disableProxyTarget(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearProxyTargets(w http.ResponseWriter, r *http.Request) {
-  listenerPort := util.GetListenerPort(r)
+  listenerPort := util.GetRequestOrListenerPort(r)
   proxyLock.Lock()
   defer proxyLock.Unlock()
   proxyByPort[listenerPort] = newProxy()

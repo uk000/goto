@@ -31,11 +31,11 @@ var (
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  timeoutRouter := r.PathPrefix("/timeout").Subrouter()
-  util.AddRoute(timeoutRouter, "/track/headers/{headers}", trackHeaders, "PUT", "POST")
-  util.AddRoute(timeoutRouter, "/track/all", trackAll, "PUT", "POST")
-  util.AddRoute(timeoutRouter, "/track/clear", clearTimeoutTracking, "POST")
-  util.AddRoute(timeoutRouter, "/status", reportTimeoutTracking, "GET")
+  timeoutRouter := util.PathRouter(r, "/timeout")
+  util.AddRouteWithPort(timeoutRouter, "/track/headers/{headers}", trackHeaders, "PUT", "POST")
+  util.AddRouteWithPort(timeoutRouter, "/track/all", trackAll, "PUT", "POST")
+  util.AddRouteWithPort(timeoutRouter, "/track/clear", clearTimeoutTracking, "POST")
+  util.AddRouteWithPort(timeoutRouter, "/status", reportTimeoutTracking, "GET")
 }
 
 func (tt *TimeoutTracking) init() {
@@ -78,7 +78,7 @@ func (tt *TimeoutTracking) trackAll(w http.ResponseWriter, r *http.Request) {
 }
 
 func getTimeoutTracking(r *http.Request) *TimeoutTracking {
-  listenerPort := util.GetListenerPort(r)
+  listenerPort := util.GetRequestOrListenerPort(r)
   timeoutTrackingLock.Lock()
   defer timeoutTrackingLock.Unlock()
   tt, present := timeoutTrackingByPort[listenerPort]
@@ -101,7 +101,7 @@ func trackAll(w http.ResponseWriter, r *http.Request) {
 func clearTimeoutTracking(w http.ResponseWriter, r *http.Request) {
   timeoutTrackingLock.Lock()
   defer timeoutTrackingLock.Unlock()
-  listenerPort := util.GetListenerPort(r)
+  listenerPort := util.GetRequestOrListenerPort(r)
   if tt := timeoutTrackingByPort[listenerPort]; tt != nil {
     timeoutTrackingByPort[listenerPort] = &TimeoutTracking{}
     timeoutTrackingByPort[listenerPort].init()

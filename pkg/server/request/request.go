@@ -18,8 +18,7 @@ var (
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  requestRouter := r.PathPrefix("/request").Subrouter()
-  util.AddRoutes(requestRouter, r, root, requestHandlers...)
+  util.AddRoutes(util.PathRouter(r, "/request"), r, root, requestHandlers...)
 }
 
 func Middleware(next http.Handler) http.Handler {

@@ -41,10 +41,11 @@ type TargetResults struct {
   CountsByStatusCodes     map[int]int              `json:"countsByStatusCodes"`
   CountsByHeaders         map[string]*HeaderCounts `json:"countsByHeaders"`
   CountsByURIs            map[string]int           `json:"countsByURIs"`
-  lock                    sync.RWMutex
   trackingHeaders         []string
   crossTrackingHeaders    map[string][]string
   crossHeadersMap         map[string]string
+  pendingRegistrySend     bool
+  lock                    sync.RWMutex
 }
 
 type TargetsSummaryResults struct {
@@ -85,7 +86,6 @@ var (
   invocationsResults           = &InvocationsResults{}
   chanSendTargetsToRegistry    = make(chan *TargetResults, 200)
   chanSendInvocationToRegistry = make(chan *InvocationResults, 200)
-  chanLockInvocationInRegistry = make(chan uint32, 100)
   stopRegistrySender           = make(chan bool, 10)
   registryClient               = util.CreateHttpClient()
   sendingToRegistry            bool
@@ -402,7 +402,6 @@ Results:
     }
   }
   invocationResults.finish()
-  chanLockInvocationInRegistry <- invocationIndex
 }
 
 func processTrackingHeaders(targetResults *TargetResults, allResults *TargetResults, trackingHeaders []string, crossTrackingHeaders map[string][]string) {
@@ -624,7 +623,7 @@ func lockInvocationRegistryLocker(invocationIndex uint32) {
   }
 }
 
-func storeInvocationResultsInRegistryLocker(keys []string, data interface{}) {
+func sendResultToRegistry(keys []string, data interface{}) {
   if global.UseLocker && global.RegistryURL != "" {
     url := fmt.Sprintf("%s/registry/peers/%s/%s/locker/store/%s", global.RegistryURL, global.PeerName, global.PeerAddress, strings.Join(keys, ","))
     if resp, err := registryClient.Post(url, "application/json",
@@ -635,37 +634,59 @@ func storeInvocationResultsInRegistryLocker(keys []string, data interface{}) {
 }
 
 func registrySender(id int) {
-  stopSender := false
+RegistrySend:
   for {
-  RegistrySend:
-    for {
-      if len(chanSendTargetsToRegistry) > 50 {
-        log.Printf("registrySender[%d]: chanSendTargetsToRegistry length %d\n", id, len(chanSendTargetsToRegistry))
-      }
-      if len(chanSendInvocationToRegistry) > 50 {
-        log.Printf("registrySender[%d]: chanSendInvocationToRegistry length %d\n", id, len(chanSendInvocationToRegistry))
-      }
-      if len(chanLockInvocationInRegistry) > 50 {
-        log.Printf("registrySender[%d]: chanLockInvocationInRegistry length %d\n", id, len(chanLockInvocationInRegistry))
-      }
-      select {
-      case targetResults := <-chanSendTargetsToRegistry:
-        targetResults.lock.RLock()
-        storeInvocationResultsInRegistryLocker([]string{constants.LockerClientKey, targetResults.Target}, targetResults)
-        targetResults.lock.RUnlock()
-      case invocationResults := <-chanSendInvocationToRegistry:
-        invocationResults.lock.RLock()
-        storeInvocationResultsInRegistryLocker([]string{constants.LockerClientKey, constants.LockerInvocationsKey,
-          fmt.Sprint(invocationResults.InvocationIndex)}, invocationResults)
-        invocationResults.lock.RUnlock()
-      case invocationIndex := <-chanLockInvocationInRegistry:
-        lockInvocationRegistryLocker(invocationIndex)
-      case stopSender = <-stopRegistrySender:
-        break RegistrySend
-      }
+    if len(chanSendTargetsToRegistry) > 50 {
+      log.Printf("registrySender[%d]: chanSendTargetsToRegistry length %d\n", id, len(chanSendTargetsToRegistry))
     }
-    if stopSender {
-      break
+    if len(chanSendInvocationToRegistry) > 50 {
+      log.Printf("registrySender[%d]: chanSendInvocationToRegistry length %d\n", id, len(chanSendInvocationToRegistry))
+    }
+    hasTargetsResults := false
+    collectedTargetsResults := map[string]*TargetResults{}
+    select {
+    case targetResult := <-chanSendTargetsToRegistry:
+      targetResult.lock.Lock()
+      if !targetResult.pendingRegistrySend {
+        hasTargetsResults = true
+        targetResult.pendingRegistrySend = true
+        collectedTargetsResults[targetResult.Target] = targetResult
+      }
+      targetResult.lock.Unlock()
+    case invocationResults := <-chanSendInvocationToRegistry:
+      invocationResults.lock.RLock()
+      sendResultToRegistry([]string{constants.LockerClientKey, constants.LockerInvocationsKey,
+        fmt.Sprint(invocationResults.InvocationIndex)}, invocationResults)
+      invocationResults.lock.RUnlock()
+    case <-stopRegistrySender:
+      break RegistrySend
+    }
+    if hasTargetsResults {
+      for i := 0; i < 5; i++ {
+      MoreResults:
+        for {
+          select {
+          case targetResult := <-chanSendTargetsToRegistry:
+            targetResult.lock.Lock()
+            if !targetResult.pendingRegistrySend || collectedTargetsResults[targetResult.Target] != nil {
+              targetResult.pendingRegistrySend = true
+              collectedTargetsResults[targetResult.Target] = targetResult
+            }
+            targetResult.lock.Unlock()
+          default:
+            break MoreResults
+          }
+        }
+        if i < 4 {
+          time.Sleep(time.Second)
+        }
+      }
+      for target, targetResult := range collectedTargetsResults {
+        targetResult.lock.Lock()
+        sendResultToRegistry([]string{constants.LockerClientKey, target}, targetResult)
+        targetResult.pendingRegistrySend = false
+        targetResult.lock.Unlock()
+      }
     }
   }
 }
@@ -675,14 +696,14 @@ func startRegistrySender() {
   defer registrySendLock.Unlock()
   if !sendingToRegistry {
     sendingToRegistry = true
-    for i := 1; i < 10; i++ {
+    for i := 1; i < 5; i++ {
       go registrySender(i)
     }
   }
 }
 
 func StopRegistrySender() {
-  for i := 1; i < 10; i++ {
+  for i := 1; i < 5; i++ {
     stopRegistrySender <- true
   }
 }

@@ -1,19 +1,26 @@
 package intercept
 
 import (
-	"bufio"
-	"net"
-	"net/http"
+  "bufio"
+  "net"
+  "net/http"
 )
+
+type Chunker interface {
+  SetChunked()
+}
 
 type InterceptResponseWriter struct {
   http.ResponseWriter
   http.Hijacker
+  http.Flusher
+  parent     Chunker
   StatusCode int
   Data       []byte
   Hold       bool
   Hijacked   bool
   Chunked    bool
+  BodyLength int
 }
 
 func (rw *InterceptResponseWriter) WriteHeader(statusCode int) {
@@ -24,7 +31,8 @@ func (rw *InterceptResponseWriter) WriteHeader(statusCode int) {
 }
 
 func (rw *InterceptResponseWriter) Write(b []byte) (int, error) {
-  if !rw.Hold || rw.Chunked  {
+  rw.BodyLength += len(b)
+  if !rw.Hold || rw.Chunked {
     if len(rw.Data) > 0 {
       rw.ResponseWriter.Write(rw.Data)
       rw.Data = []byte{}
@@ -37,9 +45,21 @@ func (rw *InterceptResponseWriter) Write(b []byte) (int, error) {
 }
 
 func (rw *InterceptResponseWriter) Flush() {
+  rw.SetChunked()
+  if rw.Flusher != nil {
+    rw.Flusher.Flush()
+  }
+}
+
+func (rw *InterceptResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+  rw.Hijacked = true
+  return rw.Hijacker.Hijack()
+}
+
+func (rw *InterceptResponseWriter) SetChunked() {
   rw.Chunked = true
-  if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
-    flusher.Flush()
+  if rw.parent != nil {
+    rw.parent.SetChunked()
   }
 }
 
@@ -53,14 +73,15 @@ func (rw *InterceptResponseWriter) Proceed() {
   }
 }
 
-func (rw *InterceptResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-  rw.Hijacked = true
-  return rw.Hijacker.Hijack()
-}
-
 func NewInterceptResponseWriter(w http.ResponseWriter, hold bool) *InterceptResponseWriter {
-  if h, ok := w.(http.Hijacker); ok {
-    return &InterceptResponseWriter{ResponseWriter: w, Hijacker: h, Hold: hold}
+  parent, _ := w.(Chunker)
+  hijacker, _ := w.(http.Hijacker)
+  flusher, _ := w.(http.Flusher)
+  return &InterceptResponseWriter{
+    ResponseWriter: w,
+    Hijacker:       hijacker,
+    Flusher:        flusher,
+    parent:         parent,
+    Hold:           hold,
   }
-  return &InterceptResponseWriter{ResponseWriter: w, Hold: hold}
 }

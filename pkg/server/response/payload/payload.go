@@ -58,27 +58,27 @@ var (
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   rootRouter = root
   matchRouter = rootRouter.NewRoute().Subrouter()
-  payloadRouter := r.PathPrefix("/payload").Subrouter()
-  util.AddRoute(payloadRouter, "/set/default/{size}", setResponsePayload, "POST")
-  util.AddRoute(payloadRouter, "/set/default", setResponsePayload, "POST")
-  util.AddRouteQ(payloadRouter, "/set/uri", setResponsePayload, "uri", "{uri}", "POST")
-  util.AddRouteQ(payloadRouter, "/set/header/{header}/{value}", setResponsePayload, "uri", "{uri}", "POST")
-  util.AddRoute(payloadRouter, "/set/header/{header}/{value}", setResponsePayload, "POST")
-  util.AddRouteQ(payloadRouter, "/set/header/{header}", setResponsePayload, "uri", "{uri}", "POST")
-  util.AddRoute(payloadRouter, "/set/header/{header}", setResponsePayload, "POST")
-  util.AddRouteQ(payloadRouter, "/set/query/{q}/{value}", setResponsePayload, "uri", "{uri}", "POST")
-  util.AddRoute(payloadRouter, "/set/query/{q}/{value}", setResponsePayload, "POST")
-  util.AddRouteQ(payloadRouter, "/set/query/{q}", setResponsePayload, "uri", "{uri}", "POST")
-  util.AddRoute(payloadRouter, "/set/query/{q}", setResponsePayload, "POST")
-  util.AddRouteQ(payloadRouter, "/set/body/contains/{keywords}", setResponsePayload, "uri", "{uri}", "POST")
-  util.AddRoute(payloadRouter, "/clear", clearResponsePayload, "POST")
-  util.AddRoute(payloadRouter, "", getResponsePayload, "GET")
-  util.AddRoute(parent, "/payload/{size}", respondWithPayload, "GET", "PUT", "POST")
-  util.AddRoute(parent, "/stream/size/{size}/duration/{duration}/delay/{delay}", streamResponse, "GET", "PUT", "POST")
-  util.AddRoute(parent, "/stream/chunk/{chunk}/duration/{duration}/delay/{delay}", streamResponse, "GET", "PUT", "POST")
-  util.AddRoute(parent, "/stream/chunk/{chunk}/count/{count}/delay/{delay}", streamResponse, "GET", "PUT", "POST")
-  util.AddRoute(parent, "/stream/duration/{duration}/delay/{delay}", streamResponse, "GET", "PUT", "POST")
-  util.AddRoute(parent, "/stream/count/{count}/delay/{delay}", streamResponse, "GET", "PUT", "POST")
+  payloadRouter := util.PathRouter(r, "/payload")
+  util.AddRouteWithPort(payloadRouter, "/set/default/{size}", setResponsePayload, "POST")
+  util.AddRouteWithPort(payloadRouter, "/set/default", setResponsePayload, "POST")
+  util.AddRouteQWithPort(payloadRouter, "/set/uri", setResponsePayload, "uri", "{uri}", "POST")
+  util.AddRouteQWithPort(payloadRouter, "/set/header/{header}={value}", setResponsePayload, "uri", "{uri}", "POST")
+  util.AddRouteWithPort(payloadRouter, "/set/header/{header}={value}", setResponsePayload, "POST")
+  util.AddRouteQWithPort(payloadRouter, "/set/header/{header}", setResponsePayload, "uri", "{uri}", "POST")
+  util.AddRouteWithPort(payloadRouter, "/set/header/{header}", setResponsePayload, "POST")
+  util.AddRouteQWithPort(payloadRouter, "/set/query/{q}={value}", setResponsePayload, "uri", "{uri}", "POST")
+  util.AddRouteWithPort(payloadRouter, "/set/query/{q}={value}", setResponsePayload, "POST")
+  util.AddRouteQWithPort(payloadRouter, "/set/query/{q}", setResponsePayload, "uri", "{uri}", "POST")
+  util.AddRouteWithPort(payloadRouter, "/set/query/{q}", setResponsePayload, "POST")
+  util.AddRouteQWithPort(payloadRouter, "/set/body~{keywords}", setResponsePayload, "uri", "{uri}", "POST")
+  util.AddRouteWithPort(payloadRouter, "/clear", clearResponsePayload, "POST")
+  util.AddRouteWithPort(payloadRouter, "", getResponsePayload, "GET")
+  util.AddRoute(root, "/payload/{size}", respondWithPayload, "GET", "PUT", "POST")
+  util.AddRoute(root, "/stream/payload={size}/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
+  util.AddRoute(root, "/stream/chunksize={chunk}/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
+  util.AddRoute(root, "/stream/chunksize={chunk}/count={count}/delay={delay}", streamResponse, "GET", "PUT", "POST")
+  util.AddRoute(root, "/stream/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
+  util.AddRoute(root, "/stream/count={count}/delay={delay}", streamResponse, "GET", "PUT", "POST")
 }
 
 func (pr *PortResponse) init() {
@@ -350,7 +350,7 @@ func (pr *PortResponse) setResponsePayloadForURIWithBody(uri, keywords, payload,
 }
 
 func getPortResponse(r *http.Request) *PortResponse {
-  port := util.GetListenerPort(r)
+  port := util.GetRequestOrListenerPort(r)
   responseLock.Lock()
   defer responseLock.Unlock()
   pr := portResponses[port]
@@ -364,9 +364,13 @@ func getPortResponse(r *http.Request) *PortResponse {
 
 func setResponsePayload(w http.ResponseWriter, r *http.Request) {
   msg := ""
+  port := util.GetRequestOrListenerPort(r)
   payload := util.Read(r.Body)
   pr := getPortResponse(r)
   contentType := r.Header.Get("Content-Type")
+  if contentType == "" {
+    contentType = "plain/text"
+  }
   uri := util.GetStringParamValue(r, "uri")
   header := util.GetStringParamValue(r, "header")
   query := util.GetStringParamValue(r, "q")
@@ -374,38 +378,49 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
   keywords := util.GetStringParamValue(r, "keywords")
   if header != "" && uri != "" {
     if err := pr.setResponsePayloadForURIWithHeader(uri, header, value, payload, contentType); err == nil {
-      msg = fmt.Sprintf("Payload set for URI [%s] and header [%s : %s] : [%s: %s]", uri, header, value, contentType, payload)
+      msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] and header [%s : %s] : [%s: %s]",
+        port, uri, header, value, contentType, payload)
     } else {
-      msg = fmt.Sprintf("Failed to set payload for URI [%s] and header [%s : %s] : [%s: %s] with error [%s]", uri, header, value, contentType, payload, err.Error())
+      msg = fmt.Sprintf("Port [%s] Failed to set payload for URI [%s] and header [%s : %s] : [%s: %s] with error [%s]",
+        port, uri, header, value, contentType, payload, err.Error())
     }
   } else if query != "" && uri != "" {
     if err := pr.setResponsePayloadForURIWithQuery(uri, query, value, payload, contentType); err == nil {
-      msg = fmt.Sprintf("Payload set for URI [%s] and query [%s : %s] : [%s: %s]", uri, query, value, contentType, payload)
+      msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] and query [%s : %s] : [%s: %s]",
+        port, uri, query, value, contentType, payload)
     } else {
-      msg = fmt.Sprintf("Failed to set payload for URI [%s] and query [%s : %s] : [%s: %s] with error [%s]", uri, query, value, contentType, payload, err.Error())
+      msg = fmt.Sprintf("Port [%s] Failed to set payload for URI [%s] and query [%s : %s] : [%s: %s] with error [%s]",
+        port, uri, query, value, contentType, payload, err.Error())
     }
   } else if uri != "" && keywords != "" {
     if err := pr.setResponsePayloadForURIWithBody(uri, keywords, payload, contentType); err == nil {
-      msg = fmt.Sprintf("Payload set for URI [%s] and keywords [%+v] : [%s: %s]", uri, keywords, contentType, payload)
+      msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] and keywords [%+v] : [%s: %s]",
+        port, uri, keywords, contentType, payload)
     } else {
-      msg = fmt.Sprintf("Failed to set payload for URI [%s] and keywords [%+v] : [%s: %s] with error [%s]", uri, keywords, contentType, payload, err.Error())
+      msg = fmt.Sprintf("Port [%s] Failed to set payload for URI [%s] and keywords [%+v] : [%s: %s] with error [%s]",
+        port, uri, keywords, contentType, payload, err.Error())
     }
   } else if uri != "" {
     pr.setURIResponsePayload(uri, payload, contentType)
-    msg = fmt.Sprintf("Payload set for URI [%s] : [%s: %s]", uri, contentType, payload)
+    msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] : [%s: %s]",
+      port, uri, contentType, payload)
   } else if header != "" {
     pr.setHeaderResponsePayload(header, value, payload, contentType)
-    msg = fmt.Sprintf("Payload set for header [%s : %s] : [%s: %s]", header, value, contentType, payload)
+    msg = fmt.Sprintf("Port [%s] Payload set for header [%s : %s] : [%s: %s]",
+      port, header, value, contentType, payload)
   } else if query != "" {
     pr.setQueryResponsePayload(query, value, payload, contentType)
-    msg = fmt.Sprintf("Payload set for query [%s : %s] : [%s: %s]", query, value, contentType, payload)
+    msg = fmt.Sprintf("Port [%s] Payload set for query [%s : %s] : [%s: %s]",
+      port, query, value, contentType, payload)
   } else {
     size := util.GetSizeParam(r, "size")
     pr.setDefaultResponsePayload(payload, contentType, size)
     if size > 0 {
-      msg = fmt.Sprintf("Default Payload set with content-type: %s, size: %d", contentType, size)
+      msg = fmt.Sprintf("Port [%s] Default Payload set with content-type: %s, size: %d",
+        port, contentType, size)
     } else {
-      msg = fmt.Sprintf("Default Payload set : [%s: %s]", pr.DefaultResponsePayload.ContentType, pr.DefaultResponsePayload.Payload)
+      msg = fmt.Sprintf("Port [%s] Default Payload set with content-type: %s, size: %d",
+        port, contentType, len(pr.DefaultResponsePayload.Payload))
     }
   }
   w.WriteHeader(http.StatusOK)
@@ -416,11 +431,11 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
 
 func clearResponsePayload(w http.ResponseWriter, r *http.Request) {
   getPortResponse(r).init()
-  msg := "Response Payload Cleared"
+  msg := fmt.Sprintf("Port [%s] Response Payload Cleared", util.GetRequestOrListenerPort(r))
   w.WriteHeader(http.StatusOK)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
-  events.SendRequestEvent(msg, "", r)
+  events.SendRequestEvent("Response Payload Cleared", msg, r)
 }
 
 func getResponsePayload(w http.ResponseWriter, r *http.Request) {
@@ -511,12 +526,12 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
     if f, ok := w.(http.Flusher); ok {
       flusher = f
       if irw, ok := w.(*intercept.InterceptResponseWriter); ok {
-        irw.Chunked = true
+        irw.SetChunked()
       }
       writer = w
     }
   }
-  if conn == nil && flusher == nil {
+  if writer == nil && flusher == nil {
     w.WriteHeader(http.StatusInternalServerError)
     fmt.Fprintln(w, "Cannot stream")
     return
@@ -662,20 +677,28 @@ func (pr *PortResponse) getResponsePayload(r *http.Request) (*ResponsePayload, b
 
 func handleURI(w http.ResponseWriter, r *http.Request) {
   pr := getPortResponse(r)
+  payload := ""
+  contentType := ""
   pr.lock.RLock()
-  defer pr.lock.RUnlock()
   rp, matched := pr.getResponsePayload(r)
   if !matched && pr.DefaultResponsePayload != nil {
     rp = pr.DefaultResponsePayload
     matched = true
   }
   if matched {
-    payload := getFilledPayload(rp, r)
-    length := len(payload)
-    w.Header().Set("Content-Length", strconv.Itoa(length))
-    w.Header().Set("Content-Type", rp.ContentType)
+    payload = getFilledPayload(rp, r)
+    contentType = rp.ContentType
+  }
+  pr.lock.RUnlock()
+  if matched {
+    length := strconv.Itoa(len(payload))
+    w.Header().Set("Content-Length", length)
+    w.Header().Set("Content-Type", contentType)
+    w.Header().Set("Goto-Payload-Length", length)
+    w.Header().Set("Goto-Payload-Content-Type", contentType)
     fmt.Fprint(w, payload)
-    msg := fmt.Sprintf("Responding with configured payload of length [%d] and content type [%s] for URI [%s]", length, rp.ContentType, r.RequestURI)
+    msg := fmt.Sprintf("Responding with configured payload of length [%s] and content type [%s] for URI [%s]",
+      length, contentType, r.RequestURI)
     util.AddLogMessage(msg, r)
     events.SendRequestEvent("Response Payload Applied", msg, r)
   }
@@ -684,18 +707,15 @@ func handleURI(w http.ResponseWriter, r *http.Request) {
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     var uriResponseMatch *ResponsePayload
-    pr := getPortResponse(r)
     if !util.IsAdminRequest(r) && !util.IsPayloadRequest(r) {
-      pr.lock.RLock()
-      for _, rp := range pr.allURIResponsePayloads {
-        if rp.uriRegExp.MatchString(r.RequestURI) {
-          uriResponseMatch = rp
-          break
+      pr := getPortResponse(r)
+      if rp, found := pr.getResponsePayload(r); found {
+        uriResponseMatch = rp
+        if rp.router != nil {
+          uriResponseMatch.router.ServeHTTP(w, r)
+        } else {
+          handleURI(w, r)
         }
-      }
-      pr.lock.RUnlock()
-      if uriResponseMatch != nil {
-        uriResponseMatch.router.ServeHTTP(w, r)
       }
     }
     if next != nil && (uriResponseMatch == nil || util.IsStatusRequest(r) || util.IsDelayRequest(r)) {

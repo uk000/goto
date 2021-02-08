@@ -43,8 +43,11 @@ func Echo(w http.ResponseWriter, r *http.Request) {
   response["RequestURI"] = r.RequestURI
   response["RequestHeaders"] = r.Header
   response["RequestQuery"] = r.URL.Query()
-  body, _ := ioutil.ReadAll(r.Body)
-  response["RequestBody"] = string(body)
+  if r.ProtoMajor == 1 {
+    body, _ := ioutil.ReadAll(r.Body)
+    response["RequestBody"] = string(body)
+  }
+  r.Body.Close()
   fmt.Fprint(w, util.ToJSON(response))
 }
 

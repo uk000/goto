@@ -13,6 +13,7 @@ import (
 )
 
 type Bypass struct {
+  Port         string                 `json:"port"`
   Uris         map[string]interface{} `json:"uris"`
   BypassStatus int                    `json:"bypassStatus"`
   statusCount  int
@@ -26,15 +27,15 @@ var (
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  bypassRouter := r.PathPrefix("/bypass").Subrouter()
-  util.AddRouteQ(bypassRouter, "/add", addBypassURI, "uri", "{uri}", "PUT", "POST")
-  util.AddRouteQ(bypassRouter, "/remove", removeBypassURI, "uri", "{uri}", "PUT", "POST")
-  util.AddRoute(bypassRouter, "/status/set/{status}", setOrGetBypassStatus, "PUT", "POST")
-  util.AddRoute(bypassRouter, "/status", setOrGetBypassStatus)
-  util.AddRoute(bypassRouter, "/clear", clearBypassURIs, "PUT", "POST")
-  util.AddRouteQ(bypassRouter, "/counts", getBypassCallCount, "uri", "{uri}", "GET")
-  util.AddRoute(bypassRouter, "/counts", getBypassCallCount, "GET")
-  util.AddRoute(bypassRouter, "", getBypassList, "GET")
+  bypassRouter := util.PathRouter(r, "/bypass")
+  util.AddRouteQWithPort(bypassRouter, "/add", addBypassURI, "uri", "{uri}", "PUT", "POST")
+  util.AddRouteQWithPort(bypassRouter, "/remove", removeBypassURI, "uri", "{uri}", "PUT", "POST")
+  util.AddRouteWithPort(bypassRouter, "/set/status={status}", setOrGetBypassStatus, "PUT", "POST")
+  util.AddRouteWithPort(bypassRouter, "/status", setOrGetBypassStatus)
+  util.AddRouteWithPort(bypassRouter, "/clear", clearBypassURIs, "PUT", "POST")
+  util.AddRouteQWithPort(bypassRouter, "/counts", getBypassCallCount, "uri", "{uri}", "GET")
+  util.AddRouteWithPort(bypassRouter, "/counts", getBypassCallCount, "GET")
+  util.AddRouteWithPort(bypassRouter, "", getBypassList, "GET")
 }
 
 func (b *Bypass) init() {
@@ -49,7 +50,7 @@ func (b *Bypass) addURI(w http.ResponseWriter, r *http.Request) {
     defer b.lock.Unlock()
     uri = strings.ToLower(uri)
     b.Uris[uri] = 0
-    msg = fmt.Sprintf("Bypass URI %s added", uri)
+    msg = fmt.Sprintf("Port [%s] Bypass URI [%s] added", b.Port, uri)
     events.SendRequestEvent("Bypass URI Added", msg, r)
     w.WriteHeader(http.StatusOK)
   } else {
@@ -67,7 +68,7 @@ func (b *Bypass) removeURI(w http.ResponseWriter, r *http.Request) {
     defer b.lock.Unlock()
     uri = strings.ToLower(uri)
     delete(b.Uris, uri)
-    msg = fmt.Sprintf("Bypass URI %s removed", uri)
+    msg = fmt.Sprintf("Port [%s] Bypass URI [%s] removed", b.Port, uri)
     events.SendRequestEvent("Bypass URI Removed", msg, r)
     w.WriteHeader(http.StatusOK)
   } else {
@@ -87,9 +88,9 @@ func (b *Bypass) setStatus(w http.ResponseWriter, r *http.Request) {
     b.BypassStatus = statusCode
     b.statusCount = times
     if times > 0 {
-      msg = fmt.Sprintf("Bypass Status set to %d for next %d calls", statusCode, times)
+      msg = fmt.Sprintf("Port [%s] Bypass Status set to [%d] for next [%d] calls", b.Port, statusCode, times)
     } else {
-      msg = fmt.Sprintf("Bypass Status set to %d forever", statusCode)
+      msg = fmt.Sprintf("Port [%s] Bypass Status set to [%d] forever", b.Port, statusCode)
     }
     events.SendRequestEvent("Bypass Status Configured", msg, r)
     w.WriteHeader(http.StatusOK)
@@ -105,11 +106,11 @@ func (b *Bypass) clear(w http.ResponseWriter, r *http.Request) {
   b.lock.Lock()
   defer b.lock.Unlock()
   b.Uris = map[string]interface{}{}
-  msg := "Bypass URIs Cleared"
+  msg := fmt.Sprintf("Port[%s] Bypass URIs Cleared", b.Port)
   w.WriteHeader(http.StatusOK)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
-  events.SendRequestEvent(msg, "", r)
+  events.SendRequestEvent("Bypass URIs Cleared", msg, r)
 }
 
 func (b *Bypass) getCallCounts(w http.ResponseWriter, r *http.Request) {
@@ -135,10 +136,10 @@ func (b *Bypass) getCallCounts(w http.ResponseWriter, r *http.Request) {
 func getBypassForPort(r *http.Request) *Bypass {
   bypassLock.Lock()
   defer bypassLock.Unlock()
-  listenerPort := util.GetListenerPort(r)
+  listenerPort := util.GetRequestOrListenerPort(r)
   b, present := bypassByPort[listenerPort]
   if !present {
-    b = &Bypass{}
+    b = &Bypass{Port: listenerPort}
     b.init()
     bypassByPort[listenerPort] = b
   }

@@ -15,8 +15,11 @@ IMAGE := uk0000/goto
 
 all: build
 
+gen:
+	protoc --proto_path=pkg/grpc pkg/grpc/*.proto --go_out=plugins=grpc:pkg/grpc/pb
+
 clean:
-	rm -rf goto
+	rm -rf pkg/server/grpc/pb/*.go
 
 build: $(GO_FILES)
 	GOOS=$(GOOS) GOARCH=amd64 go build -o $(OUT) -ldflags="-extldflags \"-static\" -w -s -X goto/cmd.Version=$(VERSION) -X goto/cmd.Commit=$(COMMIT)" .

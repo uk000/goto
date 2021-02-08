@@ -29,6 +29,7 @@ type Listener struct {
   Cert       []byte         `json:"-"`
   Key        []byte         `json:"-"`
   isHTTP     bool           `json:"-"`
+  isGRPC     bool           `json:"-"`
   isTCP      bool           `json:"-"`
   isUDP      bool           `json:"-"`
   Listener   net.Listener   `json:"-"`
@@ -43,8 +44,9 @@ var (
   listeners           = map[int]*Listener{}
   listenerGenerations = map[int]int{}
   initialListeners    = []*Listener{}
-  httpServer          func(*Listener)
-  tcpServer           func(string, int, net.Listener)
+  ServeHTTPListener   func(*Listener)
+  ServeGRPCListener   func(*Listener)
+  StartTCPServer      func(string, int, net.Listener)
   DefaultLabel        string
   serverStarted       bool
   listenersLock       sync.RWMutex
@@ -70,15 +72,16 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   global.GetListenerLabelForPort = GetListenerLabelForPort
 }
 
-func Configure(hs func(*Listener), ts func(string, int, net.Listener)) {
+func Configure(hs func(*Listener), gs func(*Listener), ts func(string, int, net.Listener)) {
   DefaultListener.Label = util.GetHostLabel()
   DefaultListener.Port = global.ServerPort
   DefaultListener.Protocol = "HTTP"
   DefaultListener.isHTTP = true
   DefaultListener.TLS = false
   DefaultListener.Open = true
-  httpServer = hs
-  tcpServer = ts
+  ServeHTTPListener = hs
+  ServeGRPCListener = gs
+  StartTCPServer = ts
 }
 
 func StartInitialListeners() {
@@ -97,11 +100,9 @@ func AddInitialListeners(portList []string) {
       if !ports[port] {
         protocol := "http"
         if len(portInfo) > 1 && portInfo[1] != "" {
-          portInfo[1] = strings.ToLower(portInfo[1])
-          if strings.EqualFold(portInfo[1], "http") || strings.EqualFold(portInfo[1], "tcp") || strings.EqualFold(portInfo[1], "udp") {
-            protocol = portInfo[1]
-          } else {
-            log.Fatalf("Error: Invalid protocol [%s]\n", portInfo[1])
+          protocol = strings.ToLower(portInfo[1])
+          if !strings.EqualFold(protocol, "http") && !strings.EqualFold(protocol, "grpc") && !strings.EqualFold(protocol, "udp") {
+            protocol = "tcp"
           }
         }
         ports[port] = true
@@ -109,7 +110,8 @@ func AddInitialListeners(portList []string) {
           global.ServerPort = port
         } else {
           listenersLock.Lock()
-          initialListeners = append(initialListeners, &Listener{Port: port, Protocol: protocol, Open: true})
+          l := &Listener{Port: port, Protocol: protocol, Open: true}
+          initialListeners = append(initialListeners, l)
           listenersLock.Unlock()
         }
       } else {
@@ -129,7 +131,6 @@ func (l *Listener) initListener() bool {
     if x509Cert, err := tls.X509KeyPair(l.Cert, l.Key); err == nil {
       tlsConfig = &tls.Config{
         Certificates: []tls.Certificate{x509Cert},
-        NextProtos:   []string{"http/1.1"},
       }
     } else {
       log.Printf("Failed to parse certificate with error: %s\n", err.Error())
@@ -172,12 +173,14 @@ func (l *Listener) openListener() bool {
     listenerGenerations[l.Port] = listenerGenerations[l.Port] + 1
     l.Generation = listenerGenerations[l.Port]
     l.ListenerID = fmt.Sprintf("%d-%d", l.Port, l.Generation)
-    log.Printf("Opening listener [%s] on port [%d].", l.ListenerID, l.Port)
+    log.Printf("Opening [%s] listener [%s] on port [%d].", l.Protocol, l.ListenerID, l.Port)
     if l.isHTTP {
-      httpServer(l)
+      ServeHTTPListener(l)
+    } else if l.isGRPC {
+      ServeGRPCListener(l)
     } else if l.isTCP {
       l.TCP.ListenerID = l.ListenerID
-      tcpServer(l.ListenerID, l.Port, l.Listener)
+      StartTCPServer(l.ListenerID, l.Port, l.Listener)
     }
     l.Open = true
     l.TLS = len(l.Cert) > 0 && len(l.Key) > 0
@@ -269,12 +272,13 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
   l.Protocol = strings.ToLower(l.Protocol)
   if l.Port <= 0 || l.Port > 65535 {
     msg = fmt.Sprintf("[Invalid port number: %d]", l.Port)
-  } else if !strings.EqualFold(l.Protocol, "http") && !strings.EqualFold(l.Protocol, "tcp") && !strings.EqualFold(l.Protocol, "udp") {
-    msg = fmt.Sprintf("[Invalid protocol: %s]", l.Protocol)
+  }
+  if strings.EqualFold(l.Protocol, "http") {
+    l.isHTTP = true
+  } else if strings.EqualFold(l.Protocol, "grpc") {
+    l.isGRPC = true
   } else if strings.EqualFold(l.Protocol, "udp") {
     l.isUDP = true
-  } else if strings.EqualFold(l.Protocol, "http") {
-    l.isHTTP = true
   } else {
     l.isTCP = true
     l.TCP, msg = tcp.InitTCPConfig(l.Port, l.TCP)
@@ -435,7 +439,7 @@ func GetListenerID(port int) string {
 }
 
 func GetListenerLabel(r *http.Request) string {
-  return GetListenerLabelForPort(util.GetListenerPortNum(r))
+  return GetListenerLabelForPort(util.GetRequestOrListenerPortNum(r))
 }
 
 func GetListenerLabelForPort(port int) string {
@@ -451,7 +455,7 @@ func GetListenerLabelForPort(port int) string {
 }
 
 func SetListenerLabel(r *http.Request) string {
-  port := util.GetListenerPortNum(r)
+  port := util.GetRequestOrListenerPortNum(r)
   label := util.GetStringParamValue(r, "label")
   listenersLock.Lock()
   l := listeners[port]

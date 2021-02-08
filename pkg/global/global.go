@@ -25,14 +25,14 @@ var (
   Stopping                   bool = false
   EnableServerLogs           bool = true
   EnableAdminLogs            bool = true
+  EnableClientLogs           bool = true
   EnableInvocationLogs       bool = true
   EnableRegistryLogs         bool = true
-  EnableRegistryLockerLogs   bool = true
-  EnableRegistryEventsLogs   bool = true
+  EnableRegistryLockerLogs   bool = false
+  EnableRegistryEventsLogs   bool = false
   EnableRegistryReminderLogs bool = false
-  EnablePeerHealthLogs       bool = false
-  EnableClientLogs           bool = true
-  EnableProbeLogs            bool = true
+  EnablePeerHealthLogs       bool = true
+  EnableProbeLogs            bool = false
   EnableMetricsLogs          bool = true
   GetPeers                   func(string, *http.Request) map[string]string
   IsReadinessProbe           func(*http.Request) bool

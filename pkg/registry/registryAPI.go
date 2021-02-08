@@ -127,8 +127,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "/track/headers/{headers}", addPeersTrackingHeaders, "POST", "PUT")
   util.AddRoute(peersRouter, "/track/headers", getPeersTrackingHeaders, "GET")
 
-  util.AddRouteQ(peersRouter, "/probe/{type}/set", setPeersProbe, "uri", "{uri}", "POST", "PUT")
-  util.AddRoute(peersRouter, "/probe/{type}/status/set/{status}", setPeersProbeStatus, "POST", "PUT")
+  util.AddRouteQ(peersRouter, "/probes/{type}/set", setPeersProbe, "uri", "{uri}", "POST", "PUT")
+  util.AddRoute(peersRouter, "/probes/{type}/set/status={status}", setPeersProbeStatus, "POST", "PUT")
   util.AddRoute(peersRouter, "/probes", getPeersProbes, "GET")
 
   util.AddRouteQ(peersRouter, "/{peer}/call", callPeer, "uri", "{uri}", "GET", "POST", "PUT")

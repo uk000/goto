@@ -745,7 +745,7 @@ func (pr *PortRegistry) setProbe(isReadiness bool, uri string, status int) {
 }
 
 func (pr *PortRegistry) sendProbe(probeType, uri string) map[string]map[string]bool {
-  return invokeForPods(pr.loadAllPeerPods(), "POST", fmt.Sprintf("/probe/%s/set?uri=%s", probeType, uri), http.StatusOK, 3, false,
+  return invokeForPods(pr.loadAllPeerPods(), "POST", fmt.Sprintf("/probes/%s/set?uri=%s", probeType, uri), http.StatusOK, 3, false,
     func(peer string, pod *Pod, response string, err error) {
       if err == nil {
         log.Printf("Pushed %s URI %s to peer %s address %s\n", probeType, uri, peer, pod.Address)
@@ -756,7 +756,7 @@ func (pr *PortRegistry) sendProbe(probeType, uri string) map[string]map[string]b
 }
 
 func (pr *PortRegistry) sendProbeStatus(probeType string, status int) map[string]map[string]bool {
-  return invokeForPods(pr.loadAllPeerPods(), "POST", fmt.Sprintf("/probe/%s/status/set/%d", probeType, status), http.StatusOK, 3, false,
+  return invokeForPods(pr.loadAllPeerPods(), "POST", fmt.Sprintf("/probes/%s/set/status=%d", probeType, status), http.StatusOK, 3, false,
     func(peer string, pod *Pod, response string, err error) {
       if err == nil {
         log.Printf("Pushed %s Status %d to peer %s address %s\n", probeType, status, peer, pod.Address)

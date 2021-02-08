@@ -2,7 +2,7 @@
 # goto
 
 ## What is it?
-An HTTP server+client testing tool in one. 
+A multi-faceted application to assist with various kinds of automated testing. It can act as a Client, a Server, a Proxy, a Job Executor, a Registry, or even all of these at once.
 
 ## Why?
 It's hard to find some of these features together in a single tool
@@ -14,6 +14,34 @@ Or build it locally on your machine
 go build -o goto .
 ```
 
+## But what can it do?
+- Say you need an application deployed as a service in k8s or on VMs, that can respond to requests on several ports using HTTP, HTTP/2, GRPC or TCP protocols both over plain text and TLS. `Goto` is what you need.
+- Say you want to test a client or a proxy, and want to introduce some chaos in your testing, so you need a service that can open or close a port on the fly, or can convert a port from plaintext to TLS and vice versa on the fly. `Goto` does it.
+- Say you need to test a client against different specific response payloads, so you need a substitute mock service that can stand in for the real service, where you can configure a payload on the fly for specific request URIs, headers, etc. Go `Goto`.
+- A lot more scenarios can benefit from `goto`. See some more scenarios further below in the doc.
+
+## Some simple usage examples?
+- Run `goto` as a server with multiple ports (first port is the default bootstrap port):
+  ```
+  goto --ports 8080,8081/http,8082/grpc
+  ```
+- Open a new port with GRPC protocol
+  ```
+  curl -X POST localhost:8080/listeners/add --data '{"port":9091, "protocol":"grpc", "open":true}'
+  ```
+- Close a non-default port on the fly
+  ```
+  curl -X POST localhost:8080/listeners/8081/close
+  ```
+- Add TLS certs for a non-default port to serve TLS traffic 
+  ```
+  curl -X PUT localhost:8080/listeners/8081/cert/add --data-binary @./goto.cert
+  curl -X PUT localhost:8080/listeners/8081/key/add --data-binary @./goto.key
+  curl -X POST localhost:8080/listeners/8081/reopen
+  ```
+- More to come... 
+
+
 ## Show me the money!
 Keep reading...
 
@@ -22,7 +50,8 @@ Keep reading...
 
 ---
 
-# Flow Diagrams
+# Overview
+
 
 Check these flow diagrams to get a visual overview of `Goto` behavior and usage.
 
@@ -86,7 +115,7 @@ As a server, it can act as an HTTP proxy that lets you intercept HTTP requests a
 
 As a client, it allows sending requests to various destinations and tracking responses by headers and response status code.
 
-The application exposes both client and server features via various management REST APIs as described below. Additionally, it can respond to all undefined URIs with a configurable status code.
+The application exposes all its features via REST APIs as described below. Additionally, it can respond to all undefined URIs with a configurable status code.
 
 The docker image is built with several useful utilities included: `curl`, `wget`, `nmap`, `iputils`, `openssl`, `jq`, etc.
 
@@ -104,6 +133,7 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 * [Server Listeners](#server-listeners)
 * [Server Listener Label](#server-listener-label)
 * [TCP Server](#server-tcp)
+* [GRPC Server](#server-grpc)
 * [Request Headers Tracking](#server-request-headers-tracking)
 * [Request Timeout](#server-request-timeout)
 * [URIs](#server-uris)
@@ -116,6 +146,7 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 * [Ad-hoc Payload](#server-ad-hoc-payload)
 * [Stream (Chunked) Payload](#server-stream-payload)
 * [Response Status](#server-response-status)
+* [Response Triggers](#server-response-triggers)
 * [Status API](#server-status)
 * [Delay API](#server-delay)
 * [Echo API](#server-echo)
@@ -123,9 +154,6 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 
 ### Proxy
 * [Proxy Features](#proxy-features)
-
-### Trigger
-* [Trigger Features](#triggers-features)
 
 ### Jobs
 * [Jobs Features](#jobs-features)
@@ -253,9 +281,19 @@ The application accepts the following command arguments:
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--peerHealthLogs={true|false}</pre></td>
-          <td>Enable/Disable logging of requests received from Registry for peer health checks </td>
-          <td rowspan="1">true</td>
+          <td rowspan="1"><pre>--clientLogs={true|false}</pre></td>
+          <td>Enable/Disable logging of client activities. </td>
+          <td rowspan="1">false</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--invocationLogs={true|false}</pre></td>
+          <td>Enable/Disable client's target invocation logs. </td>
+          <td rowspan="1">false</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--registryLogs={true|false}</pre></td>
+          <td>Enable/Disable all registry logs. </td>
+          <td rowspan="1">false</td>
         </tr>
         <tr>
           <td rowspan="1"><pre>--lockerLogs={true|false}</pre></td>
@@ -271,6 +309,11 @@ The application accepts the following command arguments:
           <td rowspan="1"><pre>--reminderLogs={true|false}</pre></td>
           <td>Enable/Disable reminder logs received from various peer instances (applicable to goto instance acting as registry). </td>
           <td rowspan="1">false</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--peerHealthLogs={true|false}</pre></td>
+          <td>Enable/Disable logging of requests received from Registry for peer health checks </td>
+          <td rowspan="1">true</td>
         </tr>
     </tbody>
 </table>
@@ -307,7 +350,6 @@ In addition to keeping the results in the `goto` client instance, those are also
 | POST      |	/client/targets/invoke/all            | Invoke all targets |
 | POST      | /client/targets/{targets}/stop        | Stops a running target |
 | POST      | /client/targets/stop/all              | Stops all running targets |
-| GET       |	/client/targets/list                  | Get list of currently configured targets |
 | GET       |	/client/targets                       | Get list of currently configured targets |
 | POST      |	/client/targets/clear                 | Remove all targets |
 | GET       |	/client/targets/active                | Get list of currently active (running) targets |
@@ -316,7 +358,6 @@ In addition to keeping the results in the `goto` client instance, those are also
 | PUT, POST |	/client/track/headers/add/{headers}   | Add headers for tracking response counts per target |
 | PUT, POST |	/client/track/headers/remove/{header}| Remove header (single) from tracking set |
 | POST      | /client/track/headers/clear           | Remove all tracked headers |
-| GET       |	/client/track/headers/list            | Get list of tracked headers |
 | GET       |	/client/track/headers                 | Get list of tracked headers |
 | GET       |	/client/results                       | Get combined results for all invocations since last time results were cleared. See [`Results Schema`](#client-results-schema) |
 | GET       |	/client/results/invocations           | Get invocation results broken down for each invocation that was triggered since last time results were cleared |
@@ -519,7 +560,7 @@ curl -X PUT localhost:8080/client/track/headers/add/Request-From-Goto|Goto-Host,
 curl -X PUT localhost:8080/client/track/headers/remove/foo
 
 #Get list of tracked headers
-curl localhost:8080/client/track/headers/list
+curl localhost:8080/client/track/headers
 
 #Clear results
 curl -X POST localhost:8080/client/results/clear
@@ -1325,23 +1366,40 @@ The server is useful to be run as a test server for testing some client applicat
 
 ### Goto Response Headers
 `Goto` adds the following common response headers to all http responses it sends:
-- `Goto-Server`: identifies the goto instance. This header's value will include hostname, IP, Port, Namespace and Cluster information if available to `Goto` from the following Environment variables: `POD_NAME`, `POD_IP`, `NODE_NAME`, `CLUSTER`, `NAMESPACE`. It falls back to using local compute's IP address if `POD_IP` is not defined. For other fields, it defaults to fixed value `local`.
+- `Goto-Host`: identifies the goto instance. This header's value will include hostname, IP, Port, Namespace and Cluster information if available to `Goto` from the following Environment variables: `POD_NAME`, `POD_IP`, `NODE_NAME`, `CLUSTER`, `NAMESPACE`. It falls back to using local compute's IP address if `POD_IP` is not defined. For other fields, it defaults to fixed value `local`.
 - `Via-Goto`: carries the label given to `goto` as startup param, or otherwise defaults to using port number as label.
 - `Goto-Port`: carries the port number on which the request was received
 - `Goto-Protocol`: identifies whether the request was received over `HTTP` or `HTTPS`
+- `Goto-Remote-Address`: remote client's address as visible to `goto`
+- `Goto-Response-Delay`: set if `goto` applied a configured delay to the response.
+- `Goto-Payload-Length`, `Goto-Payload-Content-Type`: set if `goto` sent a configured response payload
+- `Goto-Chunk-Count`, `Goto-Chunk-Length`, `Goto-Chunk-Delay`, `Goto-Stream-Length`, `Goto-Stream-Duration`: set when client requests a streaming response
+- `Goto-Requested-Status`: set when `/status` API request is made requesting a specific status
+- `Goto-Response-Status`: set on all responses, carrying the HTTP response status code that `goto` has set to the response
+- `Goto-Forced-Status`, `Goto-Forced-Status-Remaining`: set when a configured custom response status is applied to a response
+- `Goto-Ignored-Request`: set when a request URI matches an ignore config
+- `Request-*`: prefix is added to all request headers and the request headers are sent back as response headers
+- `Readiness-Request-*`: prefix is added to all request headers for Readiness probe requests
+- `Liveness-Request-*`: prefix is added to all request headers for Liveness probe requests
+- `Readiness-Request-Count`: header added to readiness probe responses, carrying the number of readiness requests received so far
+- `Readiness-Overflow-Count`: header added to readiness probe responses, carrying the number of times readiness request count has overflown
+- `Liveness-Request-Count`: header added to liveness probe responses, carrying the number of liveness requests received so far
+- `Liveness-Overflow-Count`: header added to liveness probe responses, carrying the number of times liveness request count has overflown
 
 <br/>
 
 ### <a name="server-logging"></a> Server Logging
 `goto` server logs are generated with a useful pattern to help figuring out the steps `goto` took for a request. Each log line tells the complete story about request details, how the request was processed, and response sent. Each log line contains the following segments separated by `-->`:
-- Request Timestamp, Host Id (host where the request was processed), and Server label (assigned via --label startup arg)
+- Request Timestamp
+- Listener Host Id: identifies the host+port that received the request
 - Local and Remote addresses (if available)
-- Request Headers, including Host
+- Request Body (first 50 bytes)
+- Request Headers (including Host header)
 - Request URI, Protocol and Method
-- Request Body (first 100 bytes)
-- Action(s) taken by `goto` (e.g. delaying a request)
-- Final Response code determination
+- Action(s) taken by `goto` (e.g. delaying a request, echoing back, responding with custom payload, etc.)
+- Final Response Status Code sent to client
 - Response Headers
+- Response Body Length
 
 #### Sample log line:
 ```
@@ -1364,7 +1422,9 @@ The server is useful to be run as a test server for testing some client applicat
 #### Server Events
 Each `goto` instance publishes these events at startup and shutdown
 - `Server Started`
+- `GRPC Server Started`
 - `Server Stopped`
+- `GRPC Server Stopped`
 
 A `goto` peer that's configured to connect to a `goto` registry publishes the following additional events at startup and shutdown:
 - `Peer Registered`
@@ -1609,13 +1669,18 @@ goto_requests_by_uris{requestURI="/foo"} 3
 ## <a name="server-listeners"></a>  > Listeners
 
 
-The server starts with a single http listener on the bootstrap port (given as a command line arg, defaults to 8080). It exposes listener APIs to let you add/manage additional HTTP/TCP listeners. The ability to launch and shutdown listeners lets you do some chaos testing. All listener ports respond to the same set of API calls, so any of the HTTP APIs described below as well as runtime traffic proxying can be done via any active HTTP listener, and any TCP operation can be performed on any active TCP listener.
+
+The server starts with a startup http listener (on the bootstrap port given as a command line arg `--port`, defaults to 8080). Additional ports can be opened via command line (arg `--ports`) as well as via listener APIs. When startup arg `--ports` is used to launch `goto` with multiple ports, the first port in the list is treated as bootstrap port, forced to be an HTTP port, and isn't allowed to be managed via listeners APIs.
+
+The `listeners APIs` let you manage/open/close arbitrary number of HTTP/TCP/GRPC listeners (except the default bootstrap listener). The ability to launch and shutdown listeners lets you do some chaos testing. All HTTP listener ports respond to the same set of API calls, so any of the HTTP APIs described below as well as runtime traffic proxying can be done via any active HTTP listener. Any of the TCP operations described in the TCP section can be performed on any active TCP listener, and any of the GRPC operations can be performed on any GRPC listener. The HTTP listeners perform double duty of also acting as GRPC listeners, but listners explicitly configured as `GRPC` act as `GRPC-only` and don't support HTTP operations. See `GRPC` section later in this doc for details on GRPC operations supported by `goto`.
 
 Adding TLS cert and key for a listener using `/cert` and `/key` API will configure the listener for serving HTTPS traffic when it's opened/reopened. An already opened listener can be reopened as a TLS listener by configuring TLS certs for it and calling `/reopen`.
 
 `/listeners` API output includes the default startup port for view, but the default port cannot be mutated by other listener APIs.
 
-#### See TCP Listeners section later for details of TCP features
+Several configuration APIs (used to configure server features on `goto` instances) support `/port={port}/...` URI prefix to allow use of one listener to configure another listener's HTTP features. For example, the API `http://localhost:8081/probes/readiness/set/status=503` that's meant to configure readiness probe for listener on port 8081, can also be invoked via another port as `http://localhost:8080/port=8081/probes/readiness/set/status=503`. This allows for configuring another listener that might be closed or otherwise inaccessible when the configuration call is being made.
+
+#### See TCP and GRPC Listeners section later for details of TCP or GRPC features
 
 #### APIs
 |METHOD|URI|Description|
@@ -1637,7 +1702,7 @@ Adding TLS cert and key for a listener using `/cert` and `/key` API will configu
 | listenerID    | string | Read-only field identifying the listener's port and current generation. |
 | label    | string | Label to be applied to the listener. This can also be set/changed via REST API later. |
 | port     | int    | Port on which the new listener will listen on. |
-| protocol | string | `http` or `tcp`|
+| protocol | string | `http`, `grpc`, or `tcp`|
 | open | bool | Controls whether the listener should be opened as soon as it's added. Also reflects listener's current status when queried. |
 | tls | bool | Reports whether the listener has been configured for TLS. This flag is read-only, the value of which is determined based on whether TLS cert and key have been added for the listener using the APIs. |
 | tcp | TCPConfig | Supplemental TCP config for a TCP listener. See TCP Config JSON schema under `TCP Server` section. |
@@ -1654,6 +1719,7 @@ Adding TLS cert and key for a listener using `/cert` and `/key` API will configu
 - `Listener Opened`
 - `Listener Reopened`
 - `Listener Closed`
+- `GRPC Listener Started`
 
 #### Listener API Examples:
 <details>
@@ -1663,6 +1729,8 @@ Adding TLS cert and key for a listener using `/cert` and `/key` API will configu
 curl localhost:8080/listeners/add --data '{"port":8081, "protocol":"http", "label":"Server-8081"}'
 
 curl -s localhost:8080/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true, "tcp": {"readTimeout":"15s","writeTimeout":"15s","connectTimeout":"15s","connIdleTimeout":"20s","responseDelay":"1s", "connectionLife":"20s"}}'
+
+curl localhost:8080/listeners/add --data '{"port":9091, "protocol":"grpc", "label":"GRPC-9091"}'
 
 curl -X POST localhost:8080/listeners/8081/remove
 
@@ -1747,6 +1815,8 @@ $ curl -s localhost:8080/listeners
 By default, each listener adds a header `Via-Goto: <port>` to each response it sends, where `<port>` is the port on which the listener is running (default being 8080). A custom label can be added to a listener using the label APIs described below. In addition to `Via-Goto`, each listener also adds another header `Goto-Host` that carries the pod/host name, pod namespace (or `local` if not running as a K8s pod), and pod/host IP address to identify where the response came from.
 
 #### APIs
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
 |METHOD|URI|Description|
 |---|---|---|
 | POST, PUT | /label/set/{label}  | Set label for this port |
@@ -1794,25 +1864,28 @@ A TCP listener can operate in the following modes to facilitate different kinds 
 
 
 #### APIs
+###### <small>* TCP configuration APIs are always invoked via an HTTP listener, not on the TCP port that's being configured. </small>
+
+
 |METHOD|URI|Description|
 |---|---|---|
 | POST, PUT  | /tcp/{port}/configure   | Reconfigure details of a TCP listener without having to close and restart. Accepts TCP Config JSON as payload. |
-| POST, PUT  | /tcp/{port}/timeout/read/{duration}  | Set TCP read timeout for the port (applies to TCP echo mode) |
-| POST, PUT  | /tcp/{port}/timeout/write/{duration}  | Set TCP write timeout for the port (applies to TCP echo mode) |
-| POST, PUT  | /tcp/{port}/timeout/idle/{duration}  | Set TCP connection idle timeout for the port (applies to TCP echo mode) |
-| POST, PUT  | /tcp/{port}/connection/life/{duration}  | Set TCP connection lifetime duration for the port (applies to all TCP connection modes except streaming) |
-| POST, PUT  | /tcp/{port}/echo<br/>/response/delay/{duration}  | Set response delay for TCP echo mode for the listener |
-| POST, PUT  | /tcp/{port}/stream<br/>/size/{payloadSize}<br/>/duration/{duration}<br/>/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with the given total payload size delivered over the given duration with the given delay per chunk |
-| POST, PUT  | /tcp/{port}/stream<br/>/chunk/{chunkSize}<br/>/duration/{duration}<br/>/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with chunks of the given chunk size delivered over the given duration with the given delay per chunk |
-| POST, PUT  | /tcp/{port}/stream<br/>/chunk/{chunkSize}<br/>/count/{chunkCount}<br/>/delay/{delay}  | Set TCP connection to stream data as soon as a client connects, with total chunks matching the given chunk count of the given chunk size delivered with the given delay per chunk |
-| POST, PUT  | /tcp/{port}/expect/payload/{length}  | Set expected payload length for payload verification mode (to only validate payload length, not content) |
+| POST, PUT  | /tcp/{port}/set<br/>/timeout/read={duration}  | Set TCP read timeout for the port (applies to TCP echo mode) |
+| POST, PUT  | /tcp/{port}/set<br/>/timeout/write={duration}  | Set TCP write timeout for the port (applies to TCP echo mode) |
+| POST, PUT  | /tcp/{port}/set<br/>/timeout/idle={duration}  | Set TCP connection idle timeout for the port (applies to TCP echo mode) |
+| POST, PUT  | /tcp/{port}/set<br/>/connection/life={duration}  | Set TCP connection lifetime duration for the port (applies to all TCP connection modes except streaming) |
+| POST, PUT  | /tcp/{port}/echo/response<br/>/set/delay={duration}  | Set response delay for TCP echo mode for the listener |
+| POST, PUT  | /tcp/{port}/stream<br/>/payload={payloadSize}<br/>/duration={duration}<br/>/delay={delay}  | Set TCP connection to stream data as soon as a client connects, with the given total payload size delivered over the given duration with the given delay per chunk |
+| POST, PUT  | /tcp/{port}/stream<br/>/chunksize={chunkSize}<br/>/duration={duration}<br/>/delay={delay}  | Set TCP connection to stream data as soon as a client connects, with chunks of the given chunk size delivered over the given duration with the given delay per chunk |
+| POST, PUT  | /tcp/{port}/stream<br/>/chunksize={chunkSize}<br/>/count={chunkCount}<br/>/delay={delay}  | Set TCP connection to stream data as soon as a client connects, with total chunks matching the given chunk count of the given chunk size delivered with the given delay per chunk |
+| POST, PUT  | /tcp/{port}/expect<br/>/payload/length={length}  | Set expected payload length for payload verification mode (to only validate payload length, not content) |
 | POST, PUT  | /tcp/{port}/expect/payload  | Set expected payload for payload verification mode, to validate both payload length and content. Expected payload must be sent as request body. |
-| POST, PUT  | /tcp/{port}/validate/payload/{enable} | Enable/disable payload validation mode on a port to support payload length/content validation over connection lifetime (see overview for details) |
-| POST, PUT  | /tcp/{port}/stream/{enable}  | Enable or disable streaming on a port without having to restart the listener (useful to disable streaming while retaining the stream configuration) |
-| POST, PUT  | /tcp/{port}/echo/{enable} | Enable/disable echo mode on a port to let the port be tested in silent mode (see overview for details) |
-| POST, PUT  | /tcp/{port}/conversation/{enable} | Enable/disable conversation mode on a port to support multiple packets verification (see overview for details) |
-| POST, PUT  | /tcp/{port}/silentlife/{enable} | Enable/disable silent life mode on a port (see overview for details) |
-| POST, PUT  | /tcp/{port}/closeatfirst/{enable} | Enable/disable `close at first byte` mode on a port (see overview for details) |
+| POST, PUT  | /tcp/{port}/set/validate={enable} | Enable/disable payload validation mode on a port to support payload length/content validation over connection lifetime (see overview for details) |
+| POST, PUT  | /tcp/{port}/set/stream={enable}  | Enable or disable streaming on a port without having to restart the listener (useful to disable streaming while retaining the stream configuration) |
+| POST, PUT  | /tcp/{port}/set/echo={enable} | Enable/disable echo mode on a port to let the port be tested in silent mode (see overview for details) |
+| POST, PUT  | /tcp/{port}/set/conversation={enable} | Enable/disable conversation mode on a port to support multiple packets verification (see overview for details) |
+| POST, PUT  | /tcp/{port}/set/silentlife={enable} | Enable/disable silent life mode on a port (see overview for details) |
+| POST, PUT  | /tcp/{port}/set/closeatfirst={enable} | Enable/disable `close at first byte` mode on a port (see overview for details) |
 | GET  | /tcp/{port}/active | Get a list of active client connections for a TCP listener port |
 | GET  | /tcp/active | Get a list of active client connections for all TCP listener ports |
 | GET  | /tcp/{port}/history/{mode} | Get history list of client connections for a TCP listener port for the given mode (one of the supported modes given as text: `SilentLife`, `CloseAtFirstByte`, `Echo`, `Stream`, `Conversation`, `PayloadValidation`) |
@@ -1866,17 +1939,19 @@ A TCP listener can operate in the following modes to facilitate different kinds 
 <summary>API Examples</summary>
 
 ```
-curl -s localhost:8080/tcp/9000/configure --data '{"readTimeout":"1m","writeTimeout":"1m","connectTimeout":"15s","connIdleTimeout":"1m", "connectionLife":"2m", "echo":true, "echoResponseSize":10, "echoResponseDelay": "1s"}'
+curl localhost:8080/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true}'
 
-curl -s localhost:8080/tcp/9000/configure --data '{"stream": true, "streamDuration":"5s", "streamChunkDelay":"1s", "streamPayloadSize": "2K", "streamChunkSize":"250", "streamChunkCount":15}'
+curl localhost:8080/tcp/9000/configure --data '{"readTimeout":"1m","writeTimeout":"1m","connectTimeout":"15s","connIdleTimeout":"1m", "connectionLife":"2m", "echo":true, "echoResponseSize":10, "echoResponseDelay": "1s"}'
 
-curl -X PUT localhost:8080/tcp/9000/echo/n
+curl localhost:8080/tcp/9000/configure --data '{"stream": true, "streamDuration":"5s", "streamChunkDelay":"1s", "streamPayloadSize": "2K", "streamChunkSize":"250", "streamChunkCount":15}'
 
-curl -X PUT localhost:8080/tcp/9000/stream/y
+curl -X PUT localhost:8080/tcp/9000/set/echo=n
 
-curl -X POST localhost:8080/tcp/9000/stream/size/1K/duration/30s/delay/1s
+curl -X PUT localhost:8080/tcp/9000/set/stream=y
 
-curl -X PUT localhost:8080/tcp/9000/expect/payload/10
+curl -X POST localhost:8080/tcp/9000/stream/payload=1K/duration=30s/delay=1s
+
+curl -X PUT localhost:8080/tcp/9000/expect/payload/length=10
 
 curl -X PUT localhost:8080/tcp/9000/expect/payload --data 'SomePayload'
 ```
@@ -1992,6 +2067,180 @@ curl -s localhost:8080/tcp/history | jq
 </p>
 </details>
 
+
+<br/>
+
+# <a name="server-grpc"></a>
+## > GRPC Server
+All HTTP ports that a `goto` instance listens on (including bootstrap port) support both `HTTP/2` and `GRPC` protocol. Any listener that's created with protocol `grpc` works exclusively in `grpc` mode, not supporting HTTP requests and only responding to the GRPC operations described below.
+
+### GRPC Operations
+
+All `grpc` operations exposed by `goto` produce the following proto message as output:
+
+  ```
+  message Output {
+    string payload = 1;
+    string at = 2;
+    string gotoHost = 3;
+    int32  gotoPort = 4;
+    string viaGoto = 5;
+  }
+  ```
+
+The GRPC response from `goto` also carries the following headers:
+* `Goto-Host`
+* `Via-Goto`
+* `Goto-Protocol`
+* `Goto-Port`
+* `Goto-Remote-Address`
+
+
+`Goto` exposes the following `grpc` operations:
+1. `Goto.echo`: This is a unary grpc service method that echoes back the given payload with some additional metadata and headers. The `echo` input message is given below. It responsd with a single instance of `Output` message described later.
+    ```
+    message Input {
+      string payload = 1;
+    }
+    ```
+2. `Goto.streamOut`: This is a server streaming service method that accepts the following `StreamConfig` input message, that allows the client to configure the parameters of stream response. It responds with `chunkCount` number of `Output` messages, each output carrying a payload of size `chunkSize`, and there is `interval` delay between two output messages.
+    ```
+    message StreamConfig {
+      int32  chunkSize = 1;
+      int32  chunkCount = 2;
+      string interval = 3;
+      string payload = 4;
+    }
+    ```
+3. `Goto.streamInOut`: This is a bi-directional streaming service method that accepts a stream of `StreamConfig` input messages as described in `streamOut` operationm above. Each input `StreamConfig` message requests the server to send a stream response based on the given stream config. For each input message, the service responds with `chunkCount` number of `Output` messages, each output carrying a payload of size `chunkSize`, and there is `interval` delay between two output messages.
+   
+
+#### GRPC Tracking Events
+- `GRPC Server Started`
+- `GRPC Server Stopped`
+- `GRPC Listener Started`
+- `GRPC.echo`
+- `GRPC.streamOut.start`
+- `GRPC.streamOut.end`
+- `GRPC.streamInOut.start`
+- `GRPC.streamInOut.end`
+
+
+#### GRPC Operations Examples:
+<details>
+<summary>GRPC Examples</summary>
+
+```
+$ curl localhost:8080/listeners/add --data '{"label":"grpc-9091", "port":9091, "protocol":"grpc", "open":true}'
+
+$ grpc_cli call localhost:9091 Goto.echo "payload: 'hello'"
+
+connecting to localhost:9091
+Received initial metadata from server:
+goto-host : local@1.1.1.1:8080
+goto-port : 9091
+goto-protocol : GRPC
+goto-remote-address : [::1]:54378
+via-goto : grpc-9091
+payload: "hello"
+at: "2021-02-07T12:32:33.832499-08:00"
+gotoHost: "local@1.1.1.1:8080"
+gotoPort: 9091
+viaGoto: "grpc-9091"
+Rpc succeeded with OK status
+
+$ grpc_cli call localhost:9091 Goto.streamOut "chunkSize: 10, chunkCount: 3, interval: '1s'"
+
+connecting to localhost:9091
+Received initial metadata from server:
+goto-host : local@1.1.1.1:8080
+goto-port : 9091
+goto-protocol : GRPC
+goto-remote-address : [::1]:54347
+via-goto : grpc-9091
+payload: "f4GE!G?Epr"
+at: "2021-02-07T12:32:11.690931-08:00"
+gotoHost: "local@1.1.1.1:8080"
+gotoPort: 9091
+viaGoto: "grpc-9091"
+payload: "f4GE!G?Epr"
+at: "2021-02-07T12:32:12.691058-08:00"
+gotoHost: "local@1.1.1.1:8080"
+gotoPort: 9091
+viaGoto: "grpc-9091"
+payload: "f4GE!G?Epr"
+at: "2021-02-07T12:32:13.691418-08:00"
+gotoHost: "local@1.1.1.1:8080"
+gotoPort: 9091
+viaGoto: "grpc-9091"
+Rpc succeeded with OK status
+
+$ curl -XPOST localhost:8080/events/flush
+
+$ curl localhost:8080/events
+[
+  {
+    "title": "Listener Added",
+    "data": {
+      "listener": {
+        "listenerID": "9091-1",
+        "label": "grpc-9091",
+        "port": 9091,
+        "protocol": "grpc",
+        "open": true,
+        "tls": false
+      },
+      "status": "Listener 9091 added and opened."
+    },
+    ...
+  },
+  {
+    "title": "GRPC Listener Started",
+    "data": {
+      "details": "Starting GRPC Listener 9091-1"
+    },
+    ...
+  },
+  {
+    "title": "Flushed Traffic Report",
+    "data": [
+      {
+        "port": 9091,
+        "uri": "GRPC.streamOut.start",
+        "statusCode": 200,
+        "statusRepeatCount": 2,
+        "firstEventAt": "2021-02-07T12:31:29.81144-08:00",
+        "lastEventAt": "2021-02-07T12:32:11.690928-08:00"
+      },
+      {
+        "port": 9091,
+        "uri": "GRPC.streamOut.end",
+        "statusCode": 200,
+        "statusRepeatCount": 2,
+        "firstEventAt": "2021-02-07T12:31:32.817072-08:00",
+        "lastEventAt": "2021-02-07T12:32:14.692153-08:00"
+      },
+      {
+        "port": 9091,
+        "uri": "GRPC.echo",
+        "statusCode": 200,
+        "statusRepeatCount": 2,
+        "firstEventAt": "2021-02-07T12:32:33.832506-08:00",
+        "lastEventAt": "2021-02-07T12:34:59.386956-08:00"
+      }
+    ],
+    ...
+  },
+  {
+    "title": "Events Flushed",
+    ...
+  }
+]
+
+```
+</details>
+
+
 <br/>
 
 # <a name="server-request-headers-tracking"></a>
@@ -1999,6 +2248,8 @@ curl -s localhost:8080/tcp/history | jq
 This feature allows tracking request counts by headers.
 
 #### APIs
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
 |METHOD|URI|Description|
 |---|---|---|
 |POST     | /request/headers/track/clear									| Remove all tracked headers |
@@ -2008,7 +2259,6 @@ This feature allows tracking request counts by headers.
 |PUT, POST| /request/headers/track/counts/clear/{headers}	| Clear counts for given tracked headers |
 |POST     | /request/headers/track/counts/clear						| Clear counts for all tracked headers |
 |GET      | /request/headers/track/counts									| Get counts for all tracked headers |
-|GET      | /request/headers/track/list									  | Get list of tracked headers |
 |GET      | /request/headers/track									      | Get list of tracked headers |
 
 
@@ -2017,7 +2267,6 @@ This feature allows tracking request counts by headers.
 - `Tracking Headers Removed`
 - `Tracking Headers Cleared`
 - `Tracked Header Counts Cleared`
-- `All Tracked Header Counts Cleared`
 
 #### Request Headers Tracking API Examples:
 <details>
@@ -2036,7 +2285,7 @@ curl -X POST localhost:8080/request/headers/track/counts/clear
 
 curl -X POST localhost:8080/request/headers/track/counts/clear
 
-curl localhost:8080/request/headers/track/list
+curl localhost:8080/request/headers/track
 ```
 </details>
 
@@ -2093,6 +2342,8 @@ $ curl localhost:8080/request/headers/track/counts
 This feature allows tracking request timeouts by headers.
 
 #### APIs
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
 |METHOD|URI|Description|
 |---|---|---|
 |PUT, POST| /request/timeout/<br/>track/headers/{headers}  | Add one or more headers. Requests carrying these headers will be tracked for timeouts and reported |
@@ -2170,14 +2421,17 @@ This feature allows responding with custom status code and delays for specific U
 Note: To configure server to respond with custom/random response payloads for specific URIs, see [`Response Payload`](#server-response-payload) feature.
 
 #### APIs
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
 |METHOD|URI|Description|
 |---|---|---|
-|POST     |	/request/uri/status/set?uri={uri}&status={status:count} | Set forced response status to respond with for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls |
-|POST     |	/request/uri/delay/set?uri={uri}&delay={delay:count} | Set forced delay for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls |
+|POST     |	/request/uri/set/status={status:count}?uri={uri} | Set forced response status to respond with for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls |
+|POST     |	/request/uri/set/delay={delay:count}?uri={uri} | Set forced delay for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls |
 |GET      |	/request/uri/counts                     | Get request counts for all URIs |
 |POST     |	/request/uri/counts/enable              | Enable tracking request counts for all URIs |
 |POST     |	/request/uri/counts/disable             | Disable tracking request counts for all URIs |
 |POST     |	/request/uri/counts/clear               | Clear request counts for all URIs |
+|GET     |	/request/uri               | Get current configurations for all configured URIs |
 
 
 #### URIs Events
@@ -2196,7 +2450,9 @@ Note: To configure server to respond with custom/random response payloads for sp
 <summary>API Examples</summary>
 
 ```
-curl -X POST localhost:8080/request/uri/status/set?uri=/foo&status=418:2
+curl -X POST localhost:8080/request/uri/set/status=418:2?uri=/foo
+
+curl -X POST localhost:8080/request/uri/set/delay=1s:2?uri=/foo
 
 curl localhost:8080/request/uri/counts
 
@@ -2231,7 +2487,7 @@ curl -X POST localhost:8080/request/uri/counts/clear
 
 # <a name="server-probes"></a>
 ## > Probes
-This feature allows setting readiness and liveness probe URIs, statuses to be returned for those probes, and tracking counts for how many times the probes have been called. `Goto` also tracks when the probe call counts overflow, keeping separate overflow counts. A `goto` instance can be queried for its probe details via `/probe` API.
+This feature allows setting readiness and liveness probe URIs, statuses to be returned for those probes, and tracking counts for how many times the probes have been called. `Goto` also tracks when the probe call counts overflow, keeping separate overflow counts. A `goto` instance can be queried for its probe details via `/probes` API.
 
 The probe URIs response includes the request headers echoed back with `Readiness-Request-` or `Liveness-Request-` prefixes, and include the following additional headers:
 - `Readiness-Request-Count` and `Readiness-Overflow-Count` for `readiness` probe calls
@@ -2242,14 +2498,16 @@ By default, liveness probe URI is set to `/live` and readiness probe URI is set 
 When the server starts shutting down, it waits for a configured grace period (default 5s) to serve existing traffic. During this period, the server will return 404 for the readiness probe if one is configured.
 
 #### APIs
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
 |METHOD|URI|Description|
 |---|---|---|
-|PUT, POST| /probe/readiness/set?uri={uri} | Set readiness probe URI. Also clears its counts. If not explicitly set, the readiness URI is set to `/ready`.  |
-|PUT, POST| /probe/liveness/set?uri={uri} | Set liveness probe URI. Also clears its counts If not explicitly set, the liveness URI is set to `/live`. |
-|PUT, POST| /probe/readiness/status/set/{status} | Set HTTP response status to be returned for readiness URI calls. Default 200. |
-|PUT, POST| /probe/liveness/status/set/{status} | Set HTTP response status to be returned for liveness URI calls. Default 200. |
-|POST| /probe/counts/clear               | Clear probe counts URIs |
-|GET      |	/probe                     | Get current config and counts for both probes |
+|PUT, POST| /probes/readiness/set?uri={uri} | Set readiness probe URI. Also clears its counts. If not explicitly set, the readiness URI is set to `/ready`.  |
+|PUT, POST| /probes/liveness/set?uri={uri} | Set liveness probe URI. Also clears its counts If not explicitly set, the liveness URI is set to `/live`. |
+|PUT, POST| /probes/readiness/set/status={status} | Set HTTP response status to be returned for readiness URI calls. Default 200. |
+|PUT, POST| /probes/liveness/set/status={status} | Set HTTP response status to be returned for liveness URI calls. Default 200. |
+|POST| /probes/counts/clear               | Clear probe counts URIs |
+|GET      | /probes                    | Get current config and counts for both probes |
 
 
 #### Probes API Examples
@@ -2257,17 +2515,17 @@ When the server starts shutting down, it waits for a configured grace period (de
 <summary>API Examples</summary>
 
 ```
-curl -X POST localhost:8080/probe/readiness/set?uri=/ready
+curl -X POST localhost:8080/probes/readiness/set?uri=/ready
 
-curl -X POST localhost:8080/probe/liveness/set?uri=/live
+curl -X POST localhost:8080/probes/liveness/set?uri=/live
 
-curl -X PUT localhost:8080/probe/readiness/status/set/404
+curl -X PUT localhost:8080/probes/readiness/set/status=404
 
-curl -X PUT localhost:8080/probe/liveness/status/set/200
+curl -X PUT localhost:8080/probes/liveness/set/status=200
 
-curl -X POST localhost:8080/probe/counts/clear
+curl -X POST localhost:8080/probes/counts/clear
 
-curl localhost:8080/probe
+curl localhost:8080/probes
 ```
 </details>
 
@@ -2278,12 +2536,14 @@ curl localhost:8080/probe
 This feature allows adding bypass URIs that will not be subject to other configurations, e.g. forced status codes. Request counts are tracked for bypass URIs, and specific status can be configured to respond for bypass URI requests.
 
 #### APIs
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
 |METHOD|URI|Description|
 |---|---|---|
 |PUT, POST| /request/uri/bypass/add?uri={uri}       | Add a bypass URI |
 |PUT, POST| /request/uri/bypass/remove?uri={uri}    | Remove a bypass URI |
 |PUT, POST| /request/uri/bypass/clear               | Remove all bypass URIs |
-|PUT, POST| /request/uri/bypass<br/>/status/set/{status:count} | Set status code to be returned for bypass URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
+|PUT, POST| /request/uri/bypass<br/>/set/status={status:count} | Set status code to be returned for bypass URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
 |GET      |	/request/uri/bypass                     | Get list of bypass URIs |
 |GET      |	/request/uri/bypass/status              | Get current bypass URI status code |
 |GET      |	/request/uri/bypass/counts?uri={uri}    | Get request counts for a given bypass URI |
@@ -2307,9 +2567,7 @@ curl -X PUT localhost:8080/request/uri/bypass/add\?uri=/foo
 
 curl -X PUT localhost:8081/request/uri/bypass/remove\?uri=/bar
 
-curl -X PUT localhost:8080/request/uri/bypass/status/set/418:2
-
-curl localhost:8081/request/uri/bypass/list
+curl -X PUT localhost:8080/request/uri/bypass/set/status=418:2
 
 curl localhost:8080/request/uri/bypass
 
@@ -2343,12 +2601,14 @@ curl localhost:8080/request/uri/bypass/counts\?uri=/foo
 This feature allows marking some URIs as `ignored` so that those don't generate any logs. Ignored URIs are different from `bypass` URIs in that while `bypass` URIs get logs but are not subject to additional processing, `ignored` URIs are subject to all other processing but don't get logged. Request counts are tracked for ignored URIs, and specific status can be configured to respond for ignored URI requests.
 
 #### APIs
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
 |METHOD|URI|Description|
 |---|---|---|
 |PUT, POST| /request/uri/ignore/add?uri={uri}       | Add an ignored URI |
 |PUT, POST| /request/uri/ignore/remove?uri={uri}    | Remove an ignored URI |
 |PUT, POST| /request/uri/ignore/clear               | Remove all ignored URIs |
-|PUT, POST| /request/uri/ignore<br/>/status/set/{status:count} | Set status code to be returned for ignored URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
+|PUT, POST| /request/uri/ignore<br/>/set/status={status:count} | Set status code to be returned for ignored URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
 |GET      |	/request/uri/ignore                     | Get list of ignored URIs |
 |GET      |	/request/uri/ignore/status              | Get current ignored URI status code |
 |GET      |	/request/uri/ignore/counts?uri={uri}    | Get request counts for a given ignored URI |
@@ -2372,7 +2632,7 @@ curl -X PUT localhost:8080/request/uri/ignore/add\?uri=/foo
 
 curl -X PUT localhost:8081/request/uri/ignore/remove\?uri=/bar
 
-curl -X PUT localhost:8080/request/uri/ignore/status/set/418:2
+curl -X PUT localhost:8080/request/uri/ignore/set/status=418:2
 
 curl localhost:8080/request/uri/ignore
 
@@ -2413,6 +2673,8 @@ Delay is not applied to the following requests:
 When a delay is applied to a request, the response carries a header `Response-Delay` with the value of the applied delay.
 
 #### APIs
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
 |METHOD|URI|Description|
 |---|---|---|
 | PUT, POST | /response/delay/set/{delay} | Set a delay for non-management requests (i.e. runtime traffic) |
@@ -2445,13 +2707,21 @@ curl localhost:8080/response/delay
 This feature allows adding custom response headers to all responses sent by the server.
 
 #### APIs
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
 |METHOD|URI|Description|
 |---|---|---|
-| PUT, POST | /response/headers/add/{header}/{value}  | Add a custom header to be sent with all responses |
+| PUT, POST | /response/headers/add/{header}={value}  | Add a custom header to be sent with all responses |
 | PUT, POST | /response/headers/remove/{header}       | Remove a previously added custom response header |
 | POST      |	/response/headers/clear                 | Remove all configured custom response headers |
-| GET       |	/response/headers/list                  | Get list of configured custom response headers |
 | GET       |	/response/headers                       | Get list of configured custom response headers |
+
+
+#### Response Headers Events
+- `Response Header Added`
+- `Response Header Removed`
+- `Response Header Cleared`
+
 
 #### Response Headers API Examples
 <details>
@@ -2460,9 +2730,7 @@ This feature allows adding custom response headers to all responses sent by the 
 ```
 curl -X POST localhost:8080/response/headers/clear
 
-curl -X POST localhost:8080/response/headers/add/x/x1
-
-curl localhost:8080/response/headers/list
+curl -X POST localhost:8080/response/headers/add/x=x1
 
 curl -X POST localhost:8080/response/headers/remove/x
 
@@ -2475,7 +2743,7 @@ curl localhost:8080/response/headers
 
 # <a name="server-response-payload"></a>
 ## > Response Payload
-This feature allows setting either a specific custom payload to be delivered based on request match criteria, or otherwise configure serve to send random auto-generated response payloads.
+This feature allows setting either a specific custom payload to be delivered based on request match criteria, or configure server to send random auto-generated response payloads.
 
 A payload configuration can also `capture` values from the URI/Header/Query that it matches, as described in a section below.
 
@@ -2525,17 +2793,19 @@ when a request comes for URI `/foo/hi/bar123`, the response payload will be `{"r
 
 Similarly, for a configured response payload that matches on request header:
 ```
-/response/payload/set/header/foo/{x} --data '{"result": "header was foo with value {x}"}'
+/response/payload/set/header/foo={x} --data '{"result": "header was foo with value {x}"}'
 ```
 when a request comes with header `foo:123`, the response payload will be `{"result": "header was foo with value 123"}`
 
 Same kind of capture can be done on query params, e.g.:
 ```
-/response/payload/set/query/qq/{v} --data '{"test": "query qq was set to {v}"}'
+/response/payload/set/query/qq={v} --data '{"test": "query qq was set to {v}"}'
 ```
 
 
 #### APIs
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
 |METHOD|URI|Description|
 |---|---|---|
 | POST | /response/payload<br/>/set/default  | Add a custom payload to be used for ALL URI responses except those explicitly configured with another payload |
@@ -2543,13 +2813,13 @@ Same kind of capture can be done on query params, e.g.:
 | POST | /response/payload<br/>/set/uri?uri={uri}  | Add a custom payload to be sent for requests matching the given URI. URI can contain variable placeholders. |
 | POST | /response/payload<br/>/set/header/{header}  | Add a custom payload to be sent for requests matching the given header name |
 | POST | /response/payload<br/>/set/header/{header}?uri={uri}  | Add a custom payload to be sent for requests matching the given header name and the given URI |
-| POST | /response/payload<br/>/set/header/{header}/{value}  | Add a custom payload to be sent for requests matching the given header name and value |
-| POST | /response/payload<br/>/set/header/{header}/{value}?uri={uri}  | Add a custom payload to be sent for requests matching the given header name and value along with the given URI. |
+| POST | /response/payload<br/>/set/header/{header}={value}  | Add a custom payload to be sent for requests matching the given header name and value |
+| POST | /response/payload<br/>/set/header/{header}={value}?uri={uri}  | Add a custom payload to be sent for requests matching the given header name and value along with the given URI. |
 | POST | /response/payload<br/>/set/query/{q}  | Add a custom payload to be sent for requests matching the given query param name |
 | POST | /response/payload<br/>/set/query/{q}?uri={uri}  | Add a custom payload to be sent for requests matching the given query param name and the given URI |
-| POST | /response/payload<br/>/set/query/{q}/{value}  | Add a custom payload to be sent for requests matching the given query param name and value |
-| POST | /response/payload<br/>/set/query/{q}/{value}<br/>?uri={uri}  | Add a custom payload to be sent for requests matching the given query param name and value along with the given URI. |
-| POST | /response/payload<br/>/set/body/contains<br/>/{keywords}?uri={uri}  | Add a custom payload to be sent for requests matching the given URI where the body contains the given keywords (comma-separated list) in the given order (second keyword in the list must appear after the first, and so on) |
+| POST | /response/payload<br/>/set/query/{q}={value}  | Add a custom payload to be sent for requests matching the given query param name and value |
+| POST | /response/payload<br/>/set/query/{q}={value}<br/>?uri={uri}  | Add a custom payload to be sent for requests matching the given query param name and value along with the given URI. |
+| POST | /response/payload<br/>/set/body~{keywords}?uri={uri}  | Add a custom payload to be sent for requests matching the given URI where the body contains the given keywords (comma-separated list) in the given order (second keyword in the list must appear after the first, and so on) |
 | POST | /response/payload/clear  | Clear all configured custom response payloads |
 | GET  |	/response/payload                      | Get configured custom payloads |
 
@@ -2568,13 +2838,13 @@ curl -X POST localhost:8080/response/payload/set/default --data '{"test": "defau
 
 curl -X POST localhost:8080/response/payload/set/default/10K
 
-curl -X POST localhost:8080/response/payload/set/uri?uri=/foo/{f}/bar{b} --data '{"test": "uri was /foo/{}/bar/{}"}'
+curl -X POST -g localhost:8080/response/payload/set/uri?uri=/foo/{f}/bar{b} --data '{"test": "uri was /foo/{}/bar/{}"}'
 
-curl -X POST localhost:8080/response/payload/set/header/foo --data '{"test": "header was foo"}'
+curl -X POST -g localhost:8080/response/payload/set/header/foo/{f} --data '{"test": "header was foo with value {f}"}'
 
-curl -X POST localhost:8080/response/payload/set/header/foo/value/bar --data '{"test": "header was foo with value bar"}'
+curl -X POST localhost:8080/response/payload/set/header/foo=bar --data '{"test": "header was foo with value bar"}'
 
-curl -g -X POST localhost:8080/response/payload/set/body/contains/AA,BB,CC?uri=/foo --data '{"test": "body contains AA,BB,CC"}' -HContent-Type:application/json
+curl -g -X POST localhost:8080/response/payload/set/body~AA,BB,CC?uri=/foo --data '{"test": "body contains AA,BB,CC"}' -HContent-Type:application/json
 
 curl -X POST localhost:8080/response/payload/clear
 
@@ -2582,28 +2852,6 @@ curl localhost:8080/response/payload
 ```
 </details>
 
-#### Response Payload Status Result Example
-<details>
-<summary>Example</summary>
-<p>
-
-```
-{
-  "responseContentType": "application/x-www-form-urlencoded",
-  "defaultResponsePayload": "{\"test\": \"default payload\"}n",
-  "responsePayloadByURIs": {
-    "/foo/f/barb": "{\"test\": \"uri was /foo/{}/bar/{}\"}n"
-  },
-  "responsePayloadByHeaders": {
-    "foo": {
-      "": "{\"test\": \"header was foo\"}",
-      "bar": "{\"test\": \"header was foo with value bar\"}"
-    }
-  }
-}
-```
-</p>
-</details>
 
 <br/>
 
@@ -2646,26 +2894,26 @@ Stream responses carry following headers:
 #### API
 |METHOD|URI|Description|
 |---|---|---|
-| GET, PUT, POST  |	/stream/size/{size}<br/>/duration/{duration}/delay/{delay} | Respond with a payload of given size delivered over the given duration with given delay per chunk |
-| GET, PUT, POST  |	/stream/chunk/{chunk}<br/>/duration/{duration}/delay/{delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered over the given duration with given delay per chunk |
-| GET, PUT, POST  |	/stream/chunk/{chunk}<br/>/count/{count}/delay/{delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered the given count of times with given delay per chunk|
-| GET, PUT, POST  |	/stream/duration/{duration}/delay/{delay} | Respond with pre-configured default payload split into enough chunks to spread out over the given duration with given delay per chunk. This URI requires a default payload to be set via payload API. |
-| GET, PUT, POST  |	/stream/count/{count}/delay/{delay} | Respond with pre-configured default payload split into given count of chunks with given delay per chunk. This URI requires a default payload to be set via payload API. |
+| GET, PUT, POST  |	/stream/payload={size}<br/>/duration={duration}<br/>/delay={delay} | Respond with a payload of given size delivered over the given duration with given delay per chunk |
+| GET, PUT, POST  |	/stream/chunksize={chunk}<br/>/duration={duration}<br/>/delay={delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered over the given duration with given delay per chunk |
+| GET, PUT, POST  |	/stream/chunksize={chunk}<br/>/count={count}/delay={delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered the given count of times with given delay per chunk|
+| GET, PUT, POST  |	/stream/duration={duration}<br/>/delay={delay} | Respond with pre-configured default payload split into enough chunks to spread out over the given duration with given delay per chunk. This URI requires a default payload to be set via payload API. |
+| GET, PUT, POST  |	/stream/count={count}/delay={delay} | Respond with pre-configured default payload split into given count of chunks with given delay per chunk. This URI requires a default payload to be set via payload API. |
 
 #### Stream Response API Example
 <details>
 <summary>API Examples</summary>
 
 ```
-curl -v localhost:8080/stream/size/10K/duration/15s/delay/1s
+curl -v --no-buffer localhost:8080/stream/payload=10K/duration=15s/delay=1s
 
-curl -v localhost:8080/stream/chunk/100/duration/5s/delay/500ms
+curl -v --no-buffer localhost:8080/stream/chunksize=100/duration=5s/delay=500ms
 
-curl -v localhost:8080/stream/chunk/100/count/5/delay/200ms
+curl -v --no-buffer localhost:8080/stream/chunksize=100/count=5/delay=200ms
 
-curl -v localhost:8080/stream/duration/5s/delay/100ms
+curl -v --no-buffer localhost:8080/stream/duration=5s/delay=100ms
 
-curl -v localhost:8080/stream/count/10/delay/300ms
+curl -v --no-buffer localhost:8080/stream/count=10/delay=300ms
 ```
 </details>
 
@@ -2676,6 +2924,8 @@ curl -v localhost:8080/stream/count/10/delay/300ms
 This feature allows setting a forced response status for all requests except bypass URIs. Server also tracks number of status requests received (via /status URI) and number of responses send per status code.
 
 #### APIs
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
 |METHOD|URI|Description|
 |---|---|---|
 | PUT, POST | /response/status/set/{status}     | Set a forced response status that all non-proxied and non-management requests will be responded with |
@@ -2733,6 +2983,177 @@ curl localhost:8080/response/status/counts/502
 ```
 </p>
 </details>
+
+
+<br/>
+
+
+
+# <a name="server-response-triggers"></a>
+# Response Triggers
+
+`Goto` allow targets to be configured that are triggered based on response status. The triggers can be invoked manually for testing, but their real value is when they get triggered based on response status. Even more valuable when the request was proxied to another upstream service, in which case the trigger is based on the response status of the upstream service.
+
+#### APIs
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
+|METHOD|URI|Description|
+|---|---|---|
+|POST     |	/response/triggers/add              | Add a trigger target. See [Trigger Target JSON Schema](#trigger-target-json-schema) |
+|PUT, POST| /response/triggers/{target}/remove  | Remove a trigger target |
+|PUT, POST| /response/triggers/{target}/enable  | Enable a trigger target |
+|PUT, POST| /response/triggers/{target}/disable | Disable a trigger target |
+|POST     |	/response/triggers/{targets}/invoke | Invoke trigger targets by name for manual testing |
+|POST     |	/response/triggers/clear            | Remove all trigger targets |
+|GET 	    |	/response/triggers             | List all trigger targets |
+|GET 	    |	/response/triggers/counts             | Report invocation counts for all trigger targets |
+
+
+#### Trigger Target JSON Schema
+|Field|Data Type|Description|
+|---|---|---|
+| name        | string      | Name for this target |
+| method      | string      | HTTP method to use for this target |
+| url         | string      | URL for the target. |
+| headers     | `[][]string`| request headers to send with this trigger request |
+| body        | `string`    | request body to send with this trigger request |
+| sendID      | bool        | Whether or not a unique ID be sent with each request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
+| enabled     | bool        | Whether or not the trigger is currently active |
+| triggerOn   | []int       | List of response statuses for which this target will be triggered |
+| startFrom   | int         | Trigger the target after these many occurrences of the trigger status codes |
+| stopAt      | int         | Stop triggering the target after these many occurrences of the trigger status codes |
+| statusCount | int         | (readonly) Number of occurrences of the status codes that this trigger listens on |
+| triggerCount | int         | (readonly) Number of times this target has been triggered  |
+
+
+#### Triggers Events
+- `Trigger Target Added`
+- `Trigger Target Removed`
+- `Trigger Target Enabled`
+- `Trigger Target Disabled`
+- `Trigger Target Invoked`
+
+<br/>
+
+#### Triggers API Examples:
+<details>
+<summary>API Examples</summary>
+
+```
+curl -X POST localhost:8080/response/triggers/clear
+
+curl -s localhost:8080/port=8081/response/triggers/add --data '{
+	"name": "t1", 
+	"method":"POST", 
+	"url":"http://localhost:8082/response/status/clear", 
+	"enabled": true,
+	"triggerOn": [502, 503],
+	"startFrom": 2,
+	"stopAt": 3
+}'
+
+curl -X POST localhost:8080/response/triggers/t1/remove
+
+curl -X POST localhost:8080/response/triggers/t1/enable
+
+curl -X POST localhost:8080/response/triggers/t1/disable
+
+curl -X POST localhost:8080/response/triggers/t1/invoke
+
+curl localhost:8080/response/triggers/counts
+
+curl localhost:8080/response/triggers
+
+```
+</details>
+
+#### Triggers Details and Results Example
+<details>
+<summary>Example</summary>
+<p>
+
+```
+$ curl localhost:8080/response/triggers
+{
+  "Targets": {
+    "t1": {
+      "name": "t1",
+      "method": "POST",
+      "url": "http://localhost:8081/response/status/clear",
+      "headers": null,
+      "body": "",
+      "sendID": false,
+      "enabled": true,
+      "triggerOn": [
+        502,
+        503
+      ],
+      "startFrom": 2,
+      "stopAt": 3,
+      "statusCount": 5,
+      "triggerCount": 2
+    }
+  },
+  "TargetsByResponseStatus": {
+    "502": {
+      "t1": {
+        "name": "t1",
+        "method": "POST",
+        "url": "http://localhost:8081/response/status/clear",
+        "headers": null,
+        "body": "",
+        "sendID": false,
+        "enabled": true,
+        "triggerOn": [
+          502,
+          503
+        ],
+        "startFrom": 2,
+        "stopAt": 3,
+        "statusCount": 5,
+        "triggerCount": 2
+      }
+    },
+    "503": {
+      "t1": {
+        "name": "t1",
+        "method": "POST",
+        "url": "http://localhost:8081/response/status/clear",
+        "headers": null,
+        "body": "",
+        "sendID": false,
+        "enabled": true,
+        "triggerOn": [
+          502,
+          503
+        ],
+        "startFrom": 2,
+        "stopAt": 3,
+        "statusCount": 5,
+        "triggerCount": 2
+      }
+    }
+  },
+  "TriggerResults": {
+    "t1": {
+      "200": 2
+    }
+  }
+}
+
+$ curl -s localhost:8080/response/triggers/counts
+{
+  "t1": {
+    "202": 2
+  },
+  "t3": {
+    "200": 3
+  }
+}
+```
+</p>
+</details>
+
 
 <br/>
 
@@ -2795,23 +3216,25 @@ Any request that doesn't match any of the defined management APIs, and also does
 <br/>
 
 # <a name="proxy-features"></a>
-# Proxy Features
+# Proxy
 
 `Goto` proxy feature allows targets to be configured that are triggered based on matching criteria against requests. The targets can also be invoked manually for testing the configuration. However, the real fun happens when the proxy targets are matched with runtime traffic based on the match criteria specified in a proxy target's spec (based on headers, URIs, and query parameters), and one or more matching targets get invoked for a given request.
 
 #### APIs
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
 |METHOD|URI|Description|
 |---|---|---|
-|POST     |	/request/proxy/targets/add              | Add target for proxying requests [see `Proxy Target JSON Schema`](#proxy-target-json-schema) |
-|PUT, POST| /request/proxy/targets/{target}/remove  | Remove a proxy target |
-|PUT, POST| /request/proxy/targets/{target}/enable  | Enable a proxy target |
-|PUT, POST| /request/proxy/targets/{target}/disable | Disable a proxy target |
-|POST     |	/request/proxy/targets/{targets}/invoke | Invoke proxy targets by name |
-|POST     |	/request/proxy/targets/invoke/{targets} | Invoke proxy targets by name |
-|POST     |	/request/proxy/targets/clear            | Remove all proxy targets |
-|GET 	    |	/request/proxy/targets                  | List all proxy targets |
-|GET      |	/request/proxy/counts                   | Get proxy match/invocation counts, by uri, header and query params |
-|POST     |	/request/proxy/counts/clear             | Clear proxy match/invocation counts |
+|POST     |	/proxy/targets/add              | Add target for proxying requests [see `Proxy Target JSON Schema`](#proxy-target-json-schema) |
+|PUT, POST| /proxy/targets/{target}/remove  | Remove a proxy target |
+|PUT, POST| /proxy/targets/{target}/enable  | Enable a proxy target |
+|PUT, POST| /proxy/targets/{target}/disable | Disable a proxy target |
+|POST     |	/proxy/targets/{targets}/invoke | Invoke proxy targets by name |
+|POST     |	/proxy/targets/invoke/{targets} | Invoke proxy targets by name |
+|POST     |	/proxy/targets/clear            | Remove all proxy targets |
+|GET 	    |	/proxy/targets                  | List all proxy targets |
+|GET      |	/proxy/counts                   | Get proxy match/invocation counts, by uri, header and query params |
+|POST     |	/proxy/counts/clear             | Clear proxy match/invocation counts |
 
 
 #### Proxy Target JSON Schema
@@ -2844,7 +3267,7 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
 - URIs: specified as a list of URIs, with `{foo}` to be used for variable portion of a URI. E.g., `/foo/{f}/bar/{b}` will match URIs like `/foo/123/bar/abc`, `/foo/something/bar/otherthing`, etc. The variables are captured under the given labels (f and b in previous example). If the target is configured with `replaceURI` to proxy the request to a different URI than the original request, the `replaceURI` can refer to those capturing variables using the syntax described in this example:
   
   ```
-  curl http://goto:8080/request/proxy/targets/add --data \
+  curl http://goto:8080/proxy/targets/add --data \
   '{"name": "target1", "url":"http://somewhere", \
   "match":{"uris":["/foo/{x}/bar/{y}"]}, \
   "replaceURI":"/abc/{y:.*}/def/{x:.*}", \
@@ -2860,7 +3283,7 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
 - Headers: specified as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addHeaders` list. A target is triggered if any of the headers in the match list are present in the request (headers are matched using OR instead of AND). The variable to capture header value is specified as `{foo}` and can be referenced in the `addHeaders` list again as `{foo}`. This example will make it clear:
 
   ```
-  curl http://goto:8080/request/proxy/targets/add --data \
+  curl http://goto:8080/proxy/targets/add --data \
   '{"name": "target2", "url":"http://somewhere", \
   "match":{"headers":[["foo", "{x}"], ["bar", "{y}"]]}, \
   "addHeaders":[["abc","{x}"], ["def","{y}"]], "removeHeaders":["foo"], \
@@ -2874,7 +3297,7 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
 - Query: specified as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addQuery` list. A target is triggered if any of the query parameters in the match list are present in the request (matched using OR instead of AND). The variable to capture query parameter value is specified as `{foo}` and can be referenced in the `addQuery` list again as `{foo}`. Example:
 
     ```
-  curl http://goto:8080/request/proxy/targets/add --data \
+  curl http://goto:8080/proxy/targets/add --data \
   '{"name": "target3", "url":"http://somewhere", \
   "match":{"query":[["foo", "{x}"], ["bar", "{y}"]]}, \
   "addQuery":[["abc","{x}"], ["def","{y}"]], "removeQuery":["foo"], \
@@ -2900,9 +3323,9 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
 <summary>API Examples</summary>
 
 ```
-curl -X POST localhost:8080/request/proxy/targets/clear
+curl -X POST localhost:8080/proxy/targets/clear
 
-curl localhost:8081/request/proxy/targets/add --data '{"name": "t1", \
+curl localhost:8081/proxy/targets/add --data '{"name": "t1", \
 "match":{"uris":["/x/{x}/y/{y}"], "query":[["foo", "{f}"]]}, \
 "url":"http://localhost:8083", \
 "replaceURI":"/abc/{y:.*}/def/{x:.*}", \
@@ -2911,14 +3334,14 @@ curl localhost:8081/request/proxy/targets/add --data '{"name": "t1", \
 "removeQuery":["foo"], \
 "replicas":1, "enabled":true, "sendID": true}'
 
-curl localhost:8081/request/proxy/targets/add --data '{"name": "t2", \
+curl localhost:8081/proxy/targets/add --data '{"name": "t2", \
 "match":{"headers":[["foo"]]}, \
 "url":"http://localhost:8083", \
 "replaceURI":"/echo", \
 "addHeaders":[["z","z2"]], \
 "replicas":1, "enabled":true, "sendID": false}'
 
-curl localhost:8082/request/proxy/targets/add --data '{"name": "t3", \
+curl localhost:8082/proxy/targets/add --data '{"name": "t3", \
 "match":{"headers":[["x", "{x}"], ["y", "{y}"]], "uris":["/foo"]}, \
 "url":"http://localhost:8083", \
 "replaceURI":"/echo", \
@@ -2926,17 +3349,17 @@ curl localhost:8082/request/proxy/targets/add --data '{"name": "t3", \
 "removeHeaders":["x", "y"], \
 "replicas":1, "enabled":true, "sendID": true}'
 
-curl -X PUT localhost:8080/request/proxy/targets/t1/remove
+curl -X PUT localhost:8080/proxy/targets/t1/remove
 
-curl -X PUT localhost:8080/request/proxy/targets/t2/disable
+curl -X PUT localhost:8080/proxy/targets/t2/disable
 
-curl -X PUT localhost:8080/request/proxy/targets/t2/enable
+curl -X PUT localhost:8080/proxy/targets/t2/enable
 
-curl -v -X POST localhost:8080/request/proxy/targets/t1/invoke
+curl -v -X POST localhost:8080/proxy/targets/t1/invoke
 
-curl localhost:8080/request/proxy/targets
+curl localhost:8080/proxy/targets
 
-curl localhost:8080/request/proxy/counts
+curl localhost:8080/proxy/counts
 
 ```
 </details>
@@ -3011,99 +3434,6 @@ curl localhost:8080/request/proxy/counts
 
 
 <br/>
-
-
-
-# <a name="triggers-features"></a>
-# Triggers Feature
-
-`Goto` allow targets to be configured that are triggered based on response status. The triggers can be invoked manually for testing, but their real value is when they get triggered based on response status. Even more valuable when the request was proxied to another upstream service, in which case the trigger is based on the response status of the upstream service.
-
-#### APIs
-|METHOD|URI|Description|
-|---|---|---|
-|POST     |	/response/trigger/add              | Add a trigger target. See [Trigger Target JSON Schema](#trigger-target-json-schema) |
-|PUT, POST| /response/trigger/{target}/remove  | Remove a trigger target |
-|PUT, POST| /response/trigger/{target}/enable  | Enable a trigger target |
-|PUT, POST| /response/trigger/{target}/disable | Disable a trigger target |
-|POST     |	/response/trigger/{targets}/invoke | Invoke trigger targets by name for manual testing |
-|POST     |	/response/trigger/clear            | Remove all trigger targets |
-|GET 	    |	/response/trigger/list             | List all trigger targets |
-|GET 	    |	/response/trigger/counts             | List all trigger targets |
-
-
-#### Trigger Target JSON Schema
-|Field|Data Type|Description|
-|---|---|---|
-| name          | string                                | Name for this target |
-| method        | string                                | HTTP method to use for this target |
-| url           | string                                | URL for the target. |
-| headers       | `[][]string`                          | request headers to send with this trigger request |
-| body          | `string`                              | request body to send with this trigger request |
-| sendID        | bool           | Whether or not a unique ID be sent with each request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
-| enabled       | bool     | Whether or not the trigger is currently active |
-| triggerOnResponseStatuses | []int     | List of response statuses for which this target will be triggered |
-
-
-#### Triggers Events
-- `Trigger Target Added`
-- `Trigger Target Removed`
-- `Trigger Target Enabled`
-- `Trigger Target Disabled`
-- `Trigger Target Invoked`
-
-<br/>
-
-#### Trigger API Examples:
-<details>
-<summary>API Examples</summary>
-
-```
-curl -X POST localhost:8080/response/trigger/clear
-
-curl localhost:8080/response/trigger/add --data '{
-	"name": "t1", 
-	"method":"POST", 
-	"url":"http://localhost:8082/response/status/clear", 
-	"headers":[["foo", "bar"],["x", "x1"],["y", "y1"]], 
-	"body": "{\"test\":\"this\"}", 
-	"sendID": true, 
-	"enabled": true, 
-	"triggerOnResponseStatuses": [502, 503]
-}'
-
-curl -X POST localhost:8080/response/trigger/t1/remove
-
-curl -X POST localhost:8080/response/trigger/t1/enable
-
-curl -X POST localhost:8080/response/trigger/t1/disable
-
-curl -X POST localhost:8080/response/trigger/t1/invoke
-
-curl localhost:8080/response/trigger/counts
-
-curl localhost:8080/response/trigger/list
-
-```
-</details>
-
-#### Trigger Counts Result Example
-<details>
-<summary>Example</summary>
-<p>
-
-```
-{
-  "t1": {
-    "202": 2
-  },
-  "t3": {
-    "200": 3
-  }
-}
-```
-</p>
-</details>
 
 
 # <a name="jobs-features"></a>
@@ -3476,10 +3806,10 @@ By registering a worker instance to a registry instance, we get a few benefits:
 ||||
 |<a name="registry-peers-probes-apis"></a>| ** Peer Probes APIs ** ||
 ||||
-| POST, PUT | /registry/peers/probe<br/>/readiness/set?uri={uri} | Configure readiness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
-| POST, PUT | /registry/peers/probe<br/>/liveness/set?uri={uri} | Configure liveness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
-| POST, PUT | /registry/peers/probe<br/>/readiness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
-| POST, PUT | /registry/peers/probe<br/>/liveness/status/set/{status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/probes<br/>/readiness/set?uri={uri} | Configure readiness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/probes<br/>/liveness/set?uri={uri} | Configure liveness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/probes<br/>/readiness/set/status={status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/probes<br/>/liveness/set/status={status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
 | GET | /registry/peers/probes | Get probe configuration given to registry via any of the above 4 probe APIs. |
 ||||
 |<a name="registry-peers-call-apis"></a>| ** APIs to call any API on Peers ** ||

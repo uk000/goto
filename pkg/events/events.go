@@ -145,6 +145,12 @@ func TrackTrafficEvent(statusCode int, r *http.Request) {
   }
 }
 
+func TrackPortTrafficEvent(port int, operation string, statusCode int) {
+  if global.EnableEvents {
+    trafficChannel <- []interface{}{port, operation, statusCode}
+  }
+}
+
 func FlushEvents() {
   if global.EnableEvents {
     lock.RLock()
