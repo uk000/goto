@@ -1131,7 +1131,7 @@ func getDataLockerPaths(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func findInDataLockers(w http.ResponseWriter, r *http.Request) {
+func searchInDataLockers(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
   key := util.GetStringParamValue(r, "text")
@@ -1140,10 +1140,10 @@ func findInDataLockers(w http.ResponseWriter, r *http.Request) {
   labeledLockers := pr.labeledLockers
   pr.lockersLock.RUnlock()
   if key != "" {
-    util.WriteJsonPayload(w, labeledLockers.FindInDataLockers(label, key))
-    msg = fmt.Sprintf("Reported results for key %s lookup", key)
+    util.WriteJsonPayload(w, labeledLockers.SearchInDataLockers(label, key))
+    msg = fmt.Sprintf("Reported results for key %s search", key)
   } else {
-    msg = "Cannot find. No key given."
+    msg = "Cannot search. No key given."
     fmt.Fprintln(w, msg)
   }
   if global.EnableRegistryLockerLogs {
@@ -1444,23 +1444,98 @@ func getPeerEvents(w http.ResponseWriter, r *http.Request) {
   label := util.GetStringParamValue(r, "label")
   peerName := util.GetStringParamValue(r, "peer")
   unified := strings.Contains(r.RequestURI, "unified")
+  reverse := strings.Contains(r.RequestURI, "reverse")
+  all := strings.EqualFold(label, constants.LockerAll)
+
+  pr := getPortRegistry(r)
+  pr.lockersLock.RLock()
+  labeledLockers := pr.labeledLockers
+  pr.lockersLock.RUnlock()
+
   var locker *locker.CombiLocker
-  if label == "" || strings.EqualFold(label, constants.LockerCurrent) {
+  if label == "" {
+    all = true
+  } else if strings.EqualFold(label, constants.LockerCurrent) {
     locker = getCurrentLocker(r)
+    label = locker.Label
   } else {
     locker = getLockerForLabel(r, label)
   }
-  if locker == nil {
+
+  if !all && locker == nil {
     msg = "Locker not found"
     w.WriteHeader(http.StatusNotFound)
     fmt.Fprint(w, msg)
   } else {
     if peerName != "" {
-      msg = fmt.Sprintf("Registry: Reporting events for peer: %s", peerName)
+      if all {
+        msg = fmt.Sprintf("Registry: Reporting events for peer [%s] from all lockers", peerName)
+      } else {
+        msg = fmt.Sprintf("Registry: Reporting events for peer [%s] from locker [%s]", peerName, label)
+      }
     } else {
-      msg = "Reporting events for all peers"
+      if all {
+        msg = fmt.Sprintf("Registry: Reporting events for all peers from all lockers")
+      } else {
+        msg = fmt.Sprintf("Registry: Reporting events for all peers from locker [%s]", label)
+      }
     }
-    util.WriteJsonPayload(w, locker.GetPeerEvents(peerName, unified))
+    result := labeledLockers.GetPeerEvents(label, peerName, unified, reverse)
+    util.WriteJsonPayload(w, result)
+  }
+  if global.EnableRegistryLogs {
+    util.AddLogMessage(msg, r)
+  }
+}
+
+func searchInPeerEvents(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  label := util.GetStringParamValue(r, "label")
+  peerName := util.GetStringParamValue(r, "peer")
+  key := util.GetStringParamValue(r, "text")
+  unified := strings.Contains(r.RequestURI, "unified")
+  reverse := strings.Contains(r.RequestURI, "reverse")
+  all := strings.EqualFold(label, constants.LockerCurrent)
+
+  if key == "" {
+    msg = "Cannot search. No key given."
+    fmt.Fprintln(w, msg)
+  } else {
+    pr := getPortRegistry(r)
+    pr.lockersLock.RLock()
+    labeledLockers := pr.labeledLockers
+    pr.lockersLock.RUnlock()
+
+    var locker *locker.CombiLocker
+    if label == "" {
+      all = true
+    } else if strings.EqualFold(label, constants.LockerCurrent) {
+      locker = getCurrentLocker(r)
+      label = locker.Label
+    } else {
+      locker = getLockerForLabel(r, label)
+    }
+    if !all && locker == nil {
+      msg = "Locker not found"
+      w.WriteHeader(http.StatusNotFound)
+      fmt.Fprint(w, msg)
+    } else {
+      if peerName != "" {
+        if all {
+          msg = fmt.Sprintf("Registry: Reporting searched events for peer [%s] from all lockers", peerName)
+        } else {
+          msg = fmt.Sprintf("Registry: Reporting searched events for peer [%s] from locker [%s]", peerName, label)
+        }
+      } else {
+        if all {
+          msg = fmt.Sprintf("Registry: Reporting searched events for all peers from all lockers")
+        } else {
+          msg = fmt.Sprintf("Registry: Reporting searched events for all peers from locker [%s]", label)
+        }
+      }
+      result := labeledLockers.SearchInPeerEvents(label, peerName, key, unified, reverse)
+      util.WriteJsonPayload(w, result)
+    }
   }
   if global.EnableRegistryLogs {
     util.AddLogMessage(msg, r)

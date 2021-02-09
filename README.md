@@ -205,7 +205,7 @@ The application accepts the following command arguments:
         <tr>
           <td rowspan="2"><pre>--label {label}</pre></td>
           <td>Label this server instance will use to identify itself. </td>
-          <td rowspan="2">Goto-`IPAddress` </td>
+          <td rowspan="2">Goto-`IPAddress:Port` </td>
         </tr>
         <tr>
           <td>* This is used both for setting `Goto`'s default response headers as well as when registering with registry.</td>
@@ -218,7 +218,7 @@ The application accepts the following command arguments:
         <tr>
           <td rowspan="1"><pre>--shutdownDelay {delay}</pre></td>
           <td>Delay the shutdown by this duration after receiving SIGTERM. </td>
-          <td rowspan="1">5s</td>
+          <td rowspan="1">1s</td>
         </tr>
         <tr>
           <td rowspan="2"><pre>--registry {url}</pre></td>
@@ -1414,9 +1414,12 @@ The server is useful to be run as a test server for testing some client applicat
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
-| GET       | /events          | Get events timeline of a `goto` instance. This reports instance's own timeline, as opposed to the Registry's peers events APIs that expose events collected from multiple instances.  |
-| POST      | /events/flush    | Publish any pending events to the registry, and clear local events timeline. |
-| POST      | /events/clear    | Clear the local events timeline. |
+| POST      | /events/flush    | Publish any pending events to the registry, and clear instance's events timeline. |
+| POST      | /events/clear    | Clear the instance's events timeline. |
+| GET       | /events          | Get events timeline of the instance. To get combined events from all instances, use the registry's peers events APIs instead.  |
+| GET       | /events/reverse          | Get events timeline in reverse chronological order.  |
+| GET       | /events/search/{text} | Search the instance's events timeline. |
+| GET       | /events/search/{text}/reverse | Search with results in reverse chronological order. |
 
 
 #### Server Events
@@ -2253,11 +2256,11 @@ This feature allows tracking request counts by headers.
 |METHOD|URI|Description|
 |---|---|---|
 |POST     | /request/headers/track/clear									| Remove all tracked headers |
-|PUT, POST| /request/headers/track/add/{headers}					| Add headers to track |
-|PUT, POST|	/request/headers/track/{headers}/remove				| Remove given headers from tracking |
-|GET      | /request/headers/track/{header}/counts				| Get counts for a tracked header |
-|PUT, POST| /request/headers/track/counts/clear/{headers}	| Clear counts for given tracked headers |
-|POST     | /request/headers/track/counts/clear						| Clear counts for all tracked headers |
+|PUT, POST| /request/headers/track<br/>/add/{headers}					| Add headers to track |
+|PUT, POST|	/request/headers/track<br/>/{headers}/remove				| Remove given headers from tracking |
+|GET      | /request/headers/track<br/>/{header}/counts				| Get counts for a tracked header |
+|PUT, POST| /request/headers/track<br/>/counts/clear/{headers}	| Clear counts for given tracked headers |
+|POST     | /request/headers/track<br/>/counts/clear						| Clear counts for all tracked headers |
 |GET      | /request/headers/track/counts									| Get counts for all tracked headers |
 |GET      | /request/headers/track									      | Get list of tracked headers |
 
@@ -2502,10 +2505,10 @@ When the server starts shutting down, it waits for a configured grace period (de
 
 |METHOD|URI|Description|
 |---|---|---|
-|PUT, POST| /probes/readiness/set?uri={uri} | Set readiness probe URI. Also clears its counts. If not explicitly set, the readiness URI is set to `/ready`.  |
-|PUT, POST| /probes/liveness/set?uri={uri} | Set liveness probe URI. Also clears its counts If not explicitly set, the liveness URI is set to `/live`. |
-|PUT, POST| /probes/readiness/set/status={status} | Set HTTP response status to be returned for readiness URI calls. Default 200. |
-|PUT, POST| /probes/liveness/set/status={status} | Set HTTP response status to be returned for liveness URI calls. Default 200. |
+|PUT, POST| /probes/readiness<br/>/set?uri={uri} | Set readiness probe URI. Also clears its counts. If not explicitly set, the readiness URI is set to `/ready`.  |
+|PUT, POST| /probes/liveness<br/>/set?uri={uri} | Set liveness probe URI. Also clears its counts If not explicitly set, the liveness URI is set to `/live`. |
+|PUT, POST| /probes/readiness<br/>/set/status={status} | Set HTTP response status to be returned for readiness URI calls. Default 200. |
+|PUT, POST| /probes/liveness<br/>/set/status={status} | Set HTTP response status to be returned for liveness URI calls. Default 200. |
 |POST| /probes/counts/clear               | Clear probe counts URIs |
 |GET      | /probes                    | Get current config and counts for both probes |
 
@@ -2540,13 +2543,13 @@ This feature allows adding bypass URIs that will not be subject to other configu
 
 |METHOD|URI|Description|
 |---|---|---|
-|PUT, POST| /request/uri/bypass/add?uri={uri}       | Add a bypass URI |
-|PUT, POST| /request/uri/bypass/remove?uri={uri}    | Remove a bypass URI |
+|PUT, POST| /request/uri/bypass<br/>/add?uri={uri}       | Add a bypass URI |
+|PUT, POST| /request/uri/bypass<br/>/remove?uri={uri}    | Remove a bypass URI |
 |PUT, POST| /request/uri/bypass/clear               | Remove all bypass URIs |
 |PUT, POST| /request/uri/bypass<br/>/set/status={status:count} | Set status code to be returned for bypass URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
 |GET      |	/request/uri/bypass                     | Get list of bypass URIs |
 |GET      |	/request/uri/bypass/status              | Get current bypass URI status code |
-|GET      |	/request/uri/bypass/counts?uri={uri}    | Get request counts for a given bypass URI |
+|GET      |	/request/uri/bypass<br/>/counts?uri={uri}    | Get request counts for a given bypass URI |
 |GET      |	/request/uri/bypass/counts                | Get request counts for all bypass URIs |
 
 #### URI Bypass Events
@@ -2605,13 +2608,13 @@ This feature allows marking some URIs as `ignored` so that those don't generate 
 
 |METHOD|URI|Description|
 |---|---|---|
-|PUT, POST| /request/uri/ignore/add?uri={uri}       | Add an ignored URI |
-|PUT, POST| /request/uri/ignore/remove?uri={uri}    | Remove an ignored URI |
+|PUT, POST| /request/uri/ignore<br/>/add?uri={uri}       | Add an ignored URI |
+|PUT, POST| /request/uri/ignore<br/>/remove?uri={uri}    | Remove an ignored URI |
 |PUT, POST| /request/uri/ignore/clear               | Remove all ignored URIs |
 |PUT, POST| /request/uri/ignore<br/>/set/status={status:count} | Set status code to be returned for ignored URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
 |GET      |	/request/uri/ignore                     | Get list of ignored URIs |
 |GET      |	/request/uri/ignore/status              | Get current ignored URI status code |
-|GET      |	/request/uri/ignore/counts?uri={uri}    | Get request counts for a given ignored URI |
+|GET      |	/request/uri/ignore<br/>/counts?uri={uri}    | Get request counts for a given ignored URI |
 |GET      |	/request/uri/ignore/counts                | Get request counts for all ignored URIs |
 
 
@@ -2711,8 +2714,8 @@ This feature allows adding custom response headers to all responses sent by the 
 
 |METHOD|URI|Description|
 |---|---|---|
-| PUT, POST | /response/headers/add/{header}={value}  | Add a custom header to be sent with all responses |
-| PUT, POST | /response/headers/remove/{header}       | Remove a previously added custom response header |
+| PUT, POST | /response/headers<br/>/add/{header}={value}  | Add a custom header to be sent with all responses |
+| PUT, POST | /response/headers<br/>/remove/{header}       | Remove a previously added custom response header |
 | POST      |	/response/headers/clear                 | Remove all configured custom response headers |
 | GET       |	/response/headers                       | Get list of configured custom response headers |
 
@@ -3682,7 +3685,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 1. You can pre-register a list of invocation targets and jobs at the registry instance that should be handed out to the worker instances. These targets/jobs are registered by labels, and the worker instances receive the matching targets+jobs for the labels they register with.
 2. The targets and jobs registered at the registry can also be marked for `auto-invocation`. When a worker instance receives a target/job from registry at startup that's marked for auto-invocation, it immediately invokes that target/job at startup. Additionally, the target/job is retained in the worker instance for later invocation via API as well.
 3. In addition to sending targets/jobs to worker instances at the time of registration, the registry instance also pushes targets/jobs to the worker instances as and when more targets/jobs get added to the registry. This has the added benefit of just using the registry instance as the single point of configuration, where you add targets/jobs and those get pushed to all worker instances. Removal of targets/jobs from the registry also gets pushed, so the targets/jobs get removed from the corresponding worker instances. Even targets/jobs that are pushed later can be marked for `auto-invocation`, and the worker instances that receive the target/job will invoke it immediately upon receipt.
-4. Registry provides `labeled lockers` as a flexible in-memory data store for capturing any kind of data for debugging purposes. Registry starts with a locker labeled `default`. A new locker can be opened using the `/open` API, and lockers can be closed (discarded) using the `/close` API. The most recently opened locker becomes current and captures data reported from peer instances, whereas other named lockers stay around and can be interacted with using `/store`, `/remove` and `/get` APIs. The `/find` API can find a given search phrase across all keys across all available lockers.
+4. Registry provides `labeled lockers` as a flexible in-memory data store for capturing any kind of data for debugging purposes. Registry starts with a locker labeled `default`. A new locker can be opened using the `/open` API, and lockers can be closed (discarded) using the `/close` API. The most recently opened locker becomes current and captures data reported from peer instances, whereas other named lockers stay around and can be interacted with using `/store`, `/remove` and `/get` APIs. The `/search` API can find a given search phrase across all keys across all available lockers.
 5. If peer instances are configured to connect to a registry, they store their events and client invocation results into the current labeled locker in the registry. Registry provides APIs to get summary invocation results and a timeline of events across all peers. 
 6. Peer instances periodically re-register themselves with registry in case registry was restarted and lost all peers info. Re-registering is different from startup registration in that peers don't receive targets and jobs from registry when they remind registry about themselves, and hence no auto-invocation happens.
 7. A registry instance can be asked to clone data from another registry instance using the `/cloneFrom` API. This allows for quick bootstrapping of a new registry instance based on configuration from an existing registry instance, whether for data analysis purpose or for performing further operations. The pods cloned from the other registry are not used by this registry for any operations. Any new pods connecting to this registry using the same labels cloned from the other registry will be able to use the existing configs.
@@ -3693,11 +3696,11 @@ By registering a worker instance to a registry instance, we get a few benefits:
 |<a name="registry-peers-apis"></a>| ** Peer APIs ** ||
 | POST      | /registry/peers/add     | Register a worker instance (referred to as peer). See [Peer JSON Schema](#peer-json-schema)|
 | POST      | /registry/peers/{peer}/remember | Re-register a peer. Accepts same request payload as /peers/add API but doesn't respond back with targets and jobs. |
-| POST, PUT | /registry/peers/{peer}/remove/{address} | Deregister a peer by its label and IP address |
-| GET       | /registry/peers/{peer}/health/{address} | Check and report health of a specific peer instance based on label and IP address |
+| POST, PUT | /registry/peers/{peer}<br/>/remove/{address} | Deregister a peer by its label and IP address |
+| GET       | /registry/peers/{peer}<br/>/health/{address} | Check and report health of a specific peer instance based on label and IP address |
 | GET       | /registry/peers/{peer}/health | Check and report health of all instances of a peer |
 | GET       | /registry/peers/health | Check and report health of all instances of all peers |
-| POST      | /registry/peers/{peer}/health/cleanup | Check health of all instances of the given peer label and remove IP addresses that are unresponsive |
+| POST      | /registry/peers/{peer}<br/>/health/cleanup | Check health of all instances of the given peer label and remove IP addresses that are unresponsive |
 | POST      | /registry/peers/health/cleanup | Check health of all instances of all peers and remove IP addresses that are unresponsive |
 | POST      | /registry/peers/clear/epochs   | Remove epochs for disconnected peers|
 | POST      | /registry/peers/clear   | Remove all registered peers|
@@ -3713,75 +3716,93 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST      | /registry/lockers/{label}/clear | Clear the contents of the locker for the given label but keep the locker.  |
 | POST      | /registry/lockers/clear | Remove all labeled lockers and empty the default locker.  |
 | GET       | /registry/lockers/labels | Get a list of all existing locker labels, regardless of whether or not it has data.  |
-| POST      | /registry/lockers/{label}/store/{path} | Store payload (body) as data in the given labeled locker at the leaf of the given key path. `path` can be a single key or a comma-separated list of subkeys, in which case data gets stored in the tree under the given path. |
-| POST      | /registry/lockers/{label}/remove/{path} | Remove stored data, if any, from the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data gets removed from the leaf of the given path. |
-| GET      | /registry/lockers/{label}/get/{path} | Read stored data, if any, at the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
-| GET      | /registry/lockers/current/get/{path} | Read stored data, if any, at the given key path in the current locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
-| GET      | /registry/lockers/{label}/data/keys| Get a list of keys where some data is stored, from the given locker.  |
-| GET      | /registry/lockers/{label}/data/paths| Get a list of key paths (URIs) where some data is stored, from the given locker. The returned URIs are valid for invocation against the base URL of the registry. |
-| GET      | /registry/lockers/current/data/keys| Get a list of keys where some data is stored, from the current locker.  |
-| GET      | /registry/lockers/current/data/paths| Get a list of key paths (URIs) where some data is stored, from the current locker. The returned URIs are valid for invocation against the base URL of the registry. |
+| POST      | /registry/lockers<br/>/{label}/store/{path} | Store payload (body) as data in the given labeled locker at the leaf of the given key path. `path` can be a single key or a comma-separated list of subkeys, in which case data gets stored in the tree under the given path. |
+| POST      | /registry/lockers<br/>/{label}/remove/{path} | Remove stored data, if any, from the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data gets removed from the leaf of the given path. |
+| GET      | /registry/lockers<br/>/{label}/get/{path} | Read stored data, if any, at the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
+| GET      | /registry/lockers<br/>/current/get/{path} | Read stored data, if any, at the given key path in the current locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
+| GET      | /registry/lockers<br/>/{label}/data/keys| Get a list of keys where some data is stored, from the given locker.  |
+| GET      | /registry/lockers<br/>/{label}/data/paths| Get a list of key paths (URIs) where some data is stored, from the given locker. The returned URIs are valid for invocation against the base URL of the registry. |
+| GET      | /registry/lockers<br/>/current/data/keys| Get a list of keys where some data is stored, from the current locker.  |
+| GET      | /registry/lockers<br/>/current/data/paths| Get a list of key paths (URIs) where some data is stored, from the current locker. The returned URIs are valid for invocation against the base URL of the registry. |
 | GET      | /registry/lockers/data/keys| Get a list of keys where some data is stored, from all lockers.  |
 | GET      | /registry/lockers/data/paths| Get a list of key paths (URIs) where some data is stored, from all lockers. The returned URIs are valid for invocation against the base URL of the registry. |
-| GET      | /registry/lockers/{label}/find/{text} | Get a list of all valid URI paths where the given text exists in the given locker. The returned URIs are valid for invocation against the base URL of the registry. |
-| GET      | /registry/lockers/find/{text} | Get a list of all valid URI paths (containing the locker label and keys) where the given text exists, across all lockers. The returned URIs are valid for invocation against the base URL of the registry. |
+| GET      | /registry/lockers<br/>/{label}/search/{text} | Get a list of all valid URI paths where the given text exists in the given locker. The returned URIs are valid for invocation against the base URL of the registry. |
+| GET      | /registry/lockers<br/>/search/{text} | Get a list of all valid URI paths (containing the locker label and keys) where the given text exists, across all lockers. The returned URIs are valid for invocation against the base URL of the registry. |
 | GET       | /registry/lockers/current | Get currently active locker with stored keys, but without stored data |
-| GET       | /registry/lockers/current?data=y | Get currently active locker with stored data |
+| GET       | /registry/lockers<br/>/current?data=y | Get currently active locker with stored data |
 | GET       | /registry/lockers/{label} | Get given label's locker with stored keys, but without stored data |
-| GET       | /registry/lockers/{label}?data=y | Get given label's locker with stored data |
+| GET       | /registry/lockers<br/>/{label}?data=y | Get given label's locker with stored data |
 | GET       | /registry/lockers | Get all lockers with stored keys but without stored data |
 | GET       | /registry/lockers?data=y | Get all lockers with stored data |
 ||||
 |<a name="registry-peer-lockers-apis"></a>| ** Locker APIs ** ||
 ||||
-| POST      | /registry/peers/{peer}/{address}<br/>/locker/store/{path} | Store any arbitrary value for the given `path` in the locker of the peer instance under currently active labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
-| POST      | /registry/peers/{peer}/{address}<br/>/locker/remove/{path} | Remove stored data for the given `path` from the locker of the peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
+| POST      | /registry/peers<br/>/{peer}/{address}<br/>/locker/store/{path} | Store any arbitrary value for the given `path` in the locker of the peer instance under currently active labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
+| POST      | /registry/peers<br/>/{peer}/{address}<br/>/locker/remove/{path} | Remove stored data for the given `path` from the locker of the peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
 | POST      | /registry/peers/{peer}<br/>/locker/store/{path} | Store any arbitrary value for the given key in the peer locker without associating data to a peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
 | POST      | /registry/peers/{peer}<br/>/locker/remove/{path} | Remove stored data for the given key from the peer locker under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
-| POST      | /registry/peers/{peer}/{address}<br/>/events/store | API invoked by peers to publish their events to the currently active locker. Event timeline can be retrieved from registry via various `/events` GET APIs. |
-| POST      | /registry/peers/{peer}/{address}<br/>/locker/clear | Clear the locker for the peer instance under currently active labeled locker |
-| POST      | /registry/peers/{peer}/locker/clear | Clear the locker for all instances of the given peer under currently active labeled locker |
+| POST      | /registry/peers<br/>/{peer}/{address}<br/>/events/store | API invoked by peers to publish their events to the currently active locker. Event timeline can be retrieved from registry via various `/events` GET APIs. |
+| POST      | /registry/peers<br/>/{peer}/{address}<br/>/locker/clear | Clear the locker for the peer instance under currently active labeled locker |
+| POST      | /registry/peers/{peer}<br/>/locker/clear | Clear the locker for all instances of the given peer under currently active labeled locker |
 | POST      | /registry/peers/lockers/clear | Clear all peer lockers under currently active labeled locker |
 | POST      | /registry/peers/events/flush | Requests all peer instances to publish any pending events to registry, and clears events timeline on the peer instances. Registry still retains the peers events in the current locker. |
 | POST      | /registry/peers/events/clear | Requests all peer instances to clear their events timeline, and also removes the peers events from the current registry locker. |
-| GET       | /registry/lockers/{label}<br/>/peers/{peer}/events | Get the events timeline for all instances of a peer from the given labeled locker. Using label `current` fetches data from the current labeled locker. |
+| GET       | /registry/lockers/{label}<br/>/peers/{peer}/events | Get the events timeline for all instances of the given peer from the given labeled locker. Use label `all` to get data from all lockers, and `current` to get from the current locker. |
+| GET       | /registry/lockers/{label}<br/>/peers/{peer}/events/reverse | Same as above but in reverse chronological order. |
+| GET       | /registry/lockers/{label}<br/>/peers/{peer}<br/>/events/search/{text} | Search in the events timeline for all instances of the given peer from the given labeled locker. Using label `all` fetches data from all lockers, whereas `current` gets from the current locker. Use label `all` to search across all lockers. |
+| GET       | /registry/lockers/{label}<br/>/peers/{peer}<br/>/events/search/{text}/reverse | Same as above but in reverse chronological order. |
 | GET       | /registry/lockers/{label}<br/>/peers/events | Get the events timeline for all instances of all peer from the given labeled locker, grouped by peer label. |
-| GET       | /registry/lockers/{label}<br/>/peers/events/unified | Get the events timeline for all instances of all peer from the given labeled locker, merged into a single timeline by time order. |
-| GET       | /registry/peers/{peer}/events | Get the events timeline for all instances of a peer from the current locker. |
-| GET       | /registry/peers/events | Get the events timeline for all instances of all peer from the current locker, grouped by peer label. |
-| GET       | /registry/peers/events/unified | Get the events timeline for all instances of all peer from the current locker, merged into a single timeline by time order. |
+| GET       | /registry/lockers/{label}<br/>/peers/events/reverse | Same as above but in reverse chronological order. |
+| GET       | /registry/lockers/{label}<br/>/peers/events<br/>/search/{text} | Search in the events timeline of all peers from the given labeled locker, grouped by peer label. |
+| GET       | /registry/lockers/{label}<br/>/peers/events<br/>/search/{text}/reverse | Same as above but in reverse chronological order. |
+| GET       | /registry/lockers/{label}<br/>/peers/events/unified | Get the events timeline for all instances of all peers from the given labeled locker, merged into a single timeline by time order. |
+| GET       | /registry/lockers/{label}<br/>/peers/events/unified/reverse | Same as above but in reverse chronological order. |
+| GET       | /registry/lockers/{label}<br/>/peers/events<br/>/unified/search/{text} | Search in the events timeline of all peers from the given labeled locker, with results merged into a single timeline in reverse chronological order. |
+| GET       | /registry/lockers/{label}<br/>/peers/events<br/>/unified/search/{text}/reverse | Same as above but in reverse chronological order. |
+| GET       | /registry/peers/{peer}/events | Get the events timeline for all instances of the given peer from the current locker. |
+| GET       | /registry/peers/{peer}/events/reverse | Same as above but in reverse chronological order. |
+| GET       | /registry/peers/{peer}<br/>/events/search/{text} | Search in the events timeline for all instances of the given peer from the current locker. |
+| GET       | /registry/peers/{peer}<br/>/events/search/{text}/reverse | Same as above but in reverse chronological order. |
+| GET       | /registry/peers/events | Get the events timeline for all instances of all peers from the current locker, grouped by peer label. |
+| GET       | /registry/peers/events/reverse | Same as above but in reverse chronological order. |
+| GET       | /registry/peers/events<br/>/search/{text} | Search in the events timeline of all peers from the current locker, grouped by peer label. |
+| GET       | /registry/peers/events<br/>/search/{text}/reverse | Same as above but in reverse chronological order. |
+| GET       | /registry/peers/events/unified | Get the events timeline for all instances of all peers from the current locker, merged into a single timeline by time order. |
+| GET       | /registry/peers/events/unified/reverse | Same as above but in reverse chronological order. |
+| GET       | /registry/peers/events<br/>/unified/search/{text} | Search in the events timeline of all peer from the current locker, merged into a single timeline by time order. |
+| GET       | /registry/peers/events<br/>/unified/search/{text}/reverse | Same as above but in reverse chronological order. |
 | GET       | /registry/lockers/{label}<br/>/peers/targets/results | Get target invocation summary results for all client peer instances from the given labeled locker |
-| GET       | /registry/lockers/{label}<br/>/peers/targets/results?detailed=Y | Get invocation results broken down by targets for all client peer instances from the given labeled locker |
-| GET       | /registry/peers/lockers/targets/results | Get target invocation summary results for all client peer instances from current locker |
+| GET       | /registry/lockers/{label}<br/>/peers/targets<br/>/results?detailed=Y | Get invocation results broken down by targets for all client peer instances from the given labeled locker |
+| GET       | /registry/peers/lockers<br/>/targets/results | Get target invocation summary results for all client peer instances from current locker |
 | GET       | /registry/peers/lockers<br/>/targets/results?detailed=Y | Get invocation results broken down by targets for all client peer instances from the current locker |
-| GET       | /registry/lockers/{label}<br/>/peers/{peer}/{address}/locker/get/{path} | Get the data stored at the given path under the peer instance's locker under the given labeled locker. Using label `current` fetches data from the current labeled locker. |
+| GET       | /registry/lockers/{label}<br/>/peers/{peer}/{address}<br/>/locker/get/{path} | Get the data stored at the given path under the peer instance's locker under the given labeled locker. Using label `current` fetches data from the current labeled locker. |
 | GET       | /registry/peers/{peer}<br/>/{address}/locker/get/{path} | Get the data stored at the given path under the peer instance's locker under the current labeled locker |
 | GET       | /registry/lockers/{label}<br/>/peers/{peer}/{address} | Get the peer instance's locker under the given labeled locker, using `...` placeholder for stored data to reduce the download size (to just fetch locker metadata). |
 | GET       | /registry/lockers/{label}<br/>/peers/{peer}/{address}?data=y | Get the peer instance's locker under the given labeled locker with all stored data included. |
-| GET       | /registry/peers/{peer}/{address}/locker | Get the peer instance's locker under the current active labeled locker, using `...` placeholder for stored data to just fetch locker metadata |
-| GET       | /registry/peers/{peer}/{address}/locker?data=y | Get the peer instance's locker under the current active labeled locker with all stored data included. |
-| GET       | /registry/lockers/{label}/peers/{peer} | Get the lockers of all instances of the given peer under the given labeled locker, using `...` placeholder for stored data to just fetch locker metadata. |
-| GET       | /registry/lockers/{label}/peers/{peer}?data=y | Get the lockers of all instances of the given peer under the given labeled locker with all stored data included. |
+| GET       | /registry/peers<br/>/{peer}/{address}/locker | Get the peer instance's locker under the current active labeled locker, using `...` placeholder for stored data to just fetch locker metadata |
+| GET       | /registry/peers/{peer}/{address}<br/>/locker?data=y | Get the peer instance's locker under the current active labeled locker with all stored data included. |
+| GET       | /registry/lockers/{label}<br/>/peers/{peer} | Get the lockers of all instances of the given peer under the given labeled locker, using `...` placeholder for stored data to just fetch locker metadata. |
+| GET       | /registry/lockers/{label}<br/>/peers/{peer}?data=y | Get the lockers of all instances of the given peer under the given labeled locker with all stored data included. |
 | GET       | /registry/peers/{peer}/locker | Get locker's data for all instances of the peer from currently active labeled locker, using `...` placeholder for stored data to just fetch locker metadata |
-| GET       | /registry/peers/{peer}/locker?data=y | Get locker's data for all instances of the peer from currently active labeled locker with all stored data included |
+| GET       | /registry/peers/{peer}<br/>/locker?data=y | Get locker's data for all instances of the peer from currently active labeled locker with all stored data included |
 | GET       | /registry/lockers/{label}/peers | Get the lockers of all peers under the given labeled locker, using `...` placeholder for stored data to just fetch locker metadata. |
-| GET       | /registry/lockers/{label}/peers?data=y | Get the lockers of all peers under the given labeled locker with all stored data included. |
+| GET       | /registry/lockers/{label}<br/>/peers?data=y | Get the lockers of all peers under the given labeled locker with all stored data included. |
 | GET       | /registry/peers/lockers | Get the lockers of all peers from currently active labeled locker, using `...` placeholder for stored data to just fetch locker metadata. |
-| GET       | /registry/peers/lockers?data=y | Get the lockers of all peers from currently active labeled locker with all stored data included. |
+| GET       | /registry/peers<br/>/lockers?data=y | Get the lockers of all peers from currently active labeled locker with all stored data included. |
 ||||
 |<a name="registry-peers-targets-apis"></a>| ** Peer Targets APIs ** ||
 ||||
 | GET       | /registry/peers/targets | Get all registered targets for all peers |
-| POST      | /registry/peers/{peer}/targets/add | Add a target to be sent to a peer. See [Peer Target JSON Schema](#peer-target-json-schema). Pushed immediately as well as upon start of a new peer instance. |
+| POST      | /registry/peers<br/>/{peer}/targets/add | Add a target to be sent to a peer. See [Peer Target JSON Schema](#peer-target-json-schema). Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/{peer}<br/>/targets/{targets}/remove | Remove given targets for a peer |
-| POST      | /registry/peers/{peer}/targets/clear   | Remove all targets for a peer|
+| POST      | /registry/peers<br/>/{peer}/targets/clear   | Remove all targets for a peer|
 | GET       | /registry/peers/{peer}/targets   | Get all targets of a peer |
 | POST, PUT | /registry/peers/{peer}<br/>/targets/{targets}/invoke | Invoke given targets on the given peer |
 | POST, PUT | /registry/peers/{peer}<br/>/targets/invoke/all | Invoke all targets on the given peer |
-| POST, PUT | /registry/peers/targets/invoke/all | Invoke all targets on the given peer |
+| POST, PUT | /registry/peers<br/>/targets/invoke/all | Invoke all targets on the given peer |
 | POST, PUT | /registry/peers/{peer}<br/>/targets/{targets}/stop | Stop given targets on the given peer |
 | POST, PUT | /registry/peers/{peer}<br/>/targets/stop/all | Stop all targets on the given peer |
-| POST, PUT | /registry/peers/targets/stop/all | Stop all targets on the given peer |
+| POST, PUT | /registry/peers<br/>/targets/stop/all | Stop all targets on the given peer |
 | POST, PUT | /registry/peers/targets<br/>/results/all/{enable}  | Controls whether results should be summarized across all targets. Disabling this when not needed can improve performance. Disabled by default. |
 | POST, PUT | /registry/peers/targets<br/>/results/invocations/{enable}  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
 | POST      | /registry/peers/targets/clear   | Remove all targets from all peers |
@@ -3789,12 +3810,12 @@ By registering a worker instance to a registry instance, we get a few benefits:
 |<a name="registry-peers-jobs-apis"></a>| ** Peer Jobs APIs ** ||
 ||||
 | GET       | /registry/peers/jobs | Get all registered jobs for all peers |
-| POST      | /registry/peers/{peer}/jobs/add | Add a job to be sent to a peer. See [Peer Job JSON Schema](#peer-job-json-schema). Pushed immediately as well as upon start of a new peer instance. |
+| POST      | /registry/peers/{peer}<br/>/jobs/add | Add a job to be sent to a peer. See [Peer Job JSON Schema](#peer-job-json-schema). Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/{peer}<br/>/jobs/{jobs}/remove | Remove given jobs for a peer. |
-| POST      | /registry/peers/{peer}/jobs/clear   | Remove all jobs for a peer.|
+| POST      | /registry/peers/{peer}<br/>/jobs/clear   | Remove all jobs for a peer.|
 | GET       | /registry/peers/{peer}/jobs   | Get all jobs of a peer |
-| POST, PUT | /registry/peers/{peer}/jobs/{jobs}/run | Run given jobs on the given peer |
-| POST, PUT | /registry/peers/{peer}/jobs/run/all | Run all jobs on the given peer |
+| POST, PUT | /registry/peers/{peer}<br/>/jobs/{jobs}/run | Run given jobs on the given peer |
+| POST, PUT | /registry/peers/{peer}<br/>/jobs/run/all | Run all jobs on the given peer |
 | POST, PUT | /registry/peers/{peer}<br/>/jobs/{jobs}/stop | Stop given jobs on the given peer |
 | POST, PUT | /registry/peers/{peer}<br/>/jobs/stop/all | Stop all jobs on the given peer |
 | POST      | /registry/peers/jobs/clear   | Remove all jobs from all peers. |
@@ -3814,7 +3835,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 ||||
 |<a name="registry-peers-call-apis"></a>| ** APIs to call any API on Peers ** ||
 ||||
-| GET, POST, PUT | /registry/peers/{peer}/call?uri={uri} | Invoke the given `URI` on the given `peer`, using the HTTP method and payload from this request |
+| GET, POST, PUT | /registry/peers/{peer}<br/>/call?uri={uri} | Invoke the given `URI` on the given `peer`, using the HTTP method and payload from this request |
 | GET, POST, PUT | /registry/peers/call?uri={uri} | Invoke the given `URI` on all `peers`, using the HTTP method and payload from this request |
 ||||
 |<a name="registry-dump-apis"></a>| ** Registry clone, dump and load APIs ** ||
@@ -4045,7 +4066,7 @@ curl -X POST http://localhost:8080/registry/lockers/lockerA/store/A,B,C --data '
 curl -s localhost:8080/registry/lockers/data/paths
 
 #find all paths where text `foo` appears
-curl -s localhost:8080/registry/lockers/find/foo
+curl -s localhost:8080/registry/lockers/search/foo
 
 #get data from lockerA at path A->B->C
 curl -v localhost:8080/registry/lockers/lockerA/get/XX,1,2

@@ -1,6 +1,7 @@
 package payload
 
 import (
+  "context"
   "fmt"
   "goto/pkg/events"
   "goto/pkg/server/intercept"
@@ -30,7 +31,8 @@ type ResponsePayload struct {
   URICaptureKeys   []string `json:"uriCaptureKeys"`
   HeaderCaptureKey string   `json:"headerCaptureKey"`
   QueryCaptureKey  string   `json:"queryCaptureKey"`
-  uriRegExp        *regexp.Regexp
+  uriRegexp        *regexp.Regexp
+  bodyMatchRegexp  *regexp.Regexp
   fillers          []string
   router           *mux.Router
 }
@@ -52,6 +54,7 @@ var (
   portResponses map[string]*PortResponse = map[string]*PortResponse{}
   rootRouter    *mux.Router
   matchRouter   *mux.Router
+  payloadKey    = &util.ContextKey{"payloadKey"}
   responseLock  sync.RWMutex
 )
 
@@ -134,7 +137,8 @@ func newResponsePayload(payload, contentType, uri, header, query, value string, 
     QueryMatch:       query,
     QueryValueMatch:  queryValueMatch,
     BodyMatch:        bodyMatch,
-    uriRegExp:        uriRegExp,
+    uriRegexp:        uriRegExp,
+    bodyMatchRegexp:  regexp.MustCompile("(?i)" + strings.Join(bodyMatch, ".*") + ".*"),
     URICaptureKeys:   util.GetFillersUnmarked(uri),
     HeaderCaptureKey: headerCaptureKey,
     QueryCaptureKey:  queryCaptureKey,
@@ -622,21 +626,7 @@ func getPayloadForBodyMatch(r *http.Request, bodyMatches map[string]*ResponsePay
   body := strings.ToLower(util.Read(r.Body))
   var matchedResponsePayload *ResponsePayload
   for _, rp := range bodyMatches {
-    text := body
-    currentMatch := true
-    for _, key := range rp.BodyMatch {
-      if strings.Contains(text, key) {
-        if pieces := strings.SplitN(text, key, 2); len(pieces) == 2 {
-          text = pieces[1]
-        } else {
-          text = ""
-        }
-      } else {
-        currentMatch = false
-        break
-      }
-    }
-    if currentMatch {
+    if rp.bodyMatchRegexp.MatchString(body) {
       matchedResponsePayload = rp
       break
     }
@@ -648,11 +638,11 @@ func getPayloadForBodyMatch(r *http.Request, bodyMatches map[string]*ResponsePay
   return nil, false
 }
 
-func (pr *PortResponse) getResponsePayload(r *http.Request) (*ResponsePayload, bool) {
+func (pr *PortResponse) unsafeGetResponsePayload(r *http.Request) (*ResponsePayload, bool) {
   var payload *ResponsePayload
   found := false
   for uri, rp := range pr.allURIResponsePayloads {
-    if rp.uriRegExp.MatchString(r.RequestURI) {
+    if rp.uriRegexp.MatchString(r.RequestURI) {
       if pr.ResponsePayloadByURIAndHeaders[uri] != nil {
         payload, found = getPayloadForKV(r.Header, pr.ResponsePayloadByURIAndHeaders[uri])
       } else if pr.ResponsePayloadByURIAndQuery[uri] != nil {
@@ -672,53 +662,52 @@ func (pr *PortResponse) getResponsePayload(r *http.Request) (*ResponsePayload, b
   if !found {
     payload, found = getPayloadForKV(r.URL.Query(), pr.ResponsePayloadByQuery)
   }
+  if !found && pr.DefaultResponsePayload != nil {
+    payload = pr.DefaultResponsePayload
+    found = true
+  }
   return payload, found
 }
 
-func handleURI(w http.ResponseWriter, r *http.Request) {
-  pr := getPortResponse(r)
+func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload) {
   payload := ""
   contentType := ""
-  pr.lock.RLock()
-  rp, matched := pr.getResponsePayload(r)
-  if !matched && pr.DefaultResponsePayload != nil {
-    rp = pr.DefaultResponsePayload
-    matched = true
-  }
-  if matched {
-    payload = getFilledPayload(rp, r)
-    contentType = rp.ContentType
-  }
-  pr.lock.RUnlock()
-  if matched {
-    length := strconv.Itoa(len(payload))
-    w.Header().Set("Content-Length", length)
-    w.Header().Set("Content-Type", contentType)
-    w.Header().Set("Goto-Payload-Length", length)
-    w.Header().Set("Goto-Payload-Content-Type", contentType)
-    fmt.Fprint(w, payload)
-    msg := fmt.Sprintf("Responding with configured payload of length [%s] and content type [%s] for URI [%s]",
-      length, contentType, r.RequestURI)
-    util.AddLogMessage(msg, r)
-    events.SendRequestEvent("Response Payload Applied", msg, r)
-  }
+  payload = getFilledPayload(rp, r)
+  contentType = rp.ContentType
+  length := strconv.Itoa(len(payload))
+  w.Header().Set("Content-Length", length)
+  w.Header().Set("Content-Type", contentType)
+  w.Header().Set("Goto-Payload-Length", length)
+  w.Header().Set("Goto-Payload-Content-Type", contentType)
+  fmt.Fprint(w, payload)
+  msg := fmt.Sprintf("Responding with configured payload of length [%s] and content type [%s] for URI [%s]",
+    length, contentType, r.RequestURI)
+  util.AddLogMessage(msg, r)
+  util.UpdateTrafficEventDetails(r, "Response Payload Applied")
+}
+
+func handleURI(w http.ResponseWriter, r *http.Request) {
+  processPayload(w, r, r.Context().Value(payloadKey).(*ResponsePayload))
 }
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    var uriResponseMatch *ResponsePayload
+    var payload *ResponsePayload
     if !util.IsAdminRequest(r) && !util.IsPayloadRequest(r) {
       pr := getPortResponse(r)
-      if rp, found := pr.getResponsePayload(r); found {
-        uriResponseMatch = rp
+      pr.lock.RLock()
+      rp, found := pr.unsafeGetResponsePayload(r)
+      pr.lock.RUnlock()
+      if found {
+        payload = rp
         if rp.router != nil {
-          uriResponseMatch.router.ServeHTTP(w, r)
+          rp.router.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), payloadKey, payload)))
         } else {
-          handleURI(w, r)
+          processPayload(w, r, rp)
         }
       }
     }
-    if next != nil && (uriResponseMatch == nil || util.IsStatusRequest(r) || util.IsDelayRequest(r)) {
+    if next != nil && (payload == nil || util.IsStatusRequest(r) || util.IsDelayRequest(r)) {
       next.ServeHTTP(w, r)
     }
   })

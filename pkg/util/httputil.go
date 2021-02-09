@@ -36,7 +36,10 @@ var (
   listenerPathSubRouters = map[string]*mux.Router{}
   logMessagesKey         = &ContextKey{"logMessagesKey"}
   currentPortKey         = &ContextKey{"currentPort"}
-  fillerRegExp           = regexp.MustCompile("({.+?})")
+  trafficEventKey        = &ContextKey{"trafficEventKey"}
+  fillerRegexp           = regexp.MustCompile("({.+?})")
+  contentRegexp          = regexp.MustCompile("(?i)content")
+  hostRegexp             = regexp.MustCompile("(?i)^host$")
 )
 
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=~`{}[];:,.<>/?"
@@ -52,6 +55,12 @@ type MessageStore struct {
   messages []string
 }
 
+type TrafficEventStore struct {
+  reported   bool
+  statusCode int
+  details    []string
+}
+
 func InitListenerRouter(root *mux.Router) {
   portRouter = root.PathPrefix("/port={port}").Subrouter()
 }
@@ -62,14 +71,22 @@ func ContextMiddleware(next http.Handler) http.Handler {
       CopyHeaders("Stopping-Readiness-Request", w, r.Header, r.Host, r.RequestURI)
       w.WriteHeader(http.StatusNotFound)
     } else if next != nil {
-      next.ServeHTTP(w, r.WithContext(ContextWithPort(
-        context.WithValue(r.Context(), logMessagesKey, &MessageStore{}), GetListenerPortNum(r))))
+      next.ServeHTTP(w, r.WithContext(WithLogMessages(WithTrafficEvent(
+        ContextWithPort(r.Context(), GetListenerPortNum(r))))))
     }
   })
 }
 
 func ContextWithPort(ctx context.Context, port int) context.Context {
   return context.WithValue(ctx, currentPortKey, port)
+}
+
+func WithLogMessages(ctx context.Context) context.Context {
+  return context.WithValue(ctx, logMessagesKey, &MessageStore{})
+}
+
+func WithTrafficEvent(ctx context.Context) context.Context {
+  return context.WithValue(ctx, trafficEventKey, &TrafficEventStore{})
 }
 
 func LoggingMiddleware(next http.Handler) http.Handler {
@@ -79,7 +96,8 @@ func LoggingMiddleware(next http.Handler) http.Handler {
       next.ServeHTTP(crw, r)
     }
     AddLogMessage(GetResponseHeadersLog(w), r)
-    AddLogMessage(fmt.Sprintf("Response Body Length: %d", crw.BodyLength), r)
+    AddLogMessage(fmt.Sprintf("Response Status Code: [%d]", crw.StatusCode), r)
+    AddLogMessage(fmt.Sprintf("Response Body Length: [%d]", crw.BodyLength), r)
     PrintLogMessages(r)
   })
 }
@@ -105,6 +123,34 @@ func PrintLogMessages(r *http.Request) {
     }
   }
   m.messages = m.messages[:0]
+}
+
+func IsTrafficEventReported(r *http.Request) bool {
+  te := r.Context().Value(trafficEventKey)
+  return te != nil && te.(*TrafficEventStore).reported
+}
+
+func UpdateTrafficEventStatusCode(r *http.Request, statusCode int) {
+  te := r.Context().Value(trafficEventKey).(*TrafficEventStore)
+  if te != nil && !te.reported {
+    te.statusCode = statusCode
+  }
+}
+
+func UpdateTrafficEventDetails(r *http.Request, details string) {
+  te := r.Context().Value(trafficEventKey).(*TrafficEventStore)
+  if te != nil && !te.reported {
+    te.details = append(te.details, details)
+  }
+}
+
+func ReportTrafficEvent(r *http.Request) (int, []string) {
+  te := r.Context().Value(trafficEventKey).(*TrafficEventStore)
+  if te != nil && !te.reported {
+    te.reported = true
+    return te.statusCode, te.details
+  }
+  return 0, nil
 }
 
 func GetPortNumFromGRPCAuthority(ctx context.Context) int {
@@ -202,6 +248,10 @@ func BuildHostLabel(port int) string {
     hostLabel = fmt.Sprintf("%s.%s@%s:%d", GetPodName(), GetNamespace(), GetHostIP(), port)
   }
   return hostLabel
+}
+
+func BuildListenerLabel(port int) string {
+  return fmt.Sprintf("Goto-%s:%d", GetHostIP(), port)
 }
 
 func GetHostLabel() string {
@@ -365,13 +415,12 @@ func CopyHeaders(prefix string, w http.ResponseWriter, headers http.Header, host
   hostCopied := false
   responseHeaders := w.Header()
   for h, values := range headers {
-    lowerh := strings.ToLower(h)
-    if !strings.Contains(lowerh, "content") {
+    if !contentRegexp.MatchString(h) {
       for _, v := range values {
         AddHeaderWithPrefix(prefix, h, v, responseHeaders)
       }
     }
-    if strings.EqualFold(lowerh, "host") {
+    if hostRegexp.MatchString(h) {
       hostCopied = true
     }
   }
@@ -431,7 +480,7 @@ func WriteJsonPayload(w http.ResponseWriter, t interface{}) {
 }
 
 func IsAdminRequest(r *http.Request) bool {
-  return strings.HasPrefix(r.RequestURI, "/port") || 
+  return strings.HasPrefix(r.RequestURI, "/port") ||
     strings.HasPrefix(r.RequestURI, "/request") || strings.HasPrefix(r.RequestURI, "/response") ||
     strings.HasPrefix(r.RequestURI, "/listeners") || strings.HasPrefix(r.RequestURI, "/label") ||
     strings.HasPrefix(r.RequestURI, "/client") || strings.HasPrefix(r.RequestURI, "/job") ||
@@ -476,7 +525,7 @@ func IsHealthRequest(r *http.Request) bool {
 }
 
 func IsKnownRequest(r *http.Request) bool {
-  return IsProbeRequest(r) || IsReminderRequest(r) || IsHealthRequest(r) || IsMetricsRequest(r) || 
+  return IsProbeRequest(r) || IsReminderRequest(r) || IsHealthRequest(r) || IsMetricsRequest(r) ||
     IsLockerRequest(r) || IsAdminRequest(r) || IsStatusRequest(r) || IsDelayRequest(r) || IsPayloadRequest(r)
 }
 
@@ -661,7 +710,7 @@ func GetFillerMarked(key string) string {
 }
 
 func GetFillers(text string) []string {
-  return fillerRegExp.FindAllString(text, -1)
+  return fillerRegexp.FindAllString(text, -1)
 }
 
 func GetFillersUnmarked(text string) []string {
@@ -683,7 +732,7 @@ func GetFillerUnmarked(text string) (string, bool) {
 
 func RegisterURIRouteAndGetRegex(uri string, router *mux.Router, handler func(http.ResponseWriter, *http.Request)) (*mux.Router, *regexp.Regexp, error) {
   if uri != "" {
-    vars := fillerRegExp.FindAllString(uri, -1)
+    vars := fillerRegexp.FindAllString(uri, -1)
     for _, v := range vars {
       v2, _ := GetFillerUnmarked(v)
       v2 = GetFillerMarked(v2 + ":.*")

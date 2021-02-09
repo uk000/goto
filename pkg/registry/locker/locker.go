@@ -6,6 +6,7 @@ import (
   "goto/pkg/constants"
   "goto/pkg/events"
   "goto/pkg/util"
+  "regexp"
   "sort"
   "strings"
   "sync"
@@ -144,16 +145,15 @@ func unsafeGetPaths(locker map[string]*LockerData) [][]string {
   return paths
 }
 
-func unsafeFindKey(locker map[string]*LockerData, keyToFind string) []string {
+func unsafeSearchKey(locker map[string]*LockerData, pattern *regexp.Regexp) []string {
   results := []string{}
   if locker != nil {
-    lower := strings.ToLower(keyToFind)
     for key, ld := range locker {
-      if strings.Contains(strings.ToLower(key), lower) {
+      if pattern.MatchString(key) {
         results = append(results, key)
       }
       if ld != nil {
-        subPaths := unsafeFindKey(ld.SubKeys, keyToFind)
+        subPaths := unsafeSearchKey(ld.SubKeys, pattern)
         for _, subPath := range subPaths {
           if subPath != "" {
             results = append(results, key+","+subPath)
@@ -529,37 +529,81 @@ func (cl *CombiLocker) GetTargetsSummaryResults(peerName string, trackingHeaders
   return result
 }
 
-func (cl *CombiLocker) GetPeerEvents(peerName string, unified bool) map[string][]*events.Event {
+func (cl *CombiLocker) getPeerLockers(peerName string) map[string]*PeerLocker {
   cl.lock.RLock()
   defer cl.lock.RUnlock()
-  eventsMap := map[string][]*events.Event{}
   peerLockers := map[string]*PeerLocker{}
   if peerName != "" {
     if cl.PeerLockers[peerName] != nil {
       peerLockers[peerName] = cl.PeerLockers[peerName]
     }
   } else {
-    peerLockers = cl.PeerLockers
+    for peer, peerLocker := range cl.PeerLockers {
+      peerLockers[peer] = peerLocker
+    }
   }
+  return peerLockers
+}
+
+func convertLockerDataToEvent(l *LockerData) *events.Event {
+  event := &events.Event{}
+  if err := util.ReadJson(l.Data, event); err == nil {
+    return event
+  } else {
+    fmt.Printf("Error while parsing event: %s\n", err.Error())
+  }
+  return nil
+}
+
+func sortPeerEvents(eventsMap map[string][]*events.Event, reverse bool) {
+  for _, peerEvents := range eventsMap {
+    events.SortEvents(peerEvents, reverse)
+  }
+}
+
+func (cl *CombiLocker) GetPeerEvents(peerName string, unified bool, reverse bool) map[string][]*events.Event {
+  eventsMap := map[string][]*events.Event{}
+  peerLockers := cl.getPeerLockers(peerName)
   for peer, pl := range peerLockers {
     pl.lock.RLock()
     eventsLocker := pl.DataLocker.Locker["events"]
     if eventsLocker != nil {
-      for _, v := range eventsLocker.SubKeys {
-        event := events.Event{}
-        if err := util.ReadJson(v.Data, &event); err == nil {
+      for _, ld := range eventsLocker.SubKeys {
+        if event := convertLockerDataToEvent(ld); event != nil {
           if unified {
             peer = "all"
           }
-          eventsMap[peer] = append(eventsMap[peer], &event)
-        } else {
-          fmt.Printf("Error while parsing event: %s\n", err.Error())
+          eventsMap[peer] = append(eventsMap[peer], event)
         }
       }
     }
-    sort.SliceStable(eventsMap[peer], func(i, j int) bool { return eventsMap[peer][i].At.Before(eventsMap[peer][j].At) })
     pl.lock.RUnlock()
   }
+  sortPeerEvents(eventsMap, reverse)
+  return eventsMap
+}
+
+func (cl *CombiLocker) SearchInPeerEvents(peerName string, pattern *regexp.Regexp, unified bool, reverse bool) map[string][]*events.Event {
+  eventsMap := map[string][]*events.Event{}
+  peerLockers := cl.getPeerLockers(peerName)
+  for peer, pl := range peerLockers {
+    pl.lock.RLock()
+    eventsLocker := pl.DataLocker.Locker["events"]
+    if eventsLocker != nil {
+      for _, ld := range eventsLocker.SubKeys {
+        if pattern.MatchString(ld.Data) {
+          if event := convertLockerDataToEvent(ld); event != nil {
+            if unified {
+              peer = "all"
+            }
+            eventsMap[peer] = append(eventsMap[peer], event)
+          }
+        }
+      }
+    }
+    pl.lock.RUnlock()
+  }
+  sortPeerEvents(eventsMap, reverse)
   return eventsMap
 }
 
@@ -653,21 +697,28 @@ func (ll *LabeledLockers) GetLockerLabels() []string {
   return labels
 }
 
-func (ll *LabeledLockers) GetDataLockerPaths(locker string, pathURIs bool) interface{} {
+func (ll *LabeledLockers) getLockers(locker string) map[string]*CombiLocker {
   ll.lock.RLock()
   defer ll.lock.RUnlock()
-  lockerPathsByLabels := map[string][][]string{}
-  if locker != "" {
-    if strings.EqualFold(locker, constants.LockerCurrent) {
-      lockerPathsByLabels[locker] = unsafeGetPaths(ll.currentLocker.DataLocker.Locker)
-    } else if ll.lockers[locker] != nil {
-      lockerPathsByLabels[locker] = unsafeGetPaths(ll.lockers[locker].DataLocker.Locker)
+  lockersToSearch := map[string]*CombiLocker{}
+  if locker == "" || strings.EqualFold(locker, constants.LockerAll) {
+    for lname, l := range ll.lockers {
+      lockersToSearch[lname] = l
     }
-  } else {
-    for label, cl := range ll.lockers {
-      if cl.DataLocker != nil && cl.DataLocker.Locker != nil && len(cl.DataLocker.Locker) > 0 {
-        lockerPathsByLabels[label] = unsafeGetPaths(cl.DataLocker.Locker)
-      }
+  } else if strings.EqualFold(locker, constants.LockerCurrent) {
+    lockersToSearch[ll.currentLocker.Label] = ll.currentLocker
+  } else if ll.lockers[locker] != nil {
+    lockersToSearch[locker] = ll.lockers[locker]
+  }
+  return lockersToSearch
+}
+
+func (ll *LabeledLockers) GetDataLockerPaths(locker string, pathURIs bool) interface{} {
+  lockersToSearch := ll.getLockers(locker)
+  lockerPathsByLabels := map[string][][]string{}
+  for label, cl := range lockersToSearch {
+    if cl.DataLocker != nil && cl.DataLocker.Locker != nil && len(cl.DataLocker.Locker) > 0 {
+      lockerPathsByLabels[label] = unsafeGetPaths(cl.DataLocker.Locker)
     }
   }
   if !pathURIs {
@@ -684,13 +735,12 @@ func (ll *LabeledLockers) GetDataLockerPaths(locker string, pathURIs bool) inter
   return dataPathURIs
 }
 
-func (ll *LabeledLockers) findInLockers(lockers map[string]*CombiLocker, key string) []string {
-  ll.lock.RLock()
-  defer ll.lock.RUnlock()
+func searchInLockers(lockers map[string]*CombiLocker, key string) []string {
   keyPaths := []string{}
+  pattern := regexp.MustCompile("(?i)" + key)
   for label, cl := range lockers {
     if cl.DataLocker != nil && cl.DataLocker.Locker != nil && len(cl.DataLocker.Locker) > 0 {
-      subPaths := unsafeFindKey(cl.DataLocker.Locker, key)
+      subPaths := unsafeSearchKey(cl.DataLocker.Locker, pattern)
       for i, dataPath := range subPaths {
         if dataPath != "" {
           subPaths[i] = "/registry/lockers/" + label + "/get/" + dataPath
@@ -702,20 +752,46 @@ func (ll *LabeledLockers) findInLockers(lockers map[string]*CombiLocker, key str
   return keyPaths
 }
 
-func (ll *LabeledLockers) FindInDataLockers(locker string, key string) []string {
-  ll.lock.RLock()
-  lockersToSearch := map[string]*CombiLocker{}
-  if locker != "" {
-    if strings.EqualFold(locker, constants.LockerCurrent) {
-      lockersToSearch[ll.currentLocker.Label] = ll.currentLocker
-    } else if ll.lockers[locker] != nil {
-      lockersToSearch[locker] = ll.lockers[locker]
+func (ll *LabeledLockers) SearchInDataLockers(locker string, key string) []string {
+  lockersToSearch := ll.getLockers(locker)
+  return searchInLockers(lockersToSearch, key)
+}
+
+func (ll *LabeledLockers) GetPeerEvents(locker, peerName string, unified bool, reverse bool) map[string][]*events.Event {
+  lockersToSearch := ll.getLockers(locker)
+  eventsMap := map[string][]*events.Event{}
+  for _, l := range lockersToSearch {
+    lockerEvents := l.GetPeerEvents(peerName, unified, reverse)
+    for peer, peerEvents := range lockerEvents {
+      if unified {
+        peer = "all"
+      }
+      for _, event := range peerEvents {
+        eventsMap[peer] = append(eventsMap[peer], event)
+      }
     }
-  } else {
-    lockersToSearch = ll.lockers
   }
-  ll.lock.RUnlock()
-  return ll.findInLockers(lockersToSearch, key)
+  sortPeerEvents(eventsMap, reverse)
+  return eventsMap
+}
+
+func (ll *LabeledLockers) SearchInPeerEvents(locker, peerName, key string, unified bool, reverse bool) map[string][]*events.Event {
+  lockersToSearch := ll.getLockers(locker)
+  eventsMap := map[string][]*events.Event{}
+  pattern := regexp.MustCompile("(?i)" + key)
+  for _, l := range lockersToSearch {
+    lockerEvents := l.SearchInPeerEvents(peerName, pattern, unified, reverse)
+    for peer, peerEvents := range lockerEvents {
+      if unified {
+        peer = "all"
+      }
+      for _, event := range peerEvents {
+        eventsMap[peer] = append(eventsMap[peer], event)
+      }
+    }
+  }
+  sortPeerEvents(eventsMap, reverse)
+  return eventsMap
 }
 
 func (ll *LabeledLockers) GetCurrentLocker() *CombiLocker {

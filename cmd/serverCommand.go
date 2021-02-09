@@ -24,7 +24,7 @@ func Execute() {
   flag.StringVar(&portsList, "ports", "", "Comma-separated list of <port/protocol>. First port acts as primary HTTP port")
   flag.StringVar(&global.PeerName, "label", "", "Default Server Label")
   flag.DurationVar(&global.StartupDelay, "startupDelay", 1*time.Second, "Delay Server Startup (seconds)")
-  flag.DurationVar(&global.ShutdownDelay, "shutdownDelay", 5*time.Second, "Delay Server Shutdown (seconds)")
+  flag.DurationVar(&global.ShutdownDelay, "shutdownDelay", 1*time.Second, "Delay Server Shutdown (seconds)")
   flag.StringVar(&global.RegistryURL, "registry", "", "Registry URL for Peer Registration")
   flag.BoolVar(&global.UseLocker, "locker", false, "Store Results in Registry Locker")
   flag.BoolVar(&global.EnableEvents, "events", true, "Generate and store events on local instance")
@@ -42,15 +42,16 @@ func Execute() {
   flag.BoolVar(&global.EnableRegistryReminderLogs, "reminderLogs", false, "Enable/Disable Registry Reminder Logs")
   flag.BoolVar(&global.EnablePeerHealthLogs, "peerHealthLogs", true, "Enable/Disable Registry-to-Peer Health Check Logs")
   flag.Parse()
-  if global.PeerName == "" {
-    global.PeerName = "Goto-" + util.GetHostIP()
-  }
-  listeners.DefaultLabel = global.PeerName
+
   log.Printf("Version: %s, Commit: %s\n", Version, Commit)
 
   if portsList != "" {
     listeners.AddInitialListeners(strings.Split(portsList, ","))
   }
+  if global.PeerName == "" {
+    global.PeerName = util.BuildListenerLabel(global.ServerPort)
+  }
+  listeners.DefaultLabel = global.PeerName
   log.Printf("Server [%s] will listen on port [%d]\n", global.PeerName, global.ServerPort)
 
   if global.EnableEvents {

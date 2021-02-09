@@ -337,7 +337,7 @@ func middleware(next http.Handler) http.Handler {
     }
     w.Header().Add("Goto-Response-Status", strconv.Itoa(crw.StatusCode))
     crw.Proceed()
-    events.TrackTrafficEvent(crw.StatusCode, r)
+    util.UpdateTrafficEventStatusCode(r, crw.StatusCode)
     trigger.RunTriggers(r, crw, crw.StatusCode)
   })
 }

@@ -21,6 +21,7 @@ import (
 type Listener struct {
   ListenerID string         `json:"listenerID"`
   Label      string         `json:"label"`
+  HostLabel  string         `json:"hostLabel"`
   Port       int            `json:"port"`
   Protocol   string         `json:"protocol"`
   Open       bool           `json:"open"`
@@ -70,10 +71,15 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   global.GetListenerID = GetListenerID
   global.GetListenerLabel = GetListenerLabel
   global.GetListenerLabelForPort = GetListenerLabelForPort
+  global.GetHostLabelForPort = GetHostLabelForPort
 }
 
 func Configure(hs func(*Listener), gs func(*Listener), ts func(string, int, net.Listener)) {
-  DefaultListener.Label = util.GetHostLabel()
+  if DefaultLabel == "" {
+    DefaultLabel = util.GetHostLabel()
+  }
+  DefaultListener.Label = DefaultLabel
+  DefaultListener.HostLabel = util.GetHostLabel()
   DefaultListener.Port = global.ServerPort
   DefaultListener.Protocol = "HTTP"
   DefaultListener.isHTTP = true
@@ -267,8 +273,13 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
   msg := ""
   errorCode := 0
   if l.Label == "" {
-    l.Label = util.BuildHostLabel(l.Port)
+    if global.PeerName != "" {
+      l.Label = global.PeerName
+    } else {
+      l.Label = util.BuildListenerLabel(l.Port)
+    }
   }
+  l.HostLabel = util.BuildHostLabel(l.Port)
   l.Protocol = strings.ToLower(l.Protocol)
   if l.Port <= 0 || l.Port > 65535 {
     msg = fmt.Sprintf("[Invalid port number: %d]", l.Port)
@@ -449,9 +460,25 @@ func GetListenerLabelForPort(port int) string {
   if l != nil {
     return l.Label
   } else if port == global.ServerPort {
+    if DefaultListener.Label != "" {
+      return DefaultListener.Label
+    } else {
+      return util.GetHostLabel()
+    }
+  }
+  return util.BuildListenerLabel(port)
+}
+
+func GetHostLabelForPort(port int) string {
+  listenersLock.RLock()
+  l := listeners[port]
+  listenersLock.RUnlock()
+  if l != nil {
+    return l.HostLabel
+  } else if port == global.ServerPort {
     return util.GetHostLabel()
   }
-  return strconv.Itoa(port)
+  return util.BuildHostLabel(port)
 }
 
 func SetListenerLabel(r *http.Request) string {

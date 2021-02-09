@@ -6,7 +6,7 @@ import (
   "net/http"
 )
 
-type Chunker interface {
+type ResponseInterceptor interface {
   SetChunked()
 }
 
@@ -14,7 +14,7 @@ type InterceptResponseWriter struct {
   http.ResponseWriter
   http.Hijacker
   http.Flusher
-  parent     Chunker
+  parent     ResponseInterceptor
   StatusCode int
   Data       []byte
   Hold       bool
@@ -74,7 +74,7 @@ func (rw *InterceptResponseWriter) Proceed() {
 }
 
 func NewInterceptResponseWriter(w http.ResponseWriter, hold bool) *InterceptResponseWriter {
-  parent, _ := w.(Chunker)
+  parent, _ := w.(ResponseInterceptor)
   hijacker, _ := w.(http.Hijacker)
   flusher, _ := w.(http.Flusher)
   return &InterceptResponseWriter{

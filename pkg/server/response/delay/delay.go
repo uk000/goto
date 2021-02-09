@@ -111,17 +111,21 @@ func Middleware(next http.Handler) http.Handler {
     delayLock.RUnlock()
     if delay > 0 && delayCount >= 0 && !util.IsAdminRequest(r) && !util.IsDelayRequest(r) {
       if delayCount > 0 {
+        newDelay := delay
         if delayCount == 1 {
           delayCount = -1
-          delayByPort[listenerPort] = 0
+          newDelay = 0
         } else {
           delayCount--
         }
-        msg := fmt.Sprintf("Delaying [%s] for [%s]. Remaining delay count [%d].", r.RequestURI, delay.String(), delayCount)
-        util.AddLogMessage(msg, r)
-        events.SendRequestEvent("Response Delay Applied", msg, r)
+        delayLock.Lock()
+        delayByPort[listenerPort] = newDelay
         delayCountByPort[listenerPort] = delayCount
+        delayLock.Unlock()
       }
+      msg := fmt.Sprintf("Delaying [%s] for [%s]. Remaining delay count [%d].", r.RequestURI, delay.String(), delayCount)
+      util.AddLogMessage(msg, r)
+      util.UpdateTrafficEventDetails(r, "Response Delay Applied")
       w.Header().Add("Goto-Response-Delay", delay.String())
       time.Sleep(delay)
     }

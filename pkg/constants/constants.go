@@ -7,4 +7,5 @@ const (
   LockerDefaultLabel     string = "default"
   LockerCurrent          string = "current"
   LockerPeers            string = "peerLockers"
+  LockerAll              string = "all"
 )

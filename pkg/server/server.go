@@ -31,7 +31,7 @@ func Run() {
   global.GetPeers = registry.GetPeers
   listeners.Configure(runner.ServeHTTPListener, runner.ServeGRPCListener, runner.StartTCPServer)
   invocation.Startup()
-  runner.RunHttpServer(label.Handler, conn.Handler, metrics.Handler, events.Handler,
+  runner.RunHttpServer(events.Handler, label.Handler, conn.Handler, metrics.Handler,
     listeners.Handler, probes.Handler, registry.Handler, job.Handler, client.Handler,
     tcp.Handler, proxy.Handler, request.Handler, response.Handler, echo.Handler, catchall.Handler)
   invocation.Shutdown()
