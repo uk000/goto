@@ -14,9 +14,10 @@ import (
 )
 
 type Ignore struct {
-  Port         string                 `json:"port"`
-  Uris         map[string]interface{} `json:"uris"`
-  IgnoreStatus int                    `json:"ignoreStatus"`
+  Port         string                            `json:"port"`
+  Uris         map[string]interface{}            `json:"uris"`
+  Headers      map[string]map[string]interface{} `json:"headers"`
+  IgnoreStatus int                               `json:"ignoreStatus"`
   statusCount  int
   lock         sync.RWMutex
 }
@@ -29,52 +30,88 @@ var (
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   ignoreRouter := util.PathRouter(r, "/ignore")
-  util.AddRouteQWithPort(ignoreRouter, "/add", addIgnoreURI, "uri", "{uri}", "PUT", "POST")
-  util.AddRouteQWithPort(ignoreRouter, "/remove", removeIgnoreURI, "uri", "{uri}", "PUT", "POST")
+  util.AddRouteQWithPort(ignoreRouter, "/add", addIgnoreHeaderOrURI, "uri", "{uri}", "PUT", "POST")
+  util.AddRouteWithPort(ignoreRouter, "/add/header/{header}~{value}", addIgnoreHeaderOrURI, "PUT", "POST")
+  util.AddRouteWithPort(ignoreRouter, "/add/header/{header}", addIgnoreHeaderOrURI, "PUT", "POST")
+  util.AddRouteWithPort(ignoreRouter, "/remove/header/{header}~{value}", removeIgnoreHeaderOrURI, "PUT", "POST")
+  util.AddRouteWithPort(ignoreRouter, "/remove/header/{header}", removeIgnoreHeaderOrURI, "PUT", "POST")
+  util.AddRouteQWithPort(ignoreRouter, "/remove", removeIgnoreHeaderOrURI, "uri", "{uri}", "PUT", "POST")
   util.AddRouteWithPort(ignoreRouter, "/set/status={status}", setOrGetIgnoreStatus, "PUT", "POST")
   util.AddRouteWithPort(ignoreRouter, "/status", setOrGetIgnoreStatus)
   util.AddRouteWithPort(ignoreRouter, "/clear", clearIgnoreURIs, "PUT", "POST")
-  util.AddRouteQWithPort(ignoreRouter, "/counts", getIgnoreCallCount, "uri", "{uri}", "GET")
   util.AddRouteWithPort(ignoreRouter, "/counts", getIgnoreCallCount, "GET")
   util.AddRouteWithPort(ignoreRouter, "", getIgnoreList, "GET")
-  global.IsIgnoredURI = IsIgnoredURI
+  global.IsIgnoredRequest = IsIgnoredRequest
 }
 
 func (i *Ignore) init() {
   i.Uris = map[string]interface{}{}
+  i.Headers = map[string]map[string]interface{}{}
   i.IgnoreStatus = 0
 }
 
-func (i *Ignore) addURI(w http.ResponseWriter, r *http.Request) {
+func (i *Ignore) addIgnoreHeaderOrURI(w http.ResponseWriter, r *http.Request) {
   msg := ""
-  if uri, present := util.GetStringParam(r, "uri"); present {
-    i.lock.Lock()
-    defer i.lock.Unlock()
+  uri := util.GetStringParamValue(r, "uri")
+  header := util.GetStringParamValue(r, "header")
+  value := util.GetStringParamValue(r, "value")
+  if uri != "" {
     uri = strings.ToLower(uri)
+    i.lock.Lock()
     i.Uris[uri] = 0
-    msg = fmt.Sprintf("Port [%s] Ignore URI [%s] added", i.Port, uri)
+    i.lock.Unlock()
+    msg = fmt.Sprintf("Port [%s] will ignore URI [%s]", i.Port, uri)
     events.SendRequestEvent("Ignore URI Added", msg, r)
-    w.WriteHeader(http.StatusOK)
+  } else if header != "" {
+    header = strings.ToLower(header)
+    if value != "" {
+      value = strings.ToLower(value)
+    }
+    i.lock.Lock()
+    if i.Headers[header] == nil {
+      i.Headers[header] = map[string]interface{}{}
+    }
+    i.Headers[header][value] = 0
+    i.lock.Unlock()
+    msg = fmt.Sprintf("Port [%s] will ignore header [%s : %s]", i.Port, header, value)
+    events.SendRequestEvent("Ignore Header Added", msg, r)
   } else {
-    msg = "Cannot add. Invalid Ignore URI"
+    msg = "Cannot add ignore. No URI or Header"
     w.WriteHeader(http.StatusBadRequest)
   }
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
 
-func (i *Ignore) removeURI(w http.ResponseWriter, r *http.Request) {
+func (i *Ignore) removeIgnoreHeaderOrURI(w http.ResponseWriter, r *http.Request) {
   msg := ""
-  if uri, present := util.GetStringParam(r, "uri"); present {
-    i.lock.Lock()
-    defer i.lock.Unlock()
+  uri := util.GetStringParamValue(r, "uri")
+  header := util.GetStringParamValue(r, "header")
+  value := util.GetStringParamValue(r, "value")
+  if uri != "" {
     uri = strings.ToLower(uri)
+    i.lock.Lock()
     delete(i.Uris, uri)
+    i.lock.Unlock()
     msg = fmt.Sprintf("Port [%s] Ignore URI [%s] removed", i.Port, uri)
     events.SendRequestEvent("Ignore URI Removed", msg, r)
-    w.WriteHeader(http.StatusOK)
+  } else if header != "" {
+    header = strings.ToLower(header)
+    if value != "" {
+      value = strings.ToLower(value)
+    }
+    i.lock.Lock()
+    if i.Headers[header] != nil {
+      delete(i.Headers[header], value)
+      if len(i.Headers[header]) == 0 {
+        delete(i.Headers, header)
+      }
+    }
+    i.lock.Unlock()
+    msg = fmt.Sprintf("Port [%s] Ignore Header [%s: %s] removed", i.Port, header, value)
+    events.SendRequestEvent("Ignore Header Removed", msg, r)
   } else {
-    msg = "Cannot remove. Invalid Ignore URI"
+    msg = "Cannot remove ignore. No URI or Header"
     w.WriteHeader(http.StatusBadRequest)
   }
   util.AddLogMessage(msg, r)
@@ -83,17 +120,12 @@ func (i *Ignore) removeURI(w http.ResponseWriter, r *http.Request) {
 
 func (i *Ignore) setStatus(w http.ResponseWriter, r *http.Request) {
   msg := ""
-  statusCode, times, present := util.GetStatusParam(r)
+  statusCode, _, present := util.GetStatusParam(r)
   if present {
     i.lock.Lock()
     defer i.lock.Unlock()
     i.IgnoreStatus = statusCode
-    i.statusCount = times
-    if times > 0 {
-      msg = fmt.Sprintf("Port [%s] Ignore Status set to [%d] for next [%d] calls", i.Port, statusCode, times)
-    } else {
-      msg = fmt.Sprintf("Port[%s] Ignore Status set to [%d] forever", i.Port, statusCode)
-    }
+    msg = fmt.Sprintf("Port[%s] Ignore Status set to [%d] forever", i.Port, statusCode)
     events.SendRequestEvent("Ignore Status Configured", msg, r)
     w.WriteHeader(http.StatusOK)
   } else {
@@ -108,31 +140,53 @@ func (i *Ignore) clear(w http.ResponseWriter, r *http.Request) {
   i.lock.Lock()
   defer i.lock.Unlock()
   i.Uris = map[string]interface{}{}
-  msg := fmt.Sprintf("Port[%s] Ignore URIs Cleared", i.Port)
+  i.Headers = map[string]map[string]interface{}{}
+  msg := fmt.Sprintf("Port[%s] Ignore Config Cleared", i.Port)
   w.WriteHeader(http.StatusOK)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
-  events.SendRequestEvent("Ignore URIs Cleared", msg, r)
+  events.SendRequestEvent("Ignore Config Cleared", msg, r)
 }
 
 func (i *Ignore) getCallCounts(w http.ResponseWriter, r *http.Request) {
   i.lock.RLock()
   defer i.lock.RUnlock()
-  msg := ""
-  if uri, present := util.GetStringParam(r, "uri"); present {
-    if ignoreURI := i.Uris[uri]; ignoreURI != nil {
-      msg = fmt.Sprintf("Reporting call counts for ignored uri %s = %d", uri, ignoreURI)
-      fmt.Fprintf(w, "{\"%s\": %d}", uri, ignoreURI.(int))
-    } else {
-      msg = fmt.Sprintf("Invalid ignored uri %s", uri)
-      w.WriteHeader(http.StatusBadRequest)
-      fmt.Fprintf(w, "{\"error\": \"%s\"}", msg)
-    }
-  } else {
-    msg = "Reporting call counts for all ignored uris"
-    fmt.Fprintln(w, util.ToJSON(i.Uris))
-  }
+  msg := "Reporting ignore call counts"
+  util.WriteJsonPayload(w, map[string]interface{}{"uris": i.Uris, "headers": i.Headers})
   util.AddLogMessage(msg, r)
+}
+
+func (i *Ignore) getIgnoredURI(r *http.Request) string {
+  i.lock.RLock()
+  defer i.lock.RUnlock()
+  return util.FindURIInMap(r.RequestURI, i.Uris)
+}
+
+func (i *Ignore) getIgnoredHeader(r *http.Request) (string, string) {
+  i.lock.RLock()
+  defer i.lock.RUnlock()
+  if len(i.Headers) == 0 {
+    return "", ""
+  }
+  for h, values := range r.Header {
+    h = strings.ToLower(h)
+    hvIgnoreMap := i.Headers[h]
+    if hvIgnoreMap == nil {
+      continue
+    }
+    if hvIgnoreMap[""] != nil {
+      return h, ""
+    }
+    for ignoreV, _ := range hvIgnoreMap {
+      for _, v := range values {
+        v = strings.ToLower(v)
+        if strings.Contains(v, ignoreV) {
+          return h, ignoreV
+        }
+      }
+    }
+  }
+  return "", ""
 }
 
 func getIgnoreForPort(r *http.Request) *Ignore {
@@ -148,12 +202,12 @@ func getIgnoreForPort(r *http.Request) *Ignore {
   return i
 }
 
-func addIgnoreURI(w http.ResponseWriter, r *http.Request) {
-  getIgnoreForPort(r).addURI(w, r)
+func addIgnoreHeaderOrURI(w http.ResponseWriter, r *http.Request) {
+  getIgnoreForPort(r).addIgnoreHeaderOrURI(w, r)
 }
 
-func removeIgnoreURI(w http.ResponseWriter, r *http.Request) {
-  getIgnoreForPort(r).removeURI(w, r)
+func removeIgnoreHeaderOrURI(w http.ResponseWriter, r *http.Request) {
+  getIgnoreForPort(r).removeIgnoreHeaderOrURI(w, r)
 }
 
 func setOrGetIgnoreStatus(w http.ResponseWriter, r *http.Request) {
@@ -169,20 +223,20 @@ func getIgnoreCallCount(w http.ResponseWriter, r *http.Request) {
 }
 
 func getIgnoreList(w http.ResponseWriter, r *http.Request) {
-  ignore := getIgnoreForPort(r)
-  util.AddLogMessage(fmt.Sprintf("Reporting Ignored URIs: %+v", ignore), r)
-  ignore.lock.RLock()
-  result := util.ToJSON(ignore)
-  ignore.lock.RUnlock()
-  w.WriteHeader(http.StatusOK)
+  util.AddLogMessage("Reporting Ignored URIs", r)
+  lock.RLock()
+  result := util.ToJSON(ignoreByPort)
+  lock.RUnlock()
   fmt.Fprintln(w, string(result))
 }
 
-func IsIgnoredURI(r *http.Request) bool {
+func IsIgnoredRequest(r *http.Request) bool {
   ignore := getIgnoreForPort(r)
-  ignore.lock.RLock()
-  defer ignore.lock.RUnlock()
-  return util.IsURIInMap(r.RequestURI, ignore.Uris)
+  if ignore.getIgnoredURI(r) != "" {
+    return true
+  }
+  h, _ := ignore.getIgnoredHeader(r)
+  return h != ""
 }
 
 func Middleware(next http.Handler) http.Handler {
@@ -190,19 +244,29 @@ func Middleware(next http.Handler) http.Handler {
     if !util.IsAdminRequest(r) {
       ignore := getIgnoreForPort(r)
       ignore.lock.RLock()
-      uri := util.FindURIInMap(r.RequestURI, ignore.Uris)
+      uri := ignore.getIgnoredURI(r)
+      header, value := ignore.getIgnoredHeader(r)
       ignore.lock.RUnlock()
+      ignored := false
       if uri != "" {
-        metrics.UpdateURIRequestCount(uri)
+        ignored = true
         ignore.lock.Lock()
         ignore.Uris[uri] = ignore.Uris[uri].(int) + 1
         ignore.lock.Unlock()
+      } else if header != "" {
+        ignored = true
+        ignore.lock.Lock()
+        ignore.Headers[header][value] = ignore.Headers[header][value].(int) + 1
+        ignore.lock.Unlock()
+      }
+      if ignored {
+        metrics.UpdateURIRequestCount(uri)
         w.Header().Add("Goto-Ignored-Request", "true")
+        util.CopyHeaders("Ignore-Request", w, r.Header, r.Host, r.RequestURI)
         if ignore.IgnoreStatus > 0 {
-          util.CopyHeaders("Ignore-Request", w, r.Header, r.Host, r.RequestURI)
           w.WriteHeader(ignore.IgnoreStatus)
-          return
         }
+        return
       }
     }
     if next != nil {

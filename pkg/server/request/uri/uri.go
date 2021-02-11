@@ -335,6 +335,9 @@ func middleware(next http.Handler) http.Handler {
       events.SendRequestEvent("URI Status Applied", msg, r)
       crw.StatusCode = statusToReport
     }
+    if crw.StatusCode == 0 {
+      crw.StatusCode = 200
+    }
     w.Header().Add("Goto-Response-Status", strconv.Itoa(crw.StatusCode))
     crw.Proceed()
     util.UpdateTrafficEventStatusCode(r, crw.StatusCode)

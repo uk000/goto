@@ -43,5 +43,5 @@ var (
   GetListenerLabel           func(*http.Request) string
   GetListenerLabelForPort    func(int) string
   GetHostLabelForPort        func(int) string
-  IsIgnoredURI               func(*http.Request) bool
+  IsIgnoredRequest           func(*http.Request) bool
 )

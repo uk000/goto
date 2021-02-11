@@ -2609,20 +2609,25 @@ This feature allows marking some URIs as `ignored` so that those don't generate 
 |METHOD|URI|Description|
 |---|---|---|
 |PUT, POST| /request/uri/ignore<br/>/add?uri={uri}       | Add an ignored URI |
+|PUT, POST| /request/uri/ignore<br/>/add/header/{header}  | Ignore all requests carrying the given header |
+|PUT, POST| /request/uri/ignore<br/>/add/header/{header}~{value}  | Ignored requests with a given header where value contains the given text |
 |PUT, POST| /request/uri/ignore<br/>/remove?uri={uri}    | Remove an ignored URI |
+|PUT, POST| /request/uri/ignore<br/>/remove/header/{header}    | Remove an ignored header |
+|PUT, POST| /request/uri/ignore<br/>/remove/header/{header}~{value}    | Remove an ignored header/value combination |
+|PUT, POST| /request/uri/ignore<br/>/set/status={status} | Set status code to be returned for ignored URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
 |PUT, POST| /request/uri/ignore/clear               | Remove all ignored URIs |
-|PUT, POST| /request/uri/ignore<br/>/set/status={status:count} | Set status code to be returned for ignored URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
 |GET      |	/request/uri/ignore                     | Get list of ignored URIs |
 |GET      |	/request/uri/ignore/status              | Get current ignored URI status code |
-|GET      |	/request/uri/ignore<br/>/counts?uri={uri}    | Get request counts for a given ignored URI |
-|GET      |	/request/uri/ignore/counts                | Get request counts for all ignored URIs |
+|GET      |	/request/uri/ignore/counts                | Get ignored request counts by URIs and headers |
 
 
 #### Ignore URIs Events
 - `Ignore URI Added`
+- `Ignore Header Added`
 - `Ignore URI Removed`
+- `Ignore Header Removed`
 - `Ignore Status Configured`
-- `Ignore URIs Cleared`
+- `Ignore Config Cleared`
 
 #### Ignore URIs API Examples
 <details>
@@ -2635,7 +2640,7 @@ curl -X PUT localhost:8080/request/uri/ignore/add\?uri=/foo
 
 curl -X PUT localhost:8081/request/uri/ignore/remove\?uri=/bar
 
-curl -X PUT localhost:8080/request/uri/ignore/set/status=418:2
+curl -X PUT localhost:8080/request/uri/ignore/set/status=418
 
 curl localhost:8080/request/uri/ignore
 

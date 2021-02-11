@@ -1,6 +1,7 @@
 package runner
 
 import (
+  "bytes"
   "context"
   "fmt"
   "goto/pkg/events"
@@ -13,6 +14,7 @@ import (
   "net/http"
   "os"
   "os/signal"
+  "strings"
   "syscall"
   "time"
 
@@ -46,6 +48,7 @@ func RunHttpServer(handlers ...util.ServerHandler) {
     IdleTimeout:  1 * time.Minute,
     ConnContext:  conn.SaveConnInContext,
     Handler:      h2c.NewHandler(GRPCHandler(r), h2s),
+    ErrorLog:     httpLogger(),
   }
   StartHttpServer(httpServer)
   listeners.StartInitialListeners()
@@ -110,4 +113,24 @@ func StopHttpServer(server *http.Server) {
   events.SendEventJSONDirect("Server Stopped", listeners.GetListeners())
   server.Shutdown(ctx)
   log.Printf("HTTP Server %s finished shutting down", server.Addr)
+}
+
+func httpLogger() *log.Logger {
+  buf := new(bytes.Buffer)
+  logger := log.New(buf, "httpLogger_", 0)
+  go func() {
+    for {
+      if buf.Len() > 0 {
+        line, err := buf.ReadString('\n')
+        if err != nil {
+          log.Println("[httpLogger] ", err)
+          continue
+        }
+        if !strings.Contains(line, "EOF") {
+          log.Print(line)
+        }
+      }
+    }
+  }()
+  return logger
 }
