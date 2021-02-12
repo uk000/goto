@@ -1442,7 +1442,7 @@ func clearPeerEvents(w http.ResponseWriter, r *http.Request) {
 func getPeerEvents(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
-  peerName := util.GetStringParamValue(r, "peer")
+  peerNames, _ := util.GetListParam(r, "peers")
   unified := strings.Contains(r.RequestURI, "unified")
   reverse := strings.Contains(r.RequestURI, "reverse")
   all := strings.EqualFold(label, constants.LockerAll)
@@ -1467,11 +1467,11 @@ func getPeerEvents(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusNotFound)
     fmt.Fprint(w, msg)
   } else {
-    if peerName != "" {
+    if len(peerNames) > 0 {
       if all {
-        msg = fmt.Sprintf("Registry: Reporting events for peer [%s] from all lockers", peerName)
+        msg = fmt.Sprintf("Registry: Reporting events for peers %s from all lockers", peerNames)
       } else {
-        msg = fmt.Sprintf("Registry: Reporting events for peer [%s] from locker [%s]", peerName, label)
+        msg = fmt.Sprintf("Registry: Reporting events for peers %s from locker [%s]", peerNames, label)
       }
     } else {
       if all {
@@ -1480,7 +1480,7 @@ func getPeerEvents(w http.ResponseWriter, r *http.Request) {
         msg = fmt.Sprintf("Registry: Reporting events for all peers from locker [%s]", label)
       }
     }
-    result := labeledLockers.GetPeerEvents(label, peerName, unified, reverse)
+    result := labeledLockers.GetPeerEvents(label, peerNames, unified, reverse)
     util.WriteJsonPayload(w, result)
   }
   if global.EnableRegistryLogs {
@@ -1491,7 +1491,7 @@ func getPeerEvents(w http.ResponseWriter, r *http.Request) {
 func searchInPeerEvents(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
-  peerName := util.GetStringParamValue(r, "peer")
+  peerNames, _ := util.GetListParam(r, "peers")
   key := util.GetStringParamValue(r, "text")
   unified := strings.Contains(r.RequestURI, "unified")
   reverse := strings.Contains(r.RequestURI, "reverse")
@@ -1520,11 +1520,11 @@ func searchInPeerEvents(w http.ResponseWriter, r *http.Request) {
       w.WriteHeader(http.StatusNotFound)
       fmt.Fprint(w, msg)
     } else {
-      if peerName != "" {
+      if len(peerNames) > 0 {
         if all {
-          msg = fmt.Sprintf("Registry: Reporting searched events for peer [%s] from all lockers", peerName)
+          msg = fmt.Sprintf("Registry: Reporting searched events for peers %s from all lockers", peerNames)
         } else {
-          msg = fmt.Sprintf("Registry: Reporting searched events for peer [%s] from locker [%s]", peerName, label)
+          msg = fmt.Sprintf("Registry: Reporting searched events for peers %s from locker [%s]", peerNames, label)
         }
       } else {
         if all {
@@ -1533,7 +1533,7 @@ func searchInPeerEvents(w http.ResponseWriter, r *http.Request) {
           msg = fmt.Sprintf("Registry: Reporting searched events for all peers from locker [%s]", label)
         }
       }
-      result := labeledLockers.SearchInPeerEvents(label, peerName, key, unified, reverse)
+      result := labeledLockers.SearchInPeerEvents(label, peerNames, key, unified, reverse)
       util.WriteJsonPayload(w, result)
     }
   }

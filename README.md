@@ -3752,10 +3752,10 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST      | /registry/peers/lockers/clear | Clear all peer lockers under currently active labeled locker |
 | POST      | /registry/peers/events/flush | Requests all peer instances to publish any pending events to registry, and clears events timeline on the peer instances. Registry still retains the peers events in the current locker. |
 | POST      | /registry/peers/events/clear | Requests all peer instances to clear their events timeline, and also removes the peers events from the current registry locker. |
-| GET       | /registry/lockers/{label}<br/>/peers/{peer}/events | Get the events timeline for all instances of the given peer from the given labeled locker. Use label `all` to get data from all lockers, and `current` to get from the current locker. |
-| GET       | /registry/lockers/{label}<br/>/peers/{peer}/events/reverse | Same as above but in reverse chronological order. |
-| GET       | /registry/lockers/{label}<br/>/peers/{peer}<br/>/events/search/{text} | Search in the events timeline for all instances of the given peer from the given labeled locker. Using label `all` fetches data from all lockers, whereas `current` gets from the current locker. Use label `all` to search across all lockers. |
-| GET       | /registry/lockers/{label}<br/>/peers/{peer}<br/>/events/search/{text}/reverse | Same as above but in reverse chronological order. |
+| GET       | /registry/lockers/{label}<br/>/peers/{peers}/events | Get the events timeline for all instances of the given peers (comma-separated list) from the given labeled locker. Use label `all` to get data from all lockers, and `current` to get from the current locker. |
+| GET       | /registry/lockers/{label}<br/>/peers/{peers}/events/reverse | Same as above but in reverse chronological order. |
+| GET       | /registry/lockers/{label}<br/>/peers/{peers}<br/>/events/search/{text} | Search in the events timeline for all instances of the given peers (comma-separated list) from the given labeled locker. Using label `all` fetches data from all lockers, whereas `current` gets from the current locker. Use label `all` to search across all lockers. |
+| GET       | /registry/lockers/{label}<br/>/peers/{peers}<br/>/events/search/{text}/reverse | Same as above but in reverse chronological order. |
 | GET       | /registry/lockers/{label}<br/>/peers/events | Get the events timeline for all instances of all peer from the given labeled locker, grouped by peer label. |
 | GET       | /registry/lockers/{label}<br/>/peers/events/reverse | Same as above but in reverse chronological order. |
 | GET       | /registry/lockers/{label}<br/>/peers/events<br/>/search/{text} | Search in the events timeline of all peers from the given labeled locker, grouped by peer label. |

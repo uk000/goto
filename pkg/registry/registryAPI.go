@@ -63,10 +63,10 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
   lockerPeersRouter := registryRouter.PathPrefix("/lockers/{label}/peers").Subrouter()
 
-  util.AddRoute(lockerPeersRouter, "/{peer}/events", getPeerEvents, "GET")
-  util.AddRoute(lockerPeersRouter, "/{peer}/events/reverse", getPeerEvents, "GET")
-  util.AddRoute(lockerPeersRouter, "/{peer}/events/search/{text}", searchInPeerEvents, "GET")
-  util.AddRoute(lockerPeersRouter, "/{peer}/events/search/{text}/reverse", searchInPeerEvents, "GET")
+  util.AddRoute(lockerPeersRouter, "/{peers}/events", getPeerEvents, "GET")
+  util.AddRoute(lockerPeersRouter, "/{peers}/events/reverse", getPeerEvents, "GET")
+  util.AddRoute(lockerPeersRouter, "/{peers}/events/search/{text}", searchInPeerEvents, "GET")
+  util.AddRoute(lockerPeersRouter, "/{peers}/events/search/{text}/reverse", searchInPeerEvents, "GET")
   util.AddRoute(lockerPeersRouter, "/events/unified", getPeerEvents, "GET")
   util.AddRoute(lockerPeersRouter, "/events/unified/reverse", getPeerEvents, "GET")
   util.AddRoute(lockerPeersRouter, "/events/unified/search/{text}", searchInPeerEvents, "GET")

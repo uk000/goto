@@ -14,7 +14,6 @@ import (
   "net/http"
   "os"
   "os/signal"
-  "strings"
   "syscall"
   "time"
 
@@ -116,21 +115,6 @@ func StopHttpServer(server *http.Server) {
 }
 
 func httpLogger() *log.Logger {
-  buf := new(bytes.Buffer)
-  logger := log.New(buf, "httpLogger_", 0)
-  go func() {
-    for {
-      if buf.Len() > 0 {
-        line, err := buf.ReadString('\n')
-        if err != nil {
-          log.Println("[httpLogger] ", err)
-          continue
-        }
-        if !strings.Contains(line, "EOF") {
-          log.Print(line)
-        }
-      }
-    }
-  }()
+  logger := log.New(new(bytes.Buffer), "httpLogger_", 0)
   return logger
 }

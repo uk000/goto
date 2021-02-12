@@ -529,13 +529,15 @@ func (cl *CombiLocker) GetTargetsSummaryResults(peerName string, trackingHeaders
   return result
 }
 
-func (cl *CombiLocker) getPeerLockers(peerName string) map[string]*PeerLocker {
+func (cl *CombiLocker) getPeerLockers(peerNames []string) map[string]*PeerLocker {
   cl.lock.RLock()
   defer cl.lock.RUnlock()
   peerLockers := map[string]*PeerLocker{}
-  if peerName != "" {
-    if cl.PeerLockers[peerName] != nil {
-      peerLockers[peerName] = cl.PeerLockers[peerName]
+  if len(peerNames) > 0 {
+    for _, peerName := range peerNames {
+      if cl.PeerLockers[peerName] != nil {
+        peerLockers[peerName] = cl.PeerLockers[peerName]
+      }
     }
   } else {
     for peer, peerLocker := range cl.PeerLockers {
@@ -561,9 +563,9 @@ func sortPeerEvents(eventsMap map[string][]*events.Event, reverse bool) {
   }
 }
 
-func (cl *CombiLocker) GetPeerEvents(peerName string, unified bool, reverse bool) map[string][]*events.Event {
+func (cl *CombiLocker) GetPeerEvents(peerNames []string, unified bool, reverse bool) map[string][]*events.Event {
   eventsMap := map[string][]*events.Event{}
-  peerLockers := cl.getPeerLockers(peerName)
+  peerLockers := cl.getPeerLockers(peerNames)
   for peer, pl := range peerLockers {
     pl.lock.RLock()
     eventsLocker := pl.DataLocker.Locker["events"]
@@ -583,9 +585,9 @@ func (cl *CombiLocker) GetPeerEvents(peerName string, unified bool, reverse bool
   return eventsMap
 }
 
-func (cl *CombiLocker) SearchInPeerEvents(peerName string, pattern *regexp.Regexp, unified bool, reverse bool) map[string][]*events.Event {
+func (cl *CombiLocker) SearchInPeerEvents(peerNames []string, pattern *regexp.Regexp, unified bool, reverse bool) map[string][]*events.Event {
   eventsMap := map[string][]*events.Event{}
-  peerLockers := cl.getPeerLockers(peerName)
+  peerLockers := cl.getPeerLockers(peerNames)
   for peer, pl := range peerLockers {
     pl.lock.RLock()
     eventsLocker := pl.DataLocker.Locker["events"]
@@ -757,11 +759,11 @@ func (ll *LabeledLockers) SearchInDataLockers(locker string, key string) []strin
   return searchInLockers(lockersToSearch, key)
 }
 
-func (ll *LabeledLockers) GetPeerEvents(locker, peerName string, unified bool, reverse bool) map[string][]*events.Event {
+func (ll *LabeledLockers) GetPeerEvents(locker string, peerNames []string, unified bool, reverse bool) map[string][]*events.Event {
   lockersToSearch := ll.getLockers(locker)
   eventsMap := map[string][]*events.Event{}
   for _, l := range lockersToSearch {
-    lockerEvents := l.GetPeerEvents(peerName, unified, reverse)
+    lockerEvents := l.GetPeerEvents(peerNames, unified, reverse)
     for peer, peerEvents := range lockerEvents {
       if unified {
         peer = "all"
@@ -775,12 +777,12 @@ func (ll *LabeledLockers) GetPeerEvents(locker, peerName string, unified bool, r
   return eventsMap
 }
 
-func (ll *LabeledLockers) SearchInPeerEvents(locker, peerName, key string, unified bool, reverse bool) map[string][]*events.Event {
+func (ll *LabeledLockers) SearchInPeerEvents(locker string, peerNames []string, key string, unified bool, reverse bool) map[string][]*events.Event {
   lockersToSearch := ll.getLockers(locker)
   eventsMap := map[string][]*events.Event{}
   pattern := regexp.MustCompile("(?i)" + key)
   for _, l := range lockersToSearch {
-    lockerEvents := l.SearchInPeerEvents(peerName, pattern, unified, reverse)
+    lockerEvents := l.SearchInPeerEvents(peerNames, pattern, unified, reverse)
     for peer, peerEvents := range lockerEvents {
       if unified {
         peer = "all"
