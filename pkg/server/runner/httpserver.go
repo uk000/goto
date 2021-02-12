@@ -1,7 +1,6 @@
 package runner
 
 import (
-  "bytes"
   "context"
   "fmt"
   "goto/pkg/events"
@@ -10,6 +9,7 @@ import (
   "goto/pkg/server/conn"
   "goto/pkg/server/listeners"
   "goto/pkg/util"
+  "io/ioutil"
   "log"
   "net/http"
   "os"
@@ -47,7 +47,7 @@ func RunHttpServer(handlers ...util.ServerHandler) {
     IdleTimeout:  1 * time.Minute,
     ConnContext:  conn.SaveConnInContext,
     Handler:      h2c.NewHandler(GRPCHandler(r), h2s),
-    ErrorLog:     httpLogger(),
+    ErrorLog:     log.New(ioutil.Discard, "_logger", 0),
   }
   StartHttpServer(httpServer)
   listeners.StartInitialListeners()
@@ -112,9 +112,4 @@ func StopHttpServer(server *http.Server) {
   events.SendEventJSONDirect("Server Stopped", listeners.GetListeners())
   server.Shutdown(ctx)
   log.Printf("HTTP Server %s finished shutting down", server.Addr)
-}
-
-func httpLogger() *log.Logger {
-  logger := log.New(new(bytes.Buffer), "httpLogger_", 0)
-  return logger
 }

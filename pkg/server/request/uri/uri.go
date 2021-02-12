@@ -9,7 +9,6 @@ import (
   "time"
 
   "goto/pkg/events"
-  "goto/pkg/metrics"
   "goto/pkg/server/intercept"
   "goto/pkg/server/request/uri/bypass"
   "goto/pkg/server/request/uri/ignore"
@@ -292,7 +291,6 @@ func middleware(next http.Handler) http.Handler {
     }
     uriLock.RUnlock()
     if trackURICallCounts {
-      metrics.UpdateURIRequestCount(uri)
       uriLock.Lock()
       uriCountsByPort[port][uri]++
       uriLock.Unlock()

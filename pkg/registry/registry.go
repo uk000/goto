@@ -962,24 +962,20 @@ func checkPeerHealth(w http.ResponseWriter, r *http.Request) {
   peerName := util.GetStringParamValue(r, "peer")
   address := util.GetStringParamValue(r, "address")
   result := getPortRegistry(r).checkPeerHealth(peerName, address)
-  w.WriteHeader(http.StatusOK)
   events.SendRequestEventJSON("Registry: Checked Peers Health", result, r)
-  msg := util.ToJSON(result)
+  util.WriteJsonPayload(w, result)
   if global.EnableRegistryLogs {
-    util.AddLogMessage(msg, r)
+    util.AddLogMessage(util.ToJSON(result), r)
   }
-  fmt.Fprintln(w, msg)
 }
 
 func cleanupUnhealthyPeers(w http.ResponseWriter, r *http.Request) {
   result := getPortRegistry(r).cleanupUnhealthyPeers(util.GetStringParamValue(r, "peer"))
-  w.WriteHeader(http.StatusOK)
   events.SendRequestEventJSON("Registry: Cleaned Up Unhealthy Peers", result, r)
-  msg := util.ToJSON(result)
+  util.WriteJsonPayload(w, result)
   if global.EnableRegistryLogs {
-    util.AddLogMessage(msg, r)
+    util.AddLogMessage(util.ToJSON(result), r)
   }
-  fmt.Fprintln(w, msg)
 }
 
 func getPeers(w http.ResponseWriter, r *http.Request) {

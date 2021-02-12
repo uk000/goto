@@ -81,6 +81,10 @@ type InvocationsResults struct {
   lock    sync.RWMutex
 }
 
+const (
+  SenderCount = 10
+)
+
 var (
   targetsResults               = &TargetsResults{}
   invocationsResults           = &InvocationsResults{}
@@ -696,14 +700,14 @@ func startRegistrySender() {
   defer registrySendLock.Unlock()
   if !sendingToRegistry {
     sendingToRegistry = true
-    for i := 1; i < 5; i++ {
+    for i := 1; i < SenderCount; i++ {
       go registrySender(i)
     }
   }
 }
 
 func StopRegistrySender() {
-  for i := 1; i < 5; i++ {
+  for i := 1; i < SenderCount; i++ {
     stopRegistrySender <- true
   }
 }

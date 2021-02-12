@@ -26,56 +26,62 @@ var (
     Name: "goto_client_requests_by_targets", Help: "Number of client requests by target"}, []string{"target"})
   failureCountsByTargets = factory.NewCounterVec(prometheus.CounterOpts{
     Name: "goto_client_failures_by_targets", Help: "Number of failed client requests by target"}, []string{"target"})
+  requestCountsByClient = factory.NewCounterVec(prometheus.CounterOpts{
+    Name: "goto_requests_by_client", Help: "Number of requests by client"}, []string{"client"})
   proxiedRequestCounts = factory.NewCounterVec(prometheus.CounterOpts{
     Name: "goto_proxied_requests", Help: "Number of proxied requests"}, []string{"proxyTarget"})
   triggerCounts = factory.NewCounterVec(prometheus.CounterOpts{
     Name: "goto_triggers", Help: "Number of triggered requests"}, []string{"triggerTarget"})
   connCounts = factory.NewCounterVec(prometheus.CounterOpts{
     Name: "goto_conn_counts", Help: "Number of connections by type"}, []string{"connType"})
-  activeConnCountsByTargets = factory.NewGaugeVec(prometheus.GaugeOpts{
-    Name: "goto_active_client_conn_counts_by_targets", Help: "Number of active client connections by targets"}, []string{"target"})
   tcpConnections = factory.NewCounterVec(prometheus.CounterOpts{
     Name: "goto_tcp_conn_counts", Help: "Number of TCP connections by type"}, []string{"tcpType"})
+  activeConnCountsByTargets = factory.NewGaugeVec(prometheus.GaugeOpts{
+    Name: "goto_active_client_conn_counts_by_targets", Help: "Number of active connections by targets"}, []string{"target"})
 )
 
 func UpdateRequestCount(reqType string) {
-  requestCounts.WithLabelValues(reqType).Inc()
+  go requestCounts.WithLabelValues(reqType).Inc()
 }
 
 func UpdateHeaderRequestCount(header string) {
-  requestCountsByHeaders.WithLabelValues(header).Inc()
+  go requestCountsByHeaders.WithLabelValues(header).Inc()
 }
 
 func UpdateURIRequestCount(uri string) {
-  requestCountsByURIs.WithLabelValues(uri).Inc()
+  go requestCountsByURIs.WithLabelValues(uri).Inc()
 }
 
 func UpdateTargetRequestCount(target string) {
-  requestCountsByTargets.WithLabelValues(target).Inc()
+  go requestCountsByTargets.WithLabelValues(target).Inc()
 }
 
 func UpdateTargetFailureCount(target string) {
-  failureCountsByTargets.WithLabelValues(target).Inc()
+  go failureCountsByTargets.WithLabelValues(target).Inc()
+}
+
+func UpdateClientRequestCount(client string) {
+  go requestCountsByClient.WithLabelValues(client).Inc()
 }
 
 func UpdateProxiedRequestCount(target string) {
-  proxiedRequestCounts.WithLabelValues(target).Inc()
+  go proxiedRequestCounts.WithLabelValues(target).Inc()
 }
 
 func UpdateTriggerCount(target string) {
-  triggerCounts.WithLabelValues(target).Inc()
+  go triggerCounts.WithLabelValues(target).Inc()
 }
 
 func UpdateConnCount(connType string) {
-  connCounts.WithLabelValues(connType).Inc()
-}
-
-func UpdateTargetConnCount(target string, count int) {
-  activeConnCountsByTargets.WithLabelValues(target).Set(float64(count))
+  go connCounts.WithLabelValues(connType).Inc()
 }
 
 func UpdateTCPConnCount(tcpType string) {
-  tcpConnections.WithLabelValues(tcpType).Inc()
+  go tcpConnections.WithLabelValues(tcpType).Inc()
+}
+
+func UpdateTargetConnCount(target string, count int) {
+  go activeConnCountsByTargets.WithLabelValues(target).Set(float64(count))
 }
 
 func ClearMetrics() {
