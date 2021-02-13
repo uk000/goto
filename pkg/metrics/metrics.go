@@ -23,11 +23,11 @@ var (
   requestCountsByURIs = factory.NewCounterVec(prometheus.CounterOpts{
     Name: "goto_requests_by_uris", Help: "Number of requests by URIs"}, []string{"requestURI"})
   requestCountsByTargets = factory.NewCounterVec(prometheus.CounterOpts{
-    Name: "goto_client_requests_by_targets", Help: "Number of client requests by target"}, []string{"target"})
+    Name: "goto_invocations_by_targets", Help: "Number of client invocations by target"}, []string{"target"})
   failureCountsByTargets = factory.NewCounterVec(prometheus.CounterOpts{
-    Name: "goto_client_failures_by_targets", Help: "Number of failed client requests by target"}, []string{"target"})
+    Name: "goto_failed_invocations_by_targets", Help: "Number of failed invocations by target"}, []string{"target"})
   requestCountsByClient = factory.NewCounterVec(prometheus.CounterOpts{
-    Name: "goto_requests_by_client", Help: "Number of requests by client"}, []string{"client"})
+    Name: "goto_requests_by_client", Help: "Number of server requests by client"}, []string{"client"})
   proxiedRequestCounts = factory.NewCounterVec(prometheus.CounterOpts{
     Name: "goto_proxied_requests", Help: "Number of proxied requests"}, []string{"proxyTarget"})
   triggerCounts = factory.NewCounterVec(prometheus.CounterOpts{

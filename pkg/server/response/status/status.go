@@ -197,7 +197,7 @@ func IncrementStatusCount(statusCode int, r *http.Request) {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    if util.IsMetricsRequest(r) {
+    if util.IsKnownNonTraffic(r) {
       if next != nil {
         next.ServeHTTP(w, r)
       }
@@ -208,11 +208,11 @@ func Middleware(next http.Handler) http.Handler {
       next.ServeHTTP(crw, r)
     }
     overriddenStatus := false
-    if !util.IsAdminRequest(r) {
+    if !uri.HasURIStatus(r) {
       ps := getOrCreatePortStatus(r)
       crw.StatusCode, overriddenStatus = computeResponseStatus(crw.StatusCode, r)
       IncrementStatusCount(crw.StatusCode, r)
-      if overriddenStatus && !uri.HasURIStatus(r) {
+      if overriddenStatus {
         msg := ""
         if overriddenStatus {
           w.Header().Add("Goto-Forced-Status", strconv.Itoa(crw.StatusCode))
@@ -226,9 +226,8 @@ func Middleware(next http.Handler) http.Handler {
       }
     }
     if crw.StatusCode == 0 {
-      crw.StatusCode = 200
+      crw.StatusCode = http.StatusOK
     }
-    util.AddLogMessage(fmt.Sprintf("Reporting status: [%d]", crw.StatusCode), r)
     crw.Proceed()
   })
 }

@@ -10,8 +10,6 @@ import (
 
   "goto/pkg/events"
   "goto/pkg/server/intercept"
-  "goto/pkg/server/request/uri/bypass"
-  "goto/pkg/server/request/uri/ignore"
   "goto/pkg/server/response/trigger"
   "goto/pkg/util"
 
@@ -34,7 +32,6 @@ type URIStatusConfig struct {
 
 var (
   Handler            util.ServerHandler = util.ServerHandler{"uri", SetRoutes, Middleware}
-  internalHandler    util.ServerHandler = util.ServerHandler{Name: "uri", Middleware: middleware}
   uriCountsByPort    map[string]map[string]int
   uriStatusByPort    map[string]map[string]interface{}
   uriDelayByPort     map[string]map[string]interface{}
@@ -44,8 +41,6 @@ var (
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   uriRouter := util.PathRouter(r, "/uri")
-  bypass.SetRoutes(uriRouter, parent, root)
-  ignore.SetRoutes(uriRouter, parent, root)
   util.AddRouteQWithPort(uriRouter, "/set/status={status}", setStatus, "uri", "{uri}", "POST")
   util.AddRouteQWithPort(uriRouter, "/set/delay={delay}", setDelay, "uri", "{uri}", "POST")
   util.AddRouteWithPort(uriRouter, "/counts/enable", enableURICallCounts, "POST")
@@ -263,10 +258,10 @@ func GetURIDelay(r *http.Request) *DelayConfig {
   return nil
 }
 
-func middleware(next http.Handler) http.Handler {
+func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     util.AddLogMessage(fmt.Sprintf("Request URI: [%s], Protocol: [%s], Method: [%s]", r.RequestURI, r.Proto, r.Method), r)
-    if util.IsAdminRequest(r) || util.IsMetricsRequest(r) {
+    if util.IsKnownNonTraffic(r) {
       if next != nil {
         next.ServeHTTP(w, r)
       }
@@ -341,8 +336,4 @@ func middleware(next http.Handler) http.Handler {
     util.UpdateTrafficEventStatusCode(r, crw.StatusCode)
     trigger.RunTriggers(r, crw, crw.StatusCode)
   })
-}
-
-func Middleware(next http.Handler) http.Handler {
-  return util.AddMiddlewares(next, internalHandler, bypass.Handler, ignore.Handler)
 }

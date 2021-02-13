@@ -692,8 +692,14 @@ func handleURI(w http.ResponseWriter, r *http.Request) {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    if util.IsKnownNonTraffic(r) {
+      if next != nil {
+        next.ServeHTTP(w, r)
+      }
+      return
+    }
     var payload *ResponsePayload
-    if !util.IsAdminRequest(r) && !util.IsPayloadRequest(r) {
+    if !util.IsPayloadRequest(r) {
       pr := getPortResponse(r)
       pr.lock.RLock()
       rp, found := pr.unsafeGetResponsePayload(r)

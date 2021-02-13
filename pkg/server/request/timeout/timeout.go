@@ -129,7 +129,7 @@ func reportTimeoutTracking(w http.ResponseWriter, r *http.Request) {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    if util.IsAdminRequest(r) {
+    if util.IsKnownNonTraffic(r) {
       if next != nil {
         next.ServeHTTP(w, r)
       }

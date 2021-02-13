@@ -104,12 +104,18 @@ func getDelay(w http.ResponseWriter, r *http.Request) {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    if util.IsKnownNonTraffic(r) {
+      if next != nil {
+        next.ServeHTTP(w, r)
+      }
+      return
+    }
     delayLock.RLock()
     listenerPort := util.GetRequestOrListenerPort(r)
     delay := delayByPort[listenerPort]
     delayCount := delayCountByPort[listenerPort]
     delayLock.RUnlock()
-    if delay > 0 && delayCount >= 0 && !util.IsAdminRequest(r) && !util.IsDelayRequest(r) {
+    if delay > 0 && delayCount >= 0 && !util.IsDelayRequest(r) {
       if delayCount > 0 {
         newDelay := delay
         if delayCount == 1 {

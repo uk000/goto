@@ -1,4 +1,4 @@
-package runner
+package server
 
 import (
   "context"
@@ -26,6 +26,11 @@ type IGRPCServer interface {
 
 type GRPCServer struct{}
 
+type WrappedStream struct {
+  grpc.ServerStream
+  ctx context.Context
+}
+
 var (
   grpcServer *grpc.Server
 )
@@ -50,14 +55,21 @@ func GRPCHandler(httpHandler http.Handler) http.Handler {
   })
 }
 
+func NewWrappedStream(ss grpc.ServerStream, ctx context.Context) grpc.ServerStream {
+  return WrappedStream{ServerStream: ss, ctx: ctx}
+}
+
+func (ws WrappedStream) Context() context.Context {
+  return ws.ctx
+}
+
 func ContextGRPCMiddleware(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
   port := util.GetPortNumFromGRPCAuthority(ctx)
   if port <= 0 {
     port = global.ServerPort
   }
   md := metadata.Pairs("port", fmt.Sprint(port))
-  ctx = util.ContextWithPort(metadata.NewOutgoingContext(ctx, md), port)
-  return handler(ctx, req)
+  return handler(WithPort(metadata.NewOutgoingContext(ctx, md), port), req)
 }
 
 func ContextGRPCStreamMiddleware(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
@@ -66,9 +78,7 @@ func ContextGRPCStreamMiddleware(srv interface{}, ss grpc.ServerStream, info *gr
   if port <= 0 {
     port = global.ServerPort
   }
-  md := metadata.Pairs("port", fmt.Sprint(port))
-  ctx = util.ContextWithPort(metadata.NewOutgoingContext(ctx, md), port)
-  return handler(srv, ss)
+  return handler(srv, NewWrappedStream(ss, WithPort(metadata.NewOutgoingContext(ctx, metadata.Pairs("port", fmt.Sprint(port))), port)))
 }
 
 func StopGRPCServer() {

@@ -5,6 +5,7 @@ import (
   "crypto/x509"
   "fmt"
   "goto/pkg/events"
+  . "goto/pkg/events/eventslist"
   "goto/pkg/global"
   "goto/pkg/metrics"
   "goto/pkg/util"
@@ -593,40 +594,43 @@ func prepareTargetURL(url string, sendID bool, requestId string) (string, string
   return url, requestId
 }
 
-func processStopRequest(tracker *InvocationTracker) bool {
-  tracker.lock.RLock()
-  stopChannel := tracker.StopChannel
-  tracker.lock.RUnlock()
-  if stopChannel != nil {
-    stopRequested := false
-    select {
-    case stopRequested = <-stopChannel:
-    default:
-    }
-    if stopRequested {
-      tracker.lock.Lock()
-      tracker.Status.StopRequested = true
-      stopped := tracker.Status.Stopped
-      tracker.lock.Unlock()
-      if stopped {
-        if global.EnableInvocationLogs {
-          log.Printf("[%s]: Invocation[%d]: Received stop request for target = %s that is already stopped\n", hostLabel, tracker.ID, tracker.Target.Name)
-        }
-        return true
-      } else {
-        tracker.lock.Lock()
-        tracker.Status.Stopped = true
-        remaining := (tracker.Target.RequestCount * tracker.Target.Replicas) - tracker.Status.CompletedReplicas
-        tracker.lock.Unlock()
-        if global.EnableInvocationLogs {
-          log.Printf("[%s]: Invocation[%d]: Received stop request for target = %s with remaining requests %d\n", hostLabel, tracker.ID, tracker.Target.Name, remaining)
-        }
-        removeTargetTracker(tracker.ID, tracker.Target.Name)
-        return true
+func processStopRequest(tracker *InvocationTracker) {
+  for !tracker.Status.Stopped && !tracker.Status.Stopped {
+    tracker.lock.RLock()
+    stopChannel := tracker.StopChannel
+    tracker.lock.RUnlock()
+    if stopChannel != nil {
+      stopRequested := false
+      select {
+      case stopRequested = <-stopChannel:
+      default:
       }
+      if stopRequested {
+        tracker.lock.Lock()
+        tracker.Status.StopRequested = true
+        stopped := tracker.Status.Stopped
+        tracker.lock.Unlock()
+        if stopped {
+          if global.EnableInvocationLogs {
+            log.Printf("[%s]: Invocation[%d]: Received stop request for target [%s] that is already stopped\n", hostLabel, tracker.ID, tracker.Target.Name)
+          }
+        } else {
+          tracker.lock.Lock()
+          tracker.Status.Stopped = true
+          remaining := (tracker.Target.RequestCount * tracker.Target.Replicas) - tracker.Status.CompletedReplicas
+          tracker.lock.Unlock()
+          if global.EnableInvocationLogs {
+            log.Printf("[%s]: Invocation[%d]: Received stop request for target [%s] with remaining requests [%d]\n", hostLabel, tracker.ID, tracker.Target.Name, remaining)
+          }
+          removeTargetTracker(tracker.ID, tracker.Target.Name)
+        }
+      } else {
+        time.Sleep(2 * time.Second)
+      }
+    } else {
+      break
     }
   }
-  return false
 }
 
 func activateTracker(tracker *InvocationTracker) {
@@ -655,7 +659,7 @@ func extractTargetHost(target *InvocationSpec) {
     if url, err := url.Parse(target.URL); err == nil {
       target.host = url.Host
     } else {
-      log.Printf("[%s]: Failed to parse target URL: %s\n", hostLabel, target.URL)
+      log.Printf("[%s]: Failed to parse target URL [%s]\n", hostLabel, target.URL)
     }
   }
 }
@@ -676,9 +680,9 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
   extractTargetHost(target)
   completedCount := 0
   time.Sleep(target.initialDelayD)
-  events.SendEventJSON("Invocation Started", target)
+  events.SendEventJSON(Client_InvocationStarted, target)
   if global.EnableInvocationLogs {
-    log.Printf("[%s]: Invocation[%d]: Started with target %s and total requests %d\n", hostLabel, trackerID, target.Name, (target.Replicas * target.RequestCount))
+    log.Printf("[%s]: Invocation[%d]: Started target [%s] with total requests [%d]\n", hostLabel, trackerID, target.Name, (target.Replicas * target.RequestCount))
   }
   var results []*InvocationResult
   if len(waitForResponse) > 0 && waitForResponse[0] {
@@ -686,9 +690,11 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
       results = append(results, result)
     })
   }
-
+  go processStopRequest(tracker)
   for {
-    if stopped := processStopRequest(tracker); stopped {
+    if tracker.Status.StopRequested || tracker.Status.Stopped {
+      remaining := (tracker.Target.RequestCount * tracker.Target.Replicas) - tracker.Status.CompletedReplicas
+      log.Printf("[%s]: Invocation[%d]: Stopping target [%s] with remaining requests [%d]\n", hostLabel, tracker.ID, tracker.Target.Name, remaining)
       break
     }
     wg := &sync.WaitGroup{}
@@ -733,7 +739,7 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
     }
   }
   DeregisterInvocation(tracker)
-  events.SendEventJSON("Invocation Finished", map[string]interface{}{"target": target.Name, "status": tracker.Status})
+  events.SendEventJSON(Client_InvocationFinished, map[string]interface{}{"target": target.Name, "status": tracker.Status})
   if global.EnableInvocationLogs {
     log.Printf("[%s]: Invocation[%d]: Finished\n", hostLabel, trackerID)
   }
@@ -760,7 +766,7 @@ func doInvoke(index uint32, targetID string, target *InvocationSpec,
   headers := target.Headers
   headers = append(headers, []string{"TargetID", targetID})
   if global.EnableInvocationLogs {
-    log.Printf("[%s]: Invocation[%d]: Invoking targetID: %s, url: %s, method: %s, headers: %+v\n",
+    log.Printf("[%s]: Invocation[%d]: Invoking targetID [%s], url [%s], method [%s], headers [%+v]\n",
       hostLabel, index, targetID, result.URL, target.Method, target.Headers)
   }
   result.URL, result.RequestID = prepareTargetURL(result.URL, target.SendID, result.RequestID)
@@ -773,6 +779,9 @@ func doInvoke(index uint32, targetID string, target *InvocationSpec,
     for i := 0; i <= target.Retries; i++ {
       if resp != nil {
         resp.Body.Close()
+      }
+      if tracker.Status.StopRequested || tracker.Status.Stopped {
+        break
       }
       if i > 0 {
         result.Retries++
@@ -831,14 +840,14 @@ func unsafeReportRepeatedResponse(tracker *InvocationTracker) {
   if tracker.lastStatusCount > 1 {
     msg := fmt.Sprintf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Response Status [%d] Repeated x[%d]",
       hostLabel, tracker.ID, target.Name, target.URL, target.BURLS, tracker.lastStatusCode, tracker.lastStatusCount)
-    events.SendEvent("Invocation Repeated Response Status", msg)
+    events.SendEvent(Client_InvocationRepeatedResponse, msg)
     tracker.lastStatusCount = 0
     tracker.lastStatusCode = -1
   }
   if tracker.lastErrorCount > 1 {
     msg := fmt.Sprintf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Failiure [%s] Repeated x[%d]",
       hostLabel, tracker.ID, target.Name, target.URL, target.BURLS, tracker.lastError, tracker.lastErrorCount)
-    events.SendEvent("Invocation Repeated Failure", msg)
+    events.SendEvent(Client_InvocationRepeatedFailure, msg)
     tracker.lastErrorCount = 0
     tracker.lastError = ""
   }
@@ -894,7 +903,7 @@ func doProcessResponse(index uint32, targetID string, resp *http.Response, resul
 
     tracker.lock.Lock()
     if !isRepeatStatus {
-      events.SendEvent("Invocation Response Status", fmt.Sprintf("[%s]: Invocation[%d]: Target %s Response Status: %s, URL: [%s], Payload Length: [%d]",
+      events.SendEvent(Client_InvocationResponse, fmt.Sprintf("[%s]: Invocation[%d]: Target %s Response Status: %s, URL: [%s], Payload Length: [%d]",
         hostLabel, index, targetID, resp.Status, url, responseLength))
     }
     tracker.lock.Unlock()
@@ -922,7 +931,7 @@ func processError(index uint32, targetID string, result *InvocationResult, err e
   msg := fmt.Sprintf("[%s]: Invocation[%d]: Target %s, url [%s] failed to invoke with error: %s, repeat count: [%d]",
     hostLabel, index, targetID, result.URL, err.Error(), tracker.lastErrorCount)
   if tracker.lastErrorCount == 0 {
-    events.SendEvent("Invocation Failure", msg)
+    events.SendEvent(Client_InvocationFailure, msg)
   }
   tracker.lastError = err.Error()
   tracker.lastErrorCount++
@@ -938,6 +947,9 @@ func processError(index uint32, targetID string, result *InvocationResult, err e
 func handleABCall(index uint32, targetID string, target *InvocationSpec, aRequestId string, client *HTTPClientTracker,
   sinks []ResultSink, resultChannel chan *InvocationResult, tracker *InvocationTracker) {
   for i, burl := range target.BURLS {
+    if tracker.Status.StopRequested || tracker.Status.Stopped {
+      break
+    }
     result := &InvocationResult{}
     result.TargetName = target.Name
     result.Headers = map[string][]string{}

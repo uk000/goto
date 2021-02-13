@@ -5,7 +5,6 @@ import (
   "encoding/json"
   "fmt"
   "goto/pkg/global"
-  "goto/pkg/server/intercept"
   "io"
   "io/ioutil"
   "log"
@@ -32,11 +31,12 @@ type ServerHandler struct {
 type ContextKey struct{ Key string }
 
 var (
+  RequestStoreKey   = &ContextKey{"requestStoreKey"}
+  CurrentPortKey    = &ContextKey{"currentPort"}
+  IgnoredRequestKey = &ContextKey{"ignoredRequestKey"}
+
   portRouter             *mux.Router
   listenerPathSubRouters = map[string]*mux.Router{}
-  requestStoreKey        = &ContextKey{"requestStoreKey"}
-  currentPortKey         = &ContextKey{"currentPort"}
-  ignoredRequestKey      = &ContextKey{"ignoredRequestKey"}
   fillerRegexp           = regexp.MustCompile("({.+?})")
   contentRegexp          = regexp.MustCompile("(?i)content")
   hostRegexp             = regexp.MustCompile("(?i)^host$")
@@ -52,128 +52,64 @@ var sizes map[string]uint64 = map[string]uint64{
 }
 
 type RequestStore struct {
-  logMessages         []string
-  IsIgnoredRequest    bool
-  IsLockerRequest     bool
-  IsPeerEventsRequest bool
-  IsAdminRequest      bool
-  IsMetricsRequest    bool
-  IsReminderRequest   bool
-  IsProbeRequest      bool
-  IsHealthRequest     bool
-  IsStatusRequest     bool
-  IsDelayRequest      bool
-  IsPayloadRequest    bool
-
-  trafficEventReported bool
-  statusCode           int
-  details              []string
+  LogMessages            []string
+  IsFilteredRequest      bool
+  IsLockerRequest        bool
+  IsPeerEventsRequest    bool
+  IsAdminRequest         bool
+  IsMetricsRequest       bool
+  IsReminderRequest      bool
+  IsProbeRequest         bool
+  IsHealthRequest        bool
+  IsStatusRequest        bool
+  IsDelayRequest         bool
+  IsPayloadRequest       bool
+  IsTrafficEventReported bool
+  StatusCode             int
+  TrafficDetails         []string
 }
 
 func InitListenerRouter(root *mux.Router) {
   portRouter = root.PathPrefix("/port={port}").Subrouter()
 }
 
-func ContextMiddleware(next http.Handler) http.Handler {
-  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    if global.Stopping && global.IsReadinessProbe(r) {
-      CopyHeaders("Stopping-Readiness-Request", w, r.Header, r.Host, r.RequestURI)
-      w.WriteHeader(http.StatusNotFound)
-    } else if next != nil {
-      next.ServeHTTP(w, r.WithContext(WithRequestStore(
-        ContextWithPort(r.Context(), GetListenerPortNum(r)), r)))
-    }
-  })
-}
-
-func WithRequestStore(ctx context.Context, r *http.Request) context.Context {
-  isAdminRequest := isAdminRequest(r)
-  return context.WithValue(ctx, requestStoreKey, &RequestStore{
-    IsAdminRequest:      isAdminRequest,
-    IsLockerRequest:     strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker"),
-    IsPeerEventsRequest: strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/events"),
-    IsMetricsRequest:    strings.Contains(r.RequestURI, "/metrics"),
-    IsReminderRequest:   strings.Contains(r.RequestURI, "/remember"),
-    IsProbeRequest:      global.IsReadinessProbe(r) || global.IsLivenessProbe(r),
-    IsHealthRequest:     !isAdminRequest && strings.Contains(r.RequestURI, "/health"),
-    IsStatusRequest:     !isAdminRequest && strings.Contains(r.RequestURI, "/status"),
-    IsDelayRequest:      !isAdminRequest && strings.Contains(r.RequestURI, "/delay"),
-    IsPayloadRequest:    !isAdminRequest && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload")),
-  })
-}
-
-func ContextWithPort(ctx context.Context, port int) context.Context {
-  return context.WithValue(ctx, currentPortKey, port)
-}
-
-func LoggingMiddleware(next http.Handler) http.Handler {
-  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    crw := intercept.NewInterceptResponseWriter(w, false)
-    if next != nil {
-      next.ServeHTTP(crw, r)
-    }
-    AddLogMessage(GetResponseHeadersLog(w), r)
-    AddLogMessage(fmt.Sprintf("Response Status Code: [%d]", crw.StatusCode), r)
-    AddLogMessage(fmt.Sprintf("Response Body Length: [%d]", crw.BodyLength), r)
-    PrintLogMessages(r)
-  })
-}
-
 func AddLogMessage(msg string, r *http.Request) {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
-  rs.logMessages = append(rs.logMessages, msg)
-}
-
-func PrintLogMessages(r *http.Request) {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
-  if (!rs.IsLockerRequest || global.EnableRegistryLockerLogs) &&
-    (!rs.IsPeerEventsRequest || global.EnableRegistryEventsLogs) &&
-    (!rs.IsAdminRequest || global.EnableAdminLogs) &&
-    (!rs.IsReminderRequest || global.EnableRegistryReminderLogs) &&
-    (!rs.IsProbeRequest || global.EnableProbeLogs) &&
-    (!rs.IsHealthRequest || global.EnablePeerHealthLogs) &&
-    (!rs.IsMetricsRequest || global.EnableMetricsLogs) &&
-    (!rs.IsIgnoredRequest && global.EnableServerLogs) {
-    log.Println(strings.Join(rs.logMessages, " --> "))
-    if flusher, ok := log.Writer().(http.Flusher); ok {
-      flusher.Flush()
-    }
-  }
-  rs.logMessages = rs.logMessages[:0]
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
+  rs.LogMessages = append(rs.LogMessages, msg)
 }
 
 func IsTrafficEventReported(r *http.Request) bool {
-  rs := r.Context().Value(requestStoreKey)
-  return rs != nil && rs.(*RequestStore).trafficEventReported
+  rs := r.Context().Value(RequestStoreKey)
+  return rs != nil && rs.(*RequestStore).IsTrafficEventReported
 }
 
 func UpdateTrafficEventStatusCode(r *http.Request, statusCode int) {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
-  if rs != nil && !rs.trafficEventReported {
-    rs.statusCode = statusCode
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
+  if rs != nil && !rs.IsTrafficEventReported {
+    rs.StatusCode = statusCode
   }
 }
 
 func UpdateTrafficEventDetails(r *http.Request, details string) {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
-  if rs != nil && !rs.trafficEventReported {
-    rs.details = append(rs.details, details)
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
+  if rs != nil && !rs.IsTrafficEventReported {
+    rs.TrafficDetails = append(rs.TrafficDetails, details)
   }
 }
 
 func ReportTrafficEvent(r *http.Request) (int, []string) {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
-  if rs != nil && !rs.trafficEventReported {
-    rs.trafficEventReported = true
-    return rs.statusCode, rs.details
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
+  if rs != nil && !rs.IsTrafficEventReported {
+    rs.IsTrafficEventReported = true
+    return rs.StatusCode, rs.TrafficDetails
   }
   return 0, nil
 }
 
-func SetIgnoredRequest(r *http.Request) {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
+func SetFiltreredRequest(r *http.Request) {
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
   if rs != nil {
-    rs.IsIgnoredRequest = true
+    rs.IsFilteredRequest = true
   }
 }
 
@@ -189,7 +125,7 @@ func GetPortNumFromGRPCAuthority(ctx context.Context) int {
 }
 
 func GetContextPort(ctx context.Context) int {
-  if val := ctx.Value(currentPortKey); val != nil {
+  if val := ctx.Value(CurrentPortKey); val != nil {
     return val.(int)
   }
   return GetPortNumFromGRPCAuthority(ctx)
@@ -464,10 +400,10 @@ func ToLowerHeaders(headers map[string][]string) map[string][]string {
   return newHeaders
 }
 
-func GetResponseHeadersLog(w http.ResponseWriter) string {
+func GetResponseHeadersLog(header http.Header) string {
   var s strings.Builder
   s.Grow(128)
-  fmt.Fprintf(&s, "{\"ResponseHeaders\": %s}", ToJSON(w.Header()))
+  fmt.Fprintf(&s, "{\"ResponseHeaders\": %s}", ToJSON(header))
   return s.String()
 }
 
@@ -503,13 +439,18 @@ func WriteJsonPayload(w http.ResponseWriter, t interface{}) {
   }
 }
 
+func WriteStringJsonPayload(w http.ResponseWriter, json string) {
+  w.Header().Add("Content-Type", "application/json")
+  fmt.Fprintln(w, json)
+}
+
 func IsAdminRequest(r *http.Request) bool {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
   return rs != nil && rs.IsAdminRequest
 }
 
-func isAdminRequest(r *http.Request) bool {
-  return strings.HasPrefix(r.RequestURI, "/port") ||
+func CheckAdminRequest(r *http.Request) bool {
+  return strings.HasPrefix(r.RequestURI, "/port") || strings.HasPrefix(r.RequestURI, "/metrics") ||
     strings.HasPrefix(r.RequestURI, "/request") || strings.HasPrefix(r.RequestURI, "/response") ||
     strings.HasPrefix(r.RequestURI, "/listeners") || strings.HasPrefix(r.RequestURI, "/label") ||
     strings.HasPrefix(r.RequestURI, "/client") || strings.HasPrefix(r.RequestURI, "/job") ||
@@ -518,53 +459,62 @@ func isAdminRequest(r *http.Request) bool {
 }
 
 func IsMetricsRequest(r *http.Request) bool {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
   return rs != nil && rs.IsMetricsRequest
 }
 
 func IsReminderRequest(r *http.Request) bool {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
   return rs != nil && rs.IsReminderRequest
 }
 
 func IsLockerRequest(r *http.Request) bool {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
   return rs != nil && rs.IsLockerRequest
 }
 
 func IsPeerEventsRequest(r *http.Request) bool {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
   return rs != nil && rs.IsPeerEventsRequest
 }
 
 func IsStatusRequest(r *http.Request) bool {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
   return rs != nil && rs.IsStatusRequest
 }
 
 func IsDelayRequest(r *http.Request) bool {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
   return rs != nil && rs.IsDelayRequest
 }
 
 func IsPayloadRequest(r *http.Request) bool {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
   return rs != nil && rs.IsPayloadRequest
 }
 
 func IsProbeRequest(r *http.Request) bool {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
   return rs != nil && rs.IsProbeRequest
 }
 
 func IsHealthRequest(r *http.Request) bool {
-  rs := r.Context().Value(requestStoreKey).(*RequestStore)
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
   return rs != nil && rs.IsProbeRequest
 }
 
 func IsKnownRequest(r *http.Request) bool {
   return IsProbeRequest(r) || IsReminderRequest(r) || IsHealthRequest(r) || IsMetricsRequest(r) ||
     IsLockerRequest(r) || IsAdminRequest(r) || IsStatusRequest(r) || IsDelayRequest(r) || IsPayloadRequest(r)
+}
+
+func IsKnownNonTraffic(r *http.Request) bool {
+  return IsProbeRequest(r) || IsReminderRequest(r) || IsHealthRequest(r) ||
+    IsMetricsRequest(r) || IsLockerRequest(r) || IsAdminRequest(r)
+}
+
+func IsKnownTraffic(r *http.Request) bool {
+  return IsStatusRequest(r) || IsDelayRequest(r) || IsPayloadRequest(r)
 }
 
 func PathRouter(r *mux.Router, path string) *mux.Router {

@@ -82,7 +82,9 @@ type InvocationsResults struct {
 }
 
 const (
-  SenderCount = 10
+  SenderCount  = 10
+  SendDelayMin = 3
+  SendDelayMax = 5
 )
 
 var (
@@ -107,7 +109,6 @@ func (tr *TargetResults) init(reset bool) {
     tr.CountsByStatus = map[string]int{}
     tr.CountsByStatusCodes = map[int]int{}
     tr.CountsByHeaders = map[string]*HeaderCounts{}
-    //tr.CountsByHeaderValues = map[string]map[string]int{}
     tr.CountsByURIs = map[string]int{}
   }
 }
@@ -666,7 +667,8 @@ RegistrySend:
       break RegistrySend
     }
     if hasTargetsResults {
-      for i := 0; i < 5; i++ {
+      hasMoreResults := false
+      for i := 0; i < SendDelayMax; i++ {
       MoreResults:
         for {
           select {
@@ -675,13 +677,14 @@ RegistrySend:
             if !targetResult.pendingRegistrySend || collectedTargetsResults[targetResult.Target] != nil {
               targetResult.pendingRegistrySend = true
               collectedTargetsResults[targetResult.Target] = targetResult
+              hasMoreResults = true
             }
             targetResult.lock.Unlock()
           default:
             break MoreResults
           }
         }
-        if i < 4 {
+        if i < SendDelayMin-1 || (hasMoreResults && i < SendDelayMax-1) {
           time.Sleep(time.Second)
         }
       }

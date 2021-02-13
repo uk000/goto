@@ -21,23 +21,43 @@ go build -o goto .
 - A lot more scenarios can benefit from `goto`. See some more scenarios further below in the doc.
 
 ## Some simple usage examples?
-- Run `goto` as a server with multiple ports (first port is the default bootstrap port):
+- Start `goto` as a server with multiple ports and protocols (first port is the default bootstrap port):
   ```
-  goto --ports 8080,8081/http,8082/grpc
+  goto --ports 8080,8081/http,8082/grpc,8000/tcp
   ```
-- Open a new port with GRPC protocol
+- Add a new listener with GRPC protocol and open immediately
   ```
   curl -X POST localhost:8080/listeners/add --data '{"port":9091, "protocol":"grpc", "open":true}'
+  ```
+- Add a new listener with TCP protocol without opening it
+  ```
+  curl -X POST localhost:8080/listeners/add --data '{"port":9000, "protocol":"tcp", "open":false}'
+  ```
+- Reconfigure TCP configurations of an existing listener to stream certain payload size 
+  ```
+  curl -X POST localhost:8080/tcp/9000/configure --data '{"stream": true, "streamChunkSize":"250", "streamChunkCount":15, "streamChunkDelay":"1s", "connectionLife":"30s"}'
   ```
 - Close a non-default port on the fly
   ```
   curl -X POST localhost:8080/listeners/8081/close
   ```
-- Add TLS certs for a non-default port to serve TLS traffic 
+- Add TLS certs for a non-default port and reopen it to switch to TLS mode
   ```
-  curl -X PUT localhost:8080/listeners/8081/cert/add --data-binary @./goto.cert
-  curl -X PUT localhost:8080/listeners/8081/key/add --data-binary @./goto.key
+  curl -X PUT localhost:8080/listeners/8081/cert/add --data-binary @/somepath/goto.cert
+  curl -X PUT localhost:8080/listeners/8081/key/add --data-binary @/somepath/goto.key
   curl -X POST localhost:8080/listeners/8081/reopen
+  ```
+- Configure a `goto` server instance to count number of requests received for headers `foo` and `bar`
+  ```
+  curl -X PUT localhost:8081/request/headers/track/add/foo,bar
+  ```
+- Configure a `goto` client instance to send some requests to an HTTP target
+  ```
+  curl -s localhost:8080/client/targets/add --data '{"name": "t1", "method": "GET", "url": "http://localhost:8081/foo", "body": "some payload", "replicas": 2, "requestCount": 10}'
+  ```
+- Configure a `goto` client instance to track responses received for headers `foo` and `bar`
+  ```
+  curl -X PUT localhost:8080/client/track/headers/add/foo,bar
   ```
 - More to come... 
 
@@ -138,8 +158,7 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 * [Request Timeout](#server-request-timeout)
 * [URIs](#server-uris)
 * [Probes](#server-probes)
-* [URIs Bypass](#server-uris-bypass)
-* [Ignore URIs](#server-uris-ignore)
+* [Requests Filtering](#server-requests-filtering)
 * [Response Delay](#server-response-delay)
 * [Response Headers](#server-response-headers)
 * [Response Payload](#server-response-payload)
@@ -336,7 +355,7 @@ As a client tool, `goto` offers the feature to configure multiple targets and se
 - Retry requests for specific response codes, and option to use a fallback URL for retries
 - Make simultaneous calls to two URLs to perform an A-B comparison of responses. In AB mode, the same request ID (enabled via sendID flag) are used for both A and B calls, but with a suffix `-B` used for B calls. This allows tracking the A and B calls in logs.
 
-The invocation results get accumulated across multiple invocations until cleared explicitly. Various results APIs can be used to read the accumulated results. Clearing of all results resets the invocation counter too, causing the next invocation to start at counter 1 again.
+The invocation results get accumulated across multiple invocations until cleared explicitly. Various results APIs can be used to read the accumulated results. Clearing of all results resets the invocation counter too, causing the next invocation to start at counter 1 again. When a peer is connected to a registry instance, it stores all its invocation results in a registry locker. The peer publishes its invocation results to the registry at an interval of 3-5 seconds depending on the flow of results. See Registry APIs for detail on how to query results accumulated from multiple peers.
 
 In addition to keeping the results in the `goto` client instance, those are also stored in locker on registry instance if enabled. (See `--locker` command arg). Various events are added to the peer timeline related to target invocations it performs, which are also reported to the registry. These events can be seen in the event timeline on the peer instance as well as its event timeline from the registry.
 
@@ -374,8 +393,8 @@ In addition to keeping the results in the `goto` client instance, those are also
 - `Tracking Headers Added`: headers added for tracking against invocation responses
 - `Tracking Headers Removed`: one or more tracking headers were removed
 - `Tracking Headers Cleared`: all tracking headers were removed
-- `CA Cert Stored`: CA cert was added for validating TLS cert presented by target
-- `CA Cert Removed`: CA cert was removed
+- `Client CA Cert Stored`: CA cert was added for validating TLS cert presented by target
+- `Client CA Cert Removed`: CA cert was removed
 - `Results Cleared`: all collected invocation results were cleared
 - `Target Invoked`: one or more invocation targets were invoked
 - `Targets Stopped`: one or more invocation targets were stopped
@@ -475,888 +494,9 @@ The schema below describes fields per target.
 
 
 #### Client API Examples
-<details>
-<summary>API Examples</summary>
-
-```
-#Add target
-curl localhost:8080/client/targets/add --data '
-{
-  "name": "t1",
-  "method":	"POST",
-  "url": "http://somewhere:8080/foo",
-  "protocol":"HTTP/2.0",
-  "headers":[["x", "x1"],["y", "y1"]],
-  "body": "{\"test\":\"this\"}",
-  "replicas": 2, 
-  "requestCount": 2,
-  "initialDelay": "1s",
-  "delay": "200ms", 
-  "sendID": true,
-  "autoInvoke": true
-}'
-
-curl -s localhost:8080/client/targets/add --data '
-{
-  "name": "ab",
-  "method": "POST",
-  "url": "http://localhost:8081/foo",
-  "burls": ["http://localhost:8080/b1", "http://localhost:8080/b2", "http://localhost:8080/b3"],
-  "body": "some body",
-  "abMode": true,
-  "replicas": 2,
-  "requestCount": 2,
-  "sendID": true
-}'
-
-curl -s localhost:8080/client/targets/add --data '
-{
-  "name": "ab",
-  "method": "POST",
-  "url": "http://localhost:8081/foo",
-  "burls": ["http://localhost:8080/bar"]
-  "body": "some body",
-  "fallback": true,
-  "replicas": 2,
-  "requestCount": 2,
-  "sendID": true
-}'
-
-
-#List targets
-curl localhost:8080/client/targets
-
-#Remove select target
-curl -X POST localhost:8080/client/target/t1,t2/remove
-
-#Clear all configured targets
-curl -X POST localhost:8080/client/targets/clear
-
-#Invoke select targets
-curl -X POST localhost:8080/client/targets/t2,t3/invoke
-
-#Invoke all targets
-curl -X POST localhost:8080/client/targets/invoke/all
-
-#Stop select targets across all running batches
-curl -X POST localhost:8080/client/targets/t2,t3/stop
-
-#Stop all targets across all running batches
-curl -X POST localhost:8080/client/targets/stop/all
-
-#Set blocking mode
-curl -X POST localhost:8080/client/blocking/set/n
-
-#Get blocking mode
-curl localhost:8080/client/blocking
-
-#Clear tracked headers
-curl -X POST localhost:8080/client/track/headers/clear
-
-#Add headers to track
-curl -X PUT localhost:8080/client/track/headers/add/Request-From-Goto|Goto-Host,Via-Goto,x|y|z,foo
-
-#Remove headers from tracking
-curl -X PUT localhost:8080/client/track/headers/remove/foo
-
-#Get list of tracked headers
-curl localhost:8080/client/track/headers
-
-#Clear results
-curl -X POST localhost:8080/client/results/clear
-
-#Remove results for specific targets
-curl -X POST localhost:8080/client/results/t1,t2/clear
-
-#Get results per invocation
-curl localhost:8080/client/results/invocations
-
-#Get results
-curl localhost:8080/client/results
-```
-</details>
-
-#### Sample Client Results
-
-<details>
-<summary>Result Example</summary>
-<p>
-
-```json
-
-{
-  "": {
-    "target": "",
-    "invocationCounts": 0,
-    "firstResponse": "0001-01-01T00:00:00Z",
-    "lastResponse": "0001-01-01T00:00:00Z",
-    "retriedInvocationCounts": 0,
-    "countsByStatus": {},
-    "countsByStatusCodes": {},
-    "countsByHeaders": {},
-    "countsByURIs": {}
-  },
-  "t1": {
-    "target": "t1",
-    "invocationCounts": 20,
-    "firstResponse": "2020-08-20T14:29:36.969395-07:00",
-    "lastResponse": "2020-08-20T14:36:28.740753-07:00",
-    "retriedInvocationCounts": 3,
-    "countsByStatus": {
-      "200 OK": 2,
-      "400 Bad Request": 1,
-      "418 I'm a teapot": 15,
-      "502 Bad Gateway": 2
-    },
-    "countsByStatusCodes": {
-      "200": 2,
-      "400": 1,
-      "418": 15,
-      "502": 2
-    },
-    "countsByHeaders": {
-      "goto-host": {
-        "header": "goto-host",
-        "count": {
-          "count": 20,
-          "retries": 4,
-          "firstResponse": "2020-08-20T14:29:36.969404-07:00",
-          "lastResponse": "2020-08-20T14:36:28.740769-07:00"
-        },
-        "countsByValues": {
-          "pod.local@1.0.0.1:8082": {
-            "count": 12,
-            "retries": 2,
-            "firstResponse": "2020-08-20T14:30:32.028521-07:00",
-            "lastResponse": "2020-08-20T14:36:28.74077-07:00"
-          },
-          "pod.local@1.0.0.1:9092": {
-            "count": 8,
-            "retries": 2,
-            "firstResponse": "2020-08-20T14:29:36.969405-07:00",
-            "lastResponse": "2020-08-20T14:30:16.801438-07:00"
-          }
-        },
-        "countsByStatusCodes": {
-          "200": {
-            "count": 2,
-            "retries": 0,
-            "firstResponse": "2020-08-20T14:30:15.795679-07:00",
-            "lastResponse": "2020-08-20T14:30:16.801438-07:00"
-          },
-          "400": {
-            "count": 1,
-            "retries": 0,
-            "firstResponse": "2020-08-20T14:30:02.32723-07:00",
-            "lastResponse": "2020-08-20T14:30:02.32723-07:00"
-          },
-          "418": {
-            "count": 15,
-            "retries": 4,
-            "firstResponse": "2020-08-20T14:29:36.969404-07:00",
-            "lastResponse": "2020-08-20T14:36:28.740769-07:00"
-          },
-          "502": {
-            "count": 2,
-            "retries": 0,
-            "firstResponse": "2020-08-20T14:31:04.066585-07:00",
-            "lastResponse": "2020-08-20T14:36:14.802755-07:00"
-          }
-        },
-        "countsByValuesStatusCodes": {
-          "pod.local@1.0.0.1:8082": {
-            "418": {
-              "count": 10,
-              "retries": 2,
-              "firstResponse": "2020-08-20T14:30:32.028522-07:00",
-              "lastResponse": "2020-08-20T14:36:28.740771-07:00"
-            },
-            "502": {
-              "count": 2,
-              "retries": 0,
-              "firstResponse": "2020-08-20T14:31:04.066586-07:00",
-              "lastResponse": "2020-08-20T14:36:14.802756-07:00"
-            }
-          },
-          "pod.local@1.0.0.1:9092": {
-            "200": {
-              "count": 2,
-              "retries": 0,
-              "firstResponse": "2020-08-20T14:30:15.79568-07:00",
-              "lastResponse": "2020-08-20T14:30:16.801439-07:00"
-            },
-            "400": {
-              "count": 1,
-              "retries": 0,
-              "firstResponse": "2020-08-20T14:30:02.32723-07:00",
-              "lastResponse": "2020-08-20T14:30:02.32723-07:00"
-            },
-            "418": {
-              "count": 5,
-              "retries": 2,
-              "firstResponse": "2020-08-20T14:29:36.969405-07:00",
-              "lastResponse": "2020-08-20T14:30:03.332312-07:00"
-            }
-          }
-        },
-        "crossHeaders": {
-          "request-from-goto-host": {
-            "header": "request-from-goto-host",
-            "count": {
-              "count": 20,
-              "retries": 4,
-              "firstResponse": "2020-08-20T14:29:36.969409-07:00",
-              "lastResponse": "2020-08-20T14:36:28.740773-07:00"
-            },
-            "countsByValues": {
-              "pod.local@1.0.0.1:8081": {
-                "count": 20,
-                "retries": 4,
-                "firstResponse": "2020-08-20T14:29:36.96941-07:00",
-                "lastResponse": "2020-08-20T14:36:28.740774-07:00"
-              }
-            },
-            "countsByStatusCodes": {
-              "200": {
-                "count": 2,
-                "retries": 0,
-                "firstResponse": "2020-08-20T14:30:15.795682-07:00",
-                "lastResponse": "2020-08-20T14:30:16.80144-07:00"
-              },
-              "400": {
-                "count": 1,
-                "retries": 0,
-                "firstResponse": "2020-08-20T14:30:02.327239-07:00",
-                "lastResponse": "2020-08-20T14:30:02.327239-07:00"
-              },
-              "418": {
-                "count": 15,
-                "retries": 4,
-                "firstResponse": "2020-08-20T14:29:36.969409-07:00",
-                "lastResponse": "2020-08-20T14:36:28.740773-07:00"
-              },
-              "502": {
-                "count": 2,
-                "retries": 0,
-                "firstResponse": "2020-08-20T14:31:04.066594-07:00",
-                "lastResponse": "2020-08-20T14:36:14.802766-07:00"
-              }
-            },
-            "countsByValuesStatusCodes": {
-              "pod.local@1.0.0.1:8081": {
-                "200": {
-                  "count": 2,
-                  "retries": 0,
-                  "firstResponse": "2020-08-20T14:30:15.795683-07:00",
-                  "lastResponse": "2020-08-20T14:30:16.801441-07:00"
-                },
-                "400": {
-                  "count": 1,
-                  "retries": 0,
-                  "firstResponse": "2020-08-20T14:30:02.32724-07:00",
-                  "lastResponse": "2020-08-20T14:30:02.32724-07:00"
-                },
-                "418": {
-                  "count": 15,
-                  "retries": 4,
-                  "firstResponse": "2020-08-20T14:29:36.96941-07:00",
-                  "lastResponse": "2020-08-20T14:36:28.740774-07:00"
-                },
-                "502": {
-                  "count": 2,
-                  "retries": 0,
-                  "firstResponse": "2020-08-20T14:31:04.066595-07:00",
-                  "lastResponse": "2020-08-20T14:36:14.802767-07:00"
-                }
-              }
-            },
-            "crossHeaders": {},
-            "crossHeadersByValues": {},
-            "firstResponse": "2020-08-20T14:29:36.969409-07:00",
-            "lastResponse": "2020-08-20T14:36:28.740772-07:00"
-          }
-        },
-        "crossHeadersByValues": {
-          "pod.local@1.0.0.1:8082": {
-            "request-from-goto-host": {
-              "header": "request-from-goto-host",
-              "count": {
-                "count": 12,
-                "retries": 2,
-                "firstResponse": "2020-08-20T14:30:32.028526-07:00",
-                "lastResponse": "2020-08-20T14:36:28.740776-07:00"
-              },
-              "countsByValues": {
-                "pod.local@1.0.0.1:8081": {
-                  "count": 12,
-                  "retries": 2,
-                  "firstResponse": "2020-08-20T14:30:32.028527-07:00",
-                  "lastResponse": "2020-08-20T14:36:28.740777-07:00"
-                }
-              },
-              "countsByStatusCodes": {
-                "418": {
-                  "count": 10,
-                  "retries": 2,
-                  "firstResponse": "2020-08-20T14:30:32.028527-07:00",
-                  "lastResponse": "2020-08-20T14:36:28.740776-07:00"
-                },
-                "502": {
-                  "count": 2,
-                  "retries": 0,
-                  "firstResponse": "2020-08-20T14:31:04.066596-07:00",
-                  "lastResponse": "2020-08-20T14:36:14.802769-07:00"
-                }
-              },
-              "countsByValuesStatusCodes": {
-                "pod.local@1.0.0.1:8081": {
-                  "418": {
-                    "count": 10,
-                    "retries": 2,
-                    "firstResponse": "2020-08-20T14:30:32.028528-07:00",
-                    "lastResponse": "2020-08-20T14:36:28.740777-07:00"
-                  },
-                  "502": {
-                    "count": 2,
-                    "retries": 0,
-                    "firstResponse": "2020-08-20T14:31:04.066597-07:00",
-                    "lastResponse": "2020-08-20T14:36:14.802769-07:00"
-                  }
-                }
-              },
-              "crossHeaders": {},
-              "crossHeadersByValues": {},
-              "firstResponse": "2020-08-20T14:30:32.028526-07:00",
-              "lastResponse": "2020-08-20T14:36:28.740775-07:00"
-            }
-          },
-          "pod.local@1.0.0.1:9092": {
-            "request-from-goto-host": {
-              "header": "request-from-goto-host",
-              "count": {
-                "count": 8,
-                "retries": 2,
-                "firstResponse": "2020-08-20T14:29:36.969411-07:00",
-                "lastResponse": "2020-08-20T14:30:16.801442-07:00"
-              },
-              "countsByValues": {
-                "pod.local@1.0.0.1:8081": {
-                  "count": 8,
-                  "retries": 2,
-                  "firstResponse": "2020-08-20T14:29:36.969412-07:00",
-                  "lastResponse": "2020-08-20T14:30:16.801444-07:00"
-                }
-              },
-              "countsByStatusCodes": {
-                "200": {
-                  "count": 2,
-                  "retries": 0,
-                  "firstResponse": "2020-08-20T14:30:15.795684-07:00",
-                  "lastResponse": "2020-08-20T14:30:16.801444-07:00"
-                },
-                "400": {
-                  "count": 1,
-                  "retries": 0,
-                  "firstResponse": "2020-08-20T14:30:02.327241-07:00",
-                  "lastResponse": "2020-08-20T14:30:02.327241-07:00"
-                },
-                "418": {
-                  "count": 5,
-                  "retries": 2,
-                  "firstResponse": "2020-08-20T14:29:36.969412-07:00",
-                  "lastResponse": "2020-08-20T14:30:03.332315-07:00"
-                }
-              },
-              "countsByValuesStatusCodes": {
-                "pod.local@1.0.0.1:8081": {
-                  "200": {
-                    "count": 2,
-                    "retries": 0,
-                    "firstResponse": "2020-08-20T14:30:15.795685-07:00",
-                    "lastResponse": "2020-08-20T14:30:16.801445-07:00"
-                  },
-                  "400": {
-                    "count": 1,
-                    "retries": 0,
-                    "firstResponse": "2020-08-20T14:30:02.327242-07:00",
-                    "lastResponse": "2020-08-20T14:30:02.327242-07:00"
-                  },
-                  "418": {
-                    "count": 5,
-                    "retries": 2,
-                    "firstResponse": "2020-08-20T14:29:36.969412-07:00",
-                    "lastResponse": "2020-08-20T14:30:03.332315-07:00"
-                  }
-                }
-              },
-              "crossHeaders": {},
-              "crossHeadersByValues": {},
-              "firstResponse": "2020-08-20T14:29:36.969411-07:00",
-              "lastResponse": "2020-08-20T14:30:16.801441-07:00"
-            }
-          }
-        },
-        "firstResponse": "2020-08-20T14:29:36.969404-07:00",
-        "lastResponse": "2020-08-20T14:36:28.740768-07:00"
-      },
-      "request-from-goto-host": {
-        "header": "request-from-goto-host",
-        "count": {
-          "count": 20,
-          "retries": 4,
-          "firstResponse": "2020-08-20T14:29:36.969414-07:00",
-          "lastResponse": "2020-08-20T14:36:28.74078-07:00"
-        },
-        "countsByValues": {
-          "pod.local@1.0.0.1:8081": {
-            "count": 20,
-            "retries": 4,
-            "firstResponse": "2020-08-20T14:29:36.969414-07:00",
-            "lastResponse": "2020-08-20T14:36:28.740782-07:00"
-          }
-        },
-        "countsByStatusCodes": {
-          "200": {
-            "count": 2,
-            "retries": 0,
-            "firstResponse": "2020-08-20T14:30:15.795686-07:00",
-            "lastResponse": "2020-08-20T14:30:16.801447-07:00"
-          },
-          "400": {
-            "count": 1,
-            "retries": 0,
-            "firstResponse": "2020-08-20T14:30:02.327243-07:00",
-            "lastResponse": "2020-08-20T14:30:02.327243-07:00"
-          },
-          "418": {
-            "count": 15,
-            "retries": 4,
-            "firstResponse": "2020-08-20T14:29:36.969414-07:00",
-            "lastResponse": "2020-08-20T14:36:28.740781-07:00"
-          },
-          "502": {
-            "count": 2,
-            "retries": 0,
-            "firstResponse": "2020-08-20T14:31:04.066599-07:00",
-            "lastResponse": "2020-08-20T14:36:14.802771-07:00"
-          }
-        },
-        "countsByValuesStatusCodes": {
-          "pod.local@1.0.0.1:8081": {
-            "200": {
-              "count": 2,
-              "retries": 0,
-              "firstResponse": "2020-08-20T14:30:15.795687-07:00",
-              "lastResponse": "2020-08-20T14:30:16.801448-07:00"
-            },
-            "400": {
-              "count": 1,
-              "retries": 0,
-              "firstResponse": "2020-08-20T14:30:02.327244-07:00",
-              "lastResponse": "2020-08-20T14:30:02.327244-07:00"
-            },
-            "418": {
-              "count": 15,
-              "retries": 4,
-              "firstResponse": "2020-08-20T14:29:36.969415-07:00",
-              "lastResponse": "2020-08-20T14:36:28.740783-07:00"
-            },
-            "502": {
-              "count": 2,
-              "retries": 0,
-              "firstResponse": "2020-08-20T14:31:04.0666-07:00",
-              "lastResponse": "2020-08-20T14:36:14.802772-07:00"
-            }
-          }
-        },
-        "crossHeaders": {
-          "goto-host": {
-            "header": "goto-host",
-            "count": {
-              "count": 20,
-              "retries": 4,
-              "firstResponse": "2020-08-20T14:29:36.969416-07:00",
-              "lastResponse": "2020-08-20T14:36:28.740784-07:00"
-            },
-            "countsByValues": {
-              "pod.local@1.0.0.1:8082": {
-                "count": 12,
-                "retries": 2,
-                "firstResponse": "2020-08-20T14:30:32.028532-07:00",
-                "lastResponse": "2020-08-20T14:36:28.740785-07:00"
-              },
-              "pod.local@1.0.0.1:9092": {
-                "count": 8,
-                "retries": 2,
-                "firstResponse": "2020-08-20T14:29:36.969417-07:00",
-                "lastResponse": "2020-08-20T14:30:16.801449-07:00"
-              }
-            },
-            "countsByStatusCodes": {
-              "200": {
-                "count": 2,
-                "retries": 0,
-                "firstResponse": "2020-08-20T14:30:15.795687-07:00",
-                "lastResponse": "2020-08-20T14:30:16.801449-07:00"
-              },
-              "400": {
-                "count": 1,
-                "retries": 0,
-                "firstResponse": "2020-08-20T14:30:02.327245-07:00",
-                "lastResponse": "2020-08-20T14:30:02.327245-07:00"
-              },
-              "418": {
-                "count": 15,
-                "retries": 4,
-                "firstResponse": "2020-08-20T14:29:36.969417-07:00",
-                "lastResponse": "2020-08-20T14:36:28.740784-07:00"
-              },
-              "502": {
-                "count": 2,
-                "retries": 0,
-                "firstResponse": "2020-08-20T14:31:04.066601-07:00",
-                "lastResponse": "2020-08-20T14:36:14.802773-07:00"
-              }
-            },
-            "countsByValuesStatusCodes": {
-              "pod.local@1.0.0.1:8082": {
-                "418": {
-                  "count": 10,
-                  "retries": 2,
-                  "firstResponse": "2020-08-20T14:30:32.028533-07:00",
-                  "lastResponse": "2020-08-20T14:36:28.740785-07:00"
-                },
-                "502": {
-                  "count": 2,
-                  "retries": 0,
-                  "firstResponse": "2020-08-20T14:31:04.066602-07:00",
-                  "lastResponse": "2020-08-20T14:36:14.802774-07:00"
-                }
-              },
-              "pod.local@1.0.0.1:9092": {
-                "200": {
-                  "count": 2,
-                  "retries": 0,
-                  "firstResponse": "2020-08-20T14:30:15.795688-07:00",
-                  "lastResponse": "2020-08-20T14:30:16.801449-07:00"
-                },
-                "400": {
-                  "count": 1,
-                  "retries": 0,
-                  "firstResponse": "2020-08-20T14:30:02.327245-07:00",
-                  "lastResponse": "2020-08-20T14:30:02.327245-07:00"
-                },
-                "418": {
-                  "count": 5,
-                  "retries": 2,
-                  "firstResponse": "2020-08-20T14:29:36.969417-07:00",
-                  "lastResponse": "2020-08-20T14:30:03.332319-07:00"
-                }
-              }
-            },
-            "crossHeaders": {},
-            "crossHeadersByValues": {},
-            "firstResponse": "2020-08-20T14:29:36.969416-07:00",
-            "lastResponse": "2020-08-20T14:36:28.740784-07:00"
-          }
-        },
-        "crossHeadersByValues": {
-          "pod.local@1.0.0.1:8081": {
-            "goto-host": {
-              "header": "goto-host",
-              "count": {
-                "count": 20,
-                "retries": 4,
-                "firstResponse": "2020-08-20T14:29:36.969418-07:00",
-                "lastResponse": "2020-08-20T14:36:28.740786-07:00"
-              },
-              "countsByValues": {
-                "pod.local@1.0.0.1:8082": {
-                  "count": 12,
-                  "retries": 2,
-                  "firstResponse": "2020-08-20T14:30:32.028534-07:00",
-                  "lastResponse": "2020-08-20T14:36:28.740787-07:00"
-                },
-                "pod.local@1.0.0.1:9092": {
-                  "count": 8,
-                  "retries": 2,
-                  "firstResponse": "2020-08-20T14:29:36.969418-07:00",
-                  "lastResponse": "2020-08-20T14:30:16.80145-07:00"
-                }
-              },
-              "countsByStatusCodes": {
-                "200": {
-                  "count": 2,
-                  "retries": 0,
-                  "firstResponse": "2020-08-20T14:30:15.795689-07:00",
-                  "lastResponse": "2020-08-20T14:30:16.80145-07:00"
-                },
-                "400": {
-                  "count": 1,
-                  "retries": 0,
-                  "firstResponse": "2020-08-20T14:30:02.327246-07:00",
-                  "lastResponse": "2020-08-20T14:30:02.327246-07:00"
-                },
-                "418": {
-                  "count": 15,
-                  "retries": 4,
-                  "firstResponse": "2020-08-20T14:29:36.969418-07:00",
-                  "lastResponse": "2020-08-20T14:36:28.740787-07:00"
-                },
-                "502": {
-                  "count": 2,
-                  "retries": 0,
-                  "firstResponse": "2020-08-20T14:31:04.066603-07:00",
-                  "lastResponse": "2020-08-20T14:36:14.802774-07:00"
-                }
-              },
-              "countsByValuesStatusCodes": {
-                "pod.local@1.0.0.1:8082": {
-                  "418": {
-                    "count": 10,
-                    "retries": 2,
-                    "firstResponse": "2020-08-20T14:30:32.028535-07:00",
-                    "lastResponse": "2020-08-20T14:36:28.740788-07:00"
-                  },
-                  "502": {
-                    "count": 2,
-                    "retries": 0,
-                    "firstResponse": "2020-08-20T14:31:04.066603-07:00",
-                    "lastResponse": "2020-08-20T14:36:14.802775-07:00"
-                  }
-                },
-                "pod.local@1.0.0.1:9092": {
-                  "200": {
-                    "count": 2,
-                    "retries": 0,
-                    "firstResponse": "2020-08-20T14:30:15.795689-07:00",
-                    "lastResponse": "2020-08-20T14:30:16.80145-07:00"
-                  },
-                  "400": {
-                    "count": 1,
-                    "retries": 0,
-                    "firstResponse": "2020-08-20T14:30:02.327246-07:00",
-                    "lastResponse": "2020-08-20T14:30:02.327246-07:00"
-                  },
-                  "418": {
-                    "count": 5,
-                    "retries": 2,
-                    "firstResponse": "2020-08-20T14:29:36.969419-07:00",
-                    "lastResponse": "2020-08-20T14:30:03.33232-07:00"
-                  }
-                }
-              },
-              "crossHeaders": {},
-              "crossHeadersByValues": {},
-              "firstResponse": "2020-08-20T14:29:36.969418-07:00",
-              "lastResponse": "2020-08-20T14:36:28.740786-07:00"
-            }
-          }
-        },
-        "firstResponse": "2020-08-20T14:29:36.969414-07:00",
-        "lastResponse": "2020-08-20T14:36:28.74078-07:00"
-      },
-    },
-    "countsByURIs": {
-      "": 2,
-      "/status/418": 18
-    }
-  },
-  "t2": {}
-}
-
-```
-</p>
-</details>
-
-
-#### Sample Invocation Result
-
-<details>
-<summary>Result Example</summary>
-<p>
-
-```json
-{
-  "1": {
-    "invocationIndex": 1,
-    "target": {
-      "name": "peer1_to_peer4",
-      "method": "GET",
-      "url": "http://1.0.0.4/echo",
-      "headers": [
-        [
-          "Goto-Client",
-          "peer1"
-        ]
-      ],
-      "body": "",
-      "replicas": 2,
-      "requestCount": 20,
-      "initialDelay": "2s",
-      "delay": "1s",
-      "keepOpen": "",
-      "sendID": false,
-      "connTimeout": "",
-      "connIdleTimeout": "",
-      "requestTimeout": "",
-      "verifyTLS": false,
-      "collectResponse": false,
-      "autoInvoke": true
-    },
-    "status": {
-      "completedRequestCount": 13,
-      "stopRequested": true,
-      "stopped": true,
-      "closed": true
-    },
-    "results": {
-      "target": "",
-      "invocationCounts": 13,
-      "firstResponses": "2020-06-23T13:52:33.546148-07:00",
-      "lastResponses": "2020-06-23T13:52:45.561606-07:00",
-      "countsByStatus": {
-        "200 OK": 13
-      },
-      "countsByStatusCodes": {
-        "200": 13
-      },
-      "countsByHeaders": {
-        "goto-host": 13,
-        "via-goto": 13
-      },
-      "countsByHeaderValues": {
-        "goto-host": {
-          "1.0.0.4": 13
-        },
-        "via-goto": {
-          "peer4": 13
-        }
-      },
-      "countsByURIs": {
-        "/echo": 13
-      }
-    },
-    "finished": true
-  },
-  "2": {
-    "invocationIndex": 2,
-    "target": {
-      "name": "peer1_to_peer3",
-      "method": "GET",
-      "url": "http://1.0.0.3/echo",
-      "headers": [
-        [
-          "Goto-Client",
-          "peer1"
-        ]
-      ],
-      "body": "",
-      "replicas": 2,
-      "requestCount": 20,
-      "initialDelay": "2s",
-      "delay": "1s",
-      "keepOpen": "",
-      "sendID": false,
-      "connTimeout": "",
-      "connIdleTimeout": "",
-      "requestTimeout": "",
-      "verifyTLS": false,
-      "collectResponse": false,
-      "autoInvoke": true
-    },
-    "status": {
-      "completedRequestCount": 13,
-      "stopRequested": true,
-      "stopped": true,
-      "closed": true
-    },
-    "results": {
-      "target": "",
-      "invocationCounts": 13,
-      "firstResponses": "2020-06-23T13:52:33.546295-07:00",
-      "lastResponses": "2020-06-23T13:52:45.562684-07:00",
-      "countsByStatus": {
-        "200 OK": 13
-      },
-      "countsByStatusCodes": {
-        "200": 13
-      },
-      "countsByHeaders": {
-        "goto-host": 13,
-        "via-goto": 13
-      },
-      "countsByHeaderValues": {
-        "goto-host": {
-          "1.0.0.3": 13
-        },
-        "via-goto": {
-          "peer3": 13
-        }
-      },
-      "countsByURIs": {
-        "/echo": 13
-      }
-    },
-    "finished": true
-  }
-}
-```
-</p>
-</details>
-
-
-
-#### Sample Active Targets Result
-
-<details>
-<summary>Result Example</summary>
-<p>
-
-```json
-{
-  "activeCount": 4,
-  "activeInvocations": {
-    "peer1_to_peer2": {
-      "1": {
-        "completedRequestCount": 4,
-        "stopRequested": false,
-        "stopped": false,
-        "closed": false
-      }
-    },
-    "peer1_to_peer3": {
-      "2": {
-        "completedRequestCount": 6,
-        "stopRequested": false,
-        "stopped": false,
-        "closed": false
-      }
-    },
-    "peer1_to_peer4": {
-      "3": {
-        "completedRequestCount": 5,
-        "stopRequested": false,
-        "stopped": false,
-        "closed": false
-      }
-    },
-    "peer1_to_peer5": {
-      "4": {
-        "completedRequestCount": 4,
-        "stopRequested": false,
-        "stopped": false,
-        "closed": false
-      }
-    }
-  }
-}
-
-```
+See [Client APIs and Results Examples](docs/client-api-examples.md)
 
 <br/>
-</p>
-</details>
 
 # <a name="server-features"></a>
 # Server Features
@@ -1371,13 +511,19 @@ The server is useful to be run as a test server for testing some client applicat
 - `Goto-Port`: carries the port number on which the request was received
 - `Goto-Protocol`: identifies whether the request was received over `HTTP` or `HTTPS`
 - `Goto-Remote-Address`: remote client's address as visible to `goto`
+- `Goto-In-Nanos`: Timestamp in nanoseconds when the request was received by `goto`
+- `Goto-Out-Nanos`: Timestamp in nanoseconds when `goto` finished processing the request and sent a response
+- `Goto-Took-Nanos`: Total processing time in nanoseconds taken by `goto` to process the request
+
+
+`Goto` adds the following response headers conditionally:
 - `Goto-Response-Delay`: set if `goto` applied a configured delay to the response.
 - `Goto-Payload-Length`, `Goto-Payload-Content-Type`: set if `goto` sent a configured response payload
 - `Goto-Chunk-Count`, `Goto-Chunk-Length`, `Goto-Chunk-Delay`, `Goto-Stream-Length`, `Goto-Stream-Duration`: set when client requests a streaming response
 - `Goto-Requested-Status`: set when `/status` API request is made requesting a specific status
 - `Goto-Response-Status`: set on all responses, carrying the HTTP response status code that `goto` has set to the response
 - `Goto-Forced-Status`, `Goto-Forced-Status-Remaining`: set when a configured custom response status is applied to a response
-- `Goto-Ignored-Request`: set when a request URI matches an ignore config
+- `Goto-Filtered-Request`: set when a request is filtered due to a configured `ignore` or `bypass` filter
 - `Request-*`: prefix is added to all request headers and the request headers are sent back as response headers
 - `Readiness-Request-*`: prefix is added to all request headers for Readiness probe requests
 - `Liveness-Request-*`: prefix is added to all request headers for Liveness probe requests
@@ -1385,25 +531,26 @@ The server is useful to be run as a test server for testing some client applicat
 - `Readiness-Overflow-Count`: header added to readiness probe responses, carrying the number of times readiness request count has overflown
 - `Liveness-Request-Count`: header added to liveness probe responses, carrying the number of liveness requests received so far
 - `Liveness-Overflow-Count`: header added to liveness probe responses, carrying the number of times liveness request count has overflown
+- `Stopping-Readiness-Request-*`: set when a readiness probe is received while `goto` server is shutting down
 
 <br/>
 
 ### <a name="server-logging"></a> Server Logging
 `goto` server logs are generated with a useful pattern to help figuring out the steps `goto` took for a request. Each log line tells the complete story about request details, how the request was processed, and response sent. Each log line contains the following segments separated by `-->`:
 - Request Timestamp
-- Listener Host Id: identifies the host+port that received the request
+- Listener Host: label of the listener that served the request
 - Local and Remote addresses (if available)
 - Request Body (first 50 bytes)
 - Request Headers (including Host header)
 - Request URI, Protocol and Method
 - Action(s) taken by `goto` (e.g. delaying a request, echoing back, responding with custom payload, etc.)
-- Final Response Status Code sent to client
 - Response Headers
+- Response Status Code (final code sent to client after applying any configured overrides)
 - Response Body Length
 
 #### Sample log line:
 ```
-2020/11/09 16:59:54 [localhost@1.2.3.4:8080] [Registry] --> LocalAddr: [::1]:8080, RemoteAddr: [::1]:64342 --> Request Headers: {"Content-Length":["80"],"From-Goto":["peer1"],"From-Goto-Host":["localhost@1.2.3.4:8081"],"Host":["localhost:8080"],"Protocol":["HTTP/1.1"],"Targetid":["ab[1][1]"],"User-Agent":["Go-http-client/1.1"]} --> Request URI: [/bar?x-request-id=466c822c-231c-4ea5-aab6-125b73da1612-B], Protocol: [HTTP/1.1], Method: [POST] --> Request Body: [thisisaverylongbody] --> Delaying for 2s --> Echoing back --> Reporting status: [200] --> {"ResponseHeaders": {"Content-Type":["application/json"],"Goto-Host":["localhost@1.2.3.4:8080"],"Request-From-Goto":["peer1"],"Request-From-Goto-Host":["localhost@1.2.3.4:8080"],"Request-Host":["localhost:8080"],"Request-Protocol":["HTTP/1.1"],"Request-Targetid":["ab[1][1]"],"Request-User-Agent":["Go-http-client/1.1"],"Via-Goto":["Registry"]}}
+2020/11/09 16:59:54 [Goto-Server] --> LocalAddr: [::1]:8080, RemoteAddr: [::1]:62296 --> Request Body: [some payload] --> Request Headers: {"Accept":["*/*"],"Foo":["bar"],"Host":["localhost:8080"],"Protocol":["HTTP/1.1"],"User-Agent":["curl/7.64.1"]} --> Request URI: [/foo], Protocol: [HTTP/1.1], Method: [GET] --> Echoing back --> {"ResponseHeaders": {"Content-Type":["application/json"],"Goto-Host":["localhost@1.2.3.4:8080"],"Goto-In-Nanos":["1613330713218468000"],"Goto-Out-Nanos":["1613330713218686000"],"Goto-Port":["8080"],"Goto-Protocol":["HTTP"],"Goto-Remote-Address":["[::1]:62296"],"Goto-Response-Status":["200"],"Goto-Took-Nanos":["218000"],"Request-Accept":["*/*"],"Request-Foo":["bar"],"Request-Host":["localhost:8080"],"Request-Protocol":["HTTP/1.1"],"Request-Uri":["/foo"],"Request-User-Agent":["curl/7.64.1"],"Via-Goto":["Registry"]}} --> Response Status Code: [200] --> Response Body Length: [229]
 ```
 
 <br/>
@@ -1623,13 +770,14 @@ curl -s localhost:8081/events
 - `goto_requests_by_type` (vector): Number of requests by type (dimension: requestType)
 - `goto_requests_by_headers` (vector): Number of requests by headers (dimension: requestHeader)
 - `goto_requests_by_uris` (vector): Number of requests by URIs (dimension: requestURI)
-- `goto_client_requests_by_targets` (vector): Number of client requests by target
-- `goto_client_failures_by_targets` (vector): Number of failed client requests by target
+- `goto_invocations_by_targets` (vector): Number of client invocations by target
+- `goto_failed_invocations_by_targets` (vector): Number of failed invocations by target
+- `goto_requests_by_client`: Number of server requests by client
 - `goto_proxied_requests` (vector): Number of proxied requests (dimension: proxyTarget)
 - `goto_triggers` (vector): Number of triggered requests (dimension: triggerTarget)
 - `goto_conn_counts` (vector): Number of connections by type (dimension: connType)
-- `goto_active_client_conn_counts_by_targets` (gauge): Number of active client connections by targets
 - `goto_tcp_conn_counts` (vector): Number of TCP connections by type (dimension: tcpType)
+- `goto_active_client_conn_counts_by_targets` (gauge): Number of active client connections by targets
 
 #### APIs
 |METHOD|URI|Description|
@@ -2534,134 +1682,85 @@ curl localhost:8080/probes
 
 <br/>
 
-# <a name="server-uris-bypass"></a>
-## > URIs Bypass
-This feature allows adding bypass URIs that will not be subject to other configurations, e.g. forced status codes. Request counts are tracked for bypass URIs, and specific status can be configured to respond for bypass URI requests.
+# <a name="server-requests-filtering"></a>
+## > Requests Filtering: Bypass and Ignore
+This feature allows bypassing/ignoring some requests based on URIs and Headers match. A status code can be configured to be sent for ingored/bypassed requests. While both `bypass` and `ignore` filtering results in requests skipping additional processing, `bypass` requests are still logged whereas `ignored` requests don't generate any logs. Request counts are tracked for both bypassed and ignored requests.
 
-#### APIs
-###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+* Ignore and Bypass configurations are not port specific and apply to all ports.
+* APIs for Bypass and Ignore are alike and listed in a single table below. The two feature APIs only differ in the prefix `/request/bypass` vs `/request/ignore`
+
+#### Request Ignore/Bypass APIs
 
 |METHOD|URI|Description|
 |---|---|---|
-|PUT, POST| /request/uri/bypass<br/>/add?uri={uri}       | Add a bypass URI |
-|PUT, POST| /request/uri/bypass<br/>/remove?uri={uri}    | Remove a bypass URI |
-|PUT, POST| /request/uri/bypass/clear               | Remove all bypass URIs |
-|PUT, POST| /request/uri/bypass<br/>/set/status={status:count} | Set status code to be returned for bypass URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
-|GET      |	/request/uri/bypass                     | Get list of bypass URIs |
-|GET      |	/request/uri/bypass/status              | Get current bypass URI status code |
-|GET      |	/request/uri/bypass<br/>/counts?uri={uri}    | Get request counts for a given bypass URI |
-|GET      |	/request/uri/bypass/counts                | Get request counts for all bypass URIs |
-
-#### URI Bypass Events
-- `Bypass URI Added`
-- `Bypass URI Removed`
-- `Bypass Status Configured`
-- `Bypass URIs Cleared`
+|PUT, POST| /request/[ignore\|bypass]<br/>/add?uri={uri}       | Filter (ignore or bypass) requests based on uri match, where uri can be a regex |
+|PUT, POST| /request/[ignore\|bypass]<br/>/add/header/{header}  | Filter (ignore or bypass) requests based on header name match |
+|PUT, POST| /request/[ignore\|bypass]<br/>/add/header/{header}={value}  | Filter (ignore or bypass) requests where the given header name as well as the value matches, where value can be a regex. |
+|PUT, POST| /request/[ignore\|bypass]<br/>/remove?uri={uri}    | Remove a URI filter config |
+|PUT, POST| /request/[ignore\|bypass]<br/>/remove/header/{header}    | Remove a header filter config |
+|PUT, POST| /request/[ignore\|bypass]<br/>/remove/header/{header}={value}    | Remove a header+value filter config |
+|PUT, POST| /request/[ignore\|bypass]<br/>/set/status={status} | Set status code to be returned for filtered URI requests |
+|GET      |	/request/[ignore\|bypass]/status              | Get current ignore or bypass status code |
+|PUT, POST| /request/[ignore\|bypass]/clear               | Remove all filter configs |
+|GET      |	/request/[ignore\|bypass]/count               | Get ignored or bypassed request count |
+|GET      |	/request/[ignore\|bypass]                     | Get current ignore or bypass configs |
 
 
-#### URI Bypass API Examples
+#### Request Filter (Ignore/Bypass) Events
+- `Request Filter Added`
+- `Request Filter Removed`
+- `Request Filter Status Configured`
+- `Request Filters Cleared`
+
+#### Request Filter (Ignore/Bypass) API Examples
 <details>
 <summary>API Examples</summary>
 
 ```
-curl -X POST localhost:8080/request/uri/bypass/clear
+curl -X POST localhost:8080/request/ignore/clear
+curl -X POST localhost:8080/request/bypass/clear
 
-curl -X PUT localhost:8080/request/uri/bypass/add\?uri=/foo
+curl -X PUT localhost:8080/request/ignore/add\?uri=/foo.*
+curl -X PUT localhost:8080/request/bypass/add\?uri=/foo.*bar
 
-curl -X PUT localhost:8081/request/uri/bypass/remove\?uri=/bar
+curl -X PUT localhost:8080/request/ignore/add/header/foo=bar.*
+curl -X PUT localhost:8080/request/bypass/add/header/foo=bar.*
 
-curl -X PUT localhost:8080/request/uri/bypass/set/status=418:2
+curl -X PUT localhost:8080/request/ignore/remove\?uri=/bar
+curl -X PUT localhost:8080/request/bypass/remove\?uri=/bar
 
-curl localhost:8080/request/uri/bypass
+curl -X PUT localhost:8080/request/ignore/set/status=418
+curl -X PUT localhost:8080/request/bypass/set/status=418
 
-curl localhost:8080/request/uri/bypass/status
+curl localhost:8080/request/ignore
+curl localhost:8080/request/bypass
 
-curl localhost:8080/request/uri/bypass/counts\?uri=/foo
 ```
 </details>
 
-#### URI Bypass Status Result Example
+#### Ignore Result Example
 <details>
 <summary>Example</summary>
 <p>
 
 ```
+$ curl localhost:8080/request/ignore
 {
   "uris": {
-    "/foo": 3,
-    "/health": 6
+    "/foo": {}
   },
-  "bypassStatus": 200
-}
-```
-</p>
-</details>
-
-<br/>
-
-# <a name="server-uris-ignore"></a>
-## > Ignore URIs
-This feature allows marking some URIs as `ignored` so that those don't generate any logs. Ignored URIs are different from `bypass` URIs in that while `bypass` URIs get logs but are not subject to additional processing, `ignored` URIs are subject to all other processing but don't get logged. Request counts are tracked for ignored URIs, and specific status can be configured to respond for ignored URI requests.
-
-#### APIs
-###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
-
-|METHOD|URI|Description|
-|---|---|---|
-|PUT, POST| /request/uri/ignore<br/>/add?uri={uri}       | Add an ignored URI |
-|PUT, POST| /request/uri/ignore<br/>/add/header/{header}  | Ignore all requests carrying the given header |
-|PUT, POST| /request/uri/ignore<br/>/add/header/{header}~{value}  | Ignored requests with a given header where value contains the given text |
-|PUT, POST| /request/uri/ignore<br/>/remove?uri={uri}    | Remove an ignored URI |
-|PUT, POST| /request/uri/ignore<br/>/remove/header/{header}    | Remove an ignored header |
-|PUT, POST| /request/uri/ignore<br/>/remove/header/{header}~{value}    | Remove an ignored header/value combination |
-|PUT, POST| /request/uri/ignore<br/>/set/status={status} | Set status code to be returned for ignored URI requests, either for all subsequent calls until cleared, or for specific number of subsequent calls |
-|PUT, POST| /request/uri/ignore/clear               | Remove all ignored URIs |
-|GET      |	/request/uri/ignore                     | Get list of ignored URIs |
-|GET      |	/request/uri/ignore/status              | Get current ignored URI status code |
-|GET      |	/request/uri/ignore/counts                | Get ignored request counts by URIs and headers |
-
-
-#### Ignore URIs Events
-- `Ignore URI Added`
-- `Ignore Header Added`
-- `Ignore URI Removed`
-- `Ignore Header Removed`
-- `Ignore Status Configured`
-- `Ignore Config Cleared`
-
-#### Ignore URIs API Examples
-<details>
-<summary>API Examples</summary>
-
-```
-curl -X POST localhost:8080/request/uri/ignore/clear
-
-curl -X PUT localhost:8080/request/uri/ignore/add\?uri=/foo
-
-curl -X PUT localhost:8081/request/uri/ignore/remove\?uri=/bar
-
-curl -X PUT localhost:8080/request/uri/ignore/set/status=418
-
-curl localhost:8080/request/uri/ignore
-
-curl localhost:8080/request/uri/ignore/status
-
-curl localhost:8080/request/uri/ignore/counts\?uri=/foo
-```
-</details>
-
-#### Ignore URI Status Result Example
-<details>
-<summary>Example</summary>
-<p>
-
-```
-{
-  "uris": {
-    "/foo": 3,
-    "/health": 6
+  "headers": {
+    "foo": {
+      "bar.*": {}
+    }
   },
-  "ignoreStatus": 200
+  "uriUpdates": {
+    "/ignoreme": {}
+  },
+  "headerUpdates": {},
+  "status": 200,
+  "filteredCount": 1,
+  "pendingUpdates": true
 }
 ```
 </p>

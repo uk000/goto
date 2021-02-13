@@ -10,6 +10,7 @@ import (
 
   "goto/pkg/client/results"
   "goto/pkg/events"
+  . "goto/pkg/events/eventslist"
   "goto/pkg/global"
   "goto/pkg/invocation"
   "goto/pkg/util"
@@ -243,7 +244,7 @@ func addTarget(w http.ResponseWriter, r *http.Request) {
     } else {
       w.WriteHeader(http.StatusOK)
       msg = fmt.Sprintf("Added target: %s", util.ToJSON(t))
-      events.SendRequestEventJSON("Target Added", t, r)
+      events.SendRequestEventJSON(Client_TargetAdded, t, r)
     }
   } else {
     w.WriteHeader(http.StatusBadRequest)
@@ -261,7 +262,7 @@ func removeTargets(w http.ResponseWriter, r *http.Request) {
     if getPortClient(r).removeTargets(targets) {
       w.WriteHeader(http.StatusOK)
       msg = fmt.Sprintf("Targets Removed: %+v", targets)
-      events.SendRequestEventJSON("Targets Removed", targets, r)
+      events.SendRequestEventJSON(Client_TargetsRemoved, targets, r)
     } else {
       w.WriteHeader(http.StatusNotAcceptable)
       msg = fmt.Sprintf("Targets cannot be removed while traffic is running")
@@ -281,7 +282,7 @@ func clearTargets(w http.ResponseWriter, r *http.Request) {
   if getPortClient(r).init() {
     w.WriteHeader(http.StatusOK)
     msg = "Targets cleared"
-    events.SendRequestEvent("Targets Cleared", "", r)
+    events.SendRequestEvent(Client_TargetsCleared, "", r)
   } else {
     w.WriteHeader(http.StatusNotAcceptable)
     msg = fmt.Sprintf("Targets cannot be cleared while traffic is running")
@@ -305,7 +306,7 @@ func addTrackingHeaders(w http.ResponseWriter, r *http.Request) {
     getPortClient(r).AddTrackingHeaders(h)
     w.WriteHeader(http.StatusOK)
     msg = fmt.Sprintf("Header %s will be tracked", h)
-    events.SendRequestEvent("Tracking Headers Added", msg, r)
+    events.SendRequestEvent(Client_TrackingHeadersAdded, msg, r)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = "Invalid header name"
@@ -322,7 +323,7 @@ func removeTrackingHeader(w http.ResponseWriter, r *http.Request) {
     getPortClient(r).removeTrackingHeader(header)
     w.WriteHeader(http.StatusOK)
     msg = fmt.Sprintf("Header %s removed from tracking", header)
-    events.SendRequestEvent("Tracking Headers Removed", msg, r)
+    events.SendRequestEvent(Client_TrackingHeadersRemoved, msg, r)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = "Invalid header name"
@@ -337,7 +338,7 @@ func clearTrackingHeaders(w http.ResponseWriter, r *http.Request) {
   getPortClient(r).clearTrackingHeaders()
   w.WriteHeader(http.StatusOK)
   msg := "All tracking headers cleared"
-  events.SendRequestEvent("Tracking Headers Cleared", msg, r)
+  events.SendRequestEvent(Client_TrackingHeadersCleared, msg, r)
   fmt.Fprintln(w, msg)
   if global.EnableClientLogs {
     util.AddLogMessage(msg, r)
@@ -345,7 +346,7 @@ func clearTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 }
 
 func getTrackingHeaders(w http.ResponseWriter, r *http.Request) {
-  w.WriteHeader(http.StatusAlreadyReported)
+  w.WriteHeader(http.StatusOK)
   msg := fmt.Sprintf("Tracking headers: %s", strings.Join(getPortClient(r).getTrackingHeaders(), ","))
   fmt.Fprintln(w, msg)
   if global.EnableClientLogs {
@@ -358,7 +359,7 @@ func addCACert(w http.ResponseWriter, r *http.Request) {
   data := util.ReadBytes(r.Body)
   if len(data) > 0 {
     invocation.StoreCACert(data)
-    msg = "CA Cert Stored"
+    msg = Client_CACertStored
     events.SendRequestEvent(msg, "", r)
   } else {
     w.WriteHeader(http.StatusBadRequest)
@@ -372,7 +373,7 @@ func addCACert(w http.ResponseWriter, r *http.Request) {
 
 func removeCACert(w http.ResponseWriter, r *http.Request) {
   invocation.RemoveCACert()
-  msg := "CA Cert Removed"
+  msg := Client_CACertRemoved
   events.SendRequestEvent(msg, "", r)
   fmt.Fprintln(w, msg)
   if global.EnableClientLogs {
@@ -381,16 +382,14 @@ func removeCACert(w http.ResponseWriter, r *http.Request) {
 }
 
 func getInvocationResults(w http.ResponseWriter, r *http.Request) {
-  w.WriteHeader(http.StatusAlreadyReported)
-  fmt.Fprintln(w, results.GetInvocationResultsJSON())
+  util.WriteStringJsonPayload(w, results.GetInvocationResultsJSON())
   if global.EnableClientLogs {
     util.AddLogMessage("Reporting results", r)
   }
 }
 
 func getResults(w http.ResponseWriter, r *http.Request) {
-  w.WriteHeader(http.StatusAlreadyReported)
-  fmt.Fprintln(w, results.GetTargetsResultsJSON())
+  util.WriteStringJsonPayload(w, results.GetTargetsResultsJSON())
   if global.EnableClientLogs {
     util.AddLogMessage("Reporting results", r)
   }
@@ -412,7 +411,7 @@ func getActiveTargets(w http.ResponseWriter, r *http.Request) {
 func clearResults(w http.ResponseWriter, r *http.Request) {
   results.ClearResults()
   w.WriteHeader(http.StatusOK)
-  msg := "Results Cleared"
+  msg := Client_ResultsCleared
   events.SendRequestEvent(msg, "", r)
   if global.EnableClientLogs {
     util.AddLogMessage(msg, r)
@@ -447,7 +446,7 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
   if hasActive {
     w.WriteHeader(http.StatusOK)
     msg = fmt.Sprintf("Targets %+v stopped", targets)
-    events.SendRequestEvent("Targets Stopped", msg, r)
+    events.SendRequestEvent(Client_TargetsStopped, msg, r)
   } else {
     w.WriteHeader(http.StatusOK)
     msg = "No targets to stop"
@@ -463,7 +462,7 @@ func (pc *PortClient) invokeTarget(target *invocation.InvocationSpec) {
   pc.targetsLock.Lock()
   pc.activeTargetsCount++
   pc.targetsLock.Unlock()
-  events.SendEventJSONForPort(pc.port, "Target Invoked", map[string]interface{}{"target": target.Name, "tracker": tracker.ID})
+  events.SendEventJSONForPort(pc.port, Client_TargetInvoked, map[string]interface{}{"target": target.Name, "tracker": tracker.ID})
   invocation.StartInvocation(tracker)
   pc.targetsLock.Lock()
   pc.activeTargetsCount--
