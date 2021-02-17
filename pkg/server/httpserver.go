@@ -32,6 +32,9 @@ func RunHttpServer(handlers ...util.ServerHandler) {
   r := mux.NewRouter()
   util.InitListenerRouter(r)
   r.Use(ContextMiddleware)
+  r.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
+    util.WriteJsonPayload(w, map[string]string{"version": global.Version, "commit": global.Commit})
+  })
   for _, h := range handlers {
     if h.SetRoutes != nil {
       h.SetRoutes(r, nil, r)

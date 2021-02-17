@@ -6,6 +6,8 @@ import (
 )
 
 var (
+  Version                    string
+  Commit                     string
   ServerPort                 int
   PeerName                   string
   PeerAddress                string
@@ -43,4 +45,5 @@ var (
   GetListenerLabel           func(*http.Request) string
   GetListenerLabelForPort    func(int) string
   GetHostLabelForPort        func(int) string
+  StoreEventInCurrentLocker  func(interface{})
 )

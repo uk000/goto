@@ -559,6 +559,10 @@ func AddRouteQWithPort(r *mux.Router, route string, f func(http.ResponseWriter, 
 func AddRouteMultiQ(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
   r.HandleFunc(route, f).Queries(queryParams...).Methods(method)
   r.HandleFunc(route+"/", f).Queries(queryParams...).Methods(method)
+  for i := 0; i < len(queryParams); i+= 2 {
+    r.HandleFunc(route, f).Queries(queryParams[i], queryParams[i+1]).Methods(method)
+    r.HandleFunc(route+"/", f).Queries(queryParams[i], queryParams[i+1]).Methods(method)
+  }
 }
 
 func AddRouteMultiQWithPort(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {

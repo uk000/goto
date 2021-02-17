@@ -18,7 +18,10 @@ var (
 
 func Execute() {
   log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+  log.Printf("Version: %s, Commit: %s\n", Version, Commit)
   global.ServerPort = 8080
+  global.Version = Version
+  global.Commit = Commit
   portsList := ""
   flag.IntVar(&global.ServerPort, "port", 8080, "Primary HTTP Server Listen Port")
   flag.StringVar(&portsList, "ports", "", "Comma-separated list of <port/protocol>. First port acts as primary HTTP port")
@@ -42,8 +45,6 @@ func Execute() {
   flag.BoolVar(&global.EnableRegistryReminderLogs, "reminderLogs", false, "Enable/Disable Registry Reminder Logs")
   flag.BoolVar(&global.EnablePeerHealthLogs, "peerHealthLogs", true, "Enable/Disable Registry-to-Peer Health Check Logs")
   flag.Parse()
-
-  log.Printf("Version: %s, Commit: %s\n", Version, Commit)
 
   if portsList != "" {
     listeners.AddInitialListeners(strings.Split(portsList, ","))

@@ -179,6 +179,7 @@ func ClearEvents() {
     eventsList = []*Event{}
     trafficEventTracker = map[int]map[string]*EventTracker{}
     lock.Unlock()
+    SendEvent("Events Cleared", "")
   }
 }
 
@@ -261,6 +262,9 @@ func storeAndPublishEvent(event *Event) {
         strings.NewReader(util.ToJSON(event))); err == nil {
         util.CloseResponse(resp)
       }
+    } else {
+      global.StoreEventInCurrentLocker(event)
+
     }
   }
 }
@@ -298,8 +302,6 @@ func clearEvents(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if global.EnableEvents {
     ClearEvents()
-    msg = "Events Cleared"
-    SendEvent(msg, "")
     fmt.Fprintln(w, util.ToJSON(map[string]interface{}{"cleared": true}))
   } else {
     msg = "Events not enabled"

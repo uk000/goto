@@ -139,51 +139,61 @@ The application exposes all its features via REST APIs as described below. Addit
 
 The docker image is built with several useful utilities included: `curl`, `wget`, `nmap`, `iputils`, `openssl`, `jq`, etc.
 
-## Features TOC
+# <a name="toc"></a>
+## TOC
 
-### [Startup](#startup)
+### [Startup Command](#goto-startup-command)
 
 ### Client Features
 * [Targets and Traffic](#client-http-traffic)
 
-### Server Features
-* [Server Logging](#server-logging)
-* [Events](#server-events)
-* [Server Metrics](#server-metrics)
-* [Server Listeners](#server-listeners)
-* [Server Listener Label](#server-listener-label)
-* [TCP Server](#server-tcp)
-* [GRPC Server](#server-grpc)
-* [Request Headers Tracking](#server-request-headers-tracking)
-* [Request Timeout](#server-request-timeout)
-* [URIs](#server-uris)
-* [Probes](#server-probes)
-* [Requests Filtering](#server-requests-filtering)
-* [Response Delay](#server-response-delay)
-* [Response Headers](#server-response-headers)
-* [Response Payload](#server-response-payload)
-* [Ad-hoc Payload](#server-ad-hoc-payload)
-* [Stream (Chunked) Payload](#server-stream-payload)
-* [Response Status](#server-response-status)
-* [Response Triggers](#server-response-triggers)
-* [Status API](#server-status)
-* [Delay API](#server-delay)
-* [Echo API](#server-echo)
-* [Catch All](#server-catch-all)
+### [Server Features](#goto-server-features)
+* [Goto Version](#goto-version)
+* [Goto Response Headers](#goto-response-headers)
+* [Server Logs](#goto-server-logs)
+* [Events](#goto-server-events)
+* [Goto Metrics](#goto-metrics)
+* [Server Listeners](#listeners)
+* [Server Listener Label](#listener-label)
+* [TCP Server](#tcp-server)
+* [GRPC Server](#grpc-server)
+* [Request Headers Tracking](#request-headers-tracking)
+* [Request Timeout](#request-timeout-tracking)
+* [URIs](#uris)
+* [Probes](#probes)
+* [Requests Filtering](#requests-filtering)
+* [Response Delay](#response-delay)
+* [Response Headers](#response-headers)
+* [Response Payload](#response-payload)
+* [Ad-hoc Payload](#ad-hoc-payload)
+* [Stream (Chunked) Payload](#stream-payload)
+* [Response Status](#response-status)
+* [Response Triggers](#response-triggers)
+* [Status API](#status-api)
+* [Delay API](#delay-api)
+* [Echo API](#echo-api)
+* [Catch All](#catch-all)
 
-### Proxy
-* [Proxy Features](#proxy-features)
+### Goto Proxy
+* [Proxy Features](#proxy)
 
 ### Jobs
 * [Jobs Features](#jobs-features)
 
 ### Registry
 * [Registry Features](#registry-features)
-
+  - [Registry Peers APIs](#registry-peers-apis)
+  - [Registry Locker APIs](#registry-locker-apis)
+  - [Registry Events APIs](#registry-events-apis)
+  - [Registry Peer Targets APIs](#registry-peers-targets-apis)
+  - [Registry Peer Jobs APIs](#registry-peers-jobs-apis)
+  - [Registry Peers Config APIs](#registry-peers-config-api)
+  - [Registry Peer Call APIs](#registry-peers-call-apis)
+  - [Registry clone, dump and load APIs](#registry-clone-dump-and-load-apis)
 <br/>
 
-# <a name="startup"></a>
-# Startup Command Arguments
+# <a name="goto-startup-command"></a>
+# Goto Startup Command
 First things first, run the application:
 ```
 go run main.go --port 8080
@@ -338,6 +348,8 @@ The application accepts the following command arguments:
 </table>
 
 Once the server is up and running, rest of the interactions and configurations are done purely via REST APIs.
+
+###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
@@ -496,14 +508,19 @@ The schema below describes fields per target.
 #### Client API Examples
 See [Client APIs and Results Examples](docs/client-api-examples.md)
 
+###### <small> [Back to TOC](#toc) </small>
+
 <br/>
 
-# <a name="server-features"></a>
+# <a name="goto-server-features"></a>
 # Server Features
 The server is useful to be run as a test server for testing some client application, proxy/sidecar, gateway, etc. Or, the server can also be used as a proxy to be put in between a client and a target server application, so that traffic flows through this server where headers can be inspected/tracked before proxying the requests further. The server can add headers, replace request URI with some other URI, add artificial delays to the response, respond with a specific status, monitor request/connection timeouts, etc. The server tracks all the configured parameters, applying those to runtime traffic and building metrics, which can be viewed via various APIs.
 
+###### <small> [Back to TOC](#toc) </small>
+
 <br/>
 
+# <a name="goto-response-headers)"></a>
 ### Goto Response Headers
 `Goto` adds the following common response headers to all http responses it sends:
 - `Goto-Host`: identifies the goto instance. This header's value will include hostname, IP, Port, Namespace and Cluster information if available to `Goto` from the following Environment variables: `POD_NAME`, `POD_IP`, `NODE_NAME`, `CLUSTER`, `NAMESPACE`. It falls back to using local compute's IP address if `POD_IP` is not defined. For other fields, it defaults to fixed value `local`.
@@ -533,9 +550,12 @@ The server is useful to be run as a test server for testing some client applicat
 - `Liveness-Overflow-Count`: header added to liveness probe responses, carrying the number of times liveness request count has overflown
 - `Stopping-Readiness-Request-*`: set when a readiness probe is received while `goto` server is shutting down
 
+###### <small> [Back to TOC](#toc) </small>
+
 <br/>
 
-### <a name="server-logging"></a> Server Logging
+# <a name="goto-server-logs"></a>
+### Goto Server Logs
 `goto` server logs are generated with a useful pattern to help figuring out the steps `goto` took for a request. Each log line tells the complete story about request details, how the request was processed, and response sent. Each log line contains the following segments separated by `-->`:
 - Request Timestamp
 - Listener Host: label of the listener that served the request
@@ -553,9 +573,26 @@ The server is useful to be run as a test server for testing some client applicat
 2020/11/09 16:59:54 [Goto-Server] --> LocalAddr: [::1]:8080, RemoteAddr: [::1]:62296 --> Request Body: [some payload] --> Request Headers: {"Accept":["*/*"],"Foo":["bar"],"Host":["localhost:8080"],"Protocol":["HTTP/1.1"],"User-Agent":["curl/7.64.1"]} --> Request URI: [/foo], Protocol: [HTTP/1.1], Method: [GET] --> Echoing back --> {"ResponseHeaders": {"Content-Type":["application/json"],"Goto-Host":["localhost@1.2.3.4:8080"],"Goto-In-Nanos":["1613330713218468000"],"Goto-Out-Nanos":["1613330713218686000"],"Goto-Port":["8080"],"Goto-Protocol":["HTTP"],"Goto-Remote-Address":["[::1]:62296"],"Goto-Response-Status":["200"],"Goto-Took-Nanos":["218000"],"Request-Accept":["*/*"],"Request-Foo":["bar"],"Request-Host":["localhost:8080"],"Request-Protocol":["HTTP/1.1"],"Request-Uri":["/foo"],"Request-User-Agent":["curl/7.64.1"],"Via-Goto":["Registry"]}} --> Response Status Code: [200] --> Response Body Length: [229]
 ```
 
+###### <small> [Back to TOC](#toc) </small>
+
 <br/>
 
-### <a name="server-events"></a> Events
+# <a name="goto-version)"></a>
+### Goto Version
+This API returns version info of the `goto` instance
+
+#### APIs
+|METHOD|URI|Description|
+|---|---|---|
+| GET       | /version          | Get version info of this `goto` instance.  |
+
+
+###### <small> [Back to TOC](#toc) </small>
+
+<br/>
+
+# <a name="goto-server-events"></a>
+### Goto Server Events
 `goto` logs various events as it performs operations, responds to admin requests and serves traffic. The Events APIs can be used to read and clear events on a `goto` instance. Additionally, if the `goto` instance is configured to report to a registry, it sends the events to the registry. On registry, events from various peer instances are collected and merged by peer labels. Registry exposes additional APIs to get the event timeline either for a peer (by peer label) or across all connected peers as a single unified timeline. Registry also allows clearing of events timeline on all connected instances through a single API call. See Registry APIs for additional info.
 
 #### APIs
@@ -763,9 +800,12 @@ curl -s localhost:8081/events
 </p>
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
+
 <br/>
 
-### <a name="server-metrics"></a> Server Metrics
+# <a name="goto-metrics"></a>
+### Goto Metrics
 `goto` exposes both custom server metrics and golang VM metrics in prometheus format. The following custom metrics are exposed:
 - `goto_requests_by_type` (vector): Number of requests by type (dimension: requestType)
 - `goto_requests_by_headers` (vector): Number of requests by headers (dimension: requestHeader)
@@ -814,12 +854,12 @@ goto_requests_by_uris{requestURI="/bar"} 1
 goto_requests_by_uris{requestURI="/foo"} 3
 ```
 
+###### <small> [Back to TOC](#toc) </small>
+
 <br/>
 
-#
-## <a name="server-listeners"></a>  > Listeners
-
-
+# <a name="listeners"></a>
+## > Listeners
 
 The server starts with a startup http listener (on the bootstrap port given as a command line arg `--port`, defaults to 8080). Additional ports can be opened via command line (arg `--ports`) as well as via listener APIs. When startup arg `--ports` is used to launch `goto` with multiple ports, the first port in the list is treated as bootstrap port, forced to be an HTTP port, and isn't allowed to be managed via listeners APIs.
 
@@ -957,10 +997,11 @@ $ curl -s localhost:8080/listeners
 </p>
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
-# <a name="server-listener-label"></a>
+# <a name="listener-label"></a>
 ## > Listener Label
 
 By default, each listener adds a header `Via-Goto: <port>` to each response it sends, where `<port>` is the port on which the listener is running (default being 8080). A custom label can be added to a listener using the label APIs described below. In addition to `Via-Goto`, each listener also adds another header `Goto-Host` that carries the pod/host name, pod namespace (or `local` if not running as a K8s pod), and pod/host IP address to identify where the response came from.
@@ -988,11 +1029,12 @@ curl localhost:8080/label
 
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
-#
-## <a name="server-tcp"></a>  > TCP Server
+# <a name="tcp-server"></a>
+## > TCP Server
 
 `Goto` providers features for testing server-side TCP behavior via TCP listeners (client side TCP features are described under client section).
 
@@ -1218,10 +1260,11 @@ curl -s localhost:8080/tcp/history | jq
 </p>
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
-# <a name="server-grpc"></a>
+# <a name="grpc-server"></a>
 ## > GRPC Server
 All HTTP ports that a `goto` instance listens on (including bootstrap port) support both `HTTP/2` and `GRPC` protocol. Any listener that's created with protocol `grpc` works exclusively in `grpc` mode, not supporting HTTP requests and only responding to the GRPC operations described below.
 
@@ -1248,13 +1291,13 @@ The GRPC response from `goto` also carries the following headers:
 
 
 `Goto` exposes the following `grpc` operations:
-1. `Goto.echo`: This is a unary grpc service method that echoes back the given payload with some additional metadata and headers. The `echo` input message is given below. It responsd with a single instance of `Output` message described later.
+1. `Goto.echo`: This is a unary grpc service method that echoes back the given payload with some additional metadata and headers. The `echo` input message is given below. It responds with a single instance of `Output` message described later.
     ```
     message Input {
       string payload = 1;
     }
     ```
-2. `Goto.streamOut`: This is a server streaming service method that accepts the following `StreamConfig` input message, that allows the client to configure the parameters of stream response. It responds with `chunkCount` number of `Output` messages, each output carrying a payload of size `chunkSize`, and there is `interval` delay between two output messages.
+2. `Goto.streamOut`: This is a server streaming service method that accepts a `StreamConfig` input message allowing the client to configure the parameters of stream response. It responds with `chunkCount` number of `Output` messages, each output carrying a payload of size `chunkSize`, and there is `interval` delay between two output messages.
     ```
     message StreamConfig {
       int32  chunkSize = 1;
@@ -1391,10 +1434,11 @@ $ curl localhost:8080/events
 ```
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
-# <a name="server-request-headers-tracking"></a>
+# <a name="request-headers-tracking"></a>
 ## > Request Headers Tracking
 This feature allows tracking request counts by headers.
 
@@ -1486,9 +1530,11 @@ $ curl localhost:8080/request/headers/track/counts
 </p>
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
+
 <br/>
 
-# <a name="server-request-timeout"></a>
+# <a name="request-timeout-tracking"></a>
 ## > Request Timeout Tracking
 This feature allows tracking request timeouts by headers.
 
@@ -1564,9 +1610,11 @@ curl localhost:8080/request/timeout/status
 </p>
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
+
 <br/>
 
-# <a name="server-uris"></a>
+# <a name="uris"></a>
 ## > URIs
 This feature allows responding with custom status code and delays for specific URIs, and tracking request counts for calls made to specific URIs (ignoring query parameters).
 Note: To configure server to respond with custom/random response payloads for specific URIs, see [`Response Payload`](#server-response-payload) feature.
@@ -1633,10 +1681,11 @@ curl -X POST localhost:8080/request/uri/counts/clear
 </p>
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
-# <a name="server-probes"></a>
+# <a name="probes"></a>
 ## > Probes
 This feature allows setting readiness and liveness probe URIs, statuses to be returned for those probes, and tracking counts for how many times the probes have been called. `Goto` also tracks when the probe call counts overflow, keeping separate overflow counts. A `goto` instance can be queried for its probe details via `/probes` API.
 
@@ -1680,9 +1729,11 @@ curl localhost:8080/probes
 ```
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
+
 <br/>
 
-# <a name="server-requests-filtering"></a>
+# <a name="requests-filtering"></a>
 ## > Requests Filtering: Bypass and Ignore
 This feature allows bypassing/ignoring some requests based on URIs and Headers match. A status code can be configured to be sent for ingored/bypassed requests. While both `bypass` and `ignore` filtering results in requests skipping additional processing, `bypass` requests are still logged whereas `ignored` requests don't generate any logs. Request counts are tracked for both bypassed and ignored requests.
 
@@ -1766,10 +1817,11 @@ $ curl localhost:8080/request/ignore
 </p>
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
-# <a name="server-response-delay"></a>
+# <a name="response-delay"></a>
 ## > Response Delay
 This feature allows adding a delay to all requests except bypass URIs and proxy requests. Delay is specified as duration, e.g. 1s. 
 
@@ -1806,6 +1858,8 @@ curl -X PUT localhost:8080/response/delay/set/2s
 curl localhost:8080/response/delay
 ```
 </details>
+
+###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
@@ -1845,10 +1899,11 @@ curl localhost:8080/response/headers
 ```
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
-# <a name="server-response-payload"></a>
+# <a name="response-payload"></a>
 ## > Response Payload
 This feature allows setting either a specific custom payload to be delivered based on request match criteria, or configure server to send random auto-generated response payloads.
 
@@ -1959,10 +2014,11 @@ curl localhost:8080/response/payload
 ```
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
-# <a name="server-ad-hoc-payload"></a>
+# <a name="ad-hoc-payload"></a>
 ## > Ad-hoc Payload
 This URI responds with a random-generated payload of the requested size. Payload size can be a numeric value or use common byte size conventions: `K`, `KB`, `M`, `MB`. Payload size is only limited by the memory available to the `goto` process. The response carries an additional header `Goto-Payload-Length` in addition to the standard header `Content-Length` to identify the size of the response payload.
 
@@ -1983,9 +2039,11 @@ curl -v localhost:8080/payload/100
 ```
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
+
 <br/>
 
-# <a name="server-stream-payload"></a>
+# <a name="stream-payload"></a>
 ## > Stream (Chunked) Payload
 This URI responds with either pre-configured or random-generated payload where response behavior is controlled by the parameters passed to the API. The feature allows requesting a custom payload size, custom response duration over which to stream the payload, custom chunk size to be used for splitting the payload into chunks, and custom delay to be used in-between chunked responses. Combination of these parameters define the total payload size and the total duration of the response. 
 
@@ -2024,9 +2082,11 @@ curl -v --no-buffer localhost:8080/stream/count=10/delay=300ms
 ```
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
+
 <br/>
 
-# <a name="server-response-status"></a>
+# <a name="response-status"></a>
 ## > Response Status
 This feature allows setting a forced response status for all requests except bypass URIs. Server also tracks number of status requests received (via /status URI) and number of responses send per status code.
 
@@ -2091,12 +2151,13 @@ curl localhost:8080/response/status/counts/502
 </p>
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
 
 
-# <a name="server-response-triggers"></a>
+# <a name="response-triggers"></a>
 # Response Triggers
 
 `Goto` allow targets to be configured that are triggered based on response status. The triggers can be invoked manually for testing, but their real value is when they get triggered based on response status. Even more valuable when the request was proxied to another upstream service, in which case the trigger is based on the response status of the upstream service.
@@ -2261,10 +2322,11 @@ $ curl -s localhost:8080/response/triggers/counts
 </p>
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
-# <a name="server-status"></a>
+# <a name="status-api"></a>
 ## > Status API
 The URI `/status/{status}` allows client to ask for a specific status as response code. The given status is reported back, except when forced status is configured in which case the forced status is sent as response.
 
@@ -2278,9 +2340,11 @@ The URI `/status/{status}` allows client to ask for a specific status as respons
 curl -I  localhost:8080/status/418
 ```
 
+###### <small> [Back to TOC](#toc) </small>
+
 <br/>
 
-# <a name="server-delay"></a>
+# <a name="delay-api"></a>
 ## > Delay API
 The URI `/delay/{delay}` allows client to ask for a specific delay to be applied to the current request. The delay API is not subject to the response delay that may be configured for all responses. Calling the URI as `/delay` responds with no delay, and so does the call as `/delay/0`, `/delay/0s`, etc.
 When a delay is passed to this API, the response carries a header `Response-Delay` with the value of the applied delay.
@@ -2295,9 +2359,11 @@ When a delay is passed to this API, the response carries a header `Response-Dela
 curl -I  localhost:8080/delay/2s
 ```
 
+###### <small> [Back to TOC](#toc) </small>
+
 <br/>
 
-# <a name="server-echo"></a>
+# <a name="echo-api"></a>
 ## > Echo API
 This URI echoes back the headers and payload sent by client. The response is also subject to any forced response status and will carry custom headers if any are configured.
 
@@ -2311,18 +2377,21 @@ This URI echoes back the headers and payload sent by client. The response is als
 curl -I  localhost:8080/echo
 ```
 
+###### <small> [Back to TOC](#toc) </small>
+
 <br/>
 
-# <a name="server-catch-all"></a>
+# <a name="catch-all"></a>
 ## > Catch All
 
 Any request that doesn't match any of the defined management APIs, and also doesn't match any proxy targets, gets treated by a catch-all response that sends HTTP 200 response by default (unless an override response code is set)
 
+###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 <br/>
 
-# <a name="proxy-features"></a>
+# <a name="proxy"></a>
 # Proxy
 
 `Goto` proxy feature allows targets to be configured that are triggered based on matching criteria against requests. The targets can also be invoked manually for testing the configuration. However, the real fun happens when the proxy targets are matched with runtime traffic based on the match criteria specified in a proxy target's spec (based on headers, URIs, and query parameters), and one or more matching targets get invoked for a given request.
@@ -2539,6 +2608,7 @@ curl localhost:8080/proxy/counts
 </p>
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
@@ -2775,6 +2845,8 @@ $ curl http://localhost:8080/jobs/job1/results
 </p>
 </details>
 
+###### <small> [Back to TOC](#toc) </small>
+
 <br/>
 
 
@@ -2794,10 +2866,15 @@ By registering a worker instance to a registry instance, we get a few benefits:
 6. Peer instances periodically re-register themselves with registry in case registry was restarted and lost all peers info. Re-registering is different from startup registration in that peers don't receive targets and jobs from registry when they remind registry about themselves, and hence no auto-invocation happens.
 7. A registry instance can be asked to clone data from another registry instance using the `/cloneFrom` API. This allows for quick bootstrapping of a new registry instance based on configuration from an existing registry instance, whether for data analysis purpose or for performing further operations. The pods cloned from the other registry are not used by this registry for any operations. Any new pods connecting to this registry using the same labels cloned from the other registry will be able to use the existing configs.
 
-#### <a name="registry-apis"></a> Registry APIs
+###### <small> [Back to TOC](#toc) </small>
+
+# <a name="registry-apis"></a>
+###  Registry APIs
+---
+<a name="registry-peers-apis"></a> 
+#### Registry Peers APIs
 |METHOD|URI|Description|
 |---|---|---|
-|<a name="registry-peers-apis"></a>| ** Peer APIs ** ||
 | POST      | /registry/peers/add     | Register a worker instance (referred to as peer). See [Peer JSON Schema](#peer-json-schema)|
 | POST      | /registry/peers/{peer}/remember | Re-register a peer. Accepts same request payload as /peers/add API but doesn't respond back with targets and jobs. |
 | POST, PUT | /registry/peers/{peer}<br/>/remove/{address} | Deregister a peer by its label and IP address |
@@ -2810,9 +2887,14 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST      | /registry/peers/clear   | Remove all registered peers|
 | POST      | /registry/peers/copyToLocker   | Copy current set of `Peers JSON` data (output of `/registry/peers` API) to current locker under a pre-defined key named `peers` |
 | GET       | /registry/peers         | Get all registered peers. See [Peers JSON Schema](#peers-json-schema) |
-||||
-|<a name="registry-lockers-apis"></a>| ** Locker APIs ** ||
-||||
+
+
+###### <small> [Back to TOC](#toc) </small>
+
+<a name="registry-locker-apis"></a>
+#### Registry Locker APIs
+|METHOD|URI|Description|
+|---|---|---|
 | POST      | /registry/lockers/open/{label} | Setup a locker with the given label and make it the current locker where peer results get stored.  |
 | POST      | /registry/lockers/close/{label} | Remove the locker for the given label.  |
 | POST      | /registry/lockers/{label}/close | Remove the locker for the given label.  |
@@ -2822,8 +2904,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET       | /registry/lockers/labels | Get a list of all existing locker labels, regardless of whether or not it has data.  |
 | POST      | /registry/lockers<br/>/{label}/store/{path} | Store payload (body) as data in the given labeled locker at the leaf of the given key path. `path` can be a single key or a comma-separated list of subkeys, in which case data gets stored in the tree under the given path. |
 | POST      | /registry/lockers<br/>/{label}/remove/{path} | Remove stored data, if any, from the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data gets removed from the leaf of the given path. |
-| GET      | /registry/lockers<br/>/{label}/get/{path} | Read stored data, if any, at the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
-| GET      | /registry/lockers<br/>/current/get/{path} | Read stored data, if any, at the given key path in the current locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
+| GET      | /registry/lockers<br/>/{label}/get/{path}?data=[y/n]&level={level} | Read stored data, if any, at the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. Use `data` query param to get stored data (default data param is off and only locker metadata is fetched). Use `level` query param to control how many sub-lockers to fetch (default level is 1). |
 | GET      | /registry/lockers<br/>/{label}/data/keys| Get a list of keys where some data is stored, from the given locker.  |
 | GET      | /registry/lockers<br/>/{label}/data/paths| Get a list of key paths (URIs) where some data is stored, from the given locker. The returned URIs are valid for invocation against the base URL of the registry. |
 | GET      | /registry/lockers<br/>/current/data/keys| Get a list of keys where some data is stored, from the current locker.  |
@@ -2832,15 +2913,8 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET      | /registry/lockers/data/paths| Get a list of key paths (URIs) where some data is stored, from all lockers. The returned URIs are valid for invocation against the base URL of the registry. |
 | GET      | /registry/lockers<br/>/{label}/search/{text} | Get a list of all valid URI paths where the given text exists in the given locker. The returned URIs are valid for invocation against the base URL of the registry. |
 | GET      | /registry/lockers<br/>/search/{text} | Get a list of all valid URI paths (containing the locker label and keys) where the given text exists, across all lockers. The returned URIs are valid for invocation against the base URL of the registry. |
-| GET       | /registry/lockers/current | Get currently active locker with stored keys, but without stored data |
-| GET       | /registry/lockers<br/>/current?data=y | Get currently active locker with stored data |
-| GET       | /registry/lockers/{label} | Get given label's locker with stored keys, but without stored data |
-| GET       | /registry/lockers<br/>/{label}?data=y | Get given label's locker with stored data |
-| GET       | /registry/lockers | Get all lockers with stored keys but without stored data |
-| GET       | /registry/lockers?data=y | Get all lockers with stored data |
-||||
-|<a name="registry-peer-lockers-apis"></a>| ** Locker APIs ** ||
-||||
+| GET       | /registry/lockers/{label}?data=[y/n]&level={level} | Get given label's locker with stored keys, with or without stored data. Use label `current` to get data from currently active locker. Use `data` query param to get stored data (default data param is off and only locker metadata is fetched). Use `level` query param to control how many sub-lockers to fetch (default level is 1).  |
+| GET       | /registry/lockers?data=[y/n]&level={level} | Get all lockers, with or without stored data. Usage of `data` and `level` query params is same as above. |
 | POST      | /registry/peers<br/>/{peer}/{address}<br/>/locker/store/{path} | Store any arbitrary value for the given `path` in the locker of the peer instance under currently active labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
 | POST      | /registry/peers<br/>/{peer}/{address}<br/>/locker/remove/{path} | Remove stored data for the given `path` from the locker of the peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
 | POST      | /registry/peers/{peer}<br/>/locker/store/{path} | Store any arbitrary value for the given key in the peer locker without associating data to a peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
@@ -2849,6 +2923,31 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST      | /registry/peers<br/>/{peer}/{address}<br/>/locker/clear | Clear the locker for the peer instance under currently active labeled locker |
 | POST      | /registry/peers/{peer}<br/>/locker/clear | Clear the locker for all instances of the given peer under currently active labeled locker |
 | POST      | /registry/peers/lockers/clear | Clear all peer lockers under currently active labeled locker |
+| GET       | /registry/lockers/{label}<br/>/peers/targets/results | Get target invocation summary results for all client peer instances from the given labeled locker |
+| GET       | /registry/lockers/{label}<br/>/peers/targets<br/>/results?detailed=Y | Get invocation results broken down by targets for all client peer instances from the given labeled locker |
+| GET       | /registry/peers/lockers<br/>/targets/results | Get target invocation summary results for all client peer instances from current locker |
+| GET       | /registry/peers/lockers<br/>/targets/results?detailed=Y | Get invocation results broken down by targets for all client peer instances from the current locker |
+| GET       | /registry/lockers/{label}<br/>/peers/{peer}/{address}<br/>/locker/get/{path} | Get the data stored at the given path under the peer instance's locker under the given labeled locker. Using label `current` fetches data from the current labeled locker. |
+| GET       | /registry/peers/{peer}<br/>/{address}/locker/get/{path} | Get the data stored at the given path under the peer instance's locker under the current labeled locker |
+| GET       | /registry/lockers/{label}<br/>/peers/{peer}/{address} | Get the peer instance's locker under the given labeled locker, using `...` placeholder for stored data to reduce the download size (to just fetch locker metadata). |
+| GET       | /registry/lockers/{label}<br/>/peers/{peer}/{address}?data=y | Get the peer instance's locker under the given labeled locker with all stored data included. |
+| GET       | /registry/peers<br/>/{peer}/{address}/locker | Get the peer instance's locker under the current active labeled locker, using `...` placeholder for stored data to just fetch locker metadata |
+| GET       | /registry/peers/{peer}/{address}<br/>/locker?data=y | Get the peer instance's locker under the current active labeled locker with all stored data included. |
+| GET       | /registry/lockers/{label}<br/>/peers/{peer} | Get the lockers of all instances of the given peer under the given labeled locker, using `...` placeholder for stored data to just fetch locker metadata. |
+| GET       | /registry/lockers/{label}<br/>/peers/{peer}?data=y | Get the lockers of all instances of the given peer under the given labeled locker with all stored data included. |
+| GET       | /registry/peers/{peer}/locker | Get locker's data for all instances of the peer from currently active labeled locker, using `...` placeholder for stored data to just fetch locker metadata |
+| GET       | /registry/peers/{peer}<br/>/locker?data=y | Get locker's data for all instances of the peer from currently active labeled locker with all stored data included |
+| GET       | /registry/lockers/{label}/peers | Get the lockers of all peers under the given labeled locker, using `...` placeholder for stored data to just fetch locker metadata. |
+| GET       | /registry/lockers/{label}<br/>/peers?data=y | Get the lockers of all peers under the given labeled locker with all stored data included. |
+| GET       | /registry/peers/lockers | Get the lockers of all peers from currently active labeled locker, using `...` placeholder for stored data to just fetch locker metadata. |
+| GET       | /registry/peers<br/>/lockers?data=y | Get the lockers of all peers from currently active labeled locker with all stored data included. |
+
+###### <small> [Back to TOC](#toc) </small>
+
+<a name="registry-events-apis"></a>
+#### Registry Events APIs
+|METHOD|URI|Description|
+|---|---|---|
 | POST      | /registry/peers/events/flush | Requests all peer instances to publish any pending events to registry, and clears events timeline on the peer instances. Registry still retains the peers events in the current locker. |
 | POST      | /registry/peers/events/clear | Requests all peer instances to clear their events timeline, and also removes the peers events from the current registry locker. |
 | GET       | /registry/lockers/{label}<br/>/peers/{peers}/events | Get the events timeline for all instances of the given peers (comma-separated list) from the given labeled locker. Use label `all` to get data from all lockers, and `current` to get from the current locker. |
@@ -2875,27 +2974,13 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET       | /registry/peers/events/unified/reverse | Same as above but in reverse chronological order. |
 | GET       | /registry/peers/events<br/>/unified/search/{text} | Search in the events timeline of all peer from the current locker, merged into a single timeline by time order. |
 | GET       | /registry/peers/events<br/>/unified/search/{text}/reverse | Same as above but in reverse chronological order. |
-| GET       | /registry/lockers/{label}<br/>/peers/targets/results | Get target invocation summary results for all client peer instances from the given labeled locker |
-| GET       | /registry/lockers/{label}<br/>/peers/targets<br/>/results?detailed=Y | Get invocation results broken down by targets for all client peer instances from the given labeled locker |
-| GET       | /registry/peers/lockers<br/>/targets/results | Get target invocation summary results for all client peer instances from current locker |
-| GET       | /registry/peers/lockers<br/>/targets/results?detailed=Y | Get invocation results broken down by targets for all client peer instances from the current locker |
-| GET       | /registry/lockers/{label}<br/>/peers/{peer}/{address}<br/>/locker/get/{path} | Get the data stored at the given path under the peer instance's locker under the given labeled locker. Using label `current` fetches data from the current labeled locker. |
-| GET       | /registry/peers/{peer}<br/>/{address}/locker/get/{path} | Get the data stored at the given path under the peer instance's locker under the current labeled locker |
-| GET       | /registry/lockers/{label}<br/>/peers/{peer}/{address} | Get the peer instance's locker under the given labeled locker, using `...` placeholder for stored data to reduce the download size (to just fetch locker metadata). |
-| GET       | /registry/lockers/{label}<br/>/peers/{peer}/{address}?data=y | Get the peer instance's locker under the given labeled locker with all stored data included. |
-| GET       | /registry/peers<br/>/{peer}/{address}/locker | Get the peer instance's locker under the current active labeled locker, using `...` placeholder for stored data to just fetch locker metadata |
-| GET       | /registry/peers/{peer}/{address}<br/>/locker?data=y | Get the peer instance's locker under the current active labeled locker with all stored data included. |
-| GET       | /registry/lockers/{label}<br/>/peers/{peer} | Get the lockers of all instances of the given peer under the given labeled locker, using `...` placeholder for stored data to just fetch locker metadata. |
-| GET       | /registry/lockers/{label}<br/>/peers/{peer}?data=y | Get the lockers of all instances of the given peer under the given labeled locker with all stored data included. |
-| GET       | /registry/peers/{peer}/locker | Get locker's data for all instances of the peer from currently active labeled locker, using `...` placeholder for stored data to just fetch locker metadata |
-| GET       | /registry/peers/{peer}<br/>/locker?data=y | Get locker's data for all instances of the peer from currently active labeled locker with all stored data included |
-| GET       | /registry/lockers/{label}/peers | Get the lockers of all peers under the given labeled locker, using `...` placeholder for stored data to just fetch locker metadata. |
-| GET       | /registry/lockers/{label}<br/>/peers?data=y | Get the lockers of all peers under the given labeled locker with all stored data included. |
-| GET       | /registry/peers/lockers | Get the lockers of all peers from currently active labeled locker, using `...` placeholder for stored data to just fetch locker metadata. |
-| GET       | /registry/peers<br/>/lockers?data=y | Get the lockers of all peers from currently active labeled locker with all stored data included. |
-||||
-|<a name="registry-peers-targets-apis"></a>| ** Peer Targets APIs ** ||
-||||
+
+###### <small> [Back to TOC](#toc) </small>
+
+<a name="registry-peers-targets-apis"></a>
+#### Registry Peers Targets APIs
+|METHOD|URI|Description|
+|---|---|---|
 | GET       | /registry/peers/targets | Get all registered targets for all peers |
 | POST      | /registry/peers<br/>/{peer}/targets/add | Add a target to be sent to a peer. See [Peer Target JSON Schema](#peer-target-json-schema). Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/{peer}<br/>/targets/{targets}/remove | Remove given targets for a peer |
@@ -2910,9 +2995,13 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST, PUT | /registry/peers/targets<br/>/results/all/{enable}  | Controls whether results should be summarized across all targets. Disabling this when not needed can improve performance. Disabled by default. |
 | POST, PUT | /registry/peers/targets<br/>/results/invocations/{enable}  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
 | POST      | /registry/peers/targets/clear   | Remove all targets from all peers |
-||||
-|<a name="registry-peers-jobs-apis"></a>| ** Peer Jobs APIs ** ||
-||||
+
+###### <small> [Back to TOC](#toc) </small>
+
+<a name="registry-peers-jobs-apis"></a>
+#### Registry Peers Jobs APIs
+|METHOD|URI|Description|
+|---|---|---|
 | GET       | /registry/peers/jobs | Get all registered jobs for all peers |
 | POST      | /registry/peers/{peer}<br/>/jobs/add | Add a job to be sent to a peer. See [Peer Job JSON Schema](#peer-job-json-schema). Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/{peer}<br/>/jobs/{jobs}/remove | Remove given jobs for a peer. |
@@ -2923,27 +3012,36 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | POST, PUT | /registry/peers/{peer}<br/>/jobs/{jobs}/stop | Stop given jobs on the given peer |
 | POST, PUT | /registry/peers/{peer}<br/>/jobs/stop/all | Stop all jobs on the given peer |
 | POST      | /registry/peers/jobs/clear   | Remove all jobs from all peers. |
-||||
-|<a name="registry-peers-trackheaders-apis"></a>| ** Peer Track Headers APIs *** ||
-||||
+
+###### <small> [Back to TOC](#toc) </small>
+
+<a name="registry-peers-config-apis"></a>
+#### Registry Peers Config APIs
+|METHOD|URI|Description|
+|---|---|---|
 | POST, PUT | /registry/peers<br/>/track/headers/{headers} | Configure headers to be tracked by client invocations on peers. Pushed immediately as well as upon start of a new peer instance. |
 | GET | /registry/peers/track/headers | Get a list of headers configured for tracking by the above `POST` API. |
-||||
-|<a name="registry-peers-probes-apis"></a>| ** Peer Probes APIs ** ||
-||||
 | POST, PUT | /registry/peers/probes<br/>/readiness/set?uri={uri} | Configure readiness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probes<br/>/liveness/set?uri={uri} | Configure liveness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probes<br/>/readiness/set/status={status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probes<br/>/liveness/set/status={status} | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
 | GET | /registry/peers/probes | Get probe configuration given to registry via any of the above 4 probe APIs. |
-||||
-|<a name="registry-peers-call-apis"></a>| ** APIs to call any API on Peers ** ||
-||||
+
+###### <small> [Back to TOC](#toc) </small>
+
+<a name="registry-peers-call-apis"></a>
+#### Registry Peers Call APIs
+|METHOD|URI|Description|
+|---|---|---|
 | GET, POST, PUT | /registry/peers/{peer}<br/>/call?uri={uri} | Invoke the given `URI` on the given `peer`, using the HTTP method and payload from this request |
 | GET, POST, PUT | /registry/peers/call?uri={uri} | Invoke the given `URI` on all `peers`, using the HTTP method and payload from this request |
-||||
-|<a name="registry-dump-apis"></a>| ** Registry clone, dump and load APIs ** ||
-||||
+
+###### <small> [Back to TOC](#toc) </small>
+
+<a name="registry-clone-dump-and-load-apis"></a>
+#### Registry Clone, Dump and Load APIs
+|METHOD|URI|Description|
+|---|---|---|
 | POST | /registry/cloneFrom?url={url} | Clone data from another registry instance at the given URL. The current goto instance will download `peers`, `lockers`, `targets`, `jobs`, `tracking headers` and `probes`. The peer pods downloaded from other registry are not used for any invocation by this registry, it just becomes available locally for information purpose. Any new pods connecting to this registry using the same peer labels will use the downloaded targets, jobs, etc. |
 | GET | /lockers/{label}/dump/{path} | Dump data stored at the given key path in the given labeled locker. |
 | GET | /lockers/current/dump/{path} | Dump data stored at the given key path from the current labeled locker. |
@@ -2952,6 +3050,8 @@ By registering a worker instance to a registry instance, we get a few benefits:
 | GET | /lockers/all/dump | Dump contents of all labeled lockers. |
 | GET | /registry/dump | Dump current registry configs and locker data in json format. |
 | POST | /registry/load | Load registry configs and locker data from json dump produced via `/dump` API. |
+
+###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
@@ -3000,6 +3100,8 @@ By registering a worker instance to a registry instance, we get a few benefits:
 - `Peer Registered`
 - `Peer Startup Data`
 - `Peer Deregistered`
+
+###### <small> [Back to TOC](#toc) </small>
 
 #### Peer JSON Schema 
 (to register a peer via /registry/peers/add)
@@ -5226,3 +5328,4 @@ $ curl -s localhost:8080/registry/peers/lockers/targets/results?detailed=Y
 </p>
 </details>
 
+###### <small> [Back to TOC](#toc) </small>

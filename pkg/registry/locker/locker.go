@@ -182,6 +182,23 @@ func unsafeGetLockerView(locker map[string]*LockerData, lockerView map[string]*L
   }
 }
 
+func unsafeTrimLocker(locker map[string]*LockerData, lockerView map[string]*LockerData, level int) {
+  if locker != nil && lockerView != nil && level > 0 {
+    for key, ld := range locker {
+      if ld != nil {
+        ldView := createOrGetLockerData(lockerView, key, ld.FirstReported)
+        if ld.Data != "" {
+          ldView.Data = ld.Data
+        }
+        ldView.LastReported = ld.LastReported
+        unsafeTrimLocker(ld.SubKeys, ldView.SubKeys, level-1)
+      } else {
+        lockerView[key] = nil
+      }
+    }
+  }
+}
+
 func newDataLocker() *DataLocker {
   dataLocker := &DataLocker{}
   dataLocker.init()
@@ -285,6 +302,20 @@ func (pl *PeerLocker) GetLockerView() *PeerLocker {
   for address, il := range pl.InstanceLockers {
     ilView := plView.createOrGetInstanceLocker(address)
     unsafeGetLockerView(il.Locker, ilView.Locker)
+    ilView.Active = il.Active
+  }
+  return plView
+}
+
+func (pl *PeerLocker) Trim(level int) *PeerLocker {
+  pl.lock.RLock()
+  defer pl.lock.RUnlock()
+  plView := newPeerLocker()
+  unsafeTrimLocker(pl.DataLocker.Locker, plView.DataLocker.Locker, level)
+  plView.DataLocker.Active = pl.DataLocker.Active
+  for address, il := range pl.InstanceLockers {
+    ilView := plView.createOrGetInstanceLocker(address)
+    unsafeTrimLocker(il.Locker, ilView.Locker, level)
     ilView.Active = il.Active
   }
   return plView
@@ -469,6 +500,20 @@ func (cl *CombiLocker) GetLockerView() *CombiLocker {
   combiView.Current = cl.Current
   combiView.DataLocker.Active = cl.DataLocker.Active
   unsafeGetLockerView(cl.DataLocker.Locker, combiView.DataLocker.Locker)
+  return combiView
+}
+
+func (cl *CombiLocker) Trim(level int) *CombiLocker {
+  cl.lock.RLock()
+  defer cl.lock.RUnlock()
+  combiView := NewCombiLocker(cl.Label)
+  combiView.PeerLockers = map[string]*PeerLocker{}
+  for peer, pl := range cl.PeerLockers {
+    combiView.PeerLockers[peer] = pl.Trim(level)
+  }
+  combiView.Current = cl.Current
+  combiView.DataLocker.Active = cl.DataLocker.Active
+  unsafeTrimLocker(cl.DataLocker.Locker, combiView.DataLocker.Locker, level)
   return combiView
 }
 
@@ -766,7 +811,10 @@ func (ll *LabeledLockers) GetPeerEvents(locker string, peerNames []string, unifi
     lockerEvents := l.GetPeerEvents(peerNames, unified, reverse)
     for peer, peerEvents := range lockerEvents {
       if unified {
-        peer = "all"
+        peer = locker
+        if peer == "" {
+          peer = "all"
+        }
       }
       for _, event := range peerEvents {
         eventsMap[peer] = append(eventsMap[peer], event)
@@ -785,7 +833,10 @@ func (ll *LabeledLockers) SearchInPeerEvents(locker string, peerNames []string, 
     lockerEvents := l.SearchInPeerEvents(peerNames, pattern, unified, reverse)
     for peer, peerEvents := range lockerEvents {
       if unified {
-        peer = "all"
+        peer = locker
+        if peer == "" {
+          peer = "all"
+        }
       }
       for _, event := range peerEvents {
         eventsMap[peer] = append(eventsMap[peer], event)

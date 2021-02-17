@@ -595,7 +595,7 @@ func prepareTargetURL(url string, sendID bool, requestId string) (string, string
 }
 
 func processStopRequest(tracker *InvocationTracker) {
-  for !tracker.Status.Stopped && !tracker.Status.Stopped {
+  for !tracker.Status.StopRequested && !tracker.Status.Stopped {
     tracker.lock.RLock()
     stopChannel := tracker.StopChannel
     tracker.lock.RUnlock()
@@ -616,13 +616,11 @@ func processStopRequest(tracker *InvocationTracker) {
           }
         } else {
           tracker.lock.Lock()
-          tracker.Status.Stopped = true
           remaining := (tracker.Target.RequestCount * tracker.Target.Replicas) - tracker.Status.CompletedReplicas
           tracker.lock.Unlock()
           if global.EnableInvocationLogs {
             log.Printf("[%s]: Invocation[%d]: Received stop request for target [%s] with remaining requests [%d]\n", hostLabel, tracker.ID, tracker.Target.Name, remaining)
           }
-          removeTargetTracker(tracker.ID, tracker.Target.Name)
         }
       } else {
         time.Sleep(2 * time.Second)
@@ -679,6 +677,7 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
 
   extractTargetHost(target)
   completedCount := 0
+  remaining := 0
   time.Sleep(target.initialDelayD)
   events.SendEventJSON(Client_InvocationStarted, target)
   if global.EnableInvocationLogs {
@@ -691,10 +690,12 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
     })
   }
   go processStopRequest(tracker)
-  for {
-    if tracker.Status.StopRequested || tracker.Status.Stopped {
-      remaining := (tracker.Target.RequestCount * tracker.Target.Replicas) - tracker.Status.CompletedReplicas
-      log.Printf("[%s]: Invocation[%d]: Stopping target [%s] with remaining requests [%d]\n", hostLabel, tracker.ID, tracker.Target.Name, remaining)
+  for !tracker.Status.Stopped {
+    if tracker.Status.StopRequested {
+      tracker.Status.Stopped = true
+      removeTargetTracker(tracker.ID, tracker.Target.Name)
+      remaining = (tracker.Target.RequestCount * tracker.Target.Replicas) - tracker.Status.CompletedReplicas
+      log.Printf("[%s]: Invocation[%d]: Stopping target [%s] with remaining requests [%d]\n", hostLabel, trackerID, target.Name, remaining)
       break
     }
     wg := &sync.WaitGroup{}
@@ -741,7 +742,7 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
   DeregisterInvocation(tracker)
   events.SendEventJSON(Client_InvocationFinished, map[string]interface{}{"target": target.Name, "status": tracker.Status})
   if global.EnableInvocationLogs {
-    log.Printf("[%s]: Invocation[%d]: Finished\n", hostLabel, trackerID)
+    log.Printf("[%s]: Invocation[%d]: finished for  target [%s] with remaining requests [%d]\n", hostLabel, trackerID, target.Name, remaining)
   }
   return results
 }
@@ -786,6 +787,9 @@ func doInvoke(index uint32, targetID string, target *InvocationSpec,
       if i > 0 {
         result.Retries++
         time.Sleep(target.retryDelayD)
+      }
+      if tracker.Status.StopRequested || tracker.Status.Stopped {
+        break
       }
       tracker.lock.Lock()
       tracker.Status.TotalRequests++
@@ -854,7 +858,12 @@ func unsafeReportRepeatedResponse(tracker *InvocationTracker) {
 }
 
 func doProcessResponse(index uint32, targetID string, resp *http.Response, result *InvocationResult, tracker *InvocationTracker) {
-  defer resp.Body.Close()
+  if resp == nil {
+    return
+  }
+  if resp.Body != nil {
+    defer resp.Body.Close()
+  }
   for header, values := range resp.Header {
     result.Headers[header] = values
   }
@@ -881,11 +890,13 @@ func doProcessResponse(index uint32, targetID string, resp *http.Response, resul
   tracker.lock.Unlock()
 
   var responseLength int64
-  if target.CollectResponse {
-    result.Body = util.Read(resp.Body)
-    responseLength = int64(len(result.Body))
-  } else {
-    responseLength, _ = io.Copy(ioutil.Discard, resp.Body)
+  if resp.Body != nil {
+    if target.CollectResponse {
+      result.Body = util.Read(resp.Body)
+      responseLength = int64(len(result.Body))
+    } else {
+      responseLength, _ = io.Copy(ioutil.Discard, resp.Body)
+    }
   }
   if global.EnableInvocationLogs {
     headerLogs := []string{}
@@ -956,15 +967,18 @@ func handleABCall(index uint32, targetID string, target *InvocationSpec, aReques
     result.URL = burl
     result.RequestID = aRequestId + "-B-" + strconv.Itoa(i+1)
     if resp, err := doInvoke(index, targetID, target, client, result, tracker); err == nil {
-      doProcessResponse(index, targetID, resp, result, tracker)
+      if !tracker.Status.StopRequested || tracker.Status.Stopped {
+        doProcessResponse(index, targetID, resp, result, tracker)
+      }
     } else {
       processError(index, targetID, result, err, tracker)
     }
-    publishResult(index, targetID, result, sinks, resultChannel)
-    tracker.lock.Lock()
-    tracker.Status.ABCount++
-    tracker.lock.Unlock()
-
+    if !tracker.Status.StopRequested || tracker.Status.Stopped {
+      publishResult(index, targetID, result, sinks, resultChannel)
+      tracker.lock.Lock()
+      tracker.Status.ABCount++
+      tracker.lock.Unlock()
+    }
   }
 }
 
@@ -979,13 +993,17 @@ func invokeTarget(tracker *InvocationTracker, targetID string, target *Invocatio
   result.URL = target.URL
   result.Headers = map[string][]string{}
   if resp, err := doInvoke(trackerID, targetID, target, client, result, tracker); err == nil {
-    doProcessResponse(trackerID, targetID, resp, result, tracker)
-    if target.ABMode {
-      handleABCall(trackerID, targetID, target, result.RequestID, client, sinks, resultChannel, tracker)
+    if !tracker.Status.StopRequested || tracker.Status.Stopped {
+      doProcessResponse(trackerID, targetID, resp, result, tracker)
+      if target.ABMode {
+        handleABCall(trackerID, targetID, target, result.RequestID, client, sinks, resultChannel, tracker)
+      }
     }
   } else {
     processError(trackerID, targetID, result, err, tracker)
   }
-  publishResult(trackerID, targetID, result, sinks, resultChannel)
+  if !tracker.Status.StopRequested || tracker.Status.Stopped {
+    publishResult(trackerID, targetID, result, sinks, resultChannel)
+  }
   wg.Done()
 }
