@@ -1,18 +1,21 @@
 package registry
 
 import (
-	"errors"
-	"fmt"
-	"goto/pkg/util"
-	"log"
-	"net"
-	"net/http"
-	"strings"
-	"sync"
-	"time"
+  "errors"
+  "fmt"
+  "goto/pkg/util"
+  "log"
+  "net"
+  "net/http"
+  "strings"
+  "sync"
+  "time"
 )
 
-func newPeerRequest(method string, url string, headers map[string][]string, payload string) (*http.Request, error) {
+type OnPodDone func(string, *Pod, interface{}, error)
+type OnPeerDone func(string)
+
+func newPeerRequest(method string, url string, headers http.Header, payload string) (*http.Request, error) {
   var payloadReader *strings.Reader
   if len(payload) > 0 {
     payloadReader = strings.NewReader(payload)
@@ -33,11 +36,19 @@ func newPeerRequest(method string, url string, headers map[string][]string, payl
   }
 }
 
-func invokePeerAPI(pod *Pod, method, uri string, headers map[string][]string, payload string, expectedStatus int) (bool, string, error) {
+func invokePeerAPI(pod *Pod, method, uri string, headers http.Header, payload string, expectedStatus int) (bool, interface{}, error) {
   if req, err := newPeerRequest(method, pod.URL+uri, headers, payload); err == nil {
     if resp, err := pod.client.Do(req); err == nil {
-      data := util.Read(resp.Body)
+      var data interface{}
       defer resp.Body.Close()
+      if util.IsJSONContentType(resp) {
+        data = map[string]interface{}{}
+        if err := util.ReadJsonPayloadFromBody(resp.Body, &data); err != nil {
+          fmt.Println(err.Error())
+        }
+      } else {
+        data = util.Read(resp.Body)
+      }
       if resp.StatusCode == expectedStatus {
         return true, data, nil
       } else {
@@ -51,15 +62,15 @@ func invokePeerAPI(pod *Pod, method, uri string, headers map[string][]string, pa
   }
 }
 
-func invokePod(peer string, pod *Pod, peerPodCount int, method string, uri string, headers map[string][]string, payload string,
-  expectedStatus int, retryCount int, onPodDone func(string, *Pod, string, error)) bool {
+func invokePod(peer string, pod *Pod, peerPodCount int, method string, uri string, headers http.Header,
+  payload string, expectedStatus int, retryCount int, onPodDone OnPodDone) bool {
   if pod.client == nil || pod.Offline {
     log.Printf("Skipping offline/loaded/cloned Pod %s for Peer %s\n", pod.Address, peer)
     return true
   }
   var success bool
   var err error
-  var response string
+  var response interface{}
   for i := 0; i <= retryCount; i++ {
     success, response, err = invokePeerAPI(pod, method, uri, headers, payload, expectedStatus)
     if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
@@ -86,9 +97,9 @@ func invokePod(peer string, pod *Pod, peerPodCount int, method string, uri strin
   return success
 }
 
-func invokeForPodsWithHeadersAndPayload(peerPods map[string][]*Pod, method string, uri string, headers map[string][]string, payload string, expectedStatus int, retryCount int, useUnhealthy bool,
-  onPodDone func(string, *Pod, string, error), onPeerDone ...func(string)) map[string]map[string]bool {
-  result := map[string]map[string]bool{}
+func invokeForPodsWithHeadersAndPayload(peerPods PeerPods, method string, uri string, headers http.Header,
+  payload string, expectedStatus int, retryCount int, useUnhealthy bool, onPodDone OnPodDone, onPeerDone ...OnPeerDone) PeerResults {
+  result := PeerResults{}
   resultLock := sync.Mutex{}
   wg := &sync.WaitGroup{}
   for p := range peerPods {
@@ -96,7 +107,7 @@ func invokeForPodsWithHeadersAndPayload(peerPods map[string][]*Pod, method strin
     pods := peerPods[p]
     resultLock.Lock()
     if result[peer] == nil {
-      result[peer] = map[string]bool{}
+      result[peer] = PodResults{}
     }
     resultLock.Unlock()
     for i := range pods {
@@ -130,8 +141,8 @@ func invokeForPodsWithHeadersAndPayload(peerPods map[string][]*Pod, method strin
   return result
 }
 
-func invokeForPods(peerPods map[string][]*Pod, method string, uri string, expectedStatus int, retryCount int, useUnhealthy bool,
-  onPodDone func(string, *Pod, string, error), onPeerDone ...func(string)) map[string]map[string]bool {
+func invokeForPods(peerPods PeerPods, method string, uri string, expectedStatus int, retryCount int, useUnhealthy bool,
+  onPodDone OnPodDone, onPeerDone ...OnPeerDone) PeerResults {
   return invokeForPodsWithHeadersAndPayload(peerPods, method, uri, nil, "", expectedStatus, retryCount, useUnhealthy,
     onPodDone, onPeerDone...)
 }

@@ -37,12 +37,12 @@ func RegisterPeer(peerName, peerAddress string) {
         strings.NewReader(util.ToJSON(peer))); err == nil {
         defer resp.Body.Close()
         if resp.StatusCode == 200 || resp.StatusCode == 202 {
-          events.SendEventJSONDirect("Peer Registered", peer)
+          events.SendEventJSONDirect("Peer Registered", peerName, peer)
           registered = true
           log.Printf("Registered as peer [%s] with registry [%s]\n", global.PeerName, global.RegistryURL)
           data := &registry.PeerData{}
           if err := util.ReadJsonPayloadFromBody(resp.Body, data); err == nil {
-            events.SendEventJSONDirect("Peer Startup Data", data)
+            events.SendEventJSONDirect("Peer Startup Data", peerName, data)
             log.Printf("Read startup data from registry: %+v\n", *data)
             go setupStartupTasks(data)
             go startRegistryReminder(peer)
@@ -117,7 +117,6 @@ func setupStartupTasks(peerData *registry.PeerData) {
   }
   port := global.ServerPort
   pc := target.GetClientForPort(port)
-  pj := job.GetPortJobs(port)
 
   log.Printf("Got %d targets, %d jobs\n", len(targets), len(jobs))
 
@@ -141,9 +140,9 @@ func setupStartupTasks(peerData *registry.PeerData) {
     }
   }
 
-  for _, job := range jobs {
-    log.Printf("%+v\n", job)
-    pj.AddJob(&job.Job)
+  for _, j := range jobs {
+    log.Printf("%+v\n", j)
+    job.Jobs.AddJob(&j.Job)
   }
 
   for _, t := range targets {

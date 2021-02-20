@@ -17,6 +17,7 @@ import (
 
 type Event struct {
   Title    string      `json:"title"`
+  Summary  string      `json:"summary"`
   Data     interface{} `json:"data"`
   At       time.Time   `json:"at"`
   Peer     string      `json:"peer"`
@@ -48,9 +49,9 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   eventsRouter := r.PathPrefix("/events").Subrouter()
   util.AddRoute(eventsRouter, "/flush", flushEvents, "POST")
   util.AddRoute(eventsRouter, "/clear", clearEvents, "POST")
+  util.AddRouteMultiQ(eventsRouter, "/search/{text}", searchEvents, "GET", "data", "{data}", "reverse", "{reverse}")
   util.AddRoute(eventsRouter, "/search/{text}", searchEvents, "GET")
-  util.AddRoute(eventsRouter, "/search/{text}/reverse", searchEvents, "GET")
-  util.AddRoute(eventsRouter, "/reverse", getEvents, "GET")
+  util.AddRouteMultiQ(eventsRouter, "", getEvents, "GET", "data", "{data}", "reverse", "{reverse}")
   util.AddRoute(eventsRouter, "", getEvents, "GET")
 }
 
@@ -68,24 +69,38 @@ func StopSender() {
   }
 }
 
-func newRequestEvent(title string, data interface{}, at time.Time, r *http.Request) *Event {
+func newEvent(title, summary string, data interface{}, at time.Time, peer, host string) *Event {
+  if summary == "" {
+    if text, ok := data.(string); ok {
+      n := len(text)
+      if n > 20 {
+        summary = text[:20] + "..."
+      } else {
+        summary = text[:n]
+      }
+    }
+  }
+  return &Event{Title: title, Summary: summary, Data: data, At: at, Peer: peer, PeerHost: host}
+}
+
+func newRequestEvent(title, summary string, data interface{}, at time.Time, r *http.Request) *Event {
   host := ""
   if r != nil {
     host = util.GetCurrentListenerLabel(r)
   } else {
     host = global.HostLabel
   }
-  return &Event{Title: title, Data: data, At: at, Peer: global.PeerName, PeerHost: host}
+  return newEvent(title, summary, data, at, global.PeerName, host)
 }
 
-func newPortEvent(title string, data interface{}, at time.Time, port int) *Event {
-  return &Event{Title: title, Data: data, At: at, Peer: global.PeerName, PeerHost: global.GetHostLabelForPort(port)}
+func newPortEvent(title, summary string, data interface{}, at time.Time, port int) *Event {
+  return newEvent(title, summary, data, at, global.PeerName, global.GetHostLabelForPort(port))
 }
 
 func SendRequestEvent(title, data string, r *http.Request) time.Time {
   at := time.Now()
   if global.EnableEvents {
-    event := newRequestEvent(title, map[string]string{"details": data}, at, r)
+    event := newRequestEvent(title, "", data, at, r)
     eventChannel <- event
   }
   return at
@@ -98,7 +113,7 @@ func SendEvent(title, data string) time.Time {
 func SendEventForPort(port int, title, data string) time.Time {
   at := time.Now()
   if global.EnableEvents {
-    event := newPortEvent(title, map[string]string{"details": data}, at, port)
+    event := newPortEvent(title, "", data, at, port)
     eventChannel <- event
   }
   return at
@@ -107,38 +122,38 @@ func SendEventForPort(port int, title, data string) time.Time {
 func SendEventDirect(title, data string) time.Time {
   at := time.Now()
   if global.EnableEvents {
-    event := newPortEvent(title, map[string]string{"details": data}, at, global.ServerPort)
+    event := newPortEvent(title, "", data, at, global.ServerPort)
     storeAndPublishEvent(event)
   }
   return at
 }
 
-func SendRequestEventJSON(title string, data interface{}, r *http.Request) time.Time {
+func SendRequestEventJSON(title, summary string, data interface{}, r *http.Request) time.Time {
   at := time.Now()
   if global.EnableEvents {
-    event := newRequestEvent(title, data, at, r)
+    event := newRequestEvent(title, summary, data, at, r)
     eventChannel <- event
   }
   return at
 }
 
-func SendEventJSON(title string, data interface{}) time.Time {
-  return SendEventJSONForPort(global.ServerPort, title, data)
+func SendEventJSON(title, summary string, data interface{}) time.Time {
+  return SendEventJSONForPort(global.ServerPort, title, summary, data)
 }
 
-func SendEventJSONForPort(port int, title string, data interface{}) time.Time {
+func SendEventJSONForPort(port int, title, summary string, data interface{}) time.Time {
   at := time.Now()
   if global.EnableEvents {
-    event := newPortEvent(title, data, at, port)
+    event := newPortEvent(title, summary, data, at, port)
     eventChannel <- event
   }
   return at
 }
 
-func SendEventJSONDirect(title string, data interface{}) time.Time {
+func SendEventJSONDirect(title, summary string, data interface{}) time.Time {
   at := time.Now()
   if global.EnableEvents {
-    event := newPortEvent(title, data, at, global.ServerPort)
+    event := newPortEvent(title, summary, data, at, global.ServerPort)
     storeAndPublishEvent(event)
   }
   return at
@@ -166,7 +181,7 @@ func FlushEvents() {
       }
     }
     lock.RUnlock()
-    SendEventJSONDirect("Flushed Traffic Report", trackers)
+    SendEventJSONDirect("Flushed Traffic Report", "", trackers)
     lock.Lock()
     trafficEventTracker = map[int]map[string]*EventTracker{}
     lock.Unlock()
@@ -227,7 +242,7 @@ func processTrafficEvent(traffic []interface{}) {
     oldStatusCode = tracker.StatusCode
     oldDetails = tracker.TrafficDetails
     if tracker.StatusRepeatCount > 1 {
-      SendEventJSONForPort(port, "Repeated URI Status", map[string]interface{}{"details": tracker.summary(), "data": tracker})
+      SendEventJSONForPort(port, "Repeated URI Status", tracker.summary(), tracker)
     }
     tracker = nil
   }
@@ -321,16 +336,29 @@ func SortEvents(eventsList []*Event, reverse bool) {
 }
 
 func getEvents(w http.ResponseWriter, r *http.Request) {
+  reverse := util.GetBoolParamValue(r, "reverse")
+  getData := util.GetBoolParamValue(r, "data")
+  filteredEvents := []*Event{}
   lock.RLock()
-  defer lock.RUnlock()
-  reverse := strings.Contains(r.RequestURI, "reverse")
-  SortEvents(eventsList, reverse)
-  util.WriteJsonPayload(w, eventsList)
+  if getData {
+    for _, event := range eventsList {
+      filteredEvents = append(filteredEvents, event)
+    }
+  } else {
+    for _, event := range eventsList {
+      filteredEvents = append(filteredEvents, newEvent(event.Title, event.Summary, "...", event.At, event.Peer, event.PeerHost))
+    }
+  }
+  lock.RUnlock()
+  SortEvents(filteredEvents, reverse)
+  util.WriteJsonPayload(w, filteredEvents)
 }
 
 func searchEvents(w http.ResponseWriter, r *http.Request) {
   msg := ""
   key := util.GetStringParamValue(r, "text")
+  reverse := util.GetBoolParamValue(r, "reverse")
+  getData := util.GetBoolParamValue(r, "data")
   if key == "" {
     msg = "Cannot search. No key given."
     fmt.Fprintln(w, msg)
@@ -344,13 +372,14 @@ func searchEvents(w http.ResponseWriter, r *http.Request) {
     }
     lock.RUnlock()
     for _, event := range unfilteredEvents {
-      data := fmt.Sprint(event.Data)
-      if pattern.MatchString(event.Title) || pattern.MatchString(data) ||
-        pattern.MatchString(event.PeerHost) || pattern.MatchString(event.At.String()) {
+      data := util.ToJSON(event)
+      if pattern.MatchString(data) {
+        if !getData {
+          event = newEvent(event.Title, event.Summary, "...", event.At, event.Peer, event.PeerHost)
+        }
         filteredEvents = append(filteredEvents, event)
       }
     }
-    reverse := strings.Contains(r.RequestURI, "reverse")
     SortEvents(filteredEvents, reverse)
     util.WriteJsonPayload(w, filteredEvents)
     msg = fmt.Sprintf("Reported results for key [%s] search", key)
@@ -363,7 +392,7 @@ func Middleware(next http.Handler) http.Handler {
     if next != nil {
       next.ServeHTTP(w, r)
     }
-    if !util.IsAdminRequest(r) {
+    if !util.IsKnownNonTraffic(r) && !util.IsFilteredRequest(r) {
       statusCode, details := util.ReportTrafficEvent(r)
       if details != nil {
         TrackTrafficEvent(statusCode, r, details...)

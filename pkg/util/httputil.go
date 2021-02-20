@@ -40,6 +40,7 @@ var (
   fillerRegexp           = regexp.MustCompile("({.+?})")
   contentRegexp          = regexp.MustCompile("(?i)content")
   hostRegexp             = regexp.MustCompile("(?i)^host$")
+  utf8Regexp             = regexp.MustCompile("(?i)utf-8")
 )
 
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=~`{}[];:,.<>/?"
@@ -53,6 +54,7 @@ var sizes map[string]uint64 = map[string]uint64{
 
 type RequestStore struct {
   LogMessages            []string
+  IsVersionRequest       bool
   IsFilteredRequest      bool
   IsLockerRequest        bool
   IsPeerEventsRequest    bool
@@ -503,18 +505,32 @@ func IsHealthRequest(r *http.Request) bool {
   return rs != nil && rs.IsProbeRequest
 }
 
+func IsVersionRequest(r *http.Request) bool {
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
+  return rs != nil && rs.IsVersionRequest
+}
+
+func IsFilteredRequest(r *http.Request) bool {
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
+  return rs != nil && rs.IsFilteredRequest
+}
+
 func IsKnownRequest(r *http.Request) bool {
-  return IsProbeRequest(r) || IsReminderRequest(r) || IsHealthRequest(r) || IsMetricsRequest(r) ||
-    IsLockerRequest(r) || IsAdminRequest(r) || IsStatusRequest(r) || IsDelayRequest(r) || IsPayloadRequest(r)
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
+  return rs != nil && (rs.IsProbeRequest || rs.IsReminderRequest || rs.IsHealthRequest ||
+    rs.IsMetricsRequest || rs.IsVersionRequest || rs.IsLockerRequest ||
+    rs.IsAdminRequest || rs.IsStatusRequest || rs.IsDelayRequest || rs.IsPayloadRequest)
 }
 
 func IsKnownNonTraffic(r *http.Request) bool {
-  return IsProbeRequest(r) || IsReminderRequest(r) || IsHealthRequest(r) ||
-    IsMetricsRequest(r) || IsLockerRequest(r) || IsAdminRequest(r)
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
+  return rs != nil && (rs.IsProbeRequest || rs.IsReminderRequest || rs.IsHealthRequest ||
+    rs.IsMetricsRequest || rs.IsVersionRequest || rs.IsLockerRequest || rs.IsAdminRequest)
 }
 
 func IsKnownTraffic(r *http.Request) bool {
-  return IsStatusRequest(r) || IsDelayRequest(r) || IsPayloadRequest(r)
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
+  return rs != nil && (rs.IsStatusRequest || rs.IsDelayRequest || rs.IsPayloadRequest)
 }
 
 func PathRouter(r *mux.Router, path string) *mux.Router {
@@ -559,10 +575,18 @@ func AddRouteQWithPort(r *mux.Router, route string, f func(http.ResponseWriter, 
 func AddRouteMultiQ(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
   r.HandleFunc(route, f).Queries(queryParams...).Methods(method)
   r.HandleFunc(route+"/", f).Queries(queryParams...).Methods(method)
-  for i := 0; i < len(queryParams); i+= 2 {
+  for i := 0; i < len(queryParams); i += 2 {
+    for j := i + 2; j < len(queryParams); j += 2 {
+      r.HandleFunc(route, f).Queries(queryParams[i], queryParams[i+1], queryParams[j], queryParams[j+1]).Methods(method)
+      r.HandleFunc(route+"/", f).Queries(queryParams[i], queryParams[i+1], queryParams[j], queryParams[j+1]).Methods(method)
+    }
+  }
+  for i := 0; i < len(queryParams); i += 2 {
     r.HandleFunc(route, f).Queries(queryParams[i], queryParams[i+1]).Methods(method)
     r.HandleFunc(route+"/", f).Queries(queryParams[i], queryParams[i+1]).Methods(method)
   }
+  r.HandleFunc(route, f).Methods(method)
+  r.HandleFunc(route+"/", f).Methods(method)
 }
 
 func AddRouteMultiQWithPort(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
@@ -625,6 +649,20 @@ func ToJSON(o interface{}) string {
     return string(output)
   }
   return fmt.Sprintf("%+v", o)
+}
+
+func IsJSONContentType(r *http.Response) bool {
+  if contentType := r.Header.Get("Content-Type"); contentType != "" {
+    return strings.EqualFold(contentType, "application/json")
+  }
+  return false
+}
+
+func IsUTF8ContentType(r *http.Response) bool {
+  if contentType := r.Header.Get("Content-Type"); contentType != "" {
+    return utf8Regexp.MatchString(contentType)
+  }
+  return false
 }
 
 func Read(r io.Reader) string {

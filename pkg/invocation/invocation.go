@@ -679,7 +679,7 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
   completedCount := 0
   remaining := 0
   time.Sleep(target.initialDelayD)
-  events.SendEventJSON(Client_InvocationStarted, target)
+  events.SendEventJSON(Client_InvocationStarted, fmt.Sprintf("%d-%s", trackerID, target.Name), target)
   if global.EnableInvocationLogs {
     log.Printf("[%s]: Invocation[%d]: Started target [%s] with total requests [%d]\n", hostLabel, trackerID, target.Name, (target.Replicas * target.RequestCount))
   }
@@ -740,7 +740,8 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
     }
   }
   DeregisterInvocation(tracker)
-  events.SendEventJSON(Client_InvocationFinished, map[string]interface{}{"target": target.Name, "status": tracker.Status})
+  events.SendEventJSON(Client_InvocationFinished, fmt.Sprintf("%d-%s", trackerID, target.Name),
+    map[string]interface{}{"id": trackerID, "target": target.Name, "status": tracker.Status})
   if global.EnableInvocationLogs {
     log.Printf("[%s]: Invocation[%d]: finished for  target [%s] with remaining requests [%d]\n", hostLabel, trackerID, target.Name, remaining)
   }
@@ -844,14 +845,16 @@ func unsafeReportRepeatedResponse(tracker *InvocationTracker) {
   if tracker.lastStatusCount > 1 {
     msg := fmt.Sprintf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Response Status [%d] Repeated x[%d]",
       hostLabel, tracker.ID, target.Name, target.URL, target.BURLS, tracker.lastStatusCode, tracker.lastStatusCount)
-    events.SendEvent(Client_InvocationRepeatedResponse, msg)
+    events.SendEventJSON(Client_InvocationRepeatedResponse, fmt.Sprintf("%d-%s", tracker.ID, target.Name),
+      map[string]interface{}{"id": tracker.ID, "details": msg})
     tracker.lastStatusCount = 0
     tracker.lastStatusCode = -1
   }
   if tracker.lastErrorCount > 1 {
     msg := fmt.Sprintf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Failiure [%s] Repeated x[%d]",
       hostLabel, tracker.ID, target.Name, target.URL, target.BURLS, tracker.lastError, tracker.lastErrorCount)
-    events.SendEvent(Client_InvocationRepeatedFailure, msg)
+    events.SendEventJSON(Client_InvocationRepeatedFailure, fmt.Sprintf("%d-%s", tracker.ID, target.Name),
+      map[string]interface{}{"id": tracker.ID, "details": msg})
     tracker.lastErrorCount = 0
     tracker.lastError = ""
   }
@@ -914,8 +917,9 @@ func doProcessResponse(index uint32, targetID string, resp *http.Response, resul
 
     tracker.lock.Lock()
     if !isRepeatStatus {
-      events.SendEvent(Client_InvocationResponse, fmt.Sprintf("[%s]: Invocation[%d]: Target %s Response Status: %s, URL: [%s], Payload Length: [%d]",
-        hostLabel, index, targetID, resp.Status, url, responseLength))
+      events.SendEventJSON(Client_InvocationResponse, fmt.Sprintf("%d-%s", tracker.ID, target.Name),
+        map[string]interface{}{"id": tracker.ID, "details": fmt.Sprintf("[%s]: Invocation[%d]: Target %s Response Status: %s, URL: [%s], Payload Length: [%d]",
+          hostLabel, index, targetID, resp.Status, url, responseLength)})
     }
     tracker.lock.Unlock()
   }
@@ -942,7 +946,8 @@ func processError(index uint32, targetID string, result *InvocationResult, err e
   msg := fmt.Sprintf("[%s]: Invocation[%d]: Target %s, url [%s] failed to invoke with error: %s, repeat count: [%d]",
     hostLabel, index, targetID, result.URL, err.Error(), tracker.lastErrorCount)
   if tracker.lastErrorCount == 0 {
-    events.SendEvent(Client_InvocationFailure, msg)
+    events.SendEventJSON(Client_InvocationFailure, fmt.Sprintf("%d-%s", tracker.ID, targetID),
+      map[string]interface{}{"id": tracker.ID, "details": msg})
   }
   tracker.lastError = err.Error()
   tracker.lastErrorCount++

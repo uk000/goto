@@ -244,7 +244,7 @@ func addTarget(w http.ResponseWriter, r *http.Request) {
     } else {
       w.WriteHeader(http.StatusOK)
       msg = fmt.Sprintf("Added target: %s", util.ToJSON(t))
-      events.SendRequestEventJSON(Client_TargetAdded, t, r)
+      events.SendRequestEventJSON(Client_TargetAdded, t.Name, t, r)
     }
   } else {
     w.WriteHeader(http.StatusBadRequest)
@@ -262,7 +262,7 @@ func removeTargets(w http.ResponseWriter, r *http.Request) {
     if getPortClient(r).removeTargets(targets) {
       w.WriteHeader(http.StatusOK)
       msg = fmt.Sprintf("Targets Removed: %+v", targets)
-      events.SendRequestEventJSON(Client_TargetsRemoved, targets, r)
+      events.SendRequestEventJSON(Client_TargetsRemoved, util.GetStringParamValue(r, "targets"), targets, r)
     } else {
       w.WriteHeader(http.StatusNotAcceptable)
       msg = fmt.Sprintf("Targets cannot be removed while traffic is running")
@@ -462,7 +462,7 @@ func (pc *PortClient) invokeTarget(target *invocation.InvocationSpec) {
   pc.targetsLock.Lock()
   pc.activeTargetsCount++
   pc.targetsLock.Unlock()
-  events.SendEventJSONForPort(pc.port, Client_TargetInvoked, map[string]interface{}{"target": target.Name, "tracker": tracker.ID})
+  events.SendEventJSONForPort(pc.port, Client_TargetInvoked, target.Name, tracker)
   invocation.StartInvocation(tracker)
   pc.targetsLock.Lock()
   pc.activeTargetsCount--

@@ -256,7 +256,8 @@ func addOrUpdateListenerAndRespond(w http.ResponseWriter, r *http.Request, updat
   if err := util.ReadJson(body, l); err != nil {
     w.WriteHeader(http.StatusBadRequest)
     msg = fmt.Sprintf("Failed to parse json with error: %s", err.Error())
-    events.SendRequestEventJSON("Listener Rejected", map[string]interface{}{"error": err.Error(), "payload": body}, r)
+    events.SendRequestEventJSON("Listener Rejected", err.Error(),
+      map[string]interface{}{"error": err.Error(), "payload": body}, r)
     util.AddLogMessage(msg, r)
     fmt.Fprintln(w, msg)
     return
@@ -295,7 +296,7 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
     l.TCP, msg = tcp.InitTCPConfig(l.Port, l.TCP)
   }
   if msg != "" {
-    events.SendEventJSON("Listener Rejected", map[string]interface{}{"error": msg, "payload": l})
+    events.SendEventJSON("Listener Rejected", msg, l)
     return http.StatusBadRequest, msg
   }
 
@@ -309,16 +310,16 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
         listeners[l.Port] = l
         listenersLock.Unlock()
         msg = fmt.Sprintf("Listener %d already present, restarted.", l.Port)
-        events.SendEventJSON("Listener Updated", map[string]interface{}{"listener": l, "status": msg})
+        events.SendEventJSON("Listener Updated", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
       } else {
         errorCode = http.StatusInternalServerError
         msg = fmt.Sprintf("Listener %d already present, failed to restart.", l.Port)
-        events.SendEventJSON("Listener Updated", map[string]interface{}{"listener": l, "status": msg})
+        events.SendEventJSON("Listener Updated", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
       }
     } else {
       errorCode = http.StatusBadRequest
       msg = fmt.Sprintf("Listener %d already present, cannot add.", l.Port)
-      events.SendEventJSON("Listener Rejected", map[string]interface{}{"error": msg, "payload": l})
+      events.SendEventJSON("Listener Rejected", msg, l)
     }
   } else {
     if l.Open {
@@ -327,18 +328,18 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
         listeners[l.Port] = l
         listenersLock.Unlock()
         msg = fmt.Sprintf("Listener %d added and opened.", l.Port)
-        events.SendEventJSON("Listener Added", map[string]interface{}{"listener": l, "status": msg})
+        events.SendEventJSON("Listener Added", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
       } else {
         errorCode = http.StatusInternalServerError
         msg = fmt.Sprintf("Listener %d added but failed to open.", l.Port)
-        events.SendEventJSON("Listener Added", map[string]interface{}{"listener": l, "status": msg})
+        events.SendEventJSON("Listener Added", l.HostLabel, map[string]interface{}{"listener": l, "status": msg})
       }
     } else {
       listenersLock.Lock()
       listeners[l.Port] = l
       listenersLock.Unlock()
       msg = fmt.Sprintf("Listener %d added.", l.Port)
-      events.SendEventJSON("Listener Added", map[string]interface{}{"listener": l, "status": msg})
+      events.SendEventJSON("Listener Added", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
     }
   }
   return errorCode, msg
@@ -508,7 +509,8 @@ func openListener(w http.ResponseWriter, r *http.Request) {
         } else {
           msg = fmt.Sprintf("Listener opened on port %d\n", l.Port)
         }
-        events.SendRequestEventJSON("Listener Opened", map[string]interface{}{"listener": l, "status": msg}, r)
+        events.SendRequestEventJSON("Listener Opened", l.ListenerID,
+          map[string]interface{}{"listener": l, "status": msg}, r)
       } else {
         w.WriteHeader(http.StatusInternalServerError)
         msg = fmt.Sprintf("Failed to listen on port %d\n", l.Port)
@@ -520,7 +522,8 @@ func openListener(w http.ResponseWriter, r *http.Request) {
       } else {
         msg = fmt.Sprintf("Listener reopened on port %d\n", l.Port)
       }
-      events.SendRequestEventJSON("Listener Reopened", map[string]interface{}{"listener": l, "status": msg}, r)
+      events.SendRequestEventJSON("Listener Reopened", l.ListenerID,
+        map[string]interface{}{"listener": l, "status": msg}, r)
     }
     fmt.Fprintln(w, msg)
     util.AddLogMessage(msg, r)

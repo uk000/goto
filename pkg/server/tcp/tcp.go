@@ -168,7 +168,7 @@ func ServeClientConnection(port, requestID int, conn *net.TCPConn) bool {
   connectionStatus := &ConnectionStatus{Port: port, ListenerID: tcpConfig.ListenerID, RequestID: requestID, ConnStartTime: time.Now()}
   tcpHandler := &TCPConnectionHandler{conn: conn, requestID: requestID, status: connectionStatus}
   tcpHandler.TCPConfig = *tcpConfig
-  events.SendEventJSONForPort(port, "New TCP Client Connection", tcpHandler)
+  events.SendEventJSONForPort(port, "New TCP Client Connection", tcpConfig.ListenerID, tcpHandler)
   lock.Lock()
   connectionHistory[port] = append(connectionHistory[port], &ConnectionHistory{Config: &tcpHandler.TCPConfig, Status: connectionStatus})
   if activeConnections[tcpConfig.ListenerID] == nil {
@@ -299,7 +299,7 @@ func (tcp *TCPConnectionHandler) processRequest() {
   if !global.IsListenerOpen(tcp.Port) {
     log.Printf("[Listener: %s][Request: %d]: Listener is closed for port [%d]", tcp.ListenerID, tcp.requestID, tcp.Port)
   }
-  events.SendEventJSONForPort(tcp.Port, "TCP Client Connection Closed", tcp.status)
+  events.SendEventJSONForPort(tcp.Port, "TCP Client Connection Closed", tcp.ListenerID, tcp.status)
 }
 
 func (tcp *TCPConnectionHandler) doSilentLife() {

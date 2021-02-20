@@ -84,7 +84,7 @@ func configureTCP(w http.ResponseWriter, r *http.Request) {
     if err := util.ReadJsonPayload(r, tcpConfig); err == nil {
       if _, msg = InitTCPConfig(port, tcpConfig); msg == "" {
         msg = fmt.Sprintf("TCP configuration applied to port %d", port)
-        events.SendRequestEventJSON("TCP Configured", tcpConfig, r)
+        events.SendRequestEventJSON("TCP Configured", tcpConfig.ListenerID, tcpConfig, r)
       } else {
         w.WriteHeader(http.StatusBadRequest)
       }

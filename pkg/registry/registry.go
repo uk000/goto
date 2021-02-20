@@ -62,6 +62,10 @@ type Peers struct {
   lock          sync.RWMutex
 }
 
+type PeerPods map[string][]*Pod
+type PodResults map[string]bool
+type PeerResults map[string]map[string]bool
+
 type PeerTarget struct {
   invocation.InvocationSpec
 }
@@ -95,7 +99,7 @@ type Registry struct {
   peerJobs             map[string]PeerJobs
   peerTrackingHeaders  string
   trackingHeaders      []string
-  crossTrackingHeaders map[string][]string
+  crossTrackingHeaders http.Header
   peerProbes           *PeerProbes
   labeledLockers       *locker.LabeledLockers
   eventsCounter        int
@@ -118,8 +122,8 @@ func StoreEventInCurrentLocker(data interface{}) {
   registry.eventsLock.Lock()
   registry.eventsCounter++
   registry.eventsLock.Unlock()
-  registry.getCurrentLocker().StorePeerData("Registry", "",
-    []string{"events", fmt.Sprintf("%s-%d", event.Title, registry.eventsCounter)}, util.ToJSON(event))
+  registry.getCurrentLocker().StorePeerData(global.PeerName, "",
+    []string{constants.LockerEventsKey, fmt.Sprintf("%s-%d", event.Title, registry.eventsCounter)}, util.ToJSON(event))
 }
 
 func (registry *Registry) reset() {
@@ -252,7 +256,7 @@ func (registry *Registry) initHttpClientForPeerPod(pod *Pod) {
   pod.client = &http.Client{Transport: tr, Timeout: 10 * time.Second}
 }
 
-func (registry *Registry) loadAllPeerPods() map[string][]*Pod {
+func (registry *Registry) loadAllPeerPods() PeerPods {
   registry.peersLock.RLock()
   defer registry.peersLock.RUnlock()
   peerPods := map[string][]*Pod{}
@@ -267,10 +271,10 @@ func (registry *Registry) loadAllPeerPods() map[string][]*Pod {
   return peerPods
 }
 
-func (registry *Registry) loadPeerPods(peerName string, peerAddress string) map[string][]*Pod {
+func (registry *Registry) loadPeerPods(peerName string, peerAddress string) PeerPods {
   registry.peersLock.RLock()
   defer registry.peersLock.RUnlock()
-  peerPods := map[string][]*Pod{}
+  peerPods := PeerPods{}
   if peerName != "" {
     peerPods[peerName] = []*Pod{}
     if peerAddress != "" {
@@ -303,11 +307,11 @@ func (registry *Registry) loadPeerPods(peerName string, peerAddress string) map[
   return peerPods
 }
 
-func (registry *Registry) loadPodsForPeerWithData(peerName string, jobs ...bool) map[string][]*Pod {
+func (registry *Registry) loadPodsForPeerWithData(peerName string, jobs ...bool) PeerPods {
   if peerName != "" {
     registry.peersLock.RLock()
     defer registry.peersLock.RUnlock()
-    peerPods := map[string][]*Pod{}
+    peerPods := PeerPods{}
     hasData := registry.peerTargets[peerName] != nil
     if len(jobs) > 0 && jobs[0] {
       hasData = registry.peerJobs[peerName] != nil
@@ -328,14 +332,14 @@ func (registry *Registry) loadPodsForPeerWithData(peerName string, jobs ...bool)
   return registry.loadAllPeerPods()
 }
 
-func (registry *Registry) callPeer(peerName, uri, method string, headers map[string][]string, payload string) map[string]map[string]string {
-  result := map[string]map[string]string{}
+func (registry *Registry) callPeer(peerName, uri, method string, headers http.Header, payload string) map[string]map[string]interface{} {
+  result := map[string]map[string]interface{}{}
   resultLock := sync.Mutex{}
   invokeForPodsWithHeadersAndPayload(registry.loadPeerPods(peerName, ""), method, uri, headers, payload, http.StatusOK, 0, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       resultLock.Lock()
       if result[peer] == nil {
-        result[peer] = map[string]string{}
+        result[peer] = map[string]interface{}{}
       }
       result[peer][pod.Address] = response
       resultLock.Unlock()
@@ -343,9 +347,9 @@ func (registry *Registry) callPeer(peerName, uri, method string, headers map[str
   return result
 }
 
-func (registry *Registry) checkPeerHealth(peerName string, peerAddress string) map[string]map[string]bool {
+func (registry *Registry) checkPeerHealth(peerName string, peerAddress string) PeerResults {
   return invokeForPods(registry.loadPeerPods(peerName, peerAddress), "GET", "/health", http.StatusOK, 1, true,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       pod.lock.Lock()
       pod.Healthy = err == nil
       pod.lock.Unlock()
@@ -357,9 +361,9 @@ func (registry *Registry) checkPeerHealth(peerName string, peerAddress string) m
     })
 }
 
-func (registry *Registry) cleanupUnhealthyPeers(peerName string) map[string]map[string]bool {
+func (registry *Registry) cleanupUnhealthyPeers(peerName string) PeerResults {
   return invokeForPods(registry.loadPeerPods(peerName, ""), "GET", "/health", http.StatusOK, 1, true,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         pod.lock.Lock()
         pod.Healthy = true
@@ -373,21 +377,22 @@ func (registry *Registry) cleanupUnhealthyPeers(peerName string) map[string]map[
     })
 }
 
-func clearPeersResultsAndEvents(peersToClear map[string][]*Pod, r *http.Request) map[string]map[string]bool {
+func clearPeersResultsAndEvents(peersToClear PeerPods, r *http.Request) PeerResults {
   events.ClearEvents()
   result := invokeForPods(peersToClear, "POST", "/events/clear", http.StatusOK, 2, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Events cleared on peer %s address %s\n", peer, pod.Address)
-
       } else {
         log.Printf("Failed to clear events on peer %s address %s with error %s\n", peer, pod.Address, err.Error())
       }
     })
-  events.SendRequestEventJSON(Registry_PeerEventsCleared, result, r)
+
+  events.SendRequestEventJSON(Registry_PeerEventsCleared,
+    fmt.Sprintf("Events cleared on %d peer pods", len(peersToClear)), result, r)
 
   result = invokeForPods(peersToClear, "POST", "/client/results/clear", http.StatusOK, 2, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Results cleared on peer %s address %s\n", peer, pod.Address)
 
@@ -395,12 +400,13 @@ func clearPeersResultsAndEvents(peersToClear map[string][]*Pod, r *http.Request)
         log.Printf("Failed to clear results on peer %s address %s with error %s\n", peer, pod.Address, err.Error())
       }
     })
-  events.SendRequestEventJSON(Registry_PeerResultsCleared, result, r)
+  events.SendRequestEventJSON(Registry_PeerResultsCleared,
+    fmt.Sprintf("Results cleared on %d peer pods", len(peersToClear)), result, r)
   return result
 }
 
-func (registry *Registry) clearLocker(peerName, peerAddress string, r *http.Request) map[string]map[string]bool {
-  peersToClear := map[string][]*Pod{}
+func (registry *Registry) clearLocker(peerName, peerAddress string, r *http.Request) PeerResults {
+  peersToClear := PeerPods{}
   if peerName != "" && peerAddress != "" {
     if registry.getCurrentLocker().ClearInstanceLocker(peerName, peerAddress) {
       peersToClear = registry.loadPeerPods(peerName, peerAddress)
@@ -413,9 +419,9 @@ func (registry *Registry) clearLocker(peerName, peerAddress string, r *http.Requ
   return clearPeersResultsAndEvents(peersToClear, r)
 }
 
-func (registry *Registry) addPeerTarget(peerName string, target *PeerTarget) map[string]map[string]bool {
+func (registry *Registry) addPeerTarget(peerName string, target *PeerTarget) PeerResults {
   registry.peersLock.Lock()
-  peerPods := map[string][]*Pod{}
+  peerPods := PeerPods{}
   if peerName != "" {
     if registry.peerTargets[peerName] == nil {
       registry.peerTargets[peerName] = PeerTargets{}
@@ -441,7 +447,7 @@ func (registry *Registry) addPeerTarget(peerName string, target *PeerTarget) map
   }
   registry.peersLock.Unlock()
   return invokeForPodsWithHeadersAndPayload(peerPods, "POST", "/client/targets/add", nil, util.ToJSON(target), http.StatusOK, 1, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         if global.EnableRegistryLogs {
           log.Printf("Pushed target %s to peer %s address %s\n", target.Name, peer, pod.Address)
@@ -452,12 +458,12 @@ func (registry *Registry) addPeerTarget(peerName string, target *PeerTarget) map
     })
 }
 
-func (registry *Registry) removePeerTargets(peerName string, targets []string) map[string]map[string]bool {
+func (registry *Registry) removePeerTargets(peerName string, targets []string) PeerResults {
   targetList := strings.Join(targets, ",")
   removed := true
   return invokeForPods(registry.loadPodsForPeerWithData(peerName),
     "POST", fmt.Sprintf("/client/targets/%s/remove", targetList), http.StatusOK, 3, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         if global.EnableRegistryLogs {
           log.Printf("Removed targets %s from peer %s address %s\n", targetList, peer, pod.Address)
@@ -485,10 +491,10 @@ func (registry *Registry) removePeerTargets(peerName string, targets []string) m
     })
 }
 
-func (registry *Registry) clearPeerTargets(peerName string) map[string]map[string]bool {
+func (registry *Registry) clearPeerTargets(peerName string) PeerResults {
   cleared := true
   return invokeForPods(registry.loadPodsForPeerWithData(peerName), "POST", "/client/targets/clear", http.StatusOK, 3, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Cleared targets from peer %s address %s\n", peer, pod.Address)
       } else {
@@ -506,7 +512,7 @@ func (registry *Registry) clearPeerTargets(peerName string) map[string]map[strin
     })
 }
 
-func (registry *Registry) stopPeerTargets(peerName string, targets string) map[string]map[string]bool {
+func (registry *Registry) stopPeerTargets(peerName string, targets string) PeerResults {
   uri := ""
   if len(targets) > 0 {
     uri = "/client/targets/" + targets + "/stop"
@@ -514,7 +520,7 @@ func (registry *Registry) stopPeerTargets(peerName string, targets string) map[s
     uri = "/client/targets/stop/all"
   }
   return invokeForPods(registry.loadPodsForPeerWithData(peerName), "POST", uri, http.StatusOK, 3, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Stopped targets %s from peer %s address %s\n", targets, peer, pod.Address)
       } else {
@@ -523,7 +529,7 @@ func (registry *Registry) stopPeerTargets(peerName string, targets string) map[s
     })
 }
 
-func (registry *Registry) enableAllOrInvocationsTargetsResultsCollection(enable string, all bool) map[string]map[string]bool {
+func (registry *Registry) enableAllOrInvocationsTargetsResultsCollection(enable string, all bool) PeerResults {
   uri := "/client/results/"
   if all {
     results.EnableAllTargetResults(util.IsYes(enable))
@@ -534,7 +540,7 @@ func (registry *Registry) enableAllOrInvocationsTargetsResultsCollection(enable 
   }
   uri += enable
   return invokeForPods(registry.loadAllPeerPods(), "POST", uri, http.StatusOK, 3, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Changed targets results collection on peer %s address %s\n", peer, pod.Address)
       } else {
@@ -549,9 +555,9 @@ func (registry *Registry) getPeerTargets(peerName string) PeerTargets {
   return registry.peerTargets[peerName]
 }
 
-func (registry *Registry) addPeerJob(peerName string, job *PeerJob) map[string]map[string]bool {
+func (registry *Registry) addPeerJob(peerName string, job *PeerJob) PeerResults {
   registry.peersLock.Lock()
-  peerPods := map[string][]*Pod{}
+  peerPods := PeerPods{}
   if peerName != "" {
     if registry.peerJobs[peerName] == nil {
       registry.peerJobs[peerName] = PeerJobs{}
@@ -577,7 +583,7 @@ func (registry *Registry) addPeerJob(peerName string, job *PeerJob) map[string]m
   }
   registry.peersLock.Unlock()
   return invokeForPodsWithHeadersAndPayload(peerPods, "POST", "/jobs/add", nil, util.ToJSON(job), http.StatusOK, 1, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Pushed job %s to peer %s address %s\n", job.ID, peer, pod.Address)
       } else {
@@ -586,12 +592,12 @@ func (registry *Registry) addPeerJob(peerName string, job *PeerJob) map[string]m
     })
 }
 
-func (registry *Registry) removePeerJobs(peerName string, jobs []string) map[string]map[string]bool {
+func (registry *Registry) removePeerJobs(peerName string, jobs []string) PeerResults {
   jobList := strings.Join(jobs, ",")
   removed := true
   return invokeForPods(registry.loadPodsForPeerWithData(peerName, true),
     "POST", fmt.Sprintf("/jobs/%s/remove", jobList), http.StatusOK, 3, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Removed jobs %s from peer %s address %s\n", jobList, peer, pod.Address)
       } else {
@@ -615,7 +621,7 @@ func (registry *Registry) removePeerJobs(peerName string, jobs []string) map[str
     })
 }
 
-func (registry *Registry) stopPeerJobs(peerName string, jobs string) map[string]map[string]bool {
+func (registry *Registry) stopPeerJobs(peerName string, jobs string) PeerResults {
   uri := ""
   if len(jobs) > 0 {
     uri = "/jobs/" + jobs + "/stop"
@@ -623,7 +629,7 @@ func (registry *Registry) stopPeerJobs(peerName string, jobs string) map[string]
     uri = "/jobs/stop/all"
   }
   return invokeForPods(registry.loadPodsForPeerWithData(peerName, true), "POST", uri, http.StatusOK, 3, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Stopped jobs %s from peer %s address %s\n", jobs, peer, pod.Address)
       } else {
@@ -638,7 +644,7 @@ func (registry *Registry) getPeerJobs(peerName string) PeerJobs {
   return registry.peerJobs[peerName]
 }
 
-func (registry *Registry) invokePeerTargets(peerName string, targets string) map[string]map[string]bool {
+func (registry *Registry) invokePeerTargets(peerName string, targets string) PeerResults {
   uri := ""
   if len(targets) > 0 {
     uri = "/client/targets/" + targets + "/invoke"
@@ -646,7 +652,7 @@ func (registry *Registry) invokePeerTargets(peerName string, targets string) map
     uri = "/client/targets/invoke/all"
   }
   return invokeForPods(registry.loadPodsForPeerWithData(peerName), "POST", uri, http.StatusOK, 1, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Invoked target %s on peer %s address %s\n", targets, peer, pod.Address)
       } else {
@@ -655,7 +661,7 @@ func (registry *Registry) invokePeerTargets(peerName string, targets string) map
     })
 }
 
-func (registry *Registry) invokePeerJobs(peerName string, jobs string) map[string]map[string]bool {
+func (registry *Registry) invokePeerJobs(peerName string, jobs string) PeerResults {
   uri := ""
   if len(jobs) > 0 {
     uri = "/jobs/" + jobs + "/run"
@@ -663,7 +669,7 @@ func (registry *Registry) invokePeerJobs(peerName string, jobs string) map[strin
     uri = "/jobs/run/all"
   }
   return invokeForPods(registry.loadPodsForPeerWithData(peerName, true), "POST", uri, http.StatusOK, 1, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Invoked jobs %s on peer %s address %s\n", jobs, peer, pod.Address)
       } else {
@@ -672,10 +678,10 @@ func (registry *Registry) invokePeerJobs(peerName string, jobs string) map[strin
     })
 }
 
-func (registry *Registry) clearPeerJobs(peerName string) map[string]map[string]bool {
+func (registry *Registry) clearPeerJobs(peerName string) PeerResults {
   cleared := true
   return invokeForPods(registry.loadPodsForPeerWithData(peerName, true), "POST", "/jobs/clear", http.StatusOK, 3, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Cleared jobs from peer %s address %s\n", peer, pod.Address)
       } else {
@@ -693,11 +699,11 @@ func (registry *Registry) clearPeerJobs(peerName string) map[string]map[string]b
     })
 }
 
-func (registry *Registry) addPeersTrackingHeaders(headers string) map[string]map[string]bool {
+func (registry *Registry) addPeersTrackingHeaders(headers string) PeerResults {
   registry.peerTrackingHeaders = headers
   registry.trackingHeaders, registry.crossTrackingHeaders = util.ParseTrackingHeaders(headers)
   return invokeForPods(registry.loadAllPeerPods(), "POST", "/client/track/headers/add/"+headers, http.StatusOK, 3, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Pushed tracking headers %s to peer %s address %s\n", headers, peer, pod.Address)
       } else {
@@ -734,9 +740,9 @@ func (registry *Registry) setProbe(isReadiness bool, uri string, status int) {
 
 }
 
-func (registry *Registry) sendProbe(probeType, uri string) map[string]map[string]bool {
+func (registry *Registry) sendProbe(probeType, uri string) PeerResults {
   return invokeForPods(registry.loadAllPeerPods(), "POST", fmt.Sprintf("/probes/%s/set?uri=%s", probeType, uri), http.StatusOK, 3, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Pushed %s URI %s to peer %s address %s\n", probeType, uri, peer, pod.Address)
       } else {
@@ -745,9 +751,9 @@ func (registry *Registry) sendProbe(probeType, uri string) map[string]map[string
     })
 }
 
-func (registry *Registry) sendProbeStatus(probeType string, status int) map[string]map[string]bool {
+func (registry *Registry) sendProbeStatus(probeType string, status int) PeerResults {
   return invokeForPods(registry.loadAllPeerPods(), "POST", fmt.Sprintf("/probes/%s/set/status=%d", probeType, status), http.StatusOK, 3, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Pushed %s Status %d to peer %s address %s\n", probeType, status, peer, pod.Address)
       } else {
@@ -756,9 +762,9 @@ func (registry *Registry) sendProbeStatus(probeType string, status int) map[stri
     })
 }
 
-func (registry *Registry) flushPeersEvents() map[string]map[string]bool {
+func (registry *Registry) flushPeersEvents() PeerResults {
   return invokeForPods(registry.loadAllPeerPods(), "POST", "/events/flush", http.StatusOK, 2, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Flushed events on peer %s address %s\n", peer, pod.Address)
       } else {
@@ -767,10 +773,10 @@ func (registry *Registry) flushPeersEvents() map[string]map[string]bool {
     })
 }
 
-func (registry *Registry) clearPeersEvents() map[string]map[string]bool {
+func (registry *Registry) clearPeersEvents() PeerResults {
   registry.getCurrentLocker().ClearPeerEvents()
   return invokeForPods(registry.loadAllPeerPods(), "POST", "/events/clear", http.StatusOK, 2, false,
-    func(peer string, pod *Pod, response string, err error) {
+    func(peer string, pod *Pod, response interface{}, err error) {
       if err == nil {
         log.Printf("Cleared events on peer %s address %s\n", peer, pod.Address)
       } else {
@@ -901,7 +907,7 @@ func addPeer(w http.ResponseWriter, r *http.Request) {
       registry.preparePeerStartupData(peer, peerData)
       registry.peersLock.RUnlock()
       msg = fmt.Sprintf("Added Peer: %+v", *peer)
-      events.SendRequestEventJSON(Registry_PeerAdded, peer, r)
+      events.SendRequestEventJSON(Registry_PeerAdded, peer.Name, peer, r)
     } else {
       registry.rememberPeer(peer)
       msg = fmt.Sprintf("Remembered Peer: %+v", *peer)
@@ -911,7 +917,7 @@ func addPeer(w http.ResponseWriter, r *http.Request) {
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = fmt.Sprintf("Failed to parse json with error: %s", err.Error())
-    events.SendRequestEventJSON(Registry_PeerRejected,
+    events.SendRequestEventJSON(Registry_PeerRejected, err.Error(),
       map[string]interface{}{"error": err.Error(), "payload": payload}, r)
     peerData.Message = msg
   }
@@ -951,7 +957,8 @@ func checkPeerHealth(w http.ResponseWriter, r *http.Request) {
   peerName := util.GetStringParamValue(r, "peer")
   address := util.GetStringParamValue(r, "address")
   result := registry.checkPeerHealth(peerName, address)
-  events.SendRequestEventJSON(Registry_CheckedPeersHealth, result, r)
+  events.SendRequestEventJSON(Registry_CheckedPeersHealth,
+    fmt.Sprintf("Checked health on %d peers", len(result)), result, r)
   util.WriteJsonPayload(w, result)
   if global.EnableRegistryLogs {
     util.AddLogMessage(util.ToJSON(result), r)
@@ -960,7 +967,8 @@ func checkPeerHealth(w http.ResponseWriter, r *http.Request) {
 
 func cleanupUnhealthyPeers(w http.ResponseWriter, r *http.Request) {
   result := registry.cleanupUnhealthyPeers(util.GetStringParamValue(r, "peer"))
-  events.SendRequestEventJSON(Registry_CleanedUpUnhealthyPeers, result, r)
+  events.SendRequestEventJSON(Registry_CleanedUpUnhealthyPeers,
+    fmt.Sprintf("Checked health on %d peers", len(result)), result, r)
   util.WriteJsonPayload(w, result)
   if global.EnableRegistryLogs {
     util.AddLogMessage(util.ToJSON(result), r)
@@ -1041,7 +1049,8 @@ func getLabeledLocker(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
   getData := util.GetBoolParamValue(r, "data")
-  level := util.GetIntParamValue(r, "level", 1)
+  getEvents := util.GetBoolParamValue(r, "events")
+  level := util.GetIntParamValue(r, "level", 2)
   var locker *locker.CombiLocker
   if label != "" {
     locker = registry.getLabeledLocker(label)
@@ -1052,9 +1061,12 @@ func getLabeledLocker(w http.ResponseWriter, r *http.Request) {
     locker = locker.Trim(level)
   }
   if !getData {
-    locker = locker.GetLockerView()
+    locker = locker.GetLockerView(getEvents)
     msg = fmt.Sprintf("Labeled locker [%s] view reported without data", label)
   } else {
+    if !getEvents {
+      locker = locker.GetLockerWithoutEvents()
+    }
     msg = fmt.Sprintf("Labeled locker [%s] reported with data", label)
   }
   util.WriteJsonPayload(w, locker)
@@ -1063,27 +1075,61 @@ func getLabeledLocker(w http.ResponseWriter, r *http.Request) {
   }
 }
 
+func getDataLockers(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  label := util.GetStringParamValue(r, "label")
+  getData := util.GetBoolParamValue(r, "data")
+  level := util.GetIntParamValue(r, "level", 2)
+  registry.lockersLock.RLock()
+  labeledLockers := registry.labeledLockers
+  registry.lockersLock.RUnlock()
+  var lockers map[string]*locker.DataLocker
+  if getData {
+    lockers = labeledLockers.GetDataLockers(label)
+    msg = "All data lockers reported with data"
+  } else {
+    lockers = labeledLockers.GetDataLockersView(label)
+    msg = "All data lockers view reported without data"
+  }
+  output := map[string]*locker.DataLocker{}
+  for label, dl := range lockers {
+    if level > 0 {
+      output[label] = dl.Trim(level)
+    } else {
+      output[label] = dl
+    }
+  }
+  util.WriteJsonPayload(w, output)
+  if global.EnableRegistryLockerLogs {
+    util.AddLogMessage(msg, r)
+  }
+}
+
 func getAllLockers(w http.ResponseWriter, r *http.Request) {
   msg := ""
   getData := util.GetBoolParamValue(r, "data")
-  level := util.GetIntParamValue(r, "level", 1)
+  getEvents := util.GetBoolParamValue(r, "events")
+  level := util.GetIntParamValue(r, "level", 2)
   registry.lockersLock.RLock()
   labeledLockers := registry.labeledLockers
   registry.lockersLock.RUnlock()
   var lockers map[string]*locker.CombiLocker
   if getData {
-    lockers = labeledLockers.GetAllLockers()
-    msg = "All labeled locker reported with data"
+    lockers = labeledLockers.GetAllLockers(getEvents)
+    msg = "All labeled lockers reported with data"
   } else {
-    lockers = labeledLockers.GetAllLockersView()
+    lockers = labeledLockers.GetAllLockersView(getEvents)
     msg = "All labeled lockers view reported without data"
   }
-  if level > 0 {
-    for label, cl := range lockers {
-      lockers[label] = cl.Trim(level)
+  output := map[string]*locker.CombiLocker{}
+  for label, cl := range lockers {
+    if level > 0 {
+      output[label] = cl.Trim(level)
+    } else {
+      output[label] = cl
     }
   }
-  util.WriteJsonPayload(w, lockers)
+  util.WriteJsonPayload(w, output)
   if global.EnableRegistryLockerLogs {
     util.AddLogMessage(msg, r)
   }
@@ -1175,7 +1221,8 @@ func getFromDataLocker(w http.ResponseWriter, r *http.Request) {
   val := util.GetStringParamValue(r, "path")
   path, _ := util.GetListParam(r, "path")
   getData := util.GetBoolParamValue(r, "data")
-  level := util.GetIntParamValue(r, "level", 1)
+  level := util.GetIntParamValue(r, "level", 2)
+  level = len(path) + level
   if len(path) > 0 {
     var locker *locker.CombiLocker
     if label != "" {
@@ -1188,12 +1235,11 @@ func getFromDataLocker(w http.ResponseWriter, r *http.Request) {
         locker = locker.Trim(level)
       }
       if !getData {
-        locker = locker.GetLockerView()
         msg = fmt.Sprintf("Reported data from path [%s] from locker view [%s]", val, label)
       } else {
         msg = fmt.Sprintf("Reported data from path [%s] from locker [%s]", val, label)
       }
-      data, dataAtKey := locker.Get(path)
+      data, dataAtKey := locker.Get(path, getData)
       if dataAtKey {
         fmt.Fprint(w, data)
       } else {
@@ -1346,6 +1392,8 @@ func getPeerLocker(w http.ResponseWriter, r *http.Request) {
   peerName := util.GetStringParamValue(r, "peer")
   peerAddress := util.GetStringParamValue(r, "address")
   getData := util.GetBoolParamValue(r, "data")
+  getEvents := util.GetBoolParamValue(r, "events")
+  level := util.GetIntParamValue(r, "level", 2)
   var locker *locker.CombiLocker
   if label == "" || strings.EqualFold(label, constants.LockerCurrent) {
     locker = registry.getCurrentLocker()
@@ -1358,10 +1406,13 @@ func getPeerLocker(w http.ResponseWriter, r *http.Request) {
     fmt.Fprint(w, msg)
   } else {
     var result interface{}
+    if level > 0 {
+      locker = locker.Trim(level)
+    }
     if getData {
-      result = locker.GetPeerOrAllLockers(peerName, peerAddress)
+      result = locker.GetPeerOrAllLockers(peerName, peerAddress, getEvents)
     } else {
-      result = locker.GetPeerOrAllLockersView(peerName, peerAddress)
+      result = locker.GetPeerOrAllLockersView(peerName, peerAddress, getEvents)
     }
     util.WriteJsonPayload(w, result)
     if peerName != "" {
@@ -1429,8 +1480,9 @@ func getPeerEvents(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
   peerNames, _ := util.GetListParam(r, "peers")
-  unified := strings.Contains(r.RequestURI, "unified")
-  reverse := strings.Contains(r.RequestURI, "reverse")
+  unified := util.GetBoolParamValue(r, "unified")
+  reverse := util.GetBoolParamValue(r, "reverse")
+  data := util.GetBoolParamValue(r, "data")
   all := strings.EqualFold(label, constants.LockerAll)
 
   registry.lockersLock.RLock()
@@ -1465,7 +1517,7 @@ func getPeerEvents(w http.ResponseWriter, r *http.Request) {
         msg = fmt.Sprintf("Registry: Reporting events for all peers from locker [%s]", label)
       }
     }
-    result := labeledLockers.GetPeerEvents(label, peerNames, unified, reverse)
+    result := labeledLockers.GetPeerEvents(label, peerNames, unified, reverse, data)
     util.WriteJsonPayload(w, result)
   }
   if global.EnableRegistryLogs {
@@ -1478,8 +1530,9 @@ func searchInPeerEvents(w http.ResponseWriter, r *http.Request) {
   label := util.GetStringParamValue(r, "label")
   peerNames, _ := util.GetListParam(r, "peers")
   key := util.GetStringParamValue(r, "text")
-  unified := strings.Contains(r.RequestURI, "unified")
-  reverse := strings.Contains(r.RequestURI, "reverse")
+  unified := util.GetBoolParamValue(r, "unified")
+  reverse := util.GetBoolParamValue(r, "reverse")
+  data := util.GetBoolParamValue(r, "data")
   all := strings.EqualFold(label, constants.LockerCurrent)
 
   if key == "" {
@@ -1517,7 +1570,7 @@ func searchInPeerEvents(w http.ResponseWriter, r *http.Request) {
           msg = fmt.Sprintf("Registry: Reporting searched events for all peers from locker [%s]", label)
         }
       }
-      result := labeledLockers.SearchInPeerEvents(label, peerNames, key, unified, reverse)
+      result := labeledLockers.SearchInPeerEvents(label, peerNames, key, unified, reverse, data)
       util.WriteJsonPayload(w, result)
     }
   }
@@ -1526,7 +1579,7 @@ func searchInPeerEvents(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func checkBadPods(result map[string]map[string]bool, w http.ResponseWriter) {
+func checkBadPods(result PeerResults, w http.ResponseWriter) {
   anyBad := false
   for _, pods := range result {
     for _, status := range pods {
@@ -1551,20 +1604,20 @@ func addPeerTarget(w http.ResponseWriter, r *http.Request) {
     if err := invocation.ValidateSpec(&t.InvocationSpec); err != nil {
       w.WriteHeader(http.StatusBadRequest)
       msg = fmt.Sprintf("Invalid target spec: %s", err.Error())
-      events.SendRequestEventJSON(Registry_PeerTargetRejected,
+      events.SendRequestEventJSON(Registry_PeerTargetRejected, err.Error(),
         map[string]interface{}{"error": err.Error(), "payload": body}, r)
       log.Println(err)
     } else {
       result := registry.addPeerTarget(peerName, t)
       checkBadPods(result, w)
       msg = util.ToJSON(result)
-      events.SendRequestEventJSON(Registry_PeerTargetAdded,
+      events.SendRequestEventJSON(Registry_PeerTargetAdded, t.Name,
         map[string]interface{}{"target": t, "result": result}, r)
     }
   } else {
     w.WriteHeader(http.StatusBadRequest)
     msg = "Failed to parse json"
-    events.SendRequestEventJSON(Registry_PeerTargetRejected,
+    events.SendRequestEventJSON(Registry_PeerTargetRejected, err.Error(),
       map[string]interface{}{"error": err.Error(), "payload": body}, r)
     log.Println(err)
   }
@@ -1580,7 +1633,7 @@ func removePeerTargets(w http.ResponseWriter, r *http.Request) {
   result := registry.removePeerTargets(peerName, targets)
   checkBadPods(result, w)
   msg := util.ToJSON(result)
-  events.SendRequestEventJSON(Registry_PeerTargetsRemoved,
+  events.SendRequestEventJSON(Registry_PeerTargetsRemoved, util.GetStringParamValue(r, "targets"),
     map[string]interface{}{"targets": targets, "result": result}, r)
   if global.EnableRegistryLogs {
     util.AddLogMessage(msg, r)
@@ -1593,7 +1646,8 @@ func stopPeerTargets(w http.ResponseWriter, r *http.Request) {
   targets := util.GetStringParamValue(r, "targets")
   result := registry.stopPeerTargets(peerName, targets)
   checkBadPods(result, w)
-  events.SendRequestEventJSON(Registry_PeerTargetsStopped, map[string]interface{}{"targets": targets, "result": result}, r)
+  events.SendRequestEventJSON(Registry_PeerTargetsStopped, util.GetStringParamValue(r, "targets"),
+    map[string]interface{}{"targets": targets, "result": result}, r)
   msg := util.ToJSON(result)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
@@ -1604,7 +1658,7 @@ func invokePeerTargets(w http.ResponseWriter, r *http.Request) {
   targets := util.GetStringParamValue(r, "targets")
   result := registry.invokePeerTargets(peerName, targets)
   checkBadPods(result, w)
-  events.SendRequestEventJSON(Registry_PeerTargetsInvoked,
+  events.SendRequestEventJSON(Registry_PeerTargetsInvoked, util.GetStringParamValue(r, "targets"),
     map[string]interface{}{"targets": targets, "result": result}, r)
   msg := util.ToJSON(result)
   if global.EnableRegistryLogs {
@@ -1662,12 +1716,12 @@ func addPeerJob(w http.ResponseWriter, r *http.Request) {
   if job, err := job.ParseJobFromPayload(body); err == nil {
     result := registry.addPeerJob(peerName, &PeerJob{*job})
     checkBadPods(result, w)
-    events.SendRequestEventJSON(Registry_PeerJobAdded,
+    events.SendRequestEventJSON(Registry_PeerJobAdded, job.ID,
       map[string]interface{}{"job": job, "result": result}, r)
     msg = util.ToJSON(result)
   } else {
     w.WriteHeader(http.StatusBadRequest)
-    events.SendRequestEventJSON(Registry_PeerJobRejected,
+    events.SendRequestEventJSON(Registry_PeerJobRejected, err.Error(),
       map[string]interface{}{"error": err.Error(), "payload": body}, r)
     msg = "Failed to read job"
     log.Println(err)
@@ -1683,7 +1737,7 @@ func removePeerJobs(w http.ResponseWriter, r *http.Request) {
   jobs, _ := util.GetListParam(r, "jobs")
   result := registry.removePeerJobs(peerName, jobs)
   checkBadPods(result, w)
-  events.SendRequestEventJSON(Registry_PeerJobsRemoved,
+  events.SendRequestEventJSON(Registry_PeerJobsRemoved, util.GetStringParamValue(r, "jobs"),
     map[string]interface{}{"jobs": jobs, "result": result}, r)
   msg := util.ToJSON(result)
   if global.EnableRegistryLogs {
@@ -1697,7 +1751,7 @@ func stopPeerJobs(w http.ResponseWriter, r *http.Request) {
   jobs := util.GetStringParamValue(r, "jobs")
   result := registry.stopPeerJobs(peerName, jobs)
   checkBadPods(result, w)
-  events.SendRequestEventJSON(Registry_PeerJobsStopped,
+  events.SendRequestEventJSON(Registry_PeerJobsStopped, util.GetStringParamValue(r, "jobs"),
     map[string]interface{}{"jobs": jobs, "result": result}, r)
   msg := util.ToJSON(result)
   if global.EnableRegistryLogs {
@@ -1711,7 +1765,8 @@ func runPeerJobs(w http.ResponseWriter, r *http.Request) {
   jobs := util.GetStringParamValue(r, "jobs")
   result := registry.invokePeerJobs(peerName, jobs)
   checkBadPods(result, w)
-  events.SendRequestEventJSON(Registry_PeerJobsInvoked, map[string]interface{}{"jobs": jobs, "result": result}, r)
+  events.SendRequestEventJSON(Registry_PeerJobsInvoked, util.GetStringParamValue(r, "jobs"),
+    map[string]interface{}{"jobs": jobs, "result": result}, r)
   msg := util.ToJSON(result)
   if global.EnableRegistryLogs {
     util.AddLogMessage(msg, r)
@@ -1769,7 +1824,7 @@ func clearPeerTargets(w http.ResponseWriter, r *http.Request) {
   peerName := util.GetStringParamValue(r, "peer")
   result := registry.clearPeerTargets(peerName)
   checkBadPods(result, w)
-  events.SendRequestEventJSON(Registry_PeerTargetsCleared,
+  events.SendRequestEventJSON(Registry_PeerTargetsCleared, peerName,
     map[string]interface{}{"peer": peerName, "result": result}, r)
   msg := util.ToJSON(result)
   fmt.Fprintln(w, msg)
@@ -1782,7 +1837,7 @@ func clearPeerJobs(w http.ResponseWriter, r *http.Request) {
   peerName := util.GetStringParamValue(r, "peer")
   result := registry.clearPeerJobs(peerName)
   checkBadPods(result, w)
-  events.SendRequestEventJSON(Registry_PeerJobsCleared,
+  events.SendRequestEventJSON(Registry_PeerJobsCleared, peerName,
     map[string]interface{}{"peer": peerName, "result": result}, r)
   msg := util.ToJSON(result)
   fmt.Fprintln(w, msg)
@@ -1793,9 +1848,10 @@ func clearPeerJobs(w http.ResponseWriter, r *http.Request) {
 
 func addPeersTrackingHeaders(w http.ResponseWriter, r *http.Request) {
   msg := ""
+
   if h, present := util.GetStringParam(r, "headers"); present {
     result := registry.addPeersTrackingHeaders(h)
-    events.SendRequestEventJSON(Registry_PeerTrackingHeadersAdded,
+    events.SendRequestEventJSON(Registry_PeerTrackingHeadersAdded, h,
       map[string]interface{}{"headers": h, "result": result}, r)
     checkBadPods(result, w)
     msg = util.ToJSON(result)
@@ -1834,7 +1890,7 @@ func setPeersProbe(w http.ResponseWriter, r *http.Request) {
     registry.setProbe(isReadiness, uri, 0)
     result := registry.sendProbe(probeType, uri)
     checkBadPods(result, w)
-    events.SendRequestEventJSON(Registry_PeerProbeSet,
+    events.SendRequestEventJSON(Registry_PeerProbeSet, uri,
       map[string]interface{}{"probeType": probeType, "uri": uri, "result": result}, r)
     msg = util.ToJSON(result)
   }
@@ -1862,7 +1918,7 @@ func setPeersProbeStatus(w http.ResponseWriter, r *http.Request) {
     registry.setProbe(isReadiness, "", status)
     result := registry.sendProbeStatus(probeType, status)
     checkBadPods(result, w)
-    events.SendRequestEventJSON(Registry_PeerProbeStatusSet,
+    events.SendRequestEventJSON(Registry_PeerProbeStatusSet, probeType,
       map[string]interface{}{"probeType": probeType, "status": status, "result": result}, r)
     msg = util.ToJSON(result)
   }
@@ -1894,7 +1950,7 @@ func callPeer(w http.ResponseWriter, r *http.Request) {
     body := util.Read(r.Body)
     msg = fmt.Sprintf("Calling peers with URI [%s] Method [%s] Headers [%+v] Body [%s]", uri, r.Method, r.Header, body)
     result := registry.callPeer(peerName, uri, r.Method, r.Header, body)
-    events.SendRequestEventJSON(Registry_PeerCalled, map[string]interface{}{
+    events.SendRequestEventJSON(Registry_PeerCalled, uri, map[string]interface{}{
       "peer": peerName, "uri": uri, "method": r.Method, "headers": r.Header, "body": body, "result": result}, r)
     util.WriteJsonPayload(w, result)
   }
@@ -1909,8 +1965,9 @@ func copyPeersToLocker(w http.ResponseWriter, r *http.Request) {
   currentLocker := registry.getCurrentLocker()
   currentLocker.Store([]string{"peers"}, util.ToJSON(registry.peers))
   w.WriteHeader(http.StatusOK)
-  msg := fmt.Sprintf("Peers info stored in labeled locker %s under path 'peers'", currentLocker.Label)
-  events.SendRequestEventJSON(Registry_PeersCopied, registry.peers, r)
+  msg := fmt.Sprintf("Peers [len: %d] stored in labeled locker %s under path 'peers'",
+    len(registry.peers), currentLocker.Label)
+  events.SendRequestEventJSON(Registry_PeersCopied, msg, registry.peers, r)
   fmt.Fprintln(w, msg)
   if global.EnableRegistryLogs {
     util.AddLogMessage(msg, r)
@@ -1975,7 +2032,7 @@ func dumpLockerData(w http.ResponseWriter, r *http.Request) {
       util.WriteJsonPayload(w, locker.PeerLockers)
       msg = fmt.Sprintf("Dumped peer lockers [%s]\n", label)
     } else if len(path) > 0 {
-      data, dataAtKey := locker.Get(path)
+      data, dataAtKey := locker.Get(path, true)
       if dataAtKey {
         fmt.Fprint(w, data)
       } else {
@@ -1987,7 +2044,7 @@ func dumpLockerData(w http.ResponseWriter, r *http.Request) {
       msg = fmt.Sprintf("Dumped locker [%s]\n", label)
     }
   } else {
-    util.WriteJsonPayload(w, registry.labeledLockers.GetAllLockers())
+    util.WriteJsonPayload(w, registry.labeledLockers.GetAllLockers(true))
     msg = "Dumped all lockers\n"
   }
   events.SendRequestEvent(Registry_LockersDumped, "", r)
@@ -1999,7 +2056,7 @@ func dumpLockerData(w http.ResponseWriter, r *http.Request) {
 func dumpRegistry(w http.ResponseWriter, r *http.Request) {
   dump := map[string]interface{}{}
   registry.lockersLock.RLock()
-  dump["lockers"] = registry.labeledLockers.GetAllLockers()
+  dump["lockers"] = registry.labeledLockers.GetAllLockers(true)
   registry.lockersLock.RUnlock()
   registry.peersLock.RLock()
   dump["peers"] = registry.peers

@@ -186,7 +186,7 @@ func (p *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
   if err := util.ReadJson(payload, target); err != nil {
     w.WriteHeader(http.StatusBadRequest)
     fmt.Fprintf(w, "Invalid target: %s\n", err.Error())
-    events.SendRequestEventJSON("Proxy Target Rejected",
+    events.SendRequestEventJSON("Proxy Target Rejected", err.Error(),
       map[string]interface{}{"error": err.Error(), "payload": payload}, r)
     return
   }
@@ -194,7 +194,7 @@ func (p *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusBadRequest)
     msg := "Only one of matchAll and matchAny should be specified"
     fmt.Fprintln(w, msg)
-    events.SendRequestEventJSON("Proxy Target Rejected",
+    events.SendRequestEventJSON("Proxy Target Rejected", msg,
       map[string]interface{}{"error": msg, "payload": payload}, r)
     return
   }
@@ -212,16 +212,16 @@ func (p *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
       util.AddLogMessage(fmt.Sprintf("Added proxy target: %+v", target), r)
       w.WriteHeader(http.StatusOK)
       fmt.Fprintf(w, "Added proxy target: %s\n", util.ToJSON(target))
-      events.SendRequestEventJSON("Proxy Target Added", target, r)
+      events.SendRequestEventJSON("Proxy Target Added", target.Name, target, r)
     } else {
       w.WriteHeader(http.StatusBadRequest)
-      events.SendRequestEventJSON("Proxy Target Rejected",
+      events.SendRequestEventJSON("Proxy Target Rejected", err.Error(),
         map[string]interface{}{"error": err.Error(), "payload": payload}, r)
       fmt.Fprintf(w, "Failed to add URI Match with error: %s\n", err.Error())
     }
   } else {
     w.WriteHeader(http.StatusBadRequest)
-    events.SendRequestEventJSON("Proxy Target Rejected",
+    events.SendRequestEventJSON("Proxy Target Rejected", err.Error(),
       map[string]interface{}{"error": err.Error(), "payload": payload}, r)
     fmt.Fprintf(w, "Invalid target: %s\n", err.Error())
   }
@@ -397,7 +397,7 @@ func (p *Proxy) removeProxyTarget(w http.ResponseWriter, r *http.Request) {
     util.AddLogMessage(fmt.Sprintf("Removed proxy target: %+v", t), r)
     w.WriteHeader(http.StatusOK)
     fmt.Fprintf(w, "Removed proxy target: %s\n", util.ToJSON(t))
-    events.SendRequestEventJSON("Proxy Target Removed", t, r)
+    events.SendRequestEventJSON("Proxy Target Removed", t.Name, t, r)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     fmt.Fprintln(w, "No targets")
@@ -579,7 +579,7 @@ func (p *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWr
   if len(targets) > 0 {
     responses := []*invocation.InvocationResult{}
     for _, target := range targets {
-      events.SendRequestEventJSON("Proxy Target Invoked", target, r)
+      events.SendRequestEventJSON("Proxy Target Invoked", target.Name, target, r)
       metrics.UpdateProxiedRequestCount(target.Name)
       is, _ := p.toInvocationSpec(target, r)
       tracker := invocation.RegisterInvocation(is)

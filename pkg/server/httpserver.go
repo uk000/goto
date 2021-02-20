@@ -51,12 +51,12 @@ func RunHttpServer(handlers ...util.ServerHandler) {
     IdleTimeout:  1 * time.Minute,
     ConnContext:  conn.SaveConnInContext,
     Handler:      h2c.NewHandler(GRPCHandler(r), h2s),
-    ErrorLog:     log.New(ioutil.Discard, "_logger", 0),
+    ErrorLog:     log.New(ioutil.Discard, "discard", 0),
   }
   StartHttpServer(httpServer)
-  listeners.StartInitialListeners()
+  go listeners.StartInitialListeners()
   peer.RegisterPeer(global.PeerName, global.PeerAddress)
-  events.SendEventJSONDirect("Server Started", listeners.GetListeners())
+  events.SendEventJSONDirect("Server Started", global.HostLabel, listeners.GetListeners())
   WaitForHttpServer(httpServer)
 }
 
@@ -113,7 +113,7 @@ func StopHttpServer(server *http.Server) {
   time.Sleep(time.Second)
   log.Printf("Deregistering peer [%s : %s] from registry", global.PeerName, global.PeerAddress)
   peer.DeregisterPeer(global.PeerName, global.PeerAddress)
-  events.SendEventJSONDirect("Server Stopped", listeners.GetListeners())
+  events.SendEventJSONDirect("Server Stopped", global.HostLabel, listeners.GetListeners())
   server.Shutdown(ctx)
   log.Printf("HTTP Server %s finished shutting down", server.Addr)
 }
@@ -142,13 +142,14 @@ func WithRequestStore(ctx context.Context, r *http.Request) context.Context {
   isAdminRequest := util.CheckAdminRequest(r)
   return context.WithValue(ctx, util.RequestStoreKey, &util.RequestStore{
     IsAdminRequest:      isAdminRequest,
+    IsVersionRequest:    strings.HasPrefix(r.RequestURI, "/version"),
     IsLockerRequest:     strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker"),
     IsPeerEventsRequest: strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/events"),
-    IsMetricsRequest:    strings.Contains(r.RequestURI, "/metrics"),
+    IsMetricsRequest:    strings.HasPrefix(r.RequestURI, "/metrics"),
     IsReminderRequest:   strings.Contains(r.RequestURI, "/remember"),
     IsProbeRequest:      global.IsReadinessProbe(r) || global.IsLivenessProbe(r),
-    IsHealthRequest:     !isAdminRequest && strings.Contains(r.RequestURI, "/health"),
-    IsStatusRequest:     !isAdminRequest && strings.Contains(r.RequestURI, "/status"),
+    IsHealthRequest:     !isAdminRequest && strings.HasPrefix(r.RequestURI, "/health"),
+    IsStatusRequest:     !isAdminRequest && strings.HasPrefix(r.RequestURI, "/status"),
     IsDelayRequest:      !isAdminRequest && strings.Contains(r.RequestURI, "/delay"),
     IsPayloadRequest:    !isAdminRequest && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload")),
   })
@@ -168,6 +169,9 @@ func PrintLogMessages(statusCode, bodyLength int, headers http.Header, rs *util.
     (!rs.IsMetricsRequest || global.EnableMetricsLogs) &&
     (!rs.IsFilteredRequest && global.EnableServerLogs) {
     rs.LogMessages = append(rs.LogMessages, util.GetResponseHeadersLog(headers))
+    if statusCode == 0 {
+      statusCode = 200
+    }
     rs.LogMessages = append(rs.LogMessages, fmt.Sprintf("Response Status Code: [%d]", statusCode))
     rs.LogMessages = append(rs.LogMessages, fmt.Sprintf("Response Body Length: [%d]", bodyLength))
     log.Println(strings.Join(rs.LogMessages, " --> "))

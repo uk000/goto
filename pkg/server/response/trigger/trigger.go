@@ -85,7 +85,7 @@ func (t *Trigger) addTriggerTarget(w http.ResponseWriter, r *http.Request) {
     util.AddLogMessage(msg, r)
     w.WriteHeader(http.StatusOK)
     fmt.Fprintln(w, msg)
-    events.SendRequestEventJSON("Trigger Target Added", tt, r)
+    events.SendRequestEventJSON("Trigger Target Added", tt.Name, tt, r)
   } else {
     w.WriteHeader(http.StatusBadRequest)
     fmt.Fprintf(w, "Invalid trigger target: %s\n", err.Error())
@@ -221,7 +221,7 @@ func (t *Trigger) invokeTargets(targets map[string]*TriggerTarget, w http.Respon
       target.lock.Lock()
       target.TriggerCount++
       target.lock.Unlock()
-      events.SendRequestEventJSON("Trigger Target Invoked", target, r)
+      events.SendRequestEventJSON("Trigger Target Invoked", target.Name, target, r)
       metrics.UpdateTriggerCount(target.Name)
       is, _ := target.toInvocationSpec(r, w)
       tracker := invocation.RegisterInvocation(is)

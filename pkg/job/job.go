@@ -76,17 +76,15 @@ type Job struct {
   lock          sync.RWMutex
 }
 
-type PortJobs struct {
-  jobs         map[string]*Job
-  jobRuns      map[string]map[int]*JobRunContext
-  listenerPort int
-  lock         sync.RWMutex
+type JobManager struct {
+  jobs    map[string]*Job
+  jobRuns map[string]map[int]*JobRunContext
+  lock    sync.RWMutex
 }
 
 var (
-  Handler      = util.ServerHandler{Name: "jobs", SetRoutes: SetRoutes}
-  portJobs     = map[int]*PortJobs{}
-  portJobsLock sync.RWMutex
+  Handler = util.ServerHandler{Name: "jobs", SetRoutes: SetRoutes}
+  Jobs    = &JobManager{}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -103,43 +101,43 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(jobsRouter, "", getJobs, "GET")
 }
 
-func (pj *PortJobs) init() {
-  pj.lock.Lock()
-  defer pj.lock.Unlock()
-  pj.jobs = map[string]*Job{}
-  pj.jobRuns = map[string]map[int]*JobRunContext{}
+func (jm *JobManager) init() {
+  jm.lock.Lock()
+  defer jm.lock.Unlock()
+  jm.jobs = map[string]*Job{}
+  jm.jobRuns = map[string]map[int]*JobRunContext{}
 }
 
-func (pj *PortJobs) AddJob(job *Job) {
-  pj.lock.Lock()
-  defer pj.lock.Unlock()
-  pj.jobs[job.ID] = job
+func (jm *JobManager) AddJob(job *Job) {
+  jm.lock.Lock()
+  defer jm.lock.Unlock()
+  jm.jobs[job.ID] = job
   if job.Auto {
     log.Printf("Auto-invoking Job: %s\n", job.ID)
-    go pj.RunJob(job)
+    go jm.RunJob(job)
   }
 }
 
-func (pj *PortJobs) removeJobs(jobs []string) {
-  pj.lock.Lock()
-  defer pj.lock.Unlock()
+func (jm *JobManager) removeJobs(jobs []string) {
+  jm.lock.Lock()
+  defer jm.lock.Unlock()
   for _, j := range jobs {
-    job := pj.jobs[j]
+    job := jm.jobs[j]
     if job != nil {
       job.lock.Lock()
       defer job.lock.Unlock()
-      delete(pj.jobs, j)
+      delete(jm.jobs, j)
     }
   }
 }
 
-func (pj *PortJobs) getJobResults(name string) map[int][]interface{} {
+func (jm *JobManager) getJobResults(name string) map[int][]interface{} {
   results := map[int][]interface{}{}
 
-  pj.lock.RLock()
-  job := pj.jobs[name]
-  jobRuns := pj.jobRuns[name]
-  pj.lock.RUnlock()
+  jm.lock.RLock()
+  job := jm.jobs[name]
+  jobRuns := jm.jobRuns[name]
+  jm.lock.RUnlock()
 
   if job != nil && jobRuns != nil {
     for _, jobRun := range jobRuns {
@@ -154,14 +152,14 @@ func (pj *PortJobs) getJobResults(name string) map[int][]interface{} {
   return results
 }
 
-func (pj *PortJobs) getAllJobsResults() map[string]map[int][]interface{} {
+func (jm *JobManager) getAllJobsResults() map[string]map[int][]interface{} {
   results := map[string]map[int][]interface{}{}
-  pj.lock.RLock()
-  defer pj.lock.RUnlock()
-  for _, job := range pj.jobs {
+  jm.lock.RLock()
+  defer jm.lock.RUnlock()
+  for _, job := range jm.jobs {
     job.lock.RLock()
     results[job.ID] = map[int][]interface{}{}
-    for _, jobRun := range pj.jobRuns[job.ID] {
+    for _, jobRun := range jm.jobRuns[job.ID] {
       jobRun.lock.RLock()
       results[job.ID][jobRun.index] = []interface{}{}
       for _, r := range jobRun.jobResults {
@@ -174,19 +172,19 @@ func (pj *PortJobs) getAllJobsResults() map[string]map[int][]interface{} {
   return results
 }
 
-func (pj *PortJobs) getJobsToRun(names []string) []*Job {
-  pj.lock.RLock()
-  defer pj.lock.RUnlock()
+func (jm *JobManager) getJobsToRun(names []string) []*Job {
+  jm.lock.RLock()
+  defer jm.lock.RUnlock()
   var jobsToRun []*Job
   if len(names) > 0 {
     for _, j := range names {
-      if job, found := pj.jobs[j]; found {
+      if job, found := jm.jobs[j]; found {
         jobsToRun = append(jobsToRun, job)
       }
     }
   } else {
-    if len(pj.jobs) > 0 {
-      for _, job := range pj.jobs {
+    if len(jm.jobs) > 0 {
+      for _, job := range jm.jobs {
         jobsToRun = append(jobsToRun, job)
       }
     }
@@ -229,7 +227,7 @@ func storeJobResult(job *Job, jobRun *JobRunContext, iteration int, data interfa
 
 }
 
-func (pj *PortJobs) runCommandJob(job *Job, jobRun *JobRunContext, iteration int, last bool) {
+func (jm *JobManager) runCommandJob(job *Job, jobRun *JobRunContext, iteration int, last bool) {
   job.lock.RLock()
   jobRun.lock.RLock()
   commandTask := job.commandTask
@@ -319,7 +317,7 @@ Done:
           storeJobResult(job, jobRun, iteration, out, last)
           if outputTrigger != "" {
             markers := prepareMarkers(out, commandTask, jobRun)
-            go pj.runJobWithInput(outputTrigger, markers)
+            go jm.runJobWithInput(outputTrigger, markers)
           }
         }
       } else {
@@ -358,7 +356,7 @@ func storeHttpResult(result *invocation.InvocationResult, job *Job, iteration in
   storeJobResult(job, jobRun, iteration, data, last)
 }
 
-func (pj *PortJobs) invokeHttpTarget(job *Job, jobRun *JobRunContext, iteration int, last bool) {
+func (jm *JobManager) invokeHttpTarget(job *Job, jobRun *JobRunContext, iteration int, last bool) {
   job.lock.RLock()
   target := &job.httpTask.InvocationSpec
   outputTrigger := job.OutputTrigger
@@ -390,7 +388,7 @@ func (pj *PortJobs) invokeHttpTarget(job *Job, jobRun *JobRunContext, iteration 
         resultCount++
         storeHttpResult(result, job, iteration, jobRun, last)
         if outputTrigger != "" {
-          pj.runJobWithInput(outputTrigger, nil)
+          jm.runJobWithInput(outputTrigger, nil)
         }
         return true
       }
@@ -448,21 +446,21 @@ func prepareMarkers(output string, sourceCommand *CommandJobTask, jobRun *JobRun
   return markers
 }
 
-func (pj *PortJobs) runJobWithInput(jobName string, markers map[string]string) {
-  pj.lock.RLock()
-  job := pj.jobs[jobName]
-  pj.lock.RUnlock()
+func (jm *JobManager) runJobWithInput(jobName string, markers map[string]string) {
+  jm.lock.RLock()
+  job := jm.jobs[jobName]
+  jm.lock.RUnlock()
   if job == nil {
     return
   }
   if job.commandTask != nil {
-    pj.runCommandWithInput(job, markers)
+    jm.runCommandWithInput(job, markers)
   } else if job.httpTask != nil {
-    pj.runHttpJobWithInput(job, markers)
+    jm.runHttpJobWithInput(job, markers)
   }
 }
 
-func (pj *PortJobs) runCommandWithInput(job *Job, markers map[string]string) {
+func (jm *JobManager) runCommandWithInput(job *Job, markers map[string]string) {
   job.lock.Lock()
   args := []string{}
   for _, a := range job.commandTask.Args {
@@ -479,14 +477,14 @@ func (pj *PortJobs) runCommandWithInput(job *Job, markers map[string]string) {
     }
   }
   job.lock.Unlock()
-  pj.runJob(job, args, markers)
+  jm.runJob(job, args, markers)
 }
 
-func (pj *PortJobs) runHttpJobWithInput(job *Job, markers map[string]string) {
-  pj.runJob(job, nil, markers)
+func (jm *JobManager) runHttpJobWithInput(job *Job, markers map[string]string) {
+  jm.runJob(job, nil, markers)
 }
 
-func (pj *PortJobs) executeJobRun(job *Job, jobRun *JobRunContext) {
+func (jm *JobManager) executeJobRun(job *Job, jobRun *JobRunContext) {
   job.lock.Lock()
   count := job.Count
   delay := job.delayD
@@ -498,15 +496,15 @@ func (pj *PortJobs) executeJobRun(job *Job, jobRun *JobRunContext) {
   job.lock.Unlock()
 
   log.Printf("job [%s] Run [%d] Started \n", job.ID, jobRun.index)
-  events.SendEventJSON(Jobs_JobStarted, map[string]interface{}{"job": job, "jobRun": jobRun.index})
+  events.SendEventJSON(Jobs_JobStarted, job.ID, map[string]interface{}{"job": job, "jobRun": jobRun.index})
 
   time.Sleep(initialDelay)
   for i := 0; i < count; i++ {
     time.Sleep(delay)
     if job.commandTask != nil {
-      pj.runCommandJob(job, jobRun, i+1, i == count-1)
+      jm.runCommandJob(job, jobRun, i+1, i == count-1)
     } else if job.httpTask != nil {
-      pj.invokeHttpTarget(job, jobRun, i+1, i == count-1)
+      jm.invokeHttpTarget(job, jobRun, i+1, i == count-1)
     }
     jobRun.lock.RLock()
     running := !jobRun.stopped && !jobRun.finished
@@ -526,16 +524,16 @@ func (pj *PortJobs) executeJobRun(job *Job, jobRun *JobRunContext) {
   job.lock.Unlock()
 
   if finishTrigger != "" {
-    pj.runJobWithInput(finishTrigger, nil)
+    jm.runJobWithInput(finishTrigger, nil)
   }
 }
 
-func (pj *PortJobs) initJobRun(job *Job, jobArgs []string, markers map[string]string) *JobRunContext {
+func (jm *JobManager) initJobRun(job *Job, jobArgs []string, markers map[string]string) *JobRunContext {
   if job == nil || (job.commandTask == nil && job.httpTask == nil) {
     return nil
   }
-  pj.lock.Lock()
-  defer pj.lock.Unlock()
+  jm.lock.Lock()
+  defer jm.lock.Unlock()
   job.lock.Lock()
   defer job.lock.Unlock()
   job.jobRunCounter++
@@ -546,36 +544,36 @@ func (pj *PortJobs) initJobRun(job *Job, jobArgs []string, markers map[string]st
   jobRun.markers = markers
   jobRun.stopChannel = make(chan bool, 10)
   jobRun.doneChannel = make(chan bool, 10)
-  if pj.jobRuns[job.ID] == nil {
-    pj.jobRuns[job.ID] = map[int]*JobRunContext{}
+  if jm.jobRuns[job.ID] == nil {
+    jm.jobRuns[job.ID] = map[int]*JobRunContext{}
   }
-  pj.jobRuns[job.ID][job.jobRunCounter] = jobRun
+  jm.jobRuns[job.ID][job.jobRunCounter] = jobRun
   return jobRun
 }
 
-func (pj *PortJobs) runJob(job *Job, jobArgs []string, markers map[string]string) {
-  jobRun := pj.initJobRun(job, jobArgs, markers)
+func (jm *JobManager) runJob(job *Job, jobArgs []string, markers map[string]string) {
+  jobRun := jm.initJobRun(job, jobArgs, markers)
   if jobRun == nil {
     return
   }
-  pj.executeJobRun(job, jobRun)
+  jm.executeJobRun(job, jobRun)
 }
 
-func (pj *PortJobs) RunJob(job *Job) {
-  pj.runJob(job, nil, nil)
+func (jm *JobManager) RunJob(job *Job) {
+  jm.runJob(job, nil, nil)
 }
 
-func (pj *PortJobs) runJobs(jobs []*Job) {
+func (jm *JobManager) runJobs(jobs []*Job) {
   for _, job := range jobs {
-    go pj.RunJob(job)
+    go jm.RunJob(job)
   }
 }
 
-func (pj *PortJobs) stopJob(j string) bool {
-  pj.lock.Lock()
-  defer pj.lock.Unlock()
-  job := pj.jobs[j]
-  jobRuns := pj.jobRuns[j]
+func (jm *JobManager) stopJob(j string) bool {
+  jm.lock.Lock()
+  defer jm.lock.Unlock()
+  job := jm.jobs[j]
+  jobRuns := jm.jobRuns[j]
   if job == nil || jobRuns == nil {
     return false
   }
@@ -590,41 +588,23 @@ func (pj *PortJobs) stopJob(j string) bool {
       jobRun.stopChannel <- true
     }
     jobRun.lock.Unlock()
-    events.SendEventJSON(Jobs_JobStopped, job)
+    events.SendEventJSON(Jobs_JobStopped, job.ID, job)
   }
   return true
 }
 
-func (pj *PortJobs) stopJobs(jobs []string) {
+func (jm *JobManager) stopJobs(jobs []string) {
   for _, job := range jobs {
-    pj.stopJob(job)
+    jm.stopJob(job)
   }
-}
-
-func GetPortJobs(port int) *PortJobs {
-  portJobsLock.Lock()
-  defer portJobsLock.Unlock()
-  pj := portJobs[port]
-  if pj == nil {
-    pj = &PortJobs{listenerPort: port}
-    pj.init()
-    portJobs[port] = pj
-  }
-  return pj
-}
-
-func getPortJobs(r *http.Request) *PortJobs {
-  return GetPortJobs(util.GetListenerPortNum(r))
 }
 
 func RunJobs(jobs []string, port int) {
-  pj := GetPortJobs(port)
-  pj.runJobs(pj.getJobsToRun(jobs))
+  Jobs.runJobs(Jobs.getJobsToRun(jobs))
 }
 
 func StopJob(job string, port int) bool {
-  pj := GetPortJobs(port)
-  return pj.stopJob(job)
+  return Jobs.stopJob(job)
 }
 
 func StopJobs(jobs []string, port int) {
@@ -636,10 +616,9 @@ func StopJobs(jobs []string, port int) {
 func addJob(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if job, err := ParseJob(r); err == nil {
-    pj := getPortJobs(r)
-    pj.AddJob(job)
+    Jobs.AddJob(job)
     msg = fmt.Sprintf("Added Job: %s\n", util.ToJSON(job))
-    events.SendRequestEventJSON(Jobs_JobAdded, job, r)
+    events.SendRequestEventJSON(Jobs_JobAdded, job.ID, job, r)
     w.WriteHeader(http.StatusOK)
   } else {
     w.WriteHeader(http.StatusBadRequest)
@@ -652,10 +631,10 @@ func addJob(w http.ResponseWriter, r *http.Request) {
 func removeJob(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if jobs, present := util.GetListParam(r, "jobs"); present {
-    getPortJobs(r).removeJobs(jobs)
+    Jobs.removeJobs(jobs)
     w.WriteHeader(http.StatusOK)
     msg = fmt.Sprintf("Jobs Removed: %s\n", jobs)
-    events.SendRequestEventJSON(Jobs_JobsRemoved, jobs, r)
+    events.SendRequestEventJSON(Jobs_JobsRemoved, util.GetStringParamValue(r, "jobs"), jobs, r)
   } else {
     w.WriteHeader(http.StatusNotAcceptable)
     msg = "No jobs"
@@ -665,7 +644,7 @@ func removeJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearJobs(w http.ResponseWriter, r *http.Request) {
-  getPortJobs(r).init()
+  Jobs.init()
   w.WriteHeader(http.StatusOK)
   msg := "Jobs Cleared"
   events.SendRequestEvent(msg, "", r)
@@ -675,16 +654,15 @@ func clearJobs(w http.ResponseWriter, r *http.Request) {
 
 func getJobs(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("Reporting jobs", r)
-  util.WriteJsonPayload(w, getPortJobs(r).jobs)
+  util.WriteJsonPayload(w, Jobs.jobs)
 }
 
 func runJobs(w http.ResponseWriter, r *http.Request) {
   msg := ""
-  pj := getPortJobs(r)
   names, _ := util.GetListParam(r, "jobs")
-  jobsToRun := pj.getJobsToRun(names)
+  jobsToRun := Jobs.getJobsToRun(names)
   if len(jobsToRun) > 0 {
-    pj.runJobs(jobsToRun)
+    Jobs.runJobs(jobsToRun)
     w.WriteHeader(http.StatusOK)
     msg = fmt.Sprintf("Jobs %+v started\n", names)
   } else {
@@ -697,15 +675,14 @@ func runJobs(w http.ResponseWriter, r *http.Request) {
 
 func stopJobs(w http.ResponseWriter, r *http.Request) {
   jobs, present := util.GetListParam(r, "jobs")
-  pj := getPortJobs(r)
-  pj.lock.RLock()
+  Jobs.lock.RLock()
   if !present {
-    for j := range getPortJobs(r).jobs {
+    for j := range Jobs.jobs {
       jobs = append(jobs, j)
     }
   }
-  pj.lock.RUnlock()
-  pj.stopJobs(jobs)
+  Jobs.lock.RUnlock()
+  Jobs.stopJobs(jobs)
   w.WriteHeader(http.StatusOK)
   msg := fmt.Sprintf("Jobs %+v stopped\n", jobs)
   fmt.Fprintln(w, msg)
@@ -716,10 +693,10 @@ func getJobResults(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if job, present := util.GetStringParam(r, "job"); present {
     msg = fmt.Sprintf("Results reported for job: %s", job)
-    util.WriteJsonPayload(w, getPortJobs(r).getJobResults(job))
+    util.WriteJsonPayload(w, Jobs.getJobResults(job))
   } else {
     msg = "Results reported for all jobs"
-    util.WriteJsonPayload(w, getPortJobs(r).getAllJobsResults())
+    util.WriteJsonPayload(w, Jobs.getAllJobsResults())
   }
   w.WriteHeader(http.StatusOK)
   util.AddLogMessage(msg, r)

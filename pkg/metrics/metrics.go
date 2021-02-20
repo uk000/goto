@@ -108,14 +108,15 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    UpdateRequestCount("all")
-    if util.IsAdminRequest(r) {
-      UpdateRequestCount("admin")
-    } else if util.IsMetricsRequest(r) {
-      UpdateRequestCount("metrics")
-    }
     if next != nil {
       next.ServeHTTP(w, r)
+    }
+    UpdateRequestCount("all")
+    if util.IsMetricsRequest(r) {
+      UpdateRequestCount("metrics")
+      util.AddLogMessage("Metrics reported", r)
+    } else if util.IsAdminRequest(r) {
+      UpdateRequestCount("admin")
     }
   })
 }
