@@ -168,7 +168,9 @@ func PrintLogMessages(statusCode, bodyLength int, headers http.Header, rs *util.
     (!rs.IsHealthRequest || global.EnablePeerHealthLogs) &&
     (!rs.IsMetricsRequest || global.EnableMetricsLogs) &&
     (!rs.IsFilteredRequest && global.EnableServerLogs) {
-    rs.LogMessages = append(rs.LogMessages, util.GetResponseHeadersLog(headers))
+    if global.LogResponseHeaders {
+      rs.LogMessages = append(rs.LogMessages, util.GetResponseHeadersLog(headers))
+    }
     if statusCode == 0 {
       statusCode = 200
     }

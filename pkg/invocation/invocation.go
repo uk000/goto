@@ -768,8 +768,12 @@ func doInvoke(index uint32, targetID string, target *InvocationSpec,
   headers := target.Headers
   headers = append(headers, []string{"TargetID", targetID})
   if global.EnableInvocationLogs {
+    var headersLog interface{} = ""
+    if global.LogRequestHeaders {
+      headersLog = target.Headers
+    }
     log.Printf("[%s]: Invocation[%d]: Invoking targetID [%s], url [%s], method [%s], headers [%+v]\n",
-      hostLabel, index, targetID, result.URL, target.Method, target.Headers)
+      hostLabel, index, targetID, result.URL, target.Method, headersLog)
   }
   result.URL, result.RequestID = prepareTargetURL(result.URL, target.SendID, result.RequestID)
   originalRequestId := result.RequestID
@@ -902,11 +906,14 @@ func doProcessResponse(index uint32, targetID string, resp *http.Response, resul
     }
   }
   if global.EnableInvocationLogs {
-    headerLogs := []string{}
-    for header, values := range resp.Header {
-      headerLogs = append(headerLogs, header+":["+strings.Join(values, ",")+"]")
+    headerLog := ""
+    if global.LogResponseHeaders {
+      headerLogs := []string{}
+      for header, values := range resp.Header {
+        headerLogs = append(headerLogs, header+":["+strings.Join(values, ",")+"]")
+      }
+      headerLog = strings.Join(headerLogs, ",")
     }
-    headerLog := strings.Join(headerLogs, ",")
     url := result.URL
     if result.RetryURL != "" {
       url = result.RetryURL

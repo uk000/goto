@@ -1,12 +1,13 @@
 package header
 
 import (
-	"net/http"
+  "net/http"
 
-	"goto/pkg/server/request/header/tracking"
-	"goto/pkg/util"
+  "goto/pkg/global"
+  "goto/pkg/server/request/header/tracking"
+  "goto/pkg/util"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
 
 var (
@@ -19,7 +20,9 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    util.AddLogMessage("Request Headers: " + util.GetRequestHeadersLog(r), r)
+    if global.LogRequestHeaders {
+      util.AddLogMessage("Request Headers: "+util.GetRequestHeadersLog(r), r)
+    }
     tracking.Middleware(next).ServeHTTP(w, r)
   })
 }

@@ -350,6 +350,16 @@ The application accepts the following command arguments:
           <td>Enable/Disable logging of requests received from Registry for peer health checks </td>
           <td rowspan="1">true</td>
         </tr>
+        <tr>
+          <td rowspan="1"><pre>--logRequestHeaders={true|false}</pre></td>
+          <td>Enable/Disable logging of request headers </td>
+          <td rowspan="1">true</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--logResponseHeaders={true|false}</pre></td>
+          <td>Enable/Disable logging of response headers </td>
+          <td rowspan="1">false</td>
+        </tr>
     </tbody>
 </table>
 

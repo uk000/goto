@@ -44,6 +44,8 @@ func Execute() {
   flag.BoolVar(&global.EnableRegistryEventsLogs, "eventsLogs", false, "Enable/Disable Registry Peer Events Logs")
   flag.BoolVar(&global.EnableRegistryReminderLogs, "reminderLogs", false, "Enable/Disable Registry Reminder Logs")
   flag.BoolVar(&global.EnablePeerHealthLogs, "peerHealthLogs", true, "Enable/Disable Registry-to-Peer Health Check Logs")
+  flag.BoolVar(&global.LogRequestHeaders, "logRequestHeaders", true, "Enable/Disable logging of request headers")
+  flag.BoolVar(&global.LogResponseHeaders, "logResponseHeaders", false, "Enable/Disable logging of response headers")
   flag.Parse()
 
   if portsList != "" {
@@ -86,6 +88,16 @@ func Execute() {
     log.Println("Will Print Probe Logs")
   } else {
     log.Println("Will Not Print Probe Logs")
+  }
+  if global.LogRequestHeaders {
+    log.Println("Will Log Request Headers")
+  } else {
+    log.Println("Will Not Log Request Headers")
+  }
+  if global.LogResponseHeaders {
+    log.Println("Will Log Response Headers")
+  } else {
+    log.Println("Will Not Log Response Headers")
   }
   if global.CertPath != "" {
     log.Printf("Will read certs from [%s]\n", global.CertPath)
