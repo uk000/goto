@@ -188,8 +188,8 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 - [Registry Features](#registry)
 - [Registry Peers APIs](#registry-peers-apis)
 - [Locker Management APIs](#locker-management-apis)
-- [Data Sub-Lockers Read APIs](#data-sub-lockers-read-apis)
-- [Lockers Read APIs](#lockers-read-apis)
+- [Locker Data Path Read APIs](#locker-data-path-read-apis)
+- [Lockers Dump APIs](#lockers-dump-apis)
 - [Peers Events APIs](#registry-events-apis)
 - [Peer Targets Management APIs](#peers-targets-management-apis)
 - [Peer Jobs Management APIs](#peers-jobs-management-apis)
@@ -2858,7 +2858,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 1. You can pre-register a list of invocation targets and jobs at the registry instance that should be handed out to the worker instances. These targets/jobs are registered by labels, and the worker instances receive the matching targets+jobs for the labels they register with.
 2. The targets and jobs registered at the registry can also be marked for `auto-invocation`. When a worker instance receives a target/job from registry at startup that's marked for auto-invocation, it immediately invokes that target/job at startup. Additionally, the target/job is retained in the worker instance for later invocation via API as well.
 3. In addition to sending targets/jobs to worker instances at the time of registration, the registry instance also pushes targets/jobs to the worker instances as and when more targets/jobs get added to the registry. This has the added benefit of just using the registry instance as the single point of configuration, where you add targets/jobs and those get pushed to all worker instances. Removal of targets/jobs from the registry also gets pushed, so the targets/jobs get removed from the corresponding worker instances. Even targets/jobs that are pushed later can be marked for `auto-invocation`, and the worker instances that receive the target/job will invoke it immediately upon receipt.
-4. Registry provides `labeled lockers` as a flexible in-memory data store for capturing any kind of data for debugging purposes. Registry starts with a locker labeled `default`. A new locker can be opened using the `/open` API, and lockers can be closed (discarded) using the `/close` API. The most recently opened locker becomes current and captures data reported from peer instances, whereas other named lockers stay around and can be interacted with using `/store`, `/remove` and `/get` APIs. The `/search` API can find a given search phrase across all keys across all available lockers.
+4. Registry provides `labeled lockers` as a flexible in-memory data store for capturing any kind of data for debugging purposes. Registry starts with a locker labeled `default`. A new locker can be opened using the `/open` API, and lockers can be closed (discarded) using the `/close` API. The most recently opened locker becomes current and captures data reported from peer instances, whereas other named lockers stay around and can be interacted with using `/store`, `/remove` and `/get` APIs. The `/search` API can find a given search phrase across all keys across all available lockers. Lockers can be opened in a hierarchical structure with child lockers under parent lockers, by using comma-separated names as `label` in `/open` API. 
 5. If peer instances are configured to connect to a registry, they store their events and client invocation results into the current labeled locker in the registry. Registry provides APIs to get summary invocation results and a timeline of events across all peers. 
 6. Peer instances periodically re-register themselves with registry in case registry was restarted and lost all peers info. Re-registering is different from startup registration in that peers don't receive targets and jobs from registry when they remind registry about themselves, and hence no auto-invocation happens.
 7. A registry instance can be asked to clone data from another registry instance using the `/cloneFrom` API. This allows for quick bootstrapping of a new registry instance based on configuration from an existing registry instance, whether for data analysis purpose or for performing further operations. The pods cloned from the other registry are not used by this registry for any operations. Any new pods connecting to this registry using the same labels cloned from the other registry will be able to use the existing configs.
@@ -2892,15 +2892,15 @@ By registering a worker instance to a registry instance, we get a few benefits:
 # <a name="locker-management-apis"></a>
 #### Locker Management APIs
 
-Label `current` can be used with APIs that take a locker label param to get data from currently active locker.
+Label `current` can be used with APIs that take a locker label param to get data from currently active locker. Comma-separated label can be used to open/manage a nested locker.
 
 |METHOD|URI|Description|
 |---|---|---|
-| POST      | /registry/lockers/open/`{label}` | Setup a locker with the given label and make it the current locker where peer results get stored.  |
-| POST      | /registry/lockers/close/`{label}` | Remove the locker for the given label.  |
-| POST      | /registry/lockers/`{label}`/close | Remove the locker for the given label.  |
+| POST      | /registry/lockers/open/`{label}` | Setup a locker with the given label and make it the current locker where peer results get stored. Comma-separated label can be used to open nested lockers, where each non-leaf item in the CSV list is used as a parent locker. The leaf locker label becomes the currently active locker. |
+| POST      | /registry/lockers/close/`{label}` | Remove the locker for the given label. |
+| POST      | /registry/lockers/`{label}`/close | Remove the locker for the given label. |
 | POST      | /registry/lockers/close | Remove all labeled lockers and empty the default locker.  |
-| POST      | /registry/lockers/`{label}`/clear | Clear the contents of the locker for the given label but keep the locker.  |
+| POST      | /registry/lockers/`{label}`/clear | Clear the contents of the locker for the given label but keep the locker. |
 | POST      | /registry/lockers/clear | Remove all labeled lockers and empty the default locker.  |
 | POST      | /registry/lockers<br/>/`{label}`/store/`{path}` | Store payload (body) as data in the given labeled locker at the leaf of the given key path. `path` can be a single key or a comma-separated list of subkeys, in which case data gets stored in the tree under the given path. |
 | POST      | /registry/lockers<br/>/`{label}`/remove/`{path}` | Remove stored data, if any, from the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data gets removed from the leaf of the given path. |
@@ -2917,9 +2917,9 @@ Label `current` can be used with APIs that take a locker label param to get data
 ###### <small> [Back to TOC](#goto-registry) </small>
 
 # <a name="data-sub-lockers-read-apis"></a>
-#### Data Sub-Lockers Read APIs
+#### Locker Data Path Read APIs
 
-These APIs only read from the `Data` sub-lockers that are used to store custom data under arbitrary keys. These APIs don't read from the `Instance Lockers` that store client results and events published by peers. Where applicable, query param `data` controls whether locker is returned with or without stored data (default value is `n` and only locker metadata is fetched). Query param `events` controls whether locker is returned with or without peers' events data. Query param `level` controls how many levels of subkeys are returned (default level is 2). Label `current` can be used with APIs that take a locker label param to get data from currently active locker.
+These APIs allow reading data stored at specific paths/keys. Where applicable, query param `data` controls whether locker is returned with or without stored data (default value is `n` and only locker metadata is fetched). Query param `events` controls whether locker is returned with or without peers' events data. Query param `level` controls how many levels of subkeys are returned (default level is 2). Label `current` can be used to get data from currently active locker, and label `all` can be used to read data stored under given keys from all lockers. Comma-separated locker labels can be used to read from a nested locker. Comma-separated keys can be used to read from nested keys. 
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -2931,22 +2931,24 @@ These APIs only read from the `Data` sub-lockers that are used to store custom d
 | GET      | /registry/lockers<br/>/`{label}`/search/`{text}` | Get a list of all valid URI paths where the given text exists in the given locker. The returned URIs are valid for invocation against the base URL of the registry. |
 | GET       | /registry/lockers/data?data=`[y/n]`&level=`{level}` | Get data sub-lockers from all labeled lockers |
 | GET       | /registry/lockers/`{label}`/data?data=`[y/n]`&level=`{level}` | Get data sub-lockers from the given labeled locker.  |
-| GET      | /registry/lockers<br/>/`{label}`/get/`{path}`?data=`[y/n]`&level=`{level}` | Read stored data, if any, at the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. Use `data` query param to get stored data (default data param is off and only locker metadata is fetched). Use `level` query param to control how many sub-lockers to fetch (default level is 1). |
-| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/`{address}`<br/>/locker/get/`{path}` | Get the data stored at the given path under the peer instance's locker under the given labeled locker. Using label `current` fetches data from the current labeled locker. |
-| GET       | /registry/peers/`{peer}`<br/>/`{address}`/locker/get/`{path}` | Get the data stored at the given path under the peer instance's locker under the current labeled locker |
+| GET      | /registry/lockers<br/>/`{label}`/get/`{path}`?data=`[y/n]`&level=`{level}` | Read stored data, if any, at the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/`{address}`<br/>/get/`{path}` | Get the data stored at the given path under the peer instance's locker under the given labeled locker.  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/get/`{path}` | Get the data stored at the given path under the peer locker under the given labeled locker.  |
+| GET       | /registry/peers/`{peer}`/`{address}`<br/>/locker/get/`{path}` | Get the data stored at the given path under the peer instance's locker under the current labeled locker |
+| GET       | /registry/peers/`{peer}`<br/>/locker/get/`{path}` | Get the data stored at the given path under the peer locker under the current labeled locker |
 
 ###### <small> [Back to TOC](#goto-registry) </small>
 
 
-# <a name="lockers-read-apis"></a>
-#### Lockers Read APIs
+# <a name="lockers-dump-apis"></a>
+#### Lockers Dump APIs
 
-These APIs read all contents of a selected locker or all lockers. Where applicable, query param `data` controls whether locker is returned with or without stored data (default value is `n` and only locker metadata is fetched). Query param `events` controls whether locker is returned with or without peers' events data. Query param `level` controls how many levels of subkeys are returned (default level is 2). Label `current` can be used with APIs that take a locker label param to get data from currently active locker.
+These APIs read all contents of a selected locker or all lockers. Where applicable, query param `data` controls whether locker is returned with or without stored data (default value is `n` and only locker metadata is fetched). Query param `events` controls whether locker is returned with or without peers' events data. Query param `peers` controls whether returned locker should include peer sub-lockers (containing data published by various peers). Query param `level` controls how many levels of subkeys are returned (default level is 2). Label `current` can be used with APIs that take a locker label param to get data from currently active locker. Comma-separated label can be used to read from a nested locker.
 
 |METHOD|URI|Description|
 |---|---|---|
-| GET       | /registry/lockers/`{label}`?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get given labeled locker.  |
-| GET       | /registry/lockers?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get all lockers. |
+| GET       | /registry/lockers/`{label}`?data=`[y/n]`&events=`[y/n]`&peers=`[y/n]`&level=`{level}` | Get given labeled locker.  |
+| GET       | /registry/lockers?data=`[y/n]`&events=`[y/n]`&peers=`[y/n]`&level=`{level}` | Get all lockers. |
 | GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/`{address}`?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the peer instance's locker from the given labeled locker. |
 | GET       | /registry/peers/`{peer}`/`{address}`<br/>/locker?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the peer instance's locker from the current active labeled locker. |
 | GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the lockers of all instances of the given peer from the given labeled locker. |
@@ -3051,11 +3053,6 @@ These APIs manage client invocation targets on peers, allowing to add, remove, s
 |METHOD|URI|Description|
 |---|---|---|
 | POST | /registry/cloneFrom?url={url} | Clone data from another registry instance at the given URL. The current goto instance will download `peers`, `lockers`, `targets`, `jobs`, `tracking headers` and `probes`. The peer pods downloaded from other registry are not used for any invocation by this registry, it just becomes available locally for information purpose. Any new pods connecting to this registry using the same peer labels will use the downloaded targets, jobs, etc. |
-| GET | /lockers/`{label}`/dump/`{path}` | Dump data stored at the given key path in the given labeled locker. |
-| GET | /lockers/current/dump/`{path}` | Dump data stored at the given key path from the current labeled locker. |
-| GET | /lockers/`{label}`/dump | Dump contents of the given labeled locker. |
-| GET | /lockers/current/dump | Dump contents of the current labeled locker. |
-| GET | /lockers/all/dump | Dump contents of all labeled lockers. |
 | GET | /registry/dump | Dump current registry configs and locker data in json format. |
 | POST | /registry/load | Load registry configs and locker data from json dump produced via `/dump` API. |
 

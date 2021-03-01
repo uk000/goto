@@ -436,8 +436,11 @@ func WriteJsonPayload(w http.ResponseWriter, t interface{}) {
   if reflect.ValueOf(t).IsNil() {
     fmt.Fprintln(w, "")
   } else {
-    bytes, _ := json.Marshal(t)
-    fmt.Fprintln(w, string(bytes))
+    if bytes, err := json.Marshal(t); err == nil {
+      fmt.Fprintln(w, string(bytes))
+    } else {
+      fmt.Printf("Failed to write json payload: %s\n", err.Error())
+    }
   }
 }
 

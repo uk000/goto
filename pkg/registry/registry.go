@@ -143,15 +143,6 @@ func (registry *Registry) getCurrentLocker() *locker.CombiLocker {
   return registry.labeledLockers.GetCurrentLocker()
 }
 
-func (registry *Registry) getLabeledLocker(label string) *locker.CombiLocker {
-  registry.lockersLock.RLock()
-  defer registry.lockersLock.RUnlock()
-  if strings.EqualFold(label, constants.LockerCurrent) {
-    return registry.labeledLockers.GetCurrentLocker()
-  }
-  return registry.labeledLockers.GetLocker(label)
-}
-
 func (registry *Registry) unsafeAddPeer(peer *Peer) {
   now := time.Now()
   if registry.peers[peer.Name] == nil {
@@ -1014,7 +1005,7 @@ func closeOrClearLabeledLocker(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
   close := strings.Contains(r.RequestURI, "close")
-  if strings.EqualFold(label, constants.LockerDefaultLabel) {
+  if close && strings.EqualFold(label, constants.LockerDefaultLabel) {
     w.WriteHeader(http.StatusBadRequest)
     msg = "Default locker cannot be closed"
   } else if label != "" {
@@ -1050,10 +1041,11 @@ func getLabeledLocker(w http.ResponseWriter, r *http.Request) {
   label := util.GetStringParamValue(r, "label")
   getData := util.GetBoolParamValue(r, "data")
   getEvents := util.GetBoolParamValue(r, "events")
+  getPeerLockers := util.GetBoolParamValue(r, "peers")
   level := util.GetIntParamValue(r, "level", 2)
   var locker *locker.CombiLocker
   if label != "" {
-    locker = registry.getLabeledLocker(label)
+    locker = registry.labeledLockers.GetLocker(label)
   } else {
     locker = registry.getCurrentLocker()
   }
@@ -1062,13 +1054,14 @@ func getLabeledLocker(w http.ResponseWriter, r *http.Request) {
   }
   if !getData {
     locker = locker.GetLockerView(getEvents)
-    msg = fmt.Sprintf("Labeled locker [%s] view reported without data", label)
-  } else {
-    if !getEvents {
-      locker = locker.GetLockerWithoutEvents()
-    }
-    msg = fmt.Sprintf("Labeled locker [%s] reported with data", label)
   }
+  if !getPeerLockers {
+    locker = locker.GetLockerWithoutPeers()
+  }
+  if !getEvents {
+    locker = locker.GetLockerWithoutEvents()
+  }
+  msg = fmt.Sprintf("Labeled locker [%s] reported", label)
   util.WriteJsonPayload(w, locker)
   if global.EnableRegistryLockerLogs {
     util.AddLogMessage(msg, r)
@@ -1109,27 +1102,13 @@ func getAllLockers(w http.ResponseWriter, r *http.Request) {
   msg := ""
   getData := util.GetBoolParamValue(r, "data")
   getEvents := util.GetBoolParamValue(r, "events")
+  getPeerLockers := util.GetBoolParamValue(r, "peers")
   level := util.GetIntParamValue(r, "level", 2)
   registry.lockersLock.RLock()
   labeledLockers := registry.labeledLockers
   registry.lockersLock.RUnlock()
-  var lockers map[string]*locker.CombiLocker
-  if getData {
-    lockers = labeledLockers.GetAllLockers(getEvents)
-    msg = "All labeled lockers reported with data"
-  } else {
-    lockers = labeledLockers.GetAllLockersView(getEvents)
-    msg = "All labeled lockers view reported without data"
-  }
-  output := map[string]*locker.CombiLocker{}
-  for label, cl := range lockers {
-    if level > 0 {
-      output[label] = cl.Trim(level)
-    } else {
-      output[label] = cl
-    }
-  }
-  util.WriteJsonPayload(w, output)
+  msg = "All labeled lockers reported"
+  util.WriteJsonPayload(w, labeledLockers.GetAllLockers(getPeerLockers, getEvents, getData, level))
   if global.EnableRegistryLockerLogs {
     util.AddLogMessage(msg, r)
   }
@@ -1182,7 +1161,7 @@ func storeInLabeledLocker(w http.ResponseWriter, r *http.Request) {
   path, _ := util.GetListParam(r, "path")
   if label != "" && len(path) > 0 {
     data := util.Read(r.Body)
-    registry.getLabeledLocker(label).Store(path, data)
+    registry.labeledLockers.GetOrCreateLocker(label).Store(path, data)
     w.WriteHeader(http.StatusOK)
     msg = fmt.Sprintf("Data stored in labeled locker %s for path %+v", label, path)
     events.SendRequestEvent(Registry_LockerDataStored, msg, r)
@@ -1201,7 +1180,7 @@ func removeFromLabeledLocker(w http.ResponseWriter, r *http.Request) {
   label := util.GetStringParamValue(r, "label")
   path, _ := util.GetListParam(r, "path")
   if label != "" && len(path) > 0 {
-    registry.getLabeledLocker(label).Remove(path)
+    registry.labeledLockers.GetOrCreateLocker(label).Remove(path)
     w.WriteHeader(http.StatusOK)
     msg = fmt.Sprintf("Data removed from labeled locker %s for path %+v", label, path)
     events.SendRequestEvent(Registry_LockerDataRemoved, msg, r)
@@ -1221,34 +1200,17 @@ func getFromDataLocker(w http.ResponseWriter, r *http.Request) {
   val := util.GetStringParamValue(r, "path")
   path, _ := util.GetListParam(r, "path")
   getData := util.GetBoolParamValue(r, "data")
-  level := util.GetIntParamValue(r, "level", 2)
+  level := util.GetIntParamValue(r, "level", 0)
   level = len(path) + level
   if len(path) > 0 {
-    var locker *locker.CombiLocker
-    if label != "" {
-      locker = registry.getLabeledLocker(label)
+    data, dataAtKey := registry.labeledLockers.Get(label, path, getData, level)
+    msg = fmt.Sprintf("Reported data from path [%s] from locker [%s]", val, label)
+    if dataAtKey {
+      fmt.Fprint(w, data)
+    } else if data != nil {
+      util.WriteJsonPayload(w, data)
     } else {
-      locker = registry.getCurrentLocker()
-    }
-    if locker != nil {
-      if level > 0 {
-        locker = locker.Trim(level)
-      }
-      if !getData {
-        msg = fmt.Sprintf("Reported data from path [%s] from locker view [%s]", val, label)
-      } else {
-        msg = fmt.Sprintf("Reported data from path [%s] from locker [%s]", val, label)
-      }
-      data, dataAtKey := locker.Get(path, getData)
-      if dataAtKey {
-        fmt.Fprint(w, data)
-      } else {
-        util.WriteJsonPayload(w, data)
-      }
-    } else {
-      msg = "Locker not found"
-      w.WriteHeader(http.StatusNotFound)
-      fmt.Fprint(w, msg)
+      fmt.Fprint(w, "{}")
     }
   } else {
     w.WriteHeader(http.StatusBadRequest)
@@ -1355,31 +1317,22 @@ func getFromPeerLocker(w http.ResponseWriter, r *http.Request) {
   peerAddress := util.GetStringParamValue(r, "address")
   val := util.GetStringParamValue(r, "path")
   path, _ := util.GetListParam(r, "path")
+  getData := util.GetBoolParamValue(r, "data")
+  level := util.GetIntParamValue(r, "level", 0)
+  level = len(path) + level
 
-  if len(path) == 0 || peerName == "" || peerAddress == "" {
+  if len(path) == 0 || peerName == "" {
     w.WriteHeader(http.StatusBadRequest)
     msg = "Not enough parameters to access locker"
     fmt.Fprint(w, msg)
   } else {
-    var locker *locker.CombiLocker
-    if label == "" {
-      locker = registry.getCurrentLocker()
+    data, dataAtKey := registry.labeledLockers.GetFromPeerInstanceLocker(label, peerName, peerAddress, path, getData, level)
+    if dataAtKey {
+      fmt.Fprint(w, data)
     } else {
-      locker = registry.getLabeledLocker(label)
+      util.WriteJsonPayload(w, data)
     }
-    if locker == nil {
-      msg = "Locker not found"
-      w.WriteHeader(http.StatusNotFound)
-      fmt.Fprint(w, msg)
-    } else {
-      data, dataAtKey := locker.GetFromPeerInstanceLocker(peerName, peerAddress, path)
-      if dataAtKey {
-        fmt.Fprint(w, data)
-      } else {
-        util.WriteJsonPayload(w, data)
-      }
-      msg = fmt.Sprintf("Reported data from path [%s]\n", val)
-    }
+    msg = fmt.Sprintf("Reported data from path [%s]\n", val)
   }
   if global.EnableRegistryLockerLogs {
     util.AddLogMessage(msg, r)
@@ -1398,7 +1351,7 @@ func getPeerLocker(w http.ResponseWriter, r *http.Request) {
   if label == "" || strings.EqualFold(label, constants.LockerCurrent) {
     locker = registry.getCurrentLocker()
   } else {
-    locker = registry.getLabeledLocker(label)
+    locker = registry.labeledLockers.GetLocker(label)
   }
   if locker == nil {
     msg = "Locker not found"
@@ -1435,7 +1388,7 @@ func getTargetsSummaryResults(w http.ResponseWriter, r *http.Request) {
   if label == "" || strings.EqualFold(label, constants.LockerCurrent) {
     locker = registry.getCurrentLocker()
   } else {
-    locker = registry.getLabeledLocker(label)
+    locker = registry.labeledLockers.GetLocker(label)
   }
   if locker == nil {
     msg = "Locker not found"
@@ -1496,7 +1449,7 @@ func getPeerEvents(w http.ResponseWriter, r *http.Request) {
     locker = registry.getCurrentLocker()
     label = locker.Label
   } else {
-    locker = registry.getLabeledLocker(label)
+    locker = registry.labeledLockers.GetLocker(label)
   }
 
   if !all && locker == nil {
@@ -1550,7 +1503,7 @@ func searchInPeerEvents(w http.ResponseWriter, r *http.Request) {
       locker = registry.getCurrentLocker()
       label = locker.Label
     } else {
-      locker = registry.getLabeledLocker(label)
+      locker = registry.labeledLockers.GetLocker(label)
     }
     if !all && locker == nil {
       msg = "Locker not found"
@@ -2015,48 +1968,10 @@ func cloneFromRegistry(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func dumpLockerData(w http.ResponseWriter, r *http.Request) {
-  msg := ""
-  label := util.GetStringParamValue(r, "label")
-  val := util.GetStringParamValue(r, "path")
-  path, _ := util.GetListParam(r, "path")
-
-  if label != "" {
-    var locker *locker.CombiLocker
-    if strings.EqualFold(label, constants.LockerCurrent) {
-      locker = registry.getCurrentLocker()
-    } else {
-      locker = registry.getLabeledLocker(label)
-    }
-    if strings.EqualFold(val, constants.LockerPeers) {
-      util.WriteJsonPayload(w, locker.PeerLockers)
-      msg = fmt.Sprintf("Dumped peer lockers [%s]\n", label)
-    } else if len(path) > 0 {
-      data, dataAtKey := locker.Get(path, true)
-      if dataAtKey {
-        fmt.Fprint(w, data)
-      } else {
-        util.WriteJsonPayload(w, data)
-      }
-      msg = fmt.Sprintf("Dumped data from locker [%s] path [%s]\n", label, val)
-    } else {
-      util.WriteJsonPayload(w, locker)
-      msg = fmt.Sprintf("Dumped locker [%s]\n", label)
-    }
-  } else {
-    util.WriteJsonPayload(w, registry.labeledLockers.GetAllLockers(true))
-    msg = "Dumped all lockers\n"
-  }
-  events.SendRequestEvent(Registry_LockersDumped, "", r)
-  if global.EnableRegistryLogs {
-    util.AddLogMessage(msg, r)
-  }
-}
-
 func dumpRegistry(w http.ResponseWriter, r *http.Request) {
   dump := map[string]interface{}{}
   registry.lockersLock.RLock()
-  dump["lockers"] = registry.labeledLockers.GetAllLockers(true)
+  dump["lockers"] = registry.labeledLockers.GetAllLockers(true, true, true, 0)
   registry.lockersLock.RUnlock()
   registry.peersLock.RLock()
   dump["peers"] = registry.peers
