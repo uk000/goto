@@ -237,8 +237,8 @@ func ValidateSpec(spec *InvocationSpec) error {
       return fmt.Errorf("Invalid ConnectionTimeout")
     }
   } else {
-    spec.connTimeoutD = 10 * time.Second
-    spec.ConnTimeout = "10s"
+    spec.connTimeoutD = 5 * time.Second
+    spec.ConnTimeout = "5s"
   }
   if spec.ConnIdleTimeout != "" {
     if spec.connIdleTimeoutD, err = time.ParseDuration(spec.ConnIdleTimeout); err != nil {

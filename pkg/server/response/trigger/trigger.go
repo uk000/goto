@@ -30,9 +30,9 @@ type TriggerTarget struct {
 }
 
 type Trigger struct {
-  Targets                 map[string]*TriggerTarget
-  TargetsByResponseStatus map[int]map[string]*TriggerTarget
-  TriggerResults          map[string]map[int]int
+  Targets                 map[string]*TriggerTarget         `json:"targets"`
+  TargetsByResponseStatus map[int]map[string]*TriggerTarget `json:"targetsByResponseStatus"`
+  TriggerResults          map[string]map[int]int            `json:"triggerResults"`
   lock                    sync.RWMutex
 }
 

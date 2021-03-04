@@ -443,8 +443,7 @@ func clearResponsePayload(w http.ResponseWriter, r *http.Request) {
 }
 
 func getResponsePayload(w http.ResponseWriter, r *http.Request) {
-  w.WriteHeader(http.StatusOK)
-  fmt.Fprintln(w, util.ToJSON(getPortResponse(r)))
+  util.WriteJsonPayload(w, getPortResponse(r))
 }
 
 func respondWithPayload(w http.ResponseWriter, r *http.Request) {

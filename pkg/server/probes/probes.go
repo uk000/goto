@@ -136,7 +136,7 @@ func getProbes(w http.ResponseWriter, r *http.Request) {
   output := util.ToJSON(pp)
   pp.lock.RUnlock()
   util.AddLogMessage(fmt.Sprintf("Reporting probe counts: %s", output), r)
-  fmt.Fprintln(w, output)
+  util.WriteJsonPayload(w, output)
 }
 
 func clearProbeCounts(w http.ResponseWriter, r *http.Request) {

@@ -455,7 +455,10 @@ func ClearResults() {
 func GetTargetsResultsJSON() string {
   targetsResults.lock.RLock()
   defer targetsResults.lock.RUnlock()
-  return util.ToJSON(targetsResults.Results)
+  if targetsResults.Results != nil {
+    return util.ToJSON(targetsResults.Results)
+  }
+  return "{}"
 }
 
 func GetInvocationResultsJSON() string {

@@ -2950,9 +2950,9 @@ These APIs read all contents of a selected locker or all lockers. Where applicab
 | GET       | /registry/lockers/`{label}`?data=`[y/n]`&events=`[y/n]`&peers=`[y/n]`&level=`{level}` | Get given labeled locker.  |
 | GET       | /registry/lockers?data=`[y/n]`&events=`[y/n]`&peers=`[y/n]`&level=`{level}` | Get all lockers. |
 | GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/`{address}`?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the peer instance's locker from the given labeled locker. |
-| GET       | /registry/peers/`{peer}`/`{address}`<br/>/locker?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the peer instance's locker from the current active labeled locker. |
+| GET       | /registry/peers/`{peer}`/`{address}`<br/>/lockers?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the peer instance's locker from the current active labeled locker. |
 | GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the lockers of all instances of the given peer from the given labeled locker. |
-| GET       | /registry/peers/`{peer}`<br/>/locker?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get locker's data for all instances of the peer from currently active labeled locker |
+| GET       | /registry/peers/`{peer}`<br/>/lockers?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get locker's data for all instances of the peer from currently active labeled locker |
 | GET       | /registry/lockers/`{label}`<br/>/peers?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the lockers of all peers from the given labeled locker. |
 | GET       | /registry/peers<br/>/lockers?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the lockers of all peers from currently active labeled locker. |
 
@@ -3044,6 +3044,8 @@ These APIs manage client invocation targets on peers, allowing to add, remove, s
 |---|---|---|
 | GET, POST, PUT | /registry/peers/`{peer}`<br/>/call?uri=`{uri}` | Invoke the given `URI` on the given `peer`, using the HTTP method and payload from this request |
 | GET, POST, PUT | /registry/peers/call?uri=`{uri}` | Invoke the given `URI` on all `peers`, using the HTTP method and payload from this request |
+| GET | /registry/peers/`{peer}`/apis | Get a list of useful APIs ready for invocation on or related to the given peer |
+| GET | /registry/peers/apis | Get a list of useful APIs ready for invocation on or related to all peers |
 
 ###### <small> [Back to TOC](#goto-registry) </small>
 
