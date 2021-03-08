@@ -343,6 +343,6 @@ func RunTriggers(r *http.Request, w http.ResponseWriter, statusCode int) {
       tt.StatusCount++
       tt.lock.Unlock()
     }
-    t.invokeTargets(t.getMatchingTargets(r, statusCode), w, r)
+    go t.invokeTargets(t.getMatchingTargets(r, statusCode), w, r)
   }
 }

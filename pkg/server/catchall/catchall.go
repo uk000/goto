@@ -1,11 +1,10 @@
 package catchall
 
 import (
-  "fmt"
+  "io/ioutil"
   "net/http"
 
   "goto/pkg/metrics"
-  "goto/pkg/server/echo"
   "goto/pkg/util"
 
   "github.com/gorilla/mux"
@@ -21,8 +20,20 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
 func respond(w http.ResponseWriter, r *http.Request) {
   metrics.UpdateRequestCount("catchAll")
-  w.WriteHeader(http.StatusOK)
-  fmt.Fprint(w, "{\"CatchAll\": ")
-  echo.Echo(w, r)
-  fmt.Fprintln(w, "}")
+  util.AddLogMessage("CatchAll", r)
+  SendDefaultResponse(w, r)
+}
+
+func SendDefaultResponse(w http.ResponseWriter, r *http.Request) {
+  response := map[string]interface{}{}
+  response["CatchAll"] = true
+  response["RequestProtocol"] = r.Proto
+  response["RequestURI"] = r.RequestURI
+  response["RequestHeaders"] = r.Header
+  response["RequestQuery"] = r.URL.Query()
+  if !util.IsH2C(r) {
+    body, _ := ioutil.ReadAll(r.Body)
+    response["RequestBody"] = string(body)
+  }
+  util.WriteJsonPayload(w, response)
 }

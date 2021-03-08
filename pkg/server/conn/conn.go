@@ -1,7 +1,6 @@
 package conn
 
 import (
-  "context"
   "fmt"
   "net"
   "net/http"
@@ -13,16 +12,11 @@ import (
 )
 
 var (
-  Handler       util.ServerHandler = util.ServerHandler{Name: "connection", Middleware: Middleware}
-  connectionKey *util.ContextKey   = &util.ContextKey{"connection"}
+  Handler = util.ServerHandler{Name: "connection", Middleware: Middleware}
 )
 
-func SaveConnInContext(ctx context.Context, c net.Conn) context.Context {
-  return context.WithValue(ctx, connectionKey, c)
-}
-
 func GetConn(r *http.Request) net.Conn {
-  if conn := r.Context().Value(connectionKey); conn != nil {
+  if conn := r.Context().Value(util.ConnectionKey); conn != nil {
     return conn.(net.Conn)
   }
   return nil

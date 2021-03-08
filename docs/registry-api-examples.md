@@ -1,8 +1,64 @@
 
+### Peer JSON Schema 
+(to register a peer via /registry/peers/add)
 
-#### Registry APIs Examples:
-<details>
-<summary>API Examples</summary>
+|Field|Data Type|Description|
+|---|---|---|
+| name      | string | Name/Label of a peer |
+| namespace | string | Namespace of the peer instance (if available, else `local`) |
+| pod       | string | Pod/Hostname of the peer instance |
+| address   | string | IP address of the peer instance |
+| node      | string | Host node where the peer is located |
+| cluster   | string | Cluster/DC ID where the peer is located |
+
+### Peers JSON Schema 
+Map of peer labels to peer details, where each peer details include the following info
+(output of /registry/peers)
+
+|Field|Data Type|Description|
+|---|---|---|
+| name      | string | Name/Label of a peer |
+| namespace | string | Namespace of the peer instance (if available, else `local`) |
+| pods      | map string->PodDetails | Map of Pod Addresses to Pod Details. See [Pod Details JSON Schema] below(#pod-details-json-schema) |
+| podEpochs | map string->[]PodEpoch   | Past lives of this pod since last cleanup. |
+
+
+### Pod Details JSON Schema 
+
+|Field|Data Type|Description|
+|---|---|---|
+| name      | string | Pod/Host Name |
+| address   | string | Pod Address |
+| node      | string | Host node where the peer is located |
+| cluster   | string | Cluster/DC ID where the peer is located |
+| url       | string | URL where this peer is reachable |
+| healthy   | bool   | Whether the pod was found to be healthy at last interaction |
+| offline   | bool   | Whether the pod is determined to be offline. Cloned and dump-loaded pods are marked as offline until they reconnect to the registry |
+| currentEpoch | PodEpoch   | Current lifetime details of this pod |
+| pastEpochs | []PodEpoch   | Past lives of this pod since last cleanup. |
+
+
+### Pod Epoch JSON Schema 
+
+|Field|Data Type|Description|
+|---|---|---|
+| epoch      | int | Epoch count of this pod |
+| name      | string | Pod/Host Name |
+| address   | string | Pod Address |
+| node      | string | Host node where the peer is located |
+| cluster   | string | Cluster/DC ID where the peer is located |
+| firstContact   | time | First time this pod connected (at registration) |
+| lastContact   | time | Last time this pod sent its reminder |
+
+
+### Peer Target JSON Schema
+** Same as [Client Target JSON Schema](../README.md#client-target-json-schema)
+
+### Peer Job JSON Schema
+** Same as [Jobs JSON Schema](../README.md#job-json-schema)
+
+
+### Registry APIs Examples:
 
 ```
 curl -X POST http://localhost:8080/registry/peers/clear
@@ -131,11 +187,10 @@ curl -s localhost:8080/registry/dump
 curl -X POST http://localhost:8080/registry/load --data-binary @registry.dump
 
 ```
-</details>
+<br/>
 
-#### Registry Peers List Example
 <details>
-<summary>Example</summary>
+<summary>Registry Peers List Example</summary>
 <p>
 
 ```json
@@ -244,12 +299,10 @@ $ curl -s localhost:8080/registry/peers | jq
 </p>
 </details>
 
-
-
-#### Registry Locker Example
+<br/>
 
 <details>
-<summary>Example</summary>
+<summary>Registry Locker Example</summary>
 <p>
 
 ```json
@@ -406,11 +459,10 @@ $ curl -s localhost:8080/registry/peers/lockers
 </p>
 </details>
 
-
-#### Targets Summary Results Example
+<br/>
 
 <details>
-<summary>Example</summary>
+<summary>Targets Summary Results Example</summary>
 <p>
 
 ```json
@@ -2083,10 +2135,10 @@ $ curl -s localhost:8080/registry/peers/lockers/targets/results
 </p>
 </details>
 
+<br/>
 
-#### Targets Detailed Results Example
 <details>
-<summary>Example</summary>
+<summary>Targets Detailed Results Example</summary>
 <p>
 
 ```json

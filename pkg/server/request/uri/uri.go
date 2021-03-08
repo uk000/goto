@@ -267,11 +267,18 @@ func Middleware(next http.Handler) http.Handler {
       }
       return
     }
-    port := initPort(r)
     uri := strings.ToLower(r.URL.Path)
-    statusToReport := 0
     uriStatus := GetURIStatus(r)
     uriDelay := GetURIDelay(r)
+    if uriStatus == nil && uriDelay == nil {
+      if next != nil {
+        next.ServeHTTP(w, r)
+      }
+      return
+    }
+
+    port := initPort(r)
+    statusToReport := 0
     var delay time.Duration = 0
     delayTimesLeft := 0
     statusTimesLeft := 0
@@ -305,10 +312,10 @@ func Middleware(next http.Handler) http.Handler {
       w.Header().Add("Goto-Response-Delay", delay.String())
       time.Sleep(delay)
     }
-    crw := intercept.NewInterceptResponseWriter(w, true)
     if next != nil {
-      next.ServeHTTP(crw, r)
+      next.ServeHTTP(w, r)
     }
+    irw := util.GetInterceptResponseWriter(r).(*intercept.InterceptResponseWriter)
     if statusToReport > 0 {
       uriLock.Lock()
       if uriStatus.Times >= 1 {
@@ -326,14 +333,12 @@ func Middleware(next http.Handler) http.Handler {
       }
       util.AddLogMessage(msg, r)
       events.SendRequestEvent("URI Status Applied", msg, r)
-      crw.StatusCode = statusToReport
+      irw.StatusCode = statusToReport
     }
-    if crw.StatusCode == 0 {
-      crw.StatusCode = 200
+    if irw.StatusCode == 0 {
+      irw.StatusCode = http.StatusOK
     }
-    w.Header().Add("Goto-Response-Status", strconv.Itoa(crw.StatusCode))
-    crw.Proceed()
-    util.UpdateTrafficEventStatusCode(r, crw.StatusCode)
-    trigger.RunTriggers(r, crw, crw.StatusCode)
+    util.UpdateTrafficEventStatusCode(r, irw.StatusCode)
+    trigger.RunTriggers(r, irw, irw.StatusCode)
   })
 }

@@ -47,6 +47,8 @@ type CombiLocker struct {
   DataLocker  *DataLocker            `json:"dataLocker,omitempty"`
   SubLockers  CombiLockers           `json:"subLockers,omitempty"`
   Current     bool                   `json:"current"`
+  FirstOpened time.Time              `json:"firstOpened,omitempty"`
+  LastOpened  time.Time              `json:"lastOpened,omitempty"`
   parent      *CombiLocker
   lock        sync.RWMutex
 }
@@ -177,7 +179,7 @@ func unsafeSearchOrGetPaths(locker Locker, pathPrefix string, isTop, flat bool, 
         } else {
           if subKeys, ok := subData.(map[string]interface{}); ok && len(subKeys) > 0 {
             if ld.Data != "" {
-              subKeys[""] = currentPathPrefix
+              subKeys["."] = currentPathPrefix
             }
             mapPaths[key] = subKeys
           } else if ld.Data != "" {
@@ -437,6 +439,16 @@ func (cl *CombiLocker) Init() {
   cl.PeerLockers = map[string]*PeerLocker{}
   cl.DataLocker = newDataLocker()
   cl.SubLockers = map[string]*CombiLocker{}
+  cl.Open()
+}
+
+func (cl *CombiLocker) Open() {
+  now := time.Now()
+  if cl.FirstOpened.IsZero() {
+    cl.FirstOpened = now
+  }
+  cl.LastOpened = now
+  cl.Current = true
 }
 
 func (cl *CombiLocker) MarshalJSON() ([]byte, error) {
@@ -460,7 +472,17 @@ func (cl *CombiLocker) GetLabels() map[string]interface{} {
       subLabels[k] = v
     }
   }
-  labels[cl.Label] = subLabels
+  currentLabel := map[string]interface{}{
+    "firstOpened": cl.FirstOpened,
+    "lastOpened":  cl.LastOpened,
+    "current":     cl.Current,
+  }
+  if len(subLabels) > 0 {
+    subLabels["."] = currentLabel
+    labels[cl.PathLabel] = subLabels
+  } else {
+    labels[cl.PathLabel] = currentLabel
+  }
   return labels
 }
 
@@ -850,7 +872,7 @@ func (cl *CombiLocker) searchOrGetPathsFromSubLockers(uriPrefix string, pattern 
   subPaths := map[string]map[string]interface{}{}
   for _, sub := range cl.SubLockers {
     subPaths[sub.Label] = map[string]interface{}{}
-    subResults := sub.SearchOrGetDataLockerPaths(uriPrefix, pattern)
+    subResults := sub.SearchOrGetDataLockerPaths(uriPrefix, pattern, false)
     for key, paths := range subResults {
       if paths != nil {
         subPaths[sub.Label][key] = paths
@@ -870,10 +892,13 @@ func (cl *CombiLocker) searchOrGetPathsFromPeerLockers(uriPrefix string, pattern
   return peerPaths
 }
 
-func (cl *CombiLocker) SearchOrGetDataLockerPaths(uriPrefix string, pattern *regexp.Regexp) map[string]interface{} {
+func (cl *CombiLocker) SearchOrGetDataLockerPaths(uriPrefix string, pattern *regexp.Regexp, isTop bool) map[string]interface{} {
   cl.lock.RLock()
   defer cl.lock.RUnlock()
   dataPaths := map[string]interface{}{}
+  if !isTop && uriPrefix != "" {
+    dataPaths["."] = uriPrefix + cl.PathLabel + "/data/paths"
+  }
   lockerGetURI := ""
   if uriPrefix != "" {
     lockerGetURI = uriPrefix + cl.PathLabel + "/get/"
@@ -1080,7 +1105,7 @@ func (ll *LabeledLockers) OpenLocker(label string) {
     ll.currentLocker.lock.Unlock()
   }
   ll.currentLocker, _ = ll.unsafeCreateOrGetLocker(label)
-  ll.currentLocker.Current = true
+  ll.currentLocker.Open()
 }
 
 func (ll *LabeledLockers) ClearLocker(label string, close bool) {
@@ -1187,7 +1212,7 @@ func (ll *LabeledLockers) GetDataLockerPaths(locker string, pathURIs bool) map[s
     pathPrefix = "/registry/lockers/"
   }
   for label, cl := range lockers {
-    lockerPathsByLabels[label] = cl.SearchOrGetDataLockerPaths(pathPrefix, nil)
+    lockerPathsByLabels[label] = cl.SearchOrGetDataLockerPaths(pathPrefix, nil, true)
   }
   return lockerPathsByLabels
 }
@@ -1198,7 +1223,7 @@ func (ll *LabeledLockers) SearchInDataLockers(locker string, key string) map[str
   pattern := regexp.MustCompile("(?i)" + key)
   pathPrefix := "/registry/lockers/"
   for label, cl := range lockersToSearch {
-    dataPaths[label] = cl.SearchOrGetDataLockerPaths(pathPrefix, pattern)
+    dataPaths[label] = cl.SearchOrGetDataLockerPaths(pathPrefix, pattern, true)
   }
   return dataPaths
 }

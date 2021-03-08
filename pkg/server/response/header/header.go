@@ -117,16 +117,15 @@ func setResponseHeaders(w http.ResponseWriter, r *http.Request) {
       w.Header().Add(header, value)
     }
   }
-  w.Header().Add("Content-Type", "application/json")
 }
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    if !util.IsAdminRequest(r) {
-      setResponseHeaders(w, r)
-    }
     if next != nil {
       next.ServeHTTP(w, r)
+    }
+    if !util.IsHeadersSent(r) && !util.IsAdminRequest(r) {
+      setResponseHeaders(w, r)
     }
   })
 }

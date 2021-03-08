@@ -2,11 +2,10 @@ package body
 
 import (
   "fmt"
-  "io"
-  "io/ioutil"
   "net/http"
   "strings"
 
+  "goto/pkg/server/intercept"
   "goto/pkg/util"
 )
 
@@ -16,7 +15,7 @@ var (
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    if !util.IsAdminRequest(r) && r.ProtoMajor == 1 {
+    if !util.IsAdminRequest(r) && !util.IsH2C(r) {
       body := util.Read(r.Body)
       r.Body.Close()
       miniBody := ""
@@ -27,13 +26,13 @@ func Middleware(next http.Handler) http.Handler {
       }
       miniBody = strings.ReplaceAll(miniBody, "\n", " ")
       util.AddLogMessage(fmt.Sprintf("Request Body: [%s]", miniBody), r)
-      r.Body = ioutil.NopCloser(strings.NewReader(body))
+      intercept.SetBodyTracker(r, body)
       if next != nil {
         next.ServeHTTP(w, r)
       }
     } else {
       next.ServeHTTP(w, r)
     }
-    io.Copy(ioutil.Discard, r.Body)
+    r.Body.Close()
   })
 }

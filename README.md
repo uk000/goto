@@ -1,26 +1,33 @@
 #
+
 # goto
 
 ## What is it?
+
 A multi-faceted application to assist with various kinds of automated testing. It can act as a Client, a Server, a Proxy, a Job Executor, a Registry, or even all of these at once.
 
 ## Why?
+
 It's hard to find some of these features together in a single tool
 
 ## How to use it?
+
 It's available as a docker image: https://hub.docker.com/repository/docker/uk0000/goto.
 Or build it locally on your machine
+
 ```
 go build -o goto .
 ```
 
 ## But what can it do?
+
 - Say you need an application deployed as a service in k8s or on VMs, that can respond to requests on several ports using HTTP, HTTP/2, GRPC or TCP protocols both over plain text and TLS. `Goto` is what you need.
 - Say you want to test a client or a proxy, and want to introduce some chaos in your testing, so you need a service that can open or close a port on the fly, or can convert a port from plaintext to TLS and vice versa on the fly. `Goto` does it.
 - Say you need to test a client against different specific response payloads, so you need a substitute mock service that can stand in for the real service, where you can configure a payload on the fly for specific request URIs, headers, etc. Go `Goto`.
 - A lot more scenarios can benefit from `goto`. See some more scenarios further below in the doc.
 
 ## Some simple usage examples?
+
 - Start `goto` as a server with multiple ports and protocols (first port is the default bootstrap port):
   ```
   goto --ports 8080,8081/http,8082/grpc,8000/tcp
@@ -33,7 +40,7 @@ go build -o goto .
   ```
   curl -X POST localhost:8080/listeners/add --data '{"port":9000, "protocol":"tcp", "open":false}'
   ```
-- Reconfigure TCP configurations of an existing listener to stream certain payload size 
+- Reconfigure TCP configurations of an existing listener to stream certain payload size
   ```
   curl -X POST localhost:8080/tcp/9000/configure --data '{"stream": true, "streamChunkSize":"250", "streamChunkCount":15, "streamChunkDelay":"1s", "connectionLife":"30s"}'
   ```
@@ -59,19 +66,17 @@ go build -o goto .
   ```
   curl -X PUT localhost:8080/client/track/headers/add/foo,bar
   ```
-- More to come... 
-
+- More to come...
 
 ## Show me the money!
-Keep reading...
 
+Keep reading...
 
 <br/>
 
 ---
 
 # Overview
-
 
 Check these flow diagrams to get a visual overview of `Goto` behavior and usage.
 
@@ -83,16 +88,18 @@ Check these flow diagrams to get a visual overview of `Goto` behavior and usage.
 
 ### Overview: [Goto Lockers](docs/goto-lockers.md) <a href="docs/goto-lockers.md"><img src="docs/Goto-Lockers-Thumb.png" width="50" height="50" style="border: 1px solid gray; box-shadow: 1px 1px #888888; vertical-align: middle;" /></a>
 
-
 <br/>
 
 ---
+
 # Scenarios
 
 Before we look into detailed features and APIs exposed by the tool, let's look at how this tool can be used in a few scenarios to understand it better.
 
 ## Basic Scenarios
+
 #
+
 ### Scenario: [Use HTTP client to send requests and track results](docs/scenarios-basic.md#basic-client-usage)
 
 ### Scenario: [Use HTTP server to respond to any arbitrary client HTTP requests](docs/scenarios-basic.md#basic-server-usage)
@@ -100,7 +107,6 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 ### Scenario: [HTTPS traffic with certificate validation](docs/scenarios-basic.md#basic-https-usage)
 
 ### Scenario: [Count number of requests received at each server instance for certain headers](docs/scenarios-basic.md#basic-header-tracking)
-
 
 ## K8S Scenarios
 
@@ -110,11 +116,9 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 
 ### Scenario: [Capture results from pods that may terminate anytime](docs/scenarios-k8s.md#k8s-capture-transient-pod-results)
 
-
 ## Resiliency Scenarios
 
 ### Scenario: [Test a client's behavior upon service failure](docs/scenarios-resiliency.md#scenario-test-a-clients-behavior-upon-service-failure)
-
 
 ### Scenario: [Track client hang-ups on server via request/connection timeouts](docs/scenarios-resiliency.md#server-resiliency-client-hangups)
 
@@ -127,9 +131,10 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 <br/>
 
 #
+
 # Features
 
-It's an HTTP client and server built into a single application. 
+It's an HTTP client and server built into a single application.
 
 As a server, it can act as an HTTP proxy that lets you intercept HTTP requests and get some insights (e.g. based on headers) before forwarding it to its destination. But it can also respond to requests as a server all by itself, while still capturing interesting stats and counters that can be used to correlate information against the client.
 
@@ -140,51 +145,57 @@ The application exposes all its features via REST APIs as described below. Addit
 The docker image is built with several useful utilities included: `curl`, `wget`, `nmap`, `iputils`, `openssl`, `jq`, etc.
 
 # <a name="toc"></a>
+
 ## TOC
 
 ### [Startup Command](#goto-startup-command)
 
 ### Goto Client Features
-* [Targets and Traffic](#goto-client-targets-and-traffic)
-* [Client APIs](#client-apis)
-* [Client Events](#client-events)
-* [Client JSON Schemas](#client-json-schemas)
-* [Client APIs and Results Examples](docs/client-api-examples.md)
+
+- [Targets and Traffic](#goto-client-targets-and-traffic)
+- [Client APIs](#client-apis)
+- [Client Events](#client-events)
+- [Client JSON Schemas](#client-json-schemas)
+- [Client APIs and Results Examples](docs/client-api-examples.md)
 
 ### [Server Features](#goto-server-features)
-* [Goto Response Headers](#goto-response-headers)
-* [Server Logs](#goto-server-logs)
-* [Goto Version](#-goto-version)
-* [Events](#-events)
-* [Metrics](#-metrics)
-* [Listeners](#-listeners)
-* [Listener Label](#-listener-label)
-* [TCP Server](#-tcp-server)
-* [GRPC Server](#-grpc-server)
-* [Request Headers Tracking](#-request-headers-tracking)
-* [Request Timeout](#-request-timeout-tracking)
-* [URIs](#-uris)
-* [Probes](#-probes)
-* [Requests Filtering](#-requests-filtering)
-* [Response Delay](#-response-delay)
-* [Response Headers](#-response-headers)
-* [Response Payload](#-response-payload)
-* [Ad-hoc Payload](#-ad-hoc-payload)
-* [Stream (Chunked) Payload](#-stream-chunked-payload)
-* [Response Status](#-response-status)
-* [Response Triggers](#-response-triggers)
-* [Status API](#-status-api)
-* [Delay API](#-delay-api)
-* [Echo API](#-echo-api)
-* [Catch All](#-catch-all)
+
+- [Goto Response Headers](#goto-response-headers)
+- [Server Logs](#goto-server-logs)
+- [Goto Version](#-goto-version)
+- [Events](#-events)
+- [Metrics](#-metrics)
+- [Listeners](#-listeners)
+- [Listener Label](#-listener-label)
+- [TCP Server](#-tcp-server)
+- [GRPC Server](#-grpc-server)
+- [Request Headers Tracking](#-request-headers-tracking)
+- [Request Timeout](#-request-timeout-tracking)
+- [URIs](#-uris)
+- [Probes](#-probes)
+- [Requests Filtering](#-requests-filtering)
+- [Response Delay](#-response-delay)
+- [Response Headers](#-response-headers)
+- [Response Payload](#-response-payload)
+- [Ad-hoc Payload](#-ad-hoc-payload)
+- [Stream (Chunked) Payload](#-stream-chunked-payload)
+- [Response Status](#-response-status)
+- [Response Triggers](#-response-triggers)
+- [Status API](#-status-api)
+- [Delay API](#-delay-api)
+- [Echo API](#-echo-api)
+- [Catch All](#-catch-all)
 
 ### Goto Proxy
-* [Proxy Features](#proxy)
+
+- [Proxy Features](#proxy)
 
 ### Jobs
-* [Jobs Features](#jobs-features)
+
+- [Jobs Features](#jobs-features)
 
 ### Goto Registry
+
 - [Registry Features](#registry)
 - [Registry Peers APIs](#registry-peers-apis)
 - [Locker Management APIs](#locker-management-apis)
@@ -196,15 +207,20 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 - [Peers Config Management APIs](#peers-config-management-apis)
 - [Peer Call APIs](#peers-call-apis)
 - [Registry clone, dump and load APIs](#registry-clone-dump-and-load-apis)
-<br/>
+  <br/>
 
 # <a name="goto-startup-command"></a>
+
 # Goto Startup Command
+
 First things first, run the application:
+
 ```
 go run main.go --port 8080
 ```
+
 Or, build and run
+
 ```
 go build -o goto .
 ./goto
@@ -370,8 +386,11 @@ Once the server is up and running, rest of the interactions and configurations a
 <br/>
 
 # <a name="goto-client-targets-and-traffic"></a>
+
 # Goto Client: Targets and Traffic
+
 As a client tool, `goto` offers the feature to configure multiple targets and send http traffic:
+
 - Allows targets to be configured and invoked via REST APIs
 - Configure targets to be invoked ahead of time before invocation, as well as auto-invoke targets upon configuration
 - Invoke selective targets or all configured targets in batches
@@ -433,101 +452,12 @@ In addition to keeping the results in the `goto` client instance, those are also
 - `Invocation Failure`: Event reported upon first failed request, or if a request fails after previous successful request.
 - `Invocation Repeated Failure`: All request failures after a failed request are accumulated and reported in summary, either when the next request succeeds or when the invocation completes.
 
-###### <small> [Back to TOC](#toc) </small>
+<br/>
 
-# <a name="client-json-schemas"></a>
-### Client JSON Schemas
+## <a name="client-json-schemas"></a>
 
-#### Client Target JSON Schema
-|Field|Data Type|Default Value|Description|
-|---|---|---|---|
-| name         | string         || Name for this target |
-| method       | string         || HTTP method to use for this target |
-| url          | string         || URL for this target   |
-| burls        | []string       || Secondary URLs to use for `fallback` or `AB Mode` (see below)   |
-| verifyTLS    | bool           |false| Whether the TLS certificate presented by the target is verified. (Also see `--certs` command arg) |
-| headers      | [][]string     || Headers to be sent to this target |
-| body         | string         || Request body to use for this target|
-| autoPayload  | string         || Auto-generate payload of this size when making calls to this target. This field supports numeric sizes (e.g. `1000`) as well as byte size suffixes `K`, `KB`, `M` and `MB` (e.g. `1K`). If auto payload is specified, `body` field is ignored. |
-| protocol     | string         |`HTTP/1.1`| Request Protocol to use. Supports `HTTP/1.1` (default) and `HTTP/2.0`.|
-| autoUpgrade  | bool           |false| Whether client should negotiate auto-upgrade from http/1.1 to http/2. |
-| replicas     | int            |1| Number of parallel invocations to be done for this target. |
-| requestCount | int            |1| Number of requests to be made per replicas for this target. The final request count becomes replicas * requestCount   |
-| initialDelay | duration       || Minimum delay to wait before starting traffic to a target. Actual delay will be the max of all the targets being invoked in a given round of invocation. |
-| delay        | duration       |10ms| Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
-| retries      | int            |0| Number of retries to perform for requests to this target for connection errors or for `retriableStatusCodes`.|
-| retryDelay   | duration       |1s| Time to wait between retries.|
-| retriableStatusCodes| []int|| HTTP response status codes for which requests should be retried |
-| sendID       | bool           |false| Whether or not a unique ID be sent with each client request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
-| connTimeout  | duration       |10s| Timeout for opening target connection |
-| connIdleTimeout | duration    |5m| Idle Timeout for target connection |
-| requestTimeout | duration     |30s| Timeout for HTTP requests to the target |
-| autoInvoke   | bool           |false| Whether this target should be invoked as soon as it's added |
-| fallback     | bool           |false| If enabled, retry attempts will use secondary urls (`burls`) instead of the primary url. The query param `x-request-id` will carry suffixes of `-<counter>` for each retry attempt. |
-| abMode       | bool           |false| If enabled, each request will simultaneously be sent to all secondary urls (`burls`) in addition to the primary url. The query param `x-request-id` will carry suffixes of `-B-<index>` for each secondary URL. |
+See [Client JSON Schemas](docs/client-api-json-schemas.md)
 
-###### <small> [Back to TOC](#toc) </small>
-
-
-#### Client Results Schema (output of API /client/results)
-The results are keyed by targets, with an empty key "" used to capture all results (across all targets) if "capturing of all results" is enabled (via API `/client/results/all/`{enable}``).
-The schema below describes fields per target.
-
-|Field|Data Type|Description|
-|---|---|---|
-| target            | string | Target for which these results are captured |
-| invocationCounts      | int                 | Total requests sent to this target |
-| firstResponse        | time                | Time of first response received from the target |
-| lastResponse         | time                | Time of last response received from the target |
-| retriedInvocationCounts | int | Total requests to this target that were retried at least once |
-| countsByStatus       | string->int   | Response counts by HTTP Status |
-| countsByStatusCodes  | string->int   | Response counts by HTTP Status Code |
-| countsByURIs         | string->int   | Response counts by URIs |
-| countsByHeaders      | string->HeaderCounts   | Response counts by header, with detailed info captured in `HeaderCounts` object described below |
-
-
-#### HeaderCounts schema
-The schema below describes fields per target.
-
-|Field|Data Type|Description|
-|---|---|---|
-| target            | string | Target for which these results are captured |
-| count       | CountInfo   | request counts info for this header |
-| countsByValues | string->CountInfo   | request counts info per header value for this header |
-| countsByStatusCodes | int->CountInfo   | request counts info per status code for this header |
-| countsByValuesStatusCodes | string->int->CountInfo   | request counts info per status code per header value for this header |
-| crossHeaders | string->HeaderCounts   | HeaderCounts for each cross-header for this header |
-| crossHeadersByValues | string->string->HeaderCounts   | HeaderCounts for each cross-header per header value for this header |
-| firstResponse        | time | Time of first response received for this header |
-| lastResponse         | time | Time of last response received for this header |
-
-
-#### CountInfo schema
-The schema below describes fields per target.
-
-|Field|Data Type|Description|
-|---|---|---|
-| value       | int | number of responses in this set  |
-| retries     | int | number of requests that were retried in this set |
-| firstResponse | time | Time of first response in this set  |
-| lastResponse  | time | Time of last response received in this set |
-
-
-#### Invocation Results Schema (output of API /client/results/invocations)
-* Reports results for all invocations since last clearing of results, as an Object with invocation counter as key and invocation's results as value. The results for each invocation have same schema as `Client Results Schema`, with an additional bool flag `finished` to indicate whether the invocation is still running or has finished. See example below.
-
-#### Active Targets Schema (output of API /client/targets/active)
-* Reports set of targets for which traffic is running at the time of API invocation. Result is an object with invocation counter as key, and value as object that has status for all active targets in that invocation. For each active target, the following data is reported. Also see example below.
-  
-|Field|Data Type|Description|
-|---|---|---|
-| target                | Client Target       | Target details as described in `Client Target JSON Schema`  |
-| completedRequestCount | int                 | Number of requests completed for this target in this invocation |
-| stopRequested         | bool                | Whether `stop` has been requested for this target |
-| stopped               | bool                | Whether the target has already stopped. Quite likely this will not show up as true, because the target gets removed from active set soon after it's stopped |
-
-
-#### Client API Examples
 See [Client APIs and Results Examples](docs/client-api-examples.md)
 
 ###### <small> [Back to TOC](#toc) </small>
@@ -535,7 +465,9 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 <br/>
 
 # <a name="goto-server-features"></a>
+
 # Goto Server Features
+
 `Goto` as a server is useful for testing behavior, features or chaos testing of some client application, a proxy/sidecar, a gateway, etc. Or, the server can also be used as a proxy to be put in between a client and a target server application, so that traffic flows through this server where headers can be inspected/tracked before proxying the requests further. The server can add headers, replace request URI with some other URI, add artificial delays to the response, respond with a specific status, monitor request/connection timeouts, etc. The server tracks all the configured parameters, applying those to runtime traffic and building metrics, which can be viewed via various APIs.
 
 ###### <small> [Back to TOC](#toc) </small>
@@ -543,8 +475,11 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 <br/>
 
 # <a name="goto-response-headers)"></a>
+
 ### Goto Response Headers
+
 `Goto` adds the following common response headers to all http responses it sends:
+
 - `Goto-Host`: identifies the goto instance. This header's value will include hostname, IP, Port, Namespace and Cluster information if available to `Goto` from the following Environment variables: `POD_NAME`, `POD_IP`, `NODE_NAME`, `CLUSTER`, `NAMESPACE`. It falls back to using local compute's IP address if `POD_IP` is not defined. For other fields, it defaults to fixed value `local`.
 - `Via-Goto`: carries the label of the listener that served the request. For the bootstrap port, the label used is the one given to `goto` as `--label` startup argument (defaults to auto-generated label).
 - `Goto-Port`: carries the port number on which the request was received
@@ -554,8 +489,8 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 - `Goto-Out-Nanos`: Timestamp in nanoseconds when `goto` finished processing the request and sent a response
 - `Goto-Took-Nanos`: Total processing time in nanoseconds taken by `goto` to process the request
 
-
 `Goto` adds the following response headers conditionally:
+
 - `Goto-Response-Delay`: set if `goto` applied a configured delay to the response.
 - `Goto-Payload-Length`, `Goto-Payload-Content-Type`: set if `goto` sent a configured response payload
 - `Goto-Chunk-Count`, `Goto-Chunk-Length`, `Goto-Chunk-Delay`, `Goto-Stream-Length`, `Goto-Stream-Duration`: set when client requests a streaming response
@@ -577,8 +512,11 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 <br/>
 
 # <a name="goto-server-logs"></a>
+
 ### Goto Server Logs
+
 `goto` server logs are generated with a useful pattern to help figuring out the steps `goto` took for a request. Each log line tells the complete story about request details, how the request was processed, and response sent. Each log line contains the following segments separated by `-->`:
+
 - Request Timestamp
 - Listener Host: label of the listener that served the request
 - Local and Remote addresses (if available)
@@ -591,6 +529,7 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 - Response Body Length
 
 #### Sample log line:
+
 ```
 2020/11/09 16:59:54 [Goto-Server] --> LocalAddr: [::1]:8080, RemoteAddr: [::1]:62296 --> Request Body: [some payload] --> Request Headers: {"Accept":["*/*"],"Foo":["bar"],"Host":["localhost:8080"],"Protocol":["HTTP/1.1"],"User-Agent":["curl/7.64.1"]} --> Request URI: [/foo], Protocol: [HTTP/1.1], Method: [GET] --> Echoing back --> {"ResponseHeaders": {"Content-Type":["application/json"],"Goto-Host":["localhost@1.2.3.4:8080"],"Goto-In-Nanos":["1613330713218468000"],"Goto-Out-Nanos":["1613330713218686000"],"Goto-Port":["8080"],"Goto-Protocol":["HTTP"],"Goto-Remote-Address":["[::1]:62296"],"Goto-Response-Status":["200"],"Goto-Took-Nanos":["218000"],"Request-Accept":["*/*"],"Request-Foo":["bar"],"Request-Host":["localhost:8080"],"Request-Protocol":["HTTP/1.1"],"Request-Uri":["/foo"],"Request-User-Agent":["curl/7.64.1"],"Via-Goto":["Registry"]}} --> Response Status Code: [200] --> Response Body Length: [229]
 ```
@@ -645,131 +584,20 @@ A server generates event `URI First Request` upon receiving first request for a 
 
 Various other events are published by `goto` peer instances acting as client and server, and by the `goto` registry instance, which are listed in other sections in this Readme.
 
-#### Events API Output Example
+<br/>
 
-<details>
-<summary>Example</summary>
-<p>
-
-```
-curl -s localhost:8081/events
-
-[
-  {
-    "title": "Listener Added",
-    "summary": "9091-1",
-    "data": {
-      "listener": {"...":"..."},
-      "status": "Listener 9091 added and opened."
-    },
-    "at": "2021-01-30T19:33:10.58548-08:00",
-    "peer": "peer1",
-    "peerHost": "local.local@1.1.1.1:8081"
-  },
-  {
-    "title": "Peer Registered",
-    "summary": "peer1",
-    "data": {"...":"..."},
-    "at": "2021-01-30T19:33:10.589635-08:00",
-    "peer": "peer1",
-    "peerHost": "local.local@1.1.1.1:8081"
-  },
-  {
-    "title": "Peer Startup Data",
-    "summary": "peer1",
-    "data": {
-      "Targets": {"...":"..."},
-      "Jobs": {"...":"..."},
-      "TrackingHeaders": "",
-      "Probes": null,
-      "Message": ""
-    },
-    "at": "2021-01-30T19:33:10.590423-08:00",
-    "peer": "peer1",
-    "peerHost": "local.local@1.1.1.1:8081"
-  },
-  {
-    "title": "Server Started",
-    "summary": "peer1",
-    "data": {
-      "8081": {
-        "listenerID": "",
-        "label": "local.local@1.1.1.1:8081",
-        "port": 8081,
-        "protocol": "HTTP",
-        "open": true,
-        "tls": false
-      },
-      "9091": {
-        "listenerID": "9091-1",
-        "label": "9091",
-        "port": 9091,
-        "protocol": "http",
-        "open": true,
-        "tls": false
-      }
-    },
-    "at": "2021-01-30T19:33:10.590837-08:00",
-    "peer": "peer1",
-    "peerHost": "local.local@1.1.1.1:8081"
-  },
-  {
-    "title": "Target Added",
-    "summary": "target1",
-    "data": {"...": "..."},
-    "at": "2021-01-30T19:35:51.015874-08:00",
-    "peer": "peer1",
-    "peerHost": "local.local@1.1.1.1:8081"
-  },
-  {
-    "title": "Target Invoked",
-    "summary": "target1",
-    "data": {"...": "..."},
-    "at": "2021-01-30T19:35:53.040253-08:00",
-    "peer": "peer1",
-    "peerHost": "local.local@1.1.1.1:8081"
-  },
-  {
-    "title": "Invocation Started",
-    "data": {"...": "..."},
-    "at": "2021-01-30T19:35:53.040272-08:00",
-    "peer": "peer1",
-    "peerHost": "local.local@1.1.1.1:8081"
-  },
-  {
-    "title": "URI First Request",
-    "data": {"...": "..."},
-    "at": "2021-01-30T19:35:53.041489-08:00",
-    "peer": "peer1",
-    "peerHost": "local.local@1.1.1.1:8081"
-  },
-  {
-    "title": "Invocation Response",
-    "data": {"...": "..."},
-    "at": "2021-01-30T19:35:57.119397-08:00",
-    "peer": "peer1",
-    "peerHost": "local.local@1.1.1.1:8081"
-  },
-  {
-    "title": "Invocation Repeated Response Status",
-    "data": {"...": "..."},
-    "at": "2021-01-30T19:44:10.39711-08:00",
-    "peer": "peer1",
-    "peerHost": "local.local@1.1.1.1:8081"
-  }
-}
-]
-```
-</p>
-</details>
+See [Events Example](docs/events-example.md)
 
 ###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
 # <a name="metrics"></a>
+
 ## > Metrics
+
 `goto` exposes both custom server metrics and golang VM metrics in prometheus format. The following custom metrics are exposed:
+
 - `goto_requests_by_type` (vector): Number of requests by type (dimension: requestType)
 - `goto_requests_by_headers` (vector): Number of requests by headers (dimension: requestHeader)
 - `goto_requests_by_uris` (vector): Number of requests by URIs (dimension: requestURI)
@@ -789,39 +617,17 @@ curl -s localhost:8081/events
 | GET       | /metrics/go        | Go VM metrics in prometheus format |
 | POST       | /metrics/clear    | Clear custom metrics |
 
-#### Metrics API Output Example
-```
-# HELP goto_active_client_conn_counts_by_targets Number of active client connections by targets# TYPE goto_active_client_conn_counts_by_targets gauge
-goto_active_client_conn_counts_by_targets{target="test-1.1"} 4
-goto_active_client_conn_counts_by_targets{target="test-1.2"} 4
-# HELP goto_client_failures_by_targets Number of failed client requests by target
-# TYPE goto_client_failures_by_targets counter
-goto_client_failures_by_targets{target="peer1_to_peer2"} 2
-goto_client_failures_by_targets{target="peer1_to_peer3"} 2
-# HELP goto_client_requests_by_targets Number of client requests by target
-# TYPE goto_client_requests_by_targets counter
-goto_client_requests_by_targets{target="test-1.1"} 80
-goto_client_requests_by_targets{target="test-1.2"} 80
-# HELP goto_connections Number of connections by type
-# TYPE goto_connections counter
-goto_connections{connType="http"} 9
-# HELP goto_requests_by_headers Number of requests by headers
-# TYPE goto_requests_by_headers counter
-goto_requests_by_headers{requestHeader="foo"} 3
-# HELP goto_requests_by_type Number of requests by type
-# TYPE goto_requests_by_type counter
-goto_requests_by_type{requestType="catchAll"} 4
-# HELP goto_requests_by_uris Number of requests by URIs
-# TYPE goto_requests_by_uris counter
-goto_requests_by_uris{requestURI="/bar"} 1
-goto_requests_by_uris{requestURI="/foo"} 3
-```
+
+<br/>
+
+See [Metrics Example](docs/metrics-example.md)
 
 ###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
 # <a name="listeners"></a>
+
 ## > Listeners
 
 The server starts with a bootstrap http listener (given as a command line arg `--port` or as first port in the arg `--ports`, defaults to 8080). Additional ports can be opened via command line (arg `--ports`) as well as via listener APIs. When startup arg `--ports` is used, the first port in the list is treated as bootstrap port, forced to be an HTTP port, and isn't allowed to be managed via listeners APIs.
@@ -875,96 +681,16 @@ Several configuration APIs (used to configure server features on `goto` instance
 - `Listener Closed`
 - `GRPC Listener Started`
 
-#### Listener API Examples:
-<details>
-<summary>API Examples</summary>
+<br/>
 
-```
-curl localhost:8080/listeners/add --data '{"port":8081, "protocol":"http", "label":"Server-8081"}'
-
-curl -s localhost:8080/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true, "tcp": {"readTimeout":"15s","writeTimeout":"15s","connectTimeout":"15s","connIdleTimeout":"20s","responseDelay":"1s", "connectionLife":"20s"}}'
-
-curl localhost:8080/listeners/add --data '{"port":9091, "protocol":"grpc", "label":"GRPC-9091"}'
-
-curl -X POST localhost:8080/listeners/8081/remove
-
-curl -X PUT localhost:8080/listeners/9000/open
-
-curl -X PUT localhost:8080/listeners/9000/close
-
-curl -X PUT localhost:8080/listeners/9000/reopen
-
-curl localhost:8080/listeners
-
-```
-</details>
-
-#### Listener Output Example
-
-<details>
-<summary>Example</summary>
-<p>
-
-```
-$ curl -s localhost:8080/listeners
-
-{
-  "8081": {
-    "listenerID": "8081-1",
-    "label": "http-8081",
-    "port": 8081,
-    "protocol": "http",
-    "open": true,
-    "tls": false
-  },
-  "8082": {
-    "listenerID": "",
-    "label": "http-8082",
-    "port": 8082,
-    "protocol": "http",
-    "open": false,
-    "tls": true
-  },
-  "9000": {
-    "listenerID": "9000-1",
-    "label": "tcp-9000",
-    "port": 9000,
-    "protocol": "tcp",
-    "open": true,
-    "tls": false,
-    "tcp": {
-      "readTimeout": "1m",
-      "writeTimeout": "1m",
-      "connectTimeout": "15s",
-      "connIdleTimeout": "1m",
-      "connectionLife": "2m",
-      "stream": false,
-      "echo": false,
-      "conversation": false,
-      "silentLife": false,
-      "closeAtFirstByte": false,
-      "validatePayloadLength": true,
-      "validatePayloadContent": true,
-      "expectedPayloadLength": 13,
-      "echoResponseSize": 10,
-      "echoResponseDelay": "1s",
-      "streamPayloadSize": "",
-      "streamChunkSize": "0",
-      "streamChunkCount": 0,
-      "streamChunkDelay": "0s",
-      "streamDuration": "0s"
-    }
-  }
-}
-```
-</p>
-</details>
+See [Listeners Example](docs/listeners-example.md)
 
 ###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
 # <a name="listener-label"></a>
+
 ## > Listener Label
 
 By default, each listener adds a header `Via-Goto: <port>` to each response it sends, where `<port>` is the port on which the listener is running (default being 8080). A custom label can be added to a listener using the label APIs described below. In addition to `Via-Goto`, each listener also adds another header `Goto-Host` that carries the pod/host name, pod namespace (or `local` if not running as a K8s pod), and pod/host IP address to identify where the response came from.
@@ -979,6 +705,7 @@ By default, each listener adds a header `Via-Goto: <port>` to each response it s
 | GET       | /label              | Get current label of this port |
 
 #### Listener Label API Examples:
+
 <details>
 <summary>API Examples</summary>
 
@@ -1092,189 +819,63 @@ The modes are described in detail below:
 - `New TCP Client Connection`
 - `TCP Client Connection Closed`
 
-#### TCP API Examples:
-<details>
-<summary>API Examples</summary>
+<br/>
 
-```
-curl localhost:8080/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true}'
-
-curl localhost:8080/tcp/9000/configure --data '{"readTimeout":"1m","writeTimeout":"1m","connectTimeout":"15s","connIdleTimeout":"1m", "connectionLife":"2m", "echo":true, "echoResponseSize":10, "echoResponseDelay": "1s"}'
-
-curl localhost:8080/tcp/9000/configure --data '{"stream": true, "streamDuration":"5s", "streamChunkDelay":"1s", "streamPayloadSize": "2K", "streamChunkSize":"250", "streamChunkCount":15}'
-
-curl -X PUT localhost:8080/tcp/9000/set/echo=n
-
-curl -X PUT localhost:8080/tcp/9000/set/stream=y
-
-curl -X POST localhost:8080/tcp/9000/stream/payload=1K/duration=30s/delay=1s
-
-curl -X PUT localhost:8080/tcp/9000/expect/payload/length=10
-
-curl -X PUT localhost:8080/tcp/9000/expect/payload --data 'SomePayload'
-```
-</details>
-
-#### TCP Status APIs Output Example
-
-<details>
-<summary>Example</summary>
-<p>
-
-```
-curl -s localhost:8080/tcp/history | jq
-{
-  "9000": {
-    "1": {
-      "config": {
-        "readTimeout": "",
-        "writeTimeout": "",
-        "connectTimeout": "",
-        "connIdleTimeout": "",
-        "connectionLife": "",
-        "stream": false,
-        "echo": false,
-        "conversation": false,
-        "silentLife": false,
-        "closeAtFirstByte": false,
-        "validatePayloadLength": true,
-        "validatePayloadContent": false,
-        "expectedPayloadLength": 10,
-        "echoResponseSize": 100,
-        "echoResponseDelay": "",
-        "streamPayloadSize": "",
-        "streamChunkSize": "0",
-        "streamChunkCount": 0,
-        "streamChunkDelay": "0s",
-        "streamDuration": "0s"
-      },
-      "status": {
-        "port": 9000,
-        "listenerID": "9000-1",
-        "requestID": 1,
-        "connStartTime": "2020-12-05T15:05:50.748382-08:00",
-        "connCloseTime": "2020-12-05T15:06:20.754224-08:00",
-        "firstByteInAt": "2020-12-05T15:05:56.078853-08:00",
-        "lastByteInAt": "2020-12-05T15:05:56.078853-08:00",
-        "firstByteOutAt": "2020-12-05T15:06:20.754152-08:00",
-        "lastByteOutAt": "2020-12-05T15:06:20.754152-08:00",
-        "totalBytesRead": 10,
-        "totalBytesSent": 81,
-        "totalReads": 2,
-        "totalWrites": 1,
-        "closed": true,
-        "clientClosed": false,
-        "serverClosed": true,
-        "errorClosed": false,
-        "readTimeout": false,
-        "idleTimeout": false,
-        "lifeTimeout": true,
-        "writeErrors": 0
-      }
-    },
-    "2": {
-      "config": {
-        "readTimeout": "1m",
-        "writeTimeout": "1m",
-        "connectTimeout": "15s",
-        "connIdleTimeout": "1m",
-        "connectionLife": "1m",
-        "stream": false,
-        "echo": false,
-        "conversation": true,
-        "silentLife": false,
-        "closeAtFirstByte": false,
-        "validatePayloadLength": false,
-        "validatePayloadContent": false,
-        "expectedPayloadLength": 0,
-        "echoResponseSize": 100,
-        "echoResponseDelay": "",
-        "streamPayloadSize": "",
-        "streamChunkSize": "0",
-        "streamChunkCount": 0,
-        "streamChunkDelay": "0s",
-        "streamDuration": "0s"
-      },
-      "status": {
-        "port": 9000,
-        "listenerID": "9000-1",
-        "requestID": 2,
-        "connStartTime": "2020-12-05T15:06:14.669709-08:00",
-        "connCloseTime": "2020-12-05T15:06:19.247841-08:00",
-        "firstByteInAt": "2020-12-05T15:06:16.51267-08:00",
-        "lastByteInAt": "2020-12-05T15:06:19.247753-08:00",
-        "firstByteOutAt": "2020-12-05T15:06:16.512726-08:00",
-        "lastByteOutAt": "2020-12-05T15:06:19.247801-08:00",
-        "totalBytesRead": 12,
-        "totalBytesSent": 12,
-        "totalReads": 2,
-        "totalWrites": 2,
-        "closed": true,
-        "clientClosed": false,
-        "serverClosed": false,
-        "errorClosed": false,
-        "readTimeout": false,
-        "idleTimeout": false,
-        "lifeTimeout": false,
-        "writeErrors": 0
-      }
-    }
-  }
-}
-```
-</p>
-</details>
+See [TCP Example](docs/tcp-example.md)
 
 ###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
 # <a name="grpc-server"></a>
+
 ## > GRPC Server
+
 All HTTP ports that a `goto` instance listens on (including bootstrap port) support both `HTTP/2` and `GRPC` protocol. Any listener that's created with protocol `grpc` works exclusively in `grpc` mode, not supporting HTTP requests and only responding to the GRPC operations described below.
 
 ### GRPC Operations
 
 All `grpc` operations exposed by `goto` produce the following proto message as output:
 
-  ```
-  message Output {
-    string payload = 1;
-    string at = 2;
-    string gotoHost = 3;
-    int32  gotoPort = 4;
-    string viaGoto = 5;
-  }
-  ```
+```
+message Output {
+  string payload = 1;
+  string at = 2;
+  string gotoHost = 3;
+  int32  gotoPort = 4;
+  string viaGoto = 5;
+}
+```
 
 The GRPC response from `goto` also carries the following headers:
-* `Goto-Host`
-* `Via-Goto`
-* `Goto-Protocol`
-* `Goto-Port`
-* `Goto-Remote-Address`
 
+- `Goto-Host`
+- `Via-Goto`
+- `Goto-Protocol`
+- `Goto-Port`
+- `Goto-Remote-Address`
 
 `Goto` exposes the following `grpc` operations:
+
 1. `Goto.echo`: This is a unary grpc service method that echoes back the given payload with some additional metadata and headers. The `echo` input message is given below. It responds with a single instance of `Output` message described later.
-    ```
-    message Input {
-      string payload = 1;
-    }
-    ```
+   ```
+   message Input {
+     string payload = 1;
+   }
+   ```
 2. `Goto.streamOut`: This is a server streaming service method that accepts a `StreamConfig` input message allowing the client to configure the parameters of stream response. It responds with `chunkCount` number of `Output` messages, each output carrying a payload of size `chunkSize`, and there is `interval` delay between two output messages.
-    ```
-    message StreamConfig {
-      int32  chunkSize = 1;
-      int32  chunkCount = 2;
-      string interval = 3;
-      string payload = 4;
-    }
-    ```
+   ```
+   message StreamConfig {
+     int32  chunkSize = 1;
+     int32  chunkCount = 2;
+     string interval = 3;
+     string payload = 4;
+   }
+   ```
 3. `Goto.streamInOut`: This is a bi-directional streaming service method that accepts a stream of `StreamConfig` input messages as described in `streamOut` operation above. Each input `StreamConfig` message requests the server to send a stream response based on the given stream config. For each input message, the service responds with `chunkCount` number of `Output` messages, each output carrying a payload of size `chunkSize`, and there is `interval` delay between two output messages.
-   
 
 #### GRPC Tracking Events
+
 - `GRPC Server Started`
 - `GRPC Server Stopped`
 - `GRPC Listener Started`
@@ -1284,127 +885,18 @@ The GRPC response from `goto` also carries the following headers:
 - `GRPC.streamInOut.start`
 - `GRPC.streamInOut.end`
 
+<br/>
 
-#### GRPC Operations Examples:
-<details>
-<summary>GRPC Examples</summary>
-
-```
-$ curl localhost:8080/listeners/add --data '{"label":"grpc-9091", "port":9091, "protocol":"grpc", "open":true}'
-
-$ grpc_cli call localhost:9091 Goto.echo "payload: 'hello'"
-
-connecting to localhost:9091
-Received initial metadata from server:
-goto-host : local@1.1.1.1:8080
-goto-port : 9091
-goto-protocol : GRPC
-goto-remote-address : [::1]:54378
-via-goto : grpc-9091
-payload: "hello"
-at: "2021-02-07T12:32:33.832499-08:00"
-gotoHost: "local@1.1.1.1:8080"
-gotoPort: 9091
-viaGoto: "grpc-9091"
-Rpc succeeded with OK status
-
-$ grpc_cli call localhost:9091 Goto.streamOut "chunkSize: 10, chunkCount: 3, interval: '1s'"
-
-connecting to localhost:9091
-Received initial metadata from server:
-goto-host : local@1.1.1.1:8080
-goto-port : 9091
-goto-protocol : GRPC
-goto-remote-address : [::1]:54347
-via-goto : grpc-9091
-payload: "f4GE!G?Epr"
-at: "2021-02-07T12:32:11.690931-08:00"
-gotoHost: "local@1.1.1.1:8080"
-gotoPort: 9091
-viaGoto: "grpc-9091"
-payload: "f4GE!G?Epr"
-at: "2021-02-07T12:32:12.691058-08:00"
-gotoHost: "local@1.1.1.1:8080"
-gotoPort: 9091
-viaGoto: "grpc-9091"
-payload: "f4GE!G?Epr"
-at: "2021-02-07T12:32:13.691418-08:00"
-gotoHost: "local@1.1.1.1:8080"
-gotoPort: 9091
-viaGoto: "grpc-9091"
-Rpc succeeded with OK status
-
-$ curl -XPOST localhost:8080/events/flush
-
-$ curl localhost:8080/events
-[
-  {
-    "title": "Listener Added",
-    "data": {
-      "listener": {
-        "listenerID": "9091-1",
-        "label": "grpc-9091",
-        "port": 9091,
-        "protocol": "grpc",
-        "open": true,
-        "tls": false
-      },
-      "status": "Listener 9091 added and opened."
-    },
-    ...
-  },
-  {
-    "title": "GRPC Listener Started",
-    "data": {
-      "details": "Starting GRPC Listener 9091-1"
-    },
-    ...
-  },
-  {
-    "title": "Flushed Traffic Report",
-    "data": [
-      {
-        "port": 9091,
-        "uri": "GRPC.streamOut.start",
-        "statusCode": 200,
-        "statusRepeatCount": 2,
-        "firstEventAt": "2021-02-07T12:31:29.81144-08:00",
-        "lastEventAt": "2021-02-07T12:32:11.690928-08:00"
-      },
-      {
-        "port": 9091,
-        "uri": "GRPC.streamOut.end",
-        "statusCode": 200,
-        "statusRepeatCount": 2,
-        "firstEventAt": "2021-02-07T12:31:32.817072-08:00",
-        "lastEventAt": "2021-02-07T12:32:14.692153-08:00"
-      },
-      {
-        "port": 9091,
-        "uri": "GRPC.echo",
-        "statusCode": 200,
-        "statusRepeatCount": 2,
-        "firstEventAt": "2021-02-07T12:32:33.832506-08:00",
-        "lastEventAt": "2021-02-07T12:34:59.386956-08:00"
-      }
-    ],
-    ...
-  },
-  {
-    "title": "Events Flushed",
-    ...
-  }
-]
-
-```
-</details>
+See [GRPC Example](docs/grpc-example.md)
 
 ###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
 # <a name="request-headers-tracking"></a>
+
 ## > Request Headers Tracking
+
 This feature allows tracking request counts by headers.
 
 #### APIs
@@ -1423,12 +915,14 @@ This feature allows tracking request counts by headers.
 
 
 #### Request Headers Tracking Events
+
 - `Tracking Headers Added`
 - `Tracking Headers Removed`
 - `Tracking Headers Cleared`
 - `Tracked Header Counts Cleared`
 
 #### Request Headers Tracking API Examples:
+
 <details>
 <summary>API Examples</summary>
 
@@ -1447,13 +941,14 @@ curl -X POST localhost:8080/request/headers/track/counts/clear
 
 curl localhost:8080/request/headers/track
 ```
+
 </details>
 
 #### Request Header Tracking Results Example
+
 <details>
 <summary>Example</summary>
 <p>
-
 
 ```
 $ curl localhost:8080/request/headers/track/counts
@@ -1538,6 +1033,7 @@ curl localhost:8080/request/timeout/status
 </details>
 
 #### Request Timeout Status Result Example
+
 <details>
 <summary>Example</summary>
 <p>
@@ -1572,6 +1068,7 @@ curl localhost:8080/request/timeout/status
   }
 }
 ```
+
 </p>
 </details>
 
@@ -1610,6 +1107,7 @@ Note: To configure server to respond with custom/random response payloads for sp
 - `URI Status Applied`
 
 #### URI API Examples
+
 <details>
 <summary>API Examples</summary>
 
@@ -1630,6 +1128,7 @@ curl -X POST localhost:8080/request/uri/counts/clear
 </details>
 
 #### URI Counts Result Example
+
 <details>
 <summary>Example</summary>
 <p>
@@ -1643,6 +1142,7 @@ curl -X POST localhost:8080/request/uri/counts/clear
   "/foo/4/bar/5": 10
 }
 ```
+
 </p>
 </details>
 
@@ -1651,10 +1151,13 @@ curl -X POST localhost:8080/request/uri/counts/clear
 <br/>
 
 # <a name="probes"></a>
+
 ## > Probes
+
 This feature allows setting readiness and liveness probe URIs, statuses to be returned for those probes, and tracking counts for how many times the probes have been called. `Goto` also tracks when the probe call counts overflow, keeping separate overflow counts. A `goto` instance can be queried for its probe details via `/probes` API.
 
 The probe URIs response includes the request headers echoed back with `Readiness-Request-` or `Liveness-Request-` prefixes, and include the following additional headers:
+
 - `Readiness-Request-Count` and `Readiness-Overflow-Count` for `readiness` probe calls
 - `Liveness-Request-Count` and `Liveness-Overflow-Count` for `liveness` probe calls
 
@@ -1692,6 +1195,7 @@ curl -X POST localhost:8080/probes/counts/clear
 
 curl localhost:8080/probes
 ```
+
 </details>
 
 ###### <small> [Back to TOC](#toc) </small>
@@ -1746,7 +1250,7 @@ curl -X POST localhost:8080/request/bypass/clear
 #ignore all requests where URI has /foo prefix
 curl -X PUT localhost:8080/request/ignore/add?uri=/foo.*
 
-#ignore all requests where URI has /foo prefix and contains bar somewhere 
+#ignore all requests where URI has /foo prefix and contains bar somewhere
 curl -X PUT localhost:8080/request/ignore/add?uri=/foo.*bar.*
 
 #ignore all requests where URI does not have /foo prefix
@@ -1768,9 +1272,11 @@ curl localhost:8080/request/ignore
 curl localhost:8080/request/bypass
 
 ```
+
 </details>
 
 #### Ignore Result Example
+
 <details>
 <summary>Example</summary>
 <p>
@@ -1795,6 +1301,7 @@ $ curl localhost:8080/request/ignore
   "pendingUpdates": true
 }
 ```
+
 </p>
 </details>
 
@@ -1838,6 +1345,7 @@ curl -X PUT localhost:8080/response/delay/set/2s
 
 curl localhost:8080/response/delay
 ```
+
 </details>
 
 ###### <small> [Back to TOC](#toc) </small>
@@ -1878,6 +1386,7 @@ curl -X POST localhost:8080/response/headers/remove/x
 
 curl localhost:8080/response/headers
 ```
+
 </details>
 
 ###### <small> [Back to TOC](#toc) </small>
@@ -1885,23 +1394,28 @@ curl localhost:8080/response/headers
 <br/>
 
 # <a name="response-payload"></a>
+
 ## > Response Payload
+
 This feature allows setting either a specific custom payload to be delivered based on request match criteria, or configure server to send random auto-generated response payloads.
 
 A payload configuration can also `capture` values from the URI/Header/Query that it matches, as described in a section below.
 
 ### Custom payload based on request matching
+
 Custom response payload can be set for any of the following request categories:
-1. All requests (`default` payload), 
-2. Requests matching certain URI patterns, 
+
+1. All requests (`default` payload),
+2. Requests matching certain URI patterns,
 3. Requests matching certain headers (keys, and optionally values).
 4. Requests matching certain query params (names, and optionally values)
 5. Requests matching URI + header combinations
 6. Requests matching URI + query combinations
 7. Requests matching URI + one or more keywords in request body
-   
+
 If a request matches multiple configured responses, a response is picked based on the following priority order:
-1. URI + headers combination match 
+
+1. URI + headers combination match
 2. URI + query combination match
 3. URI + body keywords combination match
 4. URI match
@@ -1993,6 +1507,7 @@ curl -X POST localhost:8080/response/payload/clear
 
 curl localhost:8080/response/payload
 ```
+
 </details>
 
 ###### <small> [Back to TOC](#toc) </small>
@@ -2018,6 +1533,7 @@ curl -v localhost:8080/payload/10K
 curl -v localhost:8080/payload/100
 
 ```
+
 </details>
 
 ###### <small> [Back to TOC](#toc) </small>
@@ -2025,10 +1541,13 @@ curl -v localhost:8080/payload/100
 <br/>
 
 # <a name="-stream-chunked-payload"></a>
+
 ## > Stream (Chunked) Payload
-This URI responds with either pre-configured or random-generated payload where response behavior is controlled by the parameters passed to the API. The feature allows requesting a custom payload size, custom response duration over which to stream the payload, custom chunk size to be used for splitting the payload into chunks, and custom delay to be used in-between chunked responses. Combination of these parameters define the total payload size and the total duration of the response. 
+
+This URI responds with either pre-configured or random-generated payload where response behavior is controlled by the parameters passed to the API. The feature allows requesting a custom payload size, custom response duration over which to stream the payload, custom chunk size to be used for splitting the payload into chunks, and custom delay to be used in-between chunked responses. Combination of these parameters define the total payload size and the total duration of the response.
 
 Stream responses carry following headers:
+
 - `Goto-Stream-Length: <total payload size>`
 - `Goto-Stream-Duration: <total response duration>`
 - `Goto-Chunk-Count: <total number of chunks>`
@@ -2061,6 +1580,7 @@ curl -v --no-buffer localhost:8080/stream/duration=5s/delay=100ms
 
 curl -v --no-buffer localhost:8080/stream/count=10/delay=300ms
 ```
+
 </details>
 
 ###### <small> [Back to TOC](#toc) </small>
@@ -2109,9 +1629,11 @@ curl localhost:8080/response/status/counts
 
 curl localhost:8080/response/status/counts/502
 ```
+
 </details>
 
 #### Response Status Tracking Result Example
+
 <details>
 <summary>Example</summary>
 <p>
@@ -2129,6 +1651,7 @@ curl localhost:8080/response/status/counts/502
   }
 }
 ```
+
 </p>
 </details>
 
@@ -2184,124 +1707,7 @@ curl localhost:8080/response/status/counts/502
 
 <br/>
 
-#### Triggers API Examples:
-<details>
-<summary>API Examples</summary>
-
-```
-curl -X POST localhost:8080/response/triggers/clear
-
-curl -s localhost:8080/port=8081/response/triggers/add --data '{
-	"name": "t1", 
-	"method":"POST", 
-	"url":"http://localhost:8082/response/status/clear", 
-	"enabled": true,
-	"triggerOn": [502, 503],
-	"startFrom": 2,
-	"stopAt": 3
-}'
-
-curl -X POST localhost:8080/response/triggers/t1/remove
-
-curl -X POST localhost:8080/response/triggers/t1/enable
-
-curl -X POST localhost:8080/response/triggers/t1/disable
-
-curl -X POST localhost:8080/response/triggers/t1/invoke
-
-curl localhost:8080/response/triggers/counts
-
-curl localhost:8080/response/triggers
-
-```
-</details>
-
-#### Triggers Details and Results Example
-<details>
-<summary>Example</summary>
-<p>
-
-```
-$ curl localhost:8080/response/triggers
-{
-  "Targets": {
-    "t1": {
-      "name": "t1",
-      "method": "POST",
-      "url": "http://localhost:8081/response/status/clear",
-      "headers": null,
-      "body": "",
-      "sendID": false,
-      "enabled": true,
-      "triggerOn": [
-        502,
-        503
-      ],
-      "startFrom": 2,
-      "stopAt": 3,
-      "statusCount": 5,
-      "triggerCount": 2
-    }
-  },
-  "TargetsByResponseStatus": {
-    "502": {
-      "t1": {
-        "name": "t1",
-        "method": "POST",
-        "url": "http://localhost:8081/response/status/clear",
-        "headers": null,
-        "body": "",
-        "sendID": false,
-        "enabled": true,
-        "triggerOn": [
-          502,
-          503
-        ],
-        "startFrom": 2,
-        "stopAt": 3,
-        "statusCount": 5,
-        "triggerCount": 2
-      }
-    },
-    "503": {
-      "t1": {
-        "name": "t1",
-        "method": "POST",
-        "url": "http://localhost:8081/response/status/clear",
-        "headers": null,
-        "body": "",
-        "sendID": false,
-        "enabled": true,
-        "triggerOn": [
-          502,
-          503
-        ],
-        "startFrom": 2,
-        "stopAt": 3,
-        "statusCount": 5,
-        "triggerCount": 2
-      }
-    }
-  },
-  "TriggerResults": {
-    "t1": {
-      "200": 2
-    }
-  }
-}
-
-$ curl -s localhost:8080/response/triggers/counts
-{
-  "t1": {
-    "202": 2
-  },
-  "t3": {
-    "200": 3
-  }
-}
-```
-</p>
-</details>
+See [Triggers Example](docs/triggers-example.md)
 
 ###### <small> [Back to TOC](#toc) </small>
 
@@ -2351,7 +1757,10 @@ This URI echoes back the headers and payload sent by client. The response is als
 #### API
 |METHOD|URI|Description|
 |---|---|---|
-| GET       |	/echo                  | Sends response back with request headers and body, with added custom response headers and forced status |
+| ALL       |	/echo         | Responds by echoing request headers as response headers, and request body as response body |
+| ALL       |	/echo/headers | Responds by echoing request headers in response payload |
+| PUT, POST |	/echo/stream  | For http/2 requests, this API streams the request body back as response body. For http/1, it acts similar to `/echo` API. |
+| PUT, POST |	/echo/ws      | Stream the request payload back over a websocket. |
 
 #### Echo API Example
 ```
@@ -2363,6 +1772,7 @@ curl -I  localhost:8080/echo
 <br/>
 
 # <a name="catch-all"></a>
+
 ## > Catch All
 
 Any request that doesn't match any of the defined management APIs, and also doesn't match any proxy targets, gets treated by a catch-all response that sends HTTP 200 response by default (unless an override response code is set)
@@ -2434,7 +1844,7 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
   "replaceURI":"/abc/{y:.*}/def/{x:.*}", \
   "enabled":true, "sendID": true}'
   ```
-  
+
   This target will be triggered for requests with the pattern `/foo/<somex>/bar/<somey>` and the request will be forwarded to the target as `http://somewhere/abc/somey/def/somex`, where the values `somex` and `somey` are extracted from the original request and injected into the replacement URI.
 
   URI match `/` has the special behavior of matching all traffic.
@@ -2457,7 +1867,7 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
 
 - Query: specified as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addQuery` list. A target is triggered if any of the query parameters in the match list are present in the request (matched using OR instead of AND). The variable to capture query parameter value is specified as `{foo}` and can be referenced in the `addQuery` list again as `{foo}`. Example:
 
-    ```
+  ```
   curl http://goto:8080/proxy/targets/add --data \
   '{"name": "target3", "url":"http://somewhere", \
   "match":{"query":[["foo", "{x}"], ["bar", "{y}"]]}, \
@@ -2465,13 +1875,14 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
   "enabled":true, "sendID": true}'
   ```
 
-  This target will be triggered for requests with carrying query params `foo` or `bar`. On the proxied request, query param `foo` will be removed, and additional query params will be set: `abc` with value copied from `foo`, an `def` with value copied from `bar`. For incoming request `http://goto:8080?foo=123&bar=456` gets proxied as `http://somewhere?abc=123&def=456&bar=456`. 
+  This target will be triggered for requests with carrying query params `foo` or `bar`. On the proxied request, query param `foo` will be removed, and additional query params will be set: `abc` with value copied from `foo`, an `def` with value copied from `bar`. For incoming request `http://goto:8080?foo=123&bar=456` gets proxied as `http://somewhere?abc=123&def=456&bar=456`.
 
 ###### <small> [Back to TOC](#goto-proxy) </small>
 
 <br/>
 
 #### Proxy Events
+
 - `Proxy Target Rejected`
 - `Proxy Target Added`
 - `Proxy Target Removed`
@@ -2481,119 +1892,7 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
 
 <br/>
 
-#### Request Proxying API Examples:
-<details>
-<summary>API Examples</summary>
-
-```
-curl -X POST localhost:8080/proxy/targets/clear
-
-curl localhost:8081/proxy/targets/add --data '{"name": "t1", \
-"match":{"uris":["/x/{x}/y/{y}"], "query":[["foo", "{f}"]]}, \
-"url":"http://localhost:8083", \
-"replaceURI":"/abc/{y:.*}/def/{x:.*}", \
-"addHeaders":[["z","z1"]], \
-"addQuery":[["bar","{f}"]], \
-"removeQuery":["foo"], \
-"replicas":1, "enabled":true, "sendID": true}'
-
-curl localhost:8081/proxy/targets/add --data '{"name": "t2", \
-"match":{"headers":[["foo"]]}, \
-"url":"http://localhost:8083", \
-"replaceURI":"/echo", \
-"addHeaders":[["z","z2"]], \
-"replicas":1, "enabled":true, "sendID": false}'
-
-curl localhost:8082/proxy/targets/add --data '{"name": "t3", \
-"match":{"headers":[["x", "{x}"], ["y", "{y}"]], "uris":["/foo"]}, \
-"url":"http://localhost:8083", \
-"replaceURI":"/echo", \
-"addHeaders":[["z","{x}"], ["z","{y}"]], \
-"removeHeaders":["x", "y"], \
-"replicas":1, "enabled":true, "sendID": true}'
-
-curl -X PUT localhost:8080/proxy/targets/t1/remove
-
-curl -X PUT localhost:8080/proxy/targets/t2/disable
-
-curl -X PUT localhost:8080/proxy/targets/t2/enable
-
-curl -v -X POST localhost:8080/proxy/targets/t1/invoke
-
-curl localhost:8080/proxy/targets
-
-curl localhost:8080/proxy/counts
-
-```
-</details>
-
-#### Proxy Target Counts Result Example
-
-<details>
-<summary>Example</summary>
-<p>
-
-```
-{
-  "countsByTargets": {
-    "t1": 4,
-    "t2": 3,
-    "t3": 3
-  },
-  "countsByHeaders": {
-    "foo": 2,
-    "x": 1,
-    "y": 1
-  },
-  "countsByHeaderValues": {},
-  "countsByHeaderTargets": {
-    "foo": {
-      "t1": 2
-    },
-    "x": {
-      "t2": 1
-    },
-    "y": {
-      "t3": 1
-    }
-  },
-  "countsByHeaderValueTargets": {},
-  "countsByUris": {
-    "/debug": 1,
-    "/foo": 2,
-    "/x/22/y/33": 1,
-    "/x/22/y/33?foo=123&bar=456": 1
-  },
-  "countsByUriTargets": {
-    "/debug": {
-      "pt4": 1
-    },
-    "/foo": {
-      "pt3": 2
-    },
-    "/x/22/y/33": {
-      "t1": 1
-    },
-    "/x/22/y/33?foo=123&bar=456": {
-      "t1": 1
-    }
-  },
-  "countsByQuery": {
-    "foo": 4
-  },
-  "countsByQueryValues": {},
-  "countsByQueryTargets": {
-    "foo": {
-      "pt1": 1,
-      "pt5": 3
-    }
-  },
-  "countsByQueryValueTargets": {}
-}
-```
-
-</p>
-</details>
+See [Proxy Example](docs/proxy-example.md)
 
 ###### <small> [Back to TOC](#goto-proxy) </small>
 
@@ -2699,155 +1998,14 @@ Jobs can also trigger another job for each line of output produced, as well as u
 
 <br/>
 
-#### Job APIs Examples:
-<details>
-<summary>API Examples</summary>
-
-```
-curl -X POST http://localhost:8080/jobs/clear
-
-curl localhost:8080/jobs/add --data '
-{ 
-"id": "job1",
-"task": {
-	"name": "job1",
-	"method":	"POST",
-	"url": "http://localhost:8081/echo",
-	"headers":[["x", "x1"],["y", "y1"]],
-	"body": "{\"test\":\"this\"}",
-	"replicas": 1, "requestCount": 1, 
-	"delay": "200ms",
-	"parseJSON": true
-	},
-"auto": false,
-"count": 10,
-"keepFirst": true,
-"maxResults": 5,
-"delay": "1s"
-}'
-
-curl -s localhost:8080/jobs/add --data '
-{ 
-"id": "job2",
-"task": {
-	"cmd": "sh", 
-	"args": ["-c", "printf `date +%s`; echo \" Say Hello\"; sleep 1; printf `date +%s`; echo \" Say Hi\""],
-	"outputMarkers": {"1":"date","3":"msg"}
-},
-"auto": false,
-"count": 1,
-"keepFirst": true,
-"maxResults": 5,
-"initialDelay": "1s",
-"delay": "1s",
-"outputTrigger": "job3"
-}'
-
-
-curl -s localhost:8080/jobs/add --data '
-{ 
-"id": "job3",
-"task": {
-	"cmd": "sh", 
-	"args": ["-c", "printf `date +%s`; printf \" Output {date} {msg} Processed\"; sleep 1;"]
-},
-"auto": false,
-"count": 1,
-"keepFirst": true,
-"maxResults": 10,
-"delay": "1s"
-}'
-
-curl -X POST http://localhost:8080/jobs/job1,job2/remove
-
-curl http://localhost:8080/jobs
-
-curl -X POST http://localhost:8080/jobs/job1,job2/run
-
-curl -X POST http://localhost:8080/jobs/run/all
-
-curl -X POST http://localhost:8080/jobs/job1,job2/stop
-
-curl -X POST http://localhost:8080/jobs/stop/all
-
-curl http://localhost:8080/jobs/job1/results
-
-curl http://localhost:8080/jobs/results
-```
-</details>
-
-#### Job Result Example
-
-<details>
-<summary>Example</summary>
-<p>
-
-```
-$ curl http://localhost:8080/jobs/job1/results
-{
-  "1": [
-    {
-      "index": "1.1.1",
-      "finished": false,
-      "stopped": false,
-      "last": true,
-      "time": "2020-06-13T22:04:28.995178-07:00",
-      "data": "1592111068 Say Hello"
-    },
-    {
-      "index": "1.1.2",
-      "finished": false,
-      "stopped": false,
-      "last": true,
-      "time": "2020-06-13T22:04:30.006885-07:00",
-      "data": "1592111070 Say Hi"
-    },
-    {
-      "index": "1.1.3",
-      "finished": true,
-      "stopped": false,
-      "last": true,
-      "time": "2020-06-13T22:04:30.007281-07:00",
-      "data": ""
-    }
-  ],
-  "2": [
-    {
-      "index": "2.1.1",
-      "finished": false,
-      "stopped": false,
-      "last": true,
-      "time": "2020-06-13T22:04:35.600331-07:00",
-      "data": "1592111075 Say Hello"
-    },
-    {
-      "index": "2.1.2",
-      "finished": false,
-      "stopped": false,
-      "last": true,
-      "time": "2020-06-13T22:04:36.610472-07:00",
-      "data": "1592111076 Say Hi"
-    },
-    {
-      "index": "2.1.3",
-      "finished": true,
-      "stopped": false,
-      "last": true,
-      "time": "2020-06-13T22:04:36.610759-07:00",
-      "data": ""
-    }
-  ]
-}
-```
-</p>
-</details>
+See [Jobs Example](docs/jobs-example.md)
 
 ###### <small> [Back to TOC](#jobs) </small>
 
 <br/>
 
-
 # <a name="registry"></a>
+
 # Registry
 
 Any `goto` instance can act as a registry of other `goto` instances, and other worker `goto` instances can be configured to register themselves with the registry. You can pick any instance as registry and pass its URL to other instances as a command line argument, which tells other instances to register themselves with the given registry at startup.
@@ -3108,68 +2266,8 @@ These APIs manage client invocation targets on peers, allowing to add, remove, s
 - `Peer Startup Data`
 - `Peer Deregistered`
 
-###### <small> [Back to TOC](#goto-registry) </small>
-
-#### Peer JSON Schema 
-(to register a peer via /registry/peers/add)
-
-|Field|Data Type|Description|
-|---|---|---|
-| name      | string | Name/Label of a peer |
-| namespace | string | Namespace of the peer instance (if available, else `local`) |
-| pod       | string | Pod/Hostname of the peer instance |
-| address   | string | IP address of the peer instance |
-| node      | string | Host node where the peer is located |
-| cluster   | string | Cluster/DC ID where the peer is located |
-
-#### Peers JSON Schema 
-Map of peer labels to peer details, where each peer details include the following info
-(output of /registry/peers)
-
-|Field|Data Type|Description|
-|---|---|---|
-| name      | string | Name/Label of a peer |
-| namespace | string | Namespace of the peer instance (if available, else `local`) |
-| pods      | map string->PodDetails | Map of Pod Addresses to Pod Details. See [Pod Details JSON Schema] below(#pod-details-json-schema) |
-| podEpochs | map string->[]PodEpoch   | Past lives of this pod since last cleanup. |
-
-
-#### Pod Details JSON Schema 
-
-|Field|Data Type|Description|
-|---|---|---|
-| name      | string | Pod/Host Name |
-| address   | string | Pod Address |
-| node      | string | Host node where the peer is located |
-| cluster   | string | Cluster/DC ID where the peer is located |
-| url       | string | URL where this peer is reachable |
-| healthy   | bool   | Whether the pod was found to be healthy at last interaction |
-| offline   | bool   | Whether the pod is determined to be offline. Cloned and dump-loaded pods are marked as offline until they reconnect to the registry |
-| currentEpoch | PodEpoch   | Current lifetime details of this pod |
-| pastEpochs | []PodEpoch   | Past lives of this pod since last cleanup. |
-
-
-#### Pod Epoch JSON Schema 
-
-|Field|Data Type|Description|
-|---|---|---|
-| epoch      | int | Epoch count of this pod |
-| name      | string | Pod/Host Name |
-| address   | string | Pod Address |
-| node      | string | Host node where the peer is located |
-| cluster   | string | Cluster/DC ID where the peer is located |
-| firstContact   | time | First time this pod connected (at registration) |
-| lastContact   | time | Last time this pod sent its reminder |
-
-#### Peer Target JSON Schema
-** Same as [Client Target JSON Schema](#client-target-json-schema)
-
-#### Peer Job JSON Schema
-** Same as [Jobs JSON Schema](#job-json-schema)
-
 <br/>
 
-#### Registry APIs Examples:
-See [Registry APIs Examples](docs/registry-api-examples.md)
+See [Registry Schema JSONs and APIs Examples](docs/registry-api-examples.md)
 
 ###### <small> [Back to TOC](#goto-registry) </small>

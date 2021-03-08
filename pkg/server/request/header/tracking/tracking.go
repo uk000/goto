@@ -3,7 +3,6 @@ package tracking
 import (
   "fmt"
   "net/http"
-  "strconv"
   "strings"
   "sync"
 
@@ -16,9 +15,9 @@ import (
 )
 
 type HeaderData struct {
-  RequestCountsByHeaderValue                   map[string]int            `json:requestCountsByHeaderValue`
-  RequestCountsByHeaderValueAndRequestedStatus map[string]map[string]int `json:requestCountsByHeaderValueAndRequestedStatus`
-  RequestCountsByHeaderValueAndResponseStatus  map[string]map[string]int `json:requestCountsByHeaderValueAndResponseStatus`
+  RequestCountsByHeaderValue                   map[string]int         `json:requestCountsByHeaderValue`
+  RequestCountsByHeaderValueAndRequestedStatus map[string]map[int]int `json:requestCountsByHeaderValueAndRequestedStatus`
+  RequestCountsByHeaderValueAndResponseStatus  map[string]map[int]int `json:requestCountsByHeaderValueAndResponseStatus`
   lock                                         sync.RWMutex
 }
 
@@ -52,19 +51,19 @@ func (hd *HeaderData) init() {
   hd.lock.Lock()
   defer hd.lock.Unlock()
   hd.RequestCountsByHeaderValue = map[string]int{}
-  hd.RequestCountsByHeaderValueAndRequestedStatus = map[string]map[string]int{}
-  hd.RequestCountsByHeaderValueAndResponseStatus = map[string]map[string]int{}
+  hd.RequestCountsByHeaderValueAndRequestedStatus = map[string]map[int]int{}
+  hd.RequestCountsByHeaderValueAndResponseStatus = map[string]map[int]int{}
 }
 
-func (hd *HeaderData) trackRequest(headerValue string, requestedStatus string) {
+func (hd *HeaderData) trackRequest(headerValue string, requestedStatus int) {
   if headerValue != "" {
     hd.lock.Lock()
     defer hd.lock.Unlock()
     hd.RequestCountsByHeaderValue[headerValue]++
-    if requestedStatus != "" {
+    if requestedStatus > 0 {
       requestedStatusMap, present := hd.RequestCountsByHeaderValueAndRequestedStatus[headerValue]
       if !present {
-        requestedStatusMap = map[string]int{}
+        requestedStatusMap = map[int]int{}
         hd.RequestCountsByHeaderValueAndRequestedStatus[headerValue] = requestedStatusMap
       }
       requestedStatusMap[requestedStatus]++
@@ -72,13 +71,13 @@ func (hd *HeaderData) trackRequest(headerValue string, requestedStatus string) {
   }
 }
 
-func (hd *HeaderData) trackResponse(headerValue string, responseStatus string) {
-  if headerValue != "" && responseStatus != "" {
+func (hd *HeaderData) trackResponse(headerValue string, responseStatus int) {
+  if headerValue != "" && responseStatus > 0 {
     hd.lock.Lock()
     defer hd.lock.Unlock()
     responseStatusMap, present := hd.RequestCountsByHeaderValueAndResponseStatus[headerValue]
     if !present {
-      responseStatusMap = map[string]int{}
+      responseStatusMap = map[int]int{}
       hd.RequestCountsByHeaderValueAndResponseStatus[headerValue] = responseStatusMap
     }
     responseStatusMap[responseStatus]++
@@ -277,37 +276,36 @@ func getHeaders(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, util.ToJSON(requestTracking.getHeaders(r)))
 }
 
-func trackRequestHeaders(r *http.Request) {
-  rtd := requestTracking.getPortRequestTrackingData(r)
-  for header, headerData := range rtd.headerMap {
-    if hv := r.Header.Get(header); hv != "" {
-      metrics.UpdateHeaderRequestCount(header)
-      headerData.trackRequest(hv, util.GetStringParamValue(r, "status"))
+func trackRequestHeaders(headers http.Header, rtd *RequestTrackingData, requestedStatus int) {
+  for h, hd := range rtd.headerMap {
+    if hv := headers.Get(h); hv != "" {
+      metrics.UpdateHeaderRequestCount(h)
+      hd.trackRequest(hv, requestedStatus)
     }
   }
 }
 
-func trackResponseForRequestHeaders(r *http.Request, statusCode int) {
-  rtd := requestTracking.getPortRequestTrackingData(r)
-  for header, headerData := range rtd.headerMap {
-    if hv := r.Header.Get(header); hv != "" {
-      headerData.trackResponse(hv, strconv.Itoa(statusCode))
+func trackResponseForRequestHeaders(headers http.Header, rtd *RequestTrackingData, responseStatus int) {
+  for h, hd := range rtd.headerMap {
+    if hv := headers.Get(h); hv != "" {
+      hd.trackResponse(hv, responseStatus)
     }
   }
 }
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    if !util.IsKnownNonTraffic(r) {
-      trackRequestHeaders(r)
-      crw := intercept.NewInterceptResponseWriter(w, false)
-      if next != nil {
-        next.ServeHTTP(crw, r)
-      }
-      trackResponseForRequestHeaders(r, crw.StatusCode)
-      crw.Proceed()
-    } else if next != nil {
+    if next != nil {
       next.ServeHTTP(w, r)
+    }
+    if !util.IsKnownNonTraffic(r) {
+      rtd := requestTracking.getPortRequestTrackingData(r)
+      requestedStatus := util.GetIntParamValue(r, "status")
+      irw := util.GetInterceptResponseWriter(r).(*intercept.InterceptResponseWriter)
+      go func(headers http.Header, rtd *RequestTrackingData, requestedStatus, responseStatus int) {
+        trackRequestHeaders(headers, rtd, requestedStatus)
+        trackResponseForRequestHeaders(headers, rtd, responseStatus)
+      }(r.Header, rtd, requestedStatus, irw.StatusCode)
     }
   })
 }

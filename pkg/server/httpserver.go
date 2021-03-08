@@ -6,15 +6,16 @@ import (
   "goto/pkg/events"
   "goto/pkg/global"
   "goto/pkg/registry/peer"
-  "goto/pkg/server/conn"
   "goto/pkg/server/intercept"
   "goto/pkg/server/listeners"
   "goto/pkg/util"
   "io/ioutil"
   "log"
+  "net"
   "net/http"
   "os"
   "os/signal"
+  "strconv"
   "strings"
   "syscall"
   "time"
@@ -26,6 +27,7 @@ import (
 
 var (
   httpServer *http.Server
+  h2s        = &http2.Server{}
 )
 
 func RunHttpServer(handlers ...util.ServerHandler) {
@@ -43,14 +45,14 @@ func RunHttpServer(handlers ...util.ServerHandler) {
       r.Use(h.Middleware)
     }
   }
-  h2s := &http2.Server{}
+  h2c := h2c.NewHandler(GRPCHandler(r), h2s)
   httpServer = &http.Server{
     Addr:         fmt.Sprintf("0.0.0.0:%d", global.ServerPort),
     WriteTimeout: 1 * time.Minute,
     ReadTimeout:  1 * time.Minute,
     IdleTimeout:  1 * time.Minute,
-    ConnContext:  conn.SaveConnInContext,
-    Handler:      h2c.NewHandler(GRPCHandler(r), h2s),
+    ConnContext:  WithConnContext,
+    Handler:      HTTPHandler(r, h2c),
     ErrorLog:     log.New(ioutil.Discard, "discard", 0),
   }
   StartHttpServer(httpServer)
@@ -58,6 +60,93 @@ func RunHttpServer(handlers ...util.ServerHandler) {
   peer.RegisterPeer(global.PeerName, global.PeerAddress)
   events.SendEventJSONDirect("Server Started", global.HostLabel, listeners.GetListeners())
   WaitForHttpServer(httpServer)
+}
+
+func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
+  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    ctx, rs := WithRequestStore(r)
+    r = r.WithContext(ctx)
+    if util.IsH2Upgrade(r) {
+      if util.IsPutOrPost(r) {
+        httpHandler.ServeHTTP(w, r)
+      } else {
+        r.ProtoMajor = 2
+        rs.IsH2C = true
+        h2cHandler.ServeHTTP(w, r)
+      }
+    } else if r.ProtoMajor == 2 {
+      rs.IsH2C = true
+      h2cHandler.ServeHTTP(w, r)
+    } else {
+      httpHandler.ServeHTTP(w, r)
+    }
+  })
+}
+
+func ContextMiddleware(next http.Handler) http.Handler {
+  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    if global.Stopping && global.IsReadinessProbe(r) {
+      util.CopyHeaders("Stopping-Readiness-Request", w, r.Header, r.Host, r.RequestURI)
+      w.WriteHeader(http.StatusNotFound)
+    } else if next != nil {
+      if r.Context().Value(util.RequestStoreKey) == nil {
+        ctx, rs := WithRequestStore(r)
+        rs.IsH2C = r.ProtoMajor == 2
+        r = r.WithContext(ctx)
+      }
+      r = r.WithContext(WithPort(r.Context(), util.GetListenerPortNum(r)))
+      rw := w
+      var irw *intercept.InterceptResponseWriter
+      if !util.IsKnownNonTraffic(r) {
+        irw = intercept.NewInterceptResponseWriter(r, w, true)
+        util.SetInterceptResponseWriter(r, irw)
+        rw = irw
+      }
+      startTime := time.Now().UnixNano()
+      w.Header().Add("Goto-In-Nanos", fmt.Sprint(startTime))
+      next.ServeHTTP(rw, r)
+      endTime := time.Now().UnixNano()
+      w.Header().Add("Goto-Out-Nanos", fmt.Sprint(endTime))
+      w.Header().Add("Goto-Took-Nanos", fmt.Sprint(endTime-startTime))
+      statusCode := http.StatusOK
+      bodyLength := 0
+      if !util.IsKnownNonTraffic(r) && irw != nil {
+        statusCode = irw.StatusCode
+        bodyLength = irw.BodyLength
+      }
+      w.Header().Add("Goto-Response-Status", strconv.Itoa(statusCode))
+      if irw != nil {
+        irw.Proceed()
+      }
+      go PrintLogMessages(statusCode, bodyLength, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
+    }
+  })
+}
+
+func WithConnContext(ctx context.Context, conn net.Conn) context.Context {
+  return context.WithValue(ctx, util.ConnectionKey, conn)
+}
+
+func WithRequestStore(r *http.Request) (context.Context, *util.RequestStore) {
+  isAdminRequest := util.CheckAdminRequest(r)
+  rs := &util.RequestStore{
+    IsAdminRequest:      isAdminRequest,
+    IsVersionRequest:    strings.HasPrefix(r.RequestURI, "/version"),
+    IsLockerRequest:     strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker"),
+    IsPeerEventsRequest: strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/events"),
+    IsMetricsRequest:    strings.HasPrefix(r.RequestURI, "/metrics"),
+    IsReminderRequest:   strings.Contains(r.RequestURI, "/remember"),
+    IsProbeRequest:      global.IsReadinessProbe(r) || global.IsLivenessProbe(r),
+    IsHealthRequest:     !isAdminRequest && strings.HasPrefix(r.RequestURI, "/health"),
+    IsStatusRequest:     !isAdminRequest && strings.HasPrefix(r.RequestURI, "/status"),
+    IsDelayRequest:      !isAdminRequest && strings.Contains(r.RequestURI, "/delay"),
+    IsPayloadRequest:    !isAdminRequest && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload")),
+  }
+  return context.WithValue(r.Context(), util.RequestStoreKey, rs), rs
+}
+
+func WithPort(ctx context.Context, port int) context.Context {
+  return context.WithValue(ctx, util.CurrentPortKey, port)
 }
 
 func StartHttpServer(server *http.Server) {
@@ -116,47 +205,6 @@ func StopHttpServer(server *http.Server) {
   events.SendEventJSONDirect("Server Stopped", global.HostLabel, listeners.GetListeners())
   server.Shutdown(ctx)
   log.Printf("HTTP Server %s finished shutting down", server.Addr)
-}
-
-func ContextMiddleware(next http.Handler) http.Handler {
-  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    if global.Stopping && global.IsReadinessProbe(r) {
-      util.CopyHeaders("Stopping-Readiness-Request", w, r.Header, r.Host, r.RequestURI)
-      w.WriteHeader(http.StatusNotFound)
-    } else if next != nil {
-      crw := intercept.NewInterceptResponseWriter(w, true)
-      startTime := time.Now().UnixNano()
-      w.Header().Add("Goto-In-Nanos", fmt.Sprint(startTime))
-      r = r.WithContext(WithRequestStore(WithPort(r.Context(), util.GetListenerPortNum(r)), r))
-      next.ServeHTTP(crw, r)
-      endTime := time.Now().UnixNano()
-      w.Header().Add("Goto-Out-Nanos", fmt.Sprint(endTime))
-      w.Header().Add("Goto-Took-Nanos", fmt.Sprint(endTime-startTime))
-      go PrintLogMessages(crw.StatusCode, crw.BodyLength, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
-      crw.Proceed()
-    }
-  })
-}
-
-func WithRequestStore(ctx context.Context, r *http.Request) context.Context {
-  isAdminRequest := util.CheckAdminRequest(r)
-  return context.WithValue(ctx, util.RequestStoreKey, &util.RequestStore{
-    IsAdminRequest:      isAdminRequest,
-    IsVersionRequest:    strings.HasPrefix(r.RequestURI, "/version"),
-    IsLockerRequest:     strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker"),
-    IsPeerEventsRequest: strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/events"),
-    IsMetricsRequest:    strings.HasPrefix(r.RequestURI, "/metrics"),
-    IsReminderRequest:   strings.Contains(r.RequestURI, "/remember"),
-    IsProbeRequest:      global.IsReadinessProbe(r) || global.IsLivenessProbe(r),
-    IsHealthRequest:     !isAdminRequest && strings.HasPrefix(r.RequestURI, "/health"),
-    IsStatusRequest:     !isAdminRequest && strings.HasPrefix(r.RequestURI, "/status"),
-    IsDelayRequest:      !isAdminRequest && strings.Contains(r.RequestURI, "/delay"),
-    IsPayloadRequest:    !isAdminRequest && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload")),
-  })
-}
-
-func WithPort(ctx context.Context, port int) context.Context {
-  return context.WithValue(ctx, util.CurrentPortKey, port)
 }
 
 func PrintLogMessages(statusCode, bodyLength int, headers http.Header, rs *util.RequestStore) {

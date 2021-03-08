@@ -10,6 +10,7 @@ import (
   "goto/pkg/metrics"
   "goto/pkg/server/intercept"
   "goto/pkg/server/request/uri"
+  "goto/pkg/server/response/trigger"
   "goto/pkg/util"
 
   "github.com/gorilla/mux"
@@ -197,37 +198,32 @@ func IncrementStatusCount(statusCode int, r *http.Request) {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    if next != nil {
+      next.ServeHTTP(w, r)
+    }
     if util.IsKnownNonTraffic(r) {
-      if next != nil {
-        next.ServeHTTP(w, r)
-      }
       return
     }
-    crw := intercept.NewInterceptResponseWriter(w, true)
-    if next != nil {
-      next.ServeHTTP(crw, r)
-    }
     overriddenStatus := false
+    irw := util.GetInterceptResponseWriter(r).(*intercept.InterceptResponseWriter)
     if !uri.HasURIStatus(r) {
       ps := getOrCreatePortStatus(r)
-      crw.StatusCode, overriddenStatus = computeResponseStatus(crw.StatusCode, r)
-      IncrementStatusCount(crw.StatusCode, r)
+      irw.StatusCode, overriddenStatus = computeResponseStatus(irw.StatusCode, r)
+      IncrementStatusCount(irw.StatusCode, r)
+      msg := ""
       if overriddenStatus {
-        msg := ""
-        if overriddenStatus {
-          w.Header().Add("Goto-Forced-Status", strconv.Itoa(crw.StatusCode))
-          w.Header().Add("Goto-Forced-Status-Remaining", strconv.Itoa(ps.alwaysReportStatusCount))
-          msg = fmt.Sprintf("Reporting status: [%d] for URI [%s]. Remaining status count [%d].",
-            crw.StatusCode, r.RequestURI, ps.alwaysReportStatusCount)
-        } else {
-          msg = fmt.Sprintf("Reporting status: [%d] for URI [%s].", crw.StatusCode, r.RequestURI)
-        }
-        util.AddLogMessage(msg, r)
+        w.Header().Add("Goto-Forced-Status", strconv.Itoa(irw.StatusCode))
+        w.Header().Add("Goto-Forced-Status-Remaining", strconv.Itoa(ps.alwaysReportStatusCount))
+        msg = fmt.Sprintf("Reporting status: [%d] for URI [%s]. Remaining status count [%d].",
+          irw.StatusCode, r.RequestURI, ps.alwaysReportStatusCount)
+      } else {
+        msg = fmt.Sprintf("Reporting status: [%d] for URI [%s].", irw.StatusCode, r.RequestURI)
       }
+      util.AddLogMessage(msg, r)
+      trigger.RunTriggers(r, irw, irw.StatusCode)
     }
-    if crw.StatusCode == 0 {
-      crw.StatusCode = http.StatusOK
+    if irw.StatusCode == 0 {
+      irw.StatusCode = http.StatusOK
     }
-    crw.Proceed()
   })
 }

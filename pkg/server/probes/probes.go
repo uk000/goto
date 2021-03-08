@@ -173,6 +173,7 @@ func Middleware(next http.Handler) http.Handler {
       w.Header().Add("Readiness-Request-Count", fmt.Sprint(pp.ReadinessCount))
       w.Header().Add("Readiness-Overflow-Count", fmt.Sprint(pp.ReadinessOverflowCount))
       w.WriteHeader(status)
+      util.SetHeadersSent(r, true)
       util.AddLogMessage(fmt.Sprintf("Serving Readiness Probe: [%s]", pp.ReadinessProbe), r)
     } else if IsLivenessProbe(r) {
       metrics.UpdateRequestCount("livenessProbe")
@@ -194,6 +195,7 @@ func Middleware(next http.Handler) http.Handler {
       w.Header().Add("Liveness-Request-Count", fmt.Sprint(pp.LivenessCount))
       w.Header().Add("Liveness-Overflow-Count", fmt.Sprint(pp.LivenessOverflowCount))
       w.WriteHeader(status)
+      util.SetHeadersSent(r, true)
       util.AddLogMessage(fmt.Sprintf("Serving Liveness Probe: [%s]", pp.LivenessProbe), r)
     } else if next != nil {
       next.ServeHTTP(w, r)

@@ -7,6 +7,7 @@ import (
   "net/http"
 
   "goto/pkg/metrics"
+  "goto/pkg/server/intercept"
   "goto/pkg/util"
 
   "github.com/gorilla/mux"
@@ -20,35 +21,36 @@ var (
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   echoRouter := r.PathPrefix("/echo").Subrouter()
   util.AddRoute(echoRouter, "/headers", EchoHeaders)
-  util.AddRoute(echoRouter, "/ws", wsEchoHandler, "GET", "POST")
+  util.AddRoute(echoRouter, "/ws", wsEchoHandler, "GET", "POST", "PUT")
+  util.AddRoute(echoRouter, "/stream", echoStream, "POST", "PUT")
   util.AddRoute(echoRouter, "", echo)
 }
 
 func EchoHeaders(w http.ResponseWriter, r *http.Request) {
-  util.AddLogMessage("Echoing headers back", r)
-  util.CopyHeaders("Request", w, r.Header, r.Host, r.RequestURI)
-  fmt.Fprintf(w, "{\"RequestHeaders\": %s}", util.GetRequestHeadersLog(r))
+  util.AddLogMessage("Echoing headers", r)
+  fmt.Fprintf(w, "{\"EchoHeaders\": %s}", util.GetRequestHeadersLog(r))
 }
 
 func echo(w http.ResponseWriter, r *http.Request) {
   metrics.UpdateRequestCount("echo")
+  util.AddLogMessage("Echoing", r)
   Echo(w, r)
-  fmt.Fprintln(w)
 }
 
-func Echo(w http.ResponseWriter, r *http.Request) {
-  util.AddLogMessage("Echoing back", r)
-  response := map[string]interface{}{}
-  response["RequestProtocol"] = r.Proto
-  response["RequestURI"] = r.RequestURI
-  response["RequestHeaders"] = r.Header
-  response["RequestQuery"] = r.URL.Query()
-  if r.ProtoMajor == 1 {
-    body, _ := ioutil.ReadAll(r.Body)
-    response["RequestBody"] = string(body)
+func echoStream(w http.ResponseWriter, r *http.Request) {
+  metrics.UpdateRequestCount("echo")
+  util.AddLogMessage("Streaming Echo", r)
+  var writer io.Writer = w
+  if util.IsH2(r) {
+    fw := intercept.NewFlushWriter(r, w)
+    util.CopyHeaders("Stream", w, r.Header, r.Host, r.RequestURI)
+    util.SetHeadersSent(r, true)
+    fw.Flush()
+    writer = fw
   }
-  r.Body.Close()
-  fmt.Fprint(w, util.ToJSON(response))
+  if _, err := io.Copy(writer, r.Body); err != nil {
+    fmt.Println(err.Error())
+  }
 }
 
 func wsEchoHandler(w http.ResponseWriter, r *http.Request) {
@@ -59,4 +61,13 @@ func wsEchoHandler(w http.ResponseWriter, r *http.Request) {
     io.Copy(ws, ws)
   })}
   s.ServeHTTP(w, r)
+}
+
+func Echo(w http.ResponseWriter, r *http.Request) {
+  if util.IsPutOrPost(r) {
+    body, _ := ioutil.ReadAll(r.Body)
+    fmt.Fprint(w, string(body))
+  } else {
+    fmt.Fprintf(w, "{\"EchoHeaders\": %s}", util.GetRequestHeadersLog(r))
+  }
 }

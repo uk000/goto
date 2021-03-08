@@ -14,6 +14,7 @@ import (
   "os"
   "reflect"
   "regexp"
+  "runtime"
   "strconv"
   "strings"
   "time"
@@ -30,10 +31,33 @@ type ServerHandler struct {
 
 type ContextKey struct{ Key string }
 
+type RequestStore struct {
+  IsVersionRequest        bool
+  IsFilteredRequest       bool
+  IsLockerRequest         bool
+  IsPeerEventsRequest     bool
+  IsAdminRequest          bool
+  IsMetricsRequest        bool
+  IsReminderRequest       bool
+  IsProbeRequest          bool
+  IsHealthRequest         bool
+  IsStatusRequest         bool
+  IsDelayRequest          bool
+  IsPayloadRequest        bool
+  IsTrafficEventReported  bool
+  IsHeadersSent           bool
+  IsH2C                   bool
+  StatusCode              int
+  TrafficDetails          []string
+  LogMessages             []string
+  InterceptResponseWriter interface{}
+}
+
 var (
-  RequestStoreKey   = &ContextKey{"requestStoreKey"}
+  RequestStoreKey   = &ContextKey{"requestStore"}
   CurrentPortKey    = &ContextKey{"currentPort"}
-  IgnoredRequestKey = &ContextKey{"ignoredRequestKey"}
+  IgnoredRequestKey = &ContextKey{"ignoredRequest"}
+  ConnectionKey     = &ContextKey{"connection"}
 
   portRouter             *mux.Router
   listenerPathSubRouters = map[string]*mux.Router{}
@@ -41,6 +65,7 @@ var (
   contentRegexp          = regexp.MustCompile("(?i)content")
   hostRegexp             = regexp.MustCompile("(?i)^host$")
   utf8Regexp             = regexp.MustCompile("(?i)utf-8")
+  upgradeRegexp          = regexp.MustCompile("(?i)upgrade")
 )
 
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=~`{}[];:,.<>/?"
@@ -52,23 +77,12 @@ var sizes map[string]uint64 = map[string]uint64{
   "MB": 1000000,
 }
 
-type RequestStore struct {
-  LogMessages            []string
-  IsVersionRequest       bool
-  IsFilteredRequest      bool
-  IsLockerRequest        bool
-  IsPeerEventsRequest    bool
-  IsAdminRequest         bool
-  IsMetricsRequest       bool
-  IsReminderRequest      bool
-  IsProbeRequest         bool
-  IsHealthRequest        bool
-  IsStatusRequest        bool
-  IsDelayRequest         bool
-  IsPayloadRequest       bool
-  IsTrafficEventReported bool
-  StatusCode             int
-  TrafficDetails         []string
+func IsH2(r *http.Request) bool {
+  return r.ProtoMajor == 2
+}
+
+func IsH2C(r *http.Request) bool {
+  return GetRequestStore(r).IsH2C
 }
 
 func InitListenerRouter(root *mux.Router) {
@@ -78,6 +92,30 @@ func InitListenerRouter(root *mux.Router) {
 func AddLogMessage(msg string, r *http.Request) {
   rs := r.Context().Value(RequestStoreKey).(*RequestStore)
   rs.LogMessages = append(rs.LogMessages, msg)
+}
+
+func GetRequestStore(r *http.Request) *RequestStore {
+  return r.Context().Value(RequestStoreKey).(*RequestStore)
+}
+
+func GetInterceptResponseWriter(r *http.Request) interface{} {
+  return r.Context().Value(RequestStoreKey).(*RequestStore).InterceptResponseWriter
+}
+
+func SetInterceptResponseWriter(r *http.Request, irw interface{}) {
+  r.Context().Value(RequestStoreKey).(*RequestStore).InterceptResponseWriter = irw
+}
+
+func IsHeadersSent(r *http.Request) bool {
+  rs := r.Context().Value(RequestStoreKey)
+  return rs != nil && rs.(*RequestStore).IsHeadersSent
+}
+
+func SetHeadersSent(r *http.Request, sent bool) {
+  rs := r.Context().Value(RequestStoreKey)
+  if rs != nil {
+    rs.(*RequestStore).IsHeadersSent = sent
+  }
 }
 
 func IsTrafficEventReported(r *http.Request) bool {
@@ -686,9 +724,22 @@ func ReadBytes(r io.Reader) []byte {
   return nil
 }
 
+func DiscardRequestBody(r *http.Request) {
+  defer r.Body.Close()
+  io.Copy(ioutil.Discard, r.Body)
+}
+
 func CloseResponse(r *http.Response) {
   defer r.Body.Close()
   io.Copy(ioutil.Discard, r.Body)
+}
+
+func IsH2Upgrade(r *http.Request) bool {
+  return strings.EqualFold(r.Header.Get("Upgrade"), "h2c") || upgradeRegexp.MatchString(r.Header.Get("Connection"))
+}
+
+func IsPutOrPost(r *http.Request) bool {
+  return strings.EqualFold(r.Method, "POST") || strings.EqualFold(r.Method, "PUT")
 }
 
 func matchPieces(pieces1 []string, pieces2 []string) bool {
@@ -840,4 +891,26 @@ func CreateHttpClient() *http.Client {
     TLSHandshakeTimeout: 10 * time.Second,
   }
   return &http.Client{Transport: tr}
+}
+
+func PrintCallers(level int, callee string) {
+  pc := make([]uintptr, 16)
+  n := runtime.Callers(1, pc)
+  frames := runtime.CallersFrames(pc[:n])
+  var callers []string
+  i := 0
+  for {
+    frame, more := frames.Next()
+    if !strings.Contains(frame.Function, "util") &&
+      strings.Contains(frame.Function, "goto") {
+      callers = append(callers, frame.Function)
+      i++
+    }
+    if !more || i >= level {
+      break
+    }
+  }
+  fmt.Println("-----------------------------------------------")
+  fmt.Printf("Callers of [%s]: %+v\n", callee, callers)
+  fmt.Println("-----------------------------------------------")
 }

@@ -2,25 +2,88 @@ package intercept
 
 import (
   "bufio"
+  "fmt"
+  "goto/pkg/server/conn"
+  "goto/pkg/util"
+  "io"
+  "io/ioutil"
   "net"
   "net/http"
+  "strings"
 )
 
 type ResponseInterceptor interface {
   SetChunked()
+  SetHijacked()
 }
 
 type InterceptResponseWriter struct {
   http.ResponseWriter
   http.Hijacker
   http.Flusher
+  conn       net.Conn
   parent     ResponseInterceptor
   StatusCode int
   Data       []byte
   Hold       bool
   Hijacked   bool
   Chunked    bool
+  IsH2C      bool
   BodyLength int
+}
+
+type FlushWriter struct {
+  flusher http.Flusher
+  w       io.Writer
+  h2c     bool
+}
+
+type BodyTracker struct {
+  io.ReadCloser
+}
+
+func NewFlushWriter(r *http.Request, w io.Writer) FlushWriter {
+  rs := util.GetRequestStore(r)
+  var flusher http.Flusher
+  if f, ok := w.(http.Flusher); ok {
+    flusher = f
+  }
+  if irw, ok := w.(*InterceptResponseWriter); ok {
+    irw.SetChunked()
+  }
+  return FlushWriter{w: w, h2c: rs.IsH2C, flusher: flusher}
+}
+
+func (fw FlushWriter) Write(p []byte) (int, error) {
+  n, err := fw.w.Write(p)
+  if err == nil {
+    fw.Flush()
+  }
+  return n, err
+}
+
+func (fw FlushWriter) Flush() {
+  if fw.flusher != nil {
+    fw.flusher.Flush()
+  }
+}
+
+func SetBodyTracker(r *http.Request, body string) {
+  r.Body = BodyTracker{ioutil.NopCloser(strings.NewReader(body))}
+}
+
+func trackRequestBody(r *http.Request) {
+  r.Body = BodyTracker{r.Body}
+}
+
+func (b BodyTracker) Read(p []byte) (n int, err error) {
+  // util.PrintCallers(3, "BodyTracker.Read")
+  return b.ReadCloser.Read(p)
+}
+
+func (b BodyTracker) Close() error {
+  // util.PrintCallers(3, "BodyTracker.Close")
+  return b.ReadCloser.Close()
 }
 
 func (rw *InterceptResponseWriter) WriteHeader(statusCode int) {
@@ -31,20 +94,31 @@ func (rw *InterceptResponseWriter) WriteHeader(statusCode int) {
 }
 
 func (rw *InterceptResponseWriter) Write(b []byte) (int, error) {
-  rw.BodyLength += len(b)
-  if !rw.Hold || rw.Chunked {
-    if len(rw.Data) > 0 {
-      rw.ResponseWriter.Write(rw.Data)
-      rw.Data = []byte{}
+  // util.PrintCallers(3, "InterceptResponseWriter.Write")
+  l := len(b)
+  rw.BodyLength += l
+  if !rw.Hijacked {
+    if !rw.Hold || rw.Chunked {
+      if len(rw.Data) > 0 {
+        if n, err := rw.ResponseWriter.Write(rw.Data); err != nil {
+          return n, err
+        }
+        rw.Data = []byte{}
+      }
+      if n, err := rw.ResponseWriter.Write(b); err != nil {
+        return n, err
+      } else {
+        return n, nil
+      }
+    } else {
+      rw.Data = append(rw.Data, b...)
     }
-    return rw.ResponseWriter.Write(b)
-  } else {
-    rw.Data = append(rw.Data, b...)
   }
-  return 0, nil
+  return l, nil
 }
 
 func (rw *InterceptResponseWriter) Flush() {
+  // util.PrintCallers(3, "InterceptResponseWriter.Flush")
   rw.SetChunked()
   if rw.Flusher != nil {
     rw.Flusher.Flush()
@@ -52,8 +126,20 @@ func (rw *InterceptResponseWriter) Flush() {
 }
 
 func (rw *InterceptResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+  // util.PrintCallers(3, "InterceptResponseWriter.Hijack")
+  if rw.Hijacker != nil {
+    rw.Hijacked = true
+    return rw.Hijacker.Hijack()
+  }
+  return rw.conn, bufio.NewReadWriter(bufio.NewReader(rw.conn), bufio.NewWriter(rw.conn)), nil
+
+}
+
+func (rw *InterceptResponseWriter) SetHijacked() {
   rw.Hijacked = true
-  return rw.Hijacker.Hijack()
+  if rw.parent != nil {
+    rw.parent.SetHijacked()
+  }
 }
 
 func (rw *InterceptResponseWriter) SetChunked() {
@@ -69,19 +155,27 @@ func (rw *InterceptResponseWriter) Proceed() {
       rw.StatusCode = 200
     }
     rw.ResponseWriter.WriteHeader(rw.StatusCode)
-    rw.ResponseWriter.Write(rw.Data)
+    if _, err := rw.ResponseWriter.Write(rw.Data); err == http.ErrHijacked {
+      rw.Hijacked = true
+      if _, err := rw.conn.Write(rw.Data); err != nil {
+        fmt.Printf("InterceptResponseWriter.Proceed: failed to write [%d] bytes with error: %s\n", len(rw.Data), err.Error())
+      }
+    }
   }
 }
 
-func NewInterceptResponseWriter(w http.ResponseWriter, hold bool) *InterceptResponseWriter {
+func NewInterceptResponseWriter(r *http.Request, w http.ResponseWriter, hold bool) *InterceptResponseWriter {
   parent, _ := w.(ResponseInterceptor)
   hijacker, _ := w.(http.Hijacker)
   flusher, _ := w.(http.Flusher)
+  trackRequestBody(r)
   return &InterceptResponseWriter{
     ResponseWriter: w,
     Hijacker:       hijacker,
     Flusher:        flusher,
     parent:         parent,
     Hold:           hold,
+    IsH2C:          util.IsH2C(r),
+    conn:           conn.GetConn(r),
   }
 }
