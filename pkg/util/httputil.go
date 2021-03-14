@@ -53,6 +53,15 @@ type RequestStore struct {
   InterceptResponseWriter interface{}
 }
 
+const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=~`{}[];:,.<>/?"
+
+var sizes map[string]uint64 = map[string]uint64{
+  "K":  1000,
+  "KB": 1000,
+  "M":  1000000,
+  "MB": 1000000,
+}
+
 var (
   RequestStoreKey   = &ContextKey{"requestStore"}
   CurrentPortKey    = &ContextKey{"currentPort"}
@@ -66,16 +75,9 @@ var (
   hostRegexp             = regexp.MustCompile("(?i)^host$")
   utf8Regexp             = regexp.MustCompile("(?i)utf-8")
   upgradeRegexp          = regexp.MustCompile("(?i)upgrade")
+  randomCharsetLength    = len(charset)
+  random                 = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
-
-const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=~`{}[];:,.<>/?"
-
-var sizes map[string]uint64 = map[string]uint64{
-  "K":  1000,
-  "KB": 1000,
-  "M":  1000000,
-  "MB": 1000000,
-}
 
 func IsH2(r *http.Request) bool {
   return r.ProtoMajor == 2
@@ -315,25 +317,27 @@ func GetListParam(r *http.Request, param string) ([]string, bool) {
   return values, len(values) > 0 && len(values[0]) > 0
 }
 
-func GetStatusParam(r *http.Request) (int, int, bool) {
+func GetStatusParam(r *http.Request) ([]int, int, bool) {
   vars := mux.Vars(r)
   status := vars["status"]
   if len(status) == 0 {
-    return 0, 0, false
+    return nil, 0, false
   }
   pieces := strings.Split(status, ":")
-  var statusCode, times int
+  var statusCodes []int
+  var times int
   if len(pieces[0]) > 0 {
-    s, _ := strconv.ParseInt(pieces[0], 10, 32)
-    statusCode = int(s)
-    if statusCode > 0 {
-      if len(pieces) > 1 {
-        s, _ := strconv.ParseInt(pieces[1], 10, 32)
-        times = int(s)
+    for _, s := range strings.Split(pieces[0], ",") {
+      if sc, err := strconv.ParseInt(s, 10, 32); err == nil {
+        statusCodes = append(statusCodes, int(sc))
       }
     }
+    if len(pieces) > 1 {
+      s, _ := strconv.ParseInt(pieces[1], 10, 32)
+      times = int(s)
+    }
   }
-  return statusCode, times, true
+  return statusCodes, times, true
 }
 
 func ParseSize(value string) int {
@@ -370,8 +374,37 @@ func ParseDuration(value string) time.Duration {
   return 0
 }
 
-func GetDurationParam(r *http.Request, name string) time.Duration {
-  return ParseDuration(mux.Vars(r)[name])
+func GetDurationParam(r *http.Request, name string) (low, high time.Duration, count int, ok bool) {
+  if val := mux.Vars(r)[name]; val != "" {
+    dRangeAndCount := strings.Split(val, ":")
+    dRange := strings.Split(dRangeAndCount[0], "-")
+    if d, err := time.ParseDuration(dRange[0]); err != nil {
+      return 0, 0, 0, false
+    } else {
+      low = d
+    }
+    if len(dRange) > 1 {
+      if d, err := time.ParseDuration(dRange[1]); err == nil {
+        if d < low {
+          high = low
+          low = d
+        } else {
+          high = d
+        }
+      }
+    } else {
+      high = low
+    }
+    if len(dRangeAndCount) > 1 {
+      if c, err := strconv.ParseInt(dRangeAndCount[1], 10, 32); err == nil {
+        if c > 0 {
+          count = int(c)
+        }
+      }
+    }
+    return low, high, count, true
+  }
+  return 0, 0, 0, false
 }
 
 func GetHeaderValues(r *http.Request) map[string]map[string]int {
@@ -706,6 +739,14 @@ func IsUTF8ContentType(r *http.Response) bool {
   return false
 }
 
+func BuildFilePath(filePath, fileName string) string {
+  if filePath != "" && !strings.HasSuffix(filePath, "/") {
+    filePath += "/"
+  }
+  filePath += fileName
+  return filePath
+}
+
 func Read(r io.Reader) string {
   if body, err := ioutil.ReadAll(r); err == nil {
     return string(body)
@@ -861,6 +902,30 @@ func ParseTrackingHeaders(headers string) ([]string, map[string][]string) {
   return trackingHeaders, crossTrackingHeaders
 }
 
+func ParseTimeBuckets(b string) ([][]int, bool) {
+  pieces := strings.Split(b, ",")
+  buckets := [][]int{}
+  var e error
+  hasError := false
+  for _, piece := range pieces {
+    bucket := strings.Split(piece, "-")
+    low := 0
+    high := 0
+    if len(bucket) == 2 {
+      if low, e = strconv.Atoi(bucket[0]); e == nil {
+        high, e = strconv.Atoi(bucket[1])
+      }
+    }
+    if e != nil || low < 0 || high < 0 || (low == 0 && high == 0) || high < low {
+      hasError = true
+      break
+    } else {
+      buckets = append(buckets, []int{low, high})
+    }
+  }
+  return buckets, !hasError
+}
+
 func BuildCrossHeadersMap(crossTrackingHeaders map[string][]string) map[string]string {
   crossHeadersMap := map[string]string{}
   for header, subheaders := range crossTrackingHeaders {
@@ -871,11 +936,31 @@ func BuildCrossHeadersMap(crossTrackingHeaders map[string][]string) map[string]s
   return crossHeadersMap
 }
 
+func Random(max int) int {
+  return random.Intn(max)
+}
+
+func Random64(max int64) int64 {
+  return random.Int63n(max)
+}
+
+func RandomDuration(min, max time.Duration) time.Duration {
+  d := min
+  if max > min {
+    addOn := max - d
+    d = d + time.Millisecond*time.Duration(Random64(addOn.Milliseconds()))
+  }
+  return d
+}
+
+func RandomFrom(vals []int) int {
+  return vals[random.Intn(len(vals))]
+}
+
 func GenerateRandomString(size int) string {
-  r := rand.New(rand.NewSource(time.Now().UnixNano()))
   b := make([]byte, size)
   for i := range b {
-    b[i] = charset[r.Intn(len(charset))]
+    b[i] = charset[Random(randomCharsetLength)]
   }
   return string(b)
 }

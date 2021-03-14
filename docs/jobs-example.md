@@ -5,7 +5,7 @@ curl -X POST http://localhost:8080/jobs/clear
 
 curl localhost:8080/jobs/add --data '
 {
-"id": "job1",
+"name": "job1",
 "task": {
 	"name": "job1",
 	"method":	"POST",
@@ -25,7 +25,7 @@ curl localhost:8080/jobs/add --data '
 
 curl -s localhost:8080/jobs/add --data '
 {
-"id": "job2",
+"name": "job2",
 "task": {
 	"cmd": "sh",
 	"args": ["-c", "printf `date +%s`; echo \" Say Hello\"; sleep 1; printf `date +%s`; echo \" Say Hi\""],
@@ -43,7 +43,7 @@ curl -s localhost:8080/jobs/add --data '
 
 curl -s localhost:8080/jobs/add --data '
 {
-"id": "job3",
+"name": "job3",
 "task": {
 	"cmd": "sh",
 	"args": ["-c", "printf `date +%s`; printf \" Output {date} {msg} Processed\"; sleep 1;"]
@@ -54,6 +54,12 @@ curl -s localhost:8080/jobs/add --data '
 "maxResults": 10,
 "delay": "1s"
 }'
+
+curl -X POST http://localhost:8080/jobs/store/file/some.conf?path=/tmp/foo/conf --data-binary @somepath/some-file.txt
+
+curl -X POST http://localhost:8080/jobs/add/script/ascriptjob --data-binary @somepath/somescript.sh
+
+curl -X POST http://localhost:8080/jobs/ascriptjob/run
 
 curl -X POST http://localhost:8080/jobs/job1,job2/remove
 
@@ -79,7 +85,7 @@ $ curl http://localhost:8080/jobs/job1/results
 {
   "1": [
     {
-      "index": "1.1.1",
+      "id": "1.1.1",
       "finished": false,
       "stopped": false,
       "last": true,
@@ -87,7 +93,7 @@ $ curl http://localhost:8080/jobs/job1/results
       "data": "1592111068 Say Hello"
     },
     {
-      "index": "1.1.2",
+      "id": "1.1.2",
       "finished": false,
       "stopped": false,
       "last": true,
@@ -95,7 +101,7 @@ $ curl http://localhost:8080/jobs/job1/results
       "data": "1592111070 Say Hi"
     },
     {
-      "index": "1.1.3",
+      "id": "1.1.3",
       "finished": true,
       "stopped": false,
       "last": true,
@@ -105,7 +111,7 @@ $ curl http://localhost:8080/jobs/job1/results
   ],
   "2": [
     {
-      "index": "2.1.1",
+      "id": "2.1.1",
       "finished": false,
       "stopped": false,
       "last": true,
@@ -113,7 +119,7 @@ $ curl http://localhost:8080/jobs/job1/results
       "data": "1592111075 Say Hello"
     },
     {
-      "index": "2.1.2",
+      "id": "2.1.2",
       "finished": false,
       "stopped": false,
       "last": true,
@@ -121,7 +127,7 @@ $ curl http://localhost:8080/jobs/job1/results
       "data": "1592111076 Say Hi"
     },
     {
-      "index": "2.1.3",
+      "id": "2.1.3",
       "finished": true,
       "stopped": false,
       "last": true,

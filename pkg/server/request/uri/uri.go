@@ -24,10 +24,10 @@ type DelayConfig struct {
 }
 
 type URIStatusConfig struct {
-  URI    string
-  Glob   bool
-  Status int
-  Times  int
+  URI      string
+  Glob     bool
+  Statuses []int
+  Times    int
 }
 
 var (
@@ -41,10 +41,10 @@ var (
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   uriRouter := util.PathRouter(r, "/uri")
-  util.AddRouteQWithPort(uriRouter, "/set/status={status}", setStatus, "uri", "{uri}", "POST")
-  util.AddRouteQWithPort(uriRouter, "/set/delay={delay}", setDelay, "uri", "{uri}", "POST")
-  util.AddRouteWithPort(uriRouter, "/counts/enable", enableURICallCounts, "POST")
-  util.AddRouteWithPort(uriRouter, "/counts/disable", disableURICallCounts, "POST")
+  util.AddRouteQWithPort(uriRouter, "/set/status={status}", setStatus, "uri", "{uri}", "POST", "PUT")
+  util.AddRouteQWithPort(uriRouter, "/set/delay={delay}", setDelay, "uri", "{uri}", "POST", "PUT")
+  util.AddRouteWithPort(uriRouter, "/counts/enable", enableURICallCounts, "POST", "PUT")
+  util.AddRouteWithPort(uriRouter, "/counts/disable", disableURICallCounts, "POST", "PUT")
   util.AddRouteWithPort(uriRouter, "/counts", getURICallCounts, "GET")
   util.AddRouteWithPort(uriRouter, "/counts/clear", clearURICallCounts, "POST")
   util.AddRouteWithPort(uriRouter, "", getURIConfigs, "GET")
@@ -80,13 +80,13 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
       matchURI = strings.ReplaceAll(uri, "*", "")
       glob = true
     }
-    if statusCode, times, statusCodePresent := util.GetStatusParam(r); statusCodePresent && statusCode > 0 {
-      uriStatusByPort[port][matchURI] = &URIStatusConfig{URI: matchURI, Glob: glob, Status: statusCode, Times: times}
+    if statusCodes, times, ok := util.GetStatusParam(r); ok && statusCodes[0] > 0 {
+      uriStatusByPort[port][matchURI] = &URIStatusConfig{URI: matchURI, Glob: glob, Statuses: statusCodes, Times: times}
       if times > 0 {
-        msg = fmt.Sprintf("Port [%s] URI [%s] status set to [%d] for next [%d] calls", port, uri, statusCode, times)
+        msg = fmt.Sprintf("Port [%s] URI [%s] status set to %d for next [%d] calls", port, uri, statusCodes, times)
         events.SendRequestEvent("URI Status Configured", msg, r)
       } else {
-        msg = fmt.Sprintf("Port [%s] URI [%s] status set to [%d] forever", port, uri, statusCode)
+        msg = fmt.Sprintf("Port [%s] URI [%s] status set to %d forever", port, uri, statusCodes)
         events.SendRequestEvent("URI Status Configured", msg, r)
       }
     } else {
@@ -233,7 +233,7 @@ func hasURIConfig(r *http.Request, uriMap map[string]map[string]interface{}) (bo
 func HasURIStatus(r *http.Request) bool {
   if present, glob, v := hasURIConfig(r, uriStatusByPort); present {
     uriStatus := v.(*URIStatusConfig)
-    return uriStatus.Status > 0 && uriStatus.Times >= 0 && (!glob || uriStatus.Glob)
+    return len(uriStatus.Statuses) > 0 && uriStatus.Statuses[0] > 0 && uriStatus.Times >= 0 && (!glob || uriStatus.Glob)
   }
   return false
 }
@@ -241,7 +241,7 @@ func HasURIStatus(r *http.Request) bool {
 func GetURIStatus(r *http.Request) *URIStatusConfig {
   if present, glob, v := hasURIConfig(r, uriStatusByPort); present {
     uriStatus := v.(*URIStatusConfig)
-    if uriStatus.Status > 0 && uriStatus.Times >= 0 && (!glob || uriStatus.Glob) {
+    if len(uriStatus.Statuses) > 0 && uriStatus.Statuses[0] > 0 && uriStatus.Times >= 0 && (!glob || uriStatus.Glob) {
       return uriStatus
     }
   }
@@ -284,7 +284,11 @@ func Middleware(next http.Handler) http.Handler {
     statusTimesLeft := 0
     uriLock.RLock()
     if uriStatus != nil {
-      statusToReport = uriStatus.Status
+      if len(uriStatus.Statuses) == 1 {
+        statusToReport = uriStatus.Statuses[0]
+      } else {
+        statusToReport = util.RandomFrom(uriStatus.Statuses)
+      }
       statusTimesLeft = uriStatus.Times
     }
     if uriDelay != nil {
@@ -334,6 +338,10 @@ func Middleware(next http.Handler) http.Handler {
       util.AddLogMessage(msg, r)
       events.SendRequestEvent("URI Status Applied", msg, r)
       irw.StatusCode = statusToReport
+      w.Header().Add("Goto-URI-Status", strconv.Itoa(statusToReport))
+      if uriStatus.Times > 0 {
+        w.Header().Add("Goto-URI-Status-Remaining", strconv.Itoa(uriStatus.Times))
+      }
     }
     if irw.StatusCode == 0 {
       irw.StatusCode = http.StatusOK

@@ -42,18 +42,18 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
 func (rf *RequestFilter) SetRoutes(filterType string, r *mux.Router) {
   rf.filterType = filterType
-  ignoreRouter := util.PathRouter(r, "/"+filterType)
-  util.AddRouteQWithPort(ignoreRouter, "/add", rf.addFilterHeaderOrURI, "uri", "{uri}", "PUT", "POST")
-  util.AddRouteWithPort(ignoreRouter, "/add/header/{header}={value}", rf.addFilterHeaderOrURI, "PUT", "POST")
-  util.AddRouteWithPort(ignoreRouter, "/add/header/{header}", rf.addFilterHeaderOrURI, "PUT", "POST")
-  util.AddRouteWithPort(ignoreRouter, "/remove/header/{header}={value}", rf.removeIgnoreHeaderOrURI, "PUT", "POST")
-  util.AddRouteWithPort(ignoreRouter, "/remove/header/{header}", rf.removeIgnoreHeaderOrURI, "PUT", "POST")
-  util.AddRouteQWithPort(ignoreRouter, "/remove", rf.removeIgnoreHeaderOrURI, "uri", "{uri}", "PUT", "POST")
-  util.AddRouteWithPort(ignoreRouter, "/set/status={status}", rf.setOrGetIgnoreStatus, "PUT", "POST")
-  util.AddRouteWithPort(ignoreRouter, "/status", rf.setOrGetIgnoreStatus)
-  util.AddRouteWithPort(ignoreRouter, "/clear", rf.clear, "PUT", "POST")
-  util.AddRouteWithPort(ignoreRouter, "/count", rf.getFilteredRequestCount, "GET")
-  util.AddRouteWithPort(ignoreRouter, "", rf.getRequestFilterConfig, "GET")
+  filterRouter := util.PathRouter(r, "/"+filterType)
+  util.AddRouteQWithPort(filterRouter, "/add", rf.addFilterHeaderOrURI, "uri", "{uri}", "PUT", "POST")
+  util.AddRouteWithPort(filterRouter, "/add/header/{header}={value}", rf.addFilterHeaderOrURI, "PUT", "POST")
+  util.AddRouteWithPort(filterRouter, "/add/header/{header}", rf.addFilterHeaderOrURI, "PUT", "POST")
+  util.AddRouteWithPort(filterRouter, "/remove/header/{header}={value}", rf.removeIgnoreHeaderOrURI, "PUT", "POST")
+  util.AddRouteWithPort(filterRouter, "/remove/header/{header}", rf.removeIgnoreHeaderOrURI, "PUT", "POST")
+  util.AddRouteQWithPort(filterRouter, "/remove", rf.removeIgnoreHeaderOrURI, "uri", "{uri}", "PUT", "POST")
+  util.AddRouteWithPort(filterRouter, "/set/status={status}", rf.setOrGetIgnoreStatus, "PUT", "POST")
+  util.AddRouteWithPort(filterRouter, "/status", rf.setOrGetIgnoreStatus)
+  util.AddRouteWithPort(filterRouter, "/clear", rf.clear, "PUT", "POST")
+  util.AddRouteWithPort(filterRouter, "/count", rf.getFilteredRequestCount, "GET")
+  util.AddRouteWithPort(filterRouter, "", rf.getRequestFilterConfig, "GET")
 }
 
 func newRequestFilter() *RequestFilter {
@@ -168,10 +168,10 @@ func (rf *RequestFilter) removeIgnoreHeaderOrURI(w http.ResponseWriter, r *http.
 
 func (rf *RequestFilter) setOrGetIgnoreStatus(w http.ResponseWriter, r *http.Request) {
   msg := ""
-  statusCode, _, present := util.GetStatusParam(r)
+  statusCodes, _, present := util.GetStatusParam(r)
   if present {
-    rf.Status = statusCode
-    msg = fmt.Sprintf("Status for %s set to [%d]", rf.filterType, statusCode)
+    rf.Status = statusCodes[0]
+    msg = fmt.Sprintf("Status for %s set to [%d]", rf.filterType, statusCodes[0])
     events.SendRequestEvent("Request Filter Status Configured", msg, r)
   } else {
     msg = fmt.Sprintf("Status for %s: %d", rf.filterType, rf.Status)

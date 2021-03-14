@@ -25,7 +25,9 @@
 | requestTimeout | duration     |30s| Timeout for HTTP requests to the target |
 | autoInvoke   | bool           |false| Whether this target should be invoked as soon as it's added |
 | fallback     | bool           |false| If enabled, retry attempts will use secondary urls (`burls`) instead of the primary url. The query param `x-request-id` will carry suffixes of `-<counter>` for each retry attempt. |
-| abMode       | bool           |false| If enabled, each request will simultaneously be sent to all secondary urls (`burls`) in addition to the primary url. The query param `x-request-id` will carry suffixes of `-B-<index>` for each secondary URL. |
+| ab      | bool           |false| If enabled, each request will simultaneously be sent to all secondary urls (`burls`) in addition to the primary url. The query param `x-request-id` will carry suffixes of `-B-<index>` for each secondary URL. |
+| random      | bool           |false| If enabled, each request will pick a random URL from either the primary URL or the B-URLs. |
+
 
 
 #### Client Results Schema (output of API /client/results)
@@ -42,17 +44,21 @@ The schema below describes fields per target.
 | retriedInvocationCounts | int | Total requests to this target that were retried at least once |
 | countsByStatus       | string->int   | Response counts by HTTP Status |
 | countsByStatusCodes  | string->int   | Response counts by HTTP Status Code |
-| countsByURIs         | string->int   | Response counts by URIs |
 | countsByHeaders      | string->HeaderCounts   | Response counts by header, with detailed info captured in `HeaderCounts` object described below |
+| countsByURIs         | string->int   | Response counts by URIs |
+| countsByTimeBuckets         | string->int   | Response counts by URIs |
 
 #### HeaderCounts schema
 
-The schema below describes fields per target.
+The schema below describes fields of HeaderCounts json (used in `countsByHeaders` result field).
 
 |Field|Data Type|Description|
 |---|---|---|
-| target            | string | Target for which these results are captured |
-| count       | CountInfo   | request counts info for this header |
+| header            | string | Header for which these results are captured |
+| count       | int | number of responses for this header  |
+| retries     | int | number of requests that were retried for this header |
+| firstResponse | time | Time of first response for this header  |
+| lastResponse  | time | Time of last response for this header |
 | countsByValues | string->CountInfo   | request counts info per header value for this header |
 | countsByStatusCodes | int->CountInfo   | request counts info per status code for this header |
 | countsByValuesStatusCodes | string->int->CountInfo   | request counts info per status code per header value for this header |
@@ -61,13 +67,53 @@ The schema below describes fields per target.
 | firstResponse        | time | Time of first response received for this header |
 | lastResponse         | time | Time of last response received for this header |
 
+
+#### URICounts schema
+
+The schema below describes fields of json object used in `countsByURIs` result field.
+
+|Field|Data Type|Description|
+|---|---|---|
+| count       | int | number of responses for this uri  |
+| retries     | int | number of requests that were retried for this uri |
+| firstResponse | time | Time of first response for this uri  |
+| lastResponse  | time | Time of last response for this uri |
+| countsByStatusCodes | string->StatusCodeCounts   | counts for this uri broken down by status codes |
+| countsByTimeBuckets | string->TimeBucketsCounts   | counts for this uri broken down by response time buckets |
+
+#### StatusCodeCounts schema
+
+The schema below describes fields of json object used in `countsByStatusCodes` result field.
+
+|Field|Data Type|Description|
+|---|---|---|
+| count       | int | number of responses for this status code  |
+| retries     | int | number of requests that were retried for this status code |
+| firstResponse | time | Time of first response for this status code  |
+| lastResponse  | time | Time of last response for this status code |
+| countsByTimeBuckets | string->TimeBucketsCounts   | counts for this status code broken down by response time buckets (except when the status code counts is already a sub-result of time bucket counts) |
+
+
+#### TimeBucketsCounts schema
+
+The schema below describes fields of json object used in `countsByTimeBuckets` result field.
+
+|Field|Data Type|Description|
+|---|---|---|
+| count       | int | number of responses for this time bucket  |
+| retries     | int | number of requests that were retried for this time bucket |
+| firstResponse | time | Time of first response for this time bucket  |
+| lastResponse  | time | Time of last response for this time bucket |
+| countsByStatusCodes | string->StatusCodeCounts   | counts for this time bucket broken down by status codes (except when the time bucket counts is already a sub-result of status code counts) |
+
+
 #### CountInfo schema
 
 The schema below describes fields per target.
 
 |Field|Data Type|Description|
 |---|---|---|
-| value       | int | number of responses in this set  |
+| count       | int | number of responses in this set  |
 | retries     | int | number of requests that were retried in this set |
 | firstResponse | time | Time of first response in this set  |
 | lastResponse  | time | Time of last response received in this set |

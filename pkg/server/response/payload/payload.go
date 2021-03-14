@@ -4,11 +4,11 @@ import (
   "context"
   "fmt"
   "goto/pkg/events"
+  "goto/pkg/server/conn"
   "goto/pkg/server/intercept"
   "goto/pkg/util"
   "io"
   "io/ioutil"
-  "net"
   "net/http"
   "regexp"
   "strconv"
@@ -463,8 +463,8 @@ func respondWithPayload(w http.ResponseWriter, r *http.Request) {
 func streamResponse(w http.ResponseWriter, r *http.Request) {
   size := util.GetSizeParam(r, "size")
   chunk := util.GetSizeParam(r, "chunk")
-  duration := util.GetDurationParam(r, "duration")
-  delay := util.GetDurationParam(r, "delay")
+  durMin, durMax, _, _ := util.GetDurationParam(r, "duration")
+  delayMin, delayMax, _, _ := util.GetDurationParam(r, "delay")
   count := util.GetIntParamValue(r, "count")
   repeat := false
   payload := ""
@@ -476,7 +476,8 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
     contentType = pr.DefaultResponsePayload.ContentType
   }
   pr.lock.RUnlock()
-
+  duration := util.RandomDuration(durMin, durMax)
+  delay := util.RandomDuration(delayMin, delayMax)
   if duration > 0 {
     count = int((duration.Milliseconds() / delay.Milliseconds()))
   }
@@ -516,28 +517,22 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Goto-Stream-Duration", duration.String())
   }
 
-  var conn net.Conn
   var flusher http.Flusher
   var writer io.Writer
-  if h, ok := w.(http.Hijacker); ok {
-    if conn, _, _ = h.Hijack(); conn != nil {
-      conn.SetWriteDeadline(time.Time{})
-      writer = conn
+  if f, ok := w.(http.Flusher); ok {
+    flusher = f
+    if irw, ok := w.(*intercept.InterceptResponseWriter); ok {
+      irw.SetChunked()
     }
-  }
-  if conn == nil {
-    if f, ok := w.(http.Flusher); ok {
-      flusher = f
-      if irw, ok := w.(*intercept.InterceptResponseWriter); ok {
-        irw.SetChunked()
-      }
-      writer = w
-    }
+    writer = w
   }
   if writer == nil && flusher == nil {
     w.WriteHeader(http.StatusInternalServerError)
     fmt.Fprintln(w, "Cannot stream")
     return
+  }
+  if c := conn.GetConn(r); c != nil {
+    c.SetWriteDeadline(time.Time{})
   }
   util.AddLogMessage("Responding with streaming payload", r)
   payloadIndex := 0
@@ -568,9 +563,6 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
     if i < count-1 {
       time.Sleep(delay)
     }
-  }
-  if conn != nil {
-    conn.Close()
   }
 }
 

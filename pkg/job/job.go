@@ -9,8 +9,10 @@ import (
   "goto/pkg/global"
   "goto/pkg/invocation"
   "goto/pkg/util"
+  "io/ioutil"
   "log"
   "net/http"
+  "os"
   "os/exec"
   "strconv"
   "strings"
@@ -34,7 +36,7 @@ type HttpJobTask struct {
 }
 
 type JobResult struct {
-  Index      string      `json:"index"`
+  ID         string      `json:"id"`
   Finished   bool        `json:"finished"`
   Stopped    bool        `json:"stopped"`
   Last       bool        `json:"last"`
@@ -43,7 +45,7 @@ type JobResult struct {
 }
 
 type JobRunContext struct {
-  index       int
+  id          int
   finished    bool
   stopped     bool
   stopChannel chan bool
@@ -56,7 +58,7 @@ type JobRunContext struct {
 }
 
 type Job struct {
-  ID            string        `json:"id"`
+  Name          string        `json:"name"`
   Task          interface{}   `json:"task"`
   Auto          bool          `json:"auto"`
   Delay         string        `json:"delay"`
@@ -84,12 +86,15 @@ type JobManager struct {
 
 var (
   Handler = util.ServerHandler{Name: "jobs", SetRoutes: SetRoutes}
-  Jobs    = &JobManager{}
+  Jobs    = newJobManager()
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   jobsRouter := r.PathPrefix("/jobs").Subrouter()
-  util.AddRoute(jobsRouter, "/add", addJob, "POST")
+  util.AddRoute(jobsRouter, "/add", addJob, "POST", "PUT")
+  util.AddRoute(jobsRouter, "/add/script/{name}", storeJobScriptOrFile, "POST", "PUT")
+  util.AddRouteQ(jobsRouter, "/store/file/{name}", storeJobScriptOrFile, "path", "{path}", "POST", "PUT")
+  util.AddRoute(jobsRouter, "/store/file/{name}", storeJobScriptOrFile, "POST", "PUT")
   util.AddRoute(jobsRouter, "/{jobs}/remove", removeJob, "POST")
   util.AddRoute(jobsRouter, "/clear", clearJobs, "POST")
   util.AddRoute(jobsRouter, "/{jobs}/run", runJobs, "POST")
@@ -98,7 +103,14 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(jobsRouter, "/stop/all", stopJobs, "POST")
   util.AddRoute(jobsRouter, "/{job}/results", getJobResults, "GET")
   util.AddRoute(jobsRouter, "/results", getJobResults, "GET")
+  util.AddRoute(jobsRouter, "/results/clear", clearJobResults, "POST")
   util.AddRoute(jobsRouter, "", getJobs, "GET")
+}
+
+func newJobManager() *JobManager {
+  j := &JobManager{}
+  j.init()
+  return j
 }
 
 func (jm *JobManager) init() {
@@ -111,11 +123,32 @@ func (jm *JobManager) init() {
 func (jm *JobManager) AddJob(job *Job) {
   jm.lock.Lock()
   defer jm.lock.Unlock()
-  jm.jobs[job.ID] = job
+  jm.jobs[job.Name] = job
+  delete(jm.jobRuns, job.Name)
   if job.Auto {
-    log.Printf("Auto-invoking Job: %s\n", job.ID)
+    log.Printf("Auto-invoking Job: %s\n", job.Name)
     go jm.RunJob(job)
   }
+}
+
+func (jm *JobManager) StoreJobScriptOrFile(filePath, fileName string, content []byte, scriptJob bool) (string, bool) {
+  if fileName != "" {
+    if _, err := os.Stat(filePath); os.IsNotExist(err) {
+      os.MkdirAll(filePath, os.ModePerm)
+    }    
+    filePath = util.BuildFilePath(filePath, fileName)
+    if err := ioutil.WriteFile(filePath, content, 0777); err == nil {
+      if scriptJob {
+        task := &CommandJobTask{Cmd: filePath}
+        job := &Job{Name: fileName, Task: task, commandTask: task, Count: 1, KeepResults: 3}
+        Jobs.AddJob(job)
+      }
+      return filePath, true
+    } else {
+      fmt.Printf("Failed to store job file [%s] with error: %s\n", filePath, err.Error())
+    }
+  }
+  return "", false
 }
 
 func (jm *JobManager) removeJobs(jobs []string) {
@@ -127,6 +160,7 @@ func (jm *JobManager) removeJobs(jobs []string) {
       job.lock.Lock()
       defer job.lock.Unlock()
       delete(jm.jobs, j)
+      delete(jm.jobRuns, j)
     }
   }
 }
@@ -142,9 +176,9 @@ func (jm *JobManager) getJobResults(name string) map[int][]interface{} {
   if job != nil && jobRuns != nil {
     for _, jobRun := range jobRuns {
       jobRun.lock.RLock()
-      results[jobRun.index] = []interface{}{}
+      results[jobRun.id] = []interface{}{}
       for _, r := range jobRun.jobResults {
-        results[jobRun.index] = append(results[jobRun.index], r)
+        results[jobRun.id] = append(results[jobRun.id], r)
       }
       jobRun.lock.RUnlock()
     }
@@ -158,12 +192,12 @@ func (jm *JobManager) getAllJobsResults() map[string]map[int][]interface{} {
   defer jm.lock.RUnlock()
   for _, job := range jm.jobs {
     job.lock.RLock()
-    results[job.ID] = map[int][]interface{}{}
-    for _, jobRun := range jm.jobRuns[job.ID] {
+    results[job.Name] = map[int][]interface{}{}
+    for _, jobRun := range jm.jobRuns[job.Name] {
       jobRun.lock.RLock()
-      results[job.ID][jobRun.index] = []interface{}{}
+      results[job.Name][jobRun.id] = []interface{}{}
       for _, r := range jobRun.jobResults {
-        results[job.ID][jobRun.index] = append(results[job.ID][jobRun.index], r)
+        results[job.Name][jobRun.id] = append(results[job.Name][jobRun.id], r)
       }
       jobRun.lock.RUnlock()
     }
@@ -172,7 +206,7 @@ func (jm *JobManager) getAllJobsResults() map[string]map[int][]interface{} {
   return results
 }
 
-func (jm *JobManager) getJobsToRun(names []string) []*Job {
+func (jm *JobManager) getJobsToRun(names []string) ([]string, []*Job) {
   jm.lock.RLock()
   defer jm.lock.RUnlock()
   var jobsToRun []*Job
@@ -186,10 +220,11 @@ func (jm *JobManager) getJobsToRun(names []string) []*Job {
     if len(jm.jobs) > 0 {
       for _, job := range jm.jobs {
         jobsToRun = append(jobsToRun, job)
+        names = append(names, job.Name)
       }
     }
   }
-  return jobsToRun
+  return names, jobsToRun
 }
 
 func storeJobResultsInRegistryLocker(jobID string, runIndex int, jobResults []*JobResult) {
@@ -205,15 +240,15 @@ func storeJobResultsInRegistryLocker(jobID string, runIndex int, jobResults []*J
 
 func storeJobResult(job *Job, jobRun *JobRunContext, iteration int, data interface{}, last bool) {
   job.lock.RLock()
-  jobID := job.ID
+  jobID := job.Name
   keepResults := job.KeepResults
   keepFirst := job.KeepFirst
   job.lock.RUnlock()
   jobRun.lock.Lock()
   defer jobRun.lock.Unlock()
   jobRun.resultCount++
-  index := strconv.Itoa(jobRun.index) + "." + strconv.Itoa(iteration) + "." + strconv.Itoa(jobRun.resultCount)
-  jobResult := &JobResult{Index: index, Last: last, Stopped: jobRun.stopped,
+  index := strconv.Itoa(jobRun.id) + "." + strconv.Itoa(iteration) + "." + strconv.Itoa(jobRun.resultCount)
+  jobResult := &JobResult{ID: index, Last: last, Stopped: jobRun.stopped,
     Finished: jobRun.finished, ResultTime: time.Now(), Data: data}
   jobRun.jobResults = append(jobRun.jobResults, jobResult)
   if len(jobRun.jobResults) > keepResults {
@@ -223,7 +258,7 @@ func storeJobResult(job *Job, jobRun *JobRunContext, iteration int, data interfa
       jobRun.jobResults = jobRun.jobResults[1:]
     }
   }
-  storeJobResultsInRegistryLocker(jobID, jobRun.index, jobRun.jobResults)
+  storeJobResultsInRegistryLocker(jobID, jobRun.id, jobRun.jobResults)
 
 }
 
@@ -303,21 +338,24 @@ Done:
   for {
     select {
     case <-time.After(job.Timeout):
-      stopCommand()
-      break Done
+      if job.Timeout > 0 {
+        stopCommand()
+        break Done
+      }
     case <-stopChannel:
       stopCommand()
       break Done
     case <-doneChannel:
       break Done
     case out := <-outputChannel:
-      if resultCount < maxResults {
+      if maxResults == 0 || resultCount < maxResults {
         if out != "" {
           resultCount++
           storeJobResult(job, jobRun, iteration, out, last)
           if outputTrigger != "" {
-            markers := prepareMarkers(out, commandTask, jobRun)
-            go jm.runJobWithInput(outputTrigger, markers)
+            if markers := prepareMarkers(out, commandTask, jobRun); len(markers) > 0 {
+              go jm.runJobWithInput(outputTrigger, markers)
+            }
           }
         }
       } else {
@@ -495,8 +533,8 @@ func (jm *JobManager) executeJobRun(job *Job, jobRun *JobRunContext) {
   }
   job.lock.Unlock()
 
-  log.Printf("job [%s] Run [%d] Started \n", job.ID, jobRun.index)
-  events.SendEventJSON(Jobs_JobStarted, job.ID, map[string]interface{}{"job": job, "jobRun": jobRun.index})
+  log.Printf("job [%s] Run [%d] Started \n", job.Name, jobRun.id)
+  events.SendEventJSON(Jobs_JobStarted, job.Name, map[string]interface{}{"job": job, "jobRun": jobRun.id})
 
   time.Sleep(initialDelay)
   for i := 0; i < count; i++ {
@@ -517,7 +555,7 @@ func (jm *JobManager) executeJobRun(job *Job, jobRun *JobRunContext) {
   jobRun.lock.Lock()
   close(jobRun.stopChannel)
   close(jobRun.doneChannel)
-  msg := fmt.Sprintf("job [%s] Run [%d] Finished", job.ID, jobRun.index)
+  msg := fmt.Sprintf("job [%s] Run [%d] Finished", job.Name, jobRun.id)
   log.Println(msg)
   events.SendEvent(Jobs_JobFinished, msg)
   jobRun.lock.Unlock()
@@ -532,22 +570,25 @@ func (jm *JobManager) initJobRun(job *Job, jobArgs []string, markers map[string]
   if job == nil || (job.commandTask == nil && job.httpTask == nil) {
     return nil
   }
-  jm.lock.Lock()
-  defer jm.lock.Unlock()
-  job.lock.Lock()
-  defer job.lock.Unlock()
-  job.jobRunCounter++
   jobRun := &JobRunContext{}
   jobRun.jobResults = []*JobResult{}
-  jobRun.index = job.jobRunCounter
   jobRun.jobArgs = jobArgs
   jobRun.markers = markers
   jobRun.stopChannel = make(chan bool, 10)
   jobRun.doneChannel = make(chan bool, 10)
-  if jm.jobRuns[job.ID] == nil {
-    jm.jobRuns[job.ID] = map[int]*JobRunContext{}
+
+  job.lock.Lock()
+  job.jobRunCounter++
+  jobRun.id = job.jobRunCounter
+  job.lock.Unlock()
+
+  jm.lock.Lock()
+  if jm.jobRuns[job.Name] == nil {
+    jm.jobRuns[job.Name] = map[int]*JobRunContext{}
   }
-  jm.jobRuns[job.ID][job.jobRunCounter] = jobRun
+  jm.jobRuns[job.Name][job.jobRunCounter] = jobRun
+  jm.lock.Unlock()
+
   return jobRun
 }
 
@@ -588,7 +629,7 @@ func (jm *JobManager) stopJob(j string) bool {
       jobRun.stopChannel <- true
     }
     jobRun.lock.Unlock()
-    events.SendEventJSON(Jobs_JobStopped, job.ID, job)
+    events.SendEventJSON(Jobs_JobStopped, job.Name, job)
   }
   return true
 }
@@ -600,7 +641,8 @@ func (jm *JobManager) stopJobs(jobs []string) {
 }
 
 func RunJobs(jobs []string, port int) {
-  Jobs.runJobs(Jobs.getJobsToRun(jobs))
+  _, jobsToRun := Jobs.getJobsToRun(jobs)
+  Jobs.runJobs(jobsToRun)
 }
 
 func StopJob(job string, port int) bool {
@@ -617,12 +659,37 @@ func addJob(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if job, err := ParseJob(r); err == nil {
     Jobs.AddJob(job)
-    msg = fmt.Sprintf("Added Job: %s\n", util.ToJSON(job))
-    events.SendRequestEventJSON(Jobs_JobAdded, job.ID, job, r)
-    w.WriteHeader(http.StatusOK)
+    msg = fmt.Sprintf("Added Job: %s", util.ToJSON(job))
+    events.SendRequestEventJSON(Jobs_JobAdded, job.Name, job, r)
   } else {
     w.WriteHeader(http.StatusBadRequest)
-    msg = fmt.Sprintf("Failed to add job with error: %s\n", err.Error())
+    msg = fmt.Sprintf("Failed to add job with error: %s", err.Error())
+  }
+  fmt.Fprintln(w, msg)
+  util.AddLogMessage(msg, r)
+}
+
+func storeJobScriptOrFile(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  name := util.GetStringParamValue(r, "name")
+  path := util.GetStringParamValue(r, "path")
+  content := util.ReadBytes(r.Body)
+  script := strings.Contains(r.RequestURI, "script")
+
+  if script || path == "" {
+    path, _ = os.Getwd()
+  }
+  if path, ok := Jobs.StoreJobScriptOrFile(path, name, content, script); ok {
+    if script {
+      msg = fmt.Sprintf("Stored Job Script [%s] at path [%s]", name, path)
+      events.SendRequestEvent(Jobs_JobScriptStored, msg, r)
+    } else {
+      msg = fmt.Sprintf("Stored File [%s] at path [%s]", name, path)
+      events.SendRequestEvent(Jobs_JobFileStored, msg, r)
+    }
+  } else {
+    msg = fmt.Sprintf("Failed to store Job file [%s] at path [%s]", name, path)
+    w.WriteHeader(http.StatusBadRequest)
   }
   fmt.Fprintln(w, msg)
   util.AddLogMessage(msg, r)
@@ -632,22 +699,12 @@ func removeJob(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if jobs, present := util.GetListParam(r, "jobs"); present {
     Jobs.removeJobs(jobs)
-    w.WriteHeader(http.StatusOK)
-    msg = fmt.Sprintf("Jobs Removed: %s\n", jobs)
+    msg = fmt.Sprintf("Jobs Removed: %s", jobs)
     events.SendRequestEventJSON(Jobs_JobsRemoved, util.GetStringParamValue(r, "jobs"), jobs, r)
   } else {
     w.WriteHeader(http.StatusNotAcceptable)
     msg = "No jobs"
   }
-  fmt.Fprintln(w, msg)
-  util.AddLogMessage(msg, r)
-}
-
-func clearJobs(w http.ResponseWriter, r *http.Request) {
-  Jobs.init()
-  w.WriteHeader(http.StatusOK)
-  msg := "Jobs Cleared"
-  events.SendRequestEvent(msg, "", r)
   fmt.Fprintln(w, msg)
   util.AddLogMessage(msg, r)
 }
@@ -660,11 +717,10 @@ func getJobs(w http.ResponseWriter, r *http.Request) {
 func runJobs(w http.ResponseWriter, r *http.Request) {
   msg := ""
   names, _ := util.GetListParam(r, "jobs")
-  jobsToRun := Jobs.getJobsToRun(names)
+  jobNames, jobsToRun := Jobs.getJobsToRun(names)
   if len(jobsToRun) > 0 {
     Jobs.runJobs(jobsToRun)
-    w.WriteHeader(http.StatusOK)
-    msg = fmt.Sprintf("Jobs %+v started\n", names)
+    msg = fmt.Sprintf("Jobs %+v started", jobNames)
   } else {
     w.WriteHeader(http.StatusNotAcceptable)
     msg = "No jobs to run"
@@ -683,8 +739,25 @@ func stopJobs(w http.ResponseWriter, r *http.Request) {
   }
   Jobs.lock.RUnlock()
   Jobs.stopJobs(jobs)
-  w.WriteHeader(http.StatusOK)
-  msg := fmt.Sprintf("Jobs %+v stopped\n", jobs)
+  msg := fmt.Sprintf("Jobs %+v stopped", jobs)
+  fmt.Fprintln(w, msg)
+  util.AddLogMessage(msg, r)
+}
+
+func clearJobs(w http.ResponseWriter, r *http.Request) {
+  Jobs.init()
+  msg := "Jobs Cleared"
+  events.SendRequestEvent(Jobs_JobsCleared, "", r)
+  fmt.Fprintln(w, msg)
+  util.AddLogMessage(msg, r)
+}
+
+func clearJobResults(w http.ResponseWriter, r *http.Request) {
+  msg := "Job Results Cleared"
+  events.SendRequestEvent(Jobs_JobResultsCleared, "", r)
+  Jobs.lock.Lock()
+  Jobs.jobRuns = map[string]map[int]*JobRunContext{}
+  Jobs.lock.Unlock()
   fmt.Fprintln(w, msg)
   util.AddLogMessage(msg, r)
 }
@@ -698,7 +771,6 @@ func getJobResults(w http.ResponseWriter, r *http.Request) {
     msg = "Results reported for all jobs"
     util.WriteJsonPayload(w, Jobs.getAllJobsResults())
   }
-  w.WriteHeader(http.StatusOK)
   util.AddLogMessage(msg, r)
 }
 

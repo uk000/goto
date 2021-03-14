@@ -398,10 +398,13 @@ As a client tool, `goto` offers the feature to configure multiple targets and se
 - Headers can be set to track results for target invocations, and APIs make those results available for consumption as JSON output.
 - Retry requests for specific response codes, and option to use a fallback URL for retries
 - Make simultaneous calls to two URLs to perform an A-B comparison of responses. In AB mode, the same request ID (enabled via sendID flag) are used for both A and B calls, but with a suffix `-B` used for B calls. This allows tracking the A and B calls in logs.
+- Have client invoke a random URL for each request from a set of URLs
 
 The invocation results get accumulated across multiple invocations until cleared explicitly. Various results APIs can be used to read the accumulated results. Clearing of all results resets the invocation counter too, causing the next invocation to start at counter 1 again. When a peer is connected to a registry instance, it stores all its invocation results in a registry locker. The peer publishes its invocation results to the registry at an interval of 3-5 seconds depending on the flow of results. See Registry APIs for detail on how to query results accumulated from multiple peers.
 
 In addition to keeping the results in the `goto` client instance, those are also stored in locker on registry instance if enabled. (See `--locker` command arg). Various events are added to the peer timeline related to target invocations it performs, which are also reported to the registry. These events can be seen in the event timeline on the peer instance as well as its event timeline from the registry.
+
+Client sends header `From-Goto-Host` to pass its identity to the server.
 
 
 # <a name="client-apis"></a>
@@ -419,11 +422,13 @@ In addition to keeping the results in the `goto` client instance, those are also
 | GET       |	/client/targets/active                | Get list of currently active (running) targets |
 | POST      |	/client/targets/cacert/add            | Store CA cert to use for all target invocations |
 | POST      |	/client/targets/cacert/remove         | Remove stored CA cert |
-| PUT, POST |	/client/track/headers/add/`{headers}`   | Add headers for tracking response counts per target |
-| PUT, POST |	/client/track/headers/remove/`{header}`| Remove header (single) from tracking set |
+| PUT, POST |	/client/track/headers/`{headers}`   | Add headers for tracking response counts per target |
 | POST      | /client/track/headers/clear           | Remove all tracked headers |
 | GET       |	/client/track/headers                 | Get list of tracked headers |
-| GET       |	/client/results                       | Get combined results for all invocations since last time results were cleared. See [`Results Schema`](#client-results-schema) |
+| PUT, POST |	/client/track/time/`{buckets}`   | Add time buckets for tracking response counts per bucket. Buckets are added as a comma-separated list of `low-high` values in millis, e.g. `0-100,101-300,301-1000` |
+| POST      | /client/track/time/clear           | Remove all tracked time buckets |
+| GET       |	/client/track/time                 | Get list of tracked time buckets |
+| GET       |	/client/results                       | Get combined results for all invocations since last time results were cleared. |
 | GET       |	/client/results/invocations           | Get invocation results broken down for each invocation that was triggered since last time results were cleared |
 | POST      | /client/results/clear                 | Clear previously accumulated invocation results |
 | POST      | /client/results/clear                 | Clear previously accumulated invocation results |
@@ -438,8 +443,9 @@ In addition to keeping the results in the `goto` client instance, those are also
 - `Targets Removed`: one or more invocation targets were removed
 - `Targets Cleared`: all invocation targets were removed
 - `Tracking Headers Added`: headers added for tracking against invocation responses
-- `Tracking Headers Removed`: one or more tracking headers were removed
 - `Tracking Headers Cleared`: all tracking headers were removed
+- `Tracking Time Buckets Added`: time buckets added for tracking against invocation responses
+- `Tracking Time Buckets Cleared`: all tracking time buckets were removed
 - `Client CA Cert Stored`: CA cert was added for validating TLS cert presented by target
 - `Client CA Cert Removed`: CA cert was removed
 - `Results Cleared`: all collected invocation results were cleared
@@ -485,9 +491,9 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 - `Goto-Port`: carries the port number on which the request was received
 - `Goto-Protocol`: identifies whether the request was received over `HTTP` or `HTTPS`
 - `Goto-Remote-Address`: remote client's address as visible to `goto`
-- `Goto-In-Nanos`: Timestamp in nanoseconds when the request was received by `goto`
-- `Goto-Out-Nanos`: Timestamp in nanoseconds when `goto` finished processing the request and sent a response
-- `Goto-Took-Nanos`: Total processing time in nanoseconds taken by `goto` to process the request
+- `Goto-In-At`: UTC timestamp when the request was received by `goto`
+- `Goto-Out-At`: UTC timestamp when `goto` finished processing the request and sent a response
+- `Goto-Took`: Total processing time taken by `goto` to process the request
 
 `Goto` adds the following response headers conditionally:
 
@@ -495,8 +501,9 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 - `Goto-Payload-Length`, `Goto-Payload-Content-Type`: set if `goto` sent a configured response payload
 - `Goto-Chunk-Count`, `Goto-Chunk-Length`, `Goto-Chunk-Delay`, `Goto-Stream-Length`, `Goto-Stream-Duration`: set when client requests a streaming response
 - `Goto-Requested-Status`: set when `/status` API request is made requesting a specific status
-- `Goto-Response-Status`: set on all responses, carrying the HTTP response status code that `goto` has set to the response
-- `Goto-Forced-Status`, `Goto-Forced-Status-Remaining`: set when a configured custom response status is applied to a response
+- `Goto-Response-Status`: set for all non-admin requests, carrying the HTTP response status code that `goto` has set to the response
+- `Goto-Forced-Status`, `Goto-Forced-Status-Remaining`: set when a configured custom response status is applied to a response that didn't have a URI-specific response status
+- `Goto-URI-Status`, `Goto-URI-Status-Remaining`: set when a configured custom response status is applied to a uri
 - `Goto-Filtered-Request`: set when a request is filtered due to a configured `ignore` or `bypass` filter
 - `Request-*`: prefix is added to all request headers and the request headers are sent back as response headers
 - `Readiness-Request-*`: prefix is added to all request headers for Readiness probe requests
@@ -1086,8 +1093,8 @@ Note: To configure server to respond with custom/random response payloads for sp
 
 |METHOD|URI|Description|
 |---|---|---|
-|POST     |	/request/uri/set/status={status:count}?uri=`{uri}` | Set forced response status to respond with for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls |
-|POST     |	/request/uri/set/delay={delay:count}?uri=`{uri}` | Set forced delay for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls |
+|POST     |	/request/uri/set/status={status:count}?uri=`{uri}` | Set forced response status to respond with for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used each time. |
+|POST     |	/request/uri/set/delay={delay:count}?uri=`{uri}` | Set forced delay for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range each time. |
 |GET      |	/request/uri/counts                     | Get request counts for all URIs |
 |POST     |	/request/uri/counts/enable              | Enable tracking request counts for all URIs |
 |POST     |	/request/uri/counts/disable             | Disable tracking request counts for all URIs |
@@ -1112,9 +1119,9 @@ Note: To configure server to respond with custom/random response payloads for sp
 <summary>API Examples</summary>
 
 ```
-curl -X POST localhost:8080/request/uri/set/status=418:2?uri=/foo
+curl -X POST localhost:8080/request/uri/set/status=418,401,404:2?uri=/foo
 
-curl -X POST localhost:8080/request/uri/set/delay=1s:2?uri=/foo
+curl -X POST localhost:8080/request/uri/set/delay=1s-3s:2?uri=/foo
 
 curl localhost:8080/request/uri/counts
 
@@ -1324,7 +1331,7 @@ When a delay is applied to a request, the response carries a header `Response-De
 
 |METHOD|URI|Description|
 |---|---|---|
-| PUT, POST | /response/delay/set/{delay} | Set a delay for non-management requests (i.e. runtime traffic) |
+| PUT, POST | /response/delay/set/{delay} | Set a delay for non-management requests (i.e. runtime traffic). `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range each time. |
 | PUT, POST | /response/delay/clear       | Remove currently set delay |
 | GET       |	/response/delay             | Get currently set delay |
 
@@ -1341,7 +1348,7 @@ When a delay is applied to a request, the response carries a header `Response-De
 ```
 curl -X POST localhost:8080/response/delay/clear
 
-curl -X PUT localhost:8080/response/delay/set/2s
+curl -X PUT localhost:8080/response/delay/set/1s-3s
 
 curl localhost:8080/response/delay
 ```
@@ -1559,24 +1566,24 @@ Stream responses carry following headers:
 #### API
 |METHOD|URI|Description|
 |---|---|---|
-| GET, PUT, POST  |	/stream/payload=`{size}`<br/>/duration={duration}<br/>/delay={delay} | Respond with a payload of given size delivered over the given duration with given delay per chunk |
-| GET, PUT, POST  |	/stream/chunksize={chunk}<br/>/duration={duration}<br/>/delay={delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered over the given duration with given delay per chunk |
-| GET, PUT, POST  |	/stream/chunksize={chunk}<br/>/count={count}/delay={delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered the given count of times with given delay per chunk|
-| GET, PUT, POST  |	/stream/duration={duration}<br/>/delay={delay} | Respond with pre-configured default payload split into enough chunks to spread out over the given duration with given delay per chunk. This URI requires a default payload to be set via payload API. |
-| GET, PUT, POST  |	/stream/count={count}/delay={delay} | Respond with pre-configured default payload split into given count of chunks with given delay per chunk. This URI requires a default payload to be set via payload API. |
+| GET, PUT, POST  |	/stream/payload=`{size}`<br/>/duration={duration}<br/>/delay={delay} | Respond with a payload of given size delivered over the given duration with given delay per chunk. Both `duration` and `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
+| GET, PUT, POST  |	/stream/chunksize={chunk}<br/>/duration={duration}<br/>/delay={delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered over the given duration with given delay per chunk. Both `duration` and `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
+| GET, PUT, POST  |	/stream/chunksize={chunk}<br/>/count={count}/delay={delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered the given count of times with given delay per chunk. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
+| GET, PUT, POST  |	/stream/duration={duration}<br/>/delay={delay} | Respond with pre-configured default payload split into enough chunks to spread out over the given duration with given delay per chunk. This URI requires a default payload to be set via payload API. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
+| GET, PUT, POST  |	/stream/count={count}/delay={delay} | Respond with pre-configured default payload split into given count of chunks with given delay per chunk. This URI requires a default payload to be set via payload API. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
 
 #### Stream Response API Example
 <details>
 <summary>API Examples</summary>
 
 ```
-curl -v --no-buffer localhost:8080/stream/payload=10K/duration=15s/delay=1s
+curl -v --no-buffer localhost:8080/stream/payload=10K/duration=5s-15s/delay=100ms-1s
 
-curl -v --no-buffer localhost:8080/stream/chunksize=100/duration=5s/delay=500ms
+curl -v --no-buffer localhost:8080/stream/chunksize=100/duration=5s/delay=500ms-2s
 
 curl -v --no-buffer localhost:8080/stream/chunksize=100/count=5/delay=200ms
 
-curl -v --no-buffer localhost:8080/stream/duration=5s/delay=100ms
+curl -v --no-buffer localhost:8080/stream/duration=5s/delay=100ms-300ms
 
 curl -v --no-buffer localhost:8080/stream/count=10/delay=300ms
 ```
@@ -1596,7 +1603,7 @@ This feature allows setting a forced response status for all requests except byp
 
 |METHOD|URI|Description|
 |---|---|---|
-| PUT, POST | /response/status/set/`{status}`     | Set a forced response status that all non-proxied and non-management requests will be responded with |
+| PUT, POST | /response/status/set/`{status}`     | Set a forced response status that all non-proxied and non-management requests will be responded with. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used each time. |
 | PUT, POST |	/response/status/clear            | Remove currently configured forced response status, so that all subsequent calls will receive their original deemed response |
 | PUT, POST | /response/status/counts/clear     | Clear counts tracked for response statuses |
 | GET       |	/response/status/counts/`{status}`  | Get request counts for a given status |
@@ -1720,11 +1727,14 @@ The URI `/status/`{status}`` allows client to ask for a specific status as respo
 #### API
 |METHOD|URI|Description|
 |---|---|---|
-| GET       |	/status/`{status}`                  | This call either receives the given status, or the forced response status if one is set |
+| GET       |	/status/`{status}` | This call either receives the given status, or the forced response status if one is set. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used. |
+| GET       |	/status/`{status}`/delay/`{delay}` | In addition to requesting a status as above, this API also allows a delay to be applied. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
 
 #### Status API Example
 ```
-curl -I  localhost:8080/status/418
+curl -I  localhost:8080/status/501,502,503
+
+curl -v  localhost:8080/status/501,502,503/delay/100ms-1s
 ```
 
 ###### <small> [Back to TOC](#toc) </small>
@@ -1739,11 +1749,12 @@ When a delay is passed to this API, the response carries a header `Response-Dela
 #### API
 |METHOD|URI|Description|
 |---|---|---|
-| GET, POST, PUT, OPTIONS, HEAD |	/delay/{delay} | Responds after the given delay |
+| GET, POST, PUT, OPTIONS, HEAD |	/delay/{delay} | Responds after the given delay. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
 
 #### Delay API Example
 ```
 curl -I  localhost:8080/delay/2s
+curl -v  localhost:8080/delay/100ms-2s
 ```
 
 ###### <small> [Back to TOC](#toc) </small>
@@ -1915,15 +1926,19 @@ Jobs can also trigger another job for each line of output produced, as well as u
 #### Jobs APIs
 |METHOD|URI|Description|
 |---|---|---|
-| POST  |	/jobs/add           | Add a job. See [Job JSON Schema](#job-json-schema) |
-| POST  | /jobs/`{jobs}`/remove | Remove given jobs by name |
+| POST, PUT  |	/jobs/add     | Add a job. See [Job JSON Schema](#job-json-schema) |
+| POST, PUT  |	/jobs/add/script/`{name}` | Add a shell script to be executed as a job, by storing the request body as script content under given filename at the current working directory of the `goto` process. Also creates a default job with the same name to provide a ready-to-use way to execute the script. |
+| POST, PUT  |	/jobs/store/file/`{name}` | Store request body as a file at the current working directory of the `goto` process. Filed saved with mode `777`.|
+| POST, PUT  |	/jobs/store/file/`{name}`?path=`{path}` | Store request body as a file at the given path with mode `777`. |
+| POST  | /jobs/`{jobs}`/remove | Remove given jobs by name, and clears its results |
 | POST  | /jobs/clear         | Remove all jobs |
-| POST  | /jobs/`{jobs}`/run    | Run given jobs |
+| POST  | /jobs/`{jobs}`/run  | Run given jobs |
 | POST  | /jobs/run/all       | Run all configured jobs |
-| POST  | /jobs/`{jobs}`/stop   | Stop given jobs if running |
+| POST  | /jobs/`{jobs}`/stop | Stop given jobs if running |
 | POST  | /jobs/stop/all      | Stop all running jobs |
 | GET   | /jobs/{job}/results | Get results for the given job's runs |
 | GET   | /jobs/results       | Get results for all jobs |
+| POST   | /jobs/results/clear | Clear all job results |
 | GET   | /jobs/              | Get a list of all configured jobs |
 
 ###### <small> [Back to TOC](#jobs) </small>
@@ -1932,7 +1947,7 @@ Jobs can also trigger another job for each line of output produced, as well as u
 #### Job JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
-| id            | string        | ID for this job |
+| name          | string        | Identifies this job |
 | task          | JSON          | Task to be executed for this job. Can be an [HTTP Task](#job-http-task-json-schema) or [Command Task](#job-command-task-json-schema) |
 | auto          | bool          | Whether the job should be started automatically as soon as it's posted. |
 | delay         | duration      | Minimum delay at start of each iteration of the job. Actual effective delay may be higher than this. |
@@ -1978,7 +1993,7 @@ Jobs can also trigger another job for each line of output produced, as well as u
 #### Job Result JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
-| index     | string     | index uniquely identifies a result item within a job run, using format `<JobRunCounter>.<JobIteration>.<ResultCount>`.  |
+| id     | string     | id uniquely identifies a result item within a job run, using format `<JobRunCounter>.<JobIteration>.<ResultCount>`.  |
 | finished  | bool       | whether the job run has finished at the time of producing this result |
 | stopped   | bool       | whether the job was stopped at the time of producing this result |
 | last      | bool       | whether this result is an output of the last iteration of this job run |
@@ -1990,8 +2005,11 @@ Jobs can also trigger another job for each line of output produced, as well as u
 
 #### Jobs Timeline Events
 - `Job Added`
+- `Job Script Stored`
+- `Job File Stored`
 - `Jobs Removed`
 - `Jobs Cleared`
+- `Job Results Cleared`
 - `Job Started`
 - `Job Finished`
 - `Job Stopped`
@@ -2158,7 +2176,7 @@ These APIs manage client invocation targets on peers, allowing to add, remove, s
 | POST, PUT | /registry/peers/targets<br/>/results/invocations/`{enable}`  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
 | POST      | /registry/peers/targets/clear   | Remove all targets from all peers |
 | GET       | /registry/lockers/`{label}`<br/>/peers/targets<br/>/results?detailed=Y | Get invocation summary or detailed results for all client peer instances from the given labeled locker. When `detailed=y` query parameter is passed, the results are broken down by targets. |
-| GET       | /registry/peers/lockers<br/>/targets/results?detailed=Y | Get target invocation summary results for all client peer instances from the current locker. When `detailed=y` query parameter is passed, the results are broken down by targets.|
+| GET       | /registry/peers/targets<br/>/results?detailed=Y | Get target invocation summary results for all client peer instances from the current locker. When `detailed=y` query parameter is passed, the results are broken down by targets.|
 
 ###### <small> [Back to TOC](#goto-registry) </small>
 
@@ -2168,15 +2186,28 @@ These APIs manage client invocation targets on peers, allowing to add, remove, s
 |METHOD|URI|Description|
 |---|---|---|
 | GET       | /registry/peers/jobs | Get all registered jobs for all peers |
-| POST      | /registry/peers/`{peer}`<br/>/jobs/add | Add a job to be sent to a peer. See [Peer Job JSON Schema](#peer-job-json-schema). Pushed immediately as well as upon start of a new peer instance. |
-| POST, PUT | /registry/peers/`{peer}`<br/>/jobs/`{jobs}`/remove | Remove given jobs for a peer. |
+| POST, PUT | /registry/peers/`{peer}`<br/>/jobs/add | Add a job to be sent to a peer. See [Peer Job JSON Schema](#peer-job-json-schema). Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/jobs/add | Add a job to be sent to all peers. See [Peer Job JSON Schema](#peer-job-json-schema). Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/`{peer}`<br/>/jobs/add/script/`{name}` | Add a job script with the given name and request body as content, to be sent to instances of a peer. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers<br/>/jobs/add/script/`{name}` | Add a job script with the given name and request body as content, to be sent to all peers. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/`{peer}`<br/>/jobs/store/file/`{name}` | Add a file with the given name and request body as content, to be sent to instances of a peer, to be saved at the current working directory of the peer `goto` process. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers<br/>/jobs/store/file/`{name}` | Add a file with the given name and request body as content, to be sent to all peers, to be saved at the current working directory of the peer `goto` process. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers/`{peer}`<br/>/jobs/store/file/`{name}`?path=`{path}` | Add a file with the given name and request body as content, to be sent to instances of a peer, to be saved at the given path in the peer `goto` process' host. Pushed immediately as well as upon start of a new peer instance. |
+| POST, PUT | /registry/peers<br/>/jobs/store/file/`{name}`?path=`{path}` | Add a file with the given name and request body as content, to be sent to all peers, to be saved at the given path in the peer `goto` process' host. Pushed immediately as well as upon start of a new peer instance. |
+| POST | /registry/peers/`{peer}`<br/>/jobs/`{jobs}`/remove | Remove given jobs for a peer. |
+| POST | /registry/peers<br/>/jobs/`{jobs}`/remove | Remove given jobs from all peers. |
 | POST      | /registry/peers/`{peer}`<br/>/jobs/clear   | Remove all jobs for a peer.|
+| POST      | /registry/peers<br/>/jobs/clear   | Remove all jobs from all peers.|
 | GET       | /registry/peers/`{peer}`/jobs   | Get all jobs of a peer |
-| POST, PUT | /registry/peers/`{peer}`<br/>/jobs/`{jobs}`/run | Run given jobs on the given peer |
-| POST, PUT | /registry/peers/`{peer}`<br/>/jobs/run/all | Run all jobs on the given peer |
-| POST, PUT | /registry/peers/`{peer}`<br/>/jobs/`{jobs}`/stop | Stop given jobs on the given peer |
-| POST, PUT | /registry/peers/`{peer}`<br/>/jobs/stop/all | Stop all jobs on the given peer |
-| POST      | /registry/peers/jobs/clear   | Remove all jobs from all peers. |
+| GET       | /registry/peers/jobs   | Get all jobs of all peers |
+| POST | /registry/peers/`{peer}`<br/>/jobs/`{jobs}`/run | Run given jobs on the given peer |
+| POST | /registry/peers<br/>/jobs/`{jobs}`/run | Run given jobs on all peers |
+| POST| /registry/peers/`{peer}`<br/>/jobs/run/all | Run all jobs on the given peer |
+| POST| /registry/peers<br/>/jobs/run/all | Run all jobs on all peers |
+| POST | /registry/peers/`{peer}`<br/>/jobs/`{jobs}`/stop | Stop given jobs on the given peer |
+| POST | /registry/peers<br/>/jobs/`{jobs}`/stop | Stop given jobs on all peers |
+| POST | /registry/peers/`{peer}`<br/>/jobs/stop/all | Stop all jobs on the given peer |
+| POST | /registry/peers<br/>/jobs/stop/all | Stop all jobs on all peers |
 
 ###### <small> [Back to TOC](#goto-registry) </small>
 
@@ -2187,6 +2218,8 @@ These APIs manage client invocation targets on peers, allowing to add, remove, s
 |---|---|---|
 | POST, PUT | /registry/peers<br/>/track/headers/`{headers}` | Configure headers to be tracked by client invocations on peers. Pushed immediately as well as upon start of a new peer instance. |
 | GET | /registry/peers/track/headers | Get a list of headers configured for tracking by the above `POST` API. |
+| POST, PUT | /registry/peers<br/>/track/time/`{buckets}` | Configure time buckets to be tracked by client invocations on peers. Pushed immediately as well as upon start of a new peer instance. Buckets are added as a comma-separated list of low-high values in millis, e.g. `0-100,101-300,301-1000` |
+| GET | /registry/peers/track/time | Get a list of time buckets configured for tracking by the above `POST` API. |
 | POST, PUT | /registry/peers/probes<br/>/readiness/set?uri=`{uri}` | Configure readiness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probes<br/>/liveness/set?uri=`{uri}` | Configure liveness probe URI for peers. Pushed immediately as well as upon start of a new peer instance. |
 | POST, PUT | /registry/peers/probes<br/>/readiness/set/status=`{status}` | Configure readiness probe status for peers. Pushed immediately as well as upon start of a new peer instance. |
@@ -2244,6 +2277,9 @@ These APIs manage client invocation targets on peers, allowing to add, remove, s
 - `Registry: Peer Targets Invoked`
 - `Registry: Peer Job Rejected`
 - `Registry: Peer Job Added`
+- `Registry: Peer Job File Added`
+- `Registry: Peer Job Rejected`
+- `Registry: Peer Job Script Rejected`
 - `Registry: Peer Jobs Removed`
 - `Registry: Peer Jobs Stopped`
 - `Registry: Peer Jobs Invoked`

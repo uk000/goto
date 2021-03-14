@@ -1,6 +1,7 @@
 package registry
 
 import (
+  "bytes"
   "errors"
   "fmt"
   "goto/pkg/util"
@@ -15,12 +16,12 @@ import (
 type OnPodDone func(string, *Pod, interface{}, error)
 type OnPeerDone func(string)
 
-func newPeerRequest(method string, url string, headers http.Header, payload string) (*http.Request, error) {
-  var payloadReader *strings.Reader
+func newPeerRequest(method string, url string, headers http.Header, payload []byte) (*http.Request, error) {
+  var payloadReader *bytes.Reader
   if len(payload) > 0 {
-    payloadReader = strings.NewReader(payload)
+    payloadReader = bytes.NewReader(payload)
   } else {
-    payloadReader = strings.NewReader("")
+    payloadReader = bytes.NewReader([]byte{})
   }
   if req, err := http.NewRequest(method, url, payloadReader); err == nil {
     for h, values := range headers {
@@ -36,7 +37,7 @@ func newPeerRequest(method string, url string, headers http.Header, payload stri
   }
 }
 
-func invokePeerAPI(pod *Pod, method, uri string, headers http.Header, payload string, expectedStatus int) (bool, interface{}, error) {
+func invokePeerAPI(pod *Pod, method, uri string, headers http.Header, payload []byte, expectedStatus int) (bool, interface{}, error) {
   if req, err := newPeerRequest(method, pod.URL+uri, headers, payload); err == nil {
     if resp, err := pod.client.Do(req); err == nil {
       var data interface{}
@@ -63,7 +64,7 @@ func invokePeerAPI(pod *Pod, method, uri string, headers http.Header, payload st
 }
 
 func invokePod(peer string, pod *Pod, peerPodCount int, method string, uri string, headers http.Header,
-  payload string, expectedStatus int, retryCount int, onPodDone OnPodDone) bool {
+  payload []byte, expectedStatus int, retryCount int, onPodDone OnPodDone) bool {
   if pod.client == nil || pod.Offline {
     log.Printf("Skipping offline/loaded/cloned Pod %s for Peer %s\n", pod.Address, peer)
     return true
@@ -85,7 +86,7 @@ func invokePod(peer string, pod *Pod, peerPodCount int, method string, uri strin
     onPodDone(peer, pod, response, nil)
   } else if err != nil {
     if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-      log.Printf("Peer %s Pod %s has too many timouts. Marking pod as bad and removing from future operations\n", peer, pod.Address)
+      log.Printf("Peer %s Pod %s has too many timeouts. Marking pod as bad and removing from future operations\n", peer, pod.Address)
       pod.lock.Lock()
       pod.Healthy = false
       pod.lock.Unlock()
@@ -98,7 +99,7 @@ func invokePod(peer string, pod *Pod, peerPodCount int, method string, uri strin
 }
 
 func invokeForPodsWithHeadersAndPayload(peerPods PeerPods, method string, uri string, headers http.Header,
-  payload string, expectedStatus int, retryCount int, useUnhealthy bool, onPodDone OnPodDone, onPeerDone ...OnPeerDone) PeerResults {
+  payload []byte, expectedStatus int, retryCount int, useUnhealthy bool, onPodDone OnPodDone, onPeerDone ...OnPeerDone) PeerResults {
   result := PeerResults{}
   resultLock := sync.Mutex{}
   wg := &sync.WaitGroup{}
@@ -141,8 +142,14 @@ func invokeForPodsWithHeadersAndPayload(peerPods PeerPods, method string, uri st
   return result
 }
 
+func invokeForPodsWithPayload(peerPods PeerPods, method string, uri string, payload string, expectedStatus int,
+  retryCount int, useUnhealthy bool, onPodDone OnPodDone, onPeerDone ...OnPeerDone) PeerResults {
+  return invokeForPodsWithHeadersAndPayload(peerPods, method, uri, nil, []byte(payload), expectedStatus, retryCount, useUnhealthy,
+    onPodDone, onPeerDone...)
+}
+
 func invokeForPods(peerPods PeerPods, method string, uri string, expectedStatus int, retryCount int, useUnhealthy bool,
   onPodDone OnPodDone, onPeerDone ...OnPeerDone) PeerResults {
-  return invokeForPodsWithHeadersAndPayload(peerPods, method, uri, nil, "", expectedStatus, retryCount, useUnhealthy,
+  return invokeForPodsWithHeadersAndPayload(peerPods, method, uri, nil, nil, expectedStatus, retryCount, useUnhealthy,
     onPodDone, onPeerDone...)
 }

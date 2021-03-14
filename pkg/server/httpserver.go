@@ -102,12 +102,12 @@ func ContextMiddleware(next http.Handler) http.Handler {
         util.SetInterceptResponseWriter(r, irw)
         rw = irw
       }
-      startTime := time.Now().UnixNano()
-      w.Header().Add("Goto-In-Nanos", fmt.Sprint(startTime))
+      startTime := time.Now()
+      w.Header().Add("Goto-In-At", startTime.UTC().String())
       next.ServeHTTP(rw, r)
-      endTime := time.Now().UnixNano()
-      w.Header().Add("Goto-Out-Nanos", fmt.Sprint(endTime))
-      w.Header().Add("Goto-Took-Nanos", fmt.Sprint(endTime-startTime))
+      endTime := time.Now()
+      w.Header().Add("Goto-Out-At", endTime.UTC().String())
+      w.Header().Add("Goto-Took", endTime.Sub(startTime).String())
       statusCode := http.StatusOK
       bodyLength := 0
       if !util.IsKnownNonTraffic(r) && irw != nil {

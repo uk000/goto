@@ -443,12 +443,14 @@ func (cl *CombiLocker) Init() {
 }
 
 func (cl *CombiLocker) Open() {
-  now := time.Now()
-  if cl.FirstOpened.IsZero() {
-    cl.FirstOpened = now
+  if !cl.Current {
+    now := time.Now()
+    if cl.FirstOpened.IsZero() {
+      cl.FirstOpened = now
+    }
+    cl.LastOpened = now
+    cl.Current = true
   }
-  cl.LastOpened = now
-  cl.Current = true
 }
 
 func (cl *CombiLocker) MarshalJSON() ([]byte, error) {
@@ -458,6 +460,8 @@ func (cl *CombiLocker) MarshalJSON() ([]byte, error) {
     "peerLockers": cl.PeerLockers,
     "subLockers":  cl.SubLockers,
     "current":     cl.Current,
+    "firstOpened": cl.FirstOpened,
+    "lastOpened":  cl.LastOpened,
   }
   return json.Marshal(data)
 }
@@ -486,7 +490,7 @@ func (cl *CombiLocker) GetLabels() map[string]interface{} {
   return labels
 }
 
-func (cl *CombiLocker) GetsubLocker(labels []string) *CombiLocker {
+func (cl *CombiLocker) GetSubLocker(labels []string) *CombiLocker {
   if len(labels) == 0 {
     return nil
   }
@@ -494,7 +498,7 @@ func (cl *CombiLocker) GetsubLocker(labels []string) *CombiLocker {
   defer cl.lock.Unlock()
   sub := cl.SubLockers[labels[0]]
   if sub != nil && len(labels) > 1 {
-    sub = sub.GetsubLocker(labels[1:])
+    sub = sub.GetSubLocker(labels[1:])
   }
   return sub
 }
@@ -915,7 +919,8 @@ func (cl *CombiLocker) SearchOrGetDataLockerPaths(uriPrefix string, pattern *reg
   return dataPaths
 }
 
-func (cl *CombiLocker) GetTargetsResults(peerName string, trackingHeaders []string, crossTrackingHeaders map[string][]string) map[string]map[string]*results.TargetResults {
+func (cl *CombiLocker) GetTargetsResults(peerName string, trackingHeaders []string, crossTrackingHeaders map[string][]string, 
+  trackingTimeBuckets [][]int) map[string]map[string]*results.TargetResults {
   cl.lock.RLock()
   defer cl.lock.RUnlock()
   summary := map[string]map[string]*results.TargetResults{}
@@ -941,7 +946,7 @@ func (cl *CombiLocker) GetTargetsResults(peerName string, trackingHeaders []stri
           }
           if summary[peer][target] == nil {
             summary[peer][target] = &results.TargetResults{Target: target}
-            summary[peer][target].Init(trackingHeaders, crossTrackingHeaders)
+            summary[peer][target].Init(trackingHeaders, crossTrackingHeaders, trackingTimeBuckets)
           }
           if data := targetData.Data; data != "" {
             result := &results.TargetResults{}
@@ -958,8 +963,9 @@ func (cl *CombiLocker) GetTargetsResults(peerName string, trackingHeaders []stri
   return summary
 }
 
-func (cl *CombiLocker) GetTargetsSummaryResults(peerName string, trackingHeaders []string, crossTrackingHeaders map[string][]string) map[string]*results.TargetsSummaryResults {
-  clientResultsSummary := cl.GetTargetsResults(peerName, trackingHeaders, crossTrackingHeaders)
+func (cl *CombiLocker) GetTargetsSummaryResults(peerName string, trackingHeaders []string, crossTrackingHeaders map[string][]string, 
+  trackingTimeBuckets [][]int) map[string]*results.TargetsSummaryResults {
+  clientResultsSummary := cl.GetTargetsResults(peerName, trackingHeaders, crossTrackingHeaders, trackingTimeBuckets)
   cl.lock.RLock()
   defer cl.lock.RUnlock()
   result := map[string]*results.TargetsSummaryResults{}
@@ -1108,24 +1114,35 @@ func (ll *LabeledLockers) OpenLocker(label string) {
   ll.currentLocker.Open()
 }
 
+func (ll *LabeledLockers) deleteLocker(locker *CombiLocker) {
+  if locker.parent == nil {
+    delete(ll.lockers, locker.Label)
+  } else {
+    delete(locker.parent.SubLockers, locker.Label)
+  }
+  delete(ll.allLockers, locker.PathLabel)
+  for _, subLocker := range locker.SubLockers {
+    ll.deleteLocker(subLocker)
+  }
+}
+
 func (ll *LabeledLockers) ClearLocker(label string, close bool) {
   ll.lock.Lock()
   defer ll.lock.Unlock()
   locker := ll.allLockers[label]
-  parent := locker.parent
   if locker != nil {
     if close {
-      if parent == nil {
-        delete(ll.lockers, locker.Label)
-      } else {
-        delete(parent.SubLockers, locker.Label)
-      }
-      delete(ll.allLockers, locker.PathLabel)
+      ll.deleteLocker(locker)
       if locker == ll.currentLocker {
         ll.currentLocker = ll.lockers[constants.LockerDefaultLabel]
         ll.currentLocker.Current = true
       }
     } else {
+      for _, subLocker := range locker.SubLockers {
+        if subLocker != nil {
+          ll.deleteLocker(subLocker)
+        }
+      }
       locker.Init()
     }
   }

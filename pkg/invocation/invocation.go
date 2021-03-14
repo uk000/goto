@@ -53,7 +53,8 @@ type InvocationSpec struct {
   AutoInvoke           bool       `json:"autoInvoke"`
   AutoPayload          string     `json:"autoPayload"`
   Fallback             bool       `json:"fallback"`
-  ABMode               bool       `json:"abMode"`
+  AB                   bool       `json:"ab"`
+  Random               bool       `json:"random"`
   httpVersionMajor     int
   httpVersionMinor     int
   tcp                  bool
@@ -98,6 +99,7 @@ type InvocationResult struct {
   Body            string
   RetryURL        string
   LastRetryReason string
+  TimeTakenMs     int
 }
 
 type ResultSink func(*InvocationResult)
@@ -160,11 +162,8 @@ func ValidateSpec(spec *InvocationSpec) error {
   if spec.URL == "" {
     return fmt.Errorf("URL is required")
   }
-  if spec.ABMode && spec.Fallback {
-    return fmt.Errorf("A target cannot have both ABMode and Fallback enabled simultaneously.")
-  }
-  if (spec.ABMode || spec.Fallback) && len(spec.BURLS) == 0 {
-    return fmt.Errorf("At least one B-URL is required for Fallback or ABMode")
+  if (spec.AB || spec.Fallback || spec.Random) && len(spec.BURLS) == 0 {
+    return fmt.Errorf("At least one B-URL is required for Fallback, ABMode or RandomMode")
   }
   if strings.Contains(strings.ToLower(spec.URL), "https") {
     spec.tls = true
@@ -800,7 +799,10 @@ func doInvoke(index uint32, targetID string, target *InvocationSpec,
       tracker.Status.TotalRequests++
       metrics.UpdateTargetRequestCount(tracker.Target.Name)
       tracker.lock.Unlock()
+      startTime := time.Now().UnixNano()
       resp, reqError = client.Do(req)
+      endTime := time.Now().UnixNano()
+      result.TimeTakenMs = int((endTime - startTime) / 1000000)
       retry := reqError != nil
       if !retry && target.RetriableStatusCodes != nil {
         for _, retriableCode := range target.RetriableStatusCodes {
@@ -1002,12 +1004,20 @@ func invokeTarget(tracker *InvocationTracker, targetID string, target *Invocatio
   result := &InvocationResult{}
   result.TargetName = target.Name
   result.TargetID = targetID
-  result.URL = target.URL
+  if target.Random {
+    if r := util.Random(len(target.BURLS) + 1); r == 0 {
+      result.URL = target.URL
+    } else {
+      result.URL = target.BURLS[r-1]
+    }
+  } else {
+    result.URL = target.URL
+  }
   result.Headers = map[string][]string{}
   if resp, err := doInvoke(trackerID, targetID, target, client, result, tracker); err == nil {
     if !tracker.Status.StopRequested || tracker.Status.Stopped {
       doProcessResponse(trackerID, targetID, resp, result, tracker)
-      if target.ABMode {
+      if target.AB {
         handleABCall(trackerID, targetID, target, result.RequestID, client, sinks, resultChannel, tracker)
       }
     }

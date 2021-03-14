@@ -78,13 +78,16 @@ curl localhost:8080/client/blocking
 curl -X POST localhost:8080/client/track/headers/clear
 
 #Add headers to track
-curl -X PUT localhost:8080/client/track/headers/add/Request-From-Goto|Goto-Host,Via-Goto,x|y|z,foo
+curl -X PUT localhost:8080/client/track/headers/Request-From-Goto|Goto-Host,Via-Goto,x|y|z,foo
 
 #Remove headers from tracking
 curl -X PUT localhost:8080/client/track/headers/remove/foo
 
 #Get list of tracked headers
 curl localhost:8080/client/track/headers
+
+#Add time buckets to track
+curl -X PUT localhost:8080/client/track/time/0-100,101-200,201-500,501-1000,1001-5000
 
 #Clear results
 curl -X POST localhost:8080/client/results/clear
@@ -682,8 +685,58 @@ curl localhost:8080/client/results
       },
     },
     "countsByURIs": {
-      "": 2,
-      "/status/418": 18
+      "/delay/200ms": {
+          "uri": "/delay/200ms",
+          "count": {
+              "value": 9,
+              "retries": 0,
+              "firstResponse": "2021-03-11T22:29:34.336611-08:00",
+              "lastResponse": "2021-03-11T22:29:34.76857-08:00"
+          },
+          "countsByStatusCodes": {
+              "200": {
+                  "value": 7,
+                  "retries": 0,
+                  "firstResponse": "2021-03-11T22:29:34.336612-08:00",
+                  "lastResponse": "2021-03-11T22:29:34.76857-08:00"
+              },
+              "502": {
+                  "value": 2,
+                  "retries": 0,
+                  "firstResponse": "2021-03-11T22:29:34.336719-08:00",
+                  "lastResponse": "2021-03-11T22:29:34.336802-08:00"
+              }
+          },
+          "firstResponse": "2021-03-11T22:29:34.336611-08:00",
+          "lastResponse": "2021-03-11T22:29:34.76857-08:00"
+      }
+  },
+  "countsByTimeBuckets": {
+      "[201 300]": {
+          "bucket": "[201 300]",
+          "count": {
+              "value": 9,
+              "retries": 0,
+              "firstResponse": "2021-03-11T22:29:34.336608-08:00",
+              "lastResponse": "2021-03-11T22:29:34.768568-08:00"
+          },
+          "countsByStatusCodes": {
+              "200": {
+                  "value": 7,
+                  "retries": 0,
+                  "firstResponse": "2021-03-11T22:29:34.336609-08:00",
+                  "lastResponse": "2021-03-11T22:29:34.768568-08:00"
+              },
+              "502": {
+                  "value": 2,
+                  "retries": 0,
+                  "firstResponse": "2021-03-11T22:29:34.336718-08:00",
+                  "lastResponse": "2021-03-11T22:29:34.3368-08:00"
+              }
+          },
+          "firstResponse": "2021-03-11T22:29:34.336608-08:00",
+          "lastResponse": "2021-03-11T22:29:34.768568-08:00"
+      }
     }
   },
   "t2": {}

@@ -100,13 +100,14 @@ func setProbeStatus(w http.ResponseWriter, r *http.Request) {
   if !isReadiness && !isLiveness {
     msg = "Cannot add. Invalid probe type"
     w.WriteHeader(http.StatusBadRequest)
-  } else if status, count, present := util.GetStatusParam(r); !present {
+  } else if statuses, count, present := util.GetStatusParam(r); !present {
     msg = "Cannot set. Invalid status code"
     w.WriteHeader(http.StatusBadRequest)
   } else {
     pp := initPortProbes(r)
-    if status <= 0 {
-      status = 200
+    status := 200
+    if statuses[0] > 0 {
+      status = statuses[0]
     }
     if count <= 0 {
       count = -1

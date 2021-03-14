@@ -43,7 +43,7 @@ func RegisterPeer(peerName, peerAddress string) {
           data := &registry.PeerData{}
           if err := util.ReadJsonPayloadFromBody(resp.Body, data); err == nil {
             events.SendEventJSONDirect("Peer Startup Data", peerName, data)
-            log.Printf("Read startup data from registry: %+v\n", *data)
+            log.Println("Read startup data from registry")
             go setupStartupTasks(data)
             go startRegistryReminder(peer)
           } else {
@@ -101,28 +101,19 @@ func startRegistryReminder(peer *registry.Peer) {
 }
 
 func setupStartupTasks(peerData *registry.PeerData) {
-  targets := registry.PeerTargets{}
-  if peerData.Targets != nil {
-    targetsData := util.ToJSON(peerData.Targets)
-    if err := util.ReadJson(targetsData, &targets); err != nil {
-      log.Println(err.Error())
-      return
-    }
-  }
-  jobs := registry.PeerJobs{}
-  if peerData.Jobs != nil {
-    for _, peerJob := range peerData.Jobs {
-      jobs[peerJob.ID] = peerJob
-    }
-  }
   port := global.ServerPort
   pc := target.GetClientForPort(port)
 
-  log.Printf("Got %d targets, %d jobs\n", len(targets), len(jobs))
+  log.Printf("Got %d targets, %d jobs, %d job scripts\n", len(peerData.Targets), len(peerData.Jobs), len(peerData.JobScripts))
 
   if peerData.TrackingHeaders != "" {
-    log.Printf("Got %s trackingHeaders\n", peerData.TrackingHeaders)
+    log.Printf("Got %s tracking headers\n", peerData.TrackingHeaders)
     pc.AddTrackingHeaders(peerData.TrackingHeaders)
+  }
+
+  if peerData.TrackingTimeBuckets != "" {
+    log.Printf("Got %s tracking time buckets\n", peerData.TrackingTimeBuckets)
+    pc.AddTrackingTimeBuckets(peerData.TrackingTimeBuckets)
   }
 
   if peerData.Probes != nil {
@@ -140,12 +131,22 @@ func setupStartupTasks(peerData *registry.PeerData) {
     }
   }
 
-  for _, j := range jobs {
+  for fileName, content := range peerData.Files {
+    log.Printf("File: %s\n", fileName)
+    job.Jobs.StoreJobScriptOrFile("", fileName, content, false)
+  }
+
+  for fileName, content := range peerData.JobScripts {
+    log.Printf("Job Script: %s\n", fileName)
+    job.Jobs.StoreJobScriptOrFile("", fileName, content, true)
+  }
+
+  for _, j := range peerData.Jobs {
     log.Printf("%+v\n", j)
     job.Jobs.AddJob(&j.Job)
   }
 
-  for _, t := range targets {
+  for _, t := range peerData.Targets {
     log.Printf("%+v\n", t)
     pc.AddTarget(&target.Target{t.InvocationSpec})
   }

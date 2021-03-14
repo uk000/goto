@@ -1,12 +1,13 @@
 package target
 
 import (
-	"goto/pkg/util"
+  "goto/pkg/util"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
+
 var (
-  Handler                    util.ServerHandler     = util.ServerHandler{Name: "client", SetRoutes: SetRoutes}
+  Handler util.ServerHandler = util.ServerHandler{Name: "client", SetRoutes: SetRoutes}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -23,10 +24,14 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(targetsRouter, "/cacert/add", addCACert, "PUT", "POST")
   util.AddRoute(targetsRouter, "/cacert/remove", removeCACert, "PUT", "POST")
 
-  util.AddRoute(r, "/track/headers/add/{headers}", addTrackingHeaders, "POST", "PUT")
-  util.AddRoute(r, "/track/headers/remove/{header}", removeTrackingHeader, "POST", "PUT")
   util.AddRoute(r, "/track/headers/clear", clearTrackingHeaders, "POST")
+  util.AddRoute(r, "/track/headers/{headers}", addTrackingHeaders, "POST", "PUT")
   util.AddRoute(r, "/track/headers", getTrackingHeaders, "GET")
+
+  util.AddRoute(r, "/track/time/clear", clearTrackingTimeBuckets, "POST")
+  util.AddRoute(r, "/track/time/{buckets}", addTrackingTimeBuckets, "POST", "PUT")
+  util.AddRoute(r, "/track/time", getTrackingTimeBuckets, "GET")
+
   util.AddRoute(r, "/results/all/{enable}", enableAllTargetsResultsCollection, "POST", "PUT")
   util.AddRoute(r, "/results/invocations/{enable}", enableInvocationResultsCollection, "POST", "PUT")
   util.AddRoute(r, "/results", getResults, "GET")

@@ -21,12 +21,13 @@ type Target struct {
 }
 
 type PortClient struct {
-  port                 int
-  targets              map[string]*Target
-  activeTargetsCount   int
-  targetsLock          sync.RWMutex
-  trackingHeaders      []string
-  crossTrackingHeaders map[string][]string
+  port               int
+  targets            map[string]*Target
+  activeTargetsCount int
+  targetsLock        sync.RWMutex
+  trackHeaders       []string
+  crossTrackHeaders  map[string][]string
+  trackTimeBuckets   [][]int
 }
 
 var (
@@ -42,8 +43,9 @@ func (pc *PortClient) init() bool {
     return false
   }
   pc.targets = map[string]*Target{}
-  pc.trackingHeaders = []string{}
-  pc.crossTrackingHeaders = map[string][]string{}
+  pc.trackHeaders = []string{}
+  pc.crossTrackHeaders = map[string][]string{}
+  pc.trackTimeBuckets = [][]int{}
   return true
 }
 
@@ -145,40 +147,43 @@ func (pc *PortClient) getTargetsToInvoke(r *http.Request) []*invocation.Invocati
 func (pc *PortClient) AddTrackingHeaders(headers string) {
   pc.targetsLock.Lock()
   defer pc.targetsLock.Unlock()
-  pc.trackingHeaders, pc.crossTrackingHeaders = util.ParseTrackingHeaders(headers)
-}
-
-func (pc *PortClient) removeTrackingHeader(header string) {
-  pc.targetsLock.Lock()
-  for i, h := range pc.trackingHeaders {
-    if strings.EqualFold(header, h) {
-      pc.trackingHeaders = append(pc.trackingHeaders[:i], pc.trackingHeaders[i+1:]...)
-    }
-    if _, present := pc.crossTrackingHeaders[h]; present {
-      delete(pc.crossTrackingHeaders, h)
-    }
-  }
-  pc.targetsLock.Unlock()
+  pc.trackHeaders, pc.crossTrackHeaders = util.ParseTrackingHeaders(headers)
 }
 
 func (pc *PortClient) clearTrackingHeaders() {
   pc.targetsLock.Lock()
-  pc.trackingHeaders = []string{}
-  pc.crossTrackingHeaders = map[string][]string{}
+  pc.trackHeaders = []string{}
+  pc.crossTrackHeaders = map[string][]string{}
   pc.targetsLock.Unlock()
 }
 
 func (pc *PortClient) getTrackingHeaders() []string {
   headers := []string{}
   pc.targetsLock.RLock()
-  for _, h := range pc.trackingHeaders {
-    if crossHeaders := pc.crossTrackingHeaders[h]; crossHeaders != nil {
+  for _, h := range pc.trackHeaders {
+    if crossHeaders := pc.crossTrackHeaders[h]; crossHeaders != nil {
       headers = append(headers, strings.Join([]string{h, strings.Join(crossHeaders, "|")}, "|"))
     }
     headers = append(headers, h)
   }
   pc.targetsLock.RUnlock()
   return headers
+}
+
+func (pc *PortClient) AddTrackingTimeBuckets(b string) bool {
+  pc.targetsLock.Lock()
+  defer pc.targetsLock.Unlock()
+  buckets, ok := util.ParseTimeBuckets(b)
+  if ok {
+    pc.trackTimeBuckets = buckets
+  }
+  return ok
+}
+
+func (pc *PortClient) clearTrackingTimeBuckets() {
+  pc.targetsLock.Lock()
+  pc.trackTimeBuckets = [][]int{}
+  pc.targetsLock.Unlock()
 }
 
 func (pc *PortClient) stopTargets(targetNames []string) (bool, bool) {
@@ -317,26 +322,8 @@ func addTrackingHeaders(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
-func removeTrackingHeader(w http.ResponseWriter, r *http.Request) {
-  msg := ""
-  if header, present := util.GetStringParam(r, "header"); present {
-    getPortClient(r).removeTrackingHeader(header)
-    w.WriteHeader(http.StatusOK)
-    msg = fmt.Sprintf("Header %s removed from tracking", header)
-    events.SendRequestEvent(Client_TrackingHeadersRemoved, msg, r)
-  } else {
-    w.WriteHeader(http.StatusBadRequest)
-    msg = "Invalid header name"
-  }
-  fmt.Fprintln(w, msg)
-  if global.EnableClientLogs {
-    util.AddLogMessage(msg, r)
-  }
-}
-
 func clearTrackingHeaders(w http.ResponseWriter, r *http.Request) {
   getPortClient(r).clearTrackingHeaders()
-  w.WriteHeader(http.StatusOK)
   msg := "All tracking headers cleared"
   events.SendRequestEvent(Client_TrackingHeadersCleared, msg, r)
   fmt.Fprintln(w, msg)
@@ -346,11 +333,43 @@ func clearTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 }
 
 func getTrackingHeaders(w http.ResponseWriter, r *http.Request) {
-  w.WriteHeader(http.StatusOK)
   msg := fmt.Sprintf("Tracking headers: %s", strings.Join(getPortClient(r).getTrackingHeaders(), ","))
   fmt.Fprintln(w, msg)
   if global.EnableClientLogs {
     util.AddLogMessage(msg, r)
+  }
+}
+
+func addTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  b := util.GetStringParamValue(r, "buckets")
+  if !getPortClient(r).AddTrackingTimeBuckets(b) {
+    w.WriteHeader(http.StatusBadRequest)
+    msg = "Invalid time bucket"
+  } else {
+    msg = fmt.Sprintf("Time Buckets [%s] will be tracked", b)
+    events.SendRequestEvent(Client_TrackingTimeBucketAdded, msg, r)
+  }
+  if global.EnableClientLogs {
+    util.AddLogMessage(msg, r)
+  }
+  fmt.Fprintln(w, msg)
+}
+
+func clearTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
+  getPortClient(r).clearTrackingTimeBuckets()
+  msg := "All tracking time buckets cleared"
+  events.SendRequestEvent(Client_TrackingTimeBucketsCleared, msg, r)
+  fmt.Fprintln(w, msg)
+  if global.EnableClientLogs {
+    util.AddLogMessage(msg, r)
+  }
+}
+
+func getTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
+  util.WriteJsonPayload(w, getPortClient(r).trackTimeBuckets)
+  if global.EnableClientLogs {
+    util.AddLogMessage("Tracking TimeBuckets Reported", r)
   }
 }
 
@@ -458,7 +477,7 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (pc *PortClient) invokeTarget(target *invocation.InvocationSpec) {
-  tracker := invocation.RegisterInvocation(target, results.ResultChannelSinkFactory(target, pc.trackingHeaders, pc.crossTrackingHeaders))
+  tracker := invocation.RegisterInvocation(target, results.ResultChannelSinkFactory(target, pc.trackHeaders, pc.crossTrackHeaders, pc.trackTimeBuckets))
   pc.targetsLock.Lock()
   pc.activeTargetsCount++
   pc.targetsLock.Unlock()
