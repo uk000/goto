@@ -382,14 +382,14 @@ func storeHttpResult(result *invocation.InvocationResult, job *Job, iteration in
   var data interface{}
   if httpTask.ParseJSON {
     json := map[string]interface{}{}
-    if err := util.ReadJson(result.Body, &json); err != nil {
+    if err := util.ReadJson(string(result.Data), &json); err != nil {
       log.Printf("Failed reading response JSON: %s\n", err.Error())
-      data = result.Body
+      data = result.Data
     } else {
       data = json
     }
   } else {
-    data = result.Body
+    data = result.Data
   }
   storeJobResult(job, jobRun, iteration, data, last)
 }

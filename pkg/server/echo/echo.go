@@ -43,7 +43,7 @@ func echoStream(w http.ResponseWriter, r *http.Request) {
   var writer io.Writer = w
   if util.IsH2(r) {
     fw := intercept.NewFlushWriter(r, w)
-    util.CopyHeaders("Stream", w, r.Header, r.Host, r.RequestURI)
+    util.CopyHeaders("Request", w, r.Header, r.Host, r.RequestURI)
     util.SetHeadersSent(r, true)
     fw.Flush()
     writer = fw

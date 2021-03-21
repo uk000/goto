@@ -69,7 +69,7 @@ func ContextGRPCMiddleware(ctx context.Context, req interface{}, info *grpc.Unar
     port = global.ServerPort
   }
   md := metadata.Pairs("port", fmt.Sprint(port))
-  return handler(WithPort(metadata.NewOutgoingContext(ctx, md), port), req)
+  return handler(withPort(metadata.NewOutgoingContext(ctx, md), port), req)
 }
 
 func ContextGRPCStreamMiddleware(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
@@ -78,7 +78,7 @@ func ContextGRPCStreamMiddleware(srv interface{}, ss grpc.ServerStream, info *gr
   if port <= 0 {
     port = global.ServerPort
   }
-  return handler(srv, NewWrappedStream(ss, WithPort(metadata.NewOutgoingContext(ctx, metadata.Pairs("port", fmt.Sprint(port))), port)))
+  return handler(srv, NewWrappedStream(ss, withPort(metadata.NewOutgoingContext(ctx, metadata.Pairs("port", fmt.Sprint(port))), port)))
 }
 
 func StopGRPCServer() {

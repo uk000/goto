@@ -59,11 +59,11 @@ type ConnectionStatus struct {
   ListenerID     string    `json:"listenerID"`
   RequestID      int       `json:"requestID"`
   ConnStartTime  time.Time `json:"connStartTime"`
-  ConnCloseTime  time.Time `json:"connCloseTime"`
-  FirstByteInAt  time.Time `json:"firstByteInAt"`
-  LastByteInAt   time.Time `json:"lastByteInAt"`
-  FirstByteOutAt time.Time `json:"firstByteOutAt"`
-  LastByteOutAt  time.Time `json:"lastByteOutAt"`
+  ConnCloseTime  string    `json:"connCloseTime"`
+  FirstByteInAt  string    `json:"firstByteInAt"`
+  LastByteInAt   string    `json:"lastByteInAt"`
+  FirstByteOutAt string    `json:"firstByteOutAt"`
+  LastByteOutAt  string    `json:"lastByteOutAt"`
   TotalBytesRead int       `json:"totalBytesRead"`
   TotalBytesSent int       `json:"totalBytesSent"`
   TotalReads     int       `json:"totalReads"`
@@ -225,7 +225,7 @@ func (tcp *TCPConnectionHandler) closeClientConnection() {
     tcp.conn.Close()
     tcp.closed = true
     tcp.status.Closed = true
-    tcp.status.ConnCloseTime = time.Now()
+    tcp.status.ConnCloseTime = time.Now().UTC().String()
   }
 }
 
@@ -330,10 +330,10 @@ func (tcp *TCPConnectionHandler) doCloseAtFirstByte() {
   len, err := tcp.reader.Read(make([]byte, 1))
   switch err {
   case nil:
-    tcp.status.FirstByteInAt = time.Now()
+    tcp.status.FirstByteInAt = time.Now().UTC().String()
     tcp.status.LastByteInAt = tcp.status.FirstByteInAt
     tcp.sendMessage(GoodByeMessage, CloseAtFirstByte)
-    tcp.status.FirstByteOutAt = time.Now()
+    tcp.status.FirstByteOutAt = time.Now().UTC().String()
     tcp.status.LastByteOutAt = tcp.status.FirstByteOutAt
     tcp.status.TotalBytesRead = 1
     log.Printf("[Listener: %s][Request: %d][%s]: Received %d bytes, closing port [%d]",
@@ -587,8 +587,8 @@ func (tcp *TCPConnectionHandler) readOrScan(scan bool, whatFor string) (bool, in
   }
   switch err {
   case nil:
-    now := time.Now()
-    if tcp.status.FirstByteInAt.IsZero() {
+    now := time.Now().UTC().String()
+    if tcp.status.FirstByteInAt == "" {
       tcp.status.FirstByteInAt = now
     }
     tcp.status.LastByteInAt = now
@@ -647,8 +647,8 @@ func (tcp *TCPConnectionHandler) sendDataToClientWithDeadline(data []byte, whatF
         tcp.ListenerID, tcp.requestID, whatFor, dataLength, err.Error())
       return false
     } else {
-      now := time.Now()
-      if tcp.status.FirstByteOutAt.IsZero() {
+      now := time.Now().UTC().String()
+      if tcp.status.FirstByteOutAt == "" {
         tcp.status.FirstByteOutAt = now
       }
       tcp.status.LastByteOutAt = now

@@ -596,7 +596,7 @@ func (p *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWr
     }
     if len(responses) == 1 {
       w.WriteHeader(responses[0].StatusCode)
-      fmt.Fprintln(w, responses[0].Body)
+      fmt.Fprintln(w, responses[0].Data)
     } else {
       w.WriteHeader(http.StatusOK)
       fmt.Fprintln(w, util.ToJSON(responses))

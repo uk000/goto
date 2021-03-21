@@ -1,8 +1,10 @@
 package invocation
 
 import (
+  "bytes"
   "crypto/tls"
   "crypto/x509"
+  "encoding/base64"
   "fmt"
   "goto/pkg/events"
   . "goto/pkg/events/eventslist"
@@ -14,8 +16,8 @@ import (
   "log"
   "net"
   "net/http"
-  "net/url"
   "path/filepath"
+  "regexp"
   "strconv"
   "strings"
   "sync"
@@ -27,50 +29,63 @@ import (
 )
 
 type InvocationSpec struct {
-  Name                 string     `json:"name"`
-  Protocol             string     `json:"protocol"`
-  Method               string     `json:"method"`
-  URL                  string     `json:"url"`
-  BURLS                []string   `json:"burls"`
-  Headers              [][]string `json:"headers"`
-  Body                 string     `json:"body"`
-  BodyReader           io.Reader  `json:"-"`
-  AutoUpgrade          bool       `json:"autoUpgrade"`
-  Replicas             int        `json:"replicas"`
-  RequestCount         int        `json:"requestCount"`
-  InitialDelay         string     `json:"initialDelay"`
-  Delay                string     `json:"delay"`
-  Retries              int        `json:"retries"`
-  RetryDelay           string     `json:"retryDelay"`
-  RetriableStatusCodes []int      `json:"retriableStatusCodes"`
-  KeepOpen             string     `json:"keepOpen"`
-  SendID               bool       `json:"sendID"`
-  ConnTimeout          string     `json:"connTimeout"`
-  ConnIdleTimeout      string     `json:"connIdleTimeout"`
-  RequestTimeout       string     `json:"requestTimeout"`
-  VerifyTLS            bool       `json:"verifyTLS"`
-  CollectResponse      bool       `json:"collectResponse"`
-  AutoInvoke           bool       `json:"autoInvoke"`
-  AutoPayload          string     `json:"autoPayload"`
-  Fallback             bool       `json:"fallback"`
-  AB                   bool       `json:"ab"`
-  Random               bool       `json:"random"`
+  Name                 string       `json:"name"`
+  Protocol             string       `json:"protocol"`
+  Method               string       `json:"method"`
+  URL                  string       `json:"url"`
+  BURLS                []string     `json:"burls"`
+  Headers              [][]string   `json:"headers"`
+  Body                 string       `json:"body"`
+  AutoPayload          string       `json:"autoPayload"`
+  Replicas             int          `json:"replicas"`
+  RequestCount         int          `json:"requestCount"`
+  InitialDelay         string       `json:"initialDelay"`
+  Delay                string       `json:"delay"`
+  Retries              int          `json:"retries"`
+  RetryDelay           string       `json:"retryDelay"`
+  RetriableStatusCodes []int        `json:"retriableStatusCodes"`
+  KeepOpen             string       `json:"keepOpen"`
+  SendID               bool         `json:"sendID"`
+  ConnTimeout          string       `json:"connTimeout"`
+  ConnIdleTimeout      string       `json:"connIdleTimeout"`
+  RequestTimeout       string       `json:"requestTimeout"`
+  AutoInvoke           bool         `json:"autoInvoke"`
+  Fallback             bool         `json:"fallback"`
+  AB                   bool         `json:"ab"`
+  Random               bool         `json:"random"`
+  StreamPayload        []string     `json:"streamPayload"`
+  StreamDelay          string       `json:"streamDelay"`
+  Binary               bool         `json:"binary"`
+  CollectResponse      bool         `json:"collectResponse"`
+  Expectation          *Expectation `json:"expectation"`
+  AutoUpgrade          bool         `json:"autoUpgrade"`
+  VerifyTLS            bool         `json:"verifyTLS"`
+  BodyReader           io.Reader    `json:"-"`
   httpVersionMajor     int
   httpVersionMinor     int
   tcp                  bool
   grpc                 bool
   http                 bool
   tls                  bool
-  host                 string
   connTimeoutD         time.Duration
   connIdleTimeoutD     time.Duration
   requestTimeoutD      time.Duration
   initialDelayD        time.Duration
   delayD               time.Duration
+  streamDelayD         time.Duration
   retryDelayD          time.Duration
   keepOpenD            time.Duration
   autoPayloadSize      int
-  payloadBody          string
+  payloads             [][]byte
+}
+
+type Expectation struct {
+  StatusCode    int               `json:"statusCode"`
+  PayloadLength int               `json:"payloadLength"`
+  Payload       string            `json:"payload"`
+  Headers       map[string]string `json:"headers"`
+  headersRegexp map[string]*regexp.Regexp
+  payload       []byte
 }
 
 type InvocationStatus struct {
@@ -87,19 +102,34 @@ type InvocationStatus struct {
 }
 
 type InvocationResult struct {
-  TargetName      string
-  TargetID        string
-  Status          string
-  StatusCode      int
-  Retries         int
-  URL             string
-  URI             string
-  RequestID       string
-  Headers         map[string][]string
-  Body            string
-  RetryURL        string
-  LastRetryReason string
-  TimeTakenMs     int
+  TargetName          string                 `json:"targetName"`
+  TargetID            string                 `json:"targetID"`
+  Status              string                 `json:"status"`
+  StatusCode          int                    `json:"statusCode"`
+  RequestPayloadSize  int                    `json:"requestPayloadSize"`
+  ResponsePayloadSize int                    `json:"responsePayloadSize"`
+  FirstByteInAt       string                 `json:"firstByteInAt"`
+  LastByteInAt        string                 `json:"lastByteInAt"`
+  FirstByteOutAt      string                 `json:"firstByteOutAt"`
+  LastByteOutAt       string                 `json:"lastByteOutAt"`
+  Retries             int                    `json:"retries"`
+  URL                 string                 `json:"url"`
+  URI                 string                 `json:"uri"`
+  RequestID           string                 `json:"requestID"`
+  Headers             map[string][]string    `json:"headers"`
+  RetryURL            string                 `json:"retryURL"`
+  LastRetryReason     string                 `json:"lastRetryReason"`
+  TookNanos           int                    `json:"tookNanos"`
+  Errors              map[string]interface{} `json:"errors"`
+  Data                []byte                 `json:"-"`
+}
+
+type InvocationLog struct {
+  Host       string
+  Invocation uint32
+  Target     string
+  URL        string
+  Result     *InvocationResult
 }
 
 type ResultSink func(*InvocationResult)
@@ -260,13 +290,44 @@ func ValidateSpec(spec *InvocationSpec) error {
       return fmt.Errorf("Invalid keepOpen")
     }
   }
-  if spec.BodyReader != nil && spec.Body == "" && spec.Replicas > 1 {
-    return fmt.Errorf("Streaming request body can only be forwarded to one target whereas replicas is %d", spec.Replicas)
-  }
   if spec.AutoPayload != "" {
     spec.autoPayloadSize = util.ParseSize(spec.AutoPayload)
     if spec.autoPayloadSize <= 0 {
       return fmt.Errorf("Invalid AutoPayload, must be a valid size like 100, 10K, etc.")
+    }
+  }
+  if spec.StreamDelay != "" {
+    if spec.streamDelayD, err = time.ParseDuration(spec.StreamDelay); err != nil {
+      return fmt.Errorf("Invalid delay")
+    }
+  } else {
+    spec.streamDelayD = 10 * time.Millisecond
+    spec.StreamDelay = "10ms"
+  }
+  if spec.Expectation != nil {
+    if len(spec.Expectation.Payload) > 0 {
+      if spec.Binary {
+        if b, err := base64.RawStdEncoding.DecodeString(spec.Expectation.Payload); err == nil {
+          spec.Expectation.payload = b
+        } else {
+          spec.Expectation.payload = []byte(spec.Expectation.Payload)
+        }
+      } else {
+        spec.Expectation.payload = []byte(spec.Expectation.Payload)
+      }
+      spec.Expectation.PayloadLength = len(spec.Expectation.payload)
+    }
+    if len(spec.Expectation.Headers) > 0 {
+      spec.Expectation.headersRegexp = map[string]*regexp.Regexp{}
+      for h, hv := range spec.Expectation.Headers {
+        if h != "" {
+          h := strings.ToLower(h)
+          spec.Expectation.headersRegexp[h] = nil
+          if hv != "" {
+            spec.Expectation.headersRegexp[h] = regexp.MustCompile("(?i)" + hv)
+          }
+        }
+      }
     }
   }
   return nil
@@ -274,7 +335,7 @@ func ValidateSpec(spec *InvocationSpec) error {
 
 func PrepareAutoPayload(i *InvocationSpec) {
   if i.autoPayloadSize > 0 {
-    i.payloadBody = util.GenerateRandomString(i.autoPayloadSize)
+    i.payloads = [][]byte{util.GenerateRandomPayload(i.autoPayloadSize)}
     i.Body = ""
   }
 }
@@ -325,10 +386,10 @@ func loadCerts() {
   }
 }
 
-func tlsConfig(target *InvocationSpec) *tls.Config {
+func tlsConfig(host string, verifyCert bool) *tls.Config {
   cfg := &tls.Config{
-    ServerName:         target.host,
-    InsecureSkipVerify: !target.VerifyTLS,
+    ServerName:         host,
+    InsecureSkipVerify: !verifyCert,
   }
   if rootCAs != nil {
     cfg.RootCAs = rootCAs
@@ -353,7 +414,6 @@ func httpTransport(target *InvocationSpec) (http.RoundTripper, *TransportTracker
         KeepAlive: target.connIdleTimeoutD,
       }).DialContext,
       TLSHandshakeTimeout: target.connTimeoutD,
-      TLSClientConfig:     tlsConfig(target),
       ForceAttemptHTTP2:   target.AutoUpgrade,
     })
     tracker = &ht.TransportTracker
@@ -362,7 +422,6 @@ func httpTransport(target *InvocationSpec) (http.RoundTripper, *TransportTracker
     tr := &http2.Transport{
       ReadIdleTimeout: target.connIdleTimeoutD,
       PingTimeout:     target.connTimeoutD,
-      TLSClientConfig: tlsConfig(target),
       AllowHTTP:       true,
     }
     tr.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
@@ -449,9 +508,22 @@ func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) *
   if target.http {
     tracker.Status.httpClient = getHttpClientForTarget(target)
   }
-  if target.BodyReader != nil && (target.Replicas > 1 || target.RequestCount > 1) {
-    body, _ := ioutil.ReadAll(target.BodyReader)
-    target.payloadBody = string(body)
+  if len(target.StreamPayload) > 0 {
+    for _, p := range target.StreamPayload {
+      if target.Binary {
+        if b, err := base64.RawStdEncoding.DecodeString(p); err == nil {
+          target.payloads = append(target.payloads, b)
+        } else {
+          target.payloads = append(target.payloads, []byte(p))
+        }
+      } else {
+        target.payloads = append(target.payloads, []byte(p))
+      }
+    }
+  } else if target.Body != "" {
+    target.payloads = [][]byte{[]byte(target.Body)}
+  } else if target.BodyReader != nil {
+    target.payloads = [][]byte{util.ReadBytes(target.BodyReader)}
     target.BodyReader = nil
   }
   tracker.lastStatusCode = -1
@@ -645,22 +717,6 @@ func activateTracker(tracker *InvocationTracker) {
   targetInvocations.lock.Unlock()
 }
 
-func extractTargetHost(target *InvocationSpec) {
-  target.host = ""
-  for _, kv := range target.Headers {
-    if strings.EqualFold(kv[0], "Host") {
-      target.host = kv[1]
-    }
-  }
-  if target.host == "" {
-    if url, err := url.Parse(target.URL); err == nil {
-      target.host = url.Host
-    } else {
-      log.Printf("[%s]: Failed to parse target URL [%s]\n", hostLabel, target.URL)
-    }
-  }
-}
-
 func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*InvocationResult {
   activateTracker(tracker)
 
@@ -674,7 +730,6 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
   stopChannel := tracker.StopChannel
   tracker.lock.RUnlock()
 
-  extractTargetHost(target)
   completedCount := 0
   remaining := 0
   time.Sleep(target.initialDelayD)
@@ -701,12 +756,6 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
     for i := 0; i < target.Replicas; i++ {
       callCounter := completedCount + i + 1
       targetID := target.Name + "[" + strconv.Itoa(i+1) + "]" + "[" + strconv.Itoa(callCounter) + "]"
-      if target.Body != "" && target.autoPayloadSize <= 0 {
-        target.payloadBody = target.Body
-      } else if target.Body == "" && target.BodyReader != nil {
-        target.payloadBody = util.Read(target.BodyReader)
-        target.BodyReader = nil
-      }
       wg.Add(1)
       go invokeTarget(tracker, targetID, target, httpClient, sinks, resultChannel, wg)
     }
@@ -747,14 +796,54 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
   return results
 }
 
-func newClientRequest(method string, url string, headers [][]string, body io.Reader) (*http.Request, error) {
-  if req, err := http.NewRequest(method, url, body); err == nil {
+func invokeTarget(tracker *InvocationTracker, targetID string, target *InvocationSpec, client *HTTPClientTracker,
+  sinks []ResultSink, resultChannel chan *InvocationResult, wg *sync.WaitGroup) {
+  tracker.lock.RLock()
+  trackerID := tracker.ID
+  tracker.lock.RUnlock()
+  result := &InvocationResult{
+    Headers: map[string][]string{},
+    Errors:  map[string]interface{}{},
+  }
+  result.TargetName = target.Name
+  result.TargetID = targetID
+  if target.Random {
+    if r := util.Random(len(target.BURLS) + 1); r == 0 {
+      result.URL = target.URL
+    } else {
+      result.URL = target.BURLS[r-1]
+    }
+  } else {
+    result.URL = target.URL
+  }
+  result.Headers = map[string][]string{}
+  if resp, err := doInvoke(trackerID, targetID, target, client, result, tracker); err == nil {
+    if !tracker.Status.StopRequested || tracker.Status.Stopped {
+      doProcessResponse(trackerID, targetID, resp, result, tracker)
+      if target.AB {
+        handleABCall(trackerID, targetID, target, result.RequestID, client, sinks, resultChannel, tracker)
+      }
+    }
+  } else {
+    processError(trackerID, targetID, result, err, tracker)
+  }
+  if !tracker.Status.StopRequested || tracker.Status.Stopped {
+    publishResult(trackerID, targetID, result, sinks, resultChannel)
+  }
+  wg.Done()
+}
+
+func newClientRequest(method, targetURL string, headers [][]string, body io.Reader) (*http.Request, error) {
+  if req, err := http.NewRequest(method, targetURL, body); err == nil {
     for _, h := range headers {
       if strings.EqualFold(h[0], "host") {
         req.Host = h[1]
       } else {
         req.Header.Add(h[0], h[1])
       }
+    }
+    if req.Host == "" {
+      req.Host = req.URL.Host
     }
     return req, nil
   } else {
@@ -776,15 +865,19 @@ func doInvoke(index uint32, targetID string, target *InvocationSpec,
   }
   result.URL, result.RequestID = prepareTargetURL(result.URL, target.SendID, result.RequestID)
   originalRequestId := result.RequestID
-  if req, err := newClientRequest(target.Method, result.URL, headers, strings.NewReader(target.payloadBody)); err == nil {
-    req.Host = target.host
+  var requestReader io.ReadCloser
+  var requestWriter io.WriteCloser
+  if len(target.payloads) > 1 {
+    requestReader, requestWriter = io.Pipe()
+  } else if len(target.payloads) == 1 && len(target.payloads[0]) > 0 {
+    requestReader = ioutil.NopCloser(bytes.NewReader(target.payloads[0]))
+  }
+  if req, err := newClientRequest(target.Method, result.URL, headers, requestReader); err == nil {
     result.URI = req.URL.Path
+    client.tracker.tlsConfig = tlsConfig(req.Host, target.VerifyTLS)
     var resp *http.Response
     var reqError error
     for i := 0; i <= target.Retries; i++ {
-      if resp != nil {
-        resp.Body.Close()
-      }
       if tracker.Status.StopRequested || tracker.Status.Stopped {
         break
       }
@@ -799,10 +892,18 @@ func doInvoke(index uint32, targetID string, target *InvocationSpec,
       tracker.Status.TotalRequests++
       metrics.UpdateTargetRequestCount(tracker.Target.Name)
       tracker.lock.Unlock()
-      startTime := time.Now().UnixNano()
+
+      if requestWriter != nil {
+        go writeRequestPayload(requestWriter, result, tracker)
+      }
+      startTime := time.Now()
       resp, reqError = client.Do(req)
-      endTime := time.Now().UnixNano()
-      result.TimeTakenMs = int((endTime - startTime) / 1000000)
+      if reqError == nil && resp != nil {
+        readResponsePayload(resp, result, tracker)
+      }
+      endTime := time.Now()
+      result.TookNanos = int(endTime.Sub(startTime).Nanoseconds())
+
       retry := reqError != nil
       if !retry && target.RetriableStatusCodes != nil {
         for _, retriableCode := range target.RetriableStatusCodes {
@@ -823,7 +924,7 @@ func doInvoke(index uint32, targetID string, target *InvocationSpec,
         }
         if target.Fallback && len(target.BURLS) > i {
           newURL, newRequestID := prepareTargetURL(target.BURLS[i], target.SendID, originalRequestId+"-"+strconv.Itoa(i+1))
-          if req2, err := newClientRequest(target.Method, newURL, headers, strings.NewReader(target.payloadBody)); err == nil {
+          if req2, err := newClientRequest(target.Method, newURL, headers, bytes.NewReader(target.payloads[0])); err == nil {
             req = req2
             result.RetryURL = newURL
             result.RequestID = newRequestID
@@ -866,20 +967,75 @@ func unsafeReportRepeatedResponse(tracker *InvocationTracker) {
   }
 }
 
+func writeRequestPayload(w io.WriteCloser, result *InvocationResult, tracker *InvocationTracker) {
+  if w != nil {
+    size, first, last, err := util.WriteAndTrack(w, tracker.Target.payloads, tracker.Target.streamDelayD)
+    if err == "" {
+      result.RequestPayloadSize = size
+      result.FirstByteOutAt = first.UTC().String()
+      result.LastByteOutAt = last.UTC().String()
+    } else {
+      result.Errors["errorWrite"] = err
+    }
+  }
+}
+
+func readResponsePayload(resp *http.Response, result *InvocationResult, tracker *InvocationTracker) {
+  if resp != nil && resp.Body != nil {
+    defer resp.Body.Close()
+    collect := tracker.Target.CollectResponse || tracker.Target.Expectation != nil && len(tracker.Target.Expectation.payload) > 0
+    data, size, first, last, err := util.ReadAndTrack(resp.Body, collect)
+    if err == "" {
+      result.ResponsePayloadSize = size
+      result.FirstByteInAt = first.UTC().String()
+      result.LastByteInAt = last.UTC().String()
+      if collect {
+        result.Data = data
+      }
+    } else {
+      result.Errors["errorRead"] = err
+    }
+  }
+}
+
+func validateResponse(result *InvocationResult, tracker *InvocationTracker) {
+  expectation := tracker.Target.Expectation
+  if expectation == nil {
+    return
+  }
+  if result.StatusCode != expectation.StatusCode {
+    result.Errors["statusCode"] = map[string]interface{}{"expected": expectation.StatusCode, "actual": result.StatusCode}
+  }
+  if expectation.PayloadLength > 0 {
+    if result.ResponsePayloadSize != expectation.PayloadLength {
+      result.Errors["payloadLength"] = map[string]interface{}{"expected": expectation.PayloadLength, "actual": result.ResponsePayloadSize}
+    }
+  }
+  if len(expectation.Payload) > 0 {
+    if bytes.Compare(expectation.payload, result.Data) != 0 {
+      result.Errors["payload"] = map[string]interface{}{"expected": expectation.PayloadLength, "actual": result.ResponsePayloadSize}
+    }
+  }
+  if len(expectation.headersRegexp) > 0 {
+    if !util.ContainsAllHeaders(result.Headers, expectation.headersRegexp) {
+      result.Errors["headers"] = map[string]interface{}{"expected": expectation.Headers, "actual": result.Headers}
+    }
+  }
+}
+
 func doProcessResponse(index uint32, targetID string, resp *http.Response, result *InvocationResult, tracker *InvocationTracker) {
   if resp == nil {
     return
   }
-  if resp.Body != nil {
-    defer resp.Body.Close()
-  }
   for header, values := range resp.Header {
-    result.Headers[header] = values
+    result.Headers[strings.ToLower(header)] = values
   }
-  result.Headers["Status"] = []string{resp.Status}
+  result.Headers["status"] = []string{resp.Status}
   result.Status = resp.Status
   result.StatusCode = resp.StatusCode
-
+  if tracker.Target.Expectation != nil {
+    validateResponse(result, tracker)
+  }
   tracker.lock.Lock()
   target := tracker.Target
   isRepeatStatus := tracker.lastStatusCode == result.StatusCode
@@ -898,37 +1054,18 @@ func doProcessResponse(index uint32, targetID string, resp *http.Response, resul
   tracker.Status.SuccessCount++
   tracker.lock.Unlock()
 
-  var responseLength int64
-  if resp.Body != nil {
-    if target.CollectResponse {
-      result.Body = util.Read(resp.Body)
-      responseLength = int64(len(result.Body))
-    } else {
-      responseLength, _ = io.Copy(ioutil.Discard, resp.Body)
-    }
+  url := result.URL
+  if result.RetryURL != "" {
+    url = result.RetryURL
   }
-  if global.EnableInvocationLogs {
-    headerLog := ""
-    if global.LogResponseHeaders {
-      headerLogs := []string{}
-      for header, values := range resp.Header {
-        headerLogs = append(headerLogs, header+":["+strings.Join(values, ",")+"]")
-      }
-      headerLog = strings.Join(headerLogs, ",")
+  if global.EnableInvocationLogs || !isRepeatStatus {
+    data := InvocationLog{Host: hostLabel, Invocation: index, Target: targetID, URL: url, Result: result}
+    if global.EnableInvocationLogs {
+      log.Println(util.ToJSON(data))
     }
-    url := result.URL
-    if result.RetryURL != "" {
-      url = result.RetryURL
-    }
-    msg := fmt.Sprintf("[%s]: Invocation[%d]: Target %s Response Status: %s, URL: [%s], Headers: [%s], Payload Length: [%d]",
-      hostLabel, index, targetID, resp.Status, url, headerLog, responseLength)
-    log.Println(msg)
-
     tracker.lock.Lock()
     if !isRepeatStatus {
-      events.SendEventJSON(Client_InvocationResponse, fmt.Sprintf("%d-%s", tracker.ID, target.Name),
-        map[string]interface{}{"id": tracker.ID, "details": fmt.Sprintf("[%s]: Invocation[%d]: Target %s Response Status: %s, URL: [%s], Payload Length: [%d]",
-          hostLabel, index, targetID, resp.Status, url, responseLength)})
+      events.SendEventJSON(Client_InvocationResponse, fmt.Sprintf("%d-%s", tracker.ID, target.Name), data)
     }
     tracker.lock.Unlock()
   }
@@ -994,38 +1131,4 @@ func handleABCall(index uint32, targetID string, target *InvocationSpec, aReques
       tracker.lock.Unlock()
     }
   }
-}
-
-func invokeTarget(tracker *InvocationTracker, targetID string, target *InvocationSpec, client *HTTPClientTracker,
-  sinks []ResultSink, resultChannel chan *InvocationResult, wg *sync.WaitGroup) {
-  tracker.lock.RLock()
-  trackerID := tracker.ID
-  tracker.lock.RUnlock()
-  result := &InvocationResult{}
-  result.TargetName = target.Name
-  result.TargetID = targetID
-  if target.Random {
-    if r := util.Random(len(target.BURLS) + 1); r == 0 {
-      result.URL = target.URL
-    } else {
-      result.URL = target.BURLS[r-1]
-    }
-  } else {
-    result.URL = target.URL
-  }
-  result.Headers = map[string][]string{}
-  if resp, err := doInvoke(trackerID, targetID, target, client, result, tracker); err == nil {
-    if !tracker.Status.StopRequested || tracker.Status.Stopped {
-      doProcessResponse(trackerID, targetID, resp, result, tracker)
-      if target.AB {
-        handleABCall(trackerID, targetID, target, result.RequestID, client, sinks, resultChannel, tracker)
-      }
-    }
-  } else {
-    processError(trackerID, targetID, result, err, tracker)
-  }
-  if !tracker.Status.StopRequested || tracker.Status.Stopped {
-    publishResult(trackerID, targetID, result, sinks, resultChannel)
-  }
-  wg.Done()
 }

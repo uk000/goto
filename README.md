@@ -203,6 +203,7 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 - [Lockers Dump APIs](#lockers-dump-apis)
 - [Peers Events APIs](#registry-events-apis)
 - [Peer Targets Management APIs](#peers-targets-management-apis)
+- [Peers Client Results APIs](#peers-client-results-apis)
 - [Peer Jobs Management APIs](#peers-jobs-management-apis)
 - [Peers Config Management APIs](#peers-config-management-apis)
 - [Peer Call APIs](#peers-call-apis)
@@ -2172,13 +2173,25 @@ These APIs manage client invocation targets on peers, allowing to add, remove, s
 | POST, PUT | /registry/peers/`{peer}`<br/>/targets/`{targets}`/stop | Stop given targets on the given peer |
 | POST, PUT | /registry/peers/`{peer}`<br/>/targets/stop/all | Stop all targets on the given peer |
 | POST, PUT | /registry/peers<br/>/targets/stop/all | Stop all targets on the given peer |
-| POST, PUT | /registry/peers/targets<br/>/results/all/`{enable}`  | Controls whether results should be summarized across all targets. Disabling this when not needed can improve performance. Disabled by default. |
-| POST, PUT | /registry/peers/targets<br/>/results/invocations/`{enable}`  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
 | POST      | /registry/peers/targets/clear   | Remove all targets from all peers |
-| GET       | /registry/lockers/`{label}`<br/>/peers/targets<br/>/results?detailed=Y | Get invocation summary or detailed results for all client peer instances from the given labeled locker. When `detailed=y` query parameter is passed, the results are broken down by targets. |
-| GET       | /registry/peers/targets<br/>/results?detailed=Y | Get target invocation summary results for all client peer instances from the current locker. When `detailed=y` query parameter is passed, the results are broken down by targets.|
 
 ###### <small> [Back to TOC](#goto-registry) </small>
+
+
+# <a name="peers-client-results-apis"></a>
+#### Peers Client Results APIs
+
+These APIs allow reading of combined client invocation results collected from all peers. When `detailed=y` query parameter is passed, the results of each category are broken down further by status codes and times buckets.
+
+|METHOD|URI|Description|
+|---|---|---|
+| POST, PUT | /registry/peers/client<br/>/results/all/`{enable}`  | Controls whether results should be summarized across all targets. Disabling this when not needed can improve performance. Disabled by default. |
+| POST, PUT | /registry/peers/client<br/>/results/invocations/`{enable}`  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/client<br/>/results?detailed=Y | Get invocation summary or detailed results for given peer's instances from the given labeled locker.  |
+| GET       | /registry/peers/`{peer}`<br/>/client/results?detailed=Y | Get invocation summary or detailed results for given peer's instances from the current locker.|
+| GET       | /registry/lockers/`{label}`<br/>/peers/client<br/>/results?detailed=Y | Get invocation summary or detailed results for all client peer instances from the given labeled locker. |
+| GET       | /registry/peers/client<br/>/results?detailed=Y | Get invocation summary or detailed results for all client peer instances from the current locker. |
+
 
 # <a name="peers-jobs-management-apis"></a>
 #### Peers Jobs Management APIs

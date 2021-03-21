@@ -450,9 +450,14 @@ func enableAllTargetsResultsCollection(w http.ResponseWriter, r *http.Request) {
 }
 
 func enableInvocationResultsCollection(w http.ResponseWriter, r *http.Request) {
-  results.EnableInvocationResults(util.IsYes(util.GetStringParamValue(r, "enable")))
-  w.WriteHeader(http.StatusOK)
-  msg := "Changed invocation results collection"
+  enable := util.GetBoolParamValue(r, "enable")
+  results.EnableInvocationResults(enable)
+  msg := ""
+  if enable {
+    msg = "Will collect invocation results"
+  } else {
+    msg = "Will not collect invocation results"
+  }
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }

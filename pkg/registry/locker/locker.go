@@ -919,12 +919,16 @@ func (cl *CombiLocker) SearchOrGetDataLockerPaths(uriPrefix string, pattern *reg
   return dataPaths
 }
 
-func (cl *CombiLocker) GetTargetsResults(peerName string, trackingHeaders []string, crossTrackingHeaders map[string][]string, 
-  trackingTimeBuckets [][]int) map[string]map[string]*results.TargetResults {
-  cl.lock.RLock()
-  defer cl.lock.RUnlock()
+func (cl *CombiLocker) GetPeersClientResults(peerName string, trackingHeaders []string, crossTrackingHeaders map[string][]string,
+  trackingTimeBuckets [][]int, detailed ...bool) map[string]map[string]*results.TargetResults {
   summary := map[string]map[string]*results.TargetResults{}
   peerLockers := map[string]*PeerLocker{}
+  isDetailed := true
+  if len(detailed) > 0 {
+    isDetailed = detailed[0]
+  }
+  cl.lock.RLock()
+  defer cl.lock.RUnlock()
   if peerName != "" {
     peerName = strings.ToLower(peerName)
     if cl.PeerLockers[peerName] != nil {
@@ -951,7 +955,9 @@ func (cl *CombiLocker) GetTargetsResults(peerName string, trackingHeaders []stri
           if data := targetData.Data; data != "" {
             result := &results.TargetResults{}
             if err := util.ReadJson(data, result); err == nil {
-              results.AddDeltaResults(summary[peer][target], result)
+              results.AddDeltaResults(summary[peer][target], result, isDetailed)
+            } else {
+              fmt.Printf("Error parsing peer result json: %s\n", err.Error())
             }
           }
         }
@@ -963,9 +969,9 @@ func (cl *CombiLocker) GetTargetsResults(peerName string, trackingHeaders []stri
   return summary
 }
 
-func (cl *CombiLocker) GetTargetsSummaryResults(peerName string, trackingHeaders []string, crossTrackingHeaders map[string][]string, 
+func (cl *CombiLocker) GetPeersClientSummaryResults(peerName string, trackingHeaders []string, crossTrackingHeaders map[string][]string,
   trackingTimeBuckets [][]int) map[string]*results.TargetsSummaryResults {
-  clientResultsSummary := cl.GetTargetsResults(peerName, trackingHeaders, crossTrackingHeaders, trackingTimeBuckets)
+  clientResultsSummary := cl.GetPeersClientResults(peerName, trackingHeaders, crossTrackingHeaders, trackingTimeBuckets, false)
   cl.lock.RLock()
   defer cl.lock.RUnlock()
   result := map[string]*results.TargetsSummaryResults{}
@@ -973,7 +979,7 @@ func (cl *CombiLocker) GetTargetsSummaryResults(peerName string, trackingHeaders
     result[peer] = &results.TargetsSummaryResults{}
     result[peer].Init()
     for _, targetResult := range targetsResults {
-      result[peer].AddTargetResult(targetResult)
+      result[peer].AddTargetResult(targetResult, false)
     }
   }
   return result

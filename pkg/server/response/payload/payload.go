@@ -478,6 +478,9 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
   pr.lock.RUnlock()
   duration := util.RandomDuration(durMin, durMax)
   delay := util.RandomDuration(delayMin, delayMax)
+  if delay == 0 {
+    delay = 1 * time.Millisecond
+  }
   if duration > 0 {
     count = int((duration.Milliseconds() / delay.Milliseconds()))
   }
@@ -491,9 +494,6 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
   }
   if size < chunk {
     payload = fixPayload(payload, chunk)
-  }
-  if delay == 0 {
-    delay = 10 * time.Millisecond
   }
   if chunk == 0 && count > 0 && size > 0 {
     chunk = size/count + 1

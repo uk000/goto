@@ -1479,7 +1479,7 @@ func getPeerLocker(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func getTargetsSummaryResults(w http.ResponseWriter, r *http.Request) {
+func getPeersClientSummaryResults(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
   peerName := util.GetStringParamValue(r, "peer")
@@ -1497,9 +1497,9 @@ func getTargetsSummaryResults(w http.ResponseWriter, r *http.Request) {
   } else {
     var result interface{}
     if detailed {
-      result = locker.GetTargetsResults(peerName, registry.trackingHeaders, registry.crossTrackingHeaders, registry.trackingTimeBuckets)
+      result = locker.GetPeersClientResults(peerName, registry.trackingHeaders, registry.crossTrackingHeaders, registry.trackingTimeBuckets)
     } else {
-      result = locker.GetTargetsSummaryResults(peerName, registry.trackingHeaders, registry.crossTrackingHeaders, registry.trackingTimeBuckets)
+      result = locker.GetPeersClientSummaryResults(peerName, registry.trackingHeaders, registry.crossTrackingHeaders, registry.trackingTimeBuckets)
     }
     util.WriteJsonPayload(w, result)
     msg = "Reported locker targets results summary"
@@ -1744,7 +1744,7 @@ func getPeerTargets(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func enableAllTargetsResultsCollection(w http.ResponseWriter, r *http.Request) {
+func enableAllClientResultsCollection(w http.ResponseWriter, r *http.Request) {
   result := registry.enableAllOrInvocationsTargetsResultsCollection(util.GetStringParamValue(r, "enable"), true)
   checkBadPods(result, w)
   msg := util.ToJSON(result)

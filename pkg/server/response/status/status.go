@@ -253,6 +253,7 @@ func Middleware(next http.Handler) http.Handler {
       } else {
         msg = fmt.Sprintf("Reporting status: [%d] for URI [%s].", irw.StatusCode, r.RequestURI)
       }
+      util.UpdateTrafficEventStatusCode(r, irw.StatusCode)
       util.AddLogMessage(msg, r)
       trigger.RunTriggers(r, irw, irw.StatusCode)
     }

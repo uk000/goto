@@ -51,7 +51,7 @@ func RunHttpServer(handlers ...util.ServerHandler) {
     WriteTimeout: 1 * time.Minute,
     ReadTimeout:  1 * time.Minute,
     IdleTimeout:  1 * time.Minute,
-    ConnContext:  WithConnContext,
+    ConnContext:  withConnContext,
     Handler:      HTTPHandler(r, h2c),
     ErrorLog:     log.New(ioutil.Discard, "discard", 0),
   }
@@ -64,7 +64,7 @@ func RunHttpServer(handlers ...util.ServerHandler) {
 
 func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    ctx, rs := WithRequestStore(r)
+    ctx, rs := withRequestStore(r)
     r = r.WithContext(ctx)
     if util.IsH2Upgrade(r) {
       if util.IsPutOrPost(r) {
@@ -89,25 +89,17 @@ func ContextMiddleware(next http.Handler) http.Handler {
       util.CopyHeaders("Stopping-Readiness-Request", w, r.Header, r.Host, r.RequestURI)
       w.WriteHeader(http.StatusNotFound)
     } else if next != nil {
+      startTime := time.Now()
+      w.Header().Add("Goto-In-At", startTime.UTC().String())
       if r.Context().Value(util.RequestStoreKey) == nil {
-        ctx, rs := WithRequestStore(r)
+        ctx, rs := withRequestStore(r)
         rs.IsH2C = r.ProtoMajor == 2
         r = r.WithContext(ctx)
       }
-      r = r.WithContext(WithPort(r.Context(), util.GetListenerPortNum(r)))
-      rw := w
+      r = r.WithContext(withPort(r.Context(), util.GetListenerPortNum(r)))
       var irw *intercept.InterceptResponseWriter
-      if !util.IsKnownNonTraffic(r) {
-        irw = intercept.NewInterceptResponseWriter(r, w, true)
-        util.SetInterceptResponseWriter(r, irw)
-        rw = irw
-      }
-      startTime := time.Now()
-      w.Header().Add("Goto-In-At", startTime.UTC().String())
-      next.ServeHTTP(rw, r)
-      endTime := time.Now()
-      w.Header().Add("Goto-Out-At", endTime.UTC().String())
-      w.Header().Add("Goto-Took", endTime.Sub(startTime).String())
+      w, irw = withIntercept(r, w)
+      next.ServeHTTP(w, r)
       statusCode := http.StatusOK
       bodyLength := 0
       if !util.IsKnownNonTraffic(r) && irw != nil {
@@ -115,6 +107,9 @@ func ContextMiddleware(next http.Handler) http.Handler {
         bodyLength = irw.BodyLength
       }
       w.Header().Add("Goto-Response-Status", strconv.Itoa(statusCode))
+      endTime := time.Now()
+      w.Header().Add("Goto-Out-At", endTime.UTC().String())
+      w.Header().Add("Goto-Took", endTime.Sub(startTime).String())
       if irw != nil {
         irw.Proceed()
       }
@@ -123,11 +118,21 @@ func ContextMiddleware(next http.Handler) http.Handler {
   })
 }
 
-func WithConnContext(ctx context.Context, conn net.Conn) context.Context {
+func withIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *intercept.InterceptResponseWriter) {
+  var irw *intercept.InterceptResponseWriter
+  if !util.IsKnownNonTraffic(r) {
+    irw = intercept.NewInterceptResponseWriter(r, w, true)
+    r.Context().Value(util.RequestStoreKey).(*util.RequestStore).InterceptResponseWriter = irw
+    w = irw
+  }
+  return w, irw
+}
+
+func withConnContext(ctx context.Context, conn net.Conn) context.Context {
   return context.WithValue(ctx, util.ConnectionKey, conn)
 }
 
-func WithRequestStore(r *http.Request) (context.Context, *util.RequestStore) {
+func withRequestStore(r *http.Request) (context.Context, *util.RequestStore) {
   isAdminRequest := util.CheckAdminRequest(r)
   rs := &util.RequestStore{
     IsAdminRequest:      isAdminRequest,
@@ -145,7 +150,7 @@ func WithRequestStore(r *http.Request) (context.Context, *util.RequestStore) {
   return context.WithValue(r.Context(), util.RequestStoreKey, rs), rs
 }
 
-func WithPort(ctx context.Context, port int) context.Context {
+func withPort(ctx context.Context, port int) context.Context {
   return context.WithValue(ctx, util.CurrentPortKey, port)
 }
 

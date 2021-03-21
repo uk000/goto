@@ -260,7 +260,6 @@ func GetURIDelay(r *http.Request) *DelayConfig {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    util.AddLogMessage(fmt.Sprintf("Request URI: [%s], Protocol: [%s], Method: [%s]", r.RequestURI, r.Proto, r.Method), r)
     if util.IsKnownNonTraffic(r) {
       if next != nil {
         next.ServeHTTP(w, r)

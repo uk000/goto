@@ -1,6 +1,7 @@
 package header
 
 import (
+  "fmt"
   "net/http"
 
   "goto/pkg/global"
@@ -20,6 +21,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    util.AddLogMessage(fmt.Sprintf("Request URI: [%s], Protocol: [%s], Method: [%s]", r.RequestURI, r.Proto, r.Method), r)
     if global.LogRequestHeaders {
       util.AddLogMessage("Request Headers: "+util.GetRequestHeadersLog(r), r)
     }

@@ -104,10 +104,6 @@ func GetInterceptResponseWriter(r *http.Request) interface{} {
   return r.Context().Value(RequestStoreKey).(*RequestStore).InterceptResponseWriter
 }
 
-func SetInterceptResponseWriter(r *http.Request, irw interface{}) {
-  r.Context().Value(RequestStoreKey).(*RequestStore).InterceptResponseWriter = irw
-}
-
 func IsHeadersSent(r *http.Request) bool {
   rs := r.Context().Value(RequestStoreKey)
   return rs != nil && rs.(*RequestStore).IsHeadersSent
@@ -770,6 +766,60 @@ func DiscardRequestBody(r *http.Request) {
   io.Copy(ioutil.Discard, r.Body)
 }
 
+func ReadAndTrack(r io.Reader, collect bool) ([]byte, int, time.Time, time.Time, string) {
+  buf := make([]byte, 1000)
+  var result []byte
+  var readSize int
+  var first, last time.Time
+  for {
+    size, err := r.Read(buf)
+    now := time.Now()
+    if first.IsZero() {
+      first = now
+    }
+    last = now
+    readSize += size
+    if collect {
+      result = append(result, buf[0:size]...)
+    }
+    if err == io.EOF {
+      return result, readSize, first, last, ""
+    } else if err != nil {
+      return result, readSize, first, last, err.Error()
+    }
+  }
+}
+
+func WriteAndTrack(w io.WriteCloser, data [][]byte, delay time.Duration) (int, time.Time, time.Time, string) {
+  defer w.Close()
+  count := len(data)
+  var writeSize int
+  var first, last time.Time
+  for i := 0; i < count; i++ {
+    d := data[i]
+    size := len(d)
+    for {
+      n, err := w.Write(d)
+      now := time.Now()
+      if first.IsZero() {
+        first = now
+      }
+      last = now
+      writeSize += n
+      if err != nil {
+        return writeSize, first, last, err.Error()
+      }
+      if n >= size {
+        break
+      }
+    }
+    if i < count-1 && delay > 0 {
+      time.Sleep(delay)
+    }
+  }
+  return writeSize, first, last, ""
+}
+
 func CloseResponse(r *http.Response) {
   defer r.Body.Close()
   io.Copy(ioutil.Discard, r.Body)
@@ -823,6 +873,24 @@ func FindURIInMap(uri string, i interface{}) string {
 
 func IsURIInMap(uri string, m map[string]interface{}) bool {
   return FindURIInMap(uri, m) != ""
+}
+
+func StringArrayContains(list []string, r *regexp.Regexp) bool {
+  for _, v := range list {
+    if r.MatchString(v) {
+      return true
+    }
+  }
+  return false
+}
+
+func ContainsAllHeaders(headers http.Header, expected map[string]*regexp.Regexp) bool {
+  for h, r := range expected {
+    if h != "" && (headers[h] == nil || r != nil && !StringArrayContains(headers[h], r)) {
+      return false
+    }
+  }
+  return true
 }
 
 func IsYes(flag string) bool {
@@ -945,6 +1013,9 @@ func Random64(max int64) int64 {
 }
 
 func RandomDuration(min, max time.Duration) time.Duration {
+  if min == 0 && max == 0 {
+    return 0
+  }
   d := min
   if max > min {
     addOn := max - d
@@ -957,12 +1028,16 @@ func RandomFrom(vals []int) int {
   return vals[random.Intn(len(vals))]
 }
 
-func GenerateRandomString(size int) string {
+func GenerateRandomPayload(size int) []byte {
   b := make([]byte, size)
   for i := range b {
     b[i] = charset[Random(randomCharsetLength)]
   }
-  return string(b)
+  return b
+}
+
+func GenerateRandomString(size int) string {
+  return string(GenerateRandomPayload(size))
 }
 
 func CreateHttpClient() *http.Client {

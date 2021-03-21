@@ -14,6 +14,7 @@ type TransportTracker struct {
   dialer    net.Dialer
   connCount int
   lock      sync.RWMutex
+  tlsConfig *tls.Config
 }
 
 type HTTPTransportTracker struct {

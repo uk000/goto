@@ -3,15 +3,13 @@
 |Field|Data Type|Default Value|Description|
 |---|---|---|---|
 | name         | string         || Name for this target |
+| protocol     | string         |`HTTP/1.1`| Request Protocol to use. Supports `HTTP/1.1` (default) and `HTTP/2.0`.|
 | method       | string         || HTTP method to use for this target |
 | url          | string         || URL for this target   |
 | burls        | []string       || Secondary URLs to use for `fallback` or `AB Mode` (see below)   |
-| verifyTLS    | bool           |false| Whether the TLS certificate presented by the target is verified. (Also see `--certs` command arg) |
 | headers      | [][]string     || Headers to be sent to this target |
 | body         | string         || Request body to use for this target|
 | autoPayload  | string         || Auto-generate payload of this size when making calls to this target. This field supports numeric sizes (e.g. `1000`) as well as byte size suffixes `K`, `KB`, `M` and `MB` (e.g. `1K`). If auto payload is specified, `body` field is ignored. |
-| protocol     | string         |`HTTP/1.1`| Request Protocol to use. Supports `HTTP/1.1` (default) and `HTTP/2.0`.|
-| autoUpgrade  | bool           |false| Whether client should negotiate auto-upgrade from http/1.1 to http/2. |
 | replicas     | int            |1| Number of parallel invocations to be done for this target. |
 | requestCount | int            |1| Number of requests to be made per replicas for this target. The final request count becomes replicas * requestCount   |
 | initialDelay | duration       || Minimum delay to wait before starting traffic to a target. Actual delay will be the max of all the targets being invoked in a given round of invocation. |
@@ -24,10 +22,26 @@
 | connIdleTimeout | duration    |5m| Idle Timeout for target connection |
 | requestTimeout | duration     |30s| Timeout for HTTP requests to the target |
 | autoInvoke   | bool           |false| Whether this target should be invoked as soon as it's added |
-| fallback     | bool           |false| If enabled, retry attempts will use secondary urls (`burls`) instead of the primary url. The query param `x-request-id` will carry suffixes of `-<counter>` for each retry attempt. |
-| ab      | bool           |false| If enabled, each request will simultaneously be sent to all secondary urls (`burls`) in addition to the primary url. The query param `x-request-id` will carry suffixes of `-B-<index>` for each secondary URL. |
-| random      | bool           |false| If enabled, each request will pick a random URL from either the primary URL or the B-URLs. |
+| fallback     | bool  |false| If enabled, retry attempts will use secondary urls (`burls`) instead of the primary url. The query param `x-request-id` will carry suffixes of `-<counter>` for each retry attempt. |
+| ab      | bool |false| If enabled, each request will simultaneously be sent to all secondary urls (`burls`) in addition to the primary url. The query param `x-request-id` will carry suffixes of `-B-<index>` for each secondary URL. |
+| random      | bool |false| If enabled, each request will pick a random URL from either the primary URL or the B-URLs. |
+| streamPayload  | []string  || If specified, elements of this array are sent to the target server as a stream with delay between each chunk applied based on `streamDelay`. |
+| streamDelay | duration |"10ms"| For streaming request payload (`streamPayload` field), this configures the delay to be applied between payload chunks. |
+| binary      | bool |false| Indicates whether request and response payload should be treated as binary data for this target |
+| collectResponse | bool  |false| Indicates whether response payload should be kept in the results for this target. By default, response payload is discarded. |
+| expectation | Expectation  |{}| If specified, fields of this object sets the expectations that `goto` will validate against each invocation response. |
+| autoUpgrade  | bool           |false| Whether client should negotiate auto-upgrade from http/1.1 to http/2. |
+| verifyTLS    | bool           |false| Whether the TLS certificate presented by the target is verified. (Also see `--certs` command arg) |
 
+
+#### Target Response Expectation
+
+|Field|Data Type|Default Value|Description|
+|---|---|---|---|
+| statusCode | int   || Validate response status code to match this value. Status code must be specified if expectation is given for a target. |
+| payloadLength | int   || Validate response payload length to match this value |
+| payload | string   || Validate response payload to match this value. For binary paylods, the expected payload should be specified as base64 encoded string |
+| headers | map[string]string   || Validate response headers to contain these headers and optionally header values |
 
 
 #### Client Results Schema (output of API /client/results)
@@ -42,11 +56,16 @@ The schema below describes fields per target.
 | firstResponse        | time                | Time of first response received from the target |
 | lastResponse         | time                | Time of last response received from the target |
 | retriedInvocationCounts | int | Total requests to this target that were retried at least once |
+| countsByHeaders      | string->HeaderCounts   | Response counts by header, with detailed info captured in `HeaderCounts` object described below |
 | countsByStatus       | string->int   | Response counts by HTTP Status |
 | countsByStatusCodes  | string->int   | Response counts by HTTP Status Code |
-| countsByHeaders      | string->HeaderCounts   | Response counts by header, with detailed info captured in `HeaderCounts` object described below |
-| countsByURIs         | string->int   | Response counts by URIs |
-| countsByTimeBuckets         | string->int   | Response counts by URIs |
+| countsByURIs         | string->KeyResultCounts   | Response counts by URI |
+| countsByRequestPayloadSizes         | string->KeyResultCounts   | Response counts by request payload sizes |
+| countsByResponsePayloadSizes | string->KeyResultCounts   | Response counts by response payload sizes |
+| countsByRetries | string->KeyResultCounts   | Response counts by number of retries |
+| countsByRetryReasons | string->KeyResultCounts   | Response counts by retry reasons |
+| countsByErrors | string->KeyResultCounts   | Response counts by error type (relevant for response validations) |
+| countsByTimeBuckets | string->KeyResultCounts   | Response counts by time buckets if defined |
 
 #### HeaderCounts schema
 
@@ -68,18 +87,18 @@ The schema below describes fields of HeaderCounts json (used in `countsByHeaders
 | lastResponse         | time | Time of last response received for this header |
 
 
-#### URICounts schema
+#### KeyResultCounts schema
 
-The schema below describes fields of json object used in `countsByURIs` result field.
+The schema below describes fields of json object used to report data related to invocation counts for various fields, e.g. `countsByURIs`.
 
 |Field|Data Type|Description|
 |---|---|---|
-| count       | int | number of responses for this uri  |
-| retries     | int | number of requests that were retried for this uri |
-| firstResponse | time | Time of first response for this uri  |
-| lastResponse  | time | Time of last response for this uri |
-| countsByStatusCodes | string->StatusCodeCounts   | counts for this uri broken down by status codes |
-| countsByTimeBuckets | string->TimeBucketsCounts   | counts for this uri broken down by response time buckets |
+| count       | int | number of responses for this key  |
+| retries     | int | number of requests that were retried for this key |
+| firstResponse | time | Time of first response for this key  |
+| lastResponse  | time | Time of last response for this key |
+| byStatusCodes | string->StatusCodeCounts   | counts for this key broken down by status codes |
+| byTimeBuckets | string->TimeBucketsCounts   | counts for this key broken down by response time buckets |
 
 #### StatusCodeCounts schema
 
@@ -91,7 +110,7 @@ The schema below describes fields of json object used in `countsByStatusCodes` r
 | retries     | int | number of requests that were retried for this status code |
 | firstResponse | time | Time of first response for this status code  |
 | lastResponse  | time | Time of last response for this status code |
-| countsByTimeBuckets | string->TimeBucketsCounts   | counts for this status code broken down by response time buckets (except when the status code counts is already a sub-result of time bucket counts) |
+| byTimeBuckets | string->TimeBucketsCounts   | counts for this status code broken down by response time buckets (except when the status code counts is already a sub-result of time bucket counts) |
 
 
 #### TimeBucketsCounts schema
@@ -120,15 +139,62 @@ The schema below describes fields per target.
 
 #### Invocation Results Schema (output of API /client/results/invocations)
 
-- Reports results for all invocations since last clearing of results, as an Object with invocation counter as key and invocation's results as value. The results for each invocation have same schema as `Client Results Schema`, with an additional bool flag `finished` to indicate whether the invocation is still running or has finished. See example below.
-
-#### Active Targets Schema (output of API /client/targets/active)
-
-- Reports set of targets for which traffic is running at the time of API invocation. Result is an object with invocation counter as key, and value as object that has status for all active targets in that invocation. For each active target, the following data is reported. Also see example below.
+- Reports results for all invocations since last clearing of results, as an Object with invocation counter as key and following JSON as result. Invocation results are not retained unless explicitly enabled via API `/results/invocations/{enable}`.
 
 |Field|Data Type|Description|
 |---|---|---|
-| target                | Client Target       | Target details as described in `Client Target JSON Schema`  |
-| completedRequestCount | int                 | Number of requests completed for this target in this invocation |
-| stopRequested         | bool                | Whether `stop` has been requested for this target |
-| stopped               | bool                | Whether the target has already stopped. Quite likely this will not show up as true, because the target gets removed from active set soon after it's stopped |
+| invocationIndex | int | invocation counter  |
+| target     | Target | target of this invocation. See `Client Target JSON Schema` |
+| status | InvocationStatus | See `InvocationStatus` schema below. |
+| results  | []InvocationResult | One result per request sent for this invocation. See `InvocationResult` schema below. |
+
+
+
+#### InvocationStatus Schema
+
+- Used to report status of an invocation within `Invocation Results Schema`.
+
+|Field|Data Type|Description|
+|---|---|---|
+| totalRequests | int | total requests made to the target for this invocation, including retries  |
+| completedReplicas | int | number of requests that completed (totalRequests - retriesCount)  |
+| retriesCount | int | number of retries made across all requests  |
+| successCount | int | number of successful requests  |
+| failureCount | int | number of failed requests  |
+| abCount | int | number of requests made for A/B comparison if configured  |
+| stopRequested | bool | whether a request was made to stop this invocation while it's running  |
+| stopped | bool | whether the invocation has been stopped, either due to stop request or it finished all requests  |
+| closed | bool | whether the invocation has been marked as `finished` after being stopped.  |
+
+
+#### InvocationResult Schema
+
+- Used to report result of each invocation request within `Invocation Results Schema`.
+
+|Field|Data Type|Description|
+|---|---|---|
+| targetName | string | name of the target this invocation  |
+| targetID | string | target id of the target this invocation  |
+| status | string | response status text  |
+| statusCode | int | response status code  |
+| requestPayloadSize | int | request payload size (if request had a payload)  |
+| responsePayloadSize | int | response payload size (if response had a payload)  |
+| firstByteOutAt | string | time when first request payload byte was sent  |
+| lastByteOutAt | string | time when last request payload byte was sent  |
+| firstByteInAt | string | time when first reponse payload byte was read  |
+| lastByteInAt | string | time when last reponse payload byte was read  |
+| retries | int | number of retries done for this request  |
+| url | string | url of this request  |
+| uri | string | uri of this request  |
+| requestID | string | id of this request  |
+| headers | map[string][]string | response headers received  |
+| retryURL | string | if request was retried due to an error or response code, the last retry url  |
+| lastRetryReason | string | if request was retried due to an error or response code, the reason for last retry  |
+| tookNanos | int | total time taken by this request as observed by the clinet  |
+| errors | map[string]any | validation or other errors if any  |
+
+
+
+#### Active Targets Schema (output of API /client/targets/active)
+
+- Reports set of targets for which traffic is running at the time of API invocation. Result is an object with results grouped by target name, then grouped by invocation counter for the target (if same target has multiple ongoing invocations), and `InvocationStatus` as the value object. See `InvocationStatus` schema above.
