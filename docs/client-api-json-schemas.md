@@ -29,19 +29,22 @@
 | streamDelay | duration |"10ms"| For streaming request payload (`streamPayload` field), this configures the delay to be applied between payload chunks. |
 | binary      | bool |false| Indicates whether request and response payload should be treated as binary data for this target |
 | collectResponse | bool  |false| Indicates whether response payload should be kept in the results for this target. By default, response payload is discarded. |
-| expectation | Expectation  |{}| If specified, fields of this object sets the expectations that `goto` will validate against each invocation response. |
+| assertions | []Asssert  || List of assertions to be validated against each invocation response. Multiple assertions are applied with logical `OR` (disjunction) so that any one of them passing causes the result to be treated as passed. If all assertions fail, `errors` array in the result will contain the failure details.  |
 | autoUpgrade  | bool           |false| Whether client should negotiate auto-upgrade from http/1.1 to http/2. |
 | verifyTLS    | bool           |false| Whether the TLS certificate presented by the target is verified. (Also see `--certs` command arg) |
 
 
-#### Target Response Expectation
+#### Assertion JSON Schema
 
 |Field|Data Type|Default Value|Description|
 |---|---|---|---|
 | statusCode | int   || Validate response status code to match this value. Status code must be specified if expectation is given for a target. |
-| payloadLength | int   || Validate response payload length to match this value |
+| payloadSize | int   || Validate response payload size to match this value |
 | payload | string   || Validate response payload to match this value. For binary paylods, the expected payload should be specified as base64 encoded string |
 | headers | map[string]string   || Validate response headers to contain these headers and optionally header values |
+| retries | int   || If specified, the response must have the same number of retry attempts. |
+| failedURL | string   || If specified, the response must have a failure recorded for this URL (from the A/B URLs) |
+| successURL | string   || If specified, the response must have a success recorded for this URL (from the A/B URLs) |
 
 
 #### Client Results Schema (output of API /client/results)
@@ -53,19 +56,19 @@ The schema below describes fields per target.
 |---|---|---|
 | target            | string | Target for which these results are captured |
 | invocationCounts      | int                 | Total requests sent to this target |
-| firstResponse        | time                | Time of first response received from the target |
-| lastResponse         | time                | Time of last response received from the target |
+| firstResultAt        | time                | Time of first result received from the target |
+| lastResultAt         | time                | Time of last result received from the target |
 | retriedInvocationCounts | int | Total requests to this target that were retried at least once |
 | countsByHeaders      | string->HeaderCounts   | Response counts by header, with detailed info captured in `HeaderCounts` object described below |
 | countsByStatus       | string->int   | Response counts by HTTP Status |
-| countsByStatusCodes  | string->int   | Response counts by HTTP Status Code |
+| countsByStatusCodes  | string->TimeBucketsCounts   | Response counts by HTTP Status Code |
 | countsByURIs         | string->KeyResultCounts   | Response counts by URI |
-| countsByRequestPayloadSizes         | string->KeyResultCounts   | Response counts by request payload sizes |
+| countsByRequestPayloadSizes | string->KeyResultCounts   | Response counts by request payload sizes |
 | countsByResponsePayloadSizes | string->KeyResultCounts   | Response counts by response payload sizes |
 | countsByRetries | string->KeyResultCounts   | Response counts by number of retries |
 | countsByRetryReasons | string->KeyResultCounts   | Response counts by retry reasons |
 | countsByErrors | string->KeyResultCounts   | Response counts by error type (relevant for response validations) |
-| countsByTimeBuckets | string->KeyResultCounts   | Response counts by time buckets if defined |
+| countsByTimeBuckets | string->StatusCodeCounts   | Response counts by time buckets if defined |
 
 #### HeaderCounts schema
 
@@ -76,15 +79,13 @@ The schema below describes fields of HeaderCounts json (used in `countsByHeaders
 | header            | string | Header for which these results are captured |
 | count       | int | number of responses for this header  |
 | retries     | int | number of requests that were retried for this header |
-| firstResponse | time | Time of first response for this header  |
-| lastResponse  | time | Time of last response for this header |
+| firstResultAt | time | Time of first result for this header  |
+| lastResultAt  | time | Time of last result for this header |
 | countsByValues | string->CountInfo   | request counts info per header value for this header |
 | countsByStatusCodes | int->CountInfo   | request counts info per status code for this header |
 | countsByValuesStatusCodes | string->int->CountInfo   | request counts info per status code per header value for this header |
 | crossHeaders | string->HeaderCounts   | HeaderCounts for each cross-header for this header |
 | crossHeadersByValues | string->string->HeaderCounts   | HeaderCounts for each cross-header per header value for this header |
-| firstResponse        | time | Time of first response received for this header |
-| lastResponse         | time | Time of last response received for this header |
 
 
 #### KeyResultCounts schema
@@ -95,8 +96,8 @@ The schema below describes fields of json object used to report data related to 
 |---|---|---|
 | count       | int | number of responses for this key  |
 | retries     | int | number of requests that were retried for this key |
-| firstResponse | time | Time of first response for this key  |
-| lastResponse  | time | Time of last response for this key |
+| firstResultAt | time | Time of first result for this key  |
+| lastResultAt  | time | Time of last result for this key |
 | byStatusCodes | string->StatusCodeCounts   | counts for this key broken down by status codes |
 | byTimeBuckets | string->TimeBucketsCounts   | counts for this key broken down by response time buckets |
 
@@ -108,8 +109,8 @@ The schema below describes fields of json object used in `countsByStatusCodes` r
 |---|---|---|
 | count       | int | number of responses for this status code  |
 | retries     | int | number of requests that were retried for this status code |
-| firstResponse | time | Time of first response for this status code  |
-| lastResponse  | time | Time of last response for this status code |
+| firstResultAt | time | Time of first result for this status code  |
+| lastResultAt  | time | Time of last result for this status code |
 | byTimeBuckets | string->TimeBucketsCounts   | counts for this status code broken down by response time buckets (except when the status code counts is already a sub-result of time bucket counts) |
 
 
@@ -121,8 +122,8 @@ The schema below describes fields of json object used in `countsByTimeBuckets` r
 |---|---|---|
 | count       | int | number of responses for this time bucket  |
 | retries     | int | number of requests that were retried for this time bucket |
-| firstResponse | time | Time of first response for this time bucket  |
-| lastResponse  | time | Time of last response for this time bucket |
+| firstResultAt | time | Time of first result for this time bucket  |
+| lastResultAt  | time | Time of last result for this time bucket |
 | countsByStatusCodes | string->StatusCodeCounts   | counts for this time bucket broken down by status codes (except when the time bucket counts is already a sub-result of status code counts) |
 
 
@@ -134,8 +135,8 @@ The schema below describes fields per target.
 |---|---|---|
 | count       | int | number of responses in this set  |
 | retries     | int | number of requests that were retried in this set |
-| firstResponse | time | Time of first response in this set  |
-| lastResponse  | time | Time of last response received in this set |
+| firstResultAt | time | Time of first result in this set  |
+| lastResultAt  | time | Time of last result in this set |
 
 #### Invocation Results Schema (output of API /client/results/invocations)
 
@@ -157,11 +158,13 @@ The schema below describes fields per target.
 |Field|Data Type|Description|
 |---|---|---|
 | totalRequests | int | total requests made to the target for this invocation, including retries  |
-| completedReplicas | int | number of requests that completed (totalRequests - retriesCount)  |
-| retriesCount | int | number of retries made across all requests  |
+| completedRequests | int | number of completed requests (totalRequests - retriesCount)  |
 | successCount | int | number of successful requests  |
 | failureCount | int | number of failed requests  |
+| retriesCount | int | number of retries made across all requests  |
 | abCount | int | number of requests made for A/B comparison if configured  |
+| firstRequestAt | time | time when first request completed  |
+| lastRequestAt | time | time when last request completed  |
 | stopRequested | bool | whether a request was made to stop this invocation while it's running  |
 | stopped | bool | whether the invocation has been stopped, either due to stop request or it finished all requests  |
 | closed | bool | whether the invocation has been marked as `finished` after being stopped.  |
@@ -183,15 +186,19 @@ The schema below describes fields per target.
 | lastByteOutAt | string | time when last request payload byte was sent  |
 | firstByteInAt | string | time when first reponse payload byte was read  |
 | lastByteInAt | string | time when last reponse payload byte was read  |
+| firstRequestAt | time | time when first request completed  |
+| lastRequestAt | time | time when last request completed (if retries were made)  |
 | retries | int | number of retries done for this request  |
 | url | string | url of this request  |
 | uri | string | uri of this request  |
 | requestID | string | id of this request  |
 | headers | map[string][]string | response headers received  |
+| failedURLs | map[string]int | A/B URLs that got a failure response. The `url` field would contain the URL that succeeded if any. |
 | retryURL | string | if request was retried due to an error or response code, the last retry url  |
 | lastRetryReason | string | if request was retried due to an error or response code, the reason for last retry  |
-| tookNanos | int | total time taken by this request as observed by the clinet  |
+| validAssertionIndex | int | index of the assertion that passed validation  |
 | errors | map[string]any | validation or other errors if any  |
+| tookNanos | int | total time taken by this request as observed by the clinet  |
 
 
 

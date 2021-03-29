@@ -1,7 +1,9 @@
 package payload
 
 import (
+  "bytes"
   "context"
+  "encoding/json"
   "fmt"
   "goto/pkg/events"
   "goto/pkg/server/conn"
@@ -19,20 +21,28 @@ import (
   "github.com/gorilla/mux"
 )
 
+type Transform struct {
+  Mappings []*util.JSONTransform `json:"mappings"`
+  Payload  interface{}           `json:"payload"`
+}
+
 type ResponsePayload struct {
-  Payload          string   `json:"payload"`
-  ContentType      string   `json:"contentType"`
-  URIMatch         string   `json:"uriMatch"`
-  HeaderMatch      string   `json:"headerMatch"`
-  HeaderValueMatch string   `json:"headerValueMatch"`
-  QueryMatch       string   `json:"queryMatch"`
-  QueryValueMatch  string   `json:"queryValueMatch"`
-  BodyMatch        []string `json:"bodyMatch"`
-  URICaptureKeys   []string `json:"uriCaptureKeys"`
-  HeaderCaptureKey string   `json:"headerCaptureKey"`
-  QueryCaptureKey  string   `json:"queryCaptureKey"`
+  Payload          []byte       `json:"payload"`
+  ContentType      string       `json:"contentType"`
+  URIMatch         string       `json:"uriMatch"`
+  HeaderMatch      string       `json:"headerMatch"`
+  HeaderValueMatch string       `json:"headerValueMatch"`
+  QueryMatch       string       `json:"queryMatch"`
+  QueryValueMatch  string       `json:"queryValueMatch"`
+  BodyMatch        []string     `json:"bodyMatch"`
+  URICaptureKeys   []string     `json:"uriCaptureKeys"`
+  HeaderCaptureKey string       `json:"headerCaptureKey"`
+  QueryCaptureKey  string       `json:"queryCaptureKey"`
+  Transforms       []*Transform `json:"transforms"`
   uriRegexp        *regexp.Regexp
+  queryMatchRegexp *regexp.Regexp
   bodyMatchRegexp  *regexp.Regexp
+  isBinary         bool
   fillers          []string
   router           *mux.Router
 }
@@ -62,6 +72,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   rootRouter = root
   matchRouter = rootRouter.NewRoute().Subrouter()
   payloadRouter := util.PathRouter(r, "/payload")
+  util.AddRouteWithPort(payloadRouter, "/set/default/binary/{size}", setResponsePayload, "POST")
+  util.AddRouteWithPort(payloadRouter, "/set/default/binary", setResponsePayload, "POST")
   util.AddRouteWithPort(payloadRouter, "/set/default/{size}", setResponsePayload, "POST")
   util.AddRouteWithPort(payloadRouter, "/set/default", setResponsePayload, "POST")
   util.AddRouteQWithPort(payloadRouter, "/set/uri", setResponsePayload, "uri", "{uri}", "POST")
@@ -74,11 +86,12 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRouteQWithPort(payloadRouter, "/set/query/{q}", setResponsePayload, "uri", "{uri}", "POST")
   util.AddRouteWithPort(payloadRouter, "/set/query/{q}", setResponsePayload, "POST")
   util.AddRouteQWithPort(payloadRouter, "/set/body~{keywords}", setResponsePayload, "uri", "{uri}", "POST")
+  util.AddRouteQWithPort(payloadRouter, "/transform", setPayloadTransform, "uri", "{uri}", "POST")
   util.AddRouteWithPort(payloadRouter, "/clear", clearResponsePayload, "POST")
   util.AddRouteWithPort(payloadRouter, "", getResponsePayload, "GET")
   util.AddRoute(root, "/payload/{size}", respondWithPayload, "GET", "PUT", "POST")
-  util.AddRoute(root, "/stream/payload={size}/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
-  util.AddRoute(root, "/stream/chunksize={chunk}/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
+  util.AddRoute(root, "/stream/payload={payloadSize}/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
+  util.AddRoute(root, "/stream/chunksize={chunkSize}/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
   util.AddRoute(root, "/stream/chunksize={chunk}/count={count}/delay={delay}", streamResponse, "GET", "PUT", "POST")
   util.AddRoute(root, "/stream/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
   util.AddRoute(root, "/stream/count={count}/delay={delay}", streamResponse, "GET", "PUT", "POST")
@@ -98,14 +111,20 @@ func (pr *PortResponse) init() {
   matchRouter = rootRouter.NewRoute().Subrouter()
 }
 
-func newResponsePayload(payload, contentType, uri, header, query, value string, bodyMatch []string) (*ResponsePayload, error) {
+func newResponsePayload(payload []byte, binary bool, contentType, uri, header, query, value string, bodyMatch []string, transforms []*Transform) (*ResponsePayload, error) {
   if contentType == "" {
     contentType = "application/json"
   }
   var uriRegExp *regexp.Regexp
   var responseRouter *mux.Router
   if uri != "" {
-    if rr, re, err := util.RegisterURIRouteAndGetRegex(uri, matchRouter, handleURI); err == nil {
+    matchURI := uri
+    glob := false
+    if strings.HasSuffix(matchURI, "*") {
+      matchURI = strings.ReplaceAll(matchURI, "*", "")
+      glob = true
+    }
+    if rr, re, err := util.RegisterURIRouteAndGetRegex(matchURI, glob, matchRouter, handleURI); err == nil {
       uriRegExp = re
       responseRouter = rr
     } else {
@@ -116,21 +135,31 @@ func newResponsePayload(payload, contentType, uri, header, query, value string, 
   headerCaptureKey := ""
   queryValueMatch := ""
   queryCaptureKey := ""
-  if key, present := util.GetFillerUnmarked(value); present {
+  if util.IsFiller(value) {
     if header != "" {
-      headerCaptureKey = key
+      headerCaptureKey = value
     } else if query != "" {
-      queryCaptureKey = key
+      queryCaptureKey = value
     }
   } else if header != "" {
     headerValueMatch = value
   } else if query != "" {
     queryValueMatch = value
   }
+  var fillers []string
+  if !binary {
+    fillers = util.GetFillersUnmarked(string(payload))
+  }
+  for _, t := range transforms {
+    for _, m := range t.Mappings {
+      m.Init()
+    }
+  }
 
   return &ResponsePayload{
     Payload:          payload,
     ContentType:      contentType,
+    isBinary:         util.IsBinaryContentType(contentType),
     URIMatch:         uri,
     HeaderMatch:      header,
     HeaderValueMatch: headerValueMatch,
@@ -138,36 +167,60 @@ func newResponsePayload(payload, contentType, uri, header, query, value string, 
     QueryValueMatch:  queryValueMatch,
     BodyMatch:        bodyMatch,
     uriRegexp:        uriRegExp,
+    queryMatchRegexp: regexp.MustCompile("(?i)" + query),
     bodyMatchRegexp:  regexp.MustCompile("(?i)" + strings.Join(bodyMatch, ".*") + ".*"),
     URICaptureKeys:   util.GetFillersUnmarked(uri),
     HeaderCaptureKey: headerCaptureKey,
     QueryCaptureKey:  queryCaptureKey,
-    fillers:          util.GetFillersUnmarked(payload),
+    Transforms:       transforms,
+    fillers:          fillers,
     router:           responseRouter,
   }, nil
 }
 
-func fixPayload(payload string, size int) string {
+func (rp ResponsePayload) MarshalJSON() ([]byte, error) {
+  data := map[string]interface{}{
+    "contentType":      rp.ContentType,
+    "uriMatch":         rp.URIMatch,
+    "headerMatch":      rp.HeaderMatch,
+    "headerValueMatch": rp.HeaderValueMatch,
+    "queryMatch":       rp.QueryMatch,
+    "queryValueMatch":  rp.QueryValueMatch,
+    "bodyMatch":        rp.BodyMatch,
+    "uriCaptureKeys":   rp.URICaptureKeys,
+    "headerCaptureKey": rp.HeaderCaptureKey,
+    "queryCaptureKey":  rp.QueryCaptureKey,
+    "transforms":       rp.Transforms,
+    "binary":           rp.isBinary,
+  }
+  if rp.isBinary || len(rp.Payload) > 10000 {
+    data["payload"] = fmt.Sprintf("...(%d bytes)", len(rp.Payload))
+  } else {
+    data["payload"] = string(rp.Payload)
+  }
+  return json.Marshal(data)
+}
+
+func fixPayload(payload []byte, size int) []byte {
   if size > 0 {
-    if payload == "" {
-      payload = util.GenerateRandomString(size)
+    if len(payload) == 0 {
+      payload = util.GenerateRandomPayload(size)
     } else if len(payload) < size {
-      payload = strings.Join([]string{payload, util.GenerateRandomString(size - len(payload))}, "")
+      payload = bytes.Join([][]byte{payload, util.GenerateRandomPayload(size - len(payload))}, []byte{})
     } else if len(payload) > size {
-      a := []rune(payload)
-      payload = string(a[:size])
+      payload = payload[:size]
     }
   }
   return payload
 }
 
-func (pr *PortResponse) setDefaultResponsePayload(payload, contentType string, size int) {
+func (pr *PortResponse) setDefaultResponsePayload(payload []byte, contentType string, size int) {
   pr.lock.Lock()
   defer pr.lock.Unlock()
   if size > 0 {
     payload = fixPayload(payload, size)
   }
-  pr.DefaultResponsePayload, _ = newResponsePayload(payload, contentType, "", "", "", "", nil)
+  pr.DefaultResponsePayload, _ = newResponsePayload(payload, true, contentType, "", "", "", "", nil, nil)
 }
 
 func (pr *PortResponse) unsafeIsURIMapped(uri string) bool {
@@ -181,12 +234,12 @@ func (pr *PortResponse) unsafeRemoveUntrackeddURI(uri string) {
   }
 }
 
-func (pr *PortResponse) setURIResponsePayload(uri, payload, contentType string) error {
+func (pr *PortResponse) setURIResponsePayload(payload []byte, binary bool, uri, contentType string, transforms []*Transform) error {
   pr.lock.Lock()
   defer pr.lock.Unlock()
   uri = strings.ToLower(uri)
-  if payload != "" {
-    if rp, err := newResponsePayload(payload, contentType, uri, "", "", "", nil); err == nil {
+  if len(payload) > 0 || len(transforms) > 0 {
+    if rp, err := newResponsePayload(payload, binary, contentType, uri, "", "", "", nil, transforms); err == nil {
       pr.ResponsePayloadByURIs[uri] = rp
       pr.allURIResponsePayloads[uri] = rp
     } else {
@@ -199,16 +252,16 @@ func (pr *PortResponse) setURIResponsePayload(uri, payload, contentType string) 
   return nil
 }
 
-func (pr *PortResponse) setHeaderResponsePayload(header, value, payload, contentType string) {
+func (pr *PortResponse) setHeaderResponsePayload(payload []byte, binary bool, header, value, contentType string) {
   pr.lock.Lock()
   defer pr.lock.Unlock()
   header = strings.ToLower(header)
   value = strings.ToLower(value)
-  if payload != "" {
+  if len(payload) > 0 {
     if pr.ResponsePayloadByHeaders[header] == nil {
       pr.ResponsePayloadByHeaders[header] = map[string]*ResponsePayload{}
     }
-    rp, _ := newResponsePayload(payload, contentType, "", header, "", value, nil)
+    rp, _ := newResponsePayload(payload, binary, contentType, "", header, "", value, nil, nil)
     pr.ResponsePayloadByHeaders[header][rp.HeaderValueMatch] = rp
   } else if pr.ResponsePayloadByHeaders[header] != nil {
     if _, present := util.GetFillerUnmarked(value); present {
@@ -223,16 +276,16 @@ func (pr *PortResponse) setHeaderResponsePayload(header, value, payload, content
   }
 }
 
-func (pr *PortResponse) setQueryResponsePayload(query, value, payload, contentType string) {
+func (pr *PortResponse) setQueryResponsePayload(payload []byte, binary bool, query, value, contentType string) {
   pr.lock.Lock()
   defer pr.lock.Unlock()
   query = strings.ToLower(query)
   value = strings.ToLower(value)
-  if payload != "" {
+  if len(payload) > 0 {
     if pr.ResponsePayloadByQuery[query] == nil {
       pr.ResponsePayloadByQuery[query] = map[string]*ResponsePayload{}
     }
-    rp, _ := newResponsePayload(payload, contentType, "", "", query, value, nil)
+    rp, _ := newResponsePayload(payload, binary, contentType, "", "", query, value, nil, nil)
     pr.ResponsePayloadByQuery[query][rp.QueryValueMatch] = rp
   } else if pr.ResponsePayloadByQuery[query] != nil {
     if _, present := util.GetFillerUnmarked(value); present {
@@ -247,20 +300,20 @@ func (pr *PortResponse) setQueryResponsePayload(query, value, payload, contentTy
   }
 }
 
-func (pr *PortResponse) setResponsePayloadForURIWithHeader(uri, header, value, payload, contentType string) error {
+func (pr *PortResponse) setResponsePayloadForURIWithHeader(payload []byte, binary bool, uri, header, value, contentType string) error {
   pr.lock.Lock()
   defer pr.lock.Unlock()
   uri = strings.ToLower(uri)
   header = strings.ToLower(header)
   value = strings.ToLower(value)
-  if payload != "" {
+  if len(payload) > 0 {
     if pr.ResponsePayloadByURIAndHeaders[uri] == nil {
       pr.ResponsePayloadByURIAndHeaders[uri] = map[string]map[string]*ResponsePayload{}
     }
     if pr.ResponsePayloadByURIAndHeaders[uri][header] == nil {
       pr.ResponsePayloadByURIAndHeaders[uri][header] = map[string]*ResponsePayload{}
     }
-    if rp, err := newResponsePayload(payload, contentType, uri, header, "", value, nil); err == nil {
+    if rp, err := newResponsePayload(payload, binary, contentType, uri, header, "", value, nil, nil); err == nil {
       pr.ResponsePayloadByURIAndHeaders[uri][header][rp.HeaderValueMatch] = rp
       pr.allURIResponsePayloads[uri] = rp
     } else {
@@ -286,20 +339,20 @@ func (pr *PortResponse) setResponsePayloadForURIWithHeader(uri, header, value, p
   return nil
 }
 
-func (pr *PortResponse) setResponsePayloadForURIWithQuery(uri, query, value, payload, contentType string) error {
+func (pr *PortResponse) setResponsePayloadForURIWithQuery(payload []byte, binary bool, uri, query, value, contentType string) error {
   pr.lock.Lock()
   defer pr.lock.Unlock()
   uri = strings.ToLower(uri)
   query = strings.ToLower(query)
   value = strings.ToLower(value)
-  if payload != "" {
+  if len(payload) > 0 {
     if pr.ResponsePayloadByURIAndQuery[uri] == nil {
       pr.ResponsePayloadByURIAndQuery[uri] = map[string]map[string]*ResponsePayload{}
     }
     if pr.ResponsePayloadByURIAndQuery[uri][query] == nil {
       pr.ResponsePayloadByURIAndQuery[uri][query] = map[string]*ResponsePayload{}
     }
-    if rp, err := newResponsePayload(payload, contentType, uri, "", query, value, nil); err == nil {
+    if rp, err := newResponsePayload(payload, binary, contentType, uri, "", query, value, nil, nil); err == nil {
       pr.ResponsePayloadByURIAndQuery[uri][query][rp.QueryValueMatch] = rp
       pr.allURIResponsePayloads[uri] = rp
     } else {
@@ -325,14 +378,14 @@ func (pr *PortResponse) setResponsePayloadForURIWithQuery(uri, query, value, pay
   return nil
 }
 
-func (pr *PortResponse) setResponsePayloadForURIWithBody(uri, keywords, payload, contentType string) error {
+func (pr *PortResponse) setResponsePayloadForURIWithBody(payload []byte, binary bool, uri, keywords, contentType string) error {
   pr.lock.Lock()
   defer pr.lock.Unlock()
   uri = strings.ToLower(uri)
   keywords = strings.ToLower(keywords)
-  if payload != "" {
+  if len(payload) > 0 {
     bodyMatch := strings.Split(keywords, ",")
-    if rp, err := newResponsePayload(payload, contentType, uri, "", "", "", bodyMatch); err == nil {
+    if rp, err := newResponsePayload(payload, binary, contentType, uri, "", "", "", bodyMatch, nil); err == nil {
       if pr.ResponsePayloadByURIAndBody[uri] == nil {
         pr.ResponsePayloadByURIAndBody[uri] = map[string]*ResponsePayload{}
       }
@@ -369,53 +422,58 @@ func getPortResponse(r *http.Request) *PortResponse {
 func setResponsePayload(w http.ResponseWriter, r *http.Request) {
   msg := ""
   port := util.GetRequestOrListenerPort(r)
-  payload := util.Read(r.Body)
+  payload := util.ReadBytes(r.Body)
   pr := getPortResponse(r)
-  contentType := r.Header.Get("Content-Type")
-  if contentType == "" {
-    contentType = "plain/text"
-  }
+  binary := util.IsBinaryContentHeader(r.Header) || strings.Contains(r.RequestURI, "binary")
   uri := util.GetStringParamValue(r, "uri")
   header := util.GetStringParamValue(r, "header")
   query := util.GetStringParamValue(r, "q")
   value := util.GetStringParamValue(r, "value")
   keywords := util.GetStringParamValue(r, "keywords")
-  if header != "" && uri != "" {
-    if err := pr.setResponsePayloadForURIWithHeader(uri, header, value, payload, contentType); err == nil {
-      msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] and header [%s : %s] : [%s: %s]",
-        port, uri, header, value, contentType, payload)
+  contentType := r.Header.Get("Content-Type")
+  if contentType == "" {
+    if binary {
+      contentType = "application/octet-stream"
     } else {
-      msg = fmt.Sprintf("Port [%s] Failed to set payload for URI [%s] and header [%s : %s] : [%s: %s] with error [%s]",
-        port, uri, header, value, contentType, payload, err.Error())
+      contentType = "plain/text"
+    }
+  }
+  if header != "" && uri != "" {
+    if err := pr.setResponsePayloadForURIWithHeader(payload, binary, uri, header, value, contentType); err == nil {
+      msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] and header [%s : %s] : content-type [%s], length [%d]",
+        port, uri, header, value, contentType, len(payload))
+    } else {
+      msg = fmt.Sprintf("Port [%s] Failed to set payload for URI [%s] and header [%s : %s] : content-type [%s], length [%d] with error [%s]",
+        port, uri, header, value, contentType, len(payload), err.Error())
     }
   } else if query != "" && uri != "" {
-    if err := pr.setResponsePayloadForURIWithQuery(uri, query, value, payload, contentType); err == nil {
-      msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] and query [%s : %s] : [%s: %s]",
-        port, uri, query, value, contentType, payload)
+    if err := pr.setResponsePayloadForURIWithQuery(payload, binary, uri, query, value, contentType); err == nil {
+      msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] and query [%s : %s] : content-type [%s], length [%d]",
+        port, uri, query, value, contentType, len(payload))
     } else {
-      msg = fmt.Sprintf("Port [%s] Failed to set payload for URI [%s] and query [%s : %s] : [%s: %s] with error [%s]",
-        port, uri, query, value, contentType, payload, err.Error())
+      msg = fmt.Sprintf("Port [%s] Failed to set payload for URI [%s] and query [%s : %s] : content-type [%s], length [%d] with error [%s]",
+        port, uri, query, value, contentType, len(payload), err.Error())
     }
   } else if uri != "" && keywords != "" {
-    if err := pr.setResponsePayloadForURIWithBody(uri, keywords, payload, contentType); err == nil {
-      msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] and keywords [%+v] : [%s: %s]",
-        port, uri, keywords, contentType, payload)
+    if err := pr.setResponsePayloadForURIWithBody(payload, binary, uri, keywords, contentType); err == nil {
+      msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] and keywords [%+v] : content-type [%s], length [%d]",
+        port, uri, keywords, contentType, len(payload))
     } else {
-      msg = fmt.Sprintf("Port [%s] Failed to set payload for URI [%s] and keywords [%+v] : [%s: %s] with error [%s]",
-        port, uri, keywords, contentType, payload, err.Error())
+      msg = fmt.Sprintf("Port [%s] Failed to set payload for URI [%s] and keywords [%+v] : content-type [%s], length [%d] with error [%s]",
+        port, uri, keywords, contentType, len(payload), err.Error())
     }
   } else if uri != "" {
-    pr.setURIResponsePayload(uri, payload, contentType)
-    msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] : [%s: %s]",
-      port, uri, contentType, payload)
+    pr.setURIResponsePayload(payload, binary, uri, contentType, nil)
+    msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] : content-type [%s], length [%d]",
+      port, uri, contentType, len(payload))
   } else if header != "" {
-    pr.setHeaderResponsePayload(header, value, payload, contentType)
-    msg = fmt.Sprintf("Port [%s] Payload set for header [%s : %s] : [%s: %s]",
-      port, header, value, contentType, payload)
+    pr.setHeaderResponsePayload(payload, binary, header, value, contentType)
+    msg = fmt.Sprintf("Port [%s] Payload set for header [%s : %s] : content-type [%s], length [%d]",
+      port, header, value, contentType, len(payload))
   } else if query != "" {
-    pr.setQueryResponsePayload(query, value, payload, contentType)
-    msg = fmt.Sprintf("Port [%s] Payload set for query [%s : %s] : [%s: %s]",
-      port, query, value, contentType, payload)
+    pr.setQueryResponsePayload(payload, binary, query, value, contentType)
+    msg = fmt.Sprintf("Port [%s] Payload set for query [%s : %s] : content-type [%s], length [%d]",
+      port, query, value, contentType, len(payload))
   } else {
     size := util.GetSizeParam(r, "size")
     pr.setDefaultResponsePayload(payload, contentType, size)
@@ -427,10 +485,35 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
         port, contentType, len(pr.DefaultResponsePayload.Payload))
     }
   }
-  w.WriteHeader(http.StatusOK)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
   events.SendRequestEvent("Response Payload Configured", msg, r)
+}
+
+func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  port := util.GetRequestOrListenerPort(r)
+  pr := getPortResponse(r)
+  contentType := r.Header.Get("Content-Type")
+  if contentType == "" {
+    contentType = "application/json"
+  }
+  var transforms []*Transform
+  if err := util.ReadJsonPayload(r, &transforms); err == nil {
+    uri := util.GetStringParamValue(r, "uri")
+    if uri != "" && transforms != nil {
+      pr.setURIResponsePayload(nil, false, uri, contentType, transforms)
+      msg = fmt.Sprintf("Port [%s] transform paths set for URI [%s] : [%s: %+v]",
+        port, uri, contentType, util.ToJSON(transforms))
+      events.SendRequestEvent("Response Payload Configured", msg, r)
+    } else {
+      msg = "Invalid transformation. Missing URI or payload."
+    }
+  } else {
+    msg = fmt.Sprintf("Invalid transformations: %s", err.Error())
+  }
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
 }
 
 func clearResponsePayload(w http.ResponseWriter, r *http.Request) {
@@ -461,21 +544,18 @@ func respondWithPayload(w http.ResponseWriter, r *http.Request) {
 }
 
 func streamResponse(w http.ResponseWriter, r *http.Request) {
-  size := util.GetSizeParam(r, "size")
-  chunk := util.GetSizeParam(r, "chunk")
+  size := util.GetSizeParam(r, "payloadSize")
+  chunkSize := util.GetSizeParam(r, "chunkSize")
   durMin, durMax, _, _ := util.GetDurationParam(r, "duration")
+  delayText := util.GetStringParamValue(r, "delay")
   delayMin, delayMax, _, _ := util.GetDurationParam(r, "delay")
   count := util.GetIntParamValue(r, "count")
   repeat := false
-  payload := ""
-  contentType := "plain/text"
-  pr := getPortResponse(r)
-  pr.lock.RLock()
-  if pr.DefaultResponsePayload != nil {
-    payload = pr.DefaultResponsePayload.Payload
-    contentType = pr.DefaultResponsePayload.ContentType
+  var payload []byte
+  contentType := r.Header.Get("Content-Type")
+  if contentType == "" {
+    contentType = "plain/text"
   }
-  pr.lock.RUnlock()
   duration := util.RandomDuration(durMin, durMax)
   delay := util.RandomDuration(delayMin, delayMax)
   if delay == 0 {
@@ -486,19 +566,19 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
   }
   if size > 0 {
     repeat = true
-    chunk = size / count
-    payload = util.GenerateRandomString(chunk)
+    chunkSize = size / count
+    payload = util.GenerateRandomPayload(chunkSize)
   } else {
     size = len(payload)
     repeat = size == 0
   }
-  if size < chunk {
-    payload = fixPayload(payload, chunk)
+  if size < chunkSize {
+    payload = fixPayload(payload, chunkSize)
   }
-  if chunk == 0 && count > 0 && size > 0 {
-    chunk = size/count + 1
+  if chunkSize == 0 && count > 0 && size > 0 {
+    chunkSize = size/count + 1
   }
-  if chunk == 0 || count == 0 {
+  if chunkSize == 0 || count == 0 {
     w.WriteHeader(http.StatusBadRequest)
     util.AddLogMessage("Invalid parameters for streaming or no payload", r)
     fmt.Fprintln(w, "{error: 'Invalid parameters for streaming'}")
@@ -508,8 +588,8 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
   w.Header().Set("Content-Type", contentType)
   w.Header().Set("X-Content-Type-Options", "nosniff")
   w.Header().Set("Goto-Chunk-Count", strconv.Itoa(count))
-  w.Header().Set("Goto-Chunk-Length", strconv.Itoa(chunk))
-  w.Header().Set("Goto-Chunk-Delay", delay.String())
+  w.Header().Set("Goto-Chunk-Length", strconv.Itoa(chunkSize))
+  w.Header().Set("Goto-Chunk-Delay", delayText)
   if size > 0 {
     w.Header().Set("Goto-Stream-Length", strconv.Itoa(size))
   }
@@ -537,18 +617,17 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("Responding with streaming payload", r)
   payloadIndex := 0
   payloadSize := len(payload)
-  payloadChunkCount := payloadSize / chunk
-  if payloadSize%chunk > 0 {
+  payloadChunkCount := payloadSize / chunkSize
+  if payloadSize%chunkSize > 0 {
     payloadChunkCount++
   }
   for i := 0; i < count; i++ {
-    start := payloadIndex * chunk
-    end := (payloadIndex + 1) * chunk
+    start := payloadIndex * chunkSize
+    end := (payloadIndex + 1) * chunkSize
     if end > payloadSize {
       end = payloadSize
     }
-    chunkResponse := string(payload[start:end])
-    fmt.Fprint(writer, chunkResponse)
+    writer.Write(payload[start:end])
     if flusher != nil {
       flusher.Flush()
     }
@@ -561,6 +640,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
       }
     }
     if i < count-1 {
+      delay = util.RandomDuration(delayMin, delayMax, delay)
       time.Sleep(delay)
     }
   }
@@ -587,9 +667,50 @@ func getPayloadForKV(kvMap map[string][]string, payloadMap map[string]map[string
   return nil, false
 }
 
-func getFilledPayload(rp *ResponsePayload, r *http.Request) string {
+func transformPayload(r *http.Request, rp *ResponsePayload) string {
+  sourcePayload := util.Read(r.Body)
+  var sourceJSON *util.JSON
+  isYAML := false
+  if util.IsYAMLContentType(r.Header) {
+    sourceJSON = util.FromYAML(sourcePayload)
+    isYAML = true
+  } else {
+    sourceJSON = util.FromJSONText(sourcePayload)
+  }
+  if sourceJSON.IsEmpty() {
+    return sourcePayload
+  }
+  targetPayload := ""
+  for _, t := range rp.Transforms {
+    var targetJSON *util.JSON
+    if t.Payload != nil {
+      targetJSON = util.FromJSON(t.Payload)
+    } else {
+      targetJSON = sourceJSON
+    }
+    if targetJSON != nil && !targetJSON.IsEmpty() {
+      if targetJSON.Transform(t.Mappings, sourceJSON) {
+        if isYAML {
+          targetPayload = targetJSON.ToYAML()
+        } else {
+          targetPayload = targetJSON.ToJSON()
+        }
+      }
+      targetPayload = targetJSON.TransformPatterns(targetPayload)
+    }
+    if targetPayload != "" {
+      break
+    }
+  }
+  if targetPayload == "" {
+    targetPayload = sourcePayload
+  }
+  return targetPayload
+}
+
+func getFilledPayload(rp *ResponsePayload, r *http.Request) []byte {
   vars := mux.Vars(r)
-  payload := rp.Payload
+  payload := string(rp.Payload)
   for _, key := range rp.URICaptureKeys {
     if vars[key] != "" {
       payload = strings.Replace(payload, util.GetFillerMarked(key), vars[key], -1)
@@ -597,17 +718,20 @@ func getFilledPayload(rp *ResponsePayload, r *http.Request) string {
   }
   if rp.HeaderCaptureKey != "" {
     if value := r.Header.Get(rp.HeaderMatch); value != "" {
-      payload = strings.Replace(payload, util.GetFillerMarked(rp.HeaderCaptureKey), value, -1)
+      payload = strings.Replace(payload, rp.HeaderCaptureKey, value, -1)
     }
   }
   if rp.QueryCaptureKey != "" {
     for k, values := range r.URL.Query() {
-      if strings.EqualFold(strings.ToLower(k), rp.QueryMatch) && len(values) > 0 {
-        payload = strings.Replace(payload, util.GetFillerMarked(rp.QueryCaptureKey), values[0], -1)
+      if rp.queryMatchRegexp.MatchString(k) && len(values) > 0 {
+        payload = strings.Replace(payload, rp.QueryCaptureKey, values[0], -1)
       }
     }
   }
-  return payload
+  if len(rp.Transforms) > 0 {
+    payload = transformPayload(r, rp)
+  }
+  return []byte(payload)
 }
 
 func getPayloadForBodyMatch(r *http.Request, bodyMatches map[string]*ResponsePayload) (*ResponsePayload, bool) {
@@ -640,7 +764,8 @@ func (pr *PortResponse) unsafeGetResponsePayload(r *http.Request) (*ResponsePayl
         payload, found = getPayloadForKV(r.URL.Query(), pr.ResponsePayloadByURIAndQuery[uri])
       } else if pr.ResponsePayloadByURIAndBody[uri] != nil {
         payload, found = getPayloadForBodyMatch(r, pr.ResponsePayloadByURIAndBody[uri])
-      } else {
+      }
+      if !found {
         payload = rp
         found = true
       }
@@ -661,18 +786,27 @@ func (pr *PortResponse) unsafeGetResponsePayload(r *http.Request) (*ResponsePayl
 }
 
 func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload) {
-  payload := ""
+  var payload []byte
   contentType := ""
-  payload = getFilledPayload(rp, r)
+  if !rp.isBinary {
+    payload = getFilledPayload(rp, r)
+  } else {
+    payload = rp.Payload
+  }
   contentType = rp.ContentType
   length := strconv.Itoa(len(payload))
   w.Header().Set("Content-Length", length)
   w.Header().Set("Content-Type", contentType)
   w.Header().Set("Goto-Payload-Length", length)
   w.Header().Set("Goto-Payload-Content-Type", contentType)
-  fmt.Fprint(w, payload)
   msg := fmt.Sprintf("Responding with configured payload of length [%s] and content type [%s] for URI [%s]",
     length, contentType, r.RequestURI)
+  util.AddLogMessage(msg, r)
+  if n, err := w.Write(payload); err != nil {
+    msg = fmt.Sprintf("Failed to write payload of length [%s] with error: %s", length, err.Error())
+  } else {
+    msg = fmt.Sprintf("Written payload of length [%d] compared to configured size [%s]", n, length)
+  }
   util.AddLogMessage(msg, r)
   util.UpdateTrafficEventDetails(r, "Response Payload Applied")
 }

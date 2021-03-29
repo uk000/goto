@@ -38,6 +38,5 @@ func Middleware(next http.Handler) http.Handler {
     if next != nil {
       next.ServeHTTP(w, r)
     }
-    metrics.UpdateURIRequestCount(strings.ToLower(r.URL.Path))
   })
 }

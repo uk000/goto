@@ -34,29 +34,29 @@ go build -o goto .
   ```
 - Add a new listener with GRPC protocol and open immediately
   ```
-  curl -X POST localhost:8080/listeners/add --data '{"port":9091, "protocol":"grpc", "open":true}'
+  curl -X POST localhost:8080/server/listeners/add --data '{"port":9091, "protocol":"grpc", "open":true}'
   ```
 - Add a new listener with TCP protocol without opening it
   ```
-  curl -X POST localhost:8080/listeners/add --data '{"port":9000, "protocol":"tcp", "open":false}'
+  curl -X POST localhost:8080/server/listeners/add --data '{"port":9000, "protocol":"tcp", "open":false}'
   ```
 - Reconfigure TCP configurations of an existing listener to stream certain payload size
   ```
-  curl -X POST localhost:8080/tcp/9000/configure --data '{"stream": true, "streamChunkSize":"250", "streamChunkCount":15, "streamChunkDelay":"1s", "connectionLife":"30s"}'
+  curl -X POST localhost:8080/server/tcp/9000/configure --data '{"stream": true, "streamChunkSize":"250", "streamChunkCount":15, "streamChunkDelay":"1s", "connectionLife":"30s"}'
   ```
 - Close a non-default port on the fly
   ```
-  curl -X POST localhost:8080/listeners/8081/close
+  curl -X POST localhost:8080/server/listeners/8081/close
   ```
 - Add TLS certs for a non-default port and reopen it to switch to TLS mode
   ```
-  curl -X PUT localhost:8080/listeners/8081/cert/add --data-binary @/somepath/goto.cert
-  curl -X PUT localhost:8080/listeners/8081/key/add --data-binary @/somepath/goto.key
-  curl -X POST localhost:8080/listeners/8081/reopen
+  curl -X PUT localhost:8080/server/listeners/8081/cert/add --data-binary @/somepath/goto.cert
+  curl -X PUT localhost:8080/server/listeners/8081/key/add --data-binary @/somepath/goto.key
+  curl -X POST localhost:8080/server/listeners/8081/reopen
   ```
 - Configure a `goto` server instance to count number of requests received for headers `foo` and `bar`
   ```
-  curl -X PUT localhost:8081/request/headers/track/add/foo,bar
+  curl -X PUT localhost:8081/server/request/headers/track/add/foo,bar
   ```
 - Configure a `goto` client instance to send some requests to an HTTP target
   ```
@@ -134,11 +134,17 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 
 # Features
 
-It's an HTTP client and server built into a single application.
+It's an HTTP client, server, proxy, registry and tunnel built into a single application.
 
-As a server, it can act as an HTTP proxy that lets you intercept HTTP requests and get some insights (e.g. based on headers) before forwarding it to its destination. But it can also respond to requests as a server all by itself, while still capturing interesting stats and counters that can be used to correlate information against the client.
+As a server, it can respond to any arbitrary URI and let you configure custom response based on various match criteria against URIs, headers, body, etc. It can collect useful stats and counters that can be used to correlate responses against requests.
+
+`Goto` can also act as an HTTP proxy that lets you intercept HTTP requests and get some insights (e.g. based on headers) before forwarding it to its destination.
 
 As a client, it allows sending requests to various destinations and tracking responses by headers and response status code.
+
+As a registry, a `goto` instance can federate and coordinate actions of multiple goto instances, sending out workloads and collecting results from those federated goto instances.
+
+Finally, a `goto` instance can act as an HTTP/S tunnel where it forwards an HTTP/HTTPS request transparently to another destinations and forwards the results back to the client. This can be useful when some other endpoints are not accessible from the client's network space, as is the case for endpoints behind an overlay network.
 
 The application exposes all its features via REST APIs as described below. Additionally, it can respond to all undefined URIs with a configurable status code.
 
@@ -185,6 +191,10 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 - [Delay API](#-delay-api)
 - [Echo API](#-echo-api)
 - [Catch All](#-catch-all)
+
+### Goto Tunnel
+
+- [Tunnel](#tunnel)
 
 ### Goto Proxy
 
@@ -433,8 +443,8 @@ Client sends header `From-Goto-Host` to pass its identity to the server.
 | GET       |	/client/results/invocations           | Get invocation results broken down for each invocation that was triggered since last time results were cleared |
 | POST      | /client/results/clear                 | Clear previously accumulated invocation results |
 | POST      | /client/results/clear                 | Clear previously accumulated invocation results |
-| POST      | /client/results/all/`{enable}`          | Enable/disable collection of cumulative results across all targets. This gives high level overview of all traffic, but at a performance overhead. Disabled by default. |
-| POST      | /client/results/invocations/`{enable}`          | Enable/disable collection of results by invocations. This gives more detailed visibility into results per invocation but has performance overhead. Disabled by default. |
+| POST      | /client/results<br/>/all/`{enable}`          | Enable/disable collection of cumulative results across all targets. This gives high level overview of all traffic, but at a performance overhead. Disabled by default. |
+| POST      | /client/results<br/>/invocations/`{enable}`          | Enable/disable collection of results by invocations. This gives more detailed visibility into results per invocation but has performance overhead. Disabled by default. |
 
 ###### <small> [Back to TOC](#toc) </small>
 
@@ -475,7 +485,7 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 
 # Goto Server Features
 
-`Goto` as a server is useful for testing behavior, features or chaos testing of some client application, a proxy/sidecar, a gateway, etc. Or, the server can also be used as a proxy to be put in between a client and a target server application, so that traffic flows through this server where headers can be inspected/tracked before proxying the requests further. The server can add headers, replace request URI with some other URI, add artificial delays to the response, respond with a specific status, monitor request/connection timeouts, etc. The server tracks all the configured parameters, applying those to runtime traffic and building metrics, which can be viewed via various APIs.
+`Goto` as a server is useful for testing behavior, features or chaos testing of some client application, a proxy/sidecar, a gateway, etc. Or, the server can also be used as a proxy to be put in between a client and a target server application, so that traffic flows through this server where headers can be inspected/tracked before forwarding the requests further. The server can add headers, replace request URI with some other URI, add artificial delays to the response, respond with a specific status, monitor request/connection timeouts, etc. The server tracks all the configured parameters, applying those to runtime traffic and building metrics, which can be viewed via various APIs.
 
 ###### <small> [Back to TOC](#toc) </small>
 
@@ -604,19 +614,47 @@ See [Events Example](docs/events-example.md)
 
 ## > Metrics
 
-`goto` exposes both custom server metrics and golang VM metrics in prometheus format. The following custom metrics are exposed:
+### Prometheus Metrics
+
+`goto` exposes custom server metrics as well as golang VM metrics in prometheus format. The following prometheus metrics are exposed:
 
 - `goto_requests_by_type` (vector): Number of requests by type (dimension: requestType)
-- `goto_requests_by_headers` (vector): Number of requests by headers (dimension: requestHeader)
-- `goto_requests_by_uris` (vector): Number of requests by URIs (dimension: requestURI)
-- `goto_invocations_by_targets` (vector): Number of client invocations by target
-- `goto_failed_invocations_by_targets` (vector): Number of failed invocations by target
-- `goto_requests_by_client`: Number of server requests by client
+- `goto_requests_by_headers` (vector): Number of requests by request headers (dimension: requestHeader)
+- `goto_requests_by_header_values` (vector): Number of requests by request headers values (dimensions: requestHeader, headerValue)
+- `goto_requests_by_uris` (vector): Number of requests by URIs (dimension: uri)
+- `goto_requests_by_uris_and_status` (vector): Number of requests by URIs and status code (dimensions: uri, statusCode)
+- `goto_requests_by_headers_and_uris` (vector): Number of requests by request headers and URIs (dimensions: requestHeader, uri)
+- `goto_requests_by_headers_and_status` (vector): Number of requests by request headers and status codes (dimensions: requestHeader, statusCode)
+- `goto_requests_by_port` (vector): Number of requests by ports (dimension: port)
+- `goto_requests_by_port_and_uris` (vector): Number of requests by ports and uris (dimensions: port, uri)
+- `goto_requests_by_port_and_headers` (vector): Number of requests by ports and request headers (dimensions: port, requestHeader)
+- `goto_requests_by_port_and_header_values` (vector): Number of requests by ports and request header values (dimensions: port, requestHeader, headerValue)
+- `goto_requests_by_protocol` (vector): Number of requests by protocol (dimension: protocol)
+- `goto_requests_by_protocol_and_uris` (vector): Number of requests by protocol and URIs (dimensions: protocol, uri)
+- `goto_invocations_by_targets` (vector): Number of client invocations by target (dimension: target)
+- `goto_failed_invocations_by_targets` (vector): Number of failed invocations by target (dimension: target)
+- `goto_requests_by_client`: Number of server requests by client (dimension: client)
 - `goto_proxied_requests` (vector): Number of proxied requests (dimension: proxyTarget)
 - `goto_triggers` (vector): Number of triggered requests (dimension: triggerTarget)
 - `goto_conn_counts` (vector): Number of connections by type (dimension: connType)
 - `goto_tcp_conn_counts` (vector): Number of TCP connections by type (dimension: tcpType)
-- `goto_active_client_conn_counts_by_targets` (gauge): Number of active client connections by targets
+- `goto_active_client_conn_counts_by_targets` (gauge): Number of active client connections by targets (dimension: target)
+
+
+### Server Stats
+
+`goto` tracks request counts by various dimensions for validation usage. The following counts are exposed via API `/stats`:
+- `requestCountsByHeaders`
+- `requestCountsByURIs`
+- `requestCountsByURIsAndStatus`
+- `requestCountsByURIsAndHeaders`
+- `requestCountsByURIsAndHeaderValues`
+- `requestCountsByHeadersAndStatus`
+- `requestCountsByHeaderValuesAndStatus`
+- `requestCountsByPortAndURIs`
+- `requestCountsByPortAndHeaders`
+- `requestCountsByPortAndHeaderValues`
+- `requestCountsByURIsAndProtocol`
 
 #### APIs
 |METHOD|URI|Description|
@@ -624,6 +662,8 @@ See [Events Example](docs/events-example.md)
 | GET       | /metrics           | Custom metrics in prometheus format |
 | GET       | /metrics/go        | Go VM metrics in prometheus format |
 | POST       | /metrics/clear    | Clear custom metrics |
+| GET       | /stats           | Server counts |
+| POST      | /stats/clear    | Clear server counts |
 
 
 <br/>
@@ -644,7 +684,7 @@ The `listeners APIs` let you manage/open/close arbitrary number of HTTP/TCP/GRPC
 
 Adding TLS cert and key for a listener using `/cert` and `/key` API will configure the listener for serving HTTPS traffic when it's opened/reopened. An already opened listener can be reopened as a TLS listener by configuring TLS certs for it and calling `/reopen`.
 
-`/listeners` API output includes the default startup port for view, but the default port cannot be mutated by other listener APIs.
+`/server/listeners` API output includes the default startup port for view, but the default port cannot be mutated by other listener APIs.
 
 Several configuration APIs (used to configure server features on `goto` instances) support `/port={port}/...` URI prefix to allow use of one listener to configure another listener's HTTP features. For example, the API `http://localhost:8081/probes/readiness/set/status=503` that's meant to configure readiness probe for listener on port 8081, can also be invoked via another port as `http://localhost:8080/port=8081/probes/readiness/set/status=503`. This allows for configuring another listener that might be closed or otherwise inaccessible when the configuration call is being made.
 
@@ -653,22 +693,23 @@ Several configuration APIs (used to configure server features on `goto` instance
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
-| POST       | /listeners/add           | Add a listener. [See Payload JSON Schema](#listener-json-schema)|
-| POST       | /listeners/update        | Update an existing listener.|
-| POST, PUT  | /listeners/{port}/cert/add   | Add/update certificate for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
-| POST, PUT  | /listeners/{port}/key/add   | Add/update private key for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
-| POST, PUT  | /listeners/{port}/cert/remove   | Remove certificate and key for a listener and reopen it to serve HTTP traffic instead of HTTPS. |
-| POST, PUT  | /listeners/{port}/remove | Remove a listener|
-| POST, PUT  | /listeners/{port}/open   | Open an added listener to accept traffic|
-| POST, PUT  | /listeners/{port}/reopen | Close and reopen an existing listener if already opened, otherwise open it |
-| POST, PUT  | /listeners/{port}/close  | Close an added listener|
-| GET        | /listeners               | Get a list of listeners. The list of listeners in the output includes the default startup port even though the default port cannot be mutated by other listener APIs. |
+| POST       | /server/listeners/add           | Add a listener. [See Payload JSON Schema](#listener-json-schema)|
+| POST       | /server/listeners/update        | Update an existing listener.|
+| POST, PUT  | /server/listeners<br/>/{port}/cert/add   | Add/update certificate for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
+| POST, PUT  | /server/listeners<br/>/{port}/key/add   | Add/update private key for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
+| POST, PUT  | /server/listeners<br/>/{port}/cert/remove   | Remove certificate and key for a listener and reopen it to serve HTTP traffic instead of HTTPS. |
+| POST, PUT  | /server/listeners<br/>/{port}/remove | Remove a listener|
+| POST, PUT  | /server/listeners<br/>/{port}/open   | Open an added listener to accept traffic|
+| POST, PUT  | /server/listeners<br/>/{port}/reopen | Close and reopen an existing listener if already opened, otherwise open it |
+| POST, PUT  | /server/listeners<br/>/{port}/close  | Close an added listener|
+| GET        | /server/listeners               | Get a list of listeners. The list of listeners in the output includes the default startup port even though the default port cannot be mutated by other listener APIs. |
 
 #### Listener JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
 | listenerID    | string | Read-only field identifying the listener's port and current generation. |
 | label    | string | Label to be applied to the listener. This can also be set/changed via REST API later. |
+| hostLabel    | string | Host Label used by this listener in `Goto-Host` response header (read-only)  |
 | port     | int    | Port on which the new listener will listen on. |
 | protocol | string | `http`, `grpc`, or `tcp`|
 | open | bool | Controls whether the listener should be opened as soon as it's added. Also reflects listener's current status when queried. |
@@ -708,9 +749,9 @@ By default, each listener adds a header `Via-Goto: <port>` to each response it s
 
 |METHOD|URI|Description|
 |---|---|---|
-| POST, PUT | /label/set/`{label}`  | Set label for this port |
-| PUT       | /label/clear        | Remove label for this port |
-| GET       | /label              | Get current label of this port |
+| POST, PUT | /server/label/set/`{label}`  | Set label for this port |
+| PUT       | /server/label/clear        | Remove label for this port |
+| GET       | /server/label              | Get current label of this port |
 
 #### Listener Label API Examples:
 
@@ -718,11 +759,11 @@ By default, each listener adds a header `Via-Goto: <port>` to each response it s
 <summary>API Examples</summary>
 
 ```
-curl -X PUT localhost:8080/label/set/Server-8080
+curl -X PUT localhost:8080/server/label/set/Server-8080
 
-curl -X PUT localhost:8080/label/clear
+curl -X PUT localhost:8080/server/label/clear
 
-curl localhost:8080/label
+curl localhost:8080/server/label
 ```
 
 </details>
@@ -762,31 +803,31 @@ The modes are described in detail below:
 
 |METHOD|URI|Description|
 |---|---|---|
-| POST, PUT  | /tcp/{port}/configure   | Reconfigure details of a TCP listener without having to close and restart. Accepts TCP Config JSON as payload. |
-| POST, PUT  | /tcp/{port}/set<br/>/timeout/read={duration}  | Set TCP read timeout for the port (applies to TCP echo mode) |
-| POST, PUT  | /tcp/{port}/set<br/>/timeout/write={duration}  | Set TCP write timeout for the port (applies to TCP echo mode) |
-| POST, PUT  | /tcp/{port}/set<br/>/timeout/idle={duration}  | Set TCP connection idle timeout for the port (applies to TCP echo mode) |
-| POST, PUT  | /tcp/{port}/set<br/>/connection/life={duration}  | Set TCP connection lifetime duration for the port (applies to all TCP connection modes except streaming) |
-| POST, PUT  | /tcp/{port}/echo/response<br/>/set/delay={duration}  | Set response delay for TCP echo mode for the listener |
-| POST, PUT  | /tcp/{port}/stream<br/>/payload={payloadSize}<br/>/duration={duration}<br/>/delay={delay}  | Set TCP connection to stream data as soon as a client connects, with the given total payload size delivered over the given duration with the given delay per chunk |
-| POST, PUT  | /tcp/{port}/stream<br/>/chunksize={chunkSize}<br/>/duration={duration}<br/>/delay={delay}  | Set TCP connection to stream data as soon as a client connects, with chunks of the given chunk size delivered over the given duration with the given delay per chunk |
-| POST, PUT  | /tcp/{port}/stream<br/>/chunksize={chunkSize}<br/>/count={chunkCount}<br/>/delay={delay}  | Set TCP connection to stream data as soon as a client connects, with total chunks matching the given chunk count of the given chunk size delivered with the given delay per chunk |
-| POST, PUT  | /tcp/{port}/expect<br/>/payload/length={length}  | Set expected payload length for payload verification mode (to only validate payload length, not content) |
-| POST, PUT  | /tcp/{port}/expect/payload  | Set expected payload for payload verification mode, to validate both payload length and content. Expected payload must be sent as request body. |
-| POST, PUT  | /tcp/{port}/set/validate=`{enable}` | Enable/disable payload validation mode on a port to support payload length/content validation over connection lifetime (see overview for details) |
-| POST, PUT  | /tcp/{port}/set/stream=`{enable}`  | Enable or disable streaming on a port without having to restart the listener (useful to disable streaming while retaining the stream configuration) |
-| POST, PUT  | /tcp/{port}/set/echo=`{enable}` | Enable/disable echo mode on a port to let the port be tested in silent mode (see overview for details) |
-| POST, PUT  | /tcp/{port}/set/conversation=`{enable}` | Enable/disable conversation mode on a port to support multiple packets verification (see overview for details) |
-| POST, PUT  | /tcp/{port}/set/silentlife=`{enable}` | Enable/disable silent life mode on a port (see overview for details) |
-| POST, PUT  | /tcp/{port}/set/closeatfirst=`{enable}` | Enable/disable `close at first byte` mode on a port (see overview for details) |
-| GET  | /tcp/{port}/active | Get a list of active client connections for a TCP listener port |
-| GET  | /tcp/active | Get a list of active client connections for all TCP listener ports |
-| GET  | /tcp/{port}/history/{mode} | Get history list of client connections for a TCP listener port for the given mode (one of the supported modes given as text: `SilentLife`, `CloseAtFirstByte`, `Echo`, `Stream`, `Conversation`, `PayloadValidation`) |
-| GET  | /tcp/{port}/history | Get history list of client connections for a TCP listener port |
-| GET  | /tcp/history/{mode} | Get history list of client connections for all TCP listener ports for the given mode (see above) |
-| GET  | /tcp/history | Get history list of client connections for all TCP listener ports |
-| POST  | /tcp/{port}/history/clear | Clear history of client connections for a TCP listener port |
-| POST  | /tcp/history/clear | Clear history of client connections for all TCP listener ports |
+| POST, PUT  | /server/tcp/{port}/configure   | Reconfigure details of a TCP listener without having to close and restart. Accepts TCP Config JSON as payload. |
+| POST, PUT  | /server/tcp/{port}<br/>/timeout/set<br/>/read={duration}  | Set TCP read timeout for the port (applies to TCP echo mode) |
+| POST, PUT  | /server/tcp/{port}<br/>/timeout/set<br/>/write={duration}  | Set TCP write timeout for the port (applies to TCP echo mode) |
+| POST, PUT  | /server/tcp/{port}<br/>/timeout/set<br/>/idle={duration}  | Set TCP connection idle timeout for the port (applies to TCP echo mode) |
+| POST, PUT  | /server/tcp/{port}<br/>/connection/set<br/>/life={duration}  | Set TCP connection lifetime duration for the port (applies to all TCP connection modes except streaming) |
+| POST, PUT  | /server/tcp/{port}/echo<br/>/response/set<br/>/delay={duration}  | Set response delay for TCP echo mode for the listener |
+| POST, PUT  | /server/tcp/{port}/stream<br/>/payload={payloadSize}<br/>/duration={duration}<br/>/delay={delay}  | Set TCP connection to stream data as soon as a client connects, with the given total payload size delivered over the given duration with the given delay per chunk |
+| POST, PUT  | /server/tcp/{port}/stream<br/>/chunksize={chunkSize}<br/>/duration={duration}<br/>/delay={delay}  | Set TCP connection to stream data as soon as a client connects, with chunks of the given chunk size delivered over the given duration with the given delay per chunk |
+| POST, PUT  | /server/tcp/{port}/stream<br/>/chunksize={chunkSize}<br/>/count={chunkCount}<br/>/delay={delay}  | Set TCP connection to stream data as soon as a client connects, with total chunks matching the given chunk count of the given chunk size delivered with the given delay per chunk |
+| POST, PUT  | /server/tcp/{port}<br/>/expect/payload<br/>/length={length}  | Set expected payload length for payload verification mode (to only validate payload length, not content) |
+| POST, PUT  | /server/tcp/{port}<br/>/expect/payload  | Set expected payload for payload verification mode, to validate both payload length and content. Expected payload must be sent as request body. |
+| POST, PUT  | /server/tcp/{port}<br/>/mode/validate=`[y/n]` | Enable/disable payload validation mode on a port to support payload length/content validation over connection lifetime (see overview for details) |
+| POST, PUT  | /server/tcp/{port}<br/>/mode/stream=`[y/n]`  | Enable or disable streaming on a port without having to restart the listener (useful to disable streaming while retaining the stream configuration) |
+| POST, PUT  | /server/tcp/{port}<br/>/mode/echo=`[y/n]` | Enable/disable echo mode on a port to let the port be tested in silent mode (see overview for details) |
+| POST, PUT  | /server/tcp/{port}<br/>/mode/conversation=`[y/n]}` | Enable/disable conversation mode on a port to support multiple packets verification (see overview for details) |
+| POST, PUT  | /server/tcp/{port}<br/>/mode/silentlife=`[y/n]` | Enable/disable silent life mode on a port (see overview for details) |
+| POST, PUT  | /server/tcp/{port}<br/>/mode/closeatfirst=`[y/n]` | Enable/disable `close at first byte` mode on a port (see overview for details) |
+| GET  | /server/tcp/{port}/active | Get a list of active client connections for a TCP listener port |
+| GET  | /server/tcp/active | Get a list of active client connections for all TCP listener ports |
+| GET  | /server/tcp/{port}<br/>/history/{mode} | Get history list of client connections for a TCP listener port for the given mode (one of the supported modes given as text: `SilentLife`, `CloseAtFirstByte`, `Echo`, `Stream`, `Conversation`, `PayloadValidation`) |
+| GET  | /server/tcp/{port}/history | Get history list of client connections for a TCP listener port |
+| GET  | /server/tcp/history/{mode} | Get history list of client connections for all TCP listener ports for the given mode (see above) |
+| GET  | /server/tcp/history | Get history list of client connections for all TCP listener ports |
+| POST  | /server/tcp/{port}<br/>/history/clear | Clear history of client connections for a TCP listener port |
+| POST  | /server/tcp/history/clear | Clear history of client connections for all TCP listener ports |
 
 
 
@@ -912,14 +953,14 @@ This feature allows tracking request counts by headers.
 
 |METHOD|URI|Description|
 |---|---|---|
-|POST     | /request/headers/track/clear									| Remove all tracked headers |
-|PUT, POST| /request/headers/track<br/>/add/`{headers}`					| Add headers to track |
-|PUT, POST|	/request/headers/track<br/>/`{headers}`/remove				| Remove given headers from tracking |
-|GET      | /request/headers/track<br/>/`{header}`/counts				| Get counts for a tracked header |
-|PUT, POST| /request/headers/track<br/>/counts/clear/`{headers}`	| Clear counts for given tracked headers |
-|POST     | /request/headers/track<br/>/counts/clear						| Clear counts for all tracked headers |
-|GET      | /request/headers/track/counts									| Get counts for all tracked headers |
-|GET      | /request/headers/track									      | Get list of tracked headers |
+|POST     | /server/request/headers<br/>/track/clear									| Remove all tracked headers |
+|PUT, POST| /server/request/headers<br/>/track/add/`{headers}`					| Add headers to track |
+|PUT, POST|	/server/request/headers<br/>/track/`{headers}`/remove				| Remove given headers from tracking |
+|GET      | /server/request/headers<br/>/track/`{header}`/counts				| Get counts for a tracked header |
+|PUT, POST| /server/request/headers<br/>/track/counts<br/>/clear/`{headers}`	| Clear counts for given tracked headers |
+|POST     | /server/request/headers<br/>/track/counts/clear						| Clear counts for all tracked headers |
+|GET      | /server/request/headers<br/>/track/counts									| Get counts for all tracked headers |
+|GET      | /server/request/headers/track									      | Get list of tracked headers |
 
 
 #### Request Headers Tracking Events
@@ -935,19 +976,19 @@ This feature allows tracking request counts by headers.
 <summary>API Examples</summary>
 
 ```
-curl -X POST localhost:8080/request/headers/track/clear
+curl -X POST localhost:8080/server/request/headers/track/clear
 
-curl -X PUT localhost:8080/request/headers/track/add/x,y
+curl -X PUT localhost:8080/server/request/headers/track/add/x,y
 
-curl -X PUT localhost:8080/request/headers/track/remove/x
+curl -X PUT localhost:8080/server/request/headers/track/remove/x
 
-curl -X POST localhost:8080/request/headers/track/counts/clear/x
+curl -X POST localhost:8080/server/request/headers/track/counts/clear/x
 
-curl -X POST localhost:8080/request/headers/track/counts/clear
+curl -X POST localhost:8080/server/request/headers/track/counts/clear
 
-curl -X POST localhost:8080/request/headers/track/counts/clear
+curl -X POST localhost:8080/server/request/headers/track/counts/clear
 
-curl localhost:8080/request/headers/track
+curl localhost:8080/request/server/headers/track
 ```
 
 </details>
@@ -1011,10 +1052,10 @@ This feature allows tracking request timeouts by headers.
 
 |METHOD|URI|Description|
 |---|---|---|
-|PUT, POST| /request/timeout/<br/>track/headers/`{headers}`  | Add one or more headers. Requests carrying these headers will be tracked for timeouts and reported |
-|PUT, POST| /request/timeout/track/all                | Enable request timeout tracking for all requests |
-|POST     |	/request/timeout/track/clear              | Clear timeout tracking configs |
-|GET      |	/request/timeout/status                   | Get a report of tracked request timeouts so far |
+|PUT, POST| /server/request/timeout<br/>/track/headers/`{headers}`  | Add one or more headers. Requests carrying these headers will be tracked for timeouts and reported |
+|PUT, POST| /server/request<br/>/timeout/track/all                | Enable request timeout tracking for all requests |
+|POST     |	/server/request<br/>/timeout/track/clear              | Clear timeout tracking configs |
+|GET      |	/server/request<br/>/timeout/status                   | Get a report of tracked request timeouts so far |
 
 
 
@@ -1029,13 +1070,13 @@ This feature allows tracking request timeouts by headers.
 <summary>API Examples</summary>
 
 ```
-curl -X POST localhost:8080/request/timeout/track/headers/x,y
+curl -X POST localhost:8080/server/request/timeout/track/headers/x,y
 
-curl -X POST localhost:8080/request/timeout/track/headers/all
+curl -X POST localhost:8080/server/request/timeout/track/headers/all
 
-curl -X POST localhost:8080/request/timeout/track/clear
+curl -X POST localhost:8080/server/request/timeout/track/clear
 
-curl localhost:8080/request/timeout/status
+curl localhost:8080/server/request/timeout/status
 ```
 
 </details>
@@ -1086,7 +1127,7 @@ curl localhost:8080/request/timeout/status
 
 # <a name="uris"></a>
 ## > URIs
-This feature allows responding with custom status code and delays for specific URIs, and tracking request counts for calls made to specific URIs (ignoring query parameters).
+This feature allows responding with custom status code and delays for specific URIs, and tracking request counts for calls made to specific URIs (ignoring query parameters). URIs can be specified with `*` suffix to match all request URIs carrying the given URI as a prefix.
 Note: To configure server to respond with custom/random response payloads for specific URIs, see [`Response Payload`](#server-response-payload) feature.
 
 #### APIs
@@ -1094,13 +1135,13 @@ Note: To configure server to respond with custom/random response payloads for sp
 
 |METHOD|URI|Description|
 |---|---|---|
-|POST     |	/request/uri/set/status={status:count}?uri=`{uri}` | Set forced response status to respond with for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used each time. |
-|POST     |	/request/uri/set/delay={delay:count}?uri=`{uri}` | Set forced delay for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range each time. |
-|GET      |	/request/uri/counts                     | Get request counts for all URIs |
-|POST     |	/request/uri/counts/enable              | Enable tracking request counts for all URIs |
-|POST     |	/request/uri/counts/disable             | Disable tracking request counts for all URIs |
-|POST     |	/request/uri/counts/clear               | Clear request counts for all URIs |
-|GET     |	/request/uri               | Get current configurations for all configured URIs |
+|POST     |	/server/request/uri<br/>/set/status=`{status:count}`?uri=`{uri}` | Set forced response status to respond with for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used each time. |
+|POST     |	/server/request/uri<br/>/set/delay=`{delay:count}`?uri=`{uri}` | Set forced delay for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range each time. |
+|GET      |	/server/request<br/>/uri/counts                     | Get request counts for all URIs |
+|POST     |	/server/request<br/>/uri/counts/enable              | Enable tracking request counts for all URIs |
+|POST     |	/server/request<br/>/uri/counts/disable             | Disable tracking request counts for all URIs |
+|POST     |	/server/request<br/>/uri/counts/clear               | Clear request counts for all URIs |
+|GET     |	/server/request/uri               | Get current configurations for all configured URIs |
 
 
 #### URIs Events
@@ -1120,17 +1161,17 @@ Note: To configure server to respond with custom/random response payloads for sp
 <summary>API Examples</summary>
 
 ```
-curl -X POST localhost:8080/request/uri/set/status=418,401,404:2?uri=/foo
+curl -X POST localhost:8080/server/request/uri/set/status=418,401,404:2?uri=/foo
 
-curl -X POST localhost:8080/request/uri/set/delay=1s-3s:2?uri=/foo
+curl -X POST localhost:8080/server/request/uri/set/delay=1s-3s:2?uri=/foo
 
-curl localhost:8080/request/uri/counts
+curl localhost:8080/server/request/uri/counts
 
-curl -X POST localhost:8080/request/uri/counts/enable
+curl -X POST localhost:8080/server/request/uri/counts/enable
 
-curl -X POST localhost:8080/request/uri/counts/disable
+curl -X POST localhost:8080/server/request/uri/counts/disable
 
-curl -X POST localhost:8080/request/uri/counts/clear
+curl -X POST localhost:8080/server/request/uri/counts/clear
 ```
 
 </details>
@@ -1226,17 +1267,17 @@ This feature allows bypassing or ignoring some requests based on URIs and Header
 
 |METHOD|URI|Description|
 |---|---|---|
-|PUT, POST| /request/[ignore\|bypass]<br/>/add?uri=`{uri}`       | Filter (ignore or bypass) requests based on uri match, where uri can be a regex. `!` prefix in the URI causes it to become a negative match. |
-|PUT, POST| /request/[ignore\|bypass]<br/>/add/header/`{header}`  | Filter (ignore or bypass) requests based on header name match |
-|PUT, POST| /request/[ignore\|bypass]<br/>/add/header/`{header}`=`{value}`  | Filter (ignore or bypass) requests where the given header name as well as the value matches, where value can be a regex. |
-|PUT, POST| /request/[ignore\|bypass]<br/>/remove?uri=`{uri}`    | Remove a URI filter config |
-|PUT, POST| /request/[ignore\|bypass]<br/>/remove/header/`{header}`    | Remove a header filter config |
-|PUT, POST| /request/[ignore\|bypass]<br/>/remove/header/`{header}`=`{value}`    | Remove a header+value filter config |
-|PUT, POST| /request/[ignore\|bypass]<br/>/set/status=`{status}` | Set status code to be returned for filtered URI requests |
-|GET      |	/request/[ignore\|bypass]/status              | Get current ignore or bypass status code |
-|PUT, POST| /request/[ignore\|bypass]/clear               | Remove all filter configs |
-|GET      |	/request/[ignore\|bypass]/count               | Get ignored or bypassed request count |
-|GET      |	/request/[ignore\|bypass]                     | Get current ignore or bypass configs |
+|PUT, POST| /server/request<br/>/`[ignore\|bypass]`<br/>/add?uri=`{uri}`       | Filter (ignore or bypass) requests based on uri match, where uri can be a regex. `!` prefix in the URI causes it to become a negative match. |
+|PUT, POST| /server/request<br/>/`[ignore\|bypass]`<br/>/add/header/`{header}`  | Filter (ignore or bypass) requests based on header name match |
+|PUT, POST| /server/request<br/>/`[ignore\|bypass]`<br/>/add/header/`{header}`=`{value}`  | Filter (ignore or bypass) requests where the given header name as well as the value matches, where value can be a regex. |
+|PUT, POST| /server/request<br/>/`[ignore\|bypass]`<br/>/remove?uri=`{uri}`    | Remove a URI filter config |
+|PUT, POST| /server/request<br/>/`[ignore\|bypass]`<br/>/remove/header<br/>/`{header}`    | Remove a header filter config |
+|PUT, POST| /server/request<br/>/`[ignore\|bypass]`<br/>/remove/header<br/>/`{header}`=`{value}`    | Remove a header+value filter config |
+|PUT, POST| /server/request<br/>/`[ignore\|bypass]`<br/>/set/status=`{status}` | Set status code to be returned for filtered URI requests |
+|GET      |	/server/request<br/>/`[ignore\|bypass]`/status              | Get current ignore or bypass status code |
+|PUT, POST| /server/request<br/>/`[ignore\|bypass]`/clear               | Remove all filter configs |
+|GET      |	/server/request<br/>/`[ignore\|bypass]`/count               | Get ignored or bypassed request count |
+|GET      |	/server/request<br/>/`[ignore\|bypass]`                     | Get current ignore or bypass configs |
 
 
 #### Request Filter (Ignore/Bypass) Events
@@ -1252,32 +1293,32 @@ This feature allows bypassing or ignoring some requests based on URIs and Header
 ```
 #all APIs can be used for both ignore and bypass
 
-curl -X POST localhost:8080/request/ignore/clear
-curl -X POST localhost:8080/request/bypass/clear
+curl -X POST localhost:8080/server/request/ignore/clear
+curl -X POST localhost:8080/server/request/bypass/clear
 
 #ignore all requests where URI has /foo prefix
-curl -X PUT localhost:8080/request/ignore/add?uri=/foo.*
+curl -X PUT localhost:8080/server/request/ignore/add?uri=/foo.*
 
 #ignore all requests where URI has /foo prefix and contains bar somewhere
-curl -X PUT localhost:8080/request/ignore/add?uri=/foo.*bar.*
+curl -X PUT localhost:8080/server/request/ignore/add?uri=/foo.*bar.*
 
 #ignore all requests where URI does not have /foo prefix
-curl -X POST localhost:8080/request/ignore/add?uri=!/foo.*
+curl -X POST localhost:8080/server/request/ignore/add?uri=!/foo.*
 
 #ignore all requests that carry a header `foo` with value that has `bar` prefix
-curl -X PUT localhost:8080/request/ignore/add/header/foo=bar.*
+curl -X PUT localhost:8080/server/request/ignore/add/header/foo=bar.*
 
-curl -X PUT localhost:8080/request/bypass/add/header/foo=bar.*
+curl -X PUT localhost:8080/server/request/bypass/add/header/foo=bar.*
 
-curl -X PUT localhost:8080/request/ignore/remove?uri=/bar
-curl -X PUT localhost:8080/request/bypass/remove?uri=/bar
+curl -X PUT localhost:8080/server/request/ignore/remove?uri=/bar
+curl -X PUT localhost:8080/server/request/bypass/remove?uri=/bar
 
 #set status code to use for ignore and bypass requests
-curl -X PUT localhost:8080/request/ignore/set/status=418
-curl -X PUT localhost:8080/request/bypass/set/status=418
+curl -X PUT localhost:8080/server/request/ignore/set/status=418
+curl -X PUT localhost:8080/server/request/bypass/set/status=418
 
-curl localhost:8080/request/ignore
-curl localhost:8080/request/bypass
+curl localhost:8080/server/request/ignore
+curl localhost:8080/server/request/bypass
 
 ```
 
@@ -1290,7 +1331,7 @@ curl localhost:8080/request/bypass
 <p>
 
 ```
-$ curl localhost:8080/request/ignore
+$ curl localhost:8080/server/request/ignore
 {
   "uris": {
     "/foo": {}
@@ -1332,9 +1373,9 @@ When a delay is applied to a request, the response carries a header `Response-De
 
 |METHOD|URI|Description|
 |---|---|---|
-| PUT, POST | /response/delay/set/{delay} | Set a delay for non-management requests (i.e. runtime traffic). `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range each time. |
-| PUT, POST | /response/delay/clear       | Remove currently set delay |
-| GET       |	/response/delay             | Get currently set delay |
+| PUT, POST | /server/response<br/>/delay/set/{delay} | Set a delay for non-management requests (i.e. runtime traffic). `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range each time. |
+| PUT, POST | /server/response<br/>/delay/clear       | Remove currently set delay |
+| GET       |	/server/response/delay             | Get currently set delay |
 
 
 #### Response Delay Events
@@ -1347,11 +1388,11 @@ When a delay is applied to a request, the response carries a header `Response-De
 <summary>API Examples</summary>
 
 ```
-curl -X POST localhost:8080/response/delay/clear
+curl -X POST localhost:8080/server/response/delay/clear
 
-curl -X PUT localhost:8080/response/delay/set/1s-3s
+curl -X PUT localhost:8080/server/response/delay/set/1s-3s
 
-curl localhost:8080/response/delay
+curl localhost:8080/server/response/delay
 ```
 
 </details>
@@ -1369,10 +1410,10 @@ This feature allows adding custom response headers to all responses sent by the 
 
 |METHOD|URI|Description|
 |---|---|---|
-| PUT, POST | /response/headers<br/>/add/`{header}`=`{value}`  | Add a custom header to be sent with all responses |
-| PUT, POST | /response/headers<br/>/remove/`{header}`       | Remove a previously added custom response header |
-| POST      |	/response/headers/clear                 | Remove all configured custom response headers |
-| GET       |	/response/headers                       | Get list of configured custom response headers |
+| PUT, POST | /server/response<br/>/headers/add<br/>/`{header}`=`{value}`  | Add a custom header to be sent with all responses |
+| PUT, POST | /server/response<br/>/headers/remove/`{header}`       | Remove a previously added custom response header |
+| POST      |	/server/response<br/>/headers/clear                 | Remove all configured custom response headers |
+| GET       |	/server/response/headers                       | Get list of configured custom response headers |
 
 
 #### Response Headers Events
@@ -1386,13 +1427,13 @@ This feature allows adding custom response headers to all responses sent by the 
 <summary>API Examples</summary>
 
 ```
-curl -X POST localhost:8080/response/headers/clear
+curl -X POST localhost:8080/server/response/headers/clear
 
-curl -X POST localhost:8080/response/headers/add/x=x1
+curl -X POST localhost:8080/server/response/headers/add/x=x1
 
-curl -X POST localhost:8080/response/headers/remove/x
+curl -X POST localhost:8080/server/response/headers/remove/x
 
-curl localhost:8080/response/headers
+curl localhost:8080/server/response/headers
 ```
 
 </details>
@@ -1405,18 +1446,30 @@ curl localhost:8080/response/headers
 
 ## > Response Payload
 
-This feature allows setting either a specific custom payload to be delivered based on request match criteria, or configure server to send random auto-generated response payloads.
+This feature lets you configure a `goto` instance to respond with custom payloads for specific requests based on various match criteria. The response payload can be:
+- Random auto-generated text based on configured size
+- Static payload of any format, including binary content (e.g. JSON, YAML, Image, Zip/Tar, etc.)
+- Dynamic payload derived from a given template by performing transformations and applying captured values from request body, URI, headers, query, etc. The transformations are defined as one or more path mappings that let you capture values from source locations and apply those to destination location..
+- Dynamic payload derived from the request's JSON/YAML payload as opposed to working off a template, and applying transformations as above.
 
-A payload configuration can also `capture` values from the URI/Header/Query that it matches, as described in a section below.
+If no custom payload is configured, the request proceeds with its normal processing. When response payload is configured, the following requests are not matched against payload rules and never receive the configured payload:
+- `Goto` admin requests
+- Probe URIs (`readiness` and `liveness`)
+- Bypass URIs
 
-### Custom payload based on request matching
+When a request is matched with a configured payload (custom or default), the request is not processed further except:
+- assigning the configured or requested response status code (either requested via `/status/{status}` call or configured via `/server/response/status/set/{status}`)
+- applying response delay, either requested via `/delay` call or configured via `/server/response/delay/set/{delay}` API.
+
+
+### Custom payload based on Request Matching
 
 Custom response payload can be set for any of the following request categories:
 
 1. All requests (`default` payload),
-2. Requests matching certain URI patterns,
-3. Requests matching certain headers (keys, and optionally values).
-4. Requests matching certain query params (names, and optionally values)
+2. Requests matching URIs
+3. Requests matching headers (keys, and optionally values).
+4. Requests matching query params (names, and optionally values)
 5. Requests matching URI + header combinations
 6. Requests matching URI + query combinations
 7. Requests matching URI + one or more keywords in request body
@@ -1432,17 +1485,31 @@ If a request matches multiple configured responses, a response is picked based o
 7. If no other match found and a default payload is configured, the default payload is served
 8. If no match found and no default payload is configured, the request proceeds for eventual catch-all response.
 
+URIs can be specified with `*` suffix to match all request URIs carrying the given URI as a prefix. E.g. `/foo*` to match `/foo`, `/fooxyz` and `/foo/xyz`.
+
 ### Auto-generated random response payload
-Random payload generation can be configured for the `default` payload that applies to all URIs that don't have a custom payload defined. Random payload generation is configured by specifying a payload size using URI `/response/payload/set/default/`{size}`` and not setting any payload. If a custom default payload is set as well as the size is configured, the custom payload will be adjusted to match the set size by either trimming the custom payload or appending more characters to the custom payload. Payload size can be a numeric value or use common byte size conventions: `K`, `KB`, `M`, `MB`. There is no limit on the payload size as such, it's only limited by the memory available to the `goto` process.
+Random payload generation can be configured for the `default` payload that applies to all URIs that don't have a custom payload defined. Random payload generation is configured by specifying a payload size using URI `/server/response/payload/set/default/{size}` and not setting any payload. If a custom default payload is set as well as the size is configured, the custom payload will be adjusted to match the set size by either trimming the custom payload or appending more characters to the custom payload. Payload size can be a numeric value or use common byte size conventions: `K`, `KB`, `M`, `MB`. There is no limit on the payload size as such, it's only limited by the memory available to the `goto` process.
 
-If no custom payload is configured, the request proceeds with its normal processing. When response payload is configured, the following requests are not matched against payload rules and never receive the configured payload:
-- `Goto` admin requests
-- Probe URIs (`readiness` and `liveness`)
-- Bypass URIs
 
-When a request is matched with a configured payload (custom or default), the request is not processed further except:
-- assigning the configured or requested response status code (either requested via `/status/`{status}`` call or configured via `/response/status/set/`{status}``)
-- applying response delay, either requested via `/delay` call or configured via `/response/delay/set/{delay}` API.
+### Payload transformation
+URI `/server/response/payload/transform` allows configuring payload transformation rules for a given URI. Requests received for that URI will receive response with payload produced by such configured transformations. Multiple transformations sets can be defined for a URI, which are applied in sequence until one of them performs an update for the request. Transformation can work off `JSON` and `YAML` request payloads. Payload template must be defined in `JSON` format.
+
+A transformation definition has two fields: `payload` and `mappings`. 
+- If a transformation is defined with an accompanying payload, the mappings are used to extract data from request payload and applied to this payload, and this payload is served as response.
+- If a transformation is defined without a payload, the mappings are used to transform the request payload and the request payload is served back as response.
+
+Each transformation spec can contain multiple mappings. A mapping carries the following fields:
+- `source`: This field contains a path separated by `.` that identifies a field in the request payload. For arrays, numeric indexes can be used as a key in the path. For example, path `a.0.b.1` means `payload["a"][0]["b"][1]`. This field is required for the transformation to take effect. A mapping with missing `source` is ignored.
+- `target`: This field is optional, and if not given then `source` path is also used as target. The `target` field has dual behavior:
+    - If it contains a dot-separated path, it identifies the target field where the value extracted from the source field is applied
+    - If it contains a capture pattern using syntax `{text}`, all occurrences of `text` in the target payload are replaced with the value extracted from the source field. A pattern of `{{text}}` causes it to look for and replace all occurrences of `{text}`
+- `ifContains` and `ifNotContains`: These fields provide text that is matched against the source field, and the mapping is applied only if the source field contains or doesn't contain the given text correspondingly.
+- `mode`: This field can contain one the following values to dictate how the source value is applied to the target field. All these modes can cause a change in the field's type.
+  - `replace`: replace the current value of the target field with the source value.
+  - `join`: join the current value of the target field with the source value using text concatenation (only makes sense for text fields). 
+  - `push`: combine the source value with the target field's current value(s) making it an array (if not already an array), inserting the source value before the given index (or head).
+  - `append` (default): combine the source value with the target field's current value(s) making it an array (if not already an array), inserting the source value after the given index (or tail).
+- `value`: The `value` field provides a default value to instead of the source value. For request payload transformation (no payload template given), the `value` field is used as primary value and source field is used as fallback value. For payload template transformation, source field is used as primary value and the given value is used as fallback.
 
 
 ### Capturing values from the request to use in the response payload
@@ -1451,20 +1518,20 @@ When a request is matched with a configured payload (custom or default), the req
 
  For example, for a configured response payload that matches on request URI:
  ```
- /response/payload/set/uri?uri=/foo/{f}/bar{b} 
+ /server/response/payload/set/uri?uri=/foo/{f}/bar{b} 
   --data '{"result": "uri had foo={f}, bar={b}"}'
  ```
 when a request comes for URI `/foo/hi/bar123`, the response payload will be `{"result": "uri had foo=hi, bar=123"}`
 
 Similarly, for a configured response payload that matches on request header:
 ```
-/response/payload/set/header/foo={x} --data '{"result": "header was foo with value {x}"}'
+/server/response/payload/set/header/foo={x} --data '{"result": "header was foo with value {x}"}'
 ```
 when a request comes with header `foo:123`, the response payload will be `{"result": "header was foo with value 123"}`
 
 Same kind of capture can be done on query params, e.g.:
 ```
-/response/payload/set/query/qq={v} --data '{"test": "query qq was set to {v}"}'
+/server/response/payload/set/query/qq={v} --data '{"test": "query qq was set to {v}"}'
 ```
 
 
@@ -1473,20 +1540,80 @@ Same kind of capture can be done on query params, e.g.:
 
 |METHOD|URI|Description|
 |---|---|---|
-| POST | /response/payload<br/>/set/default  | Add a custom payload to be used for ALL URI responses except those explicitly configured with another payload |
-| POST | /response/payload<br/>/set/default/`{size}`  | Respond with a random generated payload of the given size for all URIs except those explicitly configured with another payload. Size can be a numeric value or use common byte size conventions: K, KB, M, MB |
-| POST | /response/payload<br/>/set/uri?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given URI. URI can contain variable placeholders. |
-| POST | /response/payload<br/>/set/header/`{header}`  | Add a custom payload to be sent for requests matching the given header name |
-| POST | /response/payload<br/>/set/header/`{header}`?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given header name and the given URI |
-| POST | /response/payload<br/>/set/header/`{header}`=`{value}`  | Add a custom payload to be sent for requests matching the given header name and value |
-| POST | /response/payload<br/>/set/header/`{header}`=`{value}`?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given header name and value along with the given URI. |
-| POST | /response/payload<br/>/set/query/{q}  | Add a custom payload to be sent for requests matching the given query param name |
-| POST | /response/payload<br/>/set/query/{q}?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given query param name and the given URI |
-| POST | /response/payload<br/>/set/query/{q}=`{value}`  | Add a custom payload to be sent for requests matching the given query param name and value |
-| POST | /response/payload<br/>/set/query/{q}=`{value}`<br/>?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given query param name and value along with the given URI. |
-| POST | /response/payload<br/>/set/body~{keywords}?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given URI where the body contains the given keywords (comma-separated list) in the given order (second keyword in the list must appear after the first, and so on) |
-| POST | /response/payload/clear  | Clear all configured custom response payloads |
-| GET  |	/response/payload                      | Get configured custom payloads |
+| POST | /server/response<br/>/payload/set/default  | Add a custom payload to be used for ALL URI responses except those explicitly configured with another payload |
+| POST | /server/response<br/>/payload/set<br/>/default/`{size}`  | Respond with a random generated payload of the given size for all URIs except those explicitly configured with another payload. Size can be a numeric value or use common byte size conventions: K, KB, M, MB |
+| POST | /server/response<br/>/payload/set<br/>/default/binary  | Add a binary payload to be used for ALL URI responses except those explicitly configured with another payload. If no content type sent with the API, `application/octet-stream` is used. |
+| POST | /server/response<br/>/payload/set<br/>/default/binary/`{size}`  | Respond with a random generated binary payload of the given size for all URIs except those explicitly configured with another payload. Size can be a numeric value or use common byte size conventions: K, KB, M, MB. If no content type sent with the API, `application/octet-stream` is used. |
+| POST | /server/response<br/>/payload/set<br/>/uri?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given URI. URI can contain variable placeholders. |
+| POST | /server/response<br/>/payload/set<br/>/header/`{header}`  | Add a custom payload to be sent for requests matching the given header name |
+| POST | /server/response<br/>/payload/set/header<br/>/`{header}`?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given header name and the given URI |
+| POST | /server/response<br/>/payload/set/header<br/>/`{header}={value}`  | Add a custom payload to be sent for requests matching the given header name and value |
+| POST | /server/response<br/>/payload/set/header<br/>/`{header}={value}`?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given header name and value along with the given URI. |
+| POST | /server/response<br/>/payload/set/query/`{q}`  | Add a custom payload to be sent for requests matching the given query param name |
+| POST | /server/response<br/>/payload/set/query<br/>/`{q}`?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given query param name and the given URI |
+| POST | /server/response<br/>/payload/set<br/>/query/`{q}={value}`  | Add a custom payload to be sent for requests matching the given query param name and value |
+| POST | /server/response<br/>/payload/set/query<br/>/`{q}={value}`<br/>?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given query param name and value along with the given URI. |
+| POST | /server/response<br/>/payload/set<br/>/body~`{keywords}`?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given URI where the body contains the given keywords (comma-separated list) in the given order (second keyword in the list must appear after the first, and so on) |
+| POST | /server/response<br/>/payload/transform?uri=`{uri}`  | Add payload transformations for requests matching the given URI. Payload submitted with this URI should be `Payload Transformation Schema` |
+| POST | /server/response<br/>/payload/clear  | Clear all configured custom response payloads |
+| GET  |	/server/response/payload | Get configured custom payloads |
+
+
+
+#### Payload Transformation Schema
+A payload transformation is defined by giving one or more path mappings and an optional payload template.
+
+|Field|Type|Description|
+|---|---|---|
+| mappings | []JSONTransform | List of mappings to be applied for this transformation. |
+| payload | any | If given,  If not given, mappings are used to transform request payload and sent back. |
+
+
+#### Transformation Mapping Schema
+
+|Field|Type|Description|
+|---|---|---|
+| source | string | Path (keys separated by `.`) to be used against source payload (request) to get the source field  |
+| target | string | Path (keys separated by `.`) to be used against target payload (template or request) to get the target field |
+| ifContains | string | If given, the mapping is applied only if this text exists in the source field |
+| ifNotContains | string | If given, the mapping is applied only if this text doesn't exist in the source field |
+| mode | string | One of: `replace`, `join`, `push`, `append`. See above for details. |
+| value | any | Default value. See above for details. |
+
+
+#### Port Response Payload Config Schema
+
+This schema is used to describe currently configured response payloads for the port on which the API `/server/response/payload` is invoked
+
+|Field|Type|Description|
+|---|---|---|
+| defaultResponsePayload | ResponsePayload | Default payload if configured |
+| responsePayloadByURIs | string->ResponsePayload | Payloads configured for uri match. Includes both static and request transformation payloads |
+| responsePayloadByHeaders | string->string->ResponsePayload | Payloads configured for headers match |
+| responsePayloadByURIAndHeaders | string->string->string->ResponsePayload | Payloads configured for uri and headers match |
+| responsePayloadByQuery | string->string->ResponsePayload | Payloads configured for query params match |
+| responsePayloadByURIAndQuery | string->string->string->ResponsePayload | Payloads configured for uri and query params match |
+| responsePayloadByURIAndBody | string->string->ResponsePayload | Payloads configured for uri and body keywords match |
+
+
+#### Response Payload Config Schema
+
+This schema is used to describe currently configured response payload, as the output of `/server/response/payload`
+
+|Field|Type|Description|
+|---|---|---|
+| payload | string | Payload to serve when this configuration matches |
+| contentType | string | Response content-type to use when this configuration matches |
+| uriMatch | string | URI match criteria  |
+| headerMatch | string | Header match criteria |
+| headerValueMatch | string | Header value match criteria |
+| queryMatch | string | Query param name match criteria |
+| queryValueMatch | string | Query param value match criteria |
+| bodyMatch | []string | Keywords to match against request body for non-transformation response payload configuration |
+| uriCaptureKeys | []string | Keys to capture values from URI |
+| headerCaptureKey | string | Key to capture value from headers |
+| queryCaptureKey | string | Key to capture value from query params |
+| transforms | []PayloadTransformation | Transformations defined in this config. See `Payload Transformation schema` |
 
 
 #### Response Payload Events
@@ -1494,29 +1621,8 @@ Same kind of capture can be done on query params, e.g.:
 - `Response Payload Cleared`
 - `Response Payload Applied`: generated when a configured response payload is applied to a request that wasn't explicitly asking for a custom payload (i.e. not for `/payload` and `/stream` URIs).
 
-#### Response Payload API Examples
-<details>
-<summary>API Examples</summary>
+See [Response Payload API Examples](docs/response-payload-api-examples.md)
 
-```
-curl -X POST localhost:8080/response/payload/set/default --data '{"test": "default payload"}'
-
-curl -X POST localhost:8080/response/payload/set/default/10K
-
-curl -X POST -g localhost:8080/response/payload/set/uri?uri=/foo/{f}/bar{b} --data '{"test": "uri was /foo/{}/bar/{}"}'
-
-curl -X POST -g localhost:8080/response/payload/set/header/foo/{f} --data '{"test": "header was foo with value {f}"}'
-
-curl -X POST localhost:8080/response/payload/set/header/foo=bar --data '{"test": "header was foo with value bar"}'
-
-curl -g -X POST localhost:8080/response/payload/set/body~AA,BB,CC?uri=/foo --data '{"test": "body contains AA,BB,CC"}' -HContent-Type:application/json
-
-curl -X POST localhost:8080/response/payload/clear
-
-curl localhost:8080/response/payload
-```
-
-</details>
 
 ###### <small> [Back to TOC](#toc) </small>
 
@@ -1604,12 +1710,12 @@ This feature allows setting a forced response status for all requests except byp
 
 |METHOD|URI|Description|
 |---|---|---|
-| PUT, POST | /response/status/set/`{status}`     | Set a forced response status that all non-proxied and non-management requests will be responded with. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used each time. |
-| PUT, POST |	/response/status/clear            | Remove currently configured forced response status, so that all subsequent calls will receive their original deemed response |
-| PUT, POST | /response/status/counts/clear     | Clear counts tracked for response statuses |
-| GET       |	/response/status/counts/`{status}`  | Get request counts for a given status |
-| GET       |	/response/status/counts           | Get request counts for all response statuses so far |
-| GET       |	/response/status                  | Get the currently configured forced response status |
+| PUT, POST | /server/response<br/>/status/set/`{status}`     | Set a forced response status that all non-proxied and non-management requests will be responded with. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used each time. |
+| PUT, POST |	/server/response<br/>/status/clear            | Remove currently configured forced response status, so that all subsequent calls will receive their original deemed response |
+| PUT, POST | /server/response<br/>/status/counts/clear     | Clear counts tracked for response statuses |
+| GET       |	/server/response<br/>/status/counts/`{status}`  | Get request counts for a given status |
+| GET       |	/server/response<br/>/status/counts           | Get request counts for all response statuses so far |
+| GET       |	/server/response/status                  | Get the currently configured forced response status |
 
 
 #### Response Status Events
@@ -1623,19 +1729,19 @@ This feature allows setting a forced response status for all requests except byp
 <summary>API Examples</summary>
 
 ```
-curl -X POST localhost:8080/response/status/counts/clear
+curl -X POST localhost:8080/server/response/status/counts/clear
 
-curl -X POST localhost:8080/response/status/clear
+curl -X POST localhost:8080/server/response/status/clear
 
-curl -X PUT localhost:8080/response/status/set/502
+curl -X PUT localhost:8080/server/response/status/set/502
 
-curl -X PUT localhost:8080/response/status/set/0
+curl -X PUT localhost:8080/server/response/status/set/0
 
-curl -X POST localhost:8080/response/status/counts/clear
+curl -X POST localhost:8080/server/response/status/counts/clear
 
-curl localhost:8080/response/status/counts
+curl localhost:8080/server/response/status/counts
 
-curl localhost:8080/response/status/counts/502
+curl localhost:8080/server/response/status/counts/502
 ```
 
 </details>
@@ -1679,14 +1785,14 @@ curl localhost:8080/response/status/counts/502
 
 |METHOD|URI|Description|
 |---|---|---|
-|POST     |	/response/triggers/add              | Add a trigger target. See [Trigger Target JSON Schema](#trigger-target-json-schema) |
-|PUT, POST| /response/triggers/{target}/remove  | Remove a trigger target |
-|PUT, POST| /response/triggers/{target}/enable  | Enable a trigger target |
-|PUT, POST| /response/triggers/{target}/disable | Disable a trigger target |
-|POST     |	/response/triggers/`{targets}`/invoke | Invoke trigger targets by name for manual testing |
-|POST     |	/response/triggers/clear            | Remove all trigger targets |
-|GET 	    |	/response/triggers             | List all trigger targets |
-|GET 	    |	/response/triggers/counts             | Report invocation counts for all trigger targets |
+|POST     |	/server/response<br/>/triggers/add              | Add a trigger target. See [Trigger Target JSON Schema](#trigger-target-json-schema) |
+|PUT, POST| /server/response<br/>/triggers/{target}/remove  | Remove a trigger target |
+|PUT, POST| /server/response<br/>/triggers/{target}/enable  | Enable a trigger target |
+|PUT, POST| /server/response<br/>/triggers/{target}/disable | Disable a trigger target |
+|POST     |	/server/response<br/>/triggers/`{targets}`/invoke | Invoke trigger targets by name for manual testing |
+|POST     |	/server/response<br/>/triggers/clear            | Remove all trigger targets |
+|GET 	    |	/server/response<br/>/triggers/counts             | Report invocation counts for all trigger targets |
+|GET 	    |	/server/response/triggers             | List all trigger targets |
 
 
 #### Trigger Target JSON Schema
@@ -1728,8 +1834,11 @@ The URI `/status/`{status}`` allows client to ask for a specific status as respo
 #### API
 |METHOD|URI|Description|
 |---|---|---|
-| GET       |	/status/`{status}` | This call either receives the given status, or the forced response status if one is set. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used. |
-| GET       |	/status/`{status}`/delay/`{delay}` | In addition to requesting a status as above, this API also allows a delay to be applied. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
+| GET |	/status/`{status}` or /status=`{status}` | This call either receives the given status, or the forced response status if one is set. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used. |
+| GET  |	/status=`{status:count}`/flipflop | This call responds with the given status for the given count times when called successively with the same count value. Once the status is served `count` times, the next status served is `200`, and subsequent calls start the cycle again. If a call to this API arrives with a different `count` value than previous call, the cycle restarts using the new count value. |
+| GET  |	/status=`{status}`<br/>/delay=`{delay}` | In addition to requesting a status as above, this API also allows a delay to be applied. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
+| GET  |	/status/flipflop | Reports the current flopflop counter value, i.e. number of times current last request flipflop status has been served. |
+| POST |	/status/flipflop/clear | Clears the current flopflop counter value so the next call can start with a fresh cycle. |
 
 #### Status API Example
 ```
@@ -1750,7 +1859,7 @@ When a delay is passed to this API, the response carries a header `Response-Dela
 #### API
 |METHOD|URI|Description|
 |---|---|---|
-| GET, POST, PUT, OPTIONS, HEAD |	/delay/{delay} | Responds after the given delay. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
+| GET, POST, PUT, OPTIONS, HEAD |	/delay/`{delay}` | Responds after the given delay. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
 
 #### Delay API Example
 ```
@@ -1794,6 +1903,23 @@ Any request that doesn't match any of the defined management APIs, and also does
 <br/>
 <br/>
 
+# <a name="tunnel"></a>
+# Tunnel
+
+`Tunnel` feature allows a `goto` instance to act as a tunnel, receiving HTTP/S requests from clients and forwarding those to any arbitrary HTTP/S endpoint. This feature can be useful when a client wishes to reach an endpoint by IP address, but the endpoint is not accessible from the client's network space (e.g. K8S overlay network). In such cases, a single `goto` instance deployed inside the overlay network (e.g. K8S cluster) but accessible to the client network space via an FQDN can receive requests from clients and transparently forward those to any overlay IP address that's visible to the `goto` instance.
+
+In order to tunnel an HTTP request, use format `http://goto/tunnel={address:port}/some/uri`. The goto instance will in turn make a call to `{address:port}` with URI `/some/uri` using the same HTTP parameters that the client used (Method, Headers, Body, TLS). 
+
+When the tunnel prefix is of the form `address:port`, the protocol used by the client request is applied. If tunnel prefix is specified as `protocol:address:port`, the given protocol is used, thus allowing client to make HTTP call to goto but have goto make HTTPS call to the endpoint, and vice versa.
+
+All `Goto` APIs support tunnel prefix, allowing any `goto` API to be proxied from one instance to another. In addition, any arbitrary API can also be called using the tunnel prefix.
+
+###### <small> [Back to TOC](#toc) </small>
+
+
+<br/>
+<br/>
+
 # <a name="proxy"></a>
 # Proxy
 
@@ -1805,11 +1931,11 @@ Any request that doesn't match any of the defined management APIs, and also does
 |METHOD|URI|Description|
 |---|---|---|
 |POST     |	/proxy/targets/add              | Add target for proxying requests [see `Proxy Target JSON Schema`](#proxy-target-json-schema) |
-|PUT, POST| /proxy/targets/{target}/remove  | Remove a proxy target |
-|PUT, POST| /proxy/targets/{target}/enable  | Enable a proxy target |
-|PUT, POST| /proxy/targets/{target}/disable | Disable a proxy target |
-|POST     |	/proxy/targets/`{targets}`/invoke | Invoke proxy targets by name |
-|POST     |	/proxy/targets/invoke/`{targets}` | Invoke proxy targets by name |
+|PUT, POST| /proxy/targets<br/>/{target}/remove  | Remove a proxy target |
+|PUT, POST| /proxy/targets<br/>/{target}/enable  | Enable a proxy target |
+|PUT, POST| /proxy/targets<br/>/{target}/disable | Disable a proxy target |
+|POST     |	/proxy/targets<br/>/`{targets}`/invoke | Invoke proxy targets by name |
+|POST     |	/proxy/targets<br/>/invoke/`{targets}` | Invoke proxy targets by name |
 |POST     |	/proxy/targets/clear            | Remove all proxy targets |
 |GET 	    |	/proxy/targets                  | List all proxy targets |
 |GET      |	/proxy/counts                   | Get proxy match/invocation counts, by uri, header and query params |
@@ -1928,9 +2054,9 @@ Jobs can also trigger another job for each line of output produced, as well as u
 |METHOD|URI|Description|
 |---|---|---|
 | POST, PUT  |	/jobs/add     | Add a job. See [Job JSON Schema](#job-json-schema) |
-| POST, PUT  |	/jobs/add/script/`{name}` | Add a shell script to be executed as a job, by storing the request body as script content under given filename at the current working directory of the `goto` process. Also creates a default job with the same name to provide a ready-to-use way to execute the script. |
-| POST, PUT  |	/jobs/store/file/`{name}` | Store request body as a file at the current working directory of the `goto` process. Filed saved with mode `777`.|
-| POST, PUT  |	/jobs/store/file/`{name}`?path=`{path}` | Store request body as a file at the given path with mode `777`. |
+| POST, PUT  |	/jobs/add<br/>/script/`{name}` | Add a shell script to be executed as a job, by storing the request body as script content under given filename at the current working directory of the `goto` process. Also creates a default job with the same name to provide a ready-to-use way to execute the script. |
+| POST, PUT  |	/jobs/store<br/>/file/`{name}` | Store request body as a file at the current working directory of the `goto` process. Filed saved with mode `777`.|
+| POST, PUT  |	/jobs/store/file<br/>/`{name}`?path=`{path}` | Store request body as a file at the given path with mode `777`. |
 | POST  | /jobs/`{jobs}`/remove | Remove given jobs by name, and clears its results |
 | POST  | /jobs/clear         | Remove all jobs |
 | POST  | /jobs/`{jobs}`/run  | Run given jobs |
@@ -2051,16 +2177,16 @@ By registering a worker instance to a registry instance, we get a few benefits:
 |METHOD|URI|Description|
 |---|---|---|
 | POST      | /registry/peers/add     | Register a worker instance (referred to as peer). See [Peer JSON Schema](#peer-json-schema)|
-| POST      | /registry/peers/`{peer}`/remember | Re-register a peer. Accepts same request payload as /peers/add API but doesn't respond back with targets and jobs. |
+| POST      | /registry/peers<br/>/`{peer}`/remember | Re-register a peer. Accepts same request payload as /peers/add API but doesn't respond back with targets and jobs. |
 | POST, PUT | /registry/peers/`{peer}`<br/>/remove/`{address}` | Deregister a peer by its label and IP address |
 | GET       | /registry/peers/`{peer}`<br/>/health/`{address}` | Check and report health of a specific peer instance based on label and IP address |
-| GET       | /registry/peers/`{peer}`/health | Check and report health of all instances of a peer |
+| GET       | /registry/peers<br/>/`{peer}`/health | Check and report health of all instances of a peer |
 | GET       | /registry/peers/health | Check and report health of all instances of all peers |
 | POST      | /registry/peers/`{peer}`<br/>/health/cleanup | Check health of all instances of the given peer label and remove IP addresses that are unresponsive |
-| POST      | /registry/peers/health/cleanup | Check health of all instances of all peers and remove IP addresses that are unresponsive |
-| POST      | /registry/peers/clear/epochs   | Remove epochs for disconnected peers|
+| POST      | /registry/peers<br/>/health/cleanup | Check health of all instances of all peers and remove IP addresses that are unresponsive |
+| POST      | /registry/peers<br/>/clear/epochs   | Remove epochs for disconnected peers|
 | POST      | /registry/peers/clear   | Remove all registered peers|
-| POST      | /registry/peers/copyToLocker   | Copy current set of `Peers JSON` data (output of `/registry/peers` API) to current locker under a pre-defined key named `peers` |
+| POST      | /registry/peers<br/>/copyToLocker   | Copy current set of `Peers JSON` data (output of `/registry/peers` API) to current locker under a pre-defined key named `peers` |
 | GET       | /registry/peers         | Get all registered peers. See [Peers JSON Schema](#peers-json-schema) |
 
 
@@ -2073,11 +2199,11 @@ Label `current` can be used with APIs that take a locker label param to get data
 
 |METHOD|URI|Description|
 |---|---|---|
-| POST      | /registry/lockers/open/`{label}` | Setup a locker with the given label and make it the current locker where peer results get stored. Comma-separated label can be used to open nested lockers, where each non-leaf item in the CSV list is used as a parent locker. The leaf locker label becomes the currently active locker. |
-| POST      | /registry/lockers/close/`{label}` | Remove the locker for the given label. |
-| POST      | /registry/lockers/`{label}`/close | Remove the locker for the given label. |
+| POST      | /registry/lockers<br/>/open/`{label}` | Setup a locker with the given label and make it the current locker where peer results get stored. Comma-separated label can be used to open nested lockers, where each non-leaf item in the CSV list is used as a parent locker. The leaf locker label becomes the currently active locker. |
+| POST      | /registry/lockers<br/>/close/`{label}` | Remove the locker for the given label. |
+| POST      | /registry/lockers<br/>/`{label}`/close | Remove the locker for the given label. |
 | POST      | /registry/lockers/close | Remove all labeled lockers and empty the default locker.  |
-| POST      | /registry/lockers/`{label}`/clear | Clear the contents of the locker for the given label but keep the locker. |
+| POST      | /registry/lockers<br/>/`{label}`/clear | Clear the contents of the locker for the given label but keep the locker. |
 | POST      | /registry/lockers/clear | Remove all labeled lockers and empty the default locker.  |
 | POST      | /registry/lockers<br/>/`{label}`/store/`{path}` | Store payload (body) as data in the given labeled locker at the leaf of the given key path. `path` can be a single key or a comma-separated list of subkeys, in which case data gets stored in the tree under the given path. |
 | POST      | /registry/lockers<br/>/`{label}`/remove/`{path}` | Remove stored data, if any, from the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data gets removed from the leaf of the given path. |
@@ -2088,7 +2214,7 @@ Label `current` can be used with APIs that take a locker label param to get data
 | POST      | /registry/peers<br/>/`{peer}`/`{address}`<br/>/events/store | API invoked by peers to publish their events to the currently active locker. Event timeline can be retrieved from registry via various `/events` GET APIs. |
 | POST      | /registry/peers<br/>/`{peer}`/`{address}`<br/>/locker/clear | Clear the locker for the peer instance under currently active labeled locker |
 | POST      | /registry/peers/`{peer}`<br/>/locker/clear | Clear the locker for all instances of the given peer under currently active labeled locker |
-| POST      | /registry/peers/lockers/clear | Clear all peer lockers under currently active labeled locker |
+| POST      | /registry/peers<br/>/lockers/clear | Clear all peer lockers under currently active labeled locker |
 | GET       | /registry/lockers/labels | Get a list of all existing locker labels, regardless of whether or not it has data.  |
 
 ###### <small> [Back to TOC](#goto-registry) </small>
@@ -2102,16 +2228,16 @@ These APIs allow reading data stored at specific paths/keys. Where applicable, q
 |---|---|---|
 | GET      | /registry/lockers<br/>/`{label}`/data/keys| Get a list of keys where some data is stored, from the given locker. |
 | GET      | /registry/lockers<br/>/`{label}`/data/paths| Get a list of key paths (URIs) where some data is stored, from the given locker. The returned URIs are valid for invocation against the base URL of the registry. |
-| GET      | /registry/lockers/data/keys| Get a list of keys where some data is stored, from all lockers.  |
-| GET      | /registry/lockers/data/paths| Get a list of key paths (URIs) where some data is stored, from all lockers. The returned URIs are valid for invocation against the base URL of the registry. |
+| GET      | /registry/lockers<br/>/data/keys| Get a list of keys where some data is stored, from all lockers.  |
+| GET      | /registry/lockers<br/>/data/paths| Get a list of key paths (URIs) where some data is stored, from all lockers. The returned URIs are valid for invocation against the base URL of the registry. |
 | GET      | /registry/lockers<br/>/search/`{text}` | Get a list of all valid URI paths (containing the locker label and keys) where the given text exists, across all lockers. The returned URIs are valid for invocation against the base URL of the registry. |
 | GET      | /registry/lockers<br/>/`{label}`/search/`{text}` | Get a list of all valid URI paths where the given text exists in the given locker. The returned URIs are valid for invocation against the base URL of the registry. |
-| GET       | /registry/lockers/data?data=`[y/n]`&level=`{level}` | Get data sub-lockers from all labeled lockers |
-| GET       | /registry/lockers/`{label}`/data?data=`[y/n]`&level=`{level}` | Get data sub-lockers from the given labeled locker.  |
-| GET      | /registry/lockers<br/>/`{label}`/get/`{path}`?data=`[y/n]`&level=`{level}` | Read stored data, if any, at the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
+| GET       | /registry/lockers<br/>/data?data=`[y/n]`<br/>&level=`{level}` | Get data sub-lockers from all labeled lockers |
+| GET       | /registry/lockers/`{label}`<br/>/data?data=`[y/n]`<br/>&level=`{level}` | Get data sub-lockers from the given labeled locker.  |
+| GET      | /registry/lockers<br/>/`{label}`/get/`{path}`?<br/>data=`[y/n]`&level=`{level}` | Read stored data, if any, at the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
 | GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/`{address}`<br/>/get/`{path}` | Get the data stored at the given path under the peer instance's locker under the given labeled locker.  |
 | GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/get/`{path}` | Get the data stored at the given path under the peer locker under the given labeled locker.  |
-| GET       | /registry/peers/`{peer}`/`{address}`<br/>/locker/get/`{path}` | Get the data stored at the given path under the peer instance's locker under the current labeled locker |
+| GET       | /registry/peers<br/>/`{peer}`/`{address}`<br/>/locker/get/`{path}` | Get the data stored at the given path under the peer instance's locker under the current labeled locker |
 | GET       | /registry/peers/`{peer}`<br/>/locker/get/`{path}` | Get the data stored at the given path under the peer locker under the current labeled locker |
 
 ###### <small> [Back to TOC](#goto-registry) </small>
@@ -2124,14 +2250,14 @@ These APIs read all contents of a selected locker or all lockers. Where applicab
 
 |METHOD|URI|Description|
 |---|---|---|
-| GET       | /registry/lockers/`{label}`?data=`[y/n]`&events=`[y/n]`&peers=`[y/n]`&level=`{level}` | Get given labeled locker.  |
-| GET       | /registry/lockers?data=`[y/n]`&events=`[y/n]`&peers=`[y/n]`&level=`{level}` | Get all lockers. |
-| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/`{address}`?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the peer instance's locker from the given labeled locker. |
-| GET       | /registry/peers/`{peer}`/`{address}`<br/>/lockers?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the peer instance's locker from the current active labeled locker. |
-| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the lockers of all instances of the given peer from the given labeled locker. |
-| GET       | /registry/peers/`{peer}`<br/>/lockers?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get locker's data for all instances of the peer from currently active labeled locker |
-| GET       | /registry/lockers/`{label}`<br/>/peers?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the lockers of all peers from the given labeled locker. |
-| GET       | /registry/peers<br/>/lockers?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the lockers of all peers from currently active labeled locker. |
+| GET       | /registry/lockers/`{label}`?<br/>data=`[y/n]`&events=`[y/n]`<br/>&peers=`[y/n]`&level=`{level}` | Get given labeled locker.  |
+| GET       | /registry/lockers?<br/>data=`[y/n]`&events=`[y/n]`<br/>&peers=`[y/n]`&level=`{level}` | Get all lockers. |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/`{address}`?<br/>data=`[y/n]`&events=`[y/n]`<br/>&level=`{level}` | Get the peer instance's locker from the given labeled locker. |
+| GET       | /registry/peers<br/>/`{peer}`/`{address}`/lockers?<br/>data=`[y/n]`&events=`[y/n]`<br/>&level=`{level}` | Get the peer instance's locker from the current active labeled locker. |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`?data=`[y/n]`<br/>&events=`[y/n]`&level=`{level}` | Get the lockers of all instances of the given peer from the given labeled locker. |
+| GET       | /registry/peers/`{peer}`<br/>/lockers?data=`[y/n]`<br/>&events=`[y/n]`&level=`{level}` | Get locker's data for all instances of the peer from currently active labeled locker |
+| GET       | /registry/lockers/`{label}`<br/>/peers?data=`[y/n]`<br/>&events=`[y/n]`&level=`{level}` | Get the lockers of all peers from the given labeled locker. |
+| GET       | /registry/peers<br/>/lockers?data=`[y/n]`<br/>&events=`[y/n]`&level=`{level}` | Get the lockers of all peers from currently active labeled locker. |
 
 ###### <small> [Back to TOC](#goto-registry) </small>
 
@@ -2142,16 +2268,16 @@ Label `current` and `all` can be used with these APIs to get data from currently
 
 |METHOD|URI|Description|
 |---|---|---|
-| POST      | /registry/peers/events/flush | Requests all peer instances to publish any pending events to registry, and clears events timeline on the peer instances. Registry still retains the peers events in the current locker. |
-| POST      | /registry/peers/events/clear | Requests all peer instances to clear their events timeline, and also removes the peers events from the current registry locker. |
-| GET       | /registry/lockers/`{label}`<br/>/peers/`{peers}`/events?reverse=`[y/n]`&data=`[y/n]` | Get the events timeline for all instances of the given peers (comma-separated list) from the given labeled locker. |
-| GET       | /registry/lockers/`{label}`<br/>/peers/events?unified=`[y/n]`&reverse=`[y/n]`&data=`[y/n]` | Get the events timeline for all instances of all peer from the given labeled locker, grouped by peer label. |
-| GET       | /registry/peers/`{peer}`/events?reverse=`[y/n]`&data=`[y/n]` | Get the events timeline for all instances of the given peer from the current locker. |
-| GET       | /registry/peers/events?unified=`[y/n]`&reverse=`[y/n]`&data=`[y/n]` | Get the events timeline for all instances of all peers from the current locker, grouped by peer label. |
-| GET       | /registry/lockers/`{label}`<br/>/peers/`{peers}`<br/>/events/search/`{text}`?reverse=`[y/n]`&data=`[y/n]` | Search in the events timeline for all instances of the given peers (comma-separated list) from the given labeled locker. |
-| GET       | /registry/lockers/`{label}`<br/>/peers/events<br/>/search/`{text}`?unified=`[y/n]`&reverse=`[y/n]`&data=`[y/n]` | Search in the events timeline of all peers from the given labeled locker, grouped by peer label. |
-| GET       | /registry/peers/`{peer}`<br/>/events/search/`{text}`?reverse=`[y/n]`&data=`[y/n]` | Search in the events timeline for all instances of the given peer from the current locker. |
-| GET       | /registry/peers/events<br/>/search/`{text}`?unified=`[y/n]`&reverse=`[y/n]`&data=`[y/n]` | Search in the events timeline of all peers from the current locker, grouped by peer label. |
+| POST      | /registry/peers<br/>/events/flush | Requests all peer instances to publish any pending events to registry, and clears events timeline on the peer instances. Registry still retains the peers events in the current locker. |
+| POST      | /registry/peers<br/>/events/clear | Requests all peer instances to clear their events timeline, and also removes the peers events from the current registry locker. |
+| GET       | /registry/lockers<br/>/`{label}`/peers<br/>/`{peers}`/events?<br/>reverse=`[y/n]`<br/>&data=`[y/n]` | Get the events timeline for all instances of the given peers (comma-separated list) from the given labeled locker. |
+| GET       | /registry/lockers/`{label}`<br/>/peers/events?<br/>unified=`[y/n]`<br/>&reverse=`[y/n]`<br/>&data=`[y/n]` | Get the events timeline for all instances of all peer from the given labeled locker, grouped by peer label. |
+| GET       | /registry/peers<br/>/`{peer}`/events?<br/>reverse=`[y/n]`<br/>&data=`[y/n]` | Get the events timeline for all instances of the given peer from the current locker. |
+| GET       | /registry/peers/events?<br/>unified=`[y/n]`<br/>&reverse=`[y/n]`<br/>&data=`[y/n]` | Get the events timeline for all instances of all peers from the current locker, grouped by peer label. |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peers}`<br/>/events/search/`{text}`?<br/>reverse=`[y/n]`<br/>&data=`[y/n]` | Search in the events timeline for all instances of the given peers (comma-separated list) from the given labeled locker. |
+| GET       | /registry/lockers/`{label}`<br/>/peers/events<br/>/search/`{text}`?<br/>unified=`[y/n]`<br/>&reverse=`[y/n]`<br/>&data=`[y/n]` | Search in the events timeline of all peers from the given labeled locker, grouped by peer label. |
+| GET       | /registry/peers/`{peer}`<br/>/events/search/`{text}`?<br/>reverse=`[y/n]`&<br/>data=`[y/n]` | Search in the events timeline for all instances of the given peer from the current locker. |
+| GET       | /registry/peers/events<br/>/search/`{text}`?<br/>unified=`[y/n]`<br/>&reverse=`[y/n]`<br/>&data=`[y/n]` | Search in the events timeline of all peers from the current locker, grouped by peer label. |
 
 ###### <small> [Back to TOC](#goto-registry) </small>
 
@@ -2185,13 +2311,24 @@ These APIs allow reading of combined client invocation results collected from al
 
 |METHOD|URI|Description|
 |---|---|---|
-| POST, PUT | /registry/peers/client<br/>/results/all/`{enable}`  | Controls whether results should be summarized across all targets. Disabling this when not needed can improve performance. Disabled by default. |
-| POST, PUT | /registry/peers/client<br/>/results/invocations/`{enable}`  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
-| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/client<br/>/results?detailed=Y | Get invocation summary or detailed results for given peer's instances from the given labeled locker.  |
-| GET       | /registry/peers/`{peer}`<br/>/client/results?detailed=Y | Get invocation summary or detailed results for given peer's instances from the current locker.|
-| GET       | /registry/lockers/`{label}`<br/>/peers/client<br/>/results?detailed=Y | Get invocation summary or detailed results for all client peer instances from the given labeled locker. |
-| GET       | /registry/peers/client<br/>/results?detailed=Y | Get invocation summary or detailed results for all client peer instances from the current locker. |
-
+| POST, PUT | /registry/peers<br/>/client/results<br/>/all/`{enable}`  | Controls whether results should be summarized across all targets. Disabling this when not needed can improve performance. Disabled by default. |
+| POST, PUT | /registry/peers<br/>/client/results<br/>/invocations/`{enable}`  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/client<br/>/results/details | Get detailed invocation results for the given peer (results of all instances grouped together) from the given labeled locker.  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/instances<br/>/client/results | Get detailed invocation results for the given peer's instances (reported per instance) from the given labeled locker.  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/client<br/>/results/summary | Get invocation summary results for the given peer from the given labeled locker.  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/client<br/>/results | Get invocation summary results for the given peer from the given labeled locker.  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/client/results/details | Get detailed invocation results for all peers (results of all instances grouped together) from the given labeled locker.  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/instances<br/>/client/results | Get detailed invocation results for all peer instances (reported per instance) from the given labeled locker.  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/client/results/summary | Get invocation summary results for all peers from the given labeled locker.  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/client/results | Get invocation summary results for all peers from the given labeled locker.  |
+| GET       | /registry/peers/`{peer}`<br/>/client/results/details | Get detailed invocation results for the given peer (results of all instances grouped together) from the current locker.  |
+| GET       | /registry/peers/`{peer}`<br/>/instances/client/results | Get detailed invocation results for the given peer's instances (reported per instance) from the current locker.  |
+| GET       | /registry/peers/`{peer}`<br/>/client/results/summary | Get invocation summary results for the given peer from the current locker.  |
+| GET       | /registry/peers/`{peer}`<br/>/client/results | Get invocation summary results for the given peer from the current locker.  |
+| GET       | /registry/peers/client<br/>/results/details | Get detailed invocation results for all peers (results of all instances grouped together) from the current locker.  |
+| GET       | /registry/peers<br/>/instances/client/results | Get detailed invocation results for all peer instances (reported per instance) from the current locker.  |
+| GET       | /registry/peers/client<br/>/results/summary | Get invocation summary results for all peers from the current locker.  |
+| GET       | /registry/peers<br/>/client/results | Get invocation summary results for all peers from the current locker.  |
 
 # <a name="peers-jobs-management-apis"></a>
 #### Peers Jobs Management APIs

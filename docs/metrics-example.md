@@ -1,4 +1,6 @@
 ```
+$ curl localhost:8080/metrics
+
 # HELP goto_active_client_conn_counts_by_targets Number of active client connections by targets# TYPE goto_active_client_conn_counts_by_targets gauge
 goto_active_client_conn_counts_by_targets{target="test-1.1"} 4
 goto_active_client_conn_counts_by_targets{target="test-1.2"} 4

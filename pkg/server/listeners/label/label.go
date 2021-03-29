@@ -5,6 +5,7 @@ import (
   "net/http"
 
   "goto/pkg/events"
+  "goto/pkg/metrics"
   "goto/pkg/server/listeners"
   "goto/pkg/util"
 
@@ -16,7 +17,7 @@ var (
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  labelRouter := util.PathRouter(r, "/label")
+  labelRouter := util.PathRouter(r, "/server/label")
   util.AddRouteWithPort(labelRouter, "/set/{label}", setLabel, "PUT", "POST")
   util.AddRouteWithPort(labelRouter, "/clear", setLabel, "POST")
   util.AddRouteWithPort(labelRouter, "", getLabel)
@@ -47,9 +48,6 @@ func Middleware(next http.Handler) http.Handler {
     l := listeners.GetCurrentListener(r)
     hostLabel := util.GetHostLabel()
     util.AddLogMessage(fmt.Sprintf("[%s]", l.Label), r)
-    w.Header().Add("Via-Goto", l.Label)
-    w.Header().Add("Goto-Host", hostLabel)
-    w.Header().Add("Goto-Port", util.GetListenerPort(r))
     protocol := "HTTP"
     if l.TLS {
       if r.ProtoMajor == 2 {
@@ -60,7 +58,16 @@ func Middleware(next http.Handler) http.Handler {
     } else if r.ProtoMajor == 2 {
       protocol = "H2C"
     }
-    w.Header().Add("Goto-Protocol", protocol)
+    w.Header().Add("Via-Goto", l.Label)
+    if !util.IsTunnelRequest(r) {
+      port := util.GetListenerPort(r)
+      w.Header().Add("Goto-Host", hostLabel)
+      w.Header().Add("Goto-Port", port)
+      w.Header().Add("Goto-Protocol", protocol)
+      if !util.IsAdminRequest(r) {
+        metrics.UpdateProtocolRequestCount(protocol, r.RequestURI)
+      }
+    }
     if next != nil {
       next.ServeHTTP(w, r)
     }

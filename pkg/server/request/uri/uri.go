@@ -205,7 +205,7 @@ func disableURICallCounts(w http.ResponseWriter, r *http.Request) {
   events.SendRequestEvent("URI Call Counts Disabled", msg, r)
 }
 
-func hasURIConfig(r *http.Request, uriMap map[string]map[string]interface{}) (bool, bool, interface{}) {
+func hasURIConfig(r *http.Request, uriMap map[string]map[string]interface{}) (present bool, glob bool, config interface{}) {
   port := initPort(r)
   uri := strings.ToLower(r.URL.Path)
   uriLock.RLock()

@@ -1,14 +1,12 @@
 package registry
 
 import (
-  "bytes"
   "errors"
   "fmt"
   "goto/pkg/util"
   "log"
   "net"
   "net/http"
-  "strings"
   "sync"
   "time"
 )
@@ -16,33 +14,12 @@ import (
 type OnPodDone func(string, *Pod, interface{}, error)
 type OnPeerDone func(string)
 
-func newPeerRequest(method string, url string, headers http.Header, payload []byte) (*http.Request, error) {
-  var payloadReader *bytes.Reader
-  if len(payload) > 0 {
-    payloadReader = bytes.NewReader(payload)
-  } else {
-    payloadReader = bytes.NewReader([]byte{})
-  }
-  if req, err := http.NewRequest(method, url, payloadReader); err == nil {
-    for h, values := range headers {
-      if strings.EqualFold(h, "host") {
-        req.Host = values[0]
-      } else {
-        req.Header.Add(h, values[0])
-      }
-    }
-    return req, nil
-  } else {
-    return nil, err
-  }
-}
-
 func invokePeerAPI(pod *Pod, method, uri string, headers http.Header, payload []byte, expectedStatus int) (bool, interface{}, error) {
-  if req, err := newPeerRequest(method, pod.URL+uri, headers, payload); err == nil {
+  if req, err := util.CreateRequest(method, pod.URL+uri, headers, payload); err == nil {
     if resp, err := pod.client.Do(req); err == nil {
       var data interface{}
       defer resp.Body.Close()
-      if util.IsJSONContentType(resp) {
+      if util.IsJSONContentType(resp.Header) {
         data = map[string]interface{}{}
         if err := util.ReadJsonPayloadFromBody(resp.Body, &data); err != nil {
           fmt.Println(err.Error())

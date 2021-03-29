@@ -134,10 +134,9 @@ func setProbeStatus(w http.ResponseWriter, r *http.Request) {
 func getProbes(w http.ResponseWriter, r *http.Request) {
   pp := initPortProbes(r)
   pp.lock.RLock()
-  output := util.ToJSON(pp)
+  util.WriteJsonPayload(w, pp)
   pp.lock.RUnlock()
-  util.AddLogMessage(fmt.Sprintf("Reporting probe counts: %s", output), r)
-  util.WriteJsonPayload(w, output)
+  util.AddLogMessage("Reporting probe counts", r)
 }
 
 func clearProbeCounts(w http.ResponseWriter, r *http.Request) {

@@ -1,27 +1,27 @@
 ### TCP API Examples:
 
 ```
-curl localhost:8080/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true}'
+curl localhost:8080/server/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true}'
 
-curl localhost:8080/tcp/9000/configure --data '{"readTimeout":"1m","writeTimeout":"1m","connectTimeout":"15s","connIdleTimeout":"1m", "connectionLife":"2m", "echo":true, "echoResponseSize":10, "echoResponseDelay": "1s"}'
+curl localhost:8080/server/tcp/9000/configure --data '{"readTimeout":"1m","writeTimeout":"1m","connectTimeout":"15s","connIdleTimeout":"1m", "connectionLife":"2m", "echo":true, "echoResponseSize":10, "echoResponseDelay": "1s"}'
 
-curl localhost:8080/tcp/9000/configure --data '{"stream": true, "streamDuration":"5s", "streamChunkDelay":"1s", "streamPayloadSize": "2K", "streamChunkSize":"250", "streamChunkCount":15}'
+curl localhost:8080/server/tcp/9000/configure --data '{"stream": true, "streamDuration":"5s", "streamChunkDelay":"1s", "streamPayloadSize": "2K", "streamChunkSize":"250", "streamChunkCount":15}'
 
-curl -X PUT localhost:8080/tcp/9000/set/echo=n
+curl -X PUT localhost:8080/server/tcp/9000/mode/echo=n
 
-curl -X PUT localhost:8080/tcp/9000/set/stream=y
+curl -X PUT localhost:8080/server/tcp/9000/mode/stream=y
 
-curl -X POST localhost:8080/tcp/9000/stream/payload=1K/duration=30s/delay=1s
+curl -X POST localhost:8080/server/tcp/9000/stream/payload=1K/duration=30s/delay=1s
 
-curl -X PUT localhost:8080/tcp/9000/expect/payload/length=10
+curl -X PUT localhost:8080/server/tcp/9000/expect/payload/length=10
 
-curl -X PUT localhost:8080/tcp/9000/expect/payload --data 'SomePayload'
+curl -X PUT localhost:8080/server/tcp/9000/expect/payload --data 'SomePayload'
 ```
 
 ### TCP Status APIs Output Example
 
 ```
-curl -s localhost:8080/tcp/history | jq
+curl -s localhost:8080/server/tcp/history | jq
 {
   "9000": {
     "1": {

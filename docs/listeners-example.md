@@ -1,28 +1,28 @@
 ### Listener API Examples:
 
 ```
-curl localhost:8080/listeners/add --data '{"port":8081, "protocol":"http", "label":"Server-8081"}'
+curl localhost:8080/server/listeners/add --data '{"port":8081, "protocol":"http", "label":"Server-8081"}'
 
-curl -s localhost:8080/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true, "tcp": {"readTimeout":"15s","writeTimeout":"15s","connectTimeout":"15s","connIdleTimeout":"20s","responseDelay":"1s", "connectionLife":"20s"}}'
+curl -s localhost:8080/server/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true, "tcp": {"readTimeout":"15s","writeTimeout":"15s","connectTimeout":"15s","connIdleTimeout":"20s","responseDelay":"1s", "connectionLife":"20s"}}'
 
-curl localhost:8080/listeners/add --data '{"port":9091, "protocol":"grpc", "label":"GRPC-9091"}'
+curl localhost:8080/server/listeners/add --data '{"port":9091, "protocol":"grpc", "label":"GRPC-9091"}'
 
-curl -X POST localhost:8080/listeners/8081/remove
+curl -X POST localhost:8080/server/listeners/8081/remove
 
-curl -X PUT localhost:8080/listeners/9000/open
+curl -X PUT localhost:8080/server/listeners/9000/open
 
-curl -X PUT localhost:8080/listeners/9000/close
+curl -X PUT localhost:8080/server/listeners/9000/close
 
-curl -X PUT localhost:8080/listeners/9000/reopen
+curl -X PUT localhost:8080/server/listeners/9000/reopen
 
-curl localhost:8080/listeners
+curl localhost:8080/server/listeners
 
 ```
 
 ### Listener Output Example
 
 ```
-$ curl -s localhost:8080/listeners
+$ curl -s localhost:8080/server/listeners
 
 {
   "8081": {

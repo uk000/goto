@@ -11,10 +11,10 @@ import (
 )
 
 type TransportTracker struct {
-  dialer    net.Dialer
-  connCount int
-  lock      sync.RWMutex
-  tlsConfig *tls.Config
+  dialer       net.Dialer
+  connCount    int
+  lock         sync.RWMutex
+  tlsConfigPtr **tls.Config
 }
 
 type HTTPTransportTracker struct {
@@ -73,6 +73,7 @@ func NewHTTPTransportTracker(orig *http.Transport) *HTTPTransportTracker {
   t := &HTTPTransportTracker{
     Transport: orig,
   }
+  t.tlsConfigPtr = &orig.TLSClientConfig
   dialer := t.getDialer()
   t.Transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
     if conn, err := dialer(ctx, network, addr); err == nil {
@@ -88,6 +89,7 @@ func NewHTTP2TransportTracker(orig *http2.Transport) *HTTP2TransportTracker {
   t := &HTTP2TransportTracker{
     Transport: orig,
   }
+  t.tlsConfigPtr = &orig.TLSClientConfig
   dialer := t.getDialer()
   t.Transport.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
     if conn, err := dialer(network, addr, cfg); err == nil {
@@ -118,4 +120,8 @@ func (t *TransportTracker) GetOpenConnectionCount() int {
   t.lock.RLock()
   defer t.lock.RUnlock()
   return t.connCount
+}
+
+func (t *TransportTracker) SetTLSConfig(tlsConfig *tls.Config) {
+  *(t.tlsConfigPtr) = tlsConfig
 }

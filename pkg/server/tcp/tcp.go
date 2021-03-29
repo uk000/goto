@@ -475,7 +475,7 @@ func (tcp *TCPConnectionHandler) doStream() {
   tcp.conn.SetWriteDeadline(time.Time{})
   tcp.writeBufferSize = tcp.StreamChunkSizeV
   tcp.resetWriteBuffer()
-  payload := []byte(util.GenerateRandomString(tcp.StreamChunkSizeV))
+  payload := util.GenerateRandomPayload(tcp.StreamChunkSizeV)
   for i := 0; i < tcp.StreamChunkCount; i++ {
     if tcp.isClosingOrClosed() {
       log.Printf("[Listener: %s][Request: %d][%s]: Ending stream as the connection is closing on port [%d]",

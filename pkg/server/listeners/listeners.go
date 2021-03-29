@@ -55,7 +55,7 @@ var (
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  lRouter := r.PathPrefix("/listeners").Subrouter()
+  lRouter := r.PathPrefix("/server/listeners").Subrouter()
   util.AddRoute(lRouter, "/add", addListener, "POST")
   util.AddRoute(lRouter, "/update", updateListener, "POST")
   util.AddRoute(lRouter, "/{port}/cert/add", addListenerCert, "PUT", "POST")
@@ -494,6 +494,7 @@ func SetListenerLabel(r *http.Request) string {
     l.lock.Unlock()
   } else if label != "" {
     DefaultLabel = label
+    DefaultListener.Label = label
   }
   events.SendRequestEvent("Listener Label Updated", label, r)
   return label

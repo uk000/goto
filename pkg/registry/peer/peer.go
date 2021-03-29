@@ -101,19 +101,16 @@ func startRegistryReminder(peer *registry.Peer) {
 }
 
 func setupStartupTasks(peerData *registry.PeerData) {
-  port := global.ServerPort
-  pc := target.GetClientForPort(port)
-
   log.Printf("Got %d targets, %d jobs, %d job scripts\n", len(peerData.Targets), len(peerData.Jobs), len(peerData.JobScripts))
 
   if peerData.TrackingHeaders != "" {
     log.Printf("Got %s tracking headers\n", peerData.TrackingHeaders)
-    pc.AddTrackingHeaders(peerData.TrackingHeaders)
+    target.Client.AddTrackingHeaders(peerData.TrackingHeaders)
   }
 
   if peerData.TrackingTimeBuckets != "" {
     log.Printf("Got %s tracking time buckets\n", peerData.TrackingTimeBuckets)
-    pc.AddTrackingTimeBuckets(peerData.TrackingTimeBuckets)
+    target.Client.AddTrackingTimeBuckets(peerData.TrackingTimeBuckets)
   }
 
   if peerData.Probes != nil {
@@ -148,6 +145,6 @@ func setupStartupTasks(peerData *registry.PeerData) {
 
   for _, t := range peerData.Targets {
     log.Printf("%+v\n", t)
-    pc.AddTarget(&target.Target{t.InvocationSpec})
+    target.Client.AddTarget(&target.Target{t.InvocationSpec})
   }
 }

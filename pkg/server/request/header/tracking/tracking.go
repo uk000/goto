@@ -276,18 +276,11 @@ func getHeaders(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, util.ToJSON(requestTracking.getHeaders(r)))
 }
 
-func trackRequestHeaders(headers http.Header, rtd *RequestTrackingData, requestedStatus int) {
+func track(port string, headers http.Header, uri string, requestedStatus, responseStatus int, rtd *RequestTrackingData) {
   for h, hd := range rtd.headerMap {
     if hv := headers.Get(h); hv != "" {
-      metrics.UpdateHeaderRequestCount(h)
+      metrics.UpdateHeaderRequestCount(port, uri, h, hv, fmt.Sprint(responseStatus))
       hd.trackRequest(hv, requestedStatus)
-    }
-  }
-}
-
-func trackResponseForRequestHeaders(headers http.Header, rtd *RequestTrackingData, responseStatus int) {
-  for h, hd := range rtd.headerMap {
-    if hv := headers.Get(h); hv != "" {
       hd.trackResponse(hv, responseStatus)
     }
   }
@@ -302,10 +295,9 @@ func Middleware(next http.Handler) http.Handler {
       rtd := requestTracking.getPortRequestTrackingData(r)
       requestedStatus := util.GetIntParamValue(r, "status")
       irw := util.GetInterceptResponseWriter(r).(*intercept.InterceptResponseWriter)
-      go func(headers http.Header, rtd *RequestTrackingData, requestedStatus, responseStatus int) {
-        trackRequestHeaders(headers, rtd, requestedStatus)
-        trackResponseForRequestHeaders(headers, rtd, responseStatus)
-      }(r.Header, rtd, requestedStatus, irw.StatusCode)
+      go func(port string, headers http.Header, rtd *RequestTrackingData, requestedStatus, responseStatus int) {
+        track(port, headers, r.RequestURI, requestedStatus, responseStatus, rtd)
+      }(util.GetListenerPort(r), r.Header, rtd, requestedStatus, irw.StatusCode)
     }
   })
 }

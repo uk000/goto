@@ -324,7 +324,13 @@ func (p *Proxy) addURIMatch(target *ProxyTarget) error {
       uriTargets = map[string]*ProxyTarget{}
       p.TargetsByUris[uri] = uriTargets
     }
-    if router, re, err := util.RegisterURIRouteAndGetRegex(uri, p.router, handleURI); err == nil {
+    glob := false
+    matchURI := uri
+    if strings.HasSuffix(uri, "*") {
+      matchURI = strings.ReplaceAll(uri, "*", "")
+      glob = true
+    }
+    if router, re, err := util.RegisterURIRouteAndGetRegex(matchURI, glob, p.router, handleURI); err == nil {
       target.uriRegExp = re
       target.router = router
     } else {

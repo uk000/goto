@@ -18,7 +18,7 @@ import (
   "goto/pkg/server/listeners"
   "goto/pkg/server/listeners/label"
   "goto/pkg/server/probes"
-  "goto/pkg/server/proxy"
+  "goto/pkg/proxy"
   "goto/pkg/server/request"
   "goto/pkg/server/response"
   "goto/pkg/server/tcp"

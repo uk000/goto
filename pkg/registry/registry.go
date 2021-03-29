@@ -1483,7 +1483,8 @@ func getPeersClientSummaryResults(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
   peerName := util.GetStringParamValue(r, "peer")
-  detailed := util.IsYes(util.GetStringParamValue(r, "detailed"))
+  detailed := strings.Contains(r.RequestURI, "details")
+  byInstances := strings.Contains(r.RequestURI, "instances")
   var locker *locker.CombiLocker
   if label == "" || strings.EqualFold(label, constants.LockerCurrent) {
     locker = registry.getCurrentLocker()
@@ -1495,14 +1496,9 @@ func getPeersClientSummaryResults(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusNotFound)
     fmt.Fprint(w, msg)
   } else {
-    var result interface{}
-    if detailed {
-      result = locker.GetPeersClientResults(peerName, registry.trackingHeaders, registry.crossTrackingHeaders, registry.trackingTimeBuckets)
-    } else {
-      result = locker.GetPeersClientSummaryResults(peerName, registry.trackingHeaders, registry.crossTrackingHeaders, registry.trackingTimeBuckets)
-    }
+    result := locker.GetPeersClientResults(peerName, registry.trackingHeaders, registry.crossTrackingHeaders, registry.trackingTimeBuckets, detailed, byInstances)
     util.WriteJsonPayload(w, result)
-    msg = "Reported locker targets results summary"
+    msg = "Reported peers client results"
   }
   if global.EnableRegistryLockerLogs {
     util.AddLogMessage(msg, r)

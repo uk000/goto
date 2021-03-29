@@ -13,6 +13,9 @@ import (
   "time"
 )
 
+type PeersClientResults map[string]map[string]*results.TargetResults
+type PeersInstanceClientResults map[string]map[string]map[string]*results.TargetResults
+
 type LockerData struct {
   Data          string    `json:"data,omitempty"`
   SubKeys       Locker    `json:"subKeys,omitempty"`
@@ -919,14 +922,11 @@ func (cl *CombiLocker) SearchOrGetDataLockerPaths(uriPrefix string, pattern *reg
   return dataPaths
 }
 
-func (cl *CombiLocker) GetPeersClientResults(peerName string, trackingHeaders []string, crossTrackingHeaders map[string][]string,
-  trackingTimeBuckets [][]int, detailed ...bool) map[string]map[string]*results.TargetResults {
-  summary := map[string]map[string]*results.TargetResults{}
+func (cl *CombiLocker) getPeersClientResults(peerName string, trackingHeaders []string, crossTrackingHeaders map[string][]string,
+  trackingTimeBuckets [][]int, detailed, byInstances bool) (PeersClientResults, PeersInstanceClientResults) {
+  peersClientResults := PeersClientResults{}
+  peersInstanceClientResults := PeersInstanceClientResults{}
   peerLockers := map[string]*PeerLocker{}
-  isDetailed := true
-  if len(detailed) > 0 {
-    isDetailed = detailed[0]
-  }
   cl.lock.RLock()
   defer cl.lock.RUnlock()
   if peerName != "" {
@@ -938,9 +938,16 @@ func (cl *CombiLocker) GetPeersClientResults(peerName string, trackingHeaders []
     peerLockers = cl.PeerLockers
   }
   for peer, peerLocker := range peerLockers {
-    summary[peer] = map[string]*results.TargetResults{}
+    if byInstances {
+      peersInstanceClientResults[peer] = map[string]map[string]*results.TargetResults{}
+    } else {
+      peersClientResults[peer] = map[string]*results.TargetResults{}
+    }
     peerLocker.lock.RLock()
-    for _, instanceLocker := range peerLocker.InstanceLockers {
+    for address, instanceLocker := range peerLocker.InstanceLockers {
+      if byInstances {
+        peersInstanceClientResults[peer][address] = map[string]*results.TargetResults{}
+      }
       instanceLocker.lock.RLock()
       lockerData := instanceLocker.Locker[constants.LockerClientKey]
       if lockerData != nil {
@@ -948,14 +955,22 @@ func (cl *CombiLocker) GetPeersClientResults(peerName string, trackingHeaders []
           if strings.EqualFold(target, constants.LockerInvocationsKey) {
             continue
           }
-          if summary[peer][target] == nil {
-            summary[peer][target] = &results.TargetResults{Target: target}
-            summary[peer][target].Init(trackingHeaders, crossTrackingHeaders, trackingTimeBuckets)
+          if !byInstances && peersClientResults[peer][target] == nil {
+            peersClientResults[peer][target] = &results.TargetResults{Target: target}
+            peersClientResults[peer][target].Init(trackingHeaders, crossTrackingHeaders, trackingTimeBuckets)
+          }
+          if byInstances && peersInstanceClientResults[peer][address][target] == nil {
+            peersInstanceClientResults[peer][address][target] = &results.TargetResults{Target: target}
+            peersInstanceClientResults[peer][address][target].Init(trackingHeaders, crossTrackingHeaders, trackingTimeBuckets)
           }
           if data := targetData.Data; data != "" {
             result := &results.TargetResults{}
             if err := util.ReadJson(data, result); err == nil {
-              results.AddDeltaResults(summary[peer][target], result, isDetailed)
+              if byInstances {
+                results.AddDeltaResults(peersInstanceClientResults[peer][address][target], result, detailed)
+              } else {
+                results.AddDeltaResults(peersClientResults[peer][target], result, detailed)
+              }
             } else {
               fmt.Printf("Error parsing peer result json: %s\n", err.Error())
             }
@@ -966,23 +981,58 @@ func (cl *CombiLocker) GetPeersClientResults(peerName string, trackingHeaders []
     }
     peerLocker.lock.RUnlock()
   }
-  return summary
+  return peersClientResults, peersInstanceClientResults
 }
 
-func (cl *CombiLocker) GetPeersClientSummaryResults(peerName string, trackingHeaders []string, crossTrackingHeaders map[string][]string,
-  trackingTimeBuckets [][]int) map[string]*results.TargetsSummaryResults {
-  clientResultsSummary := cl.GetPeersClientResults(peerName, trackingHeaders, crossTrackingHeaders, trackingTimeBuckets, false)
-  cl.lock.RLock()
-  defer cl.lock.RUnlock()
-  result := map[string]*results.TargetsSummaryResults{}
-  for peer, targetsResults := range clientResultsSummary {
-    result[peer] = &results.TargetsSummaryResults{}
-    result[peer].Init()
-    for _, targetResult := range targetsResults {
-      result[peer].AddTargetResult(targetResult, false)
+func (cl *CombiLocker) GetPeersClientResults(peerName string, trackingHeaders []string, crossTrackingHeaders map[string][]string,
+  trackingTimeBuckets [][]int, detailed, byInstances bool) interface{} {
+
+  var summaryResults interface{}
+  peersClientResults, peersInstanceClientResults := cl.getPeersClientResults(peerName, trackingHeaders, crossTrackingHeaders, trackingTimeBuckets, detailed, byInstances)
+  summaryPeersResults := map[string]*results.ClientTargetsAggregateResults{}
+  summaryPeersInstanceResults := map[string]map[string]*results.ClientTargetsAggregateResults{}
+  detailedResults := map[string]interface{}{}
+
+  if byInstances {
+    for peer, instanceResults := range peersInstanceClientResults {
+      summaryPeersInstanceResults[peer] = map[string]*results.ClientTargetsAggregateResults{}
+      for address, targetsResults := range instanceResults {
+        summaryPeersInstanceResults[peer][address] = &results.ClientTargetsAggregateResults{}
+        summaryPeersInstanceResults[peer][address].Init()
+        for _, targetResult := range targetsResults {
+          summaryPeersInstanceResults[peer][address].AddTargetResult(targetResult, detailed)
+        }
+      }
+    }
+    if detailed {
+      detailedResults = map[string]interface{}{
+        "summary": summaryPeersInstanceResults,
+        "details": peersInstanceClientResults,
+      }
+    } else {
+      summaryResults = summaryPeersInstanceResults
+    }
+  } else {
+    for peer, targetsResults := range peersClientResults {
+      summaryPeersResults[peer] = &results.ClientTargetsAggregateResults{}
+      summaryPeersResults[peer].Init()
+      for _, targetResult := range targetsResults {
+        summaryPeersResults[peer].AddTargetResult(targetResult, detailed)
+      }
+    }
+    if detailed {
+      detailedResults = map[string]interface{}{
+        "summary": summaryPeersResults,
+        "details": peersClientResults,
+      }
+    } else {
+      summaryResults = summaryPeersResults
     }
   }
-  return result
+  if detailed {
+    return detailedResults
+  }
+  return summaryResults
 }
 
 func convertLockerDataToEvent(l *LockerData) *events.Event {
