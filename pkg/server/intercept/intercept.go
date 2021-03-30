@@ -2,6 +2,7 @@ package intercept
 
 import (
   "bufio"
+  "errors"
   "net"
   "net/http"
 )
@@ -52,8 +53,11 @@ func (rw *InterceptResponseWriter) Flush() {
 }
 
 func (rw *InterceptResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-  rw.Hijacked = true
-  return rw.Hijacker.Hijack()
+  if rw.Hijacker != nil {
+    rw.Hijacked = true
+    return rw.Hijacker.Hijack()
+  }
+  return nil, nil, errors.New("Cannot Hijack")
 }
 
 func (rw *InterceptResponseWriter) SetChunked() {

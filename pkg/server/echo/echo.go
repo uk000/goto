@@ -3,7 +3,6 @@ package echo
 import (
   "fmt"
   "io"
-  "io/ioutil"
   "net/http"
 
   "goto/pkg/metrics"
@@ -27,7 +26,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 func EchoHeaders(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("Echoing headers back", r)
   util.CopyHeaders("Request", w, r.Header, r.Host, r.RequestURI)
-  fmt.Fprintf(w, "{\"RequestHeaders\": %s}", util.GetRequestHeadersLog(r))
+  util.WriteJsonPayload(w, map[string]interface{}{"RequestHeaders": r.Header})
 }
 
 func echo(w http.ResponseWriter, r *http.Request) {
@@ -43,12 +42,8 @@ func Echo(w http.ResponseWriter, r *http.Request) {
   response["RequestURI"] = r.RequestURI
   response["RequestHeaders"] = r.Header
   response["RequestQuery"] = r.URL.Query()
-  if r.ProtoMajor == 1 {
-    body, _ := ioutil.ReadAll(r.Body)
-    response["RequestBody"] = string(body)
-  }
   r.Body.Close()
-  fmt.Fprint(w, util.ToJSON(response))
+  util.WriteJsonPayload(w, response)
 }
 
 func wsEchoHandler(w http.ResponseWriter, r *http.Request) {

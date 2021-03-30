@@ -54,6 +54,7 @@ type InvocationSpec struct {
   AutoPayload          string     `json:"autoPayload"`
   Fallback             bool       `json:"fallback"`
   ABMode               bool       `json:"abMode"`
+  WarmupCount          int        `json:"warmupCount"`
   httpVersionMajor     int
   httpVersionMinor     int
   tcp                  bool
@@ -342,8 +343,8 @@ func httpTransport(target *InvocationSpec) (http.RoundTripper, *TransportTracker
   var tracker *TransportTracker
   if target.httpVersionMajor == 1 {
     ht := NewHTTPTransportTracker(&http.Transport{
-      MaxIdleConns:          200,
-      MaxIdleConnsPerHost:   100,
+      MaxIdleConns:          300,
+      MaxIdleConnsPerHost:   300,
       IdleConnTimeout:       target.connIdleTimeoutD,
       Proxy:                 http.ProxyFromEnvironment,
       DisableCompression:    true,
@@ -683,6 +684,15 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
   if global.EnableInvocationLogs {
     log.Printf("[%s]: Invocation[%d]: Started target [%s] with total requests [%d]\n", hostLabel, trackerID, target.Name, (target.Replicas * target.RequestCount))
   }
+  for i := 0; i < target.WarmupCount; i++ {
+    if tracker.Status.StopRequested {
+      log.Printf("[%s]: Invocation[%d]: Stopping target [%s] during warmup with remaining [%d]\n", hostLabel, trackerID, target.Name, target.WarmupCount-i)
+      break
+    }
+    targetID := fmt.Sprintf("%s[Warmup][%d]", target.Name, i+1)
+    invokeTarget(tracker, targetID, target, httpClient, nil, nil, nil, false)
+  }
+
   var results []*InvocationResult
   if len(waitForResponse) > 0 && waitForResponse[0] {
     sinks = append(sinks, func(result *InvocationResult) {
@@ -702,14 +712,16 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
     for i := 0; i < target.Replicas; i++ {
       callCounter := completedCount + i + 1
       targetID := target.Name + "[" + strconv.Itoa(i+1) + "]" + "[" + strconv.Itoa(callCounter) + "]"
-      if target.Body != "" && target.autoPayloadSize <= 0 {
-        target.payloadBody = target.Body
-      } else if target.Body == "" && target.BodyReader != nil {
-        target.payloadBody = util.Read(target.BodyReader)
-        target.BodyReader = nil
+      if target.autoPayloadSize <= 0 {
+        if target.Body != "" {
+          target.payloadBody = target.Body
+        } else if target.Body == "" && target.BodyReader != nil {
+          target.payloadBody = util.Read(target.BodyReader)
+          target.BodyReader = nil
+        }
       }
       wg.Add(1)
-      go invokeTarget(tracker, targetID, target, httpClient, sinks, resultChannel, wg)
+      go invokeTarget(tracker, targetID, target, httpClient, sinks, resultChannel, wg, true)
     }
     wg.Wait()
     delay := 10 * time.Millisecond
@@ -757,6 +769,7 @@ func newClientRequest(method string, url string, headers [][]string, body io.Rea
         req.Header.Add(h[0], h[1])
       }
     }
+    req.Header.Add("Goto-Target-URL", url)
     return req, nil
   } else {
     return nil, err
@@ -995,7 +1008,7 @@ func handleABCall(index uint32, targetID string, target *InvocationSpec, aReques
 }
 
 func invokeTarget(tracker *InvocationTracker, targetID string, target *InvocationSpec, client *HTTPClientTracker,
-  sinks []ResultSink, resultChannel chan *InvocationResult, wg *sync.WaitGroup) {
+  sinks []ResultSink, resultChannel chan *InvocationResult, wg *sync.WaitGroup, processResults bool) {
   tracker.lock.RLock()
   trackerID := tracker.ID
   tracker.lock.RUnlock()
@@ -1005,17 +1018,19 @@ func invokeTarget(tracker *InvocationTracker, targetID string, target *Invocatio
   result.URL = target.URL
   result.Headers = map[string][]string{}
   if resp, err := doInvoke(trackerID, targetID, target, client, result, tracker); err == nil {
-    if !tracker.Status.StopRequested || tracker.Status.Stopped {
+    if !tracker.Status.StopRequested && !tracker.Status.Stopped {
       doProcessResponse(trackerID, targetID, resp, result, tracker)
-      if target.ABMode {
+      if processResults && target.ABMode {
         handleABCall(trackerID, targetID, target, result.RequestID, client, sinks, resultChannel, tracker)
       }
     }
   } else {
     processError(trackerID, targetID, result, err, tracker)
   }
-  if !tracker.Status.StopRequested || tracker.Status.Stopped {
+  if processResults && !tracker.Status.StopRequested && !tracker.Status.Stopped {
     publishResult(trackerID, targetID, result, sinks, resultChannel)
   }
-  wg.Done()
+  if wg != nil {
+    wg.Done()
+  }
 }

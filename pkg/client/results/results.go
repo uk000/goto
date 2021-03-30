@@ -45,7 +45,7 @@ type TargetResults struct {
   crossTrackingHeaders    map[string][]string
   crossHeadersMap         map[string]string
   pendingRegistrySend     bool
-  lock                    sync.RWMutex
+  lock                    *sync.RWMutex
 }
 
 type TargetsSummaryResults struct {
@@ -101,9 +101,7 @@ var (
   collectInvocationResults     bool = false
 )
 
-func (tr *TargetResults) init(reset bool) {
-  tr.lock.Lock()
-  defer tr.lock.Unlock()
+func (tr *TargetResults) unsafeInit(reset bool) {
   if tr.CountsByStatus == nil || reset {
     tr.InvocationCounts = 0
     tr.CountsByStatus = map[string]int{}
@@ -114,7 +112,7 @@ func (tr *TargetResults) init(reset bool) {
 }
 
 func (tr *TargetResults) Init(trackingHeaders []string, crossTrackingHeaders map[string][]string) {
-  tr.init(true)
+  tr.unsafeInit(true)
   tr.trackingHeaders = trackingHeaders
   tr.crossTrackingHeaders = crossTrackingHeaders
   tr.crossHeadersMap = util.BuildCrossHeadersMap(crossTrackingHeaders)
@@ -252,9 +250,9 @@ func (tr *TargetResults) addHeaderResult(header string, values []string, statusC
 }
 
 func (tr *TargetResults) AddResult(result *invocation.InvocationResult) {
-  tr.init(false)
   tr.lock.Lock()
   defer tr.lock.Unlock()
+  tr.unsafeInit(false)
   tr.InvocationCounts++
   now := time.Now()
   if tr.FirstResponse.IsZero() {
@@ -283,8 +281,8 @@ func (tr *TargetsResults) init(reset bool) {
   defer tr.lock.Unlock()
   if reset || tr.Results == nil {
     tr.Results = map[string]*TargetResults{}
-    tr.Results[""] = &TargetResults{}
-    tr.Results[""].init(true)
+    tr.Results[""] = &TargetResults{lock: &tr.lock}
+    tr.Results[""].unsafeInit(true)
   }
 }
 
@@ -292,8 +290,8 @@ func (tr *TargetsResults) getTargetResults(target string) (*TargetResults, *Targ
   tr.init(false)
   tr.lock.Lock()
   if tr.Results[target] == nil {
-    tr.Results[target] = &TargetResults{Target: target}
-    tr.Results[target].init(true)
+    tr.Results[target] = &TargetResults{Target: target, lock: &tr.lock}
+    tr.Results[target].unsafeInit(true)
   }
   targetResults := tr.Results[target]
   allResults := tr.Results[""]
@@ -310,21 +308,19 @@ func (tr *TargetsResults) AddResult(result *invocation.InvocationResult,
   }
 }
 
-func (ir *InvocationResults) init(reset bool) {
-  ir.lock.Lock()
-  defer ir.lock.Unlock()
+func (ir *InvocationResults) unsafeInit(reset bool) {
   if reset || ir.Results == nil {
     ir.Finished = false
     ir.InvocationIndex = 0
     ir.Results = &TargetResults{}
-    ir.Results.init(true)
+    ir.Results.unsafeInit(true)
   }
 }
 
 func (ir *InvocationResults) addResult(result *invocation.InvocationResult,
   trackingHeaders []string, crossTrackingHeaders map[string][]string) {
-  ir.init(false)
   ir.lock.RLock()
+  ir.unsafeInit(false)
   targetResults := ir.Results
   ir.lock.RUnlock()
   targetResults.AddResult(result)
@@ -351,7 +347,7 @@ func (ir *InvocationsResults) getInvocation(index uint32) *InvocationResults {
   ir.lock.RUnlock()
   if invocationResults == nil {
     invocationResults = &InvocationResults{}
-    invocationResults.init(true)
+    invocationResults.unsafeInit(true)
     invocationResults.InvocationIndex = index
     ir.lock.Lock()
     ir.Results[index] = invocationResults

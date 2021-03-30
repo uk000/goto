@@ -117,7 +117,6 @@ func setResponseHeaders(w http.ResponseWriter, r *http.Request) {
       w.Header().Add(header, value)
     }
   }
-  w.Header().Add("Content-Type", "application/json")
 }
 
 func Middleware(next http.Handler) http.Handler {

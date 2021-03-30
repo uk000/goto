@@ -880,8 +880,13 @@ Several configuration APIs (used to configure server features on `goto` instance
 <summary>API Examples</summary>
 
 ```
+#HTTP listener
 curl localhost:8080/listeners/add --data '{"port":8081, "protocol":"http", "label":"Server-8081"}'
 
+#HTTPS listener with auto-generated cert
+curl -s localhost:8080/listeners/add --data '{"label":"https-8081", "port":8081, "protocol":"https", "open":true, "autoCert":true, "commonName":"foo.com"}'
+
+#TCP listener
 curl -s localhost:8080/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true, "tcp": {"readTimeout":"15s","writeTimeout":"15s","connectTimeout":"15s","connIdleTimeout":"20s","responseDelay":"1s", "connectionLife":"20s"}}'
 
 curl localhost:8080/listeners/add --data '{"port":9091, "protocol":"grpc", "label":"GRPC-9091"}'
@@ -2315,10 +2320,13 @@ The URI `/status/`{status}`` allows client to ask for a specific status as respo
 |METHOD|URI|Description|
 |---|---|---|
 | GET       |	/status/`{status}`                  | This call either receives the given status, or the forced response status if one is set |
+| GET       |	/status=`{status:count}`/flipflop?`x-request-id={requestId}` | This call responds with the given status for the given count times when called successively with the same count value. Once the status is served count times, the next status served is 200, and subsequent calls start the cycle again. Optional query param `x-request-id` can be used to perform status flip for each unique request id, preventing requests from affecting one another. |
 
 #### Status API Example
 ```
 curl -I  localhost:8080/status/418
+
+curl -I localhost:8080/status=503:2/flipflop?x-request-id=123
 ```
 
 ###### <small> [Back to TOC](#toc) </small>

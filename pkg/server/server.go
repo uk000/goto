@@ -10,6 +10,7 @@ import (
   "goto/pkg/global"
   "goto/pkg/invocation"
   "goto/pkg/job"
+  "goto/pkg/log"
   "goto/pkg/metrics"
   "goto/pkg/registry"
   "goto/pkg/server/catchall"
@@ -33,7 +34,7 @@ func Run() {
   invocation.Startup()
   RunHttpServer(events.Handler, label.Handler, conn.Handler, metrics.Handler,
     listeners.Handler, probes.Handler, registry.Handler, job.Handler, client.Handler,
-    tcp.Handler, proxy.Handler, request.Handler, response.Handler, echo.Handler, catchall.Handler)
+    tcp.Handler, proxy.Handler, request.Handler, response.Handler, log.Handler, echo.Handler, catchall.Handler)
   invocation.Shutdown()
   results.StopRegistrySender()
   os.Exit(0)

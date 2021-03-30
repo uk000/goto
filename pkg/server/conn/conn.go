@@ -3,6 +3,8 @@ package conn
 import (
   "context"
   "fmt"
+  "io"
+  "io/ioutil"
   "net"
   "net/http"
   "strings"
@@ -36,7 +38,8 @@ func Middleware(next http.Handler) http.Handler {
     } else {
       localAddr = global.PeerAddress
     }
-    util.AddLogMessage(fmt.Sprintf("LocalAddr: %s, RemoteAddr: %s", localAddr, r.RemoteAddr), r)
+    util.AddLogMessage(fmt.Sprintf("LocalAddr: %s, RemoteAddr: %s, Protocol %s, Host: %s, Content Length: [%s]",
+      localAddr, r.RemoteAddr, r.Proto, r.Host, r.Header.Get("Content-Length")), r)
     w.Header().Add("Goto-Remote-Address", r.RemoteAddr)
     pieces := strings.Split(r.RemoteAddr, ":")
     remoteIP := strings.Join(pieces[:len(pieces)-1], ":")
@@ -44,6 +47,7 @@ func Middleware(next http.Handler) http.Handler {
     if next != nil {
       next.ServeHTTP(w, r)
     }
+    io.Copy(ioutil.Discard, r.Body)
     metrics.UpdateURIRequestCount(strings.ToLower(r.URL.Path))
   })
 }

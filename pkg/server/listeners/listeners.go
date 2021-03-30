@@ -19,25 +19,29 @@ import (
 )
 
 type Listener struct {
-  ListenerID string         `json:"listenerID"`
-  Label      string         `json:"label"`
-  HostLabel  string         `json:"hostLabel"`
-  Port       int            `json:"port"`
-  Protocol   string         `json:"protocol"`
-  Open       bool           `json:"open"`
-  TLS        bool           `json:"tls"`
-  TCP        *tcp.TCPConfig `json:"tcp,omitempty"`
-  Cert       []byte         `json:"-"`
-  Key        []byte         `json:"-"`
-  isHTTP     bool           `json:"-"`
-  isGRPC     bool           `json:"-"`
-  isTCP      bool           `json:"-"`
-  isUDP      bool           `json:"-"`
-  Listener   net.Listener   `json:"-"`
-  UDPConn    *net.UDPConn   `json:"-"`
-  Restarted  bool           `json:"-"`
-  Generation int            `json:"-"`
-  lock       sync.RWMutex   `json:"-"`
+  ListenerID string           `json:"listenerID"`
+  Label      string           `json:"label"`
+  HostLabel  string           `json:"hostLabel"`
+  Port       int              `json:"port"`
+  Protocol   string           `json:"protocol"`
+  Open       bool             `json:"open"`
+  AutoCert   bool             `json:"autoCert"`
+  CommonName string           `json:"commonName"`
+  MutualTLS  bool             `json:"mutualTLS"`
+  TLS        bool             `json:"tls"`
+  TCP        *tcp.TCPConfig   `json:"tcp,omitempty"`
+  Cert       *tls.Certificate `json:"-"`
+  RawCert    []byte           `json:"-"`
+  RawKey     []byte           `json:"-"`
+  isHTTP     bool             `json:"-"`
+  isGRPC     bool             `json:"-"`
+  isTCP      bool             `json:"-"`
+  isUDP      bool             `json:"-"`
+  Listener   net.Listener     `json:"-"`
+  UDPConn    *net.UDPConn     `json:"-"`
+  Restarted  bool             `json:"-"`
+  Generation int              `json:"-"`
+  lock       sync.RWMutex     `json:"-"`
 }
 
 var (
@@ -56,8 +60,9 @@ var (
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   lRouter := r.PathPrefix("/listeners").Subrouter()
-  util.AddRoute(lRouter, "/add", addListener, "POST")
-  util.AddRoute(lRouter, "/update", updateListener, "POST")
+  util.AddRoute(lRouter, "/add", addListener, "POST", "PUT")
+  util.AddRoute(lRouter, "/update", updateListener, "POST", "PUT")
+  util.AddRoute(lRouter, "/{port}/cert/auto/{domain}", autoCert, "PUT", "POST")
   util.AddRoute(lRouter, "/{port}/cert/add", addListenerCert, "PUT", "POST")
   util.AddRoute(lRouter, "/{port}/key/add", addListenerKey, "PUT", "POST")
   util.AddRoute(lRouter, "/{port}/cert/remove", removeListenerCertAndKey, "PUT", "POST")
@@ -65,6 +70,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(lRouter, "/{port}/open", openListener, "PUT", "POST")
   util.AddRoute(lRouter, "/{port}/reopen", openListener, "PUT", "POST")
   util.AddRoute(lRouter, "/{port}/close", closeListener, "PUT", "POST")
+  util.AddRoute(lRouter, "/{port}", getListeners, "GET")
   util.AddRoute(lRouter, "", getListeners, "GET")
   global.IsListenerPresent = IsListenerPresent
   global.IsListenerOpen = IsListenerOpen
@@ -107,7 +113,8 @@ func AddInitialListeners(portList []string) {
         protocol := "http"
         if len(portInfo) > 1 && portInfo[1] != "" {
           protocol = strings.ToLower(portInfo[1])
-          if !strings.EqualFold(protocol, "http") && !strings.EqualFold(protocol, "grpc") && !strings.EqualFold(protocol, "udp") {
+          if !strings.EqualFold(protocol, "http") && !strings.EqualFold(protocol, "https") &&
+            !strings.EqualFold(protocol, "grpc") && !strings.EqualFold(protocol, "udp") && !strings.EqualFold(protocol, "tls") {
             protocol = "tcp"
           }
         }
@@ -133,8 +140,20 @@ func (l *Listener) initListener() bool {
   l.lock.Lock()
   defer l.lock.Unlock()
   var tlsConfig *tls.Config
-  if len(l.Cert) > 0 && len(l.Key) > 0 {
-    if x509Cert, err := tls.X509KeyPair(l.Cert, l.Key); err == nil {
+  if l.AutoCert {
+    if l.CommonName == "" {
+      l.CommonName = "goto.goto"
+    }
+    if cert, err := util.CreateCertificate(l.CommonName, l.Label); err == nil {
+      l.Cert = cert
+    }
+  }
+  if l.Cert != nil {
+    tlsConfig = &tls.Config{
+      Certificates: []tls.Certificate{*l.Cert},
+    }
+  } else if len(l.RawCert) > 0 && len(l.RawKey) > 0 {
+    if x509Cert, err := tls.X509KeyPair(l.RawCert, l.RawKey); err == nil {
       tlsConfig = &tls.Config{
         Certificates: []tls.Certificate{x509Cert},
       }
@@ -159,6 +178,11 @@ func (l *Listener) initListener() bool {
   } else {
     if listener, err := net.Listen("tcp", address); err == nil {
       if tlsConfig != nil {
+        if l.MutualTLS {
+          tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+        } else {
+          tlsConfig.ClientAuth = tls.NoClientCert
+        }
         listener = tls.NewListener(listener, tlsConfig)
       }
       l.Listener = listener
@@ -189,7 +213,7 @@ func (l *Listener) openListener() bool {
       StartTCPServer(l.ListenerID, l.Port, l.Listener)
     }
     l.Open = true
-    l.TLS = len(l.Cert) > 0 && len(l.Key) > 0
+    l.TLS = l.isHTTP && (l.AutoCert || l.Cert != nil || len(l.RawCert) > 0 && len(l.RawKey) > 0)
     return true
   }
   return false
@@ -285,8 +309,15 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
   if l.Port <= 0 || l.Port > 65535 {
     msg = fmt.Sprintf("[Invalid port number: %d]", l.Port)
   }
-  if strings.EqualFold(l.Protocol, "http") {
+  isHTTPS := strings.EqualFold(l.Protocol, "https")
+  if isHTTPS || strings.EqualFold(l.Protocol, "http") {
     l.isHTTP = true
+    if isHTTPS {
+      l.TLS = true
+      if l.Cert == nil && l.RawCert == nil {
+        l.AutoCert = true
+      }
+    }
   } else if strings.EqualFold(l.Protocol, "grpc") {
     l.isGRPC = true
   } else if strings.EqualFold(l.Protocol, "udp") {
@@ -353,11 +384,11 @@ func addListenerCertOrKey(w http.ResponseWriter, r *http.Request, cert bool) {
       l.lock.Lock()
       defer l.lock.Unlock()
       if cert {
-        l.Cert = data
+        l.RawCert = data
         msg = fmt.Sprintf("Cert added for listener %d\n", l.Port)
         events.SendRequestEvent("Listener Cert Added", msg, r)
       } else {
-        l.Key = data
+        l.RawKey = data
         msg = fmt.Sprintf("Key added for listener %d\n", l.Port)
         events.SendRequestEvent("Listener Key Added", msg, r)
       }
@@ -382,7 +413,8 @@ func removeListenerCertAndKey(w http.ResponseWriter, r *http.Request) {
   if l := validateListener(w, r); l != nil {
     msg := ""
     l.lock.Lock()
-    l.Key = nil
+    l.RawKey = nil
+    l.RawCert = nil
     l.Cert = nil
     l.TLS = false
     l.lock.Unlock()
@@ -398,6 +430,31 @@ func removeListenerCertAndKey(w http.ResponseWriter, r *http.Request) {
   }
 }
 
+func autoCert(w http.ResponseWriter, r *http.Request) {
+  if l := validateListener(w, r); l != nil {
+    msg := ""
+    if domain := util.GetStringParamValue(r, "domain"); domain != "" {
+      if cert, err := util.CreateCertificate(domain, l.Label); err == nil {
+        l.Cert = cert
+        if l.reopenListener() {
+          msg = fmt.Sprintf("Cert auto-generated for listener %d\n", l.Port)
+          events.SendRequestEvent("Listener Cert Generated", msg, r)
+        } else {
+          msg = fmt.Sprintf("Failed to reopen listener %d for auto-generate cert\n", l.Port)
+        }
+      } else {
+        msg = fmt.Sprintf("Failed to auto-generate cert for listener %d\n", l.Port)
+        w.WriteHeader(http.StatusInternalServerError)
+      }
+    } else {
+      msg = fmt.Sprintf("Missing domain for cert auto-generation for listener %d\n", l.Port)
+      w.WriteHeader(http.StatusBadRequest)
+    }
+    fmt.Fprintln(w, msg)
+    util.AddLogMessage(msg, r)
+  }
+}
+
 func GetListeners() map[int]*Listener {
   listenersView := map[int]*Listener{}
   listenersView[DefaultListener.Port] = DefaultListener
@@ -408,16 +465,27 @@ func GetListeners() map[int]*Listener {
 }
 
 func getListeners(w http.ResponseWriter, r *http.Request) {
+  port := util.GetIntParamValue(r, "port")
   listenersLock.RLock()
   defer listenersLock.RUnlock()
-  util.WriteJsonPayload(w, GetListeners())
+  if port > 0 {
+    util.WriteJsonPayload(w, GetListenerForPort(port))
+  } else {
+    util.WriteJsonPayload(w, GetListeners())
+  }
+}
+
+func GetListenerForPort(port int) *Listener {
+  listenersLock.RLock()
+  defer listenersLock.RUnlock()
+  if port == DefaultListener.Port {
+    return DefaultListener
+  }
+  return listeners[port]
 }
 
 func GetListener(r *http.Request) *Listener {
-  port := util.GetListenerPortNum(r)
-  listenersLock.RLock()
-  defer listenersLock.RUnlock()
-  return listeners[port]
+  return GetListenerForPort(util.GetListenerPortNum(r))
 }
 
 func GetCurrentListener(r *http.Request) *Listener {
@@ -494,6 +562,7 @@ func SetListenerLabel(r *http.Request) string {
     l.lock.Unlock()
   } else if label != "" {
     DefaultLabel = label
+    DefaultListener.Label = label
   }
   events.SendRequestEvent("Listener Label Updated", label, r)
   return label

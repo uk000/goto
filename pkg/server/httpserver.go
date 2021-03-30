@@ -76,7 +76,11 @@ func StartHttpServer(server *http.Server) {
 
 func ServeHTTPListener(l *listeners.Listener) {
   go func() {
-    log.Printf("Starting HTTP Listener %s\n", l.ListenerID)
+    if l.TLS {
+      log.Printf("Starting HTTPS Listener %s\n", l.ListenerID)
+    } else {
+      log.Printf("Starting HTTP Listener %s\n", l.ListenerID)
+    }
     if err := httpServer.Serve(l.Listener); err != nil {
       log.Println(err)
     }

@@ -277,6 +277,27 @@ func GetListParam(r *http.Request, param string) ([]string, bool) {
   return values, len(values) > 0 && len(values[0]) > 0
 }
 
+func GetStatusRangeParam(r *http.Request) (statusCodes []int, times int, present bool) {
+  vars := mux.Vars(r)
+  status := vars["status"]
+  if len(status) == 0 {
+    return nil, 0, false
+  }
+  pieces := strings.Split(status, ":")
+  if len(pieces[0]) > 0 {
+    for _, s := range strings.Split(pieces[0], ",") {
+      if sc, err := strconv.ParseInt(s, 10, 32); err == nil {
+        statusCodes = append(statusCodes, int(sc))
+      }
+    }
+    if len(pieces) > 1 {
+      s, _ := strconv.ParseInt(pieces[1], 10, 32)
+      times = int(s)
+    }
+  }
+  return statusCodes, times, true
+}
+
 func GetStatusParam(r *http.Request) (int, int, bool) {
   vars := mux.Vars(r)
   status := vars["status"]
@@ -410,8 +431,6 @@ func GetResponseHeadersLog(header http.Header) string {
 }
 
 func GetRequestHeadersLog(r *http.Request) string {
-  r.Header["Host"] = []string{r.Host}
-  r.Header["Protocol"] = []string{r.Proto}
   return ToJSON(r.Header)
 }
 
