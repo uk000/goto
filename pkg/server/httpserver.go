@@ -3,12 +3,14 @@ package server
 import (
   "context"
   "fmt"
+  . "goto/pkg/constants"
   "goto/pkg/events"
   "goto/pkg/global"
   "goto/pkg/metrics"
   "goto/pkg/registry/peer"
   "goto/pkg/server/intercept"
   "goto/pkg/server/listeners"
+  "goto/pkg/tunnel"
   "goto/pkg/util"
   "io/ioutil"
   "log"
@@ -87,7 +89,7 @@ func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
 func ContextMiddleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     if global.Stopping && global.IsReadinessProbe(r) {
-      util.CopyHeaders("Stopping-Readiness-Request", w, r.Header, r.Host, r.RequestURI)
+      util.CopyHeaders(HeaderStoppingReadinessRequest, w, r.Header, r.Host, r.RequestURI, false)
       w.WriteHeader(http.StatusNotFound)
     } else if next != nil {
       var rs *util.RequestStore
@@ -110,16 +112,20 @@ func ContextMiddleware(next http.Handler) http.Handler {
         bodyLength = irw.BodyLength
       }
       endTime := time.Now()
+      statusCodeText := strconv.Itoa(statusCode)
       if !rs.IsTunnelRequest {
-        statusCode := strconv.Itoa(statusCode)
-        w.Header().Add("Goto-Response-Status", statusCode)
-        w.Header().Add("Goto-In-At", startTime.UTC().String())
-        w.Header().Add("Goto-Out-At", endTime.UTC().String())
-        w.Header().Add("Goto-Took", endTime.Sub(startTime).String())
-        if !rs.IsAdminRequest {
-          metrics.UpdateURIRequestCount(r.RequestURI, statusCode)
-          metrics.UpdatePortRequestCount(util.GetListenerPort(r), r.RequestURI)
-        }
+        w.Header().Add(HeaderGotoResponseStatus, statusCodeText)
+        w.Header().Add(HeaderGotoInAt, startTime.UTC().String())
+        w.Header().Add(HeaderGotoOutAt, endTime.UTC().String())
+        w.Header().Add(HeaderGotoTook, endTime.Sub(startTime).String())
+      } else {
+        w.Header().Add(fmt.Sprintf("%s[%d]", HeaderGotoInAt, rs.TunnelCount), startTime.UTC().String())
+        w.Header().Add(fmt.Sprintf("%s[%d]", HeaderGotoOutAt, rs.TunnelCount), endTime.UTC().String())
+        w.Header().Add(fmt.Sprintf("%s[%d]", HeaderGotoTook, rs.TunnelCount), endTime.Sub(startTime).String())
+      }
+      if !rs.IsAdminRequest {
+        metrics.UpdateURIRequestCount(r.RequestURI, statusCodeText)
+        metrics.UpdatePortRequestCount(util.GetListenerPort(r), r.RequestURI)
       }
       if irw != nil {
         irw.Proceed()
@@ -146,18 +152,19 @@ func withConnContext(ctx context.Context, conn net.Conn) context.Context {
 func withRequestStore(r *http.Request) (context.Context, *util.RequestStore) {
   isAdminRequest := util.CheckAdminRequest(r)
   rs := &util.RequestStore{
-    IsAdminRequest:      isAdminRequest,
-    IsVersionRequest:    strings.HasPrefix(r.RequestURI, "/version"),
-    IsLockerRequest:     strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker"),
-    IsPeerEventsRequest: strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/events"),
-    IsMetricsRequest:    strings.HasPrefix(r.RequestURI, "/metrics") || strings.HasPrefix(r.RequestURI, "/stats"),
-    IsReminderRequest:   strings.Contains(r.RequestURI, "/remember"),
-    IsProbeRequest:      global.IsReadinessProbe(r) || global.IsLivenessProbe(r),
-    IsHealthRequest:     !isAdminRequest && strings.HasPrefix(r.RequestURI, "/health"),
-    IsStatusRequest:     !isAdminRequest && strings.HasPrefix(r.RequestURI, "/status"),
-    IsDelayRequest:      !isAdminRequest && strings.Contains(r.RequestURI, "/delay"),
-    IsPayloadRequest:    !isAdminRequest && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload")),
-    IsTunnelRequest:     strings.HasPrefix(r.RequestURI, "/tunnel"),
+    IsAdminRequest:        isAdminRequest,
+    IsVersionRequest:      strings.HasPrefix(r.RequestURI, "/version"),
+    IsLockerRequest:       strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker"),
+    IsPeerEventsRequest:   strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/events"),
+    IsMetricsRequest:      strings.HasPrefix(r.RequestURI, "/metrics") || strings.HasPrefix(r.RequestURI, "/stats"),
+    IsReminderRequest:     strings.Contains(r.RequestURI, "/remember"),
+    IsProbeRequest:        global.IsReadinessProbe(r) || global.IsLivenessProbe(r),
+    IsHealthRequest:       !isAdminRequest && strings.HasPrefix(r.RequestURI, "/health"),
+    IsStatusRequest:       !isAdminRequest && strings.HasPrefix(r.RequestURI, "/status"),
+    IsDelayRequest:        !isAdminRequest && strings.Contains(r.RequestURI, "/delay"),
+    IsPayloadRequest:      !isAdminRequest && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload")),
+    IsTunnelRequest:       strings.HasPrefix(r.RequestURI, "/tunnel=") || tunnel.HasTunnel(r, nil),
+    IsTunnelConfigRequest: strings.HasPrefix(r.RequestURI, "/tunnels"),
   }
   return context.WithValue(r.Context(), util.RequestStoreKey, rs), rs
 }
@@ -184,7 +191,7 @@ func ServeHTTPListener(l *listeners.Listener) {
   go func() {
     log.Printf("Starting HTTP Listener %s\n", l.ListenerID)
     if err := httpServer.Serve(l.Listener); err != nil {
-      log.Println(err)
+      log.Printf("Listener [%d]: %s", l.Port, err.Error())
     }
   }()
 }

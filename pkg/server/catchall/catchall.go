@@ -1,10 +1,10 @@
 package catchall
 
 import (
-  "io/ioutil"
   "net/http"
 
   "goto/pkg/metrics"
+  "goto/pkg/server/echo"
   "goto/pkg/util"
 
   "github.com/gorilla/mux"
@@ -25,15 +25,7 @@ func respond(w http.ResponseWriter, r *http.Request) {
 }
 
 func SendDefaultResponse(w http.ResponseWriter, r *http.Request) {
-  response := map[string]interface{}{}
+  response := echo.GetEchoResponse(w, r)
   response["CatchAll"] = true
-  response["RequestProtocol"] = r.Proto
-  response["RequestURI"] = r.RequestURI
-  response["RequestHeaders"] = r.Header
-  response["RequestQuery"] = r.URL.Query()
-  if !util.IsH2C(r) {
-    body, _ := ioutil.ReadAll(r.Body)
-    response["RequestBody"] = string(body)
-  }
   util.WriteJsonPayload(w, response)
 }

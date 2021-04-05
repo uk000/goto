@@ -9,6 +9,7 @@ import (
   "time"
 
   "goto/pkg/client/results"
+  "goto/pkg/constants"
   "goto/pkg/events"
   . "goto/pkg/events/eventslist"
   "goto/pkg/global"
@@ -61,8 +62,8 @@ func (pc *TargetClient) AddTarget(t *Target, r ...*http.Request) error {
     pc.targets[t.Name] = t
     pc.targetsLock.Unlock()
     invocation.RemoveHttpClientForTarget(t.Name)
-    invocation.PrepareAutoPayload(invocationSpec)
-    t.Headers = append(t.Headers, []string{"From-Goto", global.PeerName}, []string{"From-Goto-Host", util.GetHostLabel()})
+    t.Headers = append(t.Headers, []string{constants.HeaderFromGoto, global.PeerName},
+      []string{constants.HeaderFromGotoHost, util.GetHostLabel()})
     if t.AutoInvoke {
       go func() {
         if global.EnableClientLogs {
@@ -93,22 +94,25 @@ func (pc *TargetClient) removeTargets(targets []string) bool {
 }
 
 func (pc *TargetClient) prepareTargetForPeer(target *invocation.InvocationSpec, r *http.Request) *invocation.InvocationSpec {
-  if target != nil {
-    peerName, _ := util.GetFillerUnmarked(target.Name)
-    if peerName != "" && r != nil {
-      if peers := global.GetPeers(peerName, r); peers != nil {
-        if strings.Contains(target.URL, "{") && strings.Contains(target.URL, "}") {
-          urlPre := strings.Split(target.URL, "{")[0]
-          urlPost := strings.Split(target.URL, "}")[1]
-          for _, address := range peers {
-            var newTarget = *target
-            newTarget.Name = peerName
-            newTarget.URL = urlPre + address + urlPost
-            target = &newTarget
-          }
-        }
-      }
-    }
+  if target == nil || r == nil {
+    return target
+  }
+  peerName, _ := util.GetFillerUnmarked(target.Name)
+  if peerName == "" {
+    return target
+  }
+  peers := global.GetPeers(peerName, r)
+  if peers == nil || len(peers) == 0 {
+    return target
+  }
+  if strings.Contains(target.URL, "{") && strings.Contains(target.URL, "}") {
+    urlPre := strings.Split(target.URL, "{")[0]
+    urlPost := strings.Split(target.URL, "}")[1]
+    address := peers[peerName]
+    var newTarget = *target
+    newTarget.Name = peerName
+    newTarget.URL = urlPre + address + urlPost
+    target = &newTarget
   }
   return target
 }

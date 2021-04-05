@@ -35,6 +35,7 @@ type PrometheusMetrics struct {
   triggerCounts                      *prometheus.CounterVec
   connCounts                         *prometheus.CounterVec
   tcpConnections                     *prometheus.CounterVec
+  totalConnectionsByTargets          *prometheus.CounterVec
   activeConnCountsByTargets          *prometheus.GaugeVec
 }
 
@@ -54,10 +55,30 @@ type ServerStats struct {
 }
 
 var (
-  Handler     = util.ServerHandler{"metrics", SetRoutes, Middleware}
-  promMetrics = NewPrometheusMetrics()
-  serverStats = NewServerStats()
+  Handler         = util.ServerHandler{"metrics", SetRoutes, Middleware}
+  promMetrics     = NewPrometheusMetrics()
+  serverStats     = NewServerStats()
+  ConnTracker     = make(chan string, 10)
+  stopConnTracker = make(chan bool, 2)
 )
+
+func Startup() {
+  go func() {
+  ConnTracker:
+    for {
+      select {
+      case target := <-ConnTracker:
+        IncrementTargetConnCount(target)
+      case <-stopConnTracker:
+        break ConnTracker
+      }
+    }
+  }()
+}
+
+func Shutdown() {
+  stopConnTracker <- true
+}
 
 func NewServerStats() *ServerStats {
   ss := &ServerStats{}
@@ -109,8 +130,10 @@ func NewPrometheusMetrics() *PrometheusMetrics {
     Name: "goto_conn_counts", Help: "Number of connections by type"}, []string{"connType"})
   pm.tcpConnections = factory.NewCounterVec(prometheus.CounterOpts{
     Name: "goto_tcp_conn_counts", Help: "Number of TCP connections by type"}, []string{"tcpType"})
+  pm.totalConnectionsByTargets = factory.NewCounterVec(prometheus.CounterOpts{
+    Name: "goto_total_conns_by_targets", Help: "Total connections by targets"}, []string{"target"})
   pm.activeConnCountsByTargets = factory.NewGaugeVec(prometheus.GaugeOpts{
-    Name: "goto_active_client_conn_counts_by_targets", Help: "Number of active connections by targets"}, []string{"target"})
+    Name: "goto_active_conn_counts_by_targets", Help: "Number of active connections by targets"}, []string{"target"})
   return pm
 }
 
@@ -135,6 +158,7 @@ func (pm *PrometheusMetrics) reset() {
   pm.triggerCounts.Reset()
   pm.connCounts.Reset()
   pm.tcpConnections.Reset()
+  pm.totalConnectionsByTargets.Reset()
   pm.activeConnCountsByTargets.Reset()
 }
 
@@ -279,7 +303,11 @@ func UpdateTCPConnCount(tcpType string) {
   go promMetrics.tcpConnections.WithLabelValues(tcpType).Inc()
 }
 
-func UpdateTargetConnCount(target string, count int) {
+func IncrementTargetConnCount(target string) {
+  go promMetrics.totalConnectionsByTargets.WithLabelValues(target).Inc()
+}
+
+func UpdateActiveTargetConnCount(target string, count int) {
   go promMetrics.activeConnCountsByTargets.WithLabelValues(target).Set(float64(count))
 }
 

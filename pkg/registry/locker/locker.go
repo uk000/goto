@@ -922,7 +922,7 @@ func (cl *CombiLocker) SearchOrGetDataLockerPaths(uriPrefix string, pattern *reg
   return dataPaths
 }
 
-func (cl *CombiLocker) getPeersClientResults(peerName string, trackingHeaders []string, crossTrackingHeaders map[string][]string,
+func (cl *CombiLocker) getPeersClientResults(peerName string, targets []string, trackingHeaders []string, crossTrackingHeaders map[string][]string,
   trackingTimeBuckets [][]int, detailed, byInstances bool) (PeersClientResults, PeersInstanceClientResults) {
   peersClientResults := PeersClientResults{}
   peersInstanceClientResults := PeersInstanceClientResults{}
@@ -955,13 +955,14 @@ func (cl *CombiLocker) getPeersClientResults(peerName string, trackingHeaders []
           if strings.EqualFold(target, constants.LockerInvocationsKey) {
             continue
           }
+          if len(targets) > 0 && !util.IsStringInArray(target, targets) {
+            continue
+          }
           if !byInstances && peersClientResults[peer][target] == nil {
-            peersClientResults[peer][target] = &results.TargetResults{Target: target}
-            peersClientResults[peer][target].Init(trackingHeaders, crossTrackingHeaders, trackingTimeBuckets)
+            peersClientResults[peer][target] = results.NewTargetResults(target, trackingHeaders, crossTrackingHeaders, trackingTimeBuckets)
           }
           if byInstances && peersInstanceClientResults[peer][address][target] == nil {
-            peersInstanceClientResults[peer][address][target] = &results.TargetResults{Target: target}
-            peersInstanceClientResults[peer][address][target].Init(trackingHeaders, crossTrackingHeaders, trackingTimeBuckets)
+            peersInstanceClientResults[peer][address][target] = results.NewTargetResults(target, trackingHeaders, crossTrackingHeaders, trackingTimeBuckets)
           }
           if data := targetData.Data; data != "" {
             result := &results.TargetResults{}
@@ -984,21 +985,20 @@ func (cl *CombiLocker) getPeersClientResults(peerName string, trackingHeaders []
   return peersClientResults, peersInstanceClientResults
 }
 
-func (cl *CombiLocker) GetPeersClientResults(peerName string, trackingHeaders []string, crossTrackingHeaders map[string][]string,
+func (cl *CombiLocker) GetPeersClientResults(peerName string, targets []string, trackingHeaders []string, crossTrackingHeaders map[string][]string,
   trackingTimeBuckets [][]int, detailed, byInstances bool) interface{} {
 
   var summaryResults interface{}
-  peersClientResults, peersInstanceClientResults := cl.getPeersClientResults(peerName, trackingHeaders, crossTrackingHeaders, trackingTimeBuckets, detailed, byInstances)
-  summaryPeersResults := map[string]*results.ClientTargetsAggregateResults{}
-  summaryPeersInstanceResults := map[string]map[string]*results.ClientTargetsAggregateResults{}
+  peersClientResults, peersInstanceClientResults := cl.getPeersClientResults(peerName, targets, trackingHeaders, crossTrackingHeaders, trackingTimeBuckets, detailed, byInstances)
+  summaryPeersResults := map[string]*results.ClientTargetsAggregateResultsView{}
+  summaryPeersInstanceResults := map[string]map[string]*results.ClientTargetsAggregateResultsView{}
   detailedResults := map[string]interface{}{}
 
   if byInstances {
     for peer, instanceResults := range peersInstanceClientResults {
-      summaryPeersInstanceResults[peer] = map[string]*results.ClientTargetsAggregateResults{}
+      summaryPeersInstanceResults[peer] = map[string]*results.ClientTargetsAggregateResultsView{}
       for address, targetsResults := range instanceResults {
-        summaryPeersInstanceResults[peer][address] = &results.ClientTargetsAggregateResults{}
-        summaryPeersInstanceResults[peer][address].Init()
+        summaryPeersInstanceResults[peer][address] = results.NewClientTargetsAggregateResults()
         for _, targetResult := range targetsResults {
           summaryPeersInstanceResults[peer][address].AddTargetResult(targetResult, detailed)
         }
@@ -1014,8 +1014,7 @@ func (cl *CombiLocker) GetPeersClientResults(peerName string, trackingHeaders []
     }
   } else {
     for peer, targetsResults := range peersClientResults {
-      summaryPeersResults[peer] = &results.ClientTargetsAggregateResults{}
-      summaryPeersResults[peer].Init()
+      summaryPeersResults[peer] = results.NewClientTargetsAggregateResults()
       for _, targetResult := range targetsResults {
         summaryPeersResults[peer].AddTargetResult(targetResult, detailed)
       }

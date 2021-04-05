@@ -1,4 +1,4 @@
-package invocation
+package util
 
 import (
   "context"
@@ -8,11 +8,12 @@ import (
   "sync"
 
   "golang.org/x/net/http2"
+  "google.golang.org/grpc"
 )
 
 type TransportTracker struct {
-  dialer       net.Dialer
-  connCount    int
+  Dialer       net.Dialer
+  ConnCount    int
   lock         sync.RWMutex
   tlsConfigPtr **tls.Config
 }
@@ -29,21 +30,23 @@ type HTTP2TransportTracker struct {
 
 type ConnTracker struct {
   net.Conn
-  tracker   *TransportTracker
+  Tracker   *TransportTracker
   closeSync sync.Once
 }
 
-type HTTPClientTracker struct {
+type ClientTracker struct {
   *http.Client
-  tracker *TransportTracker
+  GrpcConn *grpc.ClientConn
+  Tracker  *TransportTracker
+  IsGRPC   bool
 }
 
 func (ct *ConnTracker) Close() (err error) {
   err = ct.Conn.Close()
   ct.closeSync.Do(func() {
-    ct.tracker.lock.Lock()
-    ct.tracker.connCount--
-    ct.tracker.lock.Unlock()
+    ct.Tracker.lock.Lock()
+    ct.Tracker.ConnCount--
+    ct.Tracker.lock.Unlock()
   })
   return err
 }
@@ -57,7 +60,7 @@ func (t *HTTPTransportTracker) getDialer() func(context.Context, string, string)
       return t.Dial(network, addr)
     }
   }
-  return t.dialer.DialContext
+  return t.Dialer.DialContext
 }
 
 func (t *HTTP2TransportTracker) getDialer() func(string, string, *tls.Config) (net.Conn, error) {
@@ -65,11 +68,11 @@ func (t *HTTP2TransportTracker) getDialer() func(string, string, *tls.Config) (n
     return t.DialTLS
   }
   return func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-    return t.dialer.Dial(network, addr)
+    return t.Dialer.Dial(network, addr)
   }
 }
 
-func NewHTTPTransportTracker(orig *http.Transport) *HTTPTransportTracker {
+func NewHTTPTransportTracker(orig *http.Transport, label string, newConnNotifierChan chan string) *HTTPTransportTracker {
   t := &HTTPTransportTracker{
     Transport: orig,
   }
@@ -77,6 +80,9 @@ func NewHTTPTransportTracker(orig *http.Transport) *HTTPTransportTracker {
   dialer := t.getDialer()
   t.Transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
     if conn, err := dialer(ctx, network, addr); err == nil {
+      if newConnNotifierChan != nil {
+        newConnNotifierChan <- label
+      }
       return NewConnTracker(conn, &t.TransportTracker)
     } else {
       return nil, err
@@ -85,7 +91,7 @@ func NewHTTPTransportTracker(orig *http.Transport) *HTTPTransportTracker {
   return t
 }
 
-func NewHTTP2TransportTracker(orig *http2.Transport) *HTTP2TransportTracker {
+func NewHTTP2TransportTracker(orig *http2.Transport, label string, newConnNotifierChan chan string) *HTTP2TransportTracker {
   t := &HTTP2TransportTracker{
     Transport: orig,
   }
@@ -93,6 +99,9 @@ func NewHTTP2TransportTracker(orig *http2.Transport) *HTTP2TransportTracker {
   dialer := t.getDialer()
   t.Transport.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
     if conn, err := dialer(network, addr, cfg); err == nil {
+      if newConnNotifierChan != nil {
+        newConnNotifierChan <- label
+      }
       return NewConnTracker(conn, &t.TransportTracker)
     } else {
       return nil, err
@@ -103,23 +112,23 @@ func NewHTTP2TransportTracker(orig *http2.Transport) *HTTP2TransportTracker {
 
 func NewConnTracker(conn net.Conn, t *TransportTracker) (net.Conn, error) {
   t.lock.Lock()
-  t.connCount++
+  t.ConnCount++
   t.lock.Unlock()
   ct := &ConnTracker{
     Conn:    conn,
-    tracker: t,
+    Tracker: t,
   }
   return ct, nil
 }
 
-func NewHTTPClientTracker(c *http.Client, tracker *TransportTracker) *HTTPClientTracker {
-  return &HTTPClientTracker{Client: c, tracker: tracker}
+func NewHTTPClientTracker(c *http.Client, gc *grpc.ClientConn, tracker *TransportTracker) *ClientTracker {
+  return &ClientTracker{Client: c, GrpcConn: gc, Tracker: tracker, IsGRPC: gc != nil}
 }
 
 func (t *TransportTracker) GetOpenConnectionCount() int {
   t.lock.RLock()
   defer t.lock.RUnlock()
-  return t.connCount
+  return t.ConnCount
 }
 
 func (t *TransportTracker) SetTLSConfig(tlsConfig *tls.Config) {

@@ -1,12 +1,12 @@
 package constants
 
 const (
-  LockerClientKey        string = "client"
-  LockerClientResultsKey string = "results"
-  LockerInvocationsKey   string = "invocations"
-  LockerEventsKey        string = "events"
-  LockerDefaultLabel     string = "default"
-  LockerCurrent          string = "current"
-  LockerPeers            string = "peerLockers"
-  LockerAll              string = "all"
+  LockerClientKey        = "client"
+  LockerClientResultsKey = "results"
+  LockerInvocationsKey   = "invocations"
+  LockerEventsKey        = "events"
+  LockerDefaultLabel     = "default"
+  LockerCurrent          = "current"
+  LockerPeers            = "peerLockers"
+  LockerAll              = "all"
 )

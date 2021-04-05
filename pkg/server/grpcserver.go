@@ -3,6 +3,7 @@ package server
 import (
   "context"
   "fmt"
+  . "goto/pkg/constants"
   "goto/pkg/events"
   "goto/pkg/global"
   "goto/pkg/grpc/pb"
@@ -108,11 +109,11 @@ func (gs *GRPCServer) setHeaders(ctx context.Context, port int) {
     remoteAddress = p.Addr.String()
   }
   grpc.SendHeader(ctx, metadata.New(map[string]string{
-    "Goto-Host":           hostLabel,
-    "Via-Goto":            listenerLabel,
-    "Goto-Protocol":       "GRPC",
-    "Goto-Port":           fmt.Sprint(port),
-    "Goto-Remote-Address": remoteAddress,
+    HeaderGotoHost:          hostLabel,
+    HeaderViaGoto:           listenerLabel,
+    HeaderGotoProtocol:      "GRPC",
+    HeaderGotoPort:          fmt.Sprint(port),
+    HeaderGotoRemoteAddress: remoteAddress,
   }))
 }
 

@@ -1479,10 +1479,11 @@ func getPeerLocker(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func getPeersClientSummaryResults(w http.ResponseWriter, r *http.Request) {
+func getPeersClientResults(w http.ResponseWriter, r *http.Request) {
   msg := ""
   label := util.GetStringParamValue(r, "label")
   peerName := util.GetStringParamValue(r, "peer")
+  targets, _ := util.GetListParam(r, "targets")
   detailed := strings.Contains(r.RequestURI, "details")
   byInstances := strings.Contains(r.RequestURI, "instances")
   var locker *locker.CombiLocker
@@ -1496,7 +1497,7 @@ func getPeersClientSummaryResults(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusNotFound)
     fmt.Fprint(w, msg)
   } else {
-    result := locker.GetPeersClientResults(peerName, registry.trackingHeaders, registry.crossTrackingHeaders, registry.trackingTimeBuckets, detailed, byInstances)
+    result := locker.GetPeersClientResults(peerName, targets, registry.trackingHeaders, registry.crossTrackingHeaders, registry.trackingTimeBuckets, detailed, byInstances)
     util.WriteJsonPayload(w, result)
     msg = "Reported peers client results"
   }

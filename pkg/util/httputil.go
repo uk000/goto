@@ -19,9 +19,11 @@ import (
   "runtime"
   "strconv"
   "strings"
+  "sync"
   "time"
 
   "github.com/gorilla/mux"
+  "golang.org/x/net/http2"
   "google.golang.org/grpc/metadata"
 )
 
@@ -47,13 +49,17 @@ type RequestStore struct {
   IsDelayRequest          bool
   IsPayloadRequest        bool
   IsTunnelRequest         bool
+  IsTunnelConfigRequest   bool
   IsTrafficEventReported  bool
   IsHeadersSent           bool
+  IsTunnelResponseSent    bool
+  TunnelCount             int
   IsH2C                   bool
   StatusCode              int
   TrafficDetails          []string
   LogMessages             []string
   InterceptResponseWriter interface{}
+  TunnelLock              sync.RWMutex
 }
 
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=~`{}[];:,.<>/?"
@@ -66,22 +72,22 @@ var sizes map[string]uint64 = map[string]uint64{
 }
 
 var (
-  DefaultHttpClient = CreateHttpClient()
   RequestStoreKey   = &ContextKey{"requestStore"}
   CurrentPortKey    = &ContextKey{"currentPort"}
   IgnoredRequestKey = &ContextKey{"ignoredRequest"}
   ConnectionKey     = &ContextKey{"connection"}
 
-  portRouter          *mux.Router
-  portTunnelRouters   = map[string]*mux.Router{}
-  fillerRegexp        = regexp.MustCompile("{({[^{}]+?})}|{([^{}]+?)}")
-  contentRegexp       = regexp.MustCompile("(?i)content")
-  hostRegexp          = regexp.MustCompile("(?i)^host$")
-  utf8Regexp          = regexp.MustCompile("(?i)utf-8")
-  knownTextTypeRegexp = regexp.MustCompile(".*(text|html|json|yaml).*")
-  upgradeRegexp       = regexp.MustCompile("(?i)upgrade")
-  randomCharsetLength = len(charset)
-  random              = rand.New(rand.NewSource(time.Now().UnixNano()))
+  portRouter              *mux.Router
+  portTunnelRouters       = map[string]*mux.Router{}
+  fillerRegexp            = regexp.MustCompile("{({[^{}]+?})}|{([^{}]+?)}")
+  optionalPathKeyRegexp   = regexp.MustCompile("(\\/(?:[^\\/{}]+=)?{[^{}]+?}\\?\\??)")
+  contentRegexp           = regexp.MustCompile("(?i)content")
+  hostRegexp              = regexp.MustCompile("(?i)^host$")
+  utf8Regexp              = regexp.MustCompile("(?i)utf-8")
+  knownTextMimeTypeRegexp = regexp.MustCompile(".*(text|html|json|yaml).*")
+  upgradeRegexp           = regexp.MustCompile("(?i)upgrade")
+  randomCharsetLength     = len(charset)
+  random                  = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
 
 func IsH2(r *http.Request) bool {
@@ -94,7 +100,6 @@ func IsH2C(r *http.Request) bool {
 
 func InitListenerRouter(root *mux.Router) {
   portRouter = root.PathPrefix("/port={port}").Subrouter()
-  root.PathPrefix("/tunnel={address}").Subrouter().MatcherFunc(func(*http.Request, *mux.RouteMatch) bool { return true }).HandlerFunc(Tunnel)
 }
 
 func AddLogMessage(msg string, r *http.Request) {
@@ -119,6 +124,13 @@ func SetHeadersSent(r *http.Request, sent bool) {
   rs := r.Context().Value(RequestStoreKey)
   if rs != nil {
     rs.(*RequestStore).IsHeadersSent = sent
+  }
+}
+
+func SetTunnelCount(r *http.Request, count int) {
+  if v := r.Context().Value(RequestStoreKey); v != nil && v.(*RequestStore) != nil {
+    rs := v.(*RequestStore)
+    rs.TunnelCount = count
   }
 }
 
@@ -154,6 +166,20 @@ func SetFiltreredRequest(r *http.Request) {
   rs := r.Context().Value(RequestStoreKey).(*RequestStore)
   if rs != nil {
     rs.IsFilteredRequest = true
+  }
+}
+
+func SetTunnelRequest(r *http.Request) {
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
+  if rs != nil {
+    rs.IsTunnelRequest = true
+  }
+}
+
+func UnsetTunnelRequest(r *http.Request) {
+  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
+  if rs != nil {
+    rs.IsTunnelRequest = false
   }
 }
 
@@ -444,11 +470,11 @@ func AddHeaderWithPrefix(prefix, header, value string, headers http.Header) {
   headers.Add(header, value)
 }
 
-func CopyHeaders(prefix string, w http.ResponseWriter, headers http.Header, host, uri string) {
+func CopyHeaders(prefix string, w http.ResponseWriter, headers http.Header, host, uri string, contentType bool) {
   hostCopied := false
   responseHeaders := w.Header()
   for h, values := range headers {
-    if !contentRegexp.MatchString(h) {
+    if contentType || !contentRegexp.MatchString(h) {
       for _, v := range values {
         AddHeaderWithPrefix(prefix, h, v, responseHeaders)
       }
@@ -481,8 +507,6 @@ func GetResponseHeadersLog(header http.Header) string {
 }
 
 func GetRequestHeadersLog(r *http.Request) string {
-  r.Header["Host"] = []string{r.Host}
-  r.Header["Protocol"] = []string{r.Proto}
   return ToJSON(r.Header)
 }
 
@@ -533,7 +557,8 @@ func CheckAdminRequest(r *http.Request) bool {
   return strings.HasPrefix(r.RequestURI, "/metrics") || strings.HasPrefix(r.RequestURI, "/registry") ||
     strings.HasPrefix(r.RequestURI, "/server") || strings.HasPrefix(r.RequestURI, "/client") ||
     strings.HasPrefix(r.RequestURI, "/port") || strings.HasPrefix(r.RequestURI, "/job") ||
-    strings.HasPrefix(r.RequestURI, "/probes") || strings.HasPrefix(r.RequestURI, "/events")
+    strings.HasPrefix(r.RequestURI, "/probes") || strings.HasPrefix(r.RequestURI, "/events") ||
+    strings.HasPrefix(r.RequestURI, "/log") || strings.HasPrefix(r.RequestURI, "/tunnels")
 }
 
 func IsMetricsRequest(r *http.Request) bool {
@@ -593,7 +618,7 @@ func IsFilteredRequest(r *http.Request) bool {
 
 func IsTunnelRequest(r *http.Request) bool {
   rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && rs.IsTunnelRequest
+  return rs != nil && rs.IsTunnelRequest && !rs.IsTunnelConfigRequest
 }
 
 func IsKnownRequest(r *http.Request) bool {
@@ -601,20 +626,14 @@ func IsKnownRequest(r *http.Request) bool {
   return rs != nil && (rs.IsProbeRequest || rs.IsReminderRequest || rs.IsHealthRequest ||
     rs.IsMetricsRequest || rs.IsVersionRequest || rs.IsLockerRequest ||
     rs.IsAdminRequest || rs.IsStatusRequest || rs.IsDelayRequest ||
-    rs.IsPayloadRequest || rs.IsTunnelRequest)
+    rs.IsPayloadRequest || rs.IsTunnelConfigRequest)
 }
 
 func IsKnownNonTraffic(r *http.Request) bool {
   rs := r.Context().Value(RequestStoreKey).(*RequestStore)
   return rs != nil && (rs.IsProbeRequest || rs.IsReminderRequest || rs.IsHealthRequest ||
     rs.IsMetricsRequest || rs.IsVersionRequest || rs.IsLockerRequest ||
-    rs.IsAdminRequest || rs.IsTunnelRequest)
-}
-
-func IsKnownTraffic(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && (rs.IsStatusRequest || rs.IsDelayRequest ||
-    rs.IsPayloadRequest || rs.IsTunnelRequest)
+    rs.IsAdminRequest || rs.IsTunnelConfigRequest)
 }
 
 func PathRouter(r *mux.Router, path string) *mux.Router {
@@ -626,97 +645,93 @@ func PathRouter(r *mux.Router, path string) *mux.Router {
   return r.PathPrefix(path).Subrouter()
 }
 
-func Tunnel(w http.ResponseWriter, r *http.Request) {
-  address := GetStringParamValue(r, "address")
-  uri := "/"
-  if pieces := strings.Split(r.RequestURI, address); len(pieces) > 1 {
-    uri = pieces[1]
-  }
-  proto := ""
-  if strings.HasPrefix(address, "http") {
-    pieces := strings.Split(address, ":")
-    proto = pieces[0] + "://"
-    if len(pieces) > 1 {
-      pieces = pieces[1:]
-      address = strings.Join(pieces, ":")
-    }
-  } else {
-    if r.TLS != nil {
-      proto = "https://"
+func GetSubPaths(path string) []string {
+  matches := optionalPathKeyRegexp.FindAllStringIndex(path, -1)
+  var paths []string
+  addSubpath := func(subPath string) {
+    canSkip := strings.HasSuffix(subPath, "?") && !strings.HasSuffix(subPath, "??")
+    subPath = strings.ReplaceAll(subPath, "?", "")
+    if len(paths) > 0 {
+      for i, prefixPath := range paths {
+        if canSkip {
+          paths = append(paths, prefixPath)
+        }
+        paths[i] = prefixPath + subPath
+      }
     } else {
-      proto = "http://"
+      paths = append(paths, subPath)
     }
   }
-  url := proto + address + uri
-  AddLogMessage(fmt.Sprintf("Tunneling to [%s]", url), r)
-  if req, err := CreateRequest(r.Method, url, r.Header, ReadBytes(r.Body)); err == nil {
-    if resp, err := DefaultHttpClient.Do(req); err == nil {
-      defer resp.Body.Close()
-      CopyHeaders("", w, resp.Header, "", "")
-      w.WriteHeader(resp.StatusCode)
-      io.Copy(w, resp.Body)
+  if len(matches) > 0 {
+    start := 0
+    end := 0
+    for _, m := range matches {
+      addSubpath(path[start:m[0]])
+      addSubpath(path[m[0]:m[1]])
+      start = m[1]
+      end = m[1]
+    }
+    if end < len(path) {
+      addSubpath(path[end:])
+    }
+    for _, prefixPath := range paths {
+      paths = append(paths, prefixPath+"/")
+    }
+  } else {
+    paths = []string{path}
+  }
+  return paths
+}
+
+func AddRoute(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), methods ...string) {
+  for _, p := range GetSubPaths(path) {
+    if len(methods) > 0 {
+      r.HandleFunc(p, f).Methods(methods...)
     } else {
-      msg := fmt.Sprintf("Error invoking tunnel to [%s]: %s", url, err.Error())
-      fmt.Fprintln(w, msg)
-      AddLogMessage(msg, r)
-    }
-  } else {
-    msg := fmt.Sprintf("Error creating tunnel request for [%s]: %s", url, err.Error())
-    fmt.Fprintln(w, msg)
-    AddLogMessage(msg, r)
-  }
-}
-
-func AddRoute(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), methods ...string) {
-  if len(methods) > 0 {
-    r.HandleFunc(route, f).Methods(methods...)
-    r.HandleFunc(route+"/", f).Methods(methods...)
-  } else {
-    r.HandleFunc(route, f)
-    r.HandleFunc(route+"/", f)
-  }
-}
-
-func AddRouteWithPort(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), methods ...string) {
-  AddRoute(r, route, f, methods...)
-  if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && portTunnelRouters[lpath] != nil {
-    AddRoute(portTunnelRouters[lpath], route, f, methods...)
-  }
-}
-
-func AddRouteQ(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), queryParamName string, queryKey string, methods ...string) {
-  r.HandleFunc(route, f).Queries(queryParamName, queryKey).Methods(methods...)
-  r.HandleFunc(route+"/", f).Queries(queryParamName, queryKey).Methods(methods...)
-}
-
-func AddRouteQWithPort(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), queryParamName string, queryKey string, methods ...string) {
-  AddRouteQ(r, route, f, queryParamName, queryKey, methods...)
-  if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && portTunnelRouters[lpath] != nil {
-    AddRouteQ(portTunnelRouters[lpath], route, f, queryParamName, queryKey, methods...)
-  }
-}
-
-func AddRouteMultiQ(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
-  r.HandleFunc(route, f).Queries(queryParams...).Methods(method)
-  r.HandleFunc(route+"/", f).Queries(queryParams...).Methods(method)
-  for i := 0; i < len(queryParams); i += 2 {
-    for j := i + 2; j < len(queryParams); j += 2 {
-      r.HandleFunc(route, f).Queries(queryParams[i], queryParams[i+1], queryParams[j], queryParams[j+1]).Methods(method)
-      r.HandleFunc(route+"/", f).Queries(queryParams[i], queryParams[i+1], queryParams[j], queryParams[j+1]).Methods(method)
+      r.HandleFunc(p, f)
     }
   }
-  for i := 0; i < len(queryParams); i += 2 {
-    r.HandleFunc(route, f).Queries(queryParams[i], queryParams[i+1]).Methods(method)
-    r.HandleFunc(route+"/", f).Queries(queryParams[i], queryParams[i+1]).Methods(method)
-  }
-  r.HandleFunc(route, f).Methods(method)
-  r.HandleFunc(route+"/", f).Methods(method)
 }
 
-func AddRouteMultiQWithPort(r *mux.Router, route string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
-  AddRouteMultiQ(r, route, f, method, queryParams...)
+func AddRouteWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), methods ...string) {
+  AddRoute(r, path, f, methods...)
   if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && portTunnelRouters[lpath] != nil {
-    AddRouteMultiQ(portTunnelRouters[lpath], route, f, method, queryParams...)
+    AddRoute(portTunnelRouters[lpath], path, f, methods...)
+  }
+}
+
+func AddRouteQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParamName string, queryKey string, methods ...string) {
+  for _, p := range GetSubPaths(path) {
+    r.HandleFunc(p, f).Queries(queryParamName, queryKey).Methods(methods...)
+  }
+}
+
+func AddRouteQWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParamName string, queryKey string, methods ...string) {
+  AddRouteQ(r, path, f, queryParamName, queryKey, methods...)
+  if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && portTunnelRouters[lpath] != nil {
+    AddRouteQ(portTunnelRouters[lpath], path, f, queryParamName, queryKey, methods...)
+  }
+}
+
+func AddRouteMultiQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
+  for _, p := range GetSubPaths(path) {
+    r.HandleFunc(p, f).Queries(queryParams...).Methods(method)
+    for i := 0; i < len(queryParams); i += 2 {
+      for j := i + 2; j < len(queryParams); j += 2 {
+        r.HandleFunc(p, f).Queries(queryParams[i], queryParams[i+1], queryParams[j], queryParams[j+1]).Methods(method)
+      }
+    }
+    for i := 0; i < len(queryParams); i += 2 {
+      r.HandleFunc(p, f).Queries(queryParams[i], queryParams[i+1]).Methods(method)
+    }
+    r.HandleFunc(p, f).Methods(method)
+  }
+}
+
+func AddRouteMultiQWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
+  AddRouteMultiQ(r, path, f, method, queryParams...)
+  if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && portTunnelRouters[lpath] != nil {
+    AddRouteMultiQ(portTunnelRouters[lpath], path, f, method, queryParams...)
   }
 }
 
@@ -804,7 +819,7 @@ func IsBinaryContentHeader(h http.Header) bool {
 }
 
 func IsBinaryContentType(contentType string) bool {
-  return !knownTextTypeRegexp.MatchString(contentType)
+  return !knownTextMimeTypeRegexp.MatchString(contentType)
 }
 
 func BuildFilePath(filePath, fileName string) string {
@@ -813,6 +828,34 @@ func BuildFilePath(filePath, fileName string) string {
   }
   filePath += fileName
   return filePath
+}
+
+func Reader(ctx context.Context, r io.Reader) io.Reader {
+  if deadline, ok := ctx.Deadline(); ok {
+    type deadliner interface {
+      SetReadDeadline(time.Time) error
+    }
+    if d, ok := r.(deadliner); ok {
+      d.SetReadDeadline(deadline)
+    }
+  }
+  return reader{ctx, r}
+}
+
+type reader struct {
+  ctx context.Context
+  r   io.Reader
+}
+
+func (r reader) Read(p []byte) (n int, err error) {
+  if err = r.ctx.Err(); err != nil {
+    return
+  }
+  if n, err = r.r.Read(p); err != nil {
+    return
+  }
+  err = r.ctx.Err()
+  return
 }
 
 func Read(r io.Reader) string {
@@ -833,9 +876,16 @@ func ReadBytes(r io.Reader) []byte {
   return nil
 }
 
-func DiscardRequestBody(r *http.Request) {
+func DiscardRequestBody(r *http.Request) int {
   defer r.Body.Close()
-  io.Copy(ioutil.Discard, r.Body)
+  len, _ := io.Copy(ioutil.Discard, r.Body)
+  return int(len)
+}
+
+func DiscardResponseBody(r *http.Response) int {
+  defer r.Body.Close()
+  len, _ := io.Copy(ioutil.Discard, r.Body)
+  return int(len)
 }
 
 func ReadAndTrack(r io.Reader, collect bool) ([]byte, int, time.Time, time.Time, string) {
@@ -862,7 +912,7 @@ func ReadAndTrack(r io.Reader, collect bool) ([]byte, int, time.Time, time.Time,
   }
 }
 
-func WriteAndTrack(w io.WriteCloser, data [][]byte, delay time.Duration) (int, time.Time, time.Time, string) {
+func WriteAndTrack(w io.WriteCloser, data [][]byte, delay time.Duration) (int, time.Time, time.Time, error) {
   defer w.Close()
   count := len(data)
   var writeSize int
@@ -879,7 +929,7 @@ func WriteAndTrack(w io.WriteCloser, data [][]byte, delay time.Duration) (int, t
       last = now
       writeSize += n
       if err != nil {
-        return writeSize, first, last, err.Error()
+        return writeSize, first, last, err
       }
       if n >= size {
         break
@@ -889,7 +939,7 @@ func WriteAndTrack(w io.WriteCloser, data [][]byte, delay time.Duration) (int, t
       time.Sleep(delay)
     }
   }
-  return writeSize, first, last, ""
+  return writeSize, first, last, nil
 }
 
 func CloseResponse(r *http.Response) {
@@ -950,6 +1000,16 @@ func IsURIInMap(uri string, m map[string]interface{}) bool {
 func StringArrayContains(list []string, r *regexp.Regexp) bool {
   for _, v := range list {
     if r.MatchString(v) {
+      return true
+    }
+  }
+  return false
+}
+
+func IsStringInArray(val string, list []string) bool {
+  b := []byte(val)
+  for _, v := range list {
+    if matched, _ := regexp.Match(v, b); matched {
       return true
     }
   }
@@ -1137,19 +1197,19 @@ func GenerateRandomString(size int) string {
   return string(GenerateRandomPayload(size))
 }
 
-func CreateRequest(method string, url string, headers http.Header, payload []byte) (*http.Request, error) {
-  var payloadReader *bytes.Reader
-  if len(payload) > 0 {
-    payloadReader = bytes.NewReader(payload)
-  } else {
-    payloadReader = bytes.NewReader([]byte{})
+func CreateRequest(method string, url string, headers http.Header, payload []byte, payloadReader io.ReadCloser) (*http.Request, error) {
+  if payloadReader == nil {
+    if payload == nil {
+      payload = []byte{}
+    }
+    payloadReader = ioutil.NopCloser(bytes.NewReader(payload))
   }
   if req, err := http.NewRequest(method, url, payloadReader); err == nil {
     for h, values := range headers {
       if strings.EqualFold(h, "host") {
         req.Host = values[0]
       } else {
-        req.Header.Add(h, values[0])
+        req.Header[h] = values
       }
     }
     return req, nil
@@ -1158,20 +1218,54 @@ func CreateRequest(method string, url string, headers http.Header, payload []byt
   }
 }
 
-func CreateHttpClient() *http.Client {
-  tr := &http.Transport{
-    MaxIdleConns: 10,
-    Proxy:        http.ProxyFromEnvironment,
-    DialContext: (&net.Dialer{
-      Timeout:   15 * time.Second,
-      KeepAlive: 3 * time.Minute,
-    }).DialContext,
-    TLSHandshakeTimeout: 10 * time.Second,
-    TLSClientConfig: &tls.Config{
-      InsecureSkipVerify: true,
-    },
+func CreateDefaultHTTPClient(label string, h2, isTLS bool, newConnNotifierChan chan string) *ClientTracker {
+  return CreateHTTPClient(label, h2, true, isTLS, 30*time.Second, 30*time.Second, 3*time.Minute, newConnNotifierChan)
+}
+
+func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, requestTimeout, connTimeout, connIdleTimeout time.Duration, newConnNotifierChan chan string) *ClientTracker {
+  var transport http.RoundTripper
+  var tracker *TransportTracker
+  if !h2 {
+    ht := NewHTTPTransportTracker(&http.Transport{
+      MaxIdleConns:          300,
+      MaxIdleConnsPerHost:   300,
+      IdleConnTimeout:       connIdleTimeout,
+      Proxy:                 http.ProxyFromEnvironment,
+      DisableCompression:    true,
+      ExpectContinueTimeout: requestTimeout,
+      ResponseHeaderTimeout: requestTimeout,
+      DialContext: (&net.Dialer{
+        Timeout:   connTimeout,
+        KeepAlive: connIdleTimeout,
+      }).DialContext,
+      TLSHandshakeTimeout: connTimeout,
+      ForceAttemptHTTP2:   autoUpgrade,
+      TLSClientConfig: &tls.Config{
+        InsecureSkipVerify: true,
+      },
+    }, label, newConnNotifierChan)
+    tracker = &ht.TransportTracker
+    transport = ht.Transport
+  } else {
+    tr := &http2.Transport{
+      ReadIdleTimeout: connIdleTimeout,
+      PingTimeout:     connTimeout,
+      AllowHTTP:       true,
+      TLSClientConfig: &tls.Config{
+        InsecureSkipVerify: true,
+      },
+    }
+    tr.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+      if isTLS {
+        return tls.Dial(network, addr, cfg)
+      }
+      return net.Dial(network, addr)
+    }
+    h2t := NewHTTP2TransportTracker(tr, label, newConnNotifierChan)
+    tracker = &h2t.TransportTracker
+    transport = h2t.Transport
   }
-  return &http.Client{Transport: tr}
+  return NewHTTPClientTracker(&http.Client{Timeout: requestTimeout, Transport: transport}, nil, tracker)
 }
 
 func PrintCallers(level int, callee string) {

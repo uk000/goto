@@ -51,10 +51,10 @@ func GetConnectionReadWriteTimeout(startTime time.Time, connectionLife, readWrit
   return now.Add(GetConnectionRemainingLife(startTime, now, connectionLife, readWriteTimeout, connIdleTimeout))
 }
 
-func UpdateReadDeadline(conn *net.TCPConn, connStartTime time.Time, connectionLife, readTimeout, connIdleTimeout time.Duration) {
+func UpdateReadDeadline(conn net.Conn, connStartTime time.Time, connectionLife, readTimeout, connIdleTimeout time.Duration) {
   conn.SetReadDeadline(GetConnectionReadWriteTimeout(connStartTime, connectionLife, readTimeout, connIdleTimeout))
 }
 
-func UpdateWriteDeadline(conn *net.TCPConn, connStartTime time.Time, connectionLife, writeTimeout, connIdleTimeout time.Duration) {
+func UpdateWriteDeadline(conn net.Conn, connStartTime time.Time, connectionLife, writeTimeout, connIdleTimeout time.Duration) {
   conn.SetWriteDeadline(GetConnectionReadWriteTimeout(connStartTime, connectionLife, writeTimeout, connIdleTimeout))
 }

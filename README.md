@@ -2,6 +2,10 @@
 
 # goto
 
+> **NOTE**
+<small> The Readme reflects master HEAD code, which has breaking changes compared to the latest `0.8.x` release. For documentation of `0.8.x` and prior releases, switch to `v0.8.x` branch or any of the release tags.</small>
+
+
 ## What is it?
 
 A multi-faceted application to assist with various kinds of automated testing. It can act as a Client, a Server, a Proxy, a Job Executor, a Registry, or even all of these at once.
@@ -161,13 +165,13 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 - [Targets and Traffic](#goto-client-targets-and-traffic)
 - [Client APIs](#client-apis)
 - [Client Events](#client-events)
-- [Client JSON Schemas](#client-json-schemas)
+- [Client JSON Schemas](docs/client-api-json-schemas.md)
 - [Client APIs and Results Examples](docs/client-api-examples.md)
 
 ### [Server Features](#goto-server-features)
 
 - [Goto Response Headers](#goto-response-headers)
-- [Server Logs](#goto-server-logs)
+- [Logs](#goto-server-logs)
 - [Goto Version](#-goto-version)
 - [Events](#-events)
 - [Metrics](#-metrics)
@@ -250,19 +254,19 @@ The application accepts the following command arguments:
     <tbody>
         <tr>
           <td rowspan="2"><pre>--port {port}</pre></td>
-          <td>Primary port the server listens on. One of <strong>--port</strong> or <strong>--ports</strong> must be given. </td>
+          <td>Primary port the server listens on. Alternately use <strong>--ports</strong> for multiple startup ports. </td>
           <td rowspan="2">8080</td>
         </tr>
         <tr>
-          <td>* Alternately, `--ports` can be used for multiple ports. Additional ports can be opened by making listener API calls on this port. See <a href="#server-listeners">Listeners</a> feature for more details.</td>
+          <td>* Additional ports can be opened by making listener API calls on this port. See <a href="#-listeners">Listeners</a> feature for more details.</td>
         </tr>
         <tr>
           <td rowspan="2"><pre>--ports {ports}</pre></td>
-          <td>Initial list of ports that the server should start with. Port list is given as comma-separated list of <pre>{port1}/{protocol1},{port2}/{protocol2},...</pre> The first port in the list is used as primary port. </td>
+          <td>Initial list of ports that the server should start with. Port list is given as comma-separated list of <pre>{port1}/{protocol},{port2}/{protocol},...</pre> where protocol can be one of <pre>http, https, tcp, tls. </pre> Protocols <strong>https</strong> configures the port to serve HTTP requests with a self-signed TLS cert, whereas protocol <strong>tls</strong> configures a TCP port with self-signed TLS cert. </td>
           <td rowspan="2">""</td>
         </tr>
         <tr>
-          <td>* For example: <pre>--ports 8080/http,8081/http,9000/tcp</pre> Protocol is optional, and defaults to http. E.g., to open multiple http ports: <pre>--ports 8080,8081,8082</pre>  Additional ports can be opened by making listener API calls on this port. See <a href="#server-listeners">Listeners</a> feature for more details.</td>
+          <td>* For example: <pre>--ports 8080/http,8081/https,9000/tcp,9091/tls</pre> Protocol is optional, and defaults to http. E.g., to open multiple http ports: <pre>--ports 8080,8081,8082</pre> The first port in the list is used as primary port. Additional ports can be opened by making listener API calls on this port. See <a href="#-listeners">Listeners</a> feature for more details.</td>
         </tr>
         <tr>
           <td rowspan="2"><pre>--label `{label}`</pre></td>
@@ -429,6 +433,7 @@ Client sends header `From-Goto-Host` to pass its identity to the server.
 | POST      | /client/targets/`{targets}`/stop        | Stops a running target |
 | POST      | /client/targets/stop/all              | Stops all running targets |
 | GET       |	/client/targets                       | Get list of currently configured targets |
+| GET       |	/client/targets/{target}           | Get details of given target |
 | POST      |	/client/targets/clear                 | Remove all targets |
 | GET       |	/client/targets/active                | Get list of currently active (running) targets |
 | POST      |	/client/targets/cacert/add            | Store CA cert to use for all target invocations |
@@ -471,8 +476,6 @@ Client sends header `From-Goto-Host` to pass its identity to the server.
 
 <br/>
 
-## <a name="client-json-schemas"></a>
-
 See [Client JSON Schemas](docs/client-api-json-schemas.md)
 
 See [Client APIs and Results Examples](docs/client-api-examples.md)
@@ -502,17 +505,25 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 - `Goto-Port`: carries the port number on which the request was received
 - `Goto-Protocol`: identifies whether the request was received over `HTTP` or `HTTPS`
 - `Goto-Remote-Address`: remote client's address as visible to `goto`
+- `Goto-Response-Status`: HTTP response status code that `goto` responded with. This additional header is useful to verify if the final response code got changed by an intermediary proxy/gateway. 
 - `Goto-In-At`: UTC timestamp when the request was received by `goto`
 - `Goto-Out-At`: UTC timestamp when `goto` finished processing the request and sent a response
 - `Goto-Took`: Total processing time taken by `goto` to process the request
 
 `Goto` adds the following response headers conditionally:
 
+- `From-Goto`, `From-Goto-Host`: Sent by `goto` client with each traffic invocation, passing the label and host id of the client `goto` instance
+- `Goto-Request-ID`, `Goto-Target-ID`, `Goto-Target-URL`: Sent by `goto` client with each traffic invocation. RequestID and TargetID are auto-generated from the target name and request counters. TargetURL header identifies the URL that `goto` invoked, which can be useful when an intermediate proxy rewrites the URL.
+- `Goto-Retry-Count`: Sent by `goto` client instance when traffic invocations are retried (if a target was configured for retries)
+- `Goto-Host-Tunnel[<seq>]`: identifies `goto` instance hosts through which this request was tunneled along with the sequence number of each instance in the tunnel chain.
+- `Via-Goto-Tunnel[<seq>]`: identifies `goto` instance labels through which this request was tunneled along with the sequence number of each instance in the tunnel chain.
+- `Goto-In-At[<seq>]`: UTC timestamp when the request was received by each `goto` in the tunnel chain
+- `Goto-Out-At[<seq>]`: UTC timestamp when the request finished processing by the `goto` tunnel instance
+- `Goto-Took[<seq>]`: Total processing time taken by the `goto` tunnel instance
 - `Goto-Response-Delay`: set if `goto` applied a configured delay to the response.
 - `Goto-Payload-Length`, `Goto-Payload-Content-Type`: set if `goto` sent a configured response payload
 - `Goto-Chunk-Count`, `Goto-Chunk-Length`, `Goto-Chunk-Delay`, `Goto-Stream-Length`, `Goto-Stream-Duration`: set when client requests a streaming response
 - `Goto-Requested-Status`: set when `/status` API request is made requesting a specific status
-- `Goto-Response-Status`: set for all non-admin requests, carrying the HTTP response status code that `goto` has set to the response
 - `Goto-Forced-Status`, `Goto-Forced-Status-Remaining`: set when a configured custom response status is applied to a response that didn't have a URI-specific response status
 - `Goto-URI-Status`, `Goto-URI-Status-Remaining`: set when a configured custom response status is applied to a uri
 - `Goto-Filtered-Request`: set when a request is filtered due to a configured `ignore` or `bypass` filter
@@ -525,13 +536,14 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 - `Liveness-Overflow-Count`: header added to liveness probe responses, carrying the number of times liveness request count has overflown
 - `Stopping-Readiness-Request-*`: set when a readiness probe is received while `goto` server is shutting down
 
+
 ###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
 # <a name="goto-server-logs"></a>
 
-### Goto Server Logs
+### Goto Logs
 
 `goto` server logs are generated with a useful pattern to help figuring out the steps `goto` took for a request. Each log line tells the complete story about request details, how the request was processed, and response sent. Each log line contains the following segments separated by `-->`:
 
@@ -546,7 +558,9 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 - Response Status Code (final code sent to client after applying any configured overrides)
 - Response Body Length
 
-#### Sample log line:
+`goto` client, invocation, job, proxy and tunnel logs produce multi-line logs for the tasks being performed.
+
+#### Sample server log line:
 
 ```
 2020/11/09 16:59:54 [Goto-Server] --> LocalAddr: [::1]:8080, RemoteAddr: [::1]:62296 --> Request Body: [some payload] --> Request Headers: {"Accept":["*/*"],"Foo":["bar"],"Host":["localhost:8080"],"Protocol":["HTTP/1.1"],"User-Agent":["curl/7.64.1"]} --> Request URI: [/foo], Protocol: [HTTP/1.1], Method: [GET] --> Echoing back --> {"ResponseHeaders": {"Content-Type":["application/json"],"Goto-Host":["localhost@1.2.3.4:8080"],"Goto-In-Nanos":["1613330713218468000"],"Goto-Out-Nanos":["1613330713218686000"],"Goto-Port":["8080"],"Goto-Protocol":["HTTP"],"Goto-Remote-Address":["[::1]:62296"],"Goto-Response-Status":["200"],"Goto-Took-Nanos":["218000"],"Request-Accept":["*/*"],"Request-Foo":["bar"],"Request-Host":["localhost:8080"],"Request-Protocol":["HTTP/1.1"],"Request-Uri":["/foo"],"Request-User-Agent":["curl/7.64.1"],"Via-Goto":["Registry"]}} --> Response Status Code: [200] --> Response Body Length: [229]
@@ -556,6 +570,46 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 
 <br/>
 
+The log APIs can be used to see current logging config and turn logging on/off for various components. The components for which logging can be controlled are:
+
+- `server`
+- `admin`
+- `client` 
+- `invocation`
+- `registry`
+- `locker`
+- `events`
+- `reminder`
+- `health`
+- `probe`
+- `metrics`
+- `request`
+- `response`
+
+#### Log APIs
+|METHOD|URI|Description|
+|---|---|---|
+| GET       | /version          | Get version info of this `goto` instance.  |
+
+
+
+#### Log API Examples
+<details>
+<summary>API Examples</summary>
+
+```
+curl localhost:8080/log
+
+curl -X POST localhost:8080/log/headers/request/y
+curl -X POST localhost:8080/log/headers/response/n
+curl -X POST localhost:8080/log/invocation/n
+
+```
+
+</details>
+
+
+
 # <a name="goto-version"></a>
 ## > Goto Version
 This API returns version info of the `goto` instance
@@ -563,7 +617,8 @@ This API returns version info of the `goto` instance
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
-| GET       | /version          | Get version info of this `goto` instance.  |
+| GET   | /log          | Get current logging config for all components.  |
+| POST, PUT | /log/`{component}`/`{y/n}` | Enable/disable logging for a component |
 
 
 ###### <small> [Back to TOC](#toc) </small>
@@ -638,7 +693,8 @@ See [Events Example](docs/events-example.md)
 - `goto_triggers` (vector): Number of triggered requests (dimension: triggerTarget)
 - `goto_conn_counts` (vector): Number of connections by type (dimension: connType)
 - `goto_tcp_conn_counts` (vector): Number of TCP connections by type (dimension: tcpType)
-- `goto_active_client_conn_counts_by_targets` (gauge): Number of active client connections by targets (dimension: target)
+- `goto_total_conns_by_targets` (vector): Total client connections by targets (dimension: target)
+- `goto_active_conn_counts_by_targets` (gauge): Number of active client connections by targets (dimension: target)
 
 
 ### Server Stats
@@ -659,11 +715,11 @@ See [Events Example](docs/events-example.md)
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
-| GET       | /metrics           | Custom metrics in prometheus format |
-| GET       | /metrics/go        | Go VM metrics in prometheus format |
-| POST       | /metrics/clear    | Clear custom metrics |
-| GET       | /stats           | Server counts |
-| POST      | /stats/clear    | Clear server counts |
+| GET   | /metrics       | Custom metrics in prometheus format |
+| GET   | /metrics/go    | Go VM metrics in prometheus format |
+| POST  | /metrics/clear | Clear custom metrics |
+| GET   | /stats         | Server counts |
+| POST  | /stats/clear   | Clear server counts |
 
 
 <br/>
@@ -680,9 +736,13 @@ See [Metrics Example](docs/metrics-example.md)
 
 The server starts with a bootstrap http listener (given as a command line arg `--port` or as first port in the arg `--ports`, defaults to 8080). Additional ports can be opened via command line (arg `--ports`) as well as via listener APIs. When startup arg `--ports` is used, the first port in the list is treated as bootstrap port, forced to be an HTTP port, and isn't allowed to be managed via listeners APIs.
 
-The `listeners APIs` let you manage/open/close arbitrary number of HTTP/TCP/GRPC listeners (except the default bootstrap listener). The ability to launch and shutdown listeners lets you do some chaos testing. All HTTP listener ports respond to the same set of API calls, so any of the HTTP APIs described below as well as runtime traffic proxying can be done via any active HTTP listener. Any of the TCP operations described in the TCP section can be performed on any active TCP listener, and any of the GRPC operations can be performed on any GRPC listener. The HTTP listeners perform double duty of also acting as GRPC listeners, but listeners explicitly configured as `GRPC` act as `GRPC-only` and don't support HTTP operations. See `GRPC` section later in this doc for details on GRPC operations supported by `goto`.
+The `listeners APIs` let you manage/open/close arbitrary number of HTTP/HTTPS/TCP/TCP+TLS/GRPC listeners (except the default bootstrap listener that is set as HTTP and cannot be modified). The ability to launch and shutdown listeners lets you do some chaos testing. All HTTP listener ports respond to the same set of API calls, so any of the HTTP APIs described below as well as runtime traffic proxying can be done via any active HTTP listener. Any of the TCP operations described in the TCP section can be performed on any active TCP listener, and any of the GRPC operations can be performed on any GRPC listener. The HTTP listeners perform double duty of also acting as GRPC listeners, but listeners explicitly configured as `GRPC` act as `GRPC-only` and don't support HTTP operations. See `GRPC` section later in this doc for details on GRPC operations supported by `goto`.
 
-Adding TLS cert and key for a listener using `/cert` and `/key` API will configure the listener for serving HTTPS traffic when it's opened/reopened. An already opened listener can be reopened as a TLS listener by configuring TLS certs for it and calling `/reopen`.
+A listener can be configured to serve TLS traffic over either of the supported protocols via one of the following ways:
+- Use protocol `https` or `tls` to configure a listener to use an auto-generated self-signed cert to serve HTTP or TCP traffic correspondingly. The protocol identifiers can also be used with bootstrap listeners. Common name of the auto-generated certs is set to `goto.goto`.
+- Use `https` or `tls` protocol identifiers along with `commonName` field to configure a listener to use self-signed cert using the given common name (as opposed to using `goto.goto` in the previous approach)
+- Use APIs `/server/listeners/{port}/cert/auto/{domain}` to get the same effect as above but via an API call. The API auto-generates a cert for the listener if not already present, and reopens it in TLS mode. The API approach lets you reconfigure an already opened listener to switch to TLS.
+- Use APIs `/server/listeners/{port}/cert/add` and `/server/listeners/{port}/key/add` to add your own cert and key to a listener. After invoking these two APIs to upload cert and private key, you must explictly call `/server/listeners/{port}/reopen` to make the listener serve TLS traffic. 
 
 `/server/listeners` API output includes the default startup port for view, but the default port cannot be mutated by other listener APIs.
 
@@ -695,13 +755,15 @@ Several configuration APIs (used to configure server features on `goto` instance
 |---|---|---|
 | POST       | /server/listeners/add           | Add a listener. [See Payload JSON Schema](#listener-json-schema)|
 | POST       | /server/listeners/update        | Update an existing listener.|
-| POST, PUT  | /server/listeners<br/>/{port}/cert/add   | Add/update certificate for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
-| POST, PUT  | /server/listeners<br/>/{port}/key/add   | Add/update private key for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
-| POST, PUT  | /server/listeners<br/>/{port}/cert/remove   | Remove certificate and key for a listener and reopen it to serve HTTP traffic instead of HTTPS. |
-| POST, PUT  | /server/listeners<br/>/{port}/remove | Remove a listener|
-| POST, PUT  | /server/listeners<br/>/{port}/open   | Open an added listener to accept traffic|
-| POST, PUT  | /server/listeners<br/>/{port}/reopen | Close and reopen an existing listener if already opened, otherwise open it |
-| POST, PUT  | /server/listeners<br/>/{port}/close  | Close an added listener|
+| POST, PUT  | /server/listeners<br/>/`{port}`/cert/auto/`{domain}`   | Auto-generate certificate for the given domain and service on this listener. Listener is automatically reopened as a TLS listener serving this cert. |
+| POST, PUT  | /server/listeners<br/>/`{port}`/cert/add   | Add/update certificate for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
+| POST, PUT  | /server/listeners<br/>/`{port}`/key/add   | Add/update private key for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
+| POST, PUT  | /server/listeners<br/>/`{port}`/cert/remove   | Remove certificate and key for a listener and reopen it to serve HTTP traffic instead of HTTPS. |
+| POST, PUT  | /server/listeners<br/>/`{port}`/remove | Remove a listener|
+| POST, PUT  | /server/listeners<br/>/`{port}`/open   | Open an added listener to accept traffic|
+| POST, PUT  | /server/listeners<br/>/`{port}`/reopen | Close and reopen an existing listener if already opened, otherwise open it |
+| POST, PUT  | /server/listeners<br/>/`{port}`/close  | Close an added listener|
+| GET        | /server/listeners/`{port}`               | Get details of a chosen listener. |
 | GET        | /server/listeners               | Get a list of listeners. The list of listeners in the output includes the default startup port even though the default port cannot be mutated by other listener APIs. |
 
 #### Listener JSON Schema
@@ -711,9 +773,12 @@ Several configuration APIs (used to configure server features on `goto` instance
 | label    | string | Label to be applied to the listener. This can also be set/changed via REST API later. |
 | hostLabel    | string | Host Label used by this listener in `Goto-Host` response header (read-only)  |
 | port     | int    | Port on which the new listener will listen on. |
-| protocol | string | `http`, `grpc`, or `tcp`|
+| protocol | string | `http`, `https`, `grpc`, `tcp`, or `tls`|
 | open | bool | Controls whether the listener should be opened as soon as it's added. Also reflects listener's current status when queried. |
-| tls | bool | Reports whether the listener has been configured for TLS. This flag is read-only, the value of which is determined based on whether TLS cert and key have been added for the listener using the APIs. |
+| autoCert | bool    | Controls whether TLS cert should be auto-generated for this listener using the `commonName` field |
+| commonName | string | If given, this common name is used to generate self-signed cert for this listener. |
+| mutualTLS| bool  | Controls whether server would require client cert |
+| tls | bool | Reports whether the listener has been configured for TLS (read-only). |
 | tcp | TCPConfig | Supplemental TCP config for a TCP listener. See TCP Config JSON schema under `TCP Server` section. |
 
 #### Listener Events
@@ -724,6 +789,7 @@ Several configuration APIs (used to configure server features on `goto` instance
 - `Listener Cert Added`
 - `Listener Key Added`
 - `Listener Cert Removed`
+- `Listener Cert Generated`
 - `Listener Label Updated`
 - `Listener Opened`
 - `Listener Reopened`
@@ -803,30 +869,30 @@ The modes are described in detail below:
 
 |METHOD|URI|Description|
 |---|---|---|
-| POST, PUT  | /server/tcp/{port}/configure   | Reconfigure details of a TCP listener without having to close and restart. Accepts TCP Config JSON as payload. |
-| POST, PUT  | /server/tcp/{port}<br/>/timeout/set<br/>/read={duration}  | Set TCP read timeout for the port (applies to TCP echo mode) |
-| POST, PUT  | /server/tcp/{port}<br/>/timeout/set<br/>/write={duration}  | Set TCP write timeout for the port (applies to TCP echo mode) |
-| POST, PUT  | /server/tcp/{port}<br/>/timeout/set<br/>/idle={duration}  | Set TCP connection idle timeout for the port (applies to TCP echo mode) |
-| POST, PUT  | /server/tcp/{port}<br/>/connection/set<br/>/life={duration}  | Set TCP connection lifetime duration for the port (applies to all TCP connection modes except streaming) |
-| POST, PUT  | /server/tcp/{port}/echo<br/>/response/set<br/>/delay={duration}  | Set response delay for TCP echo mode for the listener |
-| POST, PUT  | /server/tcp/{port}/stream<br/>/payload={payloadSize}<br/>/duration={duration}<br/>/delay={delay}  | Set TCP connection to stream data as soon as a client connects, with the given total payload size delivered over the given duration with the given delay per chunk |
-| POST, PUT  | /server/tcp/{port}/stream<br/>/chunksize={chunkSize}<br/>/duration={duration}<br/>/delay={delay}  | Set TCP connection to stream data as soon as a client connects, with chunks of the given chunk size delivered over the given duration with the given delay per chunk |
-| POST, PUT  | /server/tcp/{port}/stream<br/>/chunksize={chunkSize}<br/>/count={chunkCount}<br/>/delay={delay}  | Set TCP connection to stream data as soon as a client connects, with total chunks matching the given chunk count of the given chunk size delivered with the given delay per chunk |
-| POST, PUT  | /server/tcp/{port}<br/>/expect/payload<br/>/length={length}  | Set expected payload length for payload verification mode (to only validate payload length, not content) |
-| POST, PUT  | /server/tcp/{port}<br/>/expect/payload  | Set expected payload for payload verification mode, to validate both payload length and content. Expected payload must be sent as request body. |
-| POST, PUT  | /server/tcp/{port}<br/>/mode/validate=`[y/n]` | Enable/disable payload validation mode on a port to support payload length/content validation over connection lifetime (see overview for details) |
-| POST, PUT  | /server/tcp/{port}<br/>/mode/stream=`[y/n]`  | Enable or disable streaming on a port without having to restart the listener (useful to disable streaming while retaining the stream configuration) |
-| POST, PUT  | /server/tcp/{port}<br/>/mode/echo=`[y/n]` | Enable/disable echo mode on a port to let the port be tested in silent mode (see overview for details) |
-| POST, PUT  | /server/tcp/{port}<br/>/mode/conversation=`[y/n]}` | Enable/disable conversation mode on a port to support multiple packets verification (see overview for details) |
-| POST, PUT  | /server/tcp/{port}<br/>/mode/silentlife=`[y/n]` | Enable/disable silent life mode on a port (see overview for details) |
-| POST, PUT  | /server/tcp/{port}<br/>/mode/closeatfirst=`[y/n]` | Enable/disable `close at first byte` mode on a port (see overview for details) |
-| GET  | /server/tcp/{port}/active | Get a list of active client connections for a TCP listener port |
+| POST, PUT  | /server/tcp/`{port}`/configure   | Reconfigure details of a TCP listener without having to close and restart. Accepts TCP Config JSON as payload. |
+| POST, PUT  | /server/tcp/`{port}`<br/>/timeout/set<br/>/read={duration}  | Set TCP read timeout for the port (applies to TCP echo mode) |
+| POST, PUT  | /server/tcp/`{port}`<br/>/timeout/set<br/>/write={duration}  | Set TCP write timeout for the port (applies to TCP echo mode) |
+| POST, PUT  | /server/tcp/`{port}`<br/>/timeout/set<br/>/idle={duration}  | Set TCP connection idle timeout for the port (applies to TCP echo mode) |
+| POST, PUT  | /server/tcp/`{port}`<br/>/connection/set<br/>/life={duration}  | Set TCP connection lifetime duration for the port (applies to all TCP connection modes except streaming) |
+| POST, PUT  | /server/tcp/`{port}`/echo<br/>/response/set<br/>/delay={duration}  | Set response delay for TCP echo mode for the listener |
+| POST, PUT  | /server/tcp/`{port}`/stream<br/>/payload={payloadSize}<br/>/duration={duration}<br/>/delay={delay}  | Set TCP connection to stream data as soon as a client connects, with the given total payload size delivered over the given duration with the given delay per chunk |
+| POST, PUT  | /server/tcp/`{port}`/stream<br/>/chunksize={chunkSize}<br/>/duration={duration}<br/>/delay={delay}  | Set TCP connection to stream data as soon as a client connects, with chunks of the given chunk size delivered over the given duration with the given delay per chunk |
+| POST, PUT  | /server/tcp/`{port}`/stream<br/>/chunksize={chunkSize}<br/>/count={chunkCount}<br/>/delay={delay}  | Set TCP connection to stream data as soon as a client connects, with total chunks matching the given chunk count of the given chunk size delivered with the given delay per chunk |
+| POST, PUT  | /server/tcp/`{port}`<br/>/expect/payload<br/>/length={length}  | Set expected payload length for payload verification mode (to only validate payload length, not content) |
+| POST, PUT  | /server/tcp/`{port}`<br/>/expect/payload  | Set expected payload for payload verification mode, to validate both payload length and content. Expected payload must be sent as request body. |
+| POST, PUT  | /server/tcp/`{port}`<br/>/mode/validate=`[y/n]` | Enable/disable payload validation mode on a port to support payload length/content validation over connection lifetime (see overview for details) |
+| POST, PUT  | /server/tcp/`{port}`<br/>/mode/stream=`[y/n]`  | Enable or disable streaming on a port without having to restart the listener (useful to disable streaming while retaining the stream configuration) |
+| POST, PUT  | /server/tcp/`{port}`<br/>/mode/echo=`[y/n]` | Enable/disable echo mode on a port to let the port be tested in silent mode (see overview for details) |
+| POST, PUT  | /server/tcp/`{port}`<br/>/mode/conversation=`[y/n]}` | Enable/disable conversation mode on a port to support multiple packets verification (see overview for details) |
+| POST, PUT  | /server/tcp/`{port}`<br/>/mode/silentlife=`[y/n]` | Enable/disable silent life mode on a port (see overview for details) |
+| POST, PUT  | /server/tcp/`{port}`<br/>/mode/closeatfirst=`[y/n]` | Enable/disable `close at first byte` mode on a port (see overview for details) |
+| GET  | /server/tcp/`{port}`/active | Get a list of active client connections for a TCP listener port |
 | GET  | /server/tcp/active | Get a list of active client connections for all TCP listener ports |
-| GET  | /server/tcp/{port}<br/>/history/{mode} | Get history list of client connections for a TCP listener port for the given mode (one of the supported modes given as text: `SilentLife`, `CloseAtFirstByte`, `Echo`, `Stream`, `Conversation`, `PayloadValidation`) |
-| GET  | /server/tcp/{port}/history | Get history list of client connections for a TCP listener port |
+| GET  | /server/tcp/`{port}`<br/>/history/{mode} | Get history list of client connections for a TCP listener port for the given mode (one of the supported modes given as text: `SilentLife`, `CloseAtFirstByte`, `Echo`, `Stream`, `Conversation`, `PayloadValidation`) |
+| GET  | /server/tcp/`{port}`/history | Get history list of client connections for a TCP listener port |
 | GET  | /server/tcp/history/{mode} | Get history list of client connections for all TCP listener ports for the given mode (see above) |
 | GET  | /server/tcp/history | Get history list of client connections for all TCP listener ports |
-| POST  | /server/tcp/{port}<br/>/history/clear | Clear history of client connections for a TCP listener port |
+| POST  | /server/tcp/`{port}`<br/>/history/clear | Clear history of client connections for a TCP listener port |
 | POST  | /server/tcp/history/clear | Clear history of client connections for all TCP listener ports |
 
 
@@ -1835,10 +1901,10 @@ The URI `/status/`{status}`` allows client to ask for a specific status as respo
 |METHOD|URI|Description|
 |---|---|---|
 | GET |	/status/`{status}` or /status=`{status}` | This call either receives the given status, or the forced response status if one is set. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used. |
-| GET  |	/status=`{status:count}`/flipflop | This call responds with the given status for the given count times when called successively with the same count value. Once the status is served `count` times, the next status served is `200`, and subsequent calls start the cycle again. If a call to this API arrives with a different `count` value than previous call, the cycle restarts using the new count value. |
+| GET  |	/status=`{status:count}`/flipflop?x-request-id=`{requestId}` | This call responds with the given status for the given count times when called successively with the same count value. Once the status is served `count` times, the next status served is `200`, and subsequent calls start the cycle again. Optional query param `x-request-id` can be used to perform status flip for each unique request, preventing requests from affecting one another. |
 | GET  |	/status=`{status}`<br/>/delay=`{delay}` | In addition to requesting a status as above, this API also allows a delay to be applied. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
-| GET  |	/status/flipflop | Reports the current flopflop counter value, i.e. number of times current last request flipflop status has been served. |
-| POST |	/status/flipflop/clear | Clears the current flopflop counter value so the next call can start with a fresh cycle. |
+| GET  |	/status/flipflop | Reports the current flipflop counter value, i.e. number of times current last request flipflop status has been served. |
+| POST |	/status/flipflop/clear | Clears the current flipflop counter value so the next call can start with a fresh cycle. |
 
 #### Status API Example
 ```
@@ -1878,7 +1944,8 @@ This URI echoes back the headers and payload sent by client. The response is als
 #### API
 |METHOD|URI|Description|
 |---|---|---|
-| ALL       |	/echo         | Responds by echoing request headers as response headers, and request body as response body |
+| ALL       |	/echo         | Responds by echoing request headers and some additional request details |
+| ALL       |	/echo/body    | Echoes request body |
 | ALL       |	/echo/headers | Responds by echoing request headers in response payload |
 | PUT, POST |	/echo/stream  | For http/2 requests, this API streams the request body back as response body. For http/1, it acts similar to `/echo` API. |
 | PUT, POST |	/echo/ws      | Stream the request payload back over a websocket. |
@@ -1906,9 +1973,32 @@ Any request that doesn't match any of the defined management APIs, and also does
 # <a name="tunnel"></a>
 # Tunnel
 
-`Tunnel` feature allows a `goto` instance to act as a tunnel, receiving HTTP/S requests from clients and forwarding those to any arbitrary HTTP/S endpoint. This feature can be useful when a client wishes to reach an endpoint by IP address, but the endpoint is not accessible from the client's network space (e.g. K8S overlay network). In such cases, a single `goto` instance deployed inside the overlay network (e.g. K8S cluster) but accessible to the client network space via an FQDN can receive requests from clients and transparently forward those to any overlay IP address that's visible to the `goto` instance.
+`Tunnel` feature allows a `goto` instance to act as a proxy tunnel, receiving HTTP/S requests from clients and forwarding those to any arbitrary HTTP/S endpoint. This feature can be useful in several scenarios: e.g. 
+- A client wishes to reach an endpoint by IP address, but the endpoint is not accessible from the client's network space (e.g. K8S overlay network). In this case, a single `goto` instance deployed inside the overlay network (e.g. K8S cluster) but accessible to the client network space via an FQDN can receive requests from clients and transparently forward those to any overlay IP address that's visible to the `goto` instance.
+- Route traffic from a client to a service through `goto` proxy in order to inspect traffic and capture details in both directions.
+- Observe network behavior (latencies, packet drops, etc) between two endpoints
 
-In order to tunnel an HTTP request, use format `http://goto/tunnel={address:port}/some/uri`. The goto instance will in turn make a call to `{address:port}` with URI `/some/uri` using the same HTTP parameters that the client used (Method, Headers, Body, TLS). 
+All traffic on a port can be tunneled by configuring a tunnel using APIs. Alternately, a request can be tunneled on the fly using tunnel URI prefix format.
+
+#### On-the-fly Tunneling
+Any request can be tunneled using format `http://goto/tunnel={address:port}/some/uri`. The goto instance will in turn make a call to `{address:port}` with URI `/some/uri` using the same HTTP parameters that the client used (Method, Headers, Body, TLS). 
+
+#### Configured Tunnels
+Any listener can be converted into a tunnel by calling `/tunnels/add/{protocol:endpoint}` API to add one or more endpoints as tunnel destinations. When a tunnel has more than one endpoint, the requests are forwarded to all the endpoints 
+
+#### API
+
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
+|METHOD|URI|Description|
+|---|---|---|
+| ALL       |	/`tunnel={protocol:endpoint}`/`...` | URI prefix format to tunnel any request on the fly. |
+| POST, PUT |	/tunnels/add/`{protocol:endpoint}` | Adds a tunnel on the listener port on which the API is called, forwarding traffic to the given `endpoint`, optionally remapping protocol between HTTP-HTTPS. To configure tunnel on a port using another port's listener, use `port={port}` prefix format. |
+| POST, PUT |	/tunnels/add/`{protocol:endpoint}`/transparent | Add a transparent tunnel that doesn't send any goto request headers to upstream endpoint. Still sends goto response headers to downstream client. |
+| POST, PUT |	/tunnels/remove/`{endpoint}` | Remove a configured endpoint tunnel on the listener port on which the API is called. |
+| POST, PUT |	/tunnels/clear | Clear tunnel on the listener port on which the API is called. |
+| GET |	/tunnels | Get currently configured tunnels. |
+
 
 When the tunnel prefix is of the form `address:port`, the protocol used by the client request is applied. If tunnel prefix is specified as `protocol:address:port`, the given protocol is used, thus allowing client to make HTTP call to goto but have goto make HTTPS call to the endpoint, and vice versa.
 
@@ -2313,22 +2403,22 @@ These APIs allow reading of combined client invocation results collected from al
 |---|---|---|
 | POST, PUT | /registry/peers<br/>/client/results<br/>/all/`{enable}`  | Controls whether results should be summarized across all targets. Disabling this when not needed can improve performance. Disabled by default. |
 | POST, PUT | /registry/peers<br/>/client/results<br/>/invocations/`{enable}`  | Controls whether results should be captured for individual invocations. Disabling this when not needed can reduce memory usage. Disabled by default. |
-| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/client<br/>/results/details | Get detailed invocation results for the given peer (results of all instances grouped together) from the given labeled locker.  |
-| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/instances<br/>/client/results | Get detailed invocation results for the given peer's instances (reported per instance) from the given labeled locker.  |
-| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/client<br/>/results/summary | Get invocation summary results for the given peer from the given labeled locker.  |
-| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/client<br/>/results | Get invocation summary results for the given peer from the given labeled locker.  |
-| GET       | /registry/lockers/`{label}`<br/>/peers/client/results/details | Get detailed invocation results for all peers (results of all instances grouped together) from the given labeled locker.  |
-| GET       | /registry/lockers/`{label}`<br/>/peers/instances<br/>/client/results | Get detailed invocation results for all peer instances (reported per instance) from the given labeled locker.  |
-| GET       | /registry/lockers/`{label}`<br/>/peers/client/results/summary | Get invocation summary results for all peers from the given labeled locker.  |
-| GET       | /registry/lockers/`{label}`<br/>/peers/client/results | Get invocation summary results for all peers from the given labeled locker.  |
-| GET       | /registry/peers/`{peer}`<br/>/client/results/details | Get detailed invocation results for the given peer (results of all instances grouped together) from the current locker.  |
-| GET       | /registry/peers/`{peer}`<br/>/instances/client/results | Get detailed invocation results for the given peer's instances (reported per instance) from the current locker.  |
-| GET       | /registry/peers/`{peer}`<br/>/client/results/summary | Get invocation summary results for the given peer from the current locker.  |
-| GET       | /registry/peers/`{peer}`<br/>/client/results | Get invocation summary results for the given peer from the current locker.  |
-| GET       | /registry/peers/client<br/>/results/details | Get detailed invocation results for all peers (results of all instances grouped together) from the current locker.  |
-| GET       | /registry/peers<br/>/instances/client/results | Get detailed invocation results for all peer instances (reported per instance) from the current locker.  |
-| GET       | /registry/peers/client<br/>/results/summary | Get invocation summary results for all peers from the current locker.  |
-| GET       | /registry/peers<br/>/client/results | Get invocation summary results for all peers from the current locker.  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/client<br/>`[/targets={targets}]` | Get detailed invocation results for the given peer (results of all instances grouped together) from the given labeled locker, optionally filtered for the given targets (comma-separated list).  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/instances<br/>/client/results<br/>`[/targets={targets}]` | Get detailed invocation results for the given peer's instances (reported per instance) from the given labeled locker, optionally filtered for the given targets (comma-separated list).  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/client<br/>/results/summary<br/>`[/targets={targets}]` | Get invocation summary results for the given peer from the given labeled locker, optionally filtered for the given targets (comma-separated list).  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`<br/>/client/results<br/>`[/targets={targets}]` | Get invocation summary results for the given peer from the given labeled locker, optionally filtered for the given targets (comma-separated list).  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/client<br/>/results/details<br/>`[/targets={targets}]` | Get detailed invocation results for all peers (results of all instances grouped together) from the given labeled locker, optionally filtered for the given targets (comma-separated list).  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/instances<br/>/client/results<br/>`[/targets={targets}]` | Get detailed invocation results for all peer instances (reported per instance) from the given labeled locker, optionally filtered for the given targets (comma-separated list).  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/client<br/>/results/summary<br/>`[/targets={targets}]` | Get invocation summary results for all peers from the given labeled locker, optionally filtered for the given targets (comma-separated list).  |
+| GET       | /registry/lockers/`{label}`<br/>/peers/client/results<br/>`[/targets={targets}]` | Get invocation summary results for all peers from the given labeled locker, optionally filtered for the given targets (comma-separated list).  |
+| GET       | /registry/peers/`{peer}`<br/>/client/results/details<br/>`[/targets={targets}]` | Get detailed invocation results for the given peer (results of all instances grouped together) from the current locker, optionally filtered for the given targets (comma-separated list).  |
+| GET       | /registry/peers/`{peer}`<br/>/instances/client/results<br/>`[/targets={targets}]` | Get detailed invocation results for the given peer's instances (reported per instance) from the current locker, optionally filtered for the given targets (comma-separated list).  |
+| GET       | /registry/peers/`{peer}`<br/>/client/results/summary<br/>`[/targets={targets}]` | Get invocation summary results for the given peer from the current locker, optionally filtered for the given targets (comma-separated list).  |
+| GET       | /registry/peers/`{peer}`<br/>/client/results<br/>`[/targets={targets}]` | Get invocation summary results for the given peer from the current locker, optionally filtered for the given targets (comma-separated list).  |
+| GET       | /registry/peers/client<br/>/results/details<br/>`[/targets={targets}]` | Get detailed invocation results for all peers (results of all instances grouped together) from the current locker, optionally filtered for the given targets (comma-separated list).  |
+| GET       | /registry/peers<br/>/instances/client/results<br/>`[/targets={targets}]` | Get detailed invocation results for all peer instances (reported per instance) from the current locker, optionally filtered for the given targets (comma-separated list).  |
+| GET       | /registry/peers/client<br/>/results/summary<br/>`[/targets={targets}]` | Get invocation summary results for all peers from the current locker, optionally filtered for the given targets (comma-separated list).  |
+| GET       | /registry/peers<br/>/client/results<br/>`[/targets={targets}]` | Get invocation summary results for all peers from the current locker, optionally filtered for the given targets (comma-separated list).  |
 
 # <a name="peers-jobs-management-apis"></a>
 #### Peers Jobs Management APIs

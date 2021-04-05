@@ -400,13 +400,15 @@ func (jm *JobManager) invokeHttpTarget(job *Job, jobRun *JobRunContext, iteratio
   outputTrigger := job.OutputTrigger
   maxResults := job.MaxResults
   job.lock.RUnlock()
+  tracker := invocation.RegisterInvocation(target)
   jobRun.lock.RLock()
   stopChannel := jobRun.stopChannel
   doneChannel := jobRun.doneChannel
   jobRun.lock.RUnlock()
-
+  tracker.Channels.Lock.RLock()
+  resultChannel := tracker.Channels.ResultChannel
+  tracker.Channels.Lock.RUnlock()
   resultCount := 0
-  tracker := invocation.RegisterInvocation(target)
 
   go func() {
     invocation.StartInvocation(tracker)
@@ -414,7 +416,7 @@ func (jm *JobManager) invokeHttpTarget(job *Job, jobRun *JobRunContext, iteratio
   }()
 
   sendStopSignal := func() {
-    tracker.StopChannel <- true
+    tracker.Stop()
     jobRun.lock.Lock()
     jobRun.stopped = true
     jobRun.lock.Unlock()
@@ -445,7 +447,7 @@ Done:
       break Done
     case <-doneChannel:
       break Done
-    case result := <-tracker.ResultChannel:
+    case result := <-resultChannel:
       if !storeResult(result) {
         sendStopSignal()
       }
@@ -454,7 +456,7 @@ Done:
   jobRun.lock.Lock()
   jobRun.finished = true
   jobRun.lock.Unlock()
-  for result := range tracker.ResultChannel {
+  for result := range resultChannel {
     if !storeResult(result) {
       break
     }

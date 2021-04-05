@@ -85,7 +85,7 @@ type ConnectionHistory struct {
 
 type TCPConnectionHandler struct {
   TCPConfig
-  conn            *net.TCPConn
+  conn            net.Conn
   closed          bool
   requestID       int
   status          *ConnectionStatus
@@ -158,7 +158,7 @@ func getTCPConfig(port int) *TCPConfig {
   return tcpListeners[port]
 }
 
-func ServeClientConnection(port, requestID int, conn *net.TCPConn) bool {
+func ServeClientConnection(port, requestID int, conn net.Conn) bool {
   metrics.UpdateConnCount("tcp")
   tcpConfig := getTCPConfig(port)
   if tcpConfig == nil {

@@ -9,7 +9,7 @@
 | burls        | []string       || Secondary URLs to use for `fallback` or `AB Mode` (see below)   |
 | headers      | [][]string     || Headers to be sent to this target |
 | body         | string         || Request body to use for this target|
-| autoPayload  | string         || Auto-generate payload of this size when making calls to this target. This field supports numeric sizes (e.g. `1000`) as well as byte size suffixes `K`, `KB`, `M` and `MB` (e.g. `1K`). If auto payload is specified, `body` field is ignored. |
+| autoPayload  | string         || Auto-generate request payload of the given size, specified as a numeric value (e.g. `1000`) or a byte size using suffixes `K`, `KB`, `M` and `MB` (e.g. `1K`). Use of auto payload causes `body` field to be ignored. For response payload, use `/echo/body` API as target if the destination is also a `goto` server, or see response payload feature.  |
 | replicas     | int            |1| Number of parallel invocations to be done for this target. |
 | requestCount | int            |1| Number of requests to be made per replicas for this target. The final request count becomes replicas * requestCount   |
 | initialDelay | duration       || Minimum delay to wait before starting traffic to a target. Actual delay will be the max of all the targets being invoked in a given round of invocation. |

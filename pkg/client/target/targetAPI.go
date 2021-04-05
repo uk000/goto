@@ -22,8 +22,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(targetsRouter, "/active", getActiveTargets, "GET")
   util.AddRoute(targetsRouter, "/cacert/add", addCACert, "PUT", "POST")
   util.AddRoute(targetsRouter, "/cacert/remove", removeCACert, "PUT", "POST")
-  util.AddRoute(targetsRouter, "/{target}", getTargets, "GET")
-  util.AddRoute(targetsRouter, "", getTargets, "GET")
+  util.AddRoute(targetsRouter, "/{target}?", getTargets, "GET")
 
   util.AddRoute(r, "/track/headers/clear", clearTrackingHeaders, "POST")
   util.AddRoute(r, "/track/headers/{headers}", addTrackingHeaders, "POST", "PUT")

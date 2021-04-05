@@ -4,6 +4,7 @@ import (
   "fmt"
   "net/http"
 
+  . "goto/pkg/constants"
   "goto/pkg/events"
   "goto/pkg/metrics"
   "goto/pkg/server/listeners"
@@ -46,8 +47,6 @@ func getLabel(w http.ResponseWriter, r *http.Request) {
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     l := listeners.GetCurrentListener(r)
-    hostLabel := util.GetHostLabel()
-    util.AddLogMessage(fmt.Sprintf("[%s]", l.Label), r)
     protocol := "HTTP"
     if l.TLS {
       if r.ProtoMajor == 2 {
@@ -58,12 +57,8 @@ func Middleware(next http.Handler) http.Handler {
     } else if r.ProtoMajor == 2 {
       protocol = "H2C"
     }
-    w.Header().Add("Via-Goto", l.Label)
     if !util.IsTunnelRequest(r) {
-      port := util.GetListenerPort(r)
-      w.Header().Add("Goto-Host", hostLabel)
-      w.Header().Add("Goto-Port", port)
-      w.Header().Add("Goto-Protocol", protocol)
+      w.Header().Add(HeaderGotoProtocol, protocol)
       if !util.IsAdminRequest(r) {
         metrics.UpdateProtocolRequestCount(protocol, r.RequestURI)
       }

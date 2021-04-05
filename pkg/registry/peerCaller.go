@@ -15,7 +15,7 @@ type OnPodDone func(string, *Pod, interface{}, error)
 type OnPeerDone func(string)
 
 func invokePeerAPI(pod *Pod, method, uri string, headers http.Header, payload []byte, expectedStatus int) (bool, interface{}, error) {
-  if req, err := util.CreateRequest(method, pod.URL+uri, headers, payload); err == nil {
+  if req, err := util.CreateRequest(method, pod.URL+uri, headers, payload, nil); err == nil {
     if resp, err := pod.client.Do(req); err == nil {
       var data interface{}
       defer resp.Body.Close()

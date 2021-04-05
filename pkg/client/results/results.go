@@ -60,7 +60,7 @@ type TargetResults struct {
   crossHeadersMap              map[string]string
   trackingTimeBuckets          [][]int
   pendingRegistrySend          bool
-  lock                         sync.RWMutex
+  lock                         *sync.RWMutex
 }
 
 type SummaryCounts struct {
@@ -71,7 +71,7 @@ type SummaryCounts struct {
 
 type SummaryResult map[interface{}]*SummaryCounts
 
-type AggregateResults struct {
+type AggregateResultsView struct {
   CountsByStatusCodes          SummaryResult             `json:"countsByStatusCodes,omitempty"`
   CountsByHeaders              map[string]int            `json:"countsByHeaders,omitempty"`
   CountsByHeaderValues         map[string]map[string]int `json:"countsByHeaderValues,omitempty"`
@@ -84,16 +84,16 @@ type AggregateResults struct {
   CountsByTimeBuckets          SummaryResult             `json:"countsByTimeBuckets,omitempty"`
 }
 
-type ClientAggregateResults struct {
-  AggregateResults
+type ClientAggregateResultsView struct {
+  AggregateResultsView
   InvocationCount int       `json:"invocationCount,omitempty"`
   FirstResultAt   time.Time `json:"firstResultAt,omitempty"`
   LastResultAt    time.Time `json:"lastResultAt,omitempty"`
 }
 
-type ClientTargetsAggregateResults struct {
-  AggregateResults
-  ResultsByTargets map[string]*ClientAggregateResults `json:"byTargets,omitempty"`
+type ClientTargetsAggregateResultsView struct {
+  AggregateResultsView
+  ResultsByTargets map[string]*ClientAggregateResultsView `json:"byTargets,omitempty"`
 }
 
 type TargetsResults struct {
@@ -102,12 +102,13 @@ type TargetsResults struct {
 }
 
 type InvocationResults struct {
-  InvocationIndex uint32                         `json:"invocationIndex"`
-  Target          *invocation.InvocationSpec     `json:"target"`
-  Status          *invocation.InvocationStatus   `json:"status"`
-  Results         []*invocation.InvocationResult `json:"results"`
-  Finished        bool                           `json:"finished"`
-  lock            sync.RWMutex
+  InvocationIndex     uint32                         `json:"invocationIndex"`
+  Target              *invocation.InvocationSpec     `json:"target"`
+  Status              *invocation.InvocationStatus   `json:"status"`
+  Results             []*invocation.InvocationResult `json:"results"`
+  Finished            bool                           `json:"finished"`
+  pendingRegistrySend bool
+  lock                *sync.RWMutex
 }
 
 type InvocationsResults struct {
@@ -127,7 +128,7 @@ var (
   chanSendTargetsToRegistry    = make(chan *TargetResults, 200)
   chanSendInvocationToRegistry = make(chan *InvocationResults, 200)
   stopRegistrySender           = make(chan bool, 10)
-  registryClient               = util.CreateHttpClient()
+  registryClient               = util.CreateDefaultHTTPClient("ResultsRegistrySender", true, false, nil)
   sendingToRegistry            bool
   registrySendLock             sync.Mutex
   collectTargetsResults        bool = true
@@ -192,9 +193,7 @@ func (s SummaryResult) MarshalJSON() ([]byte, error) {
   return json.Marshal(data)
 }
 
-func (tr *TargetResults) init(reset bool) {
-  tr.lock.Lock()
-  defer tr.lock.Unlock()
+func (tr *TargetResults) unsafeInit(reset bool) {
   if tr.CountsByStatus == nil || reset {
     tr.InvocationCount = 0
     tr.CountsByStatus = map[string]int{}
@@ -210,12 +209,14 @@ func (tr *TargetResults) init(reset bool) {
   }
 }
 
-func (tr *TargetResults) Init(trackingHeaders []string, crossTrackingHeaders map[string][]string, trackingTimeBuckets [][]int) {
-  tr.init(true)
+func NewTargetResults(target string, trackingHeaders []string, crossTrackingHeaders map[string][]string, trackingTimeBuckets [][]int) *TargetResults {
+  tr := &TargetResults{Target: target}
+  tr.unsafeInit(true)
   tr.trackingHeaders = trackingHeaders
   tr.crossTrackingHeaders = crossTrackingHeaders
   tr.crossHeadersMap = util.BuildCrossHeadersMap(crossTrackingHeaders)
   tr.trackingTimeBuckets = trackingTimeBuckets
+  return tr
 }
 
 func newHeaderCounts(header string) *HeaderCounts {
@@ -423,16 +424,14 @@ func (tr *TargetResults) addTimeBucketResult(tb []int, ir *invocation.Invocation
   }
 }
 
-func (tr *TargetResults) AddResult(ir *invocation.InvocationResult) {
+func (tr *TargetResults) addResult(ir *invocation.InvocationResult) {
   fmt.Printf("AddResult: Target [%s] Request ID [%s] timestamp [%s]\n", tr.Target, ir.RequestID, ir.LastRequestAt)
-  tr.init(false)
   tr.lock.Lock()
   defer tr.lock.Unlock()
+
+  tr.unsafeInit(false)
   tr.InvocationCount++
   finishedAt := ir.LastRequestAt
-  // if finishedAt.IsZero() {
-  //   finishedAt = time.Now()
-  // }
   if tr.FirstResultAt.IsZero() || finishedAt.Before(tr.FirstResultAt) {
     tr.FirstResultAt = finishedAt
   }
@@ -453,10 +452,10 @@ func (tr *TargetResults) AddResult(ir *invocation.InvocationResult) {
   addKeyResultCounts(tr.CountsByURIs, uri, ir.StatusCode, ir.Retries, ir.LastRequestAt, true, true)
 
   for _, h := range tr.trackingHeaders {
-    for rh, values := range ir.Headers {
+    for rh, values := range ir.ResponseHeaders {
       if strings.EqualFold(h, rh) {
         tr.addHeaderResult(h, values, ir.StatusCode, ir.Retries, finishedAt)
-        tr.processCrossHeadersForHeader(h, values, ir.StatusCode, ir.Retries, ir.LastRequestAt, ir.Headers)
+        tr.processCrossHeadersForHeader(h, values, ir.StatusCode, ir.Retries, ir.LastRequestAt, ir.ResponseHeaders)
       }
     }
   }
@@ -491,7 +490,7 @@ func (tr *TargetsResults) init(reset bool) {
   if reset || tr.Results == nil {
     tr.Results = map[string]*TargetResults{}
     tr.Results[""] = &TargetResults{}
-    tr.Results[""].init(true)
+    tr.Results[""].unsafeInit(true)
   }
 }
 
@@ -499,8 +498,8 @@ func (tr *TargetsResults) getTargetResults(target string) (*TargetResults, *Targ
   tr.init(false)
   tr.lock.Lock()
   if tr.Results[target] == nil {
-    tr.Results[target] = &TargetResults{Target: target}
-    tr.Results[target].init(true)
+    tr.Results[target] = &TargetResults{Target: target, lock: &tr.lock}
+    tr.Results[target].unsafeInit(true)
   }
   targetResults := tr.Results[target]
   allResults := tr.Results[""]
@@ -508,9 +507,7 @@ func (tr *TargetsResults) getTargetResults(target string) (*TargetResults, *Targ
   return targetResults, allResults
 }
 
-func (ir *InvocationResults) init(reset bool) {
-  ir.lock.Lock()
-  defer ir.lock.Unlock()
+func (ir *InvocationResults) unsafeInit(reset bool) {
   if reset || ir.Results == nil {
     ir.Finished = false
     ir.InvocationIndex = 0
@@ -519,9 +516,9 @@ func (ir *InvocationResults) init(reset bool) {
 }
 
 func (ir *InvocationResults) addResult(result *invocation.InvocationResult) {
-  ir.init(false)
   ir.lock.Lock()
   defer ir.lock.Unlock()
+  ir.unsafeInit(false)
   ir.Results = append(ir.Results, result)
 }
 
@@ -545,8 +542,8 @@ func (ir *InvocationsResults) getInvocation(index uint32) *InvocationResults {
   invocationResults := ir.Results[index]
   ir.lock.RUnlock()
   if invocationResults == nil {
-    invocationResults = &InvocationResults{}
-    invocationResults.init(true)
+    invocationResults = &InvocationResults{lock: &ir.lock}
+    invocationResults.unsafeInit(true)
     invocationResults.InvocationIndex = index
     ir.lock.Lock()
     ir.Results[index] = invocationResults
@@ -558,17 +555,17 @@ func (ir *InvocationsResults) getInvocation(index uint32) *InvocationResults {
 func resultSink(invocationIndex uint32, result *invocation.InvocationResult,
   invocationResults *InvocationResults, targetResults *TargetResults, allResults *TargetResults) {
   if result != nil {
-    result.Headers = util.ToLowerHeaders(result.Headers)
+    result.ResponseHeaders = util.ToLowerHeaders(result.ResponseHeaders)
     if collectInvocationResults {
       invocationResults.addResult(result)
       chanSendInvocationToRegistry <- invocationResults
     }
     if collectTargetsResults {
-      targetResults.AddResult(result)
+      targetResults.addResult(result)
       chanSendTargetsToRegistry <- targetResults
     }
     if collectAllTargetsResults {
-      allResults.AddResult(result)
+      allResults.addResult(result)
       chanSendTargetsToRegistry <- allResults
     }
   }
@@ -626,7 +623,9 @@ func ResultChannelSinkFactory(target *invocation.InvocationSpec, trackingHeaders
     invocationResults.Target = target
     invocationResults.Status = tracker.Status
     startRegistrySender()
-    go channelSink(tracker.ID, tracker.ResultChannel, tracker.DoneChannel, invocationResults, targetResults, allResults)
+    tracker.Channels.Lock.RLock()
+    go channelSink(tracker.ID, tracker.Channels.ResultChannel, tracker.Channels.DoneChannel, invocationResults, targetResults, allResults)
+    tracker.Channels.Lock.RUnlock()
     return nil
   }
 }
@@ -842,7 +841,7 @@ func incrementKeyResultCounts(result SummaryResult, delta interface{}, detailed 
   }
 }
 
-func (sr *AggregateResults) addTargetResult(tr *TargetResults, detailed bool) {
+func (sr *AggregateResultsView) addTargetResult(tr *TargetResults, detailed bool) {
   if tr.CountsByHeaders != nil {
     for h, counts := range tr.CountsByHeaders {
       sr.CountsByHeaders[h] += counts.Count
@@ -880,44 +879,46 @@ func (sr *AggregateResults) addTargetResult(tr *TargetResults, detailed bool) {
   }
 }
 
-func (tsr *ClientAggregateResults) addTargetResult(tr *TargetResults, detailed bool) {
-  tsr.InvocationCount += tr.InvocationCount
-  if tsr.FirstResultAt.IsZero() || tr.FirstResultAt.Before(tsr.FirstResultAt) {
-    tsr.FirstResultAt = tr.FirstResultAt
+func (car *ClientAggregateResultsView) addTargetResult(tr *TargetResults, detailed bool) {
+  car.InvocationCount += tr.InvocationCount
+  if car.FirstResultAt.IsZero() || tr.FirstResultAt.Before(car.FirstResultAt) {
+    car.FirstResultAt = tr.FirstResultAt
   }
-  if tsr.LastResultAt.IsZero() || tsr.LastResultAt.Before(tr.LastResultAt) {
-    tsr.LastResultAt = tr.LastResultAt
+  if car.LastResultAt.IsZero() || car.LastResultAt.Before(tr.LastResultAt) {
+    car.LastResultAt = tr.LastResultAt
   }
-  tsr.AggregateResults.addTargetResult(tr, detailed)
+  car.AggregateResultsView.addTargetResult(tr, detailed)
 }
 
-func (tsr *ClientTargetsAggregateResults) AddTargetResult(tr *TargetResults, detailed bool) {
+func (ctar *ClientTargetsAggregateResultsView) AddTargetResult(tr *TargetResults, detailed bool) {
   fmt.Printf("TargetsSummaryResults.AddTargetResult: Target [%s] first response [%s] last response [%s]\n",
     tr.Target, tr.FirstResultAt.UTC().String(), tr.LastResultAt.UTC().String())
-  tsr.AggregateResults.addTargetResult(tr, detailed)
-  if tsr.ResultsByTargets[tr.Target] == nil {
-    tsr.ResultsByTargets[tr.Target] = &ClientAggregateResults{}
-    tsr.ResultsByTargets[tr.Target].Init()
+  ctar.AggregateResultsView.addTargetResult(tr, detailed)
+  if ctar.ResultsByTargets[tr.Target] == nil {
+    ctar.ResultsByTargets[tr.Target] = &ClientAggregateResultsView{}
+    ctar.ResultsByTargets[tr.Target].init()
   }
-  tsr.ResultsByTargets[tr.Target].addTargetResult(tr, detailed)
+  ctar.ResultsByTargets[tr.Target].addTargetResult(tr, detailed)
 }
 
-func (sr *AggregateResults) Init() {
-  sr.CountsByStatusCodes = SummaryResult{}
-  sr.CountsByHeaders = map[string]int{}
-  sr.CountsByHeaderValues = map[string]map[string]int{}
-  sr.CountsByURIs = SummaryResult{}
-  sr.CountsByRequestPayloadSizes = SummaryResult{}
-  sr.CountsByResponsePayloadSizes = SummaryResult{}
-  sr.CountsByRetries = SummaryResult{}
-  sr.CountsByRetryReasons = SummaryResult{}
-  sr.CountsByErrors = SummaryResult{}
-  sr.CountsByTimeBuckets = SummaryResult{}
+func (ar *AggregateResultsView) init() {
+  ar.CountsByStatusCodes = SummaryResult{}
+  ar.CountsByHeaders = map[string]int{}
+  ar.CountsByHeaderValues = map[string]map[string]int{}
+  ar.CountsByURIs = SummaryResult{}
+  ar.CountsByRequestPayloadSizes = SummaryResult{}
+  ar.CountsByResponsePayloadSizes = SummaryResult{}
+  ar.CountsByRetries = SummaryResult{}
+  ar.CountsByRetryReasons = SummaryResult{}
+  ar.CountsByErrors = SummaryResult{}
+  ar.CountsByTimeBuckets = SummaryResult{}
 }
 
-func (tsr *ClientTargetsAggregateResults) Init() {
-  tsr.AggregateResults.Init()
-  tsr.ResultsByTargets = map[string]*ClientAggregateResults{}
+func NewClientTargetsAggregateResults() *ClientTargetsAggregateResultsView {
+  ctar := &ClientTargetsAggregateResultsView{}
+  ctar.AggregateResultsView.init()
+  ctar.ResultsByTargets = map[string]*ClientAggregateResultsView{}
+  return ctar
 }
 
 func lockInvocationRegistryLocker(invocationIndex uint32) {
@@ -949,39 +950,51 @@ RegistrySend:
     if len(chanSendInvocationToRegistry) > 50 {
       log.Printf("registrySender[%d]: chanSendInvocationToRegistry length %d\n", id, len(chanSendInvocationToRegistry))
     }
-    hasTargetsResults := false
+    hasResultsToSend := false
     collectedTargetsResults := map[string]*TargetResults{}
+    collectedInvocationResults := map[uint32]*InvocationResults{}
     select {
-    case targetResult := <-chanSendTargetsToRegistry:
-      targetResult.lock.Lock()
-      if !targetResult.pendingRegistrySend {
-        hasTargetsResults = true
-        targetResult.pendingRegistrySend = true
-        collectedTargetsResults[targetResult.Target] = targetResult
+    case tr := <-chanSendTargetsToRegistry:
+      tr.lock.Lock()
+      if !tr.pendingRegistrySend {
+        hasResultsToSend = true
+        tr.pendingRegistrySend = true
+        collectedTargetsResults[tr.Target] = tr
       }
-      targetResult.lock.Unlock()
-    case invocationResults := <-chanSendInvocationToRegistry:
-      invocationResults.lock.RLock()
-      sendResultToRegistry([]string{constants.LockerClientKey, constants.LockerInvocationsKey,
-        fmt.Sprint(invocationResults.InvocationIndex)}, invocationResults)
-      invocationResults.lock.RUnlock()
+      tr.lock.Unlock()
+    case ir := <-chanSendInvocationToRegistry:
+      ir.lock.RLock()
+      if !ir.pendingRegistrySend {
+        hasResultsToSend = true
+        ir.pendingRegistrySend = true
+        collectedInvocationResults[ir.InvocationIndex] = ir
+      }
+      ir.lock.RUnlock()
     case <-stopRegistrySender:
       break RegistrySend
     }
-    if hasTargetsResults {
+    if hasResultsToSend {
       hasMoreResults := false
       for i := 0; i < SendDelayMax; i++ {
       MoreResults:
         for {
           select {
-          case targetResult := <-chanSendTargetsToRegistry:
-            targetResult.lock.Lock()
-            if !targetResult.pendingRegistrySend || collectedTargetsResults[targetResult.Target] != nil {
-              targetResult.pendingRegistrySend = true
-              collectedTargetsResults[targetResult.Target] = targetResult
+          case tr := <-chanSendTargetsToRegistry:
+            tr.lock.Lock()
+            if !tr.pendingRegistrySend || collectedTargetsResults[tr.Target] != nil {
+              tr.pendingRegistrySend = true
+              collectedTargetsResults[tr.Target] = tr
               hasMoreResults = true
             }
-            targetResult.lock.Unlock()
+            tr.lock.Unlock()
+          case ir := <-chanSendInvocationToRegistry:
+            ir.lock.RLock()
+            if !ir.pendingRegistrySend || collectedInvocationResults[ir.InvocationIndex] != nil {
+              ir.pendingRegistrySend = true
+              collectedInvocationResults[ir.InvocationIndex] = ir
+              hasMoreResults = true
+            }
+            ir.lock.RUnlock()
           default:
             break MoreResults
           }
@@ -990,11 +1003,18 @@ RegistrySend:
           time.Sleep(time.Second)
         }
       }
-      for target, targetResult := range collectedTargetsResults {
-        targetResult.lock.Lock()
-        sendResultToRegistry([]string{constants.LockerClientKey, target}, targetResult)
-        targetResult.pendingRegistrySend = false
-        targetResult.lock.Unlock()
+      for target, tr := range collectedTargetsResults {
+        tr.lock.Lock()
+        sendResultToRegistry([]string{constants.LockerClientKey, target}, tr)
+        tr.pendingRegistrySend = false
+        tr.lock.Unlock()
+      }
+      for index, ir := range collectedInvocationResults {
+        ir.lock.Lock()
+        sendResultToRegistry([]string{constants.LockerClientKey, constants.LockerInvocationsKey,
+          fmt.Sprint(index)}, ir)
+        ir.pendingRegistrySend = false
+        ir.lock.Unlock()
       }
     }
   }

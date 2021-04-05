@@ -41,7 +41,7 @@ var (
   eventChannel        = make(chan *Event, 100)
   trafficChannel      = make(chan []interface{}, 100)
   stopSender          = make(chan bool, 10)
-  registryClient      = util.CreateHttpClient()
+  registryClient      = util.CreateDefaultHTTPClient("EventsRegistrySender", true, false, nil)
   lock                sync.RWMutex
 )
 

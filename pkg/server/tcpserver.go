@@ -29,7 +29,7 @@ func serveTCPRequests(listenerID string, port int, listener net.Listener) {
       lock.Lock()
       requestCounter++
       lock.Unlock()
-      go tcp.ServeClientConnection(port, requestCounter, conn.(*net.TCPConn))
+      go tcp.ServeClientConnection(port, requestCounter, conn)
     } else if !util.IsConnectionCloseError(err) {
       log.Println(err)
       continue

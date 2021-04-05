@@ -6,10 +6,8 @@ import (
   "goto/pkg/server/conn"
   "goto/pkg/util"
   "io"
-  "io/ioutil"
   "net"
   "net/http"
-  "strings"
 )
 
 type ResponseInterceptor interface {
@@ -66,10 +64,6 @@ func (fw FlushWriter) Flush() {
   if fw.flusher != nil {
     fw.flusher.Flush()
   }
-}
-
-func SetBodyTracker(r *http.Request, body string) {
-  r.Body = BodyTracker{ioutil.NopCloser(strings.NewReader(body))}
 }
 
 func trackRequestBody(r *http.Request) {

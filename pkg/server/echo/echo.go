@@ -3,11 +3,12 @@ package echo
 import (
   "fmt"
   "io"
-  "io/ioutil"
   "net/http"
 
+  . "goto/pkg/constants"
   "goto/pkg/metrics"
   "goto/pkg/server/intercept"
+  "goto/pkg/server/listeners"
   "goto/pkg/util"
 
   "github.com/gorilla/mux"
@@ -21,14 +22,22 @@ var (
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   echoRouter := r.PathPrefix("/echo").Subrouter()
   util.AddRoute(echoRouter, "/headers", EchoHeaders)
+  util.AddRoute(echoRouter, "/body", echoBody)
   util.AddRoute(echoRouter, "/ws", wsEchoHandler, "GET", "POST", "PUT")
   util.AddRoute(echoRouter, "/stream", echoStream, "POST", "PUT")
   util.AddRoute(echoRouter, "", echo)
 }
 
 func EchoHeaders(w http.ResponseWriter, r *http.Request) {
+  metrics.UpdateRequestCount("echo")
   util.AddLogMessage("Echoing headers", r)
-  fmt.Fprintf(w, "{\"EchoHeaders\": %s}", util.GetRequestHeadersLog(r))
+  util.WriteJsonPayload(w, map[string]interface{}{"RequestHeaders": r.Header})
+}
+
+func echoBody(w http.ResponseWriter, r *http.Request) {
+  metrics.UpdateRequestCount("echo")
+  util.AddLogMessage("Echoing Body", r)
+  io.Copy(w, r.Body)
 }
 
 func echo(w http.ResponseWriter, r *http.Request) {
@@ -43,7 +52,7 @@ func echoStream(w http.ResponseWriter, r *http.Request) {
   var writer io.Writer = w
   if util.IsH2(r) {
     fw := intercept.NewFlushWriter(r, w)
-    util.CopyHeaders("Request", w, r.Header, r.Host, r.RequestURI)
+    util.CopyHeaders("Request", w, r.Header, r.Host, r.RequestURI, false)
     util.SetHeadersSent(r, true)
     fw.Flush()
     writer = fw
@@ -51,6 +60,7 @@ func echoStream(w http.ResponseWriter, r *http.Request) {
   if _, err := io.Copy(writer, r.Body); err != nil {
     fmt.Println(err.Error())
   }
+  w.Header().Add("Stream-Finished", "Echo")
 }
 
 func wsEchoHandler(w http.ResponseWriter, r *http.Request) {
@@ -64,10 +74,30 @@ func wsEchoHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func Echo(w http.ResponseWriter, r *http.Request) {
-  if util.IsPutOrPost(r) {
-    body, _ := ioutil.ReadAll(r.Body)
-    fmt.Fprint(w, string(body))
-  } else {
-    fmt.Fprintf(w, "{\"EchoHeaders\": %s}", util.GetRequestHeadersLog(r))
+  util.WriteJsonPayload(w, GetEchoResponse(w, r))
+}
+
+func GetEchoResponse(w http.ResponseWriter, r *http.Request) map[string]interface{} {
+  l := listeners.GetCurrentListener(r)
+  response := map[string]interface{}{
+    "RemoteAddress":      r.RemoteAddr,
+    "RequestHost":        r.Host,
+    "RequestURI":         r.RequestURI,
+    "RequestMethod":      r.Method,
+    "RequestProtcol":     r.Proto,
+    "RequestHeaders":     r.Header,
+    "RequestQuery":       r.URL.Query(),
+    "RequestBody":        fmt.Sprintf("[%d bytes]", util.DiscardRequestBody(r)),
+    HeaderGotoTargetURL:  r.Header.Get(HeaderGotoTargetURL),
+    HeaderGotoHost:       l.HostLabel,
+    HeaderGotoPort:       l.Port,
+    HeaderViaGoto:        l.Label,
+    HeaderGotoProtocol:   w.Header().Get(HeaderGotoProtocol),
+    HeaderGotoHostTunnel: r.Header.Get(HeaderGotoHostTunnel),
+    HeaderViaGotoTunnel:  r.Header.Get(HeaderViaGotoTunnel),
   }
+  if !util.IsH2C(r) {
+    response["RequestBody"] = fmt.Sprintf("[%d bytes]", util.DiscardRequestBody(r))
+  }
+  return response
 }

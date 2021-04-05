@@ -1,4 +1,4 @@
-package tracking
+package header
 
 import (
   "fmt"
@@ -12,6 +12,10 @@ import (
   "goto/pkg/util"
 
   "github.com/gorilla/mux"
+)
+
+var (
+  Handler util.ServerHandler = util.ServerHandler{"header", SetRoutes, Middleware}
 )
 
 type HeaderData struct {
@@ -36,7 +40,7 @@ var (
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  headerTrackingRouter := util.PathRouter(r, "/track")
+  headerTrackingRouter := util.PathRouter(r, "/headers/track")
   util.AddRouteWithPort(headerTrackingRouter, "/clear", clearHeaders, "POST")
   util.AddRouteWithPort(headerTrackingRouter, "/add/{headers}", addHeaders, "PUT", "POST")
   util.AddRouteWithPort(headerTrackingRouter, "/{header}/remove", removeHeader, "PUT", "POST")
