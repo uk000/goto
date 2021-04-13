@@ -68,7 +68,16 @@ type RequestStore struct {
   IsPayloadRequest       bool
   IsTrafficEventReported bool
   StatusCode             int
+  ServerName             string
+  TLSVersion             string
   TrafficDetails         []string
+}
+
+func GetRequestStore(r *http.Request) *RequestStore {
+  if val := r.Context().Value(RequestStoreKey); val != nil {
+    return val.(*RequestStore)
+  }
+  return nil
 }
 
 func InitListenerRouter(root *mux.Router) {
@@ -126,15 +135,63 @@ func GetPortNumFromGRPCAuthority(ctx context.Context) int {
   return global.ServerPort
 }
 
+func GetPortFromAddress(addr string) int {
+  if pieces := strings.Split(addr, ":"); len(pieces) > 1 {
+    if port, err := strconv.Atoi(pieces[len(pieces)-1]); err == nil {
+      return port
+    }
+  }
+  return 0
+}
+
+func GetPortValueFromLocalAddressContext(ctx context.Context) string {
+  if val := ctx.Value(http.LocalAddrContextKey); val != nil {
+    srvAddr := ctx.Value(http.LocalAddrContextKey).(net.Addr)
+    if pieces := strings.Split(srvAddr.String(), ":"); len(pieces) > 1 {
+      return pieces[len(pieces)-1]
+    }
+  }
+  return ""
+}
+
 func GetContextPort(ctx context.Context) int {
   if val := ctx.Value(CurrentPortKey); val != nil {
     return val.(int)
+  }
+  if val := GetPortValueFromLocalAddressContext(ctx); val != "" {
+    if port, err := strconv.Atoi(val); err == nil {
+      return port
+    }
   }
   return GetPortNumFromGRPCAuthority(ctx)
 }
 
 func GetCurrentPort(r *http.Request) int {
   return GetContextPort(r.Context())
+}
+
+func GetListenerPort(r *http.Request) string {
+  return GetPortValueFromLocalAddressContext(r.Context())
+}
+
+func GetListenerPortNum(r *http.Request) int {
+  return GetContextPort(r.Context())
+}
+
+func GetRequestOrListenerPort(r *http.Request) string {
+  port, ok := GetStringParam(r, "port")
+  if !ok {
+    port = GetListenerPort(r)
+  }
+  return port
+}
+
+func GetRequestOrListenerPortNum(r *http.Request) int {
+  port, ok := GetIntParam(r, "port")
+  if !ok {
+    port = GetListenerPortNum(r)
+  }
+  return port
 }
 
 func GetCurrentListenerLabel(r *http.Request) string {
@@ -634,36 +691,6 @@ func AddMiddlewares(next http.Handler, handlers ...ServerHandler) http.Handler {
     }
   }
   return handler
-}
-
-func GetListenerPort(r *http.Request) string {
-  ctx := r.Context()
-  srvAddr := ctx.Value(http.LocalAddrContextKey).(net.Addr)
-  pieces := strings.Split(srvAddr.String(), ":")
-  return pieces[len(pieces)-1]
-}
-
-func GetListenerPortNum(r *http.Request) int {
-  if port, err := strconv.Atoi(GetListenerPort(r)); err == nil {
-    return port
-  }
-  return 0
-}
-
-func GetRequestOrListenerPort(r *http.Request) string {
-  port, ok := GetStringParam(r, "port")
-  if !ok {
-    port = GetListenerPort(r)
-  }
-  return port
-}
-
-func GetRequestOrListenerPortNum(r *http.Request) int {
-  port, ok := GetIntParam(r, "port")
-  if !ok {
-    port = GetListenerPortNum(r)
-  }
-  return port
 }
 
 func ToJSON(o interface{}) string {
