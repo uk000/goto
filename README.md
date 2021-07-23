@@ -1015,6 +1015,7 @@ The modes are described in detail below:
 - By default, a TCP listener executes in one of the two `silent` mode. 
    a) If the listener is configured with a `connectionLife` that limits its lifetime, the listener operates in `SilentLife` mode where it waits for the configured lifetime and closes the client connection. In this mode, the listener receives and counts the bytes received, but never responds. 
    b) If the listener's `connectionLife` is set to zero, the listener operates in `CloseAtFirstByte` mode where it waits for the first byte to arrive and then closes the client connection.
+- In `Payload` mode, a TCP listener serves a set of pre-configured response payload(s) with an optional `responseDelay`. If more than one payload is configured in `responsePayloads` array, the `responseDelay` gets applied before sending each item in the array. The `respondAfterRead` field controls whether response should be sent immediately or if a read should be performed before sending the response, in which case at least 1 byte must be received from the client before the response(s) are sent. The `keepOpen` configuration determines whether the connection is kept open after sending the last item in the array. If no `connectionLife` is configured explicitly, the connection life defaults to `30s` in this mode, and the connection is kept open for the remaining lifetime (computed from the start of request). Note that in this mode, server keeps the connection open even if client pre-emptively closes the connection.
  - If `Echo` mode is enabled on a TCP listener, the listener echoes back the bytes received from the client. The `echoResponseSize` configures the echo buffer size, which is the number of bytes that the listener will need to receive from the client before echoing back. If more data is received than the `echoResponseSize`, it'll echo multiple chunks each of `echoResponseSize` size. The config `echoResponseDelay` configures the delay server should apply before sending each echo response packets. In `echo` mode, the connection enforces `readTimeout` and `connIdleTimeout` based on the activity: any new bytes received reset the read/idle timeouts. It applies `writeTimeout` when sending the echo response to the client. If `connectionLife` is set, it controls the overall lifetime of the connection and the connection will close upon reaching the max life regardless of the activity.
  - If `Stream` mode is enabled, the connection starts streaming TCP bytes per the given configuration as soon as a client connects. None of the timeouts or max life applies in streaming mode, and the client connection closes automatically once the streaming completes. The stream behavior is controlled via the following configs: `streamPayloadSize`, `streamChunkSize`, `streamChunkCount`, `streamChunkDelay`, `streamDuration`. Not all of these configs are required, and a combination of some may lead to ambiguity that the server resolves by picking the most sensible combinations of these config params.
  - In `Payload Validation` mode, client should first set the payload expectation by calling either `/listeners/{port}/expect/payload/{length}` or `/listeners/{port}/expect/payload/{length}`, depending on whether server should just validate payload length or the payload content. The server then waits for the duration of the connection lifetime (if not set explicitly for the listener, this feature defaults to `30s` of total connection life), and buffers bytes received from client. If at any point during the connection life the number of received bytes exceed the expected payload length, the server responds with error and closes connection. If at the end of the connection life, the number of bytes match the payload expectations (either length or both length and content), then the server responds with success message. The messages returned by the server are one of the following:
@@ -1049,6 +1050,7 @@ The modes are described in detail below:
 | POST, PUT  | /tcp/{port}/set/conversation=`{enable}` | Enable/disable conversation mode on a port to support multiple packets verification (see overview for details) |
 | POST, PUT  | /tcp/{port}/set/silentlife=`{enable}` | Enable/disable silent life mode on a port (see overview for details) |
 | POST, PUT  | /tcp/{port}/set/closeatfirst=`{enable}` | Enable/disable `close at first byte` mode on a port (see overview for details) |
+| POST, PUT  | /tcp/{port}/set/payload=`{enable}` | Enable/disable `payload` mode on a port, allowing for tcp connection to serve a pre-configured payload and close the connection (see overview for details) |
 | GET  | /tcp/{port}/active | Get a list of active client connections for a TCP listener port |
 | GET  | /tcp/active | Get a list of active client connections for all TCP listener ports |
 | GET  | /tcp/{port}/history/{mode} | Get history list of client connections for a TCP listener port for the given mode (one of the supported modes given as text: `SilentLife`, `CloseAtFirstByte`, `Echo`, `Stream`, `Conversation`, `PayloadValidation`) |
@@ -1068,6 +1070,8 @@ The modes are described in detail below:
 | connectTimeout | duration | Max period that the server will wait during connection handshake. |
 | connIdleTimeout | duration | Max period of inactivity (no bytes traveled) on the connection that would trigger closure of the client connection. |
 | connectionLife | duration | Max lifetime after which the client connection will be terminated proactively by the server. |
+| keepOpen | bool | Controls whether server should keep the connection open after sending the response. Currently this configuration is only used in `Payload` mode where server is configured to send a set of pre-configured payloads. |
+| payload | bool | Controls whether the listener should operate in `Payload` mode. |
 | stream | bool | Controls whether the listener should operate in `Stream` mode. |
 | echo | bool | Controls whether the listener should operate in `Echo` mode. |
 | conversation | bool | Controls whether the listener should operate in `Conversation` mode. |
@@ -1078,6 +1082,9 @@ The modes are described in detail below:
 | expectedPayloadLength | int | Set the expected payload length explicitly for length verification. Also used to auto-store the expected payload content length when validating content. See API for providing expected payload content. |
 | echoResponseSize | int | Configures the size of payload to be echoed back to client. Server will only echo back when it has these many bytes received from the client. |
 | echoResponseDelay | duration | Delay to be applied when sending response back to the client in echo mode. |
+| responsePayloads | []string | A list of payloads to be used in `Payload` mode. When more than payloads are configured, each is sent in succession after applying the `responseDelay`. |
+| responseDelay | duration | Delay to apply before sending each response payload in `Payload` mode. |
+| respondAfterRead | bool | In `Payload` mode, this field controls whether server should start sending payloads immediately or after waiting to receive at least one byte from the client. |
 | streamPayloadSize | int | Configures the total payload size to be stream via chunks if streaming is enabled for the listener. |
 | streamChunkSize | int | Configures the size of each chunk of data to stream if streaming is enabled for the listener. |
 | streamChunkCount | int | Configures the total number of chunks to stream if streaming is enabled for the listener. |
@@ -1104,9 +1111,16 @@ The modes are described in detail below:
 ```
 curl localhost:8080/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true}'
 
+#response payload mode config example
+curl localhost:8080/tcp/9000/configure --data '{"payload": true, "responsePayloads": ["HTTP/1.1 200 OK\r\nServer: goto\r\nContent-Type: text/plain\r\nContent-Length:11\r\nConnection: Keep-Alive\r\nFoo: Bar\r\n\nHello Goto!"], "responseDelay":"2s", "respondAfterRead": true, "keepOpen": true, "connectionLife": "10s"}'
+
+#echo mode config example
 curl localhost:8080/tcp/9000/configure --data '{"readTimeout":"1m","writeTimeout":"1m","connectTimeout":"15s","connIdleTimeout":"1m", "connectionLife":"2m", "echo":true, "echoResponseSize":10, "echoResponseDelay": "1s"}'
 
+#stream mode config example
 curl localhost:8080/tcp/9000/configure --data '{"stream": true, "streamDuration":"5s", "streamChunkDelay":"1s", "streamPayloadSize": "2K", "streamChunkSize":"250", "streamChunkCount":15}'
+
+curl -X PUT localhost:8080/tcp/9000/set/payload=n
 
 curl -X PUT localhost:8080/tcp/9000/set/echo=n
 
