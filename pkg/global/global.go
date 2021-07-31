@@ -36,8 +36,12 @@ var (
   EnablePeerHealthLogs       bool = true
   EnableProbeLogs            bool = false
   EnableMetricsLogs          bool = true
-  LogRequestHeaders          bool = false
+  LogRequestHeaders          bool = true
+  LogRequestMiniBody         bool = false
+  LogRequestBody             bool = false
   LogResponseHeaders         bool = false
+  LogResponseMiniBody        bool = false
+  LogResponseBody            bool = false
   GetPeers                   func(string, *http.Request) map[string]string
   IsReadinessProbe           func(*http.Request) bool
   IsLivenessProbe            func(*http.Request) bool
@@ -48,4 +52,5 @@ var (
   GetListenerLabelForPort    func(int) string
   GetHostLabelForPort        func(int) string
   StoreEventInCurrentLocker  func(interface{})
+  Debug                      bool = false
 )

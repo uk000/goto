@@ -136,7 +136,7 @@ func ContextMiddleware(next http.Handler) http.Handler {
       endTime := time.Now()
       w.Header().Add("Goto-Out-At", endTime.UTC().String())
       w.Header().Add("Goto-Took", endTime.Sub(startTime).String())
-      go PrintLogMessages(crw.StatusCode, crw.BodyLength, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
+      go PrintLogMessages(crw.StatusCode, crw.BodyLength, crw.Data, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
       crw.Proceed()
     }
   })
@@ -163,7 +163,7 @@ func WithPort(ctx context.Context, port int) context.Context {
   return context.WithValue(ctx, util.CurrentPortKey, port)
 }
 
-func PrintLogMessages(statusCode, bodyLength int, headers http.Header, rs *util.RequestStore) {
+func PrintLogMessages(statusCode, bodyLength int, payload []byte, headers http.Header, rs *util.RequestStore) {
   if (!rs.IsLockerRequest || global.EnableRegistryLockerLogs) &&
     (!rs.IsPeerEventsRequest || global.EnableRegistryEventsLogs) &&
     (!rs.IsAdminRequest || global.EnableAdminLogs) &&
@@ -180,6 +180,25 @@ func PrintLogMessages(statusCode, bodyLength int, headers http.Header, rs *util.
     }
     rs.LogMessages = append(rs.LogMessages, fmt.Sprintf("Response Status Code: [%d]", statusCode))
     rs.LogMessages = append(rs.LogMessages, fmt.Sprintf("Response Body Length: [%d]", bodyLength))
+    bodyLog := ""
+    logLabel := ""
+    if !rs.IsAdminRequest {
+      if global.LogResponseMiniBody {
+        logLabel = "Mini Body"
+        if len(payload) > 50 {
+          bodyLog = fmt.Sprintf("%s...", payload[:50])
+          bodyLog += fmt.Sprintf("%s", payload[len(payload)-50:])
+        } else {
+          bodyLog = fmt.Sprintf("%s", payload)
+        }
+      } else if global.LogResponseBody {
+        logLabel = "Body"
+        bodyLog = fmt.Sprintf("%s", payload)
+      }
+      if bodyLog != "" {
+        rs.LogMessages = append(rs.LogMessages, fmt.Sprintf("Response %s: [%s]", logLabel, bodyLog))
+      }
+    }
     log.Println(strings.Join(rs.LogMessages, " --> "))
     if flusher, ok := log.Writer().(http.Flusher); ok {
       flusher.Flush()

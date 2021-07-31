@@ -1,6 +1,8 @@
 package util
 
 import (
+  "bufio"
+  "bytes"
   "crypto/ecdsa"
   "crypto/rand"
   "crypto/rsa"
@@ -80,6 +82,37 @@ func CreateCertificate(domain string, saveWithPrefix string) (*tls.Certificate, 
 
   return &outCert, nil
 }
+
+func EncodeX509Cert(cert *tls.Certificate) ([]byte, error) {
+  if cert == nil {
+    return nil, fmt.Errorf("No cert")
+  }
+  var buff bytes.Buffer
+  w := bufio.NewWriter(&buff)
+  for _, cert := range cert.Certificate {
+    if err := pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: cert}); err != nil {
+      return nil, fmt.Errorf("Failed to encode cert data with error: %s\n", err.Error())
+    }
+  }
+  w.Flush()
+  return buff.Bytes(), nil
+}
+
+func EncodeX509Key(cert *tls.Certificate) ([]byte, error) {
+  if cert == nil {
+    return nil, fmt.Errorf("No cert")
+  }
+  var buff bytes.Buffer
+  w := bufio.NewWriter(&buff)
+  if privBytes, err := x509.MarshalPKCS8PrivateKey(cert.PrivateKey); err != nil {
+    return nil, fmt.Errorf("Failed to marshal key with error: %s\n", err.Error())
+  } else if err = pem.Encode(w, &pem.Block{Type: "PRIVATE KEY", Bytes: privBytes}); err != nil {
+    return nil, fmt.Errorf("Failed to encode key data with error: %s\n", err.Error())
+  }
+  w.Flush()
+  return buff.Bytes(), nil
+}
+
 func pemBlockForKey(priv interface{}) *pem.Block {
   switch k := priv.(type) {
   case *rsa.PrivateKey:

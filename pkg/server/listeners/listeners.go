@@ -2,7 +2,9 @@ package listeners
 
 import (
   "crypto/tls"
+  "crypto/x509"
   "fmt"
+  "goto/pkg/constants"
   "goto/pkg/events"
   "goto/pkg/global"
   "goto/pkg/server/tcp"
@@ -31,6 +33,7 @@ type Listener struct {
   TLS        bool             `json:"tls"`
   TCP        *tcp.TCPConfig   `json:"tcp,omitempty"`
   Cert       *tls.Certificate `json:"-"`
+  CACerts    *x509.CertPool   `json:"-"`
   RawCert    []byte           `json:"-"`
   RawKey     []byte           `json:"-"`
   isHTTP     bool             `json:"-"`
@@ -66,6 +69,10 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(lRouter, "/{port}/cert/add", addListenerCert, "PUT", "POST")
   util.AddRoute(lRouter, "/{port}/key/add", addListenerKey, "PUT", "POST")
   util.AddRoute(lRouter, "/{port}/cert/remove", removeListenerCertAndKey, "PUT", "POST")
+  util.AddRoute(lRouter, "/{port}/cert", getListenerCertOrKey, "GET")
+  util.AddRoute(lRouter, "/{port}/ca/add", addListenerCACert, "PUT", "POST")
+  util.AddRoute(lRouter, "/{port}/ca/clear", clearListenerCACerts, "PUT", "POST")
+  util.AddRoute(lRouter, "/{port}/key", getListenerCertOrKey, "GET")
   util.AddRoute(lRouter, "/{port}/remove", removeListener, "PUT", "POST")
   util.AddRoute(lRouter, "/{port}/open", openListener, "PUT", "POST")
   util.AddRoute(lRouter, "/{port}/reopen", openListener, "PUT", "POST")
@@ -111,6 +118,7 @@ func AddInitialListeners(portList []string) {
     if port, err := strconv.Atoi(portInfo[0]); err == nil && port > 0 && port <= 65535 {
       if !ports[port] {
         protocol := "http"
+        cn := constants.DefaultCommonName
         if len(portInfo) > 1 && portInfo[1] != "" {
           protocol = strings.ToLower(portInfo[1])
           if !strings.EqualFold(protocol, "http") && !strings.EqualFold(protocol, "https") &&
@@ -118,12 +126,15 @@ func AddInitialListeners(portList []string) {
             protocol = "tcp"
           }
         }
+        if len(portInfo) > 2 && portInfo[2] != "" {
+          cn = strings.ToLower(portInfo[2])
+        }
         ports[port] = true
         if i == 0 {
           global.ServerPort = port
         } else {
           listenersLock.Lock()
-          l := &Listener{Port: port, Protocol: protocol, Open: true}
+          l := &Listener{Port: port, Protocol: protocol, CommonName: cn, Open: true}
           initialListeners = append(initialListeners, l)
           listenersLock.Unlock()
         }
@@ -142,9 +153,9 @@ func (l *Listener) initListener() bool {
   var tlsConfig *tls.Config
   if l.AutoCert {
     if l.CommonName == "" {
-      l.CommonName = "goto.goto"
+      l.CommonName = constants.DefaultCommonName
     }
-    if cert, err := util.CreateCertificate(l.CommonName, l.Label); err == nil {
+    if cert, err := util.CreateCertificate(l.CommonName, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
       l.Cert = cert
     }
   }
@@ -180,6 +191,7 @@ func (l *Listener) initListener() bool {
       if tlsConfig != nil {
         if l.MutualTLS {
           tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+          tlsConfig.ClientCAs = l.CACerts
         } else {
           tlsConfig.ClientAuth = tls.NoClientCert
         }
@@ -426,6 +438,97 @@ func removeListenerCertAndKey(w http.ResponseWriter, r *http.Request) {
     }
     events.SendRequestEvent("Listener Cert Removed", msg, r)
     fmt.Fprintln(w, msg)
+    util.AddLogMessage(msg, r)
+  }
+}
+
+func addListenerCACert(w http.ResponseWriter, r *http.Request) {
+  if l := validateListener(w, r); l != nil {
+    msg := ""
+    data := util.ReadBytes(r.Body)
+    if len(data) > 0 {
+      l.lock.Lock()
+      if l.CACerts == nil {
+        l.CACerts = x509.NewCertPool()
+      }
+      l.CACerts.AppendCertsFromPEM(data)
+      l.lock.Unlock()
+      events.SendRequestEvent("Listener CA Cert Added", msg, r)
+      if l.reopenListener() {
+        msg = fmt.Sprintf("CA Cert added for listener %d, and reopened\n", l.Port)
+      } else {
+        w.WriteHeader(http.StatusInternalServerError)
+        msg = fmt.Sprintf("CA Cert added for listener %d but failed to reopen\n", l.Port)
+      }
+
+    } else {
+      w.WriteHeader(http.StatusBadRequest)
+      msg = "No payload"
+    }
+    fmt.Fprintln(w, msg)
+    util.AddLogMessage(msg, r)
+  }
+}
+
+func clearListenerCACerts(w http.ResponseWriter, r *http.Request) {
+  if l := validateListener(w, r); l != nil {
+    msg := ""
+    l.lock.Lock()
+    l.CACerts = x509.NewCertPool()
+    l.lock.Unlock()
+    if l.reopenListener() {
+      msg = fmt.Sprintf("CA Certs cleared for listener %d, and reopened\n", l.Port)
+    } else {
+      w.WriteHeader(http.StatusInternalServerError)
+      msg = fmt.Sprintf("CA Certs cleared for listener %d but failed to reopen\n", l.Port)
+    }
+    events.SendRequestEvent("Listener CA Certs Cleared", msg, r)
+    fmt.Fprintln(w, msg)
+    util.AddLogMessage(msg, r)
+  }
+}
+
+func getListenerCertOrKey(w http.ResponseWriter, r *http.Request) {
+  cert := strings.Contains(r.RequestURI, "cert")
+  key := strings.Contains(r.RequestURI, "key")
+  if l := validateListener(w, r); l != nil {
+    msg := ""
+    var err error
+    if cert {
+      raw := l.RawCert
+      if raw == nil {
+        raw, err = util.EncodeX509Cert(l.Cert)
+      }
+      if raw != nil {
+        w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
+        w.Header().Set("Content-Type", "application/octet-stream")
+        w.Write(raw)
+        msg = "Listener TLS cert served"
+      } else if err != nil {
+        msg = fmt.Sprintf("Failed to serve listener tls cert with error: %s", err.Error())
+      } else {
+        msg = "Failed to serve listener tls cert"
+      }
+    } else if key {
+      raw := l.RawKey
+      if raw == nil {
+        raw, err = util.EncodeX509Key(l.Cert)
+      }
+      if raw != nil {
+        w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
+        w.Header().Set("Content-Type", "application/octet-stream")
+        w.Write(raw)
+        msg = "Listener TLS key served"
+      } else if err != nil {
+        msg = fmt.Sprintf("Failed to serve listener tls key with error: %s", err.Error())
+      } else {
+        msg = "Failed to serve listener tls key"
+      }
+    } else {
+      w.WriteHeader(http.StatusBadRequest)
+      msg = "Neither cert nor key requested"
+      fmt.Fprintln(w, msg)
+    }
     util.AddLogMessage(msg, r)
   }
 }

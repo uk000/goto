@@ -9,4 +9,6 @@ const (
   LockerCurrent          string = "current"
   LockerPeers            string = "peerLockers"
   LockerAll              string = "all"
+
+  DefaultCommonName      string = "goto.goto"
 )

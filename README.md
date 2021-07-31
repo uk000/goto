@@ -227,15 +227,15 @@ The application accepts the following command arguments:
           <td rowspan="2">8080</td>
         </tr>
         <tr>
-          <td>* Alternately, `--ports` can be used for multiple ports. Additional ports can be opened by making listener API calls on this port. See <a href="#server-listeners">Listeners</a> feature for more details.</td>
+          <td>* Alternately, <strong>--ports</strong> can be used for multiple ports. Additional ports can be opened by making listener API calls on this port. See <a href="#-listeners">Listeners</a> feature for more details.</td>
         </tr>
         <tr>
           <td rowspan="2"><pre>--ports {ports}</pre></td>
-          <td>Initial list of ports that the server should start with. Port list is given as comma-separated list of <pre>{port1}/{protocol1},{port2}/{protocol2},...</pre> The first port in the list is used as primary port. </td>
+          <td>Initial list of ports that the server should start with. Port list is given as comma-separated list of <pre>{port1},{port2}/{protocol2}/{commonName2},{port3}/{protocol3}/{commonName3},...</pre> The first port in the list is used as the primary port and is forced to be HTTP. Supported protocols: <pre>http, https, tcp, tls (implies tcp+tls), and grpc</pre>. </td>
           <td rowspan="2">""</td>
         </tr>
         <tr>
-          <td>* For example: <pre>--ports 8080/http,8081/http,9000/tcp</pre> Protocol is optional, and defaults to http. E.g., to open multiple http ports: <pre>--ports 8080,8081,8082</pre>  Additional ports can be opened by making listener API calls on this port. See <a href="#server-listeners">Listeners</a> feature for more details.</td>
+          <td>* For example: <pre>--ports 8080,,8081/http,8083/https,8443/https/foo.com,8000/tcp,9000/tls,10000/grpc</pre> Protocol is optional, and defaults to http. E.g., to open multiple http ports: <pre>--ports 8080,8081,8082</pre>. CommonName is optional and used only for HTTPS or TCP/TLS ports. If not given, CommonName defaults to <strong>goto.goto</strong>.  Additional ports can be opened by making listener API calls on this port. See <a href="#-listeners">Listeners</a> feature for more details.</td>
         </tr>
         <tr>
           <td rowspan="2"><pre>--label `{label}`</pre></td>
@@ -243,7 +243,7 @@ The application accepts the following command arguments:
           <td rowspan="2">Goto-`IPAddress:Port` </td>
         </tr>
         <tr>
-          <td>* This is used both for setting `Goto`'s default response headers as well as when registering with registry.</td>
+          <td>* This is used both for setting Goto's default response headers as well as when registering with the registry.</td>
         </tr>
         <tr>
           <td rowspan="1"><pre>--startupDelay {delay}</pre></td>
@@ -261,15 +261,15 @@ The application accepts the following command arguments:
           <td rowspan="2"> "" </td>
         </tr>
         <tr>
-          <td>* This is used to getting initial configs and optionally report results to registry. See <a href="#registry-features">Registry</a> feature for more details.</td>
+          <td>* This is used to get initial configs and optionally report results to the Goto registry. See <a href="#registry-features">Registry</a> feature for more details.</td>
         </tr>
         <tr>
           <td rowspan="2"><pre>--locker={true|false}</pre></td>
-          <td> Whether this instance should report its results back to the Goto Registry instance. </td>
+          <td> Whether this instance should report its results back to the Goto Registry. </td>
           <td rowspan="2"> false </td>
         </tr>
         <tr>
-          <td>* An instance can be asked to report its results to registry in case the  instance is transient, e.g. pods.</td>
+          <td>* An instance can be asked to report its results to the Goto registry in case the  instance is transient, e.g. pods.</td>
         </tr>
         <tr>
           <td rowspan="2"><pre>--events={true|false}</pre></td>
@@ -342,7 +342,7 @@ The application accepts the following command arguments:
         </tr>
         <tr>
           <td rowspan="1"><pre>--reminderLogs={true|false}</pre></td>
-          <td>Enable/Disable reminder logs received from various peer instances (applicable to goto instance acting as registry). </td>
+          <td>Enable/Disable reminder logs received from various peer instances (applicable to goto instances acting as registry). </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
@@ -356,9 +356,29 @@ The application accepts the following command arguments:
           <td rowspan="1">true</td>
         </tr>
         <tr>
+          <td rowspan="1"><pre>--logRequestBody={true|false}</pre></td>
+          <td>Enable/Disable logging of request body </td>
+          <td rowspan="1">true</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--logRequestMiniBody={true|false}</pre></td>
+          <td>Enable/Disable logging of request mini body </td>
+          <td rowspan="1">true</td>
+        </tr>
+        <tr>
           <td rowspan="1"><pre>--logResponseHeaders={true|false}</pre></td>
           <td>Enable/Disable logging of response headers </td>
           <td rowspan="1">false</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--logResponseBody={true|false}</pre></td>
+          <td>Enable/Disable logging of response body </td>
+          <td rowspan="1">true</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--logResponseMiniBody={true|false}</pre></td>
+          <td>Enable/Disable logging of response mini body </td>
+          <td rowspan="1">true</td>
         </tr>
     </tbody>
 </table>
@@ -382,7 +402,7 @@ As a client tool, `goto` offers the feature to configure multiple targets and se
 
 The invocation results get accumulated across multiple invocations until cleared explicitly. Various results APIs can be used to read the accumulated results. Clearing of all results resets the invocation counter too, causing the next invocation to start at counter 1 again. When a peer is connected to a registry instance, it stores all its invocation results in a registry locker. The peer publishes its invocation results to the registry at an interval of 3-5 seconds depending on the flow of results. See Registry APIs for detail on how to query results accumulated from multiple peers.
 
-In addition to keeping the results in the `goto` client instance, those are also stored in locker on registry instance if enabled. (See `--locker` command arg). Various events are added to the peer timeline related to target invocations it performs, which are also reported to the registry. These events can be seen in the event timeline on the peer instance as well as its event timeline from the registry.
+In addition to keeping the results in the `goto` client instance, those are also stored in a locker on the registry instance if enabled. (See `--locker` command arg). Various events are added to the peer timeline related to target invocations it performs, which are also reported to the registry. These events can be seen in the event timeline on the peer instance as well as its event timeline from the registry.
 
 
 # <a name="client-apis"></a>
@@ -408,7 +428,7 @@ In addition to keeping the results in the `goto` client instance, those are also
 | GET       |	/client/results/invocations           | Get invocation results broken down for each invocation that was triggered since last time results were cleared |
 | POST      | /client/results/clear                 | Clear previously accumulated invocation results |
 | POST      | /client/results/clear                 | Clear previously accumulated invocation results |
-| POST      | /client/results/all/`{enable}`          | Enable/disable collection of cumulative results across all targets. This gives high level overview of all traffic, but at a performance overhead. Disabled by default. |
+| POST      | /client/results/all/`{enable}`          | Enable/disable collection of cumulative results across all targets. This gives a high level overview of all traffic, but at a performance overhead. Disabled by default. |
 | POST      | /client/results/invocations/`{enable}`          | Enable/disable collection of results by invocations. This gives more detailed visibility into results per invocation but has performance overhead. Disabled by default. |
 
 ###### <small> [Back to TOC](#toc) </small>
@@ -429,7 +449,7 @@ In addition to keeping the results in the `goto` client instance, those are also
 - `Invocation Started`: invocation started for a target
 - `Invocation Finished`: invocation finished for a target
 - `Invocation Response Status`: Either first invocation response received, or the HTTP response status was different from previous response from a target during an invocation
-- `Invocation Repeated Response Status`: All HTTP responses after the first response from a target where the response status code was same as previous are accumulated and reported in summary. This event is sent out when the next response is found to carry a different response status code, or if all requests to a target completed for an invocation.
+- `Invocation Repeated Response Status`: All HTTP responses after the first response from a target where the response status code was the same as the previous, are accumulated and reported in summary. This event is sent out when the next response is found to carry a different response status code, or if all requests to a target completed for an invocation.
 - `Invocation Failure`: Event reported upon first failed request, or if a request fails after previous successful request.
 - `Invocation Repeated Failure`: All request failures after a failed request are accumulated and reported in summary, either when the next request succeeds or when the invocation completes.
 
@@ -448,11 +468,11 @@ In addition to keeping the results in the `goto` client instance, those are also
 | verifyTLS    | bool           |false| Whether the TLS certificate presented by the target is verified. (Also see `--certs` command arg) |
 | headers      | [][]string     || Headers to be sent to this target |
 | body         | string         || Request body to use for this target|
-| autoPayload  | string         || Auto-generate payload of this size when making calls to this target. This field supports numeric sizes (e.g. `1000`) as well as byte size suffixes `K`, `KB`, `M` and `MB` (e.g. `1K`). If auto payload is specified, `body` field is ignored. |
+| autoPayload  | string         || Auto-generate payload of this size when making calls to this target. This field supports numeric sizes (e.g. `1000`) as well as byte size suffixes `K`, `KB`, `M` and `MB` (e.g. `1K`). If auto payload is specified, the `body` field is ignored. |
 | protocol     | string         |`HTTP/1.1`| Request Protocol to use. Supports `HTTP/1.1` (default) and `HTTP/2.0`.|
 | autoUpgrade  | bool           |false| Whether client should negotiate auto-upgrade from http/1.1 to http/2. |
 | replicas     | int            |1| Number of parallel invocations to be done for this target. |
-| requestCount | int            |1| Number of requests to be made per replicas for this target. The final request count becomes replicas * requestCount   |
+| requestCount | int            |1| Number of requests to be made per replica for this target. The final request count becomes replicas * requestCount   |
 | initialDelay | duration       || Minimum delay to wait before starting traffic to a target. Actual delay will be the max of all the targets being invoked in a given round of invocation. |
 | delay        | duration       |10ms| Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
 | retries      | int            |0| Number of retries to perform for requests to this target for connection errors or for `retriableStatusCodes`.|
@@ -514,7 +534,7 @@ The schema below describes fields per target.
 
 
 #### Invocation Results Schema (output of API /client/results/invocations)
-* Reports results for all invocations since last clearing of results, as an Object with invocation counter as key and invocation's results as value. The results for each invocation have same schema as `Client Results Schema`, with an additional bool flag `finished` to indicate whether the invocation is still running or has finished. See example below.
+* Reports results for all invocations since last clearing of results, as an Object with invocation counter as key and invocation's results as value. The results for each invocation have the same schema as the `Client Results Schema`, with an additional bool flag `finished` to indicate whether the invocation is still running or has finished. See example below.
 
 #### Active Targets Schema (output of API /client/targets/active)
 * Reports set of targets for which traffic is running at the time of API invocation. Result is an object with invocation counter as key, and value as object that has status for all active targets in that invocation. For each active target, the following data is reported. Also see example below.
@@ -545,7 +565,7 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 # <a name="goto-response-headers)"></a>
 ### Goto Response Headers
 `Goto` adds the following common response headers to all http responses it sends:
-- `Goto-Host`: identifies the goto instance. This header's value will include hostname, IP, Port, Namespace and Cluster information if available to `Goto` from the following Environment variables: `POD_NAME`, `POD_IP`, `NODE_NAME`, `CLUSTER`, `NAMESPACE`. It falls back to using local compute's IP address if `POD_IP` is not defined. For other fields, it defaults to fixed value `local`.
+- `Goto-Host`: identifies the goto instance. This header's value will include hostname, IP, Port, Namespace and Cluster information if available to `Goto` from the following Environment variables: `POD_NAME`, `POD_IP`, `NODE_NAME`, `CLUSTER`, `NAMESPACE`. It falls back to using the local compute's IP address if `POD_IP` is not defined. For other fields, it defaults to fixed value `local`.
 - `Via-Goto`: carries the label of the listener that served the request. For the bootstrap port, the label used is the one given to `goto` as `--label` startup argument (defaults to auto-generated label).
 - `Goto-Port`: carries the port number on which the request was received
 - `Goto-Protocol`: identifies whether the request was received over `HTTP` or `HTTPS`
@@ -580,20 +600,48 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 ### Goto Server Logs
 `goto` server logs are generated with a useful pattern to help figuring out the steps `goto` took for a request. Each log line tells the complete story about request details, how the request was processed, and response sent. Each log line contains the following segments separated by `-->`:
 - Request Timestamp
-- Listener Host: label of the listener that served the request
+- Listener Label: label of the listener that served the request
 - Local and Remote addresses (if available)
-- Request Body (first 50 bytes)
-- Request Headers (including Host header)
+- Request Protocol
+- Request Host (from Host request header)
+- Request Content Length
+- Request Headers (if logging enabled)
+- Request Body Length (if logging enabled)
+- Request Body or Request Mini Body (first and last 50 characters from request body) (if logging enabled)
 - Request URI, Protocol and Method
 - Action(s) taken by `goto` (e.g. delaying a request, echoing back, responding with custom payload, etc.)
-- Response Headers
+- Response Headers (if logging enabled)
 - Response Status Code (final code sent to client after applying any configured overrides)
 - Response Body Length
+- Response Body or Response Mini Body (first and last 50 characters from response body) (if logging enabled)
 
 #### Sample log line:
 ```
-2020/11/09 16:59:54 [Goto-Server] --> LocalAddr: [::1]:8080, RemoteAddr: [::1]:62296 --> Request Body: [some payload] --> Request Headers: {"Accept":["*/*"],"Foo":["bar"],"Host":["localhost:8080"],"Protocol":["HTTP/1.1"],"User-Agent":["curl/7.64.1"]} --> Request URI: [/foo], Protocol: [HTTP/1.1], Method: [GET] --> Echoing back --> {"ResponseHeaders": {"Content-Type":["application/json"],"Goto-Host":["localhost@1.2.3.4:8080"],"Goto-In-Nanos":["1613330713218468000"],"Goto-Out-Nanos":["1613330713218686000"],"Goto-Port":["8080"],"Goto-Protocol":["HTTP"],"Goto-Remote-Address":["[::1]:62296"],"Goto-Response-Status":["200"],"Goto-Took-Nanos":["218000"],"Request-Accept":["*/*"],"Request-Foo":["bar"],"Request-Host":["localhost:8080"],"Request-Protocol":["HTTP/1.1"],"Request-Uri":["/foo"],"Request-User-Agent":["curl/7.64.1"],"Via-Goto":["Registry"]}} --> Response Status Code: [200] --> Response Body Length: [229]
+2021/07/31 16:38:07.400110 [Goto] --> LocalAddr: [[::1]:8080], RemoteAddr: [[::1]:52103], Protocol [HTTP/1.1], Host: [localhost:8080], Content Length: [154] --> Request Headers: {"Accept":["*/*"],"Content-Length":["154"],"Content-Type":["application/x-www-form-urlencoded"],"User-Agent":["curl/7.76.1"]} --> Request Body Length: [154] --> Request Mini Body: [a1234567890b1234567890c1234567890d1234567890e12345...567890k1234567890l1234567890m1234567890n1234567890] --> Request URI: [/hello], Protocol: [HTTP/1.1], Method: [POST] --> Responding with configured payload of length [154] and content type [text/plain] for URI [/hello] --> Response Status Code: [200] --> Response Body Length: [154] --> Response Mini Body: [a1234567890b1234567890c1234567890d1234567890e12345...567890k1234567890l1234567890m1234567890n1234567890]
 ```
+
+#### APIs
+|METHOD|URI|Description|
+|---|---|---|
+| POST | /log/server/{enable} | Enable/disable server logging completely |
+| POST | /log/admin/{enable} | Enable/disable logging of admin calls |
+| POST | /log/client/{enable} | Enable/disable client logging completely |
+| POST | /log/invocation/{enable} | Enable/disable invocation logs |
+| POST | /log/registry/{enable} | Enable/disable registry logs |
+| POST | /log/registry/locker/{enable} | Enable/disable registry locker logs |
+| POST | /log/registry/events/{enable} | Enable/disable registry events logs |
+| POST | /log/registry/reminder/{enable} | Enable/disable logging of reminder calls that registry receives from peers |
+| POST | /log/health/{enable} | Enable/disable logging of health calls that peers receive from registry |
+| POST | /log/probe/{enable} | Enable/disable readiness and liveness probe logs |
+| POST | /log/metrics/{enable} | Enable/disable metrics logs |
+| POST | /log/request/headers/{enable} | Enable/disable request headers logs |
+| POST | /log/request/minibody/{enable} | Enable/disable request minibody (truncated body) logs (currently only supported for http1 requests)  |
+| POST | /log/request/body/{enable} | Enable/disable request body logs (currently only supported for http1 requests) |
+| POST | /log/response/headers/{enable} | Enable/disable response headers logs |
+| POST | /log/response/minibody/{enable} | Enable/disable response minibody (truncated body) logs (currently only supported for http1 requests) |
+| POST | /log/response/body/{enable} | Enable/disable response body logs (currently only supported for http1 requests) |
+
+
 
 ###### <small> [Back to TOC](#toc) </small>
 
@@ -615,15 +663,15 @@ This API returns version info of the `goto` instance
 
 # <a name="events"></a>
 ## > Events
-`goto` logs various events as it performs operations, responds to admin requests and serves traffic. The Events APIs can be used to read and clear events on a `goto` instance. Additionally, if the `goto` instance is configured to report to a registry, it sends the events to the registry. On registry, events from various peer instances are collected and merged by peer labels. Registry exposes additional APIs to get the event timeline either for a peer (by peer label) or across all connected peers as a single unified timeline. Registry also allows clearing of events timeline on all connected instances through a single API call. See Registry APIs for additional info.
+`goto` logs various events as it performs operations, responds to admin requests and serves traffic. The Events APIs can be used to read and clear events on a `goto` instance. Additionally, if the `goto` instance is configured to report to a registry, it sends the events to the registry. On the Goto registry, events from various peer instances are collected and merged by peer labels. Registry exposes additional APIs to get the event timeline either for a peer (by peer label) or across all connected peers as a single unified timeline. Registry also allows clearing of events timeline on all connected instances through a single API call. See Registry APIs for additional info.
 
 #### APIs
 
-Param `reverse=y` produces the timeline in reverse chronological order. By default events are returned with event's data field set to `...` to reduce the amount of data returned. Param `data=y` returns the events with data.
+Param `reverse=y` produces the timeline in reverse chronological order. By default events are returned with their data field set to `...` to reduce the amount of data returned. Param `data=y` returns the events with data.
 
 |METHOD|URI|Description|
 |---|---|---|
-| POST      | /events/flush    | Publish any pending events to the registry, and clear instance's events timeline. |
+| POST      | /events/flush    | Publish any pending events to the registry, and clear the instance's events timeline. |
 | POST      | /events/clear    | Clear the instance's events timeline. |
 | GET       | /events?reverse=`[y/n]`&data=`[y/n]` | Get events timeline of the instance. To get combined events from all instances, use the registry's peers events APIs instead.  |
 | GET       | /events/search/`{text}`?reverse=`[y/n]`&data=`[y/n]` | Search the instance's events timeline. |
@@ -641,7 +689,7 @@ A `goto` peer that's configured to connect to a `goto` registry publishes the fo
 - `Peer Startup Data`
 - `Peer Deregistered`
 
-A server generates event `URI First Request` upon receiving first request for a URI. Subsequent requests for that URI are tracked and counted as long as it produces the same response status. Once the response status code changes for a URI, it generates event `Repeated URI Status` to log the accumulated summary of the URI so far, and the logs `URI Status Changed` to report the new status code. The accumulation and tracking logic then proceeds with this new status code, reporting once the status changes again for that URI.
+A server generates event `URI First Request` upon receiving the first request for a URI. Subsequent requests for that URI are tracked and counted as long as it produces the same response status. Once the response status code changes for a URI, it generates event `Repeated URI Status` to log the accumulated summary of the URI so far, and the logs `URI Status Changed` to report the new status code. The accumulation and tracking logic then proceeds with this new status code, reporting once the status changes again for that URI.
 
 Various other events are published by `goto` peer instances acting as client and server, and by the `goto` registry instance, which are listed in other sections in this Readme.
 
@@ -826,7 +874,7 @@ goto_requests_by_uris{requestURI="/foo"} 3
 
 The server starts with a bootstrap http listener (given as a command line arg `--port` or as first port in the arg `--ports`, defaults to 8080). Additional ports can be opened via command line (arg `--ports`) as well as via listener APIs. When startup arg `--ports` is used, the first port in the list is treated as bootstrap port, forced to be an HTTP port, and isn't allowed to be managed via listeners APIs.
 
-The `listeners APIs` let you manage/open/close arbitrary number of HTTP/TCP/GRPC listeners (except the default bootstrap listener). The ability to launch and shutdown listeners lets you do some chaos testing. All HTTP listener ports respond to the same set of API calls, so any of the HTTP APIs described below as well as runtime traffic proxying can be done via any active HTTP listener. Any of the TCP operations described in the TCP section can be performed on any active TCP listener, and any of the GRPC operations can be performed on any GRPC listener. The HTTP listeners perform double duty of also acting as GRPC listeners, but listeners explicitly configured as `GRPC` act as `GRPC-only` and don't support HTTP operations. See `GRPC` section later in this doc for details on GRPC operations supported by `goto`.
+The `listeners APIs` let you manage/open/close an arbitrary number of HTTP/TCP/GRPC listeners (except the default bootstrap listener). The ability to launch and shutdown listeners lets you do some chaos testing. All HTTP listener ports respond to the same set of API calls, so any of the HTTP APIs described below as well as runtime traffic proxying can be done via any active HTTP listener. Any of the TCP operations described in the TCP section can be performed on any active TCP listener, and any of the GRPC operations can be performed on any GRPC listener. The HTTP listeners perform double duty of also acting as GRPC listeners, but listeners explicitly configured as `GRPC` act as `GRPC-only` and don't support HTTP operations. See `GRPC` section later in this doc for details on GRPC operations supported by `goto`.
 
 Adding TLS cert and key for a listener using `/cert` and `/key` API will configure the listener for serving HTTPS traffic when it's opened/reopened. An already opened listener can be reopened as a TLS listener by configuring TLS certs for it and calling `/reopen`.
 
@@ -844,6 +892,10 @@ Several configuration APIs (used to configure server features on `goto` instance
 | POST, PUT  | /listeners/{port}/cert/add   | Add/update certificate for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
 | POST, PUT  | /listeners/{port}/key/add   | Add/update private key for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
 | POST, PUT  | /listeners/{port}/cert/remove   | Remove certificate and key for a listener and reopen it to serve HTTP traffic instead of HTTPS. |
+| GET  | /listeners/{port}/cert   | Get the certificate currently being used by the given listener. |
+| GET  | /listeners/{port}/key   | Get the private key currently being used by the given listener. |
+| POST, PUT  | /listeners/{port}/ca/add   | Add a CA root certificate to be used for client mutual TLS on this listener. If mTLS is enabled on a listener, one or more CA certificates must be added for the listener to validate client certificates. |
+| POST, PUT  | /listeners/{port}/ca/clear   | Remove all CA root certificates configured on this listener. |
 | POST, PUT  | /listeners/{port}/remove | Remove a listener|
 | POST, PUT  | /listeners/{port}/open   | Open an added listener to accept traffic|
 | POST, PUT  | /listeners/{port}/reopen | Close and reopen an existing listener if already opened, otherwise open it |
@@ -855,9 +907,12 @@ Several configuration APIs (used to configure server features on `goto` instance
 |---|---|---|
 | listenerID    | string | Read-only field identifying the listener's port and current generation. |
 | label    | string | Label to be applied to the listener. This can also be set/changed via REST API later. |
+| hostLabel    | string | The host label is auto-generated and assigned to the listeners to uniquely identify the host while still differentiating between multiple listeners active on the `goto` instance. This is auto-generated using format `<hostname>@<ipaddress>:<port>`. |
 | port     | int    | Port on which the new listener will listen on. |
-| protocol | string | `http`, `grpc`, or `tcp`|
-| open | bool | Controls whether the listener should be opened as soon as it's added. Also reflects listener's current status when queried. |
+| protocol | string | `http`,`https`, `grpc`, `tcp`, or `tls`. Protocol `tls` implies TCP + TLS. |
+| open | bool | Controls whether the listener should be opened as soon as it's added. Also reflects the listener's current status when queried. |
+| autoCert | bool | Controls whether a TLS certificate should be auto-generated for an HTTPS or TLS listener. If enabled, the TLS cert for the listener is generated using the `CommonName` field if configured, or else the cert common name is defaulted to `goto.goto`. |
+| mutualTLS | bool | Controls whether the HTTPS or TLS listener should enforce mutual-TLS, requiring clients to present certificates. |
 | tls | bool | Reports whether the listener has been configured for TLS. This flag is read-only, the value of which is determined based on whether TLS cert and key have been added for the listener using the APIs. |
 | tcp | TCPConfig | Supplemental TCP config for a TCP listener. See TCP Config JSON schema under `TCP Server` section. |
 
@@ -883,8 +938,8 @@ Several configuration APIs (used to configure server features on `goto` instance
 #HTTP listener
 curl localhost:8080/listeners/add --data '{"port":8081, "protocol":"http", "label":"Server-8081"}'
 
-#HTTPS listener with auto-generated cert
-curl -s localhost:8080/listeners/add --data '{"label":"https-8081", "port":8081, "protocol":"https", "open":true, "autoCert":true, "commonName":"foo.com"}'
+#HTTPS listener with auto-generated cert using common name `foo.com`
+curl -s localhost:8080/listeners/add --data '{"label":"https-8443", "port":8443, "protocol":"https", "open":true, "autoCert":true, "commonName":"foo.com"}'
 
 #TCP listener
 curl -s localhost:8080/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true, "tcp": {"readTimeout":"15s","writeTimeout":"15s","connectTimeout":"15s","connIdleTimeout":"20s","responseDelay":"1s", "connectionLife":"20s"}}'
@@ -1006,25 +1061,25 @@ curl localhost:8080/label
 
 `Goto` provides features for testing server-side TCP behavior via TCP listeners (client side TCP features are described under client section).
 
-The listeners REST APIs that `goto` exposes on HTTP ports can be used to open additional ports on the `goto` instance. These additional ports can be either `HTTP` or `TCP`. For TCP listeners, additional configs can be provided using listener's `tcp` schema, which allows for configuring various timeouts, connection lifetime, packet sizes, etc. The TCP configurations of a TCP listener can be supplied at the time of listener creation, and it can also be reconfigured at any time via the `/tcp/{port}/configure` API. 
+The listeners REST APIs that `goto` exposes on HTTP ports can be used to open additional ports on the `goto` instance. These additional ports can be either `HTTP` or `TCP`. For TCP listeners, additional configs can be provided using the listener's `tcp` schema, which allows for configuring various timeouts, connection lifetime, packet sizes, etc. The TCP configurations of a TCP listener can be supplied at the time of listener creation, and it can also be reconfigured at any time via the `/tcp/{port}/configure` API. 
 
 A TCP listener can operate in 6 different modes to facilitate different kinds of testing: `Echo`, `Stream`, `Payload Validation`, `Conversation`, `Silent Life` and `Close At First Byte`. A TCP mode is activated via the `TCP Configuration` applied to the listener. If no TCP mode is specified, the listener defaults to `CloseAtFirstByte` or `SilentLife` based on whether or not a connection lifetime is configured.
 
 The modes are described in detail below:
 
-- By default, a TCP listener executes in one of the two `silent` mode. 
+- By default, a TCP listener executes in one of the two `silent` modes. 
    a) If the listener is configured with a `connectionLife` that limits its lifetime, the listener operates in `SilentLife` mode where it waits for the configured lifetime and closes the client connection. In this mode, the listener receives and counts the bytes received, but never responds. 
    b) If the listener's `connectionLife` is set to zero, the listener operates in `CloseAtFirstByte` mode where it waits for the first byte to arrive and then closes the client connection.
-- In `Payload` mode, a TCP listener serves a set of pre-configured response payload(s) with an optional `responseDelay`. If more than one payload is configured in `responsePayloads` array, the `responseDelay` gets applied before sending each item in the array. The `respondAfterRead` field controls whether response should be sent immediately or if a read should be performed before sending the response, in which case at least 1 byte must be received from the client before the response(s) are sent. The `keepOpen` configuration determines whether the connection is kept open after sending the last item in the array. If no `connectionLife` is configured explicitly, the connection life defaults to `30s` in this mode, and the connection is kept open for the remaining lifetime (computed from the start of request). Note that in this mode, server keeps the connection open even if client pre-emptively closes the connection.
- - If `Echo` mode is enabled on a TCP listener, the listener echoes back the bytes received from the client. The `echoResponseSize` configures the echo buffer size, which is the number of bytes that the listener will need to receive from the client before echoing back. If more data is received than the `echoResponseSize`, it'll echo multiple chunks each of `echoResponseSize` size. The config `echoResponseDelay` configures the delay server should apply before sending each echo response packets. In `echo` mode, the connection enforces `readTimeout` and `connIdleTimeout` based on the activity: any new bytes received reset the read/idle timeouts. It applies `writeTimeout` when sending the echo response to the client. If `connectionLife` is set, it controls the overall lifetime of the connection and the connection will close upon reaching the max life regardless of the activity.
+- In `Payload` mode, a TCP listener serves a set of pre-configured response payload(s) with an optional `responseDelay`. If more than one payload is configured in `responsePayloads` array, the `responseDelay` gets applied before sending each item in the array. The `respondAfterRead` field controls whether response should be sent immediately or if a read should be performed before sending the response, in which case at least 1 byte must be received from the client before the response(s) are sent. The `keepOpen` configuration determines whether the connection is kept open after sending the last item in the array. If no `connectionLife` is configured explicitly, the connection life defaults to `30s` in this mode, and the connection is kept open for the remaining lifetime (computed from the start of request). Note that in this mode, the server keeps the connection open even if the client preemptively closes the connection.
+ - If `Echo` mode is enabled on a TCP listener, the listener echoes back the bytes received from the client. The `echoResponseSize` configures the echo buffer size, which is the number of bytes that the listener will need to receive from the client before echoing back. If more data is received than the `echoResponseSize`, it'll echo multiple chunks each of `echoResponseSize` size. The config `echoResponseDelay` configures the delay server should apply before sending each echo response packet. In `echo` mode, the connection enforces `readTimeout` and `connIdleTimeout` based on the activity: any new bytes received reset the read/idle timeouts. It applies `writeTimeout` when sending the echo response to the client. If `connectionLife` is set, it controls the overall lifetime of the connection and the connection will close upon reaching the max life regardless of the activity.
  - If `Stream` mode is enabled, the connection starts streaming TCP bytes per the given configuration as soon as a client connects. None of the timeouts or max life applies in streaming mode, and the client connection closes automatically once the streaming completes. The stream behavior is controlled via the following configs: `streamPayloadSize`, `streamChunkSize`, `streamChunkCount`, `streamChunkDelay`, `streamDuration`. Not all of these configs are required, and a combination of some may lead to ambiguity that the server resolves by picking the most sensible combinations of these config params.
- - In `Payload Validation` mode, client should first set the payload expectation by calling either `/listeners/{port}/expect/payload/{length}` or `/listeners/{port}/expect/payload/{length}`, depending on whether server should just validate payload length or the payload content. The server then waits for the duration of the connection lifetime (if not set explicitly for the listener, this feature defaults to `30s` of total connection life), and buffers bytes received from client. If at any point during the connection life the number of received bytes exceed the expected payload length, the server responds with error and closes connection. If at the end of the connection life, the number of bytes match the payload expectations (either length or both length and content), then the server responds with success message. The messages returned by the server are one of the following:
+ - In `Payload Validation` mode, the client should first set the payload expectation by calling either `/listeners/{port}/expect/payload/{length}` or `/listeners/{port}/expect/payload/{length}`, depending on whether server should just validate payload length or the payload content. The server then waits for the duration of the connection lifetime (if not set explicitly for the listener, this feature defaults to `30s` of total connection life), and buffers bytes received from the client. If at any point during the connection life the number of received bytes exceed the expected payload length, the server responds with error and closes connection. If at the end of the connection life, the number of bytes match the payload expectations (either length or both length and content), then the server responds with a success message. The messages returned by the server are one of the following:
    - `[SUCCESS]: Received payload matches expected payload of length [l] on port [p]`
    - `[ERROR:EXCEEDED] - Payload length [l] exceeded expected length [e] on port [p]`
    - `[ERROR:CONTENT] - Payload content of length [l] didn't match expected payload of length [e] on port [p]`
    - `[ERROR:TIMEOUT] - Timed out before receiving payload of expected length [l] on port [p]`
-- In `Conversation` mode, the server waits for the client to send a TCP payload with text `HELLO` to which server also responds back with `HELLO`. All subsequent packets from client should follow the format `BEGIN/`{text}`/END`, and server echoes the received text back in the format of `ACK/`{text}`/END`. Client can initiate connection closure by sending text `GOODBYE`, or else the connection can close based on various timeouts and connection lifetime config.
-- In all cases, client may close the connection proactively causing the ongoing operation to abort.
+- In `Conversation` mode, the server waits for the client to send a TCP payload with text `HELLO` to which server also responds back with `HELLO`. All subsequent packets from the client should follow the format `BEGIN/`{text}`/END`, and the server echoes the received text back in the format of `ACK/`{text}`/END`. The client can initiate connection closure by sending text `GOODBYE`, or else the connection can close based on various timeouts and connection lifetime config.
+- In all cases, the client may close the connection proactively causing the ongoing operation to abort.
 
 
 #### APIs
@@ -1065,12 +1120,12 @@ The modes are described in detail below:
 #### TCP Config JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
-| readTimeout | duration | Read timeout to apply when reading data sent by client. |
+| readTimeout | duration | Read timeout to apply when reading data sent by the client. |
 | writeTimeout | duration | Write timeout to apply when sending data to the client. |
 | connectTimeout | duration | Max period that the server will wait during connection handshake. |
 | connIdleTimeout | duration | Max period of inactivity (no bytes traveled) on the connection that would trigger closure of the client connection. |
 | connectionLife | duration | Max lifetime after which the client connection will be terminated proactively by the server. |
-| keepOpen | bool | Controls whether server should keep the connection open after sending the response. Currently this configuration is only used in `Payload` mode where server is configured to send a set of pre-configured payloads. |
+| keepOpen | bool | Controls whether the server should keep the connection open after sending the response. Currently this configuration is only used in `Payload` mode where the server is configured to send a set of pre-configured payloads. |
 | payload | bool | Controls whether the listener should operate in `Payload` mode. |
 | stream | bool | Controls whether the listener should operate in `Stream` mode. |
 | echo | bool | Controls whether the listener should operate in `Echo` mode. |
@@ -1080,12 +1135,12 @@ The modes are described in detail below:
 | validatePayloadLength | bool | Controls whether the listener should operate in `Payload Validation` mode for length. |
 | validatePayloadContent | bool | Controls whether the listener should operate in `Payload Validation` mode for both content and length. |
 | expectedPayloadLength | int | Set the expected payload length explicitly for length verification. Also used to auto-store the expected payload content length when validating content. See API for providing expected payload content. |
-| echoResponseSize | int | Configures the size of payload to be echoed back to client. Server will only echo back when it has these many bytes received from the client. |
+| echoResponseSize | int | Configures the size of payload to be echoed back to the client. Server will only echo back when it has these many bytes received from the client. |
 | echoResponseDelay | duration | Delay to be applied when sending response back to the client in echo mode. |
 | responsePayloads | []string | A list of payloads to be used in `Payload` mode. When more than payloads are configured, each is sent in succession after applying the `responseDelay`. |
 | responseDelay | duration | Delay to apply before sending each response payload in `Payload` mode. |
-| respondAfterRead | bool | In `Payload` mode, this field controls whether server should start sending payloads immediately or after waiting to receive at least one byte from the client. |
-| streamPayloadSize | int | Configures the total payload size to be stream via chunks if streaming is enabled for the listener. |
+| respondAfterRead | bool | In `Payload` mode, this field controls whether the server should start sending payloads immediately or after waiting to receive at least one byte from the client. |
+| streamPayloadSize | int | Configures the total payload size to stream via chunks if streaming is enabled for the listener. |
 | streamChunkSize | int | Configures the size of each chunk of data to stream if streaming is enabled for the listener. |
 | streamChunkCount | int | Configures the total number of chunks to stream if streaming is enabled for the listener. |
 | streamChunkDelay | duration | Configures the delay to be added before sending each chunk back if streaming is enabled for the listener. |
@@ -1601,7 +1656,7 @@ curl localhost:8080/request/timeout/status
 # <a name="uris"></a>
 ## > URIs
 This feature allows responding with custom status code and delays for specific URIs, and tracking request counts for calls made to specific URIs (ignoring query parameters).
-Note: To configure server to respond with custom/random response payloads for specific URIs, see [`Response Payload`](#server-response-payload) feature.
+Note: To configure the server to respond with custom/random response payloads for specific URIs, see [`Response Payload`](#server-response-payload) feature.
 
 #### APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
@@ -1724,7 +1779,7 @@ This feature allows bypassing or ignoring some requests based on URIs and Header
 
 * Ignore and Bypass configurations are not port specific and apply to all ports.
 * APIs for Bypass and Ignore are alike and listed in a single table below. The two feature APIs only differ in the prefix `/request/bypass` vs `/request/ignore`
-* For URI matches, prefix `!` can be used for negative match. Negative URI matches are treated with conjunction (`AND`) whereas positive URI matches are treated with disjunction (`OR`). A URI gets filtered if: 
+* For URI matches, prefix `!` can be used for negative matches. Negative URI matches are treated with conjunction (`AND`) whereas positive URI matches are treated with disjunction (`OR`). A URI gets filtered if: 
     * It matches any positive URI filter
     * It doesn't match all negative URI filters
 * When `/` is configured as URI match, base URL both with and without `/` are matched
@@ -1905,7 +1960,7 @@ curl localhost:8080/response/headers
 
 # <a name="response-payload"></a>
 ## > Response Payload
-This feature allows setting either a specific custom payload to be delivered based on request match criteria, or configure server to send random auto-generated response payloads.
+This feature allows setting either a specific custom payload to be delivered based on request match criteria, or configure the server to send random auto-generated response payloads.
 
 A payload configuration can also `capture` values from the URI/Header/Query that it matches, as described in a section below.
 
@@ -1927,7 +1982,7 @@ If a request matches multiple configured responses, a response is picked based o
 5. Headers match
 6. Query match
 7. If no other match found and a default payload is configured, the default payload is served
-8. If no match found and no default payload is configured, the request proceeds for eventual catch-all response.
+8. If no match is found and no default payload is configured, the request proceeds for eventual catch-all response.
 
 ### Auto-generated random response payload
 Random payload generation can be configured for the `default` payload that applies to all URIs that don't have a custom payload defined. Random payload generation is configured by specifying a payload size using URI `/response/payload/set/default/`{size}`` and not setting any payload. If a custom default payload is set as well as the size is configured, the custom payload will be adjusted to match the set size by either trimming the custom payload or appending more characters to the custom payload. Payload size can be a numeric value or use common byte size conventions: `K`, `KB`, `M`, `MB`. There is no limit on the payload size as such, it's only limited by the memory available to the `goto` process.
@@ -2063,7 +2118,7 @@ Stream responses carry following headers:
 | GET, PUT, POST  |	/stream/chunksize={chunk}<br/>/duration={duration}<br/>/delay={delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered over the given duration with given delay per chunk |
 | GET, PUT, POST  |	/stream/chunksize={chunk}<br/>/count={count}/delay={delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered the given count of times with given delay per chunk|
 | GET, PUT, POST  |	/stream/duration={duration}<br/>/delay={delay} | Respond with pre-configured default payload split into enough chunks to spread out over the given duration with given delay per chunk. This URI requires a default payload to be set via payload API. |
-| GET, PUT, POST  |	/stream/count={count}/delay={delay} | Respond with pre-configured default payload split into given count of chunks with given delay per chunk. This URI requires a default payload to be set via payload API. |
+| GET, PUT, POST  |	/stream/count={count}/delay={delay} | Respond with pre-configured default payload split into the given count of chunks with the given delay per chunk. This URI requires a default payload to be set via payload API. |
 
 #### Stream Response API Example
 <details>
@@ -2088,7 +2143,7 @@ curl -v --no-buffer localhost:8080/stream/count=10/delay=300ms
 
 # <a name="response-status"></a>
 ## > Response Status
-This feature allows setting a forced response status for all requests except bypass URIs. Server also tracks number of status requests received (via /status URI) and number of responses send per status code.
+This feature allows setting a forced response status for all requests except bypass URIs. Server also tracks the number of status requests received (via /status URI) and the number of responses sent per status code.
 
 #### APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
@@ -2160,7 +2215,7 @@ curl localhost:8080/response/status/counts/502
 # <a name="response-triggers"></a>
 # > Response Triggers
 
-`Goto` allow targets to be configured that are triggered based on response status. The triggers can be invoked manually for testing, but their real value is when they get triggered based on response status. Even more valuable when the request was proxied to another upstream service, in which case the trigger is based on the response status of the upstream service.
+`Goto` allows targets to be configured that are triggered based on response status. The triggers can be invoked manually for testing, but their real value is when they get triggered based on response status. Even more valuable when the request was proxied to another upstream service, in which case the trigger is based on the response status of the upstream service.
 
 #### APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
@@ -2328,7 +2383,7 @@ $ curl -s localhost:8080/response/triggers/counts
 
 # <a name="status-api"></a>
 ## > Status API
-The URI `/status/`{status}`` allows client to ask for a specific status as response code. The given status is reported back, except when forced status is configured in which case the forced status is sent as response.
+The URI `/status/{status}` allows clients to ask for a specific status as response code. The given status is reported back, except when forced status is configured in which case the forced status is sent as response.
 
 #### API
 |METHOD|URI|Description|
@@ -2349,7 +2404,7 @@ curl -I localhost:8080/status=503:2/flipflop?x-request-id=123
 
 # <a name="delay-api"></a>
 ## > Delay API
-The URI `/delay/{delay}` allows client to ask for a specific delay to be applied to the current request. The delay API is not subject to the response delay that may be configured for all responses. Calling the URI as `/delay` responds with no delay, and so does the call as `/delay/0`, `/delay/0s`, etc.
+The URI `/delay/{delay}` allows clients to ask for a specific delay to be applied to the current request. The delay API is not subject to the response delay that may be configured for all responses. Calling the URI as `/delay` responds with no delay, and so does the call as `/delay/0`, `/delay/0s`, etc.
 When a delay is passed to this API, the response carries a header `Response-Delay` with the value of the applied delay.
 
 #### API
@@ -2368,7 +2423,7 @@ curl -I  localhost:8080/delay/2s
 
 # <a name="echo-api"></a>
 ## > Echo API
-This URI echoes back the headers and payload sent by client. The response is also subject to any forced response status and will carry custom headers if any are configured.
+This URI echoes back the headers and payload sent by the client. The response is also subject to any forced response status and will carry custom headers if any are configured.
 
 #### API
 |METHOD|URI|Description|
@@ -2447,7 +2502,7 @@ Any request that doesn't match any of the defined management APIs, and also does
 #### Proxy Target Match Criteria
 Proxy target match criteria specify the URIs, headers and query parameters, matching either of which will cause the request to be proxied to the target.
 
-- URIs: specified as a list of URIs, with `{foo}` to be used for variable portion of a URI. E.g., `/foo/{f}/bar/{b}` will match URIs like `/foo/123/bar/abc`, `/foo/something/bar/otherthing`, etc. The variables are captured under the given labels (f and b in previous example). If the target is configured with `replaceURI` to proxy the request to a different URI than the original request, the `replaceURI` can refer to those capturing variables using the syntax described in this example:
+- URIs: specified as a list of URIs, with `{foo}` to be used for variable portion of a URI. E.g., `/foo/{f}/bar/{b}` will match URIs like `/foo/123/bar/abc`, `/foo/something/bar/otherthing`, etc. The variables are captured under the given labels (f and b in the previous example). If the target is configured with `replaceURI` to proxy the request to a different URI than the original request, the `replaceURI` can refer to those capturing variables using the syntax described in this example:
   
   ```
   curl http://goto:8080/proxy/targets/add --data \
@@ -2473,7 +2528,7 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
   "enabled":true, "sendID": true}'
   ```
 
-  This target will be triggered for requests carrying headers `foo` or `bar`. On the proxied request, additional headers will be set: `abc` with value copied from `foo`, an `def` with value copied from `bar`. Also, header `foo` will be removed from the proxied request.
+  This target will be triggered for requests carrying headers `foo` or `bar`. On the proxied request, additional headers will be set: `abc` with value copied from `foo`, and `def` with value copied from `bar`. Also, header `foo` will be removed from the proxied request.
 
 <br/>
 
@@ -2487,7 +2542,7 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
   "enabled":true, "sendID": true}'
   ```
 
-  This target will be triggered for requests with carrying query params `foo` or `bar`. On the proxied request, query param `foo` will be removed, and additional query params will be set: `abc` with value copied from `foo`, an `def` with value copied from `bar`. For incoming request `http://goto:8080?foo=123&bar=456` gets proxied as `http://somewhere?abc=123&def=456&bar=456`. 
+  This target will be triggered for requests carrying query params `foo` or `bar`. On the proxied request, query param `foo` will be removed, and additional query params will be set: `abc` with value copied from `foo`, and `def` with value copied from `bar`. The incoming request `http://goto:8080?foo=123&bar=456` gets proxied as `http://somewhere?abc=123&def=456&bar=456`. 
 
 ###### <small> [Back to TOC](#goto-proxy) </small>
 
@@ -2625,12 +2680,12 @@ curl localhost:8080/proxy/counts
 # <a name="jobs-features"></a>
 # Jobs Features
 
-`Goto` allow jobs to be configured that can be run manually or auto-start upon addition. Two kinds of jobs are supported:
+`Goto` allows jobs to be configured that can be run manually or auto-start upon addition. Two kinds of jobs are supported:
 - HTTP requests to be made to some target URL
 - Command execution on local OS
-The job results can be retrieved via API from the `goto` instance, and also stored in locker on registry instance if enabled. (See `--locker` command arg)
+The job results can be retrieved via API from the `goto` instance, and also stored in lockers on the Goto registry instance if enabled. (See `--locker` command arg)
 
-Jobs can also trigger another job for each line of output produced, as well as upon completion. For command jobs, the output produced is split by newline, and each line of output can be used as input to trigger another command job. A job can specify markers for output fields (split using specified separator), and these markers can be referenced by successor jobs. The markers from a job's output are carried over to all its successor jobs, so a job can use output from a parent job that might be several generations in the past. The triggered job's command args specifies marker references as `{foo}`, which gets replaced by the value extracted from any predecessor job's output with that marker key. This feature can be used to trigger complex chains of jobs, where each job uses output of the previous job to do something else.
+Jobs can also trigger another job for each line of output produced, as well as upon completion. For command jobs, the output produced is split by newline, and each line of output can be used as input to trigger another command job. A job can specify markers for output fields (split using specified separator), and these markers can be referenced by successor jobs. The markers from a job's output are carried over to all its successor jobs, so a job can use output from a parent job that might be several generations in the past. The triggered job's command args specify marker references as `{foo}`, which gets replaced by the value extracted from any predecessor job's output with that marker key. This feature can be used to trigger complex chains of jobs, where each job uses output of the previous job to do something else.
 
 ###### <small> [Back to TOC](#jobs) </small>
 
@@ -2681,7 +2736,7 @@ Jobs can also trigger another job for each line of output produced, as well as u
 | headers      | [][]string     | Headers to be sent to this target |
 | body         | string         | Request body to use for this target|
 | replicas     | int            | Number of parallel invocations to be done for this target |
-| requestCount | int            | Number of requests to be made per replicas for this target. The final request count becomes replicas * requestCount  |
+| requestCount | int            | Number of requests to be made per replica for this target. The final request count becomes replicas * requestCount  |
 | delay        | duration       | Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
 | sendId       | bool           | Whether or not a unique ID be sent with each client request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
 | parseJSON    | bool           | Indicates whether the response payload is expected to be JSON and hence not to treat it as text (to avoid escaping quotes in JSON) |
@@ -2694,7 +2749,7 @@ Jobs can also trigger another job for each line of output produced, as well as u
 |---|---|---|
 | cmd             | string         | Command to be executed on the OS. Use `sh` as command if shell features are to be used (e.g. pipe) |
 | args            | []string       | Arguments to be passed to the OS command |
-| outputMarkers   | map[int]string | Specifies marker keys to use to reference the output fields from each line of output. Output is split using the specified separator to extract its keys. Positioning starts at 1 for first piece of split output. |
+| outputMarkers   | map[int]string | Specifies marker keys to use to reference the output fields from each line of output. Output is split using the specified separator to extract its keys. Positioning starts at 1 for the first piece of split output. |
 | outputSeparator | string         | Text to be used as separator to split each line of output of this command to extract its fields, which are then used by markers |
 
 
@@ -2872,17 +2927,17 @@ $ curl http://localhost:8080/jobs/job1/results
 # <a name="registry"></a>
 # Registry
 
-Any `goto` instance can act as a registry of other `goto` instances, and other worker `goto` instances can be configured to register themselves with the registry. You can pick any instance as registry and pass its URL to other instances as a command line argument, which tells other instances to register themselves with the given registry at startup.
+Any `goto` instance can act as a registry of other `goto` instances, and other worker `goto` instances can be configured to register themselves with the registry. You can pick any instance as the registry and pass its URL to other instances as a command line argument, which tells other instances to register themselves with the given registry at startup.
 
 A `goto` instance can be passed command line arguments '`--registry <url>`' to point it to the `goto` instance acting as a registry. When a `goto` instance receives this command line argument, it invokes the registration API on the registry instance passing its `label` and `IP:Port` to the registry server. The `label` a `goto` instance uses can also be passed to it as a command line argument '`--label <label>`'. Multiple worker `goto` instances can register using the same label but different IP addresses, which would be the case for pods of the same deployment in K8s. The worker instances that register with a registry instance at startup, also deregister themselves with the registry upon shutdown.
 
 By registering a worker instance to a registry instance, we get a few benefits:
 1. You can pre-register a list of invocation targets and jobs at the registry instance that should be handed out to the worker instances. These targets/jobs are registered by labels, and the worker instances receive the matching targets+jobs for the labels they register with.
-2. The targets and jobs registered at the registry can also be marked for `auto-invocation`. When a worker instance receives a target/job from registry at startup that's marked for auto-invocation, it immediately invokes that target/job at startup. Additionally, the target/job is retained in the worker instance for later invocation via API as well.
+2. The targets and jobs registered at the registry can also be marked for `auto-invocation`. When a worker instance receives a target/job from the registry at startup that's marked for auto-invocation, it immediately invokes that target/job at startup. Additionally, the target/job is retained in the worker instance for later invocation via API as well.
 3. In addition to sending targets/jobs to worker instances at the time of registration, the registry instance also pushes targets/jobs to the worker instances as and when more targets/jobs get added to the registry. This has the added benefit of just using the registry instance as the single point of configuration, where you add targets/jobs and those get pushed to all worker instances. Removal of targets/jobs from the registry also gets pushed, so the targets/jobs get removed from the corresponding worker instances. Even targets/jobs that are pushed later can be marked for `auto-invocation`, and the worker instances that receive the target/job will invoke it immediately upon receipt.
 4. Registry provides `labeled lockers` as a flexible in-memory data store for capturing any kind of data for debugging purposes. Registry starts with a locker labeled `default`. A new locker can be opened using the `/open` API, and lockers can be closed (discarded) using the `/close` API. The most recently opened locker becomes current and captures data reported from peer instances, whereas other named lockers stay around and can be interacted with using `/store`, `/remove` and `/get` APIs. The `/search` API can find a given search phrase across all keys across all available lockers. Lockers can be opened in a hierarchical structure with child lockers under parent lockers, by using comma-separated names as `label` in `/open` API. 
 5. If peer instances are configured to connect to a registry, they store their events and client invocation results into the current labeled locker in the registry. Registry provides APIs to get summary invocation results and a timeline of events across all peers. 
-6. Peer instances periodically re-register themselves with registry in case registry was restarted and lost all peers info. Re-registering is different from startup registration in that peers don't receive targets and jobs from registry when they remind registry about themselves, and hence no auto-invocation happens.
+6. Peer instances periodically re-register themselves with the registry in case the registry was restarted and lost all peers info. Re-registering is different from startup registration in that peers don't receive targets and jobs from the registry when they remind the registry about themselves, and hence no auto-invocation happens.
 7. A registry instance can be asked to clone data from another registry instance using the `/cloneFrom` API. This allows for quick bootstrapping of a new registry instance based on configuration from an existing registry instance, whether for data analysis purpose or for performing further operations. The pods cloned from the other registry are not used by this registry for any operations. Any new pods connecting to this registry using the same labels cloned from the other registry will be able to use the existing configs.
 
 ###### <small> [Back to TOC](#goto-registry) </small>
@@ -2896,7 +2951,7 @@ By registering a worker instance to a registry instance, we get a few benefits:
 |METHOD|URI|Description|
 |---|---|---|
 | POST      | /registry/peers/add     | Register a worker instance (referred to as peer). See [Peer JSON Schema](#peer-json-schema)|
-| POST      | /registry/peers/`{peer}`/remember | Re-register a peer. Accepts same request payload as /peers/add API but doesn't respond back with targets and jobs. |
+| POST      | /registry/peers/`{peer}`/remember | Re-register a peer. Accepts the same request payload as /peers/add API but doesn't respond back with targets and jobs. |
 | POST, PUT | /registry/peers/`{peer}`<br/>/remove/`{address}` | Deregister a peer by its label and IP address |
 | GET       | /registry/peers/`{peer}`<br/>/health/`{address}` | Check and report health of a specific peer instance based on label and IP address |
 | GET       | /registry/peers/`{peer}`/health | Check and report health of all instances of a peer |
@@ -2914,11 +2969,11 @@ By registering a worker instance to a registry instance, we get a few benefits:
 # <a name="locker-management-apis"></a>
 #### Locker Management APIs
 
-Label `current` can be used with APIs that take a locker label param to get data from currently active locker. Comma-separated label can be used to open/manage a nested locker.
+Label `current` can be used with APIs that take a locker label param to get data from currently active locker. Comma-separated labels can be used to open/manage a nested locker.
 
 |METHOD|URI|Description|
 |---|---|---|
-| POST      | /registry/lockers/open/`{label}` | Setup a locker with the given label and make it the current locker where peer results get stored. Comma-separated label can be used to open nested lockers, where each non-leaf item in the CSV list is used as a parent locker. The leaf locker label becomes the currently active locker. |
+| POST      | /registry/lockers/open/`{label}` | Setup a locker with the given label and make it the current locker where peer results get stored. Comma-separated labels can be used to open nested lockers, where each non-leaf item in the CSV list is used as a parent locker. The leaf locker label becomes the currently active locker. |
 | POST      | /registry/lockers/close/`{label}` | Remove the locker for the given label. |
 | POST      | /registry/lockers/`{label}`/close | Remove the locker for the given label. |
 | POST      | /registry/lockers/close | Remove all labeled lockers and empty the default locker.  |
@@ -2926,14 +2981,14 @@ Label `current` can be used with APIs that take a locker label param to get data
 | POST      | /registry/lockers/clear | Remove all labeled lockers and empty the default locker.  |
 | POST      | /registry/lockers<br/>/`{label}`/store/`{path}` | Store payload (body) as data in the given labeled locker at the leaf of the given key path. `path` can be a single key or a comma-separated list of subkeys, in which case data gets stored in the tree under the given path. |
 | POST      | /registry/lockers<br/>/`{label}`/remove/`{path}` | Remove stored data, if any, from the given key path in the given labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data gets removed from the leaf of the given path. |
-| POST      | /registry/peers<br/>/`{peer}`/`{address}`<br/>/locker/store/`{path}` | Store any arbitrary value for the given `path` in the locker of the peer instance under currently active labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
-| POST      | /registry/peers<br/>/`{peer}`/`{address}`<br/>/locker/remove/`{path}` | Remove stored data for the given `path` from the locker of the peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
-| POST      | /registry/peers/`{peer}`<br/>/locker/store/`{path}` | Store any arbitrary value for the given key in the peer locker without associating data to a peer instance under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
-| POST      | /registry/peers/`{peer}`<br/>/locker/remove/`{path}` | Remove stored data for the given key from the peer locker under currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
-| POST      | /registry/peers<br/>/`{peer}`/`{address}`<br/>/events/store | API invoked by peers to publish their events to the currently active locker. Event timeline can be retrieved from registry via various `/events` GET APIs. |
-| POST      | /registry/peers<br/>/`{peer}`/`{address}`<br/>/locker/clear | Clear the locker for the peer instance under currently active labeled locker |
-| POST      | /registry/peers/`{peer}`<br/>/locker/clear | Clear the locker for all instances of the given peer under currently active labeled locker |
-| POST      | /registry/peers/lockers/clear | Clear all peer lockers under currently active labeled locker |
+| POST      | /registry/peers<br/>/`{peer}`/`{address}`<br/>/locker/store/`{path}` | Store any arbitrary value for the given `path` in the locker of the peer instance under the currently active labeled locker. `path` can be a single key or a comma-separated list of subkeys, in which case data is read from the leaf of the given path. |
+| POST      | /registry/peers<br/>/`{peer}`/`{address}`<br/>/locker/remove/`{path}` | Remove stored data for the given `path` from the locker of the peer instance under the currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
+| POST      | /registry/peers/`{peer}`<br/>/locker/store/`{path}` | Store any arbitrary value for the given key in the peer locker without associating data to a peer instance under the currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case data gets stored in the tree under the given complete path. |
+| POST      | /registry/peers/`{peer}`<br/>/locker/remove/`{path}` | Remove stored data for the given key from the peer locker under the currently active labeled locker. `path` can be a comma-separated list of subkeys, in which case the leaf key in the path gets removed. |
+| POST      | /registry/peers<br/>/`{peer}`/`{address}`<br/>/events/store | API invoked by peers to publish their events to the currently active locker. Event timeline can be retrieved from the registry via various `/events` GET APIs. |
+| POST      | /registry/peers<br/>/`{peer}`/`{address}`<br/>/locker/clear | Clear the locker for the peer instance under the currently active labeled locker |
+| POST      | /registry/peers/`{peer}`<br/>/locker/clear | Clear the locker for all instances of the given peer under the currently active labeled locker |
+| POST      | /registry/peers/lockers/clear | Clear all peer lockers under the currently active labeled locker |
 | GET       | /registry/lockers/labels | Get a list of all existing locker labels, regardless of whether or not it has data.  |
 
 ###### <small> [Back to TOC](#goto-registry) </small>
@@ -2941,7 +2996,7 @@ Label `current` can be used with APIs that take a locker label param to get data
 # <a name="data-sub-lockers-read-apis"></a>
 #### Locker Data Path Read APIs
 
-These APIs allow reading data stored at specific paths/keys. Where applicable, query param `data` controls whether locker is returned with or without stored data (default value is `n` and only locker metadata is fetched). Query param `events` controls whether locker is returned with or without peers' events data. Query param `level` controls how many levels of subkeys are returned (default level is 2). Label `current` can be used to get data from currently active locker, and label `all` can be used to read data stored under given keys from all lockers. Comma-separated locker labels can be used to read from a nested locker. Comma-separated keys can be used to read from nested keys. 
+These APIs allow reading data stored at specific paths/keys. Where applicable, query param `data` controls whether locker is returned with or without stored data (default value is `n` and only locker metadata is fetched). Query param `events` controls whether the locker is returned with or without peers' events data. Query param `level` controls how many levels of subkeys are returned (default level is 2). Label `current` can be used to get data from the currently active locker, and label `all` can be used to read data stored under given keys from all lockers. Comma-separated locker labels can be used to read from a nested locker. Comma-separated keys can be used to read from nested keys. 
 
 |METHOD|URI|Description|
 |---|---|---|
@@ -2965,32 +3020,32 @@ These APIs allow reading data stored at specific paths/keys. Where applicable, q
 # <a name="lockers-dump-apis"></a>
 #### Lockers Dump APIs
 
-These APIs read all contents of a selected locker or all lockers. Where applicable, query param `data` controls whether locker is returned with or without stored data (default value is `n` and only locker metadata is fetched). Query param `events` controls whether locker is returned with or without peers' events data. Query param `peers` controls whether returned locker should include peer sub-lockers (containing data published by various peers). Query param `level` controls how many levels of subkeys are returned (default level is 2). Label `current` can be used with APIs that take a locker label param to get data from currently active locker. Comma-separated label can be used to read from a nested locker.
+These APIs read all contents of a selected locker or all lockers. Where applicable, query param `data` controls whether locker is returned with or without stored data (default value is `n` and only locker metadata is fetched). Query param `events` controls whether the locker is returned with or without peers' events data.  Query param `peers` controls whether returned locker should include peer sub-lockers (containing data published by various peers). Query param `level` controls how many levels of subkeys are returned (default level is 2). Label `current` can be used to get data from the currently active locker. Comma-separated locker labels can be used to read from a nested locker.
 
 |METHOD|URI|Description|
 |---|---|---|
-| GET       | /registry/lockers/`{label}`?data=`[y/n]`&events=`[y/n]`&peers=`[y/n]`&level=`{level}` | Get given labeled locker.  |
+| GET       | /registry/lockers/`{label}`?data=`[y/n]`&events=`[y/n]`&peers=`[y/n]`&level=`{level}` | Get the given labeled locker.  |
 | GET       | /registry/lockers?data=`[y/n]`&events=`[y/n]`&peers=`[y/n]`&level=`{level}` | Get all lockers. |
 | GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/`{address}`?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the peer instance's locker from the given labeled locker. |
 | GET       | /registry/peers/`{peer}`/`{address}`<br/>/lockers?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the peer instance's locker from the current active labeled locker. |
 | GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the lockers of all instances of the given peer from the given labeled locker. |
 | GET       | /registry/peers/`{peer}`<br/>/lockers?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get locker's data for all instances of the peer from currently active labeled locker |
 | GET       | /registry/lockers/`{label}`<br/>/peers?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the lockers of all peers from the given labeled locker. |
-| GET       | /registry/peers<br/>/lockers?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the lockers of all peers from currently active labeled locker. |
+| GET       | /registry/peers<br/>/lockers?data=`[y/n]`&events=`[y/n]`&level=`{level}` | Get the lockers of all peers from the currently active labeled locker. |
 
 ###### <small> [Back to TOC](#goto-registry) </small>
 
 # <a name="registry-events-apis"></a>
 #### Registry Events APIs
 
-Label `current` and `all` can be used with these APIs to get data from currently active locker or all lockers. Param `unified=y` produces a single timeline of events combined from various peers. Param `reverse=y` produces the timeline in reverse chronological order. By default events are returned with event's data field set to `...` to reduce the amount of data returned. Param `data=y` returns the events with data. 
+Label `current` and `all` can be used with these APIs to get data from the currently active locker or from all lockers. Param `unified=y` produces a single timeline of events combined from various peers. Param `reverse=y` produces the timeline in reverse chronological order. By default events are returned with data field set to `...` to reduce the amount of data returned. Param `data=y` returns the events with data. 
 
 |METHOD|URI|Description|
 |---|---|---|
-| POST      | /registry/peers/events/flush | Requests all peer instances to publish any pending events to registry, and clears events timeline on the peer instances. Registry still retains the peers events in the current locker. |
+| POST      | /registry/peers/events/flush | Requests all peer instances to publish any pending events to registry, and clears events timeline on the peer instances. Registry still retains the peers' events in the current locker. |
 | POST      | /registry/peers/events/clear | Requests all peer instances to clear their events timeline, and also removes the peers events from the current registry locker. |
 | GET       | /registry/lockers/`{label}`<br/>/peers/`{peers}`/events?reverse=`[y/n]`&data=`[y/n]` | Get the events timeline for all instances of the given peers (comma-separated list) from the given labeled locker. |
-| GET       | /registry/lockers/`{label}`<br/>/peers/events?unified=`[y/n]`&reverse=`[y/n]`&data=`[y/n]` | Get the events timeline for all instances of all peer from the given labeled locker, grouped by peer label. |
+| GET       | /registry/lockers/`{label}`<br/>/peers/events?unified=`[y/n]`&reverse=`[y/n]`&data=`[y/n]` | Get the events timeline for all instances of all peers from the given labeled locker, grouped by peer label. |
 | GET       | /registry/peers/`{peer}`/events?reverse=`[y/n]`&data=`[y/n]` | Get the events timeline for all instances of the given peer from the current locker. |
 | GET       | /registry/peers/events?unified=`[y/n]`&reverse=`[y/n]`&data=`[y/n]` | Get the events timeline for all instances of all peers from the current locker, grouped by peer label. |
 | GET       | /registry/lockers/`{label}`<br/>/peers/`{peers}`<br/>/events/search/`{text}`?reverse=`[y/n]`&data=`[y/n]` | Search in the events timeline for all instances of the given peers (comma-separated list) from the given labeled locker. |
@@ -3076,7 +3131,7 @@ These APIs manage client invocation targets on peers, allowing to add, remove, s
 
 |METHOD|URI|Description|
 |---|---|---|
-| POST | /registry/cloneFrom?url={url} | Clone data from another registry instance at the given URL. The current goto instance will download `peers`, `lockers`, `targets`, `jobs`, `tracking headers` and `probes`. The peer pods downloaded from other registry are not used for any invocation by this registry, it just becomes available locally for information purpose. Any new pods connecting to this registry using the same peer labels will use the downloaded targets, jobs, etc. |
+| POST | /registry/cloneFrom?url={url} | Clone data from another registry instance at the given URL. The current goto instance will download `peers`, `lockers`, `targets`, `jobs`, `tracking headers` and `probes`. The peer pods downloaded from the other registry are not used for any invocation by this registry, it just becomes available locally for information purposes. Any new pods connecting to this registry using the same peer labels will use the downloaded targets, jobs, etc. |
 | GET | /registry/dump | Dump current registry configs and locker data in json format. |
 | POST | /registry/load | Load registry configs and locker data from json dump produced via `/dump` API. |
 

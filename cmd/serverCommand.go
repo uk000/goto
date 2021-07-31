@@ -45,7 +45,11 @@ func Execute() {
   flag.BoolVar(&global.EnableRegistryReminderLogs, "reminderLogs", false, "Enable/Disable Registry Reminder Logs")
   flag.BoolVar(&global.EnablePeerHealthLogs, "peerHealthLogs", true, "Enable/Disable Registry-to-Peer Health Check Logs")
   flag.BoolVar(&global.LogRequestHeaders, "logRequestHeaders", true, "Enable/Disable logging of request headers")
+  flag.BoolVar(&global.LogRequestBody, "logRequestBody", false, "Enable/Disable logging of request body")
+  flag.BoolVar(&global.LogRequestMiniBody, "logRequestMiniBody", false, "Enable/Disable logging of request mini body")
   flag.BoolVar(&global.LogResponseHeaders, "logResponseHeaders", false, "Enable/Disable logging of response headers")
+  flag.BoolVar(&global.LogResponseBody, "logResponseBody", false, "Enable/Disable logging of response body")
+  flag.BoolVar(&global.LogResponseMiniBody, "logResponseMiniBody", false, "Enable/Disable logging of response mini body")
   flag.Parse()
 
   if portsList != "" {
@@ -94,10 +98,24 @@ func Execute() {
   } else {
     log.Println("Will Not Log Request Headers")
   }
+  if global.LogRequestMiniBody {
+    log.Println("Will Log Request Mini Body")
+  } else if global.LogRequestBody {
+    log.Println("Will Log Request Body")
+  } else {
+    log.Println("Will Not Log Request Body")
+  }
   if global.LogResponseHeaders {
     log.Println("Will Log Response Headers")
   } else {
     log.Println("Will Not Log Response Headers")
+  }
+  if global.LogResponseMiniBody {
+    log.Println("Will Log Response Mini Body")
+  } else if global.LogResponseBody {
+    log.Println("Will Log Response Body")
+  } else {
+    log.Println("Will Not Log Response Body")
   }
   if global.CertPath != "" {
     log.Printf("Will read certs from [%s]\n", global.CertPath)

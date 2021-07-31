@@ -27,8 +27,12 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(logRouter, "/health/{enable}", setLogLevel, "POST", "PUT")
   util.AddRoute(logRouter, "/probe/{enable}", setLogLevel, "POST", "PUT")
   util.AddRoute(logRouter, "/metrics/{enable}", setLogLevel, "POST", "PUT")
-  util.AddRoute(logRouter, "/headers/request/{enable}", setLogLevel, "POST", "PUT")
-  util.AddRoute(logRouter, "/headers/response/{enable}", setLogLevel, "POST", "PUT")
+  util.AddRoute(logRouter, "/request/headers/{enable}", setLogLevel, "POST", "PUT")
+  util.AddRoute(logRouter, "/request/minibody/{enable}", setLogLevel, "POST", "PUT")
+  util.AddRoute(logRouter, "/request/body/{enable}", setLogLevel, "POST", "PUT")
+  util.AddRoute(logRouter, "/response/headers/{enable}", setLogLevel, "POST", "PUT")
+  util.AddRoute(logRouter, "/response/minibody/{enable}", setLogLevel, "POST", "PUT")
+  util.AddRoute(logRouter, "/response/body/{enable}", setLogLevel, "POST", "PUT")
   util.AddRoute(logRouter, "", getLogLevels, "GET")
 }
 
@@ -48,6 +52,9 @@ func setLogLevel(w http.ResponseWriter, r *http.Request) {
   metrics := strings.Contains(r.RequestURI, "metrics")
   request := strings.Contains(r.RequestURI, "request")
   response := strings.Contains(r.RequestURI, "response")
+  headers := strings.Contains(r.RequestURI, "headers")
+  minibody := strings.Contains(r.RequestURI, "minibody")
+  body := strings.Contains(r.RequestURI, "body")
   if server {
     global.EnableServerLogs = enable
     msg = fmt.Sprintf("All Server logging set to [%t]", enable)
@@ -84,11 +91,39 @@ func setLogLevel(w http.ResponseWriter, r *http.Request) {
     global.EnableMetricsLogs = enable
     msg = fmt.Sprintf("Metrics logging set to [%t]", enable)
   } else if request {
-    global.LogRequestHeaders = enable
-    msg = fmt.Sprintf("Request Headers logging set to [%t]", enable)
+    if headers {
+      global.LogRequestHeaders = enable
+      msg = fmt.Sprintf("Request Headers logging set to [%t]", enable)
+    } else if minibody {
+      global.LogRequestMiniBody = enable
+      if enable && global.LogRequestBody {
+        global.LogRequestBody = false
+      }
+      msg = fmt.Sprintf("Request Mini Body logging set to [%t]", enable)
+    } else if body {
+      global.LogRequestBody = enable
+      if enable && global.LogRequestMiniBody {
+        global.LogRequestMiniBody = false
+      }
+      msg = fmt.Sprintf("Request Body logging set to [%t]", enable)
+    }
   } else if response {
-    global.LogResponseHeaders = enable
-    msg = fmt.Sprintf("Response Headers logging set to [%t]", enable)
+    if headers {
+      global.LogResponseHeaders = enable
+      msg = fmt.Sprintf("Response Headers logging set to [%t]", enable)
+    } else if minibody {
+      global.LogResponseMiniBody = enable
+      if enable && global.LogResponseBody {
+        global.LogResponseBody = false
+      }
+      msg = fmt.Sprintf("Response Mini Body logging set to [%t]", enable)
+    } else if body {
+      global.LogResponseBody = enable
+      if enable && global.LogResponseMiniBody {
+        global.LogResponseMiniBody = false
+      }
+      msg = fmt.Sprintf("Response Body logging set to [%t]", enable)
+    }
   }
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
