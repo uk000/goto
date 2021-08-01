@@ -226,7 +226,7 @@ func getHttpClientForTarget(tracker *InvocationTracker) *util.ClientTracker {
   client := targetClients[target.Name]
   invocationsLock.RUnlock()
   if client == nil {
-    client = util.CreateHTTPClient(target.Name, target.h2, target.AutoUpgrade, target.tls,
+    client = util.CreateHTTPClient(target.Name, target.h2, target.AutoUpgrade, target.tls, target.authority, 0,
       target.requestTimeoutD, target.connTimeoutD, target.connIdleTimeoutD, metrics.ConnTracker)
     invocationsLock.Lock()
     targetClients[target.Name] = client

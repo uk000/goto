@@ -26,6 +26,8 @@ type TCPConfig struct {
   ConnectTimeout         string        `json:"connectTimeout"`
   ConnIdleTimeout        string        `json:"connIdleTimeout"`
   ConnectionLife         string        `json:"connectionLife"`
+  KeepOpen               bool          `json:"keepOpen"`
+  Payload                bool          `json:"payload"`
   Stream                 bool          `json:"stream"`
   Echo                   bool          `json:"echo"`
   Conversation           bool          `json:"conversation"`
@@ -36,6 +38,9 @@ type TCPConfig struct {
   ExpectedPayloadLength  int           `json:"expectedPayloadLength"`
   EchoResponseSize       int           `json:"echoResponseSize"`
   EchoResponseDelay      string        `json:"echoResponseDelay"`
+  ResponsePayloads       []string      `json:"responsePayloads"`
+  ResponseDelay          string        `json:"responseDelay"`
+  RespondAfterRead       bool          `json:"respondAfterRead"`
   StreamPayloadSize      string        `json:"streamPayloadSize"`
   StreamChunkSize        string        `json:"streamChunkSize"`
   StreamChunkCount       int           `json:"streamChunkCount"`
@@ -51,6 +56,7 @@ type TCPConfig struct {
   ConnectTimeoutD        time.Duration `json:"-"`
   ConnIdleTimeoutD       time.Duration `json:"-"`
   EchoResponseDelayD     time.Duration `json:"-"`
+  ResponseDelayD         time.Duration `json:"-"`
   ConnectionLifeD        time.Duration `json:"-"`
 }
 
@@ -102,10 +108,11 @@ type TCPConnectionHandler struct {
 
 const HelloMessage string = "HELLO"
 const GoodByeMessage string = "GOODBYE"
+const Response string = "Response"
 const Conversation string = "Conversation"
 const Echo string = "Echo"
 const Stream string = "Stream"
-const PayloadValidation string = "PayloadValidation"
+const PayloadValidation string = "Payload"
 const SilentLife string = "SilentLife"
 const CloseAtFirstByte string = "CloseAtFirstByte"
 
@@ -132,7 +139,7 @@ func InitTCPConfig(port int, tcpConfig *TCPConfig) (*TCPConfig, string) {
 func storeTCPConfig(tcpConfig *TCPConfig) {
   tcpConfig.ListenerID = global.GetListenerID(tcpConfig.Port)
   lock.Lock()
-  if !tcpConfig.Echo && !tcpConfig.Stream && !tcpConfig.Conversation &&
+  if !tcpConfig.Payload && !tcpConfig.Echo && !tcpConfig.Stream && !tcpConfig.Conversation &&
     !tcpConfig.ValidatePayloadContent && !tcpConfig.ValidatePayloadLength &&
     !tcpConfig.SilentLife && !tcpConfig.CloseAtFirstByte {
     if tcpConfig.ConnectionLifeD > 0 {
@@ -274,10 +281,13 @@ func (tcp *TCPConnectionHandler) processConnectionError(err error, whatFor strin
 
 func (tcp *TCPConnectionHandler) processRequest() {
   defer tcp.close()
-  log.Printf("[Listener: %s][Request: %d]: Processing new request on port [%d] - {echo=%t, stream=%t, conversation=%t, readTimeout=%s, writeTimeout=%s, connIdleTimeout=%s, connectionLife=%s}",
-    tcp.ListenerID, tcp.requestID, tcp.Port, tcp.Echo, tcp.Stream, tcp.Conversation, tcp.ReadTimeout, tcp.WriteTimeout, tcp.ConnIdleTimeout, tcp.ConnectionLife)
-
-  if tcp.Stream {
+  log.Printf("[Listener: %s][Request: %d]: Processing new request on port [%d] - {response=%t, echo=%t, stream=%t, conversation=%t, readTimeout=%s, writeTimeout=%s, connIdleTimeout=%s, connectionLife=%s}",
+    tcp.ListenerID, tcp.requestID, tcp.Port, tcp.Payload, tcp.Echo, tcp.Stream, tcp.Conversation, tcp.ReadTimeout, tcp.WriteTimeout, tcp.ConnIdleTimeout, tcp.ConnectionLife)
+  
+  if tcp.Payload {
+    metrics.UpdateTCPConnCount(Response)
+    tcp.doResponsePayload()
+  } else if tcp.Stream {
     metrics.UpdateTCPConnCount(Stream)
     tcp.doStream()
   } else if tcp.Echo {
@@ -467,6 +477,61 @@ func (tcp *TCPConnectionHandler) echoBack() {
   log.Printf("[Listener: %s][Request: %d][%s]: Echoing data of length [%d] on port [%d].",
     tcp.ListenerID, tcp.requestID, Echo, tcp.EchoResponseSize, tcp.Port)
   tcp.send(Echo)
+}
+
+func (tcp *TCPConnectionHandler) doResponsePayload() {
+  payloadCount := len(tcp.ResponsePayloads)
+  connectionLife := tcp.ConnectionLifeD
+  if connectionLife <= 0 {
+    connectionLife = 30 * time.Second
+  }
+  log.Printf("[Listener: %s][Request: %d][%s]: Sending [%d] preconfigured responses with delay [%s], keep open [%t] and connection life [%s] on port %d\n",
+    tcp.ListenerID, tcp.requestID, Response, payloadCount, tcp.ResponseDelayD, tcp.KeepOpen, connectionLife, tcp.Port)
+  tcp.conn.SetWriteDeadline(time.Time{})
+
+  responseIndex := 0
+  payload := tcp.ResponsePayloads[responseIndex]
+
+  for {
+    if tcp.isClosingOrClosed() {
+      log.Printf("[Listener: %s][Request: %d][%s]: Ending response as the connection is closing on port [%d]",
+        tcp.ListenerID, tcp.requestID, Response, tcp.Port)
+      break
+    }
+    if tcp.RespondAfterRead {
+      if success, readSize := tcp.read(Echo); success {
+        log.Printf("[Listener: %s][Request: %d][%s]: Read data of length [%d] on port [%d]. Total read so far [%d].",
+          tcp.ListenerID, tcp.requestID, Response, readSize, tcp.Port, tcp.status.TotalBytesRead)
+      }
+    }
+    time.Sleep(tcp.ResponseDelayD)
+    tcp.writeBufferSize = len(payload)
+    tcp.resetWriteBuffer()
+    if !tcp.sendDataToClient([]byte(payload), Response) {
+      log.Printf("[Listener: %s][Request: %d][%s]: Ending response as failed to send data on port [%d]",
+        tcp.ListenerID, tcp.requestID, Response, tcp.Port)
+      break
+    }
+    responseIndex++
+    remainingLife := util.GetConnectionRemainingLife(tcp.status.ConnStartTime, time.Now(), connectionLife, 0, 0)
+    if connectionLife > 0 && remainingLife <= 0 {
+      log.Printf("[Listener: %s][Request: %d][%s]: Max connection life [%s] reached. Will not send response on port [%d]",
+        tcp.ListenerID, tcp.requestID, Response, connectionLife, tcp.Port)
+      break
+    }
+    if responseIndex >= payloadCount {
+      if tcp.KeepOpen && remainingLife > 0 {
+        log.Printf("[Listener: %s][Request: %d][%s]: Keeping connection alive for [%s] after sending [%d] responses on port [%d]",
+          tcp.ListenerID, tcp.requestID, Response, remainingLife, payloadCount, tcp.Port)
+        time.Sleep(remainingLife)
+      }
+      break
+    } else if tcp.ResponsePayloads[responseIndex] != "" {
+      payload = tcp.ResponsePayloads[responseIndex]
+    }
+  }
+  log.Printf("[Listener: %s][Request: %d][%s]: Finished processing [%d] responses on port [%d]",
+    tcp.ListenerID, tcp.requestID, Response, payloadCount, tcp.Port)
 }
 
 func (tcp *TCPConnectionHandler) doStream() {

@@ -2,6 +2,7 @@ package filter
 
 import (
   "fmt"
+  . "goto/pkg/constants"
   "goto/pkg/events"
   "goto/pkg/util"
   "net/http"
@@ -322,7 +323,7 @@ func filterRequest(w http.ResponseWriter, r *http.Request) bool {
     statusCode = bypassFilter.Status
   }
   if statusCode > 0 {
-    w.Header().Add("Goto-Filtered-Request", "true")
+    w.Header().Add(HeaderGotoFilteredRequest, "true")
     w.WriteHeader(statusCode)
     util.SetFiltreredRequest(r)
   }

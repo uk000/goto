@@ -2,6 +2,7 @@ package events
 
 import (
   "fmt"
+  . "goto/pkg/constants"
   "goto/pkg/global"
   "goto/pkg/util"
   "log"
@@ -273,7 +274,7 @@ func storeAndPublishEvent(event *Event) {
     lock.Unlock()
     if global.PublishEvents && global.RegistryURL != "" {
       url := fmt.Sprintf("%s/registry/peers/%s/%s/events/store", global.RegistryURL, event.Peer, event.PeerHost)
-      if resp, err := registryClient.Post(url, "application/json",
+      if resp, err := registryClient.Post(url, ContentTypeJSON,
         strings.NewReader(util.ToJSON(event))); err == nil {
         util.CloseResponse(resp)
       }

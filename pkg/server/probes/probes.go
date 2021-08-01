@@ -2,6 +2,7 @@ package probes
 
 import (
   "fmt"
+  . "goto/pkg/constants"
   "goto/pkg/global"
   "goto/pkg/metrics"
   "goto/pkg/util"
@@ -170,8 +171,8 @@ func Middleware(next http.Handler) http.Handler {
       }
       pp.lock.Unlock()
       util.CopyHeaders("Readiness-Request", w, r.Header, r.Host, r.RequestURI, false)
-      w.Header().Add("Readiness-Request-Count", fmt.Sprint(pp.ReadinessCount))
-      w.Header().Add("Readiness-Overflow-Count", fmt.Sprint(pp.ReadinessOverflowCount))
+      w.Header().Add(HeaderReadinessRequestCount, fmt.Sprint(pp.ReadinessCount))
+      w.Header().Add(HeaderReadinessOverflowCount, fmt.Sprint(pp.ReadinessOverflowCount))
       w.WriteHeader(status)
       util.SetHeadersSent(r, true)
       util.AddLogMessage(fmt.Sprintf("Serving Readiness Probe: [%s]", pp.ReadinessProbe), r)
@@ -192,8 +193,8 @@ func Middleware(next http.Handler) http.Handler {
       }
       pp.lock.Unlock()
       util.CopyHeaders("Liveness-Request", w, r.Header, r.Host, r.RequestURI, false)
-      w.Header().Add("Liveness-Request-Count", fmt.Sprint(pp.LivenessCount))
-      w.Header().Add("Liveness-Overflow-Count", fmt.Sprint(pp.LivenessOverflowCount))
+      w.Header().Add(HeaderLivenessRequestCount, fmt.Sprint(pp.LivenessCount))
+      w.Header().Add(HeaderLivenessOverflowCount, fmt.Sprint(pp.LivenessOverflowCount))
       w.WriteHeader(status)
       util.SetHeadersSent(r, true)
       util.AddLogMessage(fmt.Sprintf("Serving Liveness Probe: [%s]", pp.LivenessProbe), r)

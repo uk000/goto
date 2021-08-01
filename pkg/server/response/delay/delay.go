@@ -6,6 +6,7 @@ import (
   "sync"
   "time"
 
+  "goto/pkg/constants"
   "goto/pkg/events"
   "goto/pkg/metrics"
   "goto/pkg/util"
@@ -75,7 +76,7 @@ func delay(w http.ResponseWriter, r *http.Request) {
     val := delay.String()
     msg = fmt.Sprintf("Delayed by: %s", val)
     time.Sleep(delay)
-    w.Header().Add("Goto-Response-Delay", val)
+    w.Header().Add(constants.HeaderGotoResponseDelay, val)
     w.WriteHeader(http.StatusOK)
   } else if !ok {
     msg = "Invalid Delay"
@@ -122,7 +123,7 @@ func Middleware(next http.Handler) http.Handler {
       msg := fmt.Sprintf("Delaying [%s] for [%s]. Remaining delay count [%d].", r.RequestURI, delay.String(), delayCount)
       util.AddLogMessage(msg, r)
       util.UpdateTrafficEventDetails(r, "Response Delay Applied")
-      w.Header().Add("Goto-Response-Delay", delay.String())
+      w.Header().Add(constants.HeaderGotoResponseDelay, delay.String())
       time.Sleep(delay)
     }
     if next != nil {

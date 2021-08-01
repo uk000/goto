@@ -3,7 +3,7 @@ package results
 import (
   "encoding/json"
   "fmt"
-  "goto/pkg/constants"
+  . "goto/pkg/constants"
   "goto/pkg/global"
   "goto/pkg/invocation"
   "goto/pkg/util"
@@ -924,8 +924,8 @@ func NewClientTargetsAggregateResults() *ClientTargetsAggregateResultsView {
 func lockInvocationRegistryLocker(invocationIndex uint32) {
   if global.UseLocker && global.RegistryURL != "" {
     url := fmt.Sprintf("%s/registry/peers/%s/%s/locker/lock/%s_%d", global.RegistryURL,
-      global.PeerName, global.PeerAddress, constants.LockerClientKey, invocationIndex)
-    if resp, err := registryClient.Post(url, "application/json", nil); err == nil {
+      global.PeerName, global.PeerAddress, LockerClientKey, invocationIndex)
+    if resp, err := registryClient.Post(url, ContentTypeJSON, nil); err == nil {
       util.CloseResponse(resp)
     }
   }
@@ -934,7 +934,7 @@ func lockInvocationRegistryLocker(invocationIndex uint32) {
 func sendResultToRegistry(keys []string, data interface{}) {
   if global.UseLocker && global.RegistryURL != "" {
     url := fmt.Sprintf("%s/registry/peers/%s/%s/locker/store/%s", global.RegistryURL, global.PeerName, global.PeerAddress, strings.Join(keys, ","))
-    if resp, err := registryClient.Post(url, "application/json",
+    if resp, err := registryClient.Post(url, ContentTypeJSON,
       strings.NewReader(util.ToJSON(data))); err == nil {
       util.CloseResponse(resp)
     }
@@ -1005,13 +1005,13 @@ RegistrySend:
       }
       for target, tr := range collectedTargetsResults {
         tr.lock.Lock()
-        sendResultToRegistry([]string{constants.LockerClientKey, target}, tr)
+        sendResultToRegistry([]string{LockerClientKey, target}, tr)
         tr.pendingRegistrySend = false
         tr.lock.Unlock()
       }
       for index, ir := range collectedInvocationResults {
         ir.lock.Lock()
-        sendResultToRegistry([]string{constants.LockerClientKey, constants.LockerInvocationsKey,
+        sendResultToRegistry([]string{LockerClientKey, LockerInvocationsKey,
           fmt.Sprint(index)}, ir)
         ir.pendingRegistrySend = false
         ir.lock.Unlock()

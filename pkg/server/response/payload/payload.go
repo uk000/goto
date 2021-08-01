@@ -5,6 +5,7 @@ import (
   "context"
   "encoding/json"
   "fmt"
+  . "goto/pkg/constants"
   "goto/pkg/events"
   "goto/pkg/server/conn"
   "goto/pkg/server/intercept"
@@ -113,7 +114,7 @@ func (pr *PortResponse) init() {
 
 func newResponsePayload(payload []byte, binary bool, contentType, uri, header, query, value string, bodyMatch []string, transforms []*Transform) (*ResponsePayload, error) {
   if contentType == "" {
-    contentType = "application/json"
+    contentType = ContentTypeJSON
   }
   var uriRegExp *regexp.Regexp
   var responseRouter *mux.Router
@@ -496,7 +497,7 @@ func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
   pr := getPortResponse(r)
   contentType := r.Header.Get("Content-Type")
   if contentType == "" {
-    contentType = "application/json"
+    contentType = ContentTypeJSON
   }
   var transforms []*Transform
   if err := util.ReadJsonPayload(r, &transforms); err == nil {
@@ -669,7 +670,7 @@ func getPayloadForKV(kvMap map[string][]string, payloadMap map[string]map[string
 
 func transformPayload(r *http.Request, rp *ResponsePayload) string {
   sourcePayload := util.Read(r.Body)
-  var sourceJSON *util.JSON
+  var sourceJSON util.JSON
   isYAML := false
   if util.IsYAMLContentType(r.Header) {
     sourceJSON = util.FromYAML(sourcePayload)
@@ -682,7 +683,7 @@ func transformPayload(r *http.Request, rp *ResponsePayload) string {
   }
   targetPayload := ""
   for _, t := range rp.Transforms {
-    var targetJSON *util.JSON
+    var targetJSON util.JSON
     if t.Payload != nil {
       targetJSON = util.FromJSON(t.Payload)
     } else {

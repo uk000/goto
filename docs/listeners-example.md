@@ -1,8 +1,13 @@
 ### Listener API Examples:
 
 ```
+#HTTP listener
 curl localhost:8080/server/listeners/add --data '{"port":8081, "protocol":"http", "label":"Server-8081"}'
 
+#HTTPS listener with auto-generated cert using common name `foo.com`
+curl -s localhost:8080/listeners/add --data '{"label":"https-8443", "port":8443, "protocol":"https", "open":true, "autoCert":true, "commonName":"foo.com"}'
+
+#TCP Listener
 curl -s localhost:8080/server/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true, "tcp": {"readTimeout":"15s","writeTimeout":"15s","connectTimeout":"15s","connIdleTimeout":"20s","responseDelay":"1s", "connectionLife":"20s"}}'
 
 curl localhost:8080/server/listeners/add --data '{"port":9091, "protocol":"grpc", "label":"GRPC-9091"}'

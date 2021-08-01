@@ -3,9 +3,16 @@
 ```
 curl localhost:8080/server/listeners/add --data '{"label":"tcp-9000", "port":9000, "protocol":"tcp", "open":true}'
 
+#response payload mode config example
+curl localhost:8080/tcp/9000/configure --data '{"payload": true, "responsePayloads": ["HTTP/1.1 200 OK\r\nServer: goto\r\nContent-Type: text/plain\r\nContent-Length:11\r\nConnection: Keep-Alive\r\nFoo: Bar\r\n\nHello Goto!"], "responseDelay":"2s", "respondAfterRead": true, "keepOpen": true, "connectionLife": "10s"}'
+
+#echo mode config example
 curl localhost:8080/server/tcp/9000/configure --data '{"readTimeout":"1m","writeTimeout":"1m","connectTimeout":"15s","connIdleTimeout":"1m", "connectionLife":"2m", "echo":true, "echoResponseSize":10, "echoResponseDelay": "1s"}'
 
+#stream mode config example
 curl localhost:8080/server/tcp/9000/configure --data '{"stream": true, "streamDuration":"5s", "streamChunkDelay":"1s", "streamPayloadSize": "2K", "streamChunkSize":"250", "streamChunkCount":15}'
+
+curl -X PUT localhost:8080/tcp/9000/set/payload=n
 
 curl -X PUT localhost:8080/server/tcp/9000/mode/echo=n
 

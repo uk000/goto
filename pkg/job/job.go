@@ -4,12 +4,12 @@ import (
   "bufio"
   "errors"
   "fmt"
+  . "goto/pkg/constants"
   "goto/pkg/events"
   . "goto/pkg/events/eventslist"
   "goto/pkg/global"
   "goto/pkg/invocation"
   "goto/pkg/util"
-  "io/ioutil"
   "log"
   "net/http"
   "os"
@@ -132,21 +132,15 @@ func (jm *JobManager) AddJob(job *Job) {
 }
 
 func (jm *JobManager) StoreJobScriptOrFile(filePath, fileName string, content []byte, scriptJob bool) (string, bool) {
-  if fileName != "" {
-    if _, err := os.Stat(filePath); os.IsNotExist(err) {
-      os.MkdirAll(filePath, os.ModePerm)
-    }    
-    filePath = util.BuildFilePath(filePath, fileName)
-    if err := ioutil.WriteFile(filePath, content, 0777); err == nil {
-      if scriptJob {
-        task := &CommandJobTask{Cmd: filePath}
-        job := &Job{Name: fileName, Task: task, commandTask: task, Count: 1, KeepResults: 3}
-        Jobs.AddJob(job)
-      }
-      return filePath, true
-    } else {
-      fmt.Printf("Failed to store job file [%s] with error: %s\n", filePath, err.Error())
+  if path, err := util.StoreFile(filePath, fileName, content); err == nil {
+    if scriptJob {
+      task := &CommandJobTask{Cmd: filePath}
+      job := &Job{Name: fileName, Task: task, commandTask: task, Count: 1, KeepResults: 3}
+      Jobs.AddJob(job)
     }
+    return path, true
+  } else {
+      fmt.Printf("Failed to store job file [%s] with error: %s\n", filePath, err.Error())
   }
   return "", false
 }
@@ -231,7 +225,7 @@ func storeJobResultsInRegistryLocker(jobID string, runIndex int, jobResults []*J
   if global.UseLocker && global.RegistryURL != "" {
     key := "job_" + jobID + "_" + strconv.Itoa(runIndex)
     url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/" + global.PeerAddress + "/locker/store/" + key
-    if resp, err := http.Post(url, "application/json",
+    if resp, err := http.Post(url, ContentTypeJSON,
       strings.NewReader(util.ToJSON(jobResults))); err == nil {
       util.CloseResponse(resp)
     }

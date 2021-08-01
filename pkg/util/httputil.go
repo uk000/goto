@@ -6,17 +6,14 @@ import (
   "crypto/tls"
   "encoding/json"
   "fmt"
+  . "goto/pkg/constants"
   "goto/pkg/global"
   "io"
   "io/ioutil"
-  "log"
-  "math/rand"
   "net"
   "net/http"
-  "os"
   "reflect"
   "regexp"
-  "runtime"
   "strconv"
   "strings"
   "sync"
@@ -26,12 +23,6 @@ import (
   "golang.org/x/net/http2"
   "google.golang.org/grpc/metadata"
 )
-
-type ServerHandler struct {
-  Name       string
-  SetRoutes  func(r *mux.Router, parent *mux.Router, root *mux.Router)
-  Middleware mux.MiddlewareFunc
-}
 
 type ContextKey struct{ Key string }
 
@@ -54,21 +45,16 @@ type RequestStore struct {
   IsHeadersSent           bool
   IsTunnelResponseSent    bool
   TunnelCount             int
-  IsH2C                   bool
   StatusCode              int
+  IsH2C                   bool
+  IsTLS                   bool
+  ServerName              string
+  TLSVersion              string
+  TLSVersionNum           uint16
   TrafficDetails          []string
   LogMessages             []string
   InterceptResponseWriter interface{}
   TunnelLock              sync.RWMutex
-}
-
-const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=~`{}[];:,.<>/?"
-
-var sizes map[string]uint64 = map[string]uint64{
-  "K":  1000,
-  "KB": 1000,
-  "M":  1000000,
-  "MB": 1000000,
 }
 
 var (
@@ -77,18 +63,40 @@ var (
   IgnoredRequestKey = &ContextKey{"ignoredRequest"}
   ConnectionKey     = &ContextKey{"connection"}
 
-  portRouter              *mux.Router
-  portTunnelRouters       = map[string]*mux.Router{}
-  fillerRegexp            = regexp.MustCompile("{({[^{}]+?})}|{([^{}]+?)}")
-  optionalPathKeyRegexp   = regexp.MustCompile("(\\/(?:[^\\/{}]+=)?{[^{}]+?}\\?\\??)")
   contentRegexp           = regexp.MustCompile("(?i)content")
   hostRegexp              = regexp.MustCompile("(?i)^host$")
   utf8Regexp              = regexp.MustCompile("(?i)utf-8")
   knownTextMimeTypeRegexp = regexp.MustCompile(".*(text|html|json|yaml).*")
   upgradeRegexp           = regexp.MustCompile("(?i)upgrade")
-  randomCharsetLength     = len(charset)
-  random                  = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
+
+func GetRequestStore(r *http.Request) *RequestStore {
+  if val := r.Context().Value(RequestStoreKey); val != nil {
+    return val.(*RequestStore)
+  }
+  _, rs := WithRequestStore(r)
+  return rs
+}
+
+func WithRequestStore(r *http.Request) (context.Context, *RequestStore) {
+  isAdminRequest := CheckAdminRequest(r)
+  rs := &RequestStore{
+    IsAdminRequest:        isAdminRequest,
+    IsVersionRequest:      strings.HasPrefix(r.RequestURI, "/version"),
+    IsLockerRequest:       strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker"),
+    IsPeerEventsRequest:   strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/events"),
+    IsMetricsRequest:      strings.HasPrefix(r.RequestURI, "/metrics") || strings.HasPrefix(r.RequestURI, "/stats"),
+    IsReminderRequest:     strings.Contains(r.RequestURI, "/remember"),
+    IsProbeRequest:        global.IsReadinessProbe(r) || global.IsLivenessProbe(r),
+    IsHealthRequest:       !isAdminRequest && strings.HasPrefix(r.RequestURI, "/health"),
+    IsStatusRequest:       !isAdminRequest && strings.HasPrefix(r.RequestURI, "/status"),
+    IsDelayRequest:        !isAdminRequest && strings.Contains(r.RequestURI, "/delay"),
+    IsPayloadRequest:      !isAdminRequest && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload")),
+    IsTunnelRequest:       strings.HasPrefix(r.RequestURI, "/tunnel=") || global.HasTunnel(r, nil),
+    IsTunnelConfigRequest: strings.HasPrefix(r.RequestURI, "/tunnels"),
+  }
+  return context.WithValue(r.Context(), RequestStoreKey, rs), rs
+}
 
 func IsH2(r *http.Request) bool {
   return r.ProtoMajor == 2
@@ -103,59 +111,47 @@ func InitListenerRouter(root *mux.Router) {
 }
 
 func AddLogMessage(msg string, r *http.Request) {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
+  rs := GetRequestStore(r)
   rs.LogMessages = append(rs.LogMessages, msg)
 }
 
-func GetRequestStore(r *http.Request) *RequestStore {
-  return r.Context().Value(RequestStoreKey).(*RequestStore)
-}
-
 func GetInterceptResponseWriter(r *http.Request) interface{} {
-  return r.Context().Value(RequestStoreKey).(*RequestStore).InterceptResponseWriter
+  return GetRequestStore(r).InterceptResponseWriter
 }
 
 func IsHeadersSent(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey)
-  return rs != nil && rs.(*RequestStore).IsHeadersSent
+  return GetRequestStore(r).IsHeadersSent
 }
 
 func SetHeadersSent(r *http.Request, sent bool) {
-  rs := r.Context().Value(RequestStoreKey)
-  if rs != nil {
-    rs.(*RequestStore).IsHeadersSent = sent
-  }
+  GetRequestStore(r).IsHeadersSent = sent
 }
 
 func SetTunnelCount(r *http.Request, count int) {
-  if v := r.Context().Value(RequestStoreKey); v != nil && v.(*RequestStore) != nil {
-    rs := v.(*RequestStore)
-    rs.TunnelCount = count
-  }
+  GetRequestStore(r).TunnelCount = count
 }
 
 func IsTrafficEventReported(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey)
-  return rs != nil && rs.(*RequestStore).IsTrafficEventReported
+  return GetRequestStore(r).IsTrafficEventReported
 }
 
 func UpdateTrafficEventStatusCode(r *http.Request, statusCode int) {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
+  rs := GetRequestStore(r)
   if rs != nil && !rs.IsTrafficEventReported {
     rs.StatusCode = statusCode
   }
 }
 
 func UpdateTrafficEventDetails(r *http.Request, details string) {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  if rs != nil && !rs.IsTrafficEventReported {
+  rs := GetRequestStore(r)
+  if !rs.IsTrafficEventReported {
     rs.TrafficDetails = append(rs.TrafficDetails, details)
   }
 }
 
 func ReportTrafficEvent(r *http.Request) (int, []string) {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  if rs != nil && !rs.IsTrafficEventReported {
+  rs := GetRequestStore(r)
+  if !rs.IsTrafficEventReported {
     rs.IsTrafficEventReported = true
     return rs.StatusCode, rs.TrafficDetails
   }
@@ -163,24 +159,15 @@ func ReportTrafficEvent(r *http.Request) (int, []string) {
 }
 
 func SetFiltreredRequest(r *http.Request) {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  if rs != nil {
-    rs.IsFilteredRequest = true
-  }
+  GetRequestStore(r).IsFilteredRequest = true
 }
 
 func SetTunnelRequest(r *http.Request) {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  if rs != nil {
-    rs.IsTunnelRequest = true
-  }
+  GetRequestStore(r).IsTunnelRequest = true
 }
 
 func UnsetTunnelRequest(r *http.Request) {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  if rs != nil {
-    rs.IsTunnelRequest = false
-  }
+  GetRequestStore(r).IsTunnelRequest = false
 }
 
 func GetPortNumFromGRPCAuthority(ctx context.Context) int {
@@ -194,9 +181,33 @@ func GetPortNumFromGRPCAuthority(ctx context.Context) int {
   return global.ServerPort
 }
 
+func GetPortFromAddress(addr string) int {
+  if pieces := strings.Split(addr, ":"); len(pieces) > 1 {
+    if port, err := strconv.Atoi(pieces[len(pieces)-1]); err == nil {
+      return port
+    }
+  }
+  return 0
+}
+
+func GetPortValueFromLocalAddressContext(ctx context.Context) string {
+  if val := ctx.Value(http.LocalAddrContextKey); val != nil {
+    srvAddr := ctx.Value(http.LocalAddrContextKey).(net.Addr)
+    if pieces := strings.Split(srvAddr.String(), ":"); len(pieces) > 1 {
+      return pieces[len(pieces)-1]
+    }
+  }
+  return ""
+}
+
 func GetContextPort(ctx context.Context) int {
   if val := ctx.Value(CurrentPortKey); val != nil {
     return val.(int)
+  }
+  if val := GetPortValueFromLocalAddressContext(ctx); val != "" {
+    if port, err := strconv.Atoi(val); err == nil {
+      return port
+    }
   }
   return GetPortNumFromGRPCAuthority(ctx)
 }
@@ -205,90 +216,32 @@ func GetCurrentPort(r *http.Request) int {
   return GetContextPort(r.Context())
 }
 
+func GetListenerPort(r *http.Request) string {
+  return GetPortValueFromLocalAddressContext(r.Context())
+}
+
+func GetListenerPortNum(r *http.Request) int {
+  return GetContextPort(r.Context())
+}
+
+func GetRequestOrListenerPort(r *http.Request) string {
+  port, ok := GetStringParam(r, "port")
+  if !ok {
+    port = GetListenerPort(r)
+  }
+  return port
+}
+
+func GetRequestOrListenerPortNum(r *http.Request) int {
+  port, ok := GetIntParam(r, "port")
+  if !ok {
+    port = GetListenerPortNum(r)
+  }
+  return port
+}
+
 func GetCurrentListenerLabel(r *http.Request) string {
   return global.GetListenerLabelForPort(GetCurrentPort(r))
-}
-
-func GetPodName() string {
-  if global.PodName == "" {
-    pod, present := os.LookupEnv("POD_NAME")
-    if !present {
-      pod, _ = os.Hostname()
-    }
-    global.PodName = pod
-  }
-  return global.PodName
-}
-
-func GetNodeName() string {
-  if global.NodeName == "" {
-    global.NodeName, _ = os.LookupEnv("NODE_NAME")
-  }
-  return global.NodeName
-}
-
-func GetCluster() string {
-  if global.Cluster == "" {
-    global.Cluster, _ = os.LookupEnv("CLUSTER")
-  }
-  return global.Cluster
-}
-
-func GetNamespace() string {
-  if global.Namespace == "" {
-    ns, present := os.LookupEnv("NAMESPACE")
-    if !present {
-      if data, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
-        ns = string(data)
-        present = true
-      }
-    }
-    if !present {
-      ns = "local"
-    }
-    global.Namespace = ns
-  }
-  return global.Namespace
-}
-
-func GetHostIP() string {
-  if global.HostIP == "" {
-    if ip, present := os.LookupEnv("POD_IP"); present {
-      global.HostIP = ip
-    } else {
-      conn, err := net.Dial("udp", "8.8.8.8:80")
-      if err == nil {
-        defer conn.Close()
-        global.HostIP = conn.LocalAddr().(*net.UDPAddr).IP.String()
-      } else {
-        global.HostIP = "localhost"
-      }
-    }
-  }
-  return global.HostIP
-}
-
-func BuildHostLabel(port int) string {
-  hostLabel := ""
-  node := GetNodeName()
-  cluster := GetCluster()
-  if node != "" || cluster != "" {
-    hostLabel = fmt.Sprintf("%s.%s@%s:%d(%s@%s)", GetPodName(), GetNamespace(), GetHostIP(), port, node, cluster)
-  } else {
-    hostLabel = fmt.Sprintf("%s.%s@%s:%d", GetPodName(), GetNamespace(), GetHostIP(), port)
-  }
-  return hostLabel
-}
-
-func BuildListenerLabel(port int) string {
-  return fmt.Sprintf("Goto-%s:%d", GetHostIP(), port)
-}
-
-func GetHostLabel() string {
-  if global.HostLabel == "" {
-    global.HostLabel = BuildHostLabel(global.ServerPort)
-  }
-  return global.HostLabel
 }
 
 func GetIntParam(r *http.Request, param string, defaultVal ...int) (int, bool) {
@@ -510,10 +463,6 @@ func GetRequestHeadersLog(r *http.Request) string {
   return ToJSON(r.Header)
 }
 
-func ReadJson(s string, t interface{}) error {
-  return json.Unmarshal([]byte(s), t)
-}
-
 func ReadJsonPayload(r *http.Request, t interface{}) error {
   return ReadJsonPayloadFromBody(r.Body, t)
 }
@@ -526,21 +475,24 @@ func ReadJsonPayloadFromBody(body io.ReadCloser, t interface{}) error {
   }
 }
 
-func WriteJsonPayload(w http.ResponseWriter, t interface{}) {
-  w.Header().Add("Content-Type", "application/json")
+func WriteJsonPayload(w http.ResponseWriter, t interface{}) string {
+  w.Header().Add(HeaderContentType, ContentTypeJSON)
   if reflect.ValueOf(t).IsNil() {
     fmt.Fprintln(w, "")
   } else {
     if bytes, err := json.Marshal(t); err == nil {
-      fmt.Fprintln(w, string(bytes))
+      data := string(bytes)
+      fmt.Fprintln(w, data)
+      return data
     } else {
       fmt.Printf("Failed to write json payload: %s\n", err.Error())
     }
   }
+  return ""
 }
 
 func WriteStringJsonPayload(w http.ResponseWriter, json string) {
-  w.Header().Add("Content-Type", "application/json")
+  w.Header().Add(HeaderContentType, ContentTypeJSON)
   fmt.Fprintln(w, json)
 }
 
@@ -549,8 +501,7 @@ func WriteErrorJson(w http.ResponseWriter, error string) {
 }
 
 func IsAdminRequest(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && rs.IsAdminRequest
+  return GetRequestStore(r).IsAdminRequest
 }
 
 func CheckAdminRequest(r *http.Request) bool {
@@ -562,244 +513,79 @@ func CheckAdminRequest(r *http.Request) bool {
 }
 
 func IsMetricsRequest(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && rs.IsMetricsRequest
+  return GetRequestStore(r).IsMetricsRequest
 }
 
 func IsReminderRequest(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && rs.IsReminderRequest
+  return GetRequestStore(r).IsReminderRequest
 }
 
 func IsLockerRequest(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && rs.IsLockerRequest
+  return GetRequestStore(r).IsLockerRequest
 }
 
 func IsPeerEventsRequest(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && rs.IsPeerEventsRequest
+  return GetRequestStore(r).IsPeerEventsRequest
 }
 
 func IsStatusRequest(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && rs.IsStatusRequest
+  return GetRequestStore(r).IsStatusRequest
 }
 
 func IsDelayRequest(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && rs.IsDelayRequest
+  return GetRequestStore(r).IsDelayRequest
 }
 
 func IsPayloadRequest(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && rs.IsPayloadRequest
+  return GetRequestStore(r).IsPayloadRequest
 }
 
 func IsProbeRequest(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && rs.IsProbeRequest
+  return GetRequestStore(r).IsProbeRequest
 }
 
 func IsHealthRequest(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && rs.IsProbeRequest
+  return GetRequestStore(r).IsProbeRequest
 }
 
 func IsVersionRequest(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && rs.IsVersionRequest
+  return GetRequestStore(r).IsVersionRequest
 }
 
 func IsFilteredRequest(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && rs.IsFilteredRequest
+  return GetRequestStore(r).IsFilteredRequest
 }
 
 func IsTunnelRequest(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && rs.IsTunnelRequest && !rs.IsTunnelConfigRequest
+  rs := GetRequestStore(r)
+  return rs.IsTunnelRequest && !rs.IsTunnelConfigRequest
 }
 
 func IsKnownRequest(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && (rs.IsProbeRequest || rs.IsReminderRequest || rs.IsHealthRequest ||
+  rs := GetRequestStore(r)
+  return (rs.IsProbeRequest || rs.IsReminderRequest || rs.IsHealthRequest ||
     rs.IsMetricsRequest || rs.IsVersionRequest || rs.IsLockerRequest ||
     rs.IsAdminRequest || rs.IsStatusRequest || rs.IsDelayRequest ||
     rs.IsPayloadRequest || rs.IsTunnelConfigRequest)
 }
 
 func IsKnownNonTraffic(r *http.Request) bool {
-  rs := r.Context().Value(RequestStoreKey).(*RequestStore)
-  return rs != nil && (rs.IsProbeRequest || rs.IsReminderRequest || rs.IsHealthRequest ||
+  rs := GetRequestStore(r)
+  return rs.IsProbeRequest || rs.IsReminderRequest || rs.IsHealthRequest ||
     rs.IsMetricsRequest || rs.IsVersionRequest || rs.IsLockerRequest ||
-    rs.IsAdminRequest || rs.IsTunnelConfigRequest)
-}
-
-func PathRouter(r *mux.Router, path string) *mux.Router {
-  routerPath := path
-  if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil {
-    routerPath = lpath + path
-  }
-  portTunnelRouters[routerPath] = portRouter.PathPrefix(routerPath).Subrouter()
-  return r.PathPrefix(path).Subrouter()
-}
-
-func GetSubPaths(path string) []string {
-  matches := optionalPathKeyRegexp.FindAllStringIndex(path, -1)
-  var paths []string
-  addSubpath := func(subPath string) {
-    canSkip := strings.HasSuffix(subPath, "?") && !strings.HasSuffix(subPath, "??")
-    subPath = strings.ReplaceAll(subPath, "?", "")
-    if len(paths) > 0 {
-      for i, prefixPath := range paths {
-        if canSkip {
-          paths = append(paths, prefixPath)
-        }
-        paths[i] = prefixPath + subPath
-      }
-    } else {
-      paths = append(paths, subPath)
-    }
-  }
-  if len(matches) > 0 {
-    start := 0
-    end := 0
-    for _, m := range matches {
-      addSubpath(path[start:m[0]])
-      addSubpath(path[m[0]:m[1]])
-      start = m[1]
-      end = m[1]
-    }
-    if end < len(path) {
-      addSubpath(path[end:])
-    }
-    for _, prefixPath := range paths {
-      paths = append(paths, prefixPath+"/")
-    }
-  } else {
-    paths = []string{path}
-  }
-  return paths
-}
-
-func AddRoute(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), methods ...string) {
-  for _, p := range GetSubPaths(path) {
-    if len(methods) > 0 {
-      r.HandleFunc(p, f).Methods(methods...)
-    } else {
-      r.HandleFunc(p, f)
-    }
-  }
-}
-
-func AddRouteWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), methods ...string) {
-  AddRoute(r, path, f, methods...)
-  if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && portTunnelRouters[lpath] != nil {
-    AddRoute(portTunnelRouters[lpath], path, f, methods...)
-  }
-}
-
-func AddRouteQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParamName string, queryKey string, methods ...string) {
-  for _, p := range GetSubPaths(path) {
-    r.HandleFunc(p, f).Queries(queryParamName, queryKey).Methods(methods...)
-  }
-}
-
-func AddRouteQWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParamName string, queryKey string, methods ...string) {
-  AddRouteQ(r, path, f, queryParamName, queryKey, methods...)
-  if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && portTunnelRouters[lpath] != nil {
-    AddRouteQ(portTunnelRouters[lpath], path, f, queryParamName, queryKey, methods...)
-  }
-}
-
-func AddRouteMultiQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
-  for _, p := range GetSubPaths(path) {
-    r.HandleFunc(p, f).Queries(queryParams...).Methods(method)
-    for i := 0; i < len(queryParams); i += 2 {
-      for j := i + 2; j < len(queryParams); j += 2 {
-        r.HandleFunc(p, f).Queries(queryParams[i], queryParams[i+1], queryParams[j], queryParams[j+1]).Methods(method)
-      }
-    }
-    for i := 0; i < len(queryParams); i += 2 {
-      r.HandleFunc(p, f).Queries(queryParams[i], queryParams[i+1]).Methods(method)
-    }
-    r.HandleFunc(p, f).Methods(method)
-  }
-}
-
-func AddRouteMultiQWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
-  AddRouteMultiQ(r, path, f, method, queryParams...)
-  if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && portTunnelRouters[lpath] != nil {
-    AddRouteMultiQ(portTunnelRouters[lpath], path, f, method, queryParams...)
-  }
-}
-
-func AddRoutes(r *mux.Router, parent *mux.Router, root *mux.Router, handlers ...ServerHandler) {
-  for _, h := range handlers {
-    if h.SetRoutes != nil {
-      h.SetRoutes(r, parent, root)
-    }
-  }
-}
-
-func AddMiddlewares(next http.Handler, handlers ...ServerHandler) http.Handler {
-  handler := next
-  for i := len(handlers) - 1; i >= 0; i-- {
-    if handlers[i].Middleware != nil {
-      handler = handlers[i].Middleware(handler)
-    }
-  }
-  return handler
-}
-
-func GetListenerPort(r *http.Request) string {
-  ctx := r.Context()
-  srvAddr := ctx.Value(http.LocalAddrContextKey).(net.Addr)
-  pieces := strings.Split(srvAddr.String(), ":")
-  return pieces[len(pieces)-1]
-}
-
-func GetListenerPortNum(r *http.Request) int {
-  if port, err := strconv.Atoi(GetListenerPort(r)); err == nil {
-    return port
-  }
-  return 0
-}
-
-func GetRequestOrListenerPort(r *http.Request) string {
-  port, ok := GetStringParam(r, "port")
-  if !ok {
-    port = GetListenerPort(r)
-  }
-  return port
-}
-
-func GetRequestOrListenerPortNum(r *http.Request) int {
-  port, ok := GetIntParam(r, "port")
-  if !ok {
-    port = GetListenerPortNum(r)
-  }
-  return port
-}
-
-func ToJSON(o interface{}) string {
-  if output, err := json.Marshal(o); err == nil {
-    return string(output)
-  }
-  return fmt.Sprintf("%+v", o)
+    rs.IsAdminRequest || rs.IsTunnelConfigRequest
 }
 
 func IsJSONContentType(h http.Header) bool {
   if contentType := h.Get("Content-Type"); contentType != "" {
-    return strings.EqualFold(contentType, "application/json")
+    return strings.EqualFold(contentType, ContentTypeJSON)
   }
   return false
 }
 
 func IsYAMLContentType(h http.Header) bool {
   if contentType := h.Get("Content-Type"); contentType != "" {
-    return strings.EqualFold(contentType, "application/yaml")
+    return strings.EqualFold(contentType, ContentTypeYAML)
   }
   return false
 }
@@ -822,60 +608,6 @@ func IsBinaryContentType(contentType string) bool {
   return !knownTextMimeTypeRegexp.MatchString(contentType)
 }
 
-func BuildFilePath(filePath, fileName string) string {
-  if filePath != "" && !strings.HasSuffix(filePath, "/") {
-    filePath += "/"
-  }
-  filePath += fileName
-  return filePath
-}
-
-func Reader(ctx context.Context, r io.Reader) io.Reader {
-  if deadline, ok := ctx.Deadline(); ok {
-    type deadliner interface {
-      SetReadDeadline(time.Time) error
-    }
-    if d, ok := r.(deadliner); ok {
-      d.SetReadDeadline(deadline)
-    }
-  }
-  return reader{ctx, r}
-}
-
-type reader struct {
-  ctx context.Context
-  r   io.Reader
-}
-
-func (r reader) Read(p []byte) (n int, err error) {
-  if err = r.ctx.Err(); err != nil {
-    return
-  }
-  if n, err = r.r.Read(p); err != nil {
-    return
-  }
-  err = r.ctx.Err()
-  return
-}
-
-func Read(r io.Reader) string {
-  if body, err := ioutil.ReadAll(r); err == nil {
-    return strings.Trim(string(body), " ")
-  } else {
-    log.Println(err.Error())
-  }
-  return ""
-}
-
-func ReadBytes(r io.Reader) []byte {
-  if body, err := ioutil.ReadAll(r); err == nil {
-    return body
-  } else {
-    log.Println(err.Error())
-  }
-  return nil
-}
-
 func DiscardRequestBody(r *http.Request) int {
   defer r.Body.Close()
   len, _ := io.Copy(ioutil.Discard, r.Body)
@@ -886,60 +618,6 @@ func DiscardResponseBody(r *http.Response) int {
   defer r.Body.Close()
   len, _ := io.Copy(ioutil.Discard, r.Body)
   return int(len)
-}
-
-func ReadAndTrack(r io.Reader, collect bool) ([]byte, int, time.Time, time.Time, string) {
-  buf := make([]byte, 1000)
-  var result []byte
-  var readSize int
-  var first, last time.Time
-  for {
-    size, err := r.Read(buf)
-    now := time.Now()
-    if first.IsZero() {
-      first = now
-    }
-    last = now
-    readSize += size
-    if collect {
-      result = append(result, buf[0:size]...)
-    }
-    if err == io.EOF {
-      return result, readSize, first, last, ""
-    } else if err != nil {
-      return result, readSize, first, last, err.Error()
-    }
-  }
-}
-
-func WriteAndTrack(w io.WriteCloser, data [][]byte, delay time.Duration) (int, time.Time, time.Time, error) {
-  defer w.Close()
-  count := len(data)
-  var writeSize int
-  var first, last time.Time
-  for i := 0; i < count; i++ {
-    d := data[i]
-    size := len(d)
-    for {
-      n, err := w.Write(d)
-      now := time.Now()
-      if first.IsZero() {
-        first = now
-      }
-      last = now
-      writeSize += n
-      if err != nil {
-        return writeSize, first, last, err
-      }
-      if n >= size {
-        break
-      }
-    }
-    if i < count-1 && delay > 0 {
-      time.Sleep(delay)
-    }
-  }
-  return writeSize, first, last, nil
 }
 
 func CloseResponse(r *http.Response) {
@@ -997,25 +675,6 @@ func IsURIInMap(uri string, m map[string]interface{}) bool {
   return FindURIInMap(uri, m) != ""
 }
 
-func StringArrayContains(list []string, r *regexp.Regexp) bool {
-  for _, v := range list {
-    if r.MatchString(v) {
-      return true
-    }
-  }
-  return false
-}
-
-func IsStringInArray(val string, list []string) bool {
-  b := []byte(val)
-  for _, v := range list {
-    if matched, _ := regexp.Match(v, b); matched {
-      return true
-    }
-  }
-  return false
-}
-
 func ContainsAllHeaders(headers http.Header, expected map[string]*regexp.Regexp) bool {
   for h, r := range expected {
     if h != "" && (headers[h] == nil || r != nil && !StringArrayContains(headers[h], r)) {
@@ -1028,72 +687,6 @@ func ContainsAllHeaders(headers http.Header, expected map[string]*regexp.Regexp)
 func IsYes(flag string) bool {
   return strings.EqualFold(flag, "y") || strings.EqualFold(flag, "yes") ||
     strings.EqualFold(flag, "true") || strings.EqualFold(flag, "1")
-}
-
-func IsFiller(key string) bool {
-  return fillerRegexp.MatchString(key)
-}
-
-func GetFillerMarked(key string) string {
-  return "{" + key + "}"
-}
-
-func GetFillers(text string) []string {
-  return fillerRegexp.FindAllString(text, -1)
-}
-
-func GetFiller(text string) (string, bool) {
-  fillers := GetFillers(text)
-  if len(fillers) > 0 {
-    return fillers[0], true
-  }
-  return "", false
-}
-
-func GetFillersUnmarked(text string) []string {
-  matches := GetFillers(text)
-  for i, m := range matches {
-    m = strings.TrimPrefix(m, "{")
-    matches[i] = strings.TrimSuffix(m, "}")
-  }
-  return matches
-}
-
-func GetFillerUnmarked(text string) (string, bool) {
-  fillers := GetFillersUnmarked(text)
-  if len(fillers) > 0 {
-    return fillers[0], true
-  }
-  return "", false
-}
-
-func RegisterURIRouteAndGetRegex(uri string, glob bool, router *mux.Router, handler func(http.ResponseWriter, *http.Request)) (*mux.Router, *regexp.Regexp, error) {
-  if uri != "" {
-    vars := fillerRegexp.FindAllString(uri, -1)
-    for _, v := range vars {
-      v2, _ := GetFillerUnmarked(v)
-      v2 = GetFillerMarked(v2 + ":[^/&\\?]*")
-      uri = strings.ReplaceAll(uri, v, v2)
-    }
-    subRouter := router.NewRoute().Subrouter()
-    route := subRouter.PathPrefix(uri)
-    if path, err := route.GetPathRegexp(); err == nil {
-      //path = strings.ReplaceAll(path, "$", "(/.*)?$")
-      pattern := path
-      if glob {
-        pattern += "(.*)?"
-      }
-      pattern += "(\\?.*)?$"
-      re := regexp.MustCompile(pattern)
-      route = route.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
-        return re.MatchString(r.URL.Path)
-      }).HandlerFunc(handler)
-      return subRouter, re, nil
-    } else {
-      return nil, nil, err
-    }
-  }
-  return nil, nil, fmt.Errorf("Empty URI")
 }
 
 func ParseTrackingHeaders(headers string) ([]string, map[string][]string) {
@@ -1157,46 +750,6 @@ func BuildCrossHeadersMap(crossTrackingHeaders map[string][]string) map[string]s
   return crossHeadersMap
 }
 
-func Random(max int) int {
-  return random.Intn(max)
-}
-
-func Random64(max int64) int64 {
-  return random.Int63n(max)
-}
-
-func RandomDuration(min, max time.Duration, fallback ...time.Duration) time.Duration {
-  if min == 0 && max == 0 {
-    if len(fallback) > 0 {
-      return fallback[0]
-    } else {
-      return 0
-    }
-  }
-  d := min
-  if max > min {
-    addOn := max - d
-    d = d + time.Millisecond*time.Duration(Random64(addOn.Milliseconds()))
-  }
-  return d
-}
-
-func RandomFrom(vals []int) int {
-  return vals[random.Intn(len(vals))]
-}
-
-func GenerateRandomPayload(size int) []byte {
-  b := make([]byte, size)
-  for i := range b {
-    b[i] = charset[Random(randomCharsetLength)]
-  }
-  return b
-}
-
-func GenerateRandomString(size int) string {
-  return string(GenerateRandomPayload(size))
-}
-
 func CreateRequest(method string, url string, headers http.Header, payload []byte, payloadReader io.ReadCloser) (*http.Request, error) {
   if payloadReader == nil {
     if payload == nil {
@@ -1208,9 +761,8 @@ func CreateRequest(method string, url string, headers http.Header, payload []byt
     for h, values := range headers {
       if strings.EqualFold(h, "host") {
         req.Host = values[0]
-      } else {
-        req.Header[h] = values
       }
+      req.Header[h] = values
     }
     return req, nil
   } else {
@@ -1219,10 +771,11 @@ func CreateRequest(method string, url string, headers http.Header, payload []byt
 }
 
 func CreateDefaultHTTPClient(label string, h2, isTLS bool, newConnNotifierChan chan string) *ClientTracker {
-  return CreateHTTPClient(label, h2, true, isTLS, 30*time.Second, 30*time.Second, 3*time.Minute, newConnNotifierChan)
+  return CreateHTTPClient(label, h2, true, isTLS, "", 0, 30*time.Second, 30*time.Second, 3*time.Minute, newConnNotifierChan)
 }
 
-func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, requestTimeout, connTimeout, connIdleTimeout time.Duration, newConnNotifierChan chan string) *ClientTracker {
+func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName string, tlsVersion uint16,
+  requestTimeout, connTimeout, connIdleTimeout time.Duration, newConnNotifierChan chan string) *ClientTracker {
   var transport http.RoundTripper
   var tracker *TransportTracker
   if !h2 {
@@ -1242,6 +795,9 @@ func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, requestTimeout,
       ForceAttemptHTTP2:   autoUpgrade,
       TLSClientConfig: &tls.Config{
         InsecureSkipVerify: true,
+        ServerName:         serverName,
+        MinVersion:         tlsVersion,
+        MaxVersion:         tlsVersion,
       },
     }, label, newConnNotifierChan)
     tracker = &ht.TransportTracker
@@ -1253,6 +809,9 @@ func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, requestTimeout,
       AllowHTTP:       true,
       TLSClientConfig: &tls.Config{
         InsecureSkipVerify: true,
+        ServerName:         serverName,
+        MinVersion:         tlsVersion,
+        MaxVersion:         tlsVersion,
       },
     }
     tr.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
@@ -1266,26 +825,4 @@ func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, requestTimeout,
     transport = h2t.Transport
   }
   return NewHTTPClientTracker(&http.Client{Timeout: requestTimeout, Transport: transport}, nil, tracker)
-}
-
-func PrintCallers(level int, callee string) {
-  pc := make([]uintptr, 16)
-  n := runtime.Callers(1, pc)
-  frames := runtime.CallersFrames(pc[:n])
-  var callers []string
-  i := 0
-  for {
-    frame, more := frames.Next()
-    if !strings.Contains(frame.Function, "util") &&
-      strings.Contains(frame.Function, "goto") {
-      callers = append(callers, frame.Function)
-      i++
-    }
-    if !more || i >= level {
-      break
-    }
-  }
-  fmt.Println("-----------------------------------------------")
-  fmt.Printf("Callers of [%s]: %+v\n", callee, callers)
-  fmt.Println("-----------------------------------------------")
 }

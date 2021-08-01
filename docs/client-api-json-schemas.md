@@ -9,9 +9,9 @@
 | burls        | []string       || Secondary URLs to use for `fallback` or `AB Mode` (see below)   |
 | headers      | [][]string     || Headers to be sent to this target |
 | body         | string         || Request body to use for this target|
-| autoPayload  | string         || Auto-generate request payload of the given size, specified as a numeric value (e.g. `1000`) or a byte size using suffixes `K`, `KB`, `M` and `MB` (e.g. `1K`). Use of auto payload causes `body` field to be ignored. For response payload, use `/echo/body` API as target if the destination is also a `goto` server, or see response payload feature.  |
+| autoPayload  | string         || Auto-generate request payload of the given size, specified as a numeric value (e.g. `1000`) or a byte size using suffixes `K`, `KB`, `M` and `MB` (e.g. `1K`). Use of auto payload causes the `body` field to be ignored. For response payload, use `/echo/body` API as target if the destination is also a `goto` server, or see response payload feature.  |
 | replicas     | int            |1| Number of parallel invocations to be done for this target. |
-| requestCount | int            |1| Number of requests to be made per replicas for this target. The final request count becomes replicas * requestCount   |
+| requestCount | int            |1| Number of requests to be made per replica for this target. The final request count becomes replicas * requestCount   |
 | initialDelay | duration       || Minimum delay to wait before starting traffic to a target. Actual delay will be the max of all the targets being invoked in a given round of invocation. |
 | delay        | duration       |10ms| Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
 | retries      | int            |0| Number of retries to perform for requests to this target for connection errors or for `retriableStatusCodes`.|

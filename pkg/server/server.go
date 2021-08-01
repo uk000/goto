@@ -30,13 +30,14 @@ import (
 func Run() {
   global.PeerAddress = util.GetHostIP() + ":" + strconv.Itoa(global.ServerPort)
   global.GetPeers = registry.GetPeers
+  global.HasTunnel = tunnel.HasTunnel
   global.StoreEventInCurrentLocker = registry.StoreEventInCurrentLocker
   listeners.Configure(ServeHTTPListener, ServeGRPCListener, StartTCPServer)
   metrics.Startup()
   invocation.Startup()
   RunHttpServer(conn.Handler, tunnel.Handler, events.Handler, label.Handler, metrics.Handler,
-    listeners.Handler, probes.Handler, registry.Handler, job.Handler, client.Handler,
-    tcp.Handler, proxy.Handler, request.Handler, response.Handler, log.Handler, echo.Handler, catchall.Handler)
+    listeners.Handler, probes.Handler, proxy.Handler, registry.Handler, client.Handler,
+    request.Handler, response.Handler, tcp.Handler, job.Handler, log.Handler,echo.Handler, catchall.Handler)
   invocation.Shutdown()
   metrics.Shutdown()
   results.StopRegistrySender()

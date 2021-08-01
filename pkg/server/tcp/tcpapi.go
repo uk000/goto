@@ -37,6 +37,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(tcpRouter, "/{port}/mode/conversation={enable}", setModes, "PUT", "POST")
   util.AddRoute(tcpRouter, "/{port}/mode/silentlife={enable}", setModes, "PUT", "POST")
   util.AddRoute(tcpRouter, "/{port}/mode/closeatfirst={enable}", setModes, "PUT", "POST")
+  util.AddRoute(tcpRouter, "/{port}/set/payload={enable}", setModes, "PUT", "POST")
   util.AddRoute(tcpRouter, "/{port}/active", getActiveConnections, "GET")
   util.AddRoute(tcpRouter, "/active", getActiveConnections, "GET")
   util.AddRoute(tcpRouter, "/{port}/history/{mode}", getConnectionHistory, "GET")
@@ -128,19 +129,26 @@ func (tcp *TCPConfig) configure() string {
   } else {
     tcp.ConnIdleTimeoutD = 30 * time.Second
   }
-  if tcp.EchoResponseDelay != "" {
-    if tcp.EchoResponseDelayD = util.ParseDuration(tcp.EchoResponseDelay); tcp.EchoResponseDelayD < 0 {
-      msg += fmt.Sprintf("[Invalid echo response delay: %s]", tcp.EchoResponseDelay)
-    }
-  } else {
-    tcp.EchoResponseDelayD = 0
-  }
   if tcp.ConnectionLife != "" {
     if tcp.ConnectionLifeD = util.ParseDuration(tcp.ConnectionLife); tcp.ConnectionLifeD < 0 {
       msg += fmt.Sprintf("[Invalid connection life: %s]", tcp.ConnectionLife)
     }
   } else {
     tcp.ConnectionLifeD = 0
+  }
+  if tcp.ResponseDelay != "" {
+    if tcp.ResponseDelayD = util.ParseDuration(tcp.ResponseDelay); tcp.ResponseDelayD < 0 {
+      msg += fmt.Sprintf("[Invalid response delay: %s]", tcp.ResponseDelay)
+    }
+  } else {
+    tcp.ResponseDelayD = 0
+  }
+  if tcp.EchoResponseDelay != "" {
+    if tcp.EchoResponseDelayD = util.ParseDuration(tcp.EchoResponseDelay); tcp.EchoResponseDelayD < 0 {
+      msg += fmt.Sprintf("[Invalid echo response delay: %s]", tcp.EchoResponseDelay)
+    }
+  } else {
+    tcp.EchoResponseDelayD = 0
   }
   if tcp.EchoResponseSize <= 0 {
     tcp.EchoResponseSize = 100
@@ -334,7 +342,7 @@ func setStreamConfig(w http.ResponseWriter, r *http.Request) {
     } else {
       tcpConfig := getTCPConfig(port)
       tcpConfig.configureStreamParams(payloadSize, chunkSize, duration, delay, chunkCount)
-      turnOffAllModes(tcpConfig)
+      tcpConfig.turnOffAllModes()
       tcpConfig.Stream = true
       msg = fmt.Sprintf("Connection will stream [%d] chunks of size [%d] with delay [%s] for a duration of [%s] for listener %d",
         tcpConfig.StreamChunkCount, tcpConfig.StreamChunkSizeV, tcpConfig.StreamChunkDelayD.String(), tcpConfig.StreamDurationD.String(), port)
@@ -350,7 +358,7 @@ func setExpectedPayloadLength(w http.ResponseWriter, r *http.Request) {
     port := util.GetIntParamValue(r, "port")
     tcpConfig := getTCPConfig(port)
     tcpConfig.ExpectedPayloadLength = util.GetIntParamValue(r, "length")
-    turnOffAllModes(tcpConfig)
+    tcpConfig.turnOffAllModes()
     tcpConfig.ValidatePayloadLength = true
     tcpConfig.ExpectedPayload = nil
     msg := fmt.Sprintf("Stored expected payload length [%d]", tcpConfig.ExpectedPayloadLength)
@@ -366,7 +374,7 @@ func setExpectedPayload(w http.ResponseWriter, r *http.Request) {
     tcpConfig := getTCPConfig(port)
     tcpConfig.ExpectedPayload = util.ReadBytes(r.Body)
     tcpConfig.ExpectedPayloadLength = len(tcpConfig.ExpectedPayload)
-    turnOffAllModes(tcpConfig)
+    tcpConfig.turnOffAllModes()
     tcpConfig.ValidatePayloadLength = true
     tcpConfig.ValidatePayloadContent = true
     msg := fmt.Sprintf("Stored expected payload content of length [%d]", tcpConfig.ExpectedPayloadLength)
@@ -383,7 +391,7 @@ func configurePayloadValidation(w http.ResponseWriter, r *http.Request) {
     tcpConfig := getTCPConfig(port)
     enable := util.GetBoolParamValue(r, "enable")
     if enable {
-      turnOffAllModes(tcpConfig)
+      tcpConfig.turnOffAllModes()
       tcpConfig.ValidatePayloadLength = true
       if len(tcpConfig.ExpectedPayload) > 0 {
         tcpConfig.ValidatePayloadContent = true
@@ -413,18 +421,25 @@ func setModes(w http.ResponseWriter, r *http.Request) {
     stream := strings.Contains(r.RequestURI, "stream")
     silentlife := strings.Contains(r.RequestURI, "silentlife")
     closeatfirst := strings.Contains(r.RequestURI, "closeatfirst")
+    responsePayload := strings.Contains(r.RequestURI, "payload")
     if enable {
-      turnOffAllModes(tcpConfig)
+      tcpConfig.turnOffAllModes()
     }
-    if stream {
+    if responsePayload {
+      tcpConfig.Payload = enable
+      if enable {
+        tcpConfig.configure()
+      }
+      msg = fmt.Sprintf("Response Payload mode set to [%t] for listener %d", enable, port)
+    } else if stream {
       tcpConfig.Stream = enable
-      if tcpConfig.Stream {
+      if enable {
         tcpConfig.configureStream()
       }
       msg = fmt.Sprintf("Stream mode set to [%t] for listener %d", enable, port)
     } else if echo {
       tcpConfig.Echo = enable
-      if tcpConfig.Echo {
+      if enable {
         tcpConfig.configure()
       }
       msg = fmt.Sprintf("Echo mode set to [%t] for listener %d", enable, port)
@@ -532,7 +547,8 @@ func clearConnectionHistory(w http.ResponseWriter, r *http.Request) {
   events.SendRequestEvent(msg, "", r)
 }
 
-func turnOffAllModes(tcpConfig *TCPConfig) {
+func (tcpConfig *TCPConfig) turnOffAllModes() {
+  tcpConfig.Payload = false
   tcpConfig.Conversation = false
   tcpConfig.Echo = false
   tcpConfig.Stream = false
@@ -545,7 +561,9 @@ func turnOffAllModes(tcpConfig *TCPConfig) {
 func isMode(tcpConfig *TCPConfig, mode string) bool {
   requestedMode := strings.ToLower(mode)
   actualMode := ""
-  if tcpConfig.Conversation {
+  if tcpConfig.Payload {
+    actualMode = PayloadValidation
+  } else if tcpConfig.Conversation {
     actualMode = Conversation
   } else if tcpConfig.Echo {
     actualMode = Echo

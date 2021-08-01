@@ -36,9 +36,25 @@ type ConnTracker struct {
 
 type ClientTracker struct {
   *http.Client
-  GrpcConn *grpc.ClientConn
-  Tracker  *TransportTracker
-  IsGRPC   bool
+  GrpcConn   *grpc.ClientConn
+  Tracker    *TransportTracker
+  IsGRPC     bool
+  SNI        string
+  TLSVersion uint16
+}
+
+func (client *ClientTracker) UpdateTLSConfig(sni string, tlsVersion uint16) {
+  if client.SNI != sni || client.TLSVersion != tlsVersion {
+    client.CloseIdleConnections()
+  }
+  client.Tracker.SetTLSConfig(&tls.Config{
+    InsecureSkipVerify: true,
+    ServerName:         sni,
+    MinVersion:         tlsVersion,
+    MaxVersion:         tlsVersion,
+  })
+  client.SNI = sni
+  client.TLSVersion = tlsVersion
 }
 
 func (ct *ConnTracker) Close() (err error) {

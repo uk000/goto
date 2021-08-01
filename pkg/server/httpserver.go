@@ -10,7 +10,6 @@ import (
   "goto/pkg/registry/peer"
   "goto/pkg/server/intercept"
   "goto/pkg/server/listeners"
-  "goto/pkg/tunnel"
   "goto/pkg/util"
   "io/ioutil"
   "log"
@@ -67,7 +66,7 @@ func RunHttpServer(handlers ...util.ServerHandler) {
 
 func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    ctx, rs := withRequestStore(r)
+    ctx, rs := util.WithRequestStore(r)
     r = r.WithContext(ctx)
     if util.IsH2Upgrade(r) {
       if util.IsPutOrPost(r) {
@@ -98,7 +97,7 @@ func ContextMiddleware(next http.Handler) http.Handler {
       if v := ctx.Value(util.RequestStoreKey); v != nil {
         rs = v.(*util.RequestStore)
       } else {
-        ctx, rs = withRequestStore(r)
+        ctx, rs = util.WithRequestStore(r)
         rs.IsH2C = r.ProtoMajor == 2
       }
       r = r.WithContext(withPort(ctx, util.GetListenerPortNum(r)))
@@ -130,7 +129,11 @@ func ContextMiddleware(next http.Handler) http.Handler {
       if irw != nil {
         irw.Proceed()
       }
-      go PrintLogMessages(statusCode, bodyLength, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
+      var data []byte
+      if irw != nil {
+        data = irw.Data
+      }
+      go PrintLogMessages(statusCode, bodyLength, data, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
     }
   })
 }
@@ -147,26 +150,6 @@ func withIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter,
 
 func withConnContext(ctx context.Context, conn net.Conn) context.Context {
   return context.WithValue(ctx, util.ConnectionKey, conn)
-}
-
-func withRequestStore(r *http.Request) (context.Context, *util.RequestStore) {
-  isAdminRequest := util.CheckAdminRequest(r)
-  rs := &util.RequestStore{
-    IsAdminRequest:        isAdminRequest,
-    IsVersionRequest:      strings.HasPrefix(r.RequestURI, "/version"),
-    IsLockerRequest:       strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker"),
-    IsPeerEventsRequest:   strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/events"),
-    IsMetricsRequest:      strings.HasPrefix(r.RequestURI, "/metrics") || strings.HasPrefix(r.RequestURI, "/stats"),
-    IsReminderRequest:     strings.Contains(r.RequestURI, "/remember"),
-    IsProbeRequest:        global.IsReadinessProbe(r) || global.IsLivenessProbe(r),
-    IsHealthRequest:       !isAdminRequest && strings.HasPrefix(r.RequestURI, "/health"),
-    IsStatusRequest:       !isAdminRequest && strings.HasPrefix(r.RequestURI, "/status"),
-    IsDelayRequest:        !isAdminRequest && strings.Contains(r.RequestURI, "/delay"),
-    IsPayloadRequest:      !isAdminRequest && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload")),
-    IsTunnelRequest:       strings.HasPrefix(r.RequestURI, "/tunnel=") || tunnel.HasTunnel(r, nil),
-    IsTunnelConfigRequest: strings.HasPrefix(r.RequestURI, "/tunnels"),
-  }
-  return context.WithValue(r.Context(), util.RequestStoreKey, rs), rs
 }
 
 func withPort(ctx context.Context, port int) context.Context {
@@ -189,7 +172,11 @@ func StartHttpServer(server *http.Server) {
 
 func ServeHTTPListener(l *listeners.Listener) {
   go func() {
-    log.Printf("Starting HTTP Listener %s\n", l.ListenerID)
+    msg := fmt.Sprintf("Starting HTTP Listener [%s]", l.ListenerID)
+    if l.TLS {
+      msg += fmt.Sprintf(" With TLS [CN: %s]", l.CommonName)
+    }
+    log.Println(msg)
     if err := httpServer.Serve(l.Listener); err != nil {
       log.Printf("Listener [%d]: %s", l.Port, err.Error())
     }
@@ -231,7 +218,7 @@ func StopHttpServer(server *http.Server) {
   log.Printf("HTTP Server %s finished shutting down", server.Addr)
 }
 
-func PrintLogMessages(statusCode, bodyLength int, headers http.Header, rs *util.RequestStore) {
+func PrintLogMessages(statusCode, bodyLength int, payload []byte, headers http.Header, rs *util.RequestStore) {
   if (!rs.IsLockerRequest || global.EnableRegistryLockerLogs) &&
     (!rs.IsPeerEventsRequest || global.EnableRegistryEventsLogs) &&
     (!rs.IsAdminRequest || global.EnableAdminLogs) &&
@@ -248,6 +235,25 @@ func PrintLogMessages(statusCode, bodyLength int, headers http.Header, rs *util.
     }
     rs.LogMessages = append(rs.LogMessages, fmt.Sprintf("Response Status Code: [%d]", statusCode))
     rs.LogMessages = append(rs.LogMessages, fmt.Sprintf("Response Body Length: [%d]", bodyLength))
+    bodyLog := ""
+    logLabel := ""
+    if payload != nil && !rs.IsAdminRequest {
+      if global.LogResponseMiniBody {
+        logLabel = "Mini Body"
+        if len(payload) > 50 {
+          bodyLog = fmt.Sprintf("%s...", payload[:50])
+          bodyLog += fmt.Sprintf("%s", payload[len(payload)-50:])
+        } else {
+          bodyLog = fmt.Sprintf("%s", payload)
+        }
+      } else if global.LogResponseBody {
+        logLabel = "Body"
+        bodyLog = fmt.Sprintf("%s", payload)
+      }
+      if bodyLog != "" {
+        rs.LogMessages = append(rs.LogMessages, fmt.Sprintf("Response %s: [%s]", logLabel, bodyLog))
+      }
+    }
     log.Println(strings.Join(rs.LogMessages, " --> "))
     if flusher, ok := log.Writer().(http.Flusher); ok {
       flusher.Flush()

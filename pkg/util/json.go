@@ -9,15 +9,48 @@ import (
   "regexp"
   "strconv"
   "strings"
+  "text/template"
 
+  "github.com/itchyny/gojq"
   "sigs.k8s.io/yaml"
 )
 
-type JSON struct {
-  Value          interface{}
-  jsonMap        map[string]interface{}
-  jsonArr        []interface{}
-  targetPatterns map[int][]string
+type JSON interface {
+  Value() interface{}
+  Object() map[string]interface{}
+  Array() []interface{}
+
+  ParseJSON(text string)
+  ParseYAML(y string)
+  Store(i interface{})
+  ToJSON() string
+  ToYAML() string
+
+  IsEmpty() bool
+  IsObject() bool
+  IsArray() bool
+
+  AddQueries(id int, queries []string)
+  ExecuteQueries() []interface{}
+
+  FindPath(path string) *Value
+  FindPaths(paths []string) map[string]*Value
+  FindTransformPath(path string, join, replace, push bool) JSONField
+  Transform(ts []*JSONTransform, source JSON) bool
+  TransformPatterns(text string) string
+
+  View(fields ...string) map[string]interface{}
+}
+
+type JSONValue struct {
+  jsonMap map[string]interface{}
+  jsonArr []interface{}
+  index   *JSONIndex
+}
+
+type JSONIndex struct {
+  queries  map[int]*gojq.Code
+  patterns map[int][]string
 }
 
 type JSONTransform struct {
@@ -32,6 +65,11 @@ type JSONTransform struct {
   push             bool
   cotainsRegexp    *regexp.Regexp
   notCotainsRegexp *regexp.Regexp
+}
+
+type Value struct {
+  Value  interface{}
+  IsJSON bool
 }
 
 type JSONField interface {
@@ -61,77 +99,62 @@ type JSONMapField struct {
   exists   bool
 }
 
-func NewJSON() *JSON {
-  return &JSON{
-    targetPatterns: map[int][]string{},
+func NewJSON() JSON {
+  return &JSONValue{
+    index: &JSONIndex{
+      patterns: map[int][]string{},
+      queries:  map[int]*gojq.Code{},
+    },
   }
 }
 
-func GetEmptyCopy(v interface{}) interface{} {
-  switch v.(type) {
-  case map[string]interface{}:
-    return map[string]interface{}{}
-  case []interface{}:
-    return []interface{}{}
-  }
-  return nil
-}
-
-func Clone(v interface{}) interface{} {
-  gob.Register(map[string]interface{}{})
-  gob.Register([]interface{}{})
-  buff := &bytes.Buffer{}
-  enc := gob.NewEncoder(buff)
-  dec := gob.NewDecoder(buff)
-  var err error
-  if err = enc.Encode(v); err == nil {
-    switch v.(type) {
-    case map[string]interface{}:
-      copy := map[string]interface{}{}
-      if err = dec.Decode(&copy); err == nil {
-        return copy
-      }
-    case []interface{}:
-      copy := []interface{}{}
-      if err = dec.Decode(&copy); err == nil {
-        return copy
-      }
-    }
-  }
-  if err != nil {
-    fmt.Printf("Failed to clone [%+v] with error: %s\n", v, err.Error())
-  }
-  return nil
-}
-
-func FromJSONText(text string) *JSON {
+func FromJSONText(text string) JSON {
   json := NewJSON()
   json.ParseJSON(text)
   return json
 }
 
-func FromJSON(j interface{}) *JSON {
+func FromJSON(j interface{}) JSON {
   json := NewJSON()
-  json.store(j)
+  json.Store(j)
   return json
 }
 
-func FromYAML(y string) *JSON {
+func FromYAML(y string) JSON {
   json := NewJSON()
   json.ParseYAML(y)
   return json
 }
 
-func (j *JSON) ParseJSON(text string) {
+func FromObject(o interface{}) JSON {
+  return FromJSONText(ToJSON(o))
+}
+
+func (j *JSONValue) Value() interface{} {
+  if j.jsonMap != nil {
+    return j.jsonMap
+  }
+  return j.jsonArr
+}
+
+func (j *JSONValue) Object() map[string]interface{} {
+  return j.jsonMap
+}
+
+func (j *JSONValue) Array() []interface{} {
+  return j.jsonArr
+}
+
+func (j *JSONValue) ParseJSON(text string) {
   var o interface{}
   if err := json.Unmarshal([]byte(text), &o); err == nil {
-    j.store(o)
+    j.Store(o)
   } else {
     fmt.Printf("Failed to parse json with error: %s\n", err.Error())
   }
 }
 
-func (j *JSON) ParseYAML(y string) {
+func (j *JSONValue) ParseYAML(y string) {
   if o, err := yaml.YAMLToJSON([]byte(y)); err == nil {
     j.ParseJSON(string(o))
   } else {
@@ -139,7 +162,7 @@ func (j *JSON) ParseYAML(y string) {
   }
 }
 
-func (j *JSON) ToJSON() string {
+func (j *JSONValue) ToJSON() string {
   if output, err := json.Marshal(j.Value); err == nil {
     return string(output)
   } else {
@@ -148,7 +171,7 @@ func (j *JSON) ToJSON() string {
   return ""
 }
 
-func (j *JSON) ToYAML() string {
+func (j *JSONValue) ToYAML() string {
   if b, err := yaml.Marshal(j.Value); err == nil {
     return string(b)
   } else {
@@ -157,23 +180,128 @@ func (j *JSON) ToYAML() string {
   return ""
 }
 
-func (j *JSON) store(i interface{}) {
+func (j *JSONValue) Store(i interface{}) {
   i = Clone(i)
   switch v := i.(type) {
   case map[string]interface{}:
     j.jsonMap = v
-    j.Value = &j.jsonMap
   case []interface{}:
     j.jsonArr = v
-    j.Value = &j.jsonArr
   }
 }
 
-func (j *JSON) IsEmpty() bool {
+func (j *JSONValue) IsEmpty() bool {
   return j.jsonArr == nil && j.jsonMap == nil
 }
 
-func (j *JSON) FindPath(path string, join, replace, push bool) JSONField {
+func (j *JSONValue) IsObject() bool {
+  return j.jsonMap != nil
+}
+
+func (j *JSONValue) IsArray() bool {
+  return j.jsonArr != nil
+}
+
+func (j *JSONValue) ExecuteTemplates(templates []*template.Template) []interface{} {
+  data := []interface{}{}
+  for _, t := range templates {
+    data = append(data, j.ExecuteTemplate(t))
+  }
+  return data
+}
+
+func (j *JSONValue) ExecuteTemplate(t *template.Template) interface{} {
+  buf := &bytes.Buffer{}
+  if err := t.Execute(buf, j.Value()); err == nil {
+    return buf
+  } else {
+    fmt.Println(err.Error())
+  }
+  return nil
+}
+
+func (j *JSONValue) AddQueries(id int, queries []string) {
+  for _, query := range queries {
+    if q, err := gojq.Parse(query); err == nil {
+      if code, err := gojq.Compile(q); err == nil {
+        j.index.queries[id] = code
+      }
+    }
+  }
+}
+
+func (j *JSONValue) ExecuteQueries() []interface{} {
+  data := []interface{}{}
+  for _, q := range j.index.queries {
+    iter := q.Run(j.Value())
+    for {
+      if value, ok := iter.Next(); ok {
+        if err, ok := value.(error); ok {
+          fmt.Println(err)
+        } else {
+          data = append(data, value)
+        }
+      } else {
+        break
+      }
+    }
+  }
+  return data
+}
+
+func (j *JSONValue) View(paths ...string) map[string]interface{} {
+  view := map[string]interface{}{}
+  values := j.FindPaths(paths)
+  for k, v := range values {
+    view[k] = v.Value
+  }
+  return view
+}
+
+func (j *JSONValue) FindPaths(paths []string) map[string]*Value {
+  data := map[string]*Value{}
+  for _, path := range paths {
+    data[path] = j.FindPath(path)
+  }
+  return data
+}
+
+func (j *JSONValue) FindPath(path string) *Value {
+  value := &Value{Value: j.Value()}
+  currMap := j.jsonMap
+  currArr := j.jsonArr
+  pathKeys := strings.Split(path, ".")
+  for _, key := range pathKeys {
+    var next interface{}
+    if currArr != nil {
+      if i, err := strconv.Atoi(key); err == nil && i < len(currArr) {
+        next = currArr[i]
+      }
+    } else if currMap != nil {
+      next = currMap[key]
+    }
+    if next != nil {
+      value.Value = next
+    } else if next == nil {
+      return nil
+    }
+    switch v := next.(type) {
+    case map[string]interface{}:
+      currMap = v
+      currArr = nil
+      value.IsJSON = true
+    case []interface{}:
+      currArr = v
+      currMap = nil
+      value.IsJSON = true
+    default:
+      value.IsJSON = false
+    }
+  }
+  return value
+}
+
+func (j *JSONValue) FindTransformPath(path string, join, replace, push bool) JSONField {
   currMap := j.jsonMap
   currArr := j.jsonArr
   var parentMap map[string]interface{}
@@ -239,7 +367,7 @@ func (j *JSON) FindPath(path string, join, replace, push bool) JSONField {
   return jsonField
 }
 
-func (j *JSON) Transform(ts []*JSONTransform, source *JSON) bool {
+func (j *JSONValue) Transform(ts []*JSONTransform, source JSON) bool {
   transformed := false
   for i, t := range ts {
     var sourceValue interface{}
@@ -254,7 +382,7 @@ func (j *JSON) Transform(ts []*JSONTransform, source *JSON) bool {
     }
     //either source/target are different, or the given value is missing when source and target are same
     if sourceValue == nil {
-      if sourceField := source.FindPath(t.Source, t.join, t.replace, t.push); sourceField != nil && sourceField.Exists() {
+      if sourceField := source.FindTransformPath(t.Source, t.join, t.replace, t.push); sourceField != nil && sourceField.Exists() {
         sourceValue = sourceField.Read()
       }
     }
@@ -272,8 +400,8 @@ func (j *JSON) Transform(ts []*JSONTransform, source *JSON) bool {
       }
       if IsFiller(target) {
         filler, _ := GetFillerUnmarked(target)
-        j.targetPatterns[i] = []string{filler, fmt.Sprint(sourceValue)}
-      } else if targetField := j.FindPath(target, t.join, t.replace, t.push); targetField != nil {
+        j.addPatterns(i, filler, fmt.Sprint(sourceValue))
+      } else if targetField := j.FindTransformPath(target, t.join, t.replace, t.push); targetField != nil {
         targetField.Update(sourceValue)
       }
       transformed = true
@@ -282,14 +410,18 @@ func (j *JSON) Transform(ts []*JSONTransform, source *JSON) bool {
   return transformed
 }
 
-func (j *JSON) TransformPatterns(text string) string {
-  for _, p := range j.targetPatterns {
+func (j *JSONValue) TransformPatterns(text string) string {
+  for _, p := range j.index.patterns {
     if len(p) < 2 {
       continue
     }
     text = strings.ReplaceAll(text, p[0], p[1])
   }
   return text
+}
+
+func (j *JSONValue) addPatterns(id int, patterns ...string) {
+  j.index.patterns[id] = patterns
 }
 
 func (j *JSONTransform) Init() {
@@ -392,4 +524,52 @@ func AddToArray(arr []interface{}, value interface{}, at int, push bool) []inter
     newArr = append(newArr, arr[at+1:]...)
   }
   return newArr
+}
+
+func GetEmptyCopy(v interface{}) interface{} {
+  switch v.(type) {
+  case map[string]interface{}:
+    return map[string]interface{}{}
+  case []interface{}:
+    return []interface{}{}
+  }
+  return nil
+}
+
+func Clone(v interface{}) interface{} {
+  gob.Register(map[string]interface{}{})
+  gob.Register([]interface{}{})
+  buff := &bytes.Buffer{}
+  enc := gob.NewEncoder(buff)
+  dec := gob.NewDecoder(buff)
+  var err error
+  if err = enc.Encode(v); err == nil {
+    switch v.(type) {
+    case map[string]interface{}:
+      copy := map[string]interface{}{}
+      if err = dec.Decode(&copy); err == nil {
+        return copy
+      }
+    case []interface{}:
+      copy := []interface{}{}
+      if err = dec.Decode(&copy); err == nil {
+        return copy
+      }
+    }
+  }
+  if err != nil {
+    fmt.Printf("Failed to clone [%+v] with error: %s\n", v, err.Error())
+  }
+  return nil
+}
+
+func ReadJson(s string, t interface{}) error {
+  return json.Unmarshal([]byte(s), t)
+}
+
+func ToJSON(o interface{}) string {
+  if output, err := json.Marshal(o); err == nil {
+    return string(output)
+  }
+  return fmt.Sprintf("%+v", o)
 }

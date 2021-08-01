@@ -12,12 +12,15 @@ import (
   "strconv"
   "strings"
   "sync"
+  "time"
 
   "github.com/gorilla/mux"
 )
 
 type Endpoint struct {
+  URL         string
   Address     string
+  Host        string
   Port        int
   Transparent bool
   isTLS       bool
@@ -46,13 +49,27 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 }
 
 func NewEndpoint(address string, tls, transparent bool) *Endpoint {
-  addr := strings.Split(address, ":")
+  proto := ""
   port := 80
-  if len(addr) > 1 {
-    port, _ = strconv.Atoi(addr[1])
+  pieces := strings.Split(address, ":")
+  if len(pieces) > 1 {
+    port, _ = strconv.Atoi(pieces[len(pieces)-1])
   }
-  address, tls = addProto(address, tls)
-  return &Endpoint{Address: address, Port: port, isTLS: tls, Transparent: transparent}
+  if strings.HasPrefix(address, "http") {
+    proto = pieces[0] + "://"
+    if len(pieces) > 1 {
+      pieces = pieces[1:]
+      address = strings.Join(pieces, ":")
+    }
+    tls = strings.HasPrefix(address, "https")
+  } else {
+    if tls {
+      proto = "https://"
+    } else {
+      proto = "http://"
+    }
+  }
+  return &Endpoint{URL: proto + address, Address: address, Host: pieces[0], Port: port, isTLS: tls, Transparent: transparent}
 }
 
 func HasTunnel(r *http.Request, rm *mux.RouteMatch) bool {
@@ -71,38 +88,21 @@ func GetOrCreatePortTunnel(port int) *PortTunnel {
   return tunnels[port]
 }
 
-func addProto(address string, tls bool) (string, bool) {
-  proto := ""
-  if strings.HasPrefix(address, "http") {
-    pieces := strings.Split(address, ":")
-    proto = pieces[0] + "://"
-    if len(pieces) > 1 {
-      pieces = pieces[1:]
-      address = strings.Join(pieces, ":")
-    }
-    tls = strings.HasPrefix(address, "https")
-  } else {
-    if tls {
-      proto = "https://"
-    } else {
-      proto = "http://"
-    }
-  }
-  address = proto + address
-  return address, tls
-}
-
 func (pt *PortTunnel) IsEmpty() bool {
   return len(pt.Endpoints) == 0
 }
 
 func (pt *PortTunnel) addEndpoint(address string, tls, transparent bool) {
+  ep := NewEndpoint(address, tls, transparent)
   pt.lock.Lock()
   defer pt.lock.Unlock()
-  pt.Endpoints[address] = NewEndpoint(address, tls, transparent)
+  pt.Endpoints[ep.Address] = ep
 }
 
 func (pt *PortTunnel) removeEndpoint(address string) {
+  if strings.HasPrefix(address, "http") {
+    address = strings.Join(strings.Split(address, ":")[1:], ":")
+  }
   pt.lock.Lock()
   defer pt.lock.Unlock()
   if pt.Endpoints[address] != nil {
@@ -143,23 +143,22 @@ func (pt *PortTunnel) tunnel(address string, r *http.Request, w http.ResponseWri
 
 func (ep *Endpoint) sendTunnelResponse(uri string, r *http.Request, w http.ResponseWriter, resp *http.Response) {
   defer resp.Body.Close()
-  if v := r.Context().Value(util.RequestStoreKey); v != nil && v.(*util.RequestStore) != nil {
-    rs := v.(*util.RequestStore)
-    rs.TunnelLock.Lock()
-    if !rs.IsTunnelResponseSent {
-      io.Copy(w, resp.Body)
-      util.CopyHeaders("", w, resp.Header, "", "", true)
-      w.WriteHeader(resp.StatusCode)
-      rs.IsTunnelResponseSent = true
-    } else {
-      io.Copy(ioutil.Discard, resp.Body)
-    }
-    rs.TunnelLock.Unlock()
+  rs := util.GetRequestStore(r)
+  rs.TunnelLock.Lock()
+  if !rs.IsTunnelResponseSent {
+    io.Copy(w, resp.Body)
+    util.CopyHeaders("", w, resp.Header, "", "", true)
+    w.WriteHeader(resp.StatusCode)
+    rs.IsTunnelResponseSent = true
+  } else {
+    io.Copy(ioutil.Discard, resp.Body)
   }
+  rs.TunnelLock.Unlock()
 }
 
 func (ep *Endpoint) tunnel(uri, tunnelHostLabel, viaTunnelLabel string, r *http.Request, w http.ResponseWriter, wg *sync.WaitGroup) {
-  url := ep.Address + uri
+  url := ep.URL + uri
+  rs := util.GetRequestStore(r)
   isH2 := util.IsH2(r)
   util.AddLogMessage(fmt.Sprintf("Tunneled to [%s]", url), r)
   if !ep.Transparent {
@@ -167,8 +166,12 @@ func (ep *Endpoint) tunnel(uri, tunnelHostLabel, viaTunnelLabel string, r *http.
     r.Header[HeaderViaGotoTunnel] = append(r.Header[HeaderViaGotoTunnel], viaTunnelLabel)
   }
   if req, err := util.CreateRequest(r.Method, url, r.Header, nil, r.Body); err == nil {
+    req.Host = r.Host
     if ep.client == nil {
-      ep.client = util.CreateDefaultHTTPClient(fmt.Sprintf("Tunnel[%s]", ep.Address), isH2, ep.isTLS, metrics.ConnTracker)
+      ep.client = util.CreateHTTPClient(fmt.Sprintf("Tunnel[%s]", ep.Address), isH2, false, ep.isTLS,
+        rs.ServerName, rs.TLSVersionNum, 30*time.Second, 30*time.Second, 3*time.Minute, metrics.ConnTracker)
+    } else {
+      ep.client.UpdateTLSConfig(rs.ServerName, rs.TLSVersionNum)
     }
     if resp, err := ep.client.Do(req); err == nil {
       fmt.Printf("Got response from tunnel [%s]: %s\n", url, resp.Status)

@@ -8,6 +8,7 @@ import (
   "sync"
   "time"
 
+  . "goto/pkg/constants"
   "goto/pkg/events"
   "goto/pkg/metrics"
   "goto/pkg/server/intercept"
@@ -216,7 +217,7 @@ func clearStatusCounts(w http.ResponseWriter, r *http.Request) {
   events.SendRequestEvent("Response Status Counts Cleared", msg, r)
 }
 
-func (ps *PortStatus) flipflop(requestId string, requestedStatuses []int, times int, r *http.Request) int {
+func (ps *PortStatus) flipflop(requestId string, requestedStatuses []int, times int, r *http.Request, w http.ResponseWriter) int {
   flipflopConfig := ps.flipflopConfigs[requestId]
   if flipflopConfig == nil {
     flipflopConfig = &FlipFlopConfig{
@@ -232,6 +233,7 @@ func (ps *PortStatus) flipflop(requestId string, requestedStatuses []int, times 
       requestedStatus = requestedStatuses[flipflopConfig.lastStatusIndex]
       flipflopConfig.lastStatusIndex++
     } else {
+      w.Header().Add(HeaderGotoStatusFlip, strconv.Itoa(requestedStatuses[flipflopConfig.lastStatusIndex-1]))
       flipflopConfig.lastStatusIndex = 0
       delete(ps.flipflopConfigs, requestId)
     }
@@ -247,6 +249,7 @@ func (ps *PortStatus) flipflop(requestId string, requestedStatuses []int, times 
         flipflopConfig.statusCount--
       }
     } else if flipflopConfig.statusCount == 0 {
+      w.Header().Add(HeaderGotoStatusFlip, strconv.Itoa(requestedStatuses[flipflopConfig.lastStatusIndex-1]))
       requestedStatus = http.StatusOK
       flipflopConfig.statusCount--
     } else if times > 0 {
@@ -274,7 +277,7 @@ func status(w http.ResponseWriter, r *http.Request) {
   }
   portStatus.lock.Lock()
   if flipflop {
-    requestedStatus = portStatus.flipflop(requestId, requestedStatuses, times, r)
+    requestedStatus = portStatus.flipflop(requestId, requestedStatuses, times, r, w)
   } else if len(requestedStatuses) == 1 {
     requestedStatus = requestedStatuses[0]
   } else if len(requestedStatuses) > 1 {
@@ -289,13 +292,13 @@ func status(w http.ResponseWriter, r *http.Request) {
     delay = util.RandomDuration(delayMin, delayMax)
     time.Sleep(delay)
     delayText = delay.String()
-    w.Header().Add("Goto-Response-Delay", delayText)
+    w.Header().Add(HeaderGotoResponseDelay, delayText)
   }
   if flipflop {
   } else {
     util.AddLogMessage(fmt.Sprintf("Requested status [%d] with delay [%s]", requestedStatus, delayText), r)
   }
-  w.Header().Add("Goto-Requested-Status", strconv.Itoa(requestedStatus))
+  w.Header().Add(HeaderGotoRequestedStatus, strconv.Itoa(requestedStatus))
   if !IsForcedStatus(r) {
     w.WriteHeader(requestedStatus)
   }
@@ -327,9 +330,9 @@ func Middleware(next http.Handler) http.Handler {
       IncrementStatusCount(irw.StatusCode, r)
       msg := ""
       if overriddenStatus {
-        w.Header().Add("Goto-Forced-Status", strconv.Itoa(irw.StatusCode))
+        w.Header().Add(HeaderGotoForcedStatus, strconv.Itoa(irw.StatusCode))
         if ps.alwaysReportStatusCount > 0 {
-          w.Header().Add("Goto-Forced-Status-Remaining", strconv.Itoa(ps.alwaysReportStatusCount))
+          w.Header().Add(HeaderGotoForcedStatusRemaining, strconv.Itoa(ps.alwaysReportStatusCount))
         }
         msg = fmt.Sprintf("Reporting status: [%d] for URI [%s]. Remaining status count [%d].",
           irw.StatusCode, r.RequestURI, ps.alwaysReportStatusCount)

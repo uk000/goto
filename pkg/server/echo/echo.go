@@ -60,7 +60,6 @@ func echoStream(w http.ResponseWriter, r *http.Request) {
   if _, err := io.Copy(writer, r.Body); err != nil {
     fmt.Println(err.Error())
   }
-  w.Header().Add("Stream-Finished", "Echo")
 }
 
 func wsEchoHandler(w http.ResponseWriter, r *http.Request) {

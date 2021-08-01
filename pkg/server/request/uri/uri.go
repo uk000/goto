@@ -8,6 +8,7 @@ import (
   "sync"
   "time"
 
+  . "goto/pkg/constants"
   "goto/pkg/events"
   "goto/pkg/server/intercept"
   "goto/pkg/server/response/trigger"
@@ -312,7 +313,7 @@ func Middleware(next http.Handler) http.Handler {
       msg := fmt.Sprintf("Delaying URI [%s] by [%s]. Remaining delay count [%d]", uri, delay, delayTimesLeft-1)
       util.AddLogMessage(msg, r)
       events.SendRequestEvent("URI Delay Applied", msg, r)
-      w.Header().Add("Goto-Response-Delay", delay.String())
+      w.Header().Add(HeaderGotoResponseDelay, delay.String())
       time.Sleep(delay)
     }
     if next != nil {
@@ -337,9 +338,9 @@ func Middleware(next http.Handler) http.Handler {
       util.AddLogMessage(msg, r)
       events.SendRequestEvent("URI Status Applied", msg, r)
       irw.StatusCode = statusToReport
-      w.Header().Add("Goto-URI-Status", strconv.Itoa(statusToReport))
+      w.Header().Add(HeaderGotoURIStatus, strconv.Itoa(statusToReport))
       if uriStatus.Times > 0 {
-        w.Header().Add("Goto-URI-Status-Remaining", strconv.Itoa(uriStatus.Times))
+        w.Header().Add(HeaderGotoURIStatusRemaining, strconv.Itoa(uriStatus.Times))
       }
     }
     if irw.StatusCode == 0 {

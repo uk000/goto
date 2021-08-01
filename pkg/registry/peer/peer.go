@@ -3,6 +3,7 @@ package peer
 import (
   "fmt"
   "goto/pkg/client/target"
+  . "goto/pkg/constants"
   "goto/pkg/events"
   "goto/pkg/global"
   "goto/pkg/job"
@@ -33,7 +34,7 @@ func RegisterPeer(peerName, peerAddress string) {
     registered := false
     retries := 0
     for !registered && retries < 6 {
-      if resp, err := http.Post(global.RegistryURL+"/registry/peers/add", "application/json",
+      if resp, err := http.Post(global.RegistryURL+"/registry/peers/add", ContentTypeJSON,
         strings.NewReader(util.ToJSON(peer))); err == nil {
         defer resp.Body.Close()
         if resp.StatusCode == 200 || resp.StatusCode == 202 {
@@ -88,7 +89,7 @@ func startRegistryReminder(peer *registry.Peer) {
       return
     case <-time.Tick(5 * time.Second):
       url := global.RegistryURL + "/registry/peers/" + peer.Name + "/remember"
-      if resp, err := http.Post(url, "application/json", strings.NewReader(util.ToJSON(peer))); err == nil {
+      if resp, err := http.Post(url, ContentTypeJSON, strings.NewReader(util.ToJSON(peer))); err == nil {
         util.CloseResponse(resp)
         if global.EnableRegistryReminderLogs {
           log.Printf("Sent reminder to registry at [%s] as peer %s address %s\n", global.RegistryURL, peer.Name, peer.Address)
