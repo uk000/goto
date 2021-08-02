@@ -256,6 +256,11 @@ The application accepts the following command arguments:
           <td rowspan="1">1s</td>
         </tr>
         <tr>
+          <td rowspan="1"><pre>--startupScript {shell command}</pre></td>
+          <td>List of shell commands to execute at goto startup. Multiple commands are specified by passing multiple instances of this arg. The commands are joined with ';' as separator and executed using 'sh -c'. </td>
+          <td rowspan="1"></td>
+        </tr>
+        <tr>
           <td rowspan="2"><pre>--registry {url}</pre></td>
           <td>URL of the Goto Registry instance that this instance should connect to. </td>
           <td rowspan="2"> "" </td>

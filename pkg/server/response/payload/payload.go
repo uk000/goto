@@ -642,17 +642,22 @@ func (pr *PortResponse) unsafeGetResponsePayload(r *http.Request) (*ResponsePayl
   found := false
   for uri, rp := range pr.allURIResponsePayloads {
     if rp.uriRegexp.MatchString(r.RequestURI) {
-      if pr.ResponsePayloadByURIAndHeaders[uri] != nil {
+      if !found && pr.ResponsePayloadByURIAndHeaders[uri] != nil {
         payload, found = getPayloadForKV(r.Header, pr.ResponsePayloadByURIAndHeaders[uri])
-      } else if pr.ResponsePayloadByURIAndQuery[uri] != nil {
+      }
+      if !found && pr.ResponsePayloadByURIAndQuery[uri] != nil {
         payload, found = getPayloadForKV(r.URL.Query(), pr.ResponsePayloadByURIAndQuery[uri])
-      } else if pr.ResponsePayloadByURIAndBody[uri] != nil {
+      }
+      if !found && pr.ResponsePayloadByURIAndBody[uri] != nil {
         payload, found = getPayloadForBodyMatch(r, pr.ResponsePayloadByURIAndBody[uri])
-      } else {
-        payload = rp
+      }
+      if !found && pr.ResponsePayloadByURIs[uri] != nil {
+        payload = pr.ResponsePayloadByURIs[uri]
         found = true
       }
-      break
+      if found {
+        break
+      }
     }
   }
   if !found {

@@ -16,6 +16,17 @@ var (
   Commit  string
 )
 
+type ListArg []string
+
+func (l *ListArg) String() string {
+  return strings.Join(*l, " ")
+}
+
+func (l *ListArg) Set(value string) error {
+  *l = append(*l, value)
+  return nil
+}
+
 func Execute() {
   log.SetFlags(log.LstdFlags | log.Lmicroseconds)
   log.Printf("Version: %s, Commit: %s\n", Version, Commit)
@@ -23,6 +34,7 @@ func Execute() {
   global.Version = Version
   global.Commit = Commit
   portsList := ""
+  var startupScript ListArg
   flag.IntVar(&global.ServerPort, "port", 8080, "Primary HTTP Server Listen Port")
   flag.StringVar(&portsList, "ports", "", "Comma-separated list of <port/protocol>. First port acts as primary HTTP port")
   flag.StringVar(&global.PeerName, "label", "", "Default Server Label")
@@ -50,6 +62,7 @@ func Execute() {
   flag.BoolVar(&global.LogResponseHeaders, "logResponseHeaders", false, "Enable/Disable logging of response headers")
   flag.BoolVar(&global.LogResponseBody, "logResponseBody", false, "Enable/Disable logging of response body")
   flag.BoolVar(&global.LogResponseMiniBody, "logResponseMiniBody", false, "Enable/Disable logging of response mini body")
+  flag.Var(&startupScript, "startupScript", "Script to execute at startup")
   flag.Parse()
 
   if portsList != "" {
@@ -121,5 +134,8 @@ func Execute() {
     log.Printf("Will read certs from [%s]\n", global.CertPath)
   }
   log.Printf("Server startupDelay [%s] shutdownDelay [%s]\n", global.StartupDelay, global.ShutdownDelay)
+  if startupScript != nil {
+    global.StartupScript = startupScript
+  }
   server.Run()
 }

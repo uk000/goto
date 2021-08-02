@@ -14,6 +14,7 @@ import (
   "log"
   "net/http"
   "os"
+  "os/exec"
   "os/signal"
   "strings"
   "syscall"
@@ -54,7 +55,8 @@ func RunHttpServer(handlers ...util.ServerHandler) {
     ErrorLog:     log.New(ioutil.Discard, "discard", 0),
   }
   StartHttpServer(httpServer)
-  go listeners.StartInitialListeners()
+  listeners.StartInitialListeners()
+  RunStartupScript()
   peer.RegisterPeer(global.PeerName, global.PeerAddress)
   events.SendEventJSONDirect("Server Started", global.HostLabel, listeners.GetListeners())
   WaitForHttpServer(httpServer)
@@ -65,13 +67,29 @@ func StartHttpServer(server *http.Server) {
     log.Printf("Sleeping %s before starting", global.StartupDelay)
     time.Sleep(global.StartupDelay)
   }
+  events.StartSender()
   go func() {
     log.Printf("Server %s ready", server.Addr)
-    events.StartSender()
     if err := server.ListenAndServe(); err != nil {
       log.Println(err)
     }
   }()
+}
+
+func RunStartupScript() {
+  if len(global.StartupScript) > 0 {
+    command := "sh"
+    args := []string{"-c", strings.Join(global.StartupScript, "; ")}
+    realCmd := command + " " + strings.Join(args, " ")
+    cmd := exec.Command(command, args...)
+    cmd.Stdout = os.Stdout
+    cmd.Stderr = os.Stderr
+    if err := cmd.Run(); err != nil {
+      log.Printf("Failed to run startup command [%s]. Error: [%s]\n", realCmd, err.Error())
+    } else {
+      log.Printf("Startup command [%s] ran successfully.\n", realCmd)
+    }
+  }
 }
 
 func ServeHTTPListener(l *listeners.Listener) {
