@@ -17,22 +17,30 @@ import (
   "time"
 
   "github.com/gorilla/mux"
+  "k8s.io/client-go/util/jsonpath"
 )
 
+type BodyPath struct {
+  Path       string `json:"path"`
+  CaptureKey string `json:"captureKey"`
+}
+
 type ResponsePayload struct {
-  Payload          string   `json:"payload"`
-  ContentType      string   `json:"contentType"`
-  URIMatch         string   `json:"uriMatch"`
-  HeaderMatch      string   `json:"headerMatch"`
-  HeaderValueMatch string   `json:"headerValueMatch"`
-  QueryMatch       string   `json:"queryMatch"`
-  QueryValueMatch  string   `json:"queryValueMatch"`
-  BodyMatch        []string `json:"bodyMatch"`
-  URICaptureKeys   []string `json:"uriCaptureKeys"`
-  HeaderCaptureKey string   `json:"headerCaptureKey"`
-  QueryCaptureKey  string   `json:"queryCaptureKey"`
+  Payload          string      `json:"payload"`
+  ContentType      string      `json:"contentType"`
+  URIMatch         string      `json:"uriMatch"`
+  HeaderMatch      string      `json:"headerMatch"`
+  HeaderValueMatch string      `json:"headerValueMatch"`
+  QueryMatch       string      `json:"queryMatch"`
+  QueryValueMatch  string      `json:"queryValueMatch"`
+  BodyMatch        []string    `json:"bodyMatch"`
+  BodyPaths        []*BodyPath `json:"bodyPaths"`
+  URICaptureKeys   []string    `json:"uriCaptureKeys"`
+  HeaderCaptureKey string      `json:"headerCaptureKey"`
+  QueryCaptureKey  string      `json:"queryCaptureKey"`
   uriRegexp        *regexp.Regexp
   bodyMatchRegexp  *regexp.Regexp
+  bodyJsonPaths    []*jsonpath.JSONPath
   fillers          []string
   router           *mux.Router
 }
@@ -55,6 +63,7 @@ var (
   rootRouter    *mux.Router
   matchRouter   *mux.Router
   payloadKey    = &util.ContextKey{"payloadKey"}
+  captureKey    = &util.ContextKey{"captureKey"}
   responseLock  sync.RWMutex
 )
 
@@ -73,7 +82,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRouteWithPort(payloadRouter, "/set/query/{q}={value}", setResponsePayload, "POST")
   util.AddRouteQWithPort(payloadRouter, "/set/query/{q}", setResponsePayload, "uri", "{uri}", "POST")
   util.AddRouteWithPort(payloadRouter, "/set/query/{q}", setResponsePayload, "POST")
-  util.AddRouteQWithPort(payloadRouter, "/set/body~{keywords}", setResponsePayload, "uri", "{uri}", "POST")
+  util.AddRouteQWithPort(payloadRouter, "/set/body~{regexes}", setResponsePayload, "uri", "{uri}", "POST")
+  util.AddRouteQWithPort(payloadRouter, "/set/body/paths/{paths}", setResponsePayload, "uri", "{uri}", "POST")
   util.AddRouteWithPort(payloadRouter, "/clear", clearResponsePayload, "POST")
   util.AddRouteWithPort(payloadRouter, "", getResponsePayload, "GET")
   util.AddRoute(root, "/payload/{size}", respondWithPayload, "GET", "PUT", "POST")
@@ -98,7 +108,7 @@ func (pr *PortResponse) init() {
   matchRouter = rootRouter.NewRoute().Subrouter()
 }
 
-func newResponsePayload(payload, contentType, uri, header, query, value string, bodyMatch []string) (*ResponsePayload, error) {
+func newResponsePayload(payload, contentType, uri, header, query, value string, bodyRegexes []string, paths []string) (*ResponsePayload, error) {
   if contentType == "" {
     contentType = "application/json"
   }
@@ -128,6 +138,26 @@ func newResponsePayload(payload, contentType, uri, header, query, value string, 
     queryValueMatch = value
   }
 
+  bodyPaths := []*BodyPath{}
+  bodyJsonPaths := []*jsonpath.JSONPath{}
+  for _, path := range paths {
+    pathKV := strings.Split(path, "=")
+    path = pathKV[0]
+    key := ""
+    if len(pathKV) > 1 {
+      key, _ = util.GetFillerUnmarked(pathKV[1])
+    }
+    jp := jsonpath.New(path)
+    jp.Parse("{" + path + "}")
+    bodyJsonPaths = append(bodyJsonPaths, jp)
+    bodyPaths = append(bodyPaths, &BodyPath{Path: path, CaptureKey: key})
+  }
+
+  var bodyMatchRegexp *regexp.Regexp
+  if len(bodyRegexes) > 0 {
+    bodyMatchRegexp = regexp.MustCompile("(?i)" + strings.Join(bodyRegexes, ".*") + ".*")
+  }
+
   return &ResponsePayload{
     Payload:          payload,
     ContentType:      contentType,
@@ -136,9 +166,11 @@ func newResponsePayload(payload, contentType, uri, header, query, value string, 
     HeaderValueMatch: headerValueMatch,
     QueryMatch:       query,
     QueryValueMatch:  queryValueMatch,
-    BodyMatch:        bodyMatch,
+    BodyMatch:        bodyRegexes,
+    BodyPaths:        bodyPaths,
     uriRegexp:        uriRegExp,
-    bodyMatchRegexp:  regexp.MustCompile("(?i)" + strings.Join(bodyMatch, ".*") + ".*"),
+    bodyMatchRegexp:  bodyMatchRegexp,
+    bodyJsonPaths:    bodyJsonPaths,
     URICaptureKeys:   util.GetFillersUnmarked(uri),
     HeaderCaptureKey: headerCaptureKey,
     QueryCaptureKey:  queryCaptureKey,
@@ -167,7 +199,7 @@ func (pr *PortResponse) setDefaultResponsePayload(payload, contentType string, s
   if size > 0 {
     payload = fixPayload(payload, size)
   }
-  pr.DefaultResponsePayload, _ = newResponsePayload(payload, contentType, "", "", "", "", nil)
+  pr.DefaultResponsePayload, _ = newResponsePayload(payload, contentType, "", "", "", "", nil, nil)
 }
 
 func (pr *PortResponse) unsafeIsURIMapped(uri string) bool {
@@ -186,7 +218,7 @@ func (pr *PortResponse) setURIResponsePayload(uri, payload, contentType string) 
   defer pr.lock.Unlock()
   uri = strings.ToLower(uri)
   if payload != "" {
-    if rp, err := newResponsePayload(payload, contentType, uri, "", "", "", nil); err == nil {
+    if rp, err := newResponsePayload(payload, contentType, uri, "", "", "", nil, nil); err == nil {
       pr.ResponsePayloadByURIs[uri] = rp
       pr.allURIResponsePayloads[uri] = rp
     } else {
@@ -208,7 +240,7 @@ func (pr *PortResponse) setHeaderResponsePayload(header, value, payload, content
     if pr.ResponsePayloadByHeaders[header] == nil {
       pr.ResponsePayloadByHeaders[header] = map[string]*ResponsePayload{}
     }
-    rp, _ := newResponsePayload(payload, contentType, "", header, "", value, nil)
+    rp, _ := newResponsePayload(payload, contentType, "", header, "", value, nil, nil)
     pr.ResponsePayloadByHeaders[header][rp.HeaderValueMatch] = rp
   } else if pr.ResponsePayloadByHeaders[header] != nil {
     if _, present := util.GetFillerUnmarked(value); present {
@@ -232,7 +264,7 @@ func (pr *PortResponse) setQueryResponsePayload(query, value, payload, contentTy
     if pr.ResponsePayloadByQuery[query] == nil {
       pr.ResponsePayloadByQuery[query] = map[string]*ResponsePayload{}
     }
-    rp, _ := newResponsePayload(payload, contentType, "", "", query, value, nil)
+    rp, _ := newResponsePayload(payload, contentType, "", "", query, value, nil, nil)
     pr.ResponsePayloadByQuery[query][rp.QueryValueMatch] = rp
   } else if pr.ResponsePayloadByQuery[query] != nil {
     if _, present := util.GetFillerUnmarked(value); present {
@@ -260,7 +292,7 @@ func (pr *PortResponse) setResponsePayloadForURIWithHeader(uri, header, value, p
     if pr.ResponsePayloadByURIAndHeaders[uri][header] == nil {
       pr.ResponsePayloadByURIAndHeaders[uri][header] = map[string]*ResponsePayload{}
     }
-    if rp, err := newResponsePayload(payload, contentType, uri, header, "", value, nil); err == nil {
+    if rp, err := newResponsePayload(payload, contentType, uri, header, "", value, nil, nil); err == nil {
       pr.ResponsePayloadByURIAndHeaders[uri][header][rp.HeaderValueMatch] = rp
       pr.allURIResponsePayloads[uri] = rp
     } else {
@@ -299,7 +331,7 @@ func (pr *PortResponse) setResponsePayloadForURIWithQuery(uri, query, value, pay
     if pr.ResponsePayloadByURIAndQuery[uri][query] == nil {
       pr.ResponsePayloadByURIAndQuery[uri][query] = map[string]*ResponsePayload{}
     }
-    if rp, err := newResponsePayload(payload, contentType, uri, "", query, value, nil); err == nil {
+    if rp, err := newResponsePayload(payload, contentType, uri, "", query, value, nil, nil); err == nil {
       pr.ResponsePayloadByURIAndQuery[uri][query][rp.QueryValueMatch] = rp
       pr.allURIResponsePayloads[uri] = rp
     } else {
@@ -325,25 +357,34 @@ func (pr *PortResponse) setResponsePayloadForURIWithQuery(uri, query, value, pay
   return nil
 }
 
-func (pr *PortResponse) setResponsePayloadForURIWithBody(uri, keywords, payload, contentType string) error {
+func (pr *PortResponse) setResponsePayloadForURIWithBodyMatch(uri, match, payload, contentType string, isPaths bool) error {
   pr.lock.Lock()
   defer pr.lock.Unlock()
   uri = strings.ToLower(uri)
-  keywords = strings.ToLower(keywords)
+  if !isPaths {
+    match = strings.ToLower(match)
+  }
   if payload != "" {
-    bodyMatch := strings.Split(keywords, ",")
-    if rp, err := newResponsePayload(payload, contentType, uri, "", "", "", bodyMatch); err == nil {
+    var rp *ResponsePayload
+    var err error
+    bodyMatch := strings.Split(match, ",")
+    if isPaths {
+      rp, err = newResponsePayload(payload, contentType, uri, "", "", "", nil, bodyMatch)
+    } else {
+      rp, err = newResponsePayload(payload, contentType, uri, "", "", "", bodyMatch, nil)
+    }
+    if err == nil {
       if pr.ResponsePayloadByURIAndBody[uri] == nil {
         pr.ResponsePayloadByURIAndBody[uri] = map[string]*ResponsePayload{}
       }
-      pr.ResponsePayloadByURIAndBody[uri][keywords] = rp
+      pr.ResponsePayloadByURIAndBody[uri][match] = rp
       pr.allURIResponsePayloads[uri] = rp
     } else {
       return err
     }
   } else if pr.ResponsePayloadByURIAndBody[uri] != nil {
-    if pr.ResponsePayloadByURIAndBody[uri][keywords] != nil {
-      delete(pr.ResponsePayloadByURIAndBody[uri], keywords)
+    if pr.ResponsePayloadByURIAndBody[uri][match] != nil {
+      delete(pr.ResponsePayloadByURIAndBody[uri], match)
     }
     if len(pr.ResponsePayloadByURIAndBody[uri]) == 0 {
       delete(pr.ResponsePayloadByURIAndBody, uri)
@@ -379,7 +420,8 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
   header := util.GetStringParamValue(r, "header")
   query := util.GetStringParamValue(r, "q")
   value := util.GetStringParamValue(r, "value")
-  keywords := util.GetStringParamValue(r, "keywords")
+  regexes := util.GetStringParamValue(r, "regexes")
+  paths := util.GetStringParamValue(r, "paths")
   if header != "" && uri != "" {
     if err := pr.setResponsePayloadForURIWithHeader(uri, header, value, payload, contentType); err == nil {
       msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] and header [%s : %s] : [%s: %s]",
@@ -396,13 +438,17 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
       msg = fmt.Sprintf("Port [%s] Failed to set payload for URI [%s] and query [%s : %s] : [%s: %s] with error [%s]",
         port, uri, query, value, contentType, payload, err.Error())
     }
-  } else if uri != "" && keywords != "" {
-    if err := pr.setResponsePayloadForURIWithBody(uri, keywords, payload, contentType); err == nil {
-      msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] and keywords [%+v] : [%s: %s]",
-        port, uri, keywords, contentType, payload)
+  } else if uri != "" && (regexes != "" || paths != "") {
+    match := regexes
+    if match == "" {
+      match = paths
+    }
+    if err := pr.setResponsePayloadForURIWithBodyMatch(uri, match, payload, contentType, paths != ""); err == nil {
+      msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] and match [%+v] : [%s: %s]",
+        port, uri, match, contentType, payload)
     } else {
-      msg = fmt.Sprintf("Port [%s] Failed to set payload for URI [%s] and keywords [%+v] : [%s: %s] with error [%s]",
-        port, uri, keywords, contentType, payload, err.Error())
+      msg = fmt.Sprintf("Port [%s] Failed to set payload for URI [%s] and match [%+v] : [%s: %s] with error [%s]",
+        port, uri, match, contentType, payload, err.Error())
     }
   } else if uri != "" {
     pr.setURIResponsePayload(uri, payload, contentType)
@@ -595,7 +641,7 @@ func getPayloadForKV(kvMap map[string][]string, payloadMap map[string]map[string
   return nil, false
 }
 
-func getFilledPayload(rp *ResponsePayload, r *http.Request) string {
+func getFilledPayload(rp *ResponsePayload, r *http.Request, captures map[string]string) string {
   vars := mux.Vars(r)
   payload := rp.Payload
   for _, key := range rp.URICaptureKeys {
@@ -615,30 +661,59 @@ func getFilledPayload(rp *ResponsePayload, r *http.Request) string {
       }
     }
   }
+  for k, v := range captures {
+    payload = strings.Replace(payload, util.GetFillerMarked(k), v, -1)
+  }
   return payload
 }
 
-func getPayloadForBodyMatch(r *http.Request, bodyMatches map[string]*ResponsePayload) (*ResponsePayload, bool) {
-  if len(bodyMatches) == 0 {
-    return nil, false
+func getPayloadForBodyMatch(r *http.Request, bodyMatchResponses map[string]*ResponsePayload) (*ResponsePayload, map[string]string, bool) {
+  if len(bodyMatchResponses) == 0 {
+    return nil, nil, false
   }
-  body := strings.ToLower(util.Read(r.Body))
+  body := util.Read(r.Body)
+  lowerBody := strings.ToLower(body)
   var matchedResponsePayload *ResponsePayload
-  for _, rp := range bodyMatches {
-    if rp.bodyMatchRegexp.MatchString(body) {
+  var captures map[string]string
+  for _, rp := range bodyMatchResponses {
+    if rp.bodyMatchRegexp != nil && rp.bodyMatchRegexp.MatchString(lowerBody) {
       matchedResponsePayload = rp
       break
+    } else if len(rp.bodyJsonPaths) > 0 {
+      allMatched := true
+      captures = map[string]string{}
+      var data map[string]interface{}
+      if err := util.ReadJson(body, &data); err == nil {
+        for i, jp := range rp.bodyJsonPaths {
+          if matches, err := jp.FindResults(data); err == nil && len(matches) > 0 && len(matches[0]) > 0 {
+            if rp.BodyPaths[i].CaptureKey != "" {
+              captures[rp.BodyPaths[i].CaptureKey] = fmt.Sprintf("%v", matches[0][0].Interface())
+            }
+          } else {
+            allMatched = false
+            break
+          }
+        }
+      } else {
+        allMatched = false
+        break
+      }
+      if allMatched {
+        matchedResponsePayload = rp
+        break
+      }
     }
   }
   r.Body = ioutil.NopCloser(strings.NewReader(body))
   if matchedResponsePayload != nil {
-    return matchedResponsePayload, true
+    return matchedResponsePayload, captures, true
   }
-  return nil, false
+  return nil, nil, false
 }
 
-func (pr *PortResponse) unsafeGetResponsePayload(r *http.Request) (*ResponsePayload, bool) {
+func (pr *PortResponse) unsafeGetResponsePayload(r *http.Request) (*ResponsePayload, map[string]string, bool) {
   var payload *ResponsePayload
+  var captures map[string]string
   found := false
   for uri, rp := range pr.allURIResponsePayloads {
     if rp.uriRegexp.MatchString(r.RequestURI) {
@@ -649,7 +724,7 @@ func (pr *PortResponse) unsafeGetResponsePayload(r *http.Request) (*ResponsePayl
         payload, found = getPayloadForKV(r.URL.Query(), pr.ResponsePayloadByURIAndQuery[uri])
       }
       if !found && pr.ResponsePayloadByURIAndBody[uri] != nil {
-        payload, found = getPayloadForBodyMatch(r, pr.ResponsePayloadByURIAndBody[uri])
+        payload, captures, found = getPayloadForBodyMatch(r, pr.ResponsePayloadByURIAndBody[uri])
       }
       if !found && pr.ResponsePayloadByURIs[uri] != nil {
         payload = pr.ResponsePayloadByURIs[uri]
@@ -670,13 +745,13 @@ func (pr *PortResponse) unsafeGetResponsePayload(r *http.Request) (*ResponsePayl
     payload = pr.DefaultResponsePayload
     found = true
   }
-  return payload, found
+  return payload, captures, found
 }
 
-func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload) {
+func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload, captures map[string]string) {
   payload := ""
   contentType := ""
-  payload = getFilledPayload(rp, r)
+  payload = getFilledPayload(rp, r, captures)
   contentType = rp.ContentType
   length := strconv.Itoa(len(payload))
   w.Header().Set("Content-Length", length)
@@ -691,7 +766,7 @@ func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload)
 }
 
 func handleURI(w http.ResponseWriter, r *http.Request) {
-  processPayload(w, r, r.Context().Value(payloadKey).(*ResponsePayload))
+  processPayload(w, r, r.Context().Value(payloadKey).(*ResponsePayload), r.Context().Value(captureKey).(map[string]string))
 }
 
 func Middleware(next http.Handler) http.Handler {
@@ -706,14 +781,15 @@ func Middleware(next http.Handler) http.Handler {
     if !util.IsPayloadRequest(r) {
       pr := getPortResponse(r)
       pr.lock.RLock()
-      rp, found := pr.unsafeGetResponsePayload(r)
+      rp, captures, found := pr.unsafeGetResponsePayload(r)
       pr.lock.RUnlock()
       if found {
         payload = rp
         if rp.router != nil {
-          rp.router.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), payloadKey, payload)))
+          rp.router.ServeHTTP(w, r.WithContext(context.WithValue(
+            context.WithValue(r.Context(), payloadKey, payload), captureKey, captures)))
         } else {
-          processPayload(w, r, rp)
+          processPayload(w, r, rp, captures)
         }
       }
     }

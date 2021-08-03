@@ -18,6 +18,7 @@ go build -o goto .
 - Say you need an application deployed as a service in k8s or on VMs, that can respond to requests on several ports using HTTP, HTTP/2, GRPC or TCP protocols both over plain text and TLS. `Goto` is what you need.
 - Say you want to test a client or a proxy, and want to introduce some chaos in your testing, so you need a service that can open or close a port on the fly, or can convert a port from plaintext to TLS and vice versa on the fly. `Goto` does it.
 - Say you need to test a client against different specific response payloads, so you need a substitute mock service that can stand in for the real service, where you can configure a payload on the fly for specific request URIs, headers, etc. Go `Goto`.
+- You need a test server application that can perform some quick on-the-fly transformations on incoming request, extracting values from headers/query/URI/body and produce semi-dynamic response based on templates.
 - A lot more scenarios can benefit from `goto`. See some more scenarios further below in the doc.
 
 ## Some simple usage examples?
@@ -131,7 +132,7 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 
 It's an HTTP client and server built into a single application. 
 
-As a server, it can act as an HTTP proxy that lets you intercept HTTP requests and get some insights (e.g. based on headers) before forwarding it to its destination. But it can also respond to requests as a server all by itself, while still capturing interesting stats and counters that can be used to correlate information against the client.
+As a server, it can act as an HTTP proxy that lets you intercept HTTP requests and get some insights (e.g. based on headers) before forwarding it to its destination. But it can also respond to requests as a server all by itself, while still capturing interesting stats and counters that can be used to correlate information against the client. The server can also extract values from the incoming request's headers/query/URI/body and produce semi-dynamic response based on pre-configured templates.
 
 As a client, it allows sending requests to various destinations and tracking responses by headers and response status code.
 
@@ -212,7 +213,7 @@ go build -o goto .
 
 The application accepts the following command arguments:
 
-<table>
+<table style="font-size: 0.9em;">
     <thead>
         <tr>
             <th>Argument</th>
@@ -231,11 +232,11 @@ The application accepts the following command arguments:
         </tr>
         <tr>
           <td rowspan="2"><pre>--ports {ports}</pre></td>
-          <td>Initial list of ports that the server should start with. Port list is given as comma-separated list of <pre>{port1},{port2}/{protocol2}/{commonName2},{port3}/{protocol3}/{commonName3},...</pre> The first port in the list is used as the primary port and is forced to be HTTP. Supported protocols: <pre>http, https, tcp, tls (implies tcp+tls), and grpc</pre>. </td>
+          <td>Initial list of ports that the server should start with. Port list is given as comma-separated list of <pre>{port1},<br/>{port2}/{protocol2}/{commonName2},<br/>{port3}/{protocol3}/{commonName3},...</pre> The first port in the list is used as the primary port and is forced to be HTTP. Supported protocols: <pre>http, https, tcp, <br/>tls (implies tcp+tls), and grpc</pre>. </td>
           <td rowspan="2">""</td>
         </tr>
         <tr>
-          <td>* For example: <pre>--ports 8080,,8081/http,8083/https,8443/https/foo.com,8000/tcp,9000/tls,10000/grpc</pre> Protocol is optional, and defaults to http. E.g., to open multiple http ports: <pre>--ports 8080,8081,8082</pre>. CommonName is optional and used only for HTTPS or TCP/TLS ports. If not given, CommonName defaults to <strong>goto.goto</strong>.  Additional ports can be opened by making listener API calls on this port. See <a href="#-listeners">Listeners</a> feature for more details.</td>
+          <td>* For example: <pre>--ports 8080,<br/>8081/http,8083/https,<br/>8443/https/foo.com,8000/tcp,<br/>9000/tls,10000/grpc</pre> Protocol is optional, and defaults to http. E.g., to open multiple http ports: <pre>--ports 8080,8081,8082</pre>. CommonName is optional and used only for HTTPS or TCP/TLS ports. If not given, CommonName defaults to <strong>goto.goto</strong>.  Additional ports can be opened by making listener API calls on this port. See <a href="#-listeners">Listeners</a> feature for more details.</td>
         </tr>
         <tr>
           <td rowspan="2"><pre>--label `{label}`</pre></td>
@@ -246,17 +247,17 @@ The application accepts the following command arguments:
           <td>* This is used both for setting Goto's default response headers as well as when registering with the registry.</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--startupDelay {delay}</pre></td>
+          <td rowspan="1"><pre>--startupDelay<br/> {delay}</pre></td>
           <td>Delay the startup by this duration. </td>
           <td rowspan="1">1s</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--shutdownDelay {delay}</pre></td>
+          <td rowspan="1"><pre>--shutdownDelay<br/> {delay}</pre></td>
           <td>Delay the shutdown by this duration after receiving SIGTERM. </td>
           <td rowspan="1">1s</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--startupScript {shell command}</pre></td>
+          <td rowspan="1"><pre>--startupScript<br/> {shell command}</pre></td>
           <td>List of shell commands to execute at goto startup. Multiple commands are specified by passing multiple instances of this arg. The commands are joined with ';' as separator and executed using 'sh -c'. </td>
           <td rowspan="1"></td>
         </tr>
@@ -269,7 +270,7 @@ The application accepts the following command arguments:
           <td>* This is used to get initial configs and optionally report results to the Goto registry. See <a href="#registry-features">Registry</a> feature for more details.</td>
         </tr>
         <tr>
-          <td rowspan="2"><pre>--locker={true|false}</pre></td>
+          <td rowspan="2"><pre>--locker<br/>={true|false}</pre></td>
           <td> Whether this instance should report its results back to the Goto Registry. </td>
           <td rowspan="2"> false </td>
         </tr>
@@ -277,7 +278,7 @@ The application accepts the following command arguments:
           <td>* An instance can be asked to report its results to the Goto registry in case the  instance is transient, e.g. pods.</td>
         </tr>
         <tr>
-          <td rowspan="2"><pre>--events={true|false}</pre></td>
+          <td rowspan="2"><pre>--events<br/>={true|false}</pre></td>
           <td> Whether this instance should generate events and build a timeline locally. </td>
           <td rowspan="2"> true </td>
         </tr>
@@ -285,7 +286,7 @@ The application accepts the following command arguments:
           <td>* Events timeline can be helpful in observing how various operations and traffic were interleaved, and help reason about some outcome.</td>
         </tr>
         <tr>
-          <td rowspan="2"><pre>--publishEvents={true|false}</pre></td>
+          <td rowspan="2"><pre>--publishEvents<br/>={true|false}</pre></td>
           <td> Whether this instance should publish its events to the registry to let registry build a unified timeline of events collected from various peer instances. This flag takes effect only if a registry URL is specified to let this instance connect to a registry instance. </td>
           <td rowspan="2"> false </td>
         </tr>
@@ -301,87 +302,87 @@ The application accepts the following command arguments:
           <td>* The loaded root certificates are used if available, otherwise system default root certs are used.</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--serverLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--serverLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable all goto server logging. </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--adminLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--adminLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of admin calls to configure goto. </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--metricsLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--metricsLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of calls to metrics URIs. </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--probeLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--probeLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of requests received for URIs configured as liveness and readiness probes. See <a href="#server-probes">Probes</a> for more details. </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--clientLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--clientLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of client activities. </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--invocationLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--invocationLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable client's target invocation logs. </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--registryLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--registryLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable all registry logs. </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--lockerLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--lockerLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of locker requests on Registry instance. </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--eventsLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--eventsLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of store event calls from peers on Registry instance. </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--reminderLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--reminderLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable reminder logs received from various peer instances (applicable to goto instances acting as registry). </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--peerHealthLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--peerHealthLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of requests received from Registry for peer health checks </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--logRequestHeaders={true|false}</pre></td>
+          <td rowspan="1"><pre>--logRequestHeaders<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of request headers </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--logRequestBody={true|false}</pre></td>
+          <td rowspan="1"><pre>--logRequestBody<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of request body </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--logRequestMiniBody={true|false}</pre></td>
+          <td rowspan="1"><pre>--logRequestMiniBody<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of request mini body </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--logResponseHeaders={true|false}</pre></td>
+          <td rowspan="1"><pre>--logResponseHeaders<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of response headers </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--logResponseBody={true|false}</pre></td>
+          <td rowspan="1"><pre>--logResponseBody<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of response body </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--logResponseMiniBody={true|false}</pre></td>
+          <td rowspan="1"><pre>--logResponseMiniBody<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of response mini body </td>
           <td rowspan="1">true</td>
         </tr>
@@ -1978,16 +1979,18 @@ Custom response payload can be set for any of the following request categories:
 5. Requests matching URI + header combinations
 6. Requests matching URI + query combinations
 7. Requests matching URI + one or more keywords in request body
+8. Requests matching URI + one or more JSON paths in request body
    
 If a request matches multiple configured responses, a response is picked based on the following priority order:
 1. URI + headers combination match 
 2. URI + query combination match
 3. URI + body keywords combination match
-4. URI match
-5. Headers match
-6. Query match
-7. If no other match found and a default payload is configured, the default payload is served
-8. If no match is found and no default payload is configured, the request proceeds for eventual catch-all response.
+4. URI + body JSON paths match
+5. URI match
+6. Headers match
+7. Query match
+8. If no other match found and a default payload is configured, the default payload is served
+9. If no match is found and no default payload is configured, the request proceeds for eventual catch-all response.
 
 ### Auto-generated random response payload
 Random payload generation can be configured for the `default` payload that applies to all URIs that don't have a custom payload defined. Random payload generation is configured by specifying a payload size using URI `/response/payload/set/default/`{size}`` and not setting any payload. If a custom default payload is set as well as the size is configured, the custom payload will be adjusted to match the set size by either trimming the custom payload or appending more characters to the custom payload. Payload size can be a numeric value or use common byte size conventions: `K`, `KB`, `M`, `MB`. There is no limit on the payload size as such, it's only limited by the memory available to the `goto` process.
@@ -1998,13 +2001,13 @@ If no custom payload is configured, the request proceeds with its normal process
 - Bypass URIs
 
 When a request is matched with a configured payload (custom or default), the request is not processed further except:
-- assigning the configured or requested response status code (either requested via `/status/`{status}`` call or configured via `/response/status/set/`{status}``)
+- assigning the configured or requested response status code (either requested via `/status/{status}` call or configured via `/response/status/set/{status}`)
 - applying response delay, either requested via `/delay` call or configured via `/response/delay/set/{delay}` API.
 
 
 ### Capturing values from the request to use in the response payload
 
- To capture a value from URI/Header/Query, use the `{var}` syntax in the match criteria as well as in the payload. The occurrences of `{var}` in the response payload will be replaced with the value of that var as captured from the URI/Header/Query. Additionally, `{var}` allows for URIs to be specified such that some ports of the URI can vary.
+ To capture a value from URI, Header, Query or Body JSON Path, use the `{var}` syntax in the match criteria as well as in the payload. The occurrences of `{var}` in the response payload will be replaced with the value of that var as captured from the URI/Header/Query/Body. Additionally, `{var}` allows for URIs to be specified such that some ports of the URI can vary.
 
  For example, for a configured response payload that matches on request URI:
  ```
@@ -2024,6 +2027,46 @@ Same kind of capture can be done on query params, e.g.:
 /response/payload/set/query/qq={v} --data '{"test": "query qq was set to {v}"}'
 ```
 
+A combination of captures can be done from URI and Header/Query. Below example shows a capture of {x} from URI and {y} from request header:
+```
+/response/payload/set/header/bar={y}?uri=/foo/{x} --data '{"result": "URI foo with {x} and header bar with {y}"}'
+```
+For a request `curl -H'bar:123' localhost:8080/foo/abc`, the response payload will be `{"result": "URI foo with abc and header bar with 123"}`
+
+Lastly, values can be captured from JSON paths that match against request body. For example, the configuration below captures value at JSON paths `.foo.bar` into var `{a}` and at path `.foo.baz` into var `{b}` from the request body received with URI `/foo`. The captured values are injected into the response body in two places for each variable.
+
+`curl -v -g -XPOST localhost:8080/response/payload/set/body/paths/.foo.bar={a},.foo.baz={b}\?uri=/foo --data '{"bar":"{a}", "baz":"{b}", "message": "{a} is {b}"}' -HContent-Type:application/json`
+
+For the above config, a request like this:
+
+`curl localhost:8080/foo --data '{"foo": {"bar": "hi", "baz": "hello"}}'`
+
+produces response:
+
+`{"bar":"hi", "baz":"hello", "message": "hi is hello"}`.
+
+A more complex example capturing values from arrays and objects, and producing response json with arrays of different lengths based on input array lengths. The two configurations work in tandem, showing an example of how mutually exclusive configurations can provide on-the-fly `if-else` semantics based on input payload.
+
+```json
+#capture '.one.two=two', .one.three[0]={three.1}, .one.three[1]={three.2}, .one.four[1].name={four.name}. This response is triggered if input payload has 2 elements in array '.one.three' and two elements in array '.one.four'.
+
+$ curl -g -X POST localhost:8080/response/payload/set/body/paths/.one.two={two},.one.three[0]={three.1},.one.three[1]={three.2},.one.four[1].name={four.name}?uri=/foo --data '{"two":"{two}", "three":["{three.1}", "{three.2}"]}, "message": "two -> {two}, three -> {three.1} {three.2}, four -> {four.name}"}' -H'Content-Type:application/json'
+
+#capture '.one.two=two', .one.three[0]={three.1}, .one.three[1]={three.2}, .one.three[2]={three.3}, .one.four[0].name={four.name}. This response is triggered if input payload has 3 elements in array '.one.three' and one element in '.one.four'.
+
+$ curl -g -X POST localhost:8080/response/payload/set/body/paths/.one.two={two},.one.three[0]={three.1},.one.three[1]={three.2},.one.three[2]={three.3},.one.four[0].name={four.name}?uri=/foo --data '{"two":"{two}", "three":["{three.1}", "{three.2}", "{three.3}"]}, "message": "two -> {two}, three -> {three.1} {three.2} {three.3}, four -> {four.name}"}' -H'Content-Type:application/json'
+
+#for the above config, this request produces the following output:
+
+$ curl -v localhost:8080/foo --data '{"one": {"two": "hi", "three": ["hello", "world"], "four":[{"name": "foo"},{"name":"bar"}]}}'
+
+{"two":"hi", "three":["hello", "world"]}, "message": "two -> hi, three -> hello world, four -> bar"}
+
+#whereas this request produces the following output:
+$ curl localhost:8080/foo --data '{"one": {"two": "hi", "three": ["hello", "world", "there"], "four":[{"name": "foo"}]}}'
+
+{"two":"hi", "three":["hello", "world", "there"]}, "message": "two -> hi, three -> hello world there, four -> foo"}
+```
 
 #### APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
@@ -2041,7 +2084,8 @@ Same kind of capture can be done on query params, e.g.:
 | POST | /response/payload<br/>/set/query/{q}?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given query param name and the given URI |
 | POST | /response/payload<br/>/set/query/{q}=`{value}`  | Add a custom payload to be sent for requests matching the given query param name and value |
 | POST | /response/payload<br/>/set/query/{q}=`{value}`<br/>?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given query param name and value along with the given URI. |
-| POST | /response/payload<br/>/set/body~{keywords}?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given URI where the body contains the given keywords (comma-separated list) in the given order (second keyword in the list must appear after the first, and so on) |
+| POST | /response/payload<br/>/set/body~{regex}?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given URI where the body contains the given list of regexp (comma-separated list) in the given order (second expression in the list must appear after the first, and so on) |
+| POST | /response/payload<br/>/set/body/paths/{paths}?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given URI where the body contains the given list of JSON paths (comma-separated list). Match is triggered only when all JSON paths match, and the first matched config gets applied. Also see above description and example for how to capture values from JSON paths. |
 | POST | /response/payload/clear  | Clear all configured custom response payloads |
 | GET  |	/response/payload                      | Get configured custom payloads |
 
@@ -2067,6 +2111,8 @@ curl -X POST -g localhost:8080/response/payload/set/header/foo/{f} --data '{"tes
 curl -X POST localhost:8080/response/payload/set/header/foo=bar --data '{"test": "header was foo with value bar"}'
 
 curl -g -X POST localhost:8080/response/payload/set/body~AA,BB,CC?uri=/foo --data '{"test": "body contains AA,BB,CC"}' -HContent-Type:application/json
+
+curl -v -g -XPOST localhost:8080/response/payload/set/body/paths/.foo.bar={a},.foo.baz={b}\?uri=/foo --data '{"bar":"{a}", "baz":"{b}", "message": "{a} is {b}"}' -HContent-Type:application/json
 
 curl -X POST localhost:8080/response/payload/clear
 
