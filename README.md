@@ -116,8 +116,11 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 
 ### Scenario: [Test a client's behavior upon service failure](docs/scenarios-resiliency.md#scenario-test-a-clients-behavior-upon-service-failure)
 
-
 ### Scenario: [Track client hang-ups on server via request/connection timeouts](docs/scenarios-resiliency.md#server-resiliency-client-hangups)
+
+## Outside-the-Box Scenarios
+
+### Scenario: [Create HTTP chaos that HTTP libraries won't let you](docs/http-chaos.md)
 
 <br/>
 
@@ -2439,14 +2442,26 @@ The URI `/status/{status}` allows clients to ask for a specific status as respon
 #### API
 |METHOD|URI|Description|
 |---|---|---|
-| GET       |	/status/`{status}`                  | This call either receives the given status, or the forced response status if one is set |
-| GET       |	/status=`{status:count}`/flipflop?`x-request-id={requestId}` | This call responds with the given status for the given count times when called successively with the same count value. Once the status is served count times, the next status served is 200, and subsequent calls start the cycle again. Optional query param `x-request-id` can be used to perform status flip for each unique request id, preventing requests from affecting one another. |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE |	/status/`{status}` | Respond with the requested status, or a forced response status if one is set. |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE |	/status/`{status:count}`?x-request-id=`{requestId}` or /status=`{status:count}`?x-request-id=`{requestId}` | When the status param is passed in the format `<code>:<count>`, the requested response code is returned for `count` number of subsequent calls (starting from the current one) before reverting back to 200. Optional query param `x-request-id` can be used to ask for stateful status for each unique request id, allowing multiple concurrent clients to each receive its own independent stateful response. |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE |	/status=`{status:count}`/delay=`{delay}`?x-request-id=`{requestId}` | Same behavior as above except that the given delay duration param gets applied, allowing you to add artificial delay before responding with the given status. Optional query param `x-request-id` can be used to ask for stateful status for each unique request id, allowing multiple concurrent clients to each receive its own independent stateful response. |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE |	/status=`{status:count}`/flipflop?x-request-id=`{requestId}` | This call responds with the given status for the given count times when called successively with the same count value. Once the status is served count times, the next status served is 200, and subsequent calls start the cycle again. Optional query param `x-request-id` can be used to perform status flip for each unique request id, preventing requests from affecting one another. |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE |	/status=`{status:count}`/delay=`{delay}`/flipflop?x-request-id=`{requestId}` | Same behavior as above except that the given delay duration param gets applied, allowing you to add artificial delay before responding with the given status. |
+| POST |	/status/clear | Clear the current state retained for the above stateful response calls, leading to all calls starting with fresh state. |
 
 #### Status API Example
 ```
 curl -I  localhost:8080/status/418
 
-curl -I localhost:8080/status=503:2/flipflop?x-request-id=123
+curl -v localhost:8080/status/503:2?x-request-id=1
+
+curl -v localhost:8080/status=503:2/delay=1s?x-request-id=1
+
+curl -I localhost:8080/status=503:3/flipflop?x-request-id=1
+
+curl -v localhost:8080/status=503:3/delay=1s/flipflop?x-request-id=1
+
+curl -XPOST localhost:8080/status/clear
 ```
 
 ###### <small> [Back to TOC](#toc) </small>
@@ -2461,7 +2476,7 @@ When a delay is passed to this API, the response carries a header `Response-Dela
 #### API
 |METHOD|URI|Description|
 |---|---|---|
-| GET, POST, PUT, OPTIONS, HEAD |	/delay/{delay} | Responds after the given delay |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE |	/delay/{delay} | Responds after the given delay. To apply delay with a specific response status code, see `/status` API above. |
 
 #### Delay API Example
 ```
@@ -2479,7 +2494,10 @@ This URI echoes back the headers and payload sent by the client. The response is
 #### API
 |METHOD|URI|Description|
 |---|---|---|
-| GET       |	/echo                  | Sends response back with request headers and body, with added custom response headers and forced status |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE |	/echo      | Sends response back with request headers and body, with added custom response headers and forced status |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE |	/echo/headers | Sends response back with request headers as JSON payload in the response body |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE |	/echo/body | Sends response back with request body echoed verbatim in the response |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE |	/echo/ws | Echoes headers to response body, and copies request body stream back to response over a websocket |
 
 #### Echo API Example
 ```

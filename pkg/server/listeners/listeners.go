@@ -195,6 +195,7 @@ func (l *Listener) initListener() bool {
         } else {
           tlsConfig.ClientAuth = tls.NoClientCert
         }
+        tlsConfig.NextProtos = []string{"h2"}
         listener = tls.NewListener(listener, tlsConfig)
       }
       l.Listener = listener

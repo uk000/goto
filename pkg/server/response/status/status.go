@@ -5,6 +5,7 @@ import (
   "net/http"
   "strconv"
   "sync"
+  "time"
 
   "goto/pkg/events"
   "goto/pkg/metrics"
@@ -44,9 +45,16 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRouteWithPort(statusRouter, "/counts", getStatusCount, "GET")
   util.AddRouteWithPort(statusRouter, "/clear", setStatus, "PUT", "POST")
   util.AddRouteWithPort(statusRouter, "", getStatus, "GET")
-  util.AddRoute(root, "/status/{status}", getStatus, "GET", "PUT", "POST", "OPTIONS", "HEAD")
-  util.AddRouteQ(root, "/status={status}/flipflop", flipflop, "x-request-id", "{requestId}", "GET", "PUT", "POST", "OPTIONS", "HEAD")
-  util.AddRoute(root, "/status={status}/flipflop", flipflop, "GET", "PUT", "POST", "OPTIONS", "HEAD")
+  util.AddRoute(root, "/status/clear", setStatus, "PUT", "POST")
+  util.AddRoute(root, "/status/{status}", getStatus, "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRouteQ(root, "/status={status}", getStatus, "x-request-id", "{requestId}", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRoute(root, "/status={status}", getStatus, "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRouteQ(root, "/status={status}/delay={delay}", getStatus, "x-request-id", "{requestId}", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRoute(root, "/status={status}/delay={delay}", getStatus, "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRouteQ(root, "/status={status}/flipflop", flipflop, "x-request-id", "{requestId}", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRoute(root, "/status={status}/flipflop", flipflop, "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRouteQ(root, "/status={status}/delay={delay}/flipflop", flipflop, "x-request-id", "{requestId}", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRoute(root, "/status={status}/delay={delay}/flipflop", flipflop, "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
 }
 
 func getOrCreatePortStatus(r *http.Request) *PortStatus {
@@ -78,6 +86,8 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
     if times > 1 {
       portStatus.alwaysReportStatusCount = times
     }
+  } else {
+    portStatus.flipflopConfigs = map[string]*FlipFlopConfig{}
   }
   portStatus.lock.Unlock()
   msg := ""
@@ -126,13 +136,29 @@ func computeResponseStatus(originalStatus int, r *http.Request) (int, bool) {
 
 func getStatus(w http.ResponseWriter, r *http.Request) {
   portStatus := getOrCreatePortStatus(r)
-  requestedStatus, _ := util.GetIntParam(r, "status", 200)
+  requestedStatus, times, _ := util.GetStatusParam(r)
+  if requestedStatus <= 0 {
+    requestedStatus = 200
+  }
+  if times > 0 {
+    portStatus.doFlipflop(w, r, false)
+    return
+  }
   if !util.IsAdminRequest(r) {
+    delay := util.GetDurationParam(r, "delay")
+    delayText := ""
+    if delay <= 0 {
+      delay = 0
+    } else {
+      delayText = delay.String()
+      time.Sleep(delay)
+      w.Header().Add("Goto-Response-Delay", delayText)
+    }
     metrics.UpdateRequestCount("status")
     portStatus.lock.Lock()
     portStatus.countsByRequestedStatus[requestedStatus]++
     portStatus.lock.Unlock()
-    util.AddLogMessage(fmt.Sprintf("Requested status: [%d]", requestedStatus), r)
+    util.AddLogMessage(fmt.Sprintf("Requested status [%d] with delay [%s]", requestedStatus, delayText), r)
     w.Header().Add("Goto-Requested-Status", strconv.Itoa(requestedStatus))
     if !IsForcedStatus(r) {
       w.WriteHeader(requestedStatus)
@@ -154,6 +180,77 @@ func getStatus(w http.ResponseWriter, r *http.Request) {
   }
 }
 
+func flipflop(w http.ResponseWriter, r *http.Request) {
+  getOrCreatePortStatus(r).doFlipflop(w, r, true)
+}
+
+func (portStatus *PortStatus) doFlipflop(w http.ResponseWriter, r *http.Request, restart bool) {
+  requestedStatuses, times, _ := util.GetStatusRangeParam(r)
+  if times <= 0 {
+    times = len(requestedStatuses)
+  }
+  requestId := util.GetStringParamValue(r, "requestId")
+  delay := util.GetDurationParam(r, "delay")
+  delayText := ""
+  if delay <= 0 {
+    delay = 0
+  } else {
+    delayText = delay.String()
+    time.Sleep(delay)
+    w.Header().Add("Goto-Response-Delay", delayText)
+  }
+  requestedStatus := 200
+  portStatus.lock.Lock()
+  flipflopConfig := portStatus.flipflopConfigs[requestId]
+  if flipflopConfig == nil {
+    flipflopConfig = &FlipFlopConfig{
+      times:           times,
+      statusCount:     times,
+      lastStatusIndex: 0,
+    }
+    portStatus.flipflopConfigs[requestId] = flipflopConfig
+  }
+  if len(requestedStatuses) > 1 {
+    if len(requestedStatuses) > flipflopConfig.lastStatusIndex {
+      requestedStatus = requestedStatuses[flipflopConfig.lastStatusIndex]
+      flipflopConfig.lastStatusIndex++
+    } else {
+      w.Header().Add("Goto-Status-Flip", strconv.Itoa(requestedStatuses[flipflopConfig.lastStatusIndex-1]))
+      flipflopConfig.lastStatusIndex = 0
+      delete(portStatus.flipflopConfigs, requestId)
+    }
+  } else if len(requestedStatuses) == 1 {
+    requestedStatus = requestedStatuses[0]
+    if times != flipflopConfig.times {
+      flipflopConfig.statusCount = -1
+      flipflopConfig.times = times
+    }
+    if flipflopConfig.statusCount == -1 && restart {
+      flipflopConfig.statusCount = times
+      if times > 0 {
+        flipflopConfig.statusCount--
+      }
+    } else if flipflopConfig.statusCount == 0 || (!restart && flipflopConfig.statusCount == -1) {
+      w.Header().Add("Goto-Status-Flip", strconv.Itoa(requestedStatus))
+      requestedStatus = http.StatusOK
+      flipflopConfig.statusCount = -1
+    } else if times > 0 {
+      flipflopConfig.statusCount--
+    }
+    if flipflopConfig.statusCount >= 0 {
+      portStatus.flipflopConfigs[requestId] = flipflopConfig
+    } else if restart {
+      delete(portStatus.flipflopConfigs, requestId)
+    }
+  }
+  portStatus.countsByRequestedStatus[requestedStatus]++
+  portStatus.lock.Unlock()
+  metrics.UpdateRequestCount("status")
+  util.AddLogMessage(fmt.Sprintf("Flipflop status [%d] with statux index [%d], current count [%d], delay [%s]", requestedStatus, flipflopConfig.lastStatusIndex, flipflopConfig.statusCount, delayText), r)
+  if !IsForcedStatus(r) {
+    w.WriteHeader(requestedStatus)
+  }
+}
 func getStatusCount(w http.ResponseWriter, r *http.Request) {
   port := util.GetRequestOrListenerPort(r)
   statusLock.RLock()
@@ -187,66 +284,6 @@ func getStatusCount(w http.ResponseWriter, r *http.Request) {
   } else {
     w.WriteHeader(http.StatusNoContent)
     fmt.Fprintln(w, "{}")
-  }
-}
-
-func flipflop(w http.ResponseWriter, r *http.Request) {
-  portStatus := getOrCreatePortStatus(r)
-  requestedStatuses, times, _ := util.GetStatusRangeParam(r)
-  if times <= 0 {
-    times = len((requestedStatuses))
-  }
-  requestId := util.GetStringParamValue(r, "requestId")
-  requestedStatus := 200
-  portStatus.lock.Lock()
-  flipflopConfig := portStatus.flipflopConfigs[requestId]
-  if flipflopConfig == nil {
-    flipflopConfig = &FlipFlopConfig{
-      times:           times,
-      statusCount:     -1,
-      lastStatusIndex: 0,
-    }
-    portStatus.flipflopConfigs[requestId] = flipflopConfig
-  }
-  if len(requestedStatuses) > 1 {
-    if len(requestedStatuses) > flipflopConfig.lastStatusIndex {
-      requestedStatus = requestedStatuses[flipflopConfig.lastStatusIndex]
-      flipflopConfig.lastStatusIndex++
-    } else {
-      w.Header().Add("Goto-Status-Flip", strconv.Itoa(requestedStatuses[flipflopConfig.lastStatusIndex-1]))
-      flipflopConfig.lastStatusIndex = 0
-      delete(portStatus.flipflopConfigs, requestId)
-    }
-  } else if len(requestedStatuses) == 1 {
-    requestedStatus = requestedStatuses[0]
-    if times != flipflopConfig.times {
-      flipflopConfig.statusCount = -1
-      flipflopConfig.times = times
-    }
-    if flipflopConfig.statusCount == -1 {
-      flipflopConfig.statusCount = times
-      if times > 0 {
-        flipflopConfig.statusCount--
-      }
-    } else if flipflopConfig.statusCount == 0 {
-      w.Header().Add("Goto-Status-Flip", strconv.Itoa(requestedStatus))
-      requestedStatus = http.StatusOK
-      flipflopConfig.statusCount--
-    } else if times > 0 {
-      flipflopConfig.statusCount--
-    }
-    if flipflopConfig.statusCount >= 0 {
-      portStatus.flipflopConfigs[requestId] = flipflopConfig
-    } else {
-      delete(portStatus.flipflopConfigs, requestId)
-    }
-  }
-  portStatus.countsByRequestedStatus[requestedStatus]++
-  portStatus.lock.Unlock()
-  metrics.UpdateRequestCount("status")
-  util.AddLogMessage(fmt.Sprintf("Flipflop status [%d] with statux index [%d], current count [%d]", requestedStatus, flipflopConfig.lastStatusIndex, flipflopConfig.statusCount), r)
-  if !IsForcedStatus(r) {
-    w.WriteHeader(requestedStatus)
   }
 }
 

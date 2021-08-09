@@ -531,12 +531,14 @@ func IsAdminRequest(r *http.Request) bool {
 }
 
 func CheckAdminRequest(r *http.Request) bool {
-  return strings.HasPrefix(r.RequestURI, "/port") || strings.HasPrefix(r.RequestURI, "/metrics") ||
-    strings.HasPrefix(r.RequestURI, "/request") || strings.HasPrefix(r.RequestURI, "/response") ||
-    strings.HasPrefix(r.RequestURI, "/listeners") || strings.HasPrefix(r.RequestURI, "/label") ||
-    strings.HasPrefix(r.RequestURI, "/client") || strings.HasPrefix(r.RequestURI, "/job") ||
-    strings.HasPrefix(r.RequestURI, "/probes") || strings.HasPrefix(r.RequestURI, "/tcp") ||
-    strings.HasPrefix(r.RequestURI, "/events") || strings.HasPrefix(r.RequestURI, "/registry")
+  uri := r.RequestURI
+  if strings.HasPrefix(uri, "/port=") {
+    uri = strings.Split(uri, "/port=")[1]
+    uri = strings.Split(uri, "/")[1]
+  }
+  return uri == "metrics" || uri == "request" || uri == "response" || uri == "listeners" || 
+      uri == "label" || uri == "client" || uri == "job" || uri == "probes" || uri == "tcp" ||
+      uri == "events" || uri == "registry"
 }
 
 func IsMetricsRequest(r *http.Request) bool {
@@ -886,4 +888,8 @@ func CreateHttpClient() *http.Client {
     TLSHandshakeTimeout: 10 * time.Second,
   }
   return &http.Client{Transport: tr}
+}
+
+func IsH2(r *http.Request) bool {
+  return r.ProtoMajor == 2
 }

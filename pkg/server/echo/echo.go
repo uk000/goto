@@ -18,15 +18,21 @@ var (
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   echoRouter := r.PathPrefix("/echo").Subrouter()
-  util.AddRoute(echoRouter, "/headers", EchoHeaders)
-  util.AddRoute(echoRouter, "/ws", wsEchoHandler, "GET", "POST")
-  util.AddRoute(echoRouter, "", echo)
+  util.AddRoute(echoRouter, "/headers", EchoHeaders, "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRoute(echoRouter, "/body", echoBody, "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRoute(echoRouter, "/ws", wsEchoHandler, "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRoute(echoRouter, "", echo, "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
 }
 
 func EchoHeaders(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("Echoing headers back", r)
-  util.CopyHeaders("Request", w, r.Header, r.Host, r.RequestURI)
   util.WriteJsonPayload(w, map[string]interface{}{"RequestHeaders": r.Header})
+}
+
+func echoBody(w http.ResponseWriter, r *http.Request) {
+  metrics.UpdateRequestCount("echo")
+  util.AddLogMessage("Echoing Body", r)
+  io.Copy(w, r.Body)
 }
 
 func echo(w http.ResponseWriter, r *http.Request) {
