@@ -18,7 +18,7 @@ var (
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  labelRouter := util.PathRouter(r, "/server/label")
+  labelRouter := util.PathRouter(r, "/server?/label")
   util.AddRouteWithPort(labelRouter, "/set/{label}", setLabel, "PUT", "POST")
   util.AddRouteWithPort(labelRouter, "/clear", setLabel, "POST")
   util.AddRouteWithPort(labelRouter, "", getLabel)
@@ -57,11 +57,15 @@ func Middleware(next http.Handler) http.Handler {
     } else if r.ProtoMajor == 2 {
       protocol = "H2C"
     }
-    if !util.IsTunnelRequest(r) {
+    rs := util.GetRequestStore(r)
+    rs.GotoProtocol = protocol
+    if util.IsTunnelRequest(r) {
+      w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoProtocol, rs.TunnelCount), protocol)
+    } else {
       w.Header().Add(HeaderGotoProtocol, protocol)
-      if !util.IsAdminRequest(r) {
-        metrics.UpdateProtocolRequestCount(protocol, r.RequestURI)
-      }
+    }
+    if !util.IsAdminRequest(r) {
+      metrics.UpdateProtocolRequestCount(protocol, r.RequestURI)
     }
     if next != nil {
       next.ServeHTTP(w, r)

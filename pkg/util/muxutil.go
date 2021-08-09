@@ -18,21 +18,19 @@ type ServerHandler struct {
 var (
   portRouter            *mux.Router
   portTunnelRouters     = map[string]*mux.Router{}
+  coRoutersMap         = map[*mux.Router][]*mux.Router{}
   fillerRegexp          = regexp.MustCompile("{({[^{}]+?})}|{([^{}]+?)}")
+  optionalPathRegexp    = regexp.MustCompile("(\\/[^{}]+?\\?)")
   optionalPathKeyRegexp = regexp.MustCompile("(\\/(?:[^\\/{}]+=)?{[^{}]+?}\\?\\??)")
 )
 
-func PathRouter(r *mux.Router, path string) *mux.Router {
-  routerPath := path
-  if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil {
-    routerPath = lpath + path
+func GetSubPaths(path string, key bool) []string {
+  var matches [][]int 
+  if key {
+    matches = optionalPathKeyRegexp.FindAllStringIndex(path, -1)
+  } else {
+    matches = optionalPathRegexp.FindAllStringIndex(path, -1)
   }
-  portTunnelRouters[routerPath] = portRouter.PathPrefix(routerPath).Subrouter()
-  return r.PathPrefix(path).Subrouter()
-}
-
-func GetSubPaths(path string) []string {
-  matches := optionalPathKeyRegexp.FindAllStringIndex(path, -1)
   var paths []string
   addSubpath := func(subPath string) {
     canSkip := strings.HasSuffix(subPath, "?") && !strings.HasSuffix(subPath, "??")
@@ -69,12 +67,46 @@ func GetSubPaths(path string) []string {
   return paths
 }
 
+func PathRouter(r *mux.Router, path string) *mux.Router {
+  routerPath := path
+  if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil {
+    routerPath = lpath + path
+  }
+  portTunnelRouters[routerPath] = portRouter.PathPrefix(routerPath).Subrouter()
+  pathRouter := PathPrefix(r, path)
+  for _, coRouter := range coRoutersMap[r] {
+    coRoutersMap[pathRouter] = append(coRoutersMap[pathRouter], PathPrefix(coRouter, path))
+  }
+  return pathRouter
+}
+
+func PathPrefix(r *mux.Router, path string) *mux.Router {
+  var subRouter *mux.Router
+  for _, p := range GetSubPaths(path, false) {
+    if subRouter == nil {
+      subRouter = r.PathPrefix(p).Subrouter()
+      for _, coRouter := range coRoutersMap[r] {
+        coRoutersMap[subRouter] = append(coRoutersMap[coRouter], coRouter.PathPrefix(p).Subrouter())
+      }
+    } else {
+      coRoutersMap[subRouter] = append(coRoutersMap[subRouter], r.PathPrefix(p).Subrouter())
+    }
+  }
+  return subRouter
+}
+
 func AddRoute(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), methods ...string) {
-  for _, p := range GetSubPaths(path) {
+  for _, p := range GetSubPaths(path, true) {
     if len(methods) > 0 {
       r.HandleFunc(p, f).Methods(methods...)
+      for _, coRouter := range coRoutersMap[r] {
+        coRouter.HandleFunc(p, f).Methods(methods...)
+      }
     } else {
       r.HandleFunc(p, f)
+      for _, coRouter := range coRoutersMap[r] {
+        coRouter.HandleFunc(p, f)
+      }
     }
   }
 }
@@ -87,9 +119,12 @@ func AddRouteWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *h
 }
 
 func AddRouteQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParamName string, queryKey string, methods ...string) {
-  for _, p := range GetSubPaths(path) {
+  for _, p := range GetSubPaths(path, true) {
     r.HandleFunc(p, f).Queries(queryParamName, queryKey).Methods(methods...)
-  }
+    for _, coRouter := range coRoutersMap[r] {
+      coRouter.HandleFunc(p, f).Queries(queryParamName, queryKey).Methods(methods...)
+    }
+}
 }
 
 func AddRouteQWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParamName string, queryKey string, methods ...string) {
@@ -100,17 +135,29 @@ func AddRouteQWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *
 }
 
 func AddRouteMultiQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
-  for _, p := range GetSubPaths(path) {
+  for _, p := range GetSubPaths(path, true) {
     r.HandleFunc(p, f).Queries(queryParams...).Methods(method)
+    for _, coRouter := range coRoutersMap[r] {
+      coRouter.HandleFunc(p, f).Queries(queryParams...).Methods(method)
+    }
     for i := 0; i < len(queryParams); i += 2 {
       for j := i + 2; j < len(queryParams); j += 2 {
         r.HandleFunc(p, f).Queries(queryParams[i], queryParams[i+1], queryParams[j], queryParams[j+1]).Methods(method)
+        for _, coRouter := range coRoutersMap[r] {
+          coRouter.HandleFunc(p, f).Queries(queryParams[i], queryParams[i+1], queryParams[j], queryParams[j+1]).Methods(method)
+        }
       }
     }
     for i := 0; i < len(queryParams); i += 2 {
       r.HandleFunc(p, f).Queries(queryParams[i], queryParams[i+1]).Methods(method)
+      for _, coRouter := range coRoutersMap[r] {
+        coRouter.HandleFunc(p, f).Queries(queryParams[i], queryParams[i+1]).Methods(method)
+      }
     }
     r.HandleFunc(p, f).Methods(method)
+    for _, coRouter := range coRoutersMap[r] {
+      coRouter.HandleFunc(p, f).Methods(method)
+    }
   }
 }
 

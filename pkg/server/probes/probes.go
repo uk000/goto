@@ -170,7 +170,7 @@ func Middleware(next http.Handler) http.Handler {
         pp.ReadinessOverflowCount++
       }
       pp.lock.Unlock()
-      util.CopyHeaders("Readiness-Request", w, r.Header, r.Host, r.RequestURI, false)
+      util.CopyHeaders("Readiness-Request", r, w, r.Header, true, true, false)
       w.Header().Add(HeaderReadinessRequestCount, fmt.Sprint(pp.ReadinessCount))
       w.Header().Add(HeaderReadinessOverflowCount, fmt.Sprint(pp.ReadinessOverflowCount))
       w.WriteHeader(status)
@@ -192,7 +192,7 @@ func Middleware(next http.Handler) http.Handler {
         pp.LivenessOverflowCount++
       }
       pp.lock.Unlock()
-      util.CopyHeaders("Liveness-Request", w, r.Header, r.Host, r.RequestURI, false)
+      util.CopyHeaders("Liveness-Request", r, w, r.Header, true, true, false)
       w.Header().Add(HeaderLivenessRequestCount, fmt.Sprint(pp.LivenessCount))
       w.Header().Add(HeaderLivenessOverflowCount, fmt.Sprint(pp.LivenessOverflowCount))
       w.WriteHeader(status)

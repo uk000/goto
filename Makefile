@@ -22,7 +22,7 @@ clean:
 	rm -rf pkg/server/grpc/pb/*.go
 
 build: $(GO_FILES)
-	GOOS=$(GOOS) GOARCH=amd64 go build -o $(OUT) -ldflags="-extldflags \"-static\" -w -s -X goto/cmd.Version=$(VERSION) -X goto/cmd.Commit=$(COMMIT)" .
+	GOOS=$(GOOS) GOARCH=amd64 go build -mod=mod -o $(OUT) -ldflags="-extldflags \"-static\" -w -s -X goto/cmd.Version=$(VERSION) -X goto/cmd.Commit=$(COMMIT)" .
 	@chmod +x $(OUT)
 
 run: build

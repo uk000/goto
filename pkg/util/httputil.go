@@ -44,6 +44,7 @@ type RequestStore struct {
   IsTrafficEventReported  bool
   IsHeadersSent           bool
   IsTunnelResponseSent    bool
+  GotoProtocol            string
   TunnelCount             int
   StatusCode              int
   IsH2C                   bool
@@ -65,6 +66,7 @@ var (
 
   contentRegexp           = regexp.MustCompile("(?i)content")
   hostRegexp              = regexp.MustCompile("(?i)^host$")
+  tunnelRegexp            = regexp.MustCompile("(?i)tunnel")
   utf8Regexp              = regexp.MustCompile("(?i)utf-8")
   knownTextMimeTypeRegexp = regexp.MustCompile(".*(text|html|json|yaml).*")
   upgradeRegexp           = regexp.MustCompile("(?i)upgrade")
@@ -423,24 +425,34 @@ func AddHeaderWithPrefix(prefix, header, value string, headers http.Header) {
   headers.Add(header, value)
 }
 
-func CopyHeaders(prefix string, w http.ResponseWriter, headers http.Header, host, uri string, contentType bool) {
+func CopyHeaders(prefix string, r *http.Request,  w http.ResponseWriter, headers http.Header, copyHost, copyURI, copyContentType bool) {
+  rs := GetRequestStore(r)
   hostCopied := false
   responseHeaders := w.Header()
   for h, values := range headers {
-    if contentType || !contentRegexp.MatchString(h) {
-      for _, v := range values {
-        AddHeaderWithPrefix(prefix, h, v, responseHeaders)
-      }
+    if !copyContentType && contentRegexp.MatchString(h) {
+      continue
+    }
+    for _, v := range values {
+      AddHeaderWithPrefix(prefix, h, v, responseHeaders)
     }
     if hostRegexp.MatchString(h) {
       hostCopied = true
     }
   }
-  if !hostCopied && host != "" {
-    AddHeaderWithPrefix(prefix, "Host", host, responseHeaders)
+  if !hostCopied && copyHost {
+    AddHeaderWithPrefix(prefix, "Host", r.Host, responseHeaders)
   }
-  if uri != "" {
-    AddHeaderWithPrefix(prefix, "URI", uri, responseHeaders)
+  if copyURI {
+    AddHeaderWithPrefix(prefix, "URI", r.RequestURI, responseHeaders)
+  }
+  if rs.IsTLS && copyHost {
+    if rs.ServerName != "" {
+      AddHeaderWithPrefix(prefix, "TLS-SNI", rs.ServerName, responseHeaders)
+    }
+    if rs.TLSVersion != "" {
+      AddHeaderWithPrefix(prefix, "TLS-Version", rs.TLSVersion, responseHeaders)
+    }
   }
 }
 
@@ -505,11 +517,16 @@ func IsAdminRequest(r *http.Request) bool {
 }
 
 func CheckAdminRequest(r *http.Request) bool {
-  return strings.HasPrefix(r.RequestURI, "/metrics") || strings.HasPrefix(r.RequestURI, "/registry") ||
-    strings.HasPrefix(r.RequestURI, "/server") || strings.HasPrefix(r.RequestURI, "/client") ||
-    strings.HasPrefix(r.RequestURI, "/port") || strings.HasPrefix(r.RequestURI, "/job") ||
-    strings.HasPrefix(r.RequestURI, "/probes") || strings.HasPrefix(r.RequestURI, "/events") ||
-    strings.HasPrefix(r.RequestURI, "/log") || strings.HasPrefix(r.RequestURI, "/tunnels")
+  uri := r.RequestURI
+  if strings.HasPrefix(uri, "/port=") {
+    uri = strings.Split(uri, "/port=")[1]
+  }
+  if pieces := strings.Split(uri, "/"); len(pieces) > 1 {
+    uri = pieces[1]
+  }
+  return uri == "metrics" || uri == "server" || uri == "request" || uri == "response" || 
+    uri == "listeners" || uri == "label" || uri == "registry" ||uri == "client" || 
+    uri == "job" || uri == "probes" || uri == "tcp" || uri == "log" || uri == "events" || uri == "tunnels"
 }
 
 func IsMetricsRequest(r *http.Request) bool {
@@ -558,7 +575,14 @@ func IsFilteredRequest(r *http.Request) bool {
 
 func IsTunnelRequest(r *http.Request) bool {
   rs := GetRequestStore(r)
-  return rs.IsTunnelRequest && !rs.IsTunnelConfigRequest
+  isTunnelRequest := rs.IsTunnelRequest && !rs.IsTunnelConfigRequest
+  if !isTunnelRequest {
+    if gotoTunnel := r.Header[HeaderGotoTunnel]; len(gotoTunnel) > 0 {
+      isTunnelRequest = true
+      rs.IsTunnelRequest = true
+    }
+  }
+  return isTunnelRequest
 }
 
 func IsKnownRequest(r *http.Request) bool {

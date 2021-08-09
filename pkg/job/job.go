@@ -14,16 +14,25 @@ import (
   "net/http"
   "os"
   "os/exec"
+  "path/filepath"
   "strconv"
   "strings"
   "sync"
   "time"
 
+  "github.com/go-co-op/gocron"
   "github.com/gorilla/mux"
 )
 
+type Script struct {
+  Name  string `json:"name"`
+  Path  string `json:"path"`
+  Shell bool   `json:"shell"`
+}
+
 type CommandJobTask struct {
   Cmd             string         `json:"cmd"`
+  Script          string         `json:"script"`
   Args            []string       `json:"args"`
   OutputMarkers   map[int]string `json:"outputMarkers"`
   OutputSeparator string         `json:"outputSeparator"`
@@ -64,6 +73,7 @@ type Job struct {
   Delay         string        `json:"delay"`
   InitialDelay  string        `json:"initialDelay"`
   Count         int           `json:"count"`
+  Cron          string        `json:"cron"`
   MaxResults    int           `json:"maxResults"`
   KeepResults   int           `json:"keepResults"`
   KeepFirst     bool          `json:"keepFirst"`
@@ -75,13 +85,17 @@ type Job struct {
   httpTask      *HttpJobTask
   commandTask   *CommandJobTask
   jobRunCounter int
+  cronScheduler *gocron.Scheduler
+  cronJob       *gocron.Job
   lock          sync.RWMutex
 }
 
 type JobManager struct {
-  jobs    map[string]*Job
-  jobRuns map[string]map[int]*JobRunContext
-  lock    sync.RWMutex
+  jobs          map[string]*Job
+  jobRuns       map[string]map[int]*JobRunContext
+  scripts       map[string]*Script
+  cronScheduler *gocron.Scheduler
+  lock          sync.RWMutex
 }
 
 var (
@@ -91,19 +105,22 @@ var (
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   jobsRouter := r.PathPrefix("/jobs").Subrouter()
-  util.AddRoute(jobsRouter, "/add", addJob, "POST", "PUT")
+  util.AddRoute(jobsRouter, "/add", addOrUpdateJob, "POST", "PUT")
+  util.AddRoute(jobsRouter, "/update", addOrUpdateJob, "POST", "PUT")
   util.AddRoute(jobsRouter, "/add/script/{name}", storeJobScriptOrFile, "POST", "PUT")
   util.AddRouteQ(jobsRouter, "/store/file/{name}", storeJobScriptOrFile, "path", "{path}", "POST", "PUT")
   util.AddRoute(jobsRouter, "/store/file/{name}", storeJobScriptOrFile, "POST", "PUT")
   util.AddRoute(jobsRouter, "/{jobs}/remove", removeJob, "POST")
   util.AddRoute(jobsRouter, "/clear", clearJobs, "POST")
-  util.AddRoute(jobsRouter, "/{jobs}/run", runJobs, "POST")
   util.AddRoute(jobsRouter, "/run/all", runJobs, "POST")
+  util.AddRoute(jobsRouter, "/run/{jobs}", runJobs, "POST")
+  util.AddRoute(jobsRouter, "/{jobs}/run", runJobs, "POST")
   util.AddRoute(jobsRouter, "/{jobs}/stop", stopJobs, "POST")
   util.AddRoute(jobsRouter, "/stop/all", stopJobs, "POST")
   util.AddRoute(jobsRouter, "/{job}/results", getJobResults, "GET")
   util.AddRoute(jobsRouter, "/results", getJobResults, "GET")
   util.AddRoute(jobsRouter, "/results/clear", clearJobResults, "POST")
+  util.AddRoute(jobsRouter, "/scripts", getScripts, "GET")
   util.AddRoute(jobsRouter, "", getJobs, "GET")
 }
 
@@ -118,31 +135,54 @@ func (jm *JobManager) init() {
   defer jm.lock.Unlock()
   jm.jobs = map[string]*Job{}
   jm.jobRuns = map[string]map[int]*JobRunContext{}
+  jm.scripts = map[string]*Script{}
+  jm.cronScheduler = gocron.NewScheduler(time.UTC)
 }
 
-func (jm *JobManager) AddJob(job *Job) {
+func (job *Job) schedule() error {
+  job.Auto = true
+  if d, err := time.ParseDuration(job.Cron); err == nil {
+    job.cronScheduler = Jobs.cronScheduler.Every(d).Tag(job.Name)
+  } else {
+    job.cronScheduler = Jobs.cronScheduler.Cron(job.Cron).Tag(job.Name)
+  }
+  var err error
+  job.cronJob, err = job.cronScheduler.Do(func() {
+    log.Printf("Running cron job [%s]\n", job.Name)
+    Jobs.runJob(job, nil, nil)
+  })
+  return err
+}
+
+func (jm *JobManager) AddJob(job *Job) (bool, error) {
   jm.lock.Lock()
   defer jm.lock.Unlock()
+  exists := jm.jobs[job.Name] != nil
   jm.jobs[job.Name] = job
   delete(jm.jobRuns, job.Name)
-  if job.Auto {
+  if job.Auto || job.Cron != "" {
     log.Printf("Auto-invoking Job: %s\n", job.Name)
     go jm.RunJob(job)
   }
+  return exists, nil
 }
 
-func (jm *JobManager) StoreJobScriptOrFile(filePath, fileName string, content []byte, scriptJob bool) (string, bool) {
+func (jm *JobManager) StoreJobScriptOrFile(filePath, fileName string, content []byte, scriptJob bool) (string, string, bool) {
   if path, err := util.StoreFile(filePath, fileName, content); err == nil {
+    var extension = filepath.Ext(fileName)
+    scriptName := fileName[0 : len(fileName)-len(extension)]
+    script := &Script{Name: scriptName, Path: filepath.FromSlash(filePath + "/" + fileName), Shell: extension == ".sh"}
+    jm.scripts[scriptName] = script
     if scriptJob {
-      task := &CommandJobTask{Cmd: filePath}
-      job := &Job{Name: fileName, Task: task, commandTask: task, Count: 1, KeepResults: 3}
+      task := &CommandJobTask{Script: scriptName}
+      job := &Job{Name: scriptName, Task: task, commandTask: task, Count: 1, KeepResults: 3}
       Jobs.AddJob(job)
     }
-    return path, true
+    return scriptName, path, true
   } else {
-      fmt.Printf("Failed to store job file [%s] with error: %s\n", filePath, err.Error())
+    fmt.Printf("Failed to store job file [%s] with error: %s\n", filePath, err.Error())
   }
-  return "", false
+  return "", "", false
 }
 
 func (jm *JobManager) removeJobs(jobs []string) {
@@ -260,8 +300,21 @@ func (jm *JobManager) runCommandJob(job *Job, jobRun *JobRunContext, iteration i
   job.lock.RLock()
   jobRun.lock.RLock()
   commandTask := job.commandTask
-  realCmd := strings.Join(jobRun.jobArgs, " ")
-  cmd := exec.Command(commandTask.Cmd, jobRun.jobArgs...)
+  targetCommand := commandTask.Cmd
+  var args []string
+  script := jm.scripts[commandTask.Script]
+  if targetCommand == "" && script != nil {
+    if script.Shell {
+      targetCommand = "sh"
+      args = []string{script.Path}
+      args = append(args, jobRun.jobArgs...)
+    } else {
+      targetCommand = script.Path
+      args = jobRun.jobArgs
+    }
+  }
+  realCmd := targetCommand + " " + strings.Join(args, " ")
+  cmd := exec.Command(targetCommand, args...)
   outputTrigger := job.OutputTrigger
   maxResults := job.MaxResults
   stopChannel := jobRun.stopChannel
@@ -327,11 +380,14 @@ func (jm *JobManager) runCommandJob(job *Job, jobRun *JobRunContext, iteration i
       log.Printf("Failed to stop command [%s] with error [%s]\n", job.commandTask.Cmd, err.Error())
     }
   }
-
+  timeout := job.Timeout
+  if timeout <= 0 {
+    timeout = 24 * time.Hour
+  }
 Done:
   for {
     select {
-    case <-time.After(job.Timeout):
+    case <-time.After(timeout):
       if job.Timeout > 0 {
         stopCommand()
         break Done
@@ -344,6 +400,7 @@ Done:
     case out := <-outputChannel:
       if maxResults == 0 || resultCount < maxResults {
         if out != "" {
+          log.Printf("Job[%s][%d] Output: %s\n", job.Name, jobRun.id, out)
           resultCount++
           storeJobResult(job, jobRun, iteration, out, last)
           if outputTrigger != "" {
@@ -597,7 +654,14 @@ func (jm *JobManager) runJob(job *Job, jobArgs []string, markers map[string]stri
 }
 
 func (jm *JobManager) RunJob(job *Job) {
-  jm.runJob(job, nil, nil)
+  if job.Cron != "" {
+    if err := job.schedule(); err != nil {
+      log.Printf("Failed to schedule cron job: %+v\n", job)
+    }
+    job.cronScheduler.StartAsync()
+  } else {
+    jm.runJob(job, nil, nil)
+  }
 }
 
 func (jm *JobManager) runJobs(jobs []*Job) {
@@ -623,6 +687,11 @@ func (jm *JobManager) stopJob(j string) bool {
     }
     if !done && !jobRun.finished && !jobRun.stopped {
       jobRun.stopChannel <- true
+    }
+    if job.cronScheduler != nil {
+      job.cronScheduler.Stop()
+      job.cronJob = nil
+      jm.cronScheduler.RemoveByTag(job.Name)
     }
     jobRun.lock.Unlock()
     events.SendEventJSON(Jobs_JobStopped, job.Name, job)
@@ -651,11 +720,16 @@ func StopJobs(jobs []string, port int) {
   }
 }
 
-func addJob(w http.ResponseWriter, r *http.Request) {
+func addOrUpdateJob(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if job, err := ParseJob(r); err == nil {
-    Jobs.AddJob(job)
-    msg = fmt.Sprintf("Added Job: %s", util.ToJSON(job))
+    if existing, err := Jobs.AddJob(job); err != nil {
+      msg = fmt.Sprintf("Failed to add/update job: %s", util.ToJSON(job))
+    } else if existing {
+      msg = fmt.Sprintf("Updated Job: %s", util.ToJSON(job))
+    } else {
+      msg = fmt.Sprintf("Added Job: %s", util.ToJSON(job))
+    }
     events.SendRequestEventJSON(Jobs_JobAdded, job.Name, job, r)
   } else {
     w.WriteHeader(http.StatusBadRequest)
@@ -675,12 +749,17 @@ func storeJobScriptOrFile(w http.ResponseWriter, r *http.Request) {
   if script || path == "" {
     path, _ = os.Getwd()
   }
-  if path, ok := Jobs.StoreJobScriptOrFile(path, name, content, script); ok {
+  exists := Jobs.scripts[name] != nil
+  if scriptName, path, ok := Jobs.StoreJobScriptOrFile(path, name, content, script); ok {
+    existingOrNew := "Stored New"
+    if exists {
+      existingOrNew = "Replaced Existing"
+    }
     if script {
-      msg = fmt.Sprintf("Stored Job Script [%s] at path [%s]", name, path)
+      msg = fmt.Sprintf("%s Job Script [%s] at path [%s], and Job created with name [%s]", existingOrNew, scriptName, path, scriptName)
       events.SendRequestEvent(Jobs_JobScriptStored, msg, r)
     } else {
-      msg = fmt.Sprintf("Stored File [%s] at path [%s]", name, path)
+      msg = fmt.Sprintf("%s File [%s] at path [%s]", existingOrNew, name, path)
       events.SendRequestEvent(Jobs_JobFileStored, msg, r)
     }
   } else {
@@ -708,6 +787,11 @@ func removeJob(w http.ResponseWriter, r *http.Request) {
 func getJobs(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage("Reporting jobs", r)
   util.WriteJsonPayload(w, Jobs.jobs)
+}
+
+func getScripts(w http.ResponseWriter, r *http.Request) {
+  util.AddLogMessage("Reporting job scripts ", r)
+  util.WriteJsonPayload(w, Jobs.scripts)
 }
 
 func runJobs(w http.ResponseWriter, r *http.Request) {
@@ -805,16 +889,16 @@ func ParseJobFromPayload(payload string) (*Job, error) {
       }
       if httpTaskError != nil {
         if cmdTaskError = util.ReadJson(task, &commandTask); cmdTaskError == nil {
-          if commandTask.Cmd != "" {
+          if commandTask.Cmd != "" || commandTask.Script != "" {
             for _, arg := range commandTask.Args {
               fillers := util.GetFillers(arg)
               for _, filler := range fillers {
                 commandTask.fillers[filler]++
               }
-              job.commandTask = &commandTask
             }
+            job.commandTask = &commandTask
           } else {
-            cmdTaskError = errors.New("Missing command in command task")
+            cmdTaskError = errors.New("A command task must specify a command or reference a script")
           }
         }
       }

@@ -23,8 +23,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   echoRouter := r.PathPrefix("/echo").Subrouter()
   util.AddRoute(echoRouter, "/headers", EchoHeaders)
   util.AddRoute(echoRouter, "/body", echoBody)
-  util.AddRoute(echoRouter, "/ws", wsEchoHandler, "GET", "POST", "PUT")
-  util.AddRoute(echoRouter, "/stream", echoStream, "POST", "PUT")
+  util.AddRoute(echoRouter, "/ws", wsEchoHandler)
+  util.AddRoute(echoRouter, "/stream", echoStream)
   util.AddRoute(echoRouter, "", echo)
 }
 
@@ -52,7 +52,7 @@ func echoStream(w http.ResponseWriter, r *http.Request) {
   var writer io.Writer = w
   if util.IsH2(r) {
     fw := intercept.NewFlushWriter(r, w)
-    util.CopyHeaders("Request", w, r.Header, r.Host, r.RequestURI, false)
+    util.CopyHeaders("Request", r, w, r.Header, true, true, false)
     util.SetHeadersSent(r, true)
     fw.Flush()
     writer = fw
@@ -92,7 +92,7 @@ func GetEchoResponse(w http.ResponseWriter, r *http.Request) map[string]interfac
     HeaderGotoPort:       l.Port,
     HeaderViaGoto:        l.Label,
     HeaderGotoProtocol:   w.Header().Get(HeaderGotoProtocol),
-    HeaderGotoHostTunnel: r.Header.Get(HeaderGotoHostTunnel),
+    HeaderGotoTunnelHost: r.Header.Get(HeaderGotoTunnelHost),
     HeaderViaGotoTunnel:  r.Header.Get(HeaderViaGotoTunnel),
   }
   if !util.IsH2C(r) {

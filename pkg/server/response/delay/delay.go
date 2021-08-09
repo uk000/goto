@@ -26,8 +26,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRouteWithPort(delayRouter, "/set/{delay}", setDelay, "POST", "PUT")
   util.AddRouteWithPort(delayRouter, "/clear", setDelay, "POST", "PUT")
   util.AddRouteWithPort(delayRouter, "", getDelay, "GET")
-  util.AddRoute(root, "/delay/{delay}", delay, "GET", "PUT", "POST", "OPTIONS", "HEAD")
-  util.AddRoute(root, "/delay", delay, "GET", "PUT", "POST", "OPTIONS", "HEAD")
+  util.AddRoute(root, "/delay/{delay}", delay)
 }
 
 func setDelay(w http.ResponseWriter, r *http.Request) {

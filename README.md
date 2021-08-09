@@ -3,7 +3,7 @@
 # goto
 
 > **NOTE**
-<small> The Readme reflects master HEAD code, which has breaking changes compared to the latest `0.8.x` release. For documentation of `0.8.x` and prior releases, switch to `v0.8.x` branch or any of the release tags.</small>
+<small> The Readme reflects master HEAD code and applies to release 0.9.x. For documentation of `0.8.x` and prior releases, switch to `v0.8.x` branch or any of the release tags.</small>
 
 
 ## What is it?
@@ -16,7 +16,7 @@ It's hard to find some of these features together in a single tool
 
 ## How to use it?
 
-It's available as a docker image: https://hub.docker.com/repository/docker/uk0000/goto.
+It's available as a docker image: `docker.io/uk0000/goto:latest`
 Or build it locally on your machine
 
 ```
@@ -28,6 +28,7 @@ go build -o goto .
 - Say you need an application deployed as a service in k8s or on VMs, that can respond to requests on several ports using HTTP, HTTP/2, GRPC or TCP protocols both over plain text and TLS. `Goto` is what you need.
 - Say you want to test a client or a proxy, and want to introduce some chaos in your testing, so you need a service that can open or close a port on the fly, or can convert a port from plaintext to TLS and vice versa on the fly. `Goto` does it.
 - Say you need to test a client against different specific response payloads, so you need a substitute mock service that can stand in for the real service, where you can configure a payload on the fly for specific request URIs, headers, etc. Go `Goto`.
+- You need a test server application that can perform some quick on-the-fly transformations on incoming request, extracting values from headers/query/URI/body and produce semi-dynamic response based on templates.
 - A lot more scenarios can benefit from `goto`. See some more scenarios further below in the doc.
 
 ## Some simple usage examples?
@@ -126,6 +127,10 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 
 ### Scenario: [Track client hang-ups on server via request/connection timeouts](docs/scenarios-resiliency.md#server-resiliency-client-hangups)
 
+## Outside-the-Box Scenarios
+
+### Scenario: [Create HTTP chaos that HTTP libraries won't let you](docs/http-chaos.md)
+
 <br/>
 
   <span style="color:red">
@@ -140,7 +145,7 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 
 It's an HTTP client, server, proxy, registry and tunnel built into a single application.
 
-As a server, it can respond to any arbitrary URI and let you configure custom response based on various match criteria against URIs, headers, body, etc. It can collect useful stats and counters that can be used to correlate responses against requests.
+As a server, it can respond to any arbitrary URI and let you configure custom response based on various match criteria against URIs, headers, body, etc. It can collect useful stats and counters that can be used to correlate responses against requests. The server can also extract values from the incoming request's headers/query/URI/body and produce semi-dynamic response based on pre-configured templates.
 
 `Goto` can also act as an HTTP proxy that lets you intercept HTTP requests and get some insights (e.g. based on headers) before forwarding it to its destination.
 
@@ -243,7 +248,7 @@ go build -o goto .
 
 The application accepts the following command arguments:
 
-<table>
+<table style="font-size: 0.9em;">
     <thead>
         <tr>
             <th>Argument</th>
@@ -262,11 +267,11 @@ The application accepts the following command arguments:
         </tr>
         <tr>
           <td rowspan="2"><pre>--ports {ports}</pre></td>
-          <td>Initial list of ports that the server should start with. Port list is given as comma-separated list of <pre>{port1},{port2}/{protocol2}/{commonName2},{port3}/{protocol3}/{commonName3},...</pre>. The first port in the list is used as the primary port and is forced to be HTTP. Protocol is optional, and can be one of <pre>http (default), https, tcp, tls (implies tcp+tls), or grpc. </pre> Protocol <strong>https</strong> configures the port to serve HTTP requests with a self-signed TLS cert, whereas protocol <strong>tls</strong> configures a TCP port with self-signed TLS cert. <strong>CommonName</strong> is used for generating self-signed certs, and defaults to <strong>goto.goto</strong>. </td>
+          <td>Initial list of ports that the server should start with. Port list is given as comma-separated list of <pre>{port1},<br/>{port2}/{protocol2}/{commonName2},<br/>{port3}/{protocol3}/{commonName3},...</pre>. The first port in the list is used as the primary port and is forced to be HTTP. Protocol is optional, and can be one of <pre>http (default), https, tcp,<br/> tls (implies tcp+tls), or grpc. </pre> Protocol <strong>https</strong> configures the port to serve HTTP requests with a self-signed TLS cert, whereas protocol <strong>tls</strong> configures a TCP port with self-signed TLS cert. <strong>CommonName</strong> is used for generating self-signed certs, and defaults to <strong>goto.goto</strong>. </td>
           <td rowspan="2">""</td>
         </tr>
         <tr>
-          <td>* For example: <pre>--ports 8080,,8081/http,8083/https,8443/https/foo.com,8000/tcp,9000/tls,10000/grpc</pre>  The first port in the list is used as primary port. Additional ports can be opened by making listener API calls on this port. See <a href="#-listeners">Listeners</a> feature for more details.</td>
+          <td>* For example: <pre>--ports 8080,<br/>8081/http,8083/https,<br/>8443/https/foo.com,<br/>8000/tcp,9000/tls,10000/grpc</pre>  In addition to the startup ports, additional ports can be opened by making listener API calls on this port. See <a href="#-listeners">Listeners</a> feature for more details.</td>
         </tr>
         <tr>
           <td rowspan="2"><pre>--label `{label}`</pre></td>
@@ -277,14 +282,19 @@ The application accepts the following command arguments:
           <td>* This is used both for setting Goto's default response headers as well as when registering with the registry.</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--startupDelay {delay}</pre></td>
+          <td rowspan="1"><pre>--startupDelay<br/> {delay}</pre></td>
           <td>Delay the startup by this duration. </td>
           <td rowspan="1">1s</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--shutdownDelay {delay}</pre></td>
+          <td rowspan="1"><pre>--shutdownDelay<br/> {delay}</pre></td>
           <td>Delay the shutdown by this duration after receiving SIGTERM. </td>
           <td rowspan="1">1s</td>
+        </tr>
+        <tr>
+          <td rowspan="1"><pre>--startupScript<br/> {shell command}</pre></td>
+          <td>List of shell commands to execute at goto startup. Multiple commands are specified by passing multiple instances of this arg. The commands are joined with ';' as separator and executed using 'sh -c'. </td>
+          <td rowspan="1"></td>
         </tr>
         <tr>
           <td rowspan="2"><pre>--registry {url}</pre></td>
@@ -295,7 +305,7 @@ The application accepts the following command arguments:
           <td>* This is used to get initial configs and optionally report results to the Goto registry. See <a href="#registry-features">Registry</a> feature for more details.</td>
         </tr>
         <tr>
-          <td rowspan="2"><pre>--locker={true|false}</pre></td>
+          <td rowspan="2"><pre>--locker<br/>={true|false}</pre></td>
           <td> Whether this instance should report its results back to the Goto Registry. </td>
           <td rowspan="2"> false </td>
         </tr>
@@ -303,7 +313,7 @@ The application accepts the following command arguments:
           <td>* An instance can be asked to report its results to the Goto registry in case the  instance is transient, e.g. pods.</td>
         </tr>
         <tr>
-          <td rowspan="2"><pre>--events={true|false}</pre></td>
+          <td rowspan="2"><pre>--events<br/>={true|false}</pre></td>
           <td> Whether this instance should generate events and build a timeline locally. </td>
           <td rowspan="2"> true </td>
         </tr>
@@ -311,7 +321,7 @@ The application accepts the following command arguments:
           <td>* Events timeline can be helpful in observing how various operations and traffic were interleaved, and help reason about some outcome.</td>
         </tr>
         <tr>
-          <td rowspan="2"><pre>--publishEvents={true|false}</pre></td>
+          <td rowspan="2"><pre>--publishEvents<br/>={true|false}</pre></td>
           <td> Whether this instance should publish its events to the registry to let registry build a unified timeline of events collected from various peer instances. This flag takes effect only if a registry URL is specified to let this instance connect to a registry instance. </td>
           <td rowspan="2"> false </td>
         </tr>
@@ -327,87 +337,87 @@ The application accepts the following command arguments:
           <td>* The loaded root certificates are used if available, otherwise system default root certs are used.</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--serverLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--serverLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable all goto server logging. </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--adminLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--adminLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of admin calls to configure goto. </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--metricsLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--metricsLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of calls to metrics URIs. </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--probeLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--probeLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of requests received for URIs configured as liveness and readiness probes. See <a href="#server-probes">Probes</a> for more details. </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--clientLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--clientLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of client activities. </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--invocationLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--invocationLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable client's target invocation logs. </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--registryLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--registryLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable all registry logs. </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--lockerLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--lockerLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of locker requests on Registry instance. </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--eventsLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--eventsLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of store event calls from peers on Registry instance. </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--reminderLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--reminderLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable reminder logs received from various peer instances (applicable to goto instances acting as registry). </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--peerHealthLogs={true|false}</pre></td>
+          <td rowspan="1"><pre>--peerHealthLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of requests received from Registry for peer health checks </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--logRequestHeaders={true|false}</pre></td>
+          <td rowspan="1"><pre>--logRequestHeaders<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of request headers </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--logRequestBody={true|false}</pre></td>
+          <td rowspan="1"><pre>--logRequestBody<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of request body </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--logRequestMiniBody={true|false}</pre></td>
+          <td rowspan="1"><pre>--logRequestMiniBody<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of request mini body </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--logResponseHeaders={true|false}</pre></td>
+          <td rowspan="1"><pre>--logResponseHeaders<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of response headers </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--logResponseBody={true|false}</pre></td>
+          <td rowspan="1"><pre>--logResponseBody<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of response body </td>
           <td rowspan="1">true</td>
         </tr>
         <tr>
-          <td rowspan="1"><pre>--logResponseMiniBody={true|false}</pre></td>
+          <td rowspan="1"><pre>--logResponseMiniBody<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of response mini body </td>
           <td rowspan="1">true</td>
         </tr>
@@ -884,7 +894,7 @@ The modes are described in detail below:
  - In `Payload` mode, a TCP listener serves a set of pre-configured response payload(s) with an optional `responseDelay`. If more than one payload is configured in `responsePayloads` array, the `responseDelay` gets applied before sending each item in the array. The `respondAfterRead` field controls whether response should be sent immediately or if a read should be performed before sending the response, in which case at least 1 byte must be received from the client before the response(s) are sent. The `keepOpen` configuration determines whether the connection is kept open after sending the last item in the array. If no `connectionLife` is configured explicitly, the connection life defaults to `30s` in this mode, and the connection is kept open for the remaining lifetime (computed from the start of request). Note that in this mode, the server keeps the connection open even if the client preemptively closes the connection.
  - If `Echo` mode is enabled on a TCP listener, the listener echoes back the bytes received from the client. The `echoResponseSize` configures the echo buffer size, which is the number of bytes that the listener will need to receive from the client before echoing back. If more data is received than the `echoResponseSize`, it'll echo multiple chunks each of `echoResponseSize` size. The config `echoResponseDelay` configures the delay server should apply before sending each echo response packet. In `echo` mode, the connection enforces `readTimeout` and `connIdleTimeout` based on the activity: any new bytes received reset the read/idle timeouts. It applies `writeTimeout` when sending the echo response to the client. If `connectionLife` is set, it controls the overall lifetime of the connection and the connection will close upon reaching the max life regardless of the activity.
  - If `Stream` mode is enabled, the connection starts streaming TCP bytes per the given configuration as soon as a client connects. None of the timeouts or max life applies in streaming mode, and the client connection closes automatically once the streaming completes. The stream behavior is controlled via the following configs: `streamPayloadSize`, `streamChunkSize`, `streamChunkCount`, `streamChunkDelay`, `streamDuration`. Not all of these configs are required, and a combination of some may lead to ambiguity that the server resolves by picking the most sensible combinations of these config params.
- - In `Payload Validation` mode, the client should first set the payload expectation by calling either `/listeners/{port}/expect/payload/{length}` or `/listeners/{port}/expect/payload/{length}`, depending on whether server should just validate payload length or the payload content. The server then waits for the duration of the connection lifetime (if not set explicitly for the listener, this feature defaults to `30s` of total connection life), and buffers bytes received from the client. If at any point during the connection life the number of received bytes exceed the expected payload length, the server responds with error and closes connection. If at the end of the connection life, the number of bytes match the payload expectations (either length or both length and content), then the server responds with success message. The messages returned by the server are one of the following:
+ - In `Payload Validation` mode, the client should first set the payload expectation by calling either `/server/tcp/{port}/expect/payload/{length}` or `/server/tcp/{port}/expect/payload/{length}`, depending on whether server should just validate payload length or the payload content. The server then waits for the duration of the connection lifetime (if not set explicitly for the listener, this feature defaults to `30s` of total connection life), and buffers bytes received from the client. If at any point during the connection life the number of received bytes exceed the expected payload length, the server responds with error and closes connection. If at the end of the connection life, the number of bytes match the payload expectations (either length or both length and content), then the server responds with success message. The messages returned by the server are one of the following:
    - `[SUCCESS]: Received payload matches expected payload of length [l] on port [p]`
    - `[ERROR:EXCEEDED] - Payload length [l] exceeded expected length [e] on port [p]`
    - `[ERROR:CONTENT] - Payload content of length [l] didn't match expected payload of length [e] on port [p]`
@@ -916,7 +926,7 @@ The modes are described in detail below:
 | POST, PUT  | /server/tcp/`{port}`<br/>/mode/conversation=`[y/n]}` | Enable/disable conversation mode on a port to support multiple packets verification (see overview for details) |
 | POST, PUT  | /server/tcp/`{port}`<br/>/mode/silentlife=`[y/n]` | Enable/disable silent life mode on a port (see overview for details) |
 | POST, PUT  | /server/tcp/`{port}`<br/>/mode/closeatfirst=`[y/n]` | Enable/disable `close at first byte` mode on a port (see overview for details) |
-| POST, PUT  | /tcp/{port}/set/payload=`{enable}` | Enable/disable `payload` mode on a port, allowing for tcp connection to serve a pre-configured payload and close the connection (see overview for details) |
+| POST, PUT  | /server/tcp/{port}/set/payload=`{enable}` | Enable/disable `payload` mode on a port, allowing for tcp connection to serve a pre-configured payload and close the connection (see overview for details) |
 | GET  | /server/tcp/`{port}`/active | Get a list of active client connections for a TCP listener port |
 | GET  | /server/tcp/active | Get a list of active client connections for all TCP listener ports |
 | GET  | /server/tcp/`{port}`<br/>/history/{mode} | Get history list of client connections for a TCP listener port for the given mode (one of the supported modes given as text: `SilentLife`, `CloseAtFirstByte`, `Echo`, `Stream`, `Conversation`, `PayloadValidation`) |
@@ -1090,7 +1100,7 @@ curl -X POST localhost:8080/server/request/headers/track/counts/clear
 
 curl -X POST localhost:8080/server/request/headers/track/counts/clear
 
-curl localhost:8080/request/server/headers/track
+curl localhost:8080/server/request/headers/track
 ```
 
 </details>
@@ -1102,7 +1112,7 @@ curl localhost:8080/request/server/headers/track
 <p>
 
 ```
-$ curl localhost:8080/request/headers/track/counts
+$ curl localhost:8080/server/request/headers/track/counts
 
 {
   "x": {
@@ -1359,7 +1369,7 @@ curl localhost:8080/probes
 This feature allows bypassing or ignoring some requests based on URIs and Headers match. A status code can be configured to be sent for ignored/bypassed requests. While both `bypass` and `ignore` filtering results in requests skipping additional processing, `bypass` requests are still logged whereas `ignored` requests don't generate any logs. Request counts are tracked for both bypassed and ignored requests.
 
 * Ignore and Bypass configurations are not port specific and apply to all ports.
-* APIs for Bypass and Ignore are alike and listed in a single table below. The two feature APIs only differ in the prefix `/request/bypass` vs `/request/ignore`
+* APIs for Bypass and Ignore are alike and listed in a single table below. The two feature APIs only differ in the prefix `/server/request/bypass` vs `/server/request/ignore`
 * For URI matches, prefix `!` can be used for negative matches. Negative URI matches are treated with conjunction (`AND`) whereas positive URI matches are treated with disjunction (`OR`). A URI gets filtered if: 
     * It matches any positive URI filter
     * It doesn't match all negative URI filters
@@ -1575,17 +1585,19 @@ Custom response payload can be set for any of the following request categories:
 5. Requests matching URI + header combinations
 6. Requests matching URI + query combinations
 7. Requests matching URI + one or more keywords in request body
+8. Requests matching URI + one or more JSON paths in request body
 
 If a request matches multiple configured responses, a response is picked based on the following priority order:
 
 1. URI + headers combination match
 2. URI + query combination match
 3. URI + body keywords combination match
-4. URI match
-5. Headers match
-6. Query match
-7. If no other match found and a default payload is configured, the default payload is served
-8. If no match is found and no default payload is configured, the request proceeds for eventual catch-all response.
+4. URI + body JSON paths match
+5. URI match
+6. Headers match
+7. Query match
+8. If no other match found and a default payload is configured, the default payload is served
+9. If no match is found and no default payload is configured, the request proceeds for eventual catch-all response.
 
 URIs can be specified with `*` suffix to match all request URIs carrying the given URI as a prefix. E.g. `/foo*` to match `/foo`, `/fooxyz` and `/foo/xyz`.
 
@@ -1616,7 +1628,7 @@ Each transformation spec can contain multiple mappings. A mapping carries the fo
 
 ### Capturing values from the request to use in the response payload
 
- To capture a value from URI/Header/Query, use the `{var}` syntax in the match criteria as well as in the payload. The occurrences of `{var}` in the response payload will be replaced with the value of that var as captured from the URI/Header/Query. Additionally, `{var}` allows for URIs to be specified such that some ports of the URI can vary.
+ To capture a value from URI, Header, Query or Body JSON Path, use the `{var}` syntax in the match criteria as well as in the payload. The occurrences of `{var}` in the response payload will be replaced with the value of that var as captured from the URI/Header/Query/Body. Additionally, `{var}` allows for URIs to be specified such that some ports of the URI can vary.
 
  For example, for a configured response payload that matches on request URI:
  ```
@@ -1637,6 +1649,57 @@ Same kind of capture can be done on query params, e.g.:
 ```
 
 
+A combination of captures can be done from URI and Header/Query. Below example shows a capture of {x} from URI and {y} from request header:
+```
+/server/response/payload/set/header/bar={y}?uri=/foo/{x} --data '{"result": "URI foo with {x} and header bar with {y}"}'
+```
+
+For a request 
+```
+curl -H'bar:123' localhost:8080/foo/abc
+```
+the response payload will be `{"result": "URI foo with abc and header bar with 123"}`
+
+Lastly, values can be captured from JSON paths that match against request body. For example, the configuration below captures value at JSON paths `.foo.bar` into var `{a}` and at path `.foo.baz` into var `{b}` from the request body received with URI `/foo`. The captured values are injected into the response body in two places for each variable.
+
+```
+curl -v -g -XPOST localhost:8080/server/response/payload/set/body/paths/.foo.bar={a},.foo.baz={b}\?uri=/foo --data '{"bar":"{a}", "baz":"{b}", "message": "{a} is {b}"}' -HContent-Type:application/json
+```
+
+For the above config, a request like this:
+```
+curl localhost:8080/foo --data '{"foo": {"bar": "hi", "baz": "hello"}}'
+```
+
+produces response: `{"bar":"hi", "baz":"hello", "message": "hi is hello"}`.
+
+A more complex example capturing values from arrays and objects, and producing response json with arrays of different lengths based on input array lengths. The two configurations in the below example work in tandem, showing an example of how mutually exclusive configurations can provide on-the-fly `if-else` semantics based on input payload.
+
+First config to capture `.one.two=two`, `.one.three[0]={three.1}`, `.one.three[1]={three.2}`, `.one.four[1].name={four.name}`. This response is triggered if input payload has 2 elements in array `.one.three` and two elements in array `.one.four`.
+
+```
+$ curl -g -X POST localhost:8080/server/response/payload/set/body/paths/.one.two={two},.one.three[0]={three.1},.one.three[1]={three.2},.one.four[1].name={four.name}?uri=/foo --data '{"two":"{two}", "three":["{three.1}", "{three.2}"]}, "message": "two -> {two}, three -> {three.1} {three.2}, four -> {four.name}"}' -H'Content-Type:application/json'
+```
+
+Second config to capture `.one.two=two`, `.one.three[0]={three.1}`, `.one.three[1]={three.2}`, `.one.three[2]={three.3}`, `.one.four[0].name={four.name}`. This response is triggered if input payload has 3 elements in array `.one.three` and one element in `.one.four`.
+
+```
+$ curl -g -X POST localhost:8080/server/response/payload/set/body/paths/.one.two={two},.one.three[0]={three.1},.one.three[1]={three.2},.one.three[2]={three.3},.one.four[0].name={four.name}?uri=/foo --data '{"two":"{two}", "three":["{three.1}", "{three.2}", "{three.3}"]}, "message": "two -> {two}, three -> {three.1} {three.2} {three.3}, four -> {four.name}"}' -H'Content-Type:application/json'
+```
+
+For the above two configs, this request:
+```
+$ curl -v localhost:8080/foo --data '{"one": {"two": "hi", "three": ["hello", "world"], "four":[{"name": "foo"},{"name":"bar"}]}}'
+```
+ produces the following output: `{"two":"hi", "three":["hello", "world"]}, "message": "two -> hi, three -> hello world, four -> bar"}`
+
+And this request
+```
+$ curl localhost:8080/foo --data '{"one": {"two": "hi", "three": ["hello", "world", "there"], "four":[{"name": "foo"}]}}'
+```
+produces the following output: `{"two":"hi", "three":["hello", "world", "there"]}, "message": "two -> hi, three -> hello world there, four -> foo"}`
+
+
 #### APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
 
@@ -1655,7 +1718,8 @@ Same kind of capture can be done on query params, e.g.:
 | POST | /server/response<br/>/payload/set/query<br/>/`{q}`?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given query param name and the given URI |
 | POST | /server/response<br/>/payload/set<br/>/query/`{q}={value}`  | Add a custom payload to be sent for requests matching the given query param name and value |
 | POST | /server/response<br/>/payload/set/query<br/>/`{q}={value}`<br/>?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given query param name and value along with the given URI. |
-| POST | /server/response<br/>/payload/set<br/>/body~`{keywords}`?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given URI where the body contains the given keywords (comma-separated list) in the given order (second keyword in the list must appear after the first, and so on) |
+| POST | /server/response/payload<br/>/set/body~{regex}?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given URI where the body contains the given list of regexp (comma-separated list) in the given order (second expression in the list must appear after the first, and so on) |
+| POST | /server/response/payload<br/>/set/body/paths/{paths}?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given URI where the body contains the given list of JSON paths (comma-separated list). Match is triggered only when all JSON paths match, and the first matched config gets applied. Also see above description and example for how to capture values from JSON paths. |
 | POST | /server/response<br/>/payload/transform?uri=`{uri}`  | Add payload transformations for requests matching the given URI. Payload submitted with this URI should be `Payload Transformation Schema` |
 | POST | /server/response<br/>/payload/clear  | Clear all configured custom response payloads |
 | GET  |	/server/response/payload | Get configured custom payloads |
@@ -1936,17 +2000,34 @@ The URI `/status/`{status}`` allows client to ask for a specific status as respo
 #### API
 |METHOD|URI|Description|
 |---|---|---|
-| GET |	/status/`{status}` or /status=`{status}` | This call either receives the given status, or the forced response status if one is set. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used. |
-| GET  |	/status=`{status:count}`/flipflop?x-request-id=`{requestId}` | This call responds with the given status for the given count times when called successively with the same count value. Once the status is served `count` times, the next status served is `200`, and subsequent calls start the cycle again. Optional query param `x-request-id` can be used to perform status flip for each unique request, preventing requests from affecting one another. |
-| GET  |	/status=`{status}`<br/>/delay=`{delay}` | In addition to requesting a status as above, this API also allows a delay to be applied. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE |	/status/`{status}` or /status=`{status}` | This call either receives the given status, or the forced response status if one is set. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used. |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE  |	/status=`{status}`<br/>/delay=`{delay}` | In addition to requesting a status as above, this API also allows a delay to be applied. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE |	/status=`{status:count}`?x-request-id=`{requestId}` | When the status param is passed in the format `<code>:<count>`, the requested response code is returned for `count` number of subsequent calls (starting from the current one) before reverting back to 200. The optional query param `x-request-id` can be used to ask for stateful status for each unique request id, allowing multiple concurrent clients to each receive its own independent stateful response. |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE |	/status=`{status:count}`/delay=`{delay}`?x-request-id=`{requestId}` | Same as above, the requested response code is returned for `count` number of subsequent calls but with the given delay applied before a response. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. After `count` responses, the response status reverts to 200.  |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE  |	/status=`{status:count}`/flipflop?x-request-id=`{requestId}` | This call responds with the given status for the given count times when called successively with the same count value. Once the status is served `count` times, the next status served is `200`, and subsequent calls start the cycle again. Optional query param `x-request-id` can be used to perform status flip for each unique request, preventing requests from affecting one another. |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE |	/status=`{status:count}`/delay=`{delay}`/flipflop?x-request-id=`{requestId}` | Same behavior as above except that the given delay duration param gets applied, allowing you to add artificial delay before responding with the given status. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
 | GET  |	/status/flipflop | Reports the current flipflop counter value, i.e. number of times current last request flipflop status has been served. |
-| POST |	/status/flipflop/clear | Clears the current flipflop counter value so the next call can start with a fresh cycle. |
+| POST |	/status/clear | Clears the current state of all stateful statuses recorded so far. |
 
 #### Status API Example
 ```
+curl -I  localhost:8080/status/418
+
 curl -I  localhost:8080/status/501,502,503
 
-curl -v  localhost:8080/status/501,502,503/delay/100ms-1s
+curl -v  localhost:8080/status=501,502,503/delay=100ms-1s
+
+curl -v localhost:8080/status=503:2?x-request-id=1
+
+curl -v localhost:8080/status=503:2/delay=1s?x-request-id=1
+
+curl -I localhost:8080/status=503:3/flipflop?x-request-id=1
+
+curl -v localhost:8080/status=503:3/delay=1s/flipflop?x-request-id=1
+
+curl localhost:8080/status/flipflop
+
+curl -XPOST localhost:8080/status/clear
 ```
 
 ###### <small> [Back to TOC](#toc) </small>
@@ -1963,7 +2044,7 @@ When a delay is passed to this API, the response carries a header `Response-Dela
 #### API
 |METHOD|URI|Description|
 |---|---|---|
-| GET, POST, PUT, OPTIONS, HEAD |	/delay/`{delay}` | Responds after the given delay. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
+| GET, PUT, POST, OPTIONS, HEAD, DELETE |	/delay/`{delay}` | Responds after the given delay. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. To apply delay with a specific response status code, see `/status` API above. |
 
 #### Delay API Example
 ```
@@ -2011,36 +2092,60 @@ Any request that doesn't match any of the defined management APIs, and also does
 # <a name="tunnel"></a>
 # Tunnel
 
-`Tunnel` feature allows a `goto` instance to act as a proxy tunnel, receiving HTTP(S) requests from clients and forwarding those to any arbitrary HTTP(S) endpoint. This feature can be useful in several scenarios: e.g. 
+`Tunnel` feature allows a `goto` instance to act as a L7 tunnel, receiving HTTP(S)/H2 requests from clients and forwarding those to any arbitrary HTTP(S)/H2 endpoints. This feature can be useful in several scenarios: e.g. 
 - A client wishes to reach an endpoint by IP address, but the endpoint is not accessible from the client's network space (e.g. K8S overlay network). In this case, a single `goto` instance deployed inside the overlay network (e.g. K8S cluster) but accessible to the client network space via an FQDN can receive requests from the client and transparently forward those to any overlay IP address that's visible to the `goto` instance.
 - Route traffic from a client to a service through `goto` proxy in order to inspect traffic and capture details in both directions.
 - Observe network behavior (latencies, packet drops, etc) between two endpoints
+- Send a request from a client to two or more service endpoints and analyze results from those, while sending the response to client from whichever endpoint responds first.
+- Send a request on a multi-hop journey, routing via multiple goto tunnels, in order to observe latency or other network behaviors.
+- Test a client and/or service's behavior if the other party that's communicating with it changed its protocol from HTTP/1 to HTTP/2 without having to change the real applications' code.
 
-All traffic on a port can be tunneled by configuring a tunnel using APIs. Alternately, a request can be tunneled on the fly using tunnel URI prefix format.
 
-#### On-the-fly Tunneling
-Any request can be tunneled using format `http://goto/tunnel={address:port}/some/uri`. The goto instance will in turn make a call to `{address:port}` with URI `/some/uri` using the same HTTP parameters that the client used (Method, Headers, Body, TLS). 
+There are three different ways in which requests can be tunneled via `Goto`:
 
-#### Configured Tunnels
-Any listener can be converted into a tunnel by calling `/tunnels/add/{protocol:endpoint}` API to add one or more endpoints as tunnel destinations. When a tunnel has more than one endpoint, the requests are forwarded to all the endpoints.
+### 1. Configured Tunnels
+Any listener can be converted into a tunnel by calling `/tunnels/add/{protocol:address:port}` API to add one or more endpoints as tunnel destinations. When a tunnel has more than one endpoint, the requests are forwarded to all the endpoints, and the earliest response gets sent to the client.
+
+
+### 2. On-the-fly Tunneling via URI prefix
+Any request can be tunneled via `Goto` using URI path format `http://goto/tunnel={endpoints}/some/uri`. The goto instance will in turn multicast the request to all the given endpoints (format `{protocol:address:port}` with URI `/some/uri` using the same HTTP parameters that the client used (Method, Headers, Body, TLS). In order to multi-tunnel a request via multiple `goto` instances, multiple tunnel path prefixes can be added, e.g. `http://goto-1:8080/tunnel={goto-2:8080}/tunnel={goto-3:8081}/tunnel={real-service:80}/some/uri`.
+
+
+### 3. On-the-fly Tunneling using special header `Goto-Tunnel`
+Goto can be asked to tunnel a request by sending it to the `goto` instance with an additional header `Goto-Tunnel:{endpoints}`. Endpoints can be a comma-separated list where each endpoint is of format `{protocol:address:port}`. This approach allows for rerouting some existing traffic via goto, which then sends it to the original intended upstream service without having to modify the URI. The `Goto-Tunnel` header allows for multicasting as well as multi-tunneling. 
+
+In order to multicast a request to several endpoints, add the `Goto-Tunnel` header multiple times (i.e. with list of HTTP header values). For example:
+```
+curl -vk https://goto-1:8081/foo -H'Goto-Tunnel:goto-2:8082' -H'Goto-Tunnel:goto-3:8083'
+```
+
+In order to send a request through multiple `goto` tunnels, add multiple `goto` endpoint addresses as comma-separated value to a single `Goto-Tunnel` header. For example:
+```
+curl -vk https://goto-1:8081/foo -H'Goto-Tunnel:goto-2:8082,goto-3:8083'
+```
+
+`Endpoints` (in path prefix or header) can omit the protocol, or specify the protocol from one of: `http` (HTTP/1.1), `https` (HTTP/1.1 with TLS), `h2` (HTTP/2 with TLS) or `h2c` (HTTP/2 over cleartext).
+
+When the endpoints in a tunnel have different protocols, `Goto` performs protocol conversions between all possible translations (`http` to/from `https` and `HTTP/1.1` to/from `HTTP/2`). The request `Host` and `SNI Authority` are rewritten to match the endpoint host.
+
+When an endpoint in a tunnel omits protocol in its spec, the protocol used by the original/preceding client request is carried forward.
+
 
 #### Tunnel APIs
 
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
 
+All `Goto` APIs support tunnel prefix, allowing any `goto` API to be proxied from one instance to another. In addition, any arbitrary API can also be called using the tunnel prefix.
+
 |METHOD|URI|Description|
 |---|---|---|
-| ALL       |	/`tunnel={protocol:endpoint}`/`...` | URI prefix format to tunnel any request on the fly. |
-| POST, PUT |	/tunnels/add/`{protocol:endpoint}` | Adds a tunnel on the listener port on which the API is called, forwarding traffic to the given `endpoint`, optionally remapping protocol between HTTP-HTTPS. To configure tunnel on a port using another port's listener, use `port={port}` prefix format. |
-| POST, PUT |	/tunnels/add/`{protocol:endpoint}`/transparent | Add a transparent tunnel that doesn't add goto request headers when forwarding a request to the upstream endpoints. However, goto response headers are still added to the response sent to the downstream client. |
-| POST, PUT |	/tunnels/remove/`{endpoint}` | Remove a configured endpoint tunnel on the listener port on which the API is called. |
+| ALL       |	/`tunnel={protocol:host:port}`/`...` | URI prefix format to tunnel any request on the fly. |
+| POST, PUT |	/tunnels/add/`{protocol:host:port}` | Adds a tunnel on the listener port on which the API is called, forwarding traffic to the given `endpoint`, optionally remapping protocol between HTTP-HTTPS. To configure tunnel on a port using another port's listener, use `port={port}` prefix format. |
+| POST, PUT |	/tunnels/add/`{protocol:host:port}`/transparent | Add a transparent tunnel that doesn't add goto request headers when forwarding a request to the upstream endpoints. However, goto response headers are still added to the response sent to the downstream client. |
+| POST, PUT |	/tunnels/remove/`{protocol:host:port}` | Remove a configured endpoint tunnel on the listener port on which the API is called. |
 | POST, PUT |	/tunnels/clear | Clear all tunnels on the listener port on which the API is called. |
 | GET |	/tunnels | Get currently configured tunnels. |
 
-
-When the tunnel prefix is of the form `address:port`, the protocol used by the client request is applied. If tunnel prefix is specified as `protocol:address:port`, the given protocol is used, thus allowing client to make HTTP call to goto but have goto make HTTPS call to the endpoint, and vice versa.
-
-All `Goto` APIs support tunnel prefix, allowing any `goto` API to be proxied from one instance to another. In addition, any arbitrary API can also be called using the tunnel prefix.
 
 ###### <small> [Back to TOC](#toc) </small>
 
@@ -2170,8 +2275,10 @@ See [Proxy Example](docs/proxy-example.md)
 
 `Goto` allows jobs to be configured that can be run manually or auto-start upon addition. Two kinds of jobs are supported:
 - HTTP requests to be made to some target URL
-- Command execution on local OS
+- Command execution on local OS.
 The job results can be retrieved via API from the `goto` instance, and also stored in lockers on the Goto registry instance if enabled. (See `--locker` command arg)
+
+Jobs can be configured to run periodically using `cron` field. A cron job starts automatically upon creation, and keeps running at the specified frequency until stopped (using `/jobs/stop` API). A stopped cron job can be restarted using `/jobs/run` API, which restarts the cron frequency.
 
 Jobs can also trigger another job for each line of output produced, as well as upon completion. For command jobs, the output produced is split by newline, and each line of output can be used as input to trigger another command job. A job can specify markers for output fields (split using specified separator), and these markers can be referenced by successor jobs. The markers from a job's output are carried over to all its successor jobs, so a job can use output from a parent job that might be several generations in the past. The triggered job's command arg specifies marker references as `{foo}`, which gets replaced by the value extracted from any predecessor job's output with that marker key. This feature can be used to trigger complex chains of jobs, where each job uses output of the previous job to do something else.
 
@@ -2182,18 +2289,20 @@ Jobs can also trigger another job for each line of output produced, as well as u
 |METHOD|URI|Description|
 |---|---|---|
 | POST, PUT  |	/jobs/add     | Add a job. See [Job JSON Schema](#job-json-schema) |
+| POST, PUT  |	/jobs/update | Update a job, using [Job JSON Schema](#job-json-schema) |
 | POST, PUT  |	/jobs/add<br/>/script/`{name}` | Add a shell script to be executed as a job, by storing the request body as script content under given filename at the current working directory of the `goto` process. Also creates a default job with the same name to provide a ready-to-use way to execute the script. |
 | POST, PUT  |	/jobs/store<br/>/file/`{name}` | Store request body as a file at the current working directory of the `goto` process. Filed saved with mode `777`.|
 | POST, PUT  |	/jobs/store/file<br/>/`{name}`?path=`{path}` | Store request body as a file at the given path with mode `777`. |
 | POST  | /jobs/`{jobs}`/remove | Remove given jobs by name, and clears its results |
 | POST  | /jobs/clear         | Remove all jobs |
-| POST  | /jobs/`{jobs}`/run  | Run given jobs |
+| POST  | /jobs/`{jobs}`/run `[or]` /jobs/run/`{jobs}` | Run given jobs |
 | POST  | /jobs/run/all       | Run all configured jobs |
 | POST  | /jobs/`{jobs}`/stop | Stop given jobs if running |
 | POST  | /jobs/stop/all      | Stop all running jobs |
 | GET   | /jobs/{job}/results | Get results for the given job's runs |
 | GET   | /jobs/results       | Get results for all jobs |
 | POST   | /jobs/results/clear | Clear all job results |
+| GET   | /jobs/scripts       | Get a list of all stored scripts |
 | GET   | /jobs/              | Get a list of all configured jobs |
 
 ###### <small> [Back to TOC](#jobs) </small>
@@ -2206,8 +2315,9 @@ Jobs can also trigger another job for each line of output produced, as well as u
 | task          | JSON          | Task to be executed for this job. Can be an [HTTP Task](#job-http-task-json-schema) or [Command Task](#job-command-task-json-schema) |
 | auto          | bool          | Whether the job should be started automatically as soon as it's posted. |
 | delay         | duration      | Minimum delay at start of each iteration of the job. Actual effective delay may be higher than this. |
-| initialDelay  | duration       | Minimum delay to wait before starting a job. Actual effective delay may be higher than this. |
+| initialDelay  | duration      | Minimum delay to wait before starting a job. Actual effective delay may be higher than this. |
 | count         | int           | Number of times this job should be executed during a single invocation |
+| cron          | string        | This field allows configuring the job to be executed periodically. The frequency can be specified in cron format (`* * * * *`) or as a duration (e.g. `15s`).|
 | maxResults    | int           | Number of max results to be received from the job, after which the job is stopped |
 | keepResults   | int           | Number of results to be retained from an invocation of the job |
 | keepFirst     | bool          | Indicates whether the first invocation result should be retained, reducing the slots for capturing remaining results by (maxResults-1) |
@@ -2240,6 +2350,7 @@ Jobs can also trigger another job for each line of output produced, as well as u
 |Field|Data Type|Description|
 |---|---|---|
 | cmd             | string         | Command to be executed on the OS. Use `sh` as command if shell features are to be used (e.g. pipe) |
+| script          | string         | Name of a stored script. When a script is uploaded using API `/jobs/add/script/{name}`, a script job gets created automatically with the uploaded script name stored in this field. |
 | args            | []string       | Arguments to be passed to the OS command |
 | outputMarkers   | map[int]string | Specifies marker keys to use to reference the output fields from each line of output. Output is split using the specified separator to extract its keys. Positioning starts at 1 for first the piece of split output. |
 | outputSeparator | string         | Text to be used as separator to split each line of output of this command to extract its fields, which are then used by markers |

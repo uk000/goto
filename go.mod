@@ -3,6 +3,7 @@ module goto
 go 1.16
 
 require (
+	github.com/go-co-op/gocron v1.6.2
 	github.com/golang/protobuf v1.5.2
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/reverse v1.0.0

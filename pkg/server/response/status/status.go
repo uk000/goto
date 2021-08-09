@@ -20,9 +20,9 @@ import (
 )
 
 type FlipFlopConfig struct {
-  times           int
-  statusCount     int
-  lastStatusIndex int
+  Times           int `json:"times"`
+  StatusCount     int `json:"statusCount"`
+  LastStatusIndex int `json:"lastStatusIndex"`
 }
 
 type PortStatus struct {
@@ -43,18 +43,22 @@ var (
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   statusRouter := util.PathRouter(r, "/status")
   util.AddRouteWithPort(statusRouter, "/set/{status}", setStatus, "PUT", "POST")
-  util.AddRouteWithPort(statusRouter, "/counts/clear", clearStatusCounts, "PUT", "POST")
+  util.AddRouteWithPort(statusRouter, "/counts/clear", clearStatus, "PUT", "POST")
   util.AddRouteWithPort(statusRouter, "/counts/{status}", getStatusCount, "GET")
   util.AddRouteWithPort(statusRouter, "/counts", getStatusCount, "GET")
   util.AddRouteWithPort(statusRouter, "/clear", setStatus, "PUT", "POST")
   util.AddRouteWithPort(statusRouter, "", getStatus, "GET")
   util.AddRoute(root, "/status/flipflop", getStatusCount, "GET")
-  util.AddRoute(root, "/status/flipflop/clear", clearStatusCounts, "POST")
-  util.AddRoute(root, "/status/{status}", status, "GET", "PUT", "POST", "OPTIONS", "HEAD")
-  util.AddRoute(root, "/status={status}", status, "GET", "PUT", "POST", "OPTIONS", "HEAD")
-  util.AddRouteQ(root, "/status={status}/flipflop", status, "x-request-id", "{requestId}", "GET", "PUT", "POST", "OPTIONS", "HEAD")
-  util.AddRoute(root, "/status={status}/flipflop", status, "GET", "PUT", "POST", "OPTIONS", "HEAD")
-  util.AddRoute(root, "/status={status}/delay={delay}", status, "GET", "PUT", "POST", "OPTIONS", "HEAD")
+  util.AddRoute(root, "/status/clear", clearStatus, "POST")
+  util.AddRoute(root, "/status/{status}", status)
+  util.AddRouteQ(root, "/status={status}", status, "x-request-id", "{requestId}", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRoute(root, "/status={status}", status)
+  util.AddRouteQ(root, "/status={status}/delay={delay}", status, "x-request-id", "{requestId}", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRoute(root, "/status={status}/delay={delay}", status)
+  util.AddRouteQ(root, "/status={status}/flipflop", status, "x-request-id", "{requestId}", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRoute(root, "/status={status}/flipflop", status)
+  util.AddRouteQ(root, "/status={status}/delay={delay}/flipflop", status, "x-request-id", "{requestId}", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRoute(root, "/status={status}/delay={delay}/flipflop", status)
 }
 
 func getOrCreatePortStatus(r *http.Request) *PortStatus {
@@ -88,6 +92,8 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
     portStatus.alwaysReportStatusCount = 0
     if times > 1 {
       portStatus.alwaysReportStatusCount = times
+    } else {
+      portStatus.flipflopConfigs = map[string]*FlipFlopConfig{}
     }
   } else {
     portStatus.alwaysReportStatuses = []int{}
@@ -200,68 +206,71 @@ func getStatusCount(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage(msg, r)
 }
 
-func clearStatusCounts(w http.ResponseWriter, r *http.Request) {
+func clearStatus(w http.ResponseWriter, r *http.Request) {
   portStatus := getOrCreatePortStatus(r)
-  flipflop := strings.Contains(r.RequestURI, "flipflop")
+  counts := strings.Contains(r.RequestURI, "counts")
+  msg := ""
   portStatus.lock.Lock()
-  if flipflop {
-    portStatus.flipflopConfigs = map[string]*FlipFlopConfig{}
-  } else {
+  if counts {
     portStatus.countsByRequestedStatus = map[int]int{}
     portStatus.countsByResponseStatus = map[int]int{}
+    msg = fmt.Sprintf("Port [%s] Response Status Counts Cleared", util.GetRequestOrListenerPort(r))
+    events.SendRequestEvent("Response Status Counts Cleared", msg, r)
+  } else {
+    portStatus.flipflopConfigs = map[string]*FlipFlopConfig{}
+    msg = fmt.Sprintf("Port [%s] Response Status State Cleared", util.GetRequestOrListenerPort(r))
+    events.SendRequestEvent("Response Status Cleared", msg, r)
   }
   portStatus.lock.Unlock()
-  msg := fmt.Sprintf("Port [%s] Response Status Counts Cleared", util.GetRequestOrListenerPort(r))
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
-  events.SendRequestEvent("Response Status Counts Cleared", msg, r)
 }
 
-func (ps *PortStatus) flipflop(requestId string, requestedStatuses []int, times int, r *http.Request, w http.ResponseWriter) int {
+func (ps *PortStatus) flipflop(requestId string, requestedStatuses []int, times int, restart bool, r *http.Request, w http.ResponseWriter) int {
   flipflopConfig := ps.flipflopConfigs[requestId]
   if flipflopConfig == nil {
     flipflopConfig = &FlipFlopConfig{
-      times:           times,
-      statusCount:     -1,
-      lastStatusIndex: 0,
+      Times:           times,
+      StatusCount:     times,
+      LastStatusIndex: 0,
     }
     ps.flipflopConfigs[requestId] = flipflopConfig
   }
   requestedStatus := http.StatusOK
   if len(requestedStatuses) > 1 {
-    if len(requestedStatuses) > flipflopConfig.lastStatusIndex {
-      requestedStatus = requestedStatuses[flipflopConfig.lastStatusIndex]
-      flipflopConfig.lastStatusIndex++
+    if len(requestedStatuses) > flipflopConfig.LastStatusIndex {
+      requestedStatus = requestedStatuses[flipflopConfig.LastStatusIndex]
+      flipflopConfig.LastStatusIndex++
     } else {
-      w.Header().Add(HeaderGotoStatusFlip, strconv.Itoa(requestedStatuses[flipflopConfig.lastStatusIndex-1]))
-      flipflopConfig.lastStatusIndex = 0
+      w.Header().Add(HeaderGotoStatusFlip, strconv.Itoa(requestedStatuses[flipflopConfig.LastStatusIndex-1]))
+      flipflopConfig.LastStatusIndex = 0
       delete(ps.flipflopConfigs, requestId)
     }
   } else if len(requestedStatuses) == 1 {
     requestedStatus = requestedStatuses[0]
-    if times != flipflopConfig.times {
-      flipflopConfig.statusCount = -1
-      flipflopConfig.times = times
+    if times != flipflopConfig.Times {
+      flipflopConfig.StatusCount = -1
+      flipflopConfig.Times = times
     }
-    if flipflopConfig.statusCount == -1 {
-      flipflopConfig.statusCount = times
+    if flipflopConfig.StatusCount == -1 && restart {
+      flipflopConfig.StatusCount = times
       if times > 0 {
-        flipflopConfig.statusCount--
+        flipflopConfig.StatusCount--
       }
-    } else if flipflopConfig.statusCount == 0 {
-      w.Header().Add(HeaderGotoStatusFlip, strconv.Itoa(requestedStatuses[flipflopConfig.lastStatusIndex-1]))
+    } else if flipflopConfig.StatusCount == 0 || (!restart && flipflopConfig.StatusCount == -1) {
+      w.Header().Add(HeaderGotoStatusFlip, strconv.Itoa(requestedStatuses[len(requestedStatuses)-1]))
       requestedStatus = http.StatusOK
-      flipflopConfig.statusCount--
+      flipflopConfig.StatusCount = -1
     } else if times > 0 {
-      flipflopConfig.statusCount--
+      flipflopConfig.StatusCount--
     }
-    if flipflopConfig.statusCount >= 0 {
+    if flipflopConfig.StatusCount >= 0 {
       ps.flipflopConfigs[requestId] = flipflopConfig
-    } else {
+    } else if restart {
       delete(ps.flipflopConfigs, requestId)
     }
   }
-  util.AddLogMessage(fmt.Sprintf("Flipflop status [%d] with statux index [%d], current count [%d]", requestedStatus, flipflopConfig.lastStatusIndex, flipflopConfig.statusCount), r)
+  util.AddLogMessage(fmt.Sprintf("Flipflop: request id [%s], status [%d], count [%d], remaining [%d]", requestId, requestedStatus, times, flipflopConfig.StatusCount), r)
   return requestedStatus
 }
 
@@ -272,12 +281,15 @@ func status(w http.ResponseWriter, r *http.Request) {
   requestId := util.GetStringParamValue(r, "requestId")
   flipflop := strings.Contains(r.RequestURI, "flipflop")
   requestedStatus := 200
-  if times <= 0 {
-    times = len((requestedStatuses))
+  restart := flipflop
+  if times > 0 {
+    flipflop = true
+  } else {
+    times = len(requestedStatuses)
   }
   portStatus.lock.Lock()
   if flipflop {
-    requestedStatus = portStatus.flipflop(requestId, requestedStatuses, times, r, w)
+    requestedStatus = portStatus.flipflop(requestId, requestedStatuses, times, restart, r, w)
   } else if len(requestedStatuses) == 1 {
     requestedStatus = requestedStatuses[0]
   } else if len(requestedStatuses) > 1 {
@@ -294,10 +306,7 @@ func status(w http.ResponseWriter, r *http.Request) {
     delayText = delay.String()
     w.Header().Add(HeaderGotoResponseDelay, delayText)
   }
-  if flipflop {
-  } else {
-    util.AddLogMessage(fmt.Sprintf("Requested status [%d] with delay [%s]", requestedStatus, delayText), r)
-  }
+  util.AddLogMessage(fmt.Sprintf("Requested status [%d] with delay [%s]", requestedStatus, delayText), r)
   w.Header().Add(HeaderGotoRequestedStatus, strconv.Itoa(requestedStatus))
   if !IsForcedStatus(r) {
     w.WriteHeader(requestedStatus)

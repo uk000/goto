@@ -35,7 +35,7 @@ func Run() {
   listeners.Configure(ServeHTTPListener, ServeGRPCListener, StartTCPServer)
   metrics.Startup()
   invocation.Startup()
-  RunHttpServer(conn.Handler, tunnel.Handler, events.Handler, label.Handler, metrics.Handler,
+  RunHttpServer(tunnel.TunnelCountHandler, label.Handler, conn.Handler, tunnel.Handler, events.Handler, metrics.Handler,
     listeners.Handler, probes.Handler, proxy.Handler, registry.Handler, client.Handler,
     request.Handler, response.Handler, tcp.Handler, job.Handler, log.Handler,echo.Handler, catchall.Handler)
   invocation.Shutdown()

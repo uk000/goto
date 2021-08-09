@@ -16,6 +16,7 @@ import (
   "net"
   "net/http"
   "os"
+  "os/exec"
   "os/signal"
   "strconv"
   "strings"
@@ -47,18 +48,19 @@ func RunHttpServer(handlers ...util.ServerHandler) {
       r.Use(h.Middleware)
     }
   }
-  h2c := h2c.NewHandler(GRPCHandler(r), h2s)
+  h2 := HTTPHandler(r, h2c.NewHandler(GRPCHandler(r), h2s))
   httpServer = &http.Server{
     Addr:         fmt.Sprintf("0.0.0.0:%d", global.ServerPort),
     WriteTimeout: 1 * time.Minute,
     ReadTimeout:  1 * time.Minute,
     IdleTimeout:  1 * time.Minute,
     ConnContext:  withConnContext,
-    Handler:      HTTPHandler(r, h2c),
+    Handler:      h2,
     ErrorLog:     log.New(ioutil.Discard, "discard", 0),
   }
   StartHttpServer(httpServer)
-  go listeners.StartInitialListeners()
+  listeners.StartInitialListeners()
+  RunStartupScript()
   peer.RegisterPeer(global.PeerName, global.PeerAddress)
   events.SendEventJSONDirect("Server Started", global.HostLabel, listeners.GetListeners())
   WaitForHttpServer(httpServer)
@@ -88,7 +90,7 @@ func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
 func ContextMiddleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     if global.Stopping && global.IsReadinessProbe(r) {
-      util.CopyHeaders(HeaderStoppingReadinessRequest, w, r.Header, r.Host, r.RequestURI, false)
+      util.CopyHeaders(HeaderStoppingReadinessRequest, r, w, r.Header, true, true, false)
       w.WriteHeader(http.StatusNotFound)
     } else if next != nil {
       var rs *util.RequestStore
@@ -118,9 +120,10 @@ func ContextMiddleware(next http.Handler) http.Handler {
         w.Header().Add(HeaderGotoOutAt, endTime.UTC().String())
         w.Header().Add(HeaderGotoTook, endTime.Sub(startTime).String())
       } else {
-        w.Header().Add(fmt.Sprintf("%s[%d]", HeaderGotoInAt, rs.TunnelCount), startTime.UTC().String())
-        w.Header().Add(fmt.Sprintf("%s[%d]", HeaderGotoOutAt, rs.TunnelCount), endTime.UTC().String())
-        w.Header().Add(fmt.Sprintf("%s[%d]", HeaderGotoTook, rs.TunnelCount), endTime.Sub(startTime).String())
+        w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoInAt, rs.TunnelCount), startTime.UTC().String())
+        w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoOutAt, rs.TunnelCount), endTime.UTC().String())
+        w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoTook, rs.TunnelCount), endTime.Sub(startTime).String())
+        w.Header()[HeaderGotoTunnel] = r.Header[HeaderGotoRequestedTunnel]
       }
       if !rs.IsAdminRequest {
         metrics.UpdateURIRequestCount(r.RequestURI, statusCodeText)
@@ -156,14 +159,30 @@ func withPort(ctx context.Context, port int) context.Context {
   return context.WithValue(ctx, util.CurrentPortKey, port)
 }
 
+func RunStartupScript() {
+  if len(global.StartupScript) > 0 {
+    command := "sh"
+    args := []string{"-c", strings.Join(global.StartupScript, "; ")}
+    realCmd := command + " " + strings.Join(args, " ")
+    cmd := exec.Command(command, args...)
+    cmd.Stdout = os.Stdout
+    cmd.Stderr = os.Stderr
+    if err := cmd.Run(); err != nil {
+      log.Printf("Failed to run startup command [%s]. Error: [%s]\n", realCmd, err.Error())
+    } else {
+      log.Printf("Startup command [%s] ran successfully.\n", realCmd)
+    }
+  }
+}
+
 func StartHttpServer(server *http.Server) {
   if global.StartupDelay > 0 {
     log.Printf("Sleeping %s before starting", global.StartupDelay)
     time.Sleep(global.StartupDelay)
   }
+  events.StartSender()
   go func() {
     log.Printf("Server %s ready", server.Addr)
-    events.StartSender()
     if err := server.ListenAndServe(); err != nil {
       log.Println(err)
     }

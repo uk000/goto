@@ -172,7 +172,7 @@ func (j *JSONValue) ToJSON() string {
 }
 
 func (j *JSONValue) ToYAML() string {
-  if b, err := yaml.Marshal(j.Value); err == nil {
+  if b, err := yaml.Marshal(j.Value()); err == nil {
     return string(b)
   } else {
     fmt.Printf("Failed to marshal json with error: %s\n", err.Error())

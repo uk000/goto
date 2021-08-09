@@ -110,7 +110,7 @@ func getResponseHeaders(w http.ResponseWriter, r *http.Request) {
 func setResponseHeaders(w http.ResponseWriter, r *http.Request) {
   headersLock.RLock()
   defer headersLock.RUnlock()
-  util.CopyHeaders("Request", w, r.Header, r.Host, r.RequestURI, false)
+  util.CopyHeaders("Request", r, w, r.Header, true, true, false)
   headerMap := responseHeadersByPort[util.GetRequestOrListenerPort(r)]
   for header, values := range headerMap {
     for _, value := range values {

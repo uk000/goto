@@ -27,6 +27,8 @@ var (
   PublishEvents              bool
   StartupDelay               time.Duration
   ShutdownDelay              time.Duration
+  StartupScript              []string
+  
   Stopping                   bool = false
   EnableServerLogs           bool = true
   EnableAdminLogs            bool = true

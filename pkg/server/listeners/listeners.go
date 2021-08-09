@@ -62,7 +62,7 @@ var (
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  lRouter := r.PathPrefix("/server/listeners").Subrouter()
+  lRouter := util.PathPrefix(r, "/server?/listeners")
   util.AddRoute(lRouter, "/add", addListener, "POST", "PUT")
   util.AddRoute(lRouter, "/update", updateListener, "POST", "PUT")
   util.AddRoute(lRouter, "/{port}/cert/auto/{domain}", autoCert, "PUT", "POST")
@@ -194,6 +194,7 @@ func (l *Listener) initListener() bool {
         } else {
           tlsConfig.ClientAuth = tls.NoClientCert
         }
+        tlsConfig.NextProtos = []string{"h2"}
         listener = tls.NewListener(listener, tlsConfig)
       }
       l.Listener = listener

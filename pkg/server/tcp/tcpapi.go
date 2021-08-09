@@ -19,7 +19,7 @@ var (
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  tcpRouter := r.PathPrefix("/server/tcp").Subrouter()
+  tcpRouter := util.PathPrefix(r, "/server?/tcp")
   util.AddRoute(tcpRouter, "/{port}/configure", configureTCP, "POST")
   util.AddRoute(tcpRouter, "/{port}/timeout/set/read={duration}", setConnectionDurationConfig, "PUT", "POST")
   util.AddRoute(tcpRouter, "/{port}/timeout/set/write={duration}", setConnectionDurationConfig, "PUT", "POST")

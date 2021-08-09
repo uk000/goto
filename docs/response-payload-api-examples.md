@@ -13,6 +13,8 @@ curl -X POST localhost:8080/server/response/payload/set/header/foo=bar --data '{
 
 curl -g -X POST localhost:8080/server/response/payload/set/body~AA,BB,CC?uri=/foo --data '{"test": "body contains AA,BB,CC"}' -HContent-Type:application/json
 
+curl -v -g -XPOST localhost:8080/response/payload/set/body/paths/.foo.bar={a},.foo.baz={b}\?uri=/foo --data '{"bar":"{a}", "baz":"{b}", "message": "{a} is {b}"}' -HContent-Type:application/json
+
 curl -X POST localhost:8080/server/response/payload/clear
 
 curl localhost:8080/server/response/payload

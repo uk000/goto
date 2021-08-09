@@ -50,7 +50,7 @@ Let's see the APIs involved to achieve this scenario:
    $ curl http://goto-peer1/client/results
    ``` 
    If all goes as planned (which it usually does with `goto`), you should see that the `peer1` instance already ran the traffic as requested in target config `t1` and got some results for you.
-5. Nice already, isn't it? But it keeps getting better. Not only `peer1` received the configs at startup, but any new config you add at the registry will automatically get pushed to all registered instances for that peer label. And not just client targets, but also jobs. What are jobs? Well, that's the story for another scenario. Or checkout [Job feature documentation](README.md#jobs-features)
+5. Nice already, isn't it? But it keeps getting better. Not only `peer1` received the configs at startup, but any new config you add at the registry will automatically get pushed to all registered instances for that peer label. And not just client targets, but also jobs. What are jobs? Well, that's the story for another scenario. Or checkout [Job feature documentation](../README.md#jobs-features)
 
 
 # <a name="k8s-transient-pods"></a> Scenario: Deal with transient pods
