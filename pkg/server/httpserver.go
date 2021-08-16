@@ -24,6 +24,7 @@ import (
   "goto/pkg/global"
   "goto/pkg/metrics"
   "goto/pkg/registry/peer"
+  "goto/pkg/script"
   "goto/pkg/server/intercept"
   "goto/pkg/server/listeners"
   "goto/pkg/util"
@@ -32,7 +33,6 @@ import (
   "net"
   "net/http"
   "os"
-  "os/exec"
   "os/signal"
   "strconv"
   "strings"
@@ -177,17 +177,7 @@ func withPort(ctx context.Context, port int) context.Context {
 
 func RunStartupScript() {
   if len(global.StartupScript) > 0 {
-    command := "sh"
-    args := []string{"-c", strings.Join(global.StartupScript, "; ")}
-    realCmd := command + " " + strings.Join(args, " ")
-    cmd := exec.Command(command, args...)
-    cmd.Stdout = os.Stdout
-    cmd.Stderr = os.Stderr
-    if err := cmd.Run(); err != nil {
-      log.Printf("Failed to run startup command [%s]. Error: [%s]\n", realCmd, err.Error())
-    } else {
-      log.Printf("Startup command [%s] ran successfully.\n", realCmd)
-    }
+    script.RunCommands("startup", global.StartupScript)
   }
 }
 

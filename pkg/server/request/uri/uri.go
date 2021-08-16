@@ -58,8 +58,8 @@ var (
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   uriRouter := util.PathRouter(r, "/uri")
-  util.AddRouteQWithPort(uriRouter, "/set/status={status}", setStatus, "uri", "{uri}", "POST", "PUT")
-  util.AddRouteQWithPort(uriRouter, "/set/delay={delay}", setDelay, "uri", "{uri}", "POST", "PUT")
+  util.AddRouteQWithPort(uriRouter, "/set/status={status}", setStatus, "uri", "POST", "PUT")
+  util.AddRouteQWithPort(uriRouter, "/set/delay={delay}", setDelay, "uri", "POST", "PUT")
   util.AddRouteWithPort(uriRouter, "/counts/enable", enableURICallCounts, "POST", "PUT")
   util.AddRouteWithPort(uriRouter, "/counts/disable", disableURICallCounts, "POST", "PUT")
   util.AddRouteWithPort(uriRouter, "/counts", getURICallCounts, "GET")

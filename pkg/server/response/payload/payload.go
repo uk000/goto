@@ -39,34 +39,29 @@ import (
   "k8s.io/client-go/util/jsonpath"
 )
 
-type BodyPath struct {
-  Path       string `json:"path"`
-  CaptureKey string `json:"captureKey"`
-}
-
 type Transform struct {
   Mappings []*util.JSONTransform `json:"mappings"`
   Payload  interface{}           `json:"payload"`
 }
 
 type ResponsePayload struct {
-  Payload          []byte       `json:"payload"`
-  ContentType      string       `json:"contentType"`
-  URIMatch         string       `json:"uriMatch"`
-  HeaderMatch      string       `json:"headerMatch"`
-  HeaderValueMatch string       `json:"headerValueMatch"`
-  QueryMatch       string       `json:"queryMatch"`
-  QueryValueMatch  string       `json:"queryValueMatch"`
-  BodyMatch        []string     `json:"bodyMatch"`
-  BodyPaths        []*BodyPath  `json:"bodyPaths"`
-  URICaptureKeys   []string     `json:"uriCaptureKeys"`
-  HeaderCaptureKey string       `json:"headerCaptureKey"`
-  QueryCaptureKey  string       `json:"queryCaptureKey"`
-  Transforms       []*Transform `json:"transforms"`
+  Payload          []byte            `json:"payload"`
+  ContentType      string            `json:"contentType"`
+  URIMatch         string            `json:"uriMatch"`
+  HeaderMatch      string            `json:"headerMatch"`
+  HeaderValueMatch string            `json:"headerValueMatch"`
+  QueryMatch       string            `json:"queryMatch"`
+  QueryValueMatch  string            `json:"queryValueMatch"`
+  BodyMatch        []string          `json:"bodyMatch"`
+  BodyPaths        map[string]string `json:"bodyPaths"`
+  URICaptureKeys   []string          `json:"uriCaptureKeys"`
+  HeaderCaptureKey string            `json:"headerCaptureKey"`
+  QueryCaptureKey  string            `json:"queryCaptureKey"`
+  Transforms       []*Transform      `json:"transforms"`
   uriRegexp        *regexp.Regexp
   queryMatchRegexp *regexp.Regexp
   bodyMatchRegexp  *regexp.Regexp
-  bodyJsonPaths    []*jsonpath.JSONPath
+  bodyJsonPaths    map[string]*jsonpath.JSONPath
   isBinary         bool
   fillers          []string
   router           *mux.Router
@@ -102,18 +97,18 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRouteWithPort(payloadRouter, "/set/default/binary", setResponsePayload, "POST")
   util.AddRouteWithPort(payloadRouter, "/set/default/{size}", setResponsePayload, "POST")
   util.AddRouteWithPort(payloadRouter, "/set/default", setResponsePayload, "POST")
-  util.AddRouteQWithPort(payloadRouter, "/set/uri", setResponsePayload, "uri", "{uri}", "POST")
-  util.AddRouteQWithPort(payloadRouter, "/set/header/{header}={value}", setResponsePayload, "uri", "{uri}", "POST")
+  util.AddRouteQWithPort(payloadRouter, "/set/uri", setResponsePayload, "uri", "POST")
+  util.AddRouteQWithPort(payloadRouter, "/set/header/{header}={value}", setResponsePayload, "uri", "POST")
   util.AddRouteWithPort(payloadRouter, "/set/header/{header}={value}", setResponsePayload, "POST")
-  util.AddRouteQWithPort(payloadRouter, "/set/header/{header}", setResponsePayload, "uri", "{uri}", "POST")
+  util.AddRouteQWithPort(payloadRouter, "/set/header/{header}", setResponsePayload, "uri", "POST")
   util.AddRouteWithPort(payloadRouter, "/set/header/{header}", setResponsePayload, "POST")
-  util.AddRouteQWithPort(payloadRouter, "/set/query/{q}={value}", setResponsePayload, "uri", "{uri}", "POST")
+  util.AddRouteQWithPort(payloadRouter, "/set/query/{q}={value}", setResponsePayload, "uri", "POST")
   util.AddRouteWithPort(payloadRouter, "/set/query/{q}={value}", setResponsePayload, "POST")
-  util.AddRouteQWithPort(payloadRouter, "/set/query/{q}", setResponsePayload, "uri", "{uri}", "POST")
+  util.AddRouteQWithPort(payloadRouter, "/set/query/{q}", setResponsePayload, "uri", "POST")
   util.AddRouteWithPort(payloadRouter, "/set/query/{q}", setResponsePayload, "POST")
-  util.AddRouteQWithPort(payloadRouter, "/set/body~{regexes}", setResponsePayload, "uri", "{uri}", "POST")
-  util.AddRouteQWithPort(payloadRouter, "/set/body/paths/{paths}", setResponsePayload, "uri", "{uri}", "POST")
-  util.AddRouteQWithPort(payloadRouter, "/transform", setPayloadTransform, "uri", "{uri}", "POST")
+  util.AddRouteQWithPort(payloadRouter, "/set/body~{regexes}", setResponsePayload, "uri", "POST")
+  util.AddRouteQWithPort(payloadRouter, "/set/body/paths/{paths}", setResponsePayload, "uri", "POST")
+  util.AddRouteQWithPort(payloadRouter, "/transform", setPayloadTransform, "uri", "POST")
   util.AddRouteWithPort(payloadRouter, "/clear", clearResponsePayload, "POST")
   util.AddRouteWithPort(payloadRouter, "", getResponsePayload, "GET")
   util.AddRoute(root, "/payload/{size}", respondWithPayload, "GET", "PUT", "POST")
@@ -174,20 +169,7 @@ func newResponsePayload(payload []byte, binary bool, contentType, uri, header, q
     queryValueMatch = value
   }
 
-  bodyPaths := []*BodyPath{}
-  bodyJsonPaths := []*jsonpath.JSONPath{}
-  for _, path := range paths {
-    pathKV := strings.Split(path, "=")
-    path = pathKV[0]
-    key := ""
-    if len(pathKV) > 1 {
-      key, _ = util.GetFillerUnmarked(pathKV[1])
-    }
-    jp := jsonpath.New(path)
-    jp.Parse("{" + path + "}")
-    bodyJsonPaths = append(bodyJsonPaths, jp)
-    bodyPaths = append(bodyPaths, &BodyPath{Path: path, CaptureKey: key})
-  }
+  jsonPaths := util.NewJSONPaths().Parse(paths)
 
   var bodyMatchRegexp *regexp.Regexp
   if len(bodyRegexes) > 0 {
@@ -214,11 +196,11 @@ func newResponsePayload(payload []byte, binary bool, contentType, uri, header, q
     QueryMatch:       query,
     QueryValueMatch:  queryValueMatch,
     BodyMatch:        bodyRegexes,
-    BodyPaths:        bodyPaths,
+    BodyPaths:        jsonPaths.TextPaths,
     uriRegexp:        uriRegExp,
     queryMatchRegexp: regexp.MustCompile("(?i)" + query),
     bodyMatchRegexp:  bodyMatchRegexp,
-    bodyJsonPaths:    bodyJsonPaths,
+    bodyJsonPaths:    jsonPaths.Paths,
     URICaptureKeys:   util.GetFillersUnmarked(uri),
     HeaderCaptureKey: headerCaptureKey,
     QueryCaptureKey:  queryCaptureKey,
@@ -816,10 +798,10 @@ func getPayloadForBodyMatch(r *http.Request, bodyMatchResponses map[string]*Resp
       captures = map[string]string{}
       var data map[string]interface{}
       if err := util.ReadJson(body, &data); err == nil {
-        for i, jp := range rp.bodyJsonPaths {
+        for key, jp := range rp.bodyJsonPaths {
           if matches, err := jp.FindResults(data); err == nil && len(matches) > 0 && len(matches[0]) > 0 {
-            if rp.BodyPaths[i].CaptureKey != "" {
-              captures[rp.BodyPaths[i].CaptureKey] = fmt.Sprintf("%v", matches[0][0].Interface())
+            if key != "" {
+              captures[key] = fmt.Sprintf("%v", matches[0][0].Interface())
             }
           } else {
             allMatched = false

@@ -209,9 +209,17 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 
 - [Proxy Features](#proxy)
 
+### Scripts
+
+- [Scripts Features](#scripts-features)
+
 ### Jobs
 
 - [Jobs Features](#jobs-features)
+
+### K8s
+
+- [K8s Features](#k8s-features)
 
 ### Goto Registry
 
@@ -2270,6 +2278,25 @@ See [Proxy Example](docs/proxy-example.md)
 <br/>
 
 
+# <a name="scripts-features"></a>
+# Scripts Features
+
+`Goto` allows scripts to be stored and executed on the `goto` server instance via APIs.
+
+
+#### Scripts APIs
+|METHOD|URI|Description|
+|---|---|---|
+| POST, PUT  |	/scripts/add/{name}     | Add a script under the given name. Request body payload is used as script content. |
+| POST, PUT  |	/scripts/remove/{name} <br/> /scripts/{name}/remove  | Remove a script by name. |
+| POST, PUT  |	/scripts/run/{name} <br/> /scripts/{name}/run | Run a script by name and deliver script output as the response payload of this API call. |
+| GET  |	/scripts | Get all the stored scripts with their content (lines of a script are delivered as string array) |
+
+###### <small> [Back to TOC](#scripts) </small>
+
+<br/>
+
+
 # <a name="jobs-features"></a>
 # Jobs Features
 
@@ -2385,6 +2412,34 @@ Jobs can also trigger another job for each line of output produced, as well as u
 See [Jobs Example](docs/jobs-example.md)
 
 ###### <small> [Back to TOC](#jobs) </small>
+
+<br/>
+
+# <a name="k8s-features"></a>
+
+# K8s Features
+`Goto` exposes APIs through which info can be fetched from the local k8s cluster where `goto` instance is running.
+
+# <a name="k8s-apis"></a>
+###  K8s APIs
+
+|METHOD|URI|Description|
+|---|---|---|
+| GET      | /k8s/{resource}  | Get a list of native k8s resources cluster-wide (namespaced or non-namespaced) |
+| GET      | /k8s/{resource}/[`jq`\|`jp`]  | Get a list of native k8s resources and apply a JQ or a JSONPath query to the resource data |
+| GET      | /k8s/{resource}/{namespace} | Get a list of namespaced native k8s resource from a given namespace |
+| GET      | /k8s/{resource}<br/>/{namespace}/[`jq`\|`jp`] | Get a list of namespaced native k8s resource from a given namespace, and apply a JQ or a JSONPath query to the resource data |
+| GET      | /k8s/{resource}<br/>/{namespace}/{name}  | Get a namespaced native k8s resource by name from the given namespace |
+| GET      | /k8s/{resource}<br/>/{namespace}/{name}/[`jq`\|`jp`] | Get a namespaced native k8s resource by name from the given namespace, and apply a JQ or a JSONPath query to the resource data |
+| GET      | /k8s/{group}/{version}/{kind} | Get a list of custom k8s resources cluster-wide (namespaced or non-namespaced) by specifying the GVK identifying the resource type |
+| GET      | /k8s/{group}/{version}<br/>/{kind}/[`jq`\|`jp`] | Get a list of custom k8s resources cluster-wide (namespaced or non-namespaced) by specifying the GVK identifying the resource type, and apply a JQ or a JSONPath query to the resource data |
+| GET      | /k8s/{group}/{version}<br/>/{kind}/{namespace} | Get a list of custom k8s namespaced resources from the given namespace |
+| GET      | /k8s/{group}/{version}<br/>/{kind}/{namespace}/[`jq`\|`jp`] | Get a list of custom k8s namespaced resources from the given namespace, and apply a JQ or a JSONPath query to the resource data |
+| GET      | /k8s/{group}/{version}<br/>/{kind}/{namespace}/{name} | Get a custom k8s namespaced resource by name from the given namespace |
+| GET      | /k8s/{group}/{version}<br/>/{kind}/{namespace}<br/>/{name}/[`jq`\|`jp`] | Get a custom k8s namespaced resource by name from the given namespace, and apply a JQ or a JSONPath query to the resource data |
+
+
+###### <small> [Back to TOC](#k8s) </small>
 
 <br/>
 

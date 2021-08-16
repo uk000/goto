@@ -26,10 +26,13 @@ import (
   "goto/pkg/global"
   "goto/pkg/invocation"
   "goto/pkg/job"
+  "goto/pkg/k8s"
   "goto/pkg/log"
   "goto/pkg/metrics"
+  "goto/pkg/pipe"
   "goto/pkg/proxy"
   "goto/pkg/registry"
+  "goto/pkg/script"
   "goto/pkg/server/catchall"
   "goto/pkg/server/conn"
   "goto/pkg/server/echo"
@@ -53,7 +56,8 @@ func Run() {
   invocation.Startup()
   RunHttpServer(tunnel.TunnelCountHandler, label.Handler, conn.Handler, tunnel.Handler, events.Handler, metrics.Handler,
     listeners.Handler, probes.Handler, proxy.Handler, registry.Handler, client.Handler,
-    request.Handler, response.Handler, tcp.Handler, job.Handler, log.Handler,echo.Handler, catchall.Handler)
+    request.Handler, response.Handler, tcp.Handler, script.Handler, job.Handler, log.Handler,
+    k8s.Handler, pipe.Handler, echo.Handler, catchall.Handler)
   invocation.Shutdown()
   metrics.Shutdown()
   results.StopRegistrySender()

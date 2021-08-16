@@ -52,7 +52,7 @@ var (
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   probeRouter := util.PathRouter(r, "/probes")
-  util.AddRouteQWithPort(probeRouter, "/{type}/set", setProbe, "uri", "{uri}", "PUT", "POST")
+  util.AddRouteQWithPort(probeRouter, "/{type}/set", setProbe, "uri", "PUT", "POST")
   util.AddRouteWithPort(probeRouter, "/{type}/set/status={status}", setProbeStatus, "PUT", "POST")
   util.AddRouteWithPort(probeRouter, "/counts/clear", clearProbeCounts, "POST")
   util.AddRouteWithPort(probeRouter, "", getProbes, "GET")

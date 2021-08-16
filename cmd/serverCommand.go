@@ -79,6 +79,7 @@ func Execute() {
   flag.BoolVar(&global.LogResponseBody, "logResponseBody", false, "Enable/Disable logging of response body")
   flag.BoolVar(&global.LogResponseMiniBody, "logResponseMiniBody", false, "Enable/Disable logging of response mini body")
   flag.Var(&startupScript, "startupScript", "Script to execute at startup")
+  flag.StringVar(&global.KubeConfig, "kubeConfig", "", "Path to Kubernetes config file")
   flag.Parse()
 
   if portsList != "" {

@@ -20,7 +20,9 @@ import (
   "fmt"
   "net/http"
   "regexp"
+  "strconv"
   "strings"
+  "time"
 
   "github.com/gorilla/mux"
 )
@@ -34,14 +36,14 @@ type ServerHandler struct {
 var (
   portRouter            *mux.Router
   portTunnelRouters     = map[string]*mux.Router{}
-  coRoutersMap         = map[*mux.Router][]*mux.Router{}
+  coRoutersMap          = map[*mux.Router][]*mux.Router{}
   fillerRegexp          = regexp.MustCompile("{({[^{}]+?})}|{([^{}]+?)}")
   optionalPathRegexp    = regexp.MustCompile("(\\/[^{}]+?\\?)")
   optionalPathKeyRegexp = regexp.MustCompile("(\\/(?:[^\\/{}]+=)?{[^{}]+?}\\?\\??)")
 )
 
 func GetSubPaths(path string, key bool) []string {
-  var matches [][]int 
+  var matches [][]int
   if key {
     matches = optionalPathKeyRegexp.FindAllStringIndex(path, -1)
   } else {
@@ -134,40 +136,45 @@ func AddRouteWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *h
   }
 }
 
-func AddRouteQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParamName string, queryKey string, methods ...string) {
+func AddRouteQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParam string, methods ...string) {
+  queryKey := fmt.Sprintf("{%s}", queryParam)
   for _, p := range GetSubPaths(path, true) {
-    r.HandleFunc(p, f).Queries(queryParamName, queryKey).Methods(methods...)
+    r.HandleFunc(p, f).Queries(queryParam, queryKey).Methods(methods...)
     for _, coRouter := range coRoutersMap[r] {
-      coRouter.HandleFunc(p, f).Queries(queryParamName, queryKey).Methods(methods...)
+      coRouter.HandleFunc(p, f).Queries(queryParam, queryKey).Methods(methods...)
     }
-}
+  }
 }
 
-func AddRouteQWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParamName string, queryKey string, methods ...string) {
-  AddRouteQ(r, path, f, queryParamName, queryKey, methods...)
+func AddRouteQWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParam string, methods ...string) {
+  AddRouteQ(r, path, f, queryParam, methods...)
   if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && portTunnelRouters[lpath] != nil {
-    AddRouteQ(portTunnelRouters[lpath], path, f, queryParamName, queryKey, methods...)
+    AddRouteQ(portTunnelRouters[lpath], path, f, queryParam, methods...)
   }
 }
 
 func AddRouteMultiQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
+  queryParamPairs := []string{}
+  for _, q := range queryParams {
+    queryParamPairs = append(queryParamPairs, q, fmt.Sprintf("{%s}", q))
+  }
   for _, p := range GetSubPaths(path, true) {
-    r.HandleFunc(p, f).Queries(queryParams...).Methods(method)
+    r.HandleFunc(p, f).Queries(queryParamPairs...).Methods(method)
     for _, coRouter := range coRoutersMap[r] {
-      coRouter.HandleFunc(p, f).Queries(queryParams...).Methods(method)
+      coRouter.HandleFunc(p, f).Queries(queryParamPairs...).Methods(method)
     }
-    for i := 0; i < len(queryParams); i += 2 {
-      for j := i + 2; j < len(queryParams); j += 2 {
-        r.HandleFunc(p, f).Queries(queryParams[i], queryParams[i+1], queryParams[j], queryParams[j+1]).Methods(method)
+    for i := 0; i < len(queryParamPairs); i += 2 {
+      for j := i + 2; j < len(queryParamPairs); j += 2 {
+        r.HandleFunc(p, f).Queries(queryParamPairs[i], queryParamPairs[i+1], queryParamPairs[j], queryParamPairs[j+1]).Methods(method)
         for _, coRouter := range coRoutersMap[r] {
-          coRouter.HandleFunc(p, f).Queries(queryParams[i], queryParams[i+1], queryParams[j], queryParams[j+1]).Methods(method)
+          coRouter.HandleFunc(p, f).Queries(queryParamPairs[i], queryParamPairs[i+1], queryParamPairs[j], queryParamPairs[j+1]).Methods(method)
         }
       }
     }
-    for i := 0; i < len(queryParams); i += 2 {
-      r.HandleFunc(p, f).Queries(queryParams[i], queryParams[i+1]).Methods(method)
+    for i := 0; i < len(queryParamPairs); i += 2 {
+      r.HandleFunc(p, f).Queries(queryParamPairs[i], queryParamPairs[i+1]).Methods(method)
       for _, coRouter := range coRoutersMap[r] {
-        coRouter.HandleFunc(p, f).Queries(queryParams[i], queryParams[i+1]).Methods(method)
+        coRouter.HandleFunc(p, f).Queries(queryParamPairs[i], queryParamPairs[i+1]).Methods(method)
       }
     }
     r.HandleFunc(p, f).Methods(method)
@@ -266,4 +273,168 @@ func RegisterURIRouteAndGetRegex(uri string, glob bool, router *mux.Router, hand
     }
   }
   return nil, nil, fmt.Errorf("Empty URI")
+}
+
+func GetIntParam(r *http.Request, param string, defaultVal ...int) (int, bool) {
+  vars := mux.Vars(r)
+  switch {
+  case len(vars[param]) > 0:
+    s, _ := strconv.ParseInt(vars[param], 10, 32)
+    return int(s), true
+  case len(defaultVal) > 0:
+    return defaultVal[0], false
+  default:
+    return 0, false
+  }
+}
+
+func GetIntParamValue(r *http.Request, param string, defaultVal ...int) int {
+  val, _ := GetIntParam(r, param, defaultVal...)
+  return val
+}
+
+func GetStringParam(r *http.Request, param string, defaultVal ...string) (string, bool) {
+  vars := mux.Vars(r)
+  switch {
+  case len(vars[param]) > 0:
+    return vars[param], true
+  case len(defaultVal) > 0:
+    return defaultVal[0], false
+  default:
+    return "", false
+  }
+}
+
+func GetStringParamValue(r *http.Request, param string, defaultVal ...string) string {
+  val, _ := GetStringParam(r, param, defaultVal...)
+  return val
+}
+
+func GetBoolParamValue(r *http.Request, param string, defaultVal ...bool) bool {
+  val, _ := GetStringParam(r, param)
+  if val != "" {
+    return IsYes(val)
+  }
+  if len(defaultVal) > 0 {
+    return defaultVal[0]
+  }
+  return false
+}
+
+func GetListParam(r *http.Request, param string) ([]string, bool) {
+  values := []string{}
+  if v, present := GetStringParam(r, param); present {
+    values = strings.Split(v, ",")
+  }
+  return values, len(values) > 0 && len(values[0]) > 0
+}
+
+func GetStatusParam(r *http.Request) (statusCodes []int, times int, present bool) {
+  vars := mux.Vars(r)
+  status := vars["status"]
+  if len(status) == 0 {
+    return nil, 0, false
+  }
+  pieces := strings.Split(status, ":")
+  if len(pieces[0]) > 0 {
+    for _, s := range strings.Split(pieces[0], ",") {
+      if sc, err := strconv.ParseInt(s, 10, 32); err == nil {
+        statusCodes = append(statusCodes, int(sc))
+      }
+    }
+    if len(pieces) > 1 {
+      s, _ := strconv.ParseInt(pieces[1], 10, 32)
+      times = int(s)
+    }
+  }
+  return statusCodes, times, true
+}
+
+func ParseSize(value string) int {
+  size := 0
+  multiplier := 1
+  if len(value) == 0 {
+    return 0
+  }
+  for k, v := range sizes {
+    if strings.Contains(value, k) {
+      multiplier = int(v)
+      value = strings.Split(value, k)[0]
+      break
+    }
+  }
+  if len(value) > 0 {
+    s, _ := strconv.ParseInt(value, 10, 32)
+    size = int(s)
+  } else {
+    size = 1
+  }
+  size = size * multiplier
+  return size
+}
+
+func GetSizeParam(r *http.Request, name string) int {
+  return ParseSize(mux.Vars(r)[name])
+}
+
+func ParseDuration(value string) time.Duration {
+  if d, err := time.ParseDuration(value); err == nil {
+    return d
+  }
+  return 0
+}
+
+func GetDurationParam(r *http.Request, name string) (low, high time.Duration, count int, ok bool) {
+  if val := mux.Vars(r)[name]; val != "" {
+    dRangeAndCount := strings.Split(val, ":")
+    dRange := strings.Split(dRangeAndCount[0], "-")
+    if d, err := time.ParseDuration(dRange[0]); err != nil {
+      return 0, 0, 0, false
+    } else {
+      low = d
+    }
+    if len(dRange) > 1 {
+      if d, err := time.ParseDuration(dRange[1]); err == nil {
+        if d < low {
+          high = low
+          low = d
+        } else {
+          high = d
+        }
+      }
+    } else {
+      high = low
+    }
+    if len(dRangeAndCount) > 1 {
+      if c, err := strconv.ParseInt(dRangeAndCount[1], 10, 32); err == nil {
+        if c > 0 {
+          count = int(c)
+        }
+      }
+    }
+    return low, high, count, true
+  }
+  return 0, 0, 0, false
+}
+
+func ParseJSONPathsFromRequest(r *http.Request) *JSONPath {
+  paths, ok := GetListParam(r, "paths")
+  if !ok {
+    paths = strings.Split(Read(r.Body), "\n")
+  }
+  if len(paths) > 0 {
+    return NewJSONPaths().Parse(paths)
+  }
+  return nil
+}
+
+func ParseJQFromRequest(r *http.Request) *JQ {
+  paths, ok := GetListParam(r, "paths")
+  if !ok {
+    paths = strings.Split(Read(r.Body), "\n")
+  }
+  if len(paths) > 0 {
+    return NewJQ().Parse(paths)
+  }
+  return nil
 }

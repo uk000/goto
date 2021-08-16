@@ -67,13 +67,13 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(root, "/status/flipflop", getStatusCount, "GET")
   util.AddRoute(root, "/status/clear", clearStatus, "POST")
   util.AddRoute(root, "/status/{status}", status)
-  util.AddRouteQ(root, "/status={status}", status, "x-request-id", "{requestId}", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRouteQ(root, "/status={status}", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
   util.AddRoute(root, "/status={status}", status)
-  util.AddRouteQ(root, "/status={status}/delay={delay}", status, "x-request-id", "{requestId}", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRouteQ(root, "/status={status}/delay={delay}", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
   util.AddRoute(root, "/status={status}/delay={delay}", status)
-  util.AddRouteQ(root, "/status={status}/flipflop", status, "x-request-id", "{requestId}", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRouteQ(root, "/status={status}/flipflop", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
   util.AddRoute(root, "/status={status}/flipflop", status)
-  util.AddRouteQ(root, "/status={status}/delay={delay}/flipflop", status, "x-request-id", "{requestId}", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+  util.AddRouteQ(root, "/status={status}/delay={delay}/flipflop", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
   util.AddRoute(root, "/status={status}/delay={delay}/flipflop", status)
 }
 
@@ -294,7 +294,7 @@ func status(w http.ResponseWriter, r *http.Request) {
   portStatus := getOrCreatePortStatus(r)
   requestedStatuses, times, _ := util.GetStatusParam(r)
   delayMin, delayMax, _, _ := util.GetDurationParam(r, "delay")
-  requestId := util.GetStringParamValue(r, "requestId")
+  requestId := util.GetStringParamValue(r, "x-request-id")
   flipflop := strings.Contains(r.RequestURI, "flipflop")
   requestedStatus := 200
   restart := flipflop

@@ -124,7 +124,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(jobsRouter, "/add", addOrUpdateJob, "POST", "PUT")
   util.AddRoute(jobsRouter, "/update", addOrUpdateJob, "POST", "PUT")
   util.AddRoute(jobsRouter, "/add/script/{name}", storeJobScriptOrFile, "POST", "PUT")
-  util.AddRouteQ(jobsRouter, "/store/file/{name}", storeJobScriptOrFile, "path", "{path}", "POST", "PUT")
+  util.AddRouteQ(jobsRouter, "/store/file/{name}", storeJobScriptOrFile, "path", "POST", "PUT")
   util.AddRoute(jobsRouter, "/store/file/{name}", storeJobScriptOrFile, "POST", "PUT")
   util.AddRoute(jobsRouter, "/{jobs}/remove", removeJob, "POST")
   util.AddRoute(jobsRouter, "/clear", clearJobs, "POST")
@@ -232,6 +232,30 @@ func (jm *JobManager) getJobResults(name string) map[int][]interface{} {
       }
       jobRun.lock.RUnlock()
     }
+  }
+  return results
+}
+
+func (jm *JobManager) GetJobLatestResults(name string) []interface{} {
+  results := []interface{}{}
+  var latestJobRun *JobRunContext
+  jm.lock.RLock()
+  job := jm.jobs[name]
+  jobRuns := jm.jobRuns[name]
+  if job != nil && jobRuns != nil {
+    for id, jobRun := range jobRuns {
+      if id > latestJobRun.id {
+        latestJobRun = jobRun
+      }
+    }
+  }
+  jm.lock.RUnlock()
+  if latestJobRun != nil {
+    latestJobRun.lock.RLock()
+    for _, r := range latestJobRun.jobResults {
+      results = append(results, r)
+    }
+    latestJobRun.lock.RUnlock()
   }
   return results
 }

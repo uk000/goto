@@ -262,148 +262,6 @@ func GetCurrentListenerLabel(r *http.Request) string {
   return global.GetListenerLabelForPort(GetCurrentPort(r))
 }
 
-func GetIntParam(r *http.Request, param string, defaultVal ...int) (int, bool) {
-  vars := mux.Vars(r)
-  switch {
-  case len(vars[param]) > 0:
-    s, _ := strconv.ParseInt(vars[param], 10, 32)
-    return int(s), true
-  case len(defaultVal) > 0:
-    return defaultVal[0], false
-  default:
-    return 0, false
-  }
-}
-
-func GetIntParamValue(r *http.Request, param string, defaultVal ...int) int {
-  val, _ := GetIntParam(r, param, defaultVal...)
-  return val
-}
-
-func GetStringParam(r *http.Request, param string, defaultVal ...string) (string, bool) {
-  vars := mux.Vars(r)
-  switch {
-  case len(vars[param]) > 0:
-    return vars[param], true
-  case len(defaultVal) > 0:
-    return defaultVal[0], false
-  default:
-    return "", false
-  }
-}
-
-func GetStringParamValue(r *http.Request, param string, defaultVal ...string) string {
-  val, _ := GetStringParam(r, param, defaultVal...)
-  return val
-}
-
-func GetBoolParamValue(r *http.Request, param string, defaultVal ...bool) bool {
-  val, _ := GetStringParam(r, param)
-  if val != "" {
-    return IsYes(val)
-  }
-  if len(defaultVal) > 0 {
-    return defaultVal[0]
-  }
-  return false
-}
-
-func GetListParam(r *http.Request, param string) ([]string, bool) {
-  values := []string{}
-  if v, present := GetStringParam(r, param); present {
-    values = strings.Split(v, ",")
-  }
-  return values, len(values) > 0 && len(values[0]) > 0
-}
-
-func GetStatusParam(r *http.Request) (statusCodes []int, times int, present bool) {
-  vars := mux.Vars(r)
-  status := vars["status"]
-  if len(status) == 0 {
-    return nil, 0, false
-  }
-  pieces := strings.Split(status, ":")
-  if len(pieces[0]) > 0 {
-    for _, s := range strings.Split(pieces[0], ",") {
-      if sc, err := strconv.ParseInt(s, 10, 32); err == nil {
-        statusCodes = append(statusCodes, int(sc))
-      }
-    }
-    if len(pieces) > 1 {
-      s, _ := strconv.ParseInt(pieces[1], 10, 32)
-      times = int(s)
-    }
-  }
-  return statusCodes, times, true
-}
-
-func ParseSize(value string) int {
-  size := 0
-  multiplier := 1
-  if len(value) == 0 {
-    return 0
-  }
-  for k, v := range sizes {
-    if strings.Contains(value, k) {
-      multiplier = int(v)
-      value = strings.Split(value, k)[0]
-      break
-    }
-  }
-  if len(value) > 0 {
-    s, _ := strconv.ParseInt(value, 10, 32)
-    size = int(s)
-  } else {
-    size = 1
-  }
-  size = size * multiplier
-  return size
-}
-
-func GetSizeParam(r *http.Request, name string) int {
-  return ParseSize(mux.Vars(r)[name])
-}
-
-func ParseDuration(value string) time.Duration {
-  if d, err := time.ParseDuration(value); err == nil {
-    return d
-  }
-  return 0
-}
-
-func GetDurationParam(r *http.Request, name string) (low, high time.Duration, count int, ok bool) {
-  if val := mux.Vars(r)[name]; val != "" {
-    dRangeAndCount := strings.Split(val, ":")
-    dRange := strings.Split(dRangeAndCount[0], "-")
-    if d, err := time.ParseDuration(dRange[0]); err != nil {
-      return 0, 0, 0, false
-    } else {
-      low = d
-    }
-    if len(dRange) > 1 {
-      if d, err := time.ParseDuration(dRange[1]); err == nil {
-        if d < low {
-          high = low
-          low = d
-        } else {
-          high = d
-        }
-      }
-    } else {
-      high = low
-    }
-    if len(dRangeAndCount) > 1 {
-      if c, err := strconv.ParseInt(dRangeAndCount[1], 10, 32); err == nil {
-        if c > 0 {
-          count = int(c)
-        }
-      }
-    }
-    return low, high, count, true
-  }
-  return 0, 0, 0, false
-}
-
 func GetHeaderValues(r *http.Request) map[string]map[string]int {
   headerValuesMap := map[string]map[string]int{}
   for h, values := range r.Header {
@@ -505,6 +363,15 @@ func ReadJsonPayloadFromBody(body io.ReadCloser, t interface{}) error {
 
 func WriteJsonPayload(w http.ResponseWriter, t interface{}) string {
   w.Header().Add(HeaderContentType, ContentTypeJSON)
+  return WriteJson(w, t)
+}
+
+func WriteStringJsonPayload(w http.ResponseWriter, json string) {
+  w.Header().Add(HeaderContentType, ContentTypeJSON)
+  fmt.Fprintln(w, json)
+}
+
+func WriteJson(w io.Writer, t interface{}) string {
   if reflect.ValueOf(t).IsNil() {
     fmt.Fprintln(w, "")
   } else {
@@ -517,11 +384,6 @@ func WriteJsonPayload(w http.ResponseWriter, t interface{}) string {
     }
   }
   return ""
-}
-
-func WriteStringJsonPayload(w http.ResponseWriter, json string) {
-  w.Header().Add(HeaderContentType, ContentTypeJSON)
-  fmt.Fprintln(w, json)
 }
 
 func WriteErrorJson(w http.ResponseWriter, error string) {

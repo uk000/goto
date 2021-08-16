@@ -48,16 +48,16 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(registryRouter, "/lockers/labels", getLockerLabels, "GET")
   util.AddRoute(registryRouter, "/lockers/{label}/store/{path}", storeInLabeledLocker, "POST")
   util.AddRoute(registryRouter, "/lockers/{label}/remove/{path}", removeFromLabeledLocker, "POST")
-  util.AddRouteMultiQ(registryRouter, "/lockers/{label}/get/{path}", getFromDataLocker, "GET", "data", "{data}", "level", "{level}")
+  util.AddRouteMultiQ(registryRouter, "/lockers/{label}/get/{path}", getFromDataLocker, "GET", "data", "level")
   util.AddRoute(registryRouter, "/lockers/{label}/get/{path}", getFromDataLocker, "GET")
   util.AddRoute(registryRouter, "/lockers/{label}?/data/keys", getDataLockerPaths, "GET")
   util.AddRoute(registryRouter, "/lockers/{label}?/data/paths", getDataLockerPaths, "GET")
   util.AddRoute(registryRouter, "/lockers/{label}?/search/{text}", searchInDataLockers, "GET")
-  util.AddRouteMultiQ(registryRouter, "/lockers/{label}?/data", getDataLockers, "GET", "data", "{data}", "level", "{level}")
+  util.AddRouteMultiQ(registryRouter, "/lockers/{label}?/data", getDataLockers, "GET", "data", "level")
   util.AddRoute(registryRouter, "/lockers/{label}?/data", getDataLockers, "GET")
-  util.AddRouteMultiQ(registryRouter, "/lockers/{label}", getLabeledLocker, "GET", "data", "{data}", "events", "{events}", "peers", "{peers}", "level", "{level}")
+  util.AddRouteMultiQ(registryRouter, "/lockers/{label}", getLabeledLocker, "GET", "data", "events", "peers", "level")
   util.AddRoute(registryRouter, "/lockers/{label}", getLabeledLocker, "GET")
-  util.AddRouteMultiQ(registryRouter, "/lockers", getAllLockers, "GET", "data", "{data}", "events", "{events}", "peers", "{peers}", "level", "{level}")
+  util.AddRouteMultiQ(registryRouter, "/lockers", getAllLockers, "GET", "data", "events", "peers", "level")
   util.AddRoute(registryRouter, "/lockers", getAllLockers, "GET")
 
   util.AddRoute(peersRouter, "/{peer}/{address}?/locker/store/{path}", storeInPeerLocker, "POST")
@@ -69,14 +69,14 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
   lockerPeersRouter := registryRouter.PathPrefix("/lockers/{label}/peers").Subrouter()
 
-  util.AddRouteMultiQ(lockerPeersRouter, "/{peers}?/events", getPeerEvents, "GET", "data", "{data}", "reverse", "{reverse}")
+  util.AddRouteMultiQ(lockerPeersRouter, "/{peers}?/events", getPeerEvents, "GET", "data", "reverse")
   util.AddRoute(lockerPeersRouter, "/{peers}?/events", getPeerEvents, "GET")
-  util.AddRouteMultiQ(peersRouter, "/{peer}?/events", getPeerEvents, "GET", "data", "{data}", "reverse", "{reverse}")
+  util.AddRouteMultiQ(peersRouter, "/{peer}?/events", getPeerEvents, "GET", "data", "reverse")
   util.AddRoute(peersRouter, "/{peer}?/events", getPeerEvents, "GET")
 
-  util.AddRouteMultiQ(lockerPeersRouter, "/{peers}?/events/search/{text}", searchInPeerEvents, "GET", "data", "{data}", "reverse", "{reverse}")
+  util.AddRouteMultiQ(lockerPeersRouter, "/{peers}?/events/search/{text}", searchInPeerEvents, "GET", "data", "reverse")
   util.AddRoute(lockerPeersRouter, "/{peers}?/events/search/{text}", searchInPeerEvents, "GET")
-  util.AddRouteMultiQ(peersRouter, "/{peer}?/events/search/{text}", searchInPeerEvents, "GET", "data", "{data}", "reverse", "{reverse}")
+  util.AddRouteMultiQ(peersRouter, "/{peer}?/events/search/{text}", searchInPeerEvents, "GET", "data", "reverse")
   util.AddRoute(peersRouter, "/{peer}?/events/search/{text}", searchInPeerEvents, "GET")
 
   util.AddRoute(lockerPeersRouter, "/{peer}?/instances/client/results/targets={targets}?", getPeersClientResults, "GET")
@@ -91,14 +91,14 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "/client/results/all/{enable}", enableAllClientResultsCollection, "POST", "PUT")
   util.AddRoute(peersRouter, "/client/results/invocations/{enable}", enableInvocationResultsCollection, "POST", "PUT")
 
-  util.AddRouteMultiQ(lockerPeersRouter, "/{peer}/{address}?/get/{path}", getFromPeerLocker, "GET", "data", "{data}", "level", "{level}")
+  util.AddRouteMultiQ(lockerPeersRouter, "/{peer}/{address}?/get/{path}", getFromPeerLocker, "GET", "data", "level")
   util.AddRoute(lockerPeersRouter, "/{peer}/{address}?/locker/get/{path}", getFromPeerLocker, "GET")
-  util.AddRouteMultiQ(lockerPeersRouter, "/{peer}?/{address}?", getPeerLocker, "GET", "data", "{data}", "events", "{events}", "level", "{level}")
+  util.AddRouteMultiQ(lockerPeersRouter, "/{peer}?/{address}?", getPeerLocker, "GET", "data", "events", "level")
   util.AddRoute(lockerPeersRouter, "/{peer}?/{address}?", getPeerLocker, "GET")
 
-  util.AddRouteMultiQ(peersRouter, "/{peer}/{address}?/locker/get/{path}", getFromPeerLocker, "GET", "data", "{data}", "level", "{level}")
+  util.AddRouteMultiQ(peersRouter, "/{peer}/{address}?/locker/get/{path}", getFromPeerLocker, "GET", "data", "level")
   util.AddRoute(peersRouter, "/{peer}/{address}?/locker/get/{path}", getFromPeerLocker, "GET")
-  util.AddRouteMultiQ(peersRouter, "/{peer}?/{address}?/lockers", getPeerLocker, "GET", "data", "{data}", "events", "{events}", "level", "{level}")
+  util.AddRouteMultiQ(peersRouter, "/{peer}?/{address}?/lockers", getPeerLocker, "GET", "data", "events", "level")
   util.AddRoute(peersRouter, "/{peer}?/{address}?/lockers", getPeerLocker, "GET")
 
   util.AddRoute(peersRouter, "/{peer}?/targets/add", addPeerTarget, "POST")
@@ -113,10 +113,10 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
   util.AddRoute(peersRouter, "/{peer}?/jobs/add", addPeerJob, "POST", "PUT")
   util.AddRoute(peersRouter, "/{peer}/jobs/add/script/{name}", addPeerJobScriptOrFile, "POST", "PUT")
-  util.AddRouteQ(peersRouter, "/{peer}/jobs/store/file/{name}", addPeerJobScriptOrFile, "path", "{path}", "POST", "PUT")
+  util.AddRouteQ(peersRouter, "/{peer}/jobs/store/file/{name}", addPeerJobScriptOrFile, "path", "POST", "PUT")
   util.AddRoute(peersRouter, "/{peer}/jobs/store/file/{name}", addPeerJobScriptOrFile, "POST", "PUT")
   util.AddRoute(peersRouter, "/jobs/add/script/{name}", addPeerJobScriptOrFile, "POST", "PUT")
-  util.AddRouteQ(peersRouter, "/jobs/store/file/{name}", addPeerJobScriptOrFile, "path", "{path}", "POST", "PUT")
+  util.AddRouteQ(peersRouter, "/jobs/store/file/{name}", addPeerJobScriptOrFile, "path", "POST", "PUT")
   util.AddRoute(peersRouter, "/jobs/store/file/{name}", addPeerJobScriptOrFile, "POST", "PUT")
   util.AddRoute(peersRouter, "/{peer}?/jobs/{jobs}/remove", removePeerJobs, "POST")
   util.AddRoute(peersRouter, "/{peer}?/jobs/{jobs}/run", runPeerJobs, "POST")
@@ -134,14 +134,14 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(peersRouter, "/track/time/{buckets}", addPeersTrackingTimeBuckets, "POST", "PUT")
   util.AddRoute(peersRouter, "/track/headers", getPeersTrackingTimeBuckets, "GET")
 
-  util.AddRouteQ(peersRouter, "/probes/{type}/set", setPeersProbe, "uri", "{uri}", "POST", "PUT")
+  util.AddRouteQ(peersRouter, "/probes/{type}/set", setPeersProbe, "uri", "POST", "PUT")
   util.AddRoute(peersRouter, "/probes/{type}/set/status={status}", setPeersProbeStatus, "POST", "PUT")
   util.AddRoute(peersRouter, "/probes", getPeersProbes, "GET")
 
-  util.AddRouteQ(peersRouter, "/{peer}?/call", callPeer, "uri", "{uri}", "GET", "POST", "PUT")
+  util.AddRouteQ(peersRouter, "/{peer}?/call", callPeer, "uri", "GET", "POST", "PUT")
   util.AddRoute(peersRouter, "/{peer}?/apis", getPeersAPIs, "GET")
 
-  util.AddRouteQ(registryRouter, "/cloneFrom", cloneFromRegistry, "url", "{url}", "POST")
+  util.AddRouteQ(registryRouter, "/cloneFrom", cloneFromRegistry, "url", "POST")
   util.AddRoute(registryRouter, "/dump", dumpRegistry, "GET")
   util.AddRoute(registryRouter, "/load", loadRegistryDump, "POST")
 }

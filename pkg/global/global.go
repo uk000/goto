@@ -38,6 +38,7 @@ var (
   RegistryURL                string
   CertPath                   string
   WorkDir                    string
+  KubeConfig                 string
   UseLocker                  bool
   EnableEvents               bool
   PublishEvents              bool

@@ -26,15 +26,41 @@ import (
   "strconv"
   "strings"
   "text/template"
+  "time"
 
   "github.com/itchyny/gojq"
+  "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+  "k8s.io/client-go/util/jsonpath"
   "sigs.k8s.io/yaml"
 )
+
+type JSONPath struct {
+  Paths     map[string]*jsonpath.JSONPath
+  TextPaths map[string]string
+}
+
+type JQ struct {
+  Queries map[string]*gojq.Code
+  TextQueries map[string]string
+}
+
+type JSONPatterns struct {
+  patterns map[int][]string
+}
+
+type JSONMap map[string]JSON
+
+type JSONObject struct {
+  AbstractJSON
+  JSONMap
+}
 
 type JSON interface {
   Value() interface{}
   Object() map[string]interface{}
   Array() []interface{}
+  JSONObject() *JSONObject
+  JSONArray() []JSON
 
   ParseJSON(text string)
   ParseYAML(y string)
@@ -46,9 +72,6 @@ type JSON interface {
   IsObject() bool
   IsArray() bool
 
-  AddQueries(id int, queries []string)
-  ExecuteQueries() []interface{}
-
   FindPath(path string) *Value
   FindPaths(paths []string) map[string]*Value
   FindTransformPath(path string, join, replace, push bool) JSONField
@@ -56,17 +79,15 @@ type JSON interface {
   TransformPatterns(text string) string
 
   View(fields ...string) map[string]interface{}
+
+  At() *time.Time
 }
 
 type JSONValue struct {
   jsonMap map[string]interface{}
   jsonArr []interface{}
-  index   *JSONIndex
-}
-
-type JSONIndex struct {
-  queries  map[int]*gojq.Code
-  patterns map[int][]string
+  at      time.Time
+  jsonPatterns   *JSONPatterns
 }
 
 type JSONTransform struct {
@@ -117,10 +138,7 @@ type JSONMapField struct {
 
 func NewJSON() JSON {
   return &JSONValue{
-    index: &JSONIndex{
-      patterns: map[int][]string{},
-      queries:  map[int]*gojq.Code{},
-    },
+    at: time.Now(),
   }
 }
 
@@ -146,6 +164,40 @@ func FromObject(o interface{}) JSON {
   return FromJSONText(ToJSON(o))
 }
 
+func ToJSONValue(v interface{}) *JSONValue {
+  jsonValue := &JSONValue{}
+  if vv, ok := v.(map[string]interface{}); ok {
+    jsonValue.jsonMap = vv
+  } else if vv, ok := v.([]interface{}); ok {
+    jsonValue.jsonArr = vv
+  }
+  return jsonValue
+}
+
+func (j JSONObject) Value() interface{} {
+  return j
+}
+
+func (j JSONObject) Object() map[string]interface{} {
+  return j.Value().(map[string]interface{})
+}
+
+func (j JSONObject) Array() []interface{} {
+  return nil
+}
+
+func (j JSONObject) JSONObject() JSONObject {
+  return j
+}
+
+func (j *JSONObject) JSONArray() []JSON {
+  return nil
+}
+
+func (j *JSONValue) At() *time.Time {
+  return &j.at
+}
+
 func (j *JSONValue) Value() interface{} {
   if j.jsonMap != nil {
     return j.jsonMap
@@ -157,8 +209,24 @@ func (j *JSONValue) Object() map[string]interface{} {
   return j.jsonMap
 }
 
+func (j *JSONValue) JSONObject() *JSONObject {
+  jsonObject := JSONMap{}
+  for k, v := range j.jsonMap {
+    jsonObject[k] = ToJSONValue(v)
+  }
+  return &JSONObject{JSONMap: jsonObject}
+}
+
 func (j *JSONValue) Array() []interface{} {
   return j.jsonArr
+}
+
+func (j *JSONValue) JSONArray() []JSON {
+  jsonArr := []JSON{}
+  for _, v := range j.jsonArr {
+    jsonArr = append(jsonArr, ToJSONValue(v))
+  }
+  return jsonArr
 }
 
 func (j *JSONValue) ParseJSON(text string) {
@@ -179,7 +247,7 @@ func (j *JSONValue) ParseYAML(y string) {
 }
 
 func (j *JSONValue) ToJSON() string {
-  if output, err := json.Marshal(j.Value); err == nil {
+  if output, err := json.Marshal(j.Value()); err == nil {
     return string(output)
   } else {
     fmt.Printf("Failed to marshal json with error: %s\n", err.Error())
@@ -201,8 +269,17 @@ func (j *JSONValue) Store(i interface{}) {
   switch v := i.(type) {
   case map[string]interface{}:
     j.jsonMap = v
+  case map[string][]interface{}:
+    j.jsonMap = map[string]interface{}{}
+    for key, list := range v {
+      j.jsonMap[key] = list
+    }
   case []interface{}:
     j.jsonArr = v
+  case *unstructured.UnstructuredList:
+    j.ParseJSON(ToJSON(v))
+  case *unstructured.Unstructured:
+    j.jsonMap = v.Object
   }
 }
 
@@ -234,35 +311,6 @@ func (j *JSONValue) ExecuteTemplate(t *template.Template) interface{} {
     fmt.Println(err.Error())
   }
   return nil
-}
-
-func (j *JSONValue) AddQueries(id int, queries []string) {
-  for _, query := range queries {
-    if q, err := gojq.Parse(query); err == nil {
-      if code, err := gojq.Compile(q); err == nil {
-        j.index.queries[id] = code
-      }
-    }
-  }
-}
-
-func (j *JSONValue) ExecuteQueries() []interface{} {
-  data := []interface{}{}
-  for _, q := range j.index.queries {
-    iter := q.Run(j.Value())
-    for {
-      if value, ok := iter.Next(); ok {
-        if err, ok := value.(error); ok {
-          fmt.Println(err)
-        } else {
-          data = append(data, value)
-        }
-      } else {
-        break
-      }
-    }
-  }
-  return data
 }
 
 func (j *JSONValue) View(paths ...string) map[string]interface{} {
@@ -427,7 +475,10 @@ func (j *JSONValue) Transform(ts []*JSONTransform, source JSON) bool {
 }
 
 func (j *JSONValue) TransformPatterns(text string) string {
-  for _, p := range j.index.patterns {
+  if j.jsonPatterns == nil {
+    return text
+  }
+  for _, p := range j.jsonPatterns.patterns {
     if len(p) < 2 {
       continue
     }
@@ -437,7 +488,10 @@ func (j *JSONValue) TransformPatterns(text string) string {
 }
 
 func (j *JSONValue) addPatterns(id int, patterns ...string) {
-  j.index.patterns[id] = patterns
+  if j.jsonPatterns == nil {
+    j.jsonPatterns = &JSONPatterns{patterns: map[int][]string{}}
+  }
+  j.jsonPatterns.patterns[id] = patterns
 }
 
 func (j *JSONTransform) Init() {
@@ -554,7 +608,10 @@ func GetEmptyCopy(v interface{}) interface{} {
 
 func Clone(v interface{}) interface{} {
   gob.Register(map[string]interface{}{})
+  gob.Register(map[string][]interface{}{})
   gob.Register([]interface{}{})
+  gob.Register(unstructured.Unstructured{})
+  gob.Register(unstructured.UnstructuredList{})
   buff := &bytes.Buffer{}
   enc := gob.NewEncoder(buff)
   dec := gob.NewDecoder(buff)
@@ -566,8 +623,23 @@ func Clone(v interface{}) interface{} {
       if err = dec.Decode(&copy); err == nil {
         return copy
       }
+    case map[string][]interface{}:
+      copy := map[string][]interface{}{}
+      if err = dec.Decode(&copy); err == nil {
+        return copy
+      }
     case []interface{}:
       copy := []interface{}{}
+      if err = dec.Decode(&copy); err == nil {
+        return copy
+      }
+    case *unstructured.UnstructuredList:
+      copy := &unstructured.UnstructuredList{}
+      if err = dec.Decode(&copy); err == nil {
+        return copy
+      }
+    case *unstructured.Unstructured:
+      copy := &unstructured.Unstructured{}
       if err = dec.Decode(&copy); err == nil {
         return copy
       }
@@ -588,4 +660,106 @@ func ToJSON(o interface{}) string {
     return string(output)
   }
   return fmt.Sprintf("%+v", o)
+}
+
+func NewJSONPaths() *JSONPath {
+  return &JSONPath{TextPaths: map[string]string{}, Paths: map[string]*jsonpath.JSONPath{}}
+}
+
+func (jp *JSONPath) Parse(paths []string) *JSONPath {
+  if len(paths) == 0 || paths[0] == "" {
+    return jp
+  }
+  for _, path := range paths {
+    pathKV := strings.Split(path, ":")
+    if len(pathKV) < 2 {
+      fmt.Printf("Invalid JSONPath [%s]\n", path)
+      continue
+    }
+    key := pathKV[0]
+    path = pathKV[1]
+    j := jsonpath.New(path)
+    j.Parse(path)
+    jp.TextPaths[key] = path
+    jp.Paths[key] = j
+  }
+  return jp
+}
+
+func (jp *JSONPath) Apply(j JSON) JSON {
+  if j == nil {
+    return nil
+  }
+  out := map[string][]interface{}{}
+  data := j.Value()
+  for k, jsonPath := range jp.Paths {
+    if matches, err := jsonPath.FindResults(data); err == nil && len(matches) > 0 && len(matches[0]) > 0 {
+      for _, v1 := range matches {
+        for _, v2 := range v1 {
+          out[k] = append(out[k], v2.Interface())
+        }
+      }
+    } else if err != nil {
+      fmt.Printf("Failed to find results for path [%s] with error: %s\n", jp.TextPaths[k], err.Error())
+    }
+  }
+  return FromJSON(out)
+}
+
+func (jp *JSONPath) IsEmpty() bool {
+  return len(jp.Paths) == 0
+}
+
+func NewJQ() *JQ {
+  return &JQ{Queries: map[string]*gojq.Code{}, TextQueries: map[string]string{}}
+}
+
+func (jq *JQ) Parse(queries []string) *JQ {
+  if len(queries) == 0 || queries[0] == "" {
+    return jq
+  }
+  for _, query := range queries {
+    pieces := strings.Split(query, ":")
+    if len(pieces) < 2 {
+      fmt.Printf("Invalid jq id+query pair: %s\n", query)
+      continue
+    }
+    if q, err := gojq.Parse(pieces[1]); err == nil {
+      if code, err := gojq.Compile(q); err == nil {
+        jq.Queries[pieces[0]] = code
+        jq.TextQueries[pieces[0]] = pieces[1]
+      } else {
+        fmt.Printf("Failed to compile jq query [%s] with error: %s\n", query, err.Error())
+      }
+    } else {
+      fmt.Printf("Failed to parse jq query [%s] with error: %s\n", query, err.Error())
+    }
+  }
+  return jq
+}
+
+func (jq *JQ) Apply(j JSON) JSON {
+  if j == nil {
+    return nil
+  }
+  out := map[string][]interface{}{}
+  for id, q := range jq.Queries {
+    iter := q.Run(j.Value())
+    for {
+      if value, ok := iter.Next(); ok {
+        if err, ok := value.(error); ok {
+          fmt.Println(err)
+        } else {
+          out[id] = append(out[id], value)
+        }
+      } else {
+        break
+      }
+    }
+  }
+  return FromJSON(out)
+}
+
+func (jq *JQ) IsEmpty() bool {
+  return len(jq.Queries) == 0
 }

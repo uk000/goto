@@ -66,9 +66,9 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   eventsRouter := r.PathPrefix("/events").Subrouter()
   util.AddRoute(eventsRouter, "/flush", flushEvents, "POST")
   util.AddRoute(eventsRouter, "/clear", clearEvents, "POST")
-  util.AddRouteMultiQ(eventsRouter, "/search/{text}", searchEvents, "GET", "data", "{data}", "reverse", "{reverse}")
+  util.AddRouteMultiQ(eventsRouter, "/search/{text}", searchEvents, "GET", "data", "reverse")
   util.AddRoute(eventsRouter, "/search/{text}", searchEvents, "GET")
-  util.AddRouteMultiQ(eventsRouter, "", getEvents, "GET", "data", "{data}", "reverse", "{reverse}")
+  util.AddRouteMultiQ(eventsRouter, "", getEvents, "GET", "data", "reverse")
   util.AddRoute(eventsRouter, "", getEvents, "GET")
 }
 
