@@ -370,22 +370,16 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
   _, exists := listeners[l.Port]
   listenersLock.RUnlock()
   if exists {
-    if update {
-      if l.reopenListener() {
-        listenersLock.Lock()
-        listeners[l.Port] = l
-        listenersLock.Unlock()
-        msg = fmt.Sprintf("Listener %d already present, restarted.", l.Port)
-        events.SendEventJSON("Listener Updated", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
-      } else {
-        errorCode = http.StatusInternalServerError
-        msg = fmt.Sprintf("Listener %d already present, failed to restart.", l.Port)
-        events.SendEventJSON("Listener Updated", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
-      }
+    if l.reopenListener() {
+      listenersLock.Lock()
+      listeners[l.Port] = l
+      listenersLock.Unlock()
+      msg = fmt.Sprintf("Listener %d already present, restarted.", l.Port)
+      events.SendEventJSON("Listener Updated", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
     } else {
-      errorCode = http.StatusBadRequest
-      msg = fmt.Sprintf("Listener %d already present, cannot add.", l.Port)
-      events.SendEventJSON("Listener Rejected", msg, l)
+      errorCode = http.StatusInternalServerError
+      msg = fmt.Sprintf("Listener %d already present, failed to restart.", l.Port)
+      events.SendEventJSON("Listener Updated", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
     }
   } else {
     if l.Open {

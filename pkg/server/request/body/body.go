@@ -37,8 +37,7 @@ func Middleware(next http.Handler) http.Handler {
     if global.Debug {
       log.Println("Enter Request.Body Middleware")
     }
-    if (global.LogRequestBody || global.LogRequestMiniBody) &&
-      !util.IsAdminRequest(r) && r.ProtoMajor == 1 {
+    if !util.IsAdminRequest(r) && r.ProtoMajor == 1 {
       if global.Debug {
         log.Println("Reading Request.Body")
       }
@@ -47,20 +46,23 @@ func Middleware(next http.Handler) http.Handler {
         log.Println("Finished Reading Request.Body")
       }
       bodyLength := len(body)
+      util.SetRequestPayloadSize(r, bodyLength)
       r.Body.Close()
-      bodyLog := ""
-      if global.LogRequestMiniBody && len(body) > 50 {
-        bodyLog = fmt.Sprintf("%s...", body[:50])
-        bodyLog += fmt.Sprintf("%s", body[bodyLength-50:])
-      } else {
-        bodyLog = body
-      }
-      bodyLog = strings.ReplaceAll(bodyLog, "\n", "\\n")
       util.AddLogMessage(fmt.Sprintf("Request Body Length: [%d]", bodyLength), r)
-      if global.LogRequestMiniBody {
-        util.AddLogMessage(fmt.Sprintf("Request Mini Body: [%s]", bodyLog), r)
-      } else {
-        util.AddLogMessage(fmt.Sprintf("Request Body: [%s]", bodyLog), r)
+      if global.LogRequestMiniBody || global.LogRequestBody {
+        bodyLog := ""
+        if global.LogRequestMiniBody && len(body) > 50 {
+          bodyLog = fmt.Sprintf("%s...", body[:50])
+          bodyLog += fmt.Sprintf("%s", body[bodyLength-50:])
+        } else {
+          bodyLog = body
+        }
+        bodyLog = strings.ReplaceAll(bodyLog, "\n", "\\n")
+        if global.LogRequestMiniBody {
+          util.AddLogMessage(fmt.Sprintf("Request Mini Body: [%s]", bodyLog), r)
+        } else {
+          util.AddLogMessage(fmt.Sprintf("Request Body: [%s]", bodyLog), r)
+        }
       }
       r.Body = ioutil.NopCloser(strings.NewReader(body))
     }

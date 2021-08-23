@@ -19,8 +19,6 @@ package global
 import (
   "net/http"
   "time"
-
-  "github.com/gorilla/mux"
 )
 
 var (
@@ -74,6 +72,5 @@ var (
   GetListenerLabelForPort    func(int) string
   GetHostLabelForPort        func(int) string
   StoreEventInCurrentLocker  func(interface{})
-  HasTunnel                  func(*http.Request, *mux.RouteMatch) bool
   Debug                      bool = false
 )

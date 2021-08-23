@@ -274,7 +274,7 @@ func getHeaderCount(w http.ResponseWriter, r *http.Request) {
   if header != "" {
     util.AddLogMessage(fmt.Sprintf("Port [%s] reporting counts for header %s", util.GetRequestOrListenerPort(r), header), r)
     if headerData != nil {
-      result := util.ToJSON(headerData)
+      result := util.ToJSONText(headerData)
       util.AddLogMessage(result, r)
       w.WriteHeader(http.StatusOK)
       fmt.Fprintln(w, result)
@@ -285,7 +285,7 @@ func getHeaderCount(w http.ResponseWriter, r *http.Request) {
     }
   } else {
     util.AddLogMessage(fmt.Sprintf("Port [%s] reporting counts for all headers", util.GetRequestOrListenerPort(r)), r)
-    result := util.ToJSON(requestTracking.getPortRequestTrackingData(r).headerMap)
+    result := util.ToJSONText(requestTracking.getPortRequestTrackingData(r).headerMap)
     util.AddLogMessage(result, r)
     w.WriteHeader(http.StatusOK)
     fmt.Fprintln(w, result)
@@ -293,7 +293,7 @@ func getHeaderCount(w http.ResponseWriter, r *http.Request) {
 }
 
 func getHeaders(w http.ResponseWriter, r *http.Request) {
-  fmt.Fprintln(w, util.ToJSON(requestTracking.getHeaders(r)))
+  fmt.Fprintln(w, util.ToJSONText(requestTracking.getHeaders(r)))
 }
 
 func track(port string, headers http.Header, uri string, requestedStatus, responseStatus int, rtd *RequestTrackingData) {

@@ -198,7 +198,7 @@ func getStatusCount(w http.ResponseWriter, r *http.Request) {
       portStatus.lock.RUnlock()
       msg = fmt.Sprintf("Port [%s] Status: %d, Request count: %d, Response count: %d",
         port, status, requestCount, responseCount)
-      fmt.Fprintln(w, util.ToJSON(map[string]interface{}{
+      fmt.Fprintln(w, util.ToJSONText(map[string]interface{}{
         "port":          port,
         "status":        status,
         "requestCount":  requestCount,
@@ -207,7 +207,7 @@ func getStatusCount(w http.ResponseWriter, r *http.Request) {
     } else {
       msg = fmt.Sprintf("Port [%s] reporting count for all statuses", port)
       portStatus.lock.RLock()
-      fmt.Fprintln(w, util.ToJSON(map[string]interface{}{
+      fmt.Fprintln(w, util.ToJSONText(map[string]interface{}{
         "port":                    port,
         "countsByRequestedStatus": portStatus.countsByRequestedStatus,
         "countsByResponseStatus":  portStatus.countsByResponseStatus,

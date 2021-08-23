@@ -107,12 +107,12 @@ type Assert struct {
 type Assertions []*Assert
 
 type InvocationTracker struct {
-  ID       uint32            `json:"id"`
-  Target   *InvocationSpec   `json:"target"`
-  Status   *InvocationStatus `json:"status"`
-  Channels *InvocationChannels
+  ID       uint32              `json:"id"`
+  Target   *InvocationSpec     `json:"target"`
+  Status   *InvocationStatus   `json:"status"`
+  Payloads [][]byte            `json:"-"`
+  Channels *InvocationChannels `json:"-"`
   client   *InvocationClient
-  payloads [][]byte
 }
 
 type InvocationChannels struct {
@@ -534,25 +534,25 @@ func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) *
     for _, p := range target.StreamPayload {
       if target.Binary {
         if b, err := base64.RawStdEncoding.DecodeString(p); err == nil {
-          tracker.payloads = append(tracker.payloads, b)
+          tracker.Payloads = append(tracker.Payloads, b)
         } else {
-          tracker.payloads = append(tracker.payloads, []byte(p))
+          tracker.Payloads = append(tracker.Payloads, []byte(p))
         }
       } else {
-        tracker.payloads = append(tracker.payloads, []byte(p))
+        tracker.Payloads = append(tracker.Payloads, []byte(p))
       }
     }
     target.Body = ""
   } else if target.autoPayloadSize > 0 {
-    tracker.payloads = [][]byte{util.GenerateRandomPayload(target.autoPayloadSize)}
+    tracker.Payloads = [][]byte{util.GenerateRandomPayload(target.autoPayloadSize)}
     target.Body = ""
   } else if target.Body != "" {
-    tracker.payloads = [][]byte{[]byte(target.Body)}
+    tracker.Payloads = [][]byte{[]byte(target.Body)}
   } else if target.BodyReader != nil {
-    tracker.payloads = [][]byte{util.ReadBytes(target.BodyReader)}
+    tracker.Payloads = [][]byte{util.ReadBytes(target.BodyReader)}
     target.BodyReader = nil
   } else {
-    tracker.payloads = [][]byte{nil}
+    tracker.Payloads = [][]byte{nil}
   }
   return tracker
 }
@@ -652,14 +652,6 @@ func monitorHttpClients() {
   }
 }
 
-func (t *InvocationTracker) SendResult(r *InvocationResult) {
-  if t.Channels != nil {
-    t.Channels.Lock.Lock()
-    defer t.Channels.Lock.Unlock()
-    t.Channels.ResultChannel <- r
-  }
-}
-
 func (t *InvocationTracker) CloseChannels() {
   if t.Channels != nil {
     t.Channels.Close()
@@ -731,26 +723,5 @@ func (c *InvocationChannels) Close() {
   if c.ResultChannel != nil {
     close(c.ResultChannel)
     c.ResultChannel = nil
-  }
-}
-
-func (tracker *InvocationTracker) publishResult(result *InvocationResult) {
-  if tracker.Channels != nil {
-    tracker.Channels.publish(result)
-  }
-}
-
-func (c *InvocationChannels) publish(result *InvocationResult) {
-  c.Lock.Lock()
-  defer c.Lock.Unlock()
-  if len(c.Sinks) > 0 {
-    for _, sink := range c.Sinks {
-      sink(result)
-    }
-  } else if c.ResultChannel != nil {
-    if len(c.ResultChannel) > 50 {
-      result.tracker.logResultChannelBacklog(result, len(c.ResultChannel))
-    }
-    c.ResultChannel <- result
   }
 }

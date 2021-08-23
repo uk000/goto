@@ -30,46 +30,60 @@ import (
   "strings"
   "sync"
   "time"
-
-  "github.com/gorilla/mux"
 )
 
 type Endpoint struct {
-  URL             string
-  Address         string
-  Host            string
-  Port            int
-  Transparent     bool
-  isTLS           bool
-  isH2            bool
-  useRequestProto bool
+  ID              string `json:"id"`
+  URL             string `json:"url"`
+  Address         string `json:"address"`
+  Host            string `json:"host"`
+  Port            int    `json:"port"`
+  Transparent     bool   `json:"transparent"`
+  IsTLS           bool   `json:"isTLS"`
+  IsH2            bool   `json:"isH2"`
+  UseRequestProto bool   `json:"useRequestProto"`
   client          *util.ClientTracker
 }
 
+type TunnelCounts struct {
+  ByEndpoints               map[string]int            `json:"ByEndpoints"`
+  ByURIs                    map[string]int            `json:"ByURIs"`
+  ByURIEndpoints            map[string]map[string]int `json:"ByURIEndpoints"`
+  ByRequestHeaders          map[string]int            `json:"ByRequestHeaders"`
+  ByRequestHeaderValues     map[string]map[string]int `json:"ByRequestHeaderValues"`
+  ByRequestHeaderEndpoints  map[string]map[string]int `json:"ByRequestHeaderEndpoints"`
+  ByURIRequestHeaders       map[string]map[string]int `json:"ByURIRequestHeaders"`
+  ByResponseHeaders         map[string]int            `json:"ByResponseHeaders"`
+  ByResponseHeaderValues    map[string]map[string]int `json:"ByResponseHeaderValues"`
+  ByResponseHeaderEndpoints map[string]map[string]int `json:"ByResponseHeaderEndpoints"`
+  ByURIResponseHeaders      map[string]map[string]int `json:"ByURIResponseHeaders"`
+}
+
 type PortTunnel struct {
-  Endpoints map[string]*Endpoint
-  lock      sync.RWMutex
+  Port                  int
+  BroadTunnels          map[string]*Endpoint
+  URITunnels            map[string]map[string]*Endpoint
+  HeaderTunnels         map[string]map[string]map[string]*Endpoint
+  URIHeaderTunnels      map[string]map[string]map[string]map[string]*Endpoint
+  TunnelTrackingHeaders map[string][]string
+  TunnelTrackingQueries map[string][]string
+  Counts                *TunnelCounts
+  lock                  sync.RWMutex
 }
 
 var (
   tunnels            = map[int]*PortTunnel{}
   tunnelLock         sync.RWMutex
   tunnelRegexp       = regexp.MustCompile("(?i)tunnel")
-  Handler            = util.ServerHandler{"tunnel", SetRoutes, Middleware}
   TunnelCountHandler = util.ServerHandler{Name: "tunnelCount", Middleware: TunnelCountMiddleware}
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  root.PathPrefix("/tunnel={address}").Subrouter().MatcherFunc(func(*http.Request, *mux.RouteMatch) bool { return true }).HandlerFunc(tunnel)
-  tunnelRouter := util.PathRouter(r, "/tunnels")
-  util.AddRouteWithPort(tunnelRouter, "/add/{address}/transparent", addTunnel, "POST", "PUT")
-  util.AddRouteWithPort(tunnelRouter, "/add/{address}", addTunnel, "POST", "PUT")
-  util.AddRouteWithPort(tunnelRouter, "/remove/{address}", clearTunnel, "POST", "PUT")
-  util.AddRouteWithPort(tunnelRouter, "/clear", clearTunnel, "POST", "PUT")
-  util.AddRouteWithPort(tunnelRouter, "", getTunnels, "GET")
+func newPortTunnel(port int) *PortTunnel {
+  return (&PortTunnel{Port: port}).init()
 }
 
-func NewEndpoint(address string, tls, transparent bool) *Endpoint {
+func newEndpoint(address string, tls, transparent bool) *Endpoint {
+  id := address
   proto := ""
   port := 80
   h2 := false
@@ -100,27 +114,294 @@ func NewEndpoint(address string, tls, transparent bool) *Endpoint {
     useRequestProto = true
     if tls {
       proto = "https://"
+      id = "https:" + address
     } else {
       proto = "http://"
+      id = "http:" + address
     }
   }
-  return &Endpoint{URL: proto + address, Address: address, Host: pieces[0], Port: port, isTLS: tls, isH2: h2, useRequestProto: useRequestProto, Transparent: transparent}
-}
-
-func HasTunnel(r *http.Request, rm *mux.RouteMatch) bool {
-  tunnelLock.Lock()
-  defer tunnelLock.Unlock()
-  port := util.GetListenerPortNum(r)
-  return tunnels[port] != nil && !tunnels[port].IsEmpty()
+  return &Endpoint{ID: id, URL: proto + address, Address: address, Host: pieces[0], Port: port, IsTLS: tls, IsH2: h2, UseRequestProto: useRequestProto, Transparent: transparent}
 }
 
 func GetOrCreatePortTunnel(port int) *PortTunnel {
   tunnelLock.Lock()
   defer tunnelLock.Unlock()
   if tunnels[port] == nil {
-    tunnels[port] = &PortTunnel{Endpoints: map[string]*Endpoint{}}
+    tunnels[port] = newPortTunnel(port)
   }
   return tunnels[port]
+}
+
+func WillTunnel(r *http.Request, rs *util.RequestStore) bool {
+  tunnelLock.Lock()
+  defer tunnelLock.Unlock()
+  port := util.GetListenerPortNum(r)
+  if tunnels[port] != nil {
+    if willTunnel, endpoints := tunnels[port].checkTunnelsForRequest(r); willTunnel {
+      if willTunnel && len(endpoints) > 0 {
+        rs.TunnelEndpoints = endpoints
+      }
+      return willTunnel
+    }
+  }
+  return false
+}
+
+func (pt *PortTunnel) init() *PortTunnel {
+  pt.BroadTunnels = map[string]*Endpoint{}
+  pt.URITunnels = map[string]map[string]*Endpoint{}
+  pt.HeaderTunnels = map[string]map[string]map[string]*Endpoint{}
+  pt.URIHeaderTunnels = map[string]map[string]map[string]map[string]*Endpoint{}
+  pt.TunnelTrackingHeaders = map[string][]string{}
+  pt.TunnelTrackingQueries = map[string][]string{}
+  pt.Counts = &TunnelCounts{
+    ByEndpoints:               map[string]int{},
+    ByURIs:                    map[string]int{},
+    ByURIEndpoints:            map[string]map[string]int{},
+    ByRequestHeaders:          map[string]int{},
+    ByRequestHeaderValues:     map[string]map[string]int{},
+    ByRequestHeaderEndpoints:  map[string]map[string]int{},
+    ByURIRequestHeaders:       map[string]map[string]int{},
+    ByResponseHeaders:         map[string]int{},
+    ByResponseHeaderValues:    map[string]map[string]int{},
+    ByResponseHeaderEndpoints: map[string]map[string]int{},
+    ByURIResponseHeaders:      map[string]map[string]int{},
+  }
+  return pt
+}
+
+func (pt *PortTunnel) checkTunnelsForRequest(r *http.Request) (willTunnel bool, endpoints map[string]*Endpoint) {
+  uri := r.RequestURI
+
+  if strings.HasPrefix(r.RequestURI, "/tunnel=") || r.Header.Get(HeaderGotoTunnel) != "" {
+    return true, nil
+  }
+
+  if len(pt.URIHeaderTunnels) == 0 && len(pt.URITunnels) == 0 &&
+    len(pt.HeaderTunnels) == 0 && len(pt.BroadTunnels) == 0 {
+    return false, nil
+  }
+
+  checkHeaders := func(headersEndpointMap map[string]map[string]map[string]*Endpoint, r *http.Request) {
+    for h, hMap := range headersEndpointMap {
+      if hv := r.Header.Get(h); hv != "" {
+        endpoints = hMap[hv]
+        if len(endpoints) > 0 {
+          break
+        }
+      }
+      if len(endpoints) == 0 {
+        endpoints = hMap[""]
+      }
+      if len(endpoints) > 0 {
+        break
+      }
+    }
+  }
+
+  if pt.URIHeaderTunnels[uri] != nil {
+    checkHeaders(pt.URIHeaderTunnels[uri], r)
+  }
+  if len(endpoints) == 0 && pt.URITunnels[uri] != nil {
+    endpoints = pt.URITunnels[uri]
+  }
+  if len(endpoints) == 0 && len(pt.HeaderTunnels) > 0 {
+    checkHeaders(pt.HeaderTunnels, r)
+  }
+  if len(endpoints) == 0 && len(pt.BroadTunnels) > 0 {
+    endpoints = pt.BroadTunnels
+  }
+  return len(endpoints) > 0, endpoints
+}
+
+func (pt *PortTunnel) addTunnel(endpoint string, tls, transparent bool, uri, header, value string) {
+  ep := newEndpoint(endpoint, tls, transparent)
+  pt.lock.Lock()
+  defer pt.lock.Unlock()
+  if uri != "" && header != "" {
+    if pt.URIHeaderTunnels[uri] == nil {
+      pt.URIHeaderTunnels[uri] = map[string]map[string]map[string]*Endpoint{}
+    }
+    if pt.URIHeaderTunnels[uri][header] == nil {
+      pt.URIHeaderTunnels[uri][header] = map[string]map[string]*Endpoint{}
+    }
+    if pt.URIHeaderTunnels[uri][header][value] == nil {
+      pt.URIHeaderTunnels[uri][header][value] = map[string]*Endpoint{}
+    }
+    pt.URIHeaderTunnels[uri][header][value][endpoint] = ep
+  } else if uri != "" {
+    if pt.URITunnels[uri] == nil {
+      pt.URITunnels[uri] = map[string]*Endpoint{}
+    }
+    pt.URITunnels[uri][endpoint] = ep
+  } else if header != "" {
+    if pt.HeaderTunnels[header] == nil {
+      pt.HeaderTunnels[header] = map[string]map[string]*Endpoint{}
+    }
+    if pt.HeaderTunnels[header][value] == nil {
+      pt.HeaderTunnels[header][value] = map[string]*Endpoint{}
+    }
+    pt.HeaderTunnels[header][value][endpoint] = ep
+  } else {
+    pt.BroadTunnels[endpoint] = ep
+  }
+}
+
+func (pt *PortTunnel) removeTunnel(endpoint, uri, header, value string) (exists bool) {
+  pt.lock.Lock()
+  defer pt.lock.Unlock()
+  if uri != "" && header != "" {
+    if pt.URIHeaderTunnels[uri] != nil {
+      if pt.URIHeaderTunnels[uri][header] != nil {
+        if pt.URIHeaderTunnels[uri][header][value] != nil {
+          if endpoint != "" {
+            if pt.URIHeaderTunnels[uri][header][value][endpoint] != nil {
+              delete(pt.URIHeaderTunnels[uri][header][value], endpoint)
+              exists = true
+            }
+            if len(pt.URIHeaderTunnels[uri][header][value]) == 0 {
+              delete(pt.URIHeaderTunnels[uri][header], value)
+            }
+          } else {
+            delete(pt.URIHeaderTunnels[uri][header], value)
+            exists = true
+          }
+        }
+      }
+      if len(pt.URIHeaderTunnels[uri][header]) == 0 {
+        delete(pt.URIHeaderTunnels[uri], header)
+      }
+      if len(pt.URIHeaderTunnels[uri]) == 0 {
+        delete(pt.URIHeaderTunnels, uri)
+      }
+    }
+  } else if uri != "" {
+    if pt.URITunnels[uri] != nil {
+      if endpoint != "" {
+        if pt.URITunnels[uri][endpoint] != nil {
+          delete(pt.URITunnels[uri], endpoint)
+          exists = true
+        }
+        if len(pt.URITunnels[uri]) == 0 {
+          delete(pt.URITunnels, uri)
+        }
+      } else {
+        delete(pt.URITunnels, uri)
+        exists = true
+      }
+    }
+  } else if header != "" {
+    if pt.HeaderTunnels[header] != nil {
+      if pt.HeaderTunnels[header][value] != nil {
+        if endpoint != "" {
+          if pt.HeaderTunnels[header][value][endpoint] != nil {
+            delete(pt.HeaderTunnels[header][value], endpoint)
+            exists = true
+          }
+          if len(pt.HeaderTunnels[header][value]) == 0 {
+            delete(pt.HeaderTunnels[header], value)
+          }
+        } else {
+          delete(pt.HeaderTunnels[header], value)
+          exists = true
+        }
+      }
+      if len(pt.HeaderTunnels[header]) == 0 {
+        delete(pt.HeaderTunnels, header)
+      }
+    }
+  } else {
+    if endpoint != "" {
+      if pt.BroadTunnels[endpoint] != nil {
+        delete(pt.BroadTunnels, endpoint)
+        exists = true
+      }
+    } else {
+      pt.BroadTunnels = map[string]*Endpoint{}
+      exists = true
+    }
+  }
+  return
+}
+
+func (pt *PortTunnel) addTracking(endpoint string, headers, queryParams []string) {
+  pt.lock.RLock()
+  defer pt.lock.RUnlock()
+  for _, h := range headers {
+    pt.TunnelTrackingHeaders[endpoint] = append(pt.TunnelTrackingHeaders[endpoint], h)
+  }
+  for _, q := range queryParams {
+    pt.TunnelTrackingQueries[endpoint] = append(pt.TunnelTrackingQueries[endpoint], q)
+  }
+}
+
+func (pt *PortTunnel) clearTracking(endpoint string) {
+  pt.lock.RLock()
+  defer pt.lock.RUnlock()
+  delete(pt.TunnelTrackingHeaders, endpoint)
+  delete(pt.TunnelTrackingQueries, endpoint)
+}
+
+func (pt *PortTunnel) clear() {
+  pt.lock.Lock()
+  defer pt.lock.Unlock()
+  pt.init()
+}
+
+func (pt *PortTunnel) trackRequest(r *http.Request, ep *Endpoint) {
+  c := pt.Counts
+  c.ByEndpoints[ep.ID]++
+
+  uri := strings.ToLower(r.RequestURI)
+  c.ByURIs[uri]++
+
+  if c.ByURIEndpoints[uri] == nil {
+    c.ByURIEndpoints[uri] = map[string]int{}
+  }
+  c.ByURIEndpoints[uri][ep.ID]++
+
+  if trackingHeaders := pt.TunnelTrackingHeaders[ep.ID]; trackingHeaders != nil {
+    for _, h := range trackingHeaders {
+      if hv := r.Header.Get(h); hv != "" {
+        c.ByRequestHeaders[h]++
+        if c.ByRequestHeaderValues[h] == nil {
+          c.ByRequestHeaderValues[h] = map[string]int{}
+        }
+        c.ByRequestHeaderValues[h][hv]++
+        if c.ByRequestHeaderEndpoints[h] == nil {
+          c.ByRequestHeaderEndpoints[h] = map[string]int{}
+        }
+        c.ByRequestHeaderEndpoints[h][ep.ID]++
+        if c.ByURIRequestHeaders[uri] == nil {
+          c.ByURIRequestHeaders[uri] = map[string]int{}
+        }
+        c.ByURIRequestHeaders[uri][h]++
+      }
+    }
+  }
+}
+
+func (pt *PortTunnel) trackResponse(uri string, r *http.Response, ep *Endpoint) {
+  c := pt.Counts
+  if trackingHeaders := pt.TunnelTrackingHeaders[ep.ID]; trackingHeaders != nil {
+    for _, h := range trackingHeaders {
+      if hv := r.Header.Get(h); hv != "" {
+        c.ByResponseHeaders[h]++
+        if c.ByResponseHeaderValues[h] == nil {
+          c.ByResponseHeaderValues[h] = map[string]int{}
+        }
+        c.ByResponseHeaderValues[h][hv]++
+        if c.ByResponseHeaderEndpoints[h] == nil {
+          c.ByResponseHeaderEndpoints[h] = map[string]int{}
+        }
+        c.ByResponseHeaderEndpoints[h][ep.ID]++
+        if c.ByURIResponseHeaders[uri] == nil {
+          c.ByURIResponseHeaders[uri] = map[string]int{}
+        }
+        c.ByURIResponseHeaders[uri][h]++
+      }
+    }
+  }
 }
 
 func (ep *Endpoint) sendTunnelResponse(viaTunnelLabel, uri string, r *http.Request, w http.ResponseWriter, resp *http.Response) {
@@ -139,23 +420,19 @@ func (ep *Endpoint) sendTunnelResponse(viaTunnelLabel, uri string, r *http.Reque
   rs.TunnelLock.Unlock()
 }
 
-func (ep *Endpoint) tunnel(uri, tunnelHostLabel, viaTunnelLabel string, r *http.Request, w http.ResponseWriter, wg *sync.WaitGroup) {
+func (pt *PortTunnel) tunnelToEndpoint(ep *Endpoint, uri, tunnelHostLabel, viaTunnelLabel string, r *http.Request, w http.ResponseWriter, wg *sync.WaitGroup) {
   url := ep.URL + uri
   rs := util.GetRequestStore(r)
-  isH2 := ep.isH2
-  isTLS := ep.isTLS
-  if ep.useRequestProto {
+  isH2 := ep.IsH2
+  isTLS := ep.IsTLS
+  if ep.UseRequestProto {
     isH2 = util.IsH2(r)
     isTLS = r.TLS != nil
   }
   msg := fmt.Sprintf("Tunnel Count [%d]. Tunneling to [%s]", rs.TunnelCount, url)
-  // fmt.Println(msg)
   util.AddLogMessage(msg, r)
   reqHeaders := http.Header{}
-  hasMoreTunnels := len(r.Header[HeaderGotoTunnel]) > 0
-  if hasMoreTunnels {
-    reqHeaders[HeaderGotoViaTunnelCount] = []string{strconv.Itoa(rs.TunnelCount)}
-  }
+  reqHeaders[HeaderGotoViaTunnelCount] = []string{strconv.Itoa(rs.TunnelCount)}
   if !ep.Transparent {
     reqHeaders[HeaderGotoTunnelHost] = append(r.Header[HeaderGotoTunnelHost], tunnelHostLabel)
     reqHeaders[HeaderViaGotoTunnel] = append(r.Header[HeaderViaGotoTunnel], viaTunnelLabel)
@@ -176,8 +453,8 @@ func (ep *Endpoint) tunnel(uri, tunnelHostLabel, viaTunnelLabel string, r *http.
     }
     if resp, err := ep.client.Do(req); err == nil {
       msg = fmt.Sprintf("Got response from tunnel [%s]: %s", url, resp.Status)
-      // fmt.Println(msg)
       util.AddLogMessage(msg, r)
+      pt.trackResponse(uri, resp, ep)
       ep.sendTunnelResponse(viaTunnelLabel, uri, r, w, resp)
     } else {
       msg := fmt.Sprintf("Error invoking tunnel to [%s]: %s", url, err.Error())
@@ -192,54 +469,33 @@ func (ep *Endpoint) tunnel(uri, tunnelHostLabel, viaTunnelLabel string, r *http.
   wg.Done()
 }
 
-func (pt *PortTunnel) IsEmpty() bool {
-  return len(pt.Endpoints) == 0
-}
-
-func (pt *PortTunnel) addEndpoint(address string, tls, transparent bool) {
-  ep := NewEndpoint(address, tls, transparent)
-  pt.lock.Lock()
-  defer pt.lock.Unlock()
-  pt.Endpoints[ep.Address] = ep
-}
-
-func (pt *PortTunnel) removeEndpoint(address string) {
-  if strings.HasPrefix(address, "http") {
-    address = strings.Join(strings.Split(address, ":")[1:], ":")
-  }
-  pt.lock.Lock()
-  defer pt.lock.Unlock()
-  if pt.Endpoints[address] != nil {
-    if pt.Endpoints[address].client != nil {
-      pt.Endpoints[address].client.CloseIdleConnections()
-    }
-    delete(pt.Endpoints, address)
-  }
-}
-
-func (pt *PortTunnel) clear() {
-  pt.lock.Lock()
-  defer pt.lock.Unlock()
-  pt.Endpoints = map[string]*Endpoint{}
-}
-
 func (pt *PortTunnel) tunnel(addresses []string, uri string, r *http.Request, w http.ResponseWriter) {
   metrics.UpdateRequestCount("tunnel")
-  endpoints := pt.Endpoints
+  var endpoints map[string]*Endpoint
   if len(addresses) > 0 {
     endpoints = map[string]*Endpoint{}
     for _, a := range addresses {
-      endpoints[a] = NewEndpoint(a, r.TLS != nil, true)
+      endpoints[a] = newEndpoint(a, r.TLS != nil, true)
+    }
+  } else {
+    if e := util.GetTunnelEndpoints(r); e != nil {
+      if eps, ok := e.(map[string]*Endpoint); ok {
+        endpoints = eps
+      }
     }
   }
+  if len(endpoints) == 0 {
+    return
+  }
   l := listeners.GetCurrentListener(r)
-  tunnelCount := len(r.Header[HeaderGotoTunnelHost]) + 1
+  tunnelCount := util.GetTunnelCount(r)
   tunnelHostLabel := fmt.Sprintf("%s|%d", l.HostLabel, tunnelCount)
   viaTunnelLabel := fmt.Sprintf("%s|%d", l.Label, tunnelCount)
   wg := &sync.WaitGroup{}
   wg.Add(len(endpoints))
   for _, ep := range endpoints {
-    go ep.tunnel(uri, tunnelHostLabel, viaTunnelLabel, r, w, wg)
+    pt.trackRequest(r, ep)
+    go pt.tunnelToEndpoint(ep, uri, tunnelHostLabel, viaTunnelLabel, r, w, wg)
   }
   wg.Wait()
 }
@@ -269,37 +525,6 @@ func tunnel(w http.ResponseWriter, r *http.Request) {
   }
   tunnel := GetOrCreatePortTunnel(util.GetListenerPortNum(r))
   tunnel.tunnel(addresses, uri, r, w)
-}
-
-func addTunnel(w http.ResponseWriter, r *http.Request) {
-  address := util.GetStringParamValue(r, "address")
-  transparent := strings.HasSuffix(r.RequestURI, "transparent")
-  port := util.GetRequestOrListenerPortNum(r)
-  GetOrCreatePortTunnel(port).addEndpoint(address, r.TLS != nil, transparent)
-  msg := fmt.Sprintf("Tunnel added on port [%d] to [%s]", port, address)
-  fmt.Fprintln(w, msg)
-  util.AddLogMessage(msg, r)
-}
-
-func clearTunnel(w http.ResponseWriter, r *http.Request) {
-  address := util.GetStringParamValue(r, "address")
-  port := util.GetRequestOrListenerPortNum(r)
-  pt := GetOrCreatePortTunnel(port)
-  msg := ""
-  if address != "" {
-    pt.removeEndpoint(address)
-    msg = fmt.Sprintf("Tunnel removed on port [%d] to [%s]", port, address)
-  } else {
-    pt.clear()
-    msg = fmt.Sprintf("Tunnels cleared on port [%d]", port)
-  }
-  fmt.Fprintln(w, msg)
-  util.AddLogMessage(msg, r)
-}
-
-func getTunnels(w http.ResponseWriter, r *http.Request) {
-  util.WriteJsonPayload(w, tunnels)
-  util.AddLogMessage("Tunnels reported", r)
 }
 
 func Middleware(next http.Handler) http.Handler {

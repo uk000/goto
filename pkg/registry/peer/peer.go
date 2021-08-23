@@ -51,7 +51,7 @@ func RegisterPeer(peerName, peerAddress string) {
     retries := 0
     for !registered && retries < 6 {
       if resp, err := http.Post(global.RegistryURL+"/registry/peers/add", ContentTypeJSON,
-        strings.NewReader(util.ToJSON(peer))); err == nil {
+        strings.NewReader(util.ToJSONText(peer))); err == nil {
         defer resp.Body.Close()
         if resp.StatusCode == 200 || resp.StatusCode == 202 {
           events.SendEventJSONDirect("Peer Registered", peerName, peer)
@@ -105,7 +105,7 @@ func startRegistryReminder(peer *registry.Peer) {
       return
     case <-time.Tick(5 * time.Second):
       url := global.RegistryURL + "/registry/peers/" + peer.Name + "/remember"
-      if resp, err := http.Post(url, ContentTypeJSON, strings.NewReader(util.ToJSON(peer))); err == nil {
+      if resp, err := http.Post(url, ContentTypeJSON, strings.NewReader(util.ToJSONText(peer))); err == nil {
         util.CloseResponse(resp)
         if global.EnableRegistryReminderLogs {
           log.Printf("Sent reminder to registry at [%s] as peer %s address %s\n", global.RegistryURL, peer.Name, peer.Address)
@@ -147,17 +147,17 @@ func setupStartupTasks(peerData *registry.PeerData) {
 
   for fileName, content := range peerData.Files {
     log.Printf("File: %s\n", fileName)
-    job.Jobs.StoreJobScriptOrFile("", fileName, content, false)
+    job.Manager.StoreJobScriptOrFile("", fileName, content, false)
   }
 
   for fileName, content := range peerData.JobScripts {
     log.Printf("Job Script: %s\n", fileName)
-    job.Jobs.StoreJobScriptOrFile("", fileName, content, true)
+    job.Manager.StoreJobScriptOrFile("", fileName, content, true)
   }
 
   for _, j := range peerData.Jobs {
     log.Printf("%+v\n", j)
-    job.Jobs.AddJob(&j.Job)
+    job.Manager.AddJob(&j.Job)
   }
 
   for _, t := range peerData.Targets {

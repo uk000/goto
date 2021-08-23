@@ -68,14 +68,14 @@ func (tracker *InvocationTracker) logRequestStart(requestID, targetID, url strin
 func (tracker *InvocationTracker) logRetryRequired(result *InvocationResult, remaining int) {
   if global.EnableInvocationLogs {
     log.Printf("[%s]: Invocation[%d]: Request[%s]: Target [%s] url [%s] invocation requires retry due to [%s]. Remaining Retries [%d].",
-      hostLabel, tracker.ID, result.RequestID, result.TargetID, result.URL, result.LastRetryReason, remaining)
+      hostLabel, tracker.ID, result.Request.ID, result.TargetID, result.Request.URL, result.LastRetryReason, remaining)
   }
 }
 
 func (tracker *InvocationTracker) logBRequestCreationFailed(result *InvocationResult, bURL string) {
   if global.EnableInvocationLogs {
     log.Printf("[%s]: Invocation[%d]: Request[%s]: Target [%s] failed to create request for fallback url [%s]. Continuing with retry to previous url [%s] \n",
-      hostLabel, tracker.ID, result.RequestID, result.TargetID, bURL, result.URL)
+      hostLabel, tracker.ID, result.Request.ID, result.TargetID, bURL, result.Request.URL)
   }
 }
 
@@ -89,7 +89,7 @@ func (tracker *InvocationTracker) logConnectionFailed(details string) {
 func (tracker *InvocationTracker) logResultChannelBacklog(result *InvocationResult, size int) {
   if global.EnableInvocationLogs {
     log.Printf("[%s]: Invocation[%d]: Target %s ResultChannel length %d\n",
-      hostLabel, tracker.ID, result.RequestID, size)
+      hostLabel, tracker.ID, result.Request.ID, size)
   }
 }
 
@@ -117,10 +117,10 @@ func (tracker *InvocationTracker) reportRepeatedFailure() {
 
 func (tracker *InvocationTracker) reportError(result *InvocationResult) {
   msg := fmt.Sprintf("[%s]: Invocation[%d]: Request[%s]: Target %s, url [%s] failed to invoke with error: %s, repeat count: [%d]",
-    hostLabel, tracker.ID, result.RequestID, result.TargetID, result.URL, result.err.Error(), tracker.Status.lastErrorCount)
+    hostLabel, tracker.ID, result.Request.ID, result.TargetID, result.Request.URL, result.err.Error(), tracker.Status.lastErrorCount)
   if tracker.Status.lastErrorCount == 0 {
     events.SendEventJSON(Client_InvocationFailure,
-      fmt.Sprintf("%d-%s-%s", tracker.ID, result.TargetID, result.RequestID),
+      fmt.Sprintf("%d-%s-%s", tracker.ID, result.TargetID, result.Request.ID),
       map[string]interface{}{"id": tracker.ID, "details": msg})
   }
   if global.EnableInvocationLogs {

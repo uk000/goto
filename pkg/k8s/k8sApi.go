@@ -31,26 +31,30 @@ var (
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   k8sRouter := util.PathRouter(r, "/k8s")
+  util.AddRoute(k8sRouter, "/clear", clearK8sCache, "POST")
+
   util.AddRoute(k8sRouter, "/{resource}", getUngroupedResource, "GET")
-  util.AddRoute(k8sRouter, "/{resource}/{j}", getUngroupedResource, "POST", "PUT")
+  util.AddRoute(k8sRouter, "/{resource}/{j:jq|jp}", getUngroupedResource, "POST", "PUT")
   util.AddRoute(k8sRouter, "/{resource}/{namespace}", getUngroupedResource, "GET")
-  util.AddRoute(k8sRouter, "/{resource}/{namespace}/{j}", getUngroupedResource, "POST", "PUT")
-  util.AddRoute(k8sRouter, "/{resource}/{namespace}/{name}", getUngroupedResource, "GET")
-  util.AddRoute(k8sRouter, "/{resource}/{namespace}/{name}/{j}", getUngroupedResource, "POST", "PUT")
+  util.AddRoute(k8sRouter, "/{resource}/{namespace}/{j:jq|jp}", getUngroupedResource, "POST", "PUT")
+  util.AddRoute(k8sRouter, "/{resource}/{namespace}/{name:}", getUngroupedResource, "GET")
+  util.AddRoute(k8sRouter, "/{resource}/{namespace}/{name}/{j:jq|jp}", getUngroupedResource, "POST", "PUT")
 
   util.AddRoute(k8sRouter, "/{group}/{version}/{kind}", getResource, "GET")
-  util.AddRoute(k8sRouter, "/{group}/{version}/{kind}/{j}", getResource, "POST", "PUT")
+  util.AddRoute(k8sRouter, "/{group}/{version}/{kind}/{j:jq|jp}", getResource, "POST", "PUT")
   util.AddRoute(k8sRouter, "/{group}/{version}/{kind}/{namespace}", getResource, "GET")
-  util.AddRoute(k8sRouter, "/{group}/{version}/{kind}/{namespace}/{j}", getResource, "POST", "PUT")
+  util.AddRoute(k8sRouter, "/{group}/{version}/{kind}/{namespace}/{j:jq|jp}", getResource, "POST", "PUT")
   util.AddRoute(k8sRouter, "/{group}/{version}/{kind}/{namespace}/{name}", getResource, "GET")
-  util.AddRoute(k8sRouter, "/{group}/{version}/{kind}/{namespace}/{name}/{j}", getResource, "POST", "PUT")
+  util.AddRoute(k8sRouter, "/{group}/{version}/{kind}/{namespace}/{name}/{j:jq|jp}", getResource, "POST", "PUT")
+}
+
+func clearK8sCache(w http.ResponseWriter, r *http.Request) {
+  ClearCache()
+  fmt.Fprintln(w, "K8s Cache Cleared")
 }
 
 func getUngroupedResource(w http.ResponseWriter, r *http.Request) {
   resource := util.GetStringParamValue(r, "resource")
-  ns := resource == "ns" || resource == "namespace" || resource == "namespaces"
-  pod := resource == "pod" || resource == "pods"
-  svc := resource == "svc" || resource == "service" || resource == "services"
   namespace := util.GetStringParamValue(r, "namespace")
   name := util.GetStringParamValue(r, "name")
   j := util.GetStringParamValue(r, "j")
@@ -61,22 +65,14 @@ func getUngroupedResource(w http.ResponseWriter, r *http.Request) {
   } else if j == "jq" {
     jq = util.ParseJQFromRequest(r)
   }
-  kind := ""
-  if ns {
-    kind = "namespace"
-  } else if pod {
-    kind = "pod"
-  } else if svc {
-    kind = "service"
-  }
-  if resource := GetResource("", "v1", kind, namespace, name, jp, jq, r); resource != nil {
+  if resource := GetResource("", "v1", resource, namespace, name, jp, jq, r); resource != nil {
     if strings.Contains(r.Header.Get("Accept"), "json") {
-      fmt.Fprintln(w, resource.ToJSON())
+      fmt.Fprintln(w, resource.ToJSONText())
     } else {
       fmt.Fprintln(w, resource.ToYAML())
     }
   } else {
-    util.AddLogMessage(fmt.Sprintf("Failed to serve Resource [pods/%s/%s]", namespace, name), r)
+    util.AddLogMessage(fmt.Sprintf("Failed to serve Resource [%s/%s/%s]", resource, namespace, name), r)
     w.WriteHeader(http.StatusInternalServerError)
   }
 }
@@ -97,7 +93,7 @@ func getResource(w http.ResponseWriter, r *http.Request) {
   }
   if resource := GetResource(group, version, kind, namespace, name, jp, jq, r); resource != nil {
     if strings.Contains(r.Header.Get("Accept"), "json") {
-      fmt.Fprintln(w, resource.ToJSON())
+      fmt.Fprintln(w, resource.ToJSONText())
     } else {
       fmt.Fprintln(w, resource.ToYAML())
     }

@@ -93,7 +93,7 @@ func (tracker *InvocationTracker) invokeWithRetries(requestID string, targetID s
         if !tracker.client.prepareRequest(request) {
           tracker.logBRequestCreationFailed(result, target.BURLS[i])
         } else {
-          result.URL = request.url
+          result.Request.URL = request.url
         }
       } else {
         request.addOrUpdateRequestId()
@@ -177,7 +177,7 @@ func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
   defer client.lock.Unlock()
   if client.clientTracker != nil {
     if client.clientTracker.IsGRPC {
-      if len(client.tracker.payloads) > 1 {
+      if len(client.tracker.Payloads) > 1 {
         ir.uri = "/Goto/streamInOut"
         ir.grpcStreamInput = &pb.StreamConfig{ChunkSize: 1, ChunkCount: 1, Interval: "10ms"}
       } else {
@@ -187,10 +187,11 @@ func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
     } else if client.clientTracker.Client != nil {
       var requestReader io.ReadCloser
       var requestWriter io.WriteCloser
-      if len(client.tracker.payloads) > 1 {
+      if len(client.tracker.Payloads) > 1 {
         requestReader, requestWriter = io.Pipe()
-      } else if len(client.tracker.payloads) == 1 && len(client.tracker.payloads[0]) > 0 {
-        requestReader = ioutil.NopCloser(bytes.NewReader(client.tracker.payloads[0]))
+      } else if len(client.tracker.Payloads) == 1 && len(client.tracker.Payloads[0]) > 0 {
+        requestReader = ioutil.NopCloser(bytes.NewReader(client.tracker.Payloads[0]))
+        ir.result.Request.PayloadSize = len(client.tracker.Payloads[0])
       }
       if req, err := http.NewRequest(client.tracker.Target.Method, ir.url, requestReader); err == nil {
         ir.httpRequest = req
@@ -241,7 +242,7 @@ func getHttpClientForTarget(tracker *InvocationTracker) *util.ClientTracker {
   invocationsLock.RLock()
   client := targetClients[target.Name]
   invocationsLock.RUnlock()
-  if client == nil {
+  if client == nil || client.Client == nil {
     client = util.CreateHTTPClient(target.Name, target.h2, target.AutoUpgrade, target.tls, target.authority, 0,
       target.requestTimeoutD, target.connTimeoutD, target.connIdleTimeoutD, metrics.ConnTracker)
     invocationsLock.Lock()
@@ -280,12 +281,12 @@ func getGrpcClientForTarget(tracker *InvocationTracker) *util.ClientTracker {
 func (ir *InvocationRequest) writeRequestPayload() {
   if ir.requestWriter != nil {
     go func() {
-      size, first, last, err := util.WriteAndTrack(ir.requestWriter, ir.tracker.payloads, ir.tracker.Target.streamDelayD)
+      size, first, last, err := util.WriteAndTrack(ir.requestWriter, ir.tracker.Payloads, ir.tracker.Target.streamDelayD)
       if ir.tracker.Target.TrackPayload {
         if err == nil {
-          ir.result.RequestPayloadSize = size
-          ir.result.FirstByteOutAt = first.UTC().String()
-          ir.result.LastByteOutAt = last.UTC().String()
+          ir.result.Request.PayloadSize = size
+          ir.result.Request.FirstByteOutAt = first.UTC().String()
+          ir.result.Request.LastByteOutAt = last.UTC().String()
         } else {
           ir.result.err = err
         }
@@ -308,7 +309,7 @@ func (ir *InvocationRequest) invoke() {
 
 func (ir *InvocationRequest) invokeHTTP() {
   if ir.client == nil || ir.client.Tracker == nil || ir.client.Client == nil {
-    fmt.Printf("Error: HTTP invocation attempted without a client")
+    fmt.Printf("Invocation: [ERROR] HTTP invocation attempted without a client")
     return
   }
   ir.client.Tracker.SetTLSConfig(tlsConfig(ir.httpRequest.Host, ir.tracker.Target.VerifyTLS))
@@ -320,12 +321,12 @@ func (ir *InvocationRequest) invokeHTTP() {
 func (ir *InvocationRequest) invokeGRPC() {
   ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(ir.headers))
   gotoClient := pb.NewGotoClient(ir.client.GrpcConn)
-  if len(ir.tracker.payloads) > 1 {
+  if len(ir.tracker.Payloads) > 1 {
     if streamClient, err := gotoClient.StreamInOut(ctx); err == nil {
       wg := sync.WaitGroup{}
       wg.Add(2)
       go func() {
-        for _, payload := range ir.tracker.payloads {
+        for _, payload := range ir.tracker.Payloads {
           input := &pb.StreamConfig{ChunkSize: 1, ChunkCount: 1, Interval: "10ms", Payload: string(payload)}
           if err := streamClient.Send(input); err == nil {
 
@@ -337,7 +338,7 @@ func (ir *InvocationRequest) invokeGRPC() {
       go func() {
         for {
           if _, err := streamClient.Recv(); err != nil {
-            fmt.Printf("Error: %s\n", err.Error())
+            fmt.Printf("Invocation: [ERROR] %s\n", err.Error())
             break
           }
         }
@@ -346,13 +347,13 @@ func (ir *InvocationRequest) invokeGRPC() {
       wg.Wait()
     } else {
       ir.result.err = err
-      fmt.Printf("Error while invoking GRPC stream request: %s\n", err.Error())
+      fmt.Printf("Invocation: [ERROR] while invoking GRPC stream request: %s\n", err.Error())
     }
-  } else if len(ir.tracker.payloads) == 1 {
-    _, err := gotoClient.Echo(ctx, &pb.Input{Payload: string(ir.tracker.payloads[0])})
+  } else if len(ir.tracker.Payloads) == 1 {
+    _, err := gotoClient.Echo(ctx, &pb.Input{Payload: string(ir.tracker.Payloads[0])})
     if err != nil {
       ir.result.err = err
-      fmt.Printf("Error while invoking GRPC echo request: %s\n", err.Error())
+      fmt.Printf("Invocation: [ERROR] while invoking GRPC echo request: %s\n", err.Error())
     }
   }
 }

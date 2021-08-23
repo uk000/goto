@@ -500,7 +500,7 @@ func getActiveConnections(w http.ResponseWriter, r *http.Request) {
   lock.RUnlock()
   msg := ""
   if len(activeConns) > 0 {
-    msg = util.ToJSON(activeConns)
+    msg = util.ToJSONText(activeConns)
   } else {
     msg = "{}"
   }
@@ -539,7 +539,7 @@ func getConnectionHistory(w http.ResponseWriter, r *http.Request) {
   lock.RUnlock()
   msg := ""
   if len(connHistory) > 0 {
-    msg = util.ToJSON(connHistory)
+    msg = util.ToJSONText(connHistory)
   } else {
     msg = "{}"
   }

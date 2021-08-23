@@ -221,6 +221,10 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 
 - [K8s Features](#k8s-features)
 
+### Pipelines
+
+- [Pipeline Features](#pipeline-features)
+
 ### Goto Registry
 
 - [Registry Features](#registry)
@@ -2349,8 +2353,8 @@ Jobs can also trigger another job for each line of output produced, as well as u
 | keepResults   | int           | Number of results to be retained from an invocation of the job |
 | keepFirst     | bool          | Indicates whether the first invocation result should be retained, reducing the slots for capturing remaining results by (maxResults-1) |
 | timeout       | duration      | Duration after which the job is forcefully stopped if not finished |
-| outputTrigger | string        | ID of another job to trigger for each output produced by this job. For command jobs, words from this job's output can be injected into the command of the next job using positional references (described above) |
-| finishTrigger | string        | ID of another job to trigger upon completion of this job |
+| outputTrigger | JobTrigger    | ID of another job to trigger for each output produced by this job. For command jobs, words from this job's output can be injected into the command of the next job using positional references (described above) |
+| finishTrigger | JobTrigger        | ID of another job to trigger upon completion of this job |
 
 ###### <small> [Back to TOC](#jobs) </small>
 
@@ -2358,17 +2362,9 @@ Jobs can also trigger another job for each line of output produced, as well as u
 #### Job HTTP Task JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
-| name         | string         | Name for this target |
-| method       | string         | HTTP method to use for this target |
-| url          | string         | URL for this target   |
-| verifyTLS    | bool           | Whether the TLS certificate presented by the target is verified. (Also see `--certs` command arg) |
-| headers      | [][]string     | Headers to be sent to this target |
-| body         | string         | Request body to use for this target|
-| replicas     | int            | Number of parallel invocations to be done for this target |
-| requestCount | int            | Number of requests to be made per replica for this target. The final request count becomes replicas * requestCount  |
-| delay        | duration       | Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
-| sendId       | bool           | Whether or not a unique ID be sent with each client request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
+| {Invocation Spec} | Target Invocation Spec | See [Client Target JSON Schema](docs/client-api-json-schemas.md) that's shared by the HTTP Jobs to define an HTTP target invocation |
 | parseJSON    | bool           | Indicates whether the response payload is expected to be JSON and hence not to treat it as text (to avoid escaping quotes in JSON) |
+| transforms   | []Transform | A set of transformations to be applied to the JSON output of the job. See [Response Payload Transformation](#-payload-transformation) section for details of JSON transformation supported by `goto`. |
 
 ###### <small> [Back to TOC](#jobs) </small>
 
@@ -2381,6 +2377,13 @@ Jobs can also trigger another job for each line of output produced, as well as u
 | args            | []string       | Arguments to be passed to the OS command |
 | outputMarkers   | map[int]string | Specifies marker keys to use to reference the output fields from each line of output. Output is split using the specified separator to extract its keys. Positioning starts at 1 for first the piece of split output. |
 | outputSeparator | string         | Text to be used as separator to split each line of output of this command to extract its fields, which are then used by markers |
+
+
+#### Job Trigger JSON Schema
+|Field|Data Type|Description|
+|---|---|---|
+| name     | string     | Name of the target job to trigger from the current job.  |
+| forwardPayload  | bool | Whether to forward the output of the current job as the input payload for the next job. Currently this is only supported for HTTP task jobs. |
 
 
 #### Job Result JSON Schema
@@ -2418,7 +2421,7 @@ See [Jobs Example](docs/jobs-example.md)
 # <a name="k8s-features"></a>
 
 # K8s Features
-`Goto` exposes APIs through which info can be fetched from the local k8s cluster where `goto` instance is running.
+`Goto` exposes APIs through which info can be fetched from a k8s cluster that `goto` is connected to. `Goto` can connect to the local K8s cluster when running inside a cluster, or connect to a remote K8s cluster via locally available k8s config. When connected remotely, it relies on the authentication performed by local K8s context.
 
 # <a name="k8s-apis"></a>
 ###  K8s APIs
@@ -2437,9 +2440,29 @@ See [Jobs Example](docs/jobs-example.md)
 | GET      | /k8s/{group}/{version}<br/>/{kind}/{namespace}/[`jq`\|`jp`] | Get a list of custom k8s namespaced resources from the given namespace, and apply a JQ or a JSONPath query to the resource data |
 | GET      | /k8s/{group}/{version}<br/>/{kind}/{namespace}/{name} | Get a custom k8s namespaced resource by name from the given namespace |
 | GET      | /k8s/{group}/{version}<br/>/{kind}/{namespace}<br/>/{name}/[`jq`\|`jp`] | Get a custom k8s namespaced resource by name from the given namespace, and apply a JQ or a JSONPath query to the resource data |
+| POST      | /k8s/clear  | Clear currently cached K8s resources. Necessary when switching K8s content to connect to a different cluster (when `goto` is running outside of a K8s cluster and connecting via locally available K8s config) |
 
 
 ###### <small> [Back to TOC](#k8s) </small>
+
+<br/>
+
+# <a name="pipeline-features"></a>
+
+# Pipeline Features
+`Goto` exposes a powerful pipelining capability that allows you to define sources of various types (K8s, Scripts, Jobs, HTTP requests) and chain one or more sources to one or more transformations (JSONPath, JQ, Go Template, Regex). Sources produce data, transformations can transform and extra relevant pieces from the source data, and pipeline allows the extracted data to be fed back to subsequent sources, which can feed more transformations, and so on. Additionally, pipelines support `watch` capability, where sources can be watched for new data, and a pipeline can be triggered as soon as new data becomes available.
+
+The feature is implemented but not documented. More details coming soon.
+
+# <a name="pipe-apis"></a>
+###  Pipeline APIs
+
+|METHOD|URI|Description|
+|---|---|---|
+| -  | -  | - |
+
+
+###### <small> [Back to TOC](#pipelines) </small>
 
 <br/>
 

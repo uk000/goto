@@ -407,47 +407,47 @@ func (tr *TargetResults) addTimeBucketResult(tb []int, ir *invocation.Invocation
   if tb != nil {
     bucket = fmt.Sprint(tb)
   }
-  addKeyResultCounts(tr.CountsByTimeBuckets, bucket, ir.StatusCode, ir.Retries, ir.LastRequestAt, true, false)
+  addKeyResultCounts(tr.CountsByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, false)
 
-  if uriCount := tr.CountsByURIs[ir.URI]; uriCount != nil {
-    addKeyResultCounts(uriCount.ByTimeBuckets, bucket, ir.StatusCode, ir.Retries, ir.LastRequestAt, true, false)
+  if uriCount := tr.CountsByURIs[ir.Request.URI]; uriCount != nil {
+    addKeyResultCounts(uriCount.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, false)
   }
 
-  if rpc := tr.CountsByRequestPayloadSizes[ir.RequestPayloadSize]; rpc != nil {
-    addKeyResultCounts(rpc.ByTimeBuckets, bucket, ir.StatusCode, ir.Retries, ir.LastRequestAt, true, false)
+  if rpc := tr.CountsByRequestPayloadSizes[ir.Request.PayloadSize]; rpc != nil {
+    addKeyResultCounts(rpc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, false)
   }
 
-  if rpc := tr.CountsByResponsePayloadSizes[ir.RequestPayloadSize]; rpc != nil {
-    addKeyResultCounts(rpc.ByTimeBuckets, bucket, ir.StatusCode, ir.Retries, ir.LastRequestAt, true, false)
+  if rpc := tr.CountsByResponsePayloadSizes[ir.Request.PayloadSize]; rpc != nil {
+    addKeyResultCounts(rpc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, false)
   }
 
   if rc := tr.CountsByRetries[ir.Retries]; rc != nil {
-    addKeyResultCounts(rc.ByTimeBuckets, bucket, ir.StatusCode, ir.Retries, ir.LastRequestAt, true, false)
+    addKeyResultCounts(rc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, false)
   }
 
   if rrc := tr.CountsByRetryReasons[ir.LastRetryReason]; rrc != nil {
-    addKeyResultCounts(rrc.ByTimeBuckets, bucket, ir.StatusCode, ir.Retries, ir.LastRequestAt, true, false)
+    addKeyResultCounts(rrc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, false)
   }
 
   for e := range ir.Errors {
     if ec := tr.CountsByErrors[e]; ec != nil {
-      addKeyResultCounts(ec.ByTimeBuckets, bucket, ir.StatusCode, ir.Retries, ir.LastRequestAt, true, false)
+      addKeyResultCounts(ec.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, false)
     }
   }
 
-  if sc := tr.CountsByStatusCodes[ir.StatusCode]; sc != nil {
-    addKeyResultCounts(sc.ByTimeBuckets, bucket, ir.StatusCode, ir.Retries, ir.LastRequestAt, false, false)
+  if sc := tr.CountsByStatusCodes[ir.Response.StatusCode]; sc != nil {
+    addKeyResultCounts(sc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, false, false)
   }
 }
 
 func (tr *TargetResults) addResult(ir *invocation.InvocationResult) {
-  fmt.Printf("AddResult: Target [%s] Request ID [%s] timestamp [%s]\n", tr.Target, ir.RequestID, ir.LastRequestAt)
+  fmt.Printf("AddResult: Target [%s] Request ID [%s] timestamp [%s]\n", tr.Target, ir.Request.ID, ir.Request.LastRequestAt)
   tr.lock.Lock()
   defer tr.lock.Unlock()
 
   tr.unsafeInit(false)
   tr.InvocationCount++
-  finishedAt := ir.LastRequestAt
+  finishedAt := ir.Request.LastRequestAt
   if tr.FirstResultAt.IsZero() || finishedAt.Before(tr.FirstResultAt) {
     tr.FirstResultAt = finishedAt
   }
@@ -455,34 +455,34 @@ func (tr *TargetResults) addResult(ir *invocation.InvocationResult) {
 
   if ir.Retries > 0 {
     tr.RetriedInvocationCounts++
-    addKeyResultCounts(tr.CountsByRetries, ir.Retries, ir.StatusCode, ir.Retries, ir.LastRequestAt, true, true)
+    addKeyResultCounts(tr.CountsByRetries, ir.Retries, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, true)
     if ir.LastRetryReason != "" {
-      addKeyResultCounts(tr.CountsByRetryReasons, ir.LastRetryReason, ir.StatusCode, ir.Retries, ir.LastRequestAt, true, true)
+      addKeyResultCounts(tr.CountsByRetryReasons, ir.LastRetryReason, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, true)
     }
   }
 
-  tr.CountsByStatus[ir.Status]++
-  addKeyResultCounts(tr.CountsByStatusCodes, ir.StatusCode, ir.StatusCode, ir.Retries, ir.LastRequestAt, false, true)
+  tr.CountsByStatus[ir.Response.Status]++
+  addKeyResultCounts(tr.CountsByStatusCodes, ir.Response.StatusCode, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, false, true)
 
-  uri := strings.ToLower(ir.URI)
-  addKeyResultCounts(tr.CountsByURIs, uri, ir.StatusCode, ir.Retries, ir.LastRequestAt, true, true)
+  uri := strings.ToLower(ir.Request.URI)
+  addKeyResultCounts(tr.CountsByURIs, uri, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, true)
 
   for _, h := range tr.trackingHeaders {
-    for rh, values := range ir.ResponseHeaders {
+    for rh, values := range ir.Response.Headers {
       if strings.EqualFold(h, rh) {
-        tr.addHeaderResult(h, values, ir.StatusCode, ir.Retries, finishedAt)
-        tr.processCrossHeadersForHeader(h, values, ir.StatusCode, ir.Retries, ir.LastRequestAt, ir.ResponseHeaders)
+        tr.addHeaderResult(h, values, ir.Response.StatusCode, ir.Retries, finishedAt)
+        tr.processCrossHeadersForHeader(h, values, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, ir.Response.Headers)
       }
     }
   }
-  if ir.RequestPayloadSize > 0 {
-    addKeyResultCounts(tr.CountsByRequestPayloadSizes, ir.RequestPayloadSize, ir.StatusCode, ir.Retries, ir.LastRequestAt, true, true)
+  if ir.Request.PayloadSize > 0 {
+    addKeyResultCounts(tr.CountsByRequestPayloadSizes, ir.Request.PayloadSize, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, true)
   }
-  if ir.ResponsePayloadSize > 0 {
-    addKeyResultCounts(tr.CountsByResponsePayloadSizes, ir.ResponsePayloadSize, ir.StatusCode, ir.Retries, ir.LastRequestAt, true, true)
+  if ir.Response.PayloadSize > 0 {
+    addKeyResultCounts(tr.CountsByResponsePayloadSizes, ir.Response.PayloadSize, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, true)
   }
   for e := range ir.Errors {
-    addKeyResultCounts(tr.CountsByErrors, e, ir.StatusCode, ir.Retries, ir.LastRequestAt, true, true)
+    addKeyResultCounts(tr.CountsByErrors, e, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, true)
   }
   if len(tr.trackingTimeBuckets) > 0 {
     addedToTimeBucket := false
@@ -571,7 +571,7 @@ func (ir *InvocationsResults) getInvocation(index uint32) *InvocationResults {
 func resultSink(invocationIndex uint32, result *invocation.InvocationResult,
   invocationResults *InvocationResults, targetResults *TargetResults, allResults *TargetResults) {
   if result != nil {
-    result.ResponseHeaders = util.ToLowerHeaders(result.ResponseHeaders)
+    result.Response.Headers = util.ToLowerHeaders(result.Response.Headers)
     if collectInvocationResults {
       invocationResults.addResult(result)
       chanSendInvocationToRegistry <- invocationResults
@@ -670,7 +670,7 @@ func GetTargetsResultsJSON() string {
   targetsResults.lock.RLock()
   defer targetsResults.lock.RUnlock()
   if targetsResults.Results != nil {
-    return util.ToJSON(targetsResults.Results)
+    return util.ToJSONText(targetsResults.Results)
   }
   return "{}"
 }
@@ -678,7 +678,7 @@ func GetTargetsResultsJSON() string {
 func GetInvocationResultsJSON() string {
   invocationsResults.lock.RLock()
   defer invocationsResults.lock.RUnlock()
-  return util.ToJSON(invocationsResults.Results)
+  return util.ToJSONText(invocationsResults.Results)
 }
 
 func addDeltaCrossHeaders(result, delta map[string]*HeaderCounts, crossTrackingHeaders map[string][]string, crossHeadersMap map[string]string, detailed bool) {
@@ -951,7 +951,7 @@ func sendResultToRegistry(keys []string, data interface{}) {
   if global.UseLocker && global.RegistryURL != "" {
     url := fmt.Sprintf("%s/registry/peers/%s/%s/locker/store/%s", global.RegistryURL, global.PeerName, global.PeerAddress, strings.Join(keys, ","))
     if resp, err := registryClient.Post(url, ContentTypeJSON,
-      strings.NewReader(util.ToJSON(data))); err == nil {
+      strings.NewReader(util.ToJSONText(data))); err == nil {
       util.CloseResponse(resp)
     }
   }

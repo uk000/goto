@@ -50,9 +50,10 @@ const (
   HeaderLivenessOverflowCount     = "Liveness-Overflow-Count"
   HeaderGotoFilteredRequest       = "Goto-Filtered-Request"
 
-  HeaderContentType = "Content-Type"
-  ContentTypeJSON   = "application/json"
-  ContentTypeYAML   = "application/yaml"
+  HeaderProxyConnection = "Proxy-Connection"
+  HeaderContentType     = "Content-Type"
+  ContentTypeJSON       = "application/json"
+  ContentTypeYAML       = "application/yaml"
 
   HeaderStoppingReadinessRequest = "Stopping-Readiness-Request"
 )

@@ -24,18 +24,6 @@ import (
   "time"
 )
 
-// type InvocationLog struct {
-//   Host       string
-//   Invocation uint32
-//   TargetName string
-//   TargetID   string
-//   RequestID  string
-//   URL        string
-//   RequestHeaders      map[string]string
-//   ResponseHeaders     map[string][]string
-//   Result     *InvocationResult
-// }
-
 func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*InvocationResult {
   tracker.activate()
   target := tracker.Target

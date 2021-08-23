@@ -17,43 +17,19 @@
 package util
 
 import (
-  "bytes"
-  "encoding/gob"
   "encoding/json"
   "fmt"
   "reflect"
   "regexp"
   "strconv"
   "strings"
+  "sync"
   "text/template"
   "time"
 
-  "github.com/itchyny/gojq"
   "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-  "k8s.io/client-go/util/jsonpath"
   "sigs.k8s.io/yaml"
 )
-
-type JSONPath struct {
-  Paths     map[string]*jsonpath.JSONPath
-  TextPaths map[string]string
-}
-
-type JQ struct {
-  Queries map[string]*gojq.Code
-  TextQueries map[string]string
-}
-
-type JSONPatterns struct {
-  patterns map[int][]string
-}
-
-type JSONMap map[string]JSON
-
-type JSONObject struct {
-  AbstractJSON
-  JSONMap
-}
 
 type JSON interface {
   Value() interface{}
@@ -65,43 +41,45 @@ type JSON interface {
   ParseJSON(text string)
   ParseYAML(y string)
   Store(i interface{})
-  ToJSON() string
+  Clone() JSON
+  ToJSONText() string
   ToYAML() string
 
   IsEmpty() bool
   IsObject() bool
   IsArray() bool
 
+  Get(path string) *Value
+  GetText(path string) string
   FindPath(path string) *Value
   FindPaths(paths []string) map[string]*Value
   FindTransformPath(path string, join, replace, push bool) JSONField
   Transform(ts []*JSONTransform, source JSON) bool
   TransformPatterns(text string) string
+  ExecuteTemplates(templates []*template.Template) JSON
+  ExecuteTemplate(t *template.Template) string
 
   View(fields ...string) map[string]interface{}
 
   At() *time.Time
 }
 
-type JSONValue struct {
-  jsonMap map[string]interface{}
-  jsonArr []interface{}
-  at      time.Time
-  jsonPatterns   *JSONPatterns
+type JSONPatterns struct {
+  patterns map[int][]string
+  lock     sync.Mutex
 }
 
-type JSONTransform struct {
-  Source           string      `json:"source"`
-  Target           string      `json:"target"`
-  IfContains       string      `json:"ifContains"`
-  IfNotContains    string      `json:"ifNotContains"`
-  Mode             string      `json:"mode"`
-  Value            interface{} `json:"value"`
-  replace          bool
-  join             bool
-  push             bool
-  cotainsRegexp    *regexp.Regexp
-  notCotainsRegexp *regexp.Regexp
+type JSONMap map[string]JSON
+
+type JSONObject struct {
+  JSONMap
+}
+
+type JSONValue struct {
+  JsonMap      map[string]interface{} `json:",inline"`
+  JsonArr      []interface{}          `json:",inline"`
+  at           time.Time
+  jsonPatterns *JSONPatterns
 }
 
 type Value struct {
@@ -136,6 +114,25 @@ type JSONMapField struct {
   exists   bool
 }
 
+type Transform struct {
+  Mappings []*JSONTransform `json:"mappings"`
+  Payload  interface{}      `json:"payload"`
+}
+
+type JSONTransform struct {
+  Source           string      `json:"source"`
+  Target           string      `json:"target"`
+  IfContains       string      `json:"ifContains"`
+  IfNotContains    string      `json:"ifNotContains"`
+  Mode             string      `json:"mode"`
+  Value            interface{} `json:"value"`
+  replace          bool
+  join             bool
+  push             bool
+  cotainsRegexp    *regexp.Regexp
+  notCotainsRegexp *regexp.Regexp
+}
+
 func NewJSON() JSON {
   return &JSONValue{
     at: time.Now(),
@@ -161,17 +158,41 @@ func FromYAML(y string) JSON {
 }
 
 func FromObject(o interface{}) JSON {
-  return FromJSONText(ToJSON(o))
+  return FromJSONText(ToJSONText(o))
 }
 
 func ToJSONValue(v interface{}) *JSONValue {
   jsonValue := &JSONValue{}
   if vv, ok := v.(map[string]interface{}); ok {
-    jsonValue.jsonMap = vv
+    jsonValue.JsonMap = vv
   } else if vv, ok := v.([]interface{}); ok {
-    jsonValue.jsonArr = vv
+    jsonValue.JsonArr = vv
   }
   return jsonValue
+}
+
+func (j *JSONValue) Clone() JSON {
+  clone := ToJSONValue(j.Value())
+  clone.jsonPatterns = j.jsonPatterns
+  return clone
+}
+
+func (j *JSONValue) Store(i interface{}) {
+  switch v := i.(type) {
+  case map[string]interface{}:
+    j.JsonMap = v
+  case map[string][]interface{}:
+    j.JsonMap = map[string]interface{}{}
+    for key, list := range v {
+      j.JsonMap[key] = list
+    }
+  case []interface{}:
+    j.JsonArr = v
+  case *unstructured.UnstructuredList:
+    j.ParseJSON(ToJSONText(v))
+  case *unstructured.Unstructured:
+    j.JsonMap = v.Object
+  }
 }
 
 func (j JSONObject) Value() interface{} {
@@ -199,31 +220,31 @@ func (j *JSONValue) At() *time.Time {
 }
 
 func (j *JSONValue) Value() interface{} {
-  if j.jsonMap != nil {
-    return j.jsonMap
+  if j.JsonMap != nil {
+    return j.JsonMap
   }
-  return j.jsonArr
+  return j.JsonArr
 }
 
 func (j *JSONValue) Object() map[string]interface{} {
-  return j.jsonMap
+  return j.JsonMap
 }
 
 func (j *JSONValue) JSONObject() *JSONObject {
   jsonObject := JSONMap{}
-  for k, v := range j.jsonMap {
+  for k, v := range j.JsonMap {
     jsonObject[k] = ToJSONValue(v)
   }
   return &JSONObject{JSONMap: jsonObject}
 }
 
 func (j *JSONValue) Array() []interface{} {
-  return j.jsonArr
+  return j.JsonArr
 }
 
 func (j *JSONValue) JSONArray() []JSON {
   jsonArr := []JSON{}
-  for _, v := range j.jsonArr {
+  for _, v := range j.JsonArr {
     jsonArr = append(jsonArr, ToJSONValue(v))
   }
   return jsonArr
@@ -246,7 +267,7 @@ func (j *JSONValue) ParseYAML(y string) {
   }
 }
 
-func (j *JSONValue) ToJSON() string {
+func (j *JSONValue) ToJSONText() string {
   if output, err := json.Marshal(j.Value()); err == nil {
     return string(output)
   } else {
@@ -264,53 +285,16 @@ func (j *JSONValue) ToYAML() string {
   return ""
 }
 
-func (j *JSONValue) Store(i interface{}) {
-  i = Clone(i)
-  switch v := i.(type) {
-  case map[string]interface{}:
-    j.jsonMap = v
-  case map[string][]interface{}:
-    j.jsonMap = map[string]interface{}{}
-    for key, list := range v {
-      j.jsonMap[key] = list
-    }
-  case []interface{}:
-    j.jsonArr = v
-  case *unstructured.UnstructuredList:
-    j.ParseJSON(ToJSON(v))
-  case *unstructured.Unstructured:
-    j.jsonMap = v.Object
-  }
-}
-
 func (j *JSONValue) IsEmpty() bool {
-  return j.jsonArr == nil && j.jsonMap == nil
+  return j.JsonArr == nil && j.JsonMap == nil
 }
 
 func (j *JSONValue) IsObject() bool {
-  return j.jsonMap != nil
+  return j.JsonMap != nil
 }
 
 func (j *JSONValue) IsArray() bool {
-  return j.jsonArr != nil
-}
-
-func (j *JSONValue) ExecuteTemplates(templates []*template.Template) []interface{} {
-  data := []interface{}{}
-  for _, t := range templates {
-    data = append(data, j.ExecuteTemplate(t))
-  }
-  return data
-}
-
-func (j *JSONValue) ExecuteTemplate(t *template.Template) interface{} {
-  buf := &bytes.Buffer{}
-  if err := t.Execute(buf, j.Value()); err == nil {
-    return buf
-  } else {
-    fmt.Println(err.Error())
-  }
-  return nil
+  return j.JsonArr != nil
 }
 
 func (j *JSONValue) View(paths ...string) map[string]interface{} {
@@ -320,6 +304,35 @@ func (j *JSONValue) View(paths ...string) map[string]interface{} {
     view[k] = v.Value
   }
   return view
+}
+
+func (j *JSONValue) Get(path string) *Value {
+  return j.FindPath(path)
+}
+
+func (j *JSONValue) GetText(path string) string {
+  if value := j.FindPath(path); value != nil {
+    if value.IsJSON {
+      return value.JSON().ToJSONText()
+    } else if s, ok := value.Value.(string); ok {
+      return s
+    } else {
+      return fmt.Sprint(value.Value)
+    }
+  }
+  return ""
+}
+
+func (v *Value) JSON() JSON {
+  return FromJSON(v.Value)
+}
+
+func (v *Value) Get(path string) *Value {
+  return v.JSON().Get(path)
+}
+
+func (v *Value) GetText(path string) string {
+  return v.JSON().GetText(path)
 }
 
 func (j *JSONValue) FindPaths(paths []string) map[string]*Value {
@@ -332,9 +345,9 @@ func (j *JSONValue) FindPaths(paths []string) map[string]*Value {
 
 func (j *JSONValue) FindPath(path string) *Value {
   value := &Value{Value: j.Value()}
-  currMap := j.jsonMap
-  currArr := j.jsonArr
-  pathKeys := strings.Split(path, ".")
+  currMap := j.JsonMap
+  currArr := j.JsonArr
+  pathKeys := RemoveEmpty(strings.Split(path, "."))
   for _, key := range pathKeys {
     var next interface{}
     if currArr != nil {
@@ -366,8 +379,8 @@ func (j *JSONValue) FindPath(path string) *Value {
 }
 
 func (j *JSONValue) FindTransformPath(path string, join, replace, push bool) JSONField {
-  currMap := j.jsonMap
-  currArr := j.jsonArr
+  currMap := j.JsonMap
+  currArr := j.JsonArr
   var parentMap map[string]interface{}
   var parentArr []interface{}
   var grandParentMap map[string]interface{}
@@ -378,7 +391,7 @@ func (j *JSONValue) FindTransformPath(path string, join, replace, push bool) JSO
   lastIndex := 0
   lastKey := ""
   lastKeyExists := false
-  pathKeys := strings.Split(path, ".")
+  pathKeys := RemoveEmpty(strings.Split(path, "."))
   for i, key := range pathKeys {
     grandParentMap = parentMap
     grandParentArr = parentArr
@@ -607,159 +620,28 @@ func GetEmptyCopy(v interface{}) interface{} {
 }
 
 func Clone(v interface{}) interface{} {
-  gob.Register(map[string]interface{}{})
-  gob.Register(map[string][]interface{}{})
-  gob.Register([]interface{}{})
-  gob.Register(unstructured.Unstructured{})
-  gob.Register(unstructured.UnstructuredList{})
-  buff := &bytes.Buffer{}
-  enc := gob.NewEncoder(buff)
-  dec := gob.NewDecoder(buff)
-  var err error
-  if err = enc.Encode(v); err == nil {
-    switch v.(type) {
-    case map[string]interface{}:
-      copy := map[string]interface{}{}
-      if err = dec.Decode(&copy); err == nil {
-        return copy
-      }
-    case map[string][]interface{}:
-      copy := map[string][]interface{}{}
-      if err = dec.Decode(&copy); err == nil {
-        return copy
-      }
-    case []interface{}:
-      copy := []interface{}{}
-      if err = dec.Decode(&copy); err == nil {
-        return copy
-      }
-    case *unstructured.UnstructuredList:
-      copy := &unstructured.UnstructuredList{}
-      if err = dec.Decode(&copy); err == nil {
-        return copy
-      }
-    case *unstructured.Unstructured:
-      copy := &unstructured.Unstructured{}
-      if err = dec.Decode(&copy); err == nil {
-        return copy
-      }
-    }
-  }
-  if err != nil {
-    fmt.Printf("Failed to clone [%+v] with error: %s\n", v, err.Error())
-  }
-  return nil
+  var copy interface{}
+  ReadJson(ToJSONText(v), &copy)
+  return copy
 }
 
 func ReadJson(s string, t interface{}) error {
   return json.Unmarshal([]byte(s), t)
 }
 
-func ToJSON(o interface{}) string {
+func ToJSONText(o interface{}) string {
   if output, err := json.Marshal(o); err == nil {
     return string(output)
   }
   return fmt.Sprintf("%+v", o)
 }
 
-func NewJSONPaths() *JSONPath {
-  return &JSONPath{TextPaths: map[string]string{}, Paths: map[string]*jsonpath.JSONPath{}}
-}
-
-func (jp *JSONPath) Parse(paths []string) *JSONPath {
-  if len(paths) == 0 || paths[0] == "" {
-    return jp
-  }
-  for _, path := range paths {
-    pathKV := strings.Split(path, ":")
-    if len(pathKV) < 2 {
-      fmt.Printf("Invalid JSONPath [%s]\n", path)
-      continue
-    }
-    key := pathKV[0]
-    path = pathKV[1]
-    j := jsonpath.New(path)
-    j.Parse(path)
-    jp.TextPaths[key] = path
-    jp.Paths[key] = j
-  }
-  return jp
-}
-
-func (jp *JSONPath) Apply(j JSON) JSON {
-  if j == nil {
-    return nil
-  }
-  out := map[string][]interface{}{}
-  data := j.Value()
-  for k, jsonPath := range jp.Paths {
-    if matches, err := jsonPath.FindResults(data); err == nil && len(matches) > 0 && len(matches[0]) > 0 {
-      for _, v1 := range matches {
-        for _, v2 := range v1 {
-          out[k] = append(out[k], v2.Interface())
-        }
-      }
-    } else if err != nil {
-      fmt.Printf("Failed to find results for path [%s] with error: %s\n", jp.TextPaths[k], err.Error())
+func RemoveEmpty(arr []string) []string {
+  var values []string
+  for _, item := range arr {
+    if item != "" {
+      values = append(values, item)
     }
   }
-  return FromJSON(out)
-}
-
-func (jp *JSONPath) IsEmpty() bool {
-  return len(jp.Paths) == 0
-}
-
-func NewJQ() *JQ {
-  return &JQ{Queries: map[string]*gojq.Code{}, TextQueries: map[string]string{}}
-}
-
-func (jq *JQ) Parse(queries []string) *JQ {
-  if len(queries) == 0 || queries[0] == "" {
-    return jq
-  }
-  for _, query := range queries {
-    pieces := strings.Split(query, ":")
-    if len(pieces) < 2 {
-      fmt.Printf("Invalid jq id+query pair: %s\n", query)
-      continue
-    }
-    if q, err := gojq.Parse(pieces[1]); err == nil {
-      if code, err := gojq.Compile(q); err == nil {
-        jq.Queries[pieces[0]] = code
-        jq.TextQueries[pieces[0]] = pieces[1]
-      } else {
-        fmt.Printf("Failed to compile jq query [%s] with error: %s\n", query, err.Error())
-      }
-    } else {
-      fmt.Printf("Failed to parse jq query [%s] with error: %s\n", query, err.Error())
-    }
-  }
-  return jq
-}
-
-func (jq *JQ) Apply(j JSON) JSON {
-  if j == nil {
-    return nil
-  }
-  out := map[string][]interface{}{}
-  for id, q := range jq.Queries {
-    iter := q.Run(j.Value())
-    for {
-      if value, ok := iter.Next(); ok {
-        if err, ok := value.(error); ok {
-          fmt.Println(err)
-        } else {
-          out[id] = append(out[id], value)
-        }
-      } else {
-        break
-      }
-    }
-  }
-  return FromJSON(out)
-}
-
-func (jq *JQ) IsEmpty() bool {
-  return len(jq.Queries) == 0
+  return values
 }

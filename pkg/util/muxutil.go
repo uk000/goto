@@ -213,8 +213,14 @@ func IsFiller(key string) bool {
   return fillerRegexp.MatchString(key)
 }
 
-func GetFillerMarked(key string) string {
+func MarkFiller(key string) string {
   return "{" + key + "}"
+}
+
+func UnmarkFiller(key string) string {
+  key = strings.TrimPrefix(key, "{")
+  key = strings.TrimSuffix(key, "}")
+  return key
 }
 
 func GetFillers(text string) []string {
@@ -222,9 +228,8 @@ func GetFillers(text string) []string {
 }
 
 func GetFiller(text string) (string, bool) {
-  fillers := GetFillers(text)
-  if len(fillers) > 0 {
-    return fillers[0], true
+  if filler := fillerRegexp.FindString(text); filler != "" {
+    return filler, true
   }
   return "", false
 }
@@ -232,8 +237,7 @@ func GetFiller(text string) (string, bool) {
 func GetFillersUnmarked(text string) []string {
   matches := GetFillers(text)
   for i, m := range matches {
-    m = strings.TrimPrefix(m, "{")
-    matches[i] = strings.TrimSuffix(m, "}")
+    matches[i] = UnmarkFiller(m)
   }
   return matches
 }
@@ -246,12 +250,24 @@ func GetFillerUnmarked(text string) (string, bool) {
   return "", false
 }
 
+func Fill(text, filler, value string) string {
+  return strings.ReplaceAll(text, filler, value)
+}
+
+func FillFrom(text, filler string, store map[string]interface{}) string {
+  key := UnmarkFiller(filler)
+  if value := store[key]; value != nil {
+    text = strings.ReplaceAll(text, filler, fmt.Sprint(value))
+  }
+  return text
+}
+
 func RegisterURIRouteAndGetRegex(uri string, glob bool, router *mux.Router, handler func(http.ResponseWriter, *http.Request)) (*mux.Router, *regexp.Regexp, error) {
   if uri != "" {
     vars := fillerRegexp.FindAllString(uri, -1)
     for _, v := range vars {
       v2, _ := GetFillerUnmarked(v)
-      v2 = GetFillerMarked(v2 + ":[^/&\\?]*")
+      v2 = MarkFiller(v2 + ":[^/&\\?]*")
       uri = strings.ReplaceAll(uri, v, v2)
     }
     subRouter := router.NewRoute().Subrouter()
@@ -423,7 +439,7 @@ func ParseJSONPathsFromRequest(r *http.Request) *JSONPath {
     paths = strings.Split(Read(r.Body), "\n")
   }
   if len(paths) > 0 {
-    return NewJSONPaths().Parse(paths)
+    return NewJSONPath().Parse(paths)
   }
   return nil
 }

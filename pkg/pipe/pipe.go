@@ -17,27 +17,32 @@
 package pipe
 
 import (
-  "bufio"
-  "bytes"
   "fmt"
+  "goto/pkg/job"
+  "goto/pkg/script"
   "goto/pkg/util"
   "io"
-  "strings"
+  "log"
+  "os"
   "sync"
-  "text/template"
+  "time"
 )
 
 type PipeStage struct {
-  Label     string
-  Source    Source
-  Transform Transform
+  Label      string        `json:"label"`
+  Sources    []string      `json:"sources"`
+  Transforms []string      `json:"transforms"`
+  Delay      util.Duration `json:"delay"`
 }
 
 type Pipe struct {
-  Name      string
-  Sources   map[string]Source
-  Templates map[string]*Template
-  lock      sync.RWMutex
+  Name       string                        `json:"name"`
+  Sources    map[string]*PipelineSource    `json:"sources"`
+  Transforms map[string]*PipelineTransform `json:"transforms"`
+  Stages     []*PipeStage                  `json:"stages"`
+  Out        []string                      `json:"out"`
+  Running    bool                          `json:"running"`
+  lock       sync.RWMutex
 }
 
 type PipeManager struct {
@@ -53,25 +58,52 @@ var (
   }
 )
 
-func NewPipeline(name string) *Pipe {
-  return &Pipe{
-    Name:      name,
-    Sources:   map[string]Source{},
-    Templates: map[string]*Template{},
-  }
+func NewPipe(name string) *Pipe {
+  pipe := &Pipe{Name: name}
+  pipe.Init()
+  return pipe
 }
 
 func (pm *PipeManager) CreatePipe(name string) {
-  pipeline := NewPipeline(name)
+  pipeline := NewPipe(name)
   pm.lock.Lock()
   pm.Pipes[name] = pipeline
   pm.lock.Unlock()
 }
 
+func (pm *PipeManager) AddPipe(pipe *Pipe) {
+  pipe.Running = false
+  for _, s := range pipe.Sources {
+    if s.Type == SourceJob {
+      job.Manager.ClearJobWatchers(s.Spec)
+    }
+  }
+  pm.lock.Lock()
+  pm.Pipes[pipe.Name] = pipe
+  pm.lock.Unlock()
+  pipe.InitSources()
+  pipe.InitTransforms()
+}
+
+func (pm *PipeManager) ClearPipe(name string) {
+  pm.lock.RLock()
+  pipe := pm.Pipes[name]
+  pm.lock.RUnlock()
+  if pipe != nil {
+    pipe.Init()
+  }
+}
+
+func (pm *PipeManager) RemovePipe(name string) {
+  pm.lock.RLock()
+  delete(pm.Pipes, name)
+  pm.lock.RUnlock()
+}
+
 func (pm *PipeManager) DumpPipes() string {
   pm.lock.RLock()
   defer pm.lock.RUnlock()
-  return util.ToJSON(pm.Pipes)
+  return util.ToJSONText(pm.Pipes)
 }
 
 func (pm *PipeManager) AddK8sSource(pipeName, sourceName, resourceID string) error {
@@ -85,7 +117,24 @@ func (pm *PipeManager) AddK8sSource(pipeName, sourceName, resourceID string) err
   return nil
 }
 
+func (pm *PipeManager) AddScriptSource(pipeName, sourceName, scriptContent string) error {
+  pm.lock.RLock()
+  pipe := pm.Pipes[pipeName]
+  pm.lock.RUnlock()
+  if pipe == nil {
+    return fmt.Errorf("Pipe [%s] doesn't exist.", pipeName)
+  }
+  if len(scriptContent) > 0 {
+    script.Scripts.AddScript(sourceName, scriptContent)
+  }
+  pipe.AddScriptSource(sourceName, sourceName)
+  return nil
+}
+
 func (pm *PipeManager) AddSource(pipeName string, source *PipelineSource) error {
+  if source == nil {
+    return fmt.Errorf("No source")
+  }
   pm.lock.RLock()
   pipe := pm.Pipes[pipeName]
   pm.lock.RUnlock()
@@ -96,85 +145,151 @@ func (pm *PipeManager) AddSource(pipeName string, source *PipelineSource) error 
   return nil
 }
 
-func (pm *PipeManager) AddTemplate(pipeName, name, text string) error {
+func (pm *PipeManager) RemoveSource(pipeName, sourceName string) error {
   pm.lock.RLock()
   pipe := pm.Pipes[pipeName]
   pm.lock.RUnlock()
   if pipe == nil {
     return fmt.Errorf("Pipe [%s] doesn't exist.", pipeName)
   }
-  return pipe.addTemplate(name, text)
+  pipe.RemoveSource(sourceName)
+  return nil
 }
 
-func (pm *PipeManager) StoreTemplates(pipe string, content []byte) map[string]string {
-  result := map[string]string{}
-  pm.lock.Lock()
-  pm.fileIndex++
-  index := pm.fileIndex
-  pm.lock.Unlock()
-  fileName := fmt.Sprintf("template-%d.txt", index)
-  if path, err := util.StoreFile("", fileName, content); err == nil {
-    pm.lock.Lock()
-    pm.Files = append(pm.Files, path)
-    pm.lock.Unlock()
-    result[fileName] = fmt.Sprintf("Templates stored at path [%s]", path)
-  } else {
-    result[fileName] = err.Error()
-  }
-  scanner := bufio.NewScanner(bytes.NewReader(content))
-  for scanner.Scan() {
-    line := scanner.Text()
-    if pieces := strings.Split(line, "="); len(pieces) == 2 {
-      templateName := pieces[0]
-      if err := pm.AddTemplate(pipe, templateName, pieces[1]); err == nil {
-        result[templateName] = "Added"
-      } else {
-        result[templateName] = err.Error()
-      }
-    }
-  }
-  return result
-}
-
-func (pm *PipeManager) RunPipe(name string, w io.Writer) error {
+func (pm *PipeManager) RunPipe(name string, w io.Writer, yaml bool) error {
   pm.lock.RLock()
   pipe := pm.Pipes[name]
   pm.lock.RUnlock()
   if pipe == nil {
     return fmt.Errorf("Pipe [%s] doesn't exist.", name)
   }
-  pipe.Run(w)
+  pipe.Run(w, yaml)
   return nil
 }
 
 func (pipe *Pipe) AddK8sSource(sourceName, resourceID string) {
   pipe.lock.Lock()
-  pipe.Sources[sourceName] = NewSource(sourceName, SourceK8s, resourceID)
+  pipe.Sources[sourceName] = NewSource(sourceName, SourceK8s, resourceID, pipe)
+  pipe.lock.Unlock()
+}
+
+func (pipe *Pipe) AddScriptSource(sourceName, scriptName string) {
+  pipe.lock.Lock()
+  pipe.Sources[sourceName] = NewSource(sourceName, SourceScript, scriptName, pipe)
   pipe.lock.Unlock()
 }
 
 func (pipe *Pipe) AddSource(source *PipelineSource) {
   pipe.lock.Lock()
   pipe.Sources[source.Name] = source
+  pipe.InitSources()
+  pipe.InitTransforms()
   pipe.lock.Unlock()
 }
 
-func (pipe *Pipe) addTemplate(name, text string) error {
-  if t, err := template.New(name).Parse(text); err == nil {
-    pipe.lock.Lock()
-    pipe.Templates[name] = &Template{Code: text, template: t}
-    pipe.lock.Unlock()
-    return nil
-  } else {
-    return err
+func (pipe *Pipe) RemoveSource(sourceName string) {
+  pipe.lock.Lock()
+  delete(pipe.Sources, sourceName)
+  pipe.lock.Unlock()
+}
+
+func (pipe *Pipe) Init() {
+  pipe.lock.Lock()
+  pipe.Sources = map[string]*PipelineSource{}
+  pipe.lock.Unlock()
+}
+
+func (pipe *Pipe) InitSources() {
+  for name, source := range pipe.Sources {
+    pipe.Sources[name] = source.Init(name, pipe).pipelineSource()
+    if source.IsScript() && len(source.GetContent()) > 0 {
+      script.Scripts.AddScript(source.GetSpec(), source.GetContent())
+    }
   }
 }
 
-func (pipe *Pipe) Run(w io.Writer) {
-  for name, source := range pipe.Sources {
-    fmt.Printf("Running Source [%s]\n", name)
-    out := source.Out()
-    fmt.Printf("Source [%s] Output [%+v]\n", name, out)
-    w.Write([]byte(fmt.Sprintf("%+v", out)))
+func (pipe *Pipe) InitTransforms() {
+  for name, transform := range pipe.Transforms {
+    transform.Name = name
+    transform.InitTransform()
+  }
+}
+
+func (pipe *Pipe) Trigger() {
+  pipe.lock.RLock()
+  running := pipe.Running
+  pipe.lock.RUnlock()
+  if !running {
+    pipe.Run(os.Stdout, true)
+  }
+}
+
+func (pipe *Pipe) Run(w io.Writer, yaml bool) {
+  pipe.lock.Lock()
+  pipe.Running = true
+  pipe.lock.Unlock()
+  workspace := map[string]interface{}{}
+  if len(pipe.Stages) > 0 {
+    for _, stage := range pipe.Stages {
+      if stage.Delay.Duration > 0 {
+        log.Printf("Pipe: Delaying Stage [%s] by [%s]\n", stage.Label, stage.Delay)
+        time.Sleep(stage.Delay.Duration)
+      }
+      log.Printf("Pipe: Running Stage [%s]\n", stage.Label)
+      for _, s := range stage.Sources {
+        if source := pipe.Sources[s]; source != nil {
+          log.Printf("Pipe: Pulling from Source [%s]\n", s)
+          if source.GetInputSource() != "" {
+            source.SetInput(workspace[source.GetInputSource()])
+          }
+          source.Generate(workspace)
+        }
+      }
+      if len(stage.Transforms) > 0 {
+        for _, t := range stage.Transforms {
+          if transform := pipe.Transforms[t]; transform != nil {
+            log.Printf("Pipe: Applying Transform [%s]\n", t)
+            json := transform.Map(workspace)
+            for k, v := range json.Object() {
+              workspace[k] = v
+            }
+          }
+        }
+      }
+    }
+  } else {
+    for _, source := range pipe.Sources {
+      log.Printf("Pipe: Pulling from Source [%s]\n", source.GetName())
+      if source.GetInputSource() != "" {
+        source.SetInput(workspace[source.GetInputSource()])
+      }
+      source.Generate(workspace)
+    }
+    if len(pipe.Transforms) > 0 {
+      for _, transform := range pipe.Transforms {
+        log.Printf("Pipe: Applying Transform [%s]\n", transform.Name)
+        workspace[transform.Name] = transform.Map(workspace)
+      }
+    }
+  }
+  out := map[string]interface{}{}
+  if len(pipe.Out) > 0 {
+    for _, o := range pipe.Out {
+      out[o] = workspace[o]
+    }
+  } else {
+    out = workspace
+  }
+
+  pipe.lock.Lock()
+  pipe.Running = false
+  pipe.lock.Unlock()
+
+  if w != nil {
+    if yaml {
+      util.WriteYaml(w, out)
+    } else {
+      util.WriteJson(w, out)
+    }
   }
 }

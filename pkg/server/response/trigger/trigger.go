@@ -205,7 +205,7 @@ func prepareTargetHeaders(tt *TriggerTarget, r *http.Request, w http.ResponseWri
       if strings.EqualFold(captureKey, "request.uri") {
         kv[1] = r.RequestURI
       } else if strings.EqualFold(captureKey, "request.headers") {
-        kv[1] = util.ToJSON(r.Header)
+        kv[1] = util.ToJSONText(r.Header)
       } else if captureValue := w.Header().Get(captureKey); captureValue != "" {
         kv[1] = captureValue
       }
@@ -245,14 +245,14 @@ func (t *Trigger) invokeTargets(targets map[string]*TriggerTarget, w http.Respon
       responses = append(responses, results...)
     }
     for _, response := range responses {
-      if response.StatusCode == 0 {
-        response.StatusCode = 503
+      if response.Response.StatusCode == 0 {
+        response.Response.StatusCode = 503
       }
       t.lock.Lock()
       if t.TriggerResults[response.TargetName] == nil {
         t.TriggerResults[response.TargetName] = map[int]int{}
       }
-      t.TriggerResults[response.TargetName][response.StatusCode]++
+      t.TriggerResults[response.TargetName][response.Response.StatusCode]++
       t.lock.Unlock()
     }
     return responses
@@ -327,7 +327,7 @@ func invokeTriggers(w http.ResponseWriter, r *http.Request) {
     responses := t.invokeTargets(targets, w, r)
     w.WriteHeader(http.StatusOK)
     util.AddLogMessage(fmt.Sprintf("Port [%s] Trigger targets invoked", util.GetRequestOrListenerPort(r)), r)
-    fmt.Fprintln(w, util.ToJSON(responses))
+    fmt.Fprintln(w, util.ToJSONText(responses))
   } else {
     w.WriteHeader(http.StatusNotFound)
     util.AddLogMessage("Trigger targets not found", r)

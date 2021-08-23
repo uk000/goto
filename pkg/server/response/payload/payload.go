@@ -39,11 +39,6 @@ import (
   "k8s.io/client-go/util/jsonpath"
 )
 
-type Transform struct {
-  Mappings []*util.JSONTransform `json:"mappings"`
-  Payload  interface{}           `json:"payload"`
-}
-
 type ResponsePayload struct {
   Payload          []byte            `json:"payload"`
   ContentType      string            `json:"contentType"`
@@ -57,7 +52,7 @@ type ResponsePayload struct {
   URICaptureKeys   []string          `json:"uriCaptureKeys"`
   HeaderCaptureKey string            `json:"headerCaptureKey"`
   QueryCaptureKey  string            `json:"queryCaptureKey"`
-  Transforms       []*Transform      `json:"transforms"`
+  Transforms       []*util.Transform      `json:"transforms"`
   uriRegexp        *regexp.Regexp
   queryMatchRegexp *regexp.Regexp
   bodyMatchRegexp  *regexp.Regexp
@@ -133,7 +128,8 @@ func (pr *PortResponse) init() {
   matchRouter = rootRouter.NewRoute().Subrouter()
 }
 
-func newResponsePayload(payload []byte, binary bool, contentType, uri, header, query, value string, bodyRegexes []string, paths []string, transforms []*Transform) (*ResponsePayload, error) {
+func newResponsePayload(payload []byte, binary bool, contentType, uri, header, query, value string, 
+  bodyRegexes []string, paths []string, transforms []*util.Transform) (*ResponsePayload, error) {
   if contentType == "" {
     contentType = ContentTypeJSON
   }
@@ -169,7 +165,7 @@ func newResponsePayload(payload []byte, binary bool, contentType, uri, header, q
     queryValueMatch = value
   }
 
-  jsonPaths := util.NewJSONPaths().Parse(paths)
+  jsonPaths := util.NewJSONPath().Parse(paths)
 
   var bodyMatchRegexp *regexp.Regexp
   if len(bodyRegexes) > 0 {
@@ -266,7 +262,7 @@ func (pr *PortResponse) unsafeRemoveUntrackeddURI(uri string) {
   }
 }
 
-func (pr *PortResponse) setURIResponsePayload(payload []byte, binary bool, uri, contentType string, transforms []*Transform) error {
+func (pr *PortResponse) setURIResponsePayload(payload []byte, binary bool, uri, contentType string, transforms []*util.Transform) error {
   pr.lock.Lock()
   defer pr.lock.Unlock()
   uri = strings.ToLower(uri)
@@ -544,13 +540,13 @@ func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
   if contentType == "" {
     contentType = ContentTypeJSON
   }
-  var transforms []*Transform
+  var transforms []*util.Transform
   if err := util.ReadJsonPayload(r, &transforms); err == nil {
     uri := util.GetStringParamValue(r, "uri")
     if uri != "" && transforms != nil {
       pr.setURIResponsePayload(nil, false, uri, contentType, transforms)
       msg = fmt.Sprintf("Port [%s] transform paths set for URI [%s] : [%s: %+v]",
-        port, uri, contentType, util.ToJSON(transforms))
+        port, uri, contentType, util.ToJSONText(transforms))
       events.SendRequestEvent("Response Payload Configured", msg, r)
     } else {
       msg = "Invalid transformation. Missing URI or payload."
@@ -713,55 +709,10 @@ func getPayloadForKV(kvMap map[string][]string, payloadMap map[string]map[string
   return nil, false
 }
 
-func transformPayload(r *http.Request, rp *ResponsePayload) string {
-  sourcePayload := util.Read(r.Body)
-  var sourceJSON util.JSON
-  isYAML := false
-  if util.IsYAMLContentType(r.Header) {
-    sourceJSON = util.FromYAML(sourcePayload)
-    isYAML = true
-  } else {
-    sourceJSON = util.FromJSONText(sourcePayload)
-  }
-  if sourceJSON.IsEmpty() {
-    return sourcePayload
-  }
-  targetPayload := ""
-  for _, t := range rp.Transforms {
-    var targetJSON util.JSON
-    if t.Payload != nil {
-      targetJSON = util.FromJSON(t.Payload)
-    } else {
-      targetJSON = sourceJSON
-    }
-    if targetJSON != nil && !targetJSON.IsEmpty() {
-      if targetJSON.Transform(t.Mappings, sourceJSON) {
-        if isYAML {
-          targetPayload = targetJSON.ToYAML()
-        } else {
-          targetPayload = targetJSON.ToJSON()
-        }
-      }
-      targetPayload = targetJSON.TransformPatterns(targetPayload)
-    }
-    if targetPayload != "" {
-      break
-    }
-  }
-  if targetPayload == "" {
-    targetPayload = sourcePayload
-  }
-  return targetPayload
-}
-
 func getFilledPayload(rp *ResponsePayload, r *http.Request, captures map[string]string) []byte {
   vars := mux.Vars(r)
   payload := string(rp.Payload)
-  for _, key := range rp.URICaptureKeys {
-    if vars[key] != "" {
-      payload = strings.Replace(payload, util.GetFillerMarked(key), vars[key], -1)
-    }
-  }
+  payload = util.SubstitutePayloadMarkers(payload, rp.URICaptureKeys, vars)
   if rp.HeaderCaptureKey != "" {
     if value := r.Header.Get(rp.HeaderMatch); value != "" {
       payload = strings.Replace(payload, rp.HeaderCaptureKey, value, -1)
@@ -775,10 +726,10 @@ func getFilledPayload(rp *ResponsePayload, r *http.Request, captures map[string]
     }
   }
   if len(rp.Transforms) > 0 {
-    payload = transformPayload(r, rp)
+    payload = util.TransformPayload(util.Read(r.Body), rp.Transforms, util.IsYAMLContentType(r.Header))
   }
   for k, v := range captures {
-    payload = strings.Replace(payload, util.GetFillerMarked(k), v, -1)
+    payload = strings.Replace(payload, util.MarkFiller(k), v, -1)
   }
   return []byte(payload)
 }

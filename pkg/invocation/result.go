@@ -32,31 +32,39 @@ import (
   "time"
 )
 
+type InvocationResultResponse struct {
+  Status        string      `json:"status"`
+  StatusCode    int         `json:"statusCode"`
+  Headers       http.Header `json:"headers"`
+  PayloadSize   int         `json:"payloadSize"`
+  Payload       []byte      `json:"-"`
+  FirstByteInAt string      `json:"firstByteInAt"`
+  LastByteInAt  string      `json:"lastByteInAt"`
+}
+
+type InvocationResultRequest struct {
+  ID             string            `json:"id"`
+  URL            string            `json:"url"`
+  URI            string            `json:"uri"`
+  Headers        map[string]string `json:"headers"`
+  PayloadSize    int               `json:"payloadSize"`
+  FirstByteOutAt string            `json:"firstByteOutAt"`
+  LastByteOutAt  string            `json:"lastByteOutAt"`
+  FirstRequestAt time.Time         `json:"firstRequestAt"`
+  LastRequestAt  time.Time         `json:"lastRequestAt"`
+}
+
 type InvocationResult struct {
-  TargetName          string                   `json:"targetName"`
-  TargetID            string                   `json:"targetID"`
-  Status              string                   `json:"status"`
-  StatusCode          int                      `json:"statusCode"`
-  RequestPayloadSize  int                      `json:"requestPayloadSize"`
-  ResponsePayloadSize int                      `json:"responsePayloadSize"`
-  FirstByteInAt       string                   `json:"firstByteInAt"`
-  LastByteInAt        string                   `json:"lastByteInAt"`
-  FirstByteOutAt      string                   `json:"firstByteOutAt"`
-  LastByteOutAt       string                   `json:"lastByteOutAt"`
-  FirstRequestAt      time.Time                `json:"firstRequestAt"`
-  LastRequestAt       time.Time                `json:"lastRequestAt"`
-  Retries             int                      `json:"retries"`
-  URL                 string                   `json:"url"`
-  URI                 string                   `json:"uri"`
-  RequestID           string                   `json:"requestID"`
-  RequestHeaders      map[string]string        `json:"requestHeaders"`
-  ResponseHeaders     map[string][]string      `json:"responseHeaders"`
-  FailedURLs          map[string]int           `json:"failedURLs"`
-  LastRetryReason     string                   `json:"lastRetryReason"`
-  ValidAssertionIndex int                      `json:"validAssertionIndex"`
-  Errors              []map[string]interface{} `json:"errors"`
-  Data                []byte                   `json:"-"`
-  TookNanos           int                      `json:"tookNanos"`
+  TargetName          string                    `json:"targetName"`
+  TargetID            string                    `json:"targetID"`
+  Request             *InvocationResultRequest  `json:"request"`
+  Response            *InvocationResultResponse `json:"response"`
+  FailedURLs          map[string]int            `json:"failedURLs"`
+  Retries             int                       `json:"retries"`
+  LastRetryReason     string                    `json:"lastRetryReason"`
+  ValidAssertionIndex int                       `json:"validAssertionIndex"`
+  Errors              []map[string]interface{}  `json:"errors"`
+  TookNanos           int                       `json:"tookNanos"`
   httpResponse        *http.Response
   client              *util.ClientTracker
   tracker             *InvocationTracker
@@ -86,15 +94,46 @@ type InvocationStatus struct {
 
 func newInvocationResult(request *InvocationRequest) *InvocationResult {
   return &InvocationResult{
-    RequestID:       request.requestID,
-    TargetName:      request.tracker.Target.Name,
-    TargetID:        request.targetID,
-    RequestHeaders:  request.headers,
-    ResponseHeaders: map[string][]string{},
-    FailedURLs:      map[string]int{},
-    tracker:         request.tracker,
-    client:          request.tracker.client.clientTracker,
-    request:         request,
+    TargetName: request.tracker.Target.Name,
+    TargetID:   request.targetID,
+    Request: &InvocationResultRequest{
+      ID:      request.requestID,
+      Headers: request.headers,
+    },
+    Response:   &InvocationResultResponse{Headers: make(http.Header)},
+    FailedURLs: map[string]int{},
+    tracker:    request.tracker,
+    client:     request.tracker.client.clientTracker,
+    request:    request,
+  }
+}
+
+func (t *InvocationTracker) SendResult(r *InvocationResult) {
+  if t.Channels != nil {
+    t.Channels.Lock.Lock()
+    defer t.Channels.Lock.Unlock()
+    t.Channels.ResultChannel <- r
+  }
+}
+
+func (tracker *InvocationTracker) publishResult(result *InvocationResult) {
+  if tracker.Channels != nil {
+    tracker.Channels.publish(result)
+  }
+}
+
+func (c *InvocationChannels) publish(result *InvocationResult) {
+  c.Lock.Lock()
+  defer c.Lock.Unlock()
+  if len(c.Sinks) > 0 {
+    for _, sink := range c.Sinks {
+      sink(result)
+    }
+  } else if c.ResultChannel != nil {
+    if len(c.ResultChannel) > 50 {
+      result.tracker.logResultChannelBacklog(result, len(c.ResultChannel))
+    }
+    c.ResultChannel <- result
   }
 }
 
@@ -123,25 +162,25 @@ func (result *InvocationResult) processHTTPResponse(req *InvocationRequest, r *h
       result.updateResult(req.url, req.uri, r.Status, r.StatusCode, r.Header)
     }
   } else {
-    result.Status = err.Error()
+    result.Response.Status = err.Error()
   }
 }
 
 func (result *InvocationResult) readResponsePayload() {
   if result.httpResponse != nil && result.httpResponse.Body != nil {
     defer result.httpResponse.Body.Close()
-    if result.tracker.Target.TrackPayload {
+    if result.tracker.Target.TrackPayload || result.tracker.Target.CollectResponse {
       data, size, first, last, err := util.ReadAndTrack(result.httpResponse.Body, result.tracker.Target.CollectResponse)
       if err == "" {
-        result.ResponsePayloadSize = size
-        result.FirstByteInAt = first.UTC().String()
-        result.LastByteInAt = last.UTC().String()
+        result.Response.PayloadSize = size
+        result.Response.FirstByteInAt = first.UTC().String()
+        result.Response.LastByteInAt = last.UTC().String()
         if result.tracker.Target.CollectResponse {
-          result.Data = data
+          result.Response.Payload = data
         }
       } else {
         result.err = errors.New(err)
-        result.Status = err
+        result.Response.Status = err
         result.Errors = append(result.Errors, map[string]interface{}{"errorRead": err})
       }
     } else {
@@ -152,13 +191,13 @@ func (result *InvocationResult) readResponsePayload() {
 
 func (result *InvocationResult) updateResult(url, uri, status string, statusCode int, headers map[string][]string) {
   for header, values := range headers {
-    result.ResponseHeaders[strings.ToLower(header)] = values
+    result.Response.Headers[strings.ToLower(header)] = values
   }
-  result.ResponseHeaders["status"] = []string{status}
-  result.Status = status
-  result.StatusCode = statusCode
-  result.URI = uri
-  result.URL = url
+  result.Response.Headers["status"] = []string{status}
+  result.Response.Status = status
+  result.Response.StatusCode = statusCode
+  result.Request.URI = uri
+  result.Request.URL = url
 }
 
 func (result *InvocationResult) retryReason() string {
@@ -193,23 +232,23 @@ func (result *InvocationResult) validateResponse() {
       continue
     }
     errors := map[string]interface{}{}
-    if result.StatusCode != assert.StatusCode {
-      errors["statusCode"] = map[string]interface{}{"expected": assert.StatusCode, "actual": result.StatusCode}
+    if result.Response.StatusCode != assert.StatusCode {
+      errors["statusCode"] = map[string]interface{}{"expected": assert.StatusCode, "actual": result.Response.StatusCode}
     }
-    if assert.PayloadSize > 0 && result.ResponsePayloadSize != assert.PayloadSize {
-      errors["payloadLength"] = map[string]interface{}{"expected": assert.PayloadSize, "actual": result.ResponsePayloadSize}
+    if assert.PayloadSize > 0 && result.Response.PayloadSize != assert.PayloadSize {
+      errors["payloadLength"] = map[string]interface{}{"expected": assert.PayloadSize, "actual": result.Response.PayloadSize}
     }
-    if len(assert.Payload) > 0 && bytes.Compare(assert.payload, result.Data) != 0 {
-      errors["payload"] = map[string]interface{}{"expected": assert.PayloadSize, "actual": result.ResponsePayloadSize}
+    if len(assert.Payload) > 0 && bytes.Compare(assert.payload, result.Response.Payload) != 0 {
+      errors["payload"] = map[string]interface{}{"expected": assert.PayloadSize, "actual": result.Response.PayloadSize}
     }
-    if len(assert.headersRegexp) > 0 && !util.ContainsAllHeaders(result.ResponseHeaders, assert.headersRegexp) {
-      errors["headers"] = map[string]interface{}{"expected": assert.Headers, "actual": result.ResponseHeaders}
+    if len(assert.headersRegexp) > 0 && !util.ContainsAllHeaders(result.Response.Headers, assert.headersRegexp) {
+      errors["headers"] = map[string]interface{}{"expected": assert.Headers, "actual": result.Response.Headers}
     }
     if assert.Retries > 0 && result.Retries != assert.Retries {
       errors["retries"] = map[string]interface{}{"expected": assert.Retries, "actual": result.Retries}
     }
-    if assert.SuccessURL != "" && result.URL != assert.SuccessURL {
-      errors["successURL"] = map[string]interface{}{"expected": assert.SuccessURL, "actual": result.URL}
+    if assert.SuccessURL != "" && result.Request.URL != assert.SuccessURL {
+      errors["successURL"] = map[string]interface{}{"expected": assert.SuccessURL, "actual": result.Request.URL}
     }
     if assert.FailedURL != "" && result.FailedURLs[assert.FailedURL] == 0 {
       errors["failedURL"] = map[string]interface{}{"expected": assert.FailedURL, "actual": result.FailedURLs}
@@ -227,9 +266,9 @@ func (result *InvocationResult) validateResponse() {
 
 func (ir *InvocationResult) trackRequest(start, end time.Time) {
   ir.TookNanos = int(end.Sub(start).Nanoseconds())
-  ir.LastRequestAt = end
-  if ir.FirstRequestAt.IsZero() {
-    ir.FirstRequestAt = end
+  ir.Request.LastRequestAt = end
+  if ir.Request.FirstRequestAt.IsZero() {
+    ir.Request.FirstRequestAt = end
   }
 }
 
@@ -258,7 +297,7 @@ func (is *InvocationStatus) incrementABCount() {
 
 func (is *InvocationStatus) trackStatus(result *InvocationResult) {
   is.lock.Lock()
-  isRepeatStatus := is.lastStatusCode == result.StatusCode
+  isRepeatStatus := is.lastStatusCode == result.Response.StatusCode
   if !isRepeatStatus && is.lastStatusCount > 1 || is.lastErrorCount > 1 {
     is.reportRepeatedResponse()
     is.lastStatusCode = -1
@@ -267,7 +306,7 @@ func (is *InvocationStatus) trackStatus(result *InvocationResult) {
     is.lastStatusCount++
   } else {
     is.lastStatusCount = 1
-    is.lastStatusCode = result.StatusCode
+    is.lastStatusCode = result.Response.StatusCode
   }
   is.lastError = ""
   is.lastErrorCount = 0
@@ -275,7 +314,7 @@ func (is *InvocationStatus) trackStatus(result *InvocationResult) {
   is.lock.Unlock()
   if global.EnableInvocationLogs || !isRepeatStatus {
     if global.EnableInvocationLogs {
-      log.Println(util.ToJSON(result))
+      log.Println(util.ToJSONText(result))
     }
     is.lock.Lock()
     if !isRepeatStatus {

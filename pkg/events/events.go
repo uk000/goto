@@ -291,7 +291,7 @@ func storeAndPublishEvent(event *Event) {
     if global.PublishEvents && global.RegistryURL != "" {
       url := fmt.Sprintf("%s/registry/peers/%s/%s/events/store", global.RegistryURL, event.Peer, event.PeerHost)
       if resp, err := registryClient.Post(url, ContentTypeJSON,
-        strings.NewReader(util.ToJSON(event))); err == nil {
+        strings.NewReader(util.ToJSONText(event))); err == nil {
         util.CloseResponse(resp)
       }
     } else {
@@ -322,10 +322,10 @@ func flushEvents(w http.ResponseWriter, r *http.Request) {
     FlushEvents()
     msg = "Events Flushed"
     SendEvent(msg, "")
-    fmt.Fprintln(w, util.ToJSON(map[string]interface{}{"flushed": true}))
+    fmt.Fprintln(w, util.ToJSONText(map[string]interface{}{"flushed": true}))
   } else {
     msg = "Events not enabled"
-    fmt.Fprintln(w, util.ToJSON(map[string]interface{}{"flushed": false, "error": msg}))
+    fmt.Fprintln(w, util.ToJSONText(map[string]interface{}{"flushed": false, "error": msg}))
   }
   util.AddLogMessage(msg, r)
 }
@@ -334,10 +334,10 @@ func clearEvents(w http.ResponseWriter, r *http.Request) {
   msg := ""
   if global.EnableEvents {
     ClearEvents()
-    fmt.Fprintln(w, util.ToJSON(map[string]interface{}{"cleared": true}))
+    fmt.Fprintln(w, util.ToJSONText(map[string]interface{}{"cleared": true}))
   } else {
     msg = "Events not enabled"
-    fmt.Fprintln(w, util.ToJSON(map[string]interface{}{"flushed": false, "error": msg}))
+    fmt.Fprintln(w, util.ToJSONText(map[string]interface{}{"flushed": false, "error": msg}))
   }
   util.AddLogMessage(msg, r)
 }
@@ -389,7 +389,7 @@ func searchEvents(w http.ResponseWriter, r *http.Request) {
     }
     lock.RUnlock()
     for _, event := range unfilteredEvents {
-      data := util.ToJSON(event)
+      data := util.ToJSONText(event)
       if pattern.MatchString(data) {
         if !getData {
           event = newEvent(event.Title, event.Summary, "...", event.At, event.Peer, event.PeerHost)

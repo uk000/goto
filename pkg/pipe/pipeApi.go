@@ -17,14 +17,14 @@
 package pipe
 
 import (
-	"fmt"
-	"goto/pkg/global"
-	"goto/pkg/util"
-	"net/http"
+  "fmt"
+  "goto/pkg/global"
+  "goto/pkg/util"
+  "net/http"
+  "strings"
 
-	"github.com/gorilla/mux"
+  "github.com/gorilla/mux"
 )
-
 
 var (
   Handler = util.ServerHandler{Name: "pipe", SetRoutes: SetRoutes}
@@ -32,41 +32,77 @@ var (
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   pipeRouter := util.PathRouter(r, "/pipe")
-  
-	util.AddRoute(pipeRouter, "", getPipelines, "GET")
-	util.AddRoute(pipeRouter, "/create/{name}", createPipeline, "POST", "PUT")
+
+  util.AddRoute(pipeRouter, "", getPipelines, "GET")
+  util.AddRoute(pipeRouter, "/create/{name}", createPipeline, "POST", "PUT")
+  util.AddRoute(pipeRouter, "/add", createPipeline, "POST", "PUT")
+  util.AddRoute(pipeRouter, "/{name}/clear", clearPipeline, "POST", "PUT")
+  util.AddRoute(pipeRouter, "/clear/{name}", clearPipeline, "POST", "PUT")
+  util.AddRoute(pipeRouter, "/remove/{name}", removePipeline, "POST", "PUT")
+  util.AddRoute(pipeRouter, "/{name}/remove", removePipeline, "POST", "PUT")
 
   util.AddRoute(pipeRouter, "/{pipe}/sources/add", addSource, "POST", "PUT")
-  util.AddRouteQ(pipeRouter, "/{pipe}/sources/k8s/add/{name}", addK8sSource, "id", "POST", "PUT")
+  util.AddRoute(pipeRouter, "/{pipe}/sources/remove/{name}", removeSource, "POST", "PUT")
+
+  util.AddRouteQ(pipeRouter, "/{pipe}/sources/add/k8s/{name}", addK8sSource, "spec", "POST", "PUT")
+  util.AddRoute(pipeRouter, "/{pipe}/sources/add/script/{name}", addScriptSource, "POST", "PUT")
   util.AddRoute(pipeRouter, "/{pipe}/templates/store", storeTemplates, "POST", "PUT")
 
-	util.AddRoute(pipeRouter, "/{name}/run", runPipeline, "POST", "PUT")
+  util.AddRoute(pipeRouter, "/{name}/run", runPipeline, "POST", "PUT")
 
   util.AddRouteQ(pipeRouter, "/dir/set", setWorkDir, "dir", "{dir}", "POST", "PUT")
 }
 
 func getPipelines(w http.ResponseWriter, r *http.Request) {
-	util.WriteStringJsonPayload(w, Manager.DumpPipes())
+  util.WriteStringJsonPayload(w, Manager.DumpPipes())
 }
 
 func createPipeline(w http.ResponseWriter, r *http.Request) {
+  msg := ""
   name := util.GetStringParamValue(r, "name")
-  Manager.CreatePipe(name)
-  msg := fmt.Sprintf("Pipe [%s] created", name)
+  if name != "" {
+    Manager.CreatePipe(name)
+    msg = fmt.Sprintf("Pipe [%s] created", name)
+  } else {
+    pipe := &Pipe{}
+    content := util.Read(r.Body)
+    if err := util.ReadJson(content, &pipe); err == nil {
+      Manager.AddPipe(pipe)
+      msg = fmt.Sprintf("Pipe [%s] added", pipe.Name)
+    } else {
+      msg = fmt.Sprintf("Failed to parse pipe with error: %s", err.Error())
+      fmt.Println(content)
+    }
+  }
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
 
+func clearPipeline(w http.ResponseWriter, r *http.Request) {
+  name := util.GetStringParamValue(r, "name")
+  Manager.ClearPipe(name)
+  msg := fmt.Sprintf("Pipe [%s] cleared", name)
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
+}
+
+func removePipeline(w http.ResponseWriter, r *http.Request) {
+  name := util.GetStringParamValue(r, "name")
+  Manager.RemovePipe(name)
+  msg := fmt.Sprintf("Pipe [%s] removed", name)
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
+}
 func addSource(w http.ResponseWriter, r *http.Request) {
   msg := ""
   pipe := util.GetStringParamValue(r, "pipe")
   source := &PipelineSource{}
   if err := util.ReadJsonPayload(r, &source); err == nil {
     if err := Manager.AddSource(pipe, source); err == nil {
-    	msg = fmt.Sprintf("Added Source [%s] with Resource Spec [%s] to Pipe [%s]", source.Name, source.Spec, pipe)
-		} else {
-			msg = fmt.Sprintf("Failed to add source with error: %s", err.Error())
-		}
+      msg = fmt.Sprintf("Added Source [%s] with Resource Spec [%s] to Pipe [%s]", source.Name, source.Spec, pipe)
+    } else {
+      msg = fmt.Sprintf("Failed to add source with error: %s", err.Error())
+    }
   } else {
     msg = fmt.Sprintf("Failed to parse source with error: %s", err.Error())
   }
@@ -74,29 +110,62 @@ func addSource(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, msg)
 }
 
+func removeSource(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  pipe := util.GetStringParamValue(r, "pipe")
+  sourceName := util.GetStringParamValue(r, "name")
+  if pipe == "" || sourceName == "" {
+    msg = "Missing pipe and/or source name"
+    w.WriteHeader(http.StatusBadRequest)
+  } else {
+    if err := Manager.RemoveSource(pipe, sourceName); err == nil {
+      msg = fmt.Sprintf("Removed Source [%s] from Pipe [%s]", sourceName, pipe)
+    } else {
+      msg = fmt.Sprintf("Failed to remove source [%s] from pipe [%s] with error: %s", sourceName, pipe, err.Error())
+    }
+  }
+  fmt.Fprintln(w, msg)
+  util.AddLogMessage(msg, r)
+}
+
 func addK8sSource(w http.ResponseWriter, r *http.Request) {
   msg := ""
   pipe := util.GetStringParamValue(r, "pipe")
   sourceName := util.GetStringParamValue(r, "name")
-  resourceID := util.GetStringParamValue(r, "id")
+  resourceID := util.GetStringParamValue(r, "spec")
   if pipe == "" || sourceName == "" || resourceID == "" {
     msg = "Missing pipe and/or source name"
     w.WriteHeader(http.StatusBadRequest)
   } else {
     if err := Manager.AddK8sSource(pipe, sourceName, resourceID); err == nil {
-    	msg = fmt.Sprintf("Added K8s Source [%s] with Resource Spec [%s] to Pipe [%s]", sourceName, resourceID, pipe)
-		} else {
-			msg = fmt.Sprintf("Failed to add K8s source with error: %s", err.Error())
-		}
+      msg = fmt.Sprintf("Added K8s Source [%s] with Resource Spec [%s] to Pipe [%s]", sourceName, resourceID, pipe)
+    } else {
+      msg = fmt.Sprintf("Failed to add K8s source [%s] to pipe [%s] with error: %s", sourceName, pipe, err.Error())
+    }
+  }
+  fmt.Fprintln(w, msg)
+  util.AddLogMessage(msg, r)
+}
+
+func addScriptSource(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  pipe := util.GetStringParamValue(r, "pipe")
+  sourceName := util.GetStringParamValue(r, "name")
+  if pipe == "" || sourceName == "" {
+    msg = "Missing pipe and/or source name"
+    w.WriteHeader(http.StatusBadRequest)
+  } else {
+    Manager.AddScriptSource(pipe, sourceName, util.Read(r.Body))
+    msg = fmt.Sprintf("Added Script Source [%s] to Pipe [%s]", sourceName, pipe)
   }
   fmt.Fprintln(w, msg)
   util.AddLogMessage(msg, r)
 }
 
 func storeTemplates(w http.ResponseWriter, r *http.Request) {
-  pipe := util.GetStringParamValue(r, "pipe")
-  result := Manager.StoreTemplates(pipe, util.ReadBytes(r.Body))
-  util.AddLogMessage(util.WriteJsonPayload(w, result), r)
+  // pipe := util.GetStringParamValue(r, "pipe")
+  // result := Manager.StoreTemplates(pipe, util.ReadBytes(r.Body))
+  // util.AddLogMessage(util.WriteJsonPayload(w, result), r)
 }
 
 func setWorkDir(w http.ResponseWriter, r *http.Request) {
@@ -115,17 +184,18 @@ func setWorkDir(w http.ResponseWriter, r *http.Request) {
 func runPipeline(w http.ResponseWriter, r *http.Request) {
   msg := ""
   name := util.GetStringParamValue(r, "name")
+  yaml := strings.Contains(r.Header.Get("Accept"), "yaml")
   if name == "" {
     msg = "Missing pipe name"
     w.WriteHeader(http.StatusBadRequest)
   } else {
-		if err := Manager.RunPipe(name, w); err == nil {
-			msg = fmt.Sprintf("Pipe [%s] Ran Successfully", name)
-		} else {
-			msg = fmt.Sprintf("Failed to run pipeline [%s] with error: %s", name, err.Error())
-			fmt.Fprintln(w, msg)
-			w.WriteHeader(http.StatusInternalServerError)
-		}
-	}
+    if err := Manager.RunPipe(name, w, yaml); err == nil {
+      msg = fmt.Sprintf("Pipe [%s] Ran Successfully", name)
+    } else {
+      msg = fmt.Sprintf("Failed to run pipeline [%s] with error: %s", name, err.Error())
+      fmt.Fprintln(w, msg)
+      w.WriteHeader(http.StatusInternalServerError)
+    }
+  }
   util.AddLogMessage(msg, r)
 }

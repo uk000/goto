@@ -80,7 +80,7 @@ func removeScript(w http.ResponseWriter, r *http.Request) {
 
 func runScript(w http.ResponseWriter, r *http.Request) {
   name := util.GetStringParamValue(r, "name")
-  Scripts.RunScript(name, w)
+  Scripts.RunScript(name, r.Body, w)
   msg := fmt.Sprintf("Script [%s] run successfully", name)
   util.AddLogMessage(msg, r)
 }
@@ -114,11 +114,11 @@ func (sm *ScriptManager) RemoveScript(name string) {
   delete(sm.scripts, name)
 }
 
-func (sm *ScriptManager) RunScript(name string, out io.Writer) {
+func (sm *ScriptManager) RunScript(name string, in io.Reader, out io.Writer) {
   sm.scriptsLock.RLock()
   script := sm.scripts[name]
   sm.scriptsLock.RUnlock()
-  script.runScript(out)
+  script.runScript(in, out)
 }
 
 func (sm *ScriptManager) DumpScripts(out io.Writer) {
@@ -152,19 +152,20 @@ func (s *Script) loadCommands(lines []string) {
   s.commands = strings.Join(commands, "; ")
 }
 
-func (s *Script) runScript(out io.Writer) {
+func (s *Script) runScript(in io.Reader, out io.Writer) {
   command := "sh"
   args := []string{"-c", s.commands}
   cmd := exec.Command(command, args...)
+  cmd.Stdin = in
   cmd.Stdout = out
   cmd.Stderr = out
   if err := cmd.Run(); err != nil {
-    log.Printf("Failed to run script [%s]. Error: [%s]\n", s.Text, err.Error())
+    log.Printf("Script: Failed to run script [%s]. Error: [%s]\n", s.Text, err.Error())
   } else {
-    log.Printf("Script [%s] ran successfully.\n", s.Text)
+    log.Printf("Script: Finished script successfully [%s].\n", s.Text)
   }
 }
 
 func (s *Script) runScriptToStdOut() {
-  s.runScript(os.Stdout)
+  s.runScript(os.Stdin, os.Stdout)
 }

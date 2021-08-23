@@ -137,7 +137,7 @@ func reportTimeoutTracking(w http.ResponseWriter, r *http.Request) {
   result := map[string]interface{}{}
   result["headers"] = tt.headersMap
   result["all"] = tt.allTimeouts
-  output := util.ToJSON(result)
+  output := util.ToJSONText(result)
   util.AddLogMessage(output, r)
   w.WriteHeader(http.StatusOK)
   fmt.Fprintln(w, output)

@@ -28,6 +28,7 @@ import (
   "io/ioutil"
   "net"
   "net/http"
+  "net/url"
   "reflect"
   "regexp"
   "strconv"
@@ -38,6 +39,7 @@ import (
   "github.com/gorilla/mux"
   "golang.org/x/net/http2"
   "google.golang.org/grpc/metadata"
+  "sigs.k8s.io/yaml"
 )
 
 type ContextKey struct{ Key string }
@@ -68,9 +70,11 @@ type RequestStore struct {
   ServerName              string
   TLSVersion              string
   TLSVersionNum           uint16
+  RequestPayloadSize      int
   TrafficDetails          []string
   LogMessages             []string
   InterceptResponseWriter interface{}
+  TunnelEndpoints         interface{}
   TunnelLock              sync.RWMutex
 }
 
@@ -86,6 +90,8 @@ var (
   utf8Regexp              = regexp.MustCompile("(?i)utf-8")
   knownTextMimeTypeRegexp = regexp.MustCompile(".*(text|html|json|yaml).*")
   upgradeRegexp           = regexp.MustCompile("(?i)upgrade")
+
+  WillTunnel func(*http.Request, *RequestStore) bool
 )
 
 func GetRequestStore(r *http.Request) *RequestStore {
@@ -97,23 +103,23 @@ func GetRequestStore(r *http.Request) *RequestStore {
 }
 
 func WithRequestStore(r *http.Request) (context.Context, *RequestStore) {
+  rs := &RequestStore{}
+  ctx := context.WithValue(r.Context(), RequestStoreKey, rs)
   isAdminRequest := CheckAdminRequest(r)
-  rs := &RequestStore{
-    IsAdminRequest:        isAdminRequest,
-    IsVersionRequest:      strings.HasPrefix(r.RequestURI, "/version"),
-    IsLockerRequest:       strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker"),
-    IsPeerEventsRequest:   strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/events"),
-    IsMetricsRequest:      strings.HasPrefix(r.RequestURI, "/metrics") || strings.HasPrefix(r.RequestURI, "/stats"),
-    IsReminderRequest:     strings.Contains(r.RequestURI, "/remember"),
-    IsProbeRequest:        global.IsReadinessProbe(r) || global.IsLivenessProbe(r),
-    IsHealthRequest:       !isAdminRequest && strings.HasPrefix(r.RequestURI, "/health"),
-    IsStatusRequest:       !isAdminRequest && strings.HasPrefix(r.RequestURI, "/status"),
-    IsDelayRequest:        !isAdminRequest && strings.Contains(r.RequestURI, "/delay"),
-    IsPayloadRequest:      !isAdminRequest && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload")),
-    IsTunnelRequest:       strings.HasPrefix(r.RequestURI, "/tunnel=") || global.HasTunnel(r, nil),
-    IsTunnelConfigRequest: strings.HasPrefix(r.RequestURI, "/tunnels"),
-  }
-  return context.WithValue(r.Context(), RequestStoreKey, rs), rs
+  rs.IsAdminRequest = isAdminRequest
+  rs.IsVersionRequest = strings.HasPrefix(r.RequestURI, "/version")
+  rs.IsLockerRequest = strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker")
+  rs.IsPeerEventsRequest = strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/events")
+  rs.IsMetricsRequest = strings.HasPrefix(r.RequestURI, "/metrics") || strings.HasPrefix(r.RequestURI, "/stats")
+  rs.IsReminderRequest = strings.Contains(r.RequestURI, "/remember")
+  rs.IsProbeRequest = global.IsReadinessProbe(r) || global.IsLivenessProbe(r)
+  rs.IsHealthRequest = !isAdminRequest && strings.HasPrefix(r.RequestURI, "/health")
+  rs.IsStatusRequest = !isAdminRequest && strings.HasPrefix(r.RequestURI, "/status")
+  rs.IsDelayRequest = !isAdminRequest && strings.Contains(r.RequestURI, "/delay")
+  rs.IsPayloadRequest = !isAdminRequest && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload"))
+  rs.IsTunnelRequest = strings.HasPrefix(r.RequestURI, "/tunnel=") || !isAdminRequest && WillTunnel(r, rs)
+  rs.IsTunnelConfigRequest = strings.HasPrefix(r.RequestURI, "/tunnels")
+  return ctx, rs
 }
 
 func IsH2(r *http.Request) bool {
@@ -145,8 +151,16 @@ func SetHeadersSent(r *http.Request, sent bool) {
   GetRequestStore(r).IsHeadersSent = sent
 }
 
+func GetTunnelCount(r *http.Request) int {
+  return GetRequestStore(r).TunnelCount
+}
+
 func SetTunnelCount(r *http.Request, count int) {
   GetRequestStore(r).TunnelCount = count
+}
+
+func GetTunnelEndpoints(r *http.Request) interface{} {
+  return GetRequestStore(r).TunnelEndpoints
 }
 
 func IsTrafficEventReported(r *http.Request) bool {
@@ -186,6 +200,10 @@ func SetTunnelRequest(r *http.Request) {
 
 func UnsetTunnelRequest(r *http.Request) {
   GetRequestStore(r).IsTunnelRequest = false
+}
+
+func SetRequestPayloadSize(r *http.Request, size int) {
+  GetRequestStore(r).RequestPayloadSize = size
 }
 
 func GetPortNumFromGRPCAuthority(ctx context.Context) int {
@@ -299,7 +317,7 @@ func AddHeaderWithPrefix(prefix, header, value string, headers http.Header) {
   headers.Add(header, value)
 }
 
-func CopyHeaders(prefix string, r *http.Request,  w http.ResponseWriter, headers http.Header, copyHost, copyURI, copyContentType bool) {
+func CopyHeaders(prefix string, r *http.Request, w http.ResponseWriter, headers http.Header, copyHost, copyURI, copyContentType bool) {
   rs := GetRequestStore(r)
   hostCopied := false
   responseHeaders := w.Header()
@@ -314,6 +332,7 @@ func CopyHeaders(prefix string, r *http.Request,  w http.ResponseWriter, headers
       hostCopied = true
     }
   }
+  AddHeaderWithPrefix(prefix, "Payload-Size", strconv.Itoa(rs.RequestPayloadSize), responseHeaders)
   if !hostCopied && copyHost {
     AddHeaderWithPrefix(prefix, "Host", r.Host, responseHeaders)
   }
@@ -341,12 +360,12 @@ func ToLowerHeaders(headers map[string][]string) map[string][]string {
 func GetResponseHeadersLog(header http.Header) string {
   var s strings.Builder
   s.Grow(128)
-  fmt.Fprintf(&s, "{\"ResponseHeaders\": %s}", ToJSON(header))
+  fmt.Fprintf(&s, "{\"ResponseHeaders\": %s}", ToJSONText(header))
   return s.String()
 }
 
 func GetRequestHeadersLog(r *http.Request) string {
-  return ToJSON(r.Header)
+  return ToJSONText(r.Header)
 }
 
 func ReadJsonPayload(r *http.Request, t interface{}) error {
@@ -386,6 +405,19 @@ func WriteJson(w io.Writer, t interface{}) string {
   return ""
 }
 
+func WriteYaml(w io.Writer, t interface{}) string {
+  if reflect.ValueOf(t).IsNil() {
+    fmt.Fprintln(w, "")
+  } else if b, err := yaml.Marshal(t); err == nil {
+    data := string(b)
+    fmt.Fprintln(w, data)
+    return data
+  } else {
+    fmt.Printf("Failed to marshal yaml with error: %s\n", err.Error())
+  }
+  return ""
+}
+
 func WriteErrorJson(w http.ResponseWriter, error string) {
   fmt.Fprintf(w, "{\"error\":\"%s\"}", error)
 }
@@ -402,8 +434,8 @@ func CheckAdminRequest(r *http.Request) bool {
   if pieces := strings.Split(uri, "/"); len(pieces) > 1 {
     uri = pieces[1]
   }
-  return uri == "metrics" || uri == "server" || uri == "request" || uri == "response" || 
-    uri == "listeners" || uri == "label" || uri == "registry" ||uri == "client" || 
+  return uri == "metrics" || uri == "server" || uri == "request" || uri == "response" ||
+    uri == "listeners" || uri == "label" || uri == "registry" || uri == "client" ||
     uri == "job" || uri == "probes" || uri == "tcp" || uri == "log" || uri == "events" || uri == "tunnels"
 }
 
@@ -455,9 +487,21 @@ func IsTunnelRequest(r *http.Request) bool {
   rs := GetRequestStore(r)
   isTunnelRequest := rs.IsTunnelRequest && !rs.IsTunnelConfigRequest
   if !isTunnelRequest {
-    if gotoTunnel := r.Header[HeaderGotoTunnel]; len(gotoTunnel) > 0 {
+    isConnect := r.Method == http.MethodConnect
+    isGotoTunnel := len(r.Header[HeaderGotoTunnel]) > 0
+    isProxyConnection := len(r.Header[HeaderProxyConnection]) > 0
+    if isConnect || isGotoTunnel || isProxyConnection {
       isTunnelRequest = true
       rs.IsTunnelRequest = true
+    }
+    if isConnect || isProxyConnection {
+      r.Header.Add(HeaderGotoTunnel, r.Host)
+    }
+    if isProxyConnection {
+      if u, err := url.Parse(r.RequestURI); err == nil {
+        r.RequestURI = u.Path
+      }
+      delete(r.Header, HeaderProxyConnection)
     }
   }
   return isTunnelRequest
@@ -525,6 +569,55 @@ func DiscardResponseBody(r *http.Response) int {
 func CloseResponse(r *http.Response) {
   defer r.Body.Close()
   io.Copy(ioutil.Discard, r.Body)
+}
+
+func TransformPayload(sourcePayload string, transforms []*Transform, isYaml bool) string {
+  var sourceJSON JSON
+  isYAML := false
+  if isYaml {
+    sourceJSON = FromYAML(sourcePayload)
+    isYAML = true
+  } else {
+    sourceJSON = FromJSONText(sourcePayload)
+  }
+  if sourceJSON.IsEmpty() {
+    return sourcePayload
+  }
+  targetPayload := ""
+  for _, t := range transforms {
+    var targetJSON JSON
+    if t.Payload != nil {
+      targetJSON = FromJSON(t.Payload).Clone()
+    } else {
+      targetJSON = sourceJSON
+    }
+    if targetJSON != nil && !targetJSON.IsEmpty() {
+      if targetJSON.Transform(t.Mappings, sourceJSON) {
+        if isYAML {
+          targetPayload = targetJSON.ToYAML()
+        } else {
+          targetPayload = targetJSON.ToJSONText()
+        }
+      }
+      targetPayload = targetJSON.TransformPatterns(targetPayload)
+    }
+    if targetPayload != "" {
+      break
+    }
+  }
+  if targetPayload == "" {
+    targetPayload = sourcePayload
+  }
+  return targetPayload
+}
+
+func SubstitutePayloadMarkers(payload string, keys []string, values map[string]string) string {
+  for _, key := range keys {
+    if values[key] != "" {
+      payload = strings.Replace(payload, MarkFiller(key), values[key], -1)
+    }
+  }
+  return payload
 }
 
 func IsH2Upgrade(r *http.Request) bool {

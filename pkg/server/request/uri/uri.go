@@ -173,7 +173,7 @@ func getURIConfigs(w http.ResponseWriter, r *http.Request) {
   port := initPort(r)
   uriLock.RLock()
   defer uriLock.RUnlock()
-  result := util.ToJSON(map[string]interface{}{
+  result := util.ToJSONText(map[string]interface{}{
     "uriDelayByPort":  uriDelayByPort[port],
     "uriStatusByPort": uriStatusByPort[port],
     "uriCountsByPort": uriCountsByPort[port],
@@ -186,7 +186,7 @@ func getURICallCounts(w http.ResponseWriter, r *http.Request) {
   port := initPort(r)
   uriLock.RLock()
   defer uriLock.RUnlock()
-  result := util.ToJSON(uriCountsByPort[port])
+  result := util.ToJSONText(uriCountsByPort[port])
   util.AddLogMessage(fmt.Sprintf("Port [%s] Reporting URI Call Counts: %s", port, result), r)
   fmt.Fprintf(w, "%s\n", result)
 }

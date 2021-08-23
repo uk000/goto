@@ -49,7 +49,7 @@ import (
 func Run() {
   global.PeerAddress = util.GetHostIP() + ":" + strconv.Itoa(global.ServerPort)
   global.GetPeers = registry.GetPeers
-  global.HasTunnel = tunnel.HasTunnel
+  util.WillTunnel = tunnel.WillTunnel
   global.StoreEventInCurrentLocker = registry.StoreEventInCurrentLocker
   listeners.Configure(ServeHTTPListener, ServeGRPCListener, StartTCPServer)
   metrics.Startup()
@@ -59,6 +59,7 @@ func Run() {
     request.Handler, response.Handler, tcp.Handler, script.Handler, job.Handler, log.Handler,
     k8s.Handler, pipe.Handler, echo.Handler, catchall.Handler)
   invocation.Shutdown()
+  job.Manager.StopJobWatch()
   metrics.Shutdown()
   results.StopRegistrySender()
   os.Exit(0)
