@@ -8,7 +8,21 @@
 
 ## What is it?
 
-A multi-faceted application to assist with various kinds of automated testing. It can act as a Client, a Server, a Proxy, a Job Executor, a Registry, or even all of these at once.
+A multi-faceted application to assist with various kinds of automated testing, debugging, bug hunt, runtime analysis and investigations.
+
+It can act as:
+- A [client](#goto-client-targets-and-traffic) that can generate HTTP/S, TCP, and GRPC traffic to other services (including other `goto` instances), track summary results of the traffic, and report results via [APIs](client-apis) as well as publish results to a [Goto registry](#registry). 
+- A [server](#goto-server-features) that can respond to HTTP/S, GRPC and TCP requests, and can be configured to respond to any custom API. The server features allow for various kinds of chaos testing and debugging/investigations. For example, respond with standard or custom responses([Response Status](#-response-status), [Response Payload](#-response-payload), [Response Delay](#-response-delay)), on-the-fly HTTP [Response Status](#-status-api) and/or [Delay](#-delay-api), [streaming/chunked response](#-stream-chunked-payload), and much more. It can track summary data about the received calls, and make those results available via various APIs. The server allows opening/closing [listener ports](#-listeners) on the fly in plain or TLS mode (with [auto-generated TLS certs](#tls-listeners)). It supports [payload transformations](#payload-transformation) to allow extracting data from incoming requests and injecting it into the outgoing response, and many more features. 
+- A [tunneling proxy](#tunnel) that can act as an HTTP/S passthrough tunnel, allowing any arbitrary traffic from a source to a destination to be re-routed via a `goto` instance and giving you the opportunity to inspect the traffic.
+- A [job executor](#jobs-features) that can run shell commands/scripts as well as make HTTP calls, collect and report results. It allows chaining of jobs together so that output of one job triggers another job with input. Additionally, jobs can be auto-executed via cron, and can act as a source of data for pipelines (more on this under `pipelines`)
+- A [registry](#registry) to orchestrate operations across other `goto` instances, collect and summarize results from those `goto` instances, and make the federated summary results available via APIs. A `goto` registry can also be paired with another `goto` registry instance and export/load data from one to the other to keep another backup of the collected results.
+- A [K8s proxy](#k8s-features) that can connect to and read resource information from a K8s cluster and make it available via APIs. It also supports watching for resource changes, and act as a source of data for pipelines (see below)
+- A complex multi-step [pipeline](#pipeline-features) orchestration engine that can:
+  - Source data from Shell Commands/Scripts, Client-side HTTP calls, Server-side HTTP responses, K8s resources, K8s pod commands, and Tunneled traffic.
+  - Feed the sourced data as input to transformation steps and/or to other source steps.
+  - Run JSONPath, JQ, Go Template or Regex transformations on the sourced data to extract information that can be fed to other sources or sent as output.
+  - Define stages to orchestrate invocation of sources and transformations in a specific sequence.
+  - Define watches on sources so that any changes on the source (e.g. K8s resources, cron jobs, or HTTP traffic) triggers the pipeline that the source is attached to, allowing some complex steps of data extraction, transformation and analysis to occur each time some external event occurs.
 
 ## Why?
 
@@ -27,9 +41,10 @@ go build -o goto .
 
 - Say you need an application deployed as a service in k8s or on VMs, that can respond to requests on several ports using HTTP, HTTP/2, GRPC or TCP protocols both over plain text and TLS. `Goto` is what you need.
 - Say you want to test a client or a proxy, and want to introduce some chaos in your testing, so you need a service that can open or close a port on the fly, or can convert a port from plaintext to TLS and vice versa on the fly. `Goto` does it.
-- Say you need to test a client against different specific response payloads, so you need a substitute mock service that can stand in for the real service, where you can configure a payload on the fly for specific request URIs, headers, etc. Go `Goto`.
+- Or, you need to test a client application's behavior against different specific response payloads, so you need a substitute mock service that can stand in for the real service, where you can configure a payload on the fly for specific request URIs, headers, etc. Go `Goto`.
 - You need a test server application that can perform some quick on-the-fly transformations on incoming request, extracting values from headers/query/URI/body and produce semi-dynamic response based on templates.
-- A lot more scenarios can benefit from `goto`. See some more scenarios further below in the doc.
+- You need to inspect some existing traffic between two applications in order to investigate some issue. The traffic passes through various network layers, and you wish to analyze the state of a request at a certain point in its journey, e.g. what does the request look like once it goes through a K8s ingress gateway.
+- A lot more scenarios can benefit from `goto`. More scenarios are and will be described further below in the doc.
 
 ## Some simple usage examples?
 
@@ -165,18 +180,20 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 
 ### [Startup Command](#goto-startup-command)
 
-### Goto Client Features
-
+### Goto Client
 - [Targets and Traffic](#goto-client-targets-and-traffic)
 - [Client APIs](#client-apis)
 - [Client Events](#client-events)
 - [Client JSON Schemas](docs/client-api-json-schemas.md)
 - [Client APIs and Results Examples](docs/client-api-examples.md)
 
-### [Server Features](#goto-server-features)
+### GRPC Client
+- [GRPC APIs](#grpc-apis)
 
+### Goto Server
+- [Server Features](#goto-server-features)
 - [Goto Response Headers](#goto-response-headers)
-- [Logs](#goto-server-logs)
+- [Logs](#goto-logs)
 - [Goto Version](#-goto-version)
 - [Events](#-events)
 - [Metrics](#-metrics)
@@ -202,7 +219,6 @@ The docker image is built with several useful utilities included: `curl`, `wget`
 - [Catch All](#-catch-all)
 
 ### Goto Tunnel
-
 - [Tunnel](#tunnel)
 
 ### Goto Proxy
@@ -446,7 +462,7 @@ Once the server is up and running, rest of the interactions and configurations a
 
 # Goto Client: Targets and Traffic
 
-As a client tool, `goto` offers the feature to configure multiple targets and send http traffic:
+As a client tool, `goto` offers the feature to configure multiple targets and send http/https/tcp/grpc traffic:
 
 - Allows targets to be configured and invoked via REST APIs
 - Configure targets to be invoked ahead of time before invocation, as well as auto-invoke targets upon configuration
@@ -456,6 +472,7 @@ As a client tool, `goto` offers the feature to configure multiple targets and se
 - Retry requests for specific response codes, and option to use a fallback URL for retries
 - Make simultaneous calls to two URLs to perform an A-B comparison of responses. In AB mode, the same request ID (enabled via sendID flag) are used for both A and B calls, but with a suffix `-B` used for B calls. This allows tracking the A and B calls in logs.
 - Have client invoke a random URL for each request from a set of URLs
+- Generate hybrid traffic that includes HTTP/S, H2, TCP and GRPC requests.
 
 The invocation results get accumulated across multiple invocations until cleared explicitly. Various results APIs can be used to read the accumulated results. Clearing of all results resets the invocation counter too, causing the next invocation to start at counter 1 again. When a peer is connected to a registry instance, it stores all its invocation results in a registry locker. The peer publishes its invocation results to the registry at an interval of 3-5 seconds depending on the flow of results. See Registry APIs for detail on how to query results accumulated from multiple peers.
 
@@ -495,6 +512,7 @@ Client sends header `From-Goto-Host` to pass its identity to the server.
 
 ###### <small> [Back to TOC](#toc) </small>
 
+
 # <a name="client-events"></a>
 #### Client Events
 - `Target Added`: an invocation target was added
@@ -526,11 +544,29 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 
 <br/>
 
+# GRPC Client features
+
+`Goto` can act as a generic GRPC client that allows uploading of proto files in order to auto-discover services and methods, and invoke those service methods. The GRPC Client feature is exposed via various APIs and also used by the goto client for generating grpc traffic.
+
+# <a name="grpc-apis"></a>
+#### GRPC APIs
+|METHOD|URI|Description|
+|---|---|---|
+| POST, PUT | /grpc/protos/add<br/>/`{name}`?`path={path}` | Upload a GRPC proto file as request body payload. The proto will be parsed to extract service definitions. The uploaded proto file gets saved under `./protos` dir. If the optional path param is passed, the given path is appended to `./protos/`. It assumes that the local filesystem is writable. |
+| POST      |	/grpc/protos/clear      | Remove all uploaded proto definitions from memory and local filesystem. |
+| GET      |	/grpc/protos | Returns a list of uploaded proto files. |
+| GET      |	/grpc/protos/list<br/>/services | Returns a list of services parsed from the uploaded proto files. |
+| GET      |	/grpc/protos/list<br/>/`{service}`/methods | Returns a list of methods for the given service as parsed from the uploaded proto files. |
+
+###### <small> [Back to TOC](#toc) </small>
+
+<br/>
+
 # <a name="goto-server-features"></a>
 
 # Goto Server Features
 
-`Goto` as a server is useful for testing behavior, features or chaos testing of some client application, a proxy/sidecar, a gateway, etc. Or, the server can also be used as a proxy to be put in between a client and a target server application, so that traffic flows through this server where headers can be inspected/tracked before forwarding the requests further. The server can add headers, replace request URI with some other URI, add artificial delays to the response, respond with a specific status, monitor request/connection timeouts, etc. The server tracks all the configured parameters, applying those to runtime traffic and building metrics, which can be viewed via various APIs.
+`Goto` as a server is useful for doing feature testing as well as chaos testing of some client application, a proxy/sidecar, a gateway, etc. Or, the server can also be used as a proxy to be put in between a client and a target server application, so that traffic flows through this server where headers can be inspected/tracked before forwarding the requests further. The server can add headers, replace request URI with some other URI, add artificial delays to the response, respond with a specific status, monitor request/connection timeouts, etc. The server tracks all the configured parameters, applying those to runtime traffic and building metrics, which can be viewed via various APIs.
 
 ###### <small> [Back to TOC](#toc) </small>
 
@@ -785,15 +821,16 @@ The server starts with a bootstrap http listener (given as a command line arg `-
 
 The `listeners APIs` let you manage/open/close an arbitrary number of HTTP/HTTPS/TCP/TCP+TLS/GRPC listeners (except the default bootstrap listener that is set as HTTP and cannot be modified). The ability to launch and shutdown listeners lets you do some chaos testing. All HTTP listener ports respond to the same set of API calls, so any of the HTTP APIs described below as well as runtime traffic proxying can be done via any active HTTP listener. Any of the TCP operations described in the TCP section can be performed on any active TCP listener, and any of the GRPC operations can be performed on any GRPC listener. The HTTP listeners perform double duty of also acting as GRPC listeners, but listeners explicitly configured as `GRPC` act as `GRPC-only` and don't support HTTP operations. See `GRPC` section later in this doc for details on GRPC operations supported by `goto`.
 
+`/server/listeners` API output includes the default startup port for view, but the default port cannot be mutated by other listener APIs.
+
+Several configuration APIs (used to configure server features on `goto` instances) support `/port={port}/...` URI prefix to allow use of one listener to configure another listener's HTTP features. For example, the API `http://localhost:8081/probes/readiness/set/status=503` that's meant to configure readiness probe for listener on port 8081, can also be invoked via another port as `http://localhost:8080/port=8081/probes/readiness/set/status=503`. This allows for configuring another listener that might be closed or otherwise inaccessible when the configuration call is being made.
+
+##### TLS Listeners
 A listener can be configured to serve TLS traffic over either of the supported protocols via one of the following ways:
 - Use protocol `https` or `tls` to configure a listener to use an auto-generated self-signed cert to serve HTTP or TCP traffic correspondingly. The protocol identifiers can also be used with bootstrap listeners. Common name of the auto-generated certs is set to `goto.goto`.
 - Use `https` or `tls` protocol identifiers along with `commonName` field to configure a listener to use self-signed cert using the given common name (as opposed to using `goto.goto` in the previous approach)
 - Use APIs `/server/listeners/{port}/cert/auto/{domain}` to get the same effect as above but via an API call. The API auto-generates a cert for the listener if not already present, and reopens it in TLS mode. The API approach lets you reconfigure an already opened listener to switch to TLS.
-- Use APIs `/server/listeners/{port}/cert/add` and `/server/listeners/{port}/key/add` to add your own cert and key to a listener. After invoking these two APIs to upload cert and private key, you must explictly call `/server/listeners/{port}/reopen` to make the listener serve TLS traffic. 
-
-`/server/listeners` API output includes the default startup port for view, but the default port cannot be mutated by other listener APIs.
-
-Several configuration APIs (used to configure server features on `goto` instances) support `/port={port}/...` URI prefix to allow use of one listener to configure another listener's HTTP features. For example, the API `http://localhost:8081/probes/readiness/set/status=503` that's meant to configure readiness probe for listener on port 8081, can also be invoked via another port as `http://localhost:8080/port=8081/probes/readiness/set/status=503`. This allows for configuring another listener that might be closed or otherwise inaccessible when the configuration call is being made.
+- Use APIs `/server/listeners/{port}/cert/add` and `/server/listeners/{port}/key/add` to add your own cert and key to a listener. After invoking these two APIs to upload cert and private key, you must explicitly call `/server/listeners/{port}/reopen` to make the listener serve TLS traffic. 
 
 #### See TCP and GRPC Listeners section later for details of TCP or GRPC features
 
@@ -2101,70 +2138,6 @@ Any request that doesn't match any of the defined management APIs, and also does
 <br/>
 <br/>
 
-# <a name="tunnel"></a>
-# Tunnel
-
-`Tunnel` feature allows a `goto` instance to act as a L7 tunnel, receiving HTTP(S)/H2 requests from clients and forwarding those to any arbitrary HTTP(S)/H2 endpoints. This feature can be useful in several scenarios: e.g. 
-- A client wishes to reach an endpoint by IP address, but the endpoint is not accessible from the client's network space (e.g. K8S overlay network). In this case, a single `goto` instance deployed inside the overlay network (e.g. K8S cluster) but accessible to the client network space via an FQDN can receive requests from the client and transparently forward those to any overlay IP address that's visible to the `goto` instance.
-- Route traffic from a client to a service through `goto` proxy in order to inspect traffic and capture details in both directions.
-- Observe network behavior (latencies, packet drops, etc) between two endpoints
-- Send a request from a client to two or more service endpoints and analyze results from those, while sending the response to client from whichever endpoint responds first.
-- Send a request on a multi-hop journey, routing via multiple goto tunnels, in order to observe latency or other network behaviors.
-- Test a client and/or service's behavior if the other party that's communicating with it changed its protocol from HTTP/1 to HTTP/2 without having to change the real applications' code.
-
-
-There are three different ways in which requests can be tunneled via `Goto`:
-
-### 1. Configured Tunnels
-Any listener can be converted into a tunnel by calling `/tunnels/add/{protocol:address:port}` API to add one or more endpoints as tunnel destinations. When a tunnel has more than one endpoint, the requests are forwarded to all the endpoints, and the earliest response gets sent to the client.
-
-
-### 2. On-the-fly Tunneling via URI prefix
-Any request can be tunneled via `Goto` using URI path format `http://goto/tunnel={endpoints}/some/uri`. The goto instance will in turn multicast the request to all the given endpoints (format `{protocol:address:port}` with URI `/some/uri` using the same HTTP parameters that the client used (Method, Headers, Body, TLS). In order to multi-tunnel a request via multiple `goto` instances, multiple tunnel path prefixes can be added, e.g. `http://goto-1:8080/tunnel={goto-2:8080}/tunnel={goto-3:8081}/tunnel={real-service:80}/some/uri`.
-
-
-### 3. On-the-fly Tunneling using special header `Goto-Tunnel`
-Goto can be asked to tunnel a request by sending it to the `goto` instance with an additional header `Goto-Tunnel:{endpoints}`. Endpoints can be a comma-separated list where each endpoint is of format `{protocol:address:port}`. This approach allows for rerouting some existing traffic via goto, which then sends it to the original intended upstream service without having to modify the URI. The `Goto-Tunnel` header allows for multicasting as well as multi-tunneling. 
-
-In order to multicast a request to several endpoints, add the `Goto-Tunnel` header multiple times (i.e. with list of HTTP header values). For example:
-```
-curl -vk https://goto-1:8081/foo -H'Goto-Tunnel:goto-2:8082' -H'Goto-Tunnel:goto-3:8083'
-```
-
-In order to send a request through multiple `goto` tunnels, add multiple `goto` endpoint addresses as comma-separated value to a single `Goto-Tunnel` header. For example:
-```
-curl -vk https://goto-1:8081/foo -H'Goto-Tunnel:goto-2:8082,goto-3:8083'
-```
-
-`Endpoints` (in path prefix or header) can omit the protocol, or specify the protocol from one of: `http` (HTTP/1.1), `https` (HTTP/1.1 with TLS), `h2` (HTTP/2 with TLS) or `h2c` (HTTP/2 over cleartext).
-
-When the endpoints in a tunnel have different protocols, `Goto` performs protocol conversions between all possible translations (`http` to/from `https` and `HTTP/1.1` to/from `HTTP/2`). The request `Host` and `SNI Authority` are rewritten to match the endpoint host.
-
-When an endpoint in a tunnel omits protocol in its spec, the protocol used by the original/preceding client request is carried forward.
-
-
-#### Tunnel APIs
-
-###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
-
-All `Goto` APIs support tunnel prefix, allowing any `goto` API to be proxied from one instance to another. In addition, any arbitrary API can also be called using the tunnel prefix.
-
-|METHOD|URI|Description|
-|---|---|---|
-| ALL       |	/`tunnel={protocol:host:port}`/`...` | URI prefix format to tunnel any request on the fly. |
-| POST, PUT |	/tunnels/add/`{protocol:host:port}` | Adds a tunnel on the listener port on which the API is called, forwarding traffic to the given `endpoint`, optionally remapping protocol between HTTP-HTTPS. To configure tunnel on a port using another port's listener, use `port={port}` prefix format. |
-| POST, PUT |	/tunnels/add/`{protocol:host:port}`/transparent | Add a transparent tunnel that doesn't add goto request headers when forwarding a request to the upstream endpoints. However, goto response headers are still added to the response sent to the downstream client. |
-| POST, PUT |	/tunnels/remove/`{protocol:host:port}` | Remove a configured endpoint tunnel on the listener port on which the API is called. |
-| POST, PUT |	/tunnels/clear | Clear all tunnels on the listener port on which the API is called. |
-| GET |	/tunnels | Get currently configured tunnels. |
-
-
-###### <small> [Back to TOC](#toc) </small>
-
-
-<br/>
-<br/>
-
 # <a name="proxy"></a>
 # Proxy
 
@@ -2423,14 +2396,16 @@ See [Jobs Example](docs/jobs-example.md)
 # K8s Features
 `Goto` exposes APIs through which info can be fetched from a k8s cluster that `goto` is connected to. `Goto` can connect to the local K8s cluster when running inside a cluster, or connect to a remote K8s cluster via locally available k8s config. When connected remotely, it relies on the authentication performed by local K8s context.
 
+The `goto` K8s APIs support working with both native K8s resources (e.g. Namespaces, Pods, etc.) as well as custom K8s resources identified via GVK (e.g. Istio VirtualService).
+
 # <a name="k8s-apis"></a>
 ###  K8s APIs
 
 |METHOD|URI|Description|
 |---|---|---|
-| GET      | /k8s/{resource}  | Get a list of native k8s resources cluster-wide (namespaced or non-namespaced) |
+| GET      | /k8s/{resource}  | Get a list of native k8s resource instances cluster-wide (namespaced or non-namespaced) for the given resource kind |
 | GET      | /k8s/{resource}/[`jq`\|`jp`]  | Get a list of native k8s resources and apply a JQ or a JSONPath query to the resource data |
-| GET      | /k8s/{resource}/{namespace} | Get a list of namespaced native k8s resource from a given namespace |
+| GET      | /k8s/{resource}/{namespace} | Get a list of namespaced native k8s resources for the given type from a given namespace |
 | GET      | /k8s/{resource}<br/>/{namespace}/[`jq`\|`jp`] | Get a list of namespaced native k8s resource from a given namespace, and apply a JQ or a JSONPath query to the resource data |
 | GET      | /k8s/{resource}<br/>/{namespace}/{name}  | Get a namespaced native k8s resource by name from the given namespace |
 | GET      | /k8s/{resource}<br/>/{namespace}/{name}/[`jq`\|`jp`] | Get a namespaced native k8s resource by name from the given namespace, and apply a JQ or a JSONPath query to the resource data |
@@ -2446,24 +2421,380 @@ See [Jobs Example](docs/jobs-example.md)
 ###### <small> [Back to TOC](#k8s) </small>
 
 <br/>
+<br/>
+
+# <a name="tunnel"></a>
+# Tunnel
+
+`Tunnel` feature allows a `goto` instance to act as a L7 tunnel, receiving HTTP/HTTPS/H2 requests from clients and forwarding those to any arbitrary endpoints on same or different protocol. This feature can be useful in several scenarios: e.g. 
+- A client wishes to reach an endpoint by IP address, but the endpoint is not accessible from the client's network space (e.g. K8S overlay network). In this case, a single `goto` instance deployed inside the overlay network (e.g. K8S cluster) but accessible to the client network space via an FQDN can receive requests from the client and transparently forward those to any overlay IP address that's visible to the `goto` instance.
+- Route traffic from a client to a service through `goto` proxy in order to inspect traffic and capture details in both directions.
+- Observe network behavior (latencies, packet drops, etc) between two endpoints
+- Send a request from a client to two or more service endpoints and analyze results from those, while sending the response to client from whichever endpoint responds first.
+- Send a request on a multi-hop journey, routing via multiple goto tunnels, in order to observe latency or other network behaviors.
+- Test a client and/or service's behavior if the other party that's communicating with it changed its protocol from HTTP/1 to HTTP/2 without having to change the real applications' code.
+
+There are four different ways in which requests can be tunneled via `Goto`:
+
+#### 1. Configured Tunnels
+> Any listener can be converted into a tunnel by calling `/tunnels/add/{protocol:address:port}` API to add one or more endpoints as tunnel destinations. When a tunnel has more than one endpoint, the requests are forwarded to all the endpoints, and the earliest response gets sent to the client. |
+
+
+#### 2. On-the-fly Tunneling via URI prefix
+> Any request can be tunneled via `Goto` using URI path format `http://goto/tunnel={endpoints}/some/uri`. The goto instance will in turn multicast the request to all the given endpoints (format `{protocol:address:port}` with URI `/some/uri` using the same HTTP parameters that the client used (Method, Headers, Body, TLS). In order to multi-tunnel a request via multiple `goto` instances, multiple tunnel path prefixes can be added, e.g. `http://goto-1:8080/tunnel={goto-2:8080}/tunnel={goto-3:8081}/tunnel={real-service:80}/some/uri`.
+
+
+#### 3. On-the-fly Tunneling using special header `Goto-Tunnel`
+> Goto can be asked to tunnel a request by sending it to the `goto` instance with an additional header `Goto-Tunnel:{endpoints}`. Endpoints can be a comma-separated list where each endpoint is of format `{protocol:address:port}`. This approach allows for rerouting some existing traffic via goto, which then sends it to the original intended upstream service without having to modify the URI. The `Goto-Tunnel` header allows for multicasting as well as multi-tunneling. <br/><br/>
+> In order to multicast a request to several endpoints, add the `Goto-Tunnel` header multiple times (i.e. with list of HTTP header values). For example:
+```
+curl -vk https://goto-1:8081/foo -H'Goto-Tunnel:goto-2:8082' -H'Goto-Tunnel:goto-3:8083'
+```
+
+> In order to send a request through multiple `goto` tunnels, add multiple `goto` endpoint addresses as comma-separated value to a single `Goto-Tunnel` header. For example:
+```
+curl -vk https://goto-1:8081/foo -H'Goto-Tunnel:goto-2:8082,goto-3:8083'
+```
+
+> `Endpoints` (in path prefix or header) can omit the protocol, or specify the protocol from one of: `http` (HTTP/1.1), `https` (HTTP/1.1 with TLS), `h2` (HTTP/2 with TLS) or `h2c` (HTTP/2 over cleartext).<br/><br/>
+> When the endpoints in a tunnel have different protocols, `Goto` performs protocol conversions between all possible translations (`http` to/from `https` and `HTTP/1.1` to/from `HTTP/2`). The request `Host` and `SNI Authority` are rewritten to match the endpoint host.<br/><br/>
+> When an endpoint in a tunnel omits protocol in its spec, the protocol used by the original/preceding client request is carried forward.
+
+#### 4. HTTP(S) Proxy and CONNECT protocol
+> If `Goto` receives a header that indicates that a connected client has been routed via an HTTP(S) Proxy, or if `goto` receives an HTTP CONNECT request, `goto` establishes an on-the-fly tunnel to the destination endpoint.
+
+> ** *Note: The proxy auto-detection support is experimental.*
+
+> For example, the below curl request gets routed via HTTPS proxy `goto-2.goto`. The `goto` instance running on `goto-2.goto` intercepts the request and tunnels it to the original destination `goto-1.goto`, but gives you a chance to track its details.
+
+```
+curl -vk goto-1.goto:8081/foo/bar -H'foo:bar' --proxy https://goto-2.goto:8082 --proxy-cacert goto-2-cert.pem
+```
+
+#### Tunnel APIs
+
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
+All `Goto` APIs support tunnel prefix, allowing any `goto` API to be proxied from one instance to another. In addition, any arbitrary API can also be called using the tunnel prefix. See the tunnel feature description above for the specification of `{endpoint}` used in the tunnel APIs. To configure tunnel on a port using another port's listener, use `port={port}` prefix format.
+
+|METHOD|URI|Description|
+|---|---|---|
+| ALL       |	/`tunnel={endpoint}`/`...` | URI prefix format to tunnel any request on the fly. |
+| POST, PUT |	/tunnels/add<br/>/`{endpoint}`?`uri={uri}`| Adds a tunnel on the listener port to redirect traffic to the given `endpoint`. If the URI query param is specified, only traffic to the given URI is intercepted. |
+| POST, PUT |	/tunnels/add/`{endpoint}`<br/>/header/`{key}={value}`<br/>?`uri={uri}` | Adds a tunnel that acts upon requests carrying the given header key and optional value. If value is omitted, just the presence of the header key triggers the tunnel. If a URI is specified as query param, header match is performed only on requests to the given URI. |
+| POST, PUT |	/tunnels/add<br/>/`endpoint}`/transparent | Add a transparent tunnel that doesn't add goto request headers when forwarding a request to the upstream endpoints. However, goto response headers are still added to the response sent to the downstream client. |
+| POST, PUT |	/tunnels/remove<br/>/`{endpoint}`?`uri={uri}` | Remove a configured endpoint tunnel on the listener port. If the URI query param is specified, only tunnel for that URI is removed. |
+| POST, PUT |	/tunnels/remove/`{endpoint}`<br/>/header/`{key}={value}`<br/>?`uri={uri}` | Remove a configured endpoint tunnel on the listener port for the given header match. If the URI query param is specified, tunnels for that URI are removed. |
+| POST, PUT |	/tunnels/clear | Clear all tunnels on the listener port on which the API is called. |
+| GET |	/tunnels | Get currently configured tunnels. |
+| GET |	/tunnels/active | Get currently active tunnels. |
+| POST, PUT |	/tunnels/track<br/>/header/`{headers}` | Track tunnel traffic on the listener port for the given headers. |
+| POST, PUT |	/tunnels/track<br/>/query/`{params}` | Track tunnel traffic on the listener port for the given query params. |
+| POST, PUT |	/tunnels/track/clear | Clear tunnel traffic tracking on the listener port. |
+| GET |	/tunnels/track/ | Get tunnel traffic tracking report. |
+| POST, PUT |	/tunnels/traffic<br/>/capture=`{yn}` | Enable/disable capture of tunnel traffic on the listener port. |
+| GET |	/tunnels/traffic | Get tunnel traffic log if traffic capturing was enabled for the listener port. |
+
+
+###### <small> [Back to TOC](#goto-tunnel) </small>
+
+
+<br/>
+<br/>
 
 # <a name="pipeline-features"></a>
 
 # Pipeline Features
-`Goto` exposes a powerful pipelining capability that allows you to define sources of various types (K8s, Scripts, Jobs, HTTP requests) and chain one or more sources to one or more transformations (JSONPath, JQ, Go Template, Regex). Sources produce data, transformations can transform and extra relevant pieces from the source data, and pipeline allows the extracted data to be fed back to subsequent sources, which can feed more transformations, and so on. Additionally, pipelines support `watch` capability, where sources can be watched for new data, and a pipeline can be triggered as soon as new data becomes available.
+`Goto` pipelines feature allows you to pull data from various kinds of sources, process the source data through one or more transformations, and feed the output back to more sources/transformations or write it out. Pipelines support various kinds of sources (K8s, Jobs, Command Scripts, HTTP traffic, etc.) and transformations (JSONPath, JQ, Go Template, Regex). Additionally, pipelines support `watch` capability, where sources are watched for new data and the associated pipeline is triggered for any upstream changes.
 
-The feature is implemented but not documented. More details coming soon.
+By default all sources and transformation of a pipeline are executed in a single stage. Pipeline stages can be defined to achieve a more complex orchestration where some sources and transformations need to execute before others.
+
+
+### Pipeline Spec
+A pipeline is defined via a JSON payload submitted via API. 
+
+|FIELD|TYPE|Description|
+|---|---|---|
+| name | string | Name of the pipeline |
+| sources | map[string]Source | Set of sources that feed into this pipeline, either all at once or in stages (see stages below). The map key is the source name. |
+| transforms | map[string]Transform | Set of transformations that get applied to data produced by sources at various stages. The map key is the transformation name. |
+| stages | []PipelineStage | Optional list of stages this pipeline is split into. Each stage consists of a set of sources and transforms. |
+| out | []string | Names of sources and transformations whose output is included in the final output of the pipeline. When not specified, the pipeline output includes the output of all its sources and transformations.  |
+| running | bool | A read-only status field to indicate whether the pipeline is currently executing. |
+
+#### Example
+```
+{
+  "name": "demo-pipe",
+  "sources": {
+    "source_ns": {"type":"K8s", "spec":"/v1/ns/goto", "watch": true},
+    "source_job": {"type":"Job", "spec":"job1"}
+  },
+  "transforms": {
+    "ns_name": {"type": "JQ", "spec": ".source_ns.metadata.name"},
+    "result": {"type": "Template", "spec": "{{.source_job}}"}
+  },
+  "stages": [
+    {"label": "stage1", "sources":["source_ns"], "transforms":["ns_name"]},
+    {"label": "stage2", "sources":["source_job"], "transforms":["result"]}
+  ],
+  "out": ["ns_name", "result"]
+}
+```
+
+
+## Pipeline Sources
+A pipeline source brings data into the pipeline, and can also trigger the pipeline when watched. 
+
+### Pipeline Source Spec
+
+|FIELD|TYPE|Description|
+|---|---|---|
+| name | string | Name of the source |
+| type | string | Identifies the type of the source |
+| spec | string | Provides identifying information for the source. A source's spec may use fillers with syntax `{name}` where `name` identifies another source or transformation whose output should be used to substitute the filler. See examples further below. |
+| content | string | Used for sources that need some content for execution, e.g. a script. It can use fillers to capture output of other sources/transformations similar to `spec` field. |
+| input | any | Optional input to be given to the source at execution. It can use fillers to capture output of other sources/transformations similar to `spec` field. |
+| inputSource | string | Optional name of another source whose output should be passed as input to this source |
+| parseJSON | bool | Whether the output of this source be parsed as JSON |
+| parseNumber | bool | Whether the output of this source be parsed as a number |
+| reuseIfExists | bool | Whether an existing instance of this source be reused if already instantiated in a previous execution of this pipeline |
+| watch | bool | Whether the source should be watched for new input data and trigger the pipeline |
+
+
+### Pipeline Source Types
+The following kinds of sources are available:
+
+#### <i>Source Type: `Job`</i>
+> A Job source represents the output of a goto [Job](#jobs-features). The source `spec` field refers to an existing Job's name, where the job must be previously defined using [Jobs APIs](#jobs-apis). 
+<br/><br/>
+Job sources should mostly be defined with `reuseIfExists` set to `true`, indicating that the pipeline should use the output of the last run of the linked job. This is even more relevant when the source is configured with `watch` set to true, so that an execution of the job would trigger the pipeline and the pipeline would simply use the output of the job run that triggered it. If `reuseIfExists` field is set to false, the pipeline's execution will trigger a fresh execution of the linked job, and the pipeline would wait for the job to complete and use the result produced by this job run.
+<br/><br/>
+As `goto` supports two types of jobs: `Command` and `HTTP`, hence a pipeline can use Job sources to execute OS scripts as well as make HTTP calls.
+<br/><br/>
+See [Jobs feature](#jobs-features) for details on how to define Command and HTTP jobs.
+<br/><br/>
+Example: 
+```
+{
+  "name": "demo-jobs-pipe",
+  "sources": {
+    "s_cmd_job": {"type":"Job", "spec":"job1", "reuseIfExists": true, "watch": true},
+    "s_http_job": {"type":"Job", "spec":"job2", "parseJSON": true, "reuseIfExists": true, "watch": true}
+  }
+}
+```
+
+#### <i>Source Type: `Script`</i>
+> A Script source provides a way to run an OS script in a pipeline without a predefined job. The source `spec` field provides the script name, the `content` field provides the script, and the `input` or `inputSource` field can be used to provide input for the script if needed. 
+<br/><br/>
+Example:
+```
+{
+	"name": "demo-script-pipe",
+	"sources": {
+		"s1": {
+			"type":"Script", 
+			"spec":"echo-foo", 
+			"content":"echo 'FooX\\nBarX\\nFoo2\\nAnother Foo\\nMore Foos\\nDone'"
+		},		
+		"s2": {
+			"type":"Script", 
+			"spec":"foo-array", 
+			"content":"grep Foo | sed 's/X/!/g' | tr -s ' ' | jq -R -s -c 'gsub(\"^\\\\s+|\\\\s+$\";\"\") | split(\"\\n\")' ", 
+			"inputSource": "s1",
+			"parseJSON": true
+		},
+		"s3": {
+			"type":"Script", 
+			"spec":"count-lines", 
+			"content":"wc -l | xargs echo -n Total Lines: ", 
+			"inputSource": "s1"
+		},
+		"s4": {
+			"type":"Script", 
+			"spec":"hello-world", 
+			"content":"sed 's/Foo/World/g' | xargs echo -n Hello ", 
+			"input": "{t1}"
+		},
+		"s5": {
+			"type":"Script", 
+			"spec":"foo-length", 
+			"content":"jq -R -s -c 'length' | xargs echo -n Char Count: ", 
+			"input": "{s2}",
+			"parseNumber": true
+		}
+	},
+	"transforms": {
+		"t1": {"type": "JQ", "spec": ".s2[0]"},
+		"t2": {"type": "JQ", "spec": ".s2[2]"},
+		"t3": {"type": "JQ", "spec": ".s2 | length"}
+	},
+	"stages": [
+		{"label": "stage1", "sources":["s1"]},
+		{"label": "stage2", "sources":["s2", "s3"], "transforms":["t1", "t2", "t3"]},
+		{"label": "stage3", "sources":["s4", "s5"]}
+	],
+	"out": ["s3", "s4", "s5"]
+}
+```
+
+#### <i>Source Type: `K8s`</i>
+> A K8s source represents either a single K8s resource or a set of K8s resources, identified by its `spec` field. It queries a K8s cluster to fetch the resource details: either from the local cluster where `goto` instance is deployed, or a remote cluster based on the current kube context set in local kube config.
+<br/><br/>
+The K8s source `spec` identifies the K8s resource using pattern `group/version/kind/namespace/name`. For example, spec value `networking.istio.io/v1beta1/virtualservice/foo/bar` identifies a a resource named `bar` under namespace `foo` with resource kind `VirtualService`, group `networking.istio.io`, and version `v1beta1`. 
+<br/><br/>
+For native k8s resources that don't have a group, the group piece is left empty. For example: `/v1/ns/` indicates all namespaces, `/v1/foo/pods` identifies all pods in namespace `foo`, and `/v1//pods` indicates all pods across all namespaces. 
+<br/><br/>
+> See [K8s feature](#k8s-features) for more details about K8s query support in `goto`.
+<br/><br/>
+Example:
+```
+{
+  "name": "demo-k8s-pipe",
+  "sources": {
+    "ns": {"type":"K8s", "spec":"/v1/ns/goto", "watch": true},
+    "nspods": {"type":"K8s", "spec":"/v1/pod/{ns_name}"}
+  },
+  "transforms": {
+    "ns_name": {"type": "JQ", "spec": ".ns.metadata.name"},
+    "podnames": {"type": "JQ", "spec": ".nspods.items[]|{name: .metadata.name, containers:[.spec.containers[].name]}"}
+  },
+  "stages": [
+    {"label": "stage1", "sources":["ns"], "transforms":["ns_name"]},
+    {"label": "stage2", "sources":["nspods"], "transforms":["podnames"]}
+  ],
+  "out": ["ns_name", "podnames"]
+}
+```
+
+#### <i>Source Type: `K8sPodExec`</i>
+> This source type allows executing a command on one or more K8s pods. The source `spec` field should be defined in the format `"namespace/pod-label-selector/container-name"`, and the spec `content` field should contain the command(s) to be executed on the selected pods.
+<br/><br/>
+Example:
+```
+{
+	"name": "demo-podexec-pipe",
+	"sources": {
+		"pod_source": {"type":"K8sPodExec", "spec":"gotons/app=goto/goto", "content":"ls /"}
+	}
+}
+```
+
+
+
+#### <i>Source Type: `HTTPRequest`</i>
+> This source type allows for pipelines to be triggered based on HTTP requests received by the `goto` server. The feature is achieved via two sets of configurations: 
+1. A [Trigger](#response-triggers) that defines the request/response match criteria (URI, Headers, Status Code) that should match in order for the request to trigger a pipeline.
+2. A pipeline that includes an `HTTPRequest` source that references the trigger name in its `spec` field.
+
+> When the `goto` server receives an HTTP request matching the trigger criteria, the linked pipeline gets triggered and the pipeline source's output carries the HTTP response data along with some metadata as listed below:
+1. `request.trigger`: name of the trigger that matched the request
+2. `request.host`
+3. `request.uri`
+4. `request.headers`
+5. `request.body`
+6. `response.status`
+7. `response.headers`
+
+> Example:
+```
+#HTTP Trigger definition
+{
+	"name": "t1",
+	"pipe": true,
+	"enabled": true,
+	"triggerURIs": ["/foo", "/status/*"],
+	"triggerStatuses": [502]
+}
+
+#Trigger based pipeline definition
+{
+  "name": "demo-http-trigger-pipe",
+  "sources": {
+    "http": {"type":"HTTPRequest", "spec":"t1", "watch": true}
+  },
+  "transforms": {
+    "uri": {"type": "JQ", "spec": ".http.request.uri"},
+    "req_headers": {"type": "JQ", "spec": ".http.request.headers"},
+    "status": {"type": "JQ", "spec": ".http.response.status"},
+    "resp_headers": {"type": "JQ", "spec": ".http.response.headers"}
+  }
+}
+
+#This curl call to the goto instance triggers the pipeline via the trigger that matches on URI + response status code.
+$ curl http://goto:8080/status/502
+```
+
+
+#### <i>Source Type: `Tunnel`</i>
+> This source type allows triggering pipelines for HTTP requests tunneled through a `goto` instance. The output behavior of `Tunnel` source type is somewhat similar to the `HTTPRequest` source type, but they differ in which HTTP requests would trigger the pipeline. The `HTTPRequest` source type triggers pipelines for requests served by the `goto` instance itself as a server, whereas the `Tunnel` source type comes into play for HTTP requests meant for other upstream destinations but tunneled via a `goto` instance for inspection.
+<br/><br/>
+The tunnel associated with the pipeline is referenced in the source `spec` field by the tunnel's `Endpoint` identifier that's composed as `<protocol>:<address>:<port>`. See [Tunnel](#tunnel) feature for more details about tunnel creation and handling.
+<br/><br/>
+Example: <br/>
+For an HTTP request tunneled via goto instance `goto-1.goto` to the final destination `goto-2.goto`, a pipeline on `goto-1` instance can use `Tunnel` source that references `goto-2` endpoint in its spec as shown below. The pipeline will be triggered for all requests that pass through `goto-1` with `goto-2` as the final destination.
+```
+{
+  "name": "demo-tunnel-pipe",
+  "sources": {
+    "http": {"type":"Tunnel", "spec":"http:goto-2.goto:9091", "watch": true}
+  },
+  "transforms": {
+    "uri": {"type": "JQ", "spec": ".http.request.uri"},
+    "req_headers": {"type": "JQ", "spec": ".http.request.headers"},
+    "status": {"type": "JQ", "spec": ".http.response.status"},
+    "resp_headers": {"type": "JQ", "spec": ".http.response.headers"}
+  }
+}
+```
+
+
+### Pipeline Transformations
+Pipeline's transformation steps provide you a way to extract subset of information from a source's output and/or apply some basic computational logic to the source data to produce some derived information.
+
+A transformation definition provides the implementation-specific transformation query in its `spec` field. Each transformation receives the current working context as input, and so the query can refer to any existing source or transformation by name that's expected to exist in the working context at the time of execution of that transformation. Starting with any existing source or transformation, the query can read data from the source's output.
+
+### Pipeline Transformation Spec
+
+|FIELD|TYPE|Description|
+|---|---|---|
+| name | string | Name of the transformation, provided as the map key in the pipeline JSON |
+| type | string | Identifies the type of the transformation. Supported types are: `JSONPath`, `JQ`, `Template` and `Regex`. |
+| spec | string | Provides the query code to be compiled and executed based on the transformation type.
+
+
+The following kinds of transformations are supported:
+
+1. `JSONPath`: based on implementation `k8s.io/client-go/util/jsonpath`
+2. `JQ`: based on implementation `github.com/itchyny/gojq`
+3. `Template`: based on golang templates feature
+4. `Regex`: based on golang regexp package
+
 
 # <a name="pipe-apis"></a>
 ###  Pipeline APIs
 
 |METHOD|URI|Description|
 |---|---|---|
-| -  | -  | - |
+| POST, PUT | /pipes/create/`{name}` | Create an empty pipeline that will be filled via other APIs |
+| POST, PUT | /pipes/add | Add a pipeline using JSON payload |
+| POST, PUT | /pipes/`{name}`/clear, /pipes/clear/`{name}` | Empty the given pipeline |
+| POST, PUT | /pipes/remove/`{name}`, /pipes/`{name}`/remove | Remove the given pipeline |
+| POST, PUT | /pipes/`{pipe}`/sources/add | Add a source via JSON payload to the given existing pipeline |
+| POST, PUT | /pipes/`{pipe}`/sources/remove/`{name}` | Remove the given source from the given pipeline |
+| POST, PUT | /pipes/`{pipe}`/sources/add/k8s/`{name}`?`spec={spec}` | Add a K8s source with the given `name` and `spec` to the given existing pipeline |
+| POST, PUT | /pipes/`{pipe}`/sources/add/script/`{name}` | Add a script source with the given `name` and content (body payload) to the given pipeline |
+| POST | /pipes/clear | Remove all defined pipelines |
+| POST | /pipes/`{name}`/run | Run the given pipeline manually (as opposed to pipelines getting triggered by sources) |
+| GET | /pipes | Get details of currently defined pipelines |
+| GET | /pipes/`{name}` | Get details including run logs of the given pipeline |
+
 
 
 ###### <small> [Back to TOC](#pipelines) </small>
 
+<br/>
 <br/>
 
 # <a name="registry"></a>

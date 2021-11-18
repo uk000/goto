@@ -45,18 +45,33 @@ type Pipe struct {
   lock       sync.RWMutex
 }
 
+type PipeRun struct {
+  ID   int                    `json:"id"`
+  Name string                 `json:"name"`
+  Out  map[string]interface{} `json:"out"`
+}
+
 type PipeManager struct {
   Pipes     map[string]*Pipe
   Files     []string
+  PipeRuns  map[string][]*PipeRun
   fileIndex int
+  pipeRunCounter int
   lock      sync.RWMutex
 }
 
 var (
-  Manager = &PipeManager{
-    Pipes: map[string]*Pipe{},
-  }
+  Manager = (&PipeManager{}).init()
 )
+
+func (pm *PipeManager) init() *PipeManager {
+  pm.Pipes = map[string]*Pipe{}
+  pm.PipeRuns = map[string][]*PipeRun{}
+  pm.Files = nil
+  pm.fileIndex = 0
+  pm.pipeRunCounter = 0
+  return pm
+}
 
 func NewPipe(name string) *Pipe {
   pipe := &Pipe{Name: name}
@@ -86,11 +101,15 @@ func (pm *PipeManager) AddPipe(pipe *Pipe) {
 }
 
 func (pm *PipeManager) ClearPipe(name string) {
-  pm.lock.RLock()
-  pipe := pm.Pipes[name]
-  pm.lock.RUnlock()
-  if pipe != nil {
-    pipe.Init()
+  if name != "" {
+    pm.lock.RLock()
+    pipe := pm.Pipes[name]
+    pm.lock.RUnlock()
+    if pipe != nil {
+      pipe.Init()
+    }
+  } else {
+    pm.init()
   }
 }
 
@@ -104,6 +123,23 @@ func (pm *PipeManager) DumpPipes() string {
   pm.lock.RLock()
   defer pm.lock.RUnlock()
   return util.ToJSONText(pm.Pipes)
+}
+
+func (pm *PipeManager) AddRun(pipe *Pipe, out map[string]interface{}) {
+  pm.lock.Lock()
+  defer pm.lock.Unlock()
+  pm.pipeRunCounter++
+  pm.PipeRuns[pipe.Name] = append(pm.PipeRuns[pipe.Name], &PipeRun{
+  	ID:   pm.pipeRunCounter,
+  	Name: pipe.Name,
+  	Out:  out,
+  })
+}
+
+func (pm *PipeManager) GetRuns(pipe string) interface{} {
+  pm.lock.RLock()
+  defer pm.lock.RUnlock()
+  return map[string]interface{}{"pipe": pm.Pipes[pipe], "runs": pm.PipeRuns[pipe]}
 }
 
 func (pm *PipeManager) AddK8sSource(pipeName, sourceName, resourceID string) error {
@@ -229,46 +265,40 @@ func (pipe *Pipe) Run(w io.Writer, yaml bool) {
   pipe.Running = true
   pipe.lock.Unlock()
   workspace := map[string]interface{}{}
-  if len(pipe.Stages) > 0 {
-    for _, stage := range pipe.Stages {
-      if stage.Delay.Duration > 0 {
-        log.Printf("Pipe: Delaying Stage [%s] by [%s]\n", stage.Label, stage.Delay)
-        time.Sleep(stage.Delay.Duration)
-      }
-      log.Printf("Pipe: Running Stage [%s]\n", stage.Label)
-      for _, s := range stage.Sources {
-        if source := pipe.Sources[s]; source != nil {
-          log.Printf("Pipe: Pulling from Source [%s]\n", s)
-          if source.GetInputSource() != "" {
-            source.SetInput(workspace[source.GetInputSource()])
-          }
-          source.Generate(workspace)
-        }
-      }
-      if len(stage.Transforms) > 0 {
-        for _, t := range stage.Transforms {
-          if transform := pipe.Transforms[t]; transform != nil {
-            log.Printf("Pipe: Applying Transform [%s]\n", t)
-            json := transform.Map(workspace)
-            for k, v := range json.Object() {
-              workspace[k] = v
-            }
-          }
-        }
-      }
-    }
-  } else {
+  stages := pipe.Stages
+  if len(stages) == 0 {
+    stages = []*PipeStage{{Label: "default"}}
     for _, source := range pipe.Sources {
-      log.Printf("Pipe: Pulling from Source [%s]\n", source.GetName())
-      if source.GetInputSource() != "" {
-        source.SetInput(workspace[source.GetInputSource()])
-      }
-      source.Generate(workspace)
+      stages[0].Sources = append(stages[0].Sources, source.Name)
     }
-    if len(pipe.Transforms) > 0 {
-      for _, transform := range pipe.Transforms {
-        log.Printf("Pipe: Applying Transform [%s]\n", transform.Name)
-        workspace[transform.Name] = transform.Map(workspace)
+    for _, transform := range pipe.Transforms {
+      stages[0].Transforms = append(stages[0].Transforms, transform.Name)
+    }
+  }
+  for _, stage := range stages {
+    if stage.Delay.Duration > 0 {
+      log.Printf("Pipe: Delaying Stage [%s] by [%s]\n", stage.Label, stage.Delay)
+      time.Sleep(stage.Delay.Duration)
+    }
+    log.Printf("Pipe: Running Stage [%s]\n", stage.Label)
+    for _, s := range stage.Sources {
+      if source := pipe.Sources[s]; source != nil {
+        log.Printf("Pipe: Fetching Source [%s]\n", s)
+        if source.GetInputSource() != "" {
+          source.SetInput(workspace[source.GetInputSource()])
+        }
+        source.Generate(workspace)
+      }
+    }
+    if len(stage.Transforms) > 0 {
+      for _, t := range stage.Transforms {
+        if transform := pipe.Transforms[t]; transform != nil {
+          log.Printf("Pipe: Applying Transform [%s]\n", t)
+          json := transform.Map(workspace)
+          for k, v := range json.Object() {
+            workspace[k] = v
+          }
+        }
       }
     }
   }
@@ -281,6 +311,7 @@ func (pipe *Pipe) Run(w io.Writer, yaml bool) {
     out = workspace
   }
 
+  Manager.AddRun(pipe, out)
   pipe.lock.Lock()
   pipe.Running = false
   pipe.lock.Unlock()

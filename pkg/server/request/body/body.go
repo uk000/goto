@@ -41,13 +41,14 @@ func Middleware(next http.Handler) http.Handler {
       if global.Debug {
         log.Println("Reading Request.Body")
       }
+      rs := util.GetRequestStore(r)
       body := util.Read(r.Body)
+      bodyLength := len(body)
+      rs.RequestPayload = body
+      rs.RequestPayloadSize = bodyLength
       if global.Debug {
         log.Println("Finished Reading Request.Body")
       }
-      bodyLength := len(body)
-      util.SetRequestPayloadSize(r, bodyLength)
-      r.Body.Close()
       util.AddLogMessage(fmt.Sprintf("Request Body Length: [%d]", bodyLength), r)
       if global.LogRequestMiniBody || global.LogRequestBody {
         bodyLog := ""
@@ -64,7 +65,6 @@ func Middleware(next http.Handler) http.Handler {
           util.AddLogMessage(fmt.Sprintf("Request Body: [%s]", bodyLog), r)
         }
       }
-      r.Body = ioutil.NopCloser(strings.NewReader(body))
     }
     if next != nil {
       next.ServeHTTP(w, r)

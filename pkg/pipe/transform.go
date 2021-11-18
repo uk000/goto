@@ -78,12 +78,6 @@ type RegexTransform struct {
   regexp *regexp.Regexp
 }
 
-type Template struct {
-  Name     string `json:"name"`
-  Code     string `json:"code"`
-  template *template.Template
-}
-
 func (a *AbstractTransform) Out() util.JSON {
   return nil
 }

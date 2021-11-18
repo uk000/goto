@@ -19,6 +19,7 @@ package job
 import (
   "goto/pkg/invocation"
   "goto/pkg/util"
+  "log"
   "time"
 )
 
@@ -32,7 +33,11 @@ func (jm *JobManager) invokeHttpTarget(job *Job, jobRun *JobRunContext, iteratio
   outputTrigger := job.OutputTrigger
   maxResults := job.MaxResults
   job.lock.RUnlock()
-  tracker := invocation.RegisterInvocation(target)
+  tracker, err := invocation.RegisterInvocation(target)
+  if err != nil {
+    log.Println(err.Error())
+    return
+  }
   jobRun.lock.RLock()
   if jobRun.rawInput != nil {
     tracker.Payloads = [][]byte{jobRun.rawInput}

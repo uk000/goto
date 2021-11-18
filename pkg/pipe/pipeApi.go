@@ -18,7 +18,6 @@ package pipe
 
 import (
   "fmt"
-  "goto/pkg/global"
   "goto/pkg/util"
   "net/http"
   "strings"
@@ -31,9 +30,11 @@ var (
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  pipeRouter := util.PathRouter(r, "/pipe")
+  pipeRouter := util.PathRouter(r, "/pipes")
 
   util.AddRoute(pipeRouter, "", getPipelines, "GET")
+  util.AddRoute(pipeRouter, "/clear", clearPipeline, "POST")
+
   util.AddRoute(pipeRouter, "/create/{name}", createPipeline, "POST", "PUT")
   util.AddRoute(pipeRouter, "/add", createPipeline, "POST", "PUT")
   util.AddRoute(pipeRouter, "/{name}/clear", clearPipeline, "POST", "PUT")
@@ -46,11 +47,9 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
   util.AddRouteQ(pipeRouter, "/{pipe}/sources/add/k8s/{name}", addK8sSource, "spec", "POST", "PUT")
   util.AddRoute(pipeRouter, "/{pipe}/sources/add/script/{name}", addScriptSource, "POST", "PUT")
-  util.AddRoute(pipeRouter, "/{pipe}/templates/store", storeTemplates, "POST", "PUT")
 
-  util.AddRoute(pipeRouter, "/{name}/run", runPipeline, "POST", "PUT")
-
-  util.AddRouteQ(pipeRouter, "/dir/set", setWorkDir, "dir", "{dir}", "POST", "PUT")
+  util.AddRoute(pipeRouter, "/{name}/run", runPipeline, "POST")
+  util.AddRoute(pipeRouter, "/{name}", getPipelineRuns, "GET")
 }
 
 func getPipelines(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +80,12 @@ func createPipeline(w http.ResponseWriter, r *http.Request) {
 func clearPipeline(w http.ResponseWriter, r *http.Request) {
   name := util.GetStringParamValue(r, "name")
   Manager.ClearPipe(name)
-  msg := fmt.Sprintf("Pipe [%s] cleared", name)
+  msg := ""
+  if name != "" {
+    msg = fmt.Sprintf("Pipe [%s] cleared", name)
+  } else {
+    msg = "All pipes cleared"
+  }
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, msg)
 }
@@ -162,25 +166,6 @@ func addScriptSource(w http.ResponseWriter, r *http.Request) {
   util.AddLogMessage(msg, r)
 }
 
-func storeTemplates(w http.ResponseWriter, r *http.Request) {
-  // pipe := util.GetStringParamValue(r, "pipe")
-  // result := Manager.StoreTemplates(pipe, util.ReadBytes(r.Body))
-  // util.AddLogMessage(util.WriteJsonPayload(w, result), r)
-}
-
-func setWorkDir(w http.ResponseWriter, r *http.Request) {
-  msg := ""
-  dir := util.GetStringParamValue(r, "dir")
-  if dir != "" {
-    global.WorkDir = dir
-    msg = fmt.Sprintf("Working directory set to [%s]", dir)
-  } else {
-    msg = "Missing directory path"
-  }
-  fmt.Fprintln(w, msg)
-  util.AddLogMessage(msg, r)
-}
-
 func runPipeline(w http.ResponseWriter, r *http.Request) {
   msg := ""
   name := util.GetStringParamValue(r, "name")
@@ -195,6 +180,25 @@ func runPipeline(w http.ResponseWriter, r *http.Request) {
       msg = fmt.Sprintf("Failed to run pipeline [%s] with error: %s", name, err.Error())
       fmt.Fprintln(w, msg)
       w.WriteHeader(http.StatusInternalServerError)
+    }
+  }
+  util.AddLogMessage(msg, r)
+}
+
+func getPipelineRuns(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  name := util.GetStringParamValue(r, "name")
+  yaml := strings.Contains(r.Header.Get("Accept"), "yaml")
+  if name == "" {
+    msg = "Missing pipe name"
+    fmt.Fprintln(w, msg)
+    w.WriteHeader(http.StatusBadRequest)
+  } else {
+    msg = fmt.Sprintf("Pipe [%s] Runs Reported", name)
+    if yaml {
+
+    } else {
+      fmt.Fprintln(w, util.ToJSONText(Manager.GetRuns(name)))
     }
   }
   util.AddLogMessage(msg, r)

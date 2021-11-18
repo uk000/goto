@@ -22,6 +22,7 @@ import (
   . "goto/pkg/constants"
   "goto/pkg/global"
   "goto/pkg/invocation"
+  "goto/pkg/transport"
   "goto/pkg/util"
   "log"
   "reflect"
@@ -144,7 +145,7 @@ var (
   chanSendTargetsToRegistry    = make(chan *TargetResults, 200)
   chanSendInvocationToRegistry = make(chan *InvocationResults, 200)
   stopRegistrySender           = make(chan bool, 10)
-  registryClient               = util.CreateDefaultHTTPClient("ResultsRegistrySender", true, false, nil)
+  registryClient               = transport.CreateDefaultHTTPClient("ResultsRegistrySender", true, false, nil)
   sendingToRegistry            bool
   registrySendLock             sync.Mutex
   collectTargetsResults        bool = true
@@ -441,7 +442,6 @@ func (tr *TargetResults) addTimeBucketResult(tb []int, ir *invocation.Invocation
 }
 
 func (tr *TargetResults) addResult(ir *invocation.InvocationResult) {
-  fmt.Printf("AddResult: Target [%s] Request ID [%s] timestamp [%s]\n", tr.Target, ir.Request.ID, ir.Request.LastRequestAt)
   tr.lock.Lock()
   defer tr.lock.Unlock()
 
@@ -941,7 +941,7 @@ func lockInvocationRegistryLocker(invocationIndex uint32) {
   if global.UseLocker && global.RegistryURL != "" {
     url := fmt.Sprintf("%s/registry/peers/%s/%s/locker/lock/%s_%d", global.RegistryURL,
       global.PeerName, global.PeerAddress, LockerClientKey, invocationIndex)
-    if resp, err := registryClient.Post(url, ContentTypeJSON, nil); err == nil {
+    if resp, err := registryClient.HTTP().Post(url, ContentTypeJSON, nil); err == nil {
       util.CloseResponse(resp)
     }
   }
@@ -950,7 +950,7 @@ func lockInvocationRegistryLocker(invocationIndex uint32) {
 func sendResultToRegistry(keys []string, data interface{}) {
   if global.UseLocker && global.RegistryURL != "" {
     url := fmt.Sprintf("%s/registry/peers/%s/%s/locker/store/%s", global.RegistryURL, global.PeerName, global.PeerAddress, strings.Join(keys, ","))
-    if resp, err := registryClient.Post(url, ContentTypeJSON,
+    if resp, err := registryClient.HTTP().Post(url, ContentTypeJSON,
       strings.NewReader(util.ToJSONText(data))); err == nil {
       util.CloseResponse(resp)
     }

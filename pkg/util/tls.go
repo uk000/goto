@@ -28,11 +28,97 @@ import (
   "encoding/pem"
   "fmt"
   "goto/pkg/global"
+  "io/ioutil"
   "math/big"
+  "net/http"
   "os"
   "path/filepath"
   "time"
+
+  "github.com/gorilla/mux"
 )
+
+var (
+  Handler = ServerHandler{Name: "tls", SetRoutes: SetRoutes}
+  RootCAs = x509.NewCertPool()
+  CACert  []byte
+)
+
+func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+  tlsRouter := r.PathPrefix("/tls").Subrouter()
+  AddRoute(tlsRouter, "/cacert/add", addCACert, "PUT", "POST")
+  AddRoute(tlsRouter, "/cacert/remove", removeCACert, "PUT", "POST")
+  AddRouteQ(tlsRouter, "/workdir/set", setWorkDir, "dir", "{dir}", "POST", "PUT")
+}
+
+func addCACert(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  data := ReadBytes(r.Body)
+  if len(data) > 0 {
+    StoreCACert(data)
+    msg = "CA Cert Stored"
+  } else {
+    w.WriteHeader(http.StatusBadRequest)
+    msg = "No Cert Payload"
+  }
+  fmt.Fprintln(w, msg)
+  AddLogMessage(msg, r)
+}
+
+func removeCACert(w http.ResponseWriter, r *http.Request) {
+  RemoveCACert()
+  msg := "CA Cert Removed"
+  fmt.Fprintln(w, msg)
+  AddLogMessage(msg, r)
+}
+
+func setWorkDir(w http.ResponseWriter, r *http.Request) {
+  msg := ""
+  dir := GetStringParamValue(r, "dir")
+  if dir != "" {
+    global.WorkDir = dir
+    msg = fmt.Sprintf("Working directory set to [%s]", dir)
+  } else {
+    msg = "Missing directory path"
+  }
+  fmt.Fprintln(w, msg)
+  AddLogMessage(msg, r)
+}
+
+func StoreCACert(cert []byte) {
+  CACert = cert
+  loadCerts()
+  RootCAs.AppendCertsFromPEM(cert)
+}
+
+func RemoveCACert() {
+  CACert = nil
+  loadCerts()
+}
+
+func loadCerts() {
+  RootCAs = x509.NewCertPool()
+  found := false
+  if certs, err := filepath.Glob(global.CertPath + "/*.crt"); err == nil {
+    for _, c := range certs {
+      if cert, err := ioutil.ReadFile(c); err == nil {
+        RootCAs.AppendCertsFromPEM(cert)
+        found = true
+      }
+    }
+  }
+  if certs, err := filepath.Glob(global.CertPath + "/*.pem"); err == nil {
+    for _, c := range certs {
+      if cert, err := ioutil.ReadFile(c); err == nil {
+        RootCAs.AppendCertsFromPEM(cert)
+        found = true
+      }
+    }
+  }
+  if !found {
+    RootCAs = nil
+  }
+}
 
 func CreateCertificate(domain string, saveWithPrefix string) (*tls.Certificate, error) {
   now := time.Now()

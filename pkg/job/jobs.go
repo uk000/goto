@@ -171,7 +171,7 @@ func (jm *JobManager) ClearJobWatchers(job string) {
 }
 
 func (jm *JobManager) WatchJobs() {
-  WatchLoop:
+WatchLoop:
   for {
     select {
     case <-jm.stopJobWatch:

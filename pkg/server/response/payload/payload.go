@@ -776,6 +776,11 @@ func getPayloadForBodyMatch(r *http.Request, bodyMatchResponses map[string]*Resp
   return nil, nil, false
 }
 
+func (pr *PortResponse) hasAnyPayload() bool {
+  return len(pr.allURIResponsePayloads) > 0 || len(pr.ResponsePayloadByHeaders) > 0 || 
+    len(pr.ResponsePayloadByQuery) > 0 || pr.DefaultResponsePayload != nil
+}
+
 func (pr *PortResponse) unsafeGetResponsePayload(r *http.Request) (responsePayload *ResponsePayload, captures map[string]string, found bool) {
   for uri, rp := range pr.allURIResponsePayloads {
     if rp.uriRegexp.MatchString(r.RequestURI) {
@@ -849,8 +854,8 @@ func Middleware(next http.Handler) http.Handler {
       return
     }
     var payload *ResponsePayload
-    if !util.IsPayloadRequest(r) {
-      pr := getPortResponse(r)
+    pr := getPortResponse(r)
+    if !util.IsPayloadRequest(r) && pr.hasAnyPayload() {
       pr.lock.RLock()
       rp, captures, found := pr.unsafeGetResponsePayload(r)
       pr.lock.RUnlock()

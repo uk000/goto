@@ -44,8 +44,6 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(targetsRouter, "/stop/all", stopTargets, "POST")
   util.AddRoute(targetsRouter, "/clear", clearTargets, "POST")
   util.AddRoute(targetsRouter, "/active", getActiveTargets, "GET")
-  util.AddRoute(targetsRouter, "/cacert/add", addCACert, "PUT", "POST")
-  util.AddRoute(targetsRouter, "/cacert/remove", removeCACert, "PUT", "POST")
   util.AddRoute(targetsRouter, "/{target}?", getTargets, "GET")
 
   util.AddRoute(r, "/track/headers/clear", clearTrackingHeaders, "POST")
@@ -204,32 +202,6 @@ func getTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
     util.AddLogMessage("Tracking TimeBuckets Reported", r)
   }
 }
-func addCACert(w http.ResponseWriter, r *http.Request) {
-  msg := ""
-  data := util.ReadBytes(r.Body)
-  if len(data) > 0 {
-    invocation.StoreCACert(data)
-    msg = Client_CACertStored
-    events.SendRequestEvent(msg, "", r)
-  } else {
-    w.WriteHeader(http.StatusBadRequest)
-    msg = "Invalid header name"
-  }
-  fmt.Fprintln(w, msg)
-  if global.EnableClientLogs {
-    util.AddLogMessage(msg, r)
-  }
-}
-
-func removeCACert(w http.ResponseWriter, r *http.Request) {
-  invocation.RemoveCACert()
-  msg := Client_CACertRemoved
-  events.SendRequestEvent(msg, "", r)
-  fmt.Fprintln(w, msg)
-  if global.EnableClientLogs {
-    util.AddLogMessage(msg, r)
-  }
-}
 
 func getInvocationResults(w http.ResponseWriter, r *http.Request) {
   util.WriteStringJsonPayload(w, results.GetInvocationResultsJSON())
@@ -325,6 +297,7 @@ func invokeTargets(w http.ResponseWriter, r *http.Request) {
     }
   } else {
     w.WriteHeader(http.StatusNotAcceptable)
+    fmt.Fprintln(w, "No targets to invoke")
     if global.EnableClientLogs {
       util.AddLogMessage("No targets to invoke", r)
     }

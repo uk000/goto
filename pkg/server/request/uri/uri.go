@@ -275,9 +275,13 @@ func GetURIDelay(r *http.Request) *DelayConfig {
   return nil
 }
 
+func HasAnyURIStatusOrDelay() bool {
+  return len(uriStatusByPort) > 0 || len(uriDelayByPort) > 0
+}
+
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    if util.IsKnownNonTraffic(r) {
+    if util.IsKnownNonTraffic(r) || !HasAnyURIStatusOrDelay() {
       if next != nil {
         next.ServeHTTP(w, r)
       }

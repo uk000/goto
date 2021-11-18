@@ -63,25 +63,15 @@ func getLabel(w http.ResponseWriter, r *http.Request) {
 func Middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     l := listeners.GetCurrentListener(r)
-    protocol := "HTTP"
-    if l.TLS {
-      if r.ProtoMajor == 2 {
-        protocol = "HTTP/2"
-      } else {
-        protocol = "HTTPS"
-      }
-    } else if r.ProtoMajor == 2 {
-      protocol = "H2C"
-    }
     rs := util.GetRequestStore(r)
-    rs.GotoProtocol = protocol
+    rs.GotoProtocol = util.GotoProtocol(r.ProtoMajor == 2, l.TLS)
     if util.IsTunnelRequest(r) {
-      w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoProtocol, rs.TunnelCount), protocol)
+      w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoProtocol, rs.TunnelCount), rs.GotoProtocol)
     } else {
-      w.Header().Add(HeaderGotoProtocol, protocol)
+      w.Header().Add(HeaderGotoProtocol, rs.GotoProtocol)
     }
     if !util.IsAdminRequest(r) {
-      metrics.UpdateProtocolRequestCount(protocol, r.RequestURI)
+      metrics.UpdateProtocolRequestCount(rs.GotoProtocol, r.RequestURI)
     }
     if next != nil {
       next.ServeHTTP(w, r)

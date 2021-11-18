@@ -24,9 +24,11 @@ import (
   . "goto/pkg/events/eventslist"
   "goto/pkg/global"
   "goto/pkg/metrics"
+  "goto/pkg/transport"
   "goto/pkg/util"
   "log"
   "net/http"
+  "strconv"
   "strings"
   "sync"
   "time"
@@ -66,7 +68,9 @@ type InvocationResult struct {
   Errors              []map[string]interface{}  `json:"errors"`
   TookNanos           int                       `json:"tookNanos"`
   httpResponse        *http.Response
-  client              *util.ClientTracker
+  grpcResponse        interface{}
+  grpcStatus          int
+  client              transport.TransportClient
   tracker             *InvocationTracker
   request             *InvocationRequest
   err                 error
@@ -103,7 +107,7 @@ func newInvocationResult(request *InvocationRequest) *InvocationResult {
     Response:   &InvocationResultResponse{Headers: make(http.Header)},
     FailedURLs: map[string]int{},
     tracker:    request.tracker,
-    client:     request.tracker.client.clientTracker,
+    client:     request.tracker.client.transportClient,
     request:    request,
   }
 }
@@ -157,7 +161,7 @@ func (result *InvocationResult) processHTTPResponse(req *InvocationRequest, r *h
   result.httpResponse = r
   result.err = err
   if err == nil {
-    result.readResponsePayload()
+    result.readHTTPResponsePayload()
     if r != nil {
       result.updateResult(req.url, req.uri, r.Status, r.StatusCode, r.Header)
     }
@@ -166,7 +170,20 @@ func (result *InvocationResult) processHTTPResponse(req *InvocationRequest, r *h
   }
 }
 
-func (result *InvocationResult) readResponsePayload() {
+func (result *InvocationResult) processGRPCResponse(req *InvocationRequest, responseStatus int, responseHeaders map[string][]string, responsePayload []byte, err error) {
+  result.err = err
+  if err == nil {
+    if result.tracker.Target.CollectResponse {
+      result.Response.Payload = responsePayload
+    }
+    result.Response.PayloadSize = len(responsePayload)
+    result.updateResult(req.url, result.tracker.Target.Method, strconv.Itoa(responseStatus), responseStatus, responseHeaders)
+  } else {
+    result.Response.Status = err.Error()
+  }
+}
+
+func (result *InvocationResult) readHTTPResponsePayload() {
   if result.httpResponse != nil && result.httpResponse.Body != nil {
     defer result.httpResponse.Body.Close()
     if result.tracker.Target.TrackPayload || result.tracker.Target.CollectResponse {
@@ -215,10 +232,12 @@ func (result *InvocationResult) shouldRetry() bool {
   if result.err != nil {
     return true
   }
-  if result.tracker.Target.RetriableStatusCodes != nil {
-    for _, retriableCode := range result.tracker.Target.RetriableStatusCodes {
-      if retriableCode == result.httpResponse.StatusCode {
-        return true
+  if result.httpResponse != nil {
+    if result.tracker.Target.RetriableStatusCodes != nil {
+      for _, retriableCode := range result.tracker.Target.RetriableStatusCodes {
+        if retriableCode == result.httpResponse.StatusCode {
+          return true
+        }
       }
     }
   }

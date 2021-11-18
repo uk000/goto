@@ -124,6 +124,10 @@ func getPortProxy(r *http.Request) *Proxy {
   return proxy
 }
 
+func (p *Proxy) hasAnyProxy() bool {
+  return len(p.Targets) > 0 || len(p.TargetsByHeaders) > 0 || len(p.TargetsByQuery) > 0 || len(p.TargetsByUris) > 0
+}
+
 func (p *Proxy) initResults() {
   p.proxyMatchCounts = &ProxyMatchCounts{}
   p.proxyMatchCounts.CountsByTargets = map[string]int{}
@@ -606,9 +610,12 @@ func (p *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWr
       events.SendRequestEventJSON("Proxy Target Invoked", target.Name, target, r)
       metrics.UpdateProxiedRequestCount(target.Name)
       is, _ := p.toInvocationSpec(target, r)
-      tracker := invocation.RegisterInvocation(is)
-      response := invocation.StartInvocation(tracker, true)
-      responses = append(responses, response...)
+      if tracker, err := invocation.RegisterInvocation(is); err == nil {
+        response := invocation.StartInvocation(tracker, true)
+        responses = append(responses, response...)
+      } else {
+        log.Println(err.Error())
+      }
     }
     for _, response := range responses {
       util.CopyHeaders("", r, w, response.Response.Headers, false, false, true)

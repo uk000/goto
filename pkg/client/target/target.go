@@ -248,13 +248,16 @@ func (pc *TargetClient) stopTargets(targetNames []string) (bool, bool) {
 }
 
 func (pc *TargetClient) invokeTarget(target *invocation.InvocationSpec) {
-  tracker := invocation.RegisterInvocation(target, results.ResultChannelSinkFactory(target, pc.trackHeaders, pc.crossTrackHeaders, pc.trackTimeBuckets))
-  pc.targetsLock.Lock()
-  pc.activeTargetsCount++
-  pc.targetsLock.Unlock()
-  events.SendEventJSON(Client_TargetInvoked, target.Name, tracker)
-  invocation.StartInvocation(tracker)
-  pc.targetsLock.Lock()
-  pc.activeTargetsCount--
-  pc.targetsLock.Unlock()
+  if tracker, err := invocation.RegisterInvocation(target, results.ResultChannelSinkFactory(target, pc.trackHeaders, pc.crossTrackHeaders, pc.trackTimeBuckets)); err == nil {
+    pc.targetsLock.Lock()
+    pc.activeTargetsCount++
+    pc.targetsLock.Unlock()
+    events.SendEventJSON(Client_TargetInvoked, target.Name, tracker)
+    invocation.StartInvocation(tracker)
+    pc.targetsLock.Lock()
+    pc.activeTargetsCount--
+    pc.targetsLock.Unlock()
+  } else {
+    log.Println(err.Error())
+  }
 }

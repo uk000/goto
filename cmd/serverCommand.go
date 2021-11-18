@@ -80,6 +80,7 @@ func Execute() {
   flag.BoolVar(&global.LogResponseMiniBody, "logResponseMiniBody", false, "Enable/Disable logging of response mini body")
   flag.Var(&startupScript, "startupScript", "Script to execute at startup")
   flag.StringVar(&global.KubeConfig, "kubeConfig", "", "Path to Kubernetes config file")
+  flag.BoolVar(&global.Debug, "debug", false, "Debug logs")
   flag.Parse()
 
   if portsList != "" {
@@ -149,6 +150,9 @@ func Execute() {
   }
   if global.CertPath != "" {
     log.Printf("Will read certs from [%s]\n", global.CertPath)
+  }
+  if global.Debug {
+    log.Println("Debug logging enabled")
   }
   log.Printf("Server startupDelay [%s] shutdownDelay [%s]\n", global.StartupDelay, global.ShutdownDelay)
   if startupScript != nil {

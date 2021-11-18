@@ -103,10 +103,12 @@ func Middleware(next http.Handler) http.Handler {
       msg += fmt.Sprintf(", GotoTargetURL: [%s]", targetURL)
     }
     if global.LogRequestHeaders {
-      msg += fmt.Sprintf(", Request Headers: [%s]", util.GetRequestHeadersLog(r))
+      msg += fmt.Sprintf(", Request Headers: [%s]", util.GetHeadersLog(r.Header))
     }
     util.AddLogMessage(msg, r)
-    if next != nil {
+    if rs.IsTunnelConnectRequest {
+      util.AddLogMessage("Serving Tunnel Connect Request", r)
+    } else if next != nil {
       next.ServeHTTP(w, r)
     }
     util.DiscardRequestBody(r)

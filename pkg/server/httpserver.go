@@ -27,6 +27,7 @@ import (
   "goto/pkg/script"
   "goto/pkg/server/intercept"
   "goto/pkg/server/listeners"
+  "goto/pkg/tunnel"
   "goto/pkg/util"
   "io/ioutil"
   "log"
@@ -51,6 +52,7 @@ var (
 
 func RunHttpServer(handlers ...util.ServerHandler) {
   r := mux.NewRouter()
+  r.SkipClean(true)
   util.InitListenerRouter(r)
   r.Use(ContextMiddleware)
   r.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
@@ -85,18 +87,17 @@ func RunHttpServer(handlers ...util.ServerHandler) {
 func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     ctx, rs := util.WithRequestStore(r)
+    rs.IsTLS = r.TLS != nil
     r = r.WithContext(ctx)
-    if util.IsH2Upgrade(r) {
-      if util.IsPutOrPost(r) {
+    if util.IsH2Upgrade(r) || r.ProtoMajor == 2 {
+      if rs.IsTLS {
+        rs.IsH2 = true
         httpHandler.ServeHTTP(w, r)
       } else {
         r.ProtoMajor = 2
         rs.IsH2C = true
         h2cHandler.ServeHTTP(w, r)
       }
-    } else if r.ProtoMajor == 2 {
-      rs.IsH2C = true
-      h2cHandler.ServeHTTP(w, r)
     } else {
       httpHandler.ServeHTTP(w, r)
     }
@@ -105,41 +106,42 @@ func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
 
 func ContextMiddleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    reReader := util.NewReReader(r.Body)
+    r.Body = reReader
     if global.Stopping && global.IsReadinessProbe(r) {
       util.CopyHeaders(HeaderStoppingReadinessRequest, r, w, r.Header, true, true, false)
       w.WriteHeader(http.StatusNotFound)
     } else if next != nil {
-      var rs *util.RequestStore
       startTime := time.Now()
-      ctx := r.Context()
-      if v := ctx.Value(util.RequestStoreKey); v != nil {
-        rs = v.(*util.RequestStore)
-      } else {
-        ctx, rs = util.WithRequestStore(r)
-        rs.IsH2C = r.ProtoMajor == 2
-      }
+      ctx, rs := withRequestStore(r)
       r = r.WithContext(withPort(ctx, util.GetListenerPortNum(r)))
       var irw *intercept.InterceptResponseWriter
       w, irw = withIntercept(r, w)
+      tunnel.CheckTunnelRequest(r)
+      var statusCode, bodyLength int
       next.ServeHTTP(w, r)
-      statusCode := http.StatusOK
-      bodyLength := 0
+      statusCode = http.StatusOK
       if !util.IsKnownNonTraffic(r) && irw != nil {
         statusCode = irw.StatusCode
         bodyLength = irw.BodyLength
       }
-      endTime := time.Now()
       statusCodeText := strconv.Itoa(statusCode)
-      if !rs.IsTunnelRequest {
-        w.Header().Add(HeaderGotoResponseStatus, statusCodeText)
-        w.Header().Add(HeaderGotoInAt, startTime.UTC().String())
-        w.Header().Add(HeaderGotoOutAt, endTime.UTC().String())
-        w.Header().Add(HeaderGotoTook, endTime.Sub(startTime).String())
-      } else {
+      endTime := time.Now()
+      if rs.IsTunnelRequest {
         w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoInAt, rs.TunnelCount), startTime.UTC().String())
         w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoOutAt, rs.TunnelCount), endTime.UTC().String())
         w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoTook, rs.TunnelCount), endTime.Sub(startTime).String())
         w.Header()[HeaderGotoTunnel] = r.Header[HeaderGotoRequestedTunnel]
+      } else {
+        w.Header().Add(HeaderGotoResponseStatus, statusCodeText)
+        w.Header().Add(HeaderGotoInAt, startTime.UTC().String())
+        w.Header().Add(HeaderGotoOutAt, endTime.UTC().String())
+        w.Header().Add(HeaderGotoTook, endTime.Sub(startTime).String())
+      }
+      if rs.IsTunnelConnectRequest {
+        if !tunnel.HijackConnect(r, w) {
+          w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoTunnelStatus, rs.TunnelCount), strconv.Itoa(http.StatusInternalServerError))
+        }
       }
       if !rs.IsAdminRequest {
         metrics.UpdateURIRequestCount(r.RequestURI, statusCodeText)
@@ -152,6 +154,8 @@ func ContextMiddleware(next http.Handler) http.Handler {
       if irw != nil {
         data = irw.Data
       }
+      util.DiscardRequestBody(r)
+      reReader.ReallyClose()
       go PrintLogMessages(statusCode, bodyLength, data, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
     }
   })
@@ -179,6 +183,16 @@ func RunStartupScript() {
   if len(global.StartupScript) > 0 {
     script.RunCommands("startup", global.StartupScript)
   }
+}
+
+func withRequestStore(r *http.Request) (ctx context.Context, rs *util.RequestStore) {
+  if v := r.Context().Value(util.RequestStoreKey); v != nil {
+    rs = v.(*util.RequestStore)
+    ctx = r.Context()
+  } else {
+    ctx, rs = util.WithRequestStore(r)
+  }
+  return
 }
 
 func StartHttpServer(server *http.Server) {
@@ -253,13 +267,12 @@ func PrintLogMessages(statusCode, bodyLength int, payload []byte, headers http.H
     (!rs.IsMetricsRequest || global.EnableMetricsLogs) &&
     (!rs.IsFilteredRequest && global.EnableServerLogs) {
     if global.LogResponseHeaders {
-      rs.LogMessages = append(rs.LogMessages, util.GetResponseHeadersLog(headers))
+      rs.LogMessages = append(rs.LogMessages, "Response Headers: ", util.GetHeadersLog(headers))
     }
     if statusCode == 0 {
       statusCode = 200
     }
-    rs.LogMessages = append(rs.LogMessages, fmt.Sprintf("Response Status Code: [%d]", statusCode))
-    rs.LogMessages = append(rs.LogMessages, fmt.Sprintf("Response Body Length: [%d]", bodyLength))
+    rs.LogMessages = append(rs.LogMessages, fmt.Sprintf("Response Status: [%d], Response Body Length: [%d]", statusCode, bodyLength))
     bodyLog := ""
     logLabel := ""
     if payload != nil && !rs.IsAdminRequest {

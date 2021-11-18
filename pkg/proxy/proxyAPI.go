@@ -47,7 +47,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 }
 
 func addProxyTarget(w http.ResponseWriter, r *http.Request) {
-  getPortProxy(r).addProxyTarget(w, r)
+  pp := getPortProxy(r)
+  pp.addProxyTarget(w, r)
 }
 
 func getRequestedProxyTarget(r *http.Request) *ProxyTarget {
@@ -121,8 +122,8 @@ func middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     p := getPortProxy(r)
     willProxy := false
-    if !util.IsAdminRequest(r) && !status.IsForcedStatus(r) && len(p.getMatchingTargetsForRequest(r)) > 0 {
-      willProxy = true
+    if p.hasAnyProxy() && !util.IsAdminRequest(r) && !status.IsForcedStatus(r) {
+      willProxy = len(p.getMatchingTargetsForRequest(r)) > 0
     }
     if willProxy {
       p.router.ServeHTTP(w, r)

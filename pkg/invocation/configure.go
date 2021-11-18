@@ -17,18 +17,18 @@
 package invocation
 
 import (
-  "crypto/x509"
+  "crypto/tls"
   "encoding/base64"
   "fmt"
   "goto/pkg/global"
+  "goto/pkg/grpc"
   "goto/pkg/metrics"
+  "goto/pkg/transport"
   "goto/pkg/util"
   "io"
-  "io/ioutil"
   "log"
   "net/http"
   "net/url"
-  "path/filepath"
   "regexp"
   "strings"
   "sync"
@@ -40,6 +40,7 @@ type InvocationSpec struct {
   Name                 string         `json:"name"`
   Protocol             string         `json:"protocol"`
   Method               string         `json:"method"`
+  Service              string         `json:"service"`
   URL                  string         `json:"url"`
   BURLS                []string       `json:"burls"`
   Headers              RequestHeaders `json:"headers"`
@@ -70,6 +71,7 @@ type InvocationSpec struct {
   Assertions           Assertions     `json:"assertions"`
   AutoUpgrade          bool           `json:"autoUpgrade"`
   VerifyTLS            bool           `json:"verifyTLS"`
+  TLS                  bool           `json:"tls"`
   BodyReader           io.Reader      `json:"-"`
   httpVersionMajor     int
   httpVersionMinor     int
@@ -77,7 +79,6 @@ type InvocationSpec struct {
   grpc                 bool
   http                 bool
   h2                   bool
-  tls                  bool
   authority            string
   connTimeoutD         time.Duration
   connIdleTimeoutD     time.Duration
@@ -128,6 +129,12 @@ type TargetInvocations struct {
   lock     sync.RWMutex
 }
 
+type InvocationClient struct {
+  tracker         *InvocationTracker
+  transportClient transport.TransportClient
+  lock            sync.RWMutex
+}
+
 type ResultSink func(*InvocationResult)
 type ResultSinkFactory func(*InvocationTracker) ResultSink
 
@@ -139,17 +146,14 @@ const (
 var (
   invocationCounter uint32
   hostLabel         string
-  rootCAs           *x509.CertPool
-  caCert            []byte
   chanStopCleanup   = make(chan bool, 2)
   activeInvocations = map[uint32]*InvocationTracker{}
   activeTargets     = map[string]*TargetInvocations{}
-  targetClients     = map[string]*util.ClientTracker{}
+  targetClients     = map[string]transport.TransportClient{}
   invocationsLock   sync.RWMutex
 )
 
 func Startup() {
-  loadCerts()
   hostLabel = util.GetHostLabel()
   go monitorHttpClients()
 }
@@ -212,7 +216,10 @@ func (spec *InvocationSpec) processProtocol() {
     spec.http = true
   }
   if strings.HasPrefix(strings.ToLower(spec.URL), "https") {
-    spec.tls = true
+    spec.TLS = true
+  }
+  if spec.http && !strings.HasPrefix(spec.URL, "http") {
+    spec.URL = "http://" + spec.URL
   }
 }
 
@@ -367,44 +374,6 @@ func (spec *InvocationSpec) prepareAssertions() {
   }
 }
 
-func StoreCACert(cert []byte) {
-  invocationsLock.Lock()
-  caCert = cert
-  rootCAs.AppendCertsFromPEM(cert)
-  invocationsLock.Unlock()
-}
-
-func RemoveCACert() {
-  invocationsLock.Lock()
-  caCert = nil
-  loadCerts()
-  invocationsLock.Unlock()
-}
-
-func loadCerts() {
-  rootCAs = x509.NewCertPool()
-  found := false
-  if certs, err := filepath.Glob(global.CertPath + "/*.crt"); err == nil {
-    for _, c := range certs {
-      if cert, err := ioutil.ReadFile(c); err == nil {
-        rootCAs.AppendCertsFromPEM(cert)
-        found = true
-      }
-    }
-  }
-  if certs, err := filepath.Glob(global.CertPath + "/*.pem"); err == nil {
-    for _, c := range certs {
-      if cert, err := ioutil.ReadFile(c); err == nil {
-        rootCAs.AppendCertsFromPEM(cert)
-        found = true
-      }
-    }
-  }
-  if !found {
-    rootCAs = nil
-  }
-}
-
 func GetActiveInvocations() map[string]map[uint32]*InvocationStatus {
   results := map[string]map[uint32]*InvocationStatus{}
   currentActiveTargets := map[string]*TargetInvocations{}
@@ -504,11 +473,11 @@ func ResetActiveInvocations() {
   invocationsLock.Unlock()
 }
 
-func RegisterInvocation(target *InvocationSpec, sinks ...ResultSinkFactory) *InvocationTracker {
+func RegisterInvocation(target *InvocationSpec, sinks ...ResultSinkFactory) (*InvocationTracker, error) {
   return newTracker(atomic.AddUint32(&invocationCounter, 1), target, sinks...)
 }
 
-func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) *InvocationTracker {
+func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) (*InvocationTracker, error) {
   tracker := &InvocationTracker{
     ID:     id,
     Target: target,
@@ -526,9 +495,9 @@ func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) *
     }
   }
   if target.http {
-    tracker.client.clientTracker = getHttpClientForTarget(tracker)
+    tracker.client.transportClient = getHttpClientForTarget(tracker)
   } else if target.grpc {
-    tracker.client.clientTracker = getGrpcClientForTarget(tracker)
+    tracker.client.transportClient = getGrpcClientForTarget(tracker)
   }
   if len(target.StreamPayload) > 0 {
     for _, p := range target.StreamPayload {
@@ -554,7 +523,56 @@ func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) *
   } else {
     tracker.Payloads = [][]byte{nil}
   }
-  return tracker
+  if tracker.client.transportClient == nil {
+    return tracker, fmt.Errorf("Failed to create client for target [%s]", target.Name)
+  }
+  return tracker, nil
+}
+
+func tlsConfig(host string, verifyCert bool) *tls.Config {
+  cfg := &tls.Config{
+    ServerName:         host,
+    InsecureSkipVerify: !verifyCert,
+  }
+  if util.RootCAs != nil {
+    cfg.RootCAs = util.RootCAs
+  }
+  return cfg
+}
+
+func getHttpClientForTarget(tracker *InvocationTracker) transport.TransportClient {
+  target := tracker.Target
+  invocationsLock.RLock()
+  client := targetClients[target.Name]
+  invocationsLock.RUnlock()
+  if client == nil || client.HTTP() == nil {
+    client = transport.CreateHTTPClient(target.Name, target.h2, target.AutoUpgrade, target.TLS, target.authority, 0,
+      target.requestTimeoutD, target.connTimeoutD, target.connIdleTimeoutD, metrics.ConnTracker)
+    invocationsLock.Lock()
+    targetClients[target.Name] = client
+    invocationsLock.Unlock()
+  }
+  return client
+}
+
+func getGrpcClientForTarget(tracker *InvocationTracker) transport.TransportClient {
+  target := tracker.Target
+  invocationsLock.RLock()
+  client := targetClients[target.Name]
+  invocationsLock.RUnlock()
+  if client == nil {
+    if grpcClient, err := grpc.NewGRPCClient(target.Service, target.URL, target.authority, target.authority); err == nil {
+      grpcClient.SetTLS(target.TLS, target.VerifyTLS)
+      grpcClient.SetConnectionParams(target.connTimeoutD, target.connIdleTimeoutD, target.requestTimeoutD, target.keepOpenD)
+      client = grpcClient
+      invocationsLock.Lock()
+      targetClients[target.Name] = client
+      invocationsLock.Unlock()
+    } else {
+      log.Println(err.Error())
+    }
+  }
+  return client
 }
 
 func (tracker *InvocationTracker) activate() {
@@ -602,11 +620,7 @@ func (tracker *InvocationTracker) deactivate() {
 func RemoveHttpClientForTarget(target string) {
   invocationsLock.Lock()
   if client := targetClients[target]; client != nil {
-    if client.GrpcConn != nil {
-      client.GrpcConn.Close()
-    } else if client.Client != nil {
-      client.CloseIdleConnections()
-    }
+    client.Close()
     delete(targetClients, target)
   }
   invocationsLock.Unlock()
@@ -621,8 +635,8 @@ func monitorHttpClients() {
     case <-time.Tick(clientConnReportDuration):
       invocationsLock.RLock()
       for target, client := range targetClients {
-        if client.Tracker != nil {
-          metrics.UpdateActiveTargetConnCount(target, client.Tracker.GetOpenConnectionCount())
+        if client != nil && client.Transport() != nil {
+          metrics.UpdateActiveTargetConnCount(target, client.Transport().GetOpenConnectionCount())
         } else {
           metrics.UpdateActiveTargetConnCount(target, 1)
         }
@@ -631,15 +645,11 @@ func monitorHttpClients() {
     case <-time.Tick(maxIdleClientDuration):
       invocationsLock.Lock()
       for target, client := range targetClients {
-        if activeTargets[target] == nil && (client.Tracker == nil || client.Tracker.GetOpenConnectionCount() > 0) {
+        if activeTargets[target] == nil && (client.Transport() == nil || client.Transport().GetOpenConnectionCount() > 0) {
           if watchListForRemoval[target] < 3 {
             watchListForRemoval[target]++
           } else {
-            if client.GrpcConn != nil {
-              client.GrpcConn.Close()
-            } else if client.Client != nil {
-              client.CloseIdleConnections()
-            }
+            client.Close()
             delete(targetClients, target)
             delete(watchListForRemoval, target)
           }

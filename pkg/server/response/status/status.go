@@ -39,6 +39,7 @@ type FlipFlopConfig struct {
   Times           int `json:"times"`
   StatusCount     int `json:"statusCount"`
   LastStatusIndex int `json:"lastStatusIndex"`
+  LastStatus      int `json:"lastStatus"`
 }
 
 type PortStatus struct {
@@ -264,9 +265,10 @@ func (ps *PortStatus) flipflop(requestId string, requestedStatuses []int, times 
     }
   } else if len(requestedStatuses) == 1 {
     requestedStatus = requestedStatuses[0]
-    if times != flipflopConfig.Times {
-      flipflopConfig.StatusCount = -1
+    if times != flipflopConfig.Times || requestedStatus != flipflopConfig.LastStatus {
+      flipflopConfig.StatusCount = times
       flipflopConfig.Times = times
+      flipflopConfig.LastStatus = requestedStatus
     }
     if flipflopConfig.StatusCount == -1 && restart {
       flipflopConfig.StatusCount = times

@@ -19,28 +19,23 @@ package invocation
 import (
   "bytes"
   "context"
-  "crypto/tls"
   "fmt"
   . "goto/pkg/constants"
+  "goto/pkg/grpc"
   "goto/pkg/grpc/pb"
   "goto/pkg/metrics"
+  "goto/pkg/transport"
   "goto/pkg/util"
   "io"
   "io/ioutil"
+  "log"
   "net/http"
   "strconv"
   "sync"
   "time"
 
-  "google.golang.org/grpc"
   "google.golang.org/grpc/metadata"
 )
-
-type InvocationClient struct {
-  tracker       *InvocationTracker
-  clientTracker *util.ClientTracker
-  lock          sync.RWMutex
-}
 
 type InvocationRequest struct {
   requestID       string
@@ -53,7 +48,7 @@ type InvocationRequest struct {
   grpcStreamInput *pb.StreamConfig
   requestReader   io.ReadCloser
   requestWriter   io.WriteCloser
-  client          *util.ClientTracker
+  client          transport.TransportClient
   tracker         *InvocationTracker
   result          *InvocationResult
 }
@@ -126,7 +121,7 @@ func (tracker *InvocationTracker) newRequest(requestID, targetID, url string, he
     targetID:  targetID,
     url:       url,
     headers:   headers,
-    client:    tracker.client.clientTracker,
+    client:    tracker.client.transportClient,
     tracker:   tracker,
   }
   ir.result = newInvocationResult(ir)
@@ -175,8 +170,8 @@ func (ir *InvocationRequest) addOrUpdateRequestId() {
 func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
   client.lock.Lock()
   defer client.lock.Unlock()
-  if client.clientTracker != nil {
-    if client.clientTracker.IsGRPC {
+  if client.transportClient != nil {
+    if client.transportClient.IsGRPC() {
       if len(client.tracker.Payloads) > 1 {
         ir.uri = "/Goto/streamInOut"
         ir.grpcStreamInput = &pb.StreamConfig{ChunkSize: 1, ChunkCount: 1, Interval: "10ms"}
@@ -184,7 +179,7 @@ func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
         ir.uri = "/Goto/echo"
         ir.grpcInput = &pb.Input{}
       }
-    } else if client.clientTracker.Client != nil {
+    } else if client.transportClient.IsHTTP() {
       var requestReader io.ReadCloser
       var requestWriter io.WriteCloser
       if len(client.tracker.Payloads) > 1 {
@@ -226,58 +221,6 @@ func (tracker *InvocationTracker) prepareRequestHeaders(requestID, targetID, url
   return headers
 }
 
-func tlsConfig(host string, verifyCert bool) *tls.Config {
-  cfg := &tls.Config{
-    ServerName:         host,
-    InsecureSkipVerify: !verifyCert,
-  }
-  if rootCAs != nil {
-    cfg.RootCAs = rootCAs
-  }
-  return cfg
-}
-
-func getHttpClientForTarget(tracker *InvocationTracker) *util.ClientTracker {
-  target := tracker.Target
-  invocationsLock.RLock()
-  client := targetClients[target.Name]
-  invocationsLock.RUnlock()
-  if client == nil || client.Client == nil {
-    client = util.CreateHTTPClient(target.Name, target.h2, target.AutoUpgrade, target.tls, target.authority, 0,
-      target.requestTimeoutD, target.connTimeoutD, target.connIdleTimeoutD, metrics.ConnTracker)
-    invocationsLock.Lock()
-    targetClients[target.Name] = client
-    invocationsLock.Unlock()
-  }
-  return client
-}
-
-func getGrpcClientForTarget(tracker *InvocationTracker) *util.ClientTracker {
-  target := tracker.Target
-  invocationsLock.RLock()
-  client := targetClients[target.Name]
-  invocationsLock.RUnlock()
-  if client == nil {
-    var opts []grpc.DialOption
-    opts = append(opts, grpc.WithBlock())
-    if target.authority != "" {
-      opts = append(opts, grpc.WithAuthority(target.authority))
-    }
-    if !target.tls {
-      opts = append(opts, grpc.WithInsecure())
-    }
-    if conn, err := grpc.Dial(target.URL, opts...); err == nil {
-      client = util.NewHTTPClientTracker(nil, conn, nil)
-      invocationsLock.Lock()
-      targetClients[target.Name] = client
-      invocationsLock.Unlock()
-    } else {
-      tracker.logConnectionFailed(err.Error())
-    }
-  }
-  return client
-}
-
 func (ir *InvocationRequest) writeRequestPayload() {
   if ir.requestWriter != nil {
     go func() {
@@ -297,7 +240,7 @@ func (ir *InvocationRequest) writeRequestPayload() {
 
 func (ir *InvocationRequest) invoke() {
   start := time.Now()
-  if ir.client.IsGRPC {
+  if ir.client.IsGRPC() {
     ir.invokeGRPC()
   } else {
     ir.invokeHTTP()
@@ -308,19 +251,32 @@ func (ir *InvocationRequest) invoke() {
 }
 
 func (ir *InvocationRequest) invokeHTTP() {
-  if ir.client == nil || ir.client.Tracker == nil || ir.client.Client == nil {
+  if ir.client == nil || ir.client.Transport() == nil || ir.client.HTTP() == nil {
     fmt.Printf("Invocation: [ERROR] HTTP invocation attempted without a client")
     return
   }
-  ir.client.Tracker.SetTLSConfig(tlsConfig(ir.httpRequest.Host, ir.tracker.Target.VerifyTLS))
+  ir.client.SetTLSConfig(tlsConfig(ir.httpRequest.Host, ir.tracker.Target.VerifyTLS))
   ir.writeRequestPayload()
-  resp, err := ir.client.Do(ir.httpRequest)
+  resp, err := ir.client.HTTP().Do(ir.httpRequest)
   ir.result.processHTTPResponse(ir, resp, err)
 }
 
 func (ir *InvocationRequest) invokeGRPC() {
+  if ir.client == nil {
+    fmt.Printf("Invocation: [ERROR] GRPC invocation attempted without a client")
+    return
+  }
+  if response, err := ir.client.(*grpc.GRPCClient).Invoke(ir.tracker.Target.Method, ir.headers, ir.tracker.Payloads); err == nil {
+    log.Println(string(response.ResponsePayload))
+    ir.result.processGRPCResponse(ir, response.EquivalentHTTPStatusCode, response.ResponseHeaders, response.ResponsePayload, err)
+  } else {
+    ir.tracker.logConnectionFailed(err.Error())
+  }
+}
+
+func (ir *InvocationRequest) invokeGRPC2() {
   ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(ir.headers))
-  gotoClient := pb.NewGotoClient(ir.client.GrpcConn)
+  gotoClient := pb.NewGotoClient(ir.client.GRPC())
   if len(ir.tracker.Payloads) > 1 {
     if streamClient, err := gotoClient.StreamInOut(ctx); err == nil {
       wg := sync.WaitGroup{}
@@ -329,19 +285,36 @@ func (ir *InvocationRequest) invokeGRPC() {
         for _, payload := range ir.tracker.Payloads {
           input := &pb.StreamConfig{ChunkSize: 1, ChunkCount: 1, Interval: "10ms", Payload: string(payload)}
           if err := streamClient.Send(input); err == nil {
-
+            fmt.Println("Send GRPC stream input")
           } else {
+            fmt.Println(err.Error())
           }
+        }
+        if err := streamClient.CloseSend(); err != nil {
+          fmt.Println(err.Error())
         }
         wg.Done()
       }()
       go func() {
+        var data []interface{}
+        if md, err := streamClient.Header(); err == nil {
+          fmt.Println(md)
+        }
+        status := 200
         for {
-          if _, err := streamClient.Recv(); err != nil {
-            fmt.Printf("Invocation: [ERROR] %s\n", err.Error())
+          if out, err := streamClient.Recv(); err == nil {
+            fmt.Printf("Received stream input: %s\n", out.Payload)
+            data = append(data, out)
+          } else {
+            if err != io.EOF {
+              fmt.Printf("Invocation: [ERROR] %s\n", err.Error())
+              status = 500
+            }
             break
           }
         }
+        ir.result.grpcResponse = data
+        ir.result.grpcStatus = status
         wg.Done()
       }()
       wg.Wait()
@@ -361,13 +334,7 @@ func (ir *InvocationRequest) invokeGRPC() {
 func (c *InvocationClient) close() {
   c.lock.Lock()
   defer c.lock.Unlock()
-  if c.clientTracker != nil {
-    if c.clientTracker.GrpcConn != nil {
-      c.clientTracker.GrpcConn.Close()
-      c.clientTracker.GrpcConn = nil
-    } else if c.clientTracker.Client != nil {
-      c.clientTracker.Client.CloseIdleConnections()
-      c.clientTracker.Client = nil
-    }
+  if c.transportClient != nil {
+    c.transportClient.Close()
   }
 }

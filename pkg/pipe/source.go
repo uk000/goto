@@ -25,8 +25,12 @@ import (
   "goto/pkg/job"
   "goto/pkg/k8s"
   "goto/pkg/script"
+  "goto/pkg/server/response/trigger"
+  "goto/pkg/tunnel"
   "goto/pkg/util"
+  "io"
   "log"
+  "net/http"
   "strconv"
   "strings"
   "time"
@@ -35,18 +39,17 @@ import (
 type SourceType string
 
 const (
-  SourceK8s        SourceType = "K8s"
-  SourceK8sPodExec SourceType = "K8sPodExec"
-  SourceJob        SourceType = "Job"
-  SourceScript     SourceType = "Script"
+  SourceK8s         SourceType = "K8s"
+  SourceK8sPodExec  SourceType = "K8sPodExec"
+  SourceJob         SourceType = "Job"
+  SourceScript      SourceType = "Script"
+  SourceHTTPRequest SourceType = "HTTPRequest"
+  SourceTunnel      SourceType = "Tunnel"
 )
 
 type Source interface {
   Init(pipe *Pipe)
   Generate(map[string]interface{})
-  IsK8s() bool
-  IsK8sPodExec() bool
-  IsJob() bool
   IsScript() bool
   GetName() string
   GetSpec() string
@@ -60,7 +63,7 @@ type Source interface {
 }
 
 type PipelineSource struct {
-  Source
+  Source         `json:"-"`
   Name           string      `json:"name"`
   Type           SourceType  `json:"type"`
   Spec           string      `json:"spec,omitempty"`
@@ -82,7 +85,7 @@ type PipelineSource struct {
 }
 
 type AbstractSource struct {
-  *PipelineSource
+  *PipelineSource `json:"-"`
 }
 
 type K8sSource struct {
@@ -101,23 +104,23 @@ type ScriptSource struct {
   AbstractSource
 }
 
+type HTTPRequestSource struct {
+  AbstractSource
+  request map[string]interface{}
+  response map[string]interface{}
+}
+
+type TunnelSource struct {
+  AbstractSource
+  request  map[string]interface{}
+  response map[string]interface{}
+}
+
 func (s *AbstractSource) Init(*Pipe) {}
 
 func (s *AbstractSource) init() {}
 
 func (s *AbstractSource) Generate(workspace map[string]interface{}) {
-}
-
-func (s *AbstractSource) IsK8s() bool {
-  return false
-}
-
-func (s *AbstractSource) IsK8sPodExec() bool {
-  return false
-}
-
-func (s *AbstractSource) IsJob() bool {
-  return false
 }
 
 func (s *AbstractSource) IsScript() bool {
@@ -173,6 +176,10 @@ func (ps *PipelineSource) Init(name string, pipe *Pipe) Source {
     realSource = &JobSource{AbstractSource{PipelineSource: ps}}
   case SourceScript:
     realSource = &ScriptSource{AbstractSource{PipelineSource: ps}}
+  case SourceHTTPRequest:
+    realSource = &HTTPRequestSource{AbstractSource: AbstractSource{PipelineSource: ps}}
+  case SourceTunnel:
+    realSource = &TunnelSource{AbstractSource: AbstractSource{PipelineSource: ps}}
   }
   if ps.Spec != "" {
     for _, filler := range util.GetFillers(ps.Spec) {
@@ -185,15 +192,13 @@ func (ps *PipelineSource) Init(name string, pipe *Pipe) Source {
     }
   }
   if ps.Input != nil {
-    if input, ok := ps.Input.(string); !ok {
+    if input, ok := ps.Input.(string); ok {
       for _, filler := range util.GetFillers(input) {
         ps.inputFillers = append(ps.inputFillers, filler)
       }
     }
   }
-  if ps.Watch && pipe != nil {
-    ps.triggerPipe = pipe
-  }
+  ps.triggerPipe = pipe
   ps.Source = realSource
   realSource.init()
   return realSource
@@ -223,7 +228,7 @@ func (ps *PipelineSource) processFillers(workspace map[string]interface{}) {
   }
   if ps.Input != nil {
     ps.finalInput = ps.Input
-    if input, ok := ps.finalInput.(string); !ok {
+    if input, ok := ps.finalInput.(string); ok {
       for _, filler := range ps.inputFillers {
         input = util.FillFrom(input, filler, workspace)
       }
@@ -259,25 +264,29 @@ func (ps *PipelineSource) Generate(workspace map[string]interface{}) {
 }
 
 func (k *K8sSource) watch() {
-  if k.triggerPipe != nil && !k.watching {
-    k.watching = true
-    k8s.WatchResource(k.finalSpec, func(id string) {
+  if k.triggerPipe != nil && k.Watch && !k.watching {
+    resourceID := k.finalSpec
+    if resourceID == "" {
+      resourceID = k.Spec
+    }
+    k8s.WatchResource(resourceID, func(id string) {
       log.Printf("K8s Source [%s] triggered pipe [%s]\n", id, k.triggerPipe.Name)
       k.triggerPipe.Trigger()
     })
   }
 }
 
+func (k *K8sSource) init() {
+  k.watch()
+}
+
 func (k *K8sSource) generate() interface{} {
   k.watch()
+  k.watching = true
   if j := k8s.GetResourceByID(k.finalSpec); j != nil {
     return j.Value()
   }
   return nil
-}
-
-func (k *K8sSource) IsK8s() bool {
-  return true
 }
 
 func (k *K8sPodExecSource) prepareCommand() string {
@@ -298,10 +307,6 @@ func (k *K8sPodExecSource) generate() interface{} {
     log.Printf("Pipe: Error executing command [%+v] on pod [%+v]\n", command, k.finalSpec)
   }
   return nil
-}
-
-func (k *K8sPodExecSource) IsK8sPodExec() bool {
-  return true
 }
 
 func (j *JobSource) watch() {
@@ -360,10 +365,6 @@ func (j *JobSource) generate() interface{} {
   return result
 }
 
-func (j *JobSource) IsJob() bool {
-  return true
-}
-
 func (s *ScriptSource) generate() interface{} {
   r := strings.NewReader(fmt.Sprint(s.finalInput))
   var buff bytes.Buffer
@@ -375,4 +376,62 @@ func (s *ScriptSource) generate() interface{} {
 
 func (s *ScriptSource) IsScript() bool {
   return true
+}
+
+func (h *HTTPRequestSource) watch() {
+  if h.triggerPipe != nil && !h.watching {
+    trigger.RegisterPipeCallback(h.Spec, h.Name, func(trigger, source string, port int, r *http.Request, statusCode int, responseHeaders http.Header) {
+      log.Printf("HTTP Request Trigger [%s] Source [%s] triggered pipe [%s]\n", trigger, source, h.triggerPipe.Name)
+      rs := util.GetRequestStore(r)
+      h.request = map[string]interface{}{}
+      h.request["trigger"] = trigger
+      h.request["host"] = r.Host
+      h.request["uri"] = r.RequestURI
+      h.request["headers"] = r.Header
+      h.request["body"] = rs.RequestPayload
+      h.response = map[string]interface{}{}
+      h.response["status"] = statusCode
+      h.response["headers"] = responseHeaders
+      h.triggerPipe.Trigger()
+    })
+  }
+}
+
+func (h *HTTPRequestSource) init() {
+  h.watch()
+}
+
+func (h *HTTPRequestSource) generate() interface{} {
+  h.watch()
+  h.watching = true
+  return map[string]interface{}{"request": h.request, "response": h.response}
+}
+
+func (t *TunnelSource) watch() {
+  if t.triggerPipe != nil && !t.watching {
+    tunnel.RegisterPipeCallback(t.Spec, t.Name, func(endpoint, source string, port int, r *http.Request, statusCode int, responseHeaders http.Header, responseBody io.ReadCloser) {
+      log.Printf("Tunnel Endpoint [%s] Source [%s] triggered pipe [%s]\n", endpoint, source, t.triggerPipe.Name)
+      t.request = map[string]interface{}{}
+      t.request["host"] = r.Host
+      t.request["uri"] = r.RequestURI
+      t.request["headers"] = r.Header
+      t.request["body"] = util.Read(r.Body)
+      t.response = map[string]interface{}{}
+      t.response["endpoint"] = endpoint
+      t.response["headers"] = responseHeaders
+      t.response["body"] = util.Read(responseBody)
+      t.response["status"] = statusCode
+      t.triggerPipe.Trigger()
+    })
+  }
+}
+
+func (t *TunnelSource) init() {
+  t.watch()
+}
+
+func (t *TunnelSource) generate() interface{} {
+  t.watch()
+  t.watching = true
+  return map[string]interface{}{"request": t.request, "response": t.response}
 }

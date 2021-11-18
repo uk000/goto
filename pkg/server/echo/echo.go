@@ -80,7 +80,7 @@ func echoStream(w http.ResponseWriter, r *http.Request) {
 
 func wsEchoHandler(w http.ResponseWriter, r *http.Request) {
   metrics.UpdateRequestCount("wsecho")
-  headers := util.GetRequestHeadersLog(r)
+  headers := util.GetHeadersLog(r.Header)
   s := websocket.Server{Handler: websocket.Handler(func(ws *websocket.Conn) {
     ws.Write([]byte(headers))
     io.Copy(ws, ws)
@@ -94,6 +94,7 @@ func Echo(w http.ResponseWriter, r *http.Request) {
 
 func GetEchoResponse(w http.ResponseWriter, r *http.Request) map[string]interface{} {
   l := listeners.GetCurrentListener(r)
+  rs := util.GetRequestStore(r)
   response := map[string]interface{}{
     "RemoteAddress":      r.RemoteAddr,
     "RequestHost":        r.Host,
@@ -102,7 +103,7 @@ func GetEchoResponse(w http.ResponseWriter, r *http.Request) map[string]interfac
     "RequestProtcol":     r.Proto,
     "RequestHeaders":     r.Header,
     "RequestQuery":       r.URL.Query(),
-    "RequestBody":        fmt.Sprintf("[%d bytes]", util.DiscardRequestBody(r)),
+    "RequestBody":        fmt.Sprintf("[%d bytes]", rs.RequestPayloadSize),
     HeaderGotoTargetURL:  r.Header.Get(HeaderGotoTargetURL),
     HeaderGotoHost:       l.HostLabel,
     HeaderGotoPort:       l.Port,
@@ -110,9 +111,6 @@ func GetEchoResponse(w http.ResponseWriter, r *http.Request) map[string]interfac
     HeaderGotoProtocol:   w.Header().Get(HeaderGotoProtocol),
     HeaderGotoTunnelHost: r.Header.Get(HeaderGotoTunnelHost),
     HeaderViaGotoTunnel:  r.Header.Get(HeaderViaGotoTunnel),
-  }
-  if !util.IsH2C(r) {
-    response["RequestBody"] = fmt.Sprintf("[%d bytes]", util.DiscardRequestBody(r))
   }
   return response
 }

@@ -3,8 +3,9 @@
 |Field|Data Type|Default Value|Description|
 |---|---|---|---|
 | name         | string         || Name for this target |
-| protocol     | string         |`HTTP/1.1`| Request Protocol to use. Supports `HTTP/1.1` (default) and `HTTP/2.0`.|
+| protocol     | string         |`HTTP/1.1`| Request Protocol to use. Supports `HTTP/1.1` (default), `HTTP/2.0`, `tcp` and `grpc`.|
 | method       | string         || HTTP method to use for this target |
+| service      | string         || Name of the GRPC Service. A proto must already be uploaded to the goto instance for this service. See `grpc` APIs for details. |
 | url          | string         || URL for this target   |
 | burls        | []string       || Secondary URLs to use for `fallback` or `AB Mode` (see below)   |
 | headers      | [][]string     || Headers to be sent to this target |
@@ -12,11 +13,13 @@
 | autoPayload  | string         || Auto-generate request payload of the given size, specified as a numeric value (e.g. `1000`) or a byte size using suffixes `K`, `KB`, `M` and `MB` (e.g. `1K`). Use of auto payload causes the `body` field to be ignored. For response payload, use `/echo/body` API as target if the destination is also a `goto` server, or see response payload feature.  |
 | replicas     | int            |1| Number of parallel invocations to be done for this target. |
 | requestCount | int            |1| Number of requests to be made per replica for this target. The final request count becomes replicas * requestCount   |
+| warmupCount | int            |1| Number of requests to be sent as warmup before starting the real traffic.   |
 | initialDelay | duration       || Minimum delay to wait before starting traffic to a target. Actual delay will be the max of all the targets being invoked in a given round of invocation. |
 | delay        | duration       |10ms| Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
 | retries      | int            |0| Number of retries to perform for requests to this target for connection errors or for `retriableStatusCodes`.|
 | retryDelay   | duration       |1s| Time to wait between retries.|
 | retriableStatusCodes| []int|| HTTP response status codes for which requests should be retried |
+| keepOpen   | bool           |false| Whether the connection should be kept open after the requested traffic is completed. |
 | sendID       | bool           |false| Whether or not a unique ID be sent with each client request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
 | connTimeout  | duration       |10s| Timeout for opening target connection |
 | connIdleTimeout | duration    |5m| Idle Timeout for target connection |
@@ -29,6 +32,7 @@
 | streamDelay | duration |"10ms"| For streaming request payload (`streamPayload` field), this configures the delay to be applied between payload chunks. |
 | binary      | bool |false| Indicates whether request and response payload should be treated as binary data for this target |
 | collectResponse | bool  |false| Indicates whether response payload should be kept in the results for this target. By default, response payload is discarded. |
+| trackPayload   | bool   |false| Whether the response payload should be tracked (time of receipt of first and last bytes, total size, content, etc). Tracking payload is expensive, hence it's off by default. |
 | assertions | []Asssert  || List of assertions to be validated against each invocation response. Multiple assertions are applied with logical `OR` (disjunction) so that any one of them passing causes the result to be treated as passed. If all assertions fail, `errors` array in the result will contain the failure details.  |
 | autoUpgrade  | bool           |false| Whether client should negotiate auto-upgrade from http/1.1 to http/2. |
 | verifyTLS    | bool           |false| Whether the TLS certificate presented by the target is verified. (Also see `--certs` command arg) |

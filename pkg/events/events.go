@@ -20,6 +20,7 @@ import (
   "fmt"
   . "goto/pkg/constants"
   "goto/pkg/global"
+  "goto/pkg/transport"
   "goto/pkg/util"
   "log"
   "net/http"
@@ -58,7 +59,7 @@ var (
   eventChannel        = make(chan *Event, 100)
   trafficChannel      = make(chan []interface{}, 100)
   stopSender          = make(chan bool, 10)
-  registryClient      = util.CreateDefaultHTTPClient("EventsRegistrySender", true, false, nil)
+  registryClient      = transport.CreateDefaultHTTPClient("EventsRegistrySender", true, false, nil)
   lock                sync.RWMutex
 )
 
@@ -290,7 +291,7 @@ func storeAndPublishEvent(event *Event) {
     lock.Unlock()
     if global.PublishEvents && global.RegistryURL != "" {
       url := fmt.Sprintf("%s/registry/peers/%s/%s/events/store", global.RegistryURL, event.Peer, event.PeerHost)
-      if resp, err := registryClient.Post(url, ContentTypeJSON,
+      if resp, err := registryClient.HTTP().Post(url, ContentTypeJSON,
         strings.NewReader(util.ToJSONText(event))); err == nil {
         util.CloseResponse(resp)
       }

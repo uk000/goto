@@ -24,6 +24,7 @@ const (
   HeaderGotoTunnel                = "Goto-Tunnel"
   HeaderGotoRequestedTunnel       = "Goto-Requested-Tunnel"
   HeaderGotoViaTunnelCount        = "Goto-Via-Tunnel-Count"
+  HeaderGotoTunnelStatus          = "Goto-Tunnel-Status"
   HeaderGotoPort                  = "Goto-Port"
   HeaderGotoProtocol              = "Goto-Protocol"
   HeaderGotoRemoteAddress         = "Goto-Remote-Address"
@@ -52,6 +53,8 @@ const (
 
   HeaderProxyConnection = "Proxy-Connection"
   HeaderContentType     = "Content-Type"
+  HeaderContentLength   = "Content-Length"
+  HeaderAuthority       = ":authority"
   ContentTypeJSON       = "application/json"
   ContentTypeYAML       = "application/yaml"
 

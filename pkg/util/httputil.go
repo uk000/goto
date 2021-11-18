@@ -17,9 +17,7 @@
 package util
 
 import (
-  "bytes"
   "context"
-  "crypto/tls"
   "encoding/json"
   "fmt"
   . "goto/pkg/constants"
@@ -28,16 +26,13 @@ import (
   "io/ioutil"
   "net"
   "net/http"
-  "net/url"
   "reflect"
   "regexp"
   "strconv"
   "strings"
   "sync"
-  "time"
 
   "github.com/gorilla/mux"
-  "golang.org/x/net/http2"
   "google.golang.org/grpc/metadata"
   "sigs.k8s.io/yaml"
 )
@@ -57,23 +52,27 @@ type RequestStore struct {
   IsStatusRequest         bool
   IsDelayRequest          bool
   IsPayloadRequest        bool
+  IsTunnelConnectRequest  bool
   IsTunnelRequest         bool
   IsTunnelConfigRequest   bool
   IsTrafficEventReported  bool
   IsHeadersSent           bool
   IsTunnelResponseSent    bool
   GotoProtocol            string
-  TunnelCount             int
   StatusCode              int
+  IsH2                    bool
   IsH2C                   bool
   IsTLS                   bool
   ServerName              string
   TLSVersion              string
   TLSVersionNum           uint16
+  RequestPayload          string
   RequestPayloadSize      int
   TrafficDetails          []string
   LogMessages             []string
   InterceptResponseWriter interface{}
+  TunnelCount             int
+  RequestedTunnels        []string
   TunnelEndpoints         interface{}
   TunnelLock              sync.RWMutex
 }
@@ -119,6 +118,7 @@ func WithRequestStore(r *http.Request) (context.Context, *RequestStore) {
   rs.IsPayloadRequest = !isAdminRequest && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload"))
   rs.IsTunnelRequest = strings.HasPrefix(r.RequestURI, "/tunnel=") || !isAdminRequest && WillTunnel(r, rs)
   rs.IsTunnelConfigRequest = strings.HasPrefix(r.RequestURI, "/tunnels")
+  rs.IsH2C = r.ProtoMajor == 2
   return ctx, rs
 }
 
@@ -159,10 +159,6 @@ func SetTunnelCount(r *http.Request, count int) {
   GetRequestStore(r).TunnelCount = count
 }
 
-func GetTunnelEndpoints(r *http.Request) interface{} {
-  return GetRequestStore(r).TunnelEndpoints
-}
-
 func IsTrafficEventReported(r *http.Request) bool {
   return GetRequestStore(r).IsTrafficEventReported
 }
@@ -200,10 +196,6 @@ func SetTunnelRequest(r *http.Request) {
 
 func UnsetTunnelRequest(r *http.Request) {
   GetRequestStore(r).IsTunnelRequest = false
-}
-
-func SetRequestPayloadSize(r *http.Request, size int) {
-  GetRequestStore(r).RequestPayloadSize = size
 }
 
 func GetPortNumFromGRPCAuthority(ctx context.Context) int {
@@ -357,15 +349,8 @@ func ToLowerHeaders(headers map[string][]string) map[string][]string {
   return newHeaders
 }
 
-func GetResponseHeadersLog(header http.Header) string {
-  var s strings.Builder
-  s.Grow(128)
-  fmt.Fprintf(&s, "{\"ResponseHeaders\": %s}", ToJSONText(header))
-  return s.String()
-}
-
-func GetRequestHeadersLog(r *http.Request) string {
-  return ToJSONText(r.Header)
+func GetHeadersLog(header http.Header) string {
+  return ToJSONText(header)
 }
 
 func ReadJsonPayload(r *http.Request, t interface{}) error {
@@ -485,26 +470,7 @@ func IsFilteredRequest(r *http.Request) bool {
 
 func IsTunnelRequest(r *http.Request) bool {
   rs := GetRequestStore(r)
-  isTunnelRequest := rs.IsTunnelRequest && !rs.IsTunnelConfigRequest
-  if !isTunnelRequest {
-    isConnect := r.Method == http.MethodConnect
-    isGotoTunnel := len(r.Header[HeaderGotoTunnel]) > 0
-    isProxyConnection := len(r.Header[HeaderProxyConnection]) > 0
-    if isConnect || isGotoTunnel || isProxyConnection {
-      isTunnelRequest = true
-      rs.IsTunnelRequest = true
-    }
-    if isConnect || isProxyConnection {
-      r.Header.Add(HeaderGotoTunnel, r.Host)
-    }
-    if isProxyConnection {
-      if u, err := url.Parse(r.RequestURI); err == nil {
-        r.RequestURI = u.Path
-      }
-      delete(r.Header, HeaderProxyConnection)
-    }
-  }
-  return isTunnelRequest
+  return rs.IsTunnelRequest && !rs.IsTunnelConfigRequest
 }
 
 func IsKnownRequest(r *http.Request) bool {
@@ -621,7 +587,7 @@ func SubstitutePayloadMarkers(payload string, keys []string, values map[string]s
 }
 
 func IsH2Upgrade(r *http.Request) bool {
-  return strings.EqualFold(r.Header.Get("Upgrade"), "h2c") || upgradeRegexp.MatchString(r.Header.Get("Connection"))
+  return r.Method == "PRI" || strings.EqualFold(r.Header.Get("Upgrade"), "h2c") || upgradeRegexp.MatchString(r.Header.Get("Connection"))
 }
 
 func IsPutOrPost(r *http.Request) bool {
@@ -670,6 +636,43 @@ func IsURIInMap(uri string, m map[string]interface{}) bool {
   return FindURIInMap(uri, m) != ""
 }
 
+func MatchAllHeaders(headers http.Header, expected [][]string) bool {
+  for _, ehArr := range expected {
+    if len(ehArr) < 1 {
+      continue
+    }
+    hv := headers.Get(ehArr[0])
+    if hv == "" {
+      continue
+    }
+    if len(ehArr) == 1 {
+      return true
+    }
+    if ehArr[1] == "" || strings.EqualFold(ehArr[1], hv) {
+      return true
+    }
+  }
+  return false
+}
+
+func GetIfAnyHeaderMatched(headers http.Header, expected map[string]map[string]interface{}) interface{} {
+  for eh, ehMap := range expected {
+    if eh == "" {
+      continue
+    }
+    hv := headers.Get(eh)
+    if hv == "" {
+      continue
+    }
+    for ehv, data := range ehMap {
+      if ehv == "" || strings.EqualFold(ehv, hv) {
+        return data
+      }
+    }
+  }
+  return nil
+}
+
 func ContainsAllHeaders(headers http.Header, expected map[string]*regexp.Regexp) bool {
   for h, r := range expected {
     if h != "" && (headers[h] == nil || r != nil && !StringArrayContains(headers[h], r)) {
@@ -677,6 +680,15 @@ func ContainsAllHeaders(headers http.Header, expected map[string]*regexp.Regexp)
     }
   }
   return true
+}
+
+func IsInIntArray(value int, arr []int) bool {
+  for _, v := range arr {
+    if v == value {
+      return true
+    }
+  }
+  return false
 }
 
 func IsYes(flag string) bool {
@@ -745,79 +757,79 @@ func BuildCrossHeadersMap(crossTrackingHeaders map[string][]string) map[string]s
   return crossHeadersMap
 }
 
-func CreateRequest(method string, url string, headers http.Header, payload []byte, payloadReader io.ReadCloser) (*http.Request, error) {
-  if payloadReader == nil {
-    if payload == nil {
-      payload = []byte{}
-    }
-    payloadReader = ioutil.NopCloser(bytes.NewReader(payload))
+func UpdateTrackingCountsByURIAndID(id string, uri string,
+  countsByIDs map[string]int,
+  countsByURIs map[string]int,
+  countsByURIIDs map[string]map[string]int,
+) {
+  if countsByIDs != nil {
+    countsByIDs[id]++
   }
-  if req, err := http.NewRequest(method, url, payloadReader); err == nil {
-    for h, values := range headers {
-      if strings.EqualFold(h, "host") {
-        req.Host = values[0]
-      }
-      req.Header[h] = values
+  if countsByURIs != nil {
+    countsByURIs[uri]++
+  }
+  if countsByURIIDs != nil {
+    if countsByURIIDs[uri] == nil {
+      countsByURIIDs[uri] = map[string]int{}
     }
-    return req, nil
-  } else {
-    return nil, err
+    countsByURIIDs[uri][id]++
   }
 }
 
-func CreateDefaultHTTPClient(label string, h2, isTLS bool, newConnNotifierChan chan string) *ClientTracker {
-  return CreateHTTPClient(label, h2, true, isTLS, "", 0, 30*time.Second, 30*time.Second, 3*time.Minute, newConnNotifierChan)
+func UpdateTrackingCountsByURIKeyValuesID(id string, uri string,
+  trackingKeys []string,
+  actualKeyValues map[string][]string,
+  countsByKeys map[string]int,
+  countsByKeyValues map[string]map[string]int,
+  countsByURIKeys map[string]map[string]int,
+  countsByKeyIDs map[string]map[string]int,
+) {
+  if trackingKeys == nil {
+    return
+  }
+  for _, key := range trackingKeys {
+    if values := actualKeyValues[key]; len(values) > 0 {
+      if countsByKeys != nil {
+        countsByKeys[key]++
+      }
+      if countsByKeyValues != nil {
+        if countsByKeyValues[key] == nil {
+          countsByKeyValues[key] = map[string]int{}
+        }
+        countsByKeyValues[key][values[0]]++
+      }
+      if countsByURIKeys != nil {
+        if countsByURIKeys[uri] == nil {
+          countsByURIKeys[uri] = map[string]int{}
+        }
+        countsByURIKeys[uri][key]++
+      }
+      if countsByURIKeys != nil {
+        if countsByURIKeys[uri] == nil {
+          countsByURIKeys[uri] = map[string]int{}
+        }
+        countsByURIKeys[uri][key]++
+      }
+      if countsByKeyIDs != nil {
+        if countsByKeyIDs[key] == nil {
+          countsByKeyIDs[key] = map[string]int{}
+        }
+        countsByKeyIDs[key][id]++
+      }
+    }
+  }
 }
 
-func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName string, tlsVersion uint16,
-  requestTimeout, connTimeout, connIdleTimeout time.Duration, newConnNotifierChan chan string) *ClientTracker {
-  var transport http.RoundTripper
-  var tracker *TransportTracker
-  if !h2 {
-    ht := NewHTTPTransportTracker(&http.Transport{
-      MaxIdleConns:          300,
-      MaxIdleConnsPerHost:   300,
-      IdleConnTimeout:       connIdleTimeout,
-      Proxy:                 http.ProxyFromEnvironment,
-      DisableCompression:    true,
-      ExpectContinueTimeout: requestTimeout,
-      ResponseHeaderTimeout: requestTimeout,
-      DialContext: (&net.Dialer{
-        Timeout:   connTimeout,
-        KeepAlive: connIdleTimeout,
-      }).DialContext,
-      TLSHandshakeTimeout: connTimeout,
-      ForceAttemptHTTP2:   autoUpgrade,
-      TLSClientConfig: &tls.Config{
-        InsecureSkipVerify: true,
-        ServerName:         serverName,
-        MinVersion:         tlsVersion,
-        MaxVersion:         tlsVersion,
-      },
-    }, label, newConnNotifierChan)
-    tracker = &ht.TransportTracker
-    transport = ht.Transport
-  } else {
-    tr := &http2.Transport{
-      ReadIdleTimeout: connIdleTimeout,
-      PingTimeout:     connTimeout,
-      AllowHTTP:       true,
-      TLSClientConfig: &tls.Config{
-        InsecureSkipVerify: true,
-        ServerName:         serverName,
-        MinVersion:         tlsVersion,
-        MaxVersion:         tlsVersion,
-      },
+func GotoProtocol(isH2, isTLS bool) string {
+  protocol := "HTTP"
+  if isTLS {
+    if isH2 {
+      protocol = "HTTP/2"
+    } else {
+      protocol = "HTTPS"
     }
-    tr.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-      if isTLS {
-        return tls.Dial(network, addr, cfg)
-      }
-      return net.Dial(network, addr)
-    }
-    h2t := NewHTTP2TransportTracker(tr, label, newConnNotifierChan)
-    tracker = &h2t.TransportTracker
-    transport = h2t.Transport
+  } else if isH2 {
+    protocol = "H2C"
   }
-  return NewHTTPClientTracker(&http.Client{Timeout: requestTimeout, Transport: transport}, nil, tracker)
+  return protocol
 }

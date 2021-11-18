@@ -17,6 +17,7 @@
 package util
 
 import (
+  "bytes"
   "context"
   "io"
   "io/ioutil"
@@ -32,6 +33,11 @@ type reader struct {
   r   io.Reader
 }
 
+type ReReader struct {
+  io.ReadCloser
+  Content []byte
+}
+
 func (r reader) Read(p []byte) (n int, err error) {
   if err = r.ctx.Err(); err != nil {
     return
@@ -41,6 +47,47 @@ func (r reader) Read(p []byte) (n int, err error) {
   }
   err = r.ctx.Err()
   return
+}
+
+func NewReReader(r io.ReadCloser) *ReReader {
+  content := ReadBytes(r)
+  return &ReReader{
+    ReadCloser: ioutil.NopCloser(bytes.NewReader(content)),
+    Content:    content,
+  }
+}
+
+func (r *ReReader) Read(p []byte) (n int, err error) {
+  return r.ReadCloser.Read(p)
+}
+
+func (r *ReReader) Close() error {
+  err := r.ReadCloser.Close()
+  r.ReadCloser = ioutil.NopCloser(bytes.NewReader(r.Content))
+  return err
+}
+
+func (r *ReReader) ReallyClose() error {
+  return r.ReadCloser.Close()
+}
+
+func AsReReader(r io.ReadCloser) *ReReader {
+  if rr, ok := r.(*ReReader); ok {
+    return rr
+  }
+  return NewReReader(r)
+}
+
+func Reader(ctx context.Context, r io.Reader) io.Reader {
+  if deadline, ok := ctx.Deadline(); ok {
+    type deadliner interface {
+      SetReadDeadline(time.Time) error
+    }
+    if d, ok := r.(deadliner); ok {
+      d.SetReadDeadline(deadline)
+    }
+  }
+  return reader{ctx, r}
 }
 
 func BuildFilePath(filePath, fileName string) string {
@@ -66,20 +113,9 @@ func StoreFile(filePath, fileName string, content []byte) (string, error) {
   }
 }
 
-func Reader(ctx context.Context, r io.Reader) io.Reader {
-  if deadline, ok := ctx.Deadline(); ok {
-    type deadliner interface {
-      SetReadDeadline(time.Time) error
-    }
-    if d, ok := r.(deadliner); ok {
-      d.SetReadDeadline(deadline)
-    }
-  }
-  return reader{ctx, r}
-}
-
-func Read(r io.Reader) string {
+func Read(r io.ReadCloser) string {
   if body, err := ioutil.ReadAll(r); err == nil {
+    r.Close()
     return strings.Trim(string(body), " ")
   } else {
     log.Println(err.Error())
@@ -167,4 +203,13 @@ func IsStringInArray(val string, list []string) bool {
     }
   }
   return false
+}
+
+func GetCwd() string {
+  if cwd, err := os.Getwd(); err != nil {
+    log.Printf("Failed to get current directory with error: %s", err.Error())
+    return "."
+  } else {
+    return cwd
+  }
 }
