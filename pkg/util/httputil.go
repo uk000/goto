@@ -87,7 +87,7 @@ var (
   hostRegexp              = regexp.MustCompile("(?i)^host$")
   tunnelRegexp            = regexp.MustCompile("(?i)tunnel")
   utf8Regexp              = regexp.MustCompile("(?i)utf-8")
-  knownTextMimeTypeRegexp = regexp.MustCompile(".*(text|html|json|yaml).*")
+  knownTextMimeTypeRegexp = regexp.MustCompile(".*(text|html|json|yaml|form).*")
   upgradeRegexp           = regexp.MustCompile("(?i)upgrade")
 
   WillTunnel func(*http.Request, *RequestStore) bool

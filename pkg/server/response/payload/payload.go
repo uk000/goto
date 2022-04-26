@@ -52,7 +52,7 @@ type ResponsePayload struct {
   URICaptureKeys   []string          `json:"uriCaptureKeys"`
   HeaderCaptureKey string            `json:"headerCaptureKey"`
   QueryCaptureKey  string            `json:"queryCaptureKey"`
-  Transforms       []*util.Transform      `json:"transforms"`
+  Transforms       []*util.Transform `json:"transforms"`
   uriRegexp        *regexp.Regexp
   queryMatchRegexp *regexp.Regexp
   bodyMatchRegexp  *regexp.Regexp
@@ -128,7 +128,7 @@ func (pr *PortResponse) init() {
   matchRouter = rootRouter.NewRoute().Subrouter()
 }
 
-func newResponsePayload(payload []byte, binary bool, contentType, uri, header, query, value string, 
+func newResponsePayload(payload []byte, binary bool, contentType, uri, header, query, value string,
   bodyRegexes []string, paths []string, transforms []*util.Transform) (*ResponsePayload, error) {
   if contentType == "" {
     contentType = ContentTypeJSON
@@ -777,25 +777,37 @@ func getPayloadForBodyMatch(r *http.Request, bodyMatchResponses map[string]*Resp
 }
 
 func (pr *PortResponse) hasAnyPayload() bool {
-  return len(pr.allURIResponsePayloads) > 0 || len(pr.ResponsePayloadByHeaders) > 0 || 
+  return len(pr.allURIResponsePayloads) > 0 || len(pr.ResponsePayloadByHeaders) > 0 ||
     len(pr.ResponsePayloadByQuery) > 0 || pr.DefaultResponsePayload != nil
 }
 
 func (pr *PortResponse) unsafeGetResponsePayload(r *http.Request) (responsePayload *ResponsePayload, captures map[string]string, found bool) {
+  msg := ""
   for uri, rp := range pr.allURIResponsePayloads {
     if rp.uriRegexp.MatchString(r.RequestURI) {
+      msg = fmt.Sprintf("Request URI has response", r.RequestURI)
       if !found && pr.ResponsePayloadByURIAndHeaders[uri] != nil {
         responsePayload, found = getPayloadForKV(r.Header, pr.ResponsePayloadByURIAndHeaders[uri])
+        if found {
+          msg = fmt.Sprintf("Have custom response for Request URI and Headers")
+        }
       }
       if !found && pr.ResponsePayloadByURIAndQuery[uri] != nil {
         responsePayload, found = getPayloadForKV(r.URL.Query(), pr.ResponsePayloadByURIAndQuery[uri])
+        if found {
+          msg = fmt.Sprintf("Have custom response for Request URI and Query Params")
+        }
       }
       if !found && pr.ResponsePayloadByURIAndBody[uri] != nil {
         responsePayload, captures, found = getPayloadForBodyMatch(r, pr.ResponsePayloadByURIAndBody[uri])
+        if found {
+          msg = fmt.Sprintf("Have custom response for Request URI and Body")
+        }
       }
       if !found && pr.ResponsePayloadByURIs[uri] != nil {
         responsePayload = pr.ResponsePayloadByURIs[uri]
         found = true
+        msg = fmt.Sprintf("Have custom response for Request URI")
       }
       if found {
         break
@@ -804,14 +816,22 @@ func (pr *PortResponse) unsafeGetResponsePayload(r *http.Request) (responsePaylo
   }
   if !found {
     responsePayload, found = getPayloadForKV(r.Header, pr.ResponsePayloadByHeaders)
+    if found {
+      msg = fmt.Sprintf("Have custom response for Headers")
+    }
   }
   if !found {
     responsePayload, found = getPayloadForKV(r.URL.Query(), pr.ResponsePayloadByQuery)
+    if found {
+      msg = fmt.Sprintf("Have custom response for Request URI and Query Params")
+    }
   }
   if !found && pr.DefaultResponsePayload != nil {
     responsePayload = pr.DefaultResponsePayload
     found = true
+    msg = fmt.Sprintf("Have default response")
   }
+  util.AddLogMessage(msg, r)
   return responsePayload, captures, found
 }
 

@@ -6,13 +6,22 @@
 <small> The Readme reflects master HEAD code and applies to release 0.9.x. For documentation of `0.8.x` and prior releases, switch to `v0.8.x` branch or any of the release tags.</small>
 
 
-## What is it?
+## What is `goto`?
 
-A multi-faceted application to assist with various kinds of automated testing, debugging, bug hunt, runtime analysis and investigations.
+#### <i>`"I'm an agent of chaos" - The Joker`</i>
+
+A multi-faceted chaos testing tool to help with various kinds of automated testing, debugging, bug hunt, runtime analysis and investigations. Mostly when we've a task at hand to test a system, the system to be tested is either a client, a server, or some kind of a gateway/proxy that sits between a client and a server.
+
+To test either of these 3 layers, you need at least one counter-party application:
+- To test a client, we need a server to which the client can connect, send requests and get some response back. The server needs to be able to track the lifecycle of the client connections and various requests it received from the client so that the client functionality can be verified.
+- To test a server, we need a client that can send some requests to the server and track the responses sent by the server. Again the client should be able to track the lifecycle of connections and requests/responses to be able to verify the server functionality.
+- To test an intermediary gateway, we need both a test client as well as a test server, where the two could route some requests and responses through the intermediary and validate the correctness of the traffic flow.
+
+`Goto` can be used in all the above roles, to fill the missing piece of the puzzle.
 
 It can act as:
 - A [client](#goto-client-targets-and-traffic) that can generate HTTP/S, TCP, and GRPC traffic to other services (including other `goto` instances), track summary results of the traffic, and report results via [APIs](client-apis) as well as publish results to a [Goto registry](#registry). 
-- A [server](#goto-server-features) that can respond to HTTP/S, GRPC and TCP requests, and can be configured to respond to any custom API. The server features allow for various kinds of chaos testing and debugging/investigations. For example, respond with standard or custom responses([Response Status](#-response-status), [Response Payload](#-response-payload), [Response Delay](#-response-delay)), on-the-fly HTTP [Response Status](#-status-api) and/or [Delay](#-delay-api), [streaming/chunked response](#-stream-chunked-payload), and much more. It can track summary data about the received calls, and make those results available via various APIs. The server allows opening/closing [listener ports](#-listeners) on the fly in plain or TLS mode (with [auto-generated TLS certs](#tls-listeners)). It supports [payload transformations](#payload-transformation) to allow extracting data from incoming requests and injecting it into the outgoing response, and many more features. 
+- A [server](#goto-server-features) that can respond to HTTP/S, GRPC and TCP requests, and can be configured to respond to any custom API. The server features allow for various kinds of chaos testing and debugging/investigations, with the ability to track and report summary data about the received traffic. See the [TOC](#goto-server) for a complete list of server features. 
 - A [tunneling proxy](#tunnel) that can act as an HTTP/S passthrough tunnel, allowing any arbitrary traffic from a source to a destination to be re-routed via a `goto` instance and giving you the opportunity to inspect the traffic.
 - A [job executor](#jobs-features) that can run shell commands/scripts as well as make HTTP calls, collect and report results. It allows chaining of jobs together so that output of one job triggers another job with input. Additionally, jobs can be auto-executed via cron, and can act as a source of data for pipelines (more on this under `pipelines`)
 - A [registry](#registry) to orchestrate operations across other `goto` instances, collect and summarize results from those `goto` instances, and make the federated summary results available via APIs. A `goto` registry can also be paired with another `goto` registry instance and export/load data from one to the other to keep another backup of the collected results.
@@ -24,12 +33,11 @@ It can act as:
   - Define stages to orchestrate invocation of sources and transformations in a specific sequence.
   - Define watches on sources so that any changes on the source (e.g. K8s resources, cron jobs, or HTTP traffic) triggers the pipeline that the source is attached to, allowing some complex steps of data extraction, transformation and analysis to occur each time some external event occurs.
 
-## Why?
-
-It's hard to find some of these features together in a single tool
+<br/>
 
 ## How to use it?
 
+#### <u>Grab or Build</u>
 It's available as a docker image: `docker.io/uk0000/goto:latest`
 Or build it locally on your machine
 
@@ -37,66 +45,201 @@ Or build it locally on your machine
 go build -o goto .
 ```
 
-## But what can it do?
+#### <u>Launch</u>
+Start `goto` as a server with multiple ports and protocols. 
+> &#x1F4DD; <small><i>First port is treated as bootstrap port and uses HTTP protocol</i></small>
 
-- Say you need an application deployed as a service in k8s or on VMs, that can respond to requests on several ports using HTTP, HTTP/2, GRPC or TCP protocols both over plain text and TLS. `Goto` is what you need.
-- Say you want to test a client or a proxy, and want to introduce some chaos in your testing, so you need a service that can open or close a port on the fly, or can convert a port from plaintext to TLS and vice versa on the fly. `Goto` does it.
-- Or, you need to test a client application's behavior against different specific response payloads, so you need a substitute mock service that can stand in for the real service, where you can configure a payload on the fly for specific request URIs, headers, etc. Go `Goto`.
-- You need a test server application that can perform some quick on-the-fly transformations on incoming request, extracting values from headers/query/URI/body and produce semi-dynamic response based on templates.
-- You need to inspect some existing traffic between two applications in order to investigate some issue. The traffic passes through various network layers, and you wish to analyze the state of a request at a certain point in its journey, e.g. what does the request look like once it goes through a K8s ingress gateway.
-- A lot more scenarios can benefit from `goto`. More scenarios are and will be described further below in the doc.
-
-## Some simple usage examples?
-
-- Start `goto` as a server with multiple ports and protocols (first port is the default bootstrap port):
   ```
   goto --ports 8080,8081/http,8082/grpc,8000/tcp
   ```
+
+
+#### <u>Use Admin APIs to Prepare Goto Client and/or Server</u>
+For Example:
 - Add a new listener with GRPC protocol and open immediately
   ```
   curl -X POST localhost:8080/server/listeners/add --data '{"port":9091, "protocol":"grpc", "open":true}'
   ```
-- Add a new listener with TCP protocol without opening it
-  ```
-  curl -X POST localhost:8080/server/listeners/add --data '{"port":9000, "protocol":"tcp", "open":false}'
-  ```
-- Reconfigure TCP configurations of an existing listener to stream certain payload size
-  ```
-  curl -X POST localhost:8080/server/tcp/9000/configure --data '{"stream": true, "streamChunkSize":"250", "streamChunkCount":15, "streamChunkDelay":"1s", "connectionLife":"30s"}'
-  ```
-- Close a non-default port on the fly
-  ```
-  curl -X POST localhost:8080/server/listeners/8081/close
-  ```
-- Add TLS certs for a non-default port and reopen it to switch to TLS mode
-  ```
-  curl -X PUT localhost:8080/server/listeners/8081/cert/add --data-binary @/somepath/goto.cert
-  curl -X PUT localhost:8080/server/listeners/8081/key/add --data-binary @/somepath/goto.key
-  curl -X POST localhost:8080/server/listeners/8081/reopen
-  ```
-- Configure a `goto` server instance to count number of requests received for headers `foo` and `bar`
-  ```
-  curl -X PUT localhost:8081/server/request/headers/track/add/foo,bar
-  ```
+
 - Configure a `goto` client instance to send some requests to an HTTP target
   ```
   curl -s localhost:8080/client/targets/add --data '{"name": "t1", "method": "GET", "url": "http://localhost:8081/foo", "body": "some payload", "replicas": 2, "requestCount": 10}'
   ```
-- Configure a `goto` client instance to track responses received for headers `foo` and `bar`
-  ```
-  curl -X PUT localhost:8080/client/track/headers/add/foo,bar
-  ```
-- More to come...
 
-## Show me the money!
+<br/>
 
-Keep reading...
+# Show me ~~the money~~ some use cases please!
+
+## `Use Case`: Test a client application's behavior when the upstream service goes down mid-request
+Say you have a client application that connects to some remote service for some APIs. You intend to test how your application behaves if the server died before or during a request.
+
+What's needed is:
+- A `stand-in` test server that can respond to the exact API your client invokes and send valid response too (headers, JSON payload, etc.). This requires the server to be configurable such that you can define a custom API along with a custom response for the API.
+- We should be able to ask the service to die at anytime! But we don't really want the server process to die, because we want the service to also become available at some later point. We want the service downtime to be such that it can be scripted and tested without losing any observable metrics/logs/results server may have collected so far.
+- Although the requirement didn't ask for this, but wouldn't it be nice if we could reconfigure the API to respond with a slightly different response (v2.0) so that when the Service API is back up again, we can see that the client is indeed getting a different response now! But how do we configure a dead port? Well, how do we configure any port? Hmm... what's a port anyway?
+
+Quite some ask. The example code below shows how `Goto` can be of help.
+#
+<details>
+<summary>Example: Upstream Service Death</summary>
+
+```
+#Launch goto server with two ports. We want 8080 to be closeable, so first port in the list is 8000 since the first port cannot be closed.
+
+$ goto --ports 8000,8080
+
+#Call admin API on the correct port (8080) to configure a custom response for a custom API /foo/bar
+
+$ curl -X POST -g localhost:8080/server/response/payload/set/uri?uri=/foo/{somefoo}/bar/{somebar} --data '{"version: "1.0", "foo": "{somefoo}", "bar": "{somebar}"}'
+Port [8080] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [application/x-www-form-urlencoded], length [57]
+
+#Confirm that goto indeed responds with a valid payload for a given request
+$ curl -s localhost:8080/foo/f1/bar/b1
+{"version: "1.0", "foo": "f1", "bar": "b1"}
+
+#At this time, start client application and send requests to port 8080
+
+#Once client traffic is running, we'll ask goto to close port 8080
+$ curl -X POST localhost:8000/server/listeners/8080/close
+
+#Verify that the port is closed
+$ curl -v localhost:8080/foo/f1/bar/b1
+curl: (7) Failed to connect to localhost port 8080: Connection refused
+
+#Call admin API to reconfigure the API response. Since the port 8080 is closed, we'll ask goto on its main port 8000 to reconfigure port 8080!!
+
+$ curl -X POST -g localhost:8000/port=8080/server/response/payload/set/uri?uri=/foo/{somefoo}/bar/{somebar} --data '{"version: "2.0", "foo": "{somefoo}", "bar": "{somebar}"}'
+Port [8080] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [application/x-www-form-urlencoded], length [57]
+
+#Once client traffic is confirmed to be broken and expected client behavior is verified, we'll ask goto to reopen port 8080
+$ curl -X POST localhost:8000/server/listeners/8080/open
+
+#Confirm that goto responds on the reopened port with the new payload v2.0
+$ curl -s localhost:8080/foo/f2/bar/b2
+{"version: "2.0", "foo": "f2", "bar": "b2"}
+
+#Verify the client behavior again to ensure that it behaves as expected (whether it's expected to reconnect and resume traffic, or otherwise).
+```
+
+</details>
+
+#
+
+## `Use Case`: Test a client application's behavior against invalid upstream TLS certs
+Similar to previous scenario but going one step further, let's say your client application's users have reported that the application acts funny randomly. You suspect it may have to do with the TLS certs presented by some of the upstream service nodes. In order to validate your hypothesis, you need to be able to manipulate the server TLS certs on-the-fly, to switch between valid and invalid certs.
+
+In addition to the previous scenario's requirements, what we need is:
+- The server should give us a way to change the TLS certs used for a port via some backdoor access, preferably by calling some `admin` API so that it can be scripted. 
+- The server should provide enough observability so we can validate that a request indeed reached the server with certain parameters, and a response was sent. The traffic observed on the server can be correlated with the behavior observed on the client.
+
+Well, not to despair, we have `goto`. See the solution below.
+#
+<details>
+<summary>Example: Changing Upstream TLS Certs</summary>
+
+```
+# Launch goto server with three ports (we only need two, third is just for fun). 8443 is an HTTPS port and closeable. Goto auto-generates TLS cert for 8443 using the given CN=foo.com.
+
+$ goto --ports 8000,8080,8443/https/foo.com
+
+# If you want to test with a real cert because your service validates the cert for authenticity, you can upload the real cert for the port now. If you don't wish to use a custom cert and are fine with the auto-generated cert, skip the next 3 commands and continue.
+
+$ curl -X PUT localhost:8000/server/listeners/8443/cert/add --data-binary @/some/path/real-cert.crt
+Cert added for listener 8443
+
+$ curl -X PUT localhost:8000/server/listeners/8443/key/add --data-binary @/some/path/real-cert.key
+Key added for listener 8443
+
+$ curl -X POST localhost:8000/server/listeners/8443/reopen
+TLS Listener reopened on port 8443
+
+# At this point, we can verify that the TLS port is responding with the expected cert
+$ curl -vk https://localhost:8443/
+
+# Call admin API on port 8000 to configure a custom response for a custom API /foo/bar for port 8443. We could configure 8443 directly too, but then our script would have to deal with HTTPS.
+
+$ curl -X POST -g localhost:8000/port=8443/server/response/payload/set/uri?uri=/foo/{somefoo}/bar/{somebar} --data '{"version: "1.0", "foo": "{somefoo}", "bar": "{somebar}"}'
+Port [8443] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [application/x-www-form-urlencoded], length [57]
+
+# Confirm that goto indeed responds with a valid payload for a given request
+$ curl -vk https://localhost:8443/foo/f1/bar/b1
+{"version: "1.0", "foo": "f1", "bar": "b1"}
+
+# At this time, start client application and send requests to port 8443
+# Once client traffic is running, we'll ask goto to replace the cert with a different cert.
+# We can upload a self-signed invalid cert to goto using the same 3 commands as before.
+
+$ curl -X PUT localhost:8000/server/listeners/8443/cert/add --data-binary @/some/path/invalid-cert.crt
+$ curl -X PUT localhost:8000/server/listeners/8443/key/add --data-binary @/some/path/invalid-cert.key
+$ curl -X POST localhost:8000/server/listeners/8443/reopen
+
+#Alternately we can also ask goto to auto-generate a new cert for the port using a new CN. Which path you take here depends on the specific testing requirement.
+
+$ curl -X POST localhost:8000/server/listeners/8443/cert/auto/bar.com
+Cert auto-generated for listener 8443
+
+#Call admin API to reconfigure the API response with new payload v2.0 so we can confirm the response is new.
+
+$ curl -X POST -g localhost:8000/port=8080/server/response/payload/set/uri?uri=/foo/{somefoo}/bar/{somebar} --data '{"version: "2.0", "foo": "{somefoo}", "bar": "{somebar}"}'
+Port [8080] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [application/x-www-form-urlencoded], length [57]
+
+# Test the client traffic against this reopened port that uses a different cert now.
+
+$ curl -vk https://localhost:8443/foo/f1/bar/b1
+{"version: "2.0", "foo": "f1", "bar": "b1"}
+
+# Verify the client behavior and validate against your hypothesis.
+```
+
+</details>
+
+#
+
+
+## `Use Case Pattern`: Test a client application's behavior in the face of upstream chaos
+Now that you have seen the previous two use cases, you may already be thinking of several similar scenarios where `goto` may help. The pattern here is that a client application needs to be tested against a chaotic upstream service. The upstream service can introduce various kinds of chaos at any point in the client-service interaction, and we need to assess the client behavior in presence of the chaos.
+Examples of chaotic situations that the upstream server may present are:
+- Service switches from HTTP to HTTP/2
+- Service port dies while the client was connected
+- Service takes a long time to respond to a request, causing the client to time out.
+- Service response time is longer than the HTTP/TCP timeouts configured on any intermediate gateway/proxy.
+- Service takes too long to respond and triggers an HTTP server timeout on the service end
+- Service switches from HTTPS to HTTP and vice-versa 
+- Service switches between various kinds of TLS certs with different encryption parameters, etc.
+- Server response exceeds some HTTP protocol limits: too big header, too big payload, etc.
+
+There can be many more chaotic scenarios that you may think of. Many such scenarios can be recreated in the artificial testing setup using some basic configurable patterns that `goto` offers:
+- Generic server that can listen and respond on one or more ports with different protocols (HTTP, HTTPS, HTTP/2, TCP, GRPC)
+- Being able to open/close ports on the fly to mimic a service going down and recovering
+- Change a port's protocol on-the-fly before reopening it
+- Add/remove custom TLS certs for certain ports
+- Auto-generate TLS certs for certain ports
+- Configure a custom URI that the server can respond to with a custom response (status code, headers, payload)
+- Introduce artificial delays for all or specific requests
+- Configure dynamic response for certain APIs, where the response can be based on values received in the request (performing transformations).
+
+<br/>
+
+## `Use Case`: Test traffic behavior between a pair of client and service in the face of network or proxy chaos
+Another aspect of chaos testing, perhaps in a more advanced setup, is where we want to observe the behavior of a client and a service as their communication gets disrupted in the network or in some intermediate proxy/gateway.
+
+Capabilities needed to make this happen:
+- Make certain upstream calls based on downstream request's parameters, and use upstream response to build a dynamic response to send back to the downstream client (performing transformations).
+
+This is what `Goto`'s [Proxy Features](#proxy) aim to provide.
+
+<br/>
+
+## What Else?
+- You need to inspect some existing traffic between two applications in order to investigate some issue. The traffic passes through various network layers, and you wish to analyze the state of a request at a certain point in its journey, e.g. what does the request look like once it goes through a K8s ingress gateway. You're staring at the right tool.
+- You wish to test a proxy/gateway behavior sitting between a pair of client and service in the face of upstream and/or downstream chaos. Here our focus of testing is an intermediate proxy (e.g. service mesh).
+- <span style="color:red">TODO: Many more scenarios can benefit from `goto`. More scenarios will be added here soon.</span>
 
 <br/>
 
 ---
 
-# Overview
+## Some Flow Diagrams and Scenarios Explained
 
 Check these flow diagrams to get a visual overview of `Goto` behavior and usage.
 
@@ -110,15 +253,10 @@ Check these flow diagrams to get a visual overview of `Goto` behavior and usage.
 
 <br/>
 
----
-
-# Scenarios
 
 Before we look into detailed features and APIs exposed by the tool, let's look at how this tool can be used in a few scenarios to understand it better.
 
 ## Basic Scenarios
-
-#
 
 ### Scenario: [Use HTTP client to send requests and track results](docs/scenarios-basic.md#basic-client-usage)
 
@@ -145,12 +283,6 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 ## Outside-the-Box Scenarios
 
 ### Scenario: [Create HTTP chaos that HTTP libraries won't let you](docs/http-chaos.md)
-
-<br/>
-
-  <span style="color:red">
-  TODO: There are many more possible scenarios to describe here, to show how this tool can be used for various kinds of chaos testing and investigations.
-  </span>
 
 <br/>
 
@@ -2437,12 +2569,18 @@ The `goto` K8s APIs support working with both native K8s resources (e.g. Namespa
 There are four different ways in which requests can be tunneled via `Goto`:
 
 #### 1. Configured Tunnels
-> Any listener can be converted into a tunnel by calling `/tunnels/add/{protocol:address:port}` API to add one or more endpoints as tunnel destinations. When a tunnel has more than one endpoint, the requests are forwarded to all the endpoints, and the earliest response gets sent to the client. |
+> Any listener can be converted into a tunnel by calling `/tunnels/add/{protocol:address:port}` API to add one or more endpoints as tunnel destinations. When a tunnel has more than one endpoint, the requests are forwarded to all the endpoints, and the earliest response gets sent to the client.
+
+<br/>
 
 
 #### 2. On-the-fly Tunneling via URI prefix
-> Any request can be tunneled via `Goto` using URI path format `http://goto/tunnel={endpoints}/some/uri`. The goto instance will in turn multicast the request to all the given endpoints (format `{protocol:address:port}` with URI `/some/uri` using the same HTTP parameters that the client used (Method, Headers, Body, TLS). In order to multi-tunnel a request via multiple `goto` instances, multiple tunnel path prefixes can be added, e.g. `http://goto-1:8080/tunnel={goto-2:8080}/tunnel={goto-3:8081}/tunnel={real-service:80}/some/uri`.
+> Any request can be tunneled via `Goto` using URI path format `http://goto.goto/tunnel={endpoints}/some/uri`. `{endpoints}` is a list of endpoints where each endpoint is specified using format `{protocol:address:port}`. The goto instance receiving the above formatted request will multicast the request to all the given endpoints, to URI `/some/uri` along with the same HTTP parameters that the client used (Method, Headers, Body, TLS). 
 
+> In order to multi-tunnel a request via multiple `goto` instances, multiple tunnel path prefixes can be added, e.g. `http://goto-1:8080/tunnel={goto-2:8080}/tunnel={goto-3:8081}/tunnel={real-service:80}/some/uri`. <p/>
+As you can imagine by analyzing this request, it's processed by the first goto instance (`goto-1:8080`) using the previous logic, which ends up forwarding it to instance `goto-2:8080` with the remaining URI `/tunnel={goto-3:8081}/tunnel={real-service:80}/some/uri`. The second goto instance (`goto-2:8080`) again treats the incoming request as a tunnel request, and forwards it to instance `goto-3:8081` with the remaining URI `/tunnel={real-service:80}/some/uri`. The third goto instance finally tunnels it to the endpoint `real-service:80` with URI `/some/uri`.
+
+<br/>
 
 #### 3. On-the-fly Tunneling using special header `Goto-Tunnel`
 > Goto can be asked to tunnel a request by sending it to the `goto` instance with an additional header `Goto-Tunnel:{endpoints}`. Endpoints can be a comma-separated list where each endpoint is of format `{protocol:address:port}`. This approach allows for rerouting some existing traffic via goto, which then sends it to the original intended upstream service without having to modify the URI. The `Goto-Tunnel` header allows for multicasting as well as multi-tunneling. <br/><br/>
@@ -2460,10 +2598,12 @@ curl -vk https://goto-1:8081/foo -H'Goto-Tunnel:goto-2:8082,goto-3:8083'
 > When the endpoints in a tunnel have different protocols, `Goto` performs protocol conversions between all possible translations (`http` to/from `https` and `HTTP/1.1` to/from `HTTP/2`). The request `Host` and `SNI Authority` are rewritten to match the endpoint host.<br/><br/>
 > When an endpoint in a tunnel omits protocol in its spec, the protocol used by the original/preceding client request is carried forward.
 
+<br/>
+
 #### 4. HTTP(S) Proxy and CONNECT protocol
 > If `Goto` receives a header that indicates that a connected client has been routed via an HTTP(S) Proxy, or if `goto` receives an HTTP CONNECT request, `goto` establishes an on-the-fly tunnel to the destination endpoint.
 
-> ** *Note: The proxy auto-detection support is experimental.*
+    Note: The proxy auto-detection support is experimental and not confirmed to work under all circumstances.
 
 > For example, the below curl request gets routed via HTTPS proxy `goto-2.goto`. The `goto` instance running on `goto-2.goto` intercepts the request and tunnels it to the original destination `goto-1.goto`, but gives you a chance to track its details.
 

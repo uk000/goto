@@ -412,6 +412,9 @@ func addListenerCertOrKey(w http.ResponseWriter, r *http.Request, cert bool) {
     if len(data) > 0 {
       l.lock.Lock()
       defer l.lock.Unlock()
+      l.AutoCert = false
+      l.CommonName = ""
+      l.Cert = nil
       if cert {
         l.RawCert = data
         msg = fmt.Sprintf("Cert added for listener %d\n", l.Port)
@@ -446,6 +449,8 @@ func removeListenerCertAndKey(w http.ResponseWriter, r *http.Request) {
     l.RawCert = nil
     l.Cert = nil
     l.TLS = false
+    l.AutoCert = false
+    l.CommonName = ""
     l.lock.Unlock()
     if l.reopenListener() {
       msg = fmt.Sprintf("Cert and Key removed for listener %d, and reopened\n", l.Port)

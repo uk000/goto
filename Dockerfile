@@ -1,4 +1,4 @@
-FROM golang:1.16-alpine as builder-base
+FROM golang:1.18-alpine as builder-base
 RUN echo 'http://nl.alpinelinux.org/alpine/v3.12/main' > /etc/apk/repositories
 RUN apk update
 RUN apk add openssl
