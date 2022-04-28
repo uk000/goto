@@ -132,6 +132,11 @@ func ContextMiddleware(next http.Handler) http.Handler {
         w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoOutAt, rs.TunnelCount), endTime.UTC().String())
         w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoTook, rs.TunnelCount), endTime.Sub(startTime).String())
         w.Header()[HeaderGotoTunnel] = r.Header[HeaderGotoRequestedTunnel]
+      } else if rs.WillProxy {
+        irw.Header().Add(fmt.Sprintf("%s|Proxy", HeaderGotoInAt), startTime.UTC().String())
+        irw.Header().Add(fmt.Sprintf("%s|Proxy", HeaderGotoOutAt), endTime.UTC().String())
+        irw.Header().Add(fmt.Sprintf("%s|Proxy", HeaderGotoTook), endTime.Sub(startTime).String())
+        irw.Header().Add(fmt.Sprintf("%s|Proxy", HeaderGotoResponseStatus), statusCodeText)
       } else {
         w.Header().Add(HeaderGotoResponseStatus, statusCodeText)
         w.Header().Add(HeaderGotoInAt, startTime.UTC().String())

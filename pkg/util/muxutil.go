@@ -159,41 +159,41 @@ func AddRouteQWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *
   }
 }
 
-func AddRouteMultiQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
+func AddRouteMultiQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParams []string, methods ...string) {
   queryParamPairs := []string{}
   for _, q := range queryParams {
     queryParamPairs = append(queryParamPairs, q, fmt.Sprintf("{%s}", q))
   }
   for _, p := range GetAltPaths(path, true) {
-    r.HandleFunc(p, f).Queries(queryParamPairs...).Methods(method)
+    r.HandleFunc(p, f).Queries(queryParamPairs...).Methods(methods...)
     for _, coRouter := range coRoutersMap[r] {
-      coRouter.HandleFunc(p, f).Queries(queryParamPairs...).Methods(method)
+      coRouter.HandleFunc(p, f).Queries(queryParamPairs...).Methods(methods...)
     }
     for i := 0; i < len(queryParamPairs); i += 2 {
       for j := i + 2; j < len(queryParamPairs); j += 2 {
-        r.HandleFunc(p, f).Queries(queryParamPairs[i], queryParamPairs[i+1], queryParamPairs[j], queryParamPairs[j+1]).Methods(method)
+        r.HandleFunc(p, f).Queries(queryParamPairs[i], queryParamPairs[i+1], queryParamPairs[j], queryParamPairs[j+1]).Methods(methods...)
         for _, coRouter := range coRoutersMap[r] {
-          coRouter.HandleFunc(p, f).Queries(queryParamPairs[i], queryParamPairs[i+1], queryParamPairs[j], queryParamPairs[j+1]).Methods(method)
+          coRouter.HandleFunc(p, f).Queries(queryParamPairs[i], queryParamPairs[i+1], queryParamPairs[j], queryParamPairs[j+1]).Methods(methods...)
         }
       }
     }
     for i := 0; i < len(queryParamPairs); i += 2 {
-      r.HandleFunc(p, f).Queries(queryParamPairs[i], queryParamPairs[i+1]).Methods(method)
+      r.HandleFunc(p, f).Queries(queryParamPairs[i], queryParamPairs[i+1]).Methods(methods...)
       for _, coRouter := range coRoutersMap[r] {
-        coRouter.HandleFunc(p, f).Queries(queryParamPairs[i], queryParamPairs[i+1]).Methods(method)
+        coRouter.HandleFunc(p, f).Queries(queryParamPairs[i], queryParamPairs[i+1]).Methods(methods...)
       }
     }
-    r.HandleFunc(p, f).Methods(method)
+    r.HandleFunc(p, f).Methods(methods...)
     for _, coRouter := range coRoutersMap[r] {
-      coRouter.HandleFunc(p, f).Methods(method)
+      coRouter.HandleFunc(p, f).Methods(methods...)
     }
   }
 }
 
-func AddRouteMultiQWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), method string, queryParams ...string) {
-  AddRouteMultiQ(r, path, f, method, queryParams...)
+func AddRouteMultiQWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParams []string, methods ...string) {
+  AddRouteMultiQ(r, path, f, queryParams, methods...)
   if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && portTunnelRouters[lpath] != nil {
-    AddRouteMultiQ(portTunnelRouters[lpath], path, f, method, queryParams...)
+    AddRouteMultiQ(portTunnelRouters[lpath], path, f, queryParams, methods...)
   }
 }
 

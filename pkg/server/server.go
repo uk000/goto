@@ -24,6 +24,7 @@ import (
   "goto/pkg/client/results"
   "goto/pkg/events"
   "goto/pkg/global"
+  "goto/pkg/grpc"
   "goto/pkg/invocation"
   "goto/pkg/job"
   "goto/pkg/k8s"
@@ -36,7 +37,6 @@ import (
   "goto/pkg/server/catchall"
   "goto/pkg/server/conn"
   "goto/pkg/server/echo"
-  "goto/pkg/grpc"
   "goto/pkg/server/listeners"
   "goto/pkg/server/listeners/label"
   "goto/pkg/server/probes"
@@ -51,13 +51,15 @@ func Run() {
   global.PeerAddress = util.GetHostIP() + ":" + strconv.Itoa(global.ServerPort)
   global.GetPeers = registry.GetPeers
   util.WillTunnel = tunnel.WillTunnel
+  util.WillProxy = proxy.WillProxy
   global.StoreEventInCurrentLocker = registry.StoreEventInCurrentLocker
   listeners.Configure(ServeHTTPListener, ServeGRPCListener, StartTCPServer)
   metrics.Startup()
   invocation.Startup()
   RunHttpServer(tunnel.TunnelCountHandler, label.Handler, conn.Handler, tunnel.Handler, events.Handler, metrics.Handler,
-    listeners.Handler, probes.Handler, proxy.Handler, registry.Handler, client.Handler, k8s.Handler, pipe.Handler,
-    request.Handler, response.Handler, tcp.Handler, script.Handler, job.Handler, grpc.Handler, log.Handler, echo.Handler, catchall.Handler)
+    listeners.Handler, probes.Handler, registry.Handler, client.Handler, k8s.Handler, pipe.Handler,
+    request.Handler, proxy.Handler, response.Handler, tcp.Handler, script.Handler, job.Handler,
+    grpc.Handler, log.Handler, echo.Handler, catchall.Handler)
   invocation.Shutdown()
   job.Manager.StopJobWatch()
   metrics.Shutdown()

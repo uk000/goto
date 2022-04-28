@@ -19,10 +19,12 @@ package util
 import (
   "bytes"
   "context"
+  "fmt"
   "io"
   "io/ioutil"
   "log"
   "os"
+  "reflect"
   "regexp"
   "strings"
   "time"
@@ -203,6 +205,20 @@ func IsStringInArray(val string, list []string) bool {
     }
   }
   return false
+}
+
+func GetMapKeys(m interface{}) []string {
+  keys := []string{}
+  if v := reflect.ValueOf(m); v.Kind() == reflect.Map {
+    for _, key := range v.MapKeys() {
+      keys = append(keys, fmt.Sprint(key))
+    }
+  }
+  return keys
+}
+
+func LowerAndTrim(s string) string {
+  return strings.ToLower(strings.Trim(s, " "))
 }
 
 func GetCwd() string {

@@ -3,29 +3,22 @@
 ```
 curl -X POST localhost:8080/proxy/targets/clear
 
-curl localhost:8081/proxy/targets/add --data '{"name": "t1", \
-"match":{"uris":["/x/{x}/y/{y}"], "query":[["foo", "{f}"]]}, \
-"url":"http://localhost:8083", \
-"replaceURI":"/abc/{y:.*}/def/{x:.*}", \
-"addHeaders":[["z","z1"]], \
-"addQuery":[["bar","{f}"]], \
-"removeQuery":["foo"], \
-"replicas":1, "enabled":true, "sendID": true}'
+curl http://localhost:8080/proxy/targets/add --data '{"name": "target1", "url":"http://localhost:8081", "enabled":true, "routes":{"/foo/{x}/bar/{y}": "/abc/{y:.*}/def/{x:.*}"}}'
 
-curl localhost:8081/proxy/targets/add --data '{"name": "t2", \
-"match":{"headers":[["foo"]]}, \
-"url":"http://localhost:8083", \
-"replaceURI":"/echo", \
-"addHeaders":[["z","z2"]], \
-"replicas":1, "enabled":true, "sendID": false}'
+curl http://localhost:8080/proxy/targets/add --data '{"name": "target1", "url":"http://localhost:8081", "enabled":true, "routes":{"/": ""}, "matchAll":{"headers":[["foo", "{x}"], ["bar", "{y}"]]}, "addHeaders":[["abc","{x}"], ["def","{y}"]], "removeHeaders":["foo"]}'
 
-curl localhost:8082/proxy/targets/add --data '{"name": "t3", \
-"match":{"headers":[["x", "{x}"], ["y", "{y}"]], "uris":["/foo"]}, \
-"url":"http://localhost:8083", \
-"replaceURI":"/echo", \
-"addHeaders":[["z","{x}"], ["z","{y}"]], \
-"removeHeaders":["x", "y"], \
-"replicas":1, "enabled":true, "sendID": true}'
+
+curl -X POST localhost:8000/port=8080/proxy/targets/add/t1\?url=localhost:8081; 
+curl -X POST localhost:8000/port=8080/proxy/targets/t1/route\?from=/foo\&to=/bar;
+curl -X POST localhost:8000/port=8080/proxy/targets/t1/match/header/foo=1;
+curl -X POST localhost:8000/port=8080/proxy/targets/t1/match/query/bar=123;
+
+curl -X POST localhost:8000/port=8080/proxy/targets/add/t2\?url=localhost:8082;
+curl -X POST localhost:8000/port=8080/proxy/targets/t2/route\?from=/foo;
+curl -X POST localhost:8000/port=8080/proxy/targets/t2/match/header/foo=2;
+
+curl -X POST localhost:8000/port=8080/proxy/targets/add/t3\?url=localhost:8083;
+curl -X POST localhost:8000/port=8080/proxy/targets/t3/route\?from=/
 
 curl -X PUT localhost:8080/proxy/targets/t1/remove
 

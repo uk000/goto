@@ -47,8 +47,15 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
     }
     wg := &sync.WaitGroup{}
     for i := 0; i < target.Replicas; i++ {
-      requestID := fmt.Sprintf("%s-%d", target.Name, completedCount+i+1)
-      targetID := fmt.Sprintf("%s[%d][%d]", target.Name, completedCount+i+1, i+1)
+      targetID := ""
+      requestID := ""
+      if tracker.CustomID > 0 {
+        targetID = fmt.Sprintf("%s-%d", target.Name, tracker.CustomID)
+        requestID = fmt.Sprintf("%s-%d[%d][%d]", target.Name, tracker.CustomID, i+1, completedCount+i+1)
+      } else {
+        targetID = fmt.Sprintf("%s", target.Name)
+        requestID = fmt.Sprintf("%s[%d][%d]", target.Name, i+1, completedCount+i+1)
+      }
       wg.Add(1)
       go invokeTarget(tracker, requestID, targetID, wg, true)
     }

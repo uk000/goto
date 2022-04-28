@@ -24,6 +24,7 @@ import (
   "strings"
   "sync"
 
+  "goto/pkg/constants"
   "goto/pkg/events"
   "goto/pkg/invocation"
   "goto/pkg/metrics"
@@ -36,23 +37,22 @@ import (
 )
 
 type ProxyTargetMatch struct {
-  Headers      [][]string
-  Uris         []string
-  Query        [][]string
-  MatchAllURIs bool
+  Headers [][]string
+  Query   [][]string
 }
 
 type TargetMatchInfo struct {
-  Headers map[string]string
-  Query   map[string]string
-  URIs    []string
+  Headers [][]string
+  Query   [][]string
+  URI     string
+  target  *ProxyTarget
 }
 
 type ProxyTarget struct {
   Name           string            `json:"name"`
   URL            string            `json:"url"`
+  Routes         map[string]string `json:"routes"`
   SendID         bool              `json:"sendID"`
-  ReplaceURI     string            `json:"replaceURI"`
   StripURI       string            `json:"stripURI"`
   AddHeaders     [][]string        `json:"addHeaders"`
   RemoveHeaders  []string          `json:"removeHeaders"`
@@ -62,11 +62,16 @@ type ProxyTarget struct {
   MatchAll       *ProxyTargetMatch `json:"matchAll"`
   Replicas       int               `json:"replicas"`
   Enabled        bool              `json:"enabled"`
-  uriRegExp      *regexp.Regexp
+  matchAllURIs   bool
   stripURIRegExp *regexp.Regexp
+  headerMatch    map[string][]string
+  queryMatch     map[string][]string
   captureHeaders map[string]string
   captureQuery   map[string]string
-  router         *mux.Router
+  uriRegexps     map[string]*regexp.Regexp
+  uriRouters     map[string]*mux.Router
+  callCount      int
+  lock           sync.RWMutex
 }
 
 type ProxyMatchCounts struct {
@@ -85,10 +90,8 @@ type ProxyMatchCounts struct {
 }
 
 type Proxy struct {
-  Targets          map[string]*ProxyTarget                       `json:"targets"`
-  TargetsByHeaders map[string]map[string]map[string]*ProxyTarget `json:"targetsByHeaders"`
-  TargetsByUris    map[string]map[string]*ProxyTarget            `json:"targetsByUris"`
-  TargetsByQuery   map[string]map[string]map[string]*ProxyTarget `json:"targetsByQuery"`
+  Port             string                  `json:"port"`
+  Targets          map[string]*ProxyTarget `json:"targets"`
   proxyMatchCounts *ProxyMatchCounts
   router           *mux.Router
   lock             sync.RWMutex
@@ -99,12 +102,9 @@ var (
   proxyLock   sync.RWMutex
 )
 
-func newProxy() *Proxy {
-  p := &Proxy{}
+func newProxy(port string) *Proxy {
+  p := &Proxy{Port: port}
   p.Targets = map[string]*ProxyTarget{}
-  p.TargetsByHeaders = map[string]map[string]map[string]*ProxyTarget{}
-  p.TargetsByUris = map[string]map[string]*ProxyTarget{}
-  p.TargetsByQuery = map[string]map[string]map[string]*ProxyTarget{}
   p.initResults()
   p.router = rootRouter.NewRoute().Subrouter()
   return p
@@ -118,14 +118,14 @@ func getPortProxy(r *http.Request) *Proxy {
   if proxy == nil {
     proxyLock.Lock()
     defer proxyLock.Unlock()
-    proxy = newProxy()
+    proxy = newProxy(listenerPort)
     proxyByPort[listenerPort] = proxy
   }
   return proxy
 }
 
 func (p *Proxy) hasAnyProxy() bool {
-  return len(p.Targets) > 0 || len(p.TargetsByHeaders) > 0 || len(p.TargetsByQuery) > 0 || len(p.TargetsByUris) > 0
+  return len(p.Targets) > 0
 }
 
 func (p *Proxy) initResults() {
@@ -201,8 +201,144 @@ func (p *Proxy) incrementMatchCounts(t *ProxyTarget, uri string, header string, 
   }
 }
 
+func newProxyTarget() *ProxyTarget {
+  return &ProxyTarget{
+    Routes:         map[string]string{},
+    Replicas:       1,
+    Enabled:        true,
+    headerMatch:    map[string][]string{},
+    queryMatch:     map[string][]string{},
+    captureHeaders: map[string]string{},
+    captureQuery:   map[string]string{},
+    uriRegexps:     map[string]*regexp.Regexp{},
+    uriRouters:     map[string]*mux.Router{},
+  }
+}
+
+func (p *Proxy) initProxyTarget(w http.ResponseWriter, r *http.Request) {
+  target := newProxyTarget()
+  target.Name = util.GetStringParamValue(r, "target")
+  target.URL = util.GetStringParamValue(r, "url")
+  p.deleteProxyTarget(target.Name)
+  p.lock.Lock()
+  p.Targets[target.Name] = target
+  p.lock.Unlock()
+  msg := fmt.Sprintf("Port [%s]: Added empty proxy target [%s] with URL [%s]", p.Port, target.Name, target.URL)
+  util.AddLogMessage(msg, r)
+  w.WriteHeader(http.StatusOK)
+  fmt.Fprintf(w, msg)
+  events.SendRequestEventJSON("Proxy Target Added", target.Name, target, r)
+}
+
+func (p *Proxy) addTargetRoute(w http.ResponseWriter, r *http.Request) {
+  name := util.GetStringParamValue(r, "target")
+  from := util.GetStringParamValue(r, "from")
+  to := util.GetStringParamValue(r, "to")
+  p.lock.RLock()
+  target := p.Targets[name]
+  p.lock.RUnlock()
+  if target == nil {
+    w.WriteHeader(http.StatusBadRequest)
+    fmt.Fprintf(w, "Invalid target: %s\n", name)
+    return
+  }
+  target.lock.Lock()
+  target.Routes[from] = to
+  target.lock.Unlock()
+  p.addURIMatch(target, from)
+  msg := fmt.Sprintf("Port [%s]: Added URI routing for Target [%s], URL [%s], From [%s] To [%s]", p.Port, target.Name, target.URL, from, to)
+  util.AddLogMessage(msg, r)
+  w.WriteHeader(http.StatusOK)
+  fmt.Fprintf(w, msg)
+}
+
+func (p *Proxy) addTargetHeaderOrQueryMatch(w http.ResponseWriter, r *http.Request, isHeader bool) {
+  name := util.GetStringParamValue(r, "target")
+  key := util.LowerAndTrim(util.GetStringParamValue(r, "key"))
+  value := util.LowerAndTrim(util.GetStringParamValue(r, "value"))
+  p.lock.RLock()
+  target := p.Targets[name]
+  p.lock.RUnlock()
+  if target == nil {
+    w.WriteHeader(http.StatusBadRequest)
+    fmt.Fprintf(w, "Invalid target: %s\n", name)
+    return
+  }
+  msg := ""
+  target.lock.Lock()
+  if target.MatchAny == nil {
+    target.MatchAny = &ProxyTargetMatch{}
+  }
+  if isHeader {
+    target.MatchAny.Headers = append(target.MatchAny.Headers, []string{key, value})
+    p.addHeaderMatch(target, key, value)
+    msg = fmt.Sprintf("Port [%s]: Added header match criteria for Target [%s], URL [%s], Key [%s] Value [%s]", p.Port, target.Name, target.URL, key, value)
+  } else {
+    target.MatchAny.Query = append(target.MatchAny.Query, []string{key, value})
+    p.addQueryMatch(target, key, value)
+    msg = fmt.Sprintf("Port [%s]: Added query match criteria for Target [%s], URL [%s], Key [%s] Value [%s]", p.Port, target.Name, target.URL, key, value)
+  }
+  target.lock.Unlock()
+  util.AddLogMessage(msg, r)
+  w.WriteHeader(http.StatusOK)
+  fmt.Fprintf(w, msg)
+}
+
+func (p *Proxy) addTargetHeaderOrQuery(w http.ResponseWriter, r *http.Request, isHeader bool) {
+  name := util.GetStringParamValue(r, "target")
+  key := util.GetStringParamValue(r, "key")
+  value := util.GetStringParamValue(r, "value")
+  p.lock.RLock()
+  target := p.Targets[name]
+  p.lock.RUnlock()
+  if target == nil {
+    w.WriteHeader(http.StatusBadRequest)
+    fmt.Fprintf(w, "Invalid target: %s\n", name)
+    return
+  }
+  msg := ""
+  target.lock.Lock()
+  if isHeader {
+    target.AddHeaders = append(target.AddHeaders, []string{key, value})
+    msg = fmt.Sprintf("Port [%s]: Recorded header to add for Target [%s], URL [%s], Key [%s] Value [%s]", p.Port, target.Name, target.URL, key, value)
+  } else {
+    target.AddQuery = append(target.AddQuery, []string{key, value})
+    msg = fmt.Sprintf("Port [%s]: Recorded query to add for Target [%s], URL [%s], Key [%s] Value [%s]", p.Port, target.Name, target.URL, key, value)
+  }
+  target.lock.Unlock()
+  util.AddLogMessage(msg, r)
+  w.WriteHeader(http.StatusOK)
+  fmt.Fprintf(w, msg)
+}
+
+func (p *Proxy) removeTargetHeaderOrQuery(w http.ResponseWriter, r *http.Request, isHeader bool) {
+  name := util.GetStringParamValue(r, "target")
+  key := util.GetStringParamValue(r, "key")
+  p.lock.RLock()
+  target := p.Targets[name]
+  p.lock.RUnlock()
+  if target == nil {
+    w.WriteHeader(http.StatusBadRequest)
+    fmt.Fprintf(w, "Invalid target: %s\n", name)
+    return
+  }
+  msg := ""
+  target.lock.Lock()
+  if isHeader {
+    target.RemoveHeaders = append(target.RemoveHeaders, key)
+    msg = fmt.Sprintf("Port [%s]: Recorded header to remove for Target [%s], URL [%s], Key [%s]", p.Port, target.Name, target.URL, key)
+  } else {
+    target.RemoveQuery = append(target.RemoveQuery, key)
+    msg = fmt.Sprintf("Port [%s]: Recorded query to remove for Target [%s], URL [%s], Key [%s]", p.Port, target.Name, target.URL, key)
+  }
+  target.lock.Unlock()
+  util.AddLogMessage(msg, r)
+  w.WriteHeader(http.StatusOK)
+  fmt.Fprintf(w, msg)
+}
+
 func (p *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
-  target := &ProxyTarget{}
+  target := newProxyTarget()
   payload := util.Read(r.Body)
   if err := util.ReadJson(payload, target); err != nil {
     w.WriteHeader(http.StatusBadRequest)
@@ -219,7 +355,7 @@ func (p *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
       map[string]interface{}{"error": msg, "payload": payload}, r)
     return
   }
-  if _, err := p.toInvocationSpec(target, nil); err == nil {
+  if _, err := p.toInvocationSpec(target, "/", nil); err == nil {
     p.deleteProxyTarget(target.Name)
     p.lock.Lock()
     defer p.lock.Unlock()
@@ -227,12 +363,11 @@ func (p *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
       target.stripURIRegExp = regexp.MustCompile("^(.*)(" + target.StripURI + ")(/.+).*$")
     }
     p.Targets[target.Name] = target
-    p.addHeaderMatch(target)
-    p.addQueryMatch(target)
-    if err := p.addURIMatch(target); err == nil {
+    p.addHeadersAndQueriesMatch(target)
+    if err := p.addRoutes(target); err == nil {
       util.AddLogMessage(fmt.Sprintf("Added proxy target: %+v", target), r)
       w.WriteHeader(http.StatusOK)
-      fmt.Fprintf(w, "Added proxy target: %s\n", util.ToJSONText(target))
+      fmt.Fprintf(w, "Port [%s]: Added proxy target: %s\n", p.Port, util.ToJSONText(target))
       events.SendRequestEventJSON("Proxy Target Added", target.Name, target, r)
     } else {
       w.WriteHeader(http.StatusBadRequest)
@@ -248,117 +383,89 @@ func (p *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-func (p *Proxy) addHeaderMatch(target *ProxyTarget) {
-  matchHeaders := [][]string{}
+func (p *Proxy) addHeadersAndQueriesMatch(target *ProxyTarget) {
+  headerMatches := [][]string{}
+  queryMatches := [][]string{}
   if target.MatchAny != nil {
-    matchHeaders = append(matchHeaders, target.MatchAny.Headers...)
+    headerMatches = append(headerMatches, target.MatchAny.Headers...)
+    queryMatches = append(queryMatches, target.MatchAny.Query...)
   }
   if target.MatchAll != nil {
-    matchHeaders = append(matchHeaders, target.MatchAll.Headers...)
+    headerMatches = append(headerMatches, target.MatchAll.Headers...)
+    queryMatches = append(queryMatches, target.MatchAll.Query...)
   }
-  for _, h := range matchHeaders {
-    header := strings.ToLower(strings.Trim(h[0], " "))
-    headerValue := ""
-    if len(h) > 1 {
-      headerValue = strings.ToLower(strings.Trim(h[1], " "))
-      if captureKey, found := util.GetFillerUnmarked(headerValue); found {
-        if target.captureHeaders == nil {
-          target.captureHeaders = map[string]string{}
-        }
-        target.captureHeaders[header] = captureKey
-        headerValue = ""
-      }
+  extractKV := func(kv []string) (k string, v string) {
+    if len(kv) > 0 {
+      k = util.LowerAndTrim(kv[0])
     }
-    targetsByHeaders, present := p.TargetsByHeaders[header]
-    if !present {
-      targetsByHeaders = map[string]map[string]*ProxyTarget{}
-      p.TargetsByHeaders[header] = targetsByHeaders
+    if len(kv) > 1 {
+      v = util.LowerAndTrim(kv[1])
     }
-    targetsByValue, present := targetsByHeaders[headerValue]
-    if !present {
-      targetsByValue = map[string]*ProxyTarget{}
-      targetsByHeaders[headerValue] = targetsByValue
-    }
-    targetsByValue[target.Name] = target
+    return
+  }
+  for _, m := range headerMatches {
+    key, value := extractKV(m)
+    p.addHeaderMatch(target, key, value)
+  }
+  for _, m := range queryMatches {
+    key, value := extractKV(m)
+    p.addQueryMatch(target, key, value)
   }
 }
 
-func (p *Proxy) addQueryMatch(target *ProxyTarget) {
-  matchQuery := [][]string{}
-  if target.MatchAny != nil {
-    matchQuery = append(matchQuery, target.MatchAny.Query...)
-  }
-  if target.MatchAll != nil {
-    matchQuery = append(matchQuery, target.MatchAll.Query...)
-  }
-
-  for _, q := range matchQuery {
-    key := strings.ToLower(strings.Trim(q[0], " "))
-    value := ""
-    if len(q) > 1 {
-      value = strings.ToLower(strings.Trim(q[1], " "))
-      if filler, found := util.GetFillerUnmarked(value); found {
-        if target.captureQuery == nil {
-          target.captureQuery = map[string]string{}
-        }
-        target.captureQuery[key] = filler
-        value = ""
+func (p *Proxy) addHeaderMatch(target *ProxyTarget, header, value string) {
+  if value != "" {
+    if captureKey, found := util.GetFillerUnmarked(value); found {
+      if target.captureHeaders == nil {
+        target.captureHeaders = map[string]string{}
       }
+      target.captureHeaders[header] = captureKey
+      value = ""
     }
-    targetsByQuery, present := p.TargetsByQuery[key]
-    if !present {
-      targetsByQuery = map[string]map[string]*ProxyTarget{}
-      p.TargetsByQuery[key] = targetsByQuery
-    }
-    targetsByValue, present := targetsByQuery[value]
-    if !present {
-      targetsByValue = map[string]*ProxyTarget{}
-      targetsByQuery[value] = targetsByValue
-    }
-    targetsByValue[target.Name] = target
   }
+  target.headerMatch[header] = append(target.headerMatch[header], value)
 }
 
-func (p *Proxy) addURIMatch(target *ProxyTarget) error {
-  matchURIs := []string{}
-  if target.MatchAny != nil {
-    matchURIs = append(matchURIs, target.MatchAny.Uris...)
-    for _, uri := range target.MatchAny.Uris {
-      if strings.EqualFold(uri, "/") {
-        target.MatchAny.MatchAllURIs = true
+func (p *Proxy) addQueryMatch(target *ProxyTarget, key, value string) {
+  if value != "" {
+    if filler, found := util.GetFillerUnmarked(value); found {
+      if target.captureQuery == nil {
+        target.captureQuery = map[string]string{}
       }
+      target.captureQuery[key] = filler
+      value = ""
     }
   }
-  if target.MatchAll != nil {
-    matchURIs = append(matchURIs, target.MatchAll.Uris...)
-    for _, uri := range target.MatchAll.Uris {
-      if strings.EqualFold(uri, "/") {
-        target.MatchAll.MatchAllURIs = true
-      }
-    }
-  }
+  target.queryMatch[key] = append(target.queryMatch[key], value)
+}
 
-  for _, uri := range matchURIs {
-    uri = strings.ToLower(uri)
-    uriTargets, present := p.TargetsByUris[uri]
-    if !present {
-      uriTargets = map[string]*ProxyTarget{}
-      p.TargetsByUris[uri] = uriTargets
-    }
-    glob := false
-    matchURI := uri
-    if strings.HasSuffix(uri, "*") {
-      matchURI = strings.ReplaceAll(uri, "*", "")
-      glob = true
-    }
-    if router, re, err := util.RegisterURIRouteAndGetRegex(matchURI, glob, p.router, handleURI); err == nil {
-      target.uriRegExp = re
-      target.router = router
-    } else {
-      log.Printf("Proxy: Failed to add URI match %s with error: %s\n", uri, err.Error())
+func (p *Proxy) addRoutes(target *ProxyTarget) error {
+  for uri := range target.Routes {
+    if err := p.addURIMatch(target, uri); err != nil {
       return err
     }
-    uriTargets[target.Name] = target
+  }
+  return nil
+}
+
+func (p *Proxy) addURIMatch(target *ProxyTarget, uri string) error {
+  uri = strings.ToLower(uri)
+  glob := false
+  if strings.EqualFold(uri, "/") {
+    target.matchAllURIs = true
+    glob = true
+  }
+  matchURI := uri
+  if strings.HasSuffix(uri, "*") {
+    matchURI = strings.ReplaceAll(uri, "*", "")
+    glob = true
+  }
+  if router, re, err := util.RegisterURIRouteAndGetRegex(matchURI, glob, p.router, handleURI); err == nil {
+    target.uriRegexps[uri] = re
+    target.uriRouters[uri] = router
+  } else {
+    log.Printf("Proxy: Failed to add URI match %s with error: %s\n", uri, err.Error())
+    return err
   }
   return nil
 }
@@ -376,46 +483,6 @@ func (p *Proxy) deleteProxyTarget(targetName string) {
   p.lock.Lock()
   defer p.lock.Unlock()
   delete(p.Targets, targetName)
-  for h, valueMap := range p.TargetsByHeaders {
-    for hv, valueTargets := range valueMap {
-      for name := range valueTargets {
-        if name == targetName {
-          delete(valueTargets, name)
-        }
-      }
-      if len(valueTargets) == 0 {
-        delete(valueMap, hv)
-      }
-    }
-    if len(valueMap) == 0 {
-      delete(p.TargetsByHeaders, h)
-    }
-  }
-  for h, valueMap := range p.TargetsByQuery {
-    for hv, valueTargets := range valueMap {
-      for name := range valueTargets {
-        if name == targetName {
-          delete(valueTargets, name)
-        }
-      }
-      if len(valueTargets) == 0 {
-        delete(valueMap, hv)
-      }
-    }
-    if len(valueMap) == 0 {
-      delete(p.TargetsByQuery, h)
-    }
-  }
-  for uri, uriTargets := range p.TargetsByUris {
-    for name := range uriTargets {
-      if name == targetName {
-        delete(uriTargets, name)
-      }
-    }
-    if len(uriTargets) == 0 {
-      delete(p.TargetsByUris, uri)
-    }
-  }
 }
 
 func (p *Proxy) removeProxyTarget(w http.ResponseWriter, r *http.Request) {
@@ -423,7 +490,7 @@ func (p *Proxy) removeProxyTarget(w http.ResponseWriter, r *http.Request) {
     p.deleteProxyTarget(t.Name)
     util.AddLogMessage(fmt.Sprintf("Removed proxy target: %+v", t), r)
     w.WriteHeader(http.StatusOK)
-    fmt.Fprintf(w, "Removed proxy target: %s\n", util.ToJSONText(t))
+    fmt.Fprintf(w, "Port [%s]: Removed proxy target: %s\n", p.Port, util.ToJSONText(t))
     events.SendRequestEventJSON("Proxy Target Removed", t.Name, t, r)
   } else {
     w.WriteHeader(http.StatusBadRequest)
@@ -436,7 +503,7 @@ func (p *Proxy) enableProxyTarget(w http.ResponseWriter, r *http.Request) {
     p.lock.Lock()
     defer p.lock.Unlock()
     t.Enabled = true
-    msg := fmt.Sprintf("Enabled proxy target: %s", t.Name)
+    msg := fmt.Sprintf("Port [%s]: Enabled proxy target: %s", p.Port, t.Name)
     util.AddLogMessage(msg, r)
     w.WriteHeader(http.StatusOK)
     fmt.Fprintf(w, util.ToJSONText(map[string]string{"result": msg}))
@@ -452,7 +519,7 @@ func (p *Proxy) disableProxyTarget(w http.ResponseWriter, r *http.Request) {
     p.lock.Lock()
     defer p.lock.Unlock()
     t.Enabled = false
-    msg := fmt.Sprintf("Disabled proxy target: %s", t.Name)
+    msg := fmt.Sprintf("Port [%s]: Disabled proxy target: %s", p.Port, t.Name)
     util.AddLogMessage(msg, r)
     events.SendRequestEvent("Proxy Target Disabled", msg, r)
     w.WriteHeader(http.StatusOK)
@@ -461,23 +528,6 @@ func (p *Proxy) disableProxyTarget(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusBadRequest)
     fmt.Fprintln(w, "Proxy target not found")
   }
-}
-
-func (p *Proxy) getRequestedTargets(r *http.Request) map[string]*ProxyTarget {
-  p.lock.RLock()
-  defer p.lock.RUnlock()
-  targets := map[string]*ProxyTarget{}
-  if tnamesParam, present := util.GetStringParam(r, "targets"); present {
-    tnames := strings.Split(tnamesParam, ",")
-    for _, tname := range tnames {
-      if target, found := p.Targets[tname]; found {
-        targets[target.Name] = target
-      }
-    }
-  } else {
-    targets = p.Targets
-  }
-  return targets
 }
 
 func (p *Proxy) prepareTargetHeaders(target *ProxyTarget, r *http.Request) [][]string {
@@ -514,26 +564,30 @@ func (p *Proxy) prepareTargetHeaders(target *ProxyTarget, r *http.Request) [][]s
   return headers
 }
 
-func (p *Proxy) prepareTargetURL(target *ProxyTarget, r *http.Request) string {
+func (p *Proxy) prepareTargetURL(target *ProxyTarget, uri string, r *http.Request) string {
   url := target.URL
   path := r.URL.Path
-  if len(target.ReplaceURI) > 0 {
-    forwardRoute := target.router.NewRoute().BuildOnly().Path(target.ReplaceURI)
+  targetURI := path
+  if len(target.Routes) > 0 && target.Routes[uri] != "" {
+    targetURI = target.Routes[uri]
+  }
+  if targetURI != "" {
+    forwardRoute := target.uriRouters[uri].NewRoute().BuildOnly().Path(targetURI)
     vars := mux.Vars(r)
     targetVars := []string{}
-    if rep, err := reverse.NewGorillaPath(target.ReplaceURI, false); err == nil {
+    if rep, err := reverse.NewGorillaPath(targetURI, false); err == nil {
       for _, k := range rep.Groups() {
         targetVars = append(targetVars, k, vars[k])
       }
       if netURL, err := forwardRoute.URLPath(targetVars...); err == nil {
         path = netURL.Path
       } else {
-        log.Printf("Proxy: Failed to set vars on ReplaceURI %s with error: %s. Using ReplaceURI as is.", target.ReplaceURI, err.Error())
-        path = target.ReplaceURI
+        log.Printf("Proxy: Failed to set vars on target URI %s with error: %s. Using target URI as is.", targetURI, err.Error())
+        path = targetURI
       }
     } else {
-      log.Printf("Proxy: Failed to parse path vars from ReplaceURI %s with error: %s. Using ReplaceURI as is.", target.ReplaceURI, err.Error())
-      path = target.ReplaceURI
+      log.Printf("Proxy: Failed to parse path vars from target URI %s with error: %s. Using target URI as is.", targetURI, err.Error())
+      path = targetURI
     }
   } else if len(target.StripURI) > 0 {
     path = target.stripURIRegExp.ReplaceAllString(path, "$1$3")
@@ -583,7 +637,7 @@ func (p *Proxy) prepareTargetQuery(url string, target *ProxyTarget, r *http.Requ
   return url
 }
 
-func (p *Proxy) toInvocationSpec(target *ProxyTarget, r *http.Request) (*invocation.InvocationSpec, error) {
+func (p *Proxy) toInvocationSpec(target *ProxyTarget, uri string, r *http.Request) (*invocation.InvocationSpec, error) {
   is := &invocation.InvocationSpec{}
   is.Name = target.Name
   is.Method = "GET"
@@ -591,7 +645,7 @@ func (p *Proxy) toInvocationSpec(target *ProxyTarget, r *http.Request) (*invocat
   is.Replicas = target.Replicas
   is.SendID = target.SendID
   if r != nil {
-    is.URL = p.prepareTargetURL(target, r)
+    is.URL = p.prepareTargetURL(target, uri, r)
     is.Headers = p.prepareTargetHeaders(target, r)
     is.Method = r.Method
     is.BodyReader = r.Body
@@ -601,33 +655,51 @@ func (p *Proxy) toInvocationSpec(target *ProxyTarget, r *http.Request) (*invocat
   return is, invocation.ValidateSpec(is)
 }
 
-func (p *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWriter, r *http.Request) {
+func (p *Proxy) invokeTargets(targetsMatches map[string]*TargetMatchInfo, w http.ResponseWriter, r *http.Request) {
   p.lock.Lock()
   defer p.lock.Unlock()
-  if len(targets) > 0 {
-    responses := []*invocation.InvocationResult{}
-    for _, target := range targets {
-      events.SendRequestEventJSON("Proxy Target Invoked", target.Name, target, r)
-      metrics.UpdateProxiedRequestCount(target.Name)
-      is, _ := p.toInvocationSpec(target, r)
+  if len(targetsMatches) > 0 {
+    responses := []*invocation.InvocationResultResponse{}
+    for _, m := range targetsMatches {
+      events.SendRequestEventJSON("Proxy Target Invoked", m.target.Name, m.target, r)
+      metrics.UpdateProxiedRequestCount(m.target.Name)
+      is, _ := p.toInvocationSpec(m.target, m.URI, r)
       if tracker, err := invocation.RegisterInvocation(is); err == nil {
-        response := invocation.StartInvocation(tracker, true)
-        responses = append(responses, response...)
+        m.target.lock.Lock()
+        m.target.callCount++
+        tracker.CustomID = m.target.callCount
+        m.target.lock.Unlock()
+        invocationResponses := invocation.StartInvocation(tracker, true)
+        if !util.IsBinaryContentHeader(invocationResponses[0].Response.Headers) {
+          invocationResponses[0].Response.PayloadText = string(invocationResponses[0].Response.Payload)
+        }
+        responses = append(responses, invocationResponses[0].Response)
+        util.AddHeaderWithSuffix(constants.HeaderUpstreamStatus, "|"+m.target.Name,
+          invocationResponses[0].Response.Status, w.Header())
+        util.AddHeaderWithSuffix(constants.HeaderUpstreamTook, "|"+m.target.Name,
+          invocationResponses[0].TookNanos.String(), w.Header())
       } else {
         log.Println(err.Error())
       }
     }
     for _, response := range responses {
-      util.CopyHeaders("", r, w, response.Response.Headers, false, false, true)
-      if response.Response.StatusCode == 0 {
-        response.Response.StatusCode = 503
+      util.CopyHeaders("", r, w, response.Headers, false, false, false)
+      if response.StatusCode == 0 {
+        response.StatusCode = 503
       }
-      status.IncrementStatusCount(response.Response.StatusCode, r)
-      trigger.RunTriggers(r, w, response.Response.StatusCode)
+      status.IncrementStatusCount(response.StatusCode, r)
+      trigger.RunTriggers(r, w, response.StatusCode)
     }
     if len(responses) == 1 {
-      w.WriteHeader(responses[0].Response.StatusCode)
-      fmt.Fprintln(w, responses[0].Response.Payload)
+      if util.IsBinaryContentHeader(responses[0].Headers) {
+        fmt.Fprintln(w, responses[0].Payload)
+      } else {
+        if hv := responses[0].Headers[constants.HeaderContentTypeLower]; len(hv) > 0 {
+          w.Header().Add(constants.HeaderContentType, hv[0])
+        }
+        fmt.Fprintln(w, responses[0].PayloadText)
+      }
+      w.WriteHeader(responses[0].StatusCode)
     } else {
       w.WriteHeader(http.StatusOK)
       fmt.Fprintln(w, util.ToJSONText(responses))
@@ -635,126 +707,99 @@ func (p *Proxy) invokeTargets(targets map[string]*ProxyTarget, w http.ResponseWr
   }
 }
 
-func (p *Proxy) getMatchingTargetsForRequest(r *http.Request) map[string]*ProxyTarget {
+func (p *Proxy) getMatchingTargetsForRequest(r *http.Request) map[string]*TargetMatchInfo {
+  rs := util.GetRequestStore(r)
+  if rs.ProxyTargets != nil {
+    return rs.ProxyTargets.(map[string]*TargetMatchInfo)
+  }
+  targets := p.checkMatchingTargetsForRequest(r)
+  rs.ProxyTargets = targets
+  return targets
+}
+
+func (p *Proxy) checkMatchingTargetsForRequest(r *http.Request) map[string]*TargetMatchInfo {
   p.lock.RLock()
   defer p.lock.RUnlock()
-  targets := map[string]*ProxyTarget{}
   matchInfo := map[string]*TargetMatchInfo{}
-  headerValuesMap := util.GetHeaderValues(r)
-  for header, valueMap := range p.TargetsByHeaders {
-    if headerValues, present := headerValuesMap[header]; present {
-      if valueTargets, found := valueMap[""]; found {
-        for name, target := range valueTargets {
-          if target.Enabled {
-            targets[name] = target
-            if matchInfo[target.Name] == nil {
-              matchInfo[target.Name] = &TargetMatchInfo{Headers: map[string]string{}, Query: map[string]string{}, URIs: []string{}}
-            }
-            matchInfo[target.Name].Headers[header] = ""
-          }
-        }
-      }
-      for headerValue := range headerValues {
-        if len(headerValue) > 0 {
-          if valueTargets, found := valueMap[headerValue]; found {
-            for name, target := range valueTargets {
-              if target.Enabled {
-                targets[name] = target
-                if matchInfo[target.Name] == nil {
-                  matchInfo[target.Name] = &TargetMatchInfo{Headers: map[string]string{}, Query: map[string]string{}, URIs: []string{}}
-                }
-                matchInfo[target.Name].Headers[header] = headerValue
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  queryParamsMap := util.GetQueryParams(r)
-  for key, valueMap := range p.TargetsByQuery {
-    if queryValues, present := queryParamsMap[key]; present {
-      if valueTargets, found := valueMap[""]; found {
-        for name, target := range valueTargets {
-          if target.Enabled {
-            targets[name] = target
-            if matchInfo[target.Name] == nil {
-              matchInfo[target.Name] = &TargetMatchInfo{Headers: map[string]string{}, Query: map[string]string{}, URIs: []string{}}
-            }
-            matchInfo[target.Name].Query[key] = ""
-          }
-        }
-      }
-      for queryValue := range queryValues {
-        if len(queryValue) > 0 {
-          if valueTargets, found := valueMap[queryValue]; found {
-            for name, target := range valueTargets {
-              if target.Enabled {
-                targets[name] = target
-                if matchInfo[target.Name] == nil {
-                  matchInfo[target.Name] = &TargetMatchInfo{Headers: map[string]string{}, Query: map[string]string{}, URIs: []string{}}
-                }
-                matchInfo[target.Name].Query[key] = queryValue
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  for _, target := range p.Targets {
+  for name, target := range p.Targets {
     if target.Enabled {
-      if target.uriRegExp != nil && target.uriRegExp.MatchString(r.RequestURI) {
-        targets[target.Name] = target
-        if matchInfo[target.Name] == nil {
-          matchInfo[target.Name] = &TargetMatchInfo{Headers: map[string]string{}, Query: map[string]string{}, URIs: []string{}}
+      if target.matchAllURIs {
+        matchInfo[name] = &TargetMatchInfo{target: target, URI: "/"}
+      } else {
+        for uri, re := range target.uriRegexps {
+          if re.MatchString(r.RequestURI) {
+            matchInfo[name] = &TargetMatchInfo{target: target, URI: uri}
+            break
+          }
         }
-        matchInfo[target.Name].URIs = append(matchInfo[target.Name].URIs, r.RequestURI)
-      } else if target.MatchAny != nil && target.MatchAny.MatchAllURIs ||
-        target.MatchAll != nil && target.MatchAll.MatchAllURIs {
-        targets[target.Name] = target
-        if matchInfo[target.Name] == nil {
-          matchInfo[target.Name] = &TargetMatchInfo{Headers: map[string]string{}, Query: map[string]string{}, URIs: []string{}}
+      }
+    }
+  }
+
+  var headerValuesMap map[string]map[string]int
+  var queryParamsMap map[string]map[string]int
+  for _, m := range matchInfo {
+    if len(m.target.headerMatch) > 0 {
+      if headerValuesMap == nil {
+        headerValuesMap = util.GetHeaderValues(r)
+      }
+      for header, values := range m.target.headerMatch {
+        if valueMap, present := headerValuesMap[header]; present {
+          for _, value := range values {
+            if value == "" {
+              m.Headers = append(m.Headers, []string{header, ""})
+            } else if _, found := valueMap[value]; found {
+              m.Headers = append(m.Headers, []string{header, value})
+            }
+          }
         }
-        matchInfo[target.Name].URIs = append(matchInfo[target.Name].URIs, "/")
+      }
+    }
+    if len(m.target.queryMatch) > 0 {
+      if queryParamsMap == nil {
+        queryParamsMap = util.GetQueryParams(r)
+      }
+      for key, values := range m.target.queryMatch {
+        if valueMap, present := queryParamsMap[key]; present {
+          for _, value := range values {
+            if value == "" {
+              m.Query = append(m.Query, []string{key, ""})
+            } else if _, found := valueMap[value]; found {
+              m.Query = append(m.Query, []string{key, value})
+            }
+          }
+        }
       }
     }
   }
   targetsToBeRemoved := []string{}
-  for _, t := range targets {
-    m := matchInfo[t.Name]
-    if t.MatchAll != nil {
-      if len(t.MatchAll.Uris) > 0 && len(m.URIs) == 0 ||
-        len(t.MatchAll.Headers) > 0 && len(m.Headers) == 0 ||
-        len(t.MatchAll.Query) > 0 && len(m.Query) == 0 {
-        targetsToBeRemoved = append(targetsToBeRemoved, t.Name)
+  for _, m := range matchInfo {
+    if m.target.MatchAll != nil {
+      if len(m.target.MatchAll.Headers) != len(m.Headers) ||
+        len(m.target.MatchAll.Query) != len(m.Query) {
+        targetsToBeRemoved = append(targetsToBeRemoved, m.target.Name)
+      }
+    } else if m.target.MatchAny != nil {
+      if len(m.target.MatchAny.Headers)+len(m.target.MatchAny.Query) > 0 &&
+        len(m.Headers)+len(m.Query) == 0 {
+        targetsToBeRemoved = append(targetsToBeRemoved, m.target.Name)
       }
     }
   }
   for _, t := range targetsToBeRemoved {
-    delete(targets, t)
+    delete(matchInfo, t)
   }
-  for _, t := range targets {
-    p.incrementTargetMatchCounts(t)
-    reported := false
-    for _, uri := range matchInfo[t.Name].URIs {
-      if !reported {
-        p.incrementMatchCounts(t, uri, "", "", "", "")
-        reported = true
-      }
+  for _, m := range matchInfo {
+    p.incrementTargetMatchCounts(m.target)
+    if m.URI != "" {
+      p.incrementMatchCounts(m.target, m.URI, "", "", "", "")
     }
-    for h, v := range matchInfo[t.Name].Headers {
-      if !reported {
-        p.incrementMatchCounts(t, "", h, v, "", "")
-        reported = true
-      }
+    for _, hv := range m.Headers {
+      p.incrementMatchCounts(m.target, "", hv[0], hv[1], "", "")
     }
-    for q, v := range matchInfo[t.Name].Query {
-      if !reported {
-        p.incrementMatchCounts(t, "", "", "", q, v)
-        reported = true
-      }
+    for _, qv := range m.Query {
+      p.incrementMatchCounts(m.target, "", "", "", qv[0], qv[1])
     }
   }
-  return targets
+  return matchInfo
 }

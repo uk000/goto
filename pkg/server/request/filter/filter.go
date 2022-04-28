@@ -341,7 +341,7 @@ func filterRequest(w http.ResponseWriter, r *http.Request) bool {
   if statusCode > 0 {
     w.Header().Add(HeaderGotoFilteredRequest, "true")
     w.WriteHeader(statusCode)
-    util.SetFiltreredRequest(r)
+    util.SetFilteredRequest(r)
   }
   return statusCode > 0
 }

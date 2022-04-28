@@ -79,20 +79,31 @@ func Middleware(next http.Handler) http.Handler {
     l := listeners.GetCurrentListener(r)
     rs := util.GetRequestStore(r)
     port := util.GetListenerPort(r)
+    rs.GotoProtocol = util.GotoProtocol(r.ProtoMajor == 2, l.TLS)
     if util.IsTunnelRequest(r) {
       w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoRemoteAddress, rs.TunnelCount), r.RemoteAddr)
       w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoPort, rs.TunnelCount), port)
       w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoTunnelHost, rs.TunnelCount), l.HostLabel)
       w.Header().Add(fmt.Sprintf("%s|%d", HeaderViaGotoTunnel, rs.TunnelCount), l.Label)
+      w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoProtocol, rs.TunnelCount), rs.GotoProtocol)
+    } else if rs.WillProxy {
+      util.AddHeaderWithSuffix(HeaderGotoHost, "|Proxy", l.HostLabel, w.Header())
+      util.AddHeaderWithSuffix(HeaderGotoPort, "|Proxy", port, w.Header())
+      util.AddHeaderWithSuffix(HeaderViaGoto, "|Proxy", l.Label, w.Header())
+      util.AddHeaderWithSuffix(HeaderGotoProtocol, "|Proxy", rs.GotoProtocol, w.Header())
     } else {
       w.Header().Add(HeaderGotoRemoteAddress, r.RemoteAddr)
       w.Header().Add(HeaderGotoPort, port)
       w.Header().Add(HeaderGotoHost, l.HostLabel)
       w.Header().Add(HeaderViaGoto, l.Label)
+      w.Header().Add(HeaderGotoProtocol, rs.GotoProtocol)
     }
     pieces := strings.Split(r.RemoteAddr, ":")
     remoteIP := strings.Join(pieces[:len(pieces)-1], ":")
     metrics.UpdateClientRequestCount(remoteIP)
+    if !util.IsAdminRequest(r) {
+      metrics.UpdateProtocolRequestCount(rs.GotoProtocol, r.RequestURI)
+    }
 
     msg := fmt.Sprintf("Goto: [%s] LocalAddr: [%s], RemoteAddr: [%s], RequestHost: [%s], URI: [%s], Method: [%s], Protocol: [%s], Goto-Protocol: [%s], ContentLength: [%s]",
       l.Label, localAddr, r.RemoteAddr, r.Host, r.RequestURI, r.Method, r.Proto, rs.GotoProtocol, r.Header.Get("Content-Length"))

@@ -35,11 +35,19 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   proxyRouter := util.PathRouter(r, "/proxy")
   targetsRouter := util.PathRouter(r, "/proxy/targets")
   util.AddRouteWithPort(targetsRouter, "/add", addProxyTarget, "POST")
+  util.AddRouteQWithPort(targetsRouter, "/add/{target}", initProxyTarget, "url", "POST")
+  util.AddRouteMultiQWithPort(targetsRouter, "/{target}/route", addTargetRoute, []string{"from", "to"}, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/match/header/{key}={value}", addTargetHeaderMatch, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/match/header/{key}", addTargetHeaderMatch, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/match/query/{key}={value}", addTargetQueryMatch, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/match/query/{key}", addTargetQueryMatch, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/headers/add/{key}={value}", addTargetHeader, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/headers/remove/{key}", removeTargetHeader, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/query/add/{key}={value}", addTargetQuery, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/query/remove/{key}", removeTargetQuery, "PUT", "POST")
   util.AddRouteWithPort(targetsRouter, "/{target}/remove", removeProxyTarget, "PUT", "POST")
   util.AddRouteWithPort(targetsRouter, "/{target}/enable", enableProxyTarget, "PUT", "POST")
   util.AddRouteWithPort(targetsRouter, "/{target}/disable", disableProxyTarget, "PUT", "POST")
-  util.AddRouteWithPort(targetsRouter, "/{targets}/invoke", invokeProxyTargets, "POST")
-  util.AddRouteWithPort(targetsRouter, "/invoke/{targets}", invokeProxyTargets, "POST")
   util.AddRouteWithPort(targetsRouter, "/clear", clearProxyTargets, "POST")
   util.AddRouteWithPort(targetsRouter, "", getProxyTargets)
   util.AddRouteWithPort(proxyRouter, "/counts", getProxyMatchCounts, "GET")
@@ -47,8 +55,39 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 }
 
 func addProxyTarget(w http.ResponseWriter, r *http.Request) {
-  pp := getPortProxy(r)
-  pp.addProxyTarget(w, r)
+  getPortProxy(r).addProxyTarget(w, r)
+}
+
+func initProxyTarget(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).initProxyTarget(w, r)
+}
+
+func addTargetRoute(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).addTargetRoute(w, r)
+}
+
+func addTargetHeaderMatch(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).addTargetHeaderOrQueryMatch(w, r, true)
+}
+
+func addTargetQueryMatch(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).addTargetHeaderOrQueryMatch(w, r, false)
+}
+
+func addTargetHeader(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).addTargetHeaderOrQuery(w, r, true)
+}
+
+func removeTargetHeader(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).removeTargetHeaderOrQuery(w, r, true)
+}
+
+func addTargetQuery(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).addTargetHeaderOrQuery(w, r, false)
+}
+
+func removeTargetQuery(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).removeTargetHeaderOrQuery(w, r, false)
 }
 
 func getRequestedProxyTarget(r *http.Request) *ProxyTarget {
@@ -71,7 +110,7 @@ func clearProxyTargets(w http.ResponseWriter, r *http.Request) {
   listenerPort := util.GetRequestOrListenerPort(r)
   proxyLock.Lock()
   defer proxyLock.Unlock()
-  proxyByPort[listenerPort] = newProxy()
+  proxyByPort[listenerPort] = newProxy(listenerPort)
   w.WriteHeader(http.StatusOK)
   util.AddLogMessage("Proxy targets cleared", r)
   fmt.Fprintln(w, "Proxy targets cleared")
@@ -97,35 +136,29 @@ func clearProxyMatchCounts(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, "Proxy target match counts cleared")
 }
 
-func invokeProxyTargets(w http.ResponseWriter, r *http.Request) {
-  pt := getPortProxy(r)
-  targets := pt.getRequestedTargets(r)
-  if len(targets) > 0 {
-    pt.invokeTargets(targets, w, r)
-  } else {
-    w.WriteHeader(http.StatusNotFound)
-    util.AddLogMessage("Proxy targets not found", r)
-    fmt.Fprintln(w, "Proxy targets not found")
-  }
-}
-
 func handleURI(w http.ResponseWriter, r *http.Request) {
   p := getPortProxy(r)
   targets := p.getMatchingTargetsForRequest(r)
   if len(targets) > 0 {
-    util.AddLogMessage(fmt.Sprintf("Proxying to matching targets %s", util.ToJSONText(targets)), r)
+    util.AddLogMessage(fmt.Sprintf("Proxying to matching targets %s", util.GetMapKeys(targets)), r)
     p.invokeTargets(targets, w, r)
   }
+}
+
+func WillProxy(r *http.Request, rs *util.RequestStore) bool {
+  p := getPortProxy(r)
+  rs.WillProxy = false
+  if p.hasAnyProxy() && !status.IsForcedStatus(r) {
+    rs.WillProxy = len(p.checkMatchingTargetsForRequest(r)) > 0
+  }
+  return rs.WillProxy
 }
 
 func middleware(next http.Handler) http.Handler {
   return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     p := getPortProxy(r)
-    willProxy := false
-    if p.hasAnyProxy() && !util.IsAdminRequest(r) && !status.IsForcedStatus(r) {
-      willProxy = len(p.getMatchingTargetsForRequest(r)) > 0
-    }
-    if willProxy {
+    rs := util.GetRequestStore(r)
+    if rs.WillProxy {
       p.router.ServeHTTP(w, r)
     } else if next != nil {
       next.ServeHTTP(w, r)

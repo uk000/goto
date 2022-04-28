@@ -40,6 +40,7 @@ type InvocationResultResponse struct {
   Headers       http.Header `json:"headers"`
   PayloadSize   int         `json:"payloadSize"`
   Payload       []byte      `json:"-"`
+  PayloadText   string      `json:"-"`
   FirstByteInAt string      `json:"firstByteInAt"`
   LastByteInAt  string      `json:"lastByteInAt"`
 }
@@ -66,7 +67,7 @@ type InvocationResult struct {
   LastRetryReason     string                    `json:"lastRetryReason"`
   ValidAssertionIndex int                       `json:"validAssertionIndex"`
   Errors              []map[string]interface{}  `json:"errors"`
-  TookNanos           int                       `json:"tookNanos"`
+  TookNanos           time.Duration             `json:"tookNanos"`
   httpResponse        *http.Response
   grpcResponse        interface{}
   grpcStatus          int
@@ -284,7 +285,7 @@ func (result *InvocationResult) validateResponse() {
 }
 
 func (ir *InvocationResult) trackRequest(start, end time.Time) {
-  ir.TookNanos = int(end.Sub(start).Nanoseconds())
+  ir.TookNanos = end.Sub(start)
   ir.Request.LastRequestAt = end
   if ir.Request.FirstRequestAt.IsZero() {
     ir.Request.FirstRequestAt = end

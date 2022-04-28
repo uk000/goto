@@ -192,6 +192,7 @@ func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
         ir.httpRequest = req
         ir.addOrUpdateRequestId()
         for h, hv := range ir.headers {
+          req.Header.Del(h)
           req.Header.Add(h, hv)
         }
         if req.Host == "" {

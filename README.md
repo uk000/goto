@@ -196,7 +196,7 @@ $ curl -vk https://localhost:8443/foo/f1/bar/b1
 #
 
 
-## `Use Case Pattern`: Test a client application's behavior in the face of upstream chaos
+## `Use Case Pattern`: Test a client against upstream chaos
 Now that you have seen the previous two use cases, you may already be thinking of several similar scenarios where `goto` may help. The pattern here is that a client application needs to be tested against a chaotic upstream service. The upstream service can introduce various kinds of chaos at any point in the client-service interaction, and we need to assess the client behavior in presence of the chaos.
 Examples of chaotic situations that the upstream server may present are:
 - Service switches from HTTP to HTTP/2
@@ -221,12 +221,19 @@ There can be many more chaotic scenarios that you may think of. Many such scenar
 <br/>
 
 ## `Use Case`: Test traffic behavior between a pair of client and service in the face of network or proxy chaos
-Another aspect of chaos testing, perhaps in a more advanced setup, is where we want to observe the behavior of a client and a service as their communication gets disrupted in the network or in some intermediate proxy/gateway.
+Another aspect of chaos testing, perhaps in a more advanced setup, is where we want to observe the behavior of a client and a service as their communication gets disrupted in the network or in some intermediate proxy/gateway. The key idea is that the chaos gets introduced by an intermediary that sits in the traffic path but is outside the control of both the client and the server. Such intermediary chaos is hard to produce without disrupting the network or forcibly introducing bad behavior in the intermediate gateway/proxy. 
+
+Hmm, hard you say. What's needed is a tool (obvious by now what that tool would be) that can sit between a client and a service, allowing the traffic to flow through it while giving us the knobs that we can turn to disrupt the traffic.
 
 Capabilities needed to make this happen:
-- Make certain upstream calls based on downstream request's parameters, and use upstream response to build a dynamic response to send back to the downstream client (performing transformations).
+- Make certain upstream calls based on downstream request, and use upstream response to build a dynamic response to send back to the downstream client (performing transformations). This ensures at the minimum that the client and the service are unaware of the presence of a middleman.
+- Introduce some chaos into the traffic as an intermediary.
 
-This is what `Goto`'s [Proxy Features](#proxy) aim to provide.
+This is what `Goto`'s [Proxy](#proxy) and [Tunnel](#tunnel) features aim to provide. See, it's only hard until you bring `goto` into the mix. See one such example usage in this doc: [Using Goto as a proxy between a downstream client and an upstream service](docs/goto-proxy-chaos.md).
+
+#
+
+
 
 <br/>
 
@@ -2273,19 +2280,39 @@ Any request that doesn't match any of the defined management APIs, and also does
 # <a name="proxy"></a>
 # Proxy
 
-`Goto` proxy feature allows targets to be configured that are triggered based on matching criteria against requests. The targets can also be invoked manually for testing the configuration. However, the real fun happens when the proxy targets are matched with runtime traffic based on the match criteria specified in a proxy target's spec (based on headers, URIs, and query parameters), and one or more matching targets get invoked for a given request.
+Proxy feature provides a way to configure upstream endpoints that are triggered when incoming downstream HTTP requests match certain criteria. 
+
+The upstream endpoints are defined as a URL along with optional transformations to be performed on the request URI, headers and query params. Each upstream endpoint also defines certain match criteria based on which it would be triggered. The minimum match criteria to trigger an upstream endpoint is request URI, and additional match criteria may be defined for headers and query params. URI `/` can be used as a match criteria to match all URIs.
+
+A downstream request is matched against all defined upstream endpoints match criteria, and the request is forwarded to the matching upstream endpoints. Downstream request headers, query params, and payload gets passed to the upstream requests. Transformations can be defined per upstream endpoint, allowing for URI, headers and query params to be added/removed/replaced. This allows for the upstream requests to differ from the downstream request.
+
+If the request only matched a single upstream endpoint, the upstream response payload is sent as downstream response payload. If the request matches multiple upstream endpoints, the downstream response payload will be a wrapper containing a collection of all those upstream responses. Downstream response headers include all the upstream response headers combined with the `goto` headers from the proxy instance. As a result, downstream response may contain duplicate headers or multiple values for the same header.
+
+Proxy targets can be defined in two ways:
+- Build the upstream endpoint incrementally via multiple API calls. Benefit of this approach is that targets can be defined via just API calls without the need for a JSON payload, but it does require multiple API calls to define each target.
+  - First add a target endpoint using API `/proxy/targets/add/{target}?url={url}`
+  - Then define one or more URI routing for this endpoint using API `/proxy/targets/{target}/route?from={uri}&to={uri}`. A target should have at least one URI route defined for it to be triggered.
+  - Optionally define any necessary header and query match criteria via APIs `/proxy/targets/{target}/match/[header|query]/...`
+  - Optionally define any necessary header and query transformations via APIs `/proxy/targets/{target}/headers/[add|remove]/...`, and `/proxy/targets/{target}/query/[add|remove]/...`.
+- Alternately, submit a fully defined target schema via API `/proxy/targets/add`. This allows for more advanced target match criteria to be defined using the JSON payload.
 
 #### APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
 
 |METHOD|URI|Description|
 |---|---|---|
-|POST     |	/proxy/targets/add              | Add target for proxying requests [see `Proxy Target JSON Schema`](#proxy-target-json-schema) |
-|PUT, POST| /proxy/targets<br/>/{target}/remove  | Remove a proxy target |
-|PUT, POST| /proxy/targets<br/>/{target}/enable  | Enable a proxy target |
-|PUT, POST| /proxy/targets<br/>/{target}/disable | Disable a proxy target |
-|POST     |	/proxy/targets<br/>/`{targets}`/invoke | Invoke proxy targets by name |
-|POST     |	/proxy/targets<br/>/invoke/`{targets}` | Invoke proxy targets by name |
+|POST     |	/proxy/targets/add  | Add target for proxying requests [see `Proxy Target JSON Schema`](#proxy-target-json-schema) |
+|POST     |	/proxy/targets<br/>/add/`{target}`?<br/>url=`{url}` | Add a new target with the given name and URL. The URI routing for this target should be defined using the `/{target}/route` API given below. |
+|PUT, POST | /proxy/targets<br/>/`{target}`/route?<br/>from=`{uri}`&to=`{uri}` | Add URI routing for the given target from the given downstream URI (`from`) to the given upstream URI (`to`). |
+|PUT, POST | /proxy/targets<br/>/`{target}`/match/header<br/>/`{key}`[=`{value}`] | Define a header match criteria to match just the header name, or both name and value. |
+|PUT, POST | /proxy/targets<br/>/`{target}`/match/query<br/>/`{key}`[=`{value}`] | Define a query param match criteria to match just the param name, or both name and value. |
+|PUT, POST | /proxy/targets<br/>/`{target}`/headers<br/>/add/`{key}`=`{value}` | Define a header key/value that should be added to the upstream request. |
+|PUT, POST | /proxy/targets<br/>/`{target}`/headers<br/>/remove/`{key}` | Define a downstream header that should be removed from the upstream request. |
+|PUT, POST | /proxy/targets<br/>/`{target}`/query/add<br/>/`{key}`=`{value}` | Define a query param key/value that should be added to the upstream request. |
+|PUT, POST | /proxy/targets<br/>/`{target}`/query<br/>/remove/`{key}` | Define a downstream query param that should be removed from the upstream request. |
+|PUT, POST| /proxy/targets<br/>/`{target}`/remove  | Remove a proxy target |
+|PUT, POST| /proxy/targets<br/>/`{target}`/enable  | Enable a proxy target |
+|PUT, POST| /proxy/targets<br/>/`{target}`/disable | Disable a proxy target |
 |POST     |	/proxy/targets/clear            | Remove all proxy targets |
 |GET 	    |	/proxy/targets                  | List all proxy targets |
 |GET      |	/proxy/counts                   | Get proxy match/invocation counts, by uri, header and query params |
@@ -2297,10 +2324,10 @@ Any request that doesn't match any of the defined management APIs, and also does
 #### Proxy Target JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
-| name          | string                                | Name for this target |
-| url           | string                                | URL for the target. Request's URI or Override URI gets added to the URL for each proxied request. |
+| name          | string             | Name for this target |
+| url           | string             | URL for the target. Request's URI or Override URI gets added to the URL for each proxied request. |
+| routes        | map[string]string  | URI mapping from downstream source request URI to upstream request URI. Downstream request's URI is matched against this routing table and if a match is found, the corresponding destination URI is used. If the destination URI is set to "", the source request URI is used. |
 | sendID        | bool           | Whether or not a unique ID be sent with each request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
-| replaceURI    | string                                | URI to be used in place of the original request URI.|
 | addHeaders    | `[][]string`                            | Additional headers to add to the request before proxying |
 | removeHeaders | `[]string `                             | Headers to remove from the original request before proxying |
 | addQuery      | `[][]string`                            | Additional query parameters to add to the request before proxying |
@@ -2316,20 +2343,19 @@ Any request that doesn't match any of the defined management APIs, and also does
 |Field|Data Type|Description|
 |---|---|---|
 | headers | `[][]string`  | Headers names and optional values to match against request headers |
-| uris    | `[]string`    | URIs with optional {placeholders} to match against request URI |
 | query   | `[][]string`  | Query parameters with optional values to match against request query |
 
 
 #### Proxy Target Match Criteria
-Proxy target match criteria specify the URIs, headers and query parameters, matching either of which will cause the request to be proxied to the target.
+Proxy target match criteria are based on request URI match and optional headers and query parameters matching.
+An upstream target is defined with a URI routing table, and the upstream target gets triggered for all requests matching any of the URIs defined in the routing table. However, if you need additional filtering of requests before sending those over to the upstream endpoints, you can use the headers and query params match criteria. These criteria can be defined to either match ANY of them or ALL of them for the request to qualify.
 
-- URIs: specified as a list of URIs, with `{foo}` to be used for variable portion of a URI. E.g., `/foo/{f}/bar/{b}` will match URIs like `/foo/123/bar/abc`, `/foo/something/bar/otherthing`, etc. The variables are captured under the given labels (`f` and `b` in the previous example). If the target is configured with `replaceURI` to proxy the request to a different URI than the original request, the `replaceURI` can refer to those capturing variables using the syntax described in this example:
+- URI Routing Table: this is defined as the mandatory `routes` field in the target definition. The source URI in the routing table can be specified using variables, e.g. `{foo}`, to indicate the variable portion of a URI. For example, `/foo/{f}/bar/{b}` will match URIs like `/foo/123/bar/abc`, `/foo/something/bar/otherthing`, etc. The variables are captured under the given labels (`f` and `b` in the previous example). The destination URI in the routing table can refer to those captured variables using the syntax described in this example:
   
   ```
   curl http://goto:8080/proxy/targets/add --data \
   '{"name": "target1", "url":"http://somewhere", \
-  "match":{"uris":["/foo/{x}/bar/{y}"]}, \
-  "replaceURI":"/abc/{y:.*}/def/{x:.*}", \
+  "routes":{"/foo/{x}/bar/{y}": "/abc/{y:.*}/def/{x:.*}"}, \
   "enabled":true, "sendID": true}'
   ```
 
@@ -2339,31 +2365,32 @@ Proxy target match criteria specify the URIs, headers and query parameters, matc
 
 <br/>
 
-- Headers: specified as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addHeaders` list. A target is triggered if any of the headers in the match list are present in the request (headers are matched using OR instead of AND). The variable to capture header value is specified as `{foo}` and can be referenced in the `addHeaders` list again as `{foo}`. This example will make it clear:
+- Headers: specified in the `matchAll` or `matchAny` field as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addHeaders` list. A target is triggered if any of the headers in the match list are present in the request (headers are matched using OR instead of AND). The variable to capture header value is specified as `{foo}` and can be referenced in the `addHeaders` list again as `{foo}`. This example will make it clear:
 
   ```
   curl http://goto:8080/proxy/targets/add --data \
-  '{"name": "target2", "url":"http://somewhere", \
-  "match":{"headers":[["foo", "{x}"], ["bar", "{y}"]]}, \
+  '{"name": "target2", "url":"http://somewhere", "routes":{"/": ""}, \
+  "matchAll":{"headers":[["foo", "{x}"], ["bar", "{y}"]]}, \
   "addHeaders":[["abc","{x}"], ["def","{y}"]], "removeHeaders":["foo"], \
   "enabled":true, "sendID": true}'
   ```
 
   This target will be triggered for requests carrying headers `foo` or `bar`. On the proxied request, additional headers will be set: `abc` with value copied from `foo`, and `def` with value copied from `bar`. Also, header `foo` will be removed from the proxied request.
 
+  So a downstream request `curl -v localhost:8080/bla/bla -H'foo:123' -H'bar:456'` gets sent to the upstream endpoint with the same URI (passthrough) but headers `'bar:456'`, `'abc:123'` and `'def:456'`.
 <br/>
 
 - Query: specified as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addQuery` list. A target is triggered if any of the query parameters in the match list are present in the request (matched using OR instead of AND). The variable to capture query parameter value is specified as `{foo}` and can be referenced in the `addQuery` list again as `{foo}`. Example:
 
   ```
   curl http://goto:8080/proxy/targets/add --data \
-  '{"name": "target3", "url":"http://somewhere", \
-  "match":{"query":[["foo", "{x}"], ["bar", "{y}"]]}, \
+  '{"name": "target3", "url":"http://somewhere", "routes":{"/": ""},\
+  "matchAny":{"query":[["foo", "{x}"], ["bar", "{y}"]]}, \
   "addQuery":[["abc","{x}"], ["def","{y}"]], "removeQuery":["foo"], \
   "enabled":true, "sendID": true}'
   ```
 
-  This target will be triggered for requests with carrying query params `foo` or `bar`. On the proxied request, query param `foo` will be removed, and additional query params will be set: `abc` with value copied from `foo`, and `def` with value copied from `bar`. The incoming request `http://goto:8080?foo=123&bar=456` gets proxied as `http://somewhere?abc=123&def=456&bar=456`.
+  This target will be triggered for requests that carry either of the query params `foo` or `bar`. On the proxied request, query param `foo` will be removed, and additional query params will be set: `abc` with value copied from `foo`, and `def` with value copied from `bar`. The incoming request `http://goto:8080?foo=123&bar=456` gets proxied as `http://somewhere?abc=123&def=456&bar=456`.
 
 ###### <small> [Back to TOC](#goto-proxy) </small>
 

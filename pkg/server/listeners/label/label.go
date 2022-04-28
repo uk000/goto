@@ -20,9 +20,7 @@ import (
   "fmt"
   "net/http"
 
-  . "goto/pkg/constants"
   "goto/pkg/events"
-  "goto/pkg/metrics"
   "goto/pkg/server/listeners"
   "goto/pkg/util"
 
@@ -30,7 +28,7 @@ import (
 )
 
 var (
-  Handler util.ServerHandler = util.ServerHandler{"label", SetRoutes, Middleware}
+  Handler util.ServerHandler = util.ServerHandler{Name: "label", SetRoutes: SetRoutes}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -58,23 +56,4 @@ func getLabel(w http.ResponseWriter, r *http.Request) {
   msg := fmt.Sprintf("Port [%s] Label [%s]", util.GetRequestOrListenerPort(r), label)
   util.AddLogMessage(msg, r)
   fmt.Fprintln(w, "Server Label: "+label)
-}
-
-func Middleware(next http.Handler) http.Handler {
-  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    l := listeners.GetCurrentListener(r)
-    rs := util.GetRequestStore(r)
-    rs.GotoProtocol = util.GotoProtocol(r.ProtoMajor == 2, l.TLS)
-    if util.IsTunnelRequest(r) {
-      w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoProtocol, rs.TunnelCount), rs.GotoProtocol)
-    } else {
-      w.Header().Add(HeaderGotoProtocol, rs.GotoProtocol)
-    }
-    if !util.IsAdminRequest(r) {
-      metrics.UpdateProtocolRequestCount(rs.GotoProtocol, r.RequestURI)
-    }
-    if next != nil {
-      next.ServeHTTP(w, r)
-    }
-  })
 }

@@ -51,12 +51,16 @@ const (
   HeaderLivenessOverflowCount     = "Liveness-Overflow-Count"
   HeaderGotoFilteredRequest       = "Goto-Filtered-Request"
 
-  HeaderProxyConnection = "Proxy-Connection"
-  HeaderContentType     = "Content-Type"
-  HeaderContentLength   = "Content-Length"
-  HeaderAuthority       = ":authority"
-  ContentTypeJSON       = "application/json"
-  ContentTypeYAML       = "application/yaml"
+  HeaderProxyConnection  = "Proxy-Connection"
+  HeaderContentType      = "Content-Type"
+  HeaderContentTypeLower = "content-type"
+  HeaderContentLength    = "Content-Length"
+  HeaderAuthority        = ":authority"
+  ContentTypeJSON        = "application/json"
+  ContentTypeYAML        = "application/yaml"
 
   HeaderStoppingReadinessRequest = "Stopping-Readiness-Request"
+
+  HeaderUpstreamStatus = "Goto-Upstream-Status"
+  HeaderUpstreamTook = "Goto-Upstream-Took"
 )

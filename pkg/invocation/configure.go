@@ -113,6 +113,7 @@ type InvocationTracker struct {
   Status   *InvocationStatus   `json:"status"`
   Payloads [][]byte            `json:"-"`
   Channels *InvocationChannels `json:"-"`
+  CustomID int                 `json:"customID"`
   client   *InvocationClient
 }
 

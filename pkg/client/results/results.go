@@ -486,7 +486,7 @@ func (tr *TargetResults) addResult(ir *invocation.InvocationResult) {
   }
   if len(tr.trackingTimeBuckets) > 0 {
     addedToTimeBucket := false
-    took := ir.TookNanos / 1000000
+    took := int(ir.TookNanos.Nanoseconds()) / 1000000
     for _, tb := range tr.trackingTimeBuckets {
       if took >= tb[0] && took <= tb[1] {
         tr.addTimeBucketResult(tb, ir)
