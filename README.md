@@ -1,10 +1,9 @@
-#
-
 # goto
 
-> **NOTE**
+> &#x1F4DD;
 <small> The Readme reflects master HEAD code and applies to release 0.9.x. For documentation of `0.8.x` and prior releases, switch to `v0.8.x` branch or any of the release tags.</small>
 
+> &#x1F4DD; <small>Jump to [TOC](#toc) if you'd rather skip the overview and examples given below.</small>
 
 ## What is `goto`?
 
@@ -12,7 +11,7 @@
 
 A multi-faceted chaos testing tool to help with various kinds of automated testing, debugging, bug hunt, runtime analysis and investigations. Mostly when we've a task at hand to test a system, the system to be tested is either a client, a server, or some kind of a gateway/proxy that sits between a client and a server.
 
-To test either of these 3 layers, you need at least one counter-party application:
+To test either of these 3 layers, you need at least one counterparty application:
 - To test a client, we need a server to which the client can connect, send requests and get some response back. The server needs to be able to track the lifecycle of the client connections and various requests it received from the client so that the client functionality can be verified.
 - To test a server, we need a client that can send some requests to the server and track the responses sent by the server. Again the client should be able to track the lifecycle of connections and requests/responses to be able to verify the server functionality.
 - To test an intermediary gateway, we need both a test client as well as a test server, where the two could route some requests and responses through the intermediary and validate the correctness of the traffic flow.
@@ -22,7 +21,7 @@ To test either of these 3 layers, you need at least one counter-party applicatio
 It can act as:
 - A [client](#goto-client-targets-and-traffic) that can generate HTTP/S, TCP, and GRPC traffic to other services (including other `goto` instances), track summary results of the traffic, and report results via [APIs](client-apis) as well as publish results to a [Goto registry](#registry). 
 - A [server](#goto-server-features) that can respond to HTTP/S, GRPC and TCP requests, and can be configured to respond to any custom API. The server features allow for various kinds of chaos testing and debugging/investigations, with the ability to track and report summary data about the received traffic. See the [TOC](#goto-server) for a complete list of server features. 
-- A [tunneling proxy](#tunnel) that can act as an HTTP/S passthrough tunnel, allowing any arbitrary traffic from a source to a destination to be re-routed via a `goto` instance and giving you the opportunity to inspect the traffic.
+- A [tunneling proxy](#tunnel) that can act as an HTTP/S or TCP passthrough tunnel, allowing any arbitrary traffic from a source to a destination to be re-routed via a `goto` instance and giving you the opportunity to inspect the traffic.
 - A [job executor](#jobs-features) that can run shell commands/scripts as well as make HTTP calls, collect and report results. It allows chaining of jobs together so that output of one job triggers another job with input. Additionally, jobs can be auto-executed via cron, and can act as a source of data for pipelines (more on this under `pipelines`)
 - A [registry](#registry) to orchestrate operations across other `goto` instances, collect and summarize results from those `goto` instances, and make the federated summary results available via APIs. A `goto` registry can also be paired with another `goto` registry instance and export/load data from one to the other to keep another backup of the collected results.
 - A [K8s proxy](#k8s-features) that can connect to and read resource information from a K8s cluster and make it available via APIs. It also supports watching for resource changes, and act as a source of data for pipelines (see below)
@@ -39,7 +38,10 @@ It can act as:
 
 #### <u>Grab or Build</u>
 It's available as a docker image: `docker.io/uk0000/goto:latest`
-Or build it locally on your machine
+> &#x1F4DD; <small><i>The docker image is built with several useful utilities included: `curl`, `wget`, `nmap`, `iputils`, `openssl`, `jq`, etc.</i></small>
+
+<br/>
+Or, build it locally on your machine
 
 ```
 go build -o goto .
@@ -66,136 +68,29 @@ For Example:
   curl -s localhost:8080/client/targets/add --data '{"name": "t1", "method": "GET", "url": "http://localhost:8081/foo", "body": "some payload", "replicas": 2, "requestCount": 10}'
   ```
 
-<br/>
-
 # Show me ~~the money~~ some use cases please!
 
 ## `Use Case`: Test a client application's behavior when the upstream service goes down mid-request
 Say you have a client application that connects to some remote service for some APIs. You intend to test how your application behaves if the server died before or during a request.
 
 What's needed is:
-- A `stand-in` test server that can respond to the exact API your client invokes and send valid response too (headers, JSON payload, etc.). This requires the server to be configurable such that you can define a custom API along with a custom response for the API.
-- We should be able to ask the service to die at anytime! But we don't really want the server process to die, because we want the service to also become available at some later point. We want the service downtime to be such that it can be scripted and tested without losing any observable metrics/logs/results server may have collected so far.
-- Although the requirement didn't ask for this, but wouldn't it be nice if we could reconfigure the API to respond with a slightly different response (v2.0) so that when the Service API is back up again, we can see that the client is indeed getting a different response now! But how do we configure a dead port? Well, how do we configure any port? Hmm... what's a port anyway?
+- A `stand-in` test server that can respond to the exact API your client invokes and send valid responses too (headers, JSON payload, etc.). This requires the server to be configurable such that you can define a custom API along with a custom response for the API.
+- We should be able to ask the service to die anytime! But we don't really want the server process to die, because we want the service to also become available at some later point. We want the service downtime to be such that it can be scripted and tested without losing any observable metrics/logs/results server may have collected so far.
+- Although the requirement didn't ask for this, wouldn't it be nice if we could reconfigure the API to respond with a slightly different response (v2.0) so that when the Service API is back up again, we can see that the client is indeed getting a different response now! But how do we configure a dead port? Well, how do we configure any port? Hmm... what's a port anyway?
 
-Quite some ask. The example code below shows how `Goto` can be of help.
-#
-<details>
-<summary>Example: Upstream Service Death</summary>
-
-```
-#Launch goto server with two ports. We want 8080 to be closeable, so first port in the list is 8000 since the first port cannot be closed.
-
-$ goto --ports 8000,8080
-
-#Call admin API on the correct port (8080) to configure a custom response for a custom API /foo/bar
-
-$ curl -X POST -g localhost:8080/server/response/payload/set/uri?uri=/foo/{somefoo}/bar/{somebar} --data '{"version: "1.0", "foo": "{somefoo}", "bar": "{somebar}"}'
-Port [8080] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [application/x-www-form-urlencoded], length [57]
-
-#Confirm that goto indeed responds with a valid payload for a given request
-$ curl -s localhost:8080/foo/f1/bar/b1
-{"version: "1.0", "foo": "f1", "bar": "b1"}
-
-#At this time, start client application and send requests to port 8080
-
-#Once client traffic is running, we'll ask goto to close port 8080
-$ curl -X POST localhost:8000/server/listeners/8080/close
-
-#Verify that the port is closed
-$ curl -v localhost:8080/foo/f1/bar/b1
-curl: (7) Failed to connect to localhost port 8080: Connection refused
-
-#Call admin API to reconfigure the API response. Since the port 8080 is closed, we'll ask goto on its main port 8000 to reconfigure port 8080!!
-
-$ curl -X POST -g localhost:8000/port=8080/server/response/payload/set/uri?uri=/foo/{somefoo}/bar/{somebar} --data '{"version: "2.0", "foo": "{somefoo}", "bar": "{somebar}"}'
-Port [8080] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [application/x-www-form-urlencoded], length [57]
-
-#Once client traffic is confirmed to be broken and expected client behavior is verified, we'll ask goto to reopen port 8080
-$ curl -X POST localhost:8000/server/listeners/8080/open
-
-#Confirm that goto responds on the reopened port with the new payload v2.0
-$ curl -s localhost:8080/foo/f2/bar/b2
-{"version: "2.0", "foo": "f2", "bar": "b2"}
-
-#Verify the client behavior again to ensure that it behaves as expected (whether it's expected to reconnect and resume traffic, or otherwise).
-```
-
-</details>
+Quite some ask. This example shows how `Goto` can be of help: [Using Goto for upstream service chaos](docs/goto-upstream-chaos.md#scenario-mocking-upstream-service-death).
 
 #
-
 ## `Use Case`: Test a client application's behavior against invalid upstream TLS certs
-Similar to previous scenario but going one step further, let's say your client application's users have reported that the application acts funny randomly. You suspect it may have to do with the TLS certs presented by some of the upstream service nodes. In order to validate your hypothesis, you need to be able to manipulate the server TLS certs on-the-fly, to switch between valid and invalid certs.
+Similar to the previous scenario but going one step further, let's say your client application's users have reported that the application acts funny randomly. You suspect it may have to do with the TLS certs presented by some of the upstream service nodes. In order to validate your hypothesis, you need to be able to manipulate the server TLS certs on-the-fly, to switch between valid and invalid certs.
 
 In addition to the previous scenario's requirements, what we need is:
 - The server should give us a way to change the TLS certs used for a port via some backdoor access, preferably by calling some `admin` API so that it can be scripted. 
 - The server should provide enough observability so we can validate that a request indeed reached the server with certain parameters, and a response was sent. The traffic observed on the server can be correlated with the behavior observed on the client.
 
-Well, not to despair, we have `goto`. See the solution below.
-#
-<details>
-<summary>Example: Changing Upstream TLS Certs</summary>
-
-```
-# Launch goto server with three ports (we only need two, third is just for fun). 8443 is an HTTPS port and closeable. Goto auto-generates TLS cert for 8443 using the given CN=foo.com.
-
-$ goto --ports 8000,8080,8443/https/foo.com
-
-# If you want to test with a real cert because your service validates the cert for authenticity, you can upload the real cert for the port now. If you don't wish to use a custom cert and are fine with the auto-generated cert, skip the next 3 commands and continue.
-
-$ curl -X PUT localhost:8000/server/listeners/8443/cert/add --data-binary @/some/path/real-cert.crt
-Cert added for listener 8443
-
-$ curl -X PUT localhost:8000/server/listeners/8443/key/add --data-binary @/some/path/real-cert.key
-Key added for listener 8443
-
-$ curl -X POST localhost:8000/server/listeners/8443/reopen
-TLS Listener reopened on port 8443
-
-# At this point, we can verify that the TLS port is responding with the expected cert
-$ curl -vk https://localhost:8443/
-
-# Call admin API on port 8000 to configure a custom response for a custom API /foo/bar for port 8443. We could configure 8443 directly too, but then our script would have to deal with HTTPS.
-
-$ curl -X POST -g localhost:8000/port=8443/server/response/payload/set/uri?uri=/foo/{somefoo}/bar/{somebar} --data '{"version: "1.0", "foo": "{somefoo}", "bar": "{somebar}"}'
-Port [8443] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [application/x-www-form-urlencoded], length [57]
-
-# Confirm that goto indeed responds with a valid payload for a given request
-$ curl -vk https://localhost:8443/foo/f1/bar/b1
-{"version: "1.0", "foo": "f1", "bar": "b1"}
-
-# At this time, start client application and send requests to port 8443
-# Once client traffic is running, we'll ask goto to replace the cert with a different cert.
-# We can upload a self-signed invalid cert to goto using the same 3 commands as before.
-
-$ curl -X PUT localhost:8000/server/listeners/8443/cert/add --data-binary @/some/path/invalid-cert.crt
-$ curl -X PUT localhost:8000/server/listeners/8443/key/add --data-binary @/some/path/invalid-cert.key
-$ curl -X POST localhost:8000/server/listeners/8443/reopen
-
-#Alternately we can also ask goto to auto-generate a new cert for the port using a new CN. Which path you take here depends on the specific testing requirement.
-
-$ curl -X POST localhost:8000/server/listeners/8443/cert/auto/bar.com
-Cert auto-generated for listener 8443
-
-#Call admin API to reconfigure the API response with new payload v2.0 so we can confirm the response is new.
-
-$ curl -X POST -g localhost:8000/port=8080/server/response/payload/set/uri?uri=/foo/{somefoo}/bar/{somebar} --data '{"version: "2.0", "foo": "{somefoo}", "bar": "{somebar}"}'
-Port [8080] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [application/x-www-form-urlencoded], length [57]
-
-# Test the client traffic against this reopened port that uses a different cert now.
-
-$ curl -vk https://localhost:8443/foo/f1/bar/b1
-{"version: "2.0", "foo": "f1", "bar": "b1"}
-
-# Verify the client behavior and validate against your hypothesis.
-```
-
-</details>
+Well, not to despair, we have `goto`. See the solution here: [Using Goto for upstream service TLS chaos](docs/goto-upstream-chaos.md#scenario-mocking-upstream-tls-certs-chaos).
 
 #
-
-
 ## `Use Case Pattern`: Test a client against upstream chaos
 Now that you have seen the previous two use cases, you may already be thinking of several similar scenarios where `goto` may help. The pattern here is that a client application needs to be tested against a chaotic upstream service. The upstream service can introduce various kinds of chaos at any point in the client-service interaction, and we need to assess the client behavior in presence of the chaos.
 Examples of chaotic situations that the upstream server may present are:
@@ -218,31 +113,37 @@ There can be many more chaotic scenarios that you may think of. Many such scenar
 - Introduce artificial delays for all or specific requests
 - Configure dynamic response for certain APIs, where the response can be based on values received in the request (performing transformations).
 
-<br/>
-
+#
 ## `Use Case`: Test traffic behavior between a pair of client and service in the face of network or proxy chaos
 Another aspect of chaos testing, perhaps in a more advanced setup, is where we want to observe the behavior of a client and a service as their communication gets disrupted in the network or in some intermediate proxy/gateway. The key idea is that the chaos gets introduced by an intermediary that sits in the traffic path but is outside the control of both the client and the server. Such intermediary chaos is hard to produce without disrupting the network or forcibly introducing bad behavior in the intermediate gateway/proxy. 
 
 Hmm, hard you say. What's needed is a tool (obvious by now what that tool would be) that can sit between a client and a service, allowing the traffic to flow through it while giving us the knobs that we can turn to disrupt the traffic.
 
 Capabilities needed to make this happen:
-- Make certain upstream calls based on downstream request, and use upstream response to build a dynamic response to send back to the downstream client (performing transformations). This ensures at the minimum that the client and the service are unaware of the presence of a middleman.
+- Make certain upstream calls based on downstream requests, and use upstream response to build a dynamic response to send back to the downstream client (performing transformations). This ensures at the minimum that the client and the service are unaware of the presence of a middleman.
 - Introduce some chaos into the traffic as an intermediary.
 
-This is what `Goto`'s [Proxy](#proxy) and [Tunnel](#tunnel) features aim to provide. See, it's only hard until you bring `goto` into the mix. See one such example usage in this doc: [Using Goto as a proxy between a downstream client and an upstream service](docs/goto-proxy-chaos.md).
+This is what `Goto`'s [Proxy](#proxy) and [Tunnel](#tunnel) features aim to provide. See, it's only hard until you bring `goto` into the mix. See one such example usage in this doc: [Scenario: Creating chaos with Goto as an HTTP proxy](docs/goto-proxy-chaos.md#scenario-creating-chaos-with-goto-as-an-http-proxy).
+
 
 #
+## `Use Case`: Test TCP clients and services with some network or proxy chaos
+Taking things up a notch, the previous scenario can be re-imagined with TCP clients and services, trying to create some network or proxy chaos and observing the client/service behaviors.
 
+Capabilities needed to make this happen:
+- A TCP proxy that can sit between a client and a service transparently.
+- Introduce some chaos into the traffic at this intermediary proxy.
 
+See an example in this doc: [Scenario: Creating TCP chaos with Goto](docs/goto-proxy-chaos.md#scenario-creating-tcp-chaos-with-goto)
 
-<br/>
+Going even further, `goto` proxy allows for routing to multiple upstream TCP endpoints based on SNI from client's TLS handshake. `Goto` would still act as an opaque TCP proxy and actual TLS handshake gets done between the client and the service, but `goto` can inspect the client handshake packets to read the SNI information and route to one of the multiple upstream TCP endpoints that are configured for SNI-based routing. Too much? Well, at least see the example in this doc: [Scenario: TCP Proxy with SNI matching using Goto](docs/goto-proxy-chaos.md#scenario-tcp-proxy-with-sni-matching-using-goto)
 
+#
 ## What Else?
 - You need to inspect some existing traffic between two applications in order to investigate some issue. The traffic passes through various network layers, and you wish to analyze the state of a request at a certain point in its journey, e.g. what does the request look like once it goes through a K8s ingress gateway. You're staring at the right tool.
 - You wish to test a proxy/gateway behavior sitting between a pair of client and service in the face of upstream and/or downstream chaos. Here our focus of testing is an intermediate proxy (e.g. service mesh).
-- <span style="color:red">TODO: Many more scenarios can benefit from `goto`. More scenarios will be added here soon.</span>
 
-<br/>
+<span style="color:red">TODO: Many more scenarios can benefit from `goto`. More scenarios will be added here soon.</span>
 
 ---
 
@@ -292,26 +193,6 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 ### Scenario: [Create HTTP chaos that HTTP libraries won't let you](docs/http-chaos.md)
 
 <br/>
-
-#
-
-# Features
-
-It's an HTTP client, server, proxy, registry and tunnel built into a single application.
-
-As a server, it can respond to any arbitrary URI and let you configure custom response based on various match criteria against URIs, headers, body, etc. It can collect useful stats and counters that can be used to correlate responses against requests. The server can also extract values from the incoming request's headers/query/URI/body and produce semi-dynamic response based on pre-configured templates.
-
-`Goto` can also act as an HTTP proxy that lets you intercept HTTP requests and get some insights (e.g. based on headers) before forwarding it to its destination.
-
-As a client, it allows sending requests to various destinations and tracking responses by headers and response status code.
-
-As a registry, a `goto` instance can federate and coordinate actions of multiple goto instances, sending out workloads and collecting results from those federated goto instances.
-
-Finally, a `goto` instance can act as an HTTP/S tunnel where it forwards an HTTP/HTTPS request transparently to another destinations and forwards the results back to the client. This can be useful when some other endpoints are not accessible from the client's network space, as is the case for endpoints behind an overlay network.
-
-The application exposes all its features via REST APIs as described below. Additionally, it can respond to all undefined URIs with a configurable status code.
-
-The docker image is built with several useful utilities included: `curl`, `wget`, `nmap`, `iputils`, `openssl`, `jq`, etc.
 
 # <a name="toc"></a>
 
@@ -434,7 +315,7 @@ The application accepts the following command arguments:
         </tr>
         <tr>
           <td rowspan="2"><pre>--ports {ports}</pre></td>
-          <td>Initial list of ports that the server should start with. Port list is given as comma-separated list of <pre>{port1},<br/>{port2}/{protocol2}/{commonName2},<br/>{port3}/{protocol3}/{commonName3},...</pre>. The first port in the list is used as the primary port and is forced to be HTTP. Protocol is optional, and can be one of <pre>http (default), https, tcp,<br/> tls (implies tcp+tls), or grpc. </pre> Protocol <strong>https</strong> configures the port to serve HTTP requests with a self-signed TLS cert, whereas protocol <strong>tls</strong> configures a TCP port with self-signed TLS cert. <strong>CommonName</strong> is used for generating self-signed certs, and defaults to <strong>goto.goto</strong>. </td>
+          <td>Initial list of ports that the server should start with. Port list is given as comma-separated list of <pre>{port1},<br/>{port2}/{protocol2}/{commonName2},<br/>{port3}/{protocol3}/{commonName3},...</pre>. The first port in the list is used as the primary port and is forced to be HTTP. Protocol is optional, and can be one of <pre>http (default), http1, https, https1, tcp,<br/> tls (implies tcp+tls), or grpc. </pre> Protocol <strong>https</strong> configures the port to serve HTTP requests with a self-signed TLS cert, whereas protocol <strong>tls</strong> configures a TCP port with self-signed TLS cert. <strong>CommonName</strong> is used for generating self-signed certs, and defaults to <strong>goto.goto</strong>. Use protocol <strong>http1</strong> or <strong>https1</strong> to configure a listener port that only serves HTTP/1.1 protocol and explicitly disallows HTTP/2 protocol. </td>
           <td rowspan="2">""</td>
         </tr>
         <tr>
@@ -442,7 +323,7 @@ The application accepts the following command arguments:
         </tr>
         <tr>
           <td rowspan="2"><pre>--label `{label}`</pre></td>
-          <td>Label this server instance will use to identify itself. </td>
+          <td>Label that this instance will use to identify itself. </td>
           <td rowspan="2">Goto-`IPAddress:Port` </td>
         </tr>
         <tr>
@@ -460,7 +341,7 @@ The application accepts the following command arguments:
         </tr>
         <tr>
           <td rowspan="1"><pre>--startupScript<br/> {shell command}</pre></td>
-          <td>List of shell commands to execute at goto startup. Multiple commands are specified by passing multiple instances of this arg. The commands are joined with ';' as separator and executed using 'sh -c'. </td>
+          <td>List of shell commands to execute at goto startup. Multiple commands are specified by passing multiple instances of this arg. The commands are joined with ';' as a separator and executed using 'sh -c'. </td>
           <td rowspan="1"></td>
         </tr>
         <tr>
@@ -595,8 +476,6 @@ Once the server is up and running, rest of the interactions and configurations a
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
-
 # <a name="goto-client-targets-and-traffic"></a>
 
 # Goto Client: Targets and Traffic
@@ -653,7 +532,9 @@ Client sends header `From-Goto-Host` to pass its identity to the server.
 
 
 # <a name="client-events"></a>
-#### Client Events
+<details>
+<summary>Client Events</summary>
+
 - `Target Added`: an invocation target was added
 - `Targets Removed`: one or more invocation targets were removed
 - `Targets Cleared`: all invocation targets were removed
@@ -672,7 +553,7 @@ Client sends header `From-Goto-Host` to pass its identity to the server.
 - `Invocation Repeated Response Status`: All HTTP responses after the first response from a target where the response status code was the same as the previous, are accumulated and reported in summary. This event is sent out when the next response is found to carry a different response status code, or if all requests to a target completed for an invocation.
 - `Invocation Failure`: Event reported upon first failed request, or if a request fails after previous successful request.
 - `Invocation Repeated Failure`: All request failures after a failed request are accumulated and reported in summary, either when the next request succeeds or when the invocation completes.
-
+</details>
 <br/>
 
 See [Client JSON Schemas](docs/client-api-json-schemas.md)
@@ -705,19 +586,17 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 
 # Goto Server Features
 
-`Goto` as a server is useful for doing feature testing as well as chaos testing of some client application, a proxy/sidecar, a gateway, etc. Or, the server can also be used as a proxy to be put in between a client and a target server application, so that traffic flows through this server where headers can be inspected/tracked before forwarding the requests further. The server can add headers, replace request URI with some other URI, add artificial delays to the response, respond with a specific status, monitor request/connection timeouts, etc. The server tracks all the configured parameters, applying those to runtime traffic and building metrics, which can be viewed via various APIs.
+`Goto` as a server is useful for doing feature testing as well as chaos testing of client applications, proxies/sidecars, gateways, etc. Or, the server can also be used as a proxy to be put in between a client and a target server application, so that traffic flows through this server where headers can be inspected/tracked before forwarding the requests further. The server can add headers, replace request URI with some other URI, add artificial delays to the response, respond with a specific status, monitor request/connection timeouts, etc. The server tracks all the configured parameters, applying those to runtime traffic and building metrics, which can be viewed via various APIs.
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
-
 # <a name="goto-response-headers)"></a>
-
-### Goto Response Headers
+## HTTP Headers
+#### Server response headers
 
 `Goto` adds the following common response headers to all http responses it sends:
 
-- `Goto-Host`: identifies the goto instance. This header's value will include hostname, IP, Port, Namespace and Cluster information if available to `Goto` from the following Environment variables: `POD_NAME`, `POD_IP`, `NODE_NAME`, `CLUSTER`, `NAMESPACE`. It falls back to using the local compute's IP address if `POD_IP` is not defined. For other fields, it defaults to fixed value `local`.
+- `Goto-Host`: identifies the `goto` instance. This header's value will include hostname, IP, Port, Namespace and Cluster information if available to `Goto` from the following Environment variables: `POD_NAME`, `POD_IP`, `NODE_NAME`, `CLUSTER`, `NAMESPACE`. It falls back to using the local compute's IP address if `POD_IP` is not defined. For other fields, it defaults to fixed value `local`.
 - `Via-Goto`: carries the label of the listener that served the request. For the bootstrap port, the label used is the one given to `goto` as `--label` startup argument (defaults to auto-generated label).
 - `Goto-Port`: carries the port number on which the request was received
 - `Goto-Protocol`: identifies whether the request was received over `HTTP` or `HTTPS`
@@ -727,24 +606,46 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 - `Goto-Out-At`: UTC timestamp when `goto` finished processing the request and sent a response
 - `Goto-Took`: Total processing time taken by `goto` to process the request
 
-`Goto` adds the following response headers conditionally:
+The following response headers are added conditionally under different scenarios:
+
+#### Client request headers:
 
 - `From-Goto`, `From-Goto-Host`: Sent by `goto` client with each traffic invocation, passing the label and host id of the client `goto` instance
 - `Goto-Request-ID`, `Goto-Target-ID`, `Goto-Target-URL`: Sent by `goto` client with each traffic invocation. RequestID and TargetID are auto-generated from the target name and request counters. TargetURL header identifies the URL that `goto` invoked, which can be useful when an intermediate proxy rewrites the URL.
 - `Goto-Retry-Count`: Sent by `goto` client instance when traffic invocations are retried (if a target was configured for retries)
-- `Goto-Host-Tunnel[<seq>]`: identifies `goto` instance hosts through which this request was tunneled along with the sequence number of each instance in the tunnel chain.
+
+#### Proxy response headers
+- `Goto-Host|Proxy`: identifies the `goto` instance that acted as a proxy for this request
+- `Via-Goto|Proxy`: label of the `goto` instance that acted as a proxy for this request
+- `Goto-Port|Proxy`: port number on which the `goto` proxy instance received this request, which may be different than the upstream service port
+- `Goto-Protocol|Proxy`: Protocol over which the `goto` proxy instance served this request, which may be different than the protocol used for the upstream service call
+- `Goto-Response-Status|Proxy`: HTTP response status code that `goto` proxy instance responded with. Upstream's response status code is preserved in another header listed below.
+- `Goto-In-At|Proxy`: UTC timestamp when the request was received by the `goto` proxy instance
+- `Goto-Out-At|Proxy`: UTC timestamp when the `goto` proxy instance finished processing the request and sent a response
+- `Goto-Took|Proxy`: Total processing time taken by the `goto` proxy instance to process the request
+- `Goto-Proxy-Upstream-Status|<upstream-name>`: status the `goto` proxy's upstream service responded with, which may be different than the status `goto` responded with to the downstream client
+- `Goto-Proxy-Upstream-Took|<upstream-name>`: Total roundtrip time the proxy's upstream call took
+- `Goto-Proxy-Delay`: any delay added to the request/response by `goto` as a proxy
+
+#### Tunnel response headers:
+- `Goto-Tunnel-Host[<seq>]`: identifies `goto` instance hosts through which this request was tunneled along with the sequence number of each instance in the tunnel chain.
 - `Via-Goto-Tunnel[<seq>]`: identifies `goto` instance labels through which this request was tunneled along with the sequence number of each instance in the tunnel chain.
 - `Goto-In-At[<seq>]`: UTC timestamp when the request was received by each `goto` in the tunnel chain
 - `Goto-Out-At[<seq>]`: UTC timestamp when the request finished processing by the `goto` tunnel instance
 - `Goto-Took[<seq>]`: Total processing time taken by the `goto` tunnel instance
+
+#### Use-case based response headers:
 - `Goto-Response-Delay`: set if `goto` applied a configured delay to the response.
 - `Goto-Payload-Length`, `Goto-Payload-Content-Type`: set if `goto` sent a configured response payload
 - `Goto-Chunk-Count`, `Goto-Chunk-Length`, `Goto-Chunk-Delay`, `Goto-Stream-Length`, `Goto-Stream-Duration`: set when client requests a streaming response
 - `Goto-Requested-Status`: set when `/status` API request is made requesting a specific status
 - `Goto-Forced-Status`, `Goto-Forced-Status-Remaining`: set when a configured custom response status is applied to a response that didn't have a URI-specific response status
 - `Goto-URI-Status`, `Goto-URI-Status-Remaining`: set when a configured custom response status is applied to a uri
+- `Goto-Status-Flip`: set when a flip-flop status request resulted in a status change from the previous response's status (see the feature to understand it better)
 - `Goto-Filtered-Request`: set when a request is filtered due to a configured `ignore` or `bypass` filter
 - `Request-*`: prefix is added to all request headers and the request headers are sent back as response headers
+
+#### Probe response headers
 - `Readiness-Request-*`: prefix is added to all request headers for Readiness probe requests
 - `Liveness-Request-*`: prefix is added to all request headers for Liveness probe requests
 - `Readiness-Request-Count`: header added to readiness probe responses, carrying the number of readiness requests received so far
@@ -756,13 +657,14 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
-
 # <a name="goto-server-logs"></a>
 
 ### Goto Logs
 
 `goto` server logs are generated with a useful pattern to help figuring out the steps `goto` took for a request. Each log line tells the complete story about request details, how the request was processed, and response sent. Each log line contains the following segments separated by `-->`:
+
+<details>
+<summary>Goto Log Format</summary>
 
 - Request Timestamp
 - Listener Label: label of the listener that served the request
@@ -780,24 +682,24 @@ See [Client APIs and Results Examples](docs/client-api-examples.md)
 - Response Body Length
 - Response Body or Response Mini Body (first and last 50 characters from response body) (if logging enabled)
 
-`goto` client, invocation, job, proxy and tunnel logs produce multi-line logs for the tasks being performed.
+`goto` client, invocation, job, proxy and tunnel logs produce multiline logs for the tasks being performed.
 
 #### Sample server log line:
 
 ```
 2021/07/31 16:38:07.400110 [Goto] --> LocalAddr: [[::1]:8080], RemoteAddr: [[::1]:52103], Protocol [HTTP/1.1], Host: [localhost:8080], Content Length: [154] --> Request Headers: {"Accept":["*/*"],"Content-Length":["154"],"Content-Type":["application/x-www-form-urlencoded"],"User-Agent":["curl/7.76.1"]} --> Request Body Length: [154] --> Request Mini Body: [a1234567890b1234567890c1234567890d1234567890e12345...567890k1234567890l1234567890m1234567890n1234567890] --> Request URI: [/hello], Protocol: [HTTP/1.1], Method: [POST] --> Responding with configured payload of length [154] and content type [text/plain] for URI [/hello] --> Response Status Code: [200] --> Response Body Length: [154] --> Response Mini Body: [a1234567890b1234567890c1234567890d1234567890e12345...567890k1234567890l1234567890m1234567890n1234567890]
 ```
+</details>
+
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
-
-#### Log APIs
-The log APIs can be used to see current logging config and turn logging on/off for various components.
+### Log APIs
+The log APIs can be used to see the current logging config and turn logging on/off for various components.
 
 |METHOD|URI|Description|
 |---|---|---|
-| GET   | /log    | Get current logging config for all components.  |
+| GET   | /log    | Get the current logging config for all components.  |
 | POST | /log/server/{enable} | Enable/disable server logging completely |
 | POST | /log/admin/{enable} | Enable/disable logging of admin calls |
 | POST | /log/client/{enable} | Enable/disable client logging completely |
@@ -810,15 +712,14 @@ The log APIs can be used to see current logging config and turn logging on/off f
 | POST | /log/probe/{enable} | Enable/disable readiness and liveness probe logs |
 | POST | /log/metrics/{enable} | Enable/disable metrics logs |
 | POST | /log/request/headers/{enable} | Enable/disable request headers logs |
-| POST | /log/request/minibody/{enable} | Enable/disable request minibody (truncated body) logs (currently only supported for http1 requests)  |
-| POST | /log/request/body/{enable} | Enable/disable request body logs (currently only supported for http1 requests) |
+| POST | /log/request/minibody/{enable} | Enable/disable request minibody (truncated body) logs (currently only supported for HTTP/1.x requests, not for H/2)  |
+| POST | /log/request/body/{enable} | Enable/disable request body logs (currently only supported for HTTP/1.x requests, not for H/2) |
 | POST | /log/response/headers/{enable} | Enable/disable response headers logs |
-| POST | /log/response/minibody/{enable} | Enable/disable response minibody (truncated body) logs (currently only supported for http1 requests) |
-| POST | /log/response/body/{enable} | Enable/disable response body logs (currently only supported for http1 requests) |
+| POST | /log/response/minibody/{enable} | Enable/disable response minibody (truncated body) logs (currently only supported for HTTP/1.x requests, not for H/2) |
+| POST | /log/response/body/{enable} | Enable/disable response body logs (currently only supported for HTTP/1.x requests, not for H/2) |
 
-#### Log API Examples
 <details>
-<summary>API Examples</summary>
+<summary>Log API Examples</summary>
 
 ```
 curl localhost:8080/log
@@ -828,10 +729,7 @@ curl -X POST localhost:8080/log/headers/response/n
 curl -X POST localhost:8080/log/invocation/n
 
 ```
-
 </details>
-
-
 
 # <a name="goto-version"></a>
 ## > Goto Version
@@ -845,8 +743,6 @@ This API returns version info of the `goto` instance
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
-
 # <a name="events"></a>
 ## > Events
 `goto` logs various events as it performs operations, responds to admin requests and serves traffic. The Events APIs can be used to read and clear events on a `goto` instance. Additionally, if the `goto` instance is configured to report to a registry, it sends the events to the registry. On the Goto registry, events from various peer instances are collected and merged by peer labels. Registry exposes additional APIs to get the event timeline either for a peer (by peer label) or across all connected peers as a single unified timeline. Registry also allows clearing of events timeline on all connected instances through a single API call. See Registry APIs for additional info.
@@ -857,13 +753,15 @@ Param `reverse=y` produces the timeline in reverse chronological order. By defau
 
 |METHOD|URI|Description|
 |---|---|---|
-| POST      | /events/flush    | Publish any pending events to the registry, and clear instance's events timeline. |
+| POST      | /events/flush    | Publish any pending events to the registry, and clear the instance's events timeline. |
 | POST      | /events/clear    | Clear the instance's events timeline. |
 | GET       | /events?reverse=`[y/n]`&data=`[y/n]` | Get events timeline of the instance. To get combined events from all instances, use the registry's peers events APIs instead.  |
 | GET       | /events/search/`{text}`?reverse=`[y/n]`&data=`[y/n]` | Search the instance's events timeline. |
 
 
-#### Server Events
+<details>
+<summary>Server Events Details</summary>
+
 Each `goto` instance publishes these events at startup and shutdown
 - `Server Started`
 - `GRPC Server Started`
@@ -875,17 +773,15 @@ A `goto` peer that's configured to connect to a `goto` registry publishes the fo
 - `Peer Startup Data`
 - `Peer Deregistered`
 
-A server generates event `URI First Request` upon receiving the first request for a URI. Subsequent requests for that URI are tracked and counted as long as it produces the same response status. Once the response status code changes for a URI, it generates event `Repeated URI Status` to log the accumulated summary of the URI so far, and the logs `URI Status Changed` to report the new status code. The accumulation and tracking logic then proceeds with this new status code, reporting once the status changes again for that URI.
+A server generates `URI First Request` upon receiving the first request for a URI. Subsequent requests for that URI are tracked and counted as long as it produces the same response status. Once the response status code changes for a URI, it generates `Repeated URI Status` to log the accumulated summary of the URI so far, and the logs `URI Status Changed` to report the new status code. The accumulation and tracking logic then proceeds with this new status code, reporting once the status changes again for that URI.
 
 Various other events are published by `goto` peer instances acting as client and server, and by the `goto` registry instance, which are listed in other sections in this Readme.
 
-<br/>
+</details>
 
 See [Events Example](docs/events-example.md)
 
 ###### <small> [Back to TOC](#toc) </small>
-
-<br/>
 
 # <a name="metrics"></a>
 
@@ -893,7 +789,9 @@ See [Events Example](docs/events-example.md)
 
 ### Prometheus Metrics
 
-`goto` exposes custom server metrics as well as golang VM metrics in prometheus format. The following prometheus metrics are exposed:
+`Goto` exposes custom server metrics as well as golang VM metrics in prometheus format.
+<details>
+<summary>List of Prometheus metrics exposed by goto</summary>
 
 - `goto_requests_by_type` (vector): Number of requests by type (dimension: requestType)
 - `goto_requests_by_headers` (vector): Number of requests by request headers (dimension: requestHeader)
@@ -918,10 +816,14 @@ See [Events Example](docs/events-example.md)
 - `goto_total_conns_by_targets` (vector): Total client connections by targets (dimension: target)
 - `goto_active_conn_counts_by_targets` (gauge): Number of active client connections by targets (dimension: target)
 
+</details>
+<br/>
 
-### Server Stats
+`Goto` tracks request counts by various dimensions for validation usage, exposed via API `/stats`:
 
-`goto` tracks request counts by various dimensions for validation usage. The following counts are exposed via API `/stats`:
+<details>
+<summary>List of server stats tracked by goto</summary>
+
 - `requestCountsByHeaders`
 - `requestCountsByURIs`
 - `requestCountsByURIsAndStatus`
@@ -934,7 +836,9 @@ See [Events Example](docs/events-example.md)
 - `requestCountsByPortAndHeaderValues`
 - `requestCountsByURIsAndProtocol`
 
-#### APIs
+</details>
+
+#### Metrics APIs
 |METHOD|URI|Description|
 |---|---|---|
 | GET   | /metrics       | Custom metrics in prometheus format |
@@ -950,35 +854,56 @@ See [Metrics Example](docs/metrics-example.md)
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
-
 # <a name="listeners"></a>
 
 ## > Listeners
 
-The server starts with a bootstrap http listener (given as a command line arg `--port` or as first port in the arg `--ports`, defaults to 8080). Additional ports can be opened via command line (arg `--ports`) as well as via listener APIs. When startup arg `--ports` is used, the first port in the list is treated as bootstrap port, forced to be an HTTP port, and isn't allowed to be managed via listeners APIs.
+#### Features
+- The server starts with a bootstrap http listener When startup arg `--ports` is used, the first port in the list is treated as the bootstrap port, forced to be an HTTP port, and isn't allowed to be managed via listeners APIs.
+- The `listeners APIs` let you manage/open/close an arbitrary number of HTTP/HTTPS/TCP/TCP+TLS/GRPC listeners (except the default bootstrap listener that is set as HTTP and cannot be modified). 
+- All HTTP listener ports respond to the same set of API calls, so any of the admin APIs described in this document as well as any arbitrary URI call for runtime traffic can be done via any active HTTP listener. 
+- Any of the TCP operations described in the TCP section can be performed on any active TCP listener, and any of the GRPC operations can be performed on any GRPC listener. 
+- The HTTP listeners perform double duty of also acting as GRPC listeners, but listeners explicitly configured as `GRPC` act as `GRPC-only` and don't support HTTP operations. See `GRPC` section later in this doc for details on GRPC operations supported by `goto`.
+- `/server/listeners` API lets you view a list of configured listeners, including the default bootstrap listener.
 
-The `listeners APIs` let you manage/open/close an arbitrary number of HTTP/HTTPS/TCP/TCP+TLS/GRPC listeners (except the default bootstrap listener that is set as HTTP and cannot be modified). The ability to launch and shutdown listeners lets you do some chaos testing. All HTTP listener ports respond to the same set of API calls, so any of the HTTP APIs described below as well as runtime traffic proxying can be done via any active HTTP listener. Any of the TCP operations described in the TCP section can be performed on any active TCP listener, and any of the GRPC operations can be performed on any GRPC listener. The HTTP listeners perform double duty of also acting as GRPC listeners, but listeners explicitly configured as `GRPC` act as `GRPC-only` and don't support HTTP operations. See `GRPC` section later in this doc for details on GRPC operations supported by `goto`.
+#### Prefixing APIs with `/port={port}`
+- Several configuration APIs (used to configure server features on `goto` instances) support `/port={port}/...` URI prefix to allow use of one listener to configure another listener's HTTP features. This allows for configuring another listener that might be closed or otherwise inaccessible when the configuration call is being made.
+- For example, the API `http://localhost:8081/probes/readiness/set/status=503` that's meant to configure readiness probe for listener on port 8081, can also be invoked via another port as `http://localhost:8080/port=8081/probes/readiness/set/status=503`. 
 
-`/server/listeners` API output includes the default startup port for view, but the default port cannot be mutated by other listener APIs.
+#### TLS Listeners
+`Goto` provide following kind of TLS listeners, configured via `protocol` field (in listener config JSON or at startup):
+- Protocol: `https`
+  - Serve HTTPS traffic over both HTTP/1.x and HTTP/2 protocol.
+- Protocol: `https1`
+  - Serve HTTPS traffic over HTTP/1.x only with no HTTP/2 upgrade support. This can be useful for testing a client behavior when server explicitly disallows HTTP/2.
+- Protocol: `tls`
+  - Serve TCP traffic over TLS
 
-Several configuration APIs (used to configure server features on `goto` instances) support `/port={port}/...` URI prefix to allow use of one listener to configure another listener's HTTP features. For example, the API `http://localhost:8081/probes/readiness/set/status=503` that's meant to configure readiness probe for listener on port 8081, can also be invoked via another port as `http://localhost:8080/port=8081/probes/readiness/set/status=503`. This allows for configuring another listener that might be closed or otherwise inaccessible when the configuration call is being made.
+#### Auto Certs 
+- TLS listeners created via startup command arg use auto-generated certs by default, but custom certs can be deployed for these listeners via admin APIs.
+- For TLS listeners created via admin APIs (JSON), you can choose to use auto-certs or custom certs.
+- Common name of the auto-generated certs can be supplied both for startup listeners as well as via admin APIs. If no common name supplied, the default common name `goto.goto` is used.
+- API `/server/listeners/{port}/cert/auto/{domain}` allows you to convert any existing listener to TLS with auto-cert. The API auto-generates a cert for the listener if not already present, and reopens it in TLS mode.
+- APIs `/server/listeners/{port}/cert/add` and `/server/listeners/{port}/key/add` allow you to add your own cert and key to a listener. After invoking these two APIs to upload cert and private key, you must explicitly call `/server/listeners/{port}/reopen` to make the listener serve TLS traffic.
 
-##### TLS Listeners
-A listener can be configured to serve TLS traffic over either of the supported protocols via one of the following ways:
-- Use protocol `https` or `tls` to configure a listener to use an auto-generated self-signed cert to serve HTTP or TCP traffic correspondingly. The protocol identifiers can also be used with bootstrap listeners. Common name of the auto-generated certs is set to `goto.goto`.
-- Use `https` or `tls` protocol identifiers along with `commonName` field to configure a listener to use self-signed cert using the given common name (as opposed to using `goto.goto` in the previous approach)
-- Use APIs `/server/listeners/{port}/cert/auto/{domain}` to get the same effect as above but via an API call. The API auto-generates a cert for the listener if not already present, and reopens it in TLS mode. The API approach lets you reconfigure an already opened listener to switch to TLS.
-- Use APIs `/server/listeners/{port}/cert/add` and `/server/listeners/{port}/key/add` to add your own cert and key to a listener. After invoking these two APIs to upload cert and private key, you must explicitly call `/server/listeners/{port}/reopen` to make the listener serve TLS traffic. 
+#### Auto SNI
+- API `/server/listeners/{port}/cert/autosni` allows you to configure a TLS listener to auto-generate certs on-the-fly to match the SNI presented by the client. The listener behavior in this mode is different than `cert/auto/{domain}` API mode in that:
+  - In `auto-cert` mode, the listener auto-generates one cert for the given common name and always uses that one cert regardless of what  SNI the client presents. This leaves open the possibility of a mismatch between the server name requested by the client and the cert presented by the server.
+  - In `cert/autosni` mode, the listener always presents correct certs matching the SNI requested by the client. This ensures there will never be a server name mismatch.
 
-#### See TCP and GRPC Listeners section later for details of TCP or GRPC features
+> Whether you should use auto-cert mode or auto-SNI mode depends on your testing requirements. `Auto-Cert` mode allows for negative testing with cert mismatch, whereas `Auto-SNI` ensures there will never be a cert mismatch (although still self-signed certs).
 
-#### APIs
+> &#x1F4DD; <small><i>Goto maintains a cert cache for auto-sni listeners so that it only generates a cert upon first call for a server name on a listener port, and reuses that cert upon subsequent calls for the same server name</i></small>
+
+> &#x1F4DD; <small> See TCP and GRPC Listeners section later for details of TCP or GRPC features </small>
+
+### Listeners APIs
 |METHOD|URI|Description|
 |---|---|---|
-| POST       | /server/listeners/add           | Add a listener. [See Payload JSON Schema](#listener-json-schema)|
+| POST       | /server/listeners/add           | Add a listener. [See Listener Payload JSON Schema](#listener-json-schema)|
 | POST       | /server/listeners/update        | Update an existing listener.|
 | POST, PUT  | /server/listeners<br/>/`{port}`/cert/auto/`{domain}`   | Auto-generate certificate for the given domain and service on this listener. Listener is automatically reopened as a TLS listener serving this cert. |
+| POST, PUT  | /server/listeners<br/>/`{port}`/cert/autosni   | The listener will auto-generate a certificate on-the-fly to always match the SNI presented by the client in any arbitrary call. Listener is automatically reopened as a TLS listener after this API call. |
 | POST, PUT  | /server/listeners<br/>/`{port}`/cert/add   | Add/update certificate for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
 | POST, PUT  | /server/listeners<br/>/`{port}`/key/add   | Add/update private key for a listener. Presence of both cert and key results in the port serving HTTPS traffic when opened/reopened. |
 | POST, PUT  | /server/listeners<br/>/`{port}`/cert/remove   | Remove certificate and key for a listener and reopen it to serve HTTP traffic instead of HTTPS. |
@@ -993,22 +918,29 @@ A listener can be configured to serve TLS traffic over either of the supported p
 | GET        | /server/listeners/`{port}`               | Get details of a chosen listener. |
 | GET        | /server/listeners               | Get a list of listeners. The list of listeners in the output includes the default startup port even though the default port cannot be mutated by other listener APIs. |
 
-#### Listener JSON Schema
+<br/>
+<details>
+<summary>Listener JSON Schema</summary>
+
 |Field|Data Type|Description|
 |---|---|---|
 | listenerID    | string | Read-only field identifying the listener's port and current generation. |
 | label    | string | Label to be applied to the listener. This can also be set/changed via REST API later. |
-| hostLabel    | string | The host label is auto-generated and assigned to the listeners to uniquely identify the host while still differentiating between multiple listeners active on the `goto` instance. This is auto-generated using format `<hostname>@<ipaddress>:<port>`. Host Label is used in `Goto-Host` response header.  |
+| hostLabel    | string | The host label is auto-generated and assigned to the listeners to uniquely identify the host while still differentiating between multiple listeners active on the `goto` instance. This is auto-generated using format `<hostname>@<ipaddress>:<port>`. Host Label is also sent back in the `Goto-Host` response header.  |
 | port     | int    | Port on which the new listener will listen on. |
-| protocol | string | `http`, `https`, `grpc`, `tcp`, or `tls`. Protocol `tls` implies TCP + TLS. |
-| open | bool | Controls whether the listener should be opened as soon as it's added. Also reflects listener's current status when queried. |
+| protocol | string | `http`, `http1`, `https`, `https1`, `grpc`, `tcp`, or `tls`. Protocol `tls` implies TCP + TLS. |
+| open | bool | Controls whether the listener should be opened as soon as it's added. Also reflects the listener's current status when queried. |
 | autoCert | bool | Controls whether a TLS certificate should be auto-generated for an HTTPS or TLS listener. If enabled, the TLS cert for the listener is generated using the `CommonName` field if configured, or else the cert common name is defaulted to `goto.goto`. |
 | commonName | string | If given, this common name is used to generate self-signed cert for this listener. |
 | mutualTLS | bool | Controls whether the HTTPS or TLS listener should enforce mutual-TLS, requiring clients to present a valid certificate that's validated against the configured CA certs of the listener. CA certs can be added to a listener using API `/server/listeners/{port}/ca/add`). |
 | tls | bool | Reports whether the listener has been configured for TLS (read-only). |
 | tcp | TCPConfig | Supplemental TCP config for a TCP listener. See TCP Config JSON schema under `TCP Server` section. |
 
-#### Listener Events
+</details>
+
+<details>
+<summary>Listener Events</summary>
+
 - `Listener Rejected`
 - `Listener Added`
 - `Listener Updated`
@@ -1022,14 +954,12 @@ A listener can be configured to serve TLS traffic over either of the supported p
 - `Listener Reopened`
 - `Listener Closed`
 - `GRPC Listener Started`
-
-<br/>
+</details>
 
 See [Listeners Example](docs/listeners-example.md)
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="listener-label"></a>
 
@@ -1037,7 +967,7 @@ See [Listeners Example](docs/listeners-example.md)
 
 By default, each listener adds a header `Via-Goto: <port>` to each response it sends, where `<port>` is the port on which the listener is running (default being 8080). A custom label can be added to a listener using the label APIs described below. In addition to `Via-Goto`, each listener also adds another header `Goto-Host` that carries the pod/host name, pod namespace (or `local` if not running as a K8s pod), and pod/host IP address to identify where the response came from.
 
-#### APIs
+#### Listener Label APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
 
 |METHOD|URI|Description|
@@ -1046,10 +976,8 @@ By default, each listener adds a header `Via-Goto: <port>` to each response it s
 | PUT       | /server/label/clear        | Remove label for this port |
 | GET       | /server/label              | Get current label of this port |
 
-#### Listener Label API Examples:
-
 <details>
-<summary>API Examples</summary>
+<summary>Listener Label API Examples</summary>
 
 ```
 curl -X PUT localhost:8080/server/label/set/Server-8080
@@ -1063,32 +991,54 @@ curl localhost:8080/server/label
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
-
 # <a name="tcp-server"></a>
 ## > TCP Server
 
-`Goto` provides features for testing server-side TCP behavior via TCP listeners (client side TCP features are described under client section).
+#### TCP Listeners
+- A TCP listener can be created using protocol `tcp` (plain TCP) or `tls` (TCP+TLS). TCP listeners can be opened at startup via command line arg as well as at runtime via admin APIs.
+- Startup TCP listeners are opened with default TCP config (described below). Admin APIs allow reconfiguring TCP listeners with additional configs using the listener's `tcp` config JSON schema. Parameters such as listener mode, read/write/idle timeouts, connection lifetime, packet sizes, etc. can be configured. 
 
-The listeners REST APIs that `goto` exposes on HTTP ports can be used to open additional ports on the `goto` instance. These additional ports can be either `HTTP` or `TCP`. For TCP listeners, additional configs can be provided using the listener's `tcp` schema, which allows for configuring various timeouts, connection lifetime, packet sizes, etc. The TCP configurations of a TCP listener can be supplied at the time of listener creation, and it can also be reconfigured at any time via the `/server/tcp/{port}/configure` API. 
+#### Server TCP Modes
+A TCP listener can operate in 6 different modes to facilitate different kinds of testing: `Payload`, `Echo`, `Stream`, `Payload Validation`, `Conversation`, `Silent Life` and `Close At First Byte`. 
 
-A TCP listener can operate in 6 different modes to facilitate different kinds of testing: `Payload`, `Echo`, `Stream`, `Payload Validation`, `Conversation`, `Silent Life` and `Close At First Byte`. A TCP mode is activated via the `TCP Configuration` applied to the listener. If no TCP mode is specified, the listener defaults to `CloseAtFirstByte` or `SilentLife` based on whether or not a connection lifetime is configured.
+- <strong>Mode: `SilentLife`</strong>
+  - If the listener is configured with a `connectionLife` that limits its lifetime, the listener operates in `SilentLife` mode
+  - The listener waits for the configured lifetime and closes the client connection. It receives and counts the bytes received, but never responds. 
+- <strong>Mode: `CloseAtFirstByte`</strong>
+  - If the listener's `connectionLife` is set to zero, the listener operates in `CloseAtFirstByte` mode 
+  - The listener waits for the first byte to arrive and then closes the client connection.
+- <strong>Mode: `Echo`</strong>
+  - The listener echoes back the bytes received from the client. 
+  - Field `echoResponseSize` configures the echo buffer size, which is the number of bytes that the listener will need to receive from the client before echoing back. If more data is received than the `echoResponseSize`, it'll echo multiple chunks each of `echoResponseSize` size. 
+  - Field `echoResponseDelay` configures the delay server should apply before sending each echo response packet.
+  - In `echo` mode, the connection enforces `readTimeout` and `connIdleTimeout` based on the activity: any new bytes received reset the read/idle timeouts. It applies `writeTimeout` when sending the echo response to the client. 
+  - If `connectionLife` is set, it controls the overall lifetime of the connection and the connection will close upon reaching the max life regardless of the activity.
+- <strong>Mode: `Stream`</strong>
+  - The listener starts streaming TCP bytes per the given configuration as soon as a client connects.
+  - None of the timeouts or max life applies in streaming mode, and the client connection closes automatically once the streaming completes.
+  - The stream behavior is controlled via the following fields: `streamPayloadSize`, `streamChunkSize`, `streamChunkCount`, `streamChunkDelay`, `streamDuration`. Not all of these fields are required, and a combination of some may lead to ambiguity that the server resolves by picking the most sensible combinations of these config params.
+- <strong>Mode: `Payload`</strong>
+  - The listener serves a set of pre-configured response payload(s) with an optional `responseDelay`.
+  - If more than one payload is configured in `responsePayloads` array, the `responseDelay` gets applied before sending each item in the array. 
+  - Field `respondAfterRead` controls whether response should be sent immediately or if a read should be performed before sending the response, in which case at least 1 byte must be received from the client before the response(s) are sent. 
+  - Field `keepOpen` determines whether the connection is kept open after sending the last item in the array. 
+  - If no `connectionLife` is configured explicitly, the connection life defaults to `30s` in this mode, and the connection is kept open for the remaining lifetime (computed from the start of request). 
+  - Note that in this mode, the server keeps the connection open even if the client preemptively closes the connection.
+- <strong>Mode: `Payload Validation`</strong>
+  - The client should first set the payload expectation by calling either `/server/tcp/{port}/expect/payload/{length}` or `/server/tcp/{port}/expect/payload/{length}`, depending on whether server should just validate payload length or the payload content.
+  - The server then waits for the duration of the connection lifetime (if not set explicitly for the listener, this feature defaults to `30s` of total connection life), and buffers bytes received from the client.
+  - If at any point during the connection life the number of received bytes exceed the expected payload length, the server responds with error and closes connection.
+  - If at the end of the connection life, the number of bytes match the payload expectations (either length or both length and content), then the server responds with a success message. The messages returned by the server are one of the following:
+    - `[SUCCESS]: Received payload matches expected payload of length [l] on port [p]`
+    - `[ERROR:EXCEEDED] - Payload length [l] exceeded expected length [e] on port [p]`
+    - `[ERROR:CONTENT] - Payload content of length [l] didn't match expected payload of length [e] on port [p]`
+    - `[ERROR:TIMEOUT] - Timed out before receiving payload of expected length [l] on port [p]`
+- <strong>Mode: `Conversation`</strong>
+  - The listener waits for the client to send a TCP payload with text `HELLO` to which server also responds back with `HELLO`.
+  - All subsequent packets from the client should follow the format `BEGIN/`{text}`/END`, and the server echoes the received text back in the format of `ACK/`{text}`/END`.
+  - The client can initiate connection closure by sending text `GOODBYE`, or else the connection can close based on various timeouts and connection lifetime config.
 
-The modes are described in detail below:
-
-- By default, a TCP listener executes in one of the two `silent` modes. 
-   a) If the listener is configured with a `connectionLife` that limits its lifetime, the listener operates in `SilentLife` mode where it waits for the configured lifetime and closes the client connection. In this mode, the listener receives and counts the bytes received, but never responds. 
-   b) If the listener's `connectionLife` is set to zero, the listener operates in `CloseAtFirstByte` mode where it waits for the first byte to arrive and then closes the client connection.
- - In `Payload` mode, a TCP listener serves a set of pre-configured response payload(s) with an optional `responseDelay`. If more than one payload is configured in `responsePayloads` array, the `responseDelay` gets applied before sending each item in the array. The `respondAfterRead` field controls whether response should be sent immediately or if a read should be performed before sending the response, in which case at least 1 byte must be received from the client before the response(s) are sent. The `keepOpen` configuration determines whether the connection is kept open after sending the last item in the array. If no `connectionLife` is configured explicitly, the connection life defaults to `30s` in this mode, and the connection is kept open for the remaining lifetime (computed from the start of request). Note that in this mode, the server keeps the connection open even if the client preemptively closes the connection.
- - If `Echo` mode is enabled on a TCP listener, the listener echoes back the bytes received from the client. The `echoResponseSize` configures the echo buffer size, which is the number of bytes that the listener will need to receive from the client before echoing back. If more data is received than the `echoResponseSize`, it'll echo multiple chunks each of `echoResponseSize` size. The config `echoResponseDelay` configures the delay server should apply before sending each echo response packet. In `echo` mode, the connection enforces `readTimeout` and `connIdleTimeout` based on the activity: any new bytes received reset the read/idle timeouts. It applies `writeTimeout` when sending the echo response to the client. If `connectionLife` is set, it controls the overall lifetime of the connection and the connection will close upon reaching the max life regardless of the activity.
- - If `Stream` mode is enabled, the connection starts streaming TCP bytes per the given configuration as soon as a client connects. None of the timeouts or max life applies in streaming mode, and the client connection closes automatically once the streaming completes. The stream behavior is controlled via the following configs: `streamPayloadSize`, `streamChunkSize`, `streamChunkCount`, `streamChunkDelay`, `streamDuration`. Not all of these configs are required, and a combination of some may lead to ambiguity that the server resolves by picking the most sensible combinations of these config params.
- - In `Payload Validation` mode, the client should first set the payload expectation by calling either `/server/tcp/{port}/expect/payload/{length}` or `/server/tcp/{port}/expect/payload/{length}`, depending on whether server should just validate payload length or the payload content. The server then waits for the duration of the connection lifetime (if not set explicitly for the listener, this feature defaults to `30s` of total connection life), and buffers bytes received from the client. If at any point during the connection life the number of received bytes exceed the expected payload length, the server responds with error and closes connection. If at the end of the connection life, the number of bytes match the payload expectations (either length or both length and content), then the server responds with success message. The messages returned by the server are one of the following:
-   - `[SUCCESS]: Received payload matches expected payload of length [l] on port [p]`
-   - `[ERROR:EXCEEDED] - Payload length [l] exceeded expected length [e] on port [p]`
-   - `[ERROR:CONTENT] - Payload content of length [l] didn't match expected payload of length [e] on port [p]`
-   - `[ERROR:TIMEOUT] - Timed out before receiving payload of expected length [l] on port [p]`
-- In `Conversation` mode, the server waits for the client to send a TCP payload with text `HELLO` to which server also responds back with `HELLO`. All subsequent packets from the client should follow the format `BEGIN/`{text}`/END`, and the server echoes the received text back in the format of `ACK/`{text}`/END`. The client can initiate connection closure by sending text `GOODBYE`, or else the connection can close based on various timeouts and connection lifetime config.
-- In all cases, the client may close the connection proactively causing the ongoing operation to abort.
+In all cases, the client may close the connection proactively causing the ongoing operation to abort.
 
 
 #### APIs
@@ -1124,9 +1074,10 @@ The modes are described in detail below:
 | POST  | /server/tcp/`{port}`<br/>/history/clear | Clear history of client connections for a TCP listener port |
 | POST  | /server/tcp/history/clear | Clear history of client connections for all TCP listener ports |
 
+<br/>
+<details>
+<summary>TCP Config JSON Schema</summary>
 
-
-#### TCP Config JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
 | readTimeout | duration | Read timeout to apply when reading data sent by the client. |
@@ -1149,14 +1100,17 @@ The modes are described in detail below:
 | responsePayloads | []string | A list of payloads to be used in `Payload` mode. When more than payloads are configured, each is sent in succession after applying the `responseDelay`. |
 | responseDelay | duration | Delay to apply before sending each response payload in `Payload` mode. |
 | respondAfterRead | bool | In `Payload` mode, this field controls whether the server should start sending payloads immediately or after waiting to receive at least one byte from the client. |
-| streamPayloadSize | int | Configures the total payload size to be stream via chunks if streaming is enabled for the listener. |
+| streamPayloadSize | int | Configures the total payload size to be streamed via chunks if streaming is enabled for the listener. |
 | streamChunkSize | int | Configures the size of each chunk of data to stream if streaming is enabled for the listener. |
 | streamChunkCount | int | Configures the total number of chunks to stream if streaming is enabled for the listener. |
 | streamChunkDelay | duration | Configures the delay to be added before sending each chunk back if streaming is enabled for the listener. |
 | streamDuration | duration | Configures the total duration of stream if streaming is enabled for the listener. |
 
+</details>
 
-#### TCP Events
+<details>
+<summary>TCP Events</summary>
+
 - `TCP Configuration Rejected`
 - `TCP Configured`
 - `TCP Connection Duration Configured`
@@ -1168,13 +1122,12 @@ The modes are described in detail below:
 - `New TCP Client Connection`
 - `TCP Client Connection Closed`
 
-<br/>
+</details>
 
 See [TCP Example](docs/tcp-example.md)
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="grpc-server"></a>
 
@@ -1223,7 +1176,9 @@ The GRPC response from `goto` also carries the following headers:
    ```
 3. `Goto.streamInOut`: This is a bi-directional streaming service method that accepts a stream of `StreamConfig` input messages as described in `streamOut` operation above. Each input `StreamConfig` message requests the server to send a stream response based on the given stream config. For each input message, the service responds with `chunkCount` number of `Output` messages, each output carrying a payload of size `chunkSize`, and there is `interval` delay between two output messages.
 
-#### GRPC Tracking Events
+<br/>
+<details>
+<summary> GRPC Tracking Events </summary>
 
 - `GRPC Server Started`
 - `GRPC Server Stopped`
@@ -1234,13 +1189,12 @@ The GRPC response from `goto` also carries the following headers:
 - `GRPC.streamInOut.start`
 - `GRPC.streamInOut.end`
 
-<br/>
+</details>
 
 See [GRPC Example](docs/grpc-example.md)
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="request-headers-tracking"></a>
 
@@ -1263,17 +1217,19 @@ This feature allows tracking request counts by headers.
 |GET      | /server/request/headers/track									      | Get list of tracked headers |
 
 
-#### Request Headers Tracking Events
+<br/>
+<details>
+<summary> Request Headers Tracking Events </summary>
 
 - `Tracking Headers Added`
 - `Tracking Headers Removed`
 - `Tracking Headers Cleared`
 - `Tracked Header Counts Cleared`
 
-#### Request Headers Tracking API Examples:
+</details>
 
 <details>
-<summary>API Examples</summary>
+<summary>Request Headers Tracking API Examples</summary>
 
 ```
 curl -X POST localhost:8080/server/request/headers/track/clear
@@ -1293,10 +1249,8 @@ curl localhost:8080/server/request/headers/track
 
 </details>
 
-#### Request Header Tracking Results Example
-
 <details>
-<summary>Example</summary>
+<summary>Request Header Tracking Results Example</summary>
 <p>
 
 ```
@@ -1341,7 +1295,6 @@ $ curl localhost:8080/server/request/headers/track/counts
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="request-timeout-tracking"></a>
 ## > Request Timeout Tracking
@@ -1358,16 +1311,19 @@ This feature allows tracking request timeouts by headers.
 |GET      |	/server/request<br/>/timeout/status                   | Get a report of tracked request timeouts so far |
 
 
+<br/>
+<details>
+<summary> Request Timeout Tracking Events </summary>
 
-#### Request Timeout Tracking Events
 - `Timeout Tracking Headers Added`
 - `All Timeout Tracking Enabled`
 - `Timeout Tracking Headers Cleared`
 - `Timeout Tracked`
 
-#### Request Timeout Tracking API Examples
+</details>
+
 <details>
-<summary>API Examples</summary>
+<summary>Request Timeout Tracking API Examples</summary>
 
 ```
 curl -X POST localhost:8080/server/request/timeout/track/headers/x,y
@@ -1381,10 +1337,8 @@ curl localhost:8080/server/request/timeout/status
 
 </details>
 
-#### Request Timeout Status Result Example
-
 <details>
-<summary>Example</summary>
+<summary>Request Timeout Status Result Example</summary>
 <p>
 
 ```
@@ -1423,20 +1377,19 @@ curl localhost:8080/server/request/timeout/status
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="uris"></a>
 ## > URIs
 This feature allows responding with custom status code and delays for specific URIs, and tracking request counts for calls made to specific URIs (ignoring query parameters). URIs can be specified with `*` suffix to match all request URIs carrying the given URI as a prefix.
 Note: To configure a `goto` server to respond with custom/random response payloads for specific URIs, see [`Response Payload`](#server-response-payload) feature.
 
-#### APIs
+#### URI APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
 
 |METHOD|URI|Description|
 |---|---|---|
-|POST     |	/server/request/uri<br/>/set/status=`{status:count}`?uri=`{uri}` | Set forced response status to respond with for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used each time. |
-|POST     |	/server/request/uri<br/>/set/delay=`{delay:count}`?uri=`{uri}` | Set forced delay for a URI, either for all subsequent calls until cleared, or for specific number of subsequent calls. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range each time. |
+|POST     |	/server/request/uri<br/>/set/status=`{status:count}`?uri=`{uri}` | Set forced response status to respond with for a URI, either for all subsequent calls until cleared, or for a specific number of subsequent calls. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used each time. |
+|POST     |	/server/request/uri<br/>/set/delay=`{delay:count}`?uri=`{uri}` | Set forced delay for a URI, either for all subsequent calls until cleared, or for a specific number of subsequent calls. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range each time. |
 |GET      |	/server/request<br/>/uri/counts                     | Get request counts for all URIs |
 |POST     |	/server/request<br/>/uri/counts/enable              | Enable tracking request counts for all URIs |
 |POST     |	/server/request<br/>/uri/counts/disable             | Disable tracking request counts for all URIs |
@@ -1444,7 +1397,10 @@ Note: To configure a `goto` server to respond with custom/random response payloa
 |GET     |	/server/request/uri               | Get current configurations for all configured URIs |
 
 
-#### URIs Events
+<br/>
+<details>
+<summary> URIs Events </summary>
+
 - `URI Status Configured`
 - `URI Status Cleared`
 - `URI Delay Configured`
@@ -1455,10 +1411,10 @@ Note: To configure a `goto` server to respond with custom/random response payloa
 - `URI Delay Applied`
 - `URI Status Applied`
 
-#### URI API Examples
+</details>
 
 <details>
-<summary>API Examples</summary>
+<summary>URI API Examples</summary>
 
 ```
 curl -X POST localhost:8080/server/request/uri/set/status=418,401,404:2?uri=/foo
@@ -1476,10 +1432,8 @@ curl -X POST localhost:8080/server/request/uri/counts/clear
 
 </details>
 
-#### URI Counts Result Example
-
 <details>
-<summary>Example</summary>
+<summary>URI Counts Result Example</summary>
 <p>
 
 ```
@@ -1497,7 +1451,6 @@ curl -X POST localhost:8080/server/request/uri/counts/clear
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="probes"></a>
 
@@ -1514,7 +1467,7 @@ By default, liveness probe URI is set to `/live` and readiness probe URI is set 
 
 When the server starts shutting down, it waits for a configured grace period (default 5s) to serve existing traffic. During this period, the server will return 404 for the readiness probe if one is configured.
 
-#### APIs
+#### Probes APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
 
 |METHOD|URI|Description|
@@ -1527,9 +1480,9 @@ When the server starts shutting down, it waits for a configured grace period (de
 |GET      | /probes                    | Get current config and counts for both probes |
 
 
-#### Probes API Examples
+<br/>
 <details>
-<summary>API Examples</summary>
+<summary>Probes API Examples</summary>
 
 ```
 curl -X POST localhost:8080/probes/readiness/set?uri=/ready
@@ -1549,7 +1502,6 @@ curl localhost:8080/probes
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="requests-filtering"></a>
 ## > Requests Filtering
@@ -1580,15 +1532,19 @@ This feature allows bypassing or ignoring some requests based on URIs and Header
 |GET      |	/server/request<br/>/`[ignore\|bypass]`                     | Get current ignore or bypass configs |
 
 
-#### Request Filter (Ignore/Bypass) Events
+<br/>
+<details>
+<summary>Request Filter (Ignore/Bypass) Events</summary>
+
 - `Request Filter Added`
 - `Request Filter Removed`
 - `Request Filter Status Configured`
 - `Request Filters Cleared`
 
-#### Request Filter (Ignore/Bypass) API Examples
+</details>
+
 <details>
-<summary>API Examples</summary>
+<summary>Request Filter (Ignore/Bypass) API Examples</summary>
 
 ```
 #all APIs can be used for both ignore and bypass
@@ -1624,10 +1580,8 @@ curl localhost:8080/server/request/bypass
 
 </details>
 
-#### Ignore Result Example
-
 <details>
-<summary>Example</summary>
+<summary>Ignore Result Example</summary>
 <p>
 
 ```
@@ -1656,7 +1610,6 @@ $ curl localhost:8080/server/request/ignore
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="response-delay"></a>
 ## > Response Delay
@@ -1678,14 +1631,18 @@ When a delay is applied to a request, the response carries a header `Response-De
 | GET       |	/server/response/delay             | Get currently set delay |
 
 
-#### Response Delay Events
+<br/>
+<details>
+<summary>Response Delay Events</summary>
+
 - `Delay Configured`
 - `Delay Cleared`
 - `Response Delay Applied`: generated when a configured response delay is applied to requests not explicitly asking for a delay, i.e. not generated for `/delay` API call.
 
-#### Response Delay API Examples
+</details>
+
 <details>
-<summary>API Examples</summary>
+<summary>Response Delay API Examples</summary>
 
 ```
 curl -X POST localhost:8080/server/response/delay/clear
@@ -1699,7 +1656,6 @@ curl localhost:8080/server/response/delay
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="server-response-headers"></a>
 ## > Response Headers
@@ -1715,16 +1671,18 @@ This feature allows adding custom response headers to all responses sent by the 
 | POST      |	/server/response<br/>/headers/clear                 | Remove all configured custom response headers |
 | GET       |	/server/response/headers                       | Get list of configured custom response headers |
 
+<br/>
+<details>
+<summary>Response Headers Events</summary>
 
-#### Response Headers Events
 - `Response Header Added`
 - `Response Header Removed`
 - `Response Header Cleared`
 
+</details>
 
-#### Response Headers API Examples
 <details>
-<summary>API Examples</summary>
+<summary>Response Headers API Examples</summary>
 
 ```
 curl -X POST localhost:8080/server/response/headers/clear
@@ -1740,42 +1698,30 @@ curl localhost:8080/server/response/headers
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="response-payload"></a>
 
 ## > Response Payload
 
-This feature lets you configure a `goto` instance to respond with custom payloads for specific requests based on various match criteria. The response payload can be:
-- Random auto-generated text based on configured size
-- Static payload of any format, including binary content (e.g. JSON, YAML, Image, Zip/Tar, etc.)
-- Dynamic payload derived from a given template by performing transformations and applying captured values from request body, URI, headers, query, etc. The transformations are defined as one or more path mappings that let you capture values from source locations and apply those to destination location..
-- Dynamic payload derived from the request's JSON/YAML payload as opposed to working off a template, and applying transformations as above.
+This feature lets you configure a `goto` instance to respond to arbitrary URIs with custom payloads based on various match criteria. This enables `goto` to be used as a stand-in server in any test scenario. The custom payloads are only applied to runtime traffic (going against arbitrary URIs), not to admin APIs that `goto` exposes for itself.
 
-If no custom payload is configured, the request proceeds with its normal processing. When response payload is configured, the following requests are not matched against payload rules and never receive the configured payload:
-- `Goto` admin requests
-- Probe URIs (`readiness` and `liveness`)
-- Bypass URIs
+#### Payload Types
+There are 4 possibilities for response payloads:
+1. Configure `goto` to generate a random text of any size
+2. Upload a custom static payload of any format, including binary content (e.g. JSON, YAML, Image, Zip/Tar, etc.)
+3. Configure a payload template and JSON/text transformation rules. `Goto` will apply the transformations against the incoming request and augment the payload template to generate a dynamic payload. 
+4. Configure JSON/text transformations to be applied against request body instead of using a custom payload template. The response payload becomes a derivative of the request payload.
 
-When a request is matched with a configured payload (custom or default), the request is not processed further except:
-- assigning the configured or requested response status code (either requested via `/status/{status}` call or configured via `/server/response/status/set/{status}`)
-- applying response delay, either requested via `/delay` call or configured via `/server/response/delay/set/{delay}` API.
+#### Request Processing Path
+- When `goto` receives a request, it first determines if this is an admin API call or some arbitrary URI. Admin APIs take their pre-determined path to configure goto
+- If not an admin API, goto checks if the request is for a known traffic feature offered by `goto`, e.g. `/delay`, probes, etc. These APIs serve specific purpose and don't serve custom responses.
+- If the request is not a known API, `goto` checks if the request is meant to be tunneled, proxied, or bypassed. Tunneled and proxied requests get forwarded to their intended upstream destinations, whereas bypassed/ignored requests are responded to with a minimal response.
+- If no tunnel or proxy config found for the request, `goto` checks if there is a custom payload and custom response status code configured for the request (based on URI, headers, query params, etc). If found, the custom response/status is served.
+- If no custom config is found for the request, the request is served by a `catch-all` response that echoes back some request details along with some useful server info.
+- If custom response configuration is found for a request, `goto` applies any defined transformations if needed and responds with the custom payload along with any custom response status.
 
-
-### Custom payload based on Request Matching
-
-Custom response payload can be set for any of the following request categories:
-
-1. All requests (`default` payload),
-2. Requests matching URIs
-3. Requests matching headers (keys, and optionally values).
-4. Requests matching query params (names, and optionally values)
-5. Requests matching URI + header combinations
-6. Requests matching URI + query combinations
-7. Requests matching URI + one or more keywords in request body
-8. Requests matching URI + one or more JSON paths in request body
-
-If a request matches multiple configured responses, a response is picked based on the following priority order:
+#### Request Matching
+Custom response payload can be set for any of the following request categories, listed in the order of precedence. The highest precedence match gets applied to build the response payload.
 
 1. URI + headers combination match
 2. URI + query combination match
@@ -1784,17 +1730,24 @@ If a request matches multiple configured responses, a response is picked based o
 5. URI match
 6. Headers match
 7. Query match
-8. If no other match found and a default payload is configured, the default payload is served
-9. If no match is found and no default payload is configured, the request proceeds for eventual catch-all response.
+8. `Default` payload, if configured
 
-URIs can be specified with `*` suffix to match all request URIs carrying the given URI as a prefix. E.g. `/foo*` to match `/foo`, `/fooxyz` and `/foo/xyz`.
+URIs can be specified with `*` suffix to capture all requests that match the given prefix. For example, `/foo*` matchs `/foo`, `/fooxyz`, `/foo/xyz`, `/foo/xyz?bar=123`, etc.
 
-### Auto-generated random response payload
-Random payload generation can be configured for the `default` payload that applies to all URIs that don't have a custom payload defined. Random payload generation is configured by specifying a payload size using URI `/server/response/payload/set/default/{size}` and not setting any payload. If a custom default payload is set as well as the size is configured, the custom payload will be adjusted to match the set size by either trimming the custom payload or appending more characters to the custom payload. Payload size can be a numeric value or use common byte size conventions: `K`, `KB`, `M`, `MB`. There is no limit on the payload size as such, it's only limited by the memory available to the `goto` process.
+#### Default payload with Auto-generation
+- A default payload (lowest precedence in the list above) gets applied to all URIs that don't find any other match. 
+- API `/server/response<br/>/payload/set/default` is used to upload a default custom payload.
+- Alternatively, API `/server/response/payload/set/default/{size}` can be used to ask `goto` to auto-generate a random text of the given size and serve it as default payload.
+- If both the above APIs are called to both set a custom default payload as well as set a size for the default payload, the custom payload will be adjusted to match the given size (by either trimming the custom payload or appending more characters to it). 
+- Payload size can be a numeric value or use common byte size conventions: `K`, `KB`, `M`, `MB`.
+- There is no limit on the payload size as such, it's only limited by the memory available to the `goto` process.
 
-
-### Payload transformation
-URI `/server/response/payload/transform` allows configuring payload transformation rules for a given URI. Requests received for that URI will receive response with payload produced by such configured transformations. Multiple transformations sets can be defined for a URI, which are applied in sequence until one of them performs an update for the request. Transformation can work off `JSON` and `YAML` request payloads. Payload template must be defined in `JSON` format.
+#### Payload transformations 
+<details>
+<summary> &#x1F525; Complex stuff, open at your own risk &#x1F525; </summary>
+- API `/server/response/payload/transform` allows configuring payload transformation rules for a given URI.
+- Transformation can work off `JSON` and `YAML` request payloads. Payload template must be defined in `JSON` format.
+- Multiple transformation sets can be defined for a URI, which are applied in sequence until one of them performs an update for the request. 
 
 A transformation definition has two fields: `payload` and `mappings`. 
 - If a transformation is defined with an accompanying payload, the mappings are used to extract data from request payload and applied to this payload, and this payload is served as response.
@@ -1811,10 +1764,13 @@ Each transformation spec can contain multiple mappings. A mapping carries the fo
   - `join`: join the current value of the target field with the source value using text concatenation (only makes sense for text fields). 
   - `push`: combine the source value with the target field's current value(s) making it an array (if not already an array), inserting the source value before the given index (or head).
   - `append` (default): combine the source value with the target field's current value(s) making it an array (if not already an array), inserting the source value after the given index (or tail).
-- `value`: The `value` field provides a default value to instead of the source value. For request payload transformation (no payload template given), the `value` field is used as primary value and source field is used as fallback value. For payload template transformation, source field is used as primary value and the given value is used as fallback.
+- `value`: The `value` field provides a default value to use instead of the source value. For request payload transformation (no payload template given), the `value` field is used as primary value and source field is used as fallback value. For payload template transformation, source field is used as primary value and the given value is used as fallback.
 
+</details>
 
-### Capturing values from the request to use in the response payload
+#### Capturing values from the request to use in the response payload
+<details>
+<summary>&#x1F525; Complex stuff, open at your own risk &#x1F525; </summary>
 
  To capture a value from URI, Header, Query or Body JSON Path, use the `{var}` syntax in the match criteria as well as in the payload. The occurrences of `{var}` in the response payload will be replaced with the value of that var as captured from the URI/Header/Query/Body. Additionally, `{var}` allows for URIs to be specified such that some ports of the URI can vary.
 
@@ -1848,7 +1804,7 @@ curl -H'bar:123' localhost:8080/foo/abc
 ```
 the response payload will be `{"result": "URI foo with abc and header bar with 123"}`
 
-Lastly, values can be captured from JSON paths that match against request body. For example, the configuration below captures value at JSON paths `.foo.bar` into var `{a}` and at path `.foo.baz` into var `{b}` from the request body received with URI `/foo`. The captured values are injected into the response body in two places for each variable.
+Lastly, values can be captured from JSON paths that match against the request body. For example, the configuration below captures value at JSON paths `.foo.bar` into var `{a}` and at path `.foo.baz` into var `{b}` from the request body received with URI `/foo`. The captured values are injected into the response body in two places for each variable.
 
 ```
 curl -v -g -XPOST localhost:8080/server/response/payload/set/body/paths/.foo.bar={a},.foo.baz={b}\?uri=/foo --data '{"bar":"{a}", "baz":"{b}", "message": "{a} is {b}"}' -HContent-Type:application/json
@@ -1859,9 +1815,9 @@ For the above config, a request like this:
 curl localhost:8080/foo --data '{"foo": {"bar": "hi", "baz": "hello"}}'
 ```
 
-produces response: `{"bar":"hi", "baz":"hello", "message": "hi is hello"}`.
+produces the response: `{"bar":"hi", "baz":"hello", "message": "hi is hello"}`.
 
-A more complex example capturing values from arrays and objects, and producing response json with arrays of different lengths based on input array lengths. The two configurations in the below example work in tandem, showing an example of how mutually exclusive configurations can provide on-the-fly `if-else` semantics based on input payload.
+Below is a more complex example, capturing values from arrays and objects, and producing response json with arrays of different lengths based on input array lengths. The two configurations in the below example work in tandem, showing an example of how mutually exclusive configurations can provide on-the-fly `if-else` semantics based on input payload.
 
 First config to capture `.one.two=two`, `.one.three[0]={three.1}`, `.one.three[1]={three.2}`, `.one.four[1].name={four.name}`. This response is triggered if input payload has 2 elements in array `.one.three` and two elements in array `.one.four`.
 
@@ -1887,16 +1843,17 @@ $ curl localhost:8080/foo --data '{"one": {"two": "hi", "three": ["hello", "worl
 ```
 produces the following output: `{"two":"hi", "three":["hello", "world", "there"]}, "message": "two -> hi, three -> hello world there, four -> foo"}`
 
+</details>
 
-#### APIs
+### Response Payload APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
 
 |METHOD|URI|Description|
 |---|---|---|
 | POST | /server/response<br/>/payload/set/default  | Add a custom payload to be used for ALL URI responses except those explicitly configured with another payload |
 | POST | /server/response<br/>/payload/set<br/>/default/`{size}`  | Respond with a random generated payload of the given size for all URIs except those explicitly configured with another payload. Size can be a numeric value or use common byte size conventions: K, KB, M, MB |
-| POST | /server/response<br/>/payload/set<br/>/default/binary  | Add a binary payload to be used for ALL URI responses except those explicitly configured with another payload. If no content type sent with the API, `application/octet-stream` is used. |
-| POST | /server/response<br/>/payload/set<br/>/default/binary/`{size}`  | Respond with a random generated binary payload of the given size for all URIs except those explicitly configured with another payload. Size can be a numeric value or use common byte size conventions: K, KB, M, MB. If no content type sent with the API, `application/octet-stream` is used. |
+| POST | /server/response<br/>/payload/set<br/>/default/binary  | Add a binary payload to be used for ALL URI responses except those explicitly configured with another payload. If no content type is sent with the API, `application/octet-stream` is used. |
+| POST | /server/response<br/>/payload/set<br/>/default/binary/`{size}`  | Respond with a random generated binary payload of the given size for all URIs except those explicitly configured with another payload. Size can be a numeric value or use common byte size conventions: K, KB, M, MB. If no content type is sent with the API, `application/octet-stream` is used. |
 | POST | /server/response<br/>/payload/set<br/>/uri?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given URI. URI can contain variable placeholders. |
 | POST | /server/response<br/>/payload/set<br/>/header/`{header}`  | Add a custom payload to be sent for requests matching the given header name |
 | POST | /server/response<br/>/payload/set/header<br/>/`{header}`?uri=`{uri}`  | Add a custom payload to be sent for requests matching the given header name and the given URI |
@@ -1912,7 +1869,10 @@ produces the following output: `{"two":"hi", "three":["hello", "world", "there"]
 | POST | /server/response<br/>/payload/clear  | Clear all configured custom response payloads |
 | GET  |	/server/response/payload | Get configured custom payloads |
 
+<br/>
 
+<details>
+<summary> Payload Transformation Schema </summary>
 
 #### Payload Transformation Schema
 A payload transformation is defined by giving one or more path mappings and an optional payload template.
@@ -1920,7 +1880,7 @@ A payload transformation is defined by giving one or more path mappings and an o
 |Field|Type|Description|
 |---|---|---|
 | mappings | []JSONTransform | List of mappings to be applied for this transformation. |
-| payload | any | If given,  If not given, mappings are used to transform request payload and sent back. |
+| payload | any | If given, this is used as the payload template to be transformed. If not given, the request payload itself is transformed and sent back. |
 
 
 #### Transformation Mapping Schema
@@ -1969,18 +1929,23 @@ This schema is used to describe currently configured response payload, as the ou
 | queryCaptureKey | string | Key to capture value from query params |
 | transforms | []PayloadTransformation | Transformations defined in this config. See `Payload Transformation schema` |
 
+</details>
 
-#### Response Payload Events
+<details>
+<summary> Response Payload Events </summary>
+
 - `Response Payload Configured`
 - `Response Payload Cleared`
 - `Response Payload Applied`: generated when a configured response payload is applied to a request that wasn't explicitly asking for a custom payload (i.e. not for `/payload` and `/stream` URIs).
+
+</details>
+</br>
 
 See [Response Payload API Examples](docs/response-payload-api-examples.md)
 
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="ad-hoc-payload"></a>
 ## > Ad-hoc Payload
@@ -1991,9 +1956,9 @@ This URI responds with a random-generated payload of the requested size. Payload
 |---|---|---|
 | GET, PUT, POST  |	/payload/`{size}` | Respond with a payload of given size |
 
-#### Ad-hoc Payload API Example
+<br/>
 <details>
-<summary>API Examples</summary>
+<summary>Ad-hoc Payload API Example</summary>
 
 ```
 curl -v localhost:8080/payload/10K
@@ -2006,7 +1971,6 @@ curl -v localhost:8080/payload/100
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="-stream-chunked-payload"></a>
 
@@ -2024,18 +1988,18 @@ Stream responses carry following headers:
 - `X-Content-Type-Options: nosniff`
 - `Transfer-Encoding: chunked`
 
-#### API
+#### Stream APIs
 |METHOD|URI|Description|
 |---|---|---|
-| GET, PUT, POST  |	/stream/payload=`{size}`<br/>/duration={duration}<br/>/delay={delay} | Respond with a payload of given size delivered over the given duration with given delay per chunk. Both `duration` and `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
+| GET, PUT, POST  |	/stream/payload=`{size}`<br/>/duration={duration}<br/>/delay={delay} | Respond with a payload of the given size delivered over the given duration with the given delay per chunk. Both `duration` and `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
 | GET, PUT, POST  |	/stream/chunksize={chunk}<br/>/duration={duration}<br/>/delay={delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered over the given duration with given delay per chunk. Both `duration` and `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
 | GET, PUT, POST  |	/stream/chunksize={chunk}<br/>/count={count}/delay={delay} | Respond with either pre-configured default payload or generated random payload split into chunks of given chunk size, delivered the given count of times with given delay per chunk. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
 | GET, PUT, POST  |	/stream/duration={duration}<br/>/delay={delay} | Respond with pre-configured default payload split into enough chunks to spread out over the given duration with given delay per chunk. This URI requires a default payload to be set via payload API. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
 | GET, PUT, POST  |	/stream/count={count}/delay={delay} | Respond with pre-configured default payload split into the given count of chunks with the given delay per chunk. This URI requires a default payload to be set via payload API. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
 
-#### Stream Response API Example
+<br/>
 <details>
-<summary>API Examples</summary>
+<summary>Stream Response API Example</summary>
 
 ```
 curl -v --no-buffer localhost:8080/stream/payload=10K/duration=5s-15s/delay=100ms-1s
@@ -2053,13 +2017,12 @@ curl -v --no-buffer localhost:8080/stream/count=10/delay=300ms
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="response-status"></a>
 ## > Response Status
 This feature allows setting a forced response status for all requests except bypass URIs. Server also tracks the number of status requests received (via /status URI) and the number of responses sent per status code.
 
-#### APIs
+#### Response Status APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
 
 |METHOD|URI|Description|
@@ -2071,16 +2034,18 @@ This feature allows setting a forced response status for all requests except byp
 | GET       |	/server/response<br/>/status/counts           | Get request counts for all response statuses so far |
 | GET       |	/server/response/status                  | Get the currently configured forced response status |
 
+<br/>
+<details>
+<summary>Response Status Events</summary>
 
-#### Response Status Events
 - `Response Status Configured`
 - `Response Status Cleared`
 - `Response Status Counts Cleared`
 
+</details>
 
-#### Response Status API Examples
 <details>
-<summary>API Examples</summary>
+<summary>Response Status API Examples</summary>
 
 ```
 curl -X POST localhost:8080/server/response/status/counts/clear
@@ -2100,10 +2065,9 @@ curl localhost:8080/server/response/status/counts/502
 
 </details>
 
-#### Response Status Tracking Result Example
-
 <details>
-<summary>Example</summary>
+<summary>Response Status Tracking Result Example</summary>
+
 <p>
 
 ```
@@ -2125,8 +2089,6 @@ curl localhost:8080/server/response/status/counts/502
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
-
 
 
 # <a name="response-triggers"></a>
@@ -2134,7 +2096,7 @@ curl localhost:8080/server/response/status/counts/502
 
 `Goto` allows targets to be configured that are triggered based on response status. The triggers can be invoked manually for testing, but their real value is when they get triggered based on response status. Even more valuable when the request was proxied to another upstream service, in which case the trigger is based on the response status of the upstream service.
 
-#### APIs
+#### Triggers APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
 
 |METHOD|URI|Description|
@@ -2148,8 +2110,10 @@ curl localhost:8080/server/response/status/counts/502
 |GET 	    |	/server/response<br/>/triggers/counts             | Report invocation counts for all trigger targets |
 |GET 	    |	/server/response/triggers             | List all trigger targets |
 
+<br/>
+<details>
+<summary>Trigger Target JSON Schema</summary>
 
-#### Trigger Target JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
 | name        | string      | Name for this target |
@@ -2165,25 +2129,27 @@ curl localhost:8080/server/response/status/counts/502
 | statusCount | int         | (readonly) Number of occurrences of the status codes that this trigger listens on |
 | triggerCount | int         | (readonly) Number of times this target has been triggered  |
 
+</details>
 
-#### Triggers Events
+<details>
+<summary>Triggers Events</summary>
+
 - `Trigger Target Added`
 - `Trigger Target Removed`
 - `Trigger Target Enabled`
 - `Trigger Target Disabled`
 - `Trigger Target Invoked`
 
-<br/>
+</details>
 
 See [Triggers Example](docs/triggers-example.md)
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="status-api"></a>
 ## > Status API
-The URI `/status/`{status}`` allows client to ask for a specific status as response code. The given status is reported back, except when forced status is configured in which case the forced status is sent as response.
+The URI `/status/`{status}`` allows clients to ask for a specific status as response code. The given status is reported back, except when forced status is configured in which case the forced status is sent as response.
 
 #### API
 |METHOD|URI|Description|
@@ -2194,10 +2160,13 @@ The URI `/status/`{status}`` allows client to ask for a specific status as respo
 | GET, PUT, POST, OPTIONS, HEAD, DELETE |	/status=`{status:count}`/delay=`{delay}`?x-request-id=`{requestId}` | Same as above, the requested response code is returned for `count` number of subsequent calls but with the given delay applied before a response. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. After `count` responses, the response status reverts to 200.  |
 | GET, PUT, POST, OPTIONS, HEAD, DELETE  |	/status=`{status:count}`/flipflop?x-request-id=`{requestId}` | This call responds with the given status for the given count times when called successively with the same count value. Once the status is served `count` times, the next status served is `200`, and subsequent calls start the cycle again. Optional query param `x-request-id` can be used to perform status flip for each unique request, preventing requests from affecting one another. |
 | GET, PUT, POST, OPTIONS, HEAD, DELETE |	/status=`{status:count}`/delay=`{delay}`/flipflop?x-request-id=`{requestId}` | Same behavior as above except that the given delay duration param gets applied, allowing you to add artificial delay before responding with the given status. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. |
-| GET  |	/status/flipflop | Reports the current flipflop counter value, i.e. number of times current last request flipflop status has been served. |
+| GET  |	/status/flipflop | Reports the current flipflop counter value, i.e. number of times the most recent status has been served. |
 | POST |	/status/clear | Clears the current state of all stateful statuses recorded so far. |
 
-#### Status API Example
+<br/>
+<details>
+<summary>Status API Example</summary>
+
 ```
 curl -I  localhost:8080/status/418
 
@@ -2217,14 +2186,14 @@ curl localhost:8080/status/flipflop
 
 curl -XPOST localhost:8080/status/clear
 ```
+</details>
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="delay-api"></a>
 ## > Delay API
-The URI `/delay/{delay}` allows client to ask for a specific delay to be applied to the current request. The delay API is not subject to the response delay that may be configured for all responses. Calling the URI as `/delay` responds with no delay, and so does the call as `/delay/0`, `/delay/0s`, etc.
+The URI `/delay/{delay}` allows clients to ask for a specific delay to be applied to the current request. The delay API is not subject to the response delay that may be configured for all responses. Calling the URI as `/delay` responds with no delay, and so does the call as `/delay/0`, `/delay/0s`, etc.
 When a delay is passed to this API, the response carries a header `Response-Delay` with the value of the applied delay.
 
 > Note: For requesting a delay along with a specific status, check the `/status` API documentation above.
@@ -2234,15 +2203,18 @@ When a delay is passed to this API, the response carries a header `Response-Dela
 |---|---|---|
 | GET, PUT, POST, OPTIONS, HEAD, DELETE |	/delay/`{delay}` | Responds after the given delay. `delay` can be either a single duration or a `low-high` range, in which case a random duration will be picked from the given range. To apply delay with a specific response status code, see `/status` API above. |
 
-#### Delay API Example
+<br/>
+<details>
+<summary>Delay API Example</summary>
+
 ```
 curl -I  localhost:8080/delay/2s
 curl -v  localhost:8080/delay/100ms-2s
 ```
+</details>
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="echo-api"></a>
 ## > Echo API
@@ -2257,14 +2229,17 @@ This URI echoes back the headers and payload sent by the client. The response is
 | PUT, POST |	/echo/stream  | For http/2 requests, this API streams the request body back as response body. For http/1, it acts similar to `/echo` API. |
 | PUT, POST |	/echo/ws      | Stream the request payload back over a websocket. |
 
-#### Echo API Example
+<br/>
+<details>
+<summary>Echo API Example</summary>
+
 ```
 curl -I  localhost:8080/echo
 ```
+</details>
 
 ###### <small> [Back to TOC](#toc) </small>
 
-<br/>
 
 # <a name="catch-all"></a>
 
@@ -2275,18 +2250,39 @@ Any request that doesn't match any of the defined management APIs, and also does
 ###### <small> [Back to TOC](#toc) </small>
 
 <br/>
-<br/>
 
 # <a name="proxy"></a>
 # Proxy
 
-Proxy feature provides a way to configure upstream endpoints that are triggered when incoming downstream HTTP requests match certain criteria. 
+`Goto` can act as a TCP or HTTP proxy that sits between a downstream client and an upstream service, allowing you a point in the network where the communication between the downstream client and upstream service can be observed and affected.
+
+### HTTP Proxy
+As an HTTP proxy, it allows configuring upstream endpoints that are triggered when incoming downstream HTTP requests match certain criteria (based on URI, Headers and Query Params).
 
 The upstream endpoints are defined as a URL along with optional transformations to be performed on the request URI, headers and query params. Each upstream endpoint also defines certain match criteria based on which it would be triggered. The minimum match criteria to trigger an upstream endpoint is request URI, and additional match criteria may be defined for headers and query params. URI `/` can be used as a match criteria to match all URIs.
 
 A downstream request is matched against all defined upstream endpoints match criteria, and the request is forwarded to the matching upstream endpoints. Downstream request headers, query params, and payload gets passed to the upstream requests. Transformations can be defined per upstream endpoint, allowing for URI, headers and query params to be added/removed/replaced. This allows for the upstream requests to differ from the downstream request.
 
-If the request only matched a single upstream endpoint, the upstream response payload is sent as downstream response payload. If the request matches multiple upstream endpoints, the downstream response payload will be a wrapper containing a collection of all those upstream responses. Downstream response headers include all the upstream response headers combined with the `goto` headers from the proxy instance. As a result, downstream response may contain duplicate headers or multiple values for the same header.
+If the request only matches a single upstream endpoint, the upstream response payload is sent as downstream response payload. If the request matches multiple upstream endpoints, the downstream response payload will be a wrapper containing a collection of all those upstream responses. Downstream response headers include all the upstream response headers combined with the `goto` headers from the proxy instance. As a result, downstream responses may contain duplicate headers or multiple values for the same header.
+
+In addition to request routing, the HTTP proxy also offers some chaos features:
+- A `delay` can be configured per target that's applied to all requests and responses in either direction for that target (See the `delay` API later in this section). Note that this delay feature is separate from the one offered by `Goto` as a Server, via [URIs](#-uris) and [Response Delay](#-response-delay). The URI delay feature in particular allows for more fine-grained delay configuration that can be used in conjunction with the proxy feature to apply delays to URIs that eventually get routed via proxy.
+- Additional chaos can be applied via listener API, by closing/reopening a connection.
+- If you want to drop some TCP writes for HTTP traffic, you can configure the port in `goto` as a TCP port and use the TCP features described below while the client and upstream still communicate over HTTP.
+
+### TCP Proxy
+`Goto` can be configured to act as an opaque TCP proxy that receives and transmits TCP packets in either direction. 
+
+For TLS communication, `goto` offers an additional feature where the upstream endpoints can be routed to based on SNI server name match in the downstream client's TLS handshake. At the time of a new downstream connection, `goto` checks whether TCP proxy targets on this port have been configured with SNI match. If so, `goto` reads SNI from the TLS client handshake data without actually doing the handshake, and uses the SNI DNS hostname to pick an upstream endpoint to route to. The client TLS handshake data is forwarded to the upstream endpoint so the actual handshake still happens between the client and the upstream service.
+
+The SNI routing feature described above implies that either a TCP port can be configured for just one upstream endpoint with no SNI match, or it can be configured for one or more upstream endpoints with one SNI hostname per endpoint. Unlike the HTTP proxy where a single downstream request can be routed to multiple upstream endpoints, the TCP proxy maintains a one-to-one relationship between the downstream client and the upstream service, only acting as a passthrough TCP proxy.
+
+> <small> While inspecting the client's TLS handshake, `goto` also logs the Cipher Suites and Signature Algorithms requested by the client. However, these can only be seen in the `goto` logs for now, not exposed via any API.</small>
+
+Being a TCP man-in-the-middle allows `goto` to offer some chaos features even for TCP communication:
+- A `delay` can be configured per target that's applied to all writes in either direction for that target's TCP communications
+- A `drop` percentage can be configured per target that specifies what percentage of TCP writes should be skipped in either direction for that target's TCP communications. While technically this is not a true network TCP packet drop, it does allow for some interesting chaos testing where data is randomly lost between the two parties.
+- Additional chaos can be applied via listener API, by closing/reopening a connection.
 
 Proxy targets can be defined in two ways:
 - Build the upstream endpoint incrementally via multiple API calls. Benefit of this approach is that targets can be defined via just API calls without the need for a JSON payload, but it does require multiple API calls to define each target.
@@ -2294,59 +2290,12 @@ Proxy targets can be defined in two ways:
   - Then define one or more URI routing for this endpoint using API `/proxy/targets/{target}/route?from={uri}&to={uri}`. A target should have at least one URI route defined for it to be triggered.
   - Optionally define any necessary header and query match criteria via APIs `/proxy/targets/{target}/match/[header|query]/...`
   - Optionally define any necessary header and query transformations via APIs `/proxy/targets/{target}/headers/[add|remove]/...`, and `/proxy/targets/{target}/query/[add|remove]/...`.
-- Alternately, submit a fully defined target schema via API `/proxy/targets/add`. This allows for more advanced target match criteria to be defined using the JSON payload.
-
-#### APIs
-###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
-
-|METHOD|URI|Description|
-|---|---|---|
-|POST     |	/proxy/targets/add  | Add target for proxying requests [see `Proxy Target JSON Schema`](#proxy-target-json-schema) |
-|POST     |	/proxy/targets<br/>/add/`{target}`?<br/>url=`{url}` | Add a new target with the given name and URL. The URI routing for this target should be defined using the `/{target}/route` API given below. |
-|PUT, POST | /proxy/targets<br/>/`{target}`/route?<br/>from=`{uri}`&to=`{uri}` | Add URI routing for the given target from the given downstream URI (`from`) to the given upstream URI (`to`). |
-|PUT, POST | /proxy/targets<br/>/`{target}`/match/header<br/>/`{key}`[=`{value}`] | Define a header match criteria to match just the header name, or both name and value. |
-|PUT, POST | /proxy/targets<br/>/`{target}`/match/query<br/>/`{key}`[=`{value}`] | Define a query param match criteria to match just the param name, or both name and value. |
-|PUT, POST | /proxy/targets<br/>/`{target}`/headers<br/>/add/`{key}`=`{value}` | Define a header key/value that should be added to the upstream request. |
-|PUT, POST | /proxy/targets<br/>/`{target}`/headers<br/>/remove/`{key}` | Define a downstream header that should be removed from the upstream request. |
-|PUT, POST | /proxy/targets<br/>/`{target}`/query/add<br/>/`{key}`=`{value}` | Define a query param key/value that should be added to the upstream request. |
-|PUT, POST | /proxy/targets<br/>/`{target}`/query<br/>/remove/`{key}` | Define a downstream query param that should be removed from the upstream request. |
-|PUT, POST| /proxy/targets<br/>/`{target}`/remove  | Remove a proxy target |
-|PUT, POST| /proxy/targets<br/>/`{target}`/enable  | Enable a proxy target |
-|PUT, POST| /proxy/targets<br/>/`{target}`/disable | Disable a proxy target |
-|POST     |	/proxy/targets/clear            | Remove all proxy targets |
-|GET 	    |	/proxy/targets                  | List all proxy targets |
-|GET      |	/proxy/counts                   | Get proxy match/invocation counts, by uri, header and query params |
-|POST     |	/proxy/counts/clear             | Clear proxy match/invocation counts |
-
-###### <small> [Back to TOC](#goto-proxy) </small>
-
-
-#### Proxy Target JSON Schema
-|Field|Data Type|Description|
-|---|---|---|
-| name          | string             | Name for this target |
-| url           | string             | URL for the target. Request's URI or Override URI gets added to the URL for each proxied request. |
-| routes        | map[string]string  | URI mapping from downstream source request URI to upstream request URI. Downstream request's URI is matched against this routing table and if a match is found, the corresponding destination URI is used. If the destination URI is set to "", the source request URI is used. |
-| sendID        | bool           | Whether or not a unique ID be sent with each request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
-| addHeaders    | `[][]string`                            | Additional headers to add to the request before proxying |
-| removeHeaders | `[]string `                             | Headers to remove from the original request before proxying |
-| addQuery      | `[][]string`                            | Additional query parameters to add to the request before proxying |
-| removeQuery   | `[]string`                              | Query parameters to remove from the original request before proxying |
-| matchAny        | JSON     | Match criteria based on which runtime traffic gets proxied to this target. See [JSON Schema](#proxy-target-match-criteria-json-schema) and [detailed explanation](#proxy-target-match-criteria) below |
-| matchAll        | JSON     | Match criteria based on which runtime traffic gets proxied to this target. See [JSON Schema](#proxy-target-match-criteria-json-schema) and [detailed explanation](#proxy-target-match-criteria) below |
-| replicas     | int      | Number of parallel replicated calls to be made to this target for each matched request. This allows each request to result in multiple calls to be made to a target if needed for some test scenarios |
-| enabled       | bool     | Whether or not the proxy target is currently active |
-
-###### <small> [Back to TOC](#goto-proxy) </small>
-
-#### Proxy Target Match Criteria JSON Schema
-|Field|Data Type|Description|
-|---|---|---|
-| headers | `[][]string`  | Headers names and optional values to match against request headers |
-| query   | `[][]string`  | Query parameters with optional values to match against request query |
-
+- Alternatively, submit a fully defined target schema via API `/proxy/targets/add`. This allows for more advanced target match criteria to be defined using the JSON payload.
 
 #### Proxy Target Match Criteria
+<details>
+<summary> &#x1F525; Complex stuff, open at your own risk &#x1F525; </summary>
+
 Proxy target match criteria are based on request URI match and optional headers and query parameters matching.
 An upstream target is defined with a URI routing table, and the upstream target gets triggered for all requests matching any of the URIs defined in the routing table. However, if you need additional filtering of requests before sending those over to the upstream endpoints, you can use the headers and query params match criteria. These criteria can be defined to either match ANY of them or ALL of them for the request to qualify.
 
@@ -2354,7 +2303,7 @@ An upstream target is defined with a URI routing table, and the upstream target 
   
   ```
   curl http://goto:8080/proxy/targets/add --data \
-  '{"name": "target1", "url":"http://somewhere", \
+  '{"name": "target1", "endpoint":"http://somewhere", \
   "routes":{"/foo/{x}/bar/{y}": "/abc/{y:.*}/def/{x:.*}"}, \
   "enabled":true, "sendID": true}'
   ```
@@ -2369,7 +2318,7 @@ An upstream target is defined with a URI routing table, and the upstream target 
 
   ```
   curl http://goto:8080/proxy/targets/add --data \
-  '{"name": "target2", "url":"http://somewhere", "routes":{"/": ""}, \
+  '{"name": "target2", "endpoint":"http://somewhere", "routes":{"/": ""}, \
   "matchAll":{"headers":[["foo", "{x}"], ["bar", "{y}"]]}, \
   "addHeaders":[["abc","{x}"], ["def","{y}"]], "removeHeaders":["foo"], \
   "enabled":true, "sendID": true}'
@@ -2384,7 +2333,7 @@ An upstream target is defined with a URI routing table, and the upstream target 
 
   ```
   curl http://goto:8080/proxy/targets/add --data \
-  '{"name": "target3", "url":"http://somewhere", "routes":{"/": ""},\
+  '{"name": "target3", "endpoint":"http://somewhere", "routes":{"/": ""},\
   "matchAny":{"query":[["foo", "{x}"], ["bar", "{y}"]]}, \
   "addQuery":[["abc","{x}"], ["def","{y}"]], "removeQuery":["foo"], \
   "enabled":true, "sendID": true}'
@@ -2392,11 +2341,79 @@ An upstream target is defined with a URI routing table, and the upstream target 
 
   This target will be triggered for requests that carry either of the query params `foo` or `bar`. On the proxied request, query param `foo` will be removed, and additional query params will be set: `abc` with value copied from `foo`, and `def` with value copied from `bar`. The incoming request `http://goto:8080?foo=123&bar=456` gets proxied as `http://somewhere?abc=123&def=456&bar=456`.
 
+</details>
+
+#### Proxy APIs
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+
+|METHOD|URI|Description|
+|---|---|---|
+| PUT, POST |	/proxy/targets/add  | Add target for proxying requests [see `Proxy Target JSON Schema`](#proxy-target-json-schema) |
+| PUT, POST |	/proxy/targets<br/>/add/`{target}`?<br/>url=`{url}` | Add a new target with the given name and URL. The URI routing for this target should be defined using the `/{target}/route` API given below. |
+| PUT, POST | /proxy/targets<br/>/`{target}`/route?<br/>from=`{uri}`&to=`{uri}` | Add URI routing for the given target from the given downstream URI (`from`) to the given upstream URI (`to`). |
+| PUT, POST | /proxy/targets<br/>/`{target}`/match/header<br/>/`{key}`[=`{value}`] | Define a header match criteria to match just the header name, or both name and value. |
+| PUT, POST | /proxy/targets<br/>/`{target}`/match/query<br/>/`{key}`[=`{value}`] | Define a query param match criteria to match just the param name, or both name and value. |
+| PUT, POST | /proxy/targets<br/>/`{target}`/headers<br/>/add/`{key}`=`{value}` | Define a header key/value that should be added to the upstream request. |
+| PUT, POST | /proxy/targets<br/>/`{target}`/headers<br/>/remove/`{key}` | Define a downstream header that should be removed from the upstream request. |
+| PUT, POST | /proxy/targets<br/>/`{target}`/query/add<br/>/`{key}`=`{value}` | Define a query param key/value that should be added to the upstream request. |
+| PUT, POST | /proxy/targets<br/>/`{target}`/query<br/>/remove/`{key}` | Define a downstream query param that should be removed from the upstream request. |
+| PUT, POST |	/proxy/tcp/targets<br/>/add/`{target}`?<br/>address=`{address}` | Add a new TCP upstream target with the given name and address.|
+| PUT, POST |	/proxy/tcp/targets<br/>/add/`{target}`<br/>/sni=`{sni}`?<br/>address=`{address}` | Add a new TCP TLS upstream target with the given name, address and SNI hostname match. The given SNI hostname is matched against the DNS hostname in the client TLS request. |
+| PUT, POST | /proxy/targets<br/>/`{target}`/delay/set/`{delay}` | Configure a delay to be applied to requests and responses going to/from the given target |
+| POST | /proxy/targets<br/>/`{target}`/delay/clear | Clears any configured delay for the given target |
+| PUT, POST | /proxy/tcp/targets<br/>/`{target}`/delay/set/`{delay}` | Configure a delay to be applied to TCP packets to/from the given target. The delay is applied to TCP writes done in either direction in the proxy. |
+| POST | /proxy/tcp/targets<br/>/`{target}`/delay/clear | Clears any configured delay for the given target |
+| PUT, POST | /proxy/tcp/targets<br/>/`{target}`/drops/set/`{drops}` | Configure a percentage of TCP writes to be dropped to/from the given target. When configured, `goto` will simply skip every Nth TCP write in both directions for this target, which may or may not correspond to the Nth write done by the client or the service (due to different TCP packet sizes) |
+| POST | /proxy/tcp/targets<br/>/`{target}`/drops/clear | Clears any configured packet drops for the given target |
+| GET | /proxy/tcp/targets<br/>/`{target}`/report | Get a report of the TCP writes and packet drops so far for the given target |
+| POST | /proxy/targets<br/>/`{target}`/remove  | Remove a proxy target |
+| POST | /proxy/targets<br/>/`{target}`/enable  | Enable a proxy target |
+| POST | /proxy/targets<br/>/`{target}`/disable | Disable a proxy target |
+| POST |	/proxy/targets/clear            | Remove all proxy targets |
+| GET |	/proxy/targets                  | List all proxy targets |
+| POST | /proxy/enable  | Enable proxy feature on the port |
+| POST | /proxy/disable | Disable proxy feature on the port |
+| GET  |	/proxy/counts                   | Get proxy match/invocation counts, by uri, header and query params |
+| POST |	/proxy/counts/clear             | Clear proxy match/invocation counts |
+
 ###### <small> [Back to TOC](#goto-proxy) </small>
 
 <br/>
+<details>
+<summary>Proxy Target JSON Schema</summary>
 
-#### Proxy Events
+|Field|Data Type|Description|
+|---|---|---|
+| name        | string             | Name for this target |
+| protocol    | string             | "tcp", "http", "http/2" (can also use "h2", "h2c", "http/2.0") |
+| endpoint    | string             | Upstream address for the target. |
+| routes        | map[string]string  | URI mapping from downstream source request URI to upstream request URI. Downstream request's URI is matched against this routing table and if a match is found, the corresponding destination URI is used. If the destination URI is set to "", the source request URI is used. |
+| sendID        | bool           | Whether or not a unique ID be sent with each request. If this flag is set, a query param `x-request-id` will be added to each request, which can help with tracing requests on the target servers |
+| addHeaders    | `[][]string`                            | Additional headers to add to the request before proxying |
+| removeHeaders | `[]string `                             | Headers to remove from the original request before proxying |
+| addQuery      | `[][]string`                            | Additional query parameters to add to the request before proxying |
+| removeQuery   | `[]string`                              | Query parameters to remove from the original request before proxying |
+| stripURI | string (regex) | Optional regex to capture any portions of the request URI that should be stripped. If given, it's applied on the request URI and the matching pieces get removed from the URI. |
+| matchAny        | JSON     | Match criteria based on which runtime traffic gets proxied to this target. See [JSON Schema](#proxy-target-match-criteria-json-schema) and [detailed explanation](#proxy-target-match-criteria) below |
+| matchAll        | JSON     | Match criteria based on which runtime traffic gets proxied to this target. See [JSON Schema](#proxy-target-match-criteria-json-schema) and [detailed explanation](#proxy-target-match-criteria) below |
+| replicas     | int      | Number of parallel replicated calls to be made to this target for each matched request. This allows each request to result in multiple calls to be made to a target if needed for some test scenarios |
+| enabled       | bool     | Whether or not the proxy target is currently active |
+| delayMin      | duration     | Minimum delay to be applied to the requests/responses to/from this target |
+| delayMax      | duration     | Max delay to be applied to the requests/responses to/from this target |
+| delayCount    | int     | Number of requests for which the delay should be applied. After the count of requests have been affected by the delay, the subsequent calls revert to normal processing. |
+| dropPct      | int     | Percent of TCP writes to be dropped in the proxy. This only applies to TCP targets. If given, every Nth write (calculated based on the given percentage) will be skipped in both directions. |
+
+
+#### Proxy Target Match Criteria JSON Schema
+|Field|Data Type|Description|
+|---|---|---|
+| headers | `[][]string`  | Headers names and optional values to match against request headers |
+| query   | `[][]string`  | Query parameters with optional values to match against request query |
+
+</details>
+
+<details>
+<summary>Proxy Events</summary>
 
 - `Proxy Target Rejected`
 - `Proxy Target Added`
@@ -2405,13 +2422,12 @@ An upstream target is defined with a URI routing table, and the upstream target 
 - `Proxy Target Disabled`
 - `Proxy Target Invoked`
 
-<br/>
+</details>
 
 See [Proxy Example](docs/proxy-example.md)
 
 ###### <small> [Back to TOC](#goto-proxy) </small>
 
-<br/>
 
 
 # <a name="scripts-features"></a>
@@ -2430,8 +2446,6 @@ See [Proxy Example](docs/proxy-example.md)
 
 ###### <small> [Back to TOC](#scripts) </small>
 
-<br/>
-
 
 # <a name="jobs-features"></a>
 # Jobs Features
@@ -2441,7 +2455,7 @@ See [Proxy Example](docs/proxy-example.md)
 - Command execution on local OS.
 The job results can be retrieved via API from the `goto` instance, and also stored in lockers on the Goto registry instance if enabled. (See `--locker` command arg)
 
-Jobs can be configured to run periodically using `cron` field. A cron job starts automatically upon creation, and keeps running at the specified frequency until stopped (using `/jobs/stop` API). A stopped cron job can be restarted using `/jobs/run` API, which restarts the cron frequency.
+Jobs can be configured to run periodically using the `cron` field. A cron job starts automatically upon creation, and keeps running at the specified frequency until stopped (using `/jobs/stop` API). A stopped cron job can be restarted using `/jobs/run` API, which restarts the cron frequency.
 
 Jobs can also trigger another job for each line of output produced, as well as upon completion. For command jobs, the output produced is split by newline, and each line of output can be used as input to trigger another command job. A job can specify markers for output fields (split using specified separator), and these markers can be referenced by successor jobs. The markers from a job's output are carried over to all its successor jobs, so a job can use output from a parent job that might be several generations in the past. The triggered job's command arg specifies marker references as `{foo}`, which gets replaced by the value extracted from any predecessor job's output with that marker key. This feature can be used to trigger complex chains of jobs, where each job uses output of the previous job to do something else.
 
@@ -2453,7 +2467,7 @@ Jobs can also trigger another job for each line of output produced, as well as u
 |---|---|---|
 | POST, PUT  |	/jobs/add     | Add a job. See [Job JSON Schema](#job-json-schema) |
 | POST, PUT  |	/jobs/update | Update a job, using [Job JSON Schema](#job-json-schema) |
-| POST, PUT  |	/jobs/add<br/>/script/`{name}` | Add a shell script to be executed as a job, by storing the request body as script content under given filename at the current working directory of the `goto` process. Also creates a default job with the same name to provide a ready-to-use way to execute the script. |
+| POST, PUT  |	/jobs/add<br/>/script/`{name}` | Add a shell script to be executed as a job, by storing the request body as script content under the given filename at the current working directory of the `goto` process. Also creates a default job with the same name to provide a ready-to-use way to execute the script. |
 | POST, PUT  |	/jobs/store<br/>/file/`{name}` | Store request body as a file at the current working directory of the `goto` process. Filed saved with mode `777`.|
 | POST, PUT  |	/jobs/store/file<br/>/`{name}`?path=`{path}` | Store request body as a file at the given path with mode `777`. |
 | POST  | /jobs/`{jobs}`/remove | Remove given jobs by name, and clears its results |
@@ -2468,10 +2482,13 @@ Jobs can also trigger another job for each line of output produced, as well as u
 | GET   | /jobs/scripts       | Get a list of all stored scripts |
 | GET   | /jobs/              | Get a list of all configured jobs |
 
-###### <small> [Back to TOC](#jobs) </small>
 
+<br/>
 
-#### Job JSON Schema
+<details>
+<summary> Job JSON Schema </summary>
+
+#### 
 |Field|Data Type|Description|
 |---|---|---|
 | name          | string        | Identifies this job |
@@ -2488,18 +2505,12 @@ Jobs can also trigger another job for each line of output produced, as well as u
 | outputTrigger | JobTrigger    | ID of another job to trigger for each output produced by this job. For command jobs, words from this job's output can be injected into the command of the next job using positional references (described above) |
 | finishTrigger | JobTrigger        | ID of another job to trigger upon completion of this job |
 
-###### <small> [Back to TOC](#jobs) </small>
-
-
 #### Job HTTP Task JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
 | {Invocation Spec} | Target Invocation Spec | See [Client Target JSON Schema](docs/client-api-json-schemas.md) that's shared by the HTTP Jobs to define an HTTP target invocation |
 | parseJSON    | bool           | Indicates whether the response payload is expected to be JSON and hence not to treat it as text (to avoid escaping quotes in JSON) |
 | transforms   | []Transform | A set of transformations to be applied to the JSON output of the job. See [Response Payload Transformation](#-payload-transformation) section for details of JSON transformation supported by `goto`. |
-
-###### <small> [Back to TOC](#jobs) </small>
-
 
 #### Job Command Task JSON Schema
 |Field|Data Type|Description|
@@ -2528,10 +2539,11 @@ Jobs can also trigger another job for each line of output produced, as well as u
 | time      | time       | time when this result was produced |
 | data      | string     | Result data |
 
-###### <small> [Back to TOC](#jobs) </small>
+</details>
 
+<details>
+<summary> Jobs Timeline Events </summary>
 
-#### Jobs Timeline Events
 - `Job Added`
 - `Job Script Stored`
 - `Job File Stored`
@@ -2542,13 +2554,12 @@ Jobs can also trigger another job for each line of output produced, as well as u
 - `Job Finished`
 - `Job Stopped`
 
-<br/>
+</details>
 
 See [Jobs Example](docs/jobs-example.md)
 
 ###### <small> [Back to TOC](#jobs) </small>
 
-<br/>
 
 # <a name="k8s-features"></a>
 
@@ -2579,13 +2590,11 @@ The `goto` K8s APIs support working with both native K8s resources (e.g. Namespa
 
 ###### <small> [Back to TOC](#k8s) </small>
 
-<br/>
-<br/>
 
 # <a name="tunnel"></a>
 # Tunnel
 
-`Tunnel` feature allows a `goto` instance to act as a L7 tunnel, receiving HTTP/HTTPS/H2 requests from clients and forwarding those to any arbitrary endpoints on same or different protocol. This feature can be useful in several scenarios: e.g. 
+`Tunnel` feature allows a `goto` instance to act as a L7 tunnel, receiving HTTP/HTTPS/H2 requests from clients and forwarding those to any arbitrary endpoints over the same or a different protocol. This feature can be useful in several scenarios: e.g. 
 - A client wishes to reach an endpoint by IP address, but the endpoint is not accessible from the client's network space (e.g. K8S overlay network). In this case, a single `goto` instance deployed inside the overlay network (e.g. K8S cluster) but accessible to the client network space via an FQDN can receive requests from the client and transparently forward those to any overlay IP address that's visible to the `goto` instance.
 - Route traffic from a client to a service through `goto` proxy in order to inspect traffic and capture details in both directions.
 - Observe network behavior (latencies, packet drops, etc) between two endpoints
@@ -2596,61 +2605,66 @@ The `goto` K8s APIs support working with both native K8s resources (e.g. Namespa
 There are four different ways in which requests can be tunneled via `Goto`:
 
 #### 1. Configured Tunnels
-> Any listener can be converted into a tunnel by calling `/tunnels/add/{protocol:address:port}` API to add one or more endpoints as tunnel destinations. When a tunnel has more than one endpoint, the requests are forwarded to all the endpoints, and the earliest response gets sent to the client.
-
-<br/>
-
+<div style="padding-left:20px">
+  Any listener can be converted into a tunnel by calling `/tunnels/add/{protocol:address:port}` API to add one or more endpoints as tunnel destinations. When a tunnel has more than one endpoint, the requests are forwarded to all the endpoints, and the earliest response gets sent to the client.
+</div>
 
 #### 2. On-the-fly Tunneling via URI prefix
-> Any request can be tunneled via `Goto` using URI path format `http://goto.goto/tunnel={endpoints}/some/uri`. `{endpoints}` is a list of endpoints where each endpoint is specified using format `{protocol:address:port}`. The goto instance receiving the above formatted request will multicast the request to all the given endpoints, to URI `/some/uri` along with the same HTTP parameters that the client used (Method, Headers, Body, TLS). 
+<div style="padding-left:20px">
+  Any request can be tunneled via `Goto` using URI path format `http://goto.goto/tunnel={endpoints}/some/uri`. `{endpoints}` is a list of endpoints where each endpoint is specified using the format `{protocol:address:port}`. The goto instance receiving the above formatted request will multicast the request to all the given endpoints, to URI `/some/uri` along with the same HTTP parameters that the client used (Method, Headers, Body, TLS). 
 
-> In order to multi-tunnel a request via multiple `goto` instances, multiple tunnel path prefixes can be added, e.g. `http://goto-1:8080/tunnel={goto-2:8080}/tunnel={goto-3:8081}/tunnel={real-service:80}/some/uri`. <p/>
-As you can imagine by analyzing this request, it's processed by the first goto instance (`goto-1:8080`) using the previous logic, which ends up forwarding it to instance `goto-2:8080` with the remaining URI `/tunnel={goto-3:8081}/tunnel={real-service:80}/some/uri`. The second goto instance (`goto-2:8080`) again treats the incoming request as a tunnel request, and forwards it to instance `goto-3:8081` with the remaining URI `/tunnel={real-service:80}/some/uri`. The third goto instance finally tunnels it to the endpoint `real-service:80` with URI `/some/uri`.
-
-<br/>
+  In order to multi-tunnel a request via multiple `goto` instances, multiple tunnel path prefixes can be added, e.g. `http://goto-1:8080/tunnel={goto-2:8080}/tunnel={goto-3:8081}/tunnel={real-service:80}/some/uri`. <p/>
+  As you can imagine by analyzing this request, it's processed by the first goto instance (`goto-1:8080`) using the previous logic, which ends up forwarding it to instance `goto-2:8080` with the remaining URI `/tunnel={goto-3:8081}/tunnel={real-service:80}/some/uri`. The second goto instance (`goto-2:8080`) again treats the incoming request as a tunnel request, and forwards it to instance `goto-3:8081` with the remaining URI `/tunnel={real-service:80}/some/uri`. The third goto instance finally tunnels it to the endpoint `real-service:80` with URI `/some/uri`.
+</div>
 
 #### 3. On-the-fly Tunneling using special header `Goto-Tunnel`
-> Goto can be asked to tunnel a request by sending it to the `goto` instance with an additional header `Goto-Tunnel:{endpoints}`. Endpoints can be a comma-separated list where each endpoint is of format `{protocol:address:port}`. This approach allows for rerouting some existing traffic via goto, which then sends it to the original intended upstream service without having to modify the URI. The `Goto-Tunnel` header allows for multicasting as well as multi-tunneling. <br/><br/>
-> In order to multicast a request to several endpoints, add the `Goto-Tunnel` header multiple times (i.e. with list of HTTP header values). For example:
-```
-curl -vk https://goto-1:8081/foo -H'Goto-Tunnel:goto-2:8082' -H'Goto-Tunnel:goto-3:8083'
-```
+<div style="padding-left:20px">
+  Goto can be asked to tunnel a request by sending it to the `goto` instance with an additional header `Goto-Tunnel:{endpoints}`. Endpoints can be a comma-separated list where each endpoint is of format `{protocol:address:port}`. This approach allows for rerouting some existing traffic via goto, which then sends it to the original intended upstream service without having to modify the URI. The `Goto-Tunnel` header allows for multicasting as well as multi-tunneling. <br/><br/>
 
-> In order to send a request through multiple `goto` tunnels, add multiple `goto` endpoint addresses as comma-separated value to a single `Goto-Tunnel` header. For example:
-```
-curl -vk https://goto-1:8081/foo -H'Goto-Tunnel:goto-2:8082,goto-3:8083'
-```
+  In order to multicast a request to several endpoints, add the `Goto-Tunnel` header multiple times (i.e. with list of HTTP header values). For example:
+  ```
+  curl -vk https://goto-1:8081/foo -H'Goto-Tunnel:goto-2:8082' -H'Goto-Tunnel:goto-3:8083'
+  ```
 
-> `Endpoints` (in path prefix or header) can omit the protocol, or specify the protocol from one of: `http` (HTTP/1.1), `https` (HTTP/1.1 with TLS), `h2` (HTTP/2 with TLS) or `h2c` (HTTP/2 over cleartext).<br/><br/>
-> When the endpoints in a tunnel have different protocols, `Goto` performs protocol conversions between all possible translations (`http` to/from `https` and `HTTP/1.1` to/from `HTTP/2`). The request `Host` and `SNI Authority` are rewritten to match the endpoint host.<br/><br/>
-> When an endpoint in a tunnel omits protocol in its spec, the protocol used by the original/preceding client request is carried forward.
+  In order to send a request through multiple `goto` tunnels, add multiple `goto` endpoint addresses as a comma-separated value to a single `Goto-Tunnel` header. For example:
+  ```
+  curl -vk https://goto-1:8081/foo -H'Goto-Tunnel:goto-2:8082,goto-3:8083'
+  ```
 
-<br/>
+  `Endpoints` (in path prefix or header) can omit the protocol, or specify the protocol from one of: `http` (HTTP/1.1), `https` (HTTP/1.1 with TLS), `h2` (HTTP/2 with TLS) or `h2c` (HTTP/2 over cleartext).
+
+  When the endpoints in a tunnel have different protocols, `Goto` performs protocol conversions between all possible translations (`http` to/from `https` and `HTTP/1.1` to/from `HTTP/2`). The request `Host` and `SNI Authority` are rewritten to match the endpoint host.
+
+  When an endpoint in a tunnel omits protocol in its spec, the protocol used by the original/preceding client request is carried forward.
+</div>
+
 
 #### 4. HTTP(S) Proxy and CONNECT protocol
-> If `Goto` receives a header that indicates that a connected client has been routed via an HTTP(S) Proxy, or if `goto` receives an HTTP CONNECT request, `goto` establishes an on-the-fly tunnel to the destination endpoint.
+<div style="padding-left:20px">
+  If `Goto` receives a header that indicates that a connected client has been routed via an HTTP(S) Proxy, or if `goto` receives an HTTP CONNECT request, `goto` establishes an on-the-fly tunnel to the destination endpoint.
 
-    Note: The proxy auto-detection support is experimental and not confirmed to work under all circumstances.
+      Note: The proxy auto-detection support is experimental and not confirmed to work under all circumstances.
 
-> For example, the below curl request gets routed via HTTPS proxy `goto-2.goto`. The `goto` instance running on `goto-2.goto` intercepts the request and tunnels it to the original destination `goto-1.goto`, but gives you a chance to track its details.
+  For example, the below curl request gets routed via HTTPS proxy `goto-2.goto`. The `goto` instance running on `goto-2.goto` intercepts the request and tunnels it to the original destination `goto-1.goto`, but gives you a chance to track its details.
 
-```
-curl -vk goto-1.goto:8081/foo/bar -H'foo:bar' --proxy https://goto-2.goto:8082 --proxy-cacert goto-2-cert.pem
-```
+  ```
+  curl -vk goto-1.goto:8081/foo/bar -H'foo:bar' --proxy https://goto-2.goto:8082 --proxy-cacert goto-2-cert.pem
+  ```
+</div>
 
-#### Tunnel APIs
+### Tunnel APIs
 
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
 
-All `Goto` APIs support tunnel prefix, allowing any `goto` API to be proxied from one instance to another. In addition, any arbitrary API can also be called using the tunnel prefix. See the tunnel feature description above for the specification of `{endpoint}` used in the tunnel APIs. To configure tunnel on a port using another port's listener, use `port={port}` prefix format.
+All `Goto` APIs support tunnel prefix, allowing any `goto` API to be proxied from one instance to another. In addition, any arbitrary API can also be called using the tunnel prefix. See the tunnel feature description above for the specification of `{endpoint}` used in the tunnel APIs. To configure a tunnel on a port using another port, use `port={port}` prefix format.
 
 |METHOD|URI|Description|
 |---|---|---|
 | ALL       |	/`tunnel={endpoint}`/`...` | URI prefix format to tunnel any request on the fly. |
 | POST, PUT |	/tunnels/add<br/>/`{endpoint}`?`uri={uri}`| Adds a tunnel on the listener port to redirect traffic to the given `endpoint`. If the URI query param is specified, only traffic to the given URI is intercepted. |
-| POST, PUT |	/tunnels/add/`{endpoint}`<br/>/header/`{key}={value}`<br/>?`uri={uri}` | Adds a tunnel that acts upon requests carrying the given header key and optional value. If value is omitted, just the presence of the header key triggers the tunnel. If a URI is specified as query param, header match is performed only on requests to the given URI. |
+| POST, PUT |	/tunnels/add/`{endpoint}`<br/>/header/`{key}={value}`<br/>?`uri={uri}` | Adds a tunnel that acts upon requests carrying the given header key and optional value. If value is omitted, just the presence of the header key triggers the tunnel. If a URI is specified as a query param, the header match is performed only on requests to the given URI. |
 | POST, PUT |	/tunnels/add<br/>/`endpoint}`/transparent | Add a transparent tunnel that doesn't add goto request headers when forwarding a request to the upstream endpoints. However, goto response headers are still added to the response sent to the downstream client. |
-| POST, PUT |	/tunnels/remove<br/>/`{endpoint}`?`uri={uri}` | Remove a configured endpoint tunnel on the listener port. If the URI query param is specified, only tunnel for that URI is removed. |
+| POST, PUT |	/tunnels/remove<br/>/`{endpoint}`?`uri={uri}` | Remove a configured endpoint tunnel on the listener port. If the URI query param is specified, only the tunnel for that URI is removed. |
 | POST, PUT |	/tunnels/remove/`{endpoint}`<br/>/header/`{key}={value}`<br/>?`uri={uri}` | Remove a configured endpoint tunnel on the listener port for the given header match. If the URI query param is specified, tunnels for that URI are removed. |
 | POST, PUT |	/tunnels/clear | Clear all tunnels on the listener port on which the API is called. |
 | GET |	/tunnels | Get currently configured tunnels. |
@@ -2665,9 +2679,6 @@ All `Goto` APIs support tunnel prefix, allowing any `goto` API to be proxied fro
 
 ###### <small> [Back to TOC](#goto-tunnel) </small>
 
-
-<br/>
-<br/>
 
 # <a name="pipeline-features"></a>
 
@@ -2689,7 +2700,10 @@ A pipeline is defined via a JSON payload submitted via API.
 | out | []string | Names of sources and transformations whose output is included in the final output of the pipeline. When not specified, the pipeline output includes the output of all its sources and transformations.  |
 | running | bool | A read-only status field to indicate whether the pipeline is currently executing. |
 
-#### Example
+<br/>
+<details>
+<summary> Pipeline Spec Example </summary>
+
 ```
 {
   "name": "demo-pipe",
@@ -2708,6 +2722,9 @@ A pipeline is defined via a JSON payload submitted via API.
   "out": ["ns_name", "result"]
 }
 ```
+
+</details>
+<br/>
 
 
 ## Pipeline Sources
@@ -2733,192 +2750,230 @@ A pipeline source brings data into the pipeline, and can also trigger the pipeli
 The following kinds of sources are available:
 
 #### <i>Source Type: `Job`</i>
-> A Job source represents the output of a goto [Job](#jobs-features). The source `spec` field refers to an existing Job's name, where the job must be previously defined using [Jobs APIs](#jobs-apis). 
-<br/><br/>
-Job sources should mostly be defined with `reuseIfExists` set to `true`, indicating that the pipeline should use the output of the last run of the linked job. This is even more relevant when the source is configured with `watch` set to true, so that an execution of the job would trigger the pipeline and the pipeline would simply use the output of the job run that triggered it. If `reuseIfExists` field is set to false, the pipeline's execution will trigger a fresh execution of the linked job, and the pipeline would wait for the job to complete and use the result produced by this job run.
-<br/><br/>
-As `goto` supports two types of jobs: `Command` and `HTTP`, hence a pipeline can use Job sources to execute OS scripts as well as make HTTP calls.
-<br/><br/>
-See [Jobs feature](#jobs-features) for details on how to define Command and HTTP jobs.
-<br/><br/>
-Example: 
-```
-{
-  "name": "demo-jobs-pipe",
-  "sources": {
-    "s_cmd_job": {"type":"Job", "spec":"job1", "reuseIfExists": true, "watch": true},
-    "s_http_job": {"type":"Job", "spec":"job2", "parseJSON": true, "reuseIfExists": true, "watch": true}
+<div style="padding-left:20px">
+  A Job source represents the output of a goto [Job](#jobs-features). The source `spec` field refers to an existing Job's name, where the job must be previously defined using [Jobs APIs](#jobs-apis). 
+  <br/><br/>
+  Job sources should mostly be defined with `reuseIfExists` set to `true`, indicating that the pipeline should use the output of the last run of the linked job. This is even more relevant when the source is configured with `watch` set to true, so that an execution of the job would trigger the pipeline and the pipeline would simply use the output of the job run that triggered it. If `reuseIfExists` field is set to false, the pipeline's execution will trigger a fresh execution of the linked job, and the pipeline would wait for the job to complete and use the result produced by this job run.
+  <br/><br/>
+  As `goto` supports two types of jobs: `Command` and `HTTP`, hence a pipeline can use Job sources to execute OS scripts as well as make HTTP calls.
+  <br/><br/>
+  See [Jobs feature](#jobs-features) for details on how to define Command and HTTP jobs.
+
+  <details>
+  <summary> Job Source Example </summary>
+
+  ```
+  {
+    "name": "demo-jobs-pipe",
+    "sources": {
+      "s_cmd_job": {"type":"Job", "spec":"job1", "reuseIfExists": true, "watch": true},
+      "s_http_job": {"type":"Job", "spec":"job2", "parseJSON": true, "reuseIfExists": true, "watch": true}
+    }
   }
-}
-```
+  ```
+  </details>
+
+</div>
 
 #### <i>Source Type: `Script`</i>
-> A Script source provides a way to run an OS script in a pipeline without a predefined job. The source `spec` field provides the script name, the `content` field provides the script, and the `input` or `inputSource` field can be used to provide input for the script if needed. 
-<br/><br/>
-Example:
-```
-{
-	"name": "demo-script-pipe",
-	"sources": {
-		"s1": {
-			"type":"Script", 
-			"spec":"echo-foo", 
-			"content":"echo 'FooX\\nBarX\\nFoo2\\nAnother Foo\\nMore Foos\\nDone'"
-		},		
-		"s2": {
-			"type":"Script", 
-			"spec":"foo-array", 
-			"content":"grep Foo | sed 's/X/!/g' | tr -s ' ' | jq -R -s -c 'gsub(\"^\\\\s+|\\\\s+$\";\"\") | split(\"\\n\")' ", 
-			"inputSource": "s1",
-			"parseJSON": true
-		},
-		"s3": {
-			"type":"Script", 
-			"spec":"count-lines", 
-			"content":"wc -l | xargs echo -n Total Lines: ", 
-			"inputSource": "s1"
-		},
-		"s4": {
-			"type":"Script", 
-			"spec":"hello-world", 
-			"content":"sed 's/Foo/World/g' | xargs echo -n Hello ", 
-			"input": "{t1}"
-		},
-		"s5": {
-			"type":"Script", 
-			"spec":"foo-length", 
-			"content":"jq -R -s -c 'length' | xargs echo -n Char Count: ", 
-			"input": "{s2}",
-			"parseNumber": true
-		}
-	},
-	"transforms": {
-		"t1": {"type": "JQ", "spec": ".s2[0]"},
-		"t2": {"type": "JQ", "spec": ".s2[2]"},
-		"t3": {"type": "JQ", "spec": ".s2 | length"}
-	},
-	"stages": [
-		{"label": "stage1", "sources":["s1"]},
-		{"label": "stage2", "sources":["s2", "s3"], "transforms":["t1", "t2", "t3"]},
-		{"label": "stage3", "sources":["s4", "s5"]}
-	],
-	"out": ["s3", "s4", "s5"]
-}
-```
+<div style="padding-left:20px">
+
+  A Script source provides a way to run an OS script in a pipeline without a predefined job. The source `spec` field provides the script name, the `content` field provides the script, and the `input` or `inputSource` field can be used to provide input for the script if needed. 
+
+  <details>
+  <summary> Script Source Example </summary>
+
+  ```
+  {
+    "name": "demo-script-pipe",
+    "sources": {
+      "s1": {
+        "type":"Script", 
+        "spec":"echo-foo", 
+        "content":"echo 'FooX\\nBarX\\nFoo2\\nAnother Foo\\nMore Foos\\nDone'"
+      },		
+      "s2": {
+        "type":"Script", 
+        "spec":"foo-array", 
+        "content":"grep Foo | sed 's/X/!/g' | tr -s ' ' | jq -R -s -c 'gsub(\"^\\\\s+|\\\\s+$\";\"\") | split(\"\\n\")' ", 
+        "inputSource": "s1",
+        "parseJSON": true
+      },
+      "s3": {
+        "type":"Script", 
+        "spec":"count-lines", 
+        "content":"wc -l | xargs echo -n Total Lines: ", 
+        "inputSource": "s1"
+      },
+      "s4": {
+        "type":"Script", 
+        "spec":"hello-world", 
+        "content":"sed 's/Foo/World/g' | xargs echo -n Hello ", 
+        "input": "{t1}"
+      },
+      "s5": {
+        "type":"Script", 
+        "spec":"foo-length", 
+        "content":"jq -R -s -c 'length' | xargs echo -n Char Count: ", 
+        "input": "{s2}",
+        "parseNumber": true
+      }
+    },
+    "transforms": {
+      "t1": {"type": "JQ", "spec": ".s2[0]"},
+      "t2": {"type": "JQ", "spec": ".s2[2]"},
+      "t3": {"type": "JQ", "spec": ".s2 | length"}
+    },
+    "stages": [
+      {"label": "stage1", "sources":["s1"]},
+      {"label": "stage2", "sources":["s2", "s3"], "transforms":["t1", "t2", "t3"]},
+      {"label": "stage3", "sources":["s4", "s5"]}
+    ],
+    "out": ["s3", "s4", "s5"]
+  }
+  ```
+  </details>
+</div>
 
 #### <i>Source Type: `K8s`</i>
-> A K8s source represents either a single K8s resource or a set of K8s resources, identified by its `spec` field. It queries a K8s cluster to fetch the resource details: either from the local cluster where `goto` instance is deployed, or a remote cluster based on the current kube context set in local kube config.
-<br/><br/>
-The K8s source `spec` identifies the K8s resource using pattern `group/version/kind/namespace/name`. For example, spec value `networking.istio.io/v1beta1/virtualservice/foo/bar` identifies a a resource named `bar` under namespace `foo` with resource kind `VirtualService`, group `networking.istio.io`, and version `v1beta1`. 
-<br/><br/>
-For native k8s resources that don't have a group, the group piece is left empty. For example: `/v1/ns/` indicates all namespaces, `/v1/foo/pods` identifies all pods in namespace `foo`, and `/v1//pods` indicates all pods across all namespaces. 
-<br/><br/>
-> See [K8s feature](#k8s-features) for more details about K8s query support in `goto`.
-<br/><br/>
-Example:
-```
-{
-  "name": "demo-k8s-pipe",
-  "sources": {
-    "ns": {"type":"K8s", "spec":"/v1/ns/goto", "watch": true},
-    "nspods": {"type":"K8s", "spec":"/v1/pod/{ns_name}"}
-  },
-  "transforms": {
-    "ns_name": {"type": "JQ", "spec": ".ns.metadata.name"},
-    "podnames": {"type": "JQ", "spec": ".nspods.items[]|{name: .metadata.name, containers:[.spec.containers[].name]}"}
-  },
-  "stages": [
-    {"label": "stage1", "sources":["ns"], "transforms":["ns_name"]},
-    {"label": "stage2", "sources":["nspods"], "transforms":["podnames"]}
-  ],
-  "out": ["ns_name", "podnames"]
-}
-```
+<div style="padding-left:20px">
+
+  A K8s source represents either a single K8s resource or a set of K8s resources, identified by its `spec` field. It queries a K8s cluster to fetch the resource details: either from the local cluster where `goto` instance is deployed, or a remote cluster based on the current kube context set in local kube config.
+
+  The K8s source `spec` identifies the K8s resource using pattern `group/version/kind/namespace/name`. For example, spec value `networking.istio.io/v1beta1/virtualservice/foo/bar` identifies a resource named `bar` under namespace `foo` with resource kind `VirtualService`, group `networking.istio.io`, and version `v1beta1`. 
+
+  For native k8s resources that don't have a group, the group piece is left empty. For example: `/v1/ns/` indicates all namespaces, `/v1/foo/pods` identifies all pods in namespace `foo`, and `/v1//pods` indicates all pods across all namespaces. 
+
+  > See [K8s feature](#k8s-features) for more details about K8s query support in `goto`.
+
+  <details>
+  <summary> K8S Source Example </summary>
+
+  ```
+  {
+    "name": "demo-k8s-pipe",
+    "sources": {
+      "ns": {"type":"K8s", "spec":"/v1/ns/goto", "watch": true},
+      "nspods": {"type":"K8s", "spec":"/v1/pod/{ns_name}"}
+    },
+    "transforms": {
+      "ns_name": {"type": "JQ", "spec": ".ns.metadata.name"},
+      "podnames": {"type": "JQ", "spec": ".nspods.items[]|{name: .metadata.name, containers:[.spec.containers[].name]}"}
+    },
+    "stages": [
+      {"label": "stage1", "sources":["ns"], "transforms":["ns_name"]},
+      {"label": "stage2", "sources":["nspods"], "transforms":["podnames"]}
+    ],
+    "out": ["ns_name", "podnames"]
+  }
+  ```
+  </details>
+</div>
 
 #### <i>Source Type: `K8sPodExec`</i>
-> This source type allows executing a command on one or more K8s pods. The source `spec` field should be defined in the format `"namespace/pod-label-selector/container-name"`, and the spec `content` field should contain the command(s) to be executed on the selected pods.
-<br/><br/>
-Example:
-```
-{
-	"name": "demo-podexec-pipe",
-	"sources": {
-		"pod_source": {"type":"K8sPodExec", "spec":"gotons/app=goto/goto", "content":"ls /"}
-	}
-}
-```
+<div style="padding-left:20px">
 
+  This source type allows executing a command on one or more K8s pods. The source `spec` field should be defined in the format `"namespace/pod-label-selector/container-name"`, and the spec `content` field should contain the command(s) to be executed on the selected pods.
+
+  <details>
+  <summary> K8S Pod Exec Source Example </summary>
+  ```
+  {
+    "name": "demo-podexec-pipe",
+    "sources": {
+      "pod_source": {"type":"K8sPodExec", "spec":"gotons/app=goto/goto", "content":"ls /"}
+    }
+  }
+  ```
+  </details>
+
+</div>
 
 
 #### <i>Source Type: `HTTPRequest`</i>
-> This source type allows for pipelines to be triggered based on HTTP requests received by the `goto` server. The feature is achieved via two sets of configurations: 
-1. A [Trigger](#response-triggers) that defines the request/response match criteria (URI, Headers, Status Code) that should match in order for the request to trigger a pipeline.
-2. A pipeline that includes an `HTTPRequest` source that references the trigger name in its `spec` field.
+<div style="padding-left:20px">
 
-> When the `goto` server receives an HTTP request matching the trigger criteria, the linked pipeline gets triggered and the pipeline source's output carries the HTTP response data along with some metadata as listed below:
-1. `request.trigger`: name of the trigger that matched the request
-2. `request.host`
-3. `request.uri`
-4. `request.headers`
-5. `request.body`
-6. `response.status`
-7. `response.headers`
+  This source type allows for pipelines to be triggered based on HTTP requests received by the `goto` server. The feature is achieved via two sets of configurations: 
+  1. A [Trigger](#response-triggers) that defines the request/response match criteria (URI, Headers, Status Code) that should match in order for the request to trigger a pipeline.
+  2. A pipeline that includes an `HTTPRequest` source that references the trigger name in its `spec` field.
 
-> Example:
-```
-#HTTP Trigger definition
-{
-	"name": "t1",
-	"pipe": true,
-	"enabled": true,
-	"triggerURIs": ["/foo", "/status/*"],
-	"triggerStatuses": [502]
-}
+  When the `goto` server receives an HTTP request matching the trigger criteria, the linked pipeline gets triggered and the pipeline source's output carries the HTTP response data along with some metadata as listed below:
+  1. `request.trigger`: name of the trigger that matched the request
+  2. `request.host`
+  3. `request.uri`
+  4. `request.headers`
+  5. `request.body`
+  6. `response.status`
+  7. `response.headers`
 
-#Trigger based pipeline definition
-{
-  "name": "demo-http-trigger-pipe",
-  "sources": {
-    "http": {"type":"HTTPRequest", "spec":"t1", "watch": true}
-  },
-  "transforms": {
-    "uri": {"type": "JQ", "spec": ".http.request.uri"},
-    "req_headers": {"type": "JQ", "spec": ".http.request.headers"},
-    "status": {"type": "JQ", "spec": ".http.response.status"},
-    "resp_headers": {"type": "JQ", "spec": ".http.response.headers"}
+  <details>
+  <summary> HTTP Source Example </summary>
+
+  ```
+  #HTTP Trigger definition
+  {
+    "name": "t1",
+    "pipe": true,
+    "enabled": true,
+    "triggerURIs": ["/foo", "/status/*"],
+    "triggerStatuses": [502]
   }
-}
 
-#This curl call to the goto instance triggers the pipeline via the trigger that matches on URI + response status code.
-$ curl http://goto:8080/status/502
-```
+  #Trigger based pipeline definition
+  {
+    "name": "demo-http-trigger-pipe",
+    "sources": {
+      "http": {"type":"HTTPRequest", "spec":"t1", "watch": true}
+    },
+    "transforms": {
+      "uri": {"type": "JQ", "spec": ".http.request.uri"},
+      "req_headers": {"type": "JQ", "spec": ".http.request.headers"},
+      "status": {"type": "JQ", "spec": ".http.response.status"},
+      "resp_headers": {"type": "JQ", "spec": ".http.response.headers"}
+    }
+  }
+
+  #This curl call to the goto instance triggers the pipeline via the trigger that matches on URI + response status code.
+  $ curl http://goto:8080/status/502
+  ```
+
+  </details>
+</div>
 
 
 #### <i>Source Type: `Tunnel`</i>
-> This source type allows triggering pipelines for HTTP requests tunneled through a `goto` instance. The output behavior of `Tunnel` source type is somewhat similar to the `HTTPRequest` source type, but they differ in which HTTP requests would trigger the pipeline. The `HTTPRequest` source type triggers pipelines for requests served by the `goto` instance itself as a server, whereas the `Tunnel` source type comes into play for HTTP requests meant for other upstream destinations but tunneled via a `goto` instance for inspection.
-<br/><br/>
-The tunnel associated with the pipeline is referenced in the source `spec` field by the tunnel's `Endpoint` identifier that's composed as `<protocol>:<address>:<port>`. See [Tunnel](#tunnel) feature for more details about tunnel creation and handling.
-<br/><br/>
-Example: <br/>
-For an HTTP request tunneled via goto instance `goto-1.goto` to the final destination `goto-2.goto`, a pipeline on `goto-1` instance can use `Tunnel` source that references `goto-2` endpoint in its spec as shown below. The pipeline will be triggered for all requests that pass through `goto-1` with `goto-2` as the final destination.
-```
-{
-  "name": "demo-tunnel-pipe",
-  "sources": {
-    "http": {"type":"Tunnel", "spec":"http:goto-2.goto:9091", "watch": true}
-  },
-  "transforms": {
-    "uri": {"type": "JQ", "spec": ".http.request.uri"},
-    "req_headers": {"type": "JQ", "spec": ".http.request.headers"},
-    "status": {"type": "JQ", "spec": ".http.response.status"},
-    "resp_headers": {"type": "JQ", "spec": ".http.response.headers"}
-  }
-}
-```
+<div style="padding-left:20px">
 
+  This source type allows triggering pipelines for HTTP requests tunneled through a `goto` instance. The output behavior of `Tunnel` source type is somewhat similar to the `HTTPRequest` source type, but they differ in which HTTP requests would trigger the pipeline. The `HTTPRequest` source type triggers pipelines for requests served by the `goto` instance itself as a server, whereas the `Tunnel` source type comes into play for HTTP requests meant for other upstream destinations but tunneled via a `goto` instance for inspection.
+
+  The tunnel associated with the pipeline is referenced in the source `spec` field by the tunnel's `Endpoint` identifier that's composed as `<protocol>:<address>:<port>`. See [Tunnel](#tunnel) feature for more details about tunnel creation and handling.
+
+  <details>
+  <summary> Tunnel Source Example </summary>
+
+  For an HTTP request tunneled via goto instance `goto-1.goto` to the final destination `goto-2.goto`, a pipeline on `goto-1` instance can use `Tunnel` source that references `goto-2` endpoint in its spec as shown below. The pipeline will be triggered for all requests that pass through `goto-1` with `goto-2` as the final destination.
+
+  ```
+  {
+    "name": "demo-tunnel-pipe",
+    "sources": {
+      "http": {"type":"Tunnel", "spec":"http:goto-2.goto:9091", "watch": true}
+    },
+    "transforms": {
+      "uri": {"type": "JQ", "spec": ".http.request.uri"},
+      "req_headers": {"type": "JQ", "spec": ".http.request.headers"},
+      "status": {"type": "JQ", "spec": ".http.response.status"},
+      "resp_headers": {"type": "JQ", "spec": ".http.response.headers"}
+    }
+  }
+  ```
+
+  </details>
+</div>
 
 ### Pipeline Transformations
-Pipeline's transformation steps provide you a way to extract subset of information from a source's output and/or apply some basic computational logic to the source data to produce some derived information.
+
+Pipeline's transformation steps provide you a way to extract a subset of information from a source's output and/or apply some basic computational logic to the source data to produce some derived information.
 
 A transformation definition provides the implementation-specific transformation query in its `spec` field. Each transformation receives the current working context as input, and so the query can refer to any existing source or transformation by name that's expected to exist in the working context at the time of execution of that transformation. Starting with any existing source or transformation, the query can read data from the source's output.
 
@@ -2930,14 +2985,13 @@ A transformation definition provides the implementation-specific transformation 
 | type | string | Identifies the type of the transformation. Supported types are: `JSONPath`, `JQ`, `Template` and `Regex`. |
 | spec | string | Provides the query code to be compiled and executed based on the transformation type.
 
-
+<br/>
 The following kinds of transformations are supported:
 
 1. `JSONPath`: based on implementation `k8s.io/client-go/util/jsonpath`
 2. `JQ`: based on implementation `github.com/itchyny/gojq`
 3. `Template`: based on golang templates feature
 4. `Regex`: based on golang regexp package
-
 
 # <a name="pipe-apis"></a>
 ###  Pipeline APIs
@@ -2961,7 +3015,6 @@ The following kinds of transformations are supported:
 
 ###### <small> [Back to TOC](#pipelines) </small>
 
-<br/>
 <br/>
 
 # <a name="registry"></a>
@@ -3061,11 +3114,11 @@ These APIs allow reading data stored at specific paths/keys. Where applicable, q
 # <a name="lockers-dump-apis"></a>
 #### Lockers Dump APIs
 
-These APIs read all contents of a selected locker or all lockers. Where applicable, query param `data` controls whether locker is returned with or without stored data (default value is `n` and only locker metadata is fetched). Query param `events` controls whether the locker is returned with or without peers' events data. Query param `peers` controls whether returned locker should include peer sub-lockers (containing data published by various peers). Query param `level` controls how many levels of subkeys are returned (default level is 2). Label `current` can be used with APIs that take a locker label param to get data from the currently active locker. Comma-separated labels can be used to read from a nested locker.
+These APIs read all contents of a selected locker or all lockers. Where applicable, query param `data` controls whether locker is returned with or without stored data (default value is `n` and only locker metadata is fetched). Query param `events` controls whether the locker is returned with or without peers' events data. Query param `peers` controls whether the returned locker(s) should include peer sub-lockers (containing data published by various peers). Query param `level` controls how many levels of subkeys are returned (default level is 2). Label `current` can be used with APIs that take a locker label param to get data from the currently active locker. Comma-separated labels can be used to read from a nested locker.
 
 |METHOD|URI|Description|
 |---|---|---|
-| GET       | /registry/lockers/`{label}`?<br/>data=`[y/n]`&events=`[y/n]`<br/>&peers=`[y/n]`&level=`{level}` | Get given labeled locker.  |
+| GET       | /registry/lockers/`{label}`?<br/>data=`[y/n]`&events=`[y/n]`<br/>&peers=`[y/n]`&level=`{level}` | Get the given labeled locker.  |
 | GET       | /registry/lockers?<br/>data=`[y/n]`&events=`[y/n]`<br/>&peers=`[y/n]`&level=`{level}` | Get all lockers. |
 | GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/`{address}`?<br/>data=`[y/n]`&events=`[y/n]`<br/>&level=`{level}` | Get the peer instance's locker from the given labeled locker. |
 | GET       | /registry/peers<br/>/`{peer}`/`{address}`/lockers?<br/>data=`[y/n]`&events=`[y/n]`<br/>&level=`{level}` | Get the peer instance's locker from the current active labeled locker. |
@@ -3079,11 +3132,11 @@ These APIs read all contents of a selected locker or all lockers. Where applicab
 # <a name="registry-events-apis"></a>
 #### Registry Events APIs
 
-Label `current` and `all` can be used with these APIs to get data from the currently active locker or all lockers. Param `unified=y` produces a single timeline of events combined from various peers. Param `reverse=y` produces the timeline in reverse chronological order. By default events are returned with event's data field set to `...` to reduce the amount of data returned. Param `data=y` returns the events with data. 
+Label `current` and `all` can be used with these APIs to get data from the currently active locker or all lockers. Param `unified=y` produces a single timeline of events combined from various peers. Param `reverse=y` produces the timeline in reverse chronological order. By default events are returned with their `data` field set to `...` to reduce the amount of data returned. Param `data=y` returns the events with data. 
 
 |METHOD|URI|Description|
 |---|---|---|
-| POST      | /registry/peers<br/>/events/flush | Requests all peer instances to publish any pending events to registry, and clears events timeline on the peer instances. Registry still retains the peers events in the current locker. |
+| POST      | /registry/peers<br/>/events/flush | Requests all peer instances to publish any pending events to registry, and clears events timeline on the peer instances. Registry still retains the peers' events in the current locker. |
 | POST      | /registry/peers<br/>/events/clear | Requests all peer instances to clear their events timeline, and also removes the peers events from the current registry locker. |
 | GET       | /registry/lockers<br/>/`{label}`/peers<br/>/`{peers}`/events?<br/>reverse=`[y/n]`<br/>&data=`[y/n]` | Get the events timeline for all instances of the given peers (comma-separated list) from the given labeled locker. |
 | GET       | /registry/lockers/`{label}`<br/>/peers/events?<br/>unified=`[y/n]`<br/>&reverse=`[y/n]`<br/>&data=`[y/n]` | Get the events timeline for all instances of all peers from the given labeled locker, grouped by peer label. |
@@ -3210,15 +3263,14 @@ These APIs allow reading of combined client invocation results collected from al
 
 |METHOD|URI|Description|
 |---|---|---|
-| POST | /registry/cloneFrom?url={url} | Clone data from another registry instance at the given URL. The current goto instance will download `peers`, `lockers`, `targets`, `jobs`, `tracking headers` and `probes`. The peer pods downloaded from other registry are not used for any invocation by this registry, it just becomes available locally for informational purpose. Any new pods connecting to this registry using the same peer labels will use the downloaded targets, jobs, etc. |
+| POST | /registry/cloneFrom?url={url} | Clone data from another registry instance at the given URL. The current goto instance will download `peers`, `lockers`, `targets`, `jobs`, `tracking headers` and `probes`. The peer pods downloaded from the other registry are not used for any invocation by this registry, it just becomes available locally for informational purposes. Any new pods connecting to this registry using the same peer labels will use the downloaded targets, jobs, etc. |
 | GET | /registry/dump | Dump current registry configs and locker data in json format. |
 | POST | /registry/load | Load registry configs and locker data from json dump produced via `/dump` API. |
 
-###### <small> [Back to TOC](#goto-registry) </small>
 
-<br/>
+<details>
+<summary> Registry Timeline Events </summary>
 
-#### Registry Timeline Events
 - `Registry: Peer Added`
 - `Registry: Peer Rejected`
 - `Registry: Peer Removed`
@@ -3267,7 +3319,7 @@ These APIs allow reading of combined client invocation results collected from al
 - `Peer Startup Data`
 - `Peer Deregistered`
 
-<br/>
+</details>
 
 See [Registry Schema JSONs and APIs Examples](docs/registry-api-examples.md)
 

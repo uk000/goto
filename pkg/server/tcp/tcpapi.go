@@ -1,5 +1,5 @@
 /**
- * Copyright 2021 uk
+ * Copyright 2022 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -167,7 +167,7 @@ func (tcp *TCPConfig) configure() string {
     tcp.EchoResponseDelayD = 0
   }
   if tcp.EchoResponseSize <= 0 {
-    tcp.EchoResponseSize = 100
+    tcp.EchoResponseSize = 10
   }
   tcp.configureStream()
   return msg
@@ -310,11 +310,11 @@ func setConnectionDurationConfig(w http.ResponseWriter, r *http.Request) {
     msg := ""
     port := util.GetIntParamValue(r, "port")
     dur := util.GetStringParamValue(r, "duration")
-    setLife := strings.Contains(r.RequestURI, "connection/life")
-    setReadTimeout := strings.Contains(r.RequestURI, "timeout/read")
-    setWriteTimeout := strings.Contains(r.RequestURI, "timeout/write")
-    setIdleTimeout := strings.Contains(r.RequestURI, "timeout/idle")
-    setEchoResponseDelay := strings.Contains(r.RequestURI, "echo/response/delay")
+    setLife := strings.Contains(r.RequestURI, "connection/set/life")
+    setReadTimeout := strings.Contains(r.RequestURI, "timeout/set/read")
+    setWriteTimeout := strings.Contains(r.RequestURI, "timeout/set/write")
+    setIdleTimeout := strings.Contains(r.RequestURI, "timeout/set/idle")
+    setEchoResponseDelay := strings.Contains(r.RequestURI, "echo/response/set/delay")
     if d := util.ParseDuration(dur); d >= 0 {
       tcpConfig := getTCPConfig(port)
       if setLife {
@@ -331,7 +331,7 @@ func setConnectionDurationConfig(w http.ResponseWriter, r *http.Request) {
         msg = fmt.Sprintf("Connection idle timeout set to %s for listener %d", dur, port)
       } else if setEchoResponseDelay {
         tcpConfig.EchoResponseDelayD = d
-        msg = fmt.Sprintf("Response will be sent %d after connection for listener %d", dur, port)
+        msg = fmt.Sprintf("Response will be sent %s after connection for listener %d", dur, port)
       }
     } else {
       w.WriteHeader(http.StatusBadRequest)

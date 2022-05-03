@@ -1,5 +1,5 @@
 /**
- * Copyright 2021 uk
+ * Copyright 2022 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -92,8 +92,8 @@ var (
   knownTextMimeTypeRegexp = regexp.MustCompile(".*(text|html|json|yaml|form).*")
   upgradeRegexp           = regexp.MustCompile("(?i)upgrade")
 
-  WillTunnel func(*http.Request, *RequestStore) bool
-  WillProxy  func(*http.Request, *RequestStore) bool
+  WillTunnel    func(*http.Request, *RequestStore) bool
+  WillProxyHTTP func(*http.Request, *RequestStore) bool
 )
 
 func GetRequestStore(r *http.Request) *RequestStore {
@@ -121,7 +121,7 @@ func WithRequestStore(r *http.Request) (context.Context, *RequestStore) {
   rs.IsPayloadRequest = !isAdminRequest && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload"))
   rs.IsTunnelRequest = strings.HasPrefix(r.RequestURI, "/tunnel=") || !isAdminRequest && WillTunnel(r, rs)
   rs.IsTunnelConfigRequest = strings.HasPrefix(r.RequestURI, "/tunnels")
-  rs.WillProxy = !isAdminRequest && WillProxy(r, rs)
+  rs.WillProxy = !isAdminRequest && WillProxyHTTP(r, rs)
   rs.IsH2C = r.ProtoMajor == 2
   return ctx, rs
 }

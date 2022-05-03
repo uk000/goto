@@ -1,4 +1,4 @@
-// Copyright 2021 uk
+// Copyright 2022 uk
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ import (
   "fmt"
   "net/http"
 
-  "goto/pkg/server/response/status"
   "goto/pkg/util"
 
   "github.com/gorilla/mux"
@@ -33,23 +32,41 @@ var (
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   rootRouter = root
   proxyRouter := util.PathRouter(r, "/proxy")
+  tcpTargetsRouter := util.PathRouter(r, "/proxy/tcp/targets")
   targetsRouter := util.PathRouter(r, "/proxy/targets")
-  util.AddRouteWithPort(targetsRouter, "/add", addProxyTarget, "POST")
-  util.AddRouteQWithPort(targetsRouter, "/add/{target}", initProxyTarget, "url", "POST")
+  util.AddRouteWithPort(targetsRouter, "/add", addProxyTarget, "POST", "PUT")
+
+  util.AddRouteMultiQWithPort(targetsRouter, "/add/{target}", addHTTPProxyTarget, []string{"url", "proto"}, "POST", "PUT")
   util.AddRouteMultiQWithPort(targetsRouter, "/{target}/route", addTargetRoute, []string{"from", "to"}, "PUT", "POST")
-  util.AddRouteWithPort(targetsRouter, "/{target}/match/header/{key}={value}", addTargetHeaderMatch, "PUT", "POST")
-  util.AddRouteWithPort(targetsRouter, "/{target}/match/header/{key}", addTargetHeaderMatch, "PUT", "POST")
-  util.AddRouteWithPort(targetsRouter, "/{target}/match/query/{key}={value}", addTargetQueryMatch, "PUT", "POST")
-  util.AddRouteWithPort(targetsRouter, "/{target}/match/query/{key}", addTargetQueryMatch, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/match/header/{key}={value}", addHeaderMatch, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/match/header/{key}", addHeaderMatch, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/match/query/{key}={value}", addQueryMatch, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/match/query/{key}", addQueryMatch, "PUT", "POST")
   util.AddRouteWithPort(targetsRouter, "/{target}/headers/add/{key}={value}", addTargetHeader, "PUT", "POST")
   util.AddRouteWithPort(targetsRouter, "/{target}/headers/remove/{key}", removeTargetHeader, "PUT", "POST")
   util.AddRouteWithPort(targetsRouter, "/{target}/query/add/{key}={value}", addTargetQuery, "PUT", "POST")
   util.AddRouteWithPort(targetsRouter, "/{target}/query/remove/{key}", removeTargetQuery, "PUT", "POST")
-  util.AddRouteWithPort(targetsRouter, "/{target}/remove", removeProxyTarget, "PUT", "POST")
-  util.AddRouteWithPort(targetsRouter, "/{target}/enable", enableProxyTarget, "PUT", "POST")
-  util.AddRouteWithPort(targetsRouter, "/{target}/disable", disableProxyTarget, "PUT", "POST")
+
+  util.AddRouteQWithPort(tcpTargetsRouter, "/add/{target}", addTCPProxyTarget, "address", "POST", "PUT")
+  util.AddRouteQWithPort(tcpTargetsRouter, "/add/{target}/sni={sni}", addTCPTargetForSNI, "address", "POST", "PUT")
+
+  util.AddRouteWithPort(targetsRouter, "/{target}/delay/set/{delay}", setProxyTargetDelay, "PUT", "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/delay/clear", clearProxyTargetDelay, "POST")
+  util.AddRouteWithPort(tcpTargetsRouter, "/{target}/delay/set/{delay}", setProxyTargetDelay, "PUT", "POST")
+  util.AddRouteWithPort(tcpTargetsRouter, "/{target}/delay/clear", clearProxyTargetDelay, "POST")
+  util.AddRouteWithPort(tcpTargetsRouter, "/{target}/drops/set/{drops}", setProxyTargetDrops, "PUT", "POST")
+  util.AddRouteWithPort(tcpTargetsRouter, "/{target}/drops/clear", clearProxyTargetDrops, "POST")
+  util.AddRouteWithPort(tcpTargetsRouter, "/{target}/report", getProxyTargetReport, "GET")
+
+  util.AddRouteWithPort(targetsRouter, "/{target}/remove", removeProxyTarget, "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/enable", enableProxyTarget, "POST")
+  util.AddRouteWithPort(targetsRouter, "/{target}/disable", disableProxyTarget, "POST")
   util.AddRouteWithPort(targetsRouter, "/clear", clearProxyTargets, "POST")
-  util.AddRouteWithPort(targetsRouter, "", getProxyTargets)
+  util.AddRouteWithPort(targetsRouter, "", getProxyTargets, "GET")
+
+  util.AddRouteWithPort(proxyRouter, "/enable", enableProxy, "POST")
+  util.AddRouteWithPort(proxyRouter, "/disable", disableProxy, "POST")
+
   util.AddRouteWithPort(proxyRouter, "/counts", getProxyMatchCounts, "GET")
   util.AddRouteWithPort(proxyRouter, "/counts/clear", clearProxyMatchCounts, "POST")
 }
@@ -58,20 +75,28 @@ func addProxyTarget(w http.ResponseWriter, r *http.Request) {
   getPortProxy(r).addProxyTarget(w, r)
 }
 
-func initProxyTarget(w http.ResponseWriter, r *http.Request) {
-  getPortProxy(r).initProxyTarget(w, r)
+func addHTTPProxyTarget(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).addNewProxyTarget(w, r, false, false)
+}
+
+func addTCPProxyTarget(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).addNewProxyTarget(w, r, true, false)
+}
+
+func addTCPTargetForSNI(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).addNewProxyTarget(w, r, true, true)
 }
 
 func addTargetRoute(w http.ResponseWriter, r *http.Request) {
   getPortProxy(r).addTargetRoute(w, r)
 }
 
-func addTargetHeaderMatch(w http.ResponseWriter, r *http.Request) {
-  getPortProxy(r).addTargetHeaderOrQueryMatch(w, r, true)
+func addHeaderMatch(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).addHeaderOrQueryMatch(w, r, true)
 }
 
-func addTargetQueryMatch(w http.ResponseWriter, r *http.Request) {
-  getPortProxy(r).addTargetHeaderOrQueryMatch(w, r, false)
+func addQueryMatch(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).addHeaderOrQueryMatch(w, r, false)
 }
 
 func addTargetHeader(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +119,26 @@ func getRequestedProxyTarget(r *http.Request) *ProxyTarget {
   return getPortProxy(r).getRequestedProxyTarget(r)
 }
 
+func setProxyTargetDelay(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).setProxyTargetDelay(w, r)
+}
+
+func clearProxyTargetDelay(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).clearProxyTargetDelay(w, r)
+}
+
+func setProxyTargetDrops(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).setProxyTargetDrops(w, r)
+}
+
+func clearProxyTargetDrops(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).clearProxyTargetDrops(w, r)
+}
+
+func getProxyTargetReport(w http.ResponseWriter, r *http.Request) {
+  getPortProxy(r).getProxyTargetReport(w, r)
+}
+
 func removeProxyTarget(w http.ResponseWriter, r *http.Request) {
   getPortProxy(r).removeProxyTarget(w, r)
 }
@@ -107,7 +152,7 @@ func disableProxyTarget(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearProxyTargets(w http.ResponseWriter, r *http.Request) {
-  listenerPort := util.GetRequestOrListenerPort(r)
+  listenerPort := util.GetRequestOrListenerPortNum(r)
   proxyLock.Lock()
   defer proxyLock.Unlock()
   proxyByPort[listenerPort] = newProxy(listenerPort)
@@ -136,36 +181,20 @@ func clearProxyMatchCounts(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, "Proxy target match counts cleared")
 }
 
-func handleURI(w http.ResponseWriter, r *http.Request) {
+func enableProxy(w http.ResponseWriter, r *http.Request) {
   p := getPortProxy(r)
-  targets := p.getMatchingTargetsForRequest(r)
-  if len(targets) > 0 {
-    util.AddLogMessage(fmt.Sprintf("Proxying to matching targets %s", util.GetMapKeys(targets)), r)
-    p.invokeTargets(targets, w, r)
-  }
+  p.enable(true)
+  w.WriteHeader(http.StatusOK)
+  msg := fmt.Sprintf("Proxy enabled on port [%d]", p.Port)
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
 }
 
-func WillProxy(r *http.Request, rs *util.RequestStore) bool {
+func disableProxy(w http.ResponseWriter, r *http.Request) {
   p := getPortProxy(r)
-  rs.WillProxy = false
-  if p.hasAnyProxy() && !status.IsForcedStatus(r) {
-    rs.WillProxy = len(p.checkMatchingTargetsForRequest(r)) > 0
-  }
-  return rs.WillProxy
-}
-
-func middleware(next http.Handler) http.Handler {
-  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    p := getPortProxy(r)
-    rs := util.GetRequestStore(r)
-    if rs.WillProxy {
-      p.router.ServeHTTP(w, r)
-    } else if next != nil {
-      next.ServeHTTP(w, r)
-    }
-  })
-}
-
-func Middleware(next http.Handler) http.Handler {
-  return util.AddMiddlewares(next, internalHandler)
+  p.enable(false)
+  w.WriteHeader(http.StatusOK)
+  msg := fmt.Sprintf("Proxy disabled on port [%d]", p.Port)
+  util.AddLogMessage(msg, r)
+  fmt.Fprintln(w, msg)
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2021 uk
+ * Copyright 2022 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -299,7 +299,7 @@ func (tcp *TCPConnectionHandler) processRequest() {
   defer tcp.close()
   log.Printf("[Listener: %s][Request: %d]: Processing new request on port [%d] - {response=%t, echo=%t, stream=%t, conversation=%t, readTimeout=%s, writeTimeout=%s, connIdleTimeout=%s, connectionLife=%s}",
     tcp.ListenerID, tcp.requestID, tcp.Port, tcp.Payload, tcp.Echo, tcp.Stream, tcp.Conversation, tcp.ReadTimeout, tcp.WriteTimeout, tcp.ConnIdleTimeout, tcp.ConnectionLife)
-  
+
   if tcp.Payload {
     metrics.UpdateTCPConnCount(Response)
     tcp.doResponsePayload()
@@ -312,7 +312,7 @@ func (tcp *TCPConnectionHandler) processRequest() {
   } else if tcp.Conversation {
     metrics.UpdateTCPConnCount(Conversation)
     tcp.doConversation()
-  } else if tcp.ValidatePayloadLength || tcp.ValidatePayloadLength {
+  } else if tcp.ValidatePayloadContent || tcp.ValidatePayloadLength {
     metrics.UpdateTCPConnCount(PayloadValidation)
     tcp.doPayloadValidation()
   } else if tcp.ConnectionLifeD > 0 {
@@ -695,6 +695,7 @@ func (tcp *TCPConnectionHandler) sendMessage(message, whatFor string) {
 }
 
 func (tcp *TCPConnectionHandler) sendMessageWithDeadline(message, whatFor string, useConnDeadline bool) {
+  message = fmt.Sprintf("[%s]%s", global.GetHostLabelForPort(tcp.Port), message)
   if tcp.sendDataToClientWithDeadline([]byte(message), whatFor, useConnDeadline) {
     log.Printf("[Listener: %s][Request: %d][%s]: Sent {%s} on port [%d]",
       tcp.ListenerID, tcp.requestID, whatFor, message, tcp.Port)

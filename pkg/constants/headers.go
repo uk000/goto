@@ -1,5 +1,5 @@
 /**
- * Copyright 2021 uk
+ * Copyright 2022 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,9 @@ const (
   HeaderGotoRemoteAddress         = "Goto-Remote-Address"
   HeaderGotoResponseStatus        = "Goto-Response-Status"
   HeaderGotoResponseDelay         = "Goto-Response-Delay"
+  HeaderGotoProxyDelay            = "Goto-Proxy-Delay"
+  HeaderUpstreamStatus            = "Goto-Proxy-Upstream-Status"
+  HeaderUpstreamTook              = "Goto-Proxy-Upstream-Took"
   HeaderGotoURIStatus             = "Goto-URI-Status"
   HeaderGotoURIStatusRemaining    = "Goto-URI-Status-Remaining"
   HeaderGotoRequestedStatus       = "Goto-Requested-Status"
@@ -60,7 +63,4 @@ const (
   ContentTypeYAML        = "application/yaml"
 
   HeaderStoppingReadinessRequest = "Stopping-Readiness-Request"
-
-  HeaderUpstreamStatus = "Goto-Upstream-Status"
-  HeaderUpstreamTook = "Goto-Upstream-Took"
 )

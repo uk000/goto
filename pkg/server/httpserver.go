@@ -1,5 +1,5 @@
 /**
- * Copyright 2021 uk
+ * Copyright 2022 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -89,7 +89,8 @@ func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
     ctx, rs := util.WithRequestStore(r)
     rs.IsTLS = r.TLS != nil
     r = r.WithContext(ctx)
-    if util.IsH2Upgrade(r) || r.ProtoMajor == 2 {
+    l := listeners.GetListenerForPort(util.GetCurrentPort(r))
+    if l.IsHTTP2 && (util.IsH2Upgrade(r) || r.ProtoMajor == 2) {
       if rs.IsTLS {
         rs.IsH2 = true
         httpHandler.ServeHTTP(w, r)

@@ -3,9 +3,9 @@
 ```
 curl -X POST localhost:8080/proxy/targets/clear
 
-curl http://localhost:8080/proxy/targets/add --data '{"name": "target1", "url":"http://localhost:8081", "enabled":true, "routes":{"/foo/{x}/bar/{y}": "/abc/{y:.*}/def/{x:.*}"}}'
+curl http://localhost:8080/proxy/targets/add --data '{"name": "target1", "endpoint":"http://localhost:8081", "enabled":true, "routes":{"/foo/{x}/bar/{y}": "/abc/{y:.*}/def/{x:.*}"}}'
 
-curl http://localhost:8080/proxy/targets/add --data '{"name": "target1", "url":"http://localhost:8081", "enabled":true, "routes":{"/": ""}, "matchAll":{"headers":[["foo", "{x}"], ["bar", "{y}"]]}, "addHeaders":[["abc","{x}"], ["def","{y}"]], "removeHeaders":["foo"]}'
+curl http://localhost:8080/proxy/targets/add --data '{"name": "target1", "endpoint":"http://localhost:8081", "enabled":true, "routes":{"/": ""}, "matchAll":{"headers":[["foo", "{x}"], ["bar", "{y}"]]}, "addHeaders":[["abc","{x}"], ["def","{y}"]], "removeHeaders":["foo"]}'
 
 
 curl -X POST localhost:8000/port=8080/proxy/targets/add/t1\?url=localhost:8081; 

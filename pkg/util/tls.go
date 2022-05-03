@@ -1,5 +1,5 @@
 /**
- * Copyright 2021 uk
+ * Copyright 2022 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,11 +25,15 @@ import (
   "crypto/tls"
   "crypto/x509"
   "crypto/x509/pkix"
+  "encoding/binary"
   "encoding/pem"
+  "errors"
   "fmt"
   "goto/pkg/global"
+  "io"
   "io/ioutil"
   "math/big"
+  "net"
   "net/http"
   "os"
   "path/filepath"
@@ -232,6 +236,286 @@ func pemBlockForKey(priv interface{}) *pem.Block {
   default:
     return nil
   }
+}
+
+func ReadTLSSNIFromConn(conn net.Conn) (sni string, buff bytes.Buffer, err error) {
+  r := io.TeeReader(conn, &buff)
+  tlsBuff, err := readTLSHandshake(r)
+  if err != nil {
+    return
+  }
+  tlsBuff, err = getClientHelloData(tlsBuff)
+  if err != nil {
+    return
+  }
+  cipherSuites, _ := getClientCipherSuites(tlsBuff)
+  fmt.Println(cipherSuites)
+
+  var extensions []byte
+  extensions, err = getClientHelloExtensions(tlsBuff)
+  if err != nil {
+    return
+  }
+  algos, _ := getSignatureAlgorithms(extensions)
+  fmt.Println(algos)
+  sni, err = getSNIExtensionEntries(extensions)
+  return
+}
+
+func readTLSHandshake(r io.Reader) (buff []byte, err error) {
+  var hs struct {
+    Type, VersionMajor, VersionMinor uint8
+    Length                           uint16
+  }
+  if err = binary.Read(r, binary.BigEndian, &hs); err != nil {
+    return
+  }
+  if hs.Type != 0x16 {
+    err = errors.New("Not a TLS Handshake")
+    return
+  }
+  buff = make([]byte, hs.Length)
+  _, err = io.ReadFull(r, buff)
+  return
+}
+
+func getClientHelloData(tlsBuff []byte) ([]byte, error) {
+  if tlsBuff[0] != 0x01 {
+    return nil, errors.New("Invalid ClientHello")
+  }
+  buff, _, err := parseByteRecordOfSize(tlsBuff[1:], 3, "Client Hello Header")
+  if err != nil {
+    return nil, err
+  }
+  if len(buff) < 34 /*32 client random + 1 session id + 1 cipher suites*/ {
+    return nil, errors.New("Invalid ClientHello")
+  }
+  //skip client random
+  buff = buff[34:]
+  //skip session data
+  _, buff, err = parseByteRecordOfSize(buff, 1, "Session Data")
+  if err != nil {
+    return nil, err
+  }
+  return buff, nil
+}
+
+func getClientCipherSuites(tlsBuff []byte) ([]string, error) {
+  buff, _, err := parseByteRecordOfSize(tlsBuff, 2, "Cipher Suites")
+  if err != nil {
+    return nil, err
+  }
+  cipherSuites := []string{}
+  for i := 0; i < len(buff); i += 2 {
+    if len(buff[i:]) < 2 {
+      break
+    }
+    if buff[i] == 0xcc && buff[i+1] == 0xa8 {
+      cipherSuites = append(cipherSuites, "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256")
+    } else if buff[i] == 0xcc && buff[i+1] == 0xa9 {
+      cipherSuites = append(cipherSuites, "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256")
+    } else if buff[i] == 0xcc && buff[i+1] == 0xaa {
+      cipherSuites = append(cipherSuites, "DHE_RSA_WITH_CHACHA20_POLY1305_SHA256")
+    } else if buff[i] == 0xc0 && buff[i+1] == 0x09 {
+      cipherSuites = append(cipherSuites, "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA")
+    } else if buff[i] == 0xc0 && buff[i+1] == 0x0a {
+      cipherSuites = append(cipherSuites, "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA")
+    } else if buff[i] == 0xc0 && buff[i+1] == 0x12 {
+      cipherSuites = append(cipherSuites, "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA")
+    } else if buff[i] == 0xc0 && buff[i+1] == 0x13 {
+      cipherSuites = append(cipherSuites, "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA")
+    } else if buff[i] == 0xc0 && buff[i+1] == 0x14 {
+      cipherSuites = append(cipherSuites, "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA")
+    } else if buff[i] == 0xc0 && buff[i+1] == 0x23 {
+      cipherSuites = append(cipherSuites, "ECDHE_ECDSA_WITH_AES_128_CBC_SHA256")
+    } else if buff[i] == 0xc0 && buff[i+1] == 0x24 {
+      cipherSuites = append(cipherSuites, "ECDHE_ECDSA_WITH_AES_256_CBC_SHA384")
+    } else if buff[i] == 0xc0 && buff[i+1] == 0x27 {
+      cipherSuites = append(cipherSuites, "ECDHE_RSA_WITH_AES_128_CBC_SHA256")
+    } else if buff[i] == 0xc0 && buff[i+1] == 0x28 {
+      cipherSuites = append(cipherSuites, "ECDHE_RSA_WITH_AES_256_CBC_SHA384")
+    } else if buff[i] == 0xc0 && buff[i+1] == 0x2b {
+      cipherSuites = append(cipherSuites, "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256")
+    } else if buff[i] == 0xc0 && buff[i+1] == 0x2c {
+      cipherSuites = append(cipherSuites, "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384")
+    } else if buff[i] == 0xc0 && buff[i+1] == 0x2f {
+      cipherSuites = append(cipherSuites, "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256")
+    } else if buff[i] == 0xc0 && buff[i+1] == 0x30 {
+      cipherSuites = append(cipherSuites, "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384")
+    } else if buff[i] == 0x00 && buff[i+1] == 0x0a {
+      cipherSuites = append(cipherSuites, "TLS_RSA_WITH_3DES_EDE_CBC_SHA")
+    } else if buff[i] == 0x00 && buff[i+1] == 0x2f {
+      cipherSuites = append(cipherSuites, "TLS_RSA_WITH_AES_128_CBC_SHA")
+    } else if buff[i] == 0x00 && buff[i+1] == 0x33 {
+      cipherSuites = append(cipherSuites, "DHE_RSA_WITH_AES_128_CBC_SHA")
+    } else if buff[i] == 0x00 && buff[i+1] == 0x35 {
+      cipherSuites = append(cipherSuites, "TLS_RSA_WITH_AES_256_CBC_SHA")
+    } else if buff[i] == 0x00 && buff[i+1] == 0x39 {
+      cipherSuites = append(cipherSuites, "DHE_RSA_WITH_AES_256_CBC_SHA")
+    } else if buff[i] == 0x00 && buff[i+1] == 0x3c {
+      cipherSuites = append(cipherSuites, "RSA_WITH_AES_128_CBC_SHA256")
+    } else if buff[i] == 0x00 && buff[i+1] == 0x3d {
+      cipherSuites = append(cipherSuites, "RSA_WITH_AES_256_CBC_SHA256")
+    } else if buff[i] == 0x00 && buff[i+1] == 0x6b {
+      cipherSuites = append(cipherSuites, "DHE_RSA_WITH_AES_256_CBC_SHA384")
+    } else if buff[i] == 0x00 && buff[i+1] == 0x6c {
+      cipherSuites = append(cipherSuites, "DHE_RSA_WITH_AES_128_CBC_SHA256")
+    } else if buff[i] == 0x00 && buff[i+1] == 0x9c {
+      cipherSuites = append(cipherSuites, "TLS_RSA_WITH_AES_128_GCM_SHA256")
+    } else if buff[i] == 0x00 && buff[i+1] == 0x9d {
+      cipherSuites = append(cipherSuites, "TLS_RSA_WITH_AES_256_GCM_SHA384")
+    } else if buff[i] == 0x00 && buff[i+1] == 0x9e {
+      cipherSuites = append(cipherSuites, "DHE_RSA_WITH_AES_128_GCM_SHA256")
+    } else if buff[i] == 0x00 && buff[i+1] == 0x9f {
+      cipherSuites = append(cipherSuites, "DHE_RSA_WITH_AES_256_GCM_SHA384")
+    } else if buff[i] == 0x00 && buff[i+1] == 0xff {
+      cipherSuites = append(cipherSuites, "psuedo-cipher-suite: renegotiation SCSV supported")
+    }
+  }
+  return cipherSuites, nil
+}
+
+func getClientHelloExtensions(tlsBuff []byte) ([]byte, error) {
+  //skip cipher suite
+  _, buff, err := parseByteRecordOfSize(tlsBuff, 2, "Cipher Suites")
+  if err != nil {
+    return nil, err
+  }
+  //skip compression
+  _, buff, err = parseByteRecordOfSize(buff, 1, "Compression")
+  if err != nil {
+    return nil, err
+  }
+  if len(buff) < 2 { //No extensions
+    return nil, nil
+  }
+  buff, _, err = parseByteRecordOfSize(buff, 2, "Client Extensions")
+  if err != nil {
+    return nil, err
+  }
+  if len(buff) < 4 {
+    return nil, errors.New("Invalid ClientHello Extensions")
+  }
+  return buff, nil
+}
+
+func getSNIExtensionEntries(extensions []byte) (sni string, err error) {
+  found := false
+  var extData []byte
+  for len(extensions) > 0 {
+    extType := binary.BigEndian.Uint16(extensions[:2])
+    extData, extensions, err = parseByteRecordOfSize(extensions[2:], 2, "Extension Data")
+    if extType == 0x0 { //SNI record
+      found = true
+      break
+    }
+  }
+  if found {
+    //While the extension data format is list type, a client can only send atmost 1 server name, so just read 1
+    sniListEntry, _, err := parseByteRecordOfSize(extData, 2, "SNI Record")
+    if err != nil {
+      return "", err
+    }
+    if sniListEntry[0] == 0x0 { //type of list entry is DNS hostname
+      sniEntry, _, err := parseByteRecordOfSize(sniListEntry[1:], 2, "SNI Hostname")
+      if err != nil {
+        return "", err
+      }
+      return string(sniEntry), nil
+    }
+  }
+  return
+}
+
+func getSignatureAlgorithms(extensions []byte) (algos []string, err error) {
+  found := false
+  var extData []byte
+  for len(extensions) > 0 {
+    extType := binary.BigEndian.Uint16(extensions[:2])
+    extData, extensions, err = parseByteRecordOfSize(extensions[2:], 2, "Extension Data")
+    if extType == 0x0d { //Signature Algorithms
+      found = true
+      break
+    }
+  }
+  if found {
+    //read redundant length again
+    length := int(binary.BigEndian.Uint16(extData[:2]))
+    extData = extData[2:]
+    for i := 0; i < length; i += 2 {
+      algo := ""
+      if extData[i] == 0x07 {
+        switch extData[i+1] {
+        case 0x00:
+          algo = "RSA/PSS/SHA256"
+        case 0x01:
+          algo = "RSA/PSS/SHA384"
+        case 0x02:
+          algo = "RSA/PSS/SHA512"
+        case 0x03:
+          algo = "EdDSA/ED25519"
+        case 0x04:
+          algo = "EdDSA/ED448"
+        default:
+          algo = fmt.Sprintf("%d/%d", extData[i], extData[i+1])
+        }
+      } else if extData[i] == 0x08 {
+        switch extData[i+1] {
+        case 0x04:
+          algo = "RSASSA-PSS/ED448"
+        case 0x05:
+          algo = "RSASSA-PSS/SHA384"
+        case 0x06:
+          algo = "RSASSA-PSS/SHA512"
+        default:
+          algo = fmt.Sprintf("%d/%d", extData[i], extData[i+1])
+        }
+      } else {
+        switch extData[i+1] {
+        case 0x01:
+          algo = "RSA/"
+        case 0x02:
+          algo = "DSA/"
+        case 0x03:
+          algo = "ECDSA/"
+        default:
+          algo = "Unknown"
+        }
+        switch extData[i] {
+        case 0x01:
+          algo += "MD5"
+        case 0x02:
+          algo += "SHA1"
+        case 0x03:
+          algo += "SHA224"
+        case 0x04:
+          algo += "SHA256"
+        case 0x05:
+          algo += "SHA384"
+        case 0x06:
+          algo += "SHA512"
+        default:
+          algo = fmt.Sprintf("%d/%d", extData[i], extData[i+1])
+        }
+      }
+      algos = append(algos, algo)
+    }
+  }
+  return
+}
+
+func parseByteRecordOfSize(buff []byte, sizeLen int, what string) ([]byte, []byte, error) {
+  if len(buff) < sizeLen {
+    return nil, nil, fmt.Errorf("Buffer doesn't have enough bytes to read size for [%s]", what)
+  }
+  var size int
+  for _, b := range buff[:sizeLen] {
+    size = (size << 8) | int(b)
+  }
+  if len(buff) < size+sizeLen {
+    return nil, nil, fmt.Errorf("Buffer doesn't have enough bytes given by the size for [%s]", what)
+  }
+  return buff[sizeLen : size+sizeLen], buff[size+sizeLen:], nil
 }
 
 func GetTLSVersion(tlsState *tls.ConnectionState) string {

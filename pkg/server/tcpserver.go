@@ -1,5 +1,5 @@
 /**
- * Copyright 2021 uk
+ * Copyright 2022 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package server
 
 import (
   "goto/pkg/global"
+  "goto/pkg/proxy"
   "goto/pkg/server/tcp"
   "goto/pkg/util"
   "log"
@@ -45,7 +46,11 @@ func serveTCPRequests(listenerID string, port int, listener net.Listener) {
       lock.Lock()
       requestCounter++
       lock.Unlock()
-      go tcp.ServeClientConnection(port, requestCounter, conn)
+      if proxy.WillProxyTCP(port) {
+        go proxy.ProxyTCPConnection(port, conn)
+      } else {
+        go tcp.ServeClientConnection(port, requestCounter, conn)
+      }
     } else if !util.IsConnectionCloseError(err) {
       log.Println(err)
       continue

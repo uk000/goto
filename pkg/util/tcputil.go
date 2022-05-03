@@ -1,5 +1,5 @@
 /**
- * Copyright 2021 uk
+ * Copyright 2022 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,12 +17,11 @@
 package util
 
 import (
+  "fmt"
   "net"
   "strings"
   "time"
 )
-
-
 
 func IsConnectionCloseError(err error) bool {
   return strings.Contains(err.Error(), "closed network connection")
@@ -73,4 +72,23 @@ func UpdateReadDeadline(conn net.Conn, connStartTime time.Time, connectionLife, 
 
 func UpdateWriteDeadline(conn net.Conn, connStartTime time.Time, connectionLife, writeTimeout, connIdleTimeout time.Duration) {
   conn.SetWriteDeadline(GetConnectionReadWriteTimeout(connStartTime, connectionLife, writeTimeout, connIdleTimeout))
+}
+
+func CheckForReadability(conn net.Conn, c chan bool) {
+  _, err := conn.Read([]byte{})
+  if err != nil {
+    c <- false
+  }
+  c <- true
+}
+
+func Write(buff []byte, conn net.Conn) error {
+  n, err := conn.Write(buff)
+  if err != nil {
+    return err
+  }
+  if n != len(buff) {
+    return fmt.Errorf("Wrote less data [%d] than buffer [%d]\n", len(buff), n)
+  }
+  return nil
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2021 uk
+ * Copyright 2022 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,7 +51,7 @@ func Run() {
   global.PeerAddress = util.GetHostIP() + ":" + strconv.Itoa(global.ServerPort)
   global.GetPeers = registry.GetPeers
   util.WillTunnel = tunnel.WillTunnel
-  util.WillProxy = proxy.WillProxy
+  util.WillProxyHTTP = proxy.WillProxyHTTP
   global.StoreEventInCurrentLocker = registry.StoreEventInCurrentLocker
   listeners.Configure(ServeHTTPListener, ServeGRPCListener, StartTCPServer)
   metrics.Startup()

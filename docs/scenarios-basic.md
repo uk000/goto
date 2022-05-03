@@ -388,12 +388,14 @@ Now add proxy target(s) with the relevant match criteria to each `goto` instance
 
 ```
   curl http://goto-1:8080/request/proxy/targets/add --data '{"name": "service-1", \
-  "url":"http://service-1", \
+  "endpoint":"http://service-1", \
+  "routes":{"/": ""}, \
   "match":{"uris":["/"]}, \
   "enabled":true}'
 
   curl http://goto-2:8080/request/proxy/targets/add --data '{"name": "service-2", \
-  "url":"http://service-2", \
+  "endpoint":"http://service-2", \
+  "routes":{"/": ""}, 
   "match":{"uris":["/"]}, \
   "enabled":true}'
 ```

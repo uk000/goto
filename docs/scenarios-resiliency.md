@@ -31,7 +31,7 @@ Let's look at the second setup in more details as that's more exciting of the tw
 
     ```
     curl http://goto:8080/request/proxy/targets/add --data \
-    '{"name": "myServer", "match":{"uris":["/my/fancy/api"]}, "url":"http://realserver", "enabled":true}'
+    '{"name": "myServer", "match":{"uris":["/my/fancy/api"]}, "endpoint":"http://realserver", "routes":{"/": ""}, "enabled":true}'
     ```
 
     Now `goto` will proxy all requests to the server application. Confirm it:

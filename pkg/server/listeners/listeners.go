@@ -1,5 +1,5 @@
 /**
- * Copyright 2021 uk
+ * Copyright 2022 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,34 +37,37 @@ import (
 )
 
 type Listener struct {
-  ListenerID string           `json:"listenerID"`
-  Label      string           `json:"label"`
-  HostLabel  string           `json:"hostLabel"`
-  Port       int              `json:"port"`
-  Protocol   string           `json:"protocol"`
-  Open       bool             `json:"open"`
-  AutoCert   bool             `json:"autoCert"`
-  CommonName string           `json:"commonName"`
-  MutualTLS  bool             `json:"mutualTLS"`
-  TLS        bool             `json:"tls"`
-  TCP        *tcp.TCPConfig   `json:"tcp,omitempty"`
-  Cert       *tls.Certificate `json:"-"`
-  CACerts    *x509.CertPool   `json:"-"`
-  RawCert    []byte           `json:"-"`
-  RawKey     []byte           `json:"-"`
-  isHTTP     bool             `json:"-"`
-  isGRPC     bool             `json:"-"`
-  isTCP      bool             `json:"-"`
-  isUDP      bool             `json:"-"`
-  Listener   net.Listener     `json:"-"`
-  UDPConn    *net.UDPConn     `json:"-"`
-  Restarted  bool             `json:"-"`
-  Generation int              `json:"-"`
-  lock       sync.RWMutex     `json:"-"`
+  ListenerID string                      `json:"listenerID"`
+  Label      string                      `json:"label"`
+  HostLabel  string                      `json:"hostLabel"`
+  Port       int                         `json:"port"`
+  Protocol   string                      `json:"protocol"`
+  Open       bool                        `json:"open"`
+  AutoCert   bool                        `json:"autoCert"`
+  AutoSNI    bool                        `json:"autoSNI"`
+  CommonName string                      `json:"commonName"`
+  MutualTLS  bool                        `json:"mutualTLS"`
+  TLS        bool                        `json:"tls"`
+  TCP        *tcp.TCPConfig              `json:"tcp,omitempty"`
+  Cert       *tls.Certificate            `json:"-"`
+  CACerts    *x509.CertPool              `json:"-"`
+  RawCert    []byte                      `json:"-"`
+  RawKey     []byte                      `json:"-"`
+  CertsCache map[string]*tls.Certificate `json:"-"`
+  isHTTP     bool                        `json:"-"`
+  IsHTTP2    bool                        `json:"-"`
+  isGRPC     bool                        `json:"-"`
+  isTCP      bool                        `json:"-"`
+  isUDP      bool                        `json:"-"`
+  Listener   net.Listener                `json:"-"`
+  UDPConn    *net.UDPConn                `json:"-"`
+  Restarted  bool                        `json:"-"`
+  Generation int                         `json:"-"`
+  lock       sync.RWMutex                `json:"-"`
 }
 
 var (
-  DefaultListener     = &Listener{}
+  DefaultListener     = newListener(global.ServerPort, "HTTP", constants.DefaultCommonName, true)
   listeners           = map[int]*Listener{}
   listenerGenerations = map[int]int{}
   initialListeners    = []*Listener{}
@@ -82,6 +85,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(lRouter, "/add", addListener, "POST", "PUT")
   util.AddRoute(lRouter, "/update", updateListener, "POST", "PUT")
   util.AddRoute(lRouter, "/{port}/cert/auto/{domain}", autoCert, "PUT", "POST")
+  util.AddRoute(lRouter, "/{port}/cert/autosni", autoSNI, "PUT", "POST")
   util.AddRoute(lRouter, "/{port}/cert/add", addListenerCert, "PUT", "POST")
   util.AddRoute(lRouter, "/{port}/key/add", addListenerKey, "PUT", "POST")
   util.AddRoute(lRouter, "/{port}/cert/remove", removeListenerCertAndKey, "PUT", "POST")
@@ -102,17 +106,18 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   global.GetHostLabelForPort = GetHostLabelForPort
 }
 
+func newListener(port int, protocol string, cn string, open bool) *Listener {
+  return &Listener{Port: port, Protocol: protocol, CommonName: cn, Open: true, CertsCache: map[string]*tls.Certificate{}}
+}
+
 func Configure(hs func(*Listener), gs func(*Listener), ts func(string, int, net.Listener)) {
   if DefaultLabel == "" {
     DefaultLabel = util.GetHostLabel()
   }
   DefaultListener.Label = DefaultLabel
   DefaultListener.HostLabel = util.GetHostLabel()
-  DefaultListener.Port = global.ServerPort
-  DefaultListener.Protocol = "HTTP"
   DefaultListener.isHTTP = true
   DefaultListener.TLS = false
-  DefaultListener.Open = true
   ServeHTTPListener = hs
   ServeGRPCListener = gs
   StartTCPServer = ts
@@ -137,6 +142,7 @@ func AddInitialListeners(portList []string) {
         if len(portInfo) > 1 && portInfo[1] != "" {
           protocol = strings.ToLower(portInfo[1])
           if !strings.EqualFold(protocol, "http") && !strings.EqualFold(protocol, "https") &&
+            !strings.EqualFold(protocol, "http1") && !strings.EqualFold(protocol, "https1") &&
             !strings.EqualFold(protocol, "grpc") && !strings.EqualFold(protocol, "udp") && !strings.EqualFold(protocol, "tls") {
             protocol = "tcp"
           }
@@ -147,9 +153,10 @@ func AddInitialListeners(portList []string) {
         ports[port] = true
         if i == 0 {
           global.ServerPort = port
+          DefaultListener.Port = port
         } else {
+          l := newListener(port, protocol, cn, true)
           listenersLock.Lock()
-          l := &Listener{Port: port, Protocol: protocol, CommonName: cn, Open: true}
           initialListeners = append(initialListeners, l)
           listenersLock.Unlock()
         }
@@ -174,7 +181,19 @@ func (l *Listener) initListener() bool {
       l.Cert = cert
     }
   }
-  if l.Cert != nil {
+  if l.AutoSNI {
+    tlsConfig = &tls.Config{
+      GetCertificate: func(chi *tls.ClientHelloInfo) (cert *tls.Certificate, err error) {
+        if cert = l.CertsCache[chi.ServerName]; cert != nil {
+          return
+        }
+        if cert, err = util.CreateCertificate(chi.ServerName, ""); err == nil {
+          l.CertsCache[chi.ServerName] = cert
+        }
+        return
+      },
+    }
+  } else if l.Cert != nil {
     tlsConfig = &tls.Config{
       Certificates: []tls.Certificate{*l.Cert},
     }
@@ -210,7 +229,9 @@ func (l *Listener) initListener() bool {
         } else {
           tlsConfig.ClientAuth = tls.NoClientCert
         }
-        tlsConfig.NextProtos = []string{"h2"}
+        if l.IsHTTP2 {
+          tlsConfig.NextProtos = []string{"h2"}
+        }
         listener = tls.NewListener(listener, tlsConfig)
       }
       l.Listener = listener
@@ -303,7 +324,7 @@ func updateListener(w http.ResponseWriter, r *http.Request) {
 
 func addOrUpdateListenerAndRespond(w http.ResponseWriter, r *http.Request, update bool) {
   msg := ""
-  l := &Listener{}
+  l := newListener(0, "", "", false)
   body := util.Read(r.Body)
   if err := util.ReadJson(body, l); err != nil {
     w.WriteHeader(http.StatusBadRequest)
@@ -336,6 +357,14 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
   l.Protocol = strings.ToLower(l.Protocol)
   if l.Port <= 0 || l.Port > 65535 {
     msg = fmt.Sprintf("[Invalid port number: %d]", l.Port)
+  }
+  l.IsHTTP2 = true
+  if strings.EqualFold(l.Protocol, "http1") {
+    l.Protocol = "http"
+    l.IsHTTP2 = false
+  } else if strings.EqualFold(l.Protocol, "https1") {
+    l.Protocol = "https"
+    l.IsHTTP2 = false
   }
   isHTTPS := strings.EqualFold(l.Protocol, "https")
   if isHTTPS || strings.EqualFold(l.Protocol, "http") {
@@ -574,6 +603,21 @@ func autoCert(w http.ResponseWriter, r *http.Request) {
     } else {
       msg = fmt.Sprintf("Missing domain for cert auto-generation for listener %d\n", l.Port)
       w.WriteHeader(http.StatusBadRequest)
+    }
+    fmt.Fprintln(w, msg)
+    util.AddLogMessage(msg, r)
+  }
+}
+
+func autoSNI(w http.ResponseWriter, r *http.Request) {
+  if l := validateListener(w, r); l != nil {
+    l.AutoSNI = true
+    l.AutoCert = false
+    msg := ""
+    if l.reopenListener() {
+      msg = fmt.Sprintf("Listener [%d] configured to auto-generate cert for any SNI", l.Port)
+    } else {
+      msg = fmt.Sprintf("Failed to reopen listener %d for auto-generate SNI\n", l.Port)
     }
     fmt.Fprintln(w, msg)
     util.AddLogMessage(msg, r)

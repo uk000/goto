@@ -1,5 +1,5 @@
 /**
- * Copyright 2021 uk
+ * Copyright 2022 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -201,7 +201,8 @@ func (spec *InvocationSpec) processProtocol() {
         spec.httpVersionMajor = major
         spec.httpVersionMinor = 0
       }
-    } else if strings.EqualFold(strings.ToUpper(spec.Protocol), "HTTP/2") {
+    } else if strings.EqualFold(spec.Protocol, "HTTP/2") || strings.EqualFold(spec.Protocol, "HTTP/2.0") ||
+              strings.EqualFold(spec.Protocol, "H2") || strings.EqualFold(spec.Protocol, "H2C") {
       spec.httpVersionMajor = 2
       spec.httpVersionMinor = 0
     }
