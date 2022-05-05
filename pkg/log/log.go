@@ -36,6 +36,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
   util.AddRoute(logRouter, "/admin/{enable}", setLogLevel, "POST", "PUT")
   util.AddRoute(logRouter, "/client/{enable}", setLogLevel, "POST", "PUT")
   util.AddRoute(logRouter, "/invocation/{enable}", setLogLevel, "POST", "PUT")
+  util.AddRoute(logRouter, "/invocation/response/{enable}", setLogLevel, "POST", "PUT")
   util.AddRoute(logRouter, "/registry/{enable}", setLogLevel, "POST", "PUT")
   util.AddRoute(logRouter, "/registry/locker/{enable}", setLogLevel, "POST", "PUT")
   util.AddRoute(logRouter, "/registry/events/{enable}", setLogLevel, "POST", "PUT")
@@ -59,6 +60,7 @@ func setLogLevel(w http.ResponseWriter, r *http.Request) {
   admin := strings.Contains(r.RequestURI, "admin")
   client := strings.Contains(r.RequestURI, "client")
   invocation := strings.Contains(r.RequestURI, "invocation")
+  invocationResponse := strings.Contains(r.RequestURI, "invocation/response")
   registry := strings.Contains(r.RequestURI, "registry")
   locker := strings.Contains(r.RequestURI, "locker")
   events := strings.Contains(r.RequestURI, "events")
@@ -80,6 +82,9 @@ func setLogLevel(w http.ResponseWriter, r *http.Request) {
   } else if client {
     global.EnableClientLogs = enable
     msg = fmt.Sprintf("Client logging set to [%t]", enable)
+  } else if invocationResponse {
+    global.EnableInvocationResponseLogs = enable
+    msg = fmt.Sprintf("Invocation Response logging set to [%t]", enable)
   } else if invocation {
     global.EnableInvocationLogs = enable
     msg = fmt.Sprintf("Invocation logging set to [%t]", enable)

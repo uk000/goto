@@ -107,6 +107,8 @@ type GRPCResponse struct {
   ResponseHeaders          map[string][]string
   ResponseTrailers         map[string][]string
   ResponsePayload          []byte
+  ClientStreamCount        int
+  ServerStreamCount        int
 }
 
 type GRPCManager struct {
@@ -183,7 +185,7 @@ func NewGRPCClient(service, url, authority, serverName string) (*GRPCClient, err
       metrics.ConnTracker <- service
       return transport.NewConnTracker(conn, &c.BaseTransportIntercept)
     } else {
-      log.Printf("Failed to dial address [%s] with error: %s\n", address, err.Error())
+      log.Printf("GRPCClient.NewGRPCClient: Failed to dial address [%s] with error: %s\n", address, err.Error())
       return nil, err
     }
   }
@@ -236,7 +238,7 @@ func (g *GRPCManager) configureDialOptions() {
 func (g *GRPCManager) SetTargetTLS(name string, isTLS, verifyTLS bool) {
   t := g.targets[name]
   if t == nil {
-    log.Printf("Target [%s] not found", name)
+    log.Printf("GRPCClient.SetTargetTLS: Target [%s] not found", name)
     return
   }
   t.SetTLS(isTLS, verifyTLS)
@@ -246,7 +248,7 @@ func (g *GRPCManager) ConnectTarget(name string) {
   if t := g.targets[name]; t != nil {
     t.Connect()
   } else {
-    log.Printf("Target [%s] not found", name)
+    log.Printf("GRPCClient.ConnectTarget: Target [%s] not found", name)
   }
 }
 
@@ -254,14 +256,14 @@ func (g *GRPCManager) ConnectTargetWithHeaders(name string, headers map[string]s
   if t := g.targets[name]; t != nil {
     t.ConnectWithHeaders(headers)
   } else {
-    log.Printf("Target [%s] not found", name)
+    log.Printf("GRPCClient.ConnectTargetWithHeaders: Target [%s] not found", name)
   }
 }
 
 func (g *GRPCManager) reflect(name string) {
   t := g.targets[name]
   if t == nil {
-    log.Printf("Target [%s] not found", name)
+    log.Printf("GRPCClient.reflect: Target [%s] not found", name)
     return
   }
   t.Connect()
@@ -312,7 +314,7 @@ func (c *GRPCClient) SetTLSConfig(tlsConfig *tls.Config) {
   c.tlsCredentials = credentials.NewTLS(c.tlsConfig)
   if c.ServerName != "" {
     if err := c.tlsCredentials.OverrideServerName(c.ServerName); err != nil {
-      log.Printf("Failed to override server name [%q] with error: %s", c.ServerName, err.Error())
+      log.Printf("GRPCClient.SetTLSConfig: Failed to override server name [%q] with error: %s", c.ServerName, err.Error())
     }
   }
   c.configureDialOptions()
@@ -392,7 +394,7 @@ func (c *GRPCClient) ConnectWithHeaders(headers map[string]string) error {
     ctx, cancel := context.WithTimeout(ctx, c.ConnectTimeout)
     defer cancel()
     if c.conn, err = grpc.DialContext(ctx, c.URL, c.dialOpts...); err != nil {
-      log.Printf("Failed to connect to target [%s] url [%s] with error: %s\n", c.Service, c.URL, err.Error())
+      log.Printf("GRPCClient.ConnectWithHeaders: Failed to connect to target [%s] url [%s] with error: %s\n", c.Service, c.URL, err.Error())
       return err
     }
   }
@@ -407,17 +409,20 @@ func (c *GRPCClient) Invoke(method string, headers map[string]string, payloads [
   if grpcMethod == nil {
     return nil, fmt.Errorf("Method [%s] not found in Service [%s]", method, c.Service)
   }
-  c.ConnectWithHeaders(headers)
-  ctx, cancel := context.WithTimeout(context.Background(), c.RequestTimeout)
+  if err = c.ConnectWithHeaders(headers); err != nil {
+    return
+  }
+  ctx := context.Background()
   if len(headers) > 0 {
     ctx = metadata.NewOutgoingContext(ctx, metadata.New(headers))
   }
   stub := grpcdynamic.NewStubWithMessageFactory(c.GRPC(), c.mf)
-  defer cancel()
-  return grpcMethod.Invoke(ctx, stub, payloads, c.KeepOpen)
+  return grpcMethod.Invoke(ctx, stub, payloads, c.RequestTimeout, c.KeepOpen)
 }
 
-func (m *GRPCServiceMethod) Invoke(ctx context.Context, stub grpcdynamic.Stub, payloads [][]byte, keepOpen time.Duration) (response *GRPCResponse, err error) {
+func (m *GRPCServiceMethod) Invoke(ctx context.Context, stub grpcdynamic.Stub, payloads [][]byte, requestTimeout, keepOpen time.Duration) (response *GRPCResponse, err error) {
+  ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+  defer cancel()
   if m.IsUnary {
     return m.InvokeUnary(ctx, stub, payloads)
   } else if m.IsClientStreaming && m.IsServerStreaming {
@@ -436,7 +441,7 @@ func (m *GRPCServiceMethod) newInput() protoiface.MessageV1 {
 
 func (m *GRPCServiceMethod) fillInput(input protoiface.MessageV1, payload []byte) error {
   if err := jsonpb.Unmarshal(bytes.NewReader(payload), input); err != nil {
-    log.Printf("Failed to unmarshal payload into method input type [%s] with error: %s\n", m.md.GetInputType().GetFullyQualifiedName(), err.Error())
+    log.Printf("GRPCClient.newInput: Failed to unmarshal payload into method input type [%s] with error: %s\n", m.md.GetInputType().GetFullyQualifiedName(), err.Error())
     return err
   }
   return nil
@@ -452,7 +457,7 @@ func (m *GRPCServiceMethod) InvokeUnary(ctx context.Context, stub grpcdynamic.St
   var respHeaders metadata.MD
   var respTrailers metadata.MD
   output, err := stub.InvokeRpc(ctx, m.md, input, grpc.Trailer(&respTrailers), grpc.Header(&respHeaders))
-  response = newGRPCResponse(respHeaders, respTrailers, []protoiface.MessageV1{output}, m.IsJSONResponse)
+  response = newGRPCResponse(respHeaders, respTrailers, []protoiface.MessageV1{output}, 0, 0, m.IsJSONResponse)
   if m.processResponseStatus(response, err) {
     return response, nil
   } else {
@@ -463,7 +468,7 @@ func (m *GRPCServiceMethod) InvokeUnary(ctx context.Context, stub grpcdynamic.St
 func (m *GRPCServiceMethod) InvokeClientStream(ctx context.Context, stub grpcdynamic.Stub, payloads [][]byte, keepOpen time.Duration) (response *GRPCResponse, err error) {
   stream, err := stub.InvokeRpcClientStream(ctx, m.md)
   if err != nil {
-    log.Printf("Method [%s] Failed to initiate Client stream with error: %s\n", m.Name, err.Error())
+    log.Printf("GRPCClient.InvokeClientStream: Method [%s] Failed to initiate Client stream with error: %s\n", m.Name, err.Error())
     return nil, err
   }
   var output protoiface.MessageV1
@@ -471,7 +476,7 @@ func (m *GRPCServiceMethod) InvokeClientStream(ctx context.Context, stub grpcdyn
   var respHeaders metadata.MD
   respHeaders, err = stream.Header()
   respTrailers := stream.Trailer()
-  response = newGRPCResponse(respHeaders, respTrailers, []protoiface.MessageV1{output}, m.IsJSONResponse)
+  response = newGRPCResponse(respHeaders, respTrailers, []protoiface.MessageV1{output}, len(payloads), 0, m.IsJSONResponse)
   if m.processResponseStatus(response, err) {
     return response, nil
   } else {
@@ -488,7 +493,7 @@ func (m *GRPCServiceMethod) InvokeServerStream(ctx context.Context, stub grpcdyn
   }
   stream, err := stub.InvokeRpcServerStream(ctx, m.md, input)
   if err != nil {
-    log.Printf("Method [%s] Failed to initiate Server stream with error: %s\n", m.Name, err.Error())
+    log.Printf("GRPCClient.InvokeServerStream: Method [%s] Failed to initiate Server stream with error: %s\n", m.Name, err.Error())
     return
   }
   var output []protoiface.MessageV1
@@ -496,7 +501,7 @@ func (m *GRPCServiceMethod) InvokeServerStream(ctx context.Context, stub grpcdyn
   var respHeaders metadata.MD
   respHeaders, err = stream.Header()
   respTrailers := stream.Trailer()
-  response = newGRPCResponse(respHeaders, respTrailers, output, m.IsJSONResponse)
+  response = newGRPCResponse(respHeaders, respTrailers, output, 0, len(output), m.IsJSONResponse)
   if m.processResponseStatus(response, err) {
     return response, nil
   } else {
@@ -507,7 +512,7 @@ func (m *GRPCServiceMethod) InvokeServerStream(ctx context.Context, stub grpcdyn
 func (m *GRPCServiceMethod) InvokeBidiStream(ctx context.Context, stub grpcdynamic.Stub, payloads [][]byte, keepOpen time.Duration) (response *GRPCResponse, err error) {
   stream, err := stub.InvokeRpcBidiStream(ctx, m.md)
   if err != nil {
-    log.Printf("Method [%s] Failed to initiate Bidi stream with error: %s\n", m.Name, err.Error())
+    log.Printf("GRPCClient.InvokeBidiStream: Method [%s] Failed to initiate Bidi stream with error: %s\n", m.Name, err.Error())
     return nil, err
   }
   var output []protoiface.MessageV1
@@ -528,7 +533,7 @@ func (m *GRPCServiceMethod) InvokeBidiStream(ctx context.Context, stub grpcdynam
   var respHeaders metadata.MD
   respHeaders, err = stream.Header()
   respTrailers := stream.Trailer()
-  response = newGRPCResponse(respHeaders, respTrailers, output, m.IsJSONResponse)
+  response = newGRPCResponse(respHeaders, respTrailers, output, len(payloads), len(output), m.IsJSONResponse)
   if m.processResponseStatus(response, err) {
     return response, nil
   } else {
@@ -537,15 +542,20 @@ func (m *GRPCServiceMethod) InvokeBidiStream(ctx context.Context, stub grpcdynam
 }
 
 func (m *GRPCServiceMethod) sendClientStream(stream *GRPCClientStream, payloads [][]byte, keepOpen time.Duration, wg *sync.WaitGroup) (output protoiface.MessageV1, err error) {
+  defer func() {
+    if wg != nil {
+      wg.Done()
+    }
+  }()
   startTime := time.Now()
   input := m.newInput()
   for _, payload := range payloads {
     if err = m.fillInput(input, payload); err != nil {
-      log.Printf("Method [%s] Closing stream due to send error: %s\n", m.Name, err.Error())
+      log.Printf("GRPCClient.sendClientStream: Method [%s] Closing stream due to send error: %s\n", m.Name, err.Error())
       break
     }
     if err = stream.SendMsg(input); err != nil {
-      log.Printf("Method [%s] Closing stream due to send error: %s\n", m.Name, err.Error())
+      log.Printf("GRPCClient.sendClientStream: Method [%s] Closing stream due to send error: %s\n", m.Name, err.Error())
       break
     }
     input.Reset()
@@ -560,15 +570,17 @@ func (m *GRPCServiceMethod) sendClientStream(stream *GRPCClientStream, payloads 
     output, err = stream.Close()
   }
   if err != nil {
-    log.Printf("Method [%s] Error while sending client stream: %s\n", m.Name, err.Error())
-  }
-  if wg != nil {
-    wg.Done()
+    log.Printf("GRPCClient.sendClientStream: Method [%s] Error while sending client stream: %s\n", m.Name, err.Error())
   }
   return
 }
 
 func (m *GRPCServiceMethod) receiveServerStream(stream *GRPCServerStream, wg *sync.WaitGroup) (output []protoiface.MessageV1, err error) {
+  defer func() {
+    if wg != nil {
+      wg.Done()
+    }
+  }()
   for {
     if out, e := stream.RecvMsg(); e == nil {
       if out != nil {
@@ -582,17 +594,16 @@ func (m *GRPCServiceMethod) receiveServerStream(stream *GRPCServerStream, wg *sy
       break
     }
   }
-  if wg != nil {
-    wg.Done()
-  }
   return
 }
 
-func newGRPCResponse(respHeaders metadata.MD, respTrailers metadata.MD, responsePayloads []protoiface.MessageV1, isJSON bool) *GRPCResponse {
+func newGRPCResponse(respHeaders metadata.MD, respTrailers metadata.MD, responsePayloads []protoiface.MessageV1, clientStreamCount, serverStreamCount int, isJSON bool) *GRPCResponse {
   r := &GRPCResponse{
     ResponseHeaders:  respHeaders,
     ResponseTrailers: respTrailers,
   }
+  r.ClientStreamCount = clientStreamCount
+  r.ServerStreamCount = serverStreamCount
   if isJSON {
     r.ResponsePayload = []byte(util.ToJSONText(responsePayloads))
   }
@@ -608,9 +619,9 @@ func (m *GRPCServiceMethod) processResponseStatus(r *GRPCResponse, err error) bo
     return true
   } else {
     if err != nil {
-      log.Printf("Method [%s] GRPC call failed with error: %s\n", m.Name, err.Error())
+      log.Printf("GRPCClient.processResponseStatus: Method [%s] GRPC call failed with error: %s\n", m.Name, err.Error())
     } else {
-      log.Printf("Method [%s] GRPC call failed without any error!\n", m.Name)
+      log.Printf("GRPCClient.processResponseStatus: Method [%s] GRPC call failed without any error!\n", m.Name)
     }
     if status != nil {
       r.Status = int(status.Code())

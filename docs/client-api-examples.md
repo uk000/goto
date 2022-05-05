@@ -1,6 +1,5 @@
-#### Client API Examples
 <details>
-<summary>API Examples</summary>
+<summary>Client API Examples</summary>
 
 ```
 #Add target
@@ -103,10 +102,10 @@ curl localhost:8080/client/results
 ```
 </details>
 
-#### Sample Client Results
+<br/>
 
 <details>
-<summary>Result Example</summary>
+<summary>Sample Client Results</summary>
 <p>
 
 ```json
@@ -1802,11 +1801,10 @@ $ curl localhost:8080/client/results
 </p>
 </details>
 
-
-#### Sample Invocation Result
+<br/>
 
 <details>
-<summary>Result Example</summary>
+<summary>Sample Invocation Results</summary>
 <p>
 
 ```json
@@ -2304,12 +2302,10 @@ $ curl localhost:8081/client/results/invocations
 </p>
 </details>
 
-
-
-#### Sample Active Targets Result
+<br/>
 
 <details>
-<summary>Result Example</summary>
+<summary>Sample Active Targets Results</summary>
 <p>
 
 ```json

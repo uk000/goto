@@ -8,4 +8,4 @@ Flow showing usage of APIs to configure and invoke traffic from `goto` client in
 <br/>
 <br/>
 
-See [Targets and Traffic](../README.md#client-http-traffic) for more details.
+See [Targets and Traffic](../README.md#goto-client-targets-and-traffic) for more details.

@@ -32,10 +32,12 @@ import (
 )
 
 type CountInfo struct {
-  Count         int       `json:"count"`
-  Retries       int       `json:"retries"`
-  FirstResultAt time.Time `json:"firstResultAt,omitempty"`
-  LastResultAt  time.Time `json:"lastResultAt,omitempty"`
+  Count             int       `json:"count"`
+  ClientStreamCount int       `json:"clientStreamCount"`
+  ServerStreamCount int       `json:"serverStreamCount"`
+  Retries           int       `json:"retries"`
+  FirstResultAt     time.Time `json:"firstResultAt,omitempty"`
+  LastResultAt      time.Time `json:"lastResultAt,omitempty"`
 }
 
 type HeaderCounts struct {
@@ -61,6 +63,8 @@ type TargetResults struct {
   InvocationCount              int                      `json:"invocationCount"`
   FirstResultAt                time.Time                `json:"firstResultAt,omitempty"`
   LastResultAt                 time.Time                `json:"lastResultAt,omitempty"`
+  ClientStreamCount            int                      `json:"clientStreamCount"`
+  ServerStreamCount            int                      `json:"serverStreamCount"`
   RetriedInvocationCounts      int                      `json:"retriedInvocationCounts"`
   CountsByHeaders              map[string]*HeaderCounts `json:"countsByHeaders,omitempty"`
   CountsByStatus               map[string]int           `json:"countsByStatus,omitempty"`
@@ -81,9 +85,11 @@ type TargetResults struct {
 }
 
 type SummaryCounts struct {
-  Count         int
-  ByStatusCodes map[interface{}]int
-  ByTimeBuckets map[interface{}]int
+  Count             int
+  ClientStreamCount int
+  ServerStreamCount int
+  ByStatusCodes     map[interface{}]int
+  ByTimeBuckets     map[interface{}]int
 }
 
 type SummaryResult map[interface{}]*SummaryCounts
@@ -185,6 +191,8 @@ func (s *SummaryCounts) MarshalJSON() ([]byte, error) {
   }
   data := map[string]interface{}{}
   data["count"] = s.Count
+  data["clientStreamCount"] = s.ClientStreamCount
+  data["serverStreamCount"] = s.ServerStreamCount
   if len(s.ByStatusCodes) > 0 {
     byStatusCodes := map[string]interface{}{}
     for k, v := range s.ByStatusCodes {
@@ -213,6 +221,8 @@ func (s SummaryResult) MarshalJSON() ([]byte, error) {
 func (tr *TargetResults) unsafeInit(reset bool) {
   if tr.CountsByStatus == nil || reset {
     tr.InvocationCount = 0
+    tr.ClientStreamCount = 0
+    tr.ServerStreamCount = 0
     tr.CountsByStatus = map[string]int{}
     tr.CountsByHeaders = map[string]*HeaderCounts{}
     tr.CountsByStatusCodes = KeyResult{}
@@ -265,8 +275,10 @@ func (c *HeaderCounts) setTimestamps(ts time.Time) {
   c.LastResultAt = ts
 }
 
-func (c *CountInfo) increment(retries int, ts time.Time) {
+func (c *CountInfo) increment(retries, csCount, ssCount int, ts time.Time) {
   c.Count++
+  c.ClientStreamCount += csCount
+  c.ServerStreamCount += ssCount
   c.Retries += retries
   if c.FirstResultAt.IsZero() || ts.Before(c.FirstResultAt) {
     c.FirstResultAt = ts
@@ -276,6 +288,8 @@ func (c *CountInfo) increment(retries int, ts time.Time) {
 
 func (c *CountInfo) incrementBy(retries int, by *CountInfo) {
   c.Count += by.Count
+  c.ClientStreamCount += by.ClientStreamCount
+  c.ServerStreamCount += by.ServerStreamCount
   c.Retries += by.Retries
   if c.FirstResultAt.IsZero() || by.FirstResultAt.Before(c.FirstResultAt) {
     c.FirstResultAt = by.FirstResultAt
@@ -285,25 +299,25 @@ func (c *CountInfo) incrementBy(retries int, by *CountInfo) {
   }
 }
 
-func incrementHeaderCount(m map[int]*CountInfo, statusCode int, retries int, ts time.Time) {
+func incrementHeaderCount(m map[int]*CountInfo, statusCode, retries, csCount, ssCount int, ts time.Time) {
   if m[statusCode] == nil {
     m[statusCode] = &CountInfo{}
   }
-  m[statusCode].increment(retries, ts)
+  m[statusCode].increment(retries, csCount, ssCount, ts)
 }
 
-func incrementHeaderCountBy(m map[int]*CountInfo, statusCode int, retries int, by *CountInfo) {
+func incrementHeaderCountBy(m map[int]*CountInfo, statusCode, retries int, by *CountInfo) {
   if m[statusCode] == nil {
     m[statusCode] = &CountInfo{}
   }
   m[statusCode].incrementBy(retries, by)
 }
 
-func incrementHeaderValueCount(m map[string]*CountInfo, value string, retries int, ts time.Time) {
+func incrementHeaderValueCount(m map[string]*CountInfo, value string, retries, csCount, ssCount int, ts time.Time) {
   if m[value] == nil {
     m[value] = &CountInfo{}
   }
-  m[value].increment(retries, ts)
+  m[value].increment(retries, csCount, ssCount, ts)
 }
 
 func incrementHeaderValueCountBy(m map[string]*CountInfo, value string, retries int, by *CountInfo) {
@@ -313,13 +327,13 @@ func incrementHeaderValueCountBy(m map[string]*CountInfo, value string, retries 
   m[value].incrementBy(retries, by)
 }
 
-func (tr *TargetResults) processCrossHeadersForHeader(header string, values []string, statusCode int, retries int, ts time.Time, allHeaders map[string][]string) {
+func (tr *TargetResults) processCrossHeadersForHeader(header string, values []string, statusCode, retries, csCount, ssCount int, ts time.Time, allHeaders map[string][]string) {
   if crossHeaders := tr.crossTrackingHeaders[header]; crossHeaders != nil {
-    processSubCrossHeadersForHeader(header, values, statusCode, retries, ts, tr.CountsByHeaders[header], crossHeaders, allHeaders)
+    processSubCrossHeadersForHeader(header, values, statusCode, retries, csCount, ssCount, ts, tr.CountsByHeaders[header], crossHeaders, allHeaders)
   }
 }
 
-func processSubCrossHeadersForHeader(header string, values []string, statusCode int, retries int, ts time.Time,
+func processSubCrossHeadersForHeader(header string, values []string, statusCode, retries, csCount, ssCount int, ts time.Time,
   headerCounts *HeaderCounts, crossHeaders []string, allHeaders map[string][]string) {
   for _, value := range values {
     if headerCounts.CrossHeadersByValues[value] == nil {
@@ -336,19 +350,19 @@ func processSubCrossHeadersForHeader(header string, values []string, statusCode 
     }
     crossHeaderCounts := headerCounts.CrossHeaders[crossHeader]
     crossHeaderCounts.setTimestamps(headerCounts.LastResultAt)
-    crossHeaderCounts.increment(retries, ts)
-    incrementHeaderCount(crossHeaderCounts.CountsByStatusCodes, statusCode, retries, ts)
+    crossHeaderCounts.increment(retries, csCount, ssCount, ts)
+    incrementHeaderCount(crossHeaderCounts.CountsByStatusCodes, statusCode, retries, csCount, ssCount, ts)
     for _, crossValue := range crossValues {
-      incrementHeaderValueCount(crossHeaderCounts.CountsByValues, crossValue, retries, ts)
+      incrementHeaderValueCount(crossHeaderCounts.CountsByValues, crossValue, retries, csCount, ssCount, ts)
       if crossHeaderCounts.CountsByValuesStatusCodes[crossValue] == nil {
         crossHeaderCounts.CountsByValuesStatusCodes[crossValue] = map[int]*CountInfo{}
       }
-      incrementHeaderCount(crossHeaderCounts.CountsByValuesStatusCodes[crossValue], statusCode, retries, ts)
+      incrementHeaderCount(crossHeaderCounts.CountsByValuesStatusCodes[crossValue], statusCode, retries, csCount, ssCount, ts)
     }
     processSubCrossHeaders := i < len(crossHeaders)-1
     subCrossHeaders := crossHeaders[i+1:]
     if processSubCrossHeaders {
-      processSubCrossHeadersForHeader(crossHeader, crossValues, statusCode, retries, ts, crossHeaderCounts, subCrossHeaders, allHeaders)
+      processSubCrossHeadersForHeader(crossHeader, crossValues, statusCode, retries, csCount, ssCount, ts, crossHeaderCounts, subCrossHeaders, allHeaders)
     }
     for _, value := range values {
       if headerCounts.CrossHeadersByValues[value][crossHeader] == nil {
@@ -356,50 +370,50 @@ func processSubCrossHeadersForHeader(header string, values []string, statusCode 
       }
       crossHeaderCountsByValue := headerCounts.CrossHeadersByValues[value][crossHeader]
       crossHeaderCountsByValue.setTimestamps(headerCounts.LastResultAt)
-      crossHeaderCountsByValue.increment(retries, ts)
-      incrementHeaderCount(crossHeaderCountsByValue.CountsByStatusCodes, statusCode, retries, ts)
+      crossHeaderCountsByValue.increment(retries, csCount, ssCount, ts)
+      incrementHeaderCount(crossHeaderCountsByValue.CountsByStatusCodes, statusCode, retries, csCount, ssCount, ts)
       for _, crossValue := range crossValues {
-        incrementHeaderValueCount(crossHeaderCountsByValue.CountsByValues, crossValue, retries, ts)
+        incrementHeaderValueCount(crossHeaderCountsByValue.CountsByValues, crossValue, retries, csCount, ssCount, ts)
         if crossHeaderCountsByValue.CountsByValuesStatusCodes[crossValue] == nil {
           crossHeaderCountsByValue.CountsByValuesStatusCodes[crossValue] = map[int]*CountInfo{}
         }
-        incrementHeaderCount(crossHeaderCountsByValue.CountsByValuesStatusCodes[crossValue], statusCode, retries, ts)
+        incrementHeaderCount(crossHeaderCountsByValue.CountsByValuesStatusCodes[crossValue], statusCode, retries, csCount, ssCount, ts)
       }
       if processSubCrossHeaders {
-        processSubCrossHeadersForHeader(crossHeader, crossValues, statusCode, retries, ts, crossHeaderCountsByValue, subCrossHeaders, allHeaders)
+        processSubCrossHeadersForHeader(crossHeader, crossValues, statusCode, retries, csCount, ssCount, ts, crossHeaderCountsByValue, subCrossHeaders, allHeaders)
       }
     }
   }
 }
 
-func (tr *TargetResults) addHeaderResult(header string, values []string, statusCode int, retries int, ts time.Time) {
+func (tr *TargetResults) addHeaderResult(header string, values []string, statusCode, retries, csCount, ssCount int, ts time.Time) {
   if tr.CountsByHeaders[header] == nil {
     tr.CountsByHeaders[header] = newHeaderCounts(header)
   }
   headerCounts := tr.CountsByHeaders[header]
   headerCounts.setTimestamps(ts)
-  headerCounts.increment(retries, ts)
-  incrementHeaderCount(headerCounts.CountsByStatusCodes, statusCode, retries, ts)
+  headerCounts.increment(retries, csCount, ssCount, ts)
+  incrementHeaderCount(headerCounts.CountsByStatusCodes, statusCode, retries, csCount, ssCount, ts)
   for _, value := range values {
-    incrementHeaderValueCount(headerCounts.CountsByValues, value, retries, ts)
+    incrementHeaderValueCount(headerCounts.CountsByValues, value, retries, csCount, ssCount, ts)
     if headerCounts.CountsByValuesStatusCodes[value] == nil {
       headerCounts.CountsByValuesStatusCodes[value] = map[int]*CountInfo{}
     }
-    incrementHeaderCount(headerCounts.CountsByValuesStatusCodes[value], statusCode, retries, ts)
+    incrementHeaderCount(headerCounts.CountsByValuesStatusCodes[value], statusCode, retries, csCount, ssCount, ts)
   }
 }
 
-func addKeyResultCounts(counts map[interface{}]*KeyResultCounts, key interface{}, statusCode int, retries int, ts time.Time, withStatusCodes, withTimeBuckets bool) {
+func addKeyResultCounts(counts map[interface{}]*KeyResultCounts, key interface{}, statusCode, retries, csCount, ssCount int, ts time.Time, withStatusCodes, withTimeBuckets bool) {
   if counts[key] == nil {
     counts[key] = newKeyResultCounts(withStatusCodes, withTimeBuckets)
   }
   resultCount := counts[key]
-  resultCount.increment(retries, ts)
+  resultCount.increment(retries, csCount, ssCount, ts)
   if withStatusCodes {
     if resultCount.ByStatusCodes[statusCode] == nil {
       resultCount.ByStatusCodes[statusCode] = &KeyResultCounts{}
     }
-    resultCount.ByStatusCodes[statusCode].increment(retries, ts)
+    resultCount.ByStatusCodes[statusCode].increment(retries, csCount, ssCount, ts)
   }
 }
 
@@ -408,36 +422,36 @@ func (tr *TargetResults) addTimeBucketResult(tb []int, ir *invocation.Invocation
   if tb != nil {
     bucket = fmt.Sprint(tb)
   }
-  addKeyResultCounts(tr.CountsByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, false)
+  addKeyResultCounts(tr.CountsByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
 
   if uriCount := tr.CountsByURIs[ir.Request.URI]; uriCount != nil {
-    addKeyResultCounts(uriCount.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, false)
+    addKeyResultCounts(uriCount.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
   }
 
   if rpc := tr.CountsByRequestPayloadSizes[ir.Request.PayloadSize]; rpc != nil {
-    addKeyResultCounts(rpc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, false)
+    addKeyResultCounts(rpc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
   }
 
   if rpc := tr.CountsByResponsePayloadSizes[ir.Request.PayloadSize]; rpc != nil {
-    addKeyResultCounts(rpc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, false)
+    addKeyResultCounts(rpc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
   }
 
   if rc := tr.CountsByRetries[ir.Retries]; rc != nil {
-    addKeyResultCounts(rc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, false)
+    addKeyResultCounts(rc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
   }
 
   if rrc := tr.CountsByRetryReasons[ir.LastRetryReason]; rrc != nil {
-    addKeyResultCounts(rrc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, false)
+    addKeyResultCounts(rrc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
   }
 
   for e := range ir.Errors {
     if ec := tr.CountsByErrors[e]; ec != nil {
-      addKeyResultCounts(ec.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, false)
+      addKeyResultCounts(ec.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
     }
   }
 
   if sc := tr.CountsByStatusCodes[ir.Response.StatusCode]; sc != nil {
-    addKeyResultCounts(sc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, false, false)
+    addKeyResultCounts(sc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, false, false)
   }
 }
 
@@ -452,37 +466,37 @@ func (tr *TargetResults) addResult(ir *invocation.InvocationResult) {
     tr.FirstResultAt = finishedAt
   }
   tr.LastResultAt = finishedAt
-
   if ir.Retries > 0 {
     tr.RetriedInvocationCounts++
-    addKeyResultCounts(tr.CountsByRetries, ir.Retries, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, true)
+    addKeyResultCounts(tr.CountsByRetries, ir.Retries, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
     if ir.LastRetryReason != "" {
-      addKeyResultCounts(tr.CountsByRetryReasons, ir.LastRetryReason, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, true)
+      addKeyResultCounts(tr.CountsByRetryReasons, ir.LastRetryReason, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
     }
   }
-
+  tr.ClientStreamCount += ir.Response.ClientStreamCount
+  tr.ServerStreamCount += ir.Response.ServerStreamCount
   tr.CountsByStatus[ir.Response.Status]++
-  addKeyResultCounts(tr.CountsByStatusCodes, ir.Response.StatusCode, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, false, true)
+  addKeyResultCounts(tr.CountsByStatusCodes, ir.Response.StatusCode, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, false, true)
 
   uri := strings.ToLower(ir.Request.URI)
-  addKeyResultCounts(tr.CountsByURIs, uri, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, true)
+  addKeyResultCounts(tr.CountsByURIs, uri, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
 
   for _, h := range tr.trackingHeaders {
     for rh, values := range ir.Response.Headers {
       if strings.EqualFold(h, rh) {
-        tr.addHeaderResult(h, values, ir.Response.StatusCode, ir.Retries, finishedAt)
-        tr.processCrossHeadersForHeader(h, values, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, ir.Response.Headers)
+        tr.addHeaderResult(h, values, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, finishedAt)
+        tr.processCrossHeadersForHeader(h, values, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, ir.Response.Headers)
       }
     }
   }
   if ir.Request.PayloadSize > 0 {
-    addKeyResultCounts(tr.CountsByRequestPayloadSizes, ir.Request.PayloadSize, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, true)
+    addKeyResultCounts(tr.CountsByRequestPayloadSizes, ir.Request.PayloadSize, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
   }
   if ir.Response.PayloadSize > 0 {
-    addKeyResultCounts(tr.CountsByResponsePayloadSizes, ir.Response.PayloadSize, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, true)
+    addKeyResultCounts(tr.CountsByResponsePayloadSizes, ir.Response.PayloadSize, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
   }
   for e := range ir.Errors {
-    addKeyResultCounts(tr.CountsByErrors, e, ir.Response.StatusCode, ir.Retries, ir.Request.LastRequestAt, true, true)
+    addKeyResultCounts(tr.CountsByErrors, e, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
   }
   if len(tr.trackingTimeBuckets) > 0 {
     addedToTimeBucket := false
@@ -801,6 +815,8 @@ func AddDeltaResults(results, delta *TargetResults, detailed bool) {
     results.LastResultAt = delta.LastResultAt
   }
   results.InvocationCount += delta.InvocationCount
+  results.ClientStreamCount += delta.ClientStreamCount
+  results.ServerStreamCount += delta.ServerStreamCount
   for k, v := range delta.CountsByStatus {
     results.CountsByStatus[k] += v
   }
@@ -836,6 +852,8 @@ func incrementKeyResultCounts(result SummaryResult, delta interface{}, detailed 
     }
     counts := result[key]
     counts.Count += val.Count
+    counts.ClientStreamCount += val.ClientStreamCount
+    counts.ServerStreamCount += val.ServerStreamCount
     if detailed {
       if len(val.ByStatusCodes) > 0 {
         if counts.ByStatusCodes == nil {

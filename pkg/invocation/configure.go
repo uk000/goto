@@ -189,8 +189,9 @@ func (spec *InvocationSpec) processProtocol() {
       spec.tcp = true
       spec.httpVersionMajor = 0
       spec.httpVersionMinor = 0
-    } else if strings.EqualFold(lowerProto, "grpc") {
+    } else if strings.EqualFold(lowerProto, "grpc") || strings.EqualFold(lowerProto, "grpcs") {
       spec.grpc = true
+      spec.TLS = strings.EqualFold(lowerProto, "grpcs")
       spec.httpVersionMajor = 2
       spec.httpVersionMinor = 0
     } else if major, minor, ok := http.ParseHTTPVersion(spec.Protocol); ok {

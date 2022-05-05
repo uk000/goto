@@ -35,14 +35,16 @@ import (
 )
 
 type InvocationResultResponse struct {
-  Status        string      `json:"status"`
-  StatusCode    int         `json:"statusCode"`
-  Headers       http.Header `json:"headers"`
-  PayloadSize   int         `json:"payloadSize"`
-  Payload       []byte      `json:"-"`
-  PayloadText   string      `json:"-"`
-  FirstByteInAt string      `json:"firstByteInAt"`
-  LastByteInAt  string      `json:"lastByteInAt"`
+  Status            string      `json:"status"`
+  StatusCode        int         `json:"statusCode"`
+  Headers           http.Header `json:"headers"`
+  PayloadSize       int         `json:"payloadSize"`
+  ClientStreamCount int         `json:"clientStreamCount"`
+  ServerStreamCount int         `json:"serverStreamCount"`
+  Payload           []byte      `json:"-"`
+  PayloadText       string      `json:"-"`
+  FirstByteInAt     string      `json:"firstByteInAt"`
+  LastByteInAt      string      `json:"lastByteInAt"`
 }
 
 type InvocationResultRequest struct {
@@ -83,6 +85,8 @@ type InvocationStatus struct {
   SuccessCount      int    `json:"successCount"`
   FailureCount      int    `json:"failureCount"`
   RetriesCount      int    `json:"retriesCount"`
+  ClientStreamCount int    `json:"clientStreamCount"`
+  ServerStreamCount int    `json:"serverStreamCount"`
   ABCount           int    `json:"abCount"`
   FirstRequestAt    string `json:"firstRequestAt"`
   LastRequestAt     string `json:"lastRequestAt"`
@@ -171,13 +175,16 @@ func (result *InvocationResult) processHTTPResponse(req *InvocationRequest, r *h
   }
 }
 
-func (result *InvocationResult) processGRPCResponse(req *InvocationRequest, responseStatus int, responseHeaders map[string][]string, responsePayload []byte, err error) {
+func (result *InvocationResult) processGRPCResponse(req *InvocationRequest, responseStatus int, responseHeaders map[string][]string,
+  responsePayload []byte, clientStreamCount, serverStreamCount int, err error) {
   result.err = err
   if err == nil {
     if result.tracker.Target.CollectResponse {
       result.Response.Payload = responsePayload
     }
     result.Response.PayloadSize = len(responsePayload)
+    result.Response.ClientStreamCount = clientStreamCount
+    result.Response.ServerStreamCount = serverStreamCount
     result.updateResult(req.url, result.tracker.Target.Method, strconv.Itoa(responseStatus), responseStatus, responseHeaders)
   } else {
     result.Response.Status = err.Error()
@@ -331,9 +338,11 @@ func (is *InvocationStatus) trackStatus(result *InvocationResult) {
   is.lastError = ""
   is.lastErrorCount = 0
   is.SuccessCount++
+  is.ClientStreamCount += result.Response.ClientStreamCount
+  is.ServerStreamCount += result.Response.ServerStreamCount
   is.lock.Unlock()
   if global.EnableInvocationLogs || !isRepeatStatus {
-    if global.EnableInvocationLogs {
+    if global.EnableInvocationResponseLogs {
       log.Println(util.ToJSONText(result))
     }
     is.lock.Lock()

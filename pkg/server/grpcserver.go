@@ -157,6 +157,7 @@ func (gs *GRPCServer) setHeaders(ctx context.Context, port int) (requestHeaders,
     for k, v := range md {
       if len(v) > 0 {
         requestHeaders[k] = v[0]
+        k = strings.ReplaceAll(k, ":", "")
         responseHeaders["Request-"+k] = v[0]
       }
     }

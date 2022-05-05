@@ -60,6 +60,8 @@ The schema below describes fields per target.
 |---|---|---|
 | target            | string | Target for which these results are captured |
 | invocationCounts      | int                 | Total requests sent to this target |
+| clientStreamCount      | int                 | Total GRPC stream chunks sent by the client to this target. Only applicable to GRPC targets. |
+| serverStreamCount      | int                 | Total GRPC stream chunks received from the GRPC service. Only applicable to GRPC targets. |
 | firstResultAt        | time                | Time of first result received from the target |
 | lastResultAt         | time                | Time of last result received from the target |
 | retriedInvocationCounts | int | Total requests to this target that were retried at least once |
@@ -82,6 +84,8 @@ The schema below describes fields of HeaderCounts json (used in `countsByHeaders
 |---|---|---|
 | header            | string | Header for which these results are captured |
 | count       | int | number of responses for this header  |
+| clientStreamCount | int | Total GRPC stream chunks sent by the client to this target. Only applicable to GRPC targets. |
+| serverStreamCount | int | Total GRPC stream chunks received from the GRPC service. Only applicable to GRPC targets. |
 | retries     | int | number of requests that were retried for this header |
 | firstResultAt | time | Time of first result for this header  |
 | lastResultAt  | time | Time of last result for this header |
@@ -99,6 +103,8 @@ The schema below describes fields of json object used to report data related to 
 |Field|Data Type|Description|
 |---|---|---|
 | count       | int | number of responses for this key  |
+| clientStreamCount | int | Total GRPC stream chunks sent by the client to this target. Only applicable to GRPC targets. |
+| serverStreamCount | int | Total GRPC stream chunks received from the GRPC service. Only applicable to GRPC targets. |
 | retries     | int | number of requests that were retried for this key |
 | firstResultAt | time | Time of first result for this key  |
 | lastResultAt  | time | Time of last result for this key |
@@ -112,6 +118,8 @@ The schema below describes fields of json object used in `countsByStatusCodes` r
 |Field|Data Type|Description|
 |---|---|---|
 | count       | int | number of responses for this status code  |
+| clientStreamCount | int | Total GRPC stream chunks sent by the client to this target. Only applicable to GRPC targets. |
+| serverStreamCount | int | Total GRPC stream chunks received from the GRPC service. Only applicable to GRPC targets. |
 | retries     | int | number of requests that were retried for this status code |
 | firstResultAt | time | Time of first result for this status code  |
 | lastResultAt  | time | Time of last result for this status code |
@@ -125,6 +133,8 @@ The schema below describes fields of json object used in `countsByTimeBuckets` r
 |Field|Data Type|Description|
 |---|---|---|
 | count       | int | number of responses for this time bucket  |
+| clientStreamCount | int | Total GRPC stream chunks sent by the client to this target. Only applicable to GRPC targets. |
+| serverStreamCount | int | Total GRPC stream chunks received from the GRPC service. Only applicable to GRPC targets. |
 | retries     | int | number of requests that were retried for this time bucket |
 | firstResultAt | time | Time of first result for this time bucket  |
 | lastResultAt  | time | Time of last result for this time bucket |
@@ -138,6 +148,8 @@ The schema below describes fields per target.
 |Field|Data Type|Description|
 |---|---|---|
 | count       | int | number of responses in this set  |
+| clientStreamCount | int | Total GRPC stream chunks sent by the client to this target. Only applicable to GRPC targets. |
+| serverStreamCount | int | Total GRPC stream chunks received from the GRPC service. Only applicable to GRPC targets. |
 | retries     | int | number of requests that were retried in this set |
 | firstResultAt | time | Time of first result in this set  |
 | lastResultAt  | time | Time of last result in this set |
@@ -166,6 +178,8 @@ The schema below describes fields per target.
 | successCount | int | number of successful requests  |
 | failureCount | int | number of failed requests  |
 | retriesCount | int | number of retries made across all requests  |
+| clientStreamCount | int | Total GRPC stream chunks sent by the client to this target. Only applicable to GRPC targets. |
+| serverStreamCount | int | Total GRPC stream chunks received from the GRPC service. Only applicable to GRPC targets. |
 | abCount | int | number of requests made for A/B comparison if configured  |
 | firstRequestAt | time | time when first request completed  |
 | lastRequestAt | time | time when last request completed  |

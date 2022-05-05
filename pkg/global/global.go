@@ -45,24 +45,25 @@ var (
   ShutdownDelay time.Duration
   StartupScript []string
 
-  Stopping                   bool = false
-  EnableServerLogs           bool = true
-  EnableAdminLogs            bool = true
-  EnableClientLogs           bool = true
-  EnableInvocationLogs       bool = true
-  EnableRegistryLogs         bool = true
-  EnableRegistryLockerLogs   bool = false
-  EnableRegistryEventsLogs   bool = false
-  EnableRegistryReminderLogs bool = false
-  EnablePeerHealthLogs       bool = true
-  EnableProbeLogs            bool = false
-  EnableMetricsLogs          bool = true
-  LogRequestHeaders          bool = true
-  LogRequestMiniBody         bool = false
-  LogRequestBody             bool = false
-  LogResponseHeaders         bool = false
-  LogResponseMiniBody        bool = false
-  LogResponseBody            bool = false
+  Stopping                     bool = false
+  EnableServerLogs             bool = true
+  EnableAdminLogs              bool = true
+  EnableClientLogs             bool = true
+  EnableInvocationLogs         bool = true
+  EnableInvocationResponseLogs bool = false
+  EnableRegistryLogs           bool = true
+  EnableRegistryLockerLogs     bool = false
+  EnableRegistryEventsLogs     bool = false
+  EnableRegistryReminderLogs   bool = false
+  EnablePeerHealthLogs         bool = true
+  EnableProbeLogs              bool = false
+  EnableMetricsLogs            bool = true
+  LogRequestHeaders            bool = true
+  LogRequestMiniBody           bool = false
+  LogRequestBody               bool = false
+  LogResponseHeaders           bool = false
+  LogResponseMiniBody          bool = false
+  LogResponseBody              bool = false
 
   MaxMTUSize int = getMaxMTUSize()
 

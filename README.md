@@ -139,6 +139,16 @@ See an example in this doc: [Scenario: Creating TCP chaos with Goto](docs/goto-p
 Going even further, `goto` proxy allows for routing to multiple upstream TCP endpoints based on SNI from client's TLS handshake. `Goto` would still act as an opaque TCP proxy and actual TLS handshake gets done between the client and the service, but `goto` can inspect the client handshake packets to read the SNI information and route to one of the multiple upstream TCP endpoints that are configured for SNI-based routing. Too much? Well, at least see the example in this doc: [Scenario: TCP Proxy with SNI matching using Goto](docs/goto-proxy-chaos.md#scenario-tcp-proxy-with-sni-matching-using-goto)
 
 #
+## `Use Case`: Test an upstream GRPC service behavior
+`Goto` client module has support for sending GRPC traffic to any arbitrary GRPC service. 
+- You'd need a proto file for the upstream service that describes the service methods, inputs, outputs, etc. 
+- `Goto` GRPC APIs allow you to upload proto files that `goto` can parse and learn about the available GRPC services. 
+- Then it's just a matter of adding targets to the `goto` client module and asking it to trigger the traffic. 
+
+See [Client GRPC Examples](docs/grpc-client-examples.md) for full working samples.
+
+
+#
 ## What Else?
 - You need to inspect some existing traffic between two applications in order to investigate some issue. The traffic passes through various network layers, and you wish to analyze the state of a request at a certain point in its journey, e.g. what does the request look like once it goes through a K8s ingress gateway. You're staring at the right tool.
 - You wish to test a proxy/gateway behavior sitting between a pair of client and service in the face of upstream and/or downstream chaos. Here our focus of testing is an intermediate proxy (e.g. service mesh).
@@ -206,6 +216,7 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 - [Client Events](#client-events)
 - [Client JSON Schemas](docs/client-api-json-schemas.md)
 - [Client APIs and Results Examples](docs/client-api-examples.md)
+- [Client GRPC Examples](docs/grpc-client-examples.md)
 
 ### GRPC Client
 - [GRPC APIs](#grpc-apis)
@@ -315,7 +326,7 @@ The application accepts the following command arguments:
         </tr>
         <tr>
           <td rowspan="2"><pre>--ports {ports}</pre></td>
-          <td>Initial list of ports that the server should start with. Port list is given as comma-separated list of <pre>{port1},<br/>{port2}/{protocol2}/{commonName2},<br/>{port3}/{protocol3}/{commonName3},...</pre>. The first port in the list is used as the primary port and is forced to be HTTP. Protocol is optional, and can be one of <pre>http (default), http1, https, https1, tcp,<br/> tls (implies tcp+tls), or grpc. </pre> Protocol <strong>https</strong> configures the port to serve HTTP requests with a self-signed TLS cert, whereas protocol <strong>tls</strong> configures a TCP port with self-signed TLS cert. <strong>CommonName</strong> is used for generating self-signed certs, and defaults to <strong>goto.goto</strong>. Use protocol <strong>http1</strong> or <strong>https1</strong> to configure a listener port that only serves HTTP/1.1 protocol and explicitly disallows HTTP/2 protocol. </td>
+          <td>Initial list of ports that the server should start with. Port list is given as comma-separated list of <pre>{port1},<br/>{port2}/{protocol2}/{commonName2},<br/>{port3}/{protocol3}/{commonName3},...</pre>. The first port in the list is used as the primary port and is forced to be HTTP. Protocol is optional, and can be one of <pre>http (default), http1, https, https1, tcp,<br/> tls (tcp+tls), grpc, or grpcs (grpc+tls). </pre> Protocol <strong>https</strong> configures the port to serve HTTP requests with a self-signed TLS cert, whereas protocol <strong>tls</strong> configures a TCP port with self-signed TLS cert, and <strong>grpcs</strong> configures a GRPC port with self-signed TLS cert. <strong>CommonName</strong> is used for generating self-signed certs, and defaults to <strong>goto.goto</strong>. Use protocol <strong>http1</strong> or <strong>https1</strong> to configure a listener port that only serves HTTP/1.1 protocol and explicitly disallows HTTP/2 protocol. </td>
           <td rowspan="2">""</td>
         </tr>
         <tr>
@@ -531,9 +542,9 @@ Client sends header `From-Goto-Host` to pass its identity to the server.
 ###### <small> [Back to TOC](#toc) </small>
 
 
-# <a name="client-events"></a>
+#### Client Events
 <details>
-<summary>Client Events</summary>
+<summary>Client Events List</summary>
 
 - `Target Added`: an invocation target was added
 - `Targets Removed`: one or more invocation targets were removed
@@ -559,6 +570,8 @@ Client sends header `From-Goto-Host` to pass its identity to the server.
 See [Client JSON Schemas](docs/client-api-json-schemas.md)
 
 See [Client APIs and Results Examples](docs/client-api-examples.md)
+
+See [Client GRPC Examples](docs/grpc-client-examples.md)
 
 ###### <small> [Back to TOC](#toc) </small>
 
@@ -704,6 +717,7 @@ The log APIs can be used to see the current logging config and turn logging on/o
 | POST | /log/admin/{enable} | Enable/disable logging of admin calls |
 | POST | /log/client/{enable} | Enable/disable client logging completely |
 | POST | /log/invocation/{enable} | Enable/disable invocation logs |
+| POST | /log/invocation/response/{enable} | Enable/disable logging of response received for each invocation call |
 | POST | /log/registry/{enable} | Enable/disable registry logs |
 | POST | /log/registry/locker/{enable} | Enable/disable registry locker logs |
 | POST | /log/registry/events/{enable} | Enable/disable registry events logs |
@@ -876,6 +890,8 @@ See [Metrics Example](docs/metrics-example.md)
   - Serve HTTPS traffic over both HTTP/1.x and HTTP/2 protocol.
 - Protocol: `https1`
   - Serve HTTPS traffic over HTTP/1.x only with no HTTP/2 upgrade support. This can be useful for testing a client behavior when server explicitly disallows HTTP/2.
+- Protocol: `grpcs`
+  - Serve GRPC traffic over TLS
 - Protocol: `tls`
   - Serve TCP traffic over TLS
 
@@ -928,7 +944,7 @@ See [Metrics Example](docs/metrics-example.md)
 | label    | string | Label to be applied to the listener. This can also be set/changed via REST API later. |
 | hostLabel    | string | The host label is auto-generated and assigned to the listeners to uniquely identify the host while still differentiating between multiple listeners active on the `goto` instance. This is auto-generated using format `<hostname>@<ipaddress>:<port>`. Host Label is also sent back in the `Goto-Host` response header.  |
 | port     | int    | Port on which the new listener will listen on. |
-| protocol | string | `http`, `http1`, `https`, `https1`, `grpc`, `tcp`, or `tls`. Protocol `tls` implies TCP + TLS. |
+| protocol | string | `http`, `http1`, `https`, `https1`, `grpc`, `grpcs`, `tcp`, or `tls`. Protocol `tls` implies TCP+TLS and `grpcs` implies GRPC+TLS as opposed to `tcp` and `grpc` being plain-text versions. |
 | open | bool | Controls whether the listener should be opened as soon as it's added. Also reflects the listener's current status when queried. |
 | autoCert | bool | Controls whether a TLS certificate should be auto-generated for an HTTPS or TLS listener. If enabled, the TLS cert for the listener is generated using the `CommonName` field if configured, or else the cert common name is defaulted to `goto.goto`. |
 | commonName | string | If given, this common name is used to generate self-signed cert for this listener. |
@@ -1191,7 +1207,7 @@ The GRPC response from `goto` also carries the following headers:
 
 </details>
 
-See [GRPC Example](docs/grpc-example.md)
+See [GRPC Server Example](docs/grpc-server-example.md)
 
 ###### <small> [Back to TOC](#toc) </small>
 

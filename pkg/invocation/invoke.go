@@ -18,7 +18,6 @@ package invocation
 
 import (
   "bytes"
-  "context"
   "fmt"
   . "goto/pkg/constants"
   "goto/pkg/grpc"
@@ -31,10 +30,7 @@ import (
   "log"
   "net/http"
   "strconv"
-  "sync"
   "time"
-
-  "google.golang.org/grpc/metadata"
 )
 
 type InvocationRequest struct {
@@ -172,13 +168,7 @@ func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
   defer client.lock.Unlock()
   if client.transportClient != nil {
     if client.transportClient.IsGRPC() {
-      if len(client.tracker.Payloads) > 1 {
-        ir.uri = "/Goto/streamInOut"
-        ir.grpcStreamInput = &pb.StreamConfig{ChunkSize: 1, ChunkCount: 1, Interval: "10ms"}
-      } else {
-        ir.uri = "/Goto/echo"
-        ir.grpcInput = &pb.Input{}
-      }
+      ir.uri = client.tracker.Target.Service + "." + client.tracker.Target.Method
     } else if client.transportClient.IsHTTP() {
       var requestReader io.ReadCloser
       var requestWriter io.WriteCloser
@@ -253,7 +243,7 @@ func (ir *InvocationRequest) invoke() {
 
 func (ir *InvocationRequest) invokeHTTP() {
   if ir.client == nil || ir.client.Transport() == nil || ir.client.HTTP() == nil {
-    fmt.Printf("Invocation: [ERROR] HTTP invocation attempted without a client")
+    log.Printf("Invocation: [ERROR] HTTP invocation attempted without a client")
     return
   }
   ir.client.SetTLSConfig(tlsConfig(ir.httpRequest.Host, ir.tracker.Target.VerifyTLS))
@@ -264,71 +254,14 @@ func (ir *InvocationRequest) invokeHTTP() {
 
 func (ir *InvocationRequest) invokeGRPC() {
   if ir.client == nil {
-    fmt.Printf("Invocation: [ERROR] GRPC invocation attempted without a client")
+    log.Printf("Invocation: [ERROR] GRPC invocation attempted without a client")
     return
   }
   if response, err := ir.client.(*grpc.GRPCClient).Invoke(ir.tracker.Target.Method, ir.headers, ir.tracker.Payloads); err == nil {
-    log.Println(string(response.ResponsePayload))
-    ir.result.processGRPCResponse(ir, response.EquivalentHTTPStatusCode, response.ResponseHeaders, response.ResponsePayload, err)
+    ir.result.processGRPCResponse(ir, response.EquivalentHTTPStatusCode, response.ResponseHeaders,
+      response.ResponsePayload, response.ClientStreamCount, response.ServerStreamCount, err)
   } else {
     ir.tracker.logConnectionFailed(err.Error())
-  }
-}
-
-func (ir *InvocationRequest) invokeGRPC2() {
-  ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(ir.headers))
-  gotoClient := pb.NewGotoClient(ir.client.GRPC())
-  if len(ir.tracker.Payloads) > 1 {
-    if streamClient, err := gotoClient.StreamInOut(ctx); err == nil {
-      wg := sync.WaitGroup{}
-      wg.Add(2)
-      go func() {
-        for _, payload := range ir.tracker.Payloads {
-          input := &pb.StreamConfig{ChunkSize: 1, ChunkCount: 1, Interval: "10ms", Payload: string(payload)}
-          if err := streamClient.Send(input); err == nil {
-            fmt.Println("Send GRPC stream input")
-          } else {
-            fmt.Println(err.Error())
-          }
-        }
-        if err := streamClient.CloseSend(); err != nil {
-          fmt.Println(err.Error())
-        }
-        wg.Done()
-      }()
-      go func() {
-        var data []interface{}
-        if md, err := streamClient.Header(); err == nil {
-          fmt.Println(md)
-        }
-        status := 200
-        for {
-          if out, err := streamClient.Recv(); err == nil {
-            fmt.Printf("Received stream input: %s\n", out.Payload)
-            data = append(data, out)
-          } else {
-            if err != io.EOF {
-              fmt.Printf("Invocation: [ERROR] %s\n", err.Error())
-              status = 500
-            }
-            break
-          }
-        }
-        ir.result.grpcResponse = data
-        ir.result.grpcStatus = status
-        wg.Done()
-      }()
-      wg.Wait()
-    } else {
-      ir.result.err = err
-      fmt.Printf("Invocation: [ERROR] while invoking GRPC stream request: %s\n", err.Error())
-    }
-  } else if len(ir.tracker.Payloads) == 1 {
-    _, err := gotoClient.Echo(ctx, &pb.Input{Payload: string(ir.tracker.Payloads[0])})
-    if err != nil {
-      ir.result.err = err
-      fmt.Printf("Invocation: [ERROR] while invoking GRPC echo request: %s\n", err.Error())
-    }
   }
 }
 
