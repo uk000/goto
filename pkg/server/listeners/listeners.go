@@ -144,7 +144,7 @@ func AddInitialListeners(portList []string) {
           if !strings.EqualFold(protocol, "http") && !strings.EqualFold(protocol, "https") &&
             !strings.EqualFold(protocol, "http1") && !strings.EqualFold(protocol, "https1") &&
             !strings.EqualFold(protocol, "grpc") && !strings.EqualFold(protocol, "grpcs") && 
-            !strings.EqualFold(protocol, "udp") && !strings.EqualFold(protocol, "tls") {
+            !strings.EqualFold(protocol, "udp") && !strings.EqualFold(protocol, "tls") && !strings.EqualFold(protocol, "tcps") {
             protocol = "tcp"
           }
         }
@@ -389,7 +389,7 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
     l.isUDP = true
   } else {
     l.isTCP = true
-    if strings.EqualFold(l.Protocol, "tls") {
+    if strings.EqualFold(l.Protocol, "tls") || strings.EqualFold(l.Protocol, "tcps") {
       l.Protocol = "tcp"
       l.TLS = true
       if l.Cert == nil && l.RawCert == nil {

@@ -42,6 +42,8 @@ const (
   HeaderGotoInAt                  = "Goto-In-At"
   HeaderGotoOutAt                 = "Goto-Out-At"
   HeaderGotoTook                  = "Goto-Took"
+  HeaderProxyRequestDropped       = "Goto-Proxy-Request-Dropped"
+  HeaderProxyResponseDropped      = "Goto-Proxy-Response-Dropped"
   HeaderFromGoto                  = "From-Goto"
   HeaderFromGotoHost              = "From-Goto-Host"
   HeaderGotoRequestID             = "Goto-Request-ID"

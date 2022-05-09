@@ -138,6 +138,8 @@ See an example in this doc: [Scenario: Creating TCP chaos with Goto](docs/goto-p
 
 Going even further, `goto` proxy allows for routing to multiple upstream TCP endpoints based on SNI from client's TLS handshake. `Goto` would still act as an opaque TCP proxy and actual TLS handshake gets done between the client and the service, but `goto` can inspect the client handshake packets to read the SNI information and route to one of the multiple upstream TCP endpoints that are configured for SNI-based routing. Too much? Well, at least see the example in this doc: [Scenario: TCP Proxy with SNI matching using Goto](docs/goto-proxy-chaos.md#scenario-tcp-proxy-with-sni-matching-using-goto)
 
+See more [Proxy Examples](docs/proxy-example.md)
+
 #
 ## `Use Case`: Test an upstream GRPC service behavior
 `Goto` client module has support for sending GRPC traffic to any arbitrary GRPC service. 
@@ -223,7 +225,7 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 
 ### Goto Server
 - [Server Features](#goto-server-features)
-- [Goto Response Headers](#goto-response-headers)
+- [Goto Response Headers](#-http-headers)
 - [Logs](#goto-logs)
 - [Goto Version](#-goto-version)
 - [Events](#-events)
@@ -639,6 +641,8 @@ The following response headers are added conditionally under different scenarios
 - `Goto-Proxy-Upstream-Status|<upstream-name>`: status the `goto` proxy's upstream service responded with, which may be different than the status `goto` responded with to the downstream client
 - `Goto-Proxy-Upstream-Took|<upstream-name>`: Total roundtrip time the proxy's upstream call took
 - `Goto-Proxy-Delay`: any delay added to the request/response by `goto` as a proxy
+- `Goto-Proxy-Request-Dropped`: sent back with response when the proxy drops the downstream request based on the drop percentage defined for the upstream target (see proxy feature)
+- `Goto-Proxy-Response-Dropped`: sent back with response when the proxy drops the upstream response based on the drop percentage defined for the upstream target (see proxy feature)
 
 #### Tunnel response headers:
 - `Goto-Tunnel-Host[<seq>]`: identifies `goto` instance hosts through which this request was tunneled along with the sequence number of each instance in the tunnel chain.
@@ -717,20 +721,20 @@ The log APIs can be used to see the current logging config and turn logging on/o
 | POST | /log/admin/{enable} | Enable/disable logging of admin calls |
 | POST | /log/client/{enable} | Enable/disable client logging completely |
 | POST | /log/invocation/{enable} | Enable/disable invocation logs |
-| POST | /log/invocation/response/{enable} | Enable/disable logging of response received for each invocation call |
+| POST | /log/invocation<br/>/response/{enable} | Enable/disable logging of response received for each invocation call |
 | POST | /log/registry/{enable} | Enable/disable registry logs |
-| POST | /log/registry/locker/{enable} | Enable/disable registry locker logs |
-| POST | /log/registry/events/{enable} | Enable/disable registry events logs |
-| POST | /log/registry/reminder/{enable} | Enable/disable logging of reminder calls that registry receives from peers |
+| POST | /log/registry<br/>/locker/{enable} | Enable/disable registry locker logs |
+| POST | /log/registry<br/>/events/{enable} | Enable/disable registry events logs |
+| POST | /log/registry<br/>/reminder/{enable} | Enable/disable logging of reminder calls that registry receives from peers |
 | POST | /log/health/{enable} | Enable/disable logging of health calls that peers receive from registry |
 | POST | /log/probe/{enable} | Enable/disable readiness and liveness probe logs |
 | POST | /log/metrics/{enable} | Enable/disable metrics logs |
-| POST | /log/request/headers/{enable} | Enable/disable request headers logs |
-| POST | /log/request/minibody/{enable} | Enable/disable request minibody (truncated body) logs (currently only supported for HTTP/1.x requests, not for H/2)  |
-| POST | /log/request/body/{enable} | Enable/disable request body logs (currently only supported for HTTP/1.x requests, not for H/2) |
-| POST | /log/response/headers/{enable} | Enable/disable response headers logs |
-| POST | /log/response/minibody/{enable} | Enable/disable response minibody (truncated body) logs (currently only supported for HTTP/1.x requests, not for H/2) |
-| POST | /log/response/body/{enable} | Enable/disable response body logs (currently only supported for HTTP/1.x requests, not for H/2) |
+| POST | /log/request<br/>/headers/{enable} | Enable/disable request headers logs |
+| POST | /log/request<br/>/minibody/{enable} | Enable/disable request minibody (truncated body) logs (currently only supported for HTTP/1.x requests, not for H/2)  |
+| POST | /log/request<br/>/body/{enable} | Enable/disable request body logs (currently only supported for HTTP/1.x requests, not for H/2) |
+| POST | /log/response<br/>/headers/{enable} | Enable/disable response headers logs |
+| POST | /log/response<br/>/minibody/{enable} | Enable/disable response minibody (truncated body) logs (currently only supported for HTTP/1.x requests, not for H/2) |
+| POST | /log/response<br/>/body/{enable} | Enable/disable response body logs (currently only supported for HTTP/1.x requests, not for H/2) |
 
 <details>
 <summary>Log API Examples</summary>
@@ -769,8 +773,8 @@ Param `reverse=y` produces the timeline in reverse chronological order. By defau
 |---|---|---|
 | POST      | /events/flush    | Publish any pending events to the registry, and clear the instance's events timeline. |
 | POST      | /events/clear    | Clear the instance's events timeline. |
-| GET       | /events?reverse=`[y/n]`&data=`[y/n]` | Get events timeline of the instance. To get combined events from all instances, use the registry's peers events APIs instead.  |
-| GET       | /events/search/`{text}`?reverse=`[y/n]`&data=`[y/n]` | Search the instance's events timeline. |
+| GET       | /events?reverse=`[y/n]`<br/>&data=`[y/n]` | Get events timeline of the instance. To get combined events from all instances, use the registry's peers events APIs instead.  |
+| GET       | /events/search/`{text}`?<br/>reverse=`[y/n]`<br/>&data=`[y/n]` | Search the instance's events timeline. |
 
 
 <details>
@@ -2273,124 +2277,157 @@ Any request that doesn't match any of the defined management APIs, and also does
 `Goto` can act as a TCP or HTTP proxy that sits between a downstream client and an upstream service, allowing you a point in the network where the communication between the downstream client and upstream service can be observed and affected.
 
 ### HTTP Proxy
-As an HTTP proxy, it allows configuring upstream endpoints that are triggered when incoming downstream HTTP requests match certain criteria (based on URI, Headers and Query Params).
-
-The upstream endpoints are defined as a URL along with optional transformations to be performed on the request URI, headers and query params. Each upstream endpoint also defines certain match criteria based on which it would be triggered. The minimum match criteria to trigger an upstream endpoint is request URI, and additional match criteria may be defined for headers and query params. URI `/` can be used as a match criteria to match all URIs.
-
-A downstream request is matched against all defined upstream endpoints match criteria, and the request is forwarded to the matching upstream endpoints. Downstream request headers, query params, and payload gets passed to the upstream requests. Transformations can be defined per upstream endpoint, allowing for URI, headers and query params to be added/removed/replaced. This allows for the upstream requests to differ from the downstream request.
-
-If the request only matches a single upstream endpoint, the upstream response payload is sent as downstream response payload. If the request matches multiple upstream endpoints, the downstream response payload will be a wrapper containing a collection of all those upstream responses. Downstream response headers include all the upstream response headers combined with the `goto` headers from the proxy instance. As a result, downstream responses may contain duplicate headers or multiple values for the same header.
-
-In addition to request routing, the HTTP proxy also offers some chaos features:
-- A `delay` can be configured per target that's applied to all requests and responses in either direction for that target (See the `delay` API later in this section). Note that this delay feature is separate from the one offered by `Goto` as a Server, via [URIs](#-uris) and [Response Delay](#-response-delay). The URI delay feature in particular allows for more fine-grained delay configuration that can be used in conjunction with the proxy feature to apply delays to URIs that eventually get routed via proxy.
-- Additional chaos can be applied via listener API, by closing/reopening a connection.
-- If you want to drop some TCP writes for HTTP traffic, you can configure the port in `goto` as a TCP port and use the TCP features described below while the client and upstream still communicate over HTTP.
+- Any HTTP(S) listener that you open in `goto` is ready to act as an http proxy in addition to the other server duties it performs.
+- To use an HTTP(S) listener as a proxy, all you need to do is add one or more upstream targets. The request processing path in `goto` checks for the presence of proxy targets for the listener where a request arrives. If any proxy target is defined on the listener, `goto` matches the request with those targets and forwards it to the matched targets. If no match found, the listener processes the request as a server.
+- As an HTTP proxy, `goto` can perform various kind of HTTP filtering and transformations before forwarding a downstream request to the upstream service.
+  - URI rewrite
+  - Add/remove headers.
+  - Add/remove query params.
+  - Convert between HTTP and HTTPS protocols.
+  - Route a single request to multiple upstream targets and send the combined responses back to the downstream client.
+- Note that if you use an HTTPS listener as a proxy, `goto` will perform TLS termination and will redo TLS for upstream HTTPS endpoints. If you want a passthrough proxy, you can use a TCP listener in goto to act as a TCP proxy for HTTP traffic.
 
 ### TCP Proxy
-`Goto` can be configured to act as an opaque TCP proxy that receives and transmits TCP packets in either direction. 
+- Any TCP listener can act as a TCP proxy if a proxy target is defined for that listener.
+- A TCP proxy only supports routing to a single upstream target, except for SNI based routing for TLS connections. This is unlike an HTTP proxy that can route a single request to multiple upstream targets.
+- TCP proxy is a passthrough proxy as it transmits bytes opaquely between the downstream and upstream parties. The only time the TCP proxy inspects the bytes is if you configure it to perform SNI based routing.
+- You can optionally add SNI match criteria to a TCP proxy target (see the relevant APIs further below in the doc). In this case, `goto` will inspect the client TLS handshake packets to read SNI information and match it against the defined server names. The connection will be routed to the first target for which the defined server name matches client's requested SNI.
+  <details>
+  <summary>More details about SNI matching</summary>
+  <ul style='font-size:0.95em'>
+    <li>
+    At the time of a new downstream connection, `goto` checks whether TCP proxy targets on this port have been configured with SNI match. If so, `goto` reads SNI from the TLS client handshake data without actually doing the handshake, and uses the SNI DNS hostname to pick an upstream endpoint to route to. The client TLS handshake data is forwarded to the upstream endpoint so the actual handshake still happens between the client and the upstream service.
+    </li>
+    <li>
+    While inspecting the client's TLS handshake, `goto` also logs the Cipher Suites and Signature Algorithms requested by the client. However, these can only be seen in the `goto` logs for now, not exposed via any API.
+    </li>
+  </ul>
+  </details>
 
-For TLS communication, `goto` offers an additional feature where the upstream endpoints can be routed to based on SNI server name match in the downstream client's TLS handshake. At the time of a new downstream connection, `goto` checks whether TCP proxy targets on this port have been configured with SNI match. If so, `goto` reads SNI from the TLS client handshake data without actually doing the handshake, and uses the SNI DNS hostname to pick an upstream endpoint to route to. The client TLS handshake data is forwarded to the upstream endpoint so the actual handshake still happens between the client and the upstream service.
+### Upstream targets
+Upstream targets can be defined in one of the two ways:
+- By posting a JSON spec to `/proxy/targets/add` API.
+- Build the upstream endpoint incrementally via multiple API calls. Benefit of this approach is that targets can be defined via just API calls without the need for a JSON payload, but it does require multiple API calls to define each target.
+    <details>
+      <summary>See the steps needed to define a proxy target using APIs</summary>
+      
+    - First add a target endpoint using API `/proxy/targets/add/{target}?url={url}`
+    - Then define one or more URI routing for this endpoint using API `/proxy/targets/{target}/route?from={uri}&to={uri}`. A target should have at least one URI route defined for it to be triggered.
+    - Optionally define any necessary header and query match criteria via APIs `/proxy/targets/{target}/match/[header|query]/...`
+    - Optionally define any necessary header and query transformations via APIs `/proxy/targets/{target}/headers/[add|remove]/...`, and `/proxy/targets/{target}/query/[add|remove]/...`.
+      
+    </details>
 
-The SNI routing feature described above implies that either a TCP port can be configured for just one upstream endpoint with no SNI match, or it can be configured for one or more upstream endpoints with one SNI hostname per endpoint. Unlike the HTTP proxy where a single downstream request can be routed to multiple upstream endpoints, the TCP proxy maintains a one-to-one relationship between the downstream client and the upstream service, only acting as a passthrough TCP proxy.
+### Proxy Target Matching
+- HTTP proxy targets require URI based matching at the minimum, and additional match criteria can be defined based on HTTP headers and query params. A target can be defined to accept all requests by setting URI match to `/`.
+    - URI route match is a pre-requisite for routing a call to upstream endpoints. It serves as a match criteria of its own, in `addition` to the `MatchAny` or `MatchAll` criteria of the target. 
+    - So if there's a `MatchAny` criteria defined for the target as `Header=Foo` and a route defined as `/foo -> /bar`, then a request will get routed to the upstream only if it has the URI `/foo` AND the header `Foo:<any value>`.
+    - The match criteria added via APIs get added with `MatchAny` semantics. If you need to use `MatchAll` semantics for a target's match criteria, you must define the target using JSON schema.
+- TCP targets support SNI based matching if the communication is over TLS. Otherwise TCP proxy only supports a single upstream service.
+    <details>
+    <summary> &#x1F525; More detailed explanation of HTTP target matching &#x1F525; </summary>
 
-> <small> While inspecting the client's TLS handshake, `goto` also logs the Cipher Suites and Signature Algorithms requested by the client. However, these can only be seen in the `goto` logs for now, not exposed via any API.</small>
+    Proxy target match criteria are based on request URI match and optional headers and query parameters matching.
+    An upstream target is defined with a URI routing table, and the upstream target gets triggered for all requests matching any of the URIs defined in the routing table. However, if you need additional filtering of requests before sending those over to the upstream endpoints, you can use the headers and query params match criteria. These criteria can be defined to either match ANY of them or ALL of them for the request to qualify.
 
-Being a TCP man-in-the-middle allows `goto` to offer some chaos features even for TCP communication:
-- A `delay` can be configured per target that's applied to all writes in either direction for that target's TCP communications
-- A `drop` percentage can be configured per target that specifies what percentage of TCP writes should be skipped in either direction for that target's TCP communications. While technically this is not a true network TCP packet drop, it does allow for some interesting chaos testing where data is randomly lost between the two parties.
+    - URI Routing Table: this is defined as the mandatory `routes` field in the target definition. The source URI in the routing table can be specified using variables, e.g. `{foo}`, to indicate the variable portion of a URI. For example, `/foo/{f}/bar/{b}` will match URIs like `/foo/123/bar/abc`, `/foo/something/bar/otherthing`, etc. The variables are captured under the given labels (`f` and `b` in the previous example). The destination URI in the routing table can refer to those captured variables using the syntax described in this example:
+      
+      ```
+      curl http://goto:8080/proxy/targets/add --data \
+      '{"name": "target1", "endpoint":"http://somewhere", \
+      "routes":{"/foo/{x}/bar/{y}": "/abc/{y:.*}/def/{x:.*}"}, \
+      "enabled":true, "sendID": true}'
+      ```
+
+      This target will be triggered for requests with the pattern `/foo/<somex>/bar/<somey>` and the request will be forwarded to the target as `http://somewhere/abc/somey/def/somex`, where the values `somex` and `somey` are extracted from the original request and injected into the replacement URI.
+
+      URI match `/` has the special behavior of matching all traffic.
+
+    <br/>
+
+    - Headers: specified in the `matchAll` or `matchAny` field as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addHeaders` list. A target is triggered if any of the headers in the match list are present in the request (headers are matched using OR instead of AND). The variable to capture header value is specified as `{foo}` and can be referenced in the `addHeaders` list again as `{foo}`. This example will make it clear:
+
+      ```
+      curl http://goto:8080/proxy/targets/add --data \
+      '{"name": "target2", "endpoint":"http://somewhere", "routes":{"/": ""}, \
+      "matchAll":{"headers":[["foo", "{x}"], ["bar", "{y}"]]}, \
+      "addHeaders":[["abc","{x}"], ["def","{y}"]], "removeHeaders":["foo"], \
+      "enabled":true, "sendID": true}'
+      ```
+
+      This target will be triggered for requests carrying headers `foo` or `bar`. On the proxied request, additional headers will be set: `abc` with value copied from `foo`, and `def` with value copied from `bar`. Also, header `foo` will be removed from the proxied request.
+
+      So a downstream request `curl -v localhost:8080/bla/bla -H'foo:123' -H'bar:456'` gets sent to the upstream endpoint with the same URI (passthrough) but headers `'bar:456'`, `'abc:123'` and `'def:456'`.
+    <br/>
+
+    - Query: specified as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addQuery` list. A target is triggered if any of the query parameters in the match list are present in the request (matched using OR instead of AND). The variable to capture query parameter value is specified as `{foo}` and can be referenced in the `addQuery` list again as `{foo}`. Example:
+
+      ```
+      curl http://goto:8080/proxy/targets/add --data \
+      '{"name": "target3", "endpoint":"http://somewhere", "routes":{"/": ""},\
+      "matchAny":{"query":[["foo", "{x}"], ["bar", "{y}"]]}, \
+      "addQuery":[["abc","{x}"], ["def","{y}"]], "removeQuery":["foo"], \
+      "enabled":true, "sendID": true}'
+      ```
+
+      This target will be triggered for requests that carry either of the query params `foo` or `bar`. On the proxied request, query param `foo` will be removed, and additional query params will be set: `abc` with value copied from `foo`, and `def` with value copied from `bar`. The incoming request `http://goto:8080?foo=123&bar=456` gets proxied as `http://somewhere?abc=123&def=456&bar=456`.
+
+    </details>
+
+### Request Transformation
+- Downstream request headers, query params, and payload gets passed to the upstream requests. Transformations can be defined per upstream endpoint, allowing for URI, headers and query params to be added/removed/replaced. This allows for the upstream requests to differ from the downstream request.
+
+### Response
+- If the request only matches a single upstream endpoint, the upstream response payload is sent as downstream response payload.
+- If the request matches multiple upstream endpoints, the downstream response payload will be a wrapper containing a collection of all those upstream responses.
+- Downstream response headers include all the upstream response headers combined with the `goto` headers from the proxy instance. As a result, downstream responses may contain duplicate headers or multiple values for the same header.
+
+### Chaos
+In addition to request routing, the `goto` proxy also offers some chaos features:
+- A `delay` can be configured per target that's applied to all communication in either direction for that target. For HTTP proxy, the delay is applied before sending the request and response. For TCP proxy, the delay is applied to each packet write.
+    > Note that this delay feature is separate from the one offered by `Goto` as a Server, via [URIs](#-uris) and [Response Delay](#-response-delay). The URI delay feature in particular allows for more fine-grained delay configuration that can be used in conjunction with the proxy feature to apply delays to URIs that eventually get routed via proxy.
+- A `drop` percentage can be configured per target that specifies what percentage of writes should be skipped in either direction for that target. If configured, `goto` will skip every `100/{pct}` write to/from this target. For TCP targets, the drop pct gets applied across packets in both directions. For HTTP targets, when it's time to drop a write, it'll choose to drop either of the request or the response based on a random coin flip.
+  > While technically this is not a true network TCP packet drop, it does allow for some interesting chaos testing where data is randomly lost between the two parties.
+  > If you want to drop some TCP writes for HTTP traffic, you can configure the port in `goto` as a TCP port and use the TCP features described below while the client and upstream still communicate over HTTP.
+  > For TLS traffic, the initial TLS handshake is also subject to the drop, which can create more chaos by randomly failing TLS handshake.
+- The HTTP proxy allows you to add/remove headers and query params, which can be a good way to create unexpected circumstances for the client and service. For example, configure the proxy to remove a required header, or change some header's value, and observe whether the two parties deal with the situation gracefully.
 - Additional chaos can be applied via listener API, by closing/reopening a connection.
 
-Proxy targets can be defined in two ways:
-- Build the upstream endpoint incrementally via multiple API calls. Benefit of this approach is that targets can be defined via just API calls without the need for a JSON payload, but it does require multiple API calls to define each target.
-  - First add a target endpoint using API `/proxy/targets/add/{target}?url={url}`
-  - Then define one or more URI routing for this endpoint using API `/proxy/targets/{target}/route?from={uri}&to={uri}`. A target should have at least one URI route defined for it to be triggered.
-  - Optionally define any necessary header and query match criteria via APIs `/proxy/targets/{target}/match/[header|query]/...`
-  - Optionally define any necessary header and query transformations via APIs `/proxy/targets/{target}/headers/[add|remove]/...`, and `/proxy/targets/{target}/query/[add|remove]/...`.
-- Alternatively, submit a fully defined target schema via API `/proxy/targets/add`. This allows for more advanced target match criteria to be defined using the JSON payload.
 
-#### Proxy Target Match Criteria
-<details>
-<summary> &#x1F525; Complex stuff, open at your own risk &#x1F525; </summary>
-
-Proxy target match criteria are based on request URI match and optional headers and query parameters matching.
-An upstream target is defined with a URI routing table, and the upstream target gets triggered for all requests matching any of the URIs defined in the routing table. However, if you need additional filtering of requests before sending those over to the upstream endpoints, you can use the headers and query params match criteria. These criteria can be defined to either match ANY of them or ALL of them for the request to qualify.
-
-- URI Routing Table: this is defined as the mandatory `routes` field in the target definition. The source URI in the routing table can be specified using variables, e.g. `{foo}`, to indicate the variable portion of a URI. For example, `/foo/{f}/bar/{b}` will match URIs like `/foo/123/bar/abc`, `/foo/something/bar/otherthing`, etc. The variables are captured under the given labels (`f` and `b` in the previous example). The destination URI in the routing table can refer to those captured variables using the syntax described in this example:
-  
-  ```
-  curl http://goto:8080/proxy/targets/add --data \
-  '{"name": "target1", "endpoint":"http://somewhere", \
-  "routes":{"/foo/{x}/bar/{y}": "/abc/{y:.*}/def/{x:.*}"}, \
-  "enabled":true, "sendID": true}'
-  ```
-
-  This target will be triggered for requests with the pattern `/foo/<somex>/bar/<somey>` and the request will be forwarded to the target as `http://somewhere/abc/somey/def/somex`, where the values `somex` and `somey` are extracted from the original request and injected into the replacement URI.
-
-  URI match `/` has the special behavior of matching all traffic.
-
-<br/>
-
-- Headers: specified in the `matchAll` or `matchAny` field as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addHeaders` list. A target is triggered if any of the headers in the match list are present in the request (headers are matched using OR instead of AND). The variable to capture header value is specified as `{foo}` and can be referenced in the `addHeaders` list again as `{foo}`. This example will make it clear:
-
-  ```
-  curl http://goto:8080/proxy/targets/add --data \
-  '{"name": "target2", "endpoint":"http://somewhere", "routes":{"/": ""}, \
-  "matchAll":{"headers":[["foo", "{x}"], ["bar", "{y}"]]}, \
-  "addHeaders":[["abc","{x}"], ["def","{y}"]], "removeHeaders":["foo"], \
-  "enabled":true, "sendID": true}'
-  ```
-
-  This target will be triggered for requests carrying headers `foo` or `bar`. On the proxied request, additional headers will be set: `abc` with value copied from `foo`, and `def` with value copied from `bar`. Also, header `foo` will be removed from the proxied request.
-
-  So a downstream request `curl -v localhost:8080/bla/bla -H'foo:123' -H'bar:456'` gets sent to the upstream endpoint with the same URI (passthrough) but headers `'bar:456'`, `'abc:123'` and `'def:456'`.
-<br/>
-
-- Query: specified as a list of key-value pairs, with the ability to capture values in named variables and reference those variables in the `addQuery` list. A target is triggered if any of the query parameters in the match list are present in the request (matched using OR instead of AND). The variable to capture query parameter value is specified as `{foo}` and can be referenced in the `addQuery` list again as `{foo}`. Example:
-
-  ```
-  curl http://goto:8080/proxy/targets/add --data \
-  '{"name": "target3", "endpoint":"http://somewhere", "routes":{"/": ""},\
-  "matchAny":{"query":[["foo", "{x}"], ["bar", "{y}"]]}, \
-  "addQuery":[["abc","{x}"], ["def","{y}"]], "removeQuery":["foo"], \
-  "enabled":true, "sendID": true}'
-  ```
-
-  This target will be triggered for requests that carry either of the query params `foo` or `bar`. On the proxied request, query param `foo` will be removed, and additional query params will be set: `abc` with value copied from `foo`, and `def` with value copied from `bar`. The incoming request `http://goto:8080?foo=123&bar=456` gets proxied as `http://somewhere?abc=123&def=456&bar=456`.
-
-</details>
 
 #### Proxy APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
 
 |METHOD|URI|Description|
 |---|---|---|
+| POST |	/proxy/targets/clear            | Remove all proxy targets |
 | PUT, POST |	/proxy/targets/add  | Add target for proxying requests [see `Proxy Target JSON Schema`](#proxy-target-json-schema) |
-| PUT, POST |	/proxy/targets<br/>/add/`{target}`?<br/>url=`{url}` | Add a new target with the given name and URL. The URI routing for this target should be defined using the `/{target}/route` API given below. |
-| PUT, POST | /proxy/targets<br/>/`{target}`/route?<br/>from=`{uri}`&to=`{uri}` | Add URI routing for the given target from the given downstream URI (`from`) to the given upstream URI (`to`). |
-| PUT, POST | /proxy/targets<br/>/`{target}`/match/header<br/>/`{key}`[=`{value}`] | Define a header match criteria to match just the header name, or both name and value. |
-| PUT, POST | /proxy/targets<br/>/`{target}`/match/query<br/>/`{key}`[=`{value}`] | Define a query param match criteria to match just the param name, or both name and value. |
-| PUT, POST | /proxy/targets<br/>/`{target}`/headers<br/>/add/`{key}`=`{value}` | Define a header key/value that should be added to the upstream request. |
-| PUT, POST | /proxy/targets<br/>/`{target}`/headers<br/>/remove/`{key}` | Define a downstream header that should be removed from the upstream request. |
-| PUT, POST | /proxy/targets<br/>/`{target}`/query/add<br/>/`{key}`=`{value}` | Define a query param key/value that should be added to the upstream request. |
-| PUT, POST | /proxy/targets<br/>/`{target}`/query<br/>/remove/`{key}` | Define a downstream query param that should be removed from the upstream request. |
-| PUT, POST |	/proxy/tcp/targets<br/>/add/`{target}`?<br/>address=`{address}` | Add a new TCP upstream target with the given name and address.|
-| PUT, POST |	/proxy/tcp/targets<br/>/add/`{target}`<br/>/sni=`{sni}`?<br/>address=`{address}` | Add a new TCP TLS upstream target with the given name, address and SNI hostname match. The given SNI hostname is matched against the DNS hostname in the client TLS request. |
-| PUT, POST | /proxy/targets<br/>/`{target}`/delay/set/`{delay}` | Configure a delay to be applied to requests and responses going to/from the given target |
-| POST | /proxy/targets<br/>/`{target}`/delay/clear | Clears any configured delay for the given target |
-| PUT, POST | /proxy/tcp/targets<br/>/`{target}`/delay/set/`{delay}` | Configure a delay to be applied to TCP packets to/from the given target. The delay is applied to TCP writes done in either direction in the proxy. |
-| POST | /proxy/tcp/targets<br/>/`{target}`/delay/clear | Clears any configured delay for the given target |
-| PUT, POST | /proxy/tcp/targets<br/>/`{target}`/drops/set/`{drops}` | Configure a percentage of TCP writes to be dropped to/from the given target. When configured, `goto` will simply skip every Nth TCP write in both directions for this target, which may or may not correspond to the Nth write done by the client or the service (due to different TCP packet sizes) |
-| POST | /proxy/tcp/targets<br/>/`{target}`/drops/clear | Clears any configured packet drops for the given target |
-| GET | /proxy/tcp/targets<br/>/`{target}`/report | Get a report of the TCP writes and packet drops so far for the given target |
 | POST | /proxy/targets<br/>/`{target}`/remove  | Remove a proxy target |
 | POST | /proxy/targets<br/>/`{target}`/enable  | Enable a proxy target |
 | POST | /proxy/targets<br/>/`{target}`/disable | Disable a proxy target |
-| POST |	/proxy/targets/clear            | Remove all proxy targets |
+| PUT, POST |	/proxy/http/targets<br/>/add/`{name}`?<br/>url=`{url}`<br/>&proto=`{proto}`<br/>&from=`{uri}`&to=`{uri}` | Add a new target with the given name and URL. Optional param `proto` can be used to assign a protocol (`HTTP/1.1, HTTP/2`), defaults to HTTP/1.1. Params `from` and `to` are used to define a URI mapping for this target. Additional URI routing can be defined using the `/{target}/route` API given below. |
+| PUT, POST | /proxy/http/targets<br/>/`{target}`/route?<br/>from=`{uri}`&to=`{uri}` | Add URI routing for the given target from the given downstream URI (`from`) to the given upstream URI (`to`). |
+| PUT, POST | /proxy/http/targets<br/>/`{target}`/match/header<br/>/`{key}`[=`{value}`] | Define a header match criteria to match just the header name, or both name and value. <small>Note: Header match criteria added via this API are treated as `MatchAny`. To use `MatchAll` semantics, use JSON payload to define the target.</small> |
+| PUT, POST | /proxy/http/targets<br/>/`{target}`/match/query<br/>/`{key}`[=`{value}`] | Define a query param match criteria to match just the param name, or both name and value. <small>Note: Query match criteria added via this API are treated as `MatchAny`. To use `MatchAll` semantics, use JSON payload to define the target.</small> |
+| PUT, POST | /proxy/http/targets<br/>/`{target}`/headers<br/>/add/`{key}`=`{value}` | Define a header key/value that should be added to the upstream request. |
+| PUT, POST | /proxy/http/targets<br/>/`{target}`/headers<br/>/remove/`{key}` | Define a downstream header that should be removed from the upstream request. |
+| PUT, POST | /proxy/http/targets<br/>/`{target}`/query/add<br/>/`{key}`=`{value}` | Define a query param key/value that should be added to the upstream request. |
+| PUT, POST | /proxy/http/targets<br/>/`{target}`/query<br/>/remove/`{key}` | Define a downstream query param that should be removed from the upstream request. |
+| PUT, POST |	/proxy/tcp/targets<br/>/add/`{name}`<br/>?<br/>address=`{address}`<br/>&sni=`{sni}` | Add a new TCP upstream target with the given name and address, where the address is in the format `hostname:port`. The optional `sni` param can be a comma-separated list of host names to perform SNI based routing. The presence of `sni` param indicates that the TCP traffic for this proxy port is encrypted. |
+| PUT, POST | /proxy/targets<br/>/`{target}`/delay=`{delay}` | Configure a delay to be applied to the requests/responses or tcp packets going to/from the given target |
+| POST | /proxy/targets<br/>/`{target}`/delay/clear | Clears any configured delay for the given target |
+| PUT, POST | /proxy/targets<br/>/`{target}`/drop=`{pct}` | Configure a percentage of writes to be dropped to/from the given target. If configured, `goto` will skip every `100/{pct}` write to/from this target. For TCP, this results in dropping packets in both directions. For HTTP, it'll choose to drop either of the request or the response based on a random coin flip. |
+| POST | /proxy/targets<br/>/`{target}`/drop/clear | Clears any configured drop for the given target so that the traffic can go back to normal |
 | GET |	/proxy/targets                  | List all proxy targets |
+| GET | /proxy/targets<br/>/`{target}`/report | Get a report of the activity so far for the given target |
+| GET | /proxy/report/http | Get a report of the activity so far for all HTTP targets |
+| GET | /proxy/report/tcp | Get a report of the activity so far for all TCP targets |
+| GET | /proxy/report | Get a report of the activity so far for all targets (HTTP + TCP) |
+| GET | /proxy/all/report | Get a combined report of all proxies (all ports) |
+| POST | /proxy/report/clear | Clear all the accumulated report counts/info |
+| POST | /proxy/all/report/clear | Clear reports of all proxies (all ports)  |
 | POST | /proxy/enable  | Enable proxy feature on the port |
 | POST | /proxy/disable | Disable proxy feature on the port |
-| GET  |	/proxy/counts                   | Get proxy match/invocation counts, by uri, header and query params |
-| POST |	/proxy/counts/clear             | Clear proxy match/invocation counts |
 
 ###### <small> [Back to TOC](#goto-proxy) </small>
 
@@ -2413,11 +2450,11 @@ An upstream target is defined with a URI routing table, and the upstream target 
 | matchAny        | JSON     | Match criteria based on which runtime traffic gets proxied to this target. See [JSON Schema](#proxy-target-match-criteria-json-schema) and [detailed explanation](#proxy-target-match-criteria) below |
 | matchAll        | JSON     | Match criteria based on which runtime traffic gets proxied to this target. See [JSON Schema](#proxy-target-match-criteria-json-schema) and [detailed explanation](#proxy-target-match-criteria) below |
 | replicas     | int      | Number of parallel replicated calls to be made to this target for each matched request. This allows each request to result in multiple calls to be made to a target if needed for some test scenarios |
-| enabled       | bool     | Whether or not the proxy target is currently active |
 | delayMin      | duration     | Minimum delay to be applied to the requests/responses to/from this target |
 | delayMax      | duration     | Max delay to be applied to the requests/responses to/from this target |
 | delayCount    | int     | Number of requests for which the delay should be applied. After the count of requests have been affected by the delay, the subsequent calls revert to normal processing. |
 | dropPct      | int     | Percent of TCP writes to be dropped in the proxy. This only applies to TCP targets. If given, every Nth write (calculated based on the given percentage) will be skipped in both directions. |
+| enabled       | bool     | Whether or not the proxy target is currently active |
 
 
 #### Proxy Target Match Criteria JSON Schema
@@ -2425,6 +2462,75 @@ An upstream target is defined with a URI routing table, and the upstream target 
 |---|---|---|
 | headers | `[][]string`  | Headers names and optional values to match against request headers |
 | query   | `[][]string`  | Query parameters with optional values to match against request query |
+| sni     | `[]string`  | List of server names to match against client TLS handshake |
+
+#### HTTP Proxy Tracker JSON Schema
+|Field|Data Type|Description|
+|---|---|---|
+| downstreamRequestCount | int  | Number of downstream requests received  |
+| upstreamRequestCount | int  | Number of upstream requests sent |
+| requestDropCount | int  | Number of requests dropped |
+| responseDropCount | int  | Number of responses dropped |
+| downstreamRequestCountsByURI | map[string]int  | Number of downstream requests received, grouped by URIs |
+| upstreamRequestCountsByURI | map[string]int  | Number of upstream requests sent, grouped by URIs |
+| requestDropCountsByURI | map[string]int  | Number of requests dropped, grouped by URIs |
+| responseDropCountsByURI | map[string]int  | Number of responses dropped, grouped by URIs |
+| uriMatchCounts | map[string]int  | Number of downstream requests that were forwarded due to URI match, grouped by matching URIs |
+| headerMatchCounts | map[string]int  | Number of downstream requests that were forwarded due to header match, grouped by matching headers |
+| headerValueMatchCounts | map[string]map[string]int  | Number of downstream requests that were forwarded due to header+value match, grouped by matching headers and values |
+| queryMatchCounts | map[string]int  | Number of downstream requests that were forwarded due to query param match, grouped by matching query params |
+| queryValueMatchCounts | map[string]map[string]int  | Number of downstream requests that were forwarded due to query param+value match, grouped by matching query params and values |
+| targetTrackers | map[string]HTTPTargetTracker  | Tracking info per target. Each `HTTP Target Tracker JSON Schema` has same fields as above. |
+
+
+#### HTTP Target Tracker JSON Schema
+Same fields as `HTTP Proxy Tracker JSON Schema` above
+
+
+#### TCP Proxy Tracker JSON Schema
+|Field|Data Type|Description|
+|---|---|---|
+| connCount | int  | Number of downstream connections received  |
+| connCountsBySNI | map[string]int  | Number of downstream connections received for SNI match, grouped by SNI server names |
+| rejectCountsBySNI | map[string]int  | Number of downstream connections rejected due to SNI mismatch, grouped by SNI server names |
+| targetTrackers |  map[string]TCPTargetTracker  | Tracking details per target. See `TCP Target Tracker JSON Schema` below.  |
+
+
+#### TCP Target Tracker JSON Schema
+|Field|Data Type|Description|
+|---|---|---|
+| connCount | int  | Number of downstream connections received  |
+| connCountsBySNI | map[string]int  | Number of downstream connections received for SNI match, grouped by SNI server names |
+| tcpSessions |  map[string]TCPSessionTracker  | Tracking details per client session. See `TCP Session Tracker JSON Schema` below.  |
+
+
+#### TCP Target Tracker JSON Schema
+|Field|Data Type|Description|
+|---|---|---|
+| sni | string  | SNI server name if one was used to match target for this session |
+| downstream |  map[string]ConnTracker  | Downstream connection tracking details for this session. See `Connection Tracker JSON Schema` below. |
+| upstream |  map[string]ConnTracker  | Upstream connection tracking details for this session. See `Connection Tracker JSON Schema` below. |
+
+#### Connection Tracker JSON Schema
+|Field|Data Type|Description|
+|---|---|---|
+| startTime | string  | Connection start time |
+| endTime | string  | Connection end time |
+| firstByteInAt | string  | Time of receipt of the first byte of data |
+| lastByteInAt | string  | Time of receipt of the last byte of data |
+| firstByteOutAt | string  | Time of dispatch of the first byte of data |
+| lastByteOutAt | string  | Time of dispatch of the last byte of data |
+| totalBytesRead | int  | Total number of bytes read from this connection |
+| totalBytesWritten | int  | Total number of bytes written to this connection |
+| totalReads | int  | Total number of read operations performed |
+| totalWrites | int  | Total number of write operations performed |
+| delayCount | int  | Total number of write operations where a delay was applied |
+| dropCount | int  | Total number of skipped write operations due to being dropped |
+| closed | bool  | Whether the connection is closed |
+| remoteClosed | bool  | Whether the connection was closed by remote party |
+| readError | bool  | Whether the connection was closed due to a read error |
+| writeError | bool  | Whether the connection was closed due a write error |
+
 
 </details>
 
@@ -3016,12 +3122,12 @@ The following kinds of transformations are supported:
 |---|---|---|
 | POST, PUT | /pipes/create/`{name}` | Create an empty pipeline that will be filled via other APIs |
 | POST, PUT | /pipes/add | Add a pipeline using JSON payload |
-| POST, PUT | /pipes/`{name}`/clear, /pipes/clear/`{name}` | Empty the given pipeline |
-| POST, PUT | /pipes/remove/`{name}`, /pipes/`{name}`/remove | Remove the given pipeline |
+| POST, PUT | /pipes/`{name}`/clear,<br/>/pipes/clear/`{name}` | Empty the given pipeline |
+| POST, PUT | /pipes/remove/`{name}`,<br/>/pipes/`{name}`/remove | Remove the given pipeline |
 | POST, PUT | /pipes/`{pipe}`/sources/add | Add a source via JSON payload to the given existing pipeline |
-| POST, PUT | /pipes/`{pipe}`/sources/remove/`{name}` | Remove the given source from the given pipeline |
-| POST, PUT | /pipes/`{pipe}`/sources/add/k8s/`{name}`?`spec={spec}` | Add a K8s source with the given `name` and `spec` to the given existing pipeline |
-| POST, PUT | /pipes/`{pipe}`/sources/add/script/`{name}` | Add a script source with the given `name` and content (body payload) to the given pipeline |
+| POST, PUT | /pipes/`{pipe}`/sources<br/>/remove/`{name}` | Remove the given source from the given pipeline |
+| POST, PUT | /pipes/`{pipe}`/sources<br/>/add/k8s/`{name}`?<br/>`spec={spec}` | Add a K8s source with the given `name` and `spec` to the given existing pipeline |
+| POST, PUT | /pipes/`{pipe}`/sources<br/>/add/script/`{name}` | Add a script source with the given `name` and content (body payload) to the given pipeline |
 | POST | /pipes/clear | Remove all defined pipelines |
 | POST | /pipes/`{name}`/run | Run the given pipeline manually (as opposed to pipelines getting triggered by sources) |
 | GET | /pipes | Get details of currently defined pipelines |

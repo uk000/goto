@@ -340,8 +340,8 @@ func (tcp *TCPConnectionHandler) doSilentLife() {
       tcp.sendMessage(strconv.Itoa(tcp.status.TotalBytesRead), SilentLife)
       return
     }
-    if success, readSize := tcp.read(Echo); success {
-      log.Printf("[Listener: %s][Request: %d][%s]: Read data of length [%d] for echo on port [%d]. Total read so far [%d].",
+    if success, readSize := tcp.read(SilentLife); success {
+      log.Printf("[Listener: %s][Request: %d][%s]: Read data of length [%d] for SilentLife on port [%d]. Total read so far [%d].",
         tcp.ListenerID, tcp.requestID, SilentLife, readSize, tcp.Port, tcp.status.TotalBytesRead)
     }
   }
@@ -460,7 +460,7 @@ func (tcp *TCPConnectionHandler) doEcho() {
         for remaining > 0 {
           remaining = remaining - tcp.EchoResponseSize
           tcp.echoBack()
-          if remaining > tcp.EchoResponseSize {
+          if remaining >= tcp.EchoResponseSize {
             tcp.copyInputTailToOutput(readSize-remaining, 0, tcp.EchoResponseSize)
           } else if remaining > 0 {
             log.Printf("[Listener: %s][Request: %d][%s]: Remaining data of length [%d] not enough to match echo response size [%d], will retain for later echo on port [%d].",
@@ -515,7 +515,7 @@ func (tcp *TCPConnectionHandler) doResponsePayload() {
       break
     }
     if tcp.RespondAfterRead {
-      if success, readSize := tcp.read(Echo); success {
+      if success, readSize := tcp.read(Response); success {
         log.Printf("[Listener: %s][Request: %d][%s]: Read data of length [%d] on port [%d]. Total read so far [%d].",
           tcp.ListenerID, tcp.requestID, Response, readSize, tcp.Port, tcp.status.TotalBytesRead)
       }

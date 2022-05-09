@@ -83,12 +83,20 @@ func CheckForReadability(conn net.Conn, c chan bool) {
 }
 
 func Write(buff []byte, conn net.Conn) error {
+  size := len(buff)
   n, err := conn.Write(buff)
   if err != nil {
     return err
   }
-  if n != len(buff) {
-    return fmt.Errorf("Wrote less data [%d] than buffer [%d]\n", len(buff), n)
+  if n < size {
+    n2, err := conn.Write(buff[n:])
+    if err != nil {
+      return err
+    }
+    n += n2
+  }
+  if n < size {
+    return fmt.Errorf("Wrote less data [%d] than buffer [%d]\n", size, n)
   }
   return nil
 }

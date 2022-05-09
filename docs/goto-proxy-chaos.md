@@ -5,16 +5,10 @@ Launch a goto server that'll act as an intermediate proxy on port 8080.
 ```
 $ goto --ports 8000,8080
 ```
-Add an upstream service endpoint that'll be used as proxy's upstream destination
+Add an upstream service endpoint that'll be used as proxy's upstream destination. Adding a URI routing rule for this upstream endpoint that'll route all inbound requests on this port transparently to the upstream. Here we use URI `/` to represent all traffic
 ```
-$ curl -X POST localhost:8000/port=8080/proxy/targets/add/serviceXYZ\?url=localhost:8081
-Port [8080]: Added HTTP proxy target [serviceXYZ] with upstream URL [localhost:8081]
-```
-
-Add a URI routing rule for this upstream endpoint that'll route all inbound requests on this port transparently to the upstream. Here we use URI `/` to represent all traffic
-```
-$ curl -X POST localhost:8000/port=8080/proxy/targets/serviceXYZ/route\?from=/
-Port [8080]: Added URI routing for Target [serviceXYZ], URL [localhost:8081], From [/] To []
+$ curl -X POST localhost:8000/port=8080/proxy/http/targets/add/serviceXYZ\?url=localhost:8081\&from=/
+Port [8080]: Added HTTP proxy target [serviceXYZ] with upstream URL [localhost:8081] Protocol [HTTP/1.1] With Route[from=/*, to=]
 ```
 
 At this point, all traffic on port 8080 should get routed to upstream endpoint 'localhost:8081', and the response from the upstream endpoint should get sent back to the downstream client. Send some client calls to confirm (assuming some service is listening on localhost:8081)
@@ -72,7 +66,14 @@ Goto-Response-Status|proxy: 502
 ...
 ```
 
+You can check proxy report at this point for validation
+```
+$ curl -s localhost:8000/port=8080/proxy/report | jq
+```
+
 The above few examples should give you an idea of what you can achieve using `goto` as a proxy for chaos testing.
+
+See more [Proxy Examples](proxy-example.md)
 
 #
 # Scenario: Creating TCP chaos with Goto
@@ -99,13 +100,13 @@ $ curl -v http://localhost:9000
 
 Now it's time to introduce some TCP chaos. We can ask `goto` proxy to apply some delay to the TCP packets going to/from this endpoint.
 ```
-$ curl -X POST localhost:8000/port=9000/proxy/tcp/targets/SomeTCPService/delay/set/1s
+$ curl -X POST localhost:8000/port=9000/proxy/targets/SomeTCPService/delay=1s
 Proxy[9000]: Target [SomeTCPService] Delay set to [Min=1s, Max=1s, Count=0]
 ```
 
 The response from `goto` above gives us some ideas. We could have set the delay to be a probabilistic range. E.g. let's change it to apply delay between 1s and 3s, and do it only for next 5 requests.
 ```
-$ curl -X POST localhost:8000/port=9000/proxy/tcp/targets/SomeTCPService/delay/set/1s-3s:5
+$ curl -X POST localhost:8000/port=9000/proxy/targets/SomeTCPService/delay=1s-3s:5
 Proxy[9000]: Target [SomeTCPService] Delay set to [Min=1s, Max=3s, Count=5]
 ```
 
@@ -115,11 +116,13 @@ Go ahead and run the TCP traffic again, and see the delay in action. `Goto` logs
 
 Now let's ask `goto` proxy to drop a certain percentage of packets.
 ```
-$ curl -X POST localhost:8000/port=9000/proxy/tcp/targets/SomeTCPService/drops/set/25
+$ curl -X POST localhost:8000/port=9000/proxy/targets/SomeTCPService/drop=25
 Proxy[9000]: Will drop [25]% packets for Target [SomeTCPService]
 ```
 
 Now run the traffic again and observe that some requests/responses simply disappear and the client/service are left waiting. Now you can verify the behavior of your client/service if it was left hanging dry like this.
+
+See more [Proxy Examples](proxy-example.md)
 
 #
 # Scenario: TCP Proxy with SNI matching using Goto
@@ -132,10 +135,10 @@ $ goto --ports 8000,9000/tcp
 
 Now we'll add two upstream TCP service endpoints each with an SNI hostname match.
 ```
-$ curl -X POST localhost:8000/port=9000/proxy/tcp/targets/add/ServiceA/sni=a.com\?address=localhost:8081
+$ curl -X POST localhost:8000/port=9000/proxy/tcp/targets/add/ServiceA\?address=localhost:8081\&sni=a.com
 Port [9000]: Added TCP proxy target [ServiceA] with upstream address [localhost:8081] SNI [a.com]
 
-$ curl -X POST localhost:8000/port=9000/proxy/tcp/targets/add/ServiceB/sni=b.com\?address=localhost:8082
+$ curl -X POST localhost:8000/port=9000/proxy/tcp/targets/add/ServiceB\?address=localhost:8082\&sni=b.com
 Port [9000]: Added TCP proxy target [ServiceB] with upstream address [localhost:8082] SNI [b.com]
 ```
 
@@ -177,3 +180,5 @@ The response shows it came from the second `goto` instance with the appropriate 
 This shows that the proxy was able to route to the correct upstream endpoints based on the SNI received from the client TLS handshake while still letting the upstream services do the real handshake.
 
 Beyond this point, the two upstream targets can be configured with their corresponding chaos params (delay, drops, etc) and multiple clients can be tested against two upstream services.
+
+See more [Proxy Examples](proxy-example.md)
