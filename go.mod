@@ -13,7 +13,7 @@ require (
 	github.com/prometheus/client_golang v1.12.2
 	golang.org/x/net v0.5.0
 	google.golang.org/grpc v1.53.0
-	google.golang.org/protobuf v1.28.1
+	google.golang.org/protobuf v1.33.0
 	k8s.io/api v0.24.1
 	k8s.io/apimachinery v0.24.1
 	k8s.io/client-go v0.24.1
