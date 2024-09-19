@@ -4,11 +4,11 @@
 
 What if you want to test traffic flowing to/from pods amid chaos where pods keep dying and getting respawned? Or what if you're testing in the presence of a canary deployment tool like `flagger`, where canary pods get spawned on the fly and later get terminated, and you need those canary pods to send/receive traffic.
 
-Sending traffic to such ephemeral pods is straight-forward, but getting traffic to originate from those pods automatically as soon as the pods come up? Clearly that can only happen if you put an application there that starts sending traffic as soon as it starts. But what if that traffic has to be controlled dynamically based on your current testing scenario? It's not a fixed set of traffic that needs to originate from those pods, but instead the traffic changes based on some other external conditions. 
+Sending traffic to such ephemeral pods is straight-forward, but triggering traffic from those pods automatically as soon as the pods come up has some challenges. You'd need a container that starts sending traffic as soon as it starts. And then, what if the traffic has to be controlled dynamically based on your current testing scenario, . 
 
-Now it gets tricky, because you need to be able to tell the pod where to send the traffic once it's up. But remember, the pod is not even up yet, flagger is still in the middle on spawning your canary pods. Or perhaps K8s is in the middle of recycling pod. What do you do now? Keep polling K8s for the pod availability, and once the pod is available, connect to it via IP and configure the current traffic configs/targets there so that it can start sending traffic per the current testing requirement? Exactly this is what `goto` can do, but automatically? How? Glad that you asked.
+Now it gets tricky, because you need to be able to tell the pod where to send the traffic once it's up. But remember, the pod is not even up yet, flagger is still in the middle on spawning your canary pods. Or perhaps K8s is in the middle of recycling the pod. What do you do now? Keep polling K8s for the pod availability, and once the pod is available, connect to it by IP and push configuration to the container there so that it can start sending traffic per the current testing requirement? This is exactly what `goto` can do, but that too automatically without any manual intervention. How? Glad that you asked.
 
-`Goto` has a `Registry` feature, where one or more `goto` instances can act as registry, and other `goto` instances can be configured to connect to the registry at startup. You can configure traffic details at registry, to be passed to all pods based on their labels. As soon as a `goto` instance comes up and connects to the registry, the registry sends it its share of current traffic configs. And some/all of that traffic may be configured to be run automatically. So, as soon as the `goto` instances receive a traffic config from registry and notice that it's meant to be auto invoked, they start running that traffic like there's no tomorrow.
+`Goto` has a `Registry` feature where one or more `goto` instances can act as configuration storage for other instances. The worker `goto` instances are configured to connect to the registry instance(s) at startup. You can configure traffic details at registry, to be passed to all pods based on their labels. As soon as a `goto` worker container comes up and connects to the registry, the registry sends to the worker its assigned traffic workload, some/all of which may be configured to be run automatically. As soon as a `goto` instance receives traffic config that's meant to be auto invoked, it starts running that traffic like there's no tomorrow.
 
 Let's see the APIs involved to achieve this scenario:
 
@@ -16,7 +16,7 @@ Let's see the APIs involved to achieve this scenario:
    ```
    $ goto --port 8000 --label registry
    ```
-2. On this registry instance, we configure some traffic that would be passed on to any `goto` instances that connect to registry with label `peer1`. All these worker instances that connect to registry are called `peers`. In the API below, `peer1` is the label to be used by some such peers.
+2. On this registry instance, we configure some traffic that would be sent to any `goto` instances that connect to registry with a specific label `peer1`.
    ```
    $ curl -s http://goto-registry/registry/peers/peer1/targets/add --data '
       { 
@@ -32,30 +32,39 @@ Let's see the APIs involved to achieve this scenario:
       "autoInvoke": true
       }'
    ```
-   Quite simply, we configured a target for `peer1` instances. Go ahead and add some more for other peers too. Note that this target `t1` was marked for auto invocation via flag `autoInvoke`. We'll see how this plays out soon.
+   Traffic workload is defined in terms of `targets`. Each target is a specific endpoint that we need the goto worker instance to send traffic to.    Note that this target `t1` was marked for auto invocation via flag `autoInvoke`.
 
-3. Now the basic registry work is done. Time to configure `peer1` instances. This could be a K8s deployment, but for now we'll just look at simple command line examples. A peer instance is passed a couple of additional things as command line args: its own label and the URL of the registry it must connect to.
+3. Now the basic registry work is done. Time to configure an instance with label `peer1`. This could be a K8s deployment, but for now we'll just look at simple command line examples. The goto instance is given its label and the URL of the registry it must connect to via command args.
    ```
    $ goto --port 8080 --label peer1 --registry http://goto-registry 
    ```
-   I'm sure you're connecting the dots already by now. This instance is told that it's called `peer1` and it should talk to registry at `http://goto-registry` for further instructions. `Goto` instances are good subordinates, they do as told, so this one will indeed connect to the registry at startup. What's not obvious from above command line example is that if you put these cmd args in K8s deployment's pod spec, all pods of that deployment will automatically fall in line and connect to this same registry with the same label, and hence receive the same set of configs. 
-   
-   Let's assume that this `goto` instance is available at `http://goto-peer1`
-4. Once `peer1` pods are up and running, we can check all of them for the targets they received from registry
+   This instance is told that it's called `peer1` and it should talk to registry at `http://goto-registry` for further instructions.
+   Translating the above to a K8S deployment spec would be easy:
+   ```
+         containers:
+        - image: uk0000/goto:latest
+          args: ["--port", "8080", "--label", "peer1", "--registry", "http://goto-registry"]
+          name: goto
+          ports:
+            - containerPort: 8080
+   ```
+   Let's assume that this `goto` instance is available at `http://goto-peer1`.
+
+4. Once `peer1` pods are up and running, we can check what traffic workload each pod has received from the registry.
    ```
    $ curl http://goto-peer1/client/targets
    ```
-   The above API call should show the target t1 that we configured at the registry. Additionally, remember that target `t1` was marked for auto invocation? Let's check the `peer1` instance for some results already at startup.
+   The above API call should show the target t1 that we configured at the registry. Since the target `t1` was marked for auto invocation, it must have already launched the traffic and started collecting results. Let's check the `peer1` pods for results.
    ```
    $ curl http://goto-peer1/client/results
    ``` 
-   If all goes as planned (which it usually does with `goto`), you should see that the `peer1` instance already ran the traffic as requested in target config `t1` and got some results for you.
-5. Nice already, isn't it? But it keeps getting better. Not only `peer1` received the configs at startup, but any new config you add at the registry will automatically get pushed to all registered instances for that peer label. And not just client targets, but also jobs. What are jobs? Well, that's the story for another scenario. Or checkout [Job feature documentation](../README.md#jobs-features)
+   If all goes as planned (which it usually does with `goto`), you should see some traffic results.
+5. Any new config you add on the registry for is automatically pushed to all worker instances in real-time as well as upon worker startup. And not just client traffic configs, but also jobs. What are jobs? Well, that's the story for another scenario. Or checkout [Job feature documentation](../README.md#jobs-features)
 
 
 # <a name="k8s-transient-pods"></a> Scenario: Deal with transient pods
 
-On the subject of transient pods that come up and go down randomly (due to chaos testing or canary deployment testing), testing your application's behavior in the presence of such transiency is challenging. Due to canary deployment or K8S HPA scaling, pods may come up and go down at random points non-deterministically. To be able to perform some deterministic testing among such non-determinism is a challenge. In order to connect the dots and reason about some behavior of a traffic that originates from a non-deterministic source, and receives response from a non-deterministic destination, you'd (or your test harness would) need to know which K8S pod started at what point and shut down at which point.
+On the subject of transient pods that come up and go down randomly (due to chaos testing or canary deployment testing), testing your application's behavior in the presence of such transiency is challenging. Due to canary deployment or K8S HPA scaling, pods may come up and go down at random points non-deterministically. To be able to perform some deterministic testing amidst such non-determinism is a challenge. In order to connect the dots and reason about some behavior of a traffic that originates from a non-deterministic source, and receives response from a non-deterministic destination, you'd (or your test harness would) need to know which K8S pod started at what point and shut down at which point.
 
 If `goto` is added as a container to your deployment (or `goto` was the primary container for testing purpose), the `goto` instances can help you record the timeline of your pod lifecycles and correlate it with the test results. 
 
@@ -219,11 +228,11 @@ The peer1 instance keeps pinging the registry, reminding registry of its presenc
 
 
 
-# <a name="k8s-capture-transient-pod-results"></a> Scenario: Capture results from that may terminate anytime
+# <a name="k8s-capture-transient-pod-results"></a> Scenario: Capture results from pods that may terminate anytime
 
-On the subject of transient pods that come up and go down randomly (due to chaos testing or canary deployment testing), another challenge is to collect results from such instances. You could keep polling the pods for results until they go down. However, `goto` as a client testing tool can help with this too just as in the previous scenario.
+On the subject of transient pods that come up and go down randomly (due to chaos testing or canary deployment testing), another challenge is to collect results from such instances. You could keep polling the pods for results until they go down. However, `goto` as a traffic client can help with this too.
 
-`Regitsry` feature includes a `Locker` feature, which lets `goto` worker instances to post results to the `registry` instance. `Registry` stores results from various peers using their labels as keys, and below that results are stored using keys as reported by worker instances. Worker instances stream their results to the registry as soon as partial results become available. 
+`Regitsry` feature in `Goto` includes a `Locker` feature, which allow worker instances to post results to the `registry` instance in real-time (at configuration periodicity) as the traffic is executed.
 
 Worker instances use the following keys:
 - `client` to store the summary results of their target invocations as a client
