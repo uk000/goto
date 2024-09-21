@@ -23,6 +23,7 @@ import (
   "goto/pkg/server/listeners"
   "goto/pkg/util"
   "log"
+  "strconv"
   "strings"
   "time"
 )
@@ -83,6 +84,9 @@ func Execute() {
   flag.BoolVar(&global.Debug, "debug", false, "Debug logs")
   flag.Parse()
 
+  if portsList == "" {
+    portsList = strconv.Itoa(global.ServerPort)
+  }
   if portsList != "" {
     listeners.AddInitialListeners(strings.Split(portsList, ","))
   }
