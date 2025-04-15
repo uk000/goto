@@ -1,5 +1,5 @@
 /**
- * Copyright 2024 uk
+ * Copyright 2025 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,28 +17,28 @@
 package response
 
 import (
-  "net/http"
+	"net/http"
 
-  "goto/pkg/server/response/delay"
-  "goto/pkg/server/response/header"
-  "goto/pkg/server/response/payload"
-  "goto/pkg/server/response/status"
-  "goto/pkg/server/response/trigger"
-  "goto/pkg/util"
+	"goto/pkg/server/response/delay"
+	"goto/pkg/server/response/header"
+	"goto/pkg/server/response/payload"
+	"goto/pkg/server/response/status"
+	"goto/pkg/server/response/trigger"
+	"goto/pkg/util"
 
-  "github.com/gorilla/mux"
+	"github.com/gorilla/mux"
 )
 
 var (
-  Handler          util.ServerHandler   = util.ServerHandler{"response", SetRoutes, Middleware}
-  responseHandlers []util.ServerHandler = []util.ServerHandler{
-    status.Handler, delay.Handler, header.Handler, payload.Handler, trigger.Handler}
+	Handler          util.ServerHandler   = util.ServerHandler{"response", SetRoutes, Middleware}
+	responseHandlers []util.ServerHandler = []util.ServerHandler{
+		status.Handler, delay.Handler, header.Handler, payload.Handler, trigger.Handler}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  util.AddRoutes(util.PathRouter(r, "/server?/response"), r, root, responseHandlers...)
+	util.AddRoutes(util.PathRouter(r, "/server?/response"), r, root, responseHandlers...)
 }
 
 func Middleware(next http.Handler) http.Handler {
-  return util.AddMiddlewares(next, responseHandlers...)
+	return util.AddMiddlewares(next, responseHandlers...)
 }

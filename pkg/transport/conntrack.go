@@ -1,5 +1,5 @@
 /**
- * Copyright 2024 uk
+ * Copyright 2025 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,33 +17,33 @@
 package transport
 
 import (
-  "net"
-  "sync"
+	"net"
+	"sync"
 )
 
 type ConnTracker struct {
-  net.Conn
-  TransportIntercept *BaseTransportIntercept
-  closeSync          sync.Once
+	net.Conn
+	TransportIntercept *BaseTransportIntercept
+	closeSync          sync.Once
 }
 
 func NewConnTracker(conn net.Conn, t *BaseTransportIntercept) (net.Conn, error) {
-  t.lock.Lock()
-  t.ConnCount++
-  t.lock.Unlock()
-  ct := &ConnTracker{
-    Conn:               conn,
-    TransportIntercept: t,
-  }
-  return ct, nil
+	t.lock.Lock()
+	t.ConnCount++
+	t.lock.Unlock()
+	ct := &ConnTracker{
+		Conn:               conn,
+		TransportIntercept: t,
+	}
+	return ct, nil
 }
 
 func (ct *ConnTracker) Close() (err error) {
-  err = ct.Conn.Close()
-  ct.closeSync.Do(func() {
-    ct.TransportIntercept.lock.Lock()
-    ct.TransportIntercept.ConnCount--
-    ct.TransportIntercept.lock.Unlock()
-  })
-  return err
+	err = ct.Conn.Close()
+	ct.closeSync.Do(func() {
+		ct.TransportIntercept.lock.Lock()
+		ct.TransportIntercept.ConnCount--
+		ct.TransportIntercept.lock.Unlock()
+	})
+	return err
 }

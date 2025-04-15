@@ -29,9 +29,26 @@ WORKDIR /goto
 
 RUN go build -mod=mod -o goto -ldflags="-extldflags \"-static\" -w -s -X goto/cmd.Version=$VERSION -X goto/cmd.Commit=$COMMIT" .
 
+WORKDIR /tmp
 
-FROM alpine:3.12 as release-base
-RUN echo 'http://nl.alpinelinux.org/alpine/v3.12/main' > /etc/apk/repositories
+ENV FORTIO_REPO=https://github.com/fortio/fortio
+ENV FORTIO_VERSION=1.69.1
+
+RUN wget ${FORTIO_REPO}/releases/download/v${FORTIO_VERSION}/fortio-linux_arm64-${FORTIO_VERSION}.tgz
+RUN tar -xzf fortio-linux_arm64-${FORTIO_VERSION}.tgz
+
+ENV DNSPING_REPO=https://github.com/fortio/dnsping
+ENV DNSPING_VERSION=1.9.0
+
+RUN wget ${DNSPING_REPO}/releases/download/v${DNSPING_VERSION}/dnsping_${DNSPING_VERSION}_linux_arm64.tar.gz
+RUN tar -xzf dnsping_${DNSPING_VERSION}_linux_arm64.tar.gz
+
+ENV GHZ_REPO=https://github.com/bojand/ghz
+ENV DNSPING_VERSION=0.120.0
+
+
+FROM alpine:3.21.3 as release-base
+RUN echo 'http://nl.alpinelinux.org/alpine/v3.21/main' > /etc/apk/repositories
 RUN apk update
 RUN apk add curl
 RUN apk add wget
@@ -48,12 +65,33 @@ RUN apk add busybox-extras
 RUN apk add netcat-openbsd
 RUN apk add openssl
 RUN apk add jq
+RUN apk add hey
+
+# ENV LANG en_US.UTF-8
+# ENV LANGUAGE en_US:en
+# ENV LC_ALL en_US.UTF-8
+
+# ENV GLIBC_REPO=https://github.com/sgerrand/alpine-pkg-glibc
+# ENV GLIBC_VERSION=2.35-r1
+
+# RUN set -ex && \
+#     apk --update add libstdc++ curl ca-certificates && \
+#     for pkg in glibc-${GLIBC_VERSION} glibc-bin-${GLIBC_VERSION}; \
+#         do curl -sSL ${GLIBC_REPO}/releases/download/${GLIBC_VERSION}/${pkg}.apk -o /tmp/${pkg}.apk; done && \
+#     apk add --allow-untrusted /tmp/*.apk && \
+#     rm -v /tmp/*.apk && \
+#     /usr/glibc-compat/sbin/ldconfig /lib /usr/glibc-compat/lib
+
+# RUN apk add dpkg
 
 
 FROM release-base as release
 
 WORKDIR /goto
 COPY --from=builder /goto/goto .
+COPY --from=builder /tmp/usr/bin/fortio .
+COPY --from=builder /tmp/dnsping .
+ENV PATH="$PATH:."
 
 EXPOSE 8080
 

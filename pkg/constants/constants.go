@@ -1,5 +1,5 @@
 /**
- * Copyright 2024 uk
+ * Copyright 2025 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,14 +17,14 @@
 package constants
 
 const (
-  LockerClientKey        = "client"
-  LockerClientResultsKey = "results"
-  LockerInvocationsKey   = "invocations"
-  LockerEventsKey        = "events"
-  LockerDefaultLabel     = "default"
-  LockerCurrent          = "current"
-  LockerPeers            = "peerLockers"
-  LockerAll              = "all"
+	LockerClientKey        = "client"
+	LockerClientResultsKey = "results"
+	LockerInvocationsKey   = "invocations"
+	LockerEventsKey        = "events"
+	LockerDefaultLabel     = "default"
+	LockerCurrent          = "current"
+	LockerPeers            = "peerLockers"
+	LockerAll              = "all"
 
-  DefaultCommonName      string = "goto.goto"
+	DefaultCommonName string = "goto.goto"
 )

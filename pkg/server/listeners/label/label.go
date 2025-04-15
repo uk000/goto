@@ -1,5 +1,5 @@
 /**
- * Copyright 2024 uk
+ * Copyright 2025 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,43 +17,43 @@
 package label
 
 import (
-  "fmt"
-  "net/http"
+	"fmt"
+	"net/http"
 
-  "goto/pkg/events"
-  "goto/pkg/server/listeners"
-  "goto/pkg/util"
+	"goto/pkg/events"
+	"goto/pkg/server/listeners"
+	"goto/pkg/util"
 
-  "github.com/gorilla/mux"
+	"github.com/gorilla/mux"
 )
 
 var (
-  Handler util.ServerHandler = util.ServerHandler{Name: "label", SetRoutes: SetRoutes}
+	Handler util.ServerHandler = util.ServerHandler{Name: "label", SetRoutes: SetRoutes}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  labelRouter := util.PathRouter(r, "/server?/label")
-  util.AddRouteWithPort(labelRouter, "/set/{label}", setLabel, "PUT", "POST")
-  util.AddRouteWithPort(labelRouter, "/clear", setLabel, "POST")
-  util.AddRouteWithPort(labelRouter, "", getLabel)
+	labelRouter := util.PathRouter(r, "/server?/label")
+	util.AddRouteWithPort(labelRouter, "/set/{label}", setLabel, "PUT", "POST")
+	util.AddRouteWithPort(labelRouter, "/clear", setLabel, "POST")
+	util.AddRouteWithPort(labelRouter, "", getLabel)
 }
 
 func setLabel(w http.ResponseWriter, r *http.Request) {
-  msg := ""
-  if label := listeners.SetListenerLabel(r); label == "" {
-    msg := fmt.Sprintf("Port [%s] Label Cleared", util.GetRequestOrListenerPort(r))
-    events.SendRequestEvent("Label Cleared", msg, r)
-  } else {
-    msg = fmt.Sprintf("Will use label %s for all responses on port %s", label, util.GetRequestOrListenerPort(r))
-    events.SendRequestEvent("Label Set", msg, r)
-  }
-  util.AddLogMessage(msg, r)
-  fmt.Fprintln(w, msg)
+	msg := ""
+	if label := listeners.SetListenerLabel(r); label == "" {
+		msg := fmt.Sprintf("Port [%s] Label Cleared", util.GetRequestOrListenerPort(r))
+		events.SendRequestEvent("Label Cleared", msg, r)
+	} else {
+		msg = fmt.Sprintf("Will use label %s for all responses on port %s", label, util.GetRequestOrListenerPort(r))
+		events.SendRequestEvent("Label Set", msg, r)
+	}
+	util.AddLogMessage(msg, r)
+	fmt.Fprintln(w, msg)
 }
 
 func getLabel(w http.ResponseWriter, r *http.Request) {
-  label := listeners.GetListenerLabel(r)
-  msg := fmt.Sprintf("Port [%s] Label [%s]", util.GetRequestOrListenerPort(r), label)
-  util.AddLogMessage(msg, r)
-  fmt.Fprintln(w, "Server Label: "+label)
+	label := listeners.GetListenerLabel(r)
+	msg := fmt.Sprintf("Port [%s] Label [%s]", util.GetRequestOrListenerPort(r), label)
+	util.AddLogMessage(msg, r)
+	fmt.Fprintln(w, "Server Label: "+label)
 }

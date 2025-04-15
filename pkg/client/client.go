@@ -1,5 +1,5 @@
 /**
- * Copyright 2024 uk
+ * Copyright 2025 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,11 +24,11 @@ import (
 )
 
 var (
-  Handler        util.ServerHandler   = util.ServerHandler{Name: "client", SetRoutes: SetRoutes}
-  clientHandlers []util.ServerHandler = []util.ServerHandler{target.Handler}
+	Handler        util.ServerHandler   = util.ServerHandler{Name: "client", SetRoutes: SetRoutes}
+	clientHandlers []util.ServerHandler = []util.ServerHandler{target.Handler}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-  clientRouter := r.PathPrefix("/client").Subrouter()
-  util.AddRoutes(clientRouter, r, root, clientHandlers...)
+	clientRouter := r.PathPrefix("/client").Subrouter()
+	util.AddRoutes(clientRouter, r, root, clientHandlers...)
 }

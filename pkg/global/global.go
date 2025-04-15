@@ -1,5 +1,5 @@
 /**
- * Copyright 2024 uk
+ * Copyright 2025 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,78 +17,78 @@
 package global
 
 import (
-  "net"
-  "net/http"
-  "time"
+	"net"
+	"net/http"
+	"time"
 )
 
 var (
-  Version       string
-  Commit        string
-  ServerPort    int
-  PeerName      string
-  PeerAddress   string
-  PodName       string
-  Namespace     string
-  NodeName      string
-  Cluster       string
-  HostIP        string
-  HostLabel     string
-  RegistryURL   string
-  CertPath      string
-  WorkDir       string
-  KubeConfig    string
-  UseLocker     bool
-  EnableEvents  bool
-  PublishEvents bool
-  StartupDelay  time.Duration
-  ShutdownDelay time.Duration
-  StartupScript []string
+	Version       string
+	Commit        string
+	ServerPort    int
+	PeerName      string
+	PeerAddress   string
+	PodName       string
+	Namespace     string
+	NodeName      string
+	Cluster       string
+	HostIP        string
+	HostLabel     string
+	RegistryURL   string
+	CertPath      string
+	WorkDir       string
+	KubeConfig    string
+	UseLocker     bool
+	EnableEvents  bool
+	PublishEvents bool
+	StartupDelay  time.Duration
+	ShutdownDelay time.Duration
+	StartupScript []string
 
-  Stopping                     bool = false
-  EnableServerLogs             bool = true
-  EnableAdminLogs              bool = true
-  EnableClientLogs             bool = true
-  EnableInvocationLogs         bool = true
-  EnableInvocationResponseLogs bool = false
-  EnableRegistryLogs           bool = true
-  EnableRegistryLockerLogs     bool = false
-  EnableRegistryEventsLogs     bool = false
-  EnableRegistryReminderLogs   bool = false
-  EnablePeerHealthLogs         bool = true
-  EnableProbeLogs              bool = false
-  EnableMetricsLogs            bool = true
-  LogRequestHeaders            bool = true
-  LogRequestMiniBody           bool = false
-  LogRequestBody               bool = false
-  LogResponseHeaders           bool = false
-  LogResponseMiniBody          bool = false
-  LogResponseBody              bool = false
+	Stopping                     bool = false
+	EnableServerLogs             bool = true
+	EnableAdminLogs              bool = true
+	EnableClientLogs             bool = true
+	EnableInvocationLogs         bool = true
+	EnableInvocationResponseLogs bool = false
+	EnableRegistryLogs           bool = true
+	EnableRegistryLockerLogs     bool = false
+	EnableRegistryEventsLogs     bool = false
+	EnableRegistryReminderLogs   bool = false
+	EnablePeerHealthLogs         bool = true
+	EnableProbeLogs              bool = false
+	EnableMetricsLogs            bool = true
+	LogRequestHeaders            bool = true
+	LogRequestMiniBody           bool = false
+	LogRequestBody               bool = false
+	LogResponseHeaders           bool = false
+	LogResponseMiniBody          bool = false
+	LogResponseBody              bool = false
 
-  MaxMTUSize int = getMaxMTUSize()
+	MaxMTUSize int = getMaxMTUSize()
 
-  GetPeers                  func(string, *http.Request) map[string]string
-  IsReadinessProbe          func(*http.Request) bool
-  IsLivenessProbe           func(*http.Request) bool
-  IsListenerPresent         func(int) bool
-  IsListenerOpen            func(int) bool
-  GetListenerID             func(int) string
-  GetListenerLabel          func(*http.Request) string
-  GetListenerLabelForPort   func(int) string
-  GetHostLabelForPort       func(int) string
-  StoreEventInCurrentLocker func(interface{})
+	GetPeers                  func(string, *http.Request) map[string]string
+	IsReadinessProbe          func(*http.Request) bool
+	IsLivenessProbe           func(*http.Request) bool
+	IsListenerPresent         func(int) bool
+	IsListenerOpen            func(int) bool
+	GetListenerID             func(int) string
+	GetListenerLabel          func(*http.Request) string
+	GetListenerLabelForPort   func(int) string
+	GetHostLabelForPort       func(int) string
+	StoreEventInCurrentLocker func(interface{})
 
-  Debug bool = false
+	Debug bool = false
 )
 
 func getMaxMTUSize() int {
-  var m int = 0
-  if ifs, _ := net.Interfaces(); ifs != nil {
-    for _, i := range ifs {
-      if i.MTU > m {
-        m = i.MTU
-      }
-    }
-  }
-  return m
+	var m int = 0
+	if ifs, _ := net.Interfaces(); ifs != nil {
+		for _, i := range ifs {
+			if i.MTU > m {
+				m = i.MTU
+			}
+		}
+	}
+	return m
 }
