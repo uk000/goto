@@ -19,6 +19,7 @@ package response
 import (
 	"net/http"
 
+	"goto/pkg/server/middleware"
 	"goto/pkg/server/response/delay"
 	"goto/pkg/server/response/header"
 	"goto/pkg/server/response/payload"
@@ -30,15 +31,14 @@ import (
 )
 
 var (
-	Handler          util.ServerHandler   = util.ServerHandler{"response", SetRoutes, Middleware}
-	responseHandlers []util.ServerHandler = []util.ServerHandler{
-		status.Handler, delay.Handler, header.Handler, payload.Handler, trigger.Handler}
+	Middleware          = middleware.NewMiddleware("response", SetRoutes, MiddlewareHandler)
+	responseMiddlewares = []*middleware.Middleware{status.Middleware, delay.Middleware, header.Middleware, payload.Middleware, trigger.Middleware}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	util.AddRoutes(util.PathRouter(r, "/server?/response"), r, root, responseHandlers...)
+	middleware.AddRoutes(util.PathRouter(r, "/server?/response"), r, root, responseMiddlewares...)
 }
 
-func Middleware(next http.Handler) http.Handler {
-	return util.AddMiddlewares(next, responseHandlers...)
+func MiddlewareHandler(next http.Handler) http.Handler {
+	return middleware.AddMiddlewares(next, responseMiddlewares...)
 }

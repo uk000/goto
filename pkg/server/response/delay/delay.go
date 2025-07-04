@@ -25,15 +25,16 @@ import (
 	"goto/pkg/constants"
 	"goto/pkg/events"
 	"goto/pkg/metrics"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
 )
 
 var (
-	Handler          util.ServerHandler         = util.ServerHandler{"delay", SetRoutes, Middleware}
-	delayByPort      map[string][]time.Duration = map[string][]time.Duration{}
-	delayCountByPort map[string]int             = map[string]int{}
+	Middleware       = middleware.NewMiddleware("delay", SetRoutes, MiddlewareHandler)
+	delayByPort      = map[string][]time.Duration{}
+	delayCountByPort = map[string]int{}
 	delayLock        sync.RWMutex
 )
 
@@ -43,6 +44,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRouteWithPort(delayRouter, "/clear", setDelay, "POST", "PUT")
 	util.AddRouteWithPort(delayRouter, "", getDelay, "GET")
 	util.AddRoute(root, "/delay/{delay}", delay)
+	util.AddRoute(root, "/sleep/{delay}", delay)
 }
 
 func setDelay(w http.ResponseWriter, r *http.Request) {
@@ -109,7 +111,7 @@ func getDelay(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Delay reported", r)
 }
 
-func Middleware(next http.Handler) http.Handler {
+func MiddlewareHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if util.IsKnownNonTraffic(r) {
 			if next != nil {

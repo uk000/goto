@@ -165,6 +165,10 @@ var (
 	proxyLock   sync.RWMutex
 )
 
+func init() {
+	util.WillProxyHTTP = WillProxyHTTP
+}
+
 func newProxy(port int) *Proxy {
 	p := &Proxy{
 		Port:        port,
@@ -1044,7 +1048,7 @@ func WillProxyTCP(port int) bool {
 	return p.Enabled && p.hasAnyTCPTargets()
 }
 
-func middleware(next http.Handler) http.Handler {
+func MiddlewareHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := getPortProxy(r)
 		rs := util.GetRequestStore(r)
@@ -1054,8 +1058,4 @@ func middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 	})
-}
-
-func Middleware(next http.Handler) http.Handler {
-	return util.AddMiddlewares(next, internalHandler)
 }

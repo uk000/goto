@@ -17,71 +17,40 @@
 package global
 
 import (
+	"goto/pkg/types"
 	"net"
-	"net/http"
-	"time"
 )
 
+func init() {
+	Self.ServerPort = 8080
+	Self.GRPCPort = 1234
+	ServerConfig.MaxMTUSize = GetMaxMTUSize()
+}
+
 var (
-	Version       string
-	Commit        string
-	ServerPort    int
-	PeerName      string
-	PeerAddress   string
-	PodName       string
-	Namespace     string
-	NodeName      string
-	Cluster       string
-	HostIP        string
-	HostLabel     string
-	RegistryURL   string
-	CertPath      string
-	WorkDir       string
-	KubeConfig    string
-	UseLocker     bool
-	EnableEvents  bool
-	PublishEvents bool
-	StartupDelay  time.Duration
-	ShutdownDelay time.Duration
-	StartupScript []string
-
-	Stopping                     bool = false
-	EnableServerLogs             bool = true
-	EnableAdminLogs              bool = true
-	EnableClientLogs             bool = true
-	EnableInvocationLogs         bool = true
-	EnableInvocationResponseLogs bool = false
-	EnableRegistryLogs           bool = true
-	EnableRegistryLockerLogs     bool = false
-	EnableRegistryEventsLogs     bool = false
-	EnableRegistryReminderLogs   bool = false
-	EnablePeerHealthLogs         bool = true
-	EnableProbeLogs              bool = false
-	EnableMetricsLogs            bool = true
-	LogRequestHeaders            bool = true
-	LogRequestMiniBody           bool = false
-	LogRequestBody               bool = false
-	LogResponseHeaders           bool = false
-	LogResponseMiniBody          bool = false
-	LogResponseBody              bool = false
-
-	MaxMTUSize int = getMaxMTUSize()
-
-	GetPeers                  func(string, *http.Request) map[string]string
-	IsReadinessProbe          func(*http.Request) bool
-	IsLivenessProbe           func(*http.Request) bool
-	IsListenerPresent         func(int) bool
-	IsListenerOpen            func(int) bool
-	GetListenerID             func(int) string
-	GetListenerLabel          func(*http.Request) string
-	GetListenerLabelForPort   func(int) string
-	GetHostLabelForPort       func(int) string
-	StoreEventInCurrentLocker func(interface{})
+	Version string
+	Commit  string
+	Funcs   = types.Funcs{}
+	Self    = types.SelfInfo{}
+	Flags   = types.Flags{
+		EnableServerLogs:     true,
+		EnableAdminLogs:      true,
+		EnableClientLogs:     true,
+		EnableInvocationLogs: true,
+		EnableRegistryLogs:   true,
+		EnablePeerHealthLogs: true,
+		EnableMetricsLogs:    true,
+		LogRequestHeaders:    true,
+	}
+	CmdConfig       = types.CmdConfig{}
+	CtlConfig       = types.CmdCtlConfig{}
+	CmdClientConfig = types.CmdClientConfig{}
+	ServerConfig    = types.ServerConfig{}
 
 	Debug bool = false
 )
 
-func getMaxMTUSize() int {
+func GetMaxMTUSize() int {
 	var m int = 0
 	if ifs, _ := net.Interfaces(); ifs != nil {
 		for _, i := range ifs {

@@ -26,6 +26,7 @@ import (
 	"goto/pkg/util"
 	"log"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,8 +45,8 @@ type HeaderCounts struct {
 	CountInfo
 	Header                    string                              `json:"header"`
 	CountsByValues            map[string]*CountInfo               `json:"countsByValues,omitempty"`
-	CountsByStatusCodes       map[int]*CountInfo                  `json:"countsByStatusCodes,omitempty"`
-	CountsByValuesStatusCodes map[string]map[int]*CountInfo       `json:"countsByValuesStatusCodes,omitempty"`
+	CountsByStatusCodes       map[string]*CountInfo               `json:"countsByStatusCodes,omitempty"`
+	CountsByValuesStatusCodes map[string]map[string]*CountInfo    `json:"countsByValuesStatusCodes,omitempty"`
 	CrossHeaders              map[string]*HeaderCounts            `json:"crossHeaders,omitempty"`
 	CrossHeadersByValues      map[string]map[string]*HeaderCounts `json:"crossHeadersByValues,omitempty"`
 }
@@ -56,7 +57,7 @@ type KeyResultCounts struct {
 	ByTimeBuckets KeyResult `json:"byTimeBuckets,omitempty"`
 }
 
-type KeyResult map[interface{}]*KeyResultCounts
+type KeyResult map[string]*KeyResultCounts
 
 type TargetResults struct {
 	Target                       string                   `json:"target"`
@@ -81,18 +82,18 @@ type TargetResults struct {
 	crossHeadersMap              map[string]string
 	trackingTimeBuckets          [][]int
 	pendingRegistrySend          bool
-	lock                         *sync.RWMutex
+	lock                         sync.RWMutex
 }
 
 type SummaryCounts struct {
 	Count             int
 	ClientStreamCount int
 	ServerStreamCount int
-	ByStatusCodes     map[interface{}]int
-	ByTimeBuckets     map[interface{}]int
+	ByStatusCodes     map[string]int
+	ByTimeBuckets     map[string]int
 }
 
-type SummaryResult map[interface{}]*SummaryCounts
+type SummaryResult map[string]*SummaryCounts
 
 type AggregateResultsView struct {
 	CountsByStatusCodes          SummaryResult             `json:"countsByStatusCodes,omitempty"`
@@ -157,6 +158,7 @@ var (
 	collectTargetsResults        bool = true
 	collectAllTargetsResults     bool = false
 	collectInvocationResults     bool = false
+	_                                 = global.OnShutdown(StopRegistrySender)
 )
 
 func (kr KeyResult) MarshalJSON() ([]byte, error) {
@@ -236,6 +238,39 @@ func (tr *TargetResults) unsafeInit(reset bool) {
 	}
 }
 
+func (tr *TargetResults) unsafeInitMissing() {
+	if tr.CountsByStatus == nil {
+		tr.CountsByStatus = map[string]int{}
+	}
+	if tr.CountsByHeaders == nil {
+		tr.CountsByHeaders = map[string]*HeaderCounts{}
+	}
+	if tr.CountsByStatusCodes == nil {
+		tr.CountsByStatusCodes = KeyResult{}
+	}
+	if tr.CountsByURIs == nil {
+		tr.CountsByURIs = KeyResult{}
+	}
+	if tr.CountsByRequestPayloadSizes == nil {
+		tr.CountsByRequestPayloadSizes = KeyResult{}
+	}
+	if tr.CountsByResponsePayloadSizes == nil {
+		tr.CountsByResponsePayloadSizes = KeyResult{}
+	}
+	if tr.CountsByRetries == nil {
+		tr.CountsByRetries = KeyResult{}
+	}
+	if tr.CountsByRetryReasons == nil {
+		tr.CountsByRetryReasons = KeyResult{}
+	}
+	if tr.CountsByTimeBuckets == nil {
+		tr.CountsByTimeBuckets = KeyResult{}
+	}
+	if tr.CountsByErrors == nil {
+		tr.CountsByErrors = KeyResult{}
+	}
+}
+
 func NewTargetResults(target string, trackingHeaders []string, crossTrackingHeaders map[string][]string, trackingTimeBuckets [][]int) *TargetResults {
 	tr := &TargetResults{Target: target}
 	tr.unsafeInit(true)
@@ -250,8 +285,8 @@ func newHeaderCounts(header string) *HeaderCounts {
 	return &HeaderCounts{
 		Header:                    header,
 		CountsByValues:            map[string]*CountInfo{},
-		CountsByStatusCodes:       map[int]*CountInfo{},
-		CountsByValuesStatusCodes: map[string]map[int]*CountInfo{},
+		CountsByStatusCodes:       map[string]*CountInfo{},
+		CountsByValuesStatusCodes: map[string]map[string]*CountInfo{},
 		CrossHeaders:              map[string]*HeaderCounts{},
 		CrossHeadersByValues:      map[string]map[string]*HeaderCounts{},
 	}
@@ -299,14 +334,14 @@ func (c *CountInfo) incrementBy(retries int, by *CountInfo) {
 	}
 }
 
-func incrementHeaderCount(m map[int]*CountInfo, statusCode, retries, csCount, ssCount int, ts time.Time) {
+func incrementHeaderCount(m map[string]*CountInfo, statusCode string, retries, csCount, ssCount int, ts time.Time) {
 	if m[statusCode] == nil {
 		m[statusCode] = &CountInfo{}
 	}
 	m[statusCode].increment(retries, csCount, ssCount, ts)
 }
 
-func incrementHeaderCountBy(m map[int]*CountInfo, statusCode, retries int, by *CountInfo) {
+func incrementHeaderCountBy(m map[string]*CountInfo, statusCode string, retries int, by *CountInfo) {
 	if m[statusCode] == nil {
 		m[statusCode] = &CountInfo{}
 	}
@@ -327,13 +362,13 @@ func incrementHeaderValueCountBy(m map[string]*CountInfo, value string, retries 
 	m[value].incrementBy(retries, by)
 }
 
-func (tr *TargetResults) processCrossHeadersForHeader(header string, values []string, statusCode, retries, csCount, ssCount int, ts time.Time, allHeaders map[string][]string) {
+func (tr *TargetResults) processCrossHeadersForHeader(header string, values []string, statusCode string, retries, csCount, ssCount int, ts time.Time, allHeaders map[string][]string) {
 	if crossHeaders := tr.crossTrackingHeaders[header]; crossHeaders != nil {
 		processSubCrossHeadersForHeader(header, values, statusCode, retries, csCount, ssCount, ts, tr.CountsByHeaders[header], crossHeaders, allHeaders)
 	}
 }
 
-func processSubCrossHeadersForHeader(header string, values []string, statusCode, retries, csCount, ssCount int, ts time.Time,
+func processSubCrossHeadersForHeader(header string, values []string, statusCode string, retries, csCount, ssCount int, ts time.Time,
 	headerCounts *HeaderCounts, crossHeaders []string, allHeaders map[string][]string) {
 	for _, value := range values {
 		if headerCounts.CrossHeadersByValues[value] == nil {
@@ -355,7 +390,7 @@ func processSubCrossHeadersForHeader(header string, values []string, statusCode,
 		for _, crossValue := range crossValues {
 			incrementHeaderValueCount(crossHeaderCounts.CountsByValues, crossValue, retries, csCount, ssCount, ts)
 			if crossHeaderCounts.CountsByValuesStatusCodes[crossValue] == nil {
-				crossHeaderCounts.CountsByValuesStatusCodes[crossValue] = map[int]*CountInfo{}
+				crossHeaderCounts.CountsByValuesStatusCodes[crossValue] = map[string]*CountInfo{}
 			}
 			incrementHeaderCount(crossHeaderCounts.CountsByValuesStatusCodes[crossValue], statusCode, retries, csCount, ssCount, ts)
 		}
@@ -375,7 +410,7 @@ func processSubCrossHeadersForHeader(header string, values []string, statusCode,
 			for _, crossValue := range crossValues {
 				incrementHeaderValueCount(crossHeaderCountsByValue.CountsByValues, crossValue, retries, csCount, ssCount, ts)
 				if crossHeaderCountsByValue.CountsByValuesStatusCodes[crossValue] == nil {
-					crossHeaderCountsByValue.CountsByValuesStatusCodes[crossValue] = map[int]*CountInfo{}
+					crossHeaderCountsByValue.CountsByValuesStatusCodes[crossValue] = map[string]*CountInfo{}
 				}
 				incrementHeaderCount(crossHeaderCountsByValue.CountsByValuesStatusCodes[crossValue], statusCode, retries, csCount, ssCount, ts)
 			}
@@ -386,7 +421,7 @@ func processSubCrossHeadersForHeader(header string, values []string, statusCode,
 	}
 }
 
-func (tr *TargetResults) addHeaderResult(header string, values []string, statusCode, retries, csCount, ssCount int, ts time.Time) {
+func (tr *TargetResults) addHeaderResult(header string, values []string, statusCode string, retries, csCount, ssCount int, ts time.Time) {
 	if tr.CountsByHeaders[header] == nil {
 		tr.CountsByHeaders[header] = newHeaderCounts(header)
 	}
@@ -397,13 +432,13 @@ func (tr *TargetResults) addHeaderResult(header string, values []string, statusC
 	for _, value := range values {
 		incrementHeaderValueCount(headerCounts.CountsByValues, value, retries, csCount, ssCount, ts)
 		if headerCounts.CountsByValuesStatusCodes[value] == nil {
-			headerCounts.CountsByValuesStatusCodes[value] = map[int]*CountInfo{}
+			headerCounts.CountsByValuesStatusCodes[value] = map[string]*CountInfo{}
 		}
 		incrementHeaderCount(headerCounts.CountsByValuesStatusCodes[value], statusCode, retries, csCount, ssCount, ts)
 	}
 }
 
-func addKeyResultCounts(counts map[interface{}]*KeyResultCounts, key interface{}, statusCode, retries, csCount, ssCount int, ts time.Time, withStatusCodes, withTimeBuckets bool) {
+func addKeyResultCounts(counts map[string]*KeyResultCounts, key string, statusCode string, retries, csCount, ssCount int, ts time.Time, withStatusCodes, withTimeBuckets bool) {
 	if counts[key] == nil {
 		counts[key] = newKeyResultCounts(withStatusCodes, withTimeBuckets)
 	}
@@ -422,36 +457,37 @@ func (tr *TargetResults) addTimeBucketResult(tb []int, ir *invocation.Invocation
 	if tb != nil {
 		bucket = fmt.Sprint(tb)
 	}
-	addKeyResultCounts(tr.CountsByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
+	statusCode := strconv.Itoa(ir.Response.StatusCode)
+	addKeyResultCounts(tr.CountsByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
 
 	if uriCount := tr.CountsByURIs[ir.Request.URI]; uriCount != nil {
-		addKeyResultCounts(uriCount.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
+		addKeyResultCounts(uriCount.ByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
 	}
 
-	if rpc := tr.CountsByRequestPayloadSizes[ir.Request.PayloadSize]; rpc != nil {
-		addKeyResultCounts(rpc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
+	if rpc := tr.CountsByRequestPayloadSizes[strconv.Itoa(ir.Request.PayloadSize)]; rpc != nil {
+		addKeyResultCounts(rpc.ByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
 	}
 
-	if rpc := tr.CountsByResponsePayloadSizes[ir.Request.PayloadSize]; rpc != nil {
-		addKeyResultCounts(rpc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
+	if rpc := tr.CountsByResponsePayloadSizes[strconv.Itoa(ir.Response.PayloadSize)]; rpc != nil {
+		addKeyResultCounts(rpc.ByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
 	}
 
-	if rc := tr.CountsByRetries[ir.Retries]; rc != nil {
-		addKeyResultCounts(rc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
+	if rc := tr.CountsByRetries[strconv.Itoa(ir.Retries)]; rc != nil {
+		addKeyResultCounts(rc.ByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
 	}
 
 	if rrc := tr.CountsByRetryReasons[ir.LastRetryReason]; rrc != nil {
-		addKeyResultCounts(rrc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
+		addKeyResultCounts(rrc.ByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
 	}
 
 	for e := range ir.Errors {
-		if ec := tr.CountsByErrors[e]; ec != nil {
-			addKeyResultCounts(ec.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
+		if ec := tr.CountsByErrors[strconv.Itoa(e)]; ec != nil {
+			addKeyResultCounts(ec.ByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
 		}
 	}
 
-	if sc := tr.CountsByStatusCodes[ir.Response.StatusCode]; sc != nil {
-		addKeyResultCounts(sc.ByTimeBuckets, bucket, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, false, false)
+	if sc := tr.CountsByStatusCodes[statusCode]; sc != nil {
+		addKeyResultCounts(sc.ByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, false, false)
 	}
 }
 
@@ -466,43 +502,44 @@ func (tr *TargetResults) addResult(ir *invocation.InvocationResult) {
 		tr.FirstResultAt = finishedAt
 	}
 	tr.LastResultAt = finishedAt
+	statusCode := strconv.Itoa(ir.Response.StatusCode)
 	if ir.Retries > 0 {
 		tr.RetriedInvocationCounts++
-		addKeyResultCounts(tr.CountsByRetries, ir.Retries, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
+		addKeyResultCounts(tr.CountsByRetries, strconv.Itoa(ir.Retries), statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
 		if ir.LastRetryReason != "" {
-			addKeyResultCounts(tr.CountsByRetryReasons, ir.LastRetryReason, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
+			addKeyResultCounts(tr.CountsByRetryReasons, ir.LastRetryReason, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
 		}
 	}
 	tr.ClientStreamCount += ir.Response.ClientStreamCount
 	tr.ServerStreamCount += ir.Response.ServerStreamCount
 	tr.CountsByStatus[ir.Response.Status]++
-	addKeyResultCounts(tr.CountsByStatusCodes, ir.Response.StatusCode, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, false, true)
+	addKeyResultCounts(tr.CountsByStatusCodes, statusCode, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, false, true)
 
 	uri := strings.ToLower(ir.Request.URI)
-	addKeyResultCounts(tr.CountsByURIs, uri, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
+	addKeyResultCounts(tr.CountsByURIs, uri, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
 
 	for _, h := range tr.trackingHeaders {
 		for rh, values := range ir.Response.Headers {
 			if strings.EqualFold(h, rh) {
-				tr.addHeaderResult(h, values, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, finishedAt)
-				tr.processCrossHeadersForHeader(h, values, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, ir.Response.Headers)
+				tr.addHeaderResult(h, values, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, finishedAt)
+				tr.processCrossHeadersForHeader(h, values, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, ir.Response.Headers)
 			}
 		}
 	}
 	if ir.Request.PayloadSize > 0 {
-		addKeyResultCounts(tr.CountsByRequestPayloadSizes, ir.Request.PayloadSize, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
+		addKeyResultCounts(tr.CountsByRequestPayloadSizes, strconv.Itoa(ir.Request.PayloadSize), statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
 	}
 	if ir.Response.PayloadSize > 0 {
-		addKeyResultCounts(tr.CountsByResponsePayloadSizes, ir.Response.PayloadSize, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
+		addKeyResultCounts(tr.CountsByResponsePayloadSizes, strconv.Itoa(ir.Response.PayloadSize), statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
 	}
 	for e := range ir.Errors {
-		addKeyResultCounts(tr.CountsByErrors, e, ir.Response.StatusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
+		addKeyResultCounts(tr.CountsByErrors, strconv.Itoa(e), statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, true)
 	}
 	if len(tr.trackingTimeBuckets) > 0 {
 		addedToTimeBucket := false
 		took := int(ir.TookNanos.Nanoseconds()) / 1000000
 		for _, tb := range tr.trackingTimeBuckets {
-			if took >= tb[0] && took <= tb[1] {
+			if took >= tb[0] && (tb[1] == 0 || took <= tb[1]) {
 				tr.addTimeBucketResult(tb, ir)
 				addedToTimeBucket = true
 				break
@@ -524,11 +561,17 @@ func (tr *TargetsResults) init(reset bool) {
 	}
 }
 
+func (tr *TargetsResults) unsafeInitMissing() {
+	for _, r := range tr.Results {
+		r.unsafeInitMissing()
+	}
+}
+
 func (tr *TargetsResults) getTargetResults(target string) (*TargetResults, *TargetResults) {
 	tr.init(false)
 	tr.lock.Lock()
 	if tr.Results[target] == nil {
-		tr.Results[target] = &TargetResults{Target: target, lock: &tr.lock}
+		tr.Results[target] = &TargetResults{Target: target}
 		tr.Results[target].unsafeInit(true)
 	}
 	targetResults := tr.Results[target]
@@ -680,19 +723,40 @@ func ClearResults() {
 	targetsResults.init(true)
 }
 
-func GetTargetsResultsJSON() string {
+func GetTargetsResultsJSON(pretty bool) string {
 	targetsResults.lock.RLock()
 	defer targetsResults.lock.RUnlock()
 	if targetsResults.Results != nil {
+		if pretty {
+			return util.ToPrettyJSONText(targetsResults.Results)
+		}
 		return util.ToJSONText(targetsResults.Results)
 	}
 	return "{}"
 }
 
-func GetInvocationResultsJSON() string {
+func LoadTargetsResultsJSON(content string) error {
+	targetsResults.lock.RLock()
+	defer targetsResults.lock.RUnlock()
+	err := util.ReadJson(content, &targetsResults.Results)
+	targetsResults.unsafeInitMissing()
+	log.Printf("targetsResults.Results: %+v\n", targetsResults.Results)
+	return err
+}
+
+func GetInvocationResultsJSON(pretty bool) string {
 	invocationsResults.lock.RLock()
 	defer invocationsResults.lock.RUnlock()
+	if pretty {
+		return util.ToPrettyJSONText(invocationsResults.Results)
+	}
 	return util.ToJSONText(invocationsResults.Results)
+}
+
+func LoadInvocationResultsJSON(content string) error {
+	invocationsResults.lock.RLock()
+	defer invocationsResults.lock.RUnlock()
+	return util.ReadJson(content, &invocationsResults.Results)
 }
 
 func addDeltaCrossHeaders(result, delta map[string]*HeaderCounts, crossTrackingHeaders map[string][]string, crossHeadersMap map[string]string, detailed bool) {
@@ -728,7 +792,7 @@ func addDeltaHeaderCounts(result, delta *HeaderCounts, crossTrackingHeaders map[
 		incrementHeaderValueCountBy(result.CountsByValues, value, 0, count)
 	}
 	if result.CountsByStatusCodes == nil {
-		result.CountsByStatusCodes = map[int]*CountInfo{}
+		result.CountsByStatusCodes = map[string]*CountInfo{}
 	}
 	if detailed {
 		for statusCode, count := range delta.CountsByStatusCodes {
@@ -736,7 +800,7 @@ func addDeltaHeaderCounts(result, delta *HeaderCounts, crossTrackingHeaders map[
 		}
 		for value, valueCounts := range delta.CountsByValuesStatusCodes {
 			if result.CountsByValuesStatusCodes[value] == nil {
-				result.CountsByValuesStatusCodes[value] = map[int]*CountInfo{}
+				result.CountsByValuesStatusCodes[value] = map[string]*CountInfo{}
 			}
 			for statusCode, count := range valueCounts {
 				incrementHeaderCountBy(result.CountsByValuesStatusCodes[value], statusCode, 0, count)
@@ -845,7 +909,7 @@ func incrementKeyResultCounts(result SummaryResult, delta interface{}, detailed 
 	}
 	iter := v.MapRange()
 	for iter.Next() {
-		key := iter.Key().Interface()
+		key := iter.Key().String()
 		val := iter.Value().Interface().(*KeyResultCounts)
 		if result[key] == nil {
 			result[key] = &SummaryCounts{}
@@ -857,7 +921,7 @@ func incrementKeyResultCounts(result SummaryResult, delta interface{}, detailed 
 		if detailed {
 			if len(val.ByStatusCodes) > 0 {
 				if counts.ByStatusCodes == nil {
-					counts.ByStatusCodes = map[interface{}]int{}
+					counts.ByStatusCodes = map[string]int{}
 				}
 				for sc, count := range val.ByStatusCodes {
 					counts.ByStatusCodes[sc] += count.Count
@@ -865,7 +929,7 @@ func incrementKeyResultCounts(result SummaryResult, delta interface{}, detailed 
 			}
 			if len(val.ByTimeBuckets) > 0 {
 				if counts.ByTimeBuckets == nil {
-					counts.ByTimeBuckets = map[interface{}]int{}
+					counts.ByTimeBuckets = map[string]int{}
 				}
 				for tb, count := range val.ByTimeBuckets {
 					counts.ByTimeBuckets[tb] += count.Count
@@ -956,9 +1020,9 @@ func NewClientTargetsAggregateResults() *ClientTargetsAggregateResultsView {
 }
 
 func lockInvocationRegistryLocker(invocationIndex uint32) {
-	if global.UseLocker && global.RegistryURL != "" {
-		url := fmt.Sprintf("%s/registry/peers/%s/%s/locker/lock/%s_%d", global.RegistryURL,
-			global.PeerName, global.PeerAddress, LockerClientKey, invocationIndex)
+	if global.Flags.UseLocker && global.Self.RegistryURL != "" {
+		url := fmt.Sprintf("%s/registry/peers/%s/%s/locker/lock/%s_%d", global.Self.RegistryURL,
+			global.Self.Name, global.Self.Address, LockerClientKey, invocationIndex)
 		if resp, err := registryClient.HTTP().Post(url, ContentTypeJSON, nil); err == nil {
 			util.CloseResponse(resp)
 		}
@@ -966,8 +1030,8 @@ func lockInvocationRegistryLocker(invocationIndex uint32) {
 }
 
 func sendResultToRegistry(keys []string, data interface{}) {
-	if global.UseLocker && global.RegistryURL != "" {
-		url := fmt.Sprintf("%s/registry/peers/%s/%s/locker/store/%s", global.RegistryURL, global.PeerName, global.PeerAddress, strings.Join(keys, ","))
+	if global.Flags.UseLocker && global.Self.RegistryURL != "" {
+		url := fmt.Sprintf("%s/registry/peers/%s/%s/locker/store/%s", global.Self.RegistryURL, global.Self.Name, global.Self.Address, strings.Join(keys, ","))
 		if resp, err := registryClient.HTTP().Post(url, ContentTypeJSON,
 			strings.NewReader(util.ToJSONText(data))); err == nil {
 			util.CloseResponse(resp)

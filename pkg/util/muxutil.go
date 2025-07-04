@@ -27,12 +27,6 @@ import (
 	"github.com/gorilla/mux"
 )
 
-type ServerHandler struct {
-	Name       string
-	SetRoutes  func(r *mux.Router, parent *mux.Router, root *mux.Router)
-	Middleware mux.MiddlewareFunc
-}
-
 var (
 	portRouter            *mux.Router
 	portTunnelRouters     = map[string]*mux.Router{}
@@ -195,24 +189,6 @@ func AddRouteMultiQWithPort(r *mux.Router, path string, f func(http.ResponseWrit
 	if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && portTunnelRouters[lpath] != nil {
 		AddRouteMultiQ(portTunnelRouters[lpath], path, f, queryParams, methods...)
 	}
-}
-
-func AddRoutes(r *mux.Router, parent *mux.Router, root *mux.Router, handlers ...ServerHandler) {
-	for _, h := range handlers {
-		if h.SetRoutes != nil {
-			h.SetRoutes(r, parent, root)
-		}
-	}
-}
-
-func AddMiddlewares(next http.Handler, handlers ...ServerHandler) http.Handler {
-	handler := next
-	for i := len(handlers) - 1; i >= 0; i-- {
-		if handlers[i].Middleware != nil {
-			handler = handlers[i].Middleware(handler)
-		}
-	}
-	return handler
 }
 
 func IsFiller(key string) bool {

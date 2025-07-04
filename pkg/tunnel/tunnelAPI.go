@@ -18,6 +18,7 @@ package tunnel
 
 import (
 	"fmt"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
 	"strings"
@@ -26,7 +27,7 @@ import (
 )
 
 var (
-	Handler = util.ServerHandler{"tunnel", SetRoutes, Middleware}
+	Middleware = middleware.NewMiddleware("tunnel", SetRoutes, MiddlewareHandler)
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {

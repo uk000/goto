@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Web Terminal</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm/css/xterm.css" />
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: #1e1e1e;
+    }
+    #terminal {
+      height: 100vh;
+      width: 100vw;
+    }
+  </style>
+</head>
+<body>
+  <div id="terminal"></div>
+  <script src="https://cdn.jsdelivr.net/npm/xterm/lib/xterm.js"></script>
+  <script src="https://unpkg.com/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+  <script>
+    const term = new Terminal({
+      theme: {
+        background: '#1e1e1e'
+      }
+    });
+    let fitAddon = new window.FitAddon.FitAddon()
+    term.loadAddon(fitAddon);
+    term.open(document.getElementById('terminal'));
+    fitAddon.fit();
+    const protocol = (location.protocol === 'https:') ? 'wss://' : 'ws://';
+    const socketUrl = protocol + location.host + '/ui/ws';
+    console.log('Connecting to WebSocket at:', socketUrl);
+    const socket = new WebSocket(socketUrl);
+
+    window.addEventListener('resize', () => { 
+      fitAddon.fit(); 
+    });
+
+    socket.addEventListener('message', function(event) {
+      console.log(event.data);
+      term.write(event.data);
+    });
+
+    // Send user input to backend
+    term.onData(function(data) {
+      socket.send(data);
+    });
+
+    socket.addEventListener('open', function() {
+      term.write('\x1b[32mUI Connected\x1b[0m\r\n');
+    });
+
+    socket.addEventListener('close', function() {
+      term.write('\r\n\x1b[31mUI Disconnected\x1b[0m');
+    });
+
+    socket.addEventListener('error', function() {
+      term.write('\r\n\x1b[31mConnection error\x1b[0m');
+    });
+  </script>
+</body>
+</html>

@@ -14,14 +14,17 @@
  * limitations under the License.
  */
 
-package k8s
+package store
 
 import (
 	"context"
+	"goto/pkg/global"
+	"goto/pkg/k8s"
 	"goto/pkg/util"
 	"log"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,7 +54,7 @@ type K8sResourceWatch struct {
 }
 
 type K8sCache struct {
-	cache map[string]map[string]interface{}
+	Cache map[string]map[string]interface{}
 	lock  sync.RWMutex
 }
 
@@ -60,8 +63,8 @@ const (
 )
 
 var (
-	k8sCache = K8sCache{
-		cache: map[string]map[string]interface{}{},
+	Cache = &K8sCache{
+		Cache: map[string]map[string]interface{}{},
 	}
 	k8sResourceWatch = &K8sResourceWatch{
 		watches:    map[string]map[string]map[string]*K8sResourceWatchCallback{},
@@ -70,37 +73,60 @@ var (
 		allDeletes: make(chan interface{}, 100),
 	}
 	k8sWatchStopChannel = make(chan bool, 1)
+	_                   = global.OnShutdown(StopWatch)
 )
 
-func StartWatch() {
-	notifyWatchers()
+func init() {
+	go func() {
+		for {
+			var obj interface{}
+			var isAdd, isUpdate, isDelete bool
+			select {
+			case <-k8sWatchStopChannel:
+				return
+			case obj = <-k8sResourceWatch.allAdds:
+				isAdd = true
+				log.Printf("Notifying Add: %s\n", obj)
+			case obj = <-k8sResourceWatch.allUpdates:
+				isUpdate = true
+				log.Printf("Notifying Update: %s\n", obj)
+			case obj = <-k8sResourceWatch.allDeletes:
+				isDelete = true
+				log.Printf("Notifying Delete: %s\n", obj)
+			}
+			metadata := obj.(*unstructured.Unstructured).Object["metadata"].(map[string]interface{})
+			name := metadata["name"].(string)
+			namespace := metadata["namespace"].(string)
+			k8sResourceWatch.notifyWatchers(namespace, name, obj, isAdd, isUpdate, isDelete)
+		}
+	}()
 }
 
 func StopWatch() {
 	k8sWatchStopChannel <- true
 }
 
-func (k *K8sCache) clear() {
+func (k *K8sCache) Clear() {
 	k.lock.Lock()
-	k.cache = map[string]map[string]interface{}{}
+	k.Cache = map[string]map[string]interface{}{}
 	k.lock.Unlock()
 	runtime.GC()
 }
 
-func (k *K8sCache) store(namespace, name string, obj interface{}) {
+func (k *K8sCache) Store(namespace, name string, obj interface{}) {
 	k.lock.Lock()
 	defer k.lock.Unlock()
-	if k.cache[namespace] == nil {
-		k.cache[namespace] = map[string]interface{}{}
+	if k.Cache[namespace] == nil {
+		k.Cache[namespace] = map[string]interface{}{}
 	}
-	k.cache[namespace][name] = obj
+	k.Cache[namespace][name] = obj
 }
 
-func (k *K8sCache) get(namespace, name string) interface{} {
+func (k *K8sCache) Get(namespace, name string) interface{} {
 	k.lock.RLock()
 	defer k.lock.RUnlock()
-	if k.cache[namespace] != nil && k.cache[namespace][name] != nil {
-		return k.cache[namespace][name]
+	if k.Cache[namespace] != nil && k.Cache[namespace][name] != nil {
+		return k.Cache[namespace][name]
 	}
 	return nil
 }
@@ -181,7 +207,7 @@ func UnwatchResource(group, version, resource, namespace, name string, watcher *
 }
 
 func setupWatchForResource(gvr *schema.GroupVersionResource, namespace, name string) {
-	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(k8sClient.client, CacheRefreshPeriod, namespace,
+	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(k8s.Client.Client, CacheRefreshPeriod, namespace,
 		func(opts *metav1.ListOptions) {
 			opts.FieldSelector = fields.OneTermEqualSelector(metav1.ObjectNameField, name).String()
 		})
@@ -202,32 +228,6 @@ func setupWatchForResource(gvr *schema.GroupVersionResource, namespace, name str
 	})
 }
 
-func notifyWatchers() {
-	go func() {
-		for {
-			var obj interface{}
-			var isAdd, isUpdate, isDelete bool
-			select {
-			case <-k8sWatchStopChannel:
-				return
-			case obj = <-k8sResourceWatch.allAdds:
-				isAdd = true
-				log.Printf("Notifying Add: %s\n", obj)
-			case obj = <-k8sResourceWatch.allUpdates:
-				isUpdate = true
-				log.Printf("Notifying Update: %s\n", obj)
-			case obj = <-k8sResourceWatch.allDeletes:
-				isDelete = true
-				log.Printf("Notifying Delete: %s\n", obj)
-			}
-			metadata := obj.(*unstructured.Unstructured).Object["metadata"].(map[string]interface{})
-			name := metadata["name"].(string)
-			namespace := metadata["namespace"].(string)
-			k8sResourceWatch.notifyWatchers(namespace, name, obj, isAdd, isUpdate, isDelete)
-		}
-	}()
-}
-
 func GetResourceByID(id string) (util.JSON, error) {
 	group, version, resource, namespace, name := decodeResourceID(id)
 	gvk := &schema.GroupVersionKind{
@@ -240,7 +240,7 @@ func GetResourceByID(id string) (util.JSON, error) {
 
 func GetResource(kind, namespace, name string, jp *util.JSONPath, jq *util.JQ, r *http.Request) (*schema.GroupVersionKind, util.JSON, error) {
 	kind, namespace, name = reinterpretResource(kind, namespace, name)
-	k8sApi := K8sApiResourcesMap[kind]
+	k8sApi := k8s.K8sApiResourcesMap[strings.ToLower(kind)]
 	if k8sApi == nil {
 		log.Printf("K8s: Resource [%s] not found in K8sApiResourcesMap.\n", kind)
 		return nil, nil, errors.NewBadRequest("Resource not found")
@@ -270,7 +270,7 @@ func getResource(gvk *schema.GroupVersionKind, namespace, name string, jp *util.
 }
 
 func getResourceFromCache(namespace, name string) util.JSON {
-	obj := k8sCache.get(namespace, name)
+	obj := Cache.Get(namespace, name)
 	if obj != nil {
 		log.Printf("K8s: Serving Resource [%s/%s] from cache.\n", namespace, name)
 		return util.FromObject(obj)
@@ -281,7 +281,7 @@ func getResourceFromCache(namespace, name string) util.JSON {
 func fetchResource(gvk *schema.GroupVersionKind, namespace, name string) (util.JSON, error) {
 	if obj, err := getResourceFromK8s(gvk, namespace, name); err == nil && obj != nil {
 		if name != "" {
-			k8sCache.store(namespace, name, obj)
+			Cache.Store(namespace, name, obj)
 		}
 		return util.FromJSON(obj), nil
 	} else {
@@ -297,7 +297,7 @@ func fetchResource(gvk *schema.GroupVersionKind, namespace, name string) (util.J
 }
 
 func getResourceFromK8s(gvk *schema.GroupVersionKind, namespace, name string) (result interface{}, err error) {
-	ri, _, err := getResourceInterface(gvk, namespace)
+	ri, _, err := k8s.GetResourceInterface(gvk, namespace)
 	if err != nil {
 		return nil, err
 	}

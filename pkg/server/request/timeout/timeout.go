@@ -24,6 +24,7 @@ import (
 
 	"goto/pkg/events"
 	"goto/pkg/metrics"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
@@ -41,8 +42,8 @@ type TimeoutTracking struct {
 }
 
 var (
-	Handler               util.ServerHandler          = util.ServerHandler{"timeout", SetRoutes, Middleware}
-	timeoutTrackingByPort map[string]*TimeoutTracking = map[string]*TimeoutTracking{}
+	Middleware            = middleware.NewMiddleware("timeout", SetRoutes, MiddlewareHandler)
+	timeoutTrackingByPort = map[string]*TimeoutTracking{}
 	timeoutTrackingLock   sync.RWMutex
 )
 
@@ -143,7 +144,7 @@ func reportTimeoutTracking(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, output)
 }
 
-func Middleware(next http.Handler) http.Handler {
+func MiddlewareHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if util.IsKnownNonTraffic(r) {
 			if next != nil {

@@ -21,17 +21,20 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 
 	. "goto/pkg/constants"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
 	"goto/pkg/server/listeners"
+	"goto/pkg/server/middleware"
+	gototls "goto/pkg/tls"
 	"goto/pkg/util"
 )
 
 var (
-	Handler = util.ServerHandler{Name: "connection", Middleware: Middleware}
+	Middleware = middleware.NewMiddleware("connection", nil, RequestHandler)
 )
 
 func GetConn(r *http.Request) net.Conn {
@@ -64,21 +67,28 @@ func captureTLSInfo(r *http.Request) {
 	rs.IsTLS = true
 	rs.ServerName = tlsState.ServerName
 	rs.TLSVersionNum = tlsState.Version
-	rs.TLSVersion = util.GetTLSVersion(&tlsState)
+	rs.TLSVersion = gototls.GetTLSVersion(&tlsState)
 }
 
-func Middleware(next http.Handler) http.Handler {
+func RequestHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		localAddr := ""
 		if conn := GetConn(r); conn != nil {
 			captureTLSInfo(r)
 			localAddr = conn.LocalAddr().String()
 		} else {
-			localAddr = global.PeerAddress
+			localAddr = global.Self.Address
 		}
 		l := listeners.GetCurrentListener(r)
 		rs := util.GetRequestStore(r)
-		port := util.GetListenerPort(r)
+		p := util.GetRequestOrListenerPortNum(r)
+		port := ""
+		if p == 0 {
+			p = util.GetContextPort(r.Context())
+		}
+		if p > 0 {
+			port = strconv.Itoa(p)
+		}
 		rs.GotoProtocol = util.GotoProtocol(r.ProtoMajor == 2, l.TLS)
 		if util.IsTunnelRequest(r) {
 			w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoRemoteAddress, rs.TunnelCount), r.RemoteAddr)
@@ -113,7 +123,7 @@ func Middleware(next http.Handler) http.Handler {
 		if targetURL := r.Header.Get(HeaderGotoTargetURL); targetURL != "" {
 			msg += fmt.Sprintf(", GotoTargetURL: [%s]", targetURL)
 		}
-		if global.LogRequestHeaders {
+		if global.Flags.LogRequestHeaders {
 			msg += fmt.Sprintf(", Request Headers: [%s]", util.GetHeadersLog(r.Header))
 		}
 		util.AddLogMessage(msg, r)
@@ -122,6 +132,5 @@ func Middleware(next http.Handler) http.Handler {
 		} else if next != nil {
 			next.ServeHTTP(w, r)
 		}
-		util.DiscardRequestBody(r)
 	})
 }

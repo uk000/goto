@@ -25,6 +25,7 @@ import (
 	"goto/pkg/metrics"
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/listeners"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
@@ -32,7 +33,7 @@ import (
 )
 
 var (
-	Handler util.ServerHandler = util.ServerHandler{Name: "echo", SetRoutes: SetRoutes}
+	Middleware = middleware.NewMiddleware("echo", SetRoutes, nil)
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -101,7 +102,6 @@ func GetEchoResponse(w http.ResponseWriter, r *http.Request) map[string]interfac
 		"RequestURI":         r.RequestURI,
 		"RequestMethod":      r.Method,
 		"RequestProtcol":     r.Proto,
-		"RequestHeaders":     r.Header,
 		"RequestQuery":       r.URL.Query(),
 		"RequestBody":        fmt.Sprintf("[%d bytes]", rs.RequestPayloadSize),
 		HeaderGotoTargetURL:  r.Header.Get(HeaderGotoTargetURL),

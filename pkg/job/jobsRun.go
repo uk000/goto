@@ -19,7 +19,6 @@ package job
 import (
 	"fmt"
 	"goto/pkg/events"
-	. "goto/pkg/events/eventslist"
 	"goto/pkg/util"
 	"log"
 	"time"
@@ -147,7 +146,7 @@ func (jm *JobManager) executeJobRun(job *Job, jobRun *JobRunContext) {
 	job.lock.Unlock()
 
 	log.Printf("Jobs: Job [%s] Run [%d] Started \n", job.Name, jobRun.id)
-	events.SendEventJSON(Jobs_JobStarted, job.Name, map[string]interface{}{"job": job, "jobRun": jobRun.id})
+	events.SendEventJSON(events.Jobs_JobStarted, job.Name, map[string]interface{}{"job": job, "jobRun": jobRun.id})
 
 	time.Sleep(initialDelay)
 	for i := 0; i < count; i++ {
@@ -170,7 +169,7 @@ func (jm *JobManager) executeJobRun(job *Job, jobRun *JobRunContext) {
 	close(jobRun.doneChannel)
 	msg := fmt.Sprintf("Jobs: Job [%s] Run [%d] Finished", job.Name, jobRun.id)
 	log.Println(msg)
-	events.SendEvent(Jobs_JobFinished, msg)
+	events.SendEvent(events.Jobs_JobFinished, msg)
 	jobRun.lock.Unlock()
 	job.lock.Unlock()
 
@@ -217,7 +216,7 @@ func (jm *JobManager) stopJob(j string) bool {
 			jm.cronScheduler.RemoveByTag(job.Name)
 		}
 		jobRun.lock.Unlock()
-		events.SendEventJSON(Jobs_JobStopped, job.Name, job)
+		events.SendEventJSON(events.Jobs_JobStopped, job.Name, job)
 	}
 	return true
 }

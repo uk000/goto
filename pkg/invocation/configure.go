@@ -21,8 +21,9 @@ import (
 	"encoding/base64"
 	"fmt"
 	"goto/pkg/global"
-	"goto/pkg/grpc"
 	"goto/pkg/metrics"
+	grpc "goto/pkg/rpc/grpc/client"
+	gototls "goto/pkg/tls"
 	"goto/pkg/transport"
 	"goto/pkg/util"
 	"io"
@@ -152,9 +153,10 @@ var (
 	activeTargets     = map[string]*TargetInvocations{}
 	targetClients     = map[string]transport.TransportClient{}
 	invocationsLock   sync.RWMutex
+	_                 = global.OnShutdown(Shutdown)
 )
 
-func Startup() {
+func init() {
 	hostLabel = util.GetHostLabel()
 	go monitorHttpClients()
 }
@@ -206,6 +208,10 @@ func (spec *InvocationSpec) processProtocol() {
 			strings.EqualFold(spec.Protocol, "H2") || strings.EqualFold(spec.Protocol, "H2C") {
 			spec.httpVersionMajor = 2
 			spec.httpVersionMinor = 0
+		} else if strings.HasPrefix(strings.ToLower(spec.URL), "http") {
+			spec.http = true
+			spec.httpVersionMajor = 1
+			spec.httpVersionMinor = 1
 		}
 	}
 	if !spec.tcp && spec.httpVersionMajor == 0 {
@@ -247,13 +253,13 @@ func (spec *InvocationSpec) validatePayload() error {
 	if spec.AutoPayload != "" {
 		spec.autoPayloadSize = util.ParseSize(spec.AutoPayload)
 		if spec.autoPayloadSize <= 0 {
-			return fmt.Errorf("Invalid AutoPayload, must be a valid size like 100, 10K, etc.")
+			return fmt.Errorf("invalid AutoPayload, must be a valid size like 100, 10K, etc")
 		}
 	}
 	if spec.StreamDelay != "" {
 		var err error
 		if spec.streamDelayD, err = time.ParseDuration(spec.StreamDelay); err != nil {
-			return fmt.Errorf("Invalid delay")
+			return fmt.Errorf("invalid delay")
 		}
 	} else {
 		spec.streamDelayD = 10 * time.Millisecond
@@ -266,7 +272,7 @@ func (spec *InvocationSpec) validateConnectionAndRequestConfigs() error {
 	var err error
 	if spec.ConnTimeout != "" {
 		if spec.connTimeoutD, err = time.ParseDuration(spec.ConnTimeout); err != nil {
-			return fmt.Errorf("Invalid ConnectionTimeout")
+			return fmt.Errorf("invalid ConnectionTimeout")
 		}
 	} else {
 		spec.connTimeoutD = 5 * time.Second
@@ -274,7 +280,7 @@ func (spec *InvocationSpec) validateConnectionAndRequestConfigs() error {
 	}
 	if spec.ConnIdleTimeout != "" {
 		if spec.connIdleTimeoutD, err = time.ParseDuration(spec.ConnIdleTimeout); err != nil {
-			return fmt.Errorf("Invalid ConnectionIdleTimeout")
+			return fmt.Errorf("invalid ConnectionIdleTimeout")
 		}
 	} else {
 		spec.connIdleTimeoutD = 5 * time.Minute
@@ -282,7 +288,7 @@ func (spec *InvocationSpec) validateConnectionAndRequestConfigs() error {
 	}
 	if spec.RequestTimeout != "" {
 		if spec.requestTimeoutD, err = time.ParseDuration(spec.RequestTimeout); err != nil {
-			return fmt.Errorf("Invalid RequestIdleTimeout")
+			return fmt.Errorf("invalid RequestIdleTimeout")
 		}
 	} else {
 		spec.requestTimeoutD = 30 * time.Second
@@ -294,35 +300,38 @@ func (spec *InvocationSpec) validateConnectionAndRequestConfigs() error {
 func (spec *InvocationSpec) validateTrafficConfig() error {
 	var err error
 	if spec.Name == "" {
-		return fmt.Errorf("Name is required")
+		return fmt.Errorf("name is required")
 	}
 	if spec.Method == "" {
-		return fmt.Errorf("Method is required")
+		return fmt.Errorf("method is required")
 	}
 	if spec.URL == "" {
-		return fmt.Errorf("URL is required")
+		return fmt.Errorf("url is required")
 	}
 	if (spec.AB || spec.Fallback || spec.Random) && len(spec.BURLS) == 0 {
-		return fmt.Errorf("At least one B-URL is required for Fallback, ABMode or RandomMode")
+		return fmt.Errorf("at least one B-URL is required for Fallback, ABMode or RandomMode")
 	}
 	if spec.Replicas < 0 {
-		return fmt.Errorf("Invalid replicas")
+		return fmt.Errorf("invalid replicas")
 	} else if spec.Replicas == 0 {
 		spec.Replicas = 1
 	}
 	if spec.RequestCount < 0 {
-		return fmt.Errorf("Invalid requestCount")
+		return fmt.Errorf("invalid requestCount")
 	} else if spec.RequestCount == 0 {
 		spec.RequestCount = 1
 	}
+	if spec.RequestCount < spec.Replicas {
+		return fmt.Errorf("RequestCount cannot be less than replicas.")
+	}
 	if spec.InitialDelay != "" {
 		if spec.initialDelayD, err = time.ParseDuration(spec.InitialDelay); err != nil {
-			return fmt.Errorf("Invalid initial delay")
+			return fmt.Errorf("invalid initial delay")
 		}
 	}
 	if spec.Delay != "" {
 		if spec.delayD, err = time.ParseDuration(spec.Delay); err != nil {
-			return fmt.Errorf("Invalid delay")
+			return fmt.Errorf("invalid delay")
 		}
 	} else {
 		spec.delayD = 10 * time.Millisecond
@@ -330,7 +339,7 @@ func (spec *InvocationSpec) validateTrafficConfig() error {
 	}
 	if spec.RetryDelay != "" {
 		if spec.retryDelayD, err = time.ParseDuration(spec.RetryDelay); err != nil {
-			return fmt.Errorf("Invalid retryDelay")
+			return fmt.Errorf("invalid retryDelay")
 		}
 	} else {
 		spec.retryDelayD = 1 * time.Second
@@ -338,7 +347,7 @@ func (spec *InvocationSpec) validateTrafficConfig() error {
 	}
 	if spec.KeepOpen != "" {
 		if spec.keepOpenD, err = time.ParseDuration(spec.KeepOpen); err != nil {
-			return fmt.Errorf("Invalid keepOpen")
+			return fmt.Errorf("invalid keepOpen")
 		}
 	}
 	return nil
@@ -450,12 +459,12 @@ func processStopRequest(tracker *InvocationTracker) {
 				tracker.Status.StopRequested = true
 				stopped := tracker.Status.Stopped
 				if stopped {
-					if global.EnableInvocationLogs {
+					if global.Flags.EnableInvocationLogs {
 						log.Printf("[%s]: Invocation[%d]: Received stop request for target [%s] that is already stopped\n", hostLabel, tracker.ID, tracker.Target.Name)
 					}
 				} else {
 					remaining := (tracker.Target.RequestCount * tracker.Target.Replicas) - tracker.Status.CompletedRequests
-					if global.EnableInvocationLogs {
+					if global.Flags.EnableInvocationLogs {
 						log.Printf("[%s]: Invocation[%d]: Received stop request for target [%s] with remaining requests [%d]\n", hostLabel, tracker.ID, tracker.Target.Name, remaining)
 					}
 				}
@@ -527,7 +536,7 @@ func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) (
 		tracker.Payloads = [][]byte{nil}
 	}
 	if tracker.client.transportClient == nil {
-		return tracker, fmt.Errorf("Failed to create client for target [%s]", target.Name)
+		return tracker, fmt.Errorf("failed to create client for target [%s]", target.Name)
 	}
 	return tracker, nil
 }
@@ -537,8 +546,8 @@ func tlsConfig(host string, verifyCert bool) *tls.Config {
 		ServerName:         host,
 		InsecureSkipVerify: !verifyCert,
 	}
-	if util.RootCAs != nil {
-		cfg.RootCAs = util.RootCAs
+	if gototls.RootCAs != nil {
+		cfg.RootCAs = gototls.RootCAs
 	}
 	return cfg
 }
@@ -564,9 +573,15 @@ func getGrpcClientForTarget(tracker *InvocationTracker) transport.TransportClien
 	client := targetClients[target.Name]
 	invocationsLock.RUnlock()
 	if client == nil {
-		if grpcClient, err := grpc.NewGRPCClient(target.Service, target.URL, target.authority, target.authority); err == nil {
-			grpcClient.SetTLS(target.TLS, target.VerifyTLS)
-			grpcClient.SetConnectionParams(target.connTimeoutD, target.connIdleTimeoutD, target.requestTimeoutD, target.keepOpenD)
+		if grpcClient, err := grpc.NewGRPCClient(target.Service, target.URL, target.authority, target.authority,
+			&grpc.GRPCOptions{
+				IsTLS:          target.TLS,
+				VerifyTLS:      target.VerifyTLS,
+				ConnectTimeout: target.connTimeoutD,
+				IdleTimeout:    target.connIdleTimeoutD,
+				RequestTimeout: target.requestTimeoutD,
+				KeepOpen:       target.keepOpenD,
+			}); err == nil {
 			client = grpcClient
 			invocationsLock.Lock()
 			targetClients[target.Name] = client

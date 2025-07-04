@@ -176,7 +176,7 @@ func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName stri
 				MaxVersion:         tlsVersion,
 			},
 		}
-		tr.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+		tr.DialTLSContext = func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
 			if isTLS {
 				return tls.Dial(network, addr, cfg)
 			}

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package eventslist
+package events
 
 const (
 	Client_TargetAdded                = "Target Added"

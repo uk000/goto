@@ -58,7 +58,7 @@ func serveTCPRequests(listenerID string, port int, listener net.Listener) {
 			stopped = true
 		}
 	}
-	if global.IsListenerOpen(port) {
+	if global.Funcs.IsListenerOpen(port) {
 		log.Printf("[Listener: %s] has been restarted. Stopping to serve requests on old listener.", listenerID)
 	} else {
 		log.Printf("[Listener: %s] has been closed. Stopping to serve requests.", listenerID)

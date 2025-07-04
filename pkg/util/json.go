@@ -44,6 +44,7 @@ type JSON interface {
 	Clone() JSON
 	ToJSONText() string
 	ToYAML() string
+	ToBytes() []byte
 
 	IsEmpty() bool
 	IsObject() bool
@@ -159,6 +160,12 @@ func FromYAML(y string) JSON {
 
 func FromObject(o interface{}) JSON {
 	return FromJSONText(ToJSONText(o))
+}
+
+func FromBytes(b []byte) JSON {
+	var j interface{}
+	json.Unmarshal(b, &j)
+	return FromJSON(j)
 }
 
 func ToJSONValue(v interface{}) *JSONValue {
@@ -283,6 +290,15 @@ func (j *JSONValue) ToYAML() string {
 		fmt.Printf("Failed to marshal json with error: %s\n", err.Error())
 	}
 	return ""
+}
+
+func (j *JSONValue) ToBytes() []byte {
+	if output, err := json.Marshal(j.Value()); err == nil {
+		return output
+	} else {
+		fmt.Printf("Failed to marshal json with error: %s\n", err.Error())
+	}
+	return nil
 }
 
 func (j *JSONValue) IsEmpty() bool {
@@ -631,6 +647,13 @@ func ReadJson(s string, t interface{}) error {
 
 func ToJSONText(o interface{}) string {
 	if output, err := json.Marshal(o); err == nil {
+		return string(output)
+	}
+	return fmt.Sprintf("%+v", o)
+}
+
+func ToPrettyJSONText(o interface{}) string {
+	if output, err := json.MarshalIndent(o, "", "  "); err == nil {
 		return string(output)
 	}
 	return fmt.Sprintf("%+v", o)

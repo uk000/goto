@@ -19,7 +19,7 @@ package pipe
 import (
 	"goto/pkg/client/target"
 	"goto/pkg/job"
-	"goto/pkg/script"
+	"goto/pkg/scripts"
 )
 
 type TaskType string
@@ -60,7 +60,7 @@ type JobTask struct {
 
 type ScriptTask struct {
 	AbstractTask
-	Script *script.Script
+	Script *scripts.Script
 }
 
 type HTTPRequestTask struct {

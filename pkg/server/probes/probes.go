@@ -21,6 +21,7 @@ import (
 	. "goto/pkg/constants"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
 	"strings"
@@ -45,8 +46,8 @@ type PortProbes struct {
 }
 
 var (
-	Handler      util.ServerHandler     = util.ServerHandler{"probes", SetRoutes, Middleware}
-	probesByPort map[string]*PortProbes = map[string]*PortProbes{}
+	Middleware   = middleware.NewMiddleware("probes", SetRoutes, MiddlewareHandler)
+	probesByPort = map[string]*PortProbes{}
 	lock         sync.RWMutex
 )
 
@@ -56,8 +57,8 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRouteWithPort(probeRouter, "/{type}/set/status={status}", setProbeStatus, "PUT", "POST")
 	util.AddRouteWithPort(probeRouter, "/counts/clear", clearProbeCounts, "POST")
 	util.AddRouteWithPort(probeRouter, "", getProbes, "GET")
-	global.IsLivenessProbe = IsLivenessProbe
-	global.IsReadinessProbe = IsReadinessProbe
+	global.Funcs.IsLivenessProbe = IsLivenessProbe
+	global.Funcs.IsReadinessProbe = IsReadinessProbe
 }
 
 func IsLivenessProbe(r *http.Request) bool {
@@ -167,7 +168,7 @@ func clearProbeCounts(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
-func Middleware(next http.Handler) http.Handler {
+func MiddlewareHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pp := initPortProbes(r)
 		if IsReadinessProbe(r) {

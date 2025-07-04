@@ -18,6 +18,7 @@ package pipe
 
 import (
 	"fmt"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
 	"strings"
@@ -26,7 +27,7 @@ import (
 )
 
 var (
-	Handler = util.ServerHandler{Name: "pipe", SetRoutes: SetRoutes}
+	Middleware = middleware.NewMiddleware("pipe", SetRoutes, nil)
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {

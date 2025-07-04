@@ -28,6 +28,7 @@ import (
 	"goto/pkg/events"
 	"goto/pkg/metrics"
 	"goto/pkg/server/intercept"
+	"goto/pkg/server/middleware"
 	"goto/pkg/server/request/uri"
 	"goto/pkg/server/response/trigger"
 	"goto/pkg/util"
@@ -52,8 +53,8 @@ type PortStatus struct {
 }
 
 var (
-	Handler       util.ServerHandler     = util.ServerHandler{"status", SetRoutes, Middleware}
-	portStatusMap map[string]*PortStatus = map[string]*PortStatus{}
+	Middleware    = middleware.NewMiddleware("status", SetRoutes, MiddlewareHandler)
+	portStatusMap = map[string]*PortStatus{}
 	statusLock    sync.RWMutex
 )
 
@@ -338,7 +339,7 @@ func IncrementStatusCount(statusCode int, r *http.Request) {
 	portStatus.countsByResponseStatus[statusCode]++
 }
 
-func Middleware(next http.Handler) http.Handler {
+func MiddlewareHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {
 			next.ServeHTTP(w, r)

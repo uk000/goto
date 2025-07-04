@@ -17,13 +17,14 @@
 package registry
 
 import (
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
 )
 
 var (
-	Handler util.ServerHandler = util.ServerHandler{Name: "registry", SetRoutes: SetRoutes}
+	Middleware = middleware.NewMiddleware("registry", SetRoutes, nil)
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {

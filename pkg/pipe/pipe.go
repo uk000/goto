@@ -19,7 +19,7 @@ package pipe
 import (
 	"fmt"
 	"goto/pkg/job"
-	"goto/pkg/script"
+	"goto/pkg/scripts"
 	"goto/pkg/util"
 	"io"
 	"log"
@@ -170,7 +170,7 @@ func (pm *PipeManager) AddScriptSource(pipeName, sourceName, scriptContent strin
 		return fmt.Errorf("Pipe [%s] doesn't exist.", pipeName)
 	}
 	if len(scriptContent) > 0 {
-		script.Scripts.AddScript(sourceName, scriptContent)
+		scripts.Scripts.AddScript(sourceName, scriptContent, false)
 	}
 	pipe.AddScriptSource(sourceName, sourceName)
 	return nil
@@ -248,7 +248,7 @@ func (pipe *Pipe) InitSources() {
 	for name, source := range pipe.Sources {
 		pipe.Sources[name] = source.Init(name, pipe).pipelineSource()
 		if source.IsScript() && len(source.GetContent()) > 0 {
-			script.Scripts.AddScript(source.GetSpec(), source.GetContent())
+			scripts.Scripts.AddScript(source.GetSpec(), source.GetContent(), false)
 		}
 	}
 }

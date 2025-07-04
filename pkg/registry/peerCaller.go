@@ -47,7 +47,7 @@ func invokePeerAPI(pod *Pod, method, uri string, headers http.Header, payload []
 			if resp.StatusCode == expectedStatus {
 				return true, data, nil
 			} else {
-				return false, data, fmt.Errorf("Expected status %d but received %d", expectedStatus, resp.StatusCode)
+				return false, data, fmt.Errorf("expected status %d but received %d", expectedStatus, resp.StatusCode)
 			}
 		} else {
 			return false, "", err
@@ -57,7 +57,7 @@ func invokePeerAPI(pod *Pod, method, uri string, headers http.Header, payload []
 	}
 }
 
-func invokePod(peer string, pod *Pod, peerPodCount int, method string, uri string, headers http.Header,
+func invokePod(peer string, pod *Pod, method string, uri string, headers http.Header,
 	payload []byte, expectedStatus int, retryCount int, onPodDone OnPodDone) bool {
 	if pod.client == nil || pod.Offline {
 		log.Printf("Skipping offline/loaded/cloned Pod %s for Peer %s\n", pod.Address, peer)
@@ -119,7 +119,7 @@ func invokeForPodsWithHeadersAndPayload(peerPods PeerPods, method string, uri st
 			}
 			wg.Add(1)
 			go func() {
-				success := invokePod(peer, pod, len(pods), method, uri, headers, payload, expectedStatus, retryCount, onPodDone)
+				success := invokePod(peer, pod, method, uri, headers, payload, expectedStatus, retryCount, onPodDone)
 				resultLock.Lock()
 				result[peer][pod.Address] = success
 				resultLock.Unlock()

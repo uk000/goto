@@ -23,7 +23,9 @@ import (
 	"goto/pkg/constants"
 	"goto/pkg/events"
 	"goto/pkg/global"
+	"goto/pkg/server/middleware"
 	"goto/pkg/server/tcp"
+	gototls "goto/pkg/tls"
 	"goto/pkg/util"
 	"log"
 	"net"
@@ -67,17 +69,19 @@ type Listener struct {
 }
 
 var (
-	DefaultListener     = newListener(global.ServerPort, "HTTP", constants.DefaultCommonName, true)
+	DefaultListener     = newListener(global.Self.ServerPort, "HTTP", constants.DefaultCommonName, true)
+	DefaultGRPCListener = newListener(global.Self.GRPCPort, "GRPC", constants.DefaultCommonName, false)
 	listeners           = map[int]*Listener{}
+	grpcListeners       = map[int]*Listener{}
 	listenerGenerations = map[int]int{}
 	initialListeners    = []*Listener{}
-	ServeHTTPListener   func(*Listener)
-	ServeGRPCListener   func(*Listener)
-	StartTCPServer      func(string, int, net.Listener)
+	initialStarted      = false
+	httpServer          *http.Server
+	grpcServer          global.IWatchedServer
+	serveTCP            func(string, int, net.Listener)
 	DefaultLabel        string
-	serverStarted       bool
 	listenersLock       sync.RWMutex
-	Handler             util.ServerHandler = util.ServerHandler{Name: "listeners", SetRoutes: SetRoutes}
+	Middleware          = middleware.NewMiddleware("listeners", SetRoutes, nil)
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -98,19 +102,16 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(lRouter, "/{port}/reopen", openListener, "PUT", "POST")
 	util.AddRoute(lRouter, "/{port}/close", closeListener, "PUT", "POST")
 	util.AddRoute(lRouter, "/{port}?", getListeners, "GET")
-	global.IsListenerPresent = IsListenerPresent
-	global.IsListenerOpen = IsListenerOpen
-	global.GetListenerID = GetListenerID
-	global.GetListenerLabel = GetListenerLabel
-	global.GetListenerLabelForPort = GetListenerLabelForPort
-	global.GetHostLabelForPort = GetHostLabelForPort
 }
 
-func newListener(port int, protocol string, cn string, open bool) *Listener {
-	return &Listener{Port: port, Protocol: protocol, CommonName: cn, Open: true, CertsCache: map[string]*tls.Certificate{}}
-}
+func init() {
+	global.Funcs.IsListenerPresent = IsListenerPresent
+	global.Funcs.IsListenerOpen = IsListenerOpen
+	global.Funcs.GetListenerID = GetListenerID
+	global.Funcs.GetListenerLabel = GetListenerLabel
+	global.Funcs.GetListenerLabelForPort = GetListenerLabelForPort
+	global.Funcs.GetHostLabelForPort = GetHostLabelForPort
 
-func Configure(hs func(*Listener), gs func(*Listener), ts func(string, int, net.Listener)) {
 	if DefaultLabel == "" {
 		DefaultLabel = util.GetHostLabel()
 	}
@@ -118,16 +119,60 @@ func Configure(hs func(*Listener), gs func(*Listener), ts func(string, int, net.
 	DefaultListener.HostLabel = util.GetHostLabel()
 	DefaultListener.isHTTP = true
 	DefaultListener.TLS = false
-	ServeHTTPListener = hs
-	ServeGRPCListener = gs
-	StartTCPServer = ts
+	global.AddGRPCStartWatcher(OnGRPCStart)
+	global.AddGRPCStopWatcher(OnGRPCStop)
+	global.AddHTTPStartWatcher(OnHTTPStart)
+	global.AddHTTPStopWatcher(OnHTTPStop)
+	global.AddTCPStartWatcher(OnTCPStart)
+	global.AddTCPStopWatcher(OnTCPStop)
+}
+
+func OnGRPCStart(s global.IWatchedServer) {
+	grpcServer = s
+	if httpServer != nil {
+		StartInitialListeners()
+	}
+}
+
+func OnGRPCStop() {
+	grpcServer = nil
+	for _, l := range grpcListeners {
+		l.closeListener()
+	}
+}
+
+func OnHTTPStart(s *http.Server) {
+	httpServer = s
+	if grpcServer != nil {
+		StartInitialListeners()
+	}
+}
+
+func OnHTTPStop() {
+	httpServer = nil
+}
+
+func OnTCPStart(serve func(listenerID string, port int, listener net.Listener)) {
+	serveTCP = serve
+}
+
+func OnTCPStop() {
+	serveTCP = nil
+}
+
+func newListener(port int, protocol string, cn string, open bool) *Listener {
+	return &Listener{Port: port, Protocol: protocol, CommonName: cn, Open: open, CertsCache: map[string]*tls.Certificate{}}
 }
 
 func StartInitialListeners() {
-	serverStarted = true
-	time.Sleep(1 * time.Second)
-	for _, l := range initialListeners {
-		addOrUpdateListener(l, false)
+	if !initialStarted {
+		DefaultGRPCListener.Port = global.Self.GRPCPort
+		addOrUpdateListener(DefaultGRPCListener, false)
+		time.Sleep(1 * time.Second)
+		for _, l := range initialListeners {
+			addOrUpdateListener(l, false)
+		}
+		initialStarted = true
 	}
 }
 
@@ -153,7 +198,7 @@ func AddInitialListeners(portList []string) {
 				}
 				ports[port] = true
 				if i == 0 {
-					global.ServerPort = port
+					global.Self.ServerPort = port
 					DefaultListener.Port = port
 				} else {
 					l := newListener(port, protocol, cn, true)
@@ -170,7 +215,29 @@ func AddInitialListeners(portList []string) {
 	}
 }
 
-func (l *Listener) initListener() bool {
+func (l *Listener) serveHTTP() {
+	go func() {
+		msg := fmt.Sprintf("Starting HTTP Listener [%s]", l.ListenerID)
+		if l.TLS {
+			msg += fmt.Sprintf(" With TLS [CN: %s]", l.CommonName)
+		}
+		log.Println(msg)
+		if err := httpServer.Serve(l.Listener); err != nil {
+			log.Printf("Listener [%d]: %s", l.Port, err.Error())
+		}
+	}()
+}
+
+func (l *Listener) serveGRPC() {
+	go func() {
+		msg := fmt.Sprintf("Starting GRPC Listener %s", l.ListenerID)
+		log.Println(msg)
+		grpcServer.Serve(l)
+		events.SendEventForPort(l.Port, "GRPC Listener Started", msg)
+	}()
+}
+
+func (l *Listener) InitListener() bool {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	var tlsConfig *tls.Config
@@ -178,7 +245,7 @@ func (l *Listener) initListener() bool {
 		if l.CommonName == "" {
 			l.CommonName = constants.DefaultCommonName
 		}
-		if cert, err := util.CreateCertificate(l.CommonName, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
+		if cert, err := gototls.CreateCertificate(l.CommonName, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
 			l.Cert = cert
 		}
 	}
@@ -188,7 +255,7 @@ func (l *Listener) initListener() bool {
 				if cert = l.CertsCache[chi.ServerName]; cert != nil {
 					return
 				}
-				if cert, err = util.CreateCertificate(chi.ServerName, ""); err == nil {
+				if cert, err = gototls.CreateCertificate(chi.ServerName, ""); err == nil {
 					l.CertsCache[chi.ServerName] = cert
 				}
 				return
@@ -247,7 +314,7 @@ func (l *Listener) initListener() bool {
 }
 
 func (l *Listener) openListener() bool {
-	if l.initListener() {
+	if l.InitListener() {
 		l.lock.Lock()
 		defer l.lock.Unlock()
 		listenerGenerations[l.Port] = listenerGenerations[l.Port] + 1
@@ -255,12 +322,12 @@ func (l *Listener) openListener() bool {
 		l.ListenerID = fmt.Sprintf("%d-%d", l.Port, l.Generation)
 		log.Printf("Opening [%s] listener [%s] on port [%d].", l.Protocol, l.ListenerID, l.Port)
 		if l.isHTTP {
-			ServeHTTPListener(l)
+			l.serveHTTP()
 		} else if l.isGRPC {
-			ServeGRPCListener(l)
+			l.serveGRPC()
 		} else if l.isTCP {
 			l.TCP.ListenerID = l.ListenerID
-			StartTCPServer(l.ListenerID, l.Port, l.Listener)
+			serveTCP(l.ListenerID, l.Port, l.Listener)
 		}
 		l.Open = true
 		l.TLS = l.AutoCert || l.Cert != nil || len(l.RawCert) > 0 && len(l.RawKey) > 0
@@ -274,6 +341,7 @@ func (l *Listener) closeListener() {
 	defer l.lock.Unlock()
 	if l.Listener != nil {
 		l.Listener.Close()
+		global.Funcs.CloseConnectionsForPort(l.Port)
 		l.Listener = nil
 	}
 	l.Open = false
@@ -348,8 +416,8 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
 	msg := ""
 	errorCode := 0
 	if l.Label == "" {
-		if global.PeerName != "" {
-			l.Label = global.PeerName
+		if global.Self.Name != "" {
+			l.Label = global.Self.Name
 		} else {
 			l.Label = util.BuildListenerLabel(l.Port)
 		}
@@ -438,6 +506,9 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
 			msg = fmt.Sprintf("Listener %d added.", l.Port)
 			events.SendEventJSON("Listener Added", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
 		}
+	}
+	if l.isGRPC {
+		grpcListeners[l.Port] = l
 	}
 	return errorCode, msg
 }
@@ -556,7 +627,7 @@ func getListenerCertOrKey(w http.ResponseWriter, r *http.Request) {
 		if cert {
 			raw := l.RawCert
 			if raw == nil {
-				raw, err = util.EncodeX509Cert(l.Cert)
+				raw, err = gototls.EncodeX509Cert(l.Cert)
 			}
 			if raw != nil {
 				w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
@@ -571,7 +642,7 @@ func getListenerCertOrKey(w http.ResponseWriter, r *http.Request) {
 		} else if key {
 			raw := l.RawKey
 			if raw == nil {
-				raw, err = util.EncodeX509Key(l.Cert)
+				raw, err = gototls.EncodeX509Key(l.Cert)
 			}
 			if raw != nil {
 				w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
@@ -596,7 +667,7 @@ func autoCert(w http.ResponseWriter, r *http.Request) {
 	if l := validateListener(w, r); l != nil {
 		msg := ""
 		if domain := util.GetStringParamValue(r, "domain"); domain != "" {
-			if cert, err := util.CreateCertificate(domain, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
+			if cert, err := gototls.CreateCertificate(domain, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
 				l.Cert = cert
 				if l.reopenListener() {
 					msg = fmt.Sprintf("Cert auto-generated for listener %d\n", l.Port)
@@ -662,7 +733,7 @@ func GetListenerForPort(port int) *Listener {
 }
 
 func GetListener(r *http.Request) *Listener {
-	return GetListenerForPort(util.GetListenerPortNum(r))
+	return GetListenerForPort(util.GetRequestOrListenerPortNum(r))
 }
 
 func GetCurrentListener(r *http.Request) *Listener {
@@ -705,7 +776,7 @@ func GetListenerLabelForPort(port int) string {
 	listenersLock.RUnlock()
 	if l != nil {
 		return l.Label
-	} else if port == global.ServerPort {
+	} else if port == global.Self.ServerPort {
 		if DefaultListener.Label != "" {
 			return DefaultListener.Label
 		} else {
@@ -721,7 +792,7 @@ func GetHostLabelForPort(port int) string {
 	listenersLock.RUnlock()
 	if l != nil {
 		return l.HostLabel
-	} else if port == global.ServerPort {
+	} else if port == global.Self.ServerPort {
 		return util.GetHostLabel()
 	}
 	return util.BuildHostLabel(port)
@@ -801,6 +872,9 @@ func removeListener(w http.ResponseWriter, r *http.Request) {
 		}
 		l.lock.Unlock()
 		listenersLock.Lock()
+		if l.isGRPC {
+			delete(grpcListeners, l.Port)
+		}
 		delete(listeners, l.Port)
 		listenersLock.Unlock()
 		msg := fmt.Sprintf("Listener on port %d removed", l.Port)

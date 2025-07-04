@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-package grpc
+package protos
 
 import (
 	"fmt"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
 
@@ -25,17 +26,18 @@ import (
 )
 
 var (
-	Handler = util.ServerHandler{Name: "grpc", SetRoutes: SetRoutes}
+	Middleware = middleware.NewMiddleware("protos", SetRoutes, nil)
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	grpcRouter := util.PathRouter(r, "/grpc")
-	util.AddRouteQWithPort(grpcRouter, "/protos/add/{name}", addProto, "path", "POST", "PUT")
-	util.AddRouteWithPort(grpcRouter, "/protos/add/{name}", addProto, "POST", "PUT")
-	util.AddRouteWithPort(grpcRouter, "/protos/{proto}/list/services", listServices, "GET")
-	util.AddRouteWithPort(grpcRouter, "/protos/{proto}/list/{service}/methods", listMethods, "GET")
-	util.AddRouteWithPort(grpcRouter, "/protos/clear", clearProtos, "POST", "PUT")
-	util.AddRouteWithPort(grpcRouter, "/protos", getProtos, "GET")
+	protosRouter := util.PathRouter(r, "/grpc/protos")
+	util.AddRouteQWithPort(protosRouter, "/add/{name}", addProto, "path", "POST", "PUT")
+	util.AddRouteWithPort(protosRouter, "/add/{name}", addProto, "POST", "PUT")
+	util.AddRouteWithPort(protosRouter, "/remove/{name}", removeProto, "POST", "PUT")
+	util.AddRouteWithPort(protosRouter, "/clear", clearProtos, "POST")
+	util.AddRouteWithPort(protosRouter, "/{proto}/list/services", listServices, "GET")
+	util.AddRouteWithPort(protosRouter, "/{proto}/list/{service}/methods", listMethods, "GET")
+	util.AddRouteWithPort(protosRouter, "", getProtos, "GET")
 }
 
 func addProto(w http.ResponseWriter, r *http.Request) {
@@ -43,9 +45,9 @@ func addProto(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	path := util.GetStringParamValue(r, "path")
 	if name == "" {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusBadRequest)
 		msg = "No name"
-	} else if err := grpcParser.AddProto(name, path, util.ReadBytes(r.Body)); err == nil {
+	} else if err := ProtosRegistry.AddProto(name, path, util.ReadBytes(r.Body)); err == nil {
 		msg = fmt.Sprintf("Proto [%s] stored", name)
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -55,14 +57,28 @@ func addProto(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+func removeProto(w http.ResponseWriter, r *http.Request) {
+	msg := ""
+	name := util.GetStringParamValue(r, "name")
+	if name == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = "No name"
+	} else {
+		ProtosRegistry.RemoveProto(name)
+		msg = fmt.Sprintf("Proto [%s] removed", name)
+	}
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
+}
+
 func listServices(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	proto := util.GetStringParamValue(r, "proto")
 	if proto == "" {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusBadRequest)
 		msg = "No proto"
 		fmt.Fprintln(w, msg)
-	} else if list := grpcParser.GetService(proto); list != nil {
+	} else if list := ProtosRegistry.GetService(proto); list != nil {
 		util.WriteJsonPayload(w, list)
 	} else {
 		msg = fmt.Sprintf("No services in proto [%s]", proto)
@@ -76,10 +92,10 @@ func listMethods(w http.ResponseWriter, r *http.Request) {
 	proto := util.GetStringParamValue(r, "proto")
 	service := util.GetStringParamValue(r, "service")
 	if proto == "" {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusBadRequest)
 		msg = "No proto"
 		fmt.Fprintln(w, msg)
-	} else if serviceMethods := grpcParser.ListMethods(proto, service); serviceMethods != nil {
+	} else if serviceMethods := ProtosRegistry.ListMethods(service); serviceMethods != nil {
 		util.WriteJsonPayload(w, serviceMethods)
 	}
 	util.AddLogMessage(msg, r)
@@ -87,12 +103,12 @@ func listMethods(w http.ResponseWriter, r *http.Request) {
 
 func clearProtos(w http.ResponseWriter, r *http.Request) {
 	msg := "Protos cleared"
-	grpcParser.ClearProtos()
+	ProtosRegistry.ClearProtos()
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
 
 func getProtos(w http.ResponseWriter, r *http.Request) {
-	util.WriteJsonPayload(w, grpcParser.fileSources)
+	util.WriteJsonPayload(w, ProtosRegistry.servicesByProto)
 	util.AddLogMessage("Protos reported", r)
 }

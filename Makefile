@@ -22,15 +22,23 @@ clean:
 	rm -rf pkg/server/grpc/pb/*.go
 
 build: $(GO_FILES)
-	GOOS=$(GOOS) GOARCH=amd64 go build -mod=mod -o $(OUT) -ldflags="-extldflags \"-static\" -w -s -X goto/cmd.Version=$(VERSION) -X goto/cmd.Commit=$(COMMIT)" .
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -mod=mod -o $(OUT) -ldflags="-extldflags \"-static\" -w -s -X goto/global.Version=$(VERSION) -X goto/global.Commit=$(COMMIT)" .
 	@chmod +x $(OUT)
 
 run: build
 	./$(OUT) --port 8080
 
 docker-build: Dockerfile $(GO_FILES)
-	docker build --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) .
-	docker build --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):latest .
+	docker build --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) --platform linux/amd64 .
+
+docker-build-ip: Dockerfile $(GO_FILES)
+	docker build --build-arg iputils=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) --platform linux/amd64 .
+
+docker-build-kube: Dockerfile $(GO_FILES)
+	docker build --build-arg kube=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) --platform linux/amd64 .
+
+docker-build-arm64: Dockerfile $(GO_FILES)
+	docker build --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) --platform linux/arm64 .
 
 docker-run: docker-build
 	docker run -d --rm --name goto -p8080:8080 -it $(IMAGE):$(VERSION) /app/goto --port 8080

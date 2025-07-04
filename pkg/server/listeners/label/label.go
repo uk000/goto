@@ -22,13 +22,14 @@ import (
 
 	"goto/pkg/events"
 	"goto/pkg/server/listeners"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
 )
 
 var (
-	Handler util.ServerHandler = util.ServerHandler{Name: "label", SetRoutes: SetRoutes}
+	Middleware = middleware.NewMiddleware("label", SetRoutes, nil)
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {

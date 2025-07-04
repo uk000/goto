@@ -20,10 +20,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	. "goto/pkg/constants"
+	"goto/pkg/constants"
 	"goto/pkg/global"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"reflect"
@@ -68,6 +67,9 @@ type RequestStore struct {
 	TLSVersionNum           uint16
 	RequestPayload          string
 	RequestPayloadSize      int
+	RequestPort             string
+	RequestPortNum          int
+	RequestPortChecked      bool
 	TrafficDetails          []string
 	LogMessages             []string
 	InterceptResponseWriter interface{}
@@ -80,10 +82,11 @@ type RequestStore struct {
 }
 
 var (
-	RequestStoreKey   = &ContextKey{"requestStore"}
-	CurrentPortKey    = &ContextKey{"currentPort"}
-	IgnoredRequestKey = &ContextKey{"ignoredRequest"}
-	ConnectionKey     = &ContextKey{"connection"}
+	RequestStoreKey   = &ContextKey{Key: "requestStore"}
+	CurrentPortKey    = &ContextKey{Key: "currentPort"}
+	RequestPortKey    = &ContextKey{Key: "requestPort"}
+	IgnoredRequestKey = &ContextKey{Key: "ignoredRequest"}
+	ConnectionKey     = &ContextKey{Key: "connection"}
 
 	contentRegexp           = regexp.MustCompile("(?i)content")
 	hostRegexp              = regexp.MustCompile("(?i)^host$")
@@ -104,6 +107,20 @@ func GetRequestStore(r *http.Request) *RequestStore {
 	return rs
 }
 
+func GetRequestStoreForContext(ctx context.Context) (context.Context, *RequestStore) {
+	if val := ctx.Value(RequestStoreKey); val != nil {
+		return ctx, val.(*RequestStore)
+	}
+	return WithRequestStoreForContext(ctx)
+}
+
+func GetRequestStoreIfPresent(r *http.Request) *RequestStore {
+	if val := r.Context().Value(RequestStoreKey); val != nil {
+		return val.(*RequestStore)
+	}
+	return nil
+}
+
 func WithRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	rs := &RequestStore{}
 	ctx := context.WithValue(r.Context(), RequestStoreKey, rs)
@@ -114,7 +131,7 @@ func WithRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	rs.IsPeerEventsRequest = strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/events")
 	rs.IsMetricsRequest = strings.HasPrefix(r.RequestURI, "/metrics") || strings.HasPrefix(r.RequestURI, "/stats")
 	rs.IsReminderRequest = strings.Contains(r.RequestURI, "/remember")
-	rs.IsProbeRequest = global.IsReadinessProbe(r) || global.IsLivenessProbe(r)
+	rs.IsProbeRequest = global.Funcs.IsReadinessProbe(r) || global.Funcs.IsLivenessProbe(r)
 	rs.IsHealthRequest = !isAdminRequest && strings.HasPrefix(r.RequestURI, "/health")
 	rs.IsStatusRequest = !isAdminRequest && strings.HasPrefix(r.RequestURI, "/status")
 	rs.IsDelayRequest = !isAdminRequest && strings.Contains(r.RequestURI, "/delay")
@@ -126,6 +143,16 @@ func WithRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	return ctx, rs
 }
 
+func WithRequestStoreForContext(ctx context.Context) (context.Context, *RequestStore) {
+	rs := &RequestStore{}
+	ctx = context.WithValue(ctx, RequestStoreKey, rs)
+	return ctx, rs
+}
+
+func WithPort(ctx context.Context, port int) context.Context {
+	return context.WithValue(ctx, CurrentPortKey, port)
+}
+
 func IsH2(r *http.Request) bool {
 	return r.ProtoMajor == 2
 }
@@ -134,12 +161,21 @@ func IsH2C(r *http.Request) bool {
 	return GetRequestStore(r).IsH2C
 }
 
+func IsGRPC(r *http.Request) bool {
+	return r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
+}
+
 func InitListenerRouter(root *mux.Router) {
 	portRouter = root.PathPrefix("/port={port}").Subrouter()
 }
 
 func AddLogMessage(msg string, r *http.Request) {
 	rs := GetRequestStore(r)
+	rs.LogMessages = append(rs.LogMessages, msg)
+}
+
+func AddLogMessageForContext(msg string, ctx context.Context) {
+	_, rs := GetRequestStoreForContext(ctx)
 	rs.LogMessages = append(rs.LogMessages, msg)
 }
 
@@ -210,7 +246,7 @@ func GetPortNumFromGRPCAuthority(ctx context.Context) int {
 			}
 		}
 	}
-	return global.ServerPort
+	return global.Self.GRPCPort
 }
 
 func GetPortFromAddress(addr string) int {
@@ -256,24 +292,36 @@ func GetListenerPortNum(r *http.Request) int {
 	return GetContextPort(r.Context())
 }
 
-func GetRequestOrListenerPort(r *http.Request) string {
-	port, ok := GetStringParam(r, "port")
-	if !ok {
-		port = GetListenerPort(r)
+func getRequestOrListenerPort(r *http.Request) (port string, portNum int) {
+	rs := GetRequestStoreIfPresent(r)
+	if rs != nil && rs.RequestPortChecked {
+		return rs.RequestPort, rs.RequestPortNum
 	}
-	return port
+	if port, _ = GetStringParam(r, "port"); port != "" {
+		portNum, _ = strconv.Atoi(port)
+		if rs != nil {
+			rs.RequestPort = port
+			rs.RequestPortNum = portNum
+			rs.RequestPortChecked = true
+		}
+	} else {
+		portNum = GetListenerPortNum(r)
+		port = strconv.Itoa(portNum)
+	}
+	return
 }
 
+func GetRequestOrListenerPort(r *http.Request) string {
+	port, _ := getRequestOrListenerPort(r)
+	return port
+}
 func GetRequestOrListenerPortNum(r *http.Request) int {
-	port, ok := GetIntParam(r, "port")
-	if !ok {
-		port = GetListenerPortNum(r)
-	}
+	_, port := getRequestOrListenerPort(r)
 	return port
 }
 
 func GetCurrentListenerLabel(r *http.Request) string {
-	return global.GetListenerLabelForPort(GetCurrentPort(r))
+	return global.Funcs.GetListenerLabelForPort(GetCurrentPort(r))
 }
 
 func GetHeaderValues(r *http.Request) map[string]map[string]int {
@@ -315,6 +363,10 @@ func AddHeaderWithSuffix(header, suffix, value string, headers http.Header) {
 }
 
 func CopyHeaders(prefix string, r *http.Request, w http.ResponseWriter, headers http.Header, copyHost, copyURI, copyContentType bool) {
+	CopyHeadersWithIgnore(prefix, r, w, headers, nil, copyHost, copyURI, copyContentType)
+}
+
+func CopyHeadersWithIgnore(prefix string, r *http.Request, w http.ResponseWriter, headers http.Header, ignoreHeaders map[string]bool, copyHost, copyURI, copyContentType bool) {
 	rs := GetRequestStore(r)
 	hostCopied := false
 	responseHeaders := w.Header()
@@ -337,6 +389,10 @@ func CopyHeaders(prefix string, r *http.Request, w http.ResponseWriter, headers 
 		}
 	}
 	for h, values := range headers {
+		lh := strings.ToLower(h)
+		if ignoreHeaders[lh] {
+			continue
+		}
 		if !copyContentType && contentRegexp.MatchString(h) {
 			continue
 		}
@@ -374,12 +430,12 @@ func ReadJsonPayloadFromBody(body io.ReadCloser, t interface{}) error {
 }
 
 func WriteJsonPayload(w http.ResponseWriter, t interface{}) string {
-	w.Header().Add(HeaderContentType, ContentTypeJSON)
+	w.Header().Add(constants.HeaderContentType, constants.ContentTypeJSON)
 	return WriteJson(w, t)
 }
 
 func WriteStringJsonPayload(w http.ResponseWriter, json string) {
-	w.Header().Add(HeaderContentType, ContentTypeJSON)
+	w.Header().Add(constants.HeaderContentType, constants.ContentTypeJSON)
 	fmt.Fprintln(w, json)
 }
 
@@ -427,9 +483,9 @@ func CheckAdminRequest(r *http.Request) bool {
 	if pieces := strings.Split(uri, "/"); len(pieces) > 1 {
 		uri = pieces[1]
 	}
-	return uri == "metrics" || uri == "server" || uri == "request" || uri == "response" ||
-		uri == "listeners" || uri == "label" || uri == "registry" || uri == "client" || uri == "proxy" ||
-		uri == "job" || uri == "probes" || uri == "tcp" || uri == "log" || uri == "events" || uri == "tunnels"
+	return uri == "metrics" || uri == "server" || uri == "request" || uri == "response" || uri == "listeners" ||
+		uri == "label" || uri == "registry" || uri == "client" || uri == "proxy" || uri == "job" || uri == "probes" ||
+		uri == "tcp" || uri == "log" || uri == "events" || uri == "tunnels" || uri == "grpc"
 }
 
 func IsMetricsRequest(r *http.Request) bool {
@@ -498,14 +554,14 @@ func IsKnownNonTraffic(r *http.Request) bool {
 
 func IsJSONContentType(h http.Header) bool {
 	if contentType := h.Get("Content-Type"); contentType != "" {
-		return strings.EqualFold(contentType, ContentTypeJSON)
+		return strings.EqualFold(contentType, constants.ContentTypeJSON)
 	}
 	return false
 }
 
 func IsYAMLContentType(h http.Header) bool {
 	if contentType := h.Get("Content-Type"); contentType != "" {
-		return strings.EqualFold(contentType, ContentTypeYAML)
+		return strings.EqualFold(contentType, constants.ContentTypeYAML)
 	}
 	return false
 }
@@ -530,19 +586,19 @@ func IsBinaryContentType(contentType string) bool {
 
 func DiscardRequestBody(r *http.Request) int {
 	defer r.Body.Close()
-	len, _ := io.Copy(ioutil.Discard, r.Body)
+	len, _ := io.Copy(io.Discard, r.Body)
 	return int(len)
 }
 
 func DiscardResponseBody(r *http.Response) int {
 	defer r.Body.Close()
-	len, _ := io.Copy(ioutil.Discard, r.Body)
+	len, _ := io.Copy(io.Discard, r.Body)
 	return int(len)
 }
 
 func CloseResponse(r *http.Response) {
 	defer r.Body.Close()
-	io.Copy(ioutil.Discard, r.Body)
+	io.Copy(io.Discard, r.Body)
 }
 
 func TransformPayload(sourcePayload string, transforms []*Transform, isYaml bool) string {
@@ -745,7 +801,7 @@ func ParseTimeBuckets(b string) ([][]int, bool) {
 				high, e = strconv.Atoi(bucket[1])
 			}
 		}
-		if e != nil || low < 0 || high < 0 || (low == 0 && high == 0) || high < low {
+		if e != nil || low < 0 || high < 0 || (low == 0 && high == 0) || (high != 0 && high < low) {
 			hasError = true
 			break
 		} else {

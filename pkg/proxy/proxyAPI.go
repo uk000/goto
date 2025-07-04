@@ -19,15 +19,15 @@ import (
 	"net/http"
 	"strings"
 
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
 )
 
 var (
-	Handler         util.ServerHandler = util.ServerHandler{Name: "proxy", SetRoutes: SetRoutes, Middleware: Middleware}
-	internalHandler util.ServerHandler = util.ServerHandler{Name: "uri", Middleware: middleware}
-	rootRouter      *mux.Router
+	Middleware = middleware.NewMiddleware("proxy", SetRoutes, MiddlewareHandler)
+	rootRouter *mux.Router
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {

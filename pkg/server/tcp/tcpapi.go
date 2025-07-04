@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"goto/pkg/events"
 	"goto/pkg/global"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"math"
 	"net/http"
@@ -31,7 +32,7 @@ import (
 )
 
 var (
-	Handler util.ServerHandler = util.ServerHandler{Name: "tcp", SetRoutes: SetRoutes}
+	Middleware = middleware.NewMiddleware("tcp", SetRoutes, nil)
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -66,7 +67,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
 func validateListener(w http.ResponseWriter, r *http.Request) bool {
 	port := util.GetIntParamValue(r, "port")
-	if !global.IsListenerPresent(port) {
+	if !global.Funcs.IsListenerPresent(port) {
 		w.WriteHeader(http.StatusBadRequest)
 		msg := fmt.Sprintf("No listener for port %d", port)
 		fmt.Fprintln(w, msg)
@@ -483,7 +484,7 @@ func getActiveConnections(w http.ResponseWriter, r *http.Request) {
 		if activeConns[port] == nil {
 			activeConns[port] = map[int]map[string]interface{}{}
 		}
-		listenerID := global.GetListenerID(port)
+		listenerID := global.Funcs.GetListenerID(port)
 		for requestID, tcpHandler := range activeConnections[listenerID] {
 			activeConns[port][requestID] = map[string]interface{}{"status": tcpHandler.status, "config": &tcpHandler.TCPConfig}
 		}

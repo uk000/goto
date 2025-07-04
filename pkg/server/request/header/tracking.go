@@ -25,13 +25,14 @@ import (
 	"goto/pkg/events"
 	"goto/pkg/metrics"
 	"goto/pkg/server/intercept"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
 )
 
 var (
-	Handler util.ServerHandler = util.ServerHandler{"header", SetRoutes, Middleware}
+	Middleware = middleware.NewMiddleware("header", SetRoutes, MiddlewareHandler)
 )
 
 type HeaderData struct {
@@ -306,7 +307,7 @@ func track(port string, headers http.Header, uri string, requestedStatus, respon
 	}
 }
 
-func Middleware(next http.Handler) http.Handler {
+func MiddlewareHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {
 			next.ServeHTTP(w, r)
@@ -317,7 +318,7 @@ func Middleware(next http.Handler) http.Handler {
 			irw := util.GetInterceptResponseWriter(r).(*intercept.InterceptResponseWriter)
 			go func(port string, headers http.Header, rtd *RequestTrackingData, requestedStatus, responseStatus int) {
 				track(port, headers, r.RequestURI, requestedStatus, responseStatus, rtd)
-			}(util.GetListenerPort(r), r.Header, rtd, requestedStatus, irw.StatusCode)
+			}(util.GetRequestOrListenerPort(r), r.Header, rtd, requestedStatus, irw.StatusCode)
 		}
 	})
 }

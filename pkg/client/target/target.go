@@ -26,14 +26,13 @@ import (
 	"goto/pkg/client/results"
 	"goto/pkg/constants"
 	"goto/pkg/events"
-	. "goto/pkg/events/eventslist"
 	"goto/pkg/global"
 	"goto/pkg/invocation"
 	"goto/pkg/util"
 )
 
 type Target struct {
-	invocation.InvocationSpec
+	*invocation.InvocationSpec
 }
 
 type TargetClient struct {
@@ -57,37 +56,37 @@ func NewTargetClient() *TargetClient {
 	return c
 }
 
-func (pc *TargetClient) init() bool {
-	pc.targetsLock.Lock()
-	defer pc.targetsLock.Unlock()
-	if pc.activeTargetsCount > 0 {
+func (tc *TargetClient) init() bool {
+	tc.targetsLock.Lock()
+	defer tc.targetsLock.Unlock()
+	if tc.activeTargetsCount > 0 {
 		return false
 	}
-	pc.targets = map[string]*Target{}
-	pc.trackHeaders = []string{}
-	pc.crossTrackHeaders = map[string][]string{}
-	pc.trackTimeBuckets = [][]int{}
+	tc.targets = map[string]*Target{}
+	tc.trackHeaders = []string{}
+	tc.crossTrackHeaders = map[string][]string{}
+	tc.trackTimeBuckets = [][]int{}
 	return true
 }
 
-func (pc *TargetClient) AddTarget(t *Target, r ...*http.Request) error {
-	invocationSpec := &t.InvocationSpec
+func (tc *TargetClient) AddTarget(t *Target, r ...*http.Request) error {
+	invocationSpec := t.InvocationSpec
 	if err := invocation.ValidateSpec(invocationSpec); err == nil {
-		pc.targetsLock.Lock()
-		pc.targets[t.Name] = t
-		pc.targetsLock.Unlock()
+		tc.targetsLock.Lock()
+		tc.targets[t.Name] = t
+		tc.targetsLock.Unlock()
 		invocation.RemoveHttpClientForTarget(t.Name)
-		t.Headers = append(t.Headers, []string{constants.HeaderFromGoto, global.PeerName},
+		t.Headers = append(t.Headers, []string{constants.HeaderFromGoto, global.Self.Name},
 			[]string{constants.HeaderFromGotoHost, util.GetHostLabel()})
 		if t.AutoInvoke {
 			go func() {
-				if global.EnableClientLogs {
+				if global.Flags.EnableClientLogs {
 					log.Printf("Auto-invoking target: %s\n", t.Name)
 				}
 				if len(r) > 0 {
-					invocationSpec = pc.prepareTargetForPeer(invocationSpec, r[0])
+					invocationSpec = tc.prepareTargetForPeer(invocationSpec, r[0])
 				}
-				pc.invokeTarget(invocationSpec)
+				tc.invokeTarget(invocationSpec)
 			}()
 		}
 		return nil
@@ -96,19 +95,19 @@ func (pc *TargetClient) AddTarget(t *Target, r ...*http.Request) error {
 	}
 }
 
-func (pc *TargetClient) removeTargets(targets []string) bool {
-	pc.targetsLock.Lock()
-	defer pc.targetsLock.Unlock()
-	if pc.activeTargetsCount > 0 {
+func (tc *TargetClient) removeTargets(targets []string) bool {
+	tc.targetsLock.Lock()
+	defer tc.targetsLock.Unlock()
+	if tc.activeTargetsCount > 0 {
 		return false
 	}
 	for _, t := range targets {
-		delete(pc.targets, t)
+		delete(tc.targets, t)
 	}
 	return true
 }
 
-func (pc *TargetClient) prepareTargetForPeer(target *invocation.InvocationSpec, r *http.Request) *invocation.InvocationSpec {
+func (tc *TargetClient) prepareTargetForPeer(target *invocation.InvocationSpec, r *http.Request) *invocation.InvocationSpec {
 	if target == nil || r == nil {
 		return target
 	}
@@ -116,7 +115,7 @@ func (pc *TargetClient) prepareTargetForPeer(target *invocation.InvocationSpec, 
 	if peerName == "" {
 		return target
 	}
-	peers := global.GetPeers(peerName, r)
+	peers := global.Funcs.GetPeers(peerName, r)
 	if peers == nil || len(peers) == 0 {
 		return target
 	}
@@ -132,23 +131,23 @@ func (pc *TargetClient) prepareTargetForPeer(target *invocation.InvocationSpec, 
 	return target
 }
 
-func (pc *TargetClient) PrepareTarget(name string) *invocation.InvocationSpec {
+func (tc *TargetClient) PrepareTarget(name string) *invocation.InvocationSpec {
 	var targetToInvoke *invocation.InvocationSpec
 	if name != "" {
-		pc.targetsLock.RLock()
-		target, found := pc.targets[name]
+		tc.targetsLock.RLock()
+		target, found := tc.targets[name]
 		if !found {
-			target, found = pc.targets["{"+name+"}"]
+			target, found = tc.targets["{"+name+"}"]
 		}
-		pc.targetsLock.RUnlock()
+		tc.targetsLock.RUnlock()
 		if found {
-			targetToInvoke = &target.InvocationSpec
+			targetToInvoke = target.InvocationSpec
 		}
 	}
 	return targetToInvoke
 }
 
-func (pc *TargetClient) getTargetsToInvoke(r *http.Request) []*invocation.InvocationSpec {
+func (tc *TargetClient) getTargetsToInvoke(r *http.Request) []*invocation.InvocationSpec {
 	var names []string
 	if r != nil {
 		names, _ = util.GetListParam(r, "targets")
@@ -156,76 +155,76 @@ func (pc *TargetClient) getTargetsToInvoke(r *http.Request) []*invocation.Invoca
 	var targetsToInvoke []*invocation.InvocationSpec
 	if len(names) > 0 {
 		for _, name := range names {
-			if t := pc.prepareTargetForPeer(pc.PrepareTarget(name), r); t != nil {
+			if t := tc.prepareTargetForPeer(tc.PrepareTarget(name), r); t != nil {
 				targetsToInvoke = append(targetsToInvoke, t)
 			}
 		}
 	} else {
-		for _, target := range pc.targets {
-			targetsToInvoke = append(targetsToInvoke, &target.InvocationSpec)
+		for _, target := range tc.targets {
+			targetsToInvoke = append(targetsToInvoke, target.InvocationSpec)
 		}
 	}
 	return targetsToInvoke
 }
 
-func (pc *TargetClient) AddTrackingHeaders(headers string) {
-	pc.targetsLock.Lock()
-	defer pc.targetsLock.Unlock()
-	pc.trackHeaders, pc.crossTrackHeaders = util.ParseTrackingHeaders(headers)
+func (tc *TargetClient) AddTrackingHeaders(headers string) {
+	tc.targetsLock.Lock()
+	defer tc.targetsLock.Unlock()
+	tc.trackHeaders, tc.crossTrackHeaders = util.ParseTrackingHeaders(headers)
 }
 
-func (pc *TargetClient) clearTrackingHeaders() {
-	pc.targetsLock.Lock()
-	pc.trackHeaders = []string{}
-	pc.crossTrackHeaders = map[string][]string{}
-	pc.targetsLock.Unlock()
+func (tc *TargetClient) clearTrackingHeaders() {
+	tc.targetsLock.Lock()
+	tc.trackHeaders = []string{}
+	tc.crossTrackHeaders = map[string][]string{}
+	tc.targetsLock.Unlock()
 }
 
-func (pc *TargetClient) getTrackingHeaders() []string {
+func (tc *TargetClient) getTrackingHeaders() []string {
 	headers := []string{}
-	pc.targetsLock.RLock()
-	for _, h := range pc.trackHeaders {
-		if crossHeaders := pc.crossTrackHeaders[h]; crossHeaders != nil {
+	tc.targetsLock.RLock()
+	for _, h := range tc.trackHeaders {
+		if crossHeaders := tc.crossTrackHeaders[h]; crossHeaders != nil {
 			headers = append(headers, strings.Join([]string{h, strings.Join(crossHeaders, "|")}, "|"))
 		}
 		headers = append(headers, h)
 	}
-	pc.targetsLock.RUnlock()
+	tc.targetsLock.RUnlock()
 	return headers
 }
 
-func (pc *TargetClient) AddTrackingTimeBuckets(b string) bool {
-	pc.targetsLock.Lock()
-	defer pc.targetsLock.Unlock()
+func (tc *TargetClient) AddTrackingTimeBuckets(b string) bool {
+	tc.targetsLock.Lock()
+	defer tc.targetsLock.Unlock()
 	buckets, ok := util.ParseTimeBuckets(b)
 	if ok {
-		pc.trackTimeBuckets = buckets
+		tc.trackTimeBuckets = buckets
 	}
 	return ok
 }
 
-func (pc *TargetClient) clearTrackingTimeBuckets() {
-	pc.targetsLock.Lock()
-	pc.trackTimeBuckets = [][]int{}
-	pc.targetsLock.Unlock()
+func (tc *TargetClient) clearTrackingTimeBuckets() {
+	tc.targetsLock.Lock()
+	tc.trackTimeBuckets = [][]int{}
+	tc.targetsLock.Unlock()
 }
 
-func (pc *TargetClient) stopTargets(targetNames []string) (bool, bool) {
-	pc.targetsLock.RLock()
-	defer pc.targetsLock.RUnlock()
+func (tc *TargetClient) stopTargets(targetNames []string) (bool, bool) {
+	tc.targetsLock.RLock()
+	defer tc.targetsLock.RUnlock()
 	stoppingTargets := []string{}
 	if len(targetNames) > 0 {
 		for _, tname := range targetNames {
 			if len(tname) > 0 {
-				if target, found := pc.targets[tname]; found {
+				if target, found := tc.targets[tname]; found {
 					go invocation.StopTarget(target.Name)
 					stoppingTargets = append(stoppingTargets, target.Name)
 				}
 			}
 		}
 	} else {
-		if len(pc.targets) > 0 {
-			for _, target := range pc.targets {
+		if len(tc.targets) > 0 {
+			for _, target := range tc.targets {
 				go invocation.StopTarget(target.Name)
 				stoppingTargets = append(stoppingTargets, target.Name)
 			}
@@ -247,17 +246,29 @@ func (pc *TargetClient) stopTargets(targetNames []string) (bool, bool) {
 	return len(stoppingTargets) > 0, stopped
 }
 
-func (pc *TargetClient) invokeTarget(target *invocation.InvocationSpec) {
-	if tracker, err := invocation.RegisterInvocation(target, results.ResultChannelSinkFactory(target, pc.trackHeaders, pc.crossTrackHeaders, pc.trackTimeBuckets)); err == nil {
-		pc.targetsLock.Lock()
-		pc.activeTargetsCount++
-		pc.targetsLock.Unlock()
-		events.SendEventJSON(Client_TargetInvoked, target.Name, tracker)
+func (tc *TargetClient) invokeTarget(target *invocation.InvocationSpec) {
+	if tracker, err := invocation.RegisterInvocation(target, results.ResultChannelSinkFactory(target, tc.trackHeaders, tc.crossTrackHeaders, tc.trackTimeBuckets)); err == nil {
+		tc.targetsLock.Lock()
+		tc.activeTargetsCount++
+		tc.targetsLock.Unlock()
+		events.SendEventJSON(events.Client_TargetInvoked, target.Name, tracker)
 		invocation.StartInvocation(tracker)
-		pc.targetsLock.Lock()
-		pc.activeTargetsCount--
-		pc.targetsLock.Unlock()
+		tc.targetsLock.Lock()
+		tc.activeTargetsCount--
+		tc.targetsLock.Unlock()
 	} else {
 		log.Println(err.Error())
 	}
+}
+
+func (tc *TargetClient) InvokeAll() {
+	wg := &sync.WaitGroup{}
+	for _, t := range tc.targets {
+		wg.Add(1)
+		go func() {
+			tc.invokeTarget(t.InvocationSpec)
+			wg.Done()
+		}()
+	}
+	wg.Wait()
 }

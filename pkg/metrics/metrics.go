@@ -26,6 +26,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"goto/pkg/global"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 )
 
@@ -71,14 +73,15 @@ type ServerStats struct {
 }
 
 var (
-	Handler         = util.ServerHandler{"metrics", SetRoutes, Middleware}
+	Middleware      = middleware.NewMiddleware("metrics", SetRoutes, MiddlewareHandler)
 	promMetrics     = NewPrometheusMetrics()
 	serverStats     = NewServerStats()
 	ConnTracker     = make(chan string, 10)
 	stopConnTracker = make(chan bool, 2)
+	_               = global.OnShutdown(Shutdown)
 )
 
-func Startup() {
+func init() {
 	go func() {
 	ConnTracker:
 		for {
@@ -351,7 +354,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(statsRouter, "", getStats, "GET")
 }
 
-func Middleware(next http.Handler) http.Handler {
+func MiddlewareHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {
 			next.ServeHTTP(w, r)

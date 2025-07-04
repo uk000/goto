@@ -27,32 +27,32 @@ import (
 )
 
 func GetPodName() string {
-	if global.PodName == "" {
+	if global.Self.PodName == "" {
 		pod, present := os.LookupEnv("POD_NAME")
 		if !present {
 			pod, _ = os.Hostname()
 		}
-		global.PodName = pod
+		global.Self.PodName = pod
 	}
-	return global.PodName
+	return global.Self.PodName
 }
 
 func GetNodeName() string {
-	if global.NodeName == "" {
-		global.NodeName, _ = os.LookupEnv("NODE_NAME")
+	if global.Self.NodeName == "" {
+		global.Self.NodeName, _ = os.LookupEnv("NODE_NAME")
 	}
-	return global.NodeName
+	return global.Self.NodeName
 }
 
 func GetCluster() string {
-	if global.Cluster == "" {
-		global.Cluster, _ = os.LookupEnv("CLUSTER")
+	if global.Self.Cluster == "" {
+		global.Self.Cluster, _ = os.LookupEnv("CLUSTER")
 	}
-	return global.Cluster
+	return global.Self.Cluster
 }
 
 func GetNamespace() string {
-	if global.Namespace == "" {
+	if global.Self.Namespace == "" {
 		ns, present := os.LookupEnv("NAMESPACE")
 		if !present {
 			if data, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
@@ -63,49 +63,59 @@ func GetNamespace() string {
 		if !present {
 			ns = "local"
 		}
-		global.Namespace = ns
+		global.Self.Namespace = ns
 	}
-	return global.Namespace
+	return global.Self.Namespace
+}
+
+func GetPodIP() string {
+	if ip, present := os.LookupEnv("POD_IP"); present {
+		global.Self.PodIP = ip
+	} else {
+		conn, err := net.Dial("udp", "8.8.8.8:80")
+		if err == nil {
+			defer conn.Close()
+			global.Self.PodIP = conn.LocalAddr().(*net.UDPAddr).IP.String()
+		} else {
+			global.Self.PodIP = "localhost"
+		}
+	}
+	return global.Self.PodIP
 }
 
 func GetHostIP() string {
-	if global.HostIP == "" {
-		if ip, present := os.LookupEnv("POD_IP"); present {
-			global.HostIP = ip
+	if global.Self.HostIP == "" {
+		if ip, present := os.LookupEnv("HOST_IP"); present {
+			global.Self.HostIP = ip
 		} else {
-			conn, err := net.Dial("udp", "8.8.8.8:80")
-			if err == nil {
-				defer conn.Close()
-				global.HostIP = conn.LocalAddr().(*net.UDPAddr).IP.String()
-			} else {
-				global.HostIP = "localhost"
-			}
+			global.Self.HostIP = "0.0.0.0"
 		}
 	}
-	return global.HostIP
+	return global.Self.HostIP
 }
 
 func BuildHostLabel(port int) string {
 	hostLabel := ""
 	node := GetNodeName()
 	cluster := GetCluster()
-	if node != "" || cluster != "" {
-		hostLabel = fmt.Sprintf("%s.%s@%s:%d(%s@%s)", GetPodName(), GetNamespace(), GetHostIP(), port, node, cluster)
+	host := GetHostIP()
+	if node != "" || cluster != "" || host != "" {
+		hostLabel = fmt.Sprintf("%s.%s[%s:%d](%s[%s]@%s)", GetPodName(), GetNamespace(), GetPodIP(), port, node, host, cluster)
 	} else {
-		hostLabel = fmt.Sprintf("%s.%s@%s:%d", GetPodName(), GetNamespace(), GetHostIP(), port)
+		hostLabel = fmt.Sprintf("%s.%s[%s:%d]", GetPodName(), GetNamespace(), GetPodIP(), port)
 	}
 	return hostLabel
 }
 
 func BuildListenerLabel(port int) string {
-	return fmt.Sprintf("Goto-%s:%d", GetHostIP(), port)
+	return fmt.Sprintf("Goto-%s:%d", GetPodIP(), port)
 }
 
 func GetHostLabel() string {
-	if global.HostLabel == "" {
-		global.HostLabel = BuildHostLabel(global.ServerPort)
+	if global.Self.HostLabel == "" {
+		global.Self.HostLabel = BuildHostLabel(global.Self.ServerPort)
 	}
-	return global.HostLabel
+	return global.Self.HostLabel
 }
 
 func PrintCallers(level int, callee string) {

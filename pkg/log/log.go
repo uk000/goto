@@ -19,6 +19,7 @@ package log
 import (
 	"fmt"
 	"goto/pkg/global"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
 	"strings"
@@ -27,7 +28,7 @@ import (
 )
 
 var (
-	Handler = util.ServerHandler{Name: "log", SetRoutes: SetRoutes}
+	Middleware = middleware.NewMiddleware("log", SetRoutes, nil)
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -74,74 +75,74 @@ func setLogLevel(w http.ResponseWriter, r *http.Request) {
 	minibody := strings.Contains(r.RequestURI, "minibody")
 	body := strings.Contains(r.RequestURI, "body")
 	if server {
-		global.EnableServerLogs = enable
+		global.Flags.EnableServerLogs = enable
 		msg = fmt.Sprintf("All Server logging set to [%t]", enable)
 	} else if admin {
-		global.EnableAdminLogs = enable
+		global.Flags.EnableAdminLogs = enable
 		msg = fmt.Sprintf("All Admin logging set to [%t]", enable)
 	} else if client {
-		global.EnableClientLogs = enable
+		global.Flags.EnableClientLogs = enable
 		msg = fmt.Sprintf("Client logging set to [%t]", enable)
 	} else if invocationResponse {
-		global.EnableInvocationResponseLogs = enable
+		global.Flags.EnableInvocationResponseLogs = enable
 		msg = fmt.Sprintf("Invocation Response logging set to [%t]", enable)
 	} else if invocation {
-		global.EnableInvocationLogs = enable
+		global.Flags.EnableInvocationLogs = enable
 		msg = fmt.Sprintf("Invocation logging set to [%t]", enable)
 	} else if registry {
 		if locker {
-			global.EnableRegistryLockerLogs = enable
+			global.Flags.EnableRegistryLockerLogs = enable
 			msg = fmt.Sprintf("Registry Locker logging set to [%t]", enable)
 		} else if events {
-			global.EnableRegistryEventsLogs = enable
+			global.Flags.EnableRegistryEventsLogs = enable
 			msg = fmt.Sprintf("Registry Events logging set to [%t]", enable)
 		} else if reminder {
-			global.EnableRegistryReminderLogs = enable
+			global.Flags.EnableRegistryReminderLogs = enable
 			msg = fmt.Sprintf("Registry Reminder logging set to [%t]", enable)
 		} else {
-			global.EnableRegistryLogs = enable
+			global.Flags.EnableRegistryLogs = enable
 			msg = fmt.Sprintf("All Registry logging set to [%t]", enable)
 		}
 	} else if health {
-		global.EnablePeerHealthLogs = enable
+		global.Flags.EnablePeerHealthLogs = enable
 		msg = fmt.Sprintf("Health logging set to [%t]", enable)
 	} else if probe {
-		global.EnableProbeLogs = enable
+		global.Flags.EnableProbeLogs = enable
 		msg = fmt.Sprintf("Probe logging set to [%t]", enable)
 	} else if metrics {
-		global.EnableMetricsLogs = enable
+		global.Flags.EnableMetricsLogs = enable
 		msg = fmt.Sprintf("Metrics logging set to [%t]", enable)
 	} else if request {
 		if headers {
-			global.LogRequestHeaders = enable
+			global.Flags.LogRequestHeaders = enable
 			msg = fmt.Sprintf("Request Headers logging set to [%t]", enable)
 		} else if minibody {
-			global.LogRequestMiniBody = enable
-			if enable && global.LogRequestBody {
-				global.LogRequestBody = false
+			global.Flags.LogRequestMiniBody = enable
+			if enable && global.Flags.LogRequestBody {
+				global.Flags.LogRequestBody = false
 			}
 			msg = fmt.Sprintf("Request Mini Body logging set to [%t]", enable)
 		} else if body {
-			global.LogRequestBody = enable
-			if enable && global.LogRequestMiniBody {
-				global.LogRequestMiniBody = false
+			global.Flags.LogRequestBody = enable
+			if enable && global.Flags.LogRequestMiniBody {
+				global.Flags.LogRequestMiniBody = false
 			}
 			msg = fmt.Sprintf("Request Body logging set to [%t]", enable)
 		}
 	} else if response {
 		if headers {
-			global.LogResponseHeaders = enable
+			global.Flags.LogResponseHeaders = enable
 			msg = fmt.Sprintf("Response Headers logging set to [%t]", enable)
 		} else if minibody {
-			global.LogResponseMiniBody = enable
-			if enable && global.LogResponseBody {
-				global.LogResponseBody = false
+			global.Flags.LogResponseMiniBody = enable
+			if enable && global.Flags.LogResponseBody {
+				global.Flags.LogResponseBody = false
 			}
 			msg = fmt.Sprintf("Response Mini Body logging set to [%t]", enable)
 		} else if body {
-			global.LogResponseBody = enable
-			if enable && global.LogResponseMiniBody {
-				global.LogResponseMiniBody = false
+			global.Flags.LogResponseBody = enable
+			if enable && global.Flags.LogResponseMiniBody {
+				global.Flags.LogResponseMiniBody = false
 			}
 			msg = fmt.Sprintf("Response Body logging set to [%t]", enable)
 		}
@@ -152,19 +153,19 @@ func setLogLevel(w http.ResponseWriter, r *http.Request) {
 
 func getLogLevels(w http.ResponseWriter, r *http.Request) {
 	levels := map[string]bool{
-		"server":     global.EnableServerLogs,
-		"admin":      global.EnableAdminLogs,
-		"client":     global.EnableClientLogs,
-		"invocation": global.EnableInvocationLogs,
-		"registry":   global.EnableRegistryLogs,
-		"locker":     global.EnableRegistryLockerLogs,
-		"events":     global.EnableRegistryEventsLogs,
-		"reminder":   global.EnableRegistryReminderLogs,
-		"health":     global.EnablePeerHealthLogs,
-		"probe":      global.EnableProbeLogs,
-		"metrics":    global.EnableMetricsLogs,
-		"request":    global.LogRequestHeaders,
-		"response":   global.LogResponseHeaders,
+		"server":     global.Flags.EnableServerLogs,
+		"admin":      global.Flags.EnableAdminLogs,
+		"client":     global.Flags.EnableClientLogs,
+		"invocation": global.Flags.EnableInvocationLogs,
+		"registry":   global.Flags.EnableRegistryLogs,
+		"locker":     global.Flags.EnableRegistryLockerLogs,
+		"events":     global.Flags.EnableRegistryEventsLogs,
+		"reminder":   global.Flags.EnableRegistryReminderLogs,
+		"health":     global.Flags.EnablePeerHealthLogs,
+		"probe":      global.Flags.EnableProbeLogs,
+		"metrics":    global.Flags.EnableMetricsLogs,
+		"request":    global.Flags.LogRequestHeaders,
+		"response":   global.Flags.LogResponseHeaders,
 	}
 	util.WriteJsonPayload(w, levels)
 }

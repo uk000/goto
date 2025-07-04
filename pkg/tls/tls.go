@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package util
+package tls
 
 import (
 	"bufio"
@@ -30,8 +30,9 @@ import (
 	"errors"
 	"fmt"
 	"goto/pkg/global"
+	"goto/pkg/server/middleware"
+	"goto/pkg/util"
 	"io"
-	"io/ioutil"
 	"math/big"
 	"net"
 	"net/http"
@@ -43,21 +44,21 @@ import (
 )
 
 var (
-	Handler = ServerHandler{Name: "tls", SetRoutes: SetRoutes}
-	RootCAs = x509.NewCertPool()
-	CACert  []byte
+	Middleware = middleware.NewMiddleware("tls", SetRoutes, nil)
+	RootCAs    = x509.NewCertPool()
+	CACert     []byte
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	tlsRouter := r.PathPrefix("/tls").Subrouter()
-	AddRoute(tlsRouter, "/cacert/add", addCACert, "PUT", "POST")
-	AddRoute(tlsRouter, "/cacert/remove", removeCACert, "PUT", "POST")
-	AddRouteQ(tlsRouter, "/workdir/set", setWorkDir, "dir", "{dir}", "POST", "PUT")
+	util.AddRoute(tlsRouter, "/cacert/add", addCACert, "PUT", "POST")
+	util.AddRoute(tlsRouter, "/cacert/remove", removeCACert, "PUT", "POST")
+	util.AddRouteQ(tlsRouter, "/workdir/set", setWorkDir, "dir", "POST", "PUT")
 }
 
 func addCACert(w http.ResponseWriter, r *http.Request) {
 	msg := ""
-	data := ReadBytes(r.Body)
+	data := util.ReadBytes(r.Body)
 	if len(data) > 0 {
 		StoreCACert(data)
 		msg = "CA Cert Stored"
@@ -66,27 +67,27 @@ func addCACert(w http.ResponseWriter, r *http.Request) {
 		msg = "No Cert Payload"
 	}
 	fmt.Fprintln(w, msg)
-	AddLogMessage(msg, r)
+	util.AddLogMessage(msg, r)
 }
 
 func removeCACert(w http.ResponseWriter, r *http.Request) {
 	RemoveCACert()
 	msg := "CA Cert Removed"
 	fmt.Fprintln(w, msg)
-	AddLogMessage(msg, r)
+	util.AddLogMessage(msg, r)
 }
 
 func setWorkDir(w http.ResponseWriter, r *http.Request) {
 	msg := ""
-	dir := GetStringParamValue(r, "dir")
+	dir := util.GetStringParamValue(r, "dir")
 	if dir != "" {
-		global.WorkDir = dir
+		global.ServerConfig.WorkDir = dir
 		msg = fmt.Sprintf("Working directory set to [%s]", dir)
 	} else {
 		msg = "Missing directory path"
 	}
 	fmt.Fprintln(w, msg)
-	AddLogMessage(msg, r)
+	util.AddLogMessage(msg, r)
 }
 
 func StoreCACert(cert []byte) {
@@ -103,17 +104,17 @@ func RemoveCACert() {
 func loadCerts() {
 	RootCAs = x509.NewCertPool()
 	found := false
-	if certs, err := filepath.Glob(global.CertPath + "/*.crt"); err == nil {
+	if certs, err := filepath.Glob(global.ServerConfig.CertPath + "/*.crt"); err == nil {
 		for _, c := range certs {
-			if cert, err := ioutil.ReadFile(c); err == nil {
+			if cert, err := os.ReadFile(c); err == nil {
 				RootCAs.AppendCertsFromPEM(cert)
 				found = true
 			}
 		}
 	}
-	if certs, err := filepath.Glob(global.CertPath + "/*.pem"); err == nil {
+	if certs, err := filepath.Glob(global.ServerConfig.CertPath + "/*.pem"); err == nil {
 		for _, c := range certs {
-			if cert, err := ioutil.ReadFile(c); err == nil {
+			if cert, err := os.ReadFile(c); err == nil {
 				RootCAs.AppendCertsFromPEM(cert)
 				found = true
 			}
@@ -154,7 +155,7 @@ func CreateCertificate(domain string, saveWithPrefix string) (*tls.Certificate, 
 		return &tls.Certificate{}, err
 	}
 	if saveWithPrefix != "" {
-		saveWithPrefix = filepath.Join(global.WorkDir, saveWithPrefix)
+		saveWithPrefix = filepath.Join(global.ServerConfig.WorkDir, saveWithPrefix)
 		certFile := saveWithPrefix + "-cert.pem"
 		if certOut, err := os.Create(certFile); err != nil {
 			fmt.Printf("Failed to open file [%s] for writing cert with error: %s\n", certFile, err.Error())

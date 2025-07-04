@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"goto/pkg/global"
+	gototls "goto/pkg/tls"
 	"goto/pkg/util"
 	"io"
 	"log"
@@ -52,7 +53,7 @@ func (p *Proxy) proxyTCPOpaque(downConn net.Conn, startTime time.Time) {
 }
 
 func (p *Proxy) proxyTCPWithSNI(downConn net.Conn, startTime time.Time) {
-	sni, buff, err := util.ReadTLSSNIFromConn(downConn)
+	sni, buff, err := gototls.ReadTLSSNIFromConn(downConn)
 	if err != nil {
 		log.Printf("TCP Proxy[%d]: Error while reading downstream SNI from Connection [%s]: %s\n", p.Port, downConn.RemoteAddr().String(), err.Error())
 	} else {
@@ -124,7 +125,7 @@ func (p *Proxy) pipe(from, to net.Conn, fromTracker, toTracker *ConnTracker, tar
 	defer wg.Done()
 	fromAddr := from.RemoteAddr().String()
 	toAddr := to.RemoteAddr().String()
-	buff := make([]byte, global.MaxMTUSize)
+	buff := make([]byte, global.ServerConfig.MaxMTUSize)
 	for {
 		select {
 		case <-done:

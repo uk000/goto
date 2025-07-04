@@ -21,6 +21,7 @@ import (
 	"goto/pkg/events"
 	"goto/pkg/invocation"
 	"goto/pkg/metrics"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"log"
 	"net/http"
@@ -43,14 +44,15 @@ type TriggerTarget struct {
 	Name              string             `json:"name"`
 	HTTPTarget        *TriggerHTTPTarget `json:"httpTarget"`
 	Pipe              bool               `json:"pipe"`
-	Enabled           bool               `json:"enabled"`
-	TriggerURIs       []string           `json:"triggerURIs"`
-	TriggerHeaders    [][]string         `json:"triggerHeaders"`
-	TriggerStatuses   []int              `json:"triggerStatuses"`
-	StartFrom         int                `json:"startFrom"`
-	StopAt            int                `json:"stopAt"`
-	MatchCount        int                `json:"matchCount"`
-	TriggerCount      int                `json:"triggerCount"`
+	PipeCallbacks     map[string]PipeCallback
+	Enabled           bool       `json:"enabled"`
+	TriggerURIs       []string   `json:"triggerURIs"`
+	TriggerHeaders    [][]string `json:"triggerHeaders"`
+	TriggerStatuses   []int      `json:"triggerStatuses"`
+	StartFrom         int        `json:"startFrom"`
+	StopAt            int        `json:"stopAt"`
+	MatchCount        int        `json:"matchCount"`
+	TriggerCount      int        `json:"triggerCount"`
 	triggerURIRegexps map[string]*regexp.Regexp
 	lock              sync.RWMutex
 }
@@ -67,11 +69,11 @@ type Trigger struct {
 type PipeCallback func(target, source string, port int, r *http.Request, statusCode int, responseHeaders http.Header)
 
 var (
-	rootRouter                   *mux.Router
-	Handler                      = util.ServerHandler{Name: "trigger", SetRoutes: SetRoutes}
-	portTriggers                 = map[string]*Trigger{}
-	pipeSourceCallbacksByTargets = map[string]map[string]PipeCallback{}
-	triggerLock                  sync.RWMutex
+	rootRouter        *mux.Router
+	Middleware        = middleware.NewMiddleware("trigger", SetRoutes, nil)
+	portTriggers      = map[string]*Trigger{}
+	allTriggerTargets = map[string]*TriggerTarget{}
+	triggerLock       sync.RWMutex
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -119,9 +121,9 @@ func clearTriggers(w http.ResponseWriter, r *http.Request) {
 	listenerPort := util.GetRequestOrListenerPort(r)
 	triggerLock.Lock()
 	defer triggerLock.Unlock()
-	if portTriggers[listenerPort] != nil {
-		for t := range portTriggers[listenerPort].Targets {
-			delete(pipeSourceCallbacksByTargets, t)
+	if t := portTriggers[listenerPort]; t != nil {
+		for name, _ := range t.Targets {
+			delete(allTriggerTargets, name)
 		}
 	}
 	portTriggers[listenerPort] = &Trigger{}
@@ -146,9 +148,11 @@ func getTriggerPipes(w http.ResponseWriter, r *http.Request) {
 	defer triggerLock.RUnlock()
 	util.AddLogMessage(fmt.Sprintf("Port [%s] Get trigger pipes", util.GetRequestOrListenerPort(r)), r)
 	triggerPipes := map[string][]string{}
-	for target, pipes := range pipeSourceCallbacksByTargets {
-		for pipe := range pipes {
-			triggerPipes[target] = append(triggerPipes[target], pipe)
+	for _, t := range portTriggers {
+		for target, tt := range t.Targets {
+			for pipe, _ := range tt.PipeCallbacks {
+				triggerPipes[target] = append(triggerPipes[target], pipe)
+			}
 		}
 	}
 	util.WriteJsonPayload(w, triggerPipes)
@@ -251,6 +255,9 @@ func (t *Trigger) addTrigger(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		t.lock.Unlock()
+		triggerLock.Lock()
+		allTriggerTargets[tt.Name] = tt
+		triggerLock.Unlock()
 		msg := fmt.Sprintf("Port [%s] Added trigger: %s", util.GetRequestOrListenerPort(r), tt.Name)
 		util.AddLogMessage(msg, r)
 		w.WriteHeader(http.StatusOK)
@@ -303,6 +310,9 @@ func (t *Trigger) deleteTrigger(targetName string) {
 			delete(t.TargetsByStatus, status)
 		}
 	}
+	triggerLock.Lock()
+	defer triggerLock.Unlock()
+	delete(allTriggerTargets, targetName)
 }
 
 func (t *Trigger) removeTrigger(w http.ResponseWriter, r *http.Request) {
@@ -438,8 +448,7 @@ func (t *Trigger) invokePipeSources(pipeSources map[string]*TriggerTarget, r *ht
 	port := util.GetRequestOrListenerPortNum(r)
 	for name, tt := range pipeSources {
 		tt.TriggerCount++
-		callbacks := pipeSourceCallbacksByTargets[name]
-		for source, callback := range callbacks {
+		for source, callback := range tt.PipeCallbacks {
 			callback(name, source, port, r, statusCode, w.Header())
 		}
 	}
@@ -519,8 +528,15 @@ func RunTriggers(r *http.Request, w http.ResponseWriter, statusCode int) {
 func RegisterPipeCallback(target, pipe string, callback PipeCallback) {
 	triggerLock.Lock()
 	defer triggerLock.Unlock()
-	if pipeSourceCallbacksByTargets[target] == nil {
-		pipeSourceCallbacksByTargets[target] = map[string]PipeCallback{}
+	if tt := allTriggerTargets[target]; tt != nil {
+		tt.lock.Lock()
+		if tt.PipeCallbacks == nil {
+			tt.PipeCallbacks = map[string]PipeCallback{}
+		}
+		tt.PipeCallbacks[pipe] = callback
+		tt.lock.Unlock()
+	} else {
+		log.Printf("Trigger target %s not found for pipe callback registration", target)
+		return
 	}
-	pipeSourceCallbacksByTargets[target][pipe] = callback
 }

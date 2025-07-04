@@ -1,0 +1,231 @@
+name: goto-test-config
+scripts:
+  config:
+    - name: "script1"
+      filePath: "./test/script1.sh"
+    - name: "script2"
+      content: |
+        #!/bin/bash
+        echo "This is script2"
+        echo "Current date: $(date)"
+        echo "Script completed successfully"
+  run:
+    - "script1"
+    - "script2"
+grpc:
+  config:
+    protos:
+      - name: goto-proto
+        path: /mnt/d/Code/goto/pkg/grpc/grpc.proto
+      - name: sample-proto
+        path: /mnt/d/Code/goto/pkg/grpc/sample.proto
+    services:
+      - service: Goto
+        port: 8000
+        methods:
+          - method: echo
+            responses:
+              - payload:
+                  payload: "Hello from Goto"
+                  at: now
+                  gotoHost: "goto@localhost:8000"
+                  gotoPort: 8000
+                  viaGoto: "test goto"
+                contentType: application/json
+              - match:
+                  headers:
+                    - name: foo
+                      value: xyz
+                    - name: bar
+                payload:
+                  payload: "Header foo with value xyz, and bar"
+                  at: now
+                  gotoHost: "goto@localhost:8000"
+                  gotoPort: 8000
+                  viaGoto: "test goto"
+                contentType: application/json
+              - match:
+                  headers:
+                    - name: foo
+                    - name: bar
+                      value: abc
+                payload:
+                  payload: "Header bar with value xyz, and foo"
+                  at: now
+                  gotoHost: "goto@localhost:8000"
+                  gotoPort: 8000
+                  viaGoto: "test goto"
+                contentType: application/json
+      - service: SampleService
+        port: 9000
+        methods:
+          - method: oneOne
+            responses:
+              - payload:
+                  id: 1
+                  content: "Hello SampleService.oneOne"
+                contentType: application/json
+          - method: manyOne
+            responses:
+              - payload:
+                  id: 2
+                  content: "Hello SampleService.manyOne"
+                contentType: application/json
+          - method: oneMany
+            responses:
+              - stream:
+                  count: 5
+                  delay: 1s
+                payload:
+                  id: 1
+                  content: "Hello SampleService.oneMany"
+                contentType: application/json
+              - match:
+                  headers:
+                    - name: foo
+                    - name: bar
+                      value: abc
+                stream:
+                  count: 5
+                  delay: 1s
+                payload:
+                  id: 1
+                  content: "Hello SampleService.oneMany"
+                contentType: application/json
+  serve:
+    - Goto
+    - SampleService
+registry:
+  locker: locker1
+traffic:
+  config:
+    tracking:
+      headers:
+        - name: Goto-Host
+        - name: Via-Goto
+      time:
+        buckets:
+          - 0-100
+          - 100-200
+          - 200-500
+          - 500-
+    targets:
+      - name: validate-status
+        method: POST
+        protocol: "HTTP/2"
+        url: "http://localhost:8082/status/418"
+        replicas: 1
+        requestCount: 1
+        expectation:
+          statusCode: 418
+        autoInvoke: true
+      - name: validate-payload-length
+        method: POST
+        protocol: "HTTP/2"
+        url: "http://localhost:8082/echo/stream"
+        streamPayload:
+          - "{firstbody}"
+          - "{secondbody}"
+          - "{thirdbody}"
+          - "{fourthbody}"
+          - "{fifthbody}"
+        streamDelay: "1s"
+        replicas: 1
+        requestCount: 1
+        expectation:
+          statusCode: 200
+          payloadLength: 57
+        autoInvoke: true
+      - name: validate-payload
+        method: POST
+        protocol: "HTTP/2"
+        url: "http://localhost:8082/echo/stream"
+        streamPayload:
+          - "{firstbody}"
+          - "{secondbody}"
+          - "{thirdbody}"
+          - "{fourthbody}"
+          - "{fifthbody}"
+        streamDelay: "1s"
+        replicas: 1
+        requestCount: 1
+        expectation:
+          statusCode: 200
+          payload: "{firstbody}{secondbody}{thirdbody}{fourthbody}{fifthbody}"
+        autoInvoke: true
+      - name: validate-headers
+        method: POST
+        protocol: "HTTP/2"
+        url: "http://localhost:8082/echo/stream"
+        streamPayload:
+          - "{firstbody}"
+          - "{secondbody}"
+          - "{thirdbody}"
+          - "{fourthbody}"
+          - "{fifthbody}"
+        streamDelay: "1s"
+        replicas: 1
+        requestCount: 1
+        expectation:
+          statusCode: 200
+          headers:
+            via-goto: test
+            goto-port: "8081"
+        autoInvoke: true
+  invoke:
+    - validate-status
+    - validate-payload-length
+    - validate-payload
+    - validate-headers
+jobs:
+  config:
+    - id: job1
+      task:
+        cmd: sh
+        args:
+          - -c
+          - "for i in $(seq 2); do printf \"Hello %d - %d\n\" $i `date +%s`; sleep 1; done"
+        outputMarkers:
+          "1": "date"
+          "3": "msg"
+          outputSeparator: " "
+      auto: false
+      count: 1
+      keepFirst: true
+      maxResults: 5
+      delay: 1s
+      outputTrigger: job2
+      finishTrigger: job2
+    - id: job2
+      task:
+        cmd: sh
+        args:
+          - -c
+          - 'printf `date +%s`; printf " Output {date} Processed"; sleep 1;'
+        outputMarkers:
+          "1": "ts1"
+          "3": "ts2"
+      auto: false
+      count: 1
+      keepFirst: true
+      maxResults: 10
+      initialDelay: 10s
+      outputTrigger: job3
+    - id: job3
+      task:
+        cmd: sh
+        args:
+          - -c
+          - 'printf \"Finally {date} {ts2} {msg}\"; sleep 1;'
+        outputMarkers:
+          "1": "ts1"
+          "3": "ts2"
+      auto: false
+      count: 1
+      keepFirst: true
+      maxResults: 10
+      delay: 1s
+  run:
+    - job1
+    - job2
+    - job3

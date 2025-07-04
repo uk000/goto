@@ -20,6 +20,7 @@ import (
 	"fmt"
 	. "goto/pkg/constants"
 	"goto/pkg/events"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
 	"regexp"
@@ -46,7 +47,7 @@ type RequestFilter struct {
 }
 
 var (
-	Handler      = util.ServerHandler{"filter", SetRoutes, Middleware}
+	Middleware   = middleware.NewMiddleware("filter", SetRoutes, MiddlewareHandler)
 	ignoreFilter = newRequestFilter()
 	bypassFilter = newRequestFilter()
 	lock         sync.RWMutex
@@ -346,7 +347,7 @@ func filterRequest(w http.ResponseWriter, r *http.Request) bool {
 	return statusCode > 0
 }
 
-func Middleware(next http.Handler) http.Handler {
+func MiddlewareHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if util.IsKnownNonTraffic(r) || !filterRequest(w, r) {
 			if next != nil {

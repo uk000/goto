@@ -19,7 +19,6 @@ package intercept
 import (
 	"bufio"
 	"fmt"
-	"goto/pkg/server/conn"
 	"goto/pkg/util"
 	"io"
 	"net"
@@ -54,6 +53,13 @@ type FlushWriter struct {
 
 type BodyTracker struct {
 	io.ReadCloser
+}
+
+func GetConn(r *http.Request) net.Conn {
+	if conn := r.Context().Value(util.ConnectionKey); conn != nil {
+		return conn.(net.Conn)
+	}
+	return nil
 }
 
 func NewFlushWriter(r *http.Request, w io.Writer) FlushWriter {
@@ -186,6 +192,16 @@ func NewInterceptResponseWriter(r *http.Request, w http.ResponseWriter, hold boo
 		parent:         parent,
 		Hold:           hold,
 		IsH2C:          util.IsH2C(r),
-		conn:           conn.GetConn(r),
+		conn:           GetConn(r),
 	}
+}
+
+func WithIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *InterceptResponseWriter) {
+	var irw *InterceptResponseWriter
+	if !util.IsKnownNonTraffic(r) {
+		irw = NewInterceptResponseWriter(r, w, true)
+		r.Context().Value(util.RequestStoreKey).(*util.RequestStore).InterceptResponseWriter = irw
+		w = irw
+	}
+	return w, irw
 }

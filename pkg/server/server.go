@@ -21,50 +21,49 @@ import (
 	"strconv"
 
 	"goto/pkg/client"
-	"goto/pkg/client/results"
 	"goto/pkg/events"
 	"goto/pkg/global"
-	"goto/pkg/grpc"
-	"goto/pkg/invocation"
 	"goto/pkg/job"
-	"goto/pkg/k8s"
+	k8sApi "goto/pkg/k8s/api"
+	k8sYaml "goto/pkg/k8s/yaml"
 	"goto/pkg/log"
 	"goto/pkg/metrics"
 	"goto/pkg/pipe"
 	"goto/pkg/proxy"
 	"goto/pkg/registry"
-	"goto/pkg/script"
+	"goto/pkg/rpc/grpc/protos"
+	grpcserver "goto/pkg/rpc/grpc/server"
+	"goto/pkg/rpc/jsonrpc"
+	"goto/pkg/scripts"
 	"goto/pkg/server/catchall"
 	"goto/pkg/server/conn"
 	"goto/pkg/server/echo"
 	"goto/pkg/server/listeners"
 	"goto/pkg/server/listeners/label"
+	"goto/pkg/server/middleware"
 	"goto/pkg/server/probes"
 	"goto/pkg/server/request"
 	"goto/pkg/server/response"
 	"goto/pkg/server/tcp"
+	"goto/pkg/server/ui"
+	"goto/pkg/tls"
 	"goto/pkg/tunnel"
 	"goto/pkg/util"
 )
 
+func init() {
+	middleware.Middlewares = []*middleware.Middleware{
+		ui.Middleware, tunnel.TunnelCountMiddleware, label.Middleware, conn.Middleware, tunnel.Middleware, events.Middleware,
+		metrics.Middleware, listeners.Middleware, probes.Middleware, registry.Middleware, client.Middleware,
+		k8sYaml.Middleware, k8sApi.Middleware, pipe.Middleware, request.Middleware, proxy.Middleware, response.Middleware,
+		tcp.Middleware, scripts.Middleware, job.Middleware, grpcserver.Middleware, protos.Middleware, jsonrpc.Middleware,
+		tls.Middleware, log.Middleware, echo.Middleware, catchall.Middleware,
+	}
+}
+
 func Run() {
-	global.PeerAddress = util.GetHostIP() + ":" + strconv.Itoa(global.ServerPort)
-	global.GetPeers = registry.GetPeers
-	util.WillTunnel = tunnel.WillTunnel
-	util.WillProxyHTTP = proxy.WillProxyHTTP
-	global.StoreEventInCurrentLocker = registry.StoreEventInCurrentLocker
-	listeners.Configure(ServeHTTPListener, ServeGRPCListener, StartTCPServer)
-	metrics.Startup()
-	invocation.Startup()
-	k8s.StartWatch()
-	RunHttpServer(tunnel.TunnelCountHandler, label.Handler, conn.Handler, tunnel.Handler, events.Handler, metrics.Handler,
-		listeners.Handler, probes.Handler, registry.Handler, client.Handler, k8s.Handler, pipe.Handler,
-		request.Handler, proxy.Handler, response.Handler, tcp.Handler, script.Handler, job.Handler,
-		grpc.Handler, log.Handler, echo.Handler, catchall.Handler)
-	k8s.StopWatch()
-	invocation.Shutdown()
-	job.Manager.StopJobWatch()
-	metrics.Shutdown()
-	results.StopRegistrySender()
+	global.Self.Address = util.GetPodIP() + ":" + strconv.Itoa(global.Self.ServerPort)
+	RunHttpServer()
+	global.Shutdown()
 	os.Exit(0)
 }

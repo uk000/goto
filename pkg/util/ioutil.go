@@ -54,7 +54,7 @@ func (r reader) Read(p []byte) (n int, err error) {
 func NewReReader(r io.ReadCloser) *ReReader {
 	content := ReadBytes(r)
 	return &ReReader{
-		ReadCloser: ioutil.NopCloser(bytes.NewReader(content)),
+		ReadCloser: io.NopCloser(bytes.NewReader(content)),
 		Content:    content,
 	}
 }
@@ -93,8 +93,8 @@ func Reader(ctx context.Context, r io.Reader) io.Reader {
 }
 
 func BuildFilePath(filePath, fileName string) string {
-	if filePath != "" && !strings.HasSuffix(filePath, "/") {
-		filePath += "/"
+	if filePath != "" && !strings.HasSuffix(filePath, "/") && !strings.HasSuffix(filePath, "\\") {
+		filePath += string(os.PathSeparator)
 	}
 	filePath += fileName
 	return filePath
@@ -108,15 +108,29 @@ func StoreFile(filePath, fileName string, content []byte) (string, error) {
 		os.MkdirAll(filePath, os.ModePerm)
 	}
 	filePath = BuildFilePath(filePath, fileName)
-	if err := ioutil.WriteFile(filePath, content, 0777); err == nil {
+	if err := os.WriteFile(filePath, content, 0777); err == nil {
 		return filePath, nil
 	} else {
 		return "", err
 	}
 }
 
+func LoadFile(filePath string) (string, error) {
+	if filePath == "" {
+		return "", fmt.Errorf("no filename")
+	}
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return "", fmt.Errorf("file doesn't exist")
+	}
+	if content, err := os.ReadFile(filePath); err == nil {
+		return string(content), nil
+	} else {
+		return "", err
+	}
+}
+
 func Read(r io.ReadCloser) string {
-	if body, err := ioutil.ReadAll(r); err == nil {
+	if body, err := io.ReadAll(r); err == nil {
 		r.Close()
 		return strings.Trim(string(body), " ")
 	} else {
@@ -126,7 +140,7 @@ func Read(r io.ReadCloser) string {
 }
 
 func ReadBytes(r io.Reader) []byte {
-	if body, err := ioutil.ReadAll(r); err == nil {
+	if body, err := io.ReadAll(r); err == nil {
 		return body
 	} else {
 		log.Println(err.Error())

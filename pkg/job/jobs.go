@@ -19,6 +19,7 @@ package job
 import (
 	"errors"
 	"fmt"
+	"goto/pkg/global"
 	"goto/pkg/invocation"
 	"goto/pkg/util"
 	"log"
@@ -31,6 +32,7 @@ import (
 
 var (
 	Manager = newJobManager()
+	_       = global.OnShutdown(Manager.StopJobWatch)
 )
 
 type Script struct {
