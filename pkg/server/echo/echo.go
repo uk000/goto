@@ -33,10 +33,10 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("echo", SetRoutes, nil)
+	Middleware = middleware.NewMiddleware("echo", setRoutes, nil)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	echoRouter := r.PathPrefix("/echo").Subrouter()
 	util.AddRoute(echoRouter, "/headers", EchoHeaders)
 	util.AddRoute(echoRouter, "/body", echoBody)

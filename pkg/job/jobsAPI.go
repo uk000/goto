@@ -29,10 +29,10 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("jobs", SetRoutes, nil)
+	Middleware = middleware.NewMiddleware("jobs", setRoutes, nil)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	jobsRouter := r.PathPrefix("/jobs").Subrouter()
 	util.AddRoute(jobsRouter, "/add", addOrUpdateJob, "POST", "PUT")
 	util.AddRoute(jobsRouter, "/update", addOrUpdateJob, "POST", "PUT")

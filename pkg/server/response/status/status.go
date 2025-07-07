@@ -53,12 +53,12 @@ type PortStatus struct {
 }
 
 var (
-	Middleware    = middleware.NewMiddleware("status", SetRoutes, MiddlewareHandler)
+	Middleware    = middleware.NewMiddleware("status", setRoutes, middlewareFunc)
 	portStatusMap = map[string]*PortStatus{}
 	statusLock    sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	statusRouter := util.PathRouter(r, "/status")
 	util.AddRouteWithPort(statusRouter, "/set/{status}", setStatus, "PUT", "POST")
 	util.AddRouteWithPort(statusRouter, "/counts/clear", clearStatus, "PUT", "POST")
@@ -339,7 +339,7 @@ func IncrementStatusCount(statusCode int, r *http.Request) {
 	portStatus.countsByResponseStatus[statusCode]++
 }
 
-func MiddlewareHandler(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {
 			next.ServeHTTP(w, r)

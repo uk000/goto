@@ -34,7 +34,7 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("connection", nil, RequestHandler)
+	Middleware = middleware.NewMiddleware("connection", nil, middlewareFunc)
 )
 
 func GetConn(r *http.Request) net.Conn {
@@ -70,7 +70,7 @@ func captureTLSInfo(r *http.Request) {
 	rs.TLSVersion = gototls.GetTLSVersion(&tlsState)
 }
 
-func RequestHandler(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		localAddr := ""
 		if conn := GetConn(r); conn != nil {

@@ -26,18 +26,18 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("protos", SetRoutes, nil)
+	Middleware = middleware.NewMiddleware("protos", setRoutes, nil)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	protosRouter := util.PathRouter(r, "/grpc/protos")
-	util.AddRouteQWithPort(protosRouter, "/add/{name}", addProto, "path", "POST", "PUT")
-	util.AddRouteWithPort(protosRouter, "/add/{name}", addProto, "POST", "PUT")
-	util.AddRouteWithPort(protosRouter, "/remove/{name}", removeProto, "POST", "PUT")
-	util.AddRouteWithPort(protosRouter, "/clear", clearProtos, "POST")
-	util.AddRouteWithPort(protosRouter, "/{proto}/list/services", listServices, "GET")
-	util.AddRouteWithPort(protosRouter, "/{proto}/list/{service}/methods", listMethods, "GET")
-	util.AddRouteWithPort(protosRouter, "", getProtos, "GET")
+	util.AddRouteQ(protosRouter, "/add/{name}", addProto, "path", "POST", "PUT")
+	util.AddRoute(protosRouter, "/add/{name}", addProto, "POST", "PUT")
+	util.AddRoute(protosRouter, "/remove/{name}", removeProto, "POST", "PUT")
+	util.AddRoute(protosRouter, "/clear", clearProtos, "POST")
+	util.AddRoute(protosRouter, "/{proto}/list/services", listServices, "GET")
+	util.AddRoute(protosRouter, "/{proto}/list/{service}/methods", listMethods, "GET")
+	util.AddRoute(protosRouter, "", getProtos, "GET")
 }
 
 func addProto(w http.ResponseWriter, r *http.Request) {

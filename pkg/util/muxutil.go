@@ -28,13 +28,23 @@ import (
 )
 
 var (
+	RootRouter            *mux.Router
 	portRouter            *mux.Router
 	portTunnelRouters     = map[string]*mux.Router{}
 	coRoutersMap          = map[*mux.Router][]*mux.Router{}
+	MatchRouter           *mux.Router
+	QueryParamRegex       = "(\\?.*)?$"
+	GlobRegex             = "(.*)?"
 	fillerRegexp          = regexp.MustCompile("{({[^{}]+?})}|{([^{}]+?)}")
 	optionalPathRegexp    = regexp.MustCompile("(\\/[^{}]+?\\?)")
 	optionalPathKeyRegexp = regexp.MustCompile("(\\/(?:[^\\/{}]+=)?{[^{}]+?}\\?\\??)")
 )
+
+func InitListenerRouter(root *mux.Router) {
+	RootRouter = root
+	portRouter = root.PathPrefix("/port={port}").Subrouter()
+	MatchRouter = root.NewRoute().Subrouter()
+}
 
 func GetAltPaths(path string, key bool) []string {
 	var matches [][]int
@@ -244,40 +254,70 @@ func FillFrom(text, filler string, store map[string]interface{}) string {
 	return text
 }
 
-func GetURIRegexpAndRoute(uri string, glob bool, router *mux.Router) (*regexp.Regexp, *mux.Router, *mux.Route, error) {
+func Unglob(s string) (string, bool) {
+	glob := false
+	if strings.HasSuffix(s, "*") {
+		s = strings.ReplaceAll(s, "*", "")
+		glob = true
+	}
+	return s, glob
+}
+
+func GetURIRegexpAndRoute(uri string, router *mux.Router) (string, *regexp.Regexp, *mux.Router, *mux.Route, error) {
 	if uri != "" {
-		vars := fillerRegexp.FindAllString(uri, -1)
+		finalURI, glob := Unglob(strings.ToLower(uri))
+		vars := fillerRegexp.FindAllString(finalURI, -1)
+		var prefixURI string
+		if len(vars) > 0 {
+			if pieces := strings.Split(finalURI, vars[0]); len(pieces) > 0 {
+				prefixURI = pieces[0]
+			}
+		}
+		if prefixURI == "" {
+			prefixURI = finalURI
+		}
 		for _, v := range vars {
 			v2, _ := GetFillerUnmarked(v)
 			v2 = MarkFiller(v2 + ":[^/&\\?]*")
-			uri = strings.ReplaceAll(uri, v, v2)
+			finalURI = strings.ReplaceAll(finalURI, v, v2)
 		}
 		subRouter := router.NewRoute().Subrouter()
-		route := subRouter.PathPrefix(uri)
+		route := subRouter.PathPrefix(finalURI)
 		if path, err := route.GetPathRegexp(); err == nil {
 			//path = strings.ReplaceAll(path, "$", "(/.*)?$")
 			pattern := path
 			if glob {
-				pattern += "(.*)?"
+				pattern += GlobRegex
 			}
-			pattern += "(\\?.*)?$"
-			re := regexp.MustCompile(pattern)
-			return re, subRouter, route, nil
+			pattern += QueryParamRegex
+			re := regexp.MustCompile("(?i)" + pattern)
+			return prefixURI, re, subRouter, route, nil
 		} else {
-			return nil, nil, nil, err
+			return uri, nil, nil, nil, err
 		}
 	}
-	return nil, nil, nil, fmt.Errorf("Empty URI")
+	return uri, nil, nil, nil, fmt.Errorf("Empty URI")
 }
 
-func RegisterURIRouteAndGetRegex(uri string, glob bool, router *mux.Router, handler func(http.ResponseWriter, *http.Request)) (*mux.Router, *regexp.Regexp, error) {
-	if re, subRouter, route, err := GetURIRegexpAndRoute(uri, glob, router); err == nil {
+func BuildURIMatcher(uri string, handlerFunc func(w http.ResponseWriter, r *http.Request)) (string, *regexp.Regexp, *mux.Router, error) {
+	if uri != "" {
+		if prefixURI, re, rr, err := RegisterURIRouteAndGetRegex(uri, MatchRouter, handlerFunc); err == nil {
+			return prefixURI, re, rr, nil
+		} else {
+			return uri, nil, nil, err
+		}
+	}
+	return uri, nil, nil, fmt.Errorf("no uri")
+}
+
+func RegisterURIRouteAndGetRegex(uri string, router *mux.Router, handler func(http.ResponseWriter, *http.Request)) (string, *regexp.Regexp, *mux.Router, error) {
+	if prefixURI, re, subRouter, route, err := GetURIRegexpAndRoute(uri, router); err == nil {
 		route = route.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
 			return re.MatchString(r.URL.Path)
 		}).HandlerFunc(handler)
-		return subRouter, re, nil
+		return prefixURI, re, subRouter, nil
 	} else {
-		return nil, nil, err
+		return uri, nil, nil, err
 	}
 }
 

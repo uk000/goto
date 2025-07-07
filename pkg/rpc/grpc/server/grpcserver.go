@@ -56,12 +56,13 @@ func StartGRPCServer() {
 	TheGRPCServer = &GRPCServer{}
 	TheGRPCServer.init()
 	TheGRPCServer.Start(nil)
-	//RegisterGotoServer(TheGRPCServer)
+	RegisterGotoServer(TheGRPCServer)
 }
 
 func serve(s *gotogrpc.GRPCService, l *listeners.Listener) {
 	TheGRPCServer.RegisterService(s.GSD)
 	TheGRPCServer.Start(l)
+	RegisterGotoServer(TheGRPCServer)
 }
 
 func (g *GRPCServer) init() {
@@ -171,7 +172,7 @@ func unaryMiddleware(ctx context.Context, req interface{}, info *grpc.UnaryServe
 	ctx, _ = util.WithRequestStoreForContext(util.WithPort(metadata.NewOutgoingContext(ctx, md), port))
 	resp, err := handler(ctx, req)
 	if err != nil {
-		util.AddLogMessageForContext(fmt.Sprintf("Service/Method [%s]: Error handling unary request: %v", info.FullMethod, err), ctx)
+		util.AddLogMessageForContext(ctx, fmt.Sprintf("Service/Method [%s]: Error handling unary request: %v", info.FullMethod, err))
 	}
 	_, rs := util.GetRequestStoreForContext(ctx)
 	log.Print(strings.Join(rs.LogMessages, " --> "))
@@ -188,7 +189,7 @@ func streamMiddleware(srv interface{}, ss grpc.ServerStream, info *grpc.StreamSe
 	ctx, _ = util.WithRequestStoreForContext(util.WithPort(metadata.NewOutgoingContext(ctx, md), port))
 	err := handler(srv, NewWrappedStream(ss, ctx))
 	if err != nil {
-		util.AddLogMessageForContext(fmt.Sprintf("Service/Method [%s]: Error handling stream: %v", info.FullMethod, err), ctx)
+		util.AddLogMessageForContext(ctx, fmt.Sprintf("Service/Method [%s]: Error handling stream: %v", info.FullMethod, err))
 	}
 	_, rs := util.GetRequestStoreForContext(ctx)
 	log.Print(strings.Join(rs.LogMessages, " --> "))

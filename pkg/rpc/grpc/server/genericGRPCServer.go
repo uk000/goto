@@ -18,162 +18,65 @@ package grpcserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	gotogrpc "goto/pkg/rpc/grpc"
+	gg "goto/pkg/rpc/grpc"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"io"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
 func init() {
-	gotogrpc.GRPCUnaryHandler = GRPCUnaryHandler
-	gotogrpc.GRPCStreamHandler = GRPCStreamHandler
+	gg.GRPCUnaryHandler = GRPCUnaryHandler
+	gg.GRPCStreamHandler = GRPCStreamHandler
 }
 
-func parseRequest(req interface{}) ([]byte, error) {
-	msg, ok := req.(*dynamicpb.Message)
-	if !ok {
-		return nil, fmt.Errorf("unexpected message type")
-	}
-	if b, err := protojson.Marshal(msg); err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	} else {
-		return b, nil
-	}
-}
-
-// func parseRequestJSON(req interface{}) (util.JSON, error) {
-// 	if b, err := parseRequest(req); err != nil {
-// 		return nil, err
-// 	} else {
-// 		return util.FromBytes(b), nil
-// 	}
-// }
-
-func getRequestHeaders(ctx context.Context) (map[string][]string, error) {
-	headers := make(map[string][]string)
-	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		for k, v := range md {
-			headers[k] = v
-		}
-	} else {
-		return nil, fmt.Errorf("failed to get headers from context")
-	}
-
-	return headers, nil
-}
-
-func getRequestHost(md map[string][]string) string {
-	host := ""
-	if v, ok := md[":authority"]; ok {
-		host = v[0]
-		md["host"] = v
-	} else if v, ok := md["host"]; ok {
-		host = v[0]
-	} else if v, ok := md["hostName"]; ok {
-		host = v[0]
-	}
-	return host
-}
-
-func getRequestRemoteAddr(md map[string][]string) string {
-	remoteAddr := ""
-	if v, ok := md["remoteAddr"]; ok {
-		remoteAddr = v[0]
-	}
-	return remoteAddr
-}
-
-func createDummyRequest(method *gotogrpc.GRPCServiceMethod, dec func(interface{}) error) *dynamicpb.Message {
-	req := dynamicpb.NewMessage(method.InputType())
-	if err := dec(req); err != nil {
-		return nil
-	}
-	return req
-}
-
-func buildResponse(method *gotogrpc.GRPCServiceMethod, resp [][]byte) (*dynamicpb.Message, error) {
-	dmsg := dynamicpb.NewMessage(method.OutputType())
-	if err := protojson.Unmarshal(resp[0], dmsg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response to dynamic message: %w", err)
-	}
-	return dmsg, nil
-}
-
-func sendStreamResponse(method *gotogrpc.GRPCServiceMethod, stream grpc.ServerStream, resp [][]byte, from, to int) error {
-	rem := to - from
-	for i := from; i < to; i++ {
-		if i >= len(resp) {
-			i = 0
-		}
-		rem--
-		dmsg := dynamicpb.NewMessage(method.OutputType())
-		if err := protojson.Unmarshal(resp[i], dmsg); err != nil {
-			return fmt.Errorf("failed to unmarshal response to dynamic message: %w", err)
-		}
-		if err := stream.SendMsg(dmsg); err != nil {
-			return err
-		}
-		if rem == 0 {
-			break
-		}
-	}
-	return nil
-}
-
-func commonHandler(ctx context.Context, stream grpc.ServerStream) (*gotogrpc.GRPCServiceMethod, map[string][]string, error) {
-	if ctx == nil {
-		ctx = stream.Context()
-	}
-	method := gotogrpc.ServiceRegistry.ParseGRPCServiceMethod(ctx)
-	if method == nil {
-		return nil, nil, fmt.Errorf("method not found in context")
-	}
-	md, err := getRequestHeaders(ctx)
-	if err != nil || md == nil {
-		return nil, nil, fmt.Errorf("Metadata not found in context")
-	}
-	return method, md, nil
-}
-
-func invokeMiddlewareChain(ctx context.Context, method *gotogrpc.GRPCServiceMethod, md map[string][]string, body []byte) (*middleware.GrpcHTTPRequestAdapter, *middleware.GrpcHTTPResponseWriterAdapter) {
-	return middleware.InvokeMiddlewareChainForGRPC(ctx, method.Name, getRequestHost(md), method.URI, md, body)
+func invokeMiddlewareChain(ctx context.Context, method *gg.GRPCServiceMethod, md map[string][]string, body []byte) (*middleware.GrpcHTTPRequestAdapter, *middleware.GrpcHTTPResponseWriterAdapter) {
+	return middleware.InvokeMiddlewareChainForGRPC(ctx, method.Name, gg.GetRequestHost(md), method.URI, md, body)
 }
 
 func unaryHandler(ctx context.Context, req interface{}) (interface{}, error) {
-	method, md, err := commonHandler(ctx, nil)
+	method, port, authority, md, err := gg.CommonHandler(ctx, nil)
 	if err != nil {
+		util.AddLogMessageForContext(ctx, err.Error())
 		return nil, err
 	}
-	if md == nil {
-		return nil, fmt.Errorf("Metadata not found in context")
+	gg.AddRequestLogMessage(ctx, port, method.Service.Name, method.Name, authority, md, 1, 0, "")
+
+	b, err := gg.ParseRequest(req)
+	if err != nil {
+		util.AddLogMessageForContext(ctx, err.Error())
+		return nil, err
 	}
-	b, err := parseRequest(req)
-	if err != nil || b == nil {
-		return nil, fmt.Errorf("Request body not readable")
-	}
-	util.AddLogMessageForContext(fmt.Sprintf("Service: [%s] Method [%s]: Received [%d] bytes", method.Service.Name, method.Name, len(b)), ctx)
+	util.AddLogMessageForContext(ctx, fmt.Sprintf("Received [%d] bytes", len(b)))
+
 	_, w := invokeMiddlewareChain(ctx, method, md, b)
-	grpc.SendHeader(ctx, metadata.New(w.ToMetadata()))
+	responseHeaders := w.ToMetadata()
+	grpc.SendHeader(ctx, responseHeaders)
+	var resp *dynamicpb.Message
+	responseCount := 0
+	msg := ""
 	if len(w.Responses) > 0 {
-		resp, err := buildResponse(method, w.Responses)
+		resp, err = gg.BuildResponse(method, w.Responses)
 		if err != nil {
 			return nil, err
 		}
-		util.AddLogMessageForContext(fmt.Sprintf("Sending unary response, count [%d]", len(w.Responses)), ctx)
-		return resp, nil
+		msg = fmt.Sprintf("Sending unary response, count [%d]", len(w.Responses))
+		responseCount = 1
+	} else {
+		msg = "No response to send"
 	}
-	return nil, nil
+	gg.AddResponseLogMessage(ctx, responseHeaders, 200, responseCount, -1, msg)
+	return resp, nil
 }
 
-func GRPCUnaryHandler(method *gotogrpc.GRPCServiceMethod) grpc.MethodHandler {
+func GRPCUnaryHandler(method *gg.GRPCServiceMethod) grpc.MethodHandler {
 	return func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-		req := createDummyRequest(method, dec)
+		req := gg.CreateDummyRequest(method, dec)
 		if interceptor == nil {
 			return unaryHandler(ctx, req)
 		}
@@ -187,7 +90,7 @@ func GRPCUnaryHandler(method *gotogrpc.GRPCServiceMethod) grpc.MethodHandler {
 
 func GRPCStreamHandler(_ interface{}, stream grpc.ServerStream) error {
 	ctx := stream.Context()
-	method, md, err := commonHandler(ctx, stream)
+	method, port, authority, md, err := gg.CommonHandler(ctx, stream)
 	if err != nil {
 		return err
 	}
@@ -196,33 +99,47 @@ func GRPCStreamHandler(_ interface{}, stream grpc.ServerStream) error {
 	}
 
 	var w *middleware.GrpcHTTPResponseWriterAdapter
+	requestCount := 0
 	responseCount := 0
+	bytesReceived := 0
+	var responseHeaders metadata.MD
+	headersSent := false
+
 	for {
 		req := dynamicpb.NewMessage(method.InputType())
-		if err := stream.RecvMsg(req); err == io.EOF {
+		if err := stream.RecvMsg(req); err == io.EOF || errors.Is(err, context.Canceled) {
 			break
 		} else if err != nil {
 			return err
 		}
-		b, err := parseRequest(req)
+		requestCount++
+		b, err := gg.ParseRequest(req)
 		if err != nil || b == nil {
 			return fmt.Errorf("Request body not readable")
 		} else {
-			util.AddLogMessageForContext(fmt.Sprintf("Service: [%s] Method [%s]: Received [%d] bytes", method.Service.Name, method.Name, len(b)), ctx)
+			bytesReceived += len(b)
 		}
 		_, w = invokeMiddlewareChain(ctx, method, md, b)
+		if !headersSent {
+			responseHeaders = w.ToMetadata()
+			grpc.SendHeader(ctx, responseHeaders)
+			headersSent = true
+		}
 		if method.IsServerStreaming && method.IsClientStreaming && responseCount < method.StreamCount-1 {
-			err = sendStreamResponse(method, stream, w.Responses, responseCount, responseCount+1)
+			responseCount++
+			err = gg.SendStreamResponse(method, stream, w.Responses, responseCount, responseCount+1)
 			if err != nil {
 				return err
 			}
-			util.AddLogMessageForContext(fmt.Sprintf("Sending stream responses, count [%d]", responseCount), ctx)
 		}
 	}
-	err = sendStreamResponse(method, stream, w.Responses, responseCount, method.StreamCount-responseCount)
+	err = gg.SendStreamResponse(method, stream, w.Responses, responseCount, method.StreamCount-responseCount)
 	if err != nil {
 		return err
 	}
-	util.AddLogMessageForContext(fmt.Sprintf("Sent stream responses, count [%d]", responseCount), ctx)
+	gg.AddRequestLogMessage(ctx, port, method.Service.Name, method.Name, authority, md, 1, 0, "")
+	util.AddLogMessageForContext(ctx, fmt.Sprintf("Service: [%s] Method [%s]: Received [%d] bytes from [%d] requests", method.Service.Name, method.Name, bytesReceived, requestCount))
+	gg.AddResponseLogMessage(ctx, responseHeaders, 200, responseCount, -1,
+		fmt.Sprintf("Sent stream responses, count [%d]", responseCount))
 	return nil
 }

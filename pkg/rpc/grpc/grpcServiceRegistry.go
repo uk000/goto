@@ -18,6 +18,7 @@ package grpc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"goto/pkg/rpc"
 	"goto/pkg/util"
@@ -31,7 +32,8 @@ import (
 
 type GRPCService struct {
 	Name    string                         `json:"name"`
-	Methods map[string]*GRPCServiceMethod  `json:"methods"`
+	URI     string                         `json:"uri"`
+	Methods map[string]rpc.RPCMethod       `json:"methods"`
 	GSD     *grpc.ServiceDesc              `json:"-"`
 	PSD     protoreflect.ServiceDescriptor `json:"-"`
 }
@@ -42,6 +44,7 @@ type GRPCServiceMethod struct {
 	IsUnary           bool                          `json:"isUnary"`
 	IsClientStreaming bool                          `json:"isClientStreaming"`
 	IsServerStreaming bool                          `json:"isServerStreaming"`
+	ResponsePayload   GRPCResponsePayload           `json:"responsePayload"`
 	In                func(util.JSON)               `json:"-"`
 	Out               func() util.JSON              `json:"-"`
 	StreamOut         func() []util.JSON            `json:"-"`
@@ -53,6 +56,8 @@ type GRPCServiceMethod struct {
 	StreamDelayMin    time.Duration                 `json:"-"`
 	StreamDelayMax    time.Duration                 `json:"-"`
 }
+
+type GRPCResponsePayload []byte
 
 type GRPCServiceRegistry struct {
 	Services map[string]*GRPCService
@@ -69,6 +74,10 @@ var (
 	GRPCUnaryHandler  func(*GRPCServiceMethod) grpc.MethodHandler
 	GRPCStreamHandler func(interface{}, grpc.ServerStream) error
 )
+
+func init() {
+	rpc.GetServiceRegistry["grpc"] = func(_ int) rpc.RPCServiceRegistry { return ServiceRegistry }
+}
 
 func (gsr *GRPCServiceRegistry) Init() {
 	gsr.lock.Lock()
@@ -92,16 +101,26 @@ func (gsr *GRPCServiceRegistry) RemoveService(name string) {
 	delete(gsr.Services, name)
 }
 
+func (gsr *GRPCServiceRegistry) TrackService(port int, name string, headers []string, header, value string) {
+	gsr.lock.Lock()
+	defer gsr.lock.Unlock()
+	if gsr.Services[name] != nil {
+		rpc.GetRPCTracker(port).TrackService(port, gsr.Services[name], headers, header, value)
+	}
+}
+
 func (gsr *GRPCServiceRegistry) NewGRPCService(psd protoreflect.ServiceDescriptor) *GRPCService {
+	serviceName := string(psd.FullName())
 	gsd := &grpc.ServiceDesc{
-		ServiceName: string(psd.FullName()),
+		ServiceName: serviceName,
 		HandlerType: (*DynamicServiceInterface)(nil),
 		Methods:     []grpc.MethodDesc{},
 		Streams:     []grpc.StreamDesc{},
 	}
 	service := GRPCService{
-		Name:    gsd.ServiceName,
-		Methods: make(map[string]*GRPCServiceMethod),
+		Name:    serviceName,
+		URI:     strings.ToLower(fmt.Sprintf("/%s", serviceName)),
+		Methods: make(map[string]rpc.RPCMethod),
 		GSD:     gsd,
 		PSD:     psd,
 	}
@@ -110,7 +129,7 @@ func (gsr *GRPCServiceRegistry) NewGRPCService(psd protoreflect.ServiceDescripto
 		methodName := string(pmd.Name())
 		method := &GRPCServiceMethod{
 			Name:              methodName,
-			URI:               strings.ToLower(fmt.Sprintf("/%s/%s", gsd.ServiceName, methodName)),
+			URI:               strings.ToLower(fmt.Sprintf("/%s/%s", serviceName, methodName)),
 			PMD:               pmd,
 			IsClientStreaming: pmd.IsStreamingClient(),
 			IsServerStreaming: pmd.IsStreamingServer(),
@@ -155,21 +174,33 @@ func (gsr *GRPCServiceRegistry) ParseGRPCServiceMethod(ctx context.Context) *GRP
 	gsr.lock.RLock()
 	defer gsr.lock.RUnlock()
 	if service := gsr.Services[serviceName]; service != nil {
-		method = service.Methods[methodName]
+		method = service.Methods[methodName].(*GRPCServiceMethod)
 	}
 	return method
 }
 
-func (g *GRPCService) GetName() string {
-	return g.Name
+func (s *GRPCService) IsGRPC() bool {
+	return true
 }
 
-func (g *GRPCService) HasMethod(m string) bool {
-	return g.Methods != nil && g.Methods[m] != nil
+func (s *GRPCService) GetName() string {
+	return s.Name
 }
 
-func (g *GRPCService) GetMethodCount() int {
-	return len(g.Methods)
+func (s *GRPCService) GetURI() string {
+	return s.URI
+}
+
+func (s *GRPCService) HasMethod(m string) bool {
+	return s.Methods != nil && s.Methods[m] != nil
+}
+
+func (s *GRPCService) GetMethodCount() int {
+	return len(s.Methods)
+}
+
+func (s *GRPCService) GetMethods() map[string]rpc.RPCMethod {
+	return s.Methods
 }
 
 func (m *GRPCServiceMethod) GetName() string {
@@ -192,6 +223,10 @@ func (m *GRPCServiceMethod) SetStreamDelayMax(delay time.Duration) {
 	m.StreamDelayMax = delay
 }
 
+func (m *GRPCServiceMethod) SetResponsePayload(payload []byte) {
+	m.ResponsePayload = payload
+}
+
 func (m *GRPCServiceMethod) InputType() protoreflect.MessageDescriptor {
 	if m.PMD != nil {
 		return m.PMD.Input()
@@ -204,4 +239,7 @@ func (m *GRPCServiceMethod) OutputType() protoreflect.MessageDescriptor {
 		return m.PMD.Output()
 	}
 	return nil
+}
+func (p GRPCResponsePayload) MarshalJSON() ([]byte, error) {
+	return json.Marshal(string(p))
 }

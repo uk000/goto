@@ -28,10 +28,10 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("catchall", SetRoutes, nil)
+	Middleware = middleware.NewMiddleware("catchall", setRoutes, nil)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	r.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool { return true }).HandlerFunc(respond)
 }
 

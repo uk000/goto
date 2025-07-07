@@ -29,10 +29,10 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("label", SetRoutes, nil)
+	Middleware = middleware.NewMiddleware("label", setRoutes, nil)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	labelRouter := util.PathRouter(r, "/server?/label")
 	util.AddRouteWithPort(labelRouter, "/set/{label}", setLabel, "PUT", "POST")
 	util.AddRouteWithPort(labelRouter, "/clear", setLabel, "POST")

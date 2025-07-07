@@ -30,13 +30,13 @@ import (
 )
 
 var (
-	Middleware                    = middleware.NewMiddleware("response.header", SetRoutes, MiddlewareHandler)
+	Middleware                    = middleware.NewMiddleware("response.header", setRoutes, middlewareFunc)
 	responseHeadersToAddByPort    = map[string]map[string][]string{}
 	responseHeadersToRemoveByPort = map[string]map[string]bool{}
 	headersLock                   sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	headersRouter := util.PathRouter(r, "/headers")
 	util.AddRouteWithPort(headersRouter, "/add/{header}={value}", addResponseHeader, "PUT", "POST")
 	util.AddRouteWithPort(headersRouter, "/remove/{header}", removeResponseHeader, "PUT", "POST")
@@ -146,7 +146,7 @@ func setResponseHeaders(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func MiddlewareHandler(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {
 			next.ServeHTTP(w, r)

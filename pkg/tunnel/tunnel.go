@@ -754,7 +754,7 @@ func tunnel(w http.ResponseWriter, r *http.Request) {
 	tunnel.tunnel(addresses, uri, r, w)
 }
 
-func MiddlewareHandler(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if util.IsTunnelRequest(r) {
 			l := listeners.GetCurrentListener(r)

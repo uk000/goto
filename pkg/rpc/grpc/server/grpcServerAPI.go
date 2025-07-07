@@ -29,22 +29,13 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("grpc", SetRoutes, nil)
+	Middleware = middleware.NewMiddleware("grpc", setRoutes, nil)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	grpcRouter := util.PathRouter(r, "/grpc")
-	util.AddRouteWithPort(grpcRouter, "/service/{service}/serve", serveService, "POST")
-	util.AddRouteWithPort(grpcRouter, "/service/{service}/{method}/payload/clear", clearServiceResponsePayload, "POST")
-	util.AddRouteWithPort(grpcRouter, "/service/{service}/{method}/payload", setServiceResponsePayload, "POST")
-	util.AddRouteWithPort(grpcRouter, "/service/{service}/{method}/payload/header/{header}={value}", setServiceResponsePayload, "POST")
-	util.AddRouteWithPort(grpcRouter, "/service/{service}/{method}/payload/header/{header}", setServiceResponsePayload, "POST")
-	util.AddRouteWithPort(grpcRouter, "/service/{service}/{method}/payload/body~{regexes}", setServiceResponsePayload, "POST")
-	util.AddRouteWithPort(grpcRouter, "/service/{service}/{method}/payload/body/paths/{paths}", setServiceResponsePayload, "POST")
-	util.AddRouteWithPort(grpcRouter, "/service/{service}/{method}/payload/transform", setServicePayloadTransform, "POST")
-	util.AddRouteWithPort(grpcRouter, "/service/{service}/{method}/payload/stream/count={count}/delay={delay}", setServiceResponsePayload, "POST")
-	util.AddRouteWithPort(grpcRouter, "/service/{service}/{method}/payload/stream/count={count}/delay={delay}/header/{header}={value}", setServiceResponsePayload, "POST")
-	util.AddRouteWithPort(grpcRouter, "/service/{service}/{method}/payload/stream/count={count}/delay={delay}/header/{header}", setServiceResponsePayload, "POST")
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+	grpcRouter := util.PathRouter(r, "/grpc/services")
+	// util.AddRouteWithPort(grpcRouter, "", getServices, "GET")
+	util.AddRouteWithPort(grpcRouter, "/{service}/serve", serveService, "POST")
 
 }
 
@@ -55,7 +46,7 @@ func serveService(w http.ResponseWriter, r *http.Request) {
 		msg = "GRPC Server not started"
 	} else {
 		var rs rpc.RPCService
-		rs, _, msg = rpc.CheckService(w, r, grpc.ServiceRegistry)
+		rs, _, _, msg = rpc.CheckService(w, r, grpc.ServiceRegistry)
 		if rs != nil {
 			service := rs.(*grpc.GRPCService)
 			serve(service, listeners.GetCurrentListener(r))
@@ -64,16 +55,4 @@ func serveService(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
-}
-
-func clearServiceResponsePayload(w http.ResponseWriter, r *http.Request) {
-	rpc.ClearServiceResponsePayload(w, r, grpc.ServiceRegistry)
-}
-
-func setServiceResponsePayload(w http.ResponseWriter, r *http.Request) {
-	rpc.SetServiceResponsePayload(w, r, grpc.ServiceRegistry)
-}
-
-func setServicePayloadTransform(w http.ResponseWriter, r *http.Request) {
-	rpc.SetServicePayloadTransform(w, r, grpc.ServiceRegistry)
 }

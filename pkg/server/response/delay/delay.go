@@ -32,13 +32,13 @@ import (
 )
 
 var (
-	Middleware       = middleware.NewMiddleware("delay", SetRoutes, MiddlewareHandler)
+	Middleware       = middleware.NewMiddleware("delay", setRoutes, middlewareFunc)
 	delayByPort      = map[string][]time.Duration{}
 	delayCountByPort = map[string]int{}
 	delayLock        sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	delayRouter := util.PathRouter(r, "/delay")
 	util.AddRouteWithPort(delayRouter, "/set/{delay}", setDelay, "POST", "PUT")
 	util.AddRouteWithPort(delayRouter, "/clear", setDelay, "POST", "PUT")
@@ -111,7 +111,7 @@ func getDelay(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Delay reported", r)
 }
 
-func MiddlewareHandler(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if util.IsKnownNonTraffic(r) {
 			if next != nil {

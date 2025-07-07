@@ -26,11 +26,11 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("proxy", SetRoutes, MiddlewareHandler)
+	Middleware = middleware.NewMiddleware("proxy", setRoutes, middlewareFunc)
 	rootRouter *mux.Router
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	rootRouter = root
 	proxyRouter := util.PathRouter(r, "/proxy")
 	proxyTargetsRouter := util.PathRouter(r, "/proxy/targets")

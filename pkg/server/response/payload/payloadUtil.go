@@ -23,8 +23,6 @@ import (
 	"io"
 	"regexp"
 	"strings"
-
-	"github.com/gorilla/mux"
 )
 
 func newResponsePayload(payload []byte, binary bool, contentType, uri, header, query, value string,
@@ -32,21 +30,9 @@ func newResponsePayload(payload []byte, binary bool, contentType, uri, header, q
 	if contentType == "" {
 		contentType = ContentTypeJSON
 	}
-	var uriRegExp *regexp.Regexp
-	var responseRouter *mux.Router
-	if uri != "" {
-		matchURI := uri
-		glob := false
-		if strings.HasSuffix(matchURI, "*") {
-			matchURI = strings.ReplaceAll(matchURI, "*", "")
-			glob = true
-		}
-		if rr, re, err := util.RegisterURIRouteAndGetRegex(matchURI, glob, matchRouter, handleURI); err == nil {
-			uriRegExp = re
-			responseRouter = rr
-		} else {
-			return nil, fmt.Errorf("Failed to add URI match %s with error: %s\n", uri, err.Error())
-		}
+	_, uriRegExp, responseRouter, err := util.BuildURIMatcher(uri, handleURI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to add URI match %s with error: %s\n", uri, err.Error())
 	}
 	headerValueMatch := ""
 	headerCaptureKey := ""

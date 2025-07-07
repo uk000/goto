@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package ui
+package watch
 
 import (
 	"log"
@@ -50,11 +50,11 @@ type Sockets struct {
 }
 
 var (
-	webSockets = &Sockets{
+	WebSockets = &Sockets{
 		sockets: map[string]*Socket{},
 		lock:    sync.Mutex{},
 	}
-	upgrader = websocket.Upgrader{
+	Upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 	}

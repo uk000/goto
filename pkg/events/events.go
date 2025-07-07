@@ -54,7 +54,7 @@ type EventTracker struct {
 }
 
 var (
-	Middleware          = middleware.NewMiddleware("events", SetRoutes, MiddlewareHandler)
+	Middleware          = middleware.NewMiddleware("events", setRoutes, middlewareFunc)
 	eventsList          = []*Event{}
 	trafficEventTracker = map[int]map[string]*EventTracker{}
 	eventChannel        = make(chan *Event, 100)
@@ -64,7 +64,7 @@ var (
 	lock                sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	eventsRouter := r.PathPrefix("/events").Subrouter()
 	util.AddRoute(eventsRouter, "/flush", flushEvents, "POST")
 	util.AddRoute(eventsRouter, "/clear", clearEvents, "POST")
@@ -406,7 +406,7 @@ func searchEvents(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
-func MiddlewareHandler(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {
 			next.ServeHTTP(w, r)

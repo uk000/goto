@@ -81,10 +81,10 @@ var (
 	serveTCP            func(string, int, net.Listener)
 	DefaultLabel        string
 	listenersLock       sync.RWMutex
-	Middleware          = middleware.NewMiddleware("listeners", SetRoutes, nil)
+	Middleware          = middleware.NewMiddleware("listeners", setRoutes, nil)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	lRouter := util.PathRouter(r, "/server?/listeners")
 	util.AddRoute(lRouter, "/add", addListener, "POST", "PUT")
 	util.AddRoute(lRouter, "/update", updateListener, "POST", "PUT")

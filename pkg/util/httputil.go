@@ -29,65 +29,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 
-	"github.com/gorilla/mux"
 	"google.golang.org/grpc/metadata"
 	"sigs.k8s.io/yaml"
 )
 
-type ContextKey struct{ Key string }
-
-type RequestStore struct {
-	IsVersionRequest        bool
-	IsFilteredRequest       bool
-	IsLockerRequest         bool
-	IsPeerEventsRequest     bool
-	IsAdminRequest          bool
-	IsMetricsRequest        bool
-	IsReminderRequest       bool
-	IsProbeRequest          bool
-	IsHealthRequest         bool
-	IsStatusRequest         bool
-	IsDelayRequest          bool
-	IsPayloadRequest        bool
-	IsTunnelConnectRequest  bool
-	IsTunnelRequest         bool
-	IsTunnelConfigRequest   bool
-	IsTrafficEventReported  bool
-	IsHeadersSent           bool
-	IsTunnelResponseSent    bool
-	GotoProtocol            string
-	StatusCode              int
-	IsH2                    bool
-	IsH2C                   bool
-	IsTLS                   bool
-	ServerName              string
-	TLSVersion              string
-	TLSVersionNum           uint16
-	RequestPayload          string
-	RequestPayloadSize      int
-	RequestPort             string
-	RequestPortNum          int
-	RequestPortChecked      bool
-	TrafficDetails          []string
-	LogMessages             []string
-	InterceptResponseWriter interface{}
-	TunnelCount             int
-	RequestedTunnels        []string
-	TunnelEndpoints         interface{}
-	TunnelLock              sync.RWMutex
-	WillProxy               bool
-	ProxyTargets            interface{}
-}
-
 var (
-	RequestStoreKey   = &ContextKey{Key: "requestStore"}
-	CurrentPortKey    = &ContextKey{Key: "currentPort"}
-	RequestPortKey    = &ContextKey{Key: "requestPort"}
-	IgnoredRequestKey = &ContextKey{Key: "ignoredRequest"}
-	ConnectionKey     = &ContextKey{Key: "connection"}
-
 	contentRegexp           = regexp.MustCompile("(?i)content")
 	hostRegexp              = regexp.MustCompile("(?i)^host$")
 	tunnelRegexp            = regexp.MustCompile("(?i)tunnel")
@@ -98,56 +45,6 @@ var (
 	WillTunnel    func(*http.Request, *RequestStore) bool
 	WillProxyHTTP func(*http.Request, *RequestStore) bool
 )
-
-func GetRequestStore(r *http.Request) *RequestStore {
-	if val := r.Context().Value(RequestStoreKey); val != nil {
-		return val.(*RequestStore)
-	}
-	_, rs := WithRequestStore(r)
-	return rs
-}
-
-func GetRequestStoreForContext(ctx context.Context) (context.Context, *RequestStore) {
-	if val := ctx.Value(RequestStoreKey); val != nil {
-		return ctx, val.(*RequestStore)
-	}
-	return WithRequestStoreForContext(ctx)
-}
-
-func GetRequestStoreIfPresent(r *http.Request) *RequestStore {
-	if val := r.Context().Value(RequestStoreKey); val != nil {
-		return val.(*RequestStore)
-	}
-	return nil
-}
-
-func WithRequestStore(r *http.Request) (context.Context, *RequestStore) {
-	rs := &RequestStore{}
-	ctx := context.WithValue(r.Context(), RequestStoreKey, rs)
-	isAdminRequest := CheckAdminRequest(r)
-	rs.IsAdminRequest = isAdminRequest
-	rs.IsVersionRequest = strings.HasPrefix(r.RequestURI, "/version")
-	rs.IsLockerRequest = strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker")
-	rs.IsPeerEventsRequest = strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/events")
-	rs.IsMetricsRequest = strings.HasPrefix(r.RequestURI, "/metrics") || strings.HasPrefix(r.RequestURI, "/stats")
-	rs.IsReminderRequest = strings.Contains(r.RequestURI, "/remember")
-	rs.IsProbeRequest = global.Funcs.IsReadinessProbe(r) || global.Funcs.IsLivenessProbe(r)
-	rs.IsHealthRequest = !isAdminRequest && strings.HasPrefix(r.RequestURI, "/health")
-	rs.IsStatusRequest = !isAdminRequest && strings.HasPrefix(r.RequestURI, "/status")
-	rs.IsDelayRequest = !isAdminRequest && strings.Contains(r.RequestURI, "/delay")
-	rs.IsPayloadRequest = !isAdminRequest && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload"))
-	rs.IsTunnelRequest = strings.HasPrefix(r.RequestURI, "/tunnel=") || !isAdminRequest && WillTunnel(r, rs)
-	rs.IsTunnelConfigRequest = strings.HasPrefix(r.RequestURI, "/tunnels")
-	rs.WillProxy = !isAdminRequest && WillProxyHTTP(r, rs)
-	rs.IsH2C = r.ProtoMajor == 2
-	return ctx, rs
-}
-
-func WithRequestStoreForContext(ctx context.Context) (context.Context, *RequestStore) {
-	rs := &RequestStore{}
-	ctx = context.WithValue(ctx, RequestStoreKey, rs)
-	return ctx, rs
-}
 
 func WithPort(ctx context.Context, port int) context.Context {
 	return context.WithValue(ctx, CurrentPortKey, port)
@@ -162,11 +59,23 @@ func IsH2C(r *http.Request) bool {
 }
 
 func IsGRPC(r *http.Request) bool {
-	return r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
+	rs := GetRequestStore(r)
+	if !rs.IsGRPC {
+		rs.IsGRPC = r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
+	}
+	return rs.IsGRPC
 }
 
-func InitListenerRouter(root *mux.Router) {
-	portRouter = root.PathPrefix("/port={port}").Subrouter()
+func SetIsGRPC(r *http.Request, value bool) {
+	GetRequestStore(r).IsGRPC = value
+}
+
+func IsJSONRPC(r *http.Request) bool {
+	return GetRequestStore(r).IsJSONRPC
+}
+
+func SetIsJSONRPC(r *http.Request, value bool) {
+	GetRequestStore(r).IsJSONRPC = value
 }
 
 func AddLogMessage(msg string, r *http.Request) {
@@ -174,7 +83,7 @@ func AddLogMessage(msg string, r *http.Request) {
 	rs.LogMessages = append(rs.LogMessages, msg)
 }
 
-func AddLogMessageForContext(msg string, ctx context.Context) {
+func AddLogMessageForContext(ctx context.Context, msg string) {
 	_, rs := GetRequestStoreForContext(ctx)
 	rs.LogMessages = append(rs.LogMessages, msg)
 }
@@ -485,7 +394,8 @@ func CheckAdminRequest(r *http.Request) bool {
 	}
 	return uri == "metrics" || uri == "server" || uri == "request" || uri == "response" || uri == "listeners" ||
 		uri == "label" || uri == "registry" || uri == "client" || uri == "proxy" || uri == "job" || uri == "probes" ||
-		uri == "tcp" || uri == "log" || uri == "events" || uri == "tunnels" || uri == "grpc"
+		uri == "tcp" || uri == "log" || uri == "events" || uri == "tunnels" || uri == "grpc" || uri == "jsonrpc" ||
+		uri == "k8s" || uri == "pipes" || uri == "scripts" || uri == "tls"
 }
 
 func IsMetricsRequest(r *http.Request) bool {
@@ -698,6 +608,14 @@ func FindURIInMap(uri string, i interface{}) string {
 
 func IsURIInMap(uri string, m map[string]interface{}) bool {
 	return FindURIInMap(uri, m) != ""
+}
+
+func TransformHeaders(headers []string) [][2]string {
+	newHeaders := [][2]string{}
+	for _, h := range headers {
+		newHeaders = append(newHeaders, [2]string{h, ""})
+	}
+	return newHeaders
 }
 
 func MatchAllHeaders(headers http.Header, expected [][]string) bool {

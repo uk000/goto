@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"goto/pkg/util"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -27,7 +28,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
-func MiddlewareHandler(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if util.IsKnownNonTraffic(r) {
 			if next != nil {
@@ -37,18 +38,19 @@ func MiddlewareHandler(next http.Handler) http.Handler {
 		}
 		var payload *ResponsePayload
 		p := PayloadManager.getPortResponse(r)
-		pr := p.protoPayload(util.IsGRPC(r))
+		pr := p.protoPayload(util.IsGRPC(r) || util.IsJSONRPC(r))
 		if !util.IsPayloadRequest(r) && pr.HasAnyPayload() {
-			body, rp, captures, found := pr.GetResponsePayload(r.RequestURI, r.Header, r.URL.Query(), r.Body)
+			body := util.Read(r.Body)
+			newBody, rp, captures, found := pr.GetResponsePayload(r.RequestURI, r.Header, r.URL.Query(), io.NopCloser(strings.NewReader(body)))
 			if found {
-				r.Body = body
-				payload = rp
-				if rp.router != nil {
-					rp.router.ServeHTTP(w, r.WithContext(context.WithValue(
-						context.WithValue(r.Context(), payloadKey, payload), captureKey, captures)))
+				if newBody != nil {
+					r.Body = newBody
 				} else {
-					processPayload(w, r, rp, captures)
+					r.Body = io.NopCloser(strings.NewReader(body))
 				}
+				payload = rp
+				r = r.WithContext(context.WithValue(context.WithValue(r.Context(), payloadKey, payload), captureKey, captures))
+				processPayload(w, r, rp, captures)
 			}
 		}
 		if next != nil && (payload == nil || util.IsStatusRequest(r) || util.IsDelayRequest(r)) {

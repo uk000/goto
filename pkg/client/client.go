@@ -29,11 +29,11 @@ import (
 )
 
 var (
-	Middleware        = middleware.NewMiddleware("client", SetRoutes, nil)
+	Middleware        = middleware.NewMiddleware("client", setRoutes, nil)
 	clientMiddlewares = []*middleware.Middleware{&target.Middleware}
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	clientRouter := r.PathPrefix("/client").Subrouter()
 	middleware.AddRoutes(clientRouter, r, root, clientMiddlewares...)
 }

@@ -47,13 +47,13 @@ type RequestFilter struct {
 }
 
 var (
-	Middleware   = middleware.NewMiddleware("filter", SetRoutes, MiddlewareHandler)
+	Middleware   = middleware.NewMiddleware("filter", setRoutes, middlewareFunc)
 	ignoreFilter = newRequestFilter()
 	bypassFilter = newRequestFilter()
 	lock         sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	ignoreFilter.SetRoutes("ignore", r)
 	bypassFilter.SetRoutes("bypass", r)
 }
@@ -124,14 +124,15 @@ func (rf *RequestFilter) addFilterHeaderOrURI(w http.ResponseWriter, r *http.Req
 		events.SendRequestEvent("Request Filter Added", msg, r)
 	} else if header != "" {
 		header = strings.ToLower(header)
-		if value != "" {
-			value = strings.ToLower(value)
+		hvalue, glob := util.Unglob(strings.ToLower(value))
+		if glob {
+			hvalue += util.GlobRegex
 		}
 		rf.lock.Lock()
 		if rf.HeaderUpdates[header] == nil {
 			rf.HeaderUpdates[header] = map[string]*regexp.Regexp{}
 		}
-		rf.HeaderUpdates[header][value] = regexp.MustCompile("(?i)^" + value + "$")
+		rf.HeaderUpdates[header][value] = regexp.MustCompile("(?i)^" + hvalue + "$")
 		rf.PendingUpdates = true
 		rf.hasHeaders = true
 		rf.lock.Unlock()
@@ -347,7 +348,7 @@ func filterRequest(w http.ResponseWriter, r *http.Request) bool {
 	return statusCode > 0
 }
 
-func MiddlewareHandler(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if util.IsKnownNonTraffic(r) || !filterRequest(w, r) {
 			if next != nil {

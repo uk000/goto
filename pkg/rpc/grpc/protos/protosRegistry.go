@@ -19,6 +19,7 @@ package protos
 import (
 	"context"
 	"fmt"
+	"goto/pkg/rpc"
 	"goto/pkg/rpc/grpc"
 	"goto/pkg/util"
 	"os"
@@ -129,7 +130,7 @@ func (ps *ProtosStore) ListServices(proto string) []*grpc.GRPCService {
 	return ps.servicesByProto[proto]
 }
 
-func (ps *ProtosStore) ListMethods(service string) map[string]*grpc.GRPCServiceMethod {
+func (ps *ProtosStore) ListMethods(service string) map[string]rpc.RPCMethod {
 	if s := grpc.ServiceRegistry.GetService(service); s != nil {
 		return s.Methods
 	}

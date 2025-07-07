@@ -29,10 +29,10 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("body", nil, MiddlewareHandler)
+	Middleware = middleware.NewMiddleware("body", nil, middlewareFunc)
 )
 
-func MiddlewareHandler(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if global.Debug {
 			log.Println("Enter Request.Body Middleware")

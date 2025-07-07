@@ -34,10 +34,10 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("response.payload", SetRoutes, MiddlewareHandler)
+	Middleware = middleware.NewMiddleware("response.payload", setRoutes, middlewareFunc)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	rootRouter = root
 	matchRouter = rootRouter.NewRoute().Subrouter()
 	payloadRouter := util.PathRouter(r, "/payload")

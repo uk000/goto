@@ -24,10 +24,10 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("registry", SetRoutes, nil)
+	Middleware = middleware.NewMiddleware("registry", setRoutes, nil)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	registryRouter := r.PathPrefix("/registry").Subrouter()
 	peersRouter := registryRouter.PathPrefix("/peers").Subrouter()
 	util.AddRoute(peersRouter, "/add", addPeer, "POST")

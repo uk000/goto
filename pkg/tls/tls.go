@@ -44,12 +44,12 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("tls", SetRoutes, nil)
+	Middleware = middleware.NewMiddleware("tls", setRoutes, nil)
 	RootCAs    = x509.NewCertPool()
 	CACert     []byte
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	tlsRouter := r.PathPrefix("/tls").Subrouter()
 	util.AddRoute(tlsRouter, "/cacert/add", addCACert, "PUT", "POST")
 	util.AddRoute(tlsRouter, "/cacert/remove", removeCACert, "PUT", "POST")

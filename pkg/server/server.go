@@ -31,6 +31,7 @@ import (
 	"goto/pkg/pipe"
 	"goto/pkg/proxy"
 	"goto/pkg/registry"
+	"goto/pkg/rpc"
 	"goto/pkg/rpc/grpc/protos"
 	grpcserver "goto/pkg/rpc/grpc/server"
 	"goto/pkg/rpc/jsonrpc"
@@ -38,6 +39,7 @@ import (
 	"goto/pkg/server/catchall"
 	"goto/pkg/server/conn"
 	"goto/pkg/server/echo"
+	"goto/pkg/server/hooks"
 	"goto/pkg/server/listeners"
 	"goto/pkg/server/listeners/label"
 	"goto/pkg/server/middleware"
@@ -53,10 +55,10 @@ import (
 
 func init() {
 	middleware.Middlewares = []*middleware.Middleware{
-		ui.Middleware, tunnel.TunnelCountMiddleware, label.Middleware, conn.Middleware, tunnel.Middleware, events.Middleware,
-		metrics.Middleware, listeners.Middleware, probes.Middleware, registry.Middleware, client.Middleware,
+		ui.Middleware, tunnel.TunnelCountMiddleware, label.Middleware, conn.Middleware, hooks.Middleware, tunnel.Middleware,
+		events.Middleware, metrics.Middleware, listeners.Middleware, probes.Middleware, registry.Middleware, client.Middleware,
 		k8sYaml.Middleware, k8sApi.Middleware, pipe.Middleware, request.Middleware, proxy.Middleware, response.Middleware,
-		tcp.Middleware, scripts.Middleware, job.Middleware, grpcserver.Middleware, protos.Middleware, jsonrpc.Middleware,
+		tcp.Middleware, scripts.Middleware, job.Middleware, rpc.Middleware, grpcserver.Middleware, protos.Middleware, jsonrpc.Middleware,
 		tls.Middleware, log.Middleware, echo.Middleware, catchall.Middleware,
 	}
 }

@@ -42,12 +42,12 @@ type TimeoutTracking struct {
 }
 
 var (
-	Middleware            = middleware.NewMiddleware("timeout", SetRoutes, MiddlewareHandler)
+	Middleware            = middleware.NewMiddleware("timeout", setRoutes, middlewareFunc)
 	timeoutTrackingByPort = map[string]*TimeoutTracking{}
 	timeoutTrackingLock   sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	timeoutRouter := util.PathRouter(r, "/timeout")
 	util.AddRouteWithPort(timeoutRouter, "/track/headers/{headers}", trackHeaders, "PUT", "POST")
 	util.AddRouteWithPort(timeoutRouter, "/track/all", trackAll, "PUT", "POST")
@@ -144,7 +144,7 @@ func reportTimeoutTracking(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, output)
 }
 
-func MiddlewareHandler(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if util.IsKnownNonTraffic(r) {
 			if next != nil {

@@ -29,10 +29,10 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("k8s", SetRoutes, nil)
+	Middleware = middleware.NewMiddleware("k8s", setRoutes, nil)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	k8sYamlRouter := util.PathRouter(r, "/k8s/yaml")
 
 	util.AddRoute(k8sYamlRouter, "/store/{yamlName}", apiStoreYaml, "POST")

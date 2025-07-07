@@ -586,17 +586,13 @@ func (p *Proxy) addRoutes(target *ProxyTarget) error {
 
 func (p *Proxy) addURIMatch(target *ProxyTarget, uri string) error {
 	uri = strings.ToLower(uri)
-	glob := false
-	if strings.EqualFold(uri, "/") || strings.EqualFold(uri, "/*") {
-		target.matchAllURIs = true
-		glob = true
+	if strings.EqualFold(uri, "/") {
+		uri = "/*"
 	}
-	matchURI := uri
 	if strings.HasSuffix(uri, "*") {
-		matchURI = strings.ReplaceAll(uri, "*", "")
-		glob = true
+		target.matchAllURIs = true
 	}
-	if router, re, err := util.RegisterURIRouteAndGetRegex(matchURI, glob, p.router, handleURI); err == nil {
+	if _, re, router, err := util.RegisterURIRouteAndGetRegex(uri, p.router, handleURI); err == nil {
 		target.uriRegexps[uri] = re
 		target.uriRouters[uri] = router
 	} else {
@@ -1048,7 +1044,7 @@ func WillProxyTCP(port int) bool {
 	return p.Enabled && p.hasAnyTCPTargets()
 }
 
-func MiddlewareHandler(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := getPortProxy(r)
 		rs := util.GetRequestStore(r)

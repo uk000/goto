@@ -20,6 +20,7 @@ import (
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
+	"goto/pkg/watch"
 	"log"
 	"net/http"
 
@@ -27,33 +28,33 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("ui", SetRoutes, MiddlewareFunc)
+	Middleware = middleware.NewMiddleware("ui", setRoutes, middlewareFunc)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(root, "/ui/ws", handleWebsocket, "GET")
 }
 
 func handleWebsocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := watch.Upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	webSockets.AddSocket(r.RemoteAddr, conn)
+	watch.WebSockets.AddSocket(r.RemoteAddr, conn)
 }
 
-func MiddlewareFunc(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var irw *intercept.InterceptResponseWriter
-		if webSockets.HasOpenSockets() {
+		if watch.WebSockets.HasOpenSockets() {
 			w, irw = intercept.WithIntercept(r, w)
 		}
 		if next != nil {
 			next.ServeHTTP(w, r)
 		}
 		if irw != nil {
-			webSockets.Broadcast(r.RequestURI, r.Header, irw.StatusCode, irw.Header(), irw.Data)
+			watch.WebSockets.Broadcast(r.RequestURI, r.Header, irw.StatusCode, irw.Header(), irw.Data)
 			irw.Proceed()
 		}
 	})

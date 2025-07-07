@@ -321,10 +321,11 @@ func (c *GRPCClient) Invoke(method string, headers map[string]string, payloads [
 	if c.Service == nil || c.Service.Methods == nil {
 		return nil, fmt.Errorf("service [%s] not configured", c.Service.Name)
 	}
-	grpcMethod := c.Service.Methods[method]
-	if grpcMethod == nil {
+	m := c.Service.Methods[method]
+	if m == nil {
 		return nil, fmt.Errorf("method [%s] not found in Service [%s]", method, c.Service.Name)
 	}
+	grpcMethod := m.(*gotogrpc.GRPCServiceMethod)
 	ctx, cancel, err := c.ConnectWithHeaders(headers)
 	if err != nil {
 		return nil, err

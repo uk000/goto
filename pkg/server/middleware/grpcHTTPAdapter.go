@@ -127,17 +127,17 @@ func (g *GrpcHTTPResponseWriterAdapter) Status() int {
 }
 
 // HTTPHeaderToMetadata converts an http.Header to metadata.MD.
-func HTTPToMDHeaders(h http.Header) map[string]string {
-	md := make(map[string]string)
+func HTTPToMDHeaders(h http.Header) map[string][]string {
+	md := make(map[string][]string)
 	for k, v := range h {
-		k = strings.ReplaceAll(k, ":", "")
-		md[k] = v[0]
+		k = strings.ToLower(strings.ReplaceAll(k, ":", ""))
+		md[k] = v
 	}
 	return md
 }
 
 // ToMetadata converts the response headers to metadata.MD.
-func (g *GrpcHTTPResponseWriterAdapter) ToMetadata() map[string]string {
+func (g *GrpcHTTPResponseWriterAdapter) ToMetadata() map[string][]string {
 	return HTTPToMDHeaders(g.HeaderMap)
 }
 

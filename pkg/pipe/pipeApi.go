@@ -27,10 +27,10 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("pipe", SetRoutes, nil)
+	Middleware = middleware.NewMiddleware("pipe", setRoutes, nil)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	pipeRouter := util.PathRouter(r, "/pipes")
 
 	util.AddRoute(pipeRouter, "", getPipelines, "GET")

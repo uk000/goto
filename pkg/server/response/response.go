@@ -31,14 +31,14 @@ import (
 )
 
 var (
-	Middleware          = middleware.NewMiddleware("response", SetRoutes, MiddlewareHandler)
+	Middleware          = middleware.NewMiddleware("response", setRoutes, middlewareFunc)
 	responseMiddlewares = []*middleware.Middleware{status.Middleware, delay.Middleware, header.Middleware, payload.Middleware, trigger.Middleware}
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	middleware.AddRoutes(util.PathRouter(r, "/server?/response"), r, root, responseMiddlewares...)
 }
 
-func MiddlewareHandler(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return middleware.AddMiddlewares(next, responseMiddlewares...)
 }

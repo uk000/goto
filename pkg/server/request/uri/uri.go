@@ -51,7 +51,7 @@ type URIStatusConfig struct {
 }
 
 var (
-	Middleware         = middleware.NewMiddleware("uri", SetRoutes, MiddlewareHandler)
+	Middleware         = middleware.NewMiddleware("uri", setRoutes, middlewareFunc)
 	uriCountsByPort    map[string]map[string]int
 	uriStatusByPort    map[string]map[string]interface{}
 	uriDelayByPort     map[string]map[string]interface{}
@@ -59,7 +59,7 @@ var (
 	uriLock            sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	uriRouter := util.PathRouter(r, "/uri")
 	util.AddRouteQWithPort(uriRouter, "/set/status={status}", setStatus, "uri", "POST", "PUT")
 	util.AddRouteQWithPort(uriRouter, "/set/delay={delay}", setDelay, "uri", "POST", "PUT")
@@ -365,7 +365,7 @@ func applyURIDelay(uri, port string, uriDelay *DelayConfig, r *http.Request, w h
 	}
 }
 
-func MiddlewareHandler(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		uriStatus, uriDelay, skipped := checkAndSkip(w, r, next)
 		if skipped {

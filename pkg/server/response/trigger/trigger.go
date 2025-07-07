@@ -70,13 +70,13 @@ type PipeCallback func(target, source string, port int, r *http.Request, statusC
 
 var (
 	rootRouter        *mux.Router
-	Middleware        = middleware.NewMiddleware("trigger", SetRoutes, nil)
+	Middleware        = middleware.NewMiddleware("trigger", setRoutes, nil)
 	portTriggers      = map[string]*Trigger{}
 	allTriggerTargets = map[string]*TriggerTarget{}
 	triggerLock       sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	rootRouter = root
 	triggerRouter := util.PathRouter(r, "/triggers")
 	util.AddRouteWithPort(triggerRouter, "/add", addTrigger, "POST")
@@ -219,13 +219,7 @@ func (t *Trigger) addTrigger(w http.ResponseWriter, r *http.Request) {
 		if len(tt.TriggerURIs) > 0 {
 			tt.triggerURIRegexps = map[string]*regexp.Regexp{}
 			for _, uri := range tt.TriggerURIs {
-				finalURI := strings.ToLower(uri)
-				glob := false
-				if strings.HasSuffix(uri, "*") {
-					finalURI = strings.ReplaceAll(finalURI, "*", "")
-					glob = true
-				}
-				if re, _, _, err := util.GetURIRegexpAndRoute(finalURI, glob, rootRouter); err == nil {
+				if finalURI, re, _, _, err := util.GetURIRegexpAndRoute(uri, rootRouter); err == nil {
 					t.TargetsByURIs[finalURI] = append(t.TargetsByURIs[finalURI], tt.Name)
 					tt.triggerURIRegexps[finalURI] = re
 				}
