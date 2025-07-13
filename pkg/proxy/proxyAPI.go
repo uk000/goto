@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"strings"
 
+	"goto/pkg/server/listeners"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 
@@ -36,6 +37,7 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	proxyTargetsRouter := util.PathRouter(r, "/proxy/targets")
 	httpTargetsRouter := util.PathRouter(r, "/proxy/http/targets")
 	tcpTargetsRouter := util.PathRouter(r, "/proxy/tcp/targets")
+	udpProxyRouter := util.PathRouter(r, "/proxy/udp")
 
 	util.AddRouteWithPort(proxyTargetsRouter, "/clear", clearProxyTargets, "POST")
 	util.AddRouteWithPort(proxyTargetsRouter, "/add", addProxyTarget, "POST", "PUT")
@@ -55,6 +57,8 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRouteWithPort(httpTargetsRouter, "/{target}/query/remove/{key}", removeTargetQuery, "PUT", "POST")
 
 	util.AddRouteMultiQWithPort(tcpTargetsRouter, "/add/{target}", addTCPProxyTarget, []string{"address", "sni"}, "POST", "PUT")
+	util.AddRouteWithPort(udpProxyRouter, "/{port}/{upstream}", proxyUDP, "POST")
+	util.AddRoute(udpProxyRouter, "/{port}/{upstream}/delay/{delay}", proxyUDP, "POST")
 
 	util.AddRouteWithPort(proxyTargetsRouter, "/{target}/delay={delay}", setProxyTargetDelay, "PUT", "POST")
 	util.AddRouteWithPort(proxyTargetsRouter, "/{target}/delay/clear", clearProxyTargetDelay, "POST")
@@ -84,6 +88,45 @@ func addHTTPProxyTarget(w http.ResponseWriter, r *http.Request) {
 
 func addTCPProxyTarget(w http.ResponseWriter, r *http.Request) {
 	getPortProxy(r).addNewProxyTarget(w, r, true)
+}
+
+func proxyUDP(w http.ResponseWriter, r *http.Request) {
+	port := util.GetIntParamValue(r, "port")
+	upstream := util.GetStringParamValue(r, "upstream")
+	delayMin, delayMax, _, _ := util.GetDurationParam(r, "delay")
+	msg := ""
+	status := http.StatusOK
+	if port <= 0 || upstream == "" {
+		status = http.StatusBadRequest
+		msg = fmt.Sprintf("Invalid port [%d] or upstream address [%s]", port, upstream)
+	} else if err := listeners.AddUDPListener(port); err == nil {
+		ProxyUDPUpstream(port, upstream, delayMin, delayMax)
+		msg = fmt.Sprintf("Proxying UDP on port [%d] to upstream [%s]", port, upstream)
+	} else {
+		status = http.StatusBadRequest
+		msg = fmt.Sprintf("Failed to open UDP listener on port [%d] with error: %s", port, err.Error())
+	}
+	w.WriteHeader(status)
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
+}
+
+func setUDPDelay(w http.ResponseWriter, r *http.Request) {
+	if !listeners.ValidateUDPListener(w, r) {
+		return
+	}
+	port := util.GetIntParamValue(r, "port")
+	upstream := util.GetStringParamValue(r, "upstream")
+	msg := ""
+	if delayMin, delayMax, _, ok := util.GetDurationParam(r, "delay"); ok {
+		SetUDPDelay(port, upstream, delayMin, delayMax)
+		msg = fmt.Sprintf("Delay configured for UDP port [%d]", port)
+	} else {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = fmt.Sprintf("Invalid delay value [%s]", util.GetStringParamValue(r, "delay"))
+	}
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
 }
 
 func addTargetRoute(w http.ResponseWriter, r *http.Request) {

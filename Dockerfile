@@ -1,10 +1,11 @@
 FROM golang:1.24-alpine AS builder-base
 RUN echo 'http://nl.alpinelinux.org/alpine/v3.22/main' > /etc/apk/repositories
 RUN echo 'http://nl.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories
-RUN apk update
-RUN apk add openssl
-RUN apk add ca-certificates
-RUN update-ca-certificates
+RUN apk update \
+		&& apk add --no-cache openssl \
+		&& apk add --no-cache ca-certificates \
+		&& rm -rf /var/cache/apk/* \
+		&& update-ca-certificates
 
 RUN openssl s_client -showcerts -connect github.com:443 </dev/null 2>/dev/null | openssl x509 -outform PEM > /usr/local/share/ca-certificates/github.crt \
 	&& openssl s_client -showcerts -connect proxy.golang.org:443 </dev/null 2>/dev/null | openssl x509 -outform PEM >  /usr/local/share/ca-certificates/golang-proxy.crt \
@@ -23,6 +24,7 @@ ARG COMMIT
 ARG VERSION 
 
 ADD ./cmd/ /goto/cmd
+ADD ./ctl/ /goto/ctl
 ADD ./pkg/ /goto/pkg
 ADD ./main.go /goto/main.go
 
@@ -55,7 +57,8 @@ RUN apk update \
 
 RUN if [[ -n "$iputils" ]] ; then apk add --no-cache nmap-ncat iputils iproute2 iptables ipvsadm tcpdump tcpflow bind-tools; echo "iputils=$iputils"; fi
 RUN if [[ -n "$kube" ]] ; then apk add --no-cache kubectl; echo "kubectl=$kube"; fi
-RUN if [[ -n "$perf" ]] ; then apk add hey; echo "perf=$perf"; fi
+RUN if [[ -n "$perf" ]] ; then apk add --no-cache hey; echo "perf=$perf"; fi
+RUN rm -rf /var/cache/apk/*
 
 FROM release-base AS release
 

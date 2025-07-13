@@ -36,7 +36,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	tcpRouter := util.PathPrefix(r, "/server?/tcp")
+	tcpRouter := util.PathPrefix(r, "/?server?/tcp")
 	util.AddRoute(tcpRouter, "/{port}/configure", configureTCP, "POST")
 	util.AddRoute(tcpRouter, "/{port}/timeout/set/read={duration}", setConnectionDurationConfig, "PUT", "POST")
 	util.AddRoute(tcpRouter, "/{port}/timeout/set/write={duration}", setConnectionDurationConfig, "PUT", "POST")
@@ -65,21 +65,9 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(tcpRouter, "/history/clear", clearConnectionHistory, "POST")
 }
 
-func validateListener(w http.ResponseWriter, r *http.Request) bool {
-	port := util.GetIntParamValue(r, "port")
-	if !global.Funcs.IsListenerPresent(port) {
-		w.WriteHeader(http.StatusBadRequest)
-		msg := fmt.Sprintf("No listener for port %d", port)
-		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
-		events.SendRequestEvent("TCP Configuration Rejected", msg, r)
-		return false
-	}
-	return true
-}
-
 func validateTCPListener(w http.ResponseWriter, r *http.Request) bool {
-	if !validateListener(w, r) {
+	if ok, msg := util.ValidateListener(w, r); !ok {
+		events.SendRequestEvent("TCP Configuration Rejected", msg, r)
 		return false
 	}
 	port := util.GetIntParamValue(r, "port")
@@ -95,25 +83,27 @@ func validateTCPListener(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func configureTCP(w http.ResponseWriter, r *http.Request) {
-	if validateListener(w, r) {
-		msg := ""
-		port := util.GetIntParamValue(r, "port")
-		tcpConfig := &TCPConfig{Port: port}
-		if err := util.ReadJsonPayload(r, tcpConfig); err == nil {
-			if _, msg = InitTCPConfig(port, tcpConfig); msg == "" {
-				msg = fmt.Sprintf("TCP configuration applied to port %d", port)
-				events.SendRequestEventJSON("TCP Configured", tcpConfig.ListenerID, tcpConfig, r)
-			} else {
-				w.WriteHeader(http.StatusBadRequest)
-			}
+	if ok, msg := util.ValidateListener(w, r); !ok {
+		events.SendRequestEvent("TCP Configuration Rejected", msg, r)
+		return
+	}
+	msg := ""
+	port := util.GetIntParamValue(r, "port")
+	tcpConfig := &TCPConfig{Port: port}
+	if err := util.ReadJsonPayload(r, tcpConfig); err == nil {
+		if _, msg = InitTCPConfig(port, tcpConfig); msg == "" {
+			msg = fmt.Sprintf("TCP configuration applied to port %d", port)
+			events.SendRequestEventJSON("TCP Configured", tcpConfig.ListenerID, tcpConfig, r)
 		} else {
 			w.WriteHeader(http.StatusBadRequest)
-			msg = fmt.Sprintf("Failed to parse json with error: %s", err.Error())
-			events.SendRequestEvent("TCP Configuration Rejected", msg, r)
 		}
-		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
+	} else {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = fmt.Sprintf("Failed to parse json with error: %s", err.Error())
+		events.SendRequestEvent("TCP Configuration Rejected", msg, r)
 	}
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
 }
 
 func (tcp *TCPConfig) configure() string {

@@ -161,7 +161,7 @@ func storeTCPConfig(tcpConfig *TCPConfig) {
 		if tcpConfig.ConnectionLifeD > 0 {
 			tcpConfig.SilentLife = true
 		} else {
-			tcpConfig.CloseAtFirstByte = true
+			tcpConfig.Echo = true
 		}
 	}
 	if tcpListeners[tcpConfig.Port] == nil {

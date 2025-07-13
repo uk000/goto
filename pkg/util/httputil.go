@@ -233,6 +233,18 @@ func GetCurrentListenerLabel(r *http.Request) string {
 	return global.Funcs.GetListenerLabelForPort(GetCurrentPort(r))
 }
 
+func ValidateListener(w http.ResponseWriter, r *http.Request) (bool, string) {
+	port := GetIntParamValue(r, "port")
+	if !global.Funcs.IsListenerPresent(port) {
+		w.WriteHeader(http.StatusBadRequest)
+		msg := fmt.Sprintf("No listener for port %d", port)
+		fmt.Fprintln(w, msg)
+		AddLogMessage(msg, r)
+		return false, msg
+	}
+	return true, ""
+}
+
 func GetHeaderValues(r *http.Request) map[string]map[string]int {
 	headerValuesMap := map[string]map[string]int{}
 	for h, values := range r.Header {

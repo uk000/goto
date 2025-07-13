@@ -47,6 +47,7 @@ import (
 	"goto/pkg/server/request"
 	"goto/pkg/server/response"
 	"goto/pkg/server/tcp"
+	"goto/pkg/server/udp"
 	"goto/pkg/server/ui"
 	"goto/pkg/tls"
 	"goto/pkg/tunnel"
@@ -58,7 +59,7 @@ func init() {
 		ui.Middleware, tunnel.TunnelCountMiddleware, label.Middleware, conn.Middleware, hooks.Middleware, tunnel.Middleware,
 		events.Middleware, metrics.Middleware, listeners.Middleware, probes.Middleware, registry.Middleware, client.Middleware,
 		k8sYaml.Middleware, k8sApi.Middleware, pipe.Middleware, request.Middleware, proxy.Middleware, response.Middleware,
-		tcp.Middleware, scripts.Middleware, job.Middleware, rpc.Middleware, grpcserver.Middleware, protos.Middleware, jsonrpc.Middleware,
+		tcp.Middleware, udp.Middleware, scripts.Middleware, job.Middleware, rpc.Middleware, grpcserver.Middleware, protos.Middleware, jsonrpc.Middleware,
 		tls.Middleware, log.Middleware, echo.Middleware, catchall.Middleware,
 	}
 }

@@ -16,6 +16,85 @@
 
 package proxy
 
+import (
+	"sync"
+	"time"
+)
+
+type ConnTracker struct {
+	StartTime         time.Time `json:"startTime"`
+	EndTime           time.Time `json:"endTime"`
+	FirstByteInAt     time.Time `json:"firstByteInAt"`
+	LastByteInAt      time.Time `json:"lastByteInAt"`
+	FirstByteOutAt    time.Time `json:"firstByteOutAt"`
+	LastByteOutAt     time.Time `json:"lastByteOutAt"`
+	TotalBytesRead    int       `json:"totalBytesRead"`
+	TotalBytesWritten int       `json:"totalBytesWritten"`
+	TotalReads        int       `json:"totalReads"`
+	TotalWrites       int       `json:"totalWrites"`
+	DelayCount        int       `json:"delayCount"`
+	DropCount         int       `json:"dropCount"`
+	Closed            bool      `json:"closed"`
+	RemoteClosed      bool      `json:"remoteClosed"`
+	ReadError         bool      `json:"readError"`
+	WriteError        bool      `json:"writeError"`
+}
+
+type TCPSessionTracker struct {
+	SNI        string       `json:"sni"`
+	Downstream *ConnTracker `json:"downstream"`
+	Upstream   *ConnTracker `json:"upstream"`
+}
+
+type TCPTargetTracker struct {
+	ConnCount         int                           `json:"connCount"`
+	ConnCountsBySNI   map[string]int                `json:"connCountsBySNI"`
+	TCPSessionTracker map[string]*TCPSessionTracker `json:"tcpSessions"`
+	lock              sync.RWMutex
+}
+
+type TCPProxyTracker struct {
+	ConnCount         int                          `json:"connCount"`
+	ConnCountsBySNI   map[string]int               `json:"connCountsBySNI"`
+	RejectCountsBySNI map[string]int               `json:"rejectCountsBySNI"`
+	TargetTrackers    map[string]*TCPTargetTracker `json:"targetTrackers"`
+	lock              sync.RWMutex
+}
+
+type UDPProxyTracker struct {
+	ConnCount                   int                       `json:"connCount"`
+	PacketCountByUpstream       map[string]int            `json:"packetCountByUpstream"`
+	PacketCountByDomain         map[string]int            `json:"packetCountByDomain"`
+	PacketCountByUpstreamDomain map[string]map[string]int `json:"packetCountByUpstreamDomain"`
+	lock                        sync.RWMutex
+}
+
+type HTTPCounts struct {
+	DownstreamRequestCount       int                       `json:"downstreamRequestCount"`
+	UpstreamRequestCount         int                       `json:"upstreamRequestCount"`
+	RequestDropCount             int                       `json:"requestDropCount"`
+	ResponseDropCount            int                       `json:"responseDropCount"`
+	DownstreamRequestCountsByURI map[string]int            `json:"downstreamRequestCountsByURI"`
+	UpstreamRequestCountsByURI   map[string]int            `json:"upstreamRequestCountsByURI"`
+	RequestDropCountsByURI       map[string]int            `json:"requestDropCountsByURI"`
+	ResponseDropCountsByURI      map[string]int            `json:"responseDropCountsByURI"`
+	URIMatchCounts               map[string]int            `json:"uriMatchCounts"`
+	HeaderMatchCounts            map[string]int            `json:"headerMatchCounts"`
+	HeaderValueMatchCounts       map[string]map[string]int `json:"headerValueMatchCounts"`
+	QueryMatchCounts             map[string]int            `json:"queryMatchCounts"`
+	QueryValueMatchCounts        map[string]map[string]int `json:"queryValueMatchCounts"`
+	lock                         sync.RWMutex
+}
+
+type HTTPTargetTracker struct {
+	*HTTPCounts
+}
+
+type HTTPProxyTracker struct {
+	*HTTPCounts
+	TargetTrackers map[string]*HTTPTargetTracker `json:"targetTrackers"`
+}
+
 func newHTTPCounts() *HTTPCounts {
 	return &HTTPCounts{
 		DownstreamRequestCountsByURI: map[string]int{},
@@ -123,6 +202,37 @@ func (pt *HTTPProxyTracker) incrementTargetDropCount(t *ProxyTarget, requestURI 
 		pt.TargetTrackers[t.Name] = newHTTPTargetTracker()
 	}
 	pt.TargetTrackers[t.Name].incrementDropCount(requestURI, requestDropped)
+}
+
+func newUDPTracker() *UDPProxyTracker {
+	return &UDPProxyTracker{
+		PacketCountByUpstream:       map[string]int{},
+		PacketCountByDomain:         map[string]int{},
+		PacketCountByUpstreamDomain: map[string]map[string]int{},
+	}
+}
+
+func (ut *UDPProxyTracker) incrementConnCount() {
+	ut.lock.Lock()
+	defer ut.lock.Unlock()
+	ut.ConnCount++
+}
+
+func (ut *UDPProxyTracker) incrementPacketCountForUpstream(upstream string) {
+	ut.lock.Lock()
+	defer ut.lock.Unlock()
+	ut.PacketCountByUpstream[upstream]++
+}
+
+func (ut *UDPProxyTracker) incrementPacketCountForDomain(upstream, domain string) {
+	ut.lock.Lock()
+	defer ut.lock.Unlock()
+	ut.PacketCountByUpstream[upstream]++
+	ut.PacketCountByDomain[domain]++
+	if ut.PacketCountByUpstreamDomain[upstream] == nil {
+		ut.PacketCountByUpstreamDomain[upstream] = map[string]int{}
+	}
+	ut.PacketCountByUpstreamDomain[upstream][domain]++
 }
 
 func newTCPTracker() *TCPProxyTracker {

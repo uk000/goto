@@ -49,26 +49,6 @@ type JSONRPCMethod struct {
 	StreamDelayMax  time.Duration      `json:"-"`
 }
 
-type JSONRPCError struct {
-	Code    int       `json:"code"`
-	Message string    `json:"message"`
-	Data    util.JSON `json:"data,omitempty"`
-}
-
-type JSONRPCRequest struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      interface{} `json:"id"`
-	Method  string      `json:"method"`
-	Params  util.JSON   `json:"params"`
-}
-
-type JSONRPCResponse struct {
-	JSONRPC string        `json:"jsonrpc"`
-	ID      interface{}   `json:"id"`
-	Result  util.JSON     `json:"result,omitempty"`
-	Error   *JSONRPCError `json:"error,omitempty"`
-}
-
 type JSONRPCServiceRegistry struct {
 	Services map[string]*JSONRPCService `json:"services"`
 	lock     sync.RWMutex

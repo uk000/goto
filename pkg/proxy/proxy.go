@@ -19,6 +19,7 @@ package proxy
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -83,70 +84,24 @@ type ProxyTarget struct {
 	lock               sync.RWMutex
 }
 
-type ConnTracker struct {
-	StartTime         time.Time `json:"startTime"`
-	EndTime           time.Time `json:"endTime"`
-	FirstByteInAt     time.Time `json:"firstByteInAt"`
-	LastByteInAt      time.Time `json:"lastByteInAt"`
-	FirstByteOutAt    time.Time `json:"firstByteOutAt"`
-	LastByteOutAt     time.Time `json:"lastByteOutAt"`
-	TotalBytesRead    int       `json:"totalBytesRead"`
-	TotalBytesWritten int       `json:"totalBytesWritten"`
-	TotalReads        int       `json:"totalReads"`
-	TotalWrites       int       `json:"totalWrites"`
-	DelayCount        int       `json:"delayCount"`
-	DropCount         int       `json:"dropCount"`
-	Closed            bool      `json:"closed"`
-	RemoteClosed      bool      `json:"remoteClosed"`
-	ReadError         bool      `json:"readError"`
-	WriteError        bool      `json:"writeError"`
+type UDPUpstream struct {
+	Address      string
+	DelayMin     time.Duration
+	DelayMax     time.Duration
+	stopChan     chan struct{}
+	upstreamAddr *net.UDPAddr
+	conn         *net.UDPConn
+	lock         sync.RWMutex
 }
 
-type TCPSessionTracker struct {
-	SNI        string       `json:"sni"`
-	Downstream *ConnTracker `json:"downstream"`
-	Upstream   *ConnTracker `json:"upstream"`
-}
-
-type TCPTargetTracker struct {
-	ConnCount         int                           `json:"connCount"`
-	ConnCountsBySNI   map[string]int                `json:"connCountsBySNI"`
-	TCPSessionTracker map[string]*TCPSessionTracker `json:"tcpSessions"`
-	lock              sync.RWMutex
-}
-
-type TCPProxyTracker struct {
-	ConnCount         int                          `json:"connCount"`
-	ConnCountsBySNI   map[string]int               `json:"connCountsBySNI"`
-	RejectCountsBySNI map[string]int               `json:"rejectCountsBySNI"`
-	TargetTrackers    map[string]*TCPTargetTracker `json:"targetTrackers"`
-	lock              sync.RWMutex
-}
-
-type HTTPCounts struct {
-	DownstreamRequestCount       int                       `json:"downstreamRequestCount"`
-	UpstreamRequestCount         int                       `json:"upstreamRequestCount"`
-	RequestDropCount             int                       `json:"requestDropCount"`
-	ResponseDropCount            int                       `json:"responseDropCount"`
-	DownstreamRequestCountsByURI map[string]int            `json:"downstreamRequestCountsByURI"`
-	UpstreamRequestCountsByURI   map[string]int            `json:"upstreamRequestCountsByURI"`
-	RequestDropCountsByURI       map[string]int            `json:"requestDropCountsByURI"`
-	ResponseDropCountsByURI      map[string]int            `json:"responseDropCountsByURI"`
-	URIMatchCounts               map[string]int            `json:"uriMatchCounts"`
-	HeaderMatchCounts            map[string]int            `json:"headerMatchCounts"`
-	HeaderValueMatchCounts       map[string]map[string]int `json:"headerValueMatchCounts"`
-	QueryMatchCounts             map[string]int            `json:"queryMatchCounts"`
-	QueryValueMatchCounts        map[string]map[string]int `json:"queryValueMatchCounts"`
-	lock                         sync.RWMutex
-}
-
-type HTTPTargetTracker struct {
-	*HTTPCounts
-}
-
-type HTTPProxyTracker struct {
-	*HTTPCounts
-	TargetTrackers map[string]*HTTPTargetTracker `json:"targetTrackers"`
+type UDPProxy struct {
+	Port         int              `json:"port"`
+	Upstreams    []*UDPUpstream   `json:"upstreams"`
+	UDPTracker   *UDPProxyTracker `json:"udpTracker"`
+	upstreamsMap map[string]*UDPUpstream
+	isStarted    bool
+	stopChan     chan struct{}
+	lock         sync.RWMutex
 }
 
 type Proxy struct {
@@ -156,6 +111,7 @@ type Proxy struct {
 	Enabled     bool                    `json:"enabled"`
 	HTTPTracker *HTTPProxyTracker       `json:"httpTracker"`
 	TCPTracker  *TCPProxyTracker        `json:"tcpTracker"`
+	UDPProxy    *UDPProxy               `json:"udpProxy"`
 	router      *mux.Router
 	lock        sync.RWMutex
 }
@@ -175,10 +131,22 @@ func newProxy(port int) *Proxy {
 		Enabled:     true,
 		HTTPTargets: map[string]*ProxyTarget{},
 		TCPTargets:  map[string]*ProxyTarget{},
+		UDPProxy:    newUDPProxy(port),
 	}
 	p.initTracker()
 	p.router = rootRouter.NewRoute().Subrouter()
 	return p
+}
+
+func newUDPProxy(port int) *UDPProxy {
+	return &UDPProxy{
+		Port:         port,
+		Upstreams:    []*UDPUpstream{},
+		UDPTracker:   newUDPTracker(),
+		upstreamsMap: map[string]*UDPUpstream{},
+		stopChan:     make(chan struct{}),
+		lock:         sync.RWMutex{},
+	}
 }
 
 func getPortProxy(r *http.Request) *Proxy {
@@ -215,6 +183,16 @@ func (p *Proxy) initTracker() {
 	defer p.lock.Unlock()
 	p.HTTPTracker = newHTTPTracker()
 	p.TCPTracker = newTCPTracker()
+	p.UDPProxy.UDPTracker = newUDPTracker()
+}
+
+func newUDPUpstream(address string, delayMin, delayMax time.Duration) *UDPUpstream {
+	return &UDPUpstream{
+		Address:  address,
+		DelayMin: delayMin,
+		DelayMax: delayMax,
+		stopChan: make(chan struct{}),
+	}
 }
 
 func newProxyTarget() *ProxyTarget {

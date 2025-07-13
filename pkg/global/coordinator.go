@@ -28,16 +28,14 @@ type GRPCStartWatcher func(server IWatchedServer)
 type GRPCStopWatcher func()
 type HTTPStartWatcher func(server *http.Server)
 type HTTPStopWatcher func()
-type TCPStartWatcher func(func(listenerID string, port int, listener net.Listener))
-type TCPStopWatcher func()
+type TCPServeWatcher func(func(listenerID string, port int, listener net.Listener) error)
 
 var (
 	grpcStartWatchers []GRPCStartWatcher
 	grpcStopWatchers  []GRPCStopWatcher
 	httpStartWatchers []HTTPStartWatcher
 	httpStopWatchers  []HTTPStopWatcher
-	tcpStartWatchers  []TCPStartWatcher
-	tcpStopWatchers   []TCPStopWatcher
+	tcpServeWatchers  []TCPServeWatcher
 	ShutdownFuncs     = []func(){}
 )
 
@@ -57,12 +55,8 @@ func AddHTTPStopWatcher(w HTTPStopWatcher) {
 	httpStopWatchers = append(httpStopWatchers, w)
 }
 
-func AddTCPStartWatcher(w TCPStartWatcher) {
-	tcpStartWatchers = append(tcpStartWatchers, w)
-}
-
-func AddTCPStopWatcher(w TCPStopWatcher) {
-	tcpStopWatchers = append(tcpStopWatchers, w)
+func AddTCPServeWatcher(w TCPServeWatcher) {
+	tcpServeWatchers = append(tcpServeWatchers, w)
 }
 
 func OnGRPCStart(server IWatchedServer) {
@@ -89,15 +83,9 @@ func OnHTTPStop() {
 	}
 }
 
-func OnTCPStart(serve func(listenerID string, port int, listener net.Listener)) {
-	for _, w := range tcpStartWatchers {
+func ConfigureTCPServer(serve func(listenerID string, port int, listener net.Listener) error) {
+	for _, w := range tcpServeWatchers {
 		w(serve)
-	}
-}
-
-func OnTCPStop() {
-	for _, w := range tcpStopWatchers {
-		w()
 	}
 }
 
