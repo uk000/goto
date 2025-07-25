@@ -20,6 +20,7 @@ import (
 	"context"
 	"goto/pkg/global"
 	"goto/pkg/k8s"
+	k8sClient "goto/pkg/k8s/client"
 	"goto/pkg/util"
 	"log"
 	"net/http"
@@ -207,7 +208,7 @@ func UnwatchResource(group, version, resource, namespace, name string, watcher *
 }
 
 func setupWatchForResource(gvr *schema.GroupVersionResource, namespace, name string) {
-	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(k8s.Client.Client, CacheRefreshPeriod, namespace,
+	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(k8sClient.Client.Client, CacheRefreshPeriod, namespace,
 		func(opts *metav1.ListOptions) {
 			opts.FieldSelector = fields.OneTermEqualSelector(metav1.ObjectNameField, name).String()
 		})

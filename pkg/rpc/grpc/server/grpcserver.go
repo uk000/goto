@@ -25,13 +25,13 @@ import (
 	"goto/pkg/server/listeners"
 	"goto/pkg/util"
 	"log"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	otelgrpc "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 )
@@ -42,118 +42,210 @@ type WrappedStream struct {
 }
 
 type GRPCServer struct {
-	server    *grpc.Server
-	listeners map[string]*listeners.Listener
-	running   bool
-	wg        *sync.WaitGroup
+	Server      *grpc.Server
+	Listener    *listeners.Listener
+	Services    map[string]*gotogrpc.GRPCService
+	Running     bool
+	grpcOptions []grpc.ServerOption
+	wg          *sync.WaitGroup
 }
 
-var (
-	TheGRPCServer *GRPCServer
+const (
+	grpcKeepaliveTime        = 30 * time.Second
+	grpcKeepaliveTimeout     = 5 * time.Second
+	grpcKeepaliveMinTime     = 30 * time.Second
+	grpcMaxConcurrentStreams = 1000000
 )
 
-func StartGRPCServer() {
+var (
+	TheGRPCServer   *GRPCServer
+	PortGRPCServers = map[int]*GRPCServer{}
+)
+
+func StartDefaultGRPCServer() {
 	TheGRPCServer = &GRPCServer{}
 	TheGRPCServer.init()
-	TheGRPCServer.Start(nil)
-	RegisterGotoServer(TheGRPCServer)
+	TheGRPCServer.refreshServer()
+	listeners.InitDefaultGRPCListener()
+	TheGRPCServer.start(listeners.DefaultGRPCListener)
+	PortGRPCServers[listeners.DefaultGRPCListener.Port] = TheGRPCServer
 }
 
-func serve(s *gotogrpc.GRPCService, l *listeners.Listener) {
-	TheGRPCServer.RegisterService(s.GSD)
-	TheGRPCServer.Start(l)
-	RegisterGotoServer(TheGRPCServer)
+func AddService(s *gotogrpc.GRPCService, l *listeners.Listener) {
+	gs := PortGRPCServers[l.Port]
+	if gs == nil {
+		gs = &GRPCServer{}
+		PortGRPCServers[l.Port] = gs
+		log.Printf("GRPC Server initialized for port [%d]", l.Port)
+	}
+	gs.Services[s.Name] = s
+	log.Printf("GRPC Service [%s] added for port [%d]", s.Name, l.Port)
+}
+
+func Serve(s *gotogrpc.GRPCService, l *listeners.Listener) {
+	gs := PortGRPCServers[l.Port]
+	if gs == nil {
+		gs = &GRPCServer{}
+		PortGRPCServers[l.Port] = gs
+		log.Printf("GRPC Server initialized for port [%d]", l.Port)
+	} else {
+		gs.Stop()
+		log.Printf("GRPC Server stopped for port [%d]", l.Port)
+	}
+	gs.Services[s.Name] = s
+	gs.refreshServer()
+	gs.start(l)
+}
+
+func StopService(s *gotogrpc.GRPCService, l *listeners.Listener) {
+	gs := PortGRPCServers[l.Port]
+	if gs != nil {
+		gs.Stop()
+		log.Printf("GRPC Server stopped for port [%d]", l.Port)
+	}
+	delete(gs.Services, s.Name)
+	gs.refreshServer()
+	gs.start(l)
+}
+
+func createOrGetGRPCServer(l *listeners.Listener) *GRPCServer {
+	gs := PortGRPCServers[l.Port]
+	if gs == nil {
+		gs = &GRPCServer{}
+		PortGRPCServers[l.Port] = gs
+		log.Printf("GRPC Server initialized for port [%d]", l.Port)
+	} else {
+		gs.Stop()
+		log.Printf("GRPC Server stopped for port [%d]", l.Port)
+	}
+	gs.refreshServer()
+	return gs
+}
+
+func StartWithCallback(l *listeners.Listener, callback func(gs *grpc.Server)) {
+	gs := createOrGetGRPCServer(l)
+	callback(gs.Server)
+	gs.start(l)
+}
+
+func Start(l *listeners.Listener) {
+	gs := createOrGetGRPCServer(l)
+	gs.start(l)
+}
+
+func Stop(l *listeners.Listener) {
+	gs := PortGRPCServers[l.Port]
+	if gs != nil {
+		gs.Stop()
+		log.Printf("GRPC Server stopped for port [%d]", l.Port)
+	}
 }
 
 func (g *GRPCServer) init() {
-	g.listeners = map[string]*listeners.Listener{}
+	if g.Running {
+		return
+	}
+	if g.Services == nil {
+		g.Services = map[string]*gotogrpc.GRPCService{}
+	}
+}
+
+func (g *GRPCServer) refreshServer() {
+	if g.Running {
+		return
+	}
 	g.wg = &sync.WaitGroup{}
-	g.server = grpc.NewServer(
+	g.grpcOptions = append(g.grpcOptions,
+		grpc.MaxConcurrentStreams(grpcMaxConcurrentStreams),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    grpcKeepaliveTime,
+			Timeout: grpcKeepaliveTimeout,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             grpcKeepaliveMinTime,
+			PermitWithoutStream: true,
+		}),
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.ChainUnaryInterceptor(unaryMiddleware),
-		grpc.ChainStreamInterceptor(streamMiddleware))
-	reflection.Register(g.server)
+		grpc.ChainStreamInterceptor(streamMiddleware),
+	)
+	g.Server = grpc.NewServer(g.grpcOptions...)
 }
 
-func (g *GRPCServer) RegisterService(sd *grpc.ServiceDesc) {
-	g.Stop()
-	g.init()
-	g.server.RegisterService(sd, &gotogrpc.DynamicServiceStub{})
-	log.Printf("GRPC Service [%s] registered", sd.ServiceName)
-}
-
-func (g *GRPCServer) Start(l *listeners.Listener) {
-	if l != nil {
-		g.listeners[l.ListenerID] = l
-	} else {
-		l = listeners.DefaultGRPCListener
-		g.listeners[listeners.DefaultGRPCListener.ListenerID] = l
-	}
+func (g *GRPCServer) start(l *listeners.Listener) {
+	g.Listener = l
 	if l.Listener == nil {
 		l.InitListener()
 	}
+	if len(g.Services) > 0 {
+		for _, svc := range g.Services {
+			g.Server.RegisterService(svc.GSD, &gotogrpc.DynamicServiceStub{})
+			log.Printf("GRPC Service [%s] registered", svc.Name)
+		}
+	} else if len(g.Server.GetServiceInfo()) == 0 {
+		RegisterGotoServer(g)
+	}
+	reflection.Register(g.Server)
 	msg := ""
-	if g.running {
-		msg = "Restarting GRPC Server..."
+	if g.Running {
+		msg = fmt.Sprintf("Restarting GRPC Server for port [%d]", l.Port)
 		g.Stop()
 	} else {
-		msg = "Starting GRPC Server..."
+		msg = fmt.Sprintf("Starting GRPC Server for port [%d]", l.Port)
 	}
 	log.Println(msg)
 	events.SendEventDirect(msg, "")
 	go g.run()
-	g.running = true
+	g.Running = true
 }
 
 func (g *GRPCServer) run() {
 	global.OnGRPCStart(g)
-	for _, l := range g.listeners {
-		g.wg.Add(1)
-		go g.serveListener(l)
-	}
+	g.wg.Add(1)
+	go g.serveListener(g.Listener)
 	g.wg.Wait()
 	global.OnGRPCStop()
 }
 
 func (g *GRPCServer) Serve(i interface{}) {
 	l := i.(*listeners.Listener)
-	g.listeners[l.ListenerID] = l
+	g.Listener = l
 	g.wg.Add(1)
 	go g.serveListener(l)
 }
 
 func (g *GRPCServer) serveListener(l *listeners.Listener) {
 	msg := fmt.Sprintf("GRPC Server [GRPC-%s] ready to serve services: ", l.HostLabel)
-	for s := range g.server.GetServiceInfo() {
+	for s := range g.Server.GetServiceInfo() {
 		msg += fmt.Sprintf("[%s], ", s)
 	}
 	log.Println(msg)
-	if err := g.server.Serve(l.Listener); err != nil {
+	if err := g.Server.Serve(l.Listener); err != nil {
 		log.Println(err)
 	}
 	global.OnGRPCStop()
 }
 
 func (g *GRPCServer) Stop() {
-	if g.running {
+	if g.Running {
 		log.Println("GRPC server shutting down")
-		g.server.Stop()
+		g.Server.Stop()
 		time.Sleep(2 * time.Second)
-		g.running = false
+		g.Running = false
 		global.OnGRPCStop()
 		events.SendEventDirect("GRPC Server Stopped", "")
 	}
 }
 
-func (g *GRPCServer) HandleGRPC(httpHandler http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if util.IsGRPC(r) {
-			g.server.ServeHTTP(w, r)
-		} else {
-			httpHandler.ServeHTTP(w, r)
-		}
-	})
-}
+// func (g *GRPCServer) HandleGRPC(httpHandler http.Handler) http.Handler {
+// 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// 		if util.IsGRPC(r) {
+// 			g.server.ServeHTTP(w, r)
+// 		} else {
+// 			httpHandler.ServeHTTP(w, r)
+// 		}
+// 	})
+// }
 
 func NewWrappedStream(ss grpc.ServerStream, ctx context.Context) grpc.ServerStream {
 	return WrappedStream{ServerStream: ss, ctx: ctx}

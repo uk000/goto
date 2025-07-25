@@ -17,6 +17,7 @@
 package k8s
 
 import (
+	k8sClient "goto/pkg/k8s/client"
 	"log"
 	"strings"
 
@@ -49,7 +50,7 @@ type K8sResource struct {
 }
 
 func GetGVRMapping(gvk *schema.GroupVersionKind) (*meta.RESTMapping, error) {
-	gvr, err := Client.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	gvr, err := k8sClient.Client.Mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 	if err != nil {
 		log.Printf("Failed to covert GVK to GVR with error: %s\n", err.Error())
 		return nil, err
@@ -63,9 +64,9 @@ func GetResourceInterface(gvk *schema.GroupVersionKind, namespace string) (dynam
 		return nil, nil, err
 	}
 	if gvr.Scope.Name() == meta.RESTScopeNameNamespace {
-		return Client.Client.Resource(gvr.Resource).Namespace(namespace), gvr, nil
+		return k8sClient.Client.Client.Resource(gvr.Resource).Namespace(namespace), gvr, nil
 	} else {
-		return Client.Client.Resource(gvr.Resource), gvr, nil
+		return k8sClient.Client.Client.Resource(gvr.Resource), gvr, nil
 	}
 }
 

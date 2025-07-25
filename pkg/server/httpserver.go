@@ -71,7 +71,7 @@ func RunHttpServer() {
 	util.InitListenerRouter(RootRouter)
 	RootRouter.Use(ContextMiddleware)
 	middleware.LinkMiddlewareChain(RootRouter)
-	h2 := HTTPHandler(coreRouter, h2c.NewHandler(grpcserver.TheGRPCServer.HandleGRPC(RootRouter), h2s))
+	h2 := HTTPHandler(coreRouter, h2c.NewHandler(RootRouter, h2s))
 	httpServer = &http.Server{
 		Addr:         fmt.Sprintf("0.0.0.0:%d", global.Self.ServerPort),
 		WriteTimeout: 1 * time.Minute,
@@ -82,7 +82,7 @@ func RunHttpServer() {
 		Handler:      h2,
 		ErrorLog:     log.New(io.Discard, "discard", 0),
 	}
-	grpcserver.StartGRPCServer()
+	grpcserver.StartDefaultGRPCServer()
 	StartHttpServer(httpServer)
 	RunStartupScript()
 	peer.RegisterPeer(global.Self.Name, global.Self.Address)

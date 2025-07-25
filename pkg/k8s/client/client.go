@@ -14,12 +14,16 @@
  * limitations under the License.
  */
 
-package k8s
+package client
 
 import (
+	"encoding/base64"
 	"goto/pkg/global"
+	"io"
 	"log"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/discovery"
@@ -41,14 +45,43 @@ type K8sClient struct {
 	clientset   *kubernetes.Clientset
 	dClient     *discovery.DiscoveryClient
 	TypedClient *typedclient.CoreV1Client
-	mapper      *restmapper.DeferredDiscoveryRESTMapper
+	Mapper      *restmapper.DeferredDiscoveryRESTMapper
 }
 
 var (
-	Client = createK8sClient()
+	CurrentClient *K8sClient
+	Client        = createDefaultK8sClient()
+	Clients       = map[string]*K8sClient{}
 )
 
-func createK8sClient() *K8sClient {
+func SetCurrentK8sClient(name string) bool {
+	CurrentClient = Clients[name]
+	if CurrentClient == nil {
+		return false
+	}
+	return true
+}
+
+func CreateK8sClientForConfig(name, url, caData string) error {
+	caBytes, _ := io.ReadAll(base64.NewDecoder(base64.StdEncoding, strings.NewReader(caData)))
+	k8sClient := &K8sClient{
+		Config: &rest.Config{
+			Host: url,
+			TLSClientConfig: rest.TLSClientConfig{
+				CAData: caBytes,
+			},
+			Timeout: 5 * time.Second,
+		},
+	}
+	if err := configureClient(k8sClient); err != nil {
+		log.Printf("K8s: Failed to load kube client with error: %s\n", err.Error())
+		return err
+	}
+	Clients[name] = k8sClient
+	return nil
+}
+
+func createDefaultK8sClient() *K8sClient {
 	k8sClient := &K8sClient{}
 	var err error
 	if global.ServerConfig.KubeConfig != "" {
@@ -65,25 +98,30 @@ func createK8sClient() *K8sClient {
 			}
 		}
 	}
-	k8sClient.Config.NegotiatedSerializer = serializer.NewCodecFactory(scheme.Scheme)
-	if k8sClient.clientset, err = kubernetes.NewForConfig(k8sClient.Config); err != nil {
+	if err = configureClient(k8sClient); err != nil {
 		log.Printf("K8s: Failed to load kube client with error: %s\n", err.Error())
 		return nil
+	}
+	Clients["default"] = k8sClient
+	return k8sClient
+}
+
+func configureClient(k8sClient *K8sClient) (err error) {
+	k8sClient.Config.NegotiatedSerializer = serializer.NewCodecFactory(scheme.Scheme)
+	if k8sClient.clientset, err = kubernetes.NewForConfig(k8sClient.Config); err != nil {
+		return
 	}
 
 	if k8sClient.Client, err = dynamic.NewForConfig(k8sClient.Config); err != nil {
-		log.Printf("K8s: Failed to load kube client with error: %s\n", err.Error())
-		return nil
+		return
 	}
 	if k8sClient.TypedClient, err = typedclient.NewForConfig(k8sClient.Config); err != nil {
-		log.Printf("K8s: Failed to load kube client with error: %s\n", err.Error())
-		return nil
+		return
 	}
 	k8sClient.dClient, err = discovery.NewDiscoveryClientForConfig(k8sClient.Config)
 	if err != nil {
-		log.Printf("K8s: Failed to load discovery client with error: %s\n", err.Error())
-		return nil
+		return
 	}
-	k8sClient.mapper = restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(k8sClient.dClient))
-	return k8sClient
+	k8sClient.Mapper = restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(k8sClient.dClient))
+	return
 }

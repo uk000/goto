@@ -45,7 +45,7 @@ type GotoGRPCService struct {
 }
 
 func RegisterGotoServer(g *GRPCServer) {
-	pb.RegisterGotoServer(g.server, &GotoGRPCService{})
+	pb.RegisterGotoServer(g.Server, &GotoGRPCService{})
 	log.Println("Registered Goto GRPC Server")
 }
 

@@ -19,7 +19,7 @@ package exec
 import (
 	"bytes"
 	"context"
-	"goto/pkg/k8s"
+	k8sClient "goto/pkg/k8s/client"
 	"log"
 
 	corev1 "k8s.io/api/core/v1"
@@ -31,7 +31,7 @@ import (
 
 func PodExec(namespace, label, container string, command string) (string, error) {
 	var podName string
-	if pods, err := k8s.Client.TypedClient.Pods(namespace).List(context.Background(),
+	if pods, err := k8sClient.Client.TypedClient.Pods(namespace).List(context.Background(),
 		metav1.ListOptions{LabelSelector: label}); err == nil {
 		if len(pods.Items) == 0 {
 			log.Printf("K8s: No pods in namespace [%s] for label [%s]\n", namespace, label)
@@ -43,7 +43,7 @@ func PodExec(namespace, label, container string, command string) (string, error)
 		log.Printf("K8s: Failed to load pods list with error: %s\n", err.Error())
 		return "", err
 	}
-	req := k8s.Client.TypedClient.RESTClient().Post().Namespace(namespace).
+	req := k8sClient.Client.TypedClient.RESTClient().Post().Namespace(namespace).
 		Resource("pods").Name(podName).SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: container,
@@ -53,7 +53,7 @@ func PodExec(namespace, label, container string, command string) (string, error)
 			Stderr:    true,
 			TTY:       false,
 		}, scheme.ParameterCodec)
-	exec, err := remotecommand.NewSPDYExecutor(k8s.Client.Config, "POST", req.URL())
+	exec, err := remotecommand.NewSPDYExecutor(k8sClient.Client.Config, "POST", req.URL())
 	if err != nil {
 		log.Printf("K8s: Failed to execute pod command with error: %s\n", err.Error())
 		return "", err

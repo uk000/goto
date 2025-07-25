@@ -18,6 +18,7 @@ package k8sApi
 
 import (
 	"fmt"
+	k8sClient "goto/pkg/k8s/client"
 	"goto/pkg/k8s/store"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
@@ -34,18 +35,49 @@ var (
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	k8sRouter := util.PathRouter(r, "/k8s")
 
-	util.AddRoute(k8sRouter, "/clear", apiClearK8sCache, "POST")
+	util.AddRoute(k8sRouter, "/config/{name}/{url}/{cadata}", apiConfigCluster, "POST")
+	util.AddRoute(k8sRouter, "/context/{name}", apiSetContext, "POST")
 	util.AddRouteQ(k8sRouter, "/resources/{kind}", apiGetResource, "jq", "GET")
 	util.AddRouteQ(k8sRouter, "/resources/{kind}", apiGetResource, "jp", "GET")
 	util.AddRoute(k8sRouter, "/resources/{kind}", apiGetResource, "GET")
 	util.AddRoute(k8sRouter, "/resources/{kind}/{name}", apiGetResource, "GET")
 	util.AddRoute(k8sRouter, "/resources/{kind}/{namespace}/all", apiGetResource, "GET")
 	util.AddRoute(k8sRouter, "/resources/{kind}/{namespace}/{name}", apiGetResource, "GET")
+	util.AddRoute(k8sRouter, "/clear", apiClearK8sCache, "POST")
 }
 
 func apiClearK8sCache(w http.ResponseWriter, r *http.Request) {
 	store.Cache.Clear()
 	fmt.Fprintln(w, "K8s Cache Cleared")
+}
+
+func apiConfigCluster(w http.ResponseWriter, r *http.Request) {
+	name := util.GetStringParamValue(r, "name")
+	url := util.GetStringParamValue(r, "url")
+	caData := util.GetStringParamValue(r, "cadata")
+	err := k8sClient.CreateK8sClientForConfig(name, url, caData)
+	msg := ""
+	if err != nil {
+		msg = fmt.Sprintf("Failed to create client for K8s config [%s, %s, %s]", name, url, caData)
+		w.WriteHeader(http.StatusBadRequest)
+	} else {
+		msg = fmt.Sprintf("Client configured successfully for K8s config [%s, %s, %s]", name, url, caData)
+	}
+	util.AddLogMessage(msg, r)
+	fmt.Fprintln(w, msg)
+}
+
+func apiSetContext(w http.ResponseWriter, r *http.Request) {
+	name := util.GetStringParamValue(r, "name")
+	msg := ""
+	if k8sClient.SetCurrentK8sClient(name) {
+		msg = fmt.Sprintf("Current Context swtiched to [%s]", name)
+	} else {
+		msg = fmt.Sprintf("Context [%s] not found.", name)
+		w.WriteHeader(http.StatusBadRequest)
+	}
+	util.AddLogMessage(msg, r)
+	fmt.Fprintln(w, msg)
 }
 
 func apiGetResource(w http.ResponseWriter, r *http.Request) {

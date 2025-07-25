@@ -39,6 +39,7 @@ type ProtosStore struct {
 var (
 	ProtosRegistry = (&ProtosStore{lock: sync.RWMutex{}}).Init()
 	protosDir      = filepath.FromSlash(util.GetCwd() + "/protos/")
+	importsDir     = filepath.FromSlash(util.GetCwd() + "/pkg/rpc/grpc/protos/")
 )
 
 func (ps *ProtosStore) Init() *ProtosStore {
@@ -72,7 +73,7 @@ func (ps *ProtosStore) parseProto(name, path string, content []byte) (linker.Fil
 		ps.fileSources[name] = filepath.FromSlash(path + "/" + filename)
 		ps.lock.Unlock()
 		compiler := protocompile.Compiler{Resolver: protocompile.WithStandardImports(&protocompile.SourceResolver{
-			ImportPaths: []string{path}, // defaults to cwd if empty
+			ImportPaths: []string{path, importsDir},
 		})}
 		res, err := compiler.Compile(context.Background(), filename)
 		if err != nil {
