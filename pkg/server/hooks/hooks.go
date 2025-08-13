@@ -22,12 +22,16 @@ import (
 	"goto/pkg/util"
 	"io"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/mux"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
 )
 
 var (
@@ -35,7 +39,7 @@ var (
 	HeaderTrackingFunc func(port int, key, uri string, matchedHeaders [][2]string)
 )
 
-type HookCallback func(port int, uri string, requestHeaders map[string][]string, body io.Reader) bool
+type HTTPListener func(port int, uri string, requestHeaders map[string][]string, body io.Reader) bool
 type Headers [][2]string
 
 type HeaderMatch struct {
@@ -50,19 +54,39 @@ type HookMatch struct {
 	HeaderMatches map[string]*HeaderMatch
 }
 
+type GRPCListener interface {
+	clientStream() chan proto.Message
+	serverStream() chan proto.Message
+	onClientHeaders(metadata.MD)
+	onServerHeaders(metadata.MD)
+}
+
 type Hook struct {
-	Key       string
-	ID        string
-	IsGRPC    bool
-	IsJSONRPC bool
-	URI       string
-	Match     *HookMatch
-	callback  func(port int, uri string, requestHeaders map[string][]string, body io.Reader) bool
+	Key           string
+	ID            string
+	IsJSONRPC     bool
+	URI           string
+	Match         *HookMatch
+	httpListener  HTTPListener
+	grpcListener  GRPCListener
+	streamIndexes map[int]bool
+}
+
+type GRPCHooks struct {
+	hooks                map[string]*Hook
+	listeners            map[int]map[string]GRPCListener
+	activeStreamsByURI   map[string]int
+	activeStreamsByIndex map[int]string
+	clientStreams        []reflect.SelectCase
+	serverStreams        []reflect.SelectCase
+	serverHeaders        []reflect.SelectCase
 }
 
 type Hooks struct {
-	Hooks map[string]*Hook
-	lock  sync.RWMutex
+	port      int
+	httpHooks map[string]*Hook
+	grpcHooks *GRPCHooks
+	lock      sync.RWMutex
 }
 
 var (
@@ -73,10 +97,7 @@ var (
 
 func GetPortHooks(port int) *Hooks {
 	if portHooks[port] == nil {
-		portHooks[port] = &Hooks{
-			Hooks: map[string]*Hook{},
-			lock:  sync.RWMutex{},
-		}
+		portHooks[port] = newHooks(port)
 	}
 	return portHooks[port]
 }
@@ -90,7 +111,95 @@ func getHooks(w http.ResponseWriter, r *http.Request) {
 	util.WriteYaml(w, portHooks)
 }
 
-func (h *Hooks) AddURIHookWithHandler(key, id, uri string, headers Headers, isGRPC, isJSONRPC bool, httpHandler middleware.MiddlewareFunc) error {
+func newHooks(port int) *Hooks {
+	hooks := &Hooks{
+		port:      port,
+		httpHooks: map[string]*Hook{},
+		grpcHooks: &GRPCHooks{
+			hooks:                map[string]*Hook{},
+			activeStreamsByURI:   map[string]int{},
+			activeStreamsByIndex: map[int]string{},
+			listeners:            map[int]map[string]GRPCListener{},
+			clientStreams:        []reflect.SelectCase{},
+			serverStreams:        []reflect.SelectCase{},
+			serverHeaders:        []reflect.SelectCase{},
+		},
+		lock: sync.RWMutex{},
+	}
+	go hooks.monitorGRPCStreams(true)
+	go hooks.monitorGRPCStreams(false)
+	go hooks.monitorGRPCHeaders()
+	return hooks
+}
+
+func (h *Hooks) monitorGRPCStreams(client bool) {
+	for {
+		var streams []reflect.SelectCase
+		if client {
+			streams = h.grpcHooks.clientStreams
+		} else {
+			streams = h.grpcHooks.serverStreams
+		}
+		if len(streams) == 0 {
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		index, val, ok := reflect.Select(streams)
+		if !ok {
+			h.RemoveGRPCStream("", index)
+			continue
+		}
+		if msg, ok := val.Interface().(proto.Message); ok {
+			h.lock.RLock()
+			listeners := h.grpcHooks.listeners[index]
+			h.lock.RUnlock()
+			for _, l := range listeners {
+				if client {
+					l.clientStream() <- msg
+				} else {
+					l.serverStream() <- msg
+				}
+			}
+		}
+	}
+}
+
+func (h *Hooks) monitorGRPCHeaders() {
+	for {
+		headersChans := h.grpcHooks.serverHeaders
+		if len(headersChans) == 0 {
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		index, val, ok := reflect.Select(headersChans)
+		if !ok {
+			h.RemoveGRPCStream("", index)
+			continue
+		}
+		if md, ok := val.Interface().(metadata.MD); ok {
+			h.lock.RLock()
+			listeners := h.grpcHooks.listeners[index]
+			h.lock.RUnlock()
+			for _, l := range listeners {
+				l.onServerHeaders(md)
+			}
+		}
+	}
+}
+
+func (h *Hooks) AddGRPCHook(key, id, methodURI string, grpcListener GRPCListener) error {
+	if methodURI == "" {
+		return fmt.Errorf("URI needed")
+	}
+	uriPrefix, re, _, _, err := util.GetURIRegexpAndRoute(methodURI, util.RootRouter)
+	if err != nil {
+		return err
+	}
+	h.addGRPCHook(key, id, methodURI, uriPrefix, re, grpcListener)
+	return nil
+}
+
+func (h *Hooks) AddHTTPHookWithHandler(key, id, uri string, headers Headers, isJSONRPC bool, httpHandler middleware.MiddlewareFunc) error {
 	if uri == "" && headers == nil {
 		return fmt.Errorf("One of URI and Headers needed")
 	}
@@ -98,11 +207,11 @@ func (h *Hooks) AddURIHookWithHandler(key, id, uri string, headers Headers, isGR
 	if err != nil {
 		return err
 	}
-	h.addHook(key, id, uri, uriPrefix, re, headers, isGRPC, isJSONRPC, nil)
+	h.addHTTPHook(key, id, uri, uriPrefix, re, headers, isJSONRPC, nil)
 	return nil
 }
 
-func (h *Hooks) AddHookWithCallback(key, id, uri string, headers Headers, isGRPC, isJSONRPC bool, callback HookCallback) error {
+func (h *Hooks) AddHTTPHookWithListener(key, id, uri string, headers Headers, isJSONRPC bool, listener HTTPListener) error {
 	if uri == "" && headers == nil {
 		return fmt.Errorf("One of URI and Headers needed")
 	}
@@ -110,7 +219,7 @@ func (h *Hooks) AddHookWithCallback(key, id, uri string, headers Headers, isGRPC
 	if err != nil {
 		return err
 	}
-	h.addHook(key, id, uri, uriPrefix, re, headers, isGRPC, isJSONRPC, callback)
+	h.addHTTPHook(key, id, uri, uriPrefix, re, headers, isJSONRPC, listener)
 	return nil
 }
 
@@ -124,88 +233,169 @@ func (h *Hooks) registerURI(uri string, httpHandler middleware.MiddlewareFunc) (
 	return
 }
 
-func (h *Hooks) addHook(key, id, uri, uriPrefix string, reURI *regexp.Regexp, headers Headers, isGRPC, isJSONRPC bool, callback HookCallback) *Hook {
-	hook := &Hook{}
-	hook.init(key, id, uri, uriPrefix, reURI, headers, isGRPC, isJSONRPC, callback)
+func (h *Hooks) addHTTPHook(key, id, uri, uriPrefix string, reURI *regexp.Regexp, headers Headers, isJSONRPC bool, listener HTTPListener) *Hook {
+	hook := newHook()
+	hook.initHTTP(key, id, uri, uriPrefix, reURI, headers, isJSONRPC, listener)
 	h.lock.Lock()
 	defer h.lock.Unlock()
-	h.Hooks[hook.ID] = hook
+	h.httpHooks[hook.ID] = hook
 	return hook
+}
+
+func (h *Hooks) addGRPCHook(key, id, uri, uriPrefix string, reURI *regexp.Regexp, grpcListener GRPCListener) *Hook {
+	hook := newHook()
+	hook.init(key, id, uri, uriPrefix, reURI, nil)
+	h.lock.Lock()
+	defer h.lock.Unlock()
+	hook.grpcListener = grpcListener
+	h.grpcHooks.hooks[hook.ID] = hook
+	for methodURI, index := range h.grpcHooks.activeStreamsByURI {
+		if hook.match(methodURI, nil, nil, nil) {
+			hook.streamIndexes[index] = true
+			if h.grpcHooks.listeners[index] == nil {
+				h.grpcHooks.listeners[index] = map[string]GRPCListener{}
+			}
+			h.grpcHooks.listeners[index][hook.ID] = hook.grpcListener
+		}
+	}
+	return hook
+}
+
+func (h *Hooks) AddGRPCStream(methodURI string, md metadata.MD, clientStream, serverStream chan proto.Message, serverHeaders chan metadata.MD) {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+	index := len(h.grpcHooks.clientStreams)
+	if clientStream == nil {
+		clientStream = make(chan proto.Message)
+	}
+	h.grpcHooks.clientStreams = append(h.grpcHooks.clientStreams, reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(clientStream),
+	})
+	if serverStream == nil {
+		serverStream = make(chan proto.Message)
+	}
+	h.grpcHooks.serverStreams = append(h.grpcHooks.serverStreams, reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(serverStream),
+	})
+	if serverHeaders == nil {
+		serverHeaders = make(chan metadata.MD)
+	}
+	h.grpcHooks.serverHeaders = append(h.grpcHooks.serverHeaders, reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(serverHeaders),
+	})
+	h.grpcHooks.activeStreamsByURI[methodURI] = index
+	h.grpcHooks.activeStreamsByIndex[index] = methodURI
+	allMatches, matchedHeaders := h.MatchGRPCRequest(methodURI)
+	if h.grpcHooks.listeners[index] == nil {
+		h.grpcHooks.listeners[index] = map[string]GRPCListener{}
+	}
+	for _, hook := range allMatches {
+		if md != nil {
+			hook.grpcListener.onClientHeaders(md)
+		}
+		h.grpcHooks.listeners[index][hook.ID] = hook.grpcListener
+	}
+	for key, headers := range matchedHeaders {
+		HeaderTrackingFunc(h.port, key, methodURI, headers)
+	}
+}
+
+func (h *Hooks) RemoveGRPCStream(methodURI string, index int) {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+	if methodURI != "" {
+		index = h.grpcHooks.activeStreamsByURI[methodURI]
+	} else {
+		methodURI = h.grpcHooks.activeStreamsByIndex[index]
+	}
+	delete(h.grpcHooks.activeStreamsByURI, methodURI)
+	delete(h.grpcHooks.activeStreamsByIndex, index)
+	h.grpcHooks.clientStreams = append(h.grpcHooks.clientStreams[:index], h.grpcHooks.clientStreams[index+1:]...)
+	h.grpcHooks.serverStreams = append(h.grpcHooks.serverStreams[:index], h.grpcHooks.serverStreams[index+1:]...)
+	h.grpcHooks.serverHeaders = append(h.grpcHooks.serverHeaders[:index], h.grpcHooks.serverHeaders[index+1:]...)
+	for _, hook := range h.grpcHooks.hooks {
+		delete(hook.streamIndexes, index)
+	}
 }
 
 func (h *Hooks) RemoveHook(id string) {
 	h.lock.Lock()
 	defer h.lock.Unlock()
-	if hook := h.Hooks[id]; hook != nil {
-		delete(h.Hooks, id)
+	hook := h.grpcHooks.hooks[id]
+	if hook != nil {
+		for i, _ := range hook.streamIndexes {
+			delete(h.grpcHooks.listeners[i], id)
+		}
+		delete(h.grpcHooks.hooks, id)
+	} else {
+		delete(h.httpHooks, id)
 	}
 }
 
-func (h *Hooks) MatchRequest(r *http.Request) (allMatches map[string]*Hook, matchedHeaders map[string][][2]string) {
+func (h *Hooks) MatchHTTPRequest(uri string, headers map[string][]string) (allMatches map[string]*Hook, matchedHeaders map[string][][2]string) {
 	h.lock.RLock()
 	defer h.lock.RUnlock()
-	allMatches = map[string]*Hook{}
-	matchedHeaders = map[string][][2]string{}
-	for id, hook := range h.Hooks {
-		if hook.matchURI(r.RequestURI) {
-			allMatches[id] = hook
-		} else {
-			continue
-		}
-		for header, hvalues := range r.Header {
-			matches := hook.matchHeader(header, hvalues)
-			if len(matches) > 0 {
-				allMatches[id] = hook
-				if matchedHeaders[hook.Key] == nil {
-					matchedHeaders[hook.Key] = [][2]string{}
-				}
-				matchedHeaders[hook.Key] = append(matchedHeaders[hook.Key], matches...)
-			}
-		}
-	}
-	return allMatches, matchedHeaders
+	return matchRequest(uri, headers, h.httpHooks)
 }
 
-func (h *Hook) init(key, id, uri, uriPrefix string, reURI *regexp.Regexp, headers Headers, isGRPC, isJSONRPC bool, callback HookCallback) {
+func (h *Hooks) MatchGRPCRequest(methodURI string) (allMatches map[string]*Hook, matchedHeaders map[string][][2]string) {
+	h.lock.RLock()
+	defer h.lock.RUnlock()
+	return matchRequest(methodURI, nil, h.grpcHooks.hooks)
+}
+
+func newHook() *Hook {
+	return &Hook{
+		streamIndexes: map[int]bool{},
+	}
+}
+
+func (h *Hook) initHTTP(key, id, uri, uriPrefix string, reURI *regexp.Regexp, headers Headers, isJSONRPC bool, listener HTTPListener) {
+	h.init(key, id, uri, uriPrefix, reURI, headers)
+	h.IsJSONRPC = isJSONRPC
+	h.httpListener = listener
+}
+
+func (h *Hook) init(key, id, uri, uriPrefix string, reURI *regexp.Regexp, headers Headers) {
 	if id == "" {
 		id = string(hookIdCounter.Add(1))
 	}
 	h.Key = key
 	h.ID = id
-	h.IsGRPC = isGRPC
-	h.IsJSONRPC = isJSONRPC
 	h.URI = uri
 	h.Match = &HookMatch{
 		UriPrefix: uriPrefix,
 		re:        reURI,
 	}
-	h.callback = callback
 	if len(headers) > 0 {
 		h.Match.HeaderMatches = map[string]*HeaderMatch{}
-	}
-	for _, hv := range headers {
-		header := strings.ToLower(hv[0])
-		hm := h.Match.HeaderMatches[header]
-		if hm == nil {
-			hmatch, glob := util.Unglob(header)
-			if glob {
-				hmatch += "(.*)?"
+		for _, hv := range headers {
+			header := strings.ToLower(hv[0])
+			hm := h.Match.HeaderMatches[header]
+			if hm == nil {
+				hmatch, glob := util.Unglob(header)
+				if glob {
+					hmatch += "(.*)?"
+				}
+				hm = &HeaderMatch{
+					Header: header,
+					re:     regexp.MustCompile(hmatch),
+					Values: map[string]*regexp.Regexp{},
+				}
 			}
-			hm = &HeaderMatch{
-				Header: header,
-				re:     regexp.MustCompile(hmatch),
-				Values: map[string]*regexp.Regexp{},
+			if hv[1] != "" {
+				value := strings.ToLower(hv[1])
+				vmatch, glob := util.Unglob(value)
+				if glob {
+					vmatch += "(.*)?"
+				}
+				hm.Values[value] = regexp.MustCompile(vmatch)
 			}
+			h.Match.HeaderMatches[header] = hm
 		}
-		if hv[1] != "" {
-			value := strings.ToLower(hv[1])
-			vmatch, glob := util.Unglob(value)
-			if glob {
-				vmatch += "(.*)?"
-			}
-			hm.Values[value] = regexp.MustCompile(vmatch)
-		}
-		h.Match.HeaderMatches[header] = hm
 	}
 }
 
@@ -218,30 +408,55 @@ func (h *Hook) matchURI(uri string) bool {
 	return false
 }
 
-func (h *Hook) matchHeader(header string, values []string) [][2]string {
+func (h *Hook) matchHeader(header string, values []string) (bool, string) {
 	if h.Match.HeaderMatches == nil {
-		return nil
+		return false, ""
 	}
-	matches := [][2]string{}
 	header = strings.ToLower(header)
 	for _, hm := range h.Match.HeaderMatches {
 		if hm.re.MatchString(header) {
 			if hm.Values == nil {
-				matches = append(matches, [2]string{header, ""})
-				continue
+				return true, ""
 			}
-		nextheader:
 			for _, vre := range hm.Values {
 				for _, hv := range values {
 					if vre.MatchString(hv) {
-						matches = append(matches, [2]string{header, hv})
-						break nextheader
+						return true, hv
 					}
 				}
 			}
 		}
 	}
-	return matches
+	return false, ""
+}
+
+func (h *Hook) match(uri string, headers map[string][]string, allMatches map[string]*Hook, matchedHeaders map[string][][2]string) bool {
+	if !h.matchURI(uri) {
+		return false
+	}
+	if allMatches != nil {
+		allMatches[h.ID] = h
+	}
+	for header, hvalues := range headers {
+		if matched, value := h.matchHeader(header, hvalues); matched {
+			if matchedHeaders != nil {
+				if matchedHeaders[h.Key] == nil {
+					matchedHeaders[h.Key] = [][2]string{}
+				}
+				matchedHeaders[h.Key] = append(matchedHeaders[h.Key], [2]string{header, value})
+			}
+		}
+	}
+	return true
+}
+
+func matchRequest(uri string, headers map[string][]string, hooks map[string]*Hook) (allMatches map[string]*Hook, matchedHeaders map[string][][2]string) {
+	allMatches = map[string]*Hook{}
+	matchedHeaders = map[string][][2]string{}
+	for _, hook := range hooks {
+		hook.match(uri, headers, allMatches, matchedHeaders)
+	}
+	return allMatches, matchedHeaders
 }
 
 func middlewareFunc(next http.Handler) http.Handler {
@@ -252,17 +467,14 @@ func middlewareFunc(next http.Handler) http.Handler {
 			}
 			return
 		}
-		allMatches, matchedHeaders := GetPortHooks(util.GetRequestOrListenerPortNum(r)).MatchRequest(r)
+		allMatches, matchedHeaders := GetPortHooks(util.GetRequestOrListenerPortNum(r)).MatchHTTPRequest(r.RequestURI, r.Header)
 		callNext := false
 		if len(allMatches) > 0 {
 			body := util.Read(r.Body)
 			for _, hook := range allMatches {
 				util.SetIsJSONRPC(r, hook.IsJSONRPC)
-				if hook.IsGRPC {
-					util.SetIsGRPC(r, true)
-				}
-				if hook.callback != nil {
-					callNext = callNext || hook.callback(util.GetRequestOrListenerPortNum(r), r.RequestURI, r.Header, io.NopCloser(strings.NewReader(body)))
+				if hook.httpListener != nil {
+					callNext = callNext || hook.httpListener(util.GetRequestOrListenerPortNum(r), r.RequestURI, r.Header, io.NopCloser(strings.NewReader(body)))
 				}
 			}
 			r.Body = io.NopCloser(strings.NewReader(body))

@@ -19,6 +19,7 @@ package payload
 import (
 	"context"
 	"fmt"
+	"goto/pkg/server/intercept"
 	"goto/pkg/util"
 	"io"
 	"net/http"
@@ -62,7 +63,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload, captures map[string]string) {
 	var payload []byte
 	contentType := ""
-	if !rp.isBinary {
+	if !rp.IsBinary {
 		payload = getFilledPayload(rp, r, captures)
 	} else {
 		payload = rp.Payload
@@ -71,15 +72,39 @@ func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload,
 	length := strconv.Itoa(len(payload))
 	w.Header().Set("Content-Length", length)
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Goto-Payload-Length", length)
 	w.Header().Set("Goto-Payload-Content-Type", contentType)
-	msg := fmt.Sprintf("Responding with configured payload of length [%s] and content type [%s] for URI [%s]",
-		length, contentType, r.RequestURI)
+	msg := fmt.Sprintf("Responding with configured payload of length [%s], content type [%s], stream [%t] for URI [%s]",
+		length, contentType, rp.IsStream, r.RequestURI)
 	util.AddLogMessage(msg, r)
-	if n, err := w.Write(payload); err != nil {
-		msg = fmt.Sprintf("Failed to write payload of length [%s] with error: %s", length, err.Error())
+
+	payloadSent := false
+	if rp.IsStream {
+		w.Header().Set("Goto-Payload-Count", strconv.Itoa(len(rp.StreamPayload)))
+		if fw := intercept.NewFlushWriter(r, w); fw != nil {
+			failed := false
+			for _, b := range rp.StreamPayload {
+				if n, err := fw.Write(b); err != nil {
+					msg = fmt.Sprintf("Failed to write stream payload of length [%d] with error: %s", n, err.Error())
+					failed = true
+					break
+				}
+				fw.Flush()
+			}
+			if !failed {
+				msg = fmt.Sprintf("Written stream payload, count [%d]", len(rp.StreamPayload))
+			}
+			util.AddLogMessage(msg, r)
+			payloadSent = true
+		}
 	} else {
-		msg = fmt.Sprintf("Written payload of length [%d] compared to configured size [%s]", n, length)
+		w.Header().Set("Goto-Payload-Length", length)
+	}
+	if !payloadSent {
+		if n, err := w.Write(payload); err != nil {
+			msg = fmt.Sprintf("Failed to write payload of length [%s] with error: %s", length, err.Error())
+		} else {
+			msg = fmt.Sprintf("Written payload of length [%d] compared to configured size [%s]", n, length)
+		}
 	}
 	util.AddLogMessage(msg, r)
 	util.UpdateTrafficEventDetails(r, "Response Payload Applied")

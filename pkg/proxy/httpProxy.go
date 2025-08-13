@@ -19,7 +19,6 @@ package proxy
 import (
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -30,6 +29,7 @@ import (
 	"goto/pkg/events"
 	"goto/pkg/invocation"
 	"goto/pkg/metrics"
+	"goto/pkg/proxy/trackers"
 	"goto/pkg/server/response/status"
 	"goto/pkg/server/response/trigger"
 	"goto/pkg/util"
@@ -38,193 +38,89 @@ import (
 	"github.com/gorilla/reverse"
 )
 
-type ProxyTargetMatch struct {
-	Headers   [][]string
-	Query     [][]string
-	SNI       []string
-	sniRegexp *regexp.Regexp
+type HTTPProxy struct {
+	Proxy
+	Tracker *trackers.HTTPProxyTracker `json:"tracker"`
+	router  *mux.Router
 }
 
-type TargetMatchInfo struct {
-	Headers [][]string
-	Query   [][]string
-	URI     string
-	SNI     string
-	target  *ProxyTarget
-}
-
-type ProxyTarget struct {
-	Name               string            `json:"name"`
-	Protocol           string            `json:"protocol"`
-	Endpoint           string            `json:"endpoint"`
-	Routes             map[string]string `json:"routes"`
-	SendID             bool              `json:"sendID"`
-	AddHeaders         [][]string        `json:"addHeaders"`
-	RemoveHeaders      []string          `json:"removeHeaders"`
-	AddQuery           [][]string        `json:"addQuery"`
-	RemoveQuery        []string          `json:"removeQuery"`
-	StripURI           string            `json:"stripURI"`
-	MatchAny           *ProxyTargetMatch `json:"matchAny"`
-	MatchAll           *ProxyTargetMatch `json:"matchAll"`
-	Replicas           int               `json:"replicas"`
-	DelayMin           time.Duration     `json:"delayMin"`
-	DelayMax           time.Duration     `json:"delayMax"`
-	DelayCount         int               `json:"delayCount"`
-	DropPct            int               `json:"dropPct"`
-	Enabled            bool              `json:"enabled"`
-	isTCP              bool
-	matchAllURIs       bool
-	stripURIRegExp     *regexp.Regexp
-	captureHeaders     map[string]string
-	captureQuery       map[string]string
-	uriRegexps         map[string]*regexp.Regexp
-	uriRouters         map[string]*mux.Router
-	callCount          int
-	writeSinceLastDrop int
-	lock               sync.RWMutex
-}
-
-type UDPUpstream struct {
-	Address      string
-	DelayMin     time.Duration
-	DelayMax     time.Duration
-	stopChan     chan struct{}
-	upstreamAddr *net.UDPAddr
-	conn         *net.UDPConn
-	lock         sync.RWMutex
-}
-
-type UDPProxy struct {
-	Port         int              `json:"port"`
-	Upstreams    []*UDPUpstream   `json:"upstreams"`
-	UDPTracker   *UDPProxyTracker `json:"udpTracker"`
-	upstreamsMap map[string]*UDPUpstream
-	isStarted    bool
-	stopChan     chan struct{}
-	lock         sync.RWMutex
-}
-
-type Proxy struct {
-	Port        int                     `json:"port"`
-	HTTPTargets map[string]*ProxyTarget `json:"httpTargets"`
-	TCPTargets  map[string]*ProxyTarget `json:"tcpTargets"`
-	Enabled     bool                    `json:"enabled"`
-	HTTPTracker *HTTPProxyTracker       `json:"httpTracker"`
-	TCPTracker  *TCPProxyTracker        `json:"tcpTracker"`
-	UDPProxy    *UDPProxy               `json:"udpProxy"`
-	router      *mux.Router
-	lock        sync.RWMutex
+type HTTPTarget struct {
+	*ProxyTarget
+	Routes         map[string]string `json:"routes"`
+	SendID         bool              `json:"sendID"`
+	AddHeaders     [][]string        `json:"addHeaders"`
+	RemoveHeaders  []string          `json:"removeHeaders"`
+	AddQuery       [][]string        `json:"addQuery"`
+	RemoveQuery    []string          `json:"removeQuery"`
+	StripURI       string            `json:"stripURI"`
+	matchRootURI   bool
+	stripURIRegExp *regexp.Regexp
+	captureHeaders map[string]string
+	captureQuery   map[string]string
+	uriRouters     map[string]*mux.Router
 }
 
 var (
-	proxyByPort = map[int]*Proxy{}
-	proxyLock   sync.RWMutex
+	httpProxyByPort = map[int]*HTTPProxy{}
+	proxyLock       sync.RWMutex
 )
 
 func init() {
 	util.WillProxyHTTP = WillProxyHTTP
 }
 
-func newProxy(port int) *Proxy {
-	p := &Proxy{
-		Port:        port,
-		Enabled:     true,
-		HTTPTargets: map[string]*ProxyTarget{},
-		TCPTargets:  map[string]*ProxyTarget{},
-		UDPProxy:    newUDPProxy(port),
-	}
+func newHTTPProxy(port int) *HTTPProxy {
+	p := &HTTPProxy{Proxy: *newProxy(port)}
 	p.initTracker()
 	p.router = rootRouter.NewRoute().Subrouter()
 	return p
 }
 
-func newUDPProxy(port int) *UDPProxy {
-	return &UDPProxy{
-		Port:         port,
-		Upstreams:    []*UDPUpstream{},
-		UDPTracker:   newUDPTracker(),
-		upstreamsMap: map[string]*UDPUpstream{},
-		stopChan:     make(chan struct{}),
-		lock:         sync.RWMutex{},
-	}
+func getHTTPProxyForRequestPort(r *http.Request) *HTTPProxy {
+	return getHTTPProxyForPort(util.GetRequestOrListenerPortNum(r))
 }
 
-func getPortProxy(r *http.Request) *Proxy {
-	return getProxyForPort(util.GetRequestOrListenerPortNum(r))
-}
-
-func getProxyForPort(port int) *Proxy {
+func getHTTPProxyForPort(port int) *HTTPProxy {
 	proxyLock.RLock()
-	proxy := proxyByPort[port]
+	proxy := httpProxyByPort[port]
 	proxyLock.RUnlock()
 	if proxy == nil {
 		proxyLock.Lock()
 		defer proxyLock.Unlock()
-		proxy = newProxy(port)
-		proxyByPort[port] = proxy
+		proxy = newHTTPProxy(port)
+		httpProxyByPort[port] = proxy
 	}
 	return proxy
 }
 
-func (p *Proxy) hasAnyHTTPTargets() bool {
-	return len(p.HTTPTargets) > 0
-}
-
-func (p *Proxy) hasAnyTCPTargets() bool {
-	return len(p.TCPTargets) > 0
-}
-
-func (p *Proxy) enable(enabled bool) {
-	p.Enabled = enabled
-}
-
-func (p *Proxy) initTracker() {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	p.HTTPTracker = newHTTPTracker()
-	p.TCPTracker = newTCPTracker()
-	p.UDPProxy.UDPTracker = newUDPTracker()
-}
-
-func newUDPUpstream(address string, delayMin, delayMax time.Duration) *UDPUpstream {
-	return &UDPUpstream{
-		Address:  address,
-		DelayMin: delayMin,
-		DelayMax: delayMax,
-		stopChan: make(chan struct{}),
-	}
-}
-
-func newProxyTarget() *ProxyTarget {
-	return &ProxyTarget{
+func newHTTPTarget(name, endpoint string) *HTTPTarget {
+	return &HTTPTarget{
+		ProxyTarget:    newProxyTarget(name, "HTTP/1.1", endpoint),
 		Routes:         map[string]string{},
-		Replicas:       1,
-		Enabled:        true,
+		AddHeaders:     [][]string{},
+		RemoveHeaders:  []string{},
+		AddQuery:       [][]string{},
+		RemoveQuery:    []string{},
 		captureHeaders: map[string]string{},
 		captureQuery:   map[string]string{},
-		uriRegexps:     map[string]*regexp.Regexp{},
 		uriRouters:     map[string]*mux.Router{},
 	}
 }
 
-func (p *Proxy) addNewProxyTarget(w http.ResponseWriter, r *http.Request, isTCP bool) {
+func (p *HTTPProxy) initTracker() {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	p.Tracker = trackers.NewHTTPTracker()
+}
+
+func (p *HTTPProxy) addNewHTTPTarget(w http.ResponseWriter, r *http.Request) {
 	msg := ""
-	target := newProxyTarget()
-	target.Name = util.GetStringParamValue(r, "target")
-	if isTCP {
-		target.isTCP = true
-		target.Protocol = "tcp"
-		target.Endpoint = util.GetStringParamValue(r, "address")
-		target.Protocol = util.GetStringParamValue(r, "proto")
-		msg = fmt.Sprintf("Port [%d]: Added TCP proxy target [%s] with upstream address [%s]", p.Port, target.Name, target.Endpoint)
-	} else {
-		target.Endpoint = util.GetStringParamValue(r, "url")
-		target.Protocol = util.GetStringParamValue(r, "proto")
-		if target.Protocol == "" {
-			target.Protocol = "HTTP/1.1"
-		}
-		msg = fmt.Sprintf("Port [%d]: Added HTTP proxy target [%s] with upstream URL [%s] Protocol [%s]", p.Port, target.Name, target.Endpoint, target.Protocol)
+	target := newHTTPTarget(util.GetStringParamValue(r, "target"), util.GetStringParamValue(r, "url"))
+	target.Protocol = util.GetStringParamValue(r, "proto")
+	if target.Protocol == "" {
+		target.Protocol = "HTTP/1.1"
 	}
+	msg = fmt.Sprintf("Port [%d]: Added HTTP proxy target [%s] with upstream URL [%s] Protocol [%s]", p.Port, target.Name, target.Endpoint, target.Protocol)
 	if sni := util.GetStringParamValue(r, "sni"); sni != "" {
 		snis := strings.Split(sni, ",")
 		snisRegexp := "(" + strings.Join(snis, "|") + ")"
@@ -236,11 +132,7 @@ func (p *Proxy) addNewProxyTarget(w http.ResponseWriter, r *http.Request, isTCP 
 	}
 	p.deleteProxyTarget(target.Name)
 	p.lock.Lock()
-	if target.isTCP {
-		p.TCPTargets[target.Name] = target
-	} else {
-		p.HTTPTargets[target.Name] = target
-	}
+	p.Targets[target.Name] = target
 	p.lock.Unlock()
 
 	from := util.GetStringParamValue(r, "from")
@@ -261,26 +153,12 @@ func (p *Proxy) addNewProxyTarget(w http.ResponseWriter, r *http.Request, isTCP 
 	events.SendRequestEventJSON("Proxy Target Added", target.Name, target, r)
 }
 
-func (p *Proxy) checkAndGetTarget(w http.ResponseWriter, r *http.Request) *ProxyTarget {
-	name := util.GetStringParamValue(r, "target")
-	p.lock.RLock()
-	target := p.HTTPTargets[name]
-	if target == nil {
-		target = p.TCPTargets[name]
-	}
-	p.lock.RUnlock()
-	if target == nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "Invalid target: %s\n", name)
-	}
-	return target
-}
-
-func (p *Proxy) addTargetRoute(w http.ResponseWriter, r *http.Request) {
-	target := p.checkAndGetTarget(w, r)
-	if target == nil {
+func (p *HTTPProxy) addTargetRoute(w http.ResponseWriter, r *http.Request) {
+	t := p.checkAndGetTarget(w, r)
+	if t == nil {
 		return
 	}
+	target := t.(*HTTPTarget)
 	from := util.GetStringParamValue(r, "from")
 	to := util.GetStringParamValue(r, "to")
 	if strings.Compare(from, "/") == 0 {
@@ -293,14 +171,15 @@ func (p *Proxy) addTargetRoute(w http.ResponseWriter, r *http.Request) {
 	msg := fmt.Sprintf("Port [%d]: Added URI routing for Target [%s], URL [%s], From [%s] To [%s]", p.Port, target.Name, target.Endpoint, from, to)
 	util.AddLogMessage(msg, r)
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, msg)
+	fmt.Fprintln(w, msg)
 }
 
-func (p *Proxy) addHeaderOrQueryMatch(w http.ResponseWriter, r *http.Request, isHeader bool) {
-	target := p.checkAndGetTarget(w, r)
-	if target == nil {
+func (p *HTTPProxy) addHeaderOrQueryMatch(w http.ResponseWriter, r *http.Request, isHeader bool) {
+	t := p.checkAndGetTarget(w, r)
+	if t == nil {
 		return
 	}
+	target := t.(*HTTPTarget)
 	key := util.LowerAndTrim(util.GetStringParamValue(r, "key"))
 	value := util.LowerAndTrim(util.GetStringParamValue(r, "value"))
 	msg := ""
@@ -320,14 +199,15 @@ func (p *Proxy) addHeaderOrQueryMatch(w http.ResponseWriter, r *http.Request, is
 	target.lock.Unlock()
 	util.AddLogMessage(msg, r)
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, msg)
+	fmt.Fprintln(w, msg)
 }
 
-func (p *Proxy) addTargetHeaderOrQuery(w http.ResponseWriter, r *http.Request, isHeader bool) {
-	target := p.checkAndGetTarget(w, r)
-	if target == nil {
+func (p *HTTPProxy) addTargetHeaderOrQuery(w http.ResponseWriter, r *http.Request, isHeader bool) {
+	t := p.checkAndGetTarget(w, r)
+	if t == nil {
 		return
 	}
+	target := t.(*HTTPTarget)
 	key := util.GetStringParamValue(r, "key")
 	value := util.GetStringParamValue(r, "value")
 	msg := ""
@@ -342,14 +222,15 @@ func (p *Proxy) addTargetHeaderOrQuery(w http.ResponseWriter, r *http.Request, i
 	target.lock.Unlock()
 	util.AddLogMessage(msg, r)
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, msg)
+	fmt.Fprintln(w, msg)
 }
 
-func (p *Proxy) removeTargetHeaderOrQuery(w http.ResponseWriter, r *http.Request, isHeader bool) {
-	target := p.checkAndGetTarget(w, r)
-	if target == nil {
+func (p *HTTPProxy) removeTargetHeaderOrQuery(w http.ResponseWriter, r *http.Request, isHeader bool) {
+	t := p.checkAndGetTarget(w, r)
+	if t == nil {
 		return
 	}
+	target := t.(*HTTPTarget)
 	key := util.GetStringParamValue(r, "key")
 	msg := ""
 	target.lock.Lock()
@@ -363,84 +244,11 @@ func (p *Proxy) removeTargetHeaderOrQuery(w http.ResponseWriter, r *http.Request
 	target.lock.Unlock()
 	util.AddLogMessage(msg, r)
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, msg)
-}
-
-func (p *Proxy) setProxyTargetDelay(w http.ResponseWriter, r *http.Request) {
-	target := p.checkAndGetTarget(w, r)
-	if target == nil {
-		return
-	}
-	msg := ""
-	if delayMin, delayMax, delayCount, ok := util.GetDurationParam(r, "delay"); ok {
-		target.DelayMin = delayMin
-		target.DelayMax = delayMax
-		target.DelayCount = delayCount
-		if delayMin > 0 || delayMax > 0 {
-			if delayCount == 0 {
-				target.DelayCount = -1 //forever
-			}
-		}
-		msg = fmt.Sprintf("Proxy[%d]: Target [%s] Delay set to [Min=%s, Max=%s, Count=%d]", p.Port, target.Name, delayMin, delayMax, delayCount)
-		w.WriteHeader(http.StatusOK)
-	} else {
-		msg = fmt.Sprintf("Invalid delay param [%s]", util.GetStringParamValue(r, "delay"))
-		w.WriteHeader(http.StatusBadRequest)
-	}
-	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
 }
 
-func (p *Proxy) clearProxyTargetDelay(w http.ResponseWriter, r *http.Request) {
-	target := p.checkAndGetTarget(w, r)
-	if target == nil {
-		return
-	}
-	msg := ""
-	target.DelayMin = 0
-	target.DelayMax = 0
-	target.DelayCount = -1
-	msg = fmt.Sprintf("Proxy[%d]: Target [%s] Delay Cleared", p.Port, target.Name)
-	w.WriteHeader(http.StatusOK)
-	util.AddLogMessage(msg, r)
-	fmt.Fprintln(w, msg)
-
-}
-
-func (p *Proxy) setProxyTargetDrops(w http.ResponseWriter, r *http.Request) {
-	target := p.checkAndGetTarget(w, r)
-	if target == nil {
-		return
-	}
-	msg := ""
-	if drop := util.GetIntParamValue(r, "drop"); drop > 0 {
-		target.DropPct = drop
-		msg = fmt.Sprintf("Proxy[%d]: Will drop [%d]%s packets for Target [%s] ", p.Port, drop, "%", target.Name)
-		w.WriteHeader(http.StatusOK)
-	} else {
-		msg = fmt.Sprintf("Invalid drops param [%s]", util.GetStringParamValue(r, "drops"))
-		w.WriteHeader(http.StatusBadRequest)
-	}
-	util.AddLogMessage(msg, r)
-	fmt.Fprintln(w, msg)
-}
-
-func (p *Proxy) clearProxyTargetDrops(w http.ResponseWriter, r *http.Request) {
-	target := p.checkAndGetTarget(w, r)
-	if target == nil {
-		return
-	}
-	msg := ""
-	target.DropPct = 0
-	msg = fmt.Sprintf("Proxy[%d]: Target [%s] Drops Cleared", p.Port, target.Name)
-	w.WriteHeader(http.StatusOK)
-	util.AddLogMessage(msg, r)
-	fmt.Fprintln(w, msg)
-
-}
-
-func (p *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
-	target := newProxyTarget()
+func (p *HTTPProxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
+	target := newHTTPTarget("", "")
 	payload := util.Read(r.Body)
 	if err := util.ReadJson(payload, target); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -457,43 +265,38 @@ func (p *Proxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
 			map[string]interface{}{"error": msg, "payload": payload}, r)
 		return
 	}
-	if strings.EqualFold(target.Protocol, "tcp") {
-		target.isTCP = true
-		p.TCPTargets[target.Name] = target
-	} else {
-		if target.Protocol == "" {
-			target.Protocol = "HTTP/1.1"
+	if target.Protocol == "" {
+		target.Protocol = "HTTP/1.1"
+	}
+	if _, err := p.toInvocationSpec(target, "/", nil); err == nil {
+		p.deleteProxyTarget(target.Name)
+		p.lock.Lock()
+		defer p.lock.Unlock()
+		if target.StripURI != "" {
+			target.stripURIRegExp = regexp.MustCompile("^(.*)(" + target.StripURI + ")(/.+).*$")
 		}
-		if _, err := p.toInvocationSpec(target, "/", nil); err == nil {
-			p.deleteProxyTarget(target.Name)
-			p.lock.Lock()
-			defer p.lock.Unlock()
-			if target.StripURI != "" {
-				target.stripURIRegExp = regexp.MustCompile("^(.*)(" + target.StripURI + ")(/.+).*$")
-			}
-			p.HTTPTargets[target.Name] = target
-			p.addHeadersAndQueriesMatch(target)
-			if err := p.addRoutes(target); err == nil {
-				util.AddLogMessage(fmt.Sprintf("Added proxy target: %+v", target), r)
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprintf(w, "Port [%d]: Added proxy target: %s\n", p.Port, util.ToJSONText(target))
-				events.SendRequestEventJSON("Proxy Target Added", target.Name, target, r)
-			} else {
-				w.WriteHeader(http.StatusBadRequest)
-				events.SendRequestEventJSON("Proxy Target Rejected", err.Error(),
-					map[string]interface{}{"error": err.Error(), "payload": payload}, r)
-				fmt.Fprintf(w, "Failed to add URI Match with error: %s\n", err.Error())
-			}
+		p.Targets[target.Name] = target
+		p.addHeadersAndQueriesMatch(target)
+		if err := p.addRoutes(target); err == nil {
+			util.AddLogMessage(fmt.Sprintf("Added proxy target: %+v", target), r)
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, "Port [%d]: Added proxy target: %s\n", p.Port, util.ToJSONText(target))
+			events.SendRequestEventJSON("Proxy Target Added", target.Name, target, r)
 		} else {
 			w.WriteHeader(http.StatusBadRequest)
 			events.SendRequestEventJSON("Proxy Target Rejected", err.Error(),
 				map[string]interface{}{"error": err.Error(), "payload": payload}, r)
-			fmt.Fprintf(w, "Invalid target: %s\n", err.Error())
+			fmt.Fprintf(w, "Failed to add URI Match with error: %s\n", err.Error())
 		}
+	} else {
+		w.WriteHeader(http.StatusBadRequest)
+		events.SendRequestEventJSON("Proxy Target Rejected", err.Error(),
+			map[string]interface{}{"error": err.Error(), "payload": payload}, r)
+		fmt.Fprintf(w, "Invalid target: %s\n", err.Error())
 	}
 }
 
-func (p *Proxy) addHeadersAndQueriesMatch(target *ProxyTarget) {
+func (p *HTTPProxy) addHeadersAndQueriesMatch(target *HTTPTarget) {
 	headerMatches := [][]string{}
 	queryMatches := [][]string{}
 	if target.MatchAny != nil {
@@ -523,7 +326,7 @@ func (p *Proxy) addHeadersAndQueriesMatch(target *ProxyTarget) {
 	}
 }
 
-func (p *Proxy) addHeaderCaptures(target *ProxyTarget, header, value string) {
+func (p *HTTPProxy) addHeaderCaptures(target *HTTPTarget, header, value string) {
 	if value != "" {
 		if captureKey, found := util.GetFillerUnmarked(value); found {
 			if target.captureHeaders == nil {
@@ -535,7 +338,7 @@ func (p *Proxy) addHeaderCaptures(target *ProxyTarget, header, value string) {
 	}
 }
 
-func (p *Proxy) addQueryCaptures(target *ProxyTarget, key, value string) {
+func (p *HTTPProxy) addQueryCaptures(target *HTTPTarget, key, value string) {
 	if value != "" {
 		if filler, found := util.GetFillerUnmarked(value); found {
 			if target.captureQuery == nil {
@@ -547,7 +350,7 @@ func (p *Proxy) addQueryCaptures(target *ProxyTarget, key, value string) {
 	}
 }
 
-func (p *Proxy) addRoutes(target *ProxyTarget) error {
+func (p *HTTPProxy) addRoutes(target *HTTPTarget) error {
 	for uri := range target.Routes {
 		if strings.Compare(uri, "/") == 0 {
 			to := target.Routes[uri]
@@ -562,13 +365,11 @@ func (p *Proxy) addRoutes(target *ProxyTarget) error {
 	return nil
 }
 
-func (p *Proxy) addURIMatch(target *ProxyTarget, uri string) error {
+func (p *HTTPProxy) addURIMatch(target *HTTPTarget, uri string) error {
 	uri = strings.ToLower(uri)
 	if strings.EqualFold(uri, "/") {
 		uri = "/*"
-	}
-	if strings.HasSuffix(uri, "*") {
-		target.matchAllURIs = true
+		target.matchRootURI = true
 	}
 	if _, re, router, err := util.RegisterURIRouteAndGetRegex(uri, p.router, handleURI); err == nil {
 		target.uriRegexps[uri] = re
@@ -580,56 +381,7 @@ func (p *Proxy) addURIMatch(target *ProxyTarget, uri string) error {
 	return nil
 }
 
-func (p *Proxy) deleteProxyTarget(targetName string) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	delete(p.HTTPTargets, targetName)
-	delete(p.TCPTargets, targetName)
-}
-
-func (p *Proxy) removeProxyTarget(w http.ResponseWriter, r *http.Request) {
-	target := p.checkAndGetTarget(w, r)
-	if target == nil {
-		return
-	}
-	p.deleteProxyTarget(target.Name)
-	util.AddLogMessage(fmt.Sprintf("Removed proxy target: %+v", target), r)
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Port [%d]: Removed proxy target: %s\n", p.Port, util.ToJSONText(target))
-	events.SendRequestEventJSON("Proxy Target Removed", target.Name, target, r)
-}
-
-func (p *Proxy) enableProxyTarget(w http.ResponseWriter, r *http.Request) {
-	target := p.checkAndGetTarget(w, r)
-	if target == nil {
-		return
-	}
-	p.lock.Lock()
-	target.Enabled = true
-	p.lock.Unlock()
-	msg := fmt.Sprintf("Port [%d]: Enabled proxy target: %s", p.Port, target.Name)
-	util.AddLogMessage(msg, r)
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, msg)
-	events.SendRequestEvent("Proxy Target Enabled", msg, r)
-}
-
-func (p *Proxy) disableProxyTarget(w http.ResponseWriter, r *http.Request) {
-	target := p.checkAndGetTarget(w, r)
-	if target == nil {
-		return
-	}
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	target.Enabled = false
-	msg := fmt.Sprintf("Port [%d]: Disabled proxy target: %s", p.Port, target.Name)
-	util.AddLogMessage(msg, r)
-	events.SendRequestEvent("Proxy Target Disabled", msg, r)
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, msg)
-}
-
-func (p *Proxy) prepareTargetHeaders(target *ProxyTarget, r *http.Request) [][]string {
+func (p *HTTPProxy) prepareTargetHeaders(target *HTTPTarget, r *http.Request) [][]string {
 	var headers [][]string = [][]string{}
 	for k, values := range r.Header {
 		for _, v := range values {
@@ -663,7 +415,7 @@ func (p *Proxy) prepareTargetHeaders(target *ProxyTarget, r *http.Request) [][]s
 	return headers
 }
 
-func (p *Proxy) prepareTargetURL(target *ProxyTarget, uri string, r *http.Request) string {
+func (p *HTTPProxy) prepareTargetURL(target *HTTPTarget, uri string, r *http.Request) string {
 	url := target.Endpoint
 	path := r.URL.Path
 	targetURI := path
@@ -699,7 +451,7 @@ func (p *Proxy) prepareTargetURL(target *ProxyTarget, uri string, r *http.Reques
 	return url
 }
 
-func (p *Proxy) prepareTargetQuery(url string, target *ProxyTarget, r *http.Request) string {
+func (p *HTTPProxy) prepareTargetQuery(url string, target *HTTPTarget, r *http.Request) string {
 	var params [][]string = [][]string{}
 	for k, values := range r.URL.Query() {
 		for _, v := range values {
@@ -739,7 +491,7 @@ func (p *Proxy) prepareTargetQuery(url string, target *ProxyTarget, r *http.Requ
 	return url
 }
 
-func (p *Proxy) toInvocationSpec(target *ProxyTarget, uri string, r *http.Request) (*invocation.InvocationSpec, error) {
+func (p *HTTPProxy) toInvocationSpec(target *HTTPTarget, uri string, r *http.Request) (*invocation.InvocationSpec, error) {
 	is := &invocation.InvocationSpec{}
 	is.Name = target.Name
 	is.Method = "GET"
@@ -758,39 +510,7 @@ func (p *Proxy) toInvocationSpec(target *ProxyTarget, uri string, r *http.Reques
 	return is, invocation.ValidateSpec(is)
 }
 
-func (p *Proxy) applyDelay(target *ProxyTarget, who string, w http.ResponseWriter) bool {
-	if target.DelayCount > 0 || target.DelayCount == -1 {
-		delay := util.RandomDuration(target.DelayMin, target.DelayMax)
-		log.Printf("Proxy[%d]: Delaying [%s] for Target [%s] by [%s]\n", p.Port, who, target.Name, delay)
-		if w != nil {
-			w.Header().Add(constants.HeaderGotoProxyDelay, delay.String())
-		}
-		time.Sleep(delay)
-		if target.DelayCount > 0 {
-			target.lock.Lock()
-			target.DelayCount--
-			target.lock.Unlock()
-		}
-		return true
-	}
-	return false
-}
-
-func (p *Proxy) shouldDrop(target *ProxyTarget) bool {
-	target.lock.Lock()
-	defer target.lock.Unlock()
-	if target.DropPct <= 0 {
-		return false
-	}
-	target.writeSinceLastDrop++
-	if target.writeSinceLastDrop >= (100 / target.DropPct) {
-		target.writeSinceLastDrop = 0
-		return true
-	}
-	return false
-}
-
-func (p *Proxy) invokeTargets(targetsMatches map[string]*TargetMatchInfo, w http.ResponseWriter, r *http.Request) {
+func (p *HTTPProxy) invokeTargets(targetsMatches map[string]*TargetMatchInfo, w http.ResponseWriter, r *http.Request) {
 	if len(targetsMatches) > 0 {
 		responses := []*invocation.InvocationResultResponse{}
 		maxTargetDelay := 0 * time.Second
@@ -798,7 +518,7 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*TargetMatchInfo, w http
 		for _, m := range targetsMatches {
 			dropTarget := p.shouldDrop(m.target)
 			if dropTarget && util.Random(5) < 3 {
-				p.HTTPTracker.incrementTargetDropCount(m.target, r.RequestURI, true)
+				p.Tracker.IncrementTargetDropCount(m.target.Name, r.RequestURI, true)
 				util.AddHeaderWithSuffix(constants.HeaderProxyRequestDropped, "|"+m.target.Name, "true", w.Header())
 				log.Printf("HTTP Proxy[%d]: Request dropped for target [%s] endpoint [%s]\n", p.Port, m.target.Name, m.target.Endpoint)
 				continue
@@ -809,7 +529,8 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*TargetMatchInfo, w http
 			}
 			p.applyDelay(m.target, m.target.Endpoint, w)
 			metrics.UpdateProxiedRequestCount(m.target.Name)
-			is, _ := p.toInvocationSpec(m.target, m.URI, r)
+			var t Target = m.target
+			is, _ := p.toInvocationSpec(t.(*HTTPTarget), m.URI, r)
 			if tracker, err := invocation.RegisterInvocation(is); err == nil {
 				m.target.lock.Lock()
 				m.target.callCount++
@@ -818,7 +539,7 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*TargetMatchInfo, w http
 				invocationResponses := invocation.StartInvocation(tracker, true)
 				events.SendRequestEventJSON("Proxy Target Invoked", m.target.Name, m.target, r)
 				if dropTarget {
-					p.HTTPTracker.incrementTargetDropCount(m.target, r.RequestURI, false)
+					p.Tracker.IncrementTargetDropCount(m.target.Name, r.RequestURI, false)
 					util.AddHeaderWithSuffix(constants.HeaderProxyResponseDropped, "|"+m.target.Name, "true", w.Header())
 					log.Printf("HTTP Proxy[%d]: Response dropped for target [%s] endpoint [%s]\n", p.Port, m.target.Name, m.target.Endpoint)
 				} else {
@@ -827,9 +548,9 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*TargetMatchInfo, w http
 					}
 					responses = append(responses, invocationResponses[0].Response)
 				}
-				util.AddHeaderWithSuffix(constants.HeaderUpstreamStatus, "|"+m.target.Name,
+				util.AddHeaderWithSuffix(constants.HeaderGotoProxyUpstreamStatus, "_"+m.target.Name,
 					invocationResponses[0].Response.Status, w.Header())
-				util.AddHeaderWithSuffix(constants.HeaderUpstreamTook, "|"+m.target.Name,
+				util.AddHeaderWithSuffix(constants.HeaderGotoProxyUpstreamTook, "_"+m.target.Name,
 					invocationResponses[0].TookNanos.String(), w.Header())
 			} else {
 				log.Println(err.Error())
@@ -863,7 +584,7 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*TargetMatchInfo, w http
 	}
 }
 
-func (p *Proxy) getMatchingTargetsForRequest(r *http.Request) map[string]*TargetMatchInfo {
+func (p *HTTPProxy) getMatchingTargetsForRequest(r *http.Request) map[string]*TargetMatchInfo {
 	rs := util.GetRequestStore(r)
 	if rs.ProxyTargets != nil {
 		return rs.ProxyTargets.(map[string]*TargetMatchInfo)
@@ -874,7 +595,7 @@ func (p *Proxy) getMatchingTargetsForRequest(r *http.Request) map[string]*Target
 }
 
 func handleURI(w http.ResponseWriter, r *http.Request) {
-	p := getPortProxy(r)
+	p := getHTTPProxyForRequestPort(r)
 	targets := p.getMatchingTargetsForRequest(r)
 	if len(targets) > 0 {
 		util.AddLogMessage(fmt.Sprintf("Proxying to matching targets %s", util.GetMapKeys(targets)), r)
@@ -883,35 +604,36 @@ func handleURI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (p *Proxy) incrementMatchCounts(matches map[string]*TargetMatchInfo, r *http.Request) {
-	p.HTTPTracker.incrementRequestCounts(r.RequestURI)
+func (p *HTTPProxy) incrementMatchCounts(matches map[string]*TargetMatchInfo, r *http.Request) {
+	p.Tracker.IncrementRequestCounts(r.RequestURI)
 	for _, m := range matches {
-		p.HTTPTracker.incrementTargetRequestCounts(m.target, r.RequestURI)
+		p.Tracker.IncrementTargetRequestCounts(m.target.Name, r.RequestURI)
 		if m.URI != "" {
-			p.HTTPTracker.incrementTargetMatchCounts(m.target, m.URI, "", "", "", "")
+			p.Tracker.IncrementTargetMatchCounts(m.target.Name, m.URI, "", "", "", "")
 		}
 		for _, hv := range m.Headers {
-			p.HTTPTracker.incrementTargetMatchCounts(m.target, "", hv[0], hv[1], "", "")
+			p.Tracker.IncrementTargetMatchCounts(m.target.Name, "", hv[0], hv[1], "", "")
 		}
 		for _, qv := range m.Query {
-			p.HTTPTracker.incrementTargetMatchCounts(m.target, "", "", "", qv[0], qv[1])
+			p.Tracker.IncrementTargetMatchCounts(m.target.Name, "", "", "", qv[0], qv[1])
 		}
 	}
 }
 
-func (p *Proxy) checkMatchingTargetsForRequest(r *http.Request) map[string]*TargetMatchInfo {
+func (p *HTTPProxy) checkMatchingTargetsForRequest(r *http.Request) map[string]*TargetMatchInfo {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	matchInfo := map[string]*TargetMatchInfo{}
-	for name, target := range p.HTTPTargets {
+	for name, t := range p.Targets {
+		target := t.(*HTTPTarget)
 		if target.Enabled {
-			if target.matchAllURIs {
-				matchInfo[name] = &TargetMatchInfo{target: target, URI: "/"}
+			if target.matchRootURI {
+				matchInfo[name] = &TargetMatchInfo{target: target.ProxyTarget, URI: "/"}
 			}
 			//Even if all URIs allowed, still look for a better match
 			for uri, re := range target.uriRegexps {
 				if uri != "/*" && re.MatchString(r.RequestURI) {
-					matchInfo[name] = &TargetMatchInfo{target: target, URI: uri}
+					matchInfo[name] = &TargetMatchInfo{target: target.ProxyTarget, URI: uri}
 					break
 				}
 			}
@@ -985,29 +707,10 @@ func (p *Proxy) checkMatchingTargetsForRequest(r *http.Request) map[string]*Targ
 	return matchInfo
 }
 
-func (p *Proxy) getMatchingTCPTarget(sni string) *TargetMatchInfo {
-	for _, target := range p.TCPTargets {
-		if sni == "" {
-			return &TargetMatchInfo{target: target}
-		}
-		if target.MatchAny != nil && target.MatchAny.sniRegexp != nil {
-			if target.MatchAny.sniRegexp.MatchString(sni) {
-				return &TargetMatchInfo{target: target, SNI: sni}
-			}
-		}
-		if target.MatchAll != nil && target.MatchAll.sniRegexp != nil {
-			if target.MatchAll.sniRegexp.MatchString(sni) {
-				return &TargetMatchInfo{target: target, SNI: sni}
-			}
-		}
-	}
-	return nil
-}
-
 func WillProxyHTTP(r *http.Request, rs *util.RequestStore) bool {
-	p := getPortProxy(r)
+	p := getHTTPProxyForRequestPort(r)
 	rs.WillProxy = false
-	if p.Enabled && p.hasAnyHTTPTargets() && !status.IsForcedStatus(r) {
+	if p.Enabled && p.hasAnyTargets() && !status.IsForcedStatus(r) {
 		matches := p.checkMatchingTargetsForRequest(r)
 		rs.WillProxy = len(matches) > 0
 		if rs.WillProxy {
@@ -1017,14 +720,9 @@ func WillProxyHTTP(r *http.Request, rs *util.RequestStore) bool {
 	return rs.WillProxy
 }
 
-func WillProxyTCP(port int) bool {
-	p := getProxyForPort(port)
-	return p.Enabled && p.hasAnyTCPTargets()
-}
-
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := getPortProxy(r)
+		p := getHTTPProxyForRequestPort(r)
 		rs := util.GetRequestStore(r)
 		if p.Enabled && rs.WillProxy {
 			p.router.ServeHTTP(w, r)

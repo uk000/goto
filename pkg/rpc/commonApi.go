@@ -32,23 +32,24 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	rpcRouter := util.PathRouter(r, "/{rpc:grpc|jsonrpc}/services")
-	util.AddRouteWithPort(rpcRouter, "", getServices, "GET")
-	util.AddRouteWithPort(rpcRouter, "/{service}", getService, "GET")
-	util.AddRouteWithPort(rpcRouter, "/{service}/track", trackService, "POST")
-	util.AddRouteWithPort(rpcRouter, "/{service}/track/headers/{headers}", trackService, "POST")
-	util.AddRouteWithPort(rpcRouter, "/{service}/track/{header}={value}", trackService, "POST")
-	util.AddRouteWithPort(rpcRouter, "/{service}/tracking", getServiceTracking, "GET")
-	util.AddRouteWithPort(rpcRouter, "/{service}/{method}/payload/clear", clearServiceResponsePayload, "POST")
-	util.AddRouteWithPort(rpcRouter, "/{service}/{method}/payload", setServiceResponsePayload, "POST")
-	util.AddRouteWithPort(rpcRouter, "/{service}/{method}/payload/header/{header}={value}", setServiceResponsePayload, "POST")
-	util.AddRouteWithPort(rpcRouter, "/{service}/{method}/payload/header/{header}", setServiceResponsePayload, "POST")
-	util.AddRouteWithPort(rpcRouter, "/{service}/{method}/payload/body~{regexes}", setServiceResponsePayload, "POST")
-	util.AddRouteWithPort(rpcRouter, "/{service}/{method}/payload/body/paths/{paths}", setServiceResponsePayload, "POST")
-	util.AddRouteWithPort(rpcRouter, "/{service}/{method}/payload/transform", setServicePayloadTransform, "POST")
-	util.AddRouteWithPort(rpcRouter, "/{service}/{method}/payload/stream/count={count}/delay={delay}", setServiceResponsePayload, "POST")
-	util.AddRouteWithPort(rpcRouter, "/{service}/{method}/payload/stream/count={count}/delay={delay}/header/{header}={value}", setServiceResponsePayload, "POST")
-	util.AddRouteWithPort(rpcRouter, "/{service}/{method}/payload/stream/count={count}/delay={delay}/header/{header}", setServiceResponsePayload, "POST")
+	rpcRouter := util.PathRouter(r, "/{rpc:grpc|jsonrpc}")
+	rpcServiceRouter := util.PathRouter(rpcRouter, "/services")
+	util.AddRouteWithPort(rpcServiceRouter, "", getServices, "GET")
+	util.AddRouteWithPort(rpcServiceRouter, "/{service}", getService, "GET")
+	util.AddRouteWithPort(rpcServiceRouter, "/{service}/track", trackService, "POST")
+	util.AddRouteWithPort(rpcServiceRouter, "/{service}/track/headers/{headers}", trackService, "POST")
+	util.AddRouteWithPort(rpcServiceRouter, "/{service}/track/{header}={value}", trackService, "POST")
+	util.AddRouteWithPort(rpcServiceRouter, "/{service}/tracking", getServiceTracking, "GET")
+	util.AddRouteWithPort(rpcServiceRouter, "/{service}/{method}/payload/clear", clearServiceResponsePayload, "POST")
+	util.AddRouteWithPort(rpcServiceRouter, "/{service}/{method}/payload", setServiceResponsePayload, "POST")
+	util.AddRouteWithPort(rpcServiceRouter, "/{service}/{method}/payload/header/{header}={value}", setServiceResponsePayload, "POST")
+	util.AddRouteWithPort(rpcServiceRouter, "/{service}/{method}/payload/header/{header}", setServiceResponsePayload, "POST")
+	util.AddRouteWithPort(rpcServiceRouter, "/{service}/{method}/payload/body~{regexes}", setServiceResponsePayload, "POST")
+	util.AddRouteWithPort(rpcServiceRouter, "/{service}/{method}/payload/body/paths/{paths}", setServiceResponsePayload, "POST")
+	util.AddRouteWithPort(rpcServiceRouter, "/{service}/{method}/payload/transform", setServicePayloadTransform, "POST")
+	util.AddRouteWithPort(rpcServiceRouter, "/{service}/{method}/payload/stream/count={count}/delay={delay}", setServiceResponsePayload, "POST")
+	util.AddRouteWithPort(rpcServiceRouter, "/{service}/{method}/payload/stream/count={count}/delay={delay}/header/{header}={value}", setServiceResponsePayload, "POST")
+	util.AddRouteWithPort(rpcServiceRouter, "/{service}/{method}/payload/stream/count={count}/delay={delay}/header/{header}", setServiceResponsePayload, "POST")
 }
 
 func getServices(w http.ResponseWriter, r *http.Request) {
@@ -58,11 +59,9 @@ func getServices(w http.ResponseWriter, r *http.Request) {
 }
 
 func getService(w http.ResponseWriter, r *http.Request) {
-	msg := ""
 	rpcType := util.GetStringParamValue(r, "rpc")
-	var rs RPCService
-	rs, _, _, msg = CheckService(w, r, GetServiceRegistry[rpcType](util.GetRequestOrListenerPortNum(r)))
-	if rs != nil {
+	rs, _, _, msg, ok := CheckService(w, r, GetServiceRegistry[rpcType](util.GetRequestOrListenerPortNum(r)))
+	if ok {
 		util.WriteYaml(w, rs)
 		msg = fmt.Sprintf("Service [%s] details served", rs.GetName())
 	} else {

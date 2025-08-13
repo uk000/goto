@@ -18,13 +18,17 @@ package grpcapi
 
 import (
 	"fmt"
+	"goto/pkg/proxy"
 	"goto/pkg/rpc"
 	"goto/pkg/rpc/grpc"
+	gotogrpc "goto/pkg/rpc/grpc"
+	grpcclient "goto/pkg/rpc/grpc/client"
 	grpcserver "goto/pkg/rpc/grpc/server"
 	"goto/pkg/server/listeners"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/mux"
@@ -33,18 +37,31 @@ import (
 var (
 	Middleware     = middleware.NewMiddleware("grpc", setRoutes, nil)
 	ActiveServices = map[int]map[string]*grpc.GRPCService{}
+	GRPCFactory    = grpcserver.GRPCManager
 	lock           = sync.RWMutex{}
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	grpcRouter := util.PathRouter(r, "/grpc")
 	util.AddRouteWithPort(grpcRouter, "/services/active", getActiveServices, "GET")
-	util.AddRouteWithPort(grpcRouter, "/port/{port}/open", openGRPCPort, "POST")
-	util.AddRouteWithPort(grpcRouter, "/port/{port}/services", getActiveServices, "GET")
-	util.AddRouteWithPort(grpcRouter, "/port/{port}/serve/{service}", serveService, "POST")
-	util.AddRouteWithPort(grpcRouter, "/port/{port}/stop/{service}", stopService, "POST")
+	util.AddRouteWithPort(grpcRouter, "/open", openGRPCPort, "POST")
+	util.AddRouteWithPort(grpcRouter, "/services", getActiveServices, "GET")
+	util.AddRouteWithPort(grpcRouter, "/serve/{service}", serveService, "POST")
+	util.AddRouteWithPort(grpcRouter, "/stop/{service}", stopService, "POST")
 	util.AddRouteWithPort(grpcRouter, "/services/{service}/serve", serveService, "POST")
 	util.AddRouteWithPort(grpcRouter, "/services/{service}/stop", stopService, "POST")
+
+	util.AddRouteWithPort(grpcRouter, "/services/reflect/{upstream}", loadReflectedServices, "POST")
+
+	util.AddRouteWithPort(grpcRouter, "/proxy/status", getGRPCProxyDetails, "GET")
+	util.AddRouteWithPort(grpcRouter, "/proxy/clear", clearGRPCProxies, "POST")
+	util.AddRouteWithPort(grpcRouter, "/proxy/{service}/{upstream}/tee/{teeport}", proxyGRPCService, "POST")
+	util.AddRouteWithPort(grpcRouter, "/proxy/{service}/{upstream}/{targetService}/tee/{teeport}", proxyGRPCService, "POST")
+	util.AddRouteWithPort(grpcRouter, "/proxy/{service}/{upstream}/{targetService}", proxyGRPCService, "POST")
+	util.AddRouteWithPort(grpcRouter, "/proxy/{service}/{upstream}", proxyGRPCService, "POST")
+	util.AddRouteWithPort(grpcRouter, "/proxy/{service}/{upstream}/{targetService}/delay/{delay}", proxyGRPCService, "POST")
+	util.AddRouteWithPort(grpcRouter, "/proxy/{service}/{upstream}/delay/{delay}", proxyGRPCService, "POST")
+	util.AddRouteWithPort(grpcRouter, "/proxy/all/{upstream}", proxyGRPCService, "POST")
 }
 
 func openGRPCPort(w http.ResponseWriter, r *http.Request) {
@@ -55,7 +72,7 @@ func openGRPCPort(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusBadRequest
 		msg = fmt.Sprintf("Invalid port [%d]", port)
 	} else if l, err := listeners.AddGRPCListener(port, true); err == nil {
-		grpcserver.Start(l)
+		GRPCFactory.ServeListener(l)
 		msg = fmt.Sprintf("Opened GRPC listener on port [%d]", port)
 	} else {
 		status = http.StatusInternalServerError
@@ -67,40 +84,36 @@ func openGRPCPort(w http.ResponseWriter, r *http.Request) {
 }
 
 func serveService(w http.ResponseWriter, r *http.Request) {
-	msg := ""
-	var rs rpc.RPCService
-	rs, _, _, msg = rpc.CheckService(w, r, grpc.ServiceRegistry)
-	if rs != nil {
+	rs, _, _, msg, ok := rpc.CheckService(w, r, grpc.ServiceRegistry)
+	if ok {
 		service := rs.(*grpc.GRPCService)
-		l := listeners.GetRequestedListener(r)
-		grpcserver.Serve(service, l)
+		port := util.GetRequestOrListenerPortNum(r)
+		GRPCFactory.Serve(port, service)
 		lock.Lock()
-		if ActiveServices[l.Port] == nil {
-			ActiveServices[l.Port] = map[string]*grpc.GRPCService{}
+		if ActiveServices[port] == nil {
+			ActiveServices[port] = map[string]*grpc.GRPCService{}
 		}
-		ActiveServices[l.Port][service.Name] = service
+		ActiveServices[port][service.Name] = service
 		lock.Unlock()
-		msg = fmt.Sprintf("Service [%s] registered for serving on port [%d]", service.Name, l.Port)
+		msg = fmt.Sprintf("Service [%s] registered for serving on port [%d]", service.Name, port)
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
 
 func stopService(w http.ResponseWriter, r *http.Request) {
-	msg := ""
-	var rs rpc.RPCService
-	rs, _, _, msg = rpc.CheckService(w, r, grpc.ServiceRegistry)
-	if rs != nil {
+	rs, _, _, msg, ok := rpc.CheckService(w, r, grpc.ServiceRegistry)
+	if ok {
 		service := rs.(*grpc.GRPCService)
-		l := listeners.GetRequestedListener(r)
-		grpcserver.StopService(service, l)
+		port := util.GetRequestOrListenerPortNum(r)
+		GRPCFactory.StopService(port, service)
 		lock.Lock()
-		delete(ActiveServices[l.Port], service.Name)
-		if len(ActiveServices[l.Port]) == 0 {
-			delete(ActiveServices, l.Port)
+		delete(ActiveServices[port], service.Name)
+		if len(ActiveServices[port]) == 0 {
+			delete(ActiveServices, port)
 		}
 		lock.Unlock()
-		msg = fmt.Sprintf("Service [%s] registered for serving on port [%d]", service.Name, l.Port)
+		msg = fmt.Sprintf("Service [%s] registered for serving on port [%d]", service.Name, port)
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
@@ -108,9 +121,81 @@ func stopService(w http.ResponseWriter, r *http.Request) {
 
 func getActiveServices(w http.ResponseWriter, r *http.Request) {
 	port := util.GetIntParamValue(r, "port")
-	if port > 0 {
-		util.WriteJsonPayload(w, ActiveServices[port])
+	active := strings.Contains(r.RequestURI, "active")
+	if active {
+		if port > 0 {
+			util.WriteJsonPayload(w, ActiveServices[port])
+		} else {
+			util.WriteJsonPayload(w, ActiveServices)
+		}
 	} else {
-		util.WriteJsonPayload(w, ActiveServices)
+		util.WriteJsonPayload(w, gotogrpc.ServiceRegistry.Services)
 	}
+}
+
+func proxyGRPCService(w http.ResponseWriter, r *http.Request) {
+	rs, _, _, msg, ok := rpc.CheckService(w, r, grpc.ServiceRegistry)
+	upstream := util.GetStringParamValue(r, "upstream")
+	if ok {
+		targetService := util.GetStringParamValue(r, "targetService")
+		teeport := util.GetIntParamValue(r, "teeport")
+		delayMin, delayMax, delayCount, ok := util.GetDurationParam(r, "delay")
+		if !ok {
+			delayMin = 0
+			delayMax = 0
+			delayCount = 0
+		}
+		port := util.GetRequestOrListenerPortNum(r)
+		proxy := proxy.GetGRPCProxyForPort(port)
+		proxy.SetupGRPCProxy(rs.GetName(), targetService, nil, upstream, "", teeport, delayMin, delayMax, delayCount)
+		msg = fmt.Sprintf("Service [%s] will be proxied on port [%d] to upstream [%s] target service [%s]", rs.GetName(), port, upstream, targetService)
+	}
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
+}
+
+func getGRPCProxyDetails(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	proxy := proxy.GetGRPCProxyForPort(port)
+	util.WriteJsonPayload(w, proxy)
+	util.AddLogMessage("GRPC Proxy Details Returned", r)
+}
+
+func clearGRPCProxies(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	proxy := proxy.GetGRPCProxyForPort(port)
+	proxy.Init()
+	util.AddLogMessage("GRPC Proxy cleared", r)
+}
+
+func removeGRPCProxy(w http.ResponseWriter, r *http.Request) {
+	service := util.GetStringParamValue(r, "service")
+	port := util.GetRequestOrListenerPortNum(r)
+	proxy := proxy.GetGRPCProxyForPort(port)
+	proxy.RemoveProxy(service)
+	util.AddLogMessage(fmt.Sprintf("GRPC Proxy [%s] removed", service), r)
+}
+
+func loadReflectedServices(w http.ResponseWriter, r *http.Request) {
+	msg := ""
+	defer func() {
+		if msg != "" {
+			fmt.Fprintln(w, msg)
+			util.AddLogMessage(msg, r)
+		}
+	}()
+	upstream := util.GetStringParamValue(r, "upstream")
+	if upstream == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = "Missing upstream"
+		return
+	}
+	err := grpcclient.LoadRemoteReflectedServices(upstream)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = err.Error()
+		return
+	}
+	util.WriteJsonPayload(w, gotogrpc.ServiceRegistry.Services)
+	util.AddLogMessage("Remote services loaded", r)
 }

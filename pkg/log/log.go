@@ -164,6 +164,7 @@ func getLogLevels(w http.ResponseWriter, r *http.Request) {
 		"health":     global.Flags.EnablePeerHealthLogs,
 		"probe":      global.Flags.EnableProbeLogs,
 		"metrics":    global.Flags.EnableMetricsLogs,
+		"proxy":      global.Flags.EnableProxyDebugLogs,
 		"request":    global.Flags.LogRequestHeaders,
 		"response":   global.Flags.LogResponseHeaders,
 	}

@@ -66,6 +66,14 @@ func RunHttpServer() {
 	coreRouter.HandleFunc("/ui", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFileFS(w, r, staticUI, "ui/static/index.html")
 	}).Methods("GET")
+	coreRouter.HandleFunc("/routes", func(w http.ResponseWriter, r *http.Request) {
+		coreRouter.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
+			path, _ := route.GetPathTemplate()
+			methods, _ := route.GetMethods()
+			fmt.Fprintln(w, path, methods)
+			return nil
+		})
+	}).Methods("GET")
 	RootRouter = coreRouter.PathPrefix("").Subrouter()
 	RootRouter.SkipClean(true)
 	util.InitListenerRouter(RootRouter)
@@ -135,15 +143,15 @@ func ContextMiddleware(next http.Handler) http.Handler {
 			statusCodeText := strconv.Itoa(statusCode)
 			endTime := time.Now()
 			if rs.IsTunnelRequest {
-				w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoInAt, rs.TunnelCount), startTime.UTC().String())
-				w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoOutAt, rs.TunnelCount), endTime.UTC().String())
-				w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoTook, rs.TunnelCount), endTime.Sub(startTime).String())
+				w.Header().Add(fmt.Sprintf("%s-%d", HeaderGotoInAt, rs.TunnelCount), startTime.UTC().String())
+				w.Header().Add(fmt.Sprintf("%s-%d", HeaderGotoOutAt, rs.TunnelCount), endTime.UTC().String())
+				w.Header().Add(fmt.Sprintf("%s-%d", HeaderGotoTook, rs.TunnelCount), endTime.Sub(startTime).String())
 				w.Header()[HeaderGotoTunnel] = r.Header[HeaderGotoRequestedTunnel]
 			} else if rs.WillProxy {
-				irw.Header().Add(fmt.Sprintf("%s|Proxy", HeaderGotoInAt), startTime.UTC().String())
-				irw.Header().Add(fmt.Sprintf("%s|Proxy", HeaderGotoOutAt), endTime.UTC().String())
-				irw.Header().Add(fmt.Sprintf("%s|Proxy", HeaderGotoTook), endTime.Sub(startTime).String())
-				irw.Header().Add(fmt.Sprintf("%s|Proxy", HeaderGotoResponseStatus), statusCodeText)
+				irw.Header().Add(fmt.Sprintf("Proxy-%s", HeaderGotoInAt), startTime.UTC().String())
+				irw.Header().Add(fmt.Sprintf("Proxy-%s", HeaderGotoOutAt), endTime.UTC().String())
+				irw.Header().Add(fmt.Sprintf("Proxy-%s", HeaderGotoTook), endTime.Sub(startTime).String())
+				irw.Header().Add(fmt.Sprintf("Proxy-%s", HeaderGotoResponseStatus), statusCodeText)
 			} else {
 				w.Header().Add(HeaderGotoResponseStatus, statusCodeText)
 				w.Header().Add(HeaderGotoInAt, startTime.UTC().String())

@@ -19,12 +19,17 @@ package middleware
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"google.golang.org/grpc/peer"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/dynamicpb"
 )
 
 type GrpcHTTPRequestAdapter struct {
@@ -87,16 +92,18 @@ func (g *GrpcHTTPRequestAdapter) ToHTTPRequest() *http.Request {
 
 type GrpcHTTPResponseWriterAdapter struct {
 	HeaderMap   http.Header
-	Responses   [][]byte
+	Responses   []proto.Message
 	StatusCode  int
 	wroteHeader bool
+	desc        protoreflect.MessageDescriptor
 }
 
-func NewGrpcHTTPResponseWriterAdapter() *GrpcHTTPResponseWriterAdapter {
+func NewGrpcHTTPResponseWriterAdapter(desc protoreflect.MessageDescriptor) *GrpcHTTPResponseWriterAdapter {
 	return &GrpcHTTPResponseWriterAdapter{
 		HeaderMap:  make(http.Header),
-		Responses:  [][]byte{},
+		Responses:  []proto.Message{},
 		StatusCode: http.StatusOK,
+		desc:       desc,
 	}
 }
 
@@ -109,7 +116,11 @@ func (g *GrpcHTTPResponseWriterAdapter) Write(b []byte) (int, error) {
 		g.WriteHeader(http.StatusOK)
 	}
 	if len(b) > 0 {
-		g.Responses = append(g.Responses, b)
+		dmsg := dynamicpb.NewMessage(g.desc)
+		if err := protojson.Unmarshal(b, dmsg); err != nil {
+			return 0, fmt.Errorf("failed to unmarshal response to dynamic message: %w", err)
+		}
+		g.Responses = append(g.Responses, dmsg)
 	}
 	return len(b), nil
 }
@@ -126,7 +137,6 @@ func (g *GrpcHTTPResponseWriterAdapter) Status() int {
 	return g.StatusCode
 }
 
-// HTTPHeaderToMetadata converts an http.Header to metadata.MD.
 func HTTPToMDHeaders(h http.Header) map[string][]string {
 	md := make(map[string][]string)
 	for k, v := range h {
@@ -136,14 +146,6 @@ func HTTPToMDHeaders(h http.Header) map[string][]string {
 	return md
 }
 
-// ToMetadata converts the response headers to metadata.MD.
 func (g *GrpcHTTPResponseWriterAdapter) ToMetadata() map[string][]string {
 	return HTTPToMDHeaders(g.HeaderMap)
-}
-
-func foo(w http.ResponseWriter, r *http.Request) {
-}
-
-func bar(w *GrpcHTTPResponseWriterAdapter, r *GrpcHTTPRequestAdapter) {
-	foo(w, r.ToHTTPRequest())
 }

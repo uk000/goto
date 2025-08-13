@@ -29,15 +29,31 @@ message StreamConfig {
 }
 
 message Output {
-  string payload = 1;
-  string at = 2;
-  string gotoHost = 3;
-  int32  gotoPort = 4;
-  string viaGoto = 5;
+  string id = 1;
+  string payload = 2;
+  string at = 3;
+  string gotoHost = 4;
+  int32  gotoPort = 5;
+  string viaGoto = 6;
 }
 
 service Goto {
   rpc echo(Input) returns (Output) {}
+  rpc streamIn(stream Input) returns (Output) {}
+  rpc streamOut(StreamConfig) returns (stream Output) {}
+  rpc streamInOut(stream StreamConfig) returns (stream Output) {}
+}
+
+service Goto2 {
+  rpc echo(Input) returns (Output) {}
+  rpc streamIn(stream Input) returns (Output) {}
+  rpc streamOut(StreamConfig) returns (stream Output) {}
+  rpc streamInOut(stream StreamConfig) returns (stream Output) {}
+}
+
+service Goto3 {
+  rpc echo(Input) returns (Output) {}
+  rpc streamIn(stream Input) returns (Output) {}
   rpc streamOut(StreamConfig) returns (stream Output) {}
   rpc streamInOut(stream StreamConfig) returns (stream Output) {}
 }

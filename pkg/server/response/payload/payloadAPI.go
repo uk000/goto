@@ -24,7 +24,6 @@ import (
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -132,7 +131,7 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
 				port, uri, match, contentType, len(payload), err.Error())
 		}
 	} else if uri != "" {
-		pr.setURIResponsePayload(isGRPC, payload, binary, uri, contentType, nil)
+		pr.setURIResponsePayload(isGRPC, false, payload, binary, uri, contentType, nil)
 		msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] : content-type [%s], length [%d]",
 			port, uri, contentType, len(payload))
 	} else if header != "" {
@@ -167,6 +166,7 @@ func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPort(r)
 	pr := PayloadManager.getPortResponse(r)
 	isGRPC := util.GetStringParamValue(r, "grpc") != ""
+	isStream := strings.Contains(r.RequestURI, "stream")
 	contentType := r.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = ContentTypeJSON
@@ -175,7 +175,7 @@ func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
 	if err := util.ReadJsonPayload(r, &transforms); err == nil {
 		uri := util.GetStringParamValue(r, "uri")
 		if uri != "" && transforms != nil {
-			pr.setURIResponsePayload(isGRPC, nil, false, uri, contentType, transforms)
+			pr.setURIResponsePayload(isGRPC, isStream, nil, false, uri, contentType, transforms)
 			msg = fmt.Sprintf("Port [%s] transform paths set for URI [%s] : [%s: %+v]",
 				port, uri, contentType, util.ToJSONText(transforms))
 			events.SendRequestEvent("Response Payload Configured", msg, r)
@@ -270,16 +270,8 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Goto-Stream-Duration", duration.String())
 	}
 
-	var flusher http.Flusher
-	var writer io.Writer
-	if f, ok := w.(http.Flusher); ok {
-		flusher = f
-		if irw, ok := w.(*intercept.InterceptResponseWriter); ok {
-			irw.SetChunked()
-		}
-		writer = w
-	}
-	if writer == nil && flusher == nil {
+	fw := intercept.NewFlushWriter(r, w)
+	if fw == nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintln(w, "Cannot stream")
 		return
@@ -300,10 +292,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
 		if end > payloadSize {
 			end = payloadSize
 		}
-		writer.Write(payload[start:end])
-		if flusher != nil {
-			flusher.Flush()
-		}
+		fw.Write(payload[start:end])
 		payloadIndex++
 		if payloadIndex == payloadChunkCount {
 			if repeat {

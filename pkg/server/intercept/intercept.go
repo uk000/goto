@@ -62,16 +62,15 @@ func GetConn(r *http.Request) net.Conn {
 	return nil
 }
 
-func NewFlushWriter(r *http.Request, w io.Writer) FlushWriter {
+func NewFlushWriter(r *http.Request, w io.Writer) *FlushWriter {
 	rs := util.GetRequestStore(r)
-	var flusher http.Flusher
 	if f, ok := w.(http.Flusher); ok {
-		flusher = f
+		if irw, ok := w.(*InterceptResponseWriter); ok {
+			irw.SetChunked()
+			return &FlushWriter{w: w, h2c: rs.IsH2C, flusher: f}
+		}
 	}
-	if irw, ok := w.(*InterceptResponseWriter); ok {
-		irw.SetChunked()
-	}
-	return FlushWriter{w: w, h2c: rs.IsH2C, flusher: flusher}
+	return nil
 }
 
 func (fw FlushWriter) Write(p []byte) (int, error) {

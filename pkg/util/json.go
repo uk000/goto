@@ -37,6 +37,7 @@ type JSON interface {
 	Array() []interface{}
 	JSONObject() *JSONObject
 	JSONArray() []JSON
+	ToJSONArray() []JSON
 
 	ParseJSON(text string)
 	ParseYAML(y string)
@@ -255,6 +256,13 @@ func (j *JSONValue) JSONArray() []JSON {
 		jsonArr = append(jsonArr, ToJSONValue(v))
 	}
 	return jsonArr
+}
+
+func (j *JSONValue) ToJSONArray() []JSON {
+	if j.JsonArr != nil {
+		return j.JSONArray()
+	}
+	return []JSON{j}
 }
 
 func (j *JSONValue) ParseJSON(text string) {

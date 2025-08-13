@@ -252,6 +252,9 @@ func (hd *HeaderData) trackRequest(headerValue string) {
 }
 
 func track(port string, headers http.Header, uri string, rtd *TrackingData) {
+	if rtd == nil {
+		return
+	}
 	for h, hd := range rtd.ByHeader {
 		if hv := headers.Get(h); hv != "" {
 			metrics.UpdateHeaderRequestCount(port, uri, h, hv)

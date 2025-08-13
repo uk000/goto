@@ -23,6 +23,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 var (
@@ -90,16 +91,16 @@ func LinkMiddlewareChain(r *mux.Router) {
 	}
 }
 
-func InvokeMiddlewareChainForGRPC(ctx context.Context, method, host, uri string, headers map[string][]string, body []byte) (*GrpcHTTPRequestAdapter, *GrpcHTTPResponseWriterAdapter) {
+func InvokeMiddlewareChainForGRPC(ctx context.Context, port int, method, host, uri string, headers map[string][]string, body []byte, desc protoreflect.MessageDescriptor) (*GrpcHTTPRequestAdapter, *GrpcHTTPResponseWriterAdapter) {
+	ctx = util.WithPort(ctx, port)
 	ra := NewGrpcHTTPRequestAdapter(ctx, method, host, uri, headers, body)
-	wa := NewGrpcHTTPResponseWriterAdapter()
+	wa := NewGrpcHTTPResponseWriterAdapter(desc)
 	r := ra.ToHTTPRequest()
 	r = r.WithContext(ctx)
 	ctx, _ = util.WithRequestStore(r)
 	r = r.WithContext(ctx)
 	w, irw := intercept.WithIntercept(r, wa)
 	MiddlewareChain[0](w, r)
-	// wa.Responses = [][]byte{irw.Data}
 	irw.Proceed()
 	return ra, wa
 }

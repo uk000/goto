@@ -23,6 +23,7 @@ import (
 type SelfInfo struct {
 	ServerPort  int
 	GRPCPort    int
+	GivenName   bool
 	Name        string
 	Address     string
 	PodName     string
@@ -51,6 +52,8 @@ type Flags struct {
 	EnablePeerHealthLogs         bool
 	EnableProbeLogs              bool
 	EnableMetricsLogs            bool
+	EnableProxyDebugLogs         bool
+	EnableGRPCDebugLogs          bool
 	LogRequestHeaders            bool
 	LogRequestMiniBody           bool
 	LogRequestBody               bool

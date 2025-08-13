@@ -91,22 +91,22 @@ func middlewareFunc(next http.Handler) http.Handler {
 		}
 		rs.GotoProtocol = util.GotoProtocol(r.ProtoMajor == 2, l.TLS)
 		if util.IsTunnelRequest(r) {
-			w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoRemoteAddress, rs.TunnelCount), r.RemoteAddr)
-			w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoPort, rs.TunnelCount), port)
-			w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoTunnelHost, rs.TunnelCount), l.HostLabel)
-			w.Header().Add(fmt.Sprintf("%s|%d", HeaderViaGotoTunnel, rs.TunnelCount), l.Label)
-			w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoProtocol, rs.TunnelCount), rs.GotoProtocol)
+			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoRemoteAddress, rs.TunnelCount), r.RemoteAddr)
+			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoPort, rs.TunnelCount), port)
+			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoTunnelHost, rs.TunnelCount), l.HostLabel)
+			w.Header().Add(fmt.Sprintf("%s_%d", HeaderViaGotoTunnel, rs.TunnelCount), l.Label)
+			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoProtocol, rs.TunnelCount), rs.GotoProtocol)
 		} else if rs.WillProxy {
-			util.AddHeaderWithSuffix(HeaderGotoHost, "|Proxy", l.HostLabel, w.Header())
-			util.AddHeaderWithSuffix(HeaderGotoPort, "|Proxy", port, w.Header())
-			util.AddHeaderWithSuffix(HeaderViaGoto, "|Proxy", l.Label, w.Header())
-			util.AddHeaderWithSuffix(HeaderGotoProtocol, "|Proxy", rs.GotoProtocol, w.Header())
+			util.AddHeaderWithPrefix("Proxy-", HeaderGotoHost, l.HostLabel, w.Header())
+			util.AddHeaderWithPrefix("Proxy-", HeaderGotoPort, port, w.Header())
+			util.AddHeaderWithPrefix("Proxy-", HeaderGotoProtocol, rs.GotoProtocol, w.Header())
+			util.AddHeaderWithPrefix("Proxy-", HeaderViaGoto, l.Label, w.Header())
 		} else {
 			w.Header().Add(HeaderGotoRemoteAddress, r.RemoteAddr)
 			w.Header().Add(HeaderGotoPort, port)
 			w.Header().Add(HeaderGotoHost, l.HostLabel)
-			w.Header().Add(HeaderViaGoto, l.Label)
 			w.Header().Add(HeaderGotoProtocol, rs.GotoProtocol)
+			w.Header().Add(HeaderViaGoto, l.Label)
 		}
 		pieces := strings.Split(r.RemoteAddr, ":")
 		remoteIP := strings.Join(pieces[:len(pieces)-1], ":")
@@ -131,6 +131,9 @@ func middlewareFunc(next http.Handler) http.Handler {
 			util.AddLogMessage("Serving Tunnel Connect Request", r)
 		} else if next != nil {
 			next.ServeHTTP(w, r)
+			if rs.WillProxy {
+				w.Header().Add(HeaderViaGoto, l.Label)
+			}
 		}
 	})
 }

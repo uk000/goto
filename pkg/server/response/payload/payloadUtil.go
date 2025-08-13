@@ -23,9 +23,10 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"time"
 )
 
-func newResponsePayload(payload []byte, binary bool, contentType, uri, header, query, value string,
+func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, header, query, value string,
 	bodyRegexes []string, paths []string, transforms []*util.Transform) (*ResponsePayload, error) {
 	if contentType == "" {
 		contentType = ContentTypeJSON
@@ -66,11 +67,11 @@ func newResponsePayload(payload []byte, binary bool, contentType, uri, header, q
 			m.Init()
 		}
 	}
-
 	return &ResponsePayload{
 		Payload:          payload,
 		ContentType:      contentType,
-		isBinary:         util.IsBinaryContentType(contentType),
+		IsStream:         stream,
+		IsBinary:         util.IsBinaryContentType(contentType),
 		URIMatch:         uri,
 		HeaderMatch:      header,
 		HeaderValueMatch: headerValueMatch,
@@ -89,6 +90,27 @@ func newResponsePayload(payload []byte, binary bool, contentType, uri, header, q
 		fillers:          fillers,
 		router:           responseRouter,
 	}, nil
+}
+
+func (rp *ResponsePayload) PrepareStreamPayload(count int, delayMin, delayMax time.Duration) {
+	rp.StreamCount = count
+	rp.StreamDelayMin = delayMin
+	rp.StreamDelayMax = delayMax
+	json := util.FromJSONText(string(rp.Payload))
+	jsonArray := json.ToJSONArray()
+	b := [][]byte{}
+	if len(jsonArray) > 0 {
+		for i := 0; i < count; {
+			for _, v := range jsonArray {
+				b = append(b, util.ToBytes(v))
+				i++
+				if i >= count {
+					break
+				}
+			}
+		}
+	}
+	rp.StreamPayload = b
 }
 
 func getPayloadForBodyMatch(bodyReader io.ReadCloser, bodyMatchResponses map[string]*ResponsePayload) (newBodyReader io.ReadCloser, matchedResponsePayload *ResponsePayload, captures map[string]string, matched bool) {

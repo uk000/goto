@@ -23,11 +23,14 @@ import (
 	"goto/pkg/global"
 	"goto/pkg/server/listeners"
 	"goto/pkg/util"
+	"net"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
@@ -85,7 +88,7 @@ func GetRequestRemoteAddr(md map[string][]string) string {
 	return remoteAddr
 }
 
-func CreateDummyRequest(method *GRPCServiceMethod, dec func(interface{}) error) *dynamicpb.Message {
+func ReadRequest(method *GRPCServiceMethod, dec func(interface{}) error) *dynamicpb.Message {
 	req := dynamicpb.NewMessage(method.InputType())
 	if err := dec(req); err != nil {
 		return nil
@@ -93,30 +96,18 @@ func CreateDummyRequest(method *GRPCServiceMethod, dec func(interface{}) error) 
 	return req
 }
 
-func BuildResponse(method *GRPCServiceMethod, resp [][]byte) (*dynamicpb.Message, error) {
-	dmsg := dynamicpb.NewMessage(method.OutputType())
-	if err := protojson.Unmarshal(resp[0], dmsg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response to dynamic message: %w", err)
-	}
-	return dmsg, nil
-}
-
-func SendStreamResponse(method *GRPCServiceMethod, stream grpc.ServerStream, resp [][]byte, from, to int) error {
+func SendStreamResponse(method *GRPCServiceMethod, stream grpc.ServerStream, responses []proto.Message, from, to int) error {
 	rem := to - from
-	if from > len(resp) {
+	if from > len(responses) {
 		from = 0
 		to = from + rem
 	}
 	for i := from; i < to; i++ {
-		if i >= len(resp) {
+		if i >= len(responses) {
 			i = 0
 		}
 		rem--
-		dmsg := dynamicpb.NewMessage(method.OutputType())
-		if err := protojson.Unmarshal(resp[i], dmsg); err != nil {
-			return fmt.Errorf("failed to unmarshal response to dynamic message: %w", err)
-		}
-		if err := stream.SendMsg(dmsg); err != nil {
+		if err := stream.SendMsg(responses[i]); err != nil {
 			return err
 		}
 		if rem == 0 {
@@ -126,27 +117,55 @@ func SendStreamResponse(method *GRPCServiceMethod, stream grpc.ServerStream, res
 	return nil
 }
 
-func CommonHandler(ctx context.Context, stream grpc.ServerStream) (*GRPCServiceMethod, int, string, map[string][]string, error) {
+func SendResponse(desc protoreflect.MessageDescriptor, stream grpc.ServerStream, resp []byte) error {
+	dmsg := dynamicpb.NewMessage(desc)
+	if err := protojson.Unmarshal(resp, dmsg); err != nil {
+		return fmt.Errorf("failed to unmarshal response to dynamic message: %w", err)
+	}
+	if err := stream.SendMsg(dmsg); err != nil {
+		return err
+	}
+	return nil
+}
+
+func CommonHandler(ctx context.Context, stream grpc.ServerStream) (method *GRPCServiceMethod, port int, remoteAddr *net.TCPAddr, authority string, md map[string][]string, err error) {
 	if ctx == nil {
 		ctx = stream.Context()
 	}
-	port := util.GetContextPort(ctx)
-	method := ServiceRegistry.ParseGRPCServiceMethod(ctx)
+	port = util.GetContextPort(ctx)
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		err = fmt.Errorf("failed to get peer info")
+		return
+	}
+	tcpAddr, ok := p.Addr.(*net.TCPAddr)
+	if !ok {
+		err = fmt.Errorf("failed to get TCP peer address")
+		return
+	}
+	remoteAddr = tcpAddr
+
+	method = ServiceRegistry.ParseGRPCServiceMethod(ctx)
 	if method == nil {
-		return nil, port, "", nil, fmt.Errorf("method not found in context")
+		err = fmt.Errorf("method not found in context")
+		return
 	}
-	md, err := GetRequestHeaders(ctx)
-	if err != nil || md == nil {
-		return method, port, "", nil, fmt.Errorf("Metadata not found in context")
+	md, err = GetRequestHeaders(ctx)
+	if err != nil {
+		return
 	}
-	authority := ""
+	if md == nil {
+		err = fmt.Errorf("Metadata not found in context")
+		return
+	}
+	authority = ""
 	if a := md[constants.HeaderAuthority]; len(a) > 0 {
 		authority = a[0]
 	}
-	return method, port, authority, md, nil
+	return
 }
 
-func AddRequestLogMessage(ctx context.Context, port int, service, method, authority string, requestHeaders any, requestCount, requestBodyLength int, requestMiniBody string) {
+func LogRequest(ctx context.Context, port int, service, method, authority string, requestHeaders any, requestCount, requestBodyLength int, requestMiniBody string) {
 	if !global.Flags.EnableServerLogs {
 		return
 	}
@@ -165,10 +184,10 @@ func AddRequestLogMessage(ctx context.Context, port int, service, method, author
 		msg += fmt.Sprintf(", Request Mini Body [%s]", requestMiniBody)
 	}
 	msg += " }"
-	util.AddLogMessageForContext(ctx, msg)
+	util.LogMessage(ctx, msg)
 }
 
-func AddResponseLogMessage(ctx context.Context, responseHeaders any, responseStatus, responseCount, responseLength int, action string) {
+func LogResponse(ctx context.Context, responseHeaders any, responseStatus, responseCount, responseLength int, action string) {
 	if !global.Flags.EnableServerLogs {
 		return
 	}
@@ -176,5 +195,5 @@ func AddResponseLogMessage(ctx context.Context, responseHeaders any, responseSta
 	if global.Flags.LogResponseHeaders {
 		msg += fmt.Sprintf(", Response Headers: [%s]", util.ToJSONText(responseHeaders))
 	}
-	util.AddLogMessageForContext(ctx, msg)
+	util.LogMessage(ctx, msg)
 }

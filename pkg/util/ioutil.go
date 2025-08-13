@@ -19,6 +19,7 @@ package util
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -146,6 +147,34 @@ func ReadBytes(r io.Reader) []byte {
 		log.Println(err.Error())
 	}
 	return nil
+}
+
+func ReadArrayOfArrays(r io.Reader) [][]byte {
+	b := ReadBytes(r)
+	var arr []interface{}
+	var data [][]byte
+	err := json.Unmarshal(b, &arr)
+	if err != nil {
+		return [][]byte{b}
+	}
+	for _, a2 := range arr {
+		if arr2, ok := a2.([]interface{}); ok {
+			b2, err := json.Marshal(arr2)
+			if err != nil {
+				log.Println(err.Error())
+				return nil
+			}
+			data = append(data, b2)
+		} else {
+			b2, err := json.Marshal(a2)
+			if err != nil {
+				log.Println(err.Error())
+				return nil
+			}
+			data = append(data, b2)
+		}
+	}
+	return data
 }
 
 func ReadAndTrack(r io.Reader, collect bool) ([]byte, int, time.Time, time.Time, string) {

@@ -19,33 +19,43 @@ package global
 import (
 	"net"
 	"net/http"
+
+	"google.golang.org/grpc"
 )
 
-type IWatchedServer interface {
-	Serve(l interface{})
+type IGRPCServer interface {
+	AddListener(listener any)
+	ServeListener(listener any)
 }
-type GRPCStartWatcher func(server IWatchedServer)
-type GRPCStopWatcher func()
+
+type IGRPCService interface {
+}
+
+type IGRPCManager interface {
+	Reflect(s *grpc.ServiceDesc)
+	InterceptAndServe(s *grpc.ServiceDesc, srv any)
+	InterceptWithMiddleware(s *grpc.ServiceDesc, srv any)
+	InterceptAndProxy(fromGSD, toGSD *grpc.ServiceDesc, target string, srv any, teeport int) (IGRPCService, IGRPCService)
+}
+
 type HTTPStartWatcher func(server *http.Server)
 type HTTPStopWatcher func()
 type TCPServeWatcher func(func(listenerID string, port int, listener net.Listener) error)
+type GRPCStartListener func()
+type GRPCStopListener func()
+type GRPCInterceptor func(server IGRPCManager)
 
 var (
-	grpcStartWatchers []GRPCStartWatcher
-	grpcStopWatchers  []GRPCStopWatcher
-	httpStartWatchers []HTTPStartWatcher
-	httpStopWatchers  []HTTPStopWatcher
-	tcpServeWatchers  []TCPServeWatcher
-	ShutdownFuncs     = []func(){}
+	httpStartWatchers  []HTTPStartWatcher
+	httpStopWatchers   []HTTPStopWatcher
+	tcpServeWatchers   []TCPServeWatcher
+	grpcStartListeners []GRPCStartListener
+	grpcStopListeners  []GRPCStopListener
+	grpcIntercepts     []GRPCInterceptor
+	GRPCServer         IGRPCServer
+	GRPCManager        IGRPCManager
+	ShutdownFuncs      = []func(){}
 )
-
-func AddGRPCStartWatcher(w GRPCStartWatcher) {
-	grpcStartWatchers = append(grpcStartWatchers, w)
-}
-
-func AddGRPCStopWatcher(w GRPCStopWatcher) {
-	grpcStopWatchers = append(grpcStopWatchers, w)
-}
 
 func AddHTTPStartWatcher(w HTTPStartWatcher) {
 	httpStartWatchers = append(httpStartWatchers, w)
@@ -59,16 +69,16 @@ func AddTCPServeWatcher(w TCPServeWatcher) {
 	tcpServeWatchers = append(tcpServeWatchers, w)
 }
 
-func OnGRPCStart(server IWatchedServer) {
-	for _, w := range grpcStartWatchers {
-		w(server)
-	}
+func AddGRPCStartWatcher(w GRPCStartListener) {
+	grpcStartListeners = append(grpcStartListeners, w)
 }
 
-func OnGRPCStop() {
-	for _, w := range grpcStopWatchers {
-		w()
-	}
+func AddGRPCStopWatcher(w GRPCStopListener) {
+	grpcStopListeners = append(grpcStopListeners, w)
+}
+
+func AddGRPCIntercept(w GRPCInterceptor) {
+	grpcIntercepts = append(grpcIntercepts, w)
 }
 
 func OnHTTPStart(server *http.Server) {
@@ -86,6 +96,24 @@ func OnHTTPStop() {
 func ConfigureTCPServer(serve func(listenerID string, port int, listener net.Listener) error) {
 	for _, w := range tcpServeWatchers {
 		w(serve)
+	}
+}
+
+func OnGRPCStart() {
+	for _, w := range grpcStartListeners {
+		w()
+	}
+}
+
+func OnGRPCStop() {
+	for _, w := range grpcStopListeners {
+		w()
+	}
+}
+
+func GRPCIntercept(server IGRPCManager) {
+	for _, w := range grpcIntercepts {
+		w(server)
 	}
 }
 

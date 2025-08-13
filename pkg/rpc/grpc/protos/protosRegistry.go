@@ -19,7 +19,6 @@ package protos
 import (
 	"context"
 	"fmt"
-	"goto/pkg/rpc"
 	"goto/pkg/rpc/grpc"
 	"goto/pkg/util"
 	"os"
@@ -39,7 +38,7 @@ type ProtosStore struct {
 var (
 	ProtosRegistry = (&ProtosStore{lock: sync.RWMutex{}}).Init()
 	protosDir      = filepath.FromSlash(util.GetCwd() + "/protos/")
-	importsDir     = filepath.FromSlash(util.GetCwd() + "/pkg/rpc/grpc/protos/")
+	importsDir     = filepath.FromSlash(util.GetCwd() + "/protos/")
 )
 
 func (ps *ProtosStore) Init() *ProtosStore {
@@ -85,9 +84,9 @@ func (ps *ProtosStore) parseProto(name, path string, content []byte) (linker.Fil
 	}
 }
 
-func (ps *ProtosStore) AddProto(name, path string, content []byte) error {
+func (ps *ProtosStore) AddProto(name, path string, content []byte, uploadOnly bool) error {
 	files, err := ps.parseProto(name, path, content)
-	if err != nil {
+	if err != nil || uploadOnly {
 		return err
 	}
 	for _, file := range files {
@@ -131,7 +130,7 @@ func (ps *ProtosStore) ListServices(proto string) []*grpc.GRPCService {
 	return ps.servicesByProto[proto]
 }
 
-func (ps *ProtosStore) ListMethods(service string) map[string]rpc.RPCMethod {
+func (ps *ProtosStore) ListMethods(service string) map[string]*grpc.GRPCServiceMethod {
 	if s := grpc.ServiceRegistry.GetService(service); s != nil {
 		return s.Methods
 	}

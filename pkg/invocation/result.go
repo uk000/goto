@@ -176,12 +176,9 @@ func (result *InvocationResult) processHTTPResponse(req *InvocationRequest, r *h
 }
 
 func (result *InvocationResult) processGRPCResponse(req *InvocationRequest, responseStatus int, responseHeaders map[string][]string,
-	responsePayload []byte, clientStreamCount, serverStreamCount int, err error) {
+	responsePayload []string, clientStreamCount, serverStreamCount int, err error) {
 	result.err = err
 	if err == nil {
-		if result.tracker.Target.CollectResponse {
-			result.Response.Payload = responsePayload
-		}
 		result.Response.PayloadSize = len(responsePayload)
 		result.Response.ClientStreamCount = clientStreamCount
 		result.Response.ServerStreamCount = serverStreamCount

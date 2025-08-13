@@ -105,6 +105,7 @@ func WithRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	rs := &RequestStore{}
 	ctx := context.WithValue(r.Context(), RequestStoreKey, rs)
 	isAdminRequest := CheckAdminRequest(r)
+	rs.IsGRPC = r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
 	rs.IsAdminRequest = isAdminRequest
 	rs.IsVersionRequest = strings.HasPrefix(r.RequestURI, "/version")
 	rs.IsLockerRequest = strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker")
@@ -115,7 +116,7 @@ func WithRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	rs.IsHealthRequest = !isAdminRequest && strings.HasPrefix(r.RequestURI, "/health")
 	rs.IsStatusRequest = !isAdminRequest && strings.HasPrefix(r.RequestURI, "/status")
 	rs.IsDelayRequest = !isAdminRequest && strings.Contains(r.RequestURI, "/delay")
-	rs.IsPayloadRequest = !isAdminRequest && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload"))
+	rs.IsPayloadRequest = !isAdminRequest && !rs.IsGRPC && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload"))
 	rs.IsTunnelRequest = strings.HasPrefix(r.RequestURI, "/tunnel=") || !isAdminRequest && WillTunnel(r, rs)
 	rs.IsTunnelConfigRequest = strings.HasPrefix(r.RequestURI, "/tunnels")
 	rs.WillProxy = !isAdminRequest && WillProxyHTTP(r, rs)

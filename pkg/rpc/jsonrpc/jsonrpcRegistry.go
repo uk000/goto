@@ -35,18 +35,17 @@ type JSONRPCService struct {
 }
 
 type JSONRPCMethod struct {
-	Name            string             `json:"name"`
-	URI             string             `json:"uri"`
-	IsBatch         bool               `json:"isBatch"`
-	IsStreaming     bool               `json:"isStreaming"`
-	ResponsePayload string             `json:"responsePayload"`
-	In              func(util.JSON)    `json:"-"`
-	Out             func() util.JSON   `json:"-"`
-	StreamOut       func() []util.JSON `json:"-"`
-	Service         *JSONRPCService    `json:"-"`
-	StreamCount     int                `json:"-"`
-	StreamDelayMin  time.Duration      `json:"-"`
-	StreamDelayMax  time.Duration      `json:"-"`
+	Name             string             `json:"name"`
+	URI              string             `json:"uri"`
+	IsBatch          bool               `json:"isBatch"`
+	IsStreaming      bool               `json:"isStreaming"`
+	ResponsePayload  string             `json:"responsePayload"`
+	StreamCount      int                `json:"streamCount"`
+	StreamDelayMin   time.Duration      `json:"streamDelayMin"`
+	StreamDelayMax   time.Duration      `json:"streamDelayMax"`
+	StreamDelayCount int                `json:"streamDelayCount"`
+	StreamOut        func() []util.JSON `json:"-"`
+	Service          *JSONRPCService    `json:"-"`
 }
 
 type JSONRPCServiceRegistry struct {
@@ -149,15 +148,12 @@ func (jr *JSONRPCServiceRegistry) FromGRPCService(name string) (*JSONRPCService,
 		URI:     g.URI,
 		Methods: map[string]rpc.RPCMethod{},
 	}
-	for _, m := range g.Methods {
-		method := m.(*grpc.GRPCServiceMethod)
+	for _, method := range g.Methods {
 		jsonMethod := &JSONRPCMethod{
 			Name:           method.Name,
 			URI:            method.URI,
-			IsBatch:        method.IsClientStreaming,
-			IsStreaming:    method.IsServerStreaming,
-			In:             method.In,
-			Out:            method.Out,
+			IsBatch:        method.IsClientStream,
+			IsStreaming:    method.IsServerStream,
 			StreamOut:      method.StreamOut,
 			StreamCount:    method.StreamCount,
 			StreamDelayMin: method.StreamDelayMin,
@@ -172,6 +168,10 @@ func (jr *JSONRPCServiceRegistry) FromGRPCService(name string) (*JSONRPCService,
 
 func (s *JSONRPCService) IsGRPC() bool {
 	return false
+}
+
+func (s *JSONRPCService) IsJSONRPC() bool {
+	return true
 }
 
 func (s *JSONRPCService) GetName() string {
@@ -190,8 +190,14 @@ func (s *JSONRPCService) GetMethodCount() int {
 	return len(s.Methods)
 }
 
-func (s *JSONRPCService) GetMethods() map[string]rpc.RPCMethod {
-	return s.Methods
+func (s *JSONRPCService) ForEachMethod(f func(rpc.RPCMethod)) {
+	for _, m := range s.Methods {
+		f(m)
+	}
+}
+
+func (s *JSONRPCService) GetMethod(name string) rpc.RPCMethod {
+	return s.Methods[name]
 }
 
 func (m *JSONRPCMethod) GetName() string {
@@ -206,12 +212,10 @@ func (m *JSONRPCMethod) SetStreamCount(count int) {
 	m.StreamCount = count
 }
 
-func (m *JSONRPCMethod) SetStreamDelayMin(delay time.Duration) {
-	m.StreamDelayMin = delay
-}
-
-func (m *JSONRPCMethod) SetStreamDelayMax(delay time.Duration) {
-	m.StreamDelayMax = delay
+func (m *JSONRPCMethod) SetStreamDelay(min, max time.Duration, count int) {
+	m.StreamDelayMin = min
+	m.StreamDelayMax = max
+	m.StreamDelayCount = count
 }
 
 func (m *JSONRPCMethod) SetResponsePayload(payload []byte) {

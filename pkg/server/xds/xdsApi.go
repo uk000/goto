@@ -25,7 +25,6 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"google.golang.org/grpc"
 )
 
 var (
@@ -48,8 +47,8 @@ func startXDS(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusBadRequest
 		msg = fmt.Sprintf("Invalid port [%d]", port)
 	} else if l, err := listeners.AddGRPCListener(port, false); err == nil {
-		grpcserver.StartWithCallback(l, func(gs *grpc.Server) {
-			GetXDSServer(port).registerServer(gs)
+		grpcserver.GRPCManager.StartWithCallback(l, func() {
+			GetXDSServer(port).RegisterServices(grpcserver.GRPCManager)
 		})
 		msg = fmt.Sprintf("XDS Server started on port [%d]", port)
 	} else {

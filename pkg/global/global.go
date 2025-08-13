@@ -41,6 +41,8 @@ var (
 		EnablePeerHealthLogs: true,
 		EnableMetricsLogs:    true,
 		LogRequestHeaders:    true,
+		EnableProxyDebugLogs: true,
+		EnableGRPCDebugLogs:  true,
 	}
 	CmdConfig       = types.CmdConfig{}
 	CtlConfig       = types.CmdCtlConfig{}

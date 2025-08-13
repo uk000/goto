@@ -17,6 +17,7 @@
 package echo
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"net/http"
@@ -67,16 +68,34 @@ func echoStream(w http.ResponseWriter, r *http.Request) {
 	metrics.UpdateRequestCount("echo")
 	util.AddLogMessage("Streaming Echo", r)
 	var writer io.Writer = w
-	if util.IsH2(r) {
-		fw := intercept.NewFlushWriter(r, w)
-		util.CopyHeaders("Request", r, w, r.Header, true, true, false)
-		util.SetHeadersSent(r, true)
+	// if util.IsH2(r) {
+	fw := intercept.NewFlushWriter(r, w)
+	util.CopyHeaders("Request", r, w, r.Header, true, true, false)
+	util.SetHeadersSent(r, true)
+	fw.Flush()
+	writer = fw
+	// }
+	reader := bufio.NewReader(r.Body)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if line != nil {
+			if _, err := writer.Write(line); err != nil {
+				fmt.Println(err.Error())
+				break
+			}
+		}
+		if err != nil {
+			if err != io.EOF {
+				fmt.Println(err.Error())
+			}
+			break
+		}
 		fw.Flush()
-		writer = fw
 	}
-	if _, err := io.Copy(writer, r.Body); err != nil {
-		fmt.Println(err.Error())
-	}
+
+	// if _, err := io.Copy(writer, r.Body); err != nil {
+	// 	fmt.Println(err.Error())
+	// }
 }
 
 func wsEchoHandler(w http.ResponseWriter, r *http.Request) {

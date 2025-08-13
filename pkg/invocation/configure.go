@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
+	gotogrpc "goto/pkg/rpc/grpc"
 	grpc "goto/pkg/rpc/grpc/client"
 	gototls "goto/pkg/tls"
 	"goto/pkg/transport"
@@ -147,7 +148,6 @@ const (
 
 var (
 	invocationCounter uint32
-	hostLabel         string
 	chanStopCleanup   = make(chan bool, 2)
 	activeInvocations = map[uint32]*InvocationTracker{}
 	activeTargets     = map[string]*TargetInvocations{}
@@ -157,7 +157,6 @@ var (
 )
 
 func init() {
-	hostLabel = util.GetHostLabel()
 	go monitorHttpClients()
 }
 
@@ -460,12 +459,12 @@ func processStopRequest(tracker *InvocationTracker) {
 				stopped := tracker.Status.Stopped
 				if stopped {
 					if global.Flags.EnableInvocationLogs {
-						log.Printf("[%s]: Invocation[%d]: Received stop request for target [%s] that is already stopped\n", hostLabel, tracker.ID, tracker.Target.Name)
+						log.Printf("[%s]: Invocation[%d]: Received stop request for target [%s] that is already stopped\n", global.Self.Name, tracker.ID, tracker.Target.Name)
 					}
 				} else {
 					remaining := (tracker.Target.RequestCount * tracker.Target.Replicas) - tracker.Status.CompletedRequests
 					if global.Flags.EnableInvocationLogs {
-						log.Printf("[%s]: Invocation[%d]: Received stop request for target [%s] with remaining requests [%d]\n", hostLabel, tracker.ID, tracker.Target.Name, remaining)
+						log.Printf("[%s]: Invocation[%d]: Received stop request for target [%s] with remaining requests [%d]\n", global.Self.Name, tracker.ID, tracker.Target.Name, remaining)
 					}
 				}
 			} else {
@@ -573,7 +572,12 @@ func getGrpcClientForTarget(tracker *InvocationTracker) transport.TransportClien
 	client := targetClients[target.Name]
 	invocationsLock.RUnlock()
 	if client == nil {
-		if grpcClient, err := grpc.NewGRPCClient(target.Service, target.URL, target.authority, target.authority,
+		service := gotogrpc.ServiceRegistry.GetService(target.Service)
+		if service == nil {
+			log.Printf("Service %s not found for target %s", target.Service, target.Name)
+			return nil
+		}
+		if grpcClient, err := grpc.NewGRPCClient(service, target.URL, target.authority, target.authority,
 			&grpc.GRPCOptions{
 				IsTLS:          target.TLS,
 				VerifyTLS:      target.VerifyTLS,

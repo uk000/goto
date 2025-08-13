@@ -66,7 +66,7 @@ func proxyUDP(w http.ResponseWriter, r *http.Request) {
 	if port <= 0 || upstream == "" {
 		status = http.StatusBadRequest
 		msg = fmt.Sprintf("Invalid port [%d] or upstream address [%s]", port, upstream)
-	} else if err := listeners.AddUDPListener(port); err == nil {
+	} else if err := listeners.AddListener(port, false, true, ""); err == nil {
 		proxy.ProxyUDPUpstream(port, upstream, delayMin, delayMax)
 		msg = fmt.Sprintf("Proxying UDP on port [%d] to upstream [%s] with delay [%s-%s]", port, upstream, delayMin, delayMax)
 	} else {

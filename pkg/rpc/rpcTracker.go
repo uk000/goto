@@ -81,15 +81,15 @@ func (r *RPCTracker) TrackServiceMethod(port int, s RPCService, m RPCMethod, hea
 	isGRPC := s.IsGRPC()
 	track := func(id, uri string) {
 		tracking.Tracker.Init(port, serviceName, uri, headers)
-		hooks.GetPortHooks(port).AddHookWithCallback(serviceName, id, uri+"/*", hookHeaders, isGRPC, !isGRPC, trackCallCounts(s))
+		hooks.GetPortHooks(port).AddHTTPHookWithListener(serviceName, id, uri+"/*", hookHeaders, !isGRPC, trackCallCounts(s))
 	}
 	track(s.GetName(), s.GetURI())
 	if m != nil {
 		track(m.GetName(), m.GetURI())
 	} else {
-		for _, m := range s.GetMethods() {
-			track(m.GetName(), m.GetURI())
-		}
+		s.ForEachMethod(func(r RPCMethod) {
+			track(r.GetName(), r.GetURI())
+		})
 	}
 }
 
@@ -99,13 +99,11 @@ func (r *RPCTracker) IncrementServiceCount(s RPCService, requestURI string) {
 	serviceURI := s.GetURI()
 	if r.ServiceTrackers[serviceURI] != nil {
 		r.ServiceTrackers[serviceURI].ServiceCallCounts++
-		methods := s.GetMethods()
-		for _, method := range methods {
+		s.ForEachMethod(func(method RPCMethod) {
 			if strings.HasPrefix(requestURI, method.GetURI()) {
 				r.ServiceTrackers[serviceURI].ServiceMethodCallCounts[method.GetURI()]++
-				break
 			}
-		}
+		})
 	}
 }
 

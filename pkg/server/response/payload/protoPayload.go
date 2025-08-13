@@ -31,7 +31,10 @@ import (
 
 type ResponsePayload struct {
 	Payload          []byte            `json:"payload"`
+	StreamPayload    [][]byte          `json:"streamPayload"`
 	ContentType      string            `json:"contentType"`
+	IsStream         bool              `json:"isStream"`
+	IsBinary         bool              `json:"isBinary"`
 	URIMatch         string            `json:"uriMatch"`
 	HeaderMatch      string            `json:"headerMatch"`
 	HeaderValueMatch string            `json:"headerValueMatch"`
@@ -50,7 +53,6 @@ type ResponsePayload struct {
 	queryMatchRegexp *regexp.Regexp
 	bodyMatchRegexp  *regexp.Regexp
 	bodyJsonPaths    map[string]*jsonpath.JSONPath
-	isBinary         bool
 	fillers          []string
 	router           *mux.Router
 }
@@ -80,9 +82,9 @@ func (rp *ResponsePayload) MarshalJSON() ([]byte, error) {
 		"headerCaptureKey": rp.HeaderCaptureKey,
 		"queryCaptureKey":  rp.QueryCaptureKey,
 		"transforms":       rp.Transforms,
-		"binary":           rp.isBinary,
+		"binary":           rp.IsBinary,
 	}
-	if rp.isBinary || len(rp.Payload) > 10000 {
+	if rp.IsBinary || len(rp.Payload) > 10000 {
 		data["payload"] = fmt.Sprintf("...(%d bytes)", len(rp.Payload))
 	} else {
 		data["payload"] = string(rp.Payload)

@@ -28,7 +28,7 @@ import (
 )
 
 var (
-	Middleware = middleware.NewMiddleware("catchall", setRoutes, nil)
+	Middleware = middleware.NewMiddleware("catchall", setRoutes, middlewareFunc)
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -42,7 +42,22 @@ func respond(w http.ResponseWriter, r *http.Request) {
 }
 
 func SendDefaultResponse(w http.ResponseWriter, r *http.Request) {
-	response := echo.GetEchoResponse(w, r)
-	response["CatchAll"] = true
+	response := map[string]any{}
+	response["payload"] = util.WriteYaml(nil, echo.GetEchoResponse(w, r))
+	//response["at"] = time.Now().Local().Format(time.DateTime)
+	//response["gotoHost"] = util.GetHostLabel()
+	//response["gotoPort"] = util.GetRequestOrListenerPort(r)
+	//response["viaGoto"] = util.GetCurrentListenerLabel(r)
 	util.WriteJsonPayload(w, response)
+}
+
+func middlewareFunc(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if next != nil {
+			next.ServeHTTP(w, r)
+		}
+		if !util.IsKnownNonTraffic(r) {
+			SendDefaultResponse(w, r)
+		}
+	})
 }

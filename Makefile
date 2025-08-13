@@ -16,7 +16,7 @@ IMAGE := uk0000/goto
 all: build
 
 gen:
-	protoc --proto_path=pkg/grpc pkg/grpc/*.proto --go_out=plugins=grpc:pkg/grpc/pb
+	protoc --proto_path=pkg/rpc/grpc/protos pkg/rpc/grpc/protos/goto.proto --go-grpc_out=pkg/rpc/grpc/pb
 
 clean:
 	rm -rf pkg/server/grpc/pb/*.go

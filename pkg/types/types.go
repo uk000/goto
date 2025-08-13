@@ -21,6 +21,17 @@ import (
 	"strings"
 )
 
+type Pair struct {
+	Left  any
+	Right any
+}
+
+type Triple struct {
+	First  any
+	Second any
+	Third  any
+}
+
 type Funcs struct {
 	GetPeers                  func(string, *http.Request) map[string]string
 	IsReadinessProbe          func(*http.Request) bool

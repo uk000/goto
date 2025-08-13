@@ -630,26 +630,26 @@ The following response headers are added conditionally under different scenarios
 - `Goto-Retry-Count`: Sent by `goto` client instance when traffic invocations are retried (if a target was configured for retries)
 
 #### Proxy response headers
-- `Goto-Host|Proxy`: identifies the `goto` instance that acted as a proxy for this request
-- `Via-Goto|Proxy`: label of the `goto` instance that acted as a proxy for this request
-- `Goto-Port|Proxy`: port number on which the `goto` proxy instance received this request, which may be different than the upstream service port
-- `Goto-Protocol|Proxy`: Protocol over which the `goto` proxy instance served this request, which may be different than the protocol used for the upstream service call
-- `Goto-Response-Status|Proxy`: HTTP response status code that `goto` proxy instance responded with. Upstream's response status code is preserved in another header listed below.
-- `Goto-In-At|Proxy`: UTC timestamp when the request was received by the `goto` proxy instance
-- `Goto-Out-At|Proxy`: UTC timestamp when the `goto` proxy instance finished processing the request and sent a response
-- `Goto-Took|Proxy`: Total processing time taken by the `goto` proxy instance to process the request
-- `Goto-Proxy-Upstream-Status|<upstream-name>`: status the `goto` proxy's upstream service responded with, which may be different than the status `goto` responded with to the downstream client
-- `Goto-Proxy-Upstream-Took|<upstream-name>`: Total roundtrip time the proxy's upstream call took
-- `Goto-Proxy-Delay`: any delay added to the request/response by `goto` as a proxy
-- `Goto-Proxy-Request-Dropped`: sent back with response when the proxy drops the downstream request based on the drop percentage defined for the upstream target (see proxy feature)
-- `Goto-Proxy-Response-Dropped`: sent back with response when the proxy drops the upstream response based on the drop percentage defined for the upstream target (see proxy feature)
+- `Proxy-Goto-Host`: identifies the `goto` instance that acted as a proxy for this request
+- `Proxy-Via-Goto`: label of the `goto` instance that acted as a proxy for this request
+- `Proxy-Goto-Port`: port number on which the `goto` proxy instance received this request, which may be different than the upstream service port
+- `Proxy-Goto-Protocol`: Protocol over which the `goto` proxy instance served this request, which may be different than the protocol used for the upstream service call
+- `Proxy-Goto-Response-Status`: HTTP response status code that `goto` proxy instance responded with. Upstream's response status code is preserved in another header listed below.
+- `Proxy-Goto-In-At`: UTC timestamp when the request was received by the `goto` proxy instance
+- `Proxy-Goto-Out-At`: UTC timestamp when the `goto` proxy instance finished processing the request and sent a response
+- `Proxy-Goto-Took`: Total processing time taken by the `goto` proxy instance to process the request
+- `Goto-Proxy-Upstream-Status_<upstream-name>`: status the `goto` proxy's upstream service responded with, which may be different than the status `goto` responded with to the downstream client
+- `Proxy-Goto-Upstream-Took_<upstream-name>`: Total roundtrip time the proxy's upstream call took
+- `Proxy-Goto-Delay`: any delay added to the request/response by `goto` as a proxy
+- `Proxy-Goto-Request-Dropped`: sent back with response when the proxy drops the downstream request based on the drop percentage defined for the upstream target (see proxy feature)
+- `Proxy-Goto-Response-Dropped`: sent back with response when the proxy drops the upstream response based on the drop percentage defined for the upstream target (see proxy feature)
 
 #### Tunnel response headers:
-- `Goto-Tunnel-Host[<seq>]`: identifies `goto` instance hosts through which this request was tunneled along with the sequence number of each instance in the tunnel chain.
-- `Via-Goto-Tunnel[<seq>]`: identifies `goto` instance labels through which this request was tunneled along with the sequence number of each instance in the tunnel chain.
-- `Goto-In-At[<seq>]`: UTC timestamp when the request was received by each `goto` in the tunnel chain
-- `Goto-Out-At[<seq>]`: UTC timestamp when the request finished processing by the `goto` tunnel instance
-- `Goto-Took[<seq>]`: Total processing time taken by the `goto` tunnel instance
+- `Goto-Tunnel-Host-<seq>`: identifies `goto` instance hosts through which this request was tunneled along with the sequence number of each instance in the tunnel chain.
+- `Via-Goto-Tunnel-<seq>`: identifies `goto` instance labels through which this request was tunneled along with the sequence number of each instance in the tunnel chain.
+- `Goto-In-At-<seq>`: UTC timestamp when the request was received by each `goto` in the tunnel chain
+- `Goto-Out-At-<seq>`: UTC timestamp when the request finished processing by the `goto` tunnel instance
+- `Goto-Took-<seq>`: Total processing time taken by the `goto` tunnel instance
 
 #### Use-case based response headers:
 - `Goto-Response-Delay`: set if `goto` applied a configured delay to the response.

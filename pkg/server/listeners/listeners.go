@@ -19,6 +19,7 @@ package listeners
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/events"
@@ -33,6 +34,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc"
 )
 
 type Listener struct {
@@ -58,6 +61,7 @@ type Listener struct {
 	IsGRPC     bool                        `json:"-"`
 	IsTCP      bool                        `json:"-"`
 	IsUDP      bool                        `json:"-"`
+	IsXDS      bool                        `json:"-"`
 	Listener   net.Listener                `json:"-"`
 	UDPConn    *net.UDPConn                `json:"-"`
 	Restarted  bool                        `json:"-"`
@@ -74,14 +78,16 @@ var (
 	listenerGenerations = map[int]int{}
 	initialListeners    = []*Listener{}
 	initialStarted      = false
+	grpcStarted         = false
+	httpStarted         = false
 	httpServer          *http.Server
-	grpcServer          global.IWatchedServer
 	serveTCP            func(string, int, net.Listener) error
+	serveXDS            func(*grpc.Server)
 	DefaultLabel        string
 	listenersLock       sync.RWMutex
 )
 
-func init() {
+func Init() {
 	global.Funcs.IsListenerPresent = IsListenerPresent
 	global.Funcs.IsListenerOpen = IsListenerOpen
 	global.Funcs.GetListenerID = GetListenerID
@@ -103,28 +109,27 @@ func init() {
 	global.AddTCPServeWatcher(ConfigureTCPServer)
 }
 
-func OnGRPCStart(s global.IWatchedServer) {
-	grpcServer = s
-	if httpServer != nil {
-		StartInitialListeners()
-	}
+func OnGRPCStart() {
+	grpcStarted = true
 }
 
 func OnGRPCStop() {
-	grpcServer = nil
+	grpcStarted = false
 	for _, l := range grpcListeners {
 		l.closeListener()
 	}
 }
 
 func OnHTTPStart(s *http.Server) {
+	httpStarted = true
 	httpServer = s
-	if grpcServer != nil {
-		StartInitialListeners()
+	if grpcStarted {
+		AddInitialHTTPListeners()
 	}
 }
 
 func OnHTTPStop() {
+	httpStarted = false
 	httpServer = nil
 }
 
@@ -132,24 +137,57 @@ func ConfigureTCPServer(serve func(listenerID string, port int, listener net.Lis
 	serveTCP = serve
 }
 
+func ConfigureXDSServer(serve func(*grpc.Server)) {
+	serveXDS = serve
+}
 func newListener(port int, protocol string, cn string, open bool) *Listener {
 	return &Listener{Port: port, Protocol: protocol, CommonName: cn, Open: open, CertsCache: map[string]*tls.Certificate{}}
 }
 
 func InitDefaultGRPCListener() {
-	DefaultGRPCListener.Label = DefaultLabel
 	DefaultGRPCListener.HostLabel = util.GetHostLabel()
 	DefaultGRPCListener.Port = global.Self.GRPCPort
 	addOrUpdateListener(DefaultGRPCListener)
 }
 
-func StartInitialListeners() {
+func AddInitialGRPCListeners() {
+	for _, l := range initialListeners {
+		if l.IsGRPC {
+			addOrUpdateListener(l)
+		}
+	}
+}
+
+func AddInitialHTTPListeners() {
 	if !initialStarted {
 		time.Sleep(1 * time.Second)
 		for _, l := range initialListeners {
-			addOrUpdateListener(l)
+			if l.IsHTTP {
+				addOrUpdateListener(l)
+			}
 		}
 		initialStarted = true
+	}
+}
+
+func AssignListenerProtocol(l *Listener) {
+	if strings.EqualFold(l.Protocol, "http") || strings.EqualFold(l.Protocol, "http1") || strings.EqualFold(l.Protocol, "https") {
+		l.IsHTTP = true
+	} else if strings.EqualFold(l.Protocol, "grpc") || strings.EqualFold(l.Protocol, "grpcs") {
+		l.IsGRPC = true
+	} else if strings.EqualFold(l.Protocol, "xds") {
+		l.IsGRPC = true
+		l.IsXDS = true
+	} else if strings.EqualFold(l.Protocol, "udp") {
+		l.IsUDP = true
+	} else if strings.EqualFold(l.Protocol, "tcp") || strings.EqualFold(l.Protocol, "tls") || strings.EqualFold(l.Protocol, "tcps") {
+		l.IsTCP = true
+	}
+	if strings.EqualFold(l.Protocol, "tls") || strings.EqualFold(l.Protocol, "tcps") || strings.EqualFold(l.Protocol, "https") {
+		l.TLS = true
+		if l.Cert == nil && l.RawCert == nil {
+			l.AutoCert = true
+		}
 	}
 }
 
@@ -163,12 +201,6 @@ func AddInitialListeners(portList []string) {
 				cn := constants.DefaultCommonName
 				if len(portInfo) > 1 && portInfo[1] != "" {
 					protocol = strings.ToLower(portInfo[1])
-					if !strings.EqualFold(protocol, "http") && !strings.EqualFold(protocol, "https") &&
-						!strings.EqualFold(protocol, "http1") && !strings.EqualFold(protocol, "https1") &&
-						!strings.EqualFold(protocol, "grpc") && !strings.EqualFold(protocol, "grpcs") &&
-						!strings.EqualFold(protocol, "udp") && !strings.EqualFold(protocol, "tls") && !strings.EqualFold(protocol, "tcps") {
-						protocol = "tcp"
-					}
 				}
 				if len(portInfo) > 2 && portInfo[2] != "" {
 					cn = strings.ToLower(portInfo[2])
@@ -179,6 +211,11 @@ func AddInitialListeners(portList []string) {
 					DefaultListener.Port = port
 				} else {
 					l := newListener(port, protocol, cn, true)
+					l.Protocol = protocol
+					if protocol == "" {
+						l.Protocol = "tcp"
+					}
+					AssignListenerProtocol(l)
 					listenersLock.Lock()
 					initialListeners = append(initialListeners, l)
 					listenersLock.Unlock()
@@ -206,12 +243,17 @@ func (l *Listener) serveHTTP() {
 }
 
 func (l *Listener) serveGRPC() {
-	go func() {
-		msg := fmt.Sprintf("Starting GRPC Listener %s", l.ListenerID)
-		log.Println(msg)
-		grpcServer.Serve(l)
-		events.SendEventForPort(l.Port, "GRPC Listener Started", msg)
-	}()
+	if grpcStarted {
+		go func() {
+			msg := fmt.Sprintf("Starting GRPC Listener %s", l.ListenerID)
+			log.Println(msg)
+			global.GRPCServer.ServeListener(l)
+			events.SendEventForPort(l.Port, "GRPC Listener Started", msg)
+		}()
+	} else {
+		global.GRPCServer.AddListener(l)
+	}
+
 }
 
 func (l *Listener) serveTCP() {
@@ -418,10 +460,10 @@ func AddGRPCListener(port int, serve bool) (*Listener, error) {
 	return l, nil
 }
 
-func AddUDPListener(port int) error {
+func AddListener(port int, isTCP, isUDP bool, sni string) error {
 	l := GetListenerForPort(port)
 	if l != nil {
-		if l.IsUDP {
+		if (isTCP && l.IsTCP) || (isUDP && l.IsUDP) {
 			if !l.Open {
 				l.openListener(true)
 			}
@@ -429,12 +471,16 @@ func AddUDPListener(port int) error {
 		}
 		l.closeListener()
 	}
-	l = newListener(port, "udp", "", false)
+	protocol := "tcp"
+	if isUDP {
+		protocol = "udp"
+	}
+	l = newListener(port, protocol, sni, false)
 	if err, msg := addOrUpdateListener(l); err > 0 {
-		return fmt.Errorf(msg)
+		return errors.New(msg)
 	}
 	if !l.openListener(true) {
-		return fmt.Errorf("failed to open UDP listener on port [%d]", port)
+		return fmt.Errorf("failed to open %s listener on port [%d]", protocol, port)
 	}
 	return nil
 }
@@ -464,7 +510,7 @@ func addOrUpdateListener(l *Listener) (int, string) {
 	msg := ""
 	errorCode := 0
 	if l.Label == "" {
-		if global.Self.Name != "" {
+		if global.Self.GivenName {
 			l.Label = global.Self.Name
 		} else {
 			l.Label = util.BuildListenerLabel(l.Port)
@@ -494,6 +540,9 @@ func addOrUpdateListener(l *Listener) (int, string) {
 		}
 	} else if strings.EqualFold(l.Protocol, "grpc") {
 		l.IsGRPC = true
+	} else if strings.EqualFold(l.Protocol, "xds") {
+		l.IsGRPC = true
+		l.IsXDS = true
 	} else if strings.EqualFold(l.Protocol, "grpcs") {
 		l.Protocol = "grpc"
 		l.IsGRPC = true

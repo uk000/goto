@@ -31,8 +31,8 @@ const (
 	HeaderGotoResponseStatus        = "Goto-Response-Status"
 	HeaderGotoResponseDelay         = "Goto-Response-Delay"
 	HeaderGotoProxyDelay            = "Goto-Proxy-Delay"
-	HeaderUpstreamStatus            = "Goto-Proxy-Upstream-Status"
-	HeaderUpstreamTook              = "Goto-Proxy-Upstream-Took"
+	HeaderGotoProxyUpstreamStatus   = "Goto-Proxy-Upstream-Status"
+	HeaderGotoProxyUpstreamTook     = "Goto-Proxy-Upstream-Took"
 	HeaderGotoURIStatus             = "Goto-URI-Status"
 	HeaderGotoURIStatusRemaining    = "Goto-URI-Status-Remaining"
 	HeaderGotoRequestedStatus       = "Goto-Requested-Status"
@@ -63,6 +63,8 @@ const (
 	HeaderAuthority        = ":authority"
 	ContentTypeJSON        = "application/json"
 	ContentTypeYAML        = "application/yaml"
+
+	HeaderGotoRPC = "Goto-RPC"
 
 	HeaderStoppingReadinessRequest = "Stopping-Readiness-Request"
 )

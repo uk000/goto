@@ -78,6 +78,7 @@ type ServerArgs struct {
 	EventsLogs          string
 	ReminderLogs        string
 	PeerHealthLogs      string
+	ProxyDebugLogs      string
 	LogRequestHeaders   string
 	LogRequestBody      string
 	LogRequestMiniBody  string
@@ -185,6 +186,7 @@ var (
 		EventsLogs:          "eventsLogs",
 		ReminderLogs:        "reminderLogs",
 		PeerHealthLogs:      "peerHealthLogs",
+		ProxyDebugLogs:      "proxyDebugLogs",
 		LogRequestHeaders:   "logRequestHeaders",
 		LogRequestBody:      "logRequestBody",
 		LogRequestMiniBody:  "logRequestMiniBody",
@@ -218,6 +220,7 @@ var (
 		EventsLogs:          "Enable/Disable Registry Peer Events Logs",
 		ReminderLogs:        "Enable/Disable Registry Reminder Logs",
 		PeerHealthLogs:      "Enable/Disable Registry-to-Peer Health Check Logs",
+		ProxyDebugLogs:      "Enable/Disable Proxy Debug Logs",
 		LogRequestHeaders:   "Enable/Disable logging of request headers",
 		LogRequestBody:      "Enable/Disable logging of request body",
 		LogRequestMiniBody:  "Enable/Disable logging of request mini body",
@@ -298,8 +301,9 @@ func setupServerArgs() {
 	boolFlag(&global.Flags.EnableRegistryEventsLogs, sa.EventsLogs, "", sh.EventsLogs, false)
 	boolFlag(&global.Flags.EnableRegistryReminderLogs, sa.ReminderLogs, "", sh.ReminderLogs, false)
 	boolFlag(&global.Flags.EnablePeerHealthLogs, sa.PeerHealthLogs, "", sh.PeerHealthLogs, true)
+	boolFlag(&global.Flags.EnableProxyDebugLogs, sa.ProxyDebugLogs, "", sh.ProxyDebugLogs, false)
 	boolFlag(&global.Flags.LogRequestHeaders, sa.LogRequestHeaders, "", sh.LogRequestHeaders, true)
-	boolFlag(&global.Flags.LogRequestBody, sa.LogRequestBody, "", sh.LogRequestBody, false)
+	boolFlag(&global.Flags.LogRequestBody, sa.LogRequestBody, "", sh.LogRequestBody, true)
 	boolFlag(&global.Flags.LogRequestMiniBody, sa.LogRequestMiniBody, "", sh.LogRequestMiniBody, false)
 	boolFlag(&global.Flags.LogResponseHeaders, sa.LogResponseHeaders, "", sh.LogResponseHeaders, false)
 	boolFlag(&global.Flags.LogResponseBody, sa.LogResponseBody, "", sh.LogResponseBody, false)
@@ -330,16 +334,21 @@ func processServerArgs() {
 }
 
 func setupListenerConfigs() {
-	if portsList == "" {
-		portsList = strconv.Itoa(global.Self.ServerPort)
-	}
-	if portsList != "" {
-		listeners.AddInitialListeners(strings.Split(portsList, ","))
+	ports := strings.Split(portsList, ",")
+	if len(ports) == 0 {
+		ports = []string{strconv.Itoa(global.Self.ServerPort)}
+	} else {
+		global.Self.ServerPort, _ = strconv.Atoi(ports[0])
 	}
 	if global.Self.Name == "" {
+		global.Self.GivenName = false
 		global.Self.Name = util.BuildListenerLabel(global.Self.ServerPort)
+	} else {
+		global.Self.GivenName = true
 	}
 	listeners.DefaultLabel = global.Self.Name
+	listeners.Init()
+	listeners.AddInitialListeners(ports)
 	log.Printf("Server [%s] will listen on port [%d]\n", global.Self.Name, global.Self.ServerPort)
 
 }

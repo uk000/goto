@@ -19,6 +19,7 @@ package util
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -99,4 +100,13 @@ func Write(buff []byte, conn net.Conn) error {
 		return fmt.Errorf("Wrote less data [%d] than buffer [%d]\n", size, n)
 	}
 	return nil
+}
+
+func ParseAddress(address string) (endpoint string, port int) {
+	pieces := strings.Split(address, ":")
+	if len(pieces) > 1 {
+		endpoint = pieces[0]
+		port, _ = strconv.Atoi(pieces[len(pieces)-1])
+	}
+	return
 }

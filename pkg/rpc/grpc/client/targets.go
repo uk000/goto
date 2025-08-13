@@ -18,6 +18,8 @@ package grpcclient
 
 import (
 	"crypto/tls"
+	"fmt"
+	gotogrpc "goto/pkg/rpc/grpc"
 	"log"
 	"time"
 
@@ -51,7 +53,11 @@ func newGRPCTargetsManager() *GRPCTargetsManager {
 }
 
 func (g *GRPCTargetsManager) AddTarget(name, url, authority, serverName string, options *GRPCOptions) error {
-	if c, err := NewGRPCClient(name, url, authority, serverName, options); err == nil {
+	service := gotogrpc.ServiceRegistry.GetService(name)
+	if service == nil {
+		return fmt.Errorf("Service not found for target %s", name)
+	}
+	if c, err := NewGRPCClient(service, url, authority, serverName, options); err == nil {
 		g.targets[name] = c
 		return nil
 	} else {
@@ -103,8 +109,8 @@ func (g *GRPCTargetsManager) ConnectTarget(name string) {
 }
 
 func (g *GRPCTargetsManager) ConnectTargetWithHeaders(name string, headers map[string]string) {
-	if t := g.targets[name]; t != nil {
-		t.ConnectWithHeaders(headers)
+	if client := g.targets[name]; client != nil {
+		client.ConnectWithHeadersOrMD(headers, nil)
 	} else {
 		log.Printf("GRPCClient.ConnectTargetWithHeaders: Target [%s] not found", name)
 	}

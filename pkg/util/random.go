@@ -18,21 +18,22 @@ package util
 
 import (
 	"math/rand"
+	"sync/atomic"
 	"time"
 )
 
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=~`{}[];:,.<>/?"
 
-var sizes map[string]uint64 = map[string]uint64{
-	"K":  1000,
-	"KB": 1000,
-	"M":  1000000,
-	"MB": 1000000,
-}
-
 var (
+	sizes = map[string]uint64{
+		"K":  1000,
+		"KB": 1000,
+		"M":  1000000,
+		"MB": 1000000,
+	}
 	randomCharsetLength = len(charset)
 	random              = rand.New(rand.NewSource(time.Now().UnixNano()))
+	IDCounter           = atomic.Uint32{}
 )
 
 func Random(max int) int {
@@ -73,4 +74,8 @@ func GenerateRandomPayload(size int) []byte {
 
 func GenerateRandomString(size int) string {
 	return string(GenerateRandomPayload(size))
+}
+
+func ID() int {
+	return int(IDCounter.Add(1))
 }

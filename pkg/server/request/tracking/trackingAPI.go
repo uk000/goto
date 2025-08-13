@@ -61,7 +61,7 @@ func trackURI(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if uri != "" {
 		Tracker.Init(port, "", uri, nil)
-		hooks.GetPortHooks(port).AddHookWithCallback("", uri, uri, nil, false, false, trackCallCounts)
+		hooks.GetPortHooks(port).AddHTTPHookWithListener("", uri, uri, nil, false, trackCallCounts)
 		msg = fmt.Sprintf("Port [%d] will track URI [%s]", port, uri)
 		events.SendRequestEvent("Tracking URI Added", msg, r)
 		w.WriteHeader(http.StatusOK)
@@ -80,7 +80,7 @@ func trackHeaders(w http.ResponseWriter, r *http.Request) {
 	if present {
 		Tracker.Init(port, "", "", headers)
 		name := strings.Join(headers, "_")
-		hooks.GetPortHooks(port).AddHookWithCallback("", name, "", util.TransformHeaders(headers), false, false, trackCallCounts)
+		hooks.GetPortHooks(port).AddHTTPHookWithListener("", name, "", util.TransformHeaders(headers), false, trackCallCounts)
 		msg = fmt.Sprintf("Port [%d] will track Headers [%+v]", port, headers)
 		events.SendRequestEvent("Tracking Headers Added", msg, r)
 	} else {
@@ -96,7 +96,7 @@ func trackURIAndHeaders(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if uri != "" && present {
 		Tracker.Init(port, "", uri, headers)
-		hooks.GetPortHooks(port).AddHookWithCallback("", uri, uri, util.TransformHeaders(headers), false, false, trackCallCounts)
+		hooks.GetPortHooks(port).AddHTTPHookWithListener("", uri, uri, util.TransformHeaders(headers), false, trackCallCounts)
 		msg = fmt.Sprintf("Port [%d] will track URI [%s] and Headers [%+v]", port, uri, headers)
 		events.SendRequestEvent("Tracking URI and Headers Added", msg, r)
 	} else {
@@ -114,7 +114,7 @@ func trackURIAndHeaderValue(w http.ResponseWriter, r *http.Request) {
 	if uri != "" && header != "" && value != "" {
 		headers := hooks.Headers{[2]string{header, value}}
 		Tracker.Init(port, "", uri, []string{header})
-		hooks.GetPortHooks(port).AddHookWithCallback("", uri, uri, headers, false, false, trackCallCounts)
+		hooks.GetPortHooks(port).AddHTTPHookWithListener("", uri, uri, headers, false, trackCallCounts)
 		msg = fmt.Sprintf("Port [%d] will track URI [%s] with Header:Value [%s:%s]", port, uri, header, value)
 		events.SendRequestEvent("Tracking URI and Headers Added", msg, r)
 	} else {

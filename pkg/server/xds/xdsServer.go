@@ -2,6 +2,7 @@ package xds
 
 import (
 	"context"
+	"goto/pkg/global"
 	"goto/pkg/server/xds/store"
 	"sync"
 
@@ -30,6 +31,16 @@ type XDSServer struct {
 	lock  sync.RWMutex
 }
 
+type XDSService struct {
+	discoverygrpc.UnimplementedAggregatedDiscoveryServiceServer
+	endpointservice.UnimplementedEndpointDiscoveryServiceServer
+	clusterservice.UnimplementedClusterDiscoveryServiceServer
+	routeservice.UnimplementedRouteDiscoveryServiceServer
+	listenerservice.UnimplementedListenerDiscoveryServiceServer
+	secretservice.UnimplementedSecretDiscoveryServiceServer
+	runtimeservice.UnimplementedRuntimeDiscoveryServiceServer
+}
+
 func GetXDSServer(port int) *XDSServer {
 	if PortXDSServer[port] == nil {
 		PortXDSServer[port] = &XDSServer{}
@@ -41,6 +52,18 @@ func GetXDSServer(port int) *XDSServer {
 func (x *XDSServer) init() {
 	x.Store = store.NewStore()
 	x.Server = server.NewServer(context.Background(), x.Store.Cache, Callbacks)
+	global.AddGRPCIntercept(x.RegisterServices)
+}
+
+func (x *XDSServer) RegisterServices(server global.IGRPCManager) {
+	service := &XDSService{}
+	server.InterceptAndServe(&discoverygrpc.AggregatedDiscoveryService_ServiceDesc, service)
+	server.InterceptAndServe(&endpointservice.EndpointDiscoveryService_ServiceDesc, service)
+	server.InterceptAndServe(&clusterservice.ClusterDiscoveryService_ServiceDesc, service)
+	server.InterceptAndServe(&routeservice.RouteDiscoveryService_ServiceDesc, service)
+	server.InterceptAndServe(&listenerservice.ListenerDiscoveryService_ServiceDesc, service)
+	server.InterceptAndServe(&secretservice.SecretDiscoveryService_ServiceDesc, service)
+	server.InterceptAndServe(&runtimeservice.RuntimeDiscoveryService_ServiceDesc, service)
 }
 
 func (x *XDSServer) registerServer(grpcServer *grpc.Server) {

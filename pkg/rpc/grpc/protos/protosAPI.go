@@ -21,6 +21,7 @@ import (
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -31,6 +32,8 @@ var (
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	protosRouter := util.PathRouter(r, "/grpc/protos")
+	util.AddRouteQ(protosRouter, "/store/{name}", addProto, "path", "POST", "PUT")
+	util.AddRoute(protosRouter, "/store/{name}", addProto, "POST", "PUT")
 	util.AddRouteQ(protosRouter, "/add/{name}", addProto, "path", "POST", "PUT")
 	util.AddRoute(protosRouter, "/add/{name}", addProto, "POST", "PUT")
 	util.AddRoute(protosRouter, "/remove/{name}", removeProto, "POST", "PUT")
@@ -44,10 +47,11 @@ func addProto(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	name := util.GetStringParamValue(r, "name")
 	path := util.GetStringParamValue(r, "path")
+	uploadOnly := strings.Contains(r.RequestURI, "store")
 	if name == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "No name"
-	} else if err := ProtosRegistry.AddProto(name, path, util.ReadBytes(r.Body)); err == nil {
+	} else if err := ProtosRegistry.AddProto(name, path, util.ReadBytes(r.Body), uploadOnly); err == nil {
 		msg = fmt.Sprintf("Proto [%s] stored", name)
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)

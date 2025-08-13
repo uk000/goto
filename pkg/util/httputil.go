@@ -44,6 +44,7 @@ var (
 
 	WillTunnel    func(*http.Request, *RequestStore) bool
 	WillProxyHTTP func(*http.Request, *RequestStore) bool
+	WillProxyGRPC func(int, any) bool
 )
 
 func WithPort(ctx context.Context, port int) context.Context {
@@ -83,7 +84,7 @@ func AddLogMessage(msg string, r *http.Request) {
 	rs.LogMessages = append(rs.LogMessages, msg)
 }
 
-func AddLogMessageForContext(ctx context.Context, msg string) {
+func LogMessage(ctx context.Context, msg string) {
 	_, rs := GetRequestStoreForContext(ctx)
 	rs.LogMessages = append(rs.LogMessages, msg)
 }
@@ -275,12 +276,24 @@ func GetQueryParams(r *http.Request) map[string]map[string]int {
 	return queryParamsMap
 }
 
-func AddHeaderWithPrefix(prefix, header, value string, headers http.Header) {
-	headers.Add(fmt.Sprintf("%s%s", prefix, header), value)
+func AddHeaderWithPrefix(prefix, header, value string, headers map[string][]string) {
+	key := fmt.Sprintf("%s%s", prefix, header)
+	headers[key] = append(headers[key], value)
 }
 
-func AddHeaderWithSuffix(header, suffix, value string, headers http.Header) {
-	headers.Add(fmt.Sprintf("%s%s", header, suffix), value)
+func AddHeaderWithPrefixL(prefix, header, value string, headers map[string][]string) {
+	key := strings.ToLower(fmt.Sprintf("%s%s", prefix, header))
+	headers[key] = append(headers[key], value)
+}
+
+func AddHeaderWithSuffix(header, suffix, value string, headers map[string][]string) {
+	key := fmt.Sprintf("%s%s", header, suffix)
+	headers[key] = append(headers[key], value)
+}
+
+func AddHeaderWithSuffixL(header, suffix, value string, headers map[string][]string) {
+	key := strings.ToLower(fmt.Sprintf("%s%s", header, suffix))
+	headers[key] = append(headers[key], value)
 }
 
 func CopyHeaders(prefix string, r *http.Request, w http.ResponseWriter, headers http.Header, copyHost, copyURI, copyContentType bool) {
@@ -376,20 +389,31 @@ func WriteJson(w io.Writer, t interface{}) string {
 }
 
 func WriteYaml(w io.Writer, t interface{}) string {
-	if reflect.ValueOf(t).IsNil() {
-		fmt.Fprintln(w, "")
-	} else if b, err := yaml.Marshal(t); err == nil {
-		data := string(b)
-		fmt.Fprintln(w, data)
-		return data
-	} else {
-		fmt.Printf("Failed to marshal yaml with error: %s\n", err.Error())
+	data := ""
+	if !reflect.ValueOf(t).IsNil() {
+		if b, err := yaml.Marshal(t); err == nil {
+			data = string(b)
+		} else {
+			fmt.Printf("Failed to marshal yaml with error: %s\n", err.Error())
+		}
 	}
-	return ""
+	if w != nil {
+		fmt.Fprintln(w, data)
+	}
+	return data
 }
 
 func WriteErrorJson(w http.ResponseWriter, error string) {
 	fmt.Fprintf(w, "{\"error\":\"%s\"}", error)
+}
+
+func ToBytes(v any) []byte {
+	if b, err := json.Marshal(v); err == nil {
+		return b
+	} else {
+		fmt.Printf("Failed to marshal value to bytes: %s\n", err.Error())
+	}
+	return nil
 }
 
 func IsAdminRequest(r *http.Request) bool {
