@@ -57,6 +57,7 @@ type Flags struct {
 	LogRequestHeaders            bool
 	LogRequestMiniBody           bool
 	LogRequestBody               bool
+	LogRPCRequestBody            bool
 	LogResponseHeaders           bool
 	LogResponseMiniBody          bool
 	LogResponseBody              bool

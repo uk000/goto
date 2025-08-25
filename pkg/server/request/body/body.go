@@ -43,6 +43,9 @@ func middlewareFunc(next http.Handler) http.Handler {
 			}
 			rs := util.GetRequestStore(r)
 			body := util.Read(r.Body)
+			if r.Body.(*util.ReReader) != nil {
+				r.Body.(*util.ReReader).Rewind()
+			}
 			bodyLength := len(body)
 			rs.RequestPayload = body
 			rs.RequestPayloadSize = bodyLength
@@ -50,7 +53,11 @@ func middlewareFunc(next http.Handler) http.Handler {
 				log.Println("Finished Reading Request.Body")
 			}
 			util.AddLogMessage(fmt.Sprintf("Request Body Length: [%d]", bodyLength), r)
-			if global.Flags.LogRequestMiniBody || global.Flags.LogRequestBody {
+			logBody := global.Flags.LogRequestMiniBody || global.Flags.LogRequestBody
+			if !logBody {
+				logBody = global.Flags.LogRPCRequestBody && (rs.IsGRPC || rs.IsJSONRPC || rs.IsMCP)
+			}
+			if logBody {
 				bodyLog := ""
 				if global.Flags.LogRequestMiniBody && len(body) > 50 {
 					bodyLog = fmt.Sprintf("%s...", body[:50])

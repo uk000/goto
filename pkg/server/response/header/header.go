@@ -82,6 +82,7 @@ func removeResponseHeader(w http.ResponseWriter, r *http.Request) {
 			responseHeadersToRemoveByPort[listenerPort] = headerMap
 		}
 		headerMap[header] = true
+		util.ExcludedHeaders[strings.ToLower(header)] = true
 		headersLock.Unlock()
 		msg = fmt.Sprintf("Port [%s] Will remove header [%s] from responses", listenerPort, header)
 		events.SendRequestEvent("Response Header Removed", msg, r)

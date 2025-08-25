@@ -36,6 +36,7 @@ type InterceptResponseWriter struct {
 	http.Flusher
 	conn       net.Conn
 	parent     ResponseInterceptor
+	rs         *util.RequestStore
 	StatusCode int
 	Data       []byte
 	Hold       bool
@@ -103,6 +104,7 @@ func (b BodyTracker) Close() error {
 
 func (rw *InterceptResponseWriter) WriteHeader(statusCode int) {
 	rw.StatusCode = statusCode
+	rw.rs.StatusCode = statusCode
 	if !rw.Hijacked && !rw.Hold {
 		rw.ResponseWriter.WriteHeader(statusCode)
 	}
@@ -168,6 +170,7 @@ func (rw *InterceptResponseWriter) Proceed() {
 	if !rw.Hijacked && !rw.Chunked && rw.Hold {
 		if rw.StatusCode <= 0 {
 			rw.StatusCode = 200
+			rw.rs.StatusCode = rw.StatusCode
 		}
 		rw.ResponseWriter.WriteHeader(rw.StatusCode)
 		if _, err := rw.ResponseWriter.Write(rw.Data); err == http.ErrHijacked {
@@ -185,6 +188,7 @@ func NewInterceptResponseWriter(r *http.Request, w http.ResponseWriter, hold boo
 	flusher, _ := w.(http.Flusher)
 	trackRequestBody(r)
 	return &InterceptResponseWriter{
+		rs:             r.Context().Value(util.RequestStoreKey).(*util.RequestStore),
 		ResponseWriter: w,
 		Hijacker:       hijacker,
 		Flusher:        flusher,

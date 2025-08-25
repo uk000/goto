@@ -274,7 +274,7 @@ func getResourceFromCache(namespace, name string) util.JSON {
 	obj := Cache.Get(namespace, name)
 	if obj != nil {
 		log.Printf("K8s: Serving Resource [%s/%s] from cache.\n", namespace, name)
-		return util.FromObject(obj)
+		return util.JSONFromObject(obj)
 	}
 	return nil
 }
@@ -284,7 +284,7 @@ func fetchResource(gvk *schema.GroupVersionKind, namespace, name string) (util.J
 		if name != "" {
 			Cache.Store(namespace, name, obj)
 		}
-		return util.FromJSON(obj), nil
+		return util.JSONFromJSON(obj), nil
 	} else {
 		if se, ok := err.(*errors.StatusError); ok {
 			if se.Status().Code == http.StatusNotFound {

@@ -27,6 +27,9 @@ import (
 
 func Execute() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	if global.Version == "" {
+		global.Version = global.DevTag
+	}
 	log.Printf("Version: %s, Commit: %s\n", global.Version, global.Commit)
 
 	setupCtlArgs()

@@ -39,34 +39,38 @@ import (
 )
 
 type Listener struct {
-	ListenerID string                      `json:"listenerID"`
-	Label      string                      `json:"label"`
-	HostLabel  string                      `json:"hostLabel"`
-	Port       int                         `json:"port"`
-	Protocol   string                      `json:"protocol"`
-	Open       bool                        `json:"open"`
-	AutoCert   bool                        `json:"autoCert"`
-	AutoSNI    bool                        `json:"autoSNI"`
-	CommonName string                      `json:"commonName"`
-	MutualTLS  bool                        `json:"mutualTLS"`
-	TLS        bool                        `json:"tls"`
-	TCP        *tcp.TCPConfig              `json:"tcp,omitempty"`
-	Cert       *tls.Certificate            `json:"-"`
-	CACerts    *x509.CertPool              `json:"-"`
-	RawCert    []byte                      `json:"-"`
-	RawKey     []byte                      `json:"-"`
-	CertsCache map[string]*tls.Certificate `json:"-"`
-	IsHTTP     bool                        `json:"-"`
-	IsHTTP2    bool                        `json:"-"`
-	IsGRPC     bool                        `json:"-"`
-	IsTCP      bool                        `json:"-"`
-	IsUDP      bool                        `json:"-"`
-	IsXDS      bool                        `json:"-"`
-	Listener   net.Listener                `json:"-"`
-	UDPConn    *net.UDPConn                `json:"-"`
-	Restarted  bool                        `json:"-"`
-	Generation int                         `json:"-"`
-	lock       sync.RWMutex                `json:"-"`
+	ListenerID    string                      `json:"listenerID"`
+	Label         string                      `json:"label"`
+	HostLabel     string                      `json:"hostLabel"`
+	Port          int                         `json:"port"`
+	Protocol      string                      `json:"protocol"`
+	L8Proto       string                      `json:"l8Proto"`
+	Open          bool                        `json:"open"`
+	AutoCert      bool                        `json:"autoCert"`
+	AutoSNI       bool                        `json:"autoSNI"`
+	CommonName    string                      `json:"commonName"`
+	MutualTLS     bool                        `json:"mutualTLS"`
+	TLS           bool                        `json:"tls"`
+	TCP           *tcp.TCPConfig              `json:"tcp,omitempty"`
+	IsHTTP        bool                        `json:"isHTTP"`
+	IsHTTP2       bool                        `json:"isH2"`
+	IsGRPC        bool                        `json:"isGRPC"`
+	IsJSONRPC     bool                        `json:"isJSONRPC"`
+	IsMCP         bool                        `json:"isMCP"`
+	IsTCP         bool                        `json:"isTCP"`
+	IsUDP         bool                        `json:"isUDP"`
+	IsXDS         bool                        `json:"isXDS"`
+	ProtoAssigned bool                        `json:"-"`
+	Generation    int                         `json:"generation"`
+	Cert          *tls.Certificate            `json:"-"`
+	CACerts       *x509.CertPool              `json:"-"`
+	RawCert       []byte                      `json:"-"`
+	RawKey        []byte                      `json:"-"`
+	CertsCache    map[string]*tls.Certificate `json:"-"`
+	Listener      net.Listener                `json:"-"`
+	UDPConn       *net.UDPConn                `json:"-"`
+	Restarted     bool                        `json:"-"`
+	lock          sync.RWMutex                `json:"-"`
 }
 
 var (
@@ -170,25 +174,84 @@ func AddInitialHTTPListeners() {
 	}
 }
 
-func AssignListenerProtocol(l *Listener) {
-	if strings.EqualFold(l.Protocol, "http") || strings.EqualFold(l.Protocol, "http1") || strings.EqualFold(l.Protocol, "https") {
+func (l *Listener) assignProtocol() {
+	isHTTP := strings.EqualFold(l.Protocol, "http")
+	isHTTPS := strings.EqualFold(l.Protocol, "https")
+	isHTTP1 := strings.EqualFold(l.Protocol, "http1")
+	isHTTPS1 := strings.EqualFold(l.Protocol, "https1")
+	isGRPC := strings.EqualFold(l.Protocol, "grpc")
+	isGRPCS := strings.EqualFold(l.Protocol, "grpcs")
+	isXDS := strings.EqualFold(l.Protocol, "xds")
+	isJSONRPC := strings.EqualFold(l.Protocol, "jsonrpc")
+	isJSONRPCS := strings.EqualFold(l.Protocol, "jsonrpcs")
+	isMCP := strings.EqualFold(l.Protocol, "mcp")
+	isMCPS := strings.EqualFold(l.Protocol, "mcps")
+	isUDP := strings.EqualFold(l.Protocol, "udp")
+	isTCPS := strings.EqualFold(l.Protocol, "tcps") || strings.EqualFold(l.Protocol, "tls")
+
+	if isHTTP1 || isHTTPS1 {
+		if isHTTPS1 {
+			l.L8Proto = "https"
+			l.Protocol = "https"
+			l.TLS = true
+		} else {
+			l.L8Proto = "http"
+			l.Protocol = "http"
+		}
 		l.IsHTTP = true
-	} else if strings.EqualFold(l.Protocol, "grpc") || strings.EqualFold(l.Protocol, "grpcs") {
+		l.IsHTTP2 = false
+	} else if isHTTP || isHTTPS {
+		l.TLS = isHTTPS
+		l.IsHTTP = true
+		l.IsHTTP2 = true
+		if isHTTPS {
+			l.L8Proto = "h2"
+		} else {
+			l.L8Proto = "h2c"
+		}
+	} else if isGRPC || isGRPCS {
+		if isGRPCS {
+			l.TLS = true
+		}
+		l.L8Proto = "grpc"
+		l.Protocol = "grpc"
 		l.IsGRPC = true
-	} else if strings.EqualFold(l.Protocol, "xds") {
+	} else if isXDS {
+		l.L8Proto = "xds"
+		l.Protocol = "grpc"
 		l.IsGRPC = true
 		l.IsXDS = true
-	} else if strings.EqualFold(l.Protocol, "udp") {
+	} else if isJSONRPC || isJSONRPCS || isMCP || isMCPS {
+		if isJSONRPCS || isMCPS {
+			l.Protocol = "https"
+			l.TLS = true
+		} else {
+			l.Protocol = "http"
+		}
+		if isMCP || isMCPS {
+			l.L8Proto = "mcp"
+		} else {
+			l.L8Proto = "jsonrpc"
+		}
+		l.IsHTTP = true
+		l.IsHTTP2 = true
+		l.IsJSONRPC = true
+		l.IsMCP = isMCP || isMCPS
+	} else if isUDP {
+		l.L8Proto = "udp"
 		l.IsUDP = true
-	} else if strings.EqualFold(l.Protocol, "tcp") || strings.EqualFold(l.Protocol, "tls") || strings.EqualFold(l.Protocol, "tcps") {
+	} else {
+		l.L8Proto = "tcp"
+		l.Protocol = "tcp"
 		l.IsTCP = true
+		l.TLS = isTCPS
 	}
-	if strings.EqualFold(l.Protocol, "tls") || strings.EqualFold(l.Protocol, "tcps") || strings.EqualFold(l.Protocol, "https") {
-		l.TLS = true
+	if l.TLS {
 		if l.Cert == nil && l.RawCert == nil {
 			l.AutoCert = true
 		}
 	}
+	l.ProtoAssigned = true
 }
 
 func AddInitialListeners(portList []string) {
@@ -215,7 +278,7 @@ func AddInitialListeners(portList []string) {
 					if protocol == "" {
 						l.Protocol = "tcp"
 					}
-					AssignListenerProtocol(l)
+					l.assignProtocol()
 					listenersLock.Lock()
 					initialListeners = append(initialListeners, l)
 					listenersLock.Unlock()
@@ -521,46 +584,10 @@ func addOrUpdateListener(l *Listener) (int, string) {
 	if l.Port <= 0 || l.Port > 65535 {
 		msg = fmt.Sprintf("[Invalid port number: %d]", l.Port)
 	}
-	l.IsHTTP2 = true
-	if strings.EqualFold(l.Protocol, "http1") {
-		l.Protocol = "http"
-		l.IsHTTP2 = false
-	} else if strings.EqualFold(l.Protocol, "https1") {
-		l.Protocol = "https"
-		l.IsHTTP2 = false
+	if !l.ProtoAssigned {
+		l.assignProtocol()
 	}
-	isHTTPS := strings.EqualFold(l.Protocol, "https")
-	if isHTTPS || strings.EqualFold(l.Protocol, "http") {
-		l.IsHTTP = true
-		if isHTTPS {
-			l.TLS = true
-			if l.Cert == nil && l.RawCert == nil {
-				l.AutoCert = true
-			}
-		}
-	} else if strings.EqualFold(l.Protocol, "grpc") {
-		l.IsGRPC = true
-	} else if strings.EqualFold(l.Protocol, "xds") {
-		l.IsGRPC = true
-		l.IsXDS = true
-	} else if strings.EqualFold(l.Protocol, "grpcs") {
-		l.Protocol = "grpc"
-		l.IsGRPC = true
-		l.TLS = true
-		if l.Cert == nil && l.RawCert == nil {
-			l.AutoCert = true
-		}
-	} else if strings.EqualFold(l.Protocol, "udp") {
-		l.IsUDP = true
-	} else {
-		l.IsTCP = true
-		if strings.EqualFold(l.Protocol, "tls") || strings.EqualFold(l.Protocol, "tcps") {
-			l.Protocol = "tcp"
-			l.TLS = true
-			if l.Cert == nil && l.RawCert == nil {
-				l.AutoCert = true
-			}
-		}
+	if l.IsTCP && l.TCP == nil {
 		l.TCP, msg = tcp.InitTCPConfig(l.Port, l.TCP)
 	}
 	if msg != "" {
@@ -645,6 +672,15 @@ func GetListeners() map[int]*Listener {
 	listenersView[DefaultListener.Port] = DefaultListener
 	for port, l := range listeners {
 		listenersView[port] = l
+	}
+	return listenersView
+}
+
+func GetListenerPorts() map[int]string {
+	listenersView := map[int]string{}
+	listenersView[DefaultListener.Port] = DefaultListener.Protocol
+	for port, l := range listeners {
+		listenersView[port] = l.L8Proto
 	}
 	return listenersView
 }

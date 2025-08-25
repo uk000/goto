@@ -16,27 +16,70 @@
 
 package jsonrpc
 
-import "goto/pkg/util"
-
 type JSONRPCMessage struct {
-	ID      interface{} `json:"id"`
-	JSONRPC string      `json:"jsonrpc,omitempty"`
+	ID      string `json:"id,omitempty"`
+	JSONRPC string `json:"jsonrpc,omitempty"`
 }
 
 type JSONRPCRequest struct {
 	JSONRPCMessage
-	Method string `json:"method"`
-	Params []byte `json:"params"`
+	Method string         `json:"method"`
+	Params map[string]any `json:"params,omitempty"`
 }
 
 type JSONRPCResponse struct {
 	JSONRPCMessage
-	Result any           `json:"result,omitempty"`
-	Error  *JSONRPCError `json:"error,omitempty"`
+	Result map[string]any `json:"result,omitempty"`
+	Error  *JSONRPCError  `json:"error,omitempty"`
 }
 
 type JSONRPCError struct {
-	Code    int       `json:"code"`
-	Message string    `json:"message"`
-	Data    util.JSON `json:"data,omitempty"`
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
+}
+
+func NewJSONRPCRequest(id, method string, params map[string]any) *JSONRPCRequest {
+	return &JSONRPCRequest{
+		JSONRPCMessage: JSONRPCMessage{
+			JSONRPC: "2.0",
+			ID:      id,
+		},
+		Method: method,
+		Params: params,
+	}
+}
+
+func NewJSONRPCResponse(id string, result map[string]any) *JSONRPCResponse {
+	return &JSONRPCResponse{
+		JSONRPCMessage: JSONRPCMessage{
+			JSONRPC: "2.0",
+			ID:      id,
+		},
+		Result: result,
+	}
+}
+
+func NewJSONRPCError(id string, code int, message string, data any) *JSONRPCResponse {
+	return &JSONRPCResponse{
+		JSONRPCMessage: JSONRPCMessage{
+			JSONRPC: "2.0",
+			ID:      id,
+		},
+		Error: &JSONRPCError{
+			Code:    code,
+			Message: message,
+			Data:    data,
+		},
+	}
+}
+
+func NewJSONRPCNotification(method string, params map[string]any) *JSONRPCRequest {
+	return &JSONRPCRequest{
+		JSONRPCMessage: JSONRPCMessage{
+			JSONRPC: "2.0",
+		},
+		Method: method,
+		Params: params,
+	}
 }

@@ -2,6 +2,7 @@ package grpcclient
 
 import (
 	"fmt"
+	"goto/pkg/constants"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
@@ -62,7 +63,7 @@ func callServiceMethod(w http.ResponseWriter, r *http.Request) {
 	} else {
 		content = [][]byte{util.ReadBytes(r.Body)}
 	}
-	contentType := r.Header.Get("Content-Type")
+	contentType := r.Header.Get(constants.HeaderContentType)
 	if contentType == "" {
 		contentType = "plain/text"
 	}
@@ -78,7 +79,7 @@ func callServiceMethod(w http.ResponseWriter, r *http.Request) {
 	if len(resp.ResponsePayload) > 0 {
 		jsons := []util.JSON{}
 		for _, r := range resp.ResponsePayload {
-			jsons = append(jsons, util.FromJSONText(r))
+			jsons = append(jsons, util.JSONFromJSONText(r))
 		}
 		response["payload"] = jsons
 	} else {

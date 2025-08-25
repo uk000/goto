@@ -18,20 +18,32 @@ package a2a
 
 import (
 	"encoding/json"
+	"goto/pkg/constants"
 	"goto/pkg/rpc/jsonrpc"
 	"net/http"
 )
 
+const (
+	// A2AProtocol is the name of the A2A protocol.
+	SessionID = "sessionId"
+	Query     = "query"
+	Response  = "response"
+)
+
 // TextInputParams represents the params for a text input interaction.
-type TextInputParams struct {
-	SessionID string `json:"sessionId"`
-	Query     string `json:"query"`
+func TextInputParams(sessionID, query string) map[string]any {
+	return map[string]any{
+		SessionID: sessionID,
+		Query:     query,
+	}
 }
 
 // TextInputResult represents the result for a text input interaction.
-type TextInputResult struct {
-	SessionID string `json:"sessionId"`
-	Response  string `json:"response"`
+func TextInputResult(sessionID, response string) map[string]any {
+	return map[string]any{
+		SessionID: sessionID,
+		Response:  response,
+	}
 }
 
 // handleA2A handles incoming A2A protocol requests using JSON-RPC 2.0.
@@ -43,7 +55,7 @@ func handleA2A(w http.ResponseWriter, r *http.Request) {
 
 	var req jsonrpc.JSONRPCRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONRPCError(w, nil, -32700, "Parse error")
+		writeJSONRPCError(w, "", -32700, "Parse error")
 		return
 	}
 
@@ -54,44 +66,21 @@ func handleA2A(w http.ResponseWriter, r *http.Request) {
 
 	switch req.Method {
 	case "text.input":
-		var params TextInputParams
-		if err := json.Unmarshal(req.Params, &params); err != nil {
-			writeJSONRPCError(w, req.ID, -32602, "Invalid params")
-			return
-		}
-		result := TextInputResult{
-			SessionID: params.SessionID,
-			Response:  "You said: " + params.Query,
-		}
-		resp := jsonrpc.JSONRPCResponse{
-			JSONRPCMessage: jsonrpc.JSONRPCMessage{
-				JSONRPC: "2.0",
-				ID:      req.ID,
-			},
-			Result: result,
-		}
+		result := TextInputResult(req.Params["sessionID"].(string), "Your Query: "+req.Params["query"].(string))
+		resp := jsonrpc.NewJSONRPCResponse(req.ID, result)
 		writeJSON(w, resp)
 	default:
 		writeJSONRPCError(w, req.ID, -32601, "Method not found")
 	}
 }
 
-func writeJSONRPCError(w http.ResponseWriter, id interface{}, code int, message string) {
-	resp := jsonrpc.JSONRPCResponse{
-		JSONRPCMessage: jsonrpc.JSONRPCMessage{
-			JSONRPC: "2.0",
-			ID:      id,
-		},
-		Error: &jsonrpc.JSONRPCError{
-			Code:    code,
-			Message: message,
-		},
-	}
+func writeJSONRPCError(w http.ResponseWriter, id string, code int, message string) {
+	resp := jsonrpc.NewJSONRPCError(id, code, message, nil)
 	writeJSON(w, resp)
 }
 
 func writeJSON(w http.ResponseWriter, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(constants.HeaderContentType, "application/json")
 	json.NewEncoder(w).Encode(v)
 }
 

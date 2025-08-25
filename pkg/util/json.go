@@ -19,6 +19,7 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -39,7 +40,7 @@ type JSON interface {
 	JSONArray() []JSON
 	ToJSONArray() []JSON
 
-	ParseJSON(text string)
+	ParseJSON(text string, noerror bool)
 	ParseYAML(y string)
 	Store(i interface{})
 	Clone() JSON
@@ -53,6 +54,7 @@ type JSON interface {
 
 	Get(path string) *Value
 	GetText(path string) string
+	GetRaw() any
 	FindPath(path string) *Value
 	FindPaths(paths []string) map[string]*Value
 	FindTransformPath(path string, join, replace, push bool) JSONField
@@ -71,15 +73,14 @@ type JSONPatterns struct {
 	lock     sync.Mutex
 }
 
-type JSONMap map[string]JSON
-
 type JSONObject struct {
-	JSONMap
+	JSONMap map[string]JSON
 }
 
 type JSONValue struct {
 	JsonMap      map[string]interface{} `json:",inline"`
 	JsonArr      []interface{}          `json:",inline"`
+	Raw          any
 	at           time.Time
 	jsonPatterns *JSONPatterns
 }
@@ -141,32 +142,72 @@ func NewJSON() JSON {
 	}
 }
 
-func FromJSONText(text string) JSON {
+func NewJSONWithRaw(raw any) JSON {
+	return &JSONValue{
+		at:  time.Now(),
+		Raw: raw,
+	}
+}
+
+func JSONFromJSONText(text string) JSON {
 	json := NewJSON()
-	json.ParseJSON(text)
+	json.ParseJSON(text, true)
 	return json
 }
 
-func FromJSON(j interface{}) JSON {
+func JSONFromJSON(j any) JSON {
 	json := NewJSON()
 	json.Store(j)
 	return json
 }
 
-func FromYAML(y string) JSON {
+func JSONFromYAML(y string) JSON {
 	json := NewJSON()
 	json.ParseYAML(y)
 	return json
 }
 
-func FromObject(o interface{}) JSON {
-	return FromJSONText(ToJSONText(o))
+func JSONFromObject(o any) JSON {
+	return JSONFromJSONText(ToJSONText(o))
 }
 
-func FromBytes(b []byte) JSON {
+func JSONFromMap(o map[string]any) JSON {
+	j := NewJSON().(*JSONValue)
+	j.JsonMap = o
+	return j
+}
+
+func JSONFromStringArray(a []string) JSON {
+	return JSONFromMap(map[string]any{"": a})
+}
+
+func JSONFromReader(r io.Reader) JSON {
+	if b, err := io.ReadAll(r); err == nil {
+		return JSONFromBytes(b)
+	}
+	return nil
+}
+
+func JSONFromBytes(b []byte) JSON {
 	var j interface{}
 	json.Unmarshal(b, &j)
-	return FromJSON(j)
+	return JSONFromJSON(j)
+}
+
+func ToJSONArray(b []byte) [][]byte {
+	j := JSONFromBytes(b)
+	out := [][]byte{}
+	if j.IsArray() {
+		for _, a := range j.Array() {
+			b2, _ := json.Marshal(a)
+			if b2 != nil {
+				out = append(out, b2)
+			}
+		}
+	} else {
+		out = append(out, b)
+	}
+	return out
 }
 
 func ToJSONValue(v interface{}) *JSONValue {
@@ -197,18 +238,30 @@ func (j *JSONValue) Store(i interface{}) {
 	case []interface{}:
 		j.JsonArr = v
 	case *unstructured.UnstructuredList:
-		j.ParseJSON(ToJSONText(v))
+		j.ParseJSON(ToJSONText(v), false)
 	case *unstructured.Unstructured:
 		j.JsonMap = v.Object
 	}
 }
 
 func (j JSONObject) Value() interface{} {
-	return j
+	return j.JSONMap
 }
 
-func (j JSONObject) Object() map[string]interface{} {
-	return j.Value().(map[string]interface{})
+func (j JSONObject) Object() (obj map[string]interface{}) {
+	if m, ok := j.Value().(map[string]interface{}); ok {
+		obj = m
+		return
+	}
+	m, ok := j.Value().(map[string]JSON)
+	if ok {
+		obj = map[string]interface{}{}
+		for k, v := range m {
+			obj[k] = v
+		}
+		return
+	}
+	return nil
 }
 
 func (j JSONObject) Array() []interface{} {
@@ -239,7 +292,7 @@ func (j *JSONValue) Object() map[string]interface{} {
 }
 
 func (j *JSONValue) JSONObject() *JSONObject {
-	jsonObject := JSONMap{}
+	jsonObject := map[string]JSON{}
 	for k, v := range j.JsonMap {
 		jsonObject[k] = ToJSONValue(v)
 	}
@@ -265,18 +318,18 @@ func (j *JSONValue) ToJSONArray() []JSON {
 	return []JSON{j}
 }
 
-func (j *JSONValue) ParseJSON(text string) {
+func (j *JSONValue) ParseJSON(text string, noerror bool) {
 	var o interface{}
 	if err := json.Unmarshal([]byte(text), &o); err == nil {
 		j.Store(o)
-	} else {
+	} else if !noerror {
 		fmt.Printf("Failed to parse json with error: %s\n", err.Error())
 	}
 }
 
 func (j *JSONValue) ParseYAML(y string) {
 	if o, err := yaml.YAMLToJSON([]byte(y)); err == nil {
-		j.ParseJSON(string(o))
+		j.ParseJSON(string(o), false)
 	} else {
 		fmt.Printf("Failed to parse yaml with error: %s\n", err.Error())
 	}
@@ -347,8 +400,15 @@ func (j *JSONValue) GetText(path string) string {
 	return ""
 }
 
+func (j *JSONValue) GetRaw() any {
+	if j.Raw != nil {
+		return j.Raw
+	}
+	return j
+}
+
 func (v *Value) JSON() JSON {
-	return FromJSON(v.Value)
+	return JSONFromJSON(v.Value)
 }
 
 func (v *Value) Get(path string) *Value {
@@ -357,6 +417,13 @@ func (v *Value) Get(path string) *Value {
 
 func (v *Value) GetText(path string) string {
 	return v.JSON().GetText(path)
+}
+
+func (v *Value) GetRaw() any {
+	if v.JSON().GetRaw() != nil {
+		v.JSON().GetRaw()
+	}
+	return v
 }
 
 func (j *JSONValue) FindPaths(paths []string) map[string]*Value {
@@ -383,7 +450,7 @@ func (j *JSONValue) FindPath(path string) *Value {
 		}
 		if next != nil {
 			value.Value = next
-		} else if next == nil {
+		} else {
 			return nil
 		}
 		switch v := next.(type) {
@@ -651,6 +718,18 @@ func Clone(v interface{}) interface{} {
 
 func ReadJson(s string, t interface{}) error {
 	return json.Unmarshal([]byte(s), t)
+}
+
+func ReadJsonFromBytes(b []byte, t interface{}) error {
+	return json.Unmarshal(b, t)
+}
+
+func ReadStringArray(b []byte) []string {
+	arr := []string{}
+	if err := json.Unmarshal(b, &arr); err != nil {
+		arr = []string{string(b)}
+	}
+	return arr
 }
 
 func ToJSONText(o interface{}) string {

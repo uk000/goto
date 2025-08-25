@@ -462,7 +462,7 @@ func (p GRPCResponsePayload) MarshalJSON() ([]byte, error) {
 
 func payloadsToMessages(payloads [][]byte, desc protoreflect.MessageDescriptor) (messages []proto.Message, err error) {
 	for _, payload := range payloads {
-		json := util.FromBytes(payload)
+		json := util.JSONFromBytes(payload)
 		msg := dynamicpb.NewMessage(desc)
 		if err = fillInput(msg, util.ToBytes(json)); err != nil {
 			return nil, err

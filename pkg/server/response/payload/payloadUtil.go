@@ -26,6 +26,217 @@ import (
 	"time"
 )
 
+type Payload struct {
+	IsStream    bool        `json:"isStream,omitempty"`
+	StreamCount int         `json:"streamCount,omitempty"`
+	Delay       *util.Delay `json:"delay,omitempty"`
+	JSON        util.JSON   `json:"json,omitempty"`
+	Text        string      `json:"text,omitempty"`
+	Raw         any         `json:"raw,omitempty"`
+	JSONStream  []util.JSON `json:"jsonStream,omitempty"`
+	TextStream  []string    `json:"textStream,omitempty"`
+	RawStream   []any       `json:"rawStream,omitempty"`
+}
+
+func NewJSONPayload(json util.JSON, raw []byte, delayMin, delayMax time.Duration, delayCount int) *Payload {
+	if json == nil && len(raw) > 0 {
+		json = util.JSONFromBytes(raw)
+	}
+	return &Payload{
+		Delay: util.NewDelay(delayMin, delayMax, delayCount),
+		JSON:  json,
+	}
+}
+
+func NewRawPayload(raw []byte, text string, delayMin, delayMax time.Duration, delayCount int) *Payload {
+	return &Payload{
+		Delay: util.NewDelay(delayMin, delayMax, delayCount),
+		Text:  text,
+		Raw:   raw,
+	}
+}
+
+func NewStreamJSONPayload(jsonArr []util.JSON, raw []byte, streamCount int, delayMin, delayMax time.Duration, delayCount int) *Payload {
+	if jsonArr == nil && len(raw) > 0 {
+		jsonArr = util.JSONFromBytes(raw).ToJSONArray()
+	}
+	streamPayload := []util.JSON{}
+	for i := 0; i < streamCount; {
+		for _, v := range jsonArr {
+			streamPayload = append(streamPayload, v)
+			i++
+			if i >= streamCount {
+				break
+			}
+		}
+	}
+	return &Payload{
+		IsStream:   true,
+		Delay:      util.NewDelay(delayMin, delayMax, delayCount),
+		JSONStream: streamPayload,
+	}
+}
+
+func NewStreamTextPayload(textArr []string, b []byte, streamCount int, delayMin, delayMax time.Duration, delayCount int) *Payload {
+	if textArr == nil {
+		textArr = util.ReadStringArray(b)
+	}
+	streamPayload := []string{}
+	if streamCount <= 0 {
+		streamCount = len(textArr)
+	}
+	for i := 0; i < streamCount; {
+		for _, v := range textArr {
+			streamPayload = append(streamPayload, v)
+			i++
+			if i >= streamCount {
+				break
+			}
+		}
+	}
+	return &Payload{
+		IsStream:   true,
+		Delay:      util.NewDelay(delayMin, delayMax, delayCount),
+		TextStream: streamPayload,
+	}
+}
+
+func NewRawStreamPayload(raw []any, strArr []string, byteArr [][]byte, streamCount int, delayMin, delayMax time.Duration, delayCount int) *Payload {
+	streamPayload := []any{}
+	payload := []any{}
+	if raw != nil {
+		for _, r := range raw {
+			payload = append(payload, r)
+		}
+	} else if strArr != nil {
+		for _, s := range strArr {
+			payload = append(payload, s)
+		}
+	} else {
+		for _, b := range byteArr {
+			payload = append(payload, b)
+		}
+	}
+	for i := 0; i < streamCount; {
+		for _, v := range payload {
+			streamPayload = append(streamPayload, v)
+			i++
+			if i >= streamCount {
+				break
+			}
+		}
+	}
+	return &Payload{
+		IsStream:  true,
+		Delay:     util.NewDelay(delayMin, delayMax, delayCount),
+		RawStream: streamPayload,
+	}
+}
+
+func (p *Payload) ToText() string {
+	output := strings.Builder{}
+	if p.Text != "" {
+		output.WriteString(p.Text)
+	} else if p.JSON != nil {
+		output.WriteString(p.JSON.ToJSONText())
+	} else if p.Raw != nil {
+		if s, ok := p.Raw.(string); ok {
+			output.WriteString(s)
+		} else if b, ok := p.Raw.([]byte); ok {
+			output.Write(b)
+		} else if j, ok := p.Raw.(util.JSON); ok {
+			output.WriteString(j.ToJSONText())
+		} else {
+			output.WriteString(fmt.Sprintf("%v", p.Raw))
+		}
+	} else {
+		arr := []string{}
+		if p.JSONStream != nil {
+			for _, j := range p.JSONStream {
+				arr = append(arr, j.ToJSONText())
+			}
+		} else if p.TextStream != nil {
+			for _, t := range p.TextStream {
+				arr = append(arr, t)
+			}
+		} else if p.RawStream != nil {
+			for _, r := range p.RawStream {
+				if s, ok := r.(string); ok {
+					arr = append(arr, s)
+				} else if b, ok := r.([]byte); ok {
+					arr = append(arr, string(b))
+				} else if j, ok := r.(util.JSON); ok {
+					arr = append(arr, j.ToJSONText())
+				} else {
+					arr = append(arr, fmt.Sprintf("%v", r))
+				}
+			}
+		}
+		output.WriteString(strings.Join(arr, ", "))
+	}
+	return output.String()
+}
+
+func (p *Payload) RangeText(f func(text string)) {
+	if p.JSONStream != nil {
+		for _, j := range p.JSONStream {
+			f(j.ToJSONText())
+		}
+	} else if p.TextStream != nil {
+		for _, t := range p.TextStream {
+			f(t)
+		}
+	} else if p.RawStream != nil {
+		for _, r := range p.RawStream {
+			if s, ok := r.(string); ok {
+				f(s)
+			} else if b, ok := r.([]byte); ok {
+				f(string(b))
+			} else if j, ok := r.(util.JSON); ok {
+				f(j.ToJSONText())
+			} else {
+				f(fmt.Sprintf("%v", r))
+			}
+		}
+	} else if p.JSON != nil {
+		f(p.JSON.ToJSONText())
+	} else if p.Text != "" {
+		f(p.Text)
+	} else if p.Raw != nil {
+		if s, ok := p.Raw.(string); ok {
+			f(s)
+		} else if b, ok := p.Raw.([]byte); ok {
+			f(string(b))
+		} else if j, ok := p.Raw.(util.JSON); ok {
+			f(j.ToJSONText())
+		} else {
+			f(fmt.Sprintf("%v", p.Raw))
+		}
+	}
+}
+
+func (p *Payload) RangeAny(f func(data any)) {
+	if p.JSONStream != nil {
+		for _, j := range p.JSONStream {
+			f(j)
+		}
+	} else if p.TextStream != nil {
+		for _, t := range p.TextStream {
+			f(t)
+		}
+	} else if p.RawStream != nil {
+		for _, r := range p.RawStream {
+			f(r)
+		}
+	} else if p.JSON != nil {
+		f(p.JSON)
+	} else if p.Text != "" {
+		f(p.Text)
+	} else if p.Raw != nil {
+		f(p.Raw)
+	}
+}
+
 func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, header, query, value string,
 	bodyRegexes []string, paths []string, transforms []*util.Transform) (*ResponsePayload, error) {
 	if contentType == "" {
@@ -96,7 +307,7 @@ func (rp *ResponsePayload) PrepareStreamPayload(count int, delayMin, delayMax ti
 	rp.StreamCount = count
 	rp.StreamDelayMin = delayMin
 	rp.StreamDelayMax = delayMax
-	json := util.FromJSONText(string(rp.Payload))
+	json := util.JSONFromJSONText(string(rp.Payload))
 	jsonArray := json.ToJSONArray()
 	b := [][]byte{}
 	if len(jsonArray) > 0 {

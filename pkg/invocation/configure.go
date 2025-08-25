@@ -42,6 +42,7 @@ type InvocationSpec struct {
 	Name                 string         `json:"name"`
 	Protocol             string         `json:"protocol"`
 	Method               string         `json:"method"`
+	Host                 string         `json:"host"`
 	Service              string         `json:"service"`
 	URL                  string         `json:"url"`
 	BURLS                []string       `json:"burls"`

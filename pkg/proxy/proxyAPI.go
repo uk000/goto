@@ -49,7 +49,7 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRouteWithPort(proxyTargetsRouter, "/{target}/enable", enableProxyTarget, "POST")
 	util.AddRouteWithPort(proxyTargetsRouter, "/{target}/disable", disableProxyTarget, "POST")
 
-	util.AddRouteMultiQWithPort(httpTargetsRouter, "/add/{target}", addHTTPProxyTarget, []string{"url", "proto", "from", "to"}, "POST", "PUT")
+	util.AddRouteMultiQWithPort(httpTargetsRouter, "/add/{target}", addHTTPProxyTarget, []string{"url", "proto", "from", "to", "sni"}, "POST", "PUT")
 	util.AddRouteMultiQWithPort(httpTargetsRouter, "/{target}/route", addTargetRoute, []string{"from", "to"}, "PUT", "POST")
 	util.AddRouteWithPort(httpTargetsRouter, "/{target}/match/header/{key}={value}", addHeaderMatch, "PUT", "POST")
 	util.AddRouteWithPort(httpTargetsRouter, "/{target}/match/header/{key}", addHeaderMatch, "PUT", "POST")
@@ -254,7 +254,7 @@ func getProxyTargetReport(w http.ResponseWriter, r *http.Request) {
 	result := map[string]interface{}{}
 	result["Port"] = port
 	result["Target"] = target.GetName()
-	if t := hp.Tracker.TargetTrackers[target.GetName()]; t != nil {
+	if t := hp.HTTPTracker.TargetTrackers[target.GetName()]; t != nil {
 		result["HTTP"] = t
 	}
 	if t := tp.Tracker.TargetTrackers[target.GetName()]; t != nil {
@@ -275,7 +275,7 @@ func getProxyReport(w http.ResponseWriter, r *http.Request) {
 	result["Port"] = port
 	if all || httpOnly {
 		hp := getHTTPProxyForPort(port)
-		result["HTTP"] = hp.Tracker
+		result["HTTP"] = hp.HTTPTracker
 		result["Enabled"] = hp.Enabled
 	}
 	if all || tcpOnly {
@@ -305,7 +305,7 @@ func getAllProxiesReports(w http.ResponseWriter, r *http.Request) {
 	for port, p := range httpProxyByPort {
 		result[port] = map[string]interface{}{}
 		result[port]["Enabled"] = p.Enabled
-		result[port]["HTTP"] = p.Tracker
+		result[port]["HTTP"] = p.HTTPTracker
 	}
 	for port, p := range tcpProxyByPort {
 		result[port] = map[string]interface{}{}

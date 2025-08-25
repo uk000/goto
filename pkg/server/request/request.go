@@ -20,7 +20,6 @@ import (
 	"net/http"
 
 	"goto/pkg/server/middleware"
-	"goto/pkg/server/request/body"
 	"goto/pkg/server/request/filter"
 	"goto/pkg/server/request/timeout"
 	"goto/pkg/server/request/tracking"
@@ -32,7 +31,7 @@ import (
 
 var (
 	Middleware         = middleware.NewMiddleware("request", setRoutes, middlewareFunc)
-	requestMiddlewares = []*middleware.Middleware{tracking.Middleware, body.Middleware, timeout.Middleware, uri.Middleware, filter.Middleware}
+	requestMiddlewares = []*middleware.Middleware{tracking.Middleware, timeout.Middleware, uri.Middleware, filter.Middleware}
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {

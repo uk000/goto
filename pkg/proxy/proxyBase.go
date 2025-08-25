@@ -23,9 +23,12 @@ type Target interface {
 	IsRunning() bool
 	Stop()
 	Close()
+	GetProxyTarget() *ProxyTarget
+	GetHTTPTarget() *HTTPTarget
 }
 
 type ProxyTarget struct {
+	parent             Target
 	Name               string            `json:"name"`
 	Protocol           string            `json:"protocol"`
 	Endpoint           string            `json:"endpoint"`
@@ -317,4 +320,18 @@ func (t *ProxyTarget) Stop() {
 
 func (t *ProxyTarget) Close() {
 	close(t.stopChan)
+}
+
+func (t *ProxyTarget) GetProxyTarget() *ProxyTarget {
+	if t.parent != nil {
+		return t.parent.GetProxyTarget()
+	}
+	return t
+}
+
+func (t *ProxyTarget) GetHTTPTarget() *HTTPTarget {
+	if t.parent != nil {
+		return t.parent.GetHTTPTarget()
+	}
+	return nil
 }

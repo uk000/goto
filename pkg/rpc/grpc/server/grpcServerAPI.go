@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package grpcapi
+package grpcserver
 
 import (
 	"fmt"
@@ -23,7 +23,6 @@ import (
 	"goto/pkg/rpc/grpc"
 	gotogrpc "goto/pkg/rpc/grpc"
 	grpcclient "goto/pkg/rpc/grpc/client"
-	grpcserver "goto/pkg/rpc/grpc/server"
 	"goto/pkg/server/listeners"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
@@ -37,7 +36,7 @@ import (
 var (
 	Middleware     = middleware.NewMiddleware("grpc", setRoutes, nil)
 	ActiveServices = map[int]map[string]*grpc.GRPCService{}
-	GRPCFactory    = grpcserver.GRPCManager
+	GRPCFactory    = GRPCManager
 	lock           = sync.RWMutex{}
 )
 

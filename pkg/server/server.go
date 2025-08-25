@@ -20,6 +20,8 @@ import (
 	"os"
 	"strconv"
 
+	mcpclient "goto/pkg/ai/mcp/client"
+	mcpserverapi "goto/pkg/ai/mcp/server/api"
 	"goto/pkg/client"
 	"goto/pkg/events"
 	"goto/pkg/global"
@@ -32,9 +34,9 @@ import (
 	"goto/pkg/proxy"
 	"goto/pkg/registry"
 	"goto/pkg/rpc"
-	grpcapi "goto/pkg/rpc/grpc/api"
 	grpcclient "goto/pkg/rpc/grpc/client"
 	"goto/pkg/rpc/grpc/protos"
+	grpcapi "goto/pkg/rpc/grpc/server"
 	"goto/pkg/rpc/jsonrpc"
 	"goto/pkg/scripts"
 	"goto/pkg/server/catchall"
@@ -46,6 +48,7 @@ import (
 	"goto/pkg/server/middleware"
 	"goto/pkg/server/probes"
 	"goto/pkg/server/request"
+	"goto/pkg/server/request/body"
 	"goto/pkg/server/response"
 	"goto/pkg/server/tcp"
 	"goto/pkg/server/udp"
@@ -57,12 +60,17 @@ import (
 )
 
 func init() {
+	middleware.BaseMiddlewares = []*middleware.Middleware{
+		ui.Middleware, tunnel.TunnelCountMiddleware, label.Middleware, conn.Middleware, body.Middleware, hooks.Middleware,
+	}
 	middleware.Middlewares = []*middleware.Middleware{
-		ui.Middleware, tunnel.TunnelCountMiddleware, label.Middleware, conn.Middleware, hooks.Middleware, tunnel.Middleware,
-		events.Middleware, metrics.Middleware, listeners.Middleware, probes.Middleware, registry.Middleware, client.Middleware,
-		k8sYaml.Middleware, k8sApi.Middleware, pipe.Middleware, request.Middleware, proxy.Middleware, response.Middleware,
-		tcp.Middleware, udp.Middleware, rpc.Middleware, grpcapi.Middleware, grpcclient.Middleware, protos.Middleware, jsonrpc.Middleware, xds.Middleware,
-		scripts.Middleware, job.Middleware, tls.Middleware, log.Middleware, echo.Middleware, catchall.Middleware,
+		tunnel.Middleware, events.Middleware, metrics.Middleware,
+		listeners.Middleware, probes.Middleware, registry.Middleware, client.Middleware,
+		k8sYaml.Middleware, k8sApi.Middleware, pipe.Middleware, request.Middleware,
+		proxy.Middleware, response.Middleware, tcp.Middleware, udp.Middleware,
+		rpc.Middleware, grpcapi.Middleware, grpcclient.Middleware, protos.Middleware,
+		jsonrpc.Middleware, xds.Middleware, mcpclient.Middleware, mcpserverapi.Middleware, scripts.Middleware, job.Middleware,
+		tls.Middleware, log.Middleware, echo.Middleware, catchall.Middleware,
 	}
 }
 

@@ -113,7 +113,7 @@ func (jq *JQ) Apply(j JSON) JSON {
 			out[k] = v
 		}
 	}
-	return FromJSON(out)
+	return JSONFromJSON(out)
 }
 
 func (jq *JQ) IsEmpty() bool {
@@ -180,7 +180,7 @@ func (jp *JSONPath) Apply(j JSON) JSON {
 			out[k] = v
 		}
 	}
-	return FromJSON(out)
+	return JSONFromJSON(out)
 }
 
 func (jp *JSONPath) IsEmpty() bool {
@@ -192,7 +192,7 @@ func (j *JSONValue) ExecuteTemplates(templates []*template.Template) JSON {
 	for _, t := range templates {
 		data = append(data, j.ExecuteTemplate(t))
 	}
-	return FromJSON(data)
+	return JSONFromJSON(data)
 }
 
 func (j *JSONValue) ExecuteTemplate(t *template.Template) string {

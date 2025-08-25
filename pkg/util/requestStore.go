@@ -18,6 +18,7 @@ package util
 
 import (
 	"context"
+	"goto/pkg/constants"
 	"goto/pkg/global"
 	"net/http"
 	"strings"
@@ -45,21 +46,34 @@ type RequestStore struct {
 	IsTrafficEventReported  bool
 	IsHeadersSent           bool
 	IsTunnelResponseSent    bool
-	GotoProtocol            string
-	StatusCode              int
 	IsH2                    bool
 	IsH2C                   bool
 	IsTLS                   bool
 	IsGRPC                  bool
 	IsJSONRPC               bool
+	IsMCP                   bool
+	RequestPortChecked      bool
+	RequestServed           bool
+	StatusCode              int
+	BodyLength              int
+	RequestPayloadSize      int
+	RequestPortNum          int
+	HostLabel               string
+	ListenerLabel           string
+	RequestPort             string
+	GotoProtocol            string
+	RequestHost             string
+	RequestURI              string
+	RequestQuery            string
+	RequestMethod           string
+	RequestProtcol          string
+	DownstreamAddr          string
+	UpstreamAddr            string
 	ServerName              string
+	RequestPayload          string
 	TLSVersion              string
 	TLSVersionNum           uint16
-	RequestPayload          string
-	RequestPayloadSize      int
-	RequestPort             string
-	RequestPortNum          int
-	RequestPortChecked      bool
+	RequestHeaders          map[string][]string
 	TrafficDetails          []string
 	LogMessages             []string
 	InterceptResponseWriter interface{}
@@ -69,6 +83,8 @@ type RequestStore struct {
 	TunnelLock              sync.RWMutex
 	WillProxy               bool
 	ProxyTargets            interface{}
+	Request                 *http.Request
+	ResponseWriter          http.ResponseWriter
 }
 
 var (
@@ -77,13 +93,14 @@ var (
 	RequestPortKey    = &ContextKey{Key: "requestPort"}
 	IgnoredRequestKey = &ContextKey{Key: "ignoredRequest"}
 	ConnectionKey     = &ContextKey{Key: "connection"}
+	ProtocolKey       = &ContextKey{Key: "protocol"}
 )
 
 func GetRequestStore(r *http.Request) *RequestStore {
 	if val := r.Context().Value(RequestStoreKey); val != nil {
 		return val.(*RequestStore)
 	}
-	_, rs := WithRequestStore(r)
+	_, _, rs := WithRequestStore(r)
 	return rs
 }
 
@@ -101,11 +118,25 @@ func GetRequestStoreIfPresent(r *http.Request) *RequestStore {
 	return nil
 }
 
-func WithRequestStore(r *http.Request) (context.Context, *RequestStore) {
+func WithRequestStore(r *http.Request) (context.Context, *http.Request, *RequestStore) {
 	rs := &RequestStore{}
 	ctx := context.WithValue(r.Context(), RequestStoreKey, rs)
+	r = r.WithContext(ctx)
+	rs.IsTLS = r.TLS != nil
+	rs.Request = r
+	return ctx, r, rs
+}
+
+func PopulateRequestStore(r *http.Request) (context.Context, *RequestStore) {
+	ctx := r.Context()
+	var rs *RequestStore
+	if val := ctx.Value(RequestStoreKey); val != nil {
+		rs = val.(*RequestStore)
+	} else {
+		return nil, nil
+	}
 	isAdminRequest := CheckAdminRequest(r)
-	rs.IsGRPC = r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
+	rs.IsGRPC = r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get(constants.HeaderContentType), "application/grpc")
 	rs.IsAdminRequest = isAdminRequest
 	rs.IsVersionRequest = strings.HasPrefix(r.RequestURI, "/version")
 	rs.IsLockerRequest = strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker")
@@ -121,6 +152,14 @@ func WithRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	rs.IsTunnelConfigRequest = strings.HasPrefix(r.RequestURI, "/tunnels")
 	rs.WillProxy = !isAdminRequest && WillProxyHTTP(r, rs)
 	rs.IsH2C = r.ProtoMajor == 2
+	rs.DownstreamAddr = r.RemoteAddr
+	rs.RequestHost = r.Host
+	rs.RequestURI = r.RequestURI
+	rs.RequestQuery = r.URL.Query().Encode()
+	rs.RequestMethod = r.Method
+	rs.RequestProtcol = r.Proto
+	rs.RequestHeaders = r.Header
+	rs.IsMCP = strings.Contains(r.RequestURI, "/mcp") || strings.Contains(r.RequestURI, "/sse") || strings.Contains(r.RequestURI, "/.well-known") || strings.Contains(r.RequestURI, "/register")
 	return ctx, rs
 }
 

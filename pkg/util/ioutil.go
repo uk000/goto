@@ -60,6 +60,10 @@ func NewReReader(r io.ReadCloser) *ReReader {
 	}
 }
 
+func (r *ReReader) Rewind() {
+	r.ReadCloser = io.NopCloser(bytes.NewReader(r.Content))
+}
+
 func (r *ReReader) Read(p []byte) (n int, err error) {
 	return r.ReadCloser.Read(p)
 }
@@ -72,6 +76,10 @@ func (r *ReReader) Close() error {
 
 func (r *ReReader) ReallyClose() error {
 	return r.ReadCloser.Close()
+}
+
+func (r *ReReader) Length() int {
+	return len(r.Content)
 }
 
 func AsReReader(r io.ReadCloser) *ReReader {
@@ -132,7 +140,6 @@ func LoadFile(filePath string) (string, error) {
 
 func Read(r io.ReadCloser) string {
 	if body, err := io.ReadAll(r); err == nil {
-		r.Close()
 		return strings.Trim(string(body), " ")
 	} else {
 		log.Println(err.Error())

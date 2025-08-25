@@ -51,6 +51,7 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(logRouter, "/response/headers/{enable}", setLogLevel, "POST", "PUT")
 	util.AddRoute(logRouter, "/response/minibody/{enable}", setLogLevel, "POST", "PUT")
 	util.AddRoute(logRouter, "/response/body/{enable}", setLogLevel, "POST", "PUT")
+	util.AddRoute(logRouter, "/request/headers/ignore/{header}", addExcludedHeader, "POST", "PUT")
 	util.AddRoute(logRouter, "", getLogLevels, "GET")
 }
 
@@ -146,6 +147,19 @@ func setLogLevel(w http.ResponseWriter, r *http.Request) {
 			}
 			msg = fmt.Sprintf("Response Body logging set to [%t]", enable)
 		}
+	}
+	util.AddLogMessage(msg, r)
+	fmt.Fprintln(w, msg)
+}
+
+func addExcludedHeader(w http.ResponseWriter, r *http.Request) {
+	msg := ""
+	header := util.GetStringParamValue(r, "header")
+	if header != "" {
+		util.ExcludedHeaders[strings.ToLower(header)] = true
+		msg = fmt.Sprintf("Header [%s] will not be logged", header)
+	} else {
+		msg = "No header specified"
 	}
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)

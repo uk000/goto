@@ -70,7 +70,7 @@ func removeScript(w http.ResponseWriter, r *http.Request) {
 func runScript(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	args, _ := util.GetListParam(r, "args")
-	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set(constants.HeaderContentType, "application/octet-stream")
 	Scripts.RunScript(name, args, r.Body, w)
 	msg := fmt.Sprintf("Script [%s] run successfully", name)
 	util.AddLogMessage(msg, r)

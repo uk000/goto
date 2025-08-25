@@ -106,7 +106,7 @@ func SetServiceResponsePayload(w http.ResponseWriter, r *http.Request, reg RPCSe
 		value := util.GetStringParamValue(r, "value")
 		regexes := util.GetStringParamValue(r, "regexes")
 		paths := util.GetStringParamValue(r, "paths")
-		contentType := r.Header.Get("Content-Type")
+		contentType := r.Header.Get(constants.HeaderResponseContentType)
 		if contentType == "" {
 			contentType = "plain/text"
 		}
@@ -130,7 +130,7 @@ func SetServicePayloadTransform(w http.ResponseWriter, r *http.Request, reg RPCS
 	service, method, serviceType, msg, ok := CheckService(w, r, reg)
 	if ok && service != nil {
 		isStream := strings.Contains(r.RequestURI, "stream")
-		contentType := r.Header.Get("Content-Type")
+		contentType := r.Header.Get(constants.HeaderResponseContentType)
 		if contentType == "" {
 			contentType = constants.ContentTypeJSON
 		}

@@ -52,15 +52,17 @@ type URIStatusConfig struct {
 
 var (
 	Middleware         = middleware.NewMiddleware("uri", setRoutes, middlewareFunc)
-	uriCountsByPort    map[string]map[string]int
-	uriStatusByPort    map[string]map[string]interface{}
-	uriDelayByPort     map[string]map[string]interface{}
+	uriCountsByPort    = map[string]map[string]int{}
+	uriStatusByPort    = map[string]map[string]any{}
+	uriDelayByPort     = map[string]map[string]any{}
+	uriReroues         = map[string]string{}
 	trackURICallCounts bool
 	uriLock            sync.RWMutex
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	uriRouter := util.PathRouter(r, "/uri")
+	util.AddRouteMultiQWithPort(uriRouter, "/reroute", setStatus, []string{"from", "to"}, "POST", "PUT")
 	util.AddRouteQWithPort(uriRouter, "/set/status={status}", setStatus, "uri", "POST", "PUT")
 	util.AddRouteQWithPort(uriRouter, "/set/delay={delay}", setDelay, "uri", "POST", "PUT")
 	util.AddRouteWithPort(uriRouter, "/counts/enable", enableURICallCounts, "POST", "PUT")

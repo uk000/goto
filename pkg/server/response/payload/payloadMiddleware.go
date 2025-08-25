@@ -19,6 +19,7 @@ package payload
 import (
 	"context"
 	"fmt"
+	"goto/pkg/constants"
 	"goto/pkg/server/intercept"
 	"goto/pkg/util"
 	"io"
@@ -70,16 +71,16 @@ func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload,
 	}
 	contentType = rp.ContentType
 	length := strconv.Itoa(len(payload))
-	w.Header().Set("Content-Length", length)
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Goto-Payload-Content-Type", contentType)
+	w.Header().Set(constants.HeaderContentLength, length)
+	w.Header().Set(constants.HeaderContentType, contentType)
+	w.Header().Set(constants.HeaderGotoPayloadContentType, contentType)
 	msg := fmt.Sprintf("Responding with configured payload of length [%s], content type [%s], stream [%t] for URI [%s]",
 		length, contentType, rp.IsStream, r.RequestURI)
 	util.AddLogMessage(msg, r)
 
 	payloadSent := false
 	if rp.IsStream {
-		w.Header().Set("Goto-Payload-Count", strconv.Itoa(len(rp.StreamPayload)))
+		w.Header().Set(constants.HeaderGotoPayloadCount, strconv.Itoa(len(rp.StreamPayload)))
 		if fw := intercept.NewFlushWriter(r, w); fw != nil {
 			failed := false
 			for _, b := range rp.StreamPayload {
@@ -97,7 +98,7 @@ func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload,
 			payloadSent = true
 		}
 	} else {
-		w.Header().Set("Goto-Payload-Length", length)
+		w.Header().Set(constants.HeaderGotoPayloadLength, length)
 	}
 	if !payloadSent {
 		if n, err := w.Write(payload); err != nil {

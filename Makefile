@@ -30,15 +30,15 @@ run: build
 
 docker-build: Dockerfile $(GO_FILES)
 	docker build --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) --platform linux/amd64 .
+	docker build --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-arm64 --platform linux/arm64 .
 
 docker-build-ip: Dockerfile $(GO_FILES)
 	docker build --build-arg iputils=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) --platform linux/amd64 .
+	docker build --build-arg iputils=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-arm64 --platform linux/arm64 .
 
 docker-build-kube: Dockerfile $(GO_FILES)
 	docker build --build-arg kube=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) --platform linux/amd64 .
-
-docker-build-arm64: Dockerfile $(GO_FILES)
-	docker build --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) --platform linux/arm64 .
+	docker build --build-arg kube=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-arm64 --platform linux/arm64 .
 
 docker-run: docker-build
 	docker run -d --rm --name goto -p8080:8080 -it $(IMAGE):$(VERSION) /app/goto --port 8080

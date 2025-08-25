@@ -10,7 +10,9 @@ RUN apk update \
 RUN openssl s_client -showcerts -connect github.com:443 </dev/null 2>/dev/null | openssl x509 -outform PEM > /usr/local/share/ca-certificates/github.crt \
 	&& openssl s_client -showcerts -connect proxy.golang.org:443 </dev/null 2>/dev/null | openssl x509 -outform PEM >  /usr/local/share/ca-certificates/golang-proxy.crt \
 	&& openssl s_client -showcerts -connect sum.golang.org:443 </dev/null 2>/dev/null | openssl x509 -outform PEM >  /usr/local/share/ca-certificates/golang-sum.crt \
+	&& openssl s_client -showcerts -connect dl-cdn.alpinelinux.org:443 </dev/null 2>/dev/null | openssl x509 -outform PEM > /usr/local/share/ca-certificates/alpine.crt \
 	&& update-ca-certificates
+
 
 RUN mkdir /goto
 ADD ./go.mod /goto/go.mod
@@ -34,12 +36,6 @@ RUN --mount=type=cache,target="/root/.cache/go-build" go build -mod=mod -o goto 
 
 WORKDIR /tmp
 
-# ENV DNSPING_REPO=https://github.com/fortio/dnsping
-# ENV DNSPING_VERSION=1.9.0
-
-# RUN wget ${DNSPING_REPO}/releases/download/v${DNSPING_VERSION}/dnsping_${DNSPING_VERSION}_linux_arm64.tar.gz
-# RUN tar -xzf dnsping_${DNSPING_VERSION}_linux_arm64.tar.gz
-
 
 FROM alpine:3.22.0 AS release-base
 
@@ -48,12 +44,13 @@ ARG iputils
 ARG perf
 
 RUN echo 'http://nl.alpinelinux.org/alpine/v3.22/main' > /etc/apk/repositories \
-	&& echo 'http://nl.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories
+	&& echo 'http://nl.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories \
+	&& echo 'http://dl-cdn.alpinelinux.org/alpine/edge/testing' >> /etc/apk/repositories
 
 RUN apk update \
 	&& apk add --no-cache curl jq bash sudo su-exec
 
-# RUN apk add --no-cache --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing grpcurl 
+RUN apk add --no-cache grpcurl 
 
 RUN if [[ -n "$iputils" ]] ; then apk add --no-cache nmap-ncat iputils iproute2 iptables ipvsadm tcpdump tcpflow bind-tools; echo "iputils=$iputils"; fi
 RUN if [[ -n "$kube" ]] ; then apk add --no-cache kubectl; echo "kubectl=$kube"; fi

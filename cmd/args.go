@@ -81,6 +81,7 @@ type ServerArgs struct {
 	ProxyDebugLogs      string
 	LogRequestHeaders   string
 	LogRequestBody      string
+	LogRPCRequestBody   string
 	LogRequestMiniBody  string
 	LogResponseHeaders  string
 	LogResponseBody     string
@@ -189,6 +190,7 @@ var (
 		ProxyDebugLogs:      "proxyDebugLogs",
 		LogRequestHeaders:   "logRequestHeaders",
 		LogRequestBody:      "logRequestBody",
+		LogRPCRequestBody:   "logRPCRequestBody",
 		LogRequestMiniBody:  "logRequestMiniBody",
 		LogResponseHeaders:  "logResponseHeaders",
 		LogResponseBody:     "logResponseBody",
@@ -223,6 +225,7 @@ var (
 		ProxyDebugLogs:      "Enable/Disable Proxy Debug Logs",
 		LogRequestHeaders:   "Enable/Disable logging of request headers",
 		LogRequestBody:      "Enable/Disable logging of request body",
+		LogRPCRequestBody:   "Enable/Disable logging of RPC request body",
 		LogRequestMiniBody:  "Enable/Disable logging of request mini body",
 		LogResponseHeaders:  "Enable/Disable logging of response headers",
 		LogResponseBody:     "Enable/Disable logging of response body",
@@ -303,7 +306,8 @@ func setupServerArgs() {
 	boolFlag(&global.Flags.EnablePeerHealthLogs, sa.PeerHealthLogs, "", sh.PeerHealthLogs, true)
 	boolFlag(&global.Flags.EnableProxyDebugLogs, sa.ProxyDebugLogs, "", sh.ProxyDebugLogs, false)
 	boolFlag(&global.Flags.LogRequestHeaders, sa.LogRequestHeaders, "", sh.LogRequestHeaders, true)
-	boolFlag(&global.Flags.LogRequestBody, sa.LogRequestBody, "", sh.LogRequestBody, true)
+	boolFlag(&global.Flags.LogRequestBody, sa.LogRequestBody, "", sh.LogRequestBody, false)
+	boolFlag(&global.Flags.LogRPCRequestBody, sa.LogRPCRequestBody, "", sh.LogRPCRequestBody, true)
 	boolFlag(&global.Flags.LogRequestMiniBody, sa.LogRequestMiniBody, "", sh.LogRequestMiniBody, false)
 	boolFlag(&global.Flags.LogResponseHeaders, sa.LogResponseHeaders, "", sh.LogResponseHeaders, false)
 	boolFlag(&global.Flags.LogResponseBody, sa.LogResponseBody, "", sh.LogResponseBody, false)

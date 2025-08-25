@@ -41,14 +41,27 @@ var (
 	utf8Regexp              = regexp.MustCompile("(?i)utf-8")
 	knownTextMimeTypeRegexp = regexp.MustCompile(".*(text|html|json|yaml|form).*")
 	upgradeRegexp           = regexp.MustCompile("(?i)upgrade")
+	ExcludedHeaders         = map[string]bool{}
 
 	WillTunnel    func(*http.Request, *RequestStore) bool
 	WillProxyHTTP func(*http.Request, *RequestStore) bool
 	WillProxyGRPC func(int, any) bool
+	WillProxyMCP  func(*http.Request, *RequestStore) bool
 )
 
 func WithPort(ctx context.Context, port int) context.Context {
 	return context.WithValue(ctx, CurrentPortKey, port)
+}
+
+func SetSSE(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ProtocolKey, "SSE")
+}
+
+func IsSSE(ctx context.Context) bool {
+	if val := ctx.Value(ProtocolKey); val != nil {
+		return strings.EqualFold(val.(string), "SSE")
+	}
+	return false
 }
 
 func IsH2(r *http.Request) bool {
@@ -62,7 +75,7 @@ func IsH2C(r *http.Request) bool {
 func IsGRPC(r *http.Request) bool {
 	rs := GetRequestStore(r)
 	if !rs.IsGRPC {
-		rs.IsGRPC = r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
+		rs.IsGRPC = r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get(constants.HeaderContentType), "application/grpc")
 	}
 	return rs.IsGRPC
 }
@@ -202,23 +215,27 @@ func GetListenerPortNum(r *http.Request) int {
 	return GetContextPort(r.Context())
 }
 
+func computeRequestPort(r *http.Request, rs *RequestStore) (port string, portNum int) {
+	if port, _ = GetStringParam(r, "port"); port != "" {
+		portNum, _ = strconv.Atoi(port)
+	} else {
+		portNum = GetListenerPortNum(r)
+		port = strconv.Itoa(portNum)
+	}
+	if rs != nil {
+		rs.RequestPort = port
+		rs.RequestPortNum = portNum
+		rs.RequestPortChecked = true
+	}
+	return
+}
+
 func getRequestOrListenerPort(r *http.Request) (port string, portNum int) {
 	rs := GetRequestStoreIfPresent(r)
 	if rs != nil && rs.RequestPortChecked {
 		return rs.RequestPort, rs.RequestPortNum
 	}
-	if port, _ = GetStringParam(r, "port"); port != "" {
-		portNum, _ = strconv.Atoi(port)
-		if rs != nil {
-			rs.RequestPort = port
-			rs.RequestPortNum = portNum
-			rs.RequestPortChecked = true
-		}
-	} else {
-		portNum = GetListenerPortNum(r)
-		port = strconv.Itoa(portNum)
-	}
-	return
+	return computeRequestPort(r, rs)
 }
 
 func GetRequestOrListenerPort(r *http.Request) string {
@@ -297,7 +314,7 @@ func AddHeaderWithSuffixL(header, suffix, value string, headers map[string][]str
 }
 
 func CopyHeaders(prefix string, r *http.Request, w http.ResponseWriter, headers http.Header, copyHost, copyURI, copyContentType bool) {
-	CopyHeadersWithIgnore(prefix, r, w, headers, nil, copyHost, copyURI, copyContentType)
+	CopyHeadersWithIgnore(prefix, r, w, headers, ExcludedHeaders, copyHost, copyURI, copyContentType)
 }
 
 func CopyHeadersWithIgnore(prefix string, r *http.Request, w http.ResponseWriter, headers http.Header, ignoreHeaders map[string]bool, copyHost, copyURI, copyContentType bool) {
@@ -348,7 +365,13 @@ func ToLowerHeaders(headers map[string][]string) map[string][]string {
 }
 
 func GetHeadersLog(header http.Header) string {
-	return ToJSONText(header)
+	headers := map[string][]string{}
+	for k, v := range header {
+		if !ExcludedHeaders[strings.ToLower(k)] {
+			headers[k] = v
+		}
+	}
+	return ToJSONText(headers)
 }
 
 func ReadJsonPayload(r *http.Request, t interface{}) error {
@@ -425,13 +448,18 @@ func CheckAdminRequest(r *http.Request) bool {
 	if strings.HasPrefix(uri, "/port=") {
 		uri = strings.Split(uri, "/port=")[1]
 	}
+	uri2 := ""
 	if pieces := strings.Split(uri, "/"); len(pieces) > 1 {
 		uri = pieces[1]
+		if len(pieces) > 2 {
+			uri2 = pieces[2]
+		}
 	}
 	return uri == "metrics" || uri == "server" || uri == "request" || uri == "response" || uri == "listeners" ||
 		uri == "label" || uri == "registry" || uri == "client" || uri == "proxy" || uri == "job" || uri == "probes" ||
 		uri == "tcp" || uri == "log" || uri == "events" || uri == "tunnels" || uri == "grpc" || uri == "jsonrpc" ||
-		uri == "k8s" || uri == "pipes" || uri == "scripts" || uri == "tls"
+		uri == "k8s" || uri == "pipes" || uri == "scripts" || uri == "tls" ||
+		(uri == "mcp" && (uri2 == "servers" || uri2 == "server" || uri2 == "client" || uri2 == "proxy"))
 }
 
 func IsMetricsRequest(r *http.Request) bool {
@@ -499,28 +527,28 @@ func IsKnownNonTraffic(r *http.Request) bool {
 }
 
 func IsJSONContentType(h http.Header) bool {
-	if contentType := h.Get("Content-Type"); contentType != "" {
+	if contentType := h.Get(constants.HeaderContentType); contentType != "" {
 		return strings.EqualFold(contentType, constants.ContentTypeJSON)
 	}
 	return false
 }
 
 func IsYAMLContentType(h http.Header) bool {
-	if contentType := h.Get("Content-Type"); contentType != "" {
+	if contentType := h.Get(constants.HeaderContentType); contentType != "" {
 		return strings.EqualFold(contentType, constants.ContentTypeYAML)
 	}
 	return false
 }
 
 func IsUTF8ContentType(h http.Header) bool {
-	if contentType := h.Get("Content-Type"); contentType != "" {
+	if contentType := h.Get(constants.HeaderContentType); contentType != "" {
 		return utf8Regexp.MatchString(contentType)
 	}
 	return false
 }
 
 func IsBinaryContentHeader(h http.Header) bool {
-	if contentType := h.Get("Content-Type"); contentType != "" {
+	if contentType := h.Get(constants.HeaderContentType); contentType != "" {
 		return IsBinaryContentType(contentType)
 	}
 	return false
@@ -551,10 +579,10 @@ func TransformPayload(sourcePayload string, transforms []*Transform, isYaml bool
 	var sourceJSON JSON
 	isYAML := false
 	if isYaml {
-		sourceJSON = FromYAML(sourcePayload)
+		sourceJSON = JSONFromYAML(sourcePayload)
 		isYAML = true
 	} else {
-		sourceJSON = FromJSONText(sourcePayload)
+		sourceJSON = JSONFromJSONText(sourcePayload)
 	}
 	if sourceJSON.IsEmpty() {
 		return sourcePayload
@@ -563,7 +591,7 @@ func TransformPayload(sourcePayload string, transforms []*Transform, isYaml bool
 	for _, t := range transforms {
 		var targetJSON JSON
 		if t.Payload != nil {
-			targetJSON = FromJSON(t.Payload).Clone()
+			targetJSON = JSONFromJSON(t.Payload).Clone()
 		} else {
 			targetJSON = sourceJSON
 		}

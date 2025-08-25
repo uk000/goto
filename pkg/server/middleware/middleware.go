@@ -28,6 +28,7 @@ import (
 
 var (
 	MiddlewareChain = []MiddlewareFunc{}
+	BaseMiddlewares = []*Middleware{}
 	Middlewares     = []*Middleware{}
 )
 
@@ -72,6 +73,17 @@ func BaseHandlerFunc() http.Handler {
 	})
 }
 
+func LinkBaseMiddlewareChain(r *mux.Router) {
+	for _, m := range BaseMiddlewares {
+		if m.SetRoutes != nil {
+			m.SetRoutes(r, nil, r)
+		}
+		if m.MiddlewareHandler != nil {
+			r.Use(m.MiddlewareHandler)
+		}
+	}
+}
+
 func LinkMiddlewareChain(r *mux.Router) {
 	handler := BaseHandlerFunc()
 	for _, m := range Middlewares {
@@ -97,8 +109,7 @@ func InvokeMiddlewareChainForGRPC(ctx context.Context, port int, method, host, u
 	wa := NewGrpcHTTPResponseWriterAdapter(desc)
 	r := ra.ToHTTPRequest()
 	r = r.WithContext(ctx)
-	ctx, _ = util.WithRequestStore(r)
-	r = r.WithContext(ctx)
+	ctx, r, _ = util.WithRequestStore(r)
 	w, irw := intercept.WithIntercept(r, wa)
 	MiddlewareChain[0](w, r)
 	irw.Proceed()

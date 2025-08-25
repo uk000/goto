@@ -18,7 +18,7 @@ package payload
 
 import (
 	"fmt"
-	. "goto/pkg/constants"
+	"goto/pkg/constants"
 	"goto/pkg/events"
 	"goto/pkg/server/conn"
 	"goto/pkg/server/intercept"
@@ -87,7 +87,7 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
 	isStream := strings.Contains(r.RequestURI, "stream")
 	count := util.GetIntParamValue(r, "count")
 	delayMin, delayMax, _, _ := util.GetDurationParam(r, "delay")
-	contentType := r.Header.Get("Content-Type")
+	contentType := r.Header.Get(constants.HeaderResponseContentType)
 	if contentType == "" {
 		if binary {
 			contentType = "application/octet-stream"
@@ -167,9 +167,9 @@ func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
 	pr := PayloadManager.getPortResponse(r)
 	isGRPC := util.GetStringParamValue(r, "grpc") != ""
 	isStream := strings.Contains(r.RequestURI, "stream")
-	contentType := r.Header.Get("Content-Type")
+	contentType := r.Header.Get(constants.HeaderResponseContentType)
 	if contentType == "" {
-		contentType = ContentTypeJSON
+		contentType = constants.ContentTypeJSON
 	}
 	var transforms []*util.Transform
 	if err := util.ReadJsonPayload(r, &transforms); err == nil {
@@ -210,9 +210,9 @@ func respondWithPayload(w http.ResponseWriter, r *http.Request) {
 	}
 	payload := util.GenerateRandomString(size)
 	fmt.Fprint(w, payload)
-	w.Header().Set("Content-Length", sizeV)
-	w.Header().Set("Content-Type", "plain/text")
-	w.Header().Set("Goto-Payload-Length", sizeV)
+	w.Header().Set(constants.HeaderContentLength, sizeV)
+	w.Header().Set(constants.HeaderContentType, "plain/text")
+	w.Header().Set(constants.HeaderGotoPayloadLength, sizeV)
 	util.AddLogMessage(fmt.Sprintf("Responding with requested payload of length %d", size), r)
 }
 
@@ -225,7 +225,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
 	count := util.GetIntParamValue(r, "count")
 	repeat := false
 	var payload []byte
-	contentType := r.Header.Get("Content-Type")
+	contentType := r.Header.Get(constants.HeaderContentType)
 	if contentType == "" {
 		contentType = "plain/text"
 	}
@@ -258,16 +258,16 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Goto-Chunk-Count", strconv.Itoa(count))
-	w.Header().Set("Goto-Chunk-Length", strconv.Itoa(chunkSize))
-	w.Header().Set("Goto-Chunk-Delay", delayText)
+	w.Header().Set(constants.HeaderContentType, contentType)
+	w.Header().Set(constants.HeaderXContentTypeOptions, "nosniff")
+	w.Header().Set(constants.HeaderGotoChunkCount, strconv.Itoa(count))
+	w.Header().Set(constants.HeaderGotoChunkLength, strconv.Itoa(chunkSize))
+	w.Header().Set(constants.HeaderGotoChunkDelay, delayText)
 	if size > 0 {
-		w.Header().Set("Goto-Stream-Length", strconv.Itoa(size))
+		w.Header().Set(constants.HeaderGotoStreamLength, strconv.Itoa(size))
 	}
 	if duration > 0 {
-		w.Header().Set("Goto-Stream-Duration", duration.String())
+		w.Header().Set(constants.HeaderGotoStreamDuration, duration.String())
 	}
 
 	fw := intercept.NewFlushWriter(r, w)

@@ -90,6 +90,8 @@ func middlewareFunc(next http.Handler) http.Handler {
 			port = strconv.Itoa(p)
 		}
 		rs.GotoProtocol = util.GotoProtocol(r.ProtoMajor == 2, l.TLS)
+		rs.HostLabel = l.HostLabel
+		rs.ListenerLabel = l.Label
 		if util.IsTunnelRequest(r) {
 			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoRemoteAddress, rs.TunnelCount), r.RemoteAddr)
 			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoPort, rs.TunnelCount), port)

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"goto/pkg/constants"
 	"io"
 	"net/http"
 	"net/url"
@@ -47,7 +48,7 @@ func NewGrpcHTTPRequestAdapter(ctx context.Context, method, host, uri string, he
 	}
 	h.Add("uri", uri)
 	h.Add("method", method)
-	h.Add("Content-Type", "application/grpc")
+	h.Add(constants.HeaderContentType, "application/grpc")
 	remoteAddr := ""
 	if p, ok := peer.FromContext(ctx); ok && p != nil {
 		remoteAddr = p.Addr.String()

@@ -19,6 +19,7 @@ package listeners
 import (
 	"crypto/x509"
 	"fmt"
+	"goto/pkg/constants"
 	"goto/pkg/events"
 	"goto/pkg/server/middleware"
 	gototls "goto/pkg/tls"
@@ -52,6 +53,7 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(lRouter, "/{port}/reopen", openListener, "PUT", "POST")
 	util.AddRoute(lRouter, "/{port}/close", closeListener, "PUT", "POST")
 	util.AddRoute(lRouter, "/{port}?", getListeners, "GET")
+	util.AddRoute(lRouter, "/ports", getListeners, "GET")
 }
 
 func addListener(w http.ResponseWriter, r *http.Request) {
@@ -151,8 +153,8 @@ func getListenerCertOrKey(w http.ResponseWriter, r *http.Request) {
 				raw, err = gototls.EncodeX509Cert(l.Cert)
 			}
 			if raw != nil {
-				w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
-				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Header().Set(constants.HeaderContentLength, strconv.Itoa(len(raw)))
+				w.Header().Set(constants.HeaderContentType, "application/octet-stream")
 				w.Write(raw)
 				msg = "Listener TLS cert served"
 			} else if err != nil {
@@ -166,8 +168,8 @@ func getListenerCertOrKey(w http.ResponseWriter, r *http.Request) {
 				raw, err = gototls.EncodeX509Key(l.Cert)
 			}
 			if raw != nil {
-				w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
-				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Header().Set(constants.HeaderContentLength, strconv.Itoa(len(raw)))
+				w.Header().Set(constants.HeaderContentType, "application/octet-stream")
 				w.Write(raw)
 				msg = "Listener TLS key served"
 			} else if err != nil {
@@ -226,10 +228,13 @@ func autoSNI(w http.ResponseWriter, r *http.Request) {
 
 func getListeners(w http.ResponseWriter, r *http.Request) {
 	port := util.GetIntParamValue(r, "port")
+	ports := strings.Contains(r.RequestURI, "ports")
 	listenersLock.RLock()
 	defer listenersLock.RUnlock()
 	if port > 0 {
 		util.WriteJsonPayload(w, GetListenerForPort(port))
+	} else if ports {
+		util.WriteJsonPayload(w, GetListenerPorts())
 	} else {
 		util.WriteJsonPayload(w, GetListeners())
 	}

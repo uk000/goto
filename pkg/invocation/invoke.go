@@ -37,6 +37,7 @@ type InvocationRequest struct {
 	targetID        string
 	url             string
 	uri             string
+	host            string
 	headers         map[string]string
 	httpRequest     *http.Request
 	grpcInput       *pb.Input
@@ -115,6 +116,7 @@ func (tracker *InvocationTracker) newRequest(requestID, targetID, url string, he
 		requestID: requestID,
 		targetID:  targetID,
 		url:       url,
+		host:      tracker.Target.Host,
 		headers:   headers,
 		client:    tracker.client.transportClient,
 		tracker:   tracker,
@@ -183,6 +185,9 @@ func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
 				for h, hv := range ir.headers {
 					req.Header.Del(h)
 					req.Header.Add(h, hv)
+				}
+				if ir.host != "" {
+					req.Host = ir.host
 				}
 				if req.Host == "" {
 					req.Host = req.URL.Host

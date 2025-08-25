@@ -25,7 +25,6 @@ import (
 	. "goto/pkg/constants"
 	"goto/pkg/metrics"
 	"goto/pkg/server/intercept"
-	"goto/pkg/server/listeners"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 
@@ -113,23 +112,26 @@ func Echo(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetEchoResponse(w http.ResponseWriter, r *http.Request) map[string]interface{} {
-	l := listeners.GetCurrentListener(r)
-	rs := util.GetRequestStore(r)
+	return GetEchoResponseFromRS(util.GetRequestStore(r))
+}
+
+func GetEchoResponseFromRS(rs *util.RequestStore) map[string]interface{} {
 	response := map[string]interface{}{
-		"RemoteAddress":      r.RemoteAddr,
-		"RequestHost":        r.Host,
-		"RequestURI":         r.RequestURI,
-		"RequestMethod":      r.Method,
-		"RequestProtcol":     r.Proto,
-		"RequestQuery":       r.URL.Query(),
-		"RequestBody":        fmt.Sprintf("[%d bytes]", rs.RequestPayloadSize),
-		HeaderGotoTargetURL:  r.Header.Get(HeaderGotoTargetURL),
-		HeaderGotoHost:       l.HostLabel,
-		HeaderGotoPort:       l.Port,
-		HeaderViaGoto:        l.Label,
-		HeaderGotoProtocol:   w.Header().Get(HeaderGotoProtocol),
-		HeaderGotoTunnelHost: r.Header.Get(HeaderGotoTunnelHost),
-		HeaderViaGotoTunnel:  r.Header.Get(HeaderViaGotoTunnel),
+		"RemoteAddress":      rs.DownstreamAddr,
+		"RequestHost":        rs.RequestHost,
+		"RequestURI":         rs.RequestURI,
+		"RequestMethod":      rs.RequestMethod,
+		"RequestProtcol":     rs.RequestProtcol,
+		"RequestQuery":       rs.RequestQuery,
+		"RequestPayloadSize": rs.RequestPayloadSize,
+		HeaderGotoHost:       rs.HostLabel,
+		HeaderGotoPort:       rs.RequestPort,
+		HeaderViaGoto:        rs.ListenerLabel,
+	}
+	if rs.IsTunnelRequest {
+		response[HeaderGotoTargetURL] = rs.RequestHeaders[HeaderGotoTargetURL]
+		response[HeaderGotoTunnelHost] = rs.RequestHeaders[HeaderGotoTunnelHost]
+		response[HeaderViaGotoTunnel] = rs.RequestHeaders[HeaderViaGotoTunnel]
 	}
 	return response
 }
