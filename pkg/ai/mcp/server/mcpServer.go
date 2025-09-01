@@ -8,6 +8,7 @@ import (
 	"goto/pkg/global"
 	"goto/pkg/proxy"
 	"goto/pkg/server/listeners"
+	"goto/pkg/server/middleware"
 	"goto/pkg/server/response/payload"
 	"goto/pkg/util"
 	"log"
@@ -75,6 +76,7 @@ var (
 	PortsServers  = map[int]*PortServers{}
 	AllComponents = map[string]map[string]map[string]mcp.IMCPComponent{}
 	Kinds         = []string{KindTools, KindPrompts, KindResources, KindTemplates}
+	Middleware    = middleware.NewMiddleware("mcpserver", nil, MCPServerFunc)
 	lock          sync.RWMutex
 )
 
@@ -149,6 +151,13 @@ func AddMCPServers(port int, payloads []*MCPServerPayload) {
 		}
 		GetPortMCPServers(p.Port).AddMCPServer(p)
 	}
+}
+
+func ClearAllMCPServers() {
+	lock.Lock()
+	defer lock.Unlock()
+	PortsServers = map[int]*PortServers{}
+	AllComponents = map[string]map[string]map[string]mcp.IMCPComponent{}
 }
 
 func (ps *PortServers) AddMCPServer(p *MCPServerPayload) {
@@ -245,6 +254,14 @@ func (ps *PortServers) Stop() {
 	}
 }
 
+func (ps *PortServers) Clear() {
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+	for _, s := range ps.Servers {
+		s.Clear()
+	}
+}
+
 func (ps *PortServers) GetComponents(kind string) any {
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
@@ -294,6 +311,14 @@ func (m *MCPServer) GetPort() int {
 	return m.Port
 }
 
+func (m *MCPServer) Clear() {
+	m.Tools = map[string]*MCPTool{}
+	m.Prompts = map[string]*MCPPrompt{}
+	m.Resources = map[string]*MCPResource{}
+	m.ResourceTemplates = map[string]*MCPResourceTemplate{}
+	m.CompletionPayload = map[string]*payload.Payload{}
+}
+
 func (m *MCPServer) GetComponents(kind string) any {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
@@ -327,10 +352,10 @@ func (m *MCPServer) GetTool(name string) *MCPTool {
 	return m.Tools[name]
 }
 
-func (m *MCPServer) AddPayload(name, kind string, payload []byte, url string, isRemote, isJSON, isStream bool, streamCount int, delayMin, delayMax time.Duration, delayCount int) error {
+func (m *MCPServer) AddPayload(name, kind string, payload []byte, isJSON, isStream bool, streamCount int, delayMin, delayMax time.Duration, delayCount int) error {
 	c := m.getComponent(name, kind)
 	if c != nil {
-		c.SetPayload(payload, url, isRemote, isJSON, isStream, streamCount, delayMin, delayMax, delayCount)
+		c.SetPayload(payload, isJSON, isStream, streamCount, delayMin, delayMax, delayCount)
 		return nil
 	}
 	return errors.New("component not found")
@@ -362,7 +387,7 @@ func (m *MCPServer) AddTools(b []byte, ps *PortServers) (int, error) {
 			return 0, err
 		}
 		if tool.IsProxy {
-			proxy.GetMCPProxyForPort(m.Port).SetupMCPProxy(m.Name, tool.RemoteURL, "", tool.Tool.Name, tool.Tool.Name, nil)
+			proxy.GetMCPProxyForPort(m.Port).SetupMCPProxy(m.Name, tool.Config.Remote.URL, "", tool.Tool.Name, tool.Tool.Name, nil)
 		}
 		m.server.AddTool(tool.Tool, tool.Handle)
 		tool.Server = m
@@ -500,6 +525,7 @@ func (m *MCPServer) onUnsubscribed(ctx context.Context, req *gomcp.UnsubscribeRe
 }
 
 func (m *MCPServer) Serve(w http.ResponseWriter, r *http.Request) {
+	r = r.WithContext(util.SetHTTPRW(r.Context(), r, w))
 	isSSE := strings.Contains(r.RequestURI, "/sse") || r.Header.Get("Sec-Fetch-Mode") != ""
 	isMCP := strings.Contains(r.RequestURI, "/mcp") && !strings.Contains(r.RequestURI, "/mcp/sse")
 	if isSSE && !isMCP {
@@ -522,6 +548,10 @@ func (m *MCPServer) Serve(w http.ResponseWriter, r *http.Request) {
 
 func (m *MCPServer) Middleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
+		if method == "ping" {
+			log.Println("PING: MCP Ping handled")
+			return next(ctx, method, req)
+		}
 		log.Println("===================== *** MCP *** ========================")
 		start := time.Now()
 		session := req.GetSession()
@@ -563,33 +593,51 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 	rs := util.GetRequestStore(r)
 	isMCP := l.IsMCP || rs.IsMCP
 	if isMCP && !rs.IsAdminRequest {
+		log.Println("---------------- *** Pre-MCP *** ----------------")
+		if proxy.WillProxyMCP(l.Port, r) {
+			log.Printf("MCP is configured to proxy on Port [%d]. Skipping MCP processing", l.Port)
+			return
+		}
 		port, serverName := getPortAndMCPServerNameFromURI(r.RequestURI)
 		if port == 0 {
-			port = util.GetRequestOrListenerPortNum(r)
+			port = l.Port
 		}
 		ps := PortsServers[port]
 		if ps != nil {
 			server := ps.Servers[serverName]
 			if server == nil {
-				log.Printf("MCP Server [%s] not found on port [%d], using PortDefault server", serverName, port)
 				server = ps.DefaultServer
+				if server != nil {
+					if server.Enabled {
+						if serverName == "" {
+							log.Printf("No MCP Server name was given, using PortDefault server [%s] on port [%d]", server.Name, port)
+						} else {
+							log.Printf("MCP Server [%s] not found on port [%d], using PortDefault server [%s]", serverName, port, server.Name)
+						}
+					} else {
+						log.Printf("MCP Server [%s] not found on port [%d], and PortDefault server is disabled.", serverName, port)
+					}
+				} else {
+					log.Printf("No MCP Servers present on port [%d] to be used as PortDefault server", port)
+				}
 			}
-			if server == nil {
-				log.Printf("Port [%d] doesn't have a default MCP Server either, using Default server", port)
-				GetPortDefaultMCPServer(port).Serve(w, r)
-				rs.RequestServed = true
-			} else if !server.Enabled {
-				log.Printf("Port [%d] server [%s] is disabled. Using Default server", port, server.Name)
-				GetPortDefaultMCPServer(port).Serve(w, r)
-				rs.RequestServed = true
-			} else if proxy.WillProxyMCP(l.Port, r) {
-				log.Printf("Port [%d] server [%s] is proxied. Skipping MCP processing", port, server.Name)
-			} else {
-				log.Printf("Port [%d] server [%s] serving over MCP", port, server.Name)
+			if server == nil || !server.Enabled {
+				server = GetPortDefaultMCPServer(port)
+				if server != nil {
+					log.Printf("Falling back to Default MCP Server [%s] on port [%d]", server.Name, port)
+				} else {
+					log.Printf("Default MCP Server not configured on port [%d] either. Will fall back to HTTP handling", port)
+				}
+			}
+			if server != nil {
+				log.Printf("Server [%s] will handle MCP on port [%d]", server.Name, port)
 				server.Serve(w, r)
 				rs.RequestServed = true
+			} else {
+				log.Printf("No MCP Server handling port [%d]. Will route to HTTP server.", port)
 			}
 		}
+		log.Println("---------------- *** Finish Pre-MCP *** ----------------")
 	}
 }
 

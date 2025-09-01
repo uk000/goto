@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/global"
+	"goto/pkg/types"
 	"io"
 	"net"
 	"net/http"
@@ -62,6 +63,18 @@ func IsSSE(ctx context.Context) bool {
 		return strings.EqualFold(val.(string), "SSE")
 	}
 	return false
+}
+
+func SetHTTPRW(ctx context.Context, r *http.Request, w http.ResponseWriter) context.Context {
+	return context.WithValue(ctx, HTTPRWKey, &types.Pair{Left: r, Right: w})
+}
+
+func GetHTTPRW(ctx context.Context) (*http.Request, http.ResponseWriter) {
+	if val := ctx.Value(HTTPRWKey); val != nil {
+		pair := val.(*types.Pair)
+		return pair.Left.(*http.Request), pair.Right.(http.ResponseWriter)
+	}
+	return nil, nil
 }
 
 func IsH2(r *http.Request) bool {
@@ -396,11 +409,11 @@ func WriteStringJsonPayload(w http.ResponseWriter, json string) {
 	fmt.Fprintln(w, json)
 }
 
-func WriteJson(w io.Writer, t interface{}) string {
-	if reflect.ValueOf(t).IsNil() {
+func WriteJson(w io.Writer, j interface{}) string {
+	if reflect.ValueOf(j).IsNil() {
 		fmt.Fprintln(w, "")
 	} else {
-		if bytes, err := json.Marshal(t); err == nil {
+		if bytes, err := json.MarshalIndent(j, "", "  "); err == nil {
 			data := string(bytes)
 			fmt.Fprintln(w, data)
 			return data
@@ -458,7 +471,7 @@ func CheckAdminRequest(r *http.Request) bool {
 	return uri == "metrics" || uri == "server" || uri == "request" || uri == "response" || uri == "listeners" ||
 		uri == "label" || uri == "registry" || uri == "client" || uri == "proxy" || uri == "job" || uri == "probes" ||
 		uri == "tcp" || uri == "log" || uri == "events" || uri == "tunnels" || uri == "grpc" || uri == "jsonrpc" ||
-		uri == "k8s" || uri == "pipes" || uri == "scripts" || uri == "tls" ||
+		uri == "k8s" || uri == "pipes" || uri == "scripts" || uri == "tls" || uri == "routing" ||
 		(uri == "mcp" && (uri2 == "servers" || uri2 == "server" || uri2 == "client" || uri2 == "proxy"))
 }
 

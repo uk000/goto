@@ -1,6 +1,7 @@
 package mcpclient
 
 import (
+	"errors"
 	"fmt"
 	"goto/pkg/global"
 	"goto/pkg/server/middleware"
@@ -24,10 +25,12 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
 	util.AddRouteWithPort(mcpClientRouter, "/details", getDetails, "GET")
 
-	util.AddRouteMultiQWithPort(mcpClientRouter, "/list/all", listTools, []string{"url", "sse"}, "POST", "GET")
-	util.AddRouteMultiQWithPort(mcpClientRouter, "/list/tools", listTools, []string{"url", "sse"}, "POST", "GET")
-	util.AddRouteMultiQWithPort(mcpClientRouter, "/list/tools/names", listTools, []string{"url", "sse"}, "POST", "GET")
-	util.AddRouteMultiQWithPort(mcpClientRouter, "/call", callTool, []string{"url", "server", "tool", "sse"}, "POST")
+	util.AddRouteMultiQWithPort(mcpClientRouter, "/list/all", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
+	util.AddRouteMultiQWithPort(mcpClientRouter, "/list/tools", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
+	util.AddRouteMultiQWithPort(mcpClientRouter, "/list/tools/names", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
+
+	util.AddRouteWithPort(mcpClientRouter, "/call", callTool, "POST")
+
 	util.AddRouteWithPort(mcpClientRouter, "/payload/{kind:sample|elicit}", addClientPayload, "POST")
 	util.AddRouteWithPort(mcpClientRouter, "/payload/roots", addRoots, "POST")
 }
@@ -35,15 +38,18 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 func listTools(w http.ResponseWriter, r *http.Request) {
 	url := util.GetStringParamValue(r, "url")
 	sse := util.GetBoolParamValue(r, "sse")
+	authority := util.GetStringParamValue(r, "authority")
 	toolsOnly := strings.Contains(r.RequestURI, "tools")
 	namesOnly := strings.Contains(r.RequestURI, "names")
 	msg := ""
 	operationLabel := fmt.Sprintf("[%s][tool/list]", global.Self.Name)
-	client := NewClient(util.GetCurrentPort(r), sse, "Client", operationLabel)
+	client := NewClient(util.GetCurrentPort(r), sse, "Client", operationLabel, authority)
 	err := client.Connect(url)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("Failed to connect to url %s with error [%s]", url, err.Error())
+		util.AddLogMessage(msg, r)
+		fmt.Fprintln(w, msg)
 		return
 	}
 	var toolsList *mcp.ListToolsResult
@@ -100,46 +106,49 @@ func listTools(w http.ResponseWriter, r *http.Request) {
 }
 
 func callTool(w http.ResponseWriter, r *http.Request) {
-	url := util.GetStringParamValue(r, "url")
-	sse := util.GetBoolParamValue(r, "sse")
-	tool := util.GetStringParamValue(r, "tool")
 	port := util.GetCurrentPort(r)
 	b, _ := io.ReadAll(r.Body)
 	msg := ""
-	operationLabel := fmt.Sprintf("[%s][tool/call][%s]", global.Self.Name, tool)
-	client := NewClient(port, sse, "Client", operationLabel)
-	err := client.Connect(url)
+	tc, err := ParseToolCall(port, b)
+	var output map[string]any
+	if err != nil || tc == nil {
+		if err != nil {
+			msg = fmt.Sprintf("Failed to parse tool call payload with error [%s]", err.Error())
+		} else {
+			err = errors.New("No tool call payload given")
+		}
+	} else {
+		output, err = doToolCall(port, tc)
+		if err != nil {
+			msg = err.Error()
+		} else {
+			msg = fmt.Sprintf("Tool %s called successfully on url %s", tc.Tool, tc.URL)
+		}
+	}
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		msg = fmt.Sprintf("Failed to connect to url %s with error [%s]", url, err.Error())
-		return
+		fmt.Fprintln(w, msg)
+		util.AddLogMessage(msg, r)
+	} else {
+		util.WriteJsonPayload(w, output)
+		util.AddLogMessage(msg, r)
 	}
-	var output map[string]any
+}
+
+func doToolCall(port int, tc *ToolCall) (output map[string]any, err error) {
+	operationLabel := fmt.Sprintf("[%s][tool/call][%s]", global.Self.Name, tc.Tool)
+	client := NewClient(port, tc.SSE, "Client", operationLabel, tc.Authority)
 	defer func() {
 		if output == nil {
 			log.Println("*** defer called with Nil output ***")
 		}
 		client.Close()
 	}()
-	var payload map[string]any
-	if util.IsJSONContentType(r.Header) {
-		payload = util.JSONFromBytes(b).Object()
-	} else {
-		payload = map[string]any{"text": string(b)}
+	output, err = client.CallTool(port, tc, nil)
+	if err == nil {
+		client.hops.AddToOutput(output)
 	}
-	payload["Goto-Client"] = util.GetCurrentListenerLabel(r)
-	output, err = client.CallTool(port, tool, payload)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintln(w, err.Error())
-		util.AddLogMessage(err.Error(), r)
-		return
-	} else {
-		msg = fmt.Sprintf("Tool %s called successfully on url %s", tool, url)
-	}
-	client.hops.AddToOutput(output)
-	util.WriteJsonPayload(w, output)
-	util.AddLogMessage(msg, r)
+	return
 }
 
 func addClientPayload(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +159,7 @@ func addClientPayload(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("Failed to add client payload for kind [%s] with error [%s]", kind, err.Error())
 	} else {
-		msg = fmt.Sprintf("Client payload added for kind [%s] with data [%s]", kind, string(payload))
+		msg = fmt.Sprintf("Client payload added for kind [%s]", kind)
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)

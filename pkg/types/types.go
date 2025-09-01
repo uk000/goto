@@ -17,6 +17,7 @@
 package types
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -60,4 +61,8 @@ func (l *ListArg) Set(value string) error {
 func (l *ListArg) SetAt(index int, value string) error {
 	*l = append(*l, value)
 	return nil
+}
+
+func (p *Pair) String() string {
+	return fmt.Sprintf("%+v: %+v", p.Left, p.Right)
 }

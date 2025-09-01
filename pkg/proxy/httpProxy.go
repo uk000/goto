@@ -402,7 +402,7 @@ func (p *HTTPProxy) addURIMatch(target *HTTPTarget, uri string) error {
 		uri = "/*"
 		target.matchRootURI = true
 	}
-	if _, re, router, err := util.RegisterURIRouteAndGetRegex(uri, p.router, ProxyRequest); err == nil {
+	if _, re, router, err := util.BuildURIMatcher(uri, ProxyRequest); err == nil {
 		target.uriRegexps[uri] = re
 		target.uriRouters[uri] = router
 	} else {

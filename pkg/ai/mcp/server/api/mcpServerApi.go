@@ -51,10 +51,13 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRouteWithPort(mcpRouter, "/server/{server}/{kind:tools|prompts|resources|templates}/add", addComponent, "POST")
 	util.AddRouteWithPort(mcpRouter, "/server/{server}/tool/{tool}/call", callTool, "POST")
 
-	util.AddRouteQWithPort(mcpRouter, "/server/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/remote", addComponentPayload, "url", "POST")
 	util.AddRouteWithPort(mcpRouter, "/server/{server}/payload/{kind:tools|prompts|resources|templates}/{name}", addComponentPayload, "POST")
 	util.AddRouteWithPort(mcpRouter, "/server/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}", addComponentPayload, "POST")
 	util.AddRouteWithPort(mcpRouter, "/server/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}/delay={delay}", addComponentPayload, "POST")
+
+	util.AddRouteWithPort(mcpRouter, "/servers/clear/all", clearServers, "POST")
+	util.AddRouteWithPort(mcpRouter, "/servers/clear", clearServers, "POST")
+	util.AddRouteWithPort(mcpRouter, "/server/{server}/clear", clearServers, "POST")
 }
 
 func getServers(w http.ResponseWriter, r *http.Request) {
@@ -67,10 +70,15 @@ func getServers(w http.ResponseWriter, r *http.Request) {
 	} else if all {
 		util.WriteJsonPayload(w, mcpserver.PortsServers)
 	} else if name != "" {
-		ps := mcpserver.GetPortMCPServers(port)
-		server := ps.GetMCPServer(name)
+		var server *mcpserver.MCPServer
+		for _, ps := range mcpserver.PortsServers {
+			server = ps.GetMCPServer(name)
+			if server != nil {
+				break
+			}
+		}
 		if server == nil {
-			fmt.Fprintf(w, "{\"error\": \"MCP Server doesn't exist at port [%d]\"}\n", port)
+			fmt.Fprintln(w, "{\"error\": \"MCP Server doesn't exist on any port\"}")
 		} else {
 			util.WriteJsonPayload(w, server)
 		}
@@ -82,7 +90,19 @@ func getServers(w http.ResponseWriter, r *http.Request) {
 func addServers(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	payloads := []*mcpserver.MCPServerPayload{}
-	util.ReadJsonPayload(r, &payloads)
+	err := util.ReadJsonPayload(r, &payloads)
+	msg := ""
+	if err != nil || len(payloads) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		if err != nil {
+			msg = fmt.Sprintf("Failed to parse payload with error [%s]", err.Error())
+		} else {
+			msg = "Failed to add servers, no MCP Server in the payload"
+		}
+		fmt.Fprintln(w, msg)
+		util.AddLogMessage(msg, r)
+		return
+	}
 	mcpserver.AddMCPServers(port, payloads)
 	names := []string{}
 	for _, p := range payloads {
@@ -91,7 +111,37 @@ func addServers(w http.ResponseWriter, r *http.Request) {
 		}
 		names = append(names, fmt.Sprintf("%s@%d", p.Name, p.Port))
 	}
-	msg := fmt.Sprintf("Added MCP Servers [%+v]", names)
+	msg = fmt.Sprintf("Added MCP Servers [%+v]", names)
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
+}
+
+func clearServers(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	all := strings.Contains(r.RequestURI, "all")
+	name := util.GetStringParamValue(r, "server")
+	msg := ""
+	if all {
+		mcpserver.ClearAllMCPServers()
+		msg = "Cleared all MCP servers"
+	} else if name != "" {
+		var server *mcpserver.MCPServer
+		for _, ps := range mcpserver.PortsServers {
+			server = ps.GetMCPServer(name)
+			if server != nil {
+				break
+			}
+		}
+		if server == nil {
+			msg = "MCP Server not configured on any port"
+		} else {
+			msg = fmt.Sprintf("Cleared MCP server [%s] on port [%d]", name, port)
+		}
+	} else {
+		ps := mcpserver.GetPortMCPServers(port)
+		ps.Clear()
+		msg = fmt.Sprintf("Cleared all MCP servers on port [%d]", port)
+	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
@@ -194,8 +244,6 @@ func addComponentPayload(w http.ResponseWriter, r *http.Request) {
 	serverName := util.GetStringParamValue(r, "server")
 	kind := util.GetStringParamValue(r, "kind")
 	name := util.GetStringParamValue(r, "name")
-	url := util.GetStringParamValue(r, "url")
-	isRemote := strings.Contains(r.RequestURI, "remote")
 	isStream := strings.Contains(r.RequestURI, "stream")
 	streamCount := util.GetIntParamValue(r, "count")
 	delayMin, delayMax, delayCount, _ := util.GetDurationParam(r, "delay")
@@ -212,7 +260,7 @@ func addComponentPayload(w http.ResponseWriter, r *http.Request) {
 	ps := mcpserver.GetPortMCPServers(port)
 	server := ps.GetMCPServer(serverName)
 	msg := ""
-	if err := server.AddPayload(name, kind, payload, url, isRemote, isJSON, isStream, streamCount, delayMin, delayMax, delayCount); err != nil {
+	if err := server.AddPayload(name, kind, payload, isJSON, isStream, streamCount, delayMin, delayMax, delayCount); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("Failed to set payload for component [%s] in MCP %s to server [%s] on port [%d] with error [%s]", name, kind, server.Name, port, err.Error())
 	} else {
@@ -264,11 +312,9 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 	args := map[string]any{}
 	err := util.ReadJsonPayloadFromBody(r.Body, &args)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		msg := fmt.Sprintf("MCP Server [%s] Tool [%s] failed to read arguments from body with error [%s]", serverName, toolName, err.Error())
+		msg := fmt.Sprintf("Calling Tool [%s] without payload", toolName)
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
-		return
 	}
 	req := &gomcp.CallToolRequest{
 		Params: &gomcp.CallToolParams{

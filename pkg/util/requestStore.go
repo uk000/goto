@@ -94,6 +94,7 @@ var (
 	IgnoredRequestKey = &ContextKey{Key: "ignoredRequest"}
 	ConnectionKey     = &ContextKey{Key: "connection"}
 	ProtocolKey       = &ContextKey{Key: "protocol"}
+	HTTPRWKey         = &ContextKey{Key: "httprw"}
 )
 
 func GetRequestStore(r *http.Request) *RequestStore {

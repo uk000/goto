@@ -21,6 +21,7 @@ import (
 	"strconv"
 
 	mcpclient "goto/pkg/ai/mcp/client"
+	mcpserver "goto/pkg/ai/mcp/server"
 	mcpserverapi "goto/pkg/ai/mcp/server/api"
 	"goto/pkg/client"
 	"goto/pkg/events"
@@ -33,6 +34,7 @@ import (
 	"goto/pkg/pipe"
 	"goto/pkg/proxy"
 	"goto/pkg/registry"
+	"goto/pkg/routing"
 	"goto/pkg/rpc"
 	grpcclient "goto/pkg/rpc/grpc/client"
 	"goto/pkg/rpc/grpc/protos"
@@ -61,7 +63,8 @@ import (
 
 func init() {
 	middleware.BaseMiddlewares = []*middleware.Middleware{
-		ui.Middleware, tunnel.TunnelCountMiddleware, label.Middleware, conn.Middleware, body.Middleware, hooks.Middleware,
+		label.Middleware, conn.Middleware, mcpserver.Middleware,
+		tunnel.TunnelCountMiddleware, body.Middleware, hooks.Middleware, routing.Middleware,
 	}
 	middleware.Middlewares = []*middleware.Middleware{
 		tunnel.Middleware, events.Middleware, metrics.Middleware,
@@ -69,8 +72,9 @@ func init() {
 		k8sYaml.Middleware, k8sApi.Middleware, pipe.Middleware, request.Middleware,
 		proxy.Middleware, response.Middleware, tcp.Middleware, udp.Middleware,
 		rpc.Middleware, grpcapi.Middleware, grpcclient.Middleware, protos.Middleware,
-		jsonrpc.Middleware, xds.Middleware, mcpclient.Middleware, mcpserverapi.Middleware, scripts.Middleware, job.Middleware,
-		tls.Middleware, log.Middleware, echo.Middleware, catchall.Middleware,
+		jsonrpc.Middleware, xds.Middleware, mcpclient.Middleware, mcpserverapi.Middleware,
+		scripts.Middleware, job.Middleware, tls.Middleware, log.Middleware, ui.Middleware,
+		echo.Middleware, catchall.Middleware,
 	}
 }
 

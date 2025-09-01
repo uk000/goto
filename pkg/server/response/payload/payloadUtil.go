@@ -71,9 +71,10 @@ func NewStreamJSONPayload(jsonArr []util.JSON, raw []byte, streamCount int, dela
 		}
 	}
 	return &Payload{
-		IsStream:   true,
-		Delay:      util.NewDelay(delayMin, delayMax, delayCount),
-		JSONStream: streamPayload,
+		IsStream:    true,
+		StreamCount: streamCount,
+		Delay:       util.NewDelay(delayMin, delayMax, delayCount),
+		JSONStream:  streamPayload,
 	}
 }
 
@@ -95,9 +96,10 @@ func NewStreamTextPayload(textArr []string, b []byte, streamCount int, delayMin,
 		}
 	}
 	return &Payload{
-		IsStream:   true,
-		Delay:      util.NewDelay(delayMin, delayMax, delayCount),
-		TextStream: streamPayload,
+		IsStream:    true,
+		StreamCount: streamCount,
+		Delay:       util.NewDelay(delayMin, delayMax, delayCount),
+		TextStream:  streamPayload,
 	}
 }
 
@@ -127,10 +129,24 @@ func NewRawStreamPayload(raw []any, strArr []string, byteArr [][]byte, streamCou
 		}
 	}
 	return &Payload{
-		IsStream:  true,
-		Delay:     util.NewDelay(delayMin, delayMax, delayCount),
-		RawStream: streamPayload,
+		IsStream:    true,
+		StreamCount: streamCount,
+		Delay:       util.NewDelay(delayMin, delayMax, delayCount),
+		RawStream:   streamPayload,
 	}
+}
+
+func (p *Payload) Count() int {
+	if p.JSONStream != nil {
+		return len(p.JSONStream)
+	} else if p.TextStream != nil {
+		return len(p.TextStream)
+	} else if p.RawStream != nil {
+		return len(p.RawStream)
+	} else if p.JSON != nil || p.Text != "" || p.Raw != nil {
+		return 1
+	}
+	return 0
 }
 
 func (p *Payload) ToText() string {

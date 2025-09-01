@@ -20,7 +20,6 @@ import (
 	"context"
 	"embed"
 	"fmt"
-	mcpserver "goto/pkg/ai/mcp/server"
 	. "goto/pkg/constants"
 	"goto/pkg/events"
 	"goto/pkg/global"
@@ -80,7 +79,6 @@ func RunHttpServer() {
 	util.InitListenerRouter(RootRouter)
 	RootRouter.Use(ContextMiddleware)
 	middleware.LinkBaseMiddlewareChain(RootRouter)
-	RootRouter.Use(mcpserver.MCPServerFunc)
 	interceptChainRouter := RootRouter.PathPrefix("").Subrouter()
 	interceptChainRouter.Use(IntereceptMiddleware)
 	middleware.LinkMiddlewareChain(interceptChainRouter)

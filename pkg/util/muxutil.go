@@ -299,9 +299,9 @@ func GetURIRegexpAndRoute(uri string, router *mux.Router) (string, *regexp.Regex
 	return uri, nil, nil, nil, fmt.Errorf("Empty URI")
 }
 
-func BuildURIMatcher(uri string, handlerFunc func(w http.ResponseWriter, r *http.Request)) (string, *regexp.Regexp, *mux.Router, error) {
+func BuildURIAndPortMatcher(uri string, port int, handlerFunc func(w http.ResponseWriter, r *http.Request)) (string, *regexp.Regexp, *mux.Router, error) {
 	if uri != "" {
-		if prefixURI, re, rr, err := RegisterURIRouteAndGetRegex(uri, MatchRouter, handlerFunc); err == nil {
+		if prefixURI, re, rr, err := RegisterURIRouteAndGetRegex(uri, port, handlerFunc); err == nil {
 			return prefixURI, re, rr, nil
 		} else {
 			return uri, nil, nil, err
@@ -310,9 +310,26 @@ func BuildURIMatcher(uri string, handlerFunc func(w http.ResponseWriter, r *http
 	return uri, nil, nil, fmt.Errorf("no uri")
 }
 
-func RegisterURIRouteAndGetRegex(uri string, router *mux.Router, handler func(http.ResponseWriter, *http.Request)) (string, *regexp.Regexp, *mux.Router, error) {
-	if prefixURI, re, subRouter, route, err := GetURIRegexpAndRoute(uri, router); err == nil {
+func BuildURIMatcher(uri string, handlerFunc func(w http.ResponseWriter, r *http.Request)) (string, *regexp.Regexp, *mux.Router, error) {
+	if uri != "" {
+		if prefixURI, re, rr, err := RegisterURIRouteAndGetRegex(uri, 0, handlerFunc); err == nil {
+			return prefixURI, re, rr, nil
+		} else {
+			return uri, nil, nil, err
+		}
+	}
+	return uri, nil, nil, fmt.Errorf("no uri")
+}
+
+func RegisterURIRouteAndGetRegex(uri string, port int, handler func(http.ResponseWriter, *http.Request)) (string, *regexp.Regexp, *mux.Router, error) {
+	if prefixURI, re, subRouter, route, err := GetURIRegexpAndRoute(uri, MatchRouter); err == nil {
 		route = route.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
+			if port > 0 {
+				rp := GetRequestOrListenerPortNum(r)
+				if rp != port {
+					return false
+				}
+			}
 			return re.MatchString(r.URL.Path)
 		}).HandlerFunc(handler)
 		return prefixURI, re, subRouter, nil

@@ -72,7 +72,6 @@ func (h *Hops) newStep(step int, msg string) *HopStep {
 }
 
 func (h *Hops) AddRemote(data any) *Hops {
-	h.currentIndex++
 	h.Steps = append(h.Steps, &RemoteStep{
 		BaseStep: BaseStep{
 			Counter:   h.currentIndex,
@@ -94,6 +93,7 @@ func (h *Hops) MergeRemoteHops(output map[string]any) map[string]any {
 	} else if hopSteps, ok := output["hops"].([]any); ok {
 		remoteSteps = hopSteps
 	}
+	h.currentIndex++
 	for _, s := range remoteSteps {
 		h.AddRemote(s)
 	}

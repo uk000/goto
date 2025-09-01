@@ -43,6 +43,7 @@ type BaseTransportIntercept struct {
 
 type HTTPTransportIntercept struct {
 	*http.Transport
+	http.RoundTripper
 	BaseTransportIntercept
 }
 
@@ -58,7 +59,8 @@ type GRPCIntercept struct {
 
 func NewHTTPTransportIntercept(orig *http.Transport, label string, newConnNotifierChan chan string) *HTTPTransportIntercept {
 	t := &HTTPTransportIntercept{
-		Transport: orig,
+		RoundTripper: orig,
+		Transport:    orig,
 	}
 	t.tlsConfigPtr = &orig.TLSClientConfig
 	dialer := t.getDialer()
@@ -123,6 +125,10 @@ func (t *HTTPTransportIntercept) getDialer() func(context.Context, string, strin
 		}
 	}
 	return t.Dialer.DialContext
+}
+
+func (t *HTTPTransportIntercept) RoundTrip(req *http.Request) (*http.Response, error) {
+	return t.RoundTripper.RoundTrip(req)
 }
 
 func (t *HTTP2TransportIntercept) getDialer() func(string, string, *tls.Config) (net.Conn, error) {

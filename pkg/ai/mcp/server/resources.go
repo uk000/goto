@@ -2,8 +2,8 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"goto/pkg/ai/mcp"
-	"goto/pkg/util"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -35,7 +35,7 @@ func NewMCPResource(name, desc, mimeType, uri string, size int) *MCPResource {
 
 func ParseResource(payload []byte) (*MCPResource, error) {
 	resource := &MCPResource{}
-	if err := util.ReadJsonFromBytes(payload, resource); err != nil {
+	if err := json.Unmarshal(payload, resource); err != nil {
 		return nil, err
 	}
 	resource.Kind = KindResources
@@ -44,8 +44,8 @@ func ParseResource(payload []byte) (*MCPResource, error) {
 
 func (r *MCPResource) Handle(ctx context.Context, req *gomcp.ReadResourceRequest) (*gomcp.ReadResourceResult, error) {
 	result := &gomcp.ReadResourceResult{}
-	if r.Payload != nil && r.Payload.JSON != nil {
-		result.Contents = append(result.Contents, &gomcp.ResourceContents{Text: r.Payload.JSON.ToJSONText()})
+	if r.Response != nil && r.Response.JSON != nil {
+		result.Contents = append(result.Contents, &gomcp.ResourceContents{Text: r.Response.JSON.ToJSONText()})
 	} else {
 		result.Contents = append(result.Contents, &gomcp.ResourceContents{Text: "<No payload>"})
 	}
@@ -68,7 +68,7 @@ func NewMCPResourceTemplate(name, desc, mimeType, uri string, size int) *MCPReso
 
 func ParseResourceTemplate(payload []byte) (*MCPResourceTemplate, error) {
 	template := &MCPResourceTemplate{}
-	if err := util.ReadJsonFromBytes(payload, template); err != nil {
+	if err := json.Unmarshal(payload, template); err != nil {
 		return nil, err
 	}
 	template.Kind = KindTemplates
@@ -77,8 +77,8 @@ func ParseResourceTemplate(payload []byte) (*MCPResourceTemplate, error) {
 
 func (r *MCPResourceTemplate) Handle(ctx context.Context, req *gomcp.ReadResourceRequest) (*gomcp.ReadResourceResult, error) {
 	result := &gomcp.ReadResourceResult{}
-	if r.Payload != nil && r.Payload.JSON != nil {
-		result.Contents = append(result.Contents, &gomcp.ResourceContents{Text: r.Payload.JSON.ToJSONText()})
+	if r.Response != nil && r.Response.JSON != nil {
+		result.Contents = append(result.Contents, &gomcp.ResourceContents{Text: r.Response.JSON.ToJSONText()})
 	} else {
 		result.Contents = append(result.Contents, &gomcp.ResourceContents{Text: "<No payload>"})
 	}

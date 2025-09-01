@@ -226,7 +226,7 @@ func (h *Hooks) AddHTTPHookWithListener(key, id, uri string, headers Headers, is
 func (h *Hooks) registerURI(uri string, httpHandler middleware.MiddlewareFunc) (luri, uriPrefix string, re *regexp.Regexp, err error) {
 	luri = strings.ToLower(uri)
 	if httpHandler != nil {
-		uriPrefix, re, _, err = util.RegisterURIRouteAndGetRegex(luri, util.RootRouter, httpHandler)
+		uriPrefix, re, _, err = util.BuildURIMatcher(luri, httpHandler)
 	} else {
 		uriPrefix, re, _, err = util.BuildURIMatcher(luri, func(w http.ResponseWriter, r *http.Request) {})
 	}
