@@ -67,6 +67,7 @@ RUN apk add netcat-openbsd
 RUN apk add openssl
 RUN apk add jq
 RUN apk add hey
+RUN apk add etcd-ctl
 
 # ENV LANG en_US.UTF-8
 # ENV LANGUAGE en_US:en
