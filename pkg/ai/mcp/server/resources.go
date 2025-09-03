@@ -3,18 +3,17 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
-	"goto/pkg/ai/mcp"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type MCPResource struct {
-	mcp.MCPComponent
+	MCPComponent
 	Resource *gomcp.Resource `json:"resource"`
 }
 
 type MCPResourceTemplate struct {
-	mcp.MCPComponent
+	MCPComponent
 	ResourceTemplate *gomcp.ResourceTemplate `json:"template"`
 }
 

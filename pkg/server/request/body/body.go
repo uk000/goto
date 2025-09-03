@@ -43,8 +43,8 @@ func middlewareFunc(next http.Handler) http.Handler {
 			}
 			rs := util.GetRequestStore(r)
 			body := util.Read(r.Body)
-			if r.Body.(*util.ReReader) != nil {
-				r.Body.(*util.ReReader).Rewind()
+			if rr, ok := r.Body.(util.IReReader); ok {
+				rr.Rewind()
 			}
 			bodyLength := len(body)
 			rs.RequestPayload = body

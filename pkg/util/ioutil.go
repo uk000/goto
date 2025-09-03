@@ -31,6 +31,10 @@ import (
 	"time"
 )
 
+type IReReader interface {
+	Rewind()
+}
+
 type reader struct {
 	ctx context.Context
 	r   io.Reader

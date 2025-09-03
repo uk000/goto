@@ -3,14 +3,13 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
-	"goto/pkg/ai/mcp"
 	"goto/pkg/util"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type MCPPrompt struct {
-	mcp.MCPComponent
+	MCPComponent
 	Prompt *gomcp.Prompt `json:"prompt"`
 }
 

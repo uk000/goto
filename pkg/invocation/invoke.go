@@ -44,7 +44,7 @@ type InvocationRequest struct {
 	grpcStreamInput *pb.StreamConfig
 	requestReader   io.ReadCloser
 	requestWriter   io.WriteCloser
-	client          transport.TransportClient
+	client          transport.ClientTransport
 	tracker         *InvocationTracker
 	result          *InvocationResult
 }

@@ -95,6 +95,7 @@ var (
 	ConnectionKey     = &ContextKey{Key: "connection"}
 	ProtocolKey       = &ContextKey{Key: "protocol"}
 	HTTPRWKey         = &ContextKey{Key: "httprw"}
+	HeadersKey        = &ContextKey{Key: "headers"}
 )
 
 func GetRequestStore(r *http.Request) *RequestStore {

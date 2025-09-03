@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"goto/pkg/ai/mcp"
 	"goto/pkg/global"
 	"goto/pkg/proxy"
 	"goto/pkg/server/listeners"
@@ -37,6 +36,8 @@ type MCPServer struct {
 	server            *gomcp.Server
 	handler           *gomcp.StreamableHTTPHandler
 	sseHandler        *gomcp.SSEHandler
+	sessionContexts   map[string]*SessionContext
+	ps                *PortServers
 	lock              sync.RWMutex
 }
 
@@ -56,25 +57,31 @@ type MCPServerPayload struct {
 	Enabled      bool          `json:"enabled,omitempty"`
 }
 
+type SessionContext struct {
+	Request *http.Request
+	Writer  http.ResponseWriter
+}
+
 type PortServers struct {
-	Port          int                                                `json:"port"`
-	Servers       map[string]*MCPServer                              `json:"servers"`
-	DefaultServer *MCPServer                                         `json:"defaultServer,omitempty"`
-	AllComponents map[string]map[string]map[string]mcp.IMCPComponent `json:"allComponents"`
+	Port          int                                            `json:"port"`
+	Servers       map[string]*MCPServer                          `json:"servers"`
+	DefaultServer *MCPServer                                     `json:"defaultServer,omitempty"`
+	AllComponents map[string]map[string]map[string]IMCPComponent `json:"allComponents"`
 	lock          sync.RWMutex
 }
 
 const (
-	KindTools     = "tools"
-	KindPrompts   = "prompts"
-	KindResources = "resources"
-	KindTemplates = "templates"
+	KindTools          = "tools"
+	KindPrompts        = "prompts"
+	KindResources      = "resources"
+	KindTemplates      = "templates"
+	HeaderMCPSessionID = "Mcp-Session-Id"
 )
 
 var (
 	DefaultServer *MCPServer
 	PortsServers  = map[int]*PortServers{}
-	AllComponents = map[string]map[string]map[string]mcp.IMCPComponent{}
+	AllComponents = map[string]map[string]map[string]IMCPComponent{}
 	Kinds         = []string{KindTools, KindPrompts, KindResources, KindTemplates}
 	Middleware    = middleware.NewMiddleware("mcpserver", nil, MCPServerFunc)
 	lock          sync.RWMutex
@@ -82,7 +89,7 @@ var (
 
 func init() {
 	for _, kind := range Kinds {
-		AllComponents[kind] = map[string]map[string]mcp.IMCPComponent{}
+		AllComponents[kind] = map[string]map[string]IMCPComponent{}
 	}
 }
 
@@ -121,14 +128,26 @@ func GetPortMCPServers(port int) *PortServers {
 	return PortsServers[port]
 }
 
+func GetMCPServer(name string) (server *MCPServer) {
+	lock.RLock()
+	defer lock.RUnlock()
+	for _, ps := range PortsServers {
+		server = ps.GetMCPServer(name)
+		if server != nil {
+			break
+		}
+	}
+	return
+}
+
 func NewPortMCPServers(port int) *PortServers {
 	ps := &PortServers{
 		Port:          port,
 		Servers:       map[string]*MCPServer{},
-		AllComponents: map[string]map[string]map[string]mcp.IMCPComponent{},
+		AllComponents: map[string]map[string]map[string]IMCPComponent{},
 	}
 	for _, kind := range Kinds {
-		ps.AllComponents[kind] = map[string]map[string]mcp.IMCPComponent{}
+		ps.AllComponents[kind] = map[string]map[string]IMCPComponent{}
 	}
 	return ps
 }
@@ -157,13 +176,14 @@ func ClearAllMCPServers() {
 	lock.Lock()
 	defer lock.Unlock()
 	PortsServers = map[int]*PortServers{}
-	AllComponents = map[string]map[string]map[string]mcp.IMCPComponent{}
+	AllComponents = map[string]map[string]map[string]IMCPComponent{}
 }
 
 func (ps *PortServers) AddMCPServer(p *MCPServerPayload) {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
 	s := NewMCPServer(p)
+	s.ps = ps
 	ps.Servers[p.Name] = s
 	if ps.DefaultServer == nil {
 		ps.DefaultServer = s
@@ -187,6 +207,7 @@ func NewMCPServer(p *MCPServerPayload) *MCPServer {
 		Resources:         map[string]*MCPResource{},
 		ResourceTemplates: map[string]*MCPResourceTemplate{},
 		CompletionPayload: map[string]*payload.Payload{},
+		sessionContexts:   map[string]*SessionContext{},
 	}
 	mcpserver.server = gomcp.NewServer(&mcpserver.Implementation, &gomcp.ServerOptions{
 		Instructions:                p.Instructions,
@@ -226,7 +247,7 @@ func GetComponentType(kind string) (isTools, isPrompts, isResources, isTemplates
 	return
 }
 
-func GetAllComponents(kind string) map[string]map[string]mcp.IMCPComponent {
+func GetAllComponents(kind string) map[string]map[string]IMCPComponent {
 	lock.RLock()
 	defer lock.RUnlock()
 	return AllComponents[kind]
@@ -268,34 +289,6 @@ func (ps *PortServers) GetComponents(kind string) any {
 	return ps.AllComponents[kind]
 }
 
-func (ps *PortServers) AddComponents(server, kind string, b []byte) (count int, err error) {
-	ps.lock.RLock()
-	s := ps.DefaultServer
-	if server != "" {
-		s = ps.Servers[server]
-	}
-	ps.lock.RUnlock()
-	if s != nil {
-		switch kind {
-		case KindTools:
-			count, err = s.AddTools(b, ps)
-		case KindPrompts:
-			count, err = s.AddPrompts(b, ps)
-		case KindResources:
-			count, err = s.AddResources(b, ps)
-		case KindTemplates:
-			count, err = s.AddResourceTemplates(b, ps)
-		}
-		if err == nil {
-			return count, nil
-		} else {
-			return 0, err
-		}
-	} else {
-		return 0, errors.New("server not found")
-	}
-}
-
 func (m *MCPServer) GetID() string {
 	return m.ID
 }
@@ -317,6 +310,7 @@ func (m *MCPServer) Clear() {
 	m.Resources = map[string]*MCPResource{}
 	m.ResourceTemplates = map[string]*MCPResourceTemplate{}
 	m.CompletionPayload = map[string]*payload.Payload{}
+	m.sessionContexts = map[string]*SessionContext{}
 }
 
 func (m *MCPServer) GetComponents(kind string) any {
@@ -335,7 +329,7 @@ func (m *MCPServer) GetComponents(kind string) any {
 	return nil
 }
 
-func (m *MCPServer) getComponent(name, kind string) mcp.IMCPComponent {
+func (m *MCPServer) getComponent(name, kind string) IMCPComponent {
 	lock.RLock()
 	defer lock.RUnlock()
 	if m1 := AllComponents[kind]; m1 != nil {
@@ -361,24 +355,42 @@ func (m *MCPServer) AddPayload(name, kind string, payload []byte, isJSON, isStre
 	return errors.New("component not found")
 }
 
-func (ps *PortServers) addComponentToAll(c mcp.IMCPComponent, server string) {
+func (ps *PortServers) addComponentToAll(c IMCPComponent, server string) {
 	ps.lock.Lock()
 	kind := c.GetKind()
 	name := c.GetName()
 	if ps.AllComponents[kind][name] == nil {
-		ps.AllComponents[kind][name] = map[string]mcp.IMCPComponent{}
+		ps.AllComponents[kind][name] = map[string]IMCPComponent{}
 	}
 	ps.AllComponents[kind][name][server] = c
 	ps.lock.Unlock()
 	lock.Lock()
 	if AllComponents[kind][name] == nil {
-		AllComponents[kind][name] = map[string]mcp.IMCPComponent{}
+		AllComponents[kind][name] = map[string]IMCPComponent{}
 	}
 	AllComponents[kind][name][server] = c
 	lock.Unlock()
 }
 
-func (m *MCPServer) AddTools(b []byte, ps *PortServers) (int, error) {
+func (s *MCPServer) AddComponents(kind string, b []byte) (count int, err error) {
+	switch kind {
+	case KindTools:
+		count, err = s.AddTools(b)
+	case KindPrompts:
+		count, err = s.AddPrompts(b)
+	case KindResources:
+		count, err = s.AddResources(b)
+	case KindTemplates:
+		count, err = s.AddResourceTemplates(b)
+	}
+	if err == nil {
+		return count, nil
+	} else {
+		return 0, err
+	}
+}
+
+func (m *MCPServer) AddTools(b []byte) (int, error) {
 	arr := util.ToJSONArray(b)
 	tools := []*MCPTool{}
 	for _, b2 := range arr {
@@ -399,12 +411,14 @@ func (m *MCPServer) AddTools(b []byte, ps *PortServers) (int, error) {
 		m.lock.Lock()
 		m.Tools[tool.Tool.Name] = tool
 		m.lock.Unlock()
-		ps.addComponentToAll(tool, m.Name)
+		if m.ps != nil {
+			m.ps.addComponentToAll(tool, m.Name)
+		}
 	}
 	return len(tools), nil
 }
 
-func (m *MCPServer) AddPrompts(b []byte, ps *PortServers) (int, error) {
+func (m *MCPServer) AddPrompts(b []byte) (int, error) {
 	arr := util.ToJSONArray(b)
 	prompts := []*MCPPrompt{}
 	for _, b2 := range arr {
@@ -422,12 +436,14 @@ func (m *MCPServer) AddPrompts(b []byte, ps *PortServers) (int, error) {
 		m.lock.Lock()
 		m.Prompts[prompt.Prompt.Name] = prompt
 		m.lock.Unlock()
-		ps.addComponentToAll(prompt, m.Name)
+		if m.ps != nil {
+			m.ps.addComponentToAll(prompt, m.Name)
+		}
 	}
 	return len(prompts), nil
 }
 
-func (m *MCPServer) AddResources(b []byte, ps *PortServers) (int, error) {
+func (m *MCPServer) AddResources(b []byte) (int, error) {
 	arr := util.ToJSONArray(b)
 	resources := []*MCPResource{}
 	for _, b2 := range arr {
@@ -445,12 +461,14 @@ func (m *MCPServer) AddResources(b []byte, ps *PortServers) (int, error) {
 		m.lock.Lock()
 		m.Resources[resource.Resource.Name] = resource
 		m.lock.Unlock()
-		ps.addComponentToAll(resource, m.Name)
+		if m.ps != nil {
+			m.ps.addComponentToAll(resource, m.Name)
+		}
 	}
 	return len(resources), nil
 }
 
-func (m *MCPServer) AddResourceTemplates(b []byte, ps *PortServers) (int, error) {
+func (m *MCPServer) AddResourceTemplates(b []byte) (int, error) {
 	arr := util.ToJSONArray(b)
 	templates := []*MCPResourceTemplate{}
 	for _, b2 := range arr {
@@ -468,7 +486,9 @@ func (m *MCPServer) AddResourceTemplates(b []byte, ps *PortServers) (int, error)
 		m.lock.Lock()
 		m.ResourceTemplates[template.ResourceTemplate.Name] = template
 		m.lock.Unlock()
-		ps.addComponentToAll(template, m.Name)
+		if m.ps != nil {
+			m.ps.addComponentToAll(template, m.Name)
+		}
 	}
 	return len(templates), nil
 }
@@ -524,13 +544,40 @@ func (m *MCPServer) onUnsubscribed(ctx context.Context, req *gomcp.UnsubscribeRe
 	return nil
 }
 
+func (m *MCPServer) GetAndClearSessionContext(sessionID string) *SessionContext {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	sc := m.sessionContexts[sessionID]
+	delete(m.sessionContexts, sessionID)
+	return sc
+}
+
+func (m *MCPServer) SetSessionContext(sessionID string, ctx *SessionContext) {
+	m.lock.Lock()
+	m.sessionContexts[sessionID] = ctx
+	m.lock.Unlock()
+}
+
 func (m *MCPServer) Serve(w http.ResponseWriter, r *http.Request) {
-	r = r.WithContext(util.SetHTTPRW(r.Context(), r, w))
+	// r = util.WithHTTPRW(r, w)
+	// r = util.WithContextHeaders(r)
+	sessionID := r.Header.Get(HeaderMCPSessionID)
+	if sessionID != "" {
+		m.SetSessionContext(sessionID, &SessionContext{
+			Request: r,
+			Writer:  w,
+		})
+	}
 	isSSE := strings.Contains(r.RequestURI, "/sse") || r.Header.Get("Sec-Fetch-Mode") != ""
 	isMCP := strings.Contains(r.RequestURI, "/mcp") && !strings.Contains(r.RequestURI, "/mcp/sse")
+	var payload string
+	if rr, ok := r.Body.(*util.ReReader); ok {
+		payload = string(rr.Content)
+	}
 	if isSSE && !isMCP {
 		r = r.WithContext(util.SetSSE(r.Context()))
 		util.AddLogMessage("Handling MCP SSE Request", r)
+		log.Println(payload)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
@@ -539,6 +586,7 @@ func (m *MCPServer) Serve(w http.ResponseWriter, r *http.Request) {
 		m.sseHandler.ServeHTTP(w, r)
 	} else {
 		util.AddLogMessage("Handling MCP Request", r)
+		log.Println(payload)
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
@@ -552,28 +600,36 @@ func (m *MCPServer) Middleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 			log.Println("PING: MCP Ping handled")
 			return next(ctx, method, req)
 		}
-		log.Println("===================== *** MCP *** ========================")
-		start := time.Now()
+		log.Println("------ MCP ------")
+		if strings.HasPrefix(method, "tools/") || strings.HasPrefix(method, "prompts/") || strings.HasPrefix(method, "resource") {
+			log.Println("===================== *** Tools/Prompts/Resources Call *** ========================")
+		}
 		session := req.GetSession()
 		callToolParams, ctOk := req.GetParams().(*gomcp.CallToolParams)
-		toolName := ""
+		var duration time.Duration
+		var toolName string
 		if ctOk && callToolParams != nil {
-			toolName = callToolParams.Name
+			start := time.Now()
+			toolName := callToolParams.Name
 			TrackToolCall(m.Port, m.Name, session.ID(), toolName)
+			log.Printf("MCPServer[%d][%s]: Session [%s] Method [%s] Tool [%s] Params: [%s]", m.Port, m.Name, session.ID(), method, toolName, util.ToJSONText(req))
+			result, err = next(ctx, method, req)
+			duration = time.Since(start)
+		} else {
+			result, err = next(ctx, method, req)
 		}
-		log.Printf("MCPServer[%d][%s]: Session [%s] Method [%s] Tool [%s] Params: [%s]", m.Port, m.Name, session.ID(), method, toolName, util.ToJSONText(req))
-		result, err = next(ctx, method, req)
-		duration := time.Since(start)
 		msg := ""
 		if err != nil {
-			msg = fmt.Sprintf("MCPServer[%d][%s]: Session [%s] Method [%s] Tool [%s] call finished in [%s] with error [%s]", m.Port, m.Name, session.ID(), method, toolName, duration.String(), err.Error())
+			msg = fmt.Sprintf("MCPServer[%d][%s]: Session [%s] Method [%s] Tool [%s] call finished in [%s] with error [%s]",
+				m.Port, m.Name, session.ID(), method, toolName, duration.String(), err.Error())
 			TrackToolCallResult(m.Port, m.Name, toolName, duration, false)
 		} else {
-			msg = fmt.Sprintf("MCPServer[%d][%s]: Session [%s] Method [%s] Tool [%s] call finished in [%s] with result [%s]", m.Port, m.Name, session.ID(), method, toolName, duration.String(), util.ToJSONText(result))
+			msg = fmt.Sprintf("MCPServer[%d][%s]: Session [%s] Method [%s] Tool [%s] call finished in [%s]",
+				m.Port, m.Name, session.ID(), method, toolName, duration.String())
 			TrackToolCallResult(m.Port, m.Name, toolName, duration, true)
 		}
 		log.Println(msg)
-		log.Println("===================== *** End MCP *** ========================")
+		log.Println("----- End MCP -----")
 		return result, err
 	}
 }
@@ -593,7 +649,7 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 	rs := util.GetRequestStore(r)
 	isMCP := l.IsMCP || rs.IsMCP
 	if isMCP && !rs.IsAdminRequest {
-		log.Println("---------------- *** Pre-MCP *** ----------------")
+		log.Println("----- Pre-MCP -----")
 		if proxy.WillProxyMCP(l.Port, r) {
 			log.Printf("MCP is configured to proxy on Port [%d]. Skipping MCP processing", l.Port)
 			return
@@ -610,7 +666,7 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 				if server != nil {
 					if server.Enabled {
 						if serverName == "" {
-							log.Printf("No MCP Server name was given, using PortDefault server [%s] on port [%d]", server.Name, port)
+							log.Printf("No MCP Server name was given, using first server [%s] on port [%d]", server.Name, port)
 						} else {
 							log.Printf("MCP Server [%s] not found on port [%d], using PortDefault server [%s]", serverName, port, server.Name)
 						}

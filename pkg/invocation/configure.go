@@ -135,7 +135,7 @@ type TargetInvocations struct {
 
 type InvocationClient struct {
 	tracker         *InvocationTracker
-	transportClient transport.TransportClient
+	transportClient transport.ClientTransport
 	lock            sync.RWMutex
 }
 
@@ -152,7 +152,7 @@ var (
 	chanStopCleanup   = make(chan bool, 2)
 	activeInvocations = map[uint32]*InvocationTracker{}
 	activeTargets     = map[string]*TargetInvocations{}
-	targetClients     = map[string]transport.TransportClient{}
+	targetClients     = map[string]transport.ClientTransport{}
 	invocationsLock   sync.RWMutex
 	_                 = global.OnShutdown(Shutdown)
 )
@@ -552,13 +552,13 @@ func tlsConfig(host string, verifyCert bool) *tls.Config {
 	return cfg
 }
 
-func getHttpClientForTarget(tracker *InvocationTracker) transport.TransportClient {
+func getHttpClientForTarget(tracker *InvocationTracker) transport.ClientTransport {
 	target := tracker.Target
 	invocationsLock.RLock()
 	client := targetClients[target.Name]
 	invocationsLock.RUnlock()
 	if client == nil || client.HTTP() == nil {
-		client = transport.CreateHTTPClient(target.Name, target.h2, target.AutoUpgrade, target.TLS, target.authority, 0,
+		client, _ = transport.CreateHTTPClient(target.Name, target.h2, target.AutoUpgrade, target.TLS, target.authority, 0,
 			target.requestTimeoutD, target.connTimeoutD, target.connIdleTimeoutD, metrics.ConnTracker)
 		invocationsLock.Lock()
 		targetClients[target.Name] = client
@@ -567,7 +567,7 @@ func getHttpClientForTarget(tracker *InvocationTracker) transport.TransportClien
 	return client
 }
 
-func getGrpcClientForTarget(tracker *InvocationTracker) transport.TransportClient {
+func getGrpcClientForTarget(tracker *InvocationTracker) transport.ClientTransport {
 	target := tracker.Target
 	invocationsLock.RLock()
 	client := targetClients[target.Name]

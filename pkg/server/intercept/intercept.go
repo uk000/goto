@@ -89,17 +89,24 @@ func (fw FlushWriter) Flush() {
 }
 
 func trackRequestBody(r *http.Request) {
-	r.Body = BodyTracker{r.Body}
+	r.Body = &BodyTracker{r.Body}
 }
 
-func (b BodyTracker) Read(p []byte) (n int, err error) {
+func (b *BodyTracker) Read(p []byte) (n int, err error) {
 	// util.PrintCallers(3, "BodyTracker.Read")
 	return b.ReadCloser.Read(p)
 }
 
-func (b BodyTracker) Close() error {
+func (b *BodyTracker) Close() error {
 	// util.PrintCallers(3, "BodyTracker.Close")
 	return b.ReadCloser.Close()
+}
+
+func (b *BodyTracker) Rewind() {
+	// util.PrintCallers(3, "BodyTracker.Close")
+	if rr, ok := b.ReadCloser.(*util.ReReader); ok {
+		rr.Rewind()
+	}
 }
 
 func (rw *InterceptResponseWriter) WriteHeader(statusCode int) {

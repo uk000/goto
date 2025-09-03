@@ -48,7 +48,7 @@ type Endpoint struct {
 	IsTLS           bool   `json:"isTLS"`
 	IsH2            bool   `json:"isH2"`
 	UseRequestProto bool   `json:"useRequestProto"`
-	client          transport.TransportClient
+	client          transport.ClientTransport
 }
 
 type TunnelTrafficLog struct {
@@ -627,7 +627,7 @@ func (pt *PortTunnel) tunnelToEndpoint(ep *Endpoint, uri, tunnelHostLabel, viaTu
 			if global.Debug {
 				log.Printf("Tunneling URI [%s] to endpoint [%s] - Creating HTTP Client\n", uri, ep.ID)
 			}
-			ep.client = transport.CreateHTTPClient(fmt.Sprintf("Tunnel[%s]", ep.Address), isH2, false, isTLS,
+			ep.client, _ = transport.CreateHTTPClient(fmt.Sprintf("Tunnel[%s]", ep.Address), isH2, false, isTLS,
 				ep.Host, rs.TLSVersionNum, 30*time.Second, 30*time.Second, 3*time.Minute, metrics.ConnTracker)
 		} else {
 			ep.client.UpdateTLSConfig(rs.ServerName, rs.TLSVersionNum)

@@ -31,7 +31,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-type TransportClient interface {
+type ClientTransport interface {
 	SetTLSConfig(tlsConfig *tls.Config)
 	UpdateTLSConfig(sni string, tlsVersion uint16)
 	Transport() TransportIntercept
@@ -51,11 +51,11 @@ type ClientTracker struct {
 	TLSVersion         uint16
 }
 
-func NewTransportClient(c *http.Client, gc *grpc.ClientConn, tracker *BaseTransportIntercept, grpcIntercept *GRPCIntercept) TransportClient {
+func NewTransportClient(c *http.Client, gc *grpc.ClientConn, tracker *BaseTransportIntercept, grpcIntercept *GRPCIntercept) ClientTransport {
 	return &ClientTracker{Client: c, GrpcConn: gc, TransportIntercept: tracker, GRPCIntercept: grpcIntercept}
 }
 
-func NewGRPCClient(label string, url string, ctx context.Context, dialOpts []grpc.DialOption, newConnNotifierChan chan string) (TransportClient, error) {
+func NewGRPCClient(label string, url string, ctx context.Context, dialOpts []grpc.DialOption, newConnNotifierChan chan string) (ClientTransport, error) {
 	g := NewGRPCIntercept(label, dialOpts, newConnNotifierChan)
 	if conn, err := grpc.DialContext(ctx, url, g.dialOpts...); err == nil {
 		return NewTransportClient(nil, conn, nil, g), nil
@@ -132,14 +132,15 @@ func CreateRequest(method string, url string, headers http.Header, payload []byt
 	}
 }
 
-func CreateDefaultHTTPClient(label string, h2, isTLS bool, newConnNotifierChan chan string) TransportClient {
+func CreateDefaultHTTPClient(label string, h2, isTLS bool, newConnNotifierChan chan string) (ClientTransport, TransportIntercept) {
 	return CreateHTTPClient(label, h2, true, isTLS, "", 0, 30*time.Second, 30*time.Second, 3*time.Minute, newConnNotifierChan)
 }
 
 func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName string, tlsVersion uint16,
-	requestTimeout, connTimeout, connIdleTimeout time.Duration, newConnNotifierChan chan string) TransportClient {
-	var transport http.RoundTripper
+	requestTimeout, connTimeout, connIdleTimeout time.Duration, newConnNotifierChan chan string) (ClientTransport, TransportIntercept) {
+	var rt http.RoundTripper
 	var tracker *BaseTransportIntercept
+	var ti TransportIntercept
 	if !h2 {
 		ht := NewHTTPTransportIntercept(&http.Transport{
 			MaxIdleConns:          300,
@@ -162,8 +163,9 @@ func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName stri
 				MaxVersion:         tlsVersion,
 			},
 		}, label, newConnNotifierChan)
-		tracker = &ht.BaseTransportIntercept
-		transport = ht.Transport
+		tracker = ht.BaseTransportIntercept
+		rt = ht
+		ti = ht
 	} else {
 		tr := &http2.Transport{
 			ReadIdleTimeout: connIdleTimeout,
@@ -183,8 +185,9 @@ func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName stri
 			return net.Dial(network, addr)
 		}
 		h2t := NewHTTP2TransportIntercept(tr, label, newConnNotifierChan)
-		tracker = &h2t.BaseTransportIntercept
-		transport = h2t.Transport
+		tracker = h2t.BaseTransportIntercept
+		rt = h2t
+		ti = h2t
 	}
-	return NewTransportClient(&http.Client{Timeout: requestTimeout, Transport: transport}, nil, tracker, nil)
+	return NewTransportClient(&http.Client{Timeout: requestTimeout, Transport: rt}, nil, tracker, nil), ti
 }

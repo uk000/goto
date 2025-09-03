@@ -45,7 +45,7 @@ type Route struct {
 	basePrefix string
 	re         *regexp.Regexp
 	router     *mux.Router
-	client     transport.TransportClient
+	client     transport.ClientTransport
 }
 
 type PortRouter struct {
@@ -141,11 +141,11 @@ func (r *Route) Setup() error {
 		uri = "/*"
 		r.rootMatch = true
 	}
-	if prefix, re, router, err := util.BuildURIAndPortMatcher(uri, r.From.Port, r.RouteRequest); err == nil {
+	if prefix, re, router, err := util.BuildURIAndPortMatcher(util.PortRouter, uri, r.From.Port, r.RouteRequest); err == nil {
 		r.basePrefix = prefix
 		r.re = re
 		r.router = router
-		r.client = transport.CreateDefaultHTTPClient(r.Label, r.To.IsH2, r.To.IsTLS, metrics.ConnTracker)
+		r.client, _ = transport.CreateDefaultHTTPClient(r.Label, r.To.IsH2, r.To.IsTLS, metrics.ConnTracker)
 	} else {
 		log.Printf("Route: Failed to add URI match [%s] with error: %s\n", uri, err.Error())
 		return err
@@ -154,7 +154,8 @@ func (r *Route) Setup() error {
 }
 
 func (r *Route) RouteRequest(w http.ResponseWriter, hr *http.Request) {
-	uri := string(r.re.ReplaceAll([]byte(hr.RequestURI), []byte(r.To.URIPrefix)))
+	//	uri := string(r.re.ReplaceAll([]byte(hr.RequestURI), []byte(r.To.URIPrefix)))
+	uri := hr.RequestURI
 	rr := util.NewReReader(hr.Body)
 	req, err := r.prepareRequest(r.To.URL, uri, hr, rr)
 	id := RequestCorrelationID.Add(1)
@@ -179,10 +180,15 @@ func (r *Route) RouteRequest(w http.ResponseWriter, hr *http.Request) {
 				}
 			}
 			rr = util.NewReReader(resp.Body)
-			msg = fmt.Sprintf("Routing ID [%d]: Request URI [%s], Routed successfully to upstream [%s]. Response Headers [%+v], Response Body [%s]",
-				id, headers, string(rr.Content))
 			rr.Rewind()
-			io.Copy(w, rr)
+			if len, err := io.Copy(w, rr); err != nil {
+				msg = fmt.Sprintf("Routing ID [%d]: Downstream response failed with error [%s]", id, err.Error())
+			} else if len != int64(rr.Length()) {
+				msg = fmt.Sprintf("Routing ID [%d]: Downstream response length [%d] didn't match upstream response length [%d]", id, len, rr.Length())
+			} else {
+				msg = fmt.Sprintf("Routing ID [%d]: Request URI [%s], Routed successfully to upstream [%s]. Response Headers [%+v], Response Body [%s]",
+					id, hr.RequestURI, r.To.URL, headers, string(rr.Content))
+			}
 		}
 	}
 	util.AddLogMessage(msg, hr)

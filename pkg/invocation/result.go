@@ -72,7 +72,7 @@ type InvocationResult struct {
 	httpResponse        *http.Response
 	grpcResponse        interface{}
 	grpcStatus          int
-	client              transport.TransportClient
+	client              transport.ClientTransport
 	tracker             *InvocationTracker
 	request             *InvocationRequest
 	err                 error

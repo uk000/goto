@@ -65,16 +65,27 @@ func IsSSE(ctx context.Context) bool {
 	return false
 }
 
-func SetHTTPRW(ctx context.Context, r *http.Request, w http.ResponseWriter) context.Context {
-	return context.WithValue(ctx, HTTPRWKey, &types.Pair{Left: r, Right: w})
+func WithHTTPRW(r *http.Request, w http.ResponseWriter) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), HTTPRWKey, &types.Pair{Left: r, Right: w}))
 }
 
-func GetHTTPRW(ctx context.Context) (*http.Request, http.ResponseWriter) {
+func GetHTTPRWFromContext(ctx context.Context) (*http.Request, http.ResponseWriter) {
 	if val := ctx.Value(HTTPRWKey); val != nil {
 		pair := val.(*types.Pair)
 		return pair.Left.(*http.Request), pair.Right.(http.ResponseWriter)
 	}
 	return nil, nil
+}
+
+func WithContextHeaders(r *http.Request) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), HeadersKey, r.Header))
+}
+
+func GetContextHeaders(ctx context.Context) http.Header {
+	if val := ctx.Value(HeadersKey); val != nil {
+		return val.(http.Header)
+	}
+	return nil
 }
 
 func IsH2(r *http.Request) bool {

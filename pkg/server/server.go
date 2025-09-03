@@ -63,8 +63,8 @@ import (
 
 func init() {
 	middleware.BaseMiddlewares = []*middleware.Middleware{
-		label.Middleware, conn.Middleware, mcpserver.Middleware,
-		tunnel.TunnelCountMiddleware, body.Middleware, hooks.Middleware, routing.Middleware,
+		label.Middleware, conn.Middleware, routing.Middleware, mcpserver.Middleware,
+		tunnel.TunnelCountMiddleware, hooks.Middleware,
 	}
 	middleware.Middlewares = []*middleware.Middleware{
 		tunnel.Middleware, events.Middleware, metrics.Middleware,
@@ -74,7 +74,7 @@ func init() {
 		rpc.Middleware, grpcapi.Middleware, grpcclient.Middleware, protos.Middleware,
 		jsonrpc.Middleware, xds.Middleware, mcpclient.Middleware, mcpserverapi.Middleware,
 		scripts.Middleware, job.Middleware, tls.Middleware, log.Middleware, ui.Middleware,
-		echo.Middleware, catchall.Middleware,
+		body.Middleware, echo.Middleware, catchall.Middleware,
 	}
 }
 

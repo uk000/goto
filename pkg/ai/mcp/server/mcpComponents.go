@@ -1,4 +1,4 @@
-package mcp
+package mcpserver
 
 import (
 	"fmt"
@@ -15,16 +15,9 @@ type IMCPComponent interface {
 	SetPayload(b []byte, isJSON, isStream bool, streamCount int, delayMin, delayMax time.Duration, delayCount int)
 }
 
-type IMCPServer interface {
-	GetID() string
-	GetHost() string
-	GetName() string
-	GetPort() int
-}
-
 type MCPComponent struct {
 	Kind     string           `json:"-"`
-	Server   IMCPServer       `json:"-"`
+	Server   *MCPServer       `json:"-"`
 	Response *payload.Payload `json:"response,omitempty"`
 	IsProxy  bool             `json:"proxy,omitempty"`
 	Name     string           `json:"-"`

@@ -152,7 +152,7 @@ var (
 	chanSendTargetsToRegistry    = make(chan *TargetResults, 200)
 	chanSendInvocationToRegistry = make(chan *InvocationResults, 200)
 	stopRegistrySender           = make(chan bool, 10)
-	registryClient               = transport.CreateDefaultHTTPClient("ResultsRegistrySender", true, false, nil)
+	registryClient, _            = transport.CreateDefaultHTTPClient("ResultsRegistrySender", true, false, nil)
 	sendingToRegistry            bool
 	registrySendLock             sync.Mutex
 	collectTargetsResults        bool = true

@@ -9,6 +9,8 @@ import (
 	"goto/pkg/metrics"
 	"goto/pkg/transport"
 	"goto/pkg/util"
+	"log"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,13 +28,14 @@ type MCPClientPayload struct {
 }
 
 type ToolCall struct {
-	Tool      string         `json:"tool"`
-	URL       string         `json:"url"`
-	Server    string         `json:"server,omitempty"`
-	Authority string         `json:"authority,omitempty"`
-	SSE       bool           `json:"sse,omitempty"`
-	Neat      bool           `json:"neat,omitempty"`
-	Args      map[string]any `json:"args,omitempty"`
+	Tool      string            `json:"tool"`
+	URL       string            `json:"url"`
+	Server    string            `json:"server,omitempty"`
+	Authority string            `json:"authority,omitempty"`
+	SSE       bool              `json:"sse,omitempty"`
+	Neat      bool              `json:"neat,omitempty"`
+	Args      map[string]any    `json:"args,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
 }
 
 type MCPClient struct {
@@ -42,7 +45,9 @@ type MCPClient struct {
 	role            string
 	host            string
 	sse             bool
-	transportClient transport.TransportClient
+	httpClient      transport.ClientTransport
+	clientTransport *transport.HTTPTransportIntercept
+	mcpTransport    *transport.MCPClientInterceptTransport
 	client          *gomcp.Client
 	session         *gomcp.ClientSession
 	hops            *util.Hops
@@ -76,6 +81,8 @@ func NewClientWithHops(port int, sse bool, role, operationLabel, host string, ho
 }
 
 func newMCPClient(sse bool, name, role, listenerLabel, operationLabel, host string) *MCPClient {
+	httpClient, t := transport.CreateDefaultHTTPClient(name, false, false, metrics.ConnTracker)
+	ht := t.(*transport.HTTPTransportIntercept)
 	m := &MCPClient{
 		name:            name,
 		role:            role,
@@ -84,7 +91,8 @@ func newMCPClient(sse bool, name, role, listenerLabel, operationLabel, host stri
 		sse:             sse,
 		host:            host,
 		hops:            util.NewHops(listenerLabel, name, operationLabel),
-		transportClient: transport.CreateDefaultHTTPClient(name, false, false, metrics.ConnTracker),
+		httpClient:      httpClient,
+		clientTransport: ht,
 	}
 	m.client = gomcp.NewClient(&gomcp.Implementation{Name: name}, &gomcp.ClientOptions{
 		KeepAlive:                   10 * time.Second,
@@ -97,6 +105,7 @@ func newMCPClient(sse bool, name, role, listenerLabel, operationLabel, host stri
 		LoggingMessageHandler:       m.LoggingMessageHandler,
 		ProgressNotificationHandler: m.ProgressNotificationHandler,
 	})
+	ht.SetHeadersIntercept(m)
 	lock.RLock()
 	m.client.AddRoots(Roots...)
 	lock.RUnlock()
@@ -132,16 +141,20 @@ func (c *MCPClient) Connect(url string) (err error) {
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		url = "http://" + url
 	}
+	var t gomcp.Transport
 	if c.sse {
-		c.session, err = c.client.Connect(context.Background(), &gomcp.SSEClientTransport{Endpoint: url, HTTPClient: c.transportClient.HTTP()}, &gomcp.ClientSessionOptions{})
+		t = transport.NewMCPTransport(&gomcp.SSEClientTransport{Endpoint: url, HTTPClient: c.httpClient.HTTP()}, c.clientTransport)
 	} else {
-		c.session, err = c.client.Connect(context.Background(), &gomcp.StreamableClientTransport{Endpoint: url, MaxRetries: -1, HTTPClient: c.transportClient.HTTP()}, &gomcp.ClientSessionOptions{})
+		t = transport.NewMCPTransport(&gomcp.StreamableClientTransport{Endpoint: url, MaxRetries: -1, HTTPClient: c.httpClient.HTTP()}, c.clientTransport)
 	}
+	c.session, err = c.client.Connect(context.Background(), t, &gomcp.ClientSessionOptions{})
 	return err
 }
 
 func (c *MCPClient) Close() {
-	c.session.Close()
+	if c.session != nil {
+		c.session.Close()
+	}
 	c.session = nil
 }
 
@@ -176,15 +189,18 @@ func (c *MCPClient) CallTool(port int, tc *ToolCall, args map[string]any) (map[s
 	if args == nil {
 		args = tc.Args
 	}
-	c.hops.Add(fmt.Sprintf("%s [%s][%s] calling tool [%s]/sse[%t] on url [%s]", c.role, c.listenerLabel, c.operationLabel, tc.Tool, c.sse, tc.URL))
+	msg := fmt.Sprintf("%s [%s][%s] calling tool [%s] with sse[%t] on url [%s]", c.role, c.listenerLabel, c.operationLabel, tc.Tool, c.sse, tc.URL)
+	log.Println(msg)
+	c.hops.Add(msg)
 	err := c.Connect(tc.URL)
 	if err != nil {
 		return nil, err
 	}
-
-	result, err := c.session.CallTool(context.Background(), &gomcp.CallToolParams{Name: tc.Tool, Arguments: tc.Args})
+	ctx := context.WithValue(context.Background(), "headers", tc.Headers)
+	result, err := c.session.CallTool(ctx, &gomcp.CallToolParams{Name: tc.Tool, Arguments: tc.Args})
 	if err != nil {
-		msg := fmt.Sprintf("%s [%s][%s] Failed to call tool [%s]/sse[%t] on url [%s] with error [%s]", c.role, c.listenerLabel, c.operationLabel, tc.Tool, c.sse, tc.URL, err.Error())
+		msg = fmt.Sprintf("%s [%s][%s] Failed to call tool [%s]/sse[%t] on url [%s] with error [%s]", c.role, c.listenerLabel, c.operationLabel, tc.Tool, c.sse, tc.URL, err.Error())
+		log.Println(msg)
 		c.hops.Add(msg)
 		return nil, errors.New(msg)
 	}
@@ -335,6 +351,16 @@ func (c *MCPClient) ProgressNotificationHandler(ctx context.Context, req *gomcp.
 	if c.hops != nil {
 		label := fmt.Sprintf("%s [%s][%s]", c.role, c.listenerLabel, c.operationLabel)
 		c.hops.Add(fmt.Sprintf("%s: Received Progress Notification [%s][Total: %f][Progress: %f]", label, req.Params.Message, req.Params.Total, req.Params.Progress))
+	}
+}
+
+func (c *MCPClient) SetHeaders(r *http.Request) {
+	if v := r.Context().Value("headers"); v != nil {
+		if headers, ok := v.(map[string]string); ok {
+			for k, v := range headers {
+				r.Header.Add(k, v)
+			}
+		}
 	}
 }
 
