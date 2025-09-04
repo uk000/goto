@@ -1,4 +1,4 @@
-FROM golang:1.23-alpine as builder-base
+FROM golang:1.23-alpine AS builder-base
 RUN echo 'http://nl.alpinelinux.org/alpine/v3.12/main' > /etc/apk/repositories
 RUN apk update
 RUN apk add openssl
@@ -16,7 +16,7 @@ ADD ./go.mod /goto/go.mod
 WORKDIR /goto
 RUN go mod download
 
-FROM builder-base as builder
+FROM builder-base AS builder
 
 ARG COMMIT 
 ARG VERSION 
@@ -47,8 +47,9 @@ ENV GHZ_REPO=https://github.com/bojand/ghz
 ENV DNSPING_VERSION=0.120.0
 
 
-FROM alpine:3.21.3 as release-base
-RUN echo 'http://nl.alpinelinux.org/alpine/v3.21/main' > /etc/apk/repositories
+FROM alpine:3.22 AS release-base
+RUN echo 'http://nl.alpinelinux.org/alpine/v3.22/main' > /etc/apk/repositories && \
+    echo 'http://nl.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories
 RUN apk update
 RUN apk add curl
 RUN apk add wget
@@ -66,6 +67,7 @@ RUN apk add netcat-openbsd
 RUN apk add openssl
 RUN apk add jq
 RUN apk add hey
+RUN apk add etcd-ctl
 
 # ENV LANG en_US.UTF-8
 # ENV LANGUAGE en_US:en
@@ -85,7 +87,7 @@ RUN apk add hey
 # RUN apk add dpkg
 
 
-FROM release-base as release
+FROM release-base AS release
 
 WORKDIR /goto
 COPY --from=builder /goto/goto .
