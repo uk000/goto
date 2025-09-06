@@ -23,6 +23,7 @@ import (
 type SelfInfo struct {
 	ServerPort  int
 	GRPCPort    int
+	MCPPort     int
 	GivenName   bool
 	Name        string
 	Address     string

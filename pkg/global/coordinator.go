@@ -48,6 +48,8 @@ type GRPCInterceptor func(server IGRPCManager)
 var (
 	httpStartWatchers  []HTTPStartWatcher
 	httpStopWatchers   []HTTPStopWatcher
+	mcpStartWatchers   []HTTPStartWatcher
+	mcpStopWatchers    []HTTPStopWatcher
 	tcpServeWatchers   []TCPServeWatcher
 	grpcStartListeners []GRPCStartListener
 	grpcStopListeners  []GRPCStopListener
@@ -63,6 +65,14 @@ func AddHTTPStartWatcher(w HTTPStartWatcher) {
 
 func AddHTTPStopWatcher(w HTTPStopWatcher) {
 	httpStopWatchers = append(httpStopWatchers, w)
+}
+
+func AddMCPStartWatcher(w HTTPStartWatcher) {
+	mcpStartWatchers = append(mcpStartWatchers, w)
+}
+
+func AddMCPStopWatcher(w HTTPStopWatcher) {
+	mcpStopWatchers = append(mcpStopWatchers, w)
 }
 
 func AddTCPServeWatcher(w TCPServeWatcher) {
@@ -89,6 +99,18 @@ func OnHTTPStart(server *http.Server) {
 
 func OnHTTPStop() {
 	for _, w := range httpStopWatchers {
+		w()
+	}
+}
+
+func OnMCPStart(server *http.Server) {
+	for _, w := range mcpStartWatchers {
+		w(server)
+	}
+}
+
+func OnMCPStop() {
+	for _, w := range mcpStopWatchers {
 		w()
 	}
 }

@@ -24,6 +24,7 @@ import (
 	"goto/pkg/global"
 	"goto/pkg/types"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"reflect"
@@ -77,13 +78,13 @@ func GetHTTPRWFromContext(ctx context.Context) (*http.Request, http.ResponseWrit
 	return nil, nil
 }
 
-func WithContextHeaders(r *http.Request) *http.Request {
-	return r.WithContext(context.WithValue(r.Context(), HeadersKey, r.Header))
+func WithContextHeaders(ctx context.Context, headers map[string]string) context.Context {
+	return context.WithValue(ctx, HeadersKey, headers)
 }
 
-func GetContextHeaders(ctx context.Context) http.Header {
+func GetContextHeaders(ctx context.Context) map[string]string {
 	if val := ctx.Value(HeadersKey); val != nil {
-		return val.(http.Header)
+		return val.(map[string]string)
 	}
 	return nil
 }
@@ -337,31 +338,37 @@ func AddHeaderWithSuffixL(header, suffix, value string, headers map[string][]str
 	headers[key] = append(headers[key], value)
 }
 
-func CopyHeaders(prefix string, r *http.Request, w http.ResponseWriter, headers http.Header, copyHost, copyURI, copyContentType bool) {
-	CopyHeadersWithIgnore(prefix, r, w, headers, ExcludedHeaders, copyHost, copyURI, copyContentType)
+func CopyHeadersTo(prefix string, r *http.Request, out map[string][]string, copyHost, copyURI, copyContentType bool) {
+	CopyHeadersWithIgnore(prefix, r, out, nil, ExcludedHeaders, copyHost, copyURI, copyContentType)
 }
 
-func CopyHeadersWithIgnore(prefix string, r *http.Request, w http.ResponseWriter, headers http.Header, ignoreHeaders map[string]bool, copyHost, copyURI, copyContentType bool) {
+func CopyHeaders(prefix string, r *http.Request, w http.ResponseWriter, headers http.Header, copyHost, copyURI, copyContentType bool) {
+	CopyHeadersWithIgnore(prefix, r, w.Header(), headers, ExcludedHeaders, copyHost, copyURI, copyContentType)
+}
+
+func CopyHeadersWithIgnore(prefix string, r *http.Request, out map[string][]string, headers http.Header, ignoreHeaders map[string]bool, copyHost, copyURI, copyContentType bool) {
 	rs := GetRequestStore(r)
 	hostCopied := false
-	responseHeaders := w.Header()
 	if prefix != "" {
 		prefix += "-"
-		AddHeaderWithPrefix(prefix, "Payload-Size", strconv.Itoa(rs.RequestPayloadSize), responseHeaders)
-		if !hostCopied && copyHost {
-			AddHeaderWithPrefix(prefix, "Host", r.Host, responseHeaders)
+		AddHeaderWithPrefix(prefix, "Payload-Size", strconv.Itoa(rs.RequestPayloadSize), out)
+		if !hostCopied && copyHost && r != nil {
+			AddHeaderWithPrefix(prefix, "Host", r.Host, out)
 		}
-		if copyURI {
-			AddHeaderWithPrefix(prefix, "URI", r.RequestURI, responseHeaders)
+		if copyURI && r != nil {
+			AddHeaderWithPrefix(prefix, "URI", r.RequestURI, out)
 		}
 		if rs.IsTLS && copyHost {
 			if rs.ServerName != "" {
-				AddHeaderWithPrefix(prefix, "TLS-SNI", rs.ServerName, responseHeaders)
+				AddHeaderWithPrefix(prefix, "TLS-SNI", rs.ServerName, out)
 			}
 			if rs.TLSVersion != "" {
-				AddHeaderWithPrefix(prefix, "TLS-Version", rs.TLSVersion, responseHeaders)
+				AddHeaderWithPrefix(prefix, "TLS-Version", rs.TLSVersion, out)
 			}
 		}
+	}
+	if headers == nil {
+		headers = r.Header
 	}
 	for h, values := range headers {
 		lh := strings.ToLower(h)
@@ -372,7 +379,7 @@ func CopyHeadersWithIgnore(prefix string, r *http.Request, w http.ResponseWriter
 			continue
 		}
 		for _, v := range values {
-			AddHeaderWithPrefix(prefix, h, v, responseHeaders)
+			AddHeaderWithPrefix(prefix, h, v, out)
 		}
 		if hostRegexp.MatchString(h) {
 			hostCopied = true
@@ -472,18 +479,17 @@ func CheckAdminRequest(r *http.Request) bool {
 	if strings.HasPrefix(uri, "/port=") {
 		uri = strings.Split(uri, "/port=")[1]
 	}
-	uri2 := ""
+	// uri2 := ""
 	if pieces := strings.Split(uri, "/"); len(pieces) > 1 {
 		uri = pieces[1]
-		if len(pieces) > 2 {
-			uri2 = pieces[2]
-		}
+		// if len(pieces) > 2 {
+		// 	uri2 = pieces[2]
+		// }
 	}
 	return uri == "metrics" || uri == "server" || uri == "request" || uri == "response" || uri == "listeners" ||
 		uri == "label" || uri == "registry" || uri == "client" || uri == "proxy" || uri == "job" || uri == "probes" ||
 		uri == "tcp" || uri == "log" || uri == "events" || uri == "tunnels" || uri == "grpc" || uri == "jsonrpc" ||
-		uri == "k8s" || uri == "pipes" || uri == "scripts" || uri == "tls" || uri == "routing" ||
-		(uri == "mcp" && (uri2 == "servers" || uri2 == "server" || uri2 == "client" || uri2 == "proxy"))
+		uri == "k8s" || uri == "pipes" || uri == "scripts" || uri == "tls" || uri == "routing" || uri == "mcpapi"
 }
 
 func IsMetricsRequest(r *http.Request) bool {
@@ -902,4 +908,18 @@ func GotoProtocol(isH2, isTLS bool) string {
 		protocol = "H2C"
 	}
 	return protocol
+}
+
+func PrintRequest(r *http.Request) {
+	log.Printf(">> Method: %s", ToJSONText(r.Method))
+	log.Printf(">> URI: %s", ToJSONText(r.RequestURI))
+	log.Printf(">> Headers: %s", ToJSONText(r.Header))
+	log.Printf(">> Query: %s", ToJSONText(r.URL.Query()))
+	if rr, ok := r.Body.(*ReReader); ok {
+		log.Printf(">> Body: %s", string(rr.Content))
+	}
+}
+
+func PrintResponse(w http.ResponseWriter) {
+	log.Println(ToJSONText(w))
 }

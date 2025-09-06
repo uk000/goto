@@ -24,19 +24,23 @@ import (
 	"net/http"
 	"sync"
 
-	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
 )
 
-type HeadersIntercept interface {
-	SetHeaders(r *http.Request)
+type HTTPRequestIntercept interface {
+	Intercept(r *http.Request)
 }
 
 type TransportIntercept interface {
 	SetTLSConfig(tlsConfig *tls.Config)
 	GetOpenConnectionCount() int
 	GetDialer() *net.Dialer
+}
+
+type IHTTPTransportIntercept interface {
+	TransportIntercept
+	http.RoundTripper
 }
 
 type BaseTransportIntercept struct {
@@ -49,7 +53,7 @@ type BaseTransportIntercept struct {
 type HTTPTransportIntercept struct {
 	*http.Transport
 	*BaseTransportIntercept
-	headersIntercept HeadersIntercept
+	headersIntercept HTTPRequestIntercept
 }
 
 type HTTP2TransportIntercept struct {
@@ -62,13 +66,7 @@ type GRPCIntercept struct {
 	dialOpts []grpc.DialOption
 }
 
-type MCPClientInterceptTransport struct {
-	*HTTPTransportIntercept
-	gomcp.Transport
-	SessionHeaders map[string]map[string]string
-}
-
-func NewHTTPTransportIntercept(orig *http.Transport, label string, newConnNotifierChan chan string) *HTTPTransportIntercept {
+func NewHTTPTransportInterceptWithWatch(orig *http.Transport, label string, newConnNotifierChan chan string, watcher IConnWatcher) *HTTPTransportIntercept {
 	t := &HTTPTransportIntercept{
 		Transport:              orig,
 		BaseTransportIntercept: &BaseTransportIntercept{},
@@ -80,12 +78,16 @@ func NewHTTPTransportIntercept(orig *http.Transport, label string, newConnNotifi
 			if newConnNotifierChan != nil {
 				newConnNotifierChan <- label
 			}
-			return NewConnTracker(conn, t.BaseTransportIntercept)
+			return NewConnTrackerWithWatch(conn, t.BaseTransportIntercept, watcher)
 		} else {
 			return nil, err
 		}
 	}
 	return t
+}
+
+func NewHTTPTransportIntercept(orig *http.Transport, label string, newConnNotifierChan chan string) *HTTPTransportIntercept {
+	return NewHTTPTransportInterceptWithWatch(orig, label, newConnNotifierChan, nil)
 }
 
 func NewHTTP2TransportIntercept(orig *http2.Transport, label string, newConnNotifierChan chan string) *HTTP2TransportIntercept {
@@ -96,7 +98,7 @@ func NewHTTP2TransportIntercept(orig *http2.Transport, label string, newConnNoti
 	t.tlsConfigPtr = &orig.TLSClientConfig
 	dialer := t.getDialer()
 	t.Transport.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-		if conn, err := dialer(network, addr, cfg); err == nil {
+		if conn, err := dialer(context.Background(), network, addr, cfg); err == nil {
 			if newConnNotifierChan != nil {
 				newConnNotifierChan <- label
 			}
@@ -127,14 +129,6 @@ func NewGRPCIntercept(label string, dialOpts []grpc.DialOption, newConnNotifierC
 	return g
 }
 
-func NewMCPTransport(mcpTransport gomcp.Transport, httpTransport *HTTPTransportIntercept) gomcp.Transport {
-	return &MCPClientInterceptTransport{
-		HTTPTransportIntercept: httpTransport,
-		Transport:              mcpTransport,
-		SessionHeaders:         map[string]map[string]string{},
-	}
-}
-
 func (t *HTTPTransportIntercept) getDialer() func(context.Context, string, string) (net.Conn, error) {
 	if t.DialContext != nil {
 		return t.DialContext
@@ -149,21 +143,21 @@ func (t *HTTPTransportIntercept) getDialer() func(context.Context, string, strin
 
 func (t *HTTPTransportIntercept) RoundTrip(r *http.Request) (*http.Response, error) {
 	if t.headersIntercept != nil {
-		t.headersIntercept.SetHeaders(r)
+		t.headersIntercept.Intercept(r)
 	}
 	return t.Transport.RoundTrip(r)
 }
 
-func (t *HTTPTransportIntercept) SetHeadersIntercept(hi HeadersIntercept) {
+func (t *HTTPTransportIntercept) SetHeadersIntercept(hi HTTPRequestIntercept) {
 	t.headersIntercept = hi
 }
 
-func (t *HTTP2TransportIntercept) getDialer() func(string, string, *tls.Config) (net.Conn, error) {
-	if t.DialTLS != nil {
-		return t.DialTLS
+func (t *HTTP2TransportIntercept) getDialer() func(context.Context, string, string, *tls.Config) (net.Conn, error) {
+	if t.DialTLSContext != nil {
+		return t.DialTLSContext
 	}
-	return func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-		return t.Dialer.Dial(network, addr)
+	return func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+		return t.Dialer.DialContext(ctx, network, addr)
 	}
 }
 
@@ -179,20 +173,4 @@ func (t *BaseTransportIntercept) SetTLSConfig(tlsConfig *tls.Config) {
 
 func (t *BaseTransportIntercept) GetDialer() *net.Dialer {
 	return &t.Dialer
-}
-
-func (t *MCPClientInterceptTransport) SetSessionHeaders(sessionID string, headers map[string]string) {
-	t.SessionHeaders[sessionID] = headers
-}
-
-func (t *MCPClientInterceptTransport) GetSessionHeaders(sessionID string) map[string]string {
-	return t.SessionHeaders[sessionID]
-}
-
-func (t *MCPClientInterceptTransport) RemoveSessionHeaders(sessionID string) {
-	delete(t.SessionHeaders, sessionID)
-}
-
-func (t *MCPClientInterceptTransport) Connect(ctx context.Context) (gomcp.Connection, error) {
-	return t.Transport.Connect(ctx)
 }

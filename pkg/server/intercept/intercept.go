@@ -18,6 +18,7 @@ package intercept
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"goto/pkg/util"
 	"io"
@@ -44,6 +45,19 @@ type InterceptResponseWriter struct {
 	Chunked    bool
 	IsH2C      bool
 	BodyLength int
+}
+
+type TeeResponseWriter struct {
+	http.ResponseWriter
+	http.Hijacker
+	http.Flusher
+	conn        net.Conn
+	StatusCode  int
+	Data        bytes.Buffer
+	Headers     http.Header
+	Hijacked    bool
+	Chunked     bool
+	HeadersSent bool
 }
 
 type FlushWriter struct {
@@ -98,7 +112,7 @@ func (b *BodyTracker) Read(p []byte) (n int, err error) {
 }
 
 func (b *BodyTracker) Close() error {
-	// util.PrintCallers(3, "BodyTracker.Close")
+	util.PrintCallers(3, "BodyTracker.Close")
 	return b.ReadCloser.Close()
 }
 

@@ -19,7 +19,9 @@ package server
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
+	mcpserver "goto/pkg/ai/mcp/server"
 	. "goto/pkg/constants"
 	"goto/pkg/events"
 	"goto/pkg/global"
@@ -50,15 +52,39 @@ import (
 )
 
 var (
-	httpServer *http.Server
-	h2s        = &http2.Server{}
-	RootRouter *mux.Router
+	httpServer           *http.Server
+	mcpServer            *http.Server
+	h2s                  = &http2.Server{}
+	httpStarted          bool
+	mcpStarted           bool
+	httpListenersStarted bool
+	mcpListenersStarted  bool
+	httpHandler          http.Handler
+	RootRouter           *mux.Router
 )
 
 //go:embed ui/static/*
 var staticUI embed.FS
 
 func RunHttpServer() {
+	var err error
+	err = configureAndStartHTTPServer(configureHTTPouter())
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	err = configureAndStartMCPServer(global.Self.MCPPort)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	go startListeners()
+	grpcserver.StartDefaultGRPCServer()
+	RunStartupScript()
+	peer.RegisterPeer(global.Self.Name, global.Self.Address)
+	events.SendEventJSONDirect("Server Started", global.Self.HostLabel, listeners.GetListeners())
+	WaitForHttpServer()
+}
+
+func configureHTTPouter() *mux.Router {
 	coreRouter := mux.NewRouter()
 	coreRouter.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
 		util.WriteJsonPayload(w, map[string]string{"version": global.Version, "commit": global.Commit})
@@ -82,7 +108,11 @@ func RunHttpServer() {
 	interceptChainRouter := RootRouter.PathPrefix("").Subrouter()
 	interceptChainRouter.Use(IntereceptMiddleware)
 	middleware.LinkMiddlewareChain(interceptChainRouter)
-	h2 := HTTPHandler(coreRouter, h2c.NewHandler(RootRouter, h2s))
+	return coreRouter
+}
+
+func configureAndStartHTTPServer(r *mux.Router) error {
+	httpHandler = HTTPHandler(r, h2c.NewHandler(RootRouter, h2s))
 	httpServer = &http.Server{
 		Addr:         fmt.Sprintf("0.0.0.0:%d", global.Self.ServerPort),
 		WriteTimeout: 1 * time.Minute,
@@ -90,15 +120,169 @@ func RunHttpServer() {
 		IdleTimeout:  1 * time.Minute,
 		ConnContext:  withConnContext,
 		ConnState:    conn.ConnState,
-		Handler:      h2,
+		Handler:      httpHandler,
 		ErrorLog:     log.New(io.Discard, "discard", 0),
 	}
-	grpcserver.StartDefaultGRPCServer()
-	StartHttpServer(httpServer)
-	RunStartupScript()
-	peer.RegisterPeer(global.Self.Name, global.Self.Address)
-	events.SendEventJSONDirect("Server Started", global.Self.HostLabel, listeners.GetListeners())
-	WaitForHttpServer(httpServer)
+	return StartHttpServer(false)
+}
+
+func configureAndStartMCPServer(port int) error {
+	// if mcpStarted && mcpServer != nil {
+	// 	if callback != nil {
+	// 		// callback(mcpServer)
+	// 		return nil
+	// 	}
+	// }
+	mcpServer = &http.Server{
+		Addr:         fmt.Sprintf("0.0.0.0:%d", port),
+		WriteTimeout: 1 * time.Minute,
+		ReadTimeout:  1 * time.Minute,
+		IdleTimeout:  1 * time.Minute,
+		ConnContext:  withConnContext,
+		ConnState:    conn.ConnState,
+		Handler:      MCPHandler(httpHandler),
+		ErrorLog:     log.New(io.Discard, "discard", 0),
+	}
+	return StartHttpServer(true)
+}
+
+func StartHttpServer(mcp bool) error {
+	var server *http.Server
+	if mcp {
+		server = mcpServer
+	} else {
+		server = httpServer
+	}
+	if server == nil {
+		return errors.New("Missing server")
+	}
+	if global.ServerConfig.StartupDelay > 0 {
+		log.Printf("Sleeping %s before starting", global.ServerConfig.StartupDelay)
+		time.Sleep(global.ServerConfig.StartupDelay)
+	}
+	events.StartSender()
+	go func(server *http.Server) {
+		if mcp {
+			mcpStarted = true
+		} else {
+			httpStarted = true
+		}
+		if err := server.ListenAndServe(); err != nil {
+			log.Println(err)
+		}
+		global.OnHTTPStop()
+	}(server)
+	return nil
+}
+
+func startListeners() {
+	serverCount := 0
+	if mcpServer != nil {
+		serverCount++
+	}
+	if httpServer != nil {
+		serverCount++
+	}
+	for i := 0; i < serverCount; {
+		if httpStarted && !httpListenersStarted {
+			log.Printf("HTTP server [%s] is ready. Starting additional HTTP listeners.", httpServer.Addr)
+			time.Sleep(1 * time.Second)
+			global.OnHTTPStart(httpServer)
+			httpListenersStarted = true
+			i++
+		} else if mcpStarted && !mcpListenersStarted {
+			log.Printf("MCP server [%s] is ready. Starting additional MCP listeners.", mcpServer.Addr)
+			time.Sleep(1 * time.Second)
+			global.OnMCPStart(mcpServer)
+			mcpListenersStarted = true
+			i++
+		} else {
+			if !httpStarted && httpServer != nil {
+				log.Printf("Waiting for HTTP server [%s] before starting additional HTTP listeners.", httpServer.Addr)
+			}
+			if !mcpStarted && mcpServer != nil {
+				log.Printf("Waiting for MCP server [%s] before starting additional MCP listeners.", mcpServer.Addr)
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
+}
+
+func ServeHTTPListener(l *listeners.Listener) {
+	go func() {
+		msg := ""
+		var server *http.Server
+		if l.IsMCP {
+			msg = fmt.Sprintf("Starting MCP Listener [%s]", l.ListenerID)
+			server = mcpServer
+		} else {
+			msg = fmt.Sprintf("Starting HTTP Listener [%s]", l.ListenerID)
+			server = httpServer
+		}
+		if l.TLS {
+			msg += fmt.Sprintf(" With TLS [CN: %s]", l.CommonName)
+		}
+		log.Println(msg)
+		if err := server.Serve(l.Listener); err != nil {
+			log.Printf("Listener [%d]: %s", l.Port, err.Error())
+		}
+	}()
+}
+
+func WaitForHttpServer() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	<-c
+	global.ServerConfig.Stopping = true
+	log.Println("Received stop signal.")
+	if global.ServerConfig.ShutdownDelay > 0 {
+		log.Printf("Sleeping %s before stopping", global.ServerConfig.ShutdownDelay)
+		signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+		select {
+		case <-c:
+			log.Printf("Received 2nd Interrupt. Really stopping now.")
+			break
+		case <-time.After(global.ServerConfig.ShutdownDelay):
+			log.Printf("Slept long enough. Stopping now.")
+			break
+		}
+	}
+	StopHttpServer(httpServer)
+	StopHttpServer(mcpServer)
+}
+
+func StopHttpServer(server *http.Server) {
+	log.Printf("HTTP Server %s started shutting down", server.Addr)
+	go grpcserver.TheGRPCServer.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	go events.StopSender()
+	log.Printf("Deregistering peer [%s : %s] from registry", global.Self.Name, global.Self.Address)
+	go peer.DeregisterPeer(global.Self.Name, global.Self.Address)
+	time.Sleep(time.Second)
+	server.Shutdown(ctx)
+	events.SendEventJSONDirect("Server Stopped", global.Self.HostLabel, listeners.GetListeners())
+	log.Printf("HTTP Server %s finished shutting down", server.Addr)
+}
+
+func MCPHandler(httpHandler http.Handler) http.Handler {
+	mcpHandler := mcpserver.MCPHandler(httpHandler)
+	mcpRouter := mux.NewRouter()
+	mcpRouter.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
+		return true
+	}).HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, r, _ = util.WithRequestStore(r)
+		_, rs := util.PopulateRequestStore(r)
+		reReader := util.NewReReader(r.Body)
+		r.Body = reReader
+		if rs.IsAdminRequest {
+			httpHandler.ServeHTTP(w, r)
+		} else {
+			mcpHandler.ServeHTTP(w, r)
+		}
+		go PrintLogMessages(0, 0, nil, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
+	})
+	return mcpRouter
 }
 
 func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
@@ -124,7 +308,7 @@ func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
 func ContextMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if global.ServerConfig.Stopping && global.Funcs.IsReadinessProbe(r) {
-			util.CopyHeaders(HeaderStoppingReadinessRequest, r, w, r.Header, true, true, false)
+			util.CopyHeaders(HeaderStoppingReadinessRequest, r, w, nil, true, true, false)
 			w.WriteHeader(http.StatusNotFound)
 		} else if next != nil {
 			if err := checkRequestPort(r); err != nil {
@@ -238,70 +422,6 @@ func withRequestStore(r *http.Request) (ctx context.Context, r2 *http.Request, r
 	return
 }
 
-func StartHttpServer(server *http.Server) {
-	if global.ServerConfig.StartupDelay > 0 {
-		log.Printf("Sleeping %s before starting", global.ServerConfig.StartupDelay)
-		time.Sleep(global.ServerConfig.StartupDelay)
-	}
-	events.StartSender()
-	go func() {
-		log.Printf("Server %s ready", server.Addr)
-		global.OnHTTPStart(server)
-		if err := server.ListenAndServe(); err != nil {
-			log.Println(err)
-		}
-		global.OnHTTPStop()
-	}()
-}
-
-func ServeHTTPListener(l *listeners.Listener) {
-	go func() {
-		msg := fmt.Sprintf("Starting HTTP Listener [%s]", l.ListenerID)
-		if l.TLS {
-			msg += fmt.Sprintf(" With TLS [CN: %s]", l.CommonName)
-		}
-		log.Println(msg)
-		if err := httpServer.Serve(l.Listener); err != nil {
-			log.Printf("Listener [%d]: %s", l.Port, err.Error())
-		}
-	}()
-}
-
-func WaitForHttpServer(server *http.Server) {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-	<-c
-	global.ServerConfig.Stopping = true
-	log.Println("Received stop signal.")
-	if global.ServerConfig.ShutdownDelay > 0 {
-		log.Printf("Sleeping %s before stopping", global.ServerConfig.ShutdownDelay)
-		signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-		select {
-		case <-c:
-			log.Printf("Received 2nd Interrupt. Really stopping now.")
-			break
-		case <-time.After(global.ServerConfig.ShutdownDelay):
-			log.Printf("Slept long enough. Stopping now.")
-			break
-		}
-	}
-	StopHttpServer(server)
-}
-
-func StopHttpServer(server *http.Server) {
-	log.Printf("HTTP Server %s started shutting down", server.Addr)
-	go grpcserver.TheGRPCServer.Stop()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	go events.StopSender()
-	log.Printf("Deregistering peer [%s : %s] from registry", global.Self.Name, global.Self.Address)
-	go peer.DeregisterPeer(global.Self.Name, global.Self.Address)
-	time.Sleep(time.Second)
-	server.Shutdown(ctx)
-	events.SendEventJSONDirect("Server Stopped", global.Self.HostLabel, listeners.GetListeners())
-	log.Printf("HTTP Server %s finished shutting down", server.Addr)
-}
-
 func PrintLogMessages(statusCode, bodyLength int, payload []byte, headers http.Header, rs *util.RequestStore) {
 	if (!rs.IsLockerRequest || global.Flags.EnableRegistryLockerLogs) &&
 		(!rs.IsPeerEventsRequest || global.Flags.EnableRegistryEventsLogs) &&
@@ -337,7 +457,7 @@ func PrintLogMessages(statusCode, bodyLength int, payload []byte, headers http.H
 				rs.LogMessages = append(rs.LogMessages, fmt.Sprintf("Response %s: [%s]", logLabel, bodyLog))
 			}
 		}
-		log.Println(strings.Join(rs.LogMessages, " --> "))
+		log.Printf("Method Log: %s\n", strings.Join(rs.LogMessages, " --> "))
 		if flusher, ok := log.Writer().(http.Flusher); ok {
 			flusher.Flush()
 		}

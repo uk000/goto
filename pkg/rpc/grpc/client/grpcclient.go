@@ -181,7 +181,7 @@ func (c *GRPCClient) GetDialer() *net.Dialer {
 }
 
 func (c *GRPCClient) Transport() transport.TransportIntercept {
-	return &c.BaseTransportIntercept
+	return c
 }
 
 func (c *GRPCClient) Close() {

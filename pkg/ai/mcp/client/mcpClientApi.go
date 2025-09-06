@@ -21,18 +21,18 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	mcpClientRouter := util.PathRouter(r, "/mcp/client")
+	mcpapiRouter := util.PathRouter(r, "/mcpapi/client")
 
-	util.AddRouteWithPort(mcpClientRouter, "/details", getDetails, "GET")
+	util.AddRouteWithPort(mcpapiRouter, "/details", getDetails, "GET")
 
-	util.AddRouteMultiQWithPort(mcpClientRouter, "/list/all", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
-	util.AddRouteMultiQWithPort(mcpClientRouter, "/list/tools", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
-	util.AddRouteMultiQWithPort(mcpClientRouter, "/list/tools/names", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
+	util.AddRouteMultiQWithPort(mcpapiRouter, "/list/all", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
+	util.AddRouteMultiQWithPort(mcpapiRouter, "/list/tools", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
+	util.AddRouteMultiQWithPort(mcpapiRouter, "/list/tools/names", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
 
-	util.AddRouteWithPort(mcpClientRouter, "/call", callTool, "POST")
+	util.AddRouteWithPort(mcpapiRouter, "/call", callTool, "POST")
 
-	util.AddRouteWithPort(mcpClientRouter, "/payload/{kind:sample|elicit}", addClientPayload, "POST")
-	util.AddRouteWithPort(mcpClientRouter, "/payload/roots", addRoots, "POST")
+	util.AddRouteWithPort(mcpapiRouter, "/payload/{kind:sample|elicit}", addClientPayload, "POST")
+	util.AddRouteWithPort(mcpapiRouter, "/payload/roots", addRoots, "POST")
 }
 
 func listTools(w http.ResponseWriter, r *http.Request) {
@@ -42,9 +42,10 @@ func listTools(w http.ResponseWriter, r *http.Request) {
 	toolsOnly := strings.Contains(r.RequestURI, "tools")
 	namesOnly := strings.Contains(r.RequestURI, "names")
 	msg := ""
-	operationLabel := fmt.Sprintf("[%s][tool/list]", global.Self.Name)
-	client := NewClient(util.GetCurrentPort(r), sse, "Client", operationLabel, authority)
-	err := client.Connect(url)
+	operationLabel := fmt.Sprintf("[Client: %s][tool/list]", global.Self.Name)
+	client := NewClient(util.GetCurrentPort(r), sse, operationLabel)
+	session, err := client.Connect(url, operationLabel)
+	session.SetAuthority(authority)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("Failed to connect to url %s with error [%s]", url, err.Error())
@@ -55,12 +56,12 @@ func listTools(w http.ResponseWriter, r *http.Request) {
 	var toolsList *mcp.ListToolsResult
 	var promptsList *mcp.ListPromptsResult
 	var resourcesList *mcp.ListResourcesResult
-	toolsList, err = client.ListTools()
+	toolsList, err = session.ListTools()
 	if err == nil && !toolsOnly {
-		promptsList, err = client.ListPrompts()
+		promptsList, err = session.ListPrompts()
 	}
 	if err == nil && !toolsOnly {
-		resourcesList, err = client.ListResources()
+		resourcesList, err = session.ListResources()
 	}
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -109,7 +110,7 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 	port := util.GetCurrentPort(r)
 	b, _ := io.ReadAll(r.Body)
 	msg := ""
-	tc, err := ParseToolCall(port, b)
+	tc, err := ParseToolCall(b)
 	var output map[string]any
 	if err != nil || tc == nil {
 		if err != nil {
@@ -137,16 +138,20 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 
 func doToolCall(port int, tc *ToolCall) (output map[string]any, err error) {
 	operationLabel := fmt.Sprintf("[%s][tool/call][%s]", global.Self.Name, tc.Tool)
-	client := NewClient(port, tc.SSE, "Client", operationLabel, tc.Authority)
+	client := NewClient(port, tc.ForceSSE, operationLabel)
+	session, err := client.Connect(tc.URL, tc.Tool)
+	if err != nil {
+		return nil, err
+	}
 	defer func() {
 		if output == nil {
 			log.Println("*** defer called with Nil output ***")
 		}
-		client.Close()
+		session.Close()
 	}()
-	output, err = client.CallTool(port, tc, nil)
+	output, err = session.CallTool(tc, nil)
 	if err == nil {
-		client.hops.AddToOutput(output)
+		session.Hops.AddToOutput(output)
 	}
 	return
 }

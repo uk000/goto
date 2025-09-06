@@ -145,7 +145,7 @@ func (r *Route) Setup() error {
 		r.basePrefix = prefix
 		r.re = re
 		r.router = router
-		r.client, _ = transport.CreateDefaultHTTPClient(r.Label, r.To.IsH2, r.To.IsTLS, metrics.ConnTracker)
+		r.client = transport.CreateDefaultHTTPClient(r.Label, r.To.IsH2, r.To.IsTLS, metrics.ConnTracker)
 	} else {
 		log.Printf("Route: Failed to add URI match [%s] with error: %s\n", uri, err.Error())
 		return err

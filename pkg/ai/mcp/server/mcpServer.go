@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"goto/pkg/global"
 	"goto/pkg/proxy"
+	"goto/pkg/server/conn"
 	"goto/pkg/server/listeners"
 	"goto/pkg/server/middleware"
 	"goto/pkg/server/response/payload"
@@ -83,7 +84,7 @@ var (
 	PortsServers  = map[int]*PortServers{}
 	AllComponents = map[string]map[string]map[string]IMCPComponent{}
 	Kinds         = []string{KindTools, KindPrompts, KindResources, KindTemplates}
-	Middleware    = middleware.NewMiddleware("mcpserver", nil, MCPServerFunc)
+	Middleware    = middleware.NewMiddleware("mcpserver", nil, MCPHandler)
 	lock          sync.RWMutex
 )
 
@@ -129,6 +130,7 @@ func GetPortMCPServers(port int) *PortServers {
 }
 
 func GetMCPServer(name string) (server *MCPServer) {
+	name = strings.ToLower(name)
 	lock.RLock()
 	defer lock.RUnlock()
 	for _, ps := range PortsServers {
@@ -184,15 +186,15 @@ func (ps *PortServers) AddMCPServer(p *MCPServerPayload) {
 	defer ps.lock.Unlock()
 	s := NewMCPServer(p)
 	s.ps = ps
-	ps.Servers[p.Name] = s
-	if ps.DefaultServer == nil {
+	ps.Servers[strings.ToLower(p.Name)] = s
+	if ps.DefaultServer == nil || ps.DefaultServer.Port == s.Port {
 		ps.DefaultServer = s
 	}
 }
 
 func NewMCPServer(p *MCPServerPayload) *MCPServer {
 	mcpserver := &MCPServer{
-		ID:        fmt.Sprintf("Goto-%s[%s]", p.Name, global.Funcs.GetListenerLabelForPort(p.Port)),
+		ID:        fmt.Sprintf("%s[%s]", p.Name, global.Funcs.GetListenerLabelForPort(p.Port)),
 		Host:      global.Funcs.GetHostLabelForPort(p.Port),
 		Port:      p.Port,
 		SSE:       p.SSE,
@@ -401,6 +403,7 @@ func (m *MCPServer) AddTools(b []byte) (int, error) {
 		if tool.IsProxy {
 			proxy.GetMCPProxyForPort(m.Port).SetupMCPProxy(m.Name, tool.Config.Remote.URL, "", tool.Tool.Name, tool.Tool.Name, nil)
 		}
+		m.server.RemoveTools(tool.Name)
 		m.server.AddTool(tool.Tool, tool.Handle)
 		tool.Server = m
 		tool.SetName(tool.Tool.Name)
@@ -494,18 +497,15 @@ func (m *MCPServer) AddResourceTemplates(b []byte) (int, error) {
 }
 
 func (m *MCPServer) onInitialized(ctx context.Context, req *gomcp.InitializedRequest) {
-	ip := req.Session.InitializeParams()
-	log.Printf("MCPServer[%d][%s]: Session [%s] Client [%+v] Protocol Version [%s] Capabilities: [%+v] Initialized",
-		m.Port, m.Name, req.Session.ID(), ip.ClientInfo, ip.ProtocolVersion, ip.Capabilities)
+	log.Printf("MCPServer[%d][%s]: Initialized: [%s]", m.Port, m.Name, util.ToJSONText(req.Params))
 }
 
 func (m *MCPServer) onRootsListChanged(ctx context.Context, req *gomcp.RootsListChangedRequest) {
-	log.Printf("MCPServer[%d][%s]: Session [%s] Client [%+v] Roots List Changed",
-		m.Port, m.Name, req.Session.ID(), req.Session.InitializeParams().ClientInfo)
+	log.Printf("MCPServer[%d][%s]: Roots List Changed: [%s]", m.Port, m.Name, util.ToJSONText(req.Params))
 }
 
 func (m *MCPServer) onProgressNotification(ctx context.Context, req *gomcp.ProgressNotificationServerRequest) {
-	//called when "notifications/progress" is received.
+	log.Printf("MCPServer[%d][%s]: Progress Notification Received: [%s]", m.Port, m.Name, util.ToJSONText(req.Params))
 }
 
 func (m *MCPServer) AddCompletionPayload(completionType string, b []byte, delayMin, delayMax time.Duration, delayCount int) int {
@@ -545,6 +545,7 @@ func (m *MCPServer) onUnsubscribed(ctx context.Context, req *gomcp.UnsubscribeRe
 }
 
 func (m *MCPServer) GetAndClearSessionContext(sessionID string) *SessionContext {
+	log.Println("GetAndClearSessionContext")
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	sc := m.sessionContexts[sessionID]
@@ -553,6 +554,7 @@ func (m *MCPServer) GetAndClearSessionContext(sessionID string) *SessionContext 
 }
 
 func (m *MCPServer) SetSessionContext(sessionID string, ctx *SessionContext) {
+	log.Println("SetSessionContext")
 	m.lock.Lock()
 	m.sessionContexts[sessionID] = ctx
 	m.lock.Unlock()
@@ -568,29 +570,30 @@ func (m *MCPServer) Serve(w http.ResponseWriter, r *http.Request) {
 			Writer:  w,
 		})
 	}
-	isSSE := strings.Contains(r.RequestURI, "/sse") || r.Header.Get("Sec-Fetch-Mode") != ""
-	isMCP := strings.Contains(r.RequestURI, "/mcp") && !strings.Contains(r.RequestURI, "/mcp/sse")
-	var payload string
-	if rr, ok := r.Body.(*util.ReReader); ok {
-		payload = string(rr.Content)
-	}
-	if isSSE && !isMCP {
+	conn.SendGotoHeaders(w, r)
+	util.CopyHeaders("Request", r, w, r.Header, true, true, false)
+	isGET := r.Method == "GET"
+	isMCP := !isGET && strings.Contains(r.RequestURI, "/mcp") && !strings.Contains(r.RequestURI, "/sse")
+	rs := util.GetRequestStore(r)
+	rs.IsMCP = rs.IsMCP || isMCP
+	rs.IsSSE = !isMCP || isGET
+	if isMCP {
+		util.AddLogMessage("Handling MCP Request", r)
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE")
+		w.Header().Set("Access-Control-Allow-Headers", "Cache-Control, Content-Type, Authorization")
+		m.handler.ServeHTTP(w, r)
+	} else {
 		r = r.WithContext(util.SetSSE(r.Context()))
 		util.AddLogMessage("Handling MCP SSE Request", r)
-		log.Println(payload)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Cache-Control")
-		m.sseHandler.ServeHTTP(w, r)
-	} else {
-		util.AddLogMessage("Handling MCP Request", r)
-		log.Println(payload)
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		m.handler.ServeHTTP(w, r)
+		w.Header().Set("Access-Control-Allow-Headers", "Cache-Control, Content-Type, Authorization")
+		m.sseHandler.ServeHTTP(w, r)
+		w.(http.Flusher).Flush()
 	}
 }
 
@@ -634,7 +637,7 @@ func (m *MCPServer) Middleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 	}
 }
 
-func MCPServerFunc(next http.Handler) http.Handler {
+func MCPHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		HandleMCP(w, r)
 		rs := util.GetRequestStore(r)
@@ -649,7 +652,7 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 	rs := util.GetRequestStore(r)
 	isMCP := l.IsMCP || rs.IsMCP
 	if isMCP && !rs.IsAdminRequest {
-		log.Println("----- Pre-MCP -----")
+		log.Println("------- MayBe MCP ------")
 		if proxy.WillProxyMCP(l.Port, r) {
 			log.Printf("MCP is configured to proxy on Port [%d]. Skipping MCP processing", l.Port)
 			return
@@ -665,9 +668,7 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 				server = ps.DefaultServer
 				if server != nil {
 					if server.Enabled {
-						if serverName == "" {
-							log.Printf("No MCP Server name was given, using first server [%s] on port [%d]", server.Name, port)
-						} else {
+						if serverName != "" {
 							log.Printf("MCP Server [%s] not found on port [%d], using PortDefault server [%s]", serverName, port, server.Name)
 						}
 					} else {
@@ -687,13 +688,17 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 			}
 			if server != nil {
 				log.Printf("Server [%s] will handle MCP on port [%d]", server.Name, port)
+				log.Println("-------- MCP Request Details --------")
+				util.PrintRequest(r)
 				server.Serve(w, r)
 				rs.RequestServed = true
 			} else {
 				log.Printf("No MCP Server handling port [%d]. Will route to HTTP server.", port)
 			}
+		} else {
+
 		}
-		log.Println("---------------- *** Finish Pre-MCP *** ----------------")
+		log.Println("---- After MayBe MCP ----")
 	}
 }
 

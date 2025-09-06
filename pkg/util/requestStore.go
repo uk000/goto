@@ -52,6 +52,7 @@ type RequestStore struct {
 	IsGRPC                  bool
 	IsJSONRPC               bool
 	IsMCP                   bool
+	IsSSE                   bool
 	RequestPortChecked      bool
 	RequestServed           bool
 	StatusCode              int
@@ -88,17 +89,21 @@ type RequestStore struct {
 }
 
 var (
-	RequestStoreKey   = &ContextKey{Key: "requestStore"}
-	CurrentPortKey    = &ContextKey{Key: "currentPort"}
-	RequestPortKey    = &ContextKey{Key: "requestPort"}
-	IgnoredRequestKey = &ContextKey{Key: "ignoredRequest"}
-	ConnectionKey     = &ContextKey{Key: "connection"}
-	ProtocolKey       = &ContextKey{Key: "protocol"}
-	HTTPRWKey         = &ContextKey{Key: "httprw"}
-	HeadersKey        = &ContextKey{Key: "headers"}
+	RequestStoreKey     = &ContextKey{Key: "requestStore"}
+	CurrentPortKey      = &ContextKey{Key: "currentPort"}
+	RequestPortKey      = &ContextKey{Key: "requestPort"}
+	IgnoredRequestKey   = &ContextKey{Key: "ignoredRequest"}
+	ConnectionKey       = &ContextKey{Key: "connection"}
+	ProtocolKey         = &ContextKey{Key: "protocol"}
+	HTTPRWKey           = &ContextKey{Key: "httprw"}
+	HeadersKey          = &ContextKey{Key: "headers"}
+	DefaultRequestStore = &RequestStore{}
 )
 
 func GetRequestStore(r *http.Request) *RequestStore {
+	if r == nil {
+		return DefaultRequestStore
+	}
 	if val := r.Context().Value(RequestStoreKey); val != nil {
 		return val.(*RequestStore)
 	}

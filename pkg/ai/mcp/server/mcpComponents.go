@@ -41,7 +41,7 @@ func (m *MCPComponent) SetName(name string) {
 }
 
 func (m *MCPComponent) BuildLabel() {
-	m.Label = fmt.Sprintf("[%s/%s.%s]", m.Server.GetName(), m.Kind, m.Name)
+	m.Label = fmt.Sprintf("[%s/%s/%s]", m.Server.GetName(), m.Kind, m.Name)
 }
 
 func (m *MCPComponent) SetPayload(b []byte, isJSON, isStream bool, streamCount int, delayMin, delayMax time.Duration, delayCount int) {

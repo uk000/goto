@@ -558,7 +558,7 @@ func getHttpClientForTarget(tracker *InvocationTracker) transport.ClientTranspor
 	client := targetClients[target.Name]
 	invocationsLock.RUnlock()
 	if client == nil || client.HTTP() == nil {
-		client, _ = transport.CreateHTTPClient(target.Name, target.h2, target.AutoUpgrade, target.TLS, target.authority, 0,
+		client = transport.CreateHTTPClient(target.Name, target.h2, target.AutoUpgrade, target.TLS, target.authority, 0,
 			target.requestTimeoutD, target.connTimeoutD, target.connIdleTimeoutD, metrics.ConnTracker)
 		invocationsLock.Lock()
 		targetClients[target.Name] = client

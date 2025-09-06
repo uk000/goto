@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"goto/pkg/util"
 	"io"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -43,22 +45,23 @@ type ClientTransport interface {
 }
 
 type ClientTracker struct {
+	http.RoundTripper
 	*http.Client
 	GrpcConn           *grpc.ClientConn
-	TransportIntercept *BaseTransportIntercept
+	TransportIntercept TransportIntercept
 	GRPCIntercept      *GRPCIntercept
 	SNI                string
 	TLSVersion         uint16
 }
 
-func NewTransportClient(c *http.Client, gc *grpc.ClientConn, tracker *BaseTransportIntercept, grpcIntercept *GRPCIntercept) ClientTransport {
+func NewClientTransport(c *http.Client, gc *grpc.ClientConn, tracker TransportIntercept, grpcIntercept *GRPCIntercept) ClientTransport {
 	return &ClientTracker{Client: c, GrpcConn: gc, TransportIntercept: tracker, GRPCIntercept: grpcIntercept}
 }
 
 func NewGRPCClient(label string, url string, ctx context.Context, dialOpts []grpc.DialOption, newConnNotifierChan chan string) (ClientTransport, error) {
 	g := NewGRPCIntercept(label, dialOpts, newConnNotifierChan)
 	if conn, err := grpc.DialContext(ctx, url, g.dialOpts...); err == nil {
-		return NewTransportClient(nil, conn, nil, g), nil
+		return NewClientTransport(nil, conn, nil, g), nil
 	} else {
 		return nil, err
 	}
@@ -94,6 +97,12 @@ func (c *ClientTracker) Close() {
 
 func (c *ClientTracker) Transport() TransportIntercept {
 	return c.TransportIntercept
+}
+
+func (c *ClientTracker) RoundTrip(r *http.Request) (*http.Response, error) {
+	log.Println("ClientTracker Roundtrip called")
+	util.PrintCallers(3, "ClientTracker.RoundTrip")
+	return c.Client.Transport.RoundTrip(r)
 }
 
 func (c *ClientTracker) HTTP() *http.Client {
@@ -132,15 +141,27 @@ func CreateRequest(method string, url string, headers http.Header, payload []byt
 	}
 }
 
-func CreateDefaultHTTPClient(label string, h2, isTLS bool, newConnNotifierChan chan string) (ClientTransport, TransportIntercept) {
+func CreateSimpleHTTPClient() *http.Client {
+	tr := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 100,
+		IdleConnTimeout:     time.Minute * 10,
+		Proxy:               http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   time.Minute,
+			KeepAlive: time.Minute * 5,
+		}).DialContext,
+	}
+	return &http.Client{Transport: tr, Timeout: 10 * time.Second}
+}
+
+func CreateDefaultHTTPClient(label string, h2, isTLS bool, newConnNotifierChan chan string) ClientTransport {
 	return CreateHTTPClient(label, h2, true, isTLS, "", 0, 30*time.Second, 30*time.Second, 3*time.Minute, newConnNotifierChan)
 }
 
 func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName string, tlsVersion uint16,
-	requestTimeout, connTimeout, connIdleTimeout time.Duration, newConnNotifierChan chan string) (ClientTransport, TransportIntercept) {
-	var rt http.RoundTripper
-	var tracker *BaseTransportIntercept
-	var ti TransportIntercept
+	requestTimeout, connTimeout, connIdleTimeout time.Duration, newConnNotifierChan chan string) ClientTransport {
+	var ct ClientTransport
 	if !h2 {
 		ht := NewHTTPTransportIntercept(&http.Transport{
 			MaxIdleConns:          300,
@@ -163,9 +184,7 @@ func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName stri
 				MaxVersion:         tlsVersion,
 			},
 		}, label, newConnNotifierChan)
-		tracker = ht.BaseTransportIntercept
-		rt = ht
-		ti = ht
+		ct = NewClientTransport(&http.Client{Timeout: requestTimeout, Transport: ht}, nil, ht, nil)
 	} else {
 		tr := &http2.Transport{
 			ReadIdleTimeout: connIdleTimeout,
@@ -185,9 +204,7 @@ func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName stri
 			return net.Dial(network, addr)
 		}
 		h2t := NewHTTP2TransportIntercept(tr, label, newConnNotifierChan)
-		tracker = h2t.BaseTransportIntercept
-		rt = h2t
-		ti = h2t
+		ct = NewClientTransport(nil, nil, h2t, nil)
 	}
-	return NewTransportClient(&http.Client{Timeout: requestTimeout, Transport: rt}, nil, tracker, nil), ti
+	return ct
 }

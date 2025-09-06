@@ -73,18 +73,44 @@ type Listener struct {
 	lock          sync.RWMutex                `json:"-"`
 }
 
+const (
+	PROTO_HTTP     = "HTTP"
+	PROTOL_HTTP    = "http"
+	PROTOL_HTTPS   = "https"
+	PROTOL_H2      = "h2"
+	PROTOL_H2C     = "h2c"
+	PROTO_GRPC     = "GRPC"
+	PROTOL_GRPC    = "grpc"
+	PROTO_MCP      = "MCP"
+	PROTOL_MCP     = "mcp"
+	PROTO_UDP      = "UDP"
+	PROTOL_UDP     = "udp"
+	PROTO_JSONRPC  = "JSONRPC"
+	PROTOL_JSONRPC = "jsonrpc"
+	PROTO_XDS      = "XDS"
+	PROTOL_XDS     = "xds"
+	PROTO_TCP      = "TCP"
+	PROTOL_TCP     = "tcp"
+	PROTO_TLS      = "TLS"
+	PROTOL_TLS     = "tls"
+)
+
 var (
-	DefaultListener     = newListener(global.Self.ServerPort, "HTTP", constants.DefaultCommonName, true)
-	DefaultGRPCListener = newListener(global.Self.GRPCPort, "GRPC", constants.DefaultCommonName, false)
+	DefaultListener     = newListener(global.Self.ServerPort, PROTOL_HTTP, constants.DefaultCommonName, true)
+	DefaultGRPCListener = newListener(global.Self.GRPCPort, PROTOL_GRPC, constants.DefaultCommonName, false)
 	listeners           = map[int]*Listener{}
+	mcpListeners        = map[int]*Listener{}
 	grpcListeners       = map[int]*Listener{}
 	udpListeners        = map[int]*Listener{}
 	listenerGenerations = map[int]int{}
 	initialListeners    = []*Listener{}
-	initialStarted      = false
+	initialHTTPStarted  = false
+	initialMCPStarted   = false
 	grpcStarted         = false
 	httpStarted         = false
+	mcpStarted          = false
 	httpServer          *http.Server
+	mcpServer           *http.Server
 	serveTCP            func(string, int, net.Listener) error
 	serveXDS            func(*grpc.Server)
 	DefaultLabel        string
@@ -110,11 +136,16 @@ func Init() {
 	global.AddGRPCStopWatcher(OnGRPCStop)
 	global.AddHTTPStartWatcher(OnHTTPStart)
 	global.AddHTTPStopWatcher(OnHTTPStop)
+	global.AddMCPStartWatcher(OnMCPStart)
+	global.AddMCPStopWatcher(OnMCPStop)
 	global.AddTCPServeWatcher(ConfigureTCPServer)
 }
 
 func OnGRPCStart() {
 	grpcStarted = true
+	if httpStarted {
+		AddInitialHTTPListeners(false)
+	}
 }
 
 func OnGRPCStop() {
@@ -128,13 +159,28 @@ func OnHTTPStart(s *http.Server) {
 	httpStarted = true
 	httpServer = s
 	if grpcStarted {
-		AddInitialHTTPListeners()
+		AddInitialHTTPListeners(false)
 	}
 }
 
 func OnHTTPStop() {
 	httpStarted = false
 	httpServer = nil
+}
+
+func OnMCPStart(s *http.Server) {
+	mcpStarted = true
+	mcpServer = s
+	AddInitialHTTPListeners(true)
+}
+
+func OnMCPStop() {
+	mcpStarted = false
+	mcpServer = nil
+}
+
+func HasMCPListeners() bool {
+	return len(mcpListeners) > 0
 }
 
 func ConfigureTCPServer(serve func(listenerID string, port int, listener net.Listener) error) {
@@ -162,41 +208,45 @@ func AddInitialGRPCListeners() {
 	}
 }
 
-func AddInitialHTTPListeners() {
-	if !initialStarted {
+func AddInitialHTTPListeners(mcp bool) {
+	if mcp && !initialMCPStarted || !mcp && !initialHTTPStarted {
 		time.Sleep(1 * time.Second)
 		for _, l := range initialListeners {
-			if l.IsHTTP {
+			if (l.IsMCP && mcp) || (!l.IsMCP && l.IsHTTP && !mcp) {
 				addOrUpdateListener(l)
 			}
 		}
-		initialStarted = true
+		if mcp {
+			initialMCPStarted = true
+		} else {
+			initialHTTPStarted = true
+		}
 	}
 }
 
 func (l *Listener) assignProtocol() {
-	isHTTP := strings.EqualFold(l.Protocol, "http")
-	isHTTPS := strings.EqualFold(l.Protocol, "https")
+	isHTTP := strings.EqualFold(l.Protocol, PROTOL_HTTP)
+	isHTTPS := strings.EqualFold(l.Protocol, PROTOL_HTTPS)
 	isHTTP1 := strings.EqualFold(l.Protocol, "http1")
 	isHTTPS1 := strings.EqualFold(l.Protocol, "https1")
-	isGRPC := strings.EqualFold(l.Protocol, "grpc")
+	isGRPC := strings.EqualFold(l.Protocol, PROTOL_GRPC)
 	isGRPCS := strings.EqualFold(l.Protocol, "grpcs")
-	isXDS := strings.EqualFold(l.Protocol, "xds")
-	isJSONRPC := strings.EqualFold(l.Protocol, "jsonrpc")
+	isXDS := strings.EqualFold(l.Protocol, PROTOL_XDS)
+	isJSONRPC := strings.EqualFold(l.Protocol, PROTOL_JSONRPC)
 	isJSONRPCS := strings.EqualFold(l.Protocol, "jsonrpcs")
-	isMCP := strings.EqualFold(l.Protocol, "mcp")
+	isMCP := strings.EqualFold(l.Protocol, PROTOL_MCP)
 	isMCPS := strings.EqualFold(l.Protocol, "mcps")
-	isUDP := strings.EqualFold(l.Protocol, "udp")
-	isTCPS := strings.EqualFold(l.Protocol, "tcps") || strings.EqualFold(l.Protocol, "tls")
+	isUDP := strings.EqualFold(l.Protocol, PROTOL_UDP)
+	isTCPS := strings.EqualFold(l.Protocol, PROTOL_TLS)
 
 	if isHTTP1 || isHTTPS1 {
 		if isHTTPS1 {
-			l.L8Proto = "https"
-			l.Protocol = "https"
+			l.L8Proto = PROTOL_HTTPS
+			l.Protocol = PROTOL_HTTPS
 			l.TLS = true
 		} else {
-			l.L8Proto = "http"
-			l.Protocol = "http"
+			l.L8Proto = PROTOL_HTTP
+			l.Protocol = PROTOL_HTTP
 		}
 		l.IsHTTP = true
 		l.IsHTTP2 = false
@@ -205,44 +255,44 @@ func (l *Listener) assignProtocol() {
 		l.IsHTTP = true
 		l.IsHTTP2 = true
 		if isHTTPS {
-			l.L8Proto = "h2"
+			l.L8Proto = PROTOL_H2
 		} else {
-			l.L8Proto = "h2c"
+			l.L8Proto = PROTOL_H2C
 		}
 	} else if isGRPC || isGRPCS {
 		if isGRPCS {
 			l.TLS = true
 		}
-		l.L8Proto = "grpc"
-		l.Protocol = "grpc"
+		l.L8Proto = PROTOL_GRPC
+		l.Protocol = PROTOL_GRPC
 		l.IsGRPC = true
 	} else if isXDS {
-		l.L8Proto = "xds"
-		l.Protocol = "grpc"
+		l.L8Proto = PROTOL_XDS
+		l.Protocol = PROTOL_GRPC
 		l.IsGRPC = true
 		l.IsXDS = true
 	} else if isJSONRPC || isJSONRPCS || isMCP || isMCPS {
 		if isJSONRPCS || isMCPS {
-			l.Protocol = "https"
+			l.Protocol = PROTOL_HTTPS
 			l.TLS = true
 		} else {
-			l.Protocol = "http"
+			l.Protocol = PROTOL_HTTP
 		}
 		if isMCP || isMCPS {
-			l.L8Proto = "mcp"
+			l.L8Proto = PROTOL_MCP
 		} else {
-			l.L8Proto = "jsonrpc"
+			l.L8Proto = PROTOL_JSONRPC
 		}
 		l.IsHTTP = true
 		l.IsHTTP2 = true
 		l.IsJSONRPC = true
 		l.IsMCP = isMCP || isMCPS
 	} else if isUDP {
-		l.L8Proto = "udp"
+		l.L8Proto = PROTOL_UDP
 		l.IsUDP = true
 	} else {
-		l.L8Proto = "tcp"
-		l.Protocol = "tcp"
+		l.L8Proto = PROTOL_TCP
+		l.Protocol = PROTOL_TCP
 		l.IsTCP = true
 		l.TLS = isTCPS
 	}
@@ -255,41 +305,68 @@ func (l *Listener) assignProtocol() {
 }
 
 func AddInitialListeners(portList []string) {
-	ports := map[int]bool{}
+	existing := map[int]bool{}
+	l := createPortListener(global.Self.MCPPort, PROTOL_MCP, constants.DefaultCommonName, existing)
+	if l != nil {
+		listenersLock.Lock()
+		listeners[l.Port] = l
+		listenersLock.Unlock()
+	}
 	for i, p := range portList {
 		portInfo := strings.Split(p, "/")
 		if port, err := strconv.Atoi(portInfo[0]); err == nil && port > 0 && port <= 65535 {
-			if !ports[port] {
-				protocol := "http"
-				cn := constants.DefaultCommonName
+			if i == 0 {
+				global.Self.ServerPort = port
+				DefaultListener.Port = port
+			} else {
+				protocol := ""
 				if len(portInfo) > 1 && portInfo[1] != "" {
 					protocol = strings.ToLower(portInfo[1])
 				}
+				cn := constants.DefaultCommonName
 				if len(portInfo) > 2 && portInfo[2] != "" {
 					cn = strings.ToLower(portInfo[2])
 				}
-				ports[port] = true
-				if i == 0 {
-					global.Self.ServerPort = port
-					DefaultListener.Port = port
-				} else {
-					l := newListener(port, protocol, cn, true)
-					l.Protocol = protocol
-					if protocol == "" {
-						l.Protocol = "tcp"
-					}
-					l.assignProtocol()
+				l := createPortListener(port, protocol, cn, existing)
+				if l != nil {
 					listenersLock.Lock()
 					initialListeners = append(initialListeners, l)
 					listenersLock.Unlock()
 				}
-			} else {
-				log.Fatalf("Error: Duplicate port [%d]\n", port)
 			}
 		} else {
 			log.Fatalf("Error: Invalid port [%d]\n", port)
 		}
 	}
+}
+
+func createPortListener(port int, protocol, cn string, existing map[int]bool) *Listener {
+	if !existing[port] {
+		existing[port] = true
+		l := newListener(port, protocol, cn, true)
+		if protocol == "" {
+			protocol = "tcp"
+		}
+		l.Protocol = protocol
+		l.assignProtocol()
+		return l
+	} else {
+		log.Fatalf("Error: Duplicate port [%d]\n", port)
+	}
+	return nil
+}
+
+func (l *Listener) serveMCP() {
+	go func() {
+		msg := fmt.Sprintf("Starting MCP Listener [%s]", l.ListenerID)
+		if l.TLS {
+			msg += fmt.Sprintf(" With TLS [CN: %s]", l.CommonName)
+		}
+		log.Println(msg)
+		if err := mcpServer.Serve(l.Listener); err != nil {
+			log.Printf("MCP Listener [%d]: %s", l.Port, err.Error())
+		}
+	}()
 }
 
 func (l *Listener) serveHTTP() {
@@ -300,7 +377,7 @@ func (l *Listener) serveHTTP() {
 		}
 		log.Println(msg)
 		if err := httpServer.Serve(l.Listener); err != nil {
-			log.Printf("Listener [%d]: %s", l.Port, err.Error())
+			log.Printf("HTTP Listener [%d]: %s", l.Port, err.Error())
 		}
 	}()
 }
@@ -406,7 +483,6 @@ func (l *Listener) InitListener() bool {
 			return false
 		}
 	}
-	return false
 }
 
 func (l *Listener) openListener(serve bool) bool {
@@ -416,9 +492,11 @@ func (l *Listener) openListener(serve bool) bool {
 		listenerGenerations[l.Port] = listenerGenerations[l.Port] + 1
 		l.Generation = listenerGenerations[l.Port]
 		l.ListenerID = fmt.Sprintf("%d-%d", l.Port, l.Generation)
-		log.Printf("Opening [%s] listener [%s] on port [%d].", l.Protocol, l.ListenerID, l.Port)
+		log.Printf("Opening [%s] listener [%s] on port [%d].", l.L8Proto, l.ListenerID, l.Port)
 		if serve {
-			if l.IsHTTP {
+			if l.IsMCP {
+				l.serveMCP()
+			} else if l.IsHTTP {
 				l.serveHTTP()
 			} else if l.IsGRPC {
 				l.serveGRPC()
@@ -600,9 +678,7 @@ func addOrUpdateListener(l *Listener) (int, string) {
 	listenersLock.RUnlock()
 	if exists {
 		if l.reopenListener() {
-			listenersLock.Lock()
-			listeners[l.Port] = l
-			listenersLock.Unlock()
+			l.store()
 			msg = fmt.Sprintf("Listener %d already present, restarted.", l.Port)
 			events.SendEventJSON("Listener Updated", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
 		} else {
@@ -613,9 +689,7 @@ func addOrUpdateListener(l *Listener) (int, string) {
 	} else {
 		if l.Open {
 			if l.openListener(true) {
-				listenersLock.Lock()
-				listeners[l.Port] = l
-				listenersLock.Unlock()
+				l.store()
 				msg = fmt.Sprintf("Listener %d added and opened.", l.Port)
 				events.SendEventJSON("Listener Added", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
 			} else {
@@ -624,9 +698,7 @@ func addOrUpdateListener(l *Listener) (int, string) {
 				events.SendEventJSON("Listener Added", l.HostLabel, map[string]interface{}{"listener": l, "status": msg})
 			}
 		} else {
-			listenersLock.Lock()
-			listeners[l.Port] = l
-			listenersLock.Unlock()
+			l.store()
 			msg = fmt.Sprintf("Listener %d added.", l.Port)
 			events.SendEventJSON("Listener Added", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
 		}
@@ -637,6 +709,15 @@ func addOrUpdateListener(l *Listener) (int, string) {
 		udpListeners[l.Port] = l
 	}
 	return errorCode, msg
+}
+
+func (l *Listener) store() {
+	listenersLock.Lock()
+	defer listenersLock.Unlock()
+	listeners[l.Port] = l
+	if l.IsMCP {
+		mcpListeners[l.Port] = l
+	}
 }
 
 func addListenerCertOrKey(w http.ResponseWriter, r *http.Request, cert bool) {
