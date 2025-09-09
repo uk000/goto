@@ -66,3 +66,17 @@ func (l *ListArg) SetAt(index int, value string) error {
 func (p *Pair) String() string {
 	return fmt.Sprintf("%+v: %+v", p.Left, p.Right)
 }
+
+func (p *Pair) LeftS() string {
+	if s, ok := p.Left.(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%s", p.Left)
+}
+
+func (p *Pair) RightS() string {
+	if s, ok := p.Right.(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%s", p.Right)
+}

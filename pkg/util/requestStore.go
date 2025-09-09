@@ -68,6 +68,7 @@ type RequestStore struct {
 	RequestQuery            string
 	RequestMethod           string
 	RequestProtcol          string
+	RequestedMCPTool        string
 	DownstreamAddr          string
 	UpstreamAddr            string
 	ServerName              string
@@ -111,7 +112,7 @@ func GetRequestStore(r *http.Request) *RequestStore {
 	return rs
 }
 
-func GetRequestStoreForContext(ctx context.Context) (context.Context, *RequestStore) {
+func GetRequestStoreFromContext(ctx context.Context) (context.Context, *RequestStore) {
 	if val := ctx.Value(RequestStoreKey); val != nil {
 		return ctx, val.(*RequestStore)
 	}

@@ -6,15 +6,13 @@ import (
 	"fmt"
 	"goto/pkg/global"
 	"goto/pkg/proxy"
-	"goto/pkg/server/conn"
-	"goto/pkg/server/listeners"
 	"goto/pkg/server/middleware"
 	"goto/pkg/server/response/payload"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +34,8 @@ type MCPServer struct {
 	Stateless         bool                            `json:"stateless"`
 	Enabled           bool                            `json:"enabled"`
 	URI               string                          `json:"uri,omitempty"`
+	SSEURI            string                          `json:"sseURI,omitempty"`
+	ToolsByURI        map[string]*MCPTool             `json:"toolsByURI,omitempty"`
 	URIRegex          string                          `json:"uriRegex,omitempty"`
 	uriRegexp         *regexp.Regexp
 	server            *gomcp.Server
@@ -90,7 +90,7 @@ var (
 	DefaultStatelessServer *MCPServer
 	DefaultStatefulServer  *MCPServer
 	PortsServers           = map[int]*PortServers{}
-	ServerRoutes           = map[string]*MCPServer{}
+	ServerRoutes           = map[string]*types.Pair{}
 	AllComponents          = map[string]map[string]map[string]IMCPComponent{}
 	Kinds                  = []string{KindTools, KindPrompts, KindResources, KindTemplates}
 	Middleware             = middleware.NewMiddleware("mcpserver", nil, nil)
@@ -150,6 +150,7 @@ func NewMCPServer(p *MCPServerPayload) *MCPServer {
 			Version: p.Version,
 		},
 		Tools:             map[string]*MCPTool{},
+		ToolsByURI:        map[string]*MCPTool{},
 		Prompts:           map[string]*MCPPrompt{},
 		Resources:         map[string]*MCPResource{},
 		ResourceTemplates: map[string]*MCPResourceTemplate{},
@@ -225,13 +226,20 @@ func NewMCPServer(p *MCPServerPayload) *MCPServer {
 func SetServerRoute(uri string, server *MCPServer) {
 	lock.Lock()
 	defer lock.Unlock()
-	sseURI := ""
+	uri = strings.ToLower(uri)
 	if strings.Contains(uri, "/mcp") {
 		parts := strings.Split(uri, "/mcp")
-		sseURI = parts[0] + "/mcp/sse" + parts[1]
+		server.SSEURI = parts[0] + "/mcp/sse" + parts[1]
 	}
-	ServerRoutes[uri] = server
-	ServerRoutes[sseURI] = server
+	pair := &types.Pair{Left: server.Name, Right: ""}
+	ServerRoutes[uri] = pair
+	ServerRoutes[server.SSEURI] = pair
+	for tool := range server.Tools {
+		tool = strings.ToLower(tool)
+		pair := &types.Pair{Left: server.Name, Right: tool}
+		ServerRoutes[uri+"/"+tool] = pair
+		ServerRoutes[server.SSEURI+"/"+tool] = pair
+	}
 }
 
 func GetMCPServerNames() map[int]map[string][]string {
@@ -351,6 +359,7 @@ func GetAllComponents(kind string) map[string]map[string]IMCPComponent {
 }
 
 func (ps *PortServers) GetMCPServer(name string) *MCPServer {
+	name = strings.ToLower(name)
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
 	return ps.Servers[name]
@@ -512,9 +521,16 @@ func (m *MCPServer) AddTool(tool *MCPTool) {
 	m.server.AddTool(tool.Tool, tool.Handle)
 	tool.Server = m
 	tool.SetName(tool.Tool.Name)
+	if tool.URI == "" {
+		tool.URI = strings.ToLower("/" + tool.Name)
+	}
 	tool.BuildLabel()
 	m.lock.Lock()
 	m.Tools[tool.Tool.Name] = tool
+	m.ToolsByURI[tool.URI] = tool
+	pair := &types.Pair{Left: m.Name, Right: tool}
+	ServerRoutes[m.URI+"/"+tool.URI] = pair
+	ServerRoutes[m.SSEURI+"/"+tool.URI] = pair
 	m.lock.Unlock()
 	if m.ps != nil {
 		m.ps.addComponentToAll(tool, m.Name)
@@ -727,255 +743,4 @@ func (m *MCPServer) getOrSetSessionContext(r *http.Request) (session *SessionCon
 		}
 	}
 	return
-}
-
-func getPortAndMCPServerNameFromURI(uri string) (port int, name string) {
-	isMCP := strings.Contains(uri, "/mcp")
-	isSSE := strings.Contains(uri, "/sse")
-	if !isMCP && !isSSE {
-		return
-	}
-	if isSSE && isMCP {
-		uri = strings.ReplaceAll(uri, "/sse", "")
-		isSSE = false
-	}
-	var parts []string
-	if isSSE {
-		parts = strings.Split(uri, "/sse")
-	} else {
-		parts = strings.Split(uri, "/mcp")
-	}
-	if len(parts) > 1 {
-		subParts := strings.Split(parts[0], "=")
-		if len(subParts) > 1 {
-			port, _ = strconv.Atoi(subParts[1])
-		}
-		subParts = strings.Split(parts[1], "/")
-		if len(subParts) > 1 {
-			name = subParts[1]
-		}
-	}
-	return
-}
-
-func findServerForURI(uri string) (matchedURI string, server *MCPServer) {
-	log.Printf("Searching for URI [%s] in Server Routes: %+v\n", uri, ServerRoutes)
-	server = ServerRoutes[uri]
-	if server == nil {
-		for uri2, server2 := range ServerRoutes {
-			if server2.uriRegexp != nil {
-				if server2.uriRegexp.MatchString(uri) {
-					matchedURI = uri2
-					server = server2
-					break
-				}
-			}
-		}
-	} else {
-		matchedURI = uri
-	}
-	log.Printf("Matced URI = [%s] vs original URI: %s\n", matchedURI, uri)
-	return
-}
-
-func getServer(r *http.Request) *gomcp.Server {
-	var server *MCPServer
-	port := util.GetRequestOrListenerPortNum(r)
-	defer func() {
-		log.Println("-------- MCP Request Details --------")
-		util.PrintRequest(r)
-		if server != nil {
-			rs := util.GetRequestStore(r)
-			rs.ResponseWriter.Header().Add("Goto-Server", server.ID)
-		} else {
-			log.Printf("Not handling MCP request on port [%d]", port)
-		}
-		server.getOrSetSessionContext(r)
-	}()
-	uri := r.RequestURI
-	uri, server = findServerForURI(uri)
-	if server != nil {
-		log.Printf("Server [%s] will handle MCP request based on URI match [%s] on port [%d]", server.Name, uri, port)
-		return server.server
-	}
-	ps := PortsServers[port]
-	if ps == nil || len(ps.Servers) == 0 {
-		log.Printf("Falling back to Default MCP Server [%s] on port [%d]", DefaultStatelessServer.Name, port)
-		return DefaultStatelessServer.server
-	}
-	_, serverName := getPortAndMCPServerNameFromURI(r.RequestURI)
-	server = ps.Servers[serverName]
-	if server == nil {
-		server = ps.DefaultServer
-		log.Printf("MCP Server [%s] not found on port [%d], using PortDefault server [%s]", serverName, port, server.Name)
-	}
-	if !server.Enabled {
-		log.Printf("MCP Server [%s] is disabled on port [%d]. Falling back to Default MCP Server [%s].", server.Name, port, DefaultStatelessServer.Name)
-		server = DefaultStatelessServer
-	}
-	return server.server
-}
-
-func (m *MCPServer) Serve(w http.ResponseWriter, r *http.Request, handler http.Handler) {
-	sessionID := r.Header.Get(HeaderMCPSessionID)
-	session := m.GetSessionContext(sessionID)
-	switch r.Method {
-	case "DELETE":
-		log.Println("-------- MCPServer.Serve: Serving DELETE --------")
-		if session != nil {
-			handler.ServeHTTP(w, r)
-			log.Println("-------- MCPServer.Serve: DELETE closing session --------")
-			close(session.finished)
-		}
-	case "GET":
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-		r = r.WithContext(ctx)
-		rc := make(chan bool, 1)
-		requestFinished := false
-		go func() {
-			log.Println("-------- MCPServer.Serve: Serving GET --------")
-			handler.ServeHTTP(w, r)
-			log.Println("-------- MCPServer.Serve: GET returned --------")
-			close(rc)
-			log.Println("-------- MCPServer.Serve: GET notified request channel --------")
-		}()
-		if session != nil {
-			select {
-			case <-rc:
-				requestFinished = true
-				log.Println("-------- MCPServer.Serve: Request channel finished --------")
-			case <-session.finished:
-				log.Println("-------- MCPServer.Serve: Session channel closed --------")
-			}
-			if !requestFinished {
-				log.Println("-------- MCPServer.Serve: Request not finished, marking contxt done --------")
-				ctx.Done()
-			} else {
-				log.Println("-------- MCPServer.Serve: Request finished. All GOOD --------")
-			}
-		} else {
-			<-rc
-			log.Println("-------- MCPServer.Serve: Request finished. All GOOD --------")
-		}
-	default:
-		log.Println("-------- MCPServer.Serve: Serving Normal --------")
-		handler.ServeHTTP(w, r)
-	}
-	log.Println("-------- MCPServer.Serve: Finished --------")
-}
-
-func MCPHybridHandler(server *MCPServer) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, r, rs := util.WithRequestStore(r)
-		port := util.GetRequestOrListenerPortNum(r)
-		conn.SendGotoHeaders(w, r)
-		//util.CopyHeaders("Request", r, w, r.Header, true, true, false)
-		rs.ResponseWriter = w
-		hasSSE := strings.Contains(r.RequestURI, "/sse")
-		hasMCP := strings.Contains(r.RequestURI, "/mcp")
-		// w, irw := intercept.WithIntercept(r, w)
-		if hasMCP && !hasSSE {
-			log.Printf("Port [%d] Request [%s] will be served by [%s]/stream", port, r.RequestURI, server.Name)
-			// w.Header().Set(constants.HeaderContentType, "text/event-stream")
-			// w.Header().Set(constants.HeaderCacheControl, "no-cache")
-			// w.Header().Set(constants.HeaderTransferEncoding, "chunked")
-			server.Serve(w, r, server.streamHTTPHandler)
-		} else {
-			log.Printf("Port [%d] Request [%s] will be served by [%s]/sse", port, r.RequestURI, server.Name)
-			// w.Header().Set("Connection", "keep-alive")
-			// w.Header().Set("Access-Control-Allow-Origin", "*")
-			// w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE")
-			// w.Header().Set("Access-Control-Allow-Headers", "Cache-Control, Content-Type, Authorization")
-			// w.Header().Set(constants.HeaderContentType, "text/event-stream")
-			// w.Header().Set(constants.HeaderCacheControl, "no-cache")
-			// w.Header().Set(constants.HeaderTransferEncoding, "chunked")
-			r = r.WithContext(util.SetSSE(r.Context()))
-			server.Serve(w, r, server.sseHandler)
-		}
-		rs.RequestServed = true
-		// log.Println(string(irw.Data))
-		// irw.Proceed()
-	})
-}
-
-func HandleMCPDefault(w http.ResponseWriter, r *http.Request) {
-	log.Println("-------- HandleMCPDefault: MCP Request Details --------")
-	util.PrintRequest(r)
-	l := listeners.GetCurrentListener(r)
-	rs := util.GetRequestStore(r)
-	hasSSE := strings.Contains(r.RequestURI, "/sse")
-	hasMCP := strings.Contains(r.RequestURI, "/mcp")
-	isStateful := strings.Contains(r.RequestURI, "/stateful")
-	if hasMCP && !hasSSE {
-		if isStateful {
-			log.Printf("Port [%d] Request [%s] will be served by DefaultStatefulServer/stream", l.Port, r.RequestURI)
-			DefaultStatefulServer.Serve(w, r, DefaultStatefulServer.streamHTTPHandler)
-		} else {
-			log.Printf("Port [%d] Request [%s] will be served by DefaultStatelessServer/stream", l.Port, r.RequestURI)
-			// DefaultServer.streamHTTPHandler.ServeHTTP(w, r)
-			DefaultStatelessServer.Serve(w, r, DefaultStatelessServer.streamHTTPHandler)
-		}
-	} else {
-		if isStateful {
-			log.Printf("Port [%d] Request [%s] will be served by DefaultStatefulServer/SSE", l.Port, r.RequestURI)
-			DefaultStatefulServer.Serve(w, r, DefaultStatefulServer.sseHandler)
-		} else {
-			log.Printf("Port [%d] Request [%s] will be served by DefaultStatelessServer/SSE", l.Port, r.RequestURI)
-			// DefaultServer.streamHTTPHandler.ServeHTTP(w, r)
-			DefaultStatelessServer.Serve(w, r, DefaultStatelessServer.sseHandler)
-		}
-	}
-	rs.RequestServed = true
-}
-
-func HandleMCP(w http.ResponseWriter, r *http.Request) {
-	l := listeners.GetCurrentListener(r)
-	rs := util.GetRequestStore(r)
-	isMCP := l.IsMCP || rs.IsMCP
-	if isMCP && !rs.IsAdminRequest {
-		log.Println("------- MayBe MCP ------")
-		if proxy.WillProxyMCP(l.Port, r) {
-			log.Printf("MCP is configured to proxy on Port [%d]. Skipping MCP processing", l.Port)
-			return
-		}
-		_, server := findServerForURI(r.RequestURI)
-		ps := GetPortMCPServers(l.Port)
-		if server == nil {
-			_, serverName := getPortAndMCPServerNameFromURI(r.RequestURI)
-			server = ps.Servers[serverName]
-		}
-		if server == nil && rs.IsMCP {
-			server = ps.DefaultServer
-			if server == nil {
-				isStateless := strings.Contains(r.RequestURI, "/stateless")
-				if isStateless {
-					server = DefaultStatelessServer
-				} else {
-					server = DefaultStatefulServer
-				}
-			}
-		}
-		if server != nil {
-			log.Printf("Port [%d] Request [%s] will be served by Server [%s] Stateless [%t]", l.Port, r.RequestURI, server.Name, server.Stateless)
-			server.handler.ServeHTTP(w, r)
-			rs.RequestServed = true
-		} else {
-			log.Printf("Port [%d] Request [%s] No server available. Routing to HTTP server", l.Port, r.RequestURI)
-		}
-		log.Println("---- After MayBe MCP ----")
-	} else {
-		log.Printf("Port [%d] Request [%s] skipping MCP processing", l.Port, r.RequestURI)
-	}
-}
-
-func MCPHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rs := util.GetRequestStore(r)
-		//HandleMCPDefault(w, r)
-		HandleMCP(w, r)
-		if !rs.RequestServed {
-			util.HTTPHandler.ServeHTTP(w, r)
-		}
-	})
 }

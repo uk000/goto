@@ -111,7 +111,7 @@ func AddLogMessage(msg string, r *http.Request) {
 }
 
 func LogMessage(ctx context.Context, msg string) {
-	_, rs := GetRequestStoreForContext(ctx)
+	_, rs := GetRequestStoreFromContext(ctx)
 	rs.LogMessages = append(rs.LogMessages, msg)
 }
 

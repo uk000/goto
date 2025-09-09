@@ -387,7 +387,7 @@ func unaryMiddleware(ctx context.Context, req interface{}, info *grpc.UnaryServe
 	if err != nil {
 		util.LogMessage(ctx, fmt.Sprintf("Service/Method [%s]: Error handling unary request: %v", info.FullMethod, err))
 	}
-	_, rs := util.GetRequestStoreForContext(ctx)
+	_, rs := util.GetRequestStoreFromContext(ctx)
 	log.Print(strings.Join(rs.LogMessages, " --> "))
 	return resp, err
 }
@@ -404,7 +404,7 @@ func streamMiddleware(srv interface{}, ss grpc.ServerStream, info *grpc.StreamSe
 	if err != nil {
 		util.LogMessage(ctx, fmt.Sprintf("Service/Method [%s]: Error handling stream: %v", info.FullMethod, err))
 	}
-	_, rs := util.GetRequestStoreForContext(ctx)
+	_, rs := util.GetRequestStoreFromContext(ctx)
 	log.Print(strings.Join(rs.LogMessages, " --> "))
 	return err
 }
