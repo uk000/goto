@@ -34,7 +34,7 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRouteWithPort(mcpapiRouter, "/server/{server}?", getServers, "GET")
 
 	util.AddRouteWithPort(mcpapiRouter, "/servers/add", addServers, "POST")
-
+	util.AddRouteQWithPort(mcpapiRouter, "/servers/{server}/route", setServerRoute, "uri", "POST")
 	util.AddRouteWithPort(mcpapiRouter, "/servers/start", startServer, "POST")
 	util.AddRouteWithPort(mcpapiRouter, "/server/{server}/start", startServer, "POST")
 	util.AddRouteWithPort(mcpapiRouter, "/servers/stop", stopServer, "POST")
@@ -112,9 +112,26 @@ func addServers(w http.ResponseWriter, r *http.Request) {
 		if p.Port <= 0 {
 			p.Port = port
 		}
-		names = append(names, fmt.Sprintf("%s@%d", p.Name, p.Port))
+		names = append(names, fmt.Sprintf("%s (port: %d)", p.Name, p.Port))
 	}
-	msg = fmt.Sprintf("Added MCP Servers [%+v]", names)
+	msg = fmt.Sprintf("Added MCP Servers: %+v", names)
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
+}
+
+func setServerRoute(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	serverName := util.GetStringParamValue(r, "server")
+	uri := util.GetStringParamValue(r, "uri")
+	msg := ""
+	server := mcpserver.GetMCPServer(serverName)
+	if server == nil {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = fmt.Sprintf("MCP Server [%s] not configured on any port", serverName)
+	} else {
+		mcpserver.SetServerRoute(uri, server)
+		msg = fmt.Sprintf("MCP Server [%s] will be served over URI [%s] on port [%d]", serverName, uri, port)
+	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
@@ -213,12 +230,12 @@ func addComponent(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("MCP Server [%s] not configured on any port", serverName)
 	} else {
-		count, err := server.AddComponents(kind, b)
+		names, err := server.AddComponents(kind, b)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			msg = fmt.Sprintf("Failed to add MCP %s to server [%s] on port [%d] with error [%s]", kind, serverName, port, err.Error())
 		} else {
-			msg = fmt.Sprintf("Added %d MCP %s to server [%s] on port [%d]", count, kind, serverName, port)
+			msg = fmt.Sprintf("Added %s to server [%s] on port [%d]: %+v", kind, serverName, port, names)
 		}
 	}
 	fmt.Fprintln(w, msg)

@@ -33,11 +33,12 @@ var (
 	portTunnelRouters     = map[string]*mux.Router{}
 	coRoutersMap          = map[*mux.Router][]*mux.Router{}
 	MatchRouter           *mux.Router
-	QueryParamRegex       = "(\\?.*)?$"
-	GlobRegex             = "(.*)?"
+	URIPrefixRegexParts   = []string{`^(\/port=.*)?`, `((\/)(.*))?(\?.*)?$`}
+	QueryParamRegex       = `(\?.*)?$`
+	GlobRegex             = `(.*)?`
 	fillerRegexp          = regexp.MustCompile("{({[^{}]+?})}|{([^{}]+?)}")
-	optionalPathRegexp    = regexp.MustCompile("(\\/[^{}]+?\\?)")
-	optionalPathKeyRegexp = regexp.MustCompile("(\\/(?:[^\\/{}]+=)?{[^{}]+?}\\?\\??)")
+	optionalPathRegexp    = regexp.MustCompile(`(\/[^{}]+?\?)`)
+	optionalPathKeyRegexp = regexp.MustCompile(`(\/(?:[^\/{}]+=)?{[^{}]+?}\?\??)`)
 )
 
 func InitListenerRouter(root *mux.Router) {

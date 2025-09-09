@@ -21,7 +21,6 @@ import (
 	"strconv"
 
 	mcpclient "goto/pkg/ai/mcp/client"
-	mcpserver "goto/pkg/ai/mcp/server"
 	mcpserverapi "goto/pkg/ai/mcp/server/api"
 	"goto/pkg/client"
 	"goto/pkg/events"
@@ -63,11 +62,10 @@ import (
 
 func init() {
 	middleware.BaseMiddlewares = []*middleware.Middleware{
-		label.Middleware, conn.Middleware, routing.Middleware, mcpserver.Middleware,
-		tunnel.TunnelCountMiddleware, hooks.Middleware,
+		label.Middleware, conn.Middleware, routing.Middleware, hooks.Middleware,
 	}
 	middleware.Middlewares = []*middleware.Middleware{
-		tunnel.Middleware, events.Middleware, metrics.Middleware,
+		tunnel.TunnelCountMiddleware, tunnel.Middleware, events.Middleware, metrics.Middleware,
 		listeners.Middleware, probes.Middleware, registry.Middleware, client.Middleware,
 		k8sYaml.Middleware, k8sApi.Middleware, pipe.Middleware, request.Middleware,
 		proxy.Middleware, response.Middleware, tcp.Middleware, udp.Middleware,

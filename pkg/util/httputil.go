@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/global"
-	"goto/pkg/types"
 	"io"
 	"log"
 	"net"
@@ -44,6 +43,7 @@ var (
 	knownTextMimeTypeRegexp = regexp.MustCompile(".*(text|html|json|yaml|form).*")
 	upgradeRegexp           = regexp.MustCompile("(?i)upgrade")
 	ExcludedHeaders         = map[string]bool{}
+	HTTPHandler             http.Handler
 
 	WillTunnel    func(*http.Request, *RequestStore) bool
 	WillProxyHTTP func(*http.Request, *RequestStore) bool
@@ -66,25 +66,13 @@ func IsSSE(ctx context.Context) bool {
 	return false
 }
 
-func WithHTTPRW(r *http.Request, w http.ResponseWriter) *http.Request {
-	return r.WithContext(context.WithValue(r.Context(), HTTPRWKey, &types.Pair{Left: r, Right: w}))
-}
-
-func GetHTTPRWFromContext(ctx context.Context) (*http.Request, http.ResponseWriter) {
-	if val := ctx.Value(HTTPRWKey); val != nil {
-		pair := val.(*types.Pair)
-		return pair.Left.(*http.Request), pair.Right.(http.ResponseWriter)
-	}
-	return nil, nil
-}
-
-func WithContextHeaders(ctx context.Context, headers map[string]string) context.Context {
+func WithContextHeaders(ctx context.Context, headers map[string][]string) context.Context {
 	return context.WithValue(ctx, HeadersKey, headers)
 }
 
-func GetContextHeaders(ctx context.Context) map[string]string {
+func GetContextHeaders(ctx context.Context) map[string][]string {
 	if val := ctx.Value(HeadersKey); val != nil {
-		return val.(map[string]string)
+		return val.(map[string][]string)
 	}
 	return nil
 }
@@ -338,8 +326,12 @@ func AddHeaderWithSuffixL(header, suffix, value string, headers map[string][]str
 	headers[key] = append(headers[key], value)
 }
 
-func CopyHeadersTo(prefix string, r *http.Request, out map[string][]string, copyHost, copyURI, copyContentType bool) {
-	CopyHeadersWithIgnore(prefix, r, out, nil, ExcludedHeaders, copyHost, copyURI, copyContentType)
+func CopyHeadersWithPrefix(prefix string, in, out map[string][]string) {
+	for h, values := range in {
+		for _, v := range values {
+			AddHeaderWithPrefix(prefix, h, v, out)
+		}
+	}
 }
 
 func CopyHeaders(prefix string, r *http.Request, w http.ResponseWriter, headers http.Header, copyHost, copyURI, copyContentType bool) {

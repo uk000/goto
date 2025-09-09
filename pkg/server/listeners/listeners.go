@@ -99,7 +99,6 @@ var (
 	DefaultListener     = newListener(global.Self.ServerPort, PROTOL_HTTP, constants.DefaultCommonName, true)
 	DefaultGRPCListener = newListener(global.Self.GRPCPort, PROTOL_GRPC, constants.DefaultCommonName, false)
 	listeners           = map[int]*Listener{}
-	mcpListeners        = map[int]*Listener{}
 	grpcListeners       = map[int]*Listener{}
 	udpListeners        = map[int]*Listener{}
 	listenerGenerations = map[int]int{}
@@ -177,10 +176,6 @@ func OnMCPStart(s *http.Server) {
 func OnMCPStop() {
 	mcpStarted = false
 	mcpServer = nil
-}
-
-func HasMCPListeners() bool {
-	return len(mcpListeners) > 0
 }
 
 func ConfigureTCPServer(serve func(listenerID string, port int, listener net.Listener) error) {
@@ -349,6 +344,8 @@ func createPortListener(port int, protocol, cn string, existing map[int]bool) *L
 		}
 		l.Protocol = protocol
 		l.assignProtocol()
+		l.Label = util.BuildListenerLabel(l.Port)
+		l.HostLabel = util.GetHostLabel()
 		return l
 	} else {
 		log.Fatalf("Error: Duplicate port [%d]\n", port)
@@ -715,9 +712,6 @@ func (l *Listener) store() {
 	listenersLock.Lock()
 	defer listenersLock.Unlock()
 	listeners[l.Port] = l
-	if l.IsMCP {
-		mcpListeners[l.Port] = l
-	}
 }
 
 func addListenerCertOrKey(w http.ResponseWriter, r *http.Request, cert bool) {

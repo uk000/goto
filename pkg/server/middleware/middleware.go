@@ -27,9 +27,12 @@ import (
 )
 
 var (
-	MiddlewareChain = []MiddlewareFunc{}
-	BaseMiddlewares = []*Middleware{}
-	Middlewares     = []*Middleware{}
+	BaseMiddlewares         = []*Middleware{}
+	Middlewares             = []*Middleware{}
+	MiddlewareGRPCChainHead http.Handler
+	BaseRoutingChainHead    http.Handler
+	MiddlewareChainHead     http.Handler
+	middlewareRouter        *mux.Router
 )
 
 type MiddlewareFunc func(http.ResponseWriter, *http.Request)
@@ -67,10 +70,18 @@ func AddRoutes(r *mux.Router, parent *mux.Router, root *mux.Router, handlers ...
 	}
 }
 
-func BaseHandlerFunc() http.Handler {
+func BaseHandlerFunc(getHandler func() http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		if getHandler != nil {
+			getHandler().ServeHTTP(w, r)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
 	})
+}
+
+func BaseMiddlewareHandler() http.Handler {
+	return http.HandlerFunc(BaseRoutingChainHead.ServeHTTP)
 }
 
 func LinkBaseMiddlewareChain(r *mux.Router) {
@@ -82,10 +93,21 @@ func LinkBaseMiddlewareChain(r *mux.Router) {
 			r.Use(m.MiddlewareHandler)
 		}
 	}
+	middlewareRouter = r
+	linkToGRPCChain := BaseHandlerFunc(func() http.Handler { return MiddlewareChainHead })
+	linkToRouer := BaseHandlerFunc(func() http.Handler { return middlewareRouter })
+	for i := len(BaseMiddlewares) - 1; i >= 0; i-- {
+		m := BaseMiddlewares[i]
+		if m.MiddlewareHandler != nil {
+			linkToGRPCChain = m.MiddlewareHandler(linkToGRPCChain)
+			MiddlewareGRPCChainHead = linkToGRPCChain
+			linkToRouer = m.MiddlewareHandler(linkToRouer)
+			BaseRoutingChainHead = linkToRouer
+		}
+	}
 }
 
 func LinkMiddlewareChain(r *mux.Router) {
-	handler := BaseHandlerFunc()
 	for _, m := range Middlewares {
 		if m.SetRoutes != nil {
 			m.SetRoutes(r, nil, r)
@@ -94,11 +116,11 @@ func LinkMiddlewareChain(r *mux.Router) {
 			r.Use(m.MiddlewareHandler)
 		}
 	}
+	handler := BaseHandlerFunc(nil)
 	for i := len(Middlewares) - 1; i >= 0; i-- {
 		m := Middlewares[i]
 		if m.MiddlewareHandler != nil {
-			handler = m.MiddlewareHandler(handler)
-			MiddlewareChain = append([]MiddlewareFunc{handler.ServeHTTP}, MiddlewareChain...)
+			MiddlewareChainHead = m.MiddlewareHandler(handler)
 		}
 	}
 }
@@ -111,7 +133,7 @@ func InvokeMiddlewareChainForGRPC(ctx context.Context, port int, method, host, u
 	r = r.WithContext(ctx)
 	ctx, r, _ = util.WithRequestStore(r)
 	w, irw := intercept.WithIntercept(r, wa)
-	MiddlewareChain[0](w, r)
+	MiddlewareGRPCChainHead.ServeHTTP(w, r)
 	irw.Proceed()
 	return ra, wa
 }

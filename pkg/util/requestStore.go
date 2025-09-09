@@ -78,6 +78,7 @@ type RequestStore struct {
 	TrafficDetails          []string
 	LogMessages             []string
 	InterceptResponseWriter interface{}
+	HeadersInterceptRW      interface{}
 	TunnelCount             int
 	RequestedTunnels        []string
 	TunnelEndpoints         interface{}
@@ -95,7 +96,6 @@ var (
 	IgnoredRequestKey   = &ContextKey{Key: "ignoredRequest"}
 	ConnectionKey       = &ContextKey{Key: "connection"}
 	ProtocolKey         = &ContextKey{Key: "protocol"}
-	HTTPRWKey           = &ContextKey{Key: "httprw"}
 	HeadersKey          = &ContextKey{Key: "headers"}
 	DefaultRequestStore = &RequestStore{}
 )
@@ -166,7 +166,7 @@ func PopulateRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	rs.RequestMethod = r.Method
 	rs.RequestProtcol = r.Proto
 	rs.RequestHeaders = r.Header
-	rs.IsMCP = strings.Contains(r.RequestURI, "/mcp") || strings.Contains(r.RequestURI, "/sse") || strings.Contains(r.RequestURI, "/.well-known") || strings.Contains(r.RequestURI, "/register")
+	rs.IsMCP = strings.Contains(r.RequestURI, "/mcp/") || strings.HasSuffix(r.RequestURI, "/mcp") || strings.Contains(r.RequestURI, "/sse") || strings.Contains(r.RequestURI, "/.well-known") || strings.Contains(r.RequestURI, "/register")
 	return ctx, rs
 }
 

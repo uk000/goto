@@ -19,6 +19,7 @@ package constants
 const (
 	HeaderViaGoto                   = "Via-Goto"
 	HeaderGotoHost                  = "Goto-Host"
+	HeaderGotoListener              = "Goto-Listener"
 	HeaderGotoTunnelHost            = "Goto-Tunnel-Host"
 	HeaderViaGotoTunnel             = "Via-Goto-Tunnel"
 	HeaderGotoTunnel                = "Goto-Tunnel"
@@ -70,6 +71,8 @@ const (
 	HeaderResponseContentType = "ResponseContent-Type"
 	HeaderContentTypeLower    = "content-type"
 	HeaderContentLength       = "Content-Length"
+	HeaderCacheControl        = "Cache-Control"
+	HeaderTransferEncoding    = "Transfer-Encoding"
 	HeaderAuthority           = ":authority"
 	ContentTypeJSON           = "application/json"
 	ContentTypeYAML           = "application/yaml"

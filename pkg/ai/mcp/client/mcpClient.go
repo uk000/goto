@@ -28,17 +28,17 @@ type MCPClientPayload struct {
 }
 
 type ToolCall struct {
-	Tool      string            `json:"tool"`
-	URL       string            `json:"url"`
-	SSEURL    string            `json:"sseURL"`
-	Server    string            `json:"server,omitempty"`
-	Authority string            `json:"authority,omitempty"`
-	ForceSSE  bool              `json:"forceSSE,omitempty"`
-	Neat      bool              `json:"neat,omitempty"`
-	Delay     string            `json:"delay,omitempty"`
-	Args      map[string]any    `json:"args,omitempty"`
-	Headers   map[string]string `json:"headers,omitempty"`
-	delayD    time.Duration     `json:"-"`
+	Tool      string              `json:"tool"`
+	URL       string              `json:"url"`
+	SSEURL    string              `json:"sseURL"`
+	Server    string              `json:"server,omitempty"`
+	Authority string              `json:"authority,omitempty"`
+	ForceSSE  bool                `json:"forceSSE,omitempty"`
+	Neat      bool                `json:"neat,omitempty"`
+	Delay     string              `json:"delay,omitempty"`
+	Args      map[string]any      `json:"args,omitempty"`
+	Headers   map[string][]string `json:"headers,omitempty"`
+	delayD    time.Duration       `json:"-"`
 }
 
 type MCPSession struct {
@@ -245,7 +245,7 @@ func (s *MCPSession) CallTool(tc *ToolCall, args map[string]any) (map[string]any
 	s.Hops.Add(fmt.Sprintf("%s [%s] calling tool [%s] with sse[%t] on url [%s]", s.CallerId, s.Operation, tc.Tool, s.SSE, tc.URL))
 	ctx := context.Background()
 	if tc.Headers != nil {
-		tc.Headers["Host"] = tc.Authority
+		tc.Headers["Host"] = []string{tc.Authority}
 		ctx = util.WithContextHeaders(ctx, tc.Headers)
 	}
 	msg := ""
@@ -314,15 +314,15 @@ func (s *MCPSession) Close() {
 }
 
 func (s *MCPSession) ListTools() (*gomcp.ListToolsResult, error) {
-	return s.session.ListTools(util.WithContextHeaders(context.Background(), map[string]string{"Host": s.Authority}), &gomcp.ListToolsParams{})
+	return s.session.ListTools(util.WithContextHeaders(context.Background(), map[string][]string{"Host": []string{s.Authority}}), &gomcp.ListToolsParams{})
 }
 
 func (s *MCPSession) ListPrompts() (*gomcp.ListPromptsResult, error) {
-	return s.session.ListPrompts(util.WithContextHeaders(context.Background(), map[string]string{"Host": s.Authority}), &gomcp.ListPromptsParams{})
+	return s.session.ListPrompts(util.WithContextHeaders(context.Background(), map[string][]string{"Host": []string{s.Authority}}), &gomcp.ListPromptsParams{})
 }
 
 func (s *MCPSession) ListResources() (*gomcp.ListResourcesResult, error) {
-	return s.session.ListResources(util.WithContextHeaders(context.Background(), map[string]string{"Host": s.Authority}), &gomcp.ListResourcesParams{})
+	return s.session.ListResources(util.WithContextHeaders(context.Background(), map[string][]string{"Host": []string{s.Authority}}), &gomcp.ListResourcesParams{})
 }
 
 func (c *MCPClient) ElicitationHandler(ctx context.Context, req *gomcp.ElicitRequest) (result *gomcp.ElicitResult, err error) {
@@ -452,10 +452,10 @@ func (c *MCPClient) ProgressNotificationHandler(ctx context.Context, req *gomcp.
 func (c *MCPClient) Intercept(r *http.Request) {
 	if headers := util.GetContextHeaders(r.Context()); headers != nil {
 		if len(headers["Host"]) > 0 {
-			r.Host = headers["Host"]
+			r.Host = headers["Host"][0]
 		}
 		for k, v := range headers {
-			r.Header.Add(k, v)
+			r.Header.Add(k, v[0])
 		}
 	}
 }

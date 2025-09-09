@@ -18,7 +18,6 @@ package intercept
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"goto/pkg/util"
 	"io"
@@ -47,17 +46,10 @@ type InterceptResponseWriter struct {
 	BodyLength int
 }
 
-type TeeResponseWriter struct {
+type HeaderInterceptResponseWriter struct {
 	http.ResponseWriter
-	http.Hijacker
-	http.Flusher
-	conn        net.Conn
-	StatusCode  int
-	Data        bytes.Buffer
-	Headers     http.Header
-	Hijacked    bool
-	Chunked     bool
-	HeadersSent bool
+	rs      *util.RequestStore
+	Headers http.Header
 }
 
 type FlushWriter struct {
@@ -188,7 +180,7 @@ func (rw *InterceptResponseWriter) SetChunked() {
 }
 
 func (rw *InterceptResponseWriter) Proceed() {
-	if !rw.Hijacked && !rw.Chunked && rw.Hold {
+	if rw.Hijacked || rw.Hold || !rw.Chunked {
 		if rw.StatusCode <= 0 {
 			rw.StatusCode = 200
 			rw.rs.StatusCode = rw.StatusCode
@@ -228,4 +220,25 @@ func WithIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter,
 		w = irw
 	}
 	return w, irw
+}
+
+func WithHeadersIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *HeaderInterceptResponseWriter) {
+	var irw *HeaderInterceptResponseWriter
+	if !util.IsKnownNonTraffic(r) {
+		irw = NewHeadersInterceptResponseWriter(w)
+		r.Context().Value(util.RequestStoreKey).(*util.RequestStore).HeadersInterceptRW = irw
+		w = irw
+	}
+	return w, irw
+}
+
+func NewHeadersInterceptResponseWriter(w http.ResponseWriter) *HeaderInterceptResponseWriter {
+	return &HeaderInterceptResponseWriter{
+		ResponseWriter: w,
+		Headers:        w.Header(),
+	}
+}
+
+func (rw *HeaderInterceptResponseWriter) HeadersSent() bool {
+	return len(rw.Headers) > 0
 }

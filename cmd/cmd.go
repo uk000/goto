@@ -45,6 +45,7 @@ func Execute() {
 		client.Run()
 	} else {
 		processServerArgs()
+		runInits()
 		server.Run()
 	}
 }

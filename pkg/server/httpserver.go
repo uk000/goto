@@ -29,7 +29,6 @@ import (
 	"goto/pkg/registry/peer"
 	grpcserver "goto/pkg/rpc/grpc/server"
 	"goto/pkg/scripts"
-	"goto/pkg/server/conn"
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/listeners"
 	"goto/pkg/server/middleware"
@@ -59,7 +58,6 @@ var (
 	mcpStarted           bool
 	httpListenersStarted bool
 	mcpListenersStarted  bool
-	httpHandler          http.Handler
 	RootRouter           *mux.Router
 )
 
@@ -112,36 +110,30 @@ func configureHTTPouter() *mux.Router {
 }
 
 func configureAndStartHTTPServer(r *mux.Router) error {
-	httpHandler = HTTPHandler(r, h2c.NewHandler(RootRouter, h2s))
+	util.HTTPHandler = HTTPHandler(r, h2c.NewHandler(RootRouter, h2s))
 	httpServer = &http.Server{
 		Addr:         fmt.Sprintf("0.0.0.0:%d", global.Self.ServerPort),
 		WriteTimeout: 1 * time.Minute,
 		ReadTimeout:  1 * time.Minute,
 		IdleTimeout:  1 * time.Minute,
 		ConnContext:  withConnContext,
-		ConnState:    conn.ConnState,
-		Handler:      httpHandler,
-		ErrorLog:     log.New(io.Discard, "discard", 0),
+		//ConnState:    conn.ConnState,
+		Handler:  util.HTTPHandler,
+		ErrorLog: log.New(io.Discard, "discard", 0),
 	}
 	return StartHttpServer(false)
 }
 
 func configureAndStartMCPServer(port int) error {
-	// if mcpStarted && mcpServer != nil {
-	// 	if callback != nil {
-	// 		// callback(mcpServer)
-	// 		return nil
-	// 	}
-	// }
 	mcpServer = &http.Server{
 		Addr:         fmt.Sprintf("0.0.0.0:%d", port),
 		WriteTimeout: 1 * time.Minute,
 		ReadTimeout:  1 * time.Minute,
 		IdleTimeout:  1 * time.Minute,
 		ConnContext:  withConnContext,
-		ConnState:    conn.ConnState,
-		Handler:      MCPHandler(httpHandler),
-		ErrorLog:     log.New(io.Discard, "discard", 0),
+		//ConnState:    conn.ConnState,
+		Handler:  MCPHandler(),
+		ErrorLog: log.New(io.Discard, "discard", 0),
 	}
 	return StartHttpServer(true)
 }
@@ -265,8 +257,8 @@ func StopHttpServer(server *http.Server) {
 	log.Printf("HTTP Server %s finished shutting down", server.Addr)
 }
 
-func MCPHandler(httpHandler http.Handler) http.Handler {
-	mcpHandler := mcpserver.MCPHandler(httpHandler)
+func MCPHandler() http.Handler {
+	mcpHandler := mcpserver.MCPHandler()
 	mcpRouter := mux.NewRouter()
 	mcpRouter.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
 		return true
@@ -276,7 +268,7 @@ func MCPHandler(httpHandler http.Handler) http.Handler {
 		reReader := util.NewReReader(r.Body)
 		r.Body = reReader
 		if rs.IsAdminRequest {
-			httpHandler.ServeHTTP(w, r)
+			util.HTTPHandler.ServeHTTP(w, r)
 		} else {
 			mcpHandler.ServeHTTP(w, r)
 		}

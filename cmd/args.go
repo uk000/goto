@@ -19,6 +19,7 @@ package cmd
 import (
 	"flag"
 	"goto/ctl"
+	mcpserver "goto/pkg/ai/mcp/server"
 	"goto/pkg/global"
 	"goto/pkg/server/listeners"
 	"goto/pkg/types"
@@ -324,8 +325,12 @@ func setupServerArgs() {
 	flag.Var(&startupScript, sa.StartupScript, sh.StartupScript)
 }
 
+func runInits() {
+	initListeners()
+	mcpserver.InitDefaultServer()
+}
+
 func processServerArgs() {
-	setupListenerConfigs()
 	setupRegistryConfigs()
 	setupLogs()
 
@@ -341,7 +346,7 @@ func processServerArgs() {
 	}
 }
 
-func setupListenerConfigs() {
+func initListeners() {
 	ports := strings.Split(portsList, ",")
 	if len(ports) == 0 {
 		ports = []string{strconv.Itoa(global.Self.ServerPort)}
