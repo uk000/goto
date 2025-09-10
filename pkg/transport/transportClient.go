@@ -148,11 +148,11 @@ func CreateSimpleHTTPClient() *http.Client {
 		IdleConnTimeout:     time.Minute * 10,
 		Proxy:               http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
-			Timeout:   time.Minute,
+			Timeout:   time.Minute * 10,
 			KeepAlive: time.Minute * 5,
 		}).DialContext,
 	}
-	return &http.Client{Transport: tr, Timeout: 10 * time.Second}
+	return &http.Client{Transport: tr, Timeout: 10 * time.Minute}
 }
 
 func CreateDefaultHTTPClient(label string, h2, isTLS bool, newConnNotifierChan chan string) ClientTransport {

@@ -67,6 +67,7 @@ type MCPServerPayload struct {
 type SessionContext struct {
 	Server   *MCPServer
 	RS       *util.RequestStore
+	Headers  http.Header
 	finished chan bool
 }
 

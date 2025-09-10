@@ -60,6 +60,7 @@ type MCPClient struct {
 	callerId       string
 	sse            bool
 	httpClient     *http.Client
+	ht             transport.ClientTransport
 	mcpTransport   *MCPClientInterceptTransport
 	client         *gomcp.Client
 	activeSessions map[string]*MCPSession
@@ -108,12 +109,15 @@ func NewClient(port int, sse bool, callerId string) *MCPClient {
 }
 
 func newMCPClient(sse bool, name, callerId string) *MCPClient {
-	httpClient := transport.CreateSimpleHTTPClient()
+	//httpClient := transport.CreateSimpleHTTPClient()
+	ht := transport.CreateHTTPClient(name, false, true, false, "", 0,
+		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
 	m := &MCPClient{
 		name:           name,
 		callerId:       callerId,
 		sse:            sse,
-		httpClient:     httpClient,
+		httpClient:     ht.HTTP(),
+		ht:             ht,
 		activeSessions: map[string]*MCPSession{},
 	}
 	m.client = gomcp.NewClient(&gomcp.Implementation{Name: name, Version: "2.0"}, &gomcp.ClientOptions{
@@ -127,9 +131,13 @@ func newMCPClient(sse bool, name, callerId string) *MCPClient {
 		LoggingMessageHandler:       m.LoggingMessageHandler,
 		ProgressNotificationHandler: m.ProgressNotificationHandler,
 	})
+
 	m.client.AddRoots(Roots...)
 	m.client.AddSendingMiddleware(m.SendingMiddleware)
 	m.client.AddReceivingMiddleware(m.ReceivingMiddleware)
+	if t, ok := ht.Transport().(*transport.HTTPTransportIntercept); ok {
+		t.SetHeadersIntercept(m)
+	}
 	return m
 }
 
@@ -144,8 +152,19 @@ func (c *MCPClient) newMCPTransport(label, url string) gomcp.Transport {
 	} else {
 		mcpTransport = &gomcp.StreamableClientTransport{Endpoint: url, MaxRetries: -1, HTTPClient: c.httpClient}
 	}
+	var ht *http.Transport
+	var ok bool
+	if c.httpClient.Transport != nil {
+		ht, ok = c.httpClient.Transport.(*http.Transport)
+		if !ok {
+			if ht2, ok := c.httpClient.Transport.(*transport.HTTPTransportIntercept); ok {
+				ht = ht2.Transport
+			}
+			log.Println("NO")
+		}
+	}
 	return &MCPClientInterceptTransport{
-		HTTPTransportIntercept: transport.NewHTTPTransportInterceptWithWatch(c.httpClient.Transport.(*http.Transport), label, metrics.ConnTracker, c),
+		HTTPTransportIntercept: transport.NewHTTPTransportInterceptWithWatch(ht, label, metrics.ConnTracker, c),
 		Transport:              mcpTransport,
 		SessionHeaders:         map[string]map[string]string{},
 	}
@@ -208,7 +227,7 @@ func (c *MCPClient) newMCPSession(session *gomcp.ClientSession, operLabel string
 	if hops != nil {
 		mpcSession.Hops = hops
 	} else {
-		mpcSession.Hops = util.NewHops(c.callerId, c.name, operLabel)
+		mpcSession.Hops = util.NewHops(c.callerId, operLabel)
 	}
 	c.lock.Lock()
 	c.activeSessions[mpcSession.ID] = mpcSession
@@ -332,7 +351,7 @@ func (c *MCPClient) ElicitationHandler(ctx context.Context, req *gomcp.ElicitReq
 	s := c.GetSession(req.Session.ID())
 	if s == nil {
 		msg = fmt.Sprintf("Session missing for ID [%s]", req.Session.ID())
-		hops = util.NewHops(c.callerId, c.name, label)
+		hops = util.NewHops(c.callerId, label)
 	} else {
 		hops = s.Hops
 	}
@@ -369,7 +388,7 @@ func (c *MCPClient) CreateMessageHandler(ctx context.Context, req *gomcp.CreateM
 	s := c.GetSession(req.Session.ID())
 	if s == nil {
 		msg = fmt.Sprintf("Session missing for ID [%s]", req.Session.ID())
-		hops = util.NewHops(c.callerId, c.name, label)
+		hops = util.NewHops(c.callerId, label)
 	} else {
 		hops = s.Hops
 	}

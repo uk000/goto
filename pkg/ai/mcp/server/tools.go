@@ -121,7 +121,17 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 	}
 	sCtx := t.Server.GetAndClearSessionContext(req.Session.ID())
 	isSSE := false
-	headers := util.GetContextHeaders(ctx)
+	headers := req.Extra.Header
+	if headers == nil {
+		headers = sCtx.RS.RequestHeaders
+	}
+	if headers == nil {
+		headers = sCtx.Headers
+	}
+	sCtx.Headers = nil
+	if headers == nil {
+		headers = util.GetContextHeaders(ctx)
+	}
 	if sCtx != nil {
 		isSSE = sCtx.RS.IsSSE
 	}
@@ -164,14 +174,13 @@ func (t *ToolCallContext) Hop(msg string) {
 }
 
 func (t *ToolCallContext) RunTool() (result *gomcp.CallToolResult, err error) {
-	t.Log("Args: [%+v], Remote args: [%+v]", t.args, t.remoteArgs)
 	protocol := "mcp"
 	if util.IsSSE(t.ctx) {
 		protocol = "mcp/sse"
 	}
 	serverID := fmt.Sprintf("[%s][%s]", t.Server.GetName(), protocol)
-	t.hops = util.NewHops(t.Server.GetHost(), serverID, t.Label)
-	t.Log("%s: received request with args [%+v]", t.Label, t.args)
+	t.hops = util.NewHops(serverID, t.Label)
+	t.Log("%s: Received request", t.Label)
 	if t.args["delay"] != nil {
 		if delay, ok := t.args["delay"].(string); ok {
 			if d, err := time.ParseDuration(delay); err == nil {
@@ -234,8 +243,8 @@ func (t *ToolCallContext) RunTool() (result *gomcp.CallToolResult, err error) {
 	if t.headers != nil {
 		outHeaders := map[string][]string{}
 		util.CopyHeadersWithPrefix("Request", t.headers, outHeaders)
+		output["Request-Headers"] = outHeaders
 	}
-
 	result.StructuredContent = output
 	return
 }
@@ -464,18 +473,14 @@ func (t *ToolCallContext) elicit() (*gomcp.CallToolResult, error) {
 func (t *ToolCallContext) fetch() (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	url := t.Config.Remote.URL
-	var headers map[string]any
-	var authority string
-	if len(t.args) > 0 {
-		t.Log("Received args: [%+v]", t.args)
-		if t.args["url"] != nil {
-			url = t.args["url"].(string)
+	authority := t.Config.Remote.Authority
+	if t.remoteArgs != nil {
+		t.Log("Received args: [%+v]", util.ToJSONText(t.remoteArgs))
+		if t.remoteArgs.URL != "" {
+			url = t.remoteArgs.URL
 		}
-		if t.args["headers"] != nil {
-			headers = t.args["headers"].(map[string]any)
-		}
-		if t.args["authority"] != nil {
-			authority = t.args["authority"].(string)
+		if t.remoteArgs.Authority != "" {
+			authority = t.remoteArgs.Authority
 		}
 	}
 	if !strings.HasPrefix(url, "http") {
@@ -485,11 +490,11 @@ func (t *ToolCallContext) fetch() (*gomcp.CallToolResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	for h, v := range headers {
-		req.Header.Add(h, v.(string))
+	for h, v := range t.remoteArgs.Headers {
+		req.Header.Add(h, v)
 	}
 	if authority != "" {
-		req.Host = authority
+		req.Host = t.remoteArgs.Authority
 	}
 	if req.Host == "" {
 		req.Host = req.URL.Host
@@ -516,7 +521,7 @@ func (t *ToolCallContext) remoteToolCall() (*gomcp.CallToolResult, error) {
 	url := tc.URL
 	argURL := false
 	if t.remoteArgs != nil {
-		t.Log("Received args: [%+v]", t.remoteArgs)
+		t.Log("Received args: [%+v]", util.ToJSONText(t.remoteArgs))
 		if t.remoteArgs.SSE {
 			isSSE = true
 		}
@@ -541,6 +546,14 @@ func (t *ToolCallContext) remoteToolCall() (*gomcp.CallToolResult, error) {
 		}
 		if t.remoteArgs.ToolArgs != nil {
 			tc.Args = t.remoteArgs.ToolArgs
+		}
+	}
+	if t.headers != nil {
+		if t.headers["Traceparent"] != nil {
+			tc.Headers["Traceparent"] = t.headers["Traceparent"]
+		}
+		if t.headers["Tracestate"] != nil {
+			tc.Headers["Tracestate"] = t.headers["Tracestate"]
 		}
 	}
 	if tc.ForceSSE {

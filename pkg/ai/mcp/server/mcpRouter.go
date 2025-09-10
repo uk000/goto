@@ -56,6 +56,12 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 			} else {
 				log.Printf("Port [%d] Request [%s] will be served by Stateless [%t] Server [%s]", l.Port, r.RequestURI, server.Stateless, server.Name)
 			}
+			r = r.WithContext(util.WithContextHeaders(r.Context(), r.Header))
+			if sctx := server.getOrSetSessionContext(r); sctx != nil {
+				sctx.RS = rs
+				sctx.RS.RequestHeaders = r.Header
+			}
+
 			server.handler.ServeHTTP(w, r)
 			rs.RequestServed = true
 		} else {
@@ -113,6 +119,9 @@ func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler ht
 			close(session.finished)
 		}
 	case "GET":
+		if session != nil {
+			session.Headers = r.Header
+		}
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 		r = r.WithContext(ctx)
@@ -171,12 +180,13 @@ func getServer(r *http.Request) *gomcp.Server {
 func getServerAndTool(r *http.Request) (*MCPServer, *MCPTool) {
 	var server *MCPServer
 	port := util.GetRequestOrListenerPortNum(r)
+	rs := util.GetRequestStore(r)
 	uri := r.RequestURI
 	uri, server = findServerForURI(uri)
 	_, serverName, toolName := getPortServerToolFromURI(r.RequestURI)
 	if server == nil {
 		server = GetMCPServer(serverName)
-		if server == nil {
+		if server == nil && rs.IsMCP {
 			ps := PortsServers[port]
 			if ps == nil || len(ps.Servers) == 0 {
 				log.Printf("Falling back to Default MCP Server [%s] on port [%d]", DefaultStatelessServer.Name, port)
@@ -187,7 +197,7 @@ func getServerAndTool(r *http.Request) (*MCPServer, *MCPTool) {
 			}
 		}
 	}
-	if !server.Enabled {
+	if server != nil && !server.Enabled {
 		log.Printf("MCP Server [%s] is disabled on port [%d]. Falling back to Default MCP Server [%s].", server.Name, port, DefaultStatelessServer.Name)
 		server = DefaultStatelessServer
 	}
@@ -200,7 +210,7 @@ func getServerAndTool(r *http.Request) (*MCPServer, *MCPTool) {
 			log.Printf("Server [%s] will handle MCP request based on URI match [%s] on port [%d]", server.Name, uri, port)
 		}
 	} else {
-		log.Printf("getServerAndTool: Failed to find a server [%s] on port [%d]", server.Name, port)
+		log.Printf("getServerAndTool: Failed to find a server on port [%d]", port)
 	}
 	return server, tool
 }

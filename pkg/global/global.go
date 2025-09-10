@@ -28,7 +28,7 @@ func init() {
 }
 
 var (
-	DevTag  = "0.9.5-beta1"
+	DevTag  = "0.9.4-beta8.3"
 	Version string
 	Commit  string
 	Funcs   = types.Funcs{}
