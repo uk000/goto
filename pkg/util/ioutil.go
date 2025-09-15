@@ -31,6 +31,12 @@ import (
 	"time"
 )
 
+type Type interface {
+	~string | ~bool | ~int | ~int64
+}
+
+func Ptr[T Type](t T) *T { return &t }
+
 type IReReader interface {
 	Rewind()
 }

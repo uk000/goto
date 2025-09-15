@@ -108,7 +108,7 @@ func BuildHostLabel(port int) string {
 }
 
 func BuildListenerLabel(port int) string {
-	return fmt.Sprintf("Goto-%s:%d", GetPodIP(), port)
+	return fmt.Sprintf("Goto[%s:%d][%s][%s]", GetPodIP(), port, GetNamespace(), GetCluster())
 }
 
 func GetHostLabel() string {

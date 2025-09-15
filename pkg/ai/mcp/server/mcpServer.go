@@ -139,7 +139,7 @@ func InitDefaultServer() {
 
 func NewMCPServer(p *MCPServerPayload) *MCPServer {
 	server := &MCPServer{
-		ID:        fmt.Sprintf("%s[%s]", p.Name, global.Funcs.GetListenerLabelForPort(p.Port)),
+		ID:        fmt.Sprintf("[%s][%s]", global.Funcs.GetListenerLabelForPort(p.Port), p.Name),
 		Host:      global.Funcs.GetHostLabelForPort(p.Port),
 		Port:      p.Port,
 		Stateless: p.Stateless,
@@ -359,6 +359,10 @@ func GetAllComponents(kind string) map[string]map[string]IMCPComponent {
 	return AllComponents[kind]
 }
 
+func (ps *PortServers) AllServers() map[int]*PortServers {
+	return PortsServers
+}
+
 func (ps *PortServers) GetMCPServer(name string) *MCPServer {
 	name = strings.ToLower(name)
 	ps.lock.RLock()
@@ -530,8 +534,8 @@ func (m *MCPServer) AddTool(tool *MCPTool) {
 	m.Tools[tool.Tool.Name] = tool
 	m.ToolsByURI[tool.URI] = tool
 	pair := &types.Pair{Left: m.Name, Right: tool}
-	ServerRoutes[m.URI+"/"+tool.URI] = pair
-	ServerRoutes[m.SSEURI+"/"+tool.URI] = pair
+	ServerRoutes[m.URI+tool.URI] = pair
+	ServerRoutes[m.SSEURI+tool.URI] = pair
 	m.lock.Unlock()
 	if m.ps != nil {
 		m.ps.addComponentToAll(tool, m.Name)

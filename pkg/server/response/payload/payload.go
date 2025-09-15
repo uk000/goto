@@ -142,7 +142,7 @@ func (pr *PortResponsePayloads) setStreamResponsePayload(isGRPC bool, payload []
 	if err != nil {
 		return err
 	}
-	rp.PrepareStreamPayload(count, delayMin, delayMax)
+	rp.PrepareJSONStreamPayload(count, delayMin, delayMax)
 	pp := pr.protoPayload(isGRPC)
 	if len(payload) > 0 {
 		if uri != "" && header != "" {

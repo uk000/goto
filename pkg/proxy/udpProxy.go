@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"goto/pkg/proxy/trackers"
 	"goto/pkg/server/listeners"
-	"goto/pkg/util"
+	"goto/pkg/types"
 	"log"
 	"net"
 	"strings"
@@ -177,7 +177,7 @@ func (up *UDPUpstream) readFromDownstream(conn *net.UDPConn) (packet []byte, cli
 }
 
 func (up *UDPUpstream) handlePacket(listenerConn net.PacketConn, clientAddr net.Addr, packet []byte, tracker *trackers.UDPProxyTracker) {
-	delay := util.RandomDuration(up.DelayMin, up.DelayMax)
+	delay := types.RandomDuration(up.DelayMin, up.DelayMax)
 	time.Sleep(delay)
 	domain := extractDomain(packet)
 	up.lock.RLock()

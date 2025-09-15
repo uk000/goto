@@ -29,6 +29,7 @@ import (
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/middleware"
 	"goto/pkg/server/response/trigger"
+	"goto/pkg/types"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
@@ -310,7 +311,7 @@ func computeURIStatus(uri, port string, uriStatus *URIStatusConfig, r *http.Requ
 		if len(uriStatus.Statuses) == 1 {
 			statusToReport = uriStatus.Statuses[0]
 		} else {
-			statusToReport = util.RandomFrom(uriStatus.Statuses)
+			statusToReport = types.RandomFrom(uriStatus.Statuses)
 		}
 		statusTimesLeft = uriStatus.Times
 

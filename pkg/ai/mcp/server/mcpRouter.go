@@ -85,19 +85,9 @@ func MCPHybridHandler(server *MCPServer) http.Handler {
 		// w, irw := intercept.WithIntercept(r, w)
 		if hasMCP && !hasSSE {
 			log.Printf("Port [%d] Request [%s] will be served by [%s]/stream", port, r.RequestURI, server.Name)
-			// w.Header().Set(constants.HeaderContentType, "text/event-stream")
-			// w.Header().Set(constants.HeaderCacheControl, "no-cache")
-			// w.Header().Set(constants.HeaderTransferEncoding, "chunked")
 			Serve(server, w, r, server.streamHTTPHandler)
 		} else {
 			log.Printf("Port [%d] Request [%s] will be served by [%s]/sse", port, r.RequestURI, server.Name)
-			// w.Header().Set("Connection", "keep-alive")
-			// w.Header().Set("Access-Control-Allow-Origin", "*")
-			// w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE")
-			// w.Header().Set("Access-Control-Allow-Headers", "Cache-Control, Content-Type, Authorization")
-			// w.Header().Set(constants.HeaderContentType, "text/event-stream")
-			// w.Header().Set(constants.HeaderCacheControl, "no-cache")
-			// w.Header().Set(constants.HeaderTransferEncoding, "chunked")
 			r = r.WithContext(util.SetSSE(r.Context()))
 			Serve(server, w, r, server.sseHandler)
 		}

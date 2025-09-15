@@ -14,4 +14,4 @@
  * limitations under the License.
  */
 
-package agents
+package a2aclient

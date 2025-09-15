@@ -18,9 +18,9 @@ package server
 
 import (
 	"context"
-	"embed"
 	"errors"
 	"fmt"
+	a2aserver "goto/pkg/ai/a2a/server"
 	mcpserver "goto/pkg/ai/mcp/server"
 	. "goto/pkg/constants"
 	"goto/pkg/events"
@@ -61,16 +61,13 @@ var (
 	RootRouter           *mux.Router
 )
 
-//go:embed ui/static/*
-var staticUI embed.FS
-
 func RunHttpServer() {
 	var err error
 	err = configureAndStartHTTPServer(configureHTTPouter())
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-	err = configureAndStartMCPServer(global.Self.MCPPort)
+	err = configureAndStartAIServer(global.Self.MCPPort)
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -84,23 +81,7 @@ func RunHttpServer() {
 
 func configureHTTPouter() *mux.Router {
 	coreRouter := mux.NewRouter()
-	coreRouter.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
-		util.WriteJsonPayload(w, map[string]string{"version": global.Version, "commit": global.Commit})
-	})
-	coreRouter.HandleFunc("/ui", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFileFS(w, r, staticUI, "ui/static/index.html")
-	}).Methods("GET")
-	coreRouter.HandleFunc("/{k:routes|apis}", func(w http.ResponseWriter, r *http.Request) {
-		coreRouter.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
-			path, _ := route.GetPathTemplate()
-			methods, _ := route.GetMethods()
-			fmt.Fprintln(w, path, methods)
-			return nil
-		})
-	}).Methods("GET")
-	RootRouter = coreRouter.PathPrefix("").Subrouter()
-	RootRouter.SkipClean(true)
-	util.InitListenerRouter(RootRouter)
+	RootRouter = util.CreateRouters(coreRouter)
 	RootRouter.Use(ContextMiddleware)
 	middleware.LinkBaseMiddlewareChain(RootRouter)
 	interceptChainRouter := RootRouter.PathPrefix("").Subrouter()
@@ -124,7 +105,7 @@ func configureAndStartHTTPServer(r *mux.Router) error {
 	return StartHttpServer(false)
 }
 
-func configureAndStartMCPServer(port int) error {
+func configureAndStartAIServer(port int) error {
 	mcpServer = &http.Server{
 		Addr:         fmt.Sprintf("0.0.0.0:%d", port),
 		WriteTimeout: 1 * time.Minute,
@@ -132,7 +113,7 @@ func configureAndStartMCPServer(port int) error {
 		IdleTimeout:  1 * time.Minute,
 		ConnContext:  withConnContext,
 		//ConnState:    conn.ConnState,
-		Handler:  MCPHandler(),
+		Handler:  AIHandler(),
 		ErrorLog: log.New(io.Discard, "discard", 0),
 	}
 	return StartHttpServer(true)
@@ -257,8 +238,9 @@ func StopHttpServer(server *http.Server) {
 	log.Printf("HTTP Server %s finished shutting down", server.Addr)
 }
 
-func MCPHandler() http.Handler {
+func AIHandler() http.Handler {
 	mcpHandler := mcpserver.MCPHandler()
+	agentsHandler := a2aserver.AgentsHandler()
 	mcpRouter := mux.NewRouter()
 	mcpRouter.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
 		return true
@@ -269,8 +251,12 @@ func MCPHandler() http.Handler {
 		r.Body = reReader
 		if rs.IsAdminRequest {
 			util.HTTPHandler.ServeHTTP(w, r)
-		} else {
+		} else if rs.IsMCP {
 			mcpHandler.ServeHTTP(w, r)
+		} else if rs.IsAI {
+			agentsHandler.ServeHTTP(w, r)
+		} else {
+			util.HTTPHandler.ServeHTTP(w, r)
 		}
 		go PrintLogMessages(0, 0, nil, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
 	})

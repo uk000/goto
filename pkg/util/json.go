@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -735,6 +736,8 @@ func ReadStringArray(b []byte) []string {
 func ToJSONText(o interface{}) string {
 	if output, err := json.Marshal(o); err == nil {
 		return string(output)
+	} else {
+		log.Println(err.Error())
 	}
 	return fmt.Sprintf("%+v", o)
 }

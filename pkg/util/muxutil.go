@@ -39,12 +39,31 @@ var (
 	fillerRegexp          = regexp.MustCompile("{({[^{}]+?})}|{([^{}]+?)}")
 	optionalPathRegexp    = regexp.MustCompile(`(\/[^{}]+?\?)`)
 	optionalPathKeyRegexp = regexp.MustCompile(`(\/(?:[^\/{}]+=)?{[^{}]+?}\?\??)`)
+	sizes                 = map[string]uint64{
+		"K":  1000,
+		"KB": 1000,
+		"M":  1000000,
+		"MB": 1000000,
+	}
 )
 
-func InitListenerRouter(root *mux.Router) {
-	RootRouter = root
-	PortRouter = root.PathPrefix("/port={port}").Subrouter()
-	MatchRouter = root.NewRoute().Subrouter()
+func CreateRouters(coreRouter *mux.Router) *mux.Router {
+	RootRouter = coreRouter.PathPrefix("").Subrouter()
+	coreRouter.PathPrefix("/port={port}").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sport := GetStringParamValue(r, "port")
+		port, _ := strconv.Atoi(sport)
+		rs := GetRequestStore(r)
+		rs.RequestPort = sport
+		rs.RequestPortNum = port
+		uri := strings.TrimLeft(r.RequestURI, fmt.Sprintf("/port=%s", sport))
+		r.RequestURI = uri
+		rs.RequestURI = uri
+		coreRouter.ServeHTTP(w, r)
+	})
+	RootRouter.SkipClean(true)
+	PortRouter = coreRouter.PathPrefix("/port={port}").Subrouter()
+	MatchRouter = RootRouter.NewRoute().Subrouter()
+	return RootRouter
 }
 
 func GetAltPaths(path string, key bool) []string {

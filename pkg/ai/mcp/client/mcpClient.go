@@ -8,6 +8,7 @@ import (
 	"goto/pkg/global"
 	"goto/pkg/metrics"
 	"goto/pkg/transport"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
 	"net/http"
@@ -20,25 +21,26 @@ import (
 )
 
 type MCPClientPayload struct {
-	Contents []string    `json:"contents"`
-	Roles    []string    `json:"roles,omitempty"`
-	Models   []string    `json:"models,omitempty"`
-	Actions  []string    `json:"actions,omitempty"`
-	Delay    *util.Delay `json:"delay,omitempty"`
+	Contents []string     `json:"contents"`
+	Roles    []string     `json:"roles,omitempty"`
+	Models   []string     `json:"models,omitempty"`
+	Actions  []string     `json:"actions,omitempty"`
+	Delay    *types.Delay `json:"delay,omitempty"`
 }
 
 type ToolCall struct {
-	Tool      string              `json:"tool"`
-	URL       string              `json:"url"`
-	SSEURL    string              `json:"sseURL"`
-	Server    string              `json:"server,omitempty"`
-	Authority string              `json:"authority,omitempty"`
-	ForceSSE  bool                `json:"forceSSE,omitempty"`
-	Neat      bool                `json:"neat,omitempty"`
-	Delay     string              `json:"delay,omitempty"`
-	Args      map[string]any      `json:"args,omitempty"`
-	Headers   map[string][]string `json:"headers,omitempty"`
-	delayD    time.Duration       `json:"-"`
+	Tool           string              `json:"tool"`
+	URL            string              `json:"url"`
+	SSEURL         string              `json:"sseURL"`
+	Server         string              `json:"server,omitempty"`
+	Authority      string              `json:"authority,omitempty"`
+	ForceSSE       bool                `json:"forceSSE,omitempty"`
+	Neat           bool                `json:"neat,omitempty"`
+	Delay          string              `json:"delay,omitempty"`
+	Args           map[string]any      `json:"args,omitempty"`
+	Headers        map[string][]string `json:"headers,omitempty"`
+	ForwardHeaders []string            `json:"forwardHeaders,omitempty"`
+	delayD         time.Duration       `json:"-"`
 }
 
 type MCPSession struct {
@@ -56,14 +58,14 @@ type MCPSession struct {
 }
 
 type MCPClient struct {
-	name           string
-	callerId       string
-	sse            bool
+	Name           string
+	CallerId       string
+	SSE            bool
+	ActiveSessions map[string]*MCPSession
 	httpClient     *http.Client
 	ht             transport.ClientTransport
 	mcpTransport   *MCPClientInterceptTransport
 	client         *gomcp.Client
-	activeSessions map[string]*MCPSession
 	lock           sync.RWMutex
 }
 
@@ -113,12 +115,12 @@ func newMCPClient(sse bool, name, callerId string) *MCPClient {
 	ht := transport.CreateHTTPClient(name, false, true, false, "", 0,
 		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
 	m := &MCPClient{
-		name:           name,
-		callerId:       callerId,
-		sse:            sse,
+		Name:           name,
+		CallerId:       callerId,
+		SSE:            sse,
 		httpClient:     ht.HTTP(),
 		ht:             ht,
-		activeSessions: map[string]*MCPSession{},
+		ActiveSessions: map[string]*MCPSession{},
 	}
 	m.client = gomcp.NewClient(&gomcp.Implementation{Name: name, Version: "2.0"}, &gomcp.ClientOptions{
 		KeepAlive:                   10 * time.Second,
@@ -147,7 +149,7 @@ func (c *MCPClient) Connect(url, operLabel string) (session *MCPSession, err err
 
 func (c *MCPClient) newMCPTransport(label, url string) gomcp.Transport {
 	var mcpTransport gomcp.Transport
-	if c.sse {
+	if c.SSE {
 		mcpTransport = &gomcp.SSEClientTransport{Endpoint: url, HTTPClient: c.httpClient}
 	} else {
 		mcpTransport = &gomcp.StreamableClientTransport{Endpoint: url, MaxRetries: -1, HTTPClient: c.httpClient}
@@ -174,7 +176,7 @@ func (c *MCPClient) ConnectWithHops(url, operLabel string, hops *util.Hops) (ses
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		url = "http://" + url
 	}
-	t := c.newMCPTransport(c.name, url)
+	t := c.newMCPTransport(c.Name, url)
 	s, err := c.client.Connect(context.Background(), t, &gomcp.ClientSessionOptions{})
 	if err == nil {
 		session = c.newMCPSession(s, operLabel, hops)
@@ -218,19 +220,19 @@ func (c *MCPClient) ParseAndCallTool(b []byte, operLabel string) (map[string]any
 func (c *MCPClient) newMCPSession(session *gomcp.ClientSession, operLabel string, hops *util.Hops) *MCPSession {
 	mpcSession := &MCPSession{
 		ID:           session.ID(),
-		Name:         c.name,
-		CallerId:     c.callerId,
-		SSE:          c.sse,
+		Name:         c.Name,
+		CallerId:     c.CallerId,
+		SSE:          c.SSE,
 		session:      session,
 		parentClient: c,
 	}
 	if hops != nil {
 		mpcSession.Hops = hops
 	} else {
-		mpcSession.Hops = util.NewHops(c.callerId, operLabel)
+		mpcSession.Hops = util.NewHops(c.CallerId, operLabel)
 	}
 	c.lock.Lock()
-	c.activeSessions[mpcSession.ID] = mpcSession
+	c.ActiveSessions[mpcSession.ID] = mpcSession
 	c.lock.Unlock()
 	return mpcSession
 }
@@ -238,13 +240,13 @@ func (c *MCPClient) newMCPSession(session *gomcp.ClientSession, operLabel string
 func (c *MCPClient) GetSession(sessionID string) *MCPSession {
 	c.lock.RLock()
 	defer c.lock.RLock()
-	return c.activeSessions[sessionID]
+	return c.ActiveSessions[sessionID]
 }
 
 func (c *MCPClient) RemoveSession(sessionID string) {
 	c.lock.RLock()
 	defer c.lock.RLock()
-	delete(c.activeSessions, sessionID)
+	delete(c.ActiveSessions, sessionID)
 }
 
 func (c *MCPClient) OnConnClose() {
@@ -265,6 +267,7 @@ func (s *MCPSession) CallTool(tc *ToolCall, args map[string]any) (map[string]any
 	ctx := context.Background()
 	if tc.Headers != nil {
 		tc.Headers["Host"] = []string{tc.Authority}
+		tc.Headers["User-Agent"] = []string{s.CallerId}
 		ctx = util.WithContextHeaders(ctx, tc.Headers)
 	}
 	msg := ""
@@ -316,7 +319,7 @@ func (s *MCPSession) CallTool(tc *ToolCall, args map[string]any) (map[string]any
 			}
 		}
 	}
-	msg = fmt.Sprintf("%s --> Tool [%s](sse=%t) successful", msg, tc.Tool, s.SSE)
+	msg = fmt.Sprintf("%s --> Tool [%s](sse=%t) successful on URL [%s]", msg, tc.Tool, s.SSE, tc.URL)
 	s.Hops.Add(fmt.Sprintf("%s %s", s.CallerId, msg))
 	log.Println(msg)
 	return output, nil
@@ -345,13 +348,13 @@ func (s *MCPSession) ListResources() (*gomcp.ListResourcesResult, error) {
 }
 
 func (c *MCPClient) ElicitationHandler(ctx context.Context, req *gomcp.ElicitRequest) (result *gomcp.ElicitResult, err error) {
-	label := fmt.Sprintf("%s[Elicitation]", c.callerId)
+	label := fmt.Sprintf("%s[Elicitation]", c.CallerId)
 	msg := ""
 	var hops *util.Hops
 	s := c.GetSession(req.Session.ID())
 	if s == nil {
 		msg = fmt.Sprintf("Session missing for ID [%s]", req.Session.ID())
-		hops = util.NewHops(c.callerId, label)
+		hops = util.NewHops(c.CallerId, label)
 	} else {
 		hops = s.Hops
 	}
@@ -364,11 +367,11 @@ func (c *MCPClient) ElicitationHandler(ctx context.Context, req *gomcp.ElicitReq
 		responseContent["delay"] = delay.String()
 		msg = fmt.Sprintf("%s --> Delaying for %s", msg, delay.String())
 	}
-	msg = fmt.Sprintf("%s %s --> %s", label, msg, ElicitPayload.Contents[util.Random(len(ElicitPayload.Contents))])
+	msg = fmt.Sprintf("%s %s --> %s", label, msg, ElicitPayload.Contents[types.Random(len(ElicitPayload.Contents))])
 	log.Println(msg)
 	responseContent["hops"] = hops.Add(msg).Steps
 	result = &gomcp.ElicitResult{
-		Action:  ElicitPayload.Actions[util.Random(len(ElicitPayload.Actions))],
+		Action:  ElicitPayload.Actions[types.Random(len(ElicitPayload.Actions))],
 		Content: responseContent,
 	}
 	return
@@ -382,13 +385,13 @@ func (c *MCPClient) CreateMessageHandler(ctx context.Context, req *gomcp.CreateM
 		task = "Elicitation"
 		payload = ElicitPayload
 	}
-	label := fmt.Sprintf("%s[%s]", c.callerId, task)
+	label := fmt.Sprintf("%s[%s]", c.CallerId, task)
 	msg := ""
 	var hops *util.Hops
 	s := c.GetSession(req.Session.ID())
 	if s == nil {
 		msg = fmt.Sprintf("Session missing for ID [%s]", req.Session.ID())
-		hops = util.NewHops(c.callerId, label)
+		hops = util.NewHops(c.CallerId, label)
 	} else {
 		hops = s.Hops
 	}
@@ -400,13 +403,13 @@ func (c *MCPClient) CreateMessageHandler(ctx context.Context, req *gomcp.CreateM
 			msg = fmt.Sprintf("%s --> Delaying for %s", msg, delay.String())
 		}
 		if len(payload.Models) > 0 {
-			model = payload.Models[util.Random(len(payload.Models))]
+			model = payload.Models[types.Random(len(payload.Models))]
 		}
 		if len(payload.Roles) > 0 {
-			role = payload.Roles[util.Random(len(payload.Roles))]
+			role = payload.Roles[types.Random(len(payload.Roles))]
 		}
 		if len(payload.Contents) > 0 {
-			content = payload.Contents[util.Random(len(payload.Contents))]
+			content = payload.Contents[types.Random(len(payload.Contents))]
 		}
 	}
 	if model == "" {
@@ -456,9 +459,9 @@ func (c *MCPClient) ProgressNotificationHandler(ctx context.Context, req *gomcp.
 	s := c.GetSession(req.Session.ID())
 	if s == nil {
 		msg = fmt.Sprintf("Session missing for ID [%s]", req.Session.ID())
-		label = fmt.Sprintf("%s[ProgressNotification]", c.callerId)
+		label = fmt.Sprintf("%s[ProgressNotification]", c.CallerId)
 	} else {
-		label = fmt.Sprintf("%s[%s][ProgressNotification]", c.callerId, s.Operation)
+		label = fmt.Sprintf("%s[%s][ProgressNotification]", c.CallerId, s.Operation)
 		hops = s.Hops
 	}
 	msg = fmt.Sprintf("%s %s --> Received Progress Notification [%s][Total: %f][Progress: %f]", label, msg, req.Params.Message, req.Params.Total, req.Params.Progress)

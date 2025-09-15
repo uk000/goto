@@ -31,6 +31,7 @@ import (
 	"goto/pkg/server/middleware"
 	"goto/pkg/server/request/uri"
 	"goto/pkg/server/response/trigger"
+	"goto/pkg/types"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
@@ -154,7 +155,7 @@ func computeResponseStatus(originalStatus int, r *http.Request) (int, bool) {
 		if len(portStatus.alwaysReportStatuses) == 1 {
 			responseStatus = portStatus.alwaysReportStatuses[0]
 		} else {
-			responseStatus = util.RandomFrom(portStatus.alwaysReportStatuses)
+			responseStatus = types.RandomFrom(portStatus.alwaysReportStatuses)
 		}
 		overriddenStatus = true
 		if portStatus.alwaysReportStatusCount > 1 {
@@ -312,7 +313,7 @@ func status(w http.ResponseWriter, r *http.Request) {
 	} else if len(requestedStatuses) == 1 {
 		requestedStatus = requestedStatuses[0]
 	} else if len(requestedStatuses) > 1 {
-		requestedStatus = util.RandomFrom(requestedStatuses)
+		requestedStatus = types.RandomFrom(requestedStatuses)
 	}
 	portStatus.countsByRequestedStatus[requestedStatus]++
 	portStatus.lock.Unlock()
@@ -320,7 +321,7 @@ func status(w http.ResponseWriter, r *http.Request) {
 	delay := 0 * time.Second
 	delayText := ""
 	if delayMin > 0 {
-		delay = util.RandomDuration(delayMin, delayMax)
+		delay = types.RandomDuration(delayMin, delayMax)
 		time.Sleep(delay)
 		delayText = delay.String()
 		w.Header().Add(HeaderGotoResponseDelay, delayText)

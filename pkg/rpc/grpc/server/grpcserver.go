@@ -35,8 +35,6 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
-	"google.golang.org/grpc/reflection/grpc_reflection_v1"
-	"google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -57,9 +55,7 @@ type GRPCServerManager struct {
 }
 
 type ServiceInfoProvider struct {
-	services            map[string]grpc.ServiceInfo
-	reflectionServer    grpc_reflection_v1.ServerReflectionServer
-	reflectionServerOld grpc_reflection_v1alpha.ServerReflectionServer
+	services map[string]grpc.ServiceInfo
 }
 
 const (
@@ -318,13 +314,7 @@ func (g *GRPCServer) start() {
 			g.Server.RegisterService(svc.GSD, svc.Server)
 		}
 	}
-	//reflection.Register(g.Server)
-	if SIP.reflectionServer == nil {
-		SIP.reflectionServer = reflection.NewServerV1(reflection.ServerOptions{Services: SIP})
-		SIP.reflectionServerOld = reflection.NewServer(reflection.ServerOptions{Services: SIP})
-	}
-	grpc_reflection_v1.RegisterServerReflectionServer(g.Server, SIP.reflectionServer)
-	grpc_reflection_v1alpha.RegisterServerReflectionServer(g.Server, SIP.reflectionServerOld)
+	reflection.Register(g.Server)
 
 	msg += ", with services:"
 	for svc := range g.Server.GetServiceInfo() {

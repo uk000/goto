@@ -26,6 +26,7 @@ import (
 	grpc "goto/pkg/rpc/grpc/client"
 	gototls "goto/pkg/tls"
 	"goto/pkg/transport"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
 	"log"
@@ -525,7 +526,7 @@ func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) (
 		}
 		target.Body = ""
 	} else if target.autoPayloadSize > 0 {
-		tracker.Payloads = [][]byte{util.GenerateRandomPayload(target.autoPayloadSize)}
+		tracker.Payloads = [][]byte{types.GenerateRandomPayload(target.autoPayloadSize)}
 		target.Body = ""
 	} else if target.Body != "" {
 		tracker.Payloads = [][]byte{[]byte(target.Body)}

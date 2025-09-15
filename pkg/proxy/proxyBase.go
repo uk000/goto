@@ -5,6 +5,7 @@ import (
 	"goto/pkg/constants"
 	"goto/pkg/events"
 	"goto/pkg/global"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
 	"net/http"
@@ -283,7 +284,7 @@ func (t *ProxyTarget) HasDelay() bool {
 
 func (t *ProxyTarget) ApplyDelay() (delay string) {
 	if t.DelayCount > 0 || t.DelayCount == -1 {
-		d := util.RandomDuration(t.DelayMin, t.DelayMax)
+		d := types.RandomDuration(t.DelayMin, t.DelayMax)
 		delay = d.String()
 		if global.Flags.EnableProxyDebugLogs {
 			log.Printf("[DEBUG] Target [%s]: Delaying Upstream by [%s]\n", t.Name, delay)

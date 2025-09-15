@@ -24,6 +24,7 @@ import (
 	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
 	"log"
@@ -556,7 +557,7 @@ func (tcp *TCPConnectionHandler) doStream() {
 	tcp.conn.SetWriteDeadline(time.Time{})
 	tcp.writeBufferSize = tcp.StreamChunkSizeV
 	tcp.resetWriteBuffer()
-	payload := util.GenerateRandomPayload(tcp.StreamChunkSizeV)
+	payload := types.GenerateRandomPayload(tcp.StreamChunkSizeV)
 	for i := 0; i < tcp.StreamChunkCount; i++ {
 		if tcp.isClosingOrClosed() {
 			log.Printf("[Listener: %s][Request: %d][%s]: Ending stream as the connection is closing on port [%d]",

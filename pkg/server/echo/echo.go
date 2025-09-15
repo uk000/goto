@@ -121,17 +121,17 @@ func GetEchoResponseFromRS(rs *util.RequestStore) map[string]interface{} {
 		rs.ListenerLabel = global.Funcs.GetListenerLabelForPort(rs.RequestPortNum)
 	}
 	response := map[string]interface{}{
-		"RemoteAddress":      rs.DownstreamAddr,
-		"RequestHost":        rs.RequestHost,
-		"RequestURI":         rs.RequestURI,
-		"RequestMethod":      rs.RequestMethod,
-		"RequestProtcol":     rs.RequestProtcol,
-		"RequestQuery":       rs.RequestQuery,
-		"RequestPayloadSize": rs.RequestPayloadSize,
-		HeaderGotoHost:       global.Self.HostLabel,
-		HeaderGotoListener:   global.Funcs.GetListenerLabelForPort(rs.RequestPortNum),
-		HeaderGotoPort:       rs.RequestPortNum,
-		HeaderViaGoto:        rs.ListenerLabel,
+		"Remote-Address":      rs.DownstreamAddr,
+		"Request-Host":        rs.RequestHost,
+		"Request-URI":         rs.RequestURI,
+		"Request-Method":      rs.RequestMethod,
+		"Request-Protcol":     rs.RequestProtcol,
+		"Request-Query":       rs.RequestQuery,
+		"Request-PayloadSize": rs.RequestPayloadSize,
+		HeaderGotoHost:        global.Self.HostLabel,
+		HeaderGotoListener:    global.Funcs.GetListenerLabelForPort(rs.RequestPortNum),
+		HeaderGotoPort:        rs.RequestPortNum,
+		HeaderViaGoto:         rs.ListenerLabel,
 	}
 	if rs.IsTunnelRequest {
 		response[HeaderGotoTargetURL] = rs.RequestHeaders[HeaderGotoTargetURL]

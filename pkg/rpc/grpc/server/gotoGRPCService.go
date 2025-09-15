@@ -26,6 +26,7 @@ import (
 	gotogrpc "goto/pkg/rpc/grpc"
 	"goto/pkg/rpc/grpc/pb"
 	"goto/pkg/server/listeners"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
 	"log"
@@ -212,7 +213,7 @@ func (gs *GotoGRPCService) sendStreamResponse(ctx context.Context, port int, hos
 	if configInput.Payload != "" {
 		payload = configInput.Payload
 	} else {
-		payload = util.GenerateRandomString(int(configInput.ChunkSize))
+		payload = types.GenerateRandomString(int(configInput.ChunkSize))
 	}
 	interval, err := time.ParseDuration(configInput.Interval)
 	if err != nil {

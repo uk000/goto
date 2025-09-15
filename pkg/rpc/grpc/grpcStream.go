@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/global"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
 	"log"
@@ -235,7 +236,7 @@ func (s *GRPCBaseStream) SetDelay(delayMin, delayMax time.Duration, delayCount i
 
 func (s *GRPCBaseStream) applyDelay() {
 	if (s.delayMin > 0 || s.delayMax > 0) && (s.delayCount > 0 || s.delayCount == -1) {
-		time.Sleep(util.RandomDuration(s.delayMin, s.delayMax))
+		time.Sleep(types.RandomDuration(s.delayMin, s.delayMax))
 		if s.delayCount > 0 {
 			s.delayCount--
 		}

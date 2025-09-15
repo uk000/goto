@@ -52,6 +52,7 @@ type RequestStore struct {
 	IsGRPC                  bool
 	IsJSONRPC               bool
 	IsMCP                   bool
+	IsAI                    bool
 	IsSSE                   bool
 	RequestPortChecked      bool
 	RequestServed           bool
@@ -167,7 +168,8 @@ func PopulateRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	rs.RequestMethod = r.Method
 	rs.RequestProtcol = r.Proto
 	rs.RequestHeaders = r.Header
-	rs.IsMCP = strings.Contains(r.RequestURI, "/mcp/") || strings.HasSuffix(r.RequestURI, "/mcp") || strings.Contains(r.RequestURI, "/sse") || strings.Contains(r.RequestURI, "/.well-known") || strings.Contains(r.RequestURI, "/register")
+	rs.IsMCP = strings.Contains(r.RequestURI, "/mcp/") || strings.HasSuffix(r.RequestURI, "/mcp") || strings.Contains(r.RequestURI, "/sse")
+	rs.IsAI = strings.Contains(r.RequestURI, "/agent/")
 	return ctx, rs
 }
 

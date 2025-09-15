@@ -26,6 +26,7 @@ import (
 	"goto/pkg/events"
 	"goto/pkg/metrics"
 	"goto/pkg/server/middleware"
+	"goto/pkg/types"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
@@ -43,8 +44,8 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRouteWithPort(delayRouter, "/set/{delay}", setDelay, "POST", "PUT")
 	util.AddRouteWithPort(delayRouter, "/clear", setDelay, "POST", "PUT")
 	util.AddRouteWithPort(delayRouter, "", getDelay, "GET")
-	util.AddRoute(root, "/delay/{delay}", delay)
-	util.AddRoute(root, "/sleep/{delay}", delay)
+	util.AddRoute(root, "/delay/{delay}", delay, "GET", "PUT", "POST")
+	util.AddRoute(root, "/sleep/{delay}", delay, "GET", "PUT", "POST")
 }
 
 func setDelay(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +90,7 @@ func delay(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	delayMin, delayMax, _, ok := util.GetDurationParam(r, "delay")
 	if delayMin > 0 {
-		delay := util.RandomDuration(delayMin, delayMax)
+		delay := types.RandomDuration(delayMin, delayMax)
 		val := delay.String()
 		msg = fmt.Sprintf("Delayed by: %s", val)
 		time.Sleep(delay)
@@ -136,7 +137,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 				}
 				delayLock.Unlock()
 			}
-			delay := util.RandomDuration(delayRange[0], delayRange[1])
+			delay := types.RandomDuration(delayRange[0], delayRange[1])
 			msg := fmt.Sprintf("Delaying [%s] for [%s]. Remaining delay count [%d].", r.RequestURI, delay.String(), delayCount)
 			util.AddLogMessage(msg, r)
 			util.UpdateTrafficEventDetails(r, "Response Delay Applied")

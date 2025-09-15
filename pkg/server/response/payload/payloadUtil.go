@@ -17,8 +17,10 @@
 package payload
 
 import (
+	"encoding/json"
 	"fmt"
 	. "goto/pkg/constants"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
 	"regexp"
@@ -27,15 +29,26 @@ import (
 )
 
 type Payload struct {
-	IsStream    bool        `json:"isStream,omitempty"`
-	StreamCount int         `json:"streamCount,omitempty"`
-	Delay       *util.Delay `json:"delay,omitempty"`
-	JSON        util.JSON   `json:"json,omitempty"`
-	Text        string      `json:"text,omitempty"`
-	Raw         any         `json:"raw,omitempty"`
-	JSONStream  []util.JSON `json:"jsonStream,omitempty"`
-	TextStream  []string    `json:"textStream,omitempty"`
-	RawStream   []any       `json:"rawStream,omitempty"`
+	IsStream    bool         `json:"isStream,omitempty"`
+	StreamCount int          `json:"streamCount,omitempty"`
+	Delay       *types.Delay `json:"delay,omitempty"`
+	JSON        util.JSON    `json:"json,omitempty"`
+	Text        string       `json:"text,omitempty"`
+	Raw         any          `json:"raw,omitempty"`
+	JSONStream  []util.JSON  `json:"jsonStream,omitempty"`
+	TextStream  []string     `json:"textStream,omitempty"`
+	RawStream   []any        `json:"rawStream,omitempty"`
+}
+
+type PayloadMarshal struct {
+	StreamCount int              `json:"streamCount,omitempty"`
+	Delay       *types.Delay     `json:"delay,omitempty"`
+	JSON        map[string]any   `json:"json,omitempty"`
+	Text        string           `json:"text,omitempty"`
+	Raw         any              `json:"raw,omitempty"`
+	JSONStream  []map[string]any `json:"jsonStream,omitempty"`
+	TextStream  []string         `json:"textStream,omitempty"`
+	RawStream   []any            `json:"rawStream,omitempty"`
 }
 
 func NewJSONPayload(json util.JSON, raw []byte, delayMin, delayMax time.Duration, delayCount int) *Payload {
@@ -43,97 +56,163 @@ func NewJSONPayload(json util.JSON, raw []byte, delayMin, delayMax time.Duration
 		json = util.JSONFromBytes(raw)
 	}
 	return &Payload{
-		Delay: util.NewDelay(delayMin, delayMax, delayCount),
+		Delay: types.NewDelay(delayMin, delayMax, delayCount),
 		JSON:  json,
 	}
 }
 
 func NewRawPayload(raw []byte, text string, delayMin, delayMax time.Duration, delayCount int) *Payload {
 	return &Payload{
-		Delay: util.NewDelay(delayMin, delayMax, delayCount),
+		Delay: types.NewDelay(delayMin, delayMax, delayCount),
 		Text:  text,
 		Raw:   raw,
 	}
 }
 
 func NewStreamJSONPayload(jsonArr []util.JSON, raw []byte, streamCount int, delayMin, delayMax time.Duration, delayCount int) *Payload {
-	if jsonArr == nil && len(raw) > 0 {
-		jsonArr = util.JSONFromBytes(raw).ToJSONArray()
-	}
-	streamPayload := []util.JSON{}
-	for i := 0; i < streamCount; {
-		for _, v := range jsonArr {
-			streamPayload = append(streamPayload, v)
-			i++
-			if i >= streamCount {
-				break
-			}
-		}
-	}
-	return &Payload{
+	payload := &Payload{
 		IsStream:    true,
 		StreamCount: streamCount,
-		Delay:       util.NewDelay(delayMin, delayMax, delayCount),
-		JSONStream:  streamPayload,
+		Delay:       types.NewDelay(delayMin, delayMax, delayCount),
 	}
+	payload.prepareJSONStream(jsonArr, nil, nil, raw)
+	return payload
 }
 
 func NewStreamTextPayload(textArr []string, b []byte, streamCount int, delayMin, delayMax time.Duration, delayCount int) *Payload {
-	if textArr == nil {
-		textArr = util.ReadStringArray(b)
+	payload := &Payload{
+		IsStream:    true,
+		StreamCount: streamCount,
+		Delay:       types.NewDelay(delayMin, delayMax, delayCount),
 	}
-	streamPayload := []string{}
-	if streamCount <= 0 {
-		streamCount = len(textArr)
+	payload.prepareTextStream(textArr, b)
+	return payload
+}
+
+func NewRawStreamPayload(raw []any, strArr []string, byteArr [][]byte, streamCount int, delayMin, delayMax time.Duration, delayCount int) *Payload {
+	payload := &Payload{
+		IsStream:    true,
+		StreamCount: streamCount,
+		Delay:       types.NewDelay(delayMin, delayMax, delayCount),
 	}
-	for i := 0; i < streamCount; {
-		for _, v := range textArr {
+	payload.prepareRawStream(raw, strArr, byteArr)
+	return payload
+}
+
+func (p *Payload) UnmarshalJSON(b []byte) error {
+	pm := &PayloadMarshal{}
+	if err := json.Unmarshal(b, pm); err != nil {
+		return err
+	}
+	if pm.StreamCount > 0 || len(pm.JSONStream) > 0 || len(pm.TextStream) > 0 || len(pm.RawStream) > 0 {
+		p.StreamCount = pm.StreamCount
+		if len(pm.JSONStream) > 0 {
+			p.prepareJSONStream(nil, pm.JSONStream, pm.JSON, nil)
+		} else if len(pm.TextStream) > 0 {
+			p.prepareTextStream(pm.TextStream, nil)
+		} else if len(pm.RawStream) > 0 {
+			p.prepareRawStream(pm.RawStream, nil, nil)
+		}
+	} else if len(pm.JSON) > 0 {
+		p.JSON = util.JSONFromMap(pm.JSON)
+	} else if pm.Text != "" {
+		p.Text = pm.Text
+	} else {
+		p.Raw = pm.Raw
+	}
+	p.Delay = pm.Delay
+	if p.Delay != nil {
+		p.Delay.Prepare()
+	}
+	return nil
+}
+
+func (p *Payload) prepareJSONStream(jsonArr []util.JSON, jsonMapArr []map[string]any, jsonMap map[string]any, raw []byte) {
+	if len(jsonArr) == 0 && len(jsonMapArr) == 0 && len(raw) == 0 && jsonMap == nil {
+		return
+	}
+	if len(jsonMapArr) > 0 {
+		jsonArr = []util.JSON{}
+		for _, j := range jsonMapArr {
+			jsonArr = append(jsonArr, util.JSONFromMap(j))
+		}
+	} else if len(jsonArr) == 0 && len(raw) > 0 {
+		jsonArr = util.JSONFromBytes(raw).ToJSONArray()
+	} else if len(jsonArr) == 0 && len(jsonMap) > 0 {
+		jsonArr = util.JSONFromMap(jsonMap).ToJSONArray()
+	}
+	if p.StreamCount <= 0 {
+		p.StreamCount = len(jsonArr)
+	}
+	streamPayload := []util.JSON{}
+	for i := 0; i < p.StreamCount; {
+		for _, v := range jsonArr {
 			streamPayload = append(streamPayload, v)
 			i++
-			if i >= streamCount {
+			if i >= p.StreamCount {
 				break
 			}
 		}
 	}
-	return &Payload{
-		IsStream:    true,
-		StreamCount: streamCount,
-		Delay:       util.NewDelay(delayMin, delayMax, delayCount),
-		TextStream:  streamPayload,
-	}
+	p.IsStream = true
+	p.JSONStream = streamPayload
 }
 
-func NewRawStreamPayload(raw []any, strArr []string, byteArr [][]byte, streamCount int, delayMin, delayMax time.Duration, delayCount int) *Payload {
+func (p *Payload) prepareTextStream(textArr []string, b []byte) {
+	if textArr == nil {
+		textArr = util.ReadStringArray(b)
+	}
+	if p.StreamCount <= 0 {
+		p.StreamCount = len(textArr)
+	}
+	streamPayload := []string{}
+	for i := 0; i < p.StreamCount; {
+		for _, v := range textArr {
+			streamPayload = append(streamPayload, v)
+			i++
+			if i >= p.StreamCount {
+				break
+			}
+		}
+	}
+	p.IsStream = true
+	p.TextStream = streamPayload
+}
+
+func (p *Payload) prepareRawStream(raw []any, strArr []string, byteArr [][]byte) {
 	streamPayload := []any{}
 	payload := []any{}
+	streamCount := 0
 	if raw != nil {
+		streamCount = len(raw)
 		for _, r := range raw {
 			payload = append(payload, r)
 		}
 	} else if strArr != nil {
+		streamCount = len(strArr)
 		for _, s := range strArr {
 			payload = append(payload, s)
 		}
 	} else {
+		streamCount = len(byteArr)
 		for _, b := range byteArr {
 			payload = append(payload, b)
 		}
 	}
-	for i := 0; i < streamCount; {
+	if p.StreamCount <= 0 {
+		p.StreamCount = streamCount
+	}
+	for i := 0; i < p.StreamCount; {
 		for _, v := range payload {
 			streamPayload = append(streamPayload, v)
 			i++
-			if i >= streamCount {
+			if i >= p.StreamCount {
 				break
 			}
 		}
 	}
-	return &Payload{
-		IsStream:    true,
-		StreamCount: streamCount,
-		Delay:       util.NewDelay(delayMin, delayMax, delayCount),
-		RawStream:   streamPayload,
-	}
+	p.IsStream = true
+	p.RawStream = streamPayload
 }
 
 func (p *Payload) Count() int {
@@ -319,7 +398,7 @@ func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, h
 	}, nil
 }
 
-func (rp *ResponsePayload) PrepareStreamPayload(count int, delayMin, delayMax time.Duration) {
+func (rp *ResponsePayload) PrepareJSONStreamPayload(count int, delayMin, delayMax time.Duration) {
 	rp.StreamCount = count
 	rp.StreamDelayMin = delayMin
 	rp.StreamDelayMax = delayMax
@@ -405,7 +484,7 @@ func getPayloadForKV(kvMap map[string][]string, payloadMap map[string]map[string
 
 func fixPayload(payload []byte, size int) []byte {
 	if len(payload) == 0 && size > 0 {
-		payload = util.GenerateRandomPayload(size)
+		payload = types.GenerateRandomPayload(size)
 	} else if len(payload) > size {
 		payload = payload[:size]
 	}

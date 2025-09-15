@@ -32,6 +32,7 @@ import (
 	"goto/pkg/proxy/trackers"
 	"goto/pkg/server/response/status"
 	"goto/pkg/server/response/trigger"
+	"goto/pkg/types"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
@@ -561,7 +562,7 @@ func (p *HTTPProxy) invokeTargets(targetsMatches map[string]*TargetMatchInfo, w 
 		var maxDelayTarget *ProxyTarget
 		for _, m := range targetsMatches {
 			dropTarget := p.shouldDrop(m.target)
-			if dropTarget && util.Random(5) < 3 {
+			if dropTarget && types.Random(5) < 3 {
 				p.HTTPTracker.IncrementTargetDropCount(m.target.Name, r.RequestURI, true)
 				util.AddHeaderWithSuffix(constants.HeaderProxyRequestDropped, "|"+m.target.Name, "true", w.Header())
 				log.Printf("HTTP Proxy[%d]: Request dropped for target [%s] endpoint [%s]\n", p.Port, m.target.Name, m.target.Endpoint)

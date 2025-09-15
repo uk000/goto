@@ -24,6 +24,7 @@ import (
 	grpc "goto/pkg/rpc/grpc/client"
 	"goto/pkg/rpc/grpc/pb"
 	"goto/pkg/transport"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
 	"log"
@@ -130,7 +131,7 @@ func (tracker *InvocationTracker) prepareRequestURL(requestID, targetID string, 
 	var url string
 	target := tracker.Target
 	if target.Random {
-		if r := util.Random(len(target.BURLS) + 1); r == 0 {
+		if r := types.Random(len(target.BURLS) + 1); r == 0 {
 			url = target.URL
 		} else {
 			url = target.BURLS[r-1]

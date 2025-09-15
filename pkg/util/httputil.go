@@ -481,7 +481,7 @@ func CheckAdminRequest(r *http.Request) bool {
 	return uri == "metrics" || uri == "server" || uri == "request" || uri == "response" || uri == "listeners" ||
 		uri == "label" || uri == "registry" || uri == "client" || uri == "proxy" || uri == "job" || uri == "probes" ||
 		uri == "tcp" || uri == "log" || uri == "events" || uri == "tunnels" || uri == "grpc" || uri == "jsonrpc" ||
-		uri == "k8s" || uri == "pipes" || uri == "scripts" || uri == "tls" || uri == "routing" || uri == "mcpapi"
+		uri == "k8s" || uri == "pipes" || uri == "scripts" || uri == "tls" || uri == "routing" || uri == "mcpapi" || uri == "a2a"
 }
 
 func IsMetricsRequest(r *http.Request) bool {

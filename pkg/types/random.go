@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package util
+package types
 
 import (
 	"math/rand"
@@ -25,12 +25,6 @@ import (
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=~`{}[];:,.<>/?"
 
 var (
-	sizes = map[string]uint64{
-		"K":  1000,
-		"KB": 1000,
-		"M":  1000000,
-		"MB": 1000000,
-	}
 	randomCharsetLength = len(charset)
 	random              = rand.New(rand.NewSource(time.Now().UnixNano()))
 	IDCounter           = atomic.Uint32{}

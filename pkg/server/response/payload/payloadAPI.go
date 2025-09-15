@@ -23,6 +23,7 @@ import (
 	"goto/pkg/server/conn"
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/middleware"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"net/http"
 	"strconv"
@@ -208,7 +209,7 @@ func respondWithPayload(w http.ResponseWriter, r *http.Request) {
 	if size <= 0 {
 		size = 100
 	}
-	payload := util.GenerateRandomString(size)
+	payload := types.GenerateRandomString(size)
 	fmt.Fprint(w, payload)
 	w.Header().Set(constants.HeaderContentLength, sizeV)
 	w.Header().Set(constants.HeaderContentType, "plain/text")
@@ -229,8 +230,8 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
 	if contentType == "" {
 		contentType = "plain/text"
 	}
-	duration := util.RandomDuration(durMin, durMax)
-	delay := util.RandomDuration(delayMin, delayMax)
+	duration := types.RandomDuration(durMin, durMax)
+	delay := types.RandomDuration(delayMin, delayMax)
 	if delay == 0 {
 		delay = 1 * time.Millisecond
 	}
@@ -240,7 +241,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
 	if size > 0 {
 		repeat = true
 		chunkSize = size / count
-		payload = util.GenerateRandomPayload(chunkSize)
+		payload = types.GenerateRandomPayload(chunkSize)
 	} else {
 		size = len(payload)
 		repeat = size == 0
@@ -302,7 +303,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if i < count-1 {
-			delay = util.RandomDuration(delayMin, delayMax, delay)
+			delay = types.RandomDuration(delayMin, delayMax, delay)
 			time.Sleep(delay)
 		}
 	}

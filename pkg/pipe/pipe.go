@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"goto/pkg/job"
 	"goto/pkg/scripts"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
 	"log"
@@ -29,10 +30,10 @@ import (
 )
 
 type PipeStage struct {
-	Label      string        `json:"label"`
-	Sources    []string      `json:"sources"`
-	Transforms []string      `json:"transforms"`
-	Delay      util.Duration `json:"delay"`
+	Label      string         `json:"label"`
+	Sources    []string       `json:"sources"`
+	Transforms []string       `json:"transforms"`
+	Delay      types.Duration `json:"delay"`
 }
 
 type Pipe struct {

@@ -17,6 +17,7 @@
 package ui
 
 import (
+	"embed"
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
@@ -27,12 +28,20 @@ import (
 	"github.com/gorilla/mux"
 )
 
+//go:embed static/*
+var staticUI embed.FS
+
 var (
 	Middleware = middleware.NewMiddleware("ui", setRoutes, middlewareFunc)
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+	util.AddRouteWithPort(root, "/ui", showUI, "GET")
 	util.AddRoute(root, "/ui/ws", handleWebsocket, "GET")
+}
+
+func showUI(w http.ResponseWriter, r *http.Request) {
+	http.ServeFileFS(w, r, staticUI, "ui/static/index.html")
 }
 
 func handleWebsocket(w http.ResponseWriter, r *http.Request) {
