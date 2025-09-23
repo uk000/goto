@@ -214,12 +214,12 @@ func createPartsFromMap(key string, m map[string]any, parts *[]a2aproto.Part, de
 	}
 }
 
-func createHybridMessage(result map[string]map[string]any) a2aproto.Message {
+func createHybridMessage(toolResults, agentResults map[string]any) a2aproto.Message {
 	parts := []a2aproto.Part{}
-	for name, m := range result {
-		createPartsFromMap(name, m, &parts, true)
-	}
-	parts = append(parts, a2aproto.NewDataPart(result))
+	createPartsFromMap("tools", toolResults, &parts, true)
+	createPartsFromMap("agents", agentResults, &parts, true)
+	parts = append(parts, a2aproto.NewDataPart(toolResults))
+	parts = append(parts, a2aproto.NewDataPart(agentResults))
 	return a2aproto.NewMessage(a2aproto.MessageRoleAgent, parts)
 }
 

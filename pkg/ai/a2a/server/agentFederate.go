@@ -72,30 +72,29 @@ func (bd *AgentBehaviorFederate) prepareDelegates() error {
 func (ab *AgentBehaviorFederate) DoUnary(aCtx *AgentCallContext) (*taskmanager.MessageProcessingResult, error) {
 	aCtx.triggers = ab.triggers
 	aCtx.detectRemoteCalls()
-	results := map[string]map[string]any{}
-	results["tools"] = map[string]any{}
-	results["agents"] = map[string]any{}
+	aCtx.toolResults = map[string]any{}
+	aCtx.agentResults = map[string]any{}
 	if len(ab.triggers) == 0 {
-		results["tools"][""] = []any{"Agent update: No tools available"}
+		aCtx.toolResults[""] = []any{"Agent update: No tools available"}
 	} else if len(aCtx.tools) == 0 {
-		results["tools"][""] = []any{"Agent update: No tools were triggered"}
+		aCtx.toolResults[""] = []any{"Agent update: No tools were triggered"}
 	} else {
-		ab.runTools(aCtx, results["tools"], nil, nil, nil)
-		if len(results["tools"]) == 0 {
-			results["tools"][""] = []any{"Agent update: No tool produced any results."}
+		ab.runTools(aCtx, nil)
+		if len(aCtx.toolResults) == 0 {
+			aCtx.toolResults[""] = []any{"Agent update: No tool produced any results."}
 		}
 	}
 	if len(ab.triggers) == 0 {
-		results["agents"][""] = []any{"Agent update: No agents available"}
+		aCtx.agentResults[""] = []any{"Agent update: No agents available"}
 	} else if len(aCtx.agents) == 0 {
-		results["agents"][""] = []any{"Agent update: No agents were triggered"}
+		aCtx.agentResults[""] = []any{"Agent update: No agents were triggered"}
 	} else {
-		ab.runAgents(aCtx, results["agents"], nil, nil, nil)
-		if len(results["agents"]) == 0 {
-			results["agents"][""] = []any{"No agent produced any results."}
+		ab.runAgents(aCtx, nil)
+		if len(aCtx.agentResults) == 0 {
+			aCtx.agentResults[""] = []any{"No agent produced any results."}
 		}
 	}
-	result := createHybridMessage(results)
+	result := createHybridMessage(aCtx.toolResults, aCtx.agentResults)
 	return &taskmanager.MessageProcessingResult{
 		Result: &result,
 	}, nil
@@ -104,42 +103,49 @@ func (ab *AgentBehaviorFederate) DoUnary(aCtx *AgentCallContext) (*taskmanager.M
 func (ab *AgentBehaviorFederate) DoStream(aCtx *AgentCallContext) error {
 	aCtx.triggers = ab.triggers
 	aCtx.detectRemoteCalls()
-	toolsResultsChan := make(chan *types.Pair[string, any], 10)
-	agentsResultsChan := make(chan *types.Pair[string, any], 10)
-	upstreamProgress := make(chan string, 10)
-	localProgress := make(chan *types.Pair[string, any], 10)
+	aCtx.resultsChan = make(chan *types.Pair[string, any], 10)
+	aCtx.upstreamProgress = make(chan string, 10)
+	aCtx.localProgress = make(chan *types.Pair[string, any], 10)
 
-	wg := sync.WaitGroup{}
+	runWG := sync.WaitGroup{}
+	resultsWG := sync.WaitGroup{}
 	if len(ab.triggers) == 0 {
 		aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Agent update: No tools available", nil)
 	} else if len(aCtx.tools) == 0 {
 		aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Agent update: No tools were triggered", nil)
 	} else {
-		wg.Add(1)
-		go ab.processResults(aCtx, "tool", upstreamProgress, localProgress, toolsResultsChan, &wg)
-		ab.runTools(aCtx, nil, upstreamProgress, localProgress, toolsResultsChan)
+		runWG.Add(1)
+		resultsWG.Add(1)
+		go ab.processResults(aCtx, "tool", &resultsWG)
+		go ab.runTools(aCtx, &runWG)
 	}
 	if len(ab.triggers) == 0 {
 		aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Agent update: No agents available", nil)
 	} else if len(aCtx.agents) == 0 {
 		aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Agent update: No agents were triggered", nil)
 	} else {
-		wg.Add(1)
-		go ab.processResults(aCtx, "agent", upstreamProgress, localProgress, agentsResultsChan, &wg)
-		ab.runAgents(aCtx, nil, upstreamProgress, localProgress, agentsResultsChan)
+		runWG.Add(1)
+		resultsWG.Add(1)
+		go ab.processResults(aCtx, "agent", &resultsWG)
+		go ab.runAgents(aCtx, &runWG)
 	}
-	wg.Wait()
+	runWG.Wait()
+	close(aCtx.resultsChan)
+	close(aCtx.localProgress)
+	close(aCtx.upstreamProgress)
+	resultsWG.Wait()
+
 	return nil
 }
 
-func (ab *AgentBehaviorFederate) processResults(aCtx *AgentCallContext, dType string, upstreamProgress chan string, localProgress, resultsChan chan *types.Pair[string, any], wg *sync.WaitGroup) {
+func (ab *AgentBehaviorFederate) processResults(aCtx *AgentCallContext, dType string, wg *sync.WaitGroup) {
 outer:
 	for {
 		select {
 		case <-aCtx.ctx.Done():
 			aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Stream was cancelled", nil)
 			break outer
-		case update, ok := <-upstreamProgress:
+		case update, ok := <-aCtx.upstreamProgress:
 			if !ok {
 				break outer
 			}
@@ -147,7 +153,7 @@ outer:
 				callId := fmt.Sprintf("Upstream %s update", dType)
 				aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, fmt.Sprintf("%s: %s", callId, update), nil)
 			}
-		case pair, ok := <-localProgress:
+		case pair, ok := <-aCtx.localProgress:
 			if !ok {
 				break outer
 			}
@@ -155,7 +161,7 @@ outer:
 				callId := fmt.Sprintf("Agent update [%s]", pair.Left)
 				aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, fmt.Sprintf("%s: %s", callId, pair.Right), nil)
 			}
-		case pair, ok := <-resultsChan:
+		case pair, ok := <-aCtx.resultsChan:
 			if !ok {
 				break outer
 			}
@@ -169,79 +175,81 @@ outer:
 	wg.Done()
 }
 
-func (ab *AgentBehaviorFederate) runTools(aCtx *AgentCallContext, results map[string]any, upstreamProgress chan string, localProgress, resultsChan chan *types.Pair[string, any]) {
+func (ab *AgentBehaviorFederate) runTools(aCtx *AgentCallContext, wg *sync.WaitGroup) {
 	parallel := ab.agent.Config.Delegates.Parallel
-	wg := sync.WaitGroup{}
+	wg2 := sync.WaitGroup{}
 	for _, tc := range aCtx.tools {
 		if parallel {
-			wg.Add(1)
+			wg2.Add(1)
 			go func() {
-				ab.callTool(aCtx, &tc.ToolCall, results, upstreamProgress, localProgress, resultsChan)
-				wg.Done()
+				ab.callTool(aCtx, &tc.ToolCall)
+				wg2.Done()
 			}()
 		} else {
-			ab.callTool(aCtx, &tc.ToolCall, results, upstreamProgress, localProgress, resultsChan)
+			ab.callTool(aCtx, &tc.ToolCall)
 		}
 	}
 	if parallel {
-		wg.Wait()
+		wg2.Wait()
 	}
-	if resultsChan != nil {
-		close(resultsChan)
+	if wg != nil {
+		wg.Done()
 	}
 }
 
-func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentCallContext, results map[string]any, upstreamProgress chan string, localProgress, resultsChan chan *types.Pair[string, any]) {
+func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentCallContext, wg *sync.WaitGroup) {
 	parallel := ab.agent.Config.Delegates.Parallel
-	wg := sync.WaitGroup{}
+	wg2 := sync.WaitGroup{}
 	for _, a := range aCtx.agents {
 		if parallel {
-			wg.Add(1)
+			wg2.Add(1)
 			go func() {
-				ab.callAgent(aCtx, &a.AgentCall, results, upstreamProgress, localProgress, resultsChan)
-				wg.Done()
+				ab.callAgent(aCtx, &a.AgentCall)
+				wg2.Done()
 			}()
 		} else {
-			ab.callAgent(aCtx, &a.AgentCall, results, upstreamProgress, localProgress, resultsChan)
+			ab.callAgent(aCtx, &a.AgentCall)
 		}
 	}
 	if parallel {
-		wg.Wait()
+		wg2.Wait()
 	}
-	close(resultsChan)
+	if wg != nil {
+		wg.Done()
+	}
 }
 
-func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentCallContext, ac *a2aclient.AgentCall, results map[string]any, upstreamProgress chan string, localProgress, resultsChan chan *types.Pair[string, any]) {
-	err := ab.invokeAgent(aCtx, ac, upstreamProgress, localProgress, resultsChan)
+func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentCallContext, ac *a2aclient.AgentCall) {
+	err := ab.invokeAgent(aCtx, ac)
 	if err != nil {
 		aCtx.Log(err.Error())
-		if localProgress != nil {
-			localProgress <- types.NewPair[string, any](ac.Name, err.Error())
-		} else if results != nil {
-			results[ac.Name] = err.Error()
+		if aCtx.localProgress != nil {
+			aCtx.localProgress <- types.NewPair[string, any](ac.Name, err.Error())
+		} else if aCtx.agentResults != nil {
+			aCtx.agentResults[ac.Name] = err.Error()
 		}
 	}
 }
 
-func (ab *AgentBehaviorFederate) callTool(aCtx *AgentCallContext, tc *mcpclient.ToolCall, results map[string]any, upstreamProgress chan string, localProgress, resultsChan chan *types.Pair[string, any]) {
-	remoteResult, err := ab.invokeMCP(aCtx, tc, upstreamProgress, localProgress)
+func (ab *AgentBehaviorFederate) callTool(aCtx *AgentCallContext, tc *mcpclient.ToolCall) {
+	remoteResult, err := ab.invokeMCP(aCtx, tc)
 	if err != nil {
 		msg := fmt.Sprintf("Failed to invoke MCP tool [%s] at URL [%s] with error: %s", tc.Tool, tc.URL, err.Error())
 		aCtx.Log(msg)
-		if localProgress != nil {
-			localProgress <- types.NewPair[string, any](tc.Tool, msg)
-		} else if results != nil {
-			results[tc.Tool] = msg
+		if aCtx.localProgress != nil {
+			aCtx.localProgress <- types.NewPair[string, any](tc.Tool, msg)
+		} else if aCtx.toolResults != nil {
+			aCtx.toolResults[tc.Tool] = msg
 		}
 	} else {
 		output := map[string]any{}
 		if remoteResult["content"] != nil {
-			processMCPContent(tc.Tool, remoteResult, output, resultsChan)
+			processMCPContent(tc.Tool, remoteResult, output, aCtx.resultsChan)
 			delete(remoteResult, "content")
 		}
 		if remoteResult["structuredContent"] != nil {
-			if resultsChan != nil {
-				resultsChan <- types.NewPair(tc.Tool, remoteResult["structuredContent"])
+			if aCtx.resultsChan != nil {
+				aCtx.resultsChan <- types.NewPair(tc.Tool, remoteResult["structuredContent"])
 			} else {
 				output["upstreamContent"] = remoteResult["structuredContent"]
 			}
@@ -254,20 +262,20 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentCallContext, tc *mcpclient.
 			} else if m, ok := v.(map[string]any); ok {
 				count = len(m)
 			}
-			if resultsChan != nil {
-				resultsChan <- types.NewPair[string, any](tc.Tool, fmt.Sprintf("Sent %s with %d items.", k, count))
-				resultsChan <- types.NewPair[string, any](tc.Tool, map[string]any{k: v})
+			if aCtx.resultsChan != nil {
+				aCtx.resultsChan <- types.NewPair[string, any](tc.Tool, fmt.Sprintf("Sent %s with %d items.", k, count))
+				aCtx.resultsChan <- types.NewPair[string, any](tc.Tool, map[string]any{k: v})
 			} else {
 				output[k] = v
 			}
 		}
-		if results != nil {
-			results[tc.Tool] = output
+		if aCtx.toolResults != nil {
+			aCtx.toolResults[tc.Tool] = output
 		}
 		msg := fmt.Sprintf("Successfully invoked MCP tool [%s] at URL [%s]", tc.Tool, tc.URL)
 		aCtx.Log(msg)
-		if localProgress != nil {
-			localProgress <- types.NewPair[string, any](tc.Tool, msg)
+		if aCtx.localProgress != nil {
+			aCtx.localProgress <- types.NewPair[string, any](tc.Tool, msg)
 		} else {
 			output["toolResult"] = msg
 		}
@@ -295,12 +303,12 @@ func (ab *AgentBehaviorFederate) prepareArgs(args map[string]any, forwardHeaders
 	return newArgs
 }
 
-func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentCallContext, ac *a2aclient.AgentCall, upstreamProgress chan string, localProgress, resultsChan chan *types.Pair[string, any]) error {
+func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentCallContext, ac *a2aclient.AgentCall) error {
 	ab.prepareHeaders(aCtx, ac.ForwardHeaders, ac.Headers)
 	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s]", ac.Name, ac.URL)
 	aCtx.Log(msg)
-	if localProgress != nil {
-		localProgress <- types.NewPair[string, any](ac.Name, msg)
+	if aCtx.localProgress != nil {
+		aCtx.localProgress <- types.NewPair[string, any](ac.Name, msg)
 	}
 	client := a2aclient.NewA2AClient(ab.agent.Port)
 	if client == nil {
@@ -311,27 +319,27 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentCallContext, ac *a2aclie
 		return fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", ac.Name, ac.URL, err.Error())
 	} else {
 		msg = fmt.Sprintf("Loaded agent card for Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.URL, session.Card.Capabilities.Streaming)
-		localProgress <- types.NewPair[string, any](ac.Name, msg)
+		aCtx.localProgress <- types.NewPair[string, any](ac.Name, msg)
 	}
-	err = session.CallAgent(nil, resultsChan, upstreamProgress)
+	err = session.CallAgent(nil, aCtx.resultsChan, aCtx.upstreamProgress)
 	if err != nil {
 		return fmt.Errorf("Failed to call Agent [%s] URL [%s] with error: %s", ac.Name, ac.URL, err.Error())
 	} else {
 		msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.URL, session.Card.Capabilities.Streaming)
-		localProgress <- types.NewPair[string, any](ac.Name, msg)
+		aCtx.localProgress <- types.NewPair[string, any](ac.Name, msg)
 	}
 	return nil
 }
 
-func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentCallContext, tc *mcpclient.ToolCall, upstreamProgress chan string, localProgress chan *types.Pair[string, any]) (remoteResult map[string]any, err error) {
+func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentCallContext, tc *mcpclient.ToolCall) (remoteResult map[string]any, err error) {
 	ab.prepareHeaders(aCtx, tc.ForwardHeaders, tc.Headers)
 	args := ab.prepareArgs(tc.Args, tc.ForwardHeaders)
 	msg := fmt.Sprintf("Invoking MCP tool [%s] at URL [%s]", tc.Tool, tc.URL)
 	aCtx.Log(msg)
-	if localProgress != nil {
-		localProgress <- types.NewPair[string, any](tc.Tool, msg)
+	if aCtx.localProgress != nil {
+		aCtx.localProgress <- types.NewPair[string, any](tc.Tool, msg)
 	}
-	client := mcpclient.NewClient(ab.agent.Port, false, ab.agent.ID, upstreamProgress)
+	client := mcpclient.NewClient(ab.agent.Port, false, ab.agent.ID, aCtx.upstreamProgress)
 	session, err := client.ConnectWithHops(tc.URL, tc.Tool, aCtx.hops)
 	if err == nil {
 		defer session.Close()

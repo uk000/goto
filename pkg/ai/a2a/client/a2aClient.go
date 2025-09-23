@@ -46,7 +46,6 @@ type AgentCall struct {
 	Data           map[string]any      `json:"data,omitempty"`
 	Headers        map[string][]string `json:"headers,omitempty"`
 	ForwardHeaders []string            `json:"forwardHeaders,omitempty"`
-	delayD         time.Duration       `json:"-"`
 }
 
 type A2AClient struct {
@@ -184,6 +183,16 @@ func (ac *A2AClient) CallAgent(ctx context.Context, name, input string, data map
 	if err != nil {
 		return err
 	}
+	if call != nil && call.Delay != "" {
+		delay := types.ParseDelay(call.Delay)
+		if delay != nil {
+			d := delay.Compute()
+			if progressChan != nil {
+				progressChan <- fmt.Sprintf("Agent Call [%s]: Delaying call by %s", name, d)
+			}
+			delay.Apply()
+		}
+	}
 	return session.invokeAgent(input, data, callback, resultChan, progressChan)
 }
 
@@ -291,6 +300,7 @@ func (acs *A2AClientSession) processStreamResponse(eventChan <-chan a2aproto.Str
 		}
 	}
 }
+
 func (acs *A2AClientSession) processMessageResult(result *a2aproto.MessageResult) {
 	switch r := result.Result.(type) {
 	case *a2aproto.Message:
@@ -393,10 +403,6 @@ func (acs *A2AClientSession) sendResponse(text string, data any) {
 	}
 }
 
-func (ac *AgentCall) GetName() string {
-	return ac.Name
-}
-
 func (acs *A2AClientSession) Handle(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, error) {
 	var err error
 	var resp *http.Response
@@ -418,4 +424,24 @@ func (acs *A2AClientSession) Handle(ctx context.Context, client *http.Client, re
 	}
 
 	return resp, nil
+}
+
+func (ac *AgentCall) CloneWithUpdate(name, url, authority, message string, data map[string]any) *AgentCall {
+	clone := *ac
+	if name != "" {
+		clone.Name = name
+	}
+	if url != "" {
+		clone.URL = url
+	}
+	if authority != "" {
+		clone.Authority = authority
+	}
+	if message != "" {
+		clone.Message = message
+	}
+	if data != nil {
+		clone.Data = data
+	}
+	return &clone
 }

@@ -570,9 +570,8 @@ func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, h
 	for k, v := range args {
 		clone.Args[k] = v
 	}
+	if tc.Headers == nil {
+		tc.Headers = map[string][]string{}
+	}
 	return &clone
-}
-
-func (tc *ToolCall) GetName() string {
-	return tc.Tool
 }

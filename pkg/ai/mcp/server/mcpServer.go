@@ -510,7 +510,7 @@ func (m *MCPServer) AddTools(b []byte) ([]string, error) {
 			return nil, err
 		}
 		if tool.IsProxy {
-			proxy.GetMCPProxyForPort(m.Port).SetupMCPProxy(m.Name, tool.Config.Remote.URL, "", tool.Tool.Name, tool.Tool.Name, nil)
+			proxy.GetMCPProxyForPort(m.Port).SetupMCPProxy(m.Name, tool.Config.RemoteTool.URL, "", tool.Tool.Name, tool.Tool.Name, nil)
 		}
 		m.AddTool(tool)
 		tools = append(tools, tool)

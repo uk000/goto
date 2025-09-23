@@ -12,12 +12,13 @@ import (
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
-	"net/http"
 	"strings"
-	"sync"
 	"time"
 
+	a2aclient "goto/pkg/ai/a2a/client"
 	mcpclient "goto/pkg/ai/mcp/client"
+
+	a2aproto "trpc.group/trpc-go/trpc-a2a-go/protocol"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -42,6 +43,7 @@ type ToolBehavior struct {
 	Fetch         bool `json:"fetch,omitempty"`
 	Remote        bool `json:"remote,omitempty"`
 	MultiRemote   bool `json:"multiRemote,omitempty"`
+	Agents        bool `json:"agents,omitempty"`
 	ServerDetails bool `json:"serverDetails,omitempty"`
 	ServerPaths   bool `json:"serverPaths,omitempty"`
 	AllServers    bool `json:"allServers,omitempty"`
@@ -49,13 +51,15 @@ type ToolBehavior struct {
 }
 
 type ToolConfig struct {
-	Remote      *mcpclient.ToolCall     `json:"remote,omitempty"`
+	RemoteTool  *mcpclient.ToolCall     `json:"remote,omitempty"`
 	MultiRemote [][]*mcpclient.ToolCall `json:"multiRemote,omitempty"`
+	Agent       *a2aclient.AgentCall    `json:"agent,omitempty"`
 	Delay       *types.Delay            `json:"delay,omitempty"`
 }
 
 type RemoteCallArgs struct {
 	ToolName       string            `json:"tool,omitempty"`
+	AgentName      string            `json:"agent,omitempty"`
 	URL            string            `json:"url,omitempty"`
 	Authority      string            `json:"authority,omitempty"`
 	SSE            bool              `json:"sse,omitempty"`
@@ -63,6 +67,8 @@ type RemoteCallArgs struct {
 	Headers        map[string]string `json:"headers,omitempty"`
 	ForwardHeaders []string          `json:"forwardHeaders,omitempty"`
 	ToolArgs       map[string]any    `json:"args,omitempty"`
+	AgentMessage   string            `json:"agentMessage,omitempty"`
+	AgentData      map[string]any    `json:"agentData,omitempty"`
 }
 
 type ToolCallContext struct {
@@ -99,7 +105,7 @@ func ParseTool(payload []byte) (tool *MCPTool, err error) {
 		return
 	}
 	tool.Kind = KindTools
-	if (tool.Behavior.Remote || tool.Behavior.Fetch) && (tool.Config.Remote == nil || tool.Config.Remote.URL == "") {
+	if (tool.Behavior.Remote || tool.Behavior.Fetch) && (tool.Config.RemoteTool == nil || tool.Config.RemoteTool.URL == "") {
 		err = errors.New("remote config required")
 	}
 	if tool.Name == "" {
@@ -107,7 +113,7 @@ func ParseTool(payload []byte) (tool *MCPTool, err error) {
 	}
 	tool.Name = strings.ReplaceAll(tool.Name, "\"", "")
 	if tool.Behavior.Fetch {
-		isTLS := strings.HasPrefix(tool.Config.Remote.URL, "https:")
+		isTLS := strings.HasPrefix(tool.Config.RemoteTool.URL, "https:")
 		client := transport.CreateDefaultHTTPClient(tool.Name, false, isTLS, metrics.ConnTracker)
 		tool.client = client
 	}
@@ -144,7 +150,7 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 	var remoteArgs *RemoteCallArgs
 	var args map[string]any
 	if req.Params != nil && req.Params.Arguments != nil {
-		if t.Config.Remote != nil {
+		if t.Config.RemoteTool != nil {
 			remoteArgs, err = parseRemoteCallArgs(req.Params.Arguments)
 		} else {
 			args, err = parseArgs(req.Params.Arguments)
@@ -212,6 +218,8 @@ func (t *ToolCallContext) RunTool() (result *gomcp.CallToolResult, err error) {
 		result, err = t.fetch()
 	} else if t.Behavior.Remote {
 		result, err = t.remoteToolCall()
+	} else if t.Behavior.Agents {
+		result, err = t.remoteAgentCall()
 	} else if t.Behavior.ServerDetails {
 		result, err = t.sendServerDetails()
 	} else if t.Behavior.ServerPaths {
@@ -426,173 +434,6 @@ func (t *ToolCallContext) elicit() (*gomcp.CallToolResult, error) {
 	return result, nil
 }
 
-func (t *ToolCallContext) fetch() (*gomcp.CallToolResult, error) {
-	result := &gomcp.CallToolResult{}
-	url := t.Config.Remote.URL
-	authority := t.Config.Remote.Authority
-	if t.remoteArgs == nil {
-		t.remoteArgs = &RemoteCallArgs{}
-	}
-	if t.remoteArgs.URL != "" {
-		url = t.remoteArgs.URL
-	}
-	if t.remoteArgs.Authority != "" {
-		authority = t.remoteArgs.Authority
-	}
-	forwardHeaders := map[string]bool{}
-	for _, h := range t.remoteArgs.ForwardHeaders {
-		forwardHeaders[h] = true
-	}
-	for _, h := range t.Config.Remote.ForwardHeaders {
-		forwardHeaders[h] = true
-	}
-	if !strings.HasPrefix(url, "http") {
-		url = "http://" + url
-	}
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	for h, v := range t.remoteArgs.Headers {
-		req.Header.Add(h, v)
-	}
-	if t.headers != nil {
-		for h := range forwardHeaders {
-			if t.headers[h] != nil {
-				req.Header[h] = t.headers[h]
-			}
-		}
-	}
-	if authority != "" {
-		req.Host = t.remoteArgs.Authority
-	}
-	if req.Host == "" {
-		req.Host = req.URL.Host
-	}
-	util.PrintRequest("Tool Remote HTTP Call Request Details", req)
-	resp, err := t.client.HTTP().Do(req)
-	msg := ""
-	if err != nil {
-		msg = fmt.Sprintf("Server [%s] Failed to invoke Remote URL [%s] with error: %s", t.Server.GetName(), url, err.Error())
-		t.Log(msg)
-		result.IsError = true
-		result.Content = append(result.Content, &gomcp.TextContent{Text: msg})
-	} else {
-		t.notifyClient(t.Log(fmt.Sprintf("Server [%s] fetched response from remote URL [%s]", t.Server.GetName(), url)), 0)
-		output := util.Read(resp.Body)
-		result.Content = append(result.Content, &gomcp.TextContent{Text: output})
-	}
-	t.applyDelay()
-	return result, err
-}
-
-func (t *ToolCallContext) addForwardHeaders(tc *mcpclient.ToolCall) {
-	forwardHeaders := map[string]bool{}
-	if t.remoteArgs.ToolArgs["forwardHeaders"] != nil {
-		if arr, ok := t.remoteArgs.ToolArgs["forwardHeaders"].([]string); ok {
-			for _, h := range arr {
-				forwardHeaders[h] = true
-			}
-		}
-	}
-	if t.remoteArgs.ForwardHeaders == nil {
-		t.remoteArgs.ForwardHeaders = []string{}
-	}
-	t.remoteArgs.ForwardHeaders = append(t.remoteArgs.ForwardHeaders, t.Config.Remote.ForwardHeaders...)
-	for _, h := range t.remoteArgs.ForwardHeaders {
-		forwardHeaders[h] = true
-	}
-	toolForwardHeaders := []string{}
-	for h := range forwardHeaders {
-		toolForwardHeaders = append(toolForwardHeaders, h)
-	}
-	t.remoteArgs.ToolArgs["forwardHeaders"] = toolForwardHeaders
-	tc.Args["forwardHeaders"] = toolForwardHeaders
-	if t.headers != nil {
-		if tc.Headers == nil {
-			tc.Headers = map[string][]string{}
-		}
-		for _, h := range t.remoteArgs.ForwardHeaders {
-			for h2, v2 := range t.headers {
-				if strings.EqualFold(h, h2) {
-					tc.Headers[h] = v2
-					break
-				}
-			}
-		}
-	}
-}
-
-func (t *ToolCallContext) remoteToolCall() (*gomcp.CallToolResult, error) {
-	result := &gomcp.CallToolResult{}
-	if t.remoteArgs == nil {
-		t.remoteArgs = &RemoteCallArgs{}
-	}
-	if t.remoteArgs.ToolArgs == nil {
-		t.remoteArgs.ToolArgs = map[string]any{}
-	}
-	tc := t.Config.Remote.UpdateAndClone(t.remoteArgs.ToolName, t.remoteArgs.URL, "", t.remoteArgs.Authority,
-		t.remoteArgs.Delay, t.remoteArgs.Headers, t.remoteArgs.ToolArgs)
-	t.addForwardHeaders(tc)
-	isSSE := t.sse
-	if t.remoteArgs.SSE || tc.ForceSSE {
-		isSSE = true
-	}
-	url := tc.URL
-	argHasURL := !strings.EqualFold(t.Config.Remote.URL, t.remoteArgs.URL)
-	if isSSE && !argHasURL {
-		// url = tc.SSEURL
-	}
-	operLabel := fmt.Sprintf("%s->%s@%s", t.Label, tc.Tool, tc.Server)
-	var remoteResult map[string]any
-	var err error
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		client := mcpclient.NewClient(t.Server.GetPort(), false, t.Server.ID, nil)
-		var session *mcpclient.MCPSession
-		session, err = client.ConnectWithHops(url, t.Label, t.hops)
-		if err == nil {
-			defer session.Close()
-			remoteResult, err = session.CallTool(tc, tc.Args)
-		}
-		wg.Done()
-	}()
-	wg.Wait()
-	if err != nil {
-		msg := fmt.Sprintf("Server [%s] Failed to invoke Remote tool [%s] at URL [%s] with error: %s",
-			t.Server.GetName(), tc.Tool, tc.URL, err.Error())
-		t.Log(msg)
-		result = &gomcp.CallToolResult{Content: []gomcp.Content{&gomcp.TextContent{Text: msg}}, IsError: true}
-	} else {
-		msg := fmt.Sprintf("Remote operation [%s] successful on [%s]. Sending response...", operLabel, tc.URL)
-		t.notifyClient(msg, 0)
-		t.applyDelay()
-		if remoteResult["content"] != nil {
-			content := remoteResult["content"]
-			if c, ok := content.([]gomcp.Content); ok {
-				result.Content = c
-			} else if arr, ok := content.([]any); ok {
-				for _, item := range arr {
-					result.Content = append(result.Content, &gomcp.TextContent{Text: fmt.Sprintf("%+v", item)})
-				}
-			} else if s, ok := content.(string); ok {
-				result.Content = []gomcp.Content{&gomcp.TextContent{Text: s}}
-			} else {
-				result.Content = []gomcp.Content{&gomcp.TextContent{Text: fmt.Sprintf("%+v", content)}}
-			}
-		}
-		delete(remoteResult, "content")
-		output := map[string]any{}
-		output["Goto-Client-Info"] = remoteResult["Goto-Client-Info"]
-		delete(remoteResult, "Goto-Client-Info")
-		output["upstreamContent"] = remoteResult["structuredContent"]
-		output["toolResult"] = msg
-		result.StructuredContent = output
-	}
-	return result, err
-}
-
 func (t *ToolCallContext) sendPayload() (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	var delay time.Duration
@@ -665,4 +506,18 @@ func (t *ToolCallContext) sendAllComponents() (*gomcp.CallToolResult, error) {
 	result.Content = append(result.Content, &gomcp.TextContent{Text: util.ToJSONText(AllComponents)})
 	t.Log(fmt.Sprintf("%s sent all components", t.Label))
 	return result, nil
+}
+
+func createContent(key string, result any) (gomcp.Content, any) {
+	content := &gomcp.TextContent{}
+	var data any
+	if s, ok := result.(string); ok {
+		content.Text = fmt.Sprintf("[%s] %s: %s", time.Now().Format(time.RFC3339Nano), key, s)
+	} else if t, ok := result.(a2aproto.TextPart); ok {
+		content.Text = t.Text
+	} else {
+		content.Text = fmt.Sprintf("[%s] %s: %s", time.Now().Format(time.RFC3339Nano), key, util.ToJSONText(result))
+		data = result
+	}
+	return content, data
 }

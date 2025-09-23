@@ -27,22 +27,27 @@ type AgentTask struct {
 }
 
 type AgentCallContext struct {
-	serverID string
-	agent    *model.Agent
-	behavior model.IAgentBehavior
-	ctx      context.Context
-	rs       *util.RequestStore
-	headers  http.Header
-	delay    *types.Delay
-	triggers DelegateTriggers
-	tools    map[string]*model.DelegateToolCall
-	agents   map[string]*model.DelegateAgentCall
-	input    a2aproto.Message
-	options  taskmanager.ProcessOptions
-	handler  taskmanager.TaskHandler
-	task     *AgentTask
-	hops     *util.Hops
-	logs     []string
+	serverID         string
+	agent            *model.Agent
+	behavior         model.IAgentBehavior
+	ctx              context.Context
+	rs               *util.RequestStore
+	headers          http.Header
+	delay            *types.Delay
+	triggers         DelegateTriggers
+	tools            map[string]*model.DelegateToolCall
+	agents           map[string]*model.DelegateAgentCall
+	input            a2aproto.Message
+	options          taskmanager.ProcessOptions
+	handler          taskmanager.TaskHandler
+	task             *AgentTask
+	hops             *util.Hops
+	logs             []string
+	resultsChan      chan *types.Pair[string, any]
+	upstreamProgress chan string
+	localProgress    chan *types.Pair[string, any]
+	toolResults      map[string]any
+	agentResults     map[string]any
 }
 
 type toolOverrides struct {
