@@ -65,10 +65,9 @@ type MCPServerPayload struct {
 }
 
 type SessionContext struct {
-	Server   *MCPServer
-	RS       *util.RequestStore
-	Headers  http.Header
-	finished chan bool
+	SessionID string
+	Server    *MCPServer
+	finished  chan bool
 }
 
 type PortServers struct {
@@ -91,7 +90,7 @@ var (
 	DefaultStatelessServer *MCPServer
 	DefaultStatefulServer  *MCPServer
 	PortsServers           = map[int]*PortServers{}
-	ServerRoutes           = map[string]*types.Pair{}
+	ServerRoutes           = map[string]*types.Pair[string, string]{}
 	AllComponents          = map[string]map[string]map[string]IMCPComponent{}
 	Kinds                  = []string{KindTools, KindPrompts, KindResources, KindTemplates}
 	Middleware             = middleware.NewMiddleware("mcpserver", nil, nil)
@@ -106,7 +105,7 @@ func init() {
 
 func InitDefaultServer() {
 	p := &MCPServerPayload{
-		Port:         global.Self.MCPPort,
+		Port:         global.Self.JSONRPCPort,
 		Name:         "default-stateless",
 		Version:      "1.0",
 		Description:  "Default Stateless Server",
@@ -116,12 +115,12 @@ func InitDefaultServer() {
 		Enabled:      true,
 	}
 	DefaultStatelessServer = GetPortMCPServers(p.Port).AddMCPServer(p)
-	DefaultStatelessServer.sseHandler = gomcp.NewSSEHandler(func(r *http.Request) *gomcp.Server { return DefaultStatelessServer.server })
+	DefaultStatelessServer.sseHandler = gomcp.NewSSEHandler(func(r *http.Request) *gomcp.Server { return DefaultStatelessServer.server }, &gomcp.SSEOptions{})
 	DefaultStatelessServer.streamHTTPHandler = gomcp.NewStreamableHTTPHandler(func(r *http.Request) *gomcp.Server { return DefaultStatelessServer.server }, &gomcp.StreamableHTTPOptions{Stateless: true})
 	DefaultStatelessServer.handler = MCPHybridHandler(DefaultStatelessServer)
 
 	p2 := &MCPServerPayload{
-		Port:         global.Self.MCPPort,
+		Port:         global.Self.JSONRPCPort,
 		Name:         "default-stateful",
 		Version:      "1.0",
 		Description:  "Default Stateful Server",
@@ -131,7 +130,7 @@ func InitDefaultServer() {
 		Enabled:      true,
 	}
 	DefaultStatefulServer = GetPortMCPServers(p2.Port).AddMCPServer(p2)
-	DefaultStatefulServer.sseHandler = gomcp.NewSSEHandler(func(r *http.Request) *gomcp.Server { return DefaultStatefulServer.server })
+	DefaultStatefulServer.sseHandler = gomcp.NewSSEHandler(func(r *http.Request) *gomcp.Server { return DefaultStatefulServer.server }, &gomcp.SSEOptions{})
 	DefaultStatefulServer.streamHTTPHandler = gomcp.NewStreamableHTTPHandler(func(r *http.Request) *gomcp.Server { return DefaultStatefulServer.server }, &gomcp.StreamableHTTPOptions{Stateless: false})
 	DefaultStatefulServer.handler = MCPHybridHandler(DefaultStatefulServer)
 
@@ -178,7 +177,7 @@ func NewMCPServer(p *MCPServerPayload) *MCPServer {
 		server.uriRegexp = regexp.MustCompile(fmt.Sprintf("%s%s%s", util.URIPrefixRegexParts[0], server.URI, util.URIPrefixRegexParts[1]))
 	}
 	server.streamHTTPHandler = gomcp.NewStreamableHTTPHandler(getServer, &gomcp.StreamableHTTPOptions{Stateless: p.Stateless})
-	server.sseHandler = gomcp.NewSSEHandler(getServer)
+	server.sseHandler = gomcp.NewSSEHandler(getServer, &gomcp.SSEOptions{})
 	server.handler = MCPHybridHandler(server)
 	server.server.AddReceivingMiddleware(server.Middleware)
 	server.AddTool(&MCPTool{
@@ -232,12 +231,12 @@ func SetServerRoute(uri string, server *MCPServer) {
 		parts := strings.Split(uri, "/mcp")
 		server.SSEURI = parts[0] + "/mcp/sse" + parts[1]
 	}
-	pair := &types.Pair{Left: server.Name, Right: ""}
+	pair := types.NewPair(server.Name, "")
 	ServerRoutes[uri] = pair
 	ServerRoutes[server.SSEURI] = pair
 	for tool := range server.Tools {
 		tool = strings.ToLower(tool)
-		pair := &types.Pair{Left: server.Name, Right: tool}
+		pair := types.NewPair(server.Name, tool)
 		ServerRoutes[uri+"/"+tool] = pair
 		ServerRoutes[server.SSEURI+"/"+tool] = pair
 	}
@@ -533,7 +532,7 @@ func (m *MCPServer) AddTool(tool *MCPTool) {
 	m.lock.Lock()
 	m.Tools[tool.Tool.Name] = tool
 	m.ToolsByURI[tool.URI] = tool
-	pair := &types.Pair{Left: m.Name, Right: tool}
+	pair := types.NewPair(m.Name, tool.Name)
 	ServerRoutes[m.URI+tool.URI] = pair
 	ServerRoutes[m.SSEURI+tool.URI] = pair
 	m.lock.Unlock()
@@ -671,27 +670,37 @@ func (m *MCPServer) onUnsubscribed(ctx context.Context, req *gomcp.UnsubscribeRe
 	return nil
 }
 
-func (m *MCPServer) GetSessionContext(sessionID string) *SessionContext {
+func (m *MCPServer) getSessionContext(sessionID string) *SessionContext {
 	log.Println("GetSessionContext")
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	return m.sessionContexts[sessionID]
 }
 
-func (m *MCPServer) GetAndClearSessionContext(sessionID string) *SessionContext {
-	log.Println("GetAndClearSessionContext")
+func (m *MCPServer) removeSessionContext(sessionID string) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	sc := m.sessionContexts[sessionID]
 	delete(m.sessionContexts, sessionID)
-	return sc
 }
 
-func (m *MCPServer) SetSessionContext(sessionID string, ctx *SessionContext) {
-	log.Println("SetSessionContext")
+func (m *MCPServer) setSessionContext(sessionID string, ctx *SessionContext) {
 	m.lock.Lock()
 	m.sessionContexts[sessionID] = ctx
 	m.lock.Unlock()
+}
+
+func (m *MCPServer) getOrSetSessionContext(r *http.Request) (session *SessionContext) {
+	sessionID := r.Header.Get(HeaderMCPSessionID)
+	if sessionID != "" {
+		session = m.getSessionContext(sessionID)
+		if session == nil {
+			session = &SessionContext{SessionID: sessionID, Server: m, finished: make(chan bool, 10)}
+			m.setSessionContext(sessionID, session)
+		} else {
+			session.Server = m
+		}
+	}
+	return
 }
 
 func (m *MCPServer) Middleware(next gomcp.MethodHandler) gomcp.MethodHandler {
@@ -732,20 +741,4 @@ func (m *MCPServer) Middleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 		log.Println("----- End MCP -----")
 		return result, err
 	}
-}
-
-func (m *MCPServer) getOrSetSessionContext(r *http.Request) (session *SessionContext) {
-	sessionID := r.Header.Get(HeaderMCPSessionID)
-	rs := util.GetRequestStore(r)
-	if sessionID != "" {
-		session = m.GetSessionContext(sessionID)
-		if session == nil {
-			session = &SessionContext{Server: m, RS: rs, finished: make(chan bool, 10)}
-			m.SetSessionContext(sessionID, session)
-		} else {
-			session.Server = m
-			session.RS = rs
-		}
-	}
-	return
 }

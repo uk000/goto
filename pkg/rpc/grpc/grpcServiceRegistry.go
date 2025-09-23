@@ -78,8 +78,8 @@ type GRPCResponsePayload []byte
 type GRPCServiceRegistry struct {
 	Services       map[string]*GRPCService
 	ActiveServices map[string]*GRPCService
-	ProxyServices  map[string]*types.Triple
-	TeeServices    map[int]*types.Pair
+	ProxyServices  map[string]*types.Triple[*GRPCService, *GRPCService, int]
+	TeeServices    map[int]*types.Pair[*GRPCService, *GRPCService]
 	lock           sync.RWMutex
 }
 
@@ -108,8 +108,8 @@ func (gsr *GRPCServiceRegistry) Init() {
 	defer gsr.lock.Unlock()
 	gsr.Services = map[string]*GRPCService{}
 	gsr.ActiveServices = map[string]*GRPCService{}
-	gsr.ProxyServices = map[string]*types.Triple{}
-	gsr.TeeServices = map[int]*types.Pair{}
+	gsr.ProxyServices = map[string]*types.Triple[*GRPCService, *GRPCService, int]{}
+	gsr.TeeServices = map[int]*types.Pair[*GRPCService, *GRPCService]{}
 }
 
 func (gsr *GRPCServiceRegistry) GetService(name string) *GRPCService {
@@ -138,7 +138,7 @@ func (gsr *GRPCServiceRegistry) GetProxyService(name string) (*GRPCService, *GRP
 	defer gsr.lock.RUnlock()
 	triple := gsr.ProxyServices[name]
 	if triple != nil {
-		return triple.First.(*GRPCService), triple.Second.(*GRPCService), triple.Third.(int)
+		return triple.First, triple.Second, triple.Third
 	}
 	return nil, nil, 0
 }
@@ -148,7 +148,7 @@ func (gsr *GRPCServiceRegistry) GetTeeServices(port int) (*GRPCService, *GRPCSer
 	defer gsr.lock.RUnlock()
 	pair := gsr.TeeServices[port]
 	if pair != nil {
-		return pair.Left.(*GRPCService), pair.Right.(*GRPCService)
+		return pair.Left, pair.Right
 	}
 	return nil, nil
 }
@@ -162,9 +162,9 @@ func (gsr *GRPCServiceRegistry) AddActiveService(s *GRPCService) {
 func (gsr *GRPCServiceRegistry) AddProxyService(from, to *GRPCService, teeport int) {
 	gsr.lock.Lock()
 	defer gsr.lock.Unlock()
-	gsr.ProxyServices[from.Name] = &types.Triple{First: from, Second: to, Third: teeport}
+	gsr.ProxyServices[from.Name] = types.NewTriple(from, to, teeport)
 	if teeport > 0 {
-		gsr.TeeServices[teeport] = &types.Pair{Left: from, Right: to}
+		gsr.TeeServices[teeport] = types.NewPair(from, to)
 	}
 }
 

@@ -1,9 +1,38 @@
 package util
 
 import (
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
+
+var (
+	BeforeRegex  = `(.*[\s\(\)\[\]\{\}])?`
+	AfterRegex   = `([\s\(\)\[\]\{\}].*)?`
+	EmbeddedJSON = regexp.MustCompile(`\{[^}]*\}`)
+	PortHint     = regexp.MustCompile(`(?i)\bport\s*(\d+)`)
+)
+
+func ExtractEmbeddedJSON(text string) (input string, jsons []map[string]any) {
+	matches := EmbeddedJSON.FindAll([]byte(text), len(text))
+	for _, b := range matches {
+		jsons = append(jsons, JSONFromBytes(b).Object())
+	}
+	input = string(EmbeddedJSON.ReplaceAll([]byte(text), []byte("")))
+	return
+}
+
+func ExtractPortHint(text string) (string, string) {
+	matches := PortHint.FindStringSubmatch(text)
+	if len(matches) > 1 {
+		if _, err := strconv.Atoi(matches[1]); err == nil {
+			// text = string(PortHint.ReplaceAll([]byte(text), []byte("")))
+			return text, matches[1]
+		}
+	}
+	return text, ""
+}
 
 func SplitTextIntoChunks(text string, chunkSize int) []string {
 	// If text is short enough, return it as a single chunk

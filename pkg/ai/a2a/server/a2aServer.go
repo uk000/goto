@@ -1,10 +1,11 @@
 package a2aserver
 
 import (
+	"context"
 	"fmt"
 	"goto/pkg/ai/a2a/model"
+	"goto/pkg/global"
 	"goto/pkg/util"
-	"log"
 	"net/http"
 	"sync"
 
@@ -13,6 +14,8 @@ import (
 )
 
 type A2AServer struct {
+	ID      string
+	Port    int
 	Agents  map[string]*model.Agent `json:"agents"`
 	Enabled bool                    `json:"enabled"`
 	lock    sync.RWMutex
@@ -28,7 +31,7 @@ func GetOrAddServer(port int) *A2AServer {
 	defer lock.Unlock()
 	s := PortServers[port]
 	if s == nil {
-		s = newA2AServer()
+		s = newA2AServer(port)
 		PortServers[port] = s
 	}
 	return s
@@ -42,11 +45,19 @@ func GetAgent(port int, name string) *model.Agent {
 func ClearServer(port int) {
 	lock.Lock()
 	defer lock.Unlock()
-	PortServers[port] = newA2AServer()
+	PortServers[port] = newA2AServer(port)
 }
 
-func newA2AServer() *A2AServer {
+func ClearAllServers() {
+	lock.Lock()
+	defer lock.Unlock()
+	PortServers = map[int]*A2AServer{}
+}
+
+func newA2AServer(port int) *A2AServer {
 	return &A2AServer{
+		ID:      global.Funcs.GetListenerLabelForPort(port),
+		Port:    port,
 		Agents:  map[string]*model.Agent{},
 		Enabled: true,
 	}
@@ -72,6 +83,8 @@ func (a *A2AServer) AddAgent(agent *model.Agent) error {
 
 func (a *A2AServer) PrepareAgent(agent *model.Agent) error {
 	PrepareAgentBehavior(agent)
+	agent.ID = fmt.Sprintf("%s@%s", agent.Card.Name, a.ID)
+	agent.Port = a.Port
 	tm, err := trpctask.NewMemoryTaskManager(agent.Behavior.Impl)
 	if err != nil {
 		return err
@@ -83,6 +96,12 @@ func (a *A2AServer) PrepareAgent(agent *model.Agent) error {
 	return err
 }
 
+func PrepareAgentBehavior(agent *model.Agent) {
+	b := newAgentBehavior(agent)
+	b.prepareDelay()
+	b.prepareDelegates()
+}
+
 func (a *A2AServer) GetAgent(name string) *model.Agent {
 	a.lock.RLock()
 	defer a.lock.RUnlock()
@@ -90,12 +109,17 @@ func (a *A2AServer) GetAgent(name string) *model.Agent {
 }
 
 func (a *A2AServer) Serve(name string, w http.ResponseWriter, r *http.Request) error {
-	log.Println("-------- A2A Request Details --------")
-	util.PrintRequest(r)
+	util.PrintRequest("A2A Request Details", r)
 	agent := a.GetAgent(name)
 	if agent == nil {
 		return fmt.Errorf("agent [%s] not found", name)
 	}
+	ctx := r.Context()
+	_, rs := util.GetRequestStoreFromContext(ctx)
+	rs.RequestHeaders = r.Header
+	aCtx := newAgentCallContext(a.ID, agent, r.Header, rs)
+	r = r.WithContext(context.WithValue(ctx, util.AgentContextKey, aCtx))
+	aCtx.ctx = r.Context()
 	agent.Serve(w, r)
 	return nil
 }

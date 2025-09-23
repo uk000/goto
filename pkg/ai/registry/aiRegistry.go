@@ -30,7 +30,7 @@ type SkillsRegistry struct {
 }
 
 type AgentRegistry struct {
-	Agents map[string]*a2amodel.Agent
+	Agents map[string]map[int]*a2amodel.Agent
 	lock   sync.RWMutex
 }
 
@@ -65,25 +65,34 @@ func newSkillsRegistry() *SkillsRegistry {
 }
 
 func (r *AgentRegistry) init() {
-	r.Agents = map[string]*a2amodel.Agent{}
+	r.Agents = map[string]map[int]*a2amodel.Agent{}
 }
 
-func (r *AgentRegistry) AddAgents(agents []*a2amodel.Agent) {
+func (r *AgentRegistry) AddAgents(agents []*a2amodel.Agent, port int) {
 	for _, agent := range agents {
-		r.AddAgent(agent)
+		r.AddAgent(agent, port)
 	}
 }
 
-func (r *AgentRegistry) AddAgent(agent *a2amodel.Agent) {
+func (r *AgentRegistry) AddAgent(agent *a2amodel.Agent, port int) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
-	r.Agents[agent.Card.Name] = agent
+	if r.Agents[agent.Card.Name] == nil {
+		r.Agents[agent.Card.Name] = map[int]*a2amodel.Agent{}
+	}
+	r.Agents[agent.Card.Name][port] = agent
 }
 
-func (ar *AgentRegistry) GetAgent(name string) *a2amodel.Agent {
-	ar.lock.RLock()
-	defer ar.lock.RUnlock()
-	return ar.Agents[name]
+func (r *AgentRegistry) GetAgents(name string) map[int]*a2amodel.Agent {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	return r.Agents[name]
+}
+
+func (r *AgentRegistry) Clear() {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	r.Agents = map[string]map[int]*a2amodel.Agent{}
 }
 
 func (mr *MCPRegistry) init() {

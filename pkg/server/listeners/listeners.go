@@ -56,7 +56,6 @@ type Listener struct {
 	IsHTTP2       bool                        `json:"isH2"`
 	IsGRPC        bool                        `json:"isGRPC"`
 	IsJSONRPC     bool                        `json:"isJSONRPC"`
-	IsMCP         bool                        `json:"isMCP"`
 	IsTCP         bool                        `json:"isTCP"`
 	IsUDP         bool                        `json:"isUDP"`
 	IsXDS         bool                        `json:"isXDS"`
@@ -81,12 +80,12 @@ const (
 	PROTOL_H2C     = "h2c"
 	PROTO_GRPC     = "GRPC"
 	PROTOL_GRPC    = "grpc"
-	PROTO_MCP      = "MCP"
-	PROTOL_MCP     = "mcp"
 	PROTO_UDP      = "UDP"
 	PROTOL_UDP     = "udp"
 	PROTO_JSONRPC  = "JSONRPC"
 	PROTOL_JSONRPC = "jsonrpc"
+	PROTO_RPC      = "RPC"
+	PROTOL_RPC     = "rpc"
 	PROTO_XDS      = "XDS"
 	PROTOL_XDS     = "xds"
 	PROTO_TCP      = "TCP"
@@ -96,24 +95,24 @@ const (
 )
 
 var (
-	DefaultListener     = newListener(global.Self.ServerPort, PROTOL_HTTP, constants.DefaultCommonName, true)
-	DefaultGRPCListener = newListener(global.Self.GRPCPort, PROTOL_GRPC, constants.DefaultCommonName, false)
-	listeners           = map[int]*Listener{}
-	grpcListeners       = map[int]*Listener{}
-	udpListeners        = map[int]*Listener{}
-	listenerGenerations = map[int]int{}
-	initialListeners    = []*Listener{}
-	initialHTTPStarted  = false
-	initialMCPStarted   = false
-	grpcStarted         = false
-	httpStarted         = false
-	mcpStarted          = false
-	httpServer          *http.Server
-	mcpServer           *http.Server
-	serveTCP            func(string, int, net.Listener) error
-	serveXDS            func(*grpc.Server)
-	DefaultLabel        string
-	listenersLock       sync.RWMutex
+	DefaultListener       = newListener(global.Self.ServerPort, PROTOL_HTTP, constants.DefaultCommonName, true)
+	DefaultGRPCListener   = newListener(global.Self.GRPCPort, PROTOL_GRPC, constants.DefaultCommonName, false)
+	listeners             = map[int]*Listener{}
+	grpcListeners         = map[int]*Listener{}
+	udpListeners          = map[int]*Listener{}
+	listenerGenerations   = map[int]int{}
+	initialListeners      = []*Listener{}
+	initialHTTPStarted    = false
+	initialJSONRPCStarted = false
+	grpcStarted           = false
+	httpStarted           = false
+	jsonRPCStarted        = false
+	httpServer            *http.Server
+	jsonRPCServer         *http.Server
+	serveTCP              func(string, int, net.Listener) error
+	serveXDS              func(*grpc.Server)
+	DefaultLabel          string
+	listenersLock         sync.RWMutex
 )
 
 func Init() {
@@ -135,15 +134,15 @@ func Init() {
 	global.AddGRPCStopWatcher(OnGRPCStop)
 	global.AddHTTPStartWatcher(OnHTTPStart)
 	global.AddHTTPStopWatcher(OnHTTPStop)
-	global.AddMCPStartWatcher(OnMCPStart)
-	global.AddMCPStopWatcher(OnMCPStop)
+	global.AddJSONRPCStartWatcher(OnJSONRPCStart)
+	global.AddJSONRPCStopWatcher(OnJSONRPCStop)
 	global.AddTCPServeWatcher(ConfigureTCPServer)
 }
 
 func OnGRPCStart() {
 	grpcStarted = true
 	if httpStarted {
-		AddInitialHTTPListeners(false)
+		addInitialHTTPListeners(false)
 	}
 }
 
@@ -158,7 +157,7 @@ func OnHTTPStart(s *http.Server) {
 	httpStarted = true
 	httpServer = s
 	if grpcStarted {
-		AddInitialHTTPListeners(false)
+		addInitialHTTPListeners(false)
 	}
 }
 
@@ -167,19 +166,20 @@ func OnHTTPStop() {
 	httpServer = nil
 }
 
-func OnMCPStart(s *http.Server) {
-	mcpStarted = true
-	mcpServer = s
-	AddInitialHTTPListeners(true)
+func OnJSONRPCStart(s *http.Server) {
+	jsonRPCStarted = true
+	jsonRPCServer = s
+	addInitialHTTPListeners(true)
 }
 
-func OnMCPStop() {
-	mcpStarted = false
-	mcpServer = nil
+func OnJSONRPCStop() {
+	jsonRPCStarted = false
+	jsonRPCServer = nil
 }
 
 func ConfigureTCPServer(serve func(listenerID string, port int, listener net.Listener) error) {
 	serveTCP = serve
+	addInitialTCPListeners()
 }
 
 func ConfigureXDSServer(serve func(*grpc.Server)) {
@@ -203,18 +203,26 @@ func AddInitialGRPCListeners() {
 	}
 }
 
-func AddInitialHTTPListeners(mcp bool) {
-	if mcp && !initialMCPStarted || !mcp && !initialHTTPStarted {
+func addInitialHTTPListeners(jsonRPC bool) {
+	if jsonRPC && !initialJSONRPCStarted || !jsonRPC && !initialHTTPStarted {
 		time.Sleep(1 * time.Second)
 		for _, l := range initialListeners {
-			if (l.IsMCP && mcp) || (!l.IsMCP && l.IsHTTP && !mcp) {
+			if (l.IsJSONRPC && jsonRPC) || (!l.IsJSONRPC && l.IsHTTP && !jsonRPC) {
 				addOrUpdateListener(l)
 			}
 		}
-		if mcp {
-			initialMCPStarted = true
+		if jsonRPC {
+			initialJSONRPCStarted = true
 		} else {
 			initialHTTPStarted = true
+		}
+	}
+}
+
+func addInitialTCPListeners() {
+	for _, l := range initialListeners {
+		if l.IsTCP {
+			addOrUpdateListener(l)
 		}
 	}
 }
@@ -227,10 +235,8 @@ func (l *Listener) assignProtocol() {
 	isGRPC := strings.EqualFold(l.Protocol, PROTOL_GRPC)
 	isGRPCS := strings.EqualFold(l.Protocol, "grpcs")
 	isXDS := strings.EqualFold(l.Protocol, PROTOL_XDS)
-	isJSONRPC := strings.EqualFold(l.Protocol, PROTOL_JSONRPC)
-	isJSONRPCS := strings.EqualFold(l.Protocol, "jsonrpcs")
-	isMCP := strings.EqualFold(l.Protocol, PROTOL_MCP)
-	isMCPS := strings.EqualFold(l.Protocol, "mcps")
+	isJSONRPC := strings.EqualFold(l.Protocol, PROTOL_JSONRPC) || strings.EqualFold(l.Protocol, PROTOL_RPC)
+	isJSONRPCS := strings.EqualFold(l.Protocol, "jsonrpcs") || strings.EqualFold(l.Protocol, "rpcs")
 	isUDP := strings.EqualFold(l.Protocol, PROTOL_UDP)
 	isTCPS := strings.EqualFold(l.Protocol, PROTOL_TLS)
 
@@ -266,22 +272,17 @@ func (l *Listener) assignProtocol() {
 		l.Protocol = PROTOL_GRPC
 		l.IsGRPC = true
 		l.IsXDS = true
-	} else if isJSONRPC || isJSONRPCS || isMCP || isMCPS {
-		if isJSONRPCS || isMCPS {
+	} else if isJSONRPC || isJSONRPCS {
+		if isJSONRPCS {
 			l.Protocol = PROTOL_HTTPS
 			l.TLS = true
 		} else {
 			l.Protocol = PROTOL_HTTP
 		}
-		if isMCP || isMCPS {
-			l.L8Proto = PROTOL_MCP
-		} else {
-			l.L8Proto = PROTOL_JSONRPC
-		}
+		l.L8Proto = PROTOL_JSONRPC
 		l.IsHTTP = true
 		l.IsHTTP2 = true
 		l.IsJSONRPC = true
-		l.IsMCP = isMCP || isMCPS
 	} else if isUDP {
 		l.L8Proto = PROTOL_UDP
 		l.IsUDP = true
@@ -301,7 +302,7 @@ func (l *Listener) assignProtocol() {
 
 func AddInitialListeners(portList []string) {
 	existing := map[int]bool{}
-	l := createPortListener(global.Self.MCPPort, PROTOL_MCP, constants.DefaultCommonName, existing)
+	l := createPortListener(global.Self.JSONRPCPort, PROTOL_JSONRPC, constants.DefaultCommonName, existing)
 	if l != nil {
 		listenersLock.Lock()
 		listeners[l.Port] = l
@@ -353,15 +354,15 @@ func createPortListener(port int, protocol, cn string, existing map[int]bool) *L
 	return nil
 }
 
-func (l *Listener) serveMCP() {
+func (l *Listener) serveJSONRPC() {
 	go func() {
-		msg := fmt.Sprintf("Starting MCP Listener [%s]", l.ListenerID)
+		msg := fmt.Sprintf("Starting JSONRPC Listener [%s]", l.ListenerID)
 		if l.TLS {
 			msg += fmt.Sprintf(" With TLS [CN: %s]", l.CommonName)
 		}
 		log.Println(msg)
-		if err := mcpServer.Serve(l.Listener); err != nil {
-			log.Printf("MCP Listener [%d]: %s", l.Port, err.Error())
+		if err := jsonRPCServer.Serve(l.Listener); err != nil {
+			log.Printf("JSONRPC Listener [%d]: %s", l.Port, err.Error())
 		}
 	}()
 }
@@ -491,8 +492,8 @@ func (l *Listener) openListener(serve bool) bool {
 		l.ListenerID = fmt.Sprintf("%d-%d", l.Port, l.Generation)
 		log.Printf("Opening [%s] listener [%s] on port [%d].", l.L8Proto, l.ListenerID, l.Port)
 		if serve {
-			if l.IsMCP {
-				l.serveMCP()
+			if l.IsJSONRPC {
+				l.serveJSONRPC()
 			} else if l.IsHTTP {
 				l.serveHTTP()
 			} else if l.IsGRPC {

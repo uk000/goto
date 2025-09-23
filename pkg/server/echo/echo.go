@@ -49,7 +49,10 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 func EchoHeaders(w http.ResponseWriter, r *http.Request) {
 	metrics.UpdateRequestCount("echo")
 	util.AddLogMessage("Echoing headers", r)
-	util.WriteJsonPayload(w, map[string]interface{}{"RequestHeaders": r.Header})
+	util.WriteJsonPayload(w, map[string]interface{}{
+		"RequestHeaders": r.Header,
+		"Goto-Info":      GetEchoResponseFromRS(util.GetRequestStore(r)),
+	})
 }
 
 func echoBody(w http.ResponseWriter, r *http.Request) {
@@ -132,6 +135,7 @@ func GetEchoResponseFromRS(rs *util.RequestStore) map[string]interface{} {
 		HeaderGotoListener:    global.Funcs.GetListenerLabelForPort(rs.RequestPortNum),
 		HeaderGotoPort:        rs.RequestPortNum,
 		HeaderViaGoto:         rs.ListenerLabel,
+		"Request-Headers":     rs.RequestHeaders,
 	}
 	if rs.IsTunnelRequest {
 		response[HeaderGotoTargetURL] = rs.RequestHeaders[HeaderGotoTargetURL]

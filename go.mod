@@ -6,12 +6,12 @@ require (
 	github.com/envoyproxy/go-control-plane v0.13.4
 	github.com/envoyproxy/go-control-plane/envoy v1.32.4
 	github.com/go-co-op/gocron v1.37.0
-	github.com/google/jsonschema-go v0.2.0
+	github.com/google/jsonschema-go v0.2.3
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/reverse v1.0.1
 	github.com/itchyny/gojq v0.12.16
 	github.com/jhump/protoreflect/v2 v2.0.0-beta.1
-	github.com/modelcontextprotocol/go-sdk v0.3.0
+	github.com/modelcontextprotocol/go-sdk v0.6.0
 	github.com/prometheus/client_golang v1.20.3
 	golang.org/x/net v0.41.0
 	google.golang.org/grpc v1.71.0
@@ -20,6 +20,7 @@ require (
 	k8s.io/apimachinery v0.31.1
 	k8s.io/client-go v0.31.1
 	sigs.k8s.io/yaml v1.4.0
+	trpc.group/trpc-go/trpc-a2a-go v0.2.3
 )
 
 require (
@@ -51,7 +52,6 @@ require (
 	golang.org/x/crypto v0.39.0 // indirect
 	golang.org/x/sync v0.15.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250106144421-5f5ef82da422 // indirect
-	trpc.group/trpc-go/trpc-a2a-go v0.2.3 // indirect
 )
 
 require (
@@ -68,7 +68,7 @@ require (
 	github.com/google/gnostic-models v0.6.8 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
+	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.0
 	github.com/imdario/mergo v0.3.13 // indirect
 	github.com/itchyny/timefmt-go v0.1.6 // indirect

@@ -99,6 +99,7 @@ var (
 	ConnectionKey       = &ContextKey{Key: "connection"}
 	ProtocolKey         = &ContextKey{Key: "protocol"}
 	HeadersKey          = &ContextKey{Key: "headers"}
+	AgentContextKey     = &ContextKey{Key: "agentContext"}
 	DefaultRequestStore = &RequestStore{}
 )
 

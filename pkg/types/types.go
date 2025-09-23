@@ -22,15 +22,15 @@ import (
 	"strings"
 )
 
-type Pair struct {
-	Left  any
-	Right any
+type Pair[L any, R any] struct {
+	Left  L
+	Right R
 }
 
-type Triple struct {
-	First  any
-	Second any
-	Third  any
+type Triple[F any, S any, T any] struct {
+	First  F
+	Second S
+	Third  T
 }
 
 type Funcs struct {
@@ -63,20 +63,45 @@ func (l *ListArg) SetAt(index int, value string) error {
 	return nil
 }
 
-func (p *Pair) String() string {
+func NewPair[L any, R any](left L, right R) *Pair[L, R] {
+	return &Pair[L, R]{
+		Left:  left,
+		Right: right,
+	}
+}
+
+func (p *Pair[L, R]) String() string {
 	return fmt.Sprintf("%+v: %+v", p.Left, p.Right)
 }
 
-func (p *Pair) LeftS() string {
-	if s, ok := p.Left.(string); ok {
-		return s
-	}
-	return fmt.Sprintf("%s", p.Left)
+func (p *Pair[L, R]) LeftS() string {
+	return fmt.Sprintf("%+v", p.Left)
 }
 
-func (p *Pair) RightS() string {
-	if s, ok := p.Right.(string); ok {
-		return s
+func (p *Pair[L, R]) RightS() string {
+	return fmt.Sprintf("%+v", p.Right)
+}
+
+func NewTriple[F any, S any, T any](first F, second S, third T) *Triple[F, S, T] {
+	return &Triple[F, S, T]{
+		First:  first,
+		Second: second,
+		Third:  third,
 	}
-	return fmt.Sprintf("%s", p.Right)
+}
+
+func (t *Triple[F, S, T]) String() string {
+	return fmt.Sprintf("%+v:%+v:%+v", t.First, t.Second, t.Third)
+}
+
+func (t *Triple[F, S, T]) FirstS() string {
+	return fmt.Sprintf("%+v", t.First)
+}
+
+func (t *Triple[F, S, T]) SecondS() string {
+	return fmt.Sprintf("%+v", t.Second)
+}
+
+func (t *Triple[F, S, T]) ThirdS() string {
+	return fmt.Sprintf("%+v", t.Third)
 }

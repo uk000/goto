@@ -18,6 +18,7 @@ package util
 
 import (
 	"fmt"
+	"goto/pkg/types"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -483,33 +484,7 @@ func ParseDuration(value string) time.Duration {
 
 func GetDurationParam(r *http.Request, name string) (low, high time.Duration, count int, ok bool) {
 	if val := mux.Vars(r)[name]; val != "" {
-		dRangeAndCount := strings.Split(val, ":")
-		dRange := strings.Split(dRangeAndCount[0], "-")
-		if d, err := time.ParseDuration(dRange[0]); err != nil {
-			return 0, 0, 0, false
-		} else {
-			low = d
-		}
-		if len(dRange) > 1 {
-			if d, err := time.ParseDuration(dRange[1]); err == nil {
-				if d < low {
-					high = low
-					low = d
-				} else {
-					high = d
-				}
-			}
-		} else {
-			high = low
-		}
-		if len(dRangeAndCount) > 1 {
-			if c, err := strconv.ParseInt(dRangeAndCount[1], 10, 32); err == nil {
-				if c > 0 {
-					count = int(c)
-				}
-			}
-		}
-		return low, high, count, true
+		return types.ParseDurationRange(val)
 	}
 	return 0, 0, 0, false
 }

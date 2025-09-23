@@ -51,14 +51,14 @@ import (
 )
 
 var (
-	httpServer           *http.Server
-	mcpServer            *http.Server
-	h2s                  = &http2.Server{}
-	httpStarted          bool
-	mcpStarted           bool
-	httpListenersStarted bool
-	mcpListenersStarted  bool
-	RootRouter           *mux.Router
+	httpServer              *http.Server
+	jsonRPCServer           *http.Server
+	h2s                     = &http2.Server{}
+	httpStarted             bool
+	jsonRPCStarted          bool
+	httpListenersStarted    bool
+	jsonRPCListenersStarted bool
+	RootRouter              *mux.Router
 )
 
 func RunHttpServer() {
@@ -67,7 +67,7 @@ func RunHttpServer() {
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-	err = configureAndStartAIServer(global.Self.MCPPort)
+	err = configureAndStartAIServer(global.Self.JSONRPCPort)
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -106,11 +106,11 @@ func configureAndStartHTTPServer(r *mux.Router) error {
 }
 
 func configureAndStartAIServer(port int) error {
-	mcpServer = &http.Server{
+	jsonRPCServer = &http.Server{
 		Addr:         fmt.Sprintf("0.0.0.0:%d", port),
-		WriteTimeout: 1 * time.Minute,
-		ReadTimeout:  1 * time.Minute,
-		IdleTimeout:  1 * time.Minute,
+		WriteTimeout: 10 * time.Minute,
+		ReadTimeout:  10 * time.Minute,
+		IdleTimeout:  10 * time.Minute,
 		ConnContext:  withConnContext,
 		//ConnState:    conn.ConnState,
 		Handler:  AIHandler(),
@@ -119,10 +119,10 @@ func configureAndStartAIServer(port int) error {
 	return StartHttpServer(true)
 }
 
-func StartHttpServer(mcp bool) error {
+func StartHttpServer(jsonRPC bool) error {
 	var server *http.Server
-	if mcp {
-		server = mcpServer
+	if jsonRPC {
+		server = jsonRPCServer
 	} else {
 		server = httpServer
 	}
@@ -135,8 +135,8 @@ func StartHttpServer(mcp bool) error {
 	}
 	events.StartSender()
 	go func(server *http.Server) {
-		if mcp {
-			mcpStarted = true
+		if jsonRPC {
+			jsonRPCStarted = true
 		} else {
 			httpStarted = true
 		}
@@ -150,7 +150,7 @@ func StartHttpServer(mcp bool) error {
 
 func startListeners() {
 	serverCount := 0
-	if mcpServer != nil {
+	if jsonRPCServer != nil {
 		serverCount++
 	}
 	if httpServer != nil {
@@ -163,18 +163,18 @@ func startListeners() {
 			global.OnHTTPStart(httpServer)
 			httpListenersStarted = true
 			i++
-		} else if mcpStarted && !mcpListenersStarted {
-			log.Printf("MCP server [%s] is ready. Starting additional MCP listeners.", mcpServer.Addr)
+		} else if jsonRPCStarted && !jsonRPCListenersStarted {
+			log.Printf("JSONRPC server [%s] is ready. Starting additional JSONRPC listeners.", jsonRPCServer.Addr)
 			time.Sleep(1 * time.Second)
-			global.OnMCPStart(mcpServer)
-			mcpListenersStarted = true
+			global.OnJSONRPCStart(jsonRPCServer)
+			jsonRPCListenersStarted = true
 			i++
 		} else {
 			if !httpStarted && httpServer != nil {
 				log.Printf("Waiting for HTTP server [%s] before starting additional HTTP listeners.", httpServer.Addr)
 			}
-			if !mcpStarted && mcpServer != nil {
-				log.Printf("Waiting for MCP server [%s] before starting additional MCP listeners.", mcpServer.Addr)
+			if !jsonRPCStarted && jsonRPCServer != nil {
+				log.Printf("Waiting for JSONRPC server [%s] before starting additional JSONRPC listeners.", jsonRPCServer.Addr)
 			}
 		}
 		time.Sleep(1 * time.Second)
@@ -185,9 +185,9 @@ func ServeHTTPListener(l *listeners.Listener) {
 	go func() {
 		msg := ""
 		var server *http.Server
-		if l.IsMCP {
-			msg = fmt.Sprintf("Starting MCP Listener [%s]", l.ListenerID)
-			server = mcpServer
+		if l.IsJSONRPC {
+			msg = fmt.Sprintf("Starting JSONRPC Listener [%s]", l.ListenerID)
+			server = jsonRPCServer
 		} else {
 			msg = fmt.Sprintf("Starting HTTP Listener [%s]", l.ListenerID)
 			server = httpServer
@@ -221,7 +221,7 @@ func WaitForHttpServer() {
 		}
 	}
 	StopHttpServer(httpServer)
-	StopHttpServer(mcpServer)
+	StopHttpServer(jsonRPCServer)
 }
 
 func StopHttpServer(server *http.Server) {

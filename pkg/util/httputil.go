@@ -902,7 +902,8 @@ func GotoProtocol(isH2, isTLS bool) string {
 	return protocol
 }
 
-func PrintRequest(r *http.Request) {
+func PrintRequest(context string, r *http.Request) {
+	log.Printf("======== %s ==========\n", context)
 	log.Printf(">> Method: %s", ToJSONText(r.Method))
 	log.Printf(">> URI: %s", ToJSONText(r.RequestURI))
 	log.Printf(">> Headers: %s", ToJSONText(r.Header))

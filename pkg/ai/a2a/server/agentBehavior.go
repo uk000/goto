@@ -4,75 +4,83 @@ import (
 	"context"
 	"fmt"
 	"goto/pkg/ai/a2a/model"
+	"goto/pkg/server/echo"
 	"goto/pkg/types"
 	"goto/pkg/util"
-	"log"
+	"regexp"
+	"strings"
 	"time"
 
-	"github.com/google/uuid"
-	"trpc.group/trpc-go/trpc-a2a-go/protocol"
 	a2aproto "trpc.group/trpc-go/trpc-a2a-go/protocol"
 	"trpc.group/trpc-go/trpc-a2a-go/taskmanager"
 )
 
+type DelegateTriggers map[string]*types.Triple[*regexp.Regexp, *model.DelegateToolCall, *model.DelegateAgentCall]
+type UnaryHandler func(aCtx *AgentCallContext) (*taskmanager.MessageProcessingResult, error)
+type StreamHandler func(aCtx *AgentCallContext) error
+
 type AgentBehaviorImpl struct {
-	self  model.IAgentBehavior
-	agent *model.Agent
-	delay *types.Delay
+	self     model.IAgentBehavior
+	agent    *model.Agent
+	delay    *types.Delay
+	doUnary  UnaryHandler
+	doStream StreamHandler
 }
 
-type AgentBehaviorEcho struct {
-	*AgentBehaviorImpl
-}
-
-type AgentBehaviorStream struct {
-	*AgentBehaviorImpl
-}
-
-type AgentBehaviorDelegate struct {
-	*AgentBehaviorImpl
-}
-
-type AgentBehaviorHttpProxy struct {
-	*AgentBehaviorImpl
-}
-
-type AgentTask struct {
-	Agent      *model.Agent
-	Behavior   model.IAgentBehavior
-	TaskID     string
-	Ctx        context.Context
-	Input      a2aproto.Message
-	Options    taskmanager.ProcessOptions
-	Handler    taskmanager.TaskHandler
-	Subscriber taskmanager.TaskSubscriber
-	Delay      *types.Delay
-}
-
-func PrepareAgentBehavior(agent *model.Agent) {
+func newAgentBehavior(agent *model.Agent) *AgentBehaviorImpl {
 	if agent.Behavior == nil {
 		agent.Behavior = &model.AgentBehavior{}
 	}
-	impl := &AgentBehaviorImpl{agent: agent}
-	if agent.Config != nil {
-		if agent.Config.Delay != nil {
-			agent.Config.Delay.Prepare()
-			impl.delay = agent.Config.Delay
-		}
+	impl := &AgentBehaviorImpl{
+		agent: agent,
 	}
 	if agent.Behavior.Echo {
-		agent.Behavior.Impl = &AgentBehaviorEcho{AgentBehaviorImpl: impl}
+		abe := &AgentBehaviorEcho{AgentBehaviorImpl: impl}
+		impl.self = abe
+		impl.doUnary = abe.DoUnary
+		impl.doStream = abe.DoStream
+		agent.Behavior.Impl = abe
 	} else if agent.Behavior.Stream {
-		agent.Behavior.Impl = &AgentBehaviorStream{AgentBehaviorImpl: impl}
-	} else if agent.Behavior.Delegate {
-		agent.Behavior.Impl = &AgentBehaviorDelegate{AgentBehaviorImpl: impl}
+		abs := &AgentBehaviorStream{AgentBehaviorImpl: impl}
+		impl.self = abs
+		impl.doStream = abs.DoStream
+		agent.Behavior.Impl = abs
+	} else if agent.Behavior.Federate {
+		abd := &AgentBehaviorFederate{
+			AgentBehaviorImpl: impl,
+			triggers:          map[string]*types.Triple[*regexp.Regexp, *model.DelegateToolCall, *model.DelegateAgentCall]{},
+		}
+		impl.self = abd
+		impl.doUnary = abd.DoUnary
+		impl.doStream = abd.DoStream
+		agent.Behavior.Impl = abd
 	} else if agent.Behavior.HTTPProxy {
-		agent.Behavior.Impl = &AgentBehaviorHttpProxy{AgentBehaviorImpl: impl}
+		abrh := &AgentBehaviorRemoteHttp{AgentBehaviorImpl: impl}
+		impl.self = abrh
+		impl.doUnary = abrh.DoUnary
+		impl.doStream = abrh.DoStream
+		agent.Behavior.Impl = abrh
 	}
-	impl.self = agent.Behavior.Impl
+	return impl
 }
 
-func (b *AgentBehaviorImpl) newAgentTask(ctx context.Context, input a2aproto.Message, options taskmanager.ProcessOptions,
+func (bd *AgentBehaviorImpl) prepareDelay() {
+	if bd.agent.Config == nil || bd.agent.Config.Delay == nil {
+		return
+	}
+	bd.agent.Config.Delay.Prepare()
+	bd.delay = bd.agent.Config.Delay
+}
+
+func (b *AgentBehaviorImpl) prepareDelegates() error {
+	bd, ok := b.self.(*AgentBehaviorFederate)
+	if !ok {
+		return nil
+	}
+	return bd.prepareDelegates()
+}
+
+func (bd *AgentBehaviorImpl) newAgentTask(aCtx *AgentCallContext, input a2aproto.Message, options taskmanager.ProcessOptions,
 	handler taskmanager.TaskHandler) (*AgentTask, error) {
 	taskID, err := handler.BuildTask(nil, nil)
 	if err != nil {
@@ -83,184 +91,154 @@ func (b *AgentBehaviorImpl) newAgentTask(ctx context.Context, input a2aproto.Mes
 		return nil, fmt.Errorf("failed to subscribe to task: %w", err)
 	}
 	return &AgentTask{
-		Agent:      b.agent,
-		Behavior:   b.self,
-		TaskID:     taskID,
-		Ctx:        ctx,
-		Input:      input,
-		Options:    options,
-		Handler:    handler,
-		Subscriber: subscriber,
-		Delay:      b.delay,
+		agent:      bd.agent,
+		behavior:   bd.self,
+		taskID:     taskID,
+		input:      input,
+		options:    options,
+		handler:    handler,
+		subscriber: subscriber,
 	}, nil
-}
-
-func (ab *AgentBehaviorEcho) DoUnary(ctx context.Context, input a2aproto.Message, options taskmanager.ProcessOptions,
-	handler taskmanager.TaskHandler) (*taskmanager.MessageProcessingResult, error) {
-	_, msg := ab.getEchoMessage(input)
-	return &taskmanager.MessageProcessingResult{
-		Result: &msg,
-	}, nil
-}
-
-func (ab *AgentBehaviorDelegate) DoUnary(ctx context.Context, input a2aproto.Message, options taskmanager.ProcessOptions,
-	handler taskmanager.TaskHandler) (*taskmanager.MessageProcessingResult, error) {
-	return nil, nil
-}
-
-func (ab *AgentBehaviorHttpProxy) DoUnary(ctx context.Context, input a2aproto.Message, options taskmanager.ProcessOptions,
-	handler taskmanager.TaskHandler) (*taskmanager.MessageProcessingResult, error) {
-	return nil, nil
-}
-
-func (ab *AgentBehaviorEcho) DoStream(t model.IAgentTask) error {
-	task := t.(*AgentTask)
-	output, _ := ab.getEchoMessage(task.Input)
-	task.sendTaskStatusUpdate(a2aproto.TaskStateWorking, output)
-	return nil
-}
-
-func (ab *AgentBehaviorStream) DoStream(t model.IAgentTask) error {
-	task := t.(*AgentTask)
-	if task.Delay == nil {
-		task.Delay = &types.Delay{
-			Min: &types.Duration{10 * time.Millisecond},
-			Max: &types.Duration{100 * time.Millisecond},
-		}
-	}
-	if ab.agent.Config != nil && ab.agent.Config.Response != nil {
-		ab.agent.Config.Response.RangeText(func(text string) {
-			task.sendTaskStatusUpdate(a2aproto.TaskStateWorking, text)
-			select {
-			case <-task.Ctx.Done():
-				log.Printf("Task %s cancelled during delay: %v", task.TaskID, task.Ctx.Err())
-				if err := task.sendTaskStatusUpdate(a2aproto.TaskStateCanceled, ""); err != nil {
-					log.Printf("Failed to update task state with error: %v", err)
-				}
-				return
-			case delay := <-task.Delay.Block():
-				log.Printf("Continuing after Delay.Block [%s]", delay)
-			}
-		})
-	}
-	return nil
-}
-
-func (ab *AgentBehaviorDelegate) DoStream(task model.IAgentTask) error {
-	return nil
-}
-
-func (ab *AgentBehaviorHttpProxy) DoStream(task model.IAgentTask) error {
-	return nil
 }
 
 func (b *AgentBehaviorImpl) ProcessMessage(ctx context.Context, input a2aproto.Message, options taskmanager.ProcessOptions,
 	handler taskmanager.TaskHandler) (*taskmanager.MessageProcessingResult, error) {
-	if options.Streaming {
-		return b.handleStream(ctx, input, options, handler)
-	} else {
-		return b.self.DoUnary(ctx, input, options, handler)
+	var aCtx *AgentCallContext
+	if val := ctx.Value(util.AgentContextKey); val != nil {
+		aCtx = val.(*AgentCallContext)
 	}
-}
-
-func (b *AgentBehaviorImpl) handleStream(ctx context.Context, input a2aproto.Message, options taskmanager.ProcessOptions,
-	handler taskmanager.TaskHandler) (*taskmanager.MessageProcessingResult, error) {
-	task, err := b.newAgentTask(ctx, input, options, handler)
+	if aCtx == nil {
+		return nil, fmt.Errorf("Received agent [%s] call without context", b.agent.ID)
+	}
+	task, err := b.newAgentTask(aCtx, input, options, handler)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build task: %w", err)
 	}
-	go task.stream(ctx, input)
+	aCtx.setContext(ctx, b, task, input, options, handler)
+	if options.Streaming {
+		return b.handleStream(aCtx)
+	} else {
+		return b.handleUnary(aCtx)
+	}
+}
+
+func (b *AgentBehaviorImpl) handleUnary(aCtx *AgentCallContext) (result *taskmanager.MessageProcessingResult, err error) {
+	if b.doUnary == nil {
+		return nil, fmt.Errorf("Agent [%s] doesn't support Unary behavior.", b.agent.ID)
+	}
+	result, err = b.doUnary(aCtx)
+	b.addOrSendServerInfo(aCtx, result)
+	return
+}
+
+func (b *AgentBehaviorImpl) handleStream(aCtx *AgentCallContext) (*taskmanager.MessageProcessingResult, error) {
+	if b.doStream == nil {
+		return nil, fmt.Errorf("Agent [%s] doesn't support Streaming behavior.", b.agent.ID)
+	}
+	go b.stream(aCtx)
 	return &taskmanager.MessageProcessingResult{
-		StreamingEvents: task.Subscriber,
+		StreamingEvents: aCtx.task.subscriber,
 	}, nil
 }
 
-func (ab *AgentBehaviorImpl) DoUnary(ctx context.Context, input a2aproto.Message, options taskmanager.ProcessOptions,
-	handler taskmanager.TaskHandler) (*taskmanager.MessageProcessingResult, error) {
-	return nil, nil
-}
-
-func (ab *AgentBehaviorImpl) DoStream(task model.IAgentTask) error {
-	return nil
-}
-
-func (t *AgentTask) stream(ctx context.Context, input a2aproto.Message) (err error) {
-	defer t.endTask()
-	if err = t.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Started..."); err != nil {
+func (b *AgentBehaviorImpl) stream(aCtx *AgentCallContext) (err error) {
+	defer aCtx.endTask()
+	if err = aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Agent update: Stream Started...", nil); err != nil {
 		return
 	}
-	return t.Behavior.DoStream(t)
+	b.addOrSendServerInfo(aCtx, nil)
+	return b.doStream(aCtx)
 }
 
-func (t *AgentTask) endTask() {
-	t.sendTaskStatusUpdate(a2aproto.TaskStateCompleted, "Completed.")
-	if t.Subscriber != nil {
-		t.Subscriber.Close()
+func (b *AgentBehaviorImpl) addOrSendServerInfo(aCtx *AgentCallContext, result *taskmanager.MessageProcessingResult) {
+	serverInfo := a2aproto.NewDataPart(map[string]any{"Goto-Server-Info": echo.GetEchoResponseFromRS(aCtx.rs)})
+	if result != nil && result.Result != nil {
+		if msg, ok := result.Result.(*a2aproto.Message); ok {
+			msg.Parts = append(msg.Parts, serverInfo)
+		}
+	} else {
+		aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Agent Update: Sent Goto-Server-Info", []a2aproto.Part{serverInfo})
 	}
-	t.Handler.CleanTask(&t.TaskID)
 }
 
-func (t *AgentTask) sendTaskStatusUpdate(state a2aproto.TaskState, msg string) (err error) {
-	message := protocol.NewMessage(
-		protocol.MessageRoleAgent,
-		[]protocol.Part{protocol.NewTextPart(msg)},
-	)
-	// event := a2aproto.TaskStatusUpdateEvent{
-	// 	TaskID:    t.TaskID,
-	// 	ContextID: contextID,
-	// 	Kind:      a2aproto.KindTaskStatusUpdate,
-	// 	Final:     isFinal,
-	// 	Status: a2aproto.TaskStatus{
-	// 		State:     state,
-	// 		Message:   &message,
-	// 		Timestamp: time.Now().Format(time.RFC3339Nano),
-	// 	},
-	// }
-	// err = t.Subscriber.Send(a2aproto.StreamingMessageEvent{Result: &event})
-	// if err != nil {
-	// 	return
-	// }
-	err = t.Handler.UpdateTaskState(&t.TaskID, state, &message)
-	return
+func getMessageText(message a2aproto.Message) string {
+	s := strings.Builder{}
+	for _, part := range message.Parts {
+		if p, ok := part.(*a2aproto.TextPart); ok {
+			s.WriteString(p.Text)
+		} else if p, ok := part.(*a2aproto.DataPart); ok {
+			s.WriteString(util.ToJSONText(p.Data))
+		}
+	}
+	return s.String()
 }
 
-func (t *AgentTask) sendTextArtifact(title, description, text string, isFinal, isQuestion bool) (err error) {
-	artifact := protocol.Artifact{
-		ArtifactID:  uuid.New().String(),
-		Name:        util.Ptr(title),
-		Description: util.Ptr(description),
-		Parts:       []protocol.Part{protocol.NewTextPart(text)},
-	}
-	artifactEvent := a2aproto.StreamingMessageEvent{
-		Result: &a2aproto.TaskArtifactUpdateEvent{
-			TaskID:    t.TaskID,
-			Kind:      a2aproto.KindTaskArtifactUpdate,
-			Artifact:  artifact,
-			LastChunk: util.Ptr(true),
-		},
-	}
-	err = t.Subscriber.Send(artifactEvent)
-	if err != nil {
-		return
-	}
-	return t.Handler.AddArtifact(&t.TaskID, artifact, isFinal, isQuestion)
-}
-
-func (t *AgentTask) waitBeforeNextStep(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		log.Printf("Task %s cancelled during delay: %v", t.TaskID, ctx.Err())
-		return t.Handler.UpdateTaskState(&t.TaskID, protocol.TaskStateCanceled, nil)
-	case <-t.Delay.Block():
-	}
-	return nil
-}
-
-func (ab *AgentBehaviorEcho) getEchoMessage(input a2aproto.Message) (output string, message a2aproto.Message) {
-	output = util.ToJSONText(input)
-	message = a2aproto.NewMessage(
+func createDataMessage(data any) a2aproto.Message {
+	return a2aproto.NewMessage(
 		a2aproto.MessageRoleAgent,
-		[]a2aproto.Part{a2aproto.NewTextPart(output)},
+		[]a2aproto.Part{a2aproto.NewDataPart(data)},
 	)
-	return
+}
+
+func createTextPartsFromArrayOrString(key string, val any, parts *[]a2aproto.Part) bool {
+	hasText := false
+	if arr, ok := val.([]any); ok {
+		for _, data := range arr {
+			if s, ok := data.(string); ok {
+				hasText = true
+				*parts = append(*parts, a2aproto.NewTextPart(fmt.Sprintf("%s: %s", key, s)))
+			} else if arr2, ok := val.([]any); ok {
+				createTextPartsFromArrayOrString(key, arr2, parts)
+			}
+		}
+	} else if arr, ok := val.([]string); ok {
+		for _, s := range arr {
+			hasText = true
+			*parts = append(*parts, a2aproto.NewTextPart(fmt.Sprintf("%s: %s", key, s)))
+		}
+	}
+	return hasText
+}
+
+func createPartsFromMap(key string, m map[string]any, parts *[]a2aproto.Part, deep bool) {
+	for k2, val := range m {
+		if m2, ok := val.(map[string]any); ok {
+			if deep {
+				createPartsFromMap(fmt.Sprintf("%s: [%s]", key, k2), m2, parts, false)
+			} else {
+				*parts = append(*parts, a2aproto.NewTextPart(fmt.Sprintf("%s: Sent [%s] data with %d items", key, k2, len(m2))))
+			}
+		} else {
+			createTextPartsFromArrayOrString(fmt.Sprintf("%s: [%s]", key, k2), val, parts)
+		}
+	}
+}
+
+func createHybridMessage(result map[string]map[string]any) a2aproto.Message {
+	parts := []a2aproto.Part{}
+	for name, m := range result {
+		createPartsFromMap(name, m, &parts, true)
+	}
+	parts = append(parts, a2aproto.NewDataPart(result))
+	return a2aproto.NewMessage(a2aproto.MessageRoleAgent, parts)
+}
+
+func createAnyParts(key string, result any) []a2aproto.Part {
+	parts := []a2aproto.Part{}
+	if s, ok := result.(string); ok {
+		parts = append(parts, a2aproto.NewTextPart(fmt.Sprintf("[%s] %s: %s", time.Now().Format(time.RFC3339Nano), key, s)))
+	} else if a, ok := result.([]any); ok {
+		parts = append(parts, a2aproto.NewDataPart(a))
+	} else if m, ok := result.(map[string]any); ok {
+		parts = append(parts, a2aproto.NewDataPart(m))
+	} else if t, ok := result.(a2aproto.TextPart); ok {
+		parts = append(parts, t)
+	} else if d, ok := result.(a2aproto.DataPart); ok {
+		parts = append(parts, d)
+	} else if p, ok := result.(a2aproto.Part); ok {
+		parts = append(parts, p)
+	} else {
+		parts = append(parts, a2aproto.NewTextPart(fmt.Sprintf("[%s] %s: %s", time.Now().Format(time.RFC3339Nano), key, util.ToJSONText(result))))
+	}
+	return parts
 }

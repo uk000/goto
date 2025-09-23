@@ -48,6 +48,9 @@ func GetCluster() string {
 	if global.Self.Cluster == "" {
 		global.Self.Cluster, _ = os.LookupEnv("CLUSTER")
 	}
+	if global.Self.Cluster == "" {
+		return "local"
+	}
 	return global.Self.Cluster
 }
 
@@ -108,7 +111,7 @@ func BuildHostLabel(port int) string {
 }
 
 func BuildListenerLabel(port int) string {
-	return fmt.Sprintf("Goto[%s:%d][%s][%s]", GetPodIP(), port, GetNamespace(), GetCluster())
+	return fmt.Sprintf("[%s:%d].[%s@%s]", GetPodIP(), port, GetNamespace(), GetCluster())
 }
 
 func GetHostLabel() string {

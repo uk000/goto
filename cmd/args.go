@@ -21,6 +21,7 @@ import (
 	"goto/ctl"
 	mcpserver "goto/pkg/ai/mcp/server"
 	"goto/pkg/global"
+	"goto/pkg/server"
 	"goto/pkg/server/listeners"
 	"goto/pkg/types"
 	"goto/pkg/util"
@@ -59,7 +60,7 @@ type ClientArgs struct {
 type ServerArgs struct {
 	Port                string
 	GRPCPort            string
-	MCPPort             string
+	JSONRPCPort         string
 	Ports               string
 	Label               string
 	StartupDelay        string
@@ -169,7 +170,7 @@ var (
 	sa = ServerArgs{
 		Port:                "port",
 		GRPCPort:            "grpcPort",
-		MCPPort:             "mcpPort",
+		JSONRPCPort:         "rpcPort",
 		Ports:               "ports",
 		Label:               "label",
 		StartupDelay:        "startupDelay",
@@ -205,7 +206,7 @@ var (
 	sh = struct{ ServerArgs }{ServerArgs{
 		Port:                "Primary HTTP Server Listen Port",
 		GRPCPort:            "Default GRPC Server Listen Port",
-		MCPPort:             "Default MCP Server Listen Port",
+		JSONRPCPort:         "Default JSON-RPC Server Listen Port",
 		Ports:               "Comma-separated list of <port/protocol>. First port acts as primary HTTP port",
 		Label:               "Default Server Label",
 		StartupDelay:        "Delay Server Startup (seconds)",
@@ -291,7 +292,7 @@ func processClientArgs() {
 func setupServerArgs() {
 	intFlag(&global.Self.ServerPort, sa.Port, "p", sh.Port, 8080)
 	intFlag(&global.Self.GRPCPort, sa.GRPCPort, "gp", sh.GRPCPort, 1234)
-	intFlag(&global.Self.MCPPort, sa.MCPPort, "mcp", sh.MCPPort, 3000)
+	intFlag(&global.Self.JSONRPCPort, sa.JSONRPCPort, "rpc", sh.JSONRPCPort, 3000)
 	stringFlag(&portsList, sa.Ports, "", sh.Ports, "")
 	stringFlag(&global.Self.Name, sa.Label, "l", sh.Label, "")
 	stringFlag(&global.Self.RegistryURL, sa.Registry, "", sh.Registry, "")
@@ -328,6 +329,7 @@ func setupServerArgs() {
 func runInits() {
 	initListeners()
 	mcpserver.InitDefaultServer()
+	server.InitTCPServer()
 }
 
 func processServerArgs() {

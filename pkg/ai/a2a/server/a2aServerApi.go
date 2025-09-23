@@ -40,7 +40,8 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRouteWithPort(a2aRouter, "/servers", getServers, "GET")
 	util.AddRouteWithPort(a2aRouter, "/agents/add", addAgents, "POST")
 	util.AddRouteWithPort(a2aRouter, "/agent/{agent}/payload", setAgentPayload, "POST")
-	util.AddRouteWithPort(a2aRouter, "/clear", clearServers, "POST")
+	util.AddRouteWithPort(a2aRouter, "/servers/clear", clearServers, "POST")
+	util.AddRouteWithPort(a2aRouter, "/agents/clear", clearAgents, "POST")
 
 	agentRouter := util.PathRouter(r, "/agent")
 	util.AddRouteWithPort(agentRouter, "/{agent}", serveAgent, "GET", "POST", "DELETE")
@@ -73,7 +74,7 @@ func addAgents(w http.ResponseWriter, r *http.Request) {
 		server := GetOrAddServer(port)
 		for _, agent := range agents {
 			server.AddAgent(agent)
-			registry.TheAgentRegistry.AddAgent(agent)
+			registry.TheAgentRegistry.AddAgent(agent, port)
 			names = append(names, agent.Card.Name)
 		}
 		msg = fmt.Sprintf("Added Agents: %+v", names)
@@ -111,6 +112,14 @@ func clearServers(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	ClearServer(port)
 	msg := fmt.Sprintf("Server cleared on port: %d", port)
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
+}
+
+func clearAgents(w http.ResponseWriter, r *http.Request) {
+	ClearAllServers()
+	registry.TheAgentRegistry.Clear()
+	msg := "Agents cleared on all ports and registry"
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }

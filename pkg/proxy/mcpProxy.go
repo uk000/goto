@@ -3,7 +3,6 @@ package proxy
 import (
 	"errors"
 	"goto/pkg/proxy/trackers"
-	"goto/pkg/server/listeners"
 	"goto/pkg/server/response/status"
 	"goto/pkg/util"
 	"io"
@@ -47,8 +46,7 @@ var (
 
 func WillProxyMCP(port int, r *http.Request) (willProxy bool) {
 	rs := util.GetRequestStore(r)
-	l := listeners.GetCurrentListener(r)
-	if rs.IsAdminRequest || (!rs.IsMCP && !l.IsMCP) {
+	if rs.IsAdminRequest || !rs.IsMCP {
 		return false
 	}
 	p := GetMCPProxyForPort(port)

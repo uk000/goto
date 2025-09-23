@@ -49,11 +49,7 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(tcpRouter, "/{port}/expect/payload/length={length}", setExpectedPayloadLength, "PUT", "POST")
 	util.AddRoute(tcpRouter, "/{port}/expect/payload", setExpectedPayload, "PUT", "POST")
 	util.AddRoute(tcpRouter, "/{port}/mode/validate={enable}", configurePayloadValidation, "PUT", "POST")
-	util.AddRoute(tcpRouter, "/{port}/mode/stream={enable}", setModes, "PUT", "POST")
-	util.AddRoute(tcpRouter, "/{port}/mode/echo={enable}", setModes, "PUT", "POST")
-	util.AddRoute(tcpRouter, "/{port}/mode/conversation={enable}", setModes, "PUT", "POST")
-	util.AddRoute(tcpRouter, "/{port}/mode/silentlife={enable}", setModes, "PUT", "POST")
-	util.AddRoute(tcpRouter, "/{port}/mode/closeatfirst={enable}", setModes, "PUT", "POST")
+	util.AddRoute(tcpRouter, "/{port}/mode/{mode:stream|echo|conversation|silentlife|closeatfirst}={enable}", setModes, "PUT", "POST")
 	util.AddRoute(tcpRouter, "/{port}/set/payload={enable}", setModes, "PUT", "POST")
 	util.AddRoute(tcpRouter, "/{port}/active", getActiveConnections, "GET")
 	util.AddRoute(tcpRouter, "/active", getActiveConnections, "GET")
@@ -423,11 +419,12 @@ func setModes(w http.ResponseWriter, r *http.Request) {
 		port := util.GetIntParamValue(r, "port")
 		tcpConfig := getTCPConfig(port)
 		enable := util.GetBoolParamValue(r, "enable")
-		echo := strings.Contains(r.RequestURI, "echo")
-		conversation := strings.Contains(r.RequestURI, "conversation")
-		stream := strings.Contains(r.RequestURI, "stream")
-		silentlife := strings.Contains(r.RequestURI, "silentlife")
-		closeatfirst := strings.Contains(r.RequestURI, "closeatfirst")
+		mode := util.GetStringParamValue(r, "mode")
+		echo := mode == "echo"
+		conversation := mode == "conversation"
+		stream := mode == "stream"
+		silentlife := mode == "silentlife"
+		closeatfirst := mode == "closeatfirst"
 		responsePayload := strings.Contains(r.RequestURI, "payload")
 		if enable {
 			tcpConfig.turnOffAllModes()

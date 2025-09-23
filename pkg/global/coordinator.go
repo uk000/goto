@@ -67,11 +67,11 @@ func AddHTTPStopWatcher(w HTTPStopWatcher) {
 	httpStopWatchers = append(httpStopWatchers, w)
 }
 
-func AddMCPStartWatcher(w HTTPStartWatcher) {
+func AddJSONRPCStartWatcher(w HTTPStartWatcher) {
 	mcpStartWatchers = append(mcpStartWatchers, w)
 }
 
-func AddMCPStopWatcher(w HTTPStopWatcher) {
+func AddJSONRPCStopWatcher(w HTTPStopWatcher) {
 	mcpStopWatchers = append(mcpStopWatchers, w)
 }
 
@@ -103,7 +103,7 @@ func OnHTTPStop() {
 	}
 }
 
-func OnMCPStart(server *http.Server) {
+func OnJSONRPCStart(server *http.Server) {
 	for _, w := range mcpStartWatchers {
 		w(server)
 	}

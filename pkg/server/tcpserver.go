@@ -32,7 +32,7 @@ var (
 	lock           sync.RWMutex
 )
 
-func init() {
+func InitTCPServer() {
 	global.ConfigureTCPServer(serveTCPRequests)
 }
 

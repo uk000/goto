@@ -20,6 +20,7 @@ import (
 	"os"
 	"strconv"
 
+	a2aclient "goto/pkg/ai/a2a/client"
 	a2aserver "goto/pkg/ai/a2a/server"
 	mcpclient "goto/pkg/ai/mcp/client"
 	mcpserverapi "goto/pkg/ai/mcp/server/api"
@@ -72,7 +73,7 @@ func init() {
 		k8sYaml.Middleware, k8sApi.Middleware, pipe.Middleware, request.Middleware,
 		proxy.Middleware, response.Middleware, tcp.Middleware, udp.Middleware,
 		rpc.Middleware, grpcapi.Middleware, grpcclient.Middleware, protos.Middleware, jsonrpc.Middleware,
-		xds.Middleware, mcpclient.Middleware, mcpserverapi.Middleware, a2aserver.Middleware,
+		xds.Middleware, mcpclient.Middleware, mcpserverapi.Middleware, a2aserver.Middleware, a2aclient.Middleware,
 		scripts.Middleware, job.Middleware, tls.Middleware, log.Middleware, ui.Middleware,
 		body.Middleware, echo.Middleware, catchall.Middleware,
 	}

@@ -3,6 +3,8 @@ package model
 import (
 	"context"
 	"encoding/json"
+	a2aclient "goto/pkg/ai/a2a/client"
+	mcpclient "goto/pkg/ai/mcp/client"
 	"goto/pkg/server/response/payload"
 	"goto/pkg/types"
 	"net/http"
@@ -16,41 +18,51 @@ type AgentSkill trpcserver.AgentSkill
 
 type IAgentBehavior interface {
 	ProcessMessage(ctx context.Context, input a2aproto.Message, options taskmanager.ProcessOptions, handler taskmanager.TaskHandler) (*taskmanager.MessageProcessingResult, error)
-	DoUnary(ctx context.Context, input a2aproto.Message, options taskmanager.ProcessOptions, handler taskmanager.TaskHandler) (*taskmanager.MessageProcessingResult, error)
-	DoStream(task IAgentTask) error
+	// DoUnary(aCtx IAgentCallContext) (*taskmanager.MessageProcessingResult, error)
+	// DoStream(aCtx IAgentCallContext) error
 }
 
-type IAgentTask interface {
+type IAgentCallContext interface {
 }
 
 type Agent struct {
+	ID       string                `json:"id"`
 	Card     *trpcserver.AgentCard `json:"card"`
 	Behavior *AgentBehavior        `json:"behavior,omitempty"`
 	Config   *AgentConfig          `json:"config,omitempty"`
 	Server   *trpcserver.A2AServer `json:"-"`
+	Port     int                   `json:"-"`
 }
 
 type AgentBehavior struct {
 	Echo      bool           `json:"echo,omitempty"`
 	Stream    bool           `json:"stream,omitempty"`
-	Delegate  bool           `json:"delegate,omitempty"`
+	Federate  bool           `json:"federate,omitempty"`
 	HTTPProxy bool           `json:"httpProxy,omitempty"`
 	Impl      IAgentBehavior `json:"-"`
 }
 
 type AgentConfig struct {
-	Delay    *types.Delay     `json:"delay,omitempty"`
-	Response *payload.Payload `json:"response,omitempty"`
-	Delegate *DelegateConfig  `json:"delegate,omitempty"`
+	Delay     *types.Delay     `json:"delay,omitempty"`
+	Response  *payload.Payload `json:"response,omitempty"`
+	Delegates *DelegateConfig  `json:"delegates,omitempty"`
+}
+
+type DelegateToolCall struct {
+	Triggers []string           `json:"triggers"`
+	ToolCall mcpclient.ToolCall `json:"toolCall,omitempty"`
+}
+
+type DelegateAgentCall struct {
+	Triggers  []string            `json:"triggers"`
+	AgentCall a2aclient.AgentCall `json:"agentCall,omitempty"`
 }
 
 type DelegateConfig struct {
-	Neat           bool                `json:"neat,omitempty"`
-	URL            string              `json:"url"`
-	Authority      string              `json:"authority,omitempty"`
-	Args           map[string]any      `json:"args,omitempty"`
-	Headers        map[string][]string `json:"headers,omitempty"`
-	ForwardHeaders []string            `json:"forwardHeaders,omitempty"`
+	Tools    map[string]*DelegateToolCall  `json:"tools,omitempty"`
+	Agents   map[string]*DelegateAgentCall `json:"agents,omitempty"`
+	MaxCalls int                           `json:"maxCalls,omitempty"`
+	Parallel bool                          `json:"parallel,omitempty"`
 }
 
 func (a *Agent) GetCard() *trpcserver.AgentCard {

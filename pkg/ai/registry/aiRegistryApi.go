@@ -52,7 +52,8 @@ func addAgents(w http.ResponseWriter, r *http.Request) {
 			msg = "Failed to add agents, no agent cards in the payload"
 		}
 	} else {
-		TheAgentRegistry.AddAgents(agents)
+		port := util.GetRequestOrListenerPortNum(r)
+		TheAgentRegistry.AddAgents(agents, port)
 		names := []string{}
 		for _, a := range agents {
 			names = append(names, a.Card.Name)

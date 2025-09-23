@@ -309,7 +309,7 @@ func (g *GRPCServer) start() {
 	}
 	registeredServices := g.Server.GetServiceInfo()
 	for _, triple := range ServiceRegistry.ProxyServices {
-		svc := triple.First.(*gotogrpc.GRPCService)
+		svc := triple.First
 		if _, present := registeredServices[svc.Name]; !present {
 			g.Server.RegisterService(svc.GSD, svc.Server)
 		}

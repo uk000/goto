@@ -1,6 +1,7 @@
 package mcpserverapi
 
 import (
+	"encoding/json"
 	"fmt"
 	mcpserver "goto/pkg/ai/mcp/server"
 	"goto/pkg/constants"
@@ -338,14 +339,18 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 		sendBadRequest(fmt.Sprintf("MCP Server [%s] Tool [%s] not configured", serverName, toolName), w, r)
 		return
 	}
-	args := map[string]any{}
-	err := util.ReadJsonPayloadFromBody(r.Body, &args)
+	b, err := io.ReadAll(r.Body)
 	if err != nil {
-		sendBadRequest(fmt.Sprintf("Calling Tool [%s] without payload", toolName), w, r)
+		sendBadRequest(fmt.Sprintf("Failed to read request body with error: %s", err.Error()), w, r)
 		return
 	}
+	args := json.RawMessage{}
+	err = args.UnmarshalJSON(b)
+	if err != nil {
+		sendBadRequest(fmt.Sprintf("Failed to parse args from request body. Calling Tool [%s] without payload", toolName), w, r)
+	}
 	req := &gomcp.CallToolRequest{
-		Params: &gomcp.CallToolParams{
+		Params: &gomcp.CallToolParamsRaw{
 			Name:      toolName,
 			Arguments: args,
 		},

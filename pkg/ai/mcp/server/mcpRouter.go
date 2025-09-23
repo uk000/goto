@@ -28,7 +28,7 @@ func MCPHandler() http.Handler {
 func HandleMCP(w http.ResponseWriter, r *http.Request) {
 	l := listeners.GetCurrentListener(r)
 	rs := util.GetRequestStore(r)
-	isMCP := l.IsMCP || rs.IsMCP
+	isMCP := l.IsJSONRPC || rs.IsMCP
 	if isMCP && !rs.IsAdminRequest {
 		log.Println("------- MayBe MCP ------")
 		if proxy.WillProxyMCP(l.Port, r) {
@@ -56,12 +56,6 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 			} else {
 				log.Printf("Port [%d] Request [%s] will be served by Stateless [%t] Server [%s]", l.Port, r.RequestURI, server.Stateless, server.Name)
 			}
-			r = r.WithContext(util.WithContextHeaders(r.Context(), r.Header))
-			if sctx := server.getOrSetSessionContext(r); sctx != nil {
-				sctx.RS = rs
-				sctx.RS.RequestHeaders = r.Header
-			}
-
 			server.handler.ServeHTTP(w, r)
 			rs.RequestServed = true
 		} else {
@@ -78,6 +72,7 @@ func MCPHybridHandler(server *MCPServer) http.Handler {
 		rs := util.GetRequestStore(r)
 		port := util.GetRequestOrListenerPortNum(r)
 		conn.SendGotoHeaders(w, r)
+		r = r.WithContext(util.WithContextHeaders(r.Context(), r.Header))
 		//util.CopyHeaders("Request", r, w, r.Header, true, true, false)
 		rs.ResponseWriter = w
 		hasSSE := strings.Contains(r.RequestURI, "/sse")
@@ -98,8 +93,7 @@ func MCPHybridHandler(server *MCPServer) http.Handler {
 }
 
 func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler http.Handler) {
-	sessionID := r.Header.Get(HeaderMCPSessionID)
-	session := server.GetSessionContext(sessionID)
+	session := server.getOrSetSessionContext(r)
 	switch r.Method {
 	case "DELETE":
 		log.Println("-------- MCPServer.Serve: Serving DELETE --------")
@@ -107,11 +101,9 @@ func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler ht
 			handler.ServeHTTP(w, r)
 			log.Println("-------- MCPServer.Serve: DELETE closing session --------")
 			close(session.finished)
+			server.removeSessionContext(session.SessionID)
 		}
 	case "GET":
-		if session != nil {
-			session.Headers = r.Header
-		}
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 		r = r.WithContext(ctx)
@@ -153,15 +145,13 @@ func getServer(r *http.Request) *gomcp.Server {
 	var server *MCPServer
 	port := util.GetRequestOrListenerPortNum(r)
 	defer func() {
-		log.Println("-------- MCP Request Details --------")
-		util.PrintRequest(r)
+		util.PrintRequest("MCP Request Details", r)
 		if server != nil {
 			rs := util.GetRequestStore(r)
 			rs.ResponseWriter.Header().Add("Goto-Server", server.ID)
 		} else {
 			log.Printf("Not handling MCP request on port [%d]", port)
 		}
-		server.getOrSetSessionContext(r)
 	}()
 	server, _ = getServerAndTool(r)
 	return server.server
@@ -261,8 +251,7 @@ func getPortServerToolFromURI(uri string) (port int, server, tool string) {
 }
 
 func HandleMCPDefault(w http.ResponseWriter, r *http.Request) {
-	log.Println("-------- HandleMCPDefault: MCP Request Details --------")
-	util.PrintRequest(r)
+	util.PrintRequest("Default MCP Handler: Request Details", r)
 	l := listeners.GetCurrentListener(r)
 	rs := util.GetRequestStore(r)
 	hasSSE := strings.Contains(r.RequestURI, "/sse")
