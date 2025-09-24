@@ -73,16 +73,16 @@ type RemoteCallArgs struct {
 
 type ToolCallContext struct {
 	*MCPTool
-	rs         *util.RequestStore
-	sse        bool
-	ctx        context.Context
-	headers    map[string][]string
-	req        *gomcp.CallToolRequest
-	args       map[string]any  //for all tools except remote tools
-	remoteArgs *RemoteCallArgs //for remote tools
-	delay      *types.Delay
-	hops       *util.Hops
-	log        []string
+	rs             *util.RequestStore
+	sse            bool
+	ctx            context.Context
+	requestHeaders map[string][]string
+	req            *gomcp.CallToolRequest
+	args           map[string]any  //for all tools except remote tools
+	remoteArgs     *RemoteCallArgs //for remote tools
+	delay          *types.Delay
+	hops           *util.Hops
+	log            []string
 }
 
 func NewMCPTool(name, desc string) *MCPTool {
@@ -164,7 +164,7 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 			}
 		}
 	}
-	tctx := &ToolCallContext{MCPTool: t, rs: rs, sse: isSSE, ctx: ctx, headers: headers, req: req, args: args, remoteArgs: remoteArgs, delay: delay}
+	tctx := &ToolCallContext{MCPTool: t, rs: rs, sse: isSSE, ctx: ctx, requestHeaders: headers, req: req, args: args, remoteArgs: remoteArgs, delay: delay}
 	result, err = tctx.RunTool()
 	return
 }
@@ -200,7 +200,7 @@ func (t *ToolCallContext) applyDelay() {
 
 func (t *ToolCallContext) RunTool() (result *gomcp.CallToolResult, err error) {
 	t.hops = util.NewHops(t.Server.ID, t.Label)
-	t.notifyClient(t.Log("%s: Received request with Args [%+v] Remote Args [%+v] Headers [%+v]", t.Label, t.args, t.remoteArgs, t.headers), 0)
+	t.notifyClient(t.Log("%s: Received request with Args [%+v] Remote Args [%+v] Headers [%+v]", t.Label, t.args, t.remoteArgs, t.requestHeaders), 0)
 	t.Hop(t.Flush(true))
 	if t.Behavior.Echo {
 		result, err = t.echo()
@@ -243,7 +243,7 @@ func (t *ToolCallContext) RunTool() (result *gomcp.CallToolResult, err error) {
 	t.rs.IsJSONRPC = true
 	t.rs.RequestPortNum = t.MCPTool.Server.Port
 	if t.rs.RequestHeaders == nil {
-		t.rs.RequestHeaders = t.headers
+		t.rs.RequestHeaders = t.requestHeaders
 	}
 	output["Goto-Server-Info"] = echo.GetEchoResponseFromRS(t.rs)
 	output["hops"] = t.hops.Steps

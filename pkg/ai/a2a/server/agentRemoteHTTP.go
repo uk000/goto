@@ -8,10 +8,10 @@ type AgentBehaviorRemoteHttp struct {
 	*AgentBehaviorImpl
 }
 
-func (ab *AgentBehaviorRemoteHttp) DoUnary(aCtx *AgentCallContext) (*taskmanager.MessageProcessingResult, error) {
+func (ab *AgentBehaviorRemoteHttp) DoUnary(aCtx *AgentContext) (*taskmanager.MessageProcessingResult, error) {
 	return nil, nil
 }
 
-func (ab *AgentBehaviorRemoteHttp) DoStream(aCtx *AgentCallContext) error {
+func (ab *AgentBehaviorRemoteHttp) DoStream(aCtx *AgentContext) error {
 	return nil
 }

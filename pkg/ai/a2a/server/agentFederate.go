@@ -69,7 +69,7 @@ func (bd *AgentBehaviorFederate) prepareDelegates() error {
 	return nil
 }
 
-func (ab *AgentBehaviorFederate) DoUnary(aCtx *AgentCallContext) (*taskmanager.MessageProcessingResult, error) {
+func (ab *AgentBehaviorFederate) DoUnary(aCtx *AgentContext) (*taskmanager.MessageProcessingResult, error) {
 	aCtx.triggers = ab.triggers
 	aCtx.detectRemoteCalls()
 	aCtx.toolResults = map[string]any{}
@@ -100,7 +100,7 @@ func (ab *AgentBehaviorFederate) DoUnary(aCtx *AgentCallContext) (*taskmanager.M
 	}, nil
 }
 
-func (ab *AgentBehaviorFederate) DoStream(aCtx *AgentCallContext) error {
+func (ab *AgentBehaviorFederate) DoStream(aCtx *AgentContext) error {
 	aCtx.triggers = ab.triggers
 	aCtx.detectRemoteCalls()
 	aCtx.resultsChan = make(chan *types.Pair[string, any], 10)
@@ -138,55 +138,90 @@ func (ab *AgentBehaviorFederate) DoStream(aCtx *AgentCallContext) error {
 	return nil
 }
 
-func (ab *AgentBehaviorFederate) processResults(aCtx *AgentCallContext, dType string, wg *sync.WaitGroup) {
-outer:
-	for {
-		select {
-		case <-aCtx.ctx.Done():
-			aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Stream was cancelled", nil)
-			break outer
-		case update, ok := <-aCtx.upstreamProgress:
-			if !ok {
+func (ab *AgentBehaviorFederate) processResults(aCtx *AgentContext, dType string, wg *sync.WaitGroup) {
+	channelsWG := sync.WaitGroup{}
+	channelsWG.Add(1)
+	go func() {
+	outer:
+		for {
+			select {
+			case <-aCtx.ctx.Done():
+				aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Stream was cancelled", nil)
 				break outer
-			}
-			if update != "" {
-				callId := fmt.Sprintf("Upstream %s update", dType)
-				aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, fmt.Sprintf("%s: %s", callId, update), nil)
-			}
-		case pair, ok := <-aCtx.localProgress:
-			if !ok {
-				break outer
-			}
-			if pair != nil && pair.Right != nil {
-				callId := fmt.Sprintf("Agent update [%s]", pair.Left)
-				aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, fmt.Sprintf("%s: %s", callId, pair.Right), nil)
-			}
-		case pair, ok := <-aCtx.resultsChan:
-			if !ok {
-				break outer
-			}
-			if pair != nil && pair.Right != nil {
-				log.Println(util.ToJSONText(pair))
-				callId := fmt.Sprintf("Upstream [%s] Result:", pair.Left)
-				aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "", createAnyParts(callId, pair.Right))
+			case update, ok := <-aCtx.upstreamProgress:
+				if !ok {
+					break outer
+				}
+				if update != "" {
+					callId := fmt.Sprintf("Upstream %s update", dType)
+					aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, fmt.Sprintf("%s: %s", callId, update), nil)
+				}
 			}
 		}
-	}
+		channelsWG.Done()
+	}()
+	channelsWG.Add(1)
+	go func() {
+	outer:
+		for {
+			select {
+			case <-aCtx.ctx.Done():
+				aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Stream was cancelled", nil)
+				break outer
+			case pair, ok := <-aCtx.localProgress:
+				if !ok {
+					break outer
+				}
+				if pair != nil && pair.Right != nil {
+					callId := fmt.Sprintf("Agent update [%s]", ab.agent.ID)
+					aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, fmt.Sprintf("%s: %s", callId, pair.Right), nil)
+				}
+			}
+		}
+		channelsWG.Done()
+	}()
+	channelsWG.Add(1)
+	go func() {
+	outer:
+		for {
+			select {
+			case <-aCtx.ctx.Done():
+				aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Stream was cancelled", nil)
+				break outer
+			case pair, ok := <-aCtx.resultsChan:
+				if !ok {
+					break outer
+				}
+				if pair != nil && pair.Right != nil {
+					callId := fmt.Sprintf("Upstream [%s] Result:", pair.Left)
+					aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "", createAnyParts(callId, pair.Right))
+				}
+			}
+		}
+		channelsWG.Done()
+	}()
+	channelsWG.Wait()
 	wg.Done()
 }
 
-func (ab *AgentBehaviorFederate) runTools(aCtx *AgentCallContext, wg *sync.WaitGroup) {
+func (ab *AgentBehaviorFederate) runTools(aCtx *AgentContext, wg *sync.WaitGroup) {
 	parallel := ab.agent.Config.Delegates.Parallel
 	wg2 := sync.WaitGroup{}
 	for _, tc := range aCtx.tools {
+		dCtx := &DelegateCallContext{
+			toolCall:       &tc.ToolCall,
+			configHeaders:  tc.ToolCall.Headers,
+			forwardHeaders: tc.ToolCall.ForwardHeaders,
+			removeHeaders:  tc.ToolCall.RemoveHeaders,
+		}
 		if parallel {
 			wg2.Add(1)
 			go func() {
-				ab.callTool(aCtx, &tc.ToolCall)
+				ab.callTool(aCtx, dCtx)
 				wg2.Done()
 			}()
 		} else {
-			ab.callTool(aCtx, &tc.ToolCall)
+			ab.callTool(aCtx, dCtx)
 		}
 	}
 	if parallel {
@@ -197,18 +232,24 @@ func (ab *AgentBehaviorFederate) runTools(aCtx *AgentCallContext, wg *sync.WaitG
 	}
 }
 
-func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentCallContext, wg *sync.WaitGroup) {
+func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentContext, wg *sync.WaitGroup) {
 	parallel := ab.agent.Config.Delegates.Parallel
 	wg2 := sync.WaitGroup{}
 	for _, a := range aCtx.agents {
+		dCtx := &DelegateCallContext{
+			agentCall:      &a.AgentCall,
+			configHeaders:  a.AgentCall.Headers,
+			forwardHeaders: a.AgentCall.ForwardHeaders,
+			removeHeaders:  a.AgentCall.RemoveHeaders,
+		}
 		if parallel {
 			wg2.Add(1)
 			go func() {
-				ab.callAgent(aCtx, &a.AgentCall)
+				ab.callAgent(aCtx, dCtx)
 				wg2.Done()
 			}()
 		} else {
-			ab.callAgent(aCtx, &a.AgentCall)
+			ab.callAgent(aCtx, dCtx)
 		}
 	}
 	if parallel {
@@ -219,78 +260,90 @@ func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentCallContext, wg *sync.Wait
 	}
 }
 
-func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentCallContext, ac *a2aclient.AgentCall) {
-	err := ab.invokeAgent(aCtx, ac)
+func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentContext, dCtx *DelegateCallContext) {
+	err := ab.invokeAgent(aCtx, dCtx)
 	if err != nil {
 		aCtx.Log(err.Error())
-		if aCtx.localProgress != nil {
-			aCtx.localProgress <- types.NewPair[string, any](ac.Name, err.Error())
-		} else if aCtx.agentResults != nil {
-			aCtx.agentResults[ac.Name] = err.Error()
-		}
+		aCtx.ReportProgress(dCtx.agentCall.Name, err.Error())
 	}
 }
 
-func (ab *AgentBehaviorFederate) callTool(aCtx *AgentCallContext, tc *mcpclient.ToolCall) {
-	remoteResult, err := ab.invokeMCP(aCtx, tc)
+func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCallContext) {
+	remoteResult, err := ab.invokeMCP(aCtx, dCtx)
+	output := map[string]any{}
 	if err != nil {
-		msg := fmt.Sprintf("Failed to invoke MCP tool [%s] at URL [%s] with error: %s", tc.Tool, tc.URL, err.Error())
+		msg := fmt.Sprintf("Failed to invoke MCP tool [%s] at URL [%s] with error: %s", dCtx.toolCall.Tool, dCtx.toolCall.URL, err.Error())
 		aCtx.Log(msg)
+		if remoteResult == nil {
+			remoteResult = map[string]any{}
+		}
+		util.BuildGotoClientInfo(remoteResult, aCtx.agent.Port, aCtx.agent.ID, "", dCtx.toolCall.Tool, dCtx.toolCall.URL, dCtx.toolCall.Server, aCtx.input, dCtx.toolCall.Args, aCtx.requestHeaders, dCtx.callHeaders,
+			map[string]any{
+				"Goto-MCP-Tool": dCtx.toolCall.Tool,
+				"Tool-Call":     dCtx.toolCall,
+			})
 		if aCtx.localProgress != nil {
-			aCtx.localProgress <- types.NewPair[string, any](tc.Tool, msg)
+			aCtx.ReportProgress(dCtx.toolCall.Tool, msg)
+			aCtx.ReportProgress(dCtx.toolCall.Tool, remoteResult)
 		} else if aCtx.toolResults != nil {
-			aCtx.toolResults[tc.Tool] = msg
+			aCtx.toolResults[dCtx.toolCall.Tool] = msg
 		}
 	} else {
-		output := map[string]any{}
-		if remoteResult["content"] != nil {
-			processMCPContent(tc.Tool, remoteResult, output, aCtx.resultsChan)
-			delete(remoteResult, "content")
-		}
-		if remoteResult["structuredContent"] != nil {
-			if aCtx.resultsChan != nil {
-				aCtx.resultsChan <- types.NewPair(tc.Tool, remoteResult["structuredContent"])
-			} else {
-				output["upstreamContent"] = remoteResult["structuredContent"]
-			}
-			delete(remoteResult, "structuredContent")
-		}
-		for k, v := range remoteResult {
-			count := 0
-			if arr, ok := v.([]any); ok {
-				count = len(arr)
-			} else if m, ok := v.(map[string]any); ok {
-				count = len(m)
-			}
-			if aCtx.resultsChan != nil {
-				aCtx.resultsChan <- types.NewPair[string, any](tc.Tool, fmt.Sprintf("Sent %s with %d items.", k, count))
-				aCtx.resultsChan <- types.NewPair[string, any](tc.Tool, map[string]any{k: v})
-			} else {
-				output[k] = v
-			}
-		}
-		if aCtx.toolResults != nil {
-			aCtx.toolResults[tc.Tool] = output
-		}
-		msg := fmt.Sprintf("Successfully invoked MCP tool [%s] at URL [%s]", tc.Tool, tc.URL)
+		msg := fmt.Sprintf("Successfully invoked MCP tool [%s] at URL [%s]", dCtx.toolCall.Tool, dCtx.toolCall.URL)
 		aCtx.Log(msg)
-		if aCtx.localProgress != nil {
-			aCtx.localProgress <- types.NewPair[string, any](tc.Tool, msg)
-		} else {
+
+		if !aCtx.ReportProgress(dCtx.toolCall.Tool, msg) {
 			output["toolResult"] = msg
 		}
 	}
+	if remoteResult["content"] != nil {
+		processMCPContent(dCtx.toolCall.Tool, remoteResult, output, aCtx.resultsChan)
+		delete(remoteResult, "content")
+	}
+	if remoteResult["structuredContent"] != nil {
+		if aCtx.resultsChan != nil {
+			aCtx.resultsChan <- types.NewPair(dCtx.toolCall.Tool, remoteResult["structuredContent"])
+		} else {
+			output["upstreamContent"] = remoteResult["structuredContent"]
+		}
+		delete(remoteResult, "structuredContent")
+	}
+	for k, v := range remoteResult {
+		count := 0
+		if arr, ok := v.([]any); ok {
+			count = len(arr)
+		} else if m, ok := v.(map[string]any); ok {
+			count = len(m)
+		}
+		if aCtx.resultsChan != nil {
+			aCtx.resultsChan <- types.NewPair[string, any](dCtx.toolCall.Tool, fmt.Sprintf("Sent %s with %d items.", k, count))
+			aCtx.resultsChan <- types.NewPair[string, any](dCtx.toolCall.Tool, map[string]any{k: v})
+		} else {
+			output[k] = v
+		}
+	}
+	if aCtx.toolResults != nil {
+		aCtx.toolResults[dCtx.toolCall.Tool] = output
+	}
 }
 
-func (ab *AgentBehaviorFederate) prepareHeaders(aCtx *AgentCallContext, forwardHeaders []string, headers map[string][]string) {
-	for _, h := range forwardHeaders {
-		for h2, v2 := range aCtx.headers {
+func (ab *AgentBehaviorFederate) prepareHeaders(aCtx *AgentContext, dCtx *DelegateCallContext) {
+	headers := map[string][]string{}
+	for h, v := range dCtx.configHeaders {
+		headers[h] = v
+	}
+	for _, h := range dCtx.forwardHeaders {
+		for h2, v2 := range aCtx.requestHeaders {
 			if strings.EqualFold(h, h2) {
 				headers[h] = v2
 				break
 			}
 		}
 	}
+	for _, h := range dCtx.removeHeaders {
+		delete(headers, h)
+	}
+	dCtx.callHeaders = headers
 }
 
 func (ab *AgentBehaviorFederate) prepareArgs(args map[string]any, forwardHeaders []string) map[string]any {
@@ -303,47 +356,45 @@ func (ab *AgentBehaviorFederate) prepareArgs(args map[string]any, forwardHeaders
 	return newArgs
 }
 
-func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentCallContext, ac *a2aclient.AgentCall) error {
-	ab.prepareHeaders(aCtx, ac.ForwardHeaders, ac.Headers)
-	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s]", ac.Name, ac.URL)
+func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateCallContext) error {
+	ab.prepareHeaders(aCtx, dCtx)
+	dCtx.agentCall.Headers = dCtx.callHeaders
+	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s] with input [%s]", dCtx.agentCall.Name, dCtx.agentCall.URL, dCtx.agentCall.Message)
 	aCtx.Log(msg)
-	if aCtx.localProgress != nil {
-		aCtx.localProgress <- types.NewPair[string, any](ac.Name, msg)
-	}
+	aCtx.ReportProgress(dCtx.agentCall.Name, msg)
 	client := a2aclient.NewA2AClient(ab.agent.Port)
 	if client == nil {
 		return errors.New("failed to create A2A client")
 	}
-	session, err := client.ConnectWithAgentCard(aCtx.ctx, ac)
+	session, err := client.ConnectWithAgentCard(aCtx.ctx, dCtx.agentCall, dCtx.url)
 	if err != nil {
-		return fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", ac.Name, ac.URL, err.Error())
+		return fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.URL, err.Error())
 	} else {
-		msg = fmt.Sprintf("Loaded agent card for Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.URL, session.Card.Capabilities.Streaming)
-		aCtx.localProgress <- types.NewPair[string, any](ac.Name, msg)
+		msg = fmt.Sprintf("Loaded agent card for Agent [%s] URL [%s], Streaming [%d]", dCtx.agentCall.Name, dCtx.agentCall.URL, session.Card.Capabilities.Streaming)
+		aCtx.ReportProgress(dCtx.agentCall.Name, msg)
 	}
 	err = session.CallAgent(nil, aCtx.resultsChan, aCtx.upstreamProgress)
 	if err != nil {
-		return fmt.Errorf("Failed to call Agent [%s] URL [%s] with error: %s", ac.Name, ac.URL, err.Error())
+		return fmt.Errorf("Failed to call Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.URL, err.Error())
 	} else {
-		msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.URL, session.Card.Capabilities.Streaming)
-		aCtx.localProgress <- types.NewPair[string, any](ac.Name, msg)
+		msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s], Streaming [%d]", dCtx.agentCall.Name, dCtx.agentCall.URL, session.Card.Capabilities.Streaming)
+		aCtx.ReportProgress(dCtx.agentCall.Name, msg)
 	}
 	return nil
 }
 
-func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentCallContext, tc *mcpclient.ToolCall) (remoteResult map[string]any, err error) {
-	ab.prepareHeaders(aCtx, tc.ForwardHeaders, tc.Headers)
-	args := ab.prepareArgs(tc.Args, tc.ForwardHeaders)
-	msg := fmt.Sprintf("Invoking MCP tool [%s] at URL [%s]", tc.Tool, tc.URL)
+func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCallContext) (remoteResult map[string]any, err error) {
+	ab.prepareHeaders(aCtx, dCtx)
+	dCtx.toolCall.Headers = dCtx.callHeaders
+	args := ab.prepareArgs(dCtx.toolCall.Args, dCtx.forwardHeaders)
+	msg := fmt.Sprintf("Invoking MCP tool [%s] at URL [%s]", dCtx.toolCall.Tool, dCtx.toolCall.URL)
 	aCtx.Log(msg)
-	if aCtx.localProgress != nil {
-		aCtx.localProgress <- types.NewPair[string, any](tc.Tool, msg)
-	}
-	client := mcpclient.NewClient(ab.agent.Port, false, ab.agent.ID, aCtx.upstreamProgress)
-	session, err := client.ConnectWithHops(tc.URL, tc.Tool, aCtx.hops)
+	aCtx.ReportProgress(dCtx.toolCall.Tool, msg)
+	client := mcpclient.NewClient(ab.agent.Port, false, ab.agent.ID, dCtx.callHeaders, aCtx.upstreamProgress)
+	session, err := client.ConnectWithHops(dCtx.toolCall.URL, dCtx.toolCall.Tool, dCtx.callHeaders, aCtx.hops)
 	if err == nil {
 		defer session.Close()
-		remoteResult, err = session.CallTool(tc, args)
+		remoteResult, err = session.CallTool(dCtx.toolCall, args)
 	}
 	return
 }
@@ -368,11 +419,11 @@ func processMCPContent(key string, remoteResult map[string]any, output map[strin
 		output["content"] = textResult
 	} else if contents, ok := remoteResult["content"].([]mcp.Content); ok {
 		textResult := []any{}
-		hasText := false
+		handled := false
 		for _, content := range contents {
 			if textContent, ok := content.(*mcp.TextContent); ok {
 				if textContent.Text != "" {
-					hasText = true
+					handled = true
 					if resultsChan != nil {
 						resultsChan <- types.NewPair[string, any](key, textContent.Text)
 					} else {
@@ -380,7 +431,7 @@ func processMCPContent(key string, remoteResult map[string]any, output map[strin
 					}
 				}
 			} else {
-				hasText = true
+				handled = true
 				if resultsChan != nil {
 					resultsChan <- types.NewPair[string, any](key, content)
 				} else {
@@ -391,7 +442,7 @@ func processMCPContent(key string, remoteResult map[string]any, output map[strin
 		}
 		if len(textResult) > 0 {
 			output["content"] = textResult
-		} else if !hasText {
+		} else if !handled {
 			if resultsChan != nil {
 				resultsChan <- types.NewPair(key, remoteResult["content"])
 			} else {
@@ -404,8 +455,5 @@ func processMCPContent(key string, remoteResult map[string]any, output map[strin
 		} else {
 			output["content"] = remoteResult["content"]
 		}
-	}
-	if resultsChan != nil {
-		resultsChan <- types.NewPair[string, any](key, fmt.Sprintf("Sent result content for [%s]", key))
 	}
 }

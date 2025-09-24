@@ -55,7 +55,7 @@ func invokeAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	port := util.GetRequestOrListenerPortNum(r)
 	client := NewA2AClient(port)
-	session, err := client.ConnectWithAgentCard(r.Context(), ac)
+	session, err := client.ConnectWithAgentCard(r.Context(), ac, "")
 	if err != nil {
 		msg = fmt.Sprintf("Failed to load agent card with error [%s]. Agent Call: %+v", err.Error(), ac)
 		w.WriteHeader(http.StatusBadRequest)

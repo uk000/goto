@@ -8,6 +8,7 @@ import (
 	"goto/pkg/proxy"
 	"goto/pkg/server/middleware"
 	"goto/pkg/server/response/payload"
+	"goto/pkg/server/response/status"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
@@ -94,6 +95,7 @@ var (
 	AllComponents          = map[string]map[string]map[string]IMCPComponent{}
 	Kinds                  = []string{KindTools, KindPrompts, KindResources, KindTemplates}
 	Middleware             = middleware.NewMiddleware("mcpserver", nil, nil)
+	StatusManager          = status.NewStatusManager()
 	lock                   sync.RWMutex
 )
 
@@ -623,7 +625,15 @@ func (m *MCPServer) AddResourceTemplates(b []byte) ([]string, error) {
 }
 
 func (m *MCPServer) onInitialized(ctx context.Context, req *gomcp.InitializedRequest) {
-	log.Printf("MCPServer[%d][%s]: Initialized: [%s]", m.Port, m.Name, util.ToJSONText(req.Params))
+	msg := fmt.Sprintf("MCPServer[%d][%s]: Initialized.", m.Port, m.Name)
+	params := &gomcp.ProgressNotificationParams{
+		ProgressToken: req.Params.Meta.GetMeta()["progressToken"],
+		Total:         float64(0),
+		Progress:      0,
+		Message:       msg,
+	}
+	req.Session.NotifyProgress(ctx, params)
+	log.Println(msg)
 }
 
 func (m *MCPServer) onRootsListChanged(ctx context.Context, req *gomcp.RootsListChangedRequest) {
@@ -671,7 +681,6 @@ func (m *MCPServer) onUnsubscribed(ctx context.Context, req *gomcp.UnsubscribeRe
 }
 
 func (m *MCPServer) getSessionContext(sessionID string) *SessionContext {
-	log.Println("GetSessionContext")
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	return m.sessionContexts[sessionID]

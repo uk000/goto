@@ -19,7 +19,6 @@ package a2aclient
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
@@ -46,10 +45,12 @@ type AgentCall struct {
 	Data           map[string]any      `json:"data,omitempty"`
 	Headers        map[string][]string `json:"headers,omitempty"`
 	ForwardHeaders []string            `json:"forwardHeaders,omitempty"`
+	RemoveHeaders  []string            `json:"removeHeaders,omitempty"`
 }
 
 type A2AClient struct {
 	ID         string
+	port       int
 	httpClient *http.Client
 	ht         transport.ClientTransport
 	client     *goa2aclient.A2AClient
@@ -57,11 +58,17 @@ type A2AClient struct {
 
 type A2AClientSession struct {
 	ctx          context.Context
+	port         int
+	callerId     string
 	client       *A2AClient
 	Card         *goa2aserver.AgentCard
 	url          string
 	authority    string
 	call         *AgentCall
+	inInput      string
+	outInput     string
+	inHeaders    http.Header
+	outHeaders   http.Header
 	callback     func(output string)
 	progressChan chan string
 	resultChan   chan *types.Pair[string, any]
@@ -73,44 +80,29 @@ var (
 	lock       = sync.RWMutex{}
 )
 
+func GetAgentCard(ctx context.Context, url, authority string, headers http.Header) (card *goa2aserver.AgentCard, err error) {
+	port := util.GetContextPort(ctx)
+	client := NewA2AClient(port)
+	session, err := client.LoadAgentCard(url, authority, headers)
+	if err != nil {
+		return nil, err
+	}
+	return session.Card, nil
+}
+
 func NewA2AClient(port int) *A2AClient {
 	id := fmt.Sprintf("GotoA2A[%s]", global.Funcs.GetListenerLabelForPort(port))
 	ht := transport.CreateHTTPClient(id, false, true, false, "", 0,
 		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
 	return &A2AClient{
 		ID:         id,
+		port:       port,
 		httpClient: ht.HTTP(),
 		ht:         ht,
 	}
 }
 
-func (ac *A2AClient) Connect(ctx context.Context, card *goa2aserver.AgentCard) (*A2AClientSession, error) {
-	session := ac.newSession(ctx, card)
-	c, err := goa2aclient.NewA2AClient(card.URL, goa2aclient.WithHTTPClient(ac.httpClient),
-		goa2aclient.WithHTTPReqHandler(session), goa2aclient.WithUserAgent(ac.ID))
-	if err != nil {
-		return nil, err
-	}
-	ac.client = c
-	return session, nil
-}
-
-func GetAgentCard(ctx context.Context, url, authority string, headers http.Header) (card *goa2aserver.AgentCard, err error) {
-	port := util.GetContextPort(ctx)
-	client := NewA2AClient(port)
-	return client.LoadAgentCard(url, authority, headers)
-}
-
-func addHeaders(r *http.Request, headers http.Header) {
-	if len(headers["Host"]) > 0 {
-		r.Host = headers["Host"][0]
-	}
-	for k, v := range headers {
-		r.Header.Add(k, v[0])
-	}
-}
-
-func (ac *A2AClient) LoadAgentCard(url, authority string, headers http.Header) (card *goa2aserver.AgentCard, err error) {
+func (ac *A2AClient) LoadAgentCard(url, authority string, headers http.Header) (session *A2AClientSession, err error) {
 	if !strings.HasSuffix(url, ".well-known/agent.json") {
 		if !strings.HasSuffix(url, "/") {
 			url += "/"
@@ -136,65 +128,88 @@ func (ac *A2AClient) LoadAgentCard(url, authority string, headers http.Header) (
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("Agent card request failed with status code: %d", resp.StatusCode)
 	}
-	card = &goa2aserver.AgentCard{}
+	card := &goa2aserver.AgentCard{}
 	if err := json.NewDecoder(resp.Body).Decode(card); err != nil {
 		return nil, fmt.Errorf("failed to parse agent card: %w", err)
 	}
 	lock.Lock()
 	AgentCards[card.Name] = card
 	lock.Unlock()
+	session = ac.newSession(context.Background(), ac.port, ac.ID, authority, card)
 	return
 }
 
-func (ac *A2AClient) ConnectWithAgentCard(ctx context.Context, call *AgentCall) (*A2AClientSession, error) {
-	card, err := ac.LoadAgentCard(call.URL, call.Authority, call.Headers)
+func (acs *A2AClientSession) Connect(ctx context.Context, url string) error {
+	acs.ctx = ctx
+	if url == "" {
+		url = acs.Card.URL
+	}
+	acs.url = url
+	c, err := goa2aclient.NewA2AClient(url, goa2aclient.WithHTTPClient(acs.client.httpClient),
+		goa2aclient.WithHTTPReqHandler(acs), goa2aclient.WithUserAgent(acs.callerId))
+	if err != nil {
+		return err
+	}
+	acs.client.client = c
+	return nil
+}
+
+func (ac *A2AClient) ConnectWithAgentCard(ctx context.Context, call *AgentCall, url string) (*A2AClientSession, error) {
+	session, err := ac.LoadAgentCard(call.URL, call.Authority, call.Headers)
 	if err != nil {
 		return nil, err
 	}
-	session, err := ac.Connect(ctx, card)
+	err = session.Connect(ctx, url)
 	if session != nil {
 		session.call = call
-		session.Card = card
+		session.outHeaders = make(http.Header)
+		for h, v := range call.Headers {
+			session.outHeaders[h] = v
+		}
+
 	}
 	return session, err
 }
 
-func (ac *A2AClient) newSession(ctx context.Context, card *goa2aserver.AgentCard) *A2AClientSession {
+func (ac *A2AClient) newSession(ctx context.Context, port int, callerId, authority string, card *goa2aserver.AgentCard) *A2AClientSession {
 	return &A2AClientSession{
-		ctx:    ctx,
-		client: ac,
-		Card:   card,
+		ctx:       ctx,
+		port:      port,
+		callerId:  callerId,
+		authority: authority,
+		client:    ac,
+		Card:      card,
 	}
 }
 
-func (ac *A2AClient) CallAgent(ctx context.Context, name, input string, data map[string]any, callback func(output string), call *AgentCall, resultChan chan *types.Pair[string, any], progressChan chan string) error {
-	if call != nil {
-		name = call.Name
-		input = call.Message
-		data = call.Data
-	}
-	lock.RLock()
-	card := AgentCards[name]
-	lock.RUnlock()
-	if card == nil {
-		return errors.New("agent not found")
-	}
-	session, err := ac.Connect(ctx, card)
-	if err != nil {
-		return err
-	}
-	if call != nil && call.Delay != "" {
-		delay := types.ParseDelay(call.Delay)
-		if delay != nil {
-			d := delay.Compute()
-			if progressChan != nil {
-				progressChan <- fmt.Sprintf("Agent Call [%s]: Delaying call by %s", name, d)
-			}
-			delay.Apply()
-		}
-	}
-	return session.invokeAgent(input, data, callback, resultChan, progressChan)
-}
+// func (ac *A2AClient) CallAgent(ctx context.Context, port int, callerId, name, input string, data map[string]any, callback func(output string), call *AgentCall, resultChan chan *types.Pair[string, any], progressChan chan string) error {
+// 	if call != nil {
+// 		name = call.Name
+// 		input = call.Message
+// 		data = call.Data
+// 	}
+// 	lock.RLock()
+// 	card := AgentCards[name]
+// 	lock.RUnlock()
+// 	if card == nil {
+// 		return errors.New("agent not found")
+// 	}
+// 	session, err := ac.Connect(ctx, port, callerId, card)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	if call != nil && call.Delay != "" {
+// 		delay := types.ParseDelay(call.Delay)
+// 		if delay != nil {
+// 			d := delay.Compute()
+// 			if progressChan != nil {
+// 				progressChan <- fmt.Sprintf("Agent Call [%s]: Delaying call by %s", name, d)
+// 			}
+// 			delay.Apply()
+// 		}
+// 	}
+// 	return session.invokeAgent(input, data, callback, resultChan, progressChan)
+// }
 
 func (acs *A2AClientSession) CallAgent(callback func(output string), resultChan chan *types.Pair[string, any], progressChan chan string) (err error) {
 	return acs.invokeAgent(acs.call.Message, acs.call.Data, callback, resultChan, progressChan)
@@ -209,6 +224,9 @@ func (acs *A2AClientSession) invokeAgent(input string, data map[string]any, call
 	}
 	inputParts := buildInputParts(input, data)
 	acs.update(callback, resultChan, progressChan, inputParts)
+	clientInfo := util.BuildGotoClientInfo(nil, acs.port, acs.callerId, acs.callerId, acs.call.Name, acs.url, acs.authority, acs.inInput, acs.outInput, acs.inHeaders, acs.outHeaders,
+		map[string]any{"ForwardHeaders": acs.call.ForwardHeaders})
+	acs.sendResponse("", clientInfo)
 	if acs.Card.Capabilities.Streaming != nil && *acs.Card.Capabilities.Streaming {
 		err = acs.InvokeStream()
 	} else {
@@ -325,7 +343,13 @@ func (acs *A2AClientSession) processEventResult(event *a2aproto.StreamingMessage
 			acs.processParts(e.Status.Message.Parts)
 		}
 	case *a2aproto.TaskStatusUpdateEvent:
-		msg := fmt.Sprintf("Task Status Update: TaskID %s, State: %s, Timestamp: %s, Message: %+v\n", e.TaskID, e.Status.State, e.Status.Timestamp, e.Status.Message)
+		text := []string{}
+		for _, p := range e.Status.Message.Parts {
+			if t, ok := p.(*a2aproto.TextPart); ok {
+				text = append(text, t.Text)
+			}
+		}
+		msg := fmt.Sprintf("Task Status Update: TaskID %s, State: %s, Timestamp: %s, Message: %+v\n", e.TaskID, e.Status.State, e.Status.Timestamp, text)
 		msg2 := ""
 		if e.Status.State == a2aproto.TaskStateInputRequired {
 			msg2 = ", [Additional input required]"
@@ -366,6 +390,8 @@ func (acs *A2AClientSession) processParts(parts []a2aproto.Part) {
 			acs.sendResponse(p.Text, nil)
 		case a2aproto.TextPart:
 			acs.sendResponse(p.Text, nil)
+		case *a2aproto.DataPart:
+			acs.sendResponse("", p.Data)
 		case map[string]interface{}:
 			textHandled := false
 			if typeStr, ok := p["type"].(string); ok && typeStr == "text" {
@@ -386,18 +412,24 @@ func (acs *A2AClientSession) processParts(parts []a2aproto.Part) {
 func (acs *A2AClientSession) sendResponse(text string, data any) {
 	if acs.callback != nil {
 		acs.callback(text)
+		if data != nil {
+			acs.callback(util.ToJSONText(data))
+		}
 	}
-	if text != "" && acs.progressChan != nil {
+	if text != "" && data == nil && acs.progressChan != nil {
 		acs.progressChan <- text
 	}
 	if data != nil && acs.resultChan != nil {
 		key := ""
+		if text != "" {
+			key = text
+		}
 		if acs.Card != nil {
-			key = acs.Card.Name
+			key = fmt.Sprintf("%s/%s", acs.Card.Name, key)
 		} else if acs.call != nil {
-			key = acs.call.Name
+			key = fmt.Sprintf("%s/%s", acs.call.Name, key)
 		} else {
-			key = acs.client.ID
+			key = fmt.Sprintf("%s/%s", acs.client.ID, key)
 		}
 		acs.resultChan <- types.NewPair(key, data)
 	}
@@ -444,4 +476,13 @@ func (ac *AgentCall) CloneWithUpdate(name, url, authority, message string, data 
 		clone.Data = data
 	}
 	return &clone
+}
+
+func addHeaders(r *http.Request, headers http.Header) {
+	if len(headers["Host"]) > 0 {
+		r.Host = headers["Host"][0]
+	}
+	for k, v := range headers {
+		r.Header.Add(k, v[0])
+	}
 }

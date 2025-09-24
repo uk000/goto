@@ -916,3 +916,27 @@ func PrintRequest(context string, r *http.Request) {
 func PrintResponse(w http.ResponseWriter) {
 	log.Println(ToJSONText(w))
 }
+
+func BuildGotoClientInfo(container map[string]any, port int, name, label, target, url, server string, inArgs, outArgs any, inHeaders, outHeaders http.Header, more map[string]any) map[string]any {
+	if container == nil {
+		container = map[string]any{}
+	}
+	clientInfo := map[string]any{
+		"Goto-Client":           name,
+		"Goto-Host":             global.Self.HostLabel,
+		"Goto-Listener":         global.Funcs.GetListenerLabelForPort(port),
+		"Goto-Label":            label,
+		"Goto-Remote-Target":    target,
+		"Goto-Remote-URL":       url,
+		"Goto-Remote-Server":    server,
+		"Goto-Inbound-Args":     inArgs,
+		"Goto-Inbound-Headers":  inHeaders,
+		"Goto-Outbound-Args":    outArgs,
+		"Goto-Outbound-Headers": outHeaders,
+	}
+	for k, v := range more {
+		clientInfo[k] = v
+	}
+	container["Goto-Client-Info"] = clientInfo
+	return container
+}

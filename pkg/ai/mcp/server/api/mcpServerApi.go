@@ -60,6 +60,7 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRouteWithPort(mcpapiRouter, "/servers/clear/all", clearServers, "POST")
 	util.AddRouteWithPort(mcpapiRouter, "/servers/clear", clearServers, "POST")
 	util.AddRouteWithPort(mcpapiRouter, "/server/{server}/clear", clearServers, "POST")
+	util.AddRouteWithPort(mcpapiRouter, "/status/set/{status}", setStatus, "POST")
 }
 
 func getServers(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +136,22 @@ func setServerRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
+}
+
+func setStatus(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	statusCodes, times, ok := util.GetStatusParam(r)
+	if !ok {
+		util.AddLogMessage("Invalid status", r)
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintln(w, "Invalid Status")
+		return
+	}
+	status := mcpserver.StatusManager.SetStatus(port, statusCodes, times)
+	msg := status.Log("MCP", port)
+	util.AddLogMessage(msg, r)
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintln(w, msg)
 }
 
 func clearServers(w http.ResponseWriter, r *http.Request) {

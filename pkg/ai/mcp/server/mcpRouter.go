@@ -2,10 +2,13 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
+	"goto/pkg/constants"
 	"goto/pkg/proxy"
 	"goto/pkg/server/conn"
 	"goto/pkg/server/listeners"
 	"goto/pkg/util"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -16,6 +19,11 @@ import (
 
 func MCPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		port := util.GetRequestOrListenerPortNum(r)
+		if status, rem := StatusManager.GetStatus(port); status >= 400 {
+			sendStatus(status, rem, w, r)
+			return
+		}
 		rs := util.GetRequestStore(r)
 		//HandleMCPDefault(w, r)
 		HandleMCP(w, r)
@@ -30,7 +38,6 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 	rs := util.GetRequestStore(r)
 	isMCP := l.IsJSONRPC || rs.IsMCP
 	if isMCP && !rs.IsAdminRequest {
-		log.Println("------- MayBe MCP ------")
 		if proxy.WillProxyMCP(l.Port, r) {
 			log.Printf("MCP is configured to proxy on Port [%d]. Skipping MCP processing", l.Port)
 			return
@@ -61,7 +68,6 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			log.Printf("Port [%d] Request [%s] No server available. Routing to HTTP server", l.Port, r.RequestURI)
 		}
-		log.Println("---- After MayBe MCP ----")
 	} else {
 		log.Printf("Port [%d] Request [%s] skipping MCP processing", l.Port, r.RequestURI)
 	}
@@ -96,10 +102,8 @@ func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler ht
 	session := server.getOrSetSessionContext(r)
 	switch r.Method {
 	case "DELETE":
-		log.Println("-------- MCPServer.Serve: Serving DELETE --------")
 		if session != nil {
 			handler.ServeHTTP(w, r)
-			log.Println("-------- MCPServer.Serve: DELETE closing session --------")
 			close(session.finished)
 			server.removeSessionContext(session.SessionID)
 		}
@@ -110,35 +114,25 @@ func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler ht
 		rc := make(chan bool, 1)
 		requestFinished := false
 		go func() {
-			log.Println("-------- MCPServer.Serve: Serving GET --------")
 			handler.ServeHTTP(w, r)
-			log.Println("-------- MCPServer.Serve: GET returned --------")
 			close(rc)
-			log.Println("-------- MCPServer.Serve: GET notified request channel --------")
 		}()
 		if session != nil {
 			select {
 			case <-rc:
 				requestFinished = true
-				log.Println("-------- MCPServer.Serve: Request channel finished --------")
 			case <-session.finished:
-				log.Println("-------- MCPServer.Serve: Session channel closed --------")
 			}
 			if !requestFinished {
-				log.Println("-------- MCPServer.Serve: Request not finished, marking contxt done --------")
 				ctx.Done()
 			} else {
-				log.Println("-------- MCPServer.Serve: Request finished. All GOOD --------")
 			}
 		} else {
 			<-rc
-			log.Println("-------- MCPServer.Serve: Request finished. All GOOD --------")
 		}
 	default:
-		log.Println("-------- MCPServer.Serve: Serving Normal --------")
 		handler.ServeHTTP(w, r)
 	}
-	log.Println("-------- MCPServer.Serve: Finished --------")
 }
 
 func getServer(r *http.Request) *gomcp.Server {
@@ -277,4 +271,13 @@ func HandleMCPDefault(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	rs.RequestServed = true
+}
+
+func sendStatus(status, rem int, w http.ResponseWriter, r *http.Request) {
+	w.Header().Add(constants.HeaderGotoForcedStatusRemaining, strconv.Itoa(rem))
+	w.WriteHeader(status)
+	b, _ := io.ReadAll(r.Body)
+	msg := fmt.Sprintf("Reporting status [%d], Remaining status count [%d]. MCP Request Headers [%s], Payload: %s", status, rem, util.ToJSONText(r.Header), string(b))
+	util.AddLogMessage(msg, r)
+	fmt.Fprintln(w, msg)
 }

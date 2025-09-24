@@ -48,14 +48,21 @@ type AgentConfig struct {
 	Delegates *DelegateConfig  `json:"delegates,omitempty"`
 }
 
+type DelegateServer struct {
+	URL       string `json:"url"`
+	Authority string `json:"authority,omitempty"`
+}
+
 type DelegateToolCall struct {
-	Triggers []string           `json:"triggers"`
-	ToolCall mcpclient.ToolCall `json:"toolCall,omitempty"`
+	Triggers []string                   `json:"triggers"`
+	ToolCall mcpclient.ToolCall         `json:"toolCall,omitempty"`
+	Servers  map[string]*DelegateServer `json:"servers"`
 }
 
 type DelegateAgentCall struct {
-	Triggers  []string            `json:"triggers"`
-	AgentCall a2aclient.AgentCall `json:"agentCall,omitempty"`
+	Triggers  []string                   `json:"triggers"`
+	AgentCall a2aclient.AgentCall        `json:"agentCall,omitempty"`
+	Servers   map[string]*DelegateServer `json:"servers"`
 }
 
 type DelegateConfig struct {

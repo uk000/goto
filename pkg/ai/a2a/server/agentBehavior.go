@@ -16,8 +16,8 @@ import (
 )
 
 type DelegateTriggers map[string]*types.Triple[*regexp.Regexp, *model.DelegateToolCall, *model.DelegateAgentCall]
-type UnaryHandler func(aCtx *AgentCallContext) (*taskmanager.MessageProcessingResult, error)
-type StreamHandler func(aCtx *AgentCallContext) error
+type UnaryHandler func(aCtx *AgentContext) (*taskmanager.MessageProcessingResult, error)
+type StreamHandler func(aCtx *AgentContext) error
 
 type AgentBehaviorImpl struct {
 	self     model.IAgentBehavior
@@ -80,7 +80,7 @@ func (b *AgentBehaviorImpl) prepareDelegates() error {
 	return bd.prepareDelegates()
 }
 
-func (bd *AgentBehaviorImpl) newAgentTask(aCtx *AgentCallContext, input a2aproto.Message, options taskmanager.ProcessOptions,
+func (bd *AgentBehaviorImpl) newAgentTask(aCtx *AgentContext, input *a2aproto.Message, options *taskmanager.ProcessOptions,
 	handler taskmanager.TaskHandler) (*AgentTask, error) {
 	taskID, err := handler.BuildTask(nil, nil)
 	if err != nil {
@@ -103,18 +103,18 @@ func (bd *AgentBehaviorImpl) newAgentTask(aCtx *AgentCallContext, input a2aproto
 
 func (b *AgentBehaviorImpl) ProcessMessage(ctx context.Context, input a2aproto.Message, options taskmanager.ProcessOptions,
 	handler taskmanager.TaskHandler) (*taskmanager.MessageProcessingResult, error) {
-	var aCtx *AgentCallContext
+	var aCtx *AgentContext
 	if val := ctx.Value(util.AgentContextKey); val != nil {
-		aCtx = val.(*AgentCallContext)
+		aCtx = val.(*AgentContext)
 	}
 	if aCtx == nil {
 		return nil, fmt.Errorf("Received agent [%s] call without context", b.agent.ID)
 	}
-	task, err := b.newAgentTask(aCtx, input, options, handler)
+	task, err := b.newAgentTask(aCtx, &input, &options, handler)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build task: %w", err)
 	}
-	aCtx.setContext(ctx, b, task, input, options, handler)
+	aCtx.setContext(ctx, b, task, &input, &options, handler)
 	if options.Streaming {
 		return b.handleStream(aCtx)
 	} else {
@@ -122,7 +122,7 @@ func (b *AgentBehaviorImpl) ProcessMessage(ctx context.Context, input a2aproto.M
 	}
 }
 
-func (b *AgentBehaviorImpl) handleUnary(aCtx *AgentCallContext) (result *taskmanager.MessageProcessingResult, err error) {
+func (b *AgentBehaviorImpl) handleUnary(aCtx *AgentContext) (result *taskmanager.MessageProcessingResult, err error) {
 	if b.doUnary == nil {
 		return nil, fmt.Errorf("Agent [%s] doesn't support Unary behavior.", b.agent.ID)
 	}
@@ -131,7 +131,7 @@ func (b *AgentBehaviorImpl) handleUnary(aCtx *AgentCallContext) (result *taskman
 	return
 }
 
-func (b *AgentBehaviorImpl) handleStream(aCtx *AgentCallContext) (*taskmanager.MessageProcessingResult, error) {
+func (b *AgentBehaviorImpl) handleStream(aCtx *AgentContext) (*taskmanager.MessageProcessingResult, error) {
 	if b.doStream == nil {
 		return nil, fmt.Errorf("Agent [%s] doesn't support Streaming behavior.", b.agent.ID)
 	}
@@ -141,7 +141,7 @@ func (b *AgentBehaviorImpl) handleStream(aCtx *AgentCallContext) (*taskmanager.M
 	}, nil
 }
 
-func (b *AgentBehaviorImpl) stream(aCtx *AgentCallContext) (err error) {
+func (b *AgentBehaviorImpl) stream(aCtx *AgentContext) (err error) {
 	defer aCtx.endTask()
 	if err = aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Agent update: Stream Started...", nil); err != nil {
 		return
@@ -150,7 +150,7 @@ func (b *AgentBehaviorImpl) stream(aCtx *AgentCallContext) (err error) {
 	return b.doStream(aCtx)
 }
 
-func (b *AgentBehaviorImpl) addOrSendServerInfo(aCtx *AgentCallContext, result *taskmanager.MessageProcessingResult) {
+func (b *AgentBehaviorImpl) addOrSendServerInfo(aCtx *AgentContext, result *taskmanager.MessageProcessingResult) {
 	serverInfo := a2aproto.NewDataPart(map[string]any{"Goto-Server-Info": echo.GetEchoResponseFromRS(aCtx.rs)})
 	if result != nil && result.Result != nil {
 		if msg, ok := result.Result.(*a2aproto.Message); ok {
@@ -161,7 +161,7 @@ func (b *AgentBehaviorImpl) addOrSendServerInfo(aCtx *AgentCallContext, result *
 	}
 }
 
-func getMessageText(message a2aproto.Message) string {
+func getMessageText(message *a2aproto.Message) string {
 	s := strings.Builder{}
 	for _, part := range message.Parts {
 		if p, ok := part.(*a2aproto.TextPart); ok {
@@ -223,10 +223,10 @@ func createHybridMessage(toolResults, agentResults map[string]any) a2aproto.Mess
 	return a2aproto.NewMessage(a2aproto.MessageRoleAgent, parts)
 }
 
-func createAnyParts(key string, result any) []a2aproto.Part {
+func createAnyParts(msg string, result any) []a2aproto.Part {
 	parts := []a2aproto.Part{}
 	if s, ok := result.(string); ok {
-		parts = append(parts, a2aproto.NewTextPart(fmt.Sprintf("[%s] %s: %s", time.Now().Format(time.RFC3339Nano), key, s)))
+		parts = append(parts, a2aproto.NewTextPart(fmt.Sprintf("[%s] %s: %s", time.Now().Format(time.RFC3339Nano), msg, s)))
 	} else if a, ok := result.([]any); ok {
 		parts = append(parts, a2aproto.NewDataPart(a))
 	} else if m, ok := result.(map[string]any); ok {
@@ -238,7 +238,8 @@ func createAnyParts(key string, result any) []a2aproto.Part {
 	} else if p, ok := result.(a2aproto.Part); ok {
 		parts = append(parts, p)
 	} else {
-		parts = append(parts, a2aproto.NewTextPart(fmt.Sprintf("[%s] %s: %s", time.Now().Format(time.RFC3339Nano), key, util.ToJSONText(result))))
+		parts = append(parts, a2aproto.NewDataPart(result))
+		//parts = append(parts, a2aproto.NewTextPart(fmt.Sprintf("[%s] %s: %s", time.Now().Format(time.RFC3339Nano), msg, util.ToJSONText(result))))
 	}
 	return parts
 }

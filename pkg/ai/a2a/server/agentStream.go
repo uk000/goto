@@ -13,7 +13,7 @@ type AgentBehaviorStream struct {
 	*AgentBehaviorImpl
 }
 
-func (ab *AgentBehaviorStream) DoStream(aCtx *AgentCallContext) error {
+func (ab *AgentBehaviorStream) DoStream(aCtx *AgentContext) error {
 	if aCtx.delay == nil {
 		aCtx.delay = &types.Delay{
 			Min: &types.Duration{10 * time.Millisecond},

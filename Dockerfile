@@ -37,25 +37,27 @@ RUN --mount=type=cache,target="/root/.cache/go-build" go build -mod=mod -o goto 
 WORKDIR /tmp
 
 
-FROM alpine:3.22.0 AS release-base
+FROM alpine:3.22.1 AS release-base
 
 ARG kube
-ARG iputils
+ARG netutils
 ARG perf
+ARG ssl
+ARG grpc
 
-RUN echo 'http://nl.alpinelinux.org/alpine/v3.22/main' > /etc/apk/repositories \
-	&& echo 'http://nl.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories \
-	&& echo 'http://dl-cdn.alpinelinux.org/alpine/edge/testing' >> /etc/apk/repositories
+RUN echo 'http://nl.alpinelinux.org/alpine/v3.22/main' > /etc/apk/repositories && \
+    echo 'http://nl.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories
 
 RUN apk update \
 	&& apk add --no-cache curl jq bash sudo su-exec
 
-RUN apk add --no-cache grpcurl 
+# RUN apk add --no-cache --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing grpcurl 
 
-RUN if [[ -n "$iputils" ]] ; then apk add --no-cache nmap-ncat iputils iproute2 iptables ipvsadm tcpdump tcpflow bind-tools; echo "iputils=$iputils"; fi
-RUN if [[ -n "$kube" ]] ; then apk add --no-cache kubectl; echo "kubectl=$kube"; fi
-RUN if [[ -n "$perf" ]] ; then apk add --no-cache hey; echo "perf=$perf"; fi
-RUN rm -rf /var/cache/apk/*
+RUN if [[ -n "$netutils" ]] ; then apk add --no-cache nmap-ncat netcat-openbsd socat iputils iproute2 tcpdump bind-tools iptables ipvsadm tcpflow; echo "netutils=$netutils"; fi
+RUN if [[ -n "$kube" ]] ; then apk add --no-cache kubectl etcd-ctl; echo "kubectl=$kube"; fi
+RUN if [[ -n "$perf" ]] ; then apk add --no-cache hey iftop; echo "perf=$perf"; fi
+RUN if [[ -n "$ssl" ]] ; then apk add --no-cache openssl; echo "perf=$ssl"; fi
+RUN if [[ -n "$grpc" ]] ; then apk add --no-cache grpcurl; echo "perf=$grpc"; fi
 
 FROM release-base AS release
 

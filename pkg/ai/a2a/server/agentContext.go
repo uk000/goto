@@ -3,7 +3,9 @@ package a2aserver
 import (
 	"context"
 	"fmt"
+	a2aclient "goto/pkg/ai/a2a/client"
 	"goto/pkg/ai/a2a/model"
+	mcpclient "goto/pkg/ai/mcp/client"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
@@ -20,25 +22,26 @@ type AgentTask struct {
 	agent      *model.Agent
 	behavior   model.IAgentBehavior
 	taskID     string
-	input      a2aproto.Message
-	options    taskmanager.ProcessOptions
+	input      *a2aproto.Message
+	options    *taskmanager.ProcessOptions
 	handler    taskmanager.TaskHandler
 	subscriber taskmanager.TaskSubscriber
 }
 
-type AgentCallContext struct {
+type AgentContext struct {
 	serverID         string
 	agent            *model.Agent
 	behavior         model.IAgentBehavior
 	ctx              context.Context
 	rs               *util.RequestStore
-	headers          http.Header
+	requestHeaders   http.Header
 	delay            *types.Delay
 	triggers         DelegateTriggers
 	tools            map[string]*model.DelegateToolCall
 	agents           map[string]*model.DelegateAgentCall
-	input            a2aproto.Message
-	options          taskmanager.ProcessOptions
+	input            *a2aproto.Message
+	inputText        string
+	options          *taskmanager.ProcessOptions
 	handler          taskmanager.TaskHandler
 	task             *AgentTask
 	hops             *util.Hops
@@ -50,6 +53,16 @@ type AgentCallContext struct {
 	agentResults     map[string]any
 }
 
+type DelegateCallContext struct {
+	agentCall      *a2aclient.AgentCall
+	toolCall       *mcpclient.ToolCall
+	configHeaders  http.Header
+	forwardHeaders []string
+	removeHeaders  []string
+	callHeaders    http.Header
+	url            string
+}
+
 type toolOverrides struct {
 	tool        string
 	agent       string
@@ -58,17 +71,17 @@ type toolOverrides struct {
 	args        map[string]any
 }
 
-func newAgentCallContext(serverID string, agent *model.Agent, headers http.Header, rs *util.RequestStore) *AgentCallContext {
-	return &AgentCallContext{
-		serverID: serverID,
-		agent:    agent,
-		hops:     util.NewHops(serverID, agent.ID),
-		headers:  headers,
-		rs:       rs,
+func newAgentCallContext(serverID string, agent *model.Agent, headers http.Header, rs *util.RequestStore) *AgentContext {
+	return &AgentContext{
+		serverID:       serverID,
+		agent:          agent,
+		hops:           util.NewHops(serverID, agent.ID),
+		requestHeaders: headers,
+		rs:             rs,
 	}
 }
 
-func (ac *AgentCallContext) setContext(ctx context.Context, b *AgentBehaviorImpl, task *AgentTask, input a2aproto.Message, options taskmanager.ProcessOptions, handler taskmanager.TaskHandler) {
+func (ac *AgentContext) setContext(ctx context.Context, b *AgentBehaviorImpl, task *AgentTask, input *a2aproto.Message, options *taskmanager.ProcessOptions, handler taskmanager.TaskHandler) {
 	ac.ctx = ctx
 	ac.behavior = b
 	ac.task = task
@@ -81,16 +94,19 @@ func (ac *AgentCallContext) setContext(ctx context.Context, b *AgentBehaviorImpl
 	}
 }
 
-func (ac *AgentCallContext) detectRemoteCalls() {
+func (ac *AgentContext) detectRemoteCalls() {
 	text := getMessageText(ac.input)
-	inputText, jsons := util.ExtractEmbeddedJSON(text)
-	inputText, portHint := util.ExtractPortHint(text)
-	ac.matchDelegates(inputText, portHint)
+	inputText, jsons := util.ExtractEmbeddedJSONs(text)
+	inputText, targetHint := util.ExtractTargetHint(inputText)
+	inputText, inputs := util.ExtractInputHint(inputText)
+	inputText, portHint := util.ExtractPortHint(inputText)
+	ac.matchDelegates(inputText, portHint, targetHint, inputs)
 	ac.sendDelegatesMatchUpdate()
-	ac.setOverrideParamsFromInput(jsons)
+	ac.setOverrideParamsFromInput(jsons, inputs)
+	ac.inputText = inputText
 }
 
-func (ac *AgentCallContext) sendDelegatesMatchUpdate() {
+func (ac *AgentContext) sendDelegatesMatchUpdate() {
 	toolNames := []string{}
 	agentNames := []string{}
 	for name := range ac.tools {
@@ -104,22 +120,48 @@ func (ac *AgentCallContext) sendDelegatesMatchUpdate() {
 	ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
 }
 
-func (ac *AgentCallContext) matchDelegates(input string, portHint string) {
+func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint string, inputs map[string]string) {
 	ac.tools = map[string]*model.DelegateToolCall{}
 	ac.agents = map[string]*model.DelegateAgentCall{}
+	for name := range inputs {
+		if ac.agent.Config.Delegates.Agents != nil && ac.agent.Config.Delegates.Agents[name] != nil {
+			d := ac.agent.Config.Delegates.Agents[name]
+			ac.agents[d.AgentCall.Name] = d
+		}
+		if ac.agent.Config.Delegates.Tools != nil && ac.agent.Config.Delegates.Tools[name] != nil {
+			d := ac.agent.Config.Delegates.Tools[name]
+			ac.tools[d.ToolCall.Tool] = d
+		}
+		if len(ac.tools)+len(ac.agents) >= ac.agent.Config.Delegates.MaxCalls {
+			break
+		}
+	}
 	for _, triple := range ac.triggers {
+		if len(ac.tools)+len(ac.agents) >= ac.agent.Config.Delegates.MaxCalls {
+			break
+		}
 		re := triple.First
 		if re.MatchString(input) {
 			if triple.Second != nil {
 				tool := *triple.Second
 				toolName := tool.ToolCall.Tool
-				if ac.tools[toolName] != nil && portHint != "" {
-					if strings.Contains(tool.ToolCall.URL, portHint) ||
-						!strings.Contains(ac.tools[toolName].ToolCall.URL, portHint) {
+				if ac.tools[toolName] != nil {
+					if portHint != "" && (strings.Contains(tool.ToolCall.URL, portHint) ||
+						!strings.Contains(ac.tools[toolName].ToolCall.URL, portHint)) {
 						ac.tools[toolName] = &tool
 					}
 				} else {
 					ac.tools[toolName] = &tool
+				}
+				if delegateHint != "" && !strings.EqualFold(delegateHint, tool.ToolCall.Tool) {
+					altDelegate := tool.Servers[delegateHint]
+					if altDelegate != nil {
+						msg := fmt.Sprintf("Using alternate server [%s] with URL [%s] Authority [%s] instead of default Server [%s] URL [%s]",
+							delegateHint, altDelegate.URL, altDelegate.Authority, tool.ToolCall.Server, tool.ToolCall.URL)
+						ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
+						tool.ToolCall.URL = altDelegate.URL
+						tool.ToolCall.Authority = altDelegate.Authority
+					}
 				}
 			} else if triple.Third != nil {
 				agent := *triple.Third
@@ -132,15 +174,22 @@ func (ac *AgentCallContext) matchDelegates(input string, portHint string) {
 				} else {
 					ac.agents[agentName] = &agent
 				}
-			}
-			if len(ac.tools)+len(ac.agents) >= ac.agent.Config.Delegates.MaxCalls {
-				break
+				if delegateHint != "" {
+					altDelegate := agent.Servers[delegateHint]
+					if altDelegate != nil {
+						agent.AgentCall.URL = altDelegate.URL
+						agent.AgentCall.Authority = altDelegate.Authority
+					}
+					agentURL := strings.Split(agent.AgentCall.URL, agent.AgentCall.Name)[0]
+					agent.AgentCall.URL = agentURL + "/" + delegateHint
+					agent.AgentCall.Name = delegateHint
+				}
 			}
 		}
 	}
 }
 
-func (ac *AgentCallContext) setOverrideParamsFromInput(jsons []map[string]any) {
+func (ac *AgentContext) setOverrideParamsFromInput(jsons []map[string]any, inputs map[string]string) {
 	overrides := extractJSONValues(jsons)
 	for name, override := range overrides {
 		if t := ac.tools[name]; t != nil {
@@ -177,6 +226,30 @@ func (ac *AgentCallContext) setOverrideParamsFromInput(jsons []map[string]any) {
 			}
 		}
 	}
+	for name, input := range inputs {
+		agent := ac.agent.Config.Delegates.Agents[name]
+		tool := ac.agent.Config.Delegates.Tools[name]
+		if tool != nil {
+			if t := ac.tools[tool.ToolCall.Tool]; t != nil {
+				json := util.JSONFromJSONText(input)
+				if !json.IsEmpty() {
+					args := json.Object()
+					msg := fmt.Sprintf("Will use Args %+v instead of %+v for Tool [%s]", args, t.ToolCall.Args, t.ToolCall.Tool)
+					log.Println(msg)
+					ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
+					t.ToolCall.Args = args
+				}
+			}
+		}
+		if agent != nil {
+			if a := ac.agents[agent.AgentCall.Name]; a != nil {
+				msg := fmt.Sprintf("Will use Message %s instead of %s for Agent [%s]", input, a.AgentCall.Message, a.AgentCall.Name)
+				log.Println(msg)
+				ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
+				a.AgentCall.Message = input
+			}
+		}
+	}
 }
 
 func extractJSONValues(jsons []map[string]any) map[string]*toolOverrides {
@@ -208,7 +281,15 @@ func extractJSONValues(jsons []map[string]any) map[string]*toolOverrides {
 	return overrides
 }
 
-func (ac *AgentCallContext) sendTaskStatusUpdate(state a2aproto.TaskState, msg string, parts []a2aproto.Part) (err error) {
+func (ac *AgentContext) ReportProgress(name string, msg any) bool {
+	if ac.localProgress != nil {
+		ac.localProgress <- types.NewPair[string, any](name, msg)
+		return true
+	}
+	return false
+}
+
+func (ac *AgentContext) sendTaskStatusUpdate(state a2aproto.TaskState, msg string, parts []a2aproto.Part) (err error) {
 	var message a2aproto.Message
 	if parts == nil {
 		parts = []a2aproto.Part{}
@@ -222,7 +303,7 @@ func (ac *AgentCallContext) sendTaskStatusUpdate(state a2aproto.TaskState, msg s
 	return
 }
 
-func (ac *AgentCallContext) sendTextArtifact(title, description, text string, isFinal, isQuestion bool) (err error) {
+func (ac *AgentContext) sendTextArtifact(title, description, text string, isFinal, isQuestion bool) (err error) {
 	artifact := a2aproto.Artifact{
 		ArtifactID:  uuid.New().String(),
 		Name:        util.Ptr(title),
@@ -244,7 +325,7 @@ func (ac *AgentCallContext) sendTextArtifact(title, description, text string, is
 	return ac.task.handler.AddArtifact(&ac.task.taskID, artifact, isFinal, isQuestion)
 }
 
-func (ac *AgentCallContext) endTask() {
+func (ac *AgentContext) endTask() {
 	ac.sendTaskStatusUpdate(a2aproto.TaskStateCompleted, "Agent update: Completed.", nil)
 	if ac.task.subscriber != nil {
 		ac.task.subscriber.Close()
@@ -252,7 +333,7 @@ func (ac *AgentCallContext) endTask() {
 	ac.task.handler.CleanTask(&ac.task.taskID)
 }
 
-func (ac *AgentCallContext) waitBeforeNextStep(ctx context.Context) error {
+func (ac *AgentContext) waitBeforeNextStep(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		log.Printf("Task %s cancelled during delay: %v", ac.task.taskID, ctx.Err())
@@ -262,13 +343,13 @@ func (ac *AgentCallContext) waitBeforeNextStep(ctx context.Context) error {
 	return nil
 }
 
-func (ac *AgentCallContext) Log(msg string, args ...any) string {
+func (ac *AgentContext) Log(msg string, args ...any) string {
 	msg = fmt.Sprintf(msg, args...)
 	ac.logs = append(ac.logs, msg)
 	return msg
 }
 
-func (ac *AgentCallContext) Flush(print bool) string {
+func (ac *AgentContext) Flush(print bool) string {
 	msg := strings.Join(ac.logs, " --> ")
 	ac.logs = []string{}
 	if print {
@@ -277,7 +358,7 @@ func (ac *AgentCallContext) Flush(print bool) string {
 	return msg
 }
 
-func (ac *AgentCallContext) Hop(msg string) {
+func (ac *AgentContext) Hop(msg string) {
 	if msg != "" {
 		ac.hops.Add(msg)
 	}

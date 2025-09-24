@@ -61,11 +61,11 @@ var (
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	statusRouter := util.PathRouter(r, "/status")
-	util.AddRouteWithPort(statusRouter, "/set/{status}", setStatus, "PUT", "POST")
-	util.AddRouteWithPort(statusRouter, "/counts/clear", clearStatus, "PUT", "POST")
+	util.AddRouteWithPort(statusRouter, "/set/{status}", setStatus, "POST")
+	util.AddRouteWithPort(statusRouter, "/counts/clear", clearStatus, "POST")
 	util.AddRouteWithPort(statusRouter, "/counts/{status}", getStatusCount, "GET")
 	util.AddRouteWithPort(statusRouter, "/counts", getStatusCount, "GET")
-	util.AddRouteWithPort(statusRouter, "/clear", setStatus, "PUT", "POST")
+	util.AddRouteWithPort(statusRouter, "/clear", setStatus, "POST")
 	util.AddRouteWithPort(statusRouter, "", getStatus, "GET")
 	util.AddRoute(root, "/status/flipflop", getStatusCount, "GET")
 	util.AddRoute(root, "/status/clear", clearStatus, "POST")

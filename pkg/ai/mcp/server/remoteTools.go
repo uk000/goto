@@ -44,13 +44,14 @@ func (t *ToolCallContext) fetch() (*gomcp.CallToolResult, error) {
 	for h, v := range t.remoteArgs.Headers {
 		req.Header.Add(h, v)
 	}
-	if t.headers != nil {
+	if t.requestHeaders != nil {
 		for h := range forwardHeaders {
-			if t.headers[h] != nil {
-				req.Header[h] = t.headers[h]
+			if t.requestHeaders[h] != nil {
+				req.Header[h] = t.requestHeaders[h]
 			}
 		}
 	}
+	req.Header["User-Agent"] = []string{t.Label}
 	if authority != "" {
 		req.Host = t.remoteArgs.Authority
 	}
@@ -69,6 +70,8 @@ func (t *ToolCallContext) fetch() (*gomcp.CallToolResult, error) {
 		t.notifyClient(t.Log(fmt.Sprintf("Server [%s] fetched response from remote URL [%s]", t.Server.GetName(), url)), 0)
 		output := util.Read(resp.Body)
 		result.Content = append(result.Content, &gomcp.TextContent{Text: output})
+		result.StructuredContent = util.BuildGotoClientInfo(nil, t.Server.Port, t.Label, t.Name, req.Host, url, req.Host, t.remoteArgs, nil, t.requestHeaders, req.Header,
+			map[string]any{"ForwardHeaders": forwardHeaders})
 	}
 	t.applyDelay()
 	return result, err
@@ -102,9 +105,9 @@ func (t *ToolCallContext) remoteToolCall() (*gomcp.CallToolResult, error) {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
-		client := mcpclient.NewClient(t.Server.GetPort(), false, t.Server.ID, nil)
+		client := mcpclient.NewClient(t.Server.GetPort(), false, t.Server.ID, tc.Headers, nil)
 		var session *mcpclient.MCPSession
-		session, err = client.ConnectWithHops(url, t.Label, t.hops)
+		session, err = client.ConnectWithHops(url, t.Label, tc.Headers, t.hops)
 		if err == nil {
 			defer session.Close()
 			remoteResult, err = session.CallTool(tc, tc.Args)
@@ -131,6 +134,8 @@ func (t *ToolCallContext) remoteToolCall() (*gomcp.CallToolResult, error) {
 				}
 			} else if s, ok := content.(string); ok {
 				result.Content = []gomcp.Content{&gomcp.TextContent{Text: s}}
+			} else if m, ok := content.(map[string]any); ok {
+				result.Content = []gomcp.Content{&gomcp.TextContent{Text: util.ToJSONText(m)}}
 			} else {
 				result.Content = []gomcp.Content{&gomcp.TextContent{Text: fmt.Sprintf("%+v", content)}}
 			}
@@ -161,7 +166,7 @@ func (t *ToolCallContext) remoteAgentCall() (*gomcp.CallToolResult, error) {
 	if client == nil {
 		return nil, errors.New("failed to create A2A client")
 	}
-	session, err := client.ConnectWithAgentCard(t.ctx, ac)
+	session, err := client.ConnectWithAgentCard(t.ctx, ac, t.remoteArgs.URL)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", ac.Name, ac.URL, err.Error())
 	} else {
@@ -244,9 +249,9 @@ func (t *ToolCallContext) addForwardHeaders(headers map[string][]string, forward
 	}
 	t.remoteArgs.ToolArgs["forwardHeaders"] = toolForwardHeaders
 	args["forwardHeaders"] = toolForwardHeaders
-	if t.headers != nil {
+	if t.requestHeaders != nil {
 		for _, h := range t.remoteArgs.ForwardHeaders {
-			for h2, v2 := range t.headers {
+			for h2, v2 := range t.requestHeaders {
 				if strings.EqualFold(h, h2) {
 					headers[h] = v2
 					break
