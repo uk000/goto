@@ -160,7 +160,7 @@ func (t *ToolCallContext) remoteAgentCall() (*gomcp.CallToolResult, error) {
 	}
 	ac := t.Config.Agent.CloneWithUpdate(t.remoteArgs.AgentName, t.remoteArgs.URL, t.remoteArgs.Authority, t.remoteArgs.AgentMessage, t.remoteArgs.AgentData)
 	t.addForwardHeaders(ac.Headers, ac.ForwardHeaders, ac.Data)
-	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s]", ac.Name, ac.URL)
+	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s]", ac.Name, ac.AgentURL)
 	t.notifyClient(msg, 0)
 	client := a2aclient.NewA2AClient(t.Server.Port)
 	if client == nil {
@@ -168,9 +168,9 @@ func (t *ToolCallContext) remoteAgentCall() (*gomcp.CallToolResult, error) {
 	}
 	session, err := client.ConnectWithAgentCard(t.ctx, ac, t.remoteArgs.URL)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", ac.Name, ac.URL, err.Error())
+		return nil, fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", ac.Name, ac.AgentURL, err.Error())
 	} else {
-		msg = fmt.Sprintf("Loaded agent card for Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.URL, session.Card.Capabilities.Streaming)
+		msg = fmt.Sprintf("Loaded agent card for Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.AgentURL, session.Card.Capabilities.Streaming)
 		t.notifyClient(msg, 0)
 	}
 	resultsChan := make(chan *types.Pair[string, any], 10)
@@ -183,9 +183,9 @@ func (t *ToolCallContext) remoteAgentCall() (*gomcp.CallToolResult, error) {
 	close(progressChan)
 	wg.Wait()
 	if err != nil {
-		return nil, fmt.Errorf("Failed to call Agent [%s] URL [%s] with error: %s", ac.Name, ac.URL, err.Error())
+		return nil, fmt.Errorf("Failed to call Agent [%s] URL [%s] with error: %s", ac.Name, ac.AgentURL, err.Error())
 	} else {
-		msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.URL, session.Card.Capabilities.Streaming)
+		msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.AgentURL, session.Card.Capabilities.Streaming)
 		t.notifyClient(msg, 0)
 	}
 	return result, nil

@@ -167,8 +167,8 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 				agent := *triple.Third
 				agentName := agent.AgentCall.Name
 				if ac.agents[agentName] != nil && portHint != "" {
-					if strings.Contains(agent.AgentCall.URL, portHint) ||
-						!strings.Contains(ac.agents[agentName].AgentCall.URL, portHint) {
+					if strings.Contains(agent.AgentCall.AgentURL, portHint) ||
+						!strings.Contains(ac.agents[agentName].AgentCall.AgentURL, portHint) {
 						ac.agents[agentName] = &agent
 					}
 				} else {
@@ -177,11 +177,11 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 				if delegateHint != "" {
 					altDelegate := agent.Servers[delegateHint]
 					if altDelegate != nil {
-						agent.AgentCall.URL = altDelegate.URL
+						agent.AgentCall.AgentURL = altDelegate.URL
 						agent.AgentCall.Authority = altDelegate.Authority
 					}
-					agentURL := strings.Split(agent.AgentCall.URL, agent.AgentCall.Name)[0]
-					agent.AgentCall.URL = agentURL + "/" + delegateHint
+					agentURL := strings.Split(agent.AgentCall.AgentURL, agent.AgentCall.Name)[0]
+					agent.AgentCall.AgentURL = agentURL + "/" + delegateHint
 					agent.AgentCall.Name = delegateHint
 				}
 			}
@@ -207,10 +207,10 @@ func (ac *AgentContext) setOverrideParamsFromInput(jsons []map[string]any, input
 			}
 		} else if a := ac.agents[name]; a != nil {
 			if override.url != "" {
-				msg := fmt.Sprintf("Will use URL [%s] instead of [%s] for Agent [%s]", override.url, a.AgentCall.URL, a.AgentCall.Name)
+				msg := fmt.Sprintf("Will use URL [%s] instead of [%s] for Agent [%s]", override.url, a.AgentCall.AgentURL, a.AgentCall.Name)
 				log.Println(msg)
 				ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
-				a.AgentCall.URL = override.url
+				a.AgentCall.AgentURL = override.url
 			}
 			if override.args != nil {
 				msg := fmt.Sprintf("Will use Data %+v instead of %+v for Agent [%s]", override.args, a.AgentCall.Data, a.AgentCall.Name)

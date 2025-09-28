@@ -35,7 +35,7 @@ import (
 	"goto/pkg/pipe"
 	"goto/pkg/proxy"
 	"goto/pkg/registry"
-	"goto/pkg/routing"
+	"goto/pkg/router"
 	"goto/pkg/rpc"
 	grpcclient "goto/pkg/rpc/grpc/client"
 	"goto/pkg/rpc/grpc/protos"
@@ -65,7 +65,7 @@ import (
 
 func init() {
 	middleware.BaseMiddlewares = []*middleware.Middleware{
-		label.Middleware, conn.Middleware, info.Middleware, routing.Middleware, hooks.Middleware,
+		label.Middleware, conn.Middleware, info.Middleware, router.Middleware, hooks.Middleware,
 	}
 	middleware.Middlewares = []*middleware.Middleware{
 		tunnel.TunnelCountMiddleware, tunnel.Middleware, events.Middleware, metrics.Middleware,

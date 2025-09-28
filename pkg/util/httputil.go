@@ -26,6 +26,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -381,6 +382,14 @@ func CopyHeadersWithIgnore(prefix string, r *http.Request, out map[string][]stri
 
 func ToLowerHeaders(headers map[string][]string) map[string][]string {
 	newHeaders := map[string][]string{}
+	for h, v := range headers {
+		newHeaders[strings.ToLower(h)] = v
+	}
+	return newHeaders
+}
+
+func ToLowerHeader(headers map[string]string) map[string]string {
+	newHeaders := map[string]string{}
 	for h, v := range headers {
 		newHeaders[strings.ToLower(h)] = v
 	}
@@ -902,8 +911,17 @@ func GotoProtocol(isH2, isTLS bool) string {
 	return protocol
 }
 
+func SendBadRequest(msg string, w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusBadRequest)
+	fmt.Fprintln(w, msg)
+	AddLogMessage(msg, r)
+}
+
 func PrintRequest(context string, r *http.Request) {
 	log.Printf("======== %s ==========\n", context)
+	if b, err := httputil.DumpRequest(r, true); err == nil {
+		log.Println(string(b))
+	}
 	log.Printf(">> Method: %s", ToJSONText(r.Method))
 	log.Printf(">> URI: %s", ToJSONText(r.RequestURI))
 	log.Printf(">> Headers: %s", ToJSONText(r.Header))

@@ -36,7 +36,7 @@ import (
 type ClientTransport interface {
 	SetTLSConfig(tlsConfig *tls.Config)
 	UpdateTLSConfig(sni string, tlsVersion uint16)
-	Transport() TransportIntercept
+	Transport() ITransportIntercept
 	Close()
 	HTTP() *http.Client
 	GRPC() *grpc.ClientConn
@@ -48,14 +48,14 @@ type ClientTracker struct {
 	http.RoundTripper
 	*http.Client
 	GrpcConn           *grpc.ClientConn
-	TransportIntercept TransportIntercept
+	TransportIntercept ITransportIntercept
 	GRPCIntercept      *GRPCIntercept
 	SNI                string
 	TLSVersion         uint16
 }
 
-func NewClientTransport(c *http.Client, gc *grpc.ClientConn, tracker TransportIntercept, grpcIntercept *GRPCIntercept) ClientTransport {
-	return &ClientTracker{Client: c, GrpcConn: gc, TransportIntercept: tracker, GRPCIntercept: grpcIntercept}
+func NewClientTransport(c *http.Client, gc *grpc.ClientConn, intercept ITransportIntercept, grpcIntercept *GRPCIntercept) ClientTransport {
+	return &ClientTracker{Client: c, GrpcConn: gc, TransportIntercept: intercept, GRPCIntercept: grpcIntercept}
 }
 
 func NewGRPCClient(label string, url string, ctx context.Context, dialOpts []grpc.DialOption, newConnNotifierChan chan string) (ClientTransport, error) {
@@ -95,7 +95,7 @@ func (c *ClientTracker) Close() {
 	}
 }
 
-func (c *ClientTracker) Transport() TransportIntercept {
+func (c *ClientTracker) Transport() ITransportIntercept {
 	return c.TransportIntercept
 }
 
@@ -204,7 +204,7 @@ func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName stri
 			return net.Dial(network, addr)
 		}
 		h2t := NewHTTP2TransportIntercept(tr, label, newConnNotifierChan)
-		ct = NewClientTransport(nil, nil, h2t, nil)
+		ct = NewClientTransport(&http.Client{Timeout: requestTimeout, Transport: h2t.Transport}, nil, h2t, nil)
 	}
 	return ct
 }

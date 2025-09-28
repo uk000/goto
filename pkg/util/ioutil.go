@@ -24,6 +24,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"reflect"
 	"regexp"
@@ -60,6 +61,17 @@ func (r reader) Read(p []byte) (n int, err error) {
 	}
 	err = r.ctx.Err()
 	return
+}
+
+func CreateOrGetReReader(r *http.Request) *ReReader {
+	var rr *ReReader
+	if rr2, ok := r.Body.(*ReReader); ok {
+		rr = rr2
+	} else {
+		rr = NewReReader(r.Body)
+		r.Body = rr
+	}
+	return rr
 }
 
 func NewReReader(r io.ReadCloser) *ReReader {
@@ -288,4 +300,8 @@ func GetCwd() string {
 	} else {
 		return cwd
 	}
+}
+
+func EmptyBody() io.Reader {
+	return io.NopCloser(strings.NewReader(""))
 }

@@ -28,19 +28,26 @@ import (
 	"google.golang.org/grpc"
 )
 
-type HTTPRequestIntercept interface {
+type IHTTPRequestIntercept interface {
 	Intercept(r *http.Request)
 }
 
-type TransportIntercept interface {
+type IHTTPResponseIntercept interface {
+	Intercept(r *http.Response)
+}
+
+type ITransportIntercept interface {
 	SetTLSConfig(tlsConfig *tls.Config)
 	GetOpenConnectionCount() int
 	GetDialer() *net.Dialer
+	AsHTTP() IHTTPTransportIntercept
 }
 
 type IHTTPTransportIntercept interface {
-	TransportIntercept
+	ITransportIntercept
 	http.RoundTripper
+	SetRequestIntercept(r IHTTPRequestIntercept)
+	SetResponseIntercept(r IHTTPResponseIntercept)
 }
 
 type BaseTransportIntercept struct {
@@ -53,7 +60,8 @@ type BaseTransportIntercept struct {
 type HTTPTransportIntercept struct {
 	*http.Transport
 	*BaseTransportIntercept
-	headersIntercept HTTPRequestIntercept
+	requestIntercept  IHTTPRequestIntercept
+	responseIntercept IHTTPResponseIntercept
 }
 
 type HTTP2TransportIntercept struct {
@@ -129,6 +137,10 @@ func NewGRPCIntercept(label string, dialOpts []grpc.DialOption, newConnNotifierC
 	return g
 }
 
+func (t *HTTPTransportIntercept) AsHTTP() IHTTPTransportIntercept {
+	return t
+}
+
 func (t *HTTPTransportIntercept) getDialer() func(context.Context, string, string) (net.Conn, error) {
 	if t.DialContext != nil {
 		return t.DialContext
@@ -141,15 +153,23 @@ func (t *HTTPTransportIntercept) getDialer() func(context.Context, string, strin
 	return t.Dialer.DialContext
 }
 
-func (t *HTTPTransportIntercept) RoundTrip(r *http.Request) (*http.Response, error) {
-	if t.headersIntercept != nil {
-		t.headersIntercept.Intercept(r)
+func (t *HTTPTransportIntercept) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.requestIntercept != nil {
+		t.requestIntercept.Intercept(req)
 	}
-	return t.Transport.RoundTrip(r)
+	resp, err := t.Transport.RoundTrip(req)
+	if resp != nil && t.responseIntercept != nil {
+		t.responseIntercept.Intercept(resp)
+	}
+	return resp, err
 }
 
-func (t *HTTPTransportIntercept) SetHeadersIntercept(hi HTTPRequestIntercept) {
-	t.headersIntercept = hi
+func (t *HTTPTransportIntercept) SetRequestIntercept(ri IHTTPRequestIntercept) {
+	t.requestIntercept = ri
+}
+
+func (t *HTTPTransportIntercept) SetResponseIntercept(ri IHTTPResponseIntercept) {
+	t.responseIntercept = ri
 }
 
 func (t *HTTP2TransportIntercept) getDialer() func(context.Context, string, string, *tls.Config) (net.Conn, error) {
@@ -173,4 +193,8 @@ func (t *BaseTransportIntercept) SetTLSConfig(tlsConfig *tls.Config) {
 
 func (t *BaseTransportIntercept) GetDialer() *net.Dialer {
 	return &t.Dialer
+}
+
+func (t *BaseTransportIntercept) AsHTTP() IHTTPTransportIntercept {
+	return nil
 }

@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 
+	goa2aserver "trpc.group/trpc-go/trpc-a2a-go/server"
+
 	"github.com/gorilla/mux"
 )
 
@@ -17,59 +19,73 @@ var (
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	a2aClientRouter := util.PathRouter(r, "/a2a/client")
-	util.AddRouteMultiQWithPort(a2aClientRouter, "/agent/card", getAgentCard, []string{"url", "authority"}, "GET")
-	util.AddRouteWithPort(a2aClientRouter, "/invoke", invokeAgent, "POST")
+	util.AddRouteMultiQWithPort(a2aClientRouter, "/agent/card", fetchAgentCard, []string{"url", "authority"}, "GET")
+	util.AddRouteWithPort(a2aClientRouter, "/agent/{agent}/call", callAgent, "POST")
+	util.AddRouteWithPort(a2aClientRouter, "/call", callAgent, "POST")
 	util.AddRouteWithPort(a2aClientRouter, "/push", pushReceiver, "POST")
 }
 
-func getAgentCard(w http.ResponseWriter, r *http.Request) {
+func fetchAgentCard(w http.ResponseWriter, r *http.Request) {
 	url := util.GetStringParamValue(r, "url")
 	authority := util.GetStringParamValue(r, "authority")
-	msg := ""
-	card, err := GetAgentCard(r.Context(), url, authority, nil)
+	card, err := FetchAgentCard(r.Context(), url, authority, nil)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		msg = fmt.Sprintf("Error fetching agent card from url [%s], authority [%s]: %s", url, authority, err.Error())
-		fmt.Fprintln(w, msg)
-	} else {
-		msg = fmt.Sprintf("Fetched agent card successfully for agent [%s], from url [%s], authority [%s]", card.Name, url, authority)
-		util.WriteJsonPayload(w, card)
+		util.SendBadRequest(fmt.Sprintf("Error fetching agent card from url [%s], authority [%s]: %s", url, authority, err.Error()), w, r)
+		return
 	}
+	msg := fmt.Sprintf("Fetched agent card successfully for agent [%s], from url [%s], authority [%s]", card.Name, url, authority)
+	util.WriteJsonPayload(w, card)
 	util.AddLogMessage(msg, r)
 }
 
-func invokeAgent(w http.ResponseWriter, r *http.Request) {
-	ac := &AgentCall{}
-	err := util.ReadJsonPayload(r, &ac)
+func callAgent(w http.ResponseWriter, r *http.Request) {
+	call := &AgentCall{}
+	name := util.GetStringParamValue(r, "agent")
+	err := util.ReadJsonPayload(r, &call)
 	msg := ""
 	if err != nil {
-		msg = fmt.Sprintf("Failed to parse payload with error [%s]", err.Error())
-	} else if ac.Name == "" || ac.URL == "" {
-		msg = fmt.Sprintf("Missing agent name/URL: %+v", ac)
-	}
-	if msg != "" {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
+		util.SendBadRequest(fmt.Sprintf("Failed to parse payload with error [%s]", err.Error()), w, r)
 		return
 	}
+	var card *goa2aserver.AgentCard
+	if name != "" {
+		card = GetAgentCard(name)
+	}
+	if card == nil {
+		if call.CardURL == "" {
+			util.SendBadRequest(fmt.Sprintf("Agent card not loaded and missing agent card URL in the given call spec: %+v", call), w, r)
+			return
+		}
+		card, err = FetchAgentCard(r.Context(), call.CardURL, call.Authority, call.Headers)
+		if err != nil || card == nil {
+			util.SendBadRequest(fmt.Sprintf("Error fetching agent card from url [%s], authority [%s]: %s", call.AgentURL, call.Authority, err.Error()), w, r)
+			return
+		}
+	}
+	var agentURL string
+	if call.AgentURL != "" {
+		agentURL = call.AgentURL
+	} else {
+		agentURL = card.URL
+	}
+	call.AgentURL = agentURL
 	port := util.GetRequestOrListenerPortNum(r)
-	client := NewA2AClient(port)
-	session, err := client.ConnectWithAgentCard(r.Context(), ac, "")
+	session := NewA2ASession(r.Context(), port, card, call)
+	err = session.Connect()
 	if err != nil {
-		msg = fmt.Sprintf("Failed to load agent card with error [%s]. Agent Call: %+v", err.Error(), ac)
+		msg = fmt.Sprintf("Failed to load agent card with error [%s]. Agent Call: %+v", err.Error(), call)
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
 		return
 	}
-	err = session.CallAgent(streamAgentResponse(ac.Name, w, r), nil, nil)
+	err = session.CallAgent(streamAgentResponse(call.Name, w, r), nil, nil)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		msg = fmt.Sprintf("Error invoking agent [%s]: %s", ac.Name, err.Error())
+		msg = fmt.Sprintf("Error invoking agent [%s]: %s", call.Name, err.Error())
 		fmt.Fprintln(w, msg)
 	} else {
-		msg = fmt.Sprintf("Invoked agent [%s] successfully on URL [%s] with input [%s], streamed result", ac.Name, ac.URL, ac.Message)
+		msg = fmt.Sprintf("Invoked agent [%s] successfully on URL [%s] with input [%s], streamed result", call.Name, call.AgentURL, call.Message)
 	}
 	util.AddLogMessage(msg, r)
 }

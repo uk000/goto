@@ -180,7 +180,7 @@ func (c *GRPCClient) GetDialer() *net.Dialer {
 	return &c.Dialer
 }
 
-func (c *GRPCClient) Transport() transport.TransportIntercept {
+func (c *GRPCClient) Transport() transport.ITransportIntercept {
 	return c
 }
 

@@ -371,19 +371,33 @@ func (ps *PortServers) GetMCPServer(name string) *MCPServer {
 	return ps.Servers[name]
 }
 
-func (ps *PortServers) Start() {
+func (ps *PortServers) Start(server string) {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
 	for _, s := range ps.Servers {
-		s.Enabled = true
+		if server != "" {
+			if strings.EqualFold(s.Name, server) {
+				s.Enabled = true
+				break
+			}
+		} else {
+			s.Enabled = true
+		}
 	}
 }
 
-func (ps *PortServers) Stop() {
+func (ps *PortServers) Stop(server string) {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
 	for _, s := range ps.Servers {
-		s.Enabled = false
+		if server != "" {
+			if strings.EqualFold(s.Name, server) {
+				s.Enabled = false
+				break
+			}
+		} else {
+			s.Enabled = false
+		}
 	}
 }
 
@@ -655,7 +669,7 @@ func (m *MCPServer) onCompletion(ctx context.Context, req *gomcp.CompleteRequest
 	payload := m.CompletionPayload[req.Params.Ref.Type]
 	suggestions := []string{}
 	if payload != nil {
-		payload.RangeText(func(s string) {
+		payload.RangeText(func(s string, count int) {
 			suggestions = append(suggestions, s)
 		})
 	} else {

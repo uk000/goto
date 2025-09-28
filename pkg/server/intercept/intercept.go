@@ -104,7 +104,7 @@ func (b *BodyTracker) Read(p []byte) (n int, err error) {
 }
 
 func (b *BodyTracker) Close() error {
-	util.PrintCallers(3, "BodyTracker.Close")
+	//util.PrintCallers(3, "BodyTracker.Close")
 	return b.ReadCloser.Close()
 }
 
@@ -199,7 +199,7 @@ func NewInterceptResponseWriter(r *http.Request, w http.ResponseWriter, hold boo
 	parent, _ := w.(ResponseInterceptor)
 	hijacker, _ := w.(http.Hijacker)
 	flusher, _ := w.(http.Flusher)
-	trackRequestBody(r)
+	//trackRequestBody(r)
 	return &InterceptResponseWriter{
 		rs:             r.Context().Value(util.RequestStoreKey).(*util.RequestStore),
 		ResponseWriter: w,

@@ -218,7 +218,7 @@ func (c *MCPClient) newMCPSession(operLabel string, headers http.Header, hops *u
 	} else {
 		mpcSession.Hops = util.NewHops(c.CallerId, operLabel)
 	}
-	c.ht.SetHeadersIntercept(mpcSession)
+	c.ht.SetRequestIntercept(mpcSession)
 	c.lock.Lock()
 	c.ActiveSessions[mpcSession.ID] = mpcSession
 	c.lock.Unlock()

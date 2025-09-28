@@ -359,7 +359,7 @@ func (ab *AgentBehaviorFederate) prepareArgs(args map[string]any, forwardHeaders
 func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateCallContext) error {
 	ab.prepareHeaders(aCtx, dCtx)
 	dCtx.agentCall.Headers = dCtx.callHeaders
-	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s] with input [%s]", dCtx.agentCall.Name, dCtx.agentCall.URL, dCtx.agentCall.Message)
+	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s] with input [%s]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, dCtx.agentCall.Message)
 	aCtx.Log(msg)
 	aCtx.ReportProgress(dCtx.agentCall.Name, msg)
 	client := a2aclient.NewA2AClient(ab.agent.Port)
@@ -368,16 +368,16 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 	}
 	session, err := client.ConnectWithAgentCard(aCtx.ctx, dCtx.agentCall, dCtx.url)
 	if err != nil {
-		return fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.URL, err.Error())
+		return fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, err.Error())
 	} else {
-		msg = fmt.Sprintf("Loaded agent card for Agent [%s] URL [%s], Streaming [%d]", dCtx.agentCall.Name, dCtx.agentCall.URL, session.Card.Capabilities.Streaming)
+		msg = fmt.Sprintf("Loaded agent card for Agent [%s] URL [%s], Streaming [%d]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, session.Card.Capabilities.Streaming)
 		aCtx.ReportProgress(dCtx.agentCall.Name, msg)
 	}
 	err = session.CallAgent(nil, aCtx.resultsChan, aCtx.upstreamProgress)
 	if err != nil {
-		return fmt.Errorf("Failed to call Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.URL, err.Error())
+		return fmt.Errorf("Failed to call Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, err.Error())
 	} else {
-		msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s], Streaming [%d]", dCtx.agentCall.Name, dCtx.agentCall.URL, session.Card.Capabilities.Streaming)
+		msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s], Streaming [%d]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, session.Card.Capabilities.Streaming)
 		aCtx.ReportProgress(dCtx.agentCall.Name, msg)
 	}
 	return nil

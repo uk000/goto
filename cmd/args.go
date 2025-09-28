@@ -21,6 +21,7 @@ import (
 	"goto/ctl"
 	mcpserver "goto/pkg/ai/mcp/server"
 	"goto/pkg/global"
+	registryclient "goto/pkg/registry/client"
 	"goto/pkg/server"
 	"goto/pkg/server/listeners"
 	"goto/pkg/types"
@@ -327,6 +328,7 @@ func setupServerArgs() {
 }
 
 func runInits() {
+	registryclient.InitRegistryClient()
 	initListeners()
 	mcpserver.InitDefaultServer()
 	server.InitTCPServer()

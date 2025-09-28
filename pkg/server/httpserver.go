@@ -27,6 +27,7 @@ import (
 	"goto/pkg/global"
 	"goto/pkg/metrics"
 	"goto/pkg/registry/peer"
+	"goto/pkg/router"
 	grpcserver "goto/pkg/rpc/grpc/server"
 	"goto/pkg/scripts"
 	"goto/pkg/server/intercept"
@@ -247,9 +248,12 @@ func AIHandler() http.Handler {
 	}).HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, r, _ = util.WithRequestStore(r)
 		_, rs := util.PopulateRequestStore(r)
+		l := listeners.GetListenerForPort(util.GetCurrentPort(r))
 		reReader := util.NewReReader(r.Body)
 		r.Body = reReader
-		if rs.IsAdminRequest {
+		if router.WillRoute(l.Port, r) {
+			router.RoutingHandler(l.Port).ServeHTTP(w, r)
+		} else if rs.IsAdminRequest {
 			util.HTTPHandler.ServeHTTP(w, r)
 		} else if rs.IsMCP {
 			mcpHandler.ServeHTTP(w, r)
@@ -265,10 +269,12 @@ func AIHandler() http.Handler {
 
 func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		l := listeners.GetListenerForPort(util.GetCurrentPort(r))
 		_, r, rs := util.WithRequestStore(r)
 		rs.ResponseWriter = w
-		l := listeners.GetListenerForPort(util.GetCurrentPort(r))
-		if l.IsHTTP2 && (util.IsH2Upgrade(r) || r.ProtoMajor == 2) {
+		if router.WillRoute(l.Port, r) {
+			router.RoutingHandler(l.Port).ServeHTTP(w, r)
+		} else if l.IsHTTP2 && (util.IsH2Upgrade(r) || r.ProtoMajor == 2) {
 			if rs.IsTLS {
 				rs.IsH2 = true
 				httpHandler.ServeHTTP(w, r)
@@ -435,7 +441,7 @@ func PrintLogMessages(statusCode, bodyLength int, payload []byte, headers http.H
 				rs.LogMessages = append(rs.LogMessages, fmt.Sprintf("Response %s: [%s]", logLabel, bodyLog))
 			}
 		}
-		log.Printf("Method Log: %s\n", strings.Join(rs.LogMessages, " --> "))
+		log.Printf("HTTP Log: %s\n", strings.Join(rs.LogMessages, " --> "))
 		if flusher, ok := log.Writer().(http.Flusher); ok {
 			flusher.Flush()
 		}

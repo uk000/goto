@@ -22,7 +22,7 @@ func (ab *AgentBehaviorStream) DoStream(aCtx *AgentContext) error {
 	}
 	var delay time.Duration
 	if ab.agent.Config != nil && ab.agent.Config.Response != nil {
-		ab.agent.Config.Response.RangeText(func(text string) {
+		ab.agent.Config.Response.RangeText(func(text string, count int) {
 			if delay > 0 {
 				text = fmt.Sprintf("%s, after delay %s", text, delay)
 			}

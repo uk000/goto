@@ -126,6 +126,7 @@ type Registry struct {
 	trackingTimeBuckets     [][]int
 	peerProbes              *PeerProbes
 	labeledLockers          *locker.LabeledLockers
+	contextLockers          *locker.ContextLockers
 	eventsCounter           int
 	peersLock               sync.RWMutex
 	lockersLock             sync.RWMutex
@@ -139,7 +140,8 @@ var (
 		peerJobs:       map[string]PeerJobs{},
 		peerJobScripts: map[string]PeerJobScripts{},
 		peerFiles:      map[string]PeerFiles{},
-		labeledLockers: locker.NewLabeledPeersLockers(),
+		labeledLockers: locker.NewLabeledLockers(),
+		contextLockers: locker.NewContextLockers(),
 	}
 )
 
@@ -166,7 +168,7 @@ func (registry *Registry) reset() {
 	registry.peerFiles = map[string]PeerFiles{}
 	registry.peersLock.Unlock()
 	registry.lockersLock.Lock()
-	registry.labeledLockers = locker.NewLabeledPeersLockers()
+	registry.labeledLockers = locker.NewLabeledLockers()
 	registry.lockersLock.Unlock()
 }
 
@@ -1094,12 +1096,19 @@ func GetPeers(name string, r *http.Request) map[string]string {
 func openLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")
+	context := util.GetStringParamValue(r, "context")
+	var ll *locker.LabeledLockers
+	registry.lockersLock.Lock()
+	if context != "" {
+		ll = registry.contextLockers.GetContextLocker(context)
+	} else {
+		ll = registry.labeledLockers
+	}
+	registry.lockersLock.Unlock()
 	if label != "" {
-		registry.lockersLock.Lock()
-		registry.labeledLockers.OpenLocker(label)
-		registry.lockersLock.Unlock()
+		ll.OpenLocker(label)
 		w.WriteHeader(http.StatusOK)
-		msg = fmt.Sprintf("Locker %s is open and active", label)
+		msg = fmt.Sprintf("[Context: %s] Locker %s is open and active", context, label)
 		events.SendRequestEvent(events.Registry_LockerOpened, label, r)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
@@ -1115,26 +1124,31 @@ func closeOrClearLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")
 	close := strings.Contains(r.RequestURI, "close")
+	context := util.GetStringParamValue(r, "context")
+	var ll *locker.LabeledLockers
+	registry.lockersLock.Lock()
+	if context != "" {
+		ll = registry.contextLockers.GetContextLocker(context)
+	} else {
+		ll = registry.labeledLockers
+	}
+	registry.lockersLock.Unlock()
 	if close && strings.EqualFold(label, constants.LockerDefaultLabel) {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "Default locker cannot be closed"
 	} else if label != "" {
-		registry.lockersLock.Lock()
-		registry.labeledLockers.ClearLocker(label, close)
-		registry.lockersLock.Unlock()
+		ll.ClearLocker(label, close)
 		w.WriteHeader(http.StatusOK)
 		if close {
-			msg = fmt.Sprintf("Locker %s is closed", label)
+			msg = fmt.Sprintf("[Context: %s] Locker %s is closed", context, label)
 			events.SendRequestEvent(events.Registry_LockerClosed, label, r)
 		} else {
-			msg = fmt.Sprintf("Locker %s is cleared", label)
+			msg = fmt.Sprintf("[Context: %s] Locker %s is cleared", context, label)
 			events.SendRequestEvent(events.Registry_LockerCleared, label, r)
 		}
 	} else {
 		w.WriteHeader(http.StatusOK)
-		registry.lockersLock.Lock()
-		registry.labeledLockers.Init()
-		registry.lockersLock.Unlock()
+		ll.Init()
 		result := clearPeersResultsAndEvents(registry.loadAllPeerPods(), r)
 		w.WriteHeader(http.StatusOK)
 		util.WriteJsonPayload(w, result)
@@ -1222,9 +1236,14 @@ func getAllLockers(w http.ResponseWriter, r *http.Request) {
 	level := util.GetIntParamValue(r, "level", 5)
 	registry.lockersLock.RLock()
 	labeledLockers := registry.labeledLockers
+	contextLockers := registry.contextLockers
 	registry.lockersLock.RUnlock()
 	msg = "All labeled lockers reported"
-	util.WriteJsonPayload(w, labeledLockers.GetAllLockers(getPeerLockers, getEvents, getData, level))
+	data := []any{
+		labeledLockers.GetAllLockers(getPeerLockers, getEvents, getData, level),
+		contextLockers.GetAllLockers(getPeerLockers, getEvents, getData, level),
+	}
+	util.WriteJsonPayload(w, data)
 	if global.Flags.EnableRegistryLockerLogs {
 		util.AddLogMessage(msg, r)
 	}
@@ -1275,11 +1294,20 @@ func storeInLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")
 	path, _ := util.GetListParam(r, "path")
+	context := util.GetStringParamValue(r, "context")
+	var ll *locker.LabeledLockers
+	registry.lockersLock.Lock()
+	if context != "" {
+		ll = registry.contextLockers.GetContextLocker(context)
+	} else {
+		ll = registry.labeledLockers
+	}
+	registry.lockersLock.Unlock()
 	if label != "" && len(path) > 0 {
 		data := util.Read(r.Body)
-		registry.labeledLockers.GetOrCreateLocker(label).Store(path, data)
+		ll.GetOrCreateLocker(label).Store(path, data)
 		w.WriteHeader(http.StatusOK)
-		msg = fmt.Sprintf("Data stored in labeled locker %s for path %+v", label, path)
+		msg = fmt.Sprintf("Data stored in [Context: %s] labeled locker %s for path %+v", context, label, path)
 		events.SendRequestEvent(events.Registry_LockerDataStored, msg, r)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
@@ -1313,16 +1341,24 @@ func removeFromLabeledLocker(w http.ResponseWriter, r *http.Request) {
 func getFromDataLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")
-	val := util.GetStringParamValue(r, "path")
 	path, _ := util.GetListParam(r, "path")
 	getData := util.GetBoolParamValue(r, "data")
 	level := util.GetIntParamValue(r, "level", 0)
 	if level > 0 {
 		level = len(path) + level
 	}
+	context := util.GetStringParamValue(r, "context")
+	var ll *locker.LabeledLockers
+	registry.lockersLock.Lock()
+	if context != "" {
+		ll = registry.contextLockers.GetContextLocker(context)
+	} else {
+		ll = registry.labeledLockers
+	}
+	registry.lockersLock.Unlock()
 	if len(path) > 0 {
-		data, dataAtKey := registry.labeledLockers.Get(label, path, getData, level)
-		msg = fmt.Sprintf("Reported data from path [%s] from locker [%s]", val, label)
+		data, dataAtKey := ll.Get(label, path, getData, level)
+		msg = fmt.Sprintf("Reported data from [Context: %s] Locker [%s] Path %+v", context, label, path)
 		if dataAtKey {
 			fmt.Fprint(w, data)
 		} else if data != nil {

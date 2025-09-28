@@ -272,63 +272,140 @@ func (p *Payload) ToText() string {
 	return output.String()
 }
 
-func (p *Payload) RangeText(f func(text string)) {
-	if p.JSONStream != nil {
+func (p *Payload) sendJSONStream(from int, f func(text string, count int), f2 func(data any, count int)) {
+	count := 0
+	for {
 		for _, j := range p.JSONStream {
-			f(j.ToJSONText())
-		}
-	} else if p.TextStream != nil {
-		for _, t := range p.TextStream {
-			f(t)
-		}
-	} else if p.RawStream != nil {
-		for _, r := range p.RawStream {
-			if s, ok := r.(string); ok {
-				f(s)
-			} else if b, ok := r.([]byte); ok {
-				f(string(b))
-			} else if j, ok := r.(util.JSON); ok {
-				f(j.ToJSONText())
-			} else {
-				f(fmt.Sprintf("%v", r))
+			count++
+			if count < from {
+				continue
+			}
+			f(j.ToJSONText(), count)
+			if count >= p.StreamCount {
+				break
 			}
 		}
-	} else if p.JSON != nil {
-		f(p.JSON.ToJSONText())
-	} else if p.Text != "" {
-		f(p.Text)
-	} else if p.Raw != nil {
-		if s, ok := p.Raw.(string); ok {
-			f(s)
-		} else if b, ok := p.Raw.([]byte); ok {
-			f(string(b))
-		} else if j, ok := p.Raw.(util.JSON); ok {
-			f(j.ToJSONText())
-		} else {
-			f(fmt.Sprintf("%v", p.Raw))
+		if count >= p.StreamCount {
+			break
 		}
 	}
 }
 
-func (p *Payload) RangeAny(f func(data any)) {
-	if p.JSONStream != nil {
-		for _, j := range p.JSONStream {
-			f(j)
-		}
-	} else if p.TextStream != nil {
+func (p *Payload) sendTextStream(from int, f func(text string, count int), f2 func(data any, count int)) {
+	count := 0
+	for {
 		for _, t := range p.TextStream {
-			f(t)
+			count++
+			if count < from {
+				continue
+			}
+			if f != nil {
+				f(t, count)
+			} else if f2 != nil {
+				f2(t, count)
+			}
+			if count >= p.StreamCount {
+				break
+			}
 		}
-	} else if p.RawStream != nil {
+		if count >= p.StreamCount {
+			break
+		}
+	}
+}
+
+func (p *Payload) sendRawStream(from int, f func(text string, count int), f2 func(data any, count int)) {
+	count := 0
+	for {
 		for _, r := range p.RawStream {
-			f(r)
+			count++
+			if count < from {
+				continue
+			}
+			text := ""
+			if s, ok := r.(string); ok {
+				text = s
+			} else if b, ok := r.([]byte); ok {
+				text = string(b)
+			} else if j, ok := r.(util.JSON); ok {
+				text = j.ToJSONText()
+			} else {
+				text = fmt.Sprintf("%v", r)
+			}
+			if text != "" {
+				if f != nil {
+					f(text, count)
+				} else if f2 != nil {
+					f2(text, count)
+				}
+			}
+			if count >= p.StreamCount {
+				break
+			}
 		}
+		if count >= p.StreamCount {
+			break
+		}
+	}
+}
+
+func (p *Payload) sendRaw(f func(text string, count int), f2 func(data any, count int)) {
+	text := ""
+	if s, ok := p.Raw.(string); ok {
+		text = s
+	} else if b, ok := p.Raw.([]byte); ok {
+		text = string(b)
+	} else if j, ok := p.Raw.(util.JSON); ok {
+		text = j.ToJSONText()
+	} else {
+		text = fmt.Sprintf("%v", p.Raw)
+	}
+	if text != "" {
+		if f != nil {
+			f(text, 1)
+		} else if f2 != nil {
+			f2(text, 1)
+		}
+	}
+}
+
+func (p *Payload) RangeText(f func(text string, count int)) {
+	p.RangeTextFrom(0, f)
+}
+
+func (p *Payload) RangeTextFrom(from int, f func(text string, count int)) {
+	if p.JSONStream != nil {
+		p.sendJSONStream(from, f, nil)
+	} else if p.TextStream != nil {
+		p.sendTextStream(from, f, nil)
+	} else if p.RawStream != nil {
+		p.sendRawStream(from, f, nil)
 	} else if p.JSON != nil {
-		f(p.JSON)
+		f(p.JSON.ToJSONText(), 1)
 	} else if p.Text != "" {
-		f(p.Text)
+		f(p.Text, 1)
 	} else if p.Raw != nil {
-		f(p.Raw)
+		p.sendRaw(f, nil)
+	}
+}
+
+func (p *Payload) RangeAny(f func(data any, count int)) {
+	p.RangeAnyFrom(0, f)
+}
+
+func (p *Payload) RangeAnyFrom(from int, f func(data any, count int)) {
+	if p.JSONStream != nil {
+		p.sendJSONStream(from, nil, f)
+	} else if p.TextStream != nil {
+		p.sendTextStream(from, nil, f)
+	} else if p.RawStream != nil {
+		p.sendRawStream(from, nil, f)
+	} else if p.JSON != nil {
+		f(p.JSON, 1)
+	} else if p.Text != "" {
+		f(p.Text, 1)
+	} else if p.Raw != nil {
+		p.sendRaw(nil, f)
 	}
 }
 

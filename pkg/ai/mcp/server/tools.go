@@ -43,6 +43,7 @@ type ToolBehavior struct {
 	Fetch         bool `json:"fetch,omitempty"`
 	Remote        bool `json:"remote,omitempty"`
 	MultiRemote   bool `json:"multiRemote,omitempty"`
+	Resumable     bool `json:"resumable,omitempty"`
 	Agents        bool `json:"agents,omitempty"`
 	ServerDetails bool `json:"serverDetails,omitempty"`
 	ServerPaths   bool `json:"serverPaths,omitempty"`
@@ -55,6 +56,7 @@ type ToolConfig struct {
 	MultiRemote [][]*mcpclient.ToolCall `json:"multiRemote,omitempty"`
 	Agent       *a2aclient.AgentCall    `json:"agent,omitempty"`
 	Delay       *types.Delay            `json:"delay,omitempty"`
+	StreamCount int                     `json:"streamCount,omitempty"`
 }
 
 type RemoteCallArgs struct {
@@ -73,6 +75,7 @@ type RemoteCallArgs struct {
 
 type ToolCallContext struct {
 	*MCPTool
+	sessionID      string
 	rs             *util.RequestStore
 	sse            bool
 	ctx            context.Context
@@ -83,6 +86,14 @@ type ToolCallContext struct {
 	delay          *types.Delay
 	hops           *util.Hops
 	log            []string
+}
+
+type ToolState struct {
+	RequestHeaders map[string][]string `json:"requestHeaders,omitempty"`
+	Args           map[string]any      `json:"args,omitempty"`
+	RemoteArgs     *RemoteCallArgs     `json:"remoteArgs,omitempty"`
+	Delay          *types.Delay        `json:"delay,omitempty"`
+	ResponseCount  int                 `json:"responseCount,omitempty"`
 }
 
 func NewMCPTool(name, desc string) *MCPTool {
@@ -164,7 +175,18 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 			}
 		}
 	}
-	tctx := &ToolCallContext{MCPTool: t, rs: rs, sse: isSSE, ctx: ctx, requestHeaders: headers, req: req, args: args, remoteArgs: remoteArgs, delay: delay}
+	tctx := &ToolCallContext{
+		MCPTool:        t,
+		sessionID:      req.Session.ID(),
+		rs:             rs,
+		sse:            isSSE,
+		ctx:            ctx,
+		requestHeaders: headers,
+		req:            req,
+		args:           args,
+		remoteArgs:     remoteArgs,
+		delay:          delay,
+	}
 	result, err = tctx.RunTool()
 	return
 }
@@ -445,20 +467,53 @@ func (t *ToolCallContext) sendPayload() (*gomcp.CallToolResult, error) {
 	}
 	if t.Response != nil {
 		responseCount := 0
-		total := t.Response.Count()
-		t.Response.RangeText(func(text string) {
-			responseCount++
+		oldResponseCount := 0
+		keepSending := true
+		if t.Config.StreamCount > t.Response.StreamCount {
+			t.Response.StreamCount = t.Config.StreamCount
+		}
+		total := t.Response.StreamCount
+		if t.Behavior.Resumable {
+			state, err := t.loadState()
+			if err == nil && state != nil {
+				oldResponseCount = state.ResponseCount
+			}
+		}
+		t.Response.RangeTextFrom(oldResponseCount+1, func(text string, count int) {
+			if !keepSending {
+				return
+			}
+			responseCount = count
+			if oldResponseCount > 0 && count <= oldResponseCount {
+				msg := fmt.Sprintf("%s Skipping previously sent result [%d]", t.Label, count)
+				t.notifyClient(msg, 0)
+				return
+			}
 			if t.Behavior.Stream {
-				progress := float64(total) / float64(responseCount)
-				msg := fmt.Sprintf("%s Progress: [%d] done, only [%d] more to go", t.Label, responseCount, total-responseCount)
+				progress := float64(total) / float64(count)
+				msg := fmt.Sprintf("%s Progress: [%d] done, only [%d] more to go", t.Label, count, total-count)
 				t.notifyClient(msg, progress)
 			}
 			if d != nil {
 				delay = d.ComputeAndApply()
 			}
-			result.Content = append(result.Content, &gomcp.TextContent{Text: text})
+			result.Content = append(result.Content, &gomcp.TextContent{Text: fmt.Sprintf("[%d] %s", count, text)})
+			if t.Behavior.Resumable && count >= oldResponseCount+2 {
+				keepSending = false
+				t.saveState(&ToolState{
+					RequestHeaders: t.requestHeaders,
+					Args:           t.args,
+					RemoteArgs:     t.remoteArgs,
+					Delay:          t.delay,
+					ResponseCount:  count,
+				})
+			}
 		})
-		t.Log(fmt.Sprintf("%s Server [%s] sent response: count [%d] after delay [%s]", t.Label, t.Server.GetName(), responseCount, delay))
+		if keepSending {
+			t.Log(fmt.Sprintf("%s Server [%s] sent response: count [%d] after delay [%s]", t.Label, t.Server.GetName(), responseCount, delay))
+		} else {
+			t.Log(fmt.Sprintf("%s Server [%s] sent partial response: count [%d] after delay [%s], kept the rest for resumable operation", t.Label, t.Server.GetName(), responseCount, delay))
+		}
 	} else {
 		result.Content = append(result.Content, &gomcp.TextContent{Text: "<No payload>"})
 		t.Log(fmt.Sprintf("%s Server [%s] sent default response after delay [%s]", t.Label, t.Server.GetName(), delay))

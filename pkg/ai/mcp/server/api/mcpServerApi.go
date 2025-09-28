@@ -36,8 +36,8 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
 	util.AddRouteWithPort(mcpapiRouter, "/servers/add", addServers, "POST")
 	util.AddRouteQWithPort(mcpapiRouter, "/servers/{server}/route", setServerRoute, "uri", "POST")
-	util.AddRouteWithPort(mcpapiRouter, "/servers/start", startServer, "POST")
-	util.AddRouteWithPort(mcpapiRouter, "/server/{server}/start", startServer, "POST")
+	util.AddRouteWithPort(mcpapiRouter, "/{s:server|servers}/start", startServer, "POST")
+	util.AddRouteWithPort(mcpapiRouter, "/{s:server|servers}/{server}/start", startServer, "POST")
 	util.AddRouteWithPort(mcpapiRouter, "/servers/stop", stopServer, "POST")
 	util.AddRouteWithPort(mcpapiRouter, "/servers/{server}/stop", stopServer, "POST")
 
@@ -181,9 +181,10 @@ func clearServers(w http.ResponseWriter, r *http.Request) {
 
 func startServer(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
+	name := util.GetStringParamValue(r, "server")
 	msg := ""
 	ps := mcpserver.GetPortMCPServers(port)
-	ps.Start()
+	ps.Start(name)
 	msg = fmt.Sprintf("Started [%d] MCP Servers at port [%d]", len(ps.Servers), port)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
@@ -191,9 +192,10 @@ func startServer(w http.ResponseWriter, r *http.Request) {
 
 func stopServer(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
+	name := util.GetStringParamValue(r, "server")
 	msg := ""
 	ps := mcpserver.GetPortMCPServers(port)
-	ps.Start()
+	ps.Stop(name)
 	msg = fmt.Sprintf("Stopped [%d] MCP Servers at port [%d]", len(ps.Servers), port)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)

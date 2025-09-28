@@ -81,6 +81,11 @@ type LabeledLockers struct {
 	lock          sync.RWMutex
 }
 
+type ContextLockers struct {
+	labeledLockers map[string]*LabeledLockers
+	lock           sync.RWMutex
+}
+
 func newLockerData(now time.Time, level int) *LockerData {
 	return &LockerData{SubKeys: Locker{}, FirstReported: now, level: level}
 }
@@ -1129,7 +1134,7 @@ func (cl *CombiLocker) ClearPeerEvents() {
 	}
 }
 
-func NewLabeledPeersLockers() *LabeledLockers {
+func NewLabeledLockers() *LabeledLockers {
 	ll := &LabeledLockers{}
 	ll.Init()
 	return ll
@@ -1515,4 +1520,69 @@ func (ll *LabeledLockers) GetFromPeerInstanceLocker(label, peerName, peerAddress
 		}
 	}
 	return result, false
+}
+
+func NewContextLockers() *ContextLockers {
+	return &ContextLockers{labeledLockers: map[string]*LabeledLockers{}}
+}
+
+func (cl *ContextLockers) Init() {
+	cl.lock.Lock()
+	defer cl.lock.Unlock()
+	cl.labeledLockers = map[string]*LabeledLockers{}
+}
+
+func (cl *ContextLockers) GetContextLocker(context string) *LabeledLockers {
+	cl.lock.Lock()
+	defer cl.lock.Unlock()
+	if cl.labeledLockers[context] == nil {
+		cl.labeledLockers[context] = NewLabeledLockers()
+	}
+	return cl.labeledLockers[context]
+}
+
+func (cl *ContextLockers) ClearContextLocker(context string) *LabeledLockers {
+	cl.lock.Lock()
+	defer cl.lock.Unlock()
+	cl.labeledLockers[context] = NewLabeledLockers()
+	return cl.labeledLockers[context]
+}
+
+func (cl *ContextLockers) GetAllLockers(peers, events, data bool, level int) map[string]CombiLockers {
+	result := map[string]CombiLockers{}
+	for context, ll := range cl.labeledLockers {
+		sourceLockers := ll.getMatchingOrTopLockers("")
+		lockers := CombiLockers{}
+		if peers && events && data {
+			for label, cl := range sourceLockers {
+				if cl != nil {
+					if level > 0 {
+						lockers[label] = cl.Trim(level)
+					} else {
+						lockers[label] = cl
+					}
+				}
+			}
+		} else {
+			for label, cl := range sourceLockers {
+				if cl != nil {
+					if level > 0 {
+						cl = cl.Trim(level)
+					}
+					if !data {
+						cl = cl.GetLockerView(events)
+					}
+					if !peers {
+						cl = cl.GetLockerWithoutPeers()
+					}
+					if !events {
+						cl = cl.GetLockerWithoutEvents()
+					}
+					lockers[label] = cl
+				}
+			}
+		}
+		result[context] = lockers
+	}
+	return result
 }
