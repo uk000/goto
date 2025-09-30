@@ -85,4 +85,4 @@ RUN su root \
 USER 10000
 
 ENTRYPOINT ["/goto/goto"]
-CMD ["--port", "8080"]
+CMD ["--ports", "8001,3000/rpc,4000/rpc,5000/rpc,10000/tcp", "--rpcPort", "8080", "--grpcPort", "8888"]

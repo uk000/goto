@@ -1,3 +1,19 @@
+/**
+ * Copyright 2025 uk
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package model
 
 import (
@@ -43,9 +59,9 @@ type AgentBehavior struct {
 }
 
 type AgentConfig struct {
-	Delay     *types.Delay     `json:"delay,omitempty"`
-	Response  *payload.Payload `json:"response,omitempty"`
-	Delegates *DelegateConfig  `json:"delegates,omitempty"`
+	Delay           *types.Delay     `json:"delay,omitempty"`
+	ResponsePayload *payload.Payload `json:"response,omitempty"`
+	Delegates       *DelegateConfig  `json:"delegates,omitempty"`
 }
 
 type DelegateServer struct {
@@ -82,7 +98,7 @@ func (a *Agent) SetPayload(b []byte) error {
 	if err != nil {
 		return err
 	}
-	a.Config.Response = p
+	a.Config.ResponsePayload = p
 	return nil
 }
 

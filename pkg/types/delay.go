@@ -1,3 +1,19 @@
+/**
+ * Copyright 2025 uk
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package types
 
 import (
@@ -17,7 +33,14 @@ type Delay struct {
 	Max           *Duration `json:"max,omitempty"`
 	Count         int       `json:"count,omitempty"`
 	computedDelay time.Duration
+	hasComputed   bool
 	delayChan     chan time.Duration
+}
+
+type delayPayload struct {
+	Min   *Duration `json:"min,omitempty"`
+	Max   *Duration `json:"max,omitempty"`
+	Count int       `json:"count,omitempty"`
 }
 
 func ParseDurationRange(val string) (low, high time.Duration, count int, ok bool) {
@@ -75,25 +98,28 @@ func (d *Delay) Prepare() {
 	if d.Min.Duration > d.Max.Duration {
 		d.Min.Duration = d.Max.Duration
 	}
-	if d.Count < -1 {
+	if d.Count == 0 || d.Count < -1 {
 		d.Count = -1
 	}
 	d.delayChan = make(chan time.Duration)
 }
 
 func (d *Delay) Compute() time.Duration {
-	if d.Count > 0 || d.Count == -1 {
-		d.computedDelay = RandomDuration(d.Min.Duration, d.Max.Duration)
-		return d.computedDelay
+	if !d.hasComputed {
+		if d.Count > 0 || d.Count == -1 {
+			d.computedDelay = RandomDuration(d.Min.Duration, d.Max.Duration)
+			d.hasComputed = true
+		}
 	}
-	return 0
+	return d.computedDelay
 }
 
 func (d *Delay) Apply() time.Duration {
+	if !d.hasComputed {
+		d.Compute()
+	}
+	d.hasComputed = false
 	if d.Count > 0 || d.Count == -1 {
-		if d.computedDelay == 0 {
-			d.Compute()
-		}
 		if d.computedDelay > 0 {
 			time.Sleep(d.computedDelay)
 			if d.Count > 0 {
@@ -118,7 +144,7 @@ func (d *Delay) Block() chan time.Duration {
 	return d.delayChan
 }
 
-func (d Duration) MarshalJSON() ([]byte, error) {
+func (d *Duration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d.String())
 }
 
@@ -130,15 +156,26 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 	switch value := v.(type) {
 	case float64:
 		d.Duration = time.Duration(value)
-		return nil
 	case string:
 		var err error
 		d.Duration, err = time.ParseDuration(value)
 		if err != nil {
 			return err
 		}
-		return nil
 	default:
 		return errors.New("Invalid duration")
 	}
+	return nil
+}
+
+func (d *Delay) UnmarshalJSON(b []byte) error {
+	dp := &delayPayload{}
+	if err := json.Unmarshal(b, dp); err != nil {
+		return err
+	}
+	d.Min = dp.Min
+	d.Max = dp.Max
+	d.Count = dp.Count
+	d.Prepare()
+	return nil
 }

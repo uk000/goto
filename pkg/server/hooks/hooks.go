@@ -97,8 +97,12 @@ var (
 
 func GetPortHooks(port int) *Hooks {
 	if portHooks[port] == nil {
+		lock.Lock()
 		portHooks[port] = newHooks(port)
+		lock.Unlock()
 	}
+	lock.RLock()
+	defer lock.RUnlock()
 	return portHooks[port]
 }
 
@@ -108,6 +112,8 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 }
 
 func getHooks(w http.ResponseWriter, r *http.Request) {
+	lock.RLock()
+	defer lock.RUnlock()
 	util.WriteYaml(w, portHooks)
 }
 

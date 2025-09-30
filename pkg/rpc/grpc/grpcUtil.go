@@ -139,11 +139,9 @@ func CommonHandler(ctx context.Context, stream grpc.ServerStream) (method *GRPCS
 		return
 	}
 	tcpAddr, ok := p.Addr.(*net.TCPAddr)
-	if !ok {
-		err = fmt.Errorf("failed to get TCP peer address")
-		return
+	if ok {
+		remoteAddr = tcpAddr
 	}
-	remoteAddr = tcpAddr
 
 	method = ServiceRegistry.ParseGRPCServiceMethod(ctx)
 	if method == nil {

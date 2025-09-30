@@ -1,3 +1,19 @@
+/**
+ * Copyright 2025 uk
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package a2aserver
 
 import (
@@ -303,24 +319,15 @@ func (ac *AgentContext) sendTaskStatusUpdate(state a2aproto.TaskState, msg strin
 	return
 }
 
-func (ac *AgentContext) sendTextArtifact(title, description, text string, isFinal, isQuestion bool) (err error) {
+func (ac *AgentContext) sendTextArtifact(title, description string, text []string, isFinal, isQuestion bool) (err error) {
 	artifact := a2aproto.Artifact{
 		ArtifactID:  uuid.New().String(),
 		Name:        util.Ptr(title),
 		Description: util.Ptr(description),
-		Parts:       []a2aproto.Part{a2aproto.NewTextPart(text)},
+		Parts:       []a2aproto.Part{a2aproto.NewTextPart(title), a2aproto.NewTextPart(description)},
 	}
-	artifactEvent := a2aproto.StreamingMessageEvent{
-		Result: &a2aproto.TaskArtifactUpdateEvent{
-			TaskID:    ac.task.taskID,
-			Kind:      a2aproto.KindTaskArtifactUpdate,
-			Artifact:  artifact,
-			LastChunk: util.Ptr(true),
-		},
-	}
-	err = ac.task.subscriber.Send(artifactEvent)
-	if err != nil {
-		return
+	for _, t := range text {
+		artifact.Parts = append(artifact.Parts, a2aproto.NewTextPart(t))
 	}
 	return ac.task.handler.AddArtifact(&ac.task.taskID, artifact, isFinal, isQuestion)
 }
@@ -333,14 +340,15 @@ func (ac *AgentContext) endTask() {
 	ac.task.handler.CleanTask(&ac.task.taskID)
 }
 
-func (ac *AgentContext) waitBeforeNextStep(ctx context.Context) error {
+func (ac *AgentContext) waitBeforeNextStep() (time.Duration, error) {
 	select {
-	case <-ctx.Done():
-		log.Printf("Task %s cancelled during delay: %v", ac.task.taskID, ctx.Err())
-		return ac.task.handler.UpdateTaskState(&ac.task.taskID, a2aproto.TaskStateCanceled, nil)
-	case <-ac.delay.Block():
+	case <-ac.ctx.Done():
+		log.Printf("Task %s cancelled during delay: %v", ac.task.taskID, ac.ctx.Err())
+		ac.task.handler.UpdateTaskState(&ac.task.taskID, a2aproto.TaskStateCanceled, nil)
+		return 0, ac.ctx.Err()
+	case delay := <-ac.delay.Block():
+		return delay, nil
 	}
-	return nil
 }
 
 func (ac *AgentContext) Log(msg string, args ...any) string {

@@ -42,15 +42,14 @@ var (
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	grpcRouter := util.PathRouter(r, "/grpc")
-	util.AddRouteWithPort(grpcRouter, "/services/active", getActiveServices, "GET")
 	util.AddRouteWithPort(grpcRouter, "/open", openGRPCPort, "POST")
-	util.AddRouteWithPort(grpcRouter, "/services", getActiveServices, "GET")
+	util.AddRouteWithPort(grpcRouter, "/services/reflect/{upstream}", loadReflectedServices, "POST")
 	util.AddRouteWithPort(grpcRouter, "/serve/{service}", serveService, "POST")
 	util.AddRouteWithPort(grpcRouter, "/stop/{service}", stopService, "POST")
 	util.AddRouteWithPort(grpcRouter, "/services/{service}/serve", serveService, "POST")
 	util.AddRouteWithPort(grpcRouter, "/services/{service}/stop", stopService, "POST")
-
-	util.AddRouteWithPort(grpcRouter, "/services/reflect/{upstream}", loadReflectedServices, "POST")
+	util.AddRouteWithPort(grpcRouter, "/services/active", getActiveServices, "GET")
+	util.AddRouteWithPort(grpcRouter, "/services", getActiveServices, "GET")
 
 	util.AddRouteWithPort(grpcRouter, "/proxy/status", getGRPCProxyDetails, "GET")
 	util.AddRouteWithPort(grpcRouter, "/proxy/clear", clearGRPCProxies, "POST")
@@ -60,7 +59,6 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRouteWithPort(grpcRouter, "/proxy/{service}/{upstream}", proxyGRPCService, "POST")
 	util.AddRouteWithPort(grpcRouter, "/proxy/{service}/{upstream}/{targetService}/delay/{delay}", proxyGRPCService, "POST")
 	util.AddRouteWithPort(grpcRouter, "/proxy/{service}/{upstream}/delay/{delay}", proxyGRPCService, "POST")
-	util.AddRouteWithPort(grpcRouter, "/proxy/all/{upstream}", proxyGRPCService, "POST")
 }
 
 func openGRPCPort(w http.ResponseWriter, r *http.Request) {

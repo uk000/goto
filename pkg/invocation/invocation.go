@@ -72,7 +72,6 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
 	for !tracker.Status.Stopped {
 		if tracker.Status.StopRequested {
 			tracker.Status.Stopped = true
-			tracker.deactivate()
 			break
 		}
 		availableRunner := <-runnersDoneChan

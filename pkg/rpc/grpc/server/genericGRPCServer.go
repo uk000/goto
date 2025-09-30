@@ -143,6 +143,10 @@ func (gi *GRPCMethodInterceptor) Intercept(srv any, ctx context.Context, dec fun
 		util.LogMessage(ctx, err.Error())
 		return nil, err
 	}
+	var remoteAddress string
+	if remoteAddr != nil {
+		remoteAddress = remoteAddr.String()
+	}
 	if gi.originalHandler != nil {
 		log.Println("GRPCMethodInterceptor: Original handler found, using original handler")
 		return gi.originalHandler(gi.originalServer, ctx, dec, interceptor)
@@ -150,7 +154,7 @@ func (gi *GRPCMethodInterceptor) Intercept(srv any, ctx context.Context, dec fun
 	if util.WillProxyGRPC(port, method) {
 		log.Println("GRPCMethodInterceptor: No original handler found, using ProxyUnary")
 		req := gotogrpc.ReadRequest(method, dec)
-		return ProxyUnary(ctx, port, method, remoteAddr.String(), authority, md, req)
+		return ProxyUnary(ctx, port, method, remoteAddress, authority, md, req)
 	}
 	return GRPCUnaryHandler(method)(srv, ctx, dec, interceptor)
 }

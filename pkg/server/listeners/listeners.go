@@ -314,6 +314,10 @@ func AddInitialListeners(portList []string) {
 			if i == 0 {
 				global.Self.ServerPort = port
 				DefaultListener.Port = port
+				DefaultListener.Protocol = "http"
+				DefaultListener.assignProtocol()
+				DefaultListener.Label = util.BuildListenerLabel(l.Port)
+				DefaultListener.HostLabel = util.GetHostLabel()
 			} else {
 				protocol := ""
 				if len(portInfo) > 1 && portInfo[1] != "" {

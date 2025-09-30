@@ -92,7 +92,7 @@ func configureHTTPouter() *mux.Router {
 }
 
 func configureAndStartHTTPServer(r *mux.Router) error {
-	util.HTTPHandler = HTTPHandler(r, h2c.NewHandler(RootRouter, h2s))
+	util.HTTPHandler = HTTPHandler(GRPCHandler(r), h2c.NewHandler(GRPCHandler(RootRouter), h2s))
 	httpServer = &http.Server{
 		Addr:         fmt.Sprintf("0.0.0.0:%d", global.Self.ServerPort),
 		WriteTimeout: 1 * time.Minute,
@@ -109,9 +109,9 @@ func configureAndStartHTTPServer(r *mux.Router) error {
 func configureAndStartAIServer(port int) error {
 	jsonRPCServer = &http.Server{
 		Addr:         fmt.Sprintf("0.0.0.0:%d", port),
-		WriteTimeout: 10 * time.Minute,
-		ReadTimeout:  10 * time.Minute,
-		IdleTimeout:  10 * time.Minute,
+		WriteTimeout: 10 * time.Hour,
+		ReadTimeout:  10 * time.Hour,
+		IdleTimeout:  1 * time.Hour,
 		ConnContext:  withConnContext,
 		//ConnState:    conn.ConnState,
 		Handler:  AIHandler(),
@@ -246,13 +246,13 @@ func AIHandler() http.Handler {
 	mcpRouter.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
 		return true
 	}).HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, r, _ = util.WithRequestStore(r)
-		_, rs := util.PopulateRequestStore(r)
-		l := listeners.GetListenerForPort(util.GetCurrentPort(r))
+		ctx, r, rs := util.WithRequestStore(r)
+		port := util.GetRequestOrListenerPortNum(r)
+		r = r.WithContext(withPort(ctx, port))
 		reReader := util.NewReReader(r.Body)
 		r.Body = reReader
-		if router.WillRoute(l.Port, r) {
-			router.RoutingHandler(l.Port).ServeHTTP(w, r)
+		if router.WillRoute(port, r) {
+			router.RoutingHandler(port).ServeHTTP(w, r)
 		} else if rs.IsAdminRequest {
 			util.HTTPHandler.ServeHTTP(w, r)
 		} else if rs.IsMCP {
@@ -270,10 +270,20 @@ func AIHandler() http.Handler {
 func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		l := listeners.GetListenerForPort(util.GetCurrentPort(r))
-		_, r, rs := util.WithRequestStore(r)
+		ctx, r, rs := util.WithRequestStore(r)
+		r = r.WithContext(withPort(ctx, util.GetRequestOrListenerPortNum(r)))
 		rs.ResponseWriter = w
 		if router.WillRoute(l.Port, r) {
 			router.RoutingHandler(l.Port).ServeHTTP(w, r)
+		} else if rs.IsGRPC {
+			r.ProtoMajor = 2
+			if rs.IsTLS {
+				rs.IsH2 = true
+				grpcserver.TheGRPCServer.Server.ServeHTTP(w, r)
+			} else {
+				rs.IsH2C = true
+				h2cHandler.ServeHTTP(w, r)
+			}
 		} else if l.IsHTTP2 && (util.IsH2Upgrade(r) || r.ProtoMajor == 2) {
 			if rs.IsTLS {
 				rs.IsH2 = true
@@ -283,6 +293,17 @@ func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
 				rs.IsH2C = true
 				h2cHandler.ServeHTTP(w, r)
 			}
+		} else {
+			httpHandler.ServeHTTP(w, r)
+		}
+	})
+}
+
+func GRPCHandler(httpHandler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, r, rs := util.WithRequestStore(r)
+		if rs.IsGRPC {
+			grpcserver.TheGRPCServer.Server.ServeHTTP(w, r)
 		} else {
 			httpHandler.ServeHTTP(w, r)
 		}
@@ -299,11 +320,10 @@ func ContextMiddleware(next http.Handler) http.Handler {
 				fmt.Fprintln(w, err.Error())
 				return
 			}
-			ctx, rs := util.PopulateRequestStore(r)
-			r = r.WithContext(withPort(ctx, util.GetRequestOrListenerPortNum(r)))
 			l := listeners.GetCurrentListener(r)
-			rs.IsJSONRPC = l.IsJSONRPC
-			rs.IsGRPC = l.IsGRPC
+			rs := util.GetRequestStore(r)
+			rs.IsJSONRPC = rs.IsJSONRPC || l.IsJSONRPC
+			rs.IsGRPC = rs.IsGRPC || l.IsGRPC
 			reReader := util.NewReReader(r.Body)
 			r.Body = reReader
 			rs.BodyLength = reReader.Length()
@@ -394,16 +414,6 @@ func RunStartupScript() {
 	if len(global.ServerConfig.StartupScript) > 0 {
 		scripts.RunCommands("startup", global.ServerConfig.StartupScript)
 	}
-}
-
-func withRequestStore(r *http.Request) (ctx context.Context, r2 *http.Request, rs *util.RequestStore) {
-	if v := r.Context().Value(util.RequestStoreKey); v != nil {
-		rs = v.(*util.RequestStore)
-		ctx = r.Context()
-	} else {
-		ctx, r2, rs = util.WithRequestStore(r)
-	}
-	return
 }
 
 func PrintLogMessages(statusCode, bodyLength int, payload []byte, headers http.Header, rs *util.RequestStore) {

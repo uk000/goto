@@ -33,7 +33,7 @@ type PeersClientResults map[string]map[string]*results.TargetResults
 type PeersInstanceClientResults map[string]map[string]map[string]*results.TargetResults
 
 type LockerData struct {
-	Data          string    `json:"data,omitempty"`
+	Data          any       `json:"data,omitempty"`
 	SubKeys       Locker    `json:"subKeys,omitempty"`
 	FirstReported time.Time `json:"firstReported,omitempty"`
 	LastReported  time.Time `json:"lastReported,omitempty"`
@@ -164,7 +164,7 @@ func unsafeReadKeys(locker Locker, keys []string, data bool, level int) (interfa
 					unsafeTrimLocker(lockerData.SubKeys, ldView.SubKeys, level)
 				}
 				if !data {
-					unsafeGetLockerView(lockerData.SubKeys, ldView.SubKeys)
+					unsafeGetLockerView(lockerData.SubKeys, ldView.SubKeys, data)
 				}
 				return ldView, true, false
 			} else {
@@ -217,16 +217,29 @@ func unsafeSearchOrGetPaths(locker Locker, pathPrefix string, isTop, flat bool, 
 	return paths
 }
 
-func unsafeGetLockerView(locker, lockerView Locker) {
+func unsafeGetLockerView(locker, lockerView Locker, data bool) {
 	if locker != nil && lockerView != nil {
 		for key, ld := range locker {
 			if ld != nil {
 				ldView := newLockerData(ld.FirstReported, ld.level)
-				if ld.Data != "" {
-					ldView.Data = "..."
+				if ld.Data != nil {
+					if data {
+						if val, ok := ld.Data.(string); ok {
+							m := map[string]any{}
+							if err := json.Unmarshal([]byte(val), &m); err == nil {
+								ldView.Data = m
+							} else {
+								ldView.Data = ld.Data
+							}
+						} else {
+							ldView.Data = ld.Data
+						}
+					} else {
+						ldView.Data = "..."
+					}
 				}
 				ldView.LastReported = ld.LastReported
-				unsafeGetLockerView(ld.SubKeys, ldView.SubKeys)
+				unsafeGetLockerView(ld.SubKeys, ldView.SubKeys, data)
 				lockerView[key] = ldView
 			} else {
 				lockerView[key] = nil
@@ -408,19 +421,19 @@ func (pl *PeerLocker) GetLockerWithoutEvents() *PeerLocker {
 	return plView
 }
 
-func (pl *PeerLocker) GetLockerView(events bool) *PeerLocker {
+func (pl *PeerLocker) GetLockerView(data, events bool) *PeerLocker {
 	pl.lock.RLock()
 	defer pl.lock.RUnlock()
 	plView := newPeerLocker()
 	plView.Active = pl.Active
-	unsafeGetLockerView(pl.Locker, plView.Locker)
+	unsafeGetLockerView(pl.Locker, plView.Locker, data)
 	if !events {
 		delete(plView.Locker, constants.LockerEventsKey)
 	}
 	for address, il := range pl.InstanceLockers {
 		ilView := newDataLocker()
 		plView.InstanceLockers[address] = ilView
-		unsafeGetLockerView(il.Locker, ilView.Locker)
+		unsafeGetLockerView(il.Locker, ilView.Locker, data)
 		ilView.Active = il.Active
 	}
 	return plView
@@ -455,6 +468,33 @@ func NewCombiLocker(label string, parent *CombiLocker) *CombiLocker {
 	cl := &CombiLocker{Label: label, PathLabel: pathLabel, parent: parent}
 	cl.Init()
 	return cl
+}
+
+func (cl *CombiLocker) Clone(peers, events, data, raw bool) *CombiLocker {
+	pathLabel := cl.Label
+	if cl.parent != nil {
+		pathLabel = cl.parent.PathLabel + "," + cl.Label
+	}
+	cl2 := &CombiLocker{Label: cl.Label, PathLabel: pathLabel, parent: cl.parent}
+	cl2.Init()
+	cl2.FirstOpened = cl.FirstOpened
+	cl2.LastOpened = cl.LastOpened
+	cl2.Current = cl.Current
+	if raw {
+		cl2.DataLocker = cl.DataLocker
+	} else {
+		cl2.DataLocker.Active = cl.DataLocker.Active
+		unsafeGetLockerView(cl.DataLocker.Locker, cl2.DataLocker.Locker, data)
+	}
+	for label, sub := range cl.SubLockers {
+		cl2.SubLockers[label] = sub.GetLockerView(events, data)
+	}
+	if peers {
+		for peer, pl := range cl.PeerLockers {
+			cl2.PeerLockers[peer] = pl.GetLockerView(data, events)
+		}
+	}
+	return cl2
 }
 
 func (cl *CombiLocker) Init() {
@@ -792,7 +832,7 @@ func (cl *CombiLocker) GetPeerLockers(peerName, peerAddress string, events bool)
 	return lockers
 }
 
-func (cl *CombiLocker) GetPeerLockersView(peerName, peerAddress string, events bool) map[string]map[string]interface{} {
+func (cl *CombiLocker) GetPeerLockersView(peerName, peerAddress string, data, events bool) map[string]map[string]interface{} {
 	peerName = strings.ToLower(peerName)
 	peerLockers := cl.getPeerLockers(peerName)
 	if len(peerLockers) == 0 {
@@ -804,7 +844,7 @@ func (cl *CombiLocker) GetPeerLockersView(peerName, peerAddress string, events b
 			lockers[label] = map[string]interface{}{}
 		}
 		for peer, pl := range pls {
-			plView := pl.GetLockerView(events)
+			plView := pl.GetLockerView(data, events)
 			if peerAddress == "" {
 				lockers[label][peer] = plView
 			} else {
@@ -828,47 +868,22 @@ func (cl *CombiLocker) GetDataLockers() DataLockers {
 	return dataLockers
 }
 
-func (cl *CombiLocker) GetLockerView(events bool) *CombiLocker {
+func (cl *CombiLocker) GetLockerView(events, data bool) *CombiLocker {
 	cl.lock.RLock()
 	defer cl.lock.RUnlock()
-	combiView := NewCombiLocker(cl.Label, cl.parent)
-	for label, sub := range cl.SubLockers {
-		combiView.SubLockers[label] = sub.GetLockerView(events)
-	}
-	for peer, pl := range cl.PeerLockers {
-		combiView.PeerLockers[peer] = pl.GetLockerView(events)
-	}
-	combiView.Current = cl.Current
-	combiView.DataLocker.Active = cl.DataLocker.Active
-	unsafeGetLockerView(cl.DataLocker.Locker, combiView.DataLocker.Locker)
-	return combiView
+	return cl.Clone(true, events, data, false)
 }
 
 func (cl *CombiLocker) GetLockerWithoutPeers() *CombiLocker {
 	cl.lock.RLock()
 	defer cl.lock.RUnlock()
-	combiView := NewCombiLocker(cl.Label, cl.parent)
-	for label, sub := range cl.SubLockers {
-		combiView.SubLockers[label] = sub.GetLockerWithoutPeers()
-	}
-	combiView.Current = cl.Current
-	combiView.DataLocker = cl.DataLocker
-	return combiView
+	return cl.Clone(false, false, true, false)
 }
 
 func (cl *CombiLocker) GetLockerWithoutEvents() *CombiLocker {
 	cl.lock.RLock()
 	defer cl.lock.RUnlock()
-	combiView := NewCombiLocker(cl.Label, cl.parent)
-	for label, sub := range cl.SubLockers {
-		combiView.SubLockers[label] = sub.GetLockerWithoutEvents()
-	}
-	for peer, pl := range cl.PeerLockers {
-		combiView.PeerLockers[peer] = pl.GetLockerWithoutEvents()
-	}
-	combiView.Current = cl.Current
-	combiView.DataLocker = cl.DataLocker
-	return combiView
+	return cl.Clone(true, false, true, false)
 }
 
 func (cl *CombiLocker) GetDataLockerView() *DataLocker {
@@ -876,7 +891,7 @@ func (cl *CombiLocker) GetDataLockerView() *DataLocker {
 	defer cl.lock.RUnlock()
 	dataView := newDataLocker()
 	dataView.Active = cl.DataLocker.Active
-	unsafeGetLockerView(cl.DataLocker.Locker, dataView.Locker)
+	unsafeGetLockerView(cl.DataLocker.Locker, dataView.Locker, true)
 	return dataView
 }
 
@@ -987,14 +1002,16 @@ func (cl *CombiLocker) getPeersClientResults(peerName string, targets []string, 
 					}
 					if data := targetData.Data; data != "" {
 						result := &results.TargetResults{}
-						if err := util.ReadJson(data, result); err == nil {
-							if byInstances {
-								results.AddDeltaResults(peersInstanceClientResults[peer][address][target], result, detailed)
+						if val, ok := data.(string); ok {
+							if err := util.ReadJson(val, result); err == nil {
+								if byInstances {
+									results.AddDeltaResults(peersInstanceClientResults[peer][address][target], result, detailed)
+								} else {
+									results.AddDeltaResults(peersClientResults[peer][target], result, detailed)
+								}
 							} else {
-								results.AddDeltaResults(peersClientResults[peer][target], result, detailed)
+								fmt.Printf("Error parsing peer result json: %s\n", err.Error())
 							}
-						} else {
-							fmt.Printf("Error parsing peer result json: %s\n", err.Error())
 						}
 					}
 				}
@@ -1057,10 +1074,14 @@ func (cl *CombiLocker) GetPeersClientResults(peerName string, targets []string, 
 
 func convertLockerDataToEvent(l *LockerData) *events.Event {
 	event := &events.Event{}
-	if err := util.ReadJson(l.Data, event); err == nil {
-		return event
-	} else {
-		fmt.Printf("Error while parsing event: %s\n", err.Error())
+	if l.Data != nil {
+		if val, ok := l.Data.(string); ok {
+			if err := util.ReadJson(val, event); err == nil {
+				return event
+			} else {
+				fmt.Printf("Error while parsing event: %s\n", err.Error())
+			}
+		}
 	}
 	return nil
 }
@@ -1104,15 +1125,19 @@ func (cl *CombiLocker) SearchInPeerEvents(peerNames []string, pattern *regexp.Re
 		eventsLocker := pl.DataLocker.Locker[constants.LockerEventsKey]
 		if eventsLocker != nil {
 			for _, ld := range eventsLocker.SubKeys {
-				if pattern.MatchString(ld.Data) {
-					if event := convertLockerDataToEvent(ld); event != nil {
-						if !data {
-							event.Data = "..."
+				if ld.Data != nil {
+					if val, ok := ld.Data.(string); ok {
+						if pattern.MatchString(val) {
+							if event := convertLockerDataToEvent(ld); event != nil {
+								if !data {
+									event.Data = "..."
+								}
+								if unified {
+									peer = "all"
+								}
+								eventsMap[peer] = append(eventsMap[peer], event)
+							}
 						}
-						if unified {
-							peer = "all"
-						}
-						eventsMap[peer] = append(eventsMap[peer], event)
 					}
 				}
 			}
@@ -1411,7 +1436,7 @@ func (ll *LabeledLockers) GetAllLockers(peers, events, data bool, level int) Com
 					cl = cl.Trim(level)
 				}
 				if !data {
-					cl = cl.GetLockerView(events)
+					cl = cl.GetLockerView(events, data)
 				}
 				if !peers {
 					cl = cl.GetLockerWithoutPeers()
@@ -1570,7 +1595,7 @@ func (cl *ContextLockers) GetAllLockers(peers, events, data bool, level int) map
 						cl = cl.Trim(level)
 					}
 					if !data {
-						cl = cl.GetLockerView(events)
+						cl = cl.GetLockerView(events, data)
 					}
 					if !peers {
 						cl = cl.GetLockerWithoutPeers()

@@ -134,10 +134,11 @@ func WithRequestStore(r *http.Request) (context.Context, *http.Request, *Request
 	r = r.WithContext(ctx)
 	rs.IsTLS = r.TLS != nil
 	rs.Request = r
+	populateRequestStore(r)
 	return ctx, r, rs
 }
 
-func PopulateRequestStore(r *http.Request) (context.Context, *RequestStore) {
+func populateRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	ctx := r.Context()
 	var rs *RequestStore
 	if val := ctx.Value(RequestStoreKey); val != nil {
@@ -146,7 +147,7 @@ func PopulateRequestStore(r *http.Request) (context.Context, *RequestStore) {
 		return nil, nil
 	}
 	isAdminRequest := CheckAdminRequest(r)
-	rs.IsGRPC = r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get(constants.HeaderContentType), "application/grpc")
+	rs.IsGRPC = r.ProtoMajor == 2 && (strings.HasPrefix(r.Header.Get(constants.HeaderContentType), "application/grpc") || r.Method == "PRI")
 	rs.IsAdminRequest = isAdminRequest
 	rs.IsVersionRequest = strings.HasPrefix(r.RequestURI, "/version")
 	rs.IsLockerRequest = strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker")
