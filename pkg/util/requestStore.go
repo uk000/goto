@@ -28,6 +28,7 @@ import (
 type ContextKey struct{ Key string }
 
 type RequestStore struct {
+	IsKnownNonTraffic       bool
 	IsVersionRequest        bool
 	IsFilteredRequest       bool
 	IsLockerRequest         bool
@@ -161,6 +162,9 @@ func populateRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	rs.IsPayloadRequest = !isAdminRequest && !rs.IsGRPC && (strings.Contains(r.RequestURI, "/stream") || strings.Contains(r.RequestURI, "/payload"))
 	rs.IsTunnelRequest = strings.HasPrefix(r.RequestURI, "/tunnel=") || !isAdminRequest && WillTunnel(r, rs)
 	rs.IsTunnelConfigRequest = strings.HasPrefix(r.RequestURI, "/tunnels")
+	rs.IsKnownNonTraffic = rs.IsProbeRequest || rs.IsReminderRequest || rs.IsHealthRequest ||
+		rs.IsMetricsRequest || rs.IsVersionRequest || rs.IsLockerRequest ||
+		rs.IsAdminRequest || rs.IsTunnelConfigRequest
 	rs.WillProxy = !isAdminRequest && WillProxyHTTP(r, rs)
 	rs.IsH2C = r.ProtoMajor == 2
 	rs.DownstreamAddr = r.RemoteAddr

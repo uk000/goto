@@ -469,7 +469,7 @@ func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, h
 		uriRegexp:        uriRegExp,
 		queryMatchRegexp: regexp.MustCompile("(?i)" + query),
 		bodyMatchRegexp:  bodyMatchRegexp,
-		bodyJsonPaths:    jsonPaths.Paths,
+		bodyJsonPath:     jsonPaths,
 		URICaptureKeys:   util.GetFillersUnmarked(uri),
 		HeaderCaptureKey: headerCaptureKey,
 		QueryCaptureKey:  queryCaptureKey,
@@ -510,21 +510,12 @@ func getPayloadForBodyMatch(bodyReader io.ReadCloser, bodyMatchResponses map[str
 		if rp.bodyMatchRegexp != nil && rp.bodyMatchRegexp.MatchString(lowerBody) {
 			matchedResponsePayload = rp
 			break
-		} else if len(rp.bodyJsonPaths) > 0 {
+		} else if rp.bodyJsonPath != nil && !rp.bodyJsonPath.IsEmpty() {
 			allMatched := true
 			captures = map[string]string{}
 			var data map[string]interface{}
 			if err := util.ReadJson(body, &data); err == nil {
-				for key, jp := range rp.bodyJsonPaths {
-					if matches, err := jp.FindResults(data); err == nil && len(matches) > 0 && len(matches[0]) > 0 {
-						if key != "" {
-							captures[key] = fmt.Sprintf("%v", matches[0][0].Interface())
-						}
-					} else {
-						allMatched = false
-						break
-					}
-				}
+				captures, allMatched = rp.bodyJsonPath.FindResults(data)
 			} else {
 				allMatched = false
 				break

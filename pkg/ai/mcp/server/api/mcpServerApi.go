@@ -37,13 +37,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	// mcpRouter := util.PathRouter(r, "/mcp")
-	// sseRouter := util.PathRouter(r, "/sse")
 	mcpapiRouter := util.PathRouter(r, "/mcpapi")
-
-	// util.AddRouteWithPort(mcpRouter, "", mcpserver.HandleMCP, "GET", "POST", "DELETE", "OPTIONS")
-	// util.AddRouteWithPort(mcpRouter, "/sse", mcpserver.HandleMCP, "GET", "POST", "DELETE", "OPTIONS")
-	// util.AddRouteWithPort(sseRouter, "", mcpserver.HandleMCP, "GET", "POST", "DELETE", "OPTIONS")
 
 	util.AddRouteWithPort(mcpapiRouter, "/servers", getServers, "GET")
 	util.AddRouteWithPort(mcpapiRouter, "/servers/all", getServers, "GET")
@@ -76,7 +70,19 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRouteWithPort(mcpapiRouter, "/servers/clear/all", clearServers, "POST")
 	util.AddRouteWithPort(mcpapiRouter, "/servers/clear", clearServers, "POST")
 	util.AddRouteWithPort(mcpapiRouter, "/server/{server}/clear", clearServers, "POST")
+
+	util.AddRouteQWithPort(mcpapiRouter, "/status/set/{status}", setStatus, "uri", "POST")
 	util.AddRouteWithPort(mcpapiRouter, "/status/set/{status}", setStatus, "POST")
+	util.AddRouteQWithPort(mcpapiRouter, "/status/set/{status}/header/{header}={value}", setStatus, "uri", "POST")
+	util.AddRouteQWithPort(mcpapiRouter, "/status/set/{status}/header/{header}", setStatus, "uri", "POST")
+	util.AddRouteQWithPort(mcpapiRouter, "/status/set/{status}/header/not/{header}", setStatus, "uri", "POST")
+	util.AddRouteWithPort(mcpapiRouter, "/status/set/{status}/header/{header}={value}", setStatus, "POST")
+	util.AddRouteWithPort(mcpapiRouter, "/status/set/{status}/header/{header}", setStatus, "POST")
+	util.AddRouteWithPort(mcpapiRouter, "/status/set/{status}/header/not/{header}", setStatus, "POST")
+
+	util.AddRouteWithPort(mcpapiRouter, "/status/configure", configureStatus, "POST")
+	util.AddRouteWithPort(mcpapiRouter, "/status/clear", clearStatus, "POST")
+	util.AddRouteWithPort(mcpapiRouter, "/statuses", getStatuses, "GET")
 }
 
 func getServers(w http.ResponseWriter, r *http.Request) {
@@ -154,8 +160,27 @@ func setServerRoute(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+func configureStatus(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	sc, err := mcpserver.StatusManager.ParseStatusConfig(port, r.Body)
+	msg := ""
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = fmt.Sprintf("Failed to parse status config with error: %s", err.Error())
+		fmt.Fprintln(w, msg)
+	} else {
+		msg = fmt.Sprintf("Parsed status config: %s", sc.Log("MCP", port))
+		util.WriteJsonPayload(w, sc)
+	}
+	util.AddLogMessage(msg, r)
+}
+
 func setStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
+	uri := util.GetStringParamValue(r, "uri")
+	header := util.GetStringParamValue(r, "header")
+	value := util.GetStringParamValue(r, "value")
+	noHeader := strings.Contains(r.RequestURI, "not")
 	statusCodes, times, ok := util.GetStatusParam(r)
 	if !ok {
 		util.AddLogMessage("Invalid status", r)
@@ -163,11 +188,24 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Invalid Status")
 		return
 	}
-	status := mcpserver.StatusManager.SetStatus(port, statusCodes, times)
+	status := mcpserver.StatusManager.SetStatusFor(port, uri, header, value, statusCodes, times, noHeader)
 	msg := status.Log("MCP", port)
 	util.AddLogMessage(msg, r)
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, msg)
+}
+
+func clearStatus(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	mcpserver.StatusManager.Clear(port)
+	msg := fmt.Sprintf("Status cleared on port [%d]", port)
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
+}
+
+func getStatuses(w http.ResponseWriter, r *http.Request) {
+	util.WriteJsonPayload(w, mcpserver.StatusManager.Statuses)
+	util.AddLogMessage("Delivered statuses", r)
 }
 
 func clearServers(w http.ResponseWriter, r *http.Request) {

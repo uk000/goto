@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"goto/pkg/global"
 	"goto/pkg/metrics"
 	"goto/pkg/server/echo"
 	"goto/pkg/transport"
@@ -238,7 +237,7 @@ func (t *ToolCallContext) applyDelay() {
 
 func (t *ToolCallContext) RunTool() (result *gomcp.CallToolResult, err error) {
 	t.hops = util.NewHops(t.Server.ID, t.Label)
-	t.notifyClient(t.Log("%s: Received request with Args [%+v] Remote Args [%+v] Headers [%+v]", t.Label, t.args, t.remoteArgs, t.requestHeaders), 0)
+	// t.notifyClient(t.Log("%s: Received request with Args [%+v] Remote Args [%+v] Headers [%+v]", t.Label, t.args, t.remoteArgs, t.requestHeaders), 0)
 	t.Hop(t.Flush(true))
 	if t.Behavior.Echo {
 		result, err = t.echo()
@@ -307,14 +306,15 @@ func parseRemoteCallArgs(raw json.RawMessage) (ra *RemoteCallArgs, err error) {
 
 func (t *ToolCallContext) echo() (*gomcp.CallToolResult, error) {
 	content := []gomcp.Content{}
-	input := ""
-	if t.args != nil && t.args["text"] != nil {
-		input = t.args["text"].(string)
-	} else {
-		input = "<No input to echo>"
-	}
-	msg := fmt.Sprintf("Echo Server: %s[%s]. Input: %s", t.Label, global.Funcs.GetListenerLabelForPort(t.Server.GetPort()), input)
-	content = append(content, &gomcp.TextContent{Text: msg})
+	// input := ""
+	// if t.args != nil && t.args["text"] != nil {
+	// 	input = t.args["text"].(string)
+	// } else {
+	// 	input = "<No input to echo>"
+	// }
+	// msg := fmt.Sprintf("Echo Server: %s[%s]. Input: %s", t.Label, global.Funcs.GetListenerLabelForPort(t.Server.GetPort()), input)
+	// content = append(content, &gomcp.TextContent{Text: msg})
+	content = append(content, &gomcp.TextContent{Text: util.ToJSONText(echo.GetEchoResponseFromRS(t.rs))})
 	t.applyDelay()
 	t.notifyClient(t.Log("Server [%s] echoed back", t.Server.GetName()), 0)
 	return &gomcp.CallToolResult{Content: content}, nil

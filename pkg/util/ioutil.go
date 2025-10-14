@@ -63,18 +63,23 @@ func (r reader) Read(p []byte) (n int, err error) {
 	return
 }
 
-func CreateOrGetReReader(r *http.Request) *ReReader {
+func SetAndGetReReader(r *http.Request) *ReReader {
+	rr := CreateOrGetReReader(r.Body)
+	r.Body = rr
+	return rr
+}
+
+func CreateOrGetReReader(body io.ReadCloser) *ReReader {
 	var rr *ReReader
-	if rr2, ok := r.Body.(*ReReader); ok {
+	if rr2, ok := body.(*ReReader); ok {
 		rr = rr2
 	} else {
-		rr = NewReReader(r.Body)
-		r.Body = rr
+		rr = newReReader(body)
 	}
 	return rr
 }
 
-func NewReReader(r io.ReadCloser) *ReReader {
+func newReReader(r io.ReadCloser) *ReReader {
 	content := ReadBytes(r)
 	return &ReReader{
 		ReadCloser: io.NopCloser(bytes.NewReader(content)),
@@ -104,11 +109,15 @@ func (r *ReReader) Length() int {
 	return len(r.Content)
 }
 
+func (r ReReader) Text() string {
+	return string(r.Content)
+}
+
 func AsReReader(r io.ReadCloser) *ReReader {
 	if rr, ok := r.(*ReReader); ok {
 		return rr
 	}
-	return NewReReader(r)
+	return CreateOrGetReReader(r)
 }
 
 func Reader(ctx context.Context, r io.Reader) io.Reader {

@@ -52,7 +52,19 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRouteWithPort(a2aRouter, "/agent/{agent}/payload", setAgentPayload, "POST")
 	util.AddRouteWithPort(a2aRouter, "/servers/clear", clearServers, "POST")
 	util.AddRouteWithPort(a2aRouter, "/agents/clear", clearAgents, "POST")
+
+	util.AddRouteQWithPort(a2aRouter, "/status/set/{status}", setStatus, "uri", "POST")
 	util.AddRouteWithPort(a2aRouter, "/status/set/{status}", setStatus, "POST")
+	util.AddRouteQWithPort(a2aRouter, "/status/set/{status}/header/{header}={value}", setStatus, "uri", "POST")
+	util.AddRouteQWithPort(a2aRouter, "/status/set/{status}/header/{header}", setStatus, "uri", "POST")
+	util.AddRouteQWithPort(a2aRouter, "/status/set/{status}/header/not/{header}", setStatus, "uri", "POST")
+	util.AddRouteWithPort(a2aRouter, "/status/set/{status}/header/{header}={value}", setStatus, "POST")
+	util.AddRouteWithPort(a2aRouter, "/status/set/{status}/header/{header}", setStatus, "POST")
+	util.AddRouteWithPort(a2aRouter, "/status/set/{status}/header/not/{header}", setStatus, "POST")
+
+	util.AddRouteWithPort(a2aRouter, "/status/configure", configureStatus, "POST")
+	util.AddRouteWithPort(a2aRouter, "/status/clear", clearStatus, "POST")
+	util.AddRouteWithPort(a2aRouter, "/statuses", getStatuses, "GET")
 
 	agentRouter := util.PathRouter(r, "/agent")
 	util.AddRouteWithPort(agentRouter, "/{agent}", serveAgent, "GET", "POST", "DELETE")
@@ -204,8 +216,27 @@ func clearAgents(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+func configureStatus(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	sc, err := statusManager.ParseStatusConfig(port, r.Body)
+	msg := ""
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = fmt.Sprintf("Failed to parse status config with error: %s", err.Error())
+		fmt.Fprintln(w, msg)
+	} else {
+		msg = fmt.Sprintf("Parsed status config: %s", sc.Log("MCP", port))
+		util.WriteJsonPayload(w, sc)
+	}
+	util.AddLogMessage(msg, r)
+}
+
 func setStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
+	uri := util.GetStringParamValue(r, "uri")
+	header := util.GetStringParamValue(r, "header")
+	value := util.GetStringParamValue(r, "value")
+	noHeader := strings.Contains(r.RequestURI, "not")
 	statusCodes, times, ok := util.GetStatusParam(r)
 	if !ok {
 		util.AddLogMessage("Invalid status", r)
@@ -213,28 +244,38 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Invalid Status")
 		return
 	}
-	status := statusManager.SetStatus(port, statusCodes, times)
+	status := statusManager.SetStatusFor(port, uri, header, value, statusCodes, times, noHeader)
 	msg := status.Log("A2A", port)
 	util.AddLogMessage(msg, r)
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, msg)
 }
 
-func sendStatus(status, rem int, w http.ResponseWriter, r *http.Request) {
+func clearStatus(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	statusManager.Clear(port)
+	msg := fmt.Sprintf("Status cleared on port [%d]", port)
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
+}
+
+func getStatuses(w http.ResponseWriter, r *http.Request) {
+	util.WriteJsonPayload(w, statusManager.Statuses)
+	util.AddLogMessage("Delivered statuses", r)
+}
+
+func sendStatus(id string, status, rem int, w http.ResponseWriter, r *http.Request) {
+	w.Header().Add(constants.HeaderGotoForcedStatus, strconv.Itoa(status))
 	w.Header().Add(constants.HeaderGotoForcedStatusRemaining, strconv.Itoa(rem))
 	w.WriteHeader(status)
 	b, _ := io.ReadAll(r.Body)
-	msg := fmt.Sprintf("Reporting status [%d], Remaining status count [%d]. A2A Request Headers [%s], Payload: %s", status, rem, util.ToJSONText(r.Header), string(b))
+	msg := fmt.Sprintf("%s Reporting status [%d], Remaining status count [%d]. A2A Request Headers [%s], Payload: %s", id, status, rem, util.ToJSONText(r.Header), string(b))
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
 }
 
 func serveAgent(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	if status, rem := statusManager.GetStatus(port); status >= 400 {
-		sendStatus(status, rem, w, r)
-		return
-	}
 	agent := util.GetStringParamValue(r, "agent")
 	if agent == "" {
 		agent = getAgentNameFromURI(r.RequestURI)
@@ -245,7 +286,11 @@ func serveAgent(w http.ResponseWriter, r *http.Request) {
 		msg = "Agent name needed"
 		fmt.Fprintln(w, msg)
 	} else {
-		GetOrAddServer(port).Serve(agent, w, r)
+		if status, rem := statusManager.GetStatusFor(port, r.RequestURI, r.Header); status >= 400 {
+			sendStatus(agent, status, rem, w, r)
+		} else {
+			GetOrAddServer(port).Serve(agent, w, r)
+		}
 		msg = fmt.Sprintf("Handled agent [%s] on port: %d", agent, port)
 	}
 	util.AddLogMessage(msg, r)

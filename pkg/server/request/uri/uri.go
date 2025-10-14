@@ -56,7 +56,6 @@ var (
 	uriCountsByPort    = map[string]map[string]int{}
 	uriStatusByPort    = map[string]map[string]any{}
 	uriDelayByPort     = map[string]map[string]any{}
-	uriReroues         = map[string]string{}
 	trackURICallCounts bool
 	uriLock            sync.RWMutex
 )
@@ -286,7 +285,8 @@ func HasAnyURIStatusOrDelay() bool {
 }
 
 func checkAndSkip(w http.ResponseWriter, r *http.Request, next http.Handler) (*URIStatusConfig, *DelayConfig, bool) {
-	if util.IsKnownNonTraffic(r) || !HasAnyURIStatusOrDelay() {
+	rs := util.GetRequestStore(r)
+	if rs.IsKnownNonTraffic || !HasAnyURIStatusOrDelay() {
 		if next != nil {
 			next.ServeHTTP(w, r)
 		}

@@ -178,7 +178,7 @@ func (t *ToolCallContext) remoteAgentCall() (*gomcp.CallToolResult, error) {
 	t.addForwardHeaders(ac.Headers, ac.ForwardHeaders, ac.Data)
 	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s]", ac.Name, ac.AgentURL)
 	t.notifyClient(msg, 0)
-	client := a2aclient.NewA2AClient(t.Server.Port)
+	client := a2aclient.NewA2AClient(t.Server.Port, t.Name)
 	if client == nil {
 		return nil, errors.New("failed to create A2A client")
 	}
@@ -201,8 +201,8 @@ func (t *ToolCallContext) remoteAgentCall() (*gomcp.CallToolResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Failed to call Agent [%s] URL [%s] with error: %s", ac.Name, ac.AgentURL, err.Error())
 	} else {
-		msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.AgentURL, session.Card.Capabilities.Streaming)
-		t.notifyClient(msg, 0)
+		// msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.AgentURL, session.Card.Capabilities.Streaming)
+		// t.notifyClient(msg, 0)
 	}
 	return result, nil
 }

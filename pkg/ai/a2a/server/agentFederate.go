@@ -150,13 +150,45 @@ func (ab *AgentBehaviorFederate) DoStream(aCtx *AgentContext) error {
 	close(aCtx.localProgress)
 	close(aCtx.upstreamProgress)
 	resultsWG.Wait()
-
-	return nil
+	return aCtx.err
 }
 
 func (ab *AgentBehaviorFederate) processResults(aCtx *AgentContext, dType string, wg *sync.WaitGroup) {
 	channelsWG := sync.WaitGroup{}
 	channelsWG.Add(1)
+	processResult := func(pair *types.Pair[string, any], sendArtifact bool) error {
+		if pair != nil && pair.Right != nil {
+			callId := fmt.Sprintf("Upstream [%s] Result:", pair.Left)
+			parts := createAnyParts(callId, pair.Right)
+			textParts := []a2aproto.Part{}
+			dataParts := []a2aproto.Part{}
+			for _, part := range parts {
+				if t, ok := part.(a2aproto.TextPart); ok {
+					textParts = append(textParts, t)
+				} else if t, ok := part.(a2aproto.DataPart); ok {
+					dataParts = append(dataParts, t)
+				}
+			}
+			var err error
+			if len(textParts) > 0 {
+				if sendArtifact {
+					if err = aCtx.sendTextArtifactFromParts("", textParts, false, false); err != nil {
+						return err
+					}
+				} else {
+					if err = aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "", textParts); err != nil {
+						return err
+					}
+				}
+			}
+			if len(dataParts) > 0 {
+				if err = aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "", dataParts); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
 	go func() {
 	outer:
 		for {
@@ -169,8 +201,9 @@ func (ab *AgentBehaviorFederate) processResults(aCtx *AgentContext, dType string
 					break outer
 				}
 				if update != "" {
-					callId := fmt.Sprintf("Upstream %s update", dType)
-					aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, fmt.Sprintf("%s: %s", callId, update), nil)
+					if err := aCtx.sendTextArtifact("", "", []string{update}, false, false); err != nil {
+						break outer
+					}
 				}
 			}
 		}
@@ -188,9 +221,8 @@ func (ab *AgentBehaviorFederate) processResults(aCtx *AgentContext, dType string
 				if !ok {
 					break outer
 				}
-				if pair != nil && pair.Right != nil {
-					callId := fmt.Sprintf("Agent update [%s]", ab.agent.ID)
-					aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, fmt.Sprintf("%s: %s", callId, pair.Right), nil)
+				if err := processResult(pair, false); err != nil {
+					break outer
 				}
 			}
 		}
@@ -208,9 +240,8 @@ func (ab *AgentBehaviorFederate) processResults(aCtx *AgentContext, dType string
 				if !ok {
 					break outer
 				}
-				if pair != nil && pair.Right != nil {
-					callId := fmt.Sprintf("Upstream [%s] Result:", pair.Left)
-					aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "", createAnyParts(callId, pair.Right))
+				if err := processResult(pair, true); err != nil {
+					break outer
 				}
 			}
 		}
@@ -279,8 +310,8 @@ func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentContext, wg *sync.WaitGrou
 func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentContext, dCtx *DelegateCallContext) {
 	err := ab.invokeAgent(aCtx, dCtx)
 	if err != nil {
+		aCtx.err = err
 		aCtx.Log(err.Error())
-		aCtx.ReportProgress(dCtx.agentCall.Name, err.Error())
 	}
 }
 
@@ -288,6 +319,7 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 	remoteResult, err := ab.invokeMCP(aCtx, dCtx)
 	output := map[string]any{}
 	if err != nil {
+		aCtx.err = err
 		msg := fmt.Sprintf("Failed to invoke MCP tool [%s] at URL [%s] with error: %s", dCtx.toolCall.Tool, dCtx.toolCall.URL, err.Error())
 		aCtx.Log(msg)
 		if remoteResult == nil {
@@ -325,14 +357,14 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 		delete(remoteResult, "structuredContent")
 	}
 	for k, v := range remoteResult {
-		count := 0
-		if arr, ok := v.([]any); ok {
-			count = len(arr)
-		} else if m, ok := v.(map[string]any); ok {
-			count = len(m)
-		}
+		// count := 0
+		// if arr, ok := v.([]any); ok {
+		// 	count = len(arr)
+		// } else if m, ok := v.(map[string]any); ok {
+		// 	count = len(m)
+		// }
 		if aCtx.resultsChan != nil {
-			aCtx.resultsChan <- types.NewPair[string, any](dCtx.toolCall.Tool, fmt.Sprintf("Sent %s with %d items.", k, count))
+			// aCtx.resultsChan <- types.NewPair[string, any](dCtx.toolCall.Tool, fmt.Sprintf("Sent %s with %d items.", k, count))
 			aCtx.resultsChan <- types.NewPair[string, any](dCtx.toolCall.Tool, map[string]any{k: v})
 		} else {
 			output[k] = v
@@ -378,7 +410,7 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s] with input [%s]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, dCtx.agentCall.Message)
 	aCtx.Log(msg)
 	aCtx.ReportProgress(dCtx.agentCall.Name, msg)
-	client := a2aclient.NewA2AClient(ab.agent.Port)
+	client := a2aclient.NewA2AClient(ab.agent.Port, ab.agent.ID)
 	if client == nil {
 		return errors.New("failed to create A2A client")
 	}
@@ -386,15 +418,20 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 	if err != nil {
 		return fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, err.Error())
 	} else {
-		msg = fmt.Sprintf("Loaded agent card for Agent [%s] URL [%s], Streaming [%d]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, session.Card.Capabilities.Streaming)
-		aCtx.ReportProgress(dCtx.agentCall.Name, msg)
+		// msg = fmt.Sprintf("Loaded agent card for Agent [%s] URL [%s]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL)
+		// aCtx.ReportProgress(dCtx.agentCall.Name, msg)
 	}
 	err = session.CallAgent(nil, aCtx.resultsChan, aCtx.upstreamProgress)
 	if err != nil {
-		return fmt.Errorf("Failed to call Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, err.Error())
+		if aCtx.resultsChan != nil {
+			aCtx.resultsChan <- types.NewPair[string, any](dCtx.agentCall.Name, err.Error())
+		} else if aCtx.localProgress != nil {
+			aCtx.ReportProgress(dCtx.agentCall.Name, err.Error())
+		}
+		return fmt.Errorf("Failed to call Agent [%s] URL [%s]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL)
 	} else {
-		msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s], Streaming [%d]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, session.Card.Capabilities.Streaming)
-		aCtx.ReportProgress(dCtx.agentCall.Name, msg)
+		// msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL)
+		// aCtx.ReportProgress(dCtx.agentCall.Name, msg)
 	}
 	return nil
 }

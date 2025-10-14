@@ -249,7 +249,7 @@ func AIHandler() http.Handler {
 		ctx, r, rs := util.WithRequestStore(r)
 		port := util.GetRequestOrListenerPortNum(r)
 		r = r.WithContext(withPort(ctx, port))
-		reReader := util.NewReReader(r.Body)
+		reReader := util.CreateOrGetReReader(r.Body)
 		r.Body = reReader
 		if router.WillRoute(port, r) {
 			router.RoutingHandler(port).ServeHTTP(w, r)
@@ -324,7 +324,7 @@ func ContextMiddleware(next http.Handler) http.Handler {
 			rs := util.GetRequestStore(r)
 			rs.IsJSONRPC = rs.IsJSONRPC || l.IsJSONRPC
 			rs.IsGRPC = rs.IsGRPC || l.IsGRPC
-			reReader := util.NewReReader(r.Body)
+			reReader := util.CreateOrGetReReader(r.Body)
 			r.Body = reReader
 			rs.BodyLength = reReader.Length()
 			next.ServeHTTP(w, r)
@@ -350,7 +350,7 @@ func IntereceptMiddleware(next http.Handler) http.Handler {
 			var statusCode int
 			next.ServeHTTP(w, r)
 			statusCode = http.StatusOK
-			if !util.IsKnownNonTraffic(r) && irw != nil {
+			if !rs.IsKnownNonTraffic && irw != nil {
 				statusCode = irw.StatusCode
 			}
 			statusCodeText := strconv.Itoa(statusCode)

@@ -35,11 +35,6 @@ import (
 
 func MCPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		port := util.GetRequestOrListenerPortNum(r)
-		if status, rem := StatusManager.GetStatus(port); status >= 400 {
-			sendStatus(status, rem, w, r)
-			return
-		}
 		rs := util.GetRequestStore(r)
 		//HandleMCPDefault(w, r)
 		HandleMCP(w, r)
@@ -79,7 +74,12 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 			} else {
 				log.Printf("Port [%d] Request [%s] will be served by Stateless [%t] Server [%s]", l.Port, r.RequestURI, server.Stateless, server.Name)
 			}
-			server.handler.ServeHTTP(w, r)
+			port := util.GetRequestOrListenerPortNum(r)
+			if status, rem := StatusManager.GetStatusFor(port, r.RequestURI, r.Header); status > 0 {
+				sendStatus(server.ID, status, rem, w, r)
+			} else {
+				server.handler.ServeHTTP(w, r)
+			}
 			rs.RequestServed = true
 		} else {
 			log.Printf("Port [%d] Request [%s] No server available. Routing to HTTP server", l.Port, r.RequestURI)
@@ -289,11 +289,12 @@ func HandleMCPDefault(w http.ResponseWriter, r *http.Request) {
 	rs.RequestServed = true
 }
 
-func sendStatus(status, rem int, w http.ResponseWriter, r *http.Request) {
+func sendStatus(id string, status, rem int, w http.ResponseWriter, r *http.Request) {
+	w.Header().Add(constants.HeaderGotoForcedStatus, strconv.Itoa(status))
 	w.Header().Add(constants.HeaderGotoForcedStatusRemaining, strconv.Itoa(rem))
 	w.WriteHeader(status)
 	b, _ := io.ReadAll(r.Body)
-	msg := fmt.Sprintf("Reporting status [%d], Remaining status count [%d]. MCP Request Headers [%s], Payload: %s", status, rem, util.ToJSONText(r.Header), string(b))
+	msg := fmt.Sprintf("%s Reporting status [%d], Remaining status count [%d]. MCP Request Headers [%s], Payload: %s", id, status, rem, util.ToJSONText(r.Header), string(b))
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
 }

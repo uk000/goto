@@ -637,7 +637,7 @@ func (pt *PortTunnel) tunnelToEndpoint(ep *Endpoint, uri, tunnelHostLabel, viaTu
 		}
 		if resp, err := ep.client.HTTP().Do(req); err == nil {
 			r.Body.Close()
-			rr := util.NewReReader(resp.Body)
+			rr := util.CreateOrGetReReader(resp.Body)
 			resp.Body = rr
 			msg = fmt.Sprintf("Got response from tunnel [%s]: %s", url, resp.Status)
 			if global.Debug {

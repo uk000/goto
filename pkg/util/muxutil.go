@@ -445,6 +445,9 @@ func GetStatusParam(r *http.Request) (statusCodes []int, times int, present bool
 			times = int(s)
 		}
 	}
+	if times == 0 {
+		times = -1
+	}
 	return statusCodes, times, true
 }
 

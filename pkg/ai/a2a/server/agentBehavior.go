@@ -158,12 +158,14 @@ func (b *AgentBehaviorImpl) handleStream(aCtx *AgentContext) (*taskmanager.Messa
 }
 
 func (b *AgentBehaviorImpl) stream(aCtx *AgentContext) (err error) {
-	defer aCtx.endTask()
-	if err = aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Agent update: Stream Started...", nil); err != nil {
-		return
-	}
 	b.addOrSendServerInfo(aCtx, nil)
-	return b.doStream(aCtx)
+	err = b.doStream(aCtx)
+	if err != nil {
+		aCtx.endTask(false, err.Error())
+	} else {
+		aCtx.endTask(true, b.agent.ID+": Task Done")
+	}
+	return
 }
 
 func (b *AgentBehaviorImpl) addOrSendServerInfo(aCtx *AgentContext, result *taskmanager.MessageProcessingResult) {
@@ -172,8 +174,6 @@ func (b *AgentBehaviorImpl) addOrSendServerInfo(aCtx *AgentContext, result *task
 		if msg, ok := result.Result.(*a2aproto.Message); ok {
 			msg.Parts = append(msg.Parts, serverInfo)
 		}
-	} else {
-		aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Agent Update: Sent Goto-Server-Info", []a2aproto.Part{serverInfo})
 	}
 }
 
@@ -221,8 +221,6 @@ func createPartsFromMap(key string, m map[string]any, parts *[]a2aproto.Part, de
 		if m2, ok := val.(map[string]any); ok {
 			if deep {
 				createPartsFromMap(fmt.Sprintf("%s: [%s]", key, k2), m2, parts, false)
-			} else {
-				*parts = append(*parts, a2aproto.NewTextPart(fmt.Sprintf("%s: Sent [%s] data with %d items", key, k2, len(m2))))
 			}
 		} else {
 			createTextPartsFromArrayOrString(fmt.Sprintf("%s: [%s]", key, k2), val, parts)

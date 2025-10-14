@@ -67,6 +67,7 @@ type AgentContext struct {
 	localProgress    chan *types.Pair[string, any]
 	toolResults      map[string]any
 	agentResults     map[string]any
+	err              error
 }
 
 type DelegateCallContext struct {
@@ -332,8 +333,21 @@ func (ac *AgentContext) sendTextArtifact(title, description string, text []strin
 	return ac.task.handler.AddArtifact(&ac.task.taskID, artifact, isFinal, isQuestion)
 }
 
-func (ac *AgentContext) endTask() {
-	ac.sendTaskStatusUpdate(a2aproto.TaskStateCompleted, "Agent update: Completed.", nil)
+func (ac *AgentContext) sendTextArtifactFromParts(title string, parts []a2aproto.Part, isFinal, isQuestion bool) (err error) {
+	artifact := a2aproto.Artifact{
+		ArtifactID: uuid.New().String(),
+		Name:       util.Ptr(title),
+		Parts:      parts,
+	}
+	return ac.task.handler.AddArtifact(&ac.task.taskID, artifact, isFinal, isQuestion)
+}
+
+func (ac *AgentContext) endTask(success bool, msg string) {
+	if success {
+		ac.sendTaskStatusUpdate(a2aproto.TaskStateCompleted, msg, nil)
+	} else {
+		ac.sendTaskStatusUpdate(a2aproto.TaskStateFailed, msg, nil)
+	}
 	if ac.task.subscriber != nil {
 		ac.task.subscriber.Close()
 	}

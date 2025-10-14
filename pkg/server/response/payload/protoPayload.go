@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"k8s.io/client-go/util/jsonpath"
 )
 
 type ResponsePayload struct {
@@ -52,7 +51,7 @@ type ResponsePayload struct {
 	uriRegexp        *regexp.Regexp
 	queryMatchRegexp *regexp.Regexp
 	bodyMatchRegexp  *regexp.Regexp
-	bodyJsonPaths    map[string]*jsonpath.JSONPath
+	bodyJsonPath     *util.JSONPath
 	fillers          []string
 	router           *mux.Router
 }

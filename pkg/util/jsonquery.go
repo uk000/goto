@@ -19,6 +19,7 @@ package util
 import (
 	"bytes"
 	"fmt"
+	"goto/pkg/types"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,8 +30,8 @@ import (
 )
 
 type JSONPath struct {
-	Paths     map[string]*jsonpath.JSONPath
-	TextPaths map[string]string
+	Paths     map[string]*jsonpath.JSONPath `json:"-"`
+	TextPaths map[string]string             `json:"paths"`
 	counter   uint64
 	lock      sync.Mutex
 }
@@ -41,6 +42,13 @@ type JQ struct {
 	counter     uint64
 	lock        sync.Mutex
 }
+
+type JSONPathWriter struct {
+	results    map[string][]interface{}
+	currentKey string
+}
+
+type JSONPathPair types.Pair[*JSONPath, *JSONPath]
 
 func NewJQ() *JQ {
 	return &JQ{Queries: map[string]*gojq.Code{}, TextQueries: map[string]string{}}
@@ -124,38 +132,32 @@ func NewJSONPath() *JSONPath {
 	return &JSONPath{TextPaths: map[string]string{}, Paths: map[string]*jsonpath.JSONPath{}}
 }
 
+func (jp *JSONPath) Parse2(path string) {
+	pieces := strings.Split(path, "=")
+	key := ""
+	val := ""
+	if len(pieces) == 2 {
+		key = pieces[0]
+		val = pieces[1]
+	} else {
+		atomic.AddUint64(&jp.counter, 1)
+		key = fmt.Sprint(jp.counter)
+		val = pieces[0]
+	}
+	j := jsonpath.New(key)
+	j.Parse(val)
+	jp.TextPaths[key] = val
+	jp.Paths[key] = j
+}
+
 func (jp *JSONPath) Parse(paths []string) *JSONPath {
 	if len(paths) == 0 || paths[0] == "" {
 		return jp
 	}
 	for _, path := range paths {
-		pieces := strings.Split(path, "=")
-		key := ""
-		val := ""
-		if len(pieces) == 2 {
-			key = pieces[0]
-			val = pieces[1]
-		} else {
-			atomic.AddUint64(&jp.counter, 1)
-			key = fmt.Sprint(jp.counter)
-			val = pieces[0]
-		}
-		j := jsonpath.New(key)
-		j.Parse(val)
-		jp.TextPaths[key] = val
-		jp.Paths[key] = j
+		jp.Parse2(path)
 	}
 	return jp
-}
-
-type JSONPathWriter struct {
-	results    map[string][]interface{}
-	currentKey string
-}
-
-func (jpw *JSONPathWriter) Write(p []byte) (n int, err error) {
-	jpw.results[jpw.currentKey] = append(jpw.results[jpw.currentKey], string(p))
-	return len(p), nil
 }
 
 func (jp *JSONPath) Apply(j JSON) JSON {
@@ -183,8 +185,28 @@ func (jp *JSONPath) Apply(j JSON) JSON {
 	return JSONFromJSON(out)
 }
 
+func (jp *JSONPath) FindResults(json map[string]any) (captures map[string]string, allMatched bool) {
+	captures = map[string]string{}
+	allMatched = true
+	for key, p := range jp.Paths {
+		if matches, err := p.FindResults(json); err == nil && len(matches) > 0 {
+			if key != "" && len(matches[0]) > 0 {
+				captures[key] = fmt.Sprintf("%v", matches[0][0].Interface())
+			}
+		} else {
+			allMatched = false
+		}
+	}
+	return
+}
+
 func (jp *JSONPath) IsEmpty() bool {
 	return len(jp.Paths) == 0
+}
+
+func (jpw *JSONPathWriter) Write(p []byte) (n int, err error) {
+	jpw.results[jpw.currentKey] = append(jpw.results[jpw.currentKey], string(p))
+	return len(p), nil
 }
 
 func (j *JSONValue) ExecuteTemplates(templates []*template.Template) JSON {

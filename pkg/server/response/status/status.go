@@ -345,7 +345,8 @@ func middlewareFunc(next http.Handler) http.Handler {
 		if next != nil {
 			next.ServeHTTP(w, r)
 		}
-		if util.IsKnownNonTraffic(r) {
+		rs := util.GetRequestStore(r)
+		if rs.IsKnownNonTraffic {
 			return
 		}
 		overriddenStatus := false

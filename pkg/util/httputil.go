@@ -388,10 +388,20 @@ func ToLowerHeaders(headers map[string][]string) map[string][]string {
 	return newHeaders
 }
 
+func ToLowerHeadersValues(headers map[string][]string) map[string]string {
+	newHeaders := map[string]string{}
+	for h, v := range headers {
+		if len(v) > 0 {
+			newHeaders[strings.ToLower(h)] = strings.ToLower(v[0])
+		}
+	}
+	return newHeaders
+}
+
 func ToLowerHeader(headers map[string]string) map[string]string {
 	newHeaders := map[string]string{}
 	for h, v := range headers {
-		newHeaders[strings.ToLower(h)] = v
+		newHeaders[strings.ToLower(h)] = strings.ToLower(v)
 	}
 	return newHeaders
 }
@@ -410,7 +420,7 @@ func ReadJsonPayload(r *http.Request, t interface{}) error {
 	return ReadJsonPayloadFromBody(r.Body, t)
 }
 
-func ReadJsonPayloadFromBody(body io.ReadCloser, t interface{}) error {
+func ReadJsonPayloadFromBody(body io.Reader, t interface{}) error {
 	if body, err := io.ReadAll(body); err == nil {
 		return json.Unmarshal(body, t)
 	} else {
@@ -548,13 +558,6 @@ func IsKnownRequest(r *http.Request) bool {
 		rs.IsMetricsRequest || rs.IsVersionRequest || rs.IsLockerRequest ||
 		rs.IsAdminRequest || rs.IsStatusRequest || rs.IsDelayRequest ||
 		rs.IsPayloadRequest || rs.IsTunnelConfigRequest)
-}
-
-func IsKnownNonTraffic(r *http.Request) bool {
-	rs := GetRequestStore(r)
-	return rs.IsProbeRequest || rs.IsReminderRequest || rs.IsHealthRequest ||
-		rs.IsMetricsRequest || rs.IsVersionRequest || rs.IsLockerRequest ||
-		rs.IsAdminRequest || rs.IsTunnelConfigRequest
 }
 
 func IsJSONContentType(h http.Header) bool {

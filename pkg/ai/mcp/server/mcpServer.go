@@ -656,13 +656,13 @@ func (m *MCPServer) AddResourceTemplates(b []byte) ([]string, error) {
 
 func (m *MCPServer) onInitialized(ctx context.Context, req *gomcp.InitializedRequest) {
 	msg := fmt.Sprintf("MCPServer[%d][%s]: Initialized.", m.Port, m.Name)
-	params := &gomcp.ProgressNotificationParams{
-		ProgressToken: req.Params.Meta.GetMeta()["progressToken"],
-		Total:         float64(0),
-		Progress:      0,
-		Message:       msg,
-	}
-	req.Session.NotifyProgress(ctx, params)
+	// params := &gomcp.ProgressNotificationParams{
+	// 	ProgressToken: req.Params.Meta.GetMeta()["progressToken"],
+	// 	Total:         float64(0),
+	// 	Progress:      0,
+	// 	Message:       msg,
+	// }
+	// req.Session.NotifyProgress(ctx, params)
 	log.Println(msg)
 }
 

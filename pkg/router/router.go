@@ -156,7 +156,7 @@ func (pr *PortRouter) GetMatchingRoute(r *http.Request) *Route {
 
 func (pr *PortRouter) Intercept(resp *http.Response) {
 	req := resp.Request
-	rr := util.NewReReader(resp.Body)
+	rr := util.CreateOrGetReReader(resp.Body)
 	resp.Body = rr
 	id := req.Header.Get("X-Correlation-ID")
 	var route *Route
@@ -226,7 +226,7 @@ func (r *Route) Setup() error {
 func (r *Route) RouteRequest(w http.ResponseWriter, hr *http.Request) {
 	//	uri := string(r.re.ReplaceAll([]byte(hr.RequestURI), []byte(r.To.URIPrefix)))
 	uri := hr.RequestURI
-	rr := util.NewReReader(hr.Body)
+	rr := util.CreateOrGetReReader(hr.Body)
 	id := strconv.Itoa(int(RequestCorrelationID.Add(1)))
 	req, err := r.prepareRequest(hr, rr, id)
 	msg := fmt.Sprintf("Routing ID [%s]: Request URI [%s], Routing to upstream [%s], URI [%s], Headers [%+v], Body [%s] ",
@@ -244,7 +244,7 @@ func (r *Route) RouteRequest(w http.ResponseWriter, hr *http.Request) {
 			fmt.Fprintln(w, msg)
 		} else {
 			prepareHeaders(resp.Header, w.Header(), r.To.ResponseHeaders)
-			rr = util.NewReReader(resp.Body)
+			rr = util.CreateOrGetReReader(resp.Body)
 			rr.Rewind()
 			if len, err := io.Copy(w, rr); err != nil {
 				msg = fmt.Sprintf("Routing ID [%s]: Downstream response failed with error [%s]", id, err.Error())
@@ -315,7 +315,7 @@ func GetRewriter(router *PortRouter) func(*httputil.ProxyRequest) {
 			return
 		}
 		id := strconv.Itoa(int(RequestCorrelationID.Add(1)))
-		rr := util.CreateOrGetReReader(pr.In)
+		rr := util.SetAndGetReReader(pr.In)
 		req, err := route.prepareRequest(pr.In, rr, id)
 		if err != nil {
 			log.Printf("Routing ID [%s]: Request URI [%s]: Failed to prepare upstream request with error [%s]\n", id, pr.In.RequestURI, err.Error())

@@ -295,7 +295,8 @@ func middlewareFunc(next http.Handler) http.Handler {
 		if next != nil {
 			next.ServeHTTP(w, r)
 		}
-		if !util.IsKnownNonTraffic(r) {
+		rs := util.GetRequestStore(r)
+		if !rs.IsKnownNonTraffic {
 			rtd := Tracker.getRequestTrackingData("", r)
 			go func(port string, headers http.Header, rtd *TrackingData) {
 				track(port, headers, r.RequestURI, rtd)

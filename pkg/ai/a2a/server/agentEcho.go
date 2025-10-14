@@ -17,7 +17,7 @@
 package a2aserver
 
 import (
-	"goto/pkg/util"
+	"goto/pkg/server/echo"
 
 	a2aproto "trpc.group/trpc-go/trpc-a2a-go/protocol"
 	"trpc.group/trpc-go/trpc-a2a-go/taskmanager"
@@ -28,20 +28,20 @@ type AgentBehaviorEcho struct {
 }
 
 func (ab *AgentBehaviorEcho) DoUnary(aCtx *AgentContext) (*taskmanager.MessageProcessingResult, error) {
-	_, msg := ab.getEchoMessage(aCtx.input)
+	msg := createDataMessage(ab.getEchoMessage(aCtx, aCtx.input))
 	return &taskmanager.MessageProcessingResult{
 		Result: &msg,
 	}, nil
 }
 
 func (ab *AgentBehaviorEcho) DoStream(aCtx *AgentContext) error {
-	output, _ := ab.getEchoMessage(aCtx.task.input)
-	aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, output, nil)
+	aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "", ab.getEchoMessage(aCtx, aCtx.input))
+	aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Echo response sent", nil)
 	return nil
 }
 
-func (ab *AgentBehaviorEcho) getEchoMessage(input *a2aproto.Message) (output string, message a2aproto.Message) {
-	output = util.ToJSONText(input)
-	message = createDataMessage(input)
+func (ab *AgentBehaviorEcho) getEchoMessage(aCtx *AgentContext, input *a2aproto.Message) (parts []a2aproto.Part) {
+	parts = append(parts, input.Parts...)
+	parts = append(parts, a2aproto.NewDataPart(echo.GetEchoResponseFromRS(aCtx.rs)))
 	return
 }

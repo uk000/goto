@@ -53,8 +53,11 @@ func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {
 			next.ServeHTTP(w, r)
-		} else if !util.IsKnownNonTraffic(r) {
-			SendDefaultResponse(w, r)
+		} else {
+			rs := util.GetRequestStore(r)
+			if !rs.IsKnownNonTraffic {
+				SendDefaultResponse(w, r)
+			}
 		}
 	})
 }

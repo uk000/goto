@@ -19,6 +19,7 @@ package a2aclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
@@ -74,6 +75,7 @@ type A2AClientSession struct {
 	progressChan chan string
 	resultChan   chan *types.Pair[string, any]
 	inputParts   []a2aproto.Part
+	err          error
 }
 
 var (
@@ -81,8 +83,8 @@ var (
 	lock       = sync.RWMutex{}
 )
 
-func NewA2AClient(port int) *A2AClient {
-	id := fmt.Sprintf("GotoA2A[%s]", global.Funcs.GetListenerLabelForPort(port))
+func NewA2AClient(port int, clientId string) *A2AClient {
+	id := fmt.Sprintf("%s[%s]", clientId, global.Funcs.GetListenerLabelForPort(port))
 	ht := transport.CreateHTTPClient(id, false, true, false, "", 0,
 		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
 	return &A2AClient{
@@ -94,7 +96,7 @@ func NewA2AClient(port int) *A2AClient {
 }
 
 func NewA2ASession(ctx context.Context, port int, card *goa2aserver.AgentCard, call *AgentCall) *A2AClientSession {
-	client := NewA2AClient(port)
+	client := NewA2AClient(port, card.Name)
 	return client.NewSession(ctx, card, call)
 }
 
@@ -106,7 +108,7 @@ func GetAgentCard(name string) *goa2aserver.AgentCard {
 
 func FetchAgentCard(ctx context.Context, url, authority string, headers http.Header) (card *goa2aserver.AgentCard, err error) {
 	port := util.GetContextPort(ctx)
-	client := NewA2AClient(port)
+	client := NewA2AClient(port, "")
 	session, err := client.loadAgentCard(ctx, url, authority, headers, nil)
 	if err != nil {
 		return nil, err
@@ -310,7 +312,7 @@ func (acs *A2AClientSession) Stream() error {
 		return err
 	}
 	acs.processStreamResponse(eventChan)
-	return nil
+	return acs.err
 }
 
 func (acs *A2AClientSession) setPushConfig(taskID, url string) error {
@@ -372,13 +374,16 @@ func (acs *A2AClientSession) processEventResult(event *a2aproto.StreamingMessage
 			acs.processParts(e.Status.Message.Parts)
 		}
 	case *a2aproto.TaskStatusUpdateEvent:
+		if e.Status.Message != nil {
+			acs.processParts(e.Status.Message.Parts)
+		}
 		text := []string{}
 		for _, p := range e.Status.Message.Parts {
 			if t, ok := p.(*a2aproto.TextPart); ok {
 				text = append(text, t.Text)
 			}
 		}
-		msg := fmt.Sprintf("Task Status Update: TaskID %s, State: %s, Timestamp: %s, Message: %+v\n", e.TaskID, e.Status.State, e.Status.Timestamp, text)
+		msg := fmt.Sprintf("Agent: %s, Timestamp: %s\n", acs.callerId, e.Status.Timestamp)
 		msg2 := ""
 		if e.Status.State == a2aproto.TaskStateInputRequired {
 			msg2 = ", [Additional input required]"
@@ -389,15 +394,13 @@ func (acs *A2AClientSession) processEventResult(event *a2aproto.StreamingMessage
 				msg2 = " [Task completed successfully]"
 			case a2aproto.TaskStateFailed:
 				msg2 = " [Task failed]"
+				acs.err = errors.New(msg + msg2)
 			case a2aproto.TaskStateCanceled:
 				msg2 = " [Task was canceled]"
 			}
 		}
 		if msg2 != "" {
 			acs.sendResponse(msg+msg2, nil)
-		}
-		if e.Status.Message != nil {
-			acs.processParts(e.Status.Message.Parts)
 		}
 	case *a2aproto.TaskArtifactUpdateEvent:
 		acs.processParts(e.Artifact.Parts)

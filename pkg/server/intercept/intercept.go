@@ -214,7 +214,8 @@ func NewInterceptResponseWriter(r *http.Request, w http.ResponseWriter, hold boo
 
 func WithIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *InterceptResponseWriter) {
 	var irw *InterceptResponseWriter
-	if !util.IsKnownNonTraffic(r) {
+	rs := util.GetRequestStore(r)
+	if !rs.IsKnownNonTraffic {
 		irw = NewInterceptResponseWriter(r, w, true)
 		r.Context().Value(util.RequestStoreKey).(*util.RequestStore).InterceptResponseWriter = irw
 		w = irw
@@ -224,7 +225,8 @@ func WithIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter,
 
 func WithHeadersIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *HeaderInterceptResponseWriter) {
 	var irw *HeaderInterceptResponseWriter
-	if !util.IsKnownNonTraffic(r) {
+	rs := util.GetRequestStore(r)
+	if !rs.IsKnownNonTraffic {
 		irw = NewHeadersInterceptResponseWriter(w)
 		r.Context().Value(util.RequestStoreKey).(*util.RequestStore).HeadersInterceptRW = irw
 		w = irw

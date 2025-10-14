@@ -411,7 +411,8 @@ func middlewareFunc(next http.Handler) http.Handler {
 		if next != nil {
 			next.ServeHTTP(w, r)
 		}
-		if !util.IsKnownNonTraffic(r) && !util.IsFilteredRequest(r) {
+		rs := util.GetRequestStore(r)
+		if !rs.IsKnownNonTraffic && !rs.IsFilteredRequest {
 			statusCode, details := util.ReportTrafficEvent(r)
 			if details != nil {
 				TrackTrafficEvent(statusCode, r, details...)

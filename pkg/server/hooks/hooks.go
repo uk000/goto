@@ -467,7 +467,8 @@ func matchRequest(uri string, headers map[string][]string, hooks map[string]*Hoo
 
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if util.IsKnownNonTraffic(r) {
+		rs := util.GetRequestStore(r)
+		if rs.IsKnownNonTraffic {
 			if next != nil {
 				next.ServeHTTP(w, r)
 			}

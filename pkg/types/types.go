@@ -26,12 +26,14 @@ type Pair[L any, R any] struct {
 	Left  L
 	Right R
 }
+type StringPair Pair[string, string]
 
 type Triple[F any, S any, T any] struct {
 	First  F
 	Second S
 	Third  T
 }
+type StringTriple Triple[string, string, string]
 
 type Funcs struct {
 	GetPeers                  func(string, *http.Request) map[string]string

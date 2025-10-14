@@ -350,7 +350,8 @@ func filterRequest(w http.ResponseWriter, r *http.Request) bool {
 
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if util.IsKnownNonTraffic(r) || !filterRequest(w, r) {
+		rs := util.GetRequestStore(r)
+		if rs.IsKnownNonTraffic || !filterRequest(w, r) {
 			if next != nil {
 				next.ServeHTTP(w, r)
 			}

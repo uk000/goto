@@ -31,6 +31,7 @@ import (
 	k8sApi "goto/pkg/k8s/api"
 	k8sYaml "goto/pkg/k8s/yaml"
 	"goto/pkg/log"
+	"goto/pkg/memory"
 	"goto/pkg/metrics"
 	"goto/pkg/pipe"
 	"goto/pkg/proxy"
@@ -68,12 +69,13 @@ func init() {
 		label.Middleware, conn.Middleware, info.Middleware, router.Middleware, hooks.Middleware,
 	}
 	middleware.Middlewares = []*middleware.Middleware{
-		tunnel.TunnelCountMiddleware, tunnel.Middleware, events.Middleware, metrics.Middleware,
+		memory.Middleware, tunnel.TunnelCountMiddleware, tunnel.Middleware,
 		listeners.Middleware, probes.Middleware, registry.Middleware, client.Middleware,
 		k8sYaml.Middleware, k8sApi.Middleware, pipe.Middleware, request.Middleware,
-		proxy.Middleware, response.Middleware, tcp.Middleware, udp.Middleware,
-		rpc.Middleware, grpcapi.Middleware, grpcclient.Middleware, protos.Middleware, jsonrpc.Middleware,
-		xds.Middleware, mcpclient.Middleware, mcpserverapi.Middleware, a2aserver.Middleware, a2aclient.Middleware,
+		proxy.Middleware, response.Middleware, events.Middleware, metrics.Middleware,
+		tcp.Middleware, udp.Middleware, rpc.Middleware, jsonrpc.Middleware,
+		grpcapi.Middleware, grpcclient.Middleware, protos.Middleware, xds.Middleware,
+		mcpclient.Middleware, mcpserverapi.Middleware, a2aserver.Middleware, a2aclient.Middleware,
 		scripts.Middleware, job.Middleware, tls.Middleware, log.Middleware, ui.Middleware,
 		body.Middleware, echo.Middleware, catchall.Middleware,
 	}
