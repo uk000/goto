@@ -37,9 +37,7 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
 	util.AddRoute(k8sRouter, "/config/{name}/{url}/{cadata}", apiConfigCluster, "POST")
 	util.AddRoute(k8sRouter, "/context/{name}", apiSetContext, "POST")
-	util.AddRouteQ(k8sRouter, "/resources/{kind}", apiGetResource, "jq", "GET")
-	util.AddRouteQ(k8sRouter, "/resources/{kind}", apiGetResource, "jp", "GET")
-	util.AddRoute(k8sRouter, "/resources/{kind}", apiGetResource, "GET")
+	util.AddRouteMultiQ(k8sRouter, "/resources/{kind}", apiGetResource, []string{"jq", "jp"}, "GET")
 	util.AddRoute(k8sRouter, "/resources/{kind}/{name}", apiGetResource, "GET")
 	util.AddRoute(k8sRouter, "/resources/{kind}/{namespace}/all", apiGetResource, "GET")
 	util.AddRoute(k8sRouter, "/resources/{kind}/{namespace}/{name}", apiGetResource, "GET")

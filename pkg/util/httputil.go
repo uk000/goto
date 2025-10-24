@@ -217,14 +217,6 @@ func GetContextPort(ctx context.Context) int {
 	return GetPortNumFromGRPCAuthority(ctx)
 }
 
-func GetCurrentPort(r *http.Request) int {
-	return GetContextPort(r.Context())
-}
-
-func GetListenerPort(r *http.Request) string {
-	return GetPortValueFromLocalAddressContext(r.Context())
-}
-
 func GetListenerPortNum(r *http.Request) int {
 	return GetContextPort(r.Context())
 }
@@ -262,7 +254,7 @@ func GetRequestOrListenerPortNum(r *http.Request) int {
 }
 
 func GetCurrentListenerLabel(r *http.Request) string {
-	return global.Funcs.GetListenerLabelForPort(GetCurrentPort(r))
+	return global.Funcs.GetListenerLabelForPort(GetRequestStore(r).RequestPortNum)
 }
 
 func ValidateListener(w http.ResponseWriter, r *http.Request) (bool, string) {

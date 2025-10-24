@@ -19,106 +19,12 @@ package util
 import (
 	"fmt"
 	"goto/pkg/global"
-	"io/ioutil"
-	"net"
-	"os"
 	"runtime"
 	"strings"
 )
 
-func GetPodName() string {
-	if global.Self.PodName == "" {
-		pod, present := os.LookupEnv("POD_NAME")
-		if !present {
-			pod, _ = os.Hostname()
-		}
-		global.Self.PodName = pod
-	}
-	return global.Self.PodName
-}
-
-func GetNodeName() string {
-	if global.Self.NodeName == "" {
-		global.Self.NodeName, _ = os.LookupEnv("NODE_NAME")
-	}
-	return global.Self.NodeName
-}
-
-func GetCluster() string {
-	if global.Self.Cluster == "" {
-		global.Self.Cluster, _ = os.LookupEnv("CLUSTER")
-	}
-	if global.Self.Cluster == "" {
-		return "local"
-	}
-	return global.Self.Cluster
-}
-
-func GetNamespace() string {
-	if global.Self.Namespace == "" {
-		ns, present := os.LookupEnv("NAMESPACE")
-		if !present {
-			if data, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
-				ns = string(data)
-				present = true
-			}
-		}
-		if !present {
-			ns = "local"
-		}
-		global.Self.Namespace = ns
-	}
-	return global.Self.Namespace
-}
-
-func GetPodIP() string {
-	if ip, present := os.LookupEnv("POD_IP"); present {
-		global.Self.PodIP = ip
-	} else {
-		conn, err := net.Dial("udp", "8.8.8.8:80")
-		if err == nil {
-			defer conn.Close()
-			global.Self.PodIP = conn.LocalAddr().(*net.UDPAddr).IP.String()
-		} else {
-			global.Self.PodIP = "localhost"
-		}
-	}
-	return global.Self.PodIP
-}
-
-func GetHostIP() string {
-	if global.Self.HostIP == "" {
-		if ip, present := os.LookupEnv("HOST_IP"); present {
-			global.Self.HostIP = ip
-		} else {
-			global.Self.HostIP = "0.0.0.0"
-		}
-	}
-	return global.Self.HostIP
-}
-
-func BuildHostLabel(port int) string {
-	hostLabel := ""
-	node := GetNodeName()
-	cluster := GetCluster()
-	host := GetHostIP()
-	if node != "" || cluster != "" || host != "" {
-		hostLabel = fmt.Sprintf("%s.%s[%s:%d](%s[%s]@%s)", GetPodName(), GetNamespace(), GetPodIP(), port, node, host, cluster)
-	} else {
-		hostLabel = fmt.Sprintf("%s.%s[%s:%d]", GetPodName(), GetNamespace(), GetPodIP(), port)
-	}
-	return hostLabel
-}
-
 func BuildListenerLabel(port int) string {
-	return fmt.Sprintf("[%s:%d].[%s@%s]", GetPodIP(), port, GetNamespace(), GetCluster())
-}
-
-func GetHostLabel() string {
-	if global.Self.HostLabel == "" {
-		global.Self.HostLabel = BuildHostLabel(global.Self.ServerPort)
-	}
-	return global.Self.HostLabel
+	return fmt.Sprintf("[%s:%d].[%s@%s]", global.Self.PodIP, port, global.Self.Namespace, global.Self.Cluster)
 }
 
 func PrintCallers(level int, callee string) {

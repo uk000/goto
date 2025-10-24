@@ -38,10 +38,10 @@ var (
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	headersRouter := util.PathRouter(r, "/headers")
-	util.AddRouteWithPort(headersRouter, "/add/{header}={value}", addResponseHeader, "PUT", "POST")
-	util.AddRouteWithPort(headersRouter, "/remove/{header}", removeResponseHeader, "PUT", "POST")
-	util.AddRouteWithPort(headersRouter, "/clear", clearResponseHeader, "PUT", "POST")
-	util.AddRouteWithPort(headersRouter, "", getResponseHeaders, "GET")
+	util.AddRoute(headersRouter, "/add/{header}={value}", addResponseHeader, "PUT", "POST")
+	util.AddRoute(headersRouter, "/remove/{header}", removeResponseHeader, "PUT", "POST")
+	util.AddRoute(headersRouter, "/clear", clearResponseHeader, "PUT", "POST")
+	util.AddRoute(headersRouter, "", getResponseHeaders, "GET")
 }
 
 func addResponseHeader(w http.ResponseWriter, r *http.Request) {

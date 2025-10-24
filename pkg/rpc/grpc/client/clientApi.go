@@ -35,7 +35,7 @@ var (
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	router := util.PathRouter(r, "/grpc")
 
-	util.AddRouteWithPort(router, "/call/{endpoint}/{service}/{method}", callServiceMethod, "POST")
+	util.AddRoute(router, "/call/{endpoint}/{service}/{method}", callServiceMethod, "POST")
 
 }
 

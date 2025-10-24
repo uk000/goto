@@ -18,16 +18,21 @@ package util
 
 import (
 	"context"
+	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/global"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 type ContextKey struct{ Key string }
 
 type RequestStore struct {
+	startTime               time.Time
+	endTime                 time.Time
 	IsKnownNonTraffic       bool
 	IsVersionRequest        bool
 	IsFilteredRequest       bool
@@ -183,4 +188,34 @@ func WithRequestStoreForContext(ctx context.Context) (context.Context, *RequestS
 	rs := &RequestStore{}
 	ctx = context.WithValue(ctx, RequestStoreKey, rs)
 	return ctx, rs
+}
+
+func (rs *RequestStore) Start() {
+	if rs.startTime.IsZero() {
+		rs.startTime = time.Now()
+	}
+}
+
+func (rs *RequestStore) ReportTime(w http.ResponseWriter) {
+	if !rs.endTime.IsZero() {
+		log.Println("Duplicate calls to ReportTime")
+		return
+	}
+	rs.endTime = time.Now()
+	startTime := rs.startTime.UTC().String()
+	endTime := rs.endTime.UTC().String()
+	took := rs.endTime.Sub(rs.startTime).String()
+	if rs.IsTunnelRequest {
+		w.Header().Add(fmt.Sprintf("%s-%d", constants.HeaderGotoInAt, rs.TunnelCount), startTime)
+		w.Header().Add(fmt.Sprintf("%s-%d", constants.HeaderGotoOutAt, rs.TunnelCount), endTime)
+		w.Header().Add(fmt.Sprintf("%s-%d", constants.HeaderGotoTook, rs.TunnelCount), took)
+	} else if rs.WillProxy {
+		w.Header().Add(fmt.Sprintf("Proxy-%s", constants.HeaderGotoInAt), startTime)
+		w.Header().Add(fmt.Sprintf("Proxy-%s", constants.HeaderGotoOutAt), endTime)
+		w.Header().Add(fmt.Sprintf("Proxy-%s", constants.HeaderGotoTook), took)
+	} else {
+		w.Header().Add(constants.HeaderGotoInAt, startTime)
+		w.Header().Add(constants.HeaderGotoOutAt, endTime)
+		w.Header().Add(constants.HeaderGotoTook, took)
+	}
 }

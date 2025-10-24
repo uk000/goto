@@ -39,8 +39,7 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(scriptRouter, "/remove/{name}", removeScript, "POST")
 	util.AddRoute(scriptRouter, "/{name}/remove", removeScript, "POST")
 	util.AddRoute(scriptRouter, "/run/{name}", runScript, "POST")
-	util.AddRouteQ(scriptRouter, "/{name}/run", runScript, "args", "POST")
-	util.AddRoute(scriptRouter, "/{name}/run", runScript, "POST")
+	util.AddRouteQO(scriptRouter, "/{name}/run", runScript, "args", "POST")
 	util.AddRoute(scriptRouter, "", getScripts, "GET")
 }
 

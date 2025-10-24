@@ -35,10 +35,10 @@ var (
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	a2aClientRouter := util.PathRouter(r, "/a2a/client")
-	util.AddRouteMultiQWithPort(a2aClientRouter, "/agent/card", fetchAgentCard, []string{"url", "authority"}, "GET")
-	util.AddRouteWithPort(a2aClientRouter, "/agent/{agent}/call", callAgent, "POST")
-	util.AddRouteWithPort(a2aClientRouter, "/call", callAgent, "POST")
-	util.AddRouteWithPort(a2aClientRouter, "/push", pushReceiver, "POST")
+	util.AddRouteMultiQ(a2aClientRouter, "/agent/card", fetchAgentCard, []string{"url", "authority"}, "GET")
+	util.AddRoute(a2aClientRouter, "/agent/{agent}/call", callAgent, "POST")
+	util.AddRoute(a2aClientRouter, "/call", callAgent, "POST")
+	util.AddRoute(a2aClientRouter, "/push", pushReceiver, "POST")
 }
 
 func fetchAgentCard(w http.ResponseWriter, r *http.Request) {

@@ -18,7 +18,6 @@ package server
 
 import (
 	"os"
-	"strconv"
 
 	a2aclient "goto/pkg/ai/a2a/client"
 	a2aserver "goto/pkg/ai/a2a/server"
@@ -61,7 +60,6 @@ import (
 	"goto/pkg/server/xds"
 	"goto/pkg/tls"
 	"goto/pkg/tunnel"
-	"goto/pkg/util"
 )
 
 func init() {
@@ -82,7 +80,6 @@ func init() {
 }
 
 func Run() {
-	global.Self.Address = util.GetPodIP() + ":" + strconv.Itoa(global.Self.ServerPort)
 	RunHttpServer()
 	global.Shutdown()
 	os.Exit(0)

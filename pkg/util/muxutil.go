@@ -49,21 +49,28 @@ var (
 )
 
 func CreateRouters(coreRouter *mux.Router) *mux.Router {
+	portRoute := coreRouter.PathPrefix("/port={port}")
+	portRouteRegex, _ := portRoute.GetPathRegexp()
+	portRouteRegexp := regexp.MustCompile("(?i)" + portRouteRegex)
+	PortRouter = portRoute.Subrouter()
 	RootRouter = coreRouter.PathPrefix("").Subrouter()
-	coreRouter.PathPrefix("/port={port}").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	RootRouter.SkipClean(true)
+	MatchRouter = RootRouter.NewRoute().Subrouter()
+	PortRouter.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
+		return portRouteRegexp.MatchString(r.RequestURI)
+	}).HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sport := GetStringParamValue(r, "port")
 		port, _ := strconv.Atoi(sport)
 		rs := GetRequestStore(r)
 		rs.RequestPort = sport
 		rs.RequestPortNum = port
-		uri := strings.TrimLeft(r.RequestURI, fmt.Sprintf("/port=%s", sport))
+		rs.RequestPortChecked = true
+		uri := portRouteRegexp.ReplaceAllLiteralString(r.RequestURI, "")
 		r.RequestURI = uri
+		r.URL.Path = uri
 		rs.RequestURI = uri
-		coreRouter.ServeHTTP(w, r)
+		RootRouter.ServeHTTP(w, r)
 	})
-	RootRouter.SkipClean(true)
-	PortRouter = coreRouter.PathPrefix("/port={port}").Subrouter()
-	MatchRouter = RootRouter.NewRoute().Subrouter()
 	return RootRouter
 }
 
@@ -120,7 +127,7 @@ func PathRouter(r *mux.Router, path string) *mux.Router {
 
 func PathPrefix(r *mux.Router, path string) *mux.Router {
 	var subRouter *mux.Router
-	var portSubRouter *mux.Router
+	// var portSubRouter *mux.Router
 	for _, p := range GetAltPaths(path, false) {
 		if subRouter == nil {
 			subRouter = r.PathPrefix(p).Subrouter()
@@ -130,16 +137,16 @@ func PathPrefix(r *mux.Router, path string) *mux.Router {
 		for _, coRouter := range coRoutersMap[r] {
 			coRoutersMap[subRouter] = append(coRoutersMap[subRouter], coRouter.PathPrefix(p).Subrouter())
 		}
-		routerPath := p
-		if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil {
-			routerPath = lpath + p
-		}
-		if portSubRouter == nil {
-			portSubRouter = PortRouter.PathPrefix(routerPath).Subrouter()
-			portTunnelRouters[routerPath] = portSubRouter
-		} else {
-			coRoutersMap[portSubRouter] = append(coRoutersMap[portSubRouter], PortRouter.PathPrefix(routerPath).Subrouter())
-		}
+		// routerPath := p
+		// if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil {
+		// 	routerPath = lpath + p
+		// }
+		// if portSubRouter == nil {
+		// 	portSubRouter = PortRouter.PathPrefix(routerPath).Subrouter()
+		// 	portTunnelRouters[routerPath] = portSubRouter
+		// } else {
+		// 	coRoutersMap[portSubRouter] = append(coRoutersMap[portSubRouter], PortRouter.PathPrefix(routerPath).Subrouter())
+		// }
 	}
 	return subRouter
 }
@@ -176,13 +183,24 @@ func RegisterPortRoute(r *mux.Router, hijackPort bool, path string, f func(http.
 
 func AddRouteWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), methods ...string) {
 	AddRoute(r, path, f, methods...)
-	RegisterPortRoute(r, false, path, f, methods...)
+	//RegisterPortRoute(r, false, path, f, methods...)
 }
 
 func AddRouteQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParam string, methods ...string) {
+	addRouteQ(r, path, f, queryParam, false, methods...)
+}
+
+func AddRouteQO(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParam string, methods ...string) {
+	addRouteQ(r, path, f, queryParam, true, methods...)
+}
+
+func addRouteQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParam string, queryOptional bool, methods ...string) {
 	queryKey := fmt.Sprintf("{%s}", queryParam)
 	for _, p := range GetAltPaths(path, true) {
 		r.HandleFunc(p, f).Queries(queryParam, queryKey).Methods(methods...)
+		if queryOptional {
+			r.HandleFunc(p, f).Methods(methods...)
+		}
 		for _, coRouter := range coRoutersMap[r] {
 			coRouter.HandleFunc(p, f).Queries(queryParam, queryKey).Methods(methods...)
 		}
@@ -191,9 +209,9 @@ func AddRouteQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Req
 
 func AddRouteQWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParam string, methods ...string) {
 	AddRouteQ(r, path, f, queryParam, methods...)
-	if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && portTunnelRouters[lpath] != nil {
-		AddRouteQ(portTunnelRouters[lpath], path, f, queryParam, methods...)
-	}
+	// if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && portTunnelRouters[lpath] != nil {
+	// 	AddRouteQ(portTunnelRouters[lpath], path, f, queryParam, methods...)
+	// }
 }
 
 func AddRouteMultiQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParams []string, methods ...string) {
@@ -229,9 +247,9 @@ func AddRouteMultiQ(r *mux.Router, path string, f func(http.ResponseWriter, *htt
 
 func AddRouteMultiQWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParams []string, methods ...string) {
 	AddRouteMultiQ(r, path, f, queryParams, methods...)
-	if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && portTunnelRouters[lpath] != nil {
-		AddRouteMultiQ(portTunnelRouters[lpath], path, f, queryParams, methods...)
-	}
+	// if lpath, err := r.NewRoute().BuildOnly().GetPathTemplate(); err == nil && portTunnelRouters[lpath] != nil {
+	// 	AddRouteMultiQ(portTunnelRouters[lpath], path, f, queryParams, methods...)
+	// }
 }
 
 func IsFiller(key string) bool {

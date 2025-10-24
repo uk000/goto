@@ -79,15 +79,15 @@ var (
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	rootRouter = root
 	triggerRouter := util.PathRouter(r, "/triggers")
-	util.AddRouteWithPort(triggerRouter, "/add", addTrigger, "POST")
-	util.AddRouteWithPort(triggerRouter, "/{trigger}/remove", removeTrigger, "PUT", "POST")
-	util.AddRouteWithPort(triggerRouter, "/{trigger}/enable", enableOrDisableTrigger, "PUT", "POST")
-	util.AddRouteWithPort(triggerRouter, "/{trigger}/disable", enableOrDisableTrigger, "PUT", "POST")
-	util.AddRouteWithPort(triggerRouter, "/{triggers}/invoke", invokeTriggers, "POST")
-	util.AddRouteWithPort(triggerRouter, "/clear", clearTriggers, "POST")
-	util.AddRouteWithPort(triggerRouter, "/counts", getTriggerCounts)
-	util.AddRouteWithPort(triggerRouter, "/pipes", getTriggerPipes)
-	util.AddRouteWithPort(triggerRouter, "", getTriggers)
+	util.AddRoute(triggerRouter, "/add", addTrigger, "POST")
+	util.AddRoute(triggerRouter, "/{trigger}/remove", removeTrigger, "PUT", "POST")
+	util.AddRoute(triggerRouter, "/{trigger}/enable", enableOrDisableTrigger, "PUT", "POST")
+	util.AddRoute(triggerRouter, "/{trigger}/disable", enableOrDisableTrigger, "PUT", "POST")
+	util.AddRoute(triggerRouter, "/{triggers}/invoke", invokeTriggers, "POST")
+	util.AddRoute(triggerRouter, "/clear", clearTriggers, "POST")
+	util.AddRoute(triggerRouter, "/counts", getTriggerCounts)
+	util.AddRoute(triggerRouter, "/pipes", getTriggerPipes)
+	util.AddRoute(triggerRouter, "", getTriggers)
 }
 
 func getPortTrigger(r *http.Request) *Trigger {

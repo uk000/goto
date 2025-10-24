@@ -49,10 +49,10 @@ var (
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	timeoutRouter := util.PathRouter(r, "/timeout")
-	util.AddRouteWithPort(timeoutRouter, "/track/headers/{headers}", trackHeaders, "PUT", "POST")
-	util.AddRouteWithPort(timeoutRouter, "/track/all", trackAll, "PUT", "POST")
-	util.AddRouteWithPort(timeoutRouter, "/track/clear", clearTimeoutTracking, "POST")
-	util.AddRouteWithPort(timeoutRouter, "/status", reportTimeoutTracking, "GET")
+	util.AddRoute(timeoutRouter, "/track/headers/{headers}", trackHeaders, "PUT", "POST")
+	util.AddRoute(timeoutRouter, "/track/all", trackAll, "PUT", "POST")
+	util.AddRoute(timeoutRouter, "/track/clear", clearTimeoutTracking, "POST")
+	util.AddRoute(timeoutRouter, "/status", reportTimeoutTracking, "GET")
 }
 
 func (tt *TimeoutTracking) init() {

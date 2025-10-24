@@ -62,14 +62,14 @@ var (
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	uriRouter := util.PathRouter(r, "/uri")
-	util.AddRouteMultiQWithPort(uriRouter, "/reroute", setStatus, []string{"from", "to"}, "POST", "PUT")
-	util.AddRouteQWithPort(uriRouter, "/set/status={status}", setStatus, "uri", "POST", "PUT")
-	util.AddRouteQWithPort(uriRouter, "/set/delay={delay}", setDelay, "uri", "POST", "PUT")
-	util.AddRouteWithPort(uriRouter, "/counts/enable", enableURICallCounts, "POST", "PUT")
-	util.AddRouteWithPort(uriRouter, "/counts/disable", disableURICallCounts, "POST", "PUT")
-	util.AddRouteWithPort(uriRouter, "/counts", getURICallCounts, "GET")
-	util.AddRouteWithPort(uriRouter, "/counts/clear", clearURICallCounts, "POST")
-	util.AddRouteWithPort(uriRouter, "", getURIConfigs, "GET")
+	util.AddRouteMultiQ(uriRouter, "/reroute", setStatus, []string{"from", "to"}, "POST", "PUT")
+	util.AddRouteQ(uriRouter, "/set/status={status}", setStatus, "uri", "POST", "PUT")
+	util.AddRouteQ(uriRouter, "/set/delay={delay}", setDelay, "uri", "POST", "PUT")
+	util.AddRoute(uriRouter, "/counts/enable", enableURICallCounts, "POST", "PUT")
+	util.AddRoute(uriRouter, "/counts/disable", disableURICallCounts, "POST", "PUT")
+	util.AddRoute(uriRouter, "/counts", getURICallCounts, "GET")
+	util.AddRoute(uriRouter, "/counts/clear", clearURICallCounts, "POST")
+	util.AddRoute(uriRouter, "", getURIConfigs, "GET")
 }
 
 func initPort(r *http.Request) string {

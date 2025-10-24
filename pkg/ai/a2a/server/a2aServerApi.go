@@ -40,34 +40,30 @@ var (
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	a2aRouter := util.PathRouter(r, "/a2a")
-	util.AddRouteWithPort(a2aRouter, "/agents", getAgents, "GET")
-	util.AddRouteWithPort(a2aRouter, "/agents/{agent}", getAgents, "GET")
-	util.AddRouteWithPort(a2aRouter, "/agents/{agent}/delegates", getAgentDelegates, "GET")
-	util.AddRouteWithPort(a2aRouter, "/agents/{agent}/delegates/tools", getAgentDelegates, "GET")
-	util.AddRouteWithPort(a2aRouter, "/agents/{agent}/delegates/tools/{delegate}", getAgentDelegates, "GET")
-	util.AddRouteWithPort(a2aRouter, "/agents/{agent}/delegates/agents", getAgentDelegates, "GET")
-	util.AddRouteWithPort(a2aRouter, "/agents/{agent}/delegates/agents/{delegate}", getAgentDelegates, "GET")
-	util.AddRouteWithPort(a2aRouter, "/servers", getServers, "GET")
-	util.AddRouteWithPort(a2aRouter, "/agents/add", addAgents, "POST")
-	util.AddRouteWithPort(a2aRouter, "/agent/{agent}/payload", setAgentPayload, "POST")
-	util.AddRouteWithPort(a2aRouter, "/servers/clear", clearServers, "POST")
-	util.AddRouteWithPort(a2aRouter, "/agents/clear", clearAgents, "POST")
+	util.AddRoute(a2aRouter, "/agents", getAgents, "GET")
+	util.AddRoute(a2aRouter, "/agents/{agent}", getAgents, "GET")
+	util.AddRoute(a2aRouter, "/agents/{agent}/delegates", getAgentDelegates, "GET")
+	util.AddRoute(a2aRouter, "/agents/{agent}/delegates/tools", getAgentDelegates, "GET")
+	util.AddRoute(a2aRouter, "/agents/{agent}/delegates/tools/{delegate}", getAgentDelegates, "GET")
+	util.AddRoute(a2aRouter, "/agents/{agent}/delegates/agents", getAgentDelegates, "GET")
+	util.AddRoute(a2aRouter, "/agents/{agent}/delegates/agents/{delegate}", getAgentDelegates, "GET")
+	util.AddRoute(a2aRouter, "/servers", getServers, "GET")
+	util.AddRoute(a2aRouter, "/agents/add", addAgents, "POST")
+	util.AddRoute(a2aRouter, "/agent/{agent}/payload", setAgentPayload, "POST")
+	util.AddRoute(a2aRouter, "/servers/clear", clearServers, "POST")
+	util.AddRoute(a2aRouter, "/agents/clear", clearAgents, "POST")
 
-	util.AddRouteQWithPort(a2aRouter, "/status/set/{status}", setStatus, "uri", "POST")
-	util.AddRouteWithPort(a2aRouter, "/status/set/{status}", setStatus, "POST")
-	util.AddRouteQWithPort(a2aRouter, "/status/set/{status}/header/{header}={value}", setStatus, "uri", "POST")
-	util.AddRouteQWithPort(a2aRouter, "/status/set/{status}/header/{header}", setStatus, "uri", "POST")
-	util.AddRouteQWithPort(a2aRouter, "/status/set/{status}/header/not/{header}", setStatus, "uri", "POST")
-	util.AddRouteWithPort(a2aRouter, "/status/set/{status}/header/{header}={value}", setStatus, "POST")
-	util.AddRouteWithPort(a2aRouter, "/status/set/{status}/header/{header}", setStatus, "POST")
-	util.AddRouteWithPort(a2aRouter, "/status/set/{status}/header/not/{header}", setStatus, "POST")
+	util.AddRouteQO(a2aRouter, "/status/set/{status}", setStatus, "uri", "POST")
+	util.AddRouteQO(a2aRouter, "/status/set/{status}/header/{header}={value}", setStatus, "uri", "POST")
+	util.AddRouteQO(a2aRouter, "/status/set/{status}/header/{header}", setStatus, "uri", "POST")
+	util.AddRouteQO(a2aRouter, "/status/set/{status}/header/not/{header}", setStatus, "uri", "POST")
 
-	util.AddRouteWithPort(a2aRouter, "/status/configure", configureStatus, "POST")
-	util.AddRouteWithPort(a2aRouter, "/status/clear", clearStatus, "POST")
-	util.AddRouteWithPort(a2aRouter, "/statuses", getStatuses, "GET")
+	util.AddRoute(a2aRouter, "/status/configure", configureStatus, "POST")
+	util.AddRoute(a2aRouter, "/status/clear", clearStatus, "POST")
+	util.AddRoute(a2aRouter, "/statuses", getStatuses, "GET")
 
 	agentRouter := util.PathRouter(r, "/agent")
-	util.AddRouteWithPort(agentRouter, "/{agent}", serveAgent, "GET", "POST", "DELETE")
+	util.AddRoute(agentRouter, "/{agent}", serveAgent, "GET", "POST", "DELETE")
 }
 
 func getAgents(w http.ResponseWriter, r *http.Request) {
@@ -236,7 +232,7 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 	uri := util.GetStringParamValue(r, "uri")
 	header := util.GetStringParamValue(r, "header")
 	value := util.GetStringParamValue(r, "value")
-	noHeader := strings.Contains(r.RequestURI, "not")
+	notPresent := strings.Contains(r.RequestURI, "not")
 	statusCodes, times, ok := util.GetStatusParam(r)
 	if !ok {
 		util.AddLogMessage("Invalid status", r)
@@ -244,10 +240,9 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Invalid Status")
 		return
 	}
-	status := statusManager.SetStatusFor(port, uri, header, value, statusCodes, times, noHeader)
+	status := statusManager.SetStatusFor(port, uri, header, value, statusCodes, times, !notPresent)
 	msg := status.Log("A2A", port)
 	util.AddLogMessage(msg, r)
-	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, msg)
 }
 
@@ -260,7 +255,7 @@ func clearStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func getStatuses(w http.ResponseWriter, r *http.Request) {
-	util.WriteJsonPayload(w, statusManager.Statuses)
+	util.WriteJsonPayload(w, statusManager.PortStatus)
 	util.AddLogMessage("Delivered statuses", r)
 }
 
@@ -286,7 +281,7 @@ func serveAgent(w http.ResponseWriter, r *http.Request) {
 		msg = "Agent name needed"
 		fmt.Fprintln(w, msg)
 	} else {
-		if status, rem := statusManager.GetStatusFor(port, r.RequestURI, r.Header); status >= 400 {
+		if status, rem := statusManager.GetStatusFor(port, r.RequestURI, r.Header); status > 0 {
 			sendStatus(agent, status, rem, w, r)
 		} else {
 			GetOrAddServer(port).Serve(agent, w, r)

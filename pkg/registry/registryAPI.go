@@ -89,11 +89,9 @@ func addPeerTargetsRoutes(peersRouter *mux.Router) {
 func addPeerJobsRoutes(peersRouter *mux.Router) {
 	util.AddRoute(peersRouter, "/{peer}?/jobs/add", addPeerJob, "POST", "PUT")
 	util.AddRoute(peersRouter, "/{peer}/jobs/add/script/{name}", addPeerJobScriptOrFile, "POST", "PUT")
-	util.AddRouteQ(peersRouter, "/{peer}/jobs/store/file/{name}", addPeerJobScriptOrFile, "path", "POST", "PUT")
-	util.AddRoute(peersRouter, "/{peer}/jobs/store/file/{name}", addPeerJobScriptOrFile, "POST", "PUT")
+	util.AddRouteQO(peersRouter, "/{peer}/jobs/store/file/{name}", addPeerJobScriptOrFile, "path", "POST", "PUT")
 	util.AddRoute(peersRouter, "/jobs/add/script/{name}", addPeerJobScriptOrFile, "POST", "PUT")
-	util.AddRouteQ(peersRouter, "/jobs/store/file/{name}", addPeerJobScriptOrFile, "path", "POST", "PUT")
-	util.AddRoute(peersRouter, "/jobs/store/file/{name}", addPeerJobScriptOrFile, "POST", "PUT")
+	util.AddRouteQO(peersRouter, "/jobs/store/file/{name}", addPeerJobScriptOrFile, "path", "POST", "PUT")
 	util.AddRoute(peersRouter, "/{peer}?/jobs/{jobs}/remove", removePeerJobs, "POST")
 	util.AddRoute(peersRouter, "/{peer}?/jobs/{jobs}/run", runPeerJobs, "POST")
 	util.AddRoute(peersRouter, "/{peer}?/jobs/run/all", runPeerJobs, "POST")

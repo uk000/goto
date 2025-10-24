@@ -31,9 +31,9 @@ var (
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	routingRouter := util.PathRouter(r, "/routing")
-	util.AddRouteWithPort(routingRouter, "/add", addRoute, "POST")
-	util.AddRouteWithPort(routingRouter, "/clear", clearRoutes, "POST")
-	util.AddRouteWithPort(routingRouter, "", getRoutes, "GET")
+	util.AddRoute(routingRouter, "/add", addRoute, "POST")
+	util.AddRoute(routingRouter, "/clear", clearRoutes, "POST")
+	util.AddRoute(routingRouter, "", getRoutes, "GET")
 }
 
 func addRoute(w http.ResponseWriter, r *http.Request) {

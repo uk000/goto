@@ -53,10 +53,10 @@ var (
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	probeRouter := util.PathRouter(r, "/probes")
-	util.AddRouteQWithPort(probeRouter, "/{type}/set", setProbe, "uri", "PUT", "POST")
-	util.AddRouteWithPort(probeRouter, "/{type}/set/status={status}", setProbeStatus, "PUT", "POST")
-	util.AddRouteWithPort(probeRouter, "/counts/clear", clearProbeCounts, "POST")
-	util.AddRouteWithPort(probeRouter, "", getProbes, "GET")
+	util.AddRouteQ(probeRouter, "/{type}/set", setProbe, "uri", "PUT", "POST")
+	util.AddRoute(probeRouter, "/{type}/set/status={status}", setProbeStatus, "PUT", "POST")
+	util.AddRoute(probeRouter, "/counts/clear", clearProbeCounts, "POST")
+	util.AddRoute(probeRouter, "", getProbes, "GET")
 	global.Funcs.IsLivenessProbe = IsLivenessProbe
 	global.Funcs.IsReadinessProbe = IsReadinessProbe
 }

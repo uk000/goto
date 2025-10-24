@@ -39,19 +39,20 @@ var (
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	mcpapiRouter := util.PathRouter(r, "/mcpapi/client")
 
-	util.AddRouteWithPort(mcpapiRouter, "/details", getDetails, "GET")
+	util.AddRoute(mcpapiRouter, "/details", getDetails, "GET")
 
-	util.AddRouteMultiQWithPort(mcpapiRouter, "/list/all", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
-	util.AddRouteMultiQWithPort(mcpapiRouter, "/list/tools", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
-	util.AddRouteMultiQWithPort(mcpapiRouter, "/list/tools/names", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
+	util.AddRouteMultiQ(mcpapiRouter, "/list/all", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
+	util.AddRouteMultiQ(mcpapiRouter, "/list/tools", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
+	util.AddRouteMultiQ(mcpapiRouter, "/list/tools/names", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
 
-	util.AddRouteWithPort(mcpapiRouter, "/call", callTool, "POST")
+	util.AddRoute(mcpapiRouter, "/call", callTool, "POST")
 
-	util.AddRouteWithPort(mcpapiRouter, "/payload/{kind:sample|elicit}", addClientPayload, "POST")
-	util.AddRouteWithPort(mcpapiRouter, "/payload/roots", addRoots, "POST")
+	util.AddRoute(mcpapiRouter, "/payload/{kind:sample|elicit}", addClientPayload, "POST")
+	util.AddRoute(mcpapiRouter, "/payload/roots", addRoots, "POST")
 }
 
 func listTools(w http.ResponseWriter, r *http.Request) {
+	rs := util.GetRequestStore(r)
 	url := util.GetStringParamValue(r, "url")
 	sse := util.GetBoolParamValue(r, "sse")
 	authority := util.GetStringParamValue(r, "authority")
@@ -59,7 +60,7 @@ func listTools(w http.ResponseWriter, r *http.Request) {
 	namesOnly := strings.Contains(r.RequestURI, "names")
 	msg := ""
 	clientId := fmt.Sprintf("[%s][Client: tool/list]", global.Self.HostLabel)
-	client := NewClient(util.GetCurrentPort(r), sse, clientId, r.Header, nil)
+	client := NewClient(rs.RequestPortNum, sse, clientId, r.Header, nil)
 	session, err := client.Connect(url, "tool/list", r.Header)
 	session.SetAuthority(authority)
 	if err != nil {
@@ -123,7 +124,7 @@ func listTools(w http.ResponseWriter, r *http.Request) {
 }
 
 func callTool(w http.ResponseWriter, r *http.Request) {
-	port := util.GetCurrentPort(r)
+	rs := util.GetRequestStore(r)
 	b, _ := io.ReadAll(r.Body)
 	msg := ""
 	tc, err := ParseToolCall(b)
@@ -135,7 +136,7 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 			err = errors.New("No tool call payload given")
 		}
 	} else {
-		output, err = doToolCall(port, tc)
+		output, err = doToolCall(rs.RequestPortNum, tc)
 		if err != nil {
 			msg = err.Error()
 		} else {

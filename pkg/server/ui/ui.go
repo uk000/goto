@@ -36,7 +36,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	util.AddRouteWithPort(root, "/ui", showUI, "GET")
+	util.AddRoute(root, "/ui", showUI, "GET")
 	util.AddRoute(root, "/ui/ws", handleWebsocket, "GET")
 }
 

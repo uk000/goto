@@ -32,7 +32,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	udpRouter := util.PathPrefix(r, "/?server?/udp")
+	udpRouter := util.PathPrefix(r, "/server/udp")
 	util.AddRoute(udpRouter, "/{port}/stop/{upstream}", stopUDPProxy, "POST")
 	util.AddRoute(udpRouter, "/{port}/proxy/{upstream}", proxyUDP, "POST")
 	util.AddRoute(udpRouter, "/{port}/proxy/{upstream}/delay/{delay}", proxyUDP, "POST")

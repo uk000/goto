@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder-base
+FROM golang:1.25-alpine AS builder-base
 RUN echo 'http://nl.alpinelinux.org/alpine/v3.22/main' > /etc/apk/repositories
 RUN echo 'http://nl.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories
 RUN apk update \
@@ -37,10 +37,10 @@ RUN --mount=type=cache,target="/root/.cache/go-build" go build -mod=mod -o goto 
 WORKDIR /tmp
 
 
-FROM alpine:3.22.1 AS release-base
+FROM alpine:3.22 AS release-base
 
 ARG kube
-ARG netutils
+ARG net
 ARG perf
 ARG ssl
 ARG grpc
@@ -53,7 +53,7 @@ RUN apk update \
 
 # RUN apk add --no-cache --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing grpcurl 
 
-RUN if [[ -n "$netutils" ]] ; then apk add --no-cache nmap-ncat netcat-openbsd socat iputils iproute2 tcpdump bind-tools iptables ipvsadm tcpflow; echo "netutils=$netutils"; fi
+RUN if [[ -n "$net" ]] ; then apk add --no-cache nmap-ncat netcat-openbsd socat iputils iproute2 tcpdump bind-tools iptables ipvsadm tcpflow; echo "netutils=$netutils"; fi
 RUN if [[ -n "$kube" ]] ; then apk add --no-cache kubectl etcd-ctl; echo "kubectl=$kube"; fi
 RUN if [[ -n "$perf" ]] ; then apk add --no-cache hey iftop; echo "perf=$perf"; fi
 RUN if [[ -n "$ssl" ]] ; then apk add --no-cache openssl; echo "perf=$ssl"; fi

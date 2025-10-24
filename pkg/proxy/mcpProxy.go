@@ -108,14 +108,14 @@ func (p *MCPProxy) SetupMCPProxy(server, endpoint, sni, fromTool, toTool string,
 }
 
 func GetMCPProxyForPort(port int) *MCPProxy {
-	proxyLock.RLock()
+	mcpProxyLock.RLock()
 	proxy := mcpProxyByPort[port]
-	proxyLock.RUnlock()
+	mcpProxyLock.RUnlock()
 	if proxy == nil {
 		proxy = newMCPProxy(port)
-		proxyLock.Lock()
+		mcpProxyLock.Lock()
 		mcpProxyByPort[port] = proxy
-		proxyLock.Unlock()
+		mcpProxyLock.Unlock()
 	}
 	return proxy
 }

@@ -124,10 +124,10 @@ func Init() {
 	global.Funcs.GetHostLabelForPort = GetHostLabelForPort
 
 	if DefaultLabel == "" {
-		DefaultLabel = util.GetHostLabel()
+		DefaultLabel = global.Self.HostLabel
 	}
 	DefaultListener.Label = DefaultLabel
-	DefaultListener.HostLabel = util.GetHostLabel()
+	DefaultListener.HostLabel = global.Self.HostLabel
 	DefaultListener.IsHTTP = true
 	DefaultListener.TLS = false
 	global.AddGRPCStartWatcher(OnGRPCStart)
@@ -190,7 +190,7 @@ func newListener(port int, protocol string, cn string, open bool) *Listener {
 }
 
 func InitDefaultGRPCListener() {
-	DefaultGRPCListener.HostLabel = util.GetHostLabel()
+	DefaultGRPCListener.HostLabel = global.Self.HostLabel
 	DefaultGRPCListener.Port = global.Self.GRPCPort
 	addOrUpdateListener(DefaultGRPCListener)
 }
@@ -317,7 +317,7 @@ func AddInitialListeners(portList []string) {
 				DefaultListener.Protocol = "http"
 				DefaultListener.assignProtocol()
 				DefaultListener.Label = util.BuildListenerLabel(l.Port)
-				DefaultListener.HostLabel = util.GetHostLabel()
+				DefaultListener.HostLabel = global.Self.HostLabel
 			} else {
 				protocol := ""
 				if len(portInfo) > 1 && portInfo[1] != "" {
@@ -350,7 +350,7 @@ func createPortListener(port int, protocol, cn string, existing map[int]bool) *L
 		l.Protocol = protocol
 		l.assignProtocol()
 		l.Label = util.BuildListenerLabel(l.Port)
-		l.HostLabel = util.GetHostLabel()
+		l.HostLabel = global.Self.HostLabel
 		return l
 	} else {
 		log.Fatalf("Error: Duplicate port [%d]\n", port)
@@ -659,7 +659,7 @@ func addOrUpdateListener(l *Listener) (int, string) {
 			l.Label = util.BuildListenerLabel(l.Port)
 		}
 	}
-	l.HostLabel = util.BuildHostLabel(l.Port)
+	l.HostLabel = global.BuildHostLabel(l.Port)
 	l.Protocol = strings.ToLower(l.Protocol)
 	if l.Port <= 0 || l.Port > 65535 {
 		msg = fmt.Sprintf("[Invalid port number: %d]", l.Port)
@@ -822,7 +822,7 @@ func GetListenerLabelForPort(port int) string {
 		if DefaultListener.Label != "" {
 			return DefaultListener.Label
 		} else {
-			return util.GetHostLabel()
+			return global.Self.HostLabel
 		}
 	}
 	return util.BuildListenerLabel(port)
@@ -835,9 +835,9 @@ func GetHostLabelForPort(port int) string {
 	if l != nil {
 		return l.HostLabel
 	} else if port == global.Self.ServerPort {
-		return util.GetHostLabel()
+		return global.Self.HostLabel
 	}
-	return util.BuildHostLabel(port)
+	return global.BuildHostLabel(port)
 }
 
 func SetListenerLabel(r *http.Request) string {

@@ -31,11 +31,11 @@ var (
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	jsonrpc := util.PathRouter(r, "/jsonrpc/services")
-	util.AddRouteQWithPort(jsonrpc, "/add/{service}", addService, "fromGRPC", "POST")
-	util.AddRouteWithPort(jsonrpc, "/add/{service}", addService, "POST")
-	util.AddRouteWithPort(jsonrpc, "/remove/{service}", removeService, "POST")
-	util.AddRouteWithPort(jsonrpc, "/{service}/remove", removeService, "POST")
-	util.AddRouteWithPort(jsonrpc, "/clear", removeAllServices, "POST")
+	util.AddRouteQ(jsonrpc, "/add/{service}", addService, "fromGRPC", "POST")
+	util.AddRoute(jsonrpc, "/add/{service}", addService, "POST")
+	util.AddRoute(jsonrpc, "/remove/{service}", removeService, "POST")
+	util.AddRoute(jsonrpc, "/{service}/remove", removeService, "POST")
+	util.AddRoute(jsonrpc, "/clear", removeAllServices, "POST")
 }
 
 func addService(w http.ResponseWriter, r *http.Request) {

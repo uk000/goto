@@ -1,49 +1,54 @@
 # goto
 
 > &#x1F4DD;
-<small> The Readme reflects master HEAD code and applies to release 0.9.x. For documentation of `0.8.x` and prior releases, switch to `v0.8.x` branch or any of the release tags.</small>
+<small> The Readme reflects master HEAD code and applies to release 0.9.x. Since 0.9.x releases have significant differences than 0.8.x and earlier releases, please refer to the appropriate tag for older documentation.</small>
 
-> &#x1F4DD; <small>Jump to [TOC](#toc) if you'd rather skip the overview and examples given below.</small>
+> &#x1F4DD; <small>Jump to [TOC](#toc) if you'd rather skip the overview and just to specific features and APIs.</small>
 
 ## What is `goto`?
 
 #### <i>`"I'm an agent of chaos" - The Joker`</i>
 
-A multi-faceted chaos testing tool to help with various features to help with automated testing, debugging, bug hunt, runtime analysis and investigations. Mostly when we've a task at hand to test a system, the system to be tested is either a client, a server, or some kind of a gateway/proxy that sits between a client and a server.
+A multi-faceted "No-Code" chaos testing tool to help with automated testing, debugging, bug hunt, runtime analysis and investigations. Mostly when we've a task at hand to test a system, the system to be tested is either a client, a server, or some kind of a gateway/proxy that sits between a client and a server.
 
 To test either of these 3 layers, you need at least one counterparty application:
 - To test a client, we need a server to which the client can connect, send requests and get some response back. The server needs to be able to track the lifecycle of the client connections and various requests it received from the client so that the client functionality can be verified.
 - To test a server, we need a client that can send some requests to the server and track the responses sent by the server. Again the client should be able to track the lifecycle of connections and requests/responses to be able to verify the server functionality.
-- To test an intermediary gateway, we need both a test client as well as a test server, where the two could route some requests and responses through the intermediary and validate the correctness of the traffic flow.
+- To test an intermediary proxy/gateway, we need both a test client as well as a test server, where the two could route some requests and responses through the intermediary and validate the correctness of the traffic flow.
 
-`Goto` can be used in all the above roles, to fill the missing piece of the puzzle.
+`Goto` can play all the above roles to fill the missing piece of the puzzle, all based on configs so that you don't have to write any code.
 
 It can act as:
-- A [client](#goto-client-targets-and-traffic) that can generate HTTP/S, TCP, and gRPC traffic to other services (including other `goto` instances), track summary results of the traffic, and report results via [APIs](client-apis) as well as publish results to a [Goto registry](#registry). 
-- A [server](#goto-server-features) that can respond to HTTP/S, gRPC and TCP requests, and can be configured to respond to any custom API. The server features allow for various kinds of chaos testing and debugging/investigations, with the ability to track and report summary data about the received traffic. See the [TOC](#goto-server) for a complete list of server features. 
-- A [tunneling proxy](#tunnel) that can act as an HTTP/S or TCP passthrough tunnel, allowing any arbitrary traffic from a source to a destination to be re-routed via a `goto` instance and giving you the opportunity to inspect the traffic.
-- A [job executor](#jobs-features) that can run shell commands/scripts as well as make HTTP calls, collect and report results. It allows chaining of jobs together so that output of one job triggers another job with input. Additionally, jobs can be auto-executed via cron, and can act as a source of data for pipelines (more on this under `pipelines`)
-- A [registry](#registry) to orchestrate operations across other `goto` instances, collect and summarize results from those `goto` instances, and make the federated summary results available via APIs. A `goto` registry can also be paired with another `goto` registry instance and export/load data from one to the other to keep another backup of the collected results.
-- A [K8s proxy](#k8s-features) that can connect to and read resource information from a K8s cluster and make it available via APIs. It also supports watching for resource changes, and act as a source of data for pipelines (see below)
-- A complex multi-step [pipeline](#pipeline-features) orchestration engine that can:
+- An [A2A engine](pkg/ai/README.md#a2a-agent-features-server) that can dynamically create "No Code" Agents and Clients. The agents can call other agents (over A2A) or MCP servers, or respond with a custom unary or streaming payload.
+- An [MCP engine](pkg/ai/README.md#mcp-admin-apis) that can dynamically create MCP servers and clients. The MCP servers can expose any number of tools, and a tool can expose one of the supported behaviors. Supported behaviors include serving response based on data fetched from a remote HTTP call, a remote MCP call, a remote A2A agent call, or respond with a custom unary or streaming payload.
+- A [client](pkg/client/README.md) that can generate HTTP/S, TCP, and gRPC traffic to other services (including other `goto` instances), track summary results of the traffic, and report results via [APIs](pkg/client/README.md#client-apis) as well as publish results to a [Goto registry](pkg/registry/Overview.md). 
+- A [server](pkg/server/README.md) that can act as an
+  -- HTTP server with arbitrary REST APIs with custom responses.
+  -- gRPC server that supports any arbitrary RPC service/methods based on a given set of proto files (or specs extracted from remote reflection)
+  -- TCP server that offers a set of TCP behaviors to assist with TCP testing/debugging.
+  -- UDP Server that can proxy UDP requests/responses to upstream endpoints.
+  --  The server can track and report summary data about the received traffic.
+  See the [TOC](#toc) for a complete list of server features. 
+- A [proxy](pkg/proxy/README.md) that can act as an HTTP/S, TCP, UDP, gRPC, or MCP passthrough proxy, allowing you to route traffic through a `goto` instance to an upstream server, and inspect the requests/responses.
+- A [tunnel](pkg/tunnel/README.md) that allows tunneling of HTTP/S and TCP traffic across multiple hops. This allows testing traffic behavior as it goes through overlay boundaries and through various intermediary proxies/gateways.
+- A [job executor](pkg/job/README.md) that can run shell commands/scripts as well as make HTTP calls, collect and report results. It allows chaining of jobs together so that output of one job triggers another job with input. Additionally, jobs can be auto-executed via cron, and can act as a source of data for pipelines (more on this under `pipelines`)
+- A [registry](pkg/registry/Overview.md) to orchestrate operations across other `goto` instances, collect and summarize results from those `goto` instances, and make the federated summary results available via APIs. A `goto` registry can also be paired with another `goto` registry instance and export/load data from one to the other to keep another backup of the collected results.
+- A [K8s proxy](pkg/k8s/README.md) that can connect to and read resource information from a K8s cluster and make it available via APIs. It also supports watching for resource changes, and act as a source of data for pipelines (see below)
+- A complex multi-step [pipeline](pkg/pipe/README.md) orchestration engine that can:
   - Source data from Shell Commands/Scripts, Client-side HTTP calls, Server-side HTTP responses, K8s resources, K8s pod commands, and Tunneled traffic.
   - Feed the sourced data as input to transformation steps and/or to other source steps.
   - Run JSONPath, JQ, Go Template or Regex transformations on the sourced data to extract information that can be fed to other sources or sent as output.
   - Define stages to orchestrate invocation of sources and transformations in a specific sequence.
   - Define watches on sources so that any changes on the source (e.g. K8s resources, cron jobs, or HTTP traffic) triggers the pipeline that the source is attached to, allowing some complex steps of data extraction, transformation and analysis to occur each time some external event occurs.
-  ### AI Features
-    #### A2A
-    `Goto` can act as an A2A Agent that connects and communicates with other A2A agents and MCP servers. See [A2A Feature](pkg/ai/README.md#a2a-agent-features-server) docs for details.
-    #### MCP
-    `Goto` can act as a generic MCP server that lets you configure one or more custom MCP tools that can either respond with a custom payload, or can implement one of the few supported behaviors (e.g. an MCP tool that makes a remote HTTP call to a REST server to fetch content and serves the content over MCP, or an MCP tool that makes a remote MCP call to another MCP server to invoke a tool, and includes the remote MCP response back into its own MCP response). See [MCP Feature](pkg/ai/README.md#mcp-admin-apis) docs for details.
+
 
 <br/>
 
 ## How to use it?
 
 #### <u>Grab or Build</u>
-It's available as a docker image: `docker.io/uk0000/goto:latest`
-> &#x1F4DD; <small><i>The docker image is built with several useful utilities included: `curl`, `wget`, `nmap`, `iputils`, `openssl`, `jq`, etc.</i></small>
+It's available as a docker image: `docker.io/uk0000/goto:<tag>`
+> &#x1F4DD; <small><i>The docker image is built with several useful utilities included: `curl`, `jq`, `bash`, `iputils`, `openssl`, `jq`, etc.</i></small>
 
 <br/>
 Or, build it locally on your machine

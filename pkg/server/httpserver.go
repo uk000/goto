@@ -82,6 +82,7 @@ func RunHttpServer() {
 
 func configureHTTPouter() *mux.Router {
 	coreRouter := mux.NewRouter()
+	coreRouter.SkipClean(true)
 	RootRouter = util.CreateRouters(coreRouter)
 	RootRouter.Use(ContextMiddleware)
 	middleware.LinkBaseMiddlewareChain(RootRouter)
@@ -247,6 +248,7 @@ func AIHandler() http.Handler {
 		return true
 	}).HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx, r, rs := util.WithRequestStore(r)
+		rs.Start()
 		port := util.GetRequestOrListenerPortNum(r)
 		r = r.WithContext(withPort(ctx, port))
 		reReader := util.CreateOrGetReReader(r.Body)
@@ -263,14 +265,16 @@ func AIHandler() http.Handler {
 			util.HTTPHandler.ServeHTTP(w, r)
 		}
 		go PrintLogMessages(0, 0, nil, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
+		rs.ReportTime(w)
 	})
 	return mcpRouter
 }
 
 func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		l := listeners.GetListenerForPort(util.GetCurrentPort(r))
 		ctx, r, rs := util.WithRequestStore(r)
+		rs.Start()
+		l := listeners.GetListenerForPort(rs.RequestPortNum)
 		r = r.WithContext(withPort(ctx, util.GetRequestOrListenerPortNum(r)))
 		rs.ResponseWriter = w
 		if router.WillRoute(l.Port, r) {
@@ -296,17 +300,20 @@ func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
 		} else {
 			httpHandler.ServeHTTP(w, r)
 		}
+		rs.ReportTime(w)
 	})
 }
 
 func GRPCHandler(httpHandler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, r, rs := util.WithRequestStore(r)
+		rs.Start()
 		if rs.IsGRPC {
 			grpcserver.TheGRPCServer.Server.ServeHTTP(w, r)
 		} else {
 			httpHandler.ServeHTTP(w, r)
 		}
+		rs.ReportTime(w)
 	})
 }
 
@@ -316,12 +323,14 @@ func ContextMiddleware(next http.Handler) http.Handler {
 			util.CopyHeaders(HeaderStoppingReadinessRequest, r, w, nil, true, true, false)
 			w.WriteHeader(http.StatusNotFound)
 		} else if next != nil {
-			if err := checkRequestPort(r); err != nil {
-				fmt.Fprintln(w, err.Error())
-				return
+			rs := util.GetRequestStore(r)
+			if !rs.RequestPortChecked {
+				if err := checkRequestPort(r); err != nil {
+					fmt.Fprintln(w, err.Error())
+					return
+				}
 			}
 			l := listeners.GetCurrentListener(r)
-			rs := util.GetRequestStore(r)
 			rs.IsJSONRPC = rs.IsJSONRPC || l.IsJSONRPC
 			rs.IsGRPC = rs.IsGRPC || l.IsGRPC
 			reReader := util.CreateOrGetReReader(r.Body)
@@ -331,7 +340,7 @@ func ContextMiddleware(next http.Handler) http.Handler {
 			statusCodeText := strconv.Itoa(rs.StatusCode)
 			if !rs.IsAdminRequest {
 				metrics.UpdateURIRequestCount(r.RequestURI, statusCodeText)
-				metrics.UpdatePortRequestCount(util.GetListenerPort(r), r.RequestURI)
+				metrics.UpdatePortRequestCount(rs.RequestPort, r.RequestURI)
 			}
 			go PrintLogMessages(rs.StatusCode, rs.BodyLength, nil, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
 			reReader.ReallyClose()
@@ -343,7 +352,6 @@ func IntereceptMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {
 			rs := util.GetRequestStore(r)
-			startTime := time.Now()
 			var irw *intercept.InterceptResponseWriter
 			w, irw = intercept.WithIntercept(r, w)
 			tunnel.CheckTunnelRequest(r)
@@ -354,23 +362,14 @@ func IntereceptMiddleware(next http.Handler) http.Handler {
 				statusCode = irw.StatusCode
 			}
 			statusCodeText := strconv.Itoa(statusCode)
-			endTime := time.Now()
 			if rs.IsTunnelRequest {
-				w.Header().Add(fmt.Sprintf("%s-%d", HeaderGotoInAt, rs.TunnelCount), startTime.UTC().String())
-				w.Header().Add(fmt.Sprintf("%s-%d", HeaderGotoOutAt, rs.TunnelCount), endTime.UTC().String())
-				w.Header().Add(fmt.Sprintf("%s-%d", HeaderGotoTook, rs.TunnelCount), endTime.Sub(startTime).String())
 				w.Header()[HeaderGotoTunnel] = r.Header[HeaderGotoRequestedTunnel]
 			} else if rs.WillProxy {
-				irw.Header().Add(fmt.Sprintf("Proxy-%s", HeaderGotoInAt), startTime.UTC().String())
-				irw.Header().Add(fmt.Sprintf("Proxy-%s", HeaderGotoOutAt), endTime.UTC().String())
-				irw.Header().Add(fmt.Sprintf("Proxy-%s", HeaderGotoTook), endTime.Sub(startTime).String())
 				irw.Header().Add(fmt.Sprintf("Proxy-%s", HeaderGotoResponseStatus), statusCodeText)
 			} else {
 				w.Header().Add(HeaderGotoResponseStatus, statusCodeText)
-				w.Header().Add(HeaderGotoInAt, startTime.UTC().String())
-				w.Header().Add(HeaderGotoOutAt, endTime.UTC().String())
-				w.Header().Add(HeaderGotoTook, endTime.Sub(startTime).String())
 			}
+			rs.ReportTime(w)
 			if rs.IsTunnelConnectRequest {
 				if !tunnel.HijackConnect(r, w) {
 					w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoTunnelStatus, rs.TunnelCount), strconv.Itoa(http.StatusInternalServerError))
@@ -396,8 +395,8 @@ func checkRequestPort(r *http.Request) error {
 	uri := r.RequestURI
 	rs := util.GetRequestStore(r)
 	if !strings.HasPrefix(uri, "/port=") {
-		rs.RequestPort = util.GetListenerPort(r)
-		rs.RequestPortNum, _ = strconv.Atoi(rs.RequestPort)
+		rs.RequestPortNum = util.GetListenerPortNum(r)
+		rs.RequestPort = strconv.Itoa(rs.RequestPortNum)
 	} else {
 		rs.RequestPort = strings.Split(strings.Split(uri, "/port=")[1], "/")[0]
 		rs.RequestPortNum, _ = strconv.Atoi(rs.RequestPort)

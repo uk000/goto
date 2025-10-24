@@ -61,17 +61,17 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 func (rf *RequestFilter) SetRoutes(filterType string, r *mux.Router) {
 	rf.filterType = filterType
 	filterRouter := util.PathRouter(r, "/"+filterType)
-	util.AddRouteQWithPort(filterRouter, "/add", rf.addFilterHeaderOrURI, "uri", "PUT", "POST")
-	util.AddRouteWithPort(filterRouter, "/add/header/{header}={value}", rf.addFilterHeaderOrURI, "PUT", "POST")
-	util.AddRouteWithPort(filterRouter, "/add/header/{header}", rf.addFilterHeaderOrURI, "PUT", "POST")
-	util.AddRouteWithPort(filterRouter, "/remove/header/{header}={value}", rf.removeIgnoreHeaderOrURI, "PUT", "POST")
-	util.AddRouteWithPort(filterRouter, "/remove/header/{header}", rf.removeIgnoreHeaderOrURI, "PUT", "POST")
-	util.AddRouteQWithPort(filterRouter, "/remove", rf.removeIgnoreHeaderOrURI, "uri", "PUT", "POST")
-	util.AddRouteWithPort(filterRouter, "/set/status={status}", rf.setOrGetIgnoreStatus, "PUT", "POST")
-	util.AddRouteWithPort(filterRouter, "/status", rf.setOrGetIgnoreStatus)
-	util.AddRouteWithPort(filterRouter, "/clear", rf.clear, "PUT", "POST")
-	util.AddRouteWithPort(filterRouter, "/count", rf.getFilteredRequestCount, "GET")
-	util.AddRouteWithPort(filterRouter, "", rf.getRequestFilterConfig, "GET")
+	util.AddRouteQ(filterRouter, "/add", rf.addFilterHeaderOrURI, "uri", "PUT", "POST")
+	util.AddRoute(filterRouter, "/add/header/{header}={value}", rf.addFilterHeaderOrURI, "PUT", "POST")
+	util.AddRoute(filterRouter, "/add/header/{header}", rf.addFilterHeaderOrURI, "PUT", "POST")
+	util.AddRoute(filterRouter, "/remove/header/{header}={value}", rf.removeIgnoreHeaderOrURI, "PUT", "POST")
+	util.AddRoute(filterRouter, "/remove/header/{header}", rf.removeIgnoreHeaderOrURI, "PUT", "POST")
+	util.AddRouteQ(filterRouter, "/remove", rf.removeIgnoreHeaderOrURI, "uri", "PUT", "POST")
+	util.AddRoute(filterRouter, "/set/status={status}", rf.setOrGetIgnoreStatus, "PUT", "POST")
+	util.AddRoute(filterRouter, "/status", rf.setOrGetIgnoreStatus)
+	util.AddRoute(filterRouter, "/clear", rf.clear, "PUT", "POST")
+	util.AddRoute(filterRouter, "/count", rf.getFilteredRequestCount, "GET")
+	util.AddRoute(filterRouter, "", rf.getRequestFilterConfig, "GET")
 }
 
 func newRequestFilter() *RequestFilter {

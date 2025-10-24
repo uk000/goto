@@ -33,10 +33,10 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	labelRouter := util.PathRouter(r, "/?server?/label")
-	util.AddRouteWithPort(labelRouter, "/set/{label}", setLabel, "PUT", "POST")
-	util.AddRouteWithPort(labelRouter, "/clear", setLabel, "POST")
-	util.AddRouteWithPort(labelRouter, "", getLabel)
+	labelRouter := util.PathRouter(r, "/server/label")
+	util.AddRoute(labelRouter, "/set/{label}", setLabel, "PUT", "POST")
+	util.AddRoute(labelRouter, "/clear", setLabel, "POST")
+	util.AddRoute(labelRouter, "", getLabel)
 }
 
 func setLabel(w http.ResponseWriter, r *http.Request) {

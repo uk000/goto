@@ -32,11 +32,11 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	xdsRouter := util.PathPrefix(r, "/?server?/xds")
-	util.AddRouteWithPort(xdsRouter, "/start", startXDS, "POST")
-	util.AddRouteWithPort(xdsRouter, "/add/{type:clusters|routes|listeners|secrets}", addXDSResources, "POST")
-	util.AddRouteWithPort(xdsRouter, "/remove/{type:cluster|route|listener|secret}/{name}", removeXDSResource, "POST")
-	util.AddRouteWithPort(xdsRouter, "/get/{type:clusters|routes|listeners|secrets}", getXDSResources, "GET")
+	xdsRouter := util.PathPrefix(r, "/server/xds")
+	util.AddRoute(xdsRouter, "/start", startXDS, "POST")
+	util.AddRoute(xdsRouter, "/add/{type:clusters|routes|listeners|secrets}", addXDSResources, "POST")
+	util.AddRoute(xdsRouter, "/remove/{type:cluster|route|listener|secret}/{name}", removeXDSResource, "POST")
+	util.AddRoute(xdsRouter, "/get/{type:clusters|routes|listeners|secrets}", getXDSResources, "GET")
 }
 
 func startXDS(w http.ResponseWriter, r *http.Request) {

@@ -30,8 +30,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-
-	"github.com/gorilla/mux"
 )
 
 type RouteFrom struct {
@@ -63,7 +61,6 @@ type Route struct {
 	rootMatch  bool
 	basePrefix string
 	re         *regexp.Regexp
-	router     *mux.Router
 	client     transport.ClientTransport
 }
 
@@ -211,10 +208,9 @@ func (r *Route) Setup() error {
 		uri = "/*"
 		r.rootMatch = true
 	}
-	if prefix, re, router, err := util.BuildURIAndPortMatcher(util.RootRouter, uri, r.From.Port, r.RouteRequest); err == nil {
+	if prefix, re, _, err := util.BuildURIAndPortMatcher(util.PortRouter, uri, r.From.Port, r.RouteRequest); err == nil {
 		r.basePrefix = prefix
 		r.re = re
-		r.router = router
 		r.client = transport.CreateDefaultHTTPClient(r.Label, r.To.IsH2, r.To.IsTLS, metrics.ConnTracker)
 	} else {
 		log.Printf("Route: Failed to add URI match [%s] with error: %s\n", uri, err.Error())

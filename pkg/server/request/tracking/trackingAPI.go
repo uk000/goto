@@ -36,22 +36,22 @@ var (
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	headerTrackingRouter := util.PathRouter(r, "/?headers?/track/?headers?")
-	util.AddRouteWithPort(headerTrackingRouter, "/clear", clearHeaders, "POST")
-	util.AddRouteWithPort(headerTrackingRouter, "/add/{headers}", addHeaders, "POST")
-	util.AddRouteWithPort(headerTrackingRouter, "/remove/{headers}", removeHeaders, "POST")
-	util.AddRouteWithPort(headerTrackingRouter, "/counts/clear/{headers}", clearHeaderCounts, "POST")
-	util.AddRouteWithPort(headerTrackingRouter, "/counts/clear", clearHeaderCounts, "POST")
-	util.AddRouteWithPort(headerTrackingRouter, "/counts", getCounts, "GET")
-	util.AddRouteWithPort(headerTrackingRouter, "", getHeaders, "GET")
+	util.AddRoute(headerTrackingRouter, "/clear", clearHeaders, "POST")
+	util.AddRoute(headerTrackingRouter, "/add/{headers}", addHeaders, "POST")
+	util.AddRoute(headerTrackingRouter, "/remove/{headers}", removeHeaders, "POST")
+	util.AddRoute(headerTrackingRouter, "/counts/clear/{headers}", clearHeaderCounts, "POST")
+	util.AddRoute(headerTrackingRouter, "/counts/clear", clearHeaderCounts, "POST")
+	util.AddRoute(headerTrackingRouter, "/counts", getCounts, "GET")
+	util.AddRoute(headerTrackingRouter, "", getHeaders, "GET")
 
 	trackRouter := util.PathRouter(r, "/track")
-	util.AddRouteQWithPort(trackRouter, "", trackURI, "uri", "POST")
-	util.AddRouteQWithPort(trackRouter, "/headers/{headers}", trackURIAndHeaders, "uri", "POST")
-	util.AddRouteWithPort(trackRouter, "/headers/{headers}", trackHeaders, "POST")
-	util.AddRouteQWithPort(trackRouter, "/{header}={value}", trackURIAndHeaderValue, "uri", "POST")
-	util.AddRouteWithPort(trackRouter, "/headers/clear", removeHeaders, "POST")
+	util.AddRouteQ(trackRouter, "", trackURI, "uri", "POST")
+	util.AddRouteQ(trackRouter, "/headers/{headers}", trackURIAndHeaders, "uri", "POST")
+	util.AddRoute(trackRouter, "/headers/{headers}", trackHeaders, "POST")
+	util.AddRouteQ(trackRouter, "/{header}={value}", trackURIAndHeaderValue, "uri", "POST")
+	util.AddRoute(trackRouter, "/headers/clear", removeHeaders, "POST")
 
-	util.AddRouteWithPort(trackRouter, "/counts", getCounts, "GET")
+	util.AddRoute(trackRouter, "/counts", getCounts, "GET")
 
 }
 

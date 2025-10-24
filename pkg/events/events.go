@@ -180,7 +180,8 @@ func SendEventJSONDirect(title, summary string, data interface{}) time.Time {
 
 func TrackTrafficEvent(statusCode int, r *http.Request, details ...string) {
 	if global.Flags.EnableEvents {
-		trafficChannel <- []interface{}{util.GetCurrentPort(r), strings.ToLower(r.URL.Path), statusCode, details}
+		rs := util.GetRequestStore(r)
+		trafficChannel <- []interface{}{rs.RequestPortNum, strings.ToLower(rs.RequestURI), statusCode, details}
 	}
 }
 

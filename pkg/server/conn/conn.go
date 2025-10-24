@@ -49,15 +49,15 @@ func captureTLSInfo(r *http.Request) {
 	if conn = GetConn(r); conn == nil {
 		return
 	}
-	if l := listeners.GetListenerForPort(util.GetCurrentPort(r)); l == nil || !l.TLS {
+	rs := util.GetRequestStore(r)
+	if rs == nil {
+		return
+	}
+	if l := listeners.GetListenerForPort(rs.RequestPortNum); l == nil || !l.TLS {
 		return
 	}
 	tlsConn, ok := conn.(*tls.Conn)
 	if !ok {
-		return
-	}
-	rs := util.GetRequestStore(r)
-	if rs == nil {
 		return
 	}
 	tlsState := tlsConn.ConnectionState()

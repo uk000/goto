@@ -32,13 +32,25 @@ docker-build: Dockerfile $(GO_FILES)
 	docker build --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) --platform linux/amd64 .
 	docker build --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-arm64 --platform linux/arm64 .
 
-docker-build-ip: Dockerfile $(GO_FILES)
-	docker build --build-arg iputils=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) --platform linux/amd64 .
-	docker build --build-arg iputils=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-arm64 --platform linux/arm64 .
+docker-build-net: Dockerfile $(GO_FILES)
+	docker build --build-arg net=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-net --platform linux/amd64 .
+	docker build --build-arg net=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-arm64-net --platform linux/arm64 .
 
 docker-build-kube: Dockerfile $(GO_FILES)
-	docker build --build-arg kube=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) --platform linux/amd64 .
-	docker build --build-arg kube=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-arm64 --platform linux/arm64 .
+	docker build --build-arg net=1 kube=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-kube --platform linux/amd64 .
+	docker build --build-arg net=1 kube=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-arm64-kube --platform linux/arm64 .
+
+docker-build-perf: Dockerfile $(GO_FILES)
+	docker build --build-arg net=1 perf=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-perf --platform linux/amd64 .
+	docker build --build-arg net=1 perf=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-arm64-perf --platform linux/arm64 .
+
+docker-build-ssl: Dockerfile $(GO_FILES)
+	docker build --build-arg net=1 ssl=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-ssl --platform linux/amd64 .
+	docker build --build-arg net=1 ssl=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-arm64-ssl --platform linux/arm64 .
+
+docker-build-grpc: Dockerfile $(GO_FILES)
+	docker build --build-arg net=1 grpc=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-grpc --platform linux/amd64 .
+	docker build --build-arg net=1 grpc=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-arm64-grpc --platform linux/arm64 .
 
 docker-run: docker-build
 	docker run -d --rm --name goto -p8080:8080 -it $(IMAGE):$(VERSION) /app/goto --port 8080

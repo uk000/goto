@@ -401,12 +401,13 @@ This feature allows setting a forced response status for all requests except byp
 
 |METHOD|URI|Description|
 |---|---|---|
-| PUT, POST | /server/response<br/>/status/set/`{status}`     | Set a forced response status that all non-proxied and non-management requests will be responded with. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used each time. |
+| PUT, POST | /server/response<br/>/status/set/`{status}`     | Set a forced response status that all non-proxied and non-management requests will be responded with. `status` can be either a single status code or a comma-separated list of codes, in which case a randomly selected code will be used each time. Syntax of status param is `<status1,status2,...>:<times>`, where `times` is the number of times the given forced statuses will be used, after which the requests will be served the normal response status. |
+| PUT, POST | /server/response<br/>/status/set/`{status}`?uri=`{uri}`     | Set a forced response status for a specific URL. All non-proxied requests for the URI will be responded with the given `status`. Status syntax is `<status1,status2,...>:<times>`. |
 | PUT, POST |	/server/response<br/>/status/clear            | Remove currently configured forced response status, so that all subsequent calls will receive their original deemed response |
 | PUT, POST | /server/response<br/>/status/counts/clear     | Clear counts tracked for response statuses |
 | GET       |	/server/response<br/>/status/counts/`{status}`  | Get request counts for a given status |
 | GET       |	/server/response<br/>/status/counts           | Get request counts for all response statuses so far |
-| GET       |	/server/response/status                  | Get the currently configured forced response status |
+| GET       |	/server/response/status                  | Get the currently configured forced response statuses for all ports |
 
 <br/>
 <details>
@@ -435,6 +436,27 @@ curl -X POST localhost:8080/server/response/status/counts/clear
 curl localhost:8080/server/response/status/counts
 
 curl localhost:8080/server/response/status/counts/502
+
+curl -X POST localhost:8080/server/response/status/configure --data <<EOF
+{
+	"port": 8080,
+	"statuses": [403],
+	"times": -1,
+	"match": {
+		"uri": "/foo",
+		"headers": [
+			{
+				"header": "foo",
+				"present": false
+			},
+			{
+				"header": "bar",
+        "value": "foo"
+			}
+		]
+	}
+}
+EOF
 ```
 
 </details>

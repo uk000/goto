@@ -350,7 +350,7 @@ func (pt *PortTunnel) checkTunnelsForRequest(r *http.Request) (willTunnel bool, 
 }
 
 func (pt *PortTunnel) openProxyTunnel(fromAddress, toAddress string, isH2, isH2C, isTLS bool, clientConn net.Conn) bool {
-	selfAddress := fmt.Sprintf("%s:%d", util.GetPodIP(), pt.Port)
+	selfAddress := fmt.Sprintf("%s:%d", global.Self.PodIP, pt.Port)
 	if selfConn, err := net.DialTimeout("tcp", selfAddress, 10*time.Second); err == nil {
 		selfAddress = selfConn.LocalAddr().String()
 		pt.lock.Lock()

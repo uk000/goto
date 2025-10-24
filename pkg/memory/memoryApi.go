@@ -17,39 +17,39 @@ var (
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	memoryRouter := util.PathRouter(r, "/memory")
 
-	util.AddRouteWithPort(memoryRouter, "/contexts/add/{context}", addContext, "POST")
-	util.AddRouteWithPort(memoryRouter, "/context/{context}/add/{key}={value}", addItem, "POST")
+	util.AddRoute(memoryRouter, "/contexts/add/{context}", addContext, "POST")
+	util.AddRoute(memoryRouter, "/context/{context}/add/{key}={value}", addItem, "POST")
 
-	util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/from/header/{header}", addContextMatch, "POST")
-	util.AddRouteQWithPort(memoryRouter, "/context/{ctxkey}/from/uri", addContextMatch, "uri", "POST")
+	util.AddRoute(memoryRouter, "/context/{ctxkey}/from/header/{header}", addContextMatch, "POST")
+	util.AddRouteQ(memoryRouter, "/context/{ctxkey}/from/uri", addContextMatch, "uri", "POST")
 
-	util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/from/header/{header}", addHeaderQueryMatch, "POST")
-	util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/from/query/{query}", addHeaderQueryMatch, "POST")
-	util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/from/body/regex/{key}={regex}", addBodyRegexMatch, "POST")
-	util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/from/body/paths/{paths}", addBodyJSONPathMatch, "POST")
-	util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/from/body/transform", setPayloadTransform, "POST")
+	util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/from/header/{header}", addHeaderQueryMatch, "POST")
+	util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/from/query/{query}", addHeaderQueryMatch, "POST")
+	util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/from/body/regex/{key}={regex}", addBodyRegexMatch, "POST")
+	util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/from/body/paths/{paths}", addBodyJSONPathMatch, "POST")
+	util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/from/body/transform", setPayloadTransform, "POST")
 
-	// util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/apply/on/header/{header}/add/{header2}/{key}", applyHeaderFromMemory, "POST")
-	// util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/apply/on/header/{header}/replace/{header2}/{key}", applyHeaderFromMemory, "POST")
-	// util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/apply/on/header/{header}/set/value/{key}", applyHeaderFromMemory, "POST")
+	// util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/apply/on/header/{header}/add/{header2}/{key}", applyHeaderFromMemory, "POST")
+	// util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/apply/on/header/{header}/replace/{header2}/{key}", applyHeaderFromMemory, "POST")
+	// util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/apply/on/header/{header}/set/value/{key}", applyHeaderFromMemory, "POST")
 
-	// util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/apply/on/query/{query}/add/{query2}/{key}", applyQueryFromMemory, "POST")
-	// util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/apply/on/query/{query}/replace/{query2}/{key}", applyQueryFromMemory, "POST")
-	// util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/apply/on/query/{query}/set/value/{key}", applyQueryFromMemory, "POST")
+	// util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/apply/on/query/{query}/add/{query2}/{key}", applyQueryFromMemory, "POST")
+	// util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/apply/on/query/{query}/replace/{query2}/{key}", applyQueryFromMemory, "POST")
+	// util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/apply/on/query/{query}/set/value/{key}", applyQueryFromMemory, "POST")
 
-	// util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/apply/on/body/regex/{regex}/add/{regex2}/{key}", applyBodyRegexFromMemory, "POST")
-	// util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/apply/on/body/regex/{regex}/replace/{regex2}/{key}", applyBodyRegexFromMemory, "POST")
-	// util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/apply/on/body/regex/{regex}/set/{key}", applyBodyRegexFromMemory, "POST")
+	// util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/apply/on/body/regex/{regex}/add/{regex2}/{key}", applyBodyRegexFromMemory, "POST")
+	// util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/apply/on/body/regex/{regex}/replace/{regex2}/{key}", applyBodyRegexFromMemory, "POST")
+	// util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/apply/on/body/regex/{regex}/set/{key}", applyBodyRegexFromMemory, "POST")
 
-	// util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/apply/on/body/path/{path}/add/{path2}/{key}", applyBodyPathFromMemory, "POST")
-	// util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/apply/on/body/path/{path}/replace/{path2}/{key}", applyBodyPathFromMemory, "POST")
-	// util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}/memory/apply/on/body/path/{path}/set/value/{key}", applyBodyPathFromMemory, "POST")
+	// util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/apply/on/body/path/{path}/add/{path2}/{key}", applyBodyPathFromMemory, "POST")
+	// util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/apply/on/body/path/{path}/replace/{path2}/{key}", applyBodyPathFromMemory, "POST")
+	// util.AddRoute(memoryRouter, "/context/{ctxkey}/memory/apply/on/body/path/{path}/set/value/{key}", applyBodyPathFromMemory, "POST")
 
-	util.AddRouteWithPort(memoryRouter, "/contexts/memory", getMemory, "GET")
-	util.AddRouteWithPort(memoryRouter, "/context/{context}/memory", getMemory, "GET")
-	util.AddRouteWithPort(memoryRouter, "/context/{context}/memory/get/{key}", getMemory, "GET")
-	util.AddRouteWithPort(memoryRouter, "/context/{ctxkey}", getMemoryExtractors, "GET")
-	util.AddRouteWithPort(memoryRouter, "/contexts", getMemoryExtractors, "GET")
+	util.AddRoute(memoryRouter, "/contexts/memory", getMemory, "GET")
+	util.AddRoute(memoryRouter, "/context/{context}/memory", getMemory, "GET")
+	util.AddRoute(memoryRouter, "/context/{context}/memory/get/{key}", getMemory, "GET")
+	util.AddRoute(memoryRouter, "/context/{ctxkey}", getMemoryExtractors, "GET")
+	util.AddRoute(memoryRouter, "/contexts", getMemoryExtractors, "GET")
 
 }
 

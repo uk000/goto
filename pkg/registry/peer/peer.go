@@ -41,10 +41,10 @@ func RegisterPeer(peerName, peerAddress string) {
 	peer := &registry.Peer{
 		Name:      peerName,
 		Address:   peerAddress,
-		Pod:       util.GetPodName(),
-		Namespace: util.GetNamespace(),
-		Node:      util.GetNodeName(),
-		Cluster:   util.GetCluster(),
+		Pod:       global.Self.PodName,
+		Namespace: global.Self.Namespace,
+		Node:      global.Self.NodeName,
+		Cluster:   global.Self.Cluster,
 	}
 	if global.Self.RegistryURL != "" {
 		registered := false
