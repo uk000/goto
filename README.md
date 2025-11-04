@@ -46,9 +46,27 @@ It can act as:
 
 ## How to use it?
 
-#### <u>Grab or Build</u>
-It's available as a docker image: `docker.io/uk0000/goto:<tag>`
-> &#x1F4DD; <small><i>The docker image is built with several useful utilities included: `curl`, `jq`, `bash`, `iputils`, `openssl`, `jq`, etc.</i></small>
+### Grab or Build
+#### Docker images (Alpine Linux based)
+  #### core
+  - `docker.io/uk0000/goto:0.9.5`, `docker.io/uk0000/goto:0.9.5-arm64`
+  - Includes `bash, curl, jq`
+  #### net
+  - `docker.io/uk0000/goto:0.9.5-net`, `docker.io/uk0000/goto:0.9.5-net-arm64`
+  - Includes core pack
+  - Includes network utilities like `ncat, nc, nmap, socat, tcpdump, dig, nslookup, iptables, ipvsadm, openssl`
+  #### kube
+  - `docker.io/uk0000/goto:0.9.5-kube`, `docker.io/uk0000/goto:0.9.5-kube-arm64`
+  - Includes core and net packs
+  - Includes `kubectl and etcdctl`
+  #### perf
+  - `docker.io/uk0000/goto:0.9.5-perf`, `docker.io/uk0000/goto:0.9.5-perf-arm64`
+  - Includes core and net packs
+  - Includes `hey and iftop`
+  #### gRPC
+  - `docker.io/uk0000/goto:0.9.5-grpc`, `docker.io/uk0000/goto:0.9.5-grpc-arm64`
+  - Includes core and net packs
+  - Includes `grpcurl`
 
 <br/>
 Or, build it locally on your machine
@@ -62,29 +80,14 @@ Start `goto` as a server with multiple ports and protocols.
 > &#x1F4DD; <small><i>First port is treated as bootstrap port and uses HTTP protocol</i></small>
 
   ```
-  goto --ports 8080,8081/http,8082/grpc,8000/tcp
+  goto --ports 8080,8081/http,8443/https,6000/grpc,7000/tcp,8000/rpc --rpcPort=3000 --grpcPort=9000
   ```
 
-
-#### <u>Use Admin APIs to Prepare Goto Client and/or Server</u>
-For Example:
-- Add a new listener with gRPC protocol and open immediately
-  ```
-  curl -X POST localhost:8080/server/listeners/add --data '{"port":9091, "protocol":"grpc", "open":true}'
-  ```
-
-- Configure a `goto` client instance to send some requests to an HTTP target
-  ```
-  curl -s localhost:8080/client/targets/add --data '{"name": "t1", "method": "GET", "url": "http://localhost:8081/foo", "body": "some payload", "replicas": 2, "requestCount": 10}'
-  ```
 
 # Show me ~~the money~~ some use cases please!
 
-See [Use Cases](docs/use-cases.md) doc.
-
+Now that you have `goto` running, what can you do with it?
 <br/>
-
-
 Before we look into detailed features and APIs exposed by the tool, let's look at how this tool can be used in a few scenarios to understand it better.
 
 ## Basic Scenarios
@@ -117,376 +120,134 @@ Before we look into detailed features and APIs exposed by the tool, let's look a
 
 <br/>
 
+See [Use Cases](docs/use-cases.md) for more examples.
+
 # <a name="toc"></a>
 
 ## TOC
 
-### [Startup Command](#goto-startup-command)
+### [Startup Command](#-goto-startup-command)
+
+### Self Reflection
+- [Version](#-goto-version)
+- [APIs](#-goto-apis)
 
 ### AI
 - [A2A Agent](pkg/ai/README.md#a2a-agent-features-server)
 - [MCP Server and Client](pkg/ai/README.md#mcp-admin-apis)
 
 ### Traffic (Client)
-- [Targets and Traffic](#goto-client-targets-and-traffic)
-- [Client APIs](#client-apis)
-- [Client Events](#client-events)
+- [Goto's HTTP/gRPC/TCP Client Features (To run Traffic)](pkg/client/README.md)
 - [Client JSON Schemas](docs/client-api-json-schemas.md)
 - [Client APIs and Results Examples](docs/client-api-examples.md)
 - [Client gRPC Examples](docs/grpc-client-examples.md)
 
 ### gRPC
-- [gRPC Server and Client](#grpc-server)
+- [gRPC Server and Client](pkg/rpc/README.md)
 
 ### HTTPC Server
-- [Server Features](#goto-server-features)
-- [Goto Response Headers](#http-headers)
-- [Logs](#goto-logs)
-- [Goto Version](#goto-version)
-- [Events](#events)
-- [Metrics](#metrics)
-- [Listeners](#listeners)
-- [Listener Label](#listener-label)
-- [Request Headers Tracking](#request-headers-tracking)
-- [Request Timeout](#request-timeout-tracking)
-- [URIs](#uris)
-- [Probes](#probes)
-- [Requests Filtering](#requests-filtering)
-- [Response Delay](#response-delay)
-- [Response Headers](#response-headers)
-- [Response Payload](#response-payload)
-- [Ad-hoc Payload](#ad-hoc-payload)
-- [Stream (Chunked) Payload](#stream-chunked-payload)
-- [Response Status](#response-status)
-- [Response Triggers](#response-triggers)
-- [Status API](#status-api)
-- [Delay API](#delay-api)
-- [Echo API](#echo-api)
-- [Catch All](#catch-all)
+- [Server Features](pkg/server/README.md)
+- [Goto Headers](pkg/server/README.md#http-headers)
+- [Goto Server Logs](pkg/server/README.md#goto-logs)
+- [Log APIs](pkg/log/README.md)
+- [Events](pkg/events/README.md)
+- [Metrics](pkg/metrics/README.md)
+- [Listeners](pkg/server/README.md#listeners)
+- [Listener Label](pkg/server/README.md#listener-label)
+- [Request Headers Tracking](pkg/server/request/README.md#request-headers-tracking)
+- [Request Timeout](pkg/server/request/README.md#request-timeout-tracking)
+- [URIs](pkg/server/request/README.md#request-uri-tracking)
+- [Probes](pkg/server/probes/README.md)
+- [Requests Filtering](pkg/server/request/README.md#requests-filtering)
+- [Response Delay](pkg/server/response/README.md#response-delay)
+- [Response Headers](pkg/server/response/README.md#response-headers)
+- [Response Payload](pkg/server/response/README.md#response-payload)
+- [Ad-hoc Payload](pkg/server/response/README.md#ad-hoc-payload)
+- [Stream (Chunked) Payload](pkg/server/response/README.md#-stream-chunked-payload)
+- [Response Status](pkg/server/response/README.md#response-status)
+- [Response Triggers](pkg/server/response/README.md#response-triggers)
+- [Status API](pkg/server/response/README.md#status)
+- [Delay API](pkg/server/response/README.md#delay)
+- [Echo API](pkg/server/README.md#echo-api)
+- [Catch All](#-catch-all)
 
 ### TCP Server
-- [TCP Server](#tcp-server-feature)
+- [TCP Server](pkg/server/tcp/README.md)
 
 
 ### Goto Tunnel
-- [Tunnel](#tunnel)
+- [Tunnel](pkg/tunnel/README.md)
 
 ### Goto Proxy
 
-- [Proxy Features](#proxy)
+- [Proxy Features](pkg/proxy/README.md)
 
 ### Scripts
 
-- [Scripts Features](#scripts-features)
+- [Scripts Features](pkg/scripts/README.md)
 
 ### Jobs
 
-- [Jobs Features](#jobs-features)
+- [Jobs Features](pkg/job/README.md)
 
 ### K8s
 
-- [K8s Features](#k8s-features)
+- [K8s Features](pkg/k8s/README.md)
 
 ### Pipelines
 
-- [Pipeline Features](#pipeline-features)
+- [Pipeline Features](pkg/pipe/README.md)
 
 ### Goto Registry
 
-- [Registry Features](#registry)
+- [Registry Features](pkg/registry/Overview.md)
+- [Registry APIs](pkg/registry/README.m)
 
   <br/>
 
 # <a name="goto-startup-command"></a>
 
-# Goto Startup Command
+## > Goto Startup Command
 
-First things first, run the application:
-
-```
-go run main.go --port 8080
-```
-
-Or, build and run
+To run:
 
 ```
-go build -o goto .
-./goto
+goto --ports 8080,8081/http,8443/https,6000/grpc,7000/tcp,8000/rpc --rpcPort=3000 --grpcPort=9000
 ```
 
 See [Startup Command](cmd/README.md) doc.
 
 ###### <small> [Back to TOC](#toc) </small>
 
-# <a name="goto-version-apis"></a>
+# <a name="goto-version"></a>
 ## > Goto Version
-These APIs get Goto's own details
 
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
 | GET       | /version    | Get version info of this `goto` instance.  |
-| GET       | /apis    | Get a list of all APIs offered by this version of `Goto`.  |
-
 
 ###### <small> [Back to TOC](#toc) </small>
-
-# <a name="goto-client-targets-and-traffic"></a>
-###### <small> [Back to TOC](#toc) </small>
-
-# Goto Client: Targets and Traffic
-See [Client package documentation](pkg/client/README.md) for details of Goto's Client feature and APIs.
 
 <br/>
 
-# <a name="goto-server-features"></a>
+# <a name="goto-apis"></a>
+## > Goto APIs
+This API returns a list of Goto's admin APIs, grouped by features (prefixes)
 
-# Goto Server Features
-
-See [Server](pkg/server/README.md) doc.
-
-###### <small> [Back to TOC](#toc) </small>
-
-## > Log APIs
-
-See [Log](pkg/log/README.md) package doc.
-
-# <a name="events"></a>
-## > Events
-See [Events Package](pkg/events/README.md) for documentation of Goto's Events.
+#### APIs
+|METHOD|URI|Description|
+|---|---|---|
+| GET       | /apis    | Get a list of all APIs offered by this version of `Goto`.  |
 
 ###### <small> [Back to TOC](#toc) </small>
 
-# <a name="metrics"></a>
-
-## > Metrics
-
-See [Metrics](pkg/metrics/README.md) package doc.
-
-###### <small> [Back to TOC](#toc) </small>
-
-# <a name="listeners"></a>
-
-## > Listeners
-
-
-See [Listeners](pkg/server/README.md#listeners) section in server package doc.
-
-###### <small> [Back to TOC](#toc) </small>
-
-
-# <a name="listener-label"></a>
-
-## > Listener Label
-
-See [Listener Label](pkg/server/README.md#listener-label) section in server package doc.
-
-
-###### <small> [Back to TOC](#toc) </small>
-
-# <a name="tcp-server-feature"></a>
-## > TCP Server Feature
-
-See [TCP Server](pkg/server/tcp/README.md) package doc.
-
-###### <small> [Back to TOC](#toc) </small>
-
-
-# <a name="grpc-server"></a>
-
-## > gRPC Server
-
-See [RPC Package](pkg/rpc/README.md) docs for an overview of `Goto` gRPC feature and APIs.
-
-
-###### <small> [Back to TOC](#toc) </small>
-
-
-# <a name="request-headers-tracking"></a>
-
-## > Request Headers Tracking
-
-See [Request Header Tracking](pkg/server/request/README.md#request-headers-tracking) section in Request package doc.
-
-
-###### <small> [Back to TOC](#toc) </small>
-
-<a name="request-timeout-tracking"></a>
-## > Request Timeout Tracking
-
-See [Request Timeout Tracking](pkg/server/request/README.md#request-timeout-tracking) section in Request package doc.
-
-###### <small> [Back to TOC](#toc) </small>
-
-# <a name="uris"></a>
-## > URIs
-
-See [Request URI Tracking](pkg/server/request/README.md#request-uri-tracking) section in Request package doc.
-
-###### <small> [Back to TOC](#toc) </small>
-
-
-# <a name="probes"></a>
-## > Probes
-
-See [Server Probes](pkg/server/probes/README.md) package doc.
-
-###### <small> [Back to TOC](#toc) </small>
-
-
-# <a name="requests-filtering"></a>
-## > Requests Filtering
-
-See [Request Filtering](pkg/server/request/README.md#requests-filtering) section in Request package doc.
-
-###### <small> [Back to TOC](#toc) </small>
-
-
-# <a name="response-delay"></a>
-## > Response Delay
-
-See [Response Delay](pkg/server/response/README.md#response-delay) section in Response package doc.
-
-###### <small> [Back to TOC](#toc) </small>
-
-
-# <a name="server-response-headers"></a>
-## > Response Headers
-
-See [Response Delay](pkg/server/response/README.md#response-headers) section in Response package doc.
-
-###### <small> [Back to TOC](#toc) </small>
-
-
-# <a name="response-payload"></a>
-## > Response Payload
-
-See [Response Delay](pkg/server/response/README.md#response-payload) section in Response package doc.
-
-
-###### <small> [Back to TOC](#toc) </small>
-
-
-# <a name="ad-hoc-payload"></a>
-## > Ad-hoc Payload
-
-See [Ad-Hoc Payload](pkg/server/response/README.md#ad-hoc-payload) section in Response package doc.
-
-
-###### <small> [Back to TOC](#toc) </small>
-
-
-# <a name="response-status"></a>
-## > Response Status
-
-See [Response Status](pkg/server/response/README.md#response-status) section in Response package doc.
-
-###### <small> [Back to TOC](#toc) </small>
-
-
-# <a name="response-triggers"></a>
-## > Response Triggers
-
-See [Response Triggers](pkg/server/response/README.md#response-triggers) section in Response package doc.
-
-###### <small> [Back to TOC](#toc) </small>
-
-
-# <a name="status-api"></a>
-## > Status API
-
-See [Response Status](pkg/server/response/README.md#status) section in Response package doc.
-
-###### <small> [Back to TOC](#toc) </small>
-
-
-# <a name="delay-api"></a>
-## > Delay API
-
-See [Response Delay](pkg/server/response/README.md#delay) section in Response package doc.
-
-###### <small> [Back to TOC](#toc) </small>
-
-
-# <a name="echo-api"></a>
-## > Echo API
-
-See [Echo](pkg/server/README.md#echo-api) section in Response package doc.
-
-###### <small> [Back to TOC](#toc) </small>
-
+<br/>
 
 # <a name="catch-all"></a>
-
 ## > Catch All
-
 Any request that doesn't match any of the defined management APIs, and also doesn't match any proxy targets, gets treated by a catch-all response that sends HTTP 200 response by default (unless an override response code is set)
 
 ###### <small> [Back to TOC](#toc) </small>
 
 <br/>
-
-# <a name="proxy"></a>
-# Proxy
-
-See [Proxy Package](pkg/proxy/README.md) for details about Goto's Proxy feature and APIs.
-
-
-###### <small> [Back to TOC](#goto-proxy) </small>
-
-
-
-# <a name="scripts-features"></a>
-# Scripts Features
-
-See [Scripts Package](pkg/scripts/README.md) for details about Goto's Scripts feature and APIs.
-
-###### <small> [Back to TOC](#scripts) </small>
-
-
-# <a name="jobs-features"></a>
-# Jobs Features
-
-See [Job Package](pkg/job/README.md) for details about Goto's Jobs feature and APIs.
-
-###### <small> [Back to TOC](#jobs) </small>
-
-
-# <a name="k8s-features"></a>
-
-# K8s Features
-
-See [K8s Package](pkg/k8s/README.md) for details about Goto's K8s feature and APIs.
-
-###### <small> [Back to TOC](#k8s) </small>
-
-
-# <a name="tunnel"></a>
-# Tunnel
-
-
-See [Tunnel Package](pkg/tunnel/README.md) for details about Goto's Tunnel feature and APIs.
-
-
-###### <small> [Back to TOC](#goto-tunnel) </small>
-
-
-# <a name="pipeline-features"></a>
-# Pipeline Features
-
-
-See [Pipeline Package](pkg/pipe/README.md) for details about Goto's Pipeline feature and APIs.
-
-
-###### <small> [Back to TOC](#pipelines) </small>
-
-<br/>
-
-# <a name="registry"></a>
-
-# Registry
-See [Registry Overview](pkg/registry/Overview.md) doc for an overview and examples of Goto's Registry feature.
-
-See [Registry APIs](pkg/registry/README.md) for the list of Registry REST APIs.
-
-###### <small> [Back to TOC](#goto-registry) </small>

@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/global"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -198,7 +197,6 @@ func (rs *RequestStore) Start() {
 
 func (rs *RequestStore) ReportTime(w http.ResponseWriter) {
 	if !rs.endTime.IsZero() {
-		log.Println("Duplicate calls to ReportTime")
 		return
 	}
 	rs.endTime = time.Now()

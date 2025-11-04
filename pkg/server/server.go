@@ -57,7 +57,6 @@ import (
 	"goto/pkg/server/tcp"
 	"goto/pkg/server/udp"
 	"goto/pkg/server/ui"
-	"goto/pkg/server/xds"
 	"goto/pkg/tls"
 	"goto/pkg/tunnel"
 )
@@ -72,7 +71,7 @@ func init() {
 		k8sYaml.Middleware, k8sApi.Middleware, pipe.Middleware, request.Middleware,
 		proxy.Middleware, response.Middleware, events.Middleware, metrics.Middleware,
 		tcp.Middleware, udp.Middleware, rpc.Middleware, jsonrpc.Middleware,
-		grpcapi.Middleware, grpcclient.Middleware, protos.Middleware, xds.Middleware,
+		grpcapi.Middleware, grpcclient.Middleware, protos.Middleware,
 		mcpclient.Middleware, mcpserverapi.Middleware, a2aserver.Middleware, a2aclient.Middleware,
 		scripts.Middleware, job.Middleware, tls.Middleware, log.Middleware, ui.Middleware,
 		body.Middleware, echo.Middleware, catchall.Middleware,

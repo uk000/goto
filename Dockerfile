@@ -1,4 +1,8 @@
 FROM golang:1.25-alpine AS builder-base
+
+ARG GOOS
+ARG GOARCH
+
 RUN echo 'http://nl.alpinelinux.org/alpine/v3.22/main' > /etc/apk/repositories
 RUN echo 'http://nl.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories
 RUN apk update \
@@ -18,7 +22,7 @@ RUN mkdir /goto
 ADD ./go.mod /goto/go.mod
 
 WORKDIR /goto
-RUN go mod download
+RUN GOOS=${GOOS} GOARCH=${GOARCH} go mod download
 
 FROM builder-base AS builder
 
@@ -32,32 +36,41 @@ ADD ./main.go /goto/main.go
 
 WORKDIR /goto
 
-RUN --mount=type=cache,target="/root/.cache/go-build" go build -mod=mod -o goto -ldflags="-extldflags \"-static\" -w -s -X goto/global.Version=$VERSION -X goto/global.Commit=$COMMIT" .
+RUN --mount=type=cache,target="/root/.cache/go-build" GOOS=${GOOS} GOARCH=${GOARCH} go build -mod=mod -o goto -ldflags="-extldflags \"-static\" -w -s -X goto/global.Version=$VERSION -X goto/global.Commit=$COMMIT" .
 
 WORKDIR /tmp
 
 
-FROM alpine:3.22 AS release-base
+FROM alpine:3.22 AS release-base-core
 
-ARG kube
-ARG net
-ARG perf
-ARG ssl
-ARG grpc
+ARG utils
 
 RUN echo 'http://nl.alpinelinux.org/alpine/v3.22/main' > /etc/apk/repositories && \
     echo 'http://nl.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories
 
-RUN apk update \
-	&& apk add --no-cache curl jq bash sudo su-exec
+RUN apk update && apk add bash sudo su-exec;
+RUN if [[ -n "$utils" ]] ; then apk add curl jq; echo "utils=$utils"; fi
 
-# RUN apk add --no-cache --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing grpcurl 
+FROM release-base-core AS release-base-net
 
-RUN if [[ -n "$net" ]] ; then apk add --no-cache nmap-ncat netcat-openbsd socat iputils iproute2 tcpdump bind-tools iptables ipvsadm tcpflow; echo "netutils=$netutils"; fi
-RUN if [[ -n "$kube" ]] ; then apk add --no-cache kubectl etcd-ctl; echo "kubectl=$kube"; fi
-RUN if [[ -n "$perf" ]] ; then apk add --no-cache hey iftop; echo "perf=$perf"; fi
-RUN if [[ -n "$ssl" ]] ; then apk add --no-cache openssl; echo "perf=$ssl"; fi
-RUN if [[ -n "$grpc" ]] ; then apk add --no-cache grpcurl; echo "perf=$grpc"; fi
+ARG net
+
+RUN if [[ -n "$net" ]] ; then apk add nmap nmap-ncat netcat-openbsd socat tcpdump bind-tools iptables ipvsadm openssl; echo "netutils=$netutils"; fi
+
+
+FROM release-base-net AS release-base
+
+ARG kube
+ARG perf
+ARG grpc
+
+RUN echo "kubectl=$kube, perf=$perf, ssl=$ssl, grpc=$grpc"
+
+RUN if [[ -n "$kube" ]] ; then apk add kubectl etcd-ctl; echo "kube=$kube"; fi
+RUN if [[ -n "$perf" ]] ; then apk add hey iftop; echo "perf=$perf"; fi
+RUN if [[ -n "$grpc" ]] ; then \
+		apk add --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing grpcurl; echo "grpc=$grpc"; \
+	fi
 
 FROM release-base AS release
 
