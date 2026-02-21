@@ -244,3 +244,30 @@ func NewHeadersInterceptResponseWriter(w http.ResponseWriter) *HeaderInterceptRe
 func (rw *HeaderInterceptResponseWriter) HeadersSent() bool {
 	return len(rw.Headers) > 0
 }
+
+func IntereceptMiddleware(pre, post http.Handler) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rs := util.GetRequestStore(r)
+			var irw *InterceptResponseWriter
+			w, irw = WithIntercept(r, w)
+			if pre != nil {
+				pre.ServeHTTP(w, r)
+			}
+			next.ServeHTTP(w, r)
+			if !rs.IsKnownNonTraffic && irw != nil {
+				rs.StatusCode = irw.StatusCode
+			}
+			if rs.StatusCode == 0 {
+				rs.StatusCode = http.StatusOK
+			}
+			if post != nil {
+				post.ServeHTTP(w, r)
+			}
+			if irw != nil {
+				irw.Proceed()
+			}
+			util.DiscardRequestBody(r)
+		})
+	}
+}

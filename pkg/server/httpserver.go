@@ -55,6 +55,11 @@ var (
 	httpServer              *http.Server
 	jsonRPCServer           *http.Server
 	h2s                     = &http2.Server{}
+	httpHandler             http.Handler
+	h2cHandler              http.Handler
+	mcpHandler              http.Handler
+	agentsHandler           http.Handler
+	aiHandler               http.Handler
 	httpStarted             bool
 	jsonRPCStarted          bool
 	httpListenersStarted    bool
@@ -64,7 +69,15 @@ var (
 
 func RunHttpServer() {
 	var err error
-	err = configureAndStartHTTPServer(configureHTTPouter())
+	httpRouter := configureHTTPouter()
+	gRPCHandler := GRPCHandler(httpRouter)
+	h2cHandler = h2c.NewHandler(gRPCHandler, h2s)
+	mcpHandler = mcpserver.MCPHandler()
+	agentsHandler = a2aserver.AgentsHandler()
+	aiHandler = configureAIRouter()
+	httpHandler = gRPCHandler
+	util.HTTPHandler = httpOnlyHandler()
+	err = configureAndStartHTTPServer()
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -84,16 +97,37 @@ func configureHTTPouter() *mux.Router {
 	coreRouter := mux.NewRouter()
 	coreRouter.SkipClean(true)
 	RootRouter = util.CreateRouters(coreRouter)
-	RootRouter.Use(ContextMiddleware)
 	middleware.LinkBaseMiddlewareChain(RootRouter)
 	interceptChainRouter := RootRouter.PathPrefix("").Subrouter()
-	interceptChainRouter.Use(IntereceptMiddleware)
+	interceptChainRouter.Use(intercept.IntereceptMiddleware(preIntercept(), postIntercept()))
 	middleware.LinkMiddlewareChain(interceptChainRouter)
 	return coreRouter
 }
 
-func configureAndStartHTTPServer(r *mux.Router) error {
-	util.HTTPHandler = HTTPHandler(GRPCHandler(r), h2c.NewHandler(GRPCHandler(RootRouter), h2s))
+func configureAIRouter() *mux.Router {
+	aiRouter := mux.NewRouter()
+	aiRouter.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
+		return true
+	}).HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rs := util.GetRequestStore(r)
+		if rs.IsMCP {
+			mcpHandler.ServeHTTP(w, r)
+		} else if rs.IsAI {
+			agentsHandler.ServeHTTP(w, r)
+		}
+	})
+	return aiRouter
+}
+
+func httpOnlyHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rs := util.GetRequestStore(r)
+		l := listeners.GetListenerForPort(rs.RequestPortNum)
+		handleHTTP(l, w, r, rs)
+	})
+}
+
+func configureAndStartHTTPServer() error {
 	httpServer = &http.Server{
 		Addr:         fmt.Sprintf("0.0.0.0:%d", global.Self.ServerPort),
 		WriteTimeout: 1 * time.Minute,
@@ -101,10 +135,10 @@ func configureAndStartHTTPServer(r *mux.Router) error {
 		IdleTimeout:  1 * time.Minute,
 		ConnContext:  withConnContext,
 		//ConnState:    conn.ConnState,
-		Handler:  util.HTTPHandler,
+		Handler:  HTTPHandler(),
 		ErrorLog: log.New(io.Discard, "discard", 0),
 	}
-	return StartHttpServer(false)
+	return StartHttpServer(httpServer, false)
 }
 
 func configureAndStartAIServer(port int) error {
@@ -115,19 +149,13 @@ func configureAndStartAIServer(port int) error {
 		IdleTimeout:  1 * time.Hour,
 		ConnContext:  withConnContext,
 		//ConnState:    conn.ConnState,
-		Handler:  AIHandler(),
+		Handler:  HTTPHandler(),
 		ErrorLog: log.New(io.Discard, "discard", 0),
 	}
-	return StartHttpServer(true)
+	return StartHttpServer(jsonRPCServer, true)
 }
 
-func StartHttpServer(jsonRPC bool) error {
-	var server *http.Server
-	if jsonRPC {
-		server = jsonRPCServer
-	} else {
-		server = httpServer
-	}
+func StartHttpServer(server *http.Server, jsonRPC bool) error {
 	if server == nil {
 		return errors.New("Missing server")
 	}
@@ -137,11 +165,13 @@ func StartHttpServer(jsonRPC bool) error {
 	}
 	events.StartSender()
 	go func(server *http.Server) {
-		if jsonRPC {
-			jsonRPCStarted = true
-		} else {
-			httpStarted = true
-		}
+		time.AfterFunc(2*time.Second, func() {
+			if jsonRPC {
+				jsonRPCStarted = true
+			} else {
+				httpStarted = true
+			}
+		})
 		if err := server.ListenAndServe(); err != nil {
 			log.Println(err)
 		}
@@ -222,191 +252,136 @@ func WaitForHttpServer() {
 			break
 		}
 	}
+	go grpcserver.TheGRPCServer.Stop()
+	go events.StopSender()
+	log.Printf("Deregistering peer [%s : %s] from registry", global.Self.Name, global.Self.Address)
+	go peer.DeregisterPeer(global.Self.Name, global.Self.Address)
 	StopHttpServer(httpServer)
 	StopHttpServer(jsonRPCServer)
 }
 
 func StopHttpServer(server *http.Server) {
 	log.Printf("HTTP Server %s started shutting down", server.Addr)
-	go grpcserver.TheGRPCServer.Stop()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	go events.StopSender()
-	log.Printf("Deregistering peer [%s : %s] from registry", global.Self.Name, global.Self.Address)
-	go peer.DeregisterPeer(global.Self.Name, global.Self.Address)
 	time.Sleep(time.Second)
 	server.Shutdown(ctx)
 	events.SendEventJSONDirect("Server Stopped", global.Self.HostLabel, listeners.GetListeners())
 	log.Printf("HTTP Server %s finished shutting down", server.Addr)
 }
 
-func AIHandler() http.Handler {
-	mcpHandler := mcpserver.MCPHandler()
-	agentsHandler := a2aserver.AgentsHandler()
-	mcpRouter := mux.NewRouter()
-	mcpRouter.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
-		return true
-	}).HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx, r, rs := util.WithRequestStore(r)
-		rs.Start()
-		port := util.GetRequestOrListenerPortNum(r)
-		r = r.WithContext(withPort(ctx, port))
-		reReader := util.CreateOrGetReReader(r.Body)
-		r.Body = reReader
-		if router.WillRoute(port, r) {
-			router.RoutingHandler(port).ServeHTTP(w, r)
+func HTTPHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if global.ServerConfig.Stopping && global.Funcs.IsReadinessProbe(r) {
+			util.CopyHeaders(HeaderStoppingReadinessRequest, r, w, nil, true, true, false)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		r, rs, l, err := initRequestStore(w, r)
+		if err != nil {
+			fmt.Fprintln(w, err.Error())
+			return
+		}
+		routeHandler := router.WillRoute(rs.RequestPortNum, r)
+		if routeHandler != nil {
+			routeHandler.ServeHTTP(w, r)
 		} else if rs.IsAdminRequest {
-			util.HTTPHandler.ServeHTTP(w, r)
-		} else if rs.IsMCP {
-			mcpHandler.ServeHTTP(w, r)
-		} else if rs.IsAI {
-			agentsHandler.ServeHTTP(w, r)
+			handleHTTP(l, w, r, rs)
 		} else {
-			util.HTTPHandler.ServeHTTP(w, r)
+			if rs.IsMCP || rs.IsAI {
+				aiHandler.ServeHTTP(w, r)
+			} else {
+				handleHTTP(l, w, r, rs)
+			}
+			statusCodeText := strconv.Itoa(rs.StatusCode)
+			metrics.UpdateURIRequestCount(r.RequestURI, statusCodeText)
+			metrics.UpdatePortRequestCount(rs.RequestPort, r.RequestURI)
 		}
 		go PrintLogMessages(0, 0, nil, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
-		rs.ReportTime(w)
-	})
-	return mcpRouter
-}
-
-func HTTPHandler(httpHandler, h2cHandler http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx, r, rs := util.WithRequestStore(r)
-		rs.Start()
-		l := listeners.GetListenerForPort(rs.RequestPortNum)
-		r = r.WithContext(withPort(ctx, util.GetRequestOrListenerPortNum(r)))
-		rs.ResponseWriter = w
-		if router.WillRoute(l.Port, r) {
-			router.RoutingHandler(l.Port).ServeHTTP(w, r)
-		} else if rs.IsGRPC {
-			r.ProtoMajor = 2
-			if rs.IsTLS {
-				rs.IsH2 = true
-				grpcserver.TheGRPCServer.Server.ServeHTTP(w, r)
-			} else {
-				rs.IsH2C = true
-				h2cHandler.ServeHTTP(w, r)
-			}
-		} else if l.IsHTTP2 && (util.IsH2Upgrade(r) || r.ProtoMajor == 2) {
-			if rs.IsTLS {
-				rs.IsH2 = true
-				httpHandler.ServeHTTP(w, r)
-			} else {
-				r.ProtoMajor = 2
-				rs.IsH2C = true
-				h2cHandler.ServeHTTP(w, r)
-			}
-		} else {
-			httpHandler.ServeHTTP(w, r)
+		if rs.ReReader != nil {
+			rs.ReReader.ReallyClose()
 		}
 		rs.ReportTime(w)
 	})
+}
+
+func handleHTTP(l *listeners.Listener, w http.ResponseWriter, r *http.Request, rs *util.RequestStore) {
+	if rs.IsGRPC {
+		r.ProtoMajor = 2
+		if rs.IsTLS {
+			rs.IsH2 = true
+			grpcserver.TheGRPCServer.Server.ServeHTTP(w, r)
+		} else {
+			rs.IsH2C = true
+			h2cHandler.ServeHTTP(w, r)
+		}
+	} else if l.IsHTTP2 && (util.IsH2Upgrade(r) || r.ProtoMajor == 2) {
+		if rs.IsTLS {
+			rs.IsH2 = true
+			httpHandler.ServeHTTP(w, r)
+		} else {
+			r.ProtoMajor = 2
+			rs.IsH2C = true
+			h2cHandler.ServeHTTP(w, r)
+		}
+	} else {
+		httpHandler.ServeHTTP(w, r)
+	}
 }
 
 func GRPCHandler(httpHandler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, r, rs := util.WithRequestStore(r)
-		rs.Start()
+		r, rs, _, err := initRequestStore(w, r)
+		if err != nil {
+			return
+		}
 		if rs.IsGRPC {
 			grpcserver.TheGRPCServer.Server.ServeHTTP(w, r)
 		} else {
 			httpHandler.ServeHTTP(w, r)
 		}
-		rs.ReportTime(w)
 	})
 }
 
-func ContextMiddleware(next http.Handler) http.Handler {
+func initRequestStore(w http.ResponseWriter, r *http.Request) (*http.Request, *util.RequestStore, *listeners.Listener, error) {
+	_, r, rs := util.WithRequestStore(r)
+	rs.ResponseWriter = w
+	l := listeners.GetListenerForPort(rs.RequestPortNum)
+	if l == nil {
+		return nil, nil, nil, fmt.Errorf("Port [%s] not configured", rs.RequestPortNum)
+	}
+	rs.IsJSONRPC = rs.IsJSONRPC || l.IsJSONRPC
+	rs.IsGRPC = rs.IsGRPC || l.IsGRPC
+	return r, rs, l, nil
+}
+
+func preIntercept() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if global.ServerConfig.Stopping && global.Funcs.IsReadinessProbe(r) {
-			util.CopyHeaders(HeaderStoppingReadinessRequest, r, w, nil, true, true, false)
-			w.WriteHeader(http.StatusNotFound)
-		} else if next != nil {
-			rs := util.GetRequestStore(r)
-			if !rs.RequestPortChecked {
-				if err := checkRequestPort(r); err != nil {
-					fmt.Fprintln(w, err.Error())
-					return
-				}
-			}
-			l := listeners.GetCurrentListener(r)
-			rs.IsJSONRPC = rs.IsJSONRPC || l.IsJSONRPC
-			rs.IsGRPC = rs.IsGRPC || l.IsGRPC
-			reReader := util.CreateOrGetReReader(r.Body)
-			r.Body = reReader
-			rs.BodyLength = reReader.Length()
-			next.ServeHTTP(w, r)
-			statusCodeText := strconv.Itoa(rs.StatusCode)
-			if !rs.IsAdminRequest {
-				metrics.UpdateURIRequestCount(r.RequestURI, statusCodeText)
-				metrics.UpdatePortRequestCount(rs.RequestPort, r.RequestURI)
-			}
-			go PrintLogMessages(rs.StatusCode, rs.BodyLength, nil, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
-			reReader.ReallyClose()
+		tunnel.CheckTunnelRequest(r)
+	})
+}
+
+func postIntercept() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rs := util.GetRequestStore(r)
+		statusCodeText := strconv.Itoa(rs.StatusCode)
+		if rs.IsTunnelRequest {
+			w.Header()[HeaderGotoTunnel] = r.Header[HeaderGotoRequestedTunnel]
+		} else if rs.WillProxy {
+			w.Header().Add(fmt.Sprintf("Proxy-%s", HeaderGotoResponseStatus), statusCodeText)
+		} else {
+			w.Header().Add(HeaderGotoResponseStatus, statusCodeText)
 		}
-	})
-}
-
-func IntereceptMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if next != nil {
-			rs := util.GetRequestStore(r)
-			var irw *intercept.InterceptResponseWriter
-			w, irw = intercept.WithIntercept(r, w)
-			tunnel.CheckTunnelRequest(r)
-			var statusCode int
-			next.ServeHTTP(w, r)
-			statusCode = http.StatusOK
-			if !rs.IsKnownNonTraffic && irw != nil {
-				statusCode = irw.StatusCode
+		if rs.IsTunnelConnectRequest {
+			if !tunnel.HijackConnect(r, w) {
+				w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoTunnelStatus, rs.TunnelCount), strconv.Itoa(http.StatusInternalServerError))
 			}
-			statusCodeText := strconv.Itoa(statusCode)
-			if rs.IsTunnelRequest {
-				w.Header()[HeaderGotoTunnel] = r.Header[HeaderGotoRequestedTunnel]
-			} else if rs.WillProxy {
-				irw.Header().Add(fmt.Sprintf("Proxy-%s", HeaderGotoResponseStatus), statusCodeText)
-			} else {
-				w.Header().Add(HeaderGotoResponseStatus, statusCodeText)
-			}
-			rs.ReportTime(w)
-			if rs.IsTunnelConnectRequest {
-				if !tunnel.HijackConnect(r, w) {
-					w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoTunnelStatus, rs.TunnelCount), strconv.Itoa(http.StatusInternalServerError))
-				}
-			}
-			if irw != nil {
-				irw.Proceed()
-			}
-			util.DiscardRequestBody(r)
 		}
 	})
 }
 
 func withConnContext(ctx context.Context, conn net.Conn) context.Context {
 	return context.WithValue(ctx, util.ConnectionKey, conn)
-}
-
-func withPort(ctx context.Context, port int) context.Context {
-	return context.WithValue(ctx, util.CurrentPortKey, port)
-}
-
-func checkRequestPort(r *http.Request) error {
-	uri := r.RequestURI
-	rs := util.GetRequestStore(r)
-	if !strings.HasPrefix(uri, "/port=") {
-		rs.RequestPortNum = util.GetListenerPortNum(r)
-		rs.RequestPort = strconv.Itoa(rs.RequestPortNum)
-	} else {
-		rs.RequestPort = strings.Split(strings.Split(uri, "/port=")[1], "/")[0]
-		rs.RequestPortNum, _ = strconv.Atoi(rs.RequestPort)
-		l := listeners.GetListenerForPort(rs.RequestPortNum)
-		if l == nil {
-			return fmt.Errorf("Port [%s] not configured", rs.RequestPort)
-		}
-	}
-	rs.RequestPortChecked = true
-	return nil
 }
 
 func RunStartupScript() {

@@ -29,11 +29,12 @@ import (
 )
 
 var (
-	RootRouter            *mux.Router
-	PortRouter            *mux.Router
-	portTunnelRouters     = map[string]*mux.Router{}
+	RootRouter *mux.Router
+	PortRouter *mux.Router
+	// portTunnelRouters     = map[string]*mux.Router{}
 	coRoutersMap          = map[*mux.Router][]*mux.Router{}
 	MatchRouter           *mux.Router
+	RoutePrefixRegexp     string
 	URIPrefixRegexParts   = []string{`^(\/port=.*)?`, `((\/)(.*))?(\?.*)?$`}
 	QueryParamRegex       = `(\?.*)?$`
 	GlobRegex             = `(.*)?`
@@ -52,6 +53,7 @@ func CreateRouters(coreRouter *mux.Router) *mux.Router {
 	portRoute := coreRouter.PathPrefix("/port={port}")
 	portRouteRegex, _ := portRoute.GetPathRegexp()
 	portRouteRegexp := regexp.MustCompile("(?i)" + portRouteRegex)
+	RoutePrefixRegexp = "(?i)(" + portRouteRegex + ")?"
 	PortRouter = portRoute.Subrouter()
 	RootRouter = coreRouter.PathPrefix("").Subrouter()
 	RootRouter.SkipClean(true)
@@ -167,19 +169,19 @@ func AddRoute(r *mux.Router, path string, f func(http.ResponseWriter, *http.Requ
 	}
 }
 
-func RegisterPortRoute(r *mux.Router, hijackPort bool, path string, f func(http.ResponseWriter, *http.Request), methods ...string) error {
-	lpath, err := r.NewRoute().BuildOnly().PathPrefix(path).GetPathTemplate()
-	if err != nil {
-		return err
-	}
-	if portTunnelRouters[lpath] == nil && hijackPort {
-		portTunnelRouters[lpath] = r.PathPrefix(path).Subrouter()
-	}
-	if portTunnelRouters[lpath] != nil {
-		AddRoute(portTunnelRouters[lpath], "", f, methods...)
-	}
-	return nil
-}
+// func RegisterPortRoute(r *mux.Router, hijackPort bool, path string, f func(http.ResponseWriter, *http.Request), methods ...string) error {
+// 	lpath, err := r.NewRoute().BuildOnly().PathPrefix(path).GetPathTemplate()
+// 	if err != nil {
+// 		return err
+// 	}
+// 	if portTunnelRouters[lpath] == nil && hijackPort {
+// 		portTunnelRouters[lpath] = r.PathPrefix(path).Subrouter()
+// 	}
+// 	if portTunnelRouters[lpath] != nil {
+// 		AddRoute(portTunnelRouters[lpath], "", f, methods...)
+// 	}
+// 	return nil
+// }
 
 func AddRouteWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), methods ...string) {
 	AddRoute(r, path, f, methods...)
@@ -315,6 +317,10 @@ func Unglob(s string) (string, bool) {
 }
 
 func GetURIRegexpAndRoute(uri string, router *mux.Router) (string, *regexp.Regexp, *mux.Router, *mux.Route, error) {
+	return getURIRegexpAndRoute(uri, router, "")
+}
+
+func getURIRegexpAndRoute(uri string, router *mux.Router, prefixRegexp string) (string, *regexp.Regexp, *mux.Router, *mux.Route, error) {
 	if uri != "" {
 		finalURI, glob := Unglob(strings.ToLower(uri))
 		vars := fillerRegexp.FindAllString(finalURI, -1)
@@ -332,16 +338,24 @@ func GetURIRegexpAndRoute(uri string, router *mux.Router) (string, *regexp.Regex
 			v2 = MarkFiller(v2 + ":[^/&\\?]*")
 			finalURI = strings.ReplaceAll(finalURI, v, v2)
 		}
-		subRouter := router.NewRoute().Subrouter()
-		route := subRouter.PathPrefix(finalURI)
-		if path, err := route.GetPathRegexp(); err == nil {
+		var subRouter *mux.Router
+		var route *mux.Route
+		var pathRegex string
+		var err error
+		if router != nil {
+			subRouter = router.NewRoute().Subrouter()
+			route = subRouter.PathPrefix(finalURI)
+			pathRegex, err = route.GetPathRegexp()
+		} else {
+			pathRegex = prefixRegexp + finalURI + "(.*)?"
+		}
+		if pathRegex != "" && err == nil {
 			//path = strings.ReplaceAll(path, "$", "(/.*)?$")
-			pattern := path
 			if glob {
-				pattern += GlobRegex
+				pathRegex += GlobRegex
 			}
-			pattern += QueryParamRegex
-			re := regexp.MustCompile("(?i)" + pattern)
+			pathRegex += QueryParamRegex
+			re := regexp.MustCompile("(?i)" + pathRegex)
 			return prefixURI, re, subRouter, route, nil
 		} else {
 			return uri, nil, nil, nil, err
@@ -350,28 +364,20 @@ func GetURIRegexpAndRoute(uri string, router *mux.Router) (string, *regexp.Regex
 	return uri, nil, nil, nil, fmt.Errorf("Empty URI")
 }
 
-func BuildURIAndPortMatcher(router *mux.Router, uri string, port int, handlerFunc func(w http.ResponseWriter, r *http.Request)) (string, *regexp.Regexp, *mux.Router, error) {
+func GetURIRegexp(uri string) (string, *regexp.Regexp, error) {
 	if uri != "" {
-		if prefixURI, re, subRouter, route, err := GetURIRegexpAndRoute(uri, router); err == nil {
-			route = route.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
-				rp := GetRequestOrListenerPortNum(r)
-				if rp != port {
-					return false
-				}
-				return re.MatchString(r.URL.Path)
-			}).HandlerFunc(handlerFunc)
-			RegisterPortRoute(router, true, uri, handlerFunc, "GET", "POST", "PUT", "DELETE", "OPTIONS")
-			return prefixURI, re, subRouter, nil
+		if prefixURI, re, _, _, err := getURIRegexpAndRoute(uri, nil, RoutePrefixRegexp); err == nil {
+			return prefixURI, re, nil
 		} else {
-			return uri, nil, nil, err
+			return uri, nil, err
 		}
 	}
-	return uri, nil, nil, fmt.Errorf("no uri")
+	return uri, nil, fmt.Errorf("no uri")
 }
 
 func BuildURIMatcher(uri string, handlerFunc func(w http.ResponseWriter, r *http.Request)) (string, *regexp.Regexp, *mux.Router, error) {
 	if uri != "" {
-		if prefixURI, re, rr, err := RegisterURIRouteAndGetRegex(uri, handlerFunc); err == nil {
+		if prefixURI, re, rr, err := registerURIRouteAndGetRegex(uri, handlerFunc); err == nil {
 			return prefixURI, re, rr, nil
 		} else {
 			return uri, nil, nil, err
@@ -380,7 +386,7 @@ func BuildURIMatcher(uri string, handlerFunc func(w http.ResponseWriter, r *http
 	return uri, nil, nil, fmt.Errorf("no uri")
 }
 
-func RegisterURIRouteAndGetRegex(uri string, handler func(http.ResponseWriter, *http.Request)) (string, *regexp.Regexp, *mux.Router, error) {
+func registerURIRouteAndGetRegex(uri string, handler func(http.ResponseWriter, *http.Request)) (string, *regexp.Regexp, *mux.Router, error) {
 	if prefixURI, re, subRouter, route, err := GetURIRegexpAndRoute(uri, MatchRouter); err == nil {
 		route = route.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
 			return re.MatchString(r.URL.Path)

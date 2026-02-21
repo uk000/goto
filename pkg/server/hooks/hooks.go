@@ -36,7 +36,7 @@ import (
 
 var (
 	Middleware         = middleware.NewMiddleware("hooks", setRoutes, middlewareFunc)
-	HeaderTrackingFunc func(port int, key, uri string, matchedHeaders [][2]string)
+	HeaderTrackingFunc func(port int, key, uri string, matchedHeaders map[string][]string)
 )
 
 type HTTPListener func(port int, uri string, requestHeaders map[string][]string, body io.Reader) bool
@@ -229,6 +229,18 @@ func (h *Hooks) AddHTTPHookWithListener(key, id, uri string, headers Headers, is
 	return nil
 }
 
+func (h *Hooks) AddHTTPTracking(key, uri string, headers Headers, isJSONRPC bool) error {
+	if uri == "" && headers == nil {
+		return fmt.Errorf("One of URI and Headers needed")
+	}
+	uri, uriPrefix, re, err := h.registerURI(uri, nil)
+	if err != nil {
+		return err
+	}
+	h.addHTTPHook(key, "", uri, uriPrefix, re, headers, isJSONRPC, nil)
+	return nil
+}
+
 func (h *Hooks) registerURI(uri string, httpHandler middleware.MiddlewareFunc) (luri, uriPrefix string, re *regexp.Regexp, err error) {
 	luri = strings.ToLower(uri)
 	if httpHandler != nil {
@@ -341,13 +353,13 @@ func (h *Hooks) RemoveHook(id string) {
 	}
 }
 
-func (h *Hooks) MatchHTTPRequest(uri string, headers map[string][]string) (allMatches map[string]*Hook, matchedHeaders map[string][][2]string) {
+func (h *Hooks) MatchHTTPRequest(uri string, headers map[string][]string) (allMatches map[string]*Hook, matchedHeaders map[string]map[string][]string) {
 	h.lock.RLock()
 	defer h.lock.RUnlock()
 	return matchRequest(uri, headers, h.httpHooks)
 }
 
-func (h *Hooks) MatchGRPCRequest(methodURI string) (allMatches map[string]*Hook, matchedHeaders map[string][][2]string) {
+func (h *Hooks) MatchGRPCRequest(methodURI string) (allMatches map[string]*Hook, matchedHeaders map[string]map[string][]string) {
 	h.lock.RLock()
 	defer h.lock.RUnlock()
 	return matchRequest(methodURI, nil, h.grpcHooks.hooks)
@@ -436,7 +448,7 @@ func (h *Hook) matchHeader(header string, values []string) (bool, string) {
 	return false, ""
 }
 
-func (h *Hook) match(uri string, headers map[string][]string, allMatches map[string]*Hook, matchedHeaders map[string][][2]string) bool {
+func (h *Hook) match(uri string, headers map[string][]string, allMatches map[string]*Hook, matchedHeaders map[string]map[string][]string) bool {
 	if !h.matchURI(uri) {
 		return false
 	}
@@ -447,18 +459,18 @@ func (h *Hook) match(uri string, headers map[string][]string, allMatches map[str
 		if matched, value := h.matchHeader(header, hvalues); matched {
 			if matchedHeaders != nil {
 				if matchedHeaders[h.Key] == nil {
-					matchedHeaders[h.Key] = [][2]string{}
+					matchedHeaders[h.Key] = map[string][]string{}
 				}
-				matchedHeaders[h.Key] = append(matchedHeaders[h.Key], [2]string{header, value})
+				matchedHeaders[h.Key][header] = []string{value}
 			}
 		}
 	}
 	return true
 }
 
-func matchRequest(uri string, headers map[string][]string, hooks map[string]*Hook) (allMatches map[string]*Hook, matchedHeaders map[string][][2]string) {
+func matchRequest(uri string, headers map[string][]string, hooks map[string]*Hook) (allMatches map[string]*Hook, matchedHeaders map[string]map[string][]string) {
 	allMatches = map[string]*Hook{}
-	matchedHeaders = map[string][][2]string{}
+	matchedHeaders = map[string]map[string][]string{}
 	for _, hook := range hooks {
 		hook.match(uri, headers, allMatches, matchedHeaders)
 	}

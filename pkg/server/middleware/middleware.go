@@ -30,7 +30,6 @@ var (
 	BaseMiddlewares         = []*Middleware{}
 	Middlewares             = []*Middleware{}
 	MiddlewareGRPCChainHead http.Handler
-	BaseRoutingChainHead    http.Handler
 	MiddlewareChainHead     http.Handler
 	middlewareRouter        *mux.Router
 )
@@ -80,10 +79,6 @@ func BaseHandlerFunc(getHandler func() http.Handler) http.Handler {
 	})
 }
 
-func BaseMiddlewareHandler() http.Handler {
-	return http.HandlerFunc(BaseRoutingChainHead.ServeHTTP)
-}
-
 func LinkBaseMiddlewareChain(r *mux.Router) {
 	for _, m := range BaseMiddlewares {
 		if m.SetRoutes != nil {
@@ -95,14 +90,11 @@ func LinkBaseMiddlewareChain(r *mux.Router) {
 	}
 	middlewareRouter = r
 	linkToGRPCChain := BaseHandlerFunc(func() http.Handler { return MiddlewareChainHead })
-	linkToRouer := BaseHandlerFunc(func() http.Handler { return middlewareRouter })
 	for i := len(BaseMiddlewares) - 1; i >= 0; i-- {
 		m := BaseMiddlewares[i]
 		if m.MiddlewareHandler != nil {
 			linkToGRPCChain = m.MiddlewareHandler(linkToGRPCChain)
 			MiddlewareGRPCChainHead = linkToGRPCChain
-			linkToRouer = m.MiddlewareHandler(linkToRouer)
-			BaseRoutingChainHead = linkToRouer
 		}
 	}
 }

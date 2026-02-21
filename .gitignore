@@ -5,3 +5,8 @@ go.sum
 bin/
 test/
 protos/
+vendor/
+*.pem
+*_bin*
+*.tar.gz
+*.code-workspace

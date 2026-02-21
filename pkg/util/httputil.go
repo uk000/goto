@@ -221,19 +221,17 @@ func GetListenerPortNum(r *http.Request) int {
 	return GetContextPort(r.Context())
 }
 
-func computeRequestPort(r *http.Request, rs *RequestStore) (port string, portNum int) {
-	if port, _ = GetStringParam(r, "port"); port != "" {
-		portNum, _ = strconv.Atoi(port)
+func checkRequestPort(r *http.Request, rs *RequestStore) (port string, portNum int) {
+	uri := r.RequestURI
+	if strings.HasPrefix(uri, "/port=") {
+		rs.RequestPort = strings.Split(strings.Split(uri, "/port=")[1], "/")[0]
+		rs.RequestPortNum, _ = strconv.Atoi(rs.RequestPort)
 	} else {
-		portNum = GetListenerPortNum(r)
-		port = strconv.Itoa(portNum)
+		rs.RequestPortNum = GetListenerPortNum(r)
+		rs.RequestPort = strconv.Itoa(rs.RequestPortNum)
 	}
-	if rs != nil {
-		rs.RequestPort = port
-		rs.RequestPortNum = portNum
-		rs.RequestPortChecked = true
-	}
-	return
+	rs.RequestPortChecked = true
+	return rs.RequestPort, rs.RequestPortNum
 }
 
 func getRequestOrListenerPort(r *http.Request) (port string, portNum int) {
@@ -241,7 +239,7 @@ func getRequestOrListenerPort(r *http.Request) (port string, portNum int) {
 	if rs != nil && rs.RequestPortChecked {
 		return rs.RequestPort, rs.RequestPortNum
 	}
-	return computeRequestPort(r, rs)
+	return checkRequestPort(r, rs)
 }
 
 func GetRequestOrListenerPort(r *http.Request) string {

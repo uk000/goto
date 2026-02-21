@@ -92,6 +92,7 @@ type RequestStore struct {
 	TunnelLock              sync.RWMutex
 	WillProxy               bool
 	ProxyTargets            interface{}
+	ReReader                *ReReader
 	Request                 *http.Request
 	ResponseWriter          http.ResponseWriter
 }
@@ -140,6 +141,12 @@ func WithRequestStore(r *http.Request) (context.Context, *http.Request, *Request
 	rs.IsTLS = r.TLS != nil
 	rs.Request = r
 	populateRequestStore(r)
+	rs.Start()
+	port := GetRequestOrListenerPortNum(r)
+	r = r.WithContext(context.WithValue(ctx, CurrentPortKey, port))
+	rs.ReReader = CreateOrGetReReader(r.Body)
+	r.Body = rs.ReReader
+	rs.BodyLength = rs.ReReader.Length()
 	return ctx, r, rs
 }
 

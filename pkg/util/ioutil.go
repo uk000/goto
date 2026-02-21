@@ -32,6 +32,10 @@ import (
 	"time"
 )
 
+var (
+	replacer = strings.NewReplacer("[", "", "]", "", ".", "", ":", "", "/", "", "@", "-")
+)
+
 type Type interface {
 	~string | ~bool | ~int | ~int64
 }
@@ -313,4 +317,8 @@ func GetCwd() string {
 
 func EmptyBody() io.Reader {
 	return io.NopCloser(strings.NewReader(""))
+}
+
+func Sanitize(name string) string {
+	return replacer.Replace(name)
 }

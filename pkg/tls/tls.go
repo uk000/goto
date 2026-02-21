@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"goto/pkg/global"
+	"goto/pkg/util"
 	"io"
 	"math/big"
 	"net"
@@ -108,6 +109,7 @@ func CreateCertificate(domain string, saveWithPrefix string) (*tls.Certificate, 
 		return &tls.Certificate{}, err
 	}
 	if saveWithPrefix != "" {
+		saveWithPrefix = util.Sanitize(saveWithPrefix)
 		saveWithPrefix = filepath.Join(global.ServerConfig.WorkDir, saveWithPrefix)
 		certFile := saveWithPrefix + "-cert.pem"
 		if certOut, err := os.Create(certFile); err != nil {

@@ -17,6 +17,7 @@ package tracking
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -66,9 +67,11 @@ func (rt *RequestTracking) getPortRequestTrackingData(port int, key string) *Tra
 	keyData, present := rt.KeyPort[key]
 	if !present {
 		keyData = map[int]*TrackingData{}
+		rt.KeyPort[key] = keyData
+	}
+	if keyData[port] == nil {
 		keyData[port] = &TrackingData{}
 		keyData[port].init()
-		rt.KeyPort[key] = keyData
 	}
 	return keyData[port]
 }
@@ -255,15 +258,23 @@ func track(port string, headers http.Header, uri string, rtd *TrackingData) {
 	if rtd == nil {
 		return
 	}
+	if _, present := rtd.ByURI[uri]; present {
+		rtd.ByURI[uri]++
+	}
 	for h, hd := range rtd.ByHeader {
 		if hv := headers.Get(h); hv != "" {
 			metrics.UpdateHeaderRequestCount(port, uri, h, hv)
 			hd.trackRequest(hv)
 		}
 	}
+	for h, hd := range rtd.ByURIAndHeader[uri] {
+		if hv := headers.Get(h); hv != "" {
+			hd.trackRequest(hv)
+		}
+	}
 }
 
-func Track(port int, key, uri string, matchedHeaders [][2]string) {
+func Track(port int, key, uri string, matchedHeaders map[string][]string) {
 	rtd := Tracker.getPortRequestTrackingData(port, key)
 	rtd.ByURI[uri]++
 	uriHeaders := rtd.ByURIAndHeader[uri]
@@ -271,16 +282,13 @@ func Track(port int, key, uri string, matchedHeaders [][2]string) {
 		uriHeaders = map[string]*HeaderData{}
 		rtd.ByURIAndHeader[uri] = uriHeaders
 	}
-	for _, hv := range matchedHeaders {
-		if len(hv) == 0 {
+	portText := strconv.Itoa(port)
+	for h, hvs := range matchedHeaders {
+		if len(hvs) == 0 {
 			continue
 		}
-		h := hv[0]
-		v := ""
-		if len(hv) > 1 {
-			v = hv[1]
-		}
-		metrics.UpdateHeaderRequestCount(string(port), uri, h, v)
+		v := hvs[0]
+		metrics.UpdateHeaderRequestCount(portText, uri, h, v)
 		if hd := rtd.ByHeader[h]; hd != nil {
 			hd.trackRequest(v)
 		}

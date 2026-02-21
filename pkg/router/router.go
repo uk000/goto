@@ -19,9 +19,11 @@ package router
 import (
 	"fmt"
 	"goto/pkg/metrics"
+	"goto/pkg/server/intercept"
+	"goto/pkg/server/request"
+	"goto/pkg/server/response"
 	"goto/pkg/transport"
 	"goto/pkg/util"
-	"io"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -53,25 +55,30 @@ type RouteTo struct {
 }
 
 type Route struct {
-	Label      string    `json:"label"`
-	From       RouteFrom `json:"from"`
-	To         RouteTo   `json:"to"`
-	LogBody    bool      `json:"logBody"`
-	Status     string    `json:"status"`
-	rootMatch  bool
-	basePrefix string
-	re         *regexp.Regexp
-	client     transport.ClientTransport
+	Label       string    `json:"label"`
+	From        RouteFrom `json:"from"`
+	To          RouteTo   `json:"to"`
+	LogBody     bool      `json:"logBody"`
+	ProcessReq  bool      `json:"processReq"`
+	ProcessResp bool      `json:"processResp"`
+	rootMatch   bool
+	basePrefix  string
+	re          *regexp.Regexp
+	client      transport.ClientTransport
+	handler     http.Handler
 }
 
 type PortRouter struct {
-	ID           string            `json:"id"`
-	Port         int               `json:"port"`
-	Routes       map[string]*Route `json:"routes"`
-	ActiveRoutes map[string]*Route
-	proxy        *httputil.ReverseProxy
-	intercept    transport.IHTTPTransportIntercept
-	lock         sync.RWMutex
+	ID                     string            `json:"id"`
+	Port                   int               `json:"port"`
+	Routes                 map[string]*Route `json:"routes"`
+	ActiveRoutes           map[string]*Route
+	proxy                  *httputil.ReverseProxy
+	intercept              transport.IHTTPTransportIntercept
+	requestHandler         http.Handler
+	responseHandler        http.Handler
+	requestResponseHandler http.Handler
+	lock                   sync.RWMutex
 }
 
 var (
@@ -80,12 +87,14 @@ var (
 	lock                 sync.RWMutex
 )
 
-func WillRoute(port int, r *http.Request) bool {
+func WillRoute(port int, r *http.Request) http.Handler {
 	route := GetPortRouter(port).GetMatchingRoute(r)
 	if route != nil {
-		return route.WillReroute(r)
+		if route.WillReroute(r) {
+			return route.handler
+		}
 	}
-	return false
+	return nil
 }
 
 func GetPortRouter(port int) *PortRouter {
@@ -108,9 +117,13 @@ func newPortRouter(port int) *PortRouter {
 	pr.intercept = client.Transport().AsHTTP()
 	pr.intercept.SetResponseIntercept(pr)
 	pr.proxy = &httputil.ReverseProxy{
-		Rewrite:   GetRewriter(pr),
+		Rewrite:   pr.GetRewriter(),
 		Transport: pr.intercept,
 	}
+
+	pr.requestHandler = intercept.IntereceptMiddleware(request.Middleware.MiddlewareHandler.Middleware(nil), nil)(pr.proxy)
+	pr.responseHandler = intercept.IntereceptMiddleware(nil, response.Middleware.MiddlewareHandler.Middleware(nil))(pr.proxy)
+	pr.requestResponseHandler = intercept.IntereceptMiddleware(request.Middleware.MiddlewareHandler.Middleware(nil), response.Middleware.MiddlewareHandler.Middleware(nil))(pr.proxy)
 	return pr
 }
 
@@ -127,7 +140,15 @@ func (pr *PortRouter) AddRoute(r *Route) {
 	pr.Routes[r.Label] = r
 	r.To.RequestHeaders.Remove = util.ToLowerHeader(r.To.RequestHeaders.Remove)
 	r.To.ResponseHeaders.Remove = util.ToLowerHeader(r.To.ResponseHeaders.Remove)
-	r.Status = "Added"
+	if r.ProcessReq && r.ProcessResp {
+		r.handler = pr.requestResponseHandler
+	} else if r.ProcessReq {
+		r.handler = pr.requestHandler
+	} else if r.ProcessResp {
+		r.handler = pr.responseHandler
+	} else {
+		r.handler = pr.proxy
+	}
 }
 
 func (pr *PortRouter) AddActiveRoute(id string, r *Route) {
@@ -151,8 +172,35 @@ func (pr *PortRouter) GetMatchingRoute(r *http.Request) *Route {
 	return nil
 }
 
+func (pr *PortRouter) GetRewriter() func(*httputil.ProxyRequest) {
+	return func(proxyReq *httputil.ProxyRequest) {
+		route := pr.GetMatchingRoute(proxyReq.In)
+		if route == nil {
+			return
+		}
+		if !route.WillReroute(proxyReq.In) {
+			return
+		}
+		id := strconv.Itoa(int(RequestCorrelationID.Add(1)))
+		req, rs, err := route.prepareRequest(proxyReq.In, id)
+		if err != nil {
+			log.Printf("Routing ID [%s]: Request URI [%s]: Failed to prepare upstream request with error [%s]\n", id, proxyReq.In.RequestURI, err.Error())
+			return
+		}
+		proxyReq.Out = req
+		pr.AddActiveRoute(id, route)
+		body := ""
+		if route.LogBody {
+			body = string(rs.ReReader.Content)
+		}
+		log.Printf("Routing ID [%s]: Request URI [%s]: Routing to upstream [%s], URI [%s], Headers [%+v], Body [%s]\n",
+			id, proxyReq.In.RequestURI, route.To.URL, proxyReq.Out.RequestURI, proxyReq.Out.Header, body)
+	}
+}
+
 func (pr *PortRouter) Intercept(resp *http.Response) {
 	req := resp.Request
+	util.GetRequestStore(req)
 	rr := util.CreateOrGetReReader(resp.Body)
 	resp.Body = rr
 	id := req.Header.Get("X-Correlation-ID")
@@ -208,7 +256,7 @@ func (r *Route) Setup() error {
 		uri = "/*"
 		r.rootMatch = true
 	}
-	if prefix, re, _, err := util.BuildURIAndPortMatcher(util.PortRouter, uri, r.From.Port, r.RouteRequest); err == nil {
+	if prefix, re, err := util.GetURIRegexp(uri); err == nil {
 		r.basePrefix = prefix
 		r.re = re
 		r.client = transport.CreateDefaultHTTPClient(r.Label, r.To.IsH2, r.To.IsTLS, metrics.ConnTracker)
@@ -219,50 +267,51 @@ func (r *Route) Setup() error {
 	return nil
 }
 
-func (r *Route) RouteRequest(w http.ResponseWriter, hr *http.Request) {
-	//	uri := string(r.re.ReplaceAll([]byte(hr.RequestURI), []byte(r.To.URIPrefix)))
-	uri := hr.RequestURI
-	rr := util.CreateOrGetReReader(hr.Body)
-	id := strconv.Itoa(int(RequestCorrelationID.Add(1)))
-	req, err := r.prepareRequest(hr, rr, id)
-	msg := fmt.Sprintf("Routing ID [%s]: Request URI [%s], Routing to upstream [%s], URI [%s], Headers [%+v], Body [%s] ",
-		id, hr.RequestURI, r.To.URL, uri, hr.Header, string(rr.Content))
-	util.AddLogMessage(msg, hr)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		msg = fmt.Sprintf("Routing ID [%s]: Failed to prepare upstream request with error [%s]", id, err.Error())
-		fmt.Fprintln(w, msg)
-	} else {
-		resp, err := r.client.HTTP().Do(req)
-		if err != nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			msg = fmt.Sprintf("Routing ID [%s]: Upstream request failed with error [%s]", id, err.Error())
-			fmt.Fprintln(w, msg)
-		} else {
-			prepareHeaders(resp.Header, w.Header(), r.To.ResponseHeaders)
-			rr = util.CreateOrGetReReader(resp.Body)
-			rr.Rewind()
-			if len, err := io.Copy(w, rr); err != nil {
-				msg = fmt.Sprintf("Routing ID [%s]: Downstream response failed with error [%s]", id, err.Error())
-			} else if len != int64(rr.Length()) {
-				msg = fmt.Sprintf("Routing ID [%s]: Downstream response length [%d] didn't match upstream response length [%d]", id, len, rr.Length())
-			} else {
-				msg = fmt.Sprintf("Routing ID [%s]: Request URI [%s], Routed successfully to upstream [%s]. Response Headers [%+v], Response Body [%s]",
-					id, hr.RequestURI, r.To.URL, w.Header(), string(rr.Content))
-			}
-		}
-	}
-	util.AddLogMessage(msg, hr)
-}
+// func (r *Route) RouteRequest(w http.ResponseWriter, hr *http.Request) {
+// 	//	uri := string(r.re.ReplaceAll([]byte(hr.RequestURI), []byte(r.To.URIPrefix)))
+// 	uri := hr.RequestURI
+// 	rr := util.CreateOrGetReReader(hr.Body)
+// 	id := strconv.Itoa(int(RequestCorrelationID.Add(1)))
+// 	req, err := r.prepareRequest(hr, rr, id)
+// 	msg := fmt.Sprintf("Routing ID [%s]: Request URI [%s], Routing to upstream [%s], URI [%s], Headers [%+v], Body [%s] ",
+// 		id, hr.RequestURI, r.To.URL, uri, hr.Header, string(rr.Content))
+// 	util.AddLogMessage(msg, hr)
+// 	if err != nil {
+// 		w.WriteHeader(http.StatusBadRequest)
+// 		msg = fmt.Sprintf("Routing ID [%s]: Failed to prepare upstream request with error [%s]", id, err.Error())
+// 		fmt.Fprintln(w, msg)
+// 	} else {
+// 		resp, err := r.client.HTTP().Do(req)
+// 		if err != nil {
+// 			w.WriteHeader(http.StatusServiceUnavailable)
+// 			msg = fmt.Sprintf("Routing ID [%s]: Upstream request failed with error [%s]", id, err.Error())
+// 			fmt.Fprintln(w, msg)
+// 		} else {
+// 			prepareHeaders(resp.Header, w.Header(), r.To.ResponseHeaders)
+// 			rr = util.CreateOrGetReReader(resp.Body)
+// 			rr.Rewind()
+// 			if len, err := io.Copy(w, rr); err != nil {
+// 				msg = fmt.Sprintf("Routing ID [%s]: Downstream response failed with error [%s]", id, err.Error())
+// 			} else if len != int64(rr.Length()) {
+// 				msg = fmt.Sprintf("Routing ID [%s]: Downstream response length [%d] didn't match upstream response length [%d]", id, len, rr.Length())
+// 			} else {
+// 				msg = fmt.Sprintf("Routing ID [%s]: Request URI [%s], Routed successfully to upstream [%s]. Response Headers [%+v], Response Body [%s]",
+// 					id, hr.RequestURI, r.To.URL, w.Header(), string(rr.Content))
+// 			}
+// 		}
+// 	}
+// 	util.AddLogMessage(msg, hr)
+// }
 
-func (r *Route) prepareRequest(inReq *http.Request, rr *util.ReReader, id string) (req *http.Request, err error) {
+func (r *Route) prepareRequest(inReq *http.Request, id string) (req *http.Request, rs *util.RequestStore, err error) {
+	rs = util.GetRequestStore(inReq)
 	uri := inReq.RequestURI
 	if r.To.URIPrefix != "" {
 		uri = strings.Replace(uri, r.From.URIPrefix, r.To.URIPrefix, 1)
 	}
-	req, err = http.NewRequest(inReq.Method, r.To.URL+uri, rr)
+	req, err = http.NewRequest(inReq.Method, r.To.URL+uri, rs.ReReader)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	prepareHeaders(inReq.Header, req.Header, r.To.RequestHeaders)
 	if r.To.Authority != "" {
@@ -294,36 +343,5 @@ func prepareHeaders(inHeaders, outHeaders http.Header, overrides *Headers) {
 		for k, v := range overrides.Add {
 			outHeaders[k] = []string{v}
 		}
-	}
-}
-
-func RoutingHandler(port int) http.Handler {
-	return GetPortRouter(port).proxy
-}
-
-func GetRewriter(router *PortRouter) func(*httputil.ProxyRequest) {
-	return func(pr *httputil.ProxyRequest) {
-		route := router.GetMatchingRoute(pr.In)
-		if route == nil {
-			return
-		}
-		if !route.WillReroute(pr.In) {
-			return
-		}
-		id := strconv.Itoa(int(RequestCorrelationID.Add(1)))
-		rr := util.SetAndGetReReader(pr.In)
-		req, err := route.prepareRequest(pr.In, rr, id)
-		if err != nil {
-			log.Printf("Routing ID [%s]: Request URI [%s]: Failed to prepare upstream request with error [%s]\n", id, pr.In.RequestURI, err.Error())
-			return
-		}
-		pr.Out = req
-		router.AddActiveRoute(id, route)
-		body := ""
-		if route.LogBody {
-			body = string(rr.Content)
-		}
-		log.Printf("Routing ID [%s]: Request URI [%s]: Routing to upstream [%s], URI [%s], Headers [%+v], Body [%s]\n",
-			id, pr.In.RequestURI, route.To.URL, pr.Out.RequestURI, pr.Out.Header, body)
 	}
 }
