@@ -156,10 +156,10 @@ func newScriptFromCommands(name string, lines []string) *Script {
 func (s *Script) run(args []string, in io.Reader, out io.Writer) {
 	var command string
 	if s.FilePath != "" {
-		log.Printf("Script [%s]: Running script from file [%s].\n", s.Name, s.FilePath)
+		log.Printf("Script [%s]: Running script from file [%s] with args [%+v].\n", s.Name, s.FilePath, args)
 		command = s.FilePath
 	} else if s.Text != "" {
-		log.Printf("Script [%s]: Running script from content.\n", s.Name)
+		log.Printf("Script [%s]: Running script from content with args [%+v].\n", s.Name, args)
 		command = "sh"
 		args = append([]string{"-c", s.Text}, args...)
 	}

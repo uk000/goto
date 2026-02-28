@@ -66,22 +66,25 @@ func NewStatusManager() *StatusManager {
 }
 
 func newStatusConfig(uriPrefix, header, headerValue string, statusCodes []int, times int, present bool) *StatusConfig {
-	return &StatusConfig{
+	sc := &StatusConfig{
 		Statuses: statusCodes,
 		Times:    times,
 		Match: &StatusMatch{
 			URIMatch: &StatusURIMatch{
 				Prefix: uriPrefix,
 			},
-			HeaderMatches: []*StatusHeaderMatch{
-				{
-					Header:      header,
-					HeaderValue: headerValue,
-					Present:     &present,
-				},
-			},
+			HeaderMatches: []*StatusHeaderMatch{},
 		},
 	}
+	header = strings.TrimSpace(header)
+	if header != "" {
+		sc.Match.HeaderMatches = append(sc.Match.HeaderMatches, &StatusHeaderMatch{
+			Header:      header,
+			HeaderValue: headerValue,
+			Present:     &present,
+		})
+	}
+	return sc
 }
 
 func (s *StatusManager) Clear(port int) {

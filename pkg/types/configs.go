@@ -101,6 +101,7 @@ type ServerConfig struct {
 	StartupDelay  time.Duration
 	ShutdownDelay time.Duration
 	StartupScript []string
+	ConfigPaths   []string
 	Stopping      bool
 	MaxMTUSize    int
 }

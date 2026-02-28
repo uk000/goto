@@ -56,7 +56,7 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 		server, tool := getServerAndTool(r)
 		ps := GetPortMCPServers(l.Port)
 		if server == nil && rs.IsMCP {
-			server = ps.DefaultServer
+			server = ps.defaultServer
 			if server == nil {
 				isStateless := strings.Contains(r.RequestURI, "/stateless")
 				if isStateless {
@@ -182,7 +182,7 @@ func getServerAndTool(r *http.Request) (*MCPServer, *MCPTool) {
 				log.Printf("Falling back to Default MCP Server [%s] on port [%d]", DefaultStatelessServer.Name, port)
 				server = DefaultStatelessServer
 			} else {
-				server = ps.DefaultServer
+				server = ps.defaultServer
 				log.Printf("MCP Server [%s] not found on port [%d], using PortDefault server [%s]", serverName, port, server.Name)
 			}
 		}
@@ -220,8 +220,8 @@ func findServerForURI(uri string) (matchedURI string, server *MCPServer) {
 		}
 	} else {
 		matchedURI = uri
+		server = GetMCPServer(pair.LeftS())
 	}
-	log.Printf("Matced URI = [%s] vs original URI: %s\n", matchedURI, uri)
 	return
 }
 

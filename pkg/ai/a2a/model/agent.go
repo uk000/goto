@@ -42,50 +42,50 @@ type IAgentCallContext interface {
 }
 
 type Agent struct {
-	ID       string                `json:"id"`
-	Card     *trpcserver.AgentCard `json:"card"`
-	Behavior *AgentBehavior        `json:"behavior,omitempty"`
-	Config   *AgentConfig          `json:"config,omitempty"`
-	Server   *trpcserver.A2AServer `json:"-"`
-	Port     int                   `json:"-"`
+	ID       string                `yaml:"-" json:"id"`
+	Card     *trpcserver.AgentCard `yaml:"card" json:"card"`
+	Behavior *AgentBehavior        `yaml:"behavior,omitempty" json:"behavior,omitempty"`
+	Config   *AgentConfig          `yaml:"config,omitempty" json:"config,omitempty"`
+	Server   *trpcserver.A2AServer `yaml:"-" json:"-"`
+	Port     int                   `yaml:"-" json:"-"`
 }
 
 type AgentBehavior struct {
-	Echo      bool           `json:"echo,omitempty"`
-	Stream    bool           `json:"stream,omitempty"`
-	Federate  bool           `json:"federate,omitempty"`
-	HTTPProxy bool           `json:"httpProxy,omitempty"`
-	Impl      IAgentBehavior `json:"-"`
+	Echo      bool           `yaml:"echo,omitempty" json:"echo,omitempty"`
+	Stream    bool           `yaml:"stream,omitempty" json:"stream,omitempty"`
+	Federate  bool           `yaml:"federate,omitempty" json:"federate,omitempty"`
+	HTTPProxy bool           `yaml:"httpProxy,omitempty" json:"httpProxy,omitempty"`
+	Impl      IAgentBehavior `yaml:"-" json:"-"`
 }
 
 type AgentConfig struct {
-	Delay           *types.Delay     `json:"delay,omitempty"`
-	ResponsePayload *payload.Payload `json:"response,omitempty"`
-	Delegates       *DelegateConfig  `json:"delegates,omitempty"`
+	Delay           *types.Delay     `yaml:"delay,omitempty" json:"delay,omitempty"`
+	ResponsePayload *payload.Payload `yaml:"response,omitempty" json:"response,omitempty"`
+	Delegates       *DelegateConfig  `yaml:"delegates,omitempty" json:"delegates,omitempty"`
 }
 
 type DelegateServer struct {
-	URL       string `json:"url"`
-	Authority string `json:"authority,omitempty"`
+	URL       string `yaml:"url" json:"url"`
+	Authority string `yaml:"authority,omitempty" json:"authority,omitempty"`
 }
 
 type DelegateToolCall struct {
-	Triggers []string                   `json:"triggers"`
-	ToolCall mcpclient.ToolCall         `json:"toolCall,omitempty"`
-	Servers  map[string]*DelegateServer `json:"servers"`
+	Triggers []string                   `yaml:"triggers" json:"triggers"`
+	ToolCall mcpclient.ToolCall         `yaml:"toolCall,omitempty" json:"toolCall,omitempty"`
+	Servers  map[string]*DelegateServer `yaml:"servers" json:"servers"`
 }
 
 type DelegateAgentCall struct {
-	Triggers  []string                   `json:"triggers"`
-	AgentCall a2aclient.AgentCall        `json:"agentCall,omitempty"`
-	Servers   map[string]*DelegateServer `json:"servers"`
+	Triggers  []string                   `yaml:"triggers" json:"triggers"`
+	AgentCall a2aclient.AgentCall        `yaml:"agentCall,omitempty" json:"agentCall,omitempty"`
+	Servers   map[string]*DelegateServer `yaml:"servers" json:"servers"`
 }
 
 type DelegateConfig struct {
-	Tools    map[string]*DelegateToolCall  `json:"tools,omitempty"`
-	Agents   map[string]*DelegateAgentCall `json:"agents,omitempty"`
-	MaxCalls int                           `json:"maxCalls,omitempty"`
-	Parallel bool                          `json:"parallel,omitempty"`
+	Tools    map[string]*DelegateToolCall  `yaml:"tools,omitempty" json:"tools,omitempty"`
+	Agents   map[string]*DelegateAgentCall `yaml:"agents,omitempty" json:"agents,omitempty"`
+	MaxCalls int                           `yaml:"maxCalls,omitempty" json:"maxCalls,omitempty"`
+	Parallel bool                          `yaml:"parallel,omitempty" json:"parallel,omitempty"`
 }
 
 func (a *Agent) GetCard() *trpcserver.AgentCard {

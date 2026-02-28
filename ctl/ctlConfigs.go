@@ -16,26 +16,6 @@
 
 package ctl
 
-type GotoConfig struct {
-	Name     string    `yaml:"name"`
-	Scripts  *Scripts  `yaml:"scripts,omitempty"`
-	GRPC     *GRPC     `yaml:"grpc,omitempty"`
-	Registry *Registry `yaml:"registry,omitempty"`
-	Traffic  *Traffic  `yaml:"traffic,omitempty"`
-	Jobs     *Jobs     `yaml:"jobs,omitempty"`
-}
-
-type Scripts struct {
-	Config []*ScriptConfig `yaml:"config,omitempty"`
-	Run    []string        `yaml:"run,omitempty"`
-}
-
-type ScriptConfig struct {
-	Name     string `yaml:"name"`
-	FilePath string `yaml:"filePath,omitempty"`
-	Content  string `yaml:"content,omitempty"`
-}
-
 type GRPC struct {
 	Config []*GRPCConfig `yaml:"config,omitempty"`
 	Serve  []string      `yaml:"serve,omitempty"`

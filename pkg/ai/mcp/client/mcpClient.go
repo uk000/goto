@@ -86,7 +86,15 @@ type MCPClient struct {
 	mcpTransport   *MCPClientInterceptTransport
 	progressChan   chan string
 	client         *gomcp.Client
+	clientPayload  *MCPNamedClientPayload
 	lock           sync.RWMutex
+}
+
+type MCPNamedClientPayload struct {
+	Name          string
+	ElicitPayload *MCPClientPayload
+	SamplePayload *MCPClientPayload
+	Roots         []*gomcp.Root
 }
 
 type MCPClientInterceptTransport struct {
@@ -96,30 +104,56 @@ type MCPClientInterceptTransport struct {
 }
 
 var (
-	Counter       = atomic.Int32{}
-	ElicitPayload *MCPClientPayload
-	SamplePayload *MCPClientPayload
-	Roots         = []*gomcp.Root{}
-	lock          sync.RWMutex
+	Counter              = atomic.Int32{}
+	NamedClientPayloads  = map[string]*MCPNamedClientPayload{}
+	DefaultClientPayload *MCPNamedClientPayload
+	lock                 sync.RWMutex
 )
 
-func AddPayload(kind string, b []byte) error {
+func getOrCreateNamedClientPayload(name string) *MCPNamedClientPayload {
 	lock.Lock()
 	defer lock.Unlock()
+	namedClientPayload := NamedClientPayloads[name]
+	if namedClientPayload == nil {
+		namedClientPayload = &MCPNamedClientPayload{}
+		NamedClientPayloads[name] = namedClientPayload
+		DefaultClientPayload = namedClientPayload
+	}
+	return namedClientPayload
+}
+
+func getNamedClientPayload(name string) *MCPNamedClientPayload {
+	lock.RLock()
+	defer lock.RUnlock()
+	namedClientPayload := NamedClientPayloads[name]
+	if namedClientPayload == nil {
+		namedClientPayload = DefaultClientPayload
+	}
+	return namedClientPayload
+}
+
+func AddPayload(name, kind string, b []byte) error {
 	payload := &MCPClientPayload{}
 	if err := json.Unmarshal(b, &payload); err != nil {
 		return err
 	}
+	namedClientPayload := getOrCreateNamedClientPayload(name)
 	if kind == "elicit" {
-		ElicitPayload = payload
+		namedClientPayload.ElicitPayload = payload
 	} else {
-		SamplePayload = payload
+		namedClientPayload.SamplePayload = payload
 	}
 	return nil
 }
 
-func SetRoots(roots []*gomcp.Root) {
-	Roots = roots
+func SetRoots(name string, payload []byte) error {
+	var roots []*gomcp.Root
+	if err := util.ReadJsonFromBytes(payload, &roots); err != nil {
+		return err
+	}
+	namedClientPayload := getOrCreateNamedClientPayload(name)
+	namedClientPayload.Roots = roots
+	return nil
 }
 
 func NewClient(port int, sse bool, callerId string, headers http.Header, progressChan chan string) *MCPClient {
@@ -153,8 +187,10 @@ func newMCPClient(sse bool, name, callerId string, headers http.Header, progress
 		LoggingMessageHandler:       m.LoggingMessageHandler,
 		ProgressNotificationHandler: m.ProgressNotificationHandler,
 	})
-
-	m.client.AddRoots(Roots...)
+	m.clientPayload = getNamedClientPayload(name)
+	if m.clientPayload != nil {
+		m.client.AddRoots(m.clientPayload.Roots...)
+	}
 	m.client.AddSendingMiddleware(m.SendingMiddleware)
 	m.client.AddReceivingMiddleware(m.ReceivingMiddleware)
 	if t, ok := ht.Transport().(*transport.HTTPTransportIntercept); ok {
@@ -375,18 +411,22 @@ func (c *MCPClient) ElicitationHandler(ctx context.Context, req *gomcp.ElicitReq
 		responseContent["requestParams"] = req.Params
 	}
 	action := "approve"
-	if ElicitPayload != nil {
-		msg = fmt.Sprintf("%s %s --> %s", label, msg, ElicitPayload.Contents[types.Random(len(ElicitPayload.Contents))])
-		if ElicitPayload.Delay != nil {
+	var elicitPayload *MCPClientPayload
+	if c.clientPayload != nil {
+		elicitPayload = c.clientPayload.ElicitPayload
+	}
+	if elicitPayload != nil {
+		msg = fmt.Sprintf("%s %s --> %s", label, msg, elicitPayload.Contents[types.Random(len(elicitPayload.Contents))])
+		if elicitPayload.Delay != nil {
 			msg = fmt.Sprintf("%s --> Will delay", msg)
 		}
-		action = ElicitPayload.Actions[types.Random(len(ElicitPayload.Actions))]
+		action = elicitPayload.Actions[types.Random(len(elicitPayload.Actions))]
 	}
 	if s.mcpClient.progressChan != nil {
 		s.mcpClient.progressChan <- msg
 	}
-	if ElicitPayload != nil && ElicitPayload.Delay != nil {
-		delay := ElicitPayload.Delay.ComputeAndApply()
+	if elicitPayload != nil && elicitPayload.Delay != nil {
+		delay := elicitPayload.Delay.ComputeAndApply()
 		msg = fmt.Sprintf("%s --> Delaying for %s", msg, delay.String())
 		responseContent["delay"] = delay.String()
 	}
@@ -402,10 +442,15 @@ func (c *MCPClient) ElicitationHandler(ctx context.Context, req *gomcp.ElicitReq
 func (c *MCPClient) CreateMessageHandler(ctx context.Context, req *gomcp.CreateMessageRequest) (*gomcp.CreateMessageResult, error) {
 	isElicit := strings.Contains(req.Params.SystemPrompt, "elicit")
 	task := "Sampling/Message"
-	payload := SamplePayload
+	var payload *MCPClientPayload
+	if c.clientPayload != nil {
+		payload = c.clientPayload.SamplePayload
+	}
 	if isElicit {
 		task = "Elicitation"
-		payload = ElicitPayload
+		if c.clientPayload != nil {
+			payload = c.clientPayload.ElicitPayload
+		}
 	}
 	label := fmt.Sprintf("%s[%s]", c.CallerId, task)
 	msg := ""

@@ -207,7 +207,7 @@ func ProxyGRPCStream(ctx context.Context, port int, method *gotogrpc.GRPCService
 
 func (p *GRPCProxy) createResponse(method *gotogrpc.GRPCServiceMethod, json any) (msg proto.Message, err error) {
 	msg = dynamicpb.NewMessage(method.OutputType())
-	err = protojson.Unmarshal(util.ToBytes(json), msg)
+	err = protojson.Unmarshal(util.ToJSONBytes(json), msg)
 	return
 }
 

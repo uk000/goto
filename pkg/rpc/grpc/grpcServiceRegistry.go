@@ -464,7 +464,7 @@ func payloadsToMessages(payloads [][]byte, desc protoreflect.MessageDescriptor) 
 	for _, payload := range payloads {
 		json := util.JSONFromBytes(payload)
 		msg := dynamicpb.NewMessage(desc)
-		if err = fillInput(msg, util.ToBytes(json)); err != nil {
+		if err = fillInput(msg, util.ToJSONBytes(json)); err != nil {
 			return nil, err
 		} else {
 			log.Printf("payloadsToMessages: %+v, %+s\n", json, protojson.Format(msg))
@@ -477,7 +477,7 @@ func payloadsToMessages(payloads [][]byte, desc protoreflect.MessageDescriptor) 
 func jsonsToMessages(jsons []any, desc protoreflect.MessageDescriptor) (messages []proto.Message, err error) {
 	for _, json := range jsons {
 		msg := dynamicpb.NewMessage(desc)
-		if err = fillInput(msg, util.ToBytes(json)); err != nil {
+		if err = fillInput(msg, util.ToJSONBytes(json)); err != nil {
 			return nil, err
 		} else {
 			messages = append(messages, msg)

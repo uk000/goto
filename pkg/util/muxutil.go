@@ -444,9 +444,9 @@ func GetBoolParamValue(r *http.Request, param string, defaultVal ...bool) bool {
 }
 
 func GetListParam(r *http.Request, param string) ([]string, bool) {
-	values := []string{}
-	if v, present := GetStringParam(r, param); present {
-		values = strings.Split(v, ",")
+	values := r.URL.Query()[param]
+	if len(values) == 1 {
+		values = strings.Split(values[0], ",")
 	}
 	return values, len(values) > 0 && len(values[0]) > 0
 }

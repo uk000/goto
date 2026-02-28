@@ -91,6 +91,7 @@ type ServerArgs struct {
 	LogResponseBody     string
 	LogResponseMiniBody string
 	StartupScript       string
+	ConfigPaths         string
 	KubeConfig          string
 	Debug               string
 }
@@ -201,6 +202,7 @@ var (
 		LogResponseBody:     "logResponseBody",
 		LogResponseMiniBody: "logResponseMiniBody",
 		StartupScript:       "startupScript",
+		ConfigPaths:         "config",
 		KubeConfig:          "kubeConfig",
 		Debug:               "debug",
 	}
@@ -237,6 +239,7 @@ var (
 		LogResponseBody:     "Enable/Disable logging of response body",
 		LogResponseMiniBody: "Enable/Disable logging of response mini body",
 		StartupScript:       "Script to execute at startup",
+		ConfigPaths:         "Path(s) for config files/folders to load at startup",
 		KubeConfig:          "Path to Kubernetes config file",
 		Debug:               "Debug logs",
 	}}
@@ -248,6 +251,7 @@ var (
 	retryOn       string
 	portsList     string
 	startupScript types.ListArg
+	configPaths   types.ListArg
 )
 
 func setupCtlArgs() {
@@ -325,6 +329,7 @@ func setupServerArgs() {
 	flag.DurationVar(&global.ServerConfig.StartupDelay, sa.StartupDelay, 1*time.Second, sh.StartupDelay)
 	flag.DurationVar(&global.ServerConfig.ShutdownDelay, sa.ShutdownDelay, 1*time.Second, sh.ShutdownDelay)
 	flag.Var(&startupScript, sa.StartupScript, sh.StartupScript)
+	flag.Var(&configPaths, sa.ConfigPaths, sh.ConfigPaths)
 }
 
 func runInits() {
@@ -347,6 +352,9 @@ func processServerArgs() {
 	log.Printf("Server startupDelay [%s] shutdownDelay [%s]\n", global.ServerConfig.StartupDelay, global.ServerConfig.ShutdownDelay)
 	if startupScript != nil {
 		global.ServerConfig.StartupScript = startupScript
+	}
+	if configPaths != nil {
+		global.ServerConfig.ConfigPaths = configPaths
 	}
 }
 

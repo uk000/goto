@@ -26,29 +26,32 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 type Payload struct {
-	IsStream    bool         `json:"isStream,omitempty"`
-	StreamCount int          `json:"streamCount,omitempty"`
-	Delay       *types.Delay `json:"delay,omitempty"`
-	JSON        util.JSON    `json:"json,omitempty"`
-	Text        string       `json:"text,omitempty"`
-	Raw         any          `json:"raw,omitempty"`
-	JSONStream  []util.JSON  `json:"jsonStream,omitempty"`
-	TextStream  []string     `json:"textStream,omitempty"`
-	RawStream   []any        `json:"rawStream,omitempty"`
+	IsStream    bool         `yaml:"isStream,omitempty" json:"isStream,omitempty"`
+	StreamCount int          `yaml:"streamCount,omitempty" json:"streamCount,omitempty"`
+	Delay       *types.Delay `yaml:"delay,omitempty" json:"delay,omitempty"`
+	JSON        util.JSON    `yaml:"json,omitempty" json:"json,omitempty"`
+	Text        string       `yaml:"text,omitempty" json:"text,omitempty"`
+	Raw         any          `yaml:"raw,omitempty" json:"raw,omitempty"`
+	JSONStream  []util.JSON  `yaml:"jsonStream,omitempty" json:"jsonStream,omitempty"`
+	TextStream  []string     `yaml:"textStream,omitempty" json:"textStream,omitempty"`
+	RawStream   []any        `yaml:"rawStream,omitempty" json:"rawStream,omitempty"`
 }
 
 type PayloadMarshal struct {
-	StreamCount int              `json:"streamCount,omitempty"`
-	Delay       *types.Delay     `json:"delay,omitempty"`
-	JSON        map[string]any   `json:"json,omitempty"`
-	Text        string           `json:"text,omitempty"`
-	Raw         any              `json:"raw,omitempty"`
-	JSONStream  []map[string]any `json:"jsonStream,omitempty"`
-	TextStream  []string         `json:"textStream,omitempty"`
-	RawStream   []any            `json:"rawStream,omitempty"`
+	IsStream    bool             `yaml:"isStream,omitempty" json:"isStream,omitempty"`
+	StreamCount int              `yaml:"streamCount,omitempty" json:"streamCount,omitempty"`
+	Delay       *types.Delay     `yaml:"delay,omitempty" json:"delay,omitempty"`
+	JSON        map[string]any   `yaml:"json,omitempty" json:"json,omitempty"`
+	Text        string           `yaml:"text,omitempty" json:"text,omitempty"`
+	Raw         any              `yaml:"raw,omitempty" json:"raw,omitempty"`
+	JSONStream  []map[string]any `yaml:"jsonStream,omitempty" json:"jsonStream,omitempty"`
+	TextStream  []string         `yaml:"textStream,omitempty" json:"textStream,omitempty"`
+	RawStream   []any            `yaml:"rawStream,omitempty" json:"rawStream,omitempty"`
 }
 
 type TextRangeFunc func(text string, count int, restarted bool) error
@@ -102,11 +105,27 @@ func NewRawStreamPayload(raw []any, strArr []string, byteArr [][]byte, streamCou
 	return payload
 }
 
+func (p *Payload) MarshalYAML() (any, error) {
+	return yaml.Marshal(p)
+}
+
+func (p *Payload) UnmarshalYAML(node *yaml.Node) error {
+	pm := &PayloadMarshal{}
+	if err := node.Decode(&pm); err != nil {
+		return err
+	}
+	return p.Unmarshal(pm)
+}
+
 func (p *Payload) UnmarshalJSON(b []byte) error {
 	pm := &PayloadMarshal{}
 	if err := json.Unmarshal(b, pm); err != nil {
 		return err
 	}
+	return p.Unmarshal(pm)
+}
+
+func (p *Payload) Unmarshal(pm *PayloadMarshal) error {
 	if pm.StreamCount > 0 || len(pm.JSONStream) > 0 || len(pm.TextStream) > 0 || len(pm.RawStream) > 0 {
 		p.StreamCount = pm.StreamCount
 		if len(pm.JSONStream) > 0 {
@@ -375,6 +394,18 @@ func (p *Payload) RangeText(f TextRangeFunc) (err error) {
 	return p.RangeTextFrom(0, f)
 }
 
+func (p *Payload) RangeTextWithDelay(f TextRangeFunc) (err error) {
+	if p.Delay != nil && p.Delay.IsNonZero() {
+		originalF := f
+		delayedF := func(text string, count int, restarted bool) error {
+			p.Delay.ComputeAndApply()
+			return originalF(text, count, restarted)
+		}
+		f = delayedF
+	}
+	return p.RangeTextFrom(0, f)
+}
+
 func (p *Payload) RangeTextFrom(from int, f TextRangeFunc) (err error) {
 	if p.JSONStream != nil {
 		return p.sendJSONStream(from, f, nil)
@@ -489,7 +520,7 @@ func (rp *ResponsePayload) PrepareJSONStreamPayload(count int, delayMin, delayMa
 	if len(jsonArray) > 0 {
 		for i := 0; i < count; {
 			for _, v := range jsonArray {
-				b = append(b, util.ToBytes(v))
+				b = append(b, util.ToJSONBytes(v))
 				i++
 				if i >= count {
 					break

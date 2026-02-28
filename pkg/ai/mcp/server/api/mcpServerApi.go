@@ -39,37 +39,39 @@ var (
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	mcpapiRouter := util.PathRouter(r, "/mcpapi")
 
+	util.AddRoute(mcpapiRouter, "/servers/add", addServers, "POST")
+
 	util.AddRoute(mcpapiRouter, "/servers", getServers, "GET")
 	util.AddRoute(mcpapiRouter, "/servers/all", getServers, "GET")
 	util.AddRoute(mcpapiRouter, "/servers/names", getServers, "GET")
-	util.AddRoute(mcpapiRouter, "/server/{server}?", getServers, "GET")
+	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}?", getServers, "GET")
 
-	util.AddRoute(mcpapiRouter, "/servers/add", addServers, "POST")
-	util.AddRouteQ(mcpapiRouter, "/servers/{server}/route", setServerRoute, "uri", "POST")
-	util.AddRoute(mcpapiRouter, "/{s:server|servers}/start", startServer, "POST")
-	util.AddRoute(mcpapiRouter, "/{s:server|servers}/{server}/start", startServer, "POST")
+	util.AddRouteQ(mcpapiRouter, "/{s:servers|server}/{server}/route", setServerRoute, "uri", "POST")
+	util.AddRoute(mcpapiRouter, "/servers/start", startServer, "POST")
+	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/start", startServer, "POST")
 	util.AddRoute(mcpapiRouter, "/servers/stop", stopServer, "POST")
-	util.AddRoute(mcpapiRouter, "/servers/{server}/stop", stopServer, "POST")
+	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/stop", stopServer, "POST")
 
 	util.AddRouteMultiQ(mcpapiRouter, "/proxy", setupMCPProxy, []string{"endpoint", "sni", "headers"}, "POST")
 	util.AddRouteMultiQ(mcpapiRouter, "/proxy/{tool}", setupMCPProxy, []string{"endpoint", "to", "sni", "headers"}, "POST")
 
-	util.AddRouteQ(mcpapiRouter, "/server/{server}/payload/completion", addCompletionPayload, "type", "POST")
-	util.AddRouteQ(mcpapiRouter, "/server/{server}/payload/completion/delay={delay}", addCompletionPayload, "type", "POST")
+	util.AddRouteQ(mcpapiRouter, "/{s:servers|server}/{server}/payload/completion", addCompletionPayload, "type", "POST")
+	util.AddRouteQ(mcpapiRouter, "/{s:servers|server}/{server}/payload/completion/delay={delay}", addCompletionPayload, "type", "POST")
 
 	util.AddRoute(mcpapiRouter, "/{q:servers|all}/{kind:tools|prompts|resources|templates}", getComponents, "GET")
-	util.AddRoute(mcpapiRouter, "/server/{server}/{kind:tools|prompts|resources|templates}", getComponents, "GET")
+	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/{kind:tools|prompts|resources|templates}", getComponents, "GET")
+	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/{kind:tools|prompts|resources|templates}/{name}", getComponents, "GET")
 
-	util.AddRoute(mcpapiRouter, "/server/{server}/{kind:tools|prompts|resources|templates}/add", addComponent, "POST")
-	util.AddRoute(mcpapiRouter, "/server/{server}/tool/{tool}/call", callTool, "POST")
+	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/{kind:tools|prompts|resources|templates}/add", addComponent, "POST")
+	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/{t:tools|tool}/{tool}/call", callTool, "POST")
 
-	util.AddRoute(mcpapiRouter, "/server/{server}/payload/{kind:tools|prompts|resources|templates}/{name}", addComponentPayload, "POST")
-	util.AddRoute(mcpapiRouter, "/server/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}", addComponentPayload, "POST")
-	util.AddRoute(mcpapiRouter, "/server/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}/delay={delay}", addComponentPayload, "POST")
+	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/payload/{kind:tools|prompts|resources|templates}/{name}", addComponentPayload, "POST")
+	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}", addComponentPayload, "POST")
+	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}/delay={delay}", addComponentPayload, "POST")
 
 	util.AddRoute(mcpapiRouter, "/servers/clear/all", clearServers, "POST")
 	util.AddRoute(mcpapiRouter, "/servers/clear", clearServers, "POST")
-	util.AddRoute(mcpapiRouter, "/server/{server}/clear", clearServers, "POST")
+	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/clear", clearServers, "POST")
 
 	util.AddRouteQO(mcpapiRouter, "/status/set/{status}", setStatus, "uri", "POST")
 	util.AddRouteQO(mcpapiRouter, "/status/set/{status}/header/{header}={value}", setStatus, "uri", "POST")
@@ -86,10 +88,11 @@ func getServers(w http.ResponseWriter, r *http.Request) {
 	all := strings.Contains(r.RequestURI, "all")
 	names := strings.Contains(r.RequestURI, "names")
 	name := util.GetStringParamValue(r, "server")
+	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
 	if names {
-		util.WriteJsonPayload(w, mcpserver.GetMCPServerNames())
+		util.WriteJsonOrYAMLPayload(w, mcpserver.GetMCPServerNames(), yaml)
 	} else if all {
-		util.WriteJsonPayload(w, mcpserver.PortsServers)
+		util.WriteJsonOrYAMLPayload(w, mcpserver.PortsServers, yaml)
 	} else if name != "" {
 		var server *mcpserver.MCPServer
 		name = strings.ToLower(name)
@@ -103,10 +106,10 @@ func getServers(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprintln(w, "{\"error\": \"MCP Server doesn't exist on any port\"}")
 		} else {
-			util.WriteJsonPayload(w, server)
+			util.WriteJsonOrYAMLPayload(w, server, yaml)
 		}
 	} else {
-		util.WriteJsonPayload(w, mcpserver.GetPortMCPServers(port))
+		util.WriteJsonOrYAMLPayload(w, mcpserver.GetPortMCPServers(port), yaml)
 	}
 }
 
@@ -268,24 +271,28 @@ func getComponent(kind string) (isTools, isPrompts, isResources, isTemplates boo
 func getComponents(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	q := util.GetStringParamValue(r, "q")
-	name := util.GetStringParamValue(r, "server")
+	serverName := util.GetStringParamValue(r, "server")
 	kind := util.GetStringParamValue(r, "kind")
-	if name != "" {
-		server := mcpserver.GetMCPServer(name)
+	name := util.GetStringParamValue(r, "name")
+	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
+	if serverName != "" {
+		server := mcpserver.GetMCPServer(serverName)
 		if server == nil {
 			w.WriteHeader(http.StatusBadRequest)
-			msg := fmt.Sprintf("MCP Server [%s] not configured on any port", name)
+			msg := fmt.Sprintf("MCP Server [%s] not configured on any port", serverName)
 			fmt.Fprintln(w, msg)
 			util.AddLogMessage(msg, r)
 			return
+		} else if name == "" {
+			util.WriteJsonOrYAMLPayload(w, server.GetComponents(kind), yaml)
 		} else {
-			util.WriteJsonPayload(w, server.GetComponents(kind))
+			util.WriteJsonOrYAMLPayload(w, server.GetComponent(name, kind), yaml)
 		}
 	} else if q == "servers" {
 		ps := mcpserver.GetPortMCPServers(port)
-		util.WriteJsonPayload(w, ps.GetComponents(kind))
+		util.WriteJsonOrYAMLPayload(w, ps.GetComponents(kind), yaml)
 	} else {
-		util.WriteJsonPayload(w, mcpserver.GetAllComponents(kind))
+		util.WriteJsonOrYAMLPayload(w, mcpserver.GetAllComponents(kind), yaml)
 	}
 }
 

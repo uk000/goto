@@ -418,6 +418,16 @@ func ReadJsonPayloadFromBody(body io.Reader, t interface{}) error {
 	}
 }
 
+func WriteJsonOrYAMLPayload(w http.ResponseWriter, t interface{}, yaml bool) string {
+	if yaml {
+		w.Header().Add(constants.HeaderContentType, constants.ContentTypeYAML)
+		return WriteYaml(w, t)
+	} else {
+		w.Header().Add(constants.HeaderContentType, constants.ContentTypeJSON)
+		return WriteJson(w, t)
+	}
+}
+
 func WriteJsonPayload(w http.ResponseWriter, t interface{}) string {
 	w.Header().Add(constants.HeaderContentType, constants.ContentTypeJSON)
 	return WriteJson(w, t)
@@ -462,7 +472,7 @@ func WriteErrorJson(w http.ResponseWriter, error string) {
 	fmt.Fprintf(w, "{\"error\":\"%s\"}", error)
 }
 
-func ToBytes(v any) []byte {
+func ToJSONBytes(v any) []byte {
 	if b, err := json.Marshal(v); err == nil {
 		return b
 	} else {

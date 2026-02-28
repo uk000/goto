@@ -90,8 +90,9 @@ type SessionContext struct {
 type PortServers struct {
 	Port          int                                            `json:"port"`
 	Servers       map[string]*MCPServer                          `json:"servers"`
-	DefaultServer *MCPServer                                     `json:"defaultServer,omitempty"`
-	AllComponents map[string]map[string]map[string]IMCPComponent `json:"allComponents"`
+	DefaultServer string                                         `json:"defaultServer"`
+	defaultServer *MCPServer                                     `json:"-"`
+	AllComponents map[string]map[string]map[string]IMCPComponent `json:"-"`
 	lock          sync.RWMutex
 }
 
@@ -157,6 +158,7 @@ func InitDefaultServer() {
 func NewMCPServer(p *MCPServerPayload) *MCPServer {
 	server := &MCPServer{
 		ID:        fmt.Sprintf("[%s][%s]", global.Funcs.GetListenerLabelForPort(p.Port), p.Name),
+		Enabled:   p.Enabled,
 		Host:      global.Funcs.GetHostLabelForPort(p.Port),
 		Port:      p.Port,
 		Stateless: p.Stateless,
@@ -220,7 +222,7 @@ func NewMCPServer(p *MCPServerPayload) *MCPServer {
 	})
 	server.AddTool(&MCPTool{
 		Tool: &gomcp.Tool{
-			Name:        "AllServers",
+			Name:        "ListServers",
 			Description: "List All MCP Servers on the port",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
@@ -230,7 +232,7 @@ func NewMCPServer(p *MCPServerPayload) *MCPServer {
 	})
 	server.AddTool(&MCPTool{
 		Tool: &gomcp.Tool{
-			Name:        "AllComponents",
+			Name:        "ListComponents",
 			Description: "List all registered Components from all servers",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
@@ -315,7 +317,7 @@ func NewPortMCPServers(port int) *PortServers {
 func GetPortDefaultMCPServer(port int) *MCPServer {
 	ps := GetPortMCPServers(port)
 	if len(ps.Servers) > 0 {
-		return ps.DefaultServer
+		return ps.defaultServer
 	}
 	if DefaultStatelessServer == nil {
 		InitDefaultServer()
@@ -344,7 +346,8 @@ func (ps *PortServers) AddMCPServer(p *MCPServerPayload) *MCPServer {
 	s.ps = ps
 	ps.lock.Lock()
 	ps.Servers[strings.ToLower(p.Name)] = s
-	ps.DefaultServer = s
+	ps.defaultServer = s
+	ps.DefaultServer = s.Name
 	ps.lock.Unlock()
 	if s.uriRegexp != nil {
 		uri := s.URI
@@ -471,7 +474,7 @@ func (m *MCPServer) GetComponents(kind string) any {
 	return nil
 }
 
-func (m *MCPServer) getComponent(name, kind string) IMCPComponent {
+func (m *MCPServer) GetComponent(name, kind string) IMCPComponent {
 	lock.RLock()
 	defer lock.RUnlock()
 	if m1 := AllComponents[kind]; m1 != nil {
@@ -489,7 +492,7 @@ func (m *MCPServer) GetTool(name string) *MCPTool {
 }
 
 func (m *MCPServer) AddPayload(name, kind string, payload []byte, isJSON, isStream bool, streamCount int, delayMin, delayMax time.Duration, delayCount int) error {
-	c := m.getComponent(name, kind)
+	c := m.GetComponent(name, kind)
 	if c != nil {
 		c.SetPayload(payload, isJSON, isStream, streamCount, delayMin, delayMax, delayCount)
 		return nil
@@ -548,7 +551,7 @@ func (m *MCPServer) AddTools(b []byte) ([]string, error) {
 		tools = append(tools, tool)
 		names = append(names, tool.Name)
 	}
-	m.ps.DefaultServer = m
+	//m.ps.defaultServer = m
 	log.Printf("Server [%s] added Tools [%+v] ", m.Name, names)
 	return names, nil
 }
@@ -685,7 +688,7 @@ func (m *MCPServer) onCompletion(ctx context.Context, req *gomcp.CompleteRequest
 	payload := m.CompletionPayload[req.Params.Ref.Type]
 	suggestions := []string{}
 	if payload != nil {
-		payload.RangeText(func(s string, count int, restarted bool) error {
+		payload.RangeTextWithDelay(func(s string, count int, restarted bool) error {
 			suggestions = append(suggestions, s)
 			return nil
 		})

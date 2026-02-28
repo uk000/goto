@@ -29,7 +29,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 var (
@@ -39,7 +38,7 @@ var (
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	mcpapiRouter := util.PathRouter(r, "/mcpapi/client")
 
-	util.AddRoute(mcpapiRouter, "/details", getDetails, "GET")
+	util.AddRoute(mcpapiRouter, "/{name}?/details", getDetails, "GET")
 
 	util.AddRouteMultiQ(mcpapiRouter, "/list/all", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
 	util.AddRouteMultiQ(mcpapiRouter, "/list/tools", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
@@ -47,8 +46,8 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
 	util.AddRoute(mcpapiRouter, "/call", callTool, "POST")
 
-	util.AddRoute(mcpapiRouter, "/payload/{kind:sample|elicit}", addClientPayload, "POST")
-	util.AddRoute(mcpapiRouter, "/payload/roots", addRoots, "POST")
+	util.AddRoute(mcpapiRouter, "/{name}?/payload/{kind:sample|elicit}", addClientPayload, "POST")
+	util.AddRoute(mcpapiRouter, "/{name}?/payload/roots", addRoots, "POST")
 }
 
 func listTools(w http.ResponseWriter, r *http.Request) {
@@ -175,32 +174,42 @@ func doToolCall(port int, tc *ToolCall) (output map[string]any, err error) {
 
 func addClientPayload(w http.ResponseWriter, r *http.Request) {
 	kind := util.GetStringParamValue(r, "kind")
+	name := util.GetStringParamValue(r, "name")
 	payload, _ := io.ReadAll(r.Body)
 	msg := ""
-	if err := AddPayload(kind, payload); err != nil {
+	if err := AddPayload(name, kind, payload); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		msg = fmt.Sprintf("Failed to add client payload for kind [%s] with error [%s]", kind, err.Error())
+		msg = fmt.Sprintf("Failed to add client payload for MCP [%s] kind [%s] with error [%s]", name, kind, err.Error())
 	} else {
-		msg = fmt.Sprintf("Client payload added for kind [%s]", kind)
+		msg = fmt.Sprintf("Client payload added for MCP [%s] kind [%s]", kind)
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
 
 func addRoots(w http.ResponseWriter, r *http.Request) {
-	var roots []*gomcp.Root
-	util.ReadJsonPayloadFromBody(r.Body, &roots)
-	SetRoots(roots)
-	msg := fmt.Sprintf("Client roots added: [%+v]", roots)
+	name := util.GetStringParamValue(r, "name")
+	payload, _ := io.ReadAll(r.Body)
+	msg := ""
+	if err := SetRoots(name, payload); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = fmt.Sprintf("Failed to set client roots for MCP [%s] with error [%s]", name, err.Error())
+	} else {
+		msg = fmt.Sprintf("Client roots added for MCP [%s]: [%s]", name, string(payload))
+	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
 
 func getDetails(w http.ResponseWriter, r *http.Request) {
-	output := map[string]any{}
-	output["roots"] = Roots
-	output["elicit"] = ElicitPayload
-	output["sample"] = SamplePayload
-	util.WriteJsonPayload(w, output)
-	util.AddLogMessage(fmt.Sprintf("Client details: [%+v]", output), r)
+	name := util.GetStringParamValue(r, "name")
+	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
+	var output any
+	if name != "" {
+		output = getNamedClientPayload(name)
+	} else {
+		output = NamedClientPayloads
+	}
+	util.WriteJsonOrYAMLPayload(w, output, yaml)
+	util.AddLogMessage(fmt.Sprintf("Client [%s] details: [%+v]", name, output), r)
 }

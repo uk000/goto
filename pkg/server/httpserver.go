@@ -29,10 +29,10 @@ import (
 	"goto/pkg/registry/peer"
 	"goto/pkg/router"
 	grpcserver "goto/pkg/rpc/grpc/server"
-	"goto/pkg/scripts"
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/listeners"
 	"goto/pkg/server/middleware"
+	"goto/pkg/server/startup"
 	"goto/pkg/tunnel"
 	"goto/pkg/util"
 	"io"
@@ -87,7 +87,7 @@ func RunHttpServer() {
 	}
 	go startListeners()
 	grpcserver.StartDefaultGRPCServer()
-	RunStartupScript()
+	startup.Start()
 	peer.RegisterPeer(global.Self.Name, global.Self.Address)
 	events.SendEventJSONDirect("Server Started", global.Self.HostLabel, listeners.GetListeners())
 	WaitForHttpServer()
@@ -256,6 +256,7 @@ func WaitForHttpServer() {
 	go events.StopSender()
 	log.Printf("Deregistering peer [%s : %s] from registry", global.Self.Name, global.Self.Address)
 	go peer.DeregisterPeer(global.Self.Name, global.Self.Address)
+	startup.Stop()
 	StopHttpServer(httpServer)
 	StopHttpServer(jsonRPCServer)
 }
@@ -297,7 +298,7 @@ func HTTPHandler() http.Handler {
 			metrics.UpdateURIRequestCount(r.RequestURI, statusCodeText)
 			metrics.UpdatePortRequestCount(rs.RequestPort, r.RequestURI)
 		}
-		go PrintLogMessages(0, 0, nil, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
+		go PrintLogMessages(rs.StatusCode, 0, nil, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
 		if rs.ReReader != nil {
 			rs.ReReader.ReallyClose()
 		}
@@ -331,10 +332,7 @@ func handleHTTP(l *listeners.Listener, w http.ResponseWriter, r *http.Request, r
 
 func GRPCHandler(httpHandler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r, rs, _, err := initRequestStore(w, r)
-		if err != nil {
-			return
-		}
+		rs := util.GetRequestStore(r)
 		if rs.IsGRPC {
 			grpcserver.TheGRPCServer.Server.ServeHTTP(w, r)
 		} else {
@@ -382,12 +380,6 @@ func postIntercept() http.Handler {
 
 func withConnContext(ctx context.Context, conn net.Conn) context.Context {
 	return context.WithValue(ctx, util.ConnectionKey, conn)
-}
-
-func RunStartupScript() {
-	if len(global.ServerConfig.StartupScript) > 0 {
-		scripts.RunCommands("startup", global.ServerConfig.StartupScript)
-	}
 }
 
 func PrintLogMessages(statusCode, bodyLength int, payload []byte, headers http.Header, rs *util.RequestStore) {

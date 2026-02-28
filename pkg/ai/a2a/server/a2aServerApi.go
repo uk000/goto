@@ -69,6 +69,7 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 func getAgents(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "agent")
+	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
 	msg := ""
 	if name != "" {
 		agent := GetAgent(port, name)
@@ -76,11 +77,11 @@ func getAgents(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			msg = fmt.Sprintf("Bad agent [%s]", name)
 		} else {
-			util.WriteJsonPayload(w, agent)
+			util.WriteJsonOrYAMLPayload(w, agent, yaml)
 			msg = fmt.Sprintf("Details sent for agent [%s]", name)
 		}
 	} else {
-		util.WriteJsonPayload(w, registry.TheAgentRegistry.Agents)
+		util.WriteJsonOrYAMLPayload(w, registry.TheAgentRegistry.Agents, yaml)
 		msg = "All agents sent"
 	}
 	util.AddLogMessage(msg, r)
@@ -90,6 +91,7 @@ func getAgentDelegates(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "agent")
 	delegate := util.GetStringParamValue(r, "delegate")
+	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
 	msg := ""
 	agent := GetAgent(port, name)
 	if name == "" || agent == nil {
@@ -108,11 +110,11 @@ func getAgentDelegates(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusBadRequest)
 				msg = fmt.Sprintf("No Tool delegate [%s] for agent [%s]", delegate, name)
 			} else {
-				util.WriteJsonPayload(w, d)
+				util.WriteJsonOrYAMLPayload(w, d, yaml)
 				msg = fmt.Sprintf("Delegate Tool [%s] sent for agent [%s]", delegate, name)
 			}
 		} else {
-			util.WriteJsonPayload(w, agent.Config.Delegates.Tools)
+			util.WriteJsonOrYAMLPayload(w, agent.Config.Delegates.Tools, yaml)
 			msg = fmt.Sprintf("Delegate Tools sent for agent [%s]", name)
 		}
 	} else if strings.Contains(r.RequestURI, "/agents") {
@@ -125,24 +127,25 @@ func getAgentDelegates(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusBadRequest)
 				msg = fmt.Sprintf("No Agents delegate [%s] for agent [%s]", delegate, name)
 			} else {
-				util.WriteJsonPayload(w, d)
+				util.WriteJsonOrYAMLPayload(w, d, yaml)
 				msg = fmt.Sprintf("Delegate Agents [%s] sent for agent [%s]", delegate, name)
 			}
 		} else {
-			util.WriteJsonPayload(w, agent.Config.Delegates.Agents)
+			util.WriteJsonOrYAMLPayload(w, agent.Config.Delegates.Agents, yaml)
 			msg = fmt.Sprintf("Delegate Agents sent for agent [%s]", name)
 		}
 	} else {
-		util.WriteJsonPayload(w, agent.Config.Delegates)
+		util.WriteJsonOrYAMLPayload(w, agent.Config.Delegates, yaml)
 		msg = fmt.Sprintf("Delegates sent for agent [%s]", name)
 	}
 	util.AddLogMessage(msg, r)
 }
 
 func getServers(w http.ResponseWriter, r *http.Request) {
+	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
 	text := util.ToJSONText(PortServers)
 	log.Println(text)
-	util.WriteJsonPayload(w, PortServers)
+	util.WriteJsonOrYAMLPayload(w, PortServers, yaml)
 }
 
 func addAgents(w http.ResponseWriter, r *http.Request) {

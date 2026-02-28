@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 type Duration struct {
@@ -29,18 +31,18 @@ type Duration struct {
 }
 
 type Delay struct {
-	Min           *Duration `json:"min,omitempty"`
-	Max           *Duration `json:"max,omitempty"`
-	Count         int       `json:"count,omitempty"`
+	Min           *Duration `yaml:"min,omitempty" json:"min,omitempty"`
+	Max           *Duration `yaml:"max,omitempty" json:"max,omitempty"`
+	Count         int       `yaml:"count,omitempty" json:"count,omitempty"`
 	computedDelay time.Duration
 	hasComputed   bool
 	delayChan     chan time.Duration
 }
 
 type delayPayload struct {
-	Min   *Duration `json:"min,omitempty"`
-	Max   *Duration `json:"max,omitempty"`
-	Count int       `json:"count,omitempty"`
+	Min   *Duration `yaml:"min,omitempty" json:"min,omitempty"`
+	Max   *Duration `yaml:"max,omitempty" json:"max,omitempty"`
+	Count int       `yaml:"count,omitempty" json:"count,omitempty"`
 }
 
 func ParseDurationRange(val string) (low, high time.Duration, count int, ok bool) {
@@ -88,6 +90,10 @@ func ParseDelay(val string) *Delay {
 		return NewDelay(min, max, count)
 	}
 	return nil
+}
+
+func (d *Delay) IsNonZero() bool {
+	return d.Min != nil && d.Min.Duration > 0 && d.Max != nil && d.Max.Duration > 0 && d.Count > 0
 }
 
 func (d *Delay) IsLargerThan(d2 *Delay) bool {
@@ -148,11 +154,27 @@ func (d *Duration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d.String())
 }
 
+func (d *Duration) MarshalYAML() (any, error) {
+	return d.String(), nil
+}
+
 func (d *Duration) UnmarshalJSON(b []byte) error {
 	var v interface{}
 	if err := json.Unmarshal(b, &v); err != nil {
 		return err
 	}
+	return d.Unmarshal(v)
+}
+
+func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
+	var v any
+	if err := node.Decode(&v); err != nil {
+		return err
+	}
+	return d.Unmarshal(v)
+}
+
+func (d *Duration) Unmarshal(v interface{}) error {
 	switch value := v.(type) {
 	case float64:
 		d.Duration = time.Duration(value)
@@ -171,6 +193,18 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 func (d *Delay) UnmarshalJSON(b []byte) error {
 	dp := &delayPayload{}
 	if err := json.Unmarshal(b, dp); err != nil {
+		return err
+	}
+	d.Min = dp.Min
+	d.Max = dp.Max
+	d.Count = dp.Count
+	d.Prepare()
+	return nil
+}
+
+func (d *Delay) UnmarshalYAML(node *yaml.Node) error {
+	dp := &delayPayload{}
+	if err := node.Decode(dp); err != nil {
 		return err
 	}
 	d.Min = dp.Min
