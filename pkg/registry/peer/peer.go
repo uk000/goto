@@ -19,7 +19,7 @@ package peer
 import (
 	"fmt"
 	"goto/pkg/client/target"
-	. "goto/pkg/constants"
+	"goto/pkg/constants"
 	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/job"
@@ -41,22 +41,22 @@ func RegisterPeer(peerName, peerAddress string) {
 	peer := &registry.Peer{
 		Name:      peerName,
 		Address:   peerAddress,
-		Pod:       util.GetPodName(),
-		Namespace: util.GetNamespace(),
-		Node:      util.GetNodeName(),
-		Cluster:   util.GetCluster(),
+		Pod:       global.Self.PodName,
+		Namespace: global.Self.Namespace,
+		Node:      global.Self.NodeName,
+		Cluster:   global.Self.Cluster,
 	}
-	if global.RegistryURL != "" {
+	if global.Self.RegistryURL != "" {
 		registered := false
 		retries := 0
 		for !registered && retries < 6 {
-			if resp, err := http.Post(global.RegistryURL+"/registry/peers/add", ContentTypeJSON,
+			if resp, err := http.Post(global.Self.RegistryURL+"/registry/peers/add", constants.ContentTypeJSON,
 				strings.NewReader(util.ToJSONText(peer))); err == nil {
 				defer resp.Body.Close()
 				if resp.StatusCode == 200 || resp.StatusCode == 202 {
 					events.SendEventJSONDirect("Peer Registered", peerName, peer)
 					registered = true
-					log.Printf("Registered as peer [%s] with registry [%s]\n", global.PeerName, global.RegistryURL)
+					log.Printf("Registered as peer [%s] with registry [%s]\n", global.Self.Name, global.Self.RegistryURL)
 					data := &registry.PeerData{}
 					if err := util.ReadJsonPayloadFromBody(resp.Body, data); err == nil {
 						events.SendEventJSONDirect("Peer Startup Data", peerName, data)
@@ -87,9 +87,9 @@ func RegisterPeer(peerName, peerAddress string) {
 
 func DeregisterPeer(peerName, peerAddress string) {
 	events.SendEventDirect("Peer Deregistered", fmt.Sprintf("%s - %s", peerName, peerAddress))
-	if global.RegistryURL != "" {
+	if global.Self.RegistryURL != "" {
 		chanStopReminder <- true
-		url := global.RegistryURL + "/registry/peers/" + peerName + "/remove/" + peerAddress
+		url := global.Self.RegistryURL + "/registry/peers/" + peerName + "/remove/" + peerAddress
 		if resp, err := http.Post(url, "plain/text", nil); err == nil {
 			util.CloseResponse(resp)
 		} else {
@@ -104,11 +104,11 @@ func startRegistryReminder(peer *registry.Peer) {
 		case <-chanStopReminder:
 			return
 		case <-time.Tick(5 * time.Second):
-			url := global.RegistryURL + "/registry/peers/" + peer.Name + "/remember"
-			if resp, err := http.Post(url, ContentTypeJSON, strings.NewReader(util.ToJSONText(peer))); err == nil {
+			url := global.Self.RegistryURL + "/registry/peers/" + peer.Name + "/remember"
+			if resp, err := http.Post(url, constants.ContentTypeJSON, strings.NewReader(util.ToJSONText(peer))); err == nil {
 				util.CloseResponse(resp)
-				if global.EnableRegistryReminderLogs {
-					log.Printf("Sent reminder to registry at [%s] as peer %s address %s\n", global.RegistryURL, peer.Name, peer.Address)
+				if global.Flags.EnableRegistryReminderLogs {
+					log.Printf("Sent reminder to registry at [%s] as peer %s address %s\n", global.Self.RegistryURL, peer.Name, peer.Address)
 				}
 			} else {
 				log.Printf("Failed to remind registry as peer %s address %s, error: %s\n", peer.Name, peer.Address, err.Error())
@@ -131,7 +131,7 @@ func setupStartupTasks(peerData *registry.PeerData) {
 	}
 
 	if peerData.Probes != nil {
-		probeStatus := probes.GetPortProbes(strconv.Itoa(global.ServerPort))
+		probeStatus := probes.GetPortProbes(strconv.Itoa(global.Self.ServerPort))
 		if peerData.Probes.ReadinessProbe != "" {
 			log.Printf("Got Readiness probe %s, status: %d\n", peerData.Probes.ReadinessProbe, peerData.Probes.ReadinessStatus)
 			probeStatus.ReadinessProbe = peerData.Probes.ReadinessProbe
@@ -157,7 +157,7 @@ func setupStartupTasks(peerData *registry.PeerData) {
 
 	for _, j := range peerData.Jobs {
 		log.Printf("%+v\n", j)
-		job.Manager.AddJob(&j.Job)
+		job.Manager.AddJob(j.Job)
 	}
 
 	for _, t := range peerData.Targets {

@@ -19,11 +19,13 @@ package listeners
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/server/tcp"
+	gototls "goto/pkg/tls"
 	"goto/pkg/util"
 	"log"
 	"net"
@@ -33,136 +35,304 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/mux"
+	"google.golang.org/grpc"
 )
 
 type Listener struct {
-	ListenerID string                      `json:"listenerID"`
-	Label      string                      `json:"label"`
-	HostLabel  string                      `json:"hostLabel"`
-	Port       int                         `json:"port"`
-	Protocol   string                      `json:"protocol"`
-	Open       bool                        `json:"open"`
-	AutoCert   bool                        `json:"autoCert"`
-	AutoSNI    bool                        `json:"autoSNI"`
-	CommonName string                      `json:"commonName"`
-	MutualTLS  bool                        `json:"mutualTLS"`
-	TLS        bool                        `json:"tls"`
-	TCP        *tcp.TCPConfig              `json:"tcp,omitempty"`
-	Cert       *tls.Certificate            `json:"-"`
-	CACerts    *x509.CertPool              `json:"-"`
-	RawCert    []byte                      `json:"-"`
-	RawKey     []byte                      `json:"-"`
-	CertsCache map[string]*tls.Certificate `json:"-"`
-	isHTTP     bool                        `json:"-"`
-	IsHTTP2    bool                        `json:"-"`
-	isGRPC     bool                        `json:"-"`
-	isTCP      bool                        `json:"-"`
-	isUDP      bool                        `json:"-"`
-	Listener   net.Listener                `json:"-"`
-	UDPConn    *net.UDPConn                `json:"-"`
-	Restarted  bool                        `json:"-"`
-	Generation int                         `json:"-"`
-	lock       sync.RWMutex                `json:"-"`
+	ListenerID    string                      `json:"listenerID"`
+	Label         string                      `json:"label"`
+	HostLabel     string                      `json:"hostLabel"`
+	Port          int                         `json:"port"`
+	Protocol      string                      `json:"protocol"`
+	L8Proto       string                      `json:"l8Proto"`
+	Open          bool                        `json:"open"`
+	AutoCert      bool                        `json:"autoCert"`
+	AutoSNI       bool                        `json:"autoSNI"`
+	CommonName    string                      `json:"commonName"`
+	MutualTLS     bool                        `json:"mutualTLS"`
+	TLS           bool                        `json:"tls"`
+	TCP           *tcp.TCPConfig              `json:"tcp,omitempty"`
+	IsHTTP        bool                        `json:"isHTTP"`
+	IsHTTP2       bool                        `json:"isH2"`
+	IsGRPC        bool                        `json:"isGRPC"`
+	IsJSONRPC     bool                        `json:"isJSONRPC"`
+	IsTCP         bool                        `json:"isTCP"`
+	IsUDP         bool                        `json:"isUDP"`
+	IsXDS         bool                        `json:"isXDS"`
+	ProtoAssigned bool                        `json:"-"`
+	Generation    int                         `json:"generation"`
+	Cert          *tls.Certificate            `json:"-"`
+	CACerts       *x509.CertPool              `json:"-"`
+	RawCert       []byte                      `json:"-"`
+	RawKey        []byte                      `json:"-"`
+	CertsCache    map[string]*tls.Certificate `json:"-"`
+	Listener      net.Listener                `json:"-"`
+	UDPConn       *net.UDPConn                `json:"-"`
+	Restarted     bool                        `json:"-"`
+	lock          sync.RWMutex                `json:"-"`
 }
 
-var (
-	DefaultListener     = newListener(global.ServerPort, "HTTP", constants.DefaultCommonName, true)
-	listeners           = map[int]*Listener{}
-	listenerGenerations = map[int]int{}
-	initialListeners    = []*Listener{}
-	ServeHTTPListener   func(*Listener)
-	ServeGRPCListener   func(*Listener)
-	StartTCPServer      func(string, int, net.Listener)
-	DefaultLabel        string
-	serverStarted       bool
-	listenersLock       sync.RWMutex
-	Handler             util.ServerHandler = util.ServerHandler{Name: "listeners", SetRoutes: SetRoutes}
+const (
+	PROTO_HTTP     = "HTTP"
+	PROTOL_HTTP    = "http"
+	PROTOL_HTTPS   = "https"
+	PROTOL_H2      = "h2"
+	PROTOL_H2C     = "h2c"
+	PROTO_GRPC     = "GRPC"
+	PROTOL_GRPC    = "grpc"
+	PROTO_UDP      = "UDP"
+	PROTOL_UDP     = "udp"
+	PROTO_JSONRPC  = "JSONRPC"
+	PROTOL_JSONRPC = "jsonrpc"
+	PROTO_RPC      = "RPC"
+	PROTOL_RPC     = "rpc"
+	PROTO_XDS      = "XDS"
+	PROTOL_XDS     = "xds"
+	PROTO_TCP      = "TCP"
+	PROTOL_TCP     = "tcp"
+	PROTO_TLS      = "TLS"
+	PROTOL_TLS     = "tls"
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	lRouter := util.PathRouter(r, "/server?/listeners")
-	util.AddRoute(lRouter, "/add", addListener, "POST", "PUT")
-	util.AddRoute(lRouter, "/update", updateListener, "POST", "PUT")
-	util.AddRoute(lRouter, "/{port}/cert/auto/{domain}", autoCert, "PUT", "POST")
-	util.AddRoute(lRouter, "/{port}/cert/autosni", autoSNI, "PUT", "POST")
-	util.AddRoute(lRouter, "/{port}/cert/add", addListenerCert, "PUT", "POST")
-	util.AddRoute(lRouter, "/{port}/key/add", addListenerKey, "PUT", "POST")
-	util.AddRoute(lRouter, "/{port}/cert/remove", removeListenerCertAndKey, "PUT", "POST")
-	util.AddRoute(lRouter, "/{port}/cert", getListenerCertOrKey, "GET")
-	util.AddRoute(lRouter, "/{port}/key", getListenerCertOrKey, "GET")
-	util.AddRoute(lRouter, "/{port}/ca/add", addListenerCACert, "PUT", "POST")
-	util.AddRoute(lRouter, "/{port}/ca/clear", clearListenerCACerts, "PUT", "POST")
-	util.AddRoute(lRouter, "/{port}/remove", removeListener, "PUT", "POST")
-	util.AddRoute(lRouter, "/{port}/open", openListener, "PUT", "POST")
-	util.AddRoute(lRouter, "/{port}/reopen", openListener, "PUT", "POST")
-	util.AddRoute(lRouter, "/{port}/close", closeListener, "PUT", "POST")
-	util.AddRoute(lRouter, "/{port}?", getListeners, "GET")
-	global.IsListenerPresent = IsListenerPresent
-	global.IsListenerOpen = IsListenerOpen
-	global.GetListenerID = GetListenerID
-	global.GetListenerLabel = GetListenerLabel
-	global.GetListenerLabelForPort = GetListenerLabelForPort
-	global.GetHostLabelForPort = GetHostLabelForPort
-}
+var (
+	DefaultListener       = newListener(global.Self.ServerPort, PROTOL_HTTP, constants.DefaultCommonName, true)
+	DefaultGRPCListener   = newListener(global.Self.GRPCPort, PROTOL_GRPC, constants.DefaultCommonName, false)
+	listeners             = map[int]*Listener{}
+	grpcListeners         = map[int]*Listener{}
+	udpListeners          = map[int]*Listener{}
+	listenerGenerations   = map[int]int{}
+	initialListeners      = []*Listener{}
+	initialHTTPStarted    = false
+	initialJSONRPCStarted = false
+	grpcStarted           = false
+	httpStarted           = false
+	jsonRPCStarted        = false
+	httpServer            *http.Server
+	jsonRPCServer         *http.Server
+	serveTCP              func(string, int, net.Listener) error
+	serveXDS              func(*grpc.Server)
+	DefaultLabel          string
+	listenersLock         sync.RWMutex
+)
 
-func newListener(port int, protocol string, cn string, open bool) *Listener {
-	return &Listener{Port: port, Protocol: protocol, CommonName: cn, Open: true, CertsCache: map[string]*tls.Certificate{}}
-}
+func Init() {
+	global.Funcs.IsListenerPresent = IsListenerPresent
+	global.Funcs.IsListenerOpen = IsListenerOpen
+	global.Funcs.GetListenerID = GetListenerID
+	global.Funcs.GetListenerLabel = GetListenerLabel
+	global.Funcs.GetListenerLabelForPort = GetListenerLabelForPort
+	global.Funcs.GetHostLabelForPort = GetHostLabelForPort
 
-func Configure(hs func(*Listener), gs func(*Listener), ts func(string, int, net.Listener)) {
 	if DefaultLabel == "" {
-		DefaultLabel = util.GetHostLabel()
+		DefaultLabel = global.Self.HostLabel
 	}
 	DefaultListener.Label = DefaultLabel
-	DefaultListener.HostLabel = util.GetHostLabel()
-	DefaultListener.isHTTP = true
+	DefaultListener.HostLabel = global.Self.HostLabel
+	DefaultListener.IsHTTP = true
 	DefaultListener.TLS = false
-	ServeHTTPListener = hs
-	ServeGRPCListener = gs
-	StartTCPServer = ts
+	global.AddGRPCStartWatcher(OnGRPCStart)
+	global.AddGRPCStopWatcher(OnGRPCStop)
+	global.AddHTTPStartWatcher(OnHTTPStart)
+	global.AddHTTPStopWatcher(OnHTTPStop)
+	global.AddJSONRPCStartWatcher(OnJSONRPCStart)
+	global.AddJSONRPCStopWatcher(OnJSONRPCStop)
+	global.AddTCPServeWatcher(ConfigureTCPServer)
 }
 
-func StartInitialListeners() {
-	serverStarted = true
-	time.Sleep(1 * time.Second)
-	for _, l := range initialListeners {
-		addOrUpdateListener(l, false)
+func OnGRPCStart() {
+	grpcStarted = true
+	if httpStarted {
+		addInitialHTTPListeners(false)
 	}
+}
+
+func OnGRPCStop() {
+	grpcStarted = false
+	for _, l := range grpcListeners {
+		l.closeListener()
+	}
+}
+
+func OnHTTPStart(s *http.Server) {
+	httpStarted = true
+	httpServer = s
+	if grpcStarted {
+		addInitialHTTPListeners(false)
+	}
+}
+
+func OnHTTPStop() {
+	httpStarted = false
+	httpServer = nil
+}
+
+func OnJSONRPCStart(s *http.Server) {
+	jsonRPCStarted = true
+	jsonRPCServer = s
+	addInitialHTTPListeners(true)
+}
+
+func OnJSONRPCStop() {
+	jsonRPCStarted = false
+	jsonRPCServer = nil
+}
+
+func ConfigureTCPServer(serve func(listenerID string, port int, listener net.Listener) error) {
+	serveTCP = serve
+	addInitialTCPListeners()
+}
+
+func ConfigureXDSServer(serve func(*grpc.Server)) {
+	serveXDS = serve
+}
+func newListener(port int, protocol string, cn string, open bool) *Listener {
+	return &Listener{Port: port, Protocol: protocol, CommonName: cn, Open: open, CertsCache: map[string]*tls.Certificate{}}
+}
+
+func InitDefaultGRPCListener() {
+	DefaultGRPCListener.HostLabel = global.Self.HostLabel
+	DefaultGRPCListener.Port = global.Self.GRPCPort
+	addOrUpdateListener(DefaultGRPCListener)
+}
+
+func AddInitialGRPCListeners() {
+	for _, l := range initialListeners {
+		if l.IsGRPC {
+			addOrUpdateListener(l)
+		}
+	}
+}
+
+func addInitialHTTPListeners(jsonRPC bool) {
+	if jsonRPC && !initialJSONRPCStarted || !jsonRPC && !initialHTTPStarted {
+		time.Sleep(1 * time.Second)
+		for _, l := range initialListeners {
+			if (l.IsJSONRPC && jsonRPC) || (!l.IsJSONRPC && l.IsHTTP && !jsonRPC) {
+				addOrUpdateListener(l)
+			}
+		}
+		if jsonRPC {
+			initialJSONRPCStarted = true
+		} else {
+			initialHTTPStarted = true
+		}
+	}
+}
+
+func addInitialTCPListeners() {
+	for _, l := range initialListeners {
+		if l.IsTCP {
+			addOrUpdateListener(l)
+		}
+	}
+}
+
+func (l *Listener) assignProtocol() {
+	isHTTP := strings.EqualFold(l.Protocol, PROTOL_HTTP)
+	isHTTPS := strings.EqualFold(l.Protocol, PROTOL_HTTPS)
+	isHTTP1 := strings.EqualFold(l.Protocol, "http1")
+	isHTTPS1 := strings.EqualFold(l.Protocol, "https1")
+	isGRPC := strings.EqualFold(l.Protocol, PROTOL_GRPC)
+	isGRPCS := strings.EqualFold(l.Protocol, "grpcs")
+	isXDS := strings.EqualFold(l.Protocol, PROTOL_XDS)
+	isJSONRPC := strings.EqualFold(l.Protocol, PROTOL_JSONRPC) || strings.EqualFold(l.Protocol, PROTOL_RPC)
+	isJSONRPCS := strings.EqualFold(l.Protocol, "jsonrpcs") || strings.EqualFold(l.Protocol, "rpcs")
+	isUDP := strings.EqualFold(l.Protocol, PROTOL_UDP)
+	isTCPS := strings.EqualFold(l.Protocol, PROTOL_TLS)
+
+	if isHTTP1 || isHTTPS1 {
+		if isHTTPS1 {
+			l.L8Proto = PROTOL_HTTPS
+			l.Protocol = PROTOL_HTTPS
+			l.TLS = true
+		} else {
+			l.L8Proto = PROTOL_HTTP
+			l.Protocol = PROTOL_HTTP
+		}
+		l.IsHTTP = true
+		l.IsHTTP2 = false
+	} else if isHTTP || isHTTPS {
+		l.TLS = isHTTPS
+		l.IsHTTP = true
+		l.IsHTTP2 = true
+		if isHTTPS {
+			l.L8Proto = PROTOL_H2
+		} else {
+			l.L8Proto = PROTOL_H2C
+		}
+	} else if isGRPC || isGRPCS {
+		if isGRPCS {
+			l.TLS = true
+		}
+		l.L8Proto = PROTOL_GRPC
+		l.Protocol = PROTOL_GRPC
+		l.IsGRPC = true
+	} else if isXDS {
+		l.L8Proto = PROTOL_XDS
+		l.Protocol = PROTOL_GRPC
+		l.IsGRPC = true
+		l.IsXDS = true
+	} else if isJSONRPC || isJSONRPCS {
+		if isJSONRPCS {
+			l.Protocol = PROTOL_HTTPS
+			l.TLS = true
+		} else {
+			l.Protocol = PROTOL_HTTP
+		}
+		l.L8Proto = PROTOL_JSONRPC
+		l.IsHTTP = true
+		l.IsHTTP2 = true
+		l.IsJSONRPC = true
+	} else if isUDP {
+		l.L8Proto = PROTOL_UDP
+		l.IsUDP = true
+	} else {
+		l.L8Proto = PROTOL_TCP
+		l.Protocol = PROTOL_TCP
+		l.IsTCP = true
+		l.TLS = isTCPS
+	}
+	if l.TLS {
+		if l.Cert == nil && l.RawCert == nil {
+			l.AutoCert = true
+		}
+	}
+	l.ProtoAssigned = true
 }
 
 func AddInitialListeners(portList []string) {
-	ports := map[int]bool{}
+	existing := map[int]bool{}
+	l := createPortListener(global.Self.JSONRPCPort, PROTOL_JSONRPC, constants.DefaultCommonName, existing)
+	if l != nil {
+		listenersLock.Lock()
+		listeners[l.Port] = l
+		listenersLock.Unlock()
+	}
 	for i, p := range portList {
 		portInfo := strings.Split(p, "/")
 		if port, err := strconv.Atoi(portInfo[0]); err == nil && port > 0 && port <= 65535 {
-			if !ports[port] {
-				protocol := "http"
-				cn := constants.DefaultCommonName
+			if i == 0 {
+				global.Self.ServerPort = port
+				DefaultListener.Port = port
+				DefaultListener.Protocol = "http"
+				DefaultListener.assignProtocol()
+				DefaultListener.Label = util.BuildListenerLabel(l.Port)
+				DefaultListener.HostLabel = global.Self.HostLabel
+			} else {
+				protocol := ""
 				if len(portInfo) > 1 && portInfo[1] != "" {
 					protocol = strings.ToLower(portInfo[1])
-					if !strings.EqualFold(protocol, "http") && !strings.EqualFold(protocol, "https") &&
-						!strings.EqualFold(protocol, "http1") && !strings.EqualFold(protocol, "https1") &&
-						!strings.EqualFold(protocol, "grpc") && !strings.EqualFold(protocol, "grpcs") &&
-						!strings.EqualFold(protocol, "udp") && !strings.EqualFold(protocol, "tls") && !strings.EqualFold(protocol, "tcps") {
-						protocol = "tcp"
-					}
 				}
+				cn := constants.DefaultCommonName
 				if len(portInfo) > 2 && portInfo[2] != "" {
 					cn = strings.ToLower(portInfo[2])
 				}
-				ports[port] = true
-				if i == 0 {
-					global.ServerPort = port
-					DefaultListener.Port = port
-				} else {
-					l := newListener(port, protocol, cn, true)
+				l := createPortListener(port, protocol, cn, existing)
+				if l != nil {
 					listenersLock.Lock()
 					initialListeners = append(initialListeners, l)
 					listenersLock.Unlock()
 				}
-			} else {
-				log.Fatalf("Error: Duplicate port [%d]\n", port)
 			}
 		} else {
 			log.Fatalf("Error: Invalid port [%d]\n", port)
@@ -170,7 +340,79 @@ func AddInitialListeners(portList []string) {
 	}
 }
 
-func (l *Listener) initListener() bool {
+func createPortListener(port int, protocol, cn string, existing map[int]bool) *Listener {
+	if !existing[port] {
+		existing[port] = true
+		l := newListener(port, protocol, cn, true)
+		if protocol == "" {
+			protocol = "tcp"
+		}
+		l.Protocol = protocol
+		l.assignProtocol()
+		l.Label = util.BuildListenerLabel(l.Port)
+		l.HostLabel = global.Self.HostLabel
+		return l
+	} else {
+		log.Fatalf("Error: Duplicate port [%d]\n", port)
+	}
+	return nil
+}
+
+func (l *Listener) serveJSONRPC() {
+	go func() {
+		msg := fmt.Sprintf("Starting JSONRPC Listener [%s]", l.ListenerID)
+		if l.TLS {
+			msg += fmt.Sprintf(" With TLS [CN: %s]", l.CommonName)
+		}
+		log.Println(msg)
+		if err := jsonRPCServer.Serve(l.Listener); err != nil {
+			log.Printf("JSONRPC Listener [%d]: %s", l.Port, err.Error())
+		}
+	}()
+}
+
+func (l *Listener) serveHTTP() {
+	go func() {
+		msg := fmt.Sprintf("Starting HTTP Listener [%s]", l.ListenerID)
+		if l.TLS {
+			msg += fmt.Sprintf(" With TLS [CN: %s]", l.CommonName)
+		}
+		log.Println(msg)
+		if err := httpServer.Serve(l.Listener); err != nil {
+			log.Printf("HTTP Listener [%d]: %s", l.Port, err.Error())
+		}
+	}()
+}
+
+func (l *Listener) serveGRPC() {
+	if grpcStarted {
+		go func() {
+			msg := fmt.Sprintf("Starting GRPC Listener %s", l.ListenerID)
+			log.Println(msg)
+			global.GRPCServer.ServeListener(l)
+			events.SendEventForPort(l.Port, "GRPC Listener Started", msg)
+		}()
+	} else {
+		global.GRPCServer.AddListener(l)
+	}
+
+}
+
+func (l *Listener) serveTCP() {
+	l.TCP.ListenerID = l.ListenerID
+	go func() {
+		msg := fmt.Sprintf("Starting TCP Listener [%s]", l.ListenerID)
+		if l.TLS {
+			msg += fmt.Sprintf(" With TLS [CN: %s]", l.CommonName)
+		}
+		log.Println(msg)
+		if err := serveTCP(l.ListenerID, l.Port, l.Listener); err != nil {
+			log.Printf("Listener [%d]: %s", l.Port, err.Error())
+		}
+	}()
+}
+
+func (l *Listener) InitListener() bool {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	var tlsConfig *tls.Config
@@ -178,7 +420,7 @@ func (l *Listener) initListener() bool {
 		if l.CommonName == "" {
 			l.CommonName = constants.DefaultCommonName
 		}
-		if cert, err := util.CreateCertificate(l.CommonName, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
+		if cert, err := gototls.CreateCertificate(l.CommonName, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
 			l.Cert = cert
 		}
 	}
@@ -188,7 +430,7 @@ func (l *Listener) initListener() bool {
 				if cert = l.CertsCache[chi.ServerName]; cert != nil {
 					return
 				}
-				if cert, err = util.CreateCertificate(chi.ServerName, ""); err == nil {
+				if cert, err = gototls.CreateCertificate(chi.ServerName, ""); err == nil {
 					l.CertsCache[chi.ServerName] = cert
 				}
 				return
@@ -209,10 +451,11 @@ func (l *Listener) initListener() bool {
 		}
 	}
 	address := fmt.Sprintf("0.0.0.0:%d", l.Port)
-	if l.isUDP {
+	if l.IsUDP {
 		if udpAddr, err := net.ResolveUDPAddr("udp4", address); err == nil {
 			if udpConn, err := net.ListenUDP("udp", udpAddr); err == nil {
 				l.UDPConn = udpConn
+				return true
 			} else {
 				log.Printf("Failed to open UDP listener with error: %s\n", err.Error())
 				return false
@@ -242,25 +485,26 @@ func (l *Listener) initListener() bool {
 			return false
 		}
 	}
-	log.Println("Failed to open listener with no error")
-	return false
 }
 
-func (l *Listener) openListener() bool {
-	if l.initListener() {
+func (l *Listener) openListener(serve bool) bool {
+	if l.InitListener() {
 		l.lock.Lock()
 		defer l.lock.Unlock()
 		listenerGenerations[l.Port] = listenerGenerations[l.Port] + 1
 		l.Generation = listenerGenerations[l.Port]
 		l.ListenerID = fmt.Sprintf("%d-%d", l.Port, l.Generation)
-		log.Printf("Opening [%s] listener [%s] on port [%d].", l.Protocol, l.ListenerID, l.Port)
-		if l.isHTTP {
-			ServeHTTPListener(l)
-		} else if l.isGRPC {
-			ServeGRPCListener(l)
-		} else if l.isTCP {
-			l.TCP.ListenerID = l.ListenerID
-			StartTCPServer(l.ListenerID, l.Port, l.Listener)
+		log.Printf("Opening [%s] listener [%s] on port [%d].", l.L8Proto, l.ListenerID, l.Port)
+		if serve {
+			if l.IsJSONRPC {
+				l.serveJSONRPC()
+			} else if l.IsHTTP {
+				l.serveHTTP()
+			} else if l.IsGRPC {
+				l.serveGRPC()
+			} else if l.IsTCP {
+				l.serveTCP()
+			}
 		}
 		l.Open = true
 		l.TLS = l.AutoCert || l.Cert != nil || len(l.RawCert) > 0 && len(l.RawKey) > 0
@@ -274,7 +518,12 @@ func (l *Listener) closeListener() {
 	defer l.lock.Unlock()
 	if l.Listener != nil {
 		l.Listener.Close()
+		global.Funcs.CloseConnectionsForPort(l.Port)
 		l.Listener = nil
+	}
+	if l.UDPConn != nil {
+		l.UDPConn.Close()
+		l.UDPConn = nil
 	}
 	l.Open = false
 }
@@ -291,7 +540,7 @@ func (l *Listener) reopenListener() bool {
 		old.closeListener()
 	}
 	for i := 0; i < 5; i++ {
-		if l.openListener() {
+		if l.openListener(true) {
 			log.Printf("Reopened listener %s on port %d.", l.ListenerID, l.Port)
 			return true
 		} else {
@@ -315,15 +564,71 @@ func validateListener(w http.ResponseWriter, r *http.Request) *Listener {
 	return l
 }
 
-func addListener(w http.ResponseWriter, r *http.Request) {
-	addOrUpdateListenerAndRespond(w, r, false)
+func ValidateUDPListener(w http.ResponseWriter, r *http.Request) bool {
+	if ok, msg := util.ValidateListener(w, r); !ok {
+		events.SendRequestEvent("UDP Configuration Rejected", msg, r)
+		return false
+	}
+	port := util.GetIntParamValue(r, "port")
+	l := GetListenerForPort(port)
+	if l == nil || !l.IsUDP {
+		w.WriteHeader(http.StatusBadRequest)
+		msg := fmt.Sprintf("Port %d is not a UDP listener", port)
+		fmt.Fprintln(w, msg)
+		util.AddLogMessage(msg, r)
+		events.SendRequestEvent("UDP Configuration Rejected", msg, r)
+		return false
+	}
+	return true
 }
 
-func updateListener(w http.ResponseWriter, r *http.Request) {
-	addOrUpdateListenerAndRespond(w, r, true)
+func AddGRPCListener(port int, serve bool) (*Listener, error) {
+	l := GetListenerForPort(port)
+	if l != nil {
+		if l.IsGRPC {
+			if !l.Open {
+				l.openListener(serve)
+			}
+			return l, nil
+		}
+		l.closeListener()
+	}
+	l = newListener(port, "grpc", "", false)
+	if err, msg := addOrUpdateListener(l); err > 0 {
+		return nil, fmt.Errorf(msg)
+	}
+	if !l.openListener(serve) {
+		return nil, fmt.Errorf("failed to open GRPC listener on port [%d]", port)
+	}
+	return l, nil
 }
 
-func addOrUpdateListenerAndRespond(w http.ResponseWriter, r *http.Request, update bool) {
+func AddListener(port int, isTCP, isUDP bool, sni string) error {
+	l := GetListenerForPort(port)
+	if l != nil {
+		if (isTCP && l.IsTCP) || (isUDP && l.IsUDP) {
+			if !l.Open {
+				l.openListener(true)
+			}
+			return nil
+		}
+		l.closeListener()
+	}
+	protocol := "tcp"
+	if isUDP {
+		protocol = "udp"
+	}
+	l = newListener(port, protocol, sni, false)
+	if err, msg := addOrUpdateListener(l); err > 0 {
+		return errors.New(msg)
+	}
+	if !l.openListener(true) {
+		return fmt.Errorf("failed to open %s listener on port [%d]", protocol, port)
+	}
+	return nil
+}
+
+func addOrUpdateListenerAndRespond(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	l := newListener(0, "", "", false)
 	body := util.Read(r.Body)
@@ -337,65 +642,32 @@ func addOrUpdateListenerAndRespond(w http.ResponseWriter, r *http.Request, updat
 		return
 	}
 	errorCode := 0
-	if errorCode, msg = addOrUpdateListener(l, update); errorCode > 0 {
+	if errorCode, msg = addOrUpdateListener(l); errorCode > 0 {
 		w.WriteHeader(errorCode)
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
 
-func addOrUpdateListener(l *Listener, update bool) (int, string) {
+func addOrUpdateListener(l *Listener) (int, string) {
 	msg := ""
 	errorCode := 0
 	if l.Label == "" {
-		if global.PeerName != "" {
-			l.Label = global.PeerName
+		if global.Self.GivenName {
+			l.Label = global.Self.Name
 		} else {
 			l.Label = util.BuildListenerLabel(l.Port)
 		}
 	}
-	l.HostLabel = util.BuildHostLabel(l.Port)
+	l.HostLabel = global.BuildHostLabel(l.Port)
 	l.Protocol = strings.ToLower(l.Protocol)
 	if l.Port <= 0 || l.Port > 65535 {
 		msg = fmt.Sprintf("[Invalid port number: %d]", l.Port)
 	}
-	l.IsHTTP2 = true
-	if strings.EqualFold(l.Protocol, "http1") {
-		l.Protocol = "http"
-		l.IsHTTP2 = false
-	} else if strings.EqualFold(l.Protocol, "https1") {
-		l.Protocol = "https"
-		l.IsHTTP2 = false
+	if !l.ProtoAssigned {
+		l.assignProtocol()
 	}
-	isHTTPS := strings.EqualFold(l.Protocol, "https")
-	if isHTTPS || strings.EqualFold(l.Protocol, "http") {
-		l.isHTTP = true
-		if isHTTPS {
-			l.TLS = true
-			if l.Cert == nil && l.RawCert == nil {
-				l.AutoCert = true
-			}
-		}
-	} else if strings.EqualFold(l.Protocol, "grpc") {
-		l.isGRPC = true
-	} else if strings.EqualFold(l.Protocol, "grpcs") {
-		l.Protocol = "grpc"
-		l.isGRPC = true
-		l.TLS = true
-		if l.Cert == nil && l.RawCert == nil {
-			l.AutoCert = true
-		}
-	} else if strings.EqualFold(l.Protocol, "udp") {
-		l.isUDP = true
-	} else {
-		l.isTCP = true
-		if strings.EqualFold(l.Protocol, "tls") || strings.EqualFold(l.Protocol, "tcps") {
-			l.Protocol = "tcp"
-			l.TLS = true
-			if l.Cert == nil && l.RawCert == nil {
-				l.AutoCert = true
-			}
-		}
+	if l.IsTCP && l.TCP == nil {
 		l.TCP, msg = tcp.InitTCPConfig(l.Port, l.TCP)
 	}
 	if msg != "" {
@@ -408,9 +680,7 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
 	listenersLock.RUnlock()
 	if exists {
 		if l.reopenListener() {
-			listenersLock.Lock()
-			listeners[l.Port] = l
-			listenersLock.Unlock()
+			l.store()
 			msg = fmt.Sprintf("Listener %d already present, restarted.", l.Port)
 			events.SendEventJSON("Listener Updated", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
 		} else {
@@ -420,10 +690,8 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
 		}
 	} else {
 		if l.Open {
-			if l.openListener() {
-				listenersLock.Lock()
-				listeners[l.Port] = l
-				listenersLock.Unlock()
+			if l.openListener(true) {
+				l.store()
 				msg = fmt.Sprintf("Listener %d added and opened.", l.Port)
 				events.SendEventJSON("Listener Added", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
 			} else {
@@ -432,14 +700,23 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
 				events.SendEventJSON("Listener Added", l.HostLabel, map[string]interface{}{"listener": l, "status": msg})
 			}
 		} else {
-			listenersLock.Lock()
-			listeners[l.Port] = l
-			listenersLock.Unlock()
+			l.store()
 			msg = fmt.Sprintf("Listener %d added.", l.Port)
 			events.SendEventJSON("Listener Added", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
 		}
 	}
+	if l.IsGRPC {
+		grpcListeners[l.Port] = l
+	} else if l.IsUDP {
+		udpListeners[l.Port] = l
+	}
 	return errorCode, msg
+}
+
+func (l *Listener) store() {
+	listenersLock.Lock()
+	defer listenersLock.Unlock()
+	listeners[l.Port] = l
 }
 
 func addListenerCertOrKey(w http.ResponseWriter, r *http.Request, cert bool) {
@@ -470,168 +747,6 @@ func addListenerCertOrKey(w http.ResponseWriter, r *http.Request, cert bool) {
 	}
 }
 
-func addListenerCert(w http.ResponseWriter, r *http.Request) {
-	addListenerCertOrKey(w, r, true)
-}
-
-func addListenerKey(w http.ResponseWriter, r *http.Request) {
-	addListenerCertOrKey(w, r, false)
-}
-
-func removeListenerCertAndKey(w http.ResponseWriter, r *http.Request) {
-	if l := validateListener(w, r); l != nil {
-		msg := ""
-		l.lock.Lock()
-		l.RawKey = nil
-		l.RawCert = nil
-		l.Cert = nil
-		l.TLS = false
-		l.AutoCert = false
-		l.CommonName = ""
-		l.lock.Unlock()
-		if l.reopenListener() {
-			msg = fmt.Sprintf("Cert and Key removed for listener %d, and reopened\n", l.Port)
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
-			msg = fmt.Sprintf("Cert and Key removed for listener %d but failed to reopen\n", l.Port)
-		}
-		events.SendRequestEvent("Listener Cert Removed", msg, r)
-		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
-	}
-}
-
-func addListenerCACert(w http.ResponseWriter, r *http.Request) {
-	if l := validateListener(w, r); l != nil {
-		msg := ""
-		data := util.ReadBytes(r.Body)
-		if len(data) > 0 {
-			l.lock.Lock()
-			if l.CACerts == nil {
-				l.CACerts = x509.NewCertPool()
-			}
-			l.CACerts.AppendCertsFromPEM(data)
-			l.lock.Unlock()
-			events.SendRequestEvent("Listener CA Cert Added", msg, r)
-			if l.reopenListener() {
-				msg = fmt.Sprintf("CA Cert added for listener %d, and reopened\n", l.Port)
-			} else {
-				w.WriteHeader(http.StatusInternalServerError)
-				msg = fmt.Sprintf("CA Cert added for listener %d but failed to reopen\n", l.Port)
-			}
-
-		} else {
-			w.WriteHeader(http.StatusBadRequest)
-			msg = "No payload"
-		}
-		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
-	}
-}
-
-func clearListenerCACerts(w http.ResponseWriter, r *http.Request) {
-	if l := validateListener(w, r); l != nil {
-		msg := ""
-		l.lock.Lock()
-		l.CACerts = x509.NewCertPool()
-		l.lock.Unlock()
-		if l.reopenListener() {
-			msg = fmt.Sprintf("CA Certs cleared for listener %d, and reopened\n", l.Port)
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
-			msg = fmt.Sprintf("CA Certs cleared for listener %d but failed to reopen\n", l.Port)
-		}
-		events.SendRequestEvent("Listener CA Certs Cleared", msg, r)
-		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
-	}
-}
-
-func getListenerCertOrKey(w http.ResponseWriter, r *http.Request) {
-	cert := strings.Contains(r.RequestURI, "cert")
-	key := strings.Contains(r.RequestURI, "key")
-	if l := validateListener(w, r); l != nil {
-		msg := ""
-		var err error
-		if cert {
-			raw := l.RawCert
-			if raw == nil {
-				raw, err = util.EncodeX509Cert(l.Cert)
-			}
-			if raw != nil {
-				w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
-				w.Header().Set("Content-Type", "application/octet-stream")
-				w.Write(raw)
-				msg = "Listener TLS cert served"
-			} else if err != nil {
-				msg = fmt.Sprintf("Failed to serve listener tls cert with error: %s", err.Error())
-			} else {
-				msg = "Failed to serve listener tls cert"
-			}
-		} else if key {
-			raw := l.RawKey
-			if raw == nil {
-				raw, err = util.EncodeX509Key(l.Cert)
-			}
-			if raw != nil {
-				w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
-				w.Header().Set("Content-Type", "application/octet-stream")
-				w.Write(raw)
-				msg = "Listener TLS key served"
-			} else if err != nil {
-				msg = fmt.Sprintf("Failed to serve listener tls key with error: %s", err.Error())
-			} else {
-				msg = "Failed to serve listener tls key"
-			}
-		} else {
-			w.WriteHeader(http.StatusBadRequest)
-			msg = "Neither cert nor key requested"
-			fmt.Fprintln(w, msg)
-		}
-		util.AddLogMessage(msg, r)
-	}
-}
-
-func autoCert(w http.ResponseWriter, r *http.Request) {
-	if l := validateListener(w, r); l != nil {
-		msg := ""
-		if domain := util.GetStringParamValue(r, "domain"); domain != "" {
-			if cert, err := util.CreateCertificate(domain, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
-				l.Cert = cert
-				if l.reopenListener() {
-					msg = fmt.Sprintf("Cert auto-generated for listener %d\n", l.Port)
-					events.SendRequestEvent("Listener Cert Generated", msg, r)
-				} else {
-					msg = fmt.Sprintf("Failed to reopen listener %d for auto-generate cert\n", l.Port)
-				}
-			} else {
-				msg = fmt.Sprintf("Failed to auto-generate cert for listener %d\n", l.Port)
-				w.WriteHeader(http.StatusInternalServerError)
-			}
-		} else {
-			msg = fmt.Sprintf("Missing domain for cert auto-generation for listener %d\n", l.Port)
-			w.WriteHeader(http.StatusBadRequest)
-		}
-		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
-	}
-}
-
-func autoSNI(w http.ResponseWriter, r *http.Request) {
-	if l := validateListener(w, r); l != nil {
-		l.AutoSNI = true
-		l.AutoCert = false
-		msg := ""
-		if l.reopenListener() {
-			msg = fmt.Sprintf("Listener [%d] configured to auto-generate cert for any SNI", l.Port)
-		} else {
-			msg = fmt.Sprintf("Failed to reopen listener %d for auto-generate SNI\n", l.Port)
-		}
-		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
-	}
-}
-
 func GetListeners() map[int]*Listener {
 	listenersView := map[int]*Listener{}
 	listenersView[DefaultListener.Port] = DefaultListener
@@ -641,15 +756,13 @@ func GetListeners() map[int]*Listener {
 	return listenersView
 }
 
-func getListeners(w http.ResponseWriter, r *http.Request) {
-	port := util.GetIntParamValue(r, "port")
-	listenersLock.RLock()
-	defer listenersLock.RUnlock()
-	if port > 0 {
-		util.WriteJsonPayload(w, GetListenerForPort(port))
-	} else {
-		util.WriteJsonPayload(w, GetListeners())
+func GetListenerPorts() map[int]string {
+	listenersView := map[int]string{}
+	listenersView[DefaultListener.Port] = DefaultListener.Protocol
+	for port, l := range listeners {
+		listenersView[port] = l.L8Proto
 	}
+	return listenersView
 }
 
 func GetListenerForPort(port int) *Listener {
@@ -661,12 +774,12 @@ func GetListenerForPort(port int) *Listener {
 	return listeners[port]
 }
 
-func GetListener(r *http.Request) *Listener {
-	return GetListenerForPort(util.GetListenerPortNum(r))
+func GetRequestedListener(r *http.Request) *Listener {
+	return GetListenerForPort(util.GetRequestOrListenerPortNum(r))
 }
 
 func GetCurrentListener(r *http.Request) *Listener {
-	l := GetListener(r)
+	l := GetListenerForPort(util.GetListenerPortNum(r))
 	if l == nil {
 		l = DefaultListener
 	}
@@ -705,11 +818,11 @@ func GetListenerLabelForPort(port int) string {
 	listenersLock.RUnlock()
 	if l != nil {
 		return l.Label
-	} else if port == global.ServerPort {
+	} else if port == global.Self.ServerPort {
 		if DefaultListener.Label != "" {
 			return DefaultListener.Label
 		} else {
-			return util.GetHostLabel()
+			return global.Self.HostLabel
 		}
 	}
 	return util.BuildListenerLabel(port)
@@ -721,10 +834,10 @@ func GetHostLabelForPort(port int) string {
 	listenersLock.RUnlock()
 	if l != nil {
 		return l.HostLabel
-	} else if port == global.ServerPort {
-		return util.GetHostLabel()
+	} else if port == global.Self.ServerPort {
+		return global.Self.HostLabel
 	}
-	return util.BuildHostLabel(port)
+	return global.BuildHostLabel(port)
 }
 
 func SetListenerLabel(r *http.Request) string {
@@ -743,69 +856,4 @@ func SetListenerLabel(r *http.Request) string {
 	}
 	events.SendRequestEvent("Listener Label Updated", label, r)
 	return label
-}
-
-func openListener(w http.ResponseWriter, r *http.Request) {
-	if l := validateListener(w, r); l != nil {
-		msg := ""
-		if l.Listener == nil {
-			if l.openListener() {
-				if l.TLS {
-					msg = fmt.Sprintf("TLS Listener opened on port %d\n", l.Port)
-				} else {
-					msg = fmt.Sprintf("Listener opened on port %d\n", l.Port)
-				}
-				events.SendRequestEventJSON("Listener Opened", l.ListenerID,
-					map[string]interface{}{"listener": l, "status": msg}, r)
-			} else {
-				w.WriteHeader(http.StatusInternalServerError)
-				msg = fmt.Sprintf("Failed to listen on port %d\n", l.Port)
-			}
-		} else {
-			l.reopenListener()
-			if l.TLS {
-				msg = fmt.Sprintf("TLS Listener reopened on port %d\n", l.Port)
-			} else {
-				msg = fmt.Sprintf("Listener reopened on port %d\n", l.Port)
-			}
-			events.SendRequestEventJSON("Listener Reopened", l.ListenerID,
-				map[string]interface{}{"listener": l, "status": msg}, r)
-		}
-		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
-	}
-}
-
-func closeListener(w http.ResponseWriter, r *http.Request) {
-	if l := validateListener(w, r); l != nil {
-		msg := ""
-		if l.Listener == nil {
-			w.WriteHeader(http.StatusBadRequest)
-			msg = fmt.Sprintf("Port %d not open\n", l.Port)
-		} else {
-			l.closeListener()
-			msg = fmt.Sprintf("Listener on port %d closed\n", l.Port)
-			events.SendRequestEvent("Listener Closed", msg, r)
-		}
-		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
-	}
-}
-
-func removeListener(w http.ResponseWriter, r *http.Request) {
-	if l := validateListener(w, r); l != nil {
-		l.lock.Lock()
-		if l.Listener != nil {
-			l.Listener.Close()
-			l.Listener = nil
-		}
-		l.lock.Unlock()
-		listenersLock.Lock()
-		delete(listeners, l.Port)
-		listenersLock.Unlock()
-		msg := fmt.Sprintf("Listener on port %d removed", l.Port)
-		events.SendRequestEvent("Listener Removed", msg, r)
-		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
-	}
 }

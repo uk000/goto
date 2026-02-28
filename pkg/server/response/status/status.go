@@ -28,8 +28,10 @@ import (
 	"goto/pkg/events"
 	"goto/pkg/metrics"
 	"goto/pkg/server/intercept"
+	"goto/pkg/server/middleware"
 	"goto/pkg/server/request/uri"
 	"goto/pkg/server/response/trigger"
+	"goto/pkg/types"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
@@ -43,39 +45,38 @@ type FlipFlopConfig struct {
 }
 
 type PortStatus struct {
-	alwaysReportStatuses    []int
-	alwaysReportStatusCount int
 	countsByRequestedStatus map[int]int
 	countsByResponseStatus  map[int]int
-	flipflopConfigs         map[string]*FlipFlopConfig
+	FlipflopConfigs         map[string]*FlipFlopConfig
 	lock                    sync.RWMutex
 }
 
 var (
-	Handler       util.ServerHandler     = util.ServerHandler{"status", SetRoutes, Middleware}
-	portStatusMap map[string]*PortStatus = map[string]*PortStatus{}
+	Middleware    = middleware.NewMiddleware("status", setRoutes, middlewareFunc)
+	statusManager = NewStatusManager()
+	portStatusMap = map[string]*PortStatus{}
 	statusLock    sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	statusRouter := util.PathRouter(r, "/status")
-	util.AddRouteWithPort(statusRouter, "/set/{status}", setStatus, "PUT", "POST")
-	util.AddRouteWithPort(statusRouter, "/counts/clear", clearStatus, "PUT", "POST")
-	util.AddRouteWithPort(statusRouter, "/counts/{status}", getStatusCount, "GET")
-	util.AddRouteWithPort(statusRouter, "/counts", getStatusCount, "GET")
-	util.AddRouteWithPort(statusRouter, "/clear", setStatus, "PUT", "POST")
-	util.AddRouteWithPort(statusRouter, "", getStatus, "GET")
+
+	util.AddRoute(statusRouter, "/configure", configureStatus, "POST")
+	util.AddRouteQO(statusRouter, "/set/{status}", setStatus, "uri", "POST")
+
+	util.AddRoute(statusRouter, "/clear", clearStatus, "POST")
+	util.AddRoute(statusRouter, "/counts/clear", clearStatus, "POST")
+
+	util.AddRoute(statusRouter, "/counts/{status}", getStatusCount, "GET")
+	util.AddRoute(statusRouter, "/counts", getStatusCount, "GET")
+	util.AddRoute(statusRouter, "", getStatus, "GET")
 	util.AddRoute(root, "/status/flipflop", getStatusCount, "GET")
-	util.AddRoute(root, "/status/clear", clearStatus, "POST")
+
 	util.AddRoute(root, "/status/{status}", status)
-	util.AddRouteQ(root, "/status={status}", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
-	util.AddRoute(root, "/status={status}", status)
-	util.AddRouteQ(root, "/status={status}/delay={delay}", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
-	util.AddRoute(root, "/status={status}/delay={delay}", status)
-	util.AddRouteQ(root, "/status={status}/flipflop", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
-	util.AddRoute(root, "/status={status}/flipflop", status)
-	util.AddRouteQ(root, "/status={status}/delay={delay}/flipflop", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
-	util.AddRoute(root, "/status={status}/delay={delay}/flipflop", status)
+	util.AddRouteQO(root, "/status={status}", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+	util.AddRouteQO(root, "/status={status}/delay={delay}", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+	util.AddRouteQO(root, "/status={status}/flipflop", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+	util.AddRouteQO(root, "/status={status}/delay={delay}/flipflop", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
 }
 
 func getOrCreatePortStatus(r *http.Request) *PortStatus {
@@ -87,14 +88,31 @@ func getOrCreatePortStatus(r *http.Request) *PortStatus {
 		portStatus = &PortStatus{
 			countsByRequestedStatus: map[int]int{},
 			countsByResponseStatus:  map[int]int{},
-			flipflopConfigs:         map[string]*FlipFlopConfig{},
+			FlipflopConfigs:         map[string]*FlipFlopConfig{},
 		}
 		portStatusMap[listenerPort] = portStatus
 	}
 	return portStatus
 }
 
+func configureStatus(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	sc, err := statusManager.ParseStatusConfig(port, r.Body)
+	msg := ""
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = fmt.Sprintf("Failed to parse status config with error: %s", err.Error())
+		fmt.Fprintln(w, msg)
+	} else {
+		msg = fmt.Sprintf("Parsed status config: %s", sc.Log("HTTP Response Status", port))
+		util.WriteJsonPayload(w, sc)
+	}
+	util.AddLogMessage(msg, r)
+}
+
 func setStatus(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	uri := util.GetStringParamValue(r, "uri")
 	statusCodes, times, ok := util.GetStatusParam(r)
 	if !ok {
 		util.AddLogMessage("Invalid status", r)
@@ -102,84 +120,37 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Invalid Status")
 		return
 	}
-	portStatus := getOrCreatePortStatus(r)
-	portStatus.lock.Lock()
-	if len(statusCodes) > 0 && statusCodes[0] > 0 {
-		portStatus.alwaysReportStatuses = statusCodes
-		portStatus.alwaysReportStatusCount = 0
-		if times > 1 {
-			portStatus.alwaysReportStatusCount = times
-		} else {
-			portStatus.flipflopConfigs = map[string]*FlipFlopConfig{}
-		}
-	} else {
-		portStatus.alwaysReportStatuses = []int{}
-		portStatus.alwaysReportStatusCount = -1
-	}
-	portStatus.lock.Unlock()
-	msg := ""
-	port := util.GetRequestOrListenerPort(r)
-	if portStatus.alwaysReportStatusCount > 0 {
-		msg = fmt.Sprintf("Port [%s] will respond with forced statuses %+v for next [%d] requests",
-			port, portStatus.alwaysReportStatuses, portStatus.alwaysReportStatusCount)
-		events.SendRequestEvent("Response Status Configured", msg, r)
-	} else if portStatus.alwaysReportStatusCount == 0 {
-		msg = fmt.Sprintf("Port [%s] will respond with forced statuses %+v forever",
-			port, portStatus.alwaysReportStatuses)
-		events.SendRequestEvent("Response Status Configured", msg, r)
-	} else {
-		msg = fmt.Sprintf("Port [%s] will respond normally", port)
-		events.SendRequestEvent("Response Status Cleared", msg, r)
-	}
+	status := statusManager.SetStatusFor(port, uri, "", "", statusCodes, times, true)
+	msg := status.Log("HTTP Response Status", port)
 	util.AddLogMessage(msg, r)
-	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, msg)
 }
 
 func IsForcedStatus(r *http.Request) bool {
-	portStatus := getOrCreatePortStatus(r)
-	portStatus.lock.RLock()
-	defer portStatus.lock.RUnlock()
-	return len(portStatus.alwaysReportStatuses) > 0 && portStatus.alwaysReportStatuses[0] > 0 && portStatus.alwaysReportStatusCount >= 0
+	port := util.GetRequestOrListenerPortNum(r)
+	status, rem := statusManager.GetStatusFor(port, r.RequestURI, r.Header)
+	return status > 0 && rem > 0
 }
 
-func computeResponseStatus(originalStatus int, r *http.Request) (int, bool) {
-	portStatus := getOrCreatePortStatus(r)
-	portStatus.lock.Lock()
-	defer portStatus.lock.Unlock()
+func computeResponseStatus(originalStatus int, r *http.Request) (int, int, bool) {
+	port := util.GetRequestOrListenerPortNum(r)
 	overriddenStatus := false
 	responseStatus := originalStatus
-	if len(portStatus.alwaysReportStatuses) > 0 && portStatus.alwaysReportStatuses[0] > 0 && portStatus.alwaysReportStatusCount >= 0 {
-		if len(portStatus.alwaysReportStatuses) == 1 {
-			responseStatus = portStatus.alwaysReportStatuses[0]
-		} else {
-			responseStatus = util.RandomFrom(portStatus.alwaysReportStatuses)
-		}
+	status, remaining := statusManager.GetStatusFor(port, r.RequestURI, r.Header)
+	if status > 0 {
+		responseStatus = status
 		overriddenStatus = true
-		if portStatus.alwaysReportStatusCount > 1 {
-			portStatus.alwaysReportStatusCount--
-		} else if portStatus.alwaysReportStatusCount == 1 {
-			portStatus.alwaysReportStatusCount = -1
-		}
 	}
-	return responseStatus, overriddenStatus
+	return responseStatus, remaining, overriddenStatus
 }
 
 func getStatus(w http.ResponseWriter, r *http.Request) {
-	portStatus := getOrCreatePortStatus(r)
-	msg := ""
-	port := util.GetRequestOrListenerPort(r)
-	if portStatus.alwaysReportStatusCount > 0 {
-		msg = fmt.Sprintf("Port [%s] responding with forced statuses %+v for next [%d] requests",
-			port, portStatus.alwaysReportStatuses, portStatus.alwaysReportStatusCount)
-	} else if portStatus.alwaysReportStatusCount == 0 {
-		msg = fmt.Sprintf("Port [%s] responding with forced statuses %+v forever",
-			port, portStatus.alwaysReportStatuses)
-	} else {
-		msg = fmt.Sprintf("Port [%s] responding normally", port)
+	data := map[string]any{
+		"PortStatuses":        statusManager.PortStatus,
+		"PortFlipFlopConfigs": portStatusMap,
 	}
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, msg)
+	util.WriteJsonPayload(w, data)
+	util.AddLogMessage("Delivered statuses", r)
 }
 
 func getStatusCount(w http.ResponseWriter, r *http.Request) {
@@ -190,7 +161,7 @@ func getStatusCount(w http.ResponseWriter, r *http.Request) {
 	statusLock.RUnlock()
 	if portStatus != nil {
 		if strings.Contains(r.RequestURI, "flipflop") {
-			util.WriteJsonPayload(w, portStatus.flipflopConfigs)
+			util.WriteJsonPayload(w, portStatus.FlipflopConfigs)
 			msg = "FlipFlop Status Reproted"
 		} else if status, present := util.GetIntParam(r, "status"); present {
 			portStatus.lock.RLock()
@@ -224,6 +195,7 @@ func getStatusCount(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearStatus(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
 	portStatus := getOrCreatePortStatus(r)
 	counts := strings.Contains(r.RequestURI, "counts")
 	msg := ""
@@ -234,7 +206,8 @@ func clearStatus(w http.ResponseWriter, r *http.Request) {
 		msg = fmt.Sprintf("Port [%s] Response Status Counts Cleared", util.GetRequestOrListenerPort(r))
 		events.SendRequestEvent("Response Status Counts Cleared", msg, r)
 	} else {
-		portStatus.flipflopConfigs = map[string]*FlipFlopConfig{}
+		statusManager.Clear(port)
+		portStatus.FlipflopConfigs = map[string]*FlipFlopConfig{}
 		msg = fmt.Sprintf("Port [%s] Response Status State Cleared", util.GetRequestOrListenerPort(r))
 		events.SendRequestEvent("Response Status Cleared", msg, r)
 	}
@@ -244,14 +217,14 @@ func clearStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ps *PortStatus) flipflop(requestId string, requestedStatuses []int, times int, restart bool, r *http.Request, w http.ResponseWriter) int {
-	flipflopConfig := ps.flipflopConfigs[requestId]
+	flipflopConfig := ps.FlipflopConfigs[requestId]
 	if flipflopConfig == nil {
 		flipflopConfig = &FlipFlopConfig{
 			Times:           times,
 			StatusCount:     times,
 			LastStatusIndex: 0,
 		}
-		ps.flipflopConfigs[requestId] = flipflopConfig
+		ps.FlipflopConfigs[requestId] = flipflopConfig
 	}
 	requestedStatus := http.StatusOK
 	if len(requestedStatuses) > 1 {
@@ -261,7 +234,7 @@ func (ps *PortStatus) flipflop(requestId string, requestedStatuses []int, times 
 		} else {
 			w.Header().Add(HeaderGotoStatusFlip, strconv.Itoa(requestedStatuses[flipflopConfig.LastStatusIndex-1]))
 			flipflopConfig.LastStatusIndex = 0
-			delete(ps.flipflopConfigs, requestId)
+			delete(ps.FlipflopConfigs, requestId)
 		}
 	} else if len(requestedStatuses) == 1 {
 		requestedStatus = requestedStatuses[0]
@@ -283,9 +256,9 @@ func (ps *PortStatus) flipflop(requestId string, requestedStatuses []int, times 
 			flipflopConfig.StatusCount--
 		}
 		if flipflopConfig.StatusCount >= 0 {
-			ps.flipflopConfigs[requestId] = flipflopConfig
+			ps.FlipflopConfigs[requestId] = flipflopConfig
 		} else if restart {
-			delete(ps.flipflopConfigs, requestId)
+			delete(ps.FlipflopConfigs, requestId)
 		}
 	}
 	util.AddLogMessage(fmt.Sprintf("Flipflop: request id [%s], status [%d], count [%d], remaining [%d]", requestId, requestedStatus, times, flipflopConfig.StatusCount), r)
@@ -311,7 +284,7 @@ func status(w http.ResponseWriter, r *http.Request) {
 	} else if len(requestedStatuses) == 1 {
 		requestedStatus = requestedStatuses[0]
 	} else if len(requestedStatuses) > 1 {
-		requestedStatus = util.RandomFrom(requestedStatuses)
+		requestedStatus = types.RandomFrom(requestedStatuses)
 	}
 	portStatus.countsByRequestedStatus[requestedStatus]++
 	portStatus.lock.Unlock()
@@ -319,7 +292,7 @@ func status(w http.ResponseWriter, r *http.Request) {
 	delay := 0 * time.Second
 	delayText := ""
 	if delayMin > 0 {
-		delay = util.RandomDuration(delayMin, delayMax)
+		delay = types.RandomDuration(delayMin, delayMax)
 		time.Sleep(delay)
 		delayText = delay.String()
 		w.Header().Add(HeaderGotoResponseDelay, delayText)
@@ -338,19 +311,20 @@ func IncrementStatusCount(statusCode int, r *http.Request) {
 	portStatus.countsByResponseStatus[statusCode]++
 }
 
-func Middleware(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {
 			next.ServeHTTP(w, r)
 		}
-		if util.IsKnownNonTraffic(r) {
+		rs := util.GetRequestStore(r)
+		if rs.IsAdminRequest {
 			return
 		}
 		overriddenStatus := false
 		irw := util.GetInterceptResponseWriter(r).(*intercept.InterceptResponseWriter)
 		if !uri.HasURIStatus(r) {
-			ps := getOrCreatePortStatus(r)
-			irw.StatusCode, overriddenStatus = computeResponseStatus(irw.StatusCode, r)
+			remaining := 0
+			irw.StatusCode, remaining, overriddenStatus = computeResponseStatus(irw.StatusCode, r)
 			if irw.StatusCode == 0 {
 				irw.StatusCode = http.StatusOK
 			}
@@ -358,11 +332,11 @@ func Middleware(next http.Handler) http.Handler {
 			msg := ""
 			if overriddenStatus {
 				w.Header().Add(HeaderGotoForcedStatus, strconv.Itoa(irw.StatusCode))
-				if ps.alwaysReportStatusCount > 0 {
-					w.Header().Add(HeaderGotoForcedStatusRemaining, strconv.Itoa(ps.alwaysReportStatusCount))
+				if remaining > 0 {
+					w.Header().Add(HeaderGotoForcedStatusRemaining, strconv.Itoa(remaining))
 				}
 				msg = fmt.Sprintf("Reporting status: [%d] for URI [%s]. Remaining status count [%d].",
-					irw.StatusCode, r.RequestURI, ps.alwaysReportStatusCount)
+					irw.StatusCode, r.RequestURI, remaining)
 			} else {
 				msg = fmt.Sprintf("Reporting status: [%d] for URI [%s].", irw.StatusCode, r.RequestURI)
 			}

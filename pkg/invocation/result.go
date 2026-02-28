@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"goto/pkg/events"
-	. "goto/pkg/events/eventslist"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
 	"goto/pkg/transport"
@@ -73,7 +72,7 @@ type InvocationResult struct {
 	httpResponse        *http.Response
 	grpcResponse        interface{}
 	grpcStatus          int
-	client              transport.TransportClient
+	client              transport.ClientTransport
 	tracker             *InvocationTracker
 	request             *InvocationRequest
 	err                 error
@@ -81,6 +80,7 @@ type InvocationResult struct {
 
 type InvocationStatus struct {
 	TotalRequests     int    `json:"totalRequests"`
+	AssignedRequests  int    `json:"assignedRequests"`
 	CompletedRequests int    `json:"completedRequests"`
 	SuccessCount      int    `json:"successCount"`
 	FailureCount      int    `json:"failureCount"`
@@ -176,12 +176,9 @@ func (result *InvocationResult) processHTTPResponse(req *InvocationRequest, r *h
 }
 
 func (result *InvocationResult) processGRPCResponse(req *InvocationRequest, responseStatus int, responseHeaders map[string][]string,
-	responsePayload []byte, clientStreamCount, serverStreamCount int, err error) {
+	responsePayload []string, clientStreamCount, serverStreamCount int, err error) {
 	result.err = err
 	if err == nil {
-		if result.tracker.Target.CollectResponse {
-			result.Response.Payload = responsePayload
-		}
 		result.Response.PayloadSize = len(responsePayload)
 		result.Response.ClientStreamCount = clientStreamCount
 		result.Response.ServerStreamCount = serverStreamCount
@@ -265,7 +262,7 @@ func (result *InvocationResult) validateResponse() {
 		if assert.PayloadSize > 0 && result.Response.PayloadSize != assert.PayloadSize {
 			errors["payloadLength"] = map[string]interface{}{"expected": assert.PayloadSize, "actual": result.Response.PayloadSize}
 		}
-		if len(assert.Payload) > 0 && bytes.Compare(assert.payload, result.Response.Payload) != 0 {
+		if len(assert.Payload) > 0 && !bytes.Equal(assert.payload, result.Response.Payload) {
 			errors["payload"] = map[string]interface{}{"expected": assert.PayloadSize, "actual": result.Response.PayloadSize}
 		}
 		if len(assert.headersRegexp) > 0 && !util.ContainsAllHeaders(result.Response.Headers, assert.headersRegexp) {
@@ -341,13 +338,13 @@ func (is *InvocationStatus) trackStatus(result *InvocationResult) {
 	is.ClientStreamCount += result.Response.ClientStreamCount
 	is.ServerStreamCount += result.Response.ServerStreamCount
 	is.lock.Unlock()
-	if global.EnableInvocationLogs || !isRepeatStatus {
-		if global.EnableInvocationResponseLogs {
+	if global.Flags.EnableInvocationLogs || !isRepeatStatus {
+		if global.Flags.EnableInvocationResponseLogs {
 			log.Println(util.ToJSONText(result))
 		}
 		is.lock.Lock()
 		if !isRepeatStatus {
-			events.SendEventJSON(Client_InvocationResponse,
+			events.SendEventJSON(events.Client_InvocationResponse,
 				fmt.Sprintf("%d-%s-%s", is.tracker.ID, result.request.targetID, result.request.requestID), result)
 		}
 		is.lock.Unlock()

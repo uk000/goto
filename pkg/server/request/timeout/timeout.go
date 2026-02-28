@@ -24,6 +24,7 @@ import (
 
 	"goto/pkg/events"
 	"goto/pkg/metrics"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
@@ -41,17 +42,17 @@ type TimeoutTracking struct {
 }
 
 var (
-	Handler               util.ServerHandler          = util.ServerHandler{"timeout", SetRoutes, Middleware}
-	timeoutTrackingByPort map[string]*TimeoutTracking = map[string]*TimeoutTracking{}
+	Middleware            = middleware.NewMiddleware("timeout", setRoutes, middlewareFunc)
+	timeoutTrackingByPort = map[string]*TimeoutTracking{}
 	timeoutTrackingLock   sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	timeoutRouter := util.PathRouter(r, "/timeout")
-	util.AddRouteWithPort(timeoutRouter, "/track/headers/{headers}", trackHeaders, "PUT", "POST")
-	util.AddRouteWithPort(timeoutRouter, "/track/all", trackAll, "PUT", "POST")
-	util.AddRouteWithPort(timeoutRouter, "/track/clear", clearTimeoutTracking, "POST")
-	util.AddRouteWithPort(timeoutRouter, "/status", reportTimeoutTracking, "GET")
+	util.AddRoute(timeoutRouter, "/track/headers/{headers}", trackHeaders, "PUT", "POST")
+	util.AddRoute(timeoutRouter, "/track/all", trackAll, "PUT", "POST")
+	util.AddRoute(timeoutRouter, "/track/clear", clearTimeoutTracking, "POST")
+	util.AddRoute(timeoutRouter, "/status", reportTimeoutTracking, "GET")
 }
 
 func (tt *TimeoutTracking) init() {
@@ -143,9 +144,10 @@ func reportTimeoutTracking(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, output)
 }
 
-func Middleware(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if util.IsKnownNonTraffic(r) {
+		rs := util.GetRequestStore(r)
+		if rs.IsKnownNonTraffic {
 			if next != nil {
 				next.ServeHTTP(w, r)
 			}

@@ -92,9 +92,9 @@ func (jm *JobManager) getAllJobsResults() map[string]map[int][]interface{} {
 }
 
 func storeJobResultsInRegistryLocker(jobID string, runIndex int, jobResults []*JobResult) {
-	if global.UseLocker && global.RegistryURL != "" {
+	if global.Flags.UseLocker && global.Self.RegistryURL != "" {
 		key := "job_" + jobID + "_" + strconv.Itoa(runIndex)
-		url := global.RegistryURL + "/registry/peers/" + global.PeerName + "/" + global.PeerAddress + "/locker/store/" + key
+		url := global.Self.RegistryURL + "/registry/peers/" + global.Self.Name + "/" + global.Self.Address + "/locker/store/" + key
 		if resp, err := http.Post(url, ContentTypeJSON,
 			strings.NewReader(util.ToJSONText(jobResults))); err == nil {
 			util.CloseResponse(resp)

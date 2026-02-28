@@ -19,10 +19,10 @@ package request
 import (
 	"net/http"
 
-	"goto/pkg/server/request/body"
+	"goto/pkg/server/middleware"
 	"goto/pkg/server/request/filter"
-	"goto/pkg/server/request/header"
 	"goto/pkg/server/request/timeout"
+	"goto/pkg/server/request/tracking"
 	"goto/pkg/server/request/uri"
 	"goto/pkg/util"
 
@@ -30,14 +30,14 @@ import (
 )
 
 var (
-	Handler         util.ServerHandler   = util.ServerHandler{"request", SetRoutes, Middleware}
-	requestHandlers []util.ServerHandler = []util.ServerHandler{header.Handler, body.Handler, timeout.Handler, uri.Handler, filter.Handler}
+	Middleware         = middleware.NewMiddleware("request", setRoutes, middlewareFunc)
+	requestMiddlewares = []*middleware.Middleware{tracking.Middleware, timeout.Middleware, uri.Middleware, filter.Middleware}
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	util.AddRoutes(util.PathRouter(r, "/server?/request"), r, root, requestHandlers...)
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+	middleware.AddRoutes(util.PathRouter(r, "/server/request"), r, root, requestMiddlewares...)
 }
 
-func Middleware(next http.Handler) http.Handler {
-	return util.AddMiddlewares(next, requestHandlers...)
+func middlewareFunc(next http.Handler) http.Handler {
+	return middleware.AddMiddlewares(next, requestMiddlewares...)
 }

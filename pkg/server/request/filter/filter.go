@@ -20,6 +20,7 @@ import (
 	"fmt"
 	. "goto/pkg/constants"
 	"goto/pkg/events"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
 	"regexp"
@@ -46,13 +47,13 @@ type RequestFilter struct {
 }
 
 var (
-	Handler      = util.ServerHandler{"filter", SetRoutes, Middleware}
+	Middleware   = middleware.NewMiddleware("filter", setRoutes, middlewareFunc)
 	ignoreFilter = newRequestFilter()
 	bypassFilter = newRequestFilter()
 	lock         sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	ignoreFilter.SetRoutes("ignore", r)
 	bypassFilter.SetRoutes("bypass", r)
 }
@@ -60,17 +61,17 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 func (rf *RequestFilter) SetRoutes(filterType string, r *mux.Router) {
 	rf.filterType = filterType
 	filterRouter := util.PathRouter(r, "/"+filterType)
-	util.AddRouteQWithPort(filterRouter, "/add", rf.addFilterHeaderOrURI, "uri", "PUT", "POST")
-	util.AddRouteWithPort(filterRouter, "/add/header/{header}={value}", rf.addFilterHeaderOrURI, "PUT", "POST")
-	util.AddRouteWithPort(filterRouter, "/add/header/{header}", rf.addFilterHeaderOrURI, "PUT", "POST")
-	util.AddRouteWithPort(filterRouter, "/remove/header/{header}={value}", rf.removeIgnoreHeaderOrURI, "PUT", "POST")
-	util.AddRouteWithPort(filterRouter, "/remove/header/{header}", rf.removeIgnoreHeaderOrURI, "PUT", "POST")
-	util.AddRouteQWithPort(filterRouter, "/remove", rf.removeIgnoreHeaderOrURI, "uri", "PUT", "POST")
-	util.AddRouteWithPort(filterRouter, "/set/status={status}", rf.setOrGetIgnoreStatus, "PUT", "POST")
-	util.AddRouteWithPort(filterRouter, "/status", rf.setOrGetIgnoreStatus)
-	util.AddRouteWithPort(filterRouter, "/clear", rf.clear, "PUT", "POST")
-	util.AddRouteWithPort(filterRouter, "/count", rf.getFilteredRequestCount, "GET")
-	util.AddRouteWithPort(filterRouter, "", rf.getRequestFilterConfig, "GET")
+	util.AddRouteQ(filterRouter, "/add", rf.addFilterHeaderOrURI, "uri", "PUT", "POST")
+	util.AddRoute(filterRouter, "/add/header/{header}={value}", rf.addFilterHeaderOrURI, "PUT", "POST")
+	util.AddRoute(filterRouter, "/add/header/{header}", rf.addFilterHeaderOrURI, "PUT", "POST")
+	util.AddRoute(filterRouter, "/remove/header/{header}={value}", rf.removeIgnoreHeaderOrURI, "PUT", "POST")
+	util.AddRoute(filterRouter, "/remove/header/{header}", rf.removeIgnoreHeaderOrURI, "PUT", "POST")
+	util.AddRouteQ(filterRouter, "/remove", rf.removeIgnoreHeaderOrURI, "uri", "PUT", "POST")
+	util.AddRoute(filterRouter, "/set/status={status}", rf.setOrGetIgnoreStatus, "PUT", "POST")
+	util.AddRoute(filterRouter, "/status", rf.setOrGetIgnoreStatus)
+	util.AddRoute(filterRouter, "/clear", rf.clear, "PUT", "POST")
+	util.AddRoute(filterRouter, "/count", rf.getFilteredRequestCount, "GET")
+	util.AddRoute(filterRouter, "", rf.getRequestFilterConfig, "GET")
 }
 
 func newRequestFilter() *RequestFilter {
@@ -123,14 +124,15 @@ func (rf *RequestFilter) addFilterHeaderOrURI(w http.ResponseWriter, r *http.Req
 		events.SendRequestEvent("Request Filter Added", msg, r)
 	} else if header != "" {
 		header = strings.ToLower(header)
-		if value != "" {
-			value = strings.ToLower(value)
+		hvalue, glob := util.Unglob(strings.ToLower(value))
+		if glob {
+			hvalue += util.GlobRegex
 		}
 		rf.lock.Lock()
 		if rf.HeaderUpdates[header] == nil {
 			rf.HeaderUpdates[header] = map[string]*regexp.Regexp{}
 		}
-		rf.HeaderUpdates[header][value] = regexp.MustCompile("(?i)^" + value + "$")
+		rf.HeaderUpdates[header][value] = regexp.MustCompile("(?i)^" + hvalue + "$")
 		rf.PendingUpdates = true
 		rf.hasHeaders = true
 		rf.lock.Unlock()
@@ -346,9 +348,10 @@ func filterRequest(w http.ResponseWriter, r *http.Request) bool {
 	return statusCode > 0
 }
 
-func Middleware(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if util.IsKnownNonTraffic(r) || !filterRequest(w, r) {
+		rs := util.GetRequestStore(r)
+		if rs.IsKnownNonTraffic || !filterRequest(w, r) {
 			if next != nil {
 				next.ServeHTTP(w, r)
 			}

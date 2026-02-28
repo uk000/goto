@@ -42,8 +42,8 @@ Port [8080] will delay all requests for URI [/foo] by [1s] forever
 
 Now the client requests should start seeing an additional delay of 1s on top of the processing time taken for the normal calls. This delay will be applied by goto acting as a proxy, and the goto response headers should show the response time of the upstream service as well as for itself. Looks for these response headers from goto proxy:
 ```
-Goto-Upstream-Took|t1: 868.7µs
-Goto-Took|proxy: 1.0046516s
+Proxy-Goto-Upstream-Took-t1: 868.7µs
+Proxy-Goto-Took: 1.0046516s
 ```
 
 We can go one step further and recreate a scenario where an intermediate gateway starts acting, randomly throwing 502 or 503 even though the upstream service is acting fine.
@@ -61,8 +61,8 @@ $ curl -v localhost:8080/foo
 ...
 < HTTP/1.1 502 Bad Gateway
 ...
-Goto-Upstream-Status|t1: 200 OK
-Goto-Response-Status|proxy: 502
+Goto-Upstream-Status_t1: 200 OK
+Proxy-Goto-Response-Status: 502
 ...
 ```
 

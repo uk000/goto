@@ -21,13 +21,18 @@ import (
 	"sync"
 )
 
+type IConnWatcher interface {
+	OnConnClose()
+}
+
 type ConnTracker struct {
 	net.Conn
 	TransportIntercept *BaseTransportIntercept
 	closeSync          sync.Once
+	watcher            IConnWatcher
 }
 
-func NewConnTracker(conn net.Conn, t *BaseTransportIntercept) (net.Conn, error) {
+func NewConnTrackerWithWatch(conn net.Conn, t *BaseTransportIntercept, watcher IConnWatcher) (net.Conn, error) {
 	t.lock.Lock()
 	t.ConnCount++
 	t.lock.Unlock()
@@ -35,7 +40,12 @@ func NewConnTracker(conn net.Conn, t *BaseTransportIntercept) (net.Conn, error) 
 		Conn:               conn,
 		TransportIntercept: t,
 	}
+	ct.watcher = watcher
 	return ct, nil
+}
+
+func NewConnTracker(conn net.Conn, t *BaseTransportIntercept) (net.Conn, error) {
+	return NewConnTrackerWithWatch(conn, t, nil)
 }
 
 func (ct *ConnTracker) Close() (err error) {

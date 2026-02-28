@@ -22,6 +22,7 @@ import (
 	"goto/pkg/global"
 	"goto/pkg/metrics"
 	"goto/pkg/server/listeners"
+	"goto/pkg/server/middleware"
 	"goto/pkg/transport"
 	"goto/pkg/util"
 	"io"
@@ -47,7 +48,7 @@ type Endpoint struct {
 	IsTLS           bool   `json:"isTLS"`
 	IsH2            bool   `json:"isH2"`
 	UseRequestProto bool   `json:"useRequestProto"`
-	client          transport.TransportClient
+	client          transport.ClientTransport
 }
 
 type TunnelTrafficLog struct {
@@ -107,12 +108,16 @@ type PortTunnel struct {
 type PipeCallback func(epID, source string, port int, r *http.Request, statusCode int, responseHeaders http.Header, responseBody io.ReadCloser)
 
 var (
-	TunnelCountHandler     = util.ServerHandler{Name: "tunnelCount", Middleware: TunnelCountMiddleware}
+	TunnelCountMiddleware  = middleware.NewMiddleware("tunnelCount", nil, TunnelCountHandler)
 	tunnels                = map[int]*PortTunnel{}
 	tunnelRegexp           = regexp.MustCompile("(?i)tunnel")
 	pipeCallbacksByTunnels = map[string]map[string]PipeCallback{}
 	tunnelLock             sync.RWMutex
 )
+
+func init() {
+	util.WillTunnel = WillTunnel
+}
 
 func newPortTunnel(port int) *PortTunnel {
 	return (&PortTunnel{Port: port}).init()
@@ -220,7 +225,7 @@ func CheckTunnelRequest(r *http.Request) {
 func WillTunnel(r *http.Request, rs *util.RequestStore) bool {
 	tunnelLock.Lock()
 	defer tunnelLock.Unlock()
-	port := util.GetListenerPortNum(r)
+	port := util.GetRequestOrListenerPortNum(r)
 	if tunnels[port] != nil {
 		if willTunnel, endpoints := tunnels[port].checkTunnelsForRequest(r); willTunnel {
 			if willTunnel && len(endpoints) > 0 {
@@ -345,7 +350,7 @@ func (pt *PortTunnel) checkTunnelsForRequest(r *http.Request) (willTunnel bool, 
 }
 
 func (pt *PortTunnel) openProxyTunnel(fromAddress, toAddress string, isH2, isH2C, isTLS bool, clientConn net.Conn) bool {
-	selfAddress := fmt.Sprintf("%s:%d", util.GetHostIP(), pt.Port)
+	selfAddress := fmt.Sprintf("%s:%d", global.Self.PodIP, pt.Port)
 	if selfConn, err := net.DialTimeout("tcp", selfAddress, 10*time.Second); err == nil {
 		selfAddress = selfConn.LocalAddr().String()
 		pt.lock.Lock()
@@ -632,7 +637,7 @@ func (pt *PortTunnel) tunnelToEndpoint(ep *Endpoint, uri, tunnelHostLabel, viaTu
 		}
 		if resp, err := ep.client.HTTP().Do(req); err == nil {
 			r.Body.Close()
-			rr := util.NewReReader(resp.Body)
+			rr := util.CreateOrGetReReader(resp.Body)
 			resp.Body = rr
 			msg = fmt.Sprintf("Got response from tunnel [%s]: %s", url, resp.Status)
 			if global.Debug {
@@ -745,11 +750,11 @@ func tunnel(w http.ResponseWriter, r *http.Request) {
 			delete(r.Header, HeaderGotoTunnel)
 		}
 	}
-	tunnel := GetOrCreatePortTunnel(util.GetListenerPortNum(r))
+	tunnel := GetOrCreatePortTunnel(util.GetRequestOrListenerPortNum(r))
 	tunnel.tunnel(addresses, uri, r, w)
 }
 
-func Middleware(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if util.IsTunnelRequest(r) {
 			l := listeners.GetCurrentListener(r)
@@ -770,7 +775,7 @@ func Middleware(next http.Handler) http.Handler {
 	})
 }
 
-func TunnelCountMiddleware(next http.Handler) http.Handler {
+func TunnelCountHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if util.IsTunnelRequest(r) {
 			tunnelCount, _ := strconv.Atoi(r.Header.Get(HeaderGotoViaTunnelCount))

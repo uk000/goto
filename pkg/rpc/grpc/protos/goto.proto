@@ -1,0 +1,59 @@
+/**
+ * Copyright 2025 uk
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+syntax = "proto3";
+option go_package=".;pb";
+
+message Input {
+  string payload = 1;
+}
+
+message StreamConfig {
+  int32  chunkSize = 1;
+  int32  chunkCount = 2;
+  string interval = 3;
+  string payload = 4;
+}
+
+message Output {
+  string id = 1;
+  string payload = 2;
+  string at = 3;
+  string gotoHost = 4;
+  int32  gotoPort = 5;
+  string viaGoto = 6;
+}
+
+service Goto {
+  rpc echo(Input) returns (Output) {}
+  rpc streamIn(stream Input) returns (Output) {}
+  rpc streamOut(StreamConfig) returns (stream Output) {}
+  rpc streamInOut(stream StreamConfig) returns (stream Output) {}
+}
+
+service Goto2 {
+  rpc echo(Input) returns (Output) {}
+  rpc streamIn(stream Input) returns (Output) {}
+  rpc streamOut(StreamConfig) returns (stream Output) {}
+  rpc streamInOut(stream StreamConfig) returns (stream Output) {}
+}
+
+service Goto3 {
+  rpc echo(Input) returns (Output) {}
+  rpc streamIn(stream Input) returns (Output) {}
+  rpc streamOut(StreamConfig) returns (stream Output) {}
+  rpc streamInOut(stream StreamConfig) returns (stream Output) {}
+}

@@ -22,20 +22,21 @@ import (
 
 	"goto/pkg/events"
 	"goto/pkg/server/listeners"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
 )
 
 var (
-	Handler util.ServerHandler = util.ServerHandler{Name: "label", SetRoutes: SetRoutes}
+	Middleware = middleware.NewMiddleware("label", setRoutes, nil)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	labelRouter := util.PathRouter(r, "/server?/label")
-	util.AddRouteWithPort(labelRouter, "/set/{label}", setLabel, "PUT", "POST")
-	util.AddRouteWithPort(labelRouter, "/clear", setLabel, "POST")
-	util.AddRouteWithPort(labelRouter, "", getLabel)
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+	labelRouter := util.PathRouter(r, "/server/label")
+	util.AddRoute(labelRouter, "/set/{label}", setLabel, "PUT", "POST")
+	util.AddRoute(labelRouter, "/clear", setLabel, "POST")
+	util.AddRoute(labelRouter, "", getLabel)
 }
 
 func setLabel(w http.ResponseWriter, r *http.Request) {

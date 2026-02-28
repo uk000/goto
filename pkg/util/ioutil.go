@@ -19,16 +19,32 @@ package util
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"reflect"
 	"regexp"
 	"strings"
 	"time"
 )
+
+var (
+	replacer = strings.NewReplacer("[", "", "]", "", ".", "", ":", "", "/", "", "@", "-")
+)
+
+type Type interface {
+	~string | ~bool | ~int | ~int64
+}
+
+func Ptr[T Type](t T) *T { return &t }
+
+type IReReader interface {
+	Rewind()
+}
 
 type reader struct {
 	ctx context.Context
@@ -51,12 +67,32 @@ func (r reader) Read(p []byte) (n int, err error) {
 	return
 }
 
-func NewReReader(r io.ReadCloser) *ReReader {
+func SetAndGetReReader(r *http.Request) *ReReader {
+	rr := CreateOrGetReReader(r.Body)
+	r.Body = rr
+	return rr
+}
+
+func CreateOrGetReReader(body io.ReadCloser) *ReReader {
+	var rr *ReReader
+	if rr2, ok := body.(*ReReader); ok {
+		rr = rr2
+	} else {
+		rr = newReReader(body)
+	}
+	return rr
+}
+
+func newReReader(r io.ReadCloser) *ReReader {
 	content := ReadBytes(r)
 	return &ReReader{
-		ReadCloser: ioutil.NopCloser(bytes.NewReader(content)),
+		ReadCloser: io.NopCloser(bytes.NewReader(content)),
 		Content:    content,
 	}
+}
+
+func (r *ReReader) Rewind() {
+	r.ReadCloser = io.NopCloser(bytes.NewReader(r.Content))
 }
 
 func (r *ReReader) Read(p []byte) (n int, err error) {
@@ -73,11 +109,19 @@ func (r *ReReader) ReallyClose() error {
 	return r.ReadCloser.Close()
 }
 
+func (r *ReReader) Length() int {
+	return len(r.Content)
+}
+
+func (r ReReader) Text() string {
+	return string(r.Content)
+}
+
 func AsReReader(r io.ReadCloser) *ReReader {
 	if rr, ok := r.(*ReReader); ok {
 		return rr
 	}
-	return NewReReader(r)
+	return CreateOrGetReReader(r)
 }
 
 func Reader(ctx context.Context, r io.Reader) io.Reader {
@@ -93,8 +137,8 @@ func Reader(ctx context.Context, r io.Reader) io.Reader {
 }
 
 func BuildFilePath(filePath, fileName string) string {
-	if filePath != "" && !strings.HasSuffix(filePath, "/") {
-		filePath += "/"
+	if filePath != "" && !strings.HasSuffix(filePath, "/") && !strings.HasSuffix(filePath, "\\") {
+		filePath += string(os.PathSeparator)
 	}
 	filePath += fileName
 	return filePath
@@ -108,16 +152,29 @@ func StoreFile(filePath, fileName string, content []byte) (string, error) {
 		os.MkdirAll(filePath, os.ModePerm)
 	}
 	filePath = BuildFilePath(filePath, fileName)
-	if err := ioutil.WriteFile(filePath, content, 0777); err == nil {
+	if err := os.WriteFile(filePath, content, 0777); err == nil {
 		return filePath, nil
 	} else {
 		return "", err
 	}
 }
 
+func LoadFile(filePath string) (string, error) {
+	if filePath == "" {
+		return "", fmt.Errorf("no filename")
+	}
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return "", fmt.Errorf("file doesn't exist")
+	}
+	if content, err := os.ReadFile(filePath); err == nil {
+		return string(content), nil
+	} else {
+		return "", err
+	}
+}
+
 func Read(r io.ReadCloser) string {
-	if body, err := ioutil.ReadAll(r); err == nil {
-		r.Close()
+	if body, err := io.ReadAll(r); err == nil {
 		return strings.Trim(string(body), " ")
 	} else {
 		log.Println(err.Error())
@@ -126,12 +183,40 @@ func Read(r io.ReadCloser) string {
 }
 
 func ReadBytes(r io.Reader) []byte {
-	if body, err := ioutil.ReadAll(r); err == nil {
+	if body, err := io.ReadAll(r); err == nil {
 		return body
 	} else {
 		log.Println(err.Error())
 	}
 	return nil
+}
+
+func ReadArrayOfArrays(r io.Reader) [][]byte {
+	b := ReadBytes(r)
+	var arr []interface{}
+	var data [][]byte
+	err := json.Unmarshal(b, &arr)
+	if err != nil {
+		return [][]byte{b}
+	}
+	for _, a2 := range arr {
+		if arr2, ok := a2.([]interface{}); ok {
+			b2, err := json.Marshal(arr2)
+			if err != nil {
+				log.Println(err.Error())
+				return nil
+			}
+			data = append(data, b2)
+		} else {
+			b2, err := json.Marshal(a2)
+			if err != nil {
+				log.Println(err.Error())
+				return nil
+			}
+			data = append(data, b2)
+		}
+	}
+	return data
 }
 
 func ReadAndTrack(r io.Reader, collect bool) ([]byte, int, time.Time, time.Time, string) {
@@ -228,4 +313,12 @@ func GetCwd() string {
 	} else {
 		return cwd
 	}
+}
+
+func EmptyBody() io.Reader {
+	return io.NopCloser(strings.NewReader(""))
+}
+
+func Sanitize(name string) string {
+	return replacer.Replace(name)
 }

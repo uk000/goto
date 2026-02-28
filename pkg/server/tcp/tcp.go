@@ -24,6 +24,7 @@ import (
 	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
 	"log"
@@ -153,7 +154,7 @@ func InitTCPConfig(port int, tcpConfig *TCPConfig) (*TCPConfig, string) {
 }
 
 func storeTCPConfig(tcpConfig *TCPConfig) {
-	tcpConfig.ListenerID = global.GetListenerID(tcpConfig.Port)
+	tcpConfig.ListenerID = global.Funcs.GetListenerID(tcpConfig.Port)
 	lock.Lock()
 	if !tcpConfig.Payload && !tcpConfig.Echo && !tcpConfig.Stream && !tcpConfig.Conversation &&
 		!tcpConfig.ValidatePayloadContent && !tcpConfig.ValidatePayloadLength &&
@@ -161,7 +162,7 @@ func storeTCPConfig(tcpConfig *TCPConfig) {
 		if tcpConfig.ConnectionLifeD > 0 {
 			tcpConfig.SilentLife = true
 		} else {
-			tcpConfig.CloseAtFirstByte = true
+			tcpConfig.Echo = true
 		}
 	}
 	if tcpListeners[tcpConfig.Port] == nil {
@@ -257,7 +258,7 @@ func (tcp *TCPConnectionHandler) close() {
 }
 
 func (tcp *TCPConnectionHandler) isClosingOrClosed() bool {
-	return tcp.closing || tcp.closed || !global.IsListenerOpen(tcp.Port)
+	return tcp.closing || tcp.closed || !global.Funcs.IsListenerOpen(tcp.Port)
 }
 
 func (tcp *TCPConnectionHandler) processConnectionError(err error, whatFor string) {
@@ -306,9 +307,6 @@ func (tcp *TCPConnectionHandler) processRequest() {
 	} else if tcp.Stream {
 		metrics.UpdateTCPConnCount(Stream)
 		tcp.doStream()
-	} else if tcp.Echo {
-		metrics.UpdateTCPConnCount(Echo)
-		tcp.doEcho()
 	} else if tcp.Conversation {
 		metrics.UpdateTCPConnCount(Conversation)
 		tcp.doConversation()
@@ -318,11 +316,14 @@ func (tcp *TCPConnectionHandler) processRequest() {
 	} else if tcp.ConnectionLifeD > 0 {
 		metrics.UpdateTCPConnCount(SilentLife)
 		tcp.doSilentLife()
-	} else {
+	} else if tcp.CloseAtFirstByte {
 		metrics.UpdateTCPConnCount(CloseAtFirstByte)
 		tcp.doCloseAtFirstByte()
+	} else {
+		metrics.UpdateTCPConnCount(Echo)
+		tcp.doEcho()
 	}
-	if !global.IsListenerOpen(tcp.Port) {
+	if !global.Funcs.IsListenerOpen(tcp.Port) {
 		log.Printf("[Listener: %s][Request: %d]: Listener is closed for port [%d]", tcp.ListenerID, tcp.requestID, tcp.Port)
 	}
 	events.SendEventJSONForPort(tcp.Port, "TCP Client Connection Closed", tcp.ListenerID, tcp.status)
@@ -556,7 +557,7 @@ func (tcp *TCPConnectionHandler) doStream() {
 	tcp.conn.SetWriteDeadline(time.Time{})
 	tcp.writeBufferSize = tcp.StreamChunkSizeV
 	tcp.resetWriteBuffer()
-	payload := util.GenerateRandomPayload(tcp.StreamChunkSizeV)
+	payload := types.GenerateRandomPayload(tcp.StreamChunkSizeV)
 	for i := 0; i < tcp.StreamChunkCount; i++ {
 		if tcp.isClosingOrClosed() {
 			log.Printf("[Listener: %s][Request: %d][%s]: Ending stream as the connection is closing on port [%d]",
@@ -695,7 +696,7 @@ func (tcp *TCPConnectionHandler) sendMessage(message, whatFor string) {
 }
 
 func (tcp *TCPConnectionHandler) sendMessageWithDeadline(message, whatFor string, useConnDeadline bool) {
-	message = fmt.Sprintf("[%s]%s", global.GetHostLabelForPort(tcp.Port), message)
+	message = fmt.Sprintf("[%s]%s", global.Funcs.GetHostLabelForPort(tcp.Port), message)
 	if tcp.sendDataToClientWithDeadline([]byte(message), whatFor, useConnDeadline) {
 		log.Printf("[Listener: %s][Request: %d][%s]: Sent {%s} on port [%d]",
 			tcp.ListenerID, tcp.requestID, whatFor, message, tcp.Port)

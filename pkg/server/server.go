@@ -18,53 +18,68 @@ package server
 
 import (
 	"os"
-	"strconv"
 
+	a2aclient "goto/pkg/ai/a2a/client"
+	a2aserver "goto/pkg/ai/a2a/server"
+	mcpclient "goto/pkg/ai/mcp/client"
+	mcpserverapi "goto/pkg/ai/mcp/server/api"
 	"goto/pkg/client"
-	"goto/pkg/client/results"
 	"goto/pkg/events"
 	"goto/pkg/global"
-	"goto/pkg/grpc"
-	"goto/pkg/invocation"
 	"goto/pkg/job"
-	"goto/pkg/k8s"
+	k8sApi "goto/pkg/k8s/api"
+	k8sYaml "goto/pkg/k8s/yaml"
 	"goto/pkg/log"
+	"goto/pkg/memory"
 	"goto/pkg/metrics"
 	"goto/pkg/pipe"
 	"goto/pkg/proxy"
 	"goto/pkg/registry"
-	"goto/pkg/script"
+	"goto/pkg/router"
+	"goto/pkg/rpc"
+	grpcclient "goto/pkg/rpc/grpc/client"
+	"goto/pkg/rpc/grpc/protos"
+	grpcapi "goto/pkg/rpc/grpc/server"
+	"goto/pkg/rpc/jsonrpc"
+	"goto/pkg/scripts"
 	"goto/pkg/server/catchall"
 	"goto/pkg/server/conn"
 	"goto/pkg/server/echo"
+	"goto/pkg/server/hooks"
+	"goto/pkg/server/info"
 	"goto/pkg/server/listeners"
 	"goto/pkg/server/listeners/label"
+	"goto/pkg/server/middleware"
 	"goto/pkg/server/probes"
 	"goto/pkg/server/request"
+	"goto/pkg/server/request/body"
 	"goto/pkg/server/response"
 	"goto/pkg/server/tcp"
+	"goto/pkg/server/udp"
+	"goto/pkg/server/ui"
+	"goto/pkg/tls"
 	"goto/pkg/tunnel"
-	"goto/pkg/util"
 )
 
+func init() {
+	middleware.BaseMiddlewares = []*middleware.Middleware{
+		label.Middleware, conn.Middleware, info.Middleware, router.Middleware, hooks.Middleware,
+	}
+	middleware.Middlewares = []*middleware.Middleware{
+		memory.Middleware, tunnel.TunnelCountMiddleware, tunnel.Middleware,
+		listeners.Middleware, probes.Middleware, registry.Middleware, client.Middleware,
+		k8sYaml.Middleware, k8sApi.Middleware, pipe.Middleware, request.Middleware,
+		proxy.Middleware, response.Middleware, events.Middleware, metrics.Middleware,
+		tcp.Middleware, udp.Middleware, rpc.Middleware, jsonrpc.Middleware,
+		grpcapi.Middleware, grpcclient.Middleware, protos.Middleware,
+		mcpclient.Middleware, mcpserverapi.Middleware, a2aserver.Middleware, a2aclient.Middleware,
+		scripts.Middleware, job.Middleware, tls.Middleware, log.Middleware, ui.Middleware,
+		body.Middleware, echo.Middleware, catchall.Middleware,
+	}
+}
+
 func Run() {
-	global.PeerAddress = util.GetHostIP() + ":" + strconv.Itoa(global.ServerPort)
-	global.GetPeers = registry.GetPeers
-	util.WillTunnel = tunnel.WillTunnel
-	util.WillProxyHTTP = proxy.WillProxyHTTP
-	global.StoreEventInCurrentLocker = registry.StoreEventInCurrentLocker
-	listeners.Configure(ServeHTTPListener, ServeGRPCListener, StartTCPServer)
-	metrics.Startup()
-	invocation.Startup()
-	k8s.StartWatch()
-	RunHttpServer(tunnel.TunnelCountHandler, label.Handler, conn.Handler, tunnel.Handler, events.Handler, metrics.Handler,
-		listeners.Handler, probes.Handler, registry.Handler, client.Handler, k8s.Handler, pipe.Handler,
-		request.Handler, proxy.Handler, response.Handler, tcp.Handler, script.Handler, job.Handler,
-		grpc.Handler, log.Handler, echo.Handler, catchall.Handler)
-	k8s.StopWatch()
-	invocation.Shutdown()
-	job.Manager.StopJobWatch()
-	metrics.Shutdown()
-	results.StopRegistrySender()
+	RunHttpServer()
+	global.Shutdown()
 	os.Exit(0)
 }

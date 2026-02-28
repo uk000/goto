@@ -17,6 +17,7 @@
 package server
 
 import (
+	"fmt"
 	"goto/pkg/global"
 	"goto/pkg/proxy"
 	"goto/pkg/server/tcp"
@@ -31,14 +32,13 @@ var (
 	lock           sync.RWMutex
 )
 
-func StartTCPServer(listenerID string, port int, listener net.Listener) {
-	go serveTCPRequests(listenerID, port, listener)
+func InitTCPServer() {
+	global.ConfigureTCPServer(serveTCPRequests)
 }
 
-func serveTCPRequests(listenerID string, port int, listener net.Listener) {
+func serveTCPRequests(listenerID string, port int, listener net.Listener) error {
 	if listener == nil {
-		log.Printf("Listener [%s] not open for business", listenerID)
-		return
+		return fmt.Errorf("Listener [%s] not open for business", listenerID)
 	}
 	stopped := false
 	for !stopped {
@@ -58,11 +58,12 @@ func serveTCPRequests(listenerID string, port int, listener net.Listener) {
 			stopped = true
 		}
 	}
-	if global.IsListenerOpen(port) {
+	if global.Funcs.IsListenerOpen(port) {
 		log.Printf("[Listener: %s] has been restarted. Stopping to serve requests on old listener.", listenerID)
 	} else {
 		log.Printf("[Listener: %s] has been closed. Stopping to serve requests.", listenerID)
 	}
 	log.Printf("[Listener: %s] Force closing active client connections for closed listener.", listenerID)
 	tcp.CloseListenerConnections(listenerID)
+	return nil
 }

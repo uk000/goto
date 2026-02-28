@@ -20,6 +20,7 @@ import (
 	"fmt"
 	. "goto/pkg/constants"
 	"goto/pkg/global"
+	"goto/pkg/server/middleware"
 	"goto/pkg/transport"
 	"goto/pkg/util"
 	"log"
@@ -53,7 +54,7 @@ type EventTracker struct {
 }
 
 var (
-	Handler             = util.ServerHandler{Name: "events", SetRoutes: SetRoutes, Middleware: Middleware}
+	Middleware          = middleware.NewMiddleware("events", setRoutes, middlewareFunc)
 	eventsList          = []*Event{}
 	trafficEventTracker = map[int]map[string]*EventTracker{}
 	eventChannel        = make(chan *Event, 100)
@@ -63,7 +64,7 @@ var (
 	lock                sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	eventsRouter := r.PathPrefix("/events").Subrouter()
 	util.AddRoute(eventsRouter, "/flush", flushEvents, "POST")
 	util.AddRoute(eventsRouter, "/clear", clearEvents, "POST")
@@ -74,14 +75,14 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 }
 
 func StartSender() {
-	if global.EnableEvents {
+	if global.Flags.EnableEvents {
 		go eventSender()
 		go trafficEventsProcessor()
 	}
 }
 
 func StopSender() {
-	if global.EnableEvents {
+	if global.Flags.EnableEvents {
 		FlushEvents()
 		stopSender <- true
 	}
@@ -106,18 +107,18 @@ func newRequestEvent(title, summary string, data interface{}, at time.Time, r *h
 	if r != nil {
 		host = util.GetCurrentListenerLabel(r)
 	} else {
-		host = global.HostLabel
+		host = global.Self.HostLabel
 	}
-	return newEvent(title, summary, data, at, global.PeerName, host)
+	return newEvent(title, summary, data, at, global.Self.Name, host)
 }
 
 func newPortEvent(title, summary string, data interface{}, at time.Time, port int) *Event {
-	return newEvent(title, summary, data, at, global.PeerName, global.GetHostLabelForPort(port))
+	return newEvent(title, summary, data, at, global.Self.Name, global.Funcs.GetHostLabelForPort(port))
 }
 
 func SendRequestEvent(title, data string, r *http.Request) time.Time {
 	at := time.Now()
-	if global.EnableEvents {
+	if global.Flags.EnableEvents {
 		event := newRequestEvent(title, "", data, at, r)
 		eventChannel <- event
 	}
@@ -125,12 +126,12 @@ func SendRequestEvent(title, data string, r *http.Request) time.Time {
 }
 
 func SendEvent(title, data string) time.Time {
-	return SendEventForPort(global.ServerPort, title, data)
+	return SendEventForPort(global.Self.ServerPort, title, data)
 }
 
 func SendEventForPort(port int, title, data string) time.Time {
 	at := time.Now()
-	if global.EnableEvents {
+	if global.Flags.EnableEvents {
 		event := newPortEvent(title, "", data, at, port)
 		eventChannel <- event
 	}
@@ -139,8 +140,8 @@ func SendEventForPort(port int, title, data string) time.Time {
 
 func SendEventDirect(title, data string) time.Time {
 	at := time.Now()
-	if global.EnableEvents {
-		event := newPortEvent(title, "", data, at, global.ServerPort)
+	if global.Flags.EnableEvents {
+		event := newPortEvent(title, "", data, at, global.Self.ServerPort)
 		storeAndPublishEvent(event)
 	}
 	return at
@@ -148,7 +149,7 @@ func SendEventDirect(title, data string) time.Time {
 
 func SendRequestEventJSON(title, summary string, data interface{}, r *http.Request) time.Time {
 	at := time.Now()
-	if global.EnableEvents {
+	if global.Flags.EnableEvents {
 		event := newRequestEvent(title, summary, data, at, r)
 		eventChannel <- event
 	}
@@ -156,12 +157,12 @@ func SendRequestEventJSON(title, summary string, data interface{}, r *http.Reque
 }
 
 func SendEventJSON(title, summary string, data interface{}) time.Time {
-	return SendEventJSONForPort(global.ServerPort, title, summary, data)
+	return SendEventJSONForPort(global.Self.ServerPort, title, summary, data)
 }
 
 func SendEventJSONForPort(port int, title, summary string, data interface{}) time.Time {
 	at := time.Now()
-	if global.EnableEvents {
+	if global.Flags.EnableEvents {
 		event := newPortEvent(title, summary, data, at, port)
 		eventChannel <- event
 	}
@@ -170,27 +171,28 @@ func SendEventJSONForPort(port int, title, summary string, data interface{}) tim
 
 func SendEventJSONDirect(title, summary string, data interface{}) time.Time {
 	at := time.Now()
-	if global.EnableEvents {
-		event := newPortEvent(title, summary, data, at, global.ServerPort)
+	if global.Flags.EnableEvents {
+		event := newPortEvent(title, summary, data, at, global.Self.ServerPort)
 		storeAndPublishEvent(event)
 	}
 	return at
 }
 
 func TrackTrafficEvent(statusCode int, r *http.Request, details ...string) {
-	if global.EnableEvents {
-		trafficChannel <- []interface{}{util.GetCurrentPort(r), strings.ToLower(r.URL.Path), statusCode, details}
+	if global.Flags.EnableEvents {
+		rs := util.GetRequestStore(r)
+		trafficChannel <- []interface{}{rs.RequestPortNum, strings.ToLower(rs.RequestURI), statusCode, details}
 	}
 }
 
 func TrackPortTrafficEvent(port int, operation string, statusCode int, details ...string) {
-	if global.EnableEvents {
+	if global.Flags.EnableEvents {
 		trafficChannel <- []interface{}{port, operation, statusCode, details}
 	}
 }
 
 func FlushEvents() {
-	if global.EnableEvents {
+	if global.Flags.EnableEvents {
 		lock.RLock()
 		trackers := []*EventTracker{}
 		for _, tt := range trafficEventTracker {
@@ -207,7 +209,7 @@ func FlushEvents() {
 }
 
 func ClearEvents() {
-	if global.EnableEvents {
+	if global.Flags.EnableEvents {
 		lock.Lock()
 		eventsList = []*Event{}
 		trafficEventTracker = map[int]map[string]*EventTracker{}
@@ -285,18 +287,18 @@ func processTrafficEvent(traffic []interface{}) {
 }
 
 func storeAndPublishEvent(event *Event) {
-	if global.EnableEvents {
+	if global.Flags.EnableEvents {
 		lock.Lock()
 		eventsList = append(eventsList, event)
 		lock.Unlock()
-		if global.PublishEvents && global.RegistryURL != "" {
-			url := fmt.Sprintf("%s/registry/peers/%s/%s/events/store", global.RegistryURL, event.Peer, event.PeerHost)
+		if global.Flags.PublishEvents && global.Self.RegistryURL != "" {
+			url := fmt.Sprintf("%s/registry/peers/%s/%s/events/store", global.Self.RegistryURL, event.Peer, event.PeerHost)
 			if resp, err := registryClient.HTTP().Post(url, ContentTypeJSON,
 				strings.NewReader(util.ToJSONText(event))); err == nil {
 				util.CloseResponse(resp)
 			}
 		} else {
-			global.StoreEventInCurrentLocker(event)
+			global.Funcs.StoreEventInCurrentLocker(event)
 
 		}
 	}
@@ -319,7 +321,7 @@ SendLoop:
 
 func flushEvents(w http.ResponseWriter, r *http.Request) {
 	msg := ""
-	if global.EnableEvents {
+	if global.Flags.EnableEvents {
 		FlushEvents()
 		msg = "Events Flushed"
 		SendEvent(msg, "")
@@ -333,7 +335,7 @@ func flushEvents(w http.ResponseWriter, r *http.Request) {
 
 func clearEvents(w http.ResponseWriter, r *http.Request) {
 	msg := ""
-	if global.EnableEvents {
+	if global.Flags.EnableEvents {
 		ClearEvents()
 		fmt.Fprintln(w, util.ToJSONText(map[string]interface{}{"cleared": true}))
 	} else {
@@ -405,12 +407,13 @@ func searchEvents(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
-func Middleware(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {
 			next.ServeHTTP(w, r)
 		}
-		if !util.IsKnownNonTraffic(r) && !util.IsFilteredRequest(r) {
+		rs := util.GetRequestStore(r)
+		if !rs.IsKnownNonTraffic && !rs.IsFilteredRequest {
 			statusCode, details := util.ReportTrafficEvent(r)
 			if details != nil {
 				TrackTrafficEvent(statusCode, r, details...)

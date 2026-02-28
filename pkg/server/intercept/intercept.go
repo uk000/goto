@@ -19,7 +19,6 @@ package intercept
 import (
 	"bufio"
 	"fmt"
-	"goto/pkg/server/conn"
 	"goto/pkg/util"
 	"io"
 	"net"
@@ -37,6 +36,7 @@ type InterceptResponseWriter struct {
 	http.Flusher
 	conn       net.Conn
 	parent     ResponseInterceptor
+	rs         *util.RequestStore
 	StatusCode int
 	Data       []byte
 	Hold       bool
@@ -44,6 +44,12 @@ type InterceptResponseWriter struct {
 	Chunked    bool
 	IsH2C      bool
 	BodyLength int
+}
+
+type HeaderInterceptResponseWriter struct {
+	http.ResponseWriter
+	rs      *util.RequestStore
+	Headers http.Header
 }
 
 type FlushWriter struct {
@@ -56,16 +62,22 @@ type BodyTracker struct {
 	io.ReadCloser
 }
 
-func NewFlushWriter(r *http.Request, w io.Writer) FlushWriter {
+func GetConn(r *http.Request) net.Conn {
+	if conn := r.Context().Value(util.ConnectionKey); conn != nil {
+		return conn.(net.Conn)
+	}
+	return nil
+}
+
+func NewFlushWriter(r *http.Request, w io.Writer) *FlushWriter {
 	rs := util.GetRequestStore(r)
-	var flusher http.Flusher
 	if f, ok := w.(http.Flusher); ok {
-		flusher = f
+		if irw, ok := w.(*InterceptResponseWriter); ok {
+			irw.SetChunked()
+			return &FlushWriter{w: w, h2c: rs.IsH2C, flusher: f}
+		}
 	}
-	if irw, ok := w.(*InterceptResponseWriter); ok {
-		irw.SetChunked()
-	}
-	return FlushWriter{w: w, h2c: rs.IsH2C, flusher: flusher}
+	return nil
 }
 
 func (fw FlushWriter) Write(p []byte) (int, error) {
@@ -83,21 +95,29 @@ func (fw FlushWriter) Flush() {
 }
 
 func trackRequestBody(r *http.Request) {
-	r.Body = BodyTracker{r.Body}
+	r.Body = &BodyTracker{r.Body}
 }
 
-func (b BodyTracker) Read(p []byte) (n int, err error) {
+func (b *BodyTracker) Read(p []byte) (n int, err error) {
 	// util.PrintCallers(3, "BodyTracker.Read")
 	return b.ReadCloser.Read(p)
 }
 
-func (b BodyTracker) Close() error {
-	// util.PrintCallers(3, "BodyTracker.Close")
+func (b *BodyTracker) Close() error {
+	//util.PrintCallers(3, "BodyTracker.Close")
 	return b.ReadCloser.Close()
+}
+
+func (b *BodyTracker) Rewind() {
+	// util.PrintCallers(3, "BodyTracker.Close")
+	if rr, ok := b.ReadCloser.(*util.ReReader); ok {
+		rr.Rewind()
+	}
 }
 
 func (rw *InterceptResponseWriter) WriteHeader(statusCode int) {
 	rw.StatusCode = statusCode
+	rw.rs.StatusCode = statusCode
 	if !rw.Hijacked && !rw.Hold {
 		rw.ResponseWriter.WriteHeader(statusCode)
 	}
@@ -160,9 +180,10 @@ func (rw *InterceptResponseWriter) SetChunked() {
 }
 
 func (rw *InterceptResponseWriter) Proceed() {
-	if !rw.Hijacked && !rw.Chunked && rw.Hold {
+	if rw.Hijacked || rw.Hold || !rw.Chunked {
 		if rw.StatusCode <= 0 {
 			rw.StatusCode = 200
+			rw.rs.StatusCode = rw.StatusCode
 		}
 		rw.ResponseWriter.WriteHeader(rw.StatusCode)
 		if _, err := rw.ResponseWriter.Write(rw.Data); err == http.ErrHijacked {
@@ -178,14 +199,75 @@ func NewInterceptResponseWriter(r *http.Request, w http.ResponseWriter, hold boo
 	parent, _ := w.(ResponseInterceptor)
 	hijacker, _ := w.(http.Hijacker)
 	flusher, _ := w.(http.Flusher)
-	trackRequestBody(r)
+	//trackRequestBody(r)
 	return &InterceptResponseWriter{
+		rs:             r.Context().Value(util.RequestStoreKey).(*util.RequestStore),
 		ResponseWriter: w,
 		Hijacker:       hijacker,
 		Flusher:        flusher,
 		parent:         parent,
 		Hold:           hold,
 		IsH2C:          util.IsH2C(r),
-		conn:           conn.GetConn(r),
+		conn:           GetConn(r),
+	}
+}
+
+func WithIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *InterceptResponseWriter) {
+	var irw *InterceptResponseWriter
+	rs := util.GetRequestStore(r)
+	if !rs.IsKnownNonTraffic {
+		irw = NewInterceptResponseWriter(r, w, true)
+		r.Context().Value(util.RequestStoreKey).(*util.RequestStore).InterceptResponseWriter = irw
+		w = irw
+	}
+	return w, irw
+}
+
+func WithHeadersIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *HeaderInterceptResponseWriter) {
+	var irw *HeaderInterceptResponseWriter
+	rs := util.GetRequestStore(r)
+	if !rs.IsKnownNonTraffic {
+		irw = NewHeadersInterceptResponseWriter(w)
+		r.Context().Value(util.RequestStoreKey).(*util.RequestStore).HeadersInterceptRW = irw
+		w = irw
+	}
+	return w, irw
+}
+
+func NewHeadersInterceptResponseWriter(w http.ResponseWriter) *HeaderInterceptResponseWriter {
+	return &HeaderInterceptResponseWriter{
+		ResponseWriter: w,
+		Headers:        w.Header(),
+	}
+}
+
+func (rw *HeaderInterceptResponseWriter) HeadersSent() bool {
+	return len(rw.Headers) > 0
+}
+
+func IntereceptMiddleware(pre, post http.Handler) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rs := util.GetRequestStore(r)
+			var irw *InterceptResponseWriter
+			w, irw = WithIntercept(r, w)
+			if pre != nil {
+				pre.ServeHTTP(w, r)
+			}
+			next.ServeHTTP(w, r)
+			if !rs.IsKnownNonTraffic && irw != nil {
+				rs.StatusCode = irw.StatusCode
+			}
+			if rs.StatusCode == 0 {
+				rs.StatusCode = http.StatusOK
+			}
+			if post != nil {
+				post.ServeHTTP(w, r)
+			}
+			if irw != nil {
+				irw.Proceed()
+			}
+			util.DiscardRequestBody(r)
+		})
 	}
 }

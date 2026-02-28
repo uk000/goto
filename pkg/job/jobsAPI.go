@@ -19,7 +19,7 @@ package job
 import (
 	"fmt"
 	"goto/pkg/events"
-	. "goto/pkg/events/eventslist"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
 	"os"
@@ -29,16 +29,15 @@ import (
 )
 
 var (
-	Handler = util.ServerHandler{Name: "jobs", SetRoutes: SetRoutes}
+	Middleware = middleware.NewMiddleware("jobs", setRoutes, nil)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	jobsRouter := r.PathPrefix("/jobs").Subrouter()
 	util.AddRoute(jobsRouter, "/add", addOrUpdateJob, "POST", "PUT")
 	util.AddRoute(jobsRouter, "/update", addOrUpdateJob, "POST", "PUT")
 	util.AddRoute(jobsRouter, "/add/script/{name}", storeJobScriptOrFile, "POST", "PUT")
-	util.AddRouteQ(jobsRouter, "/store/file/{name}", storeJobScriptOrFile, "path", "POST", "PUT")
-	util.AddRoute(jobsRouter, "/store/file/{name}", storeJobScriptOrFile, "POST", "PUT")
+	util.AddRouteQO(jobsRouter, "/store/file/{name}", storeJobScriptOrFile, "path", "POST", "PUT")
 	util.AddRoute(jobsRouter, "/{jobs}/remove", removeJob, "POST")
 	util.AddRoute(jobsRouter, "/clear", clearJobs, "POST")
 	util.AddRoute(jobsRouter, "/run/all", runJobs, "POST")
@@ -63,7 +62,7 @@ func addOrUpdateJob(w http.ResponseWriter, r *http.Request) {
 		} else {
 			msg = fmt.Sprintf("Added Job: %s", util.ToJSONText(job))
 		}
-		events.SendRequestEventJSON(Jobs_JobAdded, job.Name, job, r)
+		events.SendRequestEventJSON(events.Jobs_JobAdded, job.Name, job, r)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("Failed to add job with error: %s", err.Error())
@@ -90,10 +89,10 @@ func storeJobScriptOrFile(w http.ResponseWriter, r *http.Request) {
 		}
 		if script {
 			msg = fmt.Sprintf("%s Job Script [%s] at path [%s], and Job created with name [%s]", existingOrNew, scriptName, path, scriptName)
-			events.SendRequestEvent(Jobs_JobScriptStored, msg, r)
+			events.SendRequestEvent(events.Jobs_JobScriptStored, msg, r)
 		} else {
 			msg = fmt.Sprintf("%s File [%s] at path [%s]", existingOrNew, name, path)
-			events.SendRequestEvent(Jobs_JobFileStored, msg, r)
+			events.SendRequestEvent(events.Jobs_JobFileStored, msg, r)
 		}
 	} else {
 		msg = fmt.Sprintf("Failed to store Job file [%s] at path [%s]", name, path)
@@ -108,7 +107,7 @@ func removeJob(w http.ResponseWriter, r *http.Request) {
 	if jobs, present := util.GetListParam(r, "jobs"); present {
 		Manager.removeJobs(jobs)
 		msg = fmt.Sprintf("Jobs Removed: %s", jobs)
-		events.SendRequestEventJSON(Jobs_JobsRemoved, util.GetStringParamValue(r, "jobs"), jobs, r)
+		events.SendRequestEventJSON(events.Jobs_JobsRemoved, util.GetStringParamValue(r, "jobs"), jobs, r)
 	} else {
 		w.WriteHeader(http.StatusNotAcceptable)
 		msg = "No jobs"
@@ -160,14 +159,14 @@ func stopJobs(w http.ResponseWriter, r *http.Request) {
 func clearJobs(w http.ResponseWriter, r *http.Request) {
 	Manager.init()
 	msg := "Jobs Cleared"
-	events.SendRequestEvent(Jobs_JobsCleared, "", r)
+	events.SendRequestEvent(events.Jobs_JobsCleared, "", r)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
 
 func clearJobResults(w http.ResponseWriter, r *http.Request) {
 	msg := "Job Results Cleared"
-	events.SendRequestEvent(Jobs_JobResultsCleared, "", r)
+	events.SendRequestEvent(events.Jobs_JobResultsCleared, "", r)
 	Manager.lock.Lock()
 	Manager.jobRuns = map[string]map[int]*JobRunContext{}
 	Manager.lock.Unlock()

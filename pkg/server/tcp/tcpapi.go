@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"goto/pkg/events"
 	"goto/pkg/global"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"math"
 	"net/http"
@@ -31,11 +32,11 @@ import (
 )
 
 var (
-	Handler util.ServerHandler = util.ServerHandler{Name: "tcp", SetRoutes: SetRoutes}
+	Middleware = middleware.NewMiddleware("tcp", setRoutes, nil)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	tcpRouter := util.PathPrefix(r, "/server?/tcp")
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+	tcpRouter := util.PathPrefix(r, "/server/tcp")
 	util.AddRoute(tcpRouter, "/{port}/configure", configureTCP, "POST")
 	util.AddRoute(tcpRouter, "/{port}/timeout/set/read={duration}", setConnectionDurationConfig, "PUT", "POST")
 	util.AddRoute(tcpRouter, "/{port}/timeout/set/write={duration}", setConnectionDurationConfig, "PUT", "POST")
@@ -48,11 +49,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(tcpRouter, "/{port}/expect/payload/length={length}", setExpectedPayloadLength, "PUT", "POST")
 	util.AddRoute(tcpRouter, "/{port}/expect/payload", setExpectedPayload, "PUT", "POST")
 	util.AddRoute(tcpRouter, "/{port}/mode/validate={enable}", configurePayloadValidation, "PUT", "POST")
-	util.AddRoute(tcpRouter, "/{port}/mode/stream={enable}", setModes, "PUT", "POST")
-	util.AddRoute(tcpRouter, "/{port}/mode/echo={enable}", setModes, "PUT", "POST")
-	util.AddRoute(tcpRouter, "/{port}/mode/conversation={enable}", setModes, "PUT", "POST")
-	util.AddRoute(tcpRouter, "/{port}/mode/silentlife={enable}", setModes, "PUT", "POST")
-	util.AddRoute(tcpRouter, "/{port}/mode/closeatfirst={enable}", setModes, "PUT", "POST")
+	util.AddRoute(tcpRouter, "/{port}/mode/{mode:stream|echo|conversation|silentlife|closeatfirst}={enable}", setModes, "PUT", "POST")
 	util.AddRoute(tcpRouter, "/{port}/set/payload={enable}", setModes, "PUT", "POST")
 	util.AddRoute(tcpRouter, "/{port}/active", getActiveConnections, "GET")
 	util.AddRoute(tcpRouter, "/active", getActiveConnections, "GET")
@@ -64,21 +61,9 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(tcpRouter, "/history/clear", clearConnectionHistory, "POST")
 }
 
-func validateListener(w http.ResponseWriter, r *http.Request) bool {
-	port := util.GetIntParamValue(r, "port")
-	if !global.IsListenerPresent(port) {
-		w.WriteHeader(http.StatusBadRequest)
-		msg := fmt.Sprintf("No listener for port %d", port)
-		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
-		events.SendRequestEvent("TCP Configuration Rejected", msg, r)
-		return false
-	}
-	return true
-}
-
 func validateTCPListener(w http.ResponseWriter, r *http.Request) bool {
-	if !validateListener(w, r) {
+	if ok, msg := util.ValidateListener(w, r); !ok {
+		events.SendRequestEvent("TCP Configuration Rejected", msg, r)
 		return false
 	}
 	port := util.GetIntParamValue(r, "port")
@@ -94,25 +79,27 @@ func validateTCPListener(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func configureTCP(w http.ResponseWriter, r *http.Request) {
-	if validateListener(w, r) {
-		msg := ""
-		port := util.GetIntParamValue(r, "port")
-		tcpConfig := &TCPConfig{Port: port}
-		if err := util.ReadJsonPayload(r, tcpConfig); err == nil {
-			if _, msg = InitTCPConfig(port, tcpConfig); msg == "" {
-				msg = fmt.Sprintf("TCP configuration applied to port %d", port)
-				events.SendRequestEventJSON("TCP Configured", tcpConfig.ListenerID, tcpConfig, r)
-			} else {
-				w.WriteHeader(http.StatusBadRequest)
-			}
+	if ok, msg := util.ValidateListener(w, r); !ok {
+		events.SendRequestEvent("TCP Configuration Rejected", msg, r)
+		return
+	}
+	msg := ""
+	port := util.GetIntParamValue(r, "port")
+	tcpConfig := &TCPConfig{Port: port}
+	if err := util.ReadJsonPayload(r, tcpConfig); err == nil {
+		if _, msg = InitTCPConfig(port, tcpConfig); msg == "" {
+			msg = fmt.Sprintf("TCP configuration applied to port %d", port)
+			events.SendRequestEventJSON("TCP Configured", tcpConfig.ListenerID, tcpConfig, r)
 		} else {
 			w.WriteHeader(http.StatusBadRequest)
-			msg = fmt.Sprintf("Failed to parse json with error: %s", err.Error())
-			events.SendRequestEvent("TCP Configuration Rejected", msg, r)
 		}
-		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
+	} else {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = fmt.Sprintf("Failed to parse json with error: %s", err.Error())
+		events.SendRequestEvent("TCP Configuration Rejected", msg, r)
 	}
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
 }
 
 func (tcp *TCPConfig) configure() string {
@@ -432,11 +419,12 @@ func setModes(w http.ResponseWriter, r *http.Request) {
 		port := util.GetIntParamValue(r, "port")
 		tcpConfig := getTCPConfig(port)
 		enable := util.GetBoolParamValue(r, "enable")
-		echo := strings.Contains(r.RequestURI, "echo")
-		conversation := strings.Contains(r.RequestURI, "conversation")
-		stream := strings.Contains(r.RequestURI, "stream")
-		silentlife := strings.Contains(r.RequestURI, "silentlife")
-		closeatfirst := strings.Contains(r.RequestURI, "closeatfirst")
+		mode := util.GetStringParamValue(r, "mode")
+		echo := mode == "echo"
+		conversation := mode == "conversation"
+		stream := mode == "stream"
+		silentlife := mode == "silentlife"
+		closeatfirst := mode == "closeatfirst"
 		responsePayload := strings.Contains(r.RequestURI, "payload")
 		if enable {
 			tcpConfig.turnOffAllModes()
@@ -483,7 +471,7 @@ func getActiveConnections(w http.ResponseWriter, r *http.Request) {
 		if activeConns[port] == nil {
 			activeConns[port] = map[int]map[string]interface{}{}
 		}
-		listenerID := global.GetListenerID(port)
+		listenerID := global.Funcs.GetListenerID(port)
 		for requestID, tcpHandler := range activeConnections[listenerID] {
 			activeConns[port][requestID] = map[string]interface{}{"status": tcpHandler.status, "config": &tcpHandler.TCPConfig}
 		}

@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"goto/pkg/client/results"
 	"goto/pkg/events"
-	. "goto/pkg/events/eventslist"
 	"goto/pkg/global"
 	"goto/pkg/invocation"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
 	"strings"
@@ -31,7 +31,7 @@ import (
 )
 
 var (
-	Handler util.ServerHandler = util.ServerHandler{Name: "client", SetRoutes: SetRoutes}
+	Middleware = middleware.Middleware{Name: "client", SetRoutes: SetRoutes}
 )
 
 func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
@@ -71,13 +71,13 @@ func addTarget(w http.ResponseWriter, r *http.Request) {
 		} else {
 			w.WriteHeader(http.StatusOK)
 			msg = fmt.Sprintf("Added target: %s", util.ToJSONText(t))
-			events.SendRequestEventJSON(Client_TargetAdded, t.Name, t, r)
+			events.SendRequestEventJSON(events.Client_TargetAdded, t.Name, t, r)
 		}
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("Failed to parse json with error: %s", err.Error())
 	}
-	if global.EnableClientLogs {
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage(msg, r)
 	}
 	fmt.Fprintln(w, msg)
@@ -89,7 +89,7 @@ func removeTargets(w http.ResponseWriter, r *http.Request) {
 		if Client.removeTargets(targets) {
 			w.WriteHeader(http.StatusOK)
 			msg = fmt.Sprintf("Targets Removed: %+v", targets)
-			events.SendRequestEventJSON(Client_TargetsRemoved, util.GetStringParamValue(r, "targets"), targets, r)
+			events.SendRequestEventJSON(events.Client_TargetsRemoved, util.GetStringParamValue(r, "targets"), targets, r)
 		} else {
 			w.WriteHeader(http.StatusNotAcceptable)
 			msg = fmt.Sprintf("Targets cannot be removed while traffic is running")
@@ -98,7 +98,7 @@ func removeTargets(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "No target given"
 	}
-	if global.EnableClientLogs {
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage(msg, r)
 	}
 	fmt.Fprintln(w, msg)
@@ -109,12 +109,12 @@ func clearTargets(w http.ResponseWriter, r *http.Request) {
 	if Client.init() {
 		w.WriteHeader(http.StatusOK)
 		msg = "Targets cleared"
-		events.SendRequestEvent(Client_TargetsCleared, "", r)
+		events.SendRequestEvent(events.Client_TargetsCleared, "", r)
 	} else {
 		w.WriteHeader(http.StatusNotAcceptable)
 		msg = fmt.Sprintf("Targets cannot be cleared while traffic is running")
 	}
-	if global.EnableClientLogs {
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage(msg, r)
 	}
 	fmt.Fprintln(w, msg)
@@ -130,7 +130,7 @@ func getTargets(w http.ResponseWriter, r *http.Request) {
 	} else {
 		util.WriteJsonPayload(w, Client.targets)
 	}
-	if global.EnableClientLogs {
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage("Reporting targets", r)
 	}
 }
@@ -141,12 +141,12 @@ func addTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 		Client.AddTrackingHeaders(h)
 		w.WriteHeader(http.StatusOK)
 		msg = fmt.Sprintf("Header %s will be tracked", h)
-		events.SendRequestEvent(Client_TrackingHeadersAdded, msg, r)
+		events.SendRequestEvent(events.Client_TrackingHeadersAdded, msg, r)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "Invalid header name"
 	}
-	if global.EnableClientLogs {
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage(msg, r)
 	}
 	fmt.Fprintln(w, msg)
@@ -155,9 +155,9 @@ func addTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 func clearTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 	Client.clearTrackingHeaders()
 	msg := "All tracking headers cleared"
-	events.SendRequestEvent(Client_TrackingHeadersCleared, msg, r)
+	events.SendRequestEvent(events.Client_TrackingHeadersCleared, msg, r)
 	fmt.Fprintln(w, msg)
-	if global.EnableClientLogs {
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage(msg, r)
 	}
 }
@@ -165,7 +165,7 @@ func clearTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 func getTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 	msg := fmt.Sprintf("Tracking headers: %s", strings.Join(Client.getTrackingHeaders(), ","))
 	fmt.Fprintln(w, msg)
-	if global.EnableClientLogs {
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage(msg, r)
 	}
 }
@@ -178,9 +178,9 @@ func addTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 		msg = "Invalid time bucket"
 	} else {
 		msg = fmt.Sprintf("Time Buckets [%s] will be tracked", b)
-		events.SendRequestEvent(Client_TrackingTimeBucketAdded, msg, r)
+		events.SendRequestEvent(events.Client_TrackingTimeBucketAdded, msg, r)
 	}
-	if global.EnableClientLogs {
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage(msg, r)
 	}
 	fmt.Fprintln(w, msg)
@@ -189,36 +189,36 @@ func addTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 func clearTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 	Client.clearTrackingTimeBuckets()
 	msg := "All tracking time buckets cleared"
-	events.SendRequestEvent(Client_TrackingTimeBucketsCleared, msg, r)
+	events.SendRequestEvent(events.Client_TrackingTimeBucketsCleared, msg, r)
 	fmt.Fprintln(w, msg)
-	if global.EnableClientLogs {
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage(msg, r)
 	}
 }
 
 func getTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, Client.trackTimeBuckets)
-	if global.EnableClientLogs {
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage("Tracking TimeBuckets Reported", r)
 	}
 }
 
 func getInvocationResults(w http.ResponseWriter, r *http.Request) {
-	util.WriteStringJsonPayload(w, results.GetInvocationResultsJSON())
-	if global.EnableClientLogs {
+	util.WriteStringJsonPayload(w, results.GetInvocationResultsJSON(false))
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage("Reporting results", r)
 	}
 }
 
 func getResults(w http.ResponseWriter, r *http.Request) {
-	util.WriteStringJsonPayload(w, results.GetTargetsResultsJSON())
-	if global.EnableClientLogs {
+	util.WriteStringJsonPayload(w, results.GetTargetsResultsJSON(false))
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage("Reporting results", r)
 	}
 }
 
 func getActiveTargets(w http.ResponseWriter, r *http.Request) {
-	if global.EnableClientLogs {
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage("Reporting active invocations", r)
 	}
 	result := map[string]interface{}{}
@@ -233,9 +233,9 @@ func getActiveTargets(w http.ResponseWriter, r *http.Request) {
 func clearResults(w http.ResponseWriter, r *http.Request) {
 	results.ClearResults()
 	w.WriteHeader(http.StatusOK)
-	msg := Client_ResultsCleared
+	msg := events.Client_ResultsCleared
 	events.SendRequestEvent(msg, "", r)
-	if global.EnableClientLogs {
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage(msg, r)
 	}
 	fmt.Fprintln(w, msg)
@@ -246,7 +246,7 @@ func enableAllTargetsResultsCollection(w http.ResponseWriter, r *http.Request) {
 	results.EnableAllTargetResults(util.IsYes(enable))
 	w.WriteHeader(http.StatusOK)
 	msg := "Changed all targets summary results collection"
-	if global.EnableClientLogs {
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage(msg, r)
 	}
 	fmt.Fprintln(w, msg)
@@ -267,38 +267,38 @@ func enableInvocationResultsCollection(w http.ResponseWriter, r *http.Request) {
 
 func stopTargets(w http.ResponseWriter, r *http.Request) {
 	msg := ""
-	pc := Client
+	c := Client
 	targets, _ := util.GetListParam(r, "targets")
-	hasActive, _ := pc.stopTargets(targets)
+	hasActive, _ := c.stopTargets(targets)
 	if hasActive {
 		w.WriteHeader(http.StatusOK)
 		msg = fmt.Sprintf("Targets %+v stopped", targets)
-		events.SendRequestEvent(Client_TargetsStopped, msg, r)
+		events.SendRequestEvent(events.Client_TargetsStopped, msg, r)
 	} else {
 		w.WriteHeader(http.StatusOK)
 		msg = "No targets to stop"
 	}
-	if global.EnableClientLogs {
+	if global.Flags.EnableClientLogs {
 		util.AddLogMessage(msg, r)
 	}
 	fmt.Fprintln(w, msg)
 }
 
 func invokeTargets(w http.ResponseWriter, r *http.Request) {
-	pc := Client
-	targetsToInvoke := pc.getTargetsToInvoke(r)
+	c := Client
+	targetsToInvoke := c.getTargetsToInvoke(r)
 	if len(targetsToInvoke) > 0 {
 		for _, target := range targetsToInvoke {
-			go pc.invokeTarget(target)
+			go c.invokeTarget(target)
 		}
 		w.WriteHeader(http.StatusOK)
-		if global.EnableClientLogs {
+		if global.Flags.EnableClientLogs {
 			util.AddLogMessage("Targets invoked", r)
 		}
 	} else {
 		w.WriteHeader(http.StatusNotAcceptable)
 		fmt.Fprintln(w, "No targets to invoke")
-		if global.EnableClientLogs {
+		if global.Flags.EnableClientLogs {
 			util.AddLogMessage("No targets to invoke", r)
 		}
 	}

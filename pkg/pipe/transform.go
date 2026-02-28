@@ -198,7 +198,7 @@ func (j *JSONPathTransform) SetSpec(spec string) {
 }
 
 func (j *JSONPathTransform) Out() util.JSON {
-	return j.jp.Apply(util.FromJSON(j.input))
+	return j.jp.Apply(util.JSONFromJSON(j.input))
 }
 
 func (j *JSONPathTransform) IsJSONPath() bool {
@@ -212,7 +212,7 @@ func (j *JQTransform) SetSpec(spec string) {
 }
 
 func (j *JQTransform) Out() util.JSON {
-	return j.jq.Apply(util.FromJSON(j.input))
+	return j.jq.Apply(util.JSONFromJSON(j.input))
 }
 
 func (j *JQTransform) IsJQ() bool {
@@ -227,8 +227,8 @@ func (t *TemplateTransform) SetSpec(spec string) {
 }
 
 func (t *TemplateTransform) Out() util.JSON {
-	return util.FromJSON(map[string]interface{}{
-		t.Name: util.FromJSON(t.input).ExecuteTemplate(t.template),
+	return util.JSONFromJSON(map[string]interface{}{
+		t.Name: util.JSONFromJSON(t.input).ExecuteTemplate(t.template),
 	})
 }
 
@@ -242,7 +242,7 @@ func (r *RegexTransform) SetSpec(spec string) {
 }
 
 func (r *RegexTransform) Out() util.JSON {
-	return util.FromJSON(map[string]interface{}{
+	return util.JSONFromJSON(map[string]interface{}{
 		r.Name: r.regexp.FindAllString(fmt.Sprint(r.input), -1),
 	})
 }

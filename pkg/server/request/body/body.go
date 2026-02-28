@@ -19,20 +19,20 @@ package body
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"strings"
 
 	"goto/pkg/global"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 )
 
 var (
-	Handler util.ServerHandler = util.ServerHandler{Name: "body", Middleware: Middleware}
+	Middleware = middleware.NewMiddleware("body", nil, middlewareFunc)
 )
 
-func Middleware(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if global.Debug {
 			log.Println("Enter Request.Body Middleware")
@@ -43,6 +43,9 @@ func Middleware(next http.Handler) http.Handler {
 			}
 			rs := util.GetRequestStore(r)
 			body := util.Read(r.Body)
+			if rr, ok := r.Body.(util.IReReader); ok {
+				rr.Rewind()
+			}
 			bodyLength := len(body)
 			rs.RequestPayload = body
 			rs.RequestPayloadSize = bodyLength
@@ -50,16 +53,20 @@ func Middleware(next http.Handler) http.Handler {
 				log.Println("Finished Reading Request.Body")
 			}
 			util.AddLogMessage(fmt.Sprintf("Request Body Length: [%d]", bodyLength), r)
-			if global.LogRequestMiniBody || global.LogRequestBody {
+			logBody := global.Flags.LogRequestMiniBody || global.Flags.LogRequestBody
+			if !logBody {
+				logBody = global.Flags.LogRPCRequestBody && (rs.IsGRPC || rs.IsJSONRPC || rs.IsMCP)
+			}
+			if logBody {
 				bodyLog := ""
-				if global.LogRequestMiniBody && len(body) > 50 {
+				if global.Flags.LogRequestMiniBody && len(body) > 50 {
 					bodyLog = fmt.Sprintf("%s...", body[:50])
 					bodyLog += fmt.Sprintf("%s", body[bodyLength-50:])
 				} else {
 					bodyLog = body
 				}
 				bodyLog = strings.ReplaceAll(bodyLog, "\n", "\\n")
-				if global.LogRequestMiniBody {
+				if global.Flags.LogRequestMiniBody {
 					util.AddLogMessage(fmt.Sprintf("Request Mini Body: [%s]", bodyLog), r)
 				} else {
 					util.AddLogMessage(fmt.Sprintf("Request Body: [%s]", bodyLog), r)
@@ -72,7 +79,9 @@ func Middleware(next http.Handler) http.Handler {
 		if global.Debug {
 			log.Println("Discarding Request.Body")
 		}
-		io.Copy(ioutil.Discard, r.Body)
+		if r.Body != nil {
+			io.Copy(io.Discard, r.Body)
+		}
 		if global.Debug {
 			log.Println("Exit Request.Body Middleware")
 		}

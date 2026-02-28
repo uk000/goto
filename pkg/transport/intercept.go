@@ -28,10 +28,26 @@ import (
 	"google.golang.org/grpc"
 )
 
-type TransportIntercept interface {
+type IHTTPRequestIntercept interface {
+	Intercept(r *http.Request)
+}
+
+type IHTTPResponseIntercept interface {
+	Intercept(r *http.Response)
+}
+
+type ITransportIntercept interface {
 	SetTLSConfig(tlsConfig *tls.Config)
 	GetOpenConnectionCount() int
 	GetDialer() *net.Dialer
+	AsHTTP() IHTTPTransportIntercept
+}
+
+type IHTTPTransportIntercept interface {
+	ITransportIntercept
+	http.RoundTripper
+	SetRequestIntercept(r IHTTPRequestIntercept)
+	SetResponseIntercept(r IHTTPResponseIntercept)
 }
 
 type BaseTransportIntercept struct {
@@ -43,22 +59,25 @@ type BaseTransportIntercept struct {
 
 type HTTPTransportIntercept struct {
 	*http.Transport
-	BaseTransportIntercept
+	*BaseTransportIntercept
+	requestIntercept  IHTTPRequestIntercept
+	responseIntercept IHTTPResponseIntercept
 }
 
 type HTTP2TransportIntercept struct {
 	*http2.Transport
-	BaseTransportIntercept
+	*BaseTransportIntercept
 }
 
 type GRPCIntercept struct {
-	BaseTransportIntercept
+	*BaseTransportIntercept
 	dialOpts []grpc.DialOption
 }
 
-func NewHTTPTransportIntercept(orig *http.Transport, label string, newConnNotifierChan chan string) *HTTPTransportIntercept {
+func NewHTTPTransportInterceptWithWatch(orig *http.Transport, label string, newConnNotifierChan chan string, watcher IConnWatcher) *HTTPTransportIntercept {
 	t := &HTTPTransportIntercept{
-		Transport: orig,
+		Transport:              orig,
+		BaseTransportIntercept: &BaseTransportIntercept{},
 	}
 	t.tlsConfigPtr = &orig.TLSClientConfig
 	dialer := t.getDialer()
@@ -67,7 +86,7 @@ func NewHTTPTransportIntercept(orig *http.Transport, label string, newConnNotifi
 			if newConnNotifierChan != nil {
 				newConnNotifierChan <- label
 			}
-			return NewConnTracker(conn, &t.BaseTransportIntercept)
+			return NewConnTrackerWithWatch(conn, t.BaseTransportIntercept, watcher)
 		} else {
 			return nil, err
 		}
@@ -75,18 +94,23 @@ func NewHTTPTransportIntercept(orig *http.Transport, label string, newConnNotifi
 	return t
 }
 
+func NewHTTPTransportIntercept(orig *http.Transport, label string, newConnNotifierChan chan string) *HTTPTransportIntercept {
+	return NewHTTPTransportInterceptWithWatch(orig, label, newConnNotifierChan, nil)
+}
+
 func NewHTTP2TransportIntercept(orig *http2.Transport, label string, newConnNotifierChan chan string) *HTTP2TransportIntercept {
 	t := &HTTP2TransportIntercept{
-		Transport: orig,
+		Transport:              orig,
+		BaseTransportIntercept: &BaseTransportIntercept{},
 	}
 	t.tlsConfigPtr = &orig.TLSClientConfig
 	dialer := t.getDialer()
 	t.Transport.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-		if conn, err := dialer(network, addr, cfg); err == nil {
+		if conn, err := dialer(context.Background(), network, addr, cfg); err == nil {
 			if newConnNotifierChan != nil {
 				newConnNotifierChan <- label
 			}
-			return NewConnTracker(conn, &t.BaseTransportIntercept)
+			return NewConnTracker(conn, t.BaseTransportIntercept)
 		} else {
 			return nil, err
 		}
@@ -103,7 +127,7 @@ func NewGRPCIntercept(label string, dialOpts []grpc.DialOption, newConnNotifierC
 			if newConnNotifierChan != nil {
 				newConnNotifierChan <- label
 			}
-			return NewConnTracker(conn, &g.BaseTransportIntercept)
+			return NewConnTracker(conn, g.BaseTransportIntercept)
 		} else {
 			log.Printf("Failed to dial address [%s] with error: %s\n", address, err.Error())
 			return nil, err
@@ -111,6 +135,10 @@ func NewGRPCIntercept(label string, dialOpts []grpc.DialOption, newConnNotifierC
 	}
 	g.dialOpts = append(dialOpts, grpc.WithContextDialer(contextDialer))
 	return g
+}
+
+func (t *HTTPTransportIntercept) AsHTTP() IHTTPTransportIntercept {
+	return t
 }
 
 func (t *HTTPTransportIntercept) getDialer() func(context.Context, string, string) (net.Conn, error) {
@@ -125,12 +153,31 @@ func (t *HTTPTransportIntercept) getDialer() func(context.Context, string, strin
 	return t.Dialer.DialContext
 }
 
-func (t *HTTP2TransportIntercept) getDialer() func(string, string, *tls.Config) (net.Conn, error) {
-	if t.DialTLS != nil {
-		return t.DialTLS
+func (t *HTTPTransportIntercept) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.requestIntercept != nil {
+		t.requestIntercept.Intercept(req)
 	}
-	return func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-		return t.Dialer.Dial(network, addr)
+	resp, err := t.Transport.RoundTrip(req)
+	if resp != nil && t.responseIntercept != nil {
+		t.responseIntercept.Intercept(resp)
+	}
+	return resp, err
+}
+
+func (t *HTTPTransportIntercept) SetRequestIntercept(ri IHTTPRequestIntercept) {
+	t.requestIntercept = ri
+}
+
+func (t *HTTPTransportIntercept) SetResponseIntercept(ri IHTTPResponseIntercept) {
+	t.responseIntercept = ri
+}
+
+func (t *HTTP2TransportIntercept) getDialer() func(context.Context, string, string, *tls.Config) (net.Conn, error) {
+	if t.DialTLSContext != nil {
+		return t.DialTLSContext
+	}
+	return func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+		return t.Dialer.DialContext(ctx, network, addr)
 	}
 }
 
@@ -146,4 +193,8 @@ func (t *BaseTransportIntercept) SetTLSConfig(tlsConfig *tls.Config) {
 
 func (t *BaseTransportIntercept) GetDialer() *net.Dialer {
 	return &t.Dialer
+}
+
+func (t *BaseTransportIntercept) AsHTTP() IHTTPTransportIntercept {
+	return nil
 }

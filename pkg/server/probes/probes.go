@@ -21,6 +21,7 @@ import (
 	. "goto/pkg/constants"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
 	"strings"
@@ -45,19 +46,19 @@ type PortProbes struct {
 }
 
 var (
-	Handler      util.ServerHandler     = util.ServerHandler{"probes", SetRoutes, Middleware}
-	probesByPort map[string]*PortProbes = map[string]*PortProbes{}
+	Middleware   = middleware.NewMiddleware("probes", setRoutes, middlewareFunc)
+	probesByPort = map[string]*PortProbes{}
 	lock         sync.RWMutex
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	probeRouter := util.PathRouter(r, "/probes")
-	util.AddRouteQWithPort(probeRouter, "/{type}/set", setProbe, "uri", "PUT", "POST")
-	util.AddRouteWithPort(probeRouter, "/{type}/set/status={status}", setProbeStatus, "PUT", "POST")
-	util.AddRouteWithPort(probeRouter, "/counts/clear", clearProbeCounts, "POST")
-	util.AddRouteWithPort(probeRouter, "", getProbes, "GET")
-	global.IsLivenessProbe = IsLivenessProbe
-	global.IsReadinessProbe = IsReadinessProbe
+	util.AddRouteQ(probeRouter, "/{type}/set", setProbe, "uri", "PUT", "POST")
+	util.AddRoute(probeRouter, "/{type}/set/status={status}", setProbeStatus, "PUT", "POST")
+	util.AddRoute(probeRouter, "/counts/clear", clearProbeCounts, "POST")
+	util.AddRoute(probeRouter, "", getProbes, "GET")
+	global.Funcs.IsLivenessProbe = IsLivenessProbe
+	global.Funcs.IsReadinessProbe = IsReadinessProbe
 }
 
 func IsLivenessProbe(r *http.Request) bool {
@@ -167,7 +168,7 @@ func clearProbeCounts(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
-func Middleware(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pp := initPortProbes(r)
 		if IsReadinessProbe(r) {
@@ -186,7 +187,7 @@ func Middleware(next http.Handler) http.Handler {
 				pp.ReadinessOverflowCount++
 			}
 			pp.lock.Unlock()
-			util.CopyHeaders("Readiness-Request", r, w, r.Header, true, true, false)
+			util.CopyHeaders("Readiness-Request", r, w, nil, true, true, false)
 			w.Header().Add(HeaderReadinessRequestCount, fmt.Sprint(pp.ReadinessCount))
 			w.Header().Add(HeaderReadinessOverflowCount, fmt.Sprint(pp.ReadinessOverflowCount))
 			w.WriteHeader(status)
@@ -208,7 +209,7 @@ func Middleware(next http.Handler) http.Handler {
 				pp.LivenessOverflowCount++
 			}
 			pp.lock.Unlock()
-			util.CopyHeaders("Liveness-Request", r, w, r.Header, true, true, false)
+			util.CopyHeaders("Liveness-Request", r, w, nil, true, true, false)
 			w.Header().Add(HeaderLivenessRequestCount, fmt.Sprint(pp.LivenessCount))
 			w.Header().Add(HeaderLivenessOverflowCount, fmt.Sprint(pp.LivenessOverflowCount))
 			w.WriteHeader(status)

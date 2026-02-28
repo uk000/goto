@@ -21,17 +21,20 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 
 	. "goto/pkg/constants"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
 	"goto/pkg/server/listeners"
+	"goto/pkg/server/middleware"
+	gototls "goto/pkg/tls"
 	"goto/pkg/util"
 )
 
 var (
-	Handler = util.ServerHandler{Name: "connection", Middleware: Middleware}
+	Middleware = middleware.NewMiddleware("connection", nil, middlewareFunc)
 )
 
 func GetConn(r *http.Request) net.Conn {
@@ -46,15 +49,15 @@ func captureTLSInfo(r *http.Request) {
 	if conn = GetConn(r); conn == nil {
 		return
 	}
-	if l := listeners.GetListenerForPort(util.GetCurrentPort(r)); l == nil || !l.TLS {
+	rs := util.GetRequestStore(r)
+	if rs == nil {
+		return
+	}
+	if l := listeners.GetListenerForPort(rs.RequestPortNum); l == nil || !l.TLS {
 		return
 	}
 	tlsConn, ok := conn.(*tls.Conn)
 	if !ok {
-		return
-	}
-	rs := util.GetRequestStore(r)
-	if rs == nil {
 		return
 	}
 	tlsState := tlsConn.ConnectionState()
@@ -64,39 +67,56 @@ func captureTLSInfo(r *http.Request) {
 	rs.IsTLS = true
 	rs.ServerName = tlsState.ServerName
 	rs.TLSVersionNum = tlsState.Version
-	rs.TLSVersion = util.GetTLSVersion(&tlsState)
+	rs.TLSVersion = gototls.GetTLSVersion(&tlsState)
 }
 
-func Middleware(next http.Handler) http.Handler {
+func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
+	l := listeners.GetCurrentListener(r)
+	port := util.GetRequestOrListenerPort(r)
+	rs := util.GetRequestStore(r)
+	w.Header().Add(HeaderGotoRemoteAddress, r.RemoteAddr)
+	w.Header().Add(HeaderGotoPort, port)
+	w.Header().Add(HeaderGotoHost, l.HostLabel)
+	w.Header().Add(HeaderGotoProtocol, rs.GotoProtocol)
+	w.Header().Add(HeaderViaGoto, l.Label)
+
+}
+
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		localAddr := ""
 		if conn := GetConn(r); conn != nil {
 			captureTLSInfo(r)
 			localAddr = conn.LocalAddr().String()
 		} else {
-			localAddr = global.PeerAddress
+			localAddr = global.Self.Address
 		}
 		l := listeners.GetCurrentListener(r)
 		rs := util.GetRequestStore(r)
-		port := util.GetListenerPort(r)
+		p := util.GetRequestOrListenerPortNum(r)
+		port := ""
+		if p == 0 {
+			p = util.GetContextPort(r.Context())
+		}
+		if p > 0 {
+			port = strconv.Itoa(p)
+		}
 		rs.GotoProtocol = util.GotoProtocol(r.ProtoMajor == 2, l.TLS)
+		rs.HostLabel = l.HostLabel
+		rs.ListenerLabel = l.Label
 		if util.IsTunnelRequest(r) {
-			w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoRemoteAddress, rs.TunnelCount), r.RemoteAddr)
-			w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoPort, rs.TunnelCount), port)
-			w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoTunnelHost, rs.TunnelCount), l.HostLabel)
-			w.Header().Add(fmt.Sprintf("%s|%d", HeaderViaGotoTunnel, rs.TunnelCount), l.Label)
-			w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoProtocol, rs.TunnelCount), rs.GotoProtocol)
+			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoRemoteAddress, rs.TunnelCount), r.RemoteAddr)
+			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoPort, rs.TunnelCount), port)
+			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoTunnelHost, rs.TunnelCount), l.HostLabel)
+			w.Header().Add(fmt.Sprintf("%s_%d", HeaderViaGotoTunnel, rs.TunnelCount), l.Label)
+			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoProtocol, rs.TunnelCount), rs.GotoProtocol)
 		} else if rs.WillProxy {
-			util.AddHeaderWithSuffix(HeaderGotoHost, "|Proxy", l.HostLabel, w.Header())
-			util.AddHeaderWithSuffix(HeaderGotoPort, "|Proxy", port, w.Header())
-			util.AddHeaderWithSuffix(HeaderViaGoto, "|Proxy", l.Label, w.Header())
-			util.AddHeaderWithSuffix(HeaderGotoProtocol, "|Proxy", rs.GotoProtocol, w.Header())
+			util.AddHeaderWithPrefix("Proxy-", HeaderGotoHost, l.HostLabel, w.Header())
+			util.AddHeaderWithPrefix("Proxy-", HeaderGotoPort, port, w.Header())
+			util.AddHeaderWithPrefix("Proxy-", HeaderGotoProtocol, rs.GotoProtocol, w.Header())
+			util.AddHeaderWithPrefix("Proxy-", HeaderViaGoto, l.Label, w.Header())
 		} else {
-			w.Header().Add(HeaderGotoRemoteAddress, r.RemoteAddr)
-			w.Header().Add(HeaderGotoPort, port)
-			w.Header().Add(HeaderGotoHost, l.HostLabel)
-			w.Header().Add(HeaderViaGoto, l.Label)
-			w.Header().Add(HeaderGotoProtocol, rs.GotoProtocol)
+			SendGotoHeaders(w, r)
 		}
 		pieces := strings.Split(r.RemoteAddr, ":")
 		remoteIP := strings.Join(pieces[:len(pieces)-1], ":")
@@ -113,7 +133,7 @@ func Middleware(next http.Handler) http.Handler {
 		if targetURL := r.Header.Get(HeaderGotoTargetURL); targetURL != "" {
 			msg += fmt.Sprintf(", GotoTargetURL: [%s]", targetURL)
 		}
-		if global.LogRequestHeaders {
+		if global.Flags.LogRequestHeaders {
 			msg += fmt.Sprintf(", Request Headers: [%s]", util.GetHeadersLog(r.Header))
 		}
 		util.AddLogMessage(msg, r)
@@ -121,7 +141,9 @@ func Middleware(next http.Handler) http.Handler {
 			util.AddLogMessage("Serving Tunnel Connect Request", r)
 		} else if next != nil {
 			next.ServeHTTP(w, r)
+			if rs.WillProxy {
+				w.Header().Add(HeaderViaGoto, l.Label)
+			}
 		}
-		util.DiscardRequestBody(r)
 	})
 }

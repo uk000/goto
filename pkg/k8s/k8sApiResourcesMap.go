@@ -16,7 +16,16 @@
 
 package k8s
 
-import "strings"
+import (
+	k8sClient "goto/pkg/k8s/client"
+	"log"
+	"strings"
+
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+)
 
 type K8sApiResource struct {
 	ShortName  string   `json:"shortName"`
@@ -32,6 +41,34 @@ type K8sApiResource struct {
 const (
 	KindNamespace = "Namespace"
 )
+
+type K8sResource struct {
+	Resource  *unstructured.Unstructured `json:"resource"`
+	GVK       *schema.GroupVersionKind   `json:"gvk"`
+	Namespace string                     `json:"namespace"`
+	Name      string                     `json:"name"`
+}
+
+func GetGVRMapping(gvk *schema.GroupVersionKind) (*meta.RESTMapping, error) {
+	gvr, err := k8sClient.Client.Mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if err != nil {
+		log.Printf("Failed to covert GVK to GVR with error: %s\n", err.Error())
+		return nil, err
+	}
+	return gvr, nil
+}
+
+func GetResourceInterface(gvk *schema.GroupVersionKind, namespace string) (dynamic.ResourceInterface, *meta.RESTMapping, error) {
+	gvr, err := GetGVRMapping(gvk)
+	if err != nil {
+		return nil, nil, err
+	}
+	if gvr.Scope.Name() == meta.RESTScopeNameNamespace {
+		return k8sClient.Client.Client.Resource(gvr.Resource).Namespace(namespace), gvr, nil
+	} else {
+		return k8sClient.Client.Client.Resource(gvr.Resource), gvr, nil
+	}
+}
 
 var (
 	K8sApiResourcesMap = func() map[string]*K8sApiResource {

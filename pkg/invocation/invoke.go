@@ -20,13 +20,13 @@ import (
 	"bytes"
 	"fmt"
 	. "goto/pkg/constants"
-	"goto/pkg/grpc"
-	"goto/pkg/grpc/pb"
 	"goto/pkg/metrics"
+	grpc "goto/pkg/rpc/grpc/client"
+	"goto/pkg/rpc/grpc/pb"
 	"goto/pkg/transport"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"strconv"
@@ -38,13 +38,14 @@ type InvocationRequest struct {
 	targetID        string
 	url             string
 	uri             string
+	host            string
 	headers         map[string]string
 	httpRequest     *http.Request
 	grpcInput       *pb.Input
 	grpcStreamInput *pb.StreamConfig
 	requestReader   io.ReadCloser
 	requestWriter   io.WriteCloser
-	client          transport.TransportClient
+	client          transport.ClientTransport
 	tracker         *InvocationTracker
 	result          *InvocationResult
 }
@@ -52,7 +53,7 @@ type InvocationRequest struct {
 func (tracker *InvocationTracker) invokeWithRetries(requestID string, targetID string, urls ...string) *InvocationResult {
 	status := tracker.Status
 	target := tracker.Target
-	request := tracker.newClientRequest(requestID, targetID, urls...)
+	request := tracker.newInvocationRequest(requestID, targetID, urls...)
 	if request == nil {
 		return nil
 	}
@@ -102,13 +103,13 @@ func (tracker *InvocationTracker) invokeWithRetries(requestID string, targetID s
 	return result
 }
 
-func (tracker *InvocationTracker) newClientRequest(requestID, targetID string, substituteURL ...string) *InvocationRequest {
+func (tracker *InvocationTracker) newInvocationRequest(requestID, targetID string, substituteURL ...string) *InvocationRequest {
+	if tracker.client == nil {
+		return nil
+	}
 	url := tracker.prepareRequestURL(requestID, targetID, substituteURL...)
 	headers := tracker.prepareRequestHeaders(requestID, targetID, url)
-	if tracker.client != nil {
-		return tracker.newRequest(requestID, targetID, url, headers)
-	}
-	return nil
+	return tracker.newRequest(requestID, targetID, url, headers)
 }
 
 func (tracker *InvocationTracker) newRequest(requestID, targetID, url string, headers map[string]string) *InvocationRequest {
@@ -116,6 +117,7 @@ func (tracker *InvocationTracker) newRequest(requestID, targetID, url string, he
 		requestID: requestID,
 		targetID:  targetID,
 		url:       url,
+		host:      tracker.Target.Host,
 		headers:   headers,
 		client:    tracker.client.transportClient,
 		tracker:   tracker,
@@ -129,7 +131,7 @@ func (tracker *InvocationTracker) prepareRequestURL(requestID, targetID string, 
 	var url string
 	target := tracker.Target
 	if target.Random {
-		if r := util.Random(len(target.BURLS) + 1); r == 0 {
+		if r := types.Random(len(target.BURLS) + 1); r == 0 {
 			url = target.URL
 		} else {
 			url = target.BURLS[r-1]
@@ -175,7 +177,7 @@ func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
 			if len(client.tracker.Payloads) > 1 {
 				requestReader, requestWriter = io.Pipe()
 			} else if len(client.tracker.Payloads) == 1 && len(client.tracker.Payloads[0]) > 0 {
-				requestReader = ioutil.NopCloser(bytes.NewReader(client.tracker.Payloads[0]))
+				requestReader = io.NopCloser(bytes.NewReader(client.tracker.Payloads[0]))
 				ir.result.Request.PayloadSize = len(client.tracker.Payloads[0])
 			}
 			if req, err := http.NewRequest(client.tracker.Target.Method, ir.url, requestReader); err == nil {
@@ -184,6 +186,9 @@ func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
 				for h, hv := range ir.headers {
 					req.Header.Del(h)
 					req.Header.Add(h, hv)
+				}
+				if ir.host != "" {
+					req.Host = ir.host
 				}
 				if req.Host == "" {
 					req.Host = req.URL.Host

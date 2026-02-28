@@ -2,3 +2,11 @@ go.sum
 .vscode
 .history
 .idea/
+bin/
+test/
+protos/
+vendor/
+*.pem
+*_bin*
+*.tar.gz
+*.code-workspace

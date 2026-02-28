@@ -23,8 +23,9 @@ import (
 	"fmt"
 	"goto/pkg/invocation"
 	"goto/pkg/job"
-	"goto/pkg/k8s"
-	"goto/pkg/script"
+	k8sExec "goto/pkg/k8s/exec"
+	k8sStore "goto/pkg/k8s/store"
+	"goto/pkg/scripts"
 	"goto/pkg/server/response/trigger"
 	"goto/pkg/tunnel"
 	"goto/pkg/util"
@@ -251,9 +252,9 @@ func (ps *PipelineSource) Generate(workspace map[string]interface{}) {
 	}
 	if ps.ParseJSON {
 		if s, ok := result.(string); ok {
-			result = util.FromJSONText(s).Value()
+			result = util.JSONFromJSONText(s).Value()
 		} else {
-			result = util.FromJSONText(fmt.Sprint(result)).Value()
+			result = util.JSONFromJSONText(fmt.Sprint(result)).Value()
 		}
 	} else if ps.ParseNumber {
 		if n, err := strconv.Atoi(strings.TrimSpace(fmt.Sprint(result))); err == nil {
@@ -269,7 +270,7 @@ func (k *K8sSource) watch() {
 		if resourceID == "" {
 			resourceID = k.Spec
 		}
-		kw := &k8s.K8sResourceWatchCallback{
+		kw := &k8sStore.K8sResourceWatchCallback{
 			Name: k.triggerPipe.Name,
 			OnAdd: func(namespace, name string, obj interface{}) {
 				log.Printf("K8s Resource [%s/%s] Add triggered pipe [%s]\n", namespace, name, k.triggerPipe.Name)
@@ -284,7 +285,7 @@ func (k *K8sSource) watch() {
 				k.triggerPipe.Trigger()
 			},
 		}
-		k8s.WatchResourceById(resourceID, kw)
+		k8sStore.WatchResourceById(resourceID, kw)
 	}
 }
 
@@ -295,7 +296,7 @@ func (k *K8sSource) init() {
 func (k *K8sSource) generate() interface{} {
 	k.watch()
 	k.watching = true
-	if j, _ := k8s.GetResourceByID(k.finalSpec); j != nil {
+	if j, _ := k8sStore.GetResourceByID(k.finalSpec); j != nil {
 		return j.Value()
 	}
 	return nil
@@ -313,7 +314,7 @@ func (k *K8sPodExecSource) prepareCommand() string {
 func (k *K8sPodExecSource) generate() interface{} {
 	podID := strings.Split(k.finalSpec, "/")
 	command := k.prepareCommand()
-	if out, err := k8s.PodExec(podID[0], podID[1], podID[2], command); err == nil {
+	if out, err := k8sExec.PodExec(podID[0], podID[1], podID[2], command); err == nil {
 		return out
 	} else {
 		log.Printf("Pipe: Error executing command [%+v] on pod [%+v]\n", command, k.finalSpec)
@@ -381,7 +382,7 @@ func (s *ScriptSource) generate() interface{} {
 	r := strings.NewReader(fmt.Sprint(s.finalInput))
 	var buff bytes.Buffer
 	w := bufio.NewWriter(&buff)
-	script.Scripts.RunScript(s.finalSpec, r, w)
+	scripts.Scripts.RunScript(s.finalSpec, nil, r, w)
 	w.Flush()
 	return buff.String()
 }

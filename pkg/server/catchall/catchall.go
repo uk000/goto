@@ -18,19 +18,21 @@ package catchall
 
 import (
 	"net/http"
+	"time"
 
 	"goto/pkg/metrics"
 	"goto/pkg/server/echo"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
 )
 
 var (
-	Handler util.ServerHandler = util.ServerHandler{Name: "catchall", SetRoutes: SetRoutes}
+	Middleware = middleware.NewMiddleware("catchall", setRoutes, middlewareFunc)
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	r.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool { return true }).HandlerFunc(respond)
 }
 
@@ -42,6 +44,20 @@ func respond(w http.ResponseWriter, r *http.Request) {
 
 func SendDefaultResponse(w http.ResponseWriter, r *http.Request) {
 	response := echo.GetEchoResponse(w, r)
-	response["CatchAll"] = true
+	response["At"] = time.Now().Local().Format(time.DateTime)
+	response["Goto-Port"] = util.GetRequestOrListenerPort(r)
 	util.WriteJsonPayload(w, response)
+}
+
+func middlewareFunc(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if next != nil {
+			next.ServeHTTP(w, r)
+		} else {
+			rs := util.GetRequestStore(r)
+			if !rs.IsKnownNonTraffic {
+				SendDefaultResponse(w, r)
+			}
+		}
+	})
 }

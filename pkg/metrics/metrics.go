@@ -26,6 +26,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"goto/pkg/global"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 )
 
@@ -35,9 +37,7 @@ type PrometheusMetrics struct {
 	requestCountsByHeaders             *prometheus.CounterVec
 	requestCountsByHeaderValues        *prometheus.CounterVec
 	requestCountsByURIs                *prometheus.CounterVec
-	requestCountsByURIsAndStatus       *prometheus.CounterVec
 	requestCountsByHeadersAndURIs      *prometheus.CounterVec
-	requestCountsByHeadersAndStatus    *prometheus.CounterVec
 	requestCountsByPort                *prometheus.CounterVec
 	requestCountsByPortAndURIs         *prometheus.CounterVec
 	requestCountsByPortAndHeaders      *prometheus.CounterVec
@@ -56,29 +56,27 @@ type PrometheusMetrics struct {
 }
 
 type ServerStats struct {
-	RequestCountsByHeaders               map[string]int                       `json:"requestCountsByHeaders"`
-	RequestCountsByURIs                  map[string]int                       `json:"requestCountsByURIs"`
-	RequestCountsByURIsAndStatus         map[string]map[string]int            `json:"requestCountsByURIsAndStatus"`
-	RequestCountsByURIsAndHeaders        map[string]map[string]int            `json:"requestCountsByURIsAndHeaders"`
-	RequestCountsByURIsAndHeaderValues   map[string]map[string]map[string]int `json:"requestCountsByURIsAndHeaderValues"`
-	RequestCountsByHeadersAndStatus      map[string]map[string]int            `json:"requestCountsByHeadersAndStatus"`
-	RequestCountsByHeaderValuesAndStatus map[string]map[string]map[string]int `json:"requestCountsByHeaderValuesAndStatus"`
-	RequestCountsByPortAndURIs           map[string]map[string]int            `json:"requestCountsByPortAndURIs"`
-	RequestCountsByPortAndHeaders        map[string]map[string]int            `json:"requestCountsByPortAndHeaders"`
-	RequestCountsByPortAndHeaderValues   map[string]map[string]map[string]int `json:"requestCountsByPortAndHeaderValues"`
-	RequestCountsByURIsAndProtocol       map[string]map[string]int            `json:"requestCountsByURIsAndProtocol"`
-	lock                                 sync.RWMutex
+	RequestCountsByHeaders             map[string]int                       `json:"requestCountsByHeaders"`
+	RequestCountsByURIs                map[string]int                       `json:"requestCountsByURIs"`
+	RequestCountsByURIsAndHeaders      map[string]map[string]int            `json:"requestCountsByURIsAndHeaders"`
+	RequestCountsByURIsAndHeaderValues map[string]map[string]map[string]int `json:"requestCountsByURIsAndHeaderValues"`
+	RequestCountsByPortAndURIs         map[string]map[string]int            `json:"requestCountsByPortAndURIs"`
+	RequestCountsByPortAndHeaders      map[string]map[string]int            `json:"requestCountsByPortAndHeaders"`
+	RequestCountsByPortAndHeaderValues map[string]map[string]map[string]int `json:"requestCountsByPortAndHeaderValues"`
+	RequestCountsByURIsAndProtocol     map[string]map[string]int            `json:"requestCountsByURIsAndProtocol"`
+	lock                               sync.RWMutex
 }
 
 var (
-	Handler         = util.ServerHandler{"metrics", SetRoutes, Middleware}
+	Middleware      = middleware.NewMiddleware("metrics", setRoutes, middlewareFunc)
 	promMetrics     = NewPrometheusMetrics()
 	serverStats     = NewServerStats()
 	ConnTracker     = make(chan string, 10)
 	stopConnTracker = make(chan bool, 2)
+	_               = global.OnShutdown(Shutdown)
 )
 
-func Startup() {
+func init() {
 	go func() {
 	ConnTracker:
 		for {
@@ -114,12 +112,8 @@ func NewPrometheusMetrics() *PrometheusMetrics {
 		Name: "goto_requests_by_header_values", Help: "Number of requests by header values"}, []string{"requestHeader", "headerValue"})
 	pm.requestCountsByURIs = factory.NewCounterVec(prometheus.CounterOpts{
 		Name: "goto_requests_by_uris", Help: "Number of requests by URIs"}, []string{"uri"})
-	pm.requestCountsByURIsAndStatus = factory.NewCounterVec(prometheus.CounterOpts{
-		Name: "goto_requests_by_uris_and_status", Help: "Number of requests by uris and status code"}, []string{"uri", "statusCode"})
 	pm.requestCountsByHeadersAndURIs = factory.NewCounterVec(prometheus.CounterOpts{
 		Name: "goto_requests_by_headers_and_uris", Help: "Number of requests by headers and uris"}, []string{"requestHeader", "uri"})
-	pm.requestCountsByHeadersAndStatus = factory.NewCounterVec(prometheus.CounterOpts{
-		Name: "goto_requests_by_headers_and_status", Help: "Number of requests by headers and status code"}, []string{"requestHeader", "statusCode"})
 	pm.requestCountsByPort = factory.NewCounterVec(prometheus.CounterOpts{
 		Name: "goto_requests_by_port", Help: "Number of requests by port"}, []string{"port"})
 	pm.requestCountsByPortAndURIs = factory.NewCounterVec(prometheus.CounterOpts{
@@ -158,9 +152,7 @@ func (pm *PrometheusMetrics) reset() {
 	pm.requestCountsByHeaders.Reset()
 	pm.requestCountsByHeaderValues.Reset()
 	pm.requestCountsByURIs.Reset()
-	pm.requestCountsByURIsAndStatus.Reset()
 	pm.requestCountsByHeadersAndURIs.Reset()
-	pm.requestCountsByHeadersAndStatus.Reset()
 	pm.requestCountsByPort.Reset()
 	pm.requestCountsByPortAndURIs.Reset()
 	pm.requestCountsByPortAndHeaders.Reset()
@@ -182,12 +174,9 @@ func (ss *ServerStats) init() {
 	ss.lock.Lock()
 	defer ss.lock.Unlock()
 	ss.RequestCountsByURIs = map[string]int{}
-	ss.RequestCountsByURIsAndStatus = map[string]map[string]int{}
 	ss.RequestCountsByHeaders = map[string]int{}
 	ss.RequestCountsByURIsAndHeaders = map[string]map[string]int{}
 	ss.RequestCountsByURIsAndHeaderValues = map[string]map[string]map[string]int{}
-	ss.RequestCountsByHeadersAndStatus = map[string]map[string]int{}
-	ss.RequestCountsByHeaderValuesAndStatus = map[string]map[string]map[string]int{}
 	ss.RequestCountsByPortAndURIs = map[string]map[string]int{}
 	ss.RequestCountsByPortAndHeaders = map[string]map[string]int{}
 	ss.RequestCountsByPortAndHeaderValues = map[string]map[string]map[string]int{}
@@ -198,12 +187,11 @@ func UpdateRequestCount(reqType string) {
 	go promMetrics.requestCounts.WithLabelValues(reqType).Inc()
 }
 
-func UpdateHeaderRequestCount(port, uri, header, headerValue, statusCode string) {
+func UpdateHeaderRequestCount(port, uri, header, headerValue string) {
 	go func() {
 		promMetrics.requestCountsByHeaders.WithLabelValues(header).Inc()
 		promMetrics.requestCountsByHeaderValues.WithLabelValues(header, headerValue).Inc()
 		promMetrics.requestCountsByHeadersAndURIs.WithLabelValues(header, uri).Inc()
-		promMetrics.requestCountsByHeadersAndStatus.WithLabelValues(header, statusCode).Inc()
 		promMetrics.requestCountsByPortAndHeaders.WithLabelValues(port, header).Inc()
 		promMetrics.requestCountsByPortAndHeaderValues.WithLabelValues(port, header, headerValue).Inc()
 		serverStats.lock.Lock()
@@ -223,19 +211,6 @@ func UpdateHeaderRequestCount(port, uri, header, headerValue, statusCode string)
 		}
 		serverStats.RequestCountsByURIsAndHeaderValues[uri][header][headerValue]++
 
-		if serverStats.RequestCountsByHeadersAndStatus[header] == nil {
-			serverStats.RequestCountsByHeadersAndStatus[header] = map[string]int{}
-		}
-		serverStats.RequestCountsByHeadersAndStatus[header][statusCode]++
-
-		if serverStats.RequestCountsByHeaderValuesAndStatus[header] == nil {
-			serverStats.RequestCountsByHeaderValuesAndStatus[header] = map[string]map[string]int{}
-		}
-		if serverStats.RequestCountsByHeaderValuesAndStatus[header][headerValue] == nil {
-			serverStats.RequestCountsByHeaderValuesAndStatus[header][headerValue] = map[string]int{}
-		}
-		serverStats.RequestCountsByHeaderValuesAndStatus[header][headerValue][statusCode]++
-
 		if serverStats.RequestCountsByPortAndHeaders[port] == nil {
 			serverStats.RequestCountsByPortAndHeaders[port] = map[string]int{}
 		}
@@ -254,14 +229,9 @@ func UpdateHeaderRequestCount(port, uri, header, headerValue, statusCode string)
 func UpdateURIRequestCount(uri, statusCode string) {
 	go func() {
 		promMetrics.requestCountsByURIs.WithLabelValues(uri).Inc()
-		promMetrics.requestCountsByURIsAndStatus.WithLabelValues(uri, statusCode).Inc()
 		serverStats.lock.Lock()
 		defer serverStats.lock.Unlock()
 		serverStats.RequestCountsByURIs[uri]++
-		if serverStats.RequestCountsByURIsAndStatus[uri] == nil {
-			serverStats.RequestCountsByURIsAndStatus[uri] = map[string]int{}
-		}
-		serverStats.RequestCountsByURIsAndStatus[uri][statusCode]++
 	}()
 }
 
@@ -341,7 +311,7 @@ func getStats(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, serverStats)
 }
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	metricsRouter := r.PathPrefix("/metrics").Subrouter()
 	util.AddRoute(metricsRouter, "", promhttp.HandlerFor(promMetrics.registry, promhttp.HandlerOpts{}).ServeHTTP, "GET")
 	util.AddRoute(metricsRouter, "/go", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}).ServeHTTP, "GET")
@@ -351,7 +321,7 @@ func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(statsRouter, "", getStats, "GET")
 }
 
-func Middleware(next http.Handler) http.Handler {
+func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {
 			next.ServeHTTP(w, r)
