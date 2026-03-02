@@ -19,9 +19,11 @@ package ctl
 import (
 	"flag"
 	"goto/pkg/global"
+	"goto/pkg/util"
+	"log"
 	"os"
 
-	"gopkg.in/yaml.v3"
+	"sigs.k8s.io/yaml"
 )
 
 type GotoConfig struct {
@@ -53,19 +55,32 @@ func ctlApply(args []string) {
 	ApplyFlagSet.Parse(args)
 	loadContext()
 	config := LoadConfig(global.CtlConfig.ConfigFile)
-	processScripts(config)
-	processMCP(config)
-	processA2A(config)
+	if config != nil {
+		processScripts(config)
+		processMCP(config)
+		processA2A(config)
+	}
 }
 
 func LoadConfig(path string) *GotoConfig {
-	config := &GotoConfig{}
 	if data, err := os.ReadFile(path); err == nil {
-		if err := yaml.Unmarshal(data, config); err != nil {
-			panic(err)
-		}
+		return ParseConfig(data)
 	} else {
-		panic(err)
+		log.Printf("Failed to read config path [%s] with error: %s\n", path, err.Error())
+	}
+	return nil
+}
+
+func ParseConfig(yamlData []byte) *GotoConfig {
+	config := &GotoConfig{}
+	jsonData, err := yaml.YAMLToJSON(yamlData)
+	if err != nil {
+		log.Printf("Failed to unmarshal yaml config with error: %s\n", err.Error())
+		return nil
+	}
+	if err := util.ReadJsonFromBytes(jsonData, config); err != nil {
+		log.Printf("Failed to unmarshal json config with error: %s\n", err.Error())
+		return nil
 	}
 	return config
 }

@@ -39,14 +39,14 @@ type AgentBehaviorFederate struct {
 	triggers DelegateTriggers
 }
 
-func (bd *AgentBehaviorFederate) prepareDelegates() error {
-	if bd.agent.Config == nil || bd.agent.Config.Delegates == nil {
+func (ab *AgentBehaviorFederate) prepareDelegates() error {
+	if ab.agent.Config == nil || ab.agent.Config.Delegates == nil {
 		return nil
 	}
-	if len(bd.agent.Config.Delegates.Tools) == 0 && len(bd.agent.Config.Delegates.Agents) == 0 {
+	if len(ab.agent.Config.Delegates.Tools) == 0 && len(ab.agent.Config.Delegates.Agents) == 0 {
 		return nil
 	}
-	d := bd.agent.Config.Delegates
+	d := ab.agent.Config.Delegates
 	var nilToolCall *model.DelegateToolCall
 	var nilAgentCall *model.DelegateAgentCall
 	for name, a := range d.Agents {
@@ -57,10 +57,10 @@ func (bd *AgentBehaviorFederate) prepareDelegates() error {
 			log.Printf("Agent [%s] has no triggers, will never trigger", name)
 		}
 		for _, trigger := range a.Triggers {
-			if triple := bd.triggers[trigger]; triple != nil {
+			if triple := ab.triggers[trigger]; triple != nil {
 				triple.Third = a
 			} else {
-				bd.triggers[trigger] = types.NewTriple(regexp.MustCompile(fmt.Sprintf("(?i)%s%s%s", util.BeforeRegex, trigger, util.AfterRegex)), nilToolCall, a)
+				ab.triggers[trigger] = types.NewTriple(regexp.MustCompile(fmt.Sprintf("(?i)%s%s%s", util.BeforeRegex, trigger, util.AfterRegex)), nilToolCall, a)
 			}
 		}
 	}
@@ -72,10 +72,10 @@ func (bd *AgentBehaviorFederate) prepareDelegates() error {
 			log.Printf("Tool [%s] has no triggers, will never trigger", name)
 		}
 		for _, trigger := range t.Triggers {
-			if triple := bd.triggers[trigger]; triple != nil {
+			if triple := ab.triggers[trigger]; triple != nil {
 				triple.Second = t
 			} else {
-				bd.triggers[trigger] = types.NewTriple(regexp.MustCompile(fmt.Sprintf("(?i)%s%s%s", util.BeforeRegex, trigger, util.AfterRegex)), t, nilAgentCall)
+				ab.triggers[trigger] = types.NewTriple(regexp.MustCompile(fmt.Sprintf("(?i)%s%s%s", util.BeforeRegex, trigger, util.AfterRegex)), t, nilAgentCall)
 			}
 		}
 	}

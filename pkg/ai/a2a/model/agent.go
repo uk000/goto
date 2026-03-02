@@ -72,18 +72,34 @@ type DelegateServer struct {
 type DelegateToolCall struct {
 	Triggers []string                   `yaml:"triggers" json:"triggers"`
 	ToolCall mcpclient.ToolCall         `yaml:"toolCall,omitempty" json:"toolCall,omitempty"`
-	Servers  map[string]*DelegateServer `yaml:"servers" json:"servers"`
+	Servers  map[string]*DelegateServer `yaml:"servers,omitempty" json:"servers,omitempty"`
 }
 
 type DelegateAgentCall struct {
 	Triggers  []string                   `yaml:"triggers" json:"triggers"`
 	AgentCall a2aclient.AgentCall        `yaml:"agentCall,omitempty" json:"agentCall,omitempty"`
-	Servers   map[string]*DelegateServer `yaml:"servers" json:"servers"`
+	Servers   map[string]*DelegateServer `yaml:"servers,omitempty" json:"servers,omitempty"`
+}
+
+type HTTPCall struct {
+	URL            string              `yaml:"url" json:"url"`
+	Authority      string              `yaml:"authority" json:"authority"`
+	Delay          *types.Delay        `yaml:"delay,omitempty" json:"delay,omitempty"`
+	Headers        map[string][]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	ForwardHeaders []string            `yaml:"forwardHeaders,omitempty" json:"forwardHeaders,omitempty"`
+	RemoveHeaders  []string            `yaml:"removeHeaders,omitempty" json:"removeHeaders,omitempty"`
+}
+
+type DelegateHTTPCall struct {
+	Triggers []string                   `yaml:"triggers" json:"triggers"`
+	HTTPCall a2aclient.AgentCall        `yaml:"httpCall,omitempty" json:"httpCall,omitempty"`
+	Servers  map[string]*DelegateServer `yaml:"servers,omitempty" json:"servers,omitempty"`
 }
 
 type DelegateConfig struct {
 	Tools    map[string]*DelegateToolCall  `yaml:"tools,omitempty" json:"tools,omitempty"`
 	Agents   map[string]*DelegateAgentCall `yaml:"agents,omitempty" json:"agents,omitempty"`
+	HTTP     map[string]*DelegateHTTPCall  `yaml:"http,omitempty" json:"http,omitempty"`
 	MaxCalls int                           `yaml:"maxCalls,omitempty" json:"maxCalls,omitempty"`
 	Parallel bool                          `yaml:"parallel,omitempty" json:"parallel,omitempty"`
 }

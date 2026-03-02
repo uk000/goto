@@ -287,9 +287,14 @@ func serveAgent(w http.ResponseWriter, r *http.Request) {
 		if status, rem := statusManager.GetStatusFor(port, r.RequestURI, r.Header); status > 0 {
 			sendStatus(agent, status, rem, w, r)
 		} else {
-			GetOrAddServer(port).Serve(agent, w, r)
+			err := GetOrAddServer(port).Serve(agent, w, r)
+			if err != nil {
+				msg = fmt.Sprintf("Failed to serve agent [%s] on port [%d]: %s", agent, port, err.Error())
+				fmt.Fprintln(w, err.Error())
+			} else {
+				msg = fmt.Sprintf("Handled agent [%s] on port: %d", agent, port)
+			}
 		}
-		msg = fmt.Sprintf("Handled agent [%s] on port: %d", agent, port)
 	}
 	util.AddLogMessage(msg, r)
 }

@@ -18,7 +18,6 @@ package mcpserver
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"goto/pkg/global"
 	"goto/pkg/proxy"
@@ -41,6 +40,7 @@ import (
 type MCPServer struct {
 	gomcp.Implementation
 	ID                string                          `json:"id"`
+	Description       string                          `json:"description,omitempty"`
 	Host              string                          `json:"host"`
 	Port              int                             `json:"port"`
 	Tools             map[string]*MCPTool             `json:"tools"`
@@ -157,13 +157,14 @@ func InitDefaultServer() {
 
 func NewMCPServer(p *MCPServerPayload) *MCPServer {
 	server := &MCPServer{
-		ID:        fmt.Sprintf("[%s][%s]", global.Funcs.GetListenerLabelForPort(p.Port), p.Name),
-		Enabled:   p.Enabled,
-		Host:      global.Funcs.GetHostLabelForPort(p.Port),
-		Port:      p.Port,
-		Stateless: p.Stateless,
-		URI:       p.URI,
-		URIRegex:  p.URIRegex,
+		ID:          fmt.Sprintf("[%s][%s][%s][%s]", p.Name, global.Self.PodName, global.Self.Namespace, global.Self.Cluster),
+		Description: p.Description,
+		Enabled:     p.Enabled,
+		Host:        global.Funcs.GetHostLabelForPort(p.Port),
+		Port:        p.Port,
+		Stateless:   p.Stateless,
+		URI:         p.URI,
+		URIRegex:    p.URIRegex,
 		Implementation: gomcp.Implementation{
 			Name:    p.Name,
 			Title:   p.Name,
@@ -497,7 +498,7 @@ func (m *MCPServer) AddPayload(name, kind string, payload []byte, isJSON, isStre
 		c.SetPayload(payload, isJSON, isStream, streamCount, delayMin, delayMax, delayCount)
 		return nil
 	}
-	return errors.New("component not found")
+	return fmt.Errorf("%s [%s] not found", kind, name)
 }
 
 func (ps *PortServers) addComponentToAll(c IMCPComponent, server string) {

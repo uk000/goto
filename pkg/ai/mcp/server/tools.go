@@ -282,7 +282,7 @@ func (t *ToolCallContext) RunTool() (result *gomcp.CallToolResult, err error) {
 	if t.rs.RequestHeaders == nil {
 		t.rs.RequestHeaders = t.requestHeaders
 	}
-	output["Goto-Server-Info"] = echo.GetEchoResponseFromRS(t.rs)
+	output["Goto-Server-Info"] = echo.GetEchoResponseWithAddendum(t.rs, map[string]any{"Goto-MCP-Server": t.Server.ID, "Goto-MCP-Tool": t.Name})
 	output["hops"] = t.hops.Steps
 	result.StructuredContent = output
 	return
@@ -314,7 +314,7 @@ func (t *ToolCallContext) echo() (*gomcp.CallToolResult, error) {
 	// }
 	// msg := fmt.Sprintf("Echo Server: %s[%s]. Input: %s", t.Label, global.Funcs.GetListenerLabelForPort(t.Server.GetPort()), input)
 	// content = append(content, &gomcp.TextContent{Text: msg})
-	content = append(content, &gomcp.TextContent{Text: util.ToJSONText(echo.GetEchoResponseFromRS(t.rs))})
+	content = append(content, &gomcp.TextContent{Text: util.ToJSONText(echo.GetEchoResponseWithAddendum(t.rs, map[string]any{"Goto-MCP-Server": t.Server.ID, "Goto-MCP-Tool": t.Name}))})
 	t.applyDelay()
 	t.notifyClient(t.Log("Server [%s] echoed back", t.Server.GetName()), 0)
 	return &gomcp.CallToolResult{Content: content}, nil

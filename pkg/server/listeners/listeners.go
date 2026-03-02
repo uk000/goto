@@ -353,7 +353,7 @@ func createPortListener(port int, protocol, cn string, existing map[int]bool) *L
 		l.HostLabel = global.Self.HostLabel
 		return l
 	} else {
-		log.Fatalf("Error: Duplicate port [%d]\n", port)
+		log.Printf("Error: Duplicate port [%d]\n", port)
 	}
 	return nil
 }

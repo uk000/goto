@@ -5,6 +5,17 @@ mcp:
       inputSchema:
         type: object
         required: []
+    - name: basic-text-delay-schema
+      inputSchema:
+        type: object
+        properties:
+          text:
+            type: string
+            description: input text
+          delay:
+            type: string
+            description: 'Delay the response artificially (duration syntax: 5s)'
+        required: []
     - name: tool-call-schema
       inputSchema:
         type: object
@@ -127,28 +138,56 @@ mcp:
               - authorization
               args: {}
         - tool:
+            name: ping
+            description: Ping client from server goto-mcp1
+          behavior:
+            ping: true
+        - tool:
             name: echo
             description: Echo back from server goto-mcp1
-            inputSchema:
-              type: object
-              properties:
-                text:
-                  type: string
-                  description: input text
-                delay:
-                  type: string
-                  description: 'Delay the response artificially (duration syntax: 5s)'
-              required: []
+          schema: basic-text-delay-schema
           behavior:
             echo: true
         - tool:
             name: time
             description: Get current time from server Goto-8080s
-            inputSchema:
-              type: object
-              required: []
           behavior:
             time: true
+        - tool:
+            name: fetch
+            description: Fetch HTTP resource from [localhost:8080/echo/headers]
+          schema: fetch-schema
+          behavior:
+            fetch: true
+          config:
+            remote:
+              url: "localhost:8080/echo/headers"
+              authority: "localhost"
+              forwardHeaders:
+              - Traceparent
+              - Tracestate
+              - authorization
+        - tool:
+            name: stream
+            description: long running streaming tool, with stream out and progress notifications from server goto-mcp1
+          schema: basic-text-delay-schema
+          behavior:
+            stream: true
+          config:
+            delay:
+              min: 1s
+              max: 5s
+              count: -1
+        - tool:
+            name: sample
+            description: sample something from client for server goto-mcp1
+          behavior:
+            sample: true
+        - tool:
+            name: listRoots
+            description: Get list of roots from client for server goto-mcp1
+          behavior:
+            listRoots: true
         - tool:
             name: elicit
             description: elicit something from LLM for server goto-mcp1
@@ -174,52 +213,6 @@ mcp:
               properties:
                 theAsk:
                   type: string
-        - tool:
-            name: fetch
-            description: Fetch HTTP resource from [localhost:8080/echo/headers]
-          schema: fetch-schema
-          behavior:
-            fetch: true
-          config:
-            remote:
-              url: "localhost:8080/echo/headers"
-              authority: "localhost"
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - authorization
-        - tool:
-            name: ping
-            description: Ping client from server goto-mcp1
-          behavior:
-            ping: true
-        - tool:
-            name: sample
-            description: sample something from client for server goto-mcp1
-          behavior:
-            sample: true
-        - tool:
-            name: listRoots
-            description: Get list of roots from client for server goto-mcp1
-          behavior:
-            listRoots: true
-        - tool:
-            name: stream
-            description: long running streaming tool, with stream out and progress notifications from server goto-mcp1
-            inputSchema:
-              type: object
-              properties:
-                delay:
-                  type: string
-                  description: 'Delay the response artificially (duration syntax: 5s)'
-              required: []
-          behavior:
-            stream: true
-          config:
-            delay:
-              min: 1s
-              max: 5s
-              count: -1
         - tool:
             name: remote-serverdetails
             description: 'From Server [goto-mcp1], call tool [default: ServerDetails] on remote MCP server [goto-mcp2] at URL[localhost:3000/mcp/goto-mcp2/serverdetails], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
@@ -590,33 +583,7 @@ mcp:
         - tool:
             name: "toolcall"
             description: "Call a tool on another MCP server from server goto-mcp2"
-            inputSchema:
-              type: object
-              properties:
-                tool:
-                  type: string
-                  description: Tool to execute on the remote MCP server
-                url:
-                  type: string
-                  description: Remote MCP Server URL
-                authority:
-                  type: string
-                  description: HTTP Authority to use for the remote call
-                sse:
-                  type: boolean
-                  description: Whether to invoke the remote call over SSE or StreamableHTTP
-                delay:
-                  type: string
-                  description: 'Delay the response artificially (duration syntax: 5s)'
-                headers:
-                  type: object
-                  description: Headers to pass to the remote tool. JSON object with string h:v.
-                args:
-                  type: object
-                  description: Arguments to pass to the remote tool. JSON object with k:v.
-              required:
-              - tool
-              - url
+          schema: tool-call-schema
           behavior:
             remote: true
           config:
@@ -635,46 +602,25 @@ mcp:
               - authorization
               args: {}
         - tool:
+            name: ping
+            description: Ping client from server goto-mcp2
+          behavior:
+            ping: true
+        - tool:
             name: echo
             description: Echo back from server goto-mcp2
-            inputSchema:
-              type: object
-              properties:
-                text:
-                  type: string
-                  description: input text
-                delay:
-                  type: string
-                  description: 'Delay the response artificially (duration syntax: 5s)'
-              required: []
+          schema: basic-text-delay-schema
           behavior:
             echo: true
         - tool:
+            name: time
+            description: Get current time from server goto-mcp2
+          behavior:
+            time: true
+        - tool:
             name: fetch
             description: Fetch HTTP resource from [localhost:8001/echo/headers]
-            inputSchema:
-              type: object
-              properties:
-                url:
-                  type: string
-                  description: url to fetch
-                authority:
-                  type: string
-                  description: HTTP Authority to use for the remote host
-                headers:
-                  type: object
-                  description: Headers to be sent with the HTTP request
-                forwardHeaders:
-                  type: array
-                  items:
-                    type: string
-                  description: List of headers to forward from incoming reuqest to outgoing
-                    request.
-                delay:
-                  type: string
-                  description: 'Delay the response artificially (duration syntax: 5s)'
-              required:
-              - url
+          schema: fetch-schema
           behavior:
             fetch: true
           config:
@@ -686,23 +632,9 @@ mcp:
               - Tracestate
               - authorization
         - tool:
-            name: ping
-            description: Ping client from server goto-mcp2
-            inputSchema:
-              type: object
-              required: []
-          behavior:
-            ping: true
-        - tool:
             name: stream
             description: long running streaming tool, with stream out and progress notifications from server goto-mcp2
-            inputSchema:
-              type: object
-              properties:
-                delay:
-                  type: string
-                  description: 'Delay the response artificially (duration syntax: 5s)'
-              required: []
+          schema: basic-text-delay-schema
           behavior:
             stream: true
           config:

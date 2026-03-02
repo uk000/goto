@@ -35,7 +35,8 @@ func sendAgents(config *GotoConfig) {
 	}
 	json := util.ToJSONBytes(agentPayload)
 	if json == nil {
-		log.Fatalf("JSON marshalling error. Agents JSON: %+v", config.A2A.Agents)
+		log.Printf("JSON marshalling error. Agents JSON: %+v", config.A2A.Agents)
+		return
 	}
 	log.Printf("Sending Agents to URL [%s]\n", url)
 	resp, err := http.Post(url, "application/json", bytes.NewReader(json))
@@ -56,7 +57,8 @@ func sendAgents(config *GotoConfig) {
 			url = fmt.Sprintf("%s/a2a/agent/%s/payload", currentContext.RemoteGotoURL, agent.Agent.Card.Name)
 			json := util.ToJSONBytes(agent.Response)
 			if json == nil {
-				log.Fatalf("JSON marshalling error. Agent Payload: %+v", agent.Response)
+				log.Printf("JSON marshalling error. Agent Payload: %+v", agent.Response)
+				return
 			}
 			log.Printf("Sending Agent Payload to URL [%s]\n", url)
 			resp, err := http.Post(url, "application/json", bytes.NewReader(json))

@@ -60,7 +60,7 @@ func RunCommands(label string, lines []string) {
 }
 
 func (sm *ScriptManager) RunCommands(label string, commands []string) {
-	newScriptFromCommands(label, commands).runToStdOut()
+	newScriptFromCommands(label, commands).RunToStdOut()
 }
 
 func (sm *ScriptManager) AddScript(name, content string, store bool) {
@@ -134,7 +134,7 @@ func (sm *ScriptManager) RunScript(name string, args []string, in io.Reader, out
 	if args == nil {
 		args = []string{}
 	}
-	script.run(args, in, out)
+	script.Run(args, in, out)
 }
 
 func (sm *ScriptManager) DumpScripts(out io.Writer) {
@@ -153,7 +153,7 @@ func newScriptFromCommands(name string, lines []string) *Script {
 	return script
 }
 
-func (s *Script) run(args []string, in io.Reader, out io.Writer) {
+func (s *Script) Run(args []string, in io.Reader, out io.Writer) {
 	var command string
 	if s.FilePath != "" {
 		log.Printf("Script [%s]: Running script from file [%s] with args [%+v].\n", s.Name, s.FilePath, args)
@@ -175,6 +175,10 @@ func (s *Script) run(args []string, in io.Reader, out io.Writer) {
 	}
 }
 
-func (s *Script) runToStdOut() {
-	s.run([]string{}, os.Stdin, os.Stdout)
+func (s *Script) RunToStdOut() {
+	s.Run([]string{}, os.Stdin, os.Stdout)
+}
+
+func (s *Script) RunWithStdIn(out io.Writer) {
+	s.Run([]string{}, os.Stdin, out)
 }

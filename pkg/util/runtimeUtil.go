@@ -21,6 +21,8 @@ import (
 	"goto/pkg/global"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 )
 
 func BuildListenerLabel(port int) string {
@@ -47,4 +49,17 @@ func PrintCallers(level int, callee string) {
 	fmt.Println("-----------------------------------------------")
 	fmt.Printf("Callers of [%s]: %+v\n", callee, callers)
 	fmt.Println("-----------------------------------------------")
+}
+
+func Debounce(interval time.Duration) func(f func()) {
+	var timer *time.Timer
+	var mu sync.Mutex
+	return func(f func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		if timer != nil {
+			timer.Stop()
+		}
+		timer = time.AfterFunc(interval, f)
+	}
 }

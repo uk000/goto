@@ -144,3 +144,11 @@ func GetEchoResponseFromRS(rs *util.RequestStore) map[string]interface{} {
 	}
 	return response
 }
+
+func GetEchoResponseWithAddendum(rs *util.RequestStore, addendum map[string]any) map[string]interface{} {
+	response := GetEchoResponseFromRS(rs)
+	for k, v := range addendum {
+		response[k] = v
+	}
+	return response
+}

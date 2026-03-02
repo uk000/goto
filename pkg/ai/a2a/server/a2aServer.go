@@ -130,7 +130,7 @@ func (a *A2AServer) Serve(name string, w http.ResponseWriter, r *http.Request) e
 	util.PrintRequest("A2A Request Details", r)
 	agent := a.GetAgent(name)
 	if agent == nil {
-		return fmt.Errorf("agent [%s] not found", name)
+		return fmt.Errorf("agent [%s] not found on server [%s] port [%d]", name, a.ID, a.Port)
 	}
 	ctx := r.Context()
 	_, rs := util.GetRequestStoreFromContext(ctx)

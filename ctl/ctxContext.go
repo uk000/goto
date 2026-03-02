@@ -52,11 +52,11 @@ func loadOrCreateContextFile() {
 			os.MkdirAll(ctlContextPath, 0755)
 			addContext(DefaultContextName, global.CtlConfig.RemoteURL)
 		} else {
-			panic(err)
+			log.Printf("Failed to read context file [%s] with error: %s\n", ctxFile, err.Error())
 		}
 	} else {
 		if err := yaml.Unmarshal(data, &contexts); err != nil {
-			panic(err)
+			log.Printf("Failed to unmarshal context file [%s] with error: %s\n", ctxFile, err.Error())
 		}
 	}
 }

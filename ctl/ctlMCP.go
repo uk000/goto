@@ -104,7 +104,8 @@ func (m *MCP) ProcessMCPServer(server *MCPServer) {
 			if t["schema"] != nil {
 				schemaName := t["schema"].(string)
 				if m.toolInputSchemas[schemaName] == nil {
-					log.Fatalf("Invalid tool schema reference: %s", schemaName)
+					log.Printf("Invalid tool schema reference: %s", schemaName)
+					continue
 				}
 				tool["inputSchema"] = m.toolInputSchemas[schemaName]
 			} else if tool["inputSchema"] == nil {
@@ -118,7 +119,8 @@ func (m *MCP) sendMCPServers(servers []any) {
 	url := fmt.Sprintf("%s/mcpapi/servers/add", currentContext.RemoteGotoURL)
 	json := util.ToJSONBytes(servers)
 	if json == nil {
-		log.Fatalf("error marshalling Server JSON: %+v", servers)
+		log.Printf("error marshalling Server JSON: %+v", servers)
+		return
 	}
 	log.Printf("Sending MCP servers to [%s]\n", url)
 	resp, err := http.Post(url, "application/json", bytes.NewReader(json))
@@ -144,7 +146,8 @@ func (m *MCP) sendMCPConfigs(server *MCPServer) {
 	sendData := func(serverName, kind, url string, data any) {
 		json := util.ToJSONBytes(data)
 		if json == nil {
-			log.Fatalf("JSON marshalling error. Server [%s] JSON: %+v", server.name, server.Tools)
+			log.Printf("JSON marshalling error. Server [%s] JSON: %+v", server.name, server.Tools)
+			return
 		}
 		log.Printf("Sending %s for MCP Server [%s] to URL [%s]\n", kind, serverName, url)
 		resp, err := http.Post(url, "application/json", bytes.NewReader(json))
