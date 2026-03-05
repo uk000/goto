@@ -69,7 +69,7 @@ var (
 
 func RunHttpServer() {
 	var err error
-	httpRouter := configureHTTPouter()
+	httpRouter := configureHTTPRouter()
 	gRPCHandler := GRPCHandler(httpRouter)
 	h2cHandler = h2c.NewHandler(gRPCHandler, h2s)
 	mcpHandler = mcpserver.MCPHandler()
@@ -93,7 +93,7 @@ func RunHttpServer() {
 	WaitForHttpServer()
 }
 
-func configureHTTPouter() *mux.Router {
+func configureHTTPRouter() *mux.Router {
 	coreRouter := mux.NewRouter()
 	coreRouter.SkipClean(true)
 	RootRouter = util.CreateRouters(coreRouter)
@@ -302,7 +302,6 @@ func HTTPHandler() http.Handler {
 		if rs.ReReader != nil {
 			rs.ReReader.ReallyClose()
 		}
-		rs.ReportTime(w)
 	})
 }
 

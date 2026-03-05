@@ -17,13 +17,18 @@
 package router
 
 import (
+	"bytes"
 	"fmt"
+	"goto/pkg/global"
 	"goto/pkg/metrics"
+	"goto/pkg/server/echo"
 	"goto/pkg/server/intercept"
+	"goto/pkg/server/listeners"
 	"goto/pkg/server/request"
 	"goto/pkg/server/response"
 	"goto/pkg/transport"
 	"goto/pkg/util"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -32,6 +37,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type RouteFrom struct {
@@ -58,6 +64,7 @@ type Route struct {
 	Label       string    `json:"label"`
 	From        RouteFrom `json:"from"`
 	To          RouteTo   `json:"to"`
+	LogHops     bool      `json:"logHops"`
 	LogBody     bool      `json:"logBody"`
 	ProcessReq  bool      `json:"processReq"`
 	ProcessResp bool      `json:"processResp"`
@@ -68,11 +75,30 @@ type Route struct {
 	handler     http.Handler
 }
 
+type RouteTraffic struct {
+	Route
+	Listener            string              `json:"listener"`
+	GotoHost            string              `json:"gotoHost"`
+	RequestAt           time.Time           `json:"requestAt"`
+	ResponseAt          time.Time           `json:"responseAt"`
+	Took                time.Duration       `json:"took"`
+	RemoteAddr          string              `json:"remoteAddr"`
+	RequestHost         string              `json:"requestHost"`
+	RequestURI          string              `json:"requestURI"`
+	RequestQuery        string              `json:"requestQuery"`
+	RequestHeaders      map[string][]string `json:"requestHeaders"`
+	ResponseHeaders     map[string][]string `json:"responseHeaders"`
+	RequestMethod       string              `json:"requestMethod"`
+	RequestProto        string              `json:"requestProto"`
+	RequestPayloadSize  int                 `json:"requestPayloadSize"`
+	ResponsePayloadSize int                 `json:"responsePayloadSize"`
+}
+
 type PortRouter struct {
-	ID                     string            `json:"id"`
-	Port                   int               `json:"port"`
-	Routes                 map[string]*Route `json:"routes"`
-	ActiveRoutes           map[string]*Route
+	ID                     string                   `json:"id"`
+	Port                   int                      `json:"port"`
+	Routes                 map[string]*Route        `json:"routes"`
+	RouteTraffic           map[string]*RouteTraffic `json:"traffic"`
 	proxy                  *httputil.ReverseProxy
 	intercept              transport.IHTTPTransportIntercept
 	requestHandler         http.Handler
@@ -86,6 +112,11 @@ var (
 	RequestCorrelationID atomic.Int64
 	lock                 sync.RWMutex
 )
+
+func Init() {
+	PortRouters = map[int]*PortRouter{}
+	RequestCorrelationID = atomic.Int64{}
+}
 
 func WillRoute(port int, r *http.Request) http.Handler {
 	route := GetPortRouter(port).GetMatchingRoute(r)
@@ -111,14 +142,15 @@ func newPortRouter(port int) *PortRouter {
 		ID:           fmt.Sprintf("PortRouter-%d", port),
 		Port:         port,
 		Routes:       map[string]*Route{},
-		ActiveRoutes: map[string]*Route{},
+		RouteTraffic: map[string]*RouteTraffic{},
 	}
 	client := transport.CreateDefaultHTTPClient(pr.ID, false, false, metrics.ConnTracker)
 	pr.intercept = client.Transport().AsHTTP()
-	pr.intercept.SetResponseIntercept(pr)
+	//pr.intercept.SetResponseIntercept(pr)
 	pr.proxy = &httputil.ReverseProxy{
-		Rewrite:   pr.GetRewriter(),
-		Transport: pr.intercept,
+		Rewrite:        pr.GetRewriter(),
+		Transport:      pr.intercept,
+		ModifyResponse: pr.Intercept,
 	}
 
 	pr.requestHandler = intercept.IntereceptMiddleware(request.Middleware.MiddlewareHandler.Middleware(nil), nil)(pr.proxy)
@@ -131,6 +163,7 @@ func (pr *PortRouter) Clear() {
 	pr.lock.Lock()
 	defer pr.lock.Unlock()
 	pr.Routes = map[string]*Route{}
+	pr.RouteTraffic = map[string]*RouteTraffic{}
 }
 
 func (pr *PortRouter) AddRoute(r *Route) {
@@ -138,8 +171,12 @@ func (pr *PortRouter) AddRoute(r *Route) {
 	pr.lock.Lock()
 	defer pr.lock.Unlock()
 	pr.Routes[r.Label] = r
-	r.To.RequestHeaders.Remove = util.ToLowerHeader(r.To.RequestHeaders.Remove)
-	r.To.ResponseHeaders.Remove = util.ToLowerHeader(r.To.ResponseHeaders.Remove)
+	if r.To.RequestHeaders != nil {
+		r.To.RequestHeaders.Remove = util.ToLowerHeader(r.To.RequestHeaders.Remove)
+	}
+	if r.To.ResponseHeaders != nil {
+		r.To.ResponseHeaders.Remove = util.ToLowerHeader(r.To.ResponseHeaders.Remove)
+	}
 	if r.ProcessReq && r.ProcessResp {
 		r.handler = pr.requestResponseHandler
 	} else if r.ProcessReq {
@@ -151,16 +188,29 @@ func (pr *PortRouter) AddRoute(r *Route) {
 	}
 }
 
-func (pr *PortRouter) AddActiveRoute(id string, r *Route) {
+func (pr *PortRouter) AddRouteTraffic(id string, r *Route, req *http.Request) *RouteTraffic {
 	pr.lock.Lock()
 	defer pr.lock.Unlock()
-	pr.ActiveRoutes[id] = r
+	a := &RouteTraffic{
+		Route:          *r,
+		Listener:       listeners.GetListenerLabelForPort(r.From.Port),
+		GotoHost:       global.Self.HostLabel,
+		RequestAt:      time.Now(),
+		RemoteAddr:     req.RemoteAddr,
+		RequestURI:     req.RequestURI,
+		RequestQuery:   req.URL.Query().Encode(),
+		RequestHeaders: req.Header,
+		RequestMethod:  req.Method,
+		RequestProto:   req.Proto,
+	}
+	pr.RouteTraffic[id] = a
+	return a
 }
 
-func (pr *PortRouter) GetActiveRoute(id string) *Route {
+func (pr *PortRouter) GetRouteTraffic(id string) *RouteTraffic {
 	pr.lock.RLock()
 	defer pr.lock.RUnlock()
-	return pr.ActiveRoutes[id]
+	return pr.RouteTraffic[id]
 }
 
 func (pr *PortRouter) GetMatchingRoute(r *http.Request) *Route {
@@ -188,45 +238,93 @@ func (pr *PortRouter) GetRewriter() func(*httputil.ProxyRequest) {
 			return
 		}
 		proxyReq.Out = req
-		pr.AddActiveRoute(id, route)
+		ar := pr.AddRouteTraffic(id, route, proxyReq.In)
 		body := ""
 		if route.LogBody {
 			body = string(rs.ReReader.Content)
+			ar.RequestPayloadSize = len(body)
 		}
 		log.Printf("Routing ID [%s]: Request URI [%s]: Routing to upstream [%s], URI [%s], Headers [%+v], Body [%s]\n",
 			id, proxyReq.In.RequestURI, route.To.URL, proxyReq.Out.RequestURI, proxyReq.Out.Header, body)
 	}
 }
 
-func (pr *PortRouter) Intercept(resp *http.Response) {
+func (pr *PortRouter) Intercept(resp *http.Response) error {
 	req := resp.Request
 	util.GetRequestStore(req)
 	rr := util.CreateOrGetReReader(resp.Body)
-	resp.Body = rr
 	id := req.Header.Get("X-Correlation-ID")
+	var rt *RouteTraffic
 	var route *Route
 	if id != "" {
-		route = pr.GetActiveRoute(id)
+		rt = pr.GetRouteTraffic(id)
+		if rt != nil {
+			route = &rt.Route
+		}
 	}
 	if route == nil {
 		route = pr.GetMatchingRoute(req)
+		if route != nil {
+			rt = pr.AddRouteTraffic(id, route, req)
+		}
 	}
 	msg := ""
 	if route != nil {
 		body := ""
-		if route.LogBody {
-			body = string(rr.Content)
-		}
+		rt.ResponseHeaders = map[string][]string{}
+		util.CopyHeadersWithPrefix("", resp.Header, rt.ResponseHeaders)
 		prepareHeaders(resp.Header, resp.Header, route.To.ResponseHeaders)
+		if route.LogHops || route.LogBody {
+			body = string(rr.Content)
+			rt.ResponsePayloadSize = len(body)
+		}
 		msg = fmt.Sprintf("Routing ID [%s]: Request URI [%s], Response from upstream URL [%s] sent to downstream. Response Headers [%+v], Response Body [%s]",
 			id, req.RequestURI, route.To.URL, resp.Header, body)
+		rt.ResponseAt = time.Now()
+		if !rt.RequestAt.IsZero() {
+			rt.Took = rt.ResponseAt.Sub(rt.RequestAt)
+		}
+		if route.LogHops {
+			var content any
+			if err := util.ReadJson(body, &content); err != nil {
+				content = body
+			}
+			selfHeaders := echo.GetEchoResponse(rt.Listener, rt.RemoteAddr, rt.RequestHost, rt.RequestURI, rt.RequestMethod, rt.RequestProto,
+				rt.RequestQuery, rt.Route.From.Port, rt.RequestPayloadSize, rt.ResponsePayloadSize, rt.RequestHeaders)
+			routeRequestAt := fmt.Sprintf("%s/%s", rt.Listener, rt.RequestAt.Format(time.RFC3339Nano))
+			routeResponseAt := fmt.Sprintf("%s/%s", rt.Listener, rt.ResponseAt.Format(time.RFC3339Nano))
+			routeTook := fmt.Sprintf("%s/%s", rt.Listener, rt.Took.String())
+			selfHeaders["Response-Headers"] = rt.ResponseHeaders
+			selfHeaders["Route-Request-At"] = routeRequestAt
+			selfHeaders["Route-Response-At"] = routeResponseAt
+			selfHeaders["Route-Took"] = routeTook
+			resp.Header.Add("Route-Request-At", routeRequestAt)
+			resp.Header.Add("Route-Response-At", routeResponseAt)
+			resp.Header.Add("Route-Took", routeTook)
+			hops := map[string]map[string]map[string]any{
+				rt.Listener: {
+					"self": selfHeaders,
+					"upstream": {
+						"headers": resp.Header,
+						"body":    content,
+					},
+				},
+			}
+			data := util.ToJSONBytes(hops)
+			resp.ContentLength = int64(len(data))
+			resp.Header.Set("Content-Length", fmt.Sprint(len(data)))
+			resp.Body = io.NopCloser(bytes.NewReader(data))
+		} else {
+			resp.Body = rr
+		}
 	} else {
-		msg = fmt.Sprintf("Failed to find matching route (ID [%d]) for request URI [%s]. Response from upstream URL [%s] sent to downstream with original headers. Response Headers [%+v]",
-			id, req.RequestURI, req.RequestURI, resp.Request.URL.String(), resp.Header)
+		msg = fmt.Sprintf("Failed to find matching route (ID [%s]) for request URI [%s]. Response from upstream URL [%s] sent to downstream with original headers. Response Headers [%+v]",
+			id, req.RequestURI, resp.Request.URL.String(), resp.Header)
 
 	}
 	log.Println(msg)
 	util.AddLogMessage(msg, req)
+	return nil
 }
 
 func (r *Route) WillReroute(req *http.Request) bool {
@@ -234,7 +332,7 @@ func (r *Route) WillReroute(req *http.Request) bool {
 }
 
 func (r *Route) IsValid() bool {
-	if r.From.Port <= 0 || r.From.URIPrefix == "" || r.To.URL == "" {
+	if r.From.Port <= 0 || r.To.URL == "" {
 		return false
 	}
 	if r.To.URIPrefix == "" {
@@ -321,7 +419,7 @@ func (r *Route) prepareRequest(inReq *http.Request, id string) (req *http.Reques
 		req.Host = req.URL.Host
 	}
 	req.ContentLength = inReq.ContentLength
-	req.Header.Add("X-Correlation-ID", id)
+	req.Header.Set("X-Correlation-ID", id)
 	return
 }
 

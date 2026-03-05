@@ -180,7 +180,6 @@ func (p *HTTPProxy) addNewHTTPTarget(w http.ResponseWriter, r *http.Request) {
 		msg += fmt.Sprintf(" With Route[from=%s, to=%s]", uriFrom, uriTo)
 	}
 	util.AddLogMessage(msg, r)
-	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, msg)
 	events.SendRequestEventJSON("Proxy Target Added", target.Name, target, r)
 }
@@ -561,41 +560,42 @@ func (p *HTTPProxy) invokeTargets(targetsMatches map[string]*TargetMatchInfo, w 
 		maxTargetDelay := 0 * time.Second
 		var maxDelayTarget *ProxyTarget
 		for _, m := range targetsMatches {
-			dropTarget := p.shouldDrop(m.target)
+			pt := m.target.GetProxyTarget()
+			dropTarget := p.shouldDrop(pt)
 			if dropTarget && types.Random(5) < 3 {
-				p.HTTPTracker.IncrementTargetDropCount(m.target.Name, r.RequestURI, true)
-				util.AddHeaderWithSuffix(constants.HeaderProxyRequestDropped, "|"+m.target.Name, "true", w.Header())
-				log.Printf("HTTP Proxy[%d]: Request dropped for target [%s] endpoint [%s]\n", p.Port, m.target.Name, m.target.Endpoint)
+				p.HTTPTracker.IncrementTargetDropCount(pt.Name, r.RequestURI, true)
+				util.AddHeaderWithSuffix(constants.HeaderProxyRequestDropped, "|"+pt.Name, "true", w.Header())
+				log.Printf("HTTP Proxy[%d]: Request dropped for target [%s] endpoint [%s]\n", p.Port, pt.Name, pt.Endpoint)
 				continue
 			}
-			if m.target.DelayMax > 0 && m.target.DelayMax > maxTargetDelay {
-				maxTargetDelay = m.target.DelayMax
-				maxDelayTarget = m.target
+			if pt.DelayMax > 0 && pt.DelayMax > maxTargetDelay {
+				maxTargetDelay = pt.DelayMax
+				maxDelayTarget = pt
 			}
-			p.applyDelay(m.target, m.target.Endpoint, w)
-			metrics.UpdateProxiedRequestCount(m.target.Name)
+			p.applyDelay(pt, pt.Endpoint, w)
+			metrics.UpdateProxiedRequestCount(pt.Name)
 			var t Target = m.target
 			is, _ := p.toInvocationSpec(t.GetHTTPTarget(), m.URI, r)
 			if tracker, err := invocation.RegisterInvocation(is); err == nil {
-				m.target.lock.Lock()
-				m.target.callCount++
-				tracker.CustomID = m.target.callCount
-				m.target.lock.Unlock()
+				pt.lock.Lock()
+				pt.callCount++
+				tracker.CustomID = pt.callCount
+				pt.lock.Unlock()
 				invocationResponses := invocation.StartInvocation(tracker, true)
-				events.SendRequestEventJSON("Proxy Target Invoked", m.target.Name, m.target, r)
+				events.SendRequestEventJSON("Proxy Target Invoked", pt.Name, m.target, r)
 				if dropTarget {
-					p.HTTPTracker.IncrementTargetDropCount(m.target.Name, r.RequestURI, false)
-					util.AddHeaderWithSuffix(constants.HeaderProxyResponseDropped, "|"+m.target.Name, "true", w.Header())
-					log.Printf("HTTP Proxy[%d]: Response dropped for target [%s] endpoint [%s]\n", p.Port, m.target.Name, m.target.Endpoint)
+					p.HTTPTracker.IncrementTargetDropCount(pt.Name, r.RequestURI, false)
+					util.AddHeaderWithSuffix(constants.HeaderProxyResponseDropped, "|"+pt.Name, "true", w.Header())
+					log.Printf("HTTP Proxy[%d]: Response dropped for target [%s] endpoint [%s]\n", p.Port, pt.Name, pt.Endpoint)
 				} else {
 					if !util.IsBinaryContentHeader(invocationResponses[0].Response.Headers) {
 						invocationResponses[0].Response.PayloadText = string(invocationResponses[0].Response.Payload)
 					}
 					responses = append(responses, invocationResponses[0].Response)
 				}
-				util.AddHeaderWithSuffix(constants.HeaderGotoProxyUpstreamStatus, "_"+m.target.Name,
+				util.AddHeaderWithSuffix(constants.HeaderGotoProxyUpstreamStatus, "_"+pt.Name,
 					invocationResponses[0].Response.Status, w.Header())
-				util.AddHeaderWithSuffix(constants.HeaderGotoProxyUpstreamTook, "_"+m.target.Name,
+				util.AddHeaderWithSuffix(constants.HeaderGotoProxyUpstreamTook, "_"+pt.Name,
 					invocationResponses[0].TookNanos.String(), w.Header())
 			} else {
 				log.Println(err.Error())
@@ -654,15 +654,16 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 func (p *HTTPProxy) incrementMatchCounts(matches map[string]*TargetMatchInfo, r *http.Request) {
 	p.HTTPTracker.IncrementRequestCounts(r.RequestURI)
 	for _, m := range matches {
-		p.HTTPTracker.IncrementTargetRequestCounts(m.target.Name, r.RequestURI)
+		pt := m.target.GetProxyTarget()
+		p.HTTPTracker.IncrementTargetRequestCounts(pt.Name, r.RequestURI)
 		if m.URI != "" {
-			p.HTTPTracker.IncrementTargetMatchCounts(m.target.Name, m.URI, "", "", "", "")
+			p.HTTPTracker.IncrementTargetMatchCounts(pt.Name, m.URI, "", "", "", "")
 		}
 		for _, hv := range m.Headers {
-			p.HTTPTracker.IncrementTargetMatchCounts(m.target.Name, "", hv[0], hv[1], "", "")
+			p.HTTPTracker.IncrementTargetMatchCounts(pt.Name, "", hv[0], hv[1], "", "")
 		}
 		for _, qv := range m.Query {
-			p.HTTPTracker.IncrementTargetMatchCounts(m.target.Name, "", "", "", qv[0], qv[1])
+			p.HTTPTracker.IncrementTargetMatchCounts(pt.Name, "", "", "", qv[0], qv[1])
 		}
 	}
 }
@@ -675,12 +676,12 @@ func (p *Proxy) checkMatchingTargetsForRequest(r *http.Request) map[string]*Targ
 		target := t.GetHTTPTarget()
 		if target.Enabled {
 			if target.matchRootURI {
-				matchInfo[name] = &TargetMatchInfo{target: target.ProxyTarget, URI: "/"}
+				matchInfo[name] = &TargetMatchInfo{target: target, URI: "/"}
 			}
 			//Even if all URIs allowed, still look for a better match
 			for uri, re := range target.uriRegexps {
 				if uri != "/*" && re.MatchString(r.RequestURI) {
-					matchInfo[name] = &TargetMatchInfo{target: target.ProxyTarget, URI: uri}
+					matchInfo[name] = &TargetMatchInfo{target: target, URI: uri}
 					break
 				}
 			}
@@ -692,13 +693,14 @@ func (p *Proxy) checkMatchingTargetsForRequest(r *http.Request) map[string]*Targ
 	for _, m := range matchInfo {
 		headerMatches := [][]string{}
 		queryMatches := [][]string{}
-		if m.target.MatchAny != nil {
-			headerMatches = append(headerMatches, m.target.MatchAny.Headers...)
-			queryMatches = append(queryMatches, m.target.MatchAny.Query...)
+		pt := m.target.GetProxyTarget()
+		if pt.MatchAny != nil {
+			headerMatches = append(headerMatches, pt.MatchAny.Headers...)
+			queryMatches = append(queryMatches, pt.MatchAny.Query...)
 		}
-		if m.target.MatchAll != nil {
-			headerMatches = append(headerMatches, m.target.MatchAll.Headers...)
-			queryMatches = append(queryMatches, m.target.MatchAll.Query...)
+		if pt.MatchAll != nil {
+			headerMatches = append(headerMatches, pt.MatchAll.Headers...)
+			queryMatches = append(queryMatches, pt.MatchAll.Query...)
 		}
 		if len(headerMatches) > 0 {
 			if headerValuesMap == nil {
@@ -736,15 +738,16 @@ func (p *Proxy) checkMatchingTargetsForRequest(r *http.Request) map[string]*Targ
 	}
 	targetsToBeRemoved := []string{}
 	for _, m := range matchInfo {
-		if m.target.MatchAll != nil {
-			if len(m.target.MatchAll.Headers) != len(m.Headers) ||
-				len(m.target.MatchAll.Query) != len(m.Query) {
-				targetsToBeRemoved = append(targetsToBeRemoved, m.target.Name)
+		pt := m.target.GetProxyTarget()
+		if pt.MatchAll != nil {
+			if len(pt.MatchAll.Headers) != len(m.Headers) ||
+				len(pt.MatchAll.Query) != len(m.Query) {
+				targetsToBeRemoved = append(targetsToBeRemoved, pt.Name)
 			}
-		} else if m.target.MatchAny != nil {
-			if len(m.target.MatchAny.Headers)+len(m.target.MatchAny.Query) > 0 &&
+		} else if pt.MatchAny != nil {
+			if len(pt.MatchAny.Headers)+len(pt.MatchAny.Query) > 0 &&
 				len(m.Headers)+len(m.Query) == 0 {
-				targetsToBeRemoved = append(targetsToBeRemoved, m.target.Name)
+				targetsToBeRemoved = append(targetsToBeRemoved, pt.Name)
 			}
 		}
 	}

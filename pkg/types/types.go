@@ -44,7 +44,6 @@ type Funcs struct {
 	GetListenerID             func(int) string
 	GetListenerLabel          func(*http.Request) string
 	GetListenerLabelForPort   func(int) string
-	GetHostLabelForPort       func(int) string
 	CloseConnectionsForPort   func(int)
 	StoreEventInCurrentLocker func(interface{})
 }

@@ -112,10 +112,10 @@ func wsEchoHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func Echo(w http.ResponseWriter, r *http.Request) {
-	util.WriteJsonPayload(w, GetEchoResponse(w, r))
+	util.WriteJsonPayload(w, GetEchoResponseForRequest(w, r))
 }
 
-func GetEchoResponse(w http.ResponseWriter, r *http.Request) map[string]interface{} {
+func GetEchoResponseForRequest(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 	return GetEchoResponseFromRS(util.GetRequestStore(r))
 }
 
@@ -123,20 +123,9 @@ func GetEchoResponseFromRS(rs *util.RequestStore) map[string]interface{} {
 	if rs.ListenerLabel == "" {
 		rs.ListenerLabel = global.Funcs.GetListenerLabelForPort(rs.RequestPortNum)
 	}
-	response := map[string]interface{}{
-		"Remote-Address":      rs.DownstreamAddr,
-		"Request-Host":        rs.RequestHost,
-		"Request-URI":         rs.RequestURI,
-		"Request-Method":      rs.RequestMethod,
-		"Request-Protcol":     rs.RequestProtcol,
-		"Request-Query":       rs.RequestQuery,
-		"Request-PayloadSize": rs.RequestPayloadSize,
-		HeaderGotoHost:        global.Self.HostLabel,
-		HeaderGotoListener:    global.Funcs.GetListenerLabelForPort(rs.RequestPortNum),
-		HeaderGotoPort:        rs.RequestPortNum,
-		HeaderViaGoto:         rs.ListenerLabel,
-		"Request-Headers":     rs.RequestHeaders,
-	}
+	response := GetEchoResponse(rs.ListenerLabel, rs.DownstreamAddr, rs.RequestHost, rs.RequestURI, rs.RequestMethod, rs.RequestProtocol,
+		rs.RequestQuery, rs.RequestPortNum, rs.RequestPayloadSize, 0, rs.RequestHeaders)
+
 	if rs.IsTunnelRequest {
 		response[HeaderGotoTargetURL] = rs.RequestHeaders[HeaderGotoTargetURL]
 		response[HeaderGotoTunnelHost] = rs.RequestHeaders[HeaderGotoTunnelHost]
@@ -149,6 +138,26 @@ func GetEchoResponseWithAddendum(rs *util.RequestStore, addendum map[string]any)
 	response := GetEchoResponseFromRS(rs)
 	for k, v := range addendum {
 		response[k] = v
+	}
+	return response
+}
+
+func GetEchoResponse(listenerLabel, downstreamAddr, requestHost, requestURI, requestMethod, requestProto, requestQuery string,
+	requestPortNum, requestPayloadSize, responsePayloadSize int, requestHeaders map[string][]string) map[string]interface{} {
+	response := map[string]interface{}{
+		"Remote-Address":       downstreamAddr,
+		"Request-Host":         requestHost,
+		"Request-URI":          requestURI,
+		"Request-Method":       requestMethod,
+		"Request-Protocol":     requestProto,
+		"Request-Query":        requestQuery,
+		"Request-PayloadSize":  requestPayloadSize,
+		"Response-PayloadSize": responsePayloadSize,
+		HeaderGotoHost:         global.Self.HostLabel,
+		HeaderGotoListener:     listenerLabel,
+		HeaderGotoPort:         requestPortNum,
+		HeaderViaGoto:          listenerLabel,
+		"Request-Headers":      requestHeaders,
 	}
 	return response
 }

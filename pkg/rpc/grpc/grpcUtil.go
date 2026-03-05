@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/global"
-	"goto/pkg/server/listeners"
 	"goto/pkg/util"
 	"net"
 
@@ -167,14 +166,13 @@ func LogRequest(ctx context.Context, port int, service, method, authority string
 	if !global.Flags.EnableServerLogs {
 		return
 	}
-	hostLabel := listeners.GetHostLabelForPort(port)
 	listenerLabel := global.Funcs.GetListenerLabelForPort(port)
 	remoteAddr := ""
 	if p, ok := peer.FromContext(ctx); ok {
 		remoteAddr = p.Addr.String()
 	}
 	msg := fmt.Sprintf("[%s]@[%s]: Protocol: [GRPC] Service [%s] Method [%s] RemoteAddr [%s], Request{ Host: [%s], Count [%d], Content Length [%d]",
-		listenerLabel, hostLabel, service, method, remoteAddr, authority, requestCount, requestBodyLength)
+		listenerLabel, global.Self.HostLabel, service, method, remoteAddr, authority, requestCount, requestBodyLength)
 	if global.Flags.LogRequestHeaders {
 		msg += fmt.Sprintf(", Request Headers: [%+v]", util.ToJSONText(requestHeaders))
 	}

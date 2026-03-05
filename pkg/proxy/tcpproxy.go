@@ -149,10 +149,11 @@ func (p *TCPProxy) getMatchingTCPTarget(sni string) *TargetMatchInfo {
 
 func (p *TCPProxy) proxyTCPOpaque(downConn net.Conn, startTime time.Time) {
 	if m := p.getMatchingTCPTarget(""); m != nil {
-		p.Tracker.IncrementMatchCounts(m.target.Name, "")
-		st := p.Tracker.GetOrAddTargetSessionTracker(m.target.Name, downConn.RemoteAddr().String())
+		pt := m.target.GetProxyTarget()
+		p.Tracker.IncrementMatchCounts(pt.Name, "")
+		st := p.Tracker.GetOrAddTargetSessionTracker(pt.Name, downConn.RemoteAddr().String())
 		st.Downstream.StartTime = startTime
-		p.proxyPipe(downConn, m.target, nil)
+		p.proxyPipe(downConn, pt, nil)
 	} else {
 		p.Tracker.IncrementRejectCount("")
 		log.Printf("TCP Proxy[%d]: No matching target found for downstream client [%s]\n", p.Port, downConn.RemoteAddr().String())
@@ -167,14 +168,15 @@ func (p *TCPProxy) proxyTCPWithSNI(downConn net.Conn, startTime time.Time) {
 		log.Printf("TCP Proxy[%d]: Read downstream SNI = [%s]\n", p.Port, sni)
 	}
 	if m := p.getMatchingTCPTarget(sni); m != nil {
-		st := p.Tracker.GetOrAddTargetSessionTracker(m.target.Name, downConn.RemoteAddr().String())
+		pt := m.target.GetProxyTarget()
+		st := p.Tracker.GetOrAddTargetSessionTracker(pt.Name, downConn.RemoteAddr().String())
 		st.SNI = sni
 		st.Downstream.StartTime = startTime
 		st.Downstream.FirstByteInAt = startTime
 		st.Downstream.TotalBytesRead = buff.Len()
 		st.Downstream.TotalReads = 1
-		p.Tracker.IncrementMatchCounts(m.target.Name, sni)
-		p.proxyPipe(downConn, m.target, buff.Bytes())
+		p.Tracker.IncrementMatchCounts(pt.Name, sni)
+		p.proxyPipe(downConn, pt, buff.Bytes())
 	} else {
 		p.Tracker.IncrementRejectCount(sni)
 		log.Printf("TCP Proxy[%d]: No matching target found for SNI [%s] from downstream [%s]\n", p.Port, sni, downConn.RemoteAddr().String())

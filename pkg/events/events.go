@@ -113,7 +113,7 @@ func newRequestEvent(title, summary string, data interface{}, at time.Time, r *h
 }
 
 func newPortEvent(title, summary string, data interface{}, at time.Time, port int) *Event {
-	return newEvent(title, summary, data, at, global.Self.Name, global.Funcs.GetHostLabelForPort(port))
+	return newEvent(title, summary, data, at, global.Self.Name, global.Self.HostLabel)
 }
 
 func SendRequestEvent(title, data string, r *http.Request) time.Time {

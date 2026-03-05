@@ -696,7 +696,7 @@ func (tcp *TCPConnectionHandler) sendMessage(message, whatFor string) {
 }
 
 func (tcp *TCPConnectionHandler) sendMessageWithDeadline(message, whatFor string, useConnDeadline bool) {
-	message = fmt.Sprintf("[%s]%s", global.Funcs.GetHostLabelForPort(tcp.Port), message)
+	message = fmt.Sprintf("[%s]%s", global.Self.HostLabel, message)
 	if tcp.sendDataToClientWithDeadline([]byte(message), whatFor, useConnDeadline) {
 		log.Printf("[Listener: %s][Request: %d][%s]: Sent {%s} on port [%d]",
 			tcp.ListenerID, tcp.requestID, whatFor, message, tcp.Port)

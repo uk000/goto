@@ -88,7 +88,7 @@ type TargetMatchInfo struct {
 	Query   [][]string
 	URI     string
 	SNI     string
-	target  *ProxyTarget
+	target  Target
 }
 
 func newProxy(port int) *Proxy {

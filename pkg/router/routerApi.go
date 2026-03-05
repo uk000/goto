@@ -21,6 +21,7 @@ import (
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -32,7 +33,9 @@ var (
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	routingRouter := util.PathRouter(r, "/routing")
 	util.AddRoute(routingRouter, "/add", addRoute, "POST")
+	util.AddRoute(routingRouter, "/clear/all", clearRoutes, "POST")
 	util.AddRoute(routingRouter, "/clear", clearRoutes, "POST")
+	util.AddRoute(routingRouter, "/all", getRoutes, "GET")
 	util.AddRoute(routingRouter, "", getRoutes, "GET")
 }
 
@@ -54,9 +57,14 @@ func addRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearRoutes(w http.ResponseWriter, r *http.Request) {
+	all := strings.Contains(r.RequestURI, "all")
 	port := util.GetRequestOrListenerPortNum(r)
-	pr := GetPortRouter(port)
-	pr.Clear()
+	if all {
+		Init()
+	} else {
+		pr := GetPortRouter(port)
+		pr.Clear()
+	}
 	msg := fmt.Sprintf("Routes cleared on port [%d]", port)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
@@ -64,8 +72,16 @@ func clearRoutes(w http.ResponseWriter, r *http.Request) {
 
 func getRoutes(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	pr := GetPortRouter(port)
-	util.WriteJsonPayload(w, pr)
-	msg := fmt.Sprintf("Routes reported on port [%d]", port)
+	all := strings.Contains(r.RequestURI, "all")
+	var data any
+	msg := ""
+	if all {
+		data = PortRouters
+		msg = "All Routes reported"
+	} else {
+		data = GetPortRouter(port)
+		msg = fmt.Sprintf("Routes reported for port [%d]", port)
+	}
+	util.WriteJsonPayload(w, data)
 	util.AddLogMessage(msg, r)
 }

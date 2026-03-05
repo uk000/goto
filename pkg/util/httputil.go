@@ -391,7 +391,7 @@ func ToLowerHeadersValues(headers map[string][]string) map[string]string {
 func ToLowerHeader(headers map[string]string) map[string]string {
 	newHeaders := map[string]string{}
 	for h, v := range headers {
-		newHeaders[strings.ToLower(h)] = strings.ToLower(v)
+		newHeaders[strings.ToLower(h)] = v
 	}
 	return newHeaders
 }

@@ -121,7 +121,6 @@ func Init() {
 	global.Funcs.GetListenerID = GetListenerID
 	global.Funcs.GetListenerLabel = GetListenerLabel
 	global.Funcs.GetListenerLabelForPort = GetListenerLabelForPort
-	global.Funcs.GetHostLabelForPort = GetHostLabelForPort
 
 	if DefaultLabel == "" {
 		DefaultLabel = global.Self.HostLabel
@@ -316,7 +315,7 @@ func AddInitialListeners(portList []string) {
 				DefaultListener.Port = port
 				DefaultListener.Protocol = "http"
 				DefaultListener.assignProtocol()
-				DefaultListener.Label = util.BuildListenerLabel(l.Port)
+				DefaultListener.Label = util.BuildListenerLabel(port)
 				DefaultListener.HostLabel = global.Self.HostLabel
 			} else {
 				protocol := ""
@@ -653,13 +652,9 @@ func addOrUpdateListener(l *Listener) (int, string) {
 	msg := ""
 	errorCode := 0
 	if l.Label == "" {
-		if global.Self.GivenName {
-			l.Label = global.Self.Name
-		} else {
-			l.Label = util.BuildListenerLabel(l.Port)
-		}
+		l.Label = util.BuildListenerLabel(l.Port)
 	}
-	l.HostLabel = global.BuildHostLabel(l.Port)
+	l.HostLabel = global.BuildHostLabel()
 	l.Protocol = strings.ToLower(l.Protocol)
 	if l.Port <= 0 || l.Port > 65535 {
 		msg = fmt.Sprintf("[Invalid port number: %d]", l.Port)
@@ -826,18 +821,6 @@ func GetListenerLabelForPort(port int) string {
 		}
 	}
 	return util.BuildListenerLabel(port)
-}
-
-func GetHostLabelForPort(port int) string {
-	listenersLock.RLock()
-	l := listeners[port]
-	listenersLock.RUnlock()
-	if l != nil {
-		return l.HostLabel
-	} else if port == global.Self.ServerPort {
-		return global.Self.HostLabel
-	}
-	return global.BuildHostLabel(port)
 }
 
 func SetListenerLabel(r *http.Request) string {
