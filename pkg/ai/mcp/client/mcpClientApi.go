@@ -36,13 +36,13 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	mcpapiRouter := util.PathRouter(r, "/mcpapi/client")
+	mcpapiRouter := middleware.RootPath("/mcpapi/client")
 
 	util.AddRoute(mcpapiRouter, "/{name}?/details", getDetails, "GET")
 
-	util.AddRouteMultiQ(mcpapiRouter, "/list/all", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
-	util.AddRouteMultiQ(mcpapiRouter, "/list/tools", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
-	util.AddRouteMultiQ(mcpapiRouter, "/list/tools/names", listTools, []string{"url", "sse", "authority"}, "POST", "GET")
+	util.AddRouteWithMultiQ(mcpapiRouter, "/list/all", listTools, [][]string{{"url"}, {"sse", "authority"}}, "POST", "GET")
+	util.AddRouteWithMultiQ(mcpapiRouter, "/list/tools", listTools, [][]string{{"url"}, {"sse", "authority"}}, "POST", "GET")
+	util.AddRouteWithMultiQ(mcpapiRouter, "/list/tools/names", listTools, [][]string{{"url"}, {"sse", "authority"}}, "POST", "GET")
 
 	util.AddRoute(mcpapiRouter, "/call", callTool, "POST")
 

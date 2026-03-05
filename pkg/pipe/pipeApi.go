@@ -31,7 +31,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	pipeRouter := util.PathRouter(r, "/pipes")
+	pipeRouter := middleware.RootPath("/pipes")
 
 	util.AddRoute(pipeRouter, "", getPipelines, "GET")
 	util.AddRoute(pipeRouter, "/clear", clearPipeline, "POST")

@@ -60,7 +60,7 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 
 func (rf *RequestFilter) SetRoutes(filterType string, r *mux.Router) {
 	rf.filterType = filterType
-	filterRouter := util.PathRouter(r, "/"+filterType)
+	filterRouter := middleware.RootPath("/" + filterType)
 	util.AddRouteQ(filterRouter, "/add", rf.addFilterHeaderOrURI, "uri", "PUT", "POST")
 	util.AddRoute(filterRouter, "/add/header/{header}={value}", rf.addFilterHeaderOrURI, "PUT", "POST")
 	util.AddRoute(filterRouter, "/add/header/{header}", rf.addFilterHeaderOrURI, "PUT", "POST")

@@ -78,7 +78,7 @@ var (
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	rootRouter = root
-	triggerRouter := util.PathRouter(r, "/triggers")
+	triggerRouter := middleware.RootPath("/triggers")
 	util.AddRoute(triggerRouter, "/add", addTrigger, "POST")
 	util.AddRoute(triggerRouter, "/{trigger}/remove", removeTrigger, "PUT", "POST")
 	util.AddRoute(triggerRouter, "/{trigger}/enable", enableOrDisableTrigger, "PUT", "POST")

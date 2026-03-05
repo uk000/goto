@@ -48,7 +48,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	timeoutRouter := util.PathRouter(r, "/timeout")
+	timeoutRouter := middleware.RootPath("/timeout")
 	util.AddRoute(timeoutRouter, "/track/headers/{headers}", trackHeaders, "PUT", "POST")
 	util.AddRoute(timeoutRouter, "/track/all", trackAll, "PUT", "POST")
 	util.AddRoute(timeoutRouter, "/track/clear", clearTimeoutTracking, "POST")

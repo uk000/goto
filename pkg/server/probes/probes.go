@@ -52,7 +52,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	probeRouter := util.PathRouter(r, "/probes")
+	probeRouter := middleware.RootPath("/probes")
 	util.AddRouteQ(probeRouter, "/{type}/set", setProbe, "uri", "PUT", "POST")
 	util.AddRoute(probeRouter, "/{type}/set/status={status}", setProbeStatus, "PUT", "POST")
 	util.AddRoute(probeRouter, "/counts/clear", clearProbeCounts, "POST")

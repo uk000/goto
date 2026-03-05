@@ -15,7 +15,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	memoryRouter := util.PathRouter(r, "/memory")
+	memoryRouter := middleware.RootPath("/memory")
 
 	util.AddRoute(memoryRouter, "/contexts/add/{context}", addContext, "POST")
 	util.AddRoute(memoryRouter, "/context/{context}/add/{key}={value}", addItem, "POST")

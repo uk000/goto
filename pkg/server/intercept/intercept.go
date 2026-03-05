@@ -185,6 +185,7 @@ func (rw *InterceptResponseWriter) Proceed() {
 			rw.StatusCode = 200
 			rw.rs.StatusCode = rw.StatusCode
 		}
+		rw.rs.ReportTime(rw.ResponseWriter)
 		rw.ResponseWriter.WriteHeader(rw.StatusCode)
 		if _, err := rw.ResponseWriter.Write(rw.Data); err == http.ErrHijacked {
 			rw.Hijacked = true

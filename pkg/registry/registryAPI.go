@@ -38,7 +38,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	registryRouter := r.PathPrefix("/registry").Subrouter()
+	registryRouter := middleware.RootPath("/registry")
 	peersRouter := registryRouter.PathPrefix("/peers").Subrouter()
 	addLockerMaintenanceRoutes(registryRouter, peersRouter)
 	addLockerStoreRoutes(registryRouter, peersRouter)
@@ -107,7 +107,7 @@ func addPeerTrackingRoutes(peersRouter *mux.Router) {
 	util.AddRoute(peersRouter, "/track/headers", getPeersTrackingHeaders, "GET")
 	util.AddRoute(peersRouter, "/track/time/clear", clearPeersTrackingTimeBuckets, "POST", "PUT")
 	util.AddRoute(peersRouter, "/track/time/{buckets}", addPeersTrackingTimeBuckets, "POST", "PUT")
-	util.AddRoute(peersRouter, "/track/headers", getPeersTrackingTimeBuckets, "GET")
+	util.AddRoute(peersRouter, "/track/time", getPeersTrackingTimeBuckets, "GET")
 }
 
 func addPeerProbesRoutes(peersRouter *mux.Router) {

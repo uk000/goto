@@ -312,11 +312,11 @@ func getStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	metricsRouter := r.PathPrefix("/metrics").Subrouter()
+	metricsRouter := middleware.RootPath("/metrics")
 	util.AddRoute(metricsRouter, "", promhttp.HandlerFor(promMetrics.registry, promhttp.HandlerOpts{}).ServeHTTP, "GET")
 	util.AddRoute(metricsRouter, "/go", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}).ServeHTTP, "GET")
 	util.AddRoute(metricsRouter, "/clear", clearMetrics, "POST")
-	statsRouter := r.PathPrefix("/stats").Subrouter()
+	statsRouter := middleware.RootPath("/stats")
 	util.AddRoute(statsRouter, "/clear", clearStats, "POST")
 	util.AddRoute(statsRouter, "", getStats, "GET")
 }

@@ -31,7 +31,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	tlsRouter := r.PathPrefix("/tls").Subrouter()
+	tlsRouter := middleware.RootPath("/tls")
 	util.AddRoute(tlsRouter, "/cacert/add", addCACert, "PUT", "POST")
 	util.AddRoute(tlsRouter, "/cacert/remove", removeCACert, "PUT", "POST")
 	util.AddRouteQ(tlsRouter, "/workdir/set", setWorkDir, "dir", "POST", "PUT")

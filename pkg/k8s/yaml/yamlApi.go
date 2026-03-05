@@ -33,7 +33,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	k8sYamlRouter := util.PathRouter(r, "/k8s/yaml")
+	k8sYamlRouter := middleware.RootPath("/k8s/yaml")
 
 	util.AddRoute(k8sYamlRouter, "/store/{yamlName}", apiStoreYaml, "POST")
 

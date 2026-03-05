@@ -32,7 +32,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	scriptRouter := util.PathRouter(r, "/scripts")
+	scriptRouter := middleware.RootPath("/scripts")
 	util.AddRoute(scriptRouter, "/add/{name}", addScript, "POST", "PUT")
 	util.AddRoute(scriptRouter, "/store/{name}", addScript, "POST", "PUT")
 	util.AddRoute(scriptRouter, "/remove/all", removeScript, "POST")

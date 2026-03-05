@@ -39,7 +39,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	a2aRouter := util.PathRouter(r, "/a2a")
+	a2aRouter := middleware.RootPath("/a2a")
 	util.AddRoute(a2aRouter, "/agents", getAgents, "GET")
 	util.AddRoute(a2aRouter, "/agents/{agent}", getAgents, "GET")
 	util.AddRoute(a2aRouter, "/agents/{agent}/delegates", getAgentDelegates, "GET")
@@ -62,7 +62,7 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(a2aRouter, "/status/clear", clearStatus, "POST")
 	util.AddRoute(a2aRouter, "/statuses", getStatuses, "GET")
 
-	agentRouter := util.PathRouter(r, "/agent")
+	agentRouter := middleware.RootPath("/agent")
 	util.AddRoute(agentRouter, "/{agent}", serveAgent, "GET", "POST", "DELETE")
 }
 

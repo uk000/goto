@@ -40,7 +40,7 @@ var (
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	rootRouter = root
 	matchRouter = rootRouter.NewRoute().Subrouter()
-	payloadRouter := util.PathRouter(r, "/payload")
+	payloadRouter := middleware.RootPath("/payload")
 	util.AddRouteQO(payloadRouter, "/set/{grpc}?/stream/count={count}/delay={delay}", setResponsePayload, "uri", "POST")
 	util.AddRouteQO(payloadRouter, "/set/{grpc}?/stream/count={count}/delay={delay}/header/{header}", setResponsePayload, "uri", "POST")
 	util.AddRoute(payloadRouter, "/set/{grpc}?/default/binary/{size}", setResponsePayload, "POST")
@@ -57,13 +57,14 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRouteQ(payloadRouter, "/{grpc}?/transform", setPayloadTransform, "uri", "POST")
 	util.AddRoute(payloadRouter, "/clear", clearResponsePayload, "POST")
 	util.AddRoute(payloadRouter, "", getResponsePayload, "GET")
+	util.AddRoute(payloadRouter, "/{size}", respondWithPayload, "GET", "PUT", "POST")
 
-	util.AddRoute(root, "/payload/{size}", respondWithPayload, "GET", "PUT", "POST")
-	util.AddRoute(root, "/stream/payload={payloadSize}/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
-	util.AddRoute(root, "/stream/chunksize={chunkSize}/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
-	util.AddRoute(root, "/stream/chunksize={chunk}/count={count}/delay={delay}", streamResponse, "GET", "PUT", "POST")
-	util.AddRoute(root, "/stream/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
-	util.AddRoute(root, "/stream/count={count}/delay={delay}", streamResponse, "GET", "PUT", "POST")
+	streamRouter := middleware.RootPath("/stream")
+	util.AddRoute(streamRouter, "/payload={payloadSize}/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
+	util.AddRoute(streamRouter, "/chunksize={chunkSize}/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
+	util.AddRoute(streamRouter, "/chunksize={chunk}/count={count}/delay={delay}", streamResponse, "GET", "PUT", "POST")
+	util.AddRoute(streamRouter, "/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
+	util.AddRoute(streamRouter, "/count={count}/delay={delay}", streamResponse, "GET", "PUT", "POST")
 }
 
 func setResponsePayload(w http.ResponseWriter, r *http.Request) {

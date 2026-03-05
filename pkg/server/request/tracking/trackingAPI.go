@@ -35,21 +35,20 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	headerTrackingRouter := util.PathRouter(r, "/?headers?/track/?headers?")
+	trackRouter := middleware.RootPath("/track")
+	headerTrackingRouter := util.PathRouter(trackRouter, "/headers")
 	util.AddRoute(headerTrackingRouter, "/clear", clearHeaders, "POST")
-	util.AddRoute(headerTrackingRouter, "/add/{headers}", addHeaders, "POST")
 	util.AddRoute(headerTrackingRouter, "/remove/{headers}", removeHeaders, "POST")
 	util.AddRoute(headerTrackingRouter, "/counts/clear/{headers}", clearHeaderCounts, "POST")
 	util.AddRoute(headerTrackingRouter, "/counts/clear", clearHeaderCounts, "POST")
 	util.AddRoute(headerTrackingRouter, "/counts", getCounts, "GET")
+	util.AddRoute(headerTrackingRouter, "/add/{headers}", addHeaders, "POST")
+	util.AddRoute(headerTrackingRouter, "/{headers}", trackHeaders, "POST")
 	util.AddRoute(headerTrackingRouter, "", getHeaders, "GET")
 
-	trackRouter := util.PathRouter(r, "/track")
 	util.AddRouteQ(trackRouter, "", trackURI, "uri", "POST")
 	util.AddRouteQ(trackRouter, "/headers/{headers}", trackURIAndHeaders, "uri", "POST")
-	util.AddRoute(trackRouter, "/headers/{headers}", trackHeaders, "POST")
 	util.AddRouteQ(trackRouter, "/{header}={value}", trackURIAndHeaderValue, "uri", "POST")
-	util.AddRoute(trackRouter, "/headers/clear", removeHeaders, "POST")
 
 	util.AddRoute(trackRouter, "/counts", getCounts, "GET")
 

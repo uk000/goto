@@ -160,7 +160,7 @@ func NewMCPServer(p *MCPServerPayload) *MCPServer {
 		ID:          fmt.Sprintf("[%s][%s][%s][%s]", p.Name, global.Self.PodName, global.Self.Namespace, global.Self.Cluster),
 		Description: p.Description,
 		Enabled:     p.Enabled,
-		Host:        global.Funcs.GetHostLabelForPort(p.Port),
+		Host:        global.Self.HostLabel,
 		Port:        p.Port,
 		Stateless:   p.Stateless,
 		URI:         p.URI,

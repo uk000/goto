@@ -1,0 +1,2933 @@
+{
+  "/a2a": {
+    "/a2a/agent": [
+      {
+        "/a2a/agent/{agent}/payload": "[POST]"
+      }
+    ],
+    "/a2a/agents": [
+      {
+        "/a2a/agents": "[GET]"
+      },
+      {
+        "/a2a/agents/{agent}": "[GET]"
+      },
+      {
+        "/a2a/agents/{agent}/delegates": "[GET]"
+      },
+      {
+        "/a2a/agents/{agent}/delegates/tools": "[GET]"
+      },
+      {
+        "/a2a/agents/{agent}/delegates/tools/{delegate}": "[GET]"
+      },
+      {
+        "/a2a/agents/{agent}/delegates/agents": "[GET]"
+      },
+      {
+        "/a2a/agents/{agent}/delegates/agents/{delegate}": "[GET]"
+      },
+      {
+        "/a2a/agents/add": "[POST]"
+      },
+      {
+        "/a2a/agents/clear": "[POST]"
+      }
+    ],
+    "/a2a/client": [
+      {
+        "/a2a/client/agent/card?url={url}": "[GET]"
+      },
+      {
+        "/a2a/client/agent/card?url={url}\u0026authority={authority}": "[GET]"
+      },
+      {
+        "/a2a/client/agent/{agent}/call": "[POST]"
+      },
+      {
+        "/a2a/client/call": "[POST]"
+      },
+      {
+        "/a2a/client/push": "[POST]"
+      }
+    ],
+    "/a2a/servers": [
+      {
+        "/a2a/servers": "[GET]"
+      },
+      {
+        "/a2a/servers/clear": "[POST]"
+      }
+    ],
+    "/a2a/status": [
+      {
+        "/a2a/status/set/{status}?uri={uri}": "[POST]"
+      },
+      {
+        "/a2a/status/set/{status}": "[POST]"
+      },
+      {
+        "/a2a/status/set/{status}/header/{header}={value}?uri={uri}": "[POST]"
+      },
+      {
+        "/a2a/status/set/{status}/header/{header}={value}": "[POST]"
+      },
+      {
+        "/a2a/status/set/{status}/header/{header}?uri={uri}": "[POST]"
+      },
+      {
+        "/a2a/status/set/{status}/header/{header}": "[POST]"
+      },
+      {
+        "/a2a/status/set/{status}/header/not/{header}?uri={uri}": "[POST]"
+      },
+      {
+        "/a2a/status/set/{status}/header/not/{header}": "[POST]"
+      },
+      {
+        "/a2a/status/configure": "[POST]"
+      },
+      {
+        "/a2a/status/clear": "[POST]"
+      }
+    ],
+    "/a2a/statuses": [
+      {
+        "/a2a/statuses": "[GET]"
+      }
+    ]
+  },
+  "/agent": {
+    "/agent/{agent}": [
+      {
+        "/agent/{agent}": "[GET POST DELETE]"
+      }
+    ]
+  },
+  "/bypass": {
+    "/bypass": [
+      {
+        "/bypass": "[GET]"
+      }
+    ],
+    "/bypass/add": [
+      {
+        "/bypass/add?uri={uri}": "[PUT POST]"
+      },
+      {
+        "/bypass/add/header/{header}={value}": "[PUT POST]"
+      },
+      {
+        "/bypass/add/header/{header}": "[PUT POST]"
+      }
+    ],
+    "/bypass/clear": [
+      {
+        "/bypass/clear": "[PUT POST]"
+      }
+    ],
+    "/bypass/count": [
+      {
+        "/bypass/count": "[GET]"
+      }
+    ],
+    "/bypass/remove": [
+      {
+        "/bypass/remove/header/{header}={value}": "[PUT POST]"
+      },
+      {
+        "/bypass/remove/header/{header}": "[PUT POST]"
+      },
+      {
+        "/bypass/remove?uri={uri}": "[PUT POST]"
+      }
+    ],
+    "/bypass/set": [
+      {
+        "/bypass/set/status={status}": "[PUT POST]"
+      }
+    ]
+  },
+  "/client": {
+    "/client/results": [
+      {
+        "/client/results/all/{enable}": "[POST PUT]"
+      },
+      {
+        "/client/results/invocations/{enable}": "[POST PUT]"
+      },
+      {
+        "/client/results": "[GET]"
+      },
+      {
+        "/client/results/invocations": "[GET]"
+      },
+      {
+        "/client/results/clear": "[POST]"
+      }
+    ],
+    "/client/targets": [
+      {
+        "/client/targets/add": "[POST]"
+      },
+      {
+        "/client/targets/{targets}/remove": "[POST]"
+      },
+      {
+        "/client/targets/{targets}/invoke": "[POST]"
+      },
+      {
+        "/client/targets/invoke/all": "[POST]"
+      },
+      {
+        "/client/targets/{targets}/stop": "[POST]"
+      },
+      {
+        "/client/targets/stop/all": "[POST]"
+      },
+      {
+        "/client/targets/clear": "[POST]"
+      },
+      {
+        "/client/targets/active": "[GET]"
+      },
+      {
+        "/client/targets/{target}": "[GET]"
+      },
+      {
+        "/client/targets": "[GET]"
+      },
+      {
+        "/client/targets/{target}/": "[GET]"
+      },
+      {
+        "/client/targets/": "[GET]"
+      }
+    ],
+    "/client/track": [
+      {
+        "/client/track/headers/clear": "[POST]"
+      },
+      {
+        "/client/track/headers/{headers}": "[POST PUT]"
+      },
+      {
+        "/client/track/headers": "[GET]"
+      },
+      {
+        "/client/track/time/clear": "[POST]"
+      },
+      {
+        "/client/track/time/{buckets}": "[POST PUT]"
+      },
+      {
+        "/client/track/time": "[GET]"
+      }
+    ]
+  },
+  "/delay": {
+    "/delay": [
+      {
+        "/delay": "[GET]"
+      }
+    ],
+    "/delay/clear": [
+      {
+        "/delay/clear": "[POST PUT]"
+      }
+    ],
+    "/delay/set": [
+      {
+        "/delay/set/{delay}": "[POST PUT]"
+      }
+    ],
+    "/delay/{delay}": [
+      {
+        "/delay/{delay}": "[GET PUT POST]"
+      }
+    ]
+  },
+  "/events": {
+    "/events": [
+      {
+        "/events?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/events": "[GET]"
+      }
+    ],
+    "/events/clear": [
+      {
+        "/events/clear": "[POST]"
+      }
+    ],
+    "/events/flush": [
+      {
+        "/events/flush": "[POST]"
+      }
+    ],
+    "/events/search": [
+      {
+        "/events/search/{text}?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/events/search/{text}": "[GET]"
+      }
+    ]
+  },
+  "/goto": {
+    "/goto/version": [
+      {
+        "/goto/version": "[GET]"
+      }
+    ],
+    "/goto/{k:routes|apis}": [
+      {
+        "/goto/{k:routes|apis}/level={level}": "[GET]"
+      },
+      {
+        "/goto/{k:routes|apis}?q={q}": "[GET]"
+      },
+      {
+        "/goto/{k:routes|apis}?q={q}\u0026url={url}": "[GET]"
+      },
+      {
+        "/goto/{k:routes|apis}": "[GET]"
+      }
+    ]
+  },
+  "/grpc": {
+    "/grpc/call": [
+      {
+        "/grpc/call/{endpoint}/{service}/{method}": "[POST]"
+      }
+    ],
+    "/grpc/protos": [
+      {
+        "/grpc/protos/store/{name}?path={path}": "[POST PUT]"
+      },
+      {
+        "/grpc/protos/store/{name}": "[POST PUT]"
+      },
+      {
+        "/grpc/protos/add/{name}?path={path}": "[POST PUT]"
+      },
+      {
+        "/grpc/protos/add/{name}": "[POST PUT]"
+      },
+      {
+        "/grpc/protos/remove/{name}": "[POST PUT]"
+      },
+      {
+        "/grpc/protos/clear": "[POST]"
+      },
+      {
+        "/grpc/protos/{proto}/list/services": "[GET]"
+      },
+      {
+        "/grpc/protos/{proto}/list/{service}/methods": "[GET]"
+      },
+      {
+        "/grpc/protos": "[GET]"
+      }
+    ]
+  },
+  "/headers": {
+    "/headers": [
+      {
+        "/headers": "[GET]"
+      }
+    ],
+    "/headers/add": [
+      {
+        "/headers/add/{header}={value}": "[PUT POST]"
+      }
+    ],
+    "/headers/clear": [
+      {
+        "/headers/clear": "[PUT POST]"
+      }
+    ],
+    "/headers/remove": [
+      {
+        "/headers/remove/{header}": "[PUT POST]"
+      }
+    ]
+  },
+  "/hooks": {
+    "/hooks": [
+      {
+        "/hooks": "[GET]"
+      }
+    ]
+  },
+  "/ignore": {
+    "/ignore": [
+      {
+        "/ignore": "[GET]"
+      }
+    ],
+    "/ignore/add": [
+      {
+        "/ignore/add?uri={uri}": "[PUT POST]"
+      },
+      {
+        "/ignore/add/header/{header}={value}": "[PUT POST]"
+      },
+      {
+        "/ignore/add/header/{header}": "[PUT POST]"
+      }
+    ],
+    "/ignore/clear": [
+      {
+        "/ignore/clear": "[PUT POST]"
+      }
+    ],
+    "/ignore/count": [
+      {
+        "/ignore/count": "[GET]"
+      }
+    ],
+    "/ignore/remove": [
+      {
+        "/ignore/remove/header/{header}={value}": "[PUT POST]"
+      },
+      {
+        "/ignore/remove/header/{header}": "[PUT POST]"
+      },
+      {
+        "/ignore/remove?uri={uri}": "[PUT POST]"
+      }
+    ],
+    "/ignore/set": [
+      {
+        "/ignore/set/status={status}": "[PUT POST]"
+      }
+    ]
+  },
+  "/jobs": {
+    "/jobs": [
+      {
+        "/jobs": "[GET]"
+      }
+    ],
+    "/jobs/add": [
+      {
+        "/jobs/add": "[POST PUT]"
+      },
+      {
+        "/jobs/add/script/{name}": "[POST PUT]"
+      }
+    ],
+    "/jobs/clear": [
+      {
+        "/jobs/clear": "[POST]"
+      }
+    ],
+    "/jobs/results": [
+      {
+        "/jobs/results": "[GET]"
+      },
+      {
+        "/jobs/results/clear": "[POST]"
+      }
+    ],
+    "/jobs/run": [
+      {
+        "/jobs/run/all": "[POST]"
+      },
+      {
+        "/jobs/run/{jobs}": "[POST]"
+      }
+    ],
+    "/jobs/scripts": [
+      {
+        "/jobs/scripts": "[GET]"
+      }
+    ],
+    "/jobs/stop": [
+      {
+        "/jobs/stop/all": "[POST]"
+      }
+    ],
+    "/jobs/store": [
+      {
+        "/jobs/store/file/{name}?path={path}": "[POST PUT]"
+      },
+      {
+        "/jobs/store/file/{name}": "[POST PUT]"
+      }
+    ],
+    "/jobs/update": [
+      {
+        "/jobs/update": "[POST PUT]"
+      }
+    ],
+    "/jobs/{jobs}": [
+      {
+        "/jobs/{jobs}/remove": "[POST]"
+      },
+      {
+        "/jobs/{jobs}/run": "[POST]"
+      },
+      {
+        "/jobs/{jobs}/stop": "[POST]"
+      }
+    ],
+    "/jobs/{job}": [
+      {
+        "/jobs/{job}/results": "[GET]"
+      }
+    ]
+  },
+  "/jsonrpc": {
+    "/jsonrpc/services": [
+      {
+        "/jsonrpc/services/add/{service}?fromGRPC={fromGRPC}": "[POST]"
+      },
+      {
+        "/jsonrpc/services/add/{service}": "[POST]"
+      },
+      {
+        "/jsonrpc/services/remove/{service}": "[POST]"
+      },
+      {
+        "/jsonrpc/services/{service}/remove": "[POST]"
+      },
+      {
+        "/jsonrpc/services/clear": "[POST]"
+      }
+    ]
+  },
+  "/k8s": {
+    "/k8s/clear": [
+      {
+        "/k8s/clear": "[POST]"
+      }
+    ],
+    "/k8s/config": [
+      {
+        "/k8s/config/{name}/{url}/{cadata}": "[POST]"
+      }
+    ],
+    "/k8s/context": [
+      {
+        "/k8s/context/{name}": "[POST]"
+      }
+    ],
+    "/k8s/resources": [
+      {
+        "/k8s/resources/{kind}?jq={jq}\u0026jp={jp}": "[GET]"
+      },
+      {
+        "/k8s/resources/{kind}": "[GET]"
+      },
+      {
+        "/k8s/resources/{kind}/{name}": "[GET]"
+      },
+      {
+        "/k8s/resources/{kind}/{namespace}/all": "[GET]"
+      },
+      {
+        "/k8s/resources/{kind}/{namespace}/{name}": "[GET]"
+      }
+    ],
+    "/k8s/yaml": [
+      {
+        "/k8s/yaml/store/{yamlName}": "[POST]"
+      },
+      {
+        "/k8s/yaml/{a:apply|delete}/{yamlName}": "[POST]"
+      },
+      {
+        "/k8s/yaml/{a:apply|delete}/{yamlName}/to?ns={ns}": "[POST]"
+      },
+      {
+        "/k8s/yaml/{a:apply|delete}/{yamlName}/{namespace}": "[POST]"
+      },
+      {
+        "/k8s/yaml/{a:apply|delete}/{yamlName}/{namespace}/{kind}": "[POST]"
+      },
+      {
+        "/k8s/yaml/{a:apply|delete}/{yamlName}/{namespace}/{kind}/{name}": "[POST]"
+      },
+      {
+        "/k8s/yaml": "[GET]"
+      },
+      {
+        "/k8s/yaml/{yamlName}": "[GET]"
+      },
+      {
+        "/k8s/yaml/{yamlName}/{namespace}": "[GET]"
+      },
+      {
+        "/k8s/yaml/{yamlName}/{namespace}/{kind}": "[GET]"
+      },
+      {
+        "/k8s/yaml/clear": "[POST]"
+      },
+      {
+        "/k8s/yaml/clear/{yamlName}": "[POST]"
+      },
+      {
+        "/k8s/yaml/clear/{yamlName}/{namespace}": "[POST]"
+      }
+    ]
+  },
+  "/log": {
+    "/log": [
+      {
+        "/log": "[GET]"
+      }
+    ],
+    "/log/admin": [
+      {
+        "/log/admin/{enable}": "[POST PUT]"
+      }
+    ],
+    "/log/client": [
+      {
+        "/log/client/{enable}": "[POST PUT]"
+      }
+    ],
+    "/log/health": [
+      {
+        "/log/health/{enable}": "[POST PUT]"
+      }
+    ],
+    "/log/invocation": [
+      {
+        "/log/invocation/{enable}": "[POST PUT]"
+      },
+      {
+        "/log/invocation/response/{enable}": "[POST PUT]"
+      }
+    ],
+    "/log/metrics": [
+      {
+        "/log/metrics/{enable}": "[POST PUT]"
+      }
+    ],
+    "/log/probe": [
+      {
+        "/log/probe/{enable}": "[POST PUT]"
+      }
+    ],
+    "/log/registry": [
+      {
+        "/log/registry/{enable}": "[POST PUT]"
+      },
+      {
+        "/log/registry/locker/{enable}": "[POST PUT]"
+      },
+      {
+        "/log/registry/events/{enable}": "[POST PUT]"
+      },
+      {
+        "/log/registry/reminder/{enable}": "[POST PUT]"
+      }
+    ],
+    "/log/request": [
+      {
+        "/log/request/headers/{enable}": "[POST PUT]"
+      },
+      {
+        "/log/request/minibody/{enable}": "[POST PUT]"
+      },
+      {
+        "/log/request/body/{enable}": "[POST PUT]"
+      },
+      {
+        "/log/request/headers/ignore/{header}": "[POST PUT]"
+      }
+    ],
+    "/log/response": [
+      {
+        "/log/response/headers/{enable}": "[POST PUT]"
+      },
+      {
+        "/log/response/minibody/{enable}": "[POST PUT]"
+      },
+      {
+        "/log/response/body/{enable}": "[POST PUT]"
+      }
+    ],
+    "/log/server": [
+      {
+        "/log/server/{enable}": "[POST PUT]"
+      }
+    ]
+  },
+  "/mcpapi": {
+    "/mcpapi/client": [
+      {
+        "/mcpapi/client/{name}/details": "[GET]"
+      },
+      {
+        "/mcpapi/client/details": "[GET]"
+      },
+      {
+        "/mcpapi/client/{name}/details/": "[GET]"
+      },
+      {
+        "/mcpapi/client/details/": "[GET]"
+      },
+      {
+        "/mcpapi/client/list/all?url={url}": "[POST GET]"
+      },
+      {
+        "/mcpapi/client/list/all?url={url}\u0026sse={sse}\u0026authority={authority}": "[POST GET]"
+      },
+      {
+        "/mcpapi/client/list/tools?url={url}": "[POST GET]"
+      },
+      {
+        "/mcpapi/client/list/tools?url={url}\u0026sse={sse}\u0026authority={authority}": "[POST GET]"
+      },
+      {
+        "/mcpapi/client/list/tools/names?url={url}": "[POST GET]"
+      },
+      {
+        "/mcpapi/client/list/tools/names?url={url}\u0026sse={sse}\u0026authority={authority}": "[POST GET]"
+      },
+      {
+        "/mcpapi/client/call": "[POST]"
+      },
+      {
+        "/mcpapi/client/{name}/payload/{kind:sample|elicit}": "[POST]"
+      },
+      {
+        "/mcpapi/client/payload/{kind:sample|elicit}": "[POST]"
+      },
+      {
+        "/mcpapi/client/{name}/payload/{kind:sample|elicit}/": "[POST]"
+      },
+      {
+        "/mcpapi/client/payload/{kind:sample|elicit}/": "[POST]"
+      },
+      {
+        "/mcpapi/client/{name}/payload/roots": "[POST]"
+      },
+      {
+        "/mcpapi/client/payload/roots": "[POST]"
+      },
+      {
+        "/mcpapi/client/{name}/payload/roots/": "[POST]"
+      },
+      {
+        "/mcpapi/client/payload/roots/": "[POST]"
+      }
+    ],
+    "/mcpapi/proxy": [
+      {
+        "/mcpapi/proxy?endpoint={endpoint}": "[POST]"
+      },
+      {
+        "/mcpapi/proxy?endpoint={endpoint}\u0026sni={sni}\u0026headers={headers}": "[POST]"
+      },
+      {
+        "/mcpapi/proxy/{tool}?endpoint={endpoint}": "[POST]"
+      },
+      {
+        "/mcpapi/proxy/{tool}?endpoint={endpoint}\u0026to={to}": "[POST]"
+      },
+      {
+        "/mcpapi/proxy/{tool}?endpoint={endpoint}\u0026to={to}\u0026sni={sni}\u0026headers={headers}": "[POST]"
+      }
+    ],
+    "/mcpapi/servers": [
+      {
+        "/mcpapi/servers/add": "[POST]"
+      },
+      {
+        "/mcpapi/servers": "[GET]"
+      },
+      {
+        "/mcpapi/servers/all": "[GET]"
+      },
+      {
+        "/mcpapi/servers/names": "[GET]"
+      },
+      {
+        "/mcpapi/servers/start": "[POST]"
+      },
+      {
+        "/mcpapi/servers/stop": "[POST]"
+      },
+      {
+        "/mcpapi/servers/clear/all": "[POST]"
+      },
+      {
+        "/mcpapi/servers/clear": "[POST]"
+      }
+    ],
+    "/mcpapi/status": [
+      {
+        "/mcpapi/status/set/{status}?uri={uri}": "[POST]"
+      },
+      {
+        "/mcpapi/status/set/{status}": "[POST]"
+      },
+      {
+        "/mcpapi/status/set/{status}/header/{header}={value}?uri={uri}": "[POST]"
+      },
+      {
+        "/mcpapi/status/set/{status}/header/{header}={value}": "[POST]"
+      },
+      {
+        "/mcpapi/status/set/{status}/header/{header}?uri={uri}": "[POST]"
+      },
+      {
+        "/mcpapi/status/set/{status}/header/{header}": "[POST]"
+      },
+      {
+        "/mcpapi/status/set/{status}/header/not/{header}?uri={uri}": "[POST]"
+      },
+      {
+        "/mcpapi/status/set/{status}/header/not/{header}": "[POST]"
+      },
+      {
+        "/mcpapi/status/configure": "[POST]"
+      },
+      {
+        "/mcpapi/status/clear": "[POST]"
+      }
+    ],
+    "/mcpapi/statuses": [
+      {
+        "/mcpapi/statuses": "[GET]"
+      }
+    ],
+    "/mcpapi/{q:servers|all}": [
+      {
+        "/mcpapi/{q:servers|all}/{kind:tools|prompts|resources|templates}": "[GET]"
+      }
+    ],
+    "/mcpapi/{s:servers|server}": [
+      {
+        "/mcpapi/{s:servers|server}/{server}": "[GET]"
+      },
+      {
+        "/mcpapi/{s:servers|server}": "[GET]"
+      },
+      {
+        "/mcpapi/{s:servers|server}/{server}/": "[GET]"
+      },
+      {
+        "/mcpapi/{s:servers|server}/": "[GET]"
+      },
+      {
+        "/mcpapi/{s:servers|server}/{server}/route?uri={uri}": "[POST]"
+      },
+      {
+        "/mcpapi/{s:servers|server}/{server}/start": "[POST]"
+      },
+      {
+        "/mcpapi/{s:servers|server}/{server}/stop": "[POST]"
+      },
+      {
+        "/mcpapi/{s:servers|server}/{server}/payload/completion?type={type}": "[POST]"
+      },
+      {
+        "/mcpapi/{s:servers|server}/{server}/payload/completion/delay={delay}?type={type}": "[POST]"
+      },
+      {
+        "/mcpapi/{s:servers|server}/{server}/{kind:tools|prompts|resources|templates}": "[GET]"
+      },
+      {
+        "/mcpapi/{s:servers|server}/{server}/{kind:tools|prompts|resources|templates}/{name}": "[GET]"
+      },
+      {
+        "/mcpapi/{s:servers|server}/{server}/{kind:tools|prompts|resources|templates}/add": "[POST]"
+      },
+      {
+        "/mcpapi/{s:servers|server}/{server}/{t:tools|tool}/{tool}/call": "[POST]"
+      },
+      {
+        "/mcpapi/{s:servers|server}/{server}/payload/{kind:tools|prompts|resources|templates}/{name}": "[POST]"
+      },
+      {
+        "/mcpapi/{s:servers|server}/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}": "[POST]"
+      },
+      {
+        "/mcpapi/{s:servers|server}/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}/delay={delay}": "[POST]"
+      },
+      {
+        "/mcpapi/{s:servers|server}/{server}/clear": "[POST]"
+      }
+    ]
+  },
+  "/memory": {
+    "/memory/context": [
+      {
+        "/memory/context/{context}/add/{key}={value}": "[POST]"
+      },
+      {
+        "/memory/context/{ctxkey}/from/header/{header}": "[POST]"
+      },
+      {
+        "/memory/context/{ctxkey}/from/uri?uri={uri}": "[POST]"
+      },
+      {
+        "/memory/context/{ctxkey}/memory/from/header/{header}": "[POST]"
+      },
+      {
+        "/memory/context/{ctxkey}/memory/from/query/{query}": "[POST]"
+      },
+      {
+        "/memory/context/{ctxkey}/memory/from/body/regex/{key}={regex}": "[POST]"
+      },
+      {
+        "/memory/context/{ctxkey}/memory/from/body/paths/{paths}": "[POST]"
+      },
+      {
+        "/memory/context/{ctxkey}/memory/from/body/transform": "[POST]"
+      },
+      {
+        "/memory/context/{context}/memory": "[GET]"
+      },
+      {
+        "/memory/context/{context}/memory/get/{key}": "[GET]"
+      },
+      {
+        "/memory/context/{ctxkey}": "[GET]"
+      }
+    ],
+    "/memory/contexts": [
+      {
+        "/memory/contexts/add/{context}": "[POST]"
+      },
+      {
+        "/memory/contexts/memory": "[GET]"
+      },
+      {
+        "/memory/contexts": "[GET]"
+      }
+    ]
+  },
+  "/metrics": {
+    "/metrics": [
+      {
+        "/metrics": "[GET]"
+      }
+    ],
+    "/metrics/clear": [
+      {
+        "/metrics/clear": "[POST]"
+      }
+    ],
+    "/metrics/go": [
+      {
+        "/metrics/go": "[GET]"
+      }
+    ]
+  },
+  "/payload": {
+    "/payload": [
+      {
+        "/payload": "[GET]"
+      }
+    ],
+    "/payload/clear": [
+      {
+        "/payload/clear": "[POST]"
+      }
+    ],
+    "/payload/set": [
+      {
+        "/payload/set/{grpc}/stream/count={count}/delay={delay}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/stream/count={count}/delay={delay}": "[POST]"
+      },
+      {
+        "/payload/set/stream/count={count}/delay={delay}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/stream/count={count}/delay={delay}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/stream/count={count}/delay={delay}/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/stream/count={count}/delay={delay}/": "[POST]"
+      },
+      {
+        "/payload/set/stream/count={count}/delay={delay}/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/stream/count={count}/delay={delay}/": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/stream/count={count}/delay={delay}/header/{header}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/stream/count={count}/delay={delay}/header/{header}": "[POST]"
+      },
+      {
+        "/payload/set/stream/count={count}/delay={delay}/header/{header}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/stream/count={count}/delay={delay}/header/{header}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/stream/count={count}/delay={delay}/header/{header}/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/stream/count={count}/delay={delay}/header/{header}/": "[POST]"
+      },
+      {
+        "/payload/set/stream/count={count}/delay={delay}/header/{header}/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/stream/count={count}/delay={delay}/header/{header}/": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/default/binary/{size}": "[POST]"
+      },
+      {
+        "/payload/set/default/binary/{size}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/default/binary/{size}/": "[POST]"
+      },
+      {
+        "/payload/set/default/binary/{size}/": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/default/binary": "[POST]"
+      },
+      {
+        "/payload/set/default/binary": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/default/binary/": "[POST]"
+      },
+      {
+        "/payload/set/default/binary/": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/default/{size}": "[POST]"
+      },
+      {
+        "/payload/set/default/{size}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/default/{size}/": "[POST]"
+      },
+      {
+        "/payload/set/default/{size}/": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/default": "[POST]"
+      },
+      {
+        "/payload/set/default": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/default/": "[POST]"
+      },
+      {
+        "/payload/set/default/": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/uri?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/uri?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/uri/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/uri/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/header/{header}={value}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/header/{header}={value}": "[POST]"
+      },
+      {
+        "/payload/set/header/{header}={value}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/header/{header}={value}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/header/{header}={value}/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/header/{header}={value}/": "[POST]"
+      },
+      {
+        "/payload/set/header/{header}={value}/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/header/{header}={value}/": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/header/{header}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/header/{header}": "[POST]"
+      },
+      {
+        "/payload/set/header/{header}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/header/{header}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/header/{header}/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/header/{header}/": "[POST]"
+      },
+      {
+        "/payload/set/header/{header}/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/header/{header}/": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/query/{q}={value}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/query/{q}={value}": "[POST]"
+      },
+      {
+        "/payload/set/query/{q}={value}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/query/{q}={value}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/query/{q}={value}/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/query/{q}={value}/": "[POST]"
+      },
+      {
+        "/payload/set/query/{q}={value}/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/query/{q}={value}/": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/query/{q}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/query/{q}": "[POST]"
+      },
+      {
+        "/payload/set/query/{q}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/query/{q}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/query/{q}/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/query/{q}/": "[POST]"
+      },
+      {
+        "/payload/set/query/{q}/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/query/{q}/": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/body~{regexes}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/body~{regexes}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/body~{regexes}/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/body~{regexes}/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/body/paths/{paths}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/body/paths/{paths}?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/{grpc}/body/paths/{paths}/?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/set/body/paths/{paths}/?uri={uri}": "[POST]"
+      }
+    ],
+    "/payload/transform": [
+      {
+        "/payload/transform?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/transform/?uri={uri}": "[POST]"
+      }
+    ],
+    "/payload/{grpc}": [
+      {
+        "/payload/{grpc}/transform?uri={uri}": "[POST]"
+      },
+      {
+        "/payload/{grpc}/transform/?uri={uri}": "[POST]"
+      }
+    ],
+    "/payload/{size}": [
+      {
+        "/payload/{size}": "[GET PUT POST]"
+      }
+    ]
+  },
+  "/pipes": {
+    "/pipes": [
+      {
+        "/pipes": "[GET]"
+      }
+    ],
+    "/pipes/add": [
+      {
+        "/pipes/add": "[POST PUT]"
+      }
+    ],
+    "/pipes/clear": [
+      {
+        "/pipes/clear": "[POST]"
+      },
+      {
+        "/pipes/clear/{name}": "[POST PUT]"
+      }
+    ],
+    "/pipes/create": [
+      {
+        "/pipes/create/{name}": "[POST PUT]"
+      }
+    ],
+    "/pipes/remove": [
+      {
+        "/pipes/remove/{name}": "[POST PUT]"
+      }
+    ],
+    "/pipes/{name}": [
+      {
+        "/pipes/{name}/clear": "[POST PUT]"
+      },
+      {
+        "/pipes/{name}/remove": "[POST PUT]"
+      },
+      {
+        "/pipes/{name}/run": "[POST]"
+      },
+      {
+        "/pipes/{name}": "[GET]"
+      }
+    ],
+    "/pipes/{pipe}": [
+      {
+        "/pipes/{pipe}/sources/add": "[POST PUT]"
+      },
+      {
+        "/pipes/{pipe}/sources/remove/{name}": "[POST PUT]"
+      },
+      {
+        "/pipes/{pipe}/sources/add/k8s/{name}?spec={spec}": "[POST PUT]"
+      },
+      {
+        "/pipes/{pipe}/sources/add/script/{name}": "[POST PUT]"
+      }
+    ]
+  },
+  "/probes": {
+    "/probes": [
+      {
+        "/probes": "[GET]"
+      }
+    ],
+    "/probes/counts": [
+      {
+        "/probes/counts/clear": "[POST]"
+      }
+    ],
+    "/probes/{type}": [
+      {
+        "/probes/{type}/set?uri={uri}": "[PUT POST]"
+      },
+      {
+        "/probes/{type}/set/status={status}": "[PUT POST]"
+      }
+    ]
+  },
+  "/proxy": {
+    "/proxy/all": [
+      {
+        "/proxy/all/report": "[GET]"
+      },
+      {
+        "/proxy/all/report/clear": "[POST]"
+      }
+    ],
+    "/proxy/disable": [
+      {
+        "/proxy/disable": "[POST]"
+      }
+    ],
+    "/proxy/enable": [
+      {
+        "/proxy/enable": "[POST]"
+      }
+    ],
+    "/proxy/http": [
+      {
+        "/proxy/http/targets/add/{target}?url={url}": "[POST PUT]"
+      },
+      {
+        "/proxy/http/targets/add/{target}?url={url}\u0026port={port}\u0026from={from}\u0026to={to}": "[POST PUT]"
+      },
+      {
+        "/proxy/http/targets/add/{target}?url={url}\u0026port={port}\u0026from={from}\u0026to={to}\u0026proto={proto}\u0026sni={sni}": "[POST PUT]"
+      },
+      {
+        "/proxy/http/targets/{target}/route?from={from}\u0026to={to}": "[PUT POST]"
+      },
+      {
+        "/proxy/http/targets/{target}/match/header/{key}={value}": "[PUT POST]"
+      },
+      {
+        "/proxy/http/targets/{target}/match/header/{key}": "[PUT POST]"
+      },
+      {
+        "/proxy/http/targets/{target}/match/query/{key}={value}": "[PUT POST]"
+      },
+      {
+        "/proxy/http/targets/{target}/match/query/{key}": "[PUT POST]"
+      },
+      {
+        "/proxy/http/targets/{target}/headers/add/{key}={value}": "[PUT POST]"
+      },
+      {
+        "/proxy/http/targets/{target}/headers/remove/{key}": "[PUT POST]"
+      },
+      {
+        "/proxy/http/targets/{target}/query/add/{key}={value}": "[PUT POST]"
+      },
+      {
+        "/proxy/http/targets/{target}/query/remove/{key}": "[PUT POST]"
+      }
+    ],
+    "/proxy/report": [
+      {
+        "/proxy/report/http": "[GET]"
+      },
+      {
+        "/proxy/report/tcp": "[GET]"
+      },
+      {
+        "/proxy/report/grpc": "[GET]"
+      },
+      {
+        "/proxy/report": "[GET]"
+      },
+      {
+        "/proxy/report/clear": "[POST]"
+      }
+    ],
+    "/proxy/targets": [
+      {
+        "/proxy/targets/clear": "[POST]"
+      },
+      {
+        "/proxy/targets/add": "[POST PUT]"
+      },
+      {
+        "/proxy/targets/{target}/remove": "[POST]"
+      },
+      {
+        "/proxy/targets/{target}/enable": "[POST]"
+      },
+      {
+        "/proxy/targets/{target}/disable": "[POST]"
+      },
+      {
+        "/proxy/targets/{target}/delay={delay}": "[PUT POST]"
+      },
+      {
+        "/proxy/targets/{target}/delay/clear": "[POST]"
+      },
+      {
+        "/proxy/targets/{target}/drop={drop}": "[PUT POST]"
+      },
+      {
+        "/proxy/targets/{target}/drop/clear": "[POST]"
+      },
+      {
+        "/proxy/targets": "[GET]"
+      },
+      {
+        "/proxy/targets/{target}/report": "[GET]"
+      }
+    ],
+    "/proxy/tcp": [
+      {
+        "/proxy/tcp/{port}/{endpoint}?sni={sni}": "[POST]"
+      },
+      {
+        "/proxy/tcp/{port}/{endpoint}": "[POST]"
+      },
+      {
+        "/proxy/tcp/{port}/{endpoint}/retries/{retries}?sni={sni}": "[POST]"
+      },
+      {
+        "/proxy/tcp/{port}/{endpoint}/retries/{retries}": "[POST]"
+      },
+      {
+        "/proxy/tcp/targets/add/{target}?address={address}": "[POST PUT]"
+      },
+      {
+        "/proxy/tcp/targets/add/{target}?address={address}\u0026sni={sni}\u0026retries={retries}": "[POST PUT]"
+      }
+    ],
+    "/proxy/udp": [
+      {
+        "/proxy/udp/{port}/{endpoint}": "[POST]"
+      },
+      {
+        "/proxy/udp/{port}/{endpoint}/delay/{delay}": "[POST]"
+      },
+      {
+        "/proxy/udp/{port}/delay/{delay}": "[POST]"
+      }
+    ]
+  },
+  "/registry": {
+    "/registry/cloneFrom": [
+      {
+        "/registry/cloneFrom?url={url}": "[POST]"
+      }
+    ],
+    "/registry/context": [
+      {
+        "/registry/context/{context}/lockers/{label}/open": "[POST]"
+      },
+      {
+        "/registry/context/{context}/lockers/{label}/close": "[POST]"
+      },
+      {
+        "/registry/context/{context}/lockers/{label}/clear": "[POST]"
+      },
+      {
+        "/registry/context/{context}/lockers/{label}/store/{path}": "[POST]"
+      },
+      {
+        "/registry/context/{context}/lockers/{label}/get/{path}": "[GET]"
+      }
+    ],
+    "/registry/dump": [
+      {
+        "/registry/dump": "[GET]"
+      }
+    ],
+    "/registry/load": [
+      {
+        "/registry/load": "[POST]"
+      }
+    ],
+    "/registry/lockers": [
+      {
+        "/registry/lockers/{label}/open": "[POST]"
+      },
+      {
+        "/registry/lockers/{label}/close": "[POST]"
+      },
+      {
+        "/registry/lockers/{label}/clear": "[POST]"
+      },
+      {
+        "/registry/lockers/close": "[POST]"
+      },
+      {
+        "/registry/lockers/clear": "[POST]"
+      },
+      {
+        "/registry/lockers/{label}/store/{path}": "[POST]"
+      },
+      {
+        "/registry/lockers/{label}/remove/{path}": "[POST]"
+      },
+      {
+        "/registry/lockers?data={data}\u0026events={events}\u0026peers={peers}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/lockers": "[GET]"
+      },
+      {
+        "/registry/lockers/all": "[GET]"
+      },
+      {
+        "/registry/lockers/{label}?data={data}\u0026events={events}\u0026peers={peers}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/lockers/{label}": "[GET]"
+      },
+      {
+        "/registry/lockers/{label}/data?data={data}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/lockers/data?data={data}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/lockers/{label}/data/?data={data}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/lockers/data/?data={data}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/lockers/{label}/data": "[GET]"
+      },
+      {
+        "/registry/lockers/data": "[GET]"
+      },
+      {
+        "/registry/lockers/{label}/data/": "[GET]"
+      },
+      {
+        "/registry/lockers/data/": "[GET]"
+      },
+      {
+        "/registry/lockers/{label}/get/{path}?data={data}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/lockers/{label}/get/{path}": "[GET]"
+      },
+      {
+        "/registry/lockers/labels": "[GET]"
+      },
+      {
+        "/registry/lockers/{label}/data/keys": "[GET]"
+      },
+      {
+        "/registry/lockers/data/keys": "[GET]"
+      },
+      {
+        "/registry/lockers/{label}/data/keys/": "[GET]"
+      },
+      {
+        "/registry/lockers/data/keys/": "[GET]"
+      },
+      {
+        "/registry/lockers/{label}/data/paths": "[GET]"
+      },
+      {
+        "/registry/lockers/data/paths": "[GET]"
+      },
+      {
+        "/registry/lockers/{label}/data/paths/": "[GET]"
+      },
+      {
+        "/registry/lockers/data/paths/": "[GET]"
+      },
+      {
+        "/registry/lockers/{label}/search/{text}": "[GET]"
+      },
+      {
+        "/registry/lockers/search/{text}": "[GET]"
+      },
+      {
+        "/registry/lockers/{label}/search/{text}/": "[GET]"
+      },
+      {
+        "/registry/lockers/search/{text}/": "[GET]"
+      }
+    ],
+    "/registry/peers": [
+      {
+        "/registry/peers/{peer}/{address}/lockers/clear": "[POST]"
+      },
+      {
+        "/registry/peers/{address}/lockers/clear": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/lockers/clear": "[POST]"
+      },
+      {
+        "/registry/peers/lockers/clear": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/{address}/lockers/clear/": "[POST]"
+      },
+      {
+        "/registry/peers/{address}/lockers/clear/": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/lockers/clear/": "[POST]"
+      },
+      {
+        "/registry/peers/lockers/clear/": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/{address}/locker/store/{path}": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/locker/store/{path}": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/{address}/locker/store/{path}/": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/locker/store/{path}/": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/{address}/locker/remove/{path}": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/locker/remove/{path}": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/{address}/locker/remove/{path}/": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/locker/remove/{path}/": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/{address}/events/store": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/events/search/{text}?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/events/search/{text}?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/events/search/{text}/?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/events/search/{text}/?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/events/search/{text}": "[GET]"
+      },
+      {
+        "/registry/peers/events/search/{text}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/events/search/{text}/": "[GET]"
+      },
+      {
+        "/registry/peers/events/search/{text}/": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/events?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/events?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/events/?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/events/?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/events": "[GET]"
+      },
+      {
+        "/registry/peers/events": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/events/": "[GET]"
+      },
+      {
+        "/registry/peers/events/": "[GET]"
+      },
+      {
+        "/registry/peers/events/flush": "[POST]"
+      },
+      {
+        "/registry/peers/events/clear": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/{address}/locker/get/{path}?data={data}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/locker/get/{path}?data={data}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/{address}/locker/get/{path}/?data={data}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/locker/get/{path}/?data={data}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/{address}/locker/get/{path}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/locker/get/{path}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/{address}/locker/get/{path}/": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/locker/get/{path}/": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/instances/client/results/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/instances/client/results/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/instances/client/results": "[GET]"
+      },
+      {
+        "/registry/peers/instances/client/results": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/instances/client/results/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/instances/client/results/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/instances/client/results/": "[GET]"
+      },
+      {
+        "/registry/peers/instances/client/results/": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/client/results/details/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/client/results/details/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/client/results/details": "[GET]"
+      },
+      {
+        "/registry/peers/client/results/details": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/client/results/details/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/client/results/details/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/client/results/details/": "[GET]"
+      },
+      {
+        "/registry/peers/client/results/details/": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/client/results/summary/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/client/results/summary/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/client/results/summary": "[GET]"
+      },
+      {
+        "/registry/peers/client/results/summary": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/client/results/summary/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/client/results/summary/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/client/results/summary/": "[GET]"
+      },
+      {
+        "/registry/peers/client/results/summary/": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/client/results/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/client/results/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/client/results": "[GET]"
+      },
+      {
+        "/registry/peers/client/results": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/client/results/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/client/results/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/client/results/": "[GET]"
+      },
+      {
+        "/registry/peers/client/results/": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/{address}/lockers?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/{address}/lockers?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/lockers?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/{address}/lockers/?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/{address}/lockers/?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/lockers/?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/{address}/lockers": "[GET]"
+      },
+      {
+        "/registry/peers/{address}/lockers": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/lockers": "[GET]"
+      },
+      {
+        "/registry/peers/lockers": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/{address}/lockers/": "[GET]"
+      },
+      {
+        "/registry/peers/{address}/lockers/": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/lockers/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peers}/events?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/events?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peers}/events/?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/events/?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peers}/events": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/events": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peers}/events/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/events/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peers}/events/search/{text}?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/events/search/{text}?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peers}/events/search/{text}/?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/events/search/{text}/?data={data}\u0026reverse={reverse}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peers}/events/search/{text}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/events/search/{text}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peers}/events/search/{text}/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/events/search/{text}/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/instances/client/results/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/instances/client/results/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/instances/client/results": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/instances/client/results": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/instances/client/results/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/instances/client/results/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/instances/client/results/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/instances/client/results/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/client/results/details/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/client/results/details/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/client/results/details": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/client/results/details": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/client/results/details/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/client/results/details/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/client/results/details/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/client/results/details/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/client/results/summary/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/client/results/summary/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/client/results/summary": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/client/results/summary": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/client/results/summary/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/client/results/summary/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/client/results/summary/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/client/results/summary/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/client/results/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/client/results/targets={targets}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/client/results": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/client/results": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/client/results/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/client/results/targets={targets}/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/client/results/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/client/results/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/{address}?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{address}?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/{address}/?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{address}/?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/?data={data}\u0026events={events}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/{address}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{address}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/{address}/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{address}/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/{address}/get/{path}?data={data}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/get/{path}?data={data}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/{address}/get/{path}/?data={data}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/get/{path}/?data={data}\u0026level={level}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/{address}/get/{path}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/get/{path}": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/{address}/get/{path}/": "[GET]"
+      },
+      {
+        "/registry/peers/lockers/{label}/peers/{peer}/get/{path}/": "[GET]"
+      },
+      {
+        "/registry/peers/add": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/remember": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/remove/{address}": "[PUT POST]"
+      },
+      {
+        "/registry/peers/{peer}/health/{address}": "[GET]"
+      },
+      {
+        "/registry/peers/health/{address}": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/health": "[GET]"
+      },
+      {
+        "/registry/peers/health": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/health/{address}/": "[GET]"
+      },
+      {
+        "/registry/peers/health/{address}/": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/health/": "[GET]"
+      },
+      {
+        "/registry/peers/health/": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/health/cleanup": "[POST]"
+      },
+      {
+        "/registry/peers/health/cleanup": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/health/cleanup/": "[POST]"
+      },
+      {
+        "/registry/peers/health/cleanup/": "[POST]"
+      },
+      {
+        "/registry/peers/clear/epochs": "[POST]"
+      },
+      {
+        "/registry/peers/clear": "[POST]"
+      },
+      {
+        "/registry/peers/copyToLocker": "[POST]"
+      },
+      {
+        "/registry/peers": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/call?uri={uri}": "[GET POST PUT]"
+      },
+      {
+        "/registry/peers/call?uri={uri}": "[GET POST PUT]"
+      },
+      {
+        "/registry/peers/{peer}/call/?uri={uri}": "[GET POST PUT]"
+      },
+      {
+        "/registry/peers/call/?uri={uri}": "[GET POST PUT]"
+      },
+      {
+        "/registry/peers/{peer}/apis": "[GET]"
+      },
+      {
+        "/registry/peers/apis": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/apis/": "[GET]"
+      },
+      {
+        "/registry/peers/apis/": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/targets/add": "[POST]"
+      },
+      {
+        "/registry/peers/targets/add": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/targets/add/": "[POST]"
+      },
+      {
+        "/registry/peers/targets/add/": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/targets/{targets}/remove": "[PUT POST]"
+      },
+      {
+        "/registry/peers/{peer}/targets/remove/all": "[PUT POST]"
+      },
+      {
+        "/registry/peers/{peer}/targets/{targets}/invoke": "[PUT POST]"
+      },
+      {
+        "/registry/peers/{peer}/targets/invoke/all": "[PUT POST]"
+      },
+      {
+        "/registry/peers/targets/invoke/all": "[PUT POST]"
+      },
+      {
+        "/registry/peers/{peer}/targets/invoke/all/": "[PUT POST]"
+      },
+      {
+        "/registry/peers/targets/invoke/all/": "[PUT POST]"
+      },
+      {
+        "/registry/peers/{peer}/targets/{targets}/stop": "[PUT POST]"
+      },
+      {
+        "/registry/peers/{peer}/targets/stop/all": "[PUT POST]"
+      },
+      {
+        "/registry/peers/targets/stop/all": "[PUT POST]"
+      },
+      {
+        "/registry/peers/{peer}/targets/stop/all/": "[PUT POST]"
+      },
+      {
+        "/registry/peers/targets/stop/all/": "[PUT POST]"
+      },
+      {
+        "/registry/peers/{peer}/targets/clear": "[POST]"
+      },
+      {
+        "/registry/peers/targets/clear": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/targets/clear/": "[POST]"
+      },
+      {
+        "/registry/peers/targets/clear/": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/targets": "[GET]"
+      },
+      {
+        "/registry/peers/targets": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/targets/": "[GET]"
+      },
+      {
+        "/registry/peers/targets/": "[GET]"
+      },
+      {
+        "/registry/peers/client/results/all/{enable}": "[POST PUT]"
+      },
+      {
+        "/registry/peers/client/results/invocations/{enable}": "[POST PUT]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/add": "[POST PUT]"
+      },
+      {
+        "/registry/peers/jobs/add": "[POST PUT]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/add/": "[POST PUT]"
+      },
+      {
+        "/registry/peers/jobs/add/": "[POST PUT]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/add/script/{name}": "[POST PUT]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/store/file/{name}?path={path}": "[POST PUT]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/store/file/{name}": "[POST PUT]"
+      },
+      {
+        "/registry/peers/jobs/add/script/{name}": "[POST PUT]"
+      },
+      {
+        "/registry/peers/jobs/store/file/{name}?path={path}": "[POST PUT]"
+      },
+      {
+        "/registry/peers/jobs/store/file/{name}": "[POST PUT]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/{jobs}/remove": "[POST]"
+      },
+      {
+        "/registry/peers/jobs/{jobs}/remove": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/{jobs}/remove/": "[POST]"
+      },
+      {
+        "/registry/peers/jobs/{jobs}/remove/": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/{jobs}/run": "[POST]"
+      },
+      {
+        "/registry/peers/jobs/{jobs}/run": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/{jobs}/run/": "[POST]"
+      },
+      {
+        "/registry/peers/jobs/{jobs}/run/": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/run/all": "[POST]"
+      },
+      {
+        "/registry/peers/jobs/run/all": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/run/all/": "[POST]"
+      },
+      {
+        "/registry/peers/jobs/run/all/": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/{jobs}/stop": "[POST]"
+      },
+      {
+        "/registry/peers/jobs/{jobs}/stop": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/{jobs}/stop/": "[POST]"
+      },
+      {
+        "/registry/peers/jobs/{jobs}/stop/": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/stop/all": "[POST]"
+      },
+      {
+        "/registry/peers/jobs/stop/all": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/stop/all/": "[POST]"
+      },
+      {
+        "/registry/peers/jobs/stop/all/": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/clear": "[POST]"
+      },
+      {
+        "/registry/peers/jobs/clear": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/clear/": "[POST]"
+      },
+      {
+        "/registry/peers/jobs/clear/": "[POST]"
+      },
+      {
+        "/registry/peers/{peer}/jobs": "[GET]"
+      },
+      {
+        "/registry/peers/jobs": "[GET]"
+      },
+      {
+        "/registry/peers/{peer}/jobs/": "[GET]"
+      },
+      {
+        "/registry/peers/jobs/": "[GET]"
+      },
+      {
+        "/registry/peers/track/headers/clear": "[POST PUT]"
+      },
+      {
+        "/registry/peers/track/headers/{headers}": "[POST PUT]"
+      },
+      {
+        "/registry/peers/track/headers": "[GET]"
+      },
+      {
+        "/registry/peers/track/time/clear": "[POST PUT]"
+      },
+      {
+        "/registry/peers/track/time/{buckets}": "[POST PUT]"
+      },
+      {
+        "/registry/peers/track/time": "[GET]"
+      },
+      {
+        "/registry/peers/probes/{type}/set?uri={uri}": "[POST PUT]"
+      },
+      {
+        "/registry/peers/probes/{type}/set/status={status}": "[POST PUT]"
+      },
+      {
+        "/registry/peers/probes": "[GET]"
+      }
+    ]
+  },
+  "/routing": {
+    "/routing": [
+      {
+        "/routing": "[GET]"
+      }
+    ],
+    "/routing/add": [
+      {
+        "/routing/add": "[POST]"
+      }
+    ],
+    "/routing/all": [
+      {
+        "/routing/all": "[GET]"
+      }
+    ],
+    "/routing/clear": [
+      {
+        "/routing/clear/all": "[POST]"
+      },
+      {
+        "/routing/clear": "[POST]"
+      }
+    ]
+  },
+  "/scripts": {
+    "/scripts": [
+      {
+        "/scripts": "[GET]"
+      }
+    ],
+    "/scripts/add": [
+      {
+        "/scripts/add/{name}": "[POST PUT]"
+      }
+    ],
+    "/scripts/remove": [
+      {
+        "/scripts/remove/all": "[POST]"
+      },
+      {
+        "/scripts/remove/{name}": "[POST]"
+      }
+    ],
+    "/scripts/run": [
+      {
+        "/scripts/run/{name}": "[POST]"
+      }
+    ],
+    "/scripts/store": [
+      {
+        "/scripts/store/{name}": "[POST PUT]"
+      }
+    ],
+    "/scripts/{name}": [
+      {
+        "/scripts/{name}/remove": "[POST]"
+      },
+      {
+        "/scripts/{name}/run?args={args}": "[POST]"
+      },
+      {
+        "/scripts/{name}/run": "[POST]"
+      }
+    ]
+  },
+  "/server": {
+    "/server/label": [
+      {
+        "/server/label/set/{label}": "[PUT POST]"
+      },
+      {
+        "/server/label/clear": "[POST]"
+      }
+    ],
+    "/server/listeners": [
+      {
+        "/server/listeners/add": "[POST PUT]"
+      },
+      {
+        "/server/listeners/update": "[POST PUT]"
+      },
+      {
+        "/server/listeners/{port}/cert/auto/{domain}": "[PUT POST]"
+      },
+      {
+        "/server/listeners/{port}/cert/autosni": "[PUT POST]"
+      },
+      {
+        "/server/listeners/{port}/cert/add": "[PUT POST]"
+      },
+      {
+        "/server/listeners/{port}/key/add": "[PUT POST]"
+      },
+      {
+        "/server/listeners/{port}/cert/remove": "[PUT POST]"
+      },
+      {
+        "/server/listeners/{port}/cert": "[GET]"
+      },
+      {
+        "/server/listeners/{port}/key": "[GET]"
+      },
+      {
+        "/server/listeners/{port}/ca/add": "[PUT POST]"
+      },
+      {
+        "/server/listeners/{port}/ca/clear": "[PUT POST]"
+      },
+      {
+        "/server/listeners/{port}/remove": "[PUT POST]"
+      },
+      {
+        "/server/listeners/{port}/open": "[PUT POST]"
+      },
+      {
+        "/server/listeners/{port}/reopen": "[PUT POST]"
+      },
+      {
+        "/server/listeners/{port}/close": "[PUT POST]"
+      },
+      {
+        "/server/listeners/{port}": "[GET]"
+      },
+      {
+        "/server/listeners": "[GET]"
+      },
+      {
+        "/server/listeners/{port}/": "[GET]"
+      },
+      {
+        "/server/listeners/": "[GET]"
+      },
+      {
+        "/server/listeners/ports": "[GET]"
+      }
+    ],
+    "/server/tcp": [
+      {
+        "/server/tcp/{port}/configure": "[POST]"
+      },
+      {
+        "/server/tcp/{port}/timeout/set/read={duration}": "[PUT POST]"
+      },
+      {
+        "/server/tcp/{port}/timeout/set/write={duration}": "[PUT POST]"
+      },
+      {
+        "/server/tcp/{port}/timeout/set/idle={duration}": "[PUT POST]"
+      },
+      {
+        "/server/tcp/{port}/connection/set/life={duration}": "[PUT POST]"
+      },
+      {
+        "/server/tcp/{port}/echo/response/set/delay={duration}": "[PUT POST]"
+      },
+      {
+        "/server/tcp/{port}/stream/payload={payloadSize}/duration={duration}/delay={delay}": "[PUT POST]"
+      },
+      {
+        "/server/tcp/{port}/stream/chunksize={chunkSize}/duration={duration}/delay={delay}": "[PUT POST]"
+      },
+      {
+        "/server/tcp/{port}/stream/chunksize={chunkSize}/count={chunkCount}/delay={delay}": "[PUT POST]"
+      },
+      {
+        "/server/tcp/{port}/expect/payload/length={length}": "[PUT POST]"
+      },
+      {
+        "/server/tcp/{port}/expect/payload": "[PUT POST]"
+      },
+      {
+        "/server/tcp/{port}/mode/validate={enable}": "[PUT POST]"
+      },
+      {
+        "/server/tcp/{port}/mode/{mode:stream|echo|conversation|silentlife|closeatfirst}={enable}": "[PUT POST]"
+      },
+      {
+        "/server/tcp/{port}/set/payload={enable}": "[PUT POST]"
+      },
+      {
+        "/server/tcp/{port}/active": "[GET]"
+      },
+      {
+        "/server/tcp/active": "[GET]"
+      },
+      {
+        "/server/tcp/{port}/history/{mode}": "[GET]"
+      },
+      {
+        "/server/tcp/{port}/history": "[GET]"
+      },
+      {
+        "/server/tcp/history/{mode}": "[GET]"
+      },
+      {
+        "/server/tcp/history": "[GET]"
+      },
+      {
+        "/server/tcp/{port}/history/clear": "[POST]"
+      },
+      {
+        "/server/tcp/history/clear": "[POST]"
+      }
+    ],
+    "/server/udp": [
+      {
+        "/server/udp/{port}/stop/{upstream}": "[POST]"
+      },
+      {
+        "/server/udp/{port}/proxy/{upstream}": "[POST]"
+      },
+      {
+        "/server/udp/{port}/proxy/{upstream}/delay/{delay}": "[POST]"
+      },
+      {
+        "/server/udp/{port}/delay/{upstream}/{delay}": "[POST]"
+      }
+    ]
+  },
+  "/sleep": {
+    "/sleep/{delay}": [
+      {
+        "/sleep/{delay}": "[GET PUT POST]"
+      }
+    ]
+  },
+  "/stats": {
+    "/stats": [
+      {
+        "/stats": "[GET]"
+      }
+    ],
+    "/stats/clear": [
+      {
+        "/stats/clear": "[POST]"
+      }
+    ]
+  },
+  "/status": {
+    "/status": [
+      {
+        "/status": "[GET]"
+      }
+    ],
+    "/status/clear": [
+      {
+        "/status/clear": "[POST]"
+      }
+    ],
+    "/status/configure": [
+      {
+        "/status/configure": "[POST]"
+      }
+    ],
+    "/status/counts": [
+      {
+        "/status/counts/clear": "[POST]"
+      },
+      {
+        "/status/counts/{status}": "[GET]"
+      },
+      {
+        "/status/counts": "[GET]"
+      }
+    ],
+    "/status/flipflop": [
+      {
+        "/status/flipflop": "[GET]"
+      }
+    ],
+    "/status/set": [
+      {
+        "/status/set/{status}?uri={uri}": "[POST]"
+      },
+      {
+        "/status/set/{status}": "[POST]"
+      }
+    ]
+  },
+  "/stream": {
+    "/stream/chunksize={chunkSize}": [
+      {
+        "/stream/chunksize={chunkSize}/duration={duration}/delay={delay}": "[GET PUT POST]"
+      }
+    ],
+    "/stream/chunksize={chunk}": [
+      {
+        "/stream/chunksize={chunk}/count={count}/delay={delay}": "[GET PUT POST]"
+      }
+    ],
+    "/stream/count={count}": [
+      {
+        "/stream/count={count}/delay={delay}": "[GET PUT POST]"
+      }
+    ],
+    "/stream/duration={duration}": [
+      {
+        "/stream/duration={duration}/delay={delay}": "[GET PUT POST]"
+      }
+    ],
+    "/stream/payload={payloadSize}": [
+      {
+        "/stream/payload={payloadSize}/duration={duration}/delay={delay}": "[GET PUT POST]"
+      }
+    ]
+  },
+  "/timeout": {
+    "/timeout/status": [
+      {
+        "/timeout/status": "[GET]"
+      }
+    ],
+    "/timeout/track": [
+      {
+        "/timeout/track/headers/{headers}": "[PUT POST]"
+      },
+      {
+        "/timeout/track/all": "[PUT POST]"
+      },
+      {
+        "/timeout/track/clear": "[POST]"
+      }
+    ]
+  },
+  "/tls": {
+    "/tls/cacert": [
+      {
+        "/tls/cacert/add": "[PUT POST]"
+      },
+      {
+        "/tls/cacert/remove": "[PUT POST]"
+      }
+    ],
+    "/tls/workdir": [
+      {
+        "/tls/workdir/set?dir={dir}": "[POST PUT]"
+      }
+    ]
+  },
+  "/track": {
+    "/track": [
+      {
+        "/track?uri={uri}": "[POST]"
+      }
+    ],
+    "/track/counts": [
+      {
+        "/track/counts": "[GET]"
+      }
+    ],
+    "/track/headers": [
+      {
+        "/track/headers/clear": "[POST]"
+      },
+      {
+        "/track/headers/remove/{headers}": "[POST]"
+      },
+      {
+        "/track/headers/counts/clear/{headers}": "[POST]"
+      },
+      {
+        "/track/headers/counts/clear": "[POST]"
+      },
+      {
+        "/track/headers/counts": "[GET]"
+      },
+      {
+        "/track/headers/add/{headers}": "[POST]"
+      },
+      {
+        "/track/headers/{headers}": "[POST]"
+      },
+      {
+        "/track/headers": "[GET]"
+      },
+      {
+        "/track/headers/{headers}?uri={uri}": "[POST]"
+      }
+    ],
+    "/track/{header}={value}": [
+      {
+        "/track/{header}={value}?uri={uri}": "[POST]"
+      }
+    ]
+  },
+  "/triggers": {
+    "/triggers/add": [
+      {
+        "/triggers/add": "[POST]"
+      }
+    ],
+    "/triggers/clear": [
+      {
+        "/triggers/clear": "[POST]"
+      }
+    ],
+    "/triggers/{triggers}": [
+      {
+        "/triggers/{triggers}/invoke": "[POST]"
+      }
+    ],
+    "/triggers/{trigger}": [
+      {
+        "/triggers/{trigger}/remove": "[PUT POST]"
+      },
+      {
+        "/triggers/{trigger}/enable": "[PUT POST]"
+      },
+      {
+        "/triggers/{trigger}/disable": "[PUT POST]"
+      }
+    ]
+  },
+  "/tunnels": {
+    "/tunnels": [
+      {
+        "/tunnels": "[GET]"
+      }
+    ],
+    "/tunnels/active": [
+      {
+        "/tunnels/active": "[GET]"
+      }
+    ],
+    "/tunnels/add": [
+      {
+        "/tunnels/add/{endpoint}/header/{header}={value}?uri={uri}": "[POST PUT]"
+      },
+      {
+        "/tunnels/add/{endpoint}/header/{header}={value}": "[POST PUT]"
+      },
+      {
+        "/tunnels/add/{endpoint}/header/{header}?uri={uri}": "[POST PUT]"
+      },
+      {
+        "/tunnels/add/{endpoint}/header/{header}": "[POST PUT]"
+      },
+      {
+        "/tunnels/add/{endpoint}?uri={uri}": "[POST PUT]"
+      },
+      {
+        "/tunnels/add/{endpoint}": "[POST PUT]"
+      },
+      {
+        "/tunnels/add/{endpoint}/transparent": "[POST PUT]"
+      }
+    ],
+    "/tunnels/clear": [
+      {
+        "/tunnels/clear": "[POST PUT]"
+      }
+    ],
+    "/tunnels/remove": [
+      {
+        "/tunnels/remove/{endpoint}/header/{header}={value}?uri={uri}": "[POST PUT]"
+      },
+      {
+        "/tunnels/remove/{endpoint}/header/{header}={value}": "[POST PUT]"
+      },
+      {
+        "/tunnels/remove/{endpoint}/header/{header}?uri={uri}": "[POST PUT]"
+      },
+      {
+        "/tunnels/remove/{endpoint}/header/{header}": "[POST PUT]"
+      },
+      {
+        "/tunnels/remove/{endpoint}?uri={uri}": "[POST PUT]"
+      },
+      {
+        "/tunnels/remove/{endpoint}": "[POST PUT]"
+      }
+    ],
+    "/tunnels/track": [
+      {
+        "/tunnels/track/header/{headers}": "[POST PUT]"
+      },
+      {
+        "/tunnels/track/query/{params}": "[POST PUT]"
+      },
+      {
+        "/tunnels/track/clear": "[POST PUT]"
+      },
+      {
+        "/tunnels/track": "[GET]"
+      }
+    ],
+    "/tunnels/traffic": [
+      {
+        "/tunnels/traffic/capture={yn}": "[POST PUT]"
+      },
+      {
+        "/tunnels/traffic": "[GET]"
+      }
+    ]
+  },
+  "/ui": {
+    "/ui": [
+      {
+        "/ui": "[GET]"
+      }
+    ],
+    "/ui/ws": [
+      {
+        "/ui/ws": "[GET]"
+      }
+    ]
+  },
+  "/uri": {
+    "/uri": [
+      {
+        "/uri": "[GET]"
+      }
+    ],
+    "/uri/counts": [
+      {
+        "/uri/counts/enable": "[POST PUT]"
+      },
+      {
+        "/uri/counts/disable": "[POST PUT]"
+      },
+      {
+        "/uri/counts": "[GET]"
+      },
+      {
+        "/uri/counts/clear": "[POST]"
+      }
+    ],
+    "/uri/reroute": [
+      {
+        "/uri/reroute?from={from}\u0026to={to}": "[POST PUT]"
+      }
+    ],
+    "/uri/set": [
+      {
+        "/uri/set/status={status}?uri={uri}": "[POST PUT]"
+      },
+      {
+        "/uri/set/delay={delay}?uri={uri}": "[POST PUT]"
+      }
+    ]
+  },
+  "/{rpc:grpc|jsonrpc}": {
+    "/{rpc:grpc|jsonrpc}/services": [
+      {
+        "/{rpc:grpc|jsonrpc}/services": "[GET]"
+      },
+      {
+        "/{rpc:grpc|jsonrpc}/services/{service}": "[GET]"
+      },
+      {
+        "/{rpc:grpc|jsonrpc}/services/{service}/track": "[POST]"
+      },
+      {
+        "/{rpc:grpc|jsonrpc}/services/{service}/track/headers/{headers}": "[POST]"
+      },
+      {
+        "/{rpc:grpc|jsonrpc}/services/{service}/track/{header}={value}": "[POST]"
+      },
+      {
+        "/{rpc:grpc|jsonrpc}/services/{service}/tracking": "[GET]"
+      },
+      {
+        "/{rpc:grpc|jsonrpc}/services/{service}/{method}/payload/clear": "[POST]"
+      },
+      {
+        "/{rpc:grpc|jsonrpc}/services/{service}/{method}/payload": "[POST]"
+      },
+      {
+        "/{rpc:grpc|jsonrpc}/services/{service}/{method}/payload/header/{header}={value}": "[POST]"
+      },
+      {
+        "/{rpc:grpc|jsonrpc}/services/{service}/{method}/payload/header/{header}": "[POST]"
+      },
+      {
+        "/{rpc:grpc|jsonrpc}/services/{service}/{method}/payload/body~{regexes}": "[POST]"
+      },
+      {
+        "/{rpc:grpc|jsonrpc}/services/{service}/{method}/payload/body/paths/{paths}": "[POST]"
+      },
+      {
+        "/{rpc:grpc|jsonrpc}/services/{service}/{method}/payload/transform": "[POST]"
+      },
+      {
+        "/{rpc:grpc|jsonrpc}/services/{service}/{method}/payload/stream/count={count}/delay={delay}": "[POST]"
+      },
+      {
+        "/{rpc:grpc|jsonrpc}/services/{service}/{method}/payload/stream/count={count}/delay={delay}/header/{header}={value}": "[POST]"
+      },
+      {
+        "/{rpc:grpc|jsonrpc}/services/{service}/{method}/payload/stream/count={count}/delay={delay}/header/{header}": "[POST]"
+      }
+    ]
+  }
+}

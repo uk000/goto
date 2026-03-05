@@ -31,7 +31,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	protosRouter := util.PathRouter(r, "/grpc/protos")
+	protosRouter := middleware.RootPath("/grpc/protos")
 	util.AddRouteQ(protosRouter, "/store/{name}", addProto, "path", "POST", "PUT")
 	util.AddRoute(protosRouter, "/store/{name}", addProto, "POST", "PUT")
 	util.AddRouteQ(protosRouter, "/add/{name}", addProto, "path", "POST", "PUT")

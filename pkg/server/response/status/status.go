@@ -59,7 +59,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	statusRouter := util.PathRouter(r, "/status")
+	statusRouter := middleware.RootPath("/status")
 
 	util.AddRoute(statusRouter, "/configure", configureStatus, "POST")
 	util.AddRouteQO(statusRouter, "/set/{status}", setStatus, "uri", "POST")
@@ -70,13 +70,14 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(statusRouter, "/counts/{status}", getStatusCount, "GET")
 	util.AddRoute(statusRouter, "/counts", getStatusCount, "GET")
 	util.AddRoute(statusRouter, "", getStatus, "GET")
-	util.AddRoute(root, "/status/flipflop", getStatusCount, "GET")
 
-	util.AddRoute(root, "/status/{status}", status)
-	util.AddRouteQO(root, "/status={status}", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
-	util.AddRouteQO(root, "/status={status}/delay={delay}", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
-	util.AddRouteQO(root, "/status={status}/flipflop", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
-	util.AddRouteQO(root, "/status={status}/delay={delay}/flipflop", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+	util.AddRoute(statusRouter, "/flipflop", getStatusCount, "GET")
+
+	util.AddRoute(statusRouter, "/{status}", status)
+	util.AddRouteQO(statusRouter, "={status}", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+	util.AddRouteQO(statusRouter, "={status}/delay={delay}", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+	util.AddRouteQO(statusRouter, "={status}/flipflop", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
+	util.AddRouteQO(statusRouter, "={status}/delay={delay}/flipflop", status, "x-request-id", "GET", "PUT", "POST", "OPTIONS", "HEAD", "DELETE")
 }
 
 func getOrCreatePortStatus(r *http.Request) *PortStatus {

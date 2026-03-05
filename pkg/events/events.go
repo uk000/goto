@@ -65,13 +65,11 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	eventsRouter := r.PathPrefix("/events").Subrouter()
+	eventsRouter := middleware.RootPath("/events")
 	util.AddRoute(eventsRouter, "/flush", flushEvents, "POST")
 	util.AddRoute(eventsRouter, "/clear", clearEvents, "POST")
-	util.AddRouteMultiQ(eventsRouter, "/search/{text}", searchEvents, []string{"data", "reverse"}, "GET")
-	util.AddRoute(eventsRouter, "/search/{text}", searchEvents, "GET")
-	util.AddRouteMultiQ(eventsRouter, "", getEvents, []string{"data", "reverse"}, "GET")
-	util.AddRoute(eventsRouter, "", getEvents, "GET")
+	util.AddRouteWithMultiQ(eventsRouter, "/search/{text}", searchEvents, [][]string{{}, {"data", "reverse"}}, "GET")
+	util.AddRouteWithMultiQ(eventsRouter, "", getEvents, [][]string{{}, {"data", "reverse"}}, "GET")
 }
 
 func StartSender() {
@@ -113,7 +111,7 @@ func newRequestEvent(title, summary string, data interface{}, at time.Time, r *h
 }
 
 func newPortEvent(title, summary string, data interface{}, at time.Time, port int) *Event {
-	return newEvent(title, summary, data, at, global.Self.Name, global.Funcs.GetHostLabelForPort(port))
+	return newEvent(title, summary, data, at, global.Self.Name, global.Self.HostLabel)
 }
 
 func SendRequestEvent(title, data string, r *http.Request) time.Time {

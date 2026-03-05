@@ -49,7 +49,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	watchRouter := util.PathRouter(r, "/watch")
+	watchRouter := middleware.RootPath("/watch")
 	util.AddRouteQ(watchRouter, "/add/{name}", addWebhookWatcher, "url", "POST")
 	// util.AddRouteQ(watchRouter, "/{name}/filter/add", addWatchFilter, "uri", "POST")
 	// util.AddRouteMultiQ(watchRouter, "/{name}/filter/add", addWatchFilter, []string{"k", "v"}, "POST")

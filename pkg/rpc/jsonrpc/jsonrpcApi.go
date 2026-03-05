@@ -30,7 +30,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	jsonrpc := util.PathRouter(r, "/jsonrpc/services")
+	jsonrpc := middleware.RootPath("/jsonrpc/services")
 	util.AddRouteQ(jsonrpc, "/add/{service}", addService, "fromGRPC", "POST")
 	util.AddRoute(jsonrpc, "/add/{service}", addService, "POST")
 	util.AddRoute(jsonrpc, "/remove/{service}", removeService, "POST")

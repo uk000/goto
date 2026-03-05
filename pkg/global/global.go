@@ -34,7 +34,7 @@ func init() {
 	SetCluster()
 	SetPodName()
 	SetNodeName()
-	Self.HostLabel = BuildHostLabel(Self.ServerPort)
+	Self.HostLabel = BuildHostLabel()
 	Self.Address = Self.PodIP + ":" + strconv.Itoa(Self.ServerPort)
 }
 
@@ -76,12 +76,12 @@ func GetMaxMTUSize() int {
 	return m
 }
 
-func BuildHostLabel(port int) string {
+func BuildHostLabel() string {
 	hostLabel := ""
 	if Self.NodeName != "" || Self.Cluster != "" || Self.HostIP != "" {
-		hostLabel = fmt.Sprintf("%s.%s[%s:%d](%s[%s]@%s)", Self.PodName, Self.Namespace, Self.PodIP, port, Self.NodeName, Self.HostIP, Self.Cluster)
+		hostLabel = fmt.Sprintf("%s.%s[%s](%s[%s]@%s)", Self.PodName, Self.Namespace, Self.PodIP, Self.NodeName, Self.HostIP, Self.Cluster)
 	} else {
-		hostLabel = fmt.Sprintf("%s.%s[%s:%d]", Self.PodName, Self.Namespace, Self.PodIP, port)
+		hostLabel = fmt.Sprintf("%s.%s[%s]", Self.PodName, Self.Namespace, Self.PodIP)
 	}
 	return hostLabel
 }

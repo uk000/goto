@@ -37,7 +37,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	mcpapiRouter := util.PathRouter(r, "/mcpapi")
+	mcpapiRouter := middleware.RootPath("/mcpapi")
 
 	util.AddRoute(mcpapiRouter, "/servers/add", addServers, "POST")
 
@@ -52,8 +52,8 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(mcpapiRouter, "/servers/stop", stopServer, "POST")
 	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/stop", stopServer, "POST")
 
-	util.AddRouteMultiQ(mcpapiRouter, "/proxy", setupMCPProxy, []string{"endpoint", "sni", "headers"}, "POST")
-	util.AddRouteMultiQ(mcpapiRouter, "/proxy/{tool}", setupMCPProxy, []string{"endpoint", "to", "sni", "headers"}, "POST")
+	util.AddRouteWithMultiQ(mcpapiRouter, "/proxy", setupMCPProxy, [][]string{{"endpoint"}, {"sni", "headers"}}, "POST")
+	util.AddRouteWithMultiQ(mcpapiRouter, "/proxy/{tool}", setupMCPProxy, [][]string{{"endpoint"}, {"to"}, {"sni", "headers"}}, "POST")
 
 	util.AddRouteQ(mcpapiRouter, "/{s:servers|server}/{server}/payload/completion", addCompletionPayload, "type", "POST")
 	util.AddRouteQ(mcpapiRouter, "/{s:servers|server}/{server}/payload/completion/delay={delay}", addCompletionPayload, "type", "POST")

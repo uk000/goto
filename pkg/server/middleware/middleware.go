@@ -32,6 +32,7 @@ var (
 	MiddlewareGRPCChainHead http.Handler
 	MiddlewareChainHead     http.Handler
 	middlewareRouter        *mux.Router
+	RootRouters             = map[string]*mux.Router{}
 )
 
 type MiddlewareFunc func(http.ResponseWriter, *http.Request)
@@ -128,4 +129,9 @@ func InvokeMiddlewareChainForGRPC(ctx context.Context, port int, method, host, u
 	MiddlewareGRPCChainHead.ServeHTTP(w, r)
 	irw.Proceed()
 	return ra, wa
+}
+
+func RootPath(path string) *mux.Router {
+	RootRouters[path] = mux.NewRouter().SkipClean(true).PathPrefix(path).Subrouter()
+	return RootRouters[path]
 }

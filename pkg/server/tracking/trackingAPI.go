@@ -17,7 +17,7 @@ var (
 )
 
 func setRoutes(r, parent, root *mux.Router) {
-	serverRouter := util.PathRouter(r, "/server")
+	serverRouter := middleware.RootPath("/server")
 	configureRoutes(util.PathRouter(serverRouter, "/request"))
 	configureRoutes(util.PathRouter(serverRouter, "/response"))
 }
@@ -29,9 +29,9 @@ func configureRoutes(r *mux.Router) {
 
 func configureTrackingRoutes(r *mux.Router) {
 	router := util.PathRouter(r, "/uri")
-	util.AddRouteMultiQ(router, "", trackURIAndHeaders, []string{"key", "uri"}, "POST")
-	util.AddRouteMultiQ(router, "/headers/{headers}", trackURIAndHeaders, []string{"key", "uri"}, "POST")
-	util.AddRouteMultiQ(router, "/headers/{header}={value}", trackURIAndHeaderValue, []string{"key", "uri"}, "POST")
+	util.AddRouteWithMultiQ(router, "", trackURIAndHeaders, [][]string{{"key", "uri"}}, "POST")
+	util.AddRouteWithMultiQ(router, "/headers/{headers}", trackURIAndHeaders, [][]string{{"key", "uri"}}, "POST")
+	util.AddRouteWithMultiQ(router, "/headers/{header}={value}", trackURIAndHeaderValue, [][]string{{"key", "uri"}}, "POST")
 	hrouter := util.PathRouter(r, "/headers")
 	util.AddRouteQ(hrouter, "/add/{headers}", trackURIAndHeaders, "key", "POST")
 	util.AddRouteQ(r, "/clear", clear, "key", "POST")

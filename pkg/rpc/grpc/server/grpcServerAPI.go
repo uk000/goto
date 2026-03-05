@@ -41,7 +41,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	grpcRouter := util.PathRouter(r, "/grpc")
+	grpcRouter := middleware.RootPath("/grpc")
 	util.AddRoute(grpcRouter, "/open", openGRPCPort, "POST")
 	util.AddRoute(grpcRouter, "/services/reflect/{upstream}", loadReflectedServices, "POST")
 	util.AddRoute(grpcRouter, "/serve/{service}", serveService, "POST")

@@ -34,7 +34,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	clientRouter := r.PathPrefix("/client").Subrouter()
+	clientRouter := middleware.RootPath("/client")
 	middleware.AddRoutes(clientRouter, r, root, clientMiddlewares...)
 }
 

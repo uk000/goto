@@ -25,6 +25,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gorilla/mux"
 )
 
 type ContextKey struct{ Key string }
@@ -73,7 +75,7 @@ type RequestStore struct {
 	RequestURI              string
 	RequestQuery            string
 	RequestMethod           string
-	RequestProtcol          string
+	RequestProtocol         string
 	RequestedMCPTool        string
 	DownstreamAddr          string
 	UpstreamAddr            string
@@ -95,6 +97,7 @@ type RequestStore struct {
 	ReReader                *ReReader
 	Request                 *http.Request
 	ResponseWriter          http.ResponseWriter
+	CurrentRouter           *mux.Router
 }
 
 var (
@@ -183,7 +186,7 @@ func populateRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	rs.RequestURI = r.RequestURI
 	rs.RequestQuery = r.URL.Query().Encode()
 	rs.RequestMethod = r.Method
-	rs.RequestProtcol = r.Proto
+	rs.RequestProtocol = r.Proto
 	rs.RequestHeaders = r.Header
 	rs.IsMCP = strings.Contains(r.RequestURI, "/mcp/") || strings.HasSuffix(r.RequestURI, "/mcp") || strings.Contains(r.RequestURI, "/sse")
 	rs.IsAI = strings.Contains(r.RequestURI, "/agent/")

@@ -25,7 +25,6 @@ import (
 	"goto/pkg/server/response/payload"
 	"goto/pkg/server/response/status"
 	"goto/pkg/server/response/trigger"
-	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
 )
@@ -36,7 +35,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	middleware.AddRoutes(util.PathRouter(r, "/server/response"), r, root, responseMiddlewares...)
+	middleware.AddRoutes(middleware.RootPath("/server/response"), r, root, responseMiddlewares...)
 }
 
 func middlewareFunc(next http.Handler) http.Handler {

@@ -17,6 +17,7 @@
 package util
 
 import (
+	"bytes"
 	"encoding/json"
 )
 
@@ -31,6 +32,12 @@ type JSONArrayMarshal struct {
 type JSONMapMarshal struct {
 	Values map[string]interface{}
 }
+
+type JSONKeyValue struct {
+	Key   string
+	Value interface{}
+}
+type OrderedJSON []*JSONKeyValue
 
 func (j *JSONArrayMarshal) MarshalJSON() ([]byte, error) {
 	var data []interface{}
@@ -87,4 +94,27 @@ func (j *JSONValueMarshal) MarshalJSON() ([]byte, error) {
 
 func (j *JSONValue) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&JSONValueMarshal{Value: j.Value()})
+}
+
+func (j OrderedJSON) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	buf.WriteByte('{')
+	for i, jkv := range j {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		kb, err := json.Marshal(jkv.Key)
+		if err != nil {
+			return nil, err
+		}
+		buf.Write(kb)
+		buf.WriteByte(':')
+		vb, err := json.Marshal(jkv.Value)
+		if err != nil {
+			return nil, err
+		}
+		buf.Write(vb)
+	}
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
 }

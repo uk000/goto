@@ -61,8 +61,8 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	uriRouter := util.PathRouter(r, "/uri")
-	util.AddRouteMultiQ(uriRouter, "/reroute", setStatus, []string{"from", "to"}, "POST", "PUT")
+	uriRouter := middleware.RootPath("/uri")
+	util.AddRouteWithMultiQ(uriRouter, "/reroute", setStatus, [][]string{{"from", "to"}}, "POST", "PUT")
 	util.AddRouteQ(uriRouter, "/set/status={status}", setStatus, "uri", "POST", "PUT")
 	util.AddRouteQ(uriRouter, "/set/delay={delay}", setDelay, "uri", "POST", "PUT")
 	util.AddRoute(uriRouter, "/counts/enable", enableURICallCounts, "POST", "PUT")

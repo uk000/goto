@@ -162,7 +162,7 @@ func ProxyGRPCUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceM
 	tookNanos := end.Sub(start)
 	if err == nil {
 		respHeaders.Append(constants.HeaderGotoProxyUpstreamTook, tookNanos.String())
-		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderGotoHost, global.Funcs.GetHostLabelForPort(port), respHeaders)
+		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderGotoHost, global.Self.HostLabel, respHeaders)
 		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderGotoPort, strconv.Itoa(port), respHeaders)
 		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderViaGoto, global.Funcs.GetListenerLabelForPort(port), respHeaders)
 		respHeaders.Append(constants.HeaderViaGoto, global.Funcs.GetListenerLabelForPort(port))
@@ -212,7 +212,7 @@ func (p *GRPCProxy) createResponse(method *gotogrpc.GRPCServiceMethod, json any)
 }
 
 func (p *GRPCProxy) addTeeHeaders(respHeaders metadata.MD) metadata.MD {
-	util.AddHeaderWithPrefixL("TeeProxy-", constants.HeaderGotoHost, global.Funcs.GetHostLabelForPort(p.Port), respHeaders)
+	util.AddHeaderWithPrefixL("TeeProxy-", constants.HeaderGotoHost, global.Self.HostLabel, respHeaders)
 	util.AddHeaderWithPrefixL("TeeProxy-", constants.HeaderGotoPort, strconv.Itoa(p.Port), respHeaders)
 	util.AddHeaderWithPrefixL("TeeProxy-", constants.HeaderViaGoto, global.Funcs.GetListenerLabelForPort(p.Port), respHeaders)
 	respHeaders.Append(constants.HeaderViaGoto, global.Funcs.GetListenerLabelForPort(p.Port))

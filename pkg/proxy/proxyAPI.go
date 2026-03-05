@@ -36,12 +36,12 @@ var (
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	rootRouter = root
-	proxyRouter := util.PathRouter(r, "/proxy")
-	proxyTargetsRouter := util.PathRouter(r, "/proxy/targets")
-	httpTargetsRouter := util.PathRouter(r, "/proxy/http/targets")
-	tcpTargetsRouter := util.PathRouter(r, "/proxy/tcp/targets")
-	tcpProxyRouter := util.PathRouter(r, "/proxy/tcp")
-	udpProxyRouter := util.PathRouter(r, "/proxy/udp")
+	proxyRouter := middleware.RootPath("/proxy")
+	proxyTargetsRouter := middleware.RootPath("/proxy/targets")
+	httpTargetsRouter := middleware.RootPath("/proxy/http/targets")
+	tcpTargetsRouter := middleware.RootPath("/proxy/tcp/targets")
+	tcpProxyRouter := middleware.RootPath("/proxy/tcp")
+	udpProxyRouter := middleware.RootPath("/proxy/udp")
 
 	util.AddRoute(proxyTargetsRouter, "/clear", clearProxyTargets, "POST")
 	util.AddRoute(proxyTargetsRouter, "/add", addProxyTarget, "POST", "PUT")
@@ -49,8 +49,8 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(proxyTargetsRouter, "/{target}/enable", enableProxyTarget, "POST")
 	util.AddRoute(proxyTargetsRouter, "/{target}/disable", disableProxyTarget, "POST")
 
-	util.AddRouteMultiQ(httpTargetsRouter, "/add/{target}", addHTTPProxyTarget, []string{"url", "proto", "from", "to", "sni"}, "POST", "PUT")
-	util.AddRouteMultiQ(httpTargetsRouter, "/{target}/route", addTargetRoute, []string{"from", "to"}, "PUT", "POST")
+	util.AddRouteWithMultiQ(httpTargetsRouter, "/add/{target}", addHTTPProxyTarget, [][]string{{"url"}, {"port", "from", "to"}, {"proto", "sni"}}, "POST", "PUT")
+	util.AddRouteWithMultiQ(httpTargetsRouter, "/{target}/route", addTargetRoute, [][]string{{"from", "to"}}, "PUT", "POST")
 	util.AddRoute(httpTargetsRouter, "/{target}/match/header/{key}={value}", addHeaderMatch, "PUT", "POST")
 	util.AddRoute(httpTargetsRouter, "/{target}/match/header/{key}", addHeaderMatch, "PUT", "POST")
 	util.AddRoute(httpTargetsRouter, "/{target}/match/query/{key}={value}", addQueryMatch, "PUT", "POST")
@@ -60,7 +60,7 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(httpTargetsRouter, "/{target}/query/add/{key}={value}", addTargetQuery, "PUT", "POST")
 	util.AddRoute(httpTargetsRouter, "/{target}/query/remove/{key}", removeTargetQuery, "PUT", "POST")
 
-	util.AddRouteMultiQ(tcpTargetsRouter, "/add/{target}", addTCPProxyTarget, []string{"address", "sni", "retries"}, "POST", "PUT")
+	util.AddRouteWithMultiQ(tcpTargetsRouter, "/add/{target}", addTCPProxyTarget, [][]string{{"address"}, {"sni", "retries"}}, "POST", "PUT")
 	util.AddRouteQO(tcpProxyRouter, "/{port}/{endpoint}", proxyTCPOrUDP, "sni", "POST")
 	util.AddRouteQO(tcpProxyRouter, "/{port}/{endpoint}/retries/{retries}", proxyTCPOrUDP, "sni", "POST")
 

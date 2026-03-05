@@ -40,12 +40,13 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	delayRouter := util.PathRouter(r, "/delay")
+	delayRouter := middleware.RootPath("/delay")
 	util.AddRoute(delayRouter, "/set/{delay}", setDelay, "POST", "PUT")
 	util.AddRoute(delayRouter, "/clear", setDelay, "POST", "PUT")
 	util.AddRoute(delayRouter, "", getDelay, "GET")
-	util.AddRoute(root, "/delay/{delay}", delay, "GET", "PUT", "POST")
-	util.AddRoute(root, "/sleep/{delay}", delay, "GET", "PUT", "POST")
+	util.AddRoute(delayRouter, "/{delay}", delay, "GET", "PUT", "POST")
+	sleepRouter := middleware.RootPath("/sleep")
+	util.AddRoute(sleepRouter, "/{delay}", delay, "GET", "PUT", "POST")
 }
 
 func setDelay(w http.ResponseWriter, r *http.Request) {

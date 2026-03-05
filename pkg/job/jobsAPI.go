@@ -33,7 +33,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	jobsRouter := r.PathPrefix("/jobs").Subrouter()
+	jobsRouter := middleware.RootPath("/jobs")
 	util.AddRoute(jobsRouter, "/add", addOrUpdateJob, "POST", "PUT")
 	util.AddRoute(jobsRouter, "/update", addOrUpdateJob, "POST", "PUT")
 	util.AddRoute(jobsRouter, "/add/script/{name}", storeJobScriptOrFile, "POST", "PUT")

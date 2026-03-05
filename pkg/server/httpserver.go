@@ -55,6 +55,7 @@ var (
 	httpServer              *http.Server
 	jsonRPCServer           *http.Server
 	h2s                     = &http2.Server{}
+	coreRouter              *mux.Router
 	httpHandler             http.Handler
 	h2cHandler              http.Handler
 	mcpHandler              http.Handler
@@ -69,8 +70,8 @@ var (
 
 func RunHttpServer() {
 	var err error
-	httpRouter := configureHTTPouter()
-	gRPCHandler := GRPCHandler(httpRouter)
+	configureHTTPRouter()
+	gRPCHandler := GRPCHandler(coreRouter)
 	h2cHandler = h2c.NewHandler(gRPCHandler, h2s)
 	mcpHandler = mcpserver.MCPHandler()
 	agentsHandler = a2aserver.AgentsHandler()
@@ -93,15 +94,14 @@ func RunHttpServer() {
 	WaitForHttpServer()
 }
 
-func configureHTTPouter() *mux.Router {
-	coreRouter := mux.NewRouter()
+func configureHTTPRouter() {
+	coreRouter = mux.NewRouter()
 	coreRouter.SkipClean(true)
 	RootRouter = util.CreateRouters(coreRouter)
 	middleware.LinkBaseMiddlewareChain(RootRouter)
 	interceptChainRouter := RootRouter.PathPrefix("").Subrouter()
 	interceptChainRouter.Use(intercept.IntereceptMiddleware(preIntercept(), postIntercept()))
 	middleware.LinkMiddlewareChain(interceptChainRouter)
-	return coreRouter
 }
 
 func configureAIRouter() *mux.Router {
@@ -286,23 +286,25 @@ func HTTPHandler() http.Handler {
 		routeHandler := router.WillRoute(rs.RequestPortNum, r)
 		if routeHandler != nil {
 			routeHandler.ServeHTTP(w, r)
-		} else if rs.IsAdminRequest {
-			handleHTTP(l, w, r, rs)
 		} else {
-			if rs.IsMCP || rs.IsAI {
-				aiHandler.ServeHTTP(w, r)
-			} else {
+			loadRouter(r, rs)
+			if rs.IsAdminRequest {
 				handleHTTP(l, w, r, rs)
+			} else {
+				if rs.IsMCP || rs.IsAI {
+					aiHandler.ServeHTTP(w, r)
+				} else {
+					handleHTTP(l, w, r, rs)
+				}
+				statusCodeText := strconv.Itoa(rs.StatusCode)
+				metrics.UpdateURIRequestCount(r.RequestURI, statusCodeText)
+				metrics.UpdatePortRequestCount(rs.RequestPort, r.RequestURI)
 			}
-			statusCodeText := strconv.Itoa(rs.StatusCode)
-			metrics.UpdateURIRequestCount(r.RequestURI, statusCodeText)
-			metrics.UpdatePortRequestCount(rs.RequestPort, r.RequestURI)
 		}
 		go PrintLogMessages(rs.StatusCode, 0, nil, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
 		if rs.ReReader != nil {
 			rs.ReReader.ReallyClose()
 		}
-		rs.ReportTime(w)
 	})
 }
 
@@ -335,10 +337,34 @@ func GRPCHandler(httpHandler http.Handler) http.Handler {
 		rs := util.GetRequestStore(r)
 		if rs.IsGRPC {
 			grpcserver.TheGRPCServer.Server.ServeHTTP(w, r)
+		} else if rs.CurrentRouter != nil {
+			rs.CurrentRouter.ServeHTTP(w, r)
 		} else {
 			httpHandler.ServeHTTP(w, r)
 		}
 	})
+}
+
+func loadRouter(r *http.Request, rs *util.RequestStore) {
+	portMatch := util.PortRouteRegexp.FindStringSubmatch(r.RequestURI)
+	if len(portMatch) > 1 {
+		port, _ := strconv.Atoi(portMatch[1])
+		if port > 0 {
+			rs.RequestPort = portMatch[1]
+			rs.RequestPortNum = port
+			rs.RequestPortChecked = true
+			r.RequestURI = util.PortRouteRegexp.ReplaceAllLiteralString(r.RequestURI, "")
+			r.URL.Path = util.PortRouteRegexp.ReplaceAllLiteralString(r.URL.Path, "")
+			rs.RequestURI = r.RequestURI
+		}
+	}
+	uriMatch := util.RootURIRegexp.FindStringSubmatch(r.RequestURI)
+	if len(uriMatch) > 1 {
+		rs.CurrentRouter = middleware.RootRouters[uriMatch[1]]
+	}
+	if rs.CurrentRouter == nil {
+		rs.CurrentRouter = coreRouter
+	}
 }
 
 func initRequestStore(w http.ResponseWriter, r *http.Request) (*http.Request, *util.RequestStore, *listeners.Listener, error) {

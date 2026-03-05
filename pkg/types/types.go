@@ -44,7 +44,6 @@ type Funcs struct {
 	GetListenerID             func(int) string
 	GetListenerLabel          func(*http.Request) string
 	GetListenerLabelForPort   func(int) string
-	GetHostLabelForPort       func(int) string
 	CloseConnectionsForPort   func(int)
 	StoreEventInCurrentLocker func(interface{})
 }
@@ -82,6 +81,11 @@ func (p *Pair[L, R]) LeftS() string {
 
 func (p *Pair[L, R]) RightS() string {
 	return fmt.Sprintf("%+v", p.Right)
+}
+
+func (p *Pair[L, R]) MarshalJSON() ([]byte, error) {
+	data := fmt.Sprintf("{\"%v\": \"%v\"}", p.Left, p.Right)
+	return []byte(data), nil
 }
 
 func NewTriple[F any, S any, T any](first F, second S, third T) *Triple[F, S, T] {

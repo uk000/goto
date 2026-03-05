@@ -31,7 +31,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	agentRouter := util.PathRouter(r, "/ai/agents")
+	agentRouter := middleware.RootPath("/ai/agents")
 	util.AddRoute(agentRouter, "", getAgents, "GET")
 	util.AddRoute(agentRouter, "/add", addAgents, "POST")
 	util.AddRoute(agentRouter, "/clear", clearAgents, "POST")

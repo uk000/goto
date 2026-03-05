@@ -391,7 +391,7 @@ func ToLowerHeadersValues(headers map[string][]string) map[string]string {
 func ToLowerHeader(headers map[string]string) map[string]string {
 	newHeaders := map[string]string{}
 	for h, v := range headers {
-		newHeaders[strings.ToLower(h)] = strings.ToLower(v)
+		newHeaders[strings.ToLower(h)] = v
 	}
 	return newHeaders
 }
@@ -497,10 +497,12 @@ func CheckAdminRequest(r *http.Request) bool {
 		// 	uri2 = pieces[2]
 		// }
 	}
-	return uri == "metrics" || uri == "server" || uri == "request" || uri == "response" || uri == "listeners" ||
-		uri == "label" || uri == "registry" || uri == "client" || uri == "proxy" || uri == "job" || uri == "probes" ||
-		uri == "tcp" || uri == "log" || uri == "events" || uri == "tunnels" || uri == "grpc" || uri == "jsonrpc" ||
-		uri == "k8s" || uri == "pipes" || uri == "scripts" || uri == "tls" || uri == "routing" || uri == "mcpapi" || uri == "a2a"
+	return uri == "version" || uri == "routes" || uri == "apis" || uri == "metrics" ||
+		uri == "server" || uri == "request" || uri == "response" || uri == "listeners" ||
+		uri == "label" || uri == "registry" || uri == "client" || uri == "proxy" ||
+		uri == "job" || uri == "probes" || uri == "tcp" || uri == "grpc" || uri == "jsonrpc" ||
+		uri == "log" || uri == "events" || uri == "tunnels" || uri == "pipes" || uri == "scripts" ||
+		uri == "k8s" || uri == "tls" || uri == "routing" || uri == "mcpapi" || uri == "a2a"
 }
 
 func IsMetricsRequest(r *http.Request) bool {

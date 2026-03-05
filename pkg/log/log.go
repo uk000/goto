@@ -32,7 +32,7 @@ var (
 )
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	logRouter := util.PathRouter(r, "/log")
+	logRouter := middleware.RootPath("/log")
 	util.AddRoute(logRouter, "/server/{enable}", setLogLevel, "POST", "PUT")
 	util.AddRoute(logRouter, "/admin/{enable}", setLogLevel, "POST", "PUT")
 	util.AddRoute(logRouter, "/client/{enable}", setLogLevel, "POST", "PUT")

@@ -107,7 +107,7 @@ func GetPortHooks(port int) *Hooks {
 }
 
 func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	hooksRouter := util.PathRouter(r, "/hooks")
+	hooksRouter := middleware.RootPath("/hooks")
 	util.AddRoute(hooksRouter, "", getHooks, "GET")
 }
 
