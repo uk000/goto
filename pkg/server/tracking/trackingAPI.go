@@ -16,7 +16,7 @@ var (
 	Middleware = middleware.NewMiddleware("tracking", setRoutes, nil)
 )
 
-func setRoutes(r, parent, root *mux.Router) {
+func setRoutes(r, root *mux.Router) {
 	serverRouter := middleware.RootPath("/server")
 	configureRoutes(util.PathRouter(serverRouter, "/request"))
 	configureRoutes(util.PathRouter(serverRouter, "/response"))
@@ -53,7 +53,7 @@ func trackURIAndHeaders(w http.ResponseWriter, r *http.Request) {
 		} else {
 			AddUpstreamRequestTracking(port, key, uri, headers)
 		}
-		hooks.GetPortHooks(port).AddHTTPTracking(key, uri, util.TransformHeaders(headers), false)
+		hooks.GetPortHooks(port).AddHTTPTracking(key, uri, util.ConvertHeadersArrayToMultiArray(headers), false)
 		msg = fmt.Sprintf("Port [%d] will track URI [%s] and Headers [%+v]", port, uri, headers)
 		events.SendRequestEvent("Tracking URI and Headers Added", msg, r)
 	} else {

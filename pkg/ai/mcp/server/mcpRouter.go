@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 	"goto/pkg/constants"
-	"goto/pkg/proxy"
+	mcpproxy "goto/pkg/proxy/mcp"
 	"goto/pkg/server/conn"
 	"goto/pkg/server/listeners"
 	"goto/pkg/util"
@@ -49,7 +49,7 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 	rs := util.GetRequestStore(r)
 	isMCP := l.IsJSONRPC || rs.IsMCP
 	if isMCP && !rs.IsAdminRequest {
-		if proxy.WillProxyMCP(l.Port, r) {
+		if mcpproxy.WillProxyMCP(l.Port, r) {
 			log.Printf("MCP is configured to proxy on Port [%d]. Skipping MCP processing", l.Port)
 			return
 		}

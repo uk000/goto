@@ -64,7 +64,7 @@ var (
 	lock                sync.RWMutex
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, root *mux.Router) {
 	eventsRouter := middleware.RootPath("/events")
 	util.AddRoute(eventsRouter, "/flush", flushEvents, "POST")
 	util.AddRoute(eventsRouter, "/clear", clearEvents, "POST")

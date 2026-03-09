@@ -25,17 +25,22 @@ import (
 	"goto/pkg/server/response/payload"
 	"goto/pkg/server/response/status"
 	"goto/pkg/server/response/trigger"
+	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
 )
 
 var (
 	Middleware          = middleware.NewMiddleware("response", setRoutes, middlewareFunc)
-	responseMiddlewares = []*middleware.Middleware{status.Middleware, delay.Middleware, header.Middleware, payload.Middleware, trigger.Middleware}
+	responseMiddlewares = []*middleware.Middleware{payload.Middleware, trigger.Middleware}
+	CoreMiddlewares     = []*middleware.Middleware{status.Middleware, delay.Middleware, header.Middleware}
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	middleware.AddRoutes(middleware.RootPath("/server/response"), r, root, responseMiddlewares...)
+func setRoutes(r *mux.Router, root *mux.Router) {
+	server := middleware.RootPath("/server")
+	responseRouter := util.PathRouter(server, "/response")
+	middleware.AddRoutes(responseRouter, root, CoreMiddlewares...)
+	middleware.AddRoutes(responseRouter, root, responseMiddlewares...)
 }
 
 func middlewareFunc(next http.Handler) http.Handler {

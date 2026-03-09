@@ -75,7 +75,7 @@ func (r *RPCTracker) TrackServiceMethod(port int, s RPCService, m RPCMethod, hea
 		hookHeaders = hooks.Headers{[2]string{header, value}}
 		headers = []string{header}
 	} else {
-		hookHeaders = util.TransformHeaders(headers)
+		hookHeaders = util.ConvertHeadersArrayToMultiArray(headers)
 	}
 	serviceName := s.GetName()
 	isGRPC := s.IsGRPC()

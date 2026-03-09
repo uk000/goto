@@ -37,10 +37,10 @@ var (
 	Middleware = middleware.NewMiddleware("response.payload", setRoutes, middlewareFunc)
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, root *mux.Router) {
 	rootRouter = root
 	matchRouter = rootRouter.NewRoute().Subrouter()
-	payloadRouter := middleware.RootPath("/payload")
+	payloadRouter := util.PathRouter(r, "/payload")
 	util.AddRouteQO(payloadRouter, "/set/{grpc}?/stream/count={count}/delay={delay}", setResponsePayload, "uri", "POST")
 	util.AddRouteQO(payloadRouter, "/set/{grpc}?/stream/count={count}/delay={delay}/header/{header}", setResponsePayload, "uri", "POST")
 	util.AddRoute(payloadRouter, "/set/{grpc}?/default/binary/{size}", setResponsePayload, "POST")
@@ -59,7 +59,7 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(payloadRouter, "", getResponsePayload, "GET")
 	util.AddRoute(payloadRouter, "/{size}", respondWithPayload, "GET", "PUT", "POST")
 
-	streamRouter := middleware.RootPath("/stream")
+	streamRouter := util.PathRouter(r, "/stream")
 	util.AddRoute(streamRouter, "/payload={payloadSize}/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
 	util.AddRoute(streamRouter, "/chunksize={chunkSize}/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
 	util.AddRoute(streamRouter, "/chunksize={chunk}/count={count}/delay={delay}", streamResponse, "GET", "PUT", "POST")

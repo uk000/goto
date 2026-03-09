@@ -31,6 +31,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type InvocationRequest struct {
@@ -154,15 +156,36 @@ func (ir *InvocationRequest) addOrUpdateRequestId() {
 	if ir.httpRequest == nil {
 		return
 	}
+	var requestId string
+	query := ""
+	header := ""
+	q := ir.httpRequest.URL.Query()
 	if ir.tracker.Target.SendID {
-		q := ir.httpRequest.URL.Query()
-		q.Del("x-request-id")
-		q.Add("x-request-id", ir.requestID)
-		ir.httpRequest.URL.RawQuery = q.Encode()
-		ir.url = ir.httpRequest.URL.String()
-		ir.addOrUpdateHeader(HeaderGotoTargetURL, ir.url)
+		query = XRequestID
+		header = HeaderGotoRequestID
+		requestId = ir.requestID
+	} else {
+		requestIdConfig := ir.tracker.Target.RequestId
+		if requestIdConfig != nil && requestIdConfig.Send {
+			if requestIdConfig.UUID {
+				requestId = uuid.NewString()
+			} else {
+				requestId = ir.requestID
+			}
+			header = requestIdConfig.Header
+			query = requestIdConfig.Query
+		}
 	}
-	ir.addOrUpdateHeader(HeaderGotoRequestID, ir.requestID)
+	if header != "" {
+		ir.addOrUpdateHeader(header, requestId)
+	}
+	if query != "" {
+		q.Del(query)
+		q.Add(query, requestId)
+	}
+	ir.httpRequest.URL.RawQuery = q.Encode()
+	ir.url = ir.httpRequest.URL.String()
+	ir.addOrUpdateHeader(HeaderGotoTargetURL, ir.url)
 }
 
 func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
@@ -181,6 +204,7 @@ func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
 				ir.result.Request.PayloadSize = len(client.tracker.Payloads[0])
 			}
 			if req, err := http.NewRequest(client.tracker.Target.Method, ir.url, requestReader); err == nil {
+				req.Proto = "HTTP/2"
 				ir.httpRequest = req
 				ir.addOrUpdateRequestId()
 				for h, hv := range ir.headers {
@@ -208,9 +232,9 @@ func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
 
 func (tracker *InvocationTracker) prepareRequestHeaders(requestID, targetID, url string) map[string]string {
 	headers := map[string]string{}
-	for _, h := range tracker.Target.Headers {
-		if len(h) >= 2 {
-			headers[h[0]] = h[1]
+	for h, hvs := range tracker.Target.Headers {
+		if len(hvs) > 0 {
+			headers[h] = hvs[0]
 		}
 	}
 	headers[HeaderGotoTargetID] = targetID

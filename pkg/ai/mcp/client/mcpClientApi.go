@@ -35,19 +35,20 @@ var (
 	Middleware = middleware.NewMiddleware("mcpClient", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	mcpapiRouter := middleware.RootPath("/mcpapi/client")
+func setRoutes(r *mux.Router, root *mux.Router) {
+	mcpapi := middleware.RootPath("/mcpapi")
+	mcpClient := util.PathRouter(mcpapi, "/client")
 
-	util.AddRoute(mcpapiRouter, "/{name}?/details", getDetails, "GET")
+	util.AddRoute(mcpClient, "/{name}?/details", getDetails, "GET")
 
-	util.AddRouteWithMultiQ(mcpapiRouter, "/list/all", listTools, [][]string{{"url"}, {"sse", "authority"}}, "POST", "GET")
-	util.AddRouteWithMultiQ(mcpapiRouter, "/list/tools", listTools, [][]string{{"url"}, {"sse", "authority"}}, "POST", "GET")
-	util.AddRouteWithMultiQ(mcpapiRouter, "/list/tools/names", listTools, [][]string{{"url"}, {"sse", "authority"}}, "POST", "GET")
+	util.AddRouteWithMultiQ(mcpClient, "/list/all", listTools, [][]string{{"url"}, {"sse", "authority"}}, "POST", "GET")
+	util.AddRouteWithMultiQ(mcpClient, "/list/tools", listTools, [][]string{{"url"}, {"sse", "authority"}}, "POST", "GET")
+	util.AddRouteWithMultiQ(mcpClient, "/list/tools/names", listTools, [][]string{{"url"}, {"sse", "authority"}}, "POST", "GET")
 
-	util.AddRoute(mcpapiRouter, "/call", callTool, "POST")
+	util.AddRoute(mcpClient, "/call", callTool, "POST")
 
-	util.AddRoute(mcpapiRouter, "/{name}?/payload/{kind:sample|elicit}", addClientPayload, "POST")
-	util.AddRoute(mcpapiRouter, "/{name}?/payload/roots", addRoots, "POST")
+	util.AddRoute(mcpClient, "/{name}?/payload/{kind:sample|elicit}", addClientPayload, "POST")
+	util.AddRoute(mcpClient, "/{name}?/payload/roots", addRoots, "POST")
 }
 
 func listTools(w http.ResponseWriter, r *http.Request) {

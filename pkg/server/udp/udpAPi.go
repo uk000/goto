@@ -18,7 +18,7 @@ package udp
 
 import (
 	"fmt"
-	"goto/pkg/proxy"
+	udpproxy "goto/pkg/proxy/udp"
 	"goto/pkg/server/listeners"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
@@ -31,7 +31,7 @@ var (
 	Middleware = middleware.NewMiddleware("udp", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, root *mux.Router) {
 	udpRouter := middleware.RootPath("/server/udp")
 	util.AddRoute(udpRouter, "/{port}/stop/{upstream}", stopUDPProxy, "POST")
 	util.AddRoute(udpRouter, "/{port}/proxy/{upstream}", proxyUDP, "POST")
@@ -47,7 +47,7 @@ func setDelay(w http.ResponseWriter, r *http.Request) {
 	upstream := util.GetStringParamValue(r, "upstream")
 	msg := ""
 	if delayMin, delayMax, _, ok := util.GetDurationParam(r, "delay"); ok {
-		proxy.SetUDPDelay(port, upstream, delayMin, delayMax)
+		udpproxy.SetUDPDelay(port, upstream, delayMin, delayMax)
 		msg = fmt.Sprintf("Delay configured for UDP port [%d]", port)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
@@ -67,7 +67,7 @@ func proxyUDP(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusBadRequest
 		msg = fmt.Sprintf("Invalid port [%d] or upstream address [%s]", port, upstream)
 	} else if err := listeners.AddListener(port, false, true, ""); err == nil {
-		proxy.ProxyUDPUpstream(port, upstream, delayMin, delayMax)
+		udpproxy.ProxyUDPUpstream(port, upstream, delayMin, delayMax)
 		msg = fmt.Sprintf("Proxying UDP on port [%d] to upstream [%s] with delay [%s-%s]", port, upstream, delayMin, delayMax)
 	} else {
 		status = http.StatusBadRequest
@@ -90,7 +90,7 @@ func stopUDPProxy(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusBadRequest
 		msg = fmt.Sprintf("Invalid port [%d] or upstream address [%s]", port, upstream)
 	} else {
-		proxy.StopUDPUpstream(port, upstream)
+		udpproxy.StopUDPUpstream(port, upstream)
 		msg = fmt.Sprintf("Stopped Proxying UDP on port [%d] to upstream [%s]", port, upstream)
 	}
 	w.WriteHeader(status)

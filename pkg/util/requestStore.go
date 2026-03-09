@@ -92,8 +92,9 @@ type RequestStore struct {
 	RequestedTunnels        []string
 	TunnelEndpoints         interface{}
 	TunnelLock              sync.RWMutex
-	WillProxy               bool
+	ProxiedRequest          bool
 	ProxyTargets            interface{}
+	ProxyRouter             bool
 	ReReader                *ReReader
 	Request                 *http.Request
 	ResponseWriter          http.ResponseWriter
@@ -162,7 +163,7 @@ func populateRequestStore(r *http.Request) (context.Context, *RequestStore) {
 		return nil, nil
 	}
 	isAdminRequest := CheckAdminRequest(r)
-	rs.IsGRPC = r.ProtoMajor == 2 && (strings.HasPrefix(r.Header.Get(constants.HeaderContentType), "application/grpc") || r.Method == "PRI")
+	rs.IsGRPC = r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get(constants.HeaderContentType), "application/grpc")
 	rs.IsAdminRequest = isAdminRequest
 	rs.IsVersionRequest = strings.HasPrefix(r.RequestURI, "/version")
 	rs.IsLockerRequest = strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker")
@@ -179,8 +180,7 @@ func populateRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	rs.IsKnownNonTraffic = rs.IsProbeRequest || rs.IsReminderRequest || rs.IsHealthRequest ||
 		rs.IsMetricsRequest || rs.IsVersionRequest || rs.IsLockerRequest ||
 		rs.IsAdminRequest || rs.IsTunnelConfigRequest
-	rs.WillProxy = !isAdminRequest && WillProxyHTTP(r, rs)
-	rs.IsH2C = r.ProtoMajor == 2
+	rs.IsH2C = r.ProtoMajor == 2 && !rs.IsGRPC
 	rs.DownstreamAddr = r.RemoteAddr
 	rs.RequestHost = r.Host
 	rs.RequestURI = r.RequestURI
@@ -217,7 +217,7 @@ func (rs *RequestStore) ReportTime(w http.ResponseWriter) {
 		w.Header().Add(fmt.Sprintf("%s-%d", constants.HeaderGotoInAt, rs.TunnelCount), startTime)
 		w.Header().Add(fmt.Sprintf("%s-%d", constants.HeaderGotoOutAt, rs.TunnelCount), endTime)
 		w.Header().Add(fmt.Sprintf("%s-%d", constants.HeaderGotoTook, rs.TunnelCount), took)
-	} else if rs.WillProxy {
+	} else if rs.ProxiedRequest {
 		w.Header().Add(fmt.Sprintf("Proxy-%s", constants.HeaderGotoInAt), startTime)
 		w.Header().Add(fmt.Sprintf("Proxy-%s", constants.HeaderGotoOutAt), endTime)
 		w.Header().Add(fmt.Sprintf("Proxy-%s", constants.HeaderGotoTook), took)
@@ -226,4 +226,42 @@ func (rs *RequestStore) ReportTime(w http.ResponseWriter) {
 		w.Header().Add(constants.HeaderGotoOutAt, endTime)
 		w.Header().Add(constants.HeaderGotoTook, took)
 	}
+}
+
+func WithPort(ctx context.Context, port int) context.Context {
+	return context.WithValue(ctx, CurrentPortKey, port)
+}
+
+func SetSSE(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ProtocolKey, "SSE")
+}
+
+func IsSSE(ctx context.Context) bool {
+	if val := ctx.Value(ProtocolKey); val != nil {
+		return strings.EqualFold(val.(string), "SSE")
+	}
+	return false
+}
+
+func SetFilteredRequest(r *http.Request) {
+	GetRequestStore(r).IsFilteredRequest = true
+}
+
+func GetInterceptResponseWriter(r *http.Request) interface{} {
+	return GetRequestStore(r).InterceptResponseWriter
+}
+func GetTunnelCount(r *http.Request) int {
+	return GetRequestStore(r).TunnelCount
+}
+
+func SetTunnelCount(r *http.Request, count int) {
+	GetRequestStore(r).TunnelCount = count
+}
+
+func SetTunnelRequest(r *http.Request) {
+	GetRequestStore(r).IsTunnelRequest = true
+}
+
+func UnsetTunnelRequest(r *http.Request) {
+	GetRequestStore(r).IsTunnelRequest = false
 }

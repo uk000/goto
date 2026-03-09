@@ -19,7 +19,7 @@ package server
 import (
 	"fmt"
 	"goto/pkg/global"
-	"goto/pkg/proxy"
+	tcpproxy "goto/pkg/proxy/tcp"
 	"goto/pkg/server/tcp"
 	"goto/pkg/util"
 	"log"
@@ -46,8 +46,8 @@ func serveTCPRequests(listenerID string, port int, listener net.Listener) error 
 			lock.Lock()
 			requestCounter++
 			lock.Unlock()
-			if proxy.WillProxyTCP(port) {
-				go proxy.ProxyTCPConnection(port, conn)
+			if tcpproxy.WillProxyTCP(port) {
+				go tcpproxy.ProxyTCPConnection(port, conn)
 			} else {
 				go tcp.ServeClientConnection(port, requestCounter, conn)
 			}

@@ -27,8 +27,11 @@ import (
 )
 
 var (
-	BaseMiddlewares         = []*Middleware{}
-	Middlewares             = []*Middleware{}
+	Core                    = []*Middleware{}
+	InterceptedCore         = []*Middleware{}
+	Unintercepted           = []*Middleware{}
+	Intercepted             = []*Middleware{}
+	RoutesOnly              = []*Middleware{}
 	MiddlewareGRPCChainHead http.Handler
 	MiddlewareChainHead     http.Handler
 	middlewareRouter        *mux.Router
@@ -39,11 +42,11 @@ type MiddlewareFunc func(http.ResponseWriter, *http.Request)
 
 type Middleware struct {
 	Name              string
-	SetRoutes         func(r *mux.Router, parent *mux.Router, root *mux.Router)
+	SetRoutes         func(r *mux.Router, root *mux.Router)
 	MiddlewareHandler mux.MiddlewareFunc
 }
 
-func NewMiddleware(name string, setRoutes func(r *mux.Router, parent *mux.Router, root *mux.Router), middlewareHandler mux.MiddlewareFunc) *Middleware {
+func NewMiddleware(name string, setRoutes func(r *mux.Router, root *mux.Router), middlewareHandler mux.MiddlewareFunc) *Middleware {
 	m := &Middleware{
 		Name:              name,
 		SetRoutes:         setRoutes,
@@ -62,10 +65,10 @@ func AddMiddlewares(next http.Handler, middlewares ...*Middleware) http.Handler 
 	return handler
 }
 
-func AddRoutes(r *mux.Router, parent *mux.Router, root *mux.Router, handlers ...*Middleware) {
+func AddRoutes(r *mux.Router, root *mux.Router, handlers ...*Middleware) {
 	for _, h := range handlers {
 		if h.SetRoutes != nil {
-			h.SetRoutes(r, parent, root)
+			h.SetRoutes(r, root)
 		}
 	}
 }
@@ -80,10 +83,52 @@ func BaseHandlerFunc(getHandler func() http.Handler) http.Handler {
 	})
 }
 
-func LinkBaseMiddlewareChain(r *mux.Router) {
-	for _, m := range BaseMiddlewares {
+func SetRoutesOnly(r *mux.Router) {
+	for _, m := range RoutesOnly {
 		if m.SetRoutes != nil {
-			m.SetRoutes(r, nil, r)
+			m.SetRoutes(r, r)
+		}
+	}
+}
+
+func LinkCore(r *mux.Router) {
+	for _, m := range Core {
+		if m.SetRoutes != nil {
+			m.SetRoutes(r, r)
+		}
+	}
+	UseCore(r)
+}
+
+func UseCore(r *mux.Router) {
+	for _, m := range Core {
+		if m.MiddlewareHandler != nil {
+			r.Use(m.MiddlewareHandler)
+		}
+	}
+}
+
+func LinkInterceptedCore(r *mux.Router) {
+	for _, m := range InterceptedCore {
+		if m.SetRoutes != nil {
+			m.SetRoutes(r, r)
+		}
+	}
+	UseInterceptedCore(r)
+}
+
+func UseInterceptedCore(r *mux.Router) {
+	for _, m := range InterceptedCore {
+		if m.MiddlewareHandler != nil {
+			r.Use(m.MiddlewareHandler)
+		}
+	}
+}
+
+func LinkUnintercepted(r *mux.Router) {
+	for _, m := range Unintercepted {
+		if m.SetRoutes != nil {
+			m.SetRoutes(r, r)
 		}
 		if m.MiddlewareHandler != nil {
 			r.Use(m.MiddlewareHandler)
@@ -91,8 +136,22 @@ func LinkBaseMiddlewareChain(r *mux.Router) {
 	}
 	middlewareRouter = r
 	linkToGRPCChain := BaseHandlerFunc(func() http.Handler { return MiddlewareChainHead })
-	for i := len(BaseMiddlewares) - 1; i >= 0; i-- {
-		m := BaseMiddlewares[i]
+	for i := len(Unintercepted) - 1; i >= 0; i-- {
+		m := Unintercepted[i]
+		if m.MiddlewareHandler != nil {
+			linkToGRPCChain = m.MiddlewareHandler(linkToGRPCChain)
+			MiddlewareGRPCChainHead = linkToGRPCChain
+		}
+	}
+	for i := len(InterceptedCore) - 1; i >= 0; i-- {
+		m := InterceptedCore[i]
+		if m.MiddlewareHandler != nil {
+			linkToGRPCChain = m.MiddlewareHandler(linkToGRPCChain)
+			MiddlewareGRPCChainHead = linkToGRPCChain
+		}
+	}
+	for i := len(Core) - 1; i >= 0; i-- {
+		m := Core[i]
 		if m.MiddlewareHandler != nil {
 			linkToGRPCChain = m.MiddlewareHandler(linkToGRPCChain)
 			MiddlewareGRPCChainHead = linkToGRPCChain
@@ -100,18 +159,18 @@ func LinkBaseMiddlewareChain(r *mux.Router) {
 	}
 }
 
-func LinkMiddlewareChain(r *mux.Router) {
-	for _, m := range Middlewares {
+func LinkIntercepted(r *mux.Router) {
+	for _, m := range Intercepted {
 		if m.SetRoutes != nil {
-			m.SetRoutes(r, nil, r)
+			m.SetRoutes(r, r)
 		}
 		if m.MiddlewareHandler != nil {
 			r.Use(m.MiddlewareHandler)
 		}
 	}
 	handler := BaseHandlerFunc(nil)
-	for i := len(Middlewares) - 1; i >= 0; i-- {
-		m := Middlewares[i]
+	for i := len(Intercepted) - 1; i >= 0; i-- {
+		m := Intercepted[i]
 		if m.MiddlewareHandler != nil {
 			MiddlewareChainHead = m.MiddlewareHandler(handler)
 		}
@@ -132,6 +191,18 @@ func InvokeMiddlewareChainForGRPC(ctx context.Context, port int, method, host, u
 }
 
 func RootPath(path string) *mux.Router {
-	RootRouters[path] = mux.NewRouter().SkipClean(true).PathPrefix(path).Subrouter()
+	if RootRouters[path] == nil {
+		r := mux.NewRouter().SkipClean(true).PathPrefix(path).Subrouter()
+		UseCore(r)
+		UseInterceptedCore(r)
+		RootRouters[path] = r
+	}
 	return RootRouters[path]
+}
+
+func AddRouterPath(router *mux.Router, path string) *mux.Router {
+	if RootRouters[path] == nil {
+		RootRouters[path] = router
+	}
+	return router.PathPrefix(path).Subrouter()
 }

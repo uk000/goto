@@ -649,7 +649,7 @@ func (pt *PortTunnel) tunnelToEndpoint(ep *Endpoint, uri, tunnelHostLabel, viaTu
 			if trafficLog != nil {
 				trafficLog.ResponseHeaders = append(trafficLog.ResponseHeaders, resp.Header)
 				trafficLog.ResponsePayloadLengths = append(trafficLog.ResponsePayloadLengths, len(rr.Content))
-				trafficLog.ResponseProtocol = util.GotoProtocol(ep.IsH2, ep.IsTLS)
+				trafficLog.ResponseProtocol = util.GotoProtocol(ep.IsH2, ep.IsTLS, rs.IsGRPC)
 			}
 		} else {
 			msg := fmt.Sprintf("Error invoking tunnel to [%s]: %s", url, err.Error())

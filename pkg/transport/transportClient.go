@@ -42,6 +42,7 @@ type ClientTransport interface {
 	GRPC() *grpc.ClientConn
 	IsGRPC() bool
 	IsHTTP() bool
+	IsH2() bool
 }
 
 type ClientTracker struct {
@@ -52,16 +53,17 @@ type ClientTracker struct {
 	GRPCIntercept      *GRPCIntercept
 	SNI                string
 	TLSVersion         uint16
+	isH2               bool
 }
 
-func NewClientTransport(c *http.Client, gc *grpc.ClientConn, intercept ITransportIntercept, grpcIntercept *GRPCIntercept) ClientTransport {
-	return &ClientTracker{Client: c, GrpcConn: gc, TransportIntercept: intercept, GRPCIntercept: grpcIntercept}
+func NewClientTransport(c *http.Client, gc *grpc.ClientConn, intercept ITransportIntercept, grpcIntercept *GRPCIntercept, isH2 bool) ClientTransport {
+	return &ClientTracker{Client: c, GrpcConn: gc, TransportIntercept: intercept, GRPCIntercept: grpcIntercept, isH2: isH2}
 }
 
 func NewGRPCClient(label string, url string, ctx context.Context, dialOpts []grpc.DialOption, newConnNotifierChan chan string) (ClientTransport, error) {
 	g := NewGRPCIntercept(label, dialOpts, newConnNotifierChan)
 	if conn, err := grpc.DialContext(ctx, url, g.dialOpts...); err == nil {
-		return NewClientTransport(nil, conn, nil, g), nil
+		return NewClientTransport(nil, conn, nil, g, false), nil
 	} else {
 		return nil, err
 	}
@@ -119,6 +121,10 @@ func (c *ClientTracker) IsGRPC() bool {
 
 func (c *ClientTracker) IsHTTP() bool {
 	return c.HTTP() != nil
+}
+
+func (c *ClientTracker) IsH2() bool {
+	return c.HTTP() != nil && c.isH2
 }
 
 func CreateRequest(method string, url string, headers http.Header, payload []byte, payloadReader io.ReadCloser) (*http.Request, error) {
@@ -184,7 +190,7 @@ func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName stri
 				MaxVersion:         tlsVersion,
 			},
 		}, label, newConnNotifierChan)
-		ct = NewClientTransport(&http.Client{Timeout: requestTimeout, Transport: ht}, nil, ht, nil)
+		ct = NewClientTransport(&http.Client{Timeout: requestTimeout, Transport: ht}, nil, ht, nil, false)
 	} else {
 		tr := &http2.Transport{
 			ReadIdleTimeout: connIdleTimeout,
@@ -204,7 +210,7 @@ func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName stri
 			return net.Dial(network, addr)
 		}
 		h2t := NewHTTP2TransportIntercept(tr, label, newConnNotifierChan)
-		ct = NewClientTransport(&http.Client{Timeout: requestTimeout, Transport: h2t.Transport}, nil, h2t, nil)
+		ct = NewClientTransport(&http.Client{Timeout: requestTimeout, Transport: h2t.Transport}, nil, h2t, nil, true)
 	}
 	return ct
 }

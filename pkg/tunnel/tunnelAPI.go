@@ -30,7 +30,7 @@ var (
 	Middleware = middleware.NewMiddleware("tunnel", setRoutes, middlewareFunc)
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, root *mux.Router) {
 	root.PathPrefix("/tunnel={address}").Subrouter().MatcherFunc(func(*http.Request, *mux.RouteMatch) bool { return true }).HandlerFunc(tunnel)
 	tunnelRouter := middleware.RootPath("/tunnels")
 	util.AddRouteQO(tunnelRouter, "/add/{endpoint}/header/{header}={value}", addTunnel, "uri", "POST", "PUT")

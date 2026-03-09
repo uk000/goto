@@ -33,11 +33,11 @@ import (
 )
 
 type TriggerHTTPTarget struct {
-	Method  string     `json:"method"`
-	URL     string     `json:"url"`
-	Headers [][]string `json:"headers"`
-	Body    string     `json:"body"`
-	SendID  bool       `json:"sendID"`
+	Method  string              `json:"method"`
+	URL     string              `json:"url"`
+	Headers map[string][]string `json:"headers"`
+	Body    string              `json:"body"`
+	SendID  bool                `json:"sendID"`
 }
 
 type TriggerTarget struct {
@@ -45,14 +45,14 @@ type TriggerTarget struct {
 	HTTPTarget        *TriggerHTTPTarget `json:"httpTarget"`
 	Pipe              bool               `json:"pipe"`
 	PipeCallbacks     map[string]PipeCallback
-	Enabled           bool       `json:"enabled"`
-	TriggerURIs       []string   `json:"triggerURIs"`
-	TriggerHeaders    [][]string `json:"triggerHeaders"`
-	TriggerStatuses   []int      `json:"triggerStatuses"`
-	StartFrom         int        `json:"startFrom"`
-	StopAt            int        `json:"stopAt"`
-	MatchCount        int        `json:"matchCount"`
-	TriggerCount      int        `json:"triggerCount"`
+	Enabled           bool              `json:"enabled"`
+	TriggerURIs       []string          `json:"triggerURIs"`
+	TriggerHeaders    map[string]string `json:"triggerHeaders"`
+	TriggerStatuses   []int             `json:"triggerStatuses"`
+	StartFrom         int               `json:"startFrom"`
+	StopAt            int               `json:"stopAt"`
+	MatchCount        int               `json:"matchCount"`
+	TriggerCount      int               `json:"triggerCount"`
 	triggerURIRegexps map[string]*regexp.Regexp
 	lock              sync.RWMutex
 }
@@ -76,9 +76,9 @@ var (
 	triggerLock       sync.RWMutex
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, root *mux.Router) {
 	rootRouter = root
-	triggerRouter := middleware.RootPath("/triggers")
+	triggerRouter := util.PathRouter(r, "/triggers")
 	util.AddRoute(triggerRouter, "/add", addTrigger, "POST")
 	util.AddRoute(triggerRouter, "/{trigger}/remove", removeTrigger, "PUT", "POST")
 	util.AddRoute(triggerRouter, "/{trigger}/enable", enableOrDisableTrigger, "PUT", "POST")
@@ -225,23 +225,15 @@ func (t *Trigger) addTrigger(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		} else if len(tt.TriggerHeaders) > 0 {
-			for _, hv := range tt.TriggerHeaders {
-				if len(hv) == 0 {
-					continue
-				}
-				h := hv[0]
+			for h, hv := range tt.TriggerHeaders {
 				if t.TargetsByHeaders[h] == nil {
 					t.TargetsByHeaders[h] = map[string]interface{}{}
 				}
-				v := ""
-				if len(hv) > 1 {
-					v = hv[1]
+				if t.TargetsByHeaders[h][hv] == nil {
+					t.TargetsByHeaders[h][hv] = []string{}
 				}
-				if t.TargetsByHeaders[h][v] == nil {
-					t.TargetsByHeaders[h][v] = []string{}
-				}
-				targets := t.TargetsByHeaders[h][v].([]string)
-				t.TargetsByHeaders[h][v] = append(targets, tt.Name)
+				targets := t.TargetsByHeaders[h][hv].([]string)
+				t.TargetsByHeaders[h][hv] = append(targets, tt.Name)
 			}
 		} else if len(tt.TriggerStatuses) > 0 {
 			for _, status := range tt.TriggerStatuses {
@@ -371,21 +363,25 @@ func (t *Trigger) getRequestedTriggers(r *http.Request) map[string]*TriggerTarge
 	return targets
 }
 
-func (tt *TriggerTarget) prepareTargetHeaders(r *http.Request, w http.ResponseWriter) [][]string {
-	var headers [][]string = [][]string{}
-	for _, kv := range tt.HTTPTarget.Headers {
-		if strings.HasPrefix(kv[1], "{") && strings.HasSuffix(kv[1], "}") {
-			captureKey := strings.TrimLeft(kv[1], "{")
-			captureKey = strings.TrimRight(captureKey, "}")
-			if strings.EqualFold(captureKey, "request.uri") {
-				kv[1] = r.RequestURI
-			} else if strings.EqualFold(captureKey, "request.headers") {
-				kv[1] = util.ToJSONText(r.Header)
-			} else if captureValue := w.Header().Get(captureKey); captureValue != "" {
-				kv[1] = captureValue
+func (tt *TriggerTarget) prepareTargetHeaders(r *http.Request, w http.ResponseWriter) http.Header {
+	headers := http.Header{}
+	for h, hvs := range tt.HTTPTarget.Headers {
+		headerValues := []string{}
+		for _, hv := range hvs {
+			if strings.HasPrefix(hv, "{") && strings.HasSuffix(hv, "}") {
+				captureKey := strings.TrimLeft(hv, "{")
+				captureKey = strings.TrimRight(captureKey, "}")
+				if strings.EqualFold(captureKey, "request.uri") {
+					hv = r.RequestURI
+				} else if strings.EqualFold(captureKey, "request.headers") {
+					hv = util.ToJSONText(r.Header)
+				} else if captureValue := w.Header().Get(captureKey); captureValue != "" {
+					hv = captureValue
+				}
 			}
+			headerValues = append(headerValues, hv)
 		}
-		headers = append(headers, []string{kv[0], kv[1]})
+		headers[h] = headerValues
 	}
 	return headers
 }

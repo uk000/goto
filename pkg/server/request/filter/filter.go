@@ -53,14 +53,14 @@ var (
 	lock         sync.RWMutex
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, root *mux.Router) {
 	ignoreFilter.SetRoutes("ignore", r)
 	bypassFilter.SetRoutes("bypass", r)
 }
 
 func (rf *RequestFilter) SetRoutes(filterType string, r *mux.Router) {
 	rf.filterType = filterType
-	filterRouter := middleware.RootPath("/" + filterType)
+	filterRouter := util.PathRouter(r, "/"+filterType)
 	util.AddRouteQ(filterRouter, "/add", rf.addFilterHeaderOrURI, "uri", "PUT", "POST")
 	util.AddRoute(filterRouter, "/add/header/{header}={value}", rf.addFilterHeaderOrURI, "PUT", "POST")
 	util.AddRoute(filterRouter, "/add/header/{header}", rf.addFilterHeaderOrURI, "PUT", "POST")

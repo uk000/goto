@@ -33,7 +33,11 @@ import (
 	"goto/pkg/memory"
 	"goto/pkg/metrics"
 	"goto/pkg/pipe"
-	"goto/pkg/proxy"
+	grpcproxy "goto/pkg/proxy/grpc"
+	httpproxy "goto/pkg/proxy/http"
+	mcpproxy "goto/pkg/proxy/mcp"
+	tcpproxy "goto/pkg/proxy/tcp"
+	udpproxy "goto/pkg/proxy/udp"
 	"goto/pkg/registry"
 	"goto/pkg/router"
 	"goto/pkg/rpc"
@@ -62,19 +66,29 @@ import (
 )
 
 func init() {
-	middleware.BaseMiddlewares = []*middleware.Middleware{
-		label.Middleware, conn.Middleware, info.Middleware, router.Middleware, hooks.Middleware,
+	middleware.Core = []*middleware.Middleware{conn.Middleware, hooks.Middleware}
+
+	middleware.InterceptedCore = append(middleware.InterceptedCore, request.CoreMiddlewares...)
+	middleware.InterceptedCore = append(middleware.InterceptedCore, response.CoreMiddlewares...)
+
+	middleware.Unintercepted = []*middleware.Middleware{
+		tunnel.TunnelCountMiddleware, tunnel.Middleware, probes.Middleware,
+		memory.Middleware, events.Middleware, metrics.Middleware, ui.Middleware,
+		body.Middleware,
 	}
-	middleware.Middlewares = []*middleware.Middleware{
-		memory.Middleware, tunnel.TunnelCountMiddleware, tunnel.Middleware,
-		listeners.Middleware, probes.Middleware, registry.Middleware, client.Middleware,
-		k8sYaml.Middleware, k8sApi.Middleware, pipe.Middleware, request.Middleware,
-		proxy.Middleware, response.Middleware, events.Middleware, metrics.Middleware,
+	middleware.Intercepted = []*middleware.Middleware{
+		request.Middleware, response.Middleware, catchall.Middleware,
+	}
+	middleware.RoutesOnly = []*middleware.Middleware{
+		router.Middleware, httpproxy.Middleware, grpcproxy.Middleware, mcpproxy.Middleware,
+		tcpproxy.Middleware, udpproxy.Middleware,
+		a2aserver.Middleware, a2aclient.Middleware, mcpclient.Middleware, mcpserverapi.Middleware,
 		tcp.Middleware, udp.Middleware, rpc.Middleware, jsonrpc.Middleware,
+		client.Middleware, listeners.Middleware, registry.Middleware,
 		grpcapi.Middleware, grpcclient.Middleware, protos.Middleware,
-		mcpclient.Middleware, mcpserverapi.Middleware, a2aserver.Middleware, a2aclient.Middleware,
-		scripts.Middleware, job.Middleware, tls.Middleware, log.Middleware, ui.Middleware,
-		body.Middleware, echo.Middleware, catchall.Middleware,
+		scripts.Middleware, job.Middleware, tls.Middleware, log.Middleware,
+		label.Middleware, info.Middleware, echo.Middleware,
+		pipe.Middleware, k8sYaml.Middleware, k8sApi.Middleware,
 	}
 }
 

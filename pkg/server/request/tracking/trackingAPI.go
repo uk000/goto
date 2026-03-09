@@ -34,8 +34,8 @@ var (
 	Middleware = middleware.NewMiddleware("tracking", setRoutes, middlewareFunc)
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	trackRouter := middleware.RootPath("/track")
+func setRoutes(r *mux.Router, root *mux.Router) {
+	trackRouter := util.PathRouter(r, "/track")
 	headerTrackingRouter := util.PathRouter(trackRouter, "/headers")
 	util.AddRoute(headerTrackingRouter, "/clear", clearHeaders, "POST")
 	util.AddRoute(headerTrackingRouter, "/remove/{headers}", removeHeaders, "POST")
@@ -79,7 +79,7 @@ func trackHeaders(w http.ResponseWriter, r *http.Request) {
 	if present {
 		Tracker.Init(port, "", "", headers)
 		name := strings.Join(headers, "_")
-		hooks.GetPortHooks(port).AddHTTPHookWithListener("", name, "", util.TransformHeaders(headers), false, trackCallCounts)
+		hooks.GetPortHooks(port).AddHTTPHookWithListener("", name, "", util.ConvertHeadersArrayToMultiArray(headers), false, trackCallCounts)
 		msg = fmt.Sprintf("Port [%d] will track Headers [%+v]", port, headers)
 		events.SendRequestEvent("Tracking Headers Added", msg, r)
 	} else {
@@ -95,7 +95,7 @@ func trackURIAndHeaders(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if uri != "" && present {
 		Tracker.Init(port, "", uri, headers)
-		hooks.GetPortHooks(port).AddHTTPHookWithListener("", uri, uri, util.TransformHeaders(headers), false, trackCallCounts)
+		hooks.GetPortHooks(port).AddHTTPHookWithListener("", uri, uri, util.ConvertHeadersArrayToMultiArray(headers), false, trackCallCounts)
 		msg = fmt.Sprintf("Port [%d] will track URI [%s] and Headers [%+v]", port, uri, headers)
 		events.SendRequestEvent("Tracking URI and Headers Added", msg, r)
 	} else {

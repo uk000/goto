@@ -88,9 +88,9 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
 
 func computeInvocationIDs(tracker *InvocationTracker, runnerId RunnerId) (targetID string, requestID string) {
 	tracker.Status.AssignedRequests++
-	if tracker.CustomID > 0 {
-		targetID = fmt.Sprintf("%s-%d", tracker.Target.Name, tracker.CustomID)
-		requestID = fmt.Sprintf("%s-%d[%d][%d]", tracker.Target.Name, tracker.CustomID, runnerId, tracker.Status.AssignedRequests)
+	if tracker.CustomID != "" {
+		targetID = fmt.Sprintf("%s-%s", tracker.Target.Name, tracker.CustomID)
+		requestID = fmt.Sprintf("%s-%s[%d][%d]", tracker.Target.Name, tracker.CustomID, runnerId, tracker.Status.AssignedRequests)
 	} else {
 		targetID = fmt.Sprintf("%s", tracker.Target.Name)
 		requestID = fmt.Sprintf("%s[%d][%d]", tracker.Target.Name, runnerId, tracker.Status.AssignedRequests)

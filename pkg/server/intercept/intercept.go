@@ -19,10 +19,12 @@ package intercept
 import (
 	"bufio"
 	"fmt"
+	. "goto/pkg/constants"
 	"goto/pkg/util"
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 )
 
 type ResponseInterceptor interface {
@@ -246,6 +248,18 @@ func (rw *HeaderInterceptResponseWriter) HeadersSent() bool {
 	return len(rw.Headers) > 0
 }
 
+func postIntercept(w http.ResponseWriter, r *http.Request) {
+	rs := util.GetRequestStore(r)
+	statusCodeText := strconv.Itoa(rs.StatusCode)
+	if rs.IsTunnelRequest {
+		w.Header()[HeaderGotoTunnel] = r.Header[HeaderGotoRequestedTunnel]
+	} else if rs.ProxiedRequest {
+		w.Header().Add(fmt.Sprintf("Proxy-%s", HeaderGotoResponseStatus), statusCodeText)
+	} else {
+		w.Header().Add(HeaderGotoResponseStatus, statusCodeText)
+	}
+}
+
 func IntereceptMiddleware(pre, post http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -262,6 +276,7 @@ func IntereceptMiddleware(pre, post http.Handler) func(http.Handler) http.Handle
 			if rs.StatusCode == 0 {
 				rs.StatusCode = http.StatusOK
 			}
+			postIntercept(w, r)
 			if post != nil {
 				post.ServeHTTP(w, r)
 			}

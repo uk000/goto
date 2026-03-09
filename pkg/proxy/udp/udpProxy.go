@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package proxy
+package udpproxy
 
 import (
 	"encoding/binary"
@@ -32,16 +32,25 @@ import (
 
 var (
 	udpProxyByPort = map[int]*UDPProxy{}
+	proxyLock      sync.RWMutex
 )
 
 type UDPUpstream struct {
-	ProxyTarget
+	Name         string       `json:"name"`
+	Protocol     string       `json:"protocol"`
+	Endpoint     string       `json:"endpoint"`
+	Delay        *types.Delay `json:"delay"`
 	upstreamAddr *net.UDPAddr
+	isRunning    bool
 	conn         *net.UDPConn
+	stopChan     chan bool
+	lock         sync.RWMutex
 }
 
 type UDPProxy struct {
-	Proxy
+	Port       int                       `json:"port"`
+	Enabled    bool                      `json:"enabled"`
+	Upstreams  map[string]*UDPUpstream   `json:"upstreams"`
 	UDPTracker *trackers.UDPProxyTracker `json:"udpTracker"`
 	stopChan   chan bool
 	lock       sync.RWMutex
@@ -49,7 +58,9 @@ type UDPProxy struct {
 
 func newUDPProxy(port int) *UDPProxy {
 	return &UDPProxy{
-		Proxy:      *newProxy(port),
+		Port:       port,
+		Enabled:    true,
+		Upstreams:  map[string]*UDPUpstream{},
 		UDPTracker: trackers.NewUDPTracker(),
 		stopChan:   make(chan bool),
 		lock:       sync.RWMutex{},
@@ -58,7 +69,9 @@ func newUDPProxy(port int) *UDPProxy {
 
 func newUDPUpstream(name, address string, delayMin, delayMax time.Duration) *UDPUpstream {
 	return &UDPUpstream{
-		ProxyTarget: *newProxyTarget(name, "udp", address),
+		Name:     name,
+		Protocol: "udp",
+		Endpoint: address,
 	}
 }
 
@@ -97,42 +110,42 @@ func (p *UDPProxy) initTracker() {
 func (p *UDPProxy) setUDPDelay(upstream string, delayMin, delayMax time.Duration) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	up := p.Targets[upstream]
+	up := p.Upstreams[upstream]
 	if up != nil {
-		up.SetDelay(delayMin, delayMax, -1)
+		up.setUDPDelay(delayMin, delayMax)
 	}
 }
 
 func (p *UDPProxy) startUpstream(name, upstream string, delayMin, delayMax time.Duration) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	t := p.Targets[upstream]
-	if t == nil {
-		up := newUDPUpstream(name, upstream, delayMin, delayMax)
+	up := p.Upstreams[upstream]
+	if up == nil {
+		up = newUDPUpstream(name, upstream, delayMin, delayMax)
 		up.connect()
-		p.Targets[upstream] = up
-		t = up
-	} else if t.IsRunning() {
-		t.Stop()
+		p.Upstreams[upstream] = up
+	} else if up.isRunning {
+		up.Stop()
 	}
-	t.SetDelay(delayMin, delayMax, -1)
-	go p.runProxy(t.(*UDPUpstream))
+	up.setUDPDelay(delayMin, delayMax)
+	go p.runProxy(up)
 }
 
 func (p *UDPProxy) stopUpstream(upstream string) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if p.Targets[upstream] != nil && p.Targets[upstream].IsRunning() {
-		p.Targets[upstream].Stop()
+	up := p.Upstreams[upstream]
+	if up != nil && up.isRunning {
+		up.Stop()
 	}
 }
 
 func (p *UDPProxy) removeUpstream(upstream string) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if p.Targets[upstream] != nil {
-		p.Targets[upstream].Close()
-		delete(p.Targets, upstream)
+	if p.Upstreams[upstream] != nil {
+		p.Upstreams[upstream].Stop()
+		delete(p.Upstreams, upstream)
 	}
 }
 
@@ -171,14 +184,15 @@ func (up *UDPUpstream) readFromDownstream(conn *net.UDPConn) (packet []byte, cli
 	packet = make([]byte, 4096)
 	_, clientAddr, err = conn.ReadFrom(packet)
 	if err != nil {
-		log.Println("Error reading packet from downstream [%s]:error:", conn.RemoteAddr().String(), err)
+		log.Printf("Error reading packet from downstream [%s], error: %s\n", conn.RemoteAddr().String(), err.Error())
 	}
 	return
 }
 
 func (up *UDPUpstream) handlePacket(listenerConn net.PacketConn, clientAddr net.Addr, packet []byte, tracker *trackers.UDPProxyTracker) {
-	delay := types.RandomDuration(up.DelayMin, up.DelayMax)
-	time.Sleep(delay)
+	if up.Delay != nil {
+		up.Delay.ComputeAndApply()
+	}
 	domain := extractDomain(packet)
 	up.lock.RLock()
 	address := up.Endpoint
@@ -198,7 +212,10 @@ func (up *UDPUpstream) handlePacket(listenerConn net.PacketConn, clientAddr net.
 		log.Printf("Failed to read packet from upstream [%s] for domain [%s]: error [%s]\n", address, domain, err)
 		return
 	}
-	time.Sleep(delay)
+	delay := ""
+	if up.Delay != nil {
+		delay = up.Delay.Apply().String()
+	}
 	_, err = listenerConn.WriteTo(resp[:n], clientAddr)
 	if err != nil {
 		log.Printf("Failed to send packet to downstream [%s] for domain [%s]: error [%s]\n", clientAddr, domain, err)
@@ -210,8 +227,7 @@ func (up *UDPUpstream) handlePacket(listenerConn net.PacketConn, clientAddr net.
 func (up *UDPUpstream) setUDPDelay(delayMin, delayMax time.Duration) {
 	up.lock.Lock()
 	defer up.lock.Unlock()
-	up.DelayMin = delayMin
-	up.DelayMax = delayMax
+	up.Delay = types.NewDelay(delayMin, delayMax, -1)
 }
 
 func (up *UDPUpstream) connect() (err error) {
@@ -225,6 +241,7 @@ func (up *UDPUpstream) connect() (err error) {
 		return err
 	}
 	up.conn, err = net.DialUDP("udp", nil, up.upstreamAddr)
+	up.isRunning = true
 	return
 }
 

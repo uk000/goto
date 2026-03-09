@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-package proxy
+package tcpproxy
 
 import (
-	"fmt"
-	"goto/pkg/events"
+	"goto/pkg/constants"
 	"goto/pkg/global"
 	"goto/pkg/proxy/trackers"
 	gototls "goto/pkg/tls"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
 	"log"
@@ -37,15 +37,45 @@ import (
 
 var (
 	tcpProxyByPort = map[int]*TCPProxy{}
+	proxyLock      sync.RWMutex
 )
 
 type TCPProxy struct {
-	*Proxy
-	Tracker *trackers.TCPProxyTracker `json:"tracker"`
+	Port      int                       `json:"port"`
+	Enabled   bool                      `json:"enabled"`
+	Upstreams map[string]*TCPUpstream   `json:"upstreams"`
+	Tracker   *trackers.TCPProxyTracker `json:"tracker"`
+	stopChan  chan bool
+	lock      sync.RWMutex
+}
+
+type TCPUpstream struct {
+	Name               string         `json:"name"`
+	Protocol           string         `json:"protocol"`
+	Endpoint           string         `json:"endpoint"`
+	Match              *UpstreamMatch `json:"match"`
+	Delay              *types.Delay   `json:"delay"`
+	Retries            int            `json:"retries"`
+	RetryDelay         time.Duration  `json:"retryDelay"`
+	DropPct            int            `json:"dropPct"`
+	writeSinceLastDrop int
+	isRunning          bool
+	conn               *net.UDPConn
+	stopChan           chan bool
+	lock               sync.RWMutex
+}
+
+type UpstreamMatch struct {
+	SNI       []string
+	sniRegexp *regexp.Regexp
 }
 
 func newTCPProxy(port int) *TCPProxy {
-	p := &TCPProxy{Proxy: newProxy(port)}
+	p := &TCPProxy{
+		Port:      port,
+		Enabled:   true,
+		Upstreams: map[string]*TCPUpstream{},
+	}
 	p.initTracker()
 	return p
 }
@@ -85,62 +115,45 @@ func (p *TCPProxy) initTracker() {
 	p.Tracker = trackers.NewTCPTracker()
 }
 
-func (p *TCPProxy) addProxyTarget(w http.ResponseWriter, r *http.Request) {
-	target := newProxyTarget("", "", "")
-	payload := util.Read(r.Body)
-	if err := util.ReadJson(payload, target); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "Invalid target: %s\n", err.Error())
-		events.SendRequestEventJSON("Proxy Target Rejected", err.Error(),
-			map[string]interface{}{"error": err.Error(), "payload": payload}, r)
-		return
-	}
-	if target.MatchAll != nil && target.MatchAny != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		msg := "Only one of matchAll and matchAny should be specified"
-		fmt.Fprintln(w, msg)
-		events.SendRequestEventJSON("Proxy Target Rejected", msg,
-			map[string]interface{}{"error": msg, "payload": payload}, r)
-		return
-	}
-	target.isTCP = true
+func (p *TCPProxy) hasAnyTargets() bool {
+	return len(p.Upstreams) > 0
+}
+
+func (p *TCPProxy) addUpstream(up *TCPUpstream) {
 	p.lock.Lock()
-	p.Targets[target.Name] = target
+	p.Upstreams[up.Name] = up
 	p.lock.Unlock()
 }
 
-func (p *TCPProxy) addNewProxyTarget(name, address, sni string, retries int) {
-	target := newProxyTarget(name, "tcp", address)
-	target.isTCP = true
-	target.Retries = retries
-	target.Protocol = "tcp"
+func (p *TCPProxy) addNewUpstream(name, address, sni string, retries int, delayMin, delayMax time.Duration) {
+	up := &TCPUpstream{
+		Name:     name,
+		Protocol: "tcp",
+		Endpoint: address,
+		Retries:  retries,
+		Delay:    types.NewDelay(delayMin, delayMax, -1),
+	}
 	if sni != "" {
 		snis := strings.Split(sni, ",")
 		snisRegexp := "(" + strings.Join(snis, "|") + ")"
-		target.MatchAny = &ProxyTargetMatch{
+		up.Match = &UpstreamMatch{
 			SNI:       snis,
 			sniRegexp: regexp.MustCompile(snisRegexp),
 		}
 	}
 	p.lock.Lock()
-	p.Targets[target.Name] = target
+	p.Upstreams[up.Name] = up
 	p.lock.Unlock()
 }
 
-func (p *TCPProxy) getMatchingTCPTarget(sni string) *TargetMatchInfo {
-	for _, t := range p.Targets {
-		target := t.(*ProxyTarget)
+func (p *TCPProxy) getMatchingTCPUpstream(sni string) *TCPUpstream {
+	for _, up := range p.Upstreams {
 		if sni == "" {
-			return &TargetMatchInfo{target: target}
+			return up
 		}
-		if target.MatchAny != nil && target.MatchAny.sniRegexp != nil {
-			if target.MatchAny.sniRegexp.MatchString(sni) {
-				return &TargetMatchInfo{target: target, SNI: sni}
-			}
-		}
-		if target.MatchAll != nil && target.MatchAll.sniRegexp != nil {
-			if target.MatchAll.sniRegexp.MatchString(sni) {
-				return &TargetMatchInfo{target: target, SNI: sni}
+		if up.Match != nil && up.Match.sniRegexp != nil {
+			if up.Match.sniRegexp.MatchString(sni) {
+				return up
 			}
 		}
 	}
@@ -148,12 +161,11 @@ func (p *TCPProxy) getMatchingTCPTarget(sni string) *TargetMatchInfo {
 }
 
 func (p *TCPProxy) proxyTCPOpaque(downConn net.Conn, startTime time.Time) {
-	if m := p.getMatchingTCPTarget(""); m != nil {
-		pt := m.target.GetProxyTarget()
-		p.Tracker.IncrementMatchCounts(pt.Name, "")
-		st := p.Tracker.GetOrAddTargetSessionTracker(pt.Name, downConn.RemoteAddr().String())
+	if up := p.getMatchingTCPUpstream(""); up != nil {
+		p.Tracker.IncrementMatchCounts(up.Name, "")
+		st := p.Tracker.GetOrAddTargetSessionTracker(up.Name, downConn.RemoteAddr().String())
 		st.Downstream.StartTime = startTime
-		p.proxyPipe(downConn, pt, nil)
+		p.proxyPipe(downConn, up, nil)
 	} else {
 		p.Tracker.IncrementRejectCount("")
 		log.Printf("TCP Proxy[%d]: No matching target found for downstream client [%s]\n", p.Port, downConn.RemoteAddr().String())
@@ -167,35 +179,34 @@ func (p *TCPProxy) proxyTCPWithSNI(downConn net.Conn, startTime time.Time) {
 	} else {
 		log.Printf("TCP Proxy[%d]: Read downstream SNI = [%s]\n", p.Port, sni)
 	}
-	if m := p.getMatchingTCPTarget(sni); m != nil {
-		pt := m.target.GetProxyTarget()
-		st := p.Tracker.GetOrAddTargetSessionTracker(pt.Name, downConn.RemoteAddr().String())
+	if up := p.getMatchingTCPUpstream(sni); up != nil {
+		st := p.Tracker.GetOrAddTargetSessionTracker(up.Name, downConn.RemoteAddr().String())
 		st.SNI = sni
 		st.Downstream.StartTime = startTime
 		st.Downstream.FirstByteInAt = startTime
 		st.Downstream.TotalBytesRead = buff.Len()
 		st.Downstream.TotalReads = 1
-		p.Tracker.IncrementMatchCounts(pt.Name, sni)
-		p.proxyPipe(downConn, pt, buff.Bytes())
+		p.Tracker.IncrementMatchCounts(up.Name, sni)
+		p.proxyPipe(downConn, up, buff.Bytes())
 	} else {
 		p.Tracker.IncrementRejectCount(sni)
 		log.Printf("TCP Proxy[%d]: No matching target found for SNI [%s] from downstream [%s]\n", p.Port, sni, downConn.RemoteAddr().String())
 	}
 }
 
-func (p *TCPProxy) proxyPipe(downConn net.Conn, target *ProxyTarget, pendingData []byte) {
-	addr, err := net.ResolveTCPAddr("tcp", target.Endpoint)
+func (p *TCPProxy) proxyPipe(downConn net.Conn, up *TCPUpstream, pendingData []byte) {
+	addr, err := net.ResolveTCPAddr("tcp", up.Endpoint)
 	if err != nil {
 		log.Printf("TCP Proxy[%d]: Error while resolving upstream address: %s\n", p.Port, err.Error())
 		return
 	}
 	done := make(chan bool, 2)
 	downAddr := downConn.RemoteAddr().String()
-	st := p.Tracker.GetOrAddTargetSessionTracker(target.Name, downAddr)
+	st := p.Tracker.GetOrAddTargetSessionTracker(up.Name, downAddr)
 	st.Upstream.StartTime = time.Now()
 	var upConn *net.TCPConn
 	defer func() {
-		log.Printf("TCP Proxy[%d]: Closing proxy pipe between [%s] and [%s]\n", p.Port, downAddr, target.Endpoint)
+		log.Printf("TCP Proxy[%d]: Closing proxy pipe between [%s] and [%s]\n", p.Port, downAddr, up.Endpoint)
 		close(done)
 		if upConn != nil {
 			upConn.Close()
@@ -203,18 +214,18 @@ func (p *TCPProxy) proxyPipe(downConn net.Conn, target *ProxyTarget, pendingData
 		st.Downstream.Closed = true
 		st.Upstream.Closed = true
 	}()
-	retryDelay := target.RetryDelay
+	retryDelay := up.RetryDelay
 	if retryDelay == 0 {
 		retryDelay = 10 * time.Second
 	}
-	retryBudget := target.Retries + 1
+	retryBudget := up.Retries + 1
 	for retryBudget > 0 {
 		retryBudget--
 		st.Upstream.Closed = false
 		st.Upstream.RemoteClosed = false
 		st.Upstream.ReadError = false
 		st.Upstream.WriteError = false
-		log.Printf("TCP Proxy[%d]: Opening proxy pipe between [%s] and [%s] with Retry [%d]\n", p.Port, downAddr, target.Endpoint, (target.Retries - retryBudget))
+		log.Printf("TCP Proxy[%d]: Opening proxy pipe between [%s] and [%s] with Retry [%d]\n", p.Port, downAddr, up.Endpoint, (up.Retries - retryBudget))
 		upConn, err = net.DialTCP("tcp", nil, addr)
 		if err != nil {
 			log.Printf("TCP Proxy[%d]: Error while dialing upstream address: %s\n", p.Port, err.Error())
@@ -224,16 +235,16 @@ func (p *TCPProxy) proxyPipe(downConn net.Conn, target *ProxyTarget, pendingData
 			}
 			continue
 		}
-		retryBudget := target.Retries
+		retryBudget := up.Retries
 		if len(pendingData) > 0 {
 			err = util.Write(pendingData, upConn)
 			if err != nil {
 				if err == io.EOF {
 					st.Upstream.RemoteClosed = true
-					log.Printf("TCP Proxy[%d]: Connection [%s] closed by upstream\n", p.Port, target.Endpoint)
+					log.Printf("TCP Proxy[%d]: Connection [%s] closed by upstream\n", p.Port, up.Endpoint)
 				} else {
 					st.Upstream.WriteError = true
-					log.Printf("TCP Proxy[%d]: Error writing to upstream connection [%s]: %s\n", p.Port, target.Endpoint, err.Error())
+					log.Printf("TCP Proxy[%d]: Error writing to upstream connection [%s]: %s\n", p.Port, up.Endpoint, err.Error())
 				}
 				return
 			} else {
@@ -243,8 +254,8 @@ func (p *TCPProxy) proxyPipe(downConn net.Conn, target *ProxyTarget, pendingData
 		}
 		wg := &sync.WaitGroup{}
 		wg.Add(2)
-		go p.pipe(downConn, upConn, false, st.Downstream, st.Upstream, target, wg, done)
-		go p.pipe(upConn, downConn, true, st.Upstream, st.Downstream, target, wg, done)
+		go p.pipe(downConn, upConn, false, st.Downstream, st.Upstream, up, wg, done)
+		go p.pipe(upConn, downConn, true, st.Upstream, st.Downstream, up, wg, done)
 		wg.Wait()
 		if st.Upstream.RemoteClosed && retryBudget > 0 {
 			log.Printf("TCP Proxy[%d]: Sleeping for [%s] before retrying\n", p.Port, retryDelay)
@@ -255,7 +266,7 @@ func (p *TCPProxy) proxyPipe(downConn net.Conn, target *ProxyTarget, pendingData
 	}
 }
 
-func (p *TCPProxy) pipe(from, to net.Conn, inverse bool, fromTracker, toTracker *trackers.ConnTracker, target *ProxyTarget, wg *sync.WaitGroup, done chan bool) {
+func (p *TCPProxy) pipe(from, to net.Conn, inverse bool, fromTracker, toTracker *trackers.ConnTracker, target *TCPUpstream, wg *sync.WaitGroup, done chan bool) {
 	defer wg.Done()
 	downLabel := "downstream"
 	upLabel := "upstream"
@@ -335,11 +346,45 @@ func (p *TCPProxy) pipe(from, to net.Conn, inverse bool, fromTracker, toTracker 
 	}
 }
 
+func (p *TCPProxy) shouldDrop(target *TCPUpstream) bool {
+	target.lock.Lock()
+	defer target.lock.Unlock()
+	if target.DropPct <= 0 {
+		return false
+	}
+	target.writeSinceLastDrop++
+	if target.writeSinceLastDrop >= (100 / target.DropPct) {
+		target.writeSinceLastDrop = 0
+		return true
+	}
+	return false
+}
+
+func (p *TCPProxy) applyDelay(target *TCPUpstream, who string, w http.ResponseWriter) bool {
+	delay := target.applyDelay()
+	if global.Flags.EnableProxyDebugLogs && delay != "" {
+		log.Printf("[DEBUG] Proxy[%d]: Delayed [%s] for Target [%s] by [%s]\n", p.Port, who, target.Name, delay)
+		if w != nil {
+			w.Header().Add(constants.HeaderGotoProxyDelay, delay)
+		}
+		return true
+	}
+	return false
+}
+
+func (t *TCPUpstream) applyDelay() (delay string) {
+	if t.Delay != nil {
+		if global.Flags.EnableProxyDebugLogs {
+			log.Printf("[DEBUG] Target [%s]: Delaying Upstream by [%s]\n", t.Name, delay)
+		}
+		t.Delay.ComputeAndApply()
+	}
+	return
+}
+
 func (p *TCPProxy) hasSNITargets() bool {
-	for _, t := range p.Targets {
-		target := t.(*ProxyTarget)
-		if target.MatchAll != nil && target.MatchAll.sniRegexp != nil ||
-			target.MatchAny != nil && target.MatchAny.sniRegexp != nil {
+	for _, target := range p.Upstreams {
+		if target.Match != nil && target.Match.sniRegexp != nil {
 			return true
 		}
 	}

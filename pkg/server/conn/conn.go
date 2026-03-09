@@ -79,7 +79,6 @@ func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add(HeaderGotoHost, l.HostLabel)
 	w.Header().Add(HeaderGotoProtocol, rs.GotoProtocol)
 	w.Header().Add(HeaderViaGoto, l.Label)
-
 }
 
 func middlewareFunc(next http.Handler) http.Handler {
@@ -101,7 +100,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 		if p > 0 {
 			port = strconv.Itoa(p)
 		}
-		rs.GotoProtocol = util.GotoProtocol(r.ProtoMajor == 2, l.TLS)
+		rs.GotoProtocol = util.GotoProtocol(r.ProtoMajor == 2, l.TLS, rs.IsGRPC)
 		rs.HostLabel = l.HostLabel
 		rs.ListenerLabel = l.Label
 		if util.IsTunnelRequest(r) {
@@ -110,12 +109,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoTunnelHost, rs.TunnelCount), l.HostLabel)
 			w.Header().Add(fmt.Sprintf("%s_%d", HeaderViaGotoTunnel, rs.TunnelCount), l.Label)
 			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoProtocol, rs.TunnelCount), rs.GotoProtocol)
-		} else if rs.WillProxy {
-			util.AddHeaderWithPrefix("Proxy-", HeaderGotoHost, l.HostLabel, w.Header())
-			util.AddHeaderWithPrefix("Proxy-", HeaderGotoPort, port, w.Header())
-			util.AddHeaderWithPrefix("Proxy-", HeaderGotoProtocol, rs.GotoProtocol, w.Header())
-			util.AddHeaderWithPrefix("Proxy-", HeaderViaGoto, l.Label, w.Header())
-		} else {
+		} else if !rs.ProxyRouter {
 			SendGotoHeaders(w, r)
 		}
 		pieces := strings.Split(r.RemoteAddr, ":")
@@ -141,8 +135,8 @@ func middlewareFunc(next http.Handler) http.Handler {
 			util.AddLogMessage("Serving Tunnel Connect Request", r)
 		} else if next != nil {
 			next.ServeHTTP(w, r)
-			if rs.WillProxy {
-				w.Header().Add(HeaderViaGoto, l.Label)
+			if rs.ProxyRouter && !rs.ProxiedRequest {
+				SendGotoHeaders(w, r)
 			}
 		}
 	})

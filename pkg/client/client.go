@@ -33,9 +33,9 @@ var (
 	clientMiddlewares = []*middleware.Middleware{&target.Middleware}
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, root *mux.Router) {
 	clientRouter := middleware.RootPath("/client")
-	middleware.AddRoutes(clientRouter, r, root, clientMiddlewares...)
+	middleware.AddRoutes(clientRouter, root, clientMiddlewares...)
 }
 
 func Run() {

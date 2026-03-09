@@ -34,7 +34,7 @@ var (
 	Middleware = middleware.Middleware{Name: "client", SetRoutes: SetRoutes}
 )
 
-func SetRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func SetRoutes(r *mux.Router, root *mux.Router) {
 	targetsRouter := r.PathPrefix("/targets").Subrouter()
 	util.AddRoute(targetsRouter, "/add", addTarget, "POST")
 	util.AddRoute(targetsRouter, "/{targets}/remove", removeTargets, "POST")

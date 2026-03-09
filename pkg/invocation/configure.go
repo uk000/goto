@@ -40,43 +40,44 @@ import (
 )
 
 type InvocationSpec struct {
-	Name                 string         `json:"name"`
-	Protocol             string         `json:"protocol"`
-	Method               string         `json:"method"`
-	Host                 string         `json:"host"`
-	Service              string         `json:"service"`
-	URL                  string         `json:"url"`
-	BURLS                []string       `json:"burls"`
-	Headers              RequestHeaders `json:"headers"`
-	Body                 string         `json:"body"`
-	AutoPayload          string         `json:"autoPayload"`
-	Replicas             int            `json:"replicas"`
-	RequestCount         int            `json:"requestCount"`
-	WarmupCount          int            `json:"warmupCount"`
-	InitialDelay         string         `json:"initialDelay"`
-	Delay                string         `json:"delay"`
-	Retries              int            `json:"retries"`
-	RetryDelay           string         `json:"retryDelay"`
-	RetriableStatusCodes []int          `json:"retriableStatusCodes"`
-	KeepOpen             string         `json:"keepOpen"`
-	SendID               bool           `json:"sendID"`
-	ConnTimeout          string         `json:"connTimeout"`
-	ConnIdleTimeout      string         `json:"connIdleTimeout"`
-	RequestTimeout       string         `json:"requestTimeout"`
-	AutoInvoke           bool           `json:"autoInvoke"`
-	Fallback             bool           `json:"fallback"`
-	AB                   bool           `json:"ab"`
-	Random               bool           `json:"random"`
-	StreamPayload        []string       `json:"streamPayload"`
-	StreamDelay          string         `json:"streamDelay"`
-	Binary               bool           `json:"binary"`
-	CollectResponse      bool           `json:"collectResponse"`
-	TrackPayload         bool           `json:"trackPayload"`
-	Assertions           Assertions     `json:"assertions"`
-	AutoUpgrade          bool           `json:"autoUpgrade"`
-	VerifyTLS            bool           `json:"verifyTLS"`
-	TLS                  bool           `json:"tls"`
-	BodyReader           io.Reader      `json:"-"`
+	Name                 string      `json:"name"`
+	Protocol             string      `json:"protocol"`
+	Method               string      `json:"method"`
+	Host                 string      `json:"host"`
+	Service              string      `json:"service"`
+	URL                  string      `json:"url"`
+	BURLS                []string    `json:"burls"`
+	Headers              http.Header `json:"headers"`
+	Body                 string      `json:"body"`
+	AutoPayload          string      `json:"autoPayload"`
+	Replicas             int         `json:"replicas"`
+	RequestCount         int         `json:"requestCount"`
+	WarmupCount          int         `json:"warmupCount"`
+	InitialDelay         string      `json:"initialDelay"`
+	Delay                string      `json:"delay"`
+	Retries              int         `json:"retries"`
+	RetryDelay           string      `json:"retryDelay"`
+	RetriableStatusCodes []int       `json:"retriableStatusCodes"`
+	KeepOpen             string      `json:"keepOpen"`
+	SendID               bool        `json:"sendID"`
+	RequestId            *RequestId  `json:"requestId"`
+	ConnTimeout          string      `json:"connTimeout"`
+	ConnIdleTimeout      string      `json:"connIdleTimeout"`
+	RequestTimeout       string      `json:"requestTimeout"`
+	AutoInvoke           bool        `json:"autoInvoke"`
+	Fallback             bool        `json:"fallback"`
+	AB                   bool        `json:"ab"`
+	Random               bool        `json:"random"`
+	StreamPayload        []string    `json:"streamPayload"`
+	StreamDelay          string      `json:"streamDelay"`
+	Binary               bool        `json:"binary"`
+	CollectResponse      bool        `json:"collectResponse"`
+	TrackPayload         bool        `json:"trackPayload"`
+	Assertions           Assertions  `json:"assertions"`
+	AutoUpgrade          bool        `json:"autoUpgrade"`
+	VerifyTLS            bool        `json:"verifyTLS"`
+	TLS                  bool        `json:"tls"`
+	BodyReader           io.Reader   `json:"-"`
 	httpVersionMajor     int
 	httpVersionMinor     int
 	tcp                  bool
@@ -93,6 +94,13 @@ type InvocationSpec struct {
 	retryDelayD          time.Duration
 	keepOpenD            time.Duration
 	autoPayloadSize      int
+}
+
+type RequestId struct {
+	Send   bool   `json:"send"`
+	UUID   bool   `json:"uuid"`
+	Header string `json:"header"`
+	Query  string `json:"query"`
 }
 
 type RequestHeaders [][]string
@@ -117,7 +125,7 @@ type InvocationTracker struct {
 	Status   *InvocationStatus   `json:"status"`
 	Payloads [][]byte            `json:"-"`
 	Channels *InvocationChannels `json:"-"`
-	CustomID int                 `json:"customID"`
+	CustomID string              `json:"customID"`
 	client   *InvocationClient
 }
 
@@ -235,9 +243,9 @@ func (spec *InvocationSpec) processProtocol() {
 
 func (spec *InvocationSpec) processAuthority() {
 	authority := ""
-	for _, h := range spec.Headers {
-		if strings.EqualFold(h[0], "host") {
-			authority = h[1]
+	for h, hvs := range spec.Headers {
+		if strings.EqualFold(h, "host") {
+			authority = hvs[0]
 		}
 	}
 	if authority == "" {

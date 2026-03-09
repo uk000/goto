@@ -97,15 +97,25 @@ func RunHttpServer() {
 func configureHTTPRouter() {
 	coreRouter = mux.NewRouter()
 	coreRouter.SkipClean(true)
+
+	middleware.SetRoutesOnly(coreRouter)
+
 	RootRouter = util.CreateRouters(coreRouter)
-	middleware.LinkBaseMiddlewareChain(RootRouter)
-	interceptChainRouter := RootRouter.PathPrefix("").Subrouter()
-	interceptChainRouter.Use(intercept.IntereceptMiddleware(preIntercept(), postIntercept()))
-	middleware.LinkMiddlewareChain(interceptChainRouter)
+	middleware.LinkCore(RootRouter)
+
+	interceptedChainRouter := RootRouter.PathPrefix("").Subrouter()
+	interceptedChainRouter.Use(intercept.IntereceptMiddleware(preIntercept(), postIntercept()))
+	middleware.LinkInterceptedCore(interceptedChainRouter)
+	middleware.LinkIntercepted(interceptedChainRouter)
+
+	uninterceptedChainRouter := RootRouter.PathPrefix("").Subrouter()
+	middleware.LinkUnintercepted(uninterceptedChainRouter)
+
 }
 
 func configureAIRouter() *mux.Router {
 	aiRouter := mux.NewRouter()
+	middleware.UseCore(aiRouter)
 	aiRouter.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
 		return true
 	}).HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -347,7 +357,7 @@ func GRPCHandler(httpHandler http.Handler) http.Handler {
 
 func loadRouter(r *http.Request, rs *util.RequestStore) {
 	portMatch := util.PortRouteRegexp.FindStringSubmatch(r.RequestURI)
-	if len(portMatch) > 1 {
+	if len(portMatch) > 1 && portMatch[0] != "" && portMatch[1] != "" {
 		port, _ := strconv.Atoi(portMatch[1])
 		if port > 0 {
 			rs.RequestPort = portMatch[1]
@@ -358,9 +368,9 @@ func loadRouter(r *http.Request, rs *util.RequestStore) {
 			rs.RequestURI = r.RequestURI
 		}
 	}
-	uriMatch := util.RootURIRegexp.FindStringSubmatch(r.RequestURI)
-	if len(uriMatch) > 1 {
-		rs.CurrentRouter = middleware.RootRouters[uriMatch[1]]
+	rootURI, _ := util.GetRootURI(r.RequestURI)
+	if rootURI != "" {
+		rs.CurrentRouter = middleware.RootRouters[rootURI]
 	}
 	if rs.CurrentRouter == nil {
 		rs.CurrentRouter = coreRouter
@@ -388,14 +398,6 @@ func preIntercept() http.Handler {
 func postIntercept() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)
-		statusCodeText := strconv.Itoa(rs.StatusCode)
-		if rs.IsTunnelRequest {
-			w.Header()[HeaderGotoTunnel] = r.Header[HeaderGotoRequestedTunnel]
-		} else if rs.WillProxy {
-			w.Header().Add(fmt.Sprintf("Proxy-%s", HeaderGotoResponseStatus), statusCodeText)
-		} else {
-			w.Header().Add(HeaderGotoResponseStatus, statusCodeText)
-		}
 		if rs.IsTunnelConnectRequest {
 			if !tunnel.HijackConnect(r, w) {
 				w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoTunnelStatus, rs.TunnelCount), strconv.Itoa(http.StatusInternalServerError))

@@ -21,7 +21,6 @@ import (
 	"fmt"
 	mcpserver "goto/pkg/ai/mcp/server"
 	"goto/pkg/constants"
-	"goto/pkg/proxy"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"io"
@@ -36,51 +35,50 @@ var (
 	Middleware = middleware.NewMiddleware("mcp", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	mcpapiRouter := middleware.RootPath("/mcpapi")
+func setRoutes(r *mux.Router, root *mux.Router) {
+	mcpapi := middleware.RootPath("/mcpapi")
+	mcpServers := util.PathRouter(mcpapi, "/servers")
 
-	util.AddRoute(mcpapiRouter, "/servers/add", addServers, "POST")
+	util.AddRoute(mcpServers, "/add", addServers, "POST")
 
-	util.AddRoute(mcpapiRouter, "/servers", getServers, "GET")
-	util.AddRoute(mcpapiRouter, "/servers/all", getServers, "GET")
-	util.AddRoute(mcpapiRouter, "/servers/names", getServers, "GET")
-	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}?", getServers, "GET")
+	util.AddRoute(mcpServers, "", getServers, "GET")
+	util.AddRoute(mcpServers, "/all", getServers, "GET")
+	util.AddRoute(mcpServers, "/names", getServers, "GET")
+	util.AddRoute(mcpServers, "/{server}?", getServers, "GET")
 
-	util.AddRouteQ(mcpapiRouter, "/{s:servers|server}/{server}/route", setServerRoute, "uri", "POST")
-	util.AddRoute(mcpapiRouter, "/servers/start", startServer, "POST")
-	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/start", startServer, "POST")
-	util.AddRoute(mcpapiRouter, "/servers/stop", stopServer, "POST")
-	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/stop", stopServer, "POST")
+	util.AddRouteQ(mcpServers, "/{server}/route", setServerRoute, "uri", "POST")
+	util.AddRoute(mcpServers, "/start", startServer, "POST")
+	util.AddRoute(mcpServers, "/{server}/start", startServer, "POST")
+	util.AddRoute(mcpServers, "/stop", stopServer, "POST")
+	util.AddRoute(mcpServers, "/{server}/stop", stopServer, "POST")
 
-	util.AddRouteWithMultiQ(mcpapiRouter, "/proxy", setupMCPProxy, [][]string{{"endpoint"}, {"sni", "headers"}}, "POST")
-	util.AddRouteWithMultiQ(mcpapiRouter, "/proxy/{tool}", setupMCPProxy, [][]string{{"endpoint"}, {"to"}, {"sni", "headers"}}, "POST")
+	util.AddRouteQ(mcpServers, "/{server}/payload/completion", addCompletionPayload, "type", "POST")
+	util.AddRouteQ(mcpServers, "/{server}/payload/completion/delay={delay}", addCompletionPayload, "type", "POST")
 
-	util.AddRouteQ(mcpapiRouter, "/{s:servers|server}/{server}/payload/completion", addCompletionPayload, "type", "POST")
-	util.AddRouteQ(mcpapiRouter, "/{s:servers|server}/{server}/payload/completion/delay={delay}", addCompletionPayload, "type", "POST")
+	util.AddRoute(mcpServers, "/{kind:tools|prompts|resources|templates}", getComponents, "GET")
+	util.AddRoute(mcpServers, "/{server}/{kind:tools|prompts|resources|templates}", getComponents, "GET")
+	util.AddRoute(mcpServers, "/{server}/{kind:tools|prompts|resources|templates}/{name}", getComponents, "GET")
 
-	util.AddRoute(mcpapiRouter, "/{q:servers|all}/{kind:tools|prompts|resources|templates}", getComponents, "GET")
-	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/{kind:tools|prompts|resources|templates}", getComponents, "GET")
-	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/{kind:tools|prompts|resources|templates}/{name}", getComponents, "GET")
+	util.AddRoute(mcpServers, "/{server}/{kind:tools|prompts|resources|templates}/add", addComponent, "POST")
+	util.AddRoute(mcpServers, "/{server}/{t:tools|tool}/{tool}/call", callTool, "POST")
 
-	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/{kind:tools|prompts|resources|templates}/add", addComponent, "POST")
-	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/{t:tools|tool}/{tool}/call", callTool, "POST")
+	util.AddRoute(mcpServers, "/{server}/payload/{kind:tools|prompts|resources|templates}/{name}", addComponentPayload, "POST")
+	util.AddRoute(mcpServers, "/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}", addComponentPayload, "POST")
+	util.AddRoute(mcpServers, "/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}/delay={delay}", addComponentPayload, "POST")
 
-	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/payload/{kind:tools|prompts|resources|templates}/{name}", addComponentPayload, "POST")
-	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}", addComponentPayload, "POST")
-	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}/delay={delay}", addComponentPayload, "POST")
+	util.AddRoute(mcpServers, "/clear/all", clearServers, "POST")
+	util.AddRoute(mcpServers, "/clear", clearServers, "POST")
+	util.AddRoute(mcpServers, "/{server}/clear", clearServers, "POST")
 
-	util.AddRoute(mcpapiRouter, "/servers/clear/all", clearServers, "POST")
-	util.AddRoute(mcpapiRouter, "/servers/clear", clearServers, "POST")
-	util.AddRoute(mcpapiRouter, "/{s:servers|server}/{server}/clear", clearServers, "POST")
+	mcpStatus := util.PathRouter(mcpapi, "/status")
+	util.AddRouteQO(mcpStatus, "/set/{status}", setStatus, "uri", "POST")
+	util.AddRouteQO(mcpStatus, "/set/{status}/header/{header}={value}", setStatus, "uri", "POST")
+	util.AddRouteQO(mcpStatus, "/set/{status}/header/{header}", setStatus, "uri", "POST")
+	util.AddRouteQO(mcpStatus, "/set/{status}/header/not/{header}", setStatus, "uri", "POST")
 
-	util.AddRouteQO(mcpapiRouter, "/status/set/{status}", setStatus, "uri", "POST")
-	util.AddRouteQO(mcpapiRouter, "/status/set/{status}/header/{header}={value}", setStatus, "uri", "POST")
-	util.AddRouteQO(mcpapiRouter, "/status/set/{status}/header/{header}", setStatus, "uri", "POST")
-	util.AddRouteQO(mcpapiRouter, "/status/set/{status}/header/not/{header}", setStatus, "uri", "POST")
-
-	util.AddRoute(mcpapiRouter, "/status/configure", configureStatus, "POST")
-	util.AddRoute(mcpapiRouter, "/status/clear", clearStatus, "POST")
-	util.AddRoute(mcpapiRouter, "/statuses", getStatuses, "GET")
+	util.AddRoute(mcpStatus, "/configure", configureStatus, "POST")
+	util.AddRoute(mcpStatus, "/clear", clearStatus, "POST")
+	util.AddRoute(mcpStatus, "es", getStatuses, "GET")
 }
 
 func getServers(w http.ResponseWriter, r *http.Request) {
@@ -370,27 +368,6 @@ func addComponentPayload(w http.ResponseWriter, r *http.Request) {
 	} else {
 		msg = fmt.Sprintf("Set payload for component [%s] in MCP %s to server [%s] on port [%d]", name, kind, serverName, port)
 	}
-	fmt.Fprintln(w, msg)
-	util.AddLogMessage(msg, r)
-}
-
-func setupMCPProxy(w http.ResponseWriter, r *http.Request) {
-	port := util.GetRequestOrListenerPortNum(r)
-	serverName := util.GetStringParamValue(r, "server")
-	tool := util.GetStringParamValue(r, "tool")
-	toTool := util.GetStringParamValue(r, "to")
-	endpoint := util.GetStringParamValue(r, "endpoint")
-	sni := util.GetStringParamValue(r, "sni")
-	h, present := util.GetListParam(r, "headers")
-	headers := [][]string{}
-	if present {
-		for _, val := range h {
-			kv := strings.Split(val, ":")
-			headers = append(headers, []string{kv[0], kv[1]})
-		}
-	}
-	proxy.GetMCPProxyForPort(port).SetupMCPProxy(serverName, endpoint, sni, tool, toTool, headers)
-	msg := fmt.Sprintf("Setup MCP proxy at port [%d] for server [%s] tool [%s] to endpoint [%s] tool [%s] with sni [%s]", port, serverName, tool, endpoint, toTool, sni)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }

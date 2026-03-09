@@ -30,7 +30,7 @@ var (
 	Middleware = middleware.NewMiddleware("tls", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, root *mux.Router) {
 	tlsRouter := middleware.RootPath("/tls")
 	util.AddRoute(tlsRouter, "/cacert/add", addCACert, "PUT", "POST")
 	util.AddRoute(tlsRouter, "/cacert/remove", removeCACert, "PUT", "POST")

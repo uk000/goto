@@ -284,7 +284,10 @@ func processClientArgs() {
 	global.CmdClientConfig.URLs = strings.Split(urls, ",")
 	hlist := strings.Split(headers, ",")
 	for _, h := range hlist {
-		global.CmdClientConfig.Headers = append(global.CmdClientConfig.Headers, strings.Split(h, ":"))
+		hv := strings.Split(h, ":")
+		if len(hv) == 2 {
+			global.CmdClientConfig.Headers[hv[0]] = append(global.CmdClientConfig.Headers[hv[0]], hv[1])
+		}
 	}
 	retryOnList := strings.Split(retryOn, ",")
 	for _, r := range retryOnList {

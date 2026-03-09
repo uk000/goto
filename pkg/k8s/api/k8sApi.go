@@ -32,7 +32,7 @@ var (
 	Middleware = middleware.NewMiddleware("k8s", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, root *mux.Router) {
 	k8sRouter := middleware.RootPath("/k8s")
 
 	util.AddRoute(k8sRouter, "/config/{name}/{url}/{cadata}", apiConfigCluster, "POST")

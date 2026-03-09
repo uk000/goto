@@ -18,7 +18,6 @@ package grpcserver
 
 import (
 	"fmt"
-	"goto/pkg/proxy"
 	"goto/pkg/rpc"
 	"goto/pkg/rpc/grpc"
 	gotogrpc "goto/pkg/rpc/grpc"
@@ -40,7 +39,7 @@ var (
 	lock           = sync.RWMutex{}
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, root *mux.Router) {
 	grpcRouter := middleware.RootPath("/grpc")
 	util.AddRoute(grpcRouter, "/open", openGRPCPort, "POST")
 	util.AddRoute(grpcRouter, "/services/reflect/{upstream}", loadReflectedServices, "POST")
@@ -50,15 +49,6 @@ func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
 	util.AddRoute(grpcRouter, "/services/{service}/stop", stopService, "POST")
 	util.AddRoute(grpcRouter, "/services/active", getActiveServices, "GET")
 	util.AddRoute(grpcRouter, "/services", getActiveServices, "GET")
-
-	util.AddRoute(grpcRouter, "/proxy/status", getGRPCProxyDetails, "GET")
-	util.AddRoute(grpcRouter, "/proxy/clear", clearGRPCProxies, "POST")
-	util.AddRoute(grpcRouter, "/proxy/{service}/{upstream}/tee/{teeport}", proxyGRPCService, "POST")
-	util.AddRoute(grpcRouter, "/proxy/{service}/{upstream}/{targetService}/tee/{teeport}", proxyGRPCService, "POST")
-	util.AddRoute(grpcRouter, "/proxy/{service}/{upstream}/{targetService}", proxyGRPCService, "POST")
-	util.AddRoute(grpcRouter, "/proxy/{service}/{upstream}", proxyGRPCService, "POST")
-	util.AddRoute(grpcRouter, "/proxy/{service}/{upstream}/{targetService}/delay/{delay}", proxyGRPCService, "POST")
-	util.AddRoute(grpcRouter, "/proxy/{service}/{upstream}/delay/{delay}", proxyGRPCService, "POST")
 }
 
 func openGRPCPort(w http.ResponseWriter, r *http.Request) {
@@ -128,49 +118,6 @@ func getActiveServices(w http.ResponseWriter, r *http.Request) {
 	} else {
 		util.WriteJsonPayload(w, gotogrpc.ServiceRegistry.Services)
 	}
-}
-
-func proxyGRPCService(w http.ResponseWriter, r *http.Request) {
-	rs, _, _, msg, ok := rpc.CheckService(w, r, grpc.ServiceRegistry)
-	upstream := util.GetStringParamValue(r, "upstream")
-	if ok {
-		targetService := util.GetStringParamValue(r, "targetService")
-		teeport := util.GetIntParamValue(r, "teeport")
-		delayMin, delayMax, delayCount, ok := util.GetDurationParam(r, "delay")
-		if !ok {
-			delayMin = 0
-			delayMax = 0
-			delayCount = 0
-		}
-		port := util.GetRequestOrListenerPortNum(r)
-		proxy := proxy.GetGRPCProxyForPort(port)
-		proxy.SetupGRPCProxy(rs.GetName(), targetService, nil, upstream, "", teeport, delayMin, delayMax, delayCount)
-		msg = fmt.Sprintf("Service [%s] will be proxied on port [%d] to upstream [%s] target service [%s]", rs.GetName(), port, upstream, targetService)
-	}
-	fmt.Fprintln(w, msg)
-	util.AddLogMessage(msg, r)
-}
-
-func getGRPCProxyDetails(w http.ResponseWriter, r *http.Request) {
-	port := util.GetRequestOrListenerPortNum(r)
-	proxy := proxy.GetGRPCProxyForPort(port)
-	util.WriteJsonPayload(w, proxy)
-	util.AddLogMessage("GRPC Proxy Details Returned", r)
-}
-
-func clearGRPCProxies(w http.ResponseWriter, r *http.Request) {
-	port := util.GetRequestOrListenerPortNum(r)
-	proxy := proxy.GetGRPCProxyForPort(port)
-	proxy.Init()
-	util.AddLogMessage("GRPC Proxy cleared", r)
-}
-
-func removeGRPCProxy(w http.ResponseWriter, r *http.Request) {
-	service := util.GetStringParamValue(r, "service")
-	port := util.GetRequestOrListenerPortNum(r)
-	proxy := proxy.GetGRPCProxyForPort(port)
-	proxy.RemoveProxy(service)
-	util.AddLogMessage(fmt.Sprintf("GRPC Proxy [%s] removed", service), r)
 }
 
 func loadReflectedServices(w http.ResponseWriter, r *http.Request) {

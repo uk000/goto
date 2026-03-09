@@ -30,7 +30,7 @@ var (
 	Middleware = middleware.NewMiddleware("airegistry", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, root *mux.Router) {
 	agentRouter := middleware.RootPath("/ai/agents")
 	util.AddRoute(agentRouter, "", getAgents, "GET")
 	util.AddRoute(agentRouter, "/add", addAgents, "POST")

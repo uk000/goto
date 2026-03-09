@@ -206,6 +206,10 @@ func (c *GRPCClient) IsHTTP() bool {
 	return false
 }
 
+func (c *GRPCClient) IsH2() bool {
+	return false
+}
+
 func (c *GRPCClient) createContext(headers map[string]string, md metadata.MD) (context.Context, context.CancelFunc) {
 	ctx := context.Background()
 	if md != nil {

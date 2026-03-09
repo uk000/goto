@@ -81,7 +81,7 @@ type CmdClientConfig struct {
 	Protocol     string
 	URLs         []string
 	Method       string
-	Headers      [][]string
+	Headers      map[string][]string
 	Payload      string
 	AutoPayload  string
 	RequestCount int

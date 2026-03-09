@@ -35,7 +35,7 @@ var (
 	Middleware = middleware.NewMiddleware("tcp", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, root *mux.Router) {
 	tcpRouter := middleware.RootPath("/server/tcp")
 	util.AddRoute(tcpRouter, "/{port}/configure", configureTCP, "POST")
 	util.AddRoute(tcpRouter, "/{port}/timeout/set/read={duration}", setConnectionDurationConfig, "PUT", "POST")

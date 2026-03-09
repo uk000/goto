@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 	"goto/pkg/global"
-	"goto/pkg/proxy"
+	mcpproxy "goto/pkg/proxy/mcp"
 	"goto/pkg/server/middleware"
 	"goto/pkg/server/response/payload"
 	"goto/pkg/server/response/status"
@@ -546,7 +546,7 @@ func (m *MCPServer) AddTools(b []byte) ([]string, error) {
 			return nil, err
 		}
 		if tool.IsProxy {
-			proxy.GetMCPProxyForPort(m.Port).SetupMCPProxy(m.Name, tool.Config.RemoteTool.URL, "", tool.Tool.Name, tool.Tool.Name, nil)
+			mcpproxy.GetMCPProxyForPort(m.Port).SetupMCPProxy(m.Name, tool.Config.RemoteTool.URL, tool.Tool.Name, tool.Tool.Name, nil)
 		}
 		m.AddTool(tool)
 		tools = append(tools, tool)

@@ -14,18 +14,20 @@
  * limitations under the License.
  */
 
-package proxy
+package mcpproxy
 
 import (
 	"errors"
 	"goto/pkg/proxy/trackers"
 	"goto/pkg/server/response/status"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type MCPSessionLog struct {
@@ -44,15 +46,30 @@ type MCPSession struct {
 }
 
 type MCPTarget struct {
-	*HTTPTarget
+	Name           string                 `json:"name"`
+	Protocol       string                 `json:"protocol"`
+	Endpoint       string                 `json:"endpoint"`
+	Authority      string                 `json:"authority"`
+	Delay          *types.Delay           `json:"delay"`
+	Retries        int                    `json:"retries"`
+	RetryDelay     time.Duration          `json:"retryDelay"`
 	Tools          map[string]string      `json:"tools"`
 	ActiveSessions map[string]*MCPSession `json:"activeSessions"`
 	PastSessions   map[string]*MCPSession `json:"pastSessions"`
+	lock           sync.RWMutex
+}
+
+type MatchedTarget struct {
+	target      *MCPTarget
+	matchedTool string
 }
 
 type MCPProxy struct {
-	*HTTPProxy
+	Port       int                       `json:"port"`
+	Enabled    bool                      `json:"enabled"`
+	Targets    map[string]*MCPTarget     `json:"targets"`
 	MCPTracker *trackers.MCPProxyTracker `json:"tracker"`
+	lock       sync.RWMutex
 }
 
 var (
@@ -66,7 +83,7 @@ func WillProxyMCP(port int, r *http.Request) (willProxy bool) {
 		return false
 	}
 	p := GetMCPProxyForPort(port)
-	if !p.Enabled || !p.hasAnyTargets() || status.IsForcedStatus(r) {
+	if !p.Enabled || len(p.Targets) == 0 || status.IsForcedStatus(r) {
 		return false
 	}
 	tool := ""
@@ -91,16 +108,16 @@ func WillProxyMCP(port int, r *http.Request) (willProxy bool) {
 		target = p.Targets["*"]
 	}
 	if target != nil {
-		matches := map[string]*TargetMatchInfo{tool: &TargetMatchInfo{target: target.GetHTTPTarget().ProxyTarget, URI: ""}}
-		rs.WillProxy = true
+		matches := map[string]*MatchedTarget{tool: {target: target, matchedTool: tool}}
+		rs.ProxiedRequest = true
 		rs.ProxyTargets = matches
 		return true
 	}
 	return
 }
 
-func (p *MCPProxy) SetupMCPProxy(server, endpoint, sni, fromTool, toTool string, headers [][]string) error {
-	_, err := p.addMCPTarget(server, endpoint, sni, fromTool, toTool, headers)
+func (p *MCPProxy) SetupMCPProxy(server, endpoint, fromTool, toTool string, headers map[string]string) error {
+	_, err := p.addMCPTarget(server, endpoint, fromTool, toTool, headers)
 	if err != nil {
 		return err
 	}
@@ -122,7 +139,9 @@ func GetMCPProxyForPort(port int) *MCPProxy {
 
 func newMCPProxy(port int) *MCPProxy {
 	p := &MCPProxy{
-		HTTPProxy:  getHTTPProxyForPort(port),
+		Port:       port,
+		Enabled:    true,
+		Targets:    map[string]*MCPTarget{},
 		MCPTracker: &trackers.MCPProxyTracker{},
 	}
 	p.initTracker()
@@ -130,7 +149,9 @@ func newMCPProxy(port int) *MCPProxy {
 }
 
 func (p *MCPProxy) Init() {
-	p.Proxy.init()
+	p.lock.Lock()
+	p.Targets = map[string]*MCPTarget{}
+	p.lock.Unlock()
 	p.initTracker()
 }
 
@@ -141,28 +162,20 @@ func (p *MCPProxy) initTracker() {
 }
 
 func (p *MCPProxy) RemoveProxy(server string) {
-	p.Proxy.deleteProxyTarget(server)
+	delete(p.Targets, server)
 }
 
-func (p *MCPProxy) addMCPTarget(server, endpoint, sni, fromTool, toTool string, headers [][]string) (*MCPTarget, error) {
+func (p *MCPProxy) addMCPTarget(server, endpoint, fromTool, toTool string, headers map[string]string) (*MCPTarget, error) {
 	if server == "" || endpoint == "" {
 		return nil, errors.New("no endpoint given")
 	}
 	target := &MCPTarget{
-		HTTPTarget:     newHTTPTarget(fromTool, endpoint),
+		Name:           server,
+		Endpoint:       endpoint,
+		Tools:          map[string]string{},
 		ActiveSessions: map[string]*MCPSession{},
 		PastSessions:   map[string]*MCPSession{},
 	}
 	target.Tools[fromTool] = toTool
-	target.parent = target
-	p.setupHTTPTarget(target, "", sni, "", "", headers)
 	return target, nil
-}
-
-func (t *MCPTarget) GetProxyTarget() *ProxyTarget {
-	return t.ProxyTarget
-}
-
-func (t *MCPTarget) GetHTTPTarget() *HTTPTarget {
-	return t.HTTPTarget
 }

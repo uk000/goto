@@ -22,6 +22,7 @@ import (
 	"goto/pkg/server/middleware"
 	"goto/pkg/types"
 	"goto/pkg/util"
+	"log"
 	"net/http"
 	"slices"
 	"strings"
@@ -41,7 +42,7 @@ var (
 	routeLookup    = APIRouteLookup{}
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router, root *mux.Router) {
 	infoRouter := middleware.RootPath("/goto")
 	util.AddRoute(infoRouter, "/version", showVersion, "GET")
 	util.AddRoute(infoRouter, "/{k:routes|apis}/level={level}", showApis, "GET")
@@ -239,7 +240,7 @@ func loadAPIsFromRouter(r *mux.Router) {
 			routesWithCurl[root][subroot] = append(routesWithCurl[root][subroot], types.Pair[string, []string]{subpath, curls})
 			routeLookup[root][subroot][subpath] = methods
 			subPaths[root][subroot] = append(subPaths[root][subroot], subpath)
-			// log.Printf("%s -> %+v", subpath, route.GetHandler())
+			log.Printf("%s -> %+v", subpath, route.GetHandler())
 		}
 		return nil
 	})

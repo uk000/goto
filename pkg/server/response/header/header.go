@@ -36,8 +36,8 @@ var (
 	headersLock                   sync.RWMutex
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	headersRouter := middleware.RootPath("/headers")
+func setRoutes(r *mux.Router, root *mux.Router) {
+	headersRouter := util.PathRouter(r, "/headers")
 	util.AddRoute(headersRouter, "/add/{header}={value}", addResponseHeader, "PUT", "POST")
 	util.AddRoute(headersRouter, "/remove/{header}", removeResponseHeader, "PUT", "POST")
 	util.AddRoute(headersRouter, "/clear", clearResponseHeader, "PUT", "POST")

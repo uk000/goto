@@ -39,8 +39,8 @@ var (
 	delayLock        sync.RWMutex
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	delayRouter := middleware.RootPath("/delay")
+func setRoutes(r *mux.Router, root *mux.Router) {
+	delayRouter := util.PathRouter(r, "/delay")
 	util.AddRoute(delayRouter, "/set/{delay}", setDelay, "POST", "PUT")
 	util.AddRoute(delayRouter, "/clear", setDelay, "POST", "PUT")
 	util.AddRoute(delayRouter, "", getDelay, "GET")

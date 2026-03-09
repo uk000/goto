@@ -24,17 +24,22 @@ import (
 	"goto/pkg/server/request/timeout"
 	"goto/pkg/server/request/tracking"
 	"goto/pkg/server/request/uri"
+	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
 )
 
 var (
 	Middleware         = middleware.NewMiddleware("request", setRoutes, middlewareFunc)
-	requestMiddlewares = []*middleware.Middleware{tracking.Middleware, timeout.Middleware, uri.Middleware, filter.Middleware}
+	requestMiddlewares = []*middleware.Middleware{timeout.Middleware, filter.Middleware}
+	CoreMiddlewares    = []*middleware.Middleware{tracking.Middleware, uri.Middleware}
 )
 
-func setRoutes(r *mux.Router, parent *mux.Router, root *mux.Router) {
-	middleware.AddRoutes(middleware.RootPath("/server/request"), r, root, requestMiddlewares...)
+func setRoutes(r *mux.Router, root *mux.Router) {
+	server := middleware.RootPath("/server")
+	requestRouter := util.PathRouter(server, "/request")
+	middleware.AddRoutes(requestRouter, root, CoreMiddlewares...)
+	middleware.AddRoutes(requestRouter, root, requestMiddlewares...)
 }
 
 func middlewareFunc(next http.Handler) http.Handler {
