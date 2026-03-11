@@ -16,7 +16,7 @@ var (
 	Middleware = middleware.NewMiddleware("tracking", setRoutes, nil)
 )
 
-func setRoutes(r, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	serverRouter := middleware.RootPath("/server")
 	configureRoutes(util.PathRouter(serverRouter, "/request"))
 	configureRoutes(util.PathRouter(serverRouter, "/response"))

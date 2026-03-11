@@ -14,7 +14,7 @@ var (
 	Middleware = middleware.NewMiddleware("memory", setRoutes, middlewareFunc)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	memoryRouter := middleware.RootPath("/memory")
 
 	util.AddRoute(memoryRouter, "/contexts/add/{context}", addContext, "POST")

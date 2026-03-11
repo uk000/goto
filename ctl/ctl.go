@@ -35,6 +35,7 @@ type GotoConfig struct {
 	Jobs     *Jobs     `yaml:"jobs,omitempty"`
 	MCP      *MCP      `yaml:"mcp,omitempty"`
 	A2A      *A2A      `yaml:"a2a,omitempty"`
+	Proxies  []*Proxy  `yaml:"proxy,omitempty" json:"proxy,omitempty"`
 }
 
 var (
@@ -59,6 +60,7 @@ func ctlApply(args []string) {
 		processScripts(config)
 		processMCP(config)
 		processA2A(config)
+		processProxy(config)
 	}
 }
 

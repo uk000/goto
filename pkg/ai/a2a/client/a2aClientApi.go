@@ -33,7 +33,7 @@ var (
 	Middleware = middleware.NewMiddleware("a2a", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	a2a := middleware.RootPath("/a2a")
 	a2aClientRouter := util.PathRouter(a2a, "/client")
 	util.AddRouteWithMultiQ(a2aClientRouter, "/agent/card", fetchAgentCard, [][]string{{"url"}, {"authority"}}, "GET")

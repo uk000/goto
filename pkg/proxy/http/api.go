@@ -16,10 +16,12 @@ var (
 	Middleware = middleware.NewMiddleware("proxy", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	proxyRouter := middleware.RootPath("/proxy")
 	httpProxyRouter := util.PathPrefix(proxyRouter, "/http")
 	util.AddRoute(httpProxyRouter, "/{o:enable|disable}", enableProxy, "POST", "PUT")
+	util.AddRoute(httpProxyRouter, "", getProxy, "GET")
+	util.AddRoute(httpProxyRouter, "/all", getProxy, "GET")
 
 	httpTargetsRouter := util.PathPrefix(httpProxyRouter, "/targets")
 	util.AddRoute(httpTargetsRouter, "/add", addHTTPTarget, "POST", "PUT")
@@ -27,6 +29,7 @@ func setRoutes(r *mux.Router, root *mux.Router) {
 	util.AddRoute(httpTargetsRouter, "/{target}/remove", removeHTTPTarget, "POST", "PUT")
 	util.AddRoute(httpTargetsRouter, "/{target}/{o:enable|disable}", enableHTTPTarget, "POST", "PUT")
 	util.AddRoute(httpTargetsRouter, "", getProxyTargets, "GET")
+	util.AddRoute(httpTargetsRouter, "/all", getProxyTargets, "GET")
 	util.AddRoute(httpTargetsRouter, "/{target}/tracker", getProxyTargetTracker, "GET")
 	util.AddRoute(httpProxyRouter, "/trackers/{all}?", getProxyTrackers, "GET")
 	util.AddRoute(proxyRouter, "/trackers/{all}?/clear", clearProxyTrackers, "POST")
@@ -36,7 +39,7 @@ func enableProxy(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	o := util.GetStringParamValue(r, "o")
 	enable := strings.EqualFold(o, "enable")
-	getPortProxy(port).enable(enable)
+	GetPortProxy(port).enable(enable)
 	msg := fmt.Sprintf("Proxy [%d] %sd", port, o)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
@@ -53,8 +56,8 @@ func addHTTPTarget(w http.ResponseWriter, r *http.Request) {
 		if target.Port > 0 {
 			port = target.Port
 		}
-		proxy := getPortProxy(port)
-		if err := proxy.addTarget(target); err != nil {
+		proxy := GetPortProxy(port)
+		if err := proxy.AddTarget(target); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			msg = fmt.Sprintf("Failed to process target with error: %s", err.Error())
 			fmt.Fprintln(w, msg)
@@ -68,7 +71,7 @@ func addHTTPTarget(w http.ResponseWriter, r *http.Request) {
 
 func clearHTTPTarget(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	getPortProxy(port).clearTargets()
+	GetPortProxy(port).clearTargets()
 	msg := fmt.Sprintf("Proxy [%d] targets cleared", port)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
@@ -78,7 +81,7 @@ func removeHTTPTarget(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	target := util.GetStringParamValue(r, "target")
 	msg := ""
-	if getPortProxy(port).removeTarget(target) {
+	if GetPortProxy(port).removeTarget(target) {
 		msg = fmt.Sprintf("Proxy [%d] target [%s] removed", port, target)
 	} else {
 		msg = fmt.Sprintf("Proxy [%d] target [%s] doesn't exist", port, target)
@@ -93,7 +96,7 @@ func enableHTTPTarget(w http.ResponseWriter, r *http.Request) {
 	o := util.GetStringParamValue(r, "o")
 	enable := strings.EqualFold(o, "enable")
 	msg := ""
-	if getPortProxy(port).enableTarget(target, enable) {
+	if GetPortProxy(port).enableTarget(target, enable) {
 		msg = fmt.Sprintf("Proxy [%d] target [%s] %sd", port, target, o)
 	} else {
 		msg = fmt.Sprintf("Proxy [%d] target [%s] doesn't exist", port, target)
@@ -102,14 +105,38 @@ func enableHTTPTarget(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
-func getProxyTargets(w http.ResponseWriter, r *http.Request) {
-	port := util.GetRequestOrListenerPortNum(r)
-	proxy := getPortProxy(port)
-	util.AddLogMessage("Reporting proxy targets", r)
+func getProxy(w http.ResponseWriter, r *http.Request) {
+	all := strings.Contains(r.RequestURI, "all")
 	result := map[string]any{}
-	result["port"] = port
-	result["http"] = proxy.Targets
+	if all {
+		for port, proxy := range portProxy {
+			result[strconv.Itoa(port)] = proxy
+		}
+	} else {
+		port := util.GetRequestOrListenerPortNum(r)
+		proxy := GetPortProxy(port)
+		result["port"] = port
+		result["http"] = proxy
+	}
 	util.WriteJsonPayload(w, result)
+	util.AddLogMessage("Reported proxy targets", r)
+}
+
+func getProxyTargets(w http.ResponseWriter, r *http.Request) {
+	all := strings.Contains(r.RequestURI, "all")
+	result := map[string]any{}
+	if all {
+		for port, proxy := range portProxy {
+			result[strconv.Itoa(port)] = proxy.Targets
+		}
+	} else {
+		port := util.GetRequestOrListenerPortNum(r)
+		proxy := GetPortProxy(port)
+		result["port"] = port
+		result["http"] = proxy.Targets
+	}
+	util.WriteJsonPayload(w, result)
+	util.AddLogMessage("Reported proxy targets", r)
 }
 
 func checkAndGetTarget(proxy *Proxy, w http.ResponseWriter, r *http.Request) *Target {
@@ -124,7 +151,7 @@ func checkAndGetTarget(proxy *Proxy, w http.ResponseWriter, r *http.Request) *Ta
 
 func getProxyTargetTracker(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	proxy := getPortProxy(port)
+	proxy := GetPortProxy(port)
 	target := checkAndGetTarget(proxy, w, r)
 	result := map[string]any{}
 	result["port"] = port
@@ -150,7 +177,7 @@ func getProxyTrackers(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else {
-		proxy := getPortProxy(port)
+		proxy := GetPortProxy(port)
 		result["port"] = port
 		result["enabled"] = proxy.Enabled
 		result["targets"] = proxy.Targets
@@ -169,7 +196,7 @@ func clearProxyTrackers(w http.ResponseWriter, r *http.Request) {
 			proxy.initTracker()
 		}
 	} else {
-		proxy := getPortProxy(port)
+		proxy := GetPortProxy(port)
 		proxy.initTracker()
 	}
 	w.WriteHeader(http.StatusOK)

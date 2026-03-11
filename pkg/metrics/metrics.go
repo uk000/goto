@@ -311,7 +311,7 @@ func getStats(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, serverStats)
 }
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	metricsRouter := middleware.RootPath("/metrics")
 	util.AddRoute(metricsRouter, "", promhttp.HandlerFor(promMetrics.registry, promhttp.HandlerOpts{}).ServeHTTP, "GET")
 	util.AddRoute(metricsRouter, "/go", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}).ServeHTTP, "GET")

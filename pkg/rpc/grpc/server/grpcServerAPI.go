@@ -39,7 +39,7 @@ var (
 	lock           = sync.RWMutex{}
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	grpcRouter := middleware.RootPath("/grpc")
 	util.AddRoute(grpcRouter, "/open", openGRPCPort, "POST")
 	util.AddRoute(grpcRouter, "/services/reflect/{upstream}", loadReflectedServices, "POST")

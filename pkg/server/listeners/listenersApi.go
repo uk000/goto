@@ -35,7 +35,7 @@ var (
 	Middleware = middleware.NewMiddleware("listeners", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	lRouter := middleware.RootPath("/server/listeners")
 	util.AddRoute(lRouter, "/add", addListener, "POST", "PUT")
 	util.AddRoute(lRouter, "/update", updateListener, "POST", "PUT")

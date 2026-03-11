@@ -38,7 +38,7 @@ var (
 	statusManager = status.NewStatusManager()
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	a2a := middleware.RootPath("/a2a")
 	agentsRouter := util.PathRouter(a2a, "/agents")
 	util.AddRoute(agentsRouter, "", getAgents, "GET")

@@ -35,9 +35,10 @@ var (
 	Middleware = middleware.NewMiddleware("ui", setRoutes, middlewareFunc)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
-	util.AddRoute(root, "/ui", showUI, "GET")
-	util.AddRoute(root, "/ui/ws", handleWebsocket, "GET")
+func setRoutes(r *mux.Router) {
+	uiRouter := middleware.RootPath("/ui")
+	util.AddRoute(uiRouter, "", showUI, "GET")
+	util.AddRoute(uiRouter, "/ws", handleWebsocket, "GET")
 }
 
 func showUI(w http.ResponseWriter, r *http.Request) {

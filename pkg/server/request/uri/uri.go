@@ -60,7 +60,7 @@ var (
 	uriLock            sync.RWMutex
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	uriRouter := util.PathRouter(r, "/uri")
 	util.AddRouteWithMultiQ(uriRouter, "/reroute", setStatus, [][]string{{"from", "to"}}, "POST", "PUT")
 	util.AddRouteQ(uriRouter, "/set/status={status}", setStatus, "uri", "POST", "PUT")

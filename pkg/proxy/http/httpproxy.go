@@ -22,10 +22,10 @@ import (
 )
 
 type Proxy struct {
-	Port        int                        `json:"port"`
-	Targets     map[string]*Target         `json:"targets"`
-	Enabled     bool                       `json:"enabled"`
-	HTTPTracker *trackers.HTTPProxyTracker `json:"tracker"`
+	Port        int                        `yaml:"port" json:"port"`
+	Targets     map[string]*Target         `yaml:"targets" json:"targets"`
+	Enabled     bool                       `yaml:"enabled" json:"enabled"`
+	HTTPTracker *trackers.HTTPProxyTracker `yaml:"-" json:"tracker"`
 	Router      *mux.Router
 	lock        sync.RWMutex
 }
@@ -46,7 +46,7 @@ var (
 	proxyLock sync.RWMutex
 )
 
-func getPortProxy(port int) *Proxy {
+func GetPortProxy(port int) *Proxy {
 	proxyLock.RLock()
 	proxy := portProxy[port]
 	proxyLock.RUnlock()
@@ -57,6 +57,12 @@ func getPortProxy(port int) *Proxy {
 		portProxy[port] = proxy
 	}
 	return proxy
+}
+
+func ClearAllProxies() {
+	proxyLock.Lock()
+	defer proxyLock.Unlock()
+	portProxy = map[int]*Proxy{}
 }
 
 func newProxy(port int) *Proxy {
@@ -99,9 +105,6 @@ func parseTarget(r io.Reader) (*Target, error) {
 	if target.Endpoints == nil {
 		return nil, errors.New("target endpoints missing")
 	}
-	if target.Name == "" {
-		return nil, errors.New("target name missing")
-	}
 	for name, ep := range target.Endpoints {
 		if ep.URL == "" {
 			return nil, fmt.Errorf("target endpoint [%s] missing url", name)
@@ -133,7 +136,7 @@ func (p *Proxy) enable(enable bool) {
 	p.Enabled = enable
 }
 
-func (p *Proxy) addTarget(t *Target) error {
+func (p *Proxy) AddTarget(t *Target) error {
 	for _, trigger := range t.Triggers {
 		for _, match := range trigger.MatchAny {
 			//Registering URI with mux, so that the URI's embedded vars are extracted by mux
@@ -487,7 +490,7 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	rs := util.GetRequestStore(r)
 	var targets ProxyTargets
-	proxy := getPortProxy(port)
+	proxy := GetPortProxy(port)
 	if rs.ProxyTargets == nil {
 		targets = proxy.getMatchingProxyTargets(r)
 	} else {
@@ -516,7 +519,7 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 func WillProxyHTTP(w http.ResponseWriter, r *http.Request) bool {
 	port := util.GetRequestOrListenerPortNum(r)
-	proxy := getPortProxy(port)
+	proxy := GetPortProxy(port)
 	rs := util.GetRequestStore(r)
 	rs.ProxiedRequest = false
 	if proxy.Enabled && proxy.hasAnyTargets() && !status.IsForcedStatus(r) {

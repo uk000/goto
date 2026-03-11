@@ -37,7 +37,7 @@ var (
 	Middleware = middleware.NewMiddleware("registry", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	registryRouter := middleware.RootPath("/registry")
 	peersRouter := registryRouter.PathPrefix("/peers").Subrouter()
 	addLockerMaintenanceRoutes(registryRouter, peersRouter)

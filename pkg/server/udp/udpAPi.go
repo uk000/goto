@@ -31,7 +31,7 @@ var (
 	Middleware = middleware.NewMiddleware("udp", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	udpRouter := middleware.RootPath("/server/udp")
 	util.AddRoute(udpRouter, "/{port}/stop/{upstream}", stopUDPProxy, "POST")
 	util.AddRoute(udpRouter, "/{port}/proxy/{upstream}", proxyUDP, "POST")

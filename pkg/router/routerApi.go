@@ -30,7 +30,7 @@ var (
 	Middleware = middleware.NewMiddleware("routing", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	routingRouter := middleware.RootPath("/routing")
 	util.AddRoute(routingRouter, "/add", addRoute, "POST")
 	util.AddRoute(routingRouter, "/clear/all", clearRoutes, "POST")

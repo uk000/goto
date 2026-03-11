@@ -25,6 +25,55 @@ import (
 	"time"
 )
 
+type Channel[T any] struct {
+	Ch     chan T
+	mu     *sync.Mutex
+	closed bool
+}
+
+func NewChannel[T any]() *Channel[T] {
+	return &Channel[T]{
+		Ch: make(chan T, 10),
+		mu: &sync.Mutex{},
+	}
+}
+
+func (c *Channel[T]) ReadNoWait() T {
+	var val T
+	select {
+	case val = <-c.Ch:
+	default:
+	}
+	return val
+}
+
+func (c *Channel[T]) Write(val T) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.closed {
+		c.Ch <- val
+	}
+}
+
+func (c *Channel[T]) Wait() {
+	<-c.Ch
+}
+
+func (c *Channel[T]) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.closed {
+		c.closed = true
+		close(c.Ch)
+	}
+}
+
+func (c *Channel[T]) IsClosed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
+}
+
 func BuildListenerLabel(port int) string {
 	return fmt.Sprintf("[%s:%d].[%s@%s]", global.Self.PodIP, port, global.Self.Namespace, global.Self.Cluster)
 }

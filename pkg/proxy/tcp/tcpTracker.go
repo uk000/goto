@@ -14,14 +14,19 @@
  * limitations under the License.
  */
 
-package trackers
+package tcpproxy
 
 import (
+	"context"
+	"net"
 	"sync"
 	"time"
 )
 
 type ConnTracker struct {
+	ProxyPort         int       `json:"proxyPort"`
+	Upstream          string    `json:"upstream"`
+	RemoteAddress     string    `json:"remoteAddress"`
 	StartTime         time.Time `json:"startTime"`
 	EndTime           time.Time `json:"endTime"`
 	FirstByteInAt     time.Time `json:"firstByteInAt"`
@@ -41,12 +46,26 @@ type ConnTracker struct {
 }
 
 type TCPSessionTracker struct {
-	SNI        string       `json:"sni"`
-	Downstream *ConnTracker `json:"downstream"`
-	Upstream   *ConnTracker `json:"upstream"`
+	ProxyPort         int            `json:"proxyPort"`
+	Upstream          string         `json:"upstream"`
+	DownAddress       string         `json:"downAddress"`
+	SNI               string         `json:"sni"`
+	DownConnTracker   *ConnTracker   `json:"downConn"`
+	UpConnTracker     []*ConnTracker `json:"upConn"`
+	up                *TCPUpstream
+	downConn          net.Conn
+	endpointNames     []string       `json:"-"`
+	endpointAddresses []*net.TCPAddr `json:"-"`
+	upConns           []*net.TCPConn `json:"-"`
+	ctx               context.Context
+	cancel            context.CancelFunc
+	canceled          bool
 }
 
 type TCPTargetTracker struct {
+	ProxyPort         int                           `json:"proxyPort"`
+	Upstream          string                        `json:"upstream"`
+	DownAddress       string                        `json:"downAddress"`
 	ConnCount         int                           `json:"connCount"`
 	ConnCountsBySNI   map[string]int                `json:"connCountsBySNI"`
 	TCPSessionTracker map[string]*TCPSessionTracker `json:"tcpSessions"`
@@ -54,6 +73,7 @@ type TCPTargetTracker struct {
 }
 
 type TCPProxyTracker struct {
+	ProxyPort         int                          `json:"proxyPort"`
 	ConnCount         int                          `json:"connCount"`
 	ConnCountsBySNI   map[string]int               `json:"connCountsBySNI"`
 	RejectCountsBySNI map[string]int               `json:"rejectCountsBySNI"`
@@ -61,48 +81,54 @@ type TCPProxyTracker struct {
 	lock              sync.RWMutex
 }
 
-func NewTCPTracker() *TCPProxyTracker {
+func NewTCPTracker(port int) *TCPProxyTracker {
 	return &TCPProxyTracker{
+		ProxyPort:         port,
 		ConnCountsBySNI:   map[string]int{},
 		RejectCountsBySNI: map[string]int{},
 		TargetTrackers:    map[string]*TCPTargetTracker{},
 	}
 }
 
-func NewTCPTargetTracker() *TCPTargetTracker {
+func NewTCPTargetTracker(port int, upstream, downAddr string) *TCPTargetTracker {
 	return &TCPTargetTracker{
+		ProxyPort:         port,
+		Upstream:          upstream,
+		DownAddress:       downAddr,
 		ConnCountsBySNI:   map[string]int{},
 		TCPSessionTracker: map[string]*TCPSessionTracker{},
 	}
 }
 
-func NewTCPSessionTracker() *TCPSessionTracker {
+func NewTCPSessionTracker(port int, upstream, downAddr string) *TCPSessionTracker {
 	return &TCPSessionTracker{
-		Downstream: &ConnTracker{},
-		Upstream:   &ConnTracker{},
+		ProxyPort:       port,
+		Upstream:        upstream,
+		DownAddress:     downAddr,
+		DownConnTracker: &ConnTracker{},
+		UpConnTracker:   []*ConnTracker{},
 	}
 }
 
-func (pt *TCPProxyTracker) GetOrAddTargetSessionTracker(targetName, downAddr string) *TCPSessionTracker {
+func (pt *TCPProxyTracker) GetOrAddTargetSessionTracker(port int, targetName, downAddr string) *TCPSessionTracker {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
 	if pt.TargetTrackers[targetName] == nil {
-		pt.TargetTrackers[targetName] = NewTCPTargetTracker()
+		pt.TargetTrackers[targetName] = NewTCPTargetTracker(port, targetName, downAddr)
 	}
-	return pt.TargetTrackers[targetName].GetOrAddSessionTracker(downAddr)
+	return pt.TargetTrackers[targetName].GetOrAddSessionTracker(port, targetName, downAddr)
 }
 
-func (pt *TCPProxyTracker) IncrementMatchCounts(targetName, sni string) {
+func (pt *TCPProxyTracker) IncrementMatchCounts(port int, targetName, downAddr, sni string) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
 	pt.ConnCount++
 	if sni != "" {
 		pt.ConnCountsBySNI[sni]++
 	}
-	if pt.TargetTrackers[targetName] == nil {
-		pt.TargetTrackers[targetName] = NewTCPTargetTracker()
+	if pt.TargetTrackers[targetName] != nil {
+		pt.TargetTrackers[targetName].IncrementMatchCounts(sni)
 	}
-	pt.TargetTrackers[targetName].IncrementMatchCounts(sni)
 }
 
 func (pt *TCPProxyTracker) IncrementRejectCount(sni string) {
@@ -112,11 +138,11 @@ func (pt *TCPProxyTracker) IncrementRejectCount(sni string) {
 	pt.RejectCountsBySNI[sni]++
 }
 
-func (tt *TCPTargetTracker) GetOrAddSessionTracker(downAddr string) *TCPSessionTracker {
+func (tt *TCPTargetTracker) GetOrAddSessionTracker(port int, targetName, downAddr string) *TCPSessionTracker {
 	tt.lock.Lock()
 	defer tt.lock.Unlock()
 	if tt.TCPSessionTracker[downAddr] == nil {
-		tt.TCPSessionTracker[downAddr] = NewTCPSessionTracker()
+		tt.TCPSessionTracker[downAddr] = NewTCPSessionTracker(port, targetName, downAddr)
 	}
 	return tt.TCPSessionTracker[downAddr]
 }

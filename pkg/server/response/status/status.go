@@ -58,7 +58,7 @@ var (
 	statusLock    sync.RWMutex
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	statusRouter := util.PathRouter(r, "/status")
 
 	util.AddRoute(statusRouter, "/configure", configureStatus, "POST")

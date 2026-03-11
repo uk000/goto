@@ -36,11 +36,11 @@ var (
 	CoreMiddlewares     = []*middleware.Middleware{status.Middleware, delay.Middleware, header.Middleware}
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	server := middleware.RootPath("/server")
 	responseRouter := util.PathRouter(server, "/response")
-	middleware.AddRoutes(responseRouter, root, CoreMiddlewares...)
-	middleware.AddRoutes(responseRouter, root, responseMiddlewares...)
+	middleware.AddRoutes(responseRouter, CoreMiddlewares...)
+	middleware.AddRoutes(responseRouter, responseMiddlewares...)
 }
 
 func middlewareFunc(next http.Handler) http.Handler {

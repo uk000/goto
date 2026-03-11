@@ -37,9 +37,7 @@ var (
 	Middleware = middleware.NewMiddleware("response.payload", setRoutes, middlewareFunc)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
-	rootRouter = root
-	matchRouter = rootRouter.NewRoute().Subrouter()
+func setRoutes(r *mux.Router) {
 	payloadRouter := util.PathRouter(r, "/payload")
 	util.AddRouteQO(payloadRouter, "/set/{grpc}?/stream/count={count}/delay={delay}", setResponsePayload, "uri", "POST")
 	util.AddRouteQO(payloadRouter, "/set/{grpc}?/stream/count={count}/delay={delay}/header/{header}", setResponsePayload, "uri", "POST")

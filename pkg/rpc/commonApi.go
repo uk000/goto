@@ -31,7 +31,7 @@ var (
 	GetServiceRegistry = map[string]func(int) RPCServiceRegistry{}
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	rpcRouter := middleware.RootPath("/{rpc:grpc|jsonrpc}")
 	rpcServiceRouter := util.PathRouter(rpcRouter, "/services")
 	util.AddRoute(rpcServiceRouter, "", getServices, "GET")

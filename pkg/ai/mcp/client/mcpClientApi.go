@@ -35,7 +35,7 @@ var (
 	Middleware = middleware.NewMiddleware("mcpClient", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	mcpapi := middleware.RootPath("/mcpapi")
 	mcpClient := util.PathRouter(mcpapi, "/client")
 

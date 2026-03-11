@@ -42,11 +42,11 @@ type MiddlewareFunc func(http.ResponseWriter, *http.Request)
 
 type Middleware struct {
 	Name              string
-	SetRoutes         func(r *mux.Router, root *mux.Router)
+	SetRoutes         func(r *mux.Router)
 	MiddlewareHandler mux.MiddlewareFunc
 }
 
-func NewMiddleware(name string, setRoutes func(r *mux.Router, root *mux.Router), middlewareHandler mux.MiddlewareFunc) *Middleware {
+func NewMiddleware(name string, setRoutes func(r *mux.Router), middlewareHandler mux.MiddlewareFunc) *Middleware {
 	m := &Middleware{
 		Name:              name,
 		SetRoutes:         setRoutes,
@@ -65,10 +65,10 @@ func AddMiddlewares(next http.Handler, middlewares ...*Middleware) http.Handler 
 	return handler
 }
 
-func AddRoutes(r *mux.Router, root *mux.Router, handlers ...*Middleware) {
+func AddRoutes(r *mux.Router, handlers ...*Middleware) {
 	for _, h := range handlers {
 		if h.SetRoutes != nil {
-			h.SetRoutes(r, root)
+			h.SetRoutes(r)
 		}
 	}
 }
@@ -86,7 +86,7 @@ func BaseHandlerFunc(getHandler func() http.Handler) http.Handler {
 func SetRoutesOnly(r *mux.Router) {
 	for _, m := range RoutesOnly {
 		if m.SetRoutes != nil {
-			m.SetRoutes(r, r)
+			m.SetRoutes(r)
 		}
 	}
 }
@@ -94,7 +94,7 @@ func SetRoutesOnly(r *mux.Router) {
 func LinkCore(r *mux.Router) {
 	for _, m := range Core {
 		if m.SetRoutes != nil {
-			m.SetRoutes(r, r)
+			m.SetRoutes(r)
 		}
 	}
 	UseCore(r)
@@ -111,7 +111,7 @@ func UseCore(r *mux.Router) {
 func LinkInterceptedCore(r *mux.Router) {
 	for _, m := range InterceptedCore {
 		if m.SetRoutes != nil {
-			m.SetRoutes(r, r)
+			m.SetRoutes(r)
 		}
 	}
 	UseInterceptedCore(r)
@@ -128,7 +128,7 @@ func UseInterceptedCore(r *mux.Router) {
 func LinkUnintercepted(r *mux.Router) {
 	for _, m := range Unintercepted {
 		if m.SetRoutes != nil {
-			m.SetRoutes(r, r)
+			m.SetRoutes(r)
 		}
 		if m.MiddlewareHandler != nil {
 			r.Use(m.MiddlewareHandler)
@@ -162,7 +162,7 @@ func LinkUnintercepted(r *mux.Router) {
 func LinkIntercepted(r *mux.Router) {
 	for _, m := range Intercepted {
 		if m.SetRoutes != nil {
-			m.SetRoutes(r, r)
+			m.SetRoutes(r)
 		}
 		if m.MiddlewareHandler != nil {
 			r.Use(m.MiddlewareHandler)
@@ -194,6 +194,7 @@ func RootPath(path string) *mux.Router {
 	if RootRouters[path] == nil {
 		r := mux.NewRouter().SkipClean(true).PathPrefix(path).Subrouter()
 		UseCore(r)
+		r.Use(intercept.IntereceptMiddleware(nil, nil))
 		UseInterceptedCore(r)
 		RootRouters[path] = r
 	}

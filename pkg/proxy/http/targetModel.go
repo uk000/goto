@@ -26,42 +26,42 @@ type TargetEndpointResponse struct {
 }
 
 type TargetMatch struct {
-	URIPrefix string                 `json:"uriPrefix"`
-	Headers   map[string]string      `json:"headers"`
-	Vars      map[string]*util.Match `json:"vars"`
+	URIPrefix string                 `yaml:"uriPrefix" json:"uriPrefix"`
+	Headers   map[string]string      `yaml:"headers" json:"headers"`
+	Vars      map[string]*util.Match `yaml:"vars" json:"vars"`
 	uriRegexp *regexp.Regexp
 	router    *mux.Router
 }
 
 type Keys struct {
-	Add    map[string]string `json:"add"`
-	Remove []string          `json:"remove"`
+	Add    map[string]string `yaml:"add" json:"add"`
+	Remove []string          `yaml:"remove" json:"remove"`
 }
 
 type TrafficConfig struct {
-	Delay      *types.Delay `json:"delay"`
-	Retries    int          `json:"retries"`
-	RetryDelay *types.Delay `json:"retryDelay"`
-	RetryOn    []int        `json:"retryOn"`
+	Delay      *types.Delay `yaml:"delay" json:"delay"`
+	Retries    int          `yaml:"retries" json:"retries"`
+	RetryDelay *types.Delay `yaml:"retryDelay" json:"retryDelay"`
+	RetryOn    []int        `yaml:"retryOn" json:"retryOn"`
 }
 
 type TrafficTransform struct {
-	URIMap         map[string]string     `json:"uriMap"`
-	Headers        *Keys                 `json:"headers"`
-	Queries        *Keys                 `json:"queries"`
-	StripURI       string                `json:"stripURI"`
-	RequestId      *invocation.RequestId `json:"requestId"`
+	URIMap         map[string]string     `yaml:"uriMap" json:"uriMap"`
+	Headers        *Keys                 `yaml:"headers" json:"headers"`
+	Queries        *Keys                 `yaml:"queries" json:"queries"`
+	StripURI       string                `yaml:"stripURI" json:"stripURI"`
+	RequestId      *invocation.RequestId `yaml:"requestId" json:"requestId"`
 	stripURIRegexp *regexp.Regexp
 }
 
 type TargetEndpoint struct {
-	URL          string `json:"url"`
-	Method       string `json:"method"`
-	Protocol     string `json:"protocol"`
-	Authority    string `json:"authority"`
-	IsTLS        bool   `json:"tls"`
-	RequestCount int    `json:"requestCount"`
-	Concurrent   int    `json:"concurrent"`
+	URL          string `yaml:"url" json:"url"`
+	Method       string `yaml:"method" json:"method"`
+	Protocol     string `yaml:"protocol" json:"protocol"`
+	Authority    string `yaml:"authority" json:"authority"`
+	IsTLS        bool   `yaml:"tls" json:"tls"`
+	RequestCount int    `yaml:"requestCount" json:"requestCount"`
+	Concurrent   int    `yaml:"concurrent" json:"concurrent"`
 	name         string
 	callCount    int
 	target       *Target
@@ -75,10 +75,10 @@ type EndpointInvocation struct {
 }
 
 type TargetTrigger struct {
-	MatchAny      []*TargetMatch    `json:"matchAny"`
-	Endpoints     []string          `json:"endpoints"`
-	Transform     *TrafficTransform `json:"transform"`
-	TrafficConfig *TrafficConfig    `json:"trafficConfig"`
+	MatchAny      []*TargetMatch    `yaml:"matchAny" json:"matchAny"`
+	Endpoints     []string          `yaml:"endpoints" json:"endpoints"`
+	Transform     *TrafficTransform `yaml:"transform" json:"transform"`
+	TrafficConfig *TrafficConfig    `yaml:"trafficConfig" json:"trafficConfig"`
 	name          string
 	epSpecs       map[string]*EndpointInvocation
 	callCount     int
@@ -86,12 +86,12 @@ type TargetTrigger struct {
 }
 
 type Target struct {
-	Port      int                        `json:"port"`
-	Enabled   bool                       `json:"enabled"`
-	Name      string                     `json:"name"`
-	Endpoints map[string]*TargetEndpoint `json:"endpoints"`
-	Triggers  map[string]*TargetTrigger  `json:"triggers"`
-	Transform *TrafficTransform          `json:"transform"`
+	Port      int                        `yaml:"-" json:"port"`
+	Enabled   bool                       `yaml:"enabled" json:"enabled"`
+	Name      string                     `yaml:"name" json:"name"`
+	Endpoints map[string]*TargetEndpoint `yaml:"endpoints" json:"endpoints"`
+	Triggers  map[string]*TargetTrigger  `yaml:"triggers" json:"triggers"`
+	Transform *TrafficTransform          `yaml:"transform" json:"transform"`
 	callCount int
 	lock      sync.RWMutex
 }

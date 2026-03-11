@@ -24,8 +24,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/gorilla/mux"
 )
 
 type PortResponsePayloads struct {
@@ -42,8 +40,6 @@ type ResponsePayloadManager struct {
 
 var (
 	PayloadManager = (&ResponsePayloadManager{}).init()
-	rootRouter     *mux.Router
-	matchRouter    *mux.Router
 	payloadKey     = &util.ContextKey{Key: "payloadKey"}
 	captureKey     = &util.ContextKey{Key: "captureKey"}
 )

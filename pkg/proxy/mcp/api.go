@@ -14,7 +14,7 @@ var (
 	Middleware = middleware.NewMiddleware("mcp", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	proxyRouter := middleware.RootPath("/proxy")
 	mcpProxyRouter := util.PathPrefix(proxyRouter, "/mcp")
 

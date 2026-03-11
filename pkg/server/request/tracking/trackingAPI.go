@@ -34,7 +34,7 @@ var (
 	Middleware = middleware.NewMiddleware("tracking", setRoutes, middlewareFunc)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	trackRouter := util.PathRouter(r, "/track")
 	headerTrackingRouter := util.PathRouter(trackRouter, "/headers")
 	util.AddRoute(headerTrackingRouter, "/clear", clearHeaders, "POST")

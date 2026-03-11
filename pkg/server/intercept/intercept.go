@@ -217,12 +217,9 @@ func NewInterceptResponseWriter(r *http.Request, w http.ResponseWriter, hold boo
 
 func WithIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *InterceptResponseWriter) {
 	var irw *InterceptResponseWriter
-	rs := util.GetRequestStore(r)
-	if !rs.IsKnownNonTraffic {
-		irw = NewInterceptResponseWriter(r, w, true)
-		r.Context().Value(util.RequestStoreKey).(*util.RequestStore).InterceptResponseWriter = irw
-		w = irw
-	}
+	irw = NewInterceptResponseWriter(r, w, true)
+	r.Context().Value(util.RequestStoreKey).(*util.RequestStore).InterceptResponseWriter = irw
+	w = irw
 	return w, irw
 }
 

@@ -32,7 +32,7 @@ var (
 	Middleware = middleware.NewMiddleware("jobs", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	jobsRouter := middleware.RootPath("/jobs")
 	util.AddRoute(jobsRouter, "/add", addOrUpdateJob, "POST", "PUT")
 	util.AddRoute(jobsRouter, "/update", addOrUpdateJob, "POST", "PUT")

@@ -69,15 +69,13 @@ type Trigger struct {
 type PipeCallback func(target, source string, port int, r *http.Request, statusCode int, responseHeaders http.Header)
 
 var (
-	rootRouter        *mux.Router
 	Middleware        = middleware.NewMiddleware("trigger", setRoutes, nil)
 	portTriggers      = map[string]*Trigger{}
 	allTriggerTargets = map[string]*TriggerTarget{}
 	triggerLock       sync.RWMutex
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
-	rootRouter = root
+func setRoutes(r *mux.Router) {
 	triggerRouter := util.PathRouter(r, "/triggers")
 	util.AddRoute(triggerRouter, "/add", addTrigger, "POST")
 	util.AddRoute(triggerRouter, "/{trigger}/remove", removeTrigger, "PUT", "POST")
@@ -219,7 +217,7 @@ func (t *Trigger) addTrigger(w http.ResponseWriter, r *http.Request) {
 		if len(tt.TriggerURIs) > 0 {
 			tt.triggerURIRegexps = map[string]*regexp.Regexp{}
 			for _, uri := range tt.TriggerURIs {
-				if finalURI, re, _, _, err := util.GetURIRegexpAndRoute(uri, rootRouter); err == nil {
+				if finalURI, re, _, _, err := util.GetURIRegexpAndRoute(uri, util.MatchRouter); err == nil {
 					t.TargetsByURIs[finalURI] = append(t.TargetsByURIs[finalURI], tt.Name)
 					tt.triggerURIRegexps[finalURI] = re
 				}

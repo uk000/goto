@@ -35,11 +35,11 @@ var (
 	CoreMiddlewares    = []*middleware.Middleware{tracking.Middleware, uri.Middleware}
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	server := middleware.RootPath("/server")
 	requestRouter := util.PathRouter(server, "/request")
-	middleware.AddRoutes(requestRouter, root, CoreMiddlewares...)
-	middleware.AddRoutes(requestRouter, root, requestMiddlewares...)
+	middleware.AddRoutes(requestRouter, CoreMiddlewares...)
+	middleware.AddRoutes(requestRouter, requestMiddlewares...)
 }
 
 func middlewareFunc(next http.Handler) http.Handler {

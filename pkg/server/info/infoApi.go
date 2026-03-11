@@ -42,7 +42,7 @@ var (
 	routeLookup    = APIRouteLookup{}
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	infoRouter := middleware.RootPath("/goto")
 	util.AddRoute(infoRouter, "/version", showVersion, "GET")
 	util.AddRoute(infoRouter, "/{k:routes|apis}/level={level}", showApis, "GET")

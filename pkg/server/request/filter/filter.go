@@ -53,7 +53,7 @@ var (
 	lock         sync.RWMutex
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	ignoreFilter.SetRoutes("ignore", r)
 	bypassFilter.SetRoutes("bypass", r)
 }

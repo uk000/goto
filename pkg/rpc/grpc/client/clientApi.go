@@ -32,7 +32,7 @@ var (
 	Middleware = middleware.NewMiddleware("rpc", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	router := middleware.RootPath("/grpc")
 
 	util.AddRoute(router, "/call/{endpoint}/{service}/{method}", callServiceMethod, "POST")

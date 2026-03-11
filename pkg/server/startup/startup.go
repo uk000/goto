@@ -11,6 +11,8 @@ import (
 	mcpserver "goto/pkg/ai/mcp/server"
 	"goto/pkg/ai/registry"
 	"goto/pkg/global"
+	httpproxy "goto/pkg/proxy/http"
+	tcpproxy "goto/pkg/proxy/tcp"
 	"goto/pkg/scripts"
 	"goto/pkg/types"
 	"goto/pkg/util"
@@ -40,7 +42,7 @@ func Stop() {
 
 func loadStartupConfigs() {
 	if len(global.ServerConfig.ConfigPaths) > 0 {
-		loadConfigsFromPaths()
+		loadConfigsFromPaths("")
 		var err error
 		for _, configPath := range global.ServerConfig.ConfigPaths {
 			if configWatcher == nil {
@@ -68,14 +70,16 @@ func watchStartupConfig() {
 					log.Printf("File removed: %s. Configs loaded from this file will NOT be removed automatically.\n", event.Path)
 				} else {
 					log.Printf("Files changed in [%s]. Will reload with delay.", event.Path)
-					debounce(loadConfigsFromPaths)
+					debounce(func() {
+						loadConfigsFromPaths(event.Path)
+					})
 				}
 			}
 		}
 	}()
 }
 
-func loadConfigsFromPaths() {
+func loadConfigsFromPaths(filter string) {
 	for _, configPath := range global.ServerConfig.ConfigPaths {
 		log.Printf("Loading configs from path [%s]", configPath)
 		files, err := os.ReadDir(configPath)
@@ -85,6 +89,10 @@ func loadConfigsFromPaths() {
 		}
 		for _, file := range files {
 			filePath := filepath.Join(configPath, file.Name())
+			if filter != "" && !strings.Contains(filePath, filter) && !strings.Contains(filter, filePath) {
+				log.Printf("Skipping unchanged file [%s]", filePath)
+				continue
+			}
 			loadConfigFromFile(filePath)
 		}
 	}
@@ -124,11 +132,24 @@ func loadConfig(config *ctl.GotoConfig) {
 	if config.A2A != nil {
 		loadA2A(config.A2A)
 	}
+	if config.Proxies != nil {
+		httpproxy.ClearAllProxies()
+		tcpproxy.ClearAllProxies()
+		for _, proxy := range config.Proxies {
+			if proxy.HTTP != nil {
+				loadHTTPProxy(proxy.HTTP)
+			}
+			if proxy.TCP != nil {
+				loadTCPProxy(proxy.TCP)
+			}
+		}
+	}
 }
 
 func loadMCP(mcp *ctl.MCP) {
 	mcp.ProcessToolSchemas()
 	servers := []*mcpserver.MCPServerPayload{}
+	mcpserver.ClearAllMCPServers()
 	for _, s := range mcp.Servers {
 		mcp.ProcessMCPServer(s)
 		servers = append(servers, s.Server)
@@ -200,6 +221,7 @@ func loadMCP(mcp *ctl.MCP) {
 
 func loadA2A(a2a *ctl.A2A) {
 	names := []string{}
+	a2aserver.ClearAllServers()
 	for _, a2aAgent := range a2a.Agents {
 		name := a2aAgent.Agent.Card.Name
 		server := a2aserver.GetOrAddServer(a2aAgent.Port)
@@ -221,6 +243,28 @@ func loadA2A(a2a *ctl.A2A) {
 		// }
 	}
 	log.Printf("Added Agents: %+v\n", names)
+}
+
+func loadHTTPProxy(proxy *httpproxy.Proxy) {
+	for name, target := range proxy.Targets {
+		target.Name = name
+		log.Printf("Loading HTTP Proxy Target [%s]\n", name)
+		proxy := httpproxy.GetPortProxy(proxy.Port)
+		if err := proxy.AddTarget(target); err != nil {
+			log.Printf("Failed to process HTTP Proxy target [%s] with error: %s", name, err.Error())
+		} else {
+			log.Printf("HTTP Proxy target [%s] loaded successfully", name)
+		}
+	}
+}
+
+func loadTCPProxy(proxy *tcpproxy.TCPProxy) {
+	if err := tcpproxy.ValidateUpstreams(proxy.Upstreams); err != nil {
+		log.Printf("TCP Proxy [%d] Upstreams failed validation: %s\n", proxy.Port, err.Error())
+	}
+	log.Printf("Loading TCP Proxy [%d]\n", proxy.Port)
+	tcpproxy.GetPortProxy(proxy.Port).AddUpstreams(proxy.Upstreams)
+	log.Printf("TCP Proxy [%d] loaded [%d] upstreams successfully", proxy.Port, len(proxy.Upstreams))
 }
 
 func runStartupScript() {

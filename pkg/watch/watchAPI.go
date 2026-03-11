@@ -48,7 +48,7 @@ var (
 	}
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	watchRouter := middleware.RootPath("/watch")
 	util.AddRouteQ(watchRouter, "/add/{name}", addWebhookWatcher, "url", "POST")
 	// util.AddRouteQ(watchRouter, "/{name}/filter/add", addWatchFilter, "uri", "POST")

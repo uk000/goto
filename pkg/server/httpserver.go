@@ -98,13 +98,16 @@ func configureHTTPRouter() {
 	coreRouter = mux.NewRouter()
 	coreRouter.SkipClean(true)
 
-	middleware.SetRoutesOnly(coreRouter)
+	adminRouter := coreRouter.PathPrefix("").Subrouter()
+	adminRouter.Use(intercept.IntereceptMiddleware(nil, nil))
+	middleware.SetRoutesOnly(adminRouter)
 
 	RootRouter = util.CreateRouters(coreRouter)
 	middleware.LinkCore(RootRouter)
 
 	interceptedChainRouter := RootRouter.PathPrefix("").Subrouter()
 	interceptedChainRouter.Use(intercept.IntereceptMiddleware(preIntercept(), postIntercept()))
+
 	middleware.LinkInterceptedCore(interceptedChainRouter)
 	middleware.LinkIntercepted(interceptedChainRouter)
 

@@ -15,7 +15,7 @@ var (
 	Middleware = middleware.NewMiddleware("grpc", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	proxyRouter := middleware.RootPath("/proxy")
 	grpcRouter := util.PathPrefix(proxyRouter, "/grpc")
 	util.AddRoute(grpcRouter, "/status", getGRPCProxyDetails, "GET")

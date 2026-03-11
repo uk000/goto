@@ -31,7 +31,7 @@ var (
 	Middleware = middleware.NewMiddleware("script", setRoutes, nil)
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	scriptRouter := middleware.RootPath("/scripts")
 	util.AddRoute(scriptRouter, "/add/{name}", addScript, "POST", "PUT")
 	util.AddRoute(scriptRouter, "/store/{name}", addScript, "POST", "PUT")

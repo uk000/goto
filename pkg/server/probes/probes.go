@@ -51,7 +51,7 @@ var (
 	lock         sync.RWMutex
 )
 
-func setRoutes(r *mux.Router, root *mux.Router) {
+func setRoutes(r *mux.Router) {
 	probeRouter := middleware.RootPath("/probes")
 	util.AddRouteQ(probeRouter, "/{type}/set", setProbe, "uri", "PUT", "POST")
 	util.AddRoute(probeRouter, "/{type}/set/status={status}", setProbeStatus, "PUT", "POST")

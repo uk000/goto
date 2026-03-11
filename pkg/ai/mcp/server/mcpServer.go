@@ -340,6 +340,9 @@ func ClearAllMCPServers() {
 	defer lock.Unlock()
 	PortsServers = map[int]*PortServers{}
 	AllComponents = map[string]map[string]map[string]IMCPComponent{}
+	for _, kind := range Kinds {
+		AllComponents[kind] = map[string]map[string]IMCPComponent{}
+	}
 }
 
 func (ps *PortServers) AddMCPServer(p *MCPServerPayload) *MCPServer {
