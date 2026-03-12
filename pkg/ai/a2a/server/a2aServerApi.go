@@ -25,7 +25,6 @@ import (
 	"goto/pkg/server/response/status"
 	"goto/pkg/util"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -147,9 +146,8 @@ func getAgentDelegates(w http.ResponseWriter, r *http.Request) {
 
 func getServers(w http.ResponseWriter, r *http.Request) {
 	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
-	text := util.ToJSONText(PortServers)
-	log.Println(text)
 	util.WriteJsonOrYAMLPayload(w, PortServers, yaml)
+	util.AddLogMessage("All A2A servers reported", r)
 }
 
 func addAgents(w http.ResponseWriter, r *http.Request) {

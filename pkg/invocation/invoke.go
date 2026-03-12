@@ -259,15 +259,11 @@ func (ir *InvocationRequest) writeRequestPayload() {
 }
 
 func (ir *InvocationRequest) invoke() {
-	start := time.Now()
 	if ir.client.IsGRPC() {
 		ir.invokeGRPC()
 	} else {
 		ir.invokeHTTP()
 	}
-	end := time.Now()
-	ir.result.trackRequest(start, end)
-	ir.tracker.Status.trackRequest(end)
 }
 
 func (ir *InvocationRequest) invokeHTTP() {
@@ -277,7 +273,12 @@ func (ir *InvocationRequest) invokeHTTP() {
 	}
 	ir.client.SetTLSConfig(tlsConfig(ir.httpRequest.Host, ir.tracker.Target.VerifyTLS))
 	ir.writeRequestPayload()
+
+	start := time.Now()
 	resp, err := ir.client.HTTP().Do(ir.httpRequest)
+	end := time.Now()
+	ir.result.trackRequest(start, end)
+	ir.tracker.Status.trackRequest(end)
 	ir.result.processHTTPResponse(ir, resp, err)
 }
 
@@ -286,7 +287,12 @@ func (ir *InvocationRequest) invokeGRPC() {
 		log.Printf("Invocation: [ERROR] GRPC invocation attempted without a client")
 		return
 	}
-	if response, err := ir.client.(*grpc.GRPCClient).Invoke(ir.tracker.Target.Method, ir.headers, ir.tracker.Payloads); err == nil {
+	start := time.Now()
+	response, err := ir.client.(*grpc.GRPCClient).Invoke(ir.tracker.Target.Method, ir.headers, ir.tracker.Payloads)
+	end := time.Now()
+	ir.result.trackRequest(start, end)
+	ir.tracker.Status.trackRequest(end)
+	if err == nil {
 		ir.result.processGRPCResponse(ir, response.EquivalentHTTPStatusCode, response.ResponseHeaders,
 			response.ResponsePayload, response.ClientStreamCount, response.ServerStreamCount, err)
 	} else {

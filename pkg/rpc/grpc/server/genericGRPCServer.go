@@ -54,7 +54,7 @@ func invokeMiddlewareChain(ctx context.Context, port int, method *gotogrpc.GRPCS
 }
 
 func unaryHandler(ctx context.Context, req interface{}) (resp interface{}, err error) {
-	method, port, _, authority, md, err := gotogrpc.CommonHandler(ctx, nil)
+	ctx, method, port, _, authority, md, err := gotogrpc.CommonHandler(ctx, nil)
 	if err != nil {
 		util.LogMessage(ctx, err.Error())
 		return nil, err
@@ -123,8 +123,7 @@ func streamHandler(ctx context.Context, port int, method *gotogrpc.GRPCServiceMe
 }
 
 func GRPCStreamHandler(_ interface{}, ss grpc.ServerStream) error {
-	ctx := ss.Context()
-	method, port, _, authority, md, err := gotogrpc.CommonHandler(ctx, ss)
+	ctx, method, port, _, authority, md, err := gotogrpc.CommonHandler(ss.Context(), ss)
 	if err != nil {
 		return err
 	}
@@ -133,12 +132,12 @@ func GRPCStreamHandler(_ interface{}, ss grpc.ServerStream) error {
 	}
 	stream := gotogrpc.NewServerStream(port, method, ss, nil)
 	stream.SetDelay(method.StreamDelayMin, method.StreamDelayMax, method.StreamDelayCount)
-	err = streamHandler(context.Background(), port, method, authority, md, stream)
+	err = streamHandler(ctx, port, method, authority, md, stream)
 	return err
 }
 
 func (gi *GRPCMethodInterceptor) Intercept(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	method, port, remoteAddr, authority, md, err := gotogrpc.CommonHandler(ctx, nil)
+	ctx, method, port, remoteAddr, authority, md, err := gotogrpc.CommonHandler(ctx, nil)
 	if err != nil {
 		util.LogMessage(ctx, err.Error())
 		return nil, err
@@ -160,12 +159,12 @@ func (gi *GRPCMethodInterceptor) Intercept(srv any, ctx context.Context, dec fun
 }
 
 func (gi *GRPCStreamInterceptor) Intercept(srv any, ss grpc.ServerStream) error {
-	ctx := ss.Context()
-	method, port, remoteAddr, _, md, err := gotogrpc.CommonHandler(ctx, nil)
+	ctx, method, port, remoteAddr, _, md, err := gotogrpc.CommonHandler(ss.Context(), nil)
 	if err != nil {
 		util.LogMessage(ctx, err.Error())
 		return err
 	}
+	ss = NewWrappedStream(ss, ctx)
 	if gi.originalHandler != nil {
 		log.Println("GRPCStreamInterceptor: Original handler found, using original handler")
 		return gi.originalHandler(gi.originalServer, ss)
@@ -173,7 +172,7 @@ func (gi *GRPCStreamInterceptor) Intercept(srv any, ss grpc.ServerStream) error 
 	if util.WillProxyGRPC(port, method) {
 		log.Println("GRPCStreamInterceptor: No original handler found, using ProxyGRPCStream")
 		stream := gotogrpc.NewServerStream(port, method, ss, nil)
-		gotogrpc.ProxyGRPCStream(context.Background(), port, method, remoteAddr.String(), md, stream)
+		gotogrpc.ProxyGRPCStream(ctx, port, method, remoteAddr.String(), md, stream)
 		return nil
 	}
 	return GRPCStreamHandler(srv, ss)

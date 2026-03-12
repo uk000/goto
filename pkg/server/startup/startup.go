@@ -222,6 +222,7 @@ func loadMCP(mcp *ctl.MCP) {
 func loadA2A(a2a *ctl.A2A) {
 	names := []string{}
 	a2aserver.ClearAllServers()
+	registry.TheAgentRegistry.Clear()
 	for _, a2aAgent := range a2a.Agents {
 		name := a2aAgent.Agent.Card.Name
 		server := a2aserver.GetOrAddServer(a2aAgent.Port)
@@ -245,11 +246,14 @@ func loadA2A(a2a *ctl.A2A) {
 	log.Printf("Added Agents: %+v\n", names)
 }
 
-func loadHTTPProxy(proxy *httpproxy.Proxy) {
-	for name, target := range proxy.Targets {
+func loadHTTPProxy(p *httpproxy.Proxy) {
+	proxy := httpproxy.GetPortProxy(p.Port)
+	proxy.Enabled = p.Enabled
+	proxy.ProxyResponses = p.ProxyResponses
+	log.Printf("Proxy [%d] will use responses: %+v", p.Port, util.ToJSONText(proxy.ProxyResponses))
+	for name, target := range p.Targets {
 		target.Name = name
 		log.Printf("Loading HTTP Proxy Target [%s]\n", name)
-		proxy := httpproxy.GetPortProxy(proxy.Port)
 		if err := proxy.AddTarget(target); err != nil {
 			log.Printf("Failed to process HTTP Proxy target [%s] with error: %s", name, err.Error())
 		} else {

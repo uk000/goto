@@ -20,6 +20,8 @@ func setRoutes(r *mux.Router) {
 	proxyRouter := middleware.RootPath("/proxy")
 	httpProxyRouter := util.PathPrefix(proxyRouter, "/http")
 	util.AddRoute(httpProxyRouter, "/{o:enable|disable}", enableProxy, "POST", "PUT")
+	util.AddRoute(httpProxyRouter, "/responses/set", setProxyResponses, "POST", "PUT")
+	util.AddRoute(httpProxyRouter, "/responses", getProxyResponses, "GET")
 	util.AddRoute(httpProxyRouter, "", getProxy, "GET")
 	util.AddRoute(httpProxyRouter, "/all", getProxy, "GET")
 
@@ -43,6 +45,27 @@ func enableProxy(w http.ResponseWriter, r *http.Request) {
 	msg := fmt.Sprintf("Proxy [%d] %sd", port, o)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
+}
+
+func setProxyResponses(w http.ResponseWriter, r *http.Request) {
+	proxyResponses := []*ProxyResponse{}
+	port := util.GetRequestOrListenerPortNum(r)
+	msg := ""
+	if err := util.ReadJsonPayload(r, &proxyResponses); err != nil {
+		GetPortProxy(port).ProxyResponses = proxyResponses
+		msg = fmt.Sprintf("Proxy [%d] will use responses [%+v]", port, proxyResponses)
+	} else {
+		msg = fmt.Sprintf("Proxy [%d] failed to parse responses: %s", port, err.Error())
+	}
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
+}
+
+func getProxyResponses(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	proxy := GetPortProxy(port)
+	util.WriteJsonPayload(w, proxy.ProxyResponses)
+	util.AddLogMessage("Reported proxy responses", r)
 }
 
 func addHTTPTarget(w http.ResponseWriter, r *http.Request) {

@@ -148,9 +148,11 @@ func WithRequestStore(r *http.Request) (context.Context, *http.Request, *Request
 	rs.Start()
 	port := GetRequestOrListenerPortNum(r)
 	r = r.WithContext(context.WithValue(ctx, CurrentPortKey, port))
-	rs.ReReader = CreateOrGetReReader(r.Body)
-	r.Body = rs.ReReader
-	rs.BodyLength = rs.ReReader.Length()
+	if !rs.IsGRPC {
+		rs.ReReader = CreateOrGetReReader(r.Body)
+		r.Body = rs.ReReader
+		rs.BodyLength = rs.ReReader.Length()
+	}
 	return ctx, r, rs
 }
 
@@ -163,7 +165,7 @@ func populateRequestStore(r *http.Request) (context.Context, *RequestStore) {
 		return nil, nil
 	}
 	isAdminRequest := CheckAdminRequest(r)
-	rs.IsGRPC = r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get(constants.HeaderContentType), "application/grpc")
+	rs.IsGRPC = r.ProtoMajor == 2 && (strings.HasPrefix(r.Header.Get(constants.HeaderContentType), "application/grpc"))
 	rs.IsAdminRequest = isAdminRequest
 	rs.IsVersionRequest = strings.HasPrefix(r.RequestURI, "/version")
 	rs.IsLockerRequest = strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker")

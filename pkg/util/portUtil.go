@@ -12,7 +12,11 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-func GetPortNumFromGRPCAuthority(ctx context.Context) int {
+func GetGRPCPort(ctx context.Context) int {
+	port := GetContextPort(ctx)
+	if port > 0 {
+		return port
+	}
 	if headers, ok := metadata.FromIncomingContext(ctx); ok && len(headers[":authority"]) > 0 {
 		if pieces := strings.Split(headers[":authority"][0], ":"); len(pieces) > 1 {
 			if portNum, err := strconv.Atoi(pieces[1]); err == nil {
@@ -51,7 +55,7 @@ func GetContextPort(ctx context.Context) int {
 			return port
 		}
 	}
-	return GetPortNumFromGRPCAuthority(ctx)
+	return 0
 }
 
 func GetListenerPortNum(r *http.Request) int {

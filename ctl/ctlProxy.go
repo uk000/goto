@@ -28,6 +28,25 @@ func processProxy(config *GotoConfig) {
 }
 
 func sendHTTPProxy(httpProxy *httpproxy.Proxy) {
+	url := fmt.Sprintf("%s/proxy/http/responses/set", currentContext.RemoteGotoURL)
+	json := util.ToJSONBytes(httpProxy.ProxyResponses)
+	if json == nil {
+		log.Printf("JSON marshalling failed for HTTP Proxy [%d] Responses.", httpProxy.Port)
+		return
+	}
+	log.Printf("Sending HTTP Proxy [%d] Responses to URL [%s]\n", httpProxy.Port, url)
+	resp, err := http.Post(url, "application/json", bytes.NewReader(json))
+	if err != nil {
+		log.Printf("Failed to send HTTP Proxy Responses. Error [%s]n", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		log.Printf("Non-OK status for HTTP Proxy [%d] Responses: %s\n", httpProxy.Port, resp.Status)
+		log.Println(string(json))
+	} else {
+		log.Printf("HTTP Proxy [%d] Responses sent successfully. Response: [%s]\n", httpProxy.Port, util.Read(resp.Body))
+	}
 	for name, target := range httpProxy.Targets {
 		target.Name = name
 		url := fmt.Sprintf("%s/proxy/http/targets/add", currentContext.RemoteGotoURL)

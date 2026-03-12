@@ -72,7 +72,8 @@ func RunHttpServer() {
 	var err error
 	configureHTTPRouter()
 	gRPCHandler := GRPCHandler(coreRouter)
-	h2cHandler = h2c.NewHandler(gRPCHandler, h2s)
+	//h2cHandler = h2c.NewHandler(gRPCHandler, h2s)
+	h2cHandler = h2c.NewHandler(HTTPHandler(), h2s)
 	mcpHandler = mcpserver.MCPHandler()
 	agentsHandler = a2aserver.AgentsHandler()
 	aiHandler = configureAIRouter()
@@ -148,7 +149,7 @@ func configureAndStartHTTPServer() error {
 		IdleTimeout:  1 * time.Minute,
 		ConnContext:  withConnContext,
 		//ConnState:    conn.ConnState,
-		Handler:  HTTPHandler(),
+		Handler:  h2cHandler,
 		ErrorLog: log.New(io.Discard, "discard", 0),
 	}
 	return StartHttpServer(httpServer, false)
@@ -326,20 +327,18 @@ func handleHTTP(l *listeners.Listener, w http.ResponseWriter, r *http.Request, r
 		r.ProtoMajor = 2
 		if rs.IsTLS {
 			rs.IsH2 = true
-			grpcserver.TheGRPCServer.Server.ServeHTTP(w, r)
 		} else {
 			rs.IsH2C = true
-			h2cHandler.ServeHTTP(w, r)
 		}
+		grpcserver.TheGRPCServer.Server.ServeHTTP(w, r)
 	} else if l.IsHTTP2 && (util.IsH2Upgrade(r) || r.ProtoMajor == 2) {
+		r.ProtoMajor = 2
 		if rs.IsTLS {
 			rs.IsH2 = true
-			httpHandler.ServeHTTP(w, r)
 		} else {
-			r.ProtoMajor = 2
 			rs.IsH2C = true
-			h2cHandler.ServeHTTP(w, r)
 		}
+		httpHandler.ServeHTTP(w, r)
 	} else {
 		httpHandler.ServeHTTP(w, r)
 	}

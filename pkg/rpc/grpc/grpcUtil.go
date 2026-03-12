@@ -127,16 +127,21 @@ func SendResponse(desc protoreflect.MessageDescriptor, stream grpc.ServerStream,
 	return nil
 }
 
-func CommonHandler(ctx context.Context, stream grpc.ServerStream) (method *GRPCServiceMethod, port int, remoteAddr *net.TCPAddr, authority string, md map[string][]string, err error) {
+func CommonHandler(ctx context.Context, stream grpc.ServerStream) (ctx2 context.Context, method *GRPCServiceMethod, port int, remoteAddr *net.TCPAddr, authority string, md map[string][]string, err error) {
 	if ctx == nil {
 		ctx = stream.Context()
 	}
-	port = util.GetContextPort(ctx)
 	p, ok := peer.FromContext(ctx)
 	if !ok {
 		err = fmt.Errorf("failed to get peer info")
 		return
 	}
+	port = p.LocalAddr.(*net.TCPAddr).Port
+	if port == 0 {
+		port = util.GetContextPort(ctx)
+	}
+	ctx2 = util.WithPort(ctx, port)
+
 	tcpAddr, ok := p.Addr.(*net.TCPAddr)
 	if ok {
 		remoteAddr = tcpAddr

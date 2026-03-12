@@ -256,7 +256,7 @@ func (ab *AgentBehaviorFederate) runTools(aCtx *AgentContext, wg *sync.WaitGroup
 	wg2 := sync.WaitGroup{}
 	for _, tc := range aCtx.tools {
 		dCtx := &DelegateCallContext{
-			toolCall:       &tc.ToolCall,
+			toolCall:       tc.ToolCall,
 			configHeaders:  tc.ToolCall.Headers,
 			forwardHeaders: tc.ToolCall.ForwardHeaders,
 			removeHeaders:  tc.ToolCall.RemoveHeaders,
@@ -284,7 +284,7 @@ func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentContext, wg *sync.WaitGrou
 	wg2 := sync.WaitGroup{}
 	for _, a := range aCtx.agents {
 		dCtx := &DelegateCallContext{
-			agentCall:      &a.AgentCall,
+			agentCall:      a.AgentCall,
 			configHeaders:  a.AgentCall.Headers,
 			forwardHeaders: a.AgentCall.ForwardHeaders,
 			removeHeaders:  a.AgentCall.RemoveHeaders,

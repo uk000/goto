@@ -171,7 +171,7 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 					ac.tools[toolName] = &tool
 				}
 				if delegateHint != "" && !strings.EqualFold(delegateHint, tool.ToolCall.Tool) {
-					altDelegate := tool.Servers[delegateHint]
+					altDelegate := tool.Substitutes[delegateHint]
 					if altDelegate != nil {
 						msg := fmt.Sprintf("Using alternate server [%s] with URL [%s] Authority [%s] instead of default Server [%s] URL [%s]",
 							delegateHint, altDelegate.URL, altDelegate.Authority, tool.ToolCall.Server, tool.ToolCall.URL)
@@ -192,7 +192,7 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 					ac.agents[agentName] = &agent
 				}
 				if delegateHint != "" {
-					altDelegate := agent.Servers[delegateHint]
+					altDelegate := agent.Substitutes[delegateHint]
 					if altDelegate != nil {
 						agent.AgentCall.AgentURL = altDelegate.URL
 						agent.AgentCall.Authority = altDelegate.Authority

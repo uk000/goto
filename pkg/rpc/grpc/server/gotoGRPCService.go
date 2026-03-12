@@ -149,7 +149,7 @@ func (gs *GotoGRPCService) setHeaders(ctx context.Context, port int, hostLabel, 
 }
 
 func (gs *GotoGRPCService) Echo(ctx context.Context, input *pb.Input) (*pb.Output, error) {
-	port := util.GetContextPort(ctx)
+	port := util.GetGRPCPort(ctx)
 	events.TrackPortTrafficEvent(port, "GRPC.echo", 200)
 	listenerLabel := global.Funcs.GetListenerLabelForPort(port)
 	requestHeaders, responseHeaders := gs.setHeaders(ctx, port, global.Self.HostLabel, listenerLabel)
@@ -173,7 +173,7 @@ func (gs *GotoGRPCService) Echo(ctx context.Context, input *pb.Input) (*pb.Outpu
 
 func (gs *GotoGRPCService) StreamIn(cs grpc.ClientStreamingServer[pb.Input, pb.Output]) error {
 	ctx := cs.Context()
-	port := util.GetContextPort(ctx)
+	port := util.GetGRPCPort(ctx)
 	events.TrackPortTrafficEvent(port, "GRPC.streamIn.start", 200)
 	listenerLabel := global.Funcs.GetListenerLabelForPort(port)
 	requestHeaders, responseHeaders := gs.setHeaders(ctx, port, global.Self.HostLabel, listenerLabel)
@@ -230,7 +230,7 @@ func (gs *GotoGRPCService) sendStreamResponse(ctx context.Context, port int, hos
 func (gs *GotoGRPCService) StreamOut(configInput *pb.StreamConfig, ss grpc.ServerStreamingServer[pb.Output]) error {
 	log.Printf("GotoGRPCService[%d]: Serving StreamOut with config [chunkSize: %d, chunkCount: %d, interval: %s, payload size: [%d]]\n", ss.Context().Value("port"), configInput.ChunkSize, configInput.ChunkCount, configInput.Interval, len(configInput.Payload))
 	ctx := ss.Context()
-	port := util.GetContextPort(ctx)
+	port := util.GetGRPCPort(ctx)
 	events.TrackPortTrafficEvent(port, "GRPC.streamOut.start", 200)
 	listenerLabel := global.Funcs.GetListenerLabelForPort(port)
 	requestHeaders, responseHeaders := gs.setHeaders(ctx, port, global.Self.HostLabel, listenerLabel)
@@ -246,7 +246,7 @@ func (gs *GotoGRPCService) StreamOut(configInput *pb.StreamConfig, ss grpc.Serve
 
 func (gs *GotoGRPCService) StreamInOut(bidi grpc.BidiStreamingServer[pb.StreamConfig, pb.Output]) error {
 	ctx := bidi.Context()
-	port := util.GetContextPort(ctx)
+	port := util.GetGRPCPort(ctx)
 	events.TrackPortTrafficEvent(port, "GRPC.streamInOut.start", 200)
 	listenerLabel := global.Funcs.GetListenerLabelForPort(port)
 	requestHeaders, responseHeaders := gs.setHeaders(ctx, port, global.Self.HostLabel, listenerLabel)

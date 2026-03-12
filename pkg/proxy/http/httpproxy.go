@@ -3,6 +3,7 @@ package httpproxy
 import (
 	"errors"
 	"fmt"
+	"goto/pkg/constants"
 	. "goto/pkg/constants"
 	"goto/pkg/global"
 	"goto/pkg/invocation"
@@ -21,13 +22,19 @@ import (
 	"github.com/gorilla/mux"
 )
 
+type ProxyResponse struct {
+	UpResponseRange []int `yaml:"upResponseRange" json:"upResponseRange"`
+	ProxyResponse   int   `yaml:"proxyResponse" json:"proxyResponse"`
+}
+
 type Proxy struct {
-	Port        int                        `yaml:"port" json:"port"`
-	Targets     map[string]*Target         `yaml:"targets" json:"targets"`
-	Enabled     bool                       `yaml:"enabled" json:"enabled"`
-	HTTPTracker *trackers.HTTPProxyTracker `yaml:"-" json:"tracker"`
-	Router      *mux.Router
-	lock        sync.RWMutex
+	Port           int                        `yaml:"port" json:"port"`
+	Targets        map[string]*Target         `yaml:"targets" json:"targets"`
+	Enabled        bool                       `yaml:"enabled" json:"enabled"`
+	ProxyResponses []*ProxyResponse           `yaml:"proxyResponses" json:"proxyResponses"`
+	HTTPTracker    *trackers.HTTPProxyTracker `yaml:"-" json:"tracker"`
+	Router         *mux.Router
+	lock           sync.RWMutex
 }
 
 type ProxyTargets map[string]*MatchedTarget
@@ -248,8 +255,12 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 		match.invoke(rc, out, wg)
 	}
 	responses := map[string]map[string]*invocation.InvocationResultResponse{}
-	go p.asyncCollectResponses(out, wg, responses)
+	responseStatuses := map[string]map[string]int{}
+	var proxyResponseStatus int
+	go p.asyncCollectResponses(out, wg, &proxyResponseStatus, responseStatuses, responses)
 	wg.Wait()
+	rc.w.Header().Add(constants.HeaderGotoProxyUpstreamStatus, util.ToJSONText(responseStatuses))
+	rc.w.WriteHeader(proxyResponseStatus)
 	util.WriteJsonOrYAMLPayload(rc.w, responses, true)
 }
 
@@ -300,12 +311,28 @@ func (ep *EndpointInvocation) asyncInvoke(target string, tracker *invocation.Inv
 	}
 }
 
-func (p *Proxy) asyncCollectResponses(out chan *TargetEndpointResponse, wg *sync.WaitGroup, responses map[string]map[string]*invocation.InvocationResultResponse) {
+func (p *Proxy) asyncCollectResponses(out chan *TargetEndpointResponse, wg *sync.WaitGroup, proxyResponseStatus *int, responseStatuses map[string]map[string]int, responses map[string]map[string]*invocation.InvocationResultResponse) {
+	*proxyResponseStatus = http.StatusOK
 	for resp := range out {
+		if responseStatuses[resp.target] == nil {
+			responseStatuses[resp.target] = map[string]int{}
+		}
 		if responses[resp.target] == nil {
 			responses[resp.target] = map[string]*invocation.InvocationResultResponse{}
 		}
+		responseStatuses[resp.target][resp.endpoint] = resp.response.StatusCode
 		responses[resp.target][resp.endpoint] = resp.response
+		if p.ProxyResponses != nil {
+			for _, pr := range p.ProxyResponses {
+				if len(pr.UpResponseRange) < 2 {
+					continue
+				}
+				if resp.response.StatusCode >= pr.UpResponseRange[0] && resp.response.StatusCode <= pr.UpResponseRange[1] {
+					*proxyResponseStatus = pr.ProxyResponse
+					break
+				}
+			}
+		}
 		wg.Done()
 	}
 }
@@ -372,7 +399,7 @@ func (ep *EndpointInvocation) prepareURL(matchedURI string, tt *TrafficTransform
 		} else if len(tt.URIMap) > 0 && tt.URIMap[matchedURI] != "" {
 			targetURI = tt.URIMap[matchedURI]
 		}
-		if tt.Headers != nil {
+		if tt.Queries != nil {
 			add = tt.Queries.Add
 			remove = tt.Queries.Remove
 		}
@@ -478,7 +505,7 @@ func (p *Proxy) getMatchingProxyTargets(r *http.Request) ProxyTargets {
 				} else {
 					matchedTarget.transform = target.Transform
 				}
-				matchedTargets[trigger.name] = matchedTarget
+				matchedTargets[target.Name] = matchedTarget
 				continue
 			}
 		}

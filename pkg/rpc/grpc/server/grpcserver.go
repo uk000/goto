@@ -367,7 +367,7 @@ func (ws WrappedStream) Context() context.Context {
 }
 
 func unaryMiddleware(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	port := util.GetPortNumFromGRPCAuthority(ctx)
+	port := util.GetGRPCPort(ctx)
 	if port <= 0 {
 		port = global.Self.GRPCPort
 	}
@@ -384,7 +384,7 @@ func unaryMiddleware(ctx context.Context, req interface{}, info *grpc.UnaryServe
 
 func streamMiddleware(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 	ctx := ss.Context()
-	port := util.GetPortNumFromGRPCAuthority(ctx)
+	port := util.GetGRPCPort(ctx)
 	if port <= 0 {
 		port = global.Self.GRPCPort
 	}

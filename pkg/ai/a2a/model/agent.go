@@ -64,21 +64,35 @@ type AgentConfig struct {
 	Delegates       *DelegateConfig  `yaml:"delegates,omitempty" json:"delegates,omitempty"`
 }
 
-type DelegateServer struct {
-	URL       string `yaml:"url" json:"url"`
-	Authority string `yaml:"authority,omitempty" json:"authority,omitempty"`
+type DelegateConfig struct {
+	Tools    map[string]*DelegateToolCall  `yaml:"tools,omitempty" json:"tools,omitempty"`
+	Agents   map[string]*DelegateAgentCall `yaml:"agents,omitempty" json:"agents,omitempty"`
+	HTTP     map[string]*DelegateHTTPCall  `yaml:"http,omitempty" json:"http,omitempty"`
+	MaxCalls int                           `yaml:"maxCalls,omitempty" json:"maxCalls,omitempty"`
+	Parallel bool                          `yaml:"parallel,omitempty" json:"parallel,omitempty"`
 }
 
 type DelegateToolCall struct {
-	Triggers []string                   `yaml:"triggers" json:"triggers"`
-	ToolCall mcpclient.ToolCall         `yaml:"toolCall,omitempty" json:"toolCall,omitempty"`
-	Servers  map[string]*DelegateServer `yaml:"servers,omitempty" json:"servers,omitempty"`
+	Triggers    []string                   `yaml:"triggers" json:"triggers"`
+	ToolCall    *mcpclient.ToolCall        `yaml:"toolCall,omitempty" json:"toolCall,omitempty"`
+	Substitutes map[string]*DelegateServer `yaml:"substitutes,omitempty" json:"substitutes,omitempty"`
 }
 
 type DelegateAgentCall struct {
-	Triggers  []string                   `yaml:"triggers" json:"triggers"`
-	AgentCall a2aclient.AgentCall        `yaml:"agentCall,omitempty" json:"agentCall,omitempty"`
-	Servers   map[string]*DelegateServer `yaml:"servers,omitempty" json:"servers,omitempty"`
+	Triggers    []string                   `yaml:"triggers" json:"triggers"`
+	AgentCall   *a2aclient.AgentCall       `yaml:"agentCall,omitempty" json:"agentCall,omitempty"`
+	Substitutes map[string]*DelegateServer `yaml:"substitutes,omitempty" json:"substitutes,omitempty"`
+}
+
+type DelegateHTTPCall struct {
+	Triggers    []string                   `yaml:"triggers" json:"triggers"`
+	HTTPCall    *HTTPCall                  `yaml:"httpCall,omitempty" json:"httpCall,omitempty"`
+	Substitutes map[string]*DelegateServer `yaml:"substitutes,omitempty" json:"substitutes,omitempty"`
+}
+
+type DelegateServer struct {
+	URL       string `yaml:"url" json:"url"`
+	Authority string `yaml:"authority,omitempty" json:"authority,omitempty"`
 }
 
 type HTTPCall struct {
@@ -88,20 +102,6 @@ type HTTPCall struct {
 	Headers        map[string][]string `yaml:"headers,omitempty" json:"headers,omitempty"`
 	ForwardHeaders []string            `yaml:"forwardHeaders,omitempty" json:"forwardHeaders,omitempty"`
 	RemoveHeaders  []string            `yaml:"removeHeaders,omitempty" json:"removeHeaders,omitempty"`
-}
-
-type DelegateHTTPCall struct {
-	Triggers []string                   `yaml:"triggers" json:"triggers"`
-	HTTPCall a2aclient.AgentCall        `yaml:"httpCall,omitempty" json:"httpCall,omitempty"`
-	Servers  map[string]*DelegateServer `yaml:"servers,omitempty" json:"servers,omitempty"`
-}
-
-type DelegateConfig struct {
-	Tools    map[string]*DelegateToolCall  `yaml:"tools,omitempty" json:"tools,omitempty"`
-	Agents   map[string]*DelegateAgentCall `yaml:"agents,omitempty" json:"agents,omitempty"`
-	HTTP     map[string]*DelegateHTTPCall  `yaml:"http,omitempty" json:"http,omitempty"`
-	MaxCalls int                           `yaml:"maxCalls,omitempty" json:"maxCalls,omitempty"`
-	Parallel bool                          `yaml:"parallel,omitempty" json:"parallel,omitempty"`
 }
 
 func (a *Agent) GetCard() *trpcserver.AgentCard {
