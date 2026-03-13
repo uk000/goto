@@ -111,6 +111,12 @@ func ClearAllProxies() {
 	portProxy = map[int]*TCPProxy{}
 }
 
+func ClearPortProxy(port int) {
+	proxyLock.Lock()
+	defer proxyLock.Unlock()
+	portProxy[port] = newTCPProxy(port)
+}
+
 func parseUpstreams(r io.Reader) (map[string]*TCPUpstream, error) {
 	upstreams := map[string]*TCPUpstream{}
 	if err := util.ReadJsonPayloadFromBody(r, &upstreams); err != nil {

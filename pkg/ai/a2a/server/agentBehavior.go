@@ -31,7 +31,7 @@ import (
 	"trpc.group/trpc-go/trpc-a2a-go/taskmanager"
 )
 
-type DelegateTriggers map[string]*types.Triple[*regexp.Regexp, *model.DelegateToolCall, *model.DelegateAgentCall]
+type DelegateTriggers map[string][]*types.Triple[*types.Pair[string, *regexp.Regexp], *model.DelegateToolCall, *model.DelegateAgentCall]
 type UnaryHandler func(aCtx *AgentContext) (*taskmanager.MessageProcessingResult, error)
 type StreamHandler func(aCtx *AgentContext) error
 
@@ -64,7 +64,7 @@ func newAgentBehavior(agent *model.Agent) *AgentBehaviorImpl {
 	} else if agent.Behavior.Federate {
 		abd := &AgentBehaviorFederate{
 			AgentBehaviorImpl: impl,
-			triggers:          map[string]*types.Triple[*regexp.Regexp, *model.DelegateToolCall, *model.DelegateAgentCall]{},
+			triggers:          map[string][]*types.Triple[*types.Pair[string, *regexp.Regexp], *model.DelegateToolCall, *model.DelegateAgentCall]{},
 		}
 		impl.self = abd
 		impl.doUnary = abd.DoUnary

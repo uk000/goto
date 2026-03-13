@@ -53,8 +53,8 @@ type AgentContext struct {
 	requestHeaders   http.Header
 	delay            *types.Delay
 	triggers         DelegateTriggers
-	tools            map[string]*model.DelegateToolCall
-	agents           map[string]*model.DelegateAgentCall
+	tools            map[string][]*model.DelegateToolCall
+	agents           map[string][]*model.DelegateAgentCall
 	input            *a2aproto.Message
 	inputText        string
 	options          *taskmanager.ProcessOptions
@@ -126,10 +126,15 @@ func (ac *AgentContext) detectRemoteCalls() {
 func (ac *AgentContext) sendDelegatesMatchUpdate() {
 	toolNames := []string{}
 	agentNames := []string{}
-	for name := range ac.tools {
-		toolNames = append(toolNames, name)
+	for name, tcalls := range ac.tools {
+		for _, t := range tcalls {
+			toolNames = append(toolNames, fmt.Sprintf("%s@%s", name, t.ToolCall.URL))
+		}
 	}
-	for name := range ac.agents {
+	for name, acalls := range ac.agents {
+		for _, a := range acalls {
+			toolNames = append(toolNames, fmt.Sprintf("%s@%s", name, a.AgentCall.AgentURL))
+		}
 		agentNames = append(agentNames, name)
 	}
 	msg := fmt.Sprintf("Matched Tools: %+v, Agents: %+v", toolNames, agentNames)
@@ -138,68 +143,68 @@ func (ac *AgentContext) sendDelegatesMatchUpdate() {
 }
 
 func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint string, inputs map[string]string) {
-	ac.tools = map[string]*model.DelegateToolCall{}
-	ac.agents = map[string]*model.DelegateAgentCall{}
+	ac.tools = map[string][]*model.DelegateToolCall{}
+	ac.agents = map[string][]*model.DelegateAgentCall{}
 	for name := range inputs {
 		if ac.agent.Config.Delegates.Agents != nil && ac.agent.Config.Delegates.Agents[name] != nil {
 			d := ac.agent.Config.Delegates.Agents[name]
-			ac.agents[d.AgentCall.Name] = d
+			ac.agents[d.AgentCall.Name] = append(ac.agents[d.AgentCall.Name], d)
 		}
 		if ac.agent.Config.Delegates.Tools != nil && ac.agent.Config.Delegates.Tools[name] != nil {
 			d := ac.agent.Config.Delegates.Tools[name]
-			ac.tools[d.ToolCall.Tool] = d
+			ac.tools[d.ToolCall.Tool] = append(ac.tools[d.ToolCall.Tool], d)
 		}
 		if len(ac.tools)+len(ac.agents) >= ac.agent.Config.Delegates.MaxCalls {
 			break
 		}
 	}
-	for _, triple := range ac.triggers {
-		if len(ac.tools)+len(ac.agents) >= ac.agent.Config.Delegates.MaxCalls {
-			break
-		}
-		re := triple.First
-		if re.MatchString(input) {
-			if triple.Second != nil {
-				tool := *triple.Second
-				toolName := tool.ToolCall.Tool
-				if ac.tools[toolName] != nil {
-					if portHint != "" && (strings.Contains(tool.ToolCall.URL, portHint) ||
-						!strings.Contains(ac.tools[toolName].ToolCall.URL, portHint)) {
-						ac.tools[toolName] = &tool
+	for _, dInfos := range ac.triggers {
+		for _, delegateTriple := range dInfos {
+			if len(ac.tools)+len(ac.agents) >= ac.agent.Config.Delegates.MaxCalls {
+				break
+			}
+			triggerPair := delegateTriple.First
+			if triggerPair.Right.MatchString(input) || strings.Contains(triggerPair.Left, input) {
+				if delegateTriple.Second != nil {
+					tool := *delegateTriple.Second
+					toolName := tool.ToolCall.Tool
+					if portHint != "" {
+						if strings.Contains(tool.ToolCall.URL, portHint) {
+							ac.tools[toolName] = append(ac.tools[toolName], &tool)
+						}
+					} else {
+						ac.tools[toolName] = append(ac.tools[toolName], &tool)
 					}
-				} else {
-					ac.tools[toolName] = &tool
-				}
-				if delegateHint != "" && !strings.EqualFold(delegateHint, tool.ToolCall.Tool) {
-					altDelegate := tool.Substitutes[delegateHint]
-					if altDelegate != nil {
-						msg := fmt.Sprintf("Using alternate server [%s] with URL [%s] Authority [%s] instead of default Server [%s] URL [%s]",
-							delegateHint, altDelegate.URL, altDelegate.Authority, tool.ToolCall.Server, tool.ToolCall.URL)
-						ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
-						tool.ToolCall.URL = altDelegate.URL
-						tool.ToolCall.Authority = altDelegate.Authority
+					if delegateHint != "" && !strings.EqualFold(delegateHint, tool.ToolCall.Tool) {
+						altDelegate := tool.Substitutes[delegateHint]
+						if altDelegate != nil {
+							msg := fmt.Sprintf("Using alternate server [%s] with URL [%s] Authority [%s] instead of default Server [%s] URL [%s]",
+								delegateHint, altDelegate.URL, altDelegate.Authority, tool.ToolCall.Server, tool.ToolCall.URL)
+							ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
+							tool.ToolCall.URL = altDelegate.URL
+							tool.ToolCall.Authority = altDelegate.Authority
+						}
 					}
-				}
-			} else if triple.Third != nil {
-				agent := *triple.Third
-				agentName := agent.AgentCall.Name
-				if ac.agents[agentName] != nil && portHint != "" {
-					if strings.Contains(agent.AgentCall.AgentURL, portHint) ||
-						!strings.Contains(ac.agents[agentName].AgentCall.AgentURL, portHint) {
-						ac.agents[agentName] = &agent
+				} else if delegateTriple.Third != nil {
+					agent := *delegateTriple.Third
+					agentName := agent.AgentCall.Name
+					if portHint != "" {
+						if strings.Contains(agent.AgentCall.AgentURL, portHint) {
+							ac.agents[agentName] = append(ac.agents[agentName], &agent)
+						}
+					} else {
+						ac.agents[agentName] = append(ac.agents[agentName], &agent)
 					}
-				} else {
-					ac.agents[agentName] = &agent
-				}
-				if delegateHint != "" {
-					altDelegate := agent.Substitutes[delegateHint]
-					if altDelegate != nil {
-						agent.AgentCall.AgentURL = altDelegate.URL
-						agent.AgentCall.Authority = altDelegate.Authority
+					if delegateHint != "" {
+						altDelegate := agent.Substitutes[delegateHint]
+						if altDelegate != nil {
+							agent.AgentCall.AgentURL = altDelegate.URL
+							agent.AgentCall.Authority = altDelegate.Authority
+						}
+						agentURL := strings.Split(agent.AgentCall.AgentURL, agent.AgentCall.Name)[0]
+						agent.AgentCall.AgentURL = agentURL + "/" + delegateHint
+						agent.AgentCall.Name = delegateHint
 					}
-					agentURL := strings.Split(agent.AgentCall.AgentURL, agent.AgentCall.Name)[0]
-					agent.AgentCall.AgentURL = agentURL + "/" + delegateHint
-					agent.AgentCall.Name = delegateHint
 				}
 			}
 		}
@@ -209,37 +214,41 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 func (ac *AgentContext) setOverrideParamsFromInput(jsons []map[string]any, inputs map[string]string) {
 	overrides := extractJSONValues(jsons)
 	for name, override := range overrides {
-		if t := ac.tools[name]; t != nil {
-			if override.url != "" {
-				msg := fmt.Sprintf("Will use URL [%s] instead of [%s] for Tool [%s]", override.url, t.ToolCall.URL, t.ToolCall.Tool)
-				log.Println(msg)
-				ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
-				t.ToolCall.URL = override.url
+		if tcalls := ac.tools[name]; tcalls != nil {
+			for _, t := range tcalls {
+				if override.url != "" {
+					msg := fmt.Sprintf("Will use URL [%s] instead of [%s] for Tool [%s]", override.url, t.ToolCall.URL, t.ToolCall.Tool)
+					log.Println(msg)
+					ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
+					t.ToolCall.URL = override.url
+				}
+				if override.args != nil {
+					msg := fmt.Sprintf("Will use Args %+v instead of %+v for Tool [%s]", override.args, t.ToolCall.Args, t.ToolCall.Tool)
+					log.Println(msg)
+					ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
+					t.ToolCall.Args = override.args
+				}
 			}
-			if override.args != nil {
-				msg := fmt.Sprintf("Will use Args %+v instead of %+v for Tool [%s]", override.args, t.ToolCall.Args, t.ToolCall.Tool)
-				log.Println(msg)
-				ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
-				t.ToolCall.Args = override.args
-			}
-		} else if a := ac.agents[name]; a != nil {
-			if override.url != "" {
-				msg := fmt.Sprintf("Will use URL [%s] instead of [%s] for Agent [%s]", override.url, a.AgentCall.AgentURL, a.AgentCall.Name)
-				log.Println(msg)
-				ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
-				a.AgentCall.AgentURL = override.url
-			}
-			if override.args != nil {
-				msg := fmt.Sprintf("Will use Data %+v instead of %+v for Agent [%s]", override.args, a.AgentCall.Data, a.AgentCall.Name)
-				log.Println(msg)
-				ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
-				a.AgentCall.Data = override.args
-			}
-			if override.remoteInput != "" {
-				msg := fmt.Sprintf("Will use Message %s instead of %s for Agent [%s]", override.remoteInput, a.AgentCall.Message, a.AgentCall.Name)
-				log.Println(msg)
-				ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
-				a.AgentCall.Message = override.remoteInput
+		} else if acalls := ac.agents[name]; acalls != nil {
+			for _, a := range acalls {
+				if override.url != "" {
+					msg := fmt.Sprintf("Will use URL [%s] instead of [%s] for Agent [%s]", override.url, a.AgentCall.AgentURL, a.AgentCall.Name)
+					log.Println(msg)
+					ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
+					a.AgentCall.AgentURL = override.url
+				}
+				if override.args != nil {
+					msg := fmt.Sprintf("Will use Data %+v instead of %+v for Agent [%s]", override.args, a.AgentCall.Data, a.AgentCall.Name)
+					log.Println(msg)
+					ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
+					a.AgentCall.Data = override.args
+				}
+				if override.remoteInput != "" {
+					msg := fmt.Sprintf("Will use Message %s instead of %s for Agent [%s]", override.remoteInput, a.AgentCall.Message, a.AgentCall.Name)
+					log.Println(msg)
+					ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
+					a.AgentCall.Message = override.remoteInput
+				}
 			}
 		}
 	}
@@ -247,23 +256,27 @@ func (ac *AgentContext) setOverrideParamsFromInput(jsons []map[string]any, input
 		agent := ac.agent.Config.Delegates.Agents[name]
 		tool := ac.agent.Config.Delegates.Tools[name]
 		if tool != nil {
-			if t := ac.tools[tool.ToolCall.Tool]; t != nil {
-				json := util.JSONFromJSONText(input)
-				if !json.IsEmpty() {
-					args := json.Object()
-					msg := fmt.Sprintf("Will use Args %+v instead of %+v for Tool [%s]", args, t.ToolCall.Args, t.ToolCall.Tool)
-					log.Println(msg)
-					ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
-					t.ToolCall.Args = args
+			if tcalls := ac.tools[name]; tcalls != nil {
+				for _, t := range tcalls {
+					json := util.JSONFromJSONText(input)
+					if !json.IsEmpty() {
+						args := json.Object()
+						msg := fmt.Sprintf("Will use Args %+v instead of %+v for Tool [%s]", args, t.ToolCall.Args, t.ToolCall.Tool)
+						log.Println(msg)
+						ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
+						t.ToolCall.Args = args
+					}
 				}
 			}
 		}
 		if agent != nil {
-			if a := ac.agents[agent.AgentCall.Name]; a != nil {
-				msg := fmt.Sprintf("Will use Message %s instead of %s for Agent [%s]", input, a.AgentCall.Message, a.AgentCall.Name)
-				log.Println(msg)
-				ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
-				a.AgentCall.Message = input
+			if acalls := ac.agents[name]; acalls != nil {
+				for _, a := range acalls {
+					msg := fmt.Sprintf("Will use Message %s instead of %s for Agent [%s]", input, a.AgentCall.Message, a.AgentCall.Name)
+					log.Println(msg)
+					ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
+					a.AgentCall.Message = input
+				}
 			}
 		}
 	}

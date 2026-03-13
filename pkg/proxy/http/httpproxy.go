@@ -72,6 +72,12 @@ func ClearAllProxies() {
 	portProxy = map[int]*Proxy{}
 }
 
+func ClearPortProxy(port int) {
+	proxyLock.Lock()
+	defer proxyLock.Unlock()
+	portProxy[port] = newProxy(port)
+}
+
 func newProxy(port int) *Proxy {
 	p := &Proxy{
 		Port:        port,

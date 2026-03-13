@@ -57,10 +57,11 @@ func (ab *AgentBehaviorFederate) prepareDelegates() error {
 			log.Printf("Agent [%s] has no triggers, will never trigger", name)
 		}
 		for _, trigger := range a.Triggers {
-			if triple := ab.triggers[trigger]; triple != nil {
-				triple.Third = a
+			triple := types.NewTriple(types.NewPair(trigger, regexp.MustCompile(fmt.Sprintf("(?i)%s%s%s", util.BeforeRegex, trigger, util.AfterRegex))), nilToolCall, a)
+			if dInfos := ab.triggers[trigger]; dInfos != nil {
+				dInfos = append(dInfos, triple)
 			} else {
-				ab.triggers[trigger] = types.NewTriple(regexp.MustCompile(fmt.Sprintf("(?i)%s%s%s", util.BeforeRegex, trigger, util.AfterRegex)), nilToolCall, a)
+				ab.triggers[trigger] = append(ab.triggers[trigger], triple)
 			}
 		}
 	}
@@ -72,10 +73,11 @@ func (ab *AgentBehaviorFederate) prepareDelegates() error {
 			log.Printf("Tool [%s] has no triggers, will never trigger", name)
 		}
 		for _, trigger := range t.Triggers {
-			if triple := ab.triggers[trigger]; triple != nil {
-				triple.Second = t
+			triple := types.NewTriple(types.NewPair(trigger, regexp.MustCompile(fmt.Sprintf("(?i)%s%s%s", util.BeforeRegex, trigger, util.AfterRegex))), t, nilAgentCall)
+			if dInfos := ab.triggers[trigger]; dInfos != nil {
+				dInfos = append(dInfos, triple)
 			} else {
-				ab.triggers[trigger] = types.NewTriple(regexp.MustCompile(fmt.Sprintf("(?i)%s%s%s", util.BeforeRegex, trigger, util.AfterRegex)), t, nilAgentCall)
+				ab.triggers[trigger] = append(ab.triggers[trigger], triple)
 			}
 		}
 	}
@@ -254,21 +256,25 @@ func (ab *AgentBehaviorFederate) processResults(aCtx *AgentContext, dType string
 func (ab *AgentBehaviorFederate) runTools(aCtx *AgentContext, wg *sync.WaitGroup) {
 	parallel := ab.agent.Config.Delegates.Parallel
 	wg2 := sync.WaitGroup{}
-	for _, tc := range aCtx.tools {
-		dCtx := &DelegateCallContext{
-			toolCall:       tc.ToolCall,
-			configHeaders:  tc.ToolCall.Headers,
-			forwardHeaders: tc.ToolCall.ForwardHeaders,
-			removeHeaders:  tc.ToolCall.RemoveHeaders,
-		}
-		if parallel {
-			wg2.Add(1)
-			go func() {
+	for _, tcalls := range aCtx.tools {
+		for _, tc := range tcalls {
+			log.Printf("Processing tool call [%s] at URL [%s]", tc.ToolCall.Tool, tc.ToolCall.URL)
+			dCtx := &DelegateCallContext{
+				toolCall:       tc.ToolCall,
+				configHeaders:  tc.ToolCall.Headers,
+				forwardHeaders: tc.ToolCall.ForwardHeaders,
+				removeHeaders:  tc.ToolCall.RemoveHeaders,
+			}
+			if parallel {
+				wg2.Add(1)
+				go func(dCtx *DelegateCallContext) {
+					log.Printf("Calling tool [%s] at URL [%s]", dCtx.toolCall.Tool, dCtx.toolCall.URL)
+					ab.callTool(aCtx, dCtx)
+					wg2.Done()
+				}(dCtx)
+			} else {
 				ab.callTool(aCtx, dCtx)
-				wg2.Done()
-			}()
-		} else {
-			ab.callTool(aCtx, dCtx)
+			}
 		}
 	}
 	if parallel {
@@ -282,21 +288,23 @@ func (ab *AgentBehaviorFederate) runTools(aCtx *AgentContext, wg *sync.WaitGroup
 func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentContext, wg *sync.WaitGroup) {
 	parallel := ab.agent.Config.Delegates.Parallel
 	wg2 := sync.WaitGroup{}
-	for _, a := range aCtx.agents {
-		dCtx := &DelegateCallContext{
-			agentCall:      a.AgentCall,
-			configHeaders:  a.AgentCall.Headers,
-			forwardHeaders: a.AgentCall.ForwardHeaders,
-			removeHeaders:  a.AgentCall.RemoveHeaders,
-		}
-		if parallel {
-			wg2.Add(1)
-			go func() {
+	for _, acalls := range aCtx.agents {
+		for _, a := range acalls {
+			dCtx := &DelegateCallContext{
+				agentCall:      a.AgentCall,
+				configHeaders:  a.AgentCall.Headers,
+				forwardHeaders: a.AgentCall.ForwardHeaders,
+				removeHeaders:  a.AgentCall.RemoveHeaders,
+			}
+			if parallel {
+				wg2.Add(1)
+				go func(dCtx *DelegateCallContext) {
+					ab.callAgent(aCtx, dCtx)
+					wg2.Done()
+				}(dCtx)
+			} else {
 				ab.callAgent(aCtx, dCtx)
-				wg2.Done()
-			}()
-		} else {
-			ab.callAgent(aCtx, dCtx)
+			}
 		}
 	}
 	if parallel {
@@ -414,9 +422,9 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 	if client == nil {
 		return errors.New("failed to create A2A client")
 	}
-	session, err := client.ConnectWithAgentCard(aCtx.ctx, dCtx.agentCall, dCtx.url)
+	session, err := client.ConnectWithAgentCard(aCtx.ctx, dCtx.agentCall, dCtx.agentCall.CardURL)
 	if err != nil {
-		return fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, err.Error())
+		return fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.CardURL, err.Error())
 	} else {
 		// msg = fmt.Sprintf("Loaded agent card for Agent [%s] URL [%s]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL)
 		// aCtx.ReportProgress(dCtx.agentCall.Name, msg)

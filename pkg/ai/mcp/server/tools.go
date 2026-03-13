@@ -316,7 +316,7 @@ func (t *ToolCallContext) echo() (*gomcp.CallToolResult, error) {
 	// content = append(content, &gomcp.TextContent{Text: msg})
 	content = append(content, &gomcp.TextContent{Text: util.ToJSONText(echo.GetEchoResponseWithAddendum(t.rs, map[string]any{"Goto-MCP-Server": t.Server.ID, "Goto-MCP-Tool": t.Name}))})
 	t.applyDelay()
-	t.notifyClient(t.Log("Server [%s] echoed back", t.Server.GetName()), 0)
+	t.notifyClient(t.Log("Server %s Tool %s echoed back", t.Server.Host, t.Label), 0)
 	return &gomcp.CallToolResult{Content: content}, nil
 }
 

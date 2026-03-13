@@ -58,6 +58,49 @@ func GetAgent(port int, name string) *model.Agent {
 	return s.GetAgent(name)
 }
 
+func GetAgentNames(port int) map[int]map[string]map[string][]string {
+	names := map[int]map[string]map[string][]string{}
+	buildNames := func(port int, s *A2AServer) {
+		names[port] = map[string]map[string][]string{}
+		for name, a := range s.Agents {
+			names[port][name] = map[string][]string{}
+			if a.Config != nil && a.Config.Delegates != nil {
+				if a.Config.Delegates.Agents != nil {
+					names[port][name]["agents"] = []string{}
+					for _, d := range a.Config.Delegates.Agents {
+						names[port][name]["agents"] = append(names[port][name]["agents"], d.AgentCall.Name)
+					}
+					if a.Config.Delegates.Tools != nil {
+						names[port][name]["tools"] = []string{}
+						for _, d := range a.Config.Delegates.Tools {
+							names[port][name]["tools"] = append(names[port][name]["tools"], d.ToolCall.Tool)
+						}
+					}
+					if a.Config.Delegates.HTTP != nil {
+						names[port][name]["http"] = []string{}
+						for _, d := range a.Config.Delegates.HTTP {
+							names[port][name]["http"] = append(names[port][name]["http"], d.HTTPCall.URL)
+						}
+					}
+				}
+			}
+		}
+	}
+	if port > 0 {
+		buildNames(port, GetOrAddServer(port))
+	} else {
+		for port, s := range PortServers {
+			buildNames(port, s)
+		}
+	}
+	return names
+}
+
+func RemoveAgent(port int, name string) {
+	server := GetOrAddServer(port)
+	server.RemoveAgent(name)
+}
+
 func ClearServer(port int) {
 	lock.Lock()
 	defer lock.Unlock()
@@ -126,8 +169,13 @@ func (a *A2AServer) GetAgent(name string) *model.Agent {
 	return a.Agents[name]
 }
 
+func (a *A2AServer) RemoveAgent(name string) {
+	a.lock.RLock()
+	defer a.lock.RUnlock()
+	delete(a.Agents, name)
+}
+
 func (a *A2AServer) Serve(name string, w http.ResponseWriter, r *http.Request) error {
-	util.PrintRequest("A2A Request Details", r)
 	agent := a.GetAgent(name)
 	if agent == nil {
 		return fmt.Errorf("agent [%s] not found on server [%s] port [%d]", name, a.ID, a.Port)

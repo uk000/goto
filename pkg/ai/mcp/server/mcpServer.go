@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"goto/pkg/global"
 	mcpproxy "goto/pkg/proxy/mcp"
+	"goto/pkg/server/listeners"
 	"goto/pkg/server/middleware"
 	"goto/pkg/server/response/payload"
 	"goto/pkg/server/response/status"
@@ -157,10 +158,10 @@ func InitDefaultServer() {
 
 func NewMCPServer(p *MCPServerPayload) *MCPServer {
 	server := &MCPServer{
-		ID:          fmt.Sprintf("[%s][%s][%s][%s]", p.Name, global.Self.PodName, global.Self.Namespace, global.Self.Cluster),
+		ID:          fmt.Sprintf("[%s][%s][%s]", p.Name, global.Self.Namespace, global.Self.Cluster),
 		Description: p.Description,
 		Enabled:     p.Enabled,
-		Host:        global.Self.HostLabel,
+		Host:        fmt.Sprintf("[%s][%s]", global.Self.PodName, listeners.GetListenerLabelForPort(p.Port)),
 		Port:        p.Port,
 		Stateless:   p.Stateless,
 		URI:         p.URI,
@@ -290,17 +291,14 @@ func GetPortMCPServers(port int) *PortServers {
 	return PortsServers[port]
 }
 
-func GetMCPServer(name string) (server *MCPServer) {
+func GetMCPServer(port int, name string) (server *MCPServer) {
 	name = strings.ToLower(name)
 	lock.RLock()
 	defer lock.RUnlock()
-	for _, ps := range PortsServers {
-		server = ps.GetMCPServer(name)
-		if server != nil {
-			break
-		}
+	if ps := GetPortMCPServers(port); ps != nil {
+		return ps.GetMCPServer(name)
 	}
-	return
+	return nil
 }
 
 func NewPortMCPServers(port int) *PortServers {
@@ -335,6 +333,10 @@ func AddMCPServers(port int, payloads []*MCPServerPayload) {
 	}
 }
 
+func RemoveMCPServer(port int, server string) {
+	GetPortMCPServers(port).RemoveMCPServer(server)
+}
+
 func ClearAllMCPServers() {
 	lock.Lock()
 	defer lock.Unlock()
@@ -361,6 +363,30 @@ func (ps *PortServers) AddMCPServer(p *MCPServerPayload) *MCPServer {
 		SetServerRoute(uri, s)
 	}
 	return s
+}
+
+func (ps *PortServers) RemoveMCPServer(server string) {
+	ps.removeServerComponents(server)
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+	delete(ps.Servers, server)
+	if server == ps.DefaultServer {
+		count := len(ps.Servers)
+		if count > 0 {
+			i := 0
+			for _, s := range ps.Servers {
+				if i == count-1 {
+					ps.defaultServer = s
+					ps.DefaultServer = ps.defaultServer.Name
+					break
+				}
+				i++
+			}
+		} else {
+			ps.defaultServer = DefaultStatefulServer
+			ps.DefaultServer = DefaultStatefulServer.Name
+		}
+	}
 }
 
 func GetComponentType(kind string) (isTools, isPrompts, isResources, isTemplates bool) {
@@ -521,6 +547,19 @@ func (ps *PortServers) addComponentToAll(c IMCPComponent, server string) {
 	lock.Unlock()
 }
 
+func (ps *PortServers) removeServerComponents(server string) {
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+	lock.Lock()
+	defer lock.Unlock()
+	for kind, values := range ps.AllComponents {
+		for name := range values {
+			delete(ps.AllComponents[kind][name], server)
+			delete(AllComponents[kind][name], server)
+		}
+	}
+}
+
 func (s *MCPServer) AddComponents(kind string, b []byte) (names []string, err error) {
 	switch kind {
 	case KindTools:
@@ -556,7 +595,7 @@ func (m *MCPServer) AddTools(b []byte) ([]string, error) {
 		names = append(names, tool.Name)
 	}
 	//m.ps.defaultServer = m
-	log.Printf("Server [%s] added Tools [%+v] ", m.Name, names)
+	log.Printf("Server [%s][%d] added Tools [%+v] ", m.Name, m.Port, names)
 	return names, nil
 }
 

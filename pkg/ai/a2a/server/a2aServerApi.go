@@ -41,6 +41,9 @@ func setRoutes(r *mux.Router) {
 	a2a := middleware.RootPath("/a2a")
 	agentsRouter := util.PathRouter(a2a, "/agents")
 	util.AddRoute(agentsRouter, "", getAgents, "GET")
+	util.AddRoute(agentsRouter, "/all", getAgents, "GET")
+	util.AddRoute(agentsRouter, "/names", getAgents, "GET")
+	util.AddRoute(agentsRouter, "/names/all", getAgents, "GET")
 	util.AddRoute(agentsRouter, "/{agent}", getAgents, "GET")
 	util.AddRoute(agentsRouter, "/{agent}/delegates", getAgentDelegates, "GET")
 	util.AddRoute(agentsRouter, "/{agent}/delegates/tools", getAgentDelegates, "GET")
@@ -72,9 +75,21 @@ func setRoutes(r *mux.Router) {
 func getAgents(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "agent")
+	all := strings.Contains(r.RequestURI, "all")
+	names := strings.Contains(r.RequestURI, "names")
 	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
 	msg := ""
-	if name != "" {
+	if names {
+		if all {
+			util.WriteJsonOrYAMLPayload(w, GetAgentNames(0), yaml)
+		} else {
+			util.WriteJsonOrYAMLPayload(w, GetAgentNames(port), yaml)
+		}
+		msg = "Names sent for all agents and delegates"
+	} else if all {
+		util.WriteJsonOrYAMLPayload(w, PortServers, yaml)
+		msg = "Details sent for all agents"
+	} else if name != "" {
 		agent := GetAgent(port, name)
 		if agent == nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -170,7 +185,7 @@ func addAgents(w http.ResponseWriter, r *http.Request) {
 			registry.TheAgentRegistry.AddAgent(agent, port)
 			names = append(names, agent.Card.Name)
 		}
-		msg = fmt.Sprintf("Added Agents: %+v", names)
+		msg = fmt.Sprintf("Port [%d] Added Agents: %+v", port, names)
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)

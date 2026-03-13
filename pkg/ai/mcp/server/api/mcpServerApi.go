@@ -145,7 +145,7 @@ func setServerRoute(w http.ResponseWriter, r *http.Request) {
 	serverName := util.GetStringParamValue(r, "server")
 	uri := util.GetStringParamValue(r, "uri")
 	msg := ""
-	server := mcpserver.GetMCPServer(serverName)
+	server := mcpserver.GetMCPServer(port, serverName)
 	if server == nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("MCP Server [%s] not configured on any port", serverName)
@@ -214,7 +214,7 @@ func clearServers(w http.ResponseWriter, r *http.Request) {
 		mcpserver.ClearAllMCPServers()
 		msg = "Cleared all MCP servers"
 	} else if name != "" {
-		server := mcpserver.GetMCPServer(name)
+		server := mcpserver.GetMCPServer(port, name)
 		if server == nil {
 			w.WriteHeader(http.StatusBadRequest)
 			msg = fmt.Sprintf("MCP Server [%s] not configured on any port", name)
@@ -274,7 +274,7 @@ func getComponents(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
 	if serverName != "" {
-		server := mcpserver.GetMCPServer(serverName)
+		server := mcpserver.GetMCPServer(port, serverName)
 		if server == nil {
 			w.WriteHeader(http.StatusBadRequest)
 			msg := fmt.Sprintf("MCP Server [%s] not configured on any port", serverName)
@@ -300,7 +300,7 @@ func addComponent(w http.ResponseWriter, r *http.Request) {
 	serverName := util.GetStringParamValue(r, "server")
 	b, _ := io.ReadAll(r.Body)
 	msg := ""
-	server := mcpserver.GetMCPServer(serverName)
+	server := mcpserver.GetMCPServer(port, serverName)
 	if server == nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("MCP Server [%s] not configured on any port", serverName)
@@ -326,7 +326,7 @@ func addCompletionPayload(w http.ResponseWriter, r *http.Request) {
 		delayCount = -1
 	}
 	payload, _ := io.ReadAll(r.Body)
-	server := mcpserver.GetMCPServer(name)
+	server := mcpserver.GetMCPServer(port, name)
 	msg := ""
 	if server == nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -357,7 +357,7 @@ func addComponentPayload(w http.ResponseWriter, r *http.Request) {
 	isJSON := contentType == constants.ContentTypeJSON
 
 	payload, _ := io.ReadAll(r.Body)
-	server := mcpserver.GetMCPServer(serverName)
+	server := mcpserver.GetMCPServer(port, serverName)
 	msg := ""
 	if server == nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -379,10 +379,11 @@ func sendBadRequest(msg string, w http.ResponseWriter, r *http.Request) {
 }
 
 func callTool(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
 	serverName := util.GetStringParamValue(r, "server")
 	toolName := util.GetStringParamValue(r, "tool")
 	msg := ""
-	server := mcpserver.GetMCPServer(serverName)
+	server := mcpserver.GetMCPServer(port, serverName)
 	if server == nil {
 		sendBadRequest(fmt.Sprintf("MCP Server [%s] not configured on any port", serverName), w, r)
 		return

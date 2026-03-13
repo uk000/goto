@@ -155,7 +155,6 @@ func getServer(r *http.Request) *gomcp.Server {
 	var server *MCPServer
 	port := util.GetRequestOrListenerPortNum(r)
 	defer func() {
-		util.PrintRequest("MCP Request Details", r)
 		if server != nil {
 			rs := util.GetRequestStore(r)
 			rs.ResponseWriter.Header().Add("Goto-Server", server.ID)
@@ -172,10 +171,10 @@ func getServerAndTool(r *http.Request) (*MCPServer, *MCPTool) {
 	port := util.GetRequestOrListenerPortNum(r)
 	rs := util.GetRequestStore(r)
 	uri := r.RequestURI
-	uri, server = findServerForURI(uri)
+	uri, server = findServerForURI(port, uri)
 	_, serverName, toolName := getPortServerToolFromURI(r.RequestURI)
 	if server == nil {
-		server = GetMCPServer(serverName)
+		server = GetMCPServer(port, serverName)
 		if server == nil && rs.IsMCP {
 			ps := PortsServers[port]
 			if ps == nil || len(ps.Servers) == 0 {
@@ -205,11 +204,11 @@ func getServerAndTool(r *http.Request) (*MCPServer, *MCPTool) {
 	return server, tool
 }
 
-func findServerForURI(uri string) (matchedURI string, server *MCPServer) {
+func findServerForURI(port int, uri string) (matchedURI string, server *MCPServer) {
 	pair := ServerRoutes[uri]
 	if pair == nil {
 		for uri2, pair2 := range ServerRoutes {
-			s := GetMCPServer(pair2.LeftS())
+			s := GetMCPServer(port, pair2.LeftS())
 			if s.uriRegexp != nil {
 				if s.uriRegexp.MatchString(uri) {
 					matchedURI = uri2
@@ -220,7 +219,7 @@ func findServerForURI(uri string) (matchedURI string, server *MCPServer) {
 		}
 	} else {
 		matchedURI = uri
-		server = GetMCPServer(pair.LeftS())
+		server = GetMCPServer(port, pair.LeftS())
 	}
 	return
 }
@@ -261,7 +260,6 @@ func getPortServerToolFromURI(uri string) (port int, server, tool string) {
 }
 
 func HandleMCPDefault(w http.ResponseWriter, r *http.Request) {
-	util.PrintRequest("Default MCP Handler: Request Details", r)
 	l := listeners.GetCurrentListener(r)
 	rs := util.GetRequestStore(r)
 	hasSSE := strings.Contains(r.RequestURI, "/sse")

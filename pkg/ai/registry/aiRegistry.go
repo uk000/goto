@@ -95,6 +95,12 @@ func (r *AgentRegistry) Clear() {
 	r.Agents = map[string]map[int]*a2amodel.Agent{}
 }
 
+func (r *AgentRegistry) RemoveAgent(name string) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	delete(r.Agents, name)
+}
+
 func (mr *MCPRegistry) init() {
 	mr.Servers = map[string]*mcpserver.MCPServer{}
 }
