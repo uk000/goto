@@ -102,10 +102,10 @@ mcp:
         required: []
   servers:
     - server:
-        name: Goto-MCP1
+        name: goto-mcp-1
         port: 3000
-        uri: "/mcp/goto-mcp1"
-        description: "Stateful MCP Server at URI [/mcp/goto-mcp1] on Host [localhost] Port [3000] @ Cluster [local]"
+        uri: "/mcp/goto-mcp-1"
+        description: "Stateful MCP Server at URI [/mcp/goto-mcp-1] on Host [${POD_NAME}] Port [3000] @NS [ns] @ Cluster [local]"
         version: "1.0"
         instructions: "This is a stateful MCP server that even remembers where you went for lunch yesterday"
         pageSize: 50
@@ -118,7 +118,7 @@ mcp:
       tools:
         - tool:
             name: "toolcall"
-            description: "Call a tool on another MCP server from server goto-mcp1"
+            description: "Call a tool on another MCP server from server goto-mcp-1@${POD_NAME}@ns@local"
           schema: tool-call-schema
           behavior:
             remote: true
@@ -139,29 +139,29 @@ mcp:
               args: {}
         - tool:
             name: ping
-            description: Ping client from server goto-mcp1
+            description: Ping client from server goto-mcp-1@${POD_NAME}@ns@local
           behavior:
             ping: true
         - tool:
             name: echo
-            description: Echo back from server goto-mcp1
+            description: Echo back from server goto-mcp-1@${POD_NAME}@ns@local
           schema: basic-text-delay-schema
           behavior:
             echo: true
         - tool:
             name: time
-            description: Get current time from server Goto-8080s
+            description: Get current time from server goto-mcp-1@${POD_NAME}@ns@local
           behavior:
             time: true
         - tool:
             name: fetch
-            description: Fetch HTTP resource from [localhost:8080/echo/headers]
+            description: Fetch HTTP resource from [localhost:8081]
           schema: fetch-schema
           behavior:
             fetch: true
           config:
             remote:
-              url: "localhost:8080/echo/headers"
+              url: "localhost:8081"
               authority: "localhost"
               forwardHeaders:
               - Traceparent
@@ -169,7 +169,7 @@ mcp:
               - authorization
         - tool:
             name: stream
-            description: long running streaming tool, with stream out and progress notifications from server goto-mcp1
+            description: long running streaming tool, with stream out and progress notifications from server goto-mcp-1@${POD_NAME}@ns@local
           schema: basic-text-delay-schema
           behavior:
             stream: true
@@ -180,17 +180,17 @@ mcp:
               count: -1
         - tool:
             name: sample
-            description: sample something from client for server goto-mcp1
+            description: sample something from client for server goto-mcp-1@${POD_NAME}@ns@local
           behavior:
             sample: true
         - tool:
             name: listRoots
-            description: Get list of roots from client for server goto-mcp1
+            description: Get list of roots from client for server goto-mcp-1@${POD_NAME}@ns@local
           behavior:
             listRoots: true
         - tool:
             name: elicit
-            description: elicit something from LLM for server goto-mcp1
+            description: elicit something from LLM for server goto-mcp-1@${POD_NAME}@ns@local
             inputSchema:
               type: object
               properties:
@@ -207,7 +207,7 @@ mcp:
           behavior:
             elicit: true
           response:
-            message: provide a random string for server goto-mcp1
+            message: provide a random string for server goto-mcp-1@${POD_NAME}@ns@local
             requestedSchema:
               type: object
               properties:
@@ -215,284 +215,287 @@ mcp:
                   type: string
         - tool:
             name: remote-serverdetails
-            description: 'From Server [goto-mcp1], call tool [default: ServerDetails] on remote MCP server [goto-mcp2] at URL[localhost:3000/mcp/goto-mcp2/serverdetails], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
+            description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: ServerDetails] on remote MCP server at URL[localhost:4000/mcp/goto-mcp-1/serverdetails], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
           behavior:
             remote: true
           config:
             remote:
               tool: "ServerDetails"
-              server: "goto-mcp2"
-              url: "localhost:3000/mcp/goto-mcp2/serverdetails"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp2/serverdetails"
+              server: "goto-mcp-1"
+              url: "localhost:4000/mcp/goto-mcp-1/serverdetails"
+              sseURL: ""
               forceSSE: false
               authority: "localhost"
               delay: "1s"
               headers:
-                foo: ["bar"]
+                caller: ["remote-server-details@goto-mcp-1@${POD_NAME}@ns@local"]
               forwardHeaders:
               - Traceparent
               - Tracestate
               - Authorization
               args:
-                text: Calling ServerDetails@goto-mcp2 from remote-serversdetails@goto-mcp1
+                text: "Calling ServerDetails@goto-mcp-1 from MCP tool remote-serverdetails@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
-                  Accept: application/json           
+                  Accept: "application/json"
         - tool:
             name: remote-listservers
-            description: 'From Server [goto-mcp1], call tool [default: ListServers] on remote MCP server [goto-mcp2] at URL[localhost:3000/mcp/goto-mcp2/allservers], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
+            description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: ListServers] on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/allservers], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
           behavior:
             remote: true
           config:
             remote:
               tool: "ListServers"
-              server: "goto-mcp2"
-              url: "localhost:3000/mcp/goto-mcp2/listservers"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp2/listservers"
+              server: "goto-mcp-1"
+              url: "localhost:4000/mcp/goto-mcp-1/listservers"
+              sseURL: ""
               forceSSE: false
               authority: "localhost"
               delay: "1s"
               headers:
-                foo: ["bar"]
+                caller: ["remote-listservers@goto-mcp-1@${POD_NAME}@ns@local"]
               forwardHeaders:
               - Traceparent
               - Tracestate
               - Authorization
               args:
-                text: Calling ListServers@goto-mcp2 from remote-listservers@goto-mcp1
+                text: "Calling ListServers@goto-mcp-1 from remote-listservers@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
-                  Accept: application/json           
+                  Accept: "application/json"
         - tool:
             name: remote-echo
-            description: 'From Server [goto-mcp1], call tool [default: echo] on remote MCP server [goto-mcp2] at URL[localhost:3000/mcp/goto-mcp2/echo], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
+            description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: echo] on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/echo], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
           behavior:
             remote: true
           config:
             remote:
               tool: "echo"
-              server: "goto-mcp2"
-              url: "localhost:3000/mcp/goto-mcp2/echo"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp2/echo"
+              server: "goto-mcp-1"
+              url: "localhost:4000/mcp/goto-mcp-1/echo"
+              sseURL: ""
               forceSSE: false
               authority: "localhost"
               delay: "1s"
               headers:
-                foo: ["bar"]
+                caller: ["remote-echo@goto-mcp-1@${POD_NAME}@ns@local"]
               forwardHeaders:
               - Traceparent
               - Tracestate
               - Authorization
               args:
-                text: Calling echo@goto-mcp2 from remote-echo@goto-mcp1
+                text: "Calling echo@goto-mcp-1 from MCP tool remote-echo@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
-                  Accept: application/json           
+                  Accept: "application/json"
         - tool:
             name: remote-elicit
-            description: 'From Server [goto-mcp1], call tool [default: elicit] on remote MCP server [goto-mcp2] at URL[localhost:3000/mcp/goto-mcp2/elicit], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
+            description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: elicit] on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/elicit], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
           behavior:
             remote: true
           config:
             remote:
               tool: "elicit"
-              server: "goto-mcp2"
-              url: "localhost:3000/mcp/goto-mcp2/elicit"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp2/elicit"
+              server: "goto-mcp-1"
+              url: "localhost:4000/mcp/goto-mcp-1/elicit"
+              sseURL: ""
               forceSSE: false
               authority: "localhost"
               delay: "1s"
               headers:
-                foo: ["bar"]
+                caller: ["remote-elicit@goto-mcp-1@${POD_NAME}@ns@local"]
               forwardHeaders:
               - Traceparent
               - Tracestate
               - Authorization
               args:
-                text: Calling elicit@goto-mcp2 from remote-elicit@goto-mcp1
+                text: "Calling elicit@goto-mcp-1 from MCP tool remote-elicit@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
-                  Accept: application/json           
+                  Accept: "application/json"
         - tool:
             name: remote-fetch
-            description: 'From Server [goto-mcp1], call tool [default: fetch] on remote MCP server [goto-mcp2] at URL[localhost:3000/mcp/goto-mcp2/fetch], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
+            description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: fetch] on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/fetch], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
           behavior:
             remote: true
           config:
             remote:
               tool: "elicit"
-              server: "goto-mcp2"
-              url: "localhost:3000/mcp/goto-mcp2/fetch"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp2/fetch"
+              server: "goto-mcp-1"
+              url: "localhost:4000/mcp/goto-mcp-1/fetch"
+              sseURL: ""
               forceSSE: false
               authority: "localhost"
               delay: "1s"
               headers:
-                foo: ["bar"]
+                caller: ["remote-fetch@goto-mcp-1@${POD_NAME}@ns@local"]
               forwardHeaders:
               - Traceparent
               - Tracestate
               - Authorization
               args:
-                text: Calling fetch@goto-mcp2 from remote-fetch@goto-mcp1
+                text: "Calling fetch@goto-mcp-1 from MCP tool remote-fetch@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
-                  Accept: application/json           
+                  Accept: "application/json"
         - tool:
             name: remote-stream
-            description: 'From Server [goto-mcp1], call tool [default: stream] on remote MCP server [goto-mcp2] at URL[localhost:3000/mcp/goto-mcp2/stream], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
+            description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: stream] on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/stream], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
           behavior:
             remote: true
           config:
             remote:
               tool: "stream"
-              server: "goto-mcp2"
-              url: "localhost:3000/mcp/goto-mcp2/stream"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp2/stream"
+              server: "goto-mcp-1"
+              url: "localhost:4000/mcp/goto-mcp-1/stream"
+              sseURL: ""
               forceSSE: false
               authority: "localhost"
               delay: "1s"
               headers:
-                foo: ["bar"]
+                caller: ["remote-stream@goto-mcp-1@${POD_NAME}@ns@local"]
               forwardHeaders:
               - Traceparent
               - Tracestate
               - Authorization
               args:
-                text: Calling stream@goto-mcp2 from remote-stream@goto-mcp1
+                text: "Calling stream@goto-mcp-1 from MCP tool remote-stream@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
-                  Accept: application/json           
+                  Accept: "application/json"
         - tool:
             name: remote-toolcall
-            description: 'From Server [goto-mcp1], call tool [default: toolcall] on remote MCP server [goto-mcp2] at URL[localhost:3000/mcp/goto-mcp2/toolcall], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
+            description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: toolcall] on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/toolcall], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
           behavior:
             remote: true
           config:
             remote:
               tool: "toolcall"
-              server: "goto-mcp2"
-              url: "localhost:3000/mcp/goto-mcp2/toolcall"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp2/toolcall"
+              server: "goto-mcp-1"
+              url: "localhost:4000/mcp/goto-mcp-1/toolcall"
+              sseURL: ""
               forceSSE: false
               authority: "localhost"
               delay: "1s"
               headers:
-                foo: ["bar"]
+                caller: ["remote-toolcall@goto-mcp-1@${POD_NAME}@ns@local"]
               forwardHeaders:
               - Traceparent
               - Tracestate
               - Authorization
               args:
-                text: Calling toolcall@goto-mcp2 from remote-toolcall@goto-mcp1
+                text: "Calling toolcall@goto-mcp-1 from MCP tool remote-toolcall@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
-                  Accept: application/json           
+                  Accept: "application/json"
         - tool:
             name: remote-remote-toolcall
-            description: 'From Server [goto-mcp1], call tool [default: remote-toolcall] on remote MCP server [goto-mcp2] at URL[localhost:3000/mcp/goto-mcp2/remote-toolcall], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
+            description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: remote-toolcall] on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/remote-toolcall], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
           behavior:
             remote: true
           config:
             remote:
               tool: "remote-toolcall"
-              server: "goto-mcp2"
-              url: "localhost:3000/mcp/goto-mcp2/remote-toolcall"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp2/remote-toolcall"
+              server: "goto-mcp-1"
+              url: "localhost:4000/mcp/goto-mcp-1/remote-toolcall"
+              sseURL: ""
               forceSSE: false
               authority: "localhost"
               delay: "1s"
               headers:
-                foo: ["bar"]
+                caller: ["remote-remote-toolcall@goto-mcp-1@${POD_NAME}@ns@local"]
               forwardHeaders:
               - Traceparent
               - Tracestate
               - Authorization
               args:
-                text: Calling remote-toolcall@goto-mcp2 from remote-remote-toolcall@goto-mcp1
+                text: "Calling remote-toolcall@goto-mcp-1 from MCP tool remote-remote-toolcall@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
-                  Accept: application/json           
+                  Accept: "application/json"
       prompts:
         - prompt:
             name: meeting_recap_prompt
-            description: Get meeting minutes and recap from goto-mcp1
+            description: Get meeting minutes and recap from goto-mcp-1@${POD_NAME}@ns@local
             arguments:
             - name: meeting_id
               description: Meeting ID for which to fetch recap
               required: true
           payload:
-            text: Prompt from Server goto-mcp1
+            text: Prompt from Server goto-mcp-1@${POD_NAME}@ns@local
         - prompt:
             name: github_pr_comments_prompt
-            description: Get PR comments from goto-mcp1
+            description: Get PR comments from goto-mcp-1@${POD_NAME}@ns@local
             arguments:
             - name: user_id
               description: User ID for whom recent PR comments should be fetched
               required: true
           payload:
             textStream:
-            - Prompt 1 from Server goto-mcp1
-            - Prompt 2 from Server goto-mcp1
+            - Prompt 1 from Server goto-mcp-1@${POD_NAME}@ns@local
+            - Prompt 2 from Server goto-mcp-1@${POD_NAME}@ns@local
       resources:
         - resource:
             name: ResourceA
             title: ResourceA
-            description: A Resource on goto-mcp1
+            description: A Resource on goto-mcp-1@${POD_NAME}@ns@local
             size: 100
             uri: audio://resources/a
             mimeType: audio/aac
-            text: This is a sample resource A on server goto-mcp1
-            blob: Resource A Blob from server goto-mcp1
+            text: This is a sample resource A on server goto-mcp-1@${POD_NAME}@ns@local
+            blob: Resource A Blob from server goto-mcp-1@${POD_NAME}@ns@local
         - resource:
             name: ResourceB
             title: ResourceB
-            description: B Resource on goto-mcp1
+            description: B Resource on goto-mcp-1@${POD_NAME}@ns@local
             size: 200
             uri: ftp://resources/b
             mimeType: text/plain
-            text: This is a sample resource B on server goto-mcp1
-            blob: Resource B Blob from server goto-mcp1
+            text: This is a sample resource B on server goto-mcp-1@${POD_NAME}@ns@local
+            blob: Resource B Blob from server goto-mcp-1@${POD_NAME}@ns@local
         - resource:
             name: ResourceC
             title: ResourceC
-            description: C Resource on goto-mcp1
+            description: C Resource on goto-mcp-1@${POD_NAME}@ns@local
             size: 300
             uri: video://resources/c
             mimeType: video/mp4
-            text: This is a sample resource C on server goto-mcp1
-            blob: Resource C Blob from server goto-mcp1
+            text: This is a sample resource C on server goto-mcp-1@${POD_NAME}@ns@local
+            blob: Resource C Blob from server goto-mcp-1@${POD_NAME}@ns@local
       templates:
         - template:
             name: TemplateA
             title: TemplateA
-            description: A Template on goto-mcp1
+            description: A Template on goto-mcp-1@${POD_NAME}@ns@local
             uriTemplate: audio://templates/a
             mimeType: audio/aac
+            text: This is template A on server goto-mcp-1@${POD_NAME}@ns@local
         - template:
             name: TemplateB
             title: TemplateB
-            description: B Template on goto-mcp1
+            description: B Template on goto-mcp-1@${POD_NAME}@ns@local
             uriTemplate: ftp://templates/b
             mimeType: text/plain
+            text: This is template B on server goto-mcp-1@${POD_NAME}@ns@local
         - template:
             name: TemplateC
             title: TemplateC
-            description: C Template on goto-mcp1
+            description: C Template on goto-mcp-1@${POD_NAME}@ns@local
             uriTemplate: video://templates/c
             mimeType: video/mp4
+            text: This is template C on server goto-mcp-1@${POD_NAME}@ns@local
       payloads:
         server:
           completions:
             list:
-            - "Completion 1 from server goto-mcp1"
-            - "Completion 2 from server goto-mcp1"
-            - "Completion 3 from server goto-mcp1"
+            - "Completion 1 from server goto-mcp-1@${POD_NAME}@ns@local"
+            - "Completion 2 from server goto-mcp-1@${POD_NAME}@ns@local"
+            - "Completion 3 from server goto-mcp-1@${POD_NAME}@ns@local"
             delay: 1s
           toolPayloads:
             - name: sample
               payload:
-                message: sample something for server goto-mcp1
+                message: sample something for server goto-mcp-1@${POD_NAME}@ns@local
                 requestedSchema:
                   type: object
                   properties:
@@ -500,7 +503,7 @@ mcp:
                       type: string
             - name: elicit
               payload:
-                message: elciit something for server goto-mcp1
+                message: elciit something for server goto-mcp-1@${POD_NAME}@ns@local
                 requestedSchema:
                   type: object
                   properties:
@@ -514,23 +517,23 @@ mcp:
                 count: 10
                 delay: 1s
                 data:
-                - payload: stream response 1/4 from server goto-mcp1
-                - payload: stream response 2/4 from server goto-mcp1
-                - payload: stream response 3/4 from server goto-mcp1
-                - payload: stream response 4/4 from server goto-mcp1
+                - payload: stream response 1/4 from server goto-mcp-1@${POD_NAME}@ns@local
+                - payload: stream response 2/4 from server goto-mcp-1@${POD_NAME}@ns@local
+                - payload: stream response 3/4 from server goto-mcp-1@${POD_NAME}@ns@local
+                - payload: stream response 4/4 from server goto-mcp-1@${POD_NAME}@ns@local
         client:
           sample:
             models:
-            - "goto-mcp1-model1"
-            - "goto-mcp1-model2"
+            - "goto-mcp-1@${POD_NAME}@ns@local-model1"
+            - "goto-mcp-1@${POD_NAME}@ns@local-model2"
             roles:
             - user
             - system
             - assistant
             - none
             contents:
-            - "goto-mcp1: sampling successful on client"
-            - "goto-mcp1: sampling denied on client"
+            - "goto-mcp-1@${POD_NAME}@ns@local: sampling successful on client"
+            - "goto-mcp-1@${POD_NAME}@ns@local: sampling denied on client"
             actions:
             - accept
             - reject
@@ -540,16 +543,16 @@ mcp:
               count: -1
           elicit:
             models:
-            - "goto-mcp1-Model1"
-            - "goto-mcp1-Model2"
+            - "goto-mcp-1@${POD_NAME}@ns@local-Model1"
+            - "goto-mcp-1@${POD_NAME}@ns@local-Model2"
             roles:
             - user
             - system
             - assistant
             - none
             contents:
-            - "goto-mcp1: elicit accepted on client"
-            - "goto-mcp1: elicit refused by user on client"
+            - "goto-mcp-1@${POD_NAME}@ns@local: elicit accepted on client"
+            - "goto-mcp-1@${POD_NAME}@ns@local: elicit refused by user on client"
             actions:
             - accept
             - reject
@@ -558,453 +561,29 @@ mcp:
               max: 5s
               count: -1
           roots:
-            - name: Root 1 on goto-mcp1
+            - name: Root 1 on goto-mcp-1@${POD_NAME}@ns@local
               uri: "/root1"
-            - name: Root 2 on goto-mcp1
+            - name: Root 2 on goto-mcp-1@${POD_NAME}@ns@local
               uri: "/root2"
-            - name: Root 3 on goto-mcp1
-              uri: "/root3"
-
-    - server:
-        name: Goto-MCP2
-        port: 3000
-        uri: "/mcp/goto-mcp2"
-        description: "Stateless MCP Server at URI [/mcp/goto-mcp2] on Host [localhost] Port [3000] @ Cluster [local]"
-        version: "1.0"
-        instructions: "This is a stateless MCP server with no memory of what you ate for lunch yesterday"
-        pageSize: 50
-        keepAlive: 0
-        hasPrompts: true
-        hasResources: true
-        hasTools: true
-        stateless: true
-        enabled: true
-      tools:
-        - tool:
-            name: "toolcall"
-            description: "Call a tool on another MCP server from server goto-mcp2"
-          schema: tool-call-schema
-          behavior:
-            remote: true
-          config:
-            remote:
-              tool: "-"
-              server: "-"
-              url: "-"
-              sseURL: "-"
-              forceSSE: false
-              authority: "-"
-              delay: 1s
-              headers: {}
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - authorization
-              args: {}
-        - tool:
-            name: ping
-            description: Ping client from server goto-mcp2
-          behavior:
-            ping: true
-        - tool:
-            name: echo
-            description: Echo back from server goto-mcp2
-          schema: basic-text-delay-schema
-          behavior:
-            echo: true
-        - tool:
-            name: time
-            description: Get current time from server goto-mcp2
-          behavior:
-            time: true
-        - tool:
-            name: fetch
-            description: Fetch HTTP resource from [localhost:8001/echo/headers]
-          schema: fetch-schema
-          behavior:
-            fetch: true
-          config:
-            remote:
-              url: "localhost:8001/echo/headers"
-              authority: "localhost"
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - authorization
-        - tool:
-            name: stream
-            description: long running streaming tool, with stream out and progress notifications from server goto-mcp2
-          schema: basic-text-delay-schema
-          behavior:
-            stream: true
-          config:
-            delay:
-              min: 1s
-              max: 5s
-              count: -1
-        - tool:
-            name: remote-server-details
-            description: 'From Server [goto-mcp2], call tool [default: ServerDetails] on remote MCP server [goto-mcp1] at URL[localhost:3000/mcp/goto-mcp1/serverdetails], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
-          schema: remote-tool-schema
-          behavior:
-            remote: true
-          config:
-            remote:
-              tool: "ServerDetails"
-              server: "goto-mcp1"
-              url: "localhost:3000/mcp/goto-mcp1/serverdetails"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp1/serverdetails"
-              forceSSE: false
-              authority: "localhost"
-              delay: "1s"
-              headers:
-                foo: ["bar"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
-              args:
-                text: Calling ServerDetails@goto-mcp1 from remote-serversdetails@goto-mcp2
-                headers:
-                  Accept: application/json           
-        - tool:
-            name: remote-listservers
-            description: 'From Server [goto-mcp2], call tool [default: ListServers] on remote MCP server [goto-mcp1] at URL[localhost:3000/mcp/goto-mcp1/allservers], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
-          schema: remote-tool-schema
-          behavior:
-            remote: true
-          config:
-            remote:
-              tool: "ListServers"
-              server: "goto-mcp1"
-              url: "localhost:3000/mcp/goto-mcp1/listservers"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp1/listservers"
-              forceSSE: false
-              authority: "localhost"
-              delay: "1s"
-              headers:
-                foo: ["bar"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
-              args:
-                text: Calling ListServers@goto-mcp1 from remote-listservers@goto-mcp2
-                headers:
-                  Accept: application/json           
-        - tool:
-            name: remote-echo
-            description: 'From Server [goto-mcp2], call tool [default: echo] on remote MCP server [goto-mcp1] at URL[localhost:3000/mcp/goto-mcp1/echo], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
-          schema: remote-tool-schema
-          behavior:
-            remote: true
-          config:
-            remote:
-              tool: "echo"
-              server: "goto-mcp1"
-              url: "localhost:3000/mcp/goto-mcp1/echo"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp1/echo"
-              forceSSE: false
-              authority: "localhost"
-              delay: "1s"
-              headers:
-                foo: ["bar"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
-              args:
-                text: Calling echo@goto-mcp1 from remote-echo@goto-mcp2
-                headers:
-                  Accept: application/json           
-        - tool:
-            name: remote-elicit
-            description: 'From Server [goto-mcp2], call tool [default: elicit] on remote MCP server [goto-mcp1] at URL[localhost:3000/mcp/goto-mcp1/elicit], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
-          schema: remote-tool-schema
-          behavior:
-            remote: true
-          config:
-            remote:
-              tool: "elicit"
-              server: "goto-mcp1"
-              url: "localhost:3000/mcp/goto-mcp1/elicit"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp1/elicit"
-              forceSSE: false
-              authority: "localhost"
-              delay: "1s"
-              headers:
-                foo: ["bar"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
-              args:
-                text: Calling elicit@goto-mcp1 from remote-elicit@goto-mcp2
-                headers:
-                  Accept: application/json           
-        - tool:
-            name: remote-fetch
-            description: 'From Server [goto-mcp2], call tool [default: fetch] on remote MCP server [goto-mcp1] at URL[localhost:3000/mcp/goto-mcp1/fetch], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
-          schema: remote-tool-schema
-          behavior:
-            remote: true
-          config:
-            remote:
-              tool: "elicit"
-              server: "goto-mcp1"
-              url: "localhost:3000/mcp/goto-mcp1/fetch"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp1/fetch"
-              forceSSE: false
-              authority: "localhost"
-              delay: "1s"
-              headers:
-                foo: ["bar"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
-              args:
-                text: Calling fetch@goto-mcp1 from remote-fetch@goto-mcp2
-                headers:
-                  Accept: application/json           
-        - tool:
-            name: remote-stream
-            description: 'From Server [goto-mcp2], call tool [default: stream] on remote MCP server [goto-mcp1] at URL[localhost:3000/mcp/goto-mcp1/stream], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
-          schema: remote-tool-schema
-          behavior:
-            remote: true
-          config:
-            remote:
-              tool: "stream"
-              server: "goto-mcp1"
-              url: "localhost:3000/mcp/goto-mcp1/stream"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp1/stream"
-              forceSSE: false
-              authority: "localhost"
-              delay: "1s"
-              headers:
-                foo: ["bar"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
-              args:
-                text: Calling stream@goto-mcp1 from remote-stream@goto-mcp2
-                headers:
-                  Accept: application/json           
-        - tool:
-            name: remote-toolcall
-            description: 'From Server [goto-mcp2], call tool [default: toolcall] on remote MCP server [goto-mcp1] at URL[localhost:3000/mcp/goto-mcp1/toolcall], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
-          schema: remote-tool-schema
-          behavior:
-            remote: true
-          config:
-            remote:
-              tool: "toolcall"
-              server: "goto-mcp1"
-              url: "localhost:3000/mcp/goto-mcp1/toolcall"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp1/toolcall"
-              forceSSE: false
-              authority: "localhost"
-              delay: "1s"
-              headers:
-                foo: ["bar"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
-              args:
-                text: Calling toolcall@goto-mcp1 from remote-toolcall@goto-mcp2
-                headers:
-                  Accept: application/json           
-        - tool:
-            name: remote-remote-toolcall
-            description: 'From Server [goto-mcp2], call tool [default: remote-toolcall] on remote MCP server [goto-mcp1] at URL[localhost:3000/mcp/goto-mcp1/remote-toolcall], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
-          schema: remote-tool-schema
-          behavior:
-            remote: true
-          config:
-            remote:
-              tool: "remote-toolcall"
-              server: "goto-mcp1"
-              url: "localhost:3000/mcp/goto-mcp1/remote-toolcall"
-              sseURL: "localhost:3000/mcp/sse/goto-mcp1/remote-toolcall"
-              forceSSE: false
-              authority: "localhost"
-              delay: "1s"
-              headers:
-                foo: ["bar"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
-              args:
-                text: Calling remote-toolcall@goto-mcp1 from remote-remote-toolcall@goto-mcp2
-                headers:
-                  Accept: application/json           
-      prompts:
-        - prompt:
-            name: meeting_recap_prompt
-            description: Get meeting minutes and recap from server goto-mcp2
-            arguments:
-            - name: meeting_id
-              description: Meeting ID for which to fetch recap
-              required: true
-          payload:
-            text: Prompt from Server goto-mcp2
-        - prompt:
-            name: github_pr_comments_prompt
-            description: Get PR comments from goto-mcp2
-            arguments:
-            - name: user_id
-              description: User ID for whom recent PR comments should be fetched
-              required: true
-          payload:
-            textStream:
-            - Prompt 1 from Server goto-mcp2
-            - Prompt 2 from Server goto-mcp2
-      resources:
-        - resource:
-            name: ResourceA
-            title: ResourceA
-            description: A Resource
-            size: 100
-            uri: audio://resources/a
-            mimeType: audio/aac
-            text: This is a sample resource A on server goto-mcp2
-            blob: Resource A Blob from server goto-mcp2
-        - resource:
-            name: ResourceB
-            title: ResourceB
-            description: B Resource
-            size: 200
-            uri: ftp://resources/b
-            mimeType: text/plain
-            text: This is a sample resource B on server goto-mcp2
-            blob: Resource B Blob from server goto-mcp2
-        - resource:
-            name: ResourceC
-            title: ResourceC
-            description: C Resource
-            size: 300
-            uri: video://resources/c
-            mimeType: video/mp4
-            text: This is a sample resource C on server goto-mcp2
-            blob: Resource C Blob from server goto-mcp2
-      templates:
-        - template:
-            name: TemplateA
-            title: TemplateA
-            description: A Template on goto-mcp2
-            uriTemplate: audio://templates/a
-            mimeType: audio/aac
-        - template:
-            name: TemplateB
-            title: TemplateB
-            description: B Template on goto-mcp2
-            uriTemplate: ftp://templates/b
-            mimeType: text/plain
-        - template:
-            name: TemplateC
-            title: TemplateC
-            description: C Template on goto-mcp2
-            uriTemplate: video://templates/c
-            mimeType: video/mp4
-      payloads:
-        server:
-          completions:
-            list:
-            - "Completion 1 from server goto-mcp2"
-            - "Completion 2 from server goto-mcp2"
-            - "Completion 3 from server goto-mcp2"
-            delay: 1s
-          toolPayloads:
-            - name: sample
-              payload:
-                message: sample something for server goto-mcp2
-                requestedSchema:
-                  type: object
-                  properties:
-                    sample:
-                      type: string
-            - name: elicit
-              payload:
-                message: elciit something for server goto-mcp2
-                requestedSchema:
-                  type: object
-                  properties:
-                    elicit:
-                      type: string
-                    theAsk:
-                      type: string
-          streamPayloads:
-            - name: stream
-              payload:
-                count: 10
-                delay: 1s
-                data:
-                - payload: stream response 1/4 from server goto-mcp2
-                - payload: stream response 2/4 from server goto-mcp2
-                - payload: stream response 3/4 from server goto-mcp2
-                - payload: stream response 4/4 from server goto-mcp2
-        client:
-          sample:
-            models:
-            - "goto-mcp2-model1"
-            - "goto-mcp2-model2"
-            roles:
-            - user
-            - system
-            - assistant
-            - none
-            contents:
-            - "goto-mcp2: sampling successful on client"
-            - "goto-mcp2: sampling denied on client"
-            actions:
-            - accept
-            - reject
-            delay:
-              min: 2s
-              max: 5s
-              count: -1
-          elicit:
-            models:
-            - "goto-mcp2-Model1"
-            - "goto-mcp2-Model2"
-            roles:
-            - user
-            - system
-            - assistant
-            - none
-            contents:
-            - "goto-mcp2: elicit accepted on client"
-            - "goto-mcp2: elicit refused by user on client"
-            actions:
-            - accept
-            - reject
-            delay:
-              min: 2s
-              max: 5s
-              count: -1
-          roots:
-            - name: Root 1 on goto-mcp2
-              uri: "/root1"
-            - name: Root 2 on goto-mcp2
-              uri: "/root2"
-            - name: Root 3 on goto-mcp2
+            - name: Root 3 on goto-mcp-1@${POD_NAME}@ns@local
               uri: "/root3"
 a2a:
   agents:
     - port: 3000
       agent:
         card:
-          name: agent1
-          description: "this is agent agent1 with skills: federate echo elicit fetch"
-          url: http://localhost:3000/agent/agent1/
+          protocolVersion: 0.2.2
+          version: "1.0"
+          name: goto-1
+          description: "This is agent goto-1@${POD_NAME}@ns@local with skills: echo elicit fetch stream"
+          url: http://localhost:3000/agent/goto-1/
+          preferredTransport: ""
+          additionalInterfaces:
+            - url: http://localhost:3000/agent/goto-1/grpc
+              transport: grpc
           provider:
             organization: Goto
             url: http://goto.goto
-          version: "1.0"
           documentationUrl: http://foo.bar
           capabilities:
             streaming: true
@@ -1026,8 +605,8 @@ a2a:
                 - fetch
               examples:
                 - what is fetch
-                - how to do fetch
-                - when to do fetch
+                - how to fetch
+                - when to fetch
                 - explain fetch
               inputModes:
                 - text
@@ -1041,8 +620,8 @@ a2a:
                 - elicit
               examples:
                 - what is elicit
-                - how to do elicit
-                - when to do elicit
+                - how to elicit
+                - when to elicit
                 - explain elicit
               inputModes:
                 - text
@@ -1056,8 +635,8 @@ a2a:
                 - echo
               examples:
                 - what is echo
-                - how to do echo
-                - when to do echo
+                - how to echo
+                - when to echo
                 - explain echo
               inputModes:
                 - text
@@ -1071,233 +650,14 @@ a2a:
                 - federate
               examples:
                 - what is federate
-                - how to do federate
-                - when to do federate
+                - how to federate
+                - when to federate
                 - explain federate
               inputModes:
                 - text
               outputModes:
                 - text
                 - task-status
-          supportsAuthenticatedExtendedCard: false
-          preferredTransport: ""
-          protocolVersion: 0.2.2
-          additionalInterfaces:
-            - url: http://localhost:3000/agent/agent1/grpc
-              transport: grpc
-        behavior:
-          federate: true
-        config:
-          delay:
-            min: 1s
-            max: 5s
-            count: -1
-          delegates:
-            tools:
-              echo:
-                triggers:
-                  - echo
-                  - feedback
-                  - response
-                toolCall:
-                  tool: echo
-                  url: http://mcp1-dev.wmt/mcp/goto-8080s/echo
-                  sseURL: ""
-                  server: goto-8080s
-                  authority: mcp1-dev.wmt
-                  delay: 10ms
-                  args:
-                    text: Hello from agent agent1
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
-                servers:
-                  mcp1:
-                    url: http://mcp1-dev.wmt/mcp/goto-8080s/echo
-                    authority: mcp1-dev.wmt
-                  mcp2:
-                    url: http://mcp2-dev.wmt/mcp/goto-8080s/echo
-                    authority: mcp2-dev.wmt
-                  mcp3:
-                    url: http://mcp3-dev.wmt/mcp/goto-8080s/echo
-                    authority: mcp3-dev.wmt
-              elicit:
-                triggers:
-                  - elicit
-                  - llm
-                  - client
-                toolCall:
-                  tool: elicit
-                  url: http://mcp1-dev.wmt/mcp/goto-8080s/elicit
-                  sseURL: ""
-                  server: goto-8080s
-                  authority: mcp1-dev.wmt
-                  delay: 1s
-                  args:
-                    text: Hello from agent agent1
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
-                servers:
-                  mcp1:
-                    url: http://mcp1-dev.wmt/mcp/goto-8080s/elicit
-                    authority: mcp1-dev.wmt
-                  mcp2:
-                    url: http://mcp2-dev.wmt/mcp/goto-8080s/elicit
-                    authority: mcp2-dev.wmt
-                  mcp3:
-                    url: http://mcp3-dev.wmt/mcp/goto-8080s/elicit
-                    authority: mcp3-dev.wmt
-              fetch:
-                triggers:
-                  - fetch
-                  - get
-                  - web
-                  - remote
-                toolCall:
-                  tool: fetch
-                  url: http://mcp1-dev.wmt/mcp/goto-8080s/fetch
-                  sseURL: ""
-                  server: goto-8080s
-                  authority: mcp1-dev.wmt
-                  delay: 1s
-                  args:
-                    text: Hello from agent agent1
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
-                servers:
-                  mcp1:
-                    url: http://mcp1-dev.wmt/mcp/goto-8080s/fetch
-                    authority: mcp1-dev.wmt
-                  mcp2:
-                    url: http://mcp2-dev.wmt/mcp/goto-8080s/fetch
-                    authority: mcp2-dev.wmt
-                  mcp3:
-                    url: http://mcp3-dev.wmt/mcp/goto-8080s/fetch
-                    authority: mcp3-dev.wmt
-              sr-state-status:
-                triggers:
-                  - SR
-                  - Service
-                  - Registry
-                  - sr
-                  - service
-                  - registry
-                toolCall:
-                  tool: sr-state-status
-                  url: http://mcp1-dev.wmt/mcp/goto-8080s/sr-state-status
-                  sseURL: ""
-                  server: goto-8080s
-                  authority: mcp1-dev.wmt
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
-                servers: null
-              stream:
-                triggers:
-                  - stream
-                  - content
-                  - push
-                toolCall:
-                  tool: stream
-                  url: http://mcp1-dev.wmt/mcp/goto-8080s/stream
-                  sseURL: ""
-                  server: goto-8080s
-                  authority: mcp1-dev.wmt
-                  delay: 1s
-                  args:
-                    text: Hello from agent agent1
-                  headers:
-                    Accept:
-                      - text/stream
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
-                servers:
-                  mcp1:
-                    url: http://mcp1-dev.wmt/mcp/goto-8080s/stream
-                    authority: mcp1-dev.wmt
-                  mcp2:
-                    url: http://mcp2-dev.wmt/mcp/goto-8080s/stream
-                    authority: mcp2-dev.wmt
-                  mcp3:
-                    url: http://mcp3-dev.wmt/mcp/goto-8080s/stream
-                    authority: mcp3-dev.wmt
-            agents:
-              agent1-mcp:
-                triggers:
-                  - agent1-mcp
-                agentCall:
-                  name: agent1-mcp
-                  agentURL: http://localhost:3000/agent/agent1-mcp
-                  cardURL: http://localhost:3000/agent/agent1-mcp/.well-known/agent.json
-                  delay: 1s
-                  message: echo
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
-                servers: null
-              agent2-mcp:
-                triggers:
-                  - agent2-mcp
-                agentCall:
-                  name: agent2-mcp
-                  agentURL: http://localhost:3000/agent/agent2-mcp
-                  cardURL: http://localhost:3000/agent/agent2-mcp/.well-known/agent.json
-                  delay: 1s
-                  message: echo
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
-                servers: null
-              agent3-mcp:
-                triggers:
-                  - agent3-mcp
-                agentCall:
-                  name: agent3-mcp
-                  agentURL: http://localhost:3000/agent/agent3-mcp
-                  cardURL: http://localhost:3000/agent/agent3-mcp/.well-known/agent.json
-                  delay: 1s
-                  message: echo
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
-                servers: null
-            maxCalls: 3
-            parallel: true
-    - port: 3000
-      agent:
-        card:
-          name: agent1-mcp
-          description: "this is agent agent1-mcp with skills: mcp echo elicit fetch stream"
-          url: http://localhost:3000/agent/agent1-mcp/
-          provider:
-            organization: Goto
-            url: http://goto.goto
-          version: "1.0"
-          documentationUrl: http://foo.bar
-          capabilities:
-            streaming: true
-            pushNotifications: false
-            stateTransitionHistory: true
-            extensions:
-              - uri: /foo
-              - uri: /bar
-          defaultInputModes:
-            - text
-          defaultOutputModes:
-            - text
-            - task-status
-          skills:
             - id: stream
               name: stream
               description: skill of stream
@@ -1313,78 +673,13 @@ a2a:
               outputModes:
                 - text
                 - task-status
-            - id: fetch
-              name: fetch
-              description: skill of fetch
-              tags:
-                - fetch
-              examples:
-                - what is fetch
-                - how to do fetch
-                - when to do fetch
-                - explain fetch
-              inputModes:
-                - text
-              outputModes:
-                - text
-                - task-status
-            - id: elicit
-              name: elicit
-              description: skill of elicit
-              tags:
-                - elicit
-              examples:
-                - what is elicit
-                - how to do elicit
-                - when to do elicit
-                - explain elicit
-              inputModes:
-                - text
-              outputModes:
-                - text
-                - task-status
-            - id: echo
-              name: echo
-              description: skill of echo
-              tags:
-                - echo
-              examples:
-                - what is echo
-                - how to do echo
-                - when to do echo
-                - explain echo
-              inputModes:
-                - text
-              outputModes:
-                - text
-                - task-status
-            - id: mcp
-              name: mcp
-              description: skill of mcp
-              tags:
-                - mcp
-              examples:
-                - what is mcp
-                - how to do mcp
-                - when to do mcp
-                - explain mcp
-              inputModes:
-                - text
-              outputModes:
-                - text
-                - task-status
           supportsAuthenticatedExtendedCard: false
-          preferredTransport: ""
-          protocolVersion: 0.2.2
-          additionalInterfaces:
-            - url: http://localhost:3000/agent/agent1-mcp/grpc
-              transport: grpc
         behavior:
           federate: true
         config:
           delay:
-            min: 1s
-            max: 5s
+            min: 0.1s
+            max: 0.2s
             count: -1
           delegates:
             tools:
@@ -1395,30 +690,49 @@ a2a:
                   - response
                 toolCall:
                   tool: echo
-                  url: http://mcp1-dev.wmt/mcp/goto-8080s/echo
+                  url: localhost:3000/mcp/goto-mcp/echo
                   sseURL: ""
-                  server: goto-8080s
-                  authority: mcp1-dev.wmt
+                  server: goto-mcp
+                  authority: localhost
                   delay: 10ms
                   args:
-                    text: Hello from agent agent1-mcp
+                    text: Hello from agent goto-1@${POD_NAME}@ns@local
                   headers:
-                    foo:
-                      - bar
+                    foo: ["echo"]
                   forwardHeaders:
                     - Traceparent
                     - Tracestate
                     - authorization
-                servers:
+                substitutes:
                   mcp1:
-                    url: http://mcp1-dev.wmt/mcp/goto-8080s/echo
-                    authority: mcp1-dev.wmt
+                    url: localhost:3000/mcp/goto-mcp/echo
+                    authority: localhost
                   mcp2:
-                    url: http://mcp2-dev.wmt/mcp/goto-8080s/echo
-                    authority: mcp2-dev.wmt
+                    url: localhost:4000/mcp/goto-mcp-2/echo
+                    authority: localhost
                   mcp3:
-                    url: http://mcp3-dev.wmt/mcp/goto-8080s/echo
-                    authority: mcp3-dev.wmt
+                    url: localhost:4000/mcp/goto-mcp-3/echo
+                    authority: localhost
+              echo2:
+                triggers:
+                  - echo
+                  - echo2
+                toolCall:
+                  tool: echo
+                  url: localhost:4000/mcp/goto-mcp-2/echo
+                  sseURL: ""
+                  server: goto-mcp-2
+                  authority: localhost
+                  delay: 10ms
+                  args:
+                    text: Hello from agent goto-1@${POD_NAME}@ns@local
+                  headers:
+                    foo: ["echo"]
+                  forwardHeaders:
+                    - Traceparent
+                    - Tracestate
+                    - authorization
+                substitutes:
               elicit:
                 triggers:
                   - elicit
@@ -1426,62 +740,58 @@ a2a:
                   - client
                 toolCall:
                   tool: elicit
-                  url: http://mcp1-dev.wmt/mcp/goto-8080s/elicit
+                  url: localhost:4000/mcp/goto-mcp-2/elicit
                   sseURL: ""
-                  server: goto-8080s
-                  authority: mcp1-dev.wmt
+                  server: goto-mcp-2
+                  authority: localhost
                   delay: 1s
                   args:
-                    text: Hello from agent agent1-mcp
+                    text: Hello from agent goto-1@${POD_NAME}@ns@local
                   headers:
-                    foo:
-                      - bar
+                    foo: ["elicit"]
                   forwardHeaders:
                     - Traceparent
                     - Tracestate
                     - authorization
-                servers:
+                substitutes:
                   mcp1:
-                    url: http://mcp1-dev.wmt/mcp/goto-8080s/elicit
-                    authority: mcp1-dev.wmt
+                    url: localhost:4000/mcp/goto-mcp-2/elicit
+                    authority: localhost
                   mcp2:
-                    url: http://mcp2-dev.wmt/mcp/goto-8080s/elicit
-                    authority: mcp2-dev.wmt
+                    url: localhost:4000/mcp/goto-mcp-3/elicit
+                    authority: localhost
                   mcp3:
-                    url: http://mcp3-dev.wmt/mcp/goto-8080s/elicit
-                    authority: mcp3-dev.wmt
+                    url: localhost:3000/mcp/goto-mcp/elicit
+                    authority: localhost
               fetch:
                 triggers:
                   - fetch
-                  - get
-                  - web
                   - remote
                 toolCall:
                   tool: fetch
-                  url: http://mcp1-dev.wmt/mcp/goto-8080s/fetch
+                  url: localhost:4000/mcp/goto-mcp-3/fetch
                   sseURL: ""
-                  server: goto-8080s
-                  authority: mcp1-dev.wmt
+                  server: goto-mcp-3
+                  authority: localhost
                   delay: 1s
                   args:
-                    text: Hello from agent agent1-mcp
+                    text: Hello from agent goto-1@${POD_NAME}@ns@local
                   headers:
-                    foo:
-                      - bar
+                    foo: ["fetch"]
                   forwardHeaders:
                     - Traceparent
                     - Tracestate
                     - authorization
-                servers:
+                substitutes:
                   mcp1:
-                    url: http://mcp1-dev.wmt/mcp/goto-8080s/fetch
-                    authority: mcp1-dev.wmt
+                    url: localhost:4000/mcp/goto-mcp-3/fetch
+                    authority: localhost
                   mcp2:
-                    url: http://mcp2-dev.wmt/mcp/goto-8080s/fetch
-                    authority: mcp2-dev.wmt
+                    url: localhost:3000/mcp/goto-mcp/fetch
+                    authority: localhost
                   mcp3:
-                    url: http://mcp3-dev.wmt/mcp/goto-8080s/fetch
-                    authority: mcp3-dev.wmt
+                    url: localhost:4000/mcp/goto-mcp-2/fetch
+                    authority: localhost
               sr-state-status:
                 triggers:
                   - SR
@@ -1492,61 +802,172 @@ a2a:
                   - registry
                 toolCall:
                   tool: sr-state-status
-                  url: http://mcp1-dev.wmt/mcp/goto-8080s/sr-state-status
+                  url: localhost:3000/mcp/goto-mcp/sr-state-status
                   sseURL: ""
-                  server: goto-8080s
-                  authority: mcp1-dev.wmt
+                  server: goto-mcp
+                  authority: localhost
+                  headers:
+                    foo: ["sr-site-status"]
                   forwardHeaders:
                     - Traceparent
                     - Tracestate
                     - authorization
-                servers: null
+                substitutes: null
               stream:
                 triggers:
                   - stream
                   - content
                   - push
-                  - mcp
                 toolCall:
                   tool: stream
-                  url: http://mcp1-dev.wmt/mcp/goto-8080s/stream
+                  url: localhost:4000/mcp/goto-mcp-2/stream
                   sseURL: ""
-                  server: goto-8080s
-                  authority: mcp1-dev.wmt
+                  server: goto-mcp-2
+                  authority: localhost
                   delay: 1s
                   args:
-                    text: Hello from agent agent1-mcp
+                    text: Hello from agent goto-1@${POD_NAME}@ns@local
                   headers:
                     Accept:
                       - text/stream
+                    foo: ["stream"]
                   forwardHeaders:
                     - Traceparent
                     - Tracestate
                     - authorization
-                servers:
+                substitutes:
                   mcp1:
-                    url: http://mcp1-dev.wmt/mcp/goto-8080s/stream
-                    authority: mcp1-dev.wmt
+                    url: localhost:4000/mcp/goto-mcp-2/stream
+                    authority: localhost
                   mcp2:
-                    url: http://mcp2-dev.wmt/mcp/goto-8080s/stream
-                    authority: mcp2-dev.wmt
+                    url: localhost:4000/mcp/goto-mcp-3/stream
+                    authority: localhost
                   mcp3:
-                    url: http://mcp3-dev.wmt/mcp/goto-8080s/stream
-                    authority: mcp3-dev.wmt
+                    url: localhost:3000/mcp/goto-mcp/stream
+                    authority: localhost
+            agents:
+              agent1:
+                triggers: [agent1]
+                agentCall:
+                  name: goto-1
+                  agentURL: http://localhost:4000/agent/goto-1
+                  cardURL: http://localhost:4000/agent/goto-1/.well-known/agent.json
+                  authority: localhost
+                  delay: 1s
+                  message: echo
+                  headers:
+                    foo: ["a"]
+                  forwardHeaders:
+                    - Traceparent
+                    - Tracestate
+                    - authorization
+                  removeHeaders:
+                    - bar
+                substitutes:
+                  agent1:
+                    url: http://localhost:4000/agent/goto-1
+                    authority: localhost
+                  agent2:
+                    url: http://localhost:4000/agent/goto-2
+                    authority: localhost
+                  agent3:
+                    url: http://localhost:4000/agent/goto-3
+                    authority: localhost
+              agent2:
+                triggers: [agent2]
+                agentCall:
+                  name: goto-2
+                  agentURL: http://localhost:4000/agent/goto-2
+                  cardURL: http://localhost:4000/agent/goto-2/.well-known/agent.json
+                  authority: localhost
+                  delay: 1s
+                  message: echo
+                  headers:
+                    foo: ["b"]
+                  forwardHeaders:
+                    - Traceparent
+                    - Tracestate
+                    - authorization
+                  removeHeaders:
+                    - bar
+                substitutes:
+                  agent1:
+                    url: http://localhost:4000/agent/goto-1
+                    authority: localhost
+                  agent2:
+                    url: http://localhost:4000/agent/goto-2
+                    authority: localhost
+                  agent3:
+                    url: http://localhost:4000/agent/goto-3
+                    authority: localhost
+              agent3:
+                triggers: [agent3]
+                agentCall:
+                  name: goto-3
+                  agentURL: http://localhost:4000/agent/goto-3
+                  cardURL: http://localhost:4000/agent/goto-3/.well-known/agent.json
+                  authority: localhost
+                  delay: 1s
+                  message: echo
+                  headers:
+                    foo: ["c"]
+                  forwardHeaders:
+                    - Traceparent
+                    - Tracestate
+                    - authorization
+                  removeHeaders:
+                    - bar
+                substitutes:
+                  agent1:
+                    url: http://localhost:4000/agent/goto-1
+                    authority: localhost
+                  agent2:
+                    url: http://localhost:4000/agent/goto-2
+                    authority: localhost
+                  agent3:
+                    url: http://localhost:4000/agent/goto-3
+                    authority: localhost
+            http:
+              get:
+                triggers:
+                  - http
+                  - get
+                  - web
+                httpCall:
+                  url: localhost/fetch
+                  authority: localhost:8082
+                  delay:
+                    min: 0.1s
+                    max: 0.2s
+                    count: -1
+                  forwardHeaders:
+                    - Traceparent
+                    - Tracestate
+                    - authorization
+                substitutes:
+                  http1:
+                    url: localhost/stream
+                    authority: localhost:8082
+                  http2:
+                    url: localhost/stream
+                    authority: localhost:8080
+                  http3:
+                    url: localhost/stream
+                    authority: 
             maxCalls: 3
             parallel: true
     - port: 3000
       agent:
         card:
-          protocolVersion: "0.2.2"
+          protocolVersion: 0.2.2
           version: "1.0"
-          name: agent1-stream
-          description: "this is agent agent1-stream with skills: stream response"
-          url: localhost:3000/agent/agent1-stream/
+          name: goto-1-stream
+          description: "This is agent goto-1-stream@${POD_NAME}@ns@local with skills: echo elicit fetch stream"
+          url: http://localhost:3000/agent/goto-1-stream/
           preferredTransport: ""
           additionalInterfaces:
-            - transport: grpc
-              url: ${ingressbaseurl}/agent/agent1-stream/grpc
+            - url: http://localhost:3000/agent/goto-1-stream/grpc
+              transport: grpc
           provider:
             organization: Goto
             url: http://goto.goto
@@ -1564,49 +985,372 @@ a2a:
             - text
             - task-status
           skills:
+            - id: fetch
+              name: fetch
+              description: skill of fetch
+              tags:
+                - fetch
+              examples:
+                - what is fetch
+                - how to fetch
+                - when to fetch
+                - explain fetch
+              inputModes:
+                - text
+              outputModes:
+                - text
+                - task-status
+            - id: elicit
+              name: elicit
+              description: skill of elicit
+              tags:
+                - elicit
+              examples:
+                - what is elicit
+                - how to elicit
+                - when to elicit
+                - explain elicit
+              inputModes:
+                - text
+              outputModes:
+                - text
+                - task-status
+            - id: echo
+              name: echo
+              description: skill of echo
+              tags:
+                - echo
+              examples:
+                - what is echo
+                - how to echo
+                - when to echo
+                - explain echo
+              inputModes:
+                - text
+              outputModes:
+                - text
+                - task-status
+            - id: federate
+              name: federate
+              description: skill of federate
+              tags:
+                - federate
+              examples:
+                - what is federate
+                - how to federate
+                - when to federate
+                - explain federate
+              inputModes:
+                - text
+              outputModes:
+                - text
+                - task-status
             - id: stream
               name: stream
               description: skill of stream
-              tags: [stream]
+              tags:
+                - stream
               examples:
                 - what is stream
                 - how to do stream
                 - when to do stream
                 - explain stream
-              inputModes: [text]
-              outputModes: [text, task-status]
-            - id: response
-              name: response
-              description: skill of response
-              tags: [response]
-              examples:
-                - what is response
-                - how to do response
-                - when to do response
-                - explain response
-              inputModes: [text]
-              outputModes: [text, task-status]
+              inputModes:
+                - text
+              outputModes:
+                - text
+                - task-status
           supportsAuthenticatedExtendedCard: false
         behavior:
           stream: true
         config:
           delay:
-            min: 5s
-            max: 10s
+            min: 0.5s
+            max: 1s
             count: -1
           response:
             isStream: true
-            streamCount: 99
+            streamCount: 9
             delay:
-              min: 10s
-              max: 20s
+              min: 0.1s
+              max: 0.5s
               count: -1
             jsonStream:
-              - message: This is response 1/5 from Agent agent1-stream @ uswest-lab-az-af2
-              - message: This is response 2/5 from Agent agent1-stream @ uswest-lab-az-af2
-              - message: This is response 3/5 from Agent agent1-stream @ uswest-lab-az-af2
-              - message: This is response 4/5 from Agent agent1-stream @ uswest-lab-az-af2
-              - message: This is response 5/5 from Agent agent1-stream @ uswest-lab-az-af2
+              - message: This is response 1/5 from Agent goto-1-stream@Port=3000@${POD_NAME}@ns@local
+              - message: This is response 2/5 from Agent goto-1-stream@Port=3000@${POD_NAME}@ns@local
+              - message: This is response 3/5 from Agent goto-1-stream@Port=3000@${POD_NAME}@ns@local
+              - message: This is response 4/5 from Agent goto-1-stream@Port=3000@${POD_NAME}@ns@local
+              - message: This is response 5/5 from Agent goto-1-stream@Port=3000@${POD_NAME}@ns@local
+proxy:
+  - http:
+      port: 8080
+      enabled: true
+      proxyResponses:
+        - upResponseRange: [500,510]
+          proxyResponse: 500
+        - upResponseRange: [400,499]
+          proxyResponse: 418
+        - upResponseRange: [300,399]
+          proxyResponse: 300
+        - upResponseRange: [201,299]
+          proxyResponse: 418
+      targets:
+        target1:
+          enabled: true
+          endpoints:
+            ep1:
+              url: http://localhost:8081
+              method: GET
+              protocol: HTTP/1.1
+              authority: goto.uk
+              tls: false
+              requestCount: 1
+              concurrent: 1
+            ep2:
+              url: http://localhost:8082
+              method: GET
+              protocol: HTTP/2
+              authority: goto.uk
+              tls: false
+              requestCount: 1
+              concurrent: 1
+          transform:
+            uriMap:
+              /foo/{foo}: /foox/{bar}/barx/{foo}
+              /bar/{bar}: /barxfoox/{foo}
+            headers:
+              add:
+                main: "1"
+              remove:
+                - "*"
+            queries:
+              add:
+                main: "2"
+              remove:
+                - "*"
+            requestId:
+              send: true
+              uuid: true
+              header: x-request-id
+              query: request-id
+          triggers:
+            trigger1:
+              matchAny:
+                - uriPrefix: /foo/{foo}
+                  headers:
+                    bar: "{bar}"
+                  vars:
+                    foo:
+                      in:
+                        - "1"
+                        - "2"
+                    bar:
+                      regex: aa.
+                - uriPrefix: /bar/{bar}
+                  headers:
+                    foo: "{foo}"
+                  vars:
+                    foo:
+                      in:
+                        - "1"
+                        - "2"
+                    bar:
+                      regex: bb.
+              endpoints:
+                - ep1
+              transform:
+                uriMap:
+                  /foo/{foo}: /bar/{bar}
+                  /bar/{bar}: /foo/{foo}
+                headers:
+                  add:
+                    abc: "111"
+                  remove:
+                    - foo
+                queries:
+                  add:
+                    a: qqq
+                  remove:
+                    - b
+                requestId:
+                  send: true
+                  uuid: false
+                  header: x-request-id
+                  query: request-id
+              trafficConfig:
+                delay:
+                  min: 0s
+                  max: 0s
+                retries: 1
+            trigger2:
+              matchAny:
+                - uriPrefix: /foo/{foo}
+                  headers:
+                    bar: "{bar}"
+                  vars:
+                    foo:
+                      exact: "11"
+                    bar:
+                      inRegex:
+                        - a.
+                        - b.
+                - uriPrefix: /bar/{bar}
+                  headers:
+                    foo: "{foo}"
+                  vars:
+                    foo:
+                      exact: "11"
+                    bar:
+                      inRegex:
+                        - a.
+                        - b.
+              endpoints:
+                - ep1
+                - ep2
+              transform:
+                uriMap:
+                  /foo/{foo}: /foo/{bar}/bar/{foo}
+                  /bar/{bar}: /barfoo/{foo}
+                headers:
+                  add:
+                    abc: "222"
+                  remove:
+                    - bar
+                queries:
+                  add:
+                    b: zzz
+                  remove:
+                    - a
+                requestId:
+                  send: true
+                  uuid: false
+                  header: x-request-id
+                  query: request-id
+              trafficConfig:
+                delay:
+                  min: 0.1s
+                  max: 0.1s
+        target1.1:
+          enabled: true
+          endpoints:
+            ep8081:
+              url: http://localhost:8081
+              method: GET
+              protocol: HTTP/1.1
+              authority: goto.uk
+              tls: false
+              requestCount: 1
+              concurrent: 1
+          triggers:
+            t1:
+              matchAny:
+                - uriPrefix: /foo/{foo}
+                  headers:
+                    bar: "{bar}"
+                - uriPrefix: /bar/{bar}
+                  headers:
+                    foo: "{foo}"
+              endpoints:
+                - ep8081
+              transform:
+                uriMap:
+                  /foo/{foo}: /bar/{bar}
+                  /bar/{bar}: /foo/{foo}
+                headers:
+                  add:
+                    target: "target1.1"
+                    endpoint: "ep8081"
+                    foo: "foo-8081"
+                  remove:
+                    - foo
+                    - bar
+                queries:
+                  add:
+                    a: qqq
+                requestId:
+                  send: true
+                  uuid: true
+                  header: x-request-id
+                  query: request-id
+              trafficConfig:
+                delay:
+                  min: 0s
+                  max: 0s
+                retries: 1
+        target1.2:
+          enabled: true
+          endpoints:
+            ep8082:
+              url: http://localhost:8082
+              method: GET
+              protocol: HTTP/2
+              authority: goto.uk
+              tls: false
+              requestCount: 1
+              concurrent: 1
+          triggers:
+            t1:
+              matchAny:
+                - uriPrefix: /foo/{foo}
+                  headers:
+                    bar: "{bar}"
+                - uriPrefix: /bar/{bar}
+                  headers:
+                    foo: "{foo}"
+              endpoints:
+                - ep8082
+              transform:
+                uriMap:
+                  /foo/{foo}: /foobar/{foo}-{bar}
+                  /bar/{bar}: /barfoo/{bar}-{foo}
+                headers:
+                  add:
+                    target: "target1.2"
+                    endpoint: "ep8082"
+                    bar: "bar-8081"
+                requestId:
+                  send: true
+                  uuid: true
+                  header: x-request-id
+                  query: request-id
+              trafficConfig:
+                delay:
+                  min: 0s
+                  max: 0s
+                retries: 1
+  - tcp:
+      port: 10000
+      enabled: true
+      upstreams:
+        http-8081-8082:
+          delay:
+            min: 0s
+            max: 0s
+          retries: 1
+          retryDelay:
+            min: 0s
+            max: 0s
+          dropPct: 0
+          endpoints:
+            ep1:
+              address: "localhost:8081"
+            ep2:
+              address: "localhost:8082"
+  - tcp:
+      port: 9000
+      enabled: true
+      upstreams:
+        grpc-8000:
+          delay:
+            min: 0s
+            max: 0s
+          retries: 1
+          retryDelay:
+            min: 0s
+            max: 0s
+          endpoints:
+            ep1:
+              address: "localhost:8000"
 scripts:
   config:
     - name: "script1"
