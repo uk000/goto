@@ -153,6 +153,7 @@ func (a *A2AServer) PrepareAgent(agent *model.Agent) error {
 	srv, err := trpcserver.NewA2AServer(*agent.Card, tm)
 	if err == nil {
 		agent.Server = srv
+		agent.Handler = srv.Handler()
 	}
 	return err
 }

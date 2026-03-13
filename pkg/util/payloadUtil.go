@@ -60,7 +60,9 @@ func WriteStringJsonPayload(w http.ResponseWriter, json string) {
 }
 
 func WriteJson(w io.Writer, j interface{}) string {
-	if reflect.ValueOf(j).IsNil() {
+	if s, ok := j.(string); ok {
+		fmt.Fprintln(w, s)
+	} else if reflect.ValueOf(j).IsNil() {
 		fmt.Fprintln(w, "")
 	} else {
 		if bytes, err := json.MarshalIndent(j, "", "  "); err == nil {

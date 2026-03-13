@@ -59,6 +59,8 @@ type TrafficConfig struct {
 	Retries    int          `yaml:"retries" json:"retries"`
 	RetryDelay *types.Delay `yaml:"retryDelay" json:"retryDelay"`
 	RetryOn    []int        `yaml:"retryOn" json:"retryOn"`
+	Payload    bool         `yaml:"payload" json:"payload"`
+	Clean      bool         `yaml:"clean" json:"clean"`
 }
 
 type TrafficTransform struct {
@@ -102,14 +104,15 @@ type TargetTrigger struct {
 }
 
 type Target struct {
-	Port      int                        `yaml:"-" json:"port"`
-	Enabled   bool                       `yaml:"enabled" json:"enabled"`
-	Name      string                     `yaml:"name" json:"name"`
-	Endpoints map[string]*TargetEndpoint `yaml:"endpoints" json:"endpoints"`
-	Triggers  map[string]*TargetTrigger  `yaml:"triggers" json:"triggers"`
-	Transform *TrafficTransform          `yaml:"transform" json:"transform"`
-	callCount int
-	lock      sync.RWMutex
+	Port          int                        `yaml:"-" json:"port"`
+	Name          string                     `yaml:"name" json:"name"`
+	Enabled       bool                       `yaml:"enabled" json:"enabled"`
+	Endpoints     map[string]*TargetEndpoint `yaml:"endpoints" json:"endpoints"`
+	Triggers      map[string]*TargetTrigger  `yaml:"triggers" json:"triggers"`
+	Transform     *TrafficTransform          `yaml:"transform" json:"transform"`
+	TrafficConfig *TrafficConfig             `yaml:"trafficConfig" json:"trafficConfig"`
+	callCount     int
+	lock          sync.RWMutex
 }
 
 type MatchedTarget struct {
@@ -117,6 +120,7 @@ type MatchedTarget struct {
 	trigger        *TargetTrigger
 	endpoints      map[string]*EndpointInvocation
 	transform      *TrafficTransform
+	trafficConfig  *TrafficConfig
 	matchedURI     string
 	matchedHeaders map[string]string
 	captureKeys    map[string]string

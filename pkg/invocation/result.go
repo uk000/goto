@@ -41,7 +41,7 @@ type InvocationResultResponse struct {
 	ClientStreamCount int         `json:"clientStreamCount"`
 	ServerStreamCount int         `json:"serverStreamCount"`
 	Payload           []byte      `json:"-"`
-	PayloadText       string      `json:"-"`
+	PayloadText       string      `json:"payload"`
 	FirstByteInAt     string      `json:"firstByteInAt"`
 	LastByteInAt      string      `json:"lastByteInAt"`
 }

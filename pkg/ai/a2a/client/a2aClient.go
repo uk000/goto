@@ -106,10 +106,10 @@ func GetAgentCard(name string) *goa2aserver.AgentCard {
 	return AgentCards[name]
 }
 
-func FetchAgentCard(ctx context.Context, url, authority string, headers http.Header) (card *goa2aserver.AgentCard, err error) {
+func FetchAgentCard(ctx context.Context, url, authority string, headers http.Header, call *AgentCall) (card *goa2aserver.AgentCard, err error) {
 	port := util.GetContextPort(ctx)
 	client := NewA2AClient(port, "")
-	session, err := client.loadAgentCard(ctx, url, authority, headers, nil)
+	session, err := client.loadAgentCard(ctx, url, authority, headers, call)
 	if err != nil {
 		return nil, err
 	}
@@ -184,8 +184,10 @@ func (ac *A2AClient) ConnectWithAgentCard(ctx context.Context, call *AgentCall, 
 
 func (ac *A2AClient) newSession(ctx context.Context, port int, callerId, authority string, card *goa2aserver.AgentCard, call *AgentCall) *A2AClientSession {
 	outHeaders := make(http.Header)
-	for h, v := range call.Headers {
-		outHeaders[h] = v
+	if call != nil {
+		for h, v := range call.Headers {
+			outHeaders[h] = v
+		}
 	}
 	return &A2AClientSession{
 		ctx:        ctx,

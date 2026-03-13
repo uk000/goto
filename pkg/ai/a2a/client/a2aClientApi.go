@@ -45,7 +45,7 @@ func setRoutes(r *mux.Router) {
 func fetchAgentCard(w http.ResponseWriter, r *http.Request) {
 	url := util.GetStringParamValue(r, "url")
 	authority := util.GetStringParamValue(r, "authority")
-	card, err := FetchAgentCard(r.Context(), url, authority, nil)
+	card, err := FetchAgentCard(r.Context(), url, authority, nil, nil)
 	if err != nil {
 		util.SendBadRequest(fmt.Sprintf("Error fetching agent card from url [%s], authority [%s]: %s", url, authority, err.Error()), w, r)
 		return
@@ -73,7 +73,7 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 			util.SendBadRequest(fmt.Sprintf("Agent card not loaded and missing agent card URL in the given call spec: %+v", call), w, r)
 			return
 		}
-		card, err = FetchAgentCard(r.Context(), call.CardURL, call.Authority, call.Headers)
+		card, err = FetchAgentCard(r.Context(), call.CardURL, call.Authority, call.Headers, call)
 		if err != nil || card == nil {
 			util.SendBadRequest(fmt.Sprintf("Error fetching agent card from url [%s], authority [%s]: %s", call.AgentURL, call.Authority, err.Error()), w, r)
 			return

@@ -91,7 +91,7 @@ type GRPCProxy struct {
 }
 
 var (
-	grpcProxyByPort      = map[int]*GRPCProxy{}
+	portProxy            = map[int]*GRPCProxy{}
 	GRPCServiceRegistry  = gotogrpc.ServiceRegistry
 	grpcSessionIdCounter = atomic.Int32{}
 	proxyLock            sync.RWMutex
@@ -108,7 +108,7 @@ func _WillProxyGRPC(port int, method any) bool {
 }
 
 func WillProxyGRPC(port int, method *gotogrpc.GRPCServiceMethod) bool {
-	p := GetGRPCProxyForPort(port)
+	p := GetPortProxy(port)
 	if !p.Enabled || (len(p.Targets) == 0 && len(p.TeeServices) == 0) {
 		return false
 	}
@@ -129,7 +129,7 @@ func WillProxyGRPC(port int, method *gotogrpc.GRPCServiceMethod) bool {
 }
 
 func ProxyGRPCUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceMethod, md metadata.MD, inputs []proto.Message) (output []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
-	proxy := GetGRPCProxyForPort(port)
+	proxy := GetPortProxy(port)
 	if teeMethods := proxy.TeeServices[method.Service.Name]; teeMethods != nil {
 		t := teeMethods[method.Name]
 		if t == nil {
@@ -197,7 +197,7 @@ func ProxyGRPCUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceM
 
 func ProxyGRPCStream(ctx context.Context, port int, method *gotogrpc.GRPCServiceMethod, downstreamAddr string,
 	md metadata.MD, downstream gotogrpc.GRPCStream) (receiveCount, sendCount int, err error) {
-	proxy := GetGRPCProxyForPort(port)
+	proxy := GetPortProxy(port)
 	if teeMethods := proxy.TeeServices[method.Service.Name]; teeMethods != nil {
 		t := teeMethods[method.Name]
 		if t == nil {
@@ -349,14 +349,14 @@ func (p *GRPCProxy) sendTeeProxyMessages(method *gotogrpc.GRPCServiceMethod, max
 	return
 }
 
-func GetGRPCProxyForPort(port int) *GRPCProxy {
+func GetPortProxy(port int) *GRPCProxy {
 	proxyLock.RLock()
-	proxy := grpcProxyByPort[port]
+	proxy := portProxy[port]
 	proxyLock.RUnlock()
 	if proxy == nil {
 		proxy = newGRPCProxy(port)
 		proxyLock.Lock()
-		grpcProxyByPort[port] = proxy
+		portProxy[port] = proxy
 		proxyLock.Unlock()
 	}
 	return proxy
@@ -385,6 +385,7 @@ func newGRPCTarget(from, to *gotogrpc.GRPCService, endpoint, authority string) (
 		Name:           to.Name,
 		Protocol:       "grpc",
 		Endpoint:       endpoint,
+		Methods:        map[string]string{},
 		ActiveSessions: map[string]*GRPCSession{},
 		PastSessions:   map[string]*GRPCSession{},
 		ProxyService:   from,
@@ -463,7 +464,7 @@ func (p *GRPCProxy) updateTeeSessionLog(teeport int, service, methodName string,
 	if teeport <= 0 || service == "" || methodName == "" || sessionLog == nil {
 		return
 	}
-	teeProxy := GetGRPCProxyForPort(teeport)
+	teeProxy := GetPortProxy(teeport)
 	if teeProxy.TeeServices[service] == nil {
 		teeProxy.TeeServices[service] = map[string]*GRPCSessionLog{}
 	}
@@ -537,7 +538,7 @@ func (p *GRPCProxy) newGRPCSession(downstreamAddr string, target *GRPCTarget, me
 }
 
 func (p *GRPCProxy) getGRPCSession(port int, downstreamAddr string, method *gotogrpc.GRPCServiceMethod) *GRPCSession {
-	proxy := GetGRPCProxyForPort(port)
+	proxy := GetPortProxy(port)
 	if t := proxy.Targets[method.Service.Name]; t != nil {
 		return t.ActiveSessions[downstreamAddr]
 	}

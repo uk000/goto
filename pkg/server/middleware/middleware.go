@@ -36,6 +36,7 @@ var (
 	MiddlewareChainHead     http.Handler
 	middlewareRouter        *mux.Router
 	RootRouters             = map[string]*mux.Router{}
+	ProxyRouters            = map[string]*mux.Router{}
 )
 
 type MiddlewareFunc func(http.ResponseWriter, *http.Request)
@@ -201,9 +202,7 @@ func RootPath(path string) *mux.Router {
 	return RootRouters[path]
 }
 
-func AddRouterPath(router *mux.Router, path string) *mux.Router {
-	if RootRouters[path] == nil {
-		RootRouters[path] = router
-	}
+func AddProxyPath(router *mux.Router, path string) *mux.Router {
+	ProxyRouters[path] = router
 	return router.PathPrefix(path).Subrouter()
 }

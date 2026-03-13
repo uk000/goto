@@ -312,7 +312,7 @@ func (spec *InvocationSpec) validateTrafficConfig() error {
 		return fmt.Errorf("name is required")
 	}
 	if spec.Method == "" {
-		return fmt.Errorf("method is required")
+		spec.Method = "GET"
 	}
 	if spec.URL == "" {
 		return fmt.Errorf("url is required")

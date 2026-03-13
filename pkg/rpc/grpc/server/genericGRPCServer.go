@@ -146,14 +146,14 @@ func (gi *GRPCMethodInterceptor) Intercept(srv any, ctx context.Context, dec fun
 	if remoteAddr != nil {
 		remoteAddress = remoteAddr.String()
 	}
+	if util.WillProxyGRPC(port, method) {
+		log.Printf("GRPCMethodInterceptor: Port [%d] will proxy gRPC [%s].[%s] to [%s]\n", port, method.Service.Name, method.Name, remoteAddress)
+		req := gotogrpc.ReadRequest(method, dec)
+		return ProxyUnary(ctx, port, method, remoteAddress, authority, md, req)
+	}
 	if gi.originalHandler != nil {
 		log.Println("GRPCMethodInterceptor: Original handler found, using original handler")
 		return gi.originalHandler(gi.originalServer, ctx, dec, interceptor)
-	}
-	if util.WillProxyGRPC(port, method) {
-		log.Println("GRPCMethodInterceptor: No original handler found, using ProxyUnary")
-		req := gotogrpc.ReadRequest(method, dec)
-		return ProxyUnary(ctx, port, method, remoteAddress, authority, md, req)
 	}
 	return GRPCUnaryHandler(method)(srv, ctx, dec, interceptor)
 }
@@ -164,16 +164,20 @@ func (gi *GRPCStreamInterceptor) Intercept(srv any, ss grpc.ServerStream) error 
 		util.LogMessage(ctx, err.Error())
 		return err
 	}
-	ss = NewWrappedStream(ss, ctx)
-	if gi.originalHandler != nil {
-		log.Println("GRPCStreamInterceptor: Original handler found, using original handler")
-		return gi.originalHandler(gi.originalServer, ss)
+	var remoteAddress string
+	if remoteAddr != nil {
+		remoteAddress = remoteAddr.String()
 	}
+	ss = NewWrappedStream(ss, ctx)
 	if util.WillProxyGRPC(port, method) {
-		log.Println("GRPCStreamInterceptor: No original handler found, using ProxyGRPCStream")
+		log.Printf("GRPCStreamInterceptor: Port [%d] will proxy gRPC [%s].[%s] to [%s]\n", port, method.Service.Name, method.Name, remoteAddress)
 		stream := gotogrpc.NewServerStream(port, method, ss, nil)
 		gotogrpc.ProxyGRPCStream(ctx, port, method, remoteAddr.String(), md, stream)
 		return nil
+	}
+	if gi.originalHandler != nil {
+		log.Println("GRPCStreamInterceptor: Original handler found, using original handler")
+		return gi.originalHandler(gi.originalServer, ss)
 	}
 	return GRPCStreamHandler(srv, ss)
 }

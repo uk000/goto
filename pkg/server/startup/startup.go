@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"goto/ctl"
 	a2aserver "goto/pkg/ai/a2a/server"
@@ -90,7 +91,11 @@ func watchStartupConfig() {
 		for event := range configWatcher.Events() {
 			removed := false
 			for _, t := range event.Types {
-				if t == fswatcher.EventRemove || t == fswatcher.EventRename {
+				switch t {
+				case fswatcher.EventRename:
+					_, err := os.Stat(event.Path)
+					removed = errors.Is(err, os.ErrNotExist)
+				case fswatcher.EventRemove:
 					removed = true
 				}
 			}
@@ -105,23 +110,26 @@ func watchStartupConfig() {
 }
 
 func removeConfigs(filePath string) {
+	parts := strings.Split(filePath, string(os.PathSeparator))
+	filename := parts[len(parts)-1]
 	lock.Lock()
 	defer lock.Unlock()
-	if a2aConfigs[filePath] != nil {
-		log.Printf("File removed: %s. Removing A2A configs.\n", filePath)
-		clearA2A(a2aConfigs[filePath])
+	log.Printf("File [%s] removed.", filename)
+	if a2aConfigs[filename] != nil {
+		log.Printf("File removed: %s. Removing A2A configs.\n", filename)
+		clearA2A(a2aConfigs[filename])
 	}
-	if mcpConfigs[filePath] != nil {
-		log.Printf("File removed: %s. Removing MCP configs.\n", filePath)
-		clearMCP(mcpConfigs[filePath])
+	if mcpConfigs[filename] != nil {
+		log.Printf("File removed: %s. Removing MCP configs.\n", filename)
+		clearMCP(mcpConfigs[filename])
 	}
-	if httpProxyConfigs[filePath] != nil {
-		log.Printf("File removed: %s. Removing HTTP Proxy configs.\n", filePath)
-		removeHTTPProxy(httpProxyConfigs[filePath])
+	if httpProxyConfigs[filename] != nil {
+		log.Printf("File removed: %s. Removing HTTP Proxy configs.\n", filename)
+		removeHTTPProxy(httpProxyConfigs[filename])
 	}
-	if tcpProxyConfigs[filePath] != nil {
-		log.Printf("File removed: %s. Removing TCP Proxy configs.\n", filePath)
-		removeTCPProxy(tcpProxyConfigs[filePath])
+	if tcpProxyConfigs[filename] != nil {
+		log.Printf("File removed: %s. Removing TCP Proxy configs.\n", filename)
+		removeTCPProxy(tcpProxyConfigs[filename])
 	}
 }
 
@@ -191,19 +199,21 @@ func loadConfigFromScript(filePath string) {
 }
 
 func loadConfig(filePath string, config *ctl.GotoConfig) {
+	parts := strings.Split(filePath, string(os.PathSeparator))
+	filename := parts[len(parts)-1]
 	if config == nil {
 		log.Println("No config loaded")
 		return
 	}
 	if config.MCP != nil {
 		lock.Lock()
-		mcpConfigs[filePath] = config.MCP
+		mcpConfigs[filename] = config.MCP
 		lock.Unlock()
 		loadMCP(config.MCP)
 	}
 	if config.A2A != nil {
 		lock.Lock()
-		a2aConfigs[filePath] = config.A2A
+		a2aConfigs[filename] = config.A2A
 		lock.Unlock()
 		loadA2A(config.A2A)
 	}
@@ -211,13 +221,13 @@ func loadConfig(filePath string, config *ctl.GotoConfig) {
 		for _, proxy := range config.Proxies {
 			if proxy.HTTP != nil {
 				lock.Lock()
-				httpProxyConfigs[filePath] = proxy.HTTP
+				httpProxyConfigs[filename] = proxy.HTTP
 				lock.Unlock()
 				loadHTTPProxy(proxy.HTTP)
 			}
 			if proxy.TCP != nil {
 				lock.Lock()
-				tcpProxyConfigs[filePath] = proxy.TCP
+				tcpProxyConfigs[filename] = proxy.TCP
 				lock.Unlock()
 				loadTCPProxy(proxy.TCP)
 			}

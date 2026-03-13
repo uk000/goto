@@ -56,6 +56,7 @@ type ProxyTargets map[string]*MatchedTarget
 
 type RequestContext struct {
 	path    string
+	method  string
 	vars    map[string]string
 	headers map[string]string
 	queries map[string]string
@@ -143,10 +144,10 @@ func parseTarget(r io.Reader) (*Target, error) {
 	}
 	for i, t := range target.Triggers {
 		if len(t.MatchAny) == 0 {
-			return nil, fmt.Errorf("target trigger [%d] must specify matchAny", i)
+			return nil, fmt.Errorf("target trigger [%s] must specify matchAny", i)
 		}
 		if len(t.Endpoints) == 0 {
-			return nil, fmt.Errorf("target trigger [%d] must specify one endpoint", i)
+			return nil, fmt.Errorf("target trigger [%s] must specify one endpoint", i)
 		}
 	}
 	return target, nil
@@ -170,7 +171,7 @@ func (p *Proxy) AddTarget(t *Target) error {
 			//Registering URI with mux, so that the URI's embedded vars are extracted by mux
 			rootURI, suffix := util.GetRootURI(match.URIPrefix)
 			if rootURI != "" {
-				match.router = middleware.AddRouterPath(p.Router, rootURI)
+				match.router = middleware.AddProxyPath(p.Router, rootURI)
 			}
 			if re, err := util.BuildURIMatcherForRouter(suffix, ProxyRequest, match.router); err == nil {
 				match.uriRegexp = re
@@ -199,7 +200,11 @@ func (p *Proxy) AddTarget(t *Target) error {
 			if ep == nil {
 				return fmt.Errorf("Target [%s] Trigger [%s] refers to Endpoint [%s] but endpoint not defined under target", t.Name, triggerName, epName)
 			}
-			if is, err := ep.prepareInvocationSpec(trigger.TrafficConfig); err != nil {
+			tc := trigger.TrafficConfig
+			if tc == nil {
+				tc = t.TrafficConfig
+			}
+			if is, err := ep.prepareInvocationSpec(tc); err != nil {
 				return err
 			} else {
 				trigger.epSpecs[epName] = &EndpointInvocation{
@@ -272,17 +277,36 @@ func (p *Proxy) incrementMatchCounts(matches map[string]*MatchedTarget, r *http.
 func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *RequestContext) {
 	out := make(chan *TargetEndpointResponse, 10)
 	wg := &sync.WaitGroup{}
-	for _, match := range targetsMatches {
-		match.invoke(rc, out, wg)
-	}
 	responses := map[string]map[string]*invocation.InvocationResultResponse{}
 	responseStatuses := map[string]map[string]int{}
 	var proxyResponseStatus int
 	go p.asyncCollectResponses(out, wg, &proxyResponseStatus, responseStatuses, responses)
+	clean := false
+	for _, match := range targetsMatches {
+		match.invoke(rc, out, wg)
+		if match.trafficConfig != nil && match.trafficConfig.Clean {
+			clean = true
+		}
+	}
 	wg.Wait()
 	rc.w.Header().Add(constants.HeaderGotoProxyUpstreamStatus, util.ToJSONText(responseStatuses))
 	rc.w.WriteHeader(proxyResponseStatus)
-	util.WriteJsonOrYAMLPayload(rc.w, responses, true)
+	if len(responses) > 0 {
+		if clean {
+			for _, m := range responses {
+				for _, resp := range m {
+					util.WriteJsonOrYAMLPayload(rc.w, resp.PayloadText, false)
+					break
+				}
+				break
+			}
+		} else {
+			util.WriteJsonOrYAMLPayload(rc.w, responses, true)
+		}
+	} else {
+		fmt.Fprintln(rc.w, "No Response")
+	}
+
 }
 
 func (t *MatchedTarget) invoke(rc *RequestContext, out chan *TargetEndpointResponse, wg *sync.WaitGroup) {
@@ -368,8 +392,7 @@ func (ep *TargetEndpoint) prepareInvocationSpec(tc *TrafficConfig) (*invocation.
 	is.RequestCount = ep.RequestCount
 	is.Replicas = ep.Concurrent
 	is.TrackPayload = true
-	is.CollectResponse = false
-
+	is.CollectResponse = tc.Payload
 	if tc != nil {
 		is.Retries = tc.Retries
 		if tc.Delay != nil {
@@ -397,6 +420,7 @@ func (tt *TrafficTransform) prepare() {
 func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTransform, rc *RequestContext) *invocation.InvocationSpec {
 	is := *ep.is
 	is.URL = ep.prepareURL(matchedURI, tt, rc)
+	is.Method = rc.method
 	var add map[string]string
 	var remove []string
 	if tt.Headers != nil {
@@ -417,15 +441,21 @@ func (ep *EndpointInvocation) prepareURL(matchedURI string, tt *TrafficTransform
 	if tt != nil {
 		if tt.stripURIRegexp != nil {
 			targetURI = tt.stripURIRegexp.ReplaceAllString(targetURI, "$1$3")
-		} else if len(tt.URIMap) > 0 && tt.URIMap[matchedURI] != "" {
-			targetURI = tt.URIMap[matchedURI]
+		} else if len(tt.URIMap) > 0 {
+			uri := tt.URIMap[matchedURI]
+			if uri == "" {
+				uri = tt.URIMap[matchedURI+"/*"]
+			}
+			if uri != "" {
+				targetURI = uri
+			}
 		}
 		if tt.Queries != nil {
 			add = tt.Queries.Add
 			remove = tt.Queries.Remove
 		}
 	}
-	targetURI = util.TransposeURI(rc.path, targetURI, rc.vars, rc.headers, rc.queries, add, remove)
+	targetURI = util.TransposeURI(rc.path, matchedURI, targetURI, rc.vars, rc.headers, rc.queries, add, remove)
 	url := ep.ep.URL
 	url += targetURI
 	return url
@@ -526,6 +556,11 @@ func (p *Proxy) getMatchingProxyTargets(r *http.Request) ProxyTargets {
 				} else {
 					matchedTarget.transform = target.Transform
 				}
+				if trigger.TrafficConfig != nil {
+					matchedTarget.trafficConfig = trigger.TrafficConfig
+				} else {
+					matchedTarget.trafficConfig = target.TrafficConfig
+				}
 				matchedTargets[target.Name] = matchedTarget
 				continue
 			}
@@ -555,6 +590,7 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		proxy.incrementMatchCounts(targets, r)
 		rc := &RequestContext{
 			path:    r.URL.Path,
+			method:  r.Method,
 			vars:    mux.Vars(r),
 			headers: util.GetHeaderValues(r),
 			queries: util.GetQueryParams(r),

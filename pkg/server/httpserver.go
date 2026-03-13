@@ -305,7 +305,9 @@ func HTTPHandler() http.Handler {
 			if rs.IsAdminRequest {
 				handleHTTP(l, w, r, rs)
 			} else {
-				if rs.IsMCP || rs.IsAI {
+				if rs.IsProxy {
+					handleHTTP(l, w, r, rs)
+				} else if rs.IsMCP || rs.IsAI {
 					aiHandler.ServeHTTP(w, r)
 				} else {
 					handleHTTP(l, w, r, rs)
@@ -371,8 +373,16 @@ func loadRouter(r *http.Request, rs *util.RequestStore) {
 		}
 	}
 	rootURI, _ := util.GetRootURI(r.RequestURI)
+	var uriRouter *mux.Router
 	if rootURI != "" {
-		rs.CurrentRouter = middleware.RootRouters[rootURI]
+		if uriRouter = middleware.ProxyRouters[rootURI]; uriRouter != nil {
+			rs.IsProxy = true
+		} else {
+			uriRouter = middleware.RootRouters[rootURI]
+		}
+		if uriRouter != nil {
+			rs.CurrentRouter = uriRouter
+		}
 	}
 	if rs.CurrentRouter == nil {
 		rs.CurrentRouter = coreRouter

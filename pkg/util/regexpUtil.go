@@ -58,6 +58,20 @@ func UnmarkFiller(key string) string {
 	return key
 }
 
+func UnmarkAllFillers(text string) string {
+	text = strings.ReplaceAll(text, "{", "")
+	text = strings.ReplaceAll(text, "}", "")
+	return text
+}
+
+func ReplaceFillersWithRegex(text string) string {
+	fillers := GetFillers(text)
+	for _, filler := range fillers {
+		text = strings.ReplaceAll(text, filler, ".*")
+	}
+	return text
+}
+
 func GetFillers(text string) []string {
 	return fillerRegexp.FindAllString(text, -1)
 }

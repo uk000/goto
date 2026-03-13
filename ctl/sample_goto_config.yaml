@@ -1097,6 +1097,13 @@ proxy:
       targets:
         target1:
           enabled: true
+          trafficConfig:
+            payload: true
+            clean: true
+            delay:
+              min: 0s
+              max: 0s
+            retries: 1
           endpoints:
             ep1:
               url: http://localhost:8081
@@ -1232,6 +1239,9 @@ proxy:
                   max: 0.1s
         target1.1:
           enabled: true
+          trafficConfig:
+            payload: false
+            clean: false
           endpoints:
             ep8081:
               url: http://localhost:8081
@@ -1279,6 +1289,9 @@ proxy:
                 retries: 1
         target1.2:
           enabled: true
+          trafficConfig:
+            payload: false
+            clean: false
           endpoints:
             ep8082:
               url: http://localhost:8082

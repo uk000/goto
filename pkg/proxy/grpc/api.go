@@ -49,6 +49,9 @@ func proxyGRPCService(w http.ResponseWriter, r *http.Request) {
 	upstream := util.GetStringParamValue(r, "upstream")
 	if ok {
 		targetService := util.GetStringParamValue(r, "targetService")
+		if targetService == "" {
+			targetService = rs.GetName()
+		}
 		teeport := util.GetIntParamValue(r, "teeport")
 		delayMin, delayMax, delayCount, ok := util.GetDurationParam(r, "delay")
 		if !ok {
@@ -57,9 +60,12 @@ func proxyGRPCService(w http.ResponseWriter, r *http.Request) {
 			delayCount = 0
 		}
 		port := util.GetRequestOrListenerPortNum(r)
-		proxy := GetGRPCProxyForPort(port)
-		proxy.SetupGRPCProxy(rs.GetName(), targetService, nil, upstream, "", teeport, delayMin, delayMax, delayCount)
-		msg = fmt.Sprintf("Service [%s] will be proxied on port [%d] to upstream [%s] target service [%s]", rs.GetName(), port, upstream, targetService)
+		proxy := GetPortProxy(port)
+		if err := proxy.SetupGRPCProxy(rs.GetName(), targetService, nil, upstream, "", teeport, delayMin, delayMax, delayCount); err != nil {
+			msg = fmt.Sprintf("Failed to setup gRPC proxy for Service [%s]on port [%d] to upstream [%s] target service [%s] with error: %s", rs.GetName(), port, upstream, targetService, err.Error())
+		} else {
+			msg = fmt.Sprintf("Service [%s] will be proxied on port [%d] to upstream [%s] target service [%s]", rs.GetName(), port, upstream, targetService)
+		}
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
@@ -67,14 +73,14 @@ func proxyGRPCService(w http.ResponseWriter, r *http.Request) {
 
 func getGRPCProxyDetails(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	proxy := GetGRPCProxyForPort(port)
+	proxy := GetPortProxy(port)
 	util.WriteJsonPayload(w, proxy)
 	util.AddLogMessage("GRPC Proxy Details Returned", r)
 }
 
 func clearGRPCProxies(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	proxy := GetGRPCProxyForPort(port)
+	proxy := GetPortProxy(port)
 	proxy.Init()
 	util.AddLogMessage("GRPC Proxy cleared", r)
 }
@@ -82,7 +88,7 @@ func clearGRPCProxies(w http.ResponseWriter, r *http.Request) {
 func removeGRPCProxy(w http.ResponseWriter, r *http.Request) {
 	service := util.GetStringParamValue(r, "service")
 	port := util.GetRequestOrListenerPortNum(r)
-	proxy := GetGRPCProxyForPort(port)
+	proxy := GetPortProxy(port)
 	proxy.RemoveProxy(service)
 	util.AddLogMessage(fmt.Sprintf("GRPC Proxy [%s] removed", service), r)
 }

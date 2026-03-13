@@ -46,6 +46,7 @@ type Agent struct {
 	Card     *trpcserver.AgentCard `yaml:"card" json:"card"`
 	Behavior *AgentBehavior        `yaml:"behavior,omitempty" json:"behavior,omitempty"`
 	Config   *AgentConfig          `yaml:"config,omitempty" json:"config,omitempty"`
+	Handler  http.Handler
 	Server   *trpcserver.A2AServer `yaml:"-" json:"-"`
 	Port     int                   `yaml:"-" json:"-"`
 }
@@ -119,5 +120,5 @@ func (a *Agent) SetPayload(b []byte) error {
 }
 
 func (a *Agent) Serve(w http.ResponseWriter, r *http.Request) {
-	a.Server.Handler().ServeHTTP(w, r)
+	a.Handler.ServeHTTP(w, r)
 }

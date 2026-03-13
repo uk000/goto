@@ -172,8 +172,8 @@ func registerURIRouteAndGetRegex(uri string, handler func(http.ResponseWriter, *
 	}
 }
 
-func TransposeURI(sourcePath, targetURI string, vars, headers, queries map[string]string, addQuery map[string]string, removeQuery []string) string {
-	path := sourcePath
+func TransposeURI(requestURI, sourceURI, targetURI string, vars, headers, queries map[string]string, addQuery map[string]string, removeQuery []string) string {
+	path := requestURI
 	if targetURI == "" {
 		targetURI = path
 	}
@@ -193,6 +193,13 @@ func TransposeURI(sourcePath, targetURI string, vars, headers, queries map[strin
 		}
 	} else {
 		path = targetURI
+	}
+	if strings.HasSuffix(path, "*") {
+		sourceURI = strings.TrimRight(sourceURI, "/*")
+		sourcePieces := strings.Split(sourceURI, "/")
+		targetPrefix := strings.Split(path, "*")
+		requestURIPieces := strings.Split(requestURI, "/")
+		path = targetPrefix[0] + strings.Join(requestURIPieces[len(sourcePieces):], "/")
 	}
 	q := map[string]string{}
 	cleanStart := false

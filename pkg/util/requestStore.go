@@ -61,6 +61,7 @@ type RequestStore struct {
 	IsMCP                   bool
 	IsAI                    bool
 	IsSSE                   bool
+	IsProxy                 bool
 	RequestPortChecked      bool
 	RequestServed           bool
 	StatusCode              int
