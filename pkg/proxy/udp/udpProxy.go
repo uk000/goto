@@ -1,5 +1,5 @@
 /**
- * Copyright 2025 uk
+ * Copyright 2026 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"goto/pkg/proxy/trackers"
 	"goto/pkg/server/listeners"
 	"goto/pkg/types"
 	"log"
@@ -48,10 +47,10 @@ type UDPUpstream struct {
 }
 
 type UDPProxy struct {
-	Port       int                       `json:"port"`
-	Enabled    bool                      `json:"enabled"`
-	Upstreams  map[string]*UDPUpstream   `json:"upstreams"`
-	UDPTracker *trackers.UDPProxyTracker `json:"udpTracker"`
+	Port       int                     `json:"port"`
+	Enabled    bool                    `json:"enabled"`
+	Upstreams  map[string]*UDPUpstream `json:"upstreams"`
+	UDPTracker *UDPProxyTracker        `json:"udpTracker"`
 	stopChan   chan bool
 	lock       sync.RWMutex
 }
@@ -61,7 +60,7 @@ func newUDPProxy(port int) *UDPProxy {
 		Port:       port,
 		Enabled:    true,
 		Upstreams:  map[string]*UDPUpstream{},
-		UDPTracker: trackers.NewUDPTracker(),
+		UDPTracker: NewUDPTracker(),
 		stopChan:   make(chan bool),
 		lock:       sync.RWMutex{},
 	}
@@ -104,7 +103,7 @@ func StopUDPUpstream(port int, upstream string) {
 func (p *UDPProxy) initTracker() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	p.UDPTracker = trackers.NewUDPTracker()
+	p.UDPTracker = NewUDPTracker()
 }
 
 func (p *UDPProxy) setUDPDelay(upstream string, delayMin, delayMax time.Duration) {
@@ -189,7 +188,7 @@ func (up *UDPUpstream) readFromDownstream(conn *net.UDPConn) (packet []byte, cli
 	return
 }
 
-func (up *UDPUpstream) handlePacket(listenerConn net.PacketConn, clientAddr net.Addr, packet []byte, tracker *trackers.UDPProxyTracker) {
+func (up *UDPUpstream) handlePacket(listenerConn net.PacketConn, clientAddr net.Addr, packet []byte, tracker *UDPProxyTracker) {
 	if up.Delay != nil {
 		up.Delay.ComputeAndApply()
 	}

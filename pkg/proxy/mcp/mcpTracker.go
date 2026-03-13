@@ -1,5 +1,5 @@
 /**
- * Copyright 2025 uk
+ * Copyright 2026 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,12 +14,15 @@
  * limitations under the License.
  */
 
-package trackers
+package mcpproxy
 
-import "sync"
+import (
+	httpproxy "goto/pkg/proxy/http"
+	"sync"
+)
 
 type MCPProxyTracker struct {
-	*HTTPProxyTracker
+	*httpproxy.HTTPProxyTracker
 	ConnCount                 int                       `json:"connCount"`
 	ConnCountByUpstream       map[string]int            `json:"connCountByUpstream"`
 	RequestCountByUpstream    map[string]int            `json:"requestCountByUpstream"`
@@ -34,7 +37,7 @@ type MCPProxyTracker struct {
 
 func NewMCPProxyTracker() *MCPProxyTracker {
 	return &MCPProxyTracker{
-		HTTPProxyTracker:          NewHTTPTracker(),
+		HTTPProxyTracker:          httpproxy.NewHTTPTracker(),
 		ConnCount:                 0,
 		ConnCountByUpstream:       map[string]int{},
 		RequestCountByUpstream:    map[string]int{},

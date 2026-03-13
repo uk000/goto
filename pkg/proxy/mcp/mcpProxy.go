@@ -1,5 +1,5 @@
 /**
- * Copyright 2025 uk
+ * Copyright 2026 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package mcpproxy
 
 import (
 	"errors"
-	"goto/pkg/proxy/trackers"
 	"goto/pkg/server/response/status"
 	"goto/pkg/types"
 	"goto/pkg/util"
@@ -42,7 +41,7 @@ type MCPSession struct {
 	DownstreamAddr string         `json:"downstreamAddr"`
 	Log            *MCPSessionLog `json:"log"`
 	target         *MCPTarget
-	tracker        *trackers.MCPProxyTracker
+	tracker        *MCPProxyTracker
 }
 
 type MCPTarget struct {
@@ -65,10 +64,10 @@ type MatchedTarget struct {
 }
 
 type MCPProxy struct {
-	Port       int                       `json:"port"`
-	Enabled    bool                      `json:"enabled"`
-	Targets    map[string]*MCPTarget     `json:"targets"`
-	MCPTracker *trackers.MCPProxyTracker `json:"tracker"`
+	Port       int                   `json:"port"`
+	Enabled    bool                  `json:"enabled"`
+	Targets    map[string]*MCPTarget `json:"targets"`
+	MCPTracker *MCPProxyTracker      `json:"tracker"`
 	lock       sync.RWMutex
 }
 
@@ -142,7 +141,7 @@ func newMCPProxy(port int) *MCPProxy {
 		Port:       port,
 		Enabled:    true,
 		Targets:    map[string]*MCPTarget{},
-		MCPTracker: &trackers.MCPProxyTracker{},
+		MCPTracker: &MCPProxyTracker{},
 	}
 	p.initTracker()
 	return p
@@ -158,7 +157,7 @@ func (p *MCPProxy) Init() {
 func (p *MCPProxy) initTracker() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	p.MCPTracker = trackers.NewMCPProxyTracker()
+	p.MCPTracker = NewMCPProxyTracker()
 }
 
 func (p *MCPProxy) RemoveProxy(server string) {

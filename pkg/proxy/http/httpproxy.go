@@ -1,3 +1,19 @@
+/**
+ * Copyright 2026 uk
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package httpproxy
 
 import (
@@ -8,7 +24,6 @@ import (
 	"goto/pkg/global"
 	"goto/pkg/invocation"
 	"goto/pkg/metrics"
-	"goto/pkg/proxy/trackers"
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/middleware"
 	"goto/pkg/server/response/status"
@@ -28,11 +43,11 @@ type ProxyResponse struct {
 }
 
 type Proxy struct {
-	Port           int                        `yaml:"port" json:"port"`
-	Targets        map[string]*Target         `yaml:"targets" json:"targets"`
-	Enabled        bool                       `yaml:"enabled" json:"enabled"`
-	ProxyResponses []*ProxyResponse           `yaml:"proxyResponses" json:"proxyResponses"`
-	HTTPTracker    *trackers.HTTPProxyTracker `yaml:"-" json:"tracker"`
+	Port           int                `yaml:"port" json:"port"`
+	Targets        map[string]*Target `yaml:"targets" json:"targets"`
+	Enabled        bool               `yaml:"enabled" json:"enabled"`
+	ProxyResponses []*ProxyResponse   `yaml:"proxyResponses" json:"proxyResponses"`
+	HTTPTracker    *HTTPProxyTracker  `yaml:"-" json:"tracker"`
 	Router         *mux.Router
 	lock           sync.RWMutex
 }
@@ -83,7 +98,7 @@ func newProxy(port int) *Proxy {
 		Port:        port,
 		Targets:     map[string]*Target{},
 		Enabled:     true,
-		HTTPTracker: trackers.NewHTTPTracker(),
+		HTTPTracker: NewHTTPTracker(),
 		Router:      mux.NewRouter().SkipClean(true),
 	}
 	p.Router.Use(setProxyFlag)
@@ -140,7 +155,7 @@ func parseTarget(r io.Reader) (*Target, error) {
 func (p *Proxy) initTracker() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	p.HTTPTracker = trackers.NewHTTPTracker()
+	p.HTTPTracker = NewHTTPTracker()
 }
 
 func (p *Proxy) enable(enable bool) {

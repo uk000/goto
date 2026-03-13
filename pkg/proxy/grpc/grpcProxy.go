@@ -1,5 +1,5 @@
 /**
- * Copyright 2025 uk
+ * Copyright 2026 uk
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/global"
-	"goto/pkg/proxy/trackers"
 	"goto/pkg/rpc"
 	gotogrpc "goto/pkg/rpc/grpc"
 	grpcclient "goto/pkg/rpc/grpc/client"
@@ -62,7 +61,7 @@ type GRPCSession struct {
 	downstream     gotogrpc.GRPCStream
 	upstream       gotogrpc.GRPCStream
 	teeport        int
-	tracker        *trackers.GRPCProxyTracker
+	tracker        *GRPCProxyTracker
 }
 
 type GRPCTarget struct {
@@ -87,7 +86,7 @@ type GRPCProxy struct {
 	Enabled     bool                                  `json:"enabled"`
 	Targets     map[string]*GRPCTarget                `json:"targets"`
 	TeeServices map[string]map[string]*GRPCSessionLog `json:"teeServices"`
-	Tracker     *trackers.GRPCProxyTracker            `json:"tracker"`
+	Tracker     *GRPCProxyTracker                     `json:"tracker"`
 	lock        sync.RWMutex
 }
 
@@ -369,7 +368,7 @@ func newGRPCProxy(port int) *GRPCProxy {
 		Enabled:     true,
 		Targets:     map[string]*GRPCTarget{},
 		TeeServices: map[string]map[string]*GRPCSessionLog{},
-		Tracker:     &trackers.GRPCProxyTracker{},
+		Tracker:     &GRPCProxyTracker{},
 	}
 	p.initTracker()
 	return p
@@ -411,7 +410,7 @@ func (p *GRPCProxy) Init() {
 }
 
 func (p *GRPCProxy) initTracker() {
-	p.Tracker = trackers.NewGRPCProxyTracker()
+	p.Tracker = NewGRPCProxyTracker()
 }
 
 func (p *GRPCProxy) RemoveProxy(service string) {
