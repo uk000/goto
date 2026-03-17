@@ -5,6 +5,15 @@
         "/a2a/agents": "[GET]"
       },
       {
+        "/a2a/agents/all": "[GET]"
+      },
+      {
+        "/a2a/agents/names": "[GET]"
+      },
+      {
+        "/a2a/agents/names/all": "[GET]"
+      },
+      {
         "/a2a/agents/{agent}": "[GET]"
       },
       {
@@ -946,6 +955,18 @@
         "/proxy/http/{o:enable|disable}": "[POST PUT]"
       },
       {
+        "/proxy/http/responses/set": "[POST PUT]"
+      },
+      {
+        "/proxy/http/responses": "[GET]"
+      },
+      {
+        "/proxy/http": "[GET]"
+      },
+      {
+        "/proxy/http/all": "[GET]"
+      },
+      {
         "/proxy/http/targets/add": "[POST PUT]"
       },
       {
@@ -959,6 +980,9 @@
       },
       {
         "/proxy/http/targets": "[GET]"
+      },
+      {
+        "/proxy/http/targets/all": "[GET]"
       },
       {
         "/proxy/http/targets/{target}/tracker": "[GET]"
@@ -995,40 +1019,22 @@
     ],
     "/proxy/tcp": [
       {
-        "/proxy/tcp/targets/add/{target}?address={address}": "[POST PUT]"
-      },
-      {
-        "/proxy/tcp/targets/add/{target}?address={address}\u0026retries={retries}\u0026delay={delay}": "[POST PUT]"
-      },
-      {
-        "/proxy/tcp/targets/add/{target}?address={address}\u0026retries={retries}\u0026delay={delay}\u0026sni={sni}": "[POST PUT]"
-      },
-      {
         "/proxy/tcp/{port}?address={address}": "[POST]"
       },
       {
-        "/proxy/tcp/{port}?address={address}\u0026retries={retries}\u0026delay={delay}": "[POST]"
+        "/proxy/tcp": "[GET]"
       },
       {
-        "/proxy/tcp/{port}?address={address}\u0026retries={retries}\u0026delay={delay}\u0026sni={sni}": "[POST]"
+        "/proxy/tcp/all": "[GET]"
       },
       {
-        "/proxy/tcp/{port}/{endpoint}?sni={sni}": "[POST]"
+        "/proxy/tcp/upstreams/add": "[POST PUT]"
       },
       {
-        "/proxy/tcp/{port}/{endpoint}": "[POST]"
+        "/proxy/tcp/upstreams": "[GET]"
       },
       {
-        "/proxy/tcp/{port}/{endpoint}/retries/{retries}?sni={sni}": "[POST]"
-      },
-      {
-        "/proxy/tcp/{port}/{endpoint}/retries/{retries}": "[POST]"
-      },
-      {
-        "/proxy/tcp/{port}/{endpoint}/delay/{delay}?sni={sni}": "[POST]"
-      },
-      {
-        "/proxy/tcp/{port}/{endpoint}/delay/{delay}": "[POST]"
+        "/proxy/tcp/upstreams/all": "[GET]"
       }
     ],
     "/proxy/trackers": [

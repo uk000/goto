@@ -17,10 +17,11 @@
   - /{rpc:grpc|jsonrpc}/services/{service}/{method}/payload/stream/count={count}/delay={delay}/header/{header}={value}: '[POST]'
   - /{rpc:grpc|jsonrpc}/services/{service}/{method}/payload/stream/count={count}/delay={delay}/header/{header}: '[POST]'
 /a2a:
-  /a2a/agent:
-  - /a2a/agent/{agent}/payload: '[POST]'
   /a2a/agents:
   - /a2a/agents: '[GET]'
+  - /a2a/agents/all: '[GET]'
+  - /a2a/agents/names: '[GET]'
+  - /a2a/agents/names/all: '[GET]'
   - /a2a/agents/{agent}: '[GET]'
   - /a2a/agents/{agent}/delegates: '[GET]'
   - /a2a/agents/{agent}/delegates/tools: '[GET]'
@@ -28,6 +29,7 @@
   - /a2a/agents/{agent}/delegates/agents: '[GET]'
   - /a2a/agents/{agent}/delegates/agents/{delegate}: '[GET]'
   - /a2a/agents/add: '[POST]'
+  - /a2a/agents/{agent}/payload: '[POST]'
   - /a2a/agents/clear: '[POST]'
   /a2a/client:
   - /a2a/client/agent/card?url={url}: '[GET]'
@@ -49,8 +51,7 @@
   - /a2a/status/set/{status}/header/not/{header}: '[POST]'
   - /a2a/status/configure: '[POST]'
   - /a2a/status/clear: '[POST]'
-  /a2a/statuses:
-  - /a2a/statuses: '[GET]'
+  - /a2a/status: '[GET]'
 /agent:
   /agent/{agent}:
   - /agent/{agent}: '[GET POST DELETE]'
@@ -81,6 +82,15 @@
   - /client/track/time/clear: '[POST]'
   - /client/track/time/{buckets}: '[POST PUT]'
   - /client/track/time: '[GET]'
+/delay:
+  /delay:
+  - /delay: '[GET]'
+  /delay/{delay}:
+  - /delay/{delay}: '[GET PUT POST]'
+  /delay/clear:
+  - /delay/clear: '[POST PUT]'
+  /delay/set:
+  - /delay/set/{delay}: '[POST PUT]'
 /events:
   /events:
   - /events?data={data}&reverse={reverse}: '[GET]'
@@ -125,6 +135,18 @@
   - /grpc/services: '[GET]'
   /grpc/stop:
   - /grpc/stop/{service}: '[POST]'
+/headers:
+  /headers:
+  - /headers: '[GET]'
+  /headers/add:
+  - /headers/add/{header}={value}: '[PUT POST]'
+  /headers/clear:
+  - /headers/clear: '[PUT POST]'
+  /headers/remove:
+  - /headers/remove/{header}: '[PUT POST]'
+/hooks:
+  /hooks:
+  - /hooks: '[GET]'
 /jobs:
   /jobs:
   - /jobs: '[GET]'
@@ -221,26 +243,6 @@
   /log/server:
   - /log/server/{enable}: '[POST PUT]'
 /mcpapi:
-  /mcpapi/{q:servers|all}:
-  - /mcpapi/{q:servers|all}/{kind:tools|prompts|resources|templates}: '[GET]'
-  /mcpapi/{s:servers|server}:
-  - /mcpapi/{s:servers|server}/{server}: '[GET]'
-  - /mcpapi/{s:servers|server}: '[GET]'
-  - /mcpapi/{s:servers|server}/{server}/: '[GET]'
-  - /mcpapi/{s:servers|server}/: '[GET]'
-  - /mcpapi/{s:servers|server}/{server}/route?uri={uri}: '[POST]'
-  - /mcpapi/{s:servers|server}/{server}/start: '[POST]'
-  - /mcpapi/{s:servers|server}/{server}/stop: '[POST]'
-  - /mcpapi/{s:servers|server}/{server}/payload/completion?type={type}: '[POST]'
-  - /mcpapi/{s:servers|server}/{server}/payload/completion/delay={delay}?type={type}: '[POST]'
-  - /mcpapi/{s:servers|server}/{server}/{kind:tools|prompts|resources|templates}: '[GET]'
-  - /mcpapi/{s:servers|server}/{server}/{kind:tools|prompts|resources|templates}/{name}: '[GET]'
-  - /mcpapi/{s:servers|server}/{server}/{kind:tools|prompts|resources|templates}/add: '[POST]'
-  - /mcpapi/{s:servers|server}/{server}/{t:tools|tool}/{tool}/call: '[POST]'
-  - /mcpapi/{s:servers|server}/{server}/payload/{kind:tools|prompts|resources|templates}/{name}: '[POST]'
-  - /mcpapi/{s:servers|server}/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}: '[POST]'
-  - /mcpapi/{s:servers|server}/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}/delay={delay}: '[POST]'
-  - /mcpapi/{s:servers|server}/{server}/clear: '[POST]'
   /mcpapi/client:
   - /mcpapi/client/{name}/details: '[GET]'
   - /mcpapi/client/details: '[GET]'
@@ -267,10 +269,28 @@
   - /mcpapi/servers: '[GET]'
   - /mcpapi/servers/all: '[GET]'
   - /mcpapi/servers/names: '[GET]'
+  - /mcpapi/servers/{server}: '[GET]'
+  - /mcpapi/servers: '[GET]'
+  - /mcpapi/servers/{server}/: '[GET]'
+  - /mcpapi/servers/: '[GET]'
+  - /mcpapi/servers/{server}/route?uri={uri}: '[POST]'
   - /mcpapi/servers/start: '[POST]'
+  - /mcpapi/servers/{server}/start: '[POST]'
   - /mcpapi/servers/stop: '[POST]'
+  - /mcpapi/servers/{server}/stop: '[POST]'
+  - /mcpapi/servers/{server}/payload/completion?type={type}: '[POST]'
+  - /mcpapi/servers/{server}/payload/completion/delay={delay}?type={type}: '[POST]'
+  - /mcpapi/servers/{kind:tools|prompts|resources|templates}: '[GET]'
+  - /mcpapi/servers/{server}/{kind:tools|prompts|resources|templates}: '[GET]'
+  - /mcpapi/servers/{server}/{kind:tools|prompts|resources|templates}/{name}: '[GET]'
+  - /mcpapi/servers/{server}/{kind:tools|prompts|resources|templates}/add: '[POST]'
+  - /mcpapi/servers/{server}/{t:tools|tool}/{tool}/call: '[POST]'
+  - /mcpapi/servers/{server}/payload/{kind:tools|prompts|resources|templates}/{name}: '[POST]'
+  - /mcpapi/servers/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}: '[POST]'
+  - /mcpapi/servers/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}/delay={delay}: '[POST]'
   - /mcpapi/servers/clear/all: '[POST]'
   - /mcpapi/servers/clear: '[POST]'
+  - /mcpapi/servers/{server}/clear: '[POST]'
   /mcpapi/status:
   - /mcpapi/status/set/{status}?uri={uri}: '[POST]'
   - /mcpapi/status/set/{status}: '[POST]'
@@ -282,8 +302,6 @@
   - /mcpapi/status/set/{status}/header/not/{header}: '[POST]'
   - /mcpapi/status/configure: '[POST]'
   - /mcpapi/status/clear: '[POST]'
-  /mcpapi/statuses:
-  - /mcpapi/statuses: '[GET]'
 /memory:
   /memory/context:
   - /memory/context/{context}/add/{key}={value}: '[POST]'
@@ -350,11 +368,16 @@
   - /proxy/grpc/{service}/{upstream}/delay/{delay}: '[POST]'
   /proxy/http:
   - /proxy/http/{o:enable|disable}: '[POST PUT]'
+  - /proxy/http/responses/set: '[POST PUT]'
+  - /proxy/http/responses: '[GET]'
+  - /proxy/http: '[GET]'
+  - /proxy/http/all: '[GET]'
   - /proxy/http/targets/add: '[POST PUT]'
   - /proxy/http/targets/clear: '[POST PUT]'
   - /proxy/http/targets/{target}/remove: '[POST PUT]'
   - /proxy/http/targets/{target}/{o:enable|disable}: '[POST PUT]'
   - /proxy/http/targets: '[GET]'
+  - /proxy/http/targets/all: '[GET]'
   - /proxy/http/targets/{target}/tracker: '[GET]'
   - /proxy/http/trackers/{all}: '[GET]'
   - /proxy/http/trackers: '[GET]'
@@ -367,20 +390,12 @@
   - /proxy/mcp/proxy/{tool}?endpoint={endpoint}&to={to}: '[POST]'
   - /proxy/mcp/proxy/{tool}?endpoint={endpoint}&to={to}&sni={sni}&headers={headers}: '[POST]'
   /proxy/tcp:
-  - /proxy/tcp/targets/add/{target}?address={address}: '[POST PUT]'
-  - /proxy/tcp/targets/add/{target}?address={address}&retries={retries}&delay={delay}: '[POST
-      PUT]'
-  - /proxy/tcp/targets/add/{target}?address={address}&retries={retries}&delay={delay}&sni={sni}: '[POST
-      PUT]'
   - /proxy/tcp/{port}?address={address}: '[POST]'
-  - /proxy/tcp/{port}?address={address}&retries={retries}&delay={delay}: '[POST]'
-  - /proxy/tcp/{port}?address={address}&retries={retries}&delay={delay}&sni={sni}: '[POST]'
-  - /proxy/tcp/{port}/{endpoint}?sni={sni}: '[POST]'
-  - /proxy/tcp/{port}/{endpoint}: '[POST]'
-  - /proxy/tcp/{port}/{endpoint}/retries/{retries}?sni={sni}: '[POST]'
-  - /proxy/tcp/{port}/{endpoint}/retries/{retries}: '[POST]'
-  - /proxy/tcp/{port}/{endpoint}/delay/{delay}?sni={sni}: '[POST]'
-  - /proxy/tcp/{port}/{endpoint}/delay/{delay}: '[POST]'
+  - /proxy/tcp: '[GET]'
+  - /proxy/tcp/all: '[GET]'
+  - /proxy/tcp/upstreams/add: '[POST PUT]'
+  - /proxy/tcp/upstreams: '[GET]'
+  - /proxy/tcp/upstreams/all: '[GET]'
   /proxy/trackers:
   - /proxy/trackers/{all}/clear: '[POST]'
   - /proxy/trackers/clear: '[POST]'
@@ -949,17 +964,51 @@
 /sleep:
   /sleep/{delay}:
   - /sleep/{delay}: '[GET PUT POST]'
+  - /sleep/{delay}: '[GET PUT POST]'
 /stats:
   /stats:
   - /stats: '[GET]'
   /stats/clear:
   - /stats/clear: '[POST]'
+/status:
+  /status:
+  - /status: '[GET]'
+  /status/clear:
+  - /status/clear: '[POST]'
+  /status/configure:
+  - /status/configure: '[POST]'
+  /status/counts:
+  - /status/counts/clear: '[POST]'
+  - /status/counts/{status}: '[GET]'
+  - /status/counts: '[GET]'
+  /status/flipflop:
+  - /status/flipflop: '[GET]'
+  /status/set:
+  - /status/set/{status}?uri={uri}: '[POST]'
+  - /status/set/{status}: '[POST]'
 /tls:
   /tls/cacert:
   - /tls/cacert/add: '[PUT POST]'
   - /tls/cacert/remove: '[PUT POST]'
   /tls/workdir:
   - /tls/workdir/set?dir={dir}: '[POST PUT]'
+/track:
+  /track:
+  - /track?uri={uri}: '[POST]'
+  /track/{header}={value}:
+  - /track/{header}={value}?uri={uri}: '[POST]'
+  /track/counts:
+  - /track/counts: '[GET]'
+  /track/headers:
+  - /track/headers/clear: '[POST]'
+  - /track/headers/remove/{headers}: '[POST]'
+  - /track/headers/counts/clear/{headers}: '[POST]'
+  - /track/headers/counts/clear: '[POST]'
+  - /track/headers/counts: '[GET]'
+  - /track/headers/add/{headers}: '[POST]'
+  - /track/headers/{headers}: '[POST]'
+  - /track/headers: '[GET]'
+  - /track/headers/{headers}?uri={uri}: '[POST]'
 /tunnels:
   /tunnels:
   - /tunnels: '[GET]'
@@ -995,4 +1044,17 @@
   - /ui: '[GET]'
   /ui/ws:
   - /ui/ws: '[GET]'
+/uri:
+  /uri:
+  - /uri: '[GET]'
+  /uri/counts:
+  - /uri/counts/enable: '[POST PUT]'
+  - /uri/counts/disable: '[POST PUT]'
+  - /uri/counts: '[GET]'
+  - /uri/counts/clear: '[POST]'
+  /uri/reroute:
+  - /uri/reroute?from={from}&to={to}: '[POST PUT]'
+  /uri/set:
+  - /uri/set/status={status}?uri={uri}: '[POST PUT]'
+  - /uri/set/delay={delay}?uri={uri}: '[POST PUT]'
 
