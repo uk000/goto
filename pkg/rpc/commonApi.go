@@ -33,7 +33,7 @@ var (
 
 func setRoutes(r *mux.Router) {
 	rpcRouter := middleware.RootPath("/{rpc:grpc|jsonrpc}")
-	rpcServiceRouter := util.PathRouter(rpcRouter, "/services")
+	rpcServiceRouter := util.PathRouter(rpcRouter, "/server")
 	util.AddRoute(rpcServiceRouter, "", getServices, "GET")
 	util.AddRoute(rpcServiceRouter, "/{service}", getService, "GET")
 	util.AddRoute(rpcServiceRouter, "/{service}/track", trackService, "POST")

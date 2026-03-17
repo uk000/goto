@@ -41,14 +41,15 @@ var (
 
 func setRoutes(r *mux.Router) {
 	grpcRouter := middleware.RootPath("/grpc")
-	util.AddRoute(grpcRouter, "/open", openGRPCPort, "POST")
-	util.AddRoute(grpcRouter, "/services/reflect/{upstream}", loadReflectedServices, "POST")
-	util.AddRoute(grpcRouter, "/serve/{service}", serveService, "POST")
-	util.AddRoute(grpcRouter, "/stop/{service}", stopService, "POST")
-	util.AddRoute(grpcRouter, "/services/{service}/serve", serveService, "POST")
-	util.AddRoute(grpcRouter, "/services/{service}/stop", stopService, "POST")
-	util.AddRoute(grpcRouter, "/services/active", getActiveServices, "GET")
-	util.AddRoute(grpcRouter, "/services", getActiveServices, "GET")
+	serverRouter := util.PathRouter(grpcRouter, "/server")
+	util.AddRoute(serverRouter, "/open", openGRPCPort, "POST")
+	util.AddRoute(serverRouter, "/services/reflect/{upstream}", loadReflectedServices, "POST")
+	util.AddRoute(serverRouter, "/serve/{service}", serveService, "POST")
+	util.AddRoute(serverRouter, "/stop/{service}", stopService, "POST")
+	util.AddRoute(serverRouter, "/services/{service}/serve", serveService, "POST")
+	util.AddRoute(serverRouter, "/services/{service}/stop", stopService, "POST")
+	util.AddRoute(serverRouter, "/services/active", getActiveServices, "GET")
+	util.AddRoute(serverRouter, "/services", getActiveServices, "GET")
 }
 
 func openGRPCPort(w http.ResponseWriter, r *http.Request) {

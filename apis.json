@@ -186,28 +186,6 @@
       }
     ]
   },
-  "/delay": {
-    "/delay": [
-      {
-        "/delay": "[GET]"
-      }
-    ],
-    "/delay/clear": [
-      {
-        "/delay/clear": "[POST PUT]"
-      }
-    ],
-    "/delay/set": [
-      {
-        "/delay/set/{delay}": "[POST PUT]"
-      }
-    ],
-    "/delay/{delay}": [
-      {
-        "/delay/{delay}": "[GET PUT POST]"
-      }
-    ]
-  },
   "/events": {
     "/events": [
       {
@@ -322,28 +300,6 @@
     "/grpc/stop": [
       {
         "/grpc/stop/{service}": "[POST]"
-      }
-    ]
-  },
-  "/headers": {
-    "/headers": [
-      {
-        "/headers": "[GET]"
-      }
-    ],
-    "/headers/add": [
-      {
-        "/headers/add/{header}={value}": "[PUT POST]"
-      }
-    ],
-    "/headers/clear": [
-      {
-        "/headers/clear": "[PUT POST]"
-      }
-    ],
-    "/headers/remove": [
-      {
-        "/headers/remove/{header}": "[PUT POST]"
       }
     ]
   },
@@ -2688,9 +2644,6 @@
     "/sleep/{delay}": [
       {
         "/sleep/{delay}": "[GET PUT POST]"
-      },
-      {
-        "/sleep/{delay}": "[GET PUT POST]"
       }
     ]
   },
@@ -2706,47 +2659,6 @@
       }
     ]
   },
-  "/status": {
-    "/status": [
-      {
-        "/status": "[GET]"
-      }
-    ],
-    "/status/clear": [
-      {
-        "/status/clear": "[POST]"
-      }
-    ],
-    "/status/configure": [
-      {
-        "/status/configure": "[POST]"
-      }
-    ],
-    "/status/counts": [
-      {
-        "/status/counts/clear": "[POST]"
-      },
-      {
-        "/status/counts/{status}": "[GET]"
-      },
-      {
-        "/status/counts": "[GET]"
-      }
-    ],
-    "/status/flipflop": [
-      {
-        "/status/flipflop": "[GET]"
-      }
-    ],
-    "/status/set": [
-      {
-        "/status/set/{status}?uri={uri}": "[POST]"
-      },
-      {
-        "/status/set/{status}": "[POST]"
-      }
-    ]
-  },
   "/tls": {
     "/tls/cacert": [
       {
@@ -2759,52 +2671,6 @@
     "/tls/workdir": [
       {
         "/tls/workdir/set?dir={dir}": "[POST PUT]"
-      }
-    ]
-  },
-  "/track": {
-    "/track": [
-      {
-        "/track?uri={uri}": "[POST]"
-      }
-    ],
-    "/track/counts": [
-      {
-        "/track/counts": "[GET]"
-      }
-    ],
-    "/track/headers": [
-      {
-        "/track/headers/clear": "[POST]"
-      },
-      {
-        "/track/headers/remove/{headers}": "[POST]"
-      },
-      {
-        "/track/headers/counts/clear/{headers}": "[POST]"
-      },
-      {
-        "/track/headers/counts/clear": "[POST]"
-      },
-      {
-        "/track/headers/counts": "[GET]"
-      },
-      {
-        "/track/headers/add/{headers}": "[POST]"
-      },
-      {
-        "/track/headers/{headers}": "[POST]"
-      },
-      {
-        "/track/headers": "[GET]"
-      },
-      {
-        "/track/headers/{headers}?uri={uri}": "[POST]"
-      }
-    ],
-    "/track/{header}={value}": [
-      {
-        "/track/{header}={value}?uri={uri}": "[POST]"
       }
     ]
   },
@@ -2899,40 +2765,6 @@
     "/ui/ws": [
       {
         "/ui/ws": "[GET]"
-      }
-    ]
-  },
-  "/uri": {
-    "/uri": [
-      {
-        "/uri": "[GET]"
-      }
-    ],
-    "/uri/counts": [
-      {
-        "/uri/counts/enable": "[POST PUT]"
-      },
-      {
-        "/uri/counts/disable": "[POST PUT]"
-      },
-      {
-        "/uri/counts": "[GET]"
-      },
-      {
-        "/uri/counts/clear": "[POST]"
-      }
-    ],
-    "/uri/reroute": [
-      {
-        "/uri/reroute?from={from}\u0026to={to}": "[POST PUT]"
-      }
-    ],
-    "/uri/set": [
-      {
-        "/uri/set/status={status}?uri={uri}": "[POST PUT]"
-      },
-      {
-        "/uri/set/delay={delay}?uri={uri}": "[POST PUT]"
       }
     ]
   },

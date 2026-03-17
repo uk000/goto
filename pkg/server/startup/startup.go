@@ -52,6 +52,8 @@ var (
 	lock             = sync.Mutex{}
 )
 
+type ChangeLog map[string]any
+
 func Start() {
 	loadStartupConfigs()
 	//runStartupScript()
@@ -67,7 +69,7 @@ func Stop() {
 
 func loadStartupConfigs() {
 	if len(global.ServerConfig.ConfigPaths) > 0 {
-		loadConfigsFromPaths("")
+		loadConfigsFromPaths(nil)
 		for _, configPath := range global.ServerConfig.ConfigPaths {
 			configWatcher, err := fswatcher.New(fswatcher.WithPath(configPath, fswatcher.WithDepth(fswatcher.WatchTopLevel)))
 			if err != nil {
@@ -82,6 +84,8 @@ func loadStartupConfigs() {
 }
 
 func watchStartupConfig(configWatcher fswatcher.Watcher) {
+	debounceRemove := util.Debounce(5 * time.Second)
+	debounceLoad := util.Debounce(5 * time.Second)
 	changeChan := make(chan string, 10)
 	go loadChanges(changeChan)
 	go configWatcher.Watch(context.Background())
@@ -97,14 +101,54 @@ func watchStartupConfig(configWatcher fswatcher.Watcher) {
 					removed = true
 				}
 			}
-			if removed {
-				removeConfigs(event.Path)
+			all := false
+			if strings.Contains(event.Path, "..") {
+				all = true
+			}
+			if all {
+				if removed {
+					debounceRemove(func() {
+						removeAllConfigs()
+					})
+				} else {
+					debounceLoad(func() {
+						loadConfigsFromPaths(nil)
+					})
+				}
 			} else {
-				log.Printf("Files changed in [%s]. Will reload with delay.", event.Path)
-				changeChan <- event.Path
+				if removed {
+					log.Printf("Files removed in [%s]. Will cleanup configs.", event.Path)
+					removeConfigs(event.Path)
+				} else {
+					log.Printf("Files changed in [%s]. Will reload with delay.", event.Path)
+					changeChan <- event.Path
+				}
 			}
 		}
 	}()
+}
+
+func removeAllConfigs() {
+	for filename := range a2aConfigs {
+		log.Printf("Removing A2A configs for %s.\n", filename)
+		clearA2A(a2aConfigs[filename])
+		delete(a2aConfigs, filename)
+	}
+	for filename := range mcpConfigs {
+		log.Printf("Removing MCP configs for %s.\n", filename)
+		clearMCP(mcpConfigs[filename])
+		delete(mcpConfigs, filename)
+	}
+	for filename := range httpProxyConfigs {
+		log.Printf("Removing HTTP Proxy configs for %s.\n", filename)
+		removeHTTPProxy(httpProxyConfigs[filename])
+		delete(httpProxyConfigs, filename)
+	}
+	for filename := range tcpProxyConfigs {
+		log.Printf("Removing TCP Proxy configs for %s.\n", filename)
+		removeTCPProxy(tcpProxyConfigs[filename])
+		delete(tcpProxyConfigs, filename)
+	}
 }
 
 func removeConfigs(filePath string) {
@@ -131,7 +175,19 @@ func removeConfigs(filePath string) {
 	}
 }
 
-func loadConfigsFromPaths(filter string) {
+func (c ChangeLog) Contains(v string) bool {
+	if _, ok := c[v]; ok {
+		return true
+	}
+	for k := range c {
+		if strings.Contains(k, v) || strings.Contains(v, k) {
+			return true
+		}
+	}
+	return false
+}
+
+func loadConfigsFromPaths(changeLog ChangeLog) {
 	for _, configPath := range global.ServerConfig.ConfigPaths {
 		log.Printf("Loading configs from path [%s]", configPath)
 		files, err := os.ReadDir(configPath)
@@ -141,32 +197,26 @@ func loadConfigsFromPaths(filter string) {
 		}
 		for _, file := range files {
 			filePath := filepath.Join(configPath, file.Name())
-			if filter != "" && !strings.Contains(filePath, filter) && !strings.Contains(filter, filePath) {
+			if len(changeLog) == 0 || changeLog.Contains(filePath) {
+				loadConfigFromFile(filePath)
+			} else {
 				log.Printf("Skipping unchanged file [%s]", filePath)
-				continue
 			}
-			loadConfigFromFile(filePath)
 		}
-	}
-}
-
-func loadChangeLog(changeLog map[string]any) {
-	for path := range changeLog {
-		loadConfigsFromPaths(path)
 	}
 }
 
 func loadChanges(changeChan chan string) {
 	debounce := util.Debounce(5 * time.Second)
 	lock := sync.Mutex{}
-	changeLog := map[string]any{}
+	changeLog := ChangeLog{}
 	for path := range changeChan {
 		lock.Lock()
 		changeLog[path] = 0
 		lock.Unlock()
 		debounce(func() {
 			lock.Lock()
-			loadChangeLog(changeLog)
+			loadConfigsFromPaths(changeLog)
 			lock.Unlock()
 		})
 	}

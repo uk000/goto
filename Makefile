@@ -8,7 +8,6 @@ OUT := goto
 GO_FILES := $(shell find . -name '*.go' | grep -v /vendor/)
 
 COMMIT := $(shell git log -1 --pretty=tformat:%h)
-VERSION := 0.0.0
 
 IMAGE := uk0000/goto
 
@@ -21,7 +20,7 @@ clean:
 	rm -rf pkg/server/grpc/pb/*.go
 
 build: $(GO_FILES)
-	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -mod=mod -o $(OUT) -ldflags="-extldflags \"-static\" -w -s -X goto/global.Version=$(VERSION) -X goto/global.Commit=$(COMMIT)" .
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -mod=mod -o $(OUT) -ldflags="-extldflags \"-static\" -w -s -X goto/pkg/global.Version=$(VERSION) -X goto/pkg/global.Commit=$(COMMIT)" .
 	@chmod +x $(OUT)
 
 run: build

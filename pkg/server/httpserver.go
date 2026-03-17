@@ -109,7 +109,7 @@ func configureHTTPRouter() {
 	interceptedChainRouter := RootRouter.PathPrefix("").Subrouter()
 	interceptedChainRouter.Use(intercept.IntereceptMiddleware(preIntercept(), postIntercept()))
 
-	middleware.LinkInterceptedCore(interceptedChainRouter)
+	middleware.UseInterceptedCore(interceptedChainRouter)
 	middleware.LinkIntercepted(interceptedChainRouter)
 
 	uninterceptedChainRouter := RootRouter.PathPrefix("").Subrouter()

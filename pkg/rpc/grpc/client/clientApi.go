@@ -34,9 +34,8 @@ var (
 
 func setRoutes(r *mux.Router) {
 	router := middleware.RootPath("/grpc")
-
-	util.AddRoute(router, "/call/{endpoint}/{service}/{method}", callServiceMethod, "POST")
-
+	clientRouter := util.PathRouter(router, "/client")
+	util.AddRoute(clientRouter, "/call/{endpoint}/{service}/{method}", callServiceMethod, "POST")
 }
 
 func callServiceMethod(w http.ResponseWriter, r *http.Request) {
