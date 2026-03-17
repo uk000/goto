@@ -79,6 +79,7 @@ func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add(HeaderGotoHost, l.HostLabel)
 	w.Header().Add(HeaderGotoProtocol, rs.GotoProtocol)
 	w.Header().Add(HeaderViaGoto, l.Label)
+	util.CopyHeaders("Request", r, w, r.Header, true, true, false)
 }
 
 func middlewareFunc(next http.Handler) http.Handler {

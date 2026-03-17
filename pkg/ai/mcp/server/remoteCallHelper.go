@@ -19,7 +19,7 @@ package mcpserver
 import (
 	"fmt"
 	"goto/pkg/types"
-	"strings"
+	"maps"
 	"sync"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -58,24 +58,28 @@ outer:
 	wg.Done()
 }
 
-func (t *ToolCallContext) addForwardHeaders(headers map[string][]string, forwardHeaders []string, args map[string]any) {
+func (t *ToolCallContext) addForwardHeaders(headers types.SimpleHTTPHeaders, forwardHeaders []string, args map[string]any) {
 	finalForwardHeaders := map[string]bool{}
-	if t.remoteArgs.ToolArgs == nil {
-		t.remoteArgs.ToolArgs = map[string]any{}
-	}
-	if t.remoteArgs.ToolArgs["forwardHeaders"] != nil {
-		if arr, ok := t.remoteArgs.ToolArgs["forwardHeaders"].([]string); ok {
-			for _, h := range arr {
-				finalForwardHeaders[h] = true
+	if t.remoteArgs != nil {
+		if t.remoteArgs.ToolArgs == nil {
+			t.remoteArgs.ToolArgs = map[string]any{}
+		}
+		if t.remoteArgs.ToolArgs["forwardHeaders"] != nil {
+			if arr, ok := t.remoteArgs.ToolArgs["forwardHeaders"].([]string); ok {
+				for _, h := range arr {
+					finalForwardHeaders[h] = true
+				}
 			}
 		}
-	}
-	if t.remoteArgs.ForwardHeaders == nil {
-		t.remoteArgs.ForwardHeaders = []string{}
-	}
-	t.remoteArgs.ForwardHeaders = append(t.remoteArgs.ForwardHeaders, forwardHeaders...)
-	for _, h := range t.remoteArgs.ForwardHeaders {
-		finalForwardHeaders[h] = true
+		if t.remoteArgs.Headers != nil && t.remoteArgs.Headers.HasForwardHeaders() {
+			forwardHeaders = append(forwardHeaders, t.remoteArgs.Headers.Request.Forward...)
+		}
+		for _, h := range forwardHeaders {
+			finalForwardHeaders[h] = true
+		}
+		if t.requestHeaders != nil {
+			types.ForwardHeaders(t.requestHeaders, headers, maps.Keys(finalForwardHeaders), t.Label)
+		}
 	}
 	toolForwardHeaders := []string{}
 	for h := range finalForwardHeaders {
@@ -83,14 +87,4 @@ func (t *ToolCallContext) addForwardHeaders(headers map[string][]string, forward
 	}
 	t.remoteArgs.ToolArgs["forwardHeaders"] = toolForwardHeaders
 	args["forwardHeaders"] = toolForwardHeaders
-	if t.requestHeaders != nil {
-		for _, h := range t.remoteArgs.ForwardHeaders {
-			for h2, v2 := range t.requestHeaders {
-				if strings.EqualFold(h, h2) {
-					headers[h] = v2
-					break
-				}
-			}
-		}
-	}
 }

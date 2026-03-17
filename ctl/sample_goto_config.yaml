@@ -37,7 +37,7 @@ mcp:
             description: 'Delay the response artificially (duration syntax: 5s)'
           headers:
             type: object
-            description: Headers to pass to the remote tool. JSON object with string h:v.
+            description: Header configs to apply to tool call. {"request":{"add":{"h":"v"},"remove":["h"],"forward":["h"]},"response":{"add":{"h":"v"},"remove":["h"],"forward":["h"]}}
           args:
             type: object
             description: Arguments to pass to the remote tool. JSON object with k:v.
@@ -56,12 +56,7 @@ mcp:
             description: HTTP Authority to use for the remote host
           headers:
             type: object
-            description: Headers to be sent with the HTTP request
-          forwardHeaders:
-            type: array
-            items:
-              type: string
-            description: List of headers to forward from incoming reuqest to outgoing request.
+            description: Headers configs to apply to the HTTP request. {"request":{"add":{"h":"v"},"remove":["h"],"forward":["h"]},"response":{"add":{"h":"v"},"remove":["h"],"forward":["h"]}}
           delay:
             type: string
             description: 'Delay the response artificially (duration syntax: 5s)'
@@ -88,17 +83,11 @@ mcp:
             description: 'Delay the response artificially (duration syntax: 5s)'
           headers:
             type: object
-            description: Headers to pass to the remote tool. JSON object with string
+            description: Header configs to apply to tool call. {"request":{"add":{"h":"v"},"remove":["h"],"forward":["h"]},"response":{"add":{"h":"v"},"remove":["h"],"forward":["h"]}}
               h:v.
-          forwardHeaders:
-            type: array
-            items:
-              type: string
-            description: List of headers to forward from incoming reuqest to outgoing
-              request.
           args:
             type: object
-            description: Arguments to pass to the remote tool. JSON object with k:v.
+            description: Arguments to pass to the remote tool. JSON object with k:v. Can include "headers" config as an arg, meant to be applied by the remote tool for its own outbound calls.
         required: []
   servers:
     - server:
@@ -131,11 +120,12 @@ mcp:
               forceSSE: false
               authority: "-"
               delay: 1s
-              headers: {}
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - authorization
+              headers:
+                request:
+                  forward:
+                    - Traceparent
+                    - Tracestate
+                    - Authorization
               args: {}
         - tool:
             name: ping
@@ -163,10 +153,12 @@ mcp:
             remote:
               url: "localhost:8081"
               authority: "localhost"
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - authorization
+              headers:
+                request:
+                  forward:
+                    - Traceparent
+                    - Tracestate
+                    - Authorization
         - tool:
             name: stream
             description: long running streaming tool, with stream out and progress notifications from server goto-mcp-1@${POD_NAME}@ns@local
@@ -229,11 +221,13 @@ mcp:
               authority: "localhost"
               delay: "1s"
               headers:
-                caller: ["remote-server-details@goto-mcp-1@${POD_NAME}@ns@local"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
+                request:
+                  add:
+                    caller: "remote-server-details@goto-mcp-1@${POD_NAME}@ns@local"
+                  forward:
+                    - Traceparent
+                    - Tracestate
+                    - Authorization
               args:
                 text: "Calling ServerDetails@goto-mcp-1 from MCP tool remote-serverdetails@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
@@ -254,11 +248,13 @@ mcp:
               authority: "localhost"
               delay: "1s"
               headers:
-                caller: ["remote-listservers@goto-mcp-1@${POD_NAME}@ns@local"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
+                request:
+                  add:
+                    caller: "remote-listservers@goto-mcp-1@${POD_NAME}@ns@local"
+                  forward:
+                    - Traceparent
+                    - Tracestate
+                    - Authorization
               args:
                 text: "Calling ListServers@goto-mcp-1 from remote-listservers@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
@@ -279,11 +275,13 @@ mcp:
               authority: "localhost"
               delay: "1s"
               headers:
-                caller: ["remote-echo@goto-mcp-1@${POD_NAME}@ns@local"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
+                request:
+                  add:
+                    caller: "remote-echo@goto-mcp-1@${POD_NAME}@ns@local"
+                  forward:
+                    - Traceparent
+                    - Tracestate
+                    - Authorization
               args:
                 text: "Calling echo@goto-mcp-1 from MCP tool remote-echo@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
@@ -304,11 +302,13 @@ mcp:
               authority: "localhost"
               delay: "1s"
               headers:
-                caller: ["remote-elicit@goto-mcp-1@${POD_NAME}@ns@local"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
+                request:
+                  add:
+                    caller: "remote-elicit@goto-mcp-1@${POD_NAME}@ns@local"
+                  forward:
+                    - Traceparent
+                    - Tracestate
+                    - Authorization
               args:
                 text: "Calling elicit@goto-mcp-1 from MCP tool remote-elicit@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
@@ -321,7 +321,7 @@ mcp:
             remote: true
           config:
             remote:
-              tool: "elicit"
+              tool: "fetch"
               server: "goto-mcp-1"
               url: "localhost:4000/mcp/goto-mcp-1/fetch"
               sseURL: ""
@@ -329,11 +329,13 @@ mcp:
               authority: "localhost"
               delay: "1s"
               headers:
-                caller: ["remote-fetch@goto-mcp-1@${POD_NAME}@ns@local"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
+                request:
+                  add:
+                    caller: "remote-fetch@goto-mcp-1@${POD_NAME}@ns@local"
+                  forward:
+                    - Traceparent
+                    - Tracestate
+                    - Authorization
               args:
                 text: "Calling fetch@goto-mcp-1 from MCP tool remote-fetch@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
@@ -354,11 +356,13 @@ mcp:
               authority: "localhost"
               delay: "1s"
               headers:
-                caller: ["remote-stream@goto-mcp-1@${POD_NAME}@ns@local"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
+                request:
+                  add:
+                    caller: "remote-stream@goto-mcp-1@${POD_NAME}@ns@local"
+                  forward:
+                    - Traceparent
+                    - Tracestate
+                    - Authorization
               args:
                 text: "Calling stream@goto-mcp-1 from MCP tool remote-stream@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
@@ -379,13 +383,42 @@ mcp:
               authority: "localhost"
               delay: "1s"
               headers:
-                caller: ["remote-toolcall@goto-mcp-1@${POD_NAME}@ns@local"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
+                request:
+                  add:
+                    caller: "remote-toolcall@goto-mcp-1@${POD_NAME}@ns@local"
+                  forward:
+                    - Traceparent
+                    - Tracestate
+                    - Authorization
               args:
                 text: "Calling toolcall@goto-mcp-1 from MCP tool remote-toolcall@goto-mcp-1@${POD_NAME}@ns@local"
+                headers:
+                  Accept: "application/json"
+        - tool:
+            name: remote-remote-echo
+            description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool remote-echo on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/remote-echo], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
+          schema: remote-tool-schema
+          behavior:
+            remote: true
+          config:
+            remote:
+              tool: "remote-echo"
+              server: "goto-mcp-1"
+              url: "localhost:4000/mcp/goto-mcp-1/remote-echo"
+              sseURL: ""
+              forceSSE: false
+              authority: "localhost"
+              delay: "1s"
+              headers:
+                request:
+                  add:
+                    caller: "remote-remote-echo@goto-mcp-1@${POD_NAME}@ns@local"
+                  forward:
+                    - Traceparent
+                    - Tracestate
+                    - Authorization
+              args:
+                text: "Calling remote-echo@goto-mcp-1 from MCP tool remote-remote-echo@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
                   Accept: "application/json"
         - tool:
@@ -404,11 +437,13 @@ mcp:
               authority: "localhost"
               delay: "1s"
               headers:
-                caller: ["remote-remote-toolcall@goto-mcp-1@${POD_NAME}@ns@local"]
-              forwardHeaders:
-              - Traceparent
-              - Tracestate
-              - Authorization
+                request:
+                  add:
+                    caller: "remote-remote-toolcall@goto-mcp-1@${POD_NAME}@ns@local"
+                  forward:
+                    - Traceparent
+                    - Tracestate
+                    - Authorization
               args:
                 text: "Calling remote-toolcall@goto-mcp-1 from MCP tool remote-remote-toolcall@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
@@ -574,12 +609,12 @@ a2a:
         card:
           protocolVersion: 0.2.2
           version: "1.0"
-          name: goto-1
-          description: "This is agent goto-1@${POD_NAME}@ns@local with skills: echo elicit fetch stream"
-          url: http://localhost:3000/agent/goto-1/
+          name: goto-agent-1
+          description: "This is agent goto-agent-1@${POD_NAME}@ns@local with skills: echo elicit fetch stream"
+          url: http://localhost:3000/agent/goto-agent-1/
           preferredTransport: ""
           additionalInterfaces:
-            - url: http://localhost:3000/agent/goto-1/grpc
+            - url: http://localhost:3000/agent/goto-agent-1/grpc
               transport: grpc
           provider:
             organization: Goto
@@ -690,22 +725,26 @@ a2a:
                   - response
                 toolCall:
                   tool: echo
-                  url: localhost:3000/mcp/goto-mcp/echo
+                  url: localhost:3000/mcp/goto-mcp-1/echo
                   sseURL: ""
-                  server: goto-mcp
+                  server: goto-mcp-1
                   authority: localhost
                   delay: 10ms
                   args:
-                    text: Hello from agent goto-1@${POD_NAME}@ns@local
+                    text: Hello from agent goto-agent-1@${POD_NAME}@ns@local
                   headers:
-                    foo: ["echo"]
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
+                    request:
+                      add:
+                        foo: echo
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
                 substitutes:
                   mcp1:
-                    url: localhost:3000/mcp/goto-mcp/echo
+                    url: localhost:3000/mcp/goto-mcp-1/echo
                     authority: localhost
                   mcp2:
                     url: localhost:4000/mcp/goto-mcp-2/echo
@@ -725,13 +764,17 @@ a2a:
                   authority: localhost
                   delay: 10ms
                   args:
-                    text: Hello from agent goto-1@${POD_NAME}@ns@local
+                    text: Hello from agent goto-agent-1@${POD_NAME}@ns@local
                   headers:
-                    foo: ["echo"]
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
+                    request:
+                      add:
+                        foo: echo2
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
                 substitutes:
               elicit:
                 triggers:
@@ -746,13 +789,17 @@ a2a:
                   authority: localhost
                   delay: 1s
                   args:
-                    text: Hello from agent goto-1@${POD_NAME}@ns@local
+                    text: Hello from agent goto-agent-1@${POD_NAME}@ns@local
                   headers:
-                    foo: ["elicit"]
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
+                    request:
+                      add:
+                        foo: elicit
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
                 substitutes:
                   mcp1:
                     url: localhost:4000/mcp/goto-mcp-2/elicit
@@ -761,7 +808,7 @@ a2a:
                     url: localhost:4000/mcp/goto-mcp-3/elicit
                     authority: localhost
                   mcp3:
-                    url: localhost:3000/mcp/goto-mcp/elicit
+                    url: localhost:3000/mcp/goto-mcp-1/elicit
                     authority: localhost
               fetch:
                 triggers:
@@ -775,44 +822,27 @@ a2a:
                   authority: localhost
                   delay: 1s
                   args:
-                    text: Hello from agent goto-1@${POD_NAME}@ns@local
+                    text: Hello from agent goto-agent-1@${POD_NAME}@ns@local
                   headers:
-                    foo: ["fetch"]
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
+                    request:
+                      add:
+                        foo: fetch
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
                 substitutes:
                   mcp1:
                     url: localhost:4000/mcp/goto-mcp-3/fetch
                     authority: localhost
                   mcp2:
-                    url: localhost:3000/mcp/goto-mcp/fetch
+                    url: localhost:3000/mcp/goto-mcp-1/fetch
                     authority: localhost
                   mcp3:
                     url: localhost:4000/mcp/goto-mcp-2/fetch
                     authority: localhost
-              sr-state-status:
-                triggers:
-                  - SR
-                  - Service
-                  - Registry
-                  - sr
-                  - service
-                  - registry
-                toolCall:
-                  tool: sr-state-status
-                  url: localhost:3000/mcp/goto-mcp/sr-state-status
-                  sseURL: ""
-                  server: goto-mcp
-                  authority: localhost
-                  headers:
-                    foo: ["sr-site-status"]
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
-                substitutes: null
               stream:
                 triggers:
                   - stream
@@ -820,112 +850,121 @@ a2a:
                   - push
                 toolCall:
                   tool: stream
-                  url: localhost:4000/mcp/goto-mcp-2/stream
+                  url: localhost:3000/mcp/goto-mcp-1/stream
                   sseURL: ""
-                  server: goto-mcp-2
+                  server: goto-mcp-1
                   authority: localhost
                   delay: 1s
                   args:
-                    text: Hello from agent goto-1@${POD_NAME}@ns@local
+                    text: Hello from agent goto-agent-1@${POD_NAME}@ns@local
                   headers:
-                    Accept:
-                      - text/stream
-                    foo: ["stream"]
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
+                    request:
+                      add:
+                        foo: stream
+                        Accept: "text/stream"
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
                 substitutes:
                   mcp1:
-                    url: localhost:4000/mcp/goto-mcp-2/stream
+                    url: localhost:3000/mcp/goto-mcp-1/stream
                     authority: localhost
                   mcp2:
-                    url: localhost:4000/mcp/goto-mcp-3/stream
+                    url: localhost:4000/mcp/goto-mcp-2/stream
                     authority: localhost
                   mcp3:
-                    url: localhost:3000/mcp/goto-mcp/stream
+                    url: localhost:4000/mcp/goto-mcp-3/stream
                     authority: localhost
             agents:
               agent1:
                 triggers: [agent1]
                 agentCall:
-                  name: goto-1
-                  agentURL: http://localhost:4000/agent/goto-1
-                  cardURL: http://localhost:4000/agent/goto-1/.well-known/agent.json
+                  name: goto-agent-1
+                  agentURL: http://localhost:4000/agent/goto-agent-1
+                  cardURL: http://localhost:4000/agent/goto-agent-1/.well-known/agent.json
                   authority: localhost
                   delay: 1s
                   message: echo
                   headers:
-                    foo: ["a"]
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
-                  removeHeaders:
-                    - bar
+                    request:
+                      add:
+                        foo: a
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
                 substitutes:
                   agent1:
-                    url: http://localhost:4000/agent/goto-1
+                    url: http://localhost:4000/agent/goto-agent-1
                     authority: localhost
                   agent2:
-                    url: http://localhost:4000/agent/goto-2
+                    url: http://localhost:4000/agent/goto-agent-2
                     authority: localhost
                   agent3:
-                    url: http://localhost:4000/agent/goto-3
+                    url: http://localhost:4000/agent/goto-agent-3
                     authority: localhost
               agent2:
                 triggers: [agent2]
                 agentCall:
-                  name: goto-2
-                  agentURL: http://localhost:4000/agent/goto-2
-                  cardURL: http://localhost:4000/agent/goto-2/.well-known/agent.json
+                  name: goto-agent-2
+                  agentURL: http://localhost:4000/agent/goto-agent-2
+                  cardURL: http://localhost:4000/agent/goto-agent-2/.well-known/agent.json
                   authority: localhost
                   delay: 1s
                   message: echo
                   headers:
-                    foo: ["b"]
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
-                  removeHeaders:
-                    - bar
+                    request:
+                      add:
+                        foo: b
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
                 substitutes:
                   agent1:
-                    url: http://localhost:4000/agent/goto-1
+                    url: http://localhost:4000/agent/goto-agent-1
                     authority: localhost
                   agent2:
-                    url: http://localhost:4000/agent/goto-2
+                    url: http://localhost:4000/agent/goto-agent-2
                     authority: localhost
                   agent3:
-                    url: http://localhost:4000/agent/goto-3
+                    url: http://localhost:4000/agent/goto-agent-3
                     authority: localhost
               agent3:
                 triggers: [agent3]
                 agentCall:
-                  name: goto-3
-                  agentURL: http://localhost:4000/agent/goto-3
-                  cardURL: http://localhost:4000/agent/goto-3/.well-known/agent.json
+                  name: goto-agent-3
+                  agentURL: http://localhost:4000/agent/goto-agent-3
+                  cardURL: http://localhost:4000/agent/goto-agent-3/.well-known/agent.json
                   authority: localhost
                   delay: 1s
                   message: echo
                   headers:
-                    foo: ["c"]
-                  forwardHeaders:
-                    - Traceparent
-                    - Tracestate
-                    - authorization
-                  removeHeaders:
-                    - bar
+                    request:
+                      add:
+                        foo: c
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
                 substitutes:
                   agent1:
-                    url: http://localhost:4000/agent/goto-1
+                    url: http://localhost:4000/agent/goto-agent-1
                     authority: localhost
                   agent2:
-                    url: http://localhost:4000/agent/goto-2
+                    url: http://localhost:4000/agent/goto-agent-2
                     authority: localhost
                   agent3:
-                    url: http://localhost:4000/agent/goto-3
+                    url: http://localhost:4000/agent/goto-agent-3
                     authority: localhost
             http:
               get:
@@ -961,12 +1000,12 @@ a2a:
         card:
           protocolVersion: 0.2.2
           version: "1.0"
-          name: goto-1-stream
-          description: "This is agent goto-1-stream@${POD_NAME}@ns@local with skills: echo elicit fetch stream"
-          url: http://localhost:3000/agent/goto-1-stream/
+          name: goto-agent-1-stream
+          description: "This is agent goto-agent-1-stream@${POD_NAME}@ns@local with skills: echo elicit fetch stream"
+          url: http://localhost:3000/agent/goto-agent-1-stream/
           preferredTransport: ""
           additionalInterfaces:
-            - url: http://localhost:3000/agent/goto-1-stream/grpc
+            - url: http://localhost:3000/agent/goto-agent-1-stream/grpc
               transport: grpc
           provider:
             organization: Goto
@@ -1076,11 +1115,11 @@ a2a:
               max: 0.5s
               count: -1
             jsonStream:
-              - message: This is response 1/5 from Agent goto-1-stream@Port=3000@${POD_NAME}@ns@local
-              - message: This is response 2/5 from Agent goto-1-stream@Port=3000@${POD_NAME}@ns@local
-              - message: This is response 3/5 from Agent goto-1-stream@Port=3000@${POD_NAME}@ns@local
-              - message: This is response 4/5 from Agent goto-1-stream@Port=3000@${POD_NAME}@ns@local
-              - message: This is response 5/5 from Agent goto-1-stream@Port=3000@${POD_NAME}@ns@local
+              - message: This is response 1/5 from Agent goto-agent-1-stream@Port=3000@${POD_NAME}@ns@local
+              - message: This is response 2/5 from Agent goto-agent-1-stream@Port=3000@${POD_NAME}@ns@local
+              - message: This is response 3/5 from Agent goto-agent-1-stream@Port=3000@${POD_NAME}@ns@local
+              - message: This is response 4/5 from Agent goto-agent-1-stream@Port=3000@${POD_NAME}@ns@local
+              - message: This is response 5/5 from Agent goto-agent-1-stream@Port=3000@${POD_NAME}@ns@local
 proxy:
   - http:
       port: 8080

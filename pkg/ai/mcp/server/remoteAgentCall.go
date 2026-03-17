@@ -34,7 +34,8 @@ func (t *ToolCallContext) remoteAgentCall() (*gomcp.CallToolResult, error) {
 		t.remoteArgs = &RemoteCallArgs{}
 	}
 	ac := t.Config.Agent.CloneWithUpdate(t.remoteArgs.AgentName, t.remoteArgs.URL, t.remoteArgs.Authority, t.remoteArgs.AgentMessage, t.remoteArgs.AgentData)
-	t.addForwardHeaders(ac.Headers, ac.ForwardHeaders, ac.Data)
+	finalHeaders := types.Union(ac.Headers, t.remoteArgs.Headers)
+	t.addForwardHeaders(finalHeaders.Request.Add, finalHeaders.Request.Forward, ac.Data)
 	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s]", ac.Name, ac.AgentURL)
 	t.notifyClient(msg, 0)
 	client := a2aclient.NewA2AClient(t.Server.Port, t.Name)

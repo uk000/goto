@@ -18,6 +18,7 @@ package mcpserver
 
 import (
 	"fmt"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"net/http"
 	"strings"
@@ -38,13 +39,7 @@ func (t *ToolCallContext) fetch() (*gomcp.CallToolResult, error) {
 	if t.remoteArgs.Authority != "" {
 		authority = t.remoteArgs.Authority
 	}
-	forwardHeaders := map[string]bool{}
-	for _, h := range t.remoteArgs.ForwardHeaders {
-		forwardHeaders[h] = true
-	}
-	for _, h := range t.Config.RemoteTool.ForwardHeaders {
-		forwardHeaders[h] = true
-	}
+	finalHeaders := types.Union(t.Config.RemoteTool.Headers, t.remoteArgs.Headers)
 	if !strings.HasPrefix(url, "http") {
 		url = "http://" + url
 	}
@@ -52,13 +47,15 @@ func (t *ToolCallContext) fetch() (*gomcp.CallToolResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	for h, v := range t.remoteArgs.Headers {
-		req.Header.Add(h, v)
-	}
-	if t.requestHeaders != nil {
-		for h := range forwardHeaders {
-			if t.requestHeaders[h] != nil {
-				req.Header[h] = t.requestHeaders[h]
+	if finalHeaders != nil && finalHeaders.Request != nil {
+		for h, v := range finalHeaders.Request.Add {
+			req.Header.Add(h, v)
+		}
+		if t.requestHeaders != nil {
+			for _, h := range finalHeaders.Request.Forward {
+				if t.requestHeaders[h] != nil {
+					req.Header[h] = t.requestHeaders[h]
+				}
 			}
 		}
 	}
@@ -81,8 +78,8 @@ func (t *ToolCallContext) fetch() (*gomcp.CallToolResult, error) {
 		t.notifyClient(t.Log(fmt.Sprintf("Server [%s] fetched response from remote URL [%s]", t.Server.GetName(), url)), 0)
 		output := util.Read(resp.Body)
 		result.Content = append(result.Content, &gomcp.TextContent{Text: output})
-		result.StructuredContent = util.BuildGotoClientInfo(nil, t.Server.Port, t.Label, t.Name, req.Host, url, req.Host, t.remoteArgs, nil, t.requestHeaders, req.Header,
-			map[string]any{"ForwardHeaders": forwardHeaders})
+		result.StructuredContent = util.BuildGotoClientInfo(nil, t.Server.Port, t.Name, t.Label, req.Host, url, req.Host, t.args, t.remoteArgs,
+			t.requestHeaders, req.Header, finalHeaders.Request.Forward, nil)
 	}
 	t.applyDelay()
 	return result, err

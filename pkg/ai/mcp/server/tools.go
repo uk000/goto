@@ -21,12 +21,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"goto/pkg/constants"
 	"goto/pkg/metrics"
 	"goto/pkg/server/echo"
 	"goto/pkg/transport"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
@@ -75,17 +77,16 @@ type ToolConfig struct {
 }
 
 type RemoteCallArgs struct {
-	ToolName       string            `json:"tool,omitempty"`
-	AgentName      string            `json:"agent,omitempty"`
-	URL            string            `json:"url,omitempty"`
-	Authority      string            `json:"authority,omitempty"`
-	SSE            bool              `json:"sse,omitempty"`
-	Delay          string            `json:"delay,omitempty"`
-	Headers        map[string]string `json:"headers,omitempty"`
-	ForwardHeaders []string          `json:"forwardHeaders,omitempty"`
-	ToolArgs       map[string]any    `json:"args,omitempty"`
-	AgentMessage   string            `json:"agentMessage,omitempty"`
-	AgentData      map[string]any    `json:"agentData,omitempty"`
+	ToolName     string         `json:"tool,omitempty"`
+	AgentName    string         `json:"agent,omitempty"`
+	URL          string         `json:"url,omitempty"`
+	Authority    string         `json:"authority,omitempty"`
+	SSE          bool           `json:"sse,omitempty"`
+	Delay        string         `json:"delay,omitempty"`
+	Headers      *types.Headers `json:"headers,omitempty"`
+	ToolArgs     map[string]any `json:"args,omitempty"`
+	AgentMessage string         `json:"agentMessage,omitempty"`
+	AgentData    map[string]any `json:"agentData,omitempty"`
 }
 
 type ToolCallContext struct {
@@ -94,7 +95,7 @@ type ToolCallContext struct {
 	rs             *util.RequestStore
 	sse            bool
 	ctx            context.Context
-	requestHeaders map[string][]string
+	requestHeaders http.Header
 	req            *gomcp.CallToolRequest
 	args           map[string]any  //for all tools except remote tools
 	remoteArgs     *RemoteCallArgs //for remote tools
@@ -203,6 +204,8 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 		delay:          delay,
 	}
 	result, err = tctx.RunTool()
+	rs.ResponseWriter.Header().Add(constants.HeaderGotoMCPServer, t.Server.Name)
+	rs.ResponseWriter.Header().Add(constants.HeaderGotoMCPTool, t.Name)
 	return
 }
 
@@ -322,7 +325,7 @@ func (t *ToolCallContext) echo() (*gomcp.CallToolResult, error) {
 
 func (t *ToolCallContext) ping() (*gomcp.CallToolResult, error) {
 	if err := t.req.Session.Ping(t.ctx, &gomcp.PingParams{}); err != nil {
-		return nil, fmt.Errorf("ping failed")
+		return nil, fmt.Errorf("ping failed with error: %s", err.Error())
 	}
 	t.Log("Server [%s] pinged client", t.Server.GetName())
 	t.applyDelay()

@@ -97,12 +97,10 @@ type DelegateServer struct {
 }
 
 type HTTPCall struct {
-	URL            string              `yaml:"url" json:"url"`
-	Authority      string              `yaml:"authority" json:"authority"`
-	Delay          *types.Delay        `yaml:"delay,omitempty" json:"delay,omitempty"`
-	Headers        map[string][]string `yaml:"headers,omitempty" json:"headers,omitempty"`
-	ForwardHeaders []string            `yaml:"forwardHeaders,omitempty" json:"forwardHeaders,omitempty"`
-	RemoveHeaders  []string            `yaml:"removeHeaders,omitempty" json:"removeHeaders,omitempty"`
+	URL       string         `yaml:"url" json:"url"`
+	Authority string         `yaml:"authority" json:"authority"`
+	Delay     *types.Delay   `yaml:"delay,omitempty" json:"delay,omitempty"`
+	Headers   *types.Headers `yaml:"headers,omitempty" json:"headers,omitempty"`
 }
 
 func (a *Agent) GetCard() *trpcserver.AgentCard {

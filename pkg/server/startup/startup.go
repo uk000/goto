@@ -44,7 +44,7 @@ import (
 )
 
 var (
-	configWatcher    fswatcher.Watcher
+	configWatchers   []fswatcher.Watcher
 	a2aConfigs       = map[string]*ctl.A2A{}
 	mcpConfigs       = map[string]*ctl.MCP{}
 	httpProxyConfigs = map[string]*httpproxy.Proxy{}
@@ -58,32 +58,30 @@ func Start() {
 }
 
 func Stop() {
-	if configWatcher != nil && configWatcher.IsRunning() {
-		configWatcher.Close()
+	for _, cw := range configWatchers {
+		if cw.IsRunning() {
+			cw.Close()
+		}
 	}
 }
 
 func loadStartupConfigs() {
 	if len(global.ServerConfig.ConfigPaths) > 0 {
 		loadConfigsFromPaths("")
-		var err error
 		for _, configPath := range global.ServerConfig.ConfigPaths {
-			if configWatcher == nil {
-				configWatcher, err = fswatcher.New(fswatcher.WithPath(configPath, fswatcher.WithDepth(fswatcher.WatchTopLevel)))
-				if err != nil {
-					log.Printf("Failed to set watch for config [%s] with error: %s\n", configPath, err.Error())
-					log.Printf("Will load config without watching\n")
-				} else {
-					watchStartupConfig()
-				}
+			configWatcher, err := fswatcher.New(fswatcher.WithPath(configPath, fswatcher.WithDepth(fswatcher.WatchTopLevel)))
+			if err != nil {
+				log.Printf("Failed to set watch for config [%s] with error: %s\n", configPath, err.Error())
+				log.Printf("Will load config without watching\n")
 			} else {
-				configWatcher.AddPath(configPath, fswatcher.WithDepth(fswatcher.WatchNested))
+				watchStartupConfig(configWatcher)
 			}
+			configWatchers = append(configWatchers, configWatcher)
 		}
 	}
 }
 
-func watchStartupConfig() {
+func watchStartupConfig(configWatcher fswatcher.Watcher) {
 	changeChan := make(chan string, 10)
 	go loadChanges(changeChan)
 	go configWatcher.Watch(context.Background())

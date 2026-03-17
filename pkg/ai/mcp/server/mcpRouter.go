@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"goto/pkg/constants"
 	mcpproxy "goto/pkg/proxy/mcp"
-	"goto/pkg/server/conn"
 	"goto/pkg/server/listeners"
 	"goto/pkg/util"
 	"io"
@@ -93,7 +92,7 @@ func MCPHybridHandler(server *MCPServer) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)
 		port := util.GetRequestOrListenerPortNum(r)
-		conn.SendGotoHeaders(w, r)
+		//conn.SendGotoHeaders(w, r)
 		r = r.WithContext(util.WithContextHeaders(r.Context(), r.Header))
 		//util.CopyHeaders("Request", r, w, r.Header, true, true, false)
 		rs.ResponseWriter = w
@@ -192,8 +191,8 @@ func getServerAndTool(r *http.Request) (*MCPServer, *MCPTool) {
 	}
 	var tool *MCPTool
 	if server != nil {
-		tool = server.Tools[toolName]
 		if toolName != "" {
+			tool = server.Tools[toolName]
 			log.Printf("Server [%s] will handle MCP Tool Request [%s] based on URI match [%s] on port [%d]", server.Name, toolName, uri, port)
 		} else {
 			log.Printf("Server [%s] will handle MCP request based on URI match [%s] on port [%d]", server.Name, uri, port)

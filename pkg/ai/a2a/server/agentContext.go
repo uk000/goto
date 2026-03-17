@@ -71,13 +71,10 @@ type AgentContext struct {
 }
 
 type DelegateCallContext struct {
-	agentCall      *a2aclient.AgentCall
-	toolCall       *mcpclient.ToolCall
-	configHeaders  http.Header
-	forwardHeaders []string
-	removeHeaders  []string
-	callHeaders    http.Header
-	url            string
+	agentCall *a2aclient.AgentCall
+	toolCall  *mcpclient.ToolCall
+	httpCall  *model.HTTPCall
+	url       string
 }
 
 type toolOverrides struct {

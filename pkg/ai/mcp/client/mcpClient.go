@@ -27,7 +27,9 @@ import (
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -45,35 +47,36 @@ type MCPClientPayload struct {
 }
 
 type ToolCall struct {
-	Tool           string              `json:"tool"`
-	URL            string              `json:"url"`
-	SSEURL         string              `json:"sseURL"`
-	Server         string              `json:"server,omitempty"`
-	Authority      string              `json:"authority,omitempty"`
-	ForceSSE       bool                `json:"forceSSE,omitempty"`
-	Raw            bool                `json:"neat,omitempty"`
-	Delay          string              `json:"delay,omitempty"`
-	Args           map[string]any      `json:"args,omitempty"`
-	Headers        map[string][]string `json:"headers,omitempty"`
-	ForwardHeaders []string            `json:"forwardHeaders,omitempty"`
-	RemoveHeaders  []string            `json:"removeHeaders,omitempty"`
-	delayD         *types.Delay        `json:"-"`
+	Tool      string         `json:"tool"`
+	URL       string         `json:"url"`
+	SSEURL    string         `json:"sseURL"`
+	Server    string         `json:"server,omitempty"`
+	Authority string         `json:"authority,omitempty"`
+	ForceSSE  bool           `json:"forceSSE,omitempty"`
+	Raw       bool           `json:"neat,omitempty"`
+	Delay     string         `json:"delay,omitempty"`
+	Args      map[string]any `json:"args,omitempty"`
+	Headers   *types.Headers `json:"headers,omitempty"`
+	delayD    *types.Delay   `json:"-"`
 }
 
 type MCPSession struct {
 	ID              string
 	Name            string
 	CallerId        string
+	URL             string
 	Authority       string
 	SSE             bool
 	Operation       string
-	ForwardHeaders  map[string]bool
-	OutHeaders      map[string][]string
 	Hops            *util.Hops
 	session         *gomcp.ClientSession
 	FirstActivityAt time.Time
 	LasatActivityAt time.Time
 	mcpClient       *MCPClient
+	currentToolCall *ToolCall
+	inHeaders       http.Header
+	outHeaders      *types.Headers
+	respHeaders     http.Header
 }
 
 type MCPClient struct {
@@ -100,7 +103,6 @@ type MCPNamedClientPayload struct {
 type MCPClientInterceptTransport struct {
 	*transport.HTTPTransportIntercept
 	gomcp.Transport
-	SessionHeaders map[string]map[string]string
 }
 
 var (
@@ -156,15 +158,15 @@ func SetRoots(name string, payload []byte) error {
 	return nil
 }
 
-func NewClient(port int, sse bool, callerId string, headers http.Header, progressChan chan string) *MCPClient {
+func NewClient(port int, sse bool, callerId string, progressChan chan string) *MCPClient {
 	name := fmt.Sprintf("GotoMCP-%d[%s][%s]", Counter.Add(1), global.Funcs.GetListenerLabelForPort(port), callerId)
 	if sse {
 		name += "[sse]"
 	}
-	return newMCPClient(sse, name, callerId, headers, progressChan)
+	return newMCPClient(sse, name, callerId, progressChan)
 }
 
-func newMCPClient(sse bool, name, callerId string, headers http.Header, progressChan chan string) *MCPClient {
+func newMCPClient(sse bool, name, callerId string, progressChan chan string) *MCPClient {
 	//httpClient := transport.CreateSimpleHTTPClient()
 	ht := transport.CreateHTTPClient(name, false, true, false, "", 0,
 		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
@@ -209,7 +211,6 @@ func (c *MCPClient) newMCPTransport(label, url string) gomcp.Transport {
 	return &MCPClientInterceptTransport{
 		HTTPTransportIntercept: transport.NewHTTPTransportInterceptWithWatch(c.ht.Transport, label, metrics.ConnTracker, c),
 		Transport:              mcpTransport,
-		SessionHeaders:         map[string]map[string]string{},
 	}
 }
 
@@ -234,16 +235,16 @@ func ParseToolCall(b []byte) (*ToolCall, error) {
 	return tc, err
 }
 
-func (c *MCPClient) Connect(url, operLabel string, headers http.Header) (session *MCPSession, err error) {
-	return c.ConnectWithHops(url, operLabel, headers, nil)
+func (c *MCPClient) Connect(url, operLabel string) (session *MCPSession, err error) {
+	return c.ConnectWithHops(url, operLabel, nil)
 }
 
-func (c *MCPClient) ConnectWithHops(url, operLabel string, headers http.Header, hops *util.Hops) (*MCPSession, error) {
+func (c *MCPClient) ConnectWithHops(url, operLabel string, hops *util.Hops) (*MCPSession, error) {
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		url = "http://" + url
 	}
 	t := c.newMCPTransport(c.Name, url)
-	session := c.newMCPSession(operLabel, headers, hops)
+	session := c.newMCPSession(operLabel, url, hops)
 	s, err := c.client.Connect(context.Background(), t, &gomcp.ClientSessionOptions{})
 	if err == nil {
 		session.ID = s.ID()
@@ -253,17 +254,14 @@ func (c *MCPClient) ConnectWithHops(url, operLabel string, headers http.Header, 
 	return nil, err
 }
 
-func (c *MCPClient) newMCPSession(operLabel string, headers http.Header, hops *util.Hops) *MCPSession {
-	outHeaders := http.Header{}
-	for h, v := range headers {
-		outHeaders[h] = v
-	}
+func (c *MCPClient) newMCPSession(operLabel, url string, hops *util.Hops) *MCPSession {
 	mpcSession := &MCPSession{
-		Name:       c.Name,
-		CallerId:   c.CallerId,
-		SSE:        c.SSE,
-		OutHeaders: outHeaders,
-		mcpClient:  c,
+		Name:      c.Name,
+		CallerId:  c.CallerId,
+		Operation: operLabel,
+		URL:       url,
+		SSE:       c.SSE,
+		mcpClient: c,
 	}
 	if hops != nil {
 		mpcSession.Hops = hops
@@ -271,6 +269,7 @@ func (c *MCPClient) newMCPSession(operLabel string, headers http.Header, hops *u
 		mpcSession.Hops = util.NewHops(c.CallerId, operLabel)
 	}
 	c.ht.SetRequestIntercept(mpcSession)
+	c.ht.SetResponseIntercept(mpcSession)
 	c.lock.Lock()
 	c.ActiveSessions[mpcSession.ID] = mpcSession
 	c.lock.Unlock()
@@ -293,7 +292,8 @@ func (c *MCPClient) OnConnClose() {
 	log.Println("Received connection close notification")
 }
 
-func (s *MCPSession) CallTool(tc *ToolCall, args map[string]any) (map[string]any, error) {
+func (s *MCPSession) CallTool(tc *ToolCall, args map[string]any, inHeaders http.Header) (map[string]any, error) {
+	s.currentToolCall = tc
 	if args == nil {
 		args = tc.Args
 	}
@@ -303,17 +303,20 @@ func (s *MCPSession) CallTool(tc *ToolCall, args map[string]any) (map[string]any
 	}
 	s.Hops.Add(fmt.Sprintf("%s [%s] calling tool [%s] with sse[%t] on url [%s]", s.CallerId, s.Operation, tc.Tool, s.SSE, tc.URL))
 	ctx := context.Background()
-	if tc.Headers != nil {
-		if !tc.Raw {
-			tc.Headers["Host"] = []string{tc.Authority}
-			tc.Headers["User-Agent"] = []string{s.CallerId}
-		}
-		ctx = util.WithContextHeaders(ctx, tc.Headers)
-		for h, v := range tc.Headers {
-			s.OutHeaders[h] = v
-		}
+	if args["forwardHeaders"] == nil && tc.Headers != nil && tc.Headers.Request != nil {
+		args["forwardHeaders"] = tc.Headers.Request.Forward
 	}
-	output := util.BuildGotoClientInfo(nil, 0, s.Name, "", tc.Tool, tc.URL, tc.Server, nil, args, nil, tc.Headers,
+	s.outHeaders = tc.Headers
+	if s.outHeaders == nil {
+		s.outHeaders = types.NewHeaders()
+	}
+	if !tc.Raw {
+		s.outHeaders.Request.Add["Host"] = tc.Authority
+		s.outHeaders.Request.Add["User-Agent"] = s.CallerId
+	}
+	// ctx = util.WithContextHeaders(ctx, s.AddRequestHeaders)
+	s.inHeaders = inHeaders
+	output := util.BuildGotoClientInfo(nil, 0, s.Name, "", tc.Tool, tc.URL, tc.Server, nil, args, inHeaders, s.outHeaders.Request.Add, s.outHeaders.Request.Forward,
 		map[string]any{
 			"Goto-MCP-SSE":  s.SSE,
 			"Goto-MCP-Tool": tc.Tool,
@@ -367,10 +370,49 @@ func (s *MCPSession) CallTool(tc *ToolCall, args map[string]any) (map[string]any
 	return output, nil
 }
 
-func (s *MCPSession) AddForwardHeaders(forwardHeaders []string) {
-	for _, h := range forwardHeaders {
-		s.ForwardHeaders[h] = true
+func (s *MCPSession) InterceptRequest(r *http.Request) {
+	if s.outHeaders != nil && s.outHeaders.Request != nil {
+		label := fmt.Sprintf("MCP client request for %s", s.mcpClient.CallerId)
+		s.outHeaders.Request.UpdateHeaders(r.Header, label)
+		types.ForwardHeaders(s.inHeaders, r.Header, slices.Values(s.outHeaders.Request.Forward), label)
 	}
+	if len(r.Header["Host"]) > 0 {
+		r.Host = r.Header["Host"][0]
+	}
+	log.Printf("---------- Outbound request headers from MCP client %s ------------\n", s.mcpClient.CallerId)
+	log.Println(util.ToJSONText(r.Header))
+}
+
+func (s *MCPSession) InterceptResponse(r *http.Response) {
+	if s.outHeaders != nil && s.outHeaders.Response != nil {
+		s.outHeaders.Response.UpdateHeaders(r.Header, fmt.Sprintf("MCP client response for %s", s.mcpClient.CallerId))
+	}
+	s.respHeaders = r.Header
+	log.Printf("---------- Response headers from MCP client %s ------------\n", s.mcpClient.CallerId)
+	log.Println(util.ToJSONText(r.Header))
+}
+
+func (c *MCPClient) SendingMiddleware(next gomcp.MethodHandler) gomcp.MethodHandler {
+	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
+		log.Printf("---------- Outbound request from MCP client %s ------------\n", c.CallerId)
+		log.Println(util.ToJSONText(req))
+		if ctp, ok := req.GetParams().(*gomcp.CallToolParams); ok {
+			if args, ok := ctp.Arguments.(map[string]any); ok && args != nil {
+				args["goto-client"] = global.Self.HostLabel
+			}
+		}
+		return next(ctx, method, req)
+	}
+}
+
+func (c *MCPClient) ReceivingMiddleware(next gomcp.MethodHandler) gomcp.MethodHandler {
+	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
+		return next(ctx, method, req)
+	}
+}
+
+func (t *MCPClientInterceptTransport) Connect(ctx context.Context) (gomcp.Connection, error) {
+	return t.Transport.Connect(ctx)
 }
 
 func (s *MCPSession) SetAuthority(authority string) {
@@ -381,6 +423,10 @@ func (s *MCPSession) Close() {
 	s.session.Close()
 	s.session = nil
 	s.mcpClient.RemoveSession(s.ID)
+}
+
+func (s *MCPSession) ResponseHeaders() http.Header {
+	return s.respHeaders
 }
 
 func (s *MCPSession) ListTools() (*gomcp.ListToolsResult, error) {
@@ -548,66 +594,7 @@ func (c *MCPClient) ProgressNotificationHandler(ctx context.Context, req *gomcp.
 	time.Sleep(200 * time.Millisecond)
 }
 
-func (s *MCPSession) Intercept(r *http.Request) {
-	headers := util.GetContextHeaders(r.Context())
-	if headers == nil {
-		headers = map[string][]string{}
-	}
-	if s.OutHeaders != nil {
-		for h, v := range s.OutHeaders {
-			headers[h] = v
-		}
-	}
-	if len(headers["Host"]) > 0 {
-		r.Host = headers["Host"][0]
-	}
-	for k, v := range headers {
-		r.Header.Add(k, v[0])
-	}
-	if len(headers) == 0 {
-		log.Printf("---------- Not sending any outbound headers for MCP client %s ------------\n", s.mcpClient.CallerId)
-	} else {
-		log.Printf("---------- Outbound request headers from MCP client %s ------------\n", s.mcpClient.CallerId)
-		log.Println(util.ToJSONText(r.Header))
-	}
-}
-
-func (c *MCPClient) SendingMiddleware(next gomcp.MethodHandler) gomcp.MethodHandler {
-	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
-		log.Printf("---------- Outbound request from MCP client %s ------------\n", c.CallerId)
-		log.Println(util.ToJSONText(req))
-		if ctp, ok := req.GetParams().(*gomcp.CallToolParams); ok {
-			if args, ok := ctp.Arguments.(map[string]any); ok && args != nil {
-				args["goto-client"] = global.Self.HostLabel
-			}
-		}
-		return next(ctx, method, req)
-	}
-}
-
-func (c *MCPClient) ReceivingMiddleware(next gomcp.MethodHandler) gomcp.MethodHandler {
-	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
-		return next(ctx, method, req)
-	}
-}
-
-func (t *MCPClientInterceptTransport) SetSessionHeaders(sessionID string, headers map[string]string) {
-	t.SessionHeaders[sessionID] = headers
-}
-
-func (t *MCPClientInterceptTransport) GetSessionHeaders(sessionID string) map[string]string {
-	return t.SessionHeaders[sessionID]
-}
-
-func (t *MCPClientInterceptTransport) RemoveSessionHeaders(sessionID string) {
-	delete(t.SessionHeaders, sessionID)
-}
-
-func (t *MCPClientInterceptTransport) Connect(ctx context.Context) (gomcp.Connection, error) {
-	return t.Transport.Connect(ctx)
-}
-
-func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, headers map[string]string, args map[string]any) *ToolCall {
+func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, headers *types.Headers, args map[string]any) *ToolCall {
 	clone := *tc
 	if tool != "" {
 		clone.Tool = tool
@@ -624,17 +611,8 @@ func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, h
 	if delay != "" {
 		clone.Delay = delay
 	}
-	clone.Headers = map[string][]string{}
-	for h, v := range tc.Headers {
-		clone.Headers[h] = v
-	}
-	for h, v := range headers {
-		clone.Headers[h] = []string{v}
-	}
-	clone.Args = map[string]any{}
-	for k, v := range tc.Args {
-		clone.Args[k] = v
-	}
+	clone.Headers = types.Union(tc.Headers, headers)
+	clone.Args = maps.Clone(tc.Args)
 	for k, v := range args {
 		clone.Args[k] = v
 	}

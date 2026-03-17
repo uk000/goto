@@ -55,22 +55,23 @@ func SendBadRequest(msg string, w http.ResponseWriter, r *http.Request) {
 	AddLogMessage(msg, r)
 }
 
-func BuildGotoClientInfo(container map[string]any, port int, name, label, target, url, server string, inArgs, outArgs any, inHeaders, outHeaders http.Header, more map[string]any) map[string]any {
+func BuildGotoClientInfo(container map[string]any, port int, name, label, target, url, server string, inArgs, outArgs any, inHeaders, outHeaders, forwardHeaders any, more map[string]any) map[string]any {
 	if container == nil {
 		container = map[string]any{}
 	}
 	clientInfo := map[string]any{
-		"Goto-Client":           name,
-		"Goto-Host":             global.Self.HostLabel,
-		"Goto-Listener":         global.Funcs.GetListenerLabelForPort(port),
-		"Goto-Label":            label,
-		"Goto-Remote-Target":    target,
-		"Goto-Remote-URL":       url,
-		"Goto-Remote-Server":    server,
-		"Goto-Inbound-Args":     inArgs,
-		"Goto-Inbound-Headers":  inHeaders,
-		"Goto-Outbound-Args":    outArgs,
-		"Goto-Outbound-Headers": outHeaders,
+		"Goto-Client":      name,
+		"Goto-Host":        global.Self.HostLabel,
+		"Goto-Listener":    global.Funcs.GetListenerLabelForPort(port),
+		"Goto-Label":       label,
+		"Remote-Target":    target,
+		"Remote-URL":       url,
+		"Remote-Server":    server,
+		"Inbound-Args":     inArgs,
+		"Inbound-Headers":  inHeaders,
+		"Outbound-Args":    outArgs,
+		"Outbound-Headers": outHeaders,
+		"Forward-Headers":  forwardHeaders,
 	}
 	for k, v := range more {
 		clientInfo[k] = v

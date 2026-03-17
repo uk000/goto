@@ -25,8 +25,8 @@ import (
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
+	"net/http"
 	"regexp"
-	"strings"
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -259,11 +259,12 @@ func (ab *AgentBehaviorFederate) runTools(aCtx *AgentContext, wg *sync.WaitGroup
 	for _, tcalls := range aCtx.tools {
 		for _, tc := range tcalls {
 			log.Printf("Processing tool call [%s] at URL [%s]", tc.ToolCall.Tool, tc.ToolCall.URL)
+			if tc.ToolCall.Headers == nil {
+				tc.ToolCall.Headers = types.NewHeaders()
+			}
+			tc.ToolCall.Headers.NonNil()
 			dCtx := &DelegateCallContext{
-				toolCall:       tc.ToolCall,
-				configHeaders:  tc.ToolCall.Headers,
-				forwardHeaders: tc.ToolCall.ForwardHeaders,
-				removeHeaders:  tc.ToolCall.RemoveHeaders,
+				toolCall: tc.ToolCall,
 			}
 			if parallel {
 				wg2.Add(1)
@@ -290,11 +291,12 @@ func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentContext, wg *sync.WaitGrou
 	wg2 := sync.WaitGroup{}
 	for _, acalls := range aCtx.agents {
 		for _, a := range acalls {
+			if a.AgentCall.Headers == nil {
+				a.AgentCall.Headers = types.NewHeaders()
+			}
+			a.AgentCall.Headers.NonNil()
 			dCtx := &DelegateCallContext{
-				agentCall:      a.AgentCall,
-				configHeaders:  a.AgentCall.Headers,
-				forwardHeaders: a.AgentCall.ForwardHeaders,
-				removeHeaders:  a.AgentCall.RemoveHeaders,
+				agentCall: a.AgentCall,
 			}
 			if parallel {
 				wg2.Add(1)
@@ -324,7 +326,7 @@ func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentContext, dCtx *DelegateCal
 }
 
 func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCallContext) {
-	remoteResult, err := ab.invokeMCP(aCtx, dCtx)
+	remoteResult, respHeaders, err := ab.invokeMCP(aCtx, dCtx)
 	output := map[string]any{}
 	if err != nil {
 		aCtx.err = err
@@ -333,21 +335,28 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 		if remoteResult == nil {
 			remoteResult = map[string]any{}
 		}
-		util.BuildGotoClientInfo(remoteResult, aCtx.agent.Port, aCtx.agent.ID, "", dCtx.toolCall.Tool, dCtx.toolCall.URL, dCtx.toolCall.Server, aCtx.input, dCtx.toolCall.Args, aCtx.requestHeaders, dCtx.callHeaders,
+		util.BuildGotoClientInfo(remoteResult, aCtx.agent.Port, aCtx.agent.ID, "", dCtx.toolCall.Tool, dCtx.toolCall.URL,
+			dCtx.toolCall.Server, aCtx.input, dCtx.toolCall.Args, aCtx.requestHeaders, dCtx.agentCall.Headers.Request.Add, dCtx.agentCall.Headers.Request.Forward,
 			map[string]any{
 				"Goto-MCP-Tool": dCtx.toolCall.Tool,
 				"Tool-Call":     dCtx.toolCall,
 			})
 		if aCtx.localProgress != nil {
 			aCtx.ReportProgress(dCtx.toolCall.Tool, msg)
+			aCtx.ReportProgress(dCtx.toolCall.Tool, respHeaders)
 			aCtx.ReportProgress(dCtx.toolCall.Tool, remoteResult)
 		} else if aCtx.toolResults != nil {
 			aCtx.toolResults[dCtx.toolCall.Tool] = msg
 		}
 	} else {
-		msg := fmt.Sprintf("Successfully invoked MCP tool [%s] at URL [%s]", dCtx.toolCall.Tool, dCtx.toolCall.URL)
+		msg := fmt.Sprintf("MCP tool [%s] sent response headers: %s", dCtx.toolCall.Tool, util.ToPrettyJSONText(respHeaders))
 		aCtx.Log(msg)
+		if !aCtx.ReportProgress(dCtx.toolCall.Tool, msg) {
+			output["toolResponseHeaders"] = msg
+		}
 
+		msg = fmt.Sprintf("Successfully invoked MCP tool [%s] at URL [%s]", dCtx.toolCall.Tool, dCtx.toolCall.URL)
+		aCtx.Log(msg)
 		if !aCtx.ReportProgress(dCtx.toolCall.Tool, msg) {
 			output["toolResult"] = msg
 		}
@@ -383,25 +392,6 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 	}
 }
 
-func (ab *AgentBehaviorFederate) prepareHeaders(aCtx *AgentContext, dCtx *DelegateCallContext) {
-	headers := map[string][]string{}
-	for h, v := range dCtx.configHeaders {
-		headers[h] = v
-	}
-	for _, h := range dCtx.forwardHeaders {
-		for h2, v2 := range aCtx.requestHeaders {
-			if strings.EqualFold(h, h2) {
-				headers[h] = v2
-				break
-			}
-		}
-	}
-	for _, h := range dCtx.removeHeaders {
-		delete(headers, h)
-	}
-	dCtx.callHeaders = headers
-}
-
 func (ab *AgentBehaviorFederate) prepareArgs(args map[string]any, forwardHeaders []string) map[string]any {
 	newArgs := map[string]any{
 		"forwardHeaders": forwardHeaders,
@@ -413,8 +403,6 @@ func (ab *AgentBehaviorFederate) prepareArgs(args map[string]any, forwardHeaders
 }
 
 func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateCallContext) error {
-	ab.prepareHeaders(aCtx, dCtx)
-	dCtx.agentCall.Headers = dCtx.callHeaders
 	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s] with input [%s]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, dCtx.agentCall.Message)
 	aCtx.Log(msg)
 	aCtx.ReportProgress(dCtx.agentCall.Name, msg)
@@ -444,18 +432,17 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 	return nil
 }
 
-func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCallContext) (remoteResult map[string]any, err error) {
-	ab.prepareHeaders(aCtx, dCtx)
-	dCtx.toolCall.Headers = dCtx.callHeaders
-	args := ab.prepareArgs(dCtx.toolCall.Args, dCtx.forwardHeaders)
+func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCallContext) (remoteResult map[string]any, respHeaders http.Header, err error) {
+	args := ab.prepareArgs(dCtx.toolCall.Args, dCtx.toolCall.Headers.Request.Forward)
 	msg := fmt.Sprintf("Invoking MCP tool [%s] at URL [%s]", dCtx.toolCall.Tool, dCtx.toolCall.URL)
 	aCtx.Log(msg)
 	aCtx.ReportProgress(dCtx.toolCall.Tool, msg)
-	client := mcpclient.NewClient(ab.agent.Port, false, ab.agent.ID, dCtx.callHeaders, aCtx.upstreamProgress)
-	session, err := client.ConnectWithHops(dCtx.toolCall.URL, dCtx.toolCall.Tool, dCtx.callHeaders, aCtx.hops)
+	client := mcpclient.NewClient(ab.agent.Port, false, ab.agent.ID, aCtx.upstreamProgress)
+	session, err := client.ConnectWithHops(dCtx.toolCall.URL, dCtx.toolCall.Tool, aCtx.hops)
 	if err == nil {
 		defer session.Close()
-		remoteResult, err = session.CallTool(dCtx.toolCall, args)
+		remoteResult, err = session.CallTool(dCtx.toolCall, args, aCtx.requestHeaders)
+		respHeaders = session.ResponseHeaders()
 	}
 	return
 }

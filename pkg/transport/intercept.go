@@ -29,11 +29,11 @@ import (
 )
 
 type IHTTPRequestIntercept interface {
-	Intercept(r *http.Request)
+	InterceptRequest(r *http.Request)
 }
 
 type IHTTPResponseIntercept interface {
-	Intercept(r *http.Response)
+	InterceptResponse(r *http.Response)
 }
 
 type ITransportIntercept interface {
@@ -155,11 +155,11 @@ func (t *HTTPTransportIntercept) getDialer() func(context.Context, string, strin
 
 func (t *HTTPTransportIntercept) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.requestIntercept != nil {
-		t.requestIntercept.Intercept(req)
+		t.requestIntercept.InterceptRequest(req)
 	}
 	resp, err := t.Transport.RoundTrip(req)
 	if resp != nil && t.responseIntercept != nil {
-		t.responseIntercept.Intercept(resp)
+		t.responseIntercept.InterceptResponse(resp)
 	}
 	return resp, err
 }

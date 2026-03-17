@@ -65,6 +65,8 @@ const (
 	HeaderGotoChunkDelay            = "Goto-Chunk-Delay"
 	HeaderGotoStreamLength          = "Goto-Stream-Length"
 	HeaderGotoStreamDuration        = "Goto-Stream-Duration"
+	HeaderGotoMCPServer             = "Goto-MCP-Server"
+	HeaderGotoMCPTool               = "Goto-MCP-Tool"
 
 	HeaderProxyConnection     = "Proxy-Connection"
 	HeaderXContentTypeOptions = "X-Content-Type-Options"

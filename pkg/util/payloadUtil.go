@@ -77,6 +77,14 @@ func WriteJson(w io.Writer, j interface{}) string {
 }
 
 func WriteYaml(w io.Writer, t interface{}) string {
+	data := ToYaml(t)
+	if w != nil {
+		fmt.Fprintln(w, data)
+	}
+	return data
+}
+
+func ToYaml(t interface{}) string {
 	data := ""
 	if !reflect.ValueOf(t).IsNil() {
 		if b, err := yaml.Marshal(t); err == nil {
@@ -84,9 +92,6 @@ func WriteYaml(w io.Writer, t interface{}) string {
 		} else {
 			fmt.Printf("Failed to marshal yaml with error: %s\n", err.Error())
 		}
-	}
-	if w != nil {
-		fmt.Fprintln(w, data)
 	}
 	return data
 }

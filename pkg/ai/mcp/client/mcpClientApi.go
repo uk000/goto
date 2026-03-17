@@ -60,8 +60,8 @@ func listTools(w http.ResponseWriter, r *http.Request) {
 	namesOnly := strings.Contains(r.RequestURI, "names")
 	msg := ""
 	clientId := fmt.Sprintf("[%s][Client: tool/list]", global.Self.HostLabel)
-	client := NewClient(rs.RequestPortNum, sse, clientId, r.Header, nil)
-	session, err := client.Connect(url, "tool/list", r.Header)
+	client := NewClient(rs.RequestPortNum, sse, clientId, nil)
+	session, err := client.Connect(url, "tool/list")
 	session.SetAuthority(authority)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -136,7 +136,7 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 			err = errors.New("No tool call payload given")
 		}
 	} else {
-		output, err = doToolCall(rs.RequestPortNum, tc)
+		output, err = doToolCall(rs.RequestPortNum, tc, r)
 		if err != nil {
 			msg = err.Error()
 		} else {
@@ -153,10 +153,10 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func doToolCall(port int, tc *ToolCall) (output map[string]any, err error) {
+func doToolCall(port int, tc *ToolCall, r *http.Request) (output map[string]any, err error) {
 	clientId := fmt.Sprintf("[%s][Client: tool/call][%s]", global.Self.HostLabel, tc.Tool)
-	client := NewClient(port, tc.ForceSSE, clientId, tc.Headers, nil)
-	session, err := client.Connect(tc.URL, tc.Tool, tc.Headers)
+	client := NewClient(port, tc.ForceSSE, clientId, nil)
+	session, err := client.Connect(tc.URL, tc.Tool)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +166,7 @@ func doToolCall(port int, tc *ToolCall) (output map[string]any, err error) {
 		}
 		session.Close()
 	}()
-	output, err = session.CallTool(tc, nil)
+	output, err = session.CallTool(tc, nil, r.Header)
 	if err == nil {
 		session.Hops.AddToOutput(output)
 	}

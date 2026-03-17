@@ -135,7 +135,7 @@ func getResponseHeaders(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
-func setResponseHeaders(w http.ResponseWriter, r *http.Request) {
+func SetResponseHeaders(w http.ResponseWriter, r *http.Request) {
 	headersLock.RLock()
 	defer headersLock.RUnlock()
 	port := util.GetRequestOrListenerPort(r)
@@ -154,7 +154,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 		if !util.IsHeadersSent(r) && !util.IsAdminRequest(r) && !util.IsTunnelRequest(r) && !util.IsGRPC(r) {
-			setResponseHeaders(w, r)
+			SetResponseHeaders(w, r)
 		}
 	})
 }

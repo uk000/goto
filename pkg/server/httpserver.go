@@ -120,6 +120,7 @@ func configureHTTPRouter() {
 func configureAIRouter() *mux.Router {
 	aiRouter := mux.NewRouter()
 	middleware.UseCore(aiRouter)
+	aiRouter.Use(intercept.IntereceptMiddleware(nil, nil))
 	aiRouter.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
 		return true
 	}).HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
