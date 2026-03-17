@@ -291,10 +291,7 @@ func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentContext, wg *sync.WaitGrou
 	wg2 := sync.WaitGroup{}
 	for _, acalls := range aCtx.agents {
 		for _, a := range acalls {
-			if a.AgentCall.Headers == nil {
-				a.AgentCall.Headers = types.NewHeaders()
-			}
-			a.AgentCall.Headers.NonNil()
+			a.AgentCall.NonNil()
 			dCtx := &DelegateCallContext{
 				agentCall: a.AgentCall,
 			}

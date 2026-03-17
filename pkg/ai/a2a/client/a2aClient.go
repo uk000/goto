@@ -150,8 +150,10 @@ func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, c
 		return nil, fmt.Errorf("Agent card request failed with status code: %d", resp.StatusCode)
 	}
 	card := &goa2aserver.AgentCard{}
-	if err := json.NewDecoder(resp.Body).Decode(card); err != nil {
-		return nil, fmt.Errorf("failed to parse agent card: %w", err)
+	rr := util.CreateOrGetReReader(resp.Body)
+	if err := json.NewDecoder(rr).Decode(card); err != nil {
+		rr.Rewind()
+		return nil, fmt.Errorf("failed to parse agent card: %s. Body: %s", err.Error(), string(rr.Content))
 	}
 	lock.Lock()
 	AgentCards[card.Name] = card
@@ -177,6 +179,7 @@ func (ac *A2AClient) ConnectWithAgentCard(ctx context.Context, call *AgentCall, 
 }
 
 func (ac *A2AClient) newSession(ctx context.Context, port int, callerId, authority string, card *goa2aserver.AgentCard, call *AgentCall) *A2AClientSession {
+	call.NonNil()
 	return &A2AClientSession{
 		ctx:        ctx,
 		port:       port,
@@ -497,6 +500,12 @@ func (ac *AgentCall) CloneWithUpdate(name, url, authority, message string, data 
 		clone.Data = data
 	}
 	return &clone
+}
+
+func (ac *AgentCall) NonNil() {
+	ac.Data = map[string]any{}
+	ac.Headers = types.NewHeaders()
+	ac.Headers.NonNil()
 }
 
 func (acs *A2AClientSession) updateRequestHeaders(r *http.Request) {

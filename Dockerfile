@@ -36,7 +36,7 @@ ADD ./main.go /goto/main.go
 
 WORKDIR /goto
 
-RUN --mount=type=cache,target="/root/.cache/go-build" GOOS=${GOOS} GOARCH=${GOARCH} go build -mod=mod -o goto -ldflags="-extldflags \"-static\" -w -s -X goto/global.Version=$VERSION -X goto/global.Commit=$COMMIT" .
+RUN --mount=type=cache,target="/root/.cache/go-build" GOOS=${GOOS} GOARCH=${GOARCH} go build -mod=mod -o goto -ldflags="-extldflags \"-static\" -w -s -X goto/pkg/global.Version=$VERSION -X goto/pkg/global.Commit=$COMMIT" .
 
 WORKDIR /tmp
 

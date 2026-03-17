@@ -33,6 +33,7 @@ func (t *ToolCallContext) remoteAgentCall() (*gomcp.CallToolResult, error) {
 	if t.remoteArgs == nil {
 		t.remoteArgs = &RemoteCallArgs{}
 	}
+	t.Config.Agent.NonNil()
 	ac := t.Config.Agent.CloneWithUpdate(t.remoteArgs.AgentName, t.remoteArgs.URL, t.remoteArgs.Authority, t.remoteArgs.AgentMessage, t.remoteArgs.AgentData)
 	finalHeaders := types.Union(ac.Headers, t.remoteArgs.Headers)
 	t.addForwardHeaders(finalHeaders.Request.Add, finalHeaders.Request.Forward, ac.Data)

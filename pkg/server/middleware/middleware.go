@@ -109,15 +109,6 @@ func UseCore(r *mux.Router) {
 	}
 }
 
-func LinkInterceptedCore(r *mux.Router) {
-	for _, m := range InterceptedCore {
-		if m.SetRoutes != nil {
-			m.SetRoutes(r)
-		}
-	}
-	UseInterceptedCore(r)
-}
-
 func UseInterceptedCore(r *mux.Router) {
 	for _, m := range InterceptedCore {
 		if m.MiddlewareHandler != nil {
