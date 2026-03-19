@@ -85,11 +85,11 @@ type toolOverrides struct {
 	args        map[string]any
 }
 
-func newAgentCallContext(serverID string, agent *model.Agent, headers http.Header, rs *util.RequestStore) *AgentContext {
+func newAgentCallContext(serverID, listenerLabel string, agent *model.Agent, headers http.Header, rs *util.RequestStore) *AgentContext {
 	return &AgentContext{
 		serverID:       serverID,
 		agent:          agent,
-		hops:           util.NewHops(serverID, agent.ID),
+		hops:           util.NewHops(serverID, listenerLabel, agent.ID),
 		requestHeaders: headers,
 		rs:             rs,
 	}

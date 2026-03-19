@@ -92,6 +92,7 @@ type RemoteCallArgs struct {
 type ToolCallContext struct {
 	*MCPTool
 	sessionID      string
+	listener       string
 	rs             *util.RequestStore
 	sse            bool
 	ctx            context.Context
@@ -194,6 +195,7 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 	tctx := &ToolCallContext{
 		MCPTool:        t,
 		sessionID:      req.Session.ID(),
+		listener:       rs.ListenerLabel,
 		rs:             rs,
 		sse:            isSSE,
 		ctx:            ctx,
@@ -239,7 +241,7 @@ func (t *ToolCallContext) applyDelay() {
 }
 
 func (t *ToolCallContext) RunTool() (result *gomcp.CallToolResult, err error) {
-	t.hops = util.NewHops(t.Server.ID, t.Label)
+	t.hops = util.NewHops(t.Server.ID, t.rs.ListenerLabel, t.Label)
 	// t.notifyClient(t.Log("%s: Received request with Args [%+v] Remote Args [%+v] Headers [%+v]", t.Label, t.args, t.remoteArgs, t.requestHeaders), 0)
 	t.Hop(t.Flush(true))
 	if t.Behavior.Echo {
@@ -544,14 +546,20 @@ func (t *ToolCallContext) sendPayload() (*gomcp.CallToolResult, error) {
 	return result, nil
 }
 
-func (t *ToolCallContext) notifyClient(msg string, progress float64) {
-	total := 0
-	if progress > 0 {
-		total = t.Response.Count()
+func (t *ToolCallContext) notifyClient(msg string, stats ...float64) {
+	var total, progress float64
+	if t.Response != nil {
+		total = float64(t.Response.Count())
+	}
+	if len(stats) > 0 {
+		progress = stats[0]
+	}
+	if len(stats) > 1 {
+		total = stats[1]
 	}
 	params := &gomcp.ProgressNotificationParams{
 		ProgressToken: t.req.Params.Meta.GetMeta()["progressToken"],
-		Total:         float64(total),
+		Total:         total,
 		Progress:      progress,
 		Message:       msg,
 	}

@@ -53,8 +53,14 @@ func (t *ToolCallContext) remoteToolCall() (*gomcp.CallToolResult, error) {
 	var err error
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
+	progressChan := make(chan string, 10)
+	go func(pc chan string) {
+		for msg := range pc {
+			t.notifyClient(msg)
+		}
+	}(progressChan)
 	go func() {
-		client := mcpclient.NewClient(t.Server.GetPort(), false, t.Server.ID, nil)
+		client := mcpclient.NewClient(t.Server.GetPort(), false, t.Server.ID, t.rs.ListenerLabel, progressChan)
 		var session *mcpclient.MCPSession
 		session, err = client.ConnectWithHops(url, t.Label, t.hops)
 		if err == nil {
@@ -64,6 +70,7 @@ func (t *ToolCallContext) remoteToolCall() (*gomcp.CallToolResult, error) {
 		wg.Done()
 	}()
 	wg.Wait()
+	close(progressChan)
 	if err != nil {
 		msg := fmt.Sprintf("Server [%s] Failed to invoke Remote tool [%s] at URL [%s] with error: %s",
 			t.Server.GetName(), tc.Tool, tc.URL, err.Error())

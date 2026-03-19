@@ -434,7 +434,7 @@ func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCal
 	msg := fmt.Sprintf("Invoking MCP tool [%s] at URL [%s]", dCtx.toolCall.Tool, dCtx.toolCall.URL)
 	aCtx.Log(msg)
 	aCtx.ReportProgress(dCtx.toolCall.Tool, msg)
-	client := mcpclient.NewClient(ab.agent.Port, false, ab.agent.ID, aCtx.upstreamProgress)
+	client := mcpclient.NewClient(ab.agent.Port, false, ab.agent.ID, aCtx.rs.ListenerLabel, aCtx.upstreamProgress)
 	session, err := client.ConnectWithHops(dCtx.toolCall.URL, dCtx.toolCall.Tool, aCtx.hops)
 	if err == nil {
 		defer session.Close()

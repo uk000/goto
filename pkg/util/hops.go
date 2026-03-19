@@ -27,6 +27,7 @@ type Step interface {
 type BaseStep struct {
 	Counter   int    `json:"step"`
 	Host      string `json:"host"`
+	Listener  string `json:"listener"`
 	Operation string `json:"operation"`
 }
 
@@ -43,13 +44,14 @@ type HopStep struct {
 
 type Hops struct {
 	currentIndex int
-	HostLabel    string `json:"Label,omitempty"`
-	Operation    string `json:"Operation,omitempty"`
+	Host         string `json:"host,omitempty"`
+	Listener     string `json:"listener,omitempty"`
+	Operation    string `json:"operation,omitempty"`
 	Steps        []Step `json:"hops"`
 }
 
-func NewHops(label, operation string) *Hops {
-	return &Hops{HostLabel: label, Operation: operation, Steps: []Step{}}
+func NewHops(host, listener, operation string) *Hops {
+	return &Hops{Host: host, Listener: listener, Operation: operation, Steps: []Step{}}
 }
 
 func (hs *HopStep) GetCounter() int {
@@ -76,7 +78,8 @@ func (h *Hops) newStep(step int, msg string) *HopStep {
 	return &HopStep{
 		BaseStep: BaseStep{
 			Counter:   step,
-			Host:      h.HostLabel,
+			Host:      h.Host,
+			Listener:  h.Listener,
 			Operation: h.Operation,
 		},
 		Message: msg,
@@ -88,7 +91,7 @@ func (h *Hops) AddRemote(data any) *Hops {
 	h.Steps = append(h.Steps, &RemoteStep{
 		BaseStep: BaseStep{
 			Counter:   h.currentIndex,
-			Host:      h.HostLabel,
+			Host:      h.Host,
 			Operation: h.Operation,
 		},
 		Data: data,

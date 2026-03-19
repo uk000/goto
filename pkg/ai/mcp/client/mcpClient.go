@@ -64,6 +64,7 @@ type MCPSession struct {
 	ID              string
 	Name            string
 	CallerId        string
+	Listener        string
 	URL             string
 	Authority       string
 	SSE             bool
@@ -82,6 +83,7 @@ type MCPSession struct {
 type MCPClient struct {
 	Name           string
 	CallerId       string
+	Listener       string
 	SSE            bool
 	ActiveSessions map[string]*MCPSession
 	httpClient     *http.Client
@@ -158,21 +160,22 @@ func SetRoots(name string, payload []byte) error {
 	return nil
 }
 
-func NewClient(port int, sse bool, callerId string, progressChan chan string) *MCPClient {
+func NewClient(port int, sse bool, callerId, listener string, progressChan chan string) *MCPClient {
 	name := fmt.Sprintf("GotoMCP-%d[%s][%s]", Counter.Add(1), global.Funcs.GetListenerLabelForPort(port), callerId)
 	if sse {
 		name += "[sse]"
 	}
-	return newMCPClient(sse, name, callerId, progressChan)
+	return newMCPClient(sse, name, callerId, listener, progressChan)
 }
 
-func newMCPClient(sse bool, name, callerId string, progressChan chan string) *MCPClient {
+func newMCPClient(sse bool, name, callerId, listener string, progressChan chan string) *MCPClient {
 	//httpClient := transport.CreateSimpleHTTPClient()
 	ht := transport.CreateHTTPClient(name, false, true, false, "", 0,
 		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
 	m := &MCPClient{
 		Name:           name,
 		CallerId:       callerId,
+		Listener:       listener,
 		SSE:            sse,
 		httpClient:     ht.HTTP(),
 		ActiveSessions: map[string]*MCPSession{},
@@ -258,6 +261,7 @@ func (c *MCPClient) newMCPSession(operLabel, url string, hops *util.Hops) *MCPSe
 	mpcSession := &MCPSession{
 		Name:      c.Name,
 		CallerId:  c.CallerId,
+		Listener:  c.Listener,
 		Operation: operLabel,
 		URL:       url,
 		SSE:       c.SSE,
@@ -266,7 +270,7 @@ func (c *MCPClient) newMCPSession(operLabel, url string, hops *util.Hops) *MCPSe
 	if hops != nil {
 		mpcSession.Hops = hops
 	} else {
-		mpcSession.Hops = util.NewHops(c.CallerId, operLabel)
+		mpcSession.Hops = util.NewHops(c.CallerId, c.Listener, operLabel)
 	}
 	c.ht.SetRequestIntercept(mpcSession)
 	c.ht.SetResponseIntercept(mpcSession)
@@ -448,7 +452,7 @@ func (c *MCPClient) ElicitationHandler(ctx context.Context, req *gomcp.ElicitReq
 	s := c.GetSession(req.Session.ID())
 	if s == nil {
 		msg = fmt.Sprintf("Session missing for ID [%s]", req.Session.ID())
-		hops = util.NewHops(c.CallerId, label)
+		hops = util.NewHops(c.CallerId, c.Listener, label)
 	} else {
 		hops = s.Hops
 	}
@@ -504,7 +508,7 @@ func (c *MCPClient) CreateMessageHandler(ctx context.Context, req *gomcp.CreateM
 	s := c.GetSession(req.Session.ID())
 	if s == nil {
 		msg = fmt.Sprintf("Session missing for ID [%s]", req.Session.ID())
-		hops = util.NewHops(c.CallerId, label)
+		hops = util.NewHops(c.CallerId, c.Listener, label)
 	} else {
 		hops = s.Hops
 	}
