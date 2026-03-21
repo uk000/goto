@@ -14,12 +14,11 @@
  * limitations under the License.
  */
 
-package mcpserverapi
+package mcpserver
 
 import (
 	"encoding/json"
 	"fmt"
-	mcpserver "goto/pkg/ai/mcp/server"
 	"goto/pkg/constants"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
@@ -88,13 +87,13 @@ func getServers(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "server")
 	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
 	if names {
-		util.WriteJsonOrYAMLPayload(w, mcpserver.GetMCPServerNames(), yaml)
+		util.WriteJsonOrYAMLPayload(w, GetMCPServerNames(), yaml)
 	} else if all {
-		util.WriteJsonOrYAMLPayload(w, mcpserver.PortsServers, yaml)
+		util.WriteJsonOrYAMLPayload(w, PortsServers, yaml)
 	} else if name != "" {
-		var server *mcpserver.MCPServer
+		var server *MCPServer
 		name = strings.ToLower(name)
-		for _, ps := range mcpserver.PortsServers {
+		for _, ps := range PortsServers {
 			server = ps.GetMCPServer(name)
 			if server != nil {
 				break
@@ -107,13 +106,13 @@ func getServers(w http.ResponseWriter, r *http.Request) {
 			util.WriteJsonOrYAMLPayload(w, server, yaml)
 		}
 	} else {
-		util.WriteJsonOrYAMLPayload(w, mcpserver.GetPortMCPServers(port), yaml)
+		util.WriteJsonOrYAMLPayload(w, GetPortMCPServers(port), yaml)
 	}
 }
 
 func addServers(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	payloads := []*mcpserver.MCPServerPayload{}
+	payloads := []*MCPServerPayload{}
 	err := util.ReadJsonPayload(r, &payloads)
 	msg := ""
 	if err != nil || len(payloads) == 0 {
@@ -127,7 +126,7 @@ func addServers(w http.ResponseWriter, r *http.Request) {
 		util.AddLogMessage(msg, r)
 		return
 	}
-	mcpserver.AddMCPServers(port, payloads)
+	AddMCPServers(port, payloads)
 	names := []string{}
 	for _, p := range payloads {
 		if p.Port <= 0 {
@@ -145,12 +144,12 @@ func setServerRoute(w http.ResponseWriter, r *http.Request) {
 	serverName := util.GetStringParamValue(r, "server")
 	uri := util.GetStringParamValue(r, "uri")
 	msg := ""
-	server := mcpserver.GetMCPServer(port, serverName)
+	server := GetMCPServer(port, serverName)
 	if server == nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("MCP Server [%s] not configured on any port", serverName)
 	} else {
-		mcpserver.SetServerRoute(uri, server)
+		SetServerRoute(uri, server)
 		msg = fmt.Sprintf("MCP Server [%s] will be served over URI [%s] on port [%d]", serverName, uri, port)
 	}
 	fmt.Fprintln(w, msg)
@@ -159,7 +158,7 @@ func setServerRoute(w http.ResponseWriter, r *http.Request) {
 
 func configureStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	sc, err := mcpserver.StatusManager.ParseStatusConfig(port, r.Body)
+	sc, err := StatusManager.ParseStatusConfig(port, r.Body)
 	msg := ""
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -185,7 +184,7 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Invalid Status")
 		return
 	}
-	status := mcpserver.StatusManager.SetStatusFor(port, uri, header, value, statusCodes, times, noHeader)
+	status := StatusManager.SetStatusFor(port, uri, header, value, statusCodes, times, noHeader)
 	msg := status.Log("MCP", port)
 	util.AddLogMessage(msg, r)
 	w.WriteHeader(http.StatusOK)
@@ -194,14 +193,14 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 
 func clearStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	mcpserver.StatusManager.Clear(port, "")
+	StatusManager.Clear(port, "")
 	msg := fmt.Sprintf("Status cleared on port [%d]", port)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
 
 func getStatuses(w http.ResponseWriter, r *http.Request) {
-	util.WriteJsonPayload(w, mcpserver.StatusManager.PortStatus)
+	util.WriteJsonPayload(w, StatusManager.PortStatus)
 	util.AddLogMessage("Delivered statuses", r)
 }
 
@@ -211,10 +210,10 @@ func clearServers(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "server")
 	msg := ""
 	if all {
-		mcpserver.ClearAllMCPServers()
+		ClearAllMCPServers()
 		msg = "Cleared all MCP servers"
 	} else if name != "" {
-		server := mcpserver.GetMCPServer(port, name)
+		server := GetMCPServer(port, name)
 		if server == nil {
 			w.WriteHeader(http.StatusBadRequest)
 			msg = fmt.Sprintf("MCP Server [%s] not configured on any port", name)
@@ -222,7 +221,7 @@ func clearServers(w http.ResponseWriter, r *http.Request) {
 			msg = fmt.Sprintf("Cleared MCP server [%s] on port [%d]", name, port)
 		}
 	} else {
-		ps := mcpserver.GetPortMCPServers(port)
+		ps := GetPortMCPServers(port)
 		ps.Clear()
 		msg = fmt.Sprintf("Cleared all MCP servers on port [%d]", port)
 	}
@@ -234,7 +233,7 @@ func startServer(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "server")
 	msg := ""
-	ps := mcpserver.GetPortMCPServers(port)
+	ps := GetPortMCPServers(port)
 	ps.Start(name)
 	msg = fmt.Sprintf("Started [%d] MCP Servers at port [%d]", len(ps.Servers), port)
 	fmt.Fprintln(w, msg)
@@ -245,7 +244,7 @@ func stopServer(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "server")
 	msg := ""
-	ps := mcpserver.GetPortMCPServers(port)
+	ps := GetPortMCPServers(port)
 	ps.Stop(name)
 	msg = fmt.Sprintf("Stopped [%d] MCP Servers at port [%d]", len(ps.Servers), port)
 	fmt.Fprintln(w, msg)
@@ -274,7 +273,7 @@ func getComponents(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
 	if serverName != "" {
-		server := mcpserver.GetMCPServer(port, serverName)
+		server := GetMCPServer(port, serverName)
 		if server == nil {
 			w.WriteHeader(http.StatusBadRequest)
 			msg := fmt.Sprintf("MCP Server [%s] not configured on any port", serverName)
@@ -287,10 +286,10 @@ func getComponents(w http.ResponseWriter, r *http.Request) {
 			util.WriteJsonOrYAMLPayload(w, server.GetComponent(name, kind), yaml)
 		}
 	} else if q == "servers" {
-		ps := mcpserver.GetPortMCPServers(port)
+		ps := GetPortMCPServers(port)
 		util.WriteJsonOrYAMLPayload(w, ps.GetComponents(kind), yaml)
 	} else {
-		util.WriteJsonOrYAMLPayload(w, mcpserver.GetAllComponents(kind), yaml)
+		util.WriteJsonOrYAMLPayload(w, GetAllComponents(kind), yaml)
 	}
 }
 
@@ -300,7 +299,7 @@ func addComponent(w http.ResponseWriter, r *http.Request) {
 	serverName := util.GetStringParamValue(r, "server")
 	b, _ := io.ReadAll(r.Body)
 	msg := ""
-	server := mcpserver.GetMCPServer(port, serverName)
+	server := GetMCPServer(port, serverName)
 	if server == nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("MCP Server [%s] not configured on any port", serverName)
@@ -326,7 +325,7 @@ func addCompletionPayload(w http.ResponseWriter, r *http.Request) {
 		delayCount = -1
 	}
 	payload, _ := io.ReadAll(r.Body)
-	server := mcpserver.GetMCPServer(port, name)
+	server := GetMCPServer(port, name)
 	msg := ""
 	if server == nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -357,7 +356,7 @@ func addComponentPayload(w http.ResponseWriter, r *http.Request) {
 	isJSON := contentType == constants.ContentTypeJSON
 
 	payload, _ := io.ReadAll(r.Body)
-	server := mcpserver.GetMCPServer(port, serverName)
+	server := GetMCPServer(port, serverName)
 	msg := ""
 	if server == nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -383,7 +382,7 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 	serverName := util.GetStringParamValue(r, "server")
 	toolName := util.GetStringParamValue(r, "tool")
 	msg := ""
-	server := mcpserver.GetMCPServer(port, serverName)
+	server := GetMCPServer(port, serverName)
 	if server == nil {
 		sendBadRequest(fmt.Sprintf("MCP Server [%s] not configured on any port", serverName), w, r)
 		return
