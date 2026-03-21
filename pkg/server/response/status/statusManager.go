@@ -87,10 +87,14 @@ func newStatusConfig(uriPrefix, header, headerValue string, statusCodes []int, t
 	return sc
 }
 
-func (s *StatusManager) Clear(port int) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.PortStatus[port] = []*StatusConfig{}
+func (s *StatusManager) Clear(port int, uriPrefix string) {
+	if uriPrefix != "" {
+		s.findOrRemoveStatusConfig(port, uriPrefix, "", "", false, true)
+	} else {
+		s.lock.Lock()
+		defer s.lock.Unlock()
+		s.PortStatus[port] = []*StatusConfig{}
+	}
 }
 
 func (s *StatusManager) ParseStatusConfig(port int, body io.Reader) (sc *StatusConfig, err error) {
@@ -150,11 +154,11 @@ func (s *StatusManager) SetStatus(port int, statusCodes []int, times int, presen
 	return s.SetStatusFor(port, "", "", "", statusCodes, times, present)
 }
 
-func (s *StatusManager) findStatusConfig(port int, uriPrefix, header, headerValue string, present bool) *StatusConfig {
+func (s *StatusManager) findOrRemoveStatusConfig(port int, uriPrefix, header, headerValue string, present bool, remove bool) *StatusConfig {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	statuses := s.PortStatus[port]
-	for _, sc := range statuses {
+	for i, sc := range statuses {
 		if !strings.EqualFold(sc.Match.URIMatch.Prefix, uriPrefix) {
 			continue
 		}
@@ -166,6 +170,10 @@ func (s *StatusManager) findStatusConfig(port int, uriPrefix, header, headerValu
 			}
 		}
 		if matched {
+			if remove {
+				s.PortStatus[port] = statuses[0:i]
+				s.PortStatus[port] = append(s.PortStatus[port], statuses[i+1:]...)
+			}
 			return sc
 		}
 	}
@@ -183,7 +191,7 @@ func (s *StatusManager) SetStatusFor(port int, uriPrefix, header, headerValue st
 	uriPrefix = strings.ToLower(uriPrefix)
 	header = strings.ToLower(header)
 	headerValue = strings.ToLower(headerValue)
-	sc := s.findStatusConfig(port, uriPrefix, header, headerValue, present)
+	sc := s.findOrRemoveStatusConfig(port, uriPrefix, header, headerValue, present, false)
 	if sc != nil {
 		sc.SetStatus(statusCodes, times)
 	} else {

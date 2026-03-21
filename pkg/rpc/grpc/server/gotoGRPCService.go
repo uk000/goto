@@ -25,6 +25,7 @@ import (
 	gg "goto/pkg/rpc/grpc"
 	gotogrpc "goto/pkg/rpc/grpc"
 	"goto/pkg/rpc/grpc/pb"
+	"goto/pkg/server/response/payload"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
@@ -119,7 +120,7 @@ func TransformInput(req proto.Message) proto.Message {
 	return req2
 }
 
-func (gs *GotoGRPCService) setHeaders(ctx context.Context, port int, hostLabel, listenerLabel string) (requestHeaders, responseHeaders map[string]string) {
+func SetHeaders(ctx context.Context, port int, hostLabel, listenerLabel string, addHeaders map[string]string) (requestHeaders, responseHeaders map[string]string) {
 	remoteAddress := ""
 	if p, ok := peer.FromContext(ctx); ok {
 		remoteAddress = p.Addr.String()
@@ -144,6 +145,9 @@ func (gs *GotoGRPCService) setHeaders(ctx context.Context, port int, hostLabel, 
 			}
 		}
 	}
+	for k, v := range addHeaders {
+		responseHeaders[k] = v
+	}
 	grpc.SendHeader(ctx, metadata.New(responseHeaders))
 	return
 }
@@ -152,7 +156,7 @@ func (gs *GotoGRPCService) Echo(ctx context.Context, input *pb.Input) (*pb.Outpu
 	port := util.GetGRPCPort(ctx)
 	events.TrackPortTrafficEvent(port, "GRPC.echo", 200)
 	listenerLabel := global.Funcs.GetListenerLabelForPort(port)
-	requestHeaders, responseHeaders := gs.setHeaders(ctx, port, global.Self.HostLabel, listenerLabel)
+	requestHeaders, responseHeaders := SetHeaders(ctx, port, global.Self.HostLabel, listenerLabel, nil)
 	requestMiniBody := ""
 	if global.Flags.LogRequestBody {
 		requestMiniBody = input.Payload
@@ -161,6 +165,9 @@ func (gs *GotoGRPCService) Echo(ctx context.Context, input *pb.Input) (*pb.Outpu
 	}
 	gg.LogRequest(ctx, port, "Goto", "echo", requestHeaders[constants.HeaderAuthority], requestHeaders, 1, len(input.Payload), requestMiniBody)
 	id := counter.Add(1)
+	if _, rp, _, found := payload.PayloadManager.GetResponsePayload(port, true, "/Goto/echo", nil, nil, nil); found {
+		input.Payload = string(rp.Payload)
+	}
 	response := &pb.Output{Id: strconv.Itoa(int(id)), Payload: input.Payload, At: time.Now().Format(time.RFC3339Nano), GotoHost: global.Self.HostLabel, GotoPort: int32(port), ViaGoto: listenerLabel}
 	responseLength := -1
 	if global.Flags.LogResponseBody || global.Flags.LogResponseMiniBody {
@@ -176,8 +183,12 @@ func (gs *GotoGRPCService) StreamIn(cs grpc.ClientStreamingServer[pb.Input, pb.O
 	port := util.GetGRPCPort(ctx)
 	events.TrackPortTrafficEvent(port, "GRPC.streamIn.start", 200)
 	listenerLabel := global.Funcs.GetListenerLabelForPort(port)
-	requestHeaders, responseHeaders := gs.setHeaders(ctx, port, global.Self.HostLabel, listenerLabel)
+	requestHeaders, responseHeaders := SetHeaders(ctx, port, global.Self.HostLabel, listenerLabel, nil)
 	requestCount := 0
+	configPayload := ""
+	if _, rp, _, found := payload.PayloadManager.GetResponsePayload(port, true, "/Goto/streamIn", nil, nil, nil); found {
+		configPayload = string(rp.Payload)
+	}
 	responsePayload := strings.Builder{}
 	for {
 		input, err := cs.Recv()
@@ -187,13 +198,18 @@ func (gs *GotoGRPCService) StreamIn(cs grpc.ClientStreamingServer[pb.Input, pb.O
 			return err
 		}
 		requestCount++
-		responsePayload.WriteString(fmt.Sprintf("[%s]", input.Payload))
 		log.Printf("GRPC[%d]: Received client stream input [payload: [%s]]\n", port, input.Payload)
+		if len(configPayload) > 0 {
+			input.Payload = configPayload
+		}
+		responsePayload.WriteString(fmt.Sprintf("[%s]", input.Payload))
 	}
 	events.TrackPortTrafficEvent(port, "GRPC.streamIn.end", 200)
 	gg.LogRequest(ctx, port, "Goto", "streamIn", requestHeaders[constants.HeaderAuthority], requestHeaders, requestCount, 0, "")
 	id := counter.Add(1)
-	response := &pb.Output{Id: strconv.Itoa(int(id)), Payload: responsePayload.String(), At: time.Now().Format(time.RFC3339Nano), GotoHost: global.Self.HostLabel, GotoPort: int32(port), ViaGoto: listenerLabel}
+	payload := responsePayload.String()
+	response := &pb.Output{Id: strconv.Itoa(int(id)), Payload: payload, At: time.Now().Format(time.RFC3339Nano), GotoHost: global.Self.HostLabel, GotoPort: int32(port), ViaGoto: listenerLabel}
+	log.Printf("GRPC[%d]: Sent stream response [payload: [%s]]\n", port, payload)
 	cs.SendAndClose(response)
 	responseLength := -1
 	if global.Flags.LogResponseBody || global.Flags.LogResponseMiniBody {
@@ -205,7 +221,7 @@ func (gs *GotoGRPCService) StreamIn(cs grpc.ClientStreamingServer[pb.Input, pb.O
 }
 
 func (gs *GotoGRPCService) sendStreamResponse(ctx context.Context, port int, hostLabel, listenerLabel string, configInput *pb.StreamConfig, ss IGRPCService) (int, int) {
-	gs.setHeaders(ctx, port, hostLabel, listenerLabel)
+	SetHeaders(ctx, port, hostLabel, listenerLabel, nil)
 	payload := ""
 	if configInput.Payload != "" {
 		payload = configInput.Payload
@@ -228,19 +244,24 @@ func (gs *GotoGRPCService) sendStreamResponse(ctx context.Context, port int, hos
 }
 
 func (gs *GotoGRPCService) StreamOut(configInput *pb.StreamConfig, ss grpc.ServerStreamingServer[pb.Output]) error {
-	log.Printf("GotoGRPCService[%d]: Serving StreamOut with config [chunkSize: %d, chunkCount: %d, interval: %s, payload size: [%d]]\n", ss.Context().Value("port"), configInput.ChunkSize, configInput.ChunkCount, configInput.Interval, len(configInput.Payload))
 	ctx := ss.Context()
 	port := util.GetGRPCPort(ctx)
 	events.TrackPortTrafficEvent(port, "GRPC.streamOut.start", 200)
 	listenerLabel := global.Funcs.GetListenerLabelForPort(port)
-	requestHeaders, responseHeaders := gs.setHeaders(ctx, port, global.Self.HostLabel, listenerLabel)
+	requestHeaders, responseHeaders := SetHeaders(ctx, port, global.Self.HostLabel, listenerLabel, nil)
 	gg.LogRequest(ctx, port, "Goto", "streamOut", requestHeaders[constants.HeaderAuthority], requestHeaders, 1, 0, "")
-
+	payloadType := ""
+	if _, rp, _, found := payload.PayloadManager.GetResponsePayload(port, true, "/Goto/streamOut", nil, nil, nil); found {
+		configInput.Payload = string(rp.Payload)
+		payloadType = " pre-configured"
+	}
+	log.Printf("GotoGRPCService[%d]: Serving StreamOut with config [chunkSize: %d, chunkCount: %d, interval: %s,%s payload size: [%d]]\n",
+		port, configInput.ChunkSize, configInput.ChunkCount, configInput.Interval, payloadType, len(configInput.Payload))
 	responseCount, responseLength := gs.sendStreamResponse(ctx, port, global.Self.HostLabel, listenerLabel, configInput, ss)
 	events.TrackPortTrafficEvent(port, "GRPC.streamOut.end", 200)
 	gg.LogResponse(ctx, responseHeaders, 200, responseCount, responseLength,
-		fmt.Sprintf("Served StreamOut with config [chunkSize: %d, chunkCount: %d, interval: %s, payload size: %d]",
-			configInput.ChunkSize, configInput.ChunkCount, configInput.Interval, len(configInput.Payload)))
+		fmt.Sprintf("Served StreamOut with config [chunkSize: %d, chunkCount: %d, interval: %s,%s payload size: %d]",
+			configInput.ChunkSize, configInput.ChunkCount, configInput.Interval, payloadType, len(configInput.Payload)))
 	return nil
 }
 
@@ -249,8 +270,13 @@ func (gs *GotoGRPCService) StreamInOut(bidi grpc.BidiStreamingServer[pb.StreamCo
 	port := util.GetGRPCPort(ctx)
 	events.TrackPortTrafficEvent(port, "GRPC.streamInOut.start", 200)
 	listenerLabel := global.Funcs.GetListenerLabelForPort(port)
-	requestHeaders, responseHeaders := gs.setHeaders(ctx, port, global.Self.HostLabel, listenerLabel)
-
+	requestHeaders, responseHeaders := SetHeaders(ctx, port, global.Self.HostLabel, listenerLabel, nil)
+	configPayload := ""
+	payloadType := ""
+	if _, rp, _, found := payload.PayloadManager.GetResponsePayload(port, true, "/Goto/streamInOut", nil, nil, nil); found {
+		configPayload = string(rp.Payload)
+		payloadType = " pre-configured"
+	}
 	requestCount := 0
 	responseCount := 0
 	responseLength := 0
@@ -265,8 +291,11 @@ func (gs *GotoGRPCService) StreamInOut(bidi grpc.BidiStreamingServer[pb.StreamCo
 		}
 		requestCount++
 		chunkCount += int(configInput.ChunkCount)
-		log.Printf("GRPC[%d]: Serving StreamInOut with config [chunkSize: %d, chunkCount: %d, interval: %s, payload size: [%d]]\n",
-			port, configInput.ChunkSize, configInput.ChunkCount, configInput.Interval, len(configInput.Payload))
+		if len(configPayload) > 0 {
+			configInput.Payload = configPayload
+		}
+		log.Printf("GRPC[%d]: Serving StreamInOut with config [chunkSize: %d, chunkCount: %d, interval: %s,%s payload size: [%d]]\n",
+			port, configInput.ChunkSize, configInput.ChunkCount, configInput.Interval, payloadType, len(configInput.Payload))
 		count, length := gs.sendStreamResponse(ctx, port, global.Self.HostLabel, listenerLabel, configInput, bidi)
 		responseCount += count
 		responseLength += length

@@ -20,15 +20,11 @@ import (
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/events"
-	"goto/pkg/server/conn"
-	"goto/pkg/server/intercept"
 	"goto/pkg/server/middleware"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -45,7 +41,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(payloadRouter, "/set/{grpc}?/default/binary", setResponsePayload, "POST")
 	util.AddRoute(payloadRouter, "/set/{grpc}?/default/{size}", setResponsePayload, "POST")
 	util.AddRoute(payloadRouter, "/set/{grpc}?/default", setResponsePayload, "POST")
-	util.AddRouteQ(payloadRouter, "/set/{grpc}?/uri", setResponsePayload, "uri", "POST")
+	util.AddRouteQ(payloadRouter, "/set/{grpc}?", setResponsePayload, "uri", "POST")
 	util.AddRouteQO(payloadRouter, "/set/{grpc}?/header/{header}={value}", setResponsePayload, "uri", "POST")
 	util.AddRouteQO(payloadRouter, "/set/{grpc}?/header/{header}", setResponsePayload, "uri", "POST")
 	util.AddRouteQO(payloadRouter, "/set/{grpc}?/query/{q}={value}", setResponsePayload, "uri", "POST")
@@ -56,13 +52,6 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(payloadRouter, "/clear", clearResponsePayload, "POST")
 	util.AddRoute(payloadRouter, "", getResponsePayload, "GET")
 	util.AddRoute(payloadRouter, "/{size}", respondWithPayload, "GET", "PUT", "POST")
-
-	streamRouter := util.PathRouter(r, "/stream")
-	util.AddRoute(streamRouter, "/payload={payloadSize}/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
-	util.AddRoute(streamRouter, "/chunksize={chunkSize}/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
-	util.AddRoute(streamRouter, "/chunksize={chunk}/count={count}/delay={delay}", streamResponse, "GET", "PUT", "POST")
-	util.AddRoute(streamRouter, "/duration={duration}/delay={delay}", streamResponse, "GET", "PUT", "POST")
-	util.AddRoute(streamRouter, "/count={count}/delay={delay}", streamResponse, "GET", "PUT", "POST")
 }
 
 func setResponsePayload(w http.ResponseWriter, r *http.Request) {
@@ -208,96 +197,4 @@ func respondWithPayload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(constants.HeaderContentType, "plain/text")
 	w.Header().Set(constants.HeaderGotoPayloadLength, sizeV)
 	util.AddLogMessage(fmt.Sprintf("Responding with requested payload of length %d", size), r)
-}
-
-func streamResponse(w http.ResponseWriter, r *http.Request) {
-	size := util.GetSizeParam(r, "payloadSize")
-	chunkSize := util.GetSizeParam(r, "chunkSize")
-	durMin, durMax, _, _ := util.GetDurationParam(r, "duration")
-	delayText := util.GetStringParamValue(r, "delay")
-	delayMin, delayMax, _, _ := util.GetDurationParam(r, "delay")
-	count := util.GetIntParamValue(r, "count")
-	repeat := false
-	var payload []byte
-	contentType := r.Header.Get(constants.HeaderContentType)
-	if contentType == "" {
-		contentType = "plain/text"
-	}
-	duration := types.RandomDuration(durMin, durMax)
-	delay := types.RandomDuration(delayMin, delayMax)
-	if delay == 0 {
-		delay = 1 * time.Millisecond
-	}
-	if duration > 0 {
-		count = int((duration.Milliseconds() / delay.Milliseconds()))
-	}
-	if size > 0 {
-		repeat = true
-		chunkSize = size / count
-		payload = types.GenerateRandomPayload(chunkSize)
-	} else {
-		size = len(payload)
-		repeat = size == 0
-	}
-	if size < chunkSize {
-		payload = fixPayload(payload, chunkSize)
-	}
-	if chunkSize == 0 && count > 0 && size > 0 {
-		chunkSize = size/count + 1
-	}
-	if chunkSize == 0 || count == 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		util.AddLogMessage("Invalid parameters for streaming or no payload", r)
-		fmt.Fprintln(w, "{error: 'Invalid parameters for streaming'}")
-		return
-	}
-
-	w.Header().Set(constants.HeaderContentType, contentType)
-	w.Header().Set(constants.HeaderXContentTypeOptions, "nosniff")
-	w.Header().Set(constants.HeaderGotoChunkCount, strconv.Itoa(count))
-	w.Header().Set(constants.HeaderGotoChunkLength, strconv.Itoa(chunkSize))
-	w.Header().Set(constants.HeaderGotoChunkDelay, delayText)
-	if size > 0 {
-		w.Header().Set(constants.HeaderGotoStreamLength, strconv.Itoa(size))
-	}
-	if duration > 0 {
-		w.Header().Set(constants.HeaderGotoStreamDuration, duration.String())
-	}
-
-	fw := intercept.NewFlushWriter(r, w)
-	if fw == nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintln(w, "Cannot stream")
-		return
-	}
-	if c := conn.GetConn(r); c != nil {
-		c.SetWriteDeadline(time.Time{})
-	}
-	util.AddLogMessage("Responding with streaming payload", r)
-	payloadIndex := 0
-	payloadSize := len(payload)
-	payloadChunkCount := payloadSize / chunkSize
-	if payloadSize%chunkSize > 0 {
-		payloadChunkCount++
-	}
-	for i := 0; i < count; i++ {
-		start := payloadIndex * chunkSize
-		end := (payloadIndex + 1) * chunkSize
-		if end > payloadSize {
-			end = payloadSize
-		}
-		fw.Write(payload[start:end])
-		payloadIndex++
-		if payloadIndex == payloadChunkCount {
-			if repeat {
-				payloadIndex = 0
-			} else {
-				break
-			}
-		}
-		if i < count-1 {
-			delay = types.RandomDuration(delayMin, delayMax, delay)
-			time.Sleep(delay)
-		}
-	}
 }

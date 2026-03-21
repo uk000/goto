@@ -58,6 +58,7 @@ import (
 	"goto/pkg/server/request"
 	"goto/pkg/server/request/body"
 	"goto/pkg/server/response"
+	"goto/pkg/server/stream"
 	"goto/pkg/server/tcp"
 	"goto/pkg/server/udp"
 	"goto/pkg/server/ui"
@@ -87,7 +88,7 @@ func init() {
 		client.Middleware, listeners.Middleware, registry.Middleware,
 		grpcapi.Middleware, grpcclient.Middleware, protos.Middleware,
 		scripts.Middleware, job.Middleware, tls.Middleware, log.Middleware,
-		label.Middleware, info.Middleware, echo.Middleware,
+		label.Middleware, info.Middleware, echo.Middleware, stream.Middleware,
 		pipe.Middleware, k8sYaml.Middleware, k8sApi.Middleware,
 	}
 }

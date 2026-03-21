@@ -585,7 +585,7 @@ func getPayloadForKV(kvMap map[string][]string, payloadMap map[string]map[string
 	return nil, false
 }
 
-func fixPayload(payload []byte, size int) []byte {
+func FixPayload(payload []byte, size int) []byte {
 	if len(payload) == 0 && size > 0 {
 		payload = types.GenerateRandomPayload(size)
 	} else if len(payload) > size {

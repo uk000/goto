@@ -51,7 +51,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRouteQ(trackRouter, "/{header}={value}", trackURIAndHeaderValue, "uri", "POST")
 
 	util.AddRoute(trackRouter, "/counts", getCounts, "GET")
-
+	util.AddRoute(trackRouter, "", getCounts, "GET")
 }
 
 func trackURI(w http.ResponseWriter, r *http.Request) {

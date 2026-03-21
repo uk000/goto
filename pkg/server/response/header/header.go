@@ -153,7 +153,8 @@ func middlewareFunc(next http.Handler) http.Handler {
 		if next != nil {
 			next.ServeHTTP(w, r)
 		}
-		if !util.IsHeadersSent(r) && !util.IsAdminRequest(r) && !util.IsTunnelRequest(r) && !util.IsGRPC(r) {
+		rs := util.GetRequestStore(r)
+		if !rs.IsHeadersSent && !rs.IsAdminRequest && !rs.IsTunnelRequest && !rs.IsGRPC {
 			SetResponseHeaders(w, r)
 		}
 	})

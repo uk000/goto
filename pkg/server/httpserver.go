@@ -326,7 +326,9 @@ func HTTPHandler() http.Handler {
 }
 
 func handleHTTP(l *listeners.Listener, w http.ResponseWriter, r *http.Request, rs *util.RequestStore) {
-	if rs.IsGRPC {
+	if rs.IsAdminRequest {
+		rs.CurrentRouter.ServeHTTP(w, r)
+	} else if rs.IsGRPC {
 		r.ProtoMajor = 2
 		if rs.IsTLS {
 			rs.IsH2 = true
@@ -342,6 +344,8 @@ func handleHTTP(l *listeners.Listener, w http.ResponseWriter, r *http.Request, r
 			rs.IsH2C = true
 		}
 		httpHandler.ServeHTTP(w, r)
+	} else if rs.CurrentRouter != nil {
+		rs.CurrentRouter.ServeHTTP(w, r)
 	} else {
 		httpHandler.ServeHTTP(w, r)
 	}
@@ -376,9 +380,16 @@ func loadRouter(r *http.Request, rs *util.RequestStore) {
 	rootURI, _ := util.GetRootURI(r.RequestURI)
 	var uriRouter *mux.Router
 	if rootURI != "" {
-		if uriRouter = middleware.ProxyRouters[rootURI]; uriRouter != nil {
-			rs.IsProxy = true
-		} else {
+		if portProxyRouters := middleware.ProxyRouters[rs.RequestPortNum]; len(portProxyRouters) > 0 {
+			uriRouter = portProxyRouters[rootURI]
+			if uriRouter == nil {
+				uriRouter = portProxyRouters["/"]
+			}
+			if uriRouter != nil {
+				rs.IsProxy = true
+			}
+		}
+		if uriRouter == nil {
 			uriRouter = middleware.RootRouters[rootURI]
 		}
 		if uriRouter != nil {

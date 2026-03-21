@@ -22,7 +22,6 @@ import (
 	"goto/pkg/server/middleware"
 	"goto/pkg/types"
 	"goto/pkg/util"
-	"log"
 	"net/http"
 	"slices"
 	"strings"
@@ -30,21 +29,18 @@ import (
 	"github.com/gorilla/mux"
 )
 
-type APISubPaths map[string]map[string][]string
-type APIRoutes map[string]map[string][]types.Pair[string, []string]
-type APIRouteLookup map[string]map[string]map[string][]string
+type APIRoutes map[string]map[string]map[string][]types.Pair[string, []string]
 
 var (
 	Middleware     = middleware.NewMiddleware("info", setRoutes, nil)
-	subPaths       = APISubPaths{}
 	routes         = APIRoutes{}
 	routesWithCurl = APIRoutes{}
-	routeLookup    = APIRouteLookup{}
 )
 
 func setRoutes(r *mux.Router) {
 	infoRouter := middleware.RootPath("/goto")
 	util.AddRoute(infoRouter, "/version", showVersion, "GET")
+	util.AddRoute(infoRouter, "/{k:routes|apis}/refresh", showApis, "GET")
 	util.AddRoute(infoRouter, "/{k:routes|apis}/level={level}", showApis, "GET")
 	util.AddRouteWithMultiQ(infoRouter, "/{k:routes|apis}", showApis, [][]string{{}, {"q"}, {"url"}}, "GET")
 }
@@ -57,14 +53,15 @@ func showApis(w http.ResponseWriter, r *http.Request) {
 	level := util.GetIntParamValue(r, "level")
 	q := util.GetStringParamValue(r, "q")
 	baseURL := util.GetStringParamValue(r, "url")
+	refresh := strings.Contains(r.RequestURI, "refresh")
 	yaml := strings.Contains(r.Header.Get("Accept"), "yaml")
 	text := strings.Contains(r.Header.Get("Accept"), "text")
-	PrintRoutes(w, level, q, baseURL, text, yaml)
+	PrintRoutes(w, level, q, baseURL, refresh, text, yaml)
 	util.AddLogMessage("Routes/APIs reported", r)
 }
 
-func PrintRoutes(w http.ResponseWriter, level int, query, baseURL string, text bool, yaml bool) {
-	if len(routes) == 0 {
+func PrintRoutes(w http.ResponseWriter, level int, query, baseURL string, refresh, text, yaml bool) {
+	if refresh || len(routes) == 0 {
 		loadAPIs()
 	}
 	outputRoutes := filterAPIs(query)
@@ -80,8 +77,14 @@ func PrintRoutes(w http.ResponseWriter, level int, query, baseURL string, text b
 			if len(v1) > 0 {
 				for k2, v2 := range v1 {
 					if len(v2) > 0 {
-						for _, v3 := range v2 {
-							output = append(output, fmt.Sprintf("%s %s", v3.Left, v3.Right))
+						for k3, v3 := range v2 {
+							if len(v3) > 0 {
+								for _, v4 := range v3 {
+									output = append(output, fmt.Sprintf("%s %s", v4.Left, v4.Right))
+								}
+							} else {
+								output = append(output, fmt.Sprintf("%s", k3))
+							}
 						}
 					} else {
 						output = append(output, fmt.Sprintf("%s", k2))
@@ -105,27 +108,23 @@ func filterAPIs(query string) APIRoutes {
 	for r, subRoutes := range routes {
 		rootMatched := strings.Contains(r, query)
 		if rootMatched || query == "" {
-			outputRoutes[r] = map[string][]types.Pair[string, []string]{}
+			outputRoutes[r] = map[string]map[string][]types.Pair[string, []string]{}
 		}
-		for subR, _ := range subRoutes {
-			if subR != "" {
-				subRMatched := rootMatched || strings.Contains(subR, query)
-				if subRMatched || query == "" {
-					if outputRoutes[r] == nil {
-						outputRoutes[r] = map[string][]types.Pair[string, []string]{}
-					}
-					outputRoutes[r][subR] = []types.Pair[string, []string]{}
+		for subR, subPaths := range subRoutes {
+			subRMatched := rootMatched || strings.Contains(subR, query)
+			if subRMatched || query == "" {
+				if outputRoutes[r] == nil {
+					outputRoutes[r] = map[string]map[string][]types.Pair[string, []string]{}
 				}
-				for _, subP := range subPaths[r][subR] {
-					if subP != "" {
-						subPMatched := subRMatched || strings.Contains(subP, query)
-						if subPMatched || query == "" {
-							if outputRoutes[r] == nil {
-								outputRoutes[r] = map[string][]types.Pair[string, []string]{}
-							}
-							outputRoutes[r][subR] = append(outputRoutes[r][subR], types.Pair[string, []string]{subP, routeLookup[r][subR][subP]})
-						}
+				outputRoutes[r][subR] = map[string][]types.Pair[string, []string]{}
+			}
+			for subP, paths := range subPaths {
+				subPMatched := subRMatched || strings.Contains(subP, query)
+				if subPMatched || query == "" {
+					if outputRoutes[r] == nil {
+						outputRoutes[r] = map[string]map[string][]types.Pair[string, []string]{}
 					}
+					outputRoutes[r][subR][subP] = paths
 				}
 			}
 		}
@@ -136,17 +135,24 @@ func filterAPIs(query string) APIRoutes {
 func trimAPIs(matches APIRoutes, level int) APIRoutes {
 	outputRoutes := APIRoutes{}
 	for k1, v1 := range matches {
-		outputRoutes[k1] = map[string][]types.Pair[string, []string]{}
+		outputRoutes[k1] = map[string]map[string][]types.Pair[string, []string]{}
 		if level == 1 {
 			continue
 		}
 		for k2, v2 := range v1 {
-			outputRoutes[k1][k2] = []types.Pair[string, []string]{}
+			outputRoutes[k1][k2] = map[string][]types.Pair[string, []string]{}
 			if level == 2 {
 				continue
 			} else {
-				for _, pair := range v2 {
-					outputRoutes[k1][k2] = append(outputRoutes[k1][k2], pair)
+				for k3, v3 := range v2 {
+					outputRoutes[k1][k2][k3] = []types.Pair[string, []string]{}
+					if level == 3 {
+						continue
+					} else {
+						for _, pair := range v3 {
+							outputRoutes[k1][k2][k3] = append(outputRoutes[k1][k2][k3], pair)
+						}
+					}
 				}
 			}
 		}
@@ -156,16 +162,18 @@ func trimAPIs(matches APIRoutes, level int) APIRoutes {
 
 func getCurls(matches APIRoutes, baseURL string) APIRoutes {
 	for k1, v1 := range matches {
-		for k2 := range v1 {
-			for _, v3 := range routesWithCurl[k1][k2] {
-				curls := []string{}
-				for _, c := range v3.Right {
-					curl := fmt.Sprintf(c, baseURL)
-					curl = strings.ReplaceAll(curl, `?`, `\?`)
-					curl = strings.ReplaceAll(curl, `&`, `\&`)
-					curls = append(curls, curl)
+		for k2, v2 := range v1 {
+			for k3, v3 := range v2 {
+				for _, v4 := range v3 {
+					curls := []string{}
+					for _, c := range v4.Right {
+						curl := fmt.Sprintf(c, baseURL)
+						curl = strings.ReplaceAll(curl, `?`, `\?`)
+						curl = strings.ReplaceAll(curl, `&`, `\&`)
+						curls = append(curls, curl)
+					}
+					matches[k1][k2][k3] = append(matches[k1][k2][k3], types.Pair[string, []string]{v4.Left, curls})
 				}
-				matches[k1][k2] = append(matches[k1][k2], types.Pair[string, []string]{v3.Left, curls})
 			}
 		}
 	}
@@ -195,52 +203,47 @@ func loadAPIsFromRouter(r *mux.Router) {
 		root = "/" + pieces[index]
 		index++
 		if routes[root] == nil {
-			routes[root] = map[string][]types.Pair[string, []string]{}
-			routesWithCurl[root] = map[string][]types.Pair[string, []string]{}
-			routeLookup[root] = map[string]map[string][]string{}
-			subPaths[root] = map[string][]string{}
+			routes[root] = map[string]map[string][]types.Pair[string, []string]{}
+			routesWithCurl[root] = map[string]map[string][]types.Pair[string, []string]{}
 		}
 		subroot := ""
-		if len(pieces) >= index+1 {
+		if len(pieces) > index {
 			subroot = root + "/" + pieces[index]
 			index++
-		} else {
-			subroot = root
 		}
-		if subroot != "" || len(methods) > 0 {
-			if routes[root][subroot] == nil {
-				routes[root][subroot] = []types.Pair[string, []string]{}
-				routesWithCurl[root][subroot] = []types.Pair[string, []string]{}
-				routeLookup[root][subroot] = map[string][]string{}
-				subPaths[root][subroot] = []string{}
-			}
+		if routes[root][subroot] == nil {
+			routes[root][subroot] = map[string][]types.Pair[string, []string]{}
+			routesWithCurl[root][subroot] = map[string][]types.Pair[string, []string]{}
 		}
+
 		subpath := ""
 		if len(pieces) > index {
-			subpath = path
-		} else {
-			subpath = subroot
+			subpath = subroot + "/" + pieces[index]
+			index++
 		}
-		if (subroot != "" || len(methods) > 0) && route.GetHandler() != nil {
+		if routes[root][subroot][subpath] == nil {
+			routes[root][subroot][subpath] = []types.Pair[string, []string]{}
+			routesWithCurl[root][subroot][subpath] = []types.Pair[string, []string]{}
+		}
+
+		fullPath := path
+		if route.GetHandler() != nil {
 			queries, _ := route.GetQueriesTemplates()
 			if len(queries) > 0 {
-				subpath += "?"
+				fullPath += "?"
 				for i, q := range queries {
-					subpath = fmt.Sprintf("%s%s", subpath, q)
+					fullPath = fmt.Sprintf("%s%s", fullPath, q)
 					if i < len(queries)-1 {
-						subpath += "&"
+						fullPath += "&"
 					}
 				}
 			}
-			routes[root][subroot] = append(routes[root][subroot], types.Pair[string, []string]{subpath, methods})
+			routes[root][subroot][subpath] = append(routes[root][subroot][subpath], types.Pair[string, []string]{fullPath, methods})
 			curls := []string{}
 			for _, method := range methods {
-				curls = append(curls, fmt.Sprintf("curl -v -X%s %s%s", method, "%s", subpath))
+				curls = append(curls, fmt.Sprintf("curl -v -X%s %s%s", method, "%s", fullPath))
 			}
-			routesWithCurl[root][subroot] = append(routesWithCurl[root][subroot], types.Pair[string, []string]{subpath, curls})
-			routeLookup[root][subroot][subpath] = methods
-			subPaths[root][subroot] = append(subPaths[root][subroot], subpath)
-			log.Printf("%s -> %+v", subpath, route.GetHandler())
+			routesWithCurl[root][subroot][subpath] = append(routesWithCurl[root][subroot][subpath], types.Pair[string, []string]{fullPath, curls})
 		}
 		return nil
 	})

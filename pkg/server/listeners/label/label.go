@@ -33,7 +33,8 @@ var (
 )
 
 func setRoutes(r *mux.Router) {
-	labelRouter := middleware.RootPath("/server/label")
+	server := middleware.RootPath("/server")
+	labelRouter := util.PathRouter(server, "/label")
 	util.AddRoute(labelRouter, "/set/{label}", setLabel, "PUT", "POST")
 	util.AddRoute(labelRouter, "/clear", setLabel, "POST")
 	util.AddRoute(labelRouter, "", getLabel)

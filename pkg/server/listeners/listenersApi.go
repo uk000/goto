@@ -36,7 +36,8 @@ var (
 )
 
 func setRoutes(r *mux.Router) {
-	lRouter := middleware.RootPath("/server/listeners")
+	server := middleware.RootPath("/server")
+	lRouter := util.PathRouter(server, "/listeners")
 	util.AddRoute(lRouter, "/add", addListener, "POST", "PUT")
 	util.AddRoute(lRouter, "/update", updateListener, "POST", "PUT")
 	util.AddRoute(lRouter, "/{port}/cert/auto/{domain}", autoCert, "PUT", "POST")
@@ -52,8 +53,9 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(lRouter, "/{port}/open", openListener, "PUT", "POST")
 	util.AddRoute(lRouter, "/{port}/reopen", openListener, "PUT", "POST")
 	util.AddRoute(lRouter, "/{port}/close", closeListener, "PUT", "POST")
-	util.AddRoute(lRouter, "/{port}?", getListeners, "GET")
 	util.AddRoute(lRouter, "/ports", getListeners, "GET")
+	util.AddRoute(lRouter, "/{port}", getListeners, "GET")
+	util.AddRoute(lRouter, "", getListeners, "GET")
 }
 
 func addListener(w http.ResponseWriter, r *http.Request) {

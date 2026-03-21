@@ -158,7 +158,7 @@ func (pr *PortResponsePayloads) setStreamResponsePayload(isGRPC bool, payload []
 
 func (pr *PortResponsePayloads) setDefaultResponsePayload(isGRPC bool, payload []byte, contentType string, size int) error {
 	if size > 0 {
-		payload = fixPayload(payload, size)
+		payload = FixPayload(payload, size)
 	}
 	if rp, err := newResponsePayload(payload, false, true, contentType, "", "", "", "", nil, nil, nil); err == nil {
 		pr.protoPayload(isGRPC).setDefaultResponsePayload(rp)

@@ -35,7 +35,7 @@ var (
 )
 
 func SetRoutes(r *mux.Router) {
-	targetsRouter := r.PathPrefix("/targets").Subrouter()
+	targetsRouter := util.PathRouter(r, "/targets")
 	util.AddRoute(targetsRouter, "/add", addTarget, "POST")
 	util.AddRoute(targetsRouter, "/{targets}/remove", removeTargets, "POST")
 	util.AddRoute(targetsRouter, "/{targets}/invoke", invokeTargets, "POST")
@@ -45,6 +45,7 @@ func SetRoutes(r *mux.Router) {
 	util.AddRoute(targetsRouter, "/clear", clearTargets, "POST")
 	util.AddRoute(targetsRouter, "/active", getActiveTargets, "GET")
 	util.AddRoute(targetsRouter, "/{target}?", getTargets, "GET")
+	util.AddRoute(targetsRouter, "", getTargets, "GET")
 
 	util.AddRoute(r, "/track/headers/clear", clearTrackingHeaders, "POST")
 	util.AddRoute(r, "/track/headers/{headers}", addTrackingHeaders, "POST", "PUT")

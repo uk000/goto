@@ -194,7 +194,7 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 
 func clearStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	mcpserver.StatusManager.Clear(port)
+	mcpserver.StatusManager.Clear(port, "")
 	msg := fmt.Sprintf("Status cleared on port [%d]", port)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)

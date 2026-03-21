@@ -19,12 +19,15 @@ package grpcserver
 import (
 	"context"
 	"fmt"
+	"goto/pkg/constants"
 	"goto/pkg/events"
 	"goto/pkg/global"
 	gotogrpc "goto/pkg/rpc/grpc"
 	"goto/pkg/server/listeners"
+	gotostatus "goto/pkg/server/response/status"
 	"goto/pkg/util"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,9 +35,11 @@ import (
 	"github.com/jhump/protoreflect/v2/grpcreflect"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -373,6 +378,15 @@ func unaryMiddleware(ctx context.Context, req interface{}, info *grpc.UnaryServe
 	}
 	md := metadata.Pairs("port", fmt.Sprint(port))
 	ctx, _ = util.WithRequestStoreForContext(util.WithPort(metadata.NewOutgoingContext(ctx, md), port))
+	listenerLabel := global.Funcs.GetListenerLabelForPort(port)
+	if statusCode, rem := gotostatus.TheStatusManager.GetStatusFor(port, info.FullMethod, md); statusCode > 0 && statusCode != 200 {
+		codeText := strconv.Itoa(statusCode)
+		SetHeaders(ctx, port, global.Self.HostLabel, listenerLabel, map[string]string{
+			constants.HeaderGotoForcedStatus:          codeText,
+			constants.HeaderGotoForcedStatusRemaining: strconv.Itoa(rem),
+		})
+		return nil, status.Error(codes.Internal, fmt.Sprintf("%s=%s", constants.HeaderGotoForcedStatus, codeText))
+	}
 	resp, err := handler(ctx, req)
 	if err != nil {
 		util.LogMessage(ctx, fmt.Sprintf("Service/Method [%s]: Error handling unary request: %v", info.FullMethod, err))
@@ -390,6 +404,15 @@ func streamMiddleware(srv interface{}, ss grpc.ServerStream, info *grpc.StreamSe
 	}
 	md := metadata.Pairs("port", fmt.Sprint(port))
 	ctx, _ = util.WithRequestStoreForContext(util.WithPort(metadata.NewOutgoingContext(ctx, md), port))
+	listenerLabel := global.Funcs.GetListenerLabelForPort(port)
+	if statusCode, rem := gotostatus.TheStatusManager.GetStatusFor(port, info.FullMethod, md); statusCode > 0 && statusCode != 200 {
+		codeText := strconv.Itoa(statusCode)
+		SetHeaders(ctx, port, global.Self.HostLabel, listenerLabel, map[string]string{
+			constants.HeaderGotoForcedStatus:          codeText,
+			constants.HeaderGotoForcedStatusRemaining: strconv.Itoa(rem),
+		})
+		return status.Error(codes.Internal, fmt.Sprintf("%s=%s", constants.HeaderGotoForcedStatus, codeText))
+	}
 	err := handler(srv, NewWrappedStream(ss, ctx))
 	if err != nil {
 		util.LogMessage(ctx, fmt.Sprintf("Service/Method [%s]: Error handling stream: %v", info.FullMethod, err))

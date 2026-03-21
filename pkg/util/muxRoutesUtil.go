@@ -216,14 +216,22 @@ func addQueries(r *mux.Router, altPaths []string, f func(http.ResponseWriter, *h
 
 func AddRouteWithMultiQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), qParamsSets [][]string, methods ...string) {
 	altPaths := GetAltPaths(path, true)
+	qPairSets := [][]string{}
 	qPairs := []string{}
 	for _, qParams := range qParamsSets {
-		if len(qParams) > 0 {
-			for _, q := range qParams {
+		changed := false
+		for _, q := range qParams {
+			if len(q) > 0 {
 				qPairs = append(qPairs, q, fmt.Sprintf("{%s}", q))
+				changed = true
 			}
-			addQueries(r, altPaths, f, qPairs, methods)
 		}
+		if changed {
+			qPairSets = append(qPairSets, qPairs)
+		}
+	}
+	for i := len(qPairSets) - 1; i >= 0; i-- {
+		addQueries(r, altPaths, f, qPairSets[i], methods)
 	}
 	if len(qParamsSets) == 0 || len(qParamsSets[0]) == 0 {
 		addRoutes(r, altPaths, f, methods)

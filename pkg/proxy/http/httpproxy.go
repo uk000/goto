@@ -170,9 +170,11 @@ func (p *Proxy) AddTarget(t *Target) error {
 		for _, match := range trigger.MatchAny {
 			//Registering URI with mux, so that the URI's embedded vars are extracted by mux
 			rootURI, suffix := util.GetRootURI(match.URIPrefix)
-			if rootURI != "" {
-				match.router = middleware.AddProxyPath(p.Router, rootURI)
+			if rootURI == "" {
+				rootURI = "/"
+				suffix = "*"
 			}
+			match.router = middleware.AddProxyPath(p.Router, p.Port, rootURI)
 			if re, err := util.BuildURIMatcherForRouter(suffix, ProxyRequest, match.router); err == nil {
 				match.uriRegexp = re
 			} else {
@@ -392,8 +394,8 @@ func (ep *TargetEndpoint) prepareInvocationSpec(tc *TrafficConfig) (*invocation.
 	is.RequestCount = ep.RequestCount
 	is.Replicas = ep.Concurrent
 	is.TrackPayload = true
-	is.CollectResponse = tc.Payload
 	if tc != nil {
+		is.CollectResponse = tc.Payload
 		is.Retries = tc.Retries
 		if tc.Delay != nil {
 			is.Delay = tc.Delay.Compute().String()
@@ -423,14 +425,14 @@ func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTra
 	is.Method = rc.method
 	var add map[string]string
 	var remove []string
-	if tt.Headers != nil {
+	if tt != nil && tt.Headers != nil {
 		add = tt.Headers.Add
 		remove = tt.Headers.Remove
+		is.RequestId = tt.RequestId
 	}
 	is.Headers, is.Host = util.TransformHeaders(rc.vars, rc.headers, add, remove)
 	is.BodyReader = rc.body
 	is.SendID = false
-	is.RequestId = tt.RequestId
 	return &is
 }
 

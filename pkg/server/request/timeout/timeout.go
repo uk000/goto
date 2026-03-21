@@ -53,6 +53,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(timeoutRouter, "/track/all", trackAll, "PUT", "POST")
 	util.AddRoute(timeoutRouter, "/track/clear", clearTimeoutTracking, "POST")
 	util.AddRoute(timeoutRouter, "/status", reportTimeoutTracking, "GET")
+	util.AddRoute(timeoutRouter, "", reportTimeoutTracking, "GET")
 }
 
 func (tt *TimeoutTracking) init() {

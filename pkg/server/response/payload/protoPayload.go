@@ -291,7 +291,7 @@ func (pp *ProtoPayloads) GetResponsePayload(requestURI string, header map[string
 			if !found && pp.PayloadByURIAndQuery[uri] != nil {
 				responsePayload, found = getPayloadForKV(query, pp.PayloadByURIAndQuery[uri])
 			}
-			if !found && pp.PayloadByURIAndBody[uri] != nil {
+			if !found && pp.PayloadByURIAndBody[uri] != nil && body != nil {
 				newBodyReader, responsePayload, captures, found = getPayloadForBodyMatch(body, pp.PayloadByURIAndBody[uri])
 			}
 			if !found && pp.PayloadByURIs[uri] != nil {
