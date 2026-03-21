@@ -22,7 +22,6 @@ import (
 	"goto/pkg/global"
 	mcpproxy "goto/pkg/proxy/mcp"
 	"goto/pkg/server/listeners"
-	"goto/pkg/server/middleware"
 	"goto/pkg/server/response/payload"
 	"goto/pkg/server/response/status"
 	"goto/pkg/types"
@@ -112,7 +111,6 @@ var (
 	ServerRoutes           = map[string]*types.Pair[string, string]{}
 	AllComponents          = map[string]map[string]map[string]IMCPComponent{}
 	Kinds                  = []string{KindTools, KindPrompts, KindResources, KindTemplates}
-	Middleware             = middleware.NewMiddleware("mcpserver", nil, nil)
 	StatusManager          = status.NewStatusManager()
 	lock                   sync.RWMutex
 )
