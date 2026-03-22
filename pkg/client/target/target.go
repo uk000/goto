@@ -76,8 +76,8 @@ func (tc *TargetClient) AddTarget(t *Target, r ...*http.Request) error {
 		tc.targets[t.Name] = t
 		tc.targetsLock.Unlock()
 		invocation.RemoveHttpClientForTarget(t.Name)
-		t.Headers[constants.HeaderFromGoto] = []string{global.Self.Name}
-		t.Headers[constants.HeaderFromGotoHost] = []string{global.Self.HostLabel}
+		t.Headers[constants.HeaderFromGoto] = global.Self.Name
+		t.Headers[constants.HeaderFromGotoHost] = global.Self.HostLabel
 		if t.AutoInvoke {
 			go func() {
 				if global.Flags.EnableClientLogs {

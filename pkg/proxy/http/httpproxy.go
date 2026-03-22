@@ -70,8 +70,9 @@ type RequestContext struct {
 }
 
 var (
-	portProxy = map[int]*Proxy{}
-	proxyLock sync.RWMutex
+	proxyRouters = map[int]map[string]*mux.Router{}
+	portProxy    = map[int]*Proxy{}
+	proxyLock    sync.RWMutex
 )
 
 func GetPortProxy(port int) *Proxy {
@@ -170,6 +171,16 @@ func (p *Proxy) enable(enable bool) {
 	p.Enabled = enable
 }
 
+func (p *Proxy) addProxyPath(path string) *mux.Router {
+	proxyLock.Lock()
+	defer proxyLock.Unlock()
+	if proxyRouters[p.Port] == nil {
+		proxyRouters[p.Port] = map[string]*mux.Router{}
+	}
+	proxyRouters[p.Port][path] = p.Router.PathPrefix(path).Subrouter()
+	return proxyRouters[p.Port][path]
+}
+
 func (p *Proxy) AddTarget(t *Target) error {
 	for _, trigger := range t.Triggers {
 		for _, match := range trigger.MatchAny {
@@ -179,7 +190,7 @@ func (p *Proxy) AddTarget(t *Target) error {
 				rootURI = "/"
 				suffix = "*"
 			}
-			match.router = middleware.AddProxyPath(p.Router, p.Port, rootURI)
+			match.router = p.addProxyPath(rootURI)
 			if re, err := util.BuildURIMatcherForRouter(suffix, ProxyRequest, match.router); err == nil {
 				match.uriRegexp = re
 			} else {
@@ -632,7 +643,7 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func WillProxyHTTP(w http.ResponseWriter, r *http.Request) bool {
+func WillProxyHTTP(r *http.Request) (bool, *mux.Router) {
 	port := util.GetRequestOrListenerPortNum(r)
 	proxy := GetPortProxy(port)
 	rs := util.GetRequestStore(r)
@@ -642,15 +653,21 @@ func WillProxyHTTP(w http.ResponseWriter, r *http.Request) bool {
 		rs.ProxiedRequest = len(matches) > 0
 		if rs.ProxiedRequest {
 			rs.ProxyTargets = matches
+			rootURI, _ := util.GetRootURI(r.RequestURI)
+			router := proxyRouters[port][rootURI]
+			if router == nil {
+				router = proxyRouters[port]["/"]
+			}
+			return true, router
 		}
 	}
-	return rs.ProxiedRequest
+	return false, nil
 }
 
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if WillProxyHTTP(w, r) {
-			util.MatchRouter.ServeHTTP(w, r)
+		if ok, router := WillProxyHTTP(r); ok {
+			router.ServeHTTP(w, r)
 		} else if next != nil {
 			next.ServeHTTP(w, r)
 		}

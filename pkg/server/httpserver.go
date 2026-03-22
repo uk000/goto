@@ -26,6 +26,7 @@ import (
 	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
+	httpproxy "goto/pkg/proxy/http"
 	"goto/pkg/registry/peer"
 	"goto/pkg/router"
 	grpcserver "goto/pkg/rpc/grpc/server"
@@ -380,14 +381,9 @@ func loadRouter(r *http.Request, rs *util.RequestStore) {
 	rootURI, _ := util.GetRootURI(r.RequestURI)
 	var uriRouter *mux.Router
 	if rootURI != "" {
-		if portProxyRouters := middleware.ProxyRouters[rs.RequestPortNum]; len(portProxyRouters) > 0 {
-			uriRouter = portProxyRouters[rootURI]
-			if uriRouter == nil {
-				uriRouter = portProxyRouters["/"]
-			}
-			if uriRouter != nil {
-				rs.IsProxy = true
-			}
+		if ok, router := httpproxy.WillProxyHTTP(r); ok && router != nil {
+			uriRouter = router
+			rs.IsProxy = true
 		}
 		if uriRouter == nil {
 			uriRouter = middleware.RootRouters[rootURI]

@@ -33,11 +33,11 @@ import (
 )
 
 type TriggerHTTPTarget struct {
-	Method  string              `json:"method"`
-	URL     string              `json:"url"`
-	Headers map[string][]string `json:"headers"`
-	Body    string              `json:"body"`
-	SendID  bool                `json:"sendID"`
+	Method  string            `json:"method"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers"`
+	Body    string            `json:"body"`
+	SendID  bool              `json:"sendID"`
 }
 
 type TriggerTarget struct {
@@ -361,25 +361,21 @@ func (t *Trigger) getRequestedTriggers(r *http.Request) map[string]*TriggerTarge
 	return targets
 }
 
-func (tt *TriggerTarget) prepareTargetHeaders(r *http.Request, w http.ResponseWriter) http.Header {
-	headers := http.Header{}
-	for h, hvs := range tt.HTTPTarget.Headers {
-		headerValues := []string{}
-		for _, hv := range hvs {
-			if strings.HasPrefix(hv, "{") && strings.HasSuffix(hv, "}") {
-				captureKey := strings.TrimLeft(hv, "{")
-				captureKey = strings.TrimRight(captureKey, "}")
-				if strings.EqualFold(captureKey, "request.uri") {
-					hv = r.RequestURI
-				} else if strings.EqualFold(captureKey, "request.headers") {
-					hv = util.ToJSONText(r.Header)
-				} else if captureValue := w.Header().Get(captureKey); captureValue != "" {
-					hv = captureValue
-				}
+func (tt *TriggerTarget) prepareTargetHeaders(r *http.Request, w http.ResponseWriter) map[string]string {
+	headers := map[string]string{}
+	for h, hv := range tt.HTTPTarget.Headers {
+		if strings.HasPrefix(hv, "{") && strings.HasSuffix(hv, "}") {
+			captureKey := strings.TrimLeft(hv, "{")
+			captureKey = strings.TrimRight(captureKey, "}")
+			if strings.EqualFold(captureKey, "request.uri") {
+				hv = r.RequestURI
+			} else if strings.EqualFold(captureKey, "request.headers") {
+				hv = util.ToJSONText(r.Header)
+			} else if captureValue := w.Header().Get(captureKey); captureValue != "" {
+				hv = captureValue
 			}
-			headerValues = append(headerValues, hv)
 		}
-		headers[h] = headerValues
+		headers[h] = hv
 	}
 	return headers
 }

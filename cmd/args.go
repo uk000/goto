@@ -286,7 +286,7 @@ func processClientArgs() {
 	for _, h := range hlist {
 		hv := strings.Split(h, ":")
 		if len(hv) == 2 {
-			global.CmdClientConfig.Headers[hv[0]] = append(global.CmdClientConfig.Headers[hv[0]], hv[1])
+			global.CmdClientConfig.Headers[hv[0]] = hv[1]
 		}
 	}
 	retryOnList := strings.Split(retryOn, ",")

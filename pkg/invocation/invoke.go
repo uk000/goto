@@ -234,9 +234,9 @@ func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
 
 func (tracker *InvocationTracker) prepareRequestHeaders(requestID, targetID, url string) map[string]string {
 	headers := map[string]string{}
-	for h, hvs := range tracker.Target.Headers {
-		if len(hvs) > 0 {
-			headers[h] = hvs[0]
+	for h, v := range tracker.Target.Headers {
+		if len(v) > 0 {
+			headers[h] = v
 		}
 	}
 	headers[HeaderGotoTargetID] = targetID
