@@ -9,6 +9,7 @@ import (
 	"goto/pkg/server/response/payload"
 	"goto/pkg/types"
 	"goto/pkg/util"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -53,7 +54,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
 		count = 10
 	}
 	if len(data) == 0 {
-		data = types.GenerateRandomPayload(chunkSize)
+		data = types.GenerateRandomPayload(chunkSize, util.GetCurrentListenerLabel(r))
 		repeat = true
 	} else if len(data) < chunkSize {
 		data = payload.FixPayload(data, chunkSize)
@@ -70,7 +71,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(constants.HeaderGotoStreamDuration, duration.String())
 	}
 
-	fw := intercept.NewFlushWriter(r, w)
+	fw := intercept.NewFlushWriter(w)
 	if fw == nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintln(w, "Cannot stream")
@@ -92,9 +93,13 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
 		if end > payloadSize {
 			end = payloadSize
 		}
-		fw.Write(data[start:end])
-		fw.Write([]byte("\n"))
-		fw.Flush()
+		chunkData := data[start:end]
+		chunkData = append(chunkData, []byte("\n")...)
+		if _, err := fw.Write(chunkData); err != nil {
+			log.Printf("Failed to write stream response with error: %s", err.Error())
+			fmt.Fprintf(w, "Failed to write stream response with error: %s", err.Error())
+			return
+		}
 		payloadIndex++
 		if payloadIndex == payloadChunkCount {
 			if repeat {

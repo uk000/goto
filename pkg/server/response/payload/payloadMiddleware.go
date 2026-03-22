@@ -82,7 +82,7 @@ func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload,
 	payloadSent := false
 	if rp.IsStream {
 		w.Header().Set(constants.HeaderGotoPayloadCount, strconv.Itoa(len(rp.StreamPayload)))
-		if fw := intercept.NewFlushWriter(r, w); fw != nil {
+		if fw := intercept.NewFlushWriter(w); fw != nil {
 			failed := false
 			for _, b := range rp.StreamPayload {
 				if n, err := fw.Write(b); err != nil {

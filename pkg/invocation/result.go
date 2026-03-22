@@ -191,8 +191,8 @@ func (result *InvocationResult) processGRPCResponse(req *InvocationRequest, resp
 func (result *InvocationResult) readHTTPResponsePayload() {
 	if result.httpResponse != nil && result.httpResponse.Body != nil {
 		defer result.httpResponse.Body.Close()
-		if result.tracker.Target.TrackPayload || result.tracker.Target.CollectResponse {
-			data, size, first, last, err := util.ReadAndTrack(result.httpResponse.Body, result.tracker.Target.CollectResponse)
+		if result.tracker.Target.TrackPayload || result.tracker.Target.CollectResponse || result.tracker.Target.ResponseWriter != nil {
+			data, size, first, last, err := util.ReadAndTrack(result.httpResponse.Body, result.tracker.Target.CollectResponse, result.tracker.Target.ResponseWriter)
 			if err == "" {
 				result.Response.PayloadSize = size
 				result.Response.FirstByteInAt = first.UTC().String()

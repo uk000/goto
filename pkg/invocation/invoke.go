@@ -47,6 +47,7 @@ type InvocationRequest struct {
 	grpcStreamInput *pb.StreamConfig
 	requestReader   io.ReadCloser
 	requestWriter   io.WriteCloser
+	responseWriter  io.Writer
 	client          transport.ClientTransport
 	tracker         *InvocationTracker
 	result          *InvocationResult
@@ -73,7 +74,7 @@ func (tracker *InvocationTracker) invokeWithRetries(requestID string, targetID s
 		}
 		request.invoke()
 		metrics.UpdateTargetRequestCount(target.Name)
-		retry := result.shouldRetry()
+		retry := result.shouldRetry() && tracker.Target.Retries > 0
 		if !retry {
 			break
 		} else if i < target.Retries {
@@ -220,6 +221,7 @@ func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
 				ir.uri = req.URL.Path
 				ir.requestReader = requestReader
 				ir.requestWriter = requestWriter
+				ir.responseWriter = ir.tracker.Target.ResponseWriter
 			} else {
 				ir.result.err = err
 				return false

@@ -71,8 +71,7 @@ func echoStream(w http.ResponseWriter, r *http.Request) {
 	metrics.UpdateRequestCount("echo")
 	util.AddLogMessage("Streaming Echo", r)
 	var writer io.Writer = w
-	// if util.IsH2(r) {
-	fw := intercept.NewFlushWriter(r, w)
+	fw := intercept.NewFlushWriter(w)
 	util.CopyHeaders("Request", r, w, r.Header, true, true, false)
 	util.SetHeadersSent(r, true)
 	fw.Flush()

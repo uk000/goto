@@ -219,21 +219,28 @@ func ReadArrayOfArrays(r io.Reader) [][]byte {
 	return data
 }
 
-func ReadAndTrack(r io.Reader, collect bool) ([]byte, int, time.Time, time.Time, string) {
+func ReadAndTrack(r io.Reader, collect bool, w io.Writer) ([]byte, int, time.Time, time.Time, string) {
 	buf := make([]byte, 1000)
 	var result []byte
 	var readSize int
 	var first, last time.Time
+	canWrite := w != nil && !reflect.ValueOf(w).IsNil()
 	for {
 		size, err := r.Read(buf)
-		now := time.Now()
-		if first.IsZero() {
-			first = now
-		}
-		last = now
-		readSize += size
-		if collect {
-			result = append(result, buf[0:size]...)
+		if err == nil {
+			now := time.Now()
+			if first.IsZero() {
+				first = now
+			}
+			last = now
+			readSize += size
+			data := buf[0:size]
+			if collect {
+				result = append(result, data...)
+			}
+			if canWrite {
+				_, err = w.Write(data)
+			}
 		}
 		if err == io.EOF {
 			return result, readSize, first, last, ""

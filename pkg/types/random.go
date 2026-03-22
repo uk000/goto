@@ -17,6 +17,7 @@
 package types
 
 import (
+	"bytes"
 	"math/rand"
 	"sync/atomic"
 	"time"
@@ -58,12 +59,20 @@ func RandomFrom(vals []int) int {
 	return vals[random.Intn(len(vals))]
 }
 
-func GenerateRandomPayload(size int) []byte {
-	b := make([]byte, size)
-	for i := range b {
-		b[i] = charset[Random(randomCharsetLength)]
+func GenerateRandomPayload(size int, prefix ...string) []byte {
+	b := bytes.Buffer{}
+	written := 0
+	for _, p := range prefix {
+		written += len(p)
+		b.Write([]byte(p))
+		if written > size {
+			break
+		}
 	}
-	return b
+	for i := written; i < size; i++ {
+		b.WriteByte(charset[Random(randomCharsetLength)])
+	}
+	return b.Bytes()
 }
 
 func GenerateRandomString(size int) string {

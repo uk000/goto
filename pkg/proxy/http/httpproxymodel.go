@@ -80,6 +80,7 @@ type TargetEndpoint struct {
 	IsTLS        bool   `yaml:"tls" json:"tls"`
 	RequestCount int    `yaml:"requestCount" json:"requestCount"`
 	Concurrent   int    `yaml:"concurrent" json:"concurrent"`
+	Stream       bool   `yaml:"stream" json:"stream"`
 	name         string
 	callCount    int
 	target       *Target

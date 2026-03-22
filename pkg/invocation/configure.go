@@ -78,6 +78,7 @@ type InvocationSpec struct {
 	VerifyTLS            bool        `json:"verifyTLS"`
 	TLS                  bool        `json:"tls"`
 	BodyReader           io.Reader   `json:"-"`
+	ResponseWriter       io.Writer   `json:"-"`
 	httpVersionMajor     int
 	httpVersionMinor     int
 	tcp                  bool

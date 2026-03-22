@@ -54,10 +54,22 @@ type HeaderInterceptResponseWriter struct {
 	Headers http.Header
 }
 
-type FlushWriter struct {
+type FlushWriter interface {
+	io.Writer
+	http.Flusher
+}
+
+type FlushWriterImpl struct {
 	flusher http.Flusher
 	w       io.Writer
-	h2c     bool
+}
+
+type ChanWriter interface {
+	io.Writer
+}
+
+type ChanWriterImpl struct {
+	c chan []byte
 }
 
 type BodyTracker struct {
@@ -71,18 +83,24 @@ func GetConn(r *http.Request) net.Conn {
 	return nil
 }
 
-func NewFlushWriter(r *http.Request, w io.Writer) *FlushWriter {
-	rs := util.GetRequestStore(r)
+func CreateOrGetFlushWriter(w io.Writer) FlushWriter {
+	if fw, ok := w.(FlushWriter); ok {
+		return fw
+	}
+	return NewFlushWriter(w)
+}
+
+func NewFlushWriter(w io.Writer) FlushWriter {
 	if f, ok := w.(http.Flusher); ok {
 		if irw, ok := w.(*InterceptResponseWriter); ok {
 			irw.SetChunked()
-			return &FlushWriter{w: w, h2c: rs.IsH2C, flusher: f}
 		}
+		return &FlushWriterImpl{w: w, flusher: f}
 	}
 	return nil
 }
 
-func (fw FlushWriter) Write(p []byte) (int, error) {
+func (fw *FlushWriterImpl) Write(p []byte) (int, error) {
 	n, err := fw.w.Write(p)
 	if err == nil {
 		fw.Flush()
@@ -90,10 +108,23 @@ func (fw FlushWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func (fw FlushWriter) Flush() {
+func (fw *FlushWriterImpl) Flush() {
 	if fw.flusher != nil {
 		fw.flusher.Flush()
 	}
+}
+
+func NewChanWriter(c chan []byte) ChanWriter {
+	return &ChanWriterImpl{c: c}
+}
+
+func (c *ChanWriterImpl) Write(p []byte) (int, error) {
+	c.c <- p
+	return len(p), nil
+}
+
+func (c *ChanWriterImpl) Chan() chan []byte {
+	return c.c
 }
 
 func trackRequestBody(r *http.Request) {

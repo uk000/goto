@@ -55,13 +55,18 @@ type Proxy struct {
 type ProxyTargets map[string]*MatchedTarget
 
 type RequestContext struct {
-	path    string
-	method  string
-	vars    map[string]string
-	headers map[string]string
-	queries map[string]string
-	body    io.Reader
-	w       http.ResponseWriter
+	path     string
+	method   string
+	vars     map[string]string
+	headers  map[string]string
+	queries  map[string]string
+	body     io.Reader
+	r        *http.Request
+	respChan chan byte
+	w        http.ResponseWriter
+	fw       intercept.FlushWriter
+	c        chan []byte
+	cw       intercept.ChanWriter
 }
 
 var (
@@ -283,6 +288,7 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 	responseStatuses := map[string]map[string]int{}
 	var proxyResponseStatus int
 	go p.asyncCollectResponses(out, wg, &proxyResponseStatus, responseStatuses, responses)
+	go p.asyncStreamResponse(rc)
 	clean := false
 	for _, match := range targetsMatches {
 		match.invoke(rc, out, wg)
@@ -291,6 +297,7 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 		}
 	}
 	wg.Wait()
+	close(rc.c)
 	rc.w.Header().Add(constants.HeaderGotoProxyUpstreamStatus, util.ToJSONText(responseStatuses))
 	rc.w.WriteHeader(proxyResponseStatus)
 	if len(responses) > 0 {
@@ -352,9 +359,18 @@ func (ep *EndpointInvocation) asyncInvoke(target string, tracker *invocation.Inv
 		}
 		out <- &TargetEndpointResponse{
 			target:   target,
-			endpoint: ep.ep.name,
+			endpoint: ep.ep.URL,
 			response: resp.Response,
 		}
+	}
+}
+
+func (p *Proxy) asyncStreamResponse(rc *RequestContext) {
+	for data := range rc.c {
+		if len(data) == 0 {
+			return
+		}
+		rc.fw.Write(data)
 	}
 }
 
@@ -432,6 +448,15 @@ func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTra
 	}
 	is.Headers, is.Host = util.TransformHeaders(rc.vars, rc.headers, add, remove)
 	is.BodyReader = rc.body
+	if ep.ep.Stream {
+		if rc.cw == nil {
+			rc.cw = intercept.NewChanWriter(rc.c)
+		}
+		if rc.fw == nil {
+			rc.fw = intercept.CreateOrGetFlushWriter(rc.w)
+		}
+		is.ResponseWriter = rc.cw
+	}
 	is.SendID = false
 	return &is
 }
@@ -587,6 +612,7 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		util.AddHeaderWithPrefix("Proxy-", HeaderGotoPort, port, w.Header())
 		util.AddHeaderWithPrefix("Proxy-", HeaderGotoProtocol, rs.GotoProtocol, w.Header())
 		util.AddHeaderWithPrefix("Proxy-", HeaderViaGoto, rs.ListenerLabel, w.Header())
+		w.Header().Set("Trailer", constants.HeaderGotoProxyUpstreamStatus)
 
 		util.AddLogMessage(fmt.Sprintf("Proxying to matching targets %s", util.GetMapKeys(targets)), r)
 		proxy.incrementMatchCounts(targets, r)
@@ -597,7 +623,10 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			headers: util.GetHeaderValues(r),
 			queries: util.GetQueryParams(r),
 			body:    r.Body,
+			r:       r,
 			w:       w,
+			fw:      intercept.NewFlushWriter(w),
+			c:       make(chan []byte, 2),
 		}
 		proxy.invokeTargets(targets, rc)
 	}
