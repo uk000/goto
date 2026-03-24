@@ -28,6 +28,7 @@ const (
 	HeaderGotoTunnelStatus          = "Goto-Tunnel-Status"
 	HeaderGotoPort                  = "Goto-Port"
 	HeaderGotoProtocol              = "Goto-Protocol"
+	HeaderGotoTLS                   = "Goto-TLS"
 	HeaderGotoRemoteAddress         = "Goto-Remote-Address"
 	HeaderGotoResponseStatus        = "Goto-Response-Status"
 	HeaderGotoResponseDelay         = "Goto-Response-Delay"

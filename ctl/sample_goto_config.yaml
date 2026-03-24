@@ -1,4 +1,11 @@
 name: goto-test-config
+tls:
+  8443:
+    key: /Users/u0s00px/code/goto/1000488443NS-3K-local-8443-key.pem
+    cert: /Users/u0s00px/code/goto/1000488443NS-3K-local-8443-cert.pem
+  4000:
+    key: /Users/u0s00px/code/goto/17228108878443NS-3K-local-8443-key.pem
+    cert: /Users/u0s00px/code/goto/1722812138443NS-3K-local-8443-cert.pem
 mcp:
   toolSchemas:
     - name: default
@@ -261,7 +268,7 @@ mcp:
                   Accept: "application/json"
         - tool:
             name: remote-echo
-            description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: echo] on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/echo], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
+            description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: echo] on remote MCP server [goto-mcp-1] at URL[https://localhost:4000/mcp/goto-mcp-1/echo], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
           behavior:
             remote: true
@@ -269,7 +276,8 @@ mcp:
             remote:
               tool: "echo"
               server: "goto-mcp-1"
-              url: "localhost:4000/mcp/goto-mcp-1/echo"
+              url: "https://localhost:4000/mcp/goto-mcp-1/echo"
+              tls: true
               sseURL: ""
               forceSSE: false
               authority: "localhost"
@@ -758,7 +766,8 @@ a2a:
                   - echo2
                 toolCall:
                   tool: echo
-                  url: localhost:4000/mcp/goto-mcp-2/echo
+                  url: https://localhost:4000/mcp/goto-mcp-2/echo
+                  tls: true
                   sseURL: ""
                   server: goto-mcp-2
                   authority: localhost
@@ -883,8 +892,9 @@ a2a:
                 triggers: [agent1]
                 agentCall:
                   name: goto-agent-1
-                  agentURL: http://localhost:4000/agent/goto-agent-1
-                  cardURL: http://localhost:4000/agent/goto-agent-1/.well-known/agent.json
+                  agentURL: https://localhost:4000/agent/goto-agent-1
+                  cardURL: https://localhost:4000/agent/goto-agent-1/.well-known/agent.json
+                  tls: true
                   authority: localhost
                   delay: 1s
                   message: echo
@@ -1502,86 +1512,107 @@ grpc:
     - SampleService
 registry:
   locker: locker1
-traffic:
-  config:
-    tracking:
-      headers:
-        - name: Goto-Host
-        - name: Via-Goto
-      time:
-        buckets:
-          - 0-100
-          - 100-200
-          - 200-500
-          - 500-
-    targets:
-      - name: validate-status
+client:
+  targets:
+    http:
+      - name: target1
         method: POST
-        protocol: "HTTP/2"
-        url: "http://localhost:8082/status/418"
-        replicas: 1
-        requestCount: 1
-        expectation:
-          statusCode: 418
-        autoInvoke: true
-      - name: validate-payload-length
-        method: POST
-        protocol: "HTTP/2"
-        url: "http://localhost:8082/echo/stream"
-        streamPayload:
+        endpoints:
+          primary:
+            url: "http://localhost:8081/status/503"
+            authority: goto.uk
+          secondary:
+          - url: "http://localhost:8082/status/200"
+            authority: goto.uk
+          fallback: true
+          ab: false
+          random: false
+        protoConfig:
+          protocol: "HTTP/2"
+          autoUpgrade: true
+          tls: false
+          verifyTLS: false
+        headers:
+          foo: foo1
+          bar: bar1
+        payload:
+          text: ""
+          auto: ""
+          stream:
           - "{firstbody}"
           - "{secondbody}"
           - "{thirdbody}"
           - "{fourthbody}"
           - "{fifthbody}"
-        streamDelay: "1s"
+          streamDelay: "1s"
+          binary: false
+        requestId:
+          send: true
+          uuid: false
+          header: "goto-client-request-id"
+          query: "goto-client-request-id"
+        resiliency:
+          retries: 1
+          retryDelay: "1s"
+          retriableStatusCodes: [0,500,503]
+          connTimeout: "10s"
+          connIdleTimeout: "30s"
+          requestTimeout: "5s"
+        traffic:
+          autoInvoke: false
+          replicas: 1
+          requestCount: 1
+          warmupCount: 0
+          initialDelay: "1s"
+          delay: "1s"
+          keepOpen: "10s"
+          collectResponse: false
+          trackPayload: false
+        assertions:
+          FirstAssertion:
+            statusCode: 418
+            payloadSize: 0
+            payload: ""
+            headers:
+              request-host: host
+              goto-port: 8080
+            retries: 1
+            failedURL: "http://localhost:8081/status/503"
+            successURL: "http://localhost:8082/status/200"
+    grpc:
+      - name: target1
+        service: Goto
+        method: echo
+        endpoints:
+          primary:
+            url: "http://localhost:8081/status/418"
+            authority: goto.uk
+          secondary:
+          - url: "http://localhost:8082/status/418"
+            authority: goto.uk
+          fallback: true
+          ab: false
+          random: false
+        authority: goto.uk
+        url: "http://localhost:8888"
+        headers:
+          foo: foo2
+          bar: bar2
+        payload: ""
+        autoPayload: ""
         replicas: 1
         requestCount: 1
-        expectation:
-          statusCode: 200
-          payloadLength: 57
-        autoInvoke: true
-      - name: validate-payload
-        method: POST
-        protocol: "HTTP/2"
-        url: "http://localhost:8082/echo/stream"
-        streamPayload:
-          - "{firstbody}"
-          - "{secondbody}"
-          - "{thirdbody}"
-          - "{fourthbody}"
-          - "{fifthbody}"
-        streamDelay: "1s"
-        replicas: 1
-        requestCount: 1
-        expectation:
-          statusCode: 200
-          payload: "{firstbody}{secondbody}{thirdbody}{fourthbody}{fifthbody}"
-        autoInvoke: true
-      - name: validate-headers
-        method: POST
-        protocol: "HTTP/2"
-        url: "http://localhost:8082/echo/stream"
-        streamPayload:
-          - "{firstbody}"
-          - "{secondbody}"
-          - "{thirdbody}"
-          - "{fourthbody}"
-          - "{fifthbody}"
-        streamDelay: "1s"
-        replicas: 1
-        requestCount: 1
-        expectation:
-          statusCode: 200
-          headers:
-            via-goto: test
-            goto-port: "8081"
-        autoInvoke: true
-  invoke:
-    - validate-status
-    - validate-payload-length
-    - validate-payload
-    - validate-headers
+        warmupCount: 0
+  tracking:
+    headers:
+      - name: Goto-Host
+      - name: Via-Goto
+    time:
+      buckets:
+        - 0-100
+        - 100-200
+        - 200-500
+        - 500-
 jobs:
   config:
     - id: job1

@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"goto/pkg/constants"
 	"goto/pkg/metrics"
 	"goto/pkg/server/echo"
 	"goto/pkg/transport"
@@ -142,7 +141,7 @@ func ParseTool(payload []byte) (tool *MCPTool, err error) {
 	tool.Name = strings.ReplaceAll(tool.Name, "\"", "")
 	if tool.Behavior.Fetch {
 		isTLS := strings.HasPrefix(tool.Config.RemoteTool.URL, "https:")
-		client := transport.CreateDefaultHTTPClient(tool.Name, false, isTLS, metrics.ConnTracker)
+		client := transport.CreateDefaultHTTPClient(tool.Name, false, isTLS, tool.Config.RemoteTool.Authority, metrics.ConnTracker)
 		tool.client = client
 	}
 	return
@@ -205,9 +204,9 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 		remoteArgs:     remoteArgs,
 		delay:          delay,
 	}
+	// rs.ResponseWriter.Header().Add(constants.HeaderGotoMCPServer, t.Server.Name)
+	// rs.ResponseWriter.Header().Add(constants.HeaderGotoMCPTool, t.Name)
 	result, err = tctx.RunTool()
-	rs.ResponseWriter.Header().Add(constants.HeaderGotoMCPServer, t.Server.Name)
-	rs.ResponseWriter.Header().Add(constants.HeaderGotoMCPTool, t.Name)
 	return
 }
 

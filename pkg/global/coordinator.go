@@ -44,19 +44,21 @@ type TCPServeWatcher func(func(listenerID string, port int, listener net.Listene
 type GRPCStartListener func()
 type GRPCStopListener func()
 type GRPCInterceptor func(server IGRPCManager)
+type ListenersStartWatcher func()
 
 var (
-	httpStartWatchers  []HTTPStartWatcher
-	httpStopWatchers   []HTTPStopWatcher
-	mcpStartWatchers   []HTTPStartWatcher
-	mcpStopWatchers    []HTTPStopWatcher
-	tcpServeWatchers   []TCPServeWatcher
-	grpcStartListeners []GRPCStartListener
-	grpcStopListeners  []GRPCStopListener
-	grpcIntercepts     []GRPCInterceptor
-	GRPCServer         IGRPCServer
-	GRPCManager        IGRPCManager
-	ShutdownFuncs      = []func(){}
+	httpStartWatchers      []HTTPStartWatcher
+	httpStopWatchers       []HTTPStopWatcher
+	mcpStartWatchers       []HTTPStartWatcher
+	mcpStopWatchers        []HTTPStopWatcher
+	tcpServeWatchers       []TCPServeWatcher
+	grpcStartListeners     []GRPCStartListener
+	grpcStopListeners      []GRPCStopListener
+	grpcIntercepts         []GRPCInterceptor
+	listenersStartWatchers []ListenersStartWatcher
+	GRPCServer             IGRPCServer
+	GRPCManager            IGRPCManager
+	ShutdownFuncs          = []func(){}
 )
 
 func AddHTTPStartWatcher(w HTTPStartWatcher) {
@@ -89,6 +91,16 @@ func AddGRPCStopWatcher(w GRPCStopListener) {
 
 func AddGRPCIntercept(w GRPCInterceptor) {
 	grpcIntercepts = append(grpcIntercepts, w)
+}
+
+func AddListenersStartWatcher(w ListenersStartWatcher) {
+	listenersStartWatchers = append(listenersStartWatchers, w)
+}
+
+func OnListenersStarted() {
+	for _, w := range listenersStartWatchers {
+		w()
+	}
 }
 
 func OnHTTPStart(server *http.Server) {

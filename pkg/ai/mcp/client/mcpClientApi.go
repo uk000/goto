@@ -41,9 +41,9 @@ func setRoutes(r *mux.Router) {
 
 	util.AddRoute(mcpClient, "/{name}?/details", getDetails, "GET")
 
-	util.AddRouteWithMultiQ(mcpClient, "/list/all", listTools, [][]string{{"url"}, {"sse", "authority"}}, "POST", "GET")
-	util.AddRouteWithMultiQ(mcpClient, "/list/tools", listTools, [][]string{{"url"}, {"sse", "authority"}}, "POST", "GET")
-	util.AddRouteWithMultiQ(mcpClient, "/list/tools/names", listTools, [][]string{{"url"}, {"sse", "authority"}}, "POST", "GET")
+	util.AddRouteWithMultiQ(mcpClient, "/list/all", listTools, [][]string{{"url"}, {"sse", "tls", "authority"}}, "POST", "GET")
+	util.AddRouteWithMultiQ(mcpClient, "/list/tools", listTools, [][]string{{"url"}, {"sse", "tls", "authority"}}, "POST", "GET")
+	util.AddRouteWithMultiQ(mcpClient, "/list/tools/names", listTools, [][]string{{"url"}, {"sse", "tls", "authority"}}, "POST", "GET")
 
 	util.AddRoute(mcpClient, "/call", callTool, "POST")
 
@@ -55,12 +55,13 @@ func listTools(w http.ResponseWriter, r *http.Request) {
 	rs := util.GetRequestStore(r)
 	url := util.GetStringParamValue(r, "url")
 	sse := util.GetBoolParamValue(r, "sse")
+	tls := util.GetBoolParamValue(r, "tls")
 	authority := util.GetStringParamValue(r, "authority")
 	toolsOnly := strings.Contains(r.RequestURI, "tools")
 	namesOnly := strings.Contains(r.RequestURI, "names")
 	msg := ""
 	clientId := fmt.Sprintf("[%s][Client: tool/list]", global.Self.HostLabel)
-	client := NewClient(rs.RequestPortNum, sse, clientId, util.GetCurrentListenerLabel(r), nil)
+	client := NewClient(rs.RequestPortNum, sse, tls, clientId, util.GetCurrentListenerLabel(r), authority, nil)
 	session, err := client.Connect(url, "tool/list")
 	session.SetAuthority(authority)
 	if err != nil {
@@ -155,7 +156,7 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 
 func doToolCall(port int, tc *ToolCall, r *http.Request) (output map[string]any, err error) {
 	clientId := fmt.Sprintf("[%s][Client: tool/call][%s]", global.Self.HostLabel, tc.Tool)
-	client := NewClient(port, tc.ForceSSE, clientId, util.GetCurrentListenerLabel(r), nil)
+	client := NewClient(port, tc.ForceSSE, tc.TLS, clientId, util.GetCurrentListenerLabel(r), tc.Authority, nil)
 	session, err := client.Connect(tc.URL, tc.Tool)
 	if err != nil {
 		return nil, err

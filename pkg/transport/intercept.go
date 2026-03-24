@@ -48,6 +48,7 @@ type IHTTPTransportIntercept interface {
 	http.RoundTripper
 	SetRequestIntercept(r IHTTPRequestIntercept)
 	SetResponseIntercept(r IHTTPResponseIntercept)
+	Original() any
 }
 
 type BaseTransportIntercept struct {
@@ -67,6 +68,8 @@ type HTTPTransportIntercept struct {
 type HTTP2TransportIntercept struct {
 	*http2.Transport
 	*BaseTransportIntercept
+	requestIntercept  IHTTPRequestIntercept
+	responseIntercept IHTTPResponseIntercept
 }
 
 type GRPCIntercept struct {
@@ -74,12 +77,13 @@ type GRPCIntercept struct {
 	dialOpts []grpc.DialOption
 }
 
-func NewHTTPTransportInterceptWithWatch(orig *http.Transport, label string, newConnNotifierChan chan string, watcher IConnWatcher) *HTTPTransportIntercept {
+func NewHTTPTransportInterceptWithWatch(orig any, label string, newConnNotifierChan chan string, watcher IConnWatcher) *HTTPTransportIntercept {
+	ht := orig.(*http.Transport)
 	t := &HTTPTransportIntercept{
-		Transport:              orig,
+		Transport:              ht,
 		BaseTransportIntercept: &BaseTransportIntercept{},
 	}
-	t.tlsConfigPtr = &orig.TLSClientConfig
+	t.tlsConfigPtr = &ht.TLSClientConfig
 	dialer := t.getDialer()
 	t.Transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		if conn, err := dialer(ctx, network, addr); err == nil {
@@ -94,16 +98,17 @@ func NewHTTPTransportInterceptWithWatch(orig *http.Transport, label string, newC
 	return t
 }
 
-func NewHTTPTransportIntercept(orig *http.Transport, label string, newConnNotifierChan chan string) *HTTPTransportIntercept {
+func NewHTTPTransportIntercept(orig any, label string, newConnNotifierChan chan string) *HTTPTransportIntercept {
 	return NewHTTPTransportInterceptWithWatch(orig, label, newConnNotifierChan, nil)
 }
 
-func NewHTTP2TransportIntercept(orig *http2.Transport, label string, newConnNotifierChan chan string) *HTTP2TransportIntercept {
+func NewHTTP2TransportIntercept(orig any, label string, newConnNotifierChan chan string) *HTTP2TransportIntercept {
+	ht := orig.(*http2.Transport)
 	t := &HTTP2TransportIntercept{
-		Transport:              orig,
+		Transport:              ht,
 		BaseTransportIntercept: &BaseTransportIntercept{},
 	}
-	t.tlsConfigPtr = &orig.TLSClientConfig
+	t.tlsConfigPtr = &ht.TLSClientConfig
 	dialer := t.getDialer()
 	t.Transport.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
 		if conn, err := dialer(context.Background(), network, addr, cfg); err == nil {
@@ -139,6 +144,10 @@ func NewGRPCIntercept(label string, dialOpts []grpc.DialOption, newConnNotifierC
 
 func (t *HTTPTransportIntercept) AsHTTP() IHTTPTransportIntercept {
 	return t
+}
+
+func (t *HTTPTransportIntercept) Original() any {
+	return t.Transport
 }
 
 func (t *HTTPTransportIntercept) getDialer() func(context.Context, string, string) (net.Conn, error) {
@@ -179,6 +188,40 @@ func (t *HTTP2TransportIntercept) getDialer() func(context.Context, string, stri
 	return func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
 		return t.Dialer.DialContext(ctx, network, addr)
 	}
+}
+
+func (t *HTTP2TransportIntercept) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.requestIntercept != nil {
+		t.requestIntercept.InterceptRequest(req)
+	}
+	resp, err := t.Transport.RoundTrip(req)
+	if resp != nil && t.responseIntercept != nil {
+		t.responseIntercept.InterceptResponse(resp)
+	}
+	return resp, err
+}
+
+func (t *HTTP2TransportIntercept) RoundTripOpt(req *http.Request, opt http2.RoundTripOpt) (*http.Response, error) {
+	if t.requestIntercept != nil {
+		t.requestIntercept.InterceptRequest(req)
+	}
+	resp, err := t.Transport.RoundTripOpt(req, opt)
+	if resp != nil && t.responseIntercept != nil {
+		t.responseIntercept.InterceptResponse(resp)
+	}
+	return resp, err
+}
+
+func (t *HTTP2TransportIntercept) SetRequestIntercept(ri IHTTPRequestIntercept) {
+	t.requestIntercept = ri
+}
+
+func (t *HTTP2TransportIntercept) SetResponseIntercept(ri IHTTPResponseIntercept) {
+	t.responseIntercept = ri
+}
+
+func (t *HTTP2TransportIntercept) Original() any {
+	return t.Transport
 }
 
 func (t *BaseTransportIntercept) GetOpenConnectionCount() int {

@@ -52,6 +52,7 @@ type ToolCall struct {
 	SSEURL    string         `json:"sseURL"`
 	Server    string         `json:"server,omitempty"`
 	Authority string         `json:"authority,omitempty"`
+	TLS       bool           `json:"tls,omitempty"`
 	ForceSSE  bool           `json:"forceSSE,omitempty"`
 	Raw       bool           `json:"neat,omitempty"`
 	Delay     string         `json:"delay,omitempty"`
@@ -70,10 +71,11 @@ type MCPSession struct {
 	SSE             bool
 	Operation       string
 	Hops            *util.Hops
-	session         *gomcp.ClientSession
 	FirstActivityAt time.Time
 	LasatActivityAt time.Time
+	session         *gomcp.ClientSession
 	mcpClient       *MCPClient
+	currentRequest  string
 	currentToolCall *ToolCall
 	inHeaders       http.Header
 	outHeaders      *types.Headers
@@ -85,9 +87,11 @@ type MCPClient struct {
 	CallerId       string
 	Listener       string
 	SSE            bool
+	TLS            bool
+	Stop           bool
 	ActiveSessions map[string]*MCPSession
 	httpClient     *http.Client
-	ht             *transport.HTTPTransportIntercept
+	ht             transport.IHTTPTransportIntercept
 	mcpTransport   *MCPClientInterceptTransport
 	progressChan   chan string
 	client         *gomcp.Client
@@ -103,7 +107,7 @@ type MCPNamedClientPayload struct {
 }
 
 type MCPClientInterceptTransport struct {
-	*transport.HTTPTransportIntercept
+	ht transport.IHTTPTransportIntercept
 	gomcp.Transport
 }
 
@@ -160,23 +164,24 @@ func SetRoots(name string, payload []byte) error {
 	return nil
 }
 
-func NewClient(port int, sse bool, callerId, listener string, progressChan chan string) *MCPClient {
+func NewClient(port int, sse, tls bool, callerId, listener, authority string, progressChan chan string) *MCPClient {
 	name := fmt.Sprintf("GotoMCP-%d[%s][%s]", Counter.Add(1), global.Funcs.GetListenerLabelForPort(port), callerId)
 	if sse {
 		name += "[sse]"
 	}
-	return newMCPClient(sse, name, callerId, listener, progressChan)
+	return newMCPClient(sse, tls, name, callerId, listener, authority, progressChan)
 }
 
-func newMCPClient(sse bool, name, callerId, listener string, progressChan chan string) *MCPClient {
+func newMCPClient(sse, tls bool, name, callerId, listener, authority string, progressChan chan string) *MCPClient {
 	//httpClient := transport.CreateSimpleHTTPClient()
-	ht := transport.CreateHTTPClient(name, false, true, false, "", 0,
+	ht := transport.CreateHTTPClient(name, true, true, tls, authority, 0,
 		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
 	m := &MCPClient{
 		Name:           name,
 		CallerId:       callerId,
 		Listener:       listener,
 		SSE:            sse,
+		TLS:            tls,
 		httpClient:     ht.HTTP(),
 		ActiveSessions: map[string]*MCPSession{},
 		progressChan:   progressChan,
@@ -196,9 +201,9 @@ func newMCPClient(sse bool, name, callerId, listener string, progressChan chan s
 	if m.clientPayload != nil {
 		m.client.AddRoots(m.clientPayload.Roots...)
 	}
-	m.client.AddSendingMiddleware(m.SendingMiddleware)
-	m.client.AddReceivingMiddleware(m.ReceivingMiddleware)
 	if t, ok := ht.Transport().(*transport.HTTPTransportIntercept); ok {
+		m.ht = t
+	} else if t, ok := ht.Transport().(*transport.HTTP2TransportIntercept); ok {
 		m.ht = t
 	}
 	return m
@@ -212,8 +217,8 @@ func (c *MCPClient) newMCPTransport(label, url string) gomcp.Transport {
 		mcpTransport = &gomcp.StreamableClientTransport{Endpoint: url, MaxRetries: -1, HTTPClient: c.httpClient}
 	}
 	return &MCPClientInterceptTransport{
-		HTTPTransportIntercept: transport.NewHTTPTransportInterceptWithWatch(c.ht.Transport, label, metrics.ConnTracker, c),
-		Transport:              mcpTransport,
+		ht:        c.ht,
+		Transport: mcpTransport,
 	}
 }
 
@@ -244,7 +249,11 @@ func (c *MCPClient) Connect(url, operLabel string) (session *MCPSession, err err
 
 func (c *MCPClient) ConnectWithHops(url, operLabel string, hops *util.Hops) (*MCPSession, error) {
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		url = "http://" + url
+		if c.TLS {
+			url = "https://" + url
+		} else {
+			url = "http://" + url
+		}
 	}
 	t := c.newMCPTransport(c.Name, url)
 	session := c.newMCPSession(operLabel, url, hops)
@@ -258,7 +267,7 @@ func (c *MCPClient) ConnectWithHops(url, operLabel string, hops *util.Hops) (*MC
 }
 
 func (c *MCPClient) newMCPSession(operLabel, url string, hops *util.Hops) *MCPSession {
-	mpcSession := &MCPSession{
+	s := &MCPSession{
 		Name:      c.Name,
 		CallerId:  c.CallerId,
 		Listener:  c.Listener,
@@ -268,16 +277,18 @@ func (c *MCPClient) newMCPSession(operLabel, url string, hops *util.Hops) *MCPSe
 		mcpClient: c,
 	}
 	if hops != nil {
-		mpcSession.Hops = hops
+		s.Hops = hops
 	} else {
-		mpcSession.Hops = util.NewHops(c.CallerId, c.Listener, operLabel)
+		s.Hops = util.NewHops(c.CallerId, c.Listener, operLabel)
 	}
-	c.ht.SetRequestIntercept(mpcSession)
-	c.ht.SetResponseIntercept(mpcSession)
+	c.ht.SetRequestIntercept(s)
+	c.ht.SetResponseIntercept(s)
 	c.lock.Lock()
-	c.ActiveSessions[mpcSession.ID] = mpcSession
+	c.ActiveSessions[s.ID] = s
 	c.lock.Unlock()
-	return mpcSession
+	c.client.AddSendingMiddleware(s.SendingMiddleware)
+	c.client.AddReceivingMiddleware(s.ReceivingMiddleware)
+	return s
 }
 
 func (c *MCPClient) GetSession(sessionID string) *MCPSession {
@@ -383,7 +394,11 @@ func (s *MCPSession) InterceptRequest(r *http.Request) {
 	if len(r.Header["Host"]) > 0 {
 		r.Host = r.Header["Host"][0]
 	}
-	log.Printf("---------- Outbound request headers from MCP client %s ------------\n", s.mcpClient.CallerId)
+	tool := ""
+	if s.currentToolCall != nil {
+		tool = s.currentToolCall.Tool
+	}
+	log.Printf("---------- Outbound request headers from MCP client {%s} for {%s}[tool: %s] to {%s} ------------\n", s.CallerId, s.currentRequest, tool, s.URL)
 	log.Println(util.ToJSONText(r.Header))
 }
 
@@ -392,14 +407,22 @@ func (s *MCPSession) InterceptResponse(r *http.Response) {
 		s.outHeaders.Response.UpdateHeaders(r.Header, fmt.Sprintf("MCP client response for %s", s.mcpClient.CallerId))
 	}
 	s.respHeaders = r.Header
-	log.Printf("---------- Response headers from MCP client %s ------------\n", s.mcpClient.CallerId)
+	tool := ""
+	if s.currentToolCall != nil {
+		tool = s.currentToolCall.Tool
+	}
+	log.Printf("---------- Response headers from MCP client {%s} for {%s}[tool: %s] to {%s} ------------\n", s.CallerId, s.currentRequest, tool, s.URL)
 	log.Println(util.ToJSONText(r.Header))
 }
 
-func (c *MCPClient) SendingMiddleware(next gomcp.MethodHandler) gomcp.MethodHandler {
+func (s *MCPSession) SendingMiddleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
-		log.Printf("---------- Outbound request from MCP client %s ------------\n", c.CallerId)
-		log.Println(util.ToJSONText(req))
+		s.currentRequest = method
+		tool := ""
+		if s.currentToolCall != nil {
+			tool = s.currentToolCall.Tool
+		}
+		log.Printf("---------- Outbound request from MCP client {%s} for {%s}[tool: %s] to {%s} ------------\n", s.CallerId, method, tool, s.URL)
 		if ctp, ok := req.GetParams().(*gomcp.CallToolParams); ok {
 			if args, ok := ctp.Arguments.(map[string]any); ok && args != nil {
 				args["goto-client"] = global.Self.HostLabel
@@ -409,8 +432,14 @@ func (c *MCPClient) SendingMiddleware(next gomcp.MethodHandler) gomcp.MethodHand
 	}
 }
 
-func (c *MCPClient) ReceivingMiddleware(next gomcp.MethodHandler) gomcp.MethodHandler {
+func (s *MCPSession) ReceivingMiddleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
+		s.currentRequest = method
+		tool := ""
+		if s.currentToolCall != nil {
+			tool = s.currentToolCall.Tool
+		}
+		log.Printf("---------- Response received by MCP client {%s} for {%s}[tool: %s] from {%s} ------------\n", s.CallerId, method, tool, s.URL)
 		return next(ctx, method, req)
 	}
 }
@@ -446,6 +475,10 @@ func (s *MCPSession) ListResources() (*gomcp.ListResourcesResult, error) {
 }
 
 func (c *MCPClient) ElicitationHandler(ctx context.Context, req *gomcp.ElicitRequest) (result *gomcp.ElicitResult, err error) {
+	if c.Stop {
+		log.Println("Received elicitation after client stopped. Ignoring.")
+		return
+	}
 	label := fmt.Sprintf("%s[Elicitation]", c.CallerId)
 	msg := ""
 	var hops *util.Hops
@@ -472,8 +505,8 @@ func (c *MCPClient) ElicitationHandler(ctx context.Context, req *gomcp.ElicitReq
 		}
 		action = elicitPayload.Actions[types.Random(len(elicitPayload.Actions))]
 	}
-	if s.mcpClient.progressChan != nil {
-		s.mcpClient.progressChan <- msg
+	if c.progressChan != nil {
+		c.progressChan <- msg
 	}
 	if elicitPayload != nil && elicitPayload.Delay != nil {
 		delay := elicitPayload.Delay.ComputeAndApply()
@@ -490,6 +523,10 @@ func (c *MCPClient) ElicitationHandler(ctx context.Context, req *gomcp.ElicitReq
 }
 
 func (c *MCPClient) CreateMessageHandler(ctx context.Context, req *gomcp.CreateMessageRequest) (*gomcp.CreateMessageResult, error) {
+	if c.Stop {
+		log.Println("Received message after client stopped. Ignoring.")
+		return nil, nil
+	}
 	isElicit := strings.Contains(req.Params.SystemPrompt, "elicit")
 	task := "Sampling/Message"
 	var payload *MCPClientPayload
@@ -537,8 +574,8 @@ func (c *MCPClient) CreateMessageHandler(ctx context.Context, req *gomcp.CreateM
 	if content == "" {
 		msg = fmt.Sprintf("%s %s --> Responding to [%s] request with no defined payload", label, msg, task)
 	}
-	if s.mcpClient.progressChan != nil {
-		s.mcpClient.progressChan <- msg
+	if c.progressChan != nil {
+		c.progressChan <- msg
 	}
 	if payload.Delay != nil {
 		delay := payload.Delay.ComputeAndApply()
@@ -576,6 +613,10 @@ func (c *MCPClient) LoggingMessageHandler(ctx context.Context, req *gomcp.Loggin
 }
 
 func (c *MCPClient) ProgressNotificationHandler(ctx context.Context, req *gomcp.ProgressNotificationClientRequest) {
+	if c.Stop {
+		log.Println("Received progress notification after client stopped. Ignoring.")
+		return
+	}
 	if req.Params.Message != "" && c.progressChan != nil {
 		c.progressChan <- req.Params.Message
 	}

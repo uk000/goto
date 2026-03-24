@@ -28,6 +28,7 @@ import (
 
 type GotoConfig struct {
 	Name     string    `yaml:"name"`
+	TLS      PortTLS   `yaml:"tls"`
 	Scripts  *Scripts  `yaml:"scripts,omitempty"`
 	GRPC     *GRPC     `yaml:"grpc,omitempty"`
 	Registry *Registry `yaml:"registry,omitempty"`
@@ -57,6 +58,7 @@ func ctlApply(args []string) {
 	loadContext()
 	config := LoadConfig(global.CtlConfig.ConfigFile)
 	if config != nil {
+		processTLS(config)
 		processScripts(config)
 		processMCP(config)
 		processA2A(config)

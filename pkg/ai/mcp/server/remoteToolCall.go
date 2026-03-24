@@ -37,7 +37,7 @@ func (t *ToolCallContext) remoteToolCall() (*gomcp.CallToolResult, error) {
 	tc := t.Config.RemoteTool.UpdateAndClone(t.remoteArgs.ToolName, t.remoteArgs.URL, "", t.remoteArgs.Authority,
 		t.remoteArgs.Delay, t.remoteArgs.Headers, t.remoteArgs.ToolArgs)
 
-	t.addForwardHeaders(tc.Headers.Request.Add, tc.Headers.Request.Forward, tc.Args)
+	//t.addForwardHeaders(tc.Headers.Request.Add, tc.Headers.Request.Forward, tc.Args)
 
 	isSSE := t.sse
 	if t.remoteArgs.SSE || tc.ForceSSE {
@@ -60,13 +60,14 @@ func (t *ToolCallContext) remoteToolCall() (*gomcp.CallToolResult, error) {
 		}
 	}(progressChan)
 	go func() {
-		client := mcpclient.NewClient(t.Server.GetPort(), false, t.Server.ID, t.rs.ListenerLabel, progressChan)
+		client := mcpclient.NewClient(t.Server.GetPort(), false, t.Config.RemoteTool.TLS, t.Server.ID, t.rs.ListenerLabel, t.Config.RemoteTool.Authority, progressChan)
 		var session *mcpclient.MCPSession
 		session, err = client.ConnectWithHops(url, t.Label, t.hops)
 		if err == nil {
 			defer session.Close()
 			remoteResult, err = session.CallTool(tc, tc.Args, t.requestHeaders)
 		}
+		client.Stop = true
 		wg.Done()
 	}()
 	wg.Wait()

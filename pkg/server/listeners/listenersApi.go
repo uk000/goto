@@ -77,19 +77,11 @@ func addListenerKey(w http.ResponseWriter, r *http.Request) {
 func removeListenerCertAndKey(w http.ResponseWriter, r *http.Request) {
 	if l := validateListener(w, r); l != nil {
 		msg := ""
-		l.lock.Lock()
-		l.RawKey = nil
-		l.RawCert = nil
-		l.Cert = nil
-		l.TLS = false
-		l.AutoCert = false
-		l.CommonName = ""
-		l.lock.Unlock()
-		if l.reopenListener() {
-			msg = fmt.Sprintf("Cert and Key removed for listener %d, and reopened\n", l.Port)
-		} else {
+		if err := RemoveListenerCert(l.Port); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			msg = fmt.Sprintf("Cert and Key removed for listener %d but failed to reopen\n", l.Port)
+			msg = fmt.Sprintf("Listener [%d] cert removal failed with error %s\n", l.Port, err.Error())
+		} else {
+			msg = fmt.Sprintf("Cert and Key removed for listener %d, and reopened\n", l.Port)
 		}
 		events.SendRequestEvent("Listener Cert Removed", msg, r)
 		fmt.Fprintln(w, msg)

@@ -31,6 +31,7 @@ import (
 	httpproxy "goto/pkg/proxy/http"
 	tcpproxy "goto/pkg/proxy/tcp"
 	"goto/pkg/scripts"
+	"goto/pkg/server/listeners"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
@@ -45,6 +46,7 @@ import (
 
 var (
 	configWatchers   []fswatcher.Watcher
+	tlsConfigs       = map[string]ctl.PortTLS{}
 	a2aConfigs       = map[string]*ctl.A2A{}
 	mcpConfigs       = map[string]*ctl.MCP{}
 	httpProxyConfigs = map[string]*httpproxy.Proxy{}
@@ -129,6 +131,11 @@ func watchStartupConfig(configWatcher fswatcher.Watcher) {
 }
 
 func removeAllConfigs() {
+	for filename := range tlsConfigs {
+		log.Printf("Removing TLS configs for %s.\n", filename)
+		clearTLS(tlsConfigs[filename])
+		delete(tlsConfigs, filename)
+	}
 	for filename := range a2aConfigs {
 		log.Printf("Removing A2A configs for %s.\n", filename)
 		clearA2A(a2aConfigs[filename])
@@ -157,6 +164,10 @@ func removeConfigs(filePath string) {
 	lock.Lock()
 	defer lock.Unlock()
 	log.Printf("File [%s] removed.", filename)
+	if tlsConfigs[filename] != nil {
+		log.Printf("File removed: %s. Removing TLS configs.\n", filename)
+		clearTLS(tlsConfigs[filename])
+	}
 	if a2aConfigs[filename] != nil {
 		log.Printf("File removed: %s. Removing A2A configs.\n", filename)
 		clearA2A(a2aConfigs[filename])
@@ -253,6 +264,13 @@ func loadConfig(filePath string, config *ctl.GotoConfig) {
 		log.Println("No config loaded")
 		return
 	}
+	if config.TLS != nil {
+		lock.Lock()
+		tlsConfigs[filename] = config.TLS
+		lock.Unlock()
+		processTLS(config.TLS)
+
+	}
 	if config.MCP != nil {
 		lock.Lock()
 		mcpConfigs[filename] = config.MCP
@@ -279,6 +297,35 @@ func loadConfig(filePath string, config *ctl.GotoConfig) {
 				lock.Unlock()
 				loadTCPProxy(proxy.TCP)
 			}
+		}
+	}
+}
+
+func clearTLS(portTLS ctl.PortTLS) {
+	for port, _ := range portTLS {
+		listeners.RemoveListenerCert(port)
+	}
+}
+
+func processTLS(portTLS ctl.PortTLS) {
+	if len(portTLS) == 0 {
+		log.Println("No TLS configs to configure")
+		return
+	}
+	for port, tlsConfig := range portTLS {
+		l := listeners.GetListenerForPort(port)
+		if l == nil {
+			log.Printf("No Listener on Port [%d]", port)
+			continue
+		}
+		log.Printf("Loading TLS Cert from path [%s]", tlsConfig.Cert)
+		cert, key, err := tlsConfig.Load()
+		if err != nil {
+			log.Printf("Failed to read TLS cert file [%s] with error: %s\n", tlsConfig.Cert, err.Error())
+			continue
+		}
+		if err = listeners.AddListenerCert(port, key, cert, true); err != nil {
+			log.Printf("Failed to add listener cert for port [%d] cert [%s] key [%s] with error: %s\n", port, tlsConfig.Cert, tlsConfig.Key, err.Error())
 		}
 	}
 }

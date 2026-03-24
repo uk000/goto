@@ -172,6 +172,7 @@ func (result *InvocationResult) processHTTPResponse(req *InvocationRequest, r *h
 		}
 	} else {
 		result.Response.Status = err.Error()
+		result.Response.StatusCode = r.StatusCode
 	}
 }
 
@@ -237,10 +238,10 @@ func (result *InvocationResult) shouldRetry() bool {
 	if result.err != nil {
 		return true
 	}
-	if result.httpResponse != nil {
+	if result.Response != nil {
 		if result.tracker.Target.RetriableStatusCodes != nil {
 			for _, retriableCode := range result.tracker.Target.RetriableStatusCodes {
-				if retriableCode == result.httpResponse.StatusCode {
+				if retriableCode == result.Response.StatusCode {
 					return true
 				}
 			}

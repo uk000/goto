@@ -88,9 +88,11 @@ func RunHttpServer() {
 	if err != nil {
 		log.Fatal(err.Error())
 	}
+	global.AddListenersStartWatcher(func() {
+		startup.Start()
+	})
 	go startListeners()
 	grpcserver.StartDefaultGRPCServer()
-	startup.Start()
 	peer.RegisterPeer(global.Self.Name, global.Self.Address)
 	events.SendEventJSONDirect("Server Started", global.Self.HostLabel, listeners.GetListeners())
 	WaitForHttpServer()
@@ -121,7 +123,7 @@ func configureHTTPRouter() {
 func configureAIRouter() *mux.Router {
 	aiRouter := mux.NewRouter()
 	middleware.UseCore(aiRouter)
-	aiRouter.Use(intercept.IntereceptMiddleware(nil, nil))
+	//aiRouter.Use(intercept.IntereceptMiddleware(nil, nil))
 	aiRouter.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
 		return true
 	}).HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

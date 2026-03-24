@@ -107,30 +107,23 @@ func (hc *HeadersConfig) UpdateHeaders(headers http.Header, info string) {
 		for _, h := range hc.Remove {
 			headers.Del(h)
 		}
-	} else {
-		log.Printf("---------- Not removing any headers for %s ------------\n", info)
 	}
 	if len(hc.Add) > 0 {
 		log.Printf("---------- Adding headers %+v for %s ------------\n", hc.Add, info)
 		for h, v := range hc.Add {
 			headers.Add(h, v)
 		}
-	} else {
-		log.Printf("---------- Not adding any headers for %s ------------\n", info)
 	}
 }
 
 func ForwardHeaders(sourceHeaders ReadableHeaders, targetHeaders AddableHeaders, forwardHeaders iter.Seq[string], info string) {
 	if forwardHeaders != nil {
-		log.Printf("---------- Forwarding headers %+v for %s ------------\n", forwardHeaders, info)
 		for h := range forwardHeaders {
 			v := sourceHeaders.Get(h)
 			if len(v) > 0 {
 				targetHeaders.Add(h, v)
 			}
 		}
-	} else {
-		log.Printf("---------- Not forwarding any headers for %s ------------\n", info)
 	}
 }
 

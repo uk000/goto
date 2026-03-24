@@ -66,12 +66,14 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if server != nil {
+			w.Header().Add(constants.HeaderGotoMCPServer, server.ID)
 			if tool != nil {
+				w.Header().Add(constants.HeaderGotoMCPTool, tool.Name)
 				rs.RequestURI = r.RequestURI
 				rs.RequestedMCPTool = tool.Name
-				log.Printf("Port [%d] Request [%s] will be served by Stateless [%t] Server [%s] for Tool [%s]", l.Port, r.RequestURI, server.Stateless, server.Name, tool.Name)
+				log.Printf("Port [%d] Request [%s] will be served by Server [%s] (Stateless=%t) for Tool [%s]", l.Port, r.RequestURI, server.Name, server.Stateless, tool.Name)
 			} else {
-				log.Printf("Port [%d] Request [%s] will be served by Stateless [%t] Server [%s]", l.Port, r.RequestURI, server.Stateless, server.Name)
+				log.Printf("Port [%d] Request [%s] will be served by Server [%s] (Stateless=%t)", l.Port, r.RequestURI, server.Name, server.Stateless)
 			}
 			port := util.GetRequestOrListenerPortNum(r)
 			if status, rem := StatusManager.GetStatusFor(port, r.RequestURI, r.Header); status > 0 {
@@ -100,10 +102,10 @@ func MCPHybridHandler(server *MCPServer) http.Handler {
 		hasMCP := strings.Contains(r.RequestURI, "/mcp")
 		// w, irw := intercept.WithIntercept(r, w)
 		if hasMCP && !hasSSE {
-			log.Printf("Port [%d] Request [%s] will be served by [%s]/stream", port, r.RequestURI, server.Name)
+			log.Printf("Port [%d] Handling streaming request [%s] for server [%s]", port, r.RequestURI, server.Name)
 			Serve(server, w, r, server.streamHTTPHandler)
 		} else {
-			log.Printf("Port [%d] Request [%s] will be served by [%s]/sse", port, r.RequestURI, server.Name)
+			log.Printf("Port [%d] Handling SSE request [%s] for server [%s]", port, r.RequestURI, server.Name)
 			r = r.WithContext(util.SetSSE(r.Context()))
 			Serve(server, w, r, server.sseHandler)
 		}
@@ -266,19 +268,19 @@ func HandleMCPDefault(w http.ResponseWriter, r *http.Request) {
 	isStateful := strings.Contains(r.RequestURI, "/stateful")
 	if hasMCP && !hasSSE {
 		if isStateful {
-			log.Printf("Port [%d] Request [%s] will be served by DefaultStatefulServer/stream", l.Port, r.RequestURI)
+			log.Printf("Port [%d] Handling streaming request [%s] for server DefaultStatefulServer", l.Port, r.RequestURI)
 			Serve(DefaultStatefulServer, w, r, DefaultStatefulServer.streamHTTPHandler)
 		} else {
-			log.Printf("Port [%d] Request [%s] will be served by DefaultStatelessServer/stream", l.Port, r.RequestURI)
+			log.Printf("Port [%d] Handling streaming request [%s] for server DefaultStatelessServer", l.Port, r.RequestURI)
 			// DefaultServer.streamHTTPHandler.ServeHTTP(w, r)
 			Serve(DefaultStatefulServer, w, r, DefaultStatelessServer.streamHTTPHandler)
 		}
 	} else {
 		if isStateful {
-			log.Printf("Port [%d] Request [%s] will be served by DefaultStatefulServer/SSE", l.Port, r.RequestURI)
+			log.Printf("Port [%d] Handling SSE request [%s] for server DefaultStatefulServer", l.Port, r.RequestURI)
 			Serve(DefaultStatefulServer, w, r, DefaultStatefulServer.sseHandler)
 		} else {
-			log.Printf("Port [%d] Request [%s] will be served by DefaultStatelessServer/SSE", l.Port, r.RequestURI)
+			log.Printf("Port [%d] Handling SSE request [%s] for server DefaultStatelessServer", l.Port, r.RequestURI)
 			// DefaultServer.streamHTTPHandler.ServeHTTP(w, r)
 			Serve(DefaultStatefulServer, w, r, DefaultStatelessServer.sseHandler)
 		}

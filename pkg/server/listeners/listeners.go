@@ -104,6 +104,7 @@ var (
 	initialListeners      = []*Listener{}
 	initialHTTPStarted    = false
 	initialJSONRPCStarted = false
+	initialTCPStarted     = false
 	grpcStarted           = false
 	httpStarted           = false
 	jsonRPCStarted        = false
@@ -141,7 +142,7 @@ func Init() {
 func OnGRPCStart() {
 	grpcStarted = true
 	if httpStarted {
-		addInitialHTTPListeners(false)
+		startInitialHTTPListeners(false)
 	}
 }
 
@@ -156,7 +157,7 @@ func OnHTTPStart(s *http.Server) {
 	httpStarted = true
 	httpServer = s
 	if grpcStarted {
-		addInitialHTTPListeners(false)
+		startInitialHTTPListeners(false)
 	}
 }
 
@@ -168,7 +169,7 @@ func OnHTTPStop() {
 func OnJSONRPCStart(s *http.Server) {
 	jsonRPCStarted = true
 	jsonRPCServer = s
-	addInitialHTTPListeners(true)
+	startInitialHTTPListeners(true)
 }
 
 func OnJSONRPCStop() {
@@ -178,7 +179,7 @@ func OnJSONRPCStop() {
 
 func ConfigureTCPServer(serve func(listenerID string, port int, listener net.Listener) error) {
 	serveTCP = serve
-	addInitialTCPListeners()
+	startInitialTCPListeners()
 }
 
 func ConfigureXDSServer(serve func(*grpc.Server)) {
@@ -202,7 +203,7 @@ func AddInitialGRPCListeners() {
 	}
 }
 
-func addInitialHTTPListeners(jsonRPC bool) {
+func startInitialHTTPListeners(jsonRPC bool) {
 	if jsonRPC && !initialJSONRPCStarted || !jsonRPC && !initialHTTPStarted {
 		time.Sleep(1 * time.Second)
 		for _, l := range initialListeners {
@@ -216,14 +217,25 @@ func addInitialHTTPListeners(jsonRPC bool) {
 			initialHTTPStarted = true
 		}
 	}
+	if initialHTTPStarted && initialJSONRPCStarted && initialTCPStarted {
+		allInitialListenersStarted()
+	}
 }
 
-func addInitialTCPListeners() {
+func startInitialTCPListeners() {
 	for _, l := range initialListeners {
 		if l.IsTCP {
 			addOrUpdateListener(l)
 		}
 	}
+	initialTCPStarted = true
+	if initialHTTPStarted && initialJSONRPCStarted && initialTCPStarted {
+		allInitialListenersStarted()
+	}
+}
+
+func allInitialListenersStarted() {
+	global.OnListenersStarted()
 }
 
 func (l *Listener) assignProtocol() {
@@ -714,32 +726,75 @@ func (l *Listener) store() {
 	listeners[l.Port] = l
 }
 
-func addListenerCertOrKey(w http.ResponseWriter, r *http.Request, cert bool) {
+func addListenerCertOrKey(w http.ResponseWriter, r *http.Request, isKey bool) {
 	if l := validateListener(w, r); l != nil {
 		msg := ""
 		data := util.ReadBytes(r.Body)
-		if len(data) > 0 {
-			l.lock.Lock()
-			defer l.lock.Unlock()
-			l.AutoCert = false
-			l.CommonName = ""
-			l.Cert = nil
-			if cert {
-				l.RawCert = data
-				msg = fmt.Sprintf("Cert added for listener %d\n", l.Port)
-				events.SendRequestEvent("Listener Cert Added", msg, r)
-			} else {
-				l.RawKey = data
-				msg = fmt.Sprintf("Key added for listener %d\n", l.Port)
-				events.SendRequestEvent("Listener Key Added", msg, r)
-			}
+		var key, cert []byte
+		if isKey {
+			key = data
 		} else {
+			cert = data
+		}
+		if err := AddListenerCert(l.Port, key, cert, false); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			msg = "No payload"
+			msg = err.Error()
+		} else if isKey {
+			msg = fmt.Sprintf("Key added for listener %d\n", l.Port)
+			events.SendRequestEvent("Listener Key Added", msg, r)
+		} else {
+			msg = fmt.Sprintf("Cert added for listener %d\n", l.Port)
+			events.SendRequestEvent("Listener Cert Added", msg, r)
 		}
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
 	}
+}
+
+func AddListenerCert(port int, key []byte, cert []byte, reopen bool) error {
+	l := GetListenerForPort(port)
+	if l == nil {
+		return fmt.Errorf("No listener on port [%d]", port)
+	}
+	if len(key) == 0 && len(cert) == 0 {
+		return fmt.Errorf("No payload")
+	}
+	l.lock.Lock()
+	l.AutoCert = false
+	l.CommonName = ""
+	l.Cert = nil
+	if len(key) > 0 {
+		l.RawKey = key
+	}
+	if len(cert) > 0 {
+		l.RawCert = cert
+	}
+	l.lock.Unlock()
+	if reopen {
+		if !l.reopenListener() {
+			return fmt.Errorf("Failed to reopen listener on port [%d]", port)
+		}
+	}
+	return nil
+}
+
+func RemoveListenerCert(port int) error {
+	l := GetListenerForPort(port)
+	if l == nil {
+		return fmt.Errorf("No listener on port [%d]", port)
+	}
+	l.lock.Lock()
+	l.RawKey = nil
+	l.RawCert = nil
+	l.Cert = nil
+	l.TLS = false
+	l.AutoCert = false
+	l.CommonName = ""
+	l.lock.Unlock()
+	if !l.reopenListener() {
+		return fmt.Errorf("Failed to reopen listener after removing cert on port [%d]", port)
+	}
+	return nil
 }
 
 func GetListeners() map[int]*Listener {

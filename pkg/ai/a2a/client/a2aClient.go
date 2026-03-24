@@ -42,6 +42,7 @@ type AgentCall struct {
 	AgentURL  string         `json:"agentURL,omitempty"`
 	CardURL   string         `json:"cardURL,omitempty"`
 	Authority string         `json:"authority,omitempty"`
+	TLS       bool           `json:"tls,omitempty"`
 	Delay     string         `json:"delay,omitempty"`
 	Message   string         `json:"message,omitempty"`
 	Data      map[string]any `json:"data,omitempty"`
@@ -81,9 +82,9 @@ var (
 	lock       = sync.RWMutex{}
 )
 
-func NewA2AClient(port int, clientId string) *A2AClient {
+func NewA2AClient(port int, clientId string, isTLS bool, authority string) *A2AClient {
 	id := fmt.Sprintf("%s[%s]", clientId, global.Funcs.GetListenerLabelForPort(port))
-	ht := transport.CreateHTTPClient(id, false, true, false, "", 0,
+	ht := transport.CreateHTTPClient(id, true, true, isTLS, authority, 0,
 		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
 	return &A2AClient{
 		ID:         id,
@@ -94,7 +95,7 @@ func NewA2AClient(port int, clientId string) *A2AClient {
 }
 
 func NewA2ASession(ctx context.Context, port int, card *goa2aserver.AgentCard, call *AgentCall) *A2AClientSession {
-	client := NewA2AClient(port, card.Name)
+	client := NewA2AClient(port, card.Name, call.TLS, call.Authority)
 	return client.NewSession(ctx, card, call)
 }
 
@@ -106,12 +107,41 @@ func GetAgentCard(name string) *goa2aserver.AgentCard {
 
 func FetchAgentCard(ctx context.Context, url, authority string, call *AgentCall) (card *goa2aserver.AgentCard, err error) {
 	port := util.GetContextPort(ctx)
-	client := NewA2AClient(port, "")
+	client := NewA2AClient(port, "", call.TLS, call.Authority)
 	session, err := client.loadAgentCard(ctx, url, authority, call)
 	if err != nil {
 		return nil, err
 	}
 	return session.Card, nil
+}
+
+func CallAgent(ctx context.Context, port int, call *AgentCall, callback func(output string)) (err error) {
+	var card *goa2aserver.AgentCard
+	if call.Name != "" {
+		card = GetAgentCard(call.Name)
+	}
+	if card == nil {
+		if call.CardURL == "" {
+			return fmt.Errorf("Agent card not loaded and missing agent card URL in the given call spec: %+v", call)
+		}
+		card, err = FetchAgentCard(ctx, call.CardURL, call.Authority, call)
+		if err != nil || card == nil {
+			return fmt.Errorf("Error fetching agent card from url [%s], authority [%s]: %s", call.AgentURL, call.Authority, err.Error())
+		}
+	}
+	var agentURL string
+	if call.AgentURL != "" {
+		agentURL = call.AgentURL
+	} else {
+		agentURL = card.URL
+	}
+	call.AgentURL = agentURL
+	session := NewA2ASession(ctx, port, card, call)
+	err = session.Connect()
+	if err != nil {
+		return fmt.Errorf("Failed to load agent card with error [%s]. Agent Call: %+v", err.Error(), call)
+	}
+	return session.CallAgent(callback, nil, nil)
 }
 
 func (ac *A2AClient) LoadAgentCard(ctx context.Context, call *AgentCall) (session *A2AClientSession, err error) {

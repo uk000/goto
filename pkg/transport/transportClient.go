@@ -161,8 +161,8 @@ func CreateSimpleHTTPClient() *http.Client {
 	return &http.Client{Transport: tr, Timeout: 10 * time.Minute}
 }
 
-func CreateDefaultHTTPClient(label string, h2, isTLS bool, newConnNotifierChan chan string) ClientTransport {
-	return CreateHTTPClient(label, h2, true, isTLS, "", 0, 30*time.Second, 30*time.Second, 3*time.Minute, newConnNotifierChan)
+func CreateDefaultHTTPClient(label string, h2, isTLS bool, serverName string, newConnNotifierChan chan string) ClientTransport {
+	return CreateHTTPClient(label, h2, true, isTLS, serverName, 0, 30*time.Second, 30*time.Second, 3*time.Minute, newConnNotifierChan)
 }
 
 func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName string, tlsVersion uint16,
@@ -210,7 +210,7 @@ func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName stri
 			return net.Dial(network, addr)
 		}
 		h2t := NewHTTP2TransportIntercept(tr, label, newConnNotifierChan)
-		ct = NewClientTransport(&http.Client{Timeout: requestTimeout, Transport: h2t.Transport}, nil, h2t, nil, true)
+		ct = NewClientTransport(&http.Client{Timeout: requestTimeout, Transport: h2t}, nil, h2t, nil, true)
 	}
 	return ct
 }

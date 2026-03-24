@@ -589,6 +589,8 @@ func processResponseStatus(m *gotogrpc.GRPCServiceMethod, r *GRPCResponse, err e
 		r.Status = int(status.Code())
 		if r.Status == 0 {
 			r.EquivalentHTTPStatusCode = http.StatusOK
+		} else {
+			r.EquivalentHTTPStatusCode = r.Status
 		}
 		return true
 	} else {

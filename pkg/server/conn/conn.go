@@ -76,6 +76,7 @@ func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
 	rs := util.GetRequestStore(r)
 	w.Header().Add(HeaderGotoRemoteAddress, r.RemoteAddr)
 	w.Header().Add(HeaderGotoPort, port)
+	w.Header().Add(HeaderGotoTLS, fmt.Sprintf("%t", rs.IsTLS))
 	w.Header().Add(HeaderGotoHost, l.HostLabel)
 	w.Header().Add(HeaderGotoProtocol, rs.GotoProtocol)
 	w.Header().Add(HeaderViaGoto, l.Label)

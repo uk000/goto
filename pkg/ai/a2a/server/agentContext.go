@@ -53,8 +53,8 @@ type AgentContext struct {
 	requestHeaders   http.Header
 	delay            *types.Delay
 	triggers         DelegateTriggers
-	tools            map[string][]*model.DelegateToolCall
-	agents           map[string][]*model.DelegateAgentCall
+	tools            map[string]map[string]*model.DelegateToolCall
+	agents           map[string]map[string]*model.DelegateAgentCall
 	input            *a2aproto.Message
 	inputText        string
 	options          *taskmanager.ProcessOptions
@@ -123,16 +123,15 @@ func (ac *AgentContext) detectRemoteCalls() {
 func (ac *AgentContext) sendDelegatesMatchUpdate() {
 	toolNames := []string{}
 	agentNames := []string{}
-	for name, tcalls := range ac.tools {
-		for _, t := range tcalls {
-			toolNames = append(toolNames, fmt.Sprintf("%s@%s", name, t.ToolCall.URL))
+	for name, tservers := range ac.tools {
+		for server, _ := range tservers {
+			toolNames = append(toolNames, fmt.Sprintf("%s@%s", name, server))
 		}
 	}
-	for name, acalls := range ac.agents {
-		for _, a := range acalls {
-			toolNames = append(toolNames, fmt.Sprintf("%s@%s", name, a.AgentCall.AgentURL))
+	for name, aservers := range ac.agents {
+		for server, _ := range aservers {
+			agentNames = append(agentNames, fmt.Sprintf("%s@%s", name, server))
 		}
-		agentNames = append(agentNames, name)
 	}
 	msg := fmt.Sprintf("Matched Tools: %+v, Agents: %+v", toolNames, agentNames)
 	log.Println(msg)
@@ -140,16 +139,26 @@ func (ac *AgentContext) sendDelegatesMatchUpdate() {
 }
 
 func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint string, inputs map[string]string) {
-	ac.tools = map[string][]*model.DelegateToolCall{}
-	ac.agents = map[string][]*model.DelegateAgentCall{}
+	ac.tools = map[string]map[string]*model.DelegateToolCall{}
+	ac.agents = map[string]map[string]*model.DelegateAgentCall{}
+	addTool := func(d *model.DelegateToolCall) {
+		if ac.tools[d.ToolCall.Tool] == nil {
+			ac.tools[d.ToolCall.Tool] = map[string]*model.DelegateToolCall{}
+		}
+		ac.tools[d.ToolCall.Tool][d.ToolCall.URL] = d
+	}
+	addAgent := func(d *model.DelegateAgentCall) {
+		if ac.agents[d.AgentCall.Name] == nil {
+			ac.agents[d.AgentCall.Name] = map[string]*model.DelegateAgentCall{}
+		}
+		ac.agents[d.AgentCall.Name][d.AgentCall.AgentURL] = d
+	}
 	for name := range inputs {
 		if ac.agent.Config.Delegates.Agents != nil && ac.agent.Config.Delegates.Agents[name] != nil {
-			d := ac.agent.Config.Delegates.Agents[name]
-			ac.agents[d.AgentCall.Name] = append(ac.agents[d.AgentCall.Name], d)
+			addAgent(ac.agent.Config.Delegates.Agents[name])
 		}
 		if ac.agent.Config.Delegates.Tools != nil && ac.agent.Config.Delegates.Tools[name] != nil {
-			d := ac.agent.Config.Delegates.Tools[name]
-			ac.tools[d.ToolCall.Tool] = append(ac.tools[d.ToolCall.Tool], d)
+			addTool(ac.agent.Config.Delegates.Tools[name])
 		}
 		if len(ac.tools)+len(ac.agents) >= ac.agent.Config.Delegates.MaxCalls {
 			break
@@ -164,13 +173,12 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 			if triggerPair.Right.MatchString(input) || strings.Contains(triggerPair.Left, input) {
 				if delegateTriple.Second != nil {
 					tool := *delegateTriple.Second
-					toolName := tool.ToolCall.Tool
 					if portHint != "" {
 						if strings.Contains(tool.ToolCall.URL, portHint) {
-							ac.tools[toolName] = append(ac.tools[toolName], &tool)
+							addTool(&tool)
 						}
 					} else {
-						ac.tools[toolName] = append(ac.tools[toolName], &tool)
+						addTool(&tool)
 					}
 					if delegateHint != "" && !strings.EqualFold(delegateHint, tool.ToolCall.Tool) {
 						altDelegate := tool.Substitutes[delegateHint]
@@ -184,13 +192,12 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 					}
 				} else if delegateTriple.Third != nil {
 					agent := *delegateTriple.Third
-					agentName := agent.AgentCall.Name
 					if portHint != "" {
 						if strings.Contains(agent.AgentCall.AgentURL, portHint) {
-							ac.agents[agentName] = append(ac.agents[agentName], &agent)
+							addAgent(&agent)
 						}
 					} else {
-						ac.agents[agentName] = append(ac.agents[agentName], &agent)
+						addAgent(&agent)
 					}
 					if delegateHint != "" {
 						altDelegate := agent.Substitutes[delegateHint]
@@ -309,8 +316,8 @@ func extractJSONValues(jsons []map[string]any) map[string]*toolOverrides {
 }
 
 func (ac *AgentContext) ReportProgress(name string, msg any) bool {
-	if ac.localProgress != nil {
-		ac.localProgress <- types.NewPair[string, any](name, msg)
+	if ac.localProgress != nil && !util.IsNil(msg) {
+		ac.localProgress <- types.NewPair(name, msg)
 		return true
 	}
 	return false

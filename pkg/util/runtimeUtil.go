@@ -19,6 +19,7 @@ package util
 import (
 	"fmt"
 	"goto/pkg/global"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -111,4 +112,16 @@ func Debounce(interval time.Duration) func(f func()) {
 		}
 		timer = time.AfterFunc(interval, f)
 	}
+}
+func IsNil(i interface{}) bool {
+	if i == nil {
+		return true
+	}
+	v := reflect.ValueOf(i)
+	// Check if the value's kind is one that can be nil
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Map, reflect.Pointer, reflect.UnsafePointer, reflect.Interface, reflect.Slice:
+		return v.IsNil()
+	}
+	return false
 }
