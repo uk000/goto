@@ -24,6 +24,7 @@ import (
 	"goto/pkg/server/echo"
 	"goto/pkg/types"
 	"goto/pkg/util"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -234,13 +235,26 @@ func createTextPartsFromArrayOrString(key string, val any, parts *[]a2aproto.Par
 }
 
 func createPartsFromMap(key string, m map[string]any, parts *[]a2aproto.Part, builder *strings.Builder, deep bool) {
-	for k2, val := range m {
-		if m2, ok := val.(map[string]any); ok {
-			if deep {
-				createPartsFromMap(fmt.Sprintf("%s: [%s]", key, k2), m2, parts, builder, false)
+	for k1, any1 := range m {
+		v1 := reflect.ValueOf(any1)
+		// Check if the Kind of that type is a Map
+		if v1.Kind() == reflect.Map {
+			iter := v1.MapRange()
+			for iter.Next() {
+				k2 := iter.Key()
+				any2 := iter.Value().Interface()
+				if m2, ok := any2.(map[string]any); ok {
+					if deep {
+						createPartsFromMap(fmt.Sprintf("%s: [%s][%s]", key, k1, k2), m2, parts, builder, deep)
+					} else {
+						createTextPartsFromArrayOrString(fmt.Sprintf("%s: [%s][%s]", key, k1, k2), m2, parts, builder)
+					}
+				} else {
+					createTextPartsFromArrayOrString(fmt.Sprintf("%s: [%s][%s]", key, k1, k2), any2, parts, builder)
+				}
 			}
 		} else {
-			createTextPartsFromArrayOrString(fmt.Sprintf("%s: [%s]", key, k2), val, parts, builder)
+			createTextPartsFromArrayOrString(fmt.Sprintf("%s: [%s]", key, k1), any1, parts, builder)
 		}
 	}
 }

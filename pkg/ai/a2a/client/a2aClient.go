@@ -37,6 +37,8 @@ import (
 	goa2aserver "trpc.group/trpc-go/trpc-a2a-go/server"
 )
 
+type AgentResultsCallback func(key, output string)
+
 type AgentCall struct {
 	Name                 string           `json:"name,omitempty"`
 	AgentURL             string           `json:"agentURL,omitempty"`
@@ -77,7 +79,7 @@ type A2AClientSession struct {
 	outInput     string
 	inHeaders    http.Header
 	outHeaders   *types.Headers
-	callback     func(output string)
+	callback     AgentResultsCallback
 	progressChan chan string
 	resultChan   chan *types.Pair[string, any]
 	inputParts   []a2aproto.Part
@@ -122,7 +124,7 @@ func FetchAgentCard(ctx context.Context, url, authority string, call *AgentCall)
 	return session.Card, nil
 }
 
-func CallAgent(ctx context.Context, port int, call *AgentCall, callback func(output string)) (err error) {
+func CallAgent(ctx context.Context, port int, call *AgentCall, callback AgentResultsCallback) (err error) {
 	var card *goa2aserver.AgentCard
 	if call.Name != "" {
 		card = GetAgentCard(call.Name)
@@ -272,11 +274,11 @@ func (acs *A2AClientSession) Connect() error {
 // 	return session.invokeAgent(input, data, callback, resultChan, progressChan)
 // }
 
-func (acs *A2AClientSession) CallAgent(callback func(output string), resultChan chan *types.Pair[string, any], progressChan chan string) (err error) {
+func (acs *A2AClientSession) CallAgent(callback AgentResultsCallback, resultChan chan *types.Pair[string, any], progressChan chan string) (err error) {
 	return acs.invokeAgent(acs.call.Message, acs.call.Data, callback, resultChan, progressChan)
 }
 
-func (acs *A2AClientSession) invokeAgent(input string, data map[string]any, callback func(output string), resultChan chan *types.Pair[string, any], progressChan chan string) (err error) {
+func (acs *A2AClientSession) invokeAgent(input string, data map[string]any, callback AgentResultsCallback, resultChan chan *types.Pair[string, any], progressChan chan string) (err error) {
 	if input == "" {
 		input = acs.call.Message
 	}
@@ -287,7 +289,7 @@ func (acs *A2AClientSession) invokeAgent(input string, data map[string]any, call
 	acs.update(callback, resultChan, progressChan, inputParts)
 	clientInfo := util.BuildGotoClientInfo(nil, acs.port, acs.callerId, acs.callerId, acs.call.Name, acs.url, acs.authority,
 		acs.inInput, acs.outInput, acs.inHeaders, acs.call.Headers.Request.Add, acs.call.Headers.Request.Forward, nil)
-	acs.sendResponse("", clientInfo)
+	acs.sendResponse("", "", clientInfo)
 	if acs.Card.Capabilities.Streaming != nil && *acs.Card.Capabilities.Streaming {
 		err = acs.InvokeStream()
 	} else {
@@ -296,7 +298,7 @@ func (acs *A2AClientSession) invokeAgent(input string, data map[string]any, call
 	return
 }
 
-func (acs *A2AClientSession) update(callback func(output string), resultChan chan *types.Pair[string, any], progressChan chan string, inputParts []a2aproto.Part) {
+func (acs *A2AClientSession) update(callback AgentResultsCallback, resultChan chan *types.Pair[string, any], progressChan chan string, inputParts []a2aproto.Part) {
 	acs.callback = callback
 	acs.resultChan = resultChan
 	acs.progressChan = progressChan
@@ -308,8 +310,8 @@ func (acs *A2AClientSession) InvokeUnary() error {
 	if err != nil {
 		return err
 	}
-	for _, result := range results {
-		acs.processMessageResult(result)
+	for requestID, result := range results {
+		acs.processMessageResult(requestID, result)
 	}
 	return nil
 }
@@ -319,19 +321,20 @@ func (acs *A2AClientSession) InvokeStream() error {
 	return acs.Stream()
 }
 
-func (acs *A2AClientSession) SendParts() ([]*a2aproto.MessageResult, error) {
+func (acs *A2AClientSession) SendParts() (map[string]*a2aproto.MessageResult, error) {
 	requestCount := acs.call.RequestCount
 	concurrent := acs.call.Concurrent
 	rounds := requestCount / concurrent
-	results := []*a2aproto.MessageResult{}
+	results := map[string]*a2aproto.MessageResult{}
 	for i := 0; i < rounds; i++ {
+		requestID := fmt.Sprintf("[%s] Request#[%d]", acs.call.Name, i)
 		result, err := acs.client.client.SendMessage(acs.ctx, a2aproto.SendMessageParams{
 			Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
 		})
 		if err != nil {
 			return nil, err
 		}
-		results = append(results, result)
+		results[requestID] = result
 	}
 	return results, nil
 }
@@ -348,13 +351,19 @@ func buildInputParts(text string, data any) []a2aproto.Part {
 }
 
 func (acs *A2AClientSession) Stream() error {
-	eventChan, err := acs.client.client.StreamMessage(acs.ctx, a2aproto.SendMessageParams{
-		Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
-	})
-	if err != nil {
-		return err
+	requestCount := acs.call.RequestCount
+	concurrent := acs.call.Concurrent
+	rounds := requestCount / concurrent
+	for i := 0; i < rounds; i++ {
+		requestID := fmt.Sprintf("[%s] Request#[%d]", acs.callerId, i)
+		eventChan, err := acs.client.client.StreamMessage(acs.ctx, a2aproto.SendMessageParams{
+			Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
+		})
+		if err != nil {
+			return err
+		}
+		acs.processStreamResponse(requestID, eventChan)
 	}
-	acs.processStreamResponse(eventChan)
 	return acs.err
 }
 
@@ -374,7 +383,7 @@ func (acs *A2AClientSession) setPushConfig(taskID, url string) error {
 	return nil
 }
 
-func (acs *A2AClientSession) processStreamResponse(eventChan <-chan a2aproto.StreamingMessageEvent) {
+func (acs *A2AClientSession) processStreamResponse(id string, eventChan <-chan a2aproto.StreamingMessageEvent) {
 	for {
 		select {
 		case <-acs.ctx.Done():
@@ -388,37 +397,37 @@ func (acs *A2AClientSession) processStreamResponse(eventChan <-chan a2aproto.Str
 				}
 				return
 			}
-			acs.processEventResult(&event)
+			acs.processEventResult(id, &event)
 		}
 	}
 }
 
-func (acs *A2AClientSession) processMessageResult(result *a2aproto.MessageResult) {
+func (acs *A2AClientSession) processMessageResult(id string, result *a2aproto.MessageResult) {
 	switch r := result.Result.(type) {
 	case *a2aproto.Message:
-		acs.processParts(r.Parts)
+		acs.processParts(id, r.Parts)
 	case *a2aproto.Task:
-		acs.sendResponse(fmt.Sprintf("Task %s State: %s @ %s\n", r.ID, r.Status.State, r.Status.Timestamp), nil)
+		acs.sendResponse(id, fmt.Sprintf("Task %s State: %s @ %s\n", r.ID, r.Status.State, r.Status.Timestamp), nil)
 		if r.Status.Message != nil {
-			acs.processParts(r.Status.Message.Parts)
+			acs.processParts(id, r.Status.Message.Parts)
 		}
 	default:
-		acs.sendResponse(fmt.Sprintf("Task %s Received unknown message type: %T\n", r.GetKind(), r), r)
+		acs.sendResponse(id, fmt.Sprintf("Task %s Received unknown message type: %T\n", r.GetKind(), r), r)
 	}
 }
 
-func (acs *A2AClientSession) processEventResult(event *a2aproto.StreamingMessageEvent) {
+func (acs *A2AClientSession) processEventResult(id string, event *a2aproto.StreamingMessageEvent) {
 	switch e := event.Result.(type) {
 	case *a2aproto.Message:
-		acs.processParts(e.Parts)
+		acs.processParts(id, e.Parts)
 	case *a2aproto.Task:
-		acs.sendResponse(fmt.Sprintf("Task %s State: %s @ %s\n", e.ID, e.Status.State, e.Status.Timestamp), nil)
+		acs.sendResponse(id, fmt.Sprintf("Task %s State: %s @ %s\n", e.ID, e.Status.State, e.Status.Timestamp), nil)
 		if e.Status.Message != nil {
-			acs.processParts(e.Status.Message.Parts)
+			acs.processParts(id, e.Status.Message.Parts)
 		}
 	case *a2aproto.TaskStatusUpdateEvent:
 		if e.Status.Message != nil {
-			acs.processParts(e.Status.Message.Parts)
+			acs.processParts(id, e.Status.Message.Parts)
 		}
 		text := []string{}
 		for _, p := range e.Status.Message.Parts {
@@ -443,62 +452,59 @@ func (acs *A2AClientSession) processEventResult(event *a2aproto.StreamingMessage
 			}
 		}
 		if msg2 != "" {
-			acs.sendResponse(msg+msg2, nil)
+			acs.sendResponse(id, msg+msg2, nil)
 		}
 	case *a2aproto.TaskArtifactUpdateEvent:
-		acs.processParts(e.Artifact.Parts)
+		acs.processParts(id, e.Artifact.Parts)
 		if e.LastChunk != nil && *e.LastChunk {
-			acs.sendResponse(fmt.Sprintf("Task %s Final Artifact Received: ID [%s], Name: [%s], \n", e.TaskID, e.Artifact.ArtifactID, *e.Artifact.Name), e.Artifact)
+			acs.sendResponse(id, fmt.Sprintf("Task %s Final Artifact Received: ID [%s], Name: [%s], \n", e.TaskID, e.Artifact.ArtifactID, *e.Artifact.Name), e.Artifact)
 		} else {
-			acs.sendResponse(fmt.Sprintf("Task %s Artifact Update: ID [%s], Name: [%s], \n", e.TaskID, e.Artifact.ArtifactID, *e.Artifact.Name), e.Artifact)
+			acs.sendResponse(id, fmt.Sprintf("Task %s Artifact Update: ID [%s], Name: [%s], \n", e.TaskID, e.Artifact.ArtifactID, *e.Artifact.Name), e.Artifact)
 		}
 	default:
-		acs.sendResponse(fmt.Sprintf("Task %s Received unknown event type: %T\n", e.GetKind(), event.Result), event.Result)
+		acs.sendResponse(id, fmt.Sprintf("Task %s Received unknown event type: %T\n", e.GetKind(), event.Result), event.Result)
 	}
 }
 
-func (acs *A2AClientSession) processParts(parts []a2aproto.Part) {
+func (acs *A2AClientSession) processParts(id string, parts []a2aproto.Part) {
 	for _, p := range parts {
 		var part any = p
 		switch p := part.(type) {
 		case *a2aproto.TextPart:
-			acs.sendResponse(p.Text, nil)
+			acs.sendResponse(id, p.Text, nil)
 		case a2aproto.TextPart:
-			acs.sendResponse(p.Text, nil)
+			acs.sendResponse(id, p.Text, nil)
 		case *a2aproto.DataPart:
-			acs.sendResponse("", p.Data)
+			acs.sendResponse(id, "", p.Data)
 		case map[string]interface{}:
 			textHandled := false
 			if typeStr, ok := p["type"].(string); ok && typeStr == "text" {
 				if text, ok := p["text"].(string); ok {
-					acs.sendResponse(text, nil)
+					acs.sendResponse(id, text, nil)
 					textHandled = true
 				}
 			}
 			if !textHandled {
-				acs.sendResponse("", p)
+				acs.sendResponse(id, "", p)
 			}
 		default:
-			acs.sendResponse("", p)
+			acs.sendResponse(id, "", p)
 		}
 	}
 }
 
-func (acs *A2AClientSession) sendResponse(text string, data any) {
+func (acs *A2AClientSession) sendResponse(id, text string, data any) {
 	if acs.callback != nil {
-		acs.callback(text)
+		acs.callback(id, text)
 		if data != nil {
-			acs.callback(util.ToJSONText(data))
+			acs.callback(id, util.ToJSONText(data))
 		}
 	}
 	if text != "" && data == nil && acs.progressChan != nil {
 		acs.progressChan <- text
 	}
 	if data != nil && acs.resultChan != nil {
-		key := ""
-		if text != "" {
-			key = text
-		}
+		key := fmt.Sprintf("%s:%s", id, text)
 		if acs.Card != nil {
 			key = fmt.Sprintf("%s/%s", acs.Card.Name, key)
 		} else if acs.call != nil {

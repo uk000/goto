@@ -76,9 +76,9 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func streamAgentResponse(agent string, w http.ResponseWriter, r *http.Request) func(output string) {
+func streamAgentResponse(agent string, w http.ResponseWriter, r *http.Request) AgentResultsCallback {
 	var fw http.Flusher
-	return func(output string) {
+	return func(id, output string) {
 		if fw == nil {
 			if f, ok := w.(http.Flusher); ok {
 				fw = f
@@ -87,10 +87,10 @@ func streamAgentResponse(agent string, w http.ResponseWriter, r *http.Request) f
 		if fw != nil {
 			w.Write([]byte(output))
 			fw.Flush()
-			msg := fmt.Sprintf("Received stream response from agent [%s], response: %s", agent, output)
+			msg := fmt.Sprintf("Received stream response from agent [%s][%s], response: %s", agent, id, output)
 			util.AddLogMessage(msg, r)
 		} else {
-			msg := fmt.Sprintf("Cannot get flush writer to send stream response from agent [%s]", agent)
+			msg := fmt.Sprintf("Cannot get flush writer to send stream response from agent [%s][%s]", agent, id)
 			util.AddLogMessage(msg, r)
 		}
 	}

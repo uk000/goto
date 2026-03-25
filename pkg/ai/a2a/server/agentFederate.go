@@ -402,7 +402,9 @@ func (ab *AgentBehaviorFederate) prepareArgs(args map[string]any, forwardHeaders
 func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateCallContext) error {
 	msg := fmt.Sprintf("Agent [%s] Invoking Agent [%s] at URL [%s] with input [%s]", aCtx.agent.ID, dCtx.agentCall.Name, dCtx.agentCall.AgentURL, dCtx.agentCall.Message)
 	aCtx.Log(msg)
-	aCtx.ReportProgress(dCtx.agentCall.Name, msg)
+	if !aCtx.ReportProgress(dCtx.agentCall.Name, msg) {
+		aCtx.agentResults[dCtx.agentCall.Name] = msg
+	}
 	client := a2aclient.NewA2AClient(ab.agent.Port, ab.agent.ID, dCtx.agentCall.TLS, dCtx.agentCall.Authority)
 	if client == nil {
 		return errors.New("failed to create A2A client")
@@ -410,21 +412,27 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 	session, err := client.ConnectWithAgentCard(aCtx.ctx, dCtx.agentCall, dCtx.agentCall.CardURL)
 	if err != nil {
 		return fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.CardURL, err.Error())
-	} else {
-		// msg = fmt.Sprintf("Loaded agent card for Agent [%s] URL [%s]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL)
-		// aCtx.ReportProgress(dCtx.agentCall.Name, msg)
 	}
-	err = session.CallAgent(nil, aCtx.resultsChan, aCtx.upstreamProgress)
+	agentResults := map[string][]string{}
+	var unaryCallback a2aclient.AgentResultsCallback
+	if aCtx.resultsChan == nil {
+		unaryCallback = func(id, aOutput string) {
+			agentResults[id] = append(agentResults[id], aOutput)
+		}
+	}
+	err = session.CallAgent(unaryCallback, aCtx.resultsChan, aCtx.upstreamProgress)
 	if err != nil {
 		if aCtx.resultsChan != nil {
 			aCtx.resultsChan <- types.NewPair[string, any](dCtx.agentCall.Name, err.Error())
 		} else if aCtx.localProgress != nil {
 			aCtx.ReportProgress(dCtx.agentCall.Name, err.Error())
+		} else {
+			agentResults[""] = []string{err.Error()}
 		}
 		return fmt.Errorf("Failed to call Agent [%s] URL [%s]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL)
-	} else {
-		// msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL)
-		// aCtx.ReportProgress(dCtx.agentCall.Name, msg)
+	}
+	if aCtx.agentResults != nil && len(agentResults) > 0 {
+		aCtx.agentResults[dCtx.agentCall.Name] = agentResults
 	}
 	return nil
 }

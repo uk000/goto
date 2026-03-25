@@ -1821,9 +1821,9 @@ grpc:
   config:
     protos:
       - name: goto-proto
-        path: /mnt/d/Code/goto/pkg/grpc/grpc.proto
+        path: ./goto/pkg/grpc/grpc.proto
       - name: sample-proto
-        path: /mnt/d/Code/goto/pkg/grpc/sample.proto
+        path: ./goto/pkg/grpc/sample.proto
     services:
       - service: Goto
         port: 8000

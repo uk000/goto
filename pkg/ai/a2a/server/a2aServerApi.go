@@ -51,6 +51,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(agentsRouter, "/{agent}/delegates/agents", getAgentDelegates, "GET")
 	util.AddRoute(agentsRouter, "/{agent}/delegates/agents/{delegate}", getAgentDelegates, "GET")
 	util.AddRoute(agentsRouter, "/add", addAgents, "POST")
+	// util.AddRoute(agentsRouter, "/port={port}/add", addAgents, "POST")
 	util.AddRoute(agentsRouter, "/{agent}/payload", setAgentPayload, "POST")
 	util.AddRoute(agentsRouter, "/clear", clearAgents, "POST")
 
