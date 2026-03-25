@@ -64,11 +64,11 @@ type TrafficConfig struct {
 }
 
 type TrafficTransform struct {
-	URIMap         map[string]string     `yaml:"uriMap" json:"uriMap"`
-	Headers        *Keys                 `yaml:"headers" json:"headers"`
-	Queries        *Keys                 `yaml:"queries" json:"queries"`
-	StripURI       string                `yaml:"stripURI" json:"stripURI"`
-	RequestId      *invocation.RequestId `yaml:"requestId" json:"requestId"`
+	URIMap         map[string]string `yaml:"uriMap" json:"uriMap"`
+	Headers        *Keys             `yaml:"headers" json:"headers"`
+	Queries        *Keys             `yaml:"queries" json:"queries"`
+	StripURI       string            `yaml:"stripURI" json:"stripURI"`
+	RequestId      *types.RequestId  `yaml:"requestId" json:"requestId"`
 	stripURIRegexp *regexp.Regexp
 }
 

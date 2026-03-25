@@ -18,6 +18,7 @@ package a2aserver
 
 import (
 	"goto/pkg/server/echo"
+	"goto/pkg/util"
 
 	a2aproto "trpc.group/trpc-go/trpc-a2a-go/protocol"
 	"trpc.group/trpc-go/trpc-a2a-go/taskmanager"
@@ -28,7 +29,7 @@ type AgentBehaviorEcho struct {
 }
 
 func (ab *AgentBehaviorEcho) DoUnary(aCtx *AgentContext) (*taskmanager.MessageProcessingResult, error) {
-	msg := createDataMessage(ab.getEchoMessage(aCtx, aCtx.input))
+	msg := createTextMessage(util.ToJSONText(ab.getEchoMessage(aCtx, aCtx.input)))
 	return &taskmanager.MessageProcessingResult{
 		Result: &msg,
 	}, nil

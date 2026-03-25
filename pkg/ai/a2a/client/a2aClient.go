@@ -38,15 +38,22 @@ import (
 )
 
 type AgentCall struct {
-	Name      string         `json:"name,omitempty"`
-	AgentURL  string         `json:"agentURL,omitempty"`
-	CardURL   string         `json:"cardURL,omitempty"`
-	Authority string         `json:"authority,omitempty"`
-	TLS       bool           `json:"tls,omitempty"`
-	Delay     string         `json:"delay,omitempty"`
-	Message   string         `json:"message,omitempty"`
-	Data      map[string]any `json:"data,omitempty"`
-	Headers   *types.Headers `json:"headers,omitempty"`
+	Name                 string           `json:"name,omitempty"`
+	AgentURL             string           `json:"agentURL,omitempty"`
+	CardURL              string           `json:"cardURL,omitempty"`
+	Authority            string           `json:"authority,omitempty"`
+	H2                   bool             `json:"h2,omitempty"`
+	TLS                  bool             `json:"tls,omitempty"`
+	Delay                string           `json:"delay,omitempty"`
+	Message              string           `json:"message,omitempty"`
+	Data                 map[string]any   `json:"data,omitempty"`
+	Headers              *types.Headers   `json:"headers,omitempty"`
+	RequestCount         int              `json:"requestCount"`
+	Concurrent           int              `json:"concurrent"`
+	InitialDelay         string           `json:"initialDelay"`
+	RetryDelay           string           `json:"retryDelay"`
+	RetriableStatusCodes []int            `json:"retriableStatusCodes"`
+	RequestId            *types.RequestId `json:"requestId"`
 }
 
 type A2AClient struct {
@@ -297,11 +304,13 @@ func (acs *A2AClientSession) update(callback func(output string), resultChan cha
 }
 
 func (acs *A2AClientSession) InvokeUnary() error {
-	result, err := acs.SendParts()
+	results, err := acs.SendParts()
 	if err != nil {
 		return err
 	}
-	acs.processMessageResult(result)
+	for _, result := range results {
+		acs.processMessageResult(result)
+	}
 	return nil
 }
 
@@ -310,10 +319,21 @@ func (acs *A2AClientSession) InvokeStream() error {
 	return acs.Stream()
 }
 
-func (acs *A2AClientSession) SendParts() (*a2aproto.MessageResult, error) {
-	return acs.client.client.SendMessage(acs.ctx, a2aproto.SendMessageParams{
-		Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
-	})
+func (acs *A2AClientSession) SendParts() ([]*a2aproto.MessageResult, error) {
+	requestCount := acs.call.RequestCount
+	concurrent := acs.call.Concurrent
+	rounds := requestCount / concurrent
+	results := []*a2aproto.MessageResult{}
+	for i := 0; i < rounds; i++ {
+		result, err := acs.client.client.SendMessage(acs.ctx, a2aproto.SendMessageParams{
+			Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
+		})
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
 }
 
 func buildInputParts(text string, data any) []a2aproto.Part {

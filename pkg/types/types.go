@@ -22,6 +22,13 @@ import (
 	"strings"
 )
 
+type RequestId struct {
+	Send   bool   `json:"send"`
+	UUID   bool   `json:"uuid"`
+	Header string `json:"header"`
+	Query  string `json:"query"`
+}
+
 type Pair[L any, R any] struct {
 	Left  L
 	Right R

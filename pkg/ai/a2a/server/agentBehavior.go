@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"goto/pkg/ai/a2a/model"
+	"goto/pkg/constants"
 	"goto/pkg/server/echo"
 	"goto/pkg/types"
 	"goto/pkg/util"
@@ -169,7 +170,7 @@ func (b *AgentBehaviorImpl) stream(aCtx *AgentContext) (err error) {
 }
 
 func (b *AgentBehaviorImpl) addOrSendServerInfo(aCtx *AgentContext, result *taskmanager.MessageProcessingResult) {
-	serverInfo := a2aproto.NewDataPart(map[string]any{"Goto-Server-Info": echo.GetEchoResponseFromRS(aCtx.rs)})
+	serverInfo := a2aproto.NewDataPart(map[string]any{constants.HeaderGotoServerInfo: echo.GetEchoResponseFromRS(aCtx.rs)})
 	if result != nil && result.Result != nil {
 		if msg, ok := result.Result.(*a2aproto.Message); ok {
 			msg.Parts = append(msg.Parts, serverInfo)
@@ -189,6 +190,13 @@ func getMessageText(message *a2aproto.Message) string {
 	return s.String()
 }
 
+func createTextMessage(data string) a2aproto.Message {
+	return a2aproto.NewMessage(
+		a2aproto.MessageRoleAgent,
+		[]a2aproto.Part{a2aproto.NewTextPart(data)},
+	)
+}
+
 func createDataMessage(data any) a2aproto.Message {
 	return a2aproto.NewMessage(
 		a2aproto.MessageRoleAgent,
@@ -196,45 +204,57 @@ func createDataMessage(data any) a2aproto.Message {
 	)
 }
 
-func createTextPartsFromArrayOrString(key string, val any, parts *[]a2aproto.Part) bool {
+func createTextPartsFromArrayOrString(key string, val any, parts *[]a2aproto.Part, builder *strings.Builder) bool {
 	hasText := false
 	if arr, ok := val.([]any); ok {
 		for _, data := range arr {
 			if s, ok := data.(string); ok {
 				hasText = true
-				*parts = append(*parts, a2aproto.NewTextPart(fmt.Sprintf("%s: %s", key, s)))
+				msg := fmt.Sprintf("%s: %s\n", key, s)
+				*parts = append(*parts, a2aproto.NewTextPart(msg))
+				builder.WriteString(msg)
 			} else if arr2, ok := val.([]any); ok {
-				createTextPartsFromArrayOrString(key, arr2, parts)
+				createTextPartsFromArrayOrString(key, arr2, parts, builder)
 			}
 		}
 	} else if arr, ok := val.([]string); ok {
 		for _, s := range arr {
 			hasText = true
-			*parts = append(*parts, a2aproto.NewTextPart(fmt.Sprintf("%s: %s", key, s)))
+			msg := fmt.Sprintf("%s: %s\n", key, s)
+			*parts = append(*parts, a2aproto.NewTextPart(msg))
+			builder.WriteString(msg)
 		}
+	} else if s, ok := val.(string); ok {
+		hasText = true
+		msg := fmt.Sprintf("%s: %s\n", key, s)
+		*parts = append(*parts, a2aproto.NewTextPart(msg))
+		builder.WriteString(msg)
 	}
 	return hasText
 }
 
-func createPartsFromMap(key string, m map[string]any, parts *[]a2aproto.Part, deep bool) {
+func createPartsFromMap(key string, m map[string]any, parts *[]a2aproto.Part, builder *strings.Builder, deep bool) {
 	for k2, val := range m {
 		if m2, ok := val.(map[string]any); ok {
 			if deep {
-				createPartsFromMap(fmt.Sprintf("%s: [%s]", key, k2), m2, parts, false)
+				createPartsFromMap(fmt.Sprintf("%s: [%s]", key, k2), m2, parts, builder, false)
 			}
 		} else {
-			createTextPartsFromArrayOrString(fmt.Sprintf("%s: [%s]", key, k2), val, parts)
+			createTextPartsFromArrayOrString(fmt.Sprintf("%s: [%s]", key, k2), val, parts, builder)
 		}
 	}
 }
 
 func createHybridMessage(toolResults, agentResults map[string]any) a2aproto.Message {
 	parts := []a2aproto.Part{}
-	createPartsFromMap("tools", toolResults, &parts, true)
-	createPartsFromMap("agents", agentResults, &parts, true)
+	builder := &strings.Builder{}
+	createPartsFromMap("tools", toolResults, &parts, builder, true)
+	createPartsFromMap("agents", agentResults, &parts, builder, true)
 	parts = append(parts, a2aproto.NewDataPart(toolResults))
 	parts = append(parts, a2aproto.NewDataPart(agentResults))
-	return a2aproto.NewMessage(a2aproto.MessageRoleAgent, parts)
+	finalParts := []a2aproto.Part{a2aproto.NewTextPart(builder.String())}
+	finalParts = append(finalParts, parts...)
+	return a2aproto.NewMessage(a2aproto.MessageRoleAgent, finalParts)
 }
 
 func createAnyParts(msg string, result any) []a2aproto.Part {

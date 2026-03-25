@@ -1,11 +1,11 @@
 name: goto-test-config
 tls:
-  8443:
+  - port: 8443
     key: /Users/u0s00px/code/goto/1000488443NS-3K-local-8443-key.pem
     cert: /Users/u0s00px/code/goto/1000488443NS-3K-local-8443-cert.pem
-  4000:
+  - port: 4444
     key: /Users/u0s00px/code/goto/17228108878443NS-3K-local-8443-key.pem
-    cert: /Users/u0s00px/code/goto/1722812138443NS-3K-local-8443-cert.pem
+    cert: /Users/u0s00px/code/goto/17228108878443NS-3K-local-8443-cert.pem
 mcp:
   toolSchemas:
     - name: default
@@ -97,7 +97,8 @@ mcp:
             description: Arguments to pass to the remote tool. JSON object with k:v. Can include "headers" config as an arg, meant to be applied by the remote tool for its own outbound calls.
         required: []
   servers:
-    - server:
+    - port: 3000
+      server:
         name: goto-mcp-1
         port: 3000
         uri: "/mcp/goto-mcp-1"
@@ -611,9 +612,9 @@ mcp:
             - name: Root 3 on goto-mcp-1@${POD_NAME}@ns@local
               uri: "/root3"
 a2a:
-  agents:
-    - port: 3000
-      agent:
+  - port: 3000
+    agents:
+      goto-agent-1:
         card:
           protocolVersion: 0.2.2
           version: "1.0"
@@ -1005,17 +1006,406 @@ a2a:
                     authority: 
             maxCalls: 3
             parallel: true
-    - port: 3000
-      agent:
+      goto-agent-s2:
         card:
           protocolVersion: 0.2.2
           version: "1.0"
-          name: goto-agent-1-stream
-          description: "This is agent goto-agent-1-stream@${POD_NAME}@ns@local with skills: echo elicit fetch stream"
-          url: http://localhost:3000/agent/goto-agent-1-stream/
+          name: goto-agent-12
+          description: "This is agent goto-agent-12@${POD_NAME}@ns@local with skills: echo elicit fetch stream"
+          url: http://localhost:3333/agent/goto-agent-1/
           preferredTransport: ""
           additionalInterfaces:
-            - url: http://localhost:3000/agent/goto-agent-1-stream/grpc
+            - url: http://localhost:3333/agent/goto-agent-1/grpc
+              transport: grpc
+          provider:
+            organization: Goto
+            url: http://goto.goto
+          documentationUrl: http://foo.bar
+          capabilities:
+            streaming: false
+            pushNotifications: false
+            stateTransitionHistory: true
+            extensions:
+              - uri: /foo
+              - uri: /bar
+          defaultInputModes:
+            - text
+          defaultOutputModes:
+            - text
+            - task-status
+          skills:
+            - id: fetch
+              name: fetch
+              description: skill of fetch
+              tags:
+                - fetch
+              examples:
+                - what is fetch
+                - how to fetch
+                - when to fetch
+                - explain fetch
+              inputModes:
+                - text
+              outputModes:
+                - text
+                - task-status
+            - id: elicit
+              name: elicit
+              description: skill of elicit
+              tags:
+                - elicit
+              examples:
+                - what is elicit
+                - how to elicit
+                - when to elicit
+                - explain elicit
+              inputModes:
+                - text
+              outputModes:
+                - text
+                - task-status
+            - id: echo
+              name: echo
+              description: skill of echo
+              tags:
+                - echo
+              examples:
+                - what is echo
+                - how to echo
+                - when to echo
+                - explain echo
+              inputModes:
+                - text
+              outputModes:
+                - text
+                - task-status
+            - id: federate
+              name: federate
+              description: skill of federate
+              tags:
+                - federate
+              examples:
+                - what is federate
+                - how to federate
+                - when to federate
+                - explain federate
+              inputModes:
+                - text
+              outputModes:
+                - text
+                - task-status
+            - id: stream
+              name: stream
+              description: skill of stream
+              tags:
+                - stream
+              examples:
+                - what is stream
+                - how to do stream
+                - when to do stream
+                - explain stream
+              inputModes:
+                - text
+              outputModes:
+                - text
+                - task-status
+          supportsAuthenticatedExtendedCard: false
+        behavior:
+          federate: true
+        config:
+          delay:
+            min: 0.1s
+            max: 0.2s
+            count: -1
+          delegates:
+            tools:
+              echo:
+                triggers:
+                  - echo
+                  - feedback
+                  - response
+                toolCall:
+                  tool: echo
+                  url: localhost:3333/mcp/goto-mcp-1/echo
+                  sseURL: ""
+                  server: goto-mcp-1
+                  authority: localhost
+                  delay: 10ms
+                  args:
+                    text: Hello from agent goto-agent-1-2@${POD_NAME}@ns@local
+                  headers:
+                    request:
+                      add:
+                        foo: echo
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
+                substitutes:
+                  mcp1:
+                    url: localhost:3333/mcp/goto-mcp-1/echo
+                    authority: localhost
+                  mcp2:
+                    url: localhost:4000/mcp/goto-mcp-2/echo
+                    authority: localhost
+                  mcp3:
+                    url: localhost:4000/mcp/goto-mcp-3/echo
+                    authority: localhost
+              echo2:
+                triggers:
+                  - echo
+                  - echo2
+                toolCall:
+                  tool: echo
+                  url: localhost:4000/mcp/goto-mcp-2/echo
+                  sseURL: ""
+                  server: goto-mcp-2
+                  authority: localhost
+                  delay: 10ms
+                  args:
+                    text: Hello from agent goto-agent-1-2@${POD_NAME}@ns@local
+                  headers:
+                    request:
+                      add:
+                        foo: echo2
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
+                substitutes:
+              elicit:
+                triggers:
+                  - elicit
+                  - llm
+                  - client
+                toolCall:
+                  tool: elicit
+                  url: localhost:4000/mcp/goto-mcp-2/elicit
+                  sseURL: ""
+                  server: goto-mcp-2
+                  authority: localhost
+                  delay: 1s
+                  args:
+                    text: Hello from agent goto-agent-1-2@${POD_NAME}@ns@local
+                  headers:
+                    request:
+                      add:
+                        foo: elicit
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
+                substitutes:
+                  mcp1:
+                    url: localhost:4000/mcp/goto-mcp-2/elicit
+                    authority: localhost
+                  mcp2:
+                    url: localhost:4000/mcp/goto-mcp-3/elicit
+                    authority: localhost
+                  mcp3:
+                    url: localhost:3333/mcp/goto-mcp-1/elicit
+                    authority: localhost
+              fetch:
+                triggers:
+                  - fetch
+                  - remote
+                toolCall:
+                  tool: fetch
+                  url: localhost:4000/mcp/goto-mcp-3/fetch
+                  sseURL: ""
+                  server: goto-mcp-3
+                  authority: localhost
+                  delay: 1s
+                  args:
+                    text: Hello from agent goto-agent-1-2@${POD_NAME}@ns@local
+                  headers:
+                    request:
+                      add:
+                        foo: fetch
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
+                substitutes:
+                  mcp1:
+                    url: localhost:4000/mcp/goto-mcp-3/fetch
+                    authority: localhost
+                  mcp2:
+                    url: localhost:3333/mcp/goto-mcp-1/fetch
+                    authority: localhost
+                  mcp3:
+                    url: localhost:4000/mcp/goto-mcp-2/fetch
+                    authority: localhost
+              stream:
+                triggers:
+                  - stream
+                  - content
+                  - push
+                toolCall:
+                  tool: stream
+                  url: localhost:3333/mcp/goto-mcp-1/stream
+                  sseURL: ""
+                  server: goto-mcp-1
+                  authority: localhost
+                  delay: 1s
+                  args:
+                    text: Hello from agent goto-agent-1-2@${POD_NAME}@ns@local
+                  headers:
+                    request:
+                      add:
+                        foo: stream
+                        Accept: "text/stream"
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
+                substitutes:
+                  mcp1:
+                    url: localhost:3333/mcp/goto-mcp-1/stream
+                    authority: localhost
+                  mcp2:
+                    url: localhost:4000/mcp/goto-mcp-2/stream
+                    authority: localhost
+                  mcp3:
+                    url: localhost:4000/mcp/goto-mcp-3/stream
+                    authority: localhost
+            agents:
+              agent1:
+                triggers: [agent1]
+                agentCall:
+                  name: goto-agent-1
+                  agentURL: http://localhost:4000/agent/goto-agent-1
+                  cardURL: http://localhost:4000/agent/goto-agent-1/.well-known/agent.json
+                  authority: localhost
+                  delay: 1s
+                  message: echo
+                  headers:
+                    request:
+                      add:
+                        foo: a
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
+                substitutes:
+                  agent1:
+                    url: http://localhost:4000/agent/goto-agent-1
+                    authority: localhost
+                  agent2:
+                    url: http://localhost:4000/agent/goto-agent-2
+                    authority: localhost
+                  agent3:
+                    url: http://localhost:4000/agent/goto-agent-3
+                    authority: localhost
+              agent2:
+                triggers: [agent2]
+                agentCall:
+                  name: goto-agent-2
+                  agentURL: http://localhost:4000/agent/goto-agent-2
+                  cardURL: http://localhost:4000/agent/goto-agent-2/.well-known/agent.json
+                  authority: localhost
+                  delay: 1s
+                  message: echo
+                  headers:
+                    request:
+                      add:
+                        foo: b
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
+                substitutes:
+                  agent1:
+                    url: http://localhost:4000/agent/goto-agent-1
+                    authority: localhost
+                  agent2:
+                    url: http://localhost:4000/agent/goto-agent-2
+                    authority: localhost
+                  agent3:
+                    url: http://localhost:4000/agent/goto-agent-3
+                    authority: localhost
+              agent3:
+                triggers: [agent3]
+                agentCall:
+                  name: goto-agent-3
+                  agentURL: http://localhost:4000/agent/goto-agent-3
+                  cardURL: http://localhost:4000/agent/goto-agent-3/.well-known/agent.json
+                  authority: localhost
+                  delay: 1s
+                  message: echo
+                  headers:
+                    request:
+                      add:
+                        foo: c
+                      remove:
+                        - bar
+                      forward:
+                        - Traceparent
+                        - Tracestate
+                        - Authorization
+                substitutes:
+                  agent1:
+                    url: http://localhost:4000/agent/goto-agent-1
+                    authority: localhost
+                  agent2:
+                    url: http://localhost:4000/agent/goto-agent-2
+                    authority: localhost
+                  agent3:
+                    url: http://localhost:4000/agent/goto-agent-3
+                    authority: localhost
+            http:
+              get:
+                triggers:
+                  - http
+                  - get
+                  - web
+                httpCall:
+                  url: localhost/fetch
+                  authority: localhost:8082
+                  delay:
+                    min: 0.1s
+                    max: 0.2s
+                    count: -1
+                  forwardHeaders:
+                    - Traceparent
+                    - Tracestate
+                    - authorization
+                substitutes:
+                  http1:
+                    url: localhost/stream
+                    authority: localhost:8082
+                  http2:
+                    url: localhost/stream
+                    authority: localhost:8080
+                  http3:
+                    url: localhost/stream
+                    authority: 
+            maxCalls: 3
+            parallel: true
+      goto-agent-stream:
+        card:
+          protocolVersion: 0.2.2
+          version: "1.0"
+          name: goto-agent-stream
+          description: "This is agent goto-agent-stream@${POD_NAME}@ns@local with skills: echo elicit fetch stream"
+          url: http://localhost:3000/agent/goto-agent-stream/
+          preferredTransport: ""
+          additionalInterfaces:
+            - url: http://localhost:3000/agent/goto-agent-stream/grpc
               transport: grpc
           provider:
             organization: Goto
@@ -1125,11 +1515,11 @@ a2a:
               max: 0.5s
               count: -1
             jsonStream:
-              - message: This is response 1/5 from Agent goto-agent-1-stream@Port=3000@${POD_NAME}@ns@local
-              - message: This is response 2/5 from Agent goto-agent-1-stream@Port=3000@${POD_NAME}@ns@local
-              - message: This is response 3/5 from Agent goto-agent-1-stream@Port=3000@${POD_NAME}@ns@local
-              - message: This is response 4/5 from Agent goto-agent-1-stream@Port=3000@${POD_NAME}@ns@local
-              - message: This is response 5/5 from Agent goto-agent-1-stream@Port=3000@${POD_NAME}@ns@local
+              - message: This is response 1/5 from Agent goto-agent-stream@Port=3000@${POD_NAME}@ns@local
+              - message: This is response 2/5 from Agent goto-agent-stream@Port=3000@${POD_NAME}@ns@local
+              - message: This is response 3/5 from Agent goto-agent-stream@Port=3000@${POD_NAME}@ns@local
+              - message: This is response 4/5 from Agent goto-agent-stream@Port=3000@${POD_NAME}@ns@local
+              - message: This is response 5/5 from Agent goto-agent-stream@Port=3000@${POD_NAME}@ns@local
 proxy:
   - http:
       port: 8080

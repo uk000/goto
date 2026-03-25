@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"goto/pkg/constants"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
 	"goto/pkg/transport"
@@ -47,18 +48,22 @@ type MCPClientPayload struct {
 }
 
 type ToolCall struct {
-	Tool      string         `json:"tool"`
-	URL       string         `json:"url"`
-	SSEURL    string         `json:"sseURL"`
-	Server    string         `json:"server,omitempty"`
-	Authority string         `json:"authority,omitempty"`
-	TLS       bool           `json:"tls,omitempty"`
-	ForceSSE  bool           `json:"forceSSE,omitempty"`
-	Raw       bool           `json:"neat,omitempty"`
-	Delay     string         `json:"delay,omitempty"`
-	Args      map[string]any `json:"args,omitempty"`
-	Headers   *types.Headers `json:"headers,omitempty"`
-	delayD    *types.Delay   `json:"-"`
+	Tool         string         `json:"tool"`
+	URL          string         `json:"url"`
+	SSEURL       string         `json:"sseURL"`
+	Server       string         `json:"server,omitempty"`
+	Authority    string         `json:"authority,omitempty"`
+	H2           bool           `json:"h2,omitempty"`
+	TLS          bool           `json:"tls,omitempty"`
+	ForceSSE     bool           `json:"forceSSE,omitempty"`
+	Raw          bool           `json:"neat,omitempty"`
+	Args         map[string]any `json:"args,omitempty"`
+	Headers      *types.Headers `json:"headers,omitempty"`
+	Delay        string         `json:"delay,omitempty"`
+	RequestCount int            `json:"requestCount"`
+	Concurrent   int            `json:"concurrent"`
+	InitialDelay string         `json:"initialDelay"`
+	delayD       *types.Delay   `json:"-"`
 }
 
 type MCPSession struct {
@@ -316,7 +321,7 @@ func (s *MCPSession) CallTool(tc *ToolCall, args map[string]any, inHeaders http.
 	if args["delay"] == nil {
 		args["delay"] = tc.Delay
 	}
-	s.Hops.Add(fmt.Sprintf("%s [%s] calling tool [%s] with sse[%t] on url [%s]", s.CallerId, s.Operation, tc.Tool, s.SSE, tc.URL))
+	s.Hops.Add(fmt.Sprintf("%s [%s] Tool Call [%s] with sse[%t] on url [%s]. Request Count [%d], Concurrent [%d]", s.CallerId, s.Operation, tc.Tool, s.SSE, tc.URL, tc.RequestCount, tc.Concurrent))
 	ctx := context.Background()
 	if args["forwardHeaders"] == nil && tc.Headers != nil && tc.Headers.Request != nil {
 		args["forwardHeaders"] = tc.Headers.Request.Forward
@@ -331,20 +336,45 @@ func (s *MCPSession) CallTool(tc *ToolCall, args map[string]any, inHeaders http.
 	}
 	// ctx = util.WithContextHeaders(ctx, s.AddRequestHeaders)
 	s.inHeaders = inHeaders
-	output := util.BuildGotoClientInfo(nil, 0, s.Name, "", tc.Tool, tc.URL, tc.Server, nil, args, inHeaders, s.outHeaders.Request.Add, s.outHeaders.Request.Forward,
+	clientInfo := util.BuildGotoClientInfo(nil, 0, s.Name, "", tc.Tool, tc.URL, tc.Server, nil, args, inHeaders, s.outHeaders.Request.Add, s.outHeaders.Request.Forward,
 		map[string]any{
 			"Goto-MCP-SSE":  s.SSE,
 			"Goto-MCP-Tool": tc.Tool,
 			"Tool-Call":     tc,
 		})
-	result, err := s.session.CallTool(ctx, &gomcp.CallToolParams{Name: tc.Tool, Arguments: args})
-	if err != nil {
-		msg = fmt.Sprintf("%s --> Failed to call tool [%s]/sse[%t] on url [%s] with error [%s]", msg, tc.Tool, s.SSE, tc.URL, err.Error())
-		s.Hops.Add(msg)
-		log.Println(s.Hops.AsJSONText())
-		log.Println(util.ToJSONText(output))
-		return output, errors.New(msg)
+	output := map[string]any{}
+	output[constants.HeaderGotoClientInfo] = clientInfo[constants.HeaderGotoClientInfo]
+	requestCount := tc.RequestCount
+	if requestCount == 0 {
+		requestCount = 1
 	}
+	concurrent := tc.Concurrent
+	if concurrent == 0 {
+		concurrent = 1
+	}
+	rounds := requestCount / concurrent
+	results := []any{}
+	for i := 1; i <= rounds; i++ {
+		s.Hops.Add(fmt.Sprintf("[%s] Calling tool [%s] on url [%s]. Request #%d/%d", s.CallerId, tc.Tool, tc.URL, i, tc.RequestCount))
+		result, err := s.session.CallTool(ctx, &gomcp.CallToolParams{Name: tc.Tool, Arguments: args})
+		if err != nil {
+			msg = fmt.Sprintf("%s --> Request #%d/%d: Failed to call tool [%s]/sse[%t] on url [%s] with error [%s]", msg, i, tc.RequestCount, tc.Tool, s.SSE, tc.URL, err.Error())
+			s.Hops.Add(msg)
+			log.Println(s.Hops.AsJSONText())
+			results = append(results, msg)
+		} else {
+			results = append(results, s.resultToOutput(tc, result))
+			msg = fmt.Sprintf("%s --> Request #%d/%d: Tool [%s](sse=%t) successful on URL [%s]", msg, i, tc.RequestCount, tc.Tool, s.SSE, tc.URL)
+			s.Hops.Add(fmt.Sprintf("%s %s", s.CallerId, msg))
+			log.Println(msg)
+		}
+	}
+	output[tc.URL] = results
+	return output, nil
+}
+
+func (s *MCPSession) resultToOutput(tc *ToolCall, result *gomcp.CallToolResult) (output map[string]any) {
+	output = map[string]any{}
 	if result.Content != nil {
 		if tc.Raw {
 			output["content"] = result.Content
@@ -379,10 +409,7 @@ func (s *MCPSession) CallTool(tc *ToolCall, args map[string]any, inHeaders http.
 			}
 		}
 	}
-	msg = fmt.Sprintf("%s --> Tool [%s](sse=%t) successful on URL [%s]", msg, tc.Tool, s.SSE, tc.URL)
-	s.Hops.Add(fmt.Sprintf("%s %s", s.CallerId, msg))
-	log.Println(msg)
-	return output, nil
+	return
 }
 
 func (s *MCPSession) InterceptRequest(r *http.Request) {

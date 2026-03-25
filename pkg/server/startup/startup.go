@@ -47,7 +47,7 @@ import (
 var (
 	configWatchers   []fswatcher.Watcher
 	tlsConfigs       = map[string]ctl.PortTLS{}
-	a2aConfigs       = map[string]*ctl.A2A{}
+	a2aConfigs       = map[string]ctl.A2A{}
 	mcpConfigs       = map[string]*ctl.MCP{}
 	httpProxyConfigs = map[string]*httpproxy.Proxy{}
 	tcpProxyConfigs  = map[string]*tcpproxy.TCPProxy{}
@@ -302,8 +302,8 @@ func loadConfig(filePath string, config *ctl.GotoConfig) {
 }
 
 func clearTLS(portTLS ctl.PortTLS) {
-	for port, _ := range portTLS {
-		listeners.RemoveListenerCert(port)
+	for _, tls := range portTLS {
+		listeners.RemoveListenerCert(tls.Port)
 	}
 }
 
@@ -312,21 +312,25 @@ func processTLS(portTLS ctl.PortTLS) {
 		log.Println("No TLS configs to configure")
 		return
 	}
-	for port, tlsConfig := range portTLS {
-		l := listeners.GetListenerForPort(port)
+	for _, tls := range portTLS {
+		l := listeners.GetListenerForPort(tls.Port)
 		if l == nil {
-			log.Printf("No Listener on Port [%d]", port)
+			log.Printf("No Listener on Port [%d]", tls.Port)
 			continue
 		}
-		log.Printf("Loading TLS Cert from path [%s]", tlsConfig.Cert)
-		cert, key, err := tlsConfig.Load()
+		log.Printf("Loading TLS Cert from path [%s]", tls.Cert)
+		cert, key, err := tls.Load()
 		if err != nil {
-			log.Printf("Failed to read TLS cert file [%s] with error: %s\n", tlsConfig.Cert, err.Error())
+			log.Printf("Failed to read TLS cert file [%s] with error: %s\n", tls.Cert, err.Error())
 			continue
 		}
-		if err = listeners.AddListenerCert(port, key, cert, true); err != nil {
-			log.Printf("Failed to add listener cert for port [%d] cert [%s] key [%s] with error: %s\n", port, tlsConfig.Cert, tlsConfig.Key, err.Error())
+		if err = listeners.AddListenerCert(tls.Port, key, cert, true); err != nil {
+			log.Printf("Failed to add listener cert for port [%d] cert [%s] key [%s] with error: %s\n", tls.Port, tls.Cert, tls.Key, err.Error())
 		}
+		log.Println("============================================================")
+		log.Printf("Loaded TLS cert for port [%d]", tls.Port)
+		log.Println("============================================================")
+
 	}
 }
 
@@ -347,14 +351,18 @@ func loadMCP(mcp *ctl.MCP) {
 		names = append(names, fmt.Sprintf("%s (port: %d)", s.Server.Name, s.Server.Port))
 	}
 	mcpserver.AddMCPServers(0, servers)
+	log.Println("============================================================")
 	log.Printf("Added MCP Servers: %+v\n", names)
+	log.Println("============================================================")
 
 	addComponents := func(kind string, server *mcpserver.MCPServer, data []byte) {
 		names, err := server.AddComponents(kind, data)
 		if err != nil {
 			log.Printf("Failed to add %s to server [%s] on port [%d] with error [%s]\n", kind, server.Name, server.Port, err.Error())
 		} else {
+			log.Println("============================================================")
 			log.Printf("Added %s to server [%s] on port [%d]: %+v\n", kind, server.Name, server.Port, names)
+			log.Println("============================================================")
 		}
 	}
 	for _, s := range mcp.Servers {
@@ -407,37 +415,31 @@ func loadMCP(mcp *ctl.MCP) {
 	}
 }
 
-func clearA2A(a2a *ctl.A2A) {
-	for _, a2aAgent := range a2a.Agents {
-		a2aserver.RemoveAgent(a2aAgent.Port, a2aAgent.Agent.Card.Name)
-		registry.TheAgentRegistry.RemoveAgent(a2aAgent.Agent.Card.Name)
+func clearA2A(a2a ctl.A2A) {
+	for _, pa := range a2a {
+		for _, a2aAgent := range pa.Agents {
+			a2aserver.RemoveAgent(a2aAgent.Port, a2aAgent.Card.Name)
+			registry.TheAgentRegistry.RemoveAgent(a2aAgent.Card.Name)
+		}
 	}
 }
 
-func loadA2A(a2a *ctl.A2A) {
+func loadA2A(a2a ctl.A2A) {
 	names := []string{}
 	clearA2A(a2a)
-	for _, a2aAgent := range a2a.Agents {
-		name := a2aAgent.Agent.Card.Name
-		server := a2aserver.GetOrAddServer(a2aAgent.Port)
-		server.AddAgent(a2aAgent.Agent)
-		registry.TheAgentRegistry.AddAgent(a2aAgent.Agent, a2aAgent.Port)
-		names = append(names, fmt.Sprintf("%s(%d)", name, a2aAgent.Port))
-
-		// if a2aAgent.Response != nil {
-		// 	agent := a2aserver.GetAgent(a2aAgent.Port, name)
-		// 	if agent == nil {
-		// 		fmt.Printf("Bad agent [%s]\n", name)
-		// 	} else {
-		// 		if err := agent.SetPayload(util.ToJSONBytes(a2aAgent.Response)); err != nil {
-		// 			fmt.Printf("Failed to set payload for agent [%s] with error: %s\n", name, err.Error())
-		// 		} else {
-		// 			fmt.Printf("Payload set successfully for agent [%s]\n", name)
-		// 		}
-		// 	}
-		// }
+	for _, pa := range a2a {
+		for _, agent := range pa.Agents {
+			agent.Port = pa.Port
+			name := agent.Card.Name
+			server := a2aserver.GetOrAddServer(agent.Port)
+			server.AddAgent(agent)
+			registry.TheAgentRegistry.AddAgent(agent, agent.Port)
+			names = append(names, fmt.Sprintf("%s(%d)", name, agent.Port))
+		}
 	}
+	log.Println("============================================================")
 	log.Printf("Added Agents: %+v\n", names)
+	log.Println("============================================================")
 }
 
 func removeHTTPProxy(p *httpproxy.Proxy) {
@@ -456,7 +458,9 @@ func loadHTTPProxy(p *httpproxy.Proxy) {
 		if err := proxy.AddTarget(target); err != nil {
 			log.Printf("Failed to process HTTP Proxy target [%s] with error: %s", name, err.Error())
 		} else {
+			log.Println("============================================================")
 			log.Printf("HTTP Proxy target [%s] loaded successfully", name)
+			log.Println("============================================================")
 		}
 	}
 }
@@ -472,7 +476,9 @@ func loadTCPProxy(p *tcpproxy.TCPProxy) {
 	}
 	log.Printf("Loading TCP Proxy [%d]\n", p.Port)
 	tcpproxy.GetPortProxy(p.Port).AddUpstreams(p.Upstreams)
+	log.Println("============================================================")
 	log.Printf("TCP Proxy [%d] loaded [%d] upstreams successfully", p.Port, len(p.Upstreams))
+	log.Println("============================================================")
 }
 
 func runStartupScript() {

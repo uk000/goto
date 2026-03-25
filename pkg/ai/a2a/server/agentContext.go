@@ -141,24 +141,73 @@ func (ac *AgentContext) sendDelegatesMatchUpdate() {
 func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint string, inputs map[string]string) {
 	ac.tools = map[string]map[string]*model.DelegateToolCall{}
 	ac.agents = map[string]map[string]*model.DelegateAgentCall{}
-	addTool := func(d *model.DelegateToolCall) {
-		if ac.tools[d.ToolCall.Tool] == nil {
-			ac.tools[d.ToolCall.Tool] = map[string]*model.DelegateToolCall{}
+	addTool := func(d *model.DelegateToolCall) bool {
+		tool := *d
+		add := false
+		if portHint != "" {
+			if strings.Contains(tool.ToolCall.URL, portHint) {
+				add = true
+			}
+		} else {
+			add = true
 		}
-		ac.tools[d.ToolCall.Tool][d.ToolCall.URL] = d
-	}
-	addAgent := func(d *model.DelegateAgentCall) {
-		if ac.agents[d.AgentCall.Name] == nil {
-			ac.agents[d.AgentCall.Name] = map[string]*model.DelegateAgentCall{}
+		if delegateHint != "" && !strings.EqualFold(delegateHint, tool.ToolCall.Tool) {
+			altDelegate := tool.Substitutes[delegateHint]
+			if altDelegate != nil {
+				msg := fmt.Sprintf("Using alternate server [%s] with URL [%s] Authority [%s] instead of default Server [%s] URL [%s]",
+					delegateHint, altDelegate.URL, altDelegate.Authority, tool.ToolCall.Server, tool.ToolCall.URL)
+				ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
+				tool.ToolCall.URL = altDelegate.URL
+				tool.ToolCall.Authority = altDelegate.Authority
+			}
 		}
-		ac.agents[d.AgentCall.Name][d.AgentCall.AgentURL] = d
+		if add {
+			if ac.tools[d.GivenName] == nil {
+				ac.tools[d.GivenName] = map[string]*model.DelegateToolCall{}
+			}
+			ac.tools[d.GivenName][tool.ToolCall.URL] = &tool
+		}
+		return add
 	}
+	addAgent := func(d *model.DelegateAgentCall) bool {
+		agent := *d
+		add := false
+		if portHint != "" {
+			if strings.Contains(agent.AgentCall.AgentURL, portHint) {
+				add = true
+			}
+		} else {
+			add = true
+		}
+		if delegateHint != "" {
+			altDelegate := agent.Substitutes[delegateHint]
+			if altDelegate != nil {
+				agent.AgentCall.AgentURL = altDelegate.URL
+				agent.AgentCall.Authority = altDelegate.Authority
+			}
+			agentURL := strings.Split(agent.AgentCall.AgentURL, agent.AgentCall.Name)[0]
+			agent.AgentCall.AgentURL = agentURL + "/" + delegateHint
+			agent.AgentCall.Name = delegateHint
+		}
+		if add {
+			if ac.agents[d.GivenName] == nil {
+				ac.agents[d.GivenName] = map[string]*model.DelegateAgentCall{}
+			}
+			ac.agents[d.GivenName][agent.AgentCall.AgentURL] = &agent
+		}
+		return add
+	}
+	haveExactMatches := false
 	for name := range inputs {
 		if ac.agent.Config.Delegates.Agents != nil && ac.agent.Config.Delegates.Agents[name] != nil {
-			addAgent(ac.agent.Config.Delegates.Agents[name])
+			if addAgent(ac.agent.Config.Delegates.Agents[name]) {
+				haveExactMatches = true
+			}
 		}
 		if ac.agent.Config.Delegates.Tools != nil && ac.agent.Config.Delegates.Tools[name] != nil {
-			addTool(ac.agent.Config.Delegates.Tools[name])
+			if addTool(ac.agent.Config.Delegates.Tools[name]) {
+				haveExactMatches = true
+			}
 		}
 		if len(ac.tools)+len(ac.agents) >= ac.agent.Config.Delegates.MaxCalls {
 			break
@@ -170,44 +219,31 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 				break
 			}
 			triggerPair := delegateTriple.First
-			if triggerPair.Right.MatchString(input) || strings.Contains(triggerPair.Left, input) {
+			if strings.EqualFold(triggerPair.Left, input) {
 				if delegateTriple.Second != nil {
-					tool := *delegateTriple.Second
-					if portHint != "" {
-						if strings.Contains(tool.ToolCall.URL, portHint) {
-							addTool(&tool)
-						}
-					} else {
-						addTool(&tool)
-					}
-					if delegateHint != "" && !strings.EqualFold(delegateHint, tool.ToolCall.Tool) {
-						altDelegate := tool.Substitutes[delegateHint]
-						if altDelegate != nil {
-							msg := fmt.Sprintf("Using alternate server [%s] with URL [%s] Authority [%s] instead of default Server [%s] URL [%s]",
-								delegateHint, altDelegate.URL, altDelegate.Authority, tool.ToolCall.Server, tool.ToolCall.URL)
-							ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
-							tool.ToolCall.URL = altDelegate.URL
-							tool.ToolCall.Authority = altDelegate.Authority
-						}
+					if addTool(delegateTriple.Second) {
+						haveExactMatches = true
 					}
 				} else if delegateTriple.Third != nil {
-					agent := *delegateTriple.Third
-					if portHint != "" {
-						if strings.Contains(agent.AgentCall.AgentURL, portHint) {
-							addAgent(&agent)
-						}
-					} else {
-						addAgent(&agent)
+					if addAgent(delegateTriple.Third) {
+						haveExactMatches = true
 					}
-					if delegateHint != "" {
-						altDelegate := agent.Substitutes[delegateHint]
-						if altDelegate != nil {
-							agent.AgentCall.AgentURL = altDelegate.URL
-							agent.AgentCall.Authority = altDelegate.Authority
-						}
-						agentURL := strings.Split(agent.AgentCall.AgentURL, agent.AgentCall.Name)[0]
-						agent.AgentCall.AgentURL = agentURL + "/" + delegateHint
-						agent.AgentCall.Name = delegateHint
+				}
+			}
+		}
+	}
+	if !haveExactMatches {
+		for _, dInfos := range ac.triggers {
+			for _, delegateTriple := range dInfos {
+				if len(ac.tools)+len(ac.agents) >= ac.agent.Config.Delegates.MaxCalls {
+					break
+				}
+				triggerPair := delegateTriple.First
+				if triggerPair.Right.MatchString(input) || strings.Contains(triggerPair.Left, input) {
+					if delegateTriple.Second != nil {
+						addTool(delegateTriple.Second)
+					} else if delegateTriple.Third != nil {
+						addAgent(delegateTriple.Third)
 					}
 				}
 			}

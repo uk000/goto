@@ -18,6 +18,7 @@ package util
 
 import (
 	"fmt"
+	"goto/pkg/constants"
 	"goto/pkg/global"
 	"net/http"
 )
@@ -76,6 +77,6 @@ func BuildGotoClientInfo(container map[string]any, port int, name, label, target
 	for k, v := range more {
 		clientInfo[k] = v
 	}
-	container["Goto-Client-Info"] = clientInfo
+	container[constants.HeaderGotoClientInfo] = clientInfo
 	return container
 }

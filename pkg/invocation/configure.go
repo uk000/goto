@@ -60,7 +60,7 @@ type InvocationSpec struct {
 	RetriableStatusCodes []int             `json:"retriableStatusCodes"`
 	KeepOpen             string            `json:"keepOpen"`
 	SendID               bool              `json:"sendID"`
-	RequestId            *RequestId        `json:"requestId"`
+	RequestId            *types.RequestId  `json:"requestId"`
 	ConnTimeout          string            `json:"connTimeout"`
 	ConnIdleTimeout      string            `json:"connIdleTimeout"`
 	RequestTimeout       string            `json:"requestTimeout"`
@@ -95,13 +95,6 @@ type InvocationSpec struct {
 	retryDelayD          time.Duration
 	keepOpenD            time.Duration
 	autoPayloadSize      int
-}
-
-type RequestId struct {
-	Send   bool   `json:"send"`
-	UUID   bool   `json:"uuid"`
-	Header string `json:"header"`
-	Query  string `json:"query"`
 }
 
 type RequestHeaders [][]string

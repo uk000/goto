@@ -35,7 +35,7 @@ type GotoConfig struct {
 	Traffic  *Traffic  `yaml:"traffic,omitempty"`
 	Jobs     *Jobs     `yaml:"jobs,omitempty"`
 	MCP      *MCP      `yaml:"mcp,omitempty"`
-	A2A      *A2A      `yaml:"a2a,omitempty"`
+	A2A      A2A       `yaml:"a2a,omitempty"`
 	Proxies  []*Proxy  `yaml:"proxy,omitempty" json:"proxy,omitempty"`
 }
 

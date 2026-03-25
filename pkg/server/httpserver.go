@@ -167,7 +167,7 @@ func configureAndStartAIServer(port int) error {
 		IdleTimeout:  1 * time.Hour,
 		ConnContext:  withConnContext,
 		//ConnState:    conn.ConnState,
-		Handler:  HTTPHandler(),
+		Handler:  h2cHandler,
 		ErrorLog: log.New(io.Discard, "discard", 0),
 	}
 	return StartHttpServer(jsonRPCServer, true)

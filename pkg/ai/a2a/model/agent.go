@@ -74,18 +74,21 @@ type DelegateConfig struct {
 }
 
 type DelegateToolCall struct {
+	GivenName   string                     `json:"givenName"`
 	Triggers    []string                   `yaml:"triggers" json:"triggers"`
 	ToolCall    *mcpclient.ToolCall        `yaml:"toolCall,omitempty" json:"toolCall,omitempty"`
 	Substitutes map[string]*DelegateServer `yaml:"substitutes,omitempty" json:"substitutes,omitempty"`
 }
 
 type DelegateAgentCall struct {
+	GivenName   string                     `json:"givenName"`
 	Triggers    []string                   `yaml:"triggers" json:"triggers"`
 	AgentCall   *a2aclient.AgentCall       `yaml:"agentCall,omitempty" json:"agentCall,omitempty"`
 	Substitutes map[string]*DelegateServer `yaml:"substitutes,omitempty" json:"substitutes,omitempty"`
 }
 
 type DelegateHTTPCall struct {
+	GivenName   string                     `json:"givenName"`
 	Triggers    []string                   `yaml:"triggers" json:"triggers"`
 	HTTPCall    *HTTPCall                  `yaml:"httpCall,omitempty" json:"httpCall,omitempty"`
 	Substitutes map[string]*DelegateServer `yaml:"substitutes,omitempty" json:"substitutes,omitempty"`

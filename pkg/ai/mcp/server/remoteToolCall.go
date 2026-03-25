@@ -19,7 +19,7 @@ package mcpserver
 import (
 	"fmt"
 	mcpclient "goto/pkg/ai/mcp/client"
-	"goto/pkg/util"
+	"goto/pkg/constants"
 	"strings"
 	"sync"
 
@@ -78,32 +78,61 @@ func (t *ToolCallContext) remoteToolCall() (*gomcp.CallToolResult, error) {
 		t.Log(msg)
 		result = &gomcp.CallToolResult{Content: []gomcp.Content{&gomcp.TextContent{Text: msg}}, IsError: true}
 	} else {
+		output := map[string]map[string]any{}
 		msg := fmt.Sprintf("Remote operation [%s] successful on [%s]. Sending response...", operLabel, tc.URL)
 		t.notifyClient(msg, 0)
 		t.applyDelay()
-		if remoteResult["content"] != nil {
-			content := remoteResult["content"]
-			if c, ok := content.([]gomcp.Content); ok {
-				result.Content = c
-			} else if arr, ok := content.([]any); ok {
-				for _, item := range arr {
-					result.Content = append(result.Content, &gomcp.TextContent{Text: fmt.Sprintf("%+v", item)})
-				}
-			} else if s, ok := content.(string); ok {
-				result.Content = []gomcp.Content{&gomcp.TextContent{Text: s}}
-			} else if m, ok := content.(map[string]any); ok {
-				result.Content = []gomcp.Content{&gomcp.TextContent{Text: util.ToJSONText(m)}}
-			} else {
-				result.Content = []gomcp.Content{&gomcp.TextContent{Text: fmt.Sprintf("%+v", content)}}
+		output["toolResult"] = map[string]any{"": msg}
+		output[constants.HeaderGotoClientInfo] = map[string]any{}
+		if m, ok := remoteResult[constants.HeaderGotoClientInfo].(map[string]any); ok {
+			for k, v := range m {
+				output[constants.HeaderGotoClientInfo][k] = v
 			}
+		} else {
+			output[constants.HeaderGotoClientInfo][""] = remoteResult[constants.HeaderGotoClientInfo]
 		}
-		delete(remoteResult, "content")
-		output := map[string]any{}
-		output["Goto-Client-Info"] = remoteResult["Goto-Client-Info"]
-		delete(remoteResult, "Goto-Client-Info")
-		output["upstreamContent"] = remoteResult["structuredContent"]
-		output["toolResult"] = msg
-		result.StructuredContent = output
+		delete(remoteResult, constants.HeaderGotoClientInfo)
+		i := 0
+		calls := map[string]map[string]any{}
+		for url, a := range remoteResult {
+			calls[url] = map[string]any{}
+			callResults := a.([]any)
+			callData := map[string]map[string]any{}
+			for _, data := range callResults {
+				i++
+				key := fmt.Sprintf("Request %d", i)
+				switch val := data.(type) {
+				case map[string]any:
+					callData[key] = map[string]any{}
+					if m, ok := val["structuredContent"].(map[string]any); ok {
+						if m[constants.HeaderGotoServerInfo] != nil {
+							callData[key][constants.HeaderGotoServerInfo] = m[constants.HeaderGotoServerInfo]
+						}
+						delete(m, constants.HeaderGotoServerInfo)
+						if len(m) > 0 {
+							callData[key]["upstreamInfo"] = m
+						}
+					} else {
+						callData[key]["upstreamInfo"] = val["structuredContent"]
+					}
+					delete(val, "structuredContent")
+					for k, v := range val {
+						callData[key][k] = v
+						result.Content = append(result.Content, &gomcp.TextContent{Text: fmt.Sprintf("[%s][%s] %s: %+v", url, key, k, v)})
+					}
+				default:
+					result.Content = append(result.Content, &gomcp.TextContent{Text: fmt.Sprintf("[%s][%s]: %+v", url, key, data)})
+				}
+			}
+			for k, v := range callData {
+				calls[url][k] = v
+			}
+			output["Calls"] = map[string]any{}
+			for k, v := range calls {
+				output["Calls"][k] = v
+			}
+			result.StructuredContent = output
+		}
 	}
 	return result, err
 }

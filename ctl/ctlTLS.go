@@ -10,28 +10,29 @@ import (
 )
 
 type TLS struct {
+	Port      int    `yaml:"port"`
 	Key       string `yaml:"key"`
 	Cert      string `yaml:"cert"`
 	cert, key []byte
 }
 
-type PortTLS map[int]*TLS
+type PortTLS []*TLS
 
 func processTLS(config *GotoConfig) {
 	if len(config.TLS) == 0 {
 		log.Println("No TLS configs to configure")
 		return
 	}
-	for port, tlsConfig := range config.TLS {
-		tlsConfig.send(port)
+	for _, tlsConfig := range config.TLS {
+		tlsConfig.send()
 	}
 }
 
-func (tls *TLS) send(port int) {
+func (tls *TLS) send() {
 	tls.Load()
-	tls.sendCertOrKey(port, "cert")
-	tls.sendCertOrKey(port, "key")
-	reopenListener(port)
+	tls.sendCertOrKey("cert")
+	tls.sendCertOrKey("key")
+	reopenListener(tls.Port)
 }
 
 func (tls *TLS) Load() (cert, key []byte, err error) {
@@ -44,8 +45,8 @@ func (tls *TLS) Load() (cert, key []byte, err error) {
 	return tls.cert, tls.key, nil
 }
 
-func (tls *TLS) sendCertOrKey(port int, certOrKey string) {
-	url := fmt.Sprintf("%s/server/listeners/%d/%s/add", currentContext.RemoteGotoURL, port, certOrKey)
+func (tls *TLS) sendCertOrKey(certOrKey string) {
+	url := fmt.Sprintf("%s/server/listeners/%d/%s/add", currentContext.RemoteGotoURL, tls.Port, certOrKey)
 	log.Printf("Sending TLS %s to URL [%s]\n", certOrKey, url)
 	var data []byte
 	if certOrKey == "key" {

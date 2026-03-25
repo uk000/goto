@@ -155,6 +155,17 @@ func (a *A2AServer) PrepareAgent(agent *model.Agent) error {
 		agent.Server = srv
 		agent.Handler = srv.Handler()
 	}
+	if agent.Config != nil && agent.Config.Delegates != nil {
+		for dName, d := range agent.Config.Delegates.Agents {
+			d.GivenName = dName
+		}
+		for dName, d := range agent.Config.Delegates.Tools {
+			d.GivenName = dName
+		}
+		for dName, d := range agent.Config.Delegates.HTTP {
+			d.GivenName = dName
+		}
+	}
 	return err
 }
 

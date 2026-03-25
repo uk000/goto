@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"goto/pkg/constants"
+	"goto/pkg/global"
 	"goto/pkg/metrics"
 	"goto/pkg/server/echo"
 	"goto/pkg/transport"
@@ -277,7 +279,10 @@ func (t *ToolCallContext) RunTool() (result *gomcp.CallToolResult, err error) {
 	}
 	output := map[string]any{}
 	if result.StructuredContent != nil {
-		output = result.StructuredContent.(map[string]any)
+		m := result.StructuredContent.(map[string]map[string]any)
+		for k, v := range m {
+			output[k] = v
+		}
 	}
 	t.Hop(t.Flush(true))
 	t.rs.GotoProtocol = "MCP"
@@ -286,7 +291,7 @@ func (t *ToolCallContext) RunTool() (result *gomcp.CallToolResult, err error) {
 	if t.rs.RequestHeaders == nil {
 		t.rs.RequestHeaders = t.requestHeaders
 	}
-	output["Goto-Server-Info"] = echo.GetEchoResponseWithAddendum(t.rs, map[string]any{"Goto-MCP-Server": t.Server.ID, "Goto-MCP-Tool": t.Name})
+	output[constants.HeaderGotoServerInfo] = echo.GetEchoResponseWithAddendum(t.rs, map[string]any{"Goto-MCP-Server": t.Server.ID, "Goto-MCP-Tool": t.Name})
 	output["hops"] = t.hops.Steps
 	result.StructuredContent = output
 	return
@@ -310,15 +315,15 @@ func parseRemoteCallArgs(raw json.RawMessage) (ra *RemoteCallArgs, err error) {
 
 func (t *ToolCallContext) echo() (*gomcp.CallToolResult, error) {
 	content := []gomcp.Content{}
-	// input := ""
-	// if t.args != nil && t.args["text"] != nil {
-	// 	input = t.args["text"].(string)
-	// } else {
-	// 	input = "<No input to echo>"
-	// }
-	// msg := fmt.Sprintf("Echo Server: %s[%s]. Input: %s", t.Label, global.Funcs.GetListenerLabelForPort(t.Server.GetPort()), input)
-	// content = append(content, &gomcp.TextContent{Text: msg})
-	content = append(content, &gomcp.TextContent{Text: util.ToJSONText(echo.GetEchoResponseWithAddendum(t.rs, map[string]any{"Goto-MCP-Server": t.Server.ID, "Goto-MCP-Tool": t.Name}))})
+	input := ""
+	if t.args != nil && t.args["text"] != nil {
+		input = t.args["text"].(string)
+	} else {
+		input = "<No input to echo>"
+	}
+	msg := fmt.Sprintf("Echo Server: %s[%s]. Input: %s, Time: %s", t.Label, global.Funcs.GetListenerLabelForPort(t.Server.GetPort()), input, time.Now().Format(time.RFC3339))
+	content = append(content, &gomcp.TextContent{Text: msg})
+	// content = append(content, &gomcp.TextContent{Text: util.ToJSONText(echo.GetEchoResponseWithAddendum(t.rs, map[string]any{"Goto-MCP-Server": t.Server.ID, "Goto-MCP-Tool": t.Name}))})
 	t.applyDelay()
 	t.notifyClient(t.Log("Server %s Tool %s echoed back", t.Server.Host, t.Label), 0)
 	return &gomcp.CallToolResult{Content: content}, nil

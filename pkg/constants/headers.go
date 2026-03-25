@@ -68,6 +68,8 @@ const (
 	HeaderGotoStreamDuration        = "Goto-Stream-Duration"
 	HeaderGotoMCPServer             = "Goto-MCP-Server"
 	HeaderGotoMCPTool               = "Goto-MCP-Tool"
+	HeaderGotoClientInfo            = "Goto-Client-Info"
+	HeaderGotoServerInfo            = "Goto-Server-Info"
 
 	HeaderProxyConnection     = "Proxy-Connection"
 	HeaderXContentTypeOptions = "X-Content-Type-Options"
