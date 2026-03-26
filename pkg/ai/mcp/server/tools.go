@@ -30,6 +30,7 @@ import (
 	"goto/pkg/util"
 	"log"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -279,9 +280,16 @@ func (t *ToolCallContext) RunTool() (result *gomcp.CallToolResult, err error) {
 	}
 	output := map[string]any{}
 	if result.StructuredContent != nil {
-		m := result.StructuredContent.(map[string]map[string]any)
-		for k, v := range m {
-			output[k] = v
+		m := reflect.ValueOf(result.StructuredContent)
+		if m.Kind() == reflect.Map {
+			iter := m.MapRange()
+			for iter.Next() {
+				k := iter.Key().String()
+				v := iter.Value().Interface()
+				output[k] = v
+			}
+		} else {
+			output["structuredContent"] = result.StructuredContent
 		}
 	}
 	t.Hop(t.Flush(true))
@@ -516,7 +524,7 @@ func (t *ToolCallContext) sendPayload() (*gomcp.CallToolResult, error) {
 			}
 			if t.Behavior.Stream {
 				progress := float64(total) / float64(count)
-				msg := fmt.Sprintf("%s Progress: [%d] done, only [%d] more to go", t.Label, count, total-count)
+				msg := fmt.Sprintf("%s Progress: [%d] done, only [%d] more to go. Current stream output: %s", t.Label, count, total-count, text)
 				t.notifyClient(msg, progress)
 			}
 			if d != nil {

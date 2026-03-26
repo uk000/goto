@@ -224,7 +224,8 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 					if addTool(delegateTriple.Second) {
 						haveExactMatches = true
 					}
-				} else if delegateTriple.Third != nil {
+				}
+				if delegateTriple.Third != nil {
 					if addAgent(delegateTriple.Third) {
 						haveExactMatches = true
 					}
@@ -242,7 +243,8 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 				if triggerPair.Right.MatchString(input) || strings.Contains(triggerPair.Left, input) {
 					if delegateTriple.Second != nil {
 						addTool(delegateTriple.Second)
-					} else if delegateTriple.Third != nil {
+					}
+					if delegateTriple.Third != nil {
 						addAgent(delegateTriple.Third)
 					}
 				}

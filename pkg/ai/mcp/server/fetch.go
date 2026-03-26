@@ -79,7 +79,7 @@ func (t *ToolCallContext) fetch() (*gomcp.CallToolResult, error) {
 		output := util.Read(resp.Body)
 		result.Content = append(result.Content, &gomcp.TextContent{Text: output})
 		result.StructuredContent = util.BuildGotoClientInfo(nil, t.Server.Port, t.Name, t.Label, req.Host, url, req.Host, t.args, t.remoteArgs,
-			t.requestHeaders, req.Header, finalHeaders.Request.Forward, nil)
+			t.requestHeaders, req.Header, finalHeaders.Request.Forward, finalHeaders.Request.Add, finalHeaders.Request.Remove, nil)
 	}
 	t.applyDelay()
 	return result, err

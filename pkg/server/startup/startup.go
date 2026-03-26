@@ -385,7 +385,7 @@ func loadMCP(mcp *ctl.MCP) {
 		}
 		for _, sp := range s.Payloads.Server.StreamPayloads {
 			delayMin, delayMax, delayCount, _ := types.ParseDurationRange(sp.Payload.Delay)
-			if err := server.AddPayload(sp.Name, "tools", util.ToJSONBytes(sp.Payload), false, true, sp.Payload.Count, delayMin, delayMax, delayCount); err != nil {
+			if err := server.AddPayload(sp.Name, "tools", util.ToJSONBytes(sp.Payload.Data), true, true, sp.Payload.Count, delayMin, delayMax, delayCount); err != nil {
 				log.Printf("Failed to set stream payload for tool [%s] in MCP server [%s] on port [%d] with error [%s]\n", sp.Name, server.Name, server.Port, err.Error())
 			} else {
 				log.Printf("Set stream payload for tool [%s] in MCP server [%s] on port [%d]\n", sp.Name, server.Name, server.Port)

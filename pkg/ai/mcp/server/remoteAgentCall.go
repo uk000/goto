@@ -43,7 +43,7 @@ func (t *ToolCallContext) remoteAgentCall() (*gomcp.CallToolResult, error) {
 	if client == nil {
 		return nil, errors.New("failed to create A2A client")
 	}
-	session, err := client.ConnectWithAgentCard(t.ctx, ac, t.remoteArgs.URL)
+	session, err := client.ConnectWithAgentCard(t.ctx, ac, t.remoteArgs.URL, t.requestHeaders)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", ac.Name, ac.AgentURL, err.Error())
 	} else {

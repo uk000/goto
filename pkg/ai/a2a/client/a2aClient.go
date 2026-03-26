@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"goto/pkg/global"
 	"goto/pkg/metrics"
 	"goto/pkg/transport"
 	"goto/pkg/types"
@@ -92,20 +91,19 @@ var (
 )
 
 func NewA2AClient(port int, clientId string, isTLS bool, authority string) *A2AClient {
-	id := fmt.Sprintf("%s[%s]", clientId, global.Funcs.GetListenerLabelForPort(port))
-	ht := transport.CreateHTTPClient(id, true, true, isTLS, authority, 0,
+	ht := transport.CreateHTTPClient(clientId, true, true, isTLS, authority, 0,
 		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
 	return &A2AClient{
-		ID:         id,
+		ID:         clientId,
 		port:       port,
 		httpClient: ht.HTTP(),
 		ht:         ht,
 	}
 }
 
-func NewA2ASession(ctx context.Context, port int, card *goa2aserver.AgentCard, call *AgentCall) *A2AClientSession {
+func NewA2ASession(ctx context.Context, port int, card *goa2aserver.AgentCard, call *AgentCall, requestHeaders http.Header) *A2AClientSession {
 	client := NewA2AClient(port, card.Name, call.TLS, call.Authority)
-	return client.NewSession(ctx, card, call)
+	return client.NewSession(ctx, card, call, requestHeaders)
 }
 
 func GetAgentCard(name string) *goa2aserver.AgentCard {
@@ -114,17 +112,17 @@ func GetAgentCard(name string) *goa2aserver.AgentCard {
 	return AgentCards[name]
 }
 
-func FetchAgentCard(ctx context.Context, url, authority string, call *AgentCall) (card *goa2aserver.AgentCard, err error) {
+func FetchAgentCard(ctx context.Context, url, authority string, call *AgentCall, requestHeaders http.Header) (card *goa2aserver.AgentCard, err error) {
 	port := util.GetContextPort(ctx)
 	client := NewA2AClient(port, "", call.TLS, call.Authority)
-	session, err := client.loadAgentCard(ctx, url, authority, call)
+	session, err := client.loadAgentCard(ctx, url, authority, call, requestHeaders)
 	if err != nil {
 		return nil, err
 	}
 	return session.Card, nil
 }
 
-func CallAgent(ctx context.Context, port int, call *AgentCall, callback AgentResultsCallback) (err error) {
+func CallAgent(ctx context.Context, port int, call *AgentCall, callback AgentResultsCallback, requestHeaders http.Header) (err error) {
 	var card *goa2aserver.AgentCard
 	if call.Name != "" {
 		card = GetAgentCard(call.Name)
@@ -133,7 +131,7 @@ func CallAgent(ctx context.Context, port int, call *AgentCall, callback AgentRes
 		if call.CardURL == "" {
 			return fmt.Errorf("Agent card not loaded and missing agent card URL in the given call spec: %+v", call)
 		}
-		card, err = FetchAgentCard(ctx, call.CardURL, call.Authority, call)
+		card, err = FetchAgentCard(ctx, call.CardURL, call.Authority, call, requestHeaders)
 		if err != nil || card == nil {
 			return fmt.Errorf("Error fetching agent card from url [%s], authority [%s]: %s", call.AgentURL, call.Authority, err.Error())
 		}
@@ -145,7 +143,7 @@ func CallAgent(ctx context.Context, port int, call *AgentCall, callback AgentRes
 		agentURL = card.URL
 	}
 	call.AgentURL = agentURL
-	session := NewA2ASession(ctx, port, card, call)
+	session := NewA2ASession(ctx, port, card, call, requestHeaders)
 	err = session.Connect()
 	if err != nil {
 		return fmt.Errorf("Failed to load agent card with error [%s]. Agent Call: %+v", err.Error(), call)
@@ -153,11 +151,11 @@ func CallAgent(ctx context.Context, port int, call *AgentCall, callback AgentRes
 	return session.CallAgent(callback, nil, nil)
 }
 
-func (ac *A2AClient) LoadAgentCard(ctx context.Context, call *AgentCall) (session *A2AClientSession, err error) {
-	return ac.loadAgentCard(ctx, "", "", call)
+func (ac *A2AClient) LoadAgentCard(ctx context.Context, call *AgentCall, requestHeaders http.Header) (session *A2AClientSession, err error) {
+	return ac.loadAgentCard(ctx, "", "", call, requestHeaders)
 }
 
-func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, call *AgentCall) (session *A2AClientSession, err error) {
+func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, call *AgentCall, requestHeaders http.Header) (session *A2AClientSession, err error) {
 	if url == "" {
 		url = call.AgentURL
 	}
@@ -197,27 +195,28 @@ func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, c
 	lock.Lock()
 	AgentCards[card.Name] = card
 	lock.Unlock()
-	session = ac.newSession(ctx, ac.port, ac.ID, authority, card, call)
+	session = ac.newSession(ctx, ac.port, ac.ID, authority, card, call, requestHeaders)
 	return
 }
 
-func (ac *A2AClient) NewSession(ctx context.Context, card *goa2aserver.AgentCard, call *AgentCall) *A2AClientSession {
-	return ac.newSession(ctx, ac.port, ac.ID, call.Authority, card, call)
+func (ac *A2AClient) NewSession(ctx context.Context, card *goa2aserver.AgentCard, call *AgentCall, requestHeaders http.Header) *A2AClientSession {
+	return ac.newSession(ctx, ac.port, ac.ID, call.Authority, card, call, requestHeaders)
 }
 
-func (ac *A2AClient) ConnectWithAgentCard(ctx context.Context, call *AgentCall, agentURL string) (*A2AClientSession, error) {
-	session, err := ac.LoadAgentCard(ctx, call)
+func (ac *A2AClient) ConnectWithAgentCard(ctx context.Context, call *AgentCall, agentURL string, requestHeaders http.Header) (*A2AClientSession, error) {
+	session, err := ac.LoadAgentCard(ctx, call, requestHeaders)
 	if err != nil {
 		return nil, err
 	}
 	if agentURL != "" {
 		call.AgentURL = agentURL
 	}
+	session.inHeaders = requestHeaders
 	err = session.Connect()
 	return session, err
 }
 
-func (ac *A2AClient) newSession(ctx context.Context, port int, callerId, authority string, card *goa2aserver.AgentCard, call *AgentCall) *A2AClientSession {
+func (ac *A2AClient) newSession(ctx context.Context, port int, callerId, authority string, card *goa2aserver.AgentCard, call *AgentCall, requestHeaders http.Header) *A2AClientSession {
 	call.NonNil()
 	return &A2AClientSession{
 		ctx:        ctx,
@@ -227,6 +226,7 @@ func (ac *A2AClient) newSession(ctx context.Context, port int, callerId, authori
 		client:     ac,
 		Card:       card,
 		call:       call,
+		inHeaders:  requestHeaders,
 		outHeaders: call.Headers,
 	}
 }
@@ -287,9 +287,6 @@ func (acs *A2AClientSession) invokeAgent(input string, data map[string]any, call
 	}
 	inputParts := buildInputParts(input, data)
 	acs.update(callback, resultChan, progressChan, inputParts)
-	clientInfo := util.BuildGotoClientInfo(nil, acs.port, acs.callerId, acs.callerId, acs.call.Name, acs.url, acs.authority,
-		acs.inInput, acs.outInput, acs.inHeaders, acs.call.Headers.Request.Add, acs.call.Headers.Request.Forward, nil)
-	acs.sendResponse("", "", clientInfo)
 	if acs.Card.Capabilities.Streaming != nil && *acs.Card.Capabilities.Streaming {
 		err = acs.InvokeStream()
 	} else {
@@ -316,15 +313,17 @@ func (acs *A2AClientSession) InvokeUnary() error {
 	return nil
 }
 
-func (acs *A2AClientSession) InvokeStream() error {
-	//** set push config, by getting task id from somewhere
-	return acs.Stream()
-}
-
 func (acs *A2AClientSession) SendParts() (map[string]*a2aproto.MessageResult, error) {
 	requestCount := acs.call.RequestCount
+	if requestCount == 0 {
+		requestCount = 1
+	}
 	concurrent := acs.call.Concurrent
+	if concurrent == 0 {
+		concurrent = 1
+	}
 	rounds := requestCount / concurrent
+	acs.sendResponse(acs.callerId, fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL), nil)
 	results := map[string]*a2aproto.MessageResult{}
 	for i := 0; i < rounds; i++ {
 		requestID := fmt.Sprintf("[%s] Request#[%d]", acs.call.Name, i)
@@ -350,12 +349,24 @@ func buildInputParts(text string, data any) []a2aproto.Part {
 	return parts
 }
 
+func (acs *A2AClientSession) InvokeStream() error {
+	//** set push config, by getting task id from somewhere
+	return acs.Stream()
+}
+
 func (acs *A2AClientSession) Stream() error {
 	requestCount := acs.call.RequestCount
+	if requestCount == 0 {
+		requestCount = 1
+	}
 	concurrent := acs.call.Concurrent
+	if concurrent == 0 {
+		concurrent = 1
+	}
 	rounds := requestCount / concurrent
+	acs.sendResponse(acs.callerId, fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL), nil)
 	for i := 0; i < rounds; i++ {
-		requestID := fmt.Sprintf("[%s] Request#[%d]", acs.callerId, i)
+		requestID := fmt.Sprintf("[%s] Request#[%d]", acs.call.Name, i)
 		eventChan, err := acs.client.client.StreamMessage(acs.ctx, a2aproto.SendMessageParams{
 			Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
 		})
@@ -559,8 +570,12 @@ func (ac *AgentCall) CloneWithUpdate(name, url, authority, message string, data 
 }
 
 func (ac *AgentCall) NonNil() {
-	ac.Data = map[string]any{}
-	ac.Headers = types.NewHeaders()
+	if ac.Data == nil {
+		ac.Data = map[string]any{}
+	}
+	if ac.Headers == nil {
+		ac.Headers = types.NewHeaders()
+	}
 	ac.Headers.NonNil()
 }
 
@@ -573,12 +588,17 @@ func (acs *A2AClientSession) updateRequestHeaders(r *http.Request) {
 	}
 	log.Printf("---------- A2A client request headers for %s ------------\n", acs.callerId)
 	log.Println(util.ToJSONText(r.Header))
+	clientInfo := util.BuildGotoClientInfo(nil, acs.port, acs.callerId, acs.callerId, acs.call.Name, acs.url, acs.authority,
+		acs.inInput, acs.outInput, acs.inHeaders, r.Header, acs.call.Headers.Request.Forward, acs.call.Headers.Request.Add, acs.call.Headers.Request.Remove, nil)
+	acs.sendResponse("", "", clientInfo)
 }
 
 func (acs *A2AClientSession) updateResponseHeaders(r *http.Response) {
-	if acs.outHeaders.Response != nil {
-		acs.outHeaders.Response.UpdateHeaders(r.Header, fmt.Sprintf("A2A client response for caller %s", acs.callerId))
+	if r != nil {
+		if acs.outHeaders.Response != nil {
+			acs.outHeaders.Response.UpdateHeaders(r.Header, fmt.Sprintf("A2A client response for caller %s", acs.callerId))
+		}
+		log.Printf("---------- A2A client response headers for %s ------------\n", acs.callerId)
+		log.Println(util.ToJSONText(r.Header))
 	}
-	log.Printf("---------- A2A client response headers for %s ------------\n", acs.callerId)
-	log.Println(util.ToJSONText(r.Header))
 }

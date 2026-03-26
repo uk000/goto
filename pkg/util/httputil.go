@@ -56,7 +56,8 @@ func SendBadRequest(msg string, w http.ResponseWriter, r *http.Request) {
 	AddLogMessage(msg, r)
 }
 
-func BuildGotoClientInfo(container map[string]any, port int, name, label, target, url, server string, inArgs, outArgs any, inHeaders, outHeaders, forwardHeaders any, more map[string]any) map[string]any {
+func BuildGotoClientInfo(container map[string]any, port int, name, label, target, url, server string, inArgs, outArgs any,
+	inHeaders, outHeaders, forwardHeaders, addHeaders, removeHeaders any, more map[string]any) map[string]any {
 	if container == nil {
 		container = map[string]any{}
 	}
@@ -73,6 +74,8 @@ func BuildGotoClientInfo(container map[string]any, port int, name, label, target
 		"Outbound-Args":    outArgs,
 		"Outbound-Headers": outHeaders,
 		"Forward-Headers":  forwardHeaders,
+		"Add-Headers":      addHeaders,
+		"Remove-Headers":   removeHeaders,
 	}
 	for k, v := range more {
 		clientInfo[k] = v

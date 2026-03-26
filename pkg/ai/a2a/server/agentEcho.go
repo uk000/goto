@@ -44,5 +44,5 @@ func (ab *AgentBehaviorEcho) DoStream(aCtx *AgentContext) error {
 func (ab *AgentBehaviorEcho) getEchoMessage(aCtx *AgentContext, input *a2aproto.Message) (parts []a2aproto.Part) {
 	parts = append(parts, input.Parts...)
 	parts = append(parts, a2aproto.NewDataPart(echo.GetEchoResponseFromRS(aCtx.rs)))
-	return
+	return parts
 }

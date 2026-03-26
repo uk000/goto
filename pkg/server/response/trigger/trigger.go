@@ -265,6 +265,8 @@ func (t *Trigger) deleteTrigger(targetName string) {
 		}
 		if len(targets) == 0 {
 			delete(t.TargetsByURIs, uri)
+		} else {
+			t.TargetsByURIs[uri] = targets
 		}
 	}
 	for h, hvTargets := range t.TargetsByHeaders {
@@ -281,6 +283,8 @@ func (t *Trigger) deleteTrigger(targetName string) {
 		}
 		if len(hvTargets) == 0 {
 			delete(t.TargetsByHeaders, h)
+		} else {
+			t.TargetsByHeaders[h] = hvTargets
 		}
 	}
 
@@ -292,6 +296,8 @@ func (t *Trigger) deleteTrigger(targetName string) {
 		}
 		if len(targets) == 0 {
 			delete(t.TargetsByStatus, status)
+		} else {
+			t.TargetsByStatus[status] = targets
 		}
 	}
 	triggerLock.Lock()

@@ -59,7 +59,9 @@ var (
 	CmdConfig       = types.CmdConfig{}
 	CtlConfig       = types.CmdCtlConfig{}
 	CmdClientConfig = types.CmdClientConfig{}
-	ServerConfig    = types.ServerConfig{}
+	ServerConfig    = types.ServerConfig{
+		WorkDir: os.TempDir(),
+	}
 
 	Debug bool = false
 )

@@ -109,37 +109,44 @@ func CreateCertificate(domain string, saveWithPrefix string) (*tls.Certificate, 
 		return &tls.Certificate{}, err
 	}
 	if saveWithPrefix != "" {
-		saveWithPrefix = util.Sanitize(saveWithPrefix)
-		saveWithPrefix = filepath.Join(global.ServerConfig.WorkDir, saveWithPrefix)
-		certFile := saveWithPrefix + "-cert.pem"
-		if certOut, err := os.Create(certFile); err != nil {
-			fmt.Printf("Failed to open file [%s] for writing cert with error: %s\n", certFile, err.Error())
-		} else if err = pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: cert}); err != nil {
-			fmt.Printf("Failed to write data to file [%s] with error: %s\n", certFile, err.Error())
-		} else if err := certOut.Close(); err != nil {
-			fmt.Printf("Error closing file [%s]: %s\n", certFile, err.Error())
-		} else {
-			fmt.Printf("Saved certificate to file [%s]\n", certFile)
+		folder := filepath.Join(global.ServerConfig.WorkDir)
+		if _, err = os.Stat(folder); os.IsNotExist(err) {
+			err = os.MkdirAll(folder, os.ModeTemporary)
 		}
-
-		keyFile := saveWithPrefix + "-key.pem"
-		if keyOut, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600); err != nil {
-			fmt.Printf("Failed to open file [%s] for writing key with error: %s\n", keyFile, err.Error())
-		} else if privBytes, err := x509.MarshalPKCS8PrivateKey(priv); err != nil {
-			fmt.Printf("Failed to marshal key with error: %s\n", err.Error())
-		} else if err = pem.Encode(keyOut, &pem.Block{Type: "PRIVATE KEY", Bytes: privBytes}); err != nil {
-			fmt.Printf("Failed to write PRIVATE KEY to file [%s] with error: %s. Will try writing as RSA key.\n", keyFile, err.Error())
-			if err = pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}); err != nil {
-				fmt.Printf("Failed to write RSA PRIVATE KEY to file [%s] with error: %s\n", keyFile, err.Error())
+		if err != nil {
+			fmt.Printf("Failed to create path [%s] for writing cert with error: %s\n", saveWithPrefix, err.Error())
+		} else {
+			saveWithPrefix = util.Sanitize(saveWithPrefix)
+			saveWithPrefix = filepath.Join(folder, saveWithPrefix)
+			certFile := saveWithPrefix + "-cert.pem"
+			if certOut, err := os.Create(certFile); err != nil {
+				fmt.Printf("Failed to open file [%s] for writing cert with error: %s\n", certFile, err.Error())
+			} else if err = pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: cert}); err != nil {
+				fmt.Printf("Failed to write data to file [%s] with error: %s\n", certFile, err.Error())
+			} else if err := certOut.Close(); err != nil {
+				fmt.Printf("Error closing file [%s]: %s\n", certFile, err.Error())
+			} else {
+				fmt.Printf("Saved certificate to file [%s]\n", certFile)
+			}
+			keyFile := saveWithPrefix + "-key.pem"
+			if keyOut, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600); err != nil {
+				fmt.Printf("Failed to open file [%s] for writing key with error: %s\n", keyFile, err.Error())
+			} else if privBytes, err := x509.MarshalPKCS8PrivateKey(priv); err != nil {
+				fmt.Printf("Failed to marshal key with error: %s\n", err.Error())
+			} else if err = pem.Encode(keyOut, &pem.Block{Type: "PRIVATE KEY", Bytes: privBytes}); err != nil {
+				fmt.Printf("Failed to write PRIVATE KEY to file [%s] with error: %s. Will try writing as RSA key.\n", keyFile, err.Error())
+				if err = pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}); err != nil {
+					fmt.Printf("Failed to write RSA PRIVATE KEY to file [%s] with error: %s\n", keyFile, err.Error())
+				} else if err := keyOut.Close(); err != nil {
+					fmt.Printf("Error closing file [%s] with error: %s\n", keyFile, err.Error())
+				} else {
+					fmt.Printf("Saved RSA PRIVATE KEY to file [%s]\n", keyFile)
+				}
 			} else if err := keyOut.Close(); err != nil {
 				fmt.Printf("Error closing file [%s] with error: %s\n", keyFile, err.Error())
 			} else {
-				fmt.Printf("Saved RSA PRIVATE KEY to file [%s]\n", keyFile)
+				fmt.Printf("Saved PRIVATE KEY to file [%s]\n", keyFile)
 			}
-		} else if err := keyOut.Close(); err != nil {
-			fmt.Printf("Error closing file [%s] with error: %s\n", keyFile, err.Error())
-		} else {
-			fmt.Printf("Saved PRIVATE KEY to file [%s]\n", keyFile)
 		}
 	}
 	var outCert tls.Certificate

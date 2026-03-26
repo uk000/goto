@@ -156,7 +156,7 @@ func InitDefaultServer() {
 
 func NewMCPServer(p *MCPServerPayload) *MCPServer {
 	server := &MCPServer{
-		ID:          fmt.Sprintf("[%s][%s][%s]", p.Name, global.Self.Namespace, global.Self.Cluster),
+		ID:          fmt.Sprintf("[%s:%d][%s][%s]", p.Name, p.Port, global.Self.Namespace, global.Self.Cluster),
 		Description: p.Description,
 		Enabled:     p.Enabled,
 		Host:        fmt.Sprintf("[%s][%s]", global.Self.PodName, listeners.GetListenerLabelForPort(p.Port)),

@@ -33,7 +33,8 @@ import (
 	"trpc.group/trpc-go/trpc-a2a-go/taskmanager"
 )
 
-type DelegateTriggers map[string][]*types.Triple[*types.Pair[string, *regexp.Regexp], *model.DelegateToolCall, *model.DelegateAgentCall]
+type DelegateTriggerArr []*types.Triple[*types.Pair[string, *regexp.Regexp], *model.DelegateToolCall, *model.DelegateAgentCall]
+type DelegateTriggers map[string]DelegateTriggerArr
 type UnaryHandler func(aCtx *AgentContext) (*taskmanager.MessageProcessingResult, error)
 type StreamHandler func(aCtx *AgentContext) error
 
@@ -66,7 +67,7 @@ func newAgentBehavior(agent *model.Agent) *AgentBehaviorImpl {
 	} else if agent.Behavior.Federate {
 		abd := &AgentBehaviorFederate{
 			AgentBehaviorImpl: impl,
-			triggers:          map[string][]*types.Triple[*types.Pair[string, *regexp.Regexp], *model.DelegateToolCall, *model.DelegateAgentCall]{},
+			triggers:          map[string]DelegateTriggerArr{},
 		}
 		impl.self = abd
 		impl.doUnary = abd.DoUnary
@@ -214,7 +215,7 @@ func createTextPartsFromArrayOrString(key string, val any, parts *[]a2aproto.Par
 				msg := fmt.Sprintf("%s: %s\n", key, s)
 				*parts = append(*parts, a2aproto.NewTextPart(msg))
 				builder.WriteString(msg)
-			} else if arr2, ok := val.([]any); ok {
+			} else if arr2, ok := data.([]any); ok {
 				createTextPartsFromArrayOrString(key, arr2, parts, builder)
 			}
 		}
@@ -259,11 +260,11 @@ func createPartsFromMap(key string, m map[string]any, parts *[]a2aproto.Part, bu
 	}
 }
 
-func createHybridMessage(toolResults, agentResults map[string]any) a2aproto.Message {
+func createHybridMessage(id string, toolResults, agentResults map[string]any) a2aproto.Message {
 	parts := []a2aproto.Part{}
 	builder := &strings.Builder{}
-	createPartsFromMap("tools", toolResults, &parts, builder, true)
-	createPartsFromMap("agents", agentResults, &parts, builder, true)
+	createPartsFromMap(fmt.Sprintf("[%s] Reporting Result:", id), toolResults, &parts, builder, false)
+	createPartsFromMap(fmt.Sprintf("[%s] Reporting Result:", id), agentResults, &parts, builder, false)
 	parts = append(parts, a2aproto.NewDataPart(toolResults))
 	parts = append(parts, a2aproto.NewDataPart(agentResults))
 	finalParts := []a2aproto.Part{a2aproto.NewTextPart(builder.String())}

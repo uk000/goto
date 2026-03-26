@@ -59,9 +59,9 @@ func (ab *AgentBehaviorFederate) prepareDelegates() error {
 		for _, trigger := range a.Triggers {
 			triple := types.NewTriple(types.NewPair(trigger, regexp.MustCompile(fmt.Sprintf("(?i)%s%s%s", util.BeforeRegex, trigger, util.AfterRegex))), nilToolCall, a)
 			if dInfos := ab.triggers[trigger]; dInfos != nil {
-				dInfos = append(dInfos, triple)
+				ab.triggers[trigger] = append(dInfos, triple)
 			} else {
-				ab.triggers[trigger] = append(ab.triggers[trigger], triple)
+				ab.triggers[trigger] = DelegateTriggerArr{triple}
 			}
 		}
 	}
@@ -75,9 +75,9 @@ func (ab *AgentBehaviorFederate) prepareDelegates() error {
 		for _, trigger := range t.Triggers {
 			triple := types.NewTriple(types.NewPair(trigger, regexp.MustCompile(fmt.Sprintf("(?i)%s%s%s", util.BeforeRegex, trigger, util.AfterRegex))), t, nilAgentCall)
 			if dInfos := ab.triggers[trigger]; dInfos != nil {
-				dInfos = append(dInfos, triple)
+				ab.triggers[trigger] = append(dInfos, triple)
 			} else {
-				ab.triggers[trigger] = append(ab.triggers[trigger], triple)
+				ab.triggers[trigger] = DelegateTriggerArr{triple}
 			}
 		}
 	}
@@ -112,7 +112,7 @@ func (ab *AgentBehaviorFederate) DoUnary(aCtx *AgentContext) (*taskmanager.Messa
 			aCtx.agentResults[""] = []any{"No agent produced any results."}
 		}
 	}
-	result := createHybridMessage(aCtx.toolResults, aCtx.agentResults)
+	result := createHybridMessage(aCtx.agent.ID, aCtx.toolResults, aCtx.agentResults)
 	return &taskmanager.MessageProcessingResult{
 		Result: &result,
 	}, nil
@@ -332,12 +332,6 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 		if remoteResult == nil {
 			remoteResult = map[string]any{}
 		}
-		util.BuildGotoClientInfo(remoteResult, aCtx.agent.Port, aCtx.agent.ID, "", dCtx.toolCall.Tool, dCtx.toolCall.URL,
-			dCtx.toolCall.Server, aCtx.input, dCtx.toolCall.Args, aCtx.requestHeaders, dCtx.toolCall.Headers.Request.Add, dCtx.toolCall.Headers.Request.Forward,
-			map[string]any{
-				"Goto-MCP-Tool": dCtx.toolCall.Tool,
-				"Tool-Call":     dCtx.toolCall,
-			})
 		if aCtx.localProgress != nil {
 			aCtx.ReportProgress(dCtx.toolCall.Tool, msg)
 			aCtx.ReportProgress(dCtx.toolCall.Tool, respHeaders)
@@ -371,14 +365,7 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 		delete(remoteResult, "structuredContent")
 	}
 	for k, v := range remoteResult {
-		// count := 0
-		// if arr, ok := v.([]any); ok {
-		// 	count = len(arr)
-		// } else if m, ok := v.(map[string]any); ok {
-		// 	count = len(m)
-		// }
 		if aCtx.resultsChan != nil {
-			// aCtx.resultsChan <- types.NewPair[string, any](dCtx.toolCall.Tool, fmt.Sprintf("Sent %s with %d items.", k, count))
 			aCtx.resultsChan <- types.NewPair[string, any](dCtx.toolCall.Tool, map[string]any{k: v})
 		} else {
 			output[k] = v
@@ -409,7 +396,7 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 	if client == nil {
 		return errors.New("failed to create A2A client")
 	}
-	session, err := client.ConnectWithAgentCard(aCtx.ctx, dCtx.agentCall, dCtx.agentCall.CardURL)
+	session, err := client.ConnectWithAgentCard(aCtx.ctx, dCtx.agentCall, dCtx.agentCall.CardURL, aCtx.requestHeaders)
 	if err != nil {
 		return fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.CardURL, err.Error())
 	}
