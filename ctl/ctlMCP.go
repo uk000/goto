@@ -23,6 +23,7 @@ import (
 	"goto/pkg/util"
 	"log"
 	"net/http"
+	"reflect"
 )
 
 type MCPCompletions struct {
@@ -106,16 +107,24 @@ func processMCP(config *GotoConfig) {
 func (m *MCP) ProcessToolSchemas() {
 	m.toolInputSchemas = map[string]map[string]any{}
 	for _, s := range m.ToolSchemas {
-		name := s["name"].(string)
-		m.toolInputSchemas[name] = s["inputSchema"].(map[string]any)
+		if s["name"] != nil && s["inputSchema"] != nil {
+			name := s["name"].(string)
+			m.toolInputSchemas[name] = s["inputSchema"].(map[string]any)
+		}
 	}
 
 }
 
 func (m *MCP) ProcessMCPServer(server *MCPServer) {
+	if server == nil || server.Server == nil {
+		return
+	}
 	server.name = server.Server.Name
 	if server.Tools != nil {
 		for _, t := range server.Tools {
+			if t["tool"] == nil {
+				continue
+			}
 			tool := t["tool"].(map[string]any)
 			if t["schema"] != nil {
 				schemaName := t["schema"].(string)
@@ -132,6 +141,9 @@ func (m *MCP) ProcessMCPServer(server *MCPServer) {
 }
 
 func (m *MCP) sendMCPServers(servers []any) {
+	if len(servers) == 0 {
+		return
+	}
 	url := fmt.Sprintf("%s/mcpapi/servers/add", currentContext.RemoteGotoURL)
 	json := util.ToJSONBytes(servers)
 	if json == nil {
@@ -153,6 +165,9 @@ func (m *MCP) sendMCPServers(servers []any) {
 }
 
 func (m *MCP) sendMCPConfigs(server *MCPServer) {
+	if server == nil {
+		return
+	}
 	serverURL := func(serverName, uri string) string {
 		return fmt.Sprintf("%s/mcpapi/server/%s/%s", currentContext.RemoteGotoURL, serverName, uri)
 	}
@@ -160,9 +175,12 @@ func (m *MCP) sendMCPConfigs(server *MCPServer) {
 		return fmt.Sprintf("%s/mcpapi/client/%s/%s", currentContext.RemoteGotoURL, serverName, uri)
 	}
 	sendData := func(serverName, kind, url string, data any) {
+		if data == nil || reflect.ValueOf(data).IsNil() {
+			return
+		}
 		json := util.ToJSONBytes(data)
 		if json == nil {
-			log.Printf("JSON marshalling error. Server [%s] JSON: %+v", server.name, server.Tools)
+			log.Printf("JSON marshalling error. Server [%s] JSON: %+v", server.name, data)
 			return
 		}
 		log.Printf("Sending %s for MCP Server [%s] to URL [%s]\n", kind, serverName, url)
@@ -182,14 +200,33 @@ func (m *MCP) sendMCPConfigs(server *MCPServer) {
 	sendData(server.name, "prompts", serverURL(server.name, "prompts/add"), server.Prompts)
 	sendData(server.name, "resources", serverURL(server.name, "resources/add"), server.Resources)
 	sendData(server.name, "templates", serverURL(server.name, "templates/add"), server.Templates)
-	sendData(server.name, "completions", serverURL(server.name, fmt.Sprintf("payload/completion/delay=%s?type=ref/prompt", server.Payloads.Server.Completions.Delay)), server.Payloads.Server.Completions.List)
-	for _, tp := range server.Payloads.Server.ToolPayloads {
-		sendData(server.name, tp.Name+" payload", serverURL(server.name, fmt.Sprintf("payload/tools/%s", tp.Name)), tp.Payload)
+	if server.Payloads != nil {
+		sps := server.Payloads.Server
+		if sps != nil {
+			if sps.Completions != nil {
+				sendData(server.name, "completions", serverURL(server.name, fmt.Sprintf("payload/completion/delay=%s?type=ref/prompt", sps.Completions.Delay)), sps.Completions.List)
+			}
+			for _, tp := range sps.ToolPayloads {
+				sendData(server.name, tp.Name+" payload", serverURL(server.name, fmt.Sprintf("payload/tools/%s", tp.Name)), tp.Payload)
+			}
+			for _, sp := range sps.StreamPayloads {
+				if sp.Payload == nil && sp.Payload.Data == nil {
+					continue
+				}
+				url := ""
+				if sp.Payload.Delay != "" {
+					url = serverURL(server.name, fmt.Sprintf("payload/tools/%s/stream/count=%d/delay=%s", sp.Name, sp.Payload.Count, sp.Payload.Delay))
+				} else {
+					url = serverURL(server.name, fmt.Sprintf("payload/tools/%s/stream/count=%d", sp.Name, sp.Payload.Count))
+				}
+				sendData(server.name, sp.Name+" payload", url, sp.Payload.Data)
+			}
+		}
+		spc := server.Payloads.Client
+		if spc != nil {
+			sendData(server.name, "client sample payload", clientURL(server.name, "payload/sample"), spc.Sample)
+			sendData(server.name, "client elicit payload", clientURL(server.name, "payload/elicit"), spc.Elicit)
+			sendData(server.name, "client roots payload", clientURL(server.name, "payload/roots"), spc.Roots)
+		}
 	}
-	for _, sp := range server.Payloads.Server.StreamPayloads {
-		sendData(server.name, sp.Name+" payload", serverURL(server.name, fmt.Sprintf("payload/tools/%s/stream/count=%d/delay=%s", sp.Name, sp.Payload.Count, sp.Payload.Delay)), sp.Payload.Data)
-	}
-	sendData(server.name, "client sample payload", clientURL(server.name, "payload/sample"), server.Payloads.Client.Sample)
-	sendData(server.name, "client elicit payload", clientURL(server.name, "payload/elicit"), server.Payloads.Client.Elicit)
-	sendData(server.name, "client roots payload", clientURL(server.name, "payload/roots"), server.Payloads.Client.Roots)
 }

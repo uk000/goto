@@ -623,7 +623,7 @@ func (m *MCPServer) AddPrompts(b []byte) ([]string, error) {
 	names := []string{}
 	for _, b2 := range arr {
 		prompt, err := ParsePrompt(b2)
-		if err != nil {
+		if err != nil || prompt.Prompt == nil {
 			return nil, err
 		}
 		m.server.AddPrompt(prompt.Prompt, prompt.Handle)
@@ -650,7 +650,7 @@ func (m *MCPServer) AddResources(b []byte) ([]string, error) {
 	names := []string{}
 	for _, b2 := range arr {
 		resource, err := ParseResource(b2)
-		if err != nil {
+		if err != nil || resource == nil {
 			return nil, err
 		}
 		m.server.AddResource(resource.Resource, resource.Handle)
@@ -677,7 +677,7 @@ func (m *MCPServer) AddResourceTemplates(b []byte) ([]string, error) {
 	names := []string{}
 	for _, b2 := range arr {
 		template, err := ParseResourceTemplate(b2)
-		if err != nil {
+		if err != nil || template == nil {
 			return nil, err
 		}
 		m.server.AddResourceTemplate(template.ResourceTemplate, template.Handle)

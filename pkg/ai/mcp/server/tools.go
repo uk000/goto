@@ -134,10 +134,16 @@ func ParseTool(payload []byte) (tool *MCPTool, err error) {
 	if err = json.Unmarshal(payload, tool); err != nil {
 		return
 	}
-	tool.Kind = KindTools
-	if (tool.Behavior.Remote || tool.Behavior.Fetch) && (tool.Config.RemoteTool == nil || tool.Config.RemoteTool.URL == "") {
-		err = errors.New("remote config required")
+	if tool.Tool == nil {
+		return nil, fmt.Errorf("Missing tool definition")
 	}
+	if (tool.Behavior.Fetch && (tool.Config.RemoteTool == nil || tool.Config.RemoteTool.URL == "")) ||
+		(tool.Behavior.Remote && (tool.Config.RemoteTool == nil || tool.Config.RemoteTool.URL == "")) ||
+		(tool.Behavior.MultiRemote && len(tool.Config.MultiRemote) == 0) ||
+		(tool.Behavior.Agents && (tool.Config.Agent == nil || tool.Config.Agent.AgentURL == "")) {
+		return nil, errors.New("Incomplete remote configs")
+	}
+	tool.Kind = KindTools
 	if tool.Name == "" {
 		tool.Name = tool.Tool.Name
 	}

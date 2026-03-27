@@ -392,7 +392,7 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 	if !aCtx.ReportProgress(dCtx.agentCall.Name, msg) {
 		aCtx.agentResults[dCtx.agentCall.Name] = msg
 	}
-	client := a2aclient.NewA2AClient(ab.agent.Port, ab.agent.ID, dCtx.agentCall.TLS, dCtx.agentCall.Authority)
+	client := a2aclient.NewA2AClient(ab.agent.Port, ab.agent.ID, dCtx.agentCall.H2, dCtx.agentCall.TLS, dCtx.agentCall.Authority)
 	if client == nil {
 		return errors.New("failed to create A2A client")
 	}
@@ -430,7 +430,7 @@ func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCal
 	aCtx.Log(msg)
 	log.Println("AgentBehaviorFederate: " + msg)
 	aCtx.ReportProgress(dCtx.toolCall.Tool, msg)
-	client := mcpclient.NewClient(ab.agent.Port, false, dCtx.toolCall.TLS, ab.agent.ID, aCtx.rs.ListenerLabel, dCtx.toolCall.Authority, aCtx.upstreamProgress)
+	client := mcpclient.NewClient(ab.agent.Port, false, dCtx.toolCall.H2, dCtx.toolCall.TLS, ab.agent.ID, aCtx.rs.ListenerLabel, dCtx.toolCall.Authority, aCtx.upstreamProgress)
 	session, err := client.ConnectWithHops(dCtx.toolCall.URL, dCtx.toolCall.Tool, aCtx.hops)
 	if err == nil {
 		defer session.Close()

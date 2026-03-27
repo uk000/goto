@@ -61,7 +61,7 @@ type A2AClient struct {
 	ID         string
 	port       int
 	httpClient *http.Client
-	ht         transport.ClientTransport
+	ht         transport.IHTTPTransportIntercept
 	client     *goa2aclient.A2AClient
 }
 
@@ -90,19 +90,24 @@ var (
 	lock       = sync.RWMutex{}
 )
 
-func NewA2AClient(port int, clientId string, isTLS bool, authority string) *A2AClient {
-	ht := transport.CreateHTTPClient(clientId, true, true, isTLS, authority, 0,
+func NewA2AClient(port int, clientId string, h2, tls bool, authority string) *A2AClient {
+	c := transport.CreateHTTPClient(clientId, h2, true, tls, authority, 0,
 		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
-	return &A2AClient{
+	ac := &A2AClient{
 		ID:         clientId,
 		port:       port,
-		httpClient: ht.HTTP(),
-		ht:         ht,
+		httpClient: c.HTTP(),
 	}
+	if ht, ok := c.Transport().(*transport.HTTPTransportIntercept); ok {
+		ac.ht = ht
+	} else if ht, ok := c.Transport().(*transport.HTTP2TransportIntercept); ok {
+		ac.ht = ht
+	}
+	return ac
 }
 
 func NewA2ASession(ctx context.Context, port int, card *goa2aserver.AgentCard, call *AgentCall, requestHeaders http.Header) *A2AClientSession {
-	client := NewA2AClient(port, card.Name, call.TLS, call.Authority)
+	client := NewA2AClient(port, card.Name, call.H2, call.TLS, call.Authority)
 	return client.NewSession(ctx, card, call, requestHeaders)
 }
 
@@ -114,7 +119,7 @@ func GetAgentCard(name string) *goa2aserver.AgentCard {
 
 func FetchAgentCard(ctx context.Context, url, authority string, call *AgentCall, requestHeaders http.Header) (card *goa2aserver.AgentCard, err error) {
 	port := util.GetContextPort(ctx)
-	client := NewA2AClient(port, "", call.TLS, call.Authority)
+	client := NewA2AClient(port, "", call.H2, call.TLS, call.Authority)
 	session, err := client.loadAgentCard(ctx, url, authority, call, requestHeaders)
 	if err != nil {
 		return nil, err
@@ -245,35 +250,6 @@ func (acs *A2AClientSession) Connect() error {
 	return nil
 }
 
-// func (ac *A2AClient) CallAgent(ctx context.Context, port int, callerId, name, input string, data map[string]any, callback func(output string), call *AgentCall, resultChan chan *types.Pair[string, any], progressChan chan string) error {
-// 	if call != nil {
-// 		name = call.Name
-// 		input = call.Message
-// 		data = call.Data
-// 	}
-// 	lock.RLock()
-// 	card := AgentCards[name]
-// 	lock.RUnlock()
-// 	if card == nil {
-// 		return errors.New("agent not found")
-// 	}
-// 	session, err := ac.Connect(ctx, port, callerId, card)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	if call != nil && call.Delay != "" {
-// 		delay := types.ParseDelay(call.Delay)
-// 		if delay != nil {
-// 			d := delay.Compute()
-// 			if progressChan != nil {
-// 				progressChan <- fmt.Sprintf("Agent Call [%s]: Delaying call by %s", name, d)
-// 			}
-// 			delay.Apply()
-// 		}
-// 	}
-// 	return session.invokeAgent(input, data, callback, resultChan, progressChan)
-// }
-
 func (acs *A2AClientSession) CallAgent(callback AgentResultsCallback, resultChan chan *types.Pair[string, any], progressChan chan string) (err error) {
 	return acs.invokeAgent(acs.call.Message, acs.call.Data, callback, resultChan, progressChan)
 }
@@ -303,17 +279,17 @@ func (acs *A2AClientSession) update(callback AgentResultsCallback, resultChan ch
 }
 
 func (acs *A2AClientSession) InvokeUnary() error {
-	results, err := acs.SendParts()
+	results, err := acs.SendMessage()
 	if err != nil {
 		return err
 	}
 	for requestID, result := range results {
-		acs.processMessageResult(requestID, result)
+		acs.processResponse(requestID, result)
 	}
 	return nil
 }
 
-func (acs *A2AClientSession) SendParts() (map[string]*a2aproto.MessageResult, error) {
+func (acs *A2AClientSession) SendMessage() (map[string]*a2aproto.MessageResult, error) {
 	requestCount := acs.call.RequestCount
 	if requestCount == 0 {
 		requestCount = 1
@@ -413,7 +389,7 @@ func (acs *A2AClientSession) processStreamResponse(id string, eventChan <-chan a
 	}
 }
 
-func (acs *A2AClientSession) processMessageResult(id string, result *a2aproto.MessageResult) {
+func (acs *A2AClientSession) processResponse(id string, result *a2aproto.MessageResult) {
 	switch r := result.Result.(type) {
 	case *a2aproto.Message:
 		acs.processParts(id, r.Parts)

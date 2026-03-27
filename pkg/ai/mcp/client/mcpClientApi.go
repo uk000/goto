@@ -61,7 +61,7 @@ func listTools(w http.ResponseWriter, r *http.Request) {
 	namesOnly := strings.Contains(r.RequestURI, "names")
 	msg := ""
 	clientId := fmt.Sprintf("[%s][Client: tool/list]", global.Self.HostLabel)
-	client := NewClient(rs.RequestPortNum, sse, tls, clientId, util.GetCurrentListenerLabel(r), authority, nil)
+	client := NewClient(rs.RequestPortNum, sse, false, tls, clientId, util.GetCurrentListenerLabel(r), authority, nil)
 	session, err := client.Connect(url, "tool/list")
 	session.SetAuthority(authority)
 	if err != nil {
@@ -156,7 +156,7 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 
 func doToolCall(port int, tc *ToolCall, r *http.Request) (output map[string]any, err error) {
 	clientId := fmt.Sprintf("[%s][Client: tool/call][%s]", global.Self.HostLabel, tc.Tool)
-	client := NewClient(port, tc.ForceSSE, tc.TLS, clientId, util.GetCurrentListenerLabel(r), tc.Authority, nil)
+	client := NewClient(port, tc.ForceSSE, tc.H2, tc.TLS, clientId, util.GetCurrentListenerLabel(r), tc.Authority, nil)
 	session, err := client.Connect(tc.URL, tc.Tool)
 	if err != nil {
 		return nil, err

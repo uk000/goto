@@ -336,7 +336,9 @@ func processTLS(portTLS ctl.PortTLS) {
 
 func clearMCP(mcp *ctl.MCP) {
 	for _, s := range mcp.Servers {
-		mcpserver.RemoveMCPServer(s.Server.Port, s.Server.Name)
+		if s.Server != nil {
+			mcpserver.RemoveMCPServer(s.Server.Port, s.Server.Name)
+		}
 	}
 }
 
@@ -356,6 +358,9 @@ func loadMCP(mcp *ctl.MCP) {
 	log.Println("============================================================")
 
 	addComponents := func(kind string, server *mcpserver.MCPServer, data []byte) {
+		if len(data) == 0 {
+			return
+		}
 		names, err := server.AddComponents(kind, data)
 		if err != nil {
 			log.Printf("Failed to add %s to server [%s] on port [%d] with error [%s]\n", kind, server.Name, server.Port, err.Error())
@@ -366,50 +371,65 @@ func loadMCP(mcp *ctl.MCP) {
 		}
 	}
 	for _, s := range mcp.Servers {
+		if s == nil || s.Server == nil {
+			continue
+		}
 		server := mcpserver.GetMCPServer(s.Server.Port, s.Server.Name)
 		addComponents("tools", server, util.ToJSONBytes(s.Tools))
 		addComponents("prompts", server, util.ToJSONBytes(s.Prompts))
 		addComponents("resources", server, util.ToJSONBytes(s.Resources))
 		addComponents("templates", server, util.ToJSONBytes(s.Templates))
 
-		delayMin, delayMax, delayCount, _ := types.ParseDurationRange(s.Payloads.Server.Completions.Delay)
-		count := server.AddCompletionPayload("ref/prompt", util.ToJSONBytes(s.Payloads.Server.Completions.List), delayMin, delayMax, delayCount)
-		log.Printf("Set completion payload (count [%d]) for server [%s] on port [%d]\n", count, server.Name, server.Port)
-
-		for _, tp := range s.Payloads.Server.ToolPayloads {
-			if err := server.AddPayload(tp.Name, "tools", util.ToJSONBytes(tp.Payload), true, false, 0, 0, 0, 0); err != nil {
-				log.Printf("Failed to set payload for tool [%s] in MCP server [%s] on port [%d] with error [%s]\n", tp.Name, server.Name, server.Port, err.Error())
-			} else {
-				log.Printf("Set payload for tool [%s] in MCP server [%s] on port [%d]\n", tp.Name, server.Name, server.Port)
+		if s.Payloads != nil {
+			sps := s.Payloads.Server
+			if sps != nil {
+				if sps.Completions != nil {
+					delayMin, delayMax, delayCount, _ := types.ParseDurationRange(sps.Completions.Delay)
+					count := server.AddCompletionPayload("ref/prompt", util.ToJSONBytes(sps.Completions.List), delayMin, delayMax, delayCount)
+					log.Printf("Set completion payload (count [%d]) for server [%s] on port [%d]\n", count, server.Name, server.Port)
+				}
+				for _, tp := range sps.ToolPayloads {
+					if err := server.AddPayload(tp.Name, "tools", util.ToJSONBytes(tp.Payload), true, false, 0, 0, 0, 0); err != nil {
+						log.Printf("Failed to set payload for tool [%s] in MCP server [%s] on port [%d] with error [%s]\n", tp.Name, server.Name, server.Port, err.Error())
+					} else {
+						log.Printf("Set payload for tool [%s] in MCP server [%s] on port [%d]\n", tp.Name, server.Name, server.Port)
+					}
+				}
+				for _, sp := range sps.StreamPayloads {
+					if sp.Payload == nil || sp.Payload.Data == nil {
+						continue
+					}
+					delayMin, delayMax, delayCount, _ := types.ParseDurationRange(sp.Payload.Delay)
+					if err := server.AddPayload(sp.Name, "tools", util.ToJSONBytes(sp.Payload.Data), true, true, sp.Payload.Count, delayMin, delayMax, delayCount); err != nil {
+						log.Printf("Failed to set stream payload for tool [%s] in MCP server [%s] on port [%d] with error [%s]\n", sp.Name, server.Name, server.Port, err.Error())
+					} else {
+						log.Printf("Set stream payload for tool [%s] in MCP server [%s] on port [%d]\n", sp.Name, server.Name, server.Port)
+					}
+				}
 			}
-		}
-		for _, sp := range s.Payloads.Server.StreamPayloads {
-			delayMin, delayMax, delayCount, _ := types.ParseDurationRange(sp.Payload.Delay)
-			if err := server.AddPayload(sp.Name, "tools", util.ToJSONBytes(sp.Payload.Data), true, true, sp.Payload.Count, delayMin, delayMax, delayCount); err != nil {
-				log.Printf("Failed to set stream payload for tool [%s] in MCP server [%s] on port [%d] with error [%s]\n", sp.Name, server.Name, server.Port, err.Error())
-			} else {
-				log.Printf("Set stream payload for tool [%s] in MCP server [%s] on port [%d]\n", sp.Name, server.Name, server.Port)
-			}
-		}
-		if s.Payloads.Client.Elicit != nil {
-			if err := mcpclient.AddPayload(server.Name, "elicit", util.ToJSONBytes(s.Payloads.Client.Elicit)); err != nil {
-				log.Printf("Failed to set client elicit payload in MCP server [%s] on port [%d] with error [%s]\n", server.Name, server.Port, err.Error())
-			} else {
-				log.Printf("Client elicit payload added for MCP server [%s] on port [%d]\n", server.Name, server.Port)
-			}
-		}
-		if s.Payloads.Client.Sample != nil {
-			if err := mcpclient.AddPayload(server.Name, "sample", util.ToJSONBytes(s.Payloads.Client.Sample)); err != nil {
-				log.Printf("Failed to set client sample payload in MCP server [%s] on port [%d] with error [%s]\n", server.Name, server.Port, err.Error())
-			} else {
-				log.Printf("Client sample payload added for MCP server [%s] on port [%d]\n", server.Name, server.Port)
-			}
-		}
-		if s.Payloads.Client.Roots != nil {
-			if err := mcpclient.SetRoots(server.Name, util.ToJSONBytes(s.Payloads.Client.Roots)); err != nil {
-				log.Printf("Failed to set client roots in MCP server [%s] on port [%d] with error [%s]\n", server.Name, server.Port, err.Error())
-			} else {
-				log.Printf("Client roots added for MCP server [%s] on port [%d]\n", server.Name, server.Port)
+			spc := s.Payloads.Client
+			if spc != nil {
+				if spc.Elicit != nil {
+					if err := mcpclient.AddPayload(server.Name, "elicit", util.ToJSONBytes(spc.Elicit)); err != nil {
+						log.Printf("Failed to set client elicit payload in MCP server [%s] on port [%d] with error [%s]\n", server.Name, server.Port, err.Error())
+					} else {
+						log.Printf("Client elicit payload added for MCP server [%s] on port [%d]\n", server.Name, server.Port)
+					}
+				}
+				if spc.Sample != nil {
+					if err := mcpclient.AddPayload(server.Name, "sample", util.ToJSONBytes(spc.Sample)); err != nil {
+						log.Printf("Failed to set client sample payload in MCP server [%s] on port [%d] with error [%s]\n", server.Name, server.Port, err.Error())
+					} else {
+						log.Printf("Client sample payload added for MCP server [%s] on port [%d]\n", server.Name, server.Port)
+					}
+				}
+				if spc.Roots != nil {
+					if err := mcpclient.SetRoots(server.Name, util.ToJSONBytes(spc.Roots)); err != nil {
+						log.Printf("Failed to set client roots in MCP server [%s] on port [%d] with error [%s]\n", server.Name, server.Port, err.Error())
+					} else {
+						log.Printf("Client roots added for MCP server [%s] on port [%d]\n", server.Name, server.Port)
+					}
+				}
 			}
 		}
 	}
@@ -418,8 +438,10 @@ func loadMCP(mcp *ctl.MCP) {
 func clearA2A(a2a ctl.A2A) {
 	for _, pa := range a2a {
 		for _, a2aAgent := range pa.Agents {
-			a2aserver.RemoveAgent(a2aAgent.Port, a2aAgent.Card.Name)
-			registry.TheAgentRegistry.RemoveAgent(a2aAgent.Card.Name)
+			if a2aAgent != nil && a2aAgent.Card != nil {
+				a2aserver.RemoveAgent(a2aAgent.Port, a2aAgent.Card.Name)
+				registry.TheAgentRegistry.RemoveAgent(a2aAgent.Card.Name)
+			}
 		}
 	}
 }
@@ -428,13 +450,20 @@ func loadA2A(a2a ctl.A2A) {
 	names := []string{}
 	clearA2A(a2a)
 	for _, pa := range a2a {
-		for _, agent := range pa.Agents {
+		for aname, agent := range pa.Agents {
+			if agent == nil || agent.Card == nil || agent.Config == nil {
+				log.Printf("Skipping agent [%s] due to missing Card/Config\n", aname)
+				continue
+			}
 			agent.Port = pa.Port
 			name := agent.Card.Name
 			server := a2aserver.GetOrAddServer(agent.Port)
-			server.AddAgent(agent)
-			registry.TheAgentRegistry.AddAgent(agent, agent.Port)
-			names = append(names, fmt.Sprintf("%s(%d)", name, agent.Port))
+			if err := server.AddAgent(agent); err == nil {
+				registry.TheAgentRegistry.AddAgent(agent, agent.Port)
+				names = append(names, fmt.Sprintf("%s(%d)", name, agent.Port))
+			} else {
+				log.Printf("Failed to load agent [%s]: %s\n", aname, err.Error())
+			}
 		}
 	}
 	log.Println("============================================================")

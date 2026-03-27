@@ -47,13 +47,15 @@ type AgentBehaviorImpl struct {
 }
 
 func newAgentBehavior(agent *model.Agent) *AgentBehaviorImpl {
+	useDefault := false
 	if agent.Behavior == nil {
+		useDefault = true
 		agent.Behavior = &model.AgentBehavior{}
 	}
 	impl := &AgentBehaviorImpl{
 		agent: agent,
 	}
-	if agent.Behavior.Echo {
+	if agent.Behavior.Echo || useDefault {
 		abe := &AgentBehaviorEcho{AgentBehaviorImpl: impl}
 		impl.self = abe
 		impl.doUnary = abe.DoUnary

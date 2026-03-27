@@ -39,7 +39,7 @@ func (t *ToolCallContext) remoteAgentCall() (*gomcp.CallToolResult, error) {
 	t.addForwardHeaders(finalHeaders.Request.Add, finalHeaders.Request.Forward, ac.Data)
 	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s]", ac.Name, ac.AgentURL)
 	t.notifyClient(msg, 0)
-	client := a2aclient.NewA2AClient(t.Server.Port, t.Name, ac.TLS, ac.Authority)
+	client := a2aclient.NewA2AClient(t.Server.Port, t.Name, ac.H2, ac.TLS, ac.Authority)
 	if client == nil {
 		return nil, errors.New("failed to create A2A client")
 	}

@@ -171,17 +171,17 @@ func SetRoots(name string, payload []byte) error {
 	return nil
 }
 
-func NewClient(port int, sse, tls bool, callerId, listener, authority string, progressChan chan string) *MCPClient {
+func NewClient(port int, sse, h2, tls bool, callerId, listener, authority string, progressChan chan string) *MCPClient {
 	name := fmt.Sprintf("GotoMCP-%d[%s][%s]", Counter.Add(1), global.Funcs.GetListenerLabelForPort(port), callerId)
 	if sse {
 		name += "[sse]"
 	}
-	return newMCPClient(sse, tls, name, callerId, listener, authority, progressChan)
+	return newMCPClient(sse, h2, tls, name, callerId, listener, authority, progressChan)
 }
 
-func newMCPClient(sse, tls bool, name, callerId, listener, authority string, progressChan chan string) *MCPClient {
+func newMCPClient(sse, h2, tls bool, name, callerId, listener, authority string, progressChan chan string) *MCPClient {
 	//httpClient := transport.CreateSimpleHTTPClient()
-	ht := transport.CreateHTTPClient(name, true, true, tls, authority, 0,
+	ht := transport.CreateHTTPClient(name, h2, true, tls, authority, 0,
 		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
 	m := &MCPClient{
 		Name:           name,
