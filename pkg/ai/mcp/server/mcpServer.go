@@ -729,9 +729,9 @@ func (m *MCPServer) onCompletion(ctx context.Context, req *gomcp.CompleteRequest
 	payload := m.CompletionPayload[req.Params.Ref.Type]
 	suggestions := []string{}
 	if payload != nil {
-		payload.RangeTextWithDelay(func(s string, count int, restarted bool) error {
+		payload.RangeTextWithDelay(0, nil, func(s string, count int, restarted bool) (bool, error) {
 			suggestions = append(suggestions, s)
-			return nil
+			return true, nil
 		})
 	} else {
 		suggestions = append(suggestions, "<No Completion>")

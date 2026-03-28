@@ -22,15 +22,19 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
-	BeforeRegex  = `(.*[\s\(\)\[\]\{\}])?`
-	AfterRegex   = `([\s\(\)\[\]\{\}].*)?`
-	EmbeddedJSON = regexp.MustCompile(`\{[^}]*\}`)
-	PortHint     = regexp.MustCompile(`(?i)\bport\s*(\d+)`)
-	TargetHint   = regexp.MustCompile(`(?i)\b(to|on|with)\s+(\w+)(\s*)`)
-	InputHint    = regexp.MustCompile(`(?i)\b(\S*):\[(.*)\]`)
+	BeforeRegex        = `(.*[\s\(\)\[\]\{\}])?`
+	AfterRegex         = `([\s\(\)\[\]\{\}].*)?`
+	EmbeddedJSON       = regexp.MustCompile(`\{[^}]*\}`)
+	PortHint           = regexp.MustCompile(`(?i)\bport\s*(\d+)`)
+	TargetHint         = regexp.MustCompile(`(?i)\b(to|on|with)\s+(\w+)(\s*)`)
+	InputHint          = regexp.MustCompile(`(?i)\b(\S*):\[(.*)\]`)
+	DigitRegexp        = regexp.MustCompile(`(\d+)`)
+	DurationRegexp     = regexp.MustCompile(`(?i)(\d+)\s*(s|sec|m|min|h|hour)s?\b`)
+	normalizedDuration = map[string]string{"sec": "s", "min": "s", "hour": "s"}
 )
 
 func ExtractEmbeddedJSONs(text string) (input string, jsons []map[string]any) {
@@ -70,6 +74,29 @@ func ExtractInputHint(text string) (string, map[string]string) {
 		text = strings.Replace(text, pattern, m[1], 1)
 	}
 	return text, inputs
+}
+
+func ExtractNumberHint(text string) (int, string) {
+	match := DigitRegexp.FindString(text)
+	if match != "" {
+		val, _ := strconv.Atoi(match)
+		return val, text
+	}
+	return 0, text
+}
+
+func ExtractDurationHint(text string) (time.Duration, string) {
+	matches := DurationRegexp.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 || len(matches[0]) == 0 {
+		return 0, ""
+	}
+	text = string(DurationRegexp.ReplaceAll([]byte(text), []byte("")))
+	val := matches[0][1]
+	unit := strings.ToLower(matches[0][2])
+	if nu, ok := normalizedDuration[unit]; ok {
+		unit = nu
+	}
+	return ParseDuration(val + unit), text
 }
 
 func SplitTextIntoChunks(text string, chunkSize int) []string {

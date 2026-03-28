@@ -36,7 +36,7 @@ import (
 type DelegateTriggerArr []*types.Triple[*types.Pair[string, *regexp.Regexp], *model.DelegateToolCall, *model.DelegateAgentCall]
 type DelegateTriggers map[string]DelegateTriggerArr
 type UnaryHandler func(aCtx *AgentContext) (*taskmanager.MessageProcessingResult, error)
-type StreamHandler func(aCtx *AgentContext) error
+type StreamHandler func(aCtx *AgentContext) (string, error)
 
 type AgentBehaviorImpl struct {
 	self     model.IAgentBehavior
@@ -164,13 +164,13 @@ func (b *AgentBehaviorImpl) handleStream(aCtx *AgentContext) (*taskmanager.Messa
 
 func (b *AgentBehaviorImpl) stream(aCtx *AgentContext) (err error) {
 	b.addOrSendServerInfo(aCtx, nil)
-	err = b.doStream(aCtx)
+	status, err := b.doStream(aCtx)
 	if err != nil {
-		aCtx.endTask(false, err.Error())
+		aCtx.endTask(false, fmt.Sprintf("%s:%s. Error: %s", b.agent.ID, status, err.Error()))
 	} else {
-		aCtx.endTask(true, b.agent.ID+": Task Done")
+		aCtx.endTask(true, fmt.Sprintf("%s:%s", b.agent.ID, status))
 	}
-	return
+	return err
 }
 
 func (b *AgentBehaviorImpl) addOrSendServerInfo(aCtx *AgentContext, result *taskmanager.MessageProcessingResult) {

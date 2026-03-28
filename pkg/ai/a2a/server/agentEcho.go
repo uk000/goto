@@ -35,10 +35,10 @@ func (ab *AgentBehaviorEcho) DoUnary(aCtx *AgentContext) (*taskmanager.MessagePr
 	}, nil
 }
 
-func (ab *AgentBehaviorEcho) DoStream(aCtx *AgentContext) error {
+func (ab *AgentBehaviorEcho) DoStream(aCtx *AgentContext) (string, error) {
 	aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "", ab.getEchoMessage(aCtx, aCtx.input))
 	aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Echo response sent", nil)
-	return nil
+	return "Echo Done", nil
 }
 
 func (ab *AgentBehaviorEcho) getEchoMessage(aCtx *AgentContext, input *a2aproto.Message) (parts []a2aproto.Part) {

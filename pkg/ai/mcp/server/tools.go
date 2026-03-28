@@ -243,7 +243,7 @@ func (t *ToolCallContext) Hop(msg string) {
 func (t *ToolCallContext) applyDelay() {
 	if t.delay != nil {
 		d := t.delay.Compute()
-		t.notifyClient(t.Log("Server %s Tool %s: sleeping for [%s]", t.Label, t.Tool.Name, d), 0)
+		t.notifyClient(t.Log("Server %s Tool %s: \U0001F634\U0001F4A4 sleeping for [%s]", t.Label, t.Tool.Name, d), 0)
 		t.delay.Apply()
 	}
 }
@@ -518,15 +518,15 @@ func (t *ToolCallContext) sendPayload() (*gomcp.CallToolResult, error) {
 				oldResponseCount = state.ResponseCount
 			}
 		}
-		t.Response.RangeTextFrom(oldResponseCount+1, func(text string, count int, restarted bool) error {
+		t.Response.RangeTextFrom(oldResponseCount+1, 0, func(text string, count int, restarted bool) (bool, error) {
 			if !keepSending {
-				return nil
+				return false, nil
 			}
 			responseCount = count
 			if oldResponseCount > 0 && count <= oldResponseCount {
 				msg := fmt.Sprintf("%s Skipping previously sent result [%d]", t.Label, count)
 				t.notifyClient(msg, 0)
-				return nil
+				return true, nil
 			}
 			if t.Behavior.Stream {
 				progress := float64(total) / float64(count)
@@ -547,10 +547,10 @@ func (t *ToolCallContext) sendPayload() (*gomcp.CallToolResult, error) {
 					ResponseCount:  count,
 				})
 				if err != nil {
-					return err
+					return false, err
 				}
 			}
-			return nil
+			return true, nil
 		})
 		if keepSending {
 			t.Log(fmt.Sprintf("%s Server [%s] sent response: count [%d] after delay [%s]", t.Label, t.Server.GetName(), responseCount, delay))

@@ -54,8 +54,8 @@ type PayloadMarshal struct {
 	RawStream   []any            `yaml:"rawStream,omitempty" json:"rawStream,omitempty"`
 }
 
-type TextRangeFunc func(text string, count int, restarted bool) error
-type DataRangeFunc func(data any, count int, restarted bool) error
+type TextRangeFunc func(text string, count int, restarted bool) (bool, error)
+type DataRangeFunc func(data any, count int, restarted bool) (bool, error)
 
 func NewJSONPayload(json util.JSON, raw []byte, delayMin, delayMax time.Duration, delayCount int) *Payload {
 	if json == nil && len(raw) > 0 {
@@ -264,9 +264,13 @@ func (p *Payload) ToText() string {
 	return output.String()
 }
 
-func (p *Payload) sendJSONStream(from int, f TextRangeFunc, f2 DataRangeFunc) (err error) {
+func (p *Payload) sendJSONStream(from, to int, f TextRangeFunc, f2 DataRangeFunc) (err error) {
 	count := 0
 	restarted := false
+	cont := true
+	if to <= 0 {
+		to = p.StreamCount
+	}
 	for {
 		for _, j := range p.JSONStream {
 			count++
@@ -274,20 +278,20 @@ func (p *Payload) sendJSONStream(from int, f TextRangeFunc, f2 DataRangeFunc) (e
 				continue
 			}
 			if f != nil {
-				if err = f(j.ToJSONText(), count, restarted); err != nil {
+				if cont, err = f(j.ToJSONText(), count, restarted); err != nil {
 					return err
 				}
 			} else if f2 != nil {
-				if err = f2(j, count, restarted); err != nil {
+				if cont, err = f2(j, count, restarted); err != nil {
 					return err
 				}
 			}
 			restarted = false
-			if count >= p.StreamCount {
+			if !cont || count >= to {
 				break
 			}
 		}
-		if count >= p.StreamCount {
+		if !cont || count >= to {
 			break
 		}
 		restarted = true
@@ -295,9 +299,13 @@ func (p *Payload) sendJSONStream(from int, f TextRangeFunc, f2 DataRangeFunc) (e
 	return nil
 }
 
-func (p *Payload) sendTextStream(from int, f TextRangeFunc, f2 DataRangeFunc) (err error) {
+func (p *Payload) sendTextStream(from, to int, f TextRangeFunc, f2 DataRangeFunc) (err error) {
 	count := 0
 	restarted := false
+	cont := true
+	if to <= 0 {
+		to = p.StreamCount
+	}
 	for {
 		for _, t := range p.TextStream {
 			count++
@@ -305,20 +313,20 @@ func (p *Payload) sendTextStream(from int, f TextRangeFunc, f2 DataRangeFunc) (e
 				continue
 			}
 			if f != nil {
-				if err = f(t, count, restarted); err != nil {
+				if cont, err = f(t, count, restarted); err != nil {
 					return err
 				}
 			} else if f2 != nil {
-				if err = f2(t, count, restarted); err != nil {
+				if cont, err = f2(t, count, restarted); err != nil {
 					return err
 				}
 			}
 			restarted = false
-			if count >= p.StreamCount {
+			if !cont || count >= to {
 				break
 			}
 		}
-		if count >= p.StreamCount {
+		if !cont || count >= to {
 			break
 		}
 		restarted = true
@@ -326,9 +334,13 @@ func (p *Payload) sendTextStream(from int, f TextRangeFunc, f2 DataRangeFunc) (e
 	return nil
 }
 
-func (p *Payload) sendRawStream(from int, f TextRangeFunc, f2 DataRangeFunc) (err error) {
+func (p *Payload) sendRawStream(from, to int, f TextRangeFunc, f2 DataRangeFunc) (err error) {
 	count := 0
 	restarted := false
+	cont := true
+	if to <= 0 {
+		to = p.StreamCount
+	}
 	for {
 		for _, r := range p.RawStream {
 			count++
@@ -347,21 +359,21 @@ func (p *Payload) sendRawStream(from int, f TextRangeFunc, f2 DataRangeFunc) (er
 			}
 			if text != "" {
 				if f != nil {
-					if err = f(text, count, restarted); err != nil {
+					if cont, err = f(text, count, restarted); err != nil {
 						return err
 					}
 				} else if f2 != nil {
-					if err = f2(text, count, restarted); err != nil {
+					if cont, err = f2(text, count, restarted); err != nil {
 						return err
 					}
 				}
 			}
 			restarted = false
-			if count >= p.StreamCount {
+			if !cont || count >= to {
 				break
 			}
 		}
-		if count >= p.StreamCount {
+		if !cont || count >= to {
 			break
 		}
 		restarted = true
@@ -382,62 +394,73 @@ func (p *Payload) sendRaw(f TextRangeFunc, f2 DataRangeFunc) (err error) {
 	}
 	if text != "" {
 		if f != nil {
-			return f(text, 1, false)
+			_, err = f(text, 1, false)
+			return
 		} else if f2 != nil {
-			return f2(text, 1, false)
+			_, err = f2(text, 1, false)
+			return
 		}
 	}
 	return nil
 }
 
-func (p *Payload) RangeText(f TextRangeFunc) (err error) {
-	return p.RangeTextFrom(0, f)
+func (p *Payload) RangeText(to int, f TextRangeFunc) (err error) {
+	return p.RangeTextFrom(0, to, f)
 }
 
-func (p *Payload) RangeTextWithDelay(f TextRangeFunc) (err error) {
-	if p.Delay != nil && p.Delay.IsNonZero() {
+func (p *Payload) RangeTextWithDelay(to int, delay *types.Duration, f TextRangeFunc) (err error) {
+	var d types.Delay = *p.Delay
+	if delay != nil && delay.Abs() != 0 {
+		d.Min = delay
+		d.Max = delay
+	}
+	if d.IsNonZero() {
 		originalF := f
-		delayedF := func(text string, count int, restarted bool) error {
-			p.Delay.ComputeAndApply()
+		delayedF := func(text string, count int, restarted bool) (bool, error) {
+			d.ComputeAndApply()
 			return originalF(text, count, restarted)
 		}
 		f = delayedF
 	}
-	return p.RangeTextFrom(0, f)
+	return p.RangeTextFrom(0, to, f)
 }
 
-func (p *Payload) RangeTextFrom(from int, f TextRangeFunc) (err error) {
+func (p *Payload) RangeTextFrom(from, to int, f TextRangeFunc) (err error) {
 	if p.JSONStream != nil {
-		return p.sendJSONStream(from, f, nil)
+		return p.sendJSONStream(from, to, f, nil)
 	} else if p.TextStream != nil {
-		return p.sendTextStream(from, f, nil)
+		return p.sendTextStream(from, to, f, nil)
 	} else if p.RawStream != nil {
-		return p.sendRawStream(from, f, nil)
+		return p.sendRawStream(from, to, f, nil)
 	} else if p.JSON != nil {
-		return f(p.JSON.ToJSONText(), 1, false)
+		_, err = f(p.JSON.ToJSONText(), 1, false)
+		return
 	} else if p.Text != "" {
-		return f(p.Text, 1, false)
+		_, err = f(p.Text, 1, false)
+		return
 	} else if p.Raw != nil {
 		return p.sendRaw(f, nil)
 	}
 	return nil
 }
 
-func (p *Payload) RangeAny(f DataRangeFunc) (err error) {
-	return p.RangeAnyFrom(0, f)
+func (p *Payload) RangeAny(to int, f DataRangeFunc) (err error) {
+	return p.RangeAnyFrom(0, to, f)
 }
 
-func (p *Payload) RangeAnyFrom(from int, f DataRangeFunc) (err error) {
+func (p *Payload) RangeAnyFrom(from, to int, f DataRangeFunc) (err error) {
 	if p.JSONStream != nil {
-		return p.sendJSONStream(from, nil, f)
+		return p.sendJSONStream(from, to, nil, f)
 	} else if p.TextStream != nil {
-		return p.sendTextStream(from, nil, f)
+		return p.sendTextStream(from, to, nil, f)
 	} else if p.RawStream != nil {
-		return p.sendRawStream(from, nil, f)
+		return p.sendRawStream(from, to, nil, f)
 	} else if p.JSON != nil {
-		return f(p.JSON, 1, false)
+		_, err = f(p.JSON, 1, false)
+		return
 	} else if p.Text != "" {
-		return f(p.Text, 1, false)
+		_, err = f(p.Text, 1, false)
+		return
 	} else if p.Raw != nil {
 		return p.sendRaw(nil, f)
 	}

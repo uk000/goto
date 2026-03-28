@@ -28,6 +28,6 @@ func (ab *AgentBehaviorRemoteHttp) DoUnary(aCtx *AgentContext) (*taskmanager.Mes
 	return nil, nil
 }
 
-func (ab *AgentBehaviorRemoteHttp) DoStream(aCtx *AgentContext) error {
-	return nil
+func (ab *AgentBehaviorRemoteHttp) DoStream(aCtx *AgentContext) (string, error) {
+	return "", nil
 }

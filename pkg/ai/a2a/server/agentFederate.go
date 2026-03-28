@@ -118,7 +118,7 @@ func (ab *AgentBehaviorFederate) DoUnary(aCtx *AgentContext) (*taskmanager.Messa
 	}, nil
 }
 
-func (ab *AgentBehaviorFederate) DoStream(aCtx *AgentContext) error {
+func (ab *AgentBehaviorFederate) DoStream(aCtx *AgentContext) (string, error) {
 	aCtx.triggers = ab.triggers
 	aCtx.detectRemoteCalls()
 	aCtx.resultsChan = make(chan *types.Pair[string, any], 10)
@@ -152,7 +152,10 @@ func (ab *AgentBehaviorFederate) DoStream(aCtx *AgentContext) error {
 	close(aCtx.localProgress)
 	close(aCtx.upstreamProgress)
 	resultsWG.Wait()
-	return aCtx.err
+	if aCtx.err != nil {
+		return "Agent federation done with error \u274C", aCtx.err
+	}
+	return "Agent federation done \u2705", nil
 }
 
 func (ab *AgentBehaviorFederate) processResults(aCtx *AgentContext, dType string, wg *sync.WaitGroup) {

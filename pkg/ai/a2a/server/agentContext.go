@@ -77,7 +77,7 @@ type DelegateCallContext struct {
 	url       string
 }
 
-type toolOverrides struct {
+type agentOverrides struct {
 	tool        string
 	agent       string
 	url         string
@@ -100,6 +100,7 @@ func (ac *AgentContext) setContext(ctx context.Context, b *AgentBehaviorImpl, ta
 	ac.behavior = b
 	ac.task = task
 	ac.input = input
+	ac.inputText = getMessageText(input)
 	ac.options = options
 	ac.handler = handler
 	ac.delay = b.delay
@@ -109,8 +110,8 @@ func (ac *AgentContext) setContext(ctx context.Context, b *AgentBehaviorImpl, ta
 }
 
 func (ac *AgentContext) detectRemoteCalls() {
-	text := getMessageText(ac.input)
-	inputText, jsons := util.ExtractEmbeddedJSONs(text)
+	inputText := ac.inputText
+	inputText, jsons := util.ExtractEmbeddedJSONs(inputText)
 	inputText, targetHint := util.ExtractTargetHint(inputText)
 	inputText, inputs := util.ExtractInputHint(inputText)
 	inputText, portHint := util.ExtractPortHint(inputText)
@@ -324,10 +325,10 @@ func (ac *AgentContext) setOverrideParamsFromInput(jsons []map[string]any, input
 	}
 }
 
-func extractJSONValues(jsons []map[string]any) map[string]*toolOverrides {
-	overrides := map[string]*toolOverrides{}
+func extractJSONValues(jsons []map[string]any) map[string]*agentOverrides {
+	overrides := map[string]*agentOverrides{}
 	for _, json := range jsons {
-		override := &toolOverrides{}
+		override := &agentOverrides{}
 		if json["tool"] != nil {
 			override.tool = json["tool"].(string)
 			overrides[override.tool] = override
@@ -376,14 +377,22 @@ func (ac *AgentContext) sendTaskStatusUpdate(state a2aproto.TaskState, msg strin
 }
 
 func (ac *AgentContext) sendTextArtifact(title, description string, text []string, isFinal, isQuestion bool) (err error) {
+	message := ""
+	if title != "" {
+		message = fmt.Sprintf("%s", title)
+		message = fmt.Sprintf("%s\n%s", message, strings.Repeat("-", len(message)))
+	}
+	if description != "" {
+		message = fmt.Sprintf("%s\n%s", message, description)
+	}
+	for _, t := range text {
+		message = fmt.Sprintf("%s\n* %s", message, t)
+	}
 	artifact := a2aproto.Artifact{
 		ArtifactID:  uuid.New().String(),
 		Name:        util.Ptr(title),
 		Description: util.Ptr(description),
-		Parts:       []a2aproto.Part{a2aproto.NewTextPart(title), a2aproto.NewTextPart(description)},
-	}
-	for _, t := range text {
-		artifact.Parts = append(artifact.Parts, a2aproto.NewTextPart(t))
+		Parts:       []a2aproto.Part{a2aproto.NewTextPart(message)},
 	}
 	return ac.task.handler.AddArtifact(&ac.task.taskID, artifact, isFinal, isQuestion)
 }
@@ -399,9 +408,9 @@ func (ac *AgentContext) sendTextArtifactFromParts(title string, parts []a2aproto
 
 func (ac *AgentContext) endTask(success bool, msg string) {
 	if success {
-		ac.sendTaskStatusUpdate(a2aproto.TaskStateCompleted, msg, nil)
+		ac.sendTaskStatusUpdate(a2aproto.TaskStateCompleted, "\u2705 "+msg, nil)
 	} else {
-		ac.sendTaskStatusUpdate(a2aproto.TaskStateFailed, msg, nil)
+		ac.sendTaskStatusUpdate(a2aproto.TaskStateFailed, "\u274C "+msg, nil)
 	}
 	if ac.task.subscriber != nil {
 		ac.task.subscriber.Close()
