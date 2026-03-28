@@ -43,7 +43,7 @@ func (t *ToolCallContext) remoteAgentCall() (*gomcp.CallToolResult, error) {
 	if client == nil {
 		return nil, errors.New("failed to create A2A client")
 	}
-	session, err := client.ConnectWithAgentCard(t.ctx, ac, t.remoteArgs.URL, t.requestHeaders)
+	session, err := client.ConnectWithAgentCard(t.ctx, ac, t.remoteArgs.URL, t.remoteArgs.Authority, t.requestHeaders)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", ac.Name, ac.AgentURL, err.Error())
 	} else {
@@ -55,7 +55,7 @@ func (t *ToolCallContext) remoteAgentCall() (*gomcp.CallToolResult, error) {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go t.processResults(ac.Name, progressChan, resultsChan, result, &wg)
-	err = session.CallAgent(nil, resultsChan, progressChan)
+	err = session.CallAgent(nil, resultsChan, resultsChan, progressChan)
 	close(resultsChan)
 	close(progressChan)
 	wg.Wait()

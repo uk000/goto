@@ -86,7 +86,9 @@ type MCPSession struct {
 	currentOutput   map[string]any
 	inHeaders       http.Header
 	outHeaders      *types.Headers
-	respHeaders     http.Header
+	ResponseHeaders http.Header
+	requestContext  context.Context
+	transport       gomcp.Transport
 }
 
 type MCPClient struct {
@@ -250,54 +252,6 @@ func ParseToolCall(b []byte) (*ToolCall, error) {
 	return tc, err
 }
 
-func (c *MCPClient) Connect(url, operLabel string) (session *MCPSession, err error) {
-	return c.ConnectWithHops(url, operLabel, nil)
-}
-
-func (c *MCPClient) ConnectWithHops(url, operLabel string, hops *util.Hops) (*MCPSession, error) {
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		if c.TLS {
-			url = "https://" + url
-		} else {
-			url = "http://" + url
-		}
-	}
-	t := c.newMCPTransport(c.Name, url)
-	session := c.newMCPSession(operLabel, url, hops)
-	s, err := c.client.Connect(context.Background(), t, &gomcp.ClientSessionOptions{})
-	if err == nil {
-		session.ID = s.ID()
-		session.session = s
-		return session, nil
-	}
-	return nil, err
-}
-
-func (c *MCPClient) newMCPSession(operLabel, url string, hops *util.Hops) *MCPSession {
-	s := &MCPSession{
-		Name:      c.Name,
-		CallerId:  c.CallerId,
-		Listener:  c.Listener,
-		Operation: operLabel,
-		URL:       url,
-		SSE:       c.SSE,
-		mcpClient: c,
-	}
-	if hops != nil {
-		s.Hops = hops
-	} else {
-		s.Hops = util.NewHops(c.CallerId, c.Listener, operLabel)
-	}
-	c.ht.SetRequestIntercept(s)
-	c.ht.SetResponseIntercept(s)
-	c.lock.Lock()
-	c.ActiveSessions[s.ID] = s
-	c.lock.Unlock()
-	c.client.AddSendingMiddleware(s.SendingMiddleware)
-	c.client.AddReceivingMiddleware(s.ReceivingMiddleware)
-	return s
-}
-
 func (c *MCPClient) GetSession(sessionID string) *MCPSession {
 	c.lock.RLock()
 	defer c.lock.RLock()
@@ -314,10 +268,77 @@ func (c *MCPClient) OnConnClose() {
 	log.Println("Received connection close notification")
 }
 
+func (c *MCPClient) CreateSession(url, operLabel string) *MCPSession {
+	return c.CreateSessionWithHops(url, operLabel, nil)
+}
+
+func (c *MCPClient) CreateSessionWithHops(url, operLabel string, hops *util.Hops) *MCPSession {
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		if c.TLS {
+			url = "https://" + url
+		} else {
+			url = "http://" + url
+		}
+	}
+	t := c.newMCPTransport(c.Name, url)
+	return c.newMCPSession(t, operLabel, url, hops)
+}
+
+func (c *MCPClient) newMCPSession(t gomcp.Transport, operLabel, url string, hops *util.Hops) *MCPSession {
+	s := &MCPSession{
+		Name:      c.Name,
+		CallerId:  c.CallerId,
+		Listener:  c.Listener,
+		Operation: operLabel,
+		URL:       url,
+		SSE:       c.SSE,
+		mcpClient: c,
+		transport: t,
+	}
+	if hops != nil {
+		s.Hops = hops
+	} else {
+		s.Hops = util.NewHops(c.CallerId, c.Listener, operLabel)
+	}
+	c.ht.SetRequestIntercept(s)
+	c.ht.SetResponseIntercept(s)
+	c.lock.Lock()
+	c.ActiveSessions[s.ID] = s
+	c.lock.Unlock()
+	c.client.AddSendingMiddleware(s.SendingMiddleware)
+	c.client.AddReceivingMiddleware(s.ReceivingMiddleware)
+	return s
+}
+
+func (s *MCPSession) SetCallContext(tc *ToolCall, inHeaders http.Header) {
+	s.currentToolCall = tc
+	s.inHeaders = inHeaders
+	s.outHeaders = tc.Headers
+}
+
+func (s *MCPSession) Connect() error {
+	cs, err := s.mcpClient.client.Connect(context.Background(), s.transport, &gomcp.ClientSessionOptions{})
+	if err == nil {
+		s.ID = cs.ID()
+		s.session = cs
+		return nil
+	}
+	return err
+}
+
+func (s *MCPSession) Call(args map[string]any, inHeaders http.Header) (map[string]any, error) {
+	return s.CallTool(s.currentToolCall, args, inHeaders)
+}
+
 func (s *MCPSession) CallTool(tc *ToolCall, args map[string]any, inHeaders http.Header) (map[string]any, error) {
 	msg := ""
 	results := []any{}
-	s.currentToolCall = tc
+	if tc == nil {
+		tc = s.currentToolCall
+	}
+	if tc == nil {
+		return nil, errors.New("No tool given")
+	}
 	if args == nil {
 		args = tc.Args
 	}
@@ -331,17 +352,23 @@ func (s *MCPSession) CallTool(tc *ToolCall, args map[string]any, inHeaders http.
 	if args["forwardHeaders"] == nil && tc.Headers != nil && tc.Headers.Request != nil {
 		args["forwardHeaders"] = tc.Headers.Request.Forward
 	}
-	s.outHeaders = tc.Headers
 	s.currentArgs = args
-	if s.outHeaders == nil {
-		s.outHeaders = types.NewHeaders()
+	outHeaders := s.outHeaders
+	if outHeaders == nil {
+		outHeaders = tc.Headers
+	}
+	if outHeaders == nil {
+		outHeaders = types.NewHeaders()
 	}
 	if !tc.Raw {
-		s.outHeaders.Request.Add["Host"] = tc.Authority
-		s.outHeaders.Request.Add["User-Agent"] = s.CallerId
+		outHeaders.Request.Add["Host"] = tc.Authority
+		outHeaders.Request.Add["User-Agent"] = s.CallerId
 	}
-	// ctx = util.WithContextHeaders(ctx, s.AddRequestHeaders)
-	s.inHeaders = inHeaders
+	ctx = util.WithContextHeaders(ctx, outHeaders)
+	s.requestContext = ctx
+	if inHeaders != nil {
+		s.inHeaders = inHeaders
+	}
 	s.currentOutput = map[string]any{}
 	requestCount := tc.RequestCount
 	if requestCount == 0 {
@@ -416,10 +443,14 @@ func (s *MCPSession) resultToOutput(tc *ToolCall, result *gomcp.CallToolResult) 
 }
 
 func (s *MCPSession) InterceptRequest(r *http.Request) {
-	if s.outHeaders != nil && s.outHeaders.Request != nil {
+	outHeaders := s.outHeaders
+	if outHeaders == nil && s.requestContext != nil {
+		outHeaders = util.GetContextHeaders(s.requestContext)
+	}
+	if outHeaders != nil && outHeaders.Request != nil {
 		label := fmt.Sprintf("MCP client request for %s", s.mcpClient.CallerId)
-		s.outHeaders.Request.UpdateHeaders(r.Header, label)
-		types.ForwardHeaders(s.inHeaders, r.Header, slices.Values(s.outHeaders.Request.Forward), label)
+		outHeaders.Request.UpdateHeaders(r.Header, label)
+		types.ForwardHeaders(s.inHeaders, r.Header, slices.Values(outHeaders.Request.Forward), label)
 	}
 	if len(r.Header["Host"]) > 0 {
 		r.Host = r.Header["Host"][0]
@@ -427,8 +458,10 @@ func (s *MCPSession) InterceptRequest(r *http.Request) {
 	tool := ""
 	if s.currentToolCall != nil {
 		tool = s.currentToolCall.Tool
+	}
+	if s.currentOutput != nil {
 		clientInfo := util.BuildGotoClientInfo(nil, 0, s.Name, "", s.currentToolCall.Tool, s.currentToolCall.URL, s.currentToolCall.Server, nil, s.currentArgs,
-			s.inHeaders, r.Header, s.outHeaders.Request.Forward, s.outHeaders.Request.Add, s.outHeaders.Request.Remove,
+			s.inHeaders, r.Header, outHeaders.Request.Forward, outHeaders.Request.Add, outHeaders.Request.Remove,
 			map[string]any{
 				"Tool-Call": s.currentToolCall,
 			})
@@ -439,10 +472,14 @@ func (s *MCPSession) InterceptRequest(r *http.Request) {
 }
 
 func (s *MCPSession) InterceptResponse(r *http.Response) {
-	if s.outHeaders != nil && s.outHeaders.Response != nil {
-		s.outHeaders.Response.UpdateHeaders(r.Header, fmt.Sprintf("MCP client response for %s", s.mcpClient.CallerId))
+	outHeaders := s.outHeaders
+	if outHeaders == nil && s.requestContext != nil {
+		outHeaders = util.GetContextHeaders(s.requestContext)
 	}
-	s.respHeaders = r.Header
+	if outHeaders != nil && outHeaders.Response != nil {
+		outHeaders.Response.UpdateHeaders(r.Header, fmt.Sprintf("MCP client response for %s", s.mcpClient.CallerId))
+	}
+	s.ResponseHeaders = r.Header
 	tool := ""
 	if s.currentToolCall != nil {
 		tool = s.currentToolCall.Tool
@@ -494,20 +531,16 @@ func (s *MCPSession) Close() {
 	s.mcpClient.RemoveSession(s.ID)
 }
 
-func (s *MCPSession) ResponseHeaders() http.Header {
-	return s.respHeaders
-}
-
 func (s *MCPSession) ListTools() (*gomcp.ListToolsResult, error) {
-	return s.session.ListTools(util.WithContextHeaders(context.Background(), map[string][]string{"Host": []string{s.Authority}}), &gomcp.ListToolsParams{})
+	return s.session.ListTools(util.WithRequestHeaders(context.Background(), map[string][]string{"Host": []string{s.Authority}}), &gomcp.ListToolsParams{})
 }
 
 func (s *MCPSession) ListPrompts() (*gomcp.ListPromptsResult, error) {
-	return s.session.ListPrompts(util.WithContextHeaders(context.Background(), map[string][]string{"Host": []string{s.Authority}}), &gomcp.ListPromptsParams{})
+	return s.session.ListPrompts(util.WithRequestHeaders(context.Background(), map[string][]string{"Host": []string{s.Authority}}), &gomcp.ListPromptsParams{})
 }
 
 func (s *MCPSession) ListResources() (*gomcp.ListResourcesResult, error) {
-	return s.session.ListResources(util.WithContextHeaders(context.Background(), map[string][]string{"Host": []string{s.Authority}}), &gomcp.ListResourcesParams{})
+	return s.session.ListResources(util.WithRequestHeaders(context.Background(), map[string][]string{"Host": []string{s.Authority}}), &gomcp.ListResourcesParams{})
 }
 
 func (c *MCPClient) ElicitationHandler(ctx context.Context, req *gomcp.ElicitRequest) (result *gomcp.ElicitResult, err error) {

@@ -24,6 +24,7 @@ import (
 	"goto/pkg/server/response/payload"
 	"goto/pkg/types"
 	"net/http"
+	"sync/atomic"
 
 	a2aproto "trpc.group/trpc-go/trpc-a2a-go/protocol"
 	trpcserver "trpc.group/trpc-go/trpc-a2a-go/server"
@@ -73,11 +74,18 @@ type DelegateConfig struct {
 	Parallel bool                          `yaml:"parallel,omitempty" json:"parallel,omitempty"`
 }
 
+type DelegateTracker struct {
+	CallCount     atomic.Int32 `json:"callCount"`
+	ResponseCount atomic.Int32 `json:"responseCount"`
+	Done          bool         `json:"done"`
+}
+
 type DelegateToolCall struct {
 	GivenName   string                     `json:"givenName"`
 	Triggers    []string                   `yaml:"triggers" json:"triggers"`
 	ToolCall    *mcpclient.ToolCall        `yaml:"toolCall,omitempty" json:"toolCall,omitempty"`
 	Substitutes map[string]*DelegateServer `yaml:"substitutes,omitempty" json:"substitutes,omitempty"`
+	Tracker     *DelegateTracker           `json:"tracker"`
 }
 
 type DelegateAgentCall struct {
@@ -85,6 +93,7 @@ type DelegateAgentCall struct {
 	Triggers    []string                   `yaml:"triggers" json:"triggers"`
 	AgentCall   *a2aclient.AgentCall       `yaml:"agentCall,omitempty" json:"agentCall,omitempty"`
 	Substitutes map[string]*DelegateServer `yaml:"substitutes,omitempty" json:"substitutes,omitempty"`
+	Tracker     *DelegateTracker           `json:"tracker"`
 }
 
 type DelegateHTTPCall struct {
@@ -92,6 +101,7 @@ type DelegateHTTPCall struct {
 	Triggers    []string                   `yaml:"triggers" json:"triggers"`
 	HTTPCall    *HTTPCall                  `yaml:"httpCall,omitempty" json:"httpCall,omitempty"`
 	Substitutes map[string]*DelegateServer `yaml:"substitutes,omitempty" json:"substitutes,omitempty"`
+	Tracker     *DelegateTracker           `json:"tracker"`
 }
 
 type DelegateServer struct {
@@ -104,6 +114,25 @@ type HTTPCall struct {
 	Authority string         `yaml:"authority" json:"authority"`
 	Delay     *types.Delay   `yaml:"delay,omitempty" json:"delay,omitempty"`
 	Headers   *types.Headers `yaml:"headers,omitempty" json:"headers,omitempty"`
+}
+
+func NewDelegateTracker() *DelegateTracker {
+	return &DelegateTracker{
+		CallCount:     atomic.Int32{},
+		ResponseCount: atomic.Int32{},
+	}
+}
+
+func (t *DelegateTracker) IncrementCall() {
+	t.CallCount.Add(1)
+}
+
+func (t *DelegateTracker) IncrementResponse() {
+	t.ResponseCount.Add(1)
+}
+
+func (t *DelegateTracker) Finish() {
+	t.Done = true
 }
 
 func (a *Agent) GetCard() *trpcserver.AgentCard {

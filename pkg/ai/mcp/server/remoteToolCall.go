@@ -61,8 +61,9 @@ func (t *ToolCallContext) remoteToolCall() (*gomcp.CallToolResult, error) {
 	}(progressChan)
 	go func() {
 		client := mcpclient.NewClient(t.Server.GetPort(), false, t.Config.RemoteTool.H2, t.Config.RemoteTool.TLS, t.Server.ID, t.rs.ListenerLabel, t.Config.RemoteTool.Authority, progressChan)
-		var session *mcpclient.MCPSession
-		session, err = client.ConnectWithHops(url, t.Label, t.hops)
+		session := client.CreateSessionWithHops(url, t.Label, t.hops)
+		session.SetCallContext(tc, t.requestHeaders)
+		err = session.Connect()
 		if err == nil {
 			defer session.Close()
 			remoteResult, err = session.CallTool(tc, tc.Args, t.requestHeaders)

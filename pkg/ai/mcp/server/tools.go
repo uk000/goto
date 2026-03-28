@@ -177,7 +177,7 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 		}
 	}
 	if headers == nil {
-		headers = util.GetContextHeaders(ctx)
+		headers = util.GetRequestHeaders(ctx)
 	}
 	if headers != nil && rs != nil {
 		headers["RequestURI"] = []string{rs.RequestURI}
@@ -518,7 +518,7 @@ func (t *ToolCallContext) sendPayload() (*gomcp.CallToolResult, error) {
 				oldResponseCount = state.ResponseCount
 			}
 		}
-		t.Response.RangeTextFrom(oldResponseCount+1, 0, func(text string, count int, restarted bool) (bool, error) {
+		t.Response.RangeTextFrom(oldResponseCount+1, total, func(text string, count int, restarted bool) (bool, error) {
 			if !keepSending {
 				return false, nil
 			}
@@ -528,13 +528,16 @@ func (t *ToolCallContext) sendPayload() (*gomcp.CallToolResult, error) {
 				t.notifyClient(msg, 0)
 				return true, nil
 			}
+			progress := float64(count) / float64(total)
 			if t.Behavior.Stream {
-				progress := float64(total) / float64(count)
 				msg := fmt.Sprintf("%s Progress: [%d] done, only [%d] more to go. Current stream output: %s", t.Label, count, total-count, text)
 				t.notifyClient(msg, progress)
 			}
-			if d != nil {
-				delay = d.ComputeAndApply()
+			if d != nil && total-count > 0 {
+				delay = d.Compute()
+				msg := fmt.Sprintf("%s Progress: \U0001F634\U0001F4A4 Sleeping for [%s] before sending next update. [%d] done, [%d] more to go.", t.Label, delay, count, total-count)
+				t.notifyClient(msg, progress)
+				d.Apply()
 			}
 			result.Content = append(result.Content, &gomcp.TextContent{Text: fmt.Sprintf("[%d] %s", count, text)})
 			if t.Behavior.Resumable && count >= oldResponseCount+2 {
@@ -561,6 +564,8 @@ func (t *ToolCallContext) sendPayload() (*gomcp.CallToolResult, error) {
 		result.Content = append(result.Content, &gomcp.TextContent{Text: "<No payload>"})
 		t.Log(fmt.Sprintf("%s Server [%s] sent default response after delay [%s]", t.Label, t.Server.GetName(), delay))
 	}
+	msg := fmt.Sprintf("%s Stream finished \U000026F3", t.Label)
+	t.notifyClient(msg, 100)
 	return result, nil
 }
 

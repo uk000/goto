@@ -66,23 +66,25 @@ type A2AClient struct {
 }
 
 type A2AClientSession struct {
-	ctx          context.Context
-	port         int
-	callerId     string
-	client       *A2AClient
-	Card         *goa2aserver.AgentCard
-	url          string
-	authority    string
-	call         *AgentCall
-	inInput      string
-	outInput     string
-	inHeaders    http.Header
-	outHeaders   *types.Headers
-	callback     AgentResultsCallback
-	progressChan chan string
-	resultChan   chan *types.Pair[string, any]
-	inputParts   []a2aproto.Part
-	err          error
+	ctx              context.Context
+	port             int
+	callerId         string
+	client           *A2AClient
+	Card             *goa2aserver.AgentCard
+	url              string
+	authority        string
+	call             *AgentCall
+	inInput          string
+	outInput         string
+	inHeaders        http.Header
+	outHeaders       *types.Headers
+	ResponseHeaders  http.Header
+	callback         AgentResultsCallback
+	localProgress    chan *types.Pair[string, any]
+	upstreamProgress chan string
+	resultChan       chan *types.Pair[string, any]
+	inputParts       []a2aproto.Part
+	err              error
 }
 
 var (
@@ -153,14 +155,13 @@ func CallAgent(ctx context.Context, port int, call *AgentCall, callback AgentRes
 	if err != nil {
 		return fmt.Errorf("Failed to load agent card with error [%s]. Agent Call: %+v", err.Error(), call)
 	}
-	return session.CallAgent(callback, nil, nil)
-}
-
-func (ac *A2AClient) LoadAgentCard(ctx context.Context, call *AgentCall, requestHeaders http.Header) (session *A2AClientSession, err error) {
-	return ac.loadAgentCard(ctx, "", "", call, requestHeaders)
+	return session.CallAgent(callback, nil, nil, nil)
 }
 
 func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, call *AgentCall, requestHeaders http.Header) (session *A2AClientSession, err error) {
+	if url == "" {
+		url = call.CardURL
+	}
 	if url == "" {
 		url = call.AgentURL
 	}
@@ -208,13 +209,10 @@ func (ac *A2AClient) NewSession(ctx context.Context, card *goa2aserver.AgentCard
 	return ac.newSession(ctx, ac.port, ac.ID, call.Authority, card, call, requestHeaders)
 }
 
-func (ac *A2AClient) ConnectWithAgentCard(ctx context.Context, call *AgentCall, agentURL string, requestHeaders http.Header) (*A2AClientSession, error) {
-	session, err := ac.LoadAgentCard(ctx, call, requestHeaders)
+func (ac *A2AClient) ConnectWithAgentCard(ctx context.Context, call *AgentCall, cardURL, authority string, requestHeaders http.Header) (*A2AClientSession, error) {
+	session, err := ac.loadAgentCard(ctx, cardURL, authority, call, requestHeaders)
 	if err != nil {
 		return nil, err
-	}
-	if agentURL != "" {
-		call.AgentURL = agentURL
 	}
 	session.inHeaders = requestHeaders
 	err = session.Connect()
@@ -250,11 +248,11 @@ func (acs *A2AClientSession) Connect() error {
 	return nil
 }
 
-func (acs *A2AClientSession) CallAgent(callback AgentResultsCallback, resultChan chan *types.Pair[string, any], progressChan chan string) (err error) {
-	return acs.invokeAgent(acs.call.Message, acs.call.Data, callback, resultChan, progressChan)
+func (acs *A2AClientSession) CallAgent(callback AgentResultsCallback, resultChan, localProgress chan *types.Pair[string, any], upstreamProgress chan string) (err error) {
+	return acs.invokeAgent(acs.call.Message, acs.call.Data, callback, resultChan, localProgress, upstreamProgress)
 }
 
-func (acs *A2AClientSession) invokeAgent(input string, data map[string]any, callback AgentResultsCallback, resultChan chan *types.Pair[string, any], progressChan chan string) (err error) {
+func (acs *A2AClientSession) invokeAgent(input string, data map[string]any, callback AgentResultsCallback, resultChan, localProgress chan *types.Pair[string, any], upstreamProgress chan string) (err error) {
 	if input == "" {
 		input = acs.call.Message
 	}
@@ -262,7 +260,7 @@ func (acs *A2AClientSession) invokeAgent(input string, data map[string]any, call
 		data = acs.call.Data
 	}
 	inputParts := buildInputParts(input, data)
-	acs.update(callback, resultChan, progressChan, inputParts)
+	acs.update(callback, resultChan, localProgress, upstreamProgress, inputParts)
 	if acs.Card.Capabilities.Streaming != nil && *acs.Card.Capabilities.Streaming {
 		err = acs.InvokeStream()
 	} else {
@@ -271,10 +269,11 @@ func (acs *A2AClientSession) invokeAgent(input string, data map[string]any, call
 	return
 }
 
-func (acs *A2AClientSession) update(callback AgentResultsCallback, resultChan chan *types.Pair[string, any], progressChan chan string, inputParts []a2aproto.Part) {
+func (acs *A2AClientSession) update(callback AgentResultsCallback, resultChan, localProgress chan *types.Pair[string, any], upstreamProgress chan string, inputParts []a2aproto.Part) {
 	acs.callback = callback
 	acs.resultChan = resultChan
-	acs.progressChan = progressChan
+	acs.localProgress = localProgress
+	acs.upstreamProgress = upstreamProgress
 	acs.inputParts = inputParts
 }
 
@@ -299,7 +298,7 @@ func (acs *A2AClientSession) SendMessage() (map[string]*a2aproto.MessageResult, 
 		concurrent = 1
 	}
 	rounds := requestCount / concurrent
-	acs.sendResponse(acs.callerId, fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL), nil)
+	acs.sendLocalProgress(acs.callerId, fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL))
 	results := map[string]*a2aproto.MessageResult{}
 	for i := 0; i < rounds; i++ {
 		requestID := fmt.Sprintf("[%s] Request#[%d]", acs.call.Name, i)
@@ -340,7 +339,7 @@ func (acs *A2AClientSession) Stream() error {
 		concurrent = 1
 	}
 	rounds := requestCount / concurrent
-	acs.sendResponse(acs.callerId, fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL), nil)
+	acs.sendLocalProgress(acs.callerId, fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL))
 	for i := 0; i < rounds; i++ {
 		requestID := fmt.Sprintf("[%s] Request#[%d]", acs.call.Name, i)
 		eventChan, err := acs.client.client.StreamMessage(acs.ctx, a2aproto.SendMessageParams{
@@ -430,12 +429,12 @@ func (acs *A2AClientSession) processEventResult(id string, event *a2aproto.Strea
 			msg2 = fmt.Sprintf(", Final status received: %s", e.Status.State)
 			switch e.Status.State {
 			case a2aproto.TaskStateCompleted:
-				msg2 = " [Task completed successfully]"
+				msg2 = " [Task completed successfully] \U0001F4AF"
 			case a2aproto.TaskStateFailed:
-				msg2 = " [Task failed]"
+				msg2 = " [Task failed] \u274C"
 				acs.err = errors.New(msg + msg2)
 			case a2aproto.TaskStateCanceled:
-				msg2 = " [Task was canceled]"
+				msg2 = " [Task was canceled] \u2716"
 			}
 		}
 		if msg2 != "" {
@@ -480,6 +479,12 @@ func (acs *A2AClientSession) processParts(id string, parts []a2aproto.Part) {
 	}
 }
 
+func (acs *A2AClientSession) sendLocalProgress(id, text string) {
+	if text != "" && acs.localProgress != nil {
+		acs.localProgress <- types.NewPair[string, any](id, text)
+	}
+}
+
 func (acs *A2AClientSession) sendResponse(id, text string, data any) {
 	if acs.callback != nil {
 		acs.callback(id, text)
@@ -487,10 +492,9 @@ func (acs *A2AClientSession) sendResponse(id, text string, data any) {
 			acs.callback(id, util.ToJSONText(data))
 		}
 	}
-	if text != "" && data == nil && acs.progressChan != nil {
-		acs.progressChan <- text
-	}
-	if data != nil && acs.resultChan != nil {
+	if text != "" && data == nil && acs.upstreamProgress != nil {
+		acs.upstreamProgress <- text
+	} else if data != nil && acs.resultChan != nil {
 		key := fmt.Sprintf("%s:%s", id, text)
 		if acs.Card != nil {
 			key = fmt.Sprintf("%s/%s", acs.Card.Name, key)
@@ -576,5 +580,6 @@ func (acs *A2AClientSession) updateResponseHeaders(r *http.Response) {
 		}
 		log.Printf("---------- A2A client response headers for %s ------------\n", acs.callerId)
 		log.Println(util.ToJSONText(r.Header))
+		acs.ResponseHeaders = r.Header
 	}
 }

@@ -102,7 +102,7 @@ func (ab *AgentBehaviorStream) sendStream(aCtx *AgentContext) (string, error) {
 		aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "No Response Configured", nil)
 	}
 	if len(output) > 0 {
-		if err = aCtx.sendTextArtifact(fmt.Sprintf("\u2705 Recap of recently streamed output [%d-%d]", outputFrom, sentCount), "", output, false, false); err != nil {
+		if err = aCtx.sendTextArtifact(fmt.Sprintf("\u2705 Recap of recently streamed output [%d-%d] \U000026F3", outputFrom, sentCount), "", output, false, false); err != nil {
 			return "Stream finished with error \u274C", err
 		}
 	}
@@ -114,7 +114,7 @@ func (ab *AgentBehaviorStream) sendStream(aCtx *AgentContext) (string, error) {
 		ab.stopReqested = false
 		return "Stream finished due to stop requested \U0001F6D1", nil
 	}
-	return "Stream finished \u2705", nil
+	return "Stream finished \U000026F3", nil
 }
 
 func (ab *AgentBehaviorStream) processStop(aCtx *AgentContext) bool {

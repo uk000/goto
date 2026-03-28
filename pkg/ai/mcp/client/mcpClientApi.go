@@ -62,8 +62,9 @@ func listTools(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	clientId := fmt.Sprintf("[%s][Client: tool/list]", global.Self.HostLabel)
 	client := NewClient(rs.RequestPortNum, sse, false, tls, clientId, util.GetCurrentListenerLabel(r), authority, nil)
-	session, err := client.Connect(url, "tool/list")
+	session := client.CreateSession(url, "tool/list")
 	session.SetAuthority(authority)
+	err := session.Connect()
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("Failed to connect to url %s with error [%s]", url, err.Error())
@@ -157,7 +158,9 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 func doToolCall(port int, tc *ToolCall, r *http.Request) (output map[string]any, err error) {
 	clientId := fmt.Sprintf("[%s][Client: tool/call][%s]", global.Self.HostLabel, tc.Tool)
 	client := NewClient(port, tc.ForceSSE, tc.H2, tc.TLS, clientId, util.GetCurrentListenerLabel(r), tc.Authority, nil)
-	session, err := client.Connect(tc.URL, tc.Tool)
+	session := client.CreateSession(tc.URL, tc.Tool)
+	session.SetAuthority(tc.Authority)
+	err = session.Connect()
 	if err != nil {
 		return nil, err
 	}

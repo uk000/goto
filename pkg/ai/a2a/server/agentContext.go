@@ -45,36 +45,39 @@ type AgentTask struct {
 }
 
 type AgentContext struct {
-	serverID         string
-	agent            *model.Agent
-	behavior         model.IAgentBehavior
-	ctx              context.Context
-	rs               *util.RequestStore
-	requestHeaders   http.Header
-	delay            *types.Delay
-	triggers         DelegateTriggers
-	tools            map[string]map[string]*model.DelegateToolCall
-	agents           map[string]map[string]*model.DelegateAgentCall
-	input            *a2aproto.Message
-	inputText        string
-	options          *taskmanager.ProcessOptions
-	handler          taskmanager.TaskHandler
-	task             *AgentTask
-	hops             *util.Hops
-	logs             []string
-	resultsChan      chan *types.Pair[string, any]
-	upstreamProgress chan string
-	localProgress    chan *types.Pair[string, any]
-	toolResults      map[string]any
-	agentResults     map[string]any
-	err              error
+	serverID       string
+	agent          *model.Agent
+	behavior       model.IAgentBehavior
+	ctx            context.Context
+	rs             *util.RequestStore
+	requestHeaders http.Header
+	delay          *types.Delay
+	triggers       DelegateTriggers
+	tools          map[string]map[string]*model.DelegateToolCall
+	agents         map[string]map[string]*model.DelegateAgentCall
+	input          *a2aproto.Message
+	inputText      string
+	options        *taskmanager.ProcessOptions
+	handler        taskmanager.TaskHandler
+	task           *AgentTask
+	hops           *util.Hops
+	logs           []string
+	resultsChan    chan *types.Pair[string, any]
+	localProgress  chan *types.Pair[string, any]
+	toolResults    map[string]any
+	agentResults   map[string]any
+	err            error
 }
 
 type DelegateCallContext struct {
-	agentCall *a2aclient.AgentCall
-	toolCall  *mcpclient.ToolCall
-	httpCall  *model.HTTPCall
-	url       string
+	agentCall        *a2aclient.AgentCall
+	toolCall         *mcpclient.ToolCall
+	httpCall         *model.HTTPCall
+	name             string
+	url              string
+	upstreamProgress chan string
+	results          map[string]any
+	tracker          *model.DelegateTracker
 }
 
 type agentOverrides struct {
@@ -93,6 +96,24 @@ func newAgentCallContext(serverID, listenerLabel string, agent *model.Agent, hea
 		requestHeaders: headers,
 		rs:             rs,
 	}
+}
+
+func newDelegateCallContext(tc *mcpclient.ToolCall, ac *a2aclient.AgentCall, tracker *model.DelegateTracker) *DelegateCallContext {
+	dc := &DelegateCallContext{
+		toolCall:         tc,
+		agentCall:        ac,
+		tracker:          tracker,
+		results:          map[string]any{},
+		upstreamProgress: make(chan string, 10),
+	}
+	if tc != nil {
+		dc.name = tc.Tool
+		dc.url = tc.URL
+	} else if ac != nil {
+		dc.name = ac.Name
+		dc.url = ac.AgentURL
+	}
+	return dc
 }
 
 func (ac *AgentContext) setContext(ctx context.Context, b *AgentBehaviorImpl, task *AgentTask, input *a2aproto.Message, options *taskmanager.ProcessOptions, handler taskmanager.TaskHandler) {
@@ -125,7 +146,7 @@ func (ac *AgentContext) sendDelegatesMatchUpdate() {
 	toolNames := []string{}
 	agentNames := []string{}
 	for name, tservers := range ac.tools {
-		for server, _ := range tservers {
+		for server := range tservers {
 			toolNames = append(toolNames, fmt.Sprintf("%s@%s", name, server))
 		}
 	}
@@ -397,11 +418,12 @@ func (ac *AgentContext) sendTextArtifact(title, description string, text []strin
 	return ac.task.handler.AddArtifact(&ac.task.taskID, artifact, isFinal, isQuestion)
 }
 
-func (ac *AgentContext) sendTextArtifactFromParts(title string, parts []a2aproto.Part, isFinal, isQuestion bool) (err error) {
+func (ac *AgentContext) sendTextArtifactFromParts(title, description string, parts []a2aproto.Part, isFinal, isQuestion bool) (err error) {
 	artifact := a2aproto.Artifact{
-		ArtifactID: uuid.New().String(),
-		Name:       util.Ptr(title),
-		Parts:      parts,
+		ArtifactID:  uuid.New().String(),
+		Name:        util.Ptr(title),
+		Description: &description,
+		Parts:       parts,
 	}
 	return ac.task.handler.AddArtifact(&ac.task.taskID, artifact, isFinal, isQuestion)
 }

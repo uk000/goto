@@ -109,6 +109,7 @@ var (
 	IgnoredRequestKey   = &ContextKey{Key: "ignoredRequest"}
 	ConnectionKey       = &ContextKey{Key: "connection"}
 	ProtocolKey         = &ContextKey{Key: "protocol"}
+	RequestHeadersKey   = &ContextKey{Key: "requestHeaders"}
 	HeadersKey          = &ContextKey{Key: "headers"}
 	AgentContextKey     = &ContextKey{Key: "agentContext"}
 	DefaultRequestStore = &RequestStore{}

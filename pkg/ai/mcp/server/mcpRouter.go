@@ -95,7 +95,7 @@ func MCPHybridHandler(server *MCPServer) http.Handler {
 		rs := util.GetRequestStore(r)
 		port := util.GetRequestOrListenerPortNum(r)
 		//conn.SendGotoHeaders(w, r)
-		r = r.WithContext(util.WithContextHeaders(r.Context(), r.Header))
+		r = r.WithContext(util.WithRequestHeaders(r.Context(), r.Header))
 		//util.CopyHeaders("Request", r, w, r.Header, true, true, false)
 		rs.ResponseWriter = w
 		hasSSE := strings.Contains(r.RequestURI, "/sse")

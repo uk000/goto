@@ -19,19 +19,31 @@ package util
 import (
 	"context"
 	"fmt"
+	"goto/pkg/types"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 )
 
-func WithContextHeaders(ctx context.Context, headers map[string][]string) context.Context {
+func WithRequestHeaders(ctx context.Context, headers map[string][]string) context.Context {
+	return context.WithValue(ctx, RequestHeadersKey, headers)
+}
+
+func GetRequestHeaders(ctx context.Context) map[string][]string {
+	if val := ctx.Value(RequestHeadersKey); val != nil {
+		return val.(map[string][]string)
+	}
+	return nil
+}
+
+func WithContextHeaders(ctx context.Context, headers *types.Headers) context.Context {
 	return context.WithValue(ctx, HeadersKey, headers)
 }
 
-func GetContextHeaders(ctx context.Context) map[string][]string {
-	if val := ctx.Value(HeadersKey); val != nil {
-		return val.(map[string][]string)
+func GetContextHeaders(ctx context.Context) *types.Headers {
+	if val := ctx.Value(RequestHeadersKey); val != nil {
+		return val.(*types.Headers)
 	}
 	return nil
 }
