@@ -74,11 +74,11 @@ func init() {
 
 	middleware.Unintercepted = []*middleware.Middleware{
 		tunnel.TunnelCountMiddleware, tunnel.Middleware, probes.Middleware,
-		memory.Middleware, events.Middleware, metrics.Middleware, ui.Middleware,
+		memory.Middleware, events.Middleware, metrics.Middleware,
 		body.Middleware,
 	}
 	middleware.Intercepted = []*middleware.Middleware{
-		request.Middleware, response.Middleware, catchall.Middleware,
+		request.Middleware, response.Middleware, catchall.Middleware, ui.Middleware,
 	}
 	middleware.RoutesOnly = []*middleware.Middleware{
 		router.Middleware, httpproxy.Middleware, grpcproxy.Middleware, mcpproxy.Middleware,

@@ -45,6 +45,7 @@
     - /a2a/client/agent/card?url={url}: '[GET]'
     - /a2a/client/agent/{agent}/call: '[POST]'
     /a2a/client/call:
+    - /a2a/client/call/stream: '[POST]'
     - /a2a/client/call: '[POST]'
     /a2a/client/push:
     - /a2a/client/push: '[POST]'
@@ -339,12 +340,13 @@
     - /mcpapi/client/details: '[GET]'
     - /mcpapi/client/details/: '[GET]'
     /mcpapi/client/list:
-    - /mcpapi/client/list/all?url={url}&sse={sse}&authority={authority}: '[POST GET]'
+    - /mcpapi/client/list/all?url={url}&sse={sse}&tls={tls}&authority={authority}: '[POST
+        GET]'
     - /mcpapi/client/list/all?url={url}: '[POST GET]'
-    - /mcpapi/client/list/tools?url={url}&sse={sse}&authority={authority}: '[POST
+    - /mcpapi/client/list/tools?url={url}&sse={sse}&tls={tls}&authority={authority}: '[POST
         GET]'
     - /mcpapi/client/list/tools?url={url}: '[POST GET]'
-    - /mcpapi/client/list/tools/names?url={url}&sse={sse}&authority={authority}: '[POST
+    - /mcpapi/client/list/tools/names?url={url}&sse={sse}&tls={tls}&authority={authority}: '[POST
         GET]'
     - /mcpapi/client/list/tools/names?url={url}: '[POST GET]'
     /mcpapi/client/payload:
@@ -1052,10 +1054,10 @@
     - /server/response/payload/set/default: '[POST]'
     - /server/response/payload/set/{grpc}/default/: '[POST]'
     - /server/response/payload/set/default/: '[POST]'
-    - /server/response/payload/set/{grpc}/uri?uri={uri}: '[POST]'
-    - /server/response/payload/set/uri?uri={uri}: '[POST]'
-    - /server/response/payload/set/{grpc}/uri/?uri={uri}: '[POST]'
-    - /server/response/payload/set/uri/?uri={uri}: '[POST]'
+    - /server/response/payload/set/{grpc}?uri={uri}: '[POST]'
+    - /server/response/payload/set?uri={uri}: '[POST]'
+    - /server/response/payload/set/{grpc}/?uri={uri}: '[POST]'
+    - /server/response/payload/set/?uri={uri}: '[POST]'
     - /server/response/payload/set/{grpc}/header/{header}={value}?uri={uri}: '[POST]'
     - /server/response/payload/set/{grpc}/header/{header}={value}: '[POST]'
     - /server/response/payload/set/header/{header}={value}?uri={uri}: '[POST]'
@@ -1107,6 +1109,7 @@
     - /server/response/status/configure: '[POST]'
     - /server/response/status/set/{status}?uri={uri}: '[POST]'
     - /server/response/status/set/{status}: '[POST]'
+    - /server/response/status/clear?uri={uri}: '[POST]'
     - /server/response/status/clear: '[POST]'
     - /server/response/status/counts/clear: '[POST]'
     - /server/response/status/counts/{status}: '[GET]'

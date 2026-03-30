@@ -21,6 +21,7 @@ import (
 	"goto/pkg/constants"
 	"goto/pkg/global"
 	"net/http"
+	"strings"
 )
 
 var (
@@ -54,6 +55,25 @@ func SendBadRequest(msg string, w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusBadRequest)
 	fmt.Fprintln(w, msg)
 	AddLogMessage(msg, r)
+}
+
+func FixURL(url, suffix string, https bool) string {
+	if !strings.HasPrefix(url, "http") {
+		if https {
+			url = "https://" + url
+		} else {
+			url = "http://" + url
+		}
+	}
+	if !strings.HasSuffix(url, suffix) {
+		if !strings.HasSuffix(url, "/") {
+			url += "/"
+		}
+		if suffix != "/" {
+			url += suffix
+		}
+	}
+	return url
 }
 
 func BuildGotoClientInfo(container map[string]any, port int, name, label, target, url, server string, inArgs, outArgs any,

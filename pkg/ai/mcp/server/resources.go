@@ -123,9 +123,9 @@ func ParseResourceTemplate(payload []byte) (*MCPResourceTemplate, error) {
 func (r *MCPResourceTemplate) Handle(ctx context.Context, req *gomcp.ReadResourceRequest) (*gomcp.ReadResourceResult, error) {
 	result := &gomcp.ReadResourceResult{}
 	if r.Response != nil && r.Response.JSON != nil {
-		result.Contents = append(result.Contents, &gomcp.ResourceContents{Text: r.Response.JSON.ToJSONText()})
+		result.Contents = append(result.Contents, &gomcp.ResourceContents{URI: r.URI, Text: r.Response.JSON.ToJSONText()})
 	} else {
-		result.Contents = append(result.Contents, &gomcp.ResourceContents{Text: r.Text})
+		result.Contents = append(result.Contents, &gomcp.ResourceContents{URI: r.URI, Text: r.Text})
 	}
 	return result, nil
 }

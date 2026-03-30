@@ -67,6 +67,9 @@
       ],
       "/a2a/client/call": [
         {
+          "/a2a/client/call/stream": "[POST]"
+        },
+        {
           "/a2a/client/call": "[POST]"
         }
       ],
@@ -778,19 +781,19 @@
       ],
       "/mcpapi/client/list": [
         {
-          "/mcpapi/client/list/all?url={url}\u0026sse={sse}\u0026authority={authority}": "[POST GET]"
+          "/mcpapi/client/list/all?url={url}\u0026sse={sse}\u0026tls={tls}\u0026authority={authority}": "[POST GET]"
         },
         {
           "/mcpapi/client/list/all?url={url}": "[POST GET]"
         },
         {
-          "/mcpapi/client/list/tools?url={url}\u0026sse={sse}\u0026authority={authority}": "[POST GET]"
+          "/mcpapi/client/list/tools?url={url}\u0026sse={sse}\u0026tls={tls}\u0026authority={authority}": "[POST GET]"
         },
         {
           "/mcpapi/client/list/tools?url={url}": "[POST GET]"
         },
         {
-          "/mcpapi/client/list/tools/names?url={url}\u0026sse={sse}\u0026authority={authority}": "[POST GET]"
+          "/mcpapi/client/list/tools/names?url={url}\u0026sse={sse}\u0026tls={tls}\u0026authority={authority}": "[POST GET]"
         },
         {
           "/mcpapi/client/list/tools/names?url={url}": "[POST GET]"
@@ -2769,16 +2772,16 @@
           "/server/response/payload/set/default/": "[POST]"
         },
         {
-          "/server/response/payload/set/{grpc}/uri?uri={uri}": "[POST]"
+          "/server/response/payload/set/{grpc}?uri={uri}": "[POST]"
         },
         {
-          "/server/response/payload/set/uri?uri={uri}": "[POST]"
+          "/server/response/payload/set?uri={uri}": "[POST]"
         },
         {
-          "/server/response/payload/set/{grpc}/uri/?uri={uri}": "[POST]"
+          "/server/response/payload/set/{grpc}/?uri={uri}": "[POST]"
         },
         {
-          "/server/response/payload/set/uri/?uri={uri}": "[POST]"
+          "/server/response/payload/set/?uri={uri}": "[POST]"
         },
         {
           "/server/response/payload/set/{grpc}/header/{header}={value}?uri={uri}": "[POST]"
@@ -2931,6 +2934,9 @@
         },
         {
           "/server/response/status/set/{status}": "[POST]"
+        },
+        {
+          "/server/response/status/clear?uri={uri}": "[POST]"
         },
         {
           "/server/response/status/clear": "[POST]"

@@ -146,6 +146,9 @@ func (a *A2AServer) PrepareAgent(agent *model.Agent) error {
 		agent.ID = fmt.Sprintf("%s@%s", agent.Card.Name, a.ID)
 	}
 	agent.Port = a.Port
+	if agent.Card != nil {
+		agent.Streaming = *agent.Card.Capabilities.Streaming
+	}
 	tm, err := trpctask.NewMemoryTaskManager(agent.Behavior.Impl)
 	if err != nil {
 		return err

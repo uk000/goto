@@ -43,13 +43,14 @@ type IAgentCallContext interface {
 }
 
 type Agent struct {
-	ID       string                `yaml:"-" json:"id"`
-	Card     *trpcserver.AgentCard `yaml:"card" json:"card"`
-	Behavior *AgentBehavior        `yaml:"behavior,omitempty" json:"behavior,omitempty"`
-	Config   *AgentConfig          `yaml:"config,omitempty" json:"config,omitempty"`
-	Handler  http.Handler
-	Server   *trpcserver.A2AServer `yaml:"-" json:"-"`
-	Port     int                   `yaml:"-" json:"-"`
+	ID        string                `yaml:"-" json:"id"`
+	Card      *trpcserver.AgentCard `yaml:"card" json:"card"`
+	Behavior  *AgentBehavior        `yaml:"behavior,omitempty" json:"behavior,omitempty"`
+	Config    *AgentConfig          `yaml:"config,omitempty" json:"config,omitempty"`
+	Handler   http.Handler
+	Server    *trpcserver.A2AServer `yaml:"-" json:"-"`
+	Port      int                   `yaml:"-" json:"-"`
+	Streaming bool                  `yaml:"-" json:"-"`
 }
 
 type AgentBehavior struct {

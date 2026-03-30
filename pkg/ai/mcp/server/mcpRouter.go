@@ -171,7 +171,7 @@ func getServerAndTool(r *http.Request) (*MCPServer, *MCPTool) {
 	var server *MCPServer
 	port := util.GetRequestOrListenerPortNum(r)
 	rs := util.GetRequestStore(r)
-	uri := r.RequestURI
+	uri := r.URL.Path
 	uri, server = findServerForURI(port, uri)
 	_, serverName, toolName := getPortServerToolFromURI(r.RequestURI)
 	if server == nil {
@@ -235,12 +235,7 @@ func getPortServerToolFromURI(uri string) (port int, server, tool string) {
 		uri = strings.ReplaceAll(uri, "/sse", "")
 		isSSE = false
 	}
-	var parts []string
-	if isSSE {
-		parts = strings.Split(uri, "/sse")
-	} else {
-		parts = strings.Split(uri, "/mcp")
-	}
+	parts := strings.Split(uri, "/mcp")
 	if len(parts) > 1 {
 		subParts := strings.Split(parts[0], "=")
 		if len(subParts) > 1 {

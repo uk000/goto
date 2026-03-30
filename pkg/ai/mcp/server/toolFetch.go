@@ -18,6 +18,7 @@ package mcpserver
 
 import (
 	"fmt"
+	aicommon "goto/pkg/ai/common"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"net/http"
@@ -26,20 +27,20 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func (t *ToolCallContext) fetch() (*gomcp.CallToolResult, error) {
+func (t *MCPTool) fetch(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
-	url := t.Config.RemoteTool.URL
-	authority := t.Config.RemoteTool.Authority
-	if t.remoteArgs == nil {
-		t.remoteArgs = &RemoteCallArgs{}
+	url := tctx.Config.RemoteTool.URL
+	authority := tctx.Config.RemoteTool.Authority
+	if tctx.args == nil {
+		tctx.args = aicommon.NewCallArgs(false)
 	}
-	if t.remoteArgs.URL != "" {
-		url = t.remoteArgs.URL
+	if tctx.args.Remote.URL != "" {
+		url = tctx.args.Remote.URL
 	}
-	if t.remoteArgs.Authority != "" {
-		authority = t.remoteArgs.Authority
+	if tctx.args.Remote.Authority != "" {
+		authority = tctx.args.Remote.Authority
 	}
-	finalHeaders := types.Union(t.Config.RemoteTool.Headers, t.remoteArgs.Headers)
+	finalHeaders := types.Union(tctx.Config.RemoteTool.Headers, tctx.args.Remote.Headers)
 	if !strings.HasPrefix(url, "http") {
 		url = "http://" + url
 	}
@@ -51,36 +52,36 @@ func (t *ToolCallContext) fetch() (*gomcp.CallToolResult, error) {
 		for h, v := range finalHeaders.Request.Add {
 			req.Header.Add(h, v)
 		}
-		if t.requestHeaders != nil {
+		if tctx.requestHeaders != nil {
 			for _, h := range finalHeaders.Request.Forward {
-				if t.requestHeaders[h] != nil {
-					req.Header[h] = t.requestHeaders[h]
+				if tctx.requestHeaders[h] != nil {
+					req.Header[h] = tctx.requestHeaders[h]
 				}
 			}
 		}
 	}
-	req.Header["User-Agent"] = []string{t.Label}
+	req.Header["User-Agent"] = []string{tctx.Label}
 	if authority != "" {
-		req.Host = t.remoteArgs.Authority
+		req.Host = tctx.args.Remote.Authority
 	}
 	if req.Host == "" {
 		req.Host = req.URL.Host
 	}
 	util.PrintRequest("Tool Remote HTTP Call Request Details", req)
-	resp, err := t.client.HTTP().Do(req)
+	resp, err := tctx.client.HTTP().Do(req)
 	msg := ""
 	if err != nil {
-		msg = fmt.Sprintf("Server [%s] Failed to invoke Remote URL [%s] with error: %s", t.Server.GetName(), url, err.Error())
-		t.Log(msg)
+		msg = fmt.Sprintf("Server [%s] Failed to invoke Remote URL [%s] with error: %s", tctx.Server.GetName(), url, err.Error())
+		tctx.Log(msg)
 		result.IsError = true
 		result.Content = append(result.Content, &gomcp.TextContent{Text: msg})
 	} else {
-		t.notifyClient(t.Log(fmt.Sprintf("Server [%s] fetched response from remote URL [%s]", t.Server.GetName(), url)), 0)
+		tctx.notifyClient(tctx.Log(fmt.Sprintf("Server [%s] fetched response from remote URL [%s]", tctx.Server.GetName(), url)), 0)
 		output := util.Read(resp.Body)
 		result.Content = append(result.Content, &gomcp.TextContent{Text: output})
-		result.StructuredContent = util.BuildGotoClientInfo(nil, t.Server.Port, t.Name, t.Label, req.Host, url, req.Host, t.args, t.remoteArgs,
-			t.requestHeaders, req.Header, finalHeaders.Request.Forward, finalHeaders.Request.Add, finalHeaders.Request.Remove, nil)
+		result.StructuredContent = util.BuildGotoClientInfo(nil, tctx.Server.Port, tctx.Name, tctx.Label, req.Host, url, req.Host, tctx.args, tctx.args.Remote,
+			tctx.requestHeaders, req.Header, finalHeaders.Request.Forward, finalHeaders.Request.Add, finalHeaders.Request.Remove, nil)
 	}
-	t.applyDelay()
+	tctx.applyDelay()
 	return result, err
 }

@@ -85,6 +85,8 @@ type agentOverrides struct {
 	agent       string
 	url         string
 	remoteInput string
+	count       int
+	delay       time.Duration
 	args        map[string]any
 }
 
@@ -138,6 +140,8 @@ func (ac *AgentContext) detectRemoteCalls() {
 	inputText, portHint := util.ExtractPortHint(inputText)
 	ac.matchDelegates(inputText, portHint, targetHint, inputs)
 	ac.sendDelegatesMatchUpdate()
+	// count, inputText := util.ExtractNumberHint(inputText)
+	// overrideDelay, inputText := util.ExtractDurationHint(inputText)
 	ac.setOverrideParamsFromInput(jsons, inputs)
 	ac.inputText = inputText
 }
@@ -290,7 +294,7 @@ func (ac *AgentContext) setOverrideParamsFromInput(jsons []map[string]any, input
 					msg := fmt.Sprintf("Will use Args %+v instead of %+v for Tool [%s]", override.args, t.ToolCall.Args, t.ToolCall.Tool)
 					log.Println(msg)
 					ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
-					t.ToolCall.Args = override.args
+					t.ToolCall.Args.UpdateFromInputArgs(override.args)
 				}
 			}
 		} else if acalls := ac.agents[name]; acalls != nil {
@@ -328,7 +332,7 @@ func (ac *AgentContext) setOverrideParamsFromInput(jsons []map[string]any, input
 						msg := fmt.Sprintf("Will use Args %+v instead of %+v for Tool [%s]", args, t.ToolCall.Args, t.ToolCall.Tool)
 						log.Println(msg)
 						ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg, nil)
-						t.ToolCall.Args = args
+						t.ToolCall.Args.UpdateFromInputArgs(args)
 					}
 				}
 			}
@@ -375,9 +379,13 @@ func extractJSONValues(jsons []map[string]any) map[string]*agentOverrides {
 	return overrides
 }
 
-func (ac *AgentContext) ReportProgress(name string, msg any) bool {
-	if ac.localProgress != nil && !util.IsNil(msg) {
-		ac.localProgress <- types.NewPair(name, msg)
+func (ac *AgentContext) ReportProgress(name string, messages ...any) bool {
+	if ac.localProgress != nil {
+		for _, msg := range messages {
+			if !util.IsNil(msg) {
+				ac.localProgress <- types.NewPair(name, msg)
+			}
+		}
 		return true
 	}
 	return false

@@ -180,3 +180,33 @@ func ReverseString(s string) string {
 	}
 	return string(runes)
 }
+
+func AnyToBool(value any) bool {
+	switch v := value.(type) {
+	case bool:
+		return v
+	case int:
+		return v != 0
+	case string:
+		b, _ := strconv.ParseBool(v)
+		return b
+	case nil:
+		return false
+	default:
+		return false
+	}
+}
+
+func AnyToInt(value any) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case string:
+		i, _ := strconv.Atoi(v)
+		return i
+	case nil:
+		return 0
+	default:
+		return 0
+	}
+}

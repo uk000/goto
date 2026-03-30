@@ -795,7 +795,7 @@ func (m *MCPServer) Middleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 		}
 		log.Println("------ MCP ------")
 		if strings.HasPrefix(method, "tools/") || strings.HasPrefix(method, "prompts/") || strings.HasPrefix(method, "resource") {
-			log.Println("===================== *** Tools/Prompts/Resources Call *** ========================")
+			log.Printf("===================== *** Tools/Prompts/Resources Call [Port: %d] *** ========================\n", m.Port)
 		}
 		session := req.GetSession()
 		callToolParams, ctOk := req.GetParams().(*gomcp.CallToolParams)

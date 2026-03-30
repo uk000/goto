@@ -18,39 +18,52 @@ package mcpserver
 
 import (
 	"fmt"
+	aicommon "goto/pkg/ai/common"
 	"goto/pkg/types"
 	"maps"
 	"sync"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"trpc.group/trpc-go/trpc-a2a-go/protocol"
 )
 
-func (t *ToolCallContext) processResults(name string, progressChan chan string, resultsChan chan *types.Pair[string, any], result *gomcp.CallToolResult, wg *sync.WaitGroup) {
+func (tctx *ToolCallContext) processResults(name, url string, progressChan chan string, resultsChan chan *types.Pair[string, any], result *gomcp.CallToolResult, wg *sync.WaitGroup) {
 	structuredContent := map[string]any{}
 	structuredCount := 1
 outer:
 	for {
 		select {
-		case <-t.ctx.Done():
-			t.notifyClient("Stream was cancelled", 0)
+		case <-tctx.ctx.Done():
+			tctx.notifyClient("Stream was cancelled", 0)
 			break outer
 		case update, ok := <-progressChan:
 			if !ok {
 				break outer
 			}
 			if update != "" {
-				t.notifyClient(fmt.Sprintf("Upstream[%s] update: %s", name, update), 0)
+				tctx.notifyClient(fmt.Sprintf("Upstream[%s] update: %s", name, update), 0)
 			}
 		case pair, ok := <-resultsChan:
 			if !ok {
 				break outer
 			}
 			if pair != nil && pair.Right != nil {
-				t.notifyClient(fmt.Sprintf("Upstream[%s] Result for %s: %s", name, pair.Left, pair.RightS()), 0)
+				tctx.notifyClient(fmt.Sprintf("Upstream[%s] Result for %s: %s", name, pair.Left, pair.RightS()), 0)
 				// content, data := createContent(name, pair.Right)
 				// result.Content = append(result.Content, content)
-				structuredContent[fmt.Sprintf("%s-%d", pair.Left, structuredCount)] = pair.Right
-				structuredCount++
+				if a, ok := pair.Right.(protocol.Artifact); ok {
+					for _, part := range a.Parts {
+						if t, ok := part.(*protocol.TextPart); ok {
+							tctx.notifyClient(t.Text, 0)
+						} else if d, ok := part.(*protocol.DataPart); ok {
+							structuredContent[fmt.Sprintf("%s(%d)", url, structuredCount)] = d.Data
+							structuredCount++
+						}
+					}
+				} else {
+					structuredContent[fmt.Sprintf("%s(%d)", url, structuredCount)] = pair.Right
+					structuredCount++
+				}
 			}
 		}
 	}
@@ -58,33 +71,31 @@ outer:
 	wg.Done()
 }
 
-func (t *ToolCallContext) addForwardHeaders(headers types.SimpleHTTPHeaders, forwardHeaders []string, args map[string]any) {
+func (tctx *ToolCallContext) addForwardHeaders(headers types.SimpleHTTPHeaders, forwardHeaders []string, args *aicommon.ToolCallArgs) {
 	finalForwardHeaders := map[string]bool{}
-	if t.remoteArgs != nil {
-		if t.remoteArgs.ToolArgs == nil {
-			t.remoteArgs.ToolArgs = map[string]any{}
-		}
-		if t.remoteArgs.ToolArgs["forwardHeaders"] != nil {
-			if arr, ok := t.remoteArgs.ToolArgs["forwardHeaders"].([]string); ok {
-				for _, h := range arr {
-					finalForwardHeaders[h] = true
-				}
+	if tctx.args != nil && tctx.args.Remote != nil {
+		if tctx.args.Remote.ForwardHeaders != nil {
+			for _, h := range tctx.args.Remote.ForwardHeaders {
+				finalForwardHeaders[h] = true
 			}
 		}
-		if t.remoteArgs.Headers != nil && t.remoteArgs.Headers.HasForwardHeaders() {
-			forwardHeaders = append(forwardHeaders, t.remoteArgs.Headers.Request.Forward...)
+		if tctx.args.Remote.Headers != nil && tctx.args.Remote.Headers.HasForwardHeaders() {
+			forwardHeaders = append(forwardHeaders, tctx.args.Remote.Headers.Request.Forward...)
 		}
 		for _, h := range forwardHeaders {
 			finalForwardHeaders[h] = true
 		}
-		if t.requestHeaders != nil {
-			types.ForwardHeaders(t.requestHeaders, headers, maps.Keys(finalForwardHeaders), t.Label)
+		if tctx.requestHeaders != nil {
+			types.ForwardHeaders(tctx.requestHeaders, headers, maps.Keys(finalForwardHeaders), tctx.Label)
 		}
 	}
 	toolForwardHeaders := []string{}
 	for h := range finalForwardHeaders {
 		toolForwardHeaders = append(toolForwardHeaders, h)
 	}
-	t.remoteArgs.ToolArgs["forwardHeaders"] = toolForwardHeaders
-	args["forwardHeaders"] = toolForwardHeaders
+	tctx.args.Remote.ForwardHeaders = toolForwardHeaders
+	if args.Remote == nil {
+		args.Remote = aicommon.NewRemoteCallArgs(true)
+	}
+	args.Remote.ForwardHeaders = toolForwardHeaders
 }

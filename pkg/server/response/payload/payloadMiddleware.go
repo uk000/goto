@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"goto/pkg/constants"
+	"goto/pkg/server/echo"
 	"goto/pkg/server/intercept"
 	"goto/pkg/util"
 	"io"
@@ -138,5 +139,23 @@ func getFilledPayload(rp *ResponsePayload, r *http.Request, captures map[string]
 }
 
 func handleURI(w http.ResponseWriter, r *http.Request) {
-	processPayload(w, r, r.Context().Value(payloadKey).(*ResponsePayload), r.Context().Value(captureKey).(map[string]string))
+	var payload *ResponsePayload
+	p := PayloadManager.getPortResponse(r)
+	pr := p.protoPayload(util.IsGRPC(r) || util.IsJSONRPC(r))
+	if !util.IsPayloadRequest(r) && pr.HasAnyPayload() {
+		body := util.Read(r.Body)
+		newBody, rp, captures, found := pr.GetResponsePayload(r.RequestURI, r.Header, r.URL.Query(), io.NopCloser(strings.NewReader(body)))
+		if found {
+			if newBody != nil {
+				r.Body = newBody
+			} else {
+				r.Body = io.NopCloser(strings.NewReader(body))
+			}
+			payload = rp
+			r = r.WithContext(context.WithValue(context.WithValue(r.Context(), payloadKey, payload), captureKey, captures))
+			processPayload(w, r, rp, captures)
+		} else {
+			util.WriteJsonPayload(w, echo.GetEchoResponseFromRS(util.GetRequestStore(r)))
+		}
+	}
 }

@@ -238,26 +238,47 @@ func createTextPartsFromArrayOrString(key string, val any, parts *[]a2aproto.Par
 }
 
 func createPartsFromMap(key string, m map[string]any, parts *[]a2aproto.Part, builder *strings.Builder, deep bool) {
-	for k1, any1 := range m {
-		v1 := reflect.ValueOf(any1)
+	for k, any := range m {
+		v := reflect.ValueOf(any)
 		// Check if the Kind of that type is a Map
-		if v1.Kind() == reflect.Map {
-			iter := v1.MapRange()
-			for iter.Next() {
-				k2 := iter.Key()
-				any2 := iter.Value().Interface()
-				if m2, ok := any2.(map[string]any); ok {
-					if deep {
-						createPartsFromMap(fmt.Sprintf("%s: [%s][%s]", key, k1, k2), m2, parts, builder, deep)
-					} else {
-						createTextPartsFromArrayOrString(fmt.Sprintf("%s: [%s][%s]", key, k1, k2), m2, parts, builder)
-					}
-				} else {
-					createTextPartsFromArrayOrString(fmt.Sprintf("%s: [%s][%s]", key, k1, k2), any2, parts, builder)
-				}
-			}
+		if v.Kind() == reflect.Map {
+			createPartsFromMapIter(fmt.Sprintf("%s.%s", key, k), v, parts, builder, deep)
+			*parts = append(*parts, a2aproto.NewDataPart(m))
+		} else if v.Kind() == reflect.Array {
+			createPartsFromArrayIter(fmt.Sprintf("%s.%s", key, k), v, parts, builder, deep)
+			*parts = append(*parts, a2aproto.NewDataPart(m))
 		} else {
-			createTextPartsFromArrayOrString(fmt.Sprintf("%s: [%s]", key, k1), any1, parts, builder)
+			createTextPartsFromArrayOrString(fmt.Sprintf("%s: [%s]", key, k), any, parts, builder)
+		}
+	}
+}
+
+func createPartsFromMapIter(key string, m reflect.Value, parts *[]a2aproto.Part, builder *strings.Builder, deep bool) {
+	iter := m.MapRange()
+	for iter.Next() {
+		k := iter.Key()
+		any := iter.Value().Interface()
+		v := reflect.ValueOf(any)
+		if v.Kind() == reflect.Map {
+			createPartsFromMapIter(fmt.Sprintf("%s.%s", key, k), v, parts, builder, deep)
+		} else if v.Kind() == reflect.Array || v.Kind() == reflect.Slice {
+			createPartsFromArrayIter(fmt.Sprintf("%s.%s", key, k), v, parts, builder, deep)
+		} else {
+			createTextPartsFromArrayOrString(fmt.Sprintf("%s.%s", key, k), any, parts, builder)
+		}
+	}
+}
+
+func createPartsFromArrayIter(key string, arr reflect.Value, parts *[]a2aproto.Part, builder *strings.Builder, deep bool) {
+	for i := 0; i < arr.Len(); i++ {
+		any := arr.Index(i)
+		v := reflect.ValueOf(any)
+		if v.Kind() == reflect.Map {
+			createPartsFromMapIter(fmt.Sprintf("%s[%d]", key, i), v, parts, builder, deep)
+		} else if v.Kind() == reflect.Array || v.Kind() == reflect.Slice {
+			createPartsFromArrayIter(fmt.Sprintf("%s[%d]", key, i), v, parts, builder, deep)
+		} else {
+			createTextPartsFromArrayOrString(fmt.Sprintf("%s[%d]", key, i), any, parts, builder)
 		}
 	}
 }

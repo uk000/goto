@@ -22,6 +22,9 @@ mcp:
           delay:
             type: string
             description: 'Delay the response artificially (duration syntax: 5s)'
+          metadata:
+            type: object
+            description: metadata
         required: []
     - name: tool-call-schema
       inputSchema:
@@ -45,6 +48,9 @@ mcp:
           headers:
             type: object
             description: Header configs to apply to tool call. {"request":{"add":{"h":"v"},"remove":["h"],"forward":["h"]},"response":{"add":{"h":"v"},"remove":["h"],"forward":["h"]}}
+          metadata:
+            type: object
+            description: metadata
           args:
             type: object
             description: Arguments to pass to the remote tool. JSON object with k:v.
@@ -67,6 +73,9 @@ mcp:
           delay:
             type: string
             description: 'Delay the response artificially (duration syntax: 5s)'
+          metadata:
+            type: object
+            description: metadata
         required:
         - url
     - name: remote-tool-schema
@@ -92,6 +101,9 @@ mcp:
             type: object
             description: Header configs to apply to tool call. {"request":{"add":{"h":"v"},"remove":["h"],"forward":["h"]},"response":{"add":{"h":"v"},"remove":["h"],"forward":["h"]}}
               h:v.
+          metadata:
+            type: object
+            description: metadata
           args:
             type: object
             description: Arguments to pass to the remote tool. JSON object with k:v. Can include "headers" config as an arg, meant to be applied by the remote tool for its own outbound calls.

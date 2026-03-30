@@ -19,6 +19,7 @@ package types
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -78,6 +79,13 @@ func NewPair[L any, R any](left L, right R) *Pair[L, R] {
 	}
 }
 
+func NewStringPair(left, right string) *StringPair {
+	return &StringPair{
+		Left:  left,
+		Right: right,
+	}
+}
+
 func (p *Pair[L, R]) String() string {
 	return fmt.Sprintf("%+v: %+v", p.Left, p.Right)
 }
@@ -91,7 +99,7 @@ func (p *Pair[L, R]) RightS() string {
 }
 
 func (p *Pair[L, R]) MarshalJSON() ([]byte, error) {
-	data := fmt.Sprintf("{\"%v\": \"%v\"}", p.Left, p.Right)
+	data := fmt.Sprintf("{%v: %v}", strconv.Quote(fmt.Sprint(p.Left)), strconv.Quote(fmt.Sprint(p.Right)))
 	return []byte(data), nil
 }
 

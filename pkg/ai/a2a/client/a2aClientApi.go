@@ -23,8 +23,10 @@ import (
 	"goto/pkg/util"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
+	a2aproto "trpc.group/trpc-go/trpc-a2a-go/protocol"
 )
 
 var (
@@ -36,6 +38,7 @@ func setRoutes(r *mux.Router) {
 	a2aClientRouter := util.PathRouter(a2a, "/client")
 	util.AddRouteWithMultiQ(a2aClientRouter, "/agent/card", fetchAgentCard, [][]string{{"url"}, {"authority"}}, "GET")
 	util.AddRoute(a2aClientRouter, "/agent/{agent}/call", callAgent, "POST")
+	util.AddRoute(a2aClientRouter, "/call/stream", callAgent, "POST")
 	util.AddRoute(a2aClientRouter, "/call", callAgent, "POST")
 	util.AddRoute(a2aClientRouter, "/push", pushReceiver, "POST")
 }
@@ -65,33 +68,60 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 		call.Name = name
 	}
 	port := util.GetRequestOrListenerPortNum(r)
-	err = CallAgent(r.Context(), port, call, streamAgentResponse(call.Name, w, r), r.Header)
+	stream := strings.Contains(r.RequestURI, "stream")
+	output := map[string][]any{}
+	err = CallAgent(r.Context(), port, call, streamAgentResponse(call.Name, stream, output, w, r), r.Header)
 	if err != nil {
 		msg := fmt.Sprintf("Error invoking agent [%s]: %s", call.Name, err.Error())
 		util.SendBadRequest(msg, w, r)
 		return
 	} else {
-		msg := fmt.Sprintf("Invoked agent [%s] successfully on URL [%s] with input [%s], streamed result", call.Name, call.AgentURL, call.Message)
-		util.AddLogMessage(msg, r)
+		if stream {
+			msg := fmt.Sprintf("Invoked agent [%s] successfully on URL [%s] with input [%s], streamed result", call.Name, call.AgentURL, call.Message)
+			util.AddLogMessage(msg, r)
+		} else {
+			msg := fmt.Sprintf("Invoked agent [%s] successfully on URL [%s] with input [%s], JSON result", call.Name, call.AgentURL, call.Message)
+			util.AddLogMessage(msg, r)
+			util.WriteJsonPayload(w, output)
+		}
 	}
 }
 
-func streamAgentResponse(agent string, w http.ResponseWriter, r *http.Request) AgentResultsCallback {
+func streamAgentResponse(agent string, stream bool, output map[string][]any, w http.ResponseWriter, r *http.Request) AgentResultsCallback {
 	var fw http.Flusher
-	return func(id, output string) {
-		if fw == nil {
-			if f, ok := w.(http.Flusher); ok {
-				fw = f
-			}
+	if stream {
+		if f, ok := w.(http.Flusher); ok {
+			fw = f
 		}
-		if fw != nil {
-			w.Write([]byte(output))
+	}
+	send := func(id, msg string, data any) {
+		if stream && fw != nil {
+			if msg != "" {
+				fmt.Fprintln(w, msg)
+			}
+			if data != nil {
+				util.WriteJsonPayload(w, data)
+			}
 			fw.Flush()
-			msg := fmt.Sprintf("Received stream response from agent [%s][%s], response: %s", agent, id, output)
+			msg := fmt.Sprintf("Received stream response from agent [%s][%s], response: %s", agent, id, msg)
 			util.AddLogMessage(msg, r)
 		} else {
-			msg := fmt.Sprintf("Cannot get flush writer to send stream response from agent [%s][%s]", agent, id)
-			util.AddLogMessage(msg, r)
+			if msg != "" {
+				output[id] = append(output[id], msg)
+			}
+			if data != nil {
+				output[id] = append(output[id], data)
+			}
+
+		}
+	}
+	return func(id, msg string, data any) {
+		isArtifact := false
+		if data != nil {
+			_, isArtifact = data.(a2aproto.Artifact)
+		}
+		if !isArtifact {
+			send(id, msg, data)
 		}
 	}
 }

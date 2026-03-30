@@ -61,21 +61,13 @@ func listTools(w http.ResponseWriter, r *http.Request) {
 	namesOnly := strings.Contains(r.RequestURI, "names")
 	msg := ""
 	clientId := fmt.Sprintf("[%s][Client: tool/list]", global.Self.HostLabel)
-	client := NewClient(rs.RequestPortNum, sse, false, tls, clientId, util.GetCurrentListenerLabel(r), authority, nil)
-	session := client.CreateSession(url, "tool/list")
+	client := NewClient(rs.RequestPortNum, sse, false, tls, clientId, util.GetCurrentListenerLabel(r), authority, nil, nil)
+	session := client.CreateSession(url, "tool/list", nil, nil)
 	session.SetAuthority(authority)
-	err := session.Connect()
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		msg = fmt.Sprintf("Failed to connect to url %s with error [%s]", url, err.Error())
-		util.AddLogMessage(msg, r)
-		fmt.Fprintln(w, msg)
-		return
-	}
 	var toolsList *mcp.ListToolsResult
 	var promptsList *mcp.ListPromptsResult
 	var resourcesList *mcp.ListResourcesResult
-	toolsList, err = session.ListTools()
+	toolsList, err := session.ListTools()
 	if err == nil && !toolsOnly {
 		promptsList, err = session.ListPrompts()
 	}
@@ -130,7 +122,7 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 	b, _ := io.ReadAll(r.Body)
 	msg := ""
 	tc, err := ParseToolCall(b)
-	var output map[string]any
+	var output *MCPResult
 	if err != nil || tc == nil {
 		if err != nil {
 			msg = fmt.Sprintf("Failed to parse tool call payload with error [%s]", err.Error())
@@ -155,24 +147,21 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func doToolCall(port int, tc *ToolCall, r *http.Request) (output map[string]any, err error) {
+func doToolCall(port int, tc *ToolCall, r *http.Request) (output *MCPResult, err error) {
 	clientId := fmt.Sprintf("[%s][Client: tool/call][%s]", global.Self.HostLabel, tc.Tool)
-	client := NewClient(port, tc.ForceSSE, tc.H2, tc.TLS, clientId, util.GetCurrentListenerLabel(r), tc.Authority, nil)
-	session := client.CreateSession(tc.URL, tc.Tool)
+	client := NewClient(port, tc.ForceSSE, tc.H2, tc.TLS, clientId, util.GetCurrentListenerLabel(r), tc.Authority, nil, nil)
+	session := client.CreateSession(tc.URL, tc.Tool, tc, r.Header)
 	session.SetAuthority(tc.Authority)
-	err = session.Connect()
-	if err != nil {
-		return nil, err
-	}
 	defer func() {
 		if output == nil {
 			log.Println("*** defer called with Nil output ***")
 		}
-		session.Close()
 	}()
 	output, err = session.CallTool(tc, nil, r.Header)
 	if err == nil {
-		session.Hops.AddToOutput(output)
+		if output != nil && len(output.CallResults) > 0 {
+			session.Hops.AddToOutput(output.CallResults[0].RemoteData)
+		}
 	}
 	return
 }

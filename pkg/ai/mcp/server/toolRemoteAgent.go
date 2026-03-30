@@ -20,41 +20,42 @@ import (
 	"errors"
 	"fmt"
 	a2aclient "goto/pkg/ai/a2a/client"
+	aicommon "goto/pkg/ai/common"
 	"goto/pkg/types"
 	"sync"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func (t *ToolCallContext) remoteAgentCall() (*gomcp.CallToolResult, error) {
+func (t *MCPTool) callRemoteAgent(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{},
 	}
-	if t.remoteArgs == nil {
-		t.remoteArgs = &RemoteCallArgs{}
+	if tctx.args == nil {
+		tctx.args = aicommon.NewCallArgs()
 	}
-	t.Config.Agent.NonNil()
-	ac := t.Config.Agent.CloneWithUpdate(t.remoteArgs.AgentName, t.remoteArgs.URL, t.remoteArgs.Authority, t.remoteArgs.AgentMessage, t.remoteArgs.AgentData)
-	finalHeaders := types.Union(ac.Headers, t.remoteArgs.Headers)
-	t.addForwardHeaders(finalHeaders.Request.Add, finalHeaders.Request.Forward, ac.Data)
+	tctx.Config.Agent.NonNil()
+	ac := tctx.Config.Agent.CloneWithUpdate(tctx.args.Remote.AgentName, tctx.args.Remote.URL, tctx.args.Remote.Authority, tctx.args.Remote.AgentMessage, tctx.args.Remote.AgentData)
+	finalHeaders := types.Union(ac.Headers, tctx.args.Remote.Headers)
+	tctx.addForwardHeaders(finalHeaders.Request.Add, finalHeaders.Request.Forward, tctx.args.Remote.Args)
 	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s]", ac.Name, ac.AgentURL)
-	t.notifyClient(msg, 0)
-	client := a2aclient.NewA2AClient(t.Server.Port, t.Name, ac.H2, ac.TLS, ac.Authority)
+	tctx.notifyClient(msg, 0)
+	client := a2aclient.NewA2AClient(tctx.Server.Port, tctx.Name, ac.H2, ac.TLS, ac.Authority)
 	if client == nil {
 		return nil, errors.New("failed to create A2A client")
 	}
-	session, err := client.ConnectWithAgentCard(t.ctx, ac, t.remoteArgs.URL, t.remoteArgs.Authority, t.requestHeaders)
+	session, err := client.ConnectWithAgentCard(tctx.ctx, ac, ac.CardURL, ac.Authority, tctx.requestHeaders)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", ac.Name, ac.AgentURL, err.Error())
 	} else {
 		msg = fmt.Sprintf("Loaded agent card for Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.AgentURL, session.Card.Capabilities.Streaming)
-		t.notifyClient(msg, 0)
+		tctx.notifyClient(msg, 0)
 	}
 	resultsChan := make(chan *types.Pair[string, any], 10)
 	progressChan := make(chan string, 10)
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	go t.processResults(ac.Name, progressChan, resultsChan, result, &wg)
+	go tctx.processResults(ac.Name, ac.AgentURL, progressChan, resultsChan, result, &wg)
 	err = session.CallAgent(nil, resultsChan, resultsChan, progressChan)
 	close(resultsChan)
 	close(progressChan)
@@ -62,8 +63,8 @@ func (t *ToolCallContext) remoteAgentCall() (*gomcp.CallToolResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Failed to call Agent [%s] URL [%s] with error: %s", ac.Name, ac.AgentURL, err.Error())
 	} else {
-		// msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.AgentURL, session.Card.Capabilities.Streaming)
-		// t.notifyClient(msg, 0)
+		msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.AgentURL, session.Card.Capabilities.Streaming)
+		tctx.notifyClient(msg, 0)
 	}
 	return result, nil
 }

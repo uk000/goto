@@ -27,7 +27,7 @@ import (
 	"goto/pkg/util"
 	"log"
 	"net/http"
-	"strings"
+	"slices"
 	"sync"
 	"time"
 
@@ -36,7 +36,7 @@ import (
 	goa2aserver "trpc.group/trpc-go/trpc-a2a-go/server"
 )
 
-type AgentResultsCallback func(key, output string)
+type AgentResultsCallback func(key, output string, data any)
 
 type AgentCall struct {
 	Name                 string           `json:"name,omitempty"`
@@ -168,15 +168,7 @@ func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, c
 	if authority == "" {
 		authority = call.Authority
 	}
-	if !strings.HasSuffix(url, ".well-known/agent.json") {
-		if !strings.HasSuffix(url, "/") {
-			url += "/"
-		}
-		url += ".well-known/agent.json"
-	}
-	if !strings.HasPrefix(url, "http") {
-		url = "http://" + url
-	}
+	url = util.FixURL(url, ".well-known/agent.json", false)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request wtih error: %w", err)
@@ -239,6 +231,7 @@ func (acs *A2AClientSession) Connect() error {
 	if acs.url == "" {
 		acs.url = acs.Card.URL
 	}
+	acs.url = util.FixURL(acs.url, "/", false)
 	c, err := goa2aclient.NewA2AClient(acs.url, goa2aclient.WithHTTPClient(acs.client.httpClient),
 		goa2aclient.WithHTTPReqHandler(acs), goa2aclient.WithUserAgent(acs.callerId))
 	if err != nil {
@@ -300,8 +293,8 @@ func (acs *A2AClientSession) SendMessage() (map[string]*a2aproto.MessageResult, 
 	rounds := requestCount / concurrent
 	acs.sendLocalProgress(acs.callerId, fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL))
 	results := map[string]*a2aproto.MessageResult{}
-	for i := 0; i < rounds; i++ {
-		requestID := fmt.Sprintf("[%s] Request#[%d]", acs.call.Name, i)
+	for i := 1; i <= rounds; i++ {
+		requestID := fmt.Sprintf("[%s] Request#[%d]", acs.call.AgentURL, i)
 		result, err := acs.client.client.SendMessage(acs.ctx, a2aproto.SendMessageParams{
 			Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
 		})
@@ -487,10 +480,7 @@ func (acs *A2AClientSession) sendLocalProgress(id, text string) {
 
 func (acs *A2AClientSession) sendResponse(id, text string, data any) {
 	if acs.callback != nil {
-		acs.callback(id, text)
-		if data != nil {
-			acs.callback(id, util.ToJSONText(data))
-		}
+		acs.callback(id, text, data)
 	}
 	if text != "" && data == nil && acs.upstreamProgress != nil {
 		acs.upstreamProgress <- text
@@ -562,11 +552,12 @@ func (ac *AgentCall) NonNil() {
 func (acs *A2AClientSession) updateRequestHeaders(r *http.Request) {
 	if acs.outHeaders.Request != nil {
 		acs.outHeaders.Request.UpdateHeaders(r.Header, fmt.Sprintf("A2A client request for caller %s", acs.callerId))
+		types.ForwardHeaders(acs.inHeaders, r.Header, slices.Values(acs.outHeaders.Request.Forward), acs.callerId)
 	}
 	if len(r.Header["Host"]) > 0 {
 		r.Host = r.Header["Host"][0]
 	}
-	log.Printf("---------- A2A client request headers for %s ------------\n", acs.callerId)
+	log.Printf("---------- Outbound request headers from A2A client [%s] to %s ------------\n", acs.callerId, acs.url)
 	log.Println(util.ToJSONText(r.Header))
 	clientInfo := util.BuildGotoClientInfo(nil, acs.port, acs.callerId, acs.callerId, acs.call.Name, acs.url, acs.authority,
 		acs.inInput, acs.outInput, acs.inHeaders, r.Header, acs.call.Headers.Request.Forward, acs.call.Headers.Request.Add, acs.call.Headers.Request.Remove, nil)
@@ -578,7 +569,7 @@ func (acs *A2AClientSession) updateResponseHeaders(r *http.Response) {
 		if acs.outHeaders.Response != nil {
 			acs.outHeaders.Response.UpdateHeaders(r.Header, fmt.Sprintf("A2A client response for caller %s", acs.callerId))
 		}
-		log.Printf("---------- A2A client response headers for %s ------------\n", acs.callerId)
+		log.Printf("---------- Response headers received by A2A client [%s] from [%s] ------------\n", acs.callerId, acs.url)
 		log.Println(util.ToJSONText(r.Header))
 		acs.ResponseHeaders = r.Header
 	}
