@@ -18,7 +18,7 @@ There are 4 possibilities for response payloads:
 - If no custom config is found for the request, the request is served by a `catch-all` response that echoes back some request details along with some useful server info.
 - If custom response configuration is found for a request, `goto` applies any defined transformations if needed and responds with the custom payload along with any custom response status.
 
-#### Request Matching
+#### API-based Request Matching Configs
 Custom response payload can be set for any of the following request categories, listed in the order of precedence. The highest precedence match gets applied to build the response payload.
 
 1. URI + headers combination match
@@ -29,6 +29,93 @@ Custom response payload can be set for any of the following request categories, 
 6. Headers match
 7. Query match
 8. `Default` payload, if configured
+
+#### Config Payload for Request Matching
+`Goto` can be configured via a YAML (startup) or JSON (API) config that configures a custom response payload for a port for specific URI matches. JSON Schema for response payload config:
+
+```
+curl -X POST localhost:8080/server/response/payload/clear
+
+echo
+
+cat token.json
+{
+"scope": "openid full",
+"authorization_details": [],
+"client_id": "someclient",
+"guid": "someguid",
+"iss": "{iss}",
+"jti": "something",
+"aud": "{aud}",
+"sub": "{sub}",
+"upn": "{sub}",
+"nbf": 1774763490,
+"iat": 1774763610,
+"userid": "fakeuser",
+"win": "1234",
+"exp": 1774806810,
+"memberOf": "{memberOf}",
+"co": "{co}",
+"st": "{st}"
+}
+
+
+jq -Rs '{"payload": .,
+  "matches": [
+    {
+      "uriPrefix": "/token"
+    }
+  ],
+  "capture": {
+    "headers": {
+      "aud": "{aud}",
+      "sub": "{sub}",
+      "exp": "{exp}",
+      "iss": "{iss}",
+      "memberOf": "{memberOf}",
+      "co": "{co}",
+      "st": "{st}"
+    }
+  },
+  "contentType": "text/plain",
+  "base64Encode": true,
+  "detectJSON": true,
+  "escapeJSON": false
+}' token.json | curl -X POST localhost:8080/server/response/payload/set/matches -d @-
+
+echo
+
+curl -X POST localhost:8080/server/response/payload/set/matches -d '{
+  "payload": "{token}",
+  "matches": [
+    {"uriPrefix": "/idp/userinfo.openid"}
+  ],
+  "capture": {
+    "headers": {
+      "Authorization": "Bearer {token}"
+    }
+  }, 
+  "contentType": "application/json",
+  "base64Decode": true,
+  "detectJSON": false,
+  "escapeJSON": false
+}'
+
+curl -s localhost:8080/server/response/payload | jq
+echo
+
+echo "Sending Request to get token"
+
+token=$(curl -s localhost:8080/token -H'iss: iss123' -H'aud: aud123' -H'sub: sub123' -H'memberOf:["a", "b", "c"]' -H'co: US' -H'st: CA')
+
+echo $token
+echo
+
+echo "Sending Request with bearer token"
+
+curl -s localhost:8080/idp/userinfo.openid -H "Authorization: Bearer $token" | jq
+echo
+```
 
 URIs can be specified with `*` suffix to capture all requests that match the given prefix. For example, `/foo*` matchs `/foo`, `/fooxyz`, `/foo/xyz`, `/foo/xyz?bar=123`, etc.
 
@@ -148,6 +235,7 @@ produces the following output: `{"two":"hi", "three":["hello", "world", "there"]
 
 |METHOD|URI|Description|
 |---|---|---|
+| POST | /server/response<br/>/payload/set/matches  | Add a custom payload using JSON payload with Request Matching and Capture rules specified in the JSON payload. See Payload schema for detals. |
 | POST | /server/response<br/>/payload/set/default  | Add a custom payload to be used for ALL URI responses except those explicitly configured with another payload |
 | POST | /server/response<br/>/payload/set<br/>/default/`{size}`  | Respond with a random generated payload of the given size for all URIs except those explicitly configured with another payload. Size can be a numeric value or use common byte size conventions: K, KB, M, MB |
 | POST | /server/response<br/>/payload/set<br/>/default/binary  | Add a binary payload to be used for ALL URI responses except those explicitly configured with another payload. If no content type is sent with the API, `application/octet-stream` is used. |
@@ -193,8 +281,38 @@ produces the following output: `{"two":"hi", "three":["hello", "world", "there"]
 
 <br/>
 
-<details>
-<summary> Payload Transformation Schema </summary>
+
+#### Response Payload Spec
+
+|Field|Type|Description|
+|---|---|---|
+| payload | string or []byte | Text or binary payload to be returned from goto |
+| streamPayload | string or []byte | Collection of string/bytes to be streamed back as payload |
+| contentType | string | Content type to be set for the returned payload. If not set, defaults to JSON. |
+| matches | []RequestMatch | Collection of request match objects specifying the match rules |
+| capture | RequestCapture | Request capture object specifies the headers and queries from which additional values to be captured (in addition to those specified in matches) |
+| base64Encode | bool | Specifies if the response should be base64 encoded before delivery |
+| base64Decode | bool | Specifies if the response should be base64 decoded before delivery |
+| detectJSON | bool | Specifies if Goto should detect JSON inside Header/Query values, and output those in the response payload as JSONs instead of escaped text. This should be set to true when also encoding json as base64 strings. |
+| escapeJSON | bool | Specifies if Goto should escape JSON strings with backslash quotes if those contain embedded JSONs. |
+
+#### Response Payload - Request Match Spec
+
+|Field|Type|Description|
+|---|---|---|
+| uriPrefix | string or []byte | Text or binary payload to be returned from goto. Required for a match spec.  |
+| headers | object | Object specifying the header name and value to be matched on. Optional. When specified, all headers must match (AND) along with URL and queries. |
+| queries | object | Object specifying the query name and value to be matched on. Optional. When specified, all headers must match (AND) along with URL and headers.  |
+| bodyRegexes | []string | List of regular expressions to be matched against the body  |
+
+
+#### Response Payload - Request Capture Spec
+
+|Field|Type|Description|
+|---|---|---|
+| headers | object | Object specifying the header name and variable name to be captured from the request. If the given header name is found in the request, the corresponding value will be captured under the given variable name.  |
+| queries | object | Object specifying the query name and variable name to be captured from the request. If the given header name is found in the request, the corresponding value will be captured under the given variable name.  |
+
 
 #### Payload Transformation Schema
 A payload transformation is defined by giving one or more path mappings and an optional payload template.
@@ -217,7 +335,7 @@ A payload transformation is defined by giving one or more path mappings and an o
 | value | any | Default value. See above for details. |
 
 
-#### Port Response Payload Config Schema
+#### Port Response Payload Config Summary
 
 This schema is used to describe currently configured response payloads for the port on which the API `/server/response/payload` is invoked
 
@@ -232,7 +350,7 @@ This schema is used to describe currently configured response payloads for the p
 | responsePayloadByURIAndBody | string->string->ResponsePayload | Payloads configured for uri and body keywords match |
 
 
-#### Response Payload Config Schema
+#### Response Payload Config Details
 
 This schema is used to describe currently configured response payload, as the output of `/server/response/payload`
 
@@ -251,7 +369,6 @@ This schema is used to describe currently configured response payload, as the ou
 | queryCaptureKey | string | Key to capture value from query params |
 | transforms | []PayloadTransformation | Transformations defined in this config. See `Payload Transformation schema` |
 
-</details>
 
 <details>
 <summary> Response Payload Events </summary>

@@ -17,6 +17,7 @@
 package payload
 
 import (
+	"errors"
 	"fmt"
 	"goto/pkg/util"
 	"io"
@@ -83,6 +84,23 @@ func (pm *ResponsePayloadManager) SetRPCResponsePayload(port int, isStream bool,
 
 func (pm *ResponsePayloadManager) SetRPCResponsePayloadTransform(port int, isStream bool, contentType, uri string, transforms []*util.Transform) error {
 	return pm.GetPortResponse(port).setURIResponsePayload(true, isStream, nil, false, uri, contentType, transforms)
+}
+
+func (pm *ResponsePayloadManager) SetURIResponsePayloadWithMatches(port int, rp *ResponsePayload, isGRPC bool) error {
+	if rp == nil {
+		return errors.New("missing payload")
+	}
+	if err := rp.Process(); err != nil {
+		return err
+	}
+	pr := pm.GetPortResponse(port)
+	pp := pr.protoPayload(isGRPC)
+	for _, m := range rp.RequestMatches {
+		uri := strings.ToLower(m.URIPrefix)
+		pp.setURIResponsePayload(uri, rp)
+
+	}
+	return nil
 }
 
 func (pm *ResponsePayloadManager) GetResponsePayload(port int, isGRPC bool, requestURI string, header map[string][]string, query map[string][]string, body io.ReadCloser) (newBodyReader io.ReadCloser, responsePayload *ResponsePayload, captures map[string]string, found bool) {

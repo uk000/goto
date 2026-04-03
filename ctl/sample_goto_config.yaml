@@ -1829,6 +1829,56 @@ scripts:
     - name: "script1"
       args: ["one", "two three"]
     - name: "script2"
+http:
+  response:
+    payloads:
+      - port: 8080
+        matches:
+          - uriPrefix: "/token"
+        capture:
+          headers:
+            aud: "{aud}"
+            sub: "{sub}"
+            exp: "{exp}"
+            iss: "{iss}"
+            memberOf: "{memberOf}"
+            co: "{co}"
+            st: "{st}"
+        payload: |
+          {
+            "scope": "openid full",
+            "authorization_details": [],
+            "client_id": "serviceregistry",
+            "guid": "P3FdowzFirAdGheyD31vbnYQNcngiT3K",
+            "iss": "{iss}",
+            "jti": "A0hNFLdZ",
+            "aud": "{aud}",
+            "sub": "{sub}",
+            "upn": "{sub}",
+            "nbf": 1774763490,
+            "iat": 1774763610,
+            "userid": "fakeuser",
+            "win": "1234",
+            "exp": 1774806810,
+            "memberOf": "{memberOf}",
+            "co": "{co}",
+            "st": "{st}"
+          }
+        contentType: "text/plain"
+        base64Encode: true
+        detectJSON: true
+        escapeJSON: false
+      - port: 8080
+        matches:
+          - uriPrefix: "/idp/userinfo.openid"
+        capture:
+          headers:
+            Authorization: "Bearer {token}"
+        payload: "{token}"
+        base64Decode: true
+        detectJSON: false
+        escapeJSON: false
+
 grpc:
   config:
     protos:

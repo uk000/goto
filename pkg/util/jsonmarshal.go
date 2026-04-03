@@ -118,3 +118,38 @@ func (j OrderedJSON) MarshalJSON() ([]byte, error) {
 	buf.WriteByte('}')
 	return buf.Bytes(), nil
 }
+
+func TryUnmarshalString(s string) (interface{}, bool) {
+	var v interface{}
+	if err := json.Unmarshal([]byte(s), &v); err != nil {
+		return nil, false
+	}
+	return v, true
+}
+
+func Normalize(v interface{}) interface{} {
+	switch val := v.(type) {
+
+	case map[string]interface{}:
+		for k, v2 := range val {
+			val[k] = Normalize(v2)
+		}
+		return val
+
+	case []interface{}:
+		for i, v2 := range val {
+			val[i] = Normalize(v2)
+		}
+		return val
+
+	case string:
+		// Try to parse string as JSON
+		if parsed, ok := TryUnmarshalString(val); ok {
+			return Normalize(parsed) // recurse again
+		}
+		return val
+
+	default:
+		return val
+	}
+}

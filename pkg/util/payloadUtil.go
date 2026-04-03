@@ -39,7 +39,7 @@ func ReadJsonPayloadFromBody(body io.Reader, t interface{}) error {
 	}
 }
 
-func WriteJsonOrYAMLPayload(w http.ResponseWriter, t interface{}, yaml bool) string {
+func WriteJsonOrYAMLPayload(w http.ResponseWriter, t interface{}, yaml bool) error {
 	if yaml {
 		w.Header().Add(constants.HeaderContentType, constants.ContentTypeYAML)
 		return WriteYaml(w, t)
@@ -49,7 +49,7 @@ func WriteJsonOrYAMLPayload(w http.ResponseWriter, t interface{}, yaml bool) str
 	}
 }
 
-func WriteJsonPayload(w http.ResponseWriter, t interface{}) string {
+func WriteJsonPayload(w http.ResponseWriter, t interface{}) error {
 	w.Header().Add(constants.HeaderContentType, constants.ContentTypeJSON)
 	return WriteJson(w, t)
 }
@@ -59,7 +59,7 @@ func WriteStringJsonPayload(w http.ResponseWriter, json string) {
 	fmt.Fprintln(w, json)
 }
 
-func WriteJson(w io.Writer, j interface{}) string {
+func WriteJson(w io.Writer, j interface{}) error {
 	if s, ok := j.(string); ok {
 		fmt.Fprintln(w, s)
 	} else if reflect.ValueOf(j).IsNil() {
@@ -67,21 +67,25 @@ func WriteJson(w io.Writer, j interface{}) string {
 	} else {
 		if bytes, err := json.MarshalIndent(j, "", "  "); err == nil {
 			data := string(bytes)
-			fmt.Fprintln(w, data)
-			return data
+			if _, err := fmt.Fprintln(w, data); err != nil {
+				return err
+			}
 		} else {
 			fmt.Printf("Failed to write json payload: %s\n", err.Error())
+			return err
 		}
 	}
-	return ""
+	return nil
 }
 
-func WriteYaml(w io.Writer, t interface{}) string {
+func WriteYaml(w io.Writer, t interface{}) error {
 	data := ToYaml(t)
 	if w != nil {
-		fmt.Fprintln(w, data)
+		if _, err := fmt.Fprintln(w, data); err != nil {
+			return err
+		}
 	}
-	return data
+	return nil
 }
 
 func ToYaml(t interface{}) string {

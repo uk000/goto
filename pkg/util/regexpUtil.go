@@ -72,6 +72,28 @@ func ReplaceFillersWithRegex(text string) string {
 	return text
 }
 
+func ReplaceFillersWithCaptureGroupRegex(text string) ([]string, *regexp.Regexp) {
+	fillers := GetFillers(text)
+	captures := []string{}
+	for _, filler := range fillers {
+		text = strings.ReplaceAll(text, filler, "(.+)")
+		captures = append(captures, filler)
+	}
+	return captures, regexp.MustCompile(text)
+}
+
+func GetCaptureGroupValues(re *regexp.Regexp, captures []string, input string) map[string]string {
+	matches := re.FindStringSubmatch(input)
+	if len(matches) != len(captures)+1 {
+		return nil
+	}
+	captureValues := map[string]string{}
+	for i, c := range captures {
+		captureValues[c] = matches[i+1]
+	}
+	return captureValues
+}
+
 func GetFillers(text string) []string {
 	return fillerRegexp.FindAllString(text, -1)
 }

@@ -18,13 +18,17 @@ package payload
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/server/echo"
 	"goto/pkg/server/intercept"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -65,19 +69,36 @@ func middlewareFunc(next http.Handler) http.Handler {
 
 func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload, captures map[string]string) {
 	var payload []byte
+	var jsonPayload any
 	contentType := ""
 	if !rp.IsBinary {
 		payload = getFilledPayload(rp, r, captures)
 	} else {
 		payload = rp.Payload
 	}
+	if rp.Base64Encode {
+		encoded := make([]byte, base64.StdEncoding.EncodedLen(len(payload)))
+		base64.StdEncoding.Encode(encoded, payload)
+		payload = encoded
+	} else if rp.Base64Decode {
+		decoded := make([]byte, base64.StdEncoding.DecodedLen(len(payload)))
+		base64.StdEncoding.Decode(decoded, payload)
+		decoded = util.CleanJSONBytes(decoded)
+		if rp.IsJSON {
+			var err error
+			if err = json.Unmarshal(decoded, &jsonPayload); err == nil {
+				jsonPayload = util.CleanJSON(jsonPayload)
+				payload, _ = json.Marshal(jsonPayload)
+			} else {
+				payload = decoded
+			}
+		}
+	}
 	contentType = rp.ContentType
-	length := strconv.Itoa(len(payload))
-	w.Header().Set(constants.HeaderContentLength, length)
-	w.Header().Set(constants.HeaderContentType, contentType)
 	w.Header().Set(constants.HeaderGotoPayloadContentType, contentType)
-	msg := fmt.Sprintf("Responding with configured payload of length [%s], content type [%s], stream [%t] for URI [%s]",
-		length, contentType, rp.IsStream, r.RequestURI)
+	w.Header().Set(constants.HeaderContentType, contentType)
+	msg := fmt.Sprintf("Responding with configured payload content type [%s], stream [%t] for URI [%s]",
+		contentType, rp.IsStream, r.RequestURI)
 	util.AddLogMessage(msg, r)
 
 	payloadSent := false
@@ -99,18 +120,56 @@ func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload,
 			util.AddLogMessage(msg, r)
 			payloadSent = true
 		}
-	} else {
-		w.Header().Set(constants.HeaderGotoPayloadLength, length)
 	}
 	if !payloadSent {
+		if rp.IsJSON && !rp.EscapeJSON {
+			payload = util.CleanJSONBytes(payload)
+			if parsed, ok := util.TryUnmarshalString(string(payload)); ok {
+				if v := util.Normalize(parsed); v != nil {
+					jsonPayload = v
+				}
+			}
+		}
+		if jsonPayload != nil {
+			if err := util.WriteJson(w, jsonPayload); err != nil {
+				msg = fmt.Sprintf("Failed to write JSON payload of length [%d] with error: %s. Will send as non-JSON.", len(payload), err.Error())
+				util.AddLogMessage(msg, r)
+			} else {
+				payloadSent = true
+			}
+		}
+	}
+	if !payloadSent {
+		w.Header().Set(constants.HeaderGotoPayloadLength, strconv.Itoa(len(payload)))
 		if n, err := w.Write(payload); err != nil {
-			msg = fmt.Sprintf("Failed to write payload of length [%s] with error: %s", length, err.Error())
+			msg = fmt.Sprintf("Failed to write payload of length [%s] with error: %s", len(payload), err.Error())
 		} else {
-			msg = fmt.Sprintf("Written payload of length [%d] compared to configured size [%s]", n, length)
+			msg = fmt.Sprintf("Written payload of length [%d] compared to configured size [%s]", n, len(payload))
 		}
 	}
 	util.AddLogMessage(msg, r)
 	util.UpdateTrafficEventDetails(r, "Response Payload Applied")
+}
+
+func processCaptures(payload string, value string, pair *types.Pair[*regexp.Regexp, []string], detectJSON, escapteJSON bool) string {
+	if value != "" && pair.Left != nil {
+		captures := util.GetCaptureGroupValues(pair.Left, pair.Right, value)
+		for k, v := range captures {
+			isJSONValue := strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]") || strings.HasPrefix(v, "{") && strings.HasSuffix(v, "}")
+			if isJSONValue {
+				if detectJSON {
+					k = "\"" + k + "\""
+				} else if escapteJSON {
+					if v2, err := json.Marshal(v); err == nil {
+						v = string(v2)
+					}
+					k = "\"" + k + "\""
+				}
+			}
+			payload = strings.Replace(payload, k, v, -1)
+		}
+	}
+	return payload
 }
 
 func getFilledPayload(rp *ResponsePayload, r *http.Request, captures map[string]string) []byte {
@@ -120,6 +179,14 @@ func getFilledPayload(rp *ResponsePayload, r *http.Request, captures map[string]
 	if rp.HeaderCaptureKey != "" {
 		if value := r.Header.Get(rp.HeaderMatch); value != "" {
 			payload = strings.Replace(payload, rp.HeaderCaptureKey, value, -1)
+		}
+	}
+	if rp.RequestCapture != nil {
+		for k, pair := range rp.RequestCapture.headerCaptureKeys {
+			payload = processCaptures(payload, r.Header.Get(k), pair, rp.DetectJSON, rp.EscapeJSON)
+		}
+		for k, pair := range rp.RequestCapture.queryCaptureKeys {
+			payload = processCaptures(payload, r.Header.Get(k), pair, rp.DetectJSON, rp.EscapeJSON)
 		}
 	}
 	if rp.QueryCaptureKey != "" {

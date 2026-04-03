@@ -19,11 +19,9 @@ package payload
 import (
 	"encoding/json"
 	"fmt"
-	. "goto/pkg/constants"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
-	"regexp"
 	"strings"
 	"time"
 
@@ -465,93 +463,6 @@ func (p *Payload) RangeAnyFrom(from, to int, f DataRangeFunc) (err error) {
 		return p.sendRaw(nil, f)
 	}
 	return nil
-}
-
-func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, header, query, value string,
-	bodyRegexes []string, paths []string, transforms []*util.Transform) (*ResponsePayload, error) {
-	if contentType == "" {
-		contentType = ContentTypeJSON
-	}
-	_, uriRegExp, responseRouter, err := util.BuildURIMatcher(uri, handleURI)
-	if err != nil {
-		return nil, fmt.Errorf("failed to add URI match %s with error: %s\n", uri, err.Error())
-	}
-	headerValueMatch := ""
-	headerCaptureKey := ""
-	queryValueMatch := ""
-	queryCaptureKey := ""
-	if util.IsFiller(value) {
-		if header != "" {
-			headerCaptureKey = value
-		} else if query != "" {
-			queryCaptureKey = value
-		}
-	} else if header != "" {
-		headerValueMatch = value
-	} else if query != "" {
-		queryValueMatch = value
-	}
-
-	jsonPaths := util.NewJSONPath().Parse(paths)
-
-	var bodyMatchRegexp *regexp.Regexp
-	if len(bodyRegexes) > 0 {
-		bodyMatchRegexp = regexp.MustCompile("(?i)" + strings.Join(bodyRegexes, ".*") + ".*")
-	}
-
-	var fillers []string
-	if !binary {
-		fillers = util.GetFillersUnmarked(string(payload))
-	}
-	for _, t := range transforms {
-		for _, m := range t.Mappings {
-			m.Init()
-		}
-	}
-	return &ResponsePayload{
-		Payload:          payload,
-		ContentType:      contentType,
-		IsStream:         stream,
-		IsBinary:         util.IsBinaryContentType(contentType),
-		URIMatch:         uri,
-		HeaderMatch:      header,
-		HeaderValueMatch: headerValueMatch,
-		QueryMatch:       query,
-		QueryValueMatch:  queryValueMatch,
-		BodyMatch:        bodyRegexes,
-		BodyPaths:        jsonPaths.TextPaths,
-		uriRegexp:        uriRegExp,
-		queryMatchRegexp: regexp.MustCompile("(?i)" + query),
-		bodyMatchRegexp:  bodyMatchRegexp,
-		bodyJsonPath:     jsonPaths,
-		URICaptureKeys:   util.GetFillersUnmarked(uri),
-		HeaderCaptureKey: headerCaptureKey,
-		QueryCaptureKey:  queryCaptureKey,
-		Transforms:       transforms,
-		fillers:          fillers,
-		router:           responseRouter,
-	}, nil
-}
-
-func (rp *ResponsePayload) PrepareJSONStreamPayload(count int, delayMin, delayMax time.Duration) {
-	rp.StreamCount = count
-	rp.StreamDelayMin = delayMin
-	rp.StreamDelayMax = delayMax
-	json := util.JSONFromJSONText(string(rp.Payload))
-	jsonArray := json.ToJSONArray()
-	b := [][]byte{}
-	if len(jsonArray) > 0 {
-		for i := 0; i < count; {
-			for _, v := range jsonArray {
-				b = append(b, util.ToJSONBytes(v))
-				i++
-				if i >= count {
-					break
-				}
-			}
-		}
-	}
-	rp.StreamPayload = b
 }
 
 func getPayloadForBodyMatch(bodyReader io.ReadCloser, bodyMatchResponses map[string]*ResponsePayload) (newBodyReader io.ReadCloser, matchedResponsePayload *ResponsePayload, captures map[string]string, matched bool) {

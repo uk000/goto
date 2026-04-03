@@ -17,6 +17,7 @@
 package types
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -125,4 +126,18 @@ func (t *Triple[F, S, T]) SecondS() string {
 
 func (t *Triple[F, S, T]) ThirdS() string {
 	return fmt.Sprintf("%+v", t.Third)
+}
+
+type RawBytes []byte
+
+func (r *RawBytes) UnmarshalJSON(data []byte) error {
+	if len(data) >= 2 && data[0] == '"' && data[len(data)-1] == '"' {
+		*r = data[1 : len(data)-1]
+	} else {
+		*r = data
+	}
+	return nil
+}
+func (r RawBytes) MarshalJSON() ([]byte, error) {
+	return json.Marshal(string(r))
 }

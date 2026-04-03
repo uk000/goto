@@ -32,6 +32,7 @@ import (
 	tcpproxy "goto/pkg/proxy/tcp"
 	"goto/pkg/scripts"
 	"goto/pkg/server/listeners"
+	"goto/pkg/server/response/payload"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
@@ -51,6 +52,7 @@ var (
 	mcpConfigs       = map[string]*ctl.MCP{}
 	httpProxyConfigs = map[string]*httpproxy.Proxy{}
 	tcpProxyConfigs  = map[string]*tcpproxy.TCPProxy{}
+	httpConfigs      = map[string]*ctl.HTTP{}
 	lock             = sync.Mutex{}
 )
 
@@ -156,6 +158,11 @@ func removeAllConfigs() {
 		removeTCPProxy(tcpProxyConfigs[filename])
 		delete(tcpProxyConfigs, filename)
 	}
+	for filename := range httpConfigs {
+		log.Printf("Removing HTTP configs for %s.\n", filename)
+		clearHTTP(httpConfigs[filename])
+		delete(httpConfigs, filename)
+	}
 }
 
 func removeConfigs(filePath string) {
@@ -183,6 +190,10 @@ func removeConfigs(filePath string) {
 	if tcpProxyConfigs[filename] != nil {
 		log.Printf("File removed: %s. Removing TCP Proxy configs.\n", filename)
 		removeTCPProxy(tcpProxyConfigs[filename])
+	}
+	if httpConfigs[filename] != nil {
+		log.Printf("File removed: %s. Removing HTTP configs.\n", filename)
+		clearHTTP(httpConfigs[filename])
 	}
 }
 
@@ -298,6 +309,12 @@ func loadConfig(filePath string, config *ctl.GotoConfig) {
 				loadTCPProxy(proxy.TCP)
 			}
 		}
+	}
+	if config.HTTP != nil {
+		lock.Lock()
+		httpConfigs[filename] = config.HTTP
+		lock.Unlock()
+		loadHTTP(config.HTTP)
 	}
 }
 
@@ -514,4 +531,40 @@ func runStartupScript() {
 	if len(global.ServerConfig.StartupScript) > 0 {
 		scripts.RunCommands("startup", global.ServerConfig.StartupScript)
 	}
+}
+
+func clearHTTP(h *ctl.HTTP) {
+	if h != nil {
+		if h.Response != nil {
+			for _, p := range h.Response.Payloads {
+				payload.PayloadManager.ClearRPCResponsePayloads(p.Port)
+			}
+		}
+	}
+}
+
+func loadHTTP(h *ctl.HTTP) {
+	if h == nil {
+		return
+	}
+	if h.Response != nil {
+		processHTTPResponse(h.Response)
+	}
+}
+
+func processHTTPResponse(hr *ctl.HTTPResponse) {
+	if hr == nil {
+		log.Println("No HTTP response")
+		return
+	}
+	for _, hrp := range hr.Payloads {
+		rp := payload.NewResponsePayload([]byte(hrp.Payload), hrp.Matches, hrp.Capture, hrp.ContentType, hrp.Base64Encode, hrp.Base64Decode, hrp.DetectJSON, hrp.EscapeJSON)
+		err := payload.PayloadManager.SetURIResponsePayloadWithMatches(hrp.Port, rp, false)
+		if err != nil {
+			log.Printf("Error processing HTTP response: %s\n", err.Error())
+		}
+	}
+	log.Println("============================================================")
+	log.Printf("[%d] HTTP Response Payloads loaded successfully", len(hr.Payloads))
+	log.Println("============================================================")
 }

@@ -35,6 +35,7 @@ var (
 
 func setRoutes(r *mux.Router) {
 	payloadRouter := util.PathRouter(r, "/payload")
+	util.AddRoute(payloadRouter, "/set/{grpc}?/matches", setResponsePayloadWithMatches, "POST")
 	util.AddRouteQO(payloadRouter, "/set/{grpc}?/stream/count={count}/delay={delay}", setResponsePayload, "uri", "POST")
 	util.AddRouteQO(payloadRouter, "/set/{grpc}?/stream/count={count}/delay={delay}/header/{header}", setResponsePayload, "uri", "POST")
 	util.AddRoute(payloadRouter, "/set/{grpc}?/default/binary/{size}", setResponsePayload, "POST")
@@ -167,6 +168,46 @@ func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		msg = fmt.Sprintf("Invalid transformations: %s", err.Error())
+	}
+	util.AddLogMessage(msg, r)
+	fmt.Fprintln(w, msg)
+}
+
+func setResponsePayloadWithMatches(w http.ResponseWriter, r *http.Request) {
+	var err error
+	msg := ""
+	port := util.GetRequestOrListenerPortNum(r)
+	isGRPC := util.GetStringParamValue(r, "grpc") != ""
+	contentType := r.Header.Get(constants.HeaderResponseContentType)
+	if contentType == "" {
+		contentType = constants.ContentTypeJSON
+	}
+	rp := &ResponsePayload{}
+	rps := []*ResponsePayload{}
+	data := util.ReadBytes(r.Body)
+	util.ReadJsonFromBytes(data, &rps)
+	if len(rps) == 0 {
+		err = util.ReadJsonFromBytes(data, rp)
+	}
+	if err == nil {
+		if len(rps) > 0 {
+			for _, rp := range rps {
+				err = PayloadManager.SetURIResponsePayloadWithMatches(port, rp, isGRPC)
+				if err != nil {
+					break
+				}
+			}
+		} else {
+			err = PayloadManager.SetURIResponsePayloadWithMatches(port, rp, isGRPC)
+		}
+		if err == nil {
+			msg = fmt.Sprintf("Port [%d] Response Payload set: %+v", port, util.ToJSONText(rp))
+			events.SendRequestEvent("Response Payload Configured", msg, r)
+		} else {
+			msg = fmt.Sprintf("Invalid Response Payload: %s", err.Error())
+		}
+	} else {
+		msg = fmt.Sprintf("Failed to parse Response Payload: %s", err.Error())
 	}
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)

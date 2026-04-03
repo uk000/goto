@@ -17,6 +17,7 @@
 package util
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -715,6 +716,43 @@ func Clone(v interface{}) interface{} {
 	var copy interface{}
 	ReadJson(ToJSONText(v), &copy)
 	return copy
+}
+
+func CleanJSONBytes(json []byte) []byte {
+	s := string(json)
+	s = strings.ReplaceAll(s, "\\\n", "")
+	s = strings.ReplaceAll(s, "\\n", "")
+	s = strings.ReplaceAll(s, "\n", "")
+	s = strings.ReplaceAll(s, "\\\"", "\"")
+	// s = strings.ReplaceAll(s, `\"`, `"`)
+	json = []byte(s)
+	json = bytes.Trim(json, "\x00")
+	return json
+}
+
+func CleanJSON(data any) any {
+	switch v := data.(type) {
+	case map[string]any:
+		for key, value := range v {
+			v[key] = CleanJSON(value)
+		}
+	case []any:
+		for i, value := range v {
+			v[i] = CleanJSON(value)
+		}
+	case string:
+		// Check if string looks like JSON (starts with { or [)
+		trimmed := strings.TrimSpace(v)
+		if (strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")) ||
+			(strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")) {
+			var nested any
+			if err := json.Unmarshal([]byte(trimmed), &nested); err == nil {
+				// If unmarshal succeeds, recursively clean the nested data
+				return CleanJSON(nested)
+			}
+		}
+	}
+	return data
 }
 
 func ReadJson(s string, t interface{}) error {

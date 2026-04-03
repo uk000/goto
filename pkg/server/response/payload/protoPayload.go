@@ -17,37 +17,68 @@
 package payload
 
 import (
-	"encoding/json"
 	"fmt"
+	"goto/pkg/constants"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 )
 
+type RequestMatch struct {
+	URIPrefix          string            `yaml:"uriPrefix" json:"uriPrefix,omitempty"`
+	Headers            map[string]string `yaml:"headers" json:"headers,omitempty"`
+	Queries            map[string]string `yaml:"queries" json:"queries,omitempty"`
+	BodyRegexes        []string          `yaml:"bodyRegexes" json:"bodyRegexes,omitempty"`
+	uriCaptureKeys     []string
+	uriRegexp          *regexp.Regexp
+	headerCaptureKeys  map[string]string
+	headerValueMatches map[string]string
+	queryCaptureKeys   map[string]string
+	queryValueMatches  map[string]string
+	router             *mux.Router
+}
+
+type RequestCapture struct {
+	Headers           map[string]string `yaml:"headers" json:"headers,omitempty"`
+	Queries           map[string]string `yaml:"queries" json:"queries,omitempty"`
+	uriCaptureKeys    []string
+	headerCaptureKeys map[string]*types.Pair[*regexp.Regexp, []string]
+	queryCaptureKeys  map[string]*types.Pair[*regexp.Regexp, []string]
+}
+
 type ResponsePayload struct {
-	Payload          []byte            `json:"payload"`
-	StreamPayload    [][]byte          `json:"streamPayload"`
-	ContentType      string            `json:"contentType"`
-	IsStream         bool              `json:"isStream"`
-	IsBinary         bool              `json:"isBinary"`
-	URIMatch         string            `json:"uriMatch"`
-	HeaderMatch      string            `json:"headerMatch"`
-	HeaderValueMatch string            `json:"headerValueMatch"`
-	QueryMatch       string            `json:"queryMatch"`
-	QueryValueMatch  string            `json:"queryValueMatch"`
-	BodyMatch        []string          `json:"bodyMatch"`
-	BodyPaths        map[string]string `json:"bodyPaths"`
-	URICaptureKeys   []string          `json:"uriCaptureKeys"`
-	HeaderCaptureKey string            `json:"headerCaptureKey"`
-	QueryCaptureKey  string            `json:"queryCaptureKey"`
-	Transforms       []*util.Transform `json:"transforms"`
-	StreamCount      int               `json:"streamCount"`
-	StreamDelayMin   time.Duration     `json:"streamDelayMin"`
-	StreamDelayMax   time.Duration     `json:"streamDelayMax"`
+	Payload          types.RawBytes    `json:"payload,omitempty"`
+	StreamPayload    []types.RawBytes  `json:"streamPayload,omitempty"`
+	ContentType      string            `json:"contentType,omitempty"`
+	IsStream         bool              `json:"isStream,omitempty"`
+	IsBinary         bool              `json:"isBinary,omitempty"`
+	IsJSON           bool              `json:"isJSON,omitempty"`
+	URIMatch         string            `json:"uriMatch,omitempty"`
+	HeaderMatch      string            `json:"headerMatch,omitempty"`
+	HeaderValueMatch string            `json:"headerValueMatch,omitempty"`
+	RequestMatches   []*RequestMatch   `json:"matches,omitempty"`
+	RequestCapture   *RequestCapture   `json:"capture,omitempty"`
+	QueryMatch       string            `json:"queryMatch,omitempty"`
+	QueryValueMatch  string            `json:"queryValueMatch,omitempty"`
+	BodyMatch        []string          `json:"bodyMatch,omitempty"`
+	BodyPaths        map[string]string `json:"bodyPaths,omitempty"`
+	URICaptureKeys   []string          `json:"uriCaptureKeys,omitempty"`
+	HeaderCaptureKey string            `json:"headerCaptureKey,omitempty"`
+	QueryCaptureKey  string            `json:"queryCaptureKey,omitempty"`
+	Transforms       []*util.Transform `json:"transforms,omitempty"`
+	StreamCount      int               `json:"streamCount,omitempty"`
+	StreamDelayMin   time.Duration     `json:"streamDelayMin,omitempty"`
+	StreamDelayMax   time.Duration     `json:"streamDelayMax,omitempty"`
+	Base64Encode     bool              `json:"base64Encode,omitempty"`
+	Base64Decode     bool              `json:"base64Decode,omitempty"`
+	DetectJSON       bool              `json:"detectJSON,omitempty"`
+	EscapeJSON       bool              `json:"escapeJSON,omitempty"`
 	uriRegexp        *regexp.Regexp
 	queryMatchRegexp *regexp.Regexp
 	bodyMatchRegexp  *regexp.Regexp
@@ -68,27 +99,188 @@ type ProtoPayloads struct {
 	lock                   sync.RWMutex
 }
 
-func (rp *ResponsePayload) MarshalJSON() ([]byte, error) {
-	data := map[string]interface{}{
-		"contentType":      rp.ContentType,
-		"uriMatch":         rp.URIMatch,
-		"headerMatch":      rp.HeaderMatch,
-		"headerValueMatch": rp.HeaderValueMatch,
-		"queryMatch":       rp.QueryMatch,
-		"queryValueMatch":  rp.QueryValueMatch,
-		"bodyMatch":        rp.BodyMatch,
-		"uriCaptureKeys":   rp.URICaptureKeys,
-		"headerCaptureKey": rp.HeaderCaptureKey,
-		"queryCaptureKey":  rp.QueryCaptureKey,
-		"transforms":       rp.Transforms,
-		"binary":           rp.IsBinary,
+func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, header, query, value string,
+	bodyRegexes []string, paths []string, transforms []*util.Transform) (*ResponsePayload, error) {
+	if contentType == "" {
+		contentType = constants.ContentTypeJSON
 	}
-	if rp.IsBinary || len(rp.Payload) > 10000 {
-		data["payload"] = fmt.Sprintf("...(%d bytes)", len(rp.Payload))
-	} else {
-		data["payload"] = string(rp.Payload)
+	_, uriRegExp, responseRouter, err := util.BuildURIMatcher(uri, handleURI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to add URI match %s with error: %s\n", uri, err.Error())
 	}
-	return json.Marshal(data)
+	headerValueMatch := ""
+	headerCaptureKey := ""
+	queryValueMatch := ""
+	queryCaptureKey := ""
+	if util.IsFiller(value) {
+		if header != "" {
+			headerCaptureKey = value
+		} else if query != "" {
+			queryCaptureKey = value
+		}
+	} else if header != "" {
+		headerValueMatch = value
+	} else if query != "" {
+		queryValueMatch = value
+	}
+
+	jsonPaths := util.NewJSONPath().Parse(paths)
+
+	var bodyMatchRegexp *regexp.Regexp
+	if len(bodyRegexes) > 0 {
+		bodyMatchRegexp = regexp.MustCompile("(?i)" + strings.Join(bodyRegexes, ".*") + ".*")
+	}
+
+	var fillers []string
+	if !binary {
+		fillers = util.GetFillersUnmarked(string(payload))
+	}
+	for _, t := range transforms {
+		for _, m := range t.Mappings {
+			m.Init()
+		}
+	}
+	return &ResponsePayload{
+		Payload:          payload,
+		ContentType:      contentType,
+		IsStream:         stream,
+		IsBinary:         util.IsBinaryContentType(contentType),
+		URIMatch:         uri,
+		HeaderMatch:      header,
+		HeaderValueMatch: headerValueMatch,
+		QueryMatch:       query,
+		QueryValueMatch:  queryValueMatch,
+		BodyMatch:        bodyRegexes,
+		BodyPaths:        jsonPaths.TextPaths,
+		uriRegexp:        uriRegExp,
+		queryMatchRegexp: regexp.MustCompile("(?i)" + query),
+		bodyMatchRegexp:  bodyMatchRegexp,
+		bodyJsonPath:     jsonPaths,
+		URICaptureKeys:   util.GetFillersUnmarked(uri),
+		HeaderCaptureKey: headerCaptureKey,
+		QueryCaptureKey:  queryCaptureKey,
+		Transforms:       transforms,
+		fillers:          fillers,
+		router:           responseRouter,
+	}, nil
+}
+
+func NewResponsePayload(payload []byte, matches []*RequestMatch, capture *RequestCapture, contentType string, base64Encode, base64Decode, detectJSON, escapeJSON bool) *ResponsePayload {
+	return &ResponsePayload{
+		RequestMatches: matches,
+		RequestCapture: capture,
+		Payload:        payload,
+		ContentType:    contentType,
+		Base64Encode:   base64Encode,
+		Base64Decode:   base64Decode,
+		DetectJSON:     detectJSON,
+		EscapeJSON:     escapeJSON,
+	}
+}
+
+func (rp *ResponsePayload) Process() error {
+	if len(rp.RequestMatches) == 0 {
+		return fmt.Errorf("Matches required")
+	}
+	if len(rp.Payload) == 0 && len(rp.StreamPayload) == 0 {
+		return fmt.Errorf("Payload required")
+	}
+	if rp.ContentType == "" {
+		rp.ContentType = constants.ContentTypeJSON
+	}
+	rp.IsBinary = util.IsBinaryContentType(rp.ContentType)
+	rp.IsStream = (len(rp.Payload) == 0 && len(rp.StreamPayload) > 0)
+	rp.IsJSON = strings.EqualFold(rp.ContentType, constants.ContentTypeJSON)
+	if rp.Payload != nil {
+		rp.Payload = types.RawBytes(util.CleanJSONBytes(rp.Payload))
+	} else if len(rp.StreamPayload) > 0 {
+		cleanPayload := []types.RawBytes{}
+		for _, sp := range rp.StreamPayload {
+			cleanPayload = append(cleanPayload, types.RawBytes(util.CleanJSONBytes(sp)))
+		}
+		rp.StreamPayload = cleanPayload
+	}
+	for _, match := range rp.RequestMatches {
+		if match.URIPrefix == "" {
+			return fmt.Errorf("URI match is required")
+		}
+		_, uriRE, rr, err := util.BuildURIMatcher(match.URIPrefix, handleURI)
+		if err != nil {
+			return fmt.Errorf("failed to add URI match %s with error: %s\n", match.URIPrefix, err.Error())
+		}
+		match.uriRegexp = uriRE
+		match.uriCaptureKeys = util.GetFillersUnmarked(match.URIPrefix)
+		match.router = rr
+		for h, v := range match.Headers {
+			if h != "" {
+				if util.IsFiller(v) {
+					if match.headerCaptureKeys == nil {
+						match.headerCaptureKeys = map[string]string{}
+					}
+					match.headerCaptureKeys[h] = v
+				} else {
+					if match.headerValueMatches == nil {
+						match.headerValueMatches = map[string]string{}
+					}
+					match.headerValueMatches[h] = v
+				}
+			}
+		}
+		for q, v := range match.Queries {
+			if q != "" {
+				if util.IsFiller(v) {
+					if match.queryCaptureKeys == nil {
+						match.queryCaptureKeys = map[string]string{}
+					}
+					match.queryCaptureKeys[q] = v
+				} else {
+					if match.queryValueMatches == nil {
+						match.queryValueMatches = map[string]string{}
+					}
+					match.queryValueMatches[q] = v
+				}
+			}
+		}
+	}
+	if rp.RequestCapture != nil {
+		rp.RequestCapture.headerCaptureKeys = map[string]*types.Pair[*regexp.Regexp, []string]{}
+		for k, v := range rp.RequestCapture.Headers {
+			captures, regexp := util.ReplaceFillersWithCaptureGroupRegex(v)
+			rp.RequestCapture.headerCaptureKeys[k] = types.NewPair(regexp, captures)
+		}
+		rp.RequestCapture.queryCaptureKeys = map[string]*types.Pair[*regexp.Regexp, []string]{}
+		for k, v := range rp.RequestCapture.Queries {
+			captures, regexp := util.ReplaceFillersWithCaptureGroupRegex(v)
+			rp.RequestCapture.headerCaptureKeys[k] = types.NewPair(regexp, captures)
+		}
+	}
+	rp.fillers = util.GetFillersUnmarked(string(rp.Payload))
+
+	if len(rp.BodyMatch) > 0 {
+		rp.bodyMatchRegexp = regexp.MustCompile("(?i)" + strings.Join(rp.BodyMatch, ".*") + ".*")
+	}
+	return nil
+}
+
+func (rp *ResponsePayload) PrepareJSONStreamPayload(count int, delayMin, delayMax time.Duration) {
+	rp.StreamCount = count
+	rp.StreamDelayMin = delayMin
+	rp.StreamDelayMax = delayMax
+	json := util.JSONFromJSONText(string(rp.Payload))
+	jsonArray := json.ToJSONArray()
+	b := []types.RawBytes{}
+	if len(jsonArray) > 0 {
+		for i := 0; i < count; {
+			for _, v := range jsonArray {
+				b = append(b, util.ToJSONBytes(v))
+				i++
+				if i >= count {
+					break
+				}
+			}
+		}
+	}
+	rp.StreamPayload = b
 }
 
 func (pp *ProtoPayloads) init() {
@@ -284,7 +476,17 @@ func (pp *ProtoPayloads) GetResponsePayload(requestURI string, header map[string
 	pp.lock.RLock()
 	defer pp.lock.RUnlock()
 	for uri, rp := range pp.allURIResponsePayloads {
-		if rp.uriRegexp.MatchString(requestURI) {
+		uriMatched := false
+		if rp.uriRegexp != nil && rp.uriRegexp.MatchString(requestURI) {
+			uriMatched = true
+		} else {
+			for _, m := range rp.RequestMatches {
+				if m.uriRegexp != nil && m.uriRegexp.MatchString(requestURI) {
+					uriMatched = true
+				}
+			}
+		}
+		if uriMatched {
 			if !found && pp.PayloadByURIAndHeaders[uri] != nil {
 				responsePayload, found = getPayloadForKV(header, pp.PayloadByURIAndHeaders[uri])
 			}
