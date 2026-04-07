@@ -25,9 +25,9 @@ type Step interface {
 }
 
 type BaseStep struct {
-	Counter   int    `json:"step"`
 	Host      string `json:"host"`
 	Listener  string `json:"listener"`
+	Counter   int    `json:"step"`
 	Operation string `json:"operation"`
 }
 

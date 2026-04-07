@@ -266,21 +266,23 @@ func (rp *ResponsePayload) PrepareJSONStreamPayload(count int, delayMin, delayMa
 	rp.StreamCount = count
 	rp.StreamDelayMin = delayMin
 	rp.StreamDelayMax = delayMax
-	json := util.JSONFromJSONText(string(rp.Payload))
-	jsonArray := json.ToJSONArray()
-	b := []types.RawBytes{}
-	if len(jsonArray) > 0 {
-		for i := 0; i < count; {
-			for _, v := range jsonArray {
-				b = append(b, util.ToJSONBytes(v))
-				i++
-				if i >= count {
-					break
+	j, ok := util.JSONFromJSONText(string(rp.Payload))
+	if ok && !j.IsEmpty() {
+		jsonArray := j.ToJSONArray()
+		b := []types.RawBytes{}
+		if len(jsonArray) > 0 {
+			for i := 0; i < count; {
+				for _, v := range jsonArray {
+					b = append(b, util.ToJSONBytes(v))
+					i++
+					if i >= count {
+						break
+					}
 				}
 			}
 		}
+		rp.StreamPayload = b
 	}
-	rp.StreamPayload = b
 }
 
 func (pp *ProtoPayloads) init() {

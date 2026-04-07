@@ -22,6 +22,7 @@ import (
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,8 +49,6 @@ func (ab *AgentBehaviorStream) sendStream(aCtx *AgentContext) (string, error) {
 		aCtx.delay = types.NewDelay(10*time.Millisecond, 100*time.Millisecond, 0)
 	}
 	var delay time.Duration
-	output := []string{}
-	outputFrom := 1
 	var streamCount, sentCount int
 	var err error
 	if ab.agent.Config != nil && ab.agent.Config.ResponsePayload != nil {
@@ -63,21 +62,14 @@ func (ab *AgentBehaviorStream) sendStream(aCtx *AgentContext) (string, error) {
 		} else if ab.agent.Config.ResponsePayload.Delay != nil && ab.agent.Config.ResponsePayload.Delay.IsLargerThan(aCtx.delay) {
 			aCtx.delay = ab.agent.Config.ResponsePayload.Delay
 		}
-		aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, fmt.Sprintf("Will stream output count [%d] with delay range [%s-%s]", streamCount, aCtx.delay.Min, aCtx.delay.Max), nil)
+		aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, fmt.Sprintf("Will stream output count [%d] with delay range [%s-%s]", streamCount, aCtx.delay.Min, aCtx.delay.Max))
 		ab.agent.Config.ResponsePayload.RangeText(count, func(text string, count int, restarted bool) (bool, error) {
 			if ab.stopReqested || count > streamCount {
-				aCtx.sendTaskStatusUpdate(a2aproto.TaskStateCompleted, fmt.Sprintf("\U0001F6D1 Stop requested, stopping after %d stream messages, %d remaining", count-1, (streamCount-count+1)), nil)
+				aCtx.sendTaskStatusUpdate(a2aproto.TaskStateCompleted, fmt.Sprintf("\U0001F6D1 Stop requested, stopping after %d stream messages, %d remaining", count-1, (streamCount-count+1)))
 				return false, nil
 			}
-			if restarted {
-				if err = aCtx.sendTextArtifact(fmt.Sprintf("\u2705 Recap of recently streamed output [%d-%d]", outputFrom, count-1), "", output, false, false); err != nil {
-					return false, err
-				}
-				outputFrom = count
-				output = []string{}
-			}
 			delay = aCtx.delay.Compute()
-			if err = aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, fmt.Sprintf("\U0001F634\U0001F4A4 Sleeping for [%s] before sending next update", delay), nil); err != nil {
+			if err = aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, fmt.Sprintf("\U0001F634\U0001F4A4 Sleeping for [%s] before sending next update", delay)); err != nil {
 				log.Printf("Failed to send task update about sleeping with error: %s", err.Error())
 				return false, err
 			}
@@ -85,13 +77,17 @@ func (ab *AgentBehaviorStream) sendStream(aCtx *AgentContext) (string, error) {
 				log.Printf("Failed to wait before next step with error: %s", err.Error())
 				return false, err
 			}
+			text = strings.ReplaceAll(text, "{current}", strconv.Itoa(count))
+			text = strings.ReplaceAll(text, "{total}", strconv.Itoa(streamCount))
 			text = fmt.Sprintf("Result# %d (of %d): %s", count, streamCount, text)
-			output = append(output, text)
+			// if restarted {
+			// 	text = fmt.Sprintf("%s (after recycle)", text)
+			// }
 			if delay > 0 {
 				text = fmt.Sprintf("%s, after delay %s", text, delay)
 			}
 			text = fmt.Sprintf("%s, total stream time: %s", text, time.Since(streatStartAt))
-			if err = aCtx.sendTextArtifact("", "", []string{text}, count == streamCount, false); err != nil {
+			if err = aCtx.notifyUpdate(text, nil, false); err != nil {
 				log.Printf("Failed to send partial result with error: %s", err.Error())
 				return false, err
 			}
@@ -99,12 +95,7 @@ func (ab *AgentBehaviorStream) sendStream(aCtx *AgentContext) (string, error) {
 			return true, nil
 		})
 	} else {
-		aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "No Response Configured", nil)
-	}
-	if len(output) > 0 {
-		if err = aCtx.sendTextArtifact(fmt.Sprintf("\u2705 Recap of recently streamed output [%d-%d] \U000026F3", outputFrom, sentCount), "", output, false, false); err != nil {
-			return "Stream finished with error \u274C", err
-		}
+		aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "No Response Configured")
 	}
 	if ab.withError {
 		ab.withError = false

@@ -21,6 +21,7 @@ import (
 	aicommon "goto/pkg/ai/common"
 	"goto/pkg/types"
 	"goto/pkg/util"
+	"goto/pkg/util/timeline"
 	"net/http"
 	"strings"
 
@@ -40,10 +41,15 @@ func (t *MCPTool) fetch(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	if tctx.args.Remote.Authority != "" {
 		authority = tctx.args.Remote.Authority
 	}
+	count := tctx.args.Count
+	if count == 0 {
+		count = 1
+	}
 	finalHeaders := types.Union(tctx.Config.RemoteTool.Headers, tctx.args.Remote.Headers)
 	if !strings.HasPrefix(url, "http") {
 		url = "http://" + url
 	}
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -67,21 +73,26 @@ func (t *MCPTool) fetch(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	if req.Host == "" {
 		req.Host = req.URL.Host
 	}
-	util.PrintRequest("Tool Remote HTTP Call Request Details", req)
-	resp, err := tctx.client.HTTP().Do(req)
-	msg := ""
-	if err != nil {
-		msg = fmt.Sprintf("Server [%s] Failed to invoke Remote URL [%s] with error: %s", tctx.Server.GetName(), url, err.Error())
-		tctx.Log(msg)
-		result.IsError = true
-		result.Content = append(result.Content, &gomcp.TextContent{Text: msg})
-	} else {
-		tctx.notifyClient(tctx.Log(fmt.Sprintf("Server [%s] fetched response from remote URL [%s]", tctx.Server.GetName(), url)), 0)
-		output := util.Read(resp.Body)
-		result.Content = append(result.Content, &gomcp.TextContent{Text: output})
-		result.StructuredContent = util.BuildGotoClientInfo(nil, tctx.Server.Port, tctx.Name, tctx.Label, req.Host, url, req.Host, tctx.args, tctx.args.Remote,
-			tctx.requestHeaders, req.Header, finalHeaders.Request.Forward, finalHeaders.Request.Add, finalHeaders.Request.Remove, nil)
+	clientInfo := timeline.BuildGotoClientInfo(tctx.Server.Port, tctx.Label, req.Host, url, req.Host,
+		tctx.requestHeaders, req.Header, tctx.args, nil, count, 1, nil)
+	results := []any{}
+	for i := 1; i <= count; i++ {
+		tctx.timeline.AddEvent(tctx.Label, fmt.Sprintf("%s: Invoking HTTP URL [%s], Request %d/%d", t.Label, url, i, count), clientInfo, nil, true)
+		resp, err := tctx.client.HTTP().Do(req)
+		msg := ""
+		if err != nil {
+			msg = fmt.Sprintf("Server [%s] Failed to invoke Remote URL [%s] with error: %s", tctx.Server.GetName(), url, err.Error())
+			tctx.Log(msg)
+			result.IsError = true
+			result.Content = append(result.Content, &gomcp.TextContent{Text: msg})
+		} else {
+			tctx.Log(fmt.Sprintf("Server [%s] fetched response from remote URL [%s]", tctx.Server.GetName(), url))
+			output := util.Read(resp.Body)
+			result.Content = append(result.Content, &gomcp.TextContent{Text: output})
+			results = append(results, output)
+		}
+		tctx.applyDelay()
 	}
-	tctx.applyDelay()
+	result.StructuredContent = results
 	return result, err
 }

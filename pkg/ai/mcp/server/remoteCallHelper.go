@@ -27,34 +27,27 @@ import (
 	"trpc.group/trpc-go/trpc-a2a-go/protocol"
 )
 
-func (tctx *ToolCallContext) processResults(name, url string, progressChan chan string, resultsChan chan *types.Pair[string, any], result *gomcp.CallToolResult, wg *sync.WaitGroup) {
+func (tctx *ToolCallContext) processResults(name, url string, stream chan *types.Pair[string, any], result *gomcp.CallToolResult, wg *sync.WaitGroup) {
 	structuredContent := map[string]any{}
 	structuredCount := 1
 outer:
 	for {
 		select {
 		case <-tctx.ctx.Done():
-			tctx.notifyClient("Stream was cancelled", 0)
+			tctx.notifyClient("Stream was cancelled", nil, false)
 			break outer
-		case update, ok := <-progressChan:
-			if !ok {
-				break outer
-			}
-			if update != "" {
-				tctx.notifyClient(fmt.Sprintf("Upstream[%s] update: %s", name, update), 0)
-			}
-		case pair, ok := <-resultsChan:
+		case pair, ok := <-stream:
 			if !ok {
 				break outer
 			}
 			if pair != nil && pair.Right != nil {
-				tctx.notifyClient(fmt.Sprintf("Upstream[%s] Result for %s: %s", name, pair.Left, pair.RightS()), 0)
+				tctx.notifyClient(fmt.Sprintf("Upstream[%s] Result for %s: %s", name, pair.Left, pair.RightS()), nil, false)
 				// content, data := createContent(name, pair.Right)
 				// result.Content = append(result.Content, content)
 				if a, ok := pair.Right.(protocol.Artifact); ok {
 					for _, part := range a.Parts {
 						if t, ok := part.(*protocol.TextPart); ok {
-							tctx.notifyClient(t.Text, 0)
+							tctx.notifyClient(t.Text, nil, false)
 						} else if d, ok := part.(*protocol.DataPart); ok {
 							structuredContent[fmt.Sprintf("%s(%d)", url, structuredCount)] = d.Data
 							structuredCount++

@@ -22,6 +22,9 @@ mcp:
           delay:
             type: string
             description: 'Delay the response artificially (duration syntax: 5s)'
+          count:
+            type: int
+            description: 'Count'
           metadata:
             type: object
             description: metadata
@@ -54,6 +57,9 @@ mcp:
           args:
             type: object
             description: Arguments to pass to the remote tool. JSON object with k:v.
+          count:
+            type: int
+            description: 'Count'
         required:
         - tool
         - url
@@ -73,6 +79,9 @@ mcp:
           delay:
             type: string
             description: 'Delay the response artificially (duration syntax: 5s)'
+          count:
+            type: int
+            description: 'Count'
           metadata:
             type: object
             description: metadata
@@ -91,9 +100,18 @@ mcp:
           authority:
             type: string
             description: HTTP Authority to use for the remote call
-          sse:
+          h2:
             type: boolean
-            description: Whether to invoke the remote call over SSE or StreamableHTTP
+            description: Whether to invoke the remote call over HTTP/2
+          tls:
+            type: boolean
+            description: Whether to invoke the remote call over TLS
+          count:
+            type: int
+            description: Number of requests to send
+          concurrent:
+            type: int
+            description: Number of concurrent requests to send
           delay:
             type: string
             description: 'Delay the response artificially (duration syntax: 5s)'
@@ -107,6 +125,50 @@ mcp:
           args:
             type: object
             description: Arguments to pass to the remote tool. JSON object with k:v. Can include "headers" config as an arg, meant to be applied by the remote tool for its own outbound calls.
+        required: []
+    - name: agent-call-schema
+      inputSchema:
+        type: object
+        properties:
+          agent:
+            type: string
+            description: Agent to execute
+          agentURL:
+            type: string
+            description: Agent URL
+          cardURL:
+            type: string
+            description: Agent URL
+          authority:
+            type: string
+            description: HTTP Authority to use for the remote call
+          h2:
+            type: boolean
+            description: Whether to invoke the remote call over HTTP/2
+          tls:
+            type: boolean
+            description: Whether to invoke the remote call over TLS
+          message:
+            type: string
+            description: Message to send to the remote agent
+          data:
+            type: object
+            description: Data to send to the remote agent
+          headers:
+            type: object
+            description: Header configs to apply to tool call. {"request":{"add":{"h":"v"},"remove":["h"],"forward":["h"]},"response":{"add":{"h":"v"},"remove":["h"],"forward":["h"]}}
+          count:
+            type: int
+            description: Number of requests to send
+          concurrent:
+            type: int
+            description: Number of concurrent requests to send
+          delay:
+            type: string
+            description: 'Delay the response artificially (duration syntax: 5s)'
+          metadata:
+            type: object
+            description: metadata
         required: []
   servers:
     - port: 3000
@@ -125,7 +187,34 @@ mcp:
         stateless: false
         enabled: true
       tools:
-        - tool:
+        - name: call-agent
+          tool:
+            name: call-agent
+            description: 'From Server [goto-mcp-1@${POD_NAME}:3000@ns@local], call agent [default: goto-agent-1] on remote MCP server [goto-mcp-1] at URL[localhost:3000/agent/goto-agent-1]'
+          schema: agent-call-schema
+          behavior:
+            agents: true
+          config:
+            agent:
+              name: goto-agent-1
+              agentURL: "localhost:3000/agent/goto-agent-1"
+              cardURL: "localhost:3000/agent/goto-agent-1/.well-known/agent.json"
+              authority: "localhost"
+              h2: false
+              tls: false
+              delay: "1s"
+              message: "insecure"
+              headers:
+                request:
+                  add:
+                    caller: "remote-remote-toolcall@goto-mcp-1@${POD_NAME}:3000@ns@local"
+                  forward:
+                    - Traceparent
+                    - Tracestate
+                    - Authorization
+                    - foo
+        - name: "toolcall"
+          tool:
             name: "toolcall"
             description: "Call a tool on another MCP server from server goto-mcp-1@${POD_NAME}@ns@local"
           schema: tool-call-schema
@@ -147,23 +236,27 @@ mcp:
                     - Tracestate
                     - Authorization
               args: {}
-        - tool:
+        - name: ping
+          tool:
             name: ping
             description: Ping client from server goto-mcp-1@${POD_NAME}@ns@local
           behavior:
             ping: true
-        - tool:
+        - name: echo
+          tool:
             name: echo
             description: Echo back from server goto-mcp-1@${POD_NAME}@ns@local
           schema: basic-text-delay-schema
           behavior:
             echo: true
-        - tool:
+        - name: time
+          tool:
             name: time
             description: Get current time from server goto-mcp-1@${POD_NAME}@ns@local
           behavior:
             time: true
-        - tool:
+        - name: fetch
+          tool:
             name: fetch
             description: Fetch HTTP resource from [localhost:8081]
           schema: fetch-schema
@@ -179,7 +272,8 @@ mcp:
                     - Traceparent
                     - Tracestate
                     - Authorization
-        - tool:
+        - name: stream
+          tool:
             name: stream
             description: long running streaming tool, with stream out and progress notifications from server goto-mcp-1@${POD_NAME}@ns@local
           schema: basic-text-delay-schema
@@ -190,17 +284,20 @@ mcp:
               min: 1s
               max: 5s
               count: -1
-        - tool:
+        - name: sample
+          tool:
             name: sample
             description: sample something from client for server goto-mcp-1@${POD_NAME}@ns@local
           behavior:
             sample: true
-        - tool:
+        - name: listRoots
+          tool:
             name: listRoots
             description: Get list of roots from client for server goto-mcp-1@${POD_NAME}@ns@local
           behavior:
             listRoots: true
-        - tool:
+        - name: elicit
+          tool:
             name: elicit
             description: elicit something from LLM for server goto-mcp-1@${POD_NAME}@ns@local
             inputSchema:
@@ -225,7 +322,8 @@ mcp:
               properties:
                 theAsk:
                   type: string
-        - tool:
+        - name: remote-serverdetails
+          tool:
             name: remote-serverdetails
             description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: ServerDetails] on remote MCP server at URL[localhost:4000/mcp/goto-mcp-1/serverdetails], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
@@ -252,7 +350,8 @@ mcp:
                 text: "Calling ServerDetails@goto-mcp-1 from MCP tool remote-serverdetails@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
                   Accept: "application/json"
-        - tool:
+        - name: remote-listservers
+          tool:
             name: remote-listservers
             description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: ListServers] on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/allservers], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
@@ -279,7 +378,8 @@ mcp:
                 text: "Calling ListServers@goto-mcp-1 from remote-listservers@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
                   Accept: "application/json"
-        - tool:
+        - name: remote-echo
+          tool:
             name: remote-echo
             description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: echo] on remote MCP server [goto-mcp-1] at URL[https://localhost:4000/mcp/goto-mcp-1/echo], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
@@ -307,7 +407,8 @@ mcp:
                 text: "Calling echo@goto-mcp-1 from MCP tool remote-echo@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
                   Accept: "application/json"
-        - tool:
+        - name: remote-elicit
+          tool:
             name: remote-elicit
             description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: elicit] on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/elicit], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
@@ -334,7 +435,8 @@ mcp:
                 text: "Calling elicit@goto-mcp-1 from MCP tool remote-elicit@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
                   Accept: "application/json"
-        - tool:
+        - name: remote-fetch
+          tool:
             name: remote-fetch
             description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: fetch] on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/fetch], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
@@ -361,7 +463,8 @@ mcp:
                 text: "Calling fetch@goto-mcp-1 from MCP tool remote-fetch@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
                   Accept: "application/json"
-        - tool:
+        - name: remote-stream
+          tool:
             name: remote-stream
             description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: stream] on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/stream], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
@@ -388,7 +491,8 @@ mcp:
                 text: "Calling stream@goto-mcp-1 from MCP tool remote-stream@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
                   Accept: "application/json"
-        - tool:
+        - name: remote-toolcall
+          tool:
             name: remote-toolcall
             description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: toolcall] on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/toolcall], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
@@ -415,7 +519,8 @@ mcp:
                 text: "Calling toolcall@goto-mcp-1 from MCP tool remote-toolcall@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
                   Accept: "application/json"
-        - tool:
+        - name: remote-remote-echo
+          tool:
             name: remote-remote-echo
             description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool remote-echo on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/remote-echo], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema
@@ -442,7 +547,8 @@ mcp:
                 text: "Calling remote-echo@goto-mcp-1 from MCP tool remote-remote-echo@goto-mcp-1@${POD_NAME}@ns@local"
                 headers:
                   Accept: "application/json"
-        - tool:
+        - name: remote-remote-toolcall
+          tool:
             name: remote-remote-toolcall
             description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: remote-toolcall] on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/remote-toolcall], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
           schema: remote-tool-schema

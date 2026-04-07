@@ -207,3 +207,17 @@ func (a *ToolCallArgs) AddMetadata(k, v string) {
 	}
 	a.Metadata[k] = v
 }
+
+func (a *ToolCallArgs) Clone() *ToolCallArgs {
+	args := *a
+	return &args
+}
+
+func (a *ToolCallArgs) IsEmpty() bool {
+	return a.Text == "" && a.DelayText == "" && a.Count == 0 && a.Delay == nil && len(a.Metadata) == 0 && (a.Remote == nil || a.Remote.IsEmpty())
+}
+
+func (a *RemoteCallArgs) IsEmpty() bool {
+	return a.ToolName == "" && a.AgentName == "" && a.URL == "" && a.Authority == "" && a.Headers == nil && len(a.ForwardHeaders) == 0 &&
+		a.AgentMessage == "" && len(a.AgentData) == 0 && (a.Args == nil || a.Args.IsEmpty())
+}

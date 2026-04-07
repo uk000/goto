@@ -61,8 +61,8 @@ func listTools(w http.ResponseWriter, r *http.Request) {
 	namesOnly := strings.Contains(r.RequestURI, "names")
 	msg := ""
 	clientId := fmt.Sprintf("[%s][Client: tool/list]", global.Self.HostLabel)
-	client := NewClient(rs.RequestPortNum, sse, false, tls, clientId, util.GetCurrentListenerLabel(r), authority, nil, nil)
-	session := client.CreateSession(url, "tool/list", nil, nil)
+	client := NewClient(rs.RequestPortNum, sse, false, tls, clientId, util.GetCurrentListenerLabel(r), authority, nil, nil, nil)
+	session := client.CreateSession(r.Context(), url, "tool/list", nil, r.Header)
 	session.SetAuthority(authority)
 	var toolsList *mcp.ListToolsResult
 	var promptsList *mcp.ListPromptsResult
@@ -130,7 +130,7 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 			err = errors.New("No tool call payload given")
 		}
 	} else {
-		output, err = doToolCall(rs.RequestPortNum, tc, r)
+		output, err = doToolCall(rs.RequestPortNum, tc, w, r)
 		if err != nil {
 			msg = err.Error()
 		} else {
@@ -147,23 +147,50 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func doToolCall(port int, tc *ToolCall, r *http.Request) (output *MCPResult, err error) {
-	clientId := fmt.Sprintf("[%s][Client: tool/call][%s]", global.Self.HostLabel, tc.Tool)
-	client := NewClient(port, tc.ForceSSE, tc.H2, tc.TLS, clientId, util.GetCurrentListenerLabel(r), tc.Authority, nil, nil)
-	session := client.CreateSession(tc.URL, tc.Tool, tc, r.Header)
+func doToolCall(port int, tc *ToolCall, w http.ResponseWriter, r *http.Request) (output *MCPResult, err error) {
+	clientId := fmt.Sprintf("[%s][API: tool/call][%s]", global.Self.HostLabel, tc.Tool)
+	client := NewClient(port, tc.ForceSSE, tc.H2, tc.TLS, clientId, util.GetCurrentListenerLabel(r), tc.Authority, nil, streamMCPResponse(tc.Tool, w, r), endMCPResponse(tc.Tool, w, r))
+	session := client.CreateSession(r.Context(), tc.URL, tc.Tool, tc, r.Header)
 	session.SetAuthority(tc.Authority)
 	defer func() {
 		if output == nil {
 			log.Println("*** defer called with Nil output ***")
 		}
 	}()
-	output, err = session.CallTool(tc, nil, r.Header)
-	if err == nil {
-		if output != nil && len(output.CallResults) > 0 {
-			session.Hops.AddToOutput(output.CallResults[0].RemoteData)
-		}
-	}
+	output, err = session.CallTool(nil)
 	return
+}
+
+func mcpUpdateHandler(msg string, data any, json bool, toolLabel string, fw http.Flusher, w http.ResponseWriter, r *http.Request) {
+	if data != nil {
+		msg = fmt.Sprintf("%s : %+v", msg, data)
+	}
+	if fw != nil && msg != "" {
+		fmt.Fprintln(w, msg)
+	}
+	fw.Flush()
+	util.AddLogMessage(fmt.Sprintf("Received stream response from tool [%s], response: %s", toolLabel, msg), r)
+}
+
+func streamMCPResponse(toolLabel string, w http.ResponseWriter, r *http.Request) func(string, any, bool) error {
+	var fw http.Flusher
+	if f, ok := w.(http.Flusher); ok {
+		fw = f
+	}
+	return func(msg string, data any, json bool) error {
+		mcpUpdateHandler(msg, data, json, toolLabel, fw, w, r)
+		return nil
+	}
+}
+
+func endMCPResponse(toolLabel string, w http.ResponseWriter, r *http.Request) func(string, any, bool) {
+	var fw http.Flusher
+	if f, ok := w.(http.Flusher); ok {
+		fw = f
+	}
+	return func(msg string, data any, json bool) {
+		mcpUpdateHandler(msg, data, json, toolLabel, fw, w, r)
+	}
 }
 
 func addClientPayload(w http.ResponseWriter, r *http.Request) {

@@ -20,9 +20,6 @@ import (
 	"fmt"
 	aicommon "goto/pkg/ai/common"
 	mcpclient "goto/pkg/ai/mcp/client"
-	"goto/pkg/types"
-	"strings"
-	"sync"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -42,31 +39,18 @@ func (t *MCPTool) callRemoteTool(tctx *ToolCallContext) (*gomcp.CallToolResult, 
 		isSSE = true
 	}
 	url := tc.URL
-	argHasURL := !strings.EqualFold(tctx.Config.RemoteTool.URL, tctx.args.Remote.URL)
+	argHasURL := tctx.args.Remote.URL != ""
 	if isSSE && !argHasURL {
-		// url = tc.SSEURL
+		url = tc.SSEURL
 	}
 	operLabel := fmt.Sprintf("%s->%s@%s", tctx.Label, tc.Tool, tc.Server)
 	var remoteResult *mcpclient.MCPResult
 	var err error
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	progressChan := make(chan *types.Pair[string, any], 10)
-	go func(pc chan *types.Pair[string, any]) {
-		for pair := range pc {
-			tctx.notifyClient(fmt.Sprintf("%s: %+v", pair.Left, pair.Right))
-		}
-	}(progressChan)
-	go func() {
-		client := mcpclient.NewClient(tctx.Server.GetPort(), false, tctx.Config.RemoteTool.H2, tctx.Config.RemoteTool.TLS,
-			tctx.Server.ID, tctx.rs.ListenerLabel, tctx.Config.RemoteTool.Authority, progressChan, progressChan)
-		session := client.CreateSessionWithHops(url, tctx.Label, tc, tctx.requestHeaders, tctx.hops)
-		remoteResult, err = session.CallTool(tc, tc.Args, tctx.requestHeaders)
-		client.Stop = true
-		wg.Done()
-	}()
-	wg.Wait()
-	close(progressChan)
+	client := mcpclient.NewClient(tctx.Server.GetPort(), false, tctx.Config.RemoteTool.H2, tctx.Config.RemoteTool.TLS,
+		tctx.Server.ID, tctx.rs.ListenerLabel, tctx.Config.RemoteTool.Authority, nil, tctx.notifyClientWithError, tctx.notifyClient)
+	session := client.CreateSessionWithTimeline(tctx.ctx, url, tctx.Label, tc, tctx.requestHeaders, tctx.timeline)
+	remoteResult, err = session.CallTool(tc.Args)
+	session.Stop = true
 	if err != nil {
 		msg := fmt.Sprintf("Server [%s] Failed to invoke Remote tool [%s] at URL [%s] with error: %s",
 			tctx.Server.GetName(), tc.Tool, tc.URL, err.Error())
@@ -78,8 +62,8 @@ func (t *MCPTool) callRemoteTool(tctx *ToolCallContext) (*gomcp.CallToolResult, 
 		result = &gomcp.CallToolResult{Content: []gomcp.Content{&gomcp.TextContent{Text: msg}}, IsError: false}
 	} else {
 		msg := fmt.Sprintf("Remote operation [%s] successful on [%s]. Sending response...", operLabel, tc.URL)
-		result = remoteResult.ToToolResult(msg)
-		tctx.notifyClient(msg, 0)
+		tctx.Log(msg)
+		result = remoteResult.ToMCP()
 		tctx.applyDelay()
 	}
 	return result, err

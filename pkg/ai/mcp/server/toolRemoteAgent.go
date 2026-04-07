@@ -39,32 +39,31 @@ func (t *MCPTool) callRemoteAgent(tctx *ToolCallContext) (*gomcp.CallToolResult,
 	finalHeaders := types.Union(ac.Headers, tctx.args.Remote.Headers)
 	tctx.addForwardHeaders(finalHeaders.Request.Add, finalHeaders.Request.Forward, tctx.args.Remote.Args)
 	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s]", ac.Name, ac.AgentURL)
-	tctx.notifyClient(msg, 0)
+	tctx.AddEvent(msg, nil, false)
 	client := a2aclient.NewA2AClient(tctx.Server.Port, tctx.Name, ac.H2, ac.TLS, ac.Authority)
 	if client == nil {
 		return nil, errors.New("failed to create A2A client")
 	}
-	session, err := client.ConnectWithAgentCard(tctx.ctx, ac, ac.CardURL, ac.Authority, tctx.requestHeaders)
+	session, err := client.ConnectWithAgentCard(tctx.ctx, ac, ac.CardURL, ac.Authority, tctx.requestHeaders, tctx.timeline)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", ac.Name, ac.AgentURL, err.Error())
 	} else {
 		msg = fmt.Sprintf("Loaded agent card for Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.AgentURL, session.Card.Capabilities.Streaming)
-		tctx.notifyClient(msg, 0)
+		tctx.AddEvent(msg, nil, false)
 	}
-	resultsChan := make(chan *types.Pair[string, any], 10)
-	progressChan := make(chan string, 10)
+	stream := make(chan *types.Pair[string, any], 10)
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	go tctx.processResults(ac.Name, ac.AgentURL, progressChan, resultsChan, result, &wg)
-	err = session.CallAgent(nil, resultsChan, resultsChan, progressChan)
-	close(resultsChan)
-	close(progressChan)
+	go tctx.processResults(ac.Name, ac.AgentURL, stream, result, &wg)
+	err = session.CallAgent(func(key, output string, data any) {
+		tctx.notifyClient(fmt.Sprintf("%s: %s", key, output), data, true)
+	}, nil, nil)
 	wg.Wait()
 	if err != nil {
 		return nil, fmt.Errorf("Failed to call Agent [%s] URL [%s] with error: %s", ac.Name, ac.AgentURL, err.Error())
 	} else {
 		msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.AgentURL, session.Card.Capabilities.Streaming)
-		tctx.notifyClient(msg, 0)
+		tctx.AddEvent(msg, nil, false)
 	}
 	return result, nil
 }

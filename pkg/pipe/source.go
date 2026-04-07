@@ -251,10 +251,9 @@ func (ps *PipelineSource) Generate(workspace map[string]interface{}) {
 		}
 	}
 	if ps.ParseJSON {
-		if s, ok := result.(string); ok {
-			result = util.JSONFromJSONText(s).Value()
-		} else {
-			result = util.JSONFromJSONText(fmt.Sprint(result)).Value()
+		j, ok := util.JSONFromJSONText(fmt.Sprint(result))
+		if ok && !j.IsEmpty() {
+			result = j.Value()
 		}
 	} else if ps.ParseNumber {
 		if n, err := strconv.Atoi(strings.TrimSpace(fmt.Sprint(result))); err == nil {

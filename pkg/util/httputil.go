@@ -18,8 +18,6 @@ package util
 
 import (
 	"fmt"
-	"goto/pkg/constants"
-	"goto/pkg/global"
 	"net/http"
 	"strings"
 )
@@ -74,32 +72,4 @@ func FixURL(url, suffix string, https bool) string {
 		}
 	}
 	return url
-}
-
-func BuildGotoClientInfo(container map[string]any, port int, name, label, target, url, server string, inArgs, outArgs any,
-	inHeaders, outHeaders, forwardHeaders, addHeaders, removeHeaders any, more map[string]any) map[string]any {
-	if container == nil {
-		container = map[string]any{}
-	}
-	clientInfo := map[string]any{
-		"Goto-Client":      name,
-		"Goto-Host":        global.Self.HostLabel,
-		"Goto-Listener":    global.Funcs.GetListenerLabelForPort(port),
-		"Goto-Label":       label,
-		"Remote-Target":    target,
-		"Remote-URL":       url,
-		"Remote-Server":    server,
-		"Inbound-Args":     inArgs,
-		"Inbound-Headers":  inHeaders,
-		"Outbound-Args":    outArgs,
-		"Outbound-Headers": outHeaders,
-		"Forward-Headers":  forwardHeaders,
-		"Add-Headers":      addHeaders,
-		"Remove-Headers":   removeHeaders,
-	}
-	for k, v := range more {
-		clientInfo[k] = v
-	}
-	container[constants.HeaderGotoClientInfo] = clientInfo
-	return container
 }

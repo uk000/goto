@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"goto/pkg/ai/a2a/model"
 	"goto/pkg/constants"
-	"goto/pkg/server/echo"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"reflect"
@@ -148,7 +147,14 @@ func (b *AgentBehaviorImpl) handleUnary(aCtx *AgentContext) (result *taskmanager
 		return nil, fmt.Errorf("Agent [%s] doesn't support Unary behavior.", b.agent.ID)
 	}
 	result, err = b.doUnary(aCtx)
-	b.addOrSendServerInfo(aCtx, result)
+	if err == nil && result != nil {
+		if result.Result == nil {
+			result.Result = &a2aproto.Message{}
+		}
+		if msg, ok := result.Result.(*a2aproto.Message); ok {
+			msg.Parts = append(msg.Parts, a2aproto.NewDataPart(map[string]any{constants.HeaderGotoServerTimeline: aCtx.timeline}))
+		}
+	}
 	return
 }
 
@@ -163,23 +169,13 @@ func (b *AgentBehaviorImpl) handleStream(aCtx *AgentContext) (*taskmanager.Messa
 }
 
 func (b *AgentBehaviorImpl) stream(aCtx *AgentContext) (err error) {
-	b.addOrSendServerInfo(aCtx, nil)
 	status, err := b.doStream(aCtx)
 	if err != nil {
-		aCtx.endTask(false, fmt.Sprintf("%s:%s. Error: %s", b.agent.ID, status, err.Error()))
+		aCtx.endTask(false, fmt.Sprintf("%s | Error: %s", status, err.Error()))
 	} else {
-		aCtx.endTask(true, fmt.Sprintf("%s:%s", b.agent.ID, status))
+		aCtx.endTask(true, status)
 	}
 	return err
-}
-
-func (b *AgentBehaviorImpl) addOrSendServerInfo(aCtx *AgentContext, result *taskmanager.MessageProcessingResult) {
-	serverInfo := a2aproto.NewDataPart(map[string]any{constants.HeaderGotoServerInfo: echo.GetEchoResponseFromRS(aCtx.rs)})
-	if result != nil && result.Result != nil {
-		if msg, ok := result.Result.(*a2aproto.Message); ok {
-			msg.Parts = append(msg.Parts, serverInfo)
-		}
-	}
 }
 
 func getMessageText(message *a2aproto.Message) string {
@@ -295,23 +291,21 @@ func createHybridMessage(id string, toolResults, agentResults map[string]any) a2
 	return a2aproto.NewMessage(a2aproto.MessageRoleAgent, finalParts)
 }
 
-func createAnyParts(msg string, result any) []a2aproto.Part {
-	parts := []a2aproto.Part{}
+func createAnyPart(msg string, result any) a2aproto.Part {
 	if s, ok := result.(string); ok {
-		parts = append(parts, a2aproto.NewTextPart(fmt.Sprintf("[%s] %s: %s", time.Now().Format(time.RFC3339Nano), msg, s)))
+		return a2aproto.NewTextPart(fmt.Sprintf("[%s] %s: %s", time.Now().Format(time.RFC3339Nano), msg, s))
 	} else if a, ok := result.([]any); ok {
-		parts = append(parts, a2aproto.NewDataPart(a))
+		return a2aproto.NewDataPart(map[string]any{msg: a})
 	} else if m, ok := result.(map[string]any); ok {
-		parts = append(parts, a2aproto.NewDataPart(m))
+		return a2aproto.NewDataPart(map[string]any{msg: m})
 	} else if t, ok := result.(a2aproto.TextPart); ok {
-		parts = append(parts, t)
+		return t
 	} else if d, ok := result.(a2aproto.DataPart); ok {
-		parts = append(parts, d)
+		return d
 	} else if p, ok := result.(a2aproto.Part); ok {
-		parts = append(parts, p)
+		return p
 	} else {
-		parts = append(parts, a2aproto.NewDataPart(result))
+		return a2aproto.NewDataPart(map[string]any{msg: result})
 		//parts = append(parts, a2aproto.NewTextPart(fmt.Sprintf("[%s] %s: %s", time.Now().Format(time.RFC3339Nano), msg, util.ToJSONText(result))))
 	}
-	return parts
 }

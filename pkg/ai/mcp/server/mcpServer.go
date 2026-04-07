@@ -200,46 +200,7 @@ func NewMCPServer(p *MCPServerPayload) *MCPServer {
 	server.sseHandler = gomcp.NewSSEHandler(getServer, &gomcp.SSEOptions{})
 	server.handler = MCPHybridHandler(server)
 	server.server.AddReceivingMiddleware(server.Middleware)
-	server.AddTool(&MCPTool{
-		Tool: &gomcp.Tool{
-			Name:        "ServerDetails",
-			Description: "Get Server Details for " + server.Name,
-			InputSchema: &jsonschema.Schema{
-				Type: "object",
-			},
-		},
-		Behavior: ToolBehavior{ServerDetails: true},
-	})
-	server.AddTool(&MCPTool{
-		Tool: &gomcp.Tool{
-			Name:        "ServerPaths",
-			Description: "List All Registered Server URIs",
-			InputSchema: &jsonschema.Schema{
-				Type: "object",
-			},
-		},
-		Behavior: ToolBehavior{ServerPaths: true},
-	})
-	server.AddTool(&MCPTool{
-		Tool: &gomcp.Tool{
-			Name:        "ListServers",
-			Description: "List All MCP Servers on the port",
-			InputSchema: &jsonschema.Schema{
-				Type: "object",
-			},
-		},
-		Behavior: ToolBehavior{AllServers: true},
-	})
-	server.AddTool(&MCPTool{
-		Tool: &gomcp.Tool{
-			Name:        "ListComponents",
-			Description: "List all registered Components from all servers",
-			InputSchema: &jsonschema.Schema{
-				Type: "object",
-			},
-		},
-		Behavior: ToolBehavior{AllComponents: true},
-	})
+	server.addDefaultTools()
 	return server
 }
 
@@ -617,6 +578,57 @@ func (m *MCPServer) AddTool(tool *MCPTool) {
 	}
 }
 
+func (s *MCPServer) addDefaultTools() {
+	t := &MCPTool{
+		Tool: &gomcp.Tool{
+			Name:        "ServerDetails",
+			Description: "Get Server Details for " + s.Name,
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+			},
+		},
+		Behavior: ToolBehavior{ServerDetails: true},
+	}
+	t.prepareBehavior()
+	s.AddTool(t)
+	t = &MCPTool{
+		Tool: &gomcp.Tool{
+			Name:        "ServerPaths",
+			Description: "List All Registered Server URIs for " + s.Name,
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+			},
+		},
+		Behavior: ToolBehavior{ServerPaths: true},
+	}
+	t.prepareBehavior()
+	s.AddTool(t)
+	t = &MCPTool{
+		Tool: &gomcp.Tool{
+			Name:        "ListServers",
+			Description: "List All MCP Servers on the port",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+			},
+		},
+		Behavior: ToolBehavior{AllServers: true},
+	}
+	t.prepareBehavior()
+	s.AddTool(t)
+	t = &MCPTool{
+		Tool: &gomcp.Tool{
+			Name:        "ListComponents",
+			Description: "List all registered Components from all servers",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+			},
+		},
+		Behavior: ToolBehavior{AllComponents: true},
+	}
+	t.prepareBehavior()
+	s.AddTool(t)
+}
+
 func (m *MCPServer) AddPrompts(b []byte) ([]string, error) {
 	arr := util.ToJSONArray(b)
 	prompts := []*MCPPrompt{}
@@ -711,11 +723,15 @@ func (m *MCPServer) onInitialized(ctx context.Context, req *gomcp.InitializedReq
 }
 
 func (m *MCPServer) onRootsListChanged(ctx context.Context, req *gomcp.RootsListChangedRequest) {
-	log.Printf("MCPServer[%d][%s]: Roots List Changed: [%s]", m.Port, m.Name, util.ToJSONText(req.Params))
+	msg := fmt.Sprintf("MCPServer[%d][%s]: Roots List Changed: [%s]", m.Port, m.Name, util.ToJSONText(req.Extra.Header))
+	log.Println(msg)
+	notifyClient(ctx, req.Params, msg, req.Session, nil)
 }
 
 func (m *MCPServer) onProgressNotification(ctx context.Context, req *gomcp.ProgressNotificationServerRequest) {
-	log.Printf("MCPServer[%d][%s]: Progress Notification Received: [%s]", m.Port, m.Name, util.ToJSONText(req.Params))
+	msg := fmt.Sprintf("MCPServer[%d][%s]: Progress Notification Received: [%s]", m.Port, m.Name, util.ToJSONText(req.Extra.Header))
+	log.Println(msg)
+	notifyClient(ctx, req.Params, msg, req.Session, nil)
 }
 
 func (m *MCPServer) AddCompletionPayload(completionType string, b []byte, delayMin, delayMax time.Duration, delayCount int) int {
@@ -726,6 +742,9 @@ func (m *MCPServer) AddCompletionPayload(completionType string, b []byte, delayM
 }
 
 func (m *MCPServer) onCompletion(ctx context.Context, req *gomcp.CompleteRequest) (*gomcp.CompleteResult, error) {
+	msg := fmt.Sprintf("MCPServer[%d][%s]: Completion Request Received: [%s]", m.Port, m.Name, util.ToJSONText(req.Extra.Header))
+	log.Println(msg)
+	notifyClient(ctx, req.Params, msg, req.Session, nil)
 	payload := m.CompletionPayload[req.Params.Ref.Type]
 	suggestions := []string{}
 	if payload != nil {
@@ -746,12 +765,16 @@ func (m *MCPServer) onCompletion(ctx context.Context, req *gomcp.CompleteRequest
 }
 
 func (m *MCPServer) onSubscribed(ctx context.Context, req *gomcp.SubscribeRequest) error {
-	log.Printf("MCPServer[%d][%s]: Session [%s] Client [%+v] Subscribed to [%s]", m.Port, m.Name, req.Session.ID(), req.Session.InitializeParams().ClientInfo, req.Params.URI)
+	msg := fmt.Sprintf("MCPServer[%d][%s]: Session [%s] Client [%+v] Subscribed to [%s]", m.Port, m.Name, req.Session.ID(), req.Session.InitializeParams().ClientInfo, req.Params.URI)
+	log.Println(msg)
+	notifyClient(ctx, req.Params, msg, req.Session, nil)
 	return nil
 }
 
 func (m *MCPServer) onUnsubscribed(ctx context.Context, req *gomcp.UnsubscribeRequest) error {
-	log.Printf("MCPServer[%d][%s]: Session [%s] Client [%+v] Unsubscribed to [%s]", m.Port, m.Name, req.Session.ID(), req.Session.InitializeParams().ClientInfo, req.Params.URI)
+	msg := fmt.Sprintf("MCPServer[%d][%s]: Session [%s] Client [%+v] Unsubscribed to [%s]", m.Port, m.Name, req.Session.ID(), req.Session.InitializeParams().ClientInfo, req.Params.URI)
+	log.Println(msg)
+	notifyClient(ctx, req.Params, msg, req.Session, nil)
 	return nil
 }
 

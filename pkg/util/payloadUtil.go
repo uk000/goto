@@ -132,14 +132,15 @@ func CloseResponse(r *http.Response) {
 
 func TransformPayload(sourcePayload string, transforms []*Transform, isYaml bool) string {
 	var sourceJSON JSON
+	var ok bool
 	isYAML := false
 	if isYaml {
-		sourceJSON = JSONFromYAML(sourcePayload)
+		sourceJSON, ok = JSONFromYAML(sourcePayload)
 		isYAML = true
 	} else {
-		sourceJSON = JSONFromJSONText(sourcePayload)
+		sourceJSON, ok = JSONFromJSONText(sourcePayload)
 	}
-	if sourceJSON.IsEmpty() {
+	if ok && !sourceJSON.IsEmpty() {
 		return sourcePayload
 	}
 	targetPayload := ""

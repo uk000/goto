@@ -198,7 +198,7 @@ func (a *A2AServer) Serve(name string, w http.ResponseWriter, r *http.Request) e
 	ctx := r.Context()
 	_, rs := util.GetRequestStoreFromContext(ctx)
 	rs.RequestHeaders = r.Header
-	aCtx := newAgentCallContext(a.ID, rs.ListenerLabel, agent, r.Header, rs)
+	aCtx := newAgentContext(a.Port, a.ID, rs.ListenerLabel, agent, r.Header, rs)
 	r = r.WithContext(context.WithValue(ctx, util.AgentContextKey, aCtx))
 	aCtx.ctx = r.Context()
 	agent.Serve(w, r)

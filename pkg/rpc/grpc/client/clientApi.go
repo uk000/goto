@@ -94,7 +94,10 @@ func callServiceMethod(w http.ResponseWriter, r *http.Request) {
 	if len(resp.ResponsePayload) > 0 {
 		jsons := []util.JSON{}
 		for _, r := range resp.ResponsePayload {
-			jsons = append(jsons, util.JSONFromJSONText(r))
+			j, ok := util.JSONFromJSONText(r)
+			if ok && !j.IsEmpty() {
+				jsons = append(jsons, j)
+			}
 		}
 		response["payload"] = jsons
 	} else {

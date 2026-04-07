@@ -17,10 +17,13 @@
 package a2aserver
 
 import (
+	"fmt"
+	aicommon "goto/pkg/ai/common"
+	"goto/pkg/global"
 	"goto/pkg/server/echo"
 	"goto/pkg/util"
+	"time"
 
-	a2aproto "trpc.group/trpc-go/trpc-a2a-go/protocol"
 	"trpc.group/trpc-go/trpc-a2a-go/taskmanager"
 )
 
@@ -29,20 +32,15 @@ type AgentBehaviorEcho struct {
 }
 
 func (ab *AgentBehaviorEcho) DoUnary(aCtx *AgentContext) (*taskmanager.MessageProcessingResult, error) {
-	msg := createTextMessage(util.ToJSONText(ab.getEchoMessage(aCtx, aCtx.input)))
+	msg := createDataMessage(util.ToJSONText(echo.GetEchoResponseFromRS(aCtx.rs)))
 	return &taskmanager.MessageProcessingResult{
 		Result: &msg,
 	}, nil
 }
 
 func (ab *AgentBehaviorEcho) DoStream(aCtx *AgentContext) (string, error) {
-	aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "", ab.getEchoMessage(aCtx, aCtx.input))
-	aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Echo response sent", nil)
-	return "Echo Done", nil
-}
-
-func (ab *AgentBehaviorEcho) getEchoMessage(aCtx *AgentContext, input *a2aproto.Message) (parts []a2aproto.Part) {
-	parts = append(parts, input.Parts...)
-	parts = append(parts, a2aproto.NewDataPart(echo.GetEchoResponseFromRS(aCtx.rs)))
-	return parts
+	msg := fmt.Sprintf("Agent: %s[%s]. Received Input: %s at Time: %s", ab.agent.ID, global.Funcs.GetListenerLabelForPort(ab.agent.Port),
+		aicommon.GetInputTextFromMessage(aCtx.input), time.Now().Format(time.RFC3339))
+	aCtx.AddEvent(msg, nil, false)
+	return "Echo Response Sent", nil
 }

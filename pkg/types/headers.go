@@ -18,7 +18,6 @@ package types
 
 import (
 	"iter"
-	"log"
 	"maps"
 	"net/http"
 )
@@ -119,13 +118,11 @@ func (hc *HeadersConfig) Union(hc2 *HeadersConfig) *HeadersConfig {
 
 func (hc *HeadersConfig) UpdateHeaders(headers http.Header, info string) {
 	if len(hc.Remove) > 0 {
-		log.Printf("---------- Removing headers %+v for %s ------------\n", hc.Remove, info)
 		for _, h := range hc.Remove {
 			headers.Del(h)
 		}
 	}
 	if len(hc.Add) > 0 {
-		log.Printf("---------- Adding headers %+v for %s ------------\n", hc.Add, info)
 		for h, v := range hc.Add {
 			headers.Add(h, v)
 		}
@@ -142,9 +139,6 @@ func ForwardHeaders(sourceHeaders ReadableHeaders, targetHeaders AddableHeaders,
 				targetHeaders.Add(h, v)
 			}
 		}
-	}
-	if len(forwardedHeaders) > 0 {
-		log.Printf("---------- Forwarded headers %+v for %s ------------\n", forwardedHeaders, info)
 	}
 }
 

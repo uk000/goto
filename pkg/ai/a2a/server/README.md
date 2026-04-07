@@ -1,6 +1,6 @@
 
 ## A2A Agent Server Features
-The `pkg/a2a/server` sub-package implements a generic A2A server with admin APIs to let users configure `Goto` as one or more dynamic A2A agents exposed over same or different ports. Eadch agent is exposed over a unique URI as `/agent/{agent}`.
+The `pkg/a2a/server` sub-package implements a generic A2A server with admin APIs to let users configure `Goto` as one or more dynamic A2A agents exposed over same or different ports. Each agent is exposed over a unique URI as `/agent/{agent}`.
 
 The `a2a` admin APIs are exposed with path-prefix `/a2a/...`. Specifically, API `/a2a/agents/add` accepts an [Agent spec](#agent-json-schema) payload, and configures an A2A agent over the given port. API `/a2a/agents/{agent}/payload` lets you configure static streaming payload for a configured agent. Once an agent is configured, a client can call `/agent/{agent}` to interact with the agent over A2A protocol. Client can call `/agent/{agent}/.well-known/agent.json` to get the agent's card.
 
@@ -15,7 +15,7 @@ These APIs are used to add/remove/configure A2A agents to be exposed by `Goto`.
 |------|---|-----------|
 | POST | /a2a/agents/add                                | Add one or more agents from the request's payload. [See `Agent JSON Schema` for Payload](#agent-json-schema) |
 | POST | /a2a/agents/{agent}/payload                    | Set response payload for an agent (to be used by agents configured with `stream` behavior). |
-| GET  | /a2a/agents                                    | Lists all agents on the current listener port. |
+| GET  | /a2a/agents                                    | Lists all agents from the global agent registry (across all ports). |
 | GET  | /a2a/agents/all                                | Lists all agents across all ports. |
 | GET  | /a2a/agents/names                              | Lists agent names and their delegate names for the current port. |
 | GET  | /a2a/agents/names/all                          | Lists agent names and their delegate names across all ports. |
@@ -177,28 +177,72 @@ Exactly one of these should be set to `true`. Determines how the agent processes
 #### ToolCall (MCP)
 |Field|Data Type|Description|
 |---|---|---|
-| tool      | string         | Name of the MCP tool to call. |
-| url       | string         | URL of the MCP server. |
-| sseURL    | string         | Optional SSE URL for the MCP server. |
-| server    | string         | Optional server name/identifier. |
-| authority | string         | Optional `Host` header override. |
-| forceSSE  | bool           | Force SSE transport. |
-| neat      | bool           | Return raw/unprocessed results. |
-| delay     | string         | Delay before making the call (e.g. `"500ms"`). |
-| args      | map[string]any | Arguments to pass to the MCP tool. |
-| headers   | Headers        | Request/response header configuration. |
+| tool         | string       | Name of the MCP tool to call. |
+| url          | string       | URL of the MCP server. |
+| sseURL       | string       | Optional SSE URL for the MCP server. |
+| server       | string       | Optional server name/identifier. |
+| authority    | string       | Optional `Host` header override. |
+| h2           | bool         | Enable HTTP/2 protocol for the outbound connection. |
+| tls          | bool         | Enable TLS for the outbound connection. |
+| forceSSE     | bool         | Force SSE transport. |
+| neat         | bool         | Return raw/unprocessed results. |
+| dataOnly     | bool         | If `true`, suppresses text content and only returns data parts. |
+| delay        | string       | Delay before making the call (e.g. `"500ms"`). |
+| args         | ToolCallArgs | Arguments to pass to the MCP tool (see below). |
+| headers      | Headers      | Request/response header configuration. |
+| requestCount | int          | Total number of requests to send (default `1`). |
+| concurrent   | int          | Number of concurrent requests per round. Total rounds = `requestCount / concurrent`. |
+| initialDelay | string       | Delay before sending the first request. |
+
+#### ToolCallArgs
+|Field|Data Type|Description|
+|---|---|---|
+| delay    | string            | Delay before tool execution (e.g. `"500ms"`). |
+| count    | int               | Repeat count for the tool call. |
+| text     | string            | Text input for the tool. |
+| remote   | RemoteCallArgs    | Remote call configuration for the tool (see below). |
+| metadata | map[string]string | Arbitrary metadata key-value pairs. |
+
+#### RemoteCallArgs
+|Field|Data Type|Description|
+|---|---|---|
+| tool           | string   | Name of the remote tool to call. |
+| agent          | string   | Name of the remote agent to call. |
+| url            | string   | URL of the remote server. |
+| authority      | string   | Optional `Host` header override. |
+| sse            | bool     | Use SSE transport. |
+| headers        | Headers  | Request/response header configuration. |
+| forwardHeaders | []string | Header names to forward from the incoming request. |
+| agentMessage   | string   | Message to send to the remote agent. |
 
 #### AgentCall (A2A)
 |Field|Data Type|Description|
 |---|---|---|
-| name      | string         | Name of the remote agent to call. |
-| agentURL  | string         | URL of the remote agent endpoint. |
-| cardURL   | string         | URL to fetch the remote agent's card. |
-| authority | string         | Optional `Host` header override. |
-| delay     | string         | Delay before making the call (e.g. `"500ms"`). |
-| message   | string         | Text message to send to the remote agent. |
-| data      | map[string]any | Data payload to send to the remote agent. |
-| headers   | Headers        | Request/response header configuration. |
+| name                 | string            | Name of the remote agent to call. |
+| agentURL             | string            | URL of the remote agent endpoint. |
+| cardURL              | string            | URL to fetch the remote agent's card. The client appends `/.well-known/agent.json` if not already present. |
+| authority            | string            | Optional `Host` header override. |
+| h2                   | bool              | Enable HTTP/2 protocol for the outbound connection. |
+| tls                  | bool              | Enable TLS for the outbound connection. |
+| dataOnly             | bool              | If `true`, suppresses text content in responses and only returns data parts. |
+| delay                | string            | Delay before making the call (e.g. `"500ms"`). |
+| message              | string            | Text message to send to the remote agent. |
+| data                 | map[string]any    | Data payload to send to the remote agent. |
+| headers              | Headers           | Request/response header configuration. |
+| requestCount         | int               | Total number of requests to send (default `1`). |
+| concurrent           | int               | Number of concurrent requests per round. Total rounds = `requestCount / concurrent`. |
+| initialDelay         | string            | Delay before sending the first request. |
+| retryDelay           | string            | Delay between retries on retriable status codes. |
+| retriableStatusCodes | []int             | HTTP status codes that should trigger a retry. |
+| requestId            | RequestId         | Request ID generation configuration. |
+
+#### RequestId
+|Field|Data Type|Description|
+|---|---|---|
+| send   | bool   | Whether to send a request ID. |
+| uuid   | bool   | Whether to generate a UUID as the request ID. |
+| header | string | Header name to use for the request ID. |
+| query  | string | Query parameter name to use for the request ID. |
 
 #### HTTPCall
 |Field|Data Type|Description|

@@ -467,7 +467,7 @@ func PrintLogMessages(statusCode, bodyLength int, payload []byte, headers http.H
 				rs.LogMessages = append(rs.LogMessages, fmt.Sprintf("Response %s: [%s]", logLabel, bodyLog))
 			}
 		}
-		log.Printf("HTTP Log: %s\n", strings.Join(rs.LogMessages, " --> "))
+		log.Printf("HTTP Access Log: %s\n", strings.Join(rs.LogMessages, " --> "))
 		if flusher, ok := log.Writer().(http.Flusher); ok {
 			flusher.Flush()
 		}

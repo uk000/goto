@@ -26,7 +26,7 @@ import (
 )
 
 func (t *MCPTool) elicit(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
-	tctx.Log(fmt.Sprintf("Server [%s] sent elicit request to client", tctx.Server.GetName()))
+	tctx.AddEvent(fmt.Sprintf("Server [%s] sent elicit request to client", tctx.Server.GetName()), nil, false)
 	params := &gomcp.ElicitParams{}
 	if tctx.Response != nil && tctx.Response.JSON != nil {
 		params.Message = tctx.Response.JSON.GetText("message")
@@ -51,21 +51,19 @@ func (t *MCPTool) elicit(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	if res.Action == "decline" {
 		tctx.Log("%s Client declined Elicitation", tctx.Label)
 	}
+	var data map[string]any
 	if res.Content == nil {
-		tctx.notifyClient(tctx.Log("Server [%s] Empty elicit response from client", tctx.Server.GetName()), 0)
+		msg = tctx.Log("Server [%s] Empty elicit response from client", tctx.Server.GetName())
 	} else {
-		tctx.notifyClient(tctx.Log("Server [%s] Received elicit response from client", tctx.Server.GetName()), 0)
-		data := tctx.assignClientHops("", res.Content)
-		res.Content = map[string]any{"clientResponse": data}
+		msg = fmt.Sprintf("Server [%s] Received elicit response from client", tctx.Server.GetName())
+		data = extractClientData(res.Content)
+		tctx.timeline.AddEvent(t.Label, msg, nil, data, false)
 	}
 	tctx.applyDelay()
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{
 			&gomcp.TextContent{Text: msg},
 		},
-	}
-	if res.Content != nil {
-		result.Content = append(result.Content, &gomcp.TextContent{Text: util.ToJSONText(res.Content)})
 	}
 	return result, nil
 }
@@ -80,33 +78,43 @@ func (t *MCPTool) sample(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 		SystemPrompt:   tctx.Tool.Description,
 		MaxTokens:      10,
 	})
-	if err != nil {
-		tctx.Log("Server [%s] failed to get sample from client", tctx.Server.GetName())
+	var msg string
+	if err != nil || res == nil {
+		msg = tctx.Log("Server [%s] failed to get sample from client", tctx.Server.GetName())
 		return nil, fmt.Errorf("sampling failed: %v", err)
 	}
-	tctx.notifyClient(tctx.Log("Server [%s] got sample from client", tctx.Server.GetName()), 0)
+	msg = fmt.Sprintf("Server [%s] got sample from client", tctx.Server.GetName())
+	data := extractClientData(res.Content)
+	tctx.timeline.AddEvent(t.Label, msg, nil, data, false)
 	tctx.applyDelay()
-	var data map[string]any
-	if res.Content == nil {
-		res.Content = &gomcp.TextContent{Text: "No content"}
-	} else {
-		if tc, ok := res.Content.(*gomcp.TextContent); ok {
-			data = tctx.assignClientHops(tc.Text, nil)
-		}
-	}
 	result := &gomcp.CallToolResult{}
 	result.Content = []gomcp.Content{
 		&gomcp.TextContent{Text: "Sampling successful"},
 		&gomcp.TextContent{Text: "Model: " + res.Model},
 		&gomcp.TextContent{Text: "Role: " + string(res.Role)},
 		&gomcp.TextContent{Text: "StopReason: " + res.StopReason},
-	}
-	if len(data) > 0 {
-		for k, v := range data {
-			result.Content = append(result.Content, &gomcp.TextContent{Text: fmt.Sprintf("%+v: %+v", k, v)})
-		}
-	} else {
-		res.Content = &gomcp.TextContent{Text: "No content"}
+		res.Content,
 	}
 	return result, nil
+}
+
+func extractClientData(content any) map[string]any {
+	if m, ok := content.(map[string]any); ok {
+		return m
+	}
+	if text, ok := content.(gomcp.TextContent); ok {
+		json, ok := util.JSONFromJSONText(text.Text)
+		if ok && !json.IsEmpty() {
+			return json.Object()
+		}
+		return map[string]any{"content": text.Text}
+	}
+	if text, ok := content.(*gomcp.TextContent); ok {
+		json, ok := util.JSONFromJSONText(text.Text)
+		if ok && !json.IsEmpty() {
+			return json.Object()
+		}
+		return map[string]any{"content": text.Text}
+	}
+	return nil
 }

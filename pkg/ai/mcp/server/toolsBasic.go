@@ -39,11 +39,12 @@ func (t *MCPTool) echo(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	if input == "" {
 		input = "<No input to echo>"
 	}
-	msg := fmt.Sprintf("Echo Server: %s[%s]. Input: %s, Time: %s", tctx.Label, global.Funcs.GetListenerLabelForPort(tctx.Server.GetPort()), input, time.Now().Format(time.RFC3339))
+	msg := fmt.Sprintf("Echo Server: %s[%s]. Received Input: %s at Time: %s", tctx.Label, global.Funcs.GetListenerLabelForPort(tctx.Server.GetPort()), input, time.Now().Format(time.RFC3339))
 	content = append(content, &gomcp.TextContent{Text: msg})
-	// content = append(content, &gomcp.TextContent{Text: util.ToJSONText(echo.GetEchoResponseWithAddendum(t.rs, map[string]any{"Goto-MCP-Server": t.Server.ID, "Goto-MCP-Tool": t.Name}))})
 	tctx.applyDelay()
-	tctx.notifyClient(tctx.Log("Server %s Tool %s echoing back", tctx.Server.Host, tctx.Label), 0)
+	tctx.Log("Server %s Tool %s echoing back", tctx.Server.Host, tctx.Label)
+	msg = tctx.Flush(false, false)
+	content = append(content, &gomcp.TextContent{Text: msg})
 	return &gomcp.CallToolResult{Content: content}, nil
 }
 
@@ -63,9 +64,8 @@ func (t *MCPTool) ping(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 func (t *MCPTool) sendTime(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	content := []gomcp.Content{&gomcp.TextContent{Text: fmt.Sprintf("Time: %s", time.Now().Format(time.RFC3339))}}
 	content = append(content, &gomcp.TextContent{Text: fmt.Sprintf("Client Data: %s", tctx.req.Params.Arguments)})
-	tctx.notifyClient(tctx.Log("Server [%s] sent time back", tctx.Server.GetName()), 0)
+	tctx.Log("Server [%s] sent time back", tctx.Server.GetName())
 	tctx.applyDelay()
-	tctx.hops.Add(tctx.Flush(true))
 	return &gomcp.CallToolResult{Content: content}, nil
 }
 
@@ -83,7 +83,7 @@ func (t *MCPTool) listRoots(tctx *ToolCallContext) (*gomcp.CallToolResult, error
 	} else {
 		roots = []string{"no roots"}
 	}
-	tctx.notifyClient(tctx.Log("Server [%s] Reporting client's roots", tctx.Server.GetName()), 0)
+	tctx.Log("Server [%s] Reporting client's roots", tctx.Server.GetName())
 	tctx.applyDelay()
 	result := &gomcp.CallToolResult{}
 	for _, r := range roots {
@@ -92,28 +92,28 @@ func (t *MCPTool) listRoots(tctx *ToolCallContext) (*gomcp.CallToolResult, error
 	return result, nil
 }
 
-func (t *MCPTool) sendServerDetails(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) serverDetails(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	result.Content = append(result.Content, &gomcp.TextContent{Text: util.ToJSONText(tctx.MCPTool.Server)})
 	tctx.Log(fmt.Sprintf("%s sent Server [%s] details", tctx.Label, tctx.Server.GetName()))
 	return result, nil
 }
 
-func (t *MCPTool) sendAllServers(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) listServers(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	result.Content = append(result.Content, &gomcp.TextContent{Text: util.ToJSONText(tctx.MCPTool.Server.ps.AllServers())})
 	tctx.Log(fmt.Sprintf("%s sent All Servers", tctx.Label))
 	return result, nil
 }
 
-func (t *MCPTool) sendServerPaths(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) serverPaths(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	result.Content = append(result.Content, &gomcp.TextContent{Text: util.ToJSONText(ServerRoutes)})
 	tctx.Log(fmt.Sprintf("%s sent Server Routes", tctx.Label))
 	return result, nil
 }
 
-func (t *MCPTool) sendAllComponents(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) listComponents(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	result.Content = append(result.Content, &gomcp.TextContent{Text: util.ToJSONText(AllComponents)})
 	tctx.Log(fmt.Sprintf("%s sent all components", tctx.Label))

@@ -35,7 +35,6 @@ import (
 func MCPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)
-		//HandleMCPDefault(w, r)
 		HandleMCP(w, r)
 		if !rs.RequestServed {
 			util.HTTPHandler.ServeHTTP(w, r)
@@ -72,8 +71,6 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 				rs.RequestURI = r.RequestURI
 				rs.RequestedMCPTool = tool.Name
 				log.Printf("Port [%d] Request [%s] will be served by Server [%s] (Stateless=%t) for Tool [%s]", l.Port, r.RequestURI, server.Name, server.Stateless, tool.Name)
-			} else {
-				log.Printf("Port [%d] Request [%s] will be served by Server [%s] (Stateless=%t)", l.Port, r.RequestURI, server.Name, server.Stateless)
 			}
 			port := util.GetRequestOrListenerPortNum(r)
 			if status, rem := StatusManager.GetStatusFor(port, r.RequestURI, r.Header); status > 0 {
@@ -93,25 +90,17 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 func MCPHybridHandler(server *MCPServer) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)
-		port := util.GetRequestOrListenerPortNum(r)
-		//conn.SendGotoHeaders(w, r)
 		r = r.WithContext(util.WithRequestHeaders(r.Context(), r.Header))
-		//util.CopyHeaders("Request", r, w, r.Header, true, true, false)
 		rs.ResponseWriter = w
 		hasSSE := strings.Contains(r.RequestURI, "/sse")
 		hasMCP := strings.Contains(r.RequestURI, "/mcp")
-		// w, irw := intercept.WithIntercept(r, w)
 		if hasMCP && !hasSSE {
-			log.Printf("Port [%d] Handling streaming request [%s] for server [%s]", port, r.RequestURI, server.Name)
 			Serve(server, w, r, server.streamHTTPHandler)
 		} else {
-			log.Printf("Port [%d] Handling SSE request [%s] for server [%s]", port, r.RequestURI, server.Name)
 			r = r.WithContext(util.SetSSE(r.Context()))
 			Serve(server, w, r, server.sseHandler)
 		}
 		rs.RequestServed = true
-		// log.Println(string(irw.Data))
-		// irw.Proceed()
 	})
 }
 
@@ -256,27 +245,20 @@ func getPortServerToolFromURI(uri string) (port int, server, tool string) {
 }
 
 func HandleMCPDefault(w http.ResponseWriter, r *http.Request) {
-	l := listeners.GetCurrentListener(r)
 	rs := util.GetRequestStore(r)
 	hasSSE := strings.Contains(r.RequestURI, "/sse")
 	hasMCP := strings.Contains(r.RequestURI, "/mcp")
 	isStateful := strings.Contains(r.RequestURI, "/stateful")
 	if hasMCP && !hasSSE {
 		if isStateful {
-			log.Printf("Port [%d] Handling streaming request [%s] for server DefaultStatefulServer", l.Port, r.RequestURI)
 			Serve(DefaultStatefulServer, w, r, DefaultStatefulServer.streamHTTPHandler)
 		} else {
-			log.Printf("Port [%d] Handling streaming request [%s] for server DefaultStatelessServer", l.Port, r.RequestURI)
-			// DefaultServer.streamHTTPHandler.ServeHTTP(w, r)
 			Serve(DefaultStatefulServer, w, r, DefaultStatelessServer.streamHTTPHandler)
 		}
 	} else {
 		if isStateful {
-			log.Printf("Port [%d] Handling SSE request [%s] for server DefaultStatefulServer", l.Port, r.RequestURI)
 			Serve(DefaultStatefulServer, w, r, DefaultStatefulServer.sseHandler)
 		} else {
-			log.Printf("Port [%d] Handling SSE request [%s] for server DefaultStatelessServer", l.Port, r.RequestURI)
-			// DefaultServer.streamHTTPHandler.ServeHTTP(w, r)
 			Serve(DefaultStatefulServer, w, r, DefaultStatelessServer.sseHandler)
 		}
 	}

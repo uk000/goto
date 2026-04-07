@@ -42,8 +42,8 @@ type JSON interface {
 	JSONArray() []JSON
 	ToJSONArray() []JSON
 
-	ParseJSON(text string, noerror bool)
-	ParseYAML(y string)
+	ParseJSON(text string, noerror bool) bool
+	ParseYAML(y string) bool
 	Store(i interface{})
 	Clone() JSON
 	ToJSONText() string
@@ -151,10 +151,10 @@ func NewJSONWithRaw(raw any) JSON {
 	}
 }
 
-func JSONFromJSONText(text string) JSON {
+func JSONFromJSONText(text string) (JSON, bool) {
 	json := NewJSON()
-	json.ParseJSON(text, true)
-	return json
+	ok := json.ParseJSON(text, true)
+	return json, ok
 }
 
 func JSONFromJSON(j any) JSON {
@@ -163,14 +163,15 @@ func JSONFromJSON(j any) JSON {
 	return json
 }
 
-func JSONFromYAML(y string) JSON {
+func JSONFromYAML(y string) (JSON, bool) {
 	json := NewJSON()
-	json.ParseYAML(y)
-	return json
+	ok := json.ParseYAML(y)
+	return json, ok
 }
 
 func JSONFromObject(o any) JSON {
-	return JSONFromJSONText(ToJSONText(o))
+	j, _ := JSONFromJSONText(ToJSONText(o))
+	return j
 }
 
 func JSONFromMap(o map[string]any) JSON {
@@ -263,7 +264,10 @@ func (j JSONObject) Object() (obj map[string]interface{}) {
 		}
 		return
 	}
-	return nil
+	data := map[string]any{
+		"": j.Value(),
+	}
+	return data
 }
 
 func (j JSONObject) Array() []interface{} {
@@ -320,21 +324,24 @@ func (j *JSONValue) ToJSONArray() []JSON {
 	return []JSON{j}
 }
 
-func (j *JSONValue) ParseJSON(text string, noerror bool) {
+func (j *JSONValue) ParseJSON(text string, noerror bool) bool {
 	var o interface{}
 	if err := json.Unmarshal([]byte(text), &o); err == nil {
 		j.Store(o)
+		return true
 	} else if !noerror {
 		fmt.Printf("Failed to parse json with error: %s\n", err.Error())
 	}
+	return false
 }
 
-func (j *JSONValue) ParseYAML(y string) {
+func (j *JSONValue) ParseYAML(y string) bool {
 	if o, err := yaml.YAMLToJSON([]byte(y)); err == nil {
-		j.ParseJSON(string(o), false)
+		return j.ParseJSON(string(o), false)
 	} else {
 		fmt.Printf("Failed to parse yaml with error: %s\n", err.Error())
 	}
+	return false
 }
 
 func (j *JSONValue) ToJSONText() string {
@@ -772,6 +779,9 @@ func ReadStringArray(b []byte) []string {
 }
 
 func ToJSONText(o interface{}) string {
+	if o == nil {
+		return ""
+	}
 	if output, err := json.Marshal(o); err == nil {
 		return string(output)
 	} else {

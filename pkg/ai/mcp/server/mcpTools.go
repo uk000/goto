@@ -21,14 +21,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"goto/pkg/constants"
 	"goto/pkg/metrics"
-	"goto/pkg/server/echo"
 	"goto/pkg/transport"
 	"goto/pkg/types"
 	"goto/pkg/util"
-	"log"
-	"net/http"
+	"goto/pkg/util/timeline"
 	"reflect"
 	"strings"
 	"time"
@@ -78,20 +75,6 @@ type ToolConfig struct {
 	Agent       *a2aclient.AgentCall    `json:"agent,omitempty"`
 	Delay       *types.Delay            `json:"delay,omitempty"`
 	StreamCount int                     `json:"streamCount,omitempty"`
-}
-
-type ToolCallContext struct {
-	*MCPTool
-	sessionID      string
-	listener       string
-	rs             *util.RequestStore
-	sse            bool
-	ctx            context.Context
-	requestHeaders http.Header
-	req            *gomcp.CallToolRequest
-	args           *aicommon.ToolCallArgs
-	hops           *util.Hops
-	log            []string
 }
 
 type ToolState struct {
@@ -165,13 +148,13 @@ func (t *MCPTool) prepareBehavior() error {
 	} else if t.Behavior.Agents {
 		t.Behavior.run = t.callRemoteAgent
 	} else if t.Behavior.ServerDetails {
-		t.Behavior.run = t.sendServerDetails
+		t.Behavior.run = t.serverDetails
 	} else if t.Behavior.ServerPaths {
-		t.Behavior.run = t.sendServerPaths
+		t.Behavior.run = t.serverPaths
 	} else if t.Behavior.AllServers {
-		t.Behavior.run = t.sendAllServers
+		t.Behavior.run = t.listServers
 	} else if t.Behavior.AllComponents {
-		t.Behavior.run = t.sendAllComponents
+		t.Behavior.run = t.listComponents
 	} else {
 		t.Behavior.run = t.stream
 	}
@@ -181,12 +164,10 @@ func (t *MCPTool) prepareBehavior() error {
 func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (result *gomcp.CallToolResult, err error) {
 	_, rs := util.GetRequestStoreFromContext(ctx)
 	isSSE := false
-	if rs != nil {
-		if rs.RequestedMCPTool != "" && !strings.EqualFold(rs.RequestedMCPTool, t.Name) && !strings.Contains(t.Name, "toolcall") {
-			return nil, fmt.Errorf("URI [%s] doesn't match tool [%s] requested in RPC", rs.RequestedMCPTool, t.Name)
-		}
-		isSSE = rs.IsSSE
+	if rs.RequestedMCPTool != "" && !strings.EqualFold(rs.RequestedMCPTool, t.Name) && !strings.Contains(t.Name, "toolcall") {
+		return nil, fmt.Errorf("URI [%s] doesn't match tool [%s] requested in RPC", rs.RequestedMCPTool, t.Name)
 	}
+	isSSE = rs.IsSSE
 	if !isSSE {
 		isSSE = util.IsSSE(ctx)
 	}
@@ -199,22 +180,10 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 		args = aicommon.NewCallArgs()
 	}
 	args.UpdateDelay(t.Config.Delay)
-	tctx := &ToolCallContext{
-		MCPTool:        t,
-		sessionID:      req.Session.ID(),
-		listener:       rs.ListenerLabel,
-		rs:             rs,
-		sse:            isSSE,
-		ctx:            ctx,
-		requestHeaders: getRequestHeaders(ctx, req, rs),
-		req:            req,
-		args:           args,
-	}
+	tctx := NewToolCallContext(ctx, t, req, args, isSSE)
 	// rs.ResponseWriter.Header().Add(constants.HeaderGotoMCPServer, t.Server.Name)
 	// rs.ResponseWriter.Header().Add(constants.HeaderGotoMCPTool, t.Name)
-	tctx.hops = util.NewHops(t.Server.ID, tctx.rs.ListenerLabel, t.Label)
 	// t.notifyClient(t.Log("%s: Received request with Args [%+v] Remote Args [%+v] Headers [%+v]", t.Label, t.args, t.remoteArgs, t.requestHeaders), 0)
-	tctx.Hop(tctx.Flush(true))
 	result, err = t.Behavior.run(tctx)
 	if result == nil {
 		result = &gomcp.CallToolResult{}
@@ -224,30 +193,41 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 }
 
 func (t *MCPTool) prepareResult(tctx *ToolCallContext, result *gomcp.CallToolResult) {
-	output := map[string]any{}
+	msg := tctx.Flush(true, true)
+	if len(msg) > 0 {
+		tctx.AddEvent(msg, nil, true)
+	}
 	if result.StructuredContent != nil {
-		m := reflect.ValueOf(result.StructuredContent)
-		if m.Kind() == reflect.Map {
-			iter := m.MapRange()
-			for iter.Next() {
-				k := iter.Key().String()
-				v := iter.Value().Interface()
-				output[k] = v
-			}
+		if _, ok := result.StructuredContent.(*timeline.Timeline); ok {
+			//good
 		} else {
-			output["structuredContent"] = result.StructuredContent
+			m := reflect.ValueOf(result.StructuredContent)
+			if m.Kind() == reflect.Map {
+				iter := m.MapRange()
+				for iter.Next() {
+					k := iter.Key().String()
+					v := iter.Value().Interface()
+					tctx.timeline.Data[k] = v
+				}
+			} else if m.Kind() == reflect.String {
+				json, ok := util.JSONFromJSONText(m.String())
+				if ok && !json.IsEmpty() {
+					for k, v := range json.Object() {
+						tctx.timeline.Data[k] = v
+					}
+				}
+			} else {
+				tctx.timeline.Data["remoteData"] = result.StructuredContent
+			}
 		}
 	}
-	tctx.Hop(tctx.Flush(true))
-	tctx.rs.GotoProtocol = "MCP"
-	tctx.rs.IsJSONRPC = true
-	tctx.rs.RequestPortNum = tctx.MCPTool.Server.Port
-	if tctx.rs.RequestHeaders == nil {
-		tctx.rs.RequestHeaders = tctx.requestHeaders
-	}
-	output[constants.HeaderGotoServerInfo] = echo.GetEchoResponseWithAddendum(tctx.rs, map[string]any{"Goto-MCP-Server": t.Server.ID, "Goto-MCP-Tool": t.Name})
-	output["hops"] = tctx.hops.Steps
-	result.StructuredContent = output
+	result.StructuredContent = tctx.timeline
+	// tctx.rs.GotoProtocol = "MCP"
+	// tctx.rs.IsJSONRPC = true
+	// tctx.rs.RequestPortNum = tctx.MCPTool.Server.Port
+	// if tctx.rs.RequestHeaders == nil {
+	// 	tctx.rs.RequestHeaders = tctx.requestHeaders
+	// }
 }
 
 func createContent(key string, result any) (gomcp.Content, any) {
@@ -262,101 +242,4 @@ func createContent(key string, result any) (gomcp.Content, any) {
 		data = result
 	}
 	return content, data
-}
-
-func (tctx *ToolCallContext) notifyClient(msg string, stats ...float64) {
-	var total, progress float64
-	if tctx.Response != nil {
-		total = float64(tctx.Response.Count())
-	}
-	if len(stats) > 0 {
-		progress = stats[0]
-	}
-	if len(stats) > 1 {
-		total = stats[1]
-	}
-	params := &gomcp.ProgressNotificationParams{
-		ProgressToken: tctx.req.Params.Meta.GetMeta()["progressToken"],
-		Total:         total,
-		Progress:      progress,
-		Message:       msg,
-	}
-	tctx.req.Session.NotifyProgress(tctx.ctx, params)
-}
-
-func (tctx *ToolCallContext) assignClientHops(text string, data map[string]any) map[string]any {
-	if data == nil {
-		json := util.JSONFromJSONText(text)
-		if json != nil {
-			data = json.Object()
-		}
-	}
-	if s := data["hops"]; s != nil {
-		if steps, ok := s.([]any); ok {
-			for _, step := range steps {
-				tctx.hops.AddRemote(step)
-			}
-		}
-		delete(data, "hops")
-	}
-	if len(data) == 0 {
-		data = nil
-	}
-	return data
-}
-
-func (tctx *ToolCallContext) Log(msg string, args ...any) string {
-	msg = fmt.Sprintf(msg, args...)
-	tctx.log = append(tctx.log, msg)
-	return msg
-}
-
-func (tctx *ToolCallContext) Flush(print bool) string {
-	msg := strings.Join(tctx.log, " --> ")
-	tctx.log = []string{}
-	if print {
-		log.Println(msg)
-	}
-	return msg
-}
-
-func (tctx *ToolCallContext) Hop(msg string) {
-	if msg != "" {
-		tctx.hops.Add(msg)
-	}
-}
-
-func (tctx *ToolCallContext) applyDelay() {
-	if tctx.args.Delay != nil {
-		d := tctx.args.Delay.Compute()
-		tctx.notifyClient(tctx.Log("Server %s Tool %s: \U0001F634\U0001F4A4 sleeping for [%s]", tctx.Label, tctx.Tool.Name, d), 0)
-		tctx.args.Delay.Apply()
-	}
-}
-
-func getRequestHeaders(ctx context.Context, req *gomcp.CallToolRequest, rs *util.RequestStore) http.Header {
-	headers := req.Extra.Header
-	if rs != nil {
-		if headers != nil {
-			rs.RequestHeaders = headers
-		} else {
-			headers = rs.RequestHeaders
-		}
-	}
-	if headers == nil {
-		headers = util.GetRequestHeaders(ctx)
-	}
-	if headers != nil && rs != nil {
-		headers["RequestURI"] = []string{rs.RequestURI}
-		headers["RequestHost"] = []string{rs.RequestHost}
-	}
-	return headers
-}
-
-func parseArgs(raw json.RawMessage) (args *aicommon.ToolCallArgs, err error) {
-	if len(raw) > 0 {
-		args = aicommon.NewCallArgs()
-		err = json.Unmarshal([]byte(raw), &args)
-	}
-	return
 }

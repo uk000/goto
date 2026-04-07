@@ -133,6 +133,8 @@ func (d *Delay) Apply() time.Duration {
 			}
 			return d.computedDelay
 		}
+	} else {
+		d.computedDelay = 0
 	}
 	return 0
 }

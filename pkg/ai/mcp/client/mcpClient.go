@@ -28,6 +28,7 @@ import (
 	"goto/pkg/transport"
 	"goto/pkg/types"
 	"goto/pkg/util"
+	"goto/pkg/util/timeline"
 	"log"
 	"net/http"
 	"slices"
@@ -57,6 +58,7 @@ type ToolCall struct {
 	TLS          bool                   `json:"tls,omitempty"`
 	ForceSSE     bool                   `json:"forceSSE,omitempty"`
 	Raw          bool                   `json:"neat,omitempty"`
+	DataOnly     bool                   `json:"dataOnly,omitempty"`
 	Args         *aicommon.ToolCallArgs `json:"args,omitempty"`
 	Headers      *types.Headers         `json:"headers,omitempty"`
 	Delay        string                 `json:"delay,omitempty"`
@@ -66,49 +68,67 @@ type ToolCall struct {
 	delayD       *types.Delay           `json:"-"`
 }
 
+type ToolCallContext struct {
+	ctx      context.Context
+	client   *MCPClient
+	session  *MCPSession
+	tc       *ToolCall
+	callerId string
+	args     *aicommon.ToolCallArgs
+	rounds   int
+	result   *MCPResult
+}
+
+type MCPRequestContext struct {
+	requestID string
+	sessionID string
+	tctx      *ToolCallContext
+}
+
 type MCPSession struct {
-	ID              string
-	Name            string
-	CallerId        string
-	Listener        string
-	URL             string
-	Authority       string
-	SSE             bool
-	Operation       string
-	Hops            *util.Hops
-	FirstActivityAt time.Time
-	LasatActivityAt time.Time
-	session         *gomcp.ClientSession
-	mcpClient       *MCPClient
-	currentRequest  string
-	currentToolCall *ToolCall
-	currentArgs     *aicommon.ToolCallArgs
-	ongoingCalls    map[string]*MCPResult
-	inHeaders       http.Header
-	outHeaders      *types.Headers
-	ResponseHeaders http.Header
-	requestContext  context.Context
-	transport       gomcp.Transport
+	Ctx               context.Context
+	ID                string
+	Name              string
+	CallerId          string
+	Listener          string
+	URL               string
+	Authority         string
+	SSE               bool
+	Operation         string
+	tc                *ToolCall
+	Timeline          *timeline.Timeline
+	FirstActivityAt   time.Time
+	LasatActivityAt   time.Time
+	Stop              bool
+	session           *gomcp.ClientSession
+	mcpClient         *MCPClient
+	client            *gomcp.Client
+	clientPayload     *MCPNamedClientPayload
+	currentRequest    string
+	ongoingCalls      map[string]*ToolCallContext
+	inHeaders         http.Header
+	outHeaders        *types.Headers
+	currentClientInfo *timeline.GotoClientInfo
+	transport         gomcp.Transport
 }
 
 type MCPClient struct {
-	ID                   string
-	Name                 string
-	CallerId             string
-	Listener             string
-	SSE                  bool
-	TLS                  bool
-	Stop                 bool
-	ActiveSessions       map[string]*MCPSession
-	httpClient           *http.Client
-	ht                   transport.IHTTPTransportIntercept
-	mcpTransport         *MCPClientInterceptTransport
-	localProgressChan    chan *types.Pair[string, any]
-	upstreamProgressChan chan *types.Pair[string, any]
-	client               *gomcp.Client
-	clientPayload        *MCPNamedClientPayload
-	sessionCounter       atomic.Int32
-	lock                 sync.RWMutex
+	Port           int
+	ID             string
+	Name           string
+	CallerId       string
+	Listener       string
+	SSE            bool
+	TLS            bool
+	ActiveSessions map[string]*MCPSession
+	httpClient     *http.Client
+	ht             transport.IHTTPTransportIntercept
+	mcpTransport   *MCPClientInterceptTransport
+	stream         chan *types.Pair[string, any]
+	updateCallback timeline.TimelineUpdateNotifierFunc
+	endCallback    timeline.TimelineEndNotifierFunc
+	sessionCounter atomic.Int32
+	lock           sync.RWMutex
 }
 
 type MCPNamedClientPayload struct {
@@ -123,32 +143,6 @@ type MCPClientInterceptTransport struct {
 	streamTransport *gomcp.StreamableClientTransport
 	gomcp.Transport
 }
-
-type MCPCallEvent struct {
-	LocalUpdate string
-	RemoteData  *types.Pair[string, any]
-}
-
-type MCPCallResult struct {
-	ClientInfo   map[string]map[string]any
-	LocalUpdates []string
-	RemoteData   map[string]any
-	parent       *MCPResult
-}
-
-type MCPResult struct {
-	URL                  string
-	CallResults          []*MCPCallResult
-	OrderedEvents        []*MCPCallEvent
-	localProgressChan    chan *types.Pair[string, any]
-	upstreamProgressChan chan *types.Pair[string, any]
-}
-
-const (
-	GotoMCPSessionID = "goto-mcp-session-id"
-	GotoMCPRequestID = "goto-mcp-request-id"
-	GotoMCPCallerID  = "goto-mcp-caller-id"
-)
 
 var (
 	ClientCounter        = atomic.Int32{}
@@ -203,45 +197,32 @@ func SetRoots(name string, payload []byte) error {
 	return nil
 }
 
-func NewClient(port int, sse, h2, tls bool, callerId, listener, authority string, localProgressChan, upstreamProgressChan chan *types.Pair[string, any]) *MCPClient {
+func NewClient(port int, sse, h2, tls bool, callerId, listener, authority string, stream chan *types.Pair[string, any], updateCallback timeline.TimelineUpdateNotifierFunc, endCallback timeline.TimelineEndNotifierFunc) *MCPClient {
 	name := fmt.Sprintf("GotoMCP[%s][%s]", global.Funcs.GetListenerLabelForPort(port), callerId)
 	if sse {
 		name += "[sse]"
 	}
-	return newMCPClient(sse, h2, tls, name, callerId, listener, authority, localProgressChan, upstreamProgressChan)
+	return newMCPClient(port, sse, h2, tls, name, callerId, listener, authority, stream, updateCallback, endCallback)
 }
 
-func newMCPClient(sse, h2, tls bool, name, callerId, listener, authority string, localProgressChan, upstreamProgressChan chan *types.Pair[string, any]) *MCPClient {
+func newMCPClient(port int, sse, h2, tls bool, name, callerId, listener, authority string, stream chan *types.Pair[string, any], updateCallback timeline.TimelineUpdateNotifierFunc, endCallback timeline.TimelineEndNotifierFunc) *MCPClient {
 	//httpClient := transport.CreateSimpleHTTPClient()
 	ht := transport.CreateHTTPClient(name, h2, true, tls, authority, 0,
 		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
 	mcpClient := &MCPClient{
-		ID:                   fmt.Sprint(ClientCounter.Add(1)),
-		Name:                 name,
-		CallerId:             callerId,
-		Listener:             listener,
-		SSE:                  sse,
-		TLS:                  tls,
-		httpClient:           ht.HTTP(),
-		ActiveSessions:       map[string]*MCPSession{},
-		localProgressChan:    localProgressChan,
-		upstreamProgressChan: upstreamProgressChan,
-		sessionCounter:       atomic.Int32{},
-	}
-	mcpClient.client = gomcp.NewClient(&gomcp.Implementation{Name: name, Version: "2.0"}, &gomcp.ClientOptions{
-		KeepAlive:                   10 * time.Second,
-		CreateMessageHandler:        mcpClient.CreateMessageHandler,
-		ElicitationHandler:          mcpClient.ElicitationHandler,
-		ToolListChangedHandler:      mcpClient.ToolListChangedHandler,
-		PromptListChangedHandler:    mcpClient.PromptListChangedHandler,
-		ResourceListChangedHandler:  mcpClient.ResourceListChangedHandler,
-		ResourceUpdatedHandler:      mcpClient.ResourceUpdatedHandler,
-		LoggingMessageHandler:       mcpClient.LoggingMessageHandler,
-		ProgressNotificationHandler: mcpClient.ProgressNotificationHandler,
-	})
-	mcpClient.clientPayload = getNamedClientPayload(name)
-	if mcpClient.clientPayload != nil {
-		mcpClient.client.AddRoots(mcpClient.clientPayload.Roots...)
+		Port:           port,
+		ID:             fmt.Sprint(ClientCounter.Add(1)),
+		Name:           name,
+		CallerId:       callerId,
+		Listener:       listener,
+		SSE:            sse,
+		TLS:            tls,
+		httpClient:     ht.HTTP(),
+		ActiveSessions: map[string]*MCPSession{},
+		stream:         stream,
+		updateCallback: updateCallback,
+		endCallback:    endCallback,
+		sessionCounter: atomic.Int32{},
 	}
 	if t, ok := ht.Transport().(*transport.HTTPTransportIntercept); ok {
 		mcpClient.ht = t
@@ -303,11 +284,14 @@ func (c *MCPClient) OnConnClose() {
 	c.ActiveSessions = map[string]*MCPSession{}
 }
 
-func (c *MCPClient) CreateSession(url, operLabel string, tc *ToolCall, inHeaders http.Header) *MCPSession {
-	return c.CreateSessionWithHops(url, operLabel, tc, inHeaders, nil)
+func (c *MCPClient) CreateSession(ctx context.Context, url, operLabel string, tc *ToolCall, inHeaders http.Header) *MCPSession {
+	return c.CreateSessionWithTimeline(ctx, url, operLabel, tc, inHeaders, timeline.NewTimeline(c.Port, operLabel, nil, nil, inHeaders, c.stream, c.updateCallback, c.endCallback))
 }
 
-func (c *MCPClient) CreateSessionWithHops(url, operLabel string, tc *ToolCall, inHeaders http.Header, hops *util.Hops) *MCPSession {
+func (c *MCPClient) CreateSessionWithTimeline(ctx context.Context, url, operLabel string, tc *ToolCall, inHeaders http.Header, timeline *timeline.Timeline) *MCPSession {
+	if url == "" {
+		url = tc.URL
+	}
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		if c.TLS {
 			url = "https://" + url
@@ -315,18 +299,28 @@ func (c *MCPClient) CreateSessionWithHops(url, operLabel string, tc *ToolCall, i
 			url = "http://" + url
 		}
 	}
-	return c.newMCPSession(operLabel, url, tc, inHeaders, hops)
+	return c.newMCPSession(ctx, operLabel, url, tc, inHeaders, timeline)
 }
 
-func (c *MCPClient) newMCPSession(operLabel, url string, tc *ToolCall, inHeaders http.Header, hops *util.Hops) *MCPSession {
-	id := fmt.Sprintf("%s.%d", c.ID, c.sessionCounter.Add(1))
+func addSessionIDQuery(url, id string) string {
 	if !strings.Contains(url, "?") {
-		url = fmt.Sprintf("%s?%s=%s", url, GotoMCPSessionID, id)
+		url = fmt.Sprintf("%s?%s=%s", url, constants.HeaderGotoMCPSessionID, id)
 	} else {
-		url = fmt.Sprintf("%s&%s=%s", url, GotoMCPSessionID, id)
+		url = fmt.Sprintf("%s&%s=%s", url, constants.HeaderGotoMCPSessionID, id)
 	}
-	t := c.newMCPTransport(c.Name, url)
+	return url
+}
+
+func (c *MCPClient) newMCPSession(ctx context.Context, operLabel, url string, tc *ToolCall, inHeaders http.Header, t *timeline.Timeline) *MCPSession {
+	id := fmt.Sprintf("%s.%d", c.ID, c.sessionCounter.Add(1))
+	url = addSessionIDQuery(url, id)
+	transport := c.newMCPTransport(c.Name, url)
+	if tc.Headers == nil {
+		tc.Headers = types.NewHeaders()
+	}
+	tc.Headers.NonNil()
 	s := &MCPSession{
+		Ctx:          ctx,
 		ID:           id,
 		Name:         c.Name,
 		CallerId:     c.CallerId,
@@ -334,29 +328,43 @@ func (c *MCPClient) newMCPSession(operLabel, url string, tc *ToolCall, inHeaders
 		Operation:    operLabel,
 		URL:          url,
 		SSE:          c.SSE,
+		tc:           tc,
 		mcpClient:    c,
-		transport:    t,
-		ongoingCalls: map[string]*MCPResult{},
-	}
-
-	if hops != nil {
-		s.Hops = hops
-	} else {
-		s.Hops = util.NewHops(c.CallerId, c.Listener, operLabel)
+		inHeaders:    inHeaders,
+		outHeaders:   tc.Headers.Clone(),
+		Timeline:     t,
+		transport:    transport,
+		ongoingCalls: map[string]*ToolCallContext{},
 	}
 	c.lock.Lock()
 	c.ActiveSessions[s.ID] = s
 	c.lock.Unlock()
-	c.client.AddSendingMiddleware(s.SendingMiddleware)
-	c.client.AddReceivingMiddleware(s.ReceivingMiddleware)
-	s.currentToolCall = tc
-	s.inHeaders = inHeaders
-	s.outHeaders = tc.Headers
+	s.prepareClient()
 	return s
 }
 
+func (s *MCPSession) prepareClient() {
+	s.client = gomcp.NewClient(&gomcp.Implementation{Name: s.Name, Version: "2.0"}, &gomcp.ClientOptions{
+		KeepAlive:                   10 * time.Second,
+		CreateMessageHandler:        s.CreateMessageHandler,
+		ElicitationHandler:          s.ElicitationHandler,
+		ToolListChangedHandler:      s.ToolListChangedHandler,
+		PromptListChangedHandler:    s.PromptListChangedHandler,
+		ResourceListChangedHandler:  s.ResourceListChangedHandler,
+		ResourceUpdatedHandler:      s.ResourceUpdatedHandler,
+		LoggingMessageHandler:       s.LoggingMessageHandler,
+		ProgressNotificationHandler: s.ProgressNotificationHandler,
+	})
+	s.client.AddSendingMiddleware(s.SendingMiddleware)
+	s.client.AddReceivingMiddleware(s.ReceivingMiddleware)
+	s.clientPayload = getNamedClientPayload(s.Name)
+	if s.clientPayload != nil {
+		s.client.AddRoots(s.clientPayload.Roots...)
+	}
+}
+
 func (s *MCPSession) connect() error {
-	cs, err := s.mcpClient.client.Connect(context.Background(), s.transport, &gomcp.ClientSessionOptions{})
+	cs, err := s.client.Connect(context.Background(), s.transport, &gomcp.ClientSessionOptions{})
 	if err == nil {
 		s.session = cs
 		return nil
@@ -364,123 +372,140 @@ func (s *MCPSession) connect() error {
 	return err
 }
 
-func (s *MCPSession) Call(args *aicommon.ToolCallArgs, inHeaders http.Header) (*MCPResult, error) {
-	return s.CallTool(s.currentToolCall, args, inHeaders)
+func (s *MCPSession) newToolCallContext(args *aicommon.ToolCallArgs) *ToolCallContext {
+	tctx := &ToolCallContext{
+		ctx:      s.Ctx,
+		client:   s.mcpClient,
+		session:  s,
+		tc:       s.tc,
+		callerId: s.CallerId,
+		args:     args,
+		result:   NewMCPResult(s.URL, s.tc.Tool, s.Timeline),
+	}
+	if tctx.args == nil {
+		tctx.args = s.tc.Args
+	}
+	if tctx.args.DelayText == "" {
+		tctx.args.DelayText = s.tc.Delay
+	}
+	return tctx
 }
 
-func (s *MCPSession) CallTool(tc *ToolCall, args *aicommon.ToolCallArgs, inHeaders http.Header) (*MCPResult, error) {
+func (s *MCPSession) CallTool(args *aicommon.ToolCallArgs) (*MCPResult, error) {
 	if err := s.connect(); err != nil {
 		return nil, err
 	}
-	defer s.close()
-	msg := ""
-	result := NewMCPResult(tc.URL, s.mcpClient.localProgressChan, s.mcpClient.upstreamProgressChan)
-	s.ongoingCalls[tc.URL] = result
-	cr := result.addResult()
-	if tc == nil {
-		tc = s.currentToolCall
-	}
-	if tc == nil {
-		return nil, errors.New("No tool given")
-	}
-	if args == nil {
-		args = tc.Args
-	}
-	if args.DelayText == "" {
-		args.DelayText = tc.Delay
-	}
-	msg = fmt.Sprintf("%s [%s] Initiating Tool Call [%s] with sse[%t] on url [%s]. Request Count [%d], Concurrent [%d]", s.CallerId, s.Operation, tc.Tool, s.SSE, tc.URL, tc.RequestCount, tc.Concurrent)
-	s.Hops.Add(msg)
-	cr.addLocalUpdate(tc.Tool, msg)
-	ctx := context.Background()
-	if args.Remote != nil {
-		if len(args.Remote.ForwardHeaders) == 0 && tc.Headers != nil && tc.Headers.Request != nil {
-			args.Remote.ForwardHeaders = tc.Headers.Request.Forward
+	tctx := s.newToolCallContext(args)
+	return tctx.call()
+}
+
+func (tctx *ToolCallContext) prepare() {
+	if tctx.args.Remote != nil {
+		if len(tctx.args.Remote.ForwardHeaders) == 0 && tctx.session.outHeaders != nil && tctx.session.outHeaders.Request != nil {
+			tctx.args.Remote.ForwardHeaders = tctx.session.outHeaders.Request.Forward
 		}
 	}
-	s.currentArgs = args
-	outHeaders := s.outHeaders
-	if outHeaders == nil {
-		outHeaders = tc.Headers
+	if !tctx.tc.Raw {
+		tctx.session.outHeaders.Request.Add["Host"] = tctx.tc.Authority
+		tctx.session.outHeaders.Request.Add["User-Agent"] = tctx.callerId
 	}
-	if outHeaders == nil {
-		outHeaders = types.NewHeaders()
+	tctx.ctx = util.WithContextHeaders(tctx.ctx, tctx.session.outHeaders)
+	if tctx.tc.RequestCount == 0 {
+		tctx.tc.RequestCount = 1
 	}
-	if !tc.Raw {
-		outHeaders.Request.Add["Host"] = tc.Authority
-		outHeaders.Request.Add["User-Agent"] = s.CallerId
+	if tctx.tc.Concurrent == 0 {
+		tctx.tc.Concurrent = 1
 	}
-	ctx = util.WithContextHeaders(ctx, outHeaders)
-	s.requestContext = ctx
-	if inHeaders != nil {
-		s.inHeaders = inHeaders
-	}
-	requestCount := tc.RequestCount
-	if requestCount == 0 {
-		requestCount = 1
-	}
-	concurrent := tc.Concurrent
-	if concurrent == 0 {
-		concurrent = 1
-	}
-	rounds := requestCount / concurrent
-	msg = fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", s.CallerId, requestCount, rounds, concurrent, tc.URL)
-	s.Hops.Add(msg)
-	cr.addLocalUpdate(tc.Tool, msg)
-	for i := 1; i <= rounds; i++ {
-		cr := result.addResult()
-		requestID := fmt.Sprintf("%s.%d", s.ID, i)
-		msg = fmt.Sprintf("[%s] Calling tool [%s] on url [%s]. Request #%d/%d", s.CallerId, tc.Tool, tc.URL, i, requestCount)
-		s.Hops.Add(msg)
-		cr.addLocalUpdate(tc.Tool, msg)
-		args.AddMetadata(GotoMCPRequestID, requestID)
-		args.AddMetadata(GotoMCPCallerID, s.CallerId)
-		toolResult, err := s.session.CallTool(ctx, &gomcp.CallToolParams{Name: tc.Tool, Arguments: args})
+	tctx.rounds = tctx.tc.RequestCount / tctx.tc.Concurrent
+}
+
+func (tctx *ToolCallContext) reportInitiateToolCall() {
+	msg := fmt.Sprintf("%s [%s] Initiating Tool Call [%s] on URL [%s], Request Count [%d], Concurrent [%d]",
+		tctx.callerId, tctx.session.Operation, tctx.tc.Tool, tctx.tc.URL, tctx.tc.RequestCount, tctx.tc.Concurrent)
+	clientInfo := timeline.BuildGotoClientInfo(tctx.client.Port, tctx.callerId, tctx.tc.Tool, tctx.tc.URL, tctx.tc.Server, tctx.session.inHeaders, nil,
+		tctx.args, nil, tctx.tc.RequestCount, tctx.tc.Concurrent, map[string]any{
+			"Tool-Call": tctx.tc,
+		})
+	tctx.session.Timeline.AddEvent(tctx.callerId, msg, clientInfo, nil, true)
+}
+
+func (tctx *ToolCallContext) reportToolCallRequest(index int, args *aicommon.ToolCallArgs) {
+	msg := fmt.Sprintf("%s [%s] Calling Tool [%s] on URL [%s], Request# [%d/%d], Args: %+v",
+		tctx.callerId, tctx.session.Operation, tctx.tc.Tool, tctx.tc.URL, index, tctx.tc.RequestCount, args)
+	tctx.session.Timeline.AddEvent(tctx.callerId, msg, nil, nil, true)
+}
+
+func (tctx *ToolCallContext) reportToolCallFailure(index int, err string) {
+	msg := fmt.Sprintf("%s [%s] Request# [%d/%d], Failed to call tool [%s] on URL [%s] with error [%s]",
+		tctx.callerId, tctx.session.Operation, index, tctx.tc.RequestCount, tctx.tc.Tool, tctx.tc.URL, err)
+	tctx.session.Timeline.AddEvent(tctx.callerId, msg, nil, nil, true)
+}
+
+func (tctx *ToolCallContext) reportToolCallSuccess(index int) {
+	msg := fmt.Sprintf("%s [%s] Request# [%d/%d], Tool [%s] called successfully on URL [%s]",
+		tctx.callerId, tctx.session.Operation, index, tctx.tc.RequestCount, tctx.tc.Tool, tctx.tc.URL)
+	tctx.session.Timeline.AddEvent(tctx.callerId, msg, nil, nil, true)
+}
+
+func (tctx *ToolCallContext) reportToolCallResult(toolResult *gomcp.CallToolResult) {
+	tctx.session.Timeline.AddData(fmt.Sprintf("%s->%s", tctx.callerId, tctx.tc.Tool), toolResult, true)
+}
+
+func (tctx *ToolCallContext) call() (*MCPResult, error) {
+	defer tctx.session.close()
+	tctx.prepare()
+	tctx.reportInitiateToolCall()
+
+	for i := 1; i <= tctx.rounds; i++ {
+		requestID := fmt.Sprintf("%s.%d", tctx.session.ID, i)
+		tctx.session.ongoingCalls[requestID] = tctx
+		args := tctx.args.Clone()
+		args.AddMetadata(constants.HeaderGotoMCPRequestID, requestID)
+		args.AddMetadata(constants.HeaderGotoMCPSessionID, tctx.session.ID)
+		args.AddMetadata(constants.HeaderGotoMCPCallerID, tctx.callerId)
+		tctx.reportToolCallRequest(i, args)
+		ctx := context.WithValue(tctx.ctx, constants.HeaderGotoMCPRequestID, requestID)
+		toolResult, err := tctx.session.session.CallTool(ctx, &gomcp.CallToolParams{Name: tctx.tc.Tool, Arguments: args})
 		if err != nil {
-			msg = fmt.Sprintf("%s --> Request #%d/%d: Failed to call tool [%s]/sse[%t] on url [%s] with error [%s]", s.CallerId, i, requestCount, tc.Tool, s.SSE, tc.URL, err.Error())
-			s.Hops.Add(msg)
-			log.Println(s.Hops.AsJSONText())
-			cr.addLocalUpdate(tc.Tool, msg)
+			tctx.reportToolCallFailure(i, err.Error())
+		} else if toolResult != nil {
+			tctx.reportToolCallSuccess(i)
+			tctx.result.storeCallResult(requestID, toolResult)
 		} else {
-			cr.storeResult(tc, toolResult, s.Hops)
-			msg = fmt.Sprintf("%s --> Request #%d/%d: Tool [%s](sse=%t) successful on URL [%s]", s.CallerId, i, requestCount, tc.Tool, s.SSE, tc.URL)
-			s.Hops.Add(fmt.Sprintf("%s %s", s.CallerId, msg))
-			log.Println(msg)
+			tctx.reportToolCallFailure(i, "No Error, No Result")
 		}
 	}
-	return result, nil
+	return tctx.result, nil
 }
 
 func (c *MCPClient) InterceptRequest(r *http.Request) {
 	qp := r.URL.Query()
 	var s *MCPSession
 	var tool, callerId string
-	if sessionID := qp[GotoMCPSessionID]; len(sessionID) > 0 && len(sessionID[0]) > 0 {
+	if sessionID := qp[constants.HeaderGotoMCPSessionID]; len(sessionID) > 0 && len(sessionID[0]) > 0 {
 		s = c.ActiveSessions[sessionID[0]]
 	}
 	if s != nil {
 		callerId = s.CallerId
 		outHeaders := s.outHeaders
-		if outHeaders == nil && s.requestContext != nil {
-			outHeaders = util.GetContextHeaders(s.requestContext)
+		if outHeaders == nil && s.Ctx != nil {
+			outHeaders = util.GetContextHeaders(s.Ctx)
 		}
 		if outHeaders != nil && outHeaders.Request != nil {
 			label := fmt.Sprintf("MCP client request for %s", s.mcpClient.CallerId)
 			outHeaders.Request.UpdateHeaders(r.Header, label)
 			types.ForwardHeaders(s.inHeaders, r.Header, slices.Values(outHeaders.Request.Forward), label)
 		}
-		if s.currentToolCall != nil {
-			tool = s.currentToolCall.Tool
+		if s.tc != nil {
+			tool = s.tc.Tool
 		}
-		result := s.ongoingCalls[s.currentToolCall.URL]
-		if result != nil {
-			clientInfo := util.BuildGotoClientInfo(nil, 0, s.Name, "", s.currentToolCall.Tool, s.currentToolCall.URL, s.currentToolCall.Server, nil, s.currentArgs,
-				s.inHeaders, r.Header, outHeaders.Request.Forward, outHeaders.Request.Add, outHeaders.Request.Remove,
-				map[string]any{
-					"Tool-Call": s.currentToolCall,
-				})
-			result.addClientInfo(s.ID, clientInfo)
+		if v := r.Context().Value(constants.HeaderGotoMCPRequestID); v != nil {
+			if requestID, ok := v.(string); ok {
+				r.Header.Add(constants.HeaderGotoMCPRequestID, requestID)
+			}
 		}
+		r.Header.Add(constants.HeaderGotoMCPServer, s.tc.Server)
+		r.Header.Add(constants.HeaderGotoMCPTool, s.tc.Tool)
 	}
 	if len(r.Header["Host"]) > 0 {
 		r.Host = r.Header["Host"][0]
@@ -493,24 +518,31 @@ func (c *MCPClient) InterceptResponse(r *http.Response) {
 	var s *MCPSession
 	var tool, callerId string
 	qp := r.Request.URL.Query()
-	if sessionID := qp[GotoMCPSessionID]; len(sessionID) > 0 && len(sessionID[0]) > 0 {
+	if sessionID := qp[constants.HeaderGotoMCPSessionID]; len(sessionID) > 0 && len(sessionID[0]) > 0 {
 		s = c.ActiveSessions[sessionID[0]]
 	}
 	if s != nil {
 		callerId = s.CallerId
 		outHeaders := s.outHeaders
-		if outHeaders == nil && s.requestContext != nil {
-			outHeaders = util.GetContextHeaders(s.requestContext)
+		if outHeaders == nil && s.Ctx != nil {
+			outHeaders = util.GetContextHeaders(s.Ctx)
 		}
 		if outHeaders != nil && outHeaders.Response != nil {
 			outHeaders.Response.UpdateHeaders(r.Header, fmt.Sprintf("MCP client response for %s", s.mcpClient.CallerId))
 		}
-		if s.currentToolCall != nil {
-			tool = s.currentToolCall.Tool
+		if s.tc != nil {
+			tool = s.tc.Tool
 		}
-		s.ResponseHeaders = r.Header
+		requestID := r.Request.Header.Get(constants.HeaderGotoMCPRequestID)
+		if requestID != "" {
+			tctx := s.ongoingCalls[requestID]
+			if tctx != nil {
+				tctx.result.storeHeaders(requestID, r.Request.Header, r.Header)
+			}
+			delete(s.ongoingCalls, requestID)
+		}
 	}
-	log.Printf("---------- Response headers from MCP client {%s} for [tool: %s] to {%s} ------------\n", callerId, tool, r.Request.URL.String())
+	log.Printf("---------- Response headers from MCP client {%s} for {%s}[tool: %s] to {%s} ------------\n", callerId, s.currentRequest, tool, r.Request.URL.String())
 	log.Println(util.ToJSONText(r.Header))
 }
 
@@ -518,16 +550,17 @@ func (s *MCPSession) SendingMiddleware(next gomcp.MethodHandler) gomcp.MethodHan
 	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
 		s.currentRequest = method
 		tool := ""
-		if s.currentToolCall != nil {
-			tool = s.currentToolCall.Tool
+		if s.tc != nil {
+			tool = s.tc.Tool
 		}
 		log.Printf("---------- Outbound request from MCP client {%s} for {%s}[tool: %s] to {%s} ------------\n", s.CallerId, method, tool, s.URL)
 		if ctp, ok := req.GetParams().(*gomcp.CallToolParams); ok {
-			if args, ok := ctp.Arguments.(map[string]any); ok && args != nil {
-				args["goto-client"] = global.Self.HostLabel
+			if args, ok := ctp.Arguments.(*aicommon.ToolCallArgs); ok && args != nil {
+				args.AddMetadata("goto-client", global.Self.HostLabel)
 			}
 		}
-		return next(ctx, method, req)
+		result, err = next(ctx, method, req)
+		return
 	}
 }
 
@@ -535,8 +568,8 @@ func (s *MCPSession) ReceivingMiddleware(next gomcp.MethodHandler) gomcp.MethodH
 	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
 		s.currentRequest = method
 		tool := ""
-		if s.currentToolCall != nil {
-			tool = s.currentToolCall.Tool
+		if s.tc != nil {
+			tool = s.tc.Tool
 		}
 		log.Printf("---------- Response received by MCP client {%s} for {%s}[tool: %s] from {%s} ------------\n", s.CallerId, method, tool, s.URL)
 		return next(ctx, method, req)
@@ -585,171 +618,6 @@ func (s *MCPSession) ListResources() (*gomcp.ListResourcesResult, error) {
 	return s.session.ListResources(util.WithRequestHeaders(context.Background(), map[string][]string{"Host": []string{s.Authority}}), &gomcp.ListResourcesParams{})
 }
 
-func (c *MCPClient) ElicitationHandler(ctx context.Context, req *gomcp.ElicitRequest) (result *gomcp.ElicitResult, err error) {
-	if c.Stop {
-		log.Println("Received elicitation after client stopped. Ignoring.")
-		return
-	}
-	label := fmt.Sprintf("%s[Elicitation]", c.CallerId)
-	msg := ""
-	var hops *util.Hops
-	s := c.GetSession(req.Session.ID())
-	if s == nil {
-		msg = fmt.Sprintf("Session missing for ID [%s]", req.Session.ID())
-		hops = util.NewHops(c.CallerId, c.Listener, label)
-	} else {
-		hops = s.Hops
-	}
-	responseContent := map[string]any{}
-	if req.Params != nil {
-		responseContent["requestParams"] = req.Params
-	}
-	action := "approve"
-	var elicitPayload *MCPClientPayload
-	if c.clientPayload != nil {
-		elicitPayload = c.clientPayload.ElicitPayload
-	}
-	if elicitPayload != nil {
-		msg = fmt.Sprintf("%s %s --> %s", label, msg, elicitPayload.Contents[types.Random(len(elicitPayload.Contents))])
-		if elicitPayload.Delay != nil {
-			msg = fmt.Sprintf("%s --> Will delay", msg)
-		}
-		action = elicitPayload.Actions[types.Random(len(elicitPayload.Actions))]
-	}
-	if c.localProgressChan != nil {
-		c.localProgressChan <- types.NewPair[string, any](c.CallerId, msg)
-	}
-	if elicitPayload != nil && elicitPayload.Delay != nil {
-		delay := elicitPayload.Delay.ComputeAndApply()
-		msg = fmt.Sprintf("%s --> Delaying for %s", msg, delay.String())
-		responseContent["delay"] = delay.String()
-	}
-	log.Println(msg)
-	responseContent["hops"] = hops.Add(msg).Steps
-	result = &gomcp.ElicitResult{
-		Action:  action,
-		Content: responseContent,
-	}
-	return
-}
-
-func (c *MCPClient) CreateMessageHandler(ctx context.Context, req *gomcp.CreateMessageRequest) (*gomcp.CreateMessageResult, error) {
-	if c.Stop {
-		log.Println("Received message after client stopped. Ignoring.")
-		return nil, nil
-	}
-	isElicit := strings.Contains(req.Params.SystemPrompt, "elicit")
-	task := "Sampling/Message"
-	var payload *MCPClientPayload
-	if c.clientPayload != nil {
-		payload = c.clientPayload.SamplePayload
-	}
-	if isElicit {
-		task = "Elicitation"
-		if c.clientPayload != nil {
-			payload = c.clientPayload.ElicitPayload
-		}
-	}
-	label := fmt.Sprintf("%s[%s]", c.CallerId, task)
-	msg := ""
-	var hops *util.Hops
-	s := c.GetSession(req.Session.ID())
-	if s == nil {
-		msg = fmt.Sprintf("Session missing for ID [%s]", req.Session.ID())
-		hops = util.NewHops(c.CallerId, c.Listener, label)
-	} else {
-		hops = s.Hops
-	}
-	result := &gomcp.CreateMessageResult{}
-	var content, model, role string
-	if payload != nil {
-		if payload.Delay != nil {
-			msg = fmt.Sprintf("%s --> Will delay", msg)
-		}
-		if len(payload.Models) > 0 {
-			model = payload.Models[types.Random(len(payload.Models))]
-		}
-		if len(payload.Roles) > 0 {
-			role = payload.Roles[types.Random(len(payload.Roles))]
-		}
-		if len(payload.Contents) > 0 {
-			content = payload.Contents[types.Random(len(payload.Contents))]
-		}
-	}
-	if model == "" {
-		model = "GotoModel"
-	}
-	if role == "" {
-		role = "none"
-	}
-	if content == "" {
-		msg = fmt.Sprintf("%s %s --> Responding to [%s] request with no defined payload", label, msg, task)
-	}
-	if c.localProgressChan != nil {
-		c.localProgressChan <- types.NewPair[string, any](c.CallerId, msg)
-	}
-	if payload.Delay != nil {
-		delay := payload.Delay.ComputeAndApply()
-		msg = fmt.Sprintf("%s --> Delaying for %s", msg, delay.String())
-	}
-	log.Println(msg)
-	output := map[string]any{}
-	output["Content"] = content
-	hops.Add(msg).AddToOutput(output)
-	result.Model = model
-	result.Role = gomcp.Role(role)
-	result.Content = &gomcp.TextContent{Text: util.ToJSONText(output)}
-	result.StopReason = req.Params.SystemPrompt
-	return result, nil
-}
-
-func (c *MCPClient) ToolListChangedHandler(ctx context.Context, req *gomcp.ToolListChangedRequest) {
-
-}
-
-func (c *MCPClient) PromptListChangedHandler(ctx context.Context, req *gomcp.PromptListChangedRequest) {
-
-}
-
-func (c *MCPClient) ResourceListChangedHandler(ctx context.Context, req *gomcp.ResourceListChangedRequest) {
-
-}
-
-func (c *MCPClient) ResourceUpdatedHandler(ctx context.Context, req *gomcp.ResourceUpdatedNotificationRequest) {
-
-}
-
-func (c *MCPClient) LoggingMessageHandler(ctx context.Context, req *gomcp.LoggingMessageRequest) {
-
-}
-
-func (c *MCPClient) ProgressNotificationHandler(ctx context.Context, req *gomcp.ProgressNotificationClientRequest) {
-	if c.Stop {
-		log.Println("Received progress notification after client stopped. Ignoring.")
-		return
-	}
-	if req.Params.Message != "" && c.upstreamProgressChan != nil {
-		c.upstreamProgressChan <- types.NewPair[string, any](c.CallerId, req.Params.Message)
-	}
-	msg := ""
-	var hops *util.Hops
-	s := c.GetSession(req.Session.ID())
-	if s == nil {
-		msg = fmt.Sprintf("%s[ProgressNotification]. Session missing for ID [%s]. Upstream Message: [%s]", c.CallerId, req.Session.ID(), req.Params.Message)
-	} else {
-		msg = fmt.Sprintf("%s[%s: ProgressNotification]. Upstream Message: [%s]", c.CallerId, s.Operation, req.Params.Message)
-		hops = s.Hops
-	}
-	if req.Params.Progress > 0 {
-		msg = fmt.Sprintf("%s --> [Total: %f][Progress: %f]", msg, req.Params.Total, req.Params.Progress)
-	}
-	if hops != nil {
-		hops.Add(msg)
-	}
-	log.Println(msg)
-	time.Sleep(200 * time.Millisecond)
-}
-
 func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, headers *types.Headers, args ...*aicommon.ToolCallArgs) *ToolCall {
 	clone := *tc
 	if tool != "" {
@@ -776,170 +644,6 @@ func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, h
 	return &clone
 }
 
-func NewMCPResult(url string, localProgressChan, upstreamProgressChan chan *types.Pair[string, any]) *MCPResult {
-	return &MCPResult{
-		URL:                  url,
-		CallResults:          []*MCPCallResult{},
-		OrderedEvents:        []*MCPCallEvent{},
-		localProgressChan:    localProgressChan,
-		upstreamProgressChan: upstreamProgressChan,
-	}
-}
+func (tctx *ToolCallContext) addEvent(label, text string) {
 
-func (r *MCPResult) NewMCPCallResult() *MCPCallResult {
-	return &MCPCallResult{
-		RemoteData: map[string]any{},
-		ClientInfo: map[string]map[string]any{},
-		parent:     r,
-	}
-}
-
-func (r *MCPResult) addResult() *MCPCallResult {
-	cr := r.NewMCPCallResult()
-	r.CallResults = append(r.CallResults, cr)
-	return cr
-}
-
-func (r *MCPResult) addClientInfo(k string, v map[string]any) {
-	if len(r.CallResults) > 0 {
-		r.CallResults[0].addClientInfo(k, v)
-	}
-}
-
-func (r *MCPResult) addEvent(tool string, localMsg string, remoteK string, removeV any) {
-	e := &MCPCallEvent{}
-	if localMsg != "" {
-		e.LocalUpdate = localMsg
-		if r.localProgressChan != nil {
-			r.localProgressChan <- types.NewPair[string, any](tool, localMsg)
-		}
-	}
-	if remoteK != "" {
-		e.RemoteData = types.NewPair(remoteK, removeV)
-		if r.upstreamProgressChan != nil {
-			r.upstreamProgressChan <- types.NewPair(remoteK, removeV)
-		}
-	}
-	r.OrderedEvents = append(r.OrderedEvents, e)
-}
-
-func (r *MCPResult) storeResult(index int, tc *ToolCall, result *gomcp.CallToolResult, hops *util.Hops) {
-	if index < len(r.CallResults) {
-		r.CallResults[index].storeResult(tc, result, hops)
-	}
-}
-
-func (r *MCPResult) ToToolResult(msg string) *gomcp.CallToolResult {
-	result := &gomcp.CallToolResult{}
-	output := map[string]map[string]any{}
-	output["toolResult"] = map[string]any{"": msg}
-	upstreamClientInfoFound := false
-	if len(r.CallResults) > 0 && len(r.CallResults[0].RemoteData) > 0 {
-		clientInfo := r.CallResults[0].RemoteData[constants.HeaderGotoClientInfo]
-		if clientInfo != nil {
-			if m, ok := clientInfo.(map[string]any); ok {
-				output[constants.HeaderGotoClientInfo] = m
-				upstreamClientInfoFound = true
-			} else {
-				output[constants.HeaderGotoClientInfo] = map[string]any{"": clientInfo}
-				upstreamClientInfoFound = true
-			}
-			delete(r.CallResults[0].RemoteData, constants.HeaderGotoClientInfo)
-		}
-	}
-	if !upstreamClientInfoFound {
-
-	}
-	calls := map[string]map[int]map[string]any{}
-	calls[r.URL] = map[int]map[string]any{}
-	for i := 1; i < len(r.CallResults); i++ {
-		callOutput := map[string]any{}
-		calls[r.URL][i] = callOutput
-		callData := r.CallResults[i]
-		if m, ok := callData.RemoteData["structuredContent"].(map[string]any); ok {
-			if m[constants.HeaderGotoServerInfo] != nil {
-				callOutput[constants.HeaderGotoServerInfo] = m[constants.HeaderGotoServerInfo]
-			}
-			delete(m, constants.HeaderGotoServerInfo)
-			if len(m) > 0 {
-				callOutput["upstreamInfo"] = m
-			}
-		} else {
-			callOutput["upstreamInfo"] = callData.RemoteData["structuredContent"]
-		}
-		delete(callData.RemoteData, "structuredContent")
-		for k, v := range callData.RemoteData {
-			callOutput[k] = v
-		}
-	}
-	for i, event := range r.OrderedEvents {
-		if event.LocalUpdate != "" {
-			result.Content = append(result.Content, &gomcp.TextContent{Text: fmt.Sprintf("[%s][%d]: %s", r.URL, i, event.LocalUpdate)})
-		} else {
-			result.Content = append(result.Content, &gomcp.TextContent{Text: fmt.Sprintf("[%s][%d] %s: %+v", r.URL, i, event.RemoteData.Left, event.RemoteData.Right)})
-		}
-	}
-	output["Calls"] = map[string]any{}
-	for k, v := range calls {
-		output["Calls"][k] = v
-	}
-	result.StructuredContent = output
-	return result
-}
-
-func (r *MCPCallResult) addLocalUpdate(tool string, msg string) {
-	r.LocalUpdates = append(r.LocalUpdates, msg)
-	r.parent.addEvent(tool, msg, "", "")
-}
-
-func (r *MCPCallResult) addRemoteData(tool string, k string, v any) {
-	r.RemoteData[k] = v
-	r.parent.addEvent(tool, "", k, v)
-}
-
-func (r *MCPCallResult) addClientInfo(k string, v map[string]any) {
-	r.ClientInfo[k] = v
-}
-
-func (r *MCPCallResult) storeResult(tc *ToolCall, result *gomcp.CallToolResult, hops *util.Hops) {
-	if result.Content != nil {
-		//var anyContent any
-		if tc.Raw {
-			r.RemoteData["content"] = result.Content
-			//anyContent = result.Content
-		} else {
-			content := []any{}
-			for _, c := range result.Content {
-				if tc, ok := c.(*gomcp.TextContent); ok {
-					json := util.JSONFromJSONText(tc.Text)
-					if json != nil && !json.IsEmpty() {
-						content = append(content, json.Value())
-					} else {
-						content = append(content, tc.Text)
-					}
-				}
-			}
-			if len(content) == 1 {
-				r.RemoteData["content"] = content[0]
-			} else {
-				r.RemoteData["content"] = content
-			}
-			//anyContent = r.RemoteData["content"]
-		}
-		//r.parent.addEvent(tc.Tool, "", "content", map[string]any{"content": anyContent})
-	}
-	if result.StructuredContent != nil {
-		if serverOutput, ok := result.StructuredContent.(map[string]any); ok {
-			serverOutput = hops.MergeRemoteHops(serverOutput)
-			if tc.Raw {
-				for k, v := range serverOutput {
-					r.RemoteData[k] = v
-					r.parent.addEvent(tc.Tool, "", k, v)
-				}
-			} else {
-				r.RemoteData["structuredContent"] = serverOutput
-				r.parent.addEvent(tc.Tool, "", "structuredContent", serverOutput)
-			}
-		}
-	}
 }
