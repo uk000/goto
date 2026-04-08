@@ -139,7 +139,7 @@ func SetServicePayloadTransform(w http.ResponseWriter, r *http.Request, reg RPCS
 			if transforms != nil {
 				methodURI := method.GetURI() + "*"
 				port := util.GetRequestOrListenerPortNum(r)
-				if err := payload.PayloadManager.SetRPCResponsePayloadTransform(port, isStream, contentType, methodURI, transforms); err != nil {
+				if err := payload.PayloadManager.SetRPCResponsePayloadTransform(port, isStream, contentType, methodURI, transforms, 0, 0); err != nil {
 					msg = fmt.Sprintf("Port [%d]: Failed to set %s payload transform for service [%s] method [%s], content-type [%s], transforms: [%+v] with error [%s]",
 						port, serviceType, service.GetName(), method.GetName(), contentType, util.ToJSONText(transforms), err.Error())
 				} else {

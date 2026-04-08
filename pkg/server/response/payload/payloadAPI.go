@@ -50,6 +50,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRouteQ(payloadRouter, "/set/{grpc}?/body~{regexes}", setResponsePayload, "uri", "POST")
 	util.AddRouteQ(payloadRouter, "/set/{grpc}?/body/paths/{paths}", setResponsePayload, "uri", "POST")
 	util.AddRouteQ(payloadRouter, "/{grpc}?/transform", setPayloadTransform, "uri", "POST")
+	util.AddRouteQ(payloadRouter, "/{grpc}?/transform/delay={delay}", setPayloadTransform, "uri", "POST")
 	util.AddRoute(payloadRouter, "/clear", clearResponsePayload, "POST")
 	util.AddRoute(payloadRouter, "", getResponsePayload, "GET")
 	util.AddRoute(payloadRouter, "/{size}", respondWithPayload, "GET", "PUT", "POST")
@@ -87,7 +88,7 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
 			msg = fmt.Sprintf("Port [%s] Failed to set Default Stream Payload with error: %s", port, err)
 		}
 	} else if header != "" && uri != "" {
-		if err := pr.setResponsePayloadForURIWithHeader(isGRPC, payload, binary, uri, header, value, contentType); err == nil {
+		if err := pr.setResponsePayloadForURIWithHeader(isGRPC, payload, binary, uri, header, value, contentType, delayMin, delayMax); err == nil {
 			msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] and header [%s : %s] : content-type [%s], length [%d]",
 				port, uri, header, value, contentType, len(payload))
 		} else {
@@ -95,7 +96,7 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
 				port, uri, header, value, contentType, len(payload), err.Error())
 		}
 	} else if query != "" && uri != "" {
-		if err := pr.setResponsePayloadForURIWithQuery(isGRPC, payload, binary, uri, query, value, contentType); err == nil {
+		if err := pr.setResponsePayloadForURIWithQuery(isGRPC, payload, binary, uri, query, value, contentType, delayMin, delayMax); err == nil {
 			msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] and query [%s : %s] : content-type [%s], length [%d]",
 				port, uri, query, value, contentType, len(payload))
 		} else {
@@ -107,7 +108,7 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
 		if match == "" {
 			match = paths
 		}
-		if err := pr.setResponsePayloadForURIWithBodyMatch(isGRPC, payload, binary, uri, match, contentType, paths != ""); err == nil {
+		if err := pr.setResponsePayloadForURIWithBodyMatch(isGRPC, payload, binary, uri, match, contentType, paths != "", delayMin, delayMax); err == nil {
 			msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] and match [%+v] : content-type [%s], length [%d]",
 				port, uri, match, contentType, len(payload))
 		} else {
@@ -115,20 +116,20 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
 				port, uri, match, contentType, len(payload), err.Error())
 		}
 	} else if uri != "" {
-		pr.setURIResponsePayload(isGRPC, false, payload, binary, uri, contentType, nil)
+		pr.setURIResponsePayload(isGRPC, false, payload, binary, uri, contentType, nil, delayMin, delayMax)
 		msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] : content-type [%s], length [%d]",
 			port, uri, contentType, len(payload))
 	} else if header != "" {
-		pr.setHeaderResponsePayload(isGRPC, payload, binary, header, value, contentType)
+		pr.setHeaderResponsePayload(isGRPC, payload, binary, header, value, contentType, delayMin, delayMax)
 		msg = fmt.Sprintf("Port [%s] Payload set for header [%s : %s] : content-type [%s], length [%d]",
 			port, header, value, contentType, len(payload))
 	} else if query != "" {
-		pr.setQueryResponsePayload(isGRPC, payload, binary, query, value, contentType)
+		pr.setQueryResponsePayload(isGRPC, payload, binary, query, value, contentType, delayMin, delayMax)
 		msg = fmt.Sprintf("Port [%s] Payload set for query [%s : %s] : content-type [%s], length [%d]",
 			port, query, value, contentType, len(payload))
 	} else {
 		size := util.GetSizeParam(r, "size")
-		if err := pr.setDefaultResponsePayload(isGRPC, payload, contentType, size); err == nil {
+		if err := pr.setDefaultResponsePayload(isGRPC, payload, contentType, size, delayMin, delayMax); err == nil {
 			if size > 0 {
 				msg = fmt.Sprintf("Port [%s] Default Payload set with content-type: %s, size: %d",
 					port, contentType, size)
@@ -152,6 +153,7 @@ func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
 	isGRPC := util.GetStringParamValue(r, "grpc") != ""
 	isStream := strings.Contains(r.RequestURI, "stream")
 	contentType := r.Header.Get(constants.HeaderResponseContentType)
+	delayMin, delayMax, _, _ := util.GetDurationParam(r, "delay")
 	if contentType == "" {
 		contentType = constants.ContentTypeJSON
 	}
@@ -159,7 +161,7 @@ func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
 	if err := util.ReadJsonPayload(r, &transforms); err == nil {
 		uri := util.GetStringParamValue(r, "uri")
 		if uri != "" && transforms != nil {
-			pr.setURIResponsePayload(isGRPC, isStream, nil, false, uri, contentType, transforms)
+			pr.setURIResponsePayload(isGRPC, isStream, nil, false, uri, contentType, transforms, delayMin, delayMax)
 			msg = fmt.Sprintf("Port [%s] transform paths set for URI [%s] : [%s: %+v]",
 				port, uri, contentType, util.ToJSONText(transforms))
 			events.SendRequestEvent("Response Payload Configured", msg, r)

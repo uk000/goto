@@ -27,6 +27,7 @@ import (
 
 	"github.com/bufbuild/protocompile"
 	"github.com/bufbuild/protocompile/linker"
+	"google.golang.org/protobuf/reflect/protoregistry"
 )
 
 type ProtosStore struct {
@@ -89,7 +90,11 @@ func (ps *ProtosStore) AddProto(name, path string, content []byte, uploadOnly bo
 	if err != nil || uploadOnly {
 		return err
 	}
+	os.Setenv("GOLANG_PROTOBUF_REGISTRATION_CONFLICT", "ignore")
 	for _, file := range files {
+		if err = protoregistry.GlobalFiles.RegisterFile(file.ParentFile()); err != nil {
+			return err
+		}
 		sds := file.Services()
 		for i := 0; i < sds.Len(); i++ {
 			sd := sds.Get(i)
@@ -102,16 +107,16 @@ func (ps *ProtosStore) AddProto(name, path string, content []byte, uploadOnly bo
 	return nil
 }
 
-func (ps *ProtosStore) RemoveProto(proto string) {
-	if services, ok := ps.servicesByProto[proto]; ok {
+func (ps *ProtosStore) RemoveProto(name string) {
+	if services, ok := ps.servicesByProto[name]; ok {
 		for _, service := range services {
 			grpc.ServiceRegistry.RemoveService(service.Name)
 		}
-		os.Remove(ps.fileSources[proto])
+		os.Remove(ps.fileSources[name])
 		ps.lock.Lock()
 		defer ps.lock.Unlock()
-		delete(ps.fileSources, proto)
-		delete(ps.servicesByProto, proto)
+		delete(ps.fileSources, name)
+		delete(ps.servicesByProto, name)
 	}
 }
 

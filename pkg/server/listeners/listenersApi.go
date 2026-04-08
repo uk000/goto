@@ -101,7 +101,7 @@ func addListenerCACert(w http.ResponseWriter, r *http.Request) {
 			l.CACerts.AppendCertsFromPEM(data)
 			l.lock.Unlock()
 			events.SendRequestEvent("Listener CA Cert Added", msg, r)
-			if l.reopenListener() {
+			if l.ReopenListener() {
 				msg = fmt.Sprintf("CA Cert added for listener %d, and reopened\n", l.Port)
 			} else {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -123,7 +123,7 @@ func clearListenerCACerts(w http.ResponseWriter, r *http.Request) {
 		l.lock.Lock()
 		l.CACerts = x509.NewCertPool()
 		l.lock.Unlock()
-		if l.reopenListener() {
+		if l.ReopenListener() {
 			msg = fmt.Sprintf("CA Certs cleared for listener %d, and reopened\n", l.Port)
 		} else {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -186,7 +186,7 @@ func autoCert(w http.ResponseWriter, r *http.Request) {
 		if domain := util.GetStringParamValue(r, "domain"); domain != "" {
 			if cert, err := gototls.CreateCertificate(domain, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
 				l.Cert = cert
-				if l.reopenListener() {
+				if l.ReopenListener() {
 					msg = fmt.Sprintf("Cert auto-generated for listener %d\n", l.Port)
 					events.SendRequestEvent("Listener Cert Generated", msg, r)
 				} else {
@@ -210,7 +210,7 @@ func autoSNI(w http.ResponseWriter, r *http.Request) {
 		l.AutoSNI = true
 		l.AutoCert = false
 		msg := ""
-		if l.reopenListener() {
+		if l.ReopenListener() {
 			msg = fmt.Sprintf("Listener [%d] configured to auto-generate cert for any SNI", l.Port)
 		} else {
 			msg = fmt.Sprintf("Failed to reopen listener %d for auto-generate SNI\n", l.Port)
@@ -251,7 +251,7 @@ func openListener(w http.ResponseWriter, r *http.Request) {
 				msg = fmt.Sprintf("Failed to listen on port %d\n", l.Port)
 			}
 		} else {
-			l.reopenListener()
+			l.ReopenListener()
 			if l.TLS {
 				msg = fmt.Sprintf("TLS Listener reopened on port %d\n", l.Port)
 			} else {

@@ -21,8 +21,11 @@ import (
 	"fmt"
 	gotogrpc "goto/pkg/rpc/grpc"
 	"goto/pkg/server/middleware"
+	"goto/pkg/server/response/payload"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -65,21 +68,28 @@ func unaryHandler(ctx context.Context, req interface{}) (resp interface{}, err e
 		util.LogMessage(ctx, err.Error())
 		return
 	}
-	util.LogMessage(ctx, fmt.Sprintf("Received [%d] bytes", len(b)))
-
 	_, w := invokeMiddlewareChain(ctx, port, method, md, b)
 	responseHeaders := w.ToMetadata()
 	grpc.SendHeader(ctx, responseHeaders)
-	responseCount := 0
 	msg := ""
+	if _, rp, _, found := payload.PayloadManager.GetResponsePayload(port, true, method.URI, nil, nil, nil); found {
+		if rp.Delay != nil {
+			rp.Delay.ComputeAndApply(func(d time.Duration) {
+				log.Printf("%s.%s: Applying delay of %s", method.Service.Name, method.Name, d)
+			})
+		}
+		wa := middleware.NewGrpcHTTPResponseWriterAdapter(method.OutputType())
+		if _, err = wa.Write(rp.Payload); err == nil {
+			w = wa
+		}
+	}
 	if len(w.Responses) > 0 {
-		msg = fmt.Sprintf("Sending unary response, count [%d]", len(w.Responses))
-		responseCount = 1
 		resp = w.Responses[0]
+		msg = fmt.Sprintf("Sending unary response: %+v", resp)
 	} else {
 		msg = "No response to send"
 	}
-	gotogrpc.LogResponse(ctx, responseHeaders, 200, responseCount, -1, msg)
+	gotogrpc.LogResponse(ctx, responseHeaders, 200, 1, -1, msg)
 	return
 }
 
@@ -100,15 +110,35 @@ func GRPCUnaryHandler(method *gotogrpc.GRPCServiceMethod) grpc.MethodHandler {
 func streamHandler(ctx context.Context, port int, method *gotogrpc.GRPCServiceMethod, authority string, md map[string][]string, stream gotogrpc.GRPCStream) error {
 	var w *middleware.GrpcHTTPResponseWriterAdapter
 
-	hook := func(input proto.Message) (metadata.MD, []proto.Message, error) {
+	hook := func(input proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
 		b, err := gotogrpc.ParseRequest(input)
 		if err != nil {
 			util.LogMessage(ctx, err.Error())
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		util.LogMessage(ctx, fmt.Sprintf("Received [%d] bytes", len(b)))
 		_, w = invokeMiddlewareChain(ctx, port, method, md, b)
-		return w.ToMetadata(), w.Responses, nil
+		var delay *types.Delay
+		if _, rp, _, found := payload.PayloadManager.GetResponsePayload(port, true, method.URI, nil, nil, nil); found {
+			wa := middleware.NewGrpcHTTPResponseWriterAdapter(method.OutputType())
+			if rp.Delay != nil {
+				delay = rp.Delay
+			}
+			if len(rp.StreamPayload) > 0 {
+				for _, sp := range rp.StreamPayload {
+					if _, err = wa.Write(sp); err != nil {
+						break
+					}
+				}
+			} else {
+				delay = rp.Delay
+				_, err = wa.Write(rp.Payload)
+			}
+			if err == nil {
+				w = wa
+			}
+		}
+
+		return w.ToMetadata(), w.Responses, delay, nil
 	}
 	receiveCount, sendCount, err := stream.ChainInOut(hook, nil)
 	stream.Close()

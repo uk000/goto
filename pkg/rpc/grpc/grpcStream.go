@@ -74,7 +74,7 @@ type GRPCStream interface {
 	CrossHook(upstream GRPCStream, hook1, hook2 HookFunc, headersHook1, headersHook2 HeadersHookFunc) (int, int, error)
 }
 
-type HookFunc func(proto.Message) (metadata.MD, []proto.Message, error)
+type HookFunc func(proto.Message) (metadata.MD, []proto.Message, *types.Delay, error)
 type HeadersHookFunc func(metadata.MD) (metadata.MD, error)
 
 type GRPCBaseStream struct {
@@ -114,8 +114,9 @@ type StreamHook struct {
 	hook        HookFunc
 	in          chan proto.Message
 	out         chan proto.Message
-	link        chan []proto.Message
+	link        chan *types.Pair[[]proto.Message, *types.Delay]
 	output      []proto.Message
+	delay       *types.Delay
 	isInStream  bool
 	isOutStream bool
 	headersSent bool
@@ -129,7 +130,7 @@ type GRPCStreamTracker struct {
 }
 
 func init() {
-	global.Flags.EnableGRPCDebugLogs = true
+	global.Flags.EnableGRPCDebugLogs = false
 }
 
 func NewGRPCStreamForClient(port int, method *GRPCServiceMethod, cs *grpcdynamic.ClientStream, ss *grpcdynamic.ServerStream, bs *grpcdynamic.BidiStream) GRPCStream {
@@ -895,7 +896,7 @@ func NewStreamHook(label string, ctx context.Context, hook HookFunc, isInStream,
 		in:          make(chan proto.Message, 10),
 		out:         make(chan proto.Message, 10),
 		debugout:    make(chan proto.Message, 10),
-		link:        make(chan []proto.Message, 10),
+		link:        make(chan *types.Pair[[]proto.Message, *types.Delay], 10),
 	}
 }
 
@@ -924,7 +925,7 @@ func (sh *StreamHook) processMessage(input proto.Message) {
 	if global.Flags.EnableGRPCDebugLogs {
 		log.Printf("StreamHook: [%s] Invoking hook with input [%+v].\n", sh.label, input)
 	}
-	md, output, err := sh.hook(input)
+	md, output, delay, err := sh.hook(input)
 	if err != nil {
 		return
 	}
@@ -942,7 +943,7 @@ func (sh *StreamHook) processMessage(input proto.Message) {
 			if global.Flags.EnableGRPCDebugLogs {
 				log.Printf("StreamHook: [%s] Sending hook output to link.\n", sh.label)
 			}
-			sh.link <- output
+			sh.link <- types.NewPair(output, delay)
 		} else if len(output) > 0 {
 			if global.Flags.EnableGRPCDebugLogs {
 				log.Printf("StreamHook: [%s] Retaining hook output for future flush.\n", sh.label)
@@ -959,7 +960,7 @@ func (sh *StreamHook) flushOut() {
 		if global.Flags.EnableGRPCDebugLogs {
 			log.Printf("StreamHook: [%s] Flushing hook output to link.\n", sh.label)
 		}
-		sh.link <- sh.output
+		sh.link <- types.NewPair(sh.output, sh.delay)
 	} else {
 		if global.Flags.EnableGRPCDebugLogs {
 			log.Printf("StreamHook: [%s] No output retained for flushing to link.\n", sh.label)
@@ -969,11 +970,15 @@ func (sh *StreamHook) flushOut() {
 }
 
 func (sh *StreamHook) sendOutput() {
-	for responses := range sh.link {
+	for pair := range sh.link {
+		delay := pair.Right
 		if global.Flags.EnableGRPCDebugLogs {
-			log.Printf("StreamHook: [%s] Sending %d responses to out.\n", sh.label, len(responses))
+			log.Printf("StreamHook: [%s] Sending %d responses to out.\n", sh.label, len(pair.Left))
 		}
-		for _, resp := range responses {
+		for _, resp := range pair.Left {
+			if delay != nil {
+				delay.ComputeAndApply()
+			}
 			if EnableDebugHook {
 				sh.debugout <- resp
 			} else {
@@ -1018,12 +1023,12 @@ func (sh *StreamHook) readInput() {
 	sh.flushOut()
 }
 
-func IdentityHook(msg proto.Message) (metadata.MD, []proto.Message, error) {
-	return nil, []proto.Message{msg}, nil
+func IdentityHook(msg proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
+	return nil, []proto.Message{msg}, nil, nil
 }
 
-func IdentityHookWithDelay(delayFunc func() string) func(proto.Message) (metadata.MD, []proto.Message, error) {
-	return func(msg proto.Message) (metadata.MD, []proto.Message, error) {
+func IdentityHookWithDelay(delayFunc func() string) func(proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
+	return func(msg proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
 		if delayFunc != nil {
 			delay := delayFunc()
 			if global.Flags.EnableGRPCDebugLogs && delay != "" {
@@ -1038,22 +1043,22 @@ func IdentityHeadersHook(md metadata.MD) (metadata.MD, error) {
 	return md.Copy(), nil
 }
 
-func doTee(tee chan proto.Message, msg proto.Message) (metadata.MD, []proto.Message, error) {
+func doTee(tee chan proto.Message, msg proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
 	if global.Flags.EnableGRPCDebugLogs {
 		log.Printf("[DEBUG] TeeHook: Sending message to TEE channel: [%+v].\n", msg)
 	}
 	tee <- msg
-	return nil, []proto.Message{msg}, nil
+	return nil, []proto.Message{msg}, nil, nil
 }
 
-func TeeHook(tee chan proto.Message) func(proto.Message) (metadata.MD, []proto.Message, error) {
-	return func(msg proto.Message) (metadata.MD, []proto.Message, error) {
+func TeeHook(tee chan proto.Message) func(proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
+	return func(msg proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
 		return doTee(tee, msg)
 	}
 }
 
-func TeeHookWithDelay(tee chan proto.Message, delayFunc func() string) func(proto.Message) (metadata.MD, []proto.Message, error) {
-	return func(msg proto.Message) (metadata.MD, []proto.Message, error) {
+func TeeHookWithDelay(tee chan proto.Message, delayFunc func() string) func(proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
+	return func(msg proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
 		if delayFunc != nil {
 			delay := delayFunc()
 			if global.Flags.EnableGRPCDebugLogs && delay != "" {

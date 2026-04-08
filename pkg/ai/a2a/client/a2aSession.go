@@ -210,7 +210,7 @@ func (acs *A2ASession) Handle(ctx context.Context, client *http.Client, req *htt
 	}
 	resp, err = client.Do(req)
 	acs.updateResponseHeaders(resp)
-	acs.Result.storeHeaders(requestID, req.Header, resp.Header)
+	acs.Result.storeHeaders(requestID, req.Header, resp.Header, resp.StatusCode)
 	if err != nil {
 		return nil, fmt.Errorf("a2aClient.httpRequestHandler: http request failed: %w", err)
 	}

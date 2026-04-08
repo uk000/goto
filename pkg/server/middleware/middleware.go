@@ -174,7 +174,7 @@ func InvokeMiddlewareChainForGRPC(ctx context.Context, port int, method, host, u
 	wa := NewGrpcHTTPResponseWriterAdapter(desc)
 	r := ra.ToHTTPRequest()
 	r = r.WithContext(ctx)
-	ctx, r, _ = util.WithRequestStore(r)
+	ctx, r, _ = util.WithRequestStore(r, wa)
 	w, irw := intercept.WithIntercept(r, wa)
 	MiddlewareGRPCChainHead.ServeHTTP(w, r)
 	irw.Proceed()

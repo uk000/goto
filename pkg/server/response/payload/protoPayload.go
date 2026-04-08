@@ -22,6 +22,8 @@ import (
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
+	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -37,9 +39,7 @@ type RequestMatch struct {
 	BodyRegexes        []string          `yaml:"bodyRegexes" json:"bodyRegexes,omitempty"`
 	uriCaptureKeys     []string
 	uriRegexp          *regexp.Regexp
-	headerCaptureKeys  map[string]string
 	headerValueMatches map[string]string
-	queryCaptureKeys   map[string]string
 	queryValueMatches  map[string]string
 	router             *mux.Router
 }
@@ -72,9 +72,8 @@ type ResponsePayload struct {
 	HeaderCaptureKey string            `json:"headerCaptureKey,omitempty"`
 	QueryCaptureKey  string            `json:"queryCaptureKey,omitempty"`
 	Transforms       []*util.Transform `json:"transforms,omitempty"`
+	Delay            *types.Delay      `json:"delay,omitempty"`
 	StreamCount      int               `json:"streamCount,omitempty"`
-	StreamDelayMin   time.Duration     `json:"streamDelayMin,omitempty"`
-	StreamDelayMax   time.Duration     `json:"streamDelayMax,omitempty"`
 	Base64Encode     bool              `json:"base64Encode,omitempty"`
 	Base64Decode     bool              `json:"base64Decode,omitempty"`
 	DetectJSON       bool              `json:"detectJSON,omitempty"`
@@ -88,19 +87,26 @@ type ResponsePayload struct {
 }
 
 type ProtoPayloads struct {
-	DefaultPayload         *ResponsePayload                                  `json:"defaultPayload"`
-	PayloadByURIs          map[string]*ResponsePayload                       `json:"payloadByURIs"`
-	PayloadByHeaders       map[string]map[string]*ResponsePayload            `json:"responsePayloadByHeaders"`
-	PayloadByURIAndHeaders map[string]map[string]map[string]*ResponsePayload `json:"responsePayloadByURIAndHeaders"`
-	PayloadByQuery         map[string]map[string]*ResponsePayload            `json:"responsePayloadByQuery"`
-	PayloadByURIAndQuery   map[string]map[string]map[string]*ResponsePayload `json:"responsePayloadByURIAndQuery"`
-	PayloadByURIAndBody    map[string]map[string]*ResponsePayload            `json:"responsePayloadByURIAndBody"`
-	allURIResponsePayloads map[string]*ResponsePayload
-	lock                   sync.RWMutex
+	DefaultPayload          *ResponsePayload                                  `json:"defaultPayload"`
+	PayloadByURIWithMatches map[string][]*ResponsePayload                     `json:"payloadByURIWithMatches"`
+	PayloadByURIs           map[string]*ResponsePayload                       `json:"payloadByURIs"`
+	PayloadByHeaders        map[string]map[string]*ResponsePayload            `json:"responsePayloadByHeaders"`
+	PayloadByURIAndHeaders  map[string]map[string]map[string]*ResponsePayload `json:"responsePayloadByURIAndHeaders"`
+	PayloadByQuery          map[string]map[string]*ResponsePayload            `json:"responsePayloadByQuery"`
+	PayloadByURIAndQuery    map[string]map[string]map[string]*ResponsePayload `json:"responsePayloadByURIAndQuery"`
+	PayloadByURIAndBody     map[string]map[string]*ResponsePayload            `json:"responsePayloadByURIAndBody"`
+	allURIResponsePayloads  map[string]*ResponsePayload
+	lock                    sync.RWMutex
+}
+
+func NewRequestMatch(uriPrefix string) *RequestMatch {
+	return &RequestMatch{
+		URIPrefix: uriPrefix,
+	}
 }
 
 func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, header, query, value string,
-	bodyRegexes []string, paths []string, transforms []*util.Transform) (*ResponsePayload, error) {
+	bodyRegexes []string, paths []string, transforms []*util.Transform, delayMin, delayMax time.Duration) (*ResponsePayload, error) {
 	if contentType == "" {
 		contentType = constants.ContentTypeJSON
 	}
@@ -160,6 +166,7 @@ func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, h
 		HeaderCaptureKey: headerCaptureKey,
 		QueryCaptureKey:  queryCaptureKey,
 		Transforms:       transforms,
+		Delay:            types.NewDelay(delayMin, delayMax, -1),
 		fillers:          fillers,
 		router:           responseRouter,
 	}, nil
@@ -200,6 +207,21 @@ func (rp *ResponsePayload) Process() error {
 		}
 		rp.StreamPayload = cleanPayload
 	}
+
+	if rp.RequestCapture == nil {
+		rp.RequestCapture = newRequestCapture()
+	} else {
+		rp.RequestCapture.NonNil()
+	}
+	for k, v := range rp.RequestCapture.Headers {
+		captures, regexp := util.ReplaceFillersWithCaptureGroupRegex(v)
+		rp.RequestCapture.headerCaptureKeys[k] = types.NewPair(regexp, captures)
+	}
+	for k, v := range rp.RequestCapture.Queries {
+		captures, regexp := util.ReplaceFillersWithCaptureGroupRegex(v)
+		rp.RequestCapture.queryCaptureKeys[k] = types.NewPair(regexp, captures)
+	}
+
 	for _, match := range rp.RequestMatches {
 		if match.URIPrefix == "" {
 			return fmt.Errorf("URI match is required")
@@ -211,14 +233,15 @@ func (rp *ResponsePayload) Process() error {
 		match.uriRegexp = uriRE
 		match.uriCaptureKeys = util.GetFillersUnmarked(match.URIPrefix)
 		match.router = rr
+
 		for h, v := range match.Headers {
 			if h != "" {
 				if util.IsFiller(v) {
-					if match.headerCaptureKeys == nil {
-						match.headerCaptureKeys = map[string]string{}
+					if rp.RequestCapture.headerCaptureKeys[h] == nil {
+						captures, regexp := util.ReplaceFillersWithCaptureGroupRegex(v)
+						rp.RequestCapture.headerCaptureKeys[h] = types.NewPair(regexp, captures)
 					}
-					match.headerCaptureKeys[h] = v
-				} else {
+				} else if v != "{}" {
 					if match.headerValueMatches == nil {
 						match.headerValueMatches = map[string]string{}
 					}
@@ -229,11 +252,11 @@ func (rp *ResponsePayload) Process() error {
 		for q, v := range match.Queries {
 			if q != "" {
 				if util.IsFiller(v) {
-					if match.queryCaptureKeys == nil {
-						match.queryCaptureKeys = map[string]string{}
+					if rp.RequestCapture.queryCaptureKeys[q] == nil {
+						captures, regexp := util.ReplaceFillersWithCaptureGroupRegex(v)
+						rp.RequestCapture.queryCaptureKeys[q] = types.NewPair(regexp, captures)
 					}
-					match.queryCaptureKeys[q] = v
-				} else {
+				} else if v != "{}" {
 					if match.queryValueMatches == nil {
 						match.queryValueMatches = map[string]string{}
 					}
@@ -242,30 +265,15 @@ func (rp *ResponsePayload) Process() error {
 			}
 		}
 	}
-	if rp.RequestCapture != nil {
-		rp.RequestCapture.headerCaptureKeys = map[string]*types.Pair[*regexp.Regexp, []string]{}
-		for k, v := range rp.RequestCapture.Headers {
-			captures, regexp := util.ReplaceFillersWithCaptureGroupRegex(v)
-			rp.RequestCapture.headerCaptureKeys[k] = types.NewPair(regexp, captures)
-		}
-		rp.RequestCapture.queryCaptureKeys = map[string]*types.Pair[*regexp.Regexp, []string]{}
-		for k, v := range rp.RequestCapture.Queries {
-			captures, regexp := util.ReplaceFillersWithCaptureGroupRegex(v)
-			rp.RequestCapture.headerCaptureKeys[k] = types.NewPair(regexp, captures)
-		}
-	}
 	rp.fillers = util.GetFillersUnmarked(string(rp.Payload))
-
 	if len(rp.BodyMatch) > 0 {
 		rp.bodyMatchRegexp = regexp.MustCompile("(?i)" + strings.Join(rp.BodyMatch, ".*") + ".*")
 	}
 	return nil
 }
 
-func (rp *ResponsePayload) PrepareJSONStreamPayload(count int, delayMin, delayMax time.Duration) {
+func (rp *ResponsePayload) PrepareJSONStreamPayload(count int) {
 	rp.StreamCount = count
-	rp.StreamDelayMin = delayMin
-	rp.StreamDelayMax = delayMax
 	j, ok := util.JSONFromJSONText(string(rp.Payload))
 	if ok && !j.IsEmpty() {
 		jsonArray := j.ToJSONArray()
@@ -289,6 +297,7 @@ func (pp *ProtoPayloads) init() {
 	pp.lock.RLock()
 	defer pp.lock.RUnlock()
 	pp.DefaultPayload = nil
+	pp.PayloadByURIWithMatches = map[string][]*ResponsePayload{}
 	pp.PayloadByURIs = map[string]*ResponsePayload{}
 	pp.PayloadByHeaders = map[string]map[string]*ResponsePayload{}
 	pp.PayloadByURIAndHeaders = map[string]map[string]map[string]*ResponsePayload{}
@@ -313,10 +322,19 @@ func (pp *ProtoPayloads) setURIResponsePayload(uri string, rp *ResponsePayload) 
 	}
 }
 
+func (pp *ProtoPayloads) setURIResponsePayloadWithMatches(uri string, rp *ResponsePayload) {
+	pp.lock.Lock()
+	defer pp.lock.Unlock()
+	if rp != nil {
+		pp.PayloadByURIWithMatches[uri] = append(pp.PayloadByURIWithMatches[uri], rp)
+	}
+}
+
 func (pp *ProtoPayloads) removeURIResponsePayload(uri string) {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
 	delete(pp.PayloadByURIs, uri)
+	delete(pp.PayloadByURIWithMatches, uri)
 	pp.unsafeRemoveUntrackedURI(uri)
 }
 
@@ -470,40 +488,49 @@ func (pp *ProtoPayloads) removeURIWithBodyMatchResponsePayload(uri, match string
 func (pp *ProtoPayloads) HasAnyPayload() bool {
 	pp.lock.RLock()
 	defer pp.lock.RUnlock()
-	return len(pp.allURIResponsePayloads) > 0 || len(pp.PayloadByHeaders) > 0 ||
-		len(pp.PayloadByQuery) > 0 || pp.DefaultPayload != nil
+	return len(pp.allURIResponsePayloads) > 0 || len(pp.PayloadByURIWithMatches) > 0 ||
+		len(pp.PayloadByHeaders) > 0 || len(pp.PayloadByQuery) > 0 || pp.DefaultPayload != nil
 }
 
-func (pp *ProtoPayloads) GetResponsePayload(requestURI string, header map[string][]string, query map[string][]string, body io.ReadCloser) (newBodyReader io.ReadCloser, responsePayload *ResponsePayload, captures map[string]string, found bool) {
+func (pp *ProtoPayloads) GetMatchingResponsePayload(requestURI string, header http.Header, query url.Values, body io.ReadCloser) (
+	newBodyReader io.ReadCloser, responsePayload *ResponsePayload, captures map[string]string, found bool) {
 	pp.lock.RLock()
 	defer pp.lock.RUnlock()
-	for uri, rp := range pp.allURIResponsePayloads {
-		uriMatched := false
-		if rp.uriRegexp != nil && rp.uriRegexp.MatchString(requestURI) {
-			uriMatched = true
-		} else {
+outer:
+	for _, payloads := range pp.PayloadByURIWithMatches {
+		for _, rp := range payloads {
 			for _, m := range rp.RequestMatches {
-				if m.uriRegexp != nil && m.uriRegexp.MatchString(requestURI) {
-					uriMatched = true
+				if m.match(requestURI, header, query) {
+					responsePayload = rp
+					found = true
+					break outer
 				}
 			}
 		}
-		if uriMatched {
-			if !found && pp.PayloadByURIAndHeaders[uri] != nil {
-				responsePayload, found = getPayloadForKV(header, pp.PayloadByURIAndHeaders[uri])
+	}
+	if !found {
+		for uri, rp := range pp.allURIResponsePayloads {
+			uriMatched := false
+			if rp.uriRegexp != nil && rp.uriRegexp.MatchString(requestURI) {
+				uriMatched = true
 			}
-			if !found && pp.PayloadByURIAndQuery[uri] != nil {
-				responsePayload, found = getPayloadForKV(query, pp.PayloadByURIAndQuery[uri])
-			}
-			if !found && pp.PayloadByURIAndBody[uri] != nil && body != nil {
-				newBodyReader, responsePayload, captures, found = getPayloadForBodyMatch(body, pp.PayloadByURIAndBody[uri])
-			}
-			if !found && pp.PayloadByURIs[uri] != nil {
-				responsePayload = pp.PayloadByURIs[uri]
-				found = true
-			}
-			if found {
-				break
+			if uriMatched {
+				if !found && pp.PayloadByURIAndHeaders[uri] != nil {
+					responsePayload, found = getPayloadForKV(header, pp.PayloadByURIAndHeaders[uri])
+				}
+				if !found && pp.PayloadByURIAndQuery[uri] != nil {
+					responsePayload, found = getPayloadForKV(query, pp.PayloadByURIAndQuery[uri])
+				}
+				if !found && pp.PayloadByURIAndBody[uri] != nil && body != nil {
+					newBodyReader, responsePayload, captures, found = getPayloadForBodyMatch(body, pp.PayloadByURIAndBody[uri])
+				}
+				if !found && pp.PayloadByURIs[uri] != nil {
+					responsePayload = pp.PayloadByURIs[uri]
+					found = true
+				}
+				if found {
+					break
+				}
 			}
 		}
 	}
@@ -518,4 +545,56 @@ func (pp *ProtoPayloads) GetResponsePayload(requestURI string, header map[string
 		found = true
 	}
 	return
+}
+
+func (m *RequestMatch) match(requestURI string, headers http.Header, query url.Values) bool {
+	if m.uriRegexp != nil && !m.uriRegexp.MatchString(requestURI) {
+		return false
+	}
+	matched := true
+	for k := range m.Headers {
+		if !matchKV(k, m.headerValueMatches, headers.Get(k)) {
+			matched = false
+			break
+		}
+	}
+	if !matched {
+		return false
+	}
+	for k := range m.Queries {
+		if !matchKV(k, m.queryValueMatches, query.Get(k)) {
+			matched = false
+			break
+		}
+	}
+	return matched
+}
+
+func matchKV(k string, valueMatches map[string]string, v string) bool {
+	if len(v) == 0 {
+		return false
+	}
+	if v2 := valueMatches[k]; v2 != "" {
+		if !strings.EqualFold(v, v2) {
+			return false
+		}
+	}
+	return true
+}
+
+func newRequestCapture() *RequestCapture {
+	return &RequestCapture{
+		uriCaptureKeys:    []string{},
+		headerCaptureKeys: map[string]*types.Pair[*regexp.Regexp, []string]{},
+		queryCaptureKeys:  map[string]*types.Pair[*regexp.Regexp, []string]{},
+	}
+}
+
+func (rc *RequestCapture) NonNil() {
+	if rc.headerCaptureKeys == nil {
+		rc.headerCaptureKeys = map[string]*types.Pair[*regexp.Regexp, []string]{}
+	}
+	if rc.queryCaptureKeys == nil {
+		rc.queryCaptureKeys = map[string]*types.Pair[*regexp.Regexp, []string]{}
+	}
 }

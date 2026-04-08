@@ -31,6 +31,7 @@ type MCPResult struct {
 	Timeline            *timeline.Timeline
 	LastRequestHeaders  http.Header `json:"-"`
 	LastResponseHeaders http.Header `json:"-"`
+	LastResponseStatus  int         `json:"-"`
 	CallResults         map[string]*MCPCallResult
 }
 
@@ -41,6 +42,7 @@ type MCPCallResult struct {
 	RemoteTimeline  any             `json:"RemoteTimeline,omitempty"`
 	RequestHeaders  http.Header     `json:"RequestHeaders,omitempty"`
 	ResponseHeaders http.Header     `json:"ResponseHeaders,omitempty"`
+	ResponseStatus  int             `json:"ResponseStatus,omitempty"`
 }
 
 func NewMCPResult(server, tool string, t *timeline.Timeline) *MCPResult {
@@ -93,12 +95,14 @@ func extractDataAndTimeline(sc any) (data map[string]any, tl *timeline.Timeline)
 	return
 }
 
-func (r *MCPResult) storeHeaders(requestID string, requestHeaders, responseHeaders http.Header) {
+func (r *MCPResult) storeHeaders(requestID string, requestHeaders, responseHeaders http.Header, status int) {
 	cr := r.getOrAddCall(requestID)
 	cr.RequestHeaders = requestHeaders
 	cr.ResponseHeaders = responseHeaders
+	cr.ResponseStatus = status
 	r.LastRequestHeaders = requestHeaders
 	r.LastResponseHeaders = responseHeaders
+	r.LastResponseStatus = status
 }
 
 func (r *MCPResult) ToMCP() *gomcp.CallToolResult {

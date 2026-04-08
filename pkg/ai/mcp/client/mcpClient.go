@@ -537,7 +537,7 @@ func (c *MCPClient) InterceptResponse(r *http.Response) {
 		if requestID != "" {
 			tctx := s.ongoingCalls[requestID]
 			if tctx != nil {
-				tctx.result.storeHeaders(requestID, r.Request.Header, r.Header)
+				tctx.result.storeHeaders(requestID, r.Request.Header, r.Header, r.StatusCode)
 			}
 			delete(s.ongoingCalls, requestID)
 		}

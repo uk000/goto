@@ -16,40 +16,6 @@
 
 package ctl
 
-type GRPC struct {
-	Config []*GRPCConfig `yaml:"config,omitempty"`
-	Serve  []string      `yaml:"serve,omitempty"`
-}
-
-type GRPCConfig struct {
-	Protos   []ProtoConfig       `yaml:"protos,omitempty"`
-	Services []GRPCServiceConfig `yaml:"services,omitempty"`
-	Serve    []string            `yaml:"serve,omitempty"`
-}
-
-type ProtoConfig struct {
-	Name string `yaml:"name"`
-	Path string `yaml:"path"`
-}
-
-type GRPCServiceConfig struct {
-	Service string             `yaml:"service"`
-	Port    int                `yaml:"port"`
-	Methods []GRPCMethodConfig `yaml:"methods"`
-}
-
-type GRPCMethodConfig struct {
-	Method    string               `yaml:"method"`
-	Responses []GRPCResponseConfig `yaml:"responses"`
-}
-
-type GRPCResponseConfig struct {
-	Match       *RequestMatch  `yaml:"match,omitempty"`
-	Stream      *StreamConfig  `yaml:"stream,omitempty"`
-	Payload     map[string]any `yaml:"payload,omitempty"`
-	ContentType string         `yaml:"contentType,omitempty"`
-}
-
 type RequestMatch struct {
 	Headers []HeaderMatch `yaml:"headers"`
 }
@@ -57,11 +23,6 @@ type RequestMatch struct {
 type HeaderMatch struct {
 	Name  string `yaml:"name"`
 	Value string `yaml:"value,omitempty"`
-}
-
-type StreamConfig struct {
-	Count int    `yaml:"count"`
-	Delay string `yaml:"delay,omitempty"`
 }
 
 type Registry struct {

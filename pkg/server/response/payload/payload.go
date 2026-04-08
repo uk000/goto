@@ -19,9 +19,11 @@ package payload
 import (
 	"errors"
 	"fmt"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -63,27 +65,27 @@ func (pm *ResponsePayloadManager) SetRPCResponsePayload(port int, isStream bool,
 	if isStream {
 		err = pr.setStreamResponsePayload(true, payload, contentType, uri, header, value, count, delayMin, delayMax)
 	} else if isDefault {
-		err = pr.setDefaultResponsePayload(true, payload, contentType, len(payload))
+		err = pr.setDefaultResponsePayload(true, payload, contentType, len(payload), delayMin, delayMax)
 	} else if uri != "" {
 		if header != "" {
-			err = pr.setResponsePayloadForURIWithHeader(true, payload, false, uri, header, value, contentType)
+			err = pr.setResponsePayloadForURIWithHeader(true, payload, false, uri, header, value, contentType, delayMin, delayMax)
 		} else if regexes != "" || paths != "" {
 			match := regexes
 			if match == "" {
 				match = paths
 			}
-			err = pr.setResponsePayloadForURIWithBodyMatch(true, payload, false, uri, match, contentType, paths != "")
+			err = pr.setResponsePayloadForURIWithBodyMatch(true, payload, false, uri, match, contentType, paths != "", delayMin, delayMax)
 		} else {
-			err = pr.setURIResponsePayload(true, isStream, payload, false, uri, contentType, nil)
+			err = pr.setURIResponsePayload(true, isStream, payload, false, uri, contentType, nil, delayMin, delayMax)
 		}
 	} else if header != "" {
-		err = pr.setHeaderResponsePayload(true, payload, false, header, value, contentType)
+		err = pr.setHeaderResponsePayload(true, payload, false, header, value, contentType, delayMin, delayMax)
 	}
 	return
 }
 
-func (pm *ResponsePayloadManager) SetRPCResponsePayloadTransform(port int, isStream bool, contentType, uri string, transforms []*util.Transform) error {
-	return pm.GetPortResponse(port).setURIResponsePayload(true, isStream, nil, false, uri, contentType, transforms)
+func (pm *ResponsePayloadManager) SetRPCResponsePayloadTransform(port int, isStream bool, contentType, uri string, transforms []*util.Transform, delayMin, delayMax time.Duration) error {
+	return pm.GetPortResponse(port).setURIResponsePayload(true, isStream, nil, false, uri, contentType, transforms, delayMin, delayMax)
 }
 
 func (pm *ResponsePayloadManager) SetURIResponsePayloadWithMatches(port int, rp *ResponsePayload, isGRPC bool) error {
@@ -93,19 +95,22 @@ func (pm *ResponsePayloadManager) SetURIResponsePayloadWithMatches(port int, rp 
 	if err := rp.Process(); err != nil {
 		return err
 	}
+	if rp.StreamCount > 0 {
+		rp.IsStream = true
+		rp.PrepareJSONStreamPayload(rp.StreamCount)
+	}
 	pr := pm.GetPortResponse(port)
 	pp := pr.protoPayload(isGRPC)
 	for _, m := range rp.RequestMatches {
-		uri := strings.ToLower(m.URIPrefix)
-		pp.setURIResponsePayload(uri, rp)
+		pp.setURIResponsePayloadWithMatches(strings.ToLower(m.URIPrefix), rp)
 
 	}
 	return nil
 }
 
-func (pm *ResponsePayloadManager) GetResponsePayload(port int, isGRPC bool, requestURI string, header map[string][]string, query map[string][]string, body io.ReadCloser) (newBodyReader io.ReadCloser, responsePayload *ResponsePayload, captures map[string]string, found bool) {
+func (pm *ResponsePayloadManager) GetResponsePayload(port int, isGRPC bool, requestURI string, header http.Header, query url.Values, body io.ReadCloser) (newBodyReader io.ReadCloser, responsePayload *ResponsePayload, captures map[string]string, found bool) {
 	pr := pm.GetPortResponse(port)
-	return pr.protoPayload(isGRPC).GetResponsePayload(requestURI, header, query, body)
+	return pr.protoPayload(isGRPC).GetMatchingResponsePayload(requestURI, header, query, body)
 }
 
 func (pm *ResponsePayloadManager) getPortResponse(r *http.Request) *PortResponsePayloads {
@@ -152,11 +157,12 @@ func (pr *PortResponsePayloads) setStreamResponsePayload(isGRPC bool, payload []
 	uri = strings.ToLower(uri)
 	header = strings.ToLower(header)
 	value = strings.ToLower(value)
-	rp, err := newResponsePayload(payload, true, true, contentType, uri, header, "", value, nil, nil, nil)
+	rp, err := newResponsePayload(payload, true, true, contentType, uri, header, "", value, nil, nil, nil, delayMin, delayMax)
 	if err != nil {
 		return err
 	}
-	rp.PrepareJSONStreamPayload(count, delayMin, delayMax)
+	rp.PrepareJSONStreamPayload(count)
+	rp.Delay = types.NewDelay(delayMin, delayMax, -1)
 	pp := pr.protoPayload(isGRPC)
 	if len(payload) > 0 {
 		if uri != "" && header != "" {
@@ -174,11 +180,11 @@ func (pr *PortResponsePayloads) setStreamResponsePayload(isGRPC bool, payload []
 	return nil
 }
 
-func (pr *PortResponsePayloads) setDefaultResponsePayload(isGRPC bool, payload []byte, contentType string, size int) error {
+func (pr *PortResponsePayloads) setDefaultResponsePayload(isGRPC bool, payload []byte, contentType string, size int, delayMin, delayMax time.Duration) error {
 	if size > 0 {
 		payload = FixPayload(payload, size)
 	}
-	if rp, err := newResponsePayload(payload, false, true, contentType, "", "", "", "", nil, nil, nil); err == nil {
+	if rp, err := newResponsePayload(payload, false, true, contentType, "", "", "", "", nil, nil, nil, delayMin, delayMax); err == nil {
 		pr.protoPayload(isGRPC).setDefaultResponsePayload(rp)
 		return nil
 	} else {
@@ -186,11 +192,11 @@ func (pr *PortResponsePayloads) setDefaultResponsePayload(isGRPC bool, payload [
 	}
 }
 
-func (pr *PortResponsePayloads) setURIResponsePayload(isGRPC, isStream bool, payload []byte, binary bool, uri, contentType string, transforms []*util.Transform) error {
+func (pr *PortResponsePayloads) setURIResponsePayload(isGRPC, isStream bool, payload []byte, binary bool, uri, contentType string, transforms []*util.Transform, delayMin, delayMax time.Duration) error {
 	pp := pr.protoPayload(isGRPC)
 	uri = strings.ToLower(uri)
 	if len(payload) > 0 || len(transforms) > 0 {
-		if rp, err := newResponsePayload(payload, isStream, binary, contentType, uri, "", "", "", nil, nil, transforms); err == nil {
+		if rp, err := newResponsePayload(payload, isStream, binary, contentType, uri, "", "", "", nil, nil, transforms, delayMin, delayMax); err == nil {
 			pp.setURIResponsePayload(uri, rp)
 		} else {
 			return err
@@ -201,12 +207,12 @@ func (pr *PortResponsePayloads) setURIResponsePayload(isGRPC, isStream bool, pay
 	return nil
 }
 
-func (pr *PortResponsePayloads) setHeaderResponsePayload(isGRPC bool, payload []byte, binary bool, header, value, contentType string) error {
+func (pr *PortResponsePayloads) setHeaderResponsePayload(isGRPC bool, payload []byte, binary bool, header, value, contentType string, delayMin, delayMax time.Duration) error {
 	pp := pr.protoPayload(isGRPC)
 	header = strings.ToLower(header)
 	value = strings.ToLower(value)
 	if len(payload) > 0 {
-		if rp, err := newResponsePayload(payload, false, binary, contentType, "", header, "", value, nil, nil, nil); err == nil {
+		if rp, err := newResponsePayload(payload, false, binary, contentType, "", header, "", value, nil, nil, nil, delayMin, delayMax); err == nil {
 			pp.setHeaderResponsePayload(header, rp)
 		} else {
 			return err
@@ -217,12 +223,12 @@ func (pr *PortResponsePayloads) setHeaderResponsePayload(isGRPC bool, payload []
 	return nil
 }
 
-func (pr *PortResponsePayloads) setQueryResponsePayload(isGRPC bool, payload []byte, binary bool, query, value, contentType string) error {
+func (pr *PortResponsePayloads) setQueryResponsePayload(isGRPC bool, payload []byte, binary bool, query, value, contentType string, delayMin, delayMax time.Duration) error {
 	pp := pr.protoPayload(isGRPC)
 	query = strings.ToLower(query)
 	value = strings.ToLower(value)
 	if len(payload) > 0 {
-		if rp, err := newResponsePayload(payload, false, binary, contentType, "", "", query, value, nil, nil, nil); err == nil {
+		if rp, err := newResponsePayload(payload, false, binary, contentType, "", "", query, value, nil, nil, nil, delayMin, delayMax); err == nil {
 			pp.setQueryResponsePayload(query, rp)
 		} else {
 			return err
@@ -233,13 +239,13 @@ func (pr *PortResponsePayloads) setQueryResponsePayload(isGRPC bool, payload []b
 	return nil
 }
 
-func (pr *PortResponsePayloads) setResponsePayloadForURIWithHeader(isGRPC bool, payload []byte, binary bool, uri, header, value, contentType string) error {
+func (pr *PortResponsePayloads) setResponsePayloadForURIWithHeader(isGRPC bool, payload []byte, binary bool, uri, header, value, contentType string, delayMin, delayMax time.Duration) error {
 	pp := pr.protoPayload(isGRPC)
 	uri = strings.ToLower(uri)
 	header = strings.ToLower(header)
 	value = strings.ToLower(value)
 	if len(payload) > 0 {
-		if rp, err := newResponsePayload(payload, false, binary, contentType, uri, header, "", value, nil, nil, nil); err == nil {
+		if rp, err := newResponsePayload(payload, false, binary, contentType, uri, header, "", value, nil, nil, nil, delayMin, delayMax); err == nil {
 			pp.setURIWithHeaderResponsePayload(uri, header, rp)
 		} else {
 			return err
@@ -250,13 +256,13 @@ func (pr *PortResponsePayloads) setResponsePayloadForURIWithHeader(isGRPC bool, 
 	return nil
 }
 
-func (pr *PortResponsePayloads) setResponsePayloadForURIWithQuery(isGRPC bool, payload []byte, binary bool, uri, query, value, contentType string) error {
+func (pr *PortResponsePayloads) setResponsePayloadForURIWithQuery(isGRPC bool, payload []byte, binary bool, uri, query, value, contentType string, delayMin, delayMax time.Duration) error {
 	pp := pr.protoPayload(isGRPC)
 	uri = strings.ToLower(uri)
 	query = strings.ToLower(query)
 	value = strings.ToLower(value)
 	if len(payload) > 0 {
-		if rp, err := newResponsePayload(payload, false, binary, contentType, uri, "", query, value, nil, nil, nil); err == nil {
+		if rp, err := newResponsePayload(payload, false, binary, contentType, uri, "", query, value, nil, nil, nil, delayMin, delayMax); err == nil {
 			pp.setURIWithHeaderResponsePayload(uri, query, rp)
 		} else {
 			return err
@@ -267,7 +273,7 @@ func (pr *PortResponsePayloads) setResponsePayloadForURIWithQuery(isGRPC bool, p
 	return nil
 }
 
-func (pr *PortResponsePayloads) setResponsePayloadForURIWithBodyMatch(isGRPC bool, payload []byte, binary bool, uri, match, contentType string, isPaths bool) error {
+func (pr *PortResponsePayloads) setResponsePayloadForURIWithBodyMatch(isGRPC bool, payload []byte, binary bool, uri, match, contentType string, isPaths bool, delayMin, delayMax time.Duration) error {
 	pp := pr.protoPayload(isGRPC)
 	uri = strings.ToLower(uri)
 	if !isPaths {
@@ -278,9 +284,9 @@ func (pr *PortResponsePayloads) setResponsePayloadForURIWithBodyMatch(isGRPC boo
 		var err error
 		bodyMatch := strings.Split(match, ",")
 		if isPaths {
-			rp, err = newResponsePayload(payload, false, binary, contentType, uri, "", "", "", nil, bodyMatch, nil)
+			rp, err = newResponsePayload(payload, false, binary, contentType, uri, "", "", "", nil, bodyMatch, nil, delayMin, delayMax)
 		} else {
-			rp, err = newResponsePayload(payload, false, binary, contentType, uri, "", "", "", bodyMatch, nil, nil)
+			rp, err = newResponsePayload(payload, false, binary, contentType, uri, "", "", "", bodyMatch, nil, nil, delayMin, delayMax)
 		}
 		if err == nil {
 			pp.setURIWithBodyMatchResponsePayload(uri, match, rp)

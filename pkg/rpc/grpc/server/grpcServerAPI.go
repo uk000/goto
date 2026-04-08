@@ -94,7 +94,7 @@ func stopService(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		service := rs.(*grpc.GRPCService)
 		port := util.GetRequestOrListenerPortNum(r)
-		GRPCFactory.StopService(port, service)
+		GRPCFactory.StopService(service)
 		lock.Lock()
 		delete(ActiveServices[port], service.Name)
 		if len(ActiveServices[port]) == 0 {

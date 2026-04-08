@@ -539,7 +539,7 @@ func (l *Listener) closeListener() {
 	l.Open = false
 }
 
-func (l *Listener) reopenListener() bool {
+func (l *Listener) ReopenListener() bool {
 	listenersLock.RLock()
 	old := listeners[l.Port]
 	listenersLock.RUnlock()
@@ -686,7 +686,7 @@ func addOrUpdateListener(l *Listener) (int, string) {
 	_, exists := listeners[l.Port]
 	listenersLock.RUnlock()
 	if exists {
-		if l.reopenListener() {
+		if l.ReopenListener() {
 			l.store()
 			msg = fmt.Sprintf("Listener %d already present, restarted.", l.Port)
 			events.SendEventJSON("Listener Updated", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
@@ -771,7 +771,7 @@ func AddListenerCert(port int, key []byte, cert []byte, reopen bool) error {
 	}
 	l.lock.Unlock()
 	if reopen {
-		if !l.reopenListener() {
+		if !l.ReopenListener() {
 			return fmt.Errorf("Failed to reopen listener on port [%d]", port)
 		}
 	}
@@ -791,7 +791,7 @@ func RemoveListenerCert(port int) error {
 	l.AutoCert = false
 	l.CommonName = ""
 	l.lock.Unlock()
-	if !l.reopenListener() {
+	if !l.ReopenListener() {
 		return fmt.Errorf("Failed to reopen listener after removing cert on port [%d]", port)
 	}
 	return nil

@@ -19,6 +19,7 @@ package types
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -92,6 +93,13 @@ func ParseDelay(val string) *Delay {
 	return nil
 }
 
+func (d *Delay) String() string {
+	if d.Min != nil && d.Max != nil {
+		return fmt.Sprintf("%s-%s", d.Min.Duration.String(), d.Max.Duration.String())
+	}
+	return ""
+}
+
 func (d *Delay) IsNonZero() bool {
 	return d.Min != nil && d.Min.Duration > 0 && d.Max != nil && d.Max.Duration > 0 && d.Count > 0
 }
@@ -139,8 +147,11 @@ func (d *Delay) Apply() time.Duration {
 	return 0
 }
 
-func (d *Delay) ComputeAndApply() time.Duration {
-	d.Compute()
+func (d *Delay) ComputeAndApply(callback ...func(time.Duration)) time.Duration {
+	delay := d.Compute()
+	if len(callback) > 0 {
+		callback[0](delay)
+	}
 	return d.Apply()
 }
 

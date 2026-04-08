@@ -100,6 +100,11 @@ type RequestStore struct {
 	Request                 *http.Request
 	ResponseWriter          http.ResponseWriter
 	CurrentRouter           *mux.Router
+	MCPRequestStore         *MCPRequestStore
+}
+
+type MCPRequestStore struct {
+	ForcedStatus int
 }
 
 var (
@@ -122,7 +127,7 @@ func GetRequestStore(r *http.Request) *RequestStore {
 	if val := r.Context().Value(RequestStoreKey); val != nil {
 		return val.(*RequestStore)
 	}
-	_, _, rs := WithRequestStore(r)
+	_, _, rs := WithRequestStore(r, nil)
 	return rs
 }
 
@@ -140,8 +145,9 @@ func GetRequestStoreIfPresent(r *http.Request) *RequestStore {
 	return nil
 }
 
-func WithRequestStore(r *http.Request) (context.Context, *http.Request, *RequestStore) {
+func WithRequestStore(r *http.Request, w http.ResponseWriter) (context.Context, *http.Request, *RequestStore) {
 	rs := &RequestStore{}
+	rs.ResponseWriter = w
 	ctx := context.WithValue(r.Context(), RequestStoreKey, rs)
 	r = r.WithContext(ctx)
 	rs.IsTLS = r.TLS != nil

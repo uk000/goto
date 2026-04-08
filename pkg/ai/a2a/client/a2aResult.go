@@ -29,6 +29,7 @@ type A2AResult struct {
 	Timeline            *timeline.Timeline
 	LastRequestHeaders  http.Header `json:"-"`
 	LastResponseHeaders http.Header `json:"-"`
+	LastResponseStatus  int         `json:"-"`
 	CallResults         map[string]*A2ACallResult
 }
 
@@ -39,6 +40,7 @@ type A2ACallResult struct {
 	RemoteTimeline  any            `json:"RemoteTimeline,omitempty"`
 	RequestHeaders  http.Header    `json:"RequestHeaders,omitempty"`
 	ResponseHeaders http.Header    `json:"ResponseHeaders,omitempty"`
+	ResponseStatus  int            `json:"ResponseStatus,omitempty"`
 }
 
 func NewA2AResult(server, agent string, t *timeline.Timeline) *A2AResult {
@@ -84,12 +86,14 @@ func (r *A2AResult) storeA2ACallResult(requestID string, result *A2ACallResult) 
 	}
 }
 
-func (r *A2AResult) storeHeaders(requestID string, requestHeaders, responseHeaders http.Header) {
+func (r *A2AResult) storeHeaders(requestID string, requestHeaders, responseHeaders http.Header, status int) {
 	cr := r.getOrAddCall(requestID)
 	cr.RequestHeaders = requestHeaders
 	cr.ResponseHeaders = responseHeaders
+	cr.ResponseStatus = status
 	r.LastRequestHeaders = requestHeaders
 	r.LastResponseHeaders = responseHeaders
+	r.LastResponseStatus = status
 }
 
 func (cr *A2ACallResult) merge(other *A2ACallResult) {

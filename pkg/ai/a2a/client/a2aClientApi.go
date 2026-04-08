@@ -39,6 +39,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRouteWithMultiQ(a2aClientRouter, "/agent/card", fetchAgentCard, [][]string{{"url"}, {"authority"}}, "GET")
 	util.AddRoute(a2aClientRouter, "/agent/{agent}/call", callAgent, "POST")
 	util.AddRoute(a2aClientRouter, "/call/stream", callAgent, "POST")
+	util.AddRoute(a2aClientRouter, "/call/quiet", callAgent, "POST")
 	util.AddRoute(a2aClientRouter, "/call", callAgent, "POST")
 	util.AddRoute(a2aClientRouter, "/push", pushReceiver, "POST")
 }
@@ -59,6 +60,9 @@ func fetchAgentCard(w http.ResponseWriter, r *http.Request) {
 func callAgent(w http.ResponseWriter, r *http.Request) {
 	call := &AgentCall{}
 	name := util.GetStringParamValue(r, "agent")
+	stream := strings.Contains(r.RequestURI, "stream")
+	quiet := strings.Contains(r.RequestURI, "quiet")
+	port := util.GetRequestOrListenerPortNum(r)
 	err := util.ReadJsonPayload(r, &call)
 	if err != nil {
 		util.SendBadRequest(fmt.Sprintf("Failed to parse payload with error [%s]", err.Error()), w, r)
@@ -67,10 +71,8 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 	if name != "" {
 		call.Name = name
 	}
-	port := util.GetRequestOrListenerPortNum(r)
-	stream := strings.Contains(r.RequestURI, "stream")
 	output := map[string][]any{}
-	err = CallAgent(r.Context(), port, call, streamAgentResponse(call.Name, stream, output, w, r), r.Header)
+	err = CallAgent(r.Context(), port, call, streamAgentResponse(call.Name, stream, quiet, output, w, r), r.Header)
 	if err != nil {
 		msg := fmt.Sprintf("Error invoking agent [%s]: %s", call.Name, err.Error())
 		util.SendBadRequest(msg, w, r)
@@ -87,7 +89,7 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func streamAgentResponse(agent string, stream bool, output map[string][]any, w http.ResponseWriter, r *http.Request) AgentResultsCallback {
+func streamAgentResponse(agent string, stream, quiet bool, output map[string][]any, w http.ResponseWriter, r *http.Request) AgentResultsCallback {
 	var fw http.Flusher
 	if stream {
 		if f, ok := w.(http.Flusher); ok {
@@ -120,7 +122,7 @@ func streamAgentResponse(agent string, stream bool, output map[string][]any, w h
 		if data != nil {
 			_, isArtifact = data.(a2aproto.Artifact)
 		}
-		if !isArtifact {
+		if !quiet && !isArtifact {
 			send(id, msg, data)
 		}
 	}

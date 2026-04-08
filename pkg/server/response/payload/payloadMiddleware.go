@@ -49,7 +49,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 		pr := p.protoPayload(util.IsGRPC(r) || util.IsJSONRPC(r))
 		if !util.IsPayloadRequest(r) && pr.HasAnyPayload() {
 			body := util.Read(r.Body)
-			newBody, rp, captures, found := pr.GetResponsePayload(r.RequestURI, r.Header, r.URL.Query(), io.NopCloser(strings.NewReader(body)))
+			newBody, rp, captures, found := pr.GetMatchingResponsePayload(r.RequestURI, r.Header, r.URL.Query(), io.NopCloser(strings.NewReader(body)))
 			if found {
 				if newBody != nil {
 					r.Body = newBody
@@ -174,6 +174,7 @@ func processCaptures(payload string, value string, pair *types.Pair[*regexp.Rege
 
 func getFilledPayload(rp *ResponsePayload, r *http.Request, captures map[string]string) []byte {
 	vars := mux.Vars(r)
+	query := r.URL.Query()
 	payload := string(rp.Payload)
 	payload = util.SubstitutePayloadMarkers(payload, rp.URICaptureKeys, vars)
 	if rp.HeaderCaptureKey != "" {
@@ -186,11 +187,11 @@ func getFilledPayload(rp *ResponsePayload, r *http.Request, captures map[string]
 			payload = processCaptures(payload, r.Header.Get(k), pair, rp.DetectJSON, rp.EscapeJSON)
 		}
 		for k, pair := range rp.RequestCapture.queryCaptureKeys {
-			payload = processCaptures(payload, r.Header.Get(k), pair, rp.DetectJSON, rp.EscapeJSON)
+			payload = processCaptures(payload, query.Get(k), pair, rp.DetectJSON, rp.EscapeJSON)
 		}
 	}
 	if rp.QueryCaptureKey != "" {
-		for k, values := range r.URL.Query() {
+		for k, values := range query {
 			if rp.queryMatchRegexp.MatchString(k) && len(values) > 0 {
 				payload = strings.Replace(payload, rp.QueryCaptureKey, values[0], -1)
 			}
@@ -211,7 +212,7 @@ func handleURI(w http.ResponseWriter, r *http.Request) {
 	pr := p.protoPayload(util.IsGRPC(r) || util.IsJSONRPC(r))
 	if !util.IsPayloadRequest(r) && pr.HasAnyPayload() {
 		body := util.Read(r.Body)
-		newBody, rp, captures, found := pr.GetResponsePayload(r.RequestURI, r.Header, r.URL.Query(), io.NopCloser(strings.NewReader(body)))
+		newBody, rp, captures, found := pr.GetMatchingResponsePayload(r.RequestURI, r.Header, r.URL.Query(), io.NopCloser(strings.NewReader(body)))
 		if found {
 			if newBody != nil {
 				r.Body = newBody

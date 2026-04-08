@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"goto/pkg/global"
 	"goto/pkg/rpc"
+	"goto/pkg/server/response/payload"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
@@ -168,16 +169,16 @@ func (gsr *GRPCServiceRegistry) AddProxyService(from, to *GRPCService, teeport i
 	}
 }
 
-func (gsr *GRPCServiceRegistry) RemoveActiveService(s *GRPCService) {
+func (gsr *GRPCServiceRegistry) RemoveActiveService(name string) {
 	gsr.lock.Lock()
 	defer gsr.lock.Unlock()
-	delete(gsr.ActiveServices, s.Name)
+	delete(gsr.ActiveServices, name)
 }
 
-func (gsr *GRPCServiceRegistry) RemoveProxyService(s *GRPCService) {
+func (gsr *GRPCServiceRegistry) RemoveProxyService(name string) {
 	gsr.lock.Lock()
 	defer gsr.lock.Unlock()
-	delete(gsr.ProxyServices, s.Name)
+	delete(gsr.ProxyServices, name)
 }
 
 func (gsr *GRPCServiceRegistry) RemoveTeeService(port int) {
@@ -424,6 +425,28 @@ func (m *GRPCServiceMethod) SetStreamDelay(min, max time.Duration, count int) {
 
 func (m *GRPCServiceMethod) SetResponsePayload(payload []byte) {
 	m.ResponsePayload = payload
+}
+
+func (m *GRPCServiceMethod) ProcessAndSetPayload(port int, data any, matches []*payload.RequestMatch, capture *payload.RequestCapture, contentType, delay string, streamCount int) error {
+	content := util.ToJSONBytes(data)
+	isStream := m.IsServerStream || m.IsBidiStream
+	delayMin, delayMax, delayCount, _ := types.ParseDurationRange(delay)
+	methodURI := m.GetURI() + "*"
+	msg := ""
+	if err := payload.PayloadManager.SetRPCResponsePayload(port, isStream, content, contentType, methodURI, "", "", "", "", streamCount, delayMin, delayMax); err != nil {
+		msg = fmt.Sprintf("Port [%d]: Failed to set gRPC payload for service [%s] method [%s], content-type [%s], length [%d], count [%d], delay [%s-%s], with error [%s]",
+			port, m.Service.Name, m.Name, contentType, len(content), streamCount, delayMin, delayMax, err.Error())
+		log.Println(msg)
+		return err
+	} else {
+		m.SetStreamCount(1)
+		m.SetStreamDelay(delayMin, delayMax, delayCount)
+		m.SetResponsePayload(content)
+		msg = fmt.Sprintf("Port [%d]: Set gRPC payload for service [%s] method [%s], content-type [%s], length [%d], count [%d], delay [%s-%s]",
+			port, m.Service.Name, m.Name, contentType, len(content), streamCount, delayMin, delayMax)
+		log.Println(msg)
+	}
+	return nil
 }
 
 func (m *GRPCServiceMethod) InputType() protoreflect.MessageDescriptor {

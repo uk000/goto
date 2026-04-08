@@ -25,25 +25,30 @@ import (
 	"net/http"
 )
 
-type PortAgent struct {
+type A2AServer struct {
 	Port     int                     `yaml:"port"`
 	Agents   map[string]*model.Agent `yaml:"agents"`
 	Response map[string]any          `yaml:"response"`
 }
 
-type A2A []*PortAgent
+type A2A struct {
+	Servers []*A2AServer `yaml:"servers"`
+}
 
 func processA2A(config *GotoConfig) {
-	if len(config.A2A) == 0 {
+	if config.A2A == nil {
+		return
+	}
+	sendAgents(config.A2A)
+}
+
+func sendAgents(a2a *A2A) {
+	if len(a2a.Servers) == 0 {
 		log.Println("No A2A Agents to configure")
 		return
 	}
-	sendAgents(config)
-}
-
-func sendAgents(config *GotoConfig) {
 	agentPayload := []*model.Agent{}
-	for _, pa := range config.A2A {
+	for _, pa := range a2a.Servers {
 		url := fmt.Sprintf("%s/port=%d/a2a/agents/add", currentContext.RemoteGotoURL, pa.Port)
 		for _, agent := range pa.Agents {
 			agentPayload = append(agentPayload, agent)

@@ -52,6 +52,7 @@ type MCPTool struct {
 type ToolBehavior struct {
 	Ping          bool `json:"ping,omitempty"`
 	Echo          bool `json:"echo,omitempty"`
+	Status        bool `json:"status,omitempty"`
 	Time          bool `json:"time,omitempty"`
 	Stream        bool `json:"stream,omitempty"`
 	Elicit        bool `json:"elicit,omitempty"`
@@ -131,6 +132,8 @@ func (t *MCPTool) prepareBehavior() error {
 	}
 	if t.Behavior.Echo {
 		t.Behavior.run = t.echo
+	} else if t.Behavior.Status {
+		t.Behavior.run = t.status
 	} else if t.Behavior.Ping {
 		t.Behavior.run = t.ping
 	} else if t.Behavior.Time {

@@ -48,6 +48,29 @@ func (t *MCPTool) echo(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	return &gomcp.CallToolResult{Content: content}, nil
 }
 
+func (t *MCPTool) status(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+	content := []gomcp.Content{}
+	status := 200
+	if tctx.args != nil {
+		if tctx.args.Status != 0 {
+			status = tctx.args.Status
+			tctx.rs.MCPRequestStore.ForcedStatus = status
+		}
+	}
+	msg := ""
+	if status == 200 {
+		msg = fmt.Sprintf("%s[%s] Status: Success [200] at Time: %s", tctx.Label, global.Funcs.GetListenerLabelForPort(tctx.Server.GetPort()), time.Now().Format(time.RFC3339))
+	} else {
+		msg = fmt.Sprintf("%s[%s] Status: Requested [%d] at Time: %s", tctx.Label, global.Funcs.GetListenerLabelForPort(tctx.Server.GetPort()), status, time.Now().Format(time.RFC3339))
+	}
+	content = append(content, &gomcp.TextContent{Text: msg})
+	tctx.applyDelay()
+	tctx.Log("Server %s Tool %s reporting status %d", tctx.Server.Host, tctx.Label, status)
+	msg = tctx.Flush(false, false)
+	content = append(content, &gomcp.TextContent{Text: msg})
+	return &gomcp.CallToolResult{Content: content}, nil
+}
+
 func (t *MCPTool) ping(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	if err := tctx.req.Session.Ping(tctx.ctx, &gomcp.PingParams{}); err != nil {
 		return nil, fmt.Errorf("ping failed with error: %s", err.Error())

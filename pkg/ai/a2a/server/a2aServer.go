@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"goto/pkg/ai/a2a/model"
 	"goto/pkg/global"
+	"goto/pkg/server/intercept"
 	"goto/pkg/util"
 	"net/http"
 	"sync"
@@ -201,6 +202,8 @@ func (a *A2AServer) Serve(name string, w http.ResponseWriter, r *http.Request) e
 	aCtx := newAgentContext(a.Port, a.ID, rs.ListenerLabel, agent, r.Header, rs)
 	r = r.WithContext(context.WithValue(ctx, util.AgentContextKey, aCtx))
 	aCtx.ctx = r.Context()
+	w, irw := intercept.WithIntercept(r, w)
 	agent.Serve(w, r)
+	irw.Proceed()
 	return nil
 }

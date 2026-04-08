@@ -25,43 +25,35 @@ import (
 	"net/http"
 )
 
-type HTTPResponsePayload struct {
-	Port         int                     `yaml:"port"`
-	Matches      []*payload.RequestMatch `yaml:"matches"`
-	Capture      *payload.RequestCapture `yaml:"capture"`
-	Payload      string                  `yaml:"payload"`
-	ContentType  string                  `yaml:"contentType,omitempty"`
-	Base64Encode bool                    `yaml:"base64Encode,omitempty"`
-	Base64Decode bool                    `yaml:"base64Decode,omitempty"`
-	DetectJSON   bool                    `yaml:"detectJSON,omitempty"`
-	EscapeJSON   bool                    `yaml:"escapeJSON,omitempty"`
+type HTTPResponse struct {
+	Payloads []*payload.ResponsePayload `yaml:"payloads"`
 }
 
-type HTTPResponse struct {
-	Payloads []*HTTPResponsePayload `yaml:"payloads"`
+type HTTPServerConfig struct {
+	Port     int           `yaml:"port"`
+	Response *HTTPResponse `yaml:"response"`
 }
 
 type HTTP struct {
-	Response *HTTPResponse `yaml:"response"`
+	Servers []*HTTPServerConfig `yaml:"servers"`
 }
 
 func processHTTP(config *GotoConfig) {
 	if config.HTTP != nil {
-		if config.HTTP.Response != nil {
-			processHTTPResponse(config.HTTP.Response)
+		for _, server := range config.HTTP.Servers {
+			processHTTPResponse(server.Port, server.Response)
 		}
 	}
 }
 
-func processHTTPResponse(r *HTTPResponse) {
+func processHTTPResponse(port int, r *HTTPResponse) {
 	if r == nil {
 		log.Printf("no HTTP response")
 		return
 	}
-	for _, hrp := range r.Payloads {
-		rp := payload.NewResponsePayload([]byte(hrp.Payload), hrp.Matches, hrp.Capture, hrp.ContentType, hrp.Base64Encode, hrp.Base64Decode, hrp.DetectJSON, hrp.EscapeJSON)
+	for _, rp := range r.Payloads {
 		//TBD: send payload over API
-		url := fmt.Sprintf("%s/server/response/payload/set/matches", currentContext.RemoteGotoURL)
+		url := fmt.Sprintf("%s/port=%d/server/response/payload/set/matches", currentContext.RemoteGotoURL, port)
 		json := util.ToJSONBytes(rp)
 		if json == nil {
 			log.Printf("JSON marshalling failed for Response Payload: %+v\n", rp)

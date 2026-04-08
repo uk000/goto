@@ -400,8 +400,7 @@ func loadRouter(r *http.Request, rs *util.RequestStore) {
 }
 
 func initRequestStore(w http.ResponseWriter, r *http.Request) (*http.Request, *util.RequestStore, *listeners.Listener, error) {
-	_, r, rs := util.WithRequestStore(r)
-	rs.ResponseWriter = w
+	_, r, rs := util.WithRequestStore(r, w)
 	l := listeners.GetListenerForPort(rs.RequestPortNum)
 	if l == nil {
 		return nil, nil, nil, fmt.Errorf("Port [%s] not configured", rs.RequestPortNum)

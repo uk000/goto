@@ -78,16 +78,17 @@ func OnGRPCStop() {
 func RegisterGotoServer(server global.IGRPCManager) {
 	if !IsGotoServiceRunning {
 		//pb.RegisterGotoServer(TheGRPCServer.Server, &GotoGRPCService{})
-		server.InterceptAndServe(&pb.Goto_ServiceDesc, &GotoGRPCService{})
+		// server.InterceptAndServe(&pb.Goto_ServiceDesc, &GotoGRPCService{})
 		server.InterceptWithMiddleware(&pb.Goto2_ServiceDesc, &Goto2GRPCService{})
+		server.InterceptWithMiddleware(&pb.Goto3_ServiceDesc, &Goto3GRPCService{})
 		gotoService := gotogrpc.ServiceRegistry.NewGRPCServiceFromSD(&pb.Goto_ServiceDesc)
 		if gotoService != nil {
 			gotoService.Methods["echo"].In = TransformInput
 			gotoService.Methods["streamIn"].In = TransformInput
 			gotoService.Methods["streamOut"].In = TransformStreamConfig
 			gotoService.Methods["streamInOut"].In = TransformStreamConfig
+			server.InterceptAndServe(gotoService.GSD, gotoService)
 			// server.InterceptAndProxy(&pb.Goto3_ServiceDesc, &pb.Goto_ServiceDesc, pb.Goto3_ServiceDesc.ServiceName, &Goto3GRPCService{})
-			server.InterceptWithMiddleware(&pb.Goto3_ServiceDesc, &Goto3GRPCService{})
 		}
 		IsGotoServiceRunning = true
 	}

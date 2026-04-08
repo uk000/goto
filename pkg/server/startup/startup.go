@@ -21,19 +21,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"goto/ctl"
-	a2aserver "goto/pkg/ai/a2a/server"
-	mcpclient "goto/pkg/ai/mcp/client"
-	mcpserver "goto/pkg/ai/mcp/server"
-	"goto/pkg/ai/registry"
 	"goto/pkg/global"
 	httpproxy "goto/pkg/proxy/http"
 	tcpproxy "goto/pkg/proxy/tcp"
 	"goto/pkg/scripts"
-	"goto/pkg/server/listeners"
-	"goto/pkg/server/response/payload"
-	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
 	"os"
@@ -48,18 +40,23 @@ import (
 var (
 	configWatchers   []fswatcher.Watcher
 	tlsConfigs       = map[string]ctl.PortTLS{}
-	a2aConfigs       = map[string]ctl.A2A{}
+	a2aConfigs       = map[string]*ctl.A2A{}
 	mcpConfigs       = map[string]*ctl.MCP{}
 	httpProxyConfigs = map[string]*httpproxy.Proxy{}
 	tcpProxyConfigs  = map[string]*tcpproxy.TCPProxy{}
 	httpConfigs      = map[string]*ctl.HTTP{}
+	grpcConfigs      = map[string]*ctl.GRPC{}
+	loaded           = false
 	lock             = sync.Mutex{}
 )
 
 type ChangeLog map[string]any
 
 func Start() {
-	loadStartupConfigs()
+	if !loaded {
+		loaded = true
+		loadStartupConfigs()
+	}
 	//runStartupScript()
 }
 
@@ -163,6 +160,11 @@ func removeAllConfigs() {
 		clearHTTP(httpConfigs[filename])
 		delete(httpConfigs, filename)
 	}
+	for filename := range grpcConfigs {
+		log.Printf("Removing gRPC configs for %s.\n", filename)
+		clearGRPC(grpcConfigs[filename])
+		delete(grpcConfigs, filename)
+	}
 }
 
 func removeConfigs(filePath string) {
@@ -194,6 +196,10 @@ func removeConfigs(filePath string) {
 	if httpConfigs[filename] != nil {
 		log.Printf("File removed: %s. Removing HTTP configs.\n", filename)
 		clearHTTP(httpConfigs[filename])
+	}
+	if grpcConfigs[filename] != nil {
+		log.Printf("File removed: %s. Removing gRPC configs.\n", filename)
+		clearGRPC(grpcConfigs[filename])
 	}
 }
 
@@ -276,6 +282,9 @@ func loadConfig(filePath string, config *ctl.GotoConfig) {
 		return
 	}
 	if config.TLS != nil {
+		if tlsConfigs[filename] != nil {
+			clearTLS(tlsConfigs[filename])
+		}
 		lock.Lock()
 		tlsConfigs[filename] = config.TLS
 		lock.Unlock()
@@ -283,12 +292,18 @@ func loadConfig(filePath string, config *ctl.GotoConfig) {
 
 	}
 	if config.MCP != nil {
+		if mcpConfigs[filename] != nil {
+			clearMCP(mcpConfigs[filename])
+		}
 		lock.Lock()
 		mcpConfigs[filename] = config.MCP
 		lock.Unlock()
 		loadMCP(config.MCP)
 	}
 	if config.A2A != nil {
+		if a2aConfigs[filename] != nil {
+			clearA2A(a2aConfigs[filename])
+		}
 		lock.Lock()
 		a2aConfigs[filename] = config.A2A
 		lock.Unlock()
@@ -297,12 +312,18 @@ func loadConfig(filePath string, config *ctl.GotoConfig) {
 	if config.Proxies != nil {
 		for _, proxy := range config.Proxies {
 			if proxy.HTTP != nil {
+				if httpProxyConfigs[filename] != nil {
+					removeHTTPProxy(httpProxyConfigs[filename])
+				}
 				lock.Lock()
 				httpProxyConfigs[filename] = proxy.HTTP
 				lock.Unlock()
 				loadHTTPProxy(proxy.HTTP)
 			}
 			if proxy.TCP != nil {
+				if tcpProxyConfigs[filename] != nil {
+					removeTCPProxy(tcpProxyConfigs[filename])
+				}
 				lock.Lock()
 				tcpProxyConfigs[filename] = proxy.TCP
 				lock.Unlock()
@@ -311,260 +332,27 @@ func loadConfig(filePath string, config *ctl.GotoConfig) {
 		}
 	}
 	if config.HTTP != nil {
+		if httpConfigs[filename] != nil {
+			clearHTTP(httpConfigs[filename])
+		}
 		lock.Lock()
 		httpConfigs[filename] = config.HTTP
 		lock.Unlock()
 		loadHTTP(config.HTTP)
 	}
-}
-
-func clearTLS(portTLS ctl.PortTLS) {
-	for _, tls := range portTLS {
-		listeners.RemoveListenerCert(tls.Port)
-	}
-}
-
-func processTLS(portTLS ctl.PortTLS) {
-	if len(portTLS) == 0 {
-		log.Println("No TLS configs to configure")
-		return
-	}
-	for _, tls := range portTLS {
-		l := listeners.GetListenerForPort(tls.Port)
-		if l == nil {
-			log.Printf("No Listener on Port [%d]", tls.Port)
-			continue
+	if config.GRPC != nil {
+		if grpcConfigs[filename] != nil {
+			clearGRPC(grpcConfigs[filename])
 		}
-		log.Printf("Loading TLS Cert from path [%s]", tls.Cert)
-		cert, key, err := tls.Load()
-		if err != nil {
-			log.Printf("Failed to read TLS cert file [%s] with error: %s\n", tls.Cert, err.Error())
-			continue
-		}
-		if err = listeners.AddListenerCert(tls.Port, key, cert, true); err != nil {
-			log.Printf("Failed to add listener cert for port [%d] cert [%s] key [%s] with error: %s\n", tls.Port, tls.Cert, tls.Key, err.Error())
-		}
-		log.Println("============================================================")
-		log.Printf("Loaded TLS cert for port [%d]", tls.Port)
-		log.Println("============================================================")
-
+		lock.Lock()
+		grpcConfigs[filename] = config.GRPC
+		lock.Unlock()
+		loadGRPC(config.GRPC)
 	}
-}
-
-func clearMCP(mcp *ctl.MCP) {
-	for _, s := range mcp.Servers {
-		if s.Server != nil {
-			mcpserver.RemoveMCPServer(s.Server.Port, s.Server.Name)
-		}
-	}
-}
-
-func loadMCP(mcp *ctl.MCP) {
-	mcp.ProcessToolSchemas()
-	servers := []*mcpserver.MCPServerPayload{}
-	clearMCP(mcp)
-	names := []string{}
-	for _, s := range mcp.Servers {
-		mcp.ProcessMCPServer(s)
-		servers = append(servers, s.Server)
-		names = append(names, fmt.Sprintf("%s (port: %d)", s.Server.Name, s.Server.Port))
-	}
-	mcpserver.AddMCPServers(0, servers)
-	log.Println("============================================================")
-	log.Printf("Added MCP Servers: %+v\n", names)
-	log.Println("============================================================")
-
-	addComponents := func(kind string, server *mcpserver.MCPServer, data []byte) {
-		if len(data) == 0 {
-			return
-		}
-		names, err := server.AddComponents(kind, data)
-		if err != nil {
-			log.Printf("Failed to add %s to server [%s] on port [%d] with error [%s]\n", kind, server.Name, server.Port, err.Error())
-		} else {
-			log.Println("============================================================")
-			log.Printf("Added %s to server [%s] on port [%d]: %+v\n", kind, server.Name, server.Port, names)
-			log.Println("============================================================")
-		}
-	}
-	for _, s := range mcp.Servers {
-		if s == nil || s.Server == nil {
-			continue
-		}
-		server := mcpserver.GetMCPServer(s.Server.Port, s.Server.Name)
-		addComponents("tools", server, util.ToJSONBytes(s.Tools))
-		addComponents("prompts", server, util.ToJSONBytes(s.Prompts))
-		addComponents("resources", server, util.ToJSONBytes(s.Resources))
-		addComponents("templates", server, util.ToJSONBytes(s.Templates))
-
-		if s.Payloads != nil {
-			sps := s.Payloads.Server
-			if sps != nil {
-				if sps.Completions != nil {
-					delayMin, delayMax, delayCount, _ := types.ParseDurationRange(sps.Completions.Delay)
-					count := server.AddCompletionPayload("ref/prompt", util.ToJSONBytes(sps.Completions.List), delayMin, delayMax, delayCount)
-					log.Printf("Set completion payload (count [%d]) for server [%s] on port [%d]\n", count, server.Name, server.Port)
-				}
-				for _, tp := range sps.ToolPayloads {
-					if err := server.AddPayload(tp.Name, "tools", util.ToJSONBytes(tp.Payload), true, false, 0, 0, 0, 0); err != nil {
-						log.Printf("Failed to set payload for tool [%s] in MCP server [%s] on port [%d] with error [%s]\n", tp.Name, server.Name, server.Port, err.Error())
-					} else {
-						log.Printf("Set payload for tool [%s] in MCP server [%s] on port [%d]\n", tp.Name, server.Name, server.Port)
-					}
-				}
-				for _, sp := range sps.StreamPayloads {
-					if sp.Payload == nil || sp.Payload.Data == nil {
-						continue
-					}
-					delayMin, delayMax, delayCount, _ := types.ParseDurationRange(sp.Payload.Delay)
-					if err := server.AddPayload(sp.Name, "tools", util.ToJSONBytes(sp.Payload.Data), true, true, sp.Payload.Count, delayMin, delayMax, delayCount); err != nil {
-						log.Printf("Failed to set stream payload for tool [%s] in MCP server [%s] on port [%d] with error [%s]\n", sp.Name, server.Name, server.Port, err.Error())
-					} else {
-						log.Printf("Set stream payload for tool [%s] in MCP server [%s] on port [%d]\n", sp.Name, server.Name, server.Port)
-					}
-				}
-			}
-			spc := s.Payloads.Client
-			if spc != nil {
-				if spc.Elicit != nil {
-					if err := mcpclient.AddPayload(server.Name, "elicit", util.ToJSONBytes(spc.Elicit)); err != nil {
-						log.Printf("Failed to set client elicit payload in MCP server [%s] on port [%d] with error [%s]\n", server.Name, server.Port, err.Error())
-					} else {
-						log.Printf("Client elicit payload added for MCP server [%s] on port [%d]\n", server.Name, server.Port)
-					}
-				}
-				if spc.Sample != nil {
-					if err := mcpclient.AddPayload(server.Name, "sample", util.ToJSONBytes(spc.Sample)); err != nil {
-						log.Printf("Failed to set client sample payload in MCP server [%s] on port [%d] with error [%s]\n", server.Name, server.Port, err.Error())
-					} else {
-						log.Printf("Client sample payload added for MCP server [%s] on port [%d]\n", server.Name, server.Port)
-					}
-				}
-				if spc.Roots != nil {
-					if err := mcpclient.SetRoots(server.Name, util.ToJSONBytes(spc.Roots)); err != nil {
-						log.Printf("Failed to set client roots in MCP server [%s] on port [%d] with error [%s]\n", server.Name, server.Port, err.Error())
-					} else {
-						log.Printf("Client roots added for MCP server [%s] on port [%d]\n", server.Name, server.Port)
-					}
-				}
-			}
-		}
-	}
-}
-
-func clearA2A(a2a ctl.A2A) {
-	for _, pa := range a2a {
-		for _, a2aAgent := range pa.Agents {
-			if a2aAgent != nil && a2aAgent.Card != nil {
-				a2aserver.RemoveAgent(a2aAgent.Port, a2aAgent.Card.Name)
-				registry.TheAgentRegistry.RemoveAgent(a2aAgent.Card.Name)
-			}
-		}
-	}
-}
-
-func loadA2A(a2a ctl.A2A) {
-	names := []string{}
-	clearA2A(a2a)
-	for _, pa := range a2a {
-		for aname, agent := range pa.Agents {
-			if agent == nil || agent.Card == nil || agent.Config == nil {
-				log.Printf("Skipping agent [%s] due to missing Card/Config\n", aname)
-				continue
-			}
-			agent.Port = pa.Port
-			name := agent.Card.Name
-			server := a2aserver.GetOrAddServer(agent.Port)
-			if err := server.AddAgent(agent); err == nil {
-				registry.TheAgentRegistry.AddAgent(agent, agent.Port)
-				names = append(names, fmt.Sprintf("%s(%d)", name, agent.Port))
-			} else {
-				log.Printf("Failed to load agent [%s]: %s\n", aname, err.Error())
-			}
-		}
-	}
-	log.Println("============================================================")
-	log.Printf("Added Agents: %+v\n", names)
-	log.Println("============================================================")
-}
-
-func removeHTTPProxy(p *httpproxy.Proxy) {
-	httpproxy.ClearPortProxy(p.Port)
-}
-
-func loadHTTPProxy(p *httpproxy.Proxy) {
-	removeHTTPProxy(p)
-	proxy := httpproxy.GetPortProxy(p.Port)
-	proxy.Enabled = p.Enabled
-	proxy.ProxyResponses = p.ProxyResponses
-	log.Printf("Proxy [%d] will use responses: %+v", p.Port, util.ToJSONText(proxy.ProxyResponses))
-	for name, target := range p.Targets {
-		target.Name = name
-		log.Printf("Loading HTTP Proxy Target [%s]\n", name)
-		if err := proxy.AddTarget(target); err != nil {
-			log.Printf("Failed to process HTTP Proxy target [%s] with error: %s", name, err.Error())
-		} else {
-			log.Println("============================================================")
-			log.Printf("HTTP Proxy target [%s] loaded successfully", name)
-			log.Println("============================================================")
-		}
-	}
-}
-
-func removeTCPProxy(p *tcpproxy.TCPProxy) {
-	tcpproxy.ClearPortProxy(p.Port)
-}
-
-func loadTCPProxy(p *tcpproxy.TCPProxy) {
-	removeTCPProxy(p)
-	if err := tcpproxy.ValidateUpstreams(p.Upstreams); err != nil {
-		log.Printf("TCP Proxy [%d] Upstreams failed validation: %s\n", p.Port, err.Error())
-	}
-	log.Printf("Loading TCP Proxy [%d]\n", p.Port)
-	tcpproxy.GetPortProxy(p.Port).AddUpstreams(p.Upstreams)
-	log.Println("============================================================")
-	log.Printf("TCP Proxy [%d] loaded [%d] upstreams successfully", p.Port, len(p.Upstreams))
-	log.Println("============================================================")
 }
 
 func runStartupScript() {
 	if len(global.ServerConfig.StartupScript) > 0 {
 		scripts.RunCommands("startup", global.ServerConfig.StartupScript)
 	}
-}
-
-func clearHTTP(h *ctl.HTTP) {
-	if h != nil {
-		if h.Response != nil {
-			for _, p := range h.Response.Payloads {
-				payload.PayloadManager.ClearRPCResponsePayloads(p.Port)
-			}
-		}
-	}
-}
-
-func loadHTTP(h *ctl.HTTP) {
-	if h == nil {
-		return
-	}
-	if h.Response != nil {
-		processHTTPResponse(h.Response)
-	}
-}
-
-func processHTTPResponse(hr *ctl.HTTPResponse) {
-	if hr == nil {
-		log.Println("No HTTP response")
-		return
-	}
-	for _, hrp := range hr.Payloads {
-		rp := payload.NewResponsePayload([]byte(hrp.Payload), hrp.Matches, hrp.Capture, hrp.ContentType, hrp.Base64Encode, hrp.Base64Decode, hrp.DetectJSON, hrp.EscapeJSON)
-		err := payload.PayloadManager.SetURIResponsePayloadWithMatches(hrp.Port, rp, false)
-		if err != nil {
-			log.Printf("Error processing HTTP response: %s\n", err.Error())
-		}
-	}
-	log.Println("============================================================")
-	log.Printf("[%d] HTTP Response Payloads loaded successfully", len(hr.Payloads))
-	log.Println("============================================================")
 }

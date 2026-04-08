@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"goto/pkg/constants"
 	mcpproxy "goto/pkg/proxy/mcp"
+	"goto/pkg/server/intercept"
 	"goto/pkg/server/listeners"
 	"goto/pkg/util"
 	"io"
@@ -30,6 +31,10 @@ import (
 	"strings"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+var (
+	MCPRequestStoreBySession = map[string]*util.MCPRequestStore{}
 )
 
 func MCPHandler() http.Handler {
@@ -105,13 +110,22 @@ func MCPHybridHandler(server *MCPServer) http.Handler {
 }
 
 func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler http.Handler) {
+	_, r, rs := util.WithRequestStore(r, w)
 	session := server.getOrSetSessionContext(r)
+	sessionId := r.Header.Get("X-MCP-Session-ID")
+	ms := MCPRequestStoreBySession[sessionId]
+	if ms == nil {
+		ms = &util.MCPRequestStore{}
+		MCPRequestStoreBySession[sessionId] = ms
+	}
+	rs.MCPRequestStore = ms
 	switch r.Method {
 	case "DELETE":
 		if session != nil {
 			handler.ServeHTTP(w, r)
 			close(session.finished)
 			server.removeSessionContext(session.SessionID)
+			delete(MCPRequestStoreBySession, sessionId)
 		}
 	case "GET":
 		ctx, cancel := context.WithCancel(r.Context())
@@ -137,7 +151,13 @@ func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler ht
 			<-rc
 		}
 	default:
+		w, irw := intercept.WithIntercept(r, w)
 		handler.ServeHTTP(w, r)
+		log.Println(ms.ForcedStatus)
+		if ms.ForcedStatus > 0 {
+			irw.StatusCode = ms.ForcedStatus
+		}
+		irw.Proceed()
 	}
 }
 
