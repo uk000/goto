@@ -39,6 +39,7 @@ type A2ASession struct {
 	port             int
 	callerId         string
 	client           *A2AClient
+	clientInfo       *timeline.GotoClientInfo
 	Card             *goa2aserver.AgentCard
 	url              string
 	authority        string
@@ -80,7 +81,7 @@ func newSession(ac *A2AClient, ctx context.Context, port int, callerId, authorit
 		inHeaders:  inHeaders,
 		outHeaders: call.Headers,
 		timeline:   timeline,
-		Result:     NewA2AResult(call.AgentURL, card.Name, timeline),
+		Result:     NewA2AResult(call.AgentURL, call, timeline),
 	}
 }
 
@@ -104,15 +105,12 @@ func (acs *A2ASession) Connect() error {
 func (acs *A2ASession) CallAgent(callback AgentResultsCallback, localProgress, upstreamProgress chan *types.Pair[string, any]) (err error) {
 	input := acs.call.Message
 	data := acs.call.Data
+	data["resultOnly"] = acs.call.ResultOnly
 	if input == "" {
 		input = acs.call.Message
 	}
-	if data == nil {
-		data = acs.call.Data
-	}
 	inputParts := buildInputParts(input, data)
 	acs.configure(callback, localProgress, upstreamProgress, inputParts)
-	acs.reportInitiateCall()
 	if acs.Card.Capabilities.Streaming != nil && *acs.Card.Capabilities.Streaming {
 		err = acs.InvokeStream()
 	} else {
@@ -142,9 +140,11 @@ func (acs *A2ASession) InvokeUnary() error {
 	acs.sendLocalProgress(acs.callerId, fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL))
 	results := map[string]*a2aproto.MessageResult{}
 	errors := map[string]error{}
+	acs.reportInitiateCall()
 	for i := 1; i <= rounds; i++ {
 		requestID := fmt.Sprintf("[%s] Request#[%d]", acs.call.AgentURL, i)
 		cr := acs.Result.getOrAddCall(requestID)
+		cr.ClientInfo = acs.clientInfo
 		result, err := acs.client.client.SendMessage(acs.ctx, a2aproto.SendMessageParams{
 			Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
 		})
@@ -172,9 +172,11 @@ func (acs *A2ASession) InvokeStream() error {
 	}
 	rounds := requestCount / concurrent
 	acs.sendLocalProgress(acs.callerId, fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL))
+	acs.reportInitiateCall()
 	for i := 0; i < rounds; i++ {
 		requestID := fmt.Sprintf("[%s] Request#[%d]", acs.call.Name, i)
 		cr := acs.Result.getOrAddCall(requestID)
+		cr.ClientInfo = acs.clientInfo
 		ctx := context.WithValue(acs.ctx, constants.HeaderGotoA2ARequestID, requestID)
 		eventChan, err := acs.client.client.StreamMessage(ctx, a2aproto.SendMessageParams{
 			Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
@@ -208,9 +210,14 @@ func (acs *A2ASession) Handle(ctx context.Context, client *http.Client, req *htt
 			req.Header.Add(constants.HeaderGotoA2AAgent, acs.Card.Name)
 		}
 	}
+	acs.Result.storeHeaders(requestID, req.Header, nil, 0)
+	acs.clientInfo.StoreHeaders(req.Header, nil)
 	resp, err = client.Do(req)
-	acs.updateResponseHeaders(resp)
-	acs.Result.storeHeaders(requestID, req.Header, resp.Header, resp.StatusCode)
+	if resp != nil {
+		acs.updateResponseHeaders(resp)
+		acs.Result.storeHeaders(requestID, req.Header, resp.Header, resp.StatusCode)
+		acs.clientInfo.StoreHeaders(req.Header, resp.Header)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("a2aClient.httpRequestHandler: http request failed: %w", err)
 	}
@@ -271,13 +278,19 @@ func (acs *A2ASession) processStreamResponse(id string, eventChan <-chan a2aprot
 	for {
 		select {
 		case <-acs.ctx.Done():
-			log.Printf("ERROR: Context timeout or cancellation while waiting for stream events: %v", acs.ctx.Err())
+			msg := fmt.Sprintf("ERROR: Context timeout or cancellation while waiting for stream events: %v", acs.ctx.Err())
+			acs.err = acs.ctx.Err()
+			if acs.err == nil {
+				acs.err = errors.New(msg)
+			}
+			log.Println(msg)
 			return
 		case event, ok := <-eventChan:
 			if !ok {
 				log.Println("Stream channel closed.")
 				if acs.ctx.Err() != nil {
 					log.Printf("Context error after stream close: %v", acs.ctx.Err())
+					acs.err = acs.ctx.Err()
 				}
 				return
 			}
@@ -404,9 +417,9 @@ func (acs *A2ASession) sendResponse(id, text string, data any, cr *A2ACallResult
 func (as *A2ASession) reportInitiateCall() {
 	msg := fmt.Sprintf("%s [%s] Initiating Agent Call [%s] on URL [%s], Request Count [%d], Concurrent [%d]",
 		as.callerId, as.client.ID, as.call.Name, as.call.AgentURL, as.call.RequestCount, as.call.Concurrent)
-	clientInfo := timeline.BuildGotoClientInfo(as.port, as.callerId, as.call.Name, as.call.AgentURL, as.call.CardURL, as.inHeaders, nil,
+	as.clientInfo = timeline.BuildGotoClientInfo(as.port, as.callerId, as.call.Name, as.call.AgentURL, as.call.CardURL, as.inHeaders, nil,
 		nil, nil, as.call.RequestCount, as.call.Concurrent, map[string]any{
 			"Agent-Call": as.call,
 		})
-	as.timeline.AddEvent(as.callerId, msg, clientInfo, nil, true)
+	as.timeline.AddEvent(as.callerId, msg, as.clientInfo, nil, true)
 }

@@ -48,6 +48,7 @@ type Agent struct {
 	Behavior  *AgentBehavior        `yaml:"behavior,omitempty" json:"behavior,omitempty"`
 	Config    *AgentConfig          `yaml:"config,omitempty" json:"config,omitempty"`
 	Handler   http.Handler
+	URI       string                `yaml:"-" json:"-"`
 	Server    *trpcserver.A2AServer `yaml:"-" json:"-"`
 	Port      int                   `yaml:"-" json:"-"`
 	Streaming bool                  `yaml:"-" json:"-"`

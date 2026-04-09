@@ -76,6 +76,7 @@ func (t *MCPTool) fetch(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	clientInfo := timeline.BuildGotoClientInfo(tctx.Server.Port, tctx.Label, req.Host, url, req.Host,
 		tctx.requestHeaders, req.Header, tctx.args, nil, count, 1, nil)
 	results := []any{}
+	var anyError error
 	for i := 1; i <= count; i++ {
 		tctx.timeline.AddEvent(tctx.Label, fmt.Sprintf("%s: Invoking HTTP URL [%s], Request %d/%d", t.Label, url, i, count), clientInfo, nil, true)
 		resp, err := tctx.client.HTTP().Do(req)
@@ -85,6 +86,7 @@ func (t *MCPTool) fetch(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 			tctx.Log(msg)
 			result.IsError = true
 			result.Content = append(result.Content, &gomcp.TextContent{Text: msg})
+			anyError = err
 		} else {
 			tctx.Log(fmt.Sprintf("Server [%s] fetched response from remote URL [%s]", tctx.Server.GetName(), url))
 			output := util.Read(resp.Body)
@@ -94,5 +96,5 @@ func (t *MCPTool) fetch(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 		tctx.applyDelay()
 	}
 	result.StructuredContent = results
-	return result, err
+	return result, anyError
 }

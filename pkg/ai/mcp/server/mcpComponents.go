@@ -32,13 +32,14 @@ type IMCPComponent interface {
 }
 
 type MCPComponent struct {
-	URI      string           `json:"uri,omitempty"`
-	Response *payload.Payload `json:"response,omitempty"`
-	IsProxy  bool             `json:"proxy,omitempty"`
-	Kind     string           `json:"-"`
-	Server   *MCPServer       `json:"-"`
-	Name     string           `json:"-"`
-	Label    string           `json:"-"`
+	URI       string           `json:"uri,omitempty"`
+	ServerURI string           `json:"serverURI,omitempty"`
+	Response  *payload.Payload `json:"response,omitempty"`
+	IsProxy   bool             `json:"proxy,omitempty"`
+	Kind      string           `json:"-"`
+	Server    *MCPServer       `json:"-"`
+	Name      string           `json:"-"`
+	Label     string           `json:"-"`
 }
 
 type MCPCallLog struct {

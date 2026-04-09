@@ -51,6 +51,8 @@ type AgentCall struct {
 	RetryDelay           string           `json:"retryDelay"`
 	RetriableStatusCodes []int            `json:"retriableStatusCodes"`
 	RequestId            *types.RequestId `json:"requestId"`
+	ForcedStatus         int              `json:"forcedStatus"`
+	ResultOnly           bool             `json:"resultOnly,omitempty"`
 }
 
 type A2AClient struct {

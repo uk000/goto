@@ -407,7 +407,7 @@ func unaryMiddleware(ctx context.Context, req interface{}, info *grpc.UnaryServe
 	md := metadata.Pairs("port", fmt.Sprint(port))
 	ctx, _ = util.WithRequestStoreForContext(util.WithPort(metadata.NewOutgoingContext(ctx, md), port))
 	listenerLabel := global.Funcs.GetListenerLabelForPort(port)
-	if statusCode, rem := gotostatus.TheStatusManager.GetStatusFor(port, info.FullMethod, md); statusCode > 0 && statusCode != 200 {
+	if statusCode, rem := gotostatus.TheStatusManager.GetStatusFor(port, info.FullMethod, md, ""); statusCode > 0 && statusCode != 200 {
 		codeText := strconv.Itoa(statusCode)
 		SetHeaders(ctx, port, global.Self.HostLabel, listenerLabel, map[string]string{
 			constants.HeaderGotoForcedStatus:          codeText,
@@ -435,7 +435,7 @@ func streamMiddleware(srv interface{}, ss grpc.ServerStream, info *grpc.StreamSe
 	md := metadata.Pairs("port", fmt.Sprint(port))
 	ctx, _ = util.WithRequestStoreForContext(util.WithPort(metadata.NewOutgoingContext(ctx, md), port))
 	listenerLabel := global.Funcs.GetListenerLabelForPort(port)
-	if statusCode, rem := gotostatus.TheStatusManager.GetStatusFor(port, info.FullMethod, md); statusCode > 0 && statusCode != 200 {
+	if statusCode, rem := gotostatus.TheStatusManager.GetStatusFor(port, info.FullMethod, md, ""); statusCode > 0 && statusCode != 200 {
 		codeText := strconv.Itoa(statusCode)
 		SetHeaders(ctx, port, global.Self.HostLabel, listenerLabel, map[string]string{
 			constants.HeaderGotoForcedStatus:          codeText,

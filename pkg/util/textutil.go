@@ -30,6 +30,7 @@ var (
 	AfterRegex         = `([\s\(\)\[\]\{\}].*)?`
 	EmbeddedJSON       = regexp.MustCompile(`\{[^}]*\}`)
 	PortHint           = regexp.MustCompile(`(?i)\bport\s*(\d+)`)
+	StatusHint         = regexp.MustCompile(`(?i)\bstatus\s*(\d+)`)
 	TargetHint         = regexp.MustCompile(`(?i)\b(to|on|with)\s+(\w+)(\s*)`)
 	InputHint          = regexp.MustCompile(`(?i)\b(\S*):\[(.*)\]`)
 	DigitRegexp        = regexp.MustCompile(`(\d+)`)
@@ -56,6 +57,16 @@ func ExtractPortHint(text string) (string, string) {
 	return text, ""
 }
 
+func ExtractStatusHint(text string) (string, int) {
+	matches := StatusHint.FindStringSubmatch(text)
+	if len(matches) > 1 {
+		if status, err := strconv.Atoi(matches[1]); err == nil {
+			return text, status
+		}
+	}
+	return text, 0
+}
+
 func ExtractTargetHint(text string) (string, string) {
 	matches := TargetHint.FindStringSubmatch(text)
 	if len(matches) > 2 {
@@ -76,19 +87,19 @@ func ExtractInputHint(text string) (string, map[string]string) {
 	return text, inputs
 }
 
-func ExtractNumberHint(text string) (int, string) {
+func ExtractNumberHint(text string) (string, int) {
 	match := DigitRegexp.FindString(text)
 	if match != "" {
 		val, _ := strconv.Atoi(match)
-		return val, text
+		return text, val
 	}
-	return 0, text
+	return text, 0
 }
 
-func ExtractDurationHint(text string) (time.Duration, string) {
+func ExtractDurationHint(text string) (string, time.Duration) {
 	matches := DurationRegexp.FindAllStringSubmatch(text, -1)
 	if len(matches) == 0 || len(matches[0]) == 0 {
-		return 0, ""
+		return text, 0
 	}
 	text = string(DurationRegexp.ReplaceAll([]byte(text), []byte("")))
 	val := matches[0][1]
@@ -96,7 +107,7 @@ func ExtractDurationHint(text string) (time.Duration, string) {
 	if nu, ok := normalizedDuration[unit]; ok {
 		unit = nu
 	}
-	return ParseDuration(val + unit), text
+	return text, ParseDuration(val + unit)
 }
 
 func SplitTextIntoChunks(text string, chunkSize int) []string {

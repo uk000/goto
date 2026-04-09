@@ -28,28 +28,34 @@ type MCPResult struct {
 	ID                  string
 	Server              string
 	Tool                string
+	ToolCall            *ToolCall
+	ServerInfo          *timeline.GotoServerInfo
 	Timeline            *timeline.Timeline
 	LastRequestHeaders  http.Header `json:"-"`
 	LastResponseHeaders http.Header `json:"-"`
 	LastResponseStatus  int         `json:"-"`
+	LastError           error       `json:"-"`
 	CallResults         map[string]*MCPCallResult
 }
 
 type MCPCallResult struct {
 	RequestID       string
-	Content         []gomcp.Content `json:"Content,omitempty"`
-	Data            any             `json:"Data,omitempty"`
-	RemoteTimeline  any             `json:"RemoteTimeline,omitempty"`
-	RequestHeaders  http.Header     `json:"RequestHeaders,omitempty"`
-	ResponseHeaders http.Header     `json:"ResponseHeaders,omitempty"`
-	ResponseStatus  int             `json:"ResponseStatus,omitempty"`
+	Content         []gomcp.Content          `json:"Content,omitempty"`
+	Data            any                      `json:"Data,omitempty"`
+	ClientInfo      *timeline.GotoClientInfo `json:"ClientInfo,omitempty"`
+	RemoteTimeline  any                      `json:"RemoteTimeline,omitempty"`
+	RequestHeaders  http.Header              `json:"RequestHeaders,omitempty"`
+	ResponseHeaders http.Header              `json:"ResponseHeaders,omitempty"`
+	ResponseStatus  int                      `json:"ResponseStatus,omitempty"`
 }
 
-func NewMCPResult(server, tool string, t *timeline.Timeline) *MCPResult {
+func NewMCPResult(server string, tc *ToolCall, t *timeline.Timeline) *MCPResult {
 	return &MCPResult{
-		ID:          fmt.Sprintf("[%s]@%s", tool, server),
+		ID:          fmt.Sprintf("[%s]@%s", tc.Tool, server),
 		Server:      server,
-		Tool:        tool,
+		ServerInfo:  t.Server,
+		Tool:        tc.Tool,
+		ToolCall:    tc,
 		CallResults: map[string]*MCPCallResult{},
 		Timeline:    t,
 	}
@@ -64,13 +70,19 @@ func (r *MCPResult) getOrAddCall(requestID string) *MCPCallResult {
 	return r.CallResults[requestID]
 }
 
-func (r *MCPResult) storeCallResult(requestID string, result *gomcp.CallToolResult) {
+func (r *MCPResult) storeCallResult(requestID string, result *gomcp.CallToolResult, clientInfo *timeline.GotoClientInfo) {
 	if result != nil {
 		cr := r.getOrAddCall(requestID)
-		cr.Content = result.Content
+		if !r.ToolCall.ResultOnly {
+			cr.Content = result.Content
+		}
+		cr.ClientInfo = clientInfo
 		if m, ok := result.StructuredContent.(map[string]any); ok {
 			if m["TYPE"] != nil && m["TYPE"].(string) == timeline.TIMELINE {
 				delete(m, "TYPE")
+				if r.ToolCall.ResultOnly {
+					delete(m, "Events")
+				}
 				cr.RemoteTimeline = m
 			}
 		}
@@ -109,9 +121,14 @@ func (r *MCPResult) ToMCP() *gomcp.CallToolResult {
 	result := &gomcp.CallToolResult{}
 	if len(r.CallResults) > 0 {
 		r.Timeline.Data["MCPCalls"] = r.buildCallsData()
-		for _, cr := range r.CallResults {
-			result.Content = append(result.Content, cr.Content...)
+		if !r.ToolCall.ResultOnly {
+			for _, cr := range r.CallResults {
+				result.Content = append(result.Content, cr.Content...)
+			}
 		}
+	}
+	if r.ToolCall.ResultOnly {
+		r.Timeline.Events = nil
 	}
 	result.StructuredContent = r.Timeline
 	return result
@@ -121,15 +138,20 @@ func (r *MCPResult) ToObject() map[string]any {
 	result := map[string]any{}
 	if len(r.CallResults) > 0 {
 		r.Timeline.Data["MCPCalls"] = r.buildCallsData()
-		content := []string{}
-		for _, cr := range r.CallResults {
-			for _, c := range cr.Content {
-				if text, ok := c.(*gomcp.TextContent); ok {
-					content = append(content, text.Text)
+		if !r.ToolCall.ResultOnly {
+			content := []string{}
+			for _, cr := range r.CallResults {
+				for _, c := range cr.Content {
+					if text, ok := c.(*gomcp.TextContent); ok {
+						content = append(content, text.Text)
+					}
 				}
 			}
+			result["Content"] = content
 		}
-		result["Content"] = content
+	}
+	if r.ToolCall.ResultOnly {
+		r.Timeline.Events = nil
 	}
 	result["Timeline"] = r.Timeline
 	return result

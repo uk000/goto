@@ -36,6 +36,9 @@ func (t *MCPTool) callRemoteAgent(tctx *ToolCallContext) (*gomcp.CallToolResult,
 	}
 	tctx.Config.Agent.NonNil()
 	ac := tctx.Config.Agent.CloneWithUpdate(tctx.args.Remote.AgentName, tctx.args.Remote.URL, tctx.args.Remote.Authority, tctx.args.Remote.AgentMessage, tctx.args.Remote.AgentData)
+	if tctx.timeline.ResultOnly {
+		ac.ResultOnly = true
+	}
 	finalHeaders := types.Union(ac.Headers, tctx.args.Remote.Headers)
 	tctx.addForwardHeaders(finalHeaders.Request.Add, finalHeaders.Request.Forward, tctx.args.Remote.Args)
 	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s]", ac.Name, ac.AgentURL)

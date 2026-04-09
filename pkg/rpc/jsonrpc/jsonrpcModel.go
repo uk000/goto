@@ -16,15 +16,50 @@
 
 package jsonrpc
 
+import (
+	"goto/pkg/util"
+	"io"
+)
+
+const (
+	METHOD_INITIALIZE = "initialize"
+)
+
+type MCPMethods struct {
+	Initialize            bool
+	Initialized           bool
+	Cancelled             bool
+	Progress              bool
+	Ping                  bool
+	ToolsList             bool
+	ToolsListChanged      bool
+	ToolsCall             bool
+	ResourcesList         bool
+	ResourcesRead         bool
+	ResourcesUpdated      bool
+	ResourcesSubscribe    bool
+	ResourcesUnsubscribe  bool
+	ResourcesListChanged  bool
+	ResourceTemplatesList bool
+	PromptsList           bool
+	PromptsGet            bool
+	PromptsListChanged    bool
+	RootsList             bool
+	RootsListChanged      bool
+	LoggingSetLevel       bool
+	LoggingMessage        bool
+}
+
 type JSONRPCMessage struct {
-	ID      string `json:"id,omitempty"`
+	ID      int    `json:"id,omitempty"`
 	JSONRPC string `json:"jsonrpc,omitempty"`
 }
 
 type JSONRPCRequest struct {
 	JSONRPCMessage
-	Method string         `json:"method"`
-	Params map[string]any `json:"params,omitempty"`
+	Method    string         `json:"method"`
+	Params    map[string]any `json:"params,omitempty"`
+	MCPMethod *MCPMethods    `json:"-"`
 }
 
 type JSONRPCResponse struct {
@@ -39,7 +74,7 @@ type JSONRPCError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
-func NewJSONRPCRequest(id, method string, params map[string]any) *JSONRPCRequest {
+func NewJSONRPCRequest(id int, method string, params map[string]any) *JSONRPCRequest {
 	return &JSONRPCRequest{
 		JSONRPCMessage: JSONRPCMessage{
 			JSONRPC: "2.0",
@@ -50,7 +85,7 @@ func NewJSONRPCRequest(id, method string, params map[string]any) *JSONRPCRequest
 	}
 }
 
-func NewJSONRPCResponse(id string, result map[string]any) *JSONRPCResponse {
+func NewJSONRPCResponse(id int, result map[string]any) *JSONRPCResponse {
 	return &JSONRPCResponse{
 		JSONRPCMessage: JSONRPCMessage{
 			JSONRPC: "2.0",
@@ -60,7 +95,7 @@ func NewJSONRPCResponse(id string, result map[string]any) *JSONRPCResponse {
 	}
 }
 
-func NewJSONRPCError(id string, code int, message string, data any) *JSONRPCResponse {
+func NewJSONRPCError(id int, code int, message string, data any) *JSONRPCResponse {
 	return &JSONRPCResponse{
 		JSONRPCMessage: JSONRPCMessage{
 			JSONRPC: "2.0",
@@ -82,4 +117,60 @@ func NewJSONRPCNotification(method string, params map[string]any) *JSONRPCReques
 		Method: method,
 		Params: params,
 	}
+}
+
+func ParseJSONRPCRequest(b io.Reader) (*JSONRPCRequest, error) {
+	m := &JSONRPCRequest{
+		MCPMethod: &MCPMethods{},
+	}
+	if err := util.ReadJsonPayloadFromBody(b, m); err != nil {
+		return nil, err
+	}
+	switch m.Method {
+	case "initialize":
+		m.MCPMethod.Initialize = true
+	case "initialized":
+		m.MCPMethod.Initialized = true
+	case "cancelled":
+		m.MCPMethod.Cancelled = true
+	case "progress":
+		m.MCPMethod.Progress = true
+	case "ping":
+		m.MCPMethod.Ping = true
+	case "tools/list":
+		m.MCPMethod.ToolsList = true
+	case "tools/list_changed":
+		m.MCPMethod.ToolsListChanged = true
+	case "tools/call":
+		m.MCPMethod.ToolsCall = true
+	case "resources/list":
+		m.MCPMethod.ResourcesList = true
+	case "resources/read":
+		m.MCPMethod.ResourcesRead = true
+	case "resources/updated":
+		m.MCPMethod.ResourcesUpdated = true
+	case "resources/subscribe":
+		m.MCPMethod.ResourcesSubscribe = true
+	case "resources/unsubscribe":
+		m.MCPMethod.ResourcesUnsubscribe = true
+	case "resources/list_changed":
+		m.MCPMethod.ResourcesListChanged = true
+	case "resources/templates/list":
+		m.MCPMethod.ResourceTemplatesList = true
+	case "prompts/list":
+		m.MCPMethod.PromptsList = true
+	case "prompts/get":
+		m.MCPMethod.PromptsGet = true
+	case "prompts/list_changed":
+		m.MCPMethod.PromptsListChanged = true
+	case "roots/list":
+		m.MCPMethod.RootsList = true
+	case "roots/list_changed":
+		m.MCPMethod.RootsListChanged = true
+	case "logging/setLevel":
+		m.MCPMethod.LoggingSetLevel = true
+	case "logging/message":
+		m.MCPMethod.LoggingMessage = true
+	}
+	return m, nil
 }

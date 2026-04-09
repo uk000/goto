@@ -26,6 +26,8 @@ type A2AResult struct {
 	ID                  string
 	Server              string
 	Agent               string
+	AgentCall           *AgentCall
+	ServerInfo          *timeline.GotoServerInfo
 	Timeline            *timeline.Timeline
 	LastRequestHeaders  http.Header `json:"-"`
 	LastResponseHeaders http.Header `json:"-"`
@@ -35,19 +37,22 @@ type A2AResult struct {
 
 type A2ACallResult struct {
 	RequestID       string
-	Content         []string       `json:"Content,omitempty"`
-	Data            map[string]any `json:"Data,omitempty"`
-	RemoteTimeline  any            `json:"RemoteTimeline,omitempty"`
-	RequestHeaders  http.Header    `json:"RequestHeaders,omitempty"`
-	ResponseHeaders http.Header    `json:"ResponseHeaders,omitempty"`
-	ResponseStatus  int            `json:"ResponseStatus,omitempty"`
+	Content         []string                 `json:"Content,omitempty"`
+	Data            map[string]any           `json:"Data,omitempty"`
+	ClientInfo      *timeline.GotoClientInfo `json:"ClientInfo,omitempty"`
+	RemoteTimeline  any                      `json:"RemoteTimeline,omitempty"`
+	RequestHeaders  http.Header              `json:"RequestHeaders,omitempty"`
+	ResponseHeaders http.Header              `json:"ResponseHeaders,omitempty"`
+	ResponseStatus  int                      `json:"ResponseStatus,omitempty"`
 }
 
-func NewA2AResult(server, agent string, t *timeline.Timeline) *A2AResult {
+func NewA2AResult(server string, ac *AgentCall, t *timeline.Timeline) *A2AResult {
 	return &A2AResult{
-		ID:          fmt.Sprintf("[%s]@%s", agent, server),
+		ID:          fmt.Sprintf("[%s]@%s", ac.Name, server),
 		Server:      server,
-		Agent:       agent,
+		Agent:       ac.Name,
+		AgentCall:   ac,
+		ServerInfo:  t.Server,
 		CallResults: map[string]*A2ACallResult{},
 		Timeline:    t,
 	}
@@ -65,7 +70,7 @@ func (r *A2AResult) getOrAddCall(requestID string) *A2ACallResult {
 	return result
 }
 
-func (r *A2AResult) addOrUpdateCall(requestID string, result *A2ACallResult) *A2ACallResult {
+func (r *A2AResult) addOrUpdateCall(requestID string, result *A2ACallResult, clientInfo *timeline.GotoClientInfo) *A2ACallResult {
 	if result == nil {
 		result = r.getOrAddCall(requestID)
 	} else {
@@ -77,12 +82,13 @@ func (r *A2AResult) addOrUpdateCall(requestID string, result *A2ACallResult) *A2
 			result = existing
 		}
 	}
+	result.ClientInfo = clientInfo
 	return result
 }
 
-func (r *A2AResult) storeA2ACallResult(requestID string, result *A2ACallResult) {
+func (r *A2AResult) storeA2ACallResult(requestID string, result *A2ACallResult, clientInfo *timeline.GotoClientInfo) {
 	if result != nil {
-		result = r.addOrUpdateCall(requestID, result)
+		result = r.addOrUpdateCall(requestID, result, clientInfo)
 	}
 }
 
@@ -116,11 +122,16 @@ func (r *A2AResult) ToObject() map[string]any {
 	result := map[string]any{}
 	if len(r.CallResults) > 0 {
 		r.Timeline.Data["A2ACalls"] = r.buildCallsData()
-		content := []string{}
-		for _, cr := range r.CallResults {
-			content = append(content, cr.Content...)
+		if !r.AgentCall.ResultOnly {
+			content := []string{}
+			for _, cr := range r.CallResults {
+				content = append(content, cr.Content...)
+			}
+			result["Content"] = content
 		}
-		result["Content"] = content
+	}
+	if r.AgentCall.ResultOnly {
+		r.Timeline.Events = nil
 	}
 	result["Timeline"] = r.Timeline
 	return result
@@ -130,6 +141,14 @@ func (r *A2AResult) buildCallsData() map[string]map[string]any {
 	callsData := map[string]map[string]any{}
 	callsData[r.ID] = map[string]any{}
 	for _, cr := range r.CallResults {
+		if r.AgentCall.ResultOnly {
+			cr.Content = nil
+			if t, ok := cr.RemoteTimeline.(*timeline.Timeline); ok {
+				t.Events = nil
+			} else if m, ok := cr.RemoteTimeline.(map[string]any); ok {
+				m["Events"] = nil
+			}
+		}
 		callsData[r.ID][cr.RequestID] = cr
 	}
 	return callsData

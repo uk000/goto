@@ -246,6 +246,18 @@ func NewInterceptResponseWriter(r *http.Request, w http.ResponseWriter, hold boo
 	}
 }
 
+func WithInterceptAndStatus(r *http.Request, w http.ResponseWriter, status int) (http.ResponseWriter, *InterceptResponseWriter) {
+	var irw *InterceptResponseWriter
+	irw = NewInterceptResponseWriter(r, w, true)
+	r.Context().Value(util.RequestStoreKey).(*util.RequestStore).InterceptResponseWriter = irw
+	if status > 0 {
+		w.WriteHeader(status)
+		irw.StatusCode = status
+	}
+	w = irw
+	return w, irw
+}
+
 func WithIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *InterceptResponseWriter) {
 	var irw *InterceptResponseWriter
 	irw = NewInterceptResponseWriter(r, w, true)

@@ -43,8 +43,8 @@ func (ab *AgentBehaviorStream) DoStream(aCtx *AgentContext) (string, error) {
 }
 
 func (ab *AgentBehaviorStream) sendStream(aCtx *AgentContext) (string, error) {
-	count, text := util.ExtractNumberHint(aCtx.inputText)
-	overrideDelay, text := util.ExtractDurationHint(text)
+	text, count := util.ExtractNumberHint(aCtx.inputText)
+	text, overrideDelay := util.ExtractDurationHint(text)
 	if aCtx.delay == nil {
 		aCtx.delay = types.NewDelay(10*time.Millisecond, 100*time.Millisecond, 0)
 	}

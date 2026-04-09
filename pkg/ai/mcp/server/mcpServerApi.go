@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/server/middleware"
+	"goto/pkg/server/response/status"
 	"goto/pkg/util"
 	"io"
 	"net/http"
@@ -37,47 +38,43 @@ var (
 func setRoutes(r *mux.Router) {
 	mcpapi := middleware.RootPath("/mcpapi")
 	mcpServers := util.PathRouter(mcpapi, "/servers")
+	mcpServerRouter := util.PathRouter(mcpapi, "/server/{server}")
 
 	util.AddRoute(mcpServers, "/add", addServers, "POST")
-
 	util.AddRoute(mcpServers, "", getServers, "GET")
 	util.AddRoute(mcpServers, "/all", getServers, "GET")
 	util.AddRoute(mcpServers, "/names", getServers, "GET")
-	util.AddRoute(mcpServers, "/{server}?", getServers, "GET")
-
-	util.AddRouteQ(mcpServers, "/{server}/route", setServerRoute, "uri", "POST")
 	util.AddRoute(mcpServers, "/start", startServer, "POST")
-	util.AddRoute(mcpServers, "/{server}/start", startServer, "POST")
 	util.AddRoute(mcpServers, "/stop", stopServer, "POST")
-	util.AddRoute(mcpServers, "/{server}/stop", stopServer, "POST")
-
-	util.AddRouteQ(mcpServers, "/{server}/payload/completion", addCompletionPayload, "type", "POST")
-	util.AddRouteQ(mcpServers, "/{server}/payload/completion/delay={delay}", addCompletionPayload, "type", "POST")
-
 	util.AddRoute(mcpServers, "/{kind:tools|prompts|resources|templates}", getComponents, "GET")
-	util.AddRoute(mcpServers, "/{server}/{kind:tools|prompts|resources|templates}", getComponents, "GET")
-	util.AddRoute(mcpServers, "/{server}/{kind:tools|prompts|resources|templates}/{name}", getComponents, "GET")
-
-	util.AddRoute(mcpServers, "/{server}/{kind:tools|prompts|resources|templates}/add", addComponent, "POST")
-	util.AddRoute(mcpServers, "/{server}/{t:tools|tool}/{tool}/call", callTool, "POST")
-
-	util.AddRoute(mcpServers, "/{server}/payload/{kind:tools|prompts|resources|templates}/{name}", addComponentPayload, "POST")
-	util.AddRoute(mcpServers, "/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}", addComponentPayload, "POST")
-	util.AddRoute(mcpServers, "/{server}/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}/delay={delay}", addComponentPayload, "POST")
-
 	util.AddRoute(mcpServers, "/clear/all", clearServers, "POST")
 	util.AddRoute(mcpServers, "/clear", clearServers, "POST")
-	util.AddRoute(mcpServers, "/{server}/clear", clearServers, "POST")
+	util.AddRoute(mcpServers, "/status", getStatuses, "GET")
+	util.AddRoute(mcpServers, "/status/clear", clearStatus, "POST")
 
-	mcpStatus := util.PathRouter(mcpapi, "/status")
-	util.AddRouteQO(mcpStatus, "/set/{status}", setStatus, "uri", "POST")
-	util.AddRouteQO(mcpStatus, "/set/{status}/header/{header}={value}", setStatus, "uri", "POST")
-	util.AddRouteQO(mcpStatus, "/set/{status}/header/{header}", setStatus, "uri", "POST")
-	util.AddRouteQO(mcpStatus, "/set/{status}/header/not/{header}", setStatus, "uri", "POST")
+	util.AddRoute(mcpServerRouter, "", getServers, "GET")
+	util.AddRouteQ(mcpServerRouter, "/route", setServerRoute, "uri", "POST")
+	util.AddRoute(mcpServerRouter, "/start", startServer, "POST")
+	util.AddRoute(mcpServerRouter, "/stop", stopServer, "POST")
+	util.AddRouteQ(mcpServerRouter, "/payload/completion", addCompletionPayload, "type", "POST")
+	util.AddRouteQ(mcpServerRouter, "/payload/completion/delay={delay}", addCompletionPayload, "type", "POST")
+	util.AddRoute(mcpServerRouter, "/{kind:tools|prompts|resources|templates}", getComponents, "GET")
+	util.AddRoute(mcpServerRouter, "/{kind:tools|prompts|resources|templates}/{name}", getComponents, "GET")
+	util.AddRoute(mcpServerRouter, "/{kind:tools|prompts|resources|templates}/add", addComponent, "POST")
+	util.AddRoute(mcpServerRouter, "/tool/{tool}/call", callTool, "POST")
+	util.AddRoute(mcpServerRouter, "/payload/{kind:tools|prompts|resources|templates}/{name}", addComponentPayload, "POST")
+	util.AddRoute(mcpServerRouter, "/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}", addComponentPayload, "POST")
+	util.AddRoute(mcpServerRouter, "/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}/delay={delay}", addComponentPayload, "POST")
+	util.AddRoute(mcpServerRouter, "/clear", clearServers, "POST")
 
-	util.AddRoute(mcpStatus, "/configure", configureStatus, "POST")
-	util.AddRoute(mcpStatus, "/clear", clearStatus, "POST")
-	util.AddRoute(mcpStatus, "es", getStatuses, "GET")
+	util.AddRoute(mcpServerRouter, "/status/set/{status}", setStatus, "POST")
+	util.AddRoute(mcpServerRouter, "/status/set/{status}/tool/{tool}", setStatus, "POST")
+	util.AddRoute(mcpServerRouter, "/status/set/{status}/header/{header}={value}", setStatus, "POST")
+	util.AddRoute(mcpServerRouter, "/status/set/{status}/header/{header}", setStatus, "POST")
+	util.AddRoute(mcpServerRouter, "/status/set/{status}/header/not/{header}", setStatus, "POST")
+	util.AddRoute(mcpServerRouter, "/status/configure", configureStatus, "POST")
+	util.AddRoute(mcpServerRouter, "/status/clear", clearStatus, "POST")
+	util.AddRoute(mcpServerRouter, "/status", getStatuses, "GET")
 }
 
 func getServers(w http.ResponseWriter, r *http.Request) {
@@ -158,22 +155,44 @@ func setServerRoute(w http.ResponseWriter, r *http.Request) {
 
 func configureStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	sc, err := StatusManager.ParseStatusConfig(port, r.Body)
+	serverName := util.GetStringParamValue(r, "server")
+	sc, err := StatusManager.ParseStatusConfig(r.Body)
 	msg := ""
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("Failed to parse status config with error: %s", err.Error())
 		fmt.Fprintln(w, msg)
 	} else {
-		msg = fmt.Sprintf("Parsed status config: %s", sc.Log("MCP", port))
-		util.WriteJsonPayload(w, sc)
+		server := GetMCPServer(port, serverName)
+		if server == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = fmt.Sprintf("MCP Server [%s] not configured on any port", serverName)
+		} else {
+			if sc.Match == nil {
+				sc.Match = &status.StatusMatch{}
+			}
+			if sc.Match.URIMatch == nil {
+				sc.Match.URIMatch = &status.StatusURIMatch{}
+			}
+			sc.Match.URIMatch.Exact = server.URI
+		}
+		err = StatusManager.ApplyStatusConfig(port, sc)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = fmt.Sprintf("Failed to apply status config with error: %s", err.Error())
+			fmt.Fprintln(w, msg)
+		} else {
+			msg = fmt.Sprintf("Applied status config: %s", sc.Log("MCP", port))
+			util.WriteJsonPayload(w, sc)
+		}
 	}
 	util.AddLogMessage(msg, r)
 }
 
 func setStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	uri := util.GetStringParamValue(r, "uri")
+	serverName := util.GetStringParamValue(r, "server")
+	toolName := util.GetStringParamValue(r, "tool")
 	header := util.GetStringParamValue(r, "header")
 	value := util.GetStringParamValue(r, "value")
 	noHeader := strings.Contains(r.RequestURI, "not")
@@ -184,7 +203,27 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Invalid Status")
 		return
 	}
-	status := StatusManager.SetStatusFor(port, uri, header, value, statusCodes, times, noHeader)
+	server := GetMCPServer(port, serverName)
+	if server == nil {
+		msg := fmt.Sprintf("MCP Server [%s] not configured on any port", serverName)
+		w.WriteHeader(http.StatusBadRequest)
+		util.AddLogMessage(msg, r)
+		fmt.Fprintln(w, msg)
+		return
+	}
+	uri := server.URI
+	if toolName != "" {
+		tool := server.GetTool(toolName)
+		if tool == nil {
+			msg := fmt.Sprintf("MCP Server [%s] has no tool [%s]", serverName, toolName)
+			w.WriteHeader(http.StatusBadRequest)
+			util.AddLogMessage(msg, r)
+			fmt.Fprintln(w, msg)
+			return
+		}
+		uri = tool.ServerURI
+	}
+	status := StatusManager.SetStatusFor(port, uri, header, value, []string{"POST"}, statusCodes, times, noHeader)
 	msg := status.Log("MCP", port)
 	util.AddLogMessage(msg, r)
 	w.WriteHeader(http.StatusOK)
@@ -193,15 +232,33 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 
 func clearStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	StatusManager.Clear(port, "")
-	msg := fmt.Sprintf("Status cleared on port [%d]", port)
+	serverName := util.GetStringParamValue(r, "server")
+	server := GetMCPServer(port, serverName)
+	msg := ""
+	if server == nil {
+		StatusManager.Clear(port, "")
+		msg = fmt.Sprintf("Status cleared on port [%d]", port)
+	} else {
+		StatusManager.Clear(port, server.URI)
+		msg = fmt.Sprintf("Status cleared on port [%d] for server [%s]", port, serverName)
+	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
 
 func getStatuses(w http.ResponseWriter, r *http.Request) {
-	util.WriteJsonPayload(w, StatusManager.PortStatus)
-	util.AddLogMessage("Delivered statuses", r)
+	port := util.GetRequestOrListenerPortNum(r)
+	serverName := util.GetStringParamValue(r, "server")
+	server := GetMCPServer(port, serverName)
+	if server != nil {
+		status, times := StatusManager.GetStatusFor(port, server.URI, nil, "")
+		msg := fmt.Sprintf("Port [%d] Server [%s] Reporting Status [%d] for [%d] times", port, serverName, status, times)
+		fmt.Fprintln(w, msg)
+		util.AddLogMessage(msg, r)
+	} else {
+		util.WriteJsonPayload(w, StatusManager.PortStatus)
+		util.AddLogMessage("Delivered statuses", r)
+	}
 }
 
 func clearServers(w http.ResponseWriter, r *http.Request) {

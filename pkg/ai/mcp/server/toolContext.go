@@ -66,6 +66,7 @@ func NewToolCallContext(ctx context.Context, t *MCPTool, req *gomcp.CallToolRequ
 		constants.HeaderGotoMCPServer: t.Server.ID,
 		constants.HeaderGotoMCPTool:   t.Name,
 	}, args, requestHeaders, nil, tctx.notifyClientWithError, tctx.notifyClient)
+	tctx.timeline.ResultOnly = args.ResultOnly
 	tctx.timeline.StartTimeline(t.Label, fmt.Sprintf("%s: Received Tool Call [%s]", t.Server.Name, t.Label), tctx.timeline.Server)
 	return tctx
 }

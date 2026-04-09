@@ -44,33 +44,34 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(agentsRouter, "/all", getAgents, "GET")
 	util.AddRoute(agentsRouter, "/names", getAgents, "GET")
 	util.AddRoute(agentsRouter, "/names/all", getAgents, "GET")
-	util.AddRoute(agentsRouter, "/{agent}", getAgents, "GET")
-	util.AddRoute(agentsRouter, "/{agent}/delegates", getAgentDelegates, "GET")
-	util.AddRoute(agentsRouter, "/{agent}/delegates/tools", getAgentDelegates, "GET")
-	util.AddRoute(agentsRouter, "/{agent}/delegates/tools/{delegate}", getAgentDelegates, "GET")
-	util.AddRoute(agentsRouter, "/{agent}/delegates/agents", getAgentDelegates, "GET")
-	util.AddRoute(agentsRouter, "/{agent}/delegates/agents/{delegate}", getAgentDelegates, "GET")
 	util.AddRoute(agentsRouter, "/add", addAgents, "POST")
-	// util.AddRoute(agentsRouter, "/port={port}/add", addAgents, "POST")
-	util.AddRoute(agentsRouter, "/{agent}/payload", setAgentPayload, "POST")
 	util.AddRoute(agentsRouter, "/clear", clearAgents, "POST")
+
+	agentRouter := util.PathRouter(agentsRouter, "/{agent}")
+	util.AddRoute(agentRouter, "", getAgents, "GET")
+	util.AddRoute(agentRouter, "/delegates", getAgentDelegates, "GET")
+	util.AddRoute(agentRouter, "/delegates/tools", getAgentDelegates, "GET")
+	util.AddRoute(agentRouter, "/delegates/tools/{delegate}", getAgentDelegates, "GET")
+	util.AddRoute(agentRouter, "/delegates/agents", getAgentDelegates, "GET")
+	util.AddRoute(agentRouter, "/delegates/agents/{delegate}", getAgentDelegates, "GET")
+	util.AddRoute(agentRouter, "/payload", setAgentPayload, "POST")
 
 	a2aServersRouter := util.PathRouter(a2a, "/servers")
 	util.AddRoute(a2aServersRouter, "", getServers, "GET")
 	util.AddRoute(a2aServersRouter, "/clear", clearServers, "POST")
 
-	a2aStatusRouter := util.PathRouter(a2a, "/status")
-	util.AddRouteQO(a2aStatusRouter, "/set/{status}", setStatus, "uri", "POST")
-	util.AddRouteQO(a2aStatusRouter, "/set/{status}/header/{header}={value}", setStatus, "uri", "POST")
-	util.AddRouteQO(a2aStatusRouter, "/set/{status}/header/{header}", setStatus, "uri", "POST")
-	util.AddRouteQO(a2aStatusRouter, "/set/{status}/header/not/{header}", setStatus, "uri", "POST")
+	a2aStatusRouter := util.PathRouter(agentRouter, "/status")
+	util.AddRoute(a2aStatusRouter, "/set/{status}", setStatus, "POST")
+	util.AddRoute(a2aStatusRouter, "/set/{status}/header/{header}={value}", setStatus, "POST")
+	util.AddRoute(a2aStatusRouter, "/set/{status}/header/{header}", setStatus, "POST")
+	util.AddRoute(a2aStatusRouter, "/set/{status}/header/not/{header}", setStatus, "POST")
 
 	util.AddRoute(a2aStatusRouter, "/configure", configureStatus, "POST")
 	util.AddRoute(a2aStatusRouter, "/clear", clearStatus, "POST")
 	util.AddRoute(a2aStatusRouter, "", getStatuses, "GET")
 
-	agentRouter := middleware.RootPath("/agent")
-	util.AddRoute(agentRouter, "/{agent}", serveAgent, "GET", "POST", "DELETE")
+	agentCallRouter := middleware.RootPath("/agent")
+	util.AddRoute(agentCallRouter, "/{agent}", serveAgent, "GET", "POST", "DELETE")
 }
 
 func getAgents(w http.ResponseWriter, r *http.Request) {
@@ -235,7 +236,7 @@ func clearAgents(w http.ResponseWriter, r *http.Request) {
 
 func configureStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	sc, err := statusManager.ParseStatusConfig(port, r.Body)
+	sc, err := statusManager.ParseAndApplyStatusConfig(port, r.Body)
 	msg := ""
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -250,7 +251,7 @@ func configureStatus(w http.ResponseWriter, r *http.Request) {
 
 func setStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	uri := util.GetStringParamValue(r, "uri")
+	name := util.GetStringParamValue(r, "agent")
 	header := util.GetStringParamValue(r, "header")
 	value := util.GetStringParamValue(r, "value")
 	notPresent := strings.Contains(r.RequestURI, "not")
@@ -261,7 +262,15 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Invalid Status")
 		return
 	}
-	status := statusManager.SetStatusFor(port, uri, header, value, statusCodes, times, !notPresent)
+	agent := GetAgent(port, name)
+	if agent == nil {
+		w.WriteHeader(http.StatusBadRequest)
+		msg := fmt.Sprintf("Bad agent [%s]", name)
+		util.AddLogMessage(msg, r)
+		fmt.Fprintln(w, msg)
+		return
+	}
+	status := statusManager.SetStatusFor(port, agent.URI, header, value, []string{"POST"}, statusCodes, times, !notPresent)
 	msg := status.Log("A2A", port)
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
@@ -284,6 +293,8 @@ func sendStatus(id string, status, rem int, w http.ResponseWriter, r *http.Reque
 	w.Header().Add(constants.HeaderGotoForcedStatus, strconv.Itoa(status))
 	w.Header().Add(constants.HeaderGotoForcedStatusRemaining, strconv.Itoa(rem))
 	w.WriteHeader(status)
+	rs := util.GetRequestStore(r)
+	rs.StatusCode = status
 	b, _ := io.ReadAll(r.Body)
 	msg := fmt.Sprintf("%s Reporting status [%d], Remaining status count [%d]. A2A Request Headers [%s], Payload: %s", id, status, rem, util.ToJSONText(r.Header), string(b))
 	util.AddLogMessage(msg, r)
@@ -302,7 +313,7 @@ func serveAgent(w http.ResponseWriter, r *http.Request) {
 		msg = "Agent name needed"
 		fmt.Fprintln(w, msg)
 	} else {
-		if status, rem := statusManager.GetStatusFor(port, r.RequestURI, r.Header); status > 0 {
+		if status, rem := statusManager.GetStatusFor(port, r.RequestURI, r.Header, r.Method); status > 0 {
 			sendStatus(agent, status, rem, w, r)
 		} else {
 			err := GetOrAddServer(port).Serve(agent, w, r)

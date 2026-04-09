@@ -387,6 +387,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 		irw := util.GetInterceptResponseWriter(r).(*intercept.InterceptResponseWriter)
+		rs := util.GetRequestStore(r)
 		if statusToReport > 0 {
 			irw.StatusCode = statusToReport
 			w.Header().Add(HeaderGotoURIStatus, strconv.Itoa(statusToReport))
@@ -394,6 +395,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 		if irw.StatusCode == 0 {
 			irw.StatusCode = http.StatusOK
 		}
+		rs.StatusCode = irw.StatusCode
 		util.UpdateTrafficEventStatusCode(r, irw.StatusCode)
 		trigger.RunTriggers(r, irw, irw.StatusCode)
 	})

@@ -565,12 +565,13 @@ func (m *MCPServer) AddTool(tool *MCPTool) {
 	if tool.URI == "" {
 		tool.URI = strings.ToLower("/" + tool.Name)
 	}
+	tool.ServerURI = m.URI + tool.URI
 	tool.BuildLabel()
 	m.lock.Lock()
 	m.Tools[tool.Tool.Name] = tool
 	m.ToolsByURI[tool.URI] = tool
 	pair := types.NewPair(m.Name, tool.Name)
-	ServerRoutes[m.URI+tool.URI] = pair
+	ServerRoutes[tool.ServerURI] = pair
 	ServerRoutes[m.SSEURI+tool.URI] = pair
 	m.lock.Unlock()
 	if m.ps != nil {

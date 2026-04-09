@@ -44,14 +44,15 @@ type InstanceInfo struct {
 }
 
 type RemoteInfo struct {
-	RemoteTarget    string
-	RemoteURL       string
-	RemoteLabel     string
-	OutboundArgs    any
-	OutboundHeaders any
-	HeadersConfig   *types.Headers
-	RequestCount    int
-	Concurrent      int
+	RemoteTarget           string
+	RemoteURL              string
+	RemoteLabel            string
+	OutboundRequestArgs    any
+	OutboundRequestHeaders any
+	ResponseHeaders        any
+	HeadersConfig          *types.Headers
+	RequestCount           int
+	Concurrent             int
 }
 
 type GotoClientInfo struct {
@@ -82,6 +83,7 @@ type Timeline struct {
 	Data            map[string]any
 	Finished        bool
 	Success         bool
+	ResultOnly      bool
 	stream          chan *types.Pair[string, any]
 	streamPreferred bool
 	updateNotifier  TimelineUpdateNotifierFunc
@@ -139,17 +141,19 @@ func (t *Timeline) EndTimeline(label, text string, data any, success bool) {
 }
 
 func (t *Timeline) AddEvent(label, text string, client *GotoClientInfo, remote any, json bool) {
-	event := t.NewEvent(label, text, client, nil, remote)
-	t.send(text, nil, false, t.Finished)
+	if !t.ResultOnly {
+		event := t.NewEvent(label, text, client, nil, remote)
+		t.lock.Lock()
+		defer t.lock.Unlock()
+		t.Events = append(t.Events, event)
+		t.send(text, nil, false, t.Finished)
+	}
 	if client != nil {
 		t.send("ClientInfo", client, true, t.Finished)
 	}
 	if remote != nil {
 		t.send(label, remote, json, t.Finished)
 	}
-	t.lock.Lock()
-	defer t.lock.Unlock()
-	t.Events = append(t.Events, event)
 }
 
 func (t *Timeline) AddData(key string, data any, json bool) {
@@ -210,14 +214,14 @@ func CreateInstanceInfo(port int, label string, metadata map[string]any, inbound
 
 func CreateRemoteInfo(target, url, server string, outArgs, outHeaders any, requestCount, concurrent int) *RemoteInfo {
 	return &RemoteInfo{
-		RemoteTarget:    target,
-		RemoteURL:       url,
-		RemoteLabel:     server,
-		OutboundArgs:    outArgs,
-		OutboundHeaders: outHeaders,
-		HeadersConfig:   &types.Headers{},
-		RequestCount:    requestCount,
-		Concurrent:      concurrent,
+		RemoteTarget:           target,
+		RemoteURL:              url,
+		RemoteLabel:            server,
+		OutboundRequestArgs:    outArgs,
+		OutboundRequestHeaders: outHeaders,
+		HeadersConfig:          &types.Headers{},
+		RequestCount:           requestCount,
+		Concurrent:             concurrent,
 	}
 }
 
@@ -233,4 +237,9 @@ func BuildGotoClientInfo(port int, label, target, url, server string, inHeaders,
 		InstanceInfo: CreateInstanceInfo(port, label, metadata, inArgs, inHeaders),
 		RemoteInfo:   CreateRemoteInfo(target, url, server, outArgs, outHeaders, requestCount, concurrent),
 	}
+}
+
+func (c *GotoClientInfo) StoreHeaders(request, response http.Header) {
+	c.OutboundRequestHeaders = request
+	c.ResponseHeaders = response
 }

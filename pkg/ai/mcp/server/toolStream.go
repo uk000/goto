@@ -24,8 +24,8 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func (t *MCPTool) stream(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
-	result := &gomcp.CallToolResult{}
+func (t *MCPTool) stream(tctx *ToolCallContext) (result *gomcp.CallToolResult, err error) {
+	result = &gomcp.CallToolResult{}
 	var delay time.Duration
 	d := tctx.args.Delay
 	if tctx.Response != nil && tctx.Response.Delay != nil {
@@ -62,7 +62,7 @@ func (t *MCPTool) stream(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 		msg := fmt.Sprintf("%s Will stream [%d] responses with delay %s", tctx.Label, total, util.ToJSONText(d))
 		tctx.AddEvent(msg, nil, true)
 
-		tctx.Response.RangeTextFrom(oldResponseCount+1, total, func(text string, count int, restarted bool) (bool, error) {
+		err = tctx.Response.RangeTextFrom(oldResponseCount+1, total, func(text string, count int, restarted bool) (bool, error) {
 			if !keepSending {
 				return false, nil
 			}
@@ -113,5 +113,5 @@ func (t *MCPTool) stream(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	}
 	msg := fmt.Sprintf("%s Stream finished \U000026F3", tctx.Label)
 	tctx.AddEvent(msg, nil, true)
-	return result, nil
+	return
 }

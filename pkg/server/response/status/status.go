@@ -98,7 +98,7 @@ func getOrCreatePortStatus(r *http.Request) *PortStatus {
 
 func configureStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	sc, err := TheStatusManager.ParseStatusConfig(port, r.Body)
+	sc, err := TheStatusManager.ParseAndApplyStatusConfig(port, r.Body)
 	msg := ""
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -121,7 +121,7 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Invalid Status")
 		return
 	}
-	status := TheStatusManager.SetStatusFor(port, uri, "", "", statusCodes, times, true)
+	status := TheStatusManager.SetStatusFor(port, uri, "", "", nil, statusCodes, times, true)
 	msg := status.Log("HTTP Response Status", port)
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
@@ -129,7 +129,7 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 
 func IsForcedStatus(r *http.Request) bool {
 	port := util.GetRequestOrListenerPortNum(r)
-	status, rem := TheStatusManager.GetStatusFor(port, r.RequestURI, r.Header)
+	status, rem := TheStatusManager.GetStatusFor(port, r.RequestURI, r.Header, r.Method)
 	return status > 0 && rem > 0
 }
 
@@ -137,7 +137,7 @@ func computeResponseStatus(originalStatus int, r *http.Request) (int, int, bool)
 	port := util.GetRequestOrListenerPortNum(r)
 	overriddenStatus := false
 	responseStatus := originalStatus
-	status, remaining := TheStatusManager.GetStatusFor(port, r.RequestURI, r.Header)
+	status, remaining := TheStatusManager.GetStatusFor(port, r.RequestURI, r.Header, r.Method)
 	if status > 0 {
 		responseStatus = status
 		overriddenStatus = true
@@ -333,6 +333,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 			if irw.StatusCode == 0 {
 				irw.StatusCode = http.StatusOK
 			}
+			rs.StatusCode = irw.StatusCode
 			IncrementStatusCount(irw.StatusCode, r)
 			msg := ""
 			if overriddenStatus {

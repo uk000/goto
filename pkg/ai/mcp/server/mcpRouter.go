@@ -21,10 +21,10 @@ import (
 	"fmt"
 	"goto/pkg/constants"
 	mcpproxy "goto/pkg/proxy/mcp"
+	"goto/pkg/rpc/jsonrpc"
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/listeners"
 	"goto/pkg/util"
-	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -77,12 +77,7 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 				rs.RequestedMCPTool = tool.Name
 				log.Printf("Port [%d] Request [%s] will be served by Server [%s] (Stateless=%t) for Tool [%s]", l.Port, r.RequestURI, server.Name, server.Stateless, tool.Name)
 			}
-			port := util.GetRequestOrListenerPortNum(r)
-			if status, rem := StatusManager.GetStatusFor(port, r.RequestURI, r.Header); status > 0 {
-				sendStatus(server.ID, status, rem, w, r)
-			} else {
-				server.handler.ServeHTTP(w, r)
-			}
+			server.handler.ServeHTTP(w, r)
 			rs.RequestServed = true
 		} else {
 			log.Printf("Port [%d] Request [%s] No server available. Routing to HTTP server", l.Port, r.RequestURI)
@@ -110,7 +105,7 @@ func MCPHybridHandler(server *MCPServer) http.Handler {
 }
 
 func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler http.Handler) {
-	_, r, rs := util.WithRequestStore(r, w)
+	rs := util.GetRequestStore(r)
 	session := server.getOrSetSessionContext(r)
 	sessionId := r.Header.Get("X-MCP-Session-ID")
 	ms := MCPRequestStoreBySession[sessionId]
@@ -151,12 +146,30 @@ func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler ht
 			<-rc
 		}
 	default:
-		w, irw := intercept.WithIntercept(r, w)
-		handler.ServeHTTP(w, r)
-		log.Println(ms.ForcedStatus)
-		if ms.ForcedStatus > 0 {
-			irw.StatusCode = ms.ForcedStatus
+		var irw *intercept.InterceptResponseWriter
+		var status, rem int
+		rr := util.CreateOrGetReReader(r.Body)
+		r.Body = rr
+		j, err := jsonrpc.ParseJSONRPCRequest(r.Body)
+		if err == nil && j != nil {
+			if j.MCPMethod.ToolsCall {
+				status, rem = StatusManager.GetStatusFor(server.Port, server.URI, r.Header, r.Method)
+				if status == 0 {
+					toolName := j.Params["name"].(string)
+					if tool := server.GetTool(toolName); tool != nil {
+						status, rem = StatusManager.GetStatusFor(server.Port, tool.ServerURI, r.Header, r.Method)
+					}
+				}
+			}
 		}
+		rr.Rewind()
+		w, irw = intercept.WithInterceptAndStatus(r, w, status)
+		if status > 0 {
+			ms.ForcedStatus = status
+			rs.StatusCode = status
+			sendStatus(server.ID, status, rem, w, r)
+		}
+		handler.ServeHTTP(w, r)
 		irw.Proceed()
 	}
 }
@@ -289,8 +302,9 @@ func sendStatus(id string, status, rem int, w http.ResponseWriter, r *http.Reque
 	w.Header().Add(constants.HeaderGotoForcedStatus, strconv.Itoa(status))
 	w.Header().Add(constants.HeaderGotoForcedStatusRemaining, strconv.Itoa(rem))
 	w.WriteHeader(status)
-	b, _ := io.ReadAll(r.Body)
-	msg := fmt.Sprintf("%s Reporting status [%d], Remaining status count [%d]. MCP Request Headers [%s], Payload: %s", id, status, rem, util.ToJSONText(r.Header), string(b))
+	rr := util.CreateOrGetReReader(r.Body)
+	rr.Rewind()
+	r.Body = rr
+	msg := fmt.Sprintf("%s Reporting status [%d], Remaining status count [%d]. MCP Request Headers [%s], Payload: %s", id, status, rem, util.ToJSONText(r.Header), string(rr.Content))
 	util.AddLogMessage(msg, r)
-	fmt.Fprintln(w, msg)
 }

@@ -168,26 +168,13 @@ func (b *AgentBehaviorImpl) handleStream(aCtx *AgentContext) (*taskmanager.Messa
 	}, nil
 }
 
-func (b *AgentBehaviorImpl) stream(aCtx *AgentContext) (err error) {
+func (b *AgentBehaviorImpl) stream(aCtx *AgentContext) {
 	status, err := b.doStream(aCtx)
 	if err != nil {
 		aCtx.endTask(false, fmt.Sprintf("%s | Error: %s", status, err.Error()))
 	} else {
 		aCtx.endTask(true, status)
 	}
-	return err
-}
-
-func getMessageText(message *a2aproto.Message) string {
-	s := strings.Builder{}
-	for _, part := range message.Parts {
-		if p, ok := part.(*a2aproto.TextPart); ok {
-			s.WriteString(p.Text)
-		} else if p, ok := part.(*a2aproto.DataPart); ok {
-			s.WriteString(util.ToJSONText(p.Data))
-		}
-	}
-	return s.String()
 }
 
 func createTextMessage(data string) a2aproto.Message {

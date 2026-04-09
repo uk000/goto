@@ -31,9 +31,10 @@ func (t *MCPTool) callRemoteTool(tctx *ToolCallContext) (*gomcp.CallToolResult, 
 	}
 	tc := tctx.Config.RemoteTool.UpdateAndClone(tctx.args.Remote.ToolName, tctx.args.Remote.URL, "", tctx.args.Remote.Authority,
 		tctx.args.DelayText, tctx.args.Remote.Headers, tctx.args, tctx.args.Remote.Args)
-
+	if tctx.args.ResultOnly {
+		tc.ResultOnly = true
+	}
 	//t.addForwardHeaders(tc.Headers.Request.Add, tc.Headers.Request.Forward, tc.Args)
-
 	isSSE := tctx.sse
 	if tctx.args.Remote.SSE || tc.ForceSSE {
 		isSSE = true
@@ -44,6 +45,10 @@ func (t *MCPTool) callRemoteTool(tctx *ToolCallContext) (*gomcp.CallToolResult, 
 		url = tc.SSEURL
 	}
 	operLabel := fmt.Sprintf("%s->%s@%s", tctx.Label, tc.Tool, tc.Server)
+	count := tctx.args.Count
+	if count > 0 {
+		tc.RequestCount = count
+	}
 	var remoteResult *mcpclient.MCPResult
 	var err error
 	client := mcpclient.NewClient(tctx.Server.GetPort(), false, tctx.Config.RemoteTool.H2, tctx.Config.RemoteTool.TLS,

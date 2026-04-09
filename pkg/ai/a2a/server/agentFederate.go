@@ -199,7 +199,9 @@ func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentContext, dCtx *DelegateCal
 	// 	msg := fmt.Sprintf("Response headers from Agent [%s][%s]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL)
 	// 	aCtx.AddEvent(msg, map[string]any{"responseHeaders": respHeaders}, true)
 	// }
-	aCtx.sendData("Result", result.ToObject())
+	if result != nil {
+		aCtx.sendData("Result", result.ToObject())
+	}
 }
 
 func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCallContext, toolsWG *sync.WaitGroup) {
@@ -218,8 +220,8 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 		msg := fmt.Sprintf("Successfully invoked MCP tool [%s] at URL [%s]. Call Count [%d], Response Count [%d]",
 			dCtx.toolCall.Tool, dCtx.toolCall.URL, dCtx.tracker.CallCount.Load(), dCtx.tracker.ResponseCount.Load())
 		aCtx.AddEvent(msg, nil, false)
+		aCtx.sendData("Result", remoteResult.ToObject())
 	}
-	aCtx.sendData("Result", remoteResult.ToObject())
 	//processMCPCallResults(dCtx.toolCall.Tool, remoteResult, dCtx.results, dCtx.upstreamProgress, ab.agent.Streaming)
 }
 
@@ -233,6 +235,9 @@ func (ab *AgentBehaviorFederate) prepareArgs(args *aicommon.ToolCallArgs, forwar
 func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateCallContext) (result *a2aclient.A2AResult, err error) {
 	msg := fmt.Sprintf("Agent [%s] Invoking Agent [%s] at URL [%s] with input [%s]", aCtx.agent.ID, dCtx.agentCall.Name, dCtx.agentCall.AgentURL, dCtx.agentCall.Message)
 	aCtx.AddEvent(msg, nil, false)
+	if aCtx.timeline.ResultOnly {
+		dCtx.agentCall.ResultOnly = true
+	}
 	client := a2aclient.NewA2AClient(ab.agent.Port, ab.agent.ID, dCtx.agentCall.H2, dCtx.agentCall.TLS, dCtx.agentCall.Authority)
 	if client == nil {
 		return nil, errors.New("failed to create A2A client")
@@ -262,6 +267,7 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 }
 
 func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCallContext) (mcpResult *mcpclient.MCPResult, respHeaders http.Header, err error) {
+	dCtx.toolCall.ResultOnly = aCtx.timeline.ResultOnly
 	args := ab.prepareArgs(dCtx.toolCall.Args, dCtx.toolCall.Headers.Request.Forward)
 	msg := fmt.Sprintf("Agent [%s] Invoking MCP tool [%s] at URL [%s]", aCtx.agent.ID, dCtx.toolCall.Tool, dCtx.toolCall.URL)
 	aCtx.AddEvent(msg, nil, false)
@@ -300,6 +306,7 @@ outer:
 				break outer
 			}
 			if err := processResult(pair); err != nil {
+				aCtx.err = err
 				break outer
 			}
 		}
@@ -328,6 +335,7 @@ outer:
 					err = aCtx.notifyUpdate(fmt.Sprintf("%s[%s]: %s", dCtx.name, dCtx.url, p.Left), nil, false)
 				}
 				if err != nil {
+					aCtx.err = err
 					break outer
 				} else {
 					dCtx.tracker.IncrementResponse()

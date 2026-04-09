@@ -62,6 +62,7 @@ type AgentContext struct {
 	tools          map[string]map[string]*model.DelegateToolCall
 	agents         map[string]map[string]*model.DelegateAgentCall
 	input          *a2aproto.Message
+	inputData      map[string]any
 	inputText      string
 	options        *taskmanager.ProcessOptions
 	handler        taskmanager.TaskHandler
@@ -70,6 +71,8 @@ type AgentContext struct {
 	localProgress  chan *types.Pair[string, any]
 	toolResults    map[string]any
 	agentResults   map[string]any
+	forcedStatus   int
+	overrideDelay  time.Duration
 	timeline       *timeline.Timeline
 	err            error
 }
@@ -129,7 +132,6 @@ func (ac *AgentContext) setContext(ctx context.Context, b *AgentBehaviorImpl, ta
 	ac.behavior = b
 	ac.task = task
 	ac.input = input
-	ac.inputText = getMessageText(input)
 	ac.options = options
 	ac.handler = handler
 	ac.delay = b.delay
@@ -140,7 +142,37 @@ func (ac *AgentContext) setContext(ctx context.Context, b *AgentBehaviorImpl, ta
 		constants.HeaderGotoA2AServer: ac.serverID,
 		constants.HeaderGotoA2AAgent:  ac.agent.Card.Name,
 	}, nil, ac.requestHeaders, nil, ac.notifyUpdate, ac.notifyEndSession)
+	ac.loadInputs(input)
 	ac.timeline.StartTimeline(ac.agent.ID, fmt.Sprintf("Received Agent Call [%s]", ac.agent.Card.Name), ac.timeline.Server)
+}
+
+func (ac *AgentContext) loadInputs(input *a2aproto.Message) {
+	s := strings.Builder{}
+	ac.inputData = map[string]any{}
+	for _, part := range input.Parts {
+		if p, ok := part.(*a2aproto.TextPart); ok {
+			s.WriteString(p.Text)
+		} else if dp, ok := part.(*a2aproto.DataPart); ok {
+			if dp.Data != nil {
+				if m, ok := dp.Data.(map[string]any); ok {
+					for k, v := range m {
+						ac.inputData[k] = v
+						if strings.EqualFold(k, "resultOnly") {
+							ac.timeline.ResultOnly = util.AnyToBool(v)
+						}
+					}
+				}
+			}
+		}
+	}
+	ac.inputText = s.String()
+}
+
+func (ac *AgentContext) detectHints() {
+	inputText := ac.inputText
+	inputText, ac.forcedStatus = util.ExtractStatusHint(inputText)
+	inputText, ac.overrideDelay = util.ExtractDurationHint(inputText)
+	// count, inputText := util.ExtractNumberHint(inputText)
 }
 
 func (ac *AgentContext) detectRemoteCalls() {
@@ -149,11 +181,12 @@ func (ac *AgentContext) detectRemoteCalls() {
 	inputText, targetHint := util.ExtractTargetHint(inputText)
 	inputText, inputs := util.ExtractInputHint(inputText)
 	inputText, portHint := util.ExtractPortHint(inputText)
+	inputText, forcedStatus := util.ExtractStatusHint(inputText)
 	ac.matchDelegates(inputText, portHint, targetHint, inputs)
 	ac.sendDelegatesMatchUpdate()
 	// count, inputText := util.ExtractNumberHint(inputText)
 	// overrideDelay, inputText := util.ExtractDurationHint(inputText)
-	ac.setOverrideParamsFromInput(jsons, inputs)
+	ac.setOverrideParamsFromInput(jsons, inputs, forcedStatus)
 	ac.inputText = inputText
 }
 
@@ -290,7 +323,7 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 	}
 }
 
-func (ac *AgentContext) setOverrideParamsFromInput(jsons []map[string]any, inputs map[string]string) {
+func (ac *AgentContext) setOverrideParamsFromInput(jsons []map[string]any, inputs map[string]string, forcedStatus int) {
 	overrides := extractJSONValues(jsons)
 	for name, override := range overrides {
 		if tcalls := ac.tools[name]; tcalls != nil {
@@ -306,6 +339,9 @@ func (ac *AgentContext) setOverrideParamsFromInput(jsons []map[string]any, input
 					log.Println(msg)
 					ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg)
 					t.ToolCall.Args.UpdateFromInputArgs(override.args)
+				}
+				if forcedStatus > 0 {
+					t.ToolCall.ForcedStatus = forcedStatus
 				}
 			}
 		} else if acalls := ac.agents[name]; acalls != nil {
@@ -327,6 +363,9 @@ func (ac *AgentContext) setOverrideParamsFromInput(jsons []map[string]any, input
 					log.Println(msg)
 					ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg)
 					a.AgentCall.Message = override.remoteInput
+				}
+				if forcedStatus > 0 {
+					a.AgentCall.ForcedStatus = forcedStatus
 				}
 			}
 		}

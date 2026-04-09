@@ -58,25 +58,27 @@ type ToolCall struct {
 	TLS          bool                   `json:"tls,omitempty"`
 	ForceSSE     bool                   `json:"forceSSE,omitempty"`
 	Raw          bool                   `json:"neat,omitempty"`
-	ResultOnly   bool                   `json:"resultOnly,omitempty"`
 	Args         *aicommon.ToolCallArgs `json:"args,omitempty"`
 	Headers      *types.Headers         `json:"headers,omitempty"`
 	Delay        string                 `json:"delay,omitempty"`
 	RequestCount int                    `json:"requestCount"`
 	Concurrent   int                    `json:"concurrent"`
 	InitialDelay string                 `json:"initialDelay"`
+	ForcedStatus int                    `json:"forcedStatus"`
+	ResultOnly   bool                   `json:"resultOnly,omitempty"`
 	delayD       *types.Delay           `json:"-"`
 }
 
 type ToolCallContext struct {
-	ctx      context.Context
-	client   *MCPClient
-	session  *MCPSession
-	tc       *ToolCall
-	callerId string
-	args     *aicommon.ToolCallArgs
-	rounds   int
-	result   *MCPResult
+	ctx        context.Context
+	client     *MCPClient
+	session    *MCPSession
+	clientInfo *timeline.GotoClientInfo
+	tc         *ToolCall
+	callerId   string
+	args       *aicommon.ToolCallArgs
+	rounds     int
+	result     *MCPResult
 }
 
 type MCPRequestContext struct {
@@ -380,7 +382,7 @@ func (s *MCPSession) newToolCallContext(args *aicommon.ToolCallArgs) *ToolCallCo
 		tc:       s.tc,
 		callerId: s.CallerId,
 		args:     args,
-		result:   NewMCPResult(s.URL, s.tc.Tool, s.Timeline),
+		result:   NewMCPResult(s.URL, s.tc, s.Timeline),
 	}
 	if tctx.args == nil {
 		tctx.args = s.tc.Args
@@ -422,11 +424,11 @@ func (tctx *ToolCallContext) prepare() {
 func (tctx *ToolCallContext) reportInitiateToolCall() {
 	msg := fmt.Sprintf("%s [%s] Initiating Tool Call [%s] on URL [%s], Request Count [%d], Concurrent [%d]",
 		tctx.callerId, tctx.session.Operation, tctx.tc.Tool, tctx.tc.URL, tctx.tc.RequestCount, tctx.tc.Concurrent)
-	clientInfo := timeline.BuildGotoClientInfo(tctx.client.Port, tctx.callerId, tctx.tc.Tool, tctx.tc.URL, tctx.tc.Server, tctx.session.inHeaders, nil,
+	tctx.clientInfo = timeline.BuildGotoClientInfo(tctx.client.Port, tctx.callerId, tctx.tc.Tool, tctx.tc.URL, tctx.tc.Server, tctx.session.inHeaders, nil,
 		tctx.args, nil, tctx.tc.RequestCount, tctx.tc.Concurrent, map[string]any{
 			"Tool-Call": tctx.tc,
 		})
-	tctx.session.Timeline.AddEvent(tctx.callerId, msg, clientInfo, nil, true)
+	tctx.session.Timeline.AddEvent(tctx.callerId, msg, tctx.clientInfo, nil, true)
 }
 
 func (tctx *ToolCallContext) reportToolCallRequest(index int, args *aicommon.ToolCallArgs) {
@@ -455,7 +457,6 @@ func (tctx *ToolCallContext) call() (*MCPResult, error) {
 	defer tctx.session.close()
 	tctx.prepare()
 	tctx.reportInitiateToolCall()
-
 	for i := 1; i <= tctx.rounds; i++ {
 		requestID := fmt.Sprintf("%s.%d", tctx.session.ID, i)
 		tctx.session.ongoingCalls[requestID] = tctx
@@ -468,14 +469,15 @@ func (tctx *ToolCallContext) call() (*MCPResult, error) {
 		toolResult, err := tctx.session.session.CallTool(ctx, &gomcp.CallToolParams{Name: tctx.tc.Tool, Arguments: args})
 		if err != nil {
 			tctx.reportToolCallFailure(i, err.Error())
+			tctx.result.LastError = err
 		} else if toolResult != nil {
 			tctx.reportToolCallSuccess(i)
-			tctx.result.storeCallResult(requestID, toolResult)
+			tctx.result.storeCallResult(requestID, toolResult, tctx.clientInfo)
 		} else {
 			tctx.reportToolCallFailure(i, "No Error, No Result")
 		}
 	}
-	return tctx.result, nil
+	return tctx.result, tctx.result.LastError
 }
 
 func (c *MCPClient) InterceptRequest(r *http.Request) {
@@ -538,6 +540,7 @@ func (c *MCPClient) InterceptResponse(r *http.Response) {
 			tctx := s.ongoingCalls[requestID]
 			if tctx != nil {
 				tctx.result.storeHeaders(requestID, r.Request.Header, r.Header, r.StatusCode)
+				tctx.clientInfo.StoreHeaders(r.Request.Header, r.Header)
 			}
 			delete(s.ongoingCalls, requestID)
 		}

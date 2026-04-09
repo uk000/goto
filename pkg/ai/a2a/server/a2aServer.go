@@ -24,6 +24,7 @@ import (
 	"goto/pkg/server/intercept"
 	"goto/pkg/util"
 	"net/http"
+	"net/url"
 	"sync"
 
 	trpcserver "trpc.group/trpc-go/trpc-a2a-go/server"
@@ -150,6 +151,11 @@ func (a *A2AServer) PrepareAgent(agent *model.Agent) error {
 	if agent.Card != nil {
 		agent.Streaming = *agent.Card.Capabilities.Streaming
 	}
+	if url, err := url.Parse(agent.Card.URL); err != nil {
+		return err
+	} else {
+		agent.URI = url.Path
+	}
 	tm, err := trpctask.NewMemoryTaskManager(agent.Behavior.Impl)
 	if err != nil {
 		return err
@@ -203,6 +209,10 @@ func (a *A2AServer) Serve(name string, w http.ResponseWriter, r *http.Request) e
 	r = r.WithContext(context.WithValue(ctx, util.AgentContextKey, aCtx))
 	aCtx.ctx = r.Context()
 	w, irw := intercept.WithIntercept(r, w)
+	if aCtx.forcedStatus > 0 {
+		irw.WriteHeader(aCtx.forcedStatus)
+		rs.StatusCode = aCtx.forcedStatus
+	}
 	agent.Serve(w, r)
 	irw.Proceed()
 	return nil
