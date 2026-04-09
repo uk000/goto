@@ -70,6 +70,9 @@
           "/a2a/client/call/stream": "[POST]"
         },
         {
+          "/a2a/client/call/result": "[POST]"
+        },
+        {
           "/a2a/client/call": "[POST]"
         }
       ],
@@ -2676,6 +2679,18 @@
       ],
       "/server/response/payload": [
         {
+          "/server/response/payload/set/{grpc}/matches": "[POST]"
+        },
+        {
+          "/server/response/payload/set/matches": "[POST]"
+        },
+        {
+          "/server/response/payload/set/{grpc}/matches/": "[POST]"
+        },
+        {
+          "/server/response/payload/set/matches/": "[POST]"
+        },
+        {
           "/server/response/payload/set/{grpc}/stream/count={count}/delay={delay}?uri={uri}": "[POST]"
         },
         {
@@ -2914,6 +2929,18 @@
         },
         {
           "/server/response/payload/transform/?uri={uri}": "[POST]"
+        },
+        {
+          "/server/response/payload/{grpc}/transform/delay={delay}?uri={uri}": "[POST]"
+        },
+        {
+          "/server/response/payload/transform/delay={delay}?uri={uri}": "[POST]"
+        },
+        {
+          "/server/response/payload/{grpc}/transform/delay={delay}/?uri={uri}": "[POST]"
+        },
+        {
+          "/server/response/payload/transform/delay={delay}/?uri={uri}": "[POST]"
         },
         {
           "/server/response/payload/clear": "[POST]"

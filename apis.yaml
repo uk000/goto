@@ -46,6 +46,7 @@
     - /a2a/client/agent/{agent}/call: '[POST]'
     /a2a/client/call:
     - /a2a/client/call/stream: '[POST]'
+    - /a2a/client/call/result: '[POST]'
     - /a2a/client/call: '[POST]'
     /a2a/client/push:
     - /a2a/client/push: '[POST]'
@@ -1022,6 +1023,10 @@
     - /server/response/headers/clear: '[PUT POST]'
     - /server/response/headers: '[GET]'
     /server/response/payload:
+    - /server/response/payload/set/{grpc}/matches: '[POST]'
+    - /server/response/payload/set/matches: '[POST]'
+    - /server/response/payload/set/{grpc}/matches/: '[POST]'
+    - /server/response/payload/set/matches/: '[POST]'
     - /server/response/payload/set/{grpc}/stream/count={count}/delay={delay}?uri={uri}: '[POST]'
     - /server/response/payload/set/{grpc}/stream/count={count}/delay={delay}: '[POST]'
     - /server/response/payload/set/stream/count={count}/delay={delay}?uri={uri}: '[POST]'
@@ -1102,6 +1107,10 @@
     - /server/response/payload/transform?uri={uri}: '[POST]'
     - /server/response/payload/{grpc}/transform/?uri={uri}: '[POST]'
     - /server/response/payload/transform/?uri={uri}: '[POST]'
+    - /server/response/payload/{grpc}/transform/delay={delay}?uri={uri}: '[POST]'
+    - /server/response/payload/transform/delay={delay}?uri={uri}: '[POST]'
+    - /server/response/payload/{grpc}/transform/delay={delay}/?uri={uri}: '[POST]'
+    - /server/response/payload/transform/delay={delay}/?uri={uri}: '[POST]'
     - /server/response/payload/clear: '[POST]'
     - /server/response/payload: '[GET]'
     - /server/response/payload/{size}: '[GET PUT POST]'

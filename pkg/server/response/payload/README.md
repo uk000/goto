@@ -39,26 +39,29 @@ curl -X POST localhost:8080/server/response/payload/clear
 echo
 
 cat token.json
+{"alg":"HS256","typ":"JWT"}
+{{}}
 {
-"scope": "openid full",
-"authorization_details": [],
-"client_id": "someclient",
-"guid": "someguid",
-"iss": "{iss}",
-"jti": "something",
-"aud": "{aud}",
-"sub": "{sub}",
-"upn": "{sub}",
-"nbf": 1774763490,
-"iat": 1774763610,
-"userid": "fakeuser",
-"win": "1234",
-"exp": 1774806810,
-"memberOf": "{memberOf}",
-"co": "{co}",
-"st": "{st}"
+  "scope": "openid full",
+  "authorization_details": [],
+  "client_id": "goto",
+  "guid": "P3FdowzFirAdGheyD31vbnYQNcngiT3K",
+  "iss": "{iss}",
+  "jti": "A0hNFLdZ",
+  "aud": "{aud}",
+  "sub": "{sub}",
+  "upn": "{sub}",
+  "nbf": 1774763490,
+  "iat": 1774763610,
+  "userid": "fakeuser",
+  "win": "1234",
+  "exp": 1774806810,
+  "memberOf": "{memberOf}",
+  "co": "{co}",
+  "st": "{st}"
 }
-
+{{}}
+foobar
 
 jq -Rs '{"payload": .,
   "matches": [
@@ -78,7 +81,16 @@ jq -Rs '{"payload": .,
     }
   },
   "contentType": "text/plain",
-  "base64Encode": true,
+  "parts": {
+    "pre": {
+      "splitWith": "{{}}"
+    },
+    "post": {
+      "joinWith": ".",
+      "base64Encode": [true, true, false]
+    }
+  },
+  "replace": {"=": ""},
   "detectJSON": true,
   "escapeJSON": false
 }' token.json | curl -X POST localhost:8080/server/response/payload/set/matches -d @-
@@ -96,7 +108,14 @@ curl -X POST localhost:8080/server/response/payload/set/matches -d '{
     }
   }, 
   "contentType": "application/json",
-  "base64Decode": true,
+  "parts": {
+    "post": {
+      "splitWith": ".",
+      "base64Decode": [true, true, false],
+      "keep": [false, true, false],
+      "joinWith": "."
+    }
+  },
   "detectJSON": false,
   "escapeJSON": false
 }'
