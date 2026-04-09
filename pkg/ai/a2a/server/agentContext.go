@@ -71,7 +71,6 @@ type AgentContext struct {
 	toolResults    map[string]any
 	agentResults   map[string]any
 	timeline       *timeline.Timeline
-	dataOnly       bool
 	err            error
 }
 

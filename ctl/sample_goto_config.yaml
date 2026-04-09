@@ -1974,6 +1974,8 @@ http:
                 co: "{co}"
                 st: "{st}"
             payload: |
+              {"alg":"HS256","typ":"JWT"}
+              {{}}
               {
                 "scope": "openid full",
                 "authorization_details": [],
@@ -1993,8 +1995,17 @@ http:
                 "co": "{co}",
                 "st": "{st}"
               }
+              {{}}
+              foobar
             contentType: "text/plain"
-            base64Encode: true
+            parts:
+              pre:
+                splitWith: "{{}}"
+              post:
+                joinWith: "."
+                base64Encode: [true, true, false]
+            replace:
+              "=": ""
             detectJSON: true
             escapeJSON: false
           - matches:
@@ -2003,8 +2014,13 @@ http:
               headers:
                 Authorization: "Bearer {token}"
             payload: "{token}"
+            parts:
+              post:
+                splitWith: "."
+                base64Decode: [true, true, false]
+                keep: [false, true, false]
+                joinWith: "."
             contentType: "application/json"
-            base64Decode: true
             detectJSON: false
             escapeJSON: false
 grpc:

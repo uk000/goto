@@ -39,7 +39,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRouteWithMultiQ(a2aClientRouter, "/agent/card", fetchAgentCard, [][]string{{"url"}, {"authority"}}, "GET")
 	util.AddRoute(a2aClientRouter, "/agent/{agent}/call", callAgent, "POST")
 	util.AddRoute(a2aClientRouter, "/call/stream", callAgent, "POST")
-	util.AddRoute(a2aClientRouter, "/call/quiet", callAgent, "POST")
+	util.AddRoute(a2aClientRouter, "/call/result", callAgent, "POST")
 	util.AddRoute(a2aClientRouter, "/call", callAgent, "POST")
 	util.AddRoute(a2aClientRouter, "/push", pushReceiver, "POST")
 }
@@ -61,7 +61,7 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 	call := &AgentCall{}
 	name := util.GetStringParamValue(r, "agent")
 	stream := strings.Contains(r.RequestURI, "stream")
-	quiet := strings.Contains(r.RequestURI, "quiet")
+	result := strings.Contains(r.RequestURI, "result")
 	port := util.GetRequestOrListenerPortNum(r)
 	err := util.ReadJsonPayload(r, &call)
 	if err != nil {
@@ -72,7 +72,7 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 		call.Name = name
 	}
 	output := map[string][]any{}
-	err = CallAgent(r.Context(), port, call, streamAgentResponse(call.Name, stream, quiet, output, w, r), r.Header)
+	err = CallAgent(r.Context(), port, call, streamAgentResponse(call.Name, stream, result, output, w, r), r.Header)
 	if err != nil {
 		msg := fmt.Sprintf("Error invoking agent [%s]: %s", call.Name, err.Error())
 		util.SendBadRequest(msg, w, r)
@@ -89,7 +89,7 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func streamAgentResponse(agent string, stream, quiet bool, output map[string][]any, w http.ResponseWriter, r *http.Request) AgentResultsCallback {
+func streamAgentResponse(agent string, stream, result bool, output map[string][]any, w http.ResponseWriter, r *http.Request) AgentResultsCallback {
 	var fw http.Flusher
 	if stream {
 		if f, ok := w.(http.Flusher); ok {
@@ -122,8 +122,16 @@ func streamAgentResponse(agent string, stream, quiet bool, output map[string][]a
 		if data != nil {
 			_, isArtifact = data.(a2aproto.Artifact)
 		}
-		if !quiet && !isArtifact {
-			send(id, msg, data)
+		if !isArtifact {
+			if result {
+				if m, ok := data.(map[string]any); ok {
+					if m["Result"] != nil || m["Timeline"] != nil {
+						send(id, msg, data)
+					}
+				}
+			} else {
+				send(id, msg, data)
+			}
 		}
 	}
 }

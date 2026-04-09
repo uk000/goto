@@ -41,7 +41,6 @@ type AgentCall struct {
 	Authority            string           `json:"authority,omitempty"`
 	H2                   bool             `json:"h2,omitempty"`
 	TLS                  bool             `json:"tls,omitempty"`
-	DataOnly             bool             `json:"dataOnly,omitempty"`
 	Delay                string           `json:"delay,omitempty"`
 	Message              string           `json:"message,omitempty"`
 	Data                 map[string]any   `json:"data,omitempty"`

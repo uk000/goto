@@ -53,7 +53,7 @@ func (pm *ResponsePayloadManager) init() *ResponsePayloadManager {
 }
 
 func (pm *ResponsePayloadManager) ClearRPCResponsePayloads(port int) {
-	pm.GetPortResponse(port).protoPayload(true).init()
+	pm.GetPortResponse(port).init()
 }
 
 func (pm *ResponsePayloadManager) SetRPCResponsePayload(port int, isStream bool, payload []byte, contentType, uri, header, value, regexes, paths string, count int, delayMin, delayMax time.Duration) (err error) {

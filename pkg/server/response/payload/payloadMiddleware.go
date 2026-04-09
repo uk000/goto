@@ -18,21 +18,15 @@ package payload
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/server/echo"
 	"goto/pkg/server/intercept"
-	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/gorilla/mux"
 )
 
 func middlewareFunc(next http.Handler) http.Handler {
@@ -69,30 +63,11 @@ func middlewareFunc(next http.Handler) http.Handler {
 
 func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload, captures map[string]string) {
 	var payload []byte
-	var jsonPayload any
 	contentType := ""
 	if !rp.IsBinary {
-		payload = getFilledPayload(rp, r, captures)
+		payload = rp.getFilledPayload(r, captures)
 	} else {
 		payload = rp.Payload
-	}
-	if rp.Base64Encode {
-		encoded := make([]byte, base64.StdEncoding.EncodedLen(len(payload)))
-		base64.StdEncoding.Encode(encoded, payload)
-		payload = encoded
-	} else if rp.Base64Decode {
-		decoded := make([]byte, base64.StdEncoding.DecodedLen(len(payload)))
-		base64.StdEncoding.Decode(decoded, payload)
-		decoded = util.CleanJSONBytes(decoded)
-		if rp.IsJSON {
-			var err error
-			if err = json.Unmarshal(decoded, &jsonPayload); err == nil {
-				jsonPayload = util.CleanJSON(jsonPayload)
-				payload, _ = json.Marshal(jsonPayload)
-			} else {
-				payload = decoded
-			}
-		}
 	}
 	contentType = rp.ContentType
 	w.Header().Set(constants.HeaderGotoPayloadContentType, contentType)
@@ -121,6 +96,7 @@ func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload,
 			payloadSent = true
 		}
 	}
+	var jsonPayload any
 	if !payloadSent {
 		if rp.IsJSON && !rp.EscapeJSON {
 			payload = util.CleanJSONBytes(payload)
@@ -149,61 +125,6 @@ func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload,
 	}
 	util.AddLogMessage(msg, r)
 	util.UpdateTrafficEventDetails(r, "Response Payload Applied")
-}
-
-func processCaptures(payload string, value string, pair *types.Pair[*regexp.Regexp, []string], detectJSON, escapteJSON bool) string {
-	if value != "" && pair.Left != nil {
-		captures := util.GetCaptureGroupValues(pair.Left, pair.Right, value)
-		for k, v := range captures {
-			isJSONValue := strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]") || strings.HasPrefix(v, "{") && strings.HasSuffix(v, "}")
-			if isJSONValue {
-				if detectJSON {
-					k = "\"" + k + "\""
-				} else if escapteJSON {
-					if v2, err := json.Marshal(v); err == nil {
-						v = string(v2)
-					}
-					k = "\"" + k + "\""
-				}
-			}
-			payload = strings.Replace(payload, k, v, -1)
-		}
-	}
-	return payload
-}
-
-func getFilledPayload(rp *ResponsePayload, r *http.Request, captures map[string]string) []byte {
-	vars := mux.Vars(r)
-	query := r.URL.Query()
-	payload := string(rp.Payload)
-	payload = util.SubstitutePayloadMarkers(payload, rp.URICaptureKeys, vars)
-	if rp.HeaderCaptureKey != "" {
-		if value := r.Header.Get(rp.HeaderMatch); value != "" {
-			payload = strings.Replace(payload, rp.HeaderCaptureKey, value, -1)
-		}
-	}
-	if rp.RequestCapture != nil {
-		for k, pair := range rp.RequestCapture.headerCaptureKeys {
-			payload = processCaptures(payload, r.Header.Get(k), pair, rp.DetectJSON, rp.EscapeJSON)
-		}
-		for k, pair := range rp.RequestCapture.queryCaptureKeys {
-			payload = processCaptures(payload, query.Get(k), pair, rp.DetectJSON, rp.EscapeJSON)
-		}
-	}
-	if rp.QueryCaptureKey != "" {
-		for k, values := range query {
-			if rp.queryMatchRegexp.MatchString(k) && len(values) > 0 {
-				payload = strings.Replace(payload, rp.QueryCaptureKey, values[0], -1)
-			}
-		}
-	}
-	if len(rp.Transforms) > 0 {
-		payload = util.TransformPayload(util.Read(r.Body), rp.Transforms, util.IsYAMLContentType(r.Header))
-	}
-	for k, v := range captures {
-		payload = strings.Replace(payload, util.MarkFiller(k), v, -1)
-	}
-	return []byte(payload)
 }
 
 func handleURI(w http.ResponseWriter, r *http.Request) {

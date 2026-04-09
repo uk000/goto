@@ -287,33 +287,25 @@ func (acs *A2ASession) processStreamResponse(id string, eventChan <-chan a2aprot
 }
 
 func (acs *A2ASession) processResponse(id string, result *a2aproto.MessageResult, cr *A2ACallResult) {
-	dataOnly := acs.call.DataOnly
 	switch r := result.Result.(type) {
 	case *a2aproto.Message:
 		acs.processParts(id, r.Parts, cr)
 	case *a2aproto.Task:
-		if !dataOnly {
-			acs.sendResponse(id, fmt.Sprintf("Task %s State: %s @ %s\n", r.ID, r.Status.State, r.Status.Timestamp), nil, cr)
-		}
+		acs.sendResponse(id, fmt.Sprintf("Task %s State: %s @ %s\n", r.ID, r.Status.State, r.Status.Timestamp), nil, cr)
 		if r.Status.Message != nil {
 			acs.processParts(id, r.Status.Message.Parts, cr)
 		}
 	default:
-		if !dataOnly {
-			acs.sendResponse(id, fmt.Sprintf("Task %s Received unknown message type: %T\n", r.GetKind(), r), r, cr)
-		}
+		acs.sendResponse(id, fmt.Sprintf("Task %s Received unknown message type: %T\n", r.GetKind(), r), r, cr)
 	}
 }
 
 func (acs *A2ASession) processEventResult(id string, event *a2aproto.StreamingMessageEvent, cr *A2ACallResult) {
-	dataOnly := acs.call.DataOnly
 	switch e := event.Result.(type) {
 	case *a2aproto.Message:
 		acs.processParts(id, e.Parts, cr)
 	case *a2aproto.Task:
-		if !dataOnly {
-			acs.sendResponse(id, fmt.Sprintf("Task %s State: %s @ %s\n", e.ID, e.Status.State, e.Status.Timestamp), nil, cr)
-		}
+		acs.sendResponse(id, fmt.Sprintf("Task %s State: %s @ %s\n", e.ID, e.Status.State, e.Status.Timestamp), nil, cr)
 		if e.Status.Message != nil {
 			acs.processParts(id, e.Status.Message.Parts, cr)
 		}
@@ -343,7 +335,7 @@ func (acs *A2ASession) processEventResult(id string, event *a2aproto.StreamingMe
 				msg2 = " [Task was canceled] \u2716"
 			}
 		}
-		if msg2 != "" && !dataOnly {
+		if msg2 != "" {
 			acs.sendResponse(id, msg+msg2, nil, cr)
 		}
 	case *a2aproto.TaskArtifactUpdateEvent:
@@ -354,34 +346,25 @@ func (acs *A2ASession) processEventResult(id string, event *a2aproto.StreamingMe
 		}
 		acs.processParts(id, e.Artifact.Parts, cr)
 	default:
-		if !dataOnly {
-			acs.sendResponse(id, fmt.Sprintf("Task %s Received unknown event type: %T\n", e.GetKind(), event.Result), event.Result, cr)
-		}
+		acs.sendResponse(id, fmt.Sprintf("Task %s Received unknown event type: %T\n", e.GetKind(), event.Result), event.Result, cr)
 	}
 }
 
 func (acs *A2ASession) processParts(id string, parts []a2aproto.Part, cr *A2ACallResult) {
-	dataOnly := acs.call.DataOnly
 	for _, p := range parts {
 		var part any = p
 		switch p := part.(type) {
 		case *a2aproto.TextPart:
-			if !dataOnly {
-				acs.sendResponse(id, p.Text, nil, cr)
-			}
+			acs.sendResponse(id, p.Text, nil, cr)
 		case a2aproto.TextPart:
-			if !dataOnly {
-				acs.sendResponse(id, p.Text, nil, cr)
-			}
+			acs.sendResponse(id, p.Text, nil, cr)
 		case *a2aproto.DataPart:
 			acs.sendResponse(id, "", p.Data, cr)
 		case map[string]interface{}:
 			textHandled := false
 			if typeStr, ok := p["type"].(string); ok && typeStr == "text" {
 				if text, ok := p["text"].(string); ok {
-					if !dataOnly {
-						acs.sendResponse(id, text, nil, cr)
-					}
+					acs.sendResponse(id, text, nil, cr)
 					textHandled = true
 				}
 			}

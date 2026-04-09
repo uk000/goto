@@ -58,7 +58,7 @@ type ToolCall struct {
 	TLS          bool                   `json:"tls,omitempty"`
 	ForceSSE     bool                   `json:"forceSSE,omitempty"`
 	Raw          bool                   `json:"neat,omitempty"`
-	DataOnly     bool                   `json:"dataOnly,omitempty"`
+	ResultOnly   bool                   `json:"resultOnly,omitempty"`
 	Args         *aicommon.ToolCallArgs `json:"args,omitempty"`
 	Headers      *types.Headers         `json:"headers,omitempty"`
 	Delay        string                 `json:"delay,omitempty"`

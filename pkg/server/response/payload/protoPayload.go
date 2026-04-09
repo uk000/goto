@@ -17,11 +17,15 @@
 package payload
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -52,6 +56,19 @@ type RequestCapture struct {
 	queryCaptureKeys  map[string]*types.Pair[*regexp.Regexp, []string]
 }
 
+type PayloadPartProcess struct {
+	SplitWith    string `json:"splitWith,omitempty"`
+	JoinWith     string `json:"joinWith,omitempty"`
+	Base64Encode []bool `json:"base64Encode,omitempty"`
+	Base64Decode []bool `json:"base64Decode,omitempty"`
+	Keep         []bool `json:"keep,omitempty"`
+}
+
+type PayloadParts struct {
+	Pre  *PayloadPartProcess `json:"pre,omitempty"`
+	Post *PayloadPartProcess `json:"post,omitempty"`
+}
+
 type ResponsePayload struct {
 	Payload          types.RawBytes    `json:"payload,omitempty"`
 	StreamPayload    []types.RawBytes  `json:"streamPayload,omitempty"`
@@ -78,6 +95,8 @@ type ResponsePayload struct {
 	Base64Decode     bool              `json:"base64Decode,omitempty"`
 	DetectJSON       bool              `json:"detectJSON,omitempty"`
 	EscapeJSON       bool              `json:"escapeJSON,omitempty"`
+	Replace          map[string]string `json:"replace,omitempty"`
+	Parts            *PayloadParts     `json:"parts,omitempty"`
 	uriRegexp        *regexp.Regexp
 	queryMatchRegexp *regexp.Regexp
 	bodyMatchRegexp  *regexp.Regexp
@@ -597,4 +616,166 @@ func (rc *RequestCapture) NonNil() {
 	if rc.queryCaptureKeys == nil {
 		rc.queryCaptureKeys = map[string]*types.Pair[*regexp.Regexp, []string]{}
 	}
+}
+
+func (rp *ResponsePayload) encodePayload(payload []byte) []byte {
+	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(payload)))
+	base64.StdEncoding.Encode(encoded, []byte(payload))
+	return encoded
+}
+
+func (rp *ResponsePayload) decodePayload(payload []byte) []byte {
+	decoded := make([]byte, base64.StdEncoding.DecodedLen(len(payload)))
+	if _, err := base64.StdEncoding.Decode(decoded, payload); err != nil {
+		log.Printf("Failed to decode payload with error: %s\n", err.Error())
+	} else {
+		decoded = util.CleanJSONBytes(decoded)
+		if rp.IsJSON {
+			var jsonPayload any
+			var err error
+			if err = json.Unmarshal(decoded, &jsonPayload); err == nil {
+				jsonPayload = util.CleanJSON(jsonPayload)
+				payload, _ = json.Marshal(jsonPayload)
+			} else {
+				payload = decoded
+			}
+		} else {
+			payload = decoded
+		}
+	}
+	return payload
+}
+
+func (rp *ResponsePayload) encodeDecodeParts(parts [][]byte, encode []bool, decode []bool) [][]byte {
+	processedParts := [][]byte{}
+	for i, part := range parts {
+		if len(encode) > i && encode[i] {
+			processedParts = append(processedParts, rp.encodePayload(part))
+		} else if len(decode) > i && decode[i] {
+			processedParts = append(processedParts, rp.decodePayload(part))
+		} else {
+			processedParts = append(processedParts, part)
+		}
+	}
+	return processedParts
+}
+
+func (rp *ResponsePayload) preProcess() [][]byte {
+	var rawParts [][]byte
+	if rp.Parts != nil && rp.Parts.Pre != nil {
+		var payloadParts [][]byte
+		if rp.Parts.Pre.SplitWith != "" {
+			payloadParts = bytes.Split(rp.Payload, []byte(rp.Parts.Pre.SplitWith))
+		} else {
+			payloadParts = [][]byte{rp.Payload}
+		}
+		rawParts = rp.encodeDecodeParts(payloadParts, rp.Parts.Pre.Base64Encode, rp.Parts.Pre.Base64Decode)
+	} else {
+		rawParts = [][]byte{rp.Payload}
+	}
+	return rawParts
+}
+
+func joinSplit(parts [][]byte, sep []byte) [][]byte {
+	joined := []byte{}
+	for _, b := range parts {
+		joined = append(joined, b...)
+	}
+	return bytes.Split(joined, sep)
+}
+
+func (rp *ResponsePayload) postProcess(parts [][]byte) []byte {
+	var payload []byte
+	if rp.Parts != nil && rp.Parts.Post != nil {
+		if rp.Parts.Post.SplitWith != "" {
+			parts = joinSplit(parts, []byte(rp.Parts.Post.SplitWith))
+		}
+		keptParts := [][]byte{}
+		for i, part := range parts {
+			if len(rp.Parts.Post.Keep) > i {
+				if rp.Parts.Post.Keep[i] {
+					keptParts = append(keptParts, part)
+				}
+			} else {
+				keptParts = append(keptParts, part)
+			}
+		}
+		parts = keptParts
+		parts = rp.encodeDecodeParts(parts, rp.Parts.Post.Base64Encode, rp.Parts.Post.Base64Decode)
+		if rp.Parts.Post.JoinWith != "" {
+			payload = bytes.Join(parts, []byte(rp.Parts.Post.JoinWith))
+		}
+	} else {
+		parts = rp.encodeDecodeParts(parts, []bool{rp.Base64Encode}, []bool{rp.Base64Decode})
+	}
+	if len(payload) == 0 {
+		for _, b := range parts {
+			payload = append(payload, b...)
+		}
+	}
+	return payload
+}
+
+func (rp *ResponsePayload) getFilledPayload(r *http.Request, captures map[string]string) []byte {
+	vars := mux.Vars(r)
+	query := r.URL.Query()
+	payloadParts := rp.preProcess()
+	rawParts := [][]byte{}
+	for _, b := range payloadParts {
+		part := string(b)
+		part = util.SubstitutePayloadMarkers(part, rp.URICaptureKeys, vars)
+		if rp.HeaderCaptureKey != "" {
+			if value := r.Header.Get(rp.HeaderMatch); value != "" {
+				part = strings.Replace(part, rp.HeaderCaptureKey, value, -1)
+			}
+		}
+		if rp.RequestCapture != nil {
+			for k, pair := range rp.RequestCapture.headerCaptureKeys {
+				part = processCaptures(part, r.Header.Get(k), pair, rp.DetectJSON, rp.EscapeJSON)
+			}
+			for k, pair := range rp.RequestCapture.queryCaptureKeys {
+				part = processCaptures(part, query.Get(k), pair, rp.DetectJSON, rp.EscapeJSON)
+			}
+		}
+		if rp.QueryCaptureKey != "" {
+			for k, values := range query {
+				if rp.queryMatchRegexp.MatchString(k) && len(values) > 0 {
+					part = strings.Replace(part, rp.QueryCaptureKey, values[0], -1)
+				}
+			}
+		}
+		if len(rp.Transforms) > 0 {
+			part = util.TransformPayload(util.Read(r.Body), rp.Transforms, util.IsYAMLContentType(r.Header))
+		}
+		for k, v := range captures {
+			part = strings.Replace(part, util.MarkFiller(k), v, -1)
+		}
+		rawParts = append(rawParts, []byte(part))
+	}
+	rawPayload := rp.postProcess(rawParts)
+	for from, to := range rp.Replace {
+		rawPayload = bytes.ReplaceAll(rawPayload, []byte(from), []byte(to))
+	}
+	return rawPayload
+}
+
+func processCaptures(payload string, value string, pair *types.Pair[*regexp.Regexp, []string], detectJSON, escapteJSON bool) string {
+	if value != "" && pair.Left != nil {
+		captures := util.GetCaptureGroupValues(pair.Left, pair.Right, value)
+		for k, v := range captures {
+			isJSONValue := strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]") || strings.HasPrefix(v, "{") && strings.HasSuffix(v, "}")
+			if isJSONValue {
+				if detectJSON {
+					k = "\"" + k + "\""
+				} else if escapteJSON {
+					if v2, err := json.Marshal(v); err == nil {
+						v = string(v2)
+					}
+					k = "\"" + k + "\""
+				}
+			}
+			payload = strings.Replace(payload, k, v, -1)
+		}
+	}
+	return payload
 }
