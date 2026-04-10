@@ -85,8 +85,6 @@ func newSession(ac *A2AClient, ctx context.Context, port int, callerId, authorit
 	}
 }
 
-func (as *A2ASession) updateTimeline() {}
-
 func (acs *A2ASession) Connect() error {
 	acs.url = acs.call.AgentURL
 	if acs.url == "" {
@@ -174,7 +172,7 @@ func (acs *A2ASession) InvokeStream() error {
 	acs.sendLocalProgress(acs.callerId, fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL))
 	acs.reportInitiateCall()
 	for i := 0; i < rounds; i++ {
-		requestID := fmt.Sprintf("[%s] Request#[%d]", acs.call.Name, i)
+		requestID := fmt.Sprintf("[%s @ %s] [Request# %d]", acs.call.Name, acs.url, i)
 		cr := acs.Result.getOrAddCall(requestID)
 		cr.ClientInfo = acs.clientInfo
 		ctx := context.WithValue(acs.ctx, constants.HeaderGotoA2ARequestID, requestID)
@@ -211,12 +209,11 @@ func (acs *A2ASession) Handle(ctx context.Context, client *http.Client, req *htt
 		}
 	}
 	acs.Result.storeHeaders(requestID, req.Header, nil, 0)
-	acs.clientInfo.StoreHeaders(req.Header, nil)
+	acs.clientInfo.StoreHeaders(req.Header)
 	resp, err = client.Do(req)
 	if resp != nil {
 		acs.updateResponseHeaders(resp)
 		acs.Result.storeHeaders(requestID, req.Header, resp.Header, resp.StatusCode)
-		acs.clientInfo.StoreHeaders(req.Header, resp.Header)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("a2aClient.httpRequestHandler: http request failed: %w", err)
@@ -354,7 +351,7 @@ func (acs *A2ASession) processEventResult(id string, event *a2aproto.StreamingMe
 	case *a2aproto.TaskArtifactUpdateEvent:
 		if e.Artifact.Name != nil && strings.EqualFold(*e.Artifact.Name, "Timeline") && len(e.Artifact.Parts) > 0 {
 			if dp, ok := e.Artifact.Parts[0].(*a2aproto.DataPart); ok {
-				cr.RemoteTimeline = dp.Data
+				cr.storeRemoteTimeline(dp.Data)
 			}
 		}
 		acs.processParts(id, e.Artifact.Parts, cr)
@@ -397,19 +394,42 @@ func (acs *A2ASession) sendLocalProgress(id, text string) {
 }
 
 func (acs *A2ASession) sendResponse(id, text string, data any, cr *A2ACallResult) {
+	dataKey := text
+	if dataKey == "" {
+		if m, ok := data.(map[string]any); ok {
+			for k := range m {
+				dataKey = fmt.Sprintf("%s: %s", id, k)
+				break
+			}
+		}
+	}
 	if data != nil {
-		cr.Data[text] = data
+		result := timeline.CheckAndGetResult(data)
+		if strings.Contains(dataKey, "Result") || result != nil {
+			cr.RemoteResult = data
+		} else {
+			t := timeline.CheckAndGetTimeline(data)
+			if strings.Contains(dataKey, "Timeline") || t != nil {
+				cr.RemoteTimeline = t
+			} else {
+				cr.Data[dataKey] = data
+			}
+		}
 	} else if text != "" {
 		cr.Content = append(cr.Content, text)
 	}
 	if acs.callback != nil {
-		acs.callback(id, text, data)
+		if data != nil {
+			acs.callback(id, dataKey, data)
+		} else {
+			acs.callback(id, text, nil)
+		}
 	}
 	if acs.upstreamProgress != nil {
 		if text != "" {
 			acs.upstreamProgress <- types.NewPair[string, any](fmt.Sprintf("%s[%s]", id, text), data)
 		} else if data != nil {
-			acs.upstreamProgress <- types.NewPair(id, data)
+			acs.upstreamProgress <- types.NewPair(dataKey, data)
 		}
 	}
 }
@@ -421,5 +441,5 @@ func (as *A2ASession) reportInitiateCall() {
 		nil, nil, as.call.RequestCount, as.call.Concurrent, map[string]any{
 			"Agent-Call": as.call,
 		})
-	as.timeline.AddEvent(as.callerId, msg, as.clientInfo, nil, true)
+	as.timeline.AddEventWithClient(as.callerId, msg, as.clientInfo)
 }

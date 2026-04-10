@@ -37,7 +37,7 @@ func (t *MCPTool) stream(tctx *ToolCallContext) (result *gomcp.CallToolResult, e
 		if d != nil && total-done > 0 {
 			delay = d.Compute()
 			msg := fmt.Sprintf("%s Progress: \U0001F634\U0001F4A4 Sleeping for [%s] before sending next update. [%d] done, [%d] more to go.", tctx.Label, delay, done, total-done)
-			tctx.AddEvent(msg, nil, true)
+			tctx.AddEvent(msg)
 			d.Apply()
 		}
 	}
@@ -60,7 +60,7 @@ func (t *MCPTool) stream(tctx *ToolCallContext) (result *gomcp.CallToolResult, e
 			}
 		}
 		msg := fmt.Sprintf("%s Will stream [%d] responses with delay %s", tctx.Label, total, util.ToJSONText(d))
-		tctx.AddEvent(msg, nil, true)
+		tctx.AddEvent(msg)
 
 		err = tctx.Response.RangeTextFrom(oldResponseCount+1, total, func(text string, count int, restarted bool) (bool, error) {
 			if !keepSending {
@@ -72,12 +72,12 @@ func (t *MCPTool) stream(tctx *ToolCallContext) (result *gomcp.CallToolResult, e
 			responseCount = count
 			if oldResponseCount > 0 && count <= oldResponseCount {
 				msg := fmt.Sprintf("%s Skipping previously sent result [%d]", tctx.Label, count)
-				tctx.AddEvent(msg, nil, true)
+				tctx.AddEvent(msg)
 				return true, nil
 			}
 			if tctx.Behavior.Stream {
 				msg := fmt.Sprintf("%s Progress: [%d] done, only [%d] more to go. Current stream output: %s", tctx.Label, count, total-count, text)
-				tctx.AddEvent(msg, nil, true)
+				tctx.AddEvent(msg)
 			}
 			applyDelay(total, count)
 			result.Content = append(result.Content, &gomcp.TextContent{Text: fmt.Sprintf("[%d] %s", count, text)})
@@ -106,12 +106,12 @@ func (t *MCPTool) stream(tctx *ToolCallContext) (result *gomcp.CallToolResult, e
 		}
 		for i := 1; i <= responseCount; i++ {
 			msg := fmt.Sprintf("%s Progress: [%d] done, only [%d] more to go. Current stream output: %s", tctx.Label, i, responseCount-i, argText)
-			tctx.AddEvent(msg, nil, true)
+			tctx.AddEvent(msg)
 			result.Content = append(result.Content, &gomcp.TextContent{Text: argText})
 			applyDelay(responseCount, i)
 		}
 	}
 	msg := fmt.Sprintf("%s Stream finished \U000026F3", tctx.Label)
-	tctx.AddEvent(msg, nil, true)
+	tctx.AddEvent(msg)
 	return
 }

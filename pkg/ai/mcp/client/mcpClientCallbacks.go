@@ -58,9 +58,9 @@ func (s *MCPSession) ElicitationHandler(ctx context.Context, req *gomcp.ElicitRe
 		msg = fmt.Sprintf("%s --> Delaying for %s", msg, delay.String())
 	}
 	log.Println(msg)
-	s.Timeline.AddEvent(label, msg, nil, nil, false)
+	s.Timeline.AddEvent(label, msg)
 	t := timeline.NewTimeline(s.mcpClient.Port, label, nil, nil, nil, s.mcpClient.stream, s.mcpClient.updateCallback, s.mcpClient.endCallback)
-	t.AddEvent(label, msg, nil, nil, false)
+	t.AddEvent(label, msg)
 	output["Timeline"] = t
 	result = &gomcp.ElicitResult{
 		Action:  action,
@@ -118,9 +118,9 @@ func (s *MCPSession) CreateMessageHandler(ctx context.Context, req *gomcp.Create
 		msg = fmt.Sprintf("%s --> Delaying for %s", msg, delay.String())
 	}
 	log.Println(msg)
-	s.Timeline.AddEvent(label, msg, nil, nil, false)
+	s.Timeline.AddEvent(label, msg)
 	t := timeline.NewTimeline(s.mcpClient.Port, label, nil, nil, nil, s.mcpClient.stream, s.mcpClient.updateCallback, s.mcpClient.endCallback)
-	t.AddEvent(label, msg, nil, nil, false)
+	t.AddEvent(label, msg)
 	output := map[string]any{}
 	output["Content"] = content
 	output["Timeline"] = t
@@ -164,18 +164,27 @@ func (s *MCPSession) ProgressNotificationHandler(ctx context.Context, req *gomcp
 		msg = fmt.Sprintf("%s --> [Total: %f][Progress: %f]", msg, req.Params.Total, req.Params.Progress)
 	}
 	var remoteData any
+	var remoteClient *timeline.GotoClientInfo
+	var remoteServer *timeline.GotoServerInfo
 	isjson := false
 	if req.Params.Meta != nil {
 		if req.Params.Meta["json"] != nil {
 			if json, ok := util.JSONFromJSONText(req.Params.Message); ok {
 				remoteData = json.Object()
+				req.Params.Message = ""
 				isjson = true
+				if remoteClient, ok = timeline.CheckAndGetClientInfo(remoteData); ok {
+					req.Params.Message = "ClientInfo"
+				} else if remoteServer, ok = timeline.CheckAndGetServerInfo(remoteData); ok {
+					req.Params.Message = "ServerInfo"
+				} else if timeline.IsTimeline(remoteData) {
+					req.Params.Message = "Timeline"
+				} else if timeline.IsResult(remoteData) {
+					req.Params.Message = "Result"
+				}
 			}
 		}
 	}
-	if remoteData == nil {
-		remoteData = req.Params.Message
-	}
-	s.Timeline.AddEvent(s.CallerId, msg, nil, remoteData, isjson)
+	s.Timeline.AddEventWithRemote(s.CallerId, msg, req.Params.Message, remoteServer, remoteClient, remoteData, isjson)
 	log.Println(msg)
 }

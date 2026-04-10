@@ -198,12 +198,10 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 func (t *MCPTool) prepareResult(tctx *ToolCallContext, result *gomcp.CallToolResult) {
 	msg := tctx.Flush(true, true)
 	if len(msg) > 0 {
-		tctx.AddEvent(msg, nil, true)
+		tctx.AddEvent(msg)
 	}
 	if result.StructuredContent != nil {
-		if _, ok := result.StructuredContent.(*timeline.Timeline); ok {
-			//good
-		} else {
+		if !timeline.IsTimeline(result.StructuredContent) {
 			m := reflect.ValueOf(result.StructuredContent)
 			if m.Kind() == reflect.Map {
 				iter := m.MapRange()

@@ -40,10 +40,12 @@ type A2ACallResult struct {
 	Content         []string                 `json:"Content,omitempty"`
 	Data            map[string]any           `json:"Data,omitempty"`
 	ClientInfo      *timeline.GotoClientInfo `json:"ClientInfo,omitempty"`
-	RemoteTimeline  any                      `json:"RemoteTimeline,omitempty"`
+	RemoteTimeline  *timeline.Timeline       `json:"RemoteTimeline,omitempty"`
+	RemoteResult    any                      `json:"RemoteResult,omitempty"`
 	RequestHeaders  http.Header              `json:"RequestHeaders,omitempty"`
 	ResponseHeaders http.Header              `json:"ResponseHeaders,omitempty"`
 	ResponseStatus  int                      `json:"ResponseStatus,omitempty"`
+	parent          *A2AResult
 }
 
 func NewA2AResult(server string, ac *AgentCall, t *timeline.Timeline) *A2AResult {
@@ -64,6 +66,7 @@ func (r *A2AResult) getOrAddCall(requestID string) *A2ACallResult {
 		result = &A2ACallResult{
 			RequestID: requestID,
 			Data:      map[string]any{},
+			parent:    r,
 		}
 		r.CallResults[requestID] = result
 	}
@@ -118,6 +121,16 @@ func (cr *A2ACallResult) merge(other *A2ACallResult) {
 	}
 }
 
+func (cr *A2ACallResult) storeRemoteTimeline(data any) {
+	t := timeline.CheckAndGetTimeline(data)
+	if t != nil {
+		if cr.parent.AgentCall.ResultOnly {
+			t.Events = nil
+		}
+		cr.RemoteTimeline = t
+	}
+}
+
 func (r *A2AResult) ToObject() map[string]any {
 	result := map[string]any{}
 	if len(r.CallResults) > 0 {
@@ -143,13 +156,17 @@ func (r *A2AResult) buildCallsData() map[string]map[string]any {
 	for _, cr := range r.CallResults {
 		if r.AgentCall.ResultOnly {
 			cr.Content = nil
-			if t, ok := cr.RemoteTimeline.(*timeline.Timeline); ok {
-				t.Events = nil
-			} else if m, ok := cr.RemoteTimeline.(map[string]any); ok {
-				m["Events"] = nil
+			if cr.RemoteTimeline != nil {
+				cr.RemoteTimeline.Events = nil
+
 			}
 		}
 		callsData[r.ID][cr.RequestID] = cr
+		if cr.RemoteTimeline != nil {
+			r.Timeline.AddRemoteCall(r.ID, cr.RequestID, cr.RemoteTimeline)
+		} else {
+			r.Timeline.AddRemoteCall(r.ID, cr.RequestID, cr.RemoteResult)
+		}
 	}
 	return callsData
 }

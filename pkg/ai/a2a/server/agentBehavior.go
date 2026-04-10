@@ -151,8 +151,10 @@ func (b *AgentBehaviorImpl) handleUnary(aCtx *AgentContext) (result *taskmanager
 		if result.Result == nil {
 			result.Result = &a2aproto.Message{}
 		}
-		if msg, ok := result.Result.(*a2aproto.Message); ok {
-			msg.Parts = append(msg.Parts, a2aproto.NewDataPart(map[string]any{constants.HeaderGotoServerTimeline: aCtx.timeline}))
+		if aCtx.reportTimeline {
+			if msg, ok := result.Result.(*a2aproto.Message); ok {
+				msg.Parts = append(msg.Parts, a2aproto.NewDataPart(map[string]any{constants.HeaderGotoServerTimeline: aCtx.timeline}))
+			}
 		}
 	}
 	return

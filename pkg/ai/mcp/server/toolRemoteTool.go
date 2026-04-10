@@ -34,6 +34,9 @@ func (t *MCPTool) callRemoteTool(tctx *ToolCallContext) (*gomcp.CallToolResult, 
 	if tctx.args.ResultOnly {
 		tc.ResultOnly = true
 	}
+	if tctx.args.NoEvents {
+		tc.NoEvents = true
+	}
 	//t.addForwardHeaders(tc.Headers.Request.Add, tc.Headers.Request.Forward, tc.Args)
 	isSSE := tctx.sse
 	if tctx.args.Remote.SSE || tc.ForceSSE {

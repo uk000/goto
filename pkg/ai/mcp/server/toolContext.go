@@ -67,7 +67,8 @@ func NewToolCallContext(ctx context.Context, t *MCPTool, req *gomcp.CallToolRequ
 		constants.HeaderGotoMCPTool:   t.Name,
 	}, args, requestHeaders, nil, tctx.notifyClientWithError, tctx.notifyClient)
 	tctx.timeline.ResultOnly = args.ResultOnly
-	tctx.timeline.StartTimeline(t.Label, fmt.Sprintf("%s: Received Tool Call [%s]", t.Server.Name, t.Label), tctx.timeline.Server)
+	tctx.timeline.NoEvents = args.NoEvents
+	tctx.timeline.AddEvent(t.Label, fmt.Sprintf("%s: Received Tool Call [%s]", t.Server.Name, t.Label))
 	return tctx
 }
 
@@ -91,9 +92,15 @@ func (tctx *ToolCallContext) notifyClient(msg string, data any, json bool) {
 	}
 }
 
-func (tctx *ToolCallContext) AddEvent(msg string, remoteData any, json bool) {
+func (tctx *ToolCallContext) AddEvent(msg string) {
+	if msg != "" {
+		tctx.timeline.AddEvent(tctx.Label, msg)
+	}
+}
+
+func (tctx *ToolCallContext) AddRemoteEvent(msg string, remoteText string, remoteData any, json bool) {
 	if msg != "" || remoteData != nil {
-		tctx.timeline.AddEvent(tctx.Label, msg, nil, remoteData, json)
+		tctx.timeline.AddEventWithRemote(tctx.Label, msg, remoteText, nil, nil, remoteData, json)
 	}
 }
 

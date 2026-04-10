@@ -66,6 +66,7 @@ type ToolCall struct {
 	InitialDelay string                 `json:"initialDelay"`
 	ForcedStatus int                    `json:"forcedStatus"`
 	ResultOnly   bool                   `json:"resultOnly,omitempty"`
+	NoEvents     bool                   `json:"noEvents,omitempty"`
 	delayD       *types.Delay           `json:"-"`
 }
 
@@ -428,29 +429,29 @@ func (tctx *ToolCallContext) reportInitiateToolCall() {
 		tctx.args, nil, tctx.tc.RequestCount, tctx.tc.Concurrent, map[string]any{
 			"Tool-Call": tctx.tc,
 		})
-	tctx.session.Timeline.AddEvent(tctx.callerId, msg, tctx.clientInfo, nil, true)
+	tctx.session.Timeline.AddEventWithClient(tctx.callerId, msg, tctx.clientInfo)
 }
 
 func (tctx *ToolCallContext) reportToolCallRequest(index int, args *aicommon.ToolCallArgs) {
 	msg := fmt.Sprintf("%s [%s] Calling Tool [%s] on URL [%s], Request# [%d/%d], Args: %+v",
 		tctx.callerId, tctx.session.Operation, tctx.tc.Tool, tctx.tc.URL, index, tctx.tc.RequestCount, args)
-	tctx.session.Timeline.AddEvent(tctx.callerId, msg, nil, nil, true)
+	tctx.AddEvent(msg)
 }
 
 func (tctx *ToolCallContext) reportToolCallFailure(index int, err string) {
 	msg := fmt.Sprintf("%s [%s] Request# [%d/%d], Failed to call tool [%s] on URL [%s] with error [%s]",
 		tctx.callerId, tctx.session.Operation, index, tctx.tc.RequestCount, tctx.tc.Tool, tctx.tc.URL, err)
-	tctx.session.Timeline.AddEvent(tctx.callerId, msg, nil, nil, true)
+	tctx.AddEvent(msg)
 }
 
 func (tctx *ToolCallContext) reportToolCallSuccess(index int) {
 	msg := fmt.Sprintf("%s [%s] Request# [%d/%d], Tool [%s] called successfully on URL [%s]",
 		tctx.callerId, tctx.session.Operation, index, tctx.tc.RequestCount, tctx.tc.Tool, tctx.tc.URL)
-	tctx.session.Timeline.AddEvent(tctx.callerId, msg, nil, nil, true)
+	tctx.AddEvent(msg)
 }
 
 func (tctx *ToolCallContext) reportToolCallResult(toolResult *gomcp.CallToolResult) {
-	tctx.session.Timeline.AddData(fmt.Sprintf("%s->%s", tctx.callerId, tctx.tc.Tool), toolResult, true)
+	tctx.AddRemoteEvent(fmt.Sprintf("%s->%s", tctx.callerId, tctx.tc.Tool), "Result", toolResult, true)
 }
 
 func (tctx *ToolCallContext) call() (*MCPResult, error) {
@@ -540,7 +541,7 @@ func (c *MCPClient) InterceptResponse(r *http.Response) {
 			tctx := s.ongoingCalls[requestID]
 			if tctx != nil {
 				tctx.result.storeHeaders(requestID, r.Request.Header, r.Header, r.StatusCode)
-				tctx.clientInfo.StoreHeaders(r.Request.Header, r.Header)
+				tctx.clientInfo.StoreHeaders(r.Request.Header)
 			}
 			delete(s.ongoingCalls, requestID)
 		}
@@ -647,6 +648,14 @@ func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, h
 	return &clone
 }
 
-func (tctx *ToolCallContext) addEvent(label, text string) {
+func (tctx *ToolCallContext) AddEvent(msg string) {
+	if msg != "" {
+		tctx.session.Timeline.AddEvent(tctx.callerId, msg)
+	}
+}
 
+func (tctx *ToolCallContext) AddRemoteEvent(msg string, remoteText string, remoteData any, json bool) {
+	if msg != "" || remoteData != nil {
+		tctx.session.Timeline.AddEventWithRemote(tctx.callerId, msg, remoteText, nil, nil, remoteData, json)
+	}
 }

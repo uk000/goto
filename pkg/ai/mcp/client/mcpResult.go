@@ -43,7 +43,8 @@ type MCPCallResult struct {
 	Content         []gomcp.Content          `json:"Content,omitempty"`
 	Data            any                      `json:"Data,omitempty"`
 	ClientInfo      *timeline.GotoClientInfo `json:"ClientInfo,omitempty"`
-	RemoteTimeline  any                      `json:"RemoteTimeline,omitempty"`
+	RemoteTimeline  *timeline.Timeline       `json:"RemoteTimeline,omitempty"`
+	RemoteResult    any                      `json:"RemoteResult,omitempty"`
 	RequestHeaders  http.Header              `json:"RequestHeaders,omitempty"`
 	ResponseHeaders http.Header              `json:"ResponseHeaders,omitempty"`
 	ResponseStatus  int                      `json:"ResponseStatus,omitempty"`
@@ -77,31 +78,28 @@ func (r *MCPResult) storeCallResult(requestID string, result *gomcp.CallToolResu
 			cr.Content = result.Content
 		}
 		cr.ClientInfo = clientInfo
-		if m, ok := result.StructuredContent.(map[string]any); ok {
-			if m["TYPE"] != nil && m["TYPE"].(string) == timeline.TIMELINE {
-				delete(m, "TYPE")
-				if r.ToolCall.ResultOnly {
-					delete(m, "Events")
-				}
-				cr.RemoteTimeline = m
+		t := timeline.CheckAndGetTimeline(result.StructuredContent)
+		if t != nil {
+			if r.ToolCall.NoEvents {
+				t.Events = nil
 			}
-		}
-		if cr.RemoteTimeline == nil {
+			cr.RemoteTimeline = t
+		} else if r := timeline.CheckAndGetResult(result.StructuredContent); r != nil {
+			cr.RemoteResult = r
+		} else {
 			cr.Data = result.StructuredContent
 		}
 	}
 }
 
-func extractDataAndTimeline(sc any) (data map[string]any, tl *timeline.Timeline) {
-	if sc != nil {
-		if m, ok := sc.(map[string]any); ok {
-			data = m
-			if m["Timeline"] != nil {
-				if t, ok := m["Timeline"].(*timeline.Timeline); ok {
-					tl = t
-					delete(m, "Timeline")
-				}
+func extractDataAndTimeline(v any) (data map[string]any, t *timeline.Timeline) {
+	if v != nil {
+		if m, ok := v.(map[string]any); ok {
+			t = timeline.CheckAndGetTimeline(m)
+			if t != nil {
+				delete(m, "Timeline")
 			}
+			data = m
 		}
 	}
 	return
@@ -127,7 +125,7 @@ func (r *MCPResult) ToMCP() *gomcp.CallToolResult {
 			}
 		}
 	}
-	if r.ToolCall.ResultOnly {
+	if r.ToolCall.NoEvents {
 		r.Timeline.Events = nil
 	}
 	result.StructuredContent = r.Timeline
@@ -150,7 +148,7 @@ func (r *MCPResult) ToObject() map[string]any {
 			result["Content"] = content
 		}
 	}
-	if r.ToolCall.ResultOnly {
+	if r.ToolCall.NoEvents {
 		r.Timeline.Events = nil
 	}
 	result["Timeline"] = r.Timeline
@@ -161,7 +159,14 @@ func (r *MCPResult) buildCallsData() map[string]map[string]any {
 	callsData := map[string]map[string]any{}
 	callsData[r.ID] = map[string]any{}
 	for _, cr := range r.CallResults {
+		if r.ToolCall.ResultOnly {
+			cr.Content = nil
+			if cr.RemoteTimeline != nil {
+				cr.RemoteTimeline.Events = nil
+			}
+		}
 		callsData[r.ID][cr.RequestID] = cr
+		r.Timeline.AddRemoteCall(r.ID, cr.RequestID, cr.RemoteTimeline)
 	}
 	return callsData
 }

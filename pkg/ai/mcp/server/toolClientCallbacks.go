@@ -26,7 +26,7 @@ import (
 )
 
 func (t *MCPTool) elicit(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
-	tctx.AddEvent(fmt.Sprintf("Server [%s] sent elicit request to client", tctx.Server.GetName()), nil, false)
+	tctx.AddEvent(fmt.Sprintf("Server [%s] sent elicit request to client", tctx.Server.GetName()))
 	params := &gomcp.ElicitParams{}
 	if tctx.Response != nil && tctx.Response.JSON != nil {
 		params.Message = tctx.Response.JSON.GetText("message")
@@ -57,7 +57,7 @@ func (t *MCPTool) elicit(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	} else {
 		msg = fmt.Sprintf("Server [%s] Received elicit response from client", tctx.Server.GetName())
 		data = extractClientData(res.Content)
-		tctx.timeline.AddEvent(t.Label, msg, nil, data, false)
+		tctx.AddRemoteEvent(msg, "", data, false)
 	}
 	tctx.applyDelay()
 	result := &gomcp.CallToolResult{
@@ -85,7 +85,7 @@ func (t *MCPTool) sample(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	}
 	msg = fmt.Sprintf("Server [%s] got sample from client", tctx.Server.GetName())
 	data := extractClientData(res.Content)
-	tctx.timeline.AddEvent(t.Label, msg, nil, data, false)
+	tctx.AddRemoteEvent(msg, "", data, false)
 	tctx.applyDelay()
 	result := &gomcp.CallToolResult{}
 	result.Content = []gomcp.Content{

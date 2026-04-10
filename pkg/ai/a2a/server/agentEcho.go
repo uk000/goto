@@ -41,6 +41,6 @@ func (ab *AgentBehaviorEcho) DoUnary(aCtx *AgentContext) (*taskmanager.MessagePr
 func (ab *AgentBehaviorEcho) DoStream(aCtx *AgentContext) (string, error) {
 	msg := fmt.Sprintf("Agent: %s[%s]. Received Input: %s at Time: %s", ab.agent.ID, global.Funcs.GetListenerLabelForPort(ab.agent.Port),
 		aicommon.GetInputTextFromMessage(aCtx.input), time.Now().Format(time.RFC3339))
-	aCtx.AddEvent(msg, nil, false)
+	aCtx.AddEvent(msg)
 	return "Echo Response Sent", nil
 }

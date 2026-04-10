@@ -53,6 +53,7 @@ type AgentCall struct {
 	RequestId            *types.RequestId `json:"requestId"`
 	ForcedStatus         int              `json:"forcedStatus"`
 	ResultOnly           bool             `json:"resultOnly,omitempty"`
+	NoEvents             bool             `json:"noEvents,omitempty"`
 }
 
 type A2AClient struct {

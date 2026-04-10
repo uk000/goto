@@ -29,6 +29,7 @@ import (
 	"goto/pkg/util/timeline"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -74,6 +75,8 @@ type AgentContext struct {
 	forcedStatus   int
 	overrideDelay  time.Duration
 	timeline       *timeline.Timeline
+	surfaceData    bool
+	reportTimeline bool
 	err            error
 }
 
@@ -143,7 +146,22 @@ func (ac *AgentContext) setContext(ctx context.Context, b *AgentBehaviorImpl, ta
 		constants.HeaderGotoA2AAgent:  ac.agent.Card.Name,
 	}, nil, ac.requestHeaders, nil, ac.notifyUpdate, ac.notifyEndSession)
 	ac.loadInputs(input)
-	ac.timeline.StartTimeline(ac.agent.ID, fmt.Sprintf("Received Agent Call [%s]", ac.agent.Card.Name), ac.timeline.Server)
+	ac.timeline.AddEvent(ac.agent.ID, fmt.Sprintf("Received Agent Call [%s]", ac.agent.Card.Name))
+}
+
+func (ac *AgentContext) detectAndConfigureFeature(k string, v any) {
+	k = strings.ToLower(k)
+	if strings.Contains(k, "result") && strings.Contains(k, "only") {
+		ac.timeline.ResultOnly = util.AnyToBool(v)
+	} else if strings.Contains(k, "content") || strings.Contains(k, "message") {
+		ac.timeline.ResultOnly = !util.AnyToBool(v)
+	} else if strings.Contains(k, "timeline") {
+		ac.reportTimeline = util.AnyToBool(v)
+	} else if strings.Contains(k, "events") {
+		ac.timeline.ResultOnly = !util.AnyToBool(v)
+	} else if strings.Contains(k, "show") || strings.Contains(k, "data") {
+		ac.surfaceData = util.AnyToBool(v)
+	}
 }
 
 func (ac *AgentContext) loadInputs(input *a2aproto.Message) {
@@ -157,21 +175,32 @@ func (ac *AgentContext) loadInputs(input *a2aproto.Message) {
 				if m, ok := dp.Data.(map[string]any); ok {
 					for k, v := range m {
 						ac.inputData[k] = v
-						if strings.EqualFold(k, "resultOnly") {
-							ac.timeline.ResultOnly = util.AnyToBool(v)
-						}
+						ac.detectAndConfigureFeature(k, v)
 					}
 				}
 			}
 		}
 	}
 	ac.inputText = s.String()
+	ac.detectHints()
 }
 
 func (ac *AgentContext) detectHints() {
 	inputText := ac.inputText
 	inputText, ac.forcedStatus = util.ExtractStatusHint(inputText)
 	inputText, ac.overrideDelay = util.ExtractDurationHint(inputText)
+	inputText, inputs := util.ExtractInputHint(inputText)
+	for k, v := range inputs {
+		ac.detectAndConfigureFeature(k, v)
+	}
+	inputText, feature, flag := util.ExtractFeatureHint(inputText)
+	for {
+		if feature == "" {
+			break
+		}
+		ac.detectAndConfigureFeature(feature, flag)
+		inputText, feature, flag = util.ExtractFeatureHint(inputText)
+	}
 	// count, inputText := util.ExtractNumberHint(inputText)
 }
 
@@ -213,6 +242,8 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 	ac.agents = map[string]map[string]*model.DelegateAgentCall{}
 	addTool := func(d *model.DelegateToolCall) bool {
 		tool := *d
+		toolCall := *d.ToolCall
+		tool.ToolCall = &toolCall
 		add := false
 		if portHint != "" {
 			if strings.Contains(tool.ToolCall.URL, portHint) {
@@ -229,6 +260,12 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 				ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg)
 				tool.ToolCall.URL = altDelegate.URL
 				tool.ToolCall.Authority = altDelegate.Authority
+			} else {
+				delegate := ac.agent.Config.Delegates.Tools[delegateHint]
+				if delegate != nil {
+					toolCall = *delegate.ToolCall
+					tool.ToolCall = &toolCall
+				}
 			}
 		}
 		if add {
@@ -241,6 +278,8 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 	}
 	addAgent := func(d *model.DelegateAgentCall) bool {
 		agent := *d
+		agentCall := *d.AgentCall
+		agent.AgentCall = &agentCall
 		add := false
 		if portHint != "" {
 			if strings.Contains(agent.AgentCall.AgentURL, portHint) {
@@ -254,10 +293,13 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 			if altDelegate != nil {
 				agent.AgentCall.AgentURL = altDelegate.URL
 				agent.AgentCall.Authority = altDelegate.Authority
+			} else {
+				delegate := ac.agent.Config.Delegates.Agents[delegateHint]
+				if delegate != nil {
+					agentCall = *delegate.AgentCall
+					agent.AgentCall = &agentCall
+				}
 			}
-			agentURL := strings.Split(agent.AgentCall.AgentURL, agent.AgentCall.Name)[0]
-			agent.AgentCall.AgentURL = agentURL + "/" + delegateHint
-			agent.AgentCall.Name = delegateHint
 		}
 		if add {
 			if ac.agents[d.GivenName] == nil {
@@ -431,14 +473,23 @@ func extractJSONValues(jsons []map[string]any) map[string]*agentOverrides {
 
 func (ac *AgentContext) sendData(key string, data any) error {
 	data = map[string]any{key: data}
-	a := a2aproto.Artifact{
-		ArtifactID:  uuid.New().String(),
-		Name:        util.Ptr(key),
-		Description: util.Ptr(""),
-		Parts:       []a2aproto.Part{a2aproto.NewDataPart(data)},
-	}
-	if err := ac.task.handler.AddArtifact(&ac.task.taskID, a, false, false); err != nil {
-		return err
+	if ac.surfaceData {
+		a := a2aproto.Artifact{
+			ArtifactID:  uuid.New().String(),
+			Name:        util.Ptr(key),
+			Description: util.Ptr(""),
+			Parts:       []a2aproto.Part{a2aproto.NewDataPart(data)},
+		}
+		if err := ac.task.handler.AddArtifact(&ac.task.taskID, a, false, false); err != nil {
+			return err
+		}
+	} else {
+		msg := fmt.Sprintf("'%s' Reported", key)
+		m := a2aproto.NewMessage(a2aproto.MessageRoleAgent, []a2aproto.Part{a2aproto.NewTextPart(msg), a2aproto.NewDataPart(data)})
+		if err := ac.task.handler.UpdateTaskState(&ac.task.taskID, a2aproto.TaskStateWorking, &m); err != nil {
+			log.Printf("Failed to notify client about [%s] with error: %s", msg, err.Error())
+			return err
+		}
 	}
 	return nil
 }
@@ -484,9 +535,14 @@ func (ac *AgentContext) notifyEndSession(msg string, data any, success bool) {
 	if err := ac.prepareAndSendUpdate(msg, data, true, prefix, suffix, true); err != nil {
 		log.Printf("Failed to notify client about [%s] with error: %s", msg, err.Error())
 	}
-	ac.timeline.TYPE = ""
-	if err := ac.sendData("Timeline", ac.timeline); err != nil {
-		log.Printf("Failed to send timeline to client with error: %s", err.Error())
+	if ac.reportTimeline {
+		ac.timeline.TYPE = ""
+		if err := ac.sendData("Timeline", ac.timeline); err != nil {
+			log.Printf("Failed to send timeline to client with error: %s", err.Error())
+		}
+	}
+	if path, err := util.StoreFile(os.TempDir(), ac.agent.ID+".json", util.ToJSONBytes(ac.timeline)); err == nil {
+		log.Printf("Stored result at path: %s\n", path)
 	}
 }
 
@@ -500,70 +556,6 @@ func (ac *AgentContext) sendTaskStatusUpdate(state a2aproto.TaskState, msg strin
 		}
 	}
 	return
-}
-
-func (ac *AgentContext) sendDataUpdate(state a2aproto.TaskState, data any, part a2aproto.Part) (err error) {
-	if data != nil {
-		err = ac.sendArtifact(ac.agent.ID, "", "", data, false, false)
-	}
-	if part != nil {
-		if tp, ok := part.(a2aproto.TextPart); ok {
-			m := a2aproto.NewMessage(a2aproto.MessageRoleAgent, []a2aproto.Part{tp})
-			err = ac.task.handler.UpdateTaskState(&ac.task.taskID, state, &m)
-			if err != nil {
-				return
-			}
-		} else if dp, ok := part.(a2aproto.DataPart); ok {
-			err = ac.sendArtifact(ac.agent.ID, "", "", dp.Data, false, false)
-		}
-	}
-	return
-}
-
-func (ac *AgentContext) sendArtifact(title, description string, text string, data any, isFinal, isQuestion bool) (err error) {
-	if data != nil {
-		a := a2aproto.Artifact{
-			ArtifactID:  uuid.New().String(),
-			Name:        util.Ptr(title),
-			Description: util.Ptr(description),
-			Parts:       []a2aproto.Part{a2aproto.NewDataPart(data)},
-		}
-		if err := ac.task.handler.AddArtifact(&ac.task.taskID, a, isFinal, isQuestion); err != nil {
-			return err
-		}
-	} else {
-		message := ""
-		if title != "" {
-			message = fmt.Sprintf("%s", title)
-			message = fmt.Sprintf("%s\n%s", message, strings.Repeat("-", len(message)))
-		}
-		if description != "" {
-			message = fmt.Sprintf("%s\n%s", message, description)
-		}
-		if text != "" {
-			message = fmt.Sprintf("%s\n* %s", message, text)
-			a := a2aproto.Artifact{
-				ArtifactID:  uuid.New().String(),
-				Name:        util.Ptr(title),
-				Description: util.Ptr(description),
-				Parts:       []a2aproto.Part{a2aproto.NewTextPart(message)},
-			}
-			if err := ac.task.handler.AddArtifact(&ac.task.taskID, a, isFinal, isQuestion); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (ac *AgentContext) sendTextArtifactFromParts(title, description string, parts []a2aproto.Part, isFinal, isQuestion bool) (err error) {
-	artifact := a2aproto.Artifact{
-		ArtifactID:  uuid.New().String(),
-		Name:        util.Ptr(title),
-		Description: &description,
-		Parts:       parts,
-	}
-	return ac.task.handler.AddArtifact(&ac.task.taskID, artifact, isFinal, isQuestion)
 }
 
 func (ac *AgentContext) endTask(success bool, msg string) {
@@ -585,9 +577,9 @@ func (ac *AgentContext) waitBeforeNextStep() (time.Duration, error) {
 	}
 }
 
-func (ac *AgentContext) AddEvent(msg string, remoteData any, json bool) {
-	if msg != "" || remoteData != nil {
-		ac.timeline.AddEvent(ac.label, msg, nil, remoteData, json)
+func (ac *AgentContext) AddEvent(msg string) {
+	if msg != "" {
+		ac.timeline.AddEvent(ac.label, msg)
 	}
 }
 

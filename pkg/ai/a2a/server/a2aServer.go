@@ -145,7 +145,7 @@ func (a *A2AServer) AddAgent(agent *model.Agent) error {
 func (a *A2AServer) PrepareAgent(agent *model.Agent) error {
 	PrepareAgentBehavior(agent)
 	if agent.ID == "" {
-		agent.ID = fmt.Sprintf("%s@%s", agent.Card.Name, a.ID)
+		agent.ID = fmt.Sprintf("%s(%s)", agent.Card.Name, a.ID)
 	}
 	agent.Port = a.Port
 	if agent.Card != nil {

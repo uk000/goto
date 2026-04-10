@@ -27,6 +27,7 @@ type ToolCallArgs struct {
 	Text       string            `json:"text,omitempty"`
 	Status     int               `json:"status,omitempty"`
 	ResultOnly bool              `json:"resultOnly,omitempty"`
+	NoEvents   bool              `json:"noEvents,omitempty"`
 	Remote     *RemoteCallArgs   `json:"remote,omitempty"`
 	Metadata   map[string]string `json:"metadata,omitempty"`
 	Delay      *types.Delay      `json:"-"`
@@ -49,6 +50,7 @@ func NewCallArgs(remoteArgs ...bool) *ToolCallArgs {
 	return &ToolCallArgs{
 		Remote:   NewRemoteCallArgs(remoteArgs...),
 		Metadata: map[string]string{},
+		Delay:    types.NewDelay(0, 0, 0),
 	}
 }
 

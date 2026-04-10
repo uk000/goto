@@ -17,10 +17,14 @@
 package timeline
 
 import (
+	"encoding/json"
+	"fmt"
 	aicommon "goto/pkg/ai/common"
 	"goto/pkg/global"
 	"goto/pkg/types"
+	"goto/pkg/util"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,7 +53,6 @@ type RemoteInfo struct {
 	RemoteLabel            string
 	OutboundRequestArgs    any
 	OutboundRequestHeaders any
-	ResponseHeaders        any
 	HeadersConfig          *types.Headers
 	RequestCount           int
 	Concurrent             int
@@ -65,13 +68,16 @@ type GotoServerInfo struct {
 }
 
 type Event struct {
-	Idx        int `json:"Index"`
-	Label      string
-	Text       string
-	At         time.Time
-	Client     *GotoClientInfo
-	Server     *GotoServerInfo
-	RemoteData any
+	Idx            int `json:"Index"`
+	Label          string
+	Text           string
+	At             time.Time
+	Client         *GotoClientInfo
+	RemoteServer   *GotoServerInfo
+	RemoteClient   *GotoClientInfo
+	RemoteTimeline *Timeline
+	RemoteText     string
+	RemoteData     any
 }
 
 type Timeline struct {
@@ -81,9 +87,11 @@ type Timeline struct {
 	Server          *GotoServerInfo
 	Events          []*Event
 	Data            map[string]any
+	RemoteCalls     map[string]map[string]any
 	Finished        bool
 	Success         bool
 	ResultOnly      bool
+	NoEvents        bool
 	stream          chan *types.Pair[string, any]
 	streamPreferred bool
 	updateNotifier  TimelineUpdateNotifierFunc
@@ -107,27 +115,130 @@ func NewTimeline(port int, label string, metadata map[string]any, inboundArgs *a
 		Server:         CreateOrGetGotoServerInfo(port, metadata, inboundArgs, inboundHeaders),
 		Events:         []*Event{},
 		Data:           map[string]any{},
+		RemoteCalls:    map[string]map[string]any{},
 		Finished:       false,
 		stream:         stream,
 		updateNotifier: updateNotifier,
 		endNotifier:    endNotifier,
 		eventCounter:   atomic.Int32{},
 	}
+	t.send("ServerInfo", t.Server, true, false)
 	return t
+}
+
+func LoadTimeline(data map[string]any) (t *Timeline, e error) {
+	t = &Timeline{}
+	e = json.Unmarshal(util.ToJSONBytes(data), t)
+	return
+}
+
+func IsTimeline(data any) bool {
+	if _, ok := data.(*Timeline); ok {
+		return true
+	} else if m, ok := data.(map[string]any); ok {
+		if m["TYPE"] != nil && m["TYPE"].(string) == TIMELINE {
+			return true
+		}
+	}
+	return false
+}
+
+func IsResult(data any) bool {
+	if m, ok := data.(map[string]any); ok {
+		if m["Result"] != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func IsClientInfo(data any) bool {
+	if util.IsNil(data) {
+		return false
+	}
+	if _, ok := data.(*GotoClientInfo); ok {
+		return true
+	} else if m, ok := data.(map[string]any); ok {
+		if m["ClientInfo"] != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func CheckAndGetClientInfo(data any) (*GotoClientInfo, bool) {
+	if util.IsNil(data) {
+		return nil, false
+	}
+	if c, ok := data.(*GotoClientInfo); ok {
+		return c, true
+	} else if m, ok := data.(map[string]any); ok {
+		if m["ClientInfo"] != nil {
+			c := &GotoClientInfo{}
+			if err := json.Unmarshal(util.ToJSONBytes(m), c); err == nil {
+				return c, true
+			}
+		}
+	}
+	return nil, false
+}
+func IsServerInfo(data any) bool {
+	if util.IsNil(data) {
+		return false
+	}
+	if _, ok := data.(*GotoServerInfo); ok {
+		return true
+	} else if m, ok := data.(map[string]any); ok {
+		if m["ServerInfo"] != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func CheckAndGetServerInfo(data any) (*GotoServerInfo, bool) {
+	if util.IsNil(data) {
+		return nil, false
+	}
+	if s, ok := data.(*GotoServerInfo); ok {
+		return s, true
+	} else if m, ok := data.(map[string]any); ok {
+		if m["ServerInfo"] != nil {
+			s := &GotoServerInfo{}
+			if err := json.Unmarshal(util.ToJSONBytes(m), s); err == nil {
+				return s, true
+			}
+		}
+	}
+	return nil, false
+}
+
+func CheckAndGetTimeline(data any) *Timeline {
+	if IsTimeline(data) {
+		if t, ok := data.(*Timeline); ok {
+			return t
+		} else if m, ok := data.(map[string]any); ok {
+			t, _ = LoadTimeline(m)
+			return t
+		}
+	}
+	return nil
+}
+
+func CheckAndGetResult(data any) map[string]any {
+	if m, ok := data.(map[string]any); ok {
+		for k := range m {
+			if strings.Contains(k, "Result") {
+				return m
+			}
+		}
+	}
+	return nil
 }
 
 func (t *Timeline) SetStreamPreferred(stream chan *types.Pair[string, any]) {
 	t.stream = stream
 	t.streamPreferred = true
-}
-
-func (t *Timeline) StartTimeline(label, text string, server *GotoServerInfo) {
-	event := t.NewEvent(label, text, nil, server, nil)
-	t.send(text, nil, false, false)
-	t.send("ServerInfo", server, true, false)
-	t.lock.Lock()
-	defer t.lock.Unlock()
-	t.Events = append(t.Events, event)
 }
 
 func (t *Timeline) EndTimeline(label, text string, data any, success bool) {
@@ -136,23 +247,52 @@ func (t *Timeline) EndTimeline(label, text string, data any, success bool) {
 	if data != nil {
 		t.AddData(text, data, true)
 	} else {
-		t.AddEvent(label, text, nil, nil, false)
+		t.AddEvent(label, text)
 	}
 }
 
-func (t *Timeline) AddEvent(label, text string, client *GotoClientInfo, remote any, json bool) {
-	if !t.ResultOnly {
-		event := t.NewEvent(label, text, client, nil, remote)
+func (t *Timeline) AddEvent(label, text string) {
+	t.addEvent(label, text, nil, "", nil, nil, nil, false)
+}
+
+func (t *Timeline) AddEventWithClient(label, text string, client *GotoClientInfo) {
+	t.addEvent(label, text, client, "", nil, nil, nil, false)
+}
+
+func (t *Timeline) AddEventWithRemote(label, text string, remoteText string, remoteServer *GotoServerInfo, remoteClient *GotoClientInfo, remoteData any, isJson bool) {
+	t.addEvent(label, text, nil, remoteText, remoteServer, remoteClient, remoteData, isJson)
+}
+
+func (t *Timeline) addEvent(label, text string, client *GotoClientInfo, remoteText string, remoteServer *GotoServerInfo, remoteClient *GotoClientInfo, remoteData any, isJson bool) {
+	var remoteTimeline *Timeline
+	if remoteData != nil {
+		remoteTimeline = CheckAndGetTimeline(remoteData)
+		if remoteClient != nil || remoteServer != nil || remoteTimeline != nil {
+			remoteData = nil
+		}
+	}
+	if !t.NoEvents {
+		event := t.NewEvent(label, text, client, remoteClient, remoteServer, remoteTimeline, remoteText, remoteData)
 		t.lock.Lock()
 		defer t.lock.Unlock()
 		t.Events = append(t.Events, event)
-		t.send(text, nil, false, t.Finished)
+		if remoteText != "" {
+			t.send(fmt.Sprintf("%s: %s", text, remoteText), nil, false, t.Finished)
+		} else {
+			t.send(text, nil, false, t.Finished)
+		}
 	}
 	if client != nil {
 		t.send("ClientInfo", client, true, t.Finished)
 	}
-	if remote != nil {
-		t.send(label, remote, json, t.Finished)
+	if remoteClient != nil {
+		t.send("ClientInfo", client, true, t.Finished)
+	}
+	if remoteServer != nil {
+		t.send("ServerInfo", remoteServer, true, t.Finished)
+	}
+	if remoteData != nil {
+		t.send(label, remoteData, isJson, t.Finished)
 	}
 }
 
@@ -161,6 +301,15 @@ func (t *Timeline) AddData(key string, data any, json bool) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	t.Data[key] = data
+}
+
+func (t *Timeline) AddRemoteCall(remoteID, callID string, data any) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	if t.RemoteCalls[remoteID] == nil {
+		t.RemoteCalls[remoteID] = map[string]any{}
+	}
+	t.RemoteCalls[remoteID][callID] = data
 }
 
 func (t *Timeline) send(key string, data any, json, finish bool) {
@@ -181,15 +330,18 @@ func (t *Timeline) send(key string, data any, json, finish bool) {
 	}
 }
 
-func (t *Timeline) NewEvent(label, text string, client *GotoClientInfo, server *GotoServerInfo, remote any) *Event {
+func (t *Timeline) NewEvent(label, text string, client, remoteClient *GotoClientInfo, remoteServer *GotoServerInfo, timeline *Timeline, remoteText string, remoteData any) *Event {
 	return &Event{
-		Label:      label,
-		Text:       text,
-		Idx:        int(t.eventCounter.Add(1)),
-		At:         time.Now(),
-		Client:     client,
-		Server:     server,
-		RemoteData: remote,
+		Label:          label,
+		Text:           text,
+		Idx:            int(t.eventCounter.Add(1)),
+		At:             time.Now(),
+		Client:         client,
+		RemoteClient:   remoteClient,
+		RemoteServer:   remoteServer,
+		RemoteTimeline: timeline,
+		RemoteText:     remoteText,
+		RemoteData:     remoteData,
 	}
 }
 
@@ -239,7 +391,6 @@ func BuildGotoClientInfo(port int, label, target, url, server string, inHeaders,
 	}
 }
 
-func (c *GotoClientInfo) StoreHeaders(request, response http.Header) {
+func (c *GotoClientInfo) StoreHeaders(request http.Header) {
 	c.OutboundRequestHeaders = request
-	c.ResponseHeaders = response
 }

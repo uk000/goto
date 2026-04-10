@@ -78,7 +78,7 @@ func (t *MCPTool) fetch(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	results := []any{}
 	var anyError error
 	for i := 1; i <= count; i++ {
-		tctx.timeline.AddEvent(tctx.Label, fmt.Sprintf("%s: Invoking HTTP URL [%s], Request %d/%d", t.Label, url, i, count), clientInfo, nil, true)
+		tctx.timeline.AddEventWithClient(tctx.Label, fmt.Sprintf("%s: Invoking HTTP URL [%s], Request %d/%d", t.Label, url, i, count), clientInfo)
 		resp, err := tctx.client.HTTP().Do(req)
 		msg := ""
 		if err != nil {

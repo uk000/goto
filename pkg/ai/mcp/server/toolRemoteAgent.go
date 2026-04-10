@@ -39,10 +39,13 @@ func (t *MCPTool) callRemoteAgent(tctx *ToolCallContext) (*gomcp.CallToolResult,
 	if tctx.timeline.ResultOnly {
 		ac.ResultOnly = true
 	}
+	if tctx.timeline.NoEvents {
+		ac.NoEvents = true
+	}
 	finalHeaders := types.Union(ac.Headers, tctx.args.Remote.Headers)
 	tctx.addForwardHeaders(finalHeaders.Request.Add, finalHeaders.Request.Forward, tctx.args.Remote.Args)
 	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s]", ac.Name, ac.AgentURL)
-	tctx.AddEvent(msg, nil, false)
+	tctx.AddEvent(msg)
 	client := a2aclient.NewA2AClient(tctx.Server.Port, tctx.Name, ac.H2, ac.TLS, ac.Authority)
 	if client == nil {
 		return nil, errors.New("failed to create A2A client")
@@ -52,7 +55,7 @@ func (t *MCPTool) callRemoteAgent(tctx *ToolCallContext) (*gomcp.CallToolResult,
 		return nil, fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", ac.Name, ac.AgentURL, err.Error())
 	} else {
 		msg = fmt.Sprintf("Loaded agent card for Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.AgentURL, session.Card.Capabilities.Streaming)
-		tctx.AddEvent(msg, nil, false)
+		tctx.AddEvent(msg)
 	}
 	stream := make(chan *types.Pair[string, any], 10)
 	wg := sync.WaitGroup{}
@@ -66,7 +69,7 @@ func (t *MCPTool) callRemoteAgent(tctx *ToolCallContext) (*gomcp.CallToolResult,
 		return nil, fmt.Errorf("Failed to call Agent [%s] URL [%s] with error: %s", ac.Name, ac.AgentURL, err.Error())
 	} else {
 		msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.AgentURL, session.Card.Capabilities.Streaming)
-		tctx.AddEvent(msg, nil, false)
+		tctx.AddEvent(msg)
 	}
 	return result, nil
 }

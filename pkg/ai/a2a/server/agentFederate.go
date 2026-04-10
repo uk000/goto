@@ -46,29 +46,29 @@ func (ab *AgentBehaviorFederate) DoUnary(aCtx *AgentContext) (*taskmanager.Messa
 	aCtx.toolResults = map[string]any{}
 	aCtx.agentResults = map[string]any{}
 	if len(ab.triggers) == 0 {
-		aCtx.AddEvent("Agent update: No tools available", nil, false)
-		aCtx.toolResults[""] = []any{"Agent update: No tools available"}
+		aCtx.AddEvent("Agent update: No tools available")
+		aCtx.toolResults["No Tools"] = "Agent update: No tools available"
 	} else if len(aCtx.tools) == 0 {
-		aCtx.AddEvent("Agent update: No tools were triggered", nil, false)
-		aCtx.toolResults[""] = []any{"Agent update: No tools were triggered"}
+		aCtx.AddEvent("Agent update: No tools were triggered")
+		aCtx.toolResults["No Tools"] = "Agent update: No tools were triggered"
 	} else {
 		ab.runTools(aCtx, nil, nil)
 		if len(aCtx.toolResults) == 0 {
-			aCtx.AddEvent("Agent update: No tool produced any results", nil, false)
-			aCtx.toolResults[""] = []any{"Agent update: No tool produced any results"}
+			aCtx.AddEvent("Agent update: No tool produced any results")
+			aCtx.toolResults["No Tools"] = "Agent update: No tool produced any results"
 		}
 	}
 	if len(ab.triggers) == 0 {
-		aCtx.AddEvent("Agent update: No agents available", nil, false)
-		aCtx.agentResults[""] = []any{"Agent update: No agents available"}
+		aCtx.AddEvent("Agent update: No agents available")
+		aCtx.agentResults["No Agents"] = "Agent update: No agents available"
 	} else if len(aCtx.agents) == 0 {
-		aCtx.AddEvent("Agent update: No agents were triggered", nil, false)
-		aCtx.agentResults[""] = []any{"Agent update: No agents were triggered"}
+		aCtx.AddEvent("Agent update: No agents were triggered")
+		aCtx.agentResults["No Agents"] = "Agent update: No agents were triggered"
 	} else {
 		ab.runAgents(aCtx, nil, nil)
 		if len(aCtx.agentResults) == 0 {
-			aCtx.AddEvent("Agent update: No agent produced any results", nil, false)
-			aCtx.agentResults[""] = []any{"No agent produced any results"}
+			aCtx.AddEvent("Agent update: No agent produced any results")
+			aCtx.agentResults["No Agents"] = "No agent produced any results"
 		}
 	}
 	result := createHybridMessage(aCtx.agent.ID, aCtx.toolResults, aCtx.agentResults)
@@ -88,17 +88,17 @@ func (ab *AgentBehaviorFederate) DoStream(aCtx *AgentContext) (string, error) {
 	resultsWG.Add(1)
 	go ab.processLocalUpdates(aCtx, resultsWG)
 	if len(ab.triggers) == 0 {
-		aCtx.AddEvent("Agent update: No tools available", nil, false)
+		aCtx.AddEvent("Agent update: No tools available")
 	} else if len(aCtx.tools) == 0 {
-		aCtx.AddEvent("Agent update: No tools were triggered", nil, false)
+		aCtx.AddEvent("Agent update: No tools were triggered")
 	} else {
 		runWG.Add(1)
 		go ab.runTools(aCtx, runWG, resultsWG)
 	}
 	if len(ab.triggers) == 0 {
-		aCtx.AddEvent("Agent update: No agents available", nil, false)
+		aCtx.AddEvent("Agent update: No agents available")
 	} else if len(aCtx.agents) == 0 {
-		aCtx.AddEvent("Agent update: No agents were triggered", nil, false)
+		aCtx.AddEvent("Agent update: No agents were triggered")
 	} else {
 		runWG.Add(1)
 		go ab.runAgents(aCtx, runWG, resultsWG)
@@ -189,11 +189,11 @@ func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentContext, dCtx *DelegateCal
 	if err != nil {
 		aCtx.err = err
 		msg := fmt.Sprintf("Failed to invoke Agent [%s] at URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, err.Error())
-		aCtx.AddEvent(msg, nil, false)
+		aCtx.AddEvent(msg)
 	} else {
 		msg := fmt.Sprintf("Successfully invoked Agent [%s] at URL [%s]. Call Count [%d], Response Count [%d]",
 			dCtx.agentCall.Name, dCtx.agentCall.AgentURL, dCtx.tracker.CallCount.Load(), dCtx.tracker.ResponseCount.Load())
-		aCtx.AddEvent(msg, nil, false)
+		aCtx.AddEvent(msg)
 	}
 	// if respHeaders != nil {
 	// 	msg := fmt.Sprintf("Response headers from Agent [%s][%s]", dCtx.agentCall.Name, dCtx.agentCall.AgentURL)
@@ -210,16 +210,17 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 	if err != nil {
 		aCtx.err = err
 		msg := fmt.Sprintf("Failed to invoke MCP tool [%s] at URL [%s] with error: %s", dCtx.toolCall.Tool, dCtx.toolCall.URL, err.Error())
-		aCtx.AddEvent(msg, nil, false)
+		aCtx.AddEvent(msg)
 	}
 	if respHeaders != nil {
 		msg := fmt.Sprintf("MCP tool [%s] sent response headers", dCtx.toolCall.Tool)
-		aCtx.AddEvent(msg, map[string]any{"responseHeaders": respHeaders}, true)
+		aCtx.AddEvent(msg)
+		aCtx.AddData(map[string]any{"responseHeaders": respHeaders}, true)
 	}
 	if remoteResult != nil {
 		msg := fmt.Sprintf("Successfully invoked MCP tool [%s] at URL [%s]. Call Count [%d], Response Count [%d]",
 			dCtx.toolCall.Tool, dCtx.toolCall.URL, dCtx.tracker.CallCount.Load(), dCtx.tracker.ResponseCount.Load())
-		aCtx.AddEvent(msg, nil, false)
+		aCtx.AddEvent(msg)
 		aCtx.sendData("Result", remoteResult.ToObject())
 	}
 	//processMCPCallResults(dCtx.toolCall.Tool, remoteResult, dCtx.results, dCtx.upstreamProgress, ab.agent.Streaming)
@@ -234,9 +235,12 @@ func (ab *AgentBehaviorFederate) prepareArgs(args *aicommon.ToolCallArgs, forwar
 
 func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateCallContext) (result *a2aclient.A2AResult, err error) {
 	msg := fmt.Sprintf("Agent [%s] Invoking Agent [%s] at URL [%s] with input [%s]", aCtx.agent.ID, dCtx.agentCall.Name, dCtx.agentCall.AgentURL, dCtx.agentCall.Message)
-	aCtx.AddEvent(msg, nil, false)
+	aCtx.AddEvent(msg)
 	if aCtx.timeline.ResultOnly {
 		dCtx.agentCall.ResultOnly = true
+	}
+	if aCtx.timeline.NoEvents {
+		dCtx.agentCall.NoEvents = true
 	}
 	client := a2aclient.NewA2AClient(ab.agent.Port, ab.agent.ID, dCtx.agentCall.H2, dCtx.agentCall.TLS, dCtx.agentCall.Authority)
 	if client == nil {
@@ -257,7 +261,7 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 	err = session.CallAgent(unaryCallback, aCtx.localProgress, dCtx.upstreamProgress)
 	if err != nil {
 		msg := fmt.Sprintf("Failed to call Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, err.Error())
-		aCtx.AddEvent(msg, nil, false)
+		aCtx.AddEvent(msg)
 		return nil, err
 	}
 	if aCtx.agentResults != nil && len(agentResults) > 0 {
@@ -267,10 +271,15 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 }
 
 func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCallContext) (mcpResult *mcpclient.MCPResult, respHeaders http.Header, err error) {
-	dCtx.toolCall.ResultOnly = aCtx.timeline.ResultOnly
+	if aCtx.timeline.ResultOnly {
+		dCtx.toolCall.ResultOnly = true
+	}
+	if aCtx.timeline.NoEvents {
+		dCtx.toolCall.NoEvents = true
+	}
 	args := ab.prepareArgs(dCtx.toolCall.Args, dCtx.toolCall.Headers.Request.Forward)
 	msg := fmt.Sprintf("Agent [%s] Invoking MCP tool [%s] at URL [%s]", aCtx.agent.ID, dCtx.toolCall.Tool, dCtx.toolCall.URL)
-	aCtx.AddEvent(msg, nil, false)
+	aCtx.AddEvent(msg)
 	client := mcpclient.NewClient(ab.agent.Port, false, dCtx.toolCall.H2, dCtx.toolCall.TLS, ab.agent.ID,
 		aCtx.rs.ListenerLabel, dCtx.toolCall.Authority, aCtx.localProgress, aCtx.notifyUpdate, aCtx.notifyEndSession)
 	session := client.CreateSessionWithTimeline(aCtx.ctx, dCtx.toolCall.URL, dCtx.toolCall.Tool, dCtx.toolCall, aCtx.requestHeaders, aCtx.timeline)
@@ -282,13 +291,12 @@ func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCal
 func (ab *AgentBehaviorFederate) processLocalUpdates(aCtx *AgentContext, resultsWG *sync.WaitGroup) {
 	processResult := func(pair *types.Pair[string, any]) error {
 		if pair != nil && pair.Right != nil {
-			part := createAnyPart(pair.Left, pair.Right)
-			if t, ok := part.(a2aproto.TextPart); ok {
-				if err := aCtx.sendDataUpdate(a2aproto.TaskStateWorking, nil, t); err != nil {
+			if s, ok := pair.Right.(string); ok {
+				if err := aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, s); err != nil {
 					return err
 				}
-			} else if d, ok := part.(a2aproto.DataPart); ok {
-				if err := aCtx.sendArtifact(aCtx.agent.ID, "", "", d.Data, false, false); err != nil {
+			} else {
+				if err := aCtx.sendData(pair.Left, pair.Right); err != nil {
 					return err
 				}
 			}
@@ -330,7 +338,7 @@ outer:
 			if p != nil {
 				var err error
 				if p.Right != nil {
-					err = aCtx.notifyUpdate(fmt.Sprintf("%s[%s]", dCtx.name, dCtx.url), p.Right, true)
+					err = aCtx.notifyUpdate(p.Left, p.Right, true)
 				} else {
 					err = aCtx.notifyUpdate(fmt.Sprintf("%s[%s]: %s", dCtx.name, dCtx.url, p.Left), nil, false)
 				}

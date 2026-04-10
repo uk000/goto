@@ -33,6 +33,8 @@ var (
 	StatusHint         = regexp.MustCompile(`(?i)\bstatus\s*(\d+)`)
 	TargetHint         = regexp.MustCompile(`(?i)\b(to|on|with)\s+(\w+)(\s*)`)
 	InputHint          = regexp.MustCompile(`(?i)\b(\S*):\[(.*)\]`)
+	FeatureHint        = regexp.MustCompile(`(?i)\b(show|with|use)\s+(\w+)(\s*)`)
+	NotFeatureHint     = regexp.MustCompile(`(?i)\b(hide|without|not|no)\s+(\w+)(\s*)`)
 	DigitRegexp        = regexp.MustCompile(`(\d+)`)
 	DurationRegexp     = regexp.MustCompile(`(?i)(\d+)\s*(s|sec|m|min|h|hour)s?\b`)
 	normalizedDuration = map[string]string{"sec": "s", "min": "s", "hour": "s"}
@@ -110,6 +112,20 @@ func ExtractDurationHint(text string) (string, time.Duration) {
 	return text, ParseDuration(val + unit)
 }
 
+func ExtractFeatureHint(text string) (string, string, bool) {
+	notMatches := NotFeatureHint.FindStringSubmatch(text)
+	if len(notMatches) > 2 {
+		text = strings.ReplaceAll(text, notMatches[0], "")
+		return text, notMatches[2], false
+	}
+	matches := FeatureHint.FindStringSubmatch(text)
+	if len(matches) > 2 {
+		text = strings.ReplaceAll(text, matches[0], "")
+		return text, matches[2], true
+	}
+	return text, "", false
+}
+
 func SplitTextIntoChunks(text string, chunkSize int) []string {
 	if len(text) <= chunkSize {
 		return []string{text}
@@ -121,7 +137,7 @@ func SplitTextIntoChunks(text string, chunkSize int) []string {
 	chunks := []string{}
 	currentChunk := ""
 	for _, word := range words {
-		if len(currentChunk) > 0 && len(currentChunk)+len(word)+1 > chunkSize && len(currentChunk) > 0 {
+		if len(currentChunk) > 0 && len(currentChunk)+len(word)+1 > chunkSize {
 			chunks = append(chunks, currentChunk)
 			currentChunk = word
 		} else {
