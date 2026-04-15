@@ -2920,6 +2920,9 @@
           "/server/response/status/configure": "[POST]"
         },
         {
+          "/server/response/status/set/{status}?uriPrefix={uriPrefix}": "[POST]"
+        },
+        {
           "/server/response/status/set/{status}?uri={uri}": "[POST]"
         },
         {

@@ -62,6 +62,7 @@ func setRoutes(r *mux.Router) {
 	statusRouter := util.PathRouter(r, "/status")
 
 	util.AddRoute(statusRouter, "/configure", configureStatus, "POST")
+	util.AddRouteQ(statusRouter, "/set/{status}", setStatus, "uriPrefix", "POST")
 	util.AddRouteQO(statusRouter, "/set/{status}", setStatus, "uri", "POST")
 
 	util.AddRouteQO(statusRouter, "/clear", clearStatus, "uri", "POST")
@@ -113,7 +114,8 @@ func configureStatus(w http.ResponseWriter, r *http.Request) {
 
 func setStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	uri := util.GetStringParamValue(r, "uri")
+	uriExact := util.GetStringParamValue(r, "uri")
+	uriPrefix := util.GetStringParamValue(r, "uriPrefix")
 	statusCodes, times, ok := util.GetStatusParam(r)
 	if !ok {
 		util.AddLogMessage("Invalid status", r)
@@ -121,7 +123,7 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Invalid Status")
 		return
 	}
-	status := TheStatusManager.SetStatusFor(port, uri, "", "", nil, statusCodes, times, true)
+	status := TheStatusManager.SetStatusFor(port, uriExact, uriPrefix, "", "", nil, statusCodes, times, true)
 	msg := status.Log("HTTP Response Status", port)
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
@@ -208,7 +210,7 @@ func clearStatus(w http.ResponseWriter, r *http.Request) {
 		msg = fmt.Sprintf("Port [%s] Response Status Counts Cleared", util.GetRequestOrListenerPort(r))
 		events.SendRequestEvent("Response Status Counts Cleared", msg, r)
 	} else {
-		TheStatusManager.Clear(port, uri)
+		TheStatusManager.Clear(port, uri, uri)
 		portStatus.FlipflopConfigs = map[string]*FlipFlopConfig{}
 		msg = fmt.Sprintf("Port [%s] Response Status State Cleared", util.GetRequestOrListenerPort(r))
 		if uri != "" {

@@ -770,6 +770,7 @@
 /server/response/status/flipflop [GET]
 /server/response/status/set/{status} [POST]
 /server/response/status/set/{status}?uri={uri} [POST]
+/server/response/status/set/{status}?uriPrefix={uriPrefix} [POST]
 /server/response/triggers/add [POST]
 /server/response/triggers/clear [POST]
 /server/response/triggers/{triggers}/invoke [POST]

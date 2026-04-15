@@ -66,13 +66,14 @@ func NewStatusManager() *StatusManager {
 	return &StatusManager{PortStatus: map[int][]*StatusConfig{}}
 }
 
-func newStatusConfig(uriExact, header, headerValue string, methods []string, statusCodes []int, times int, present bool) *StatusConfig {
+func newStatusConfig(uriExact, uriPrefix, header, headerValue string, methods []string, statusCodes []int, times int, present bool) *StatusConfig {
 	sc := &StatusConfig{
 		Statuses: statusCodes,
 		Times:    times,
 		Match: &StatusMatch{
 			URIMatch: &StatusURIMatch{
-				Exact: uriExact,
+				Exact:  uriExact,
+				Prefix: uriPrefix,
 			},
 			HeaderMatches: []*StatusHeaderMatch{},
 			MethodMatch:   methods,
@@ -89,9 +90,9 @@ func newStatusConfig(uriExact, header, headerValue string, methods []string, sta
 	return sc
 }
 
-func (s *StatusManager) Clear(port int, uriPrefix string) {
-	if uriPrefix != "" {
-		s.findOrRemoveStatusConfig(port, uriPrefix, "", "", false, true)
+func (s *StatusManager) Clear(port int, uriExact, uriPrefix string) {
+	if uriExact != "" {
+		s.findOrRemoveStatusConfig(port, uriExact, uriPrefix, "", "", false, true)
 	} else {
 		s.lock.Lock()
 		defer s.lock.Unlock()
@@ -168,36 +169,35 @@ func (s *StatusManager) ApplyStatusConfig(port int, sc *StatusConfig) (err error
 }
 
 func (s *StatusManager) SetStatus(port int, statusCodes []int, times int, present bool) *StatusConfig {
-	return s.SetStatusFor(port, "", "", "", nil, statusCodes, times, present)
+	return s.SetStatusFor(port, "", "", "", "", nil, statusCodes, times, present)
 }
 
-func (s *StatusManager) findOrRemoveStatusConfig(port int, uri, header, headerValue string, present bool, remove bool) *StatusConfig {
+func (s *StatusManager) findOrRemoveStatusConfig(port int, uriExact, uriPrefix, header, headerValue string, present bool, remove bool) *StatusConfig {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	statuses := s.PortStatus[port]
 	for i, sc := range statuses {
-		if !strings.EqualFold(sc.Match.URIMatch.Exact, uri) {
-			continue
-		}
-		matched := true
-		for _, m := range sc.Match.HeaderMatches {
-			if !m.matchOne(header, headerValue, present) {
-				matched = false
-				break
+		if strings.EqualFold(sc.Match.URIMatch.Exact, uriExact) && strings.EqualFold(sc.Match.URIMatch.Prefix, uriPrefix) {
+			matched := true
+			for _, m := range sc.Match.HeaderMatches {
+				if !m.matchOne(header, headerValue, present) {
+					matched = false
+					break
+				}
 			}
-		}
-		if matched {
-			if remove {
-				s.PortStatus[port] = statuses[0:i]
-				s.PortStatus[port] = append(s.PortStatus[port], statuses[i+1:]...)
+			if matched {
+				if remove {
+					s.PortStatus[port] = statuses[0:i]
+					s.PortStatus[port] = append(s.PortStatus[port], statuses[i+1:]...)
+				}
+				return sc
 			}
-			return sc
 		}
 	}
 	return nil
 }
 
-func (s *StatusManager) SetStatusFor(port int, uriExact, header, headerValue string, methods []string, statusCodes []int, times int, present bool) *StatusConfig {
+func (s *StatusManager) SetStatusFor(port int, uriExact, uriPrefix, header, headerValue string, methods []string, statusCodes []int, times int, present bool) *StatusConfig {
 	s.lock.Lock()
 	statuses := s.PortStatus[port]
 	if statuses == nil {
@@ -206,12 +206,13 @@ func (s *StatusManager) SetStatusFor(port int, uriExact, header, headerValue str
 	}
 	s.lock.Unlock()
 	uriExact = strings.ToLower(uriExact)
+	uriPrefix = strings.ToLower(uriPrefix)
 	header = strings.ToLower(header)
-	sc := s.findOrRemoveStatusConfig(port, uriExact, header, headerValue, present, false)
+	sc := s.findOrRemoveStatusConfig(port, uriExact, uriPrefix, header, headerValue, present, false)
 	if sc != nil {
 		sc.SetStatus(statusCodes, times)
 	} else {
-		sc = newStatusConfig(uriExact, header, headerValue, methods, statusCodes, times, present)
+		sc = newStatusConfig(uriExact, uriPrefix, header, headerValue, methods, statusCodes, times, present)
 		s.PortStatus[port] = append(s.PortStatus[port], sc)
 	}
 	return sc

@@ -270,7 +270,7 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, msg)
 		return
 	}
-	status := statusManager.SetStatusFor(port, agent.URI, header, value, []string{"POST"}, statusCodes, times, !notPresent)
+	status := statusManager.SetStatusFor(port, agent.URI, agent.URI, header, value, []string{"POST"}, statusCodes, times, !notPresent)
 	msg := status.Log("A2A", port)
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
@@ -278,7 +278,7 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 
 func clearStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	statusManager.Clear(port, "")
+	statusManager.Clear(port, "", "")
 	msg := fmt.Sprintf("Status cleared on port [%d]", port)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)

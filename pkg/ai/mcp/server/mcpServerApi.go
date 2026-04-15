@@ -223,7 +223,7 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		uri = tool.ServerURI
 	}
-	status := StatusManager.SetStatusFor(port, uri, header, value, []string{"POST"}, statusCodes, times, noHeader)
+	status := StatusManager.SetStatusFor(port, uri, "", header, value, []string{"POST"}, statusCodes, times, noHeader)
 	msg := status.Log("MCP", port)
 	util.AddLogMessage(msg, r)
 	w.WriteHeader(http.StatusOK)
@@ -236,10 +236,10 @@ func clearStatus(w http.ResponseWriter, r *http.Request) {
 	server := GetMCPServer(port, serverName)
 	msg := ""
 	if server == nil {
-		StatusManager.Clear(port, "")
+		StatusManager.Clear(port, "", "")
 		msg = fmt.Sprintf("Status cleared on port [%d]", port)
 	} else {
-		StatusManager.Clear(port, server.URI)
+		StatusManager.Clear(port, server.URI, server.URI)
 		msg = fmt.Sprintf("Status cleared on port [%d] for server [%s]", port, serverName)
 	}
 	fmt.Fprintln(w, msg)

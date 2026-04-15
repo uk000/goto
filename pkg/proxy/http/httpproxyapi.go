@@ -194,9 +194,11 @@ func getProxyTargetTracker(w http.ResponseWriter, r *http.Request) {
 	target := checkAndGetTarget(proxy, w, r)
 	result := map[string]any{}
 	result["port"] = port
-	result["target"] = target.Name
+	result["total"] = proxy.HTTPTracker.HTTPCounts
 	if t := proxy.HTTPTracker.TargetTrackers[target.Name]; t != nil {
-		result["http"] = t
+		result[target.Name] = t
+	} else {
+		result[target.Name] = nil
 	}
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, util.ToJSONText(result))
@@ -211,7 +213,6 @@ func getProxyTrackers(w http.ResponseWriter, r *http.Request) {
 		for port, proxy := range portProxy {
 			result[strconv.Itoa(port)] = map[string]any{
 				"enabled": proxy.Enabled,
-				"targets": proxy.Targets,
 				"http":    proxy.HTTPTracker,
 			}
 		}
@@ -219,7 +220,6 @@ func getProxyTrackers(w http.ResponseWriter, r *http.Request) {
 		proxy := GetPortProxy(port)
 		result["port"] = port
 		result["enabled"] = proxy.Enabled
-		result["targets"] = proxy.Targets
 		result["http"] = proxy.HTTPTracker
 	}
 	w.WriteHeader(http.StatusOK)

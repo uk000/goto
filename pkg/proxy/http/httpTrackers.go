@@ -17,24 +17,29 @@
 package httpproxy
 
 import (
+	"strconv"
 	"sync"
 )
 
 type HTTPCounts struct {
-	DownstreamRequestCount       int                       `json:"downstreamRequestCount"`
-	UpstreamRequestCount         int                       `json:"upstreamRequestCount"`
-	RequestDropCount             int                       `json:"requestDropCount"`
-	ResponseDropCount            int                       `json:"responseDropCount"`
-	DownstreamRequestCountsByURI map[string]int            `json:"downstreamRequestCountsByURI"`
-	UpstreamRequestCountsByURI   map[string]int            `json:"upstreamRequestCountsByURI"`
-	RequestDropCountsByURI       map[string]int            `json:"requestDropCountsByURI"`
-	ResponseDropCountsByURI      map[string]int            `json:"responseDropCountsByURI"`
-	URIMatchCounts               map[string]int            `json:"uriMatchCounts"`
-	HeaderMatchCounts            map[string]int            `json:"headerMatchCounts"`
-	HeaderValueMatchCounts       map[string]map[string]int `json:"headerValueMatchCounts"`
-	QueryMatchCounts             map[string]int            `json:"queryMatchCounts"`
-	QueryValueMatchCounts        map[string]map[string]int `json:"queryValueMatchCounts"`
-	lock                         sync.RWMutex
+	DownstreamRequestCount                int                       `json:"downstreamRequestCount"`
+	UpstreamRequestCount                  int                       `json:"upstreamRequestCount"`
+	RequestDropCount                      int                       `json:"requestDropCount"`
+	ResponseDropCount                     int                       `json:"responseDropCount"`
+	DownstreamRequestCountsByURI          map[string]int            `json:"downstreamRequestCountsByURI"`
+	UpstreamRequestCountsByURI            map[string]int            `json:"upstreamRequestCountsByURI"`
+	UpstreamRequestCountsByEndpoint       map[string]int            `json:"upstreamRequestCountsByEndpoint"`
+	UpstreamRequestCountByStatus          map[string]int            `json:"upstreamRequestCountByStatus"`
+	UpstreamRequestCountsByURIStatus      map[string]map[string]int `json:"upstreamRequestCountsByURIStatus"`
+	UpstreamRequestCountsByEndpointStatus map[string]map[string]int `json:"upstreamRequestCountsByEndpointStatus"`
+	RequestDropCountsByURI                map[string]int            `json:"requestDropCountsByURI"`
+	ResponseDropCountsByURI               map[string]int            `json:"responseDropCountsByURI"`
+	URIMatchCounts                        map[string]int            `json:"uriMatchCounts"`
+	HeaderMatchCounts                     map[string]int            `json:"headerMatchCounts"`
+	HeaderValueMatchCounts                map[string]map[string]int `json:"headerValueMatchCounts"`
+	QueryMatchCounts                      map[string]int            `json:"queryMatchCounts"`
+	QueryValueMatchCounts                 map[string]map[string]int `json:"queryValueMatchCounts"`
+	lock                                  sync.RWMutex
 }
 
 type HTTPTargetTracker struct {
@@ -48,15 +53,19 @@ type HTTPProxyTracker struct {
 
 func NewHTTPCounts() *HTTPCounts {
 	return &HTTPCounts{
-		DownstreamRequestCountsByURI: map[string]int{},
-		UpstreamRequestCountsByURI:   map[string]int{},
-		RequestDropCountsByURI:       map[string]int{},
-		ResponseDropCountsByURI:      map[string]int{},
-		URIMatchCounts:               map[string]int{},
-		HeaderMatchCounts:            map[string]int{},
-		HeaderValueMatchCounts:       map[string]map[string]int{},
-		QueryMatchCounts:             map[string]int{},
-		QueryValueMatchCounts:        map[string]map[string]int{},
+		DownstreamRequestCountsByURI:          map[string]int{},
+		UpstreamRequestCountsByURI:            map[string]int{},
+		UpstreamRequestCountsByEndpoint:       map[string]int{},
+		UpstreamRequestCountByStatus:          map[string]int{},
+		UpstreamRequestCountsByURIStatus:      map[string]map[string]int{},
+		UpstreamRequestCountsByEndpointStatus: map[string]map[string]int{},
+		RequestDropCountsByURI:                map[string]int{},
+		ResponseDropCountsByURI:               map[string]int{},
+		URIMatchCounts:                        map[string]int{},
+		HeaderMatchCounts:                     map[string]int{},
+		HeaderValueMatchCounts:                map[string]map[string]int{},
+		QueryMatchCounts:                      map[string]int{},
+		QueryValueMatchCounts:                 map[string]map[string]int{},
 	}
 }
 
@@ -118,24 +127,63 @@ func NewHTTPTargetTracker() *HTTPTargetTracker {
 	}
 }
 
-func (pt *HTTPProxyTracker) IncrementRequestCounts(requestURI string) {
+func (pt *HTTPProxyTracker) IncrementDownstreamRequestCounts(requestURI string) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
 	pt.DownstreamRequestCount++
 	pt.DownstreamRequestCountsByURI[requestURI]++
 }
 
-func (pt *HTTPProxyTracker) IncrementTargetRequestCounts(targetName string, requestURI string) {
+func (pt *HTTPProxyTracker) IncrementUpstreamRequestCounts(requestURI string) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
 	pt.UpstreamRequestCount++
 	pt.UpstreamRequestCountsByURI[requestURI]++
+}
+
+func (pt *HTTPProxyTracker) IncrementTargetDownstreamCounts(targetName string, requestURI string) {
+	pt.lock.Lock()
+	defer pt.lock.Unlock()
 	if pt.TargetTrackers[targetName] == nil {
 		pt.TargetTrackers[targetName] = NewHTTPTargetTracker()
 	}
 	pt.TargetTrackers[targetName].lock.Lock()
 	pt.TargetTrackers[targetName].DownstreamRequestCount++
 	pt.TargetTrackers[targetName].DownstreamRequestCountsByURI[requestURI]++
+	pt.TargetTrackers[targetName].lock.Unlock()
+}
+
+func (pt *HTTPProxyTracker) IncrementTargetUpstreamCounts(targetName, endpoint, requestURI string) {
+	pt.lock.Lock()
+	defer pt.lock.Unlock()
+	if pt.TargetTrackers[targetName] == nil {
+		pt.TargetTrackers[targetName] = NewHTTPTargetTracker()
+	}
+	pt.TargetTrackers[targetName].lock.Lock()
+	pt.TargetTrackers[targetName].UpstreamRequestCount++
+	pt.TargetTrackers[targetName].UpstreamRequestCountsByURI[requestURI]++
+	pt.TargetTrackers[targetName].UpstreamRequestCountsByEndpoint[endpoint]++
+	pt.TargetTrackers[targetName].lock.Unlock()
+}
+
+func (pt *HTTPProxyTracker) IncrementTargetUpstreamStatusCounts(targetName, endpoint, requestURI string, statusCode int) {
+	pt.lock.Lock()
+	defer pt.lock.Unlock()
+	if pt.TargetTrackers[targetName] == nil {
+		pt.TargetTrackers[targetName] = NewHTTPTargetTracker()
+	}
+	status := strconv.Itoa(statusCode)
+	pt.UpstreamRequestCountByStatus[status]++
+	pt.TargetTrackers[targetName].lock.Lock()
+	pt.TargetTrackers[targetName].UpstreamRequestCountByStatus[status]++
+	if pt.TargetTrackers[targetName].UpstreamRequestCountsByURIStatus[requestURI] == nil {
+		pt.TargetTrackers[targetName].UpstreamRequestCountsByURIStatus[requestURI] = map[string]int{}
+	}
+	pt.TargetTrackers[targetName].UpstreamRequestCountsByURIStatus[requestURI][status]++
+	if pt.TargetTrackers[targetName].UpstreamRequestCountsByEndpointStatus[endpoint] == nil {
+		pt.TargetTrackers[targetName].UpstreamRequestCountsByEndpointStatus[endpoint] = map[string]int{}
+	}
+	pt.TargetTrackers[targetName].UpstreamRequestCountsByEndpointStatus[endpoint][status]++
 	pt.TargetTrackers[targetName].lock.Unlock()
 }
 

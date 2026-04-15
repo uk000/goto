@@ -280,9 +280,9 @@ func (p *Proxy) hasAnyTargets() bool {
 }
 
 func (p *Proxy) incrementMatchCounts(matches map[string]*MatchedTarget, r *http.Request) {
-	p.HTTPTracker.IncrementRequestCounts(r.RequestURI)
+	p.HTTPTracker.IncrementDownstreamRequestCounts(r.RequestURI)
 	for _, match := range matches {
-		p.HTTPTracker.IncrementTargetRequestCounts(match.target.Name, r.RequestURI)
+		p.HTTPTracker.IncrementTargetDownstreamCounts(match.target.Name, r.RequestURI)
 		if match.matchedURI != "" {
 			p.HTTPTracker.IncrementTargetMatchCounts(match.target.Name, match.matchedURI, "", "", "", "")
 		}
@@ -302,7 +302,7 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 	go p.asyncStreamResponse(rc)
 	clean := false
 	for _, match := range targetsMatches {
-		match.invoke(rc, out, wg)
+		match.invoke(rc, out, wg, p.HTTPTracker)
 		if match.trafficConfig != nil && match.trafficConfig.Clean {
 			clean = true
 		}
@@ -329,21 +329,21 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 
 }
 
-func (t *MatchedTarget) invoke(rc *RequestContext, out chan *TargetEndpointResponse, wg *sync.WaitGroup) {
+func (t *MatchedTarget) invoke(rc *RequestContext, out chan *TargetEndpointResponse, wg *sync.WaitGroup, pt *HTTPProxyTracker) {
 	for _, ep := range t.endpoints {
 		t.target.lock.Lock()
-		t.target.callCount++
-		targetCounter := t.target.callCount
+		t.target.CallCount++
+		targetCounter := t.target.CallCount
 		t.target.lock.Unlock()
 		t.trigger.lock.Lock()
-		t.trigger.callCount++
+		t.trigger.CallCount++
 		t.trigger.lock.Unlock()
 		ep.ep.lock.Lock()
-		ep.ep.callCount++
-		epCounter := ep.ep.callCount
+		ep.ep.CallCount++
+		epCounter := ep.ep.CallCount
 		ep.ep.lock.Unlock()
 		metrics.UpdateProxiedRequestCount(ep.ep.name)
-		err := ep.invoke(targetCounter, epCounter, t.target.Name, t.matchedURI, t.transform, rc, out)
+		err := ep.invoke(targetCounter, epCounter, t.target.Name, t.matchedURI, t.transform, rc, out, pt)
 		if err != nil {
 			log.Println(err.Error())
 		}
@@ -351,8 +351,8 @@ func (t *MatchedTarget) invoke(rc *RequestContext, out chan *TargetEndpointRespo
 	}
 }
 
-func (ep *EndpointInvocation) invoke(targetCounter, epCounter int, target string, matchedURI string, tt *TrafficTransform, rc *RequestContext, out chan *TargetEndpointResponse) error {
-	is := ep.toInvocationSpec(matchedURI, tt, rc)
+func (ep *EndpointInvocation) invoke(targetCounter, epCounter int, target string, matchedURI string, tt *TrafficTransform, rc *RequestContext, out chan *TargetEndpointResponse, pt *HTTPProxyTracker) error {
+	is := ep.toInvocationSpec(matchedURI, tt, rc, pt)
 	tracker, err := invocation.RegisterInvocation(is)
 	if err != nil {
 		return err
@@ -369,9 +369,11 @@ func (ep *EndpointInvocation) asyncInvoke(target string, tracker *invocation.Inv
 			resp.Response.PayloadText = string(resp.Response.Payload)
 		}
 		out <- &TargetEndpointResponse{
-			target:   target,
-			endpoint: ep.ep.URL,
-			response: resp.Response,
+			target:     target,
+			endpoint:   ep.ep.name,
+			requestURI: resp.Request.URI,
+			url:        ep.ep.URL,
+			response:   resp.Response,
 		}
 	}
 }
@@ -396,6 +398,7 @@ func (p *Proxy) asyncCollectResponses(out chan *TargetEndpointResponse, wg *sync
 		}
 		responseStatuses[resp.target][resp.endpoint] = resp.response.StatusCode
 		responses[resp.target][resp.endpoint] = resp.response
+		p.HTTPTracker.IncrementTargetUpstreamStatusCounts(resp.target, resp.endpoint, resp.requestURI, resp.response.StatusCode)
 		if p.ProxyResponses != nil {
 			for _, pr := range p.ProxyResponses {
 				if len(pr.UpResponseRange) < 2 {
@@ -446,9 +449,9 @@ func (tt *TrafficTransform) prepare() {
 	}
 }
 
-func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTransform, rc *RequestContext) *invocation.InvocationSpec {
+func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTransform, rc *RequestContext, pt *HTTPProxyTracker) *invocation.InvocationSpec {
 	is := *ep.is
-	is.URL = ep.prepareURL(matchedURI, tt, rc)
+	is.URL = ep.prepareURL(matchedURI, tt, rc, pt)
 	is.Method = rc.method
 	var add map[string]string
 	var remove []string
@@ -472,7 +475,7 @@ func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTra
 	return &is
 }
 
-func (ep *EndpointInvocation) prepareURL(matchedURI string, tt *TrafficTransform, rc *RequestContext) string {
+func (ep *EndpointInvocation) prepareURL(matchedURI string, tt *TrafficTransform, rc *RequestContext, pt *HTTPProxyTracker) string {
 	targetURI := rc.path
 	var add map[string]string
 	var remove []string
@@ -494,6 +497,8 @@ func (ep *EndpointInvocation) prepareURL(matchedURI string, tt *TrafficTransform
 		}
 	}
 	targetURI = util.TransposeURI(rc.path, matchedURI, targetURI, rc.vars, rc.headers, rc.queries, add, remove)
+	pt.IncrementUpstreamRequestCounts(targetURI)
+	pt.IncrementTargetUpstreamCounts(ep.ep.target.Name, ep.ep.name, targetURI)
 	url := ep.ep.URL
 	url += targetURI
 	return url

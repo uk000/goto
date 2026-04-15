@@ -36,9 +36,11 @@ type ITarget interface {
 }
 
 type TargetEndpointResponse struct {
-	target   string
-	endpoint string
-	response *invocation.InvocationResultResponse
+	target     string
+	endpoint   string
+	requestURI string
+	url        string
+	response   *invocation.InvocationResultResponse
 }
 
 type TargetMatch struct {
@@ -81,8 +83,8 @@ type TargetEndpoint struct {
 	RequestCount int    `yaml:"requestCount" json:"requestCount"`
 	Concurrent   int    `yaml:"concurrent" json:"concurrent"`
 	Stream       bool   `yaml:"stream" json:"stream"`
+	CallCount    int    `yaml:"-" json:"callCount"`
 	name         string
-	callCount    int
 	target       *Target
 	lock         sync.RWMutex
 }
@@ -98,9 +100,9 @@ type TargetTrigger struct {
 	Endpoints     []string          `yaml:"endpoints" json:"endpoints"`
 	Transform     *TrafficTransform `yaml:"transform" json:"transform"`
 	TrafficConfig *TrafficConfig    `yaml:"trafficConfig" json:"trafficConfig"`
+	CallCount     int               `yaml:"-" json:"callCount"`
 	name          string
 	epSpecs       map[string]*EndpointInvocation
-	callCount     int
 	lock          sync.RWMutex
 }
 
@@ -112,7 +114,7 @@ type Target struct {
 	Triggers      map[string]*TargetTrigger  `yaml:"triggers" json:"triggers"`
 	Transform     *TrafficTransform          `yaml:"transform" json:"transform"`
 	TrafficConfig *TrafficConfig             `yaml:"trafficConfig" json:"trafficConfig"`
-	callCount     int
+	CallCount     int                        `yaml:"-" json:"callCount"`
 	lock          sync.RWMutex
 }
 

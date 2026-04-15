@@ -1101,6 +1101,7 @@
     - /server/response/payload/{size}: '[GET PUT POST]'
     /server/response/status:
     - /server/response/status/configure: '[POST]'
+    - /server/response/status/set/{status}?uriPrefix={uriPrefix}: '[POST]'
     - /server/response/status/set/{status}?uri={uri}: '[POST]'
     - /server/response/status/set/{status}: '[POST]'
     - /server/response/status/clear?uri={uri}: '[POST]'
