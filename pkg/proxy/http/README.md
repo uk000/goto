@@ -9,6 +9,8 @@ Upstream targets can be defined in one of the two ways:
 - Feeding the targets through a startup YAML config (See Goto Start Configs).
 An upstream target is defined as a set of endpoints, along with trigger definitions that provide match criteria controlling when specific endpoints are invoked.
 
+See [HTTP Proxy Examples][proxy-examples] for startup config YAML examples
+
 ## Proxy Target Triggers
 A target must be defined with one or more triggers. Each trigger defines one or more sets of match criteria as `matchAny` list.
 - Each match criteria in the `matchAny` list must define a `uriPrefix` at the minimum. A trigger can be defined to accept all requests by setting URI prefix match to `/`.
@@ -38,7 +40,6 @@ A target must be defined with one or more triggers. Each trigger defines one or 
 - Outside of the specified transformations, downstream HTTP metadata (URI, headers, query params) get applied to the upstream request as-is except for the necessary adjustments of headers like Content-Length, Host/Authority etc.
 - Note that if you use an HTTPS listener as a proxy, `goto` will perform TLS termination and will redo TLS for upstream HTTPS endpoints. If you need a passthrough proxy, you can use a TCP listener in goto to act as a TCP proxy for HTTP traffic.
 - Transformations can be defined per target (applied to all endpoints of a target) or per trigger (applied to all endpoints selected by the trigger). This allows for the same downstream request to result in different upstream requests to different endpoints.
-
 
 
 ## Traffic Config

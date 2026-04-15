@@ -145,7 +145,7 @@ See [Use Cases](docs/use-cases.md) for more examples.
 ### gRPC
 - [gRPC Server and Client](pkg/rpc/README.md)
 
-### HTTPC Server
+### HTTP Server
 - [Server Features](pkg/server/README.md)
 - [Goto Headers](pkg/server/README.md#http-headers)
 - [Goto Server Logs](pkg/server/README.md#goto-logs)
@@ -175,10 +175,10 @@ See [Use Cases](docs/use-cases.md) for more examples.
 - [TCP Server](pkg/server/tcp/README.md)
 
 
-### Goto Tunnel
+### Tunnel
 - [Tunnel](pkg/tunnel/README.md)
 
-### Goto Proxy
+### Proxy
 
 - [Proxy Features](pkg/proxy/README.md)
 
