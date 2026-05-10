@@ -73,3 +73,15 @@ func FixURL(url, suffix string, https bool) string {
 	}
 	return url
 }
+
+func IsAcceptJSON(r *http.Request) bool {
+	return strings.Contains(r.Header.Get("Accept"), "json")
+}
+
+func IsAcceptYAML(r *http.Request) bool {
+	return strings.Contains(r.Header.Get("Accept"), "yaml")
+}
+
+func IsAcceptText(r *http.Request) bool {
+	return strings.Contains(r.Header.Get("Accept"), "text")
+}

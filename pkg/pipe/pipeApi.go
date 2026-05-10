@@ -21,7 +21,6 @@ import (
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
-	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -170,7 +169,7 @@ func addScriptSource(w http.ResponseWriter, r *http.Request) {
 func runPipeline(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	name := util.GetStringParamValue(r, "name")
-	yaml := strings.Contains(r.Header.Get("Accept"), "yaml")
+	yaml := util.IsAcceptYAML(r)
 	if name == "" {
 		msg = "Missing pipe name"
 		w.WriteHeader(http.StatusBadRequest)
@@ -189,7 +188,7 @@ func runPipeline(w http.ResponseWriter, r *http.Request) {
 func getPipelineRuns(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	name := util.GetStringParamValue(r, "name")
-	yaml := strings.Contains(r.Header.Get("Accept"), "yaml")
+	yaml := util.IsAcceptYAML(r)
 	if name == "" {
 		msg = "Missing pipe name"
 		fmt.Fprintln(w, msg)

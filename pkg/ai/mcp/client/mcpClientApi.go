@@ -224,7 +224,7 @@ func addRoots(w http.ResponseWriter, r *http.Request) {
 
 func getDetails(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
-	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
+	yaml := util.IsAcceptYAML(r)
 	var output any
 	if name != "" {
 		output = getNamedClientPayload(name)

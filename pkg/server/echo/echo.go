@@ -143,6 +143,12 @@ func GetEchoResponseWithAddendum(rs *util.RequestStore, addendum map[string]any)
 
 func GetEchoResponse(listenerLabel, downstreamAddr, requestHost, requestURI, requestMethod, requestProto, requestQuery string,
 	requestPortNum, requestPayloadSize, responsePayloadSize int, requestHeaders map[string][]string, isTLS bool) map[string]interface{} {
+	outputHeaders := map[string][]string{}
+	for h, values := range requestHeaders {
+		for _, v := range values {
+			util.AddHeaderWithPrefix("Request-", h, v, outputHeaders)
+		}
+	}
 	response := map[string]interface{}{
 		"Remote-Address":       downstreamAddr,
 		"Request-Host":         requestHost,
@@ -157,7 +163,7 @@ func GetEchoResponse(listenerLabel, downstreamAddr, requestHost, requestURI, req
 		HeaderGotoPort:         requestPortNum,
 		HeaderGotoTLS:          isTLS,
 		HeaderViaGoto:          listenerLabel,
-		"Request-Headers":      requestHeaders,
+		"Request-Headers":      outputHeaders,
 	}
 	return response
 }

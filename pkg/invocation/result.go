@@ -36,7 +36,7 @@ import (
 type InvocationResultResponse struct {
 	Status            string      `json:"status"`
 	StatusCode        int         `json:"statusCode"`
-	Headers           http.Header `json:"headers"`
+	Headers           http.Header `json:"headers,omitempty"`
 	PayloadSize       int         `json:"payloadSize"`
 	ClientStreamCount int         `json:"clientStreamCount"`
 	ServerStreamCount int         `json:"serverStreamCount"`
@@ -171,8 +171,12 @@ func (result *InvocationResult) processHTTPResponse(req *InvocationRequest, r *h
 			result.updateResult(req.url, req.uri, r.Status, r.StatusCode, r.Header)
 		}
 	} else {
-		result.Response.Status = err.Error()
-		result.Response.StatusCode = r.StatusCode
+		if r != nil {
+			result.Response.Status = r.Status
+			result.Response.StatusCode = r.StatusCode
+		} else {
+			result.Response.Status = err.Error()
+		}
 	}
 }
 

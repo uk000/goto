@@ -23,7 +23,6 @@ import (
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
-	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -94,7 +93,7 @@ func apiGetResources(w http.ResponseWriter, r *http.Request) {
 	namespace := util.GetStringParamValue(r, "namespace")
 	kind := util.GetStringParamValue(r, "kind")
 	if result := store.Kstore.Get(yamlName, namespace, kind); result != nil {
-		if strings.Contains(r.Header.Get("Accept"), "json") {
+		if util.IsAcceptJSON(r) {
 			util.WriteJson(w, result)
 		} else {
 			util.WriteYaml(w, result)

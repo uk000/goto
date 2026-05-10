@@ -20,6 +20,7 @@ import (
 	"goto/pkg/invocation"
 	"goto/pkg/types"
 	"goto/pkg/util"
+	"net/http"
 	"regexp"
 	"sync"
 
@@ -35,12 +36,17 @@ type ITarget interface {
 	Close()
 }
 
+type TargetInvocationResult struct {
+	*invocation.InvocationResultResponse
+	Headers http.Header `json:"Request-Headers"`
+}
+
 type TargetEndpointResponse struct {
 	target     string
 	endpoint   string
 	requestURI string
 	url        string
-	response   *invocation.InvocationResultResponse
+	response   *TargetInvocationResult
 }
 
 type TargetMatch struct {

@@ -24,6 +24,7 @@ import (
 	"goto/pkg/global"
 	"goto/pkg/invocation"
 	"goto/pkg/metrics"
+	"goto/pkg/server/catchall"
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/middleware"
 	"goto/pkg/server/response/status"
@@ -67,6 +68,7 @@ type RequestContext struct {
 	fw       intercept.FlushWriter
 	c        chan []byte
 	cw       intercept.ChanWriter
+	yaml     bool
 }
 
 var (
@@ -112,6 +114,7 @@ func newProxy(port int) *Proxy {
 	middleware.UseCore(p.Router)
 	p.Router.Use(intercept.IntereceptMiddleware(nil, nil))
 	middleware.UseInterceptedCore(p.Router)
+	p.Router.NotFoundHandler = catchall.Middleware.MiddlewareHandler(nil)
 	return p
 }
 
@@ -178,6 +181,7 @@ func (p *Proxy) addProxyPath(path string) *mux.Router {
 		proxyRouters[p.Port] = map[string]*mux.Router{}
 	}
 	proxyRouters[p.Port][path] = p.Router.PathPrefix(path).Subrouter()
+	proxyRouters[p.Port][path].NotFoundHandler = p.Router.NotFoundHandler
 	return proxyRouters[p.Port][path]
 }
 
@@ -295,7 +299,7 @@ func (p *Proxy) incrementMatchCounts(matches map[string]*MatchedTarget, r *http.
 func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *RequestContext) {
 	out := make(chan *TargetEndpointResponse, 10)
 	wg := &sync.WaitGroup{}
-	responses := map[string]map[string]*invocation.InvocationResultResponse{}
+	responses := map[string]map[string]*TargetInvocationResult{}
 	responseStatuses := map[string]map[string]int{}
 	var proxyResponseStatus int
 	go p.asyncCollectResponses(out, wg, &proxyResponseStatus, responseStatuses, responses)
@@ -321,7 +325,7 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 				break
 			}
 		} else {
-			util.WriteJsonOrYAMLPayload(rc.w, responses, true)
+			util.WriteJsonOrYAMLPayload(rc.w, responses, rc.yaml)
 		}
 	} else {
 		fmt.Fprintln(rc.w, "No Response")
@@ -368,12 +372,14 @@ func (ep *EndpointInvocation) asyncInvoke(target string, tracker *invocation.Inv
 		if !util.IsBinaryContentHeader(resp.Response.Headers) {
 			resp.Response.PayloadText = string(resp.Response.Payload)
 		}
+		r := &TargetInvocationResult{InvocationResultResponse: resp.Response, Headers: resp.Response.Headers}
+		r.InvocationResultResponse.Headers = nil
 		out <- &TargetEndpointResponse{
 			target:     target,
 			endpoint:   ep.ep.name,
 			requestURI: resp.Request.URI,
 			url:        ep.ep.URL,
-			response:   resp.Response,
+			response:   r,
 		}
 	}
 }
@@ -387,14 +393,14 @@ func (p *Proxy) asyncStreamResponse(rc *RequestContext) {
 	}
 }
 
-func (p *Proxy) asyncCollectResponses(out chan *TargetEndpointResponse, wg *sync.WaitGroup, proxyResponseStatus *int, responseStatuses map[string]map[string]int, responses map[string]map[string]*invocation.InvocationResultResponse) {
+func (p *Proxy) asyncCollectResponses(out chan *TargetEndpointResponse, wg *sync.WaitGroup, proxyResponseStatus *int, responseStatuses map[string]map[string]int, responses map[string]map[string]*TargetInvocationResult) {
 	*proxyResponseStatus = http.StatusOK
 	for resp := range out {
 		if responseStatuses[resp.target] == nil {
 			responseStatuses[resp.target] = map[string]int{}
 		}
 		if responses[resp.target] == nil {
-			responses[resp.target] = map[string]*invocation.InvocationResultResponse{}
+			responses[resp.target] = map[string]*TargetInvocationResult{}
 		}
 		responseStatuses[resp.target][resp.endpoint] = resp.response.StatusCode
 		responses[resp.target][resp.endpoint] = resp.response
@@ -643,6 +649,7 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			w:       w,
 			fw:      intercept.NewFlushWriter(w),
 			c:       make(chan []byte, 2),
+			yaml:    util.IsAcceptYAML(r),
 		}
 		proxy.invokeTargets(targets, rc)
 	}

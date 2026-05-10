@@ -79,7 +79,7 @@ func getAgents(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "agent")
 	all := strings.Contains(r.RequestURI, "all")
 	names := strings.Contains(r.RequestURI, "names")
-	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
+	yaml := util.IsAcceptYAML(r)
 	msg := ""
 	if names {
 		if all {
@@ -111,7 +111,7 @@ func getAgentDelegates(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "agent")
 	delegate := util.GetStringParamValue(r, "delegate")
-	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
+	yaml := util.IsAcceptYAML(r)
 	msg := ""
 	agent := GetAgent(port, name)
 	if name == "" || agent == nil {
@@ -162,7 +162,7 @@ func getAgentDelegates(w http.ResponseWriter, r *http.Request) {
 }
 
 func getServers(w http.ResponseWriter, r *http.Request) {
-	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
+	yaml := util.IsAcceptYAML(r)
 	util.WriteJsonOrYAMLPayload(w, PortServers, yaml)
 	util.AddLogMessage("All A2A servers reported", r)
 }

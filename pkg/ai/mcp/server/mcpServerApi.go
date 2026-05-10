@@ -82,7 +82,7 @@ func getServers(w http.ResponseWriter, r *http.Request) {
 	all := strings.Contains(r.RequestURI, "all")
 	names := strings.Contains(r.RequestURI, "names")
 	name := util.GetStringParamValue(r, "server")
-	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
+	yaml := util.IsAcceptYAML(r)
 	if names {
 		util.WriteJsonOrYAMLPayload(w, GetMCPServerNames(), yaml)
 	} else if all {
@@ -328,7 +328,7 @@ func getComponents(w http.ResponseWriter, r *http.Request) {
 	serverName := util.GetStringParamValue(r, "server")
 	kind := util.GetStringParamValue(r, "kind")
 	name := util.GetStringParamValue(r, "name")
-	yaml := strings.EqualFold(r.Header.Get("Accept"), "application/yaml")
+	yaml := util.IsAcceptYAML(r)
 	if serverName != "" {
 		server := GetMCPServer(port, serverName)
 		if server == nil {

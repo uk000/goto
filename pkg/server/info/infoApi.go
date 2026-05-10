@@ -54,8 +54,8 @@ func showApis(w http.ResponseWriter, r *http.Request) {
 	q := util.GetStringParamValue(r, "q")
 	baseURL := util.GetStringParamValue(r, "url")
 	refresh := strings.Contains(r.RequestURI, "refresh")
-	yaml := strings.Contains(r.Header.Get("Accept"), "yaml")
-	text := strings.Contains(r.Header.Get("Accept"), "text")
+	yaml := util.IsAcceptYAML(r)
+	text := util.IsAcceptText(r)
 	PrintRoutes(w, level, q, baseURL, refresh, text, yaml)
 	util.AddLogMessage("Routes/APIs reported", r)
 }

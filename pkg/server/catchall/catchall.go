@@ -46,7 +46,7 @@ func SendDefaultResponse(w http.ResponseWriter, r *http.Request) {
 	response := echo.GetEchoResponseForRequest(w, r)
 	response["At"] = time.Now().Local().Format(time.DateTime)
 	response["Goto-Port"] = util.GetRequestOrListenerPort(r)
-	util.WriteJsonPayload(w, response)
+	util.WriteJsonOrYAMLPayload(w, response, util.IsAcceptYAML(r))
 }
 
 func middlewareFunc(next http.Handler) http.Handler {

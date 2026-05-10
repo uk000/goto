@@ -96,7 +96,7 @@ func apiGetResource(w http.ResponseWriter, r *http.Request) {
 
 func sendResourceResponse(group, version, kind, namespace, name string, json util.JSON, err error, w http.ResponseWriter, r *http.Request) {
 	if json != nil {
-		if strings.Contains(r.Header.Get("Accept"), "json") {
+		if util.IsAcceptJSON(r) {
 			fmt.Fprintln(w, json.ToJSONText())
 		} else {
 			fmt.Fprintln(w, json.ToYAML())

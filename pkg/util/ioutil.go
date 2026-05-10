@@ -227,7 +227,7 @@ func ReadAndTrack(r io.Reader, collect bool, w io.Writer) ([]byte, int, time.Tim
 	canWrite := w != nil && !reflect.ValueOf(w).IsNil()
 	for {
 		size, err := r.Read(buf)
-		if err == nil {
+		if err == nil || err == io.EOF {
 			now := time.Now()
 			if first.IsZero() {
 				first = now
