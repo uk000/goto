@@ -70,20 +70,6 @@ func captureTLSInfo(r *http.Request) {
 	rs.TLSVersion = gototls.GetTLSVersion(&tlsState)
 }
 
-func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
-	l := listeners.GetCurrentListener(r)
-	port := util.GetRequestOrListenerPort(r)
-	rs := util.GetRequestStore(r)
-	w.Header().Add(HeaderGotoRemoteAddress, r.RemoteAddr)
-	w.Header().Add(HeaderGotoPort, port)
-	w.Header().Add(HeaderGotoTLS, fmt.Sprintf("%t", rs.IsTLS))
-	w.Header().Add(HeaderGotoHost, l.HostLabel)
-	w.Header().Add(HeaderGotoProtocol, rs.GotoProtocol)
-	w.Header().Add(HeaderViaGoto, l.Label)
-	util.CopyHeaders("Request", r, w, r.Header, true, true, false)
-	rs.IsHeadersSent = true
-}
-
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		localAddr := ""
@@ -113,7 +99,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 			w.Header().Add(fmt.Sprintf("%s_%d", HeaderViaGotoTunnel, rs.TunnelCount), l.Label)
 			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoProtocol, rs.TunnelCount), rs.GotoProtocol)
 		} else if !rs.ProxyRouter {
-			SendGotoHeaders(w, r)
+			util.SendGotoHeaders(w, r)
 		}
 		pieces := strings.Split(r.RemoteAddr, ":")
 		remoteIP := strings.Join(pieces[:len(pieces)-1], ":")
@@ -139,7 +125,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 		} else if next != nil {
 			next.ServeHTTP(w, r)
 			if rs.ProxyRouter && !rs.ProxiedRequest {
-				SendGotoHeaders(w, r)
+				util.SendGotoHeaders(w, r)
 			}
 		}
 	})

@@ -18,6 +18,8 @@ package util
 
 import (
 	"fmt"
+	"goto/pkg/constants"
+	"goto/pkg/global"
 	"net/http"
 	"strings"
 )
@@ -30,6 +32,19 @@ var (
 	WillProxyGRPC func(int, any) bool
 	WillProxyMCP  func(*http.Request, *RequestStore) bool
 )
+
+func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
+	port := GetRequestOrListenerPort(r)
+	rs := GetRequestStore(r)
+	w.Header().Add(constants.HeaderGotoRemoteAddress, r.RemoteAddr)
+	w.Header().Add(constants.HeaderGotoPort, port)
+	w.Header().Add(constants.HeaderGotoTLS, fmt.Sprintf("%t", rs.IsTLS))
+	w.Header().Add(constants.HeaderGotoHost, global.Self.HostLabel)
+	w.Header().Add(constants.HeaderGotoProtocol, rs.GotoProtocol)
+	w.Header().Add(constants.HeaderViaGoto, global.Funcs.GetListenerLabel(r))
+	CopyHeaders("Request", r, w, r.Header, true, true, false)
+	rs.IsHeadersSent = true
+}
 
 func GotoProtocol(isH2, isTLS, isGRPC bool) string {
 	protocol := "HTTP"

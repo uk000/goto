@@ -305,7 +305,7 @@ func setupServerArgs() {
 	stringFlag(&global.Self.Name, sa.Label, "l", sh.Label, "")
 	stringFlag(&global.Self.RegistryURL, sa.Registry, "", sh.Registry, "")
 	boolFlag(&global.Flags.UseLocker, sa.Locker, "", sh.Locker, false)
-	boolFlag(&global.Flags.EnableEvents, sa.Events, "", sh.Events, true)
+	boolFlag(&global.Flags.EnableEvents, sa.Events, "", sh.Events, false)
 	boolFlag(&global.Flags.PublishEvents, sa.PublishEvents, "", sh.PublishEvents, false)
 	boolFlag(&global.Flags.EnableServerLogs, sa.ServerLogs, "", sh.ServerLogs, true)
 	boolFlag(&global.Flags.EnableAdminLogs, sa.AdminLogs, "", sh.AdminLogs, true)

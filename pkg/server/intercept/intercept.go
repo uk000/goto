@@ -36,16 +36,17 @@ type InterceptResponseWriter struct {
 	http.ResponseWriter
 	http.Hijacker
 	http.Flusher
-	conn       net.Conn
-	parent     ResponseInterceptor
-	rs         *util.RequestStore
-	StatusCode int
-	Data       []byte
-	Hold       bool
-	Hijacked   bool
-	Chunked    bool
-	IsH2C      bool
-	BodyLength int
+	conn        net.Conn
+	parent      ResponseInterceptor
+	rs          *util.RequestStore
+	StatusCode  int
+	Data        []byte
+	Hold        bool
+	HoldChunked bool
+	Hijacked    bool
+	Chunked     bool
+	IsH2C       bool
+	BodyLength  int
 }
 
 type HeaderInterceptResponseWriter struct {
@@ -161,7 +162,7 @@ func (rw *InterceptResponseWriter) Write(b []byte) (int, error) {
 	l := len(b)
 	rw.BodyLength += l
 	if !rw.Hijacked {
-		if !rw.Hold || rw.Chunked {
+		if !rw.Hold || rw.Chunked && !rw.HoldChunked {
 			if len(rw.Data) > 0 {
 				if n, err := rw.ResponseWriter.Write(rw.Data); err != nil {
 					return n, err
@@ -213,7 +214,7 @@ func (rw *InterceptResponseWriter) SetChunked() {
 }
 
 func (rw *InterceptResponseWriter) Proceed() {
-	if rw.Hijacked || rw.Hold || !rw.Chunked {
+	if rw.Hijacked || rw.Hold || rw.HoldChunked || !rw.Chunked {
 		if rw.StatusCode <= 0 {
 			rw.StatusCode = 200
 			rw.rs.StatusCode = rw.StatusCode
@@ -247,9 +248,7 @@ func NewInterceptResponseWriter(r *http.Request, w http.ResponseWriter, hold boo
 }
 
 func WithInterceptAndStatus(r *http.Request, w http.ResponseWriter, status int) (http.ResponseWriter, *InterceptResponseWriter) {
-	var irw *InterceptResponseWriter
-	irw = NewInterceptResponseWriter(r, w, true)
-	r.Context().Value(util.RequestStoreKey).(*util.RequestStore).InterceptResponseWriter = irw
+	_, irw := WithIntercept(r, w)
 	if status > 0 {
 		w.WriteHeader(status)
 		irw.StatusCode = status
@@ -261,8 +260,16 @@ func WithInterceptAndStatus(r *http.Request, w http.ResponseWriter, status int) 
 func WithIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *InterceptResponseWriter) {
 	var irw *InterceptResponseWriter
 	irw = NewInterceptResponseWriter(r, w, true)
-	r.Context().Value(util.RequestStoreKey).(*util.RequestStore).InterceptResponseWriter = irw
+	rs := util.GetRequestStore(r)
+	rs.InterceptResponseWriter = irw
 	w = irw
+	return w, irw
+}
+
+func WithInterceptChunked(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *InterceptResponseWriter) {
+	var irw *InterceptResponseWriter
+	w, irw = WithIntercept(r, w)
+	irw.HoldChunked = true
 	return w, irw
 }
 
@@ -271,7 +278,7 @@ func WithHeadersIntercept(r *http.Request, w http.ResponseWriter) (http.Response
 	rs := util.GetRequestStore(r)
 	if !rs.IsKnownNonTraffic {
 		irw = NewHeadersInterceptResponseWriter(w)
-		r.Context().Value(util.RequestStoreKey).(*util.RequestStore).HeadersInterceptRW = irw
+		rs.HeadersInterceptRW = irw
 		w = irw
 	}
 	return w, irw
@@ -305,7 +312,11 @@ func IntereceptMiddleware(pre, post http.Handler) func(http.Handler) http.Handle
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rs := util.GetRequestStore(r)
 			var irw *InterceptResponseWriter
-			w, irw = WithIntercept(r, w)
+			if rs.InterceptChunked {
+				w, irw = WithInterceptChunked(r, w)
+			} else {
+				w, irw = WithIntercept(r, w)
+			}
 			if pre != nil {
 				pre.ServeHTTP(w, r)
 			}

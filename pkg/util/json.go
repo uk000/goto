@@ -778,16 +778,22 @@ func ReadStringArray(b []byte) []string {
 	return arr
 }
 
-func ToJSONText(o interface{}) string {
-	if o == nil {
+func ToJSONText(o interface{}) (result string) {
+	if o == nil || reflect.ValueOf(o).IsNil() {
 		return ""
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			result = ""
+		}
+	}()
 	if output, err := json.Marshal(o); err == nil {
-		return string(output)
+		result = string(output)
 	} else {
 		log.Println(err.Error())
+		result = fmt.Sprintf("%+v", o)
 	}
-	return fmt.Sprintf("%+v", o)
+	return
 }
 
 func ToPrettyJSONText(o interface{}) string {

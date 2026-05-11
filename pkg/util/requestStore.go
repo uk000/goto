@@ -96,6 +96,7 @@ type RequestStore struct {
 	ProxiedRequest          bool
 	ProxyTargets            interface{}
 	ProxyRouter             bool
+	InterceptChunked        bool
 	ReReader                *ReReader
 	Request                 *http.Request
 	ResponseWriter          http.ResponseWriter

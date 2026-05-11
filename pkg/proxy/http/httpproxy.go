@@ -20,8 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"goto/pkg/constants"
-	. "goto/pkg/constants"
-	"goto/pkg/global"
 	"goto/pkg/invocation"
 	"goto/pkg/metrics"
 	"goto/pkg/server/catchall"
@@ -33,10 +31,13 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/mux"
 )
+
+type UpstreamResults map[string]map[string][]*invocation.InvocationResultResponse
 
 type ProxyResponse struct {
 	UpResponseRange []int `yaml:"upResponseRange" json:"upResponseRange"`
@@ -69,12 +70,16 @@ type RequestContext struct {
 	c        chan []byte
 	cw       intercept.ChanWriter
 	yaml     bool
+	clean    bool
 }
 
 var (
-	proxyRouters = map[int]map[string]*mux.Router{}
-	portProxy    = map[int]*Proxy{}
-	proxyLock    sync.RWMutex
+	proxyRouters        = map[int]map[string]*mux.Router{}
+	portProxy           = map[int]*Proxy{}
+	interceptMiddleware = intercept.IntereceptMiddleware(nil, nil)
+	notFoundHandler     = catchall.Middleware.MiddlewareHandler(nil)
+	lowerViaGoto        = strings.ToLower(constants.HeaderViaGoto)
+	proxyLock           sync.RWMutex
 )
 
 func GetPortProxy(port int) *Proxy {
@@ -110,18 +115,23 @@ func newProxy(port int) *Proxy {
 		HTTPTracker: NewHTTPTracker(),
 		Router:      mux.NewRouter().SkipClean(true),
 	}
-	p.Router.Use(setProxyFlag)
-	middleware.UseCore(p.Router)
-	p.Router.Use(intercept.IntereceptMiddleware(nil, nil))
-	middleware.UseInterceptedCore(p.Router)
-	p.Router.NotFoundHandler = catchall.Middleware.MiddlewareHandler(nil)
+	configureRouter(p.Router)
 	return p
+}
+
+func configureRouter(r *mux.Router) {
+	r.Use(setProxyFlag)
+	middleware.UseCore(r)
+	r.Use(interceptMiddleware)
+	middleware.UseInterceptedCore(r)
+	r.NotFoundHandler = notFoundHandler
 }
 
 func setProxyFlag(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)
 		rs.ProxyRouter = true
+		rs.InterceptChunked = true
 		if next != nil {
 			next.ServeHTTP(w, r)
 		}
@@ -181,7 +191,7 @@ func (p *Proxy) addProxyPath(path string) *mux.Router {
 		proxyRouters[p.Port] = map[string]*mux.Router{}
 	}
 	proxyRouters[p.Port][path] = p.Router.PathPrefix(path).Subrouter()
-	proxyRouters[p.Port][path].NotFoundHandler = p.Router.NotFoundHandler
+	configureRouter(proxyRouters[p.Port][path])
 	return proxyRouters[p.Port][path]
 }
 
@@ -299,36 +309,65 @@ func (p *Proxy) incrementMatchCounts(matches map[string]*MatchedTarget, r *http.
 func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *RequestContext) {
 	out := make(chan *TargetEndpointResponse, 10)
 	wg := &sync.WaitGroup{}
-	responses := map[string]map[string]*TargetInvocationResult{}
+	responses := UpstreamResults{}
 	responseStatuses := map[string]map[string]int{}
 	var proxyResponseStatus int
 	go p.asyncCollectResponses(out, wg, &proxyResponseStatus, responseStatuses, responses)
 	go p.asyncStreamResponse(rc)
-	clean := false
 	for _, match := range targetsMatches {
 		match.invoke(rc, out, wg, p.HTTPTracker)
 		if match.trafficConfig != nil && match.trafficConfig.Clean {
-			clean = true
+			rc.clean = true
 		}
 	}
 	wg.Wait()
 	close(rc.c)
+	p.processHeaders(rc, responses, responseStatuses)
+	rc.w.WriteHeader(proxyResponseStatus)
+	p.processPayload(rc, responses)
+}
+
+func (p *Proxy) processHeaders(rc *RequestContext, responses UpstreamResults, responseStatuses map[string]map[string]int) {
 	rc.w.Header().Add(constants.HeaderGotoProxyUpstreamStatus, util.ToJSONText(responseStatuses))
-	if clean {
+	upstreamViaGoto := []string{}
+	for _, m := range responses {
+		for _, responses := range m {
+			for _, resp := range responses {
+				v := resp.Headers[constants.HeaderViaGoto]
+				if len(v) == 0 {
+					v = resp.Headers[lowerViaGoto]
+				}
+				if len(v) > 0 {
+					upstreamViaGoto = append(upstreamViaGoto, v...)
+					break
+				}
+			}
+		}
+	}
+	rc.w.Header()[constants.HeaderViaGoto] = append(rc.w.Header()[constants.HeaderViaGoto], upstreamViaGoto...)
+	if rc.clean {
 		for _, m := range responses {
-			for _, resp := range m {
-				util.CopyHeadersWithIgnore("", resp.Headers, rc.w.Header(), nil, false, false, false)
+			for _, responses := range m {
+				for _, resp := range responses {
+					util.CopyHeadersWithIgnore("", resp.Headers, rc.w.Header(), nil, false, false, false)
+					break
+				}
 				break
 			}
 			break
 		}
 	}
-	rc.w.WriteHeader(proxyResponseStatus)
+}
+
+func (p *Proxy) processPayload(rc *RequestContext, responses UpstreamResults) {
 	if len(responses) > 0 {
-		if clean {
+		if rc.clean {
 			for _, m := range responses {
-				for _, resp := range m {
-					util.WriteJsonOrYAMLPayload(rc.w, resp.PayloadText, false)
+				for _, responses := range m {
+					for _, resp := range responses {
+						util.WriteJsonOrYAMLPayload(rc.w, resp.PayloadText, false)
+						break
+					}
 					break
 				}
 				break
@@ -339,7 +378,6 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 	} else {
 		fmt.Fprintln(rc.w, "No Response")
 	}
-
 }
 
 func (t *MatchedTarget) invoke(rc *RequestContext, out chan *TargetEndpointResponse, wg *sync.WaitGroup, pt *HTTPProxyTracker) {
@@ -360,7 +398,7 @@ func (t *MatchedTarget) invoke(rc *RequestContext, out chan *TargetEndpointRespo
 		if err != nil {
 			log.Println(err.Error())
 		}
-		wg.Add(1)
+		wg.Add(ep.ep.RequestCount * ep.ep.Concurrent)
 	}
 }
 
@@ -381,14 +419,12 @@ func (ep *EndpointInvocation) asyncInvoke(target string, tracker *invocation.Inv
 		if !util.IsBinaryContentHeader(resp.Response.Headers) {
 			resp.Response.PayloadText = string(resp.Response.Payload)
 		}
-		r := &TargetInvocationResult{InvocationResultResponse: resp.Response, Headers: resp.Response.Headers}
-		r.InvocationResultResponse.Headers = nil
 		out <- &TargetEndpointResponse{
 			target:     target,
 			endpoint:   ep.ep.name,
 			requestURI: resp.Request.URI,
 			url:        ep.ep.URL,
-			response:   r,
+			response:   resp.Response,
 		}
 	}
 }
@@ -402,17 +438,17 @@ func (p *Proxy) asyncStreamResponse(rc *RequestContext) {
 	}
 }
 
-func (p *Proxy) asyncCollectResponses(out chan *TargetEndpointResponse, wg *sync.WaitGroup, proxyResponseStatus *int, responseStatuses map[string]map[string]int, responses map[string]map[string]*TargetInvocationResult) {
+func (p *Proxy) asyncCollectResponses(out chan *TargetEndpointResponse, wg *sync.WaitGroup, proxyResponseStatus *int, responseStatuses map[string]map[string]int, responses UpstreamResults) {
 	*proxyResponseStatus = http.StatusOK
 	for resp := range out {
 		if responseStatuses[resp.target] == nil {
 			responseStatuses[resp.target] = map[string]int{}
 		}
 		if responses[resp.target] == nil {
-			responses[resp.target] = map[string]*TargetInvocationResult{}
+			responses[resp.target] = map[string][]*invocation.InvocationResultResponse{}
 		}
 		responseStatuses[resp.target][resp.endpoint] = resp.response.StatusCode
-		responses[resp.target][resp.endpoint] = resp.response
+		responses[resp.target][resp.endpoint] = append(responses[resp.target][resp.endpoint], resp.response)
 		p.HTTPTracker.IncrementTargetUpstreamStatusCounts(resp.target, resp.endpoint, resp.requestURI, resp.response.StatusCode)
 		if p.ProxyResponses != nil {
 			for _, pr := range p.ProxyResponses {
@@ -470,11 +506,13 @@ func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTra
 	is.Method = rc.method
 	var add map[string]string
 	var remove []string
-	if tt != nil && tt.Headers != nil {
-		add = tt.Headers.Add
-		remove = tt.Headers.Remove
+	if tt != nil {
 		is.RequestId = tt.RequestId
-		is.LowerHeaders = tt.Headers.Lower
+		if tt.Headers != nil {
+			add = tt.Headers.Add
+			remove = tt.Headers.Remove
+			is.LowerHeaders = tt.Headers.Lower
+		}
 	}
 	is.Headers, is.Host = util.TransformHeaders(rc.vars, rc.headers, add, remove)
 	is.BodyReader = rc.body
@@ -640,12 +678,8 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(targets) > 0 {
 		rs.ProxiedRequest = true
-		util.AddHeaderWithPrefix("Proxy-", HeaderGotoHost, global.Self.HostLabel, w.Header())
-		util.AddHeaderWithPrefix("Proxy-", HeaderGotoPort, port, w.Header())
-		util.AddHeaderWithPrefix("Proxy-", HeaderGotoProtocol, rs.GotoProtocol, w.Header())
-		util.AddHeaderWithPrefix("Proxy-", HeaderViaGoto, rs.ListenerLabel, w.Header())
-		w.Header().Set("Trailer", constants.HeaderGotoProxyUpstreamStatus)
-
+		util.SendGotoHeaders(w, r)
+		// w.Header()["Trailer"] = []string{constants.HeaderGotoProxyUpstreamStatus, fmt.Sprintf("Proxy-%s", constants.HeaderGotoInAt), fmt.Sprintf("Proxy-%s", constants.HeaderGotoOutAt), fmt.Sprintf("Proxy-%s", constants.HeaderGotoTook)}
 		util.AddLogMessage(fmt.Sprintf("Proxying to matching targets %s", util.GetMapKeys(targets)), r)
 		proxy.incrementMatchCounts(targets, r)
 		rc := &RequestContext{

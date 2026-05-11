@@ -36,7 +36,7 @@ import (
 type InvocationResultResponse struct {
 	Status            string      `json:"status"`
 	StatusCode        int         `json:"statusCode"`
-	Headers           http.Header `json:"headers,omitempty"`
+	Headers           http.Header `json:"headers"`
 	PayloadSize       int         `json:"payloadSize"`
 	ClientStreamCount int         `json:"clientStreamCount"`
 	ServerStreamCount int         `json:"serverStreamCount"`
