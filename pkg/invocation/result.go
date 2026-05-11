@@ -218,9 +218,16 @@ func (result *InvocationResult) readHTTPResponsePayload() {
 
 func (result *InvocationResult) updateResult(url, uri, status string, statusCode int, headers map[string][]string) {
 	for header, values := range headers {
-		result.Response.Headers[strings.ToLower(header)] = values
+		if result.tracker.Target.LowerHeaders {
+			header = strings.ToLower(header)
+		}
+		result.Response.Headers[header] = values
 	}
-	result.Response.Headers["status"] = []string{status}
+	if result.tracker.Target.LowerHeaders {
+		result.Response.Headers["status"] = []string{status}
+	} else {
+		result.Response.Headers["Status"] = []string{status}
+	}
 	result.Response.Status = status
 	result.Response.StatusCode = statusCode
 	result.Request.URI = uri

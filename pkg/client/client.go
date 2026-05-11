@@ -81,6 +81,7 @@ func Run() {
 			RetryDelay:           global.CmdClientConfig.RetryDelay,
 			RetriableStatusCodes: global.CmdClientConfig.RetryOn,
 			AutoInvoke:           false,
+			LowerHeaders:         true,
 		}
 		if err := target.Client.AddTarget(&target.Target{is}); err != nil {
 			log.Printf("Invalid target spec: %s", err.Error())

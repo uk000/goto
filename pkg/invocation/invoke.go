@@ -51,6 +51,7 @@ type InvocationRequest struct {
 	client          transport.ClientTransport
 	tracker         *InvocationTracker
 	result          *InvocationResult
+	lowerHeaders    bool
 }
 
 func (tracker *InvocationTracker) invokeWithRetries(requestID string, targetID string, urls ...string) *InvocationResult {

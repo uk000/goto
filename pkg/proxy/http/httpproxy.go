@@ -314,6 +314,15 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 	wg.Wait()
 	close(rc.c)
 	rc.w.Header().Add(constants.HeaderGotoProxyUpstreamStatus, util.ToJSONText(responseStatuses))
+	if clean {
+		for _, m := range responses {
+			for _, resp := range m {
+				util.CopyHeadersWithIgnore("", resp.Headers, rc.w.Header(), nil, false, false, false)
+				break
+			}
+			break
+		}
+	}
 	rc.w.WriteHeader(proxyResponseStatus)
 	if len(responses) > 0 {
 		if clean {
@@ -465,6 +474,7 @@ func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTra
 		add = tt.Headers.Add
 		remove = tt.Headers.Remove
 		is.RequestId = tt.RequestId
+		is.LowerHeaders = tt.Headers.Lower
 	}
 	is.Headers, is.Host = util.TransformHeaders(rc.vars, rc.headers, add, remove)
 	is.BodyReader = rc.body

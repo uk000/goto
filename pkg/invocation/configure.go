@@ -48,6 +48,7 @@ type InvocationSpec struct {
 	URL                  string            `json:"url"`
 	BURLS                []string          `json:"burls"`
 	Headers              map[string]string `json:"headers"`
+	LowerHeaders         bool              `json:"lowerHeaders"`
 	Body                 string            `json:"body"`
 	AutoPayload          string            `json:"autoPayload"`
 	Replicas             int               `json:"replicas"`

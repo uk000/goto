@@ -99,10 +99,10 @@ func CopyHeadersWithPrefix(prefix string, in, out map[string][]string) {
 }
 
 func CopyHeaders(prefix string, r *http.Request, w http.ResponseWriter, headers http.Header, copyHost, copyURI, copyContentType bool) {
-	CopyHeadersWithIgnore(prefix, r, w.Header(), headers, ExcludedHeaders, copyHost, copyURI, copyContentType)
+	CopyRequestHeadersWithIgnore(prefix, r, w.Header(), headers, ExcludedHeaders, copyHost, copyURI, copyContentType)
 }
 
-func CopyHeadersWithIgnore(prefix string, r *http.Request, out map[string][]string, headers http.Header, ignoreHeaders map[string]bool, copyHost, copyURI, copyContentType bool) {
+func CopyRequestHeadersWithIgnore(prefix string, r *http.Request, out map[string][]string, headers http.Header, ignoreHeaders map[string]bool, copyHost, copyURI, copyContentType bool) {
 	rs := GetRequestStore(r)
 	hostCopied := false
 	if prefix != "" {
@@ -110,6 +110,7 @@ func CopyHeadersWithIgnore(prefix string, r *http.Request, out map[string][]stri
 		AddHeaderWithPrefix(prefix, "Payload-Size", strconv.Itoa(rs.RequestPayloadSize), out)
 		if !hostCopied && copyHost && r != nil {
 			AddHeaderWithPrefix(prefix, "Host", r.Host, out)
+			hostCopied = true
 		}
 		if copyURI && r != nil {
 			AddHeaderWithPrefix(prefix, "URI", r.RequestURI, out)
@@ -126,7 +127,11 @@ func CopyHeadersWithIgnore(prefix string, r *http.Request, out map[string][]stri
 	if headers == nil {
 		headers = r.Header
 	}
-	for h, values := range headers {
+	CopyHeadersWithIgnore(prefix, headers, out, ignoreHeaders, !hostCopied && copyHost, copyURI, copyContentType)
+}
+
+func CopyHeadersWithIgnore(prefix string, in, out http.Header, ignoreHeaders map[string]bool, copyHost, copyURI, copyContentType bool) {
+	for h, values := range in {
 		lh := strings.ToLower(h)
 		if ignoreHeaders[lh] {
 			continue
@@ -134,11 +139,11 @@ func CopyHeadersWithIgnore(prefix string, r *http.Request, out map[string][]stri
 		if !copyContentType && contentRegexp.MatchString(h) {
 			continue
 		}
+		if !copyHost && hostRegexp.MatchString(h) {
+			continue
+		}
 		for _, v := range values {
 			AddHeaderWithPrefix(prefix, h, v, out)
-		}
-		if hostRegexp.MatchString(h) {
-			hostCopied = true
 		}
 	}
 }
