@@ -197,7 +197,7 @@ func (h *Hooks) AddGRPCHook(key, id, methodURI string, grpcListener GRPCListener
 	if methodURI == "" {
 		return fmt.Errorf("URI needed")
 	}
-	uriPrefix, re, _, _, err := util.GetURIRegexpAndRoute(methodURI, util.RootRouter)
+	uriPrefix, re, _, _, err := util.GetURIRegexpAndRoute(methodURI, true, util.RootRouter)
 	if err != nil {
 		return err
 	}
@@ -244,9 +244,9 @@ func (h *Hooks) AddHTTPTracking(key, uri string, headers Headers, isJSONRPC bool
 func (h *Hooks) registerURI(uri string, httpHandler middleware.MiddlewareFunc) (luri, uriPrefix string, re *regexp.Regexp, err error) {
 	luri = strings.ToLower(uri)
 	if httpHandler != nil {
-		uriPrefix, re, _, err = util.BuildURIMatcher(luri, httpHandler)
+		uriPrefix, re, _, err = util.BuildURIMatcher(luri, true, httpHandler)
 	} else {
-		uriPrefix, re, _, err = util.BuildURIMatcher(luri, func(w http.ResponseWriter, r *http.Request) {})
+		uriPrefix, re, _, err = util.BuildURIMatcher(luri, true, func(w http.ResponseWriter, r *http.Request) {})
 	}
 	return
 }

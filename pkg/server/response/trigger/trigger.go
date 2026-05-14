@@ -217,7 +217,7 @@ func (t *Trigger) addTrigger(w http.ResponseWriter, r *http.Request) {
 		if len(tt.TriggerURIs) > 0 {
 			tt.triggerURIRegexps = map[string]*regexp.Regexp{}
 			for _, uri := range tt.TriggerURIs {
-				if finalURI, re, _, _, err := util.GetURIRegexpAndRoute(uri, util.MatchRouter); err == nil {
+				if finalURI, re, _, _, err := util.GetURIRegexpAndRoute(uri, true, util.MatchRouter); err == nil {
 					t.TargetsByURIs[finalURI] = append(t.TargetsByURIs[finalURI], tt.Name)
 					tt.triggerURIRegexps[finalURI] = re
 				}

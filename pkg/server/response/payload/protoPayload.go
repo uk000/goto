@@ -129,7 +129,7 @@ func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, h
 	if contentType == "" {
 		contentType = constants.ContentTypeJSON
 	}
-	_, uriRegExp, responseRouter, err := util.BuildURIMatcher(uri, handleURI)
+	_, uriRegExp, responseRouter, err := util.BuildURIMatcher(uri, true, handleURI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add URI match %s with error: %s\n", uri, err.Error())
 	}
@@ -245,7 +245,7 @@ func (rp *ResponsePayload) Process() error {
 		if match.URIPrefix == "" {
 			return fmt.Errorf("URI match is required")
 		}
-		_, uriRE, rr, err := util.BuildURIMatcher(match.URIPrefix, handleURI)
+		_, uriRE, rr, err := util.BuildURIMatcher(match.URIPrefix, true, handleURI)
 		if err != nil {
 			return fmt.Errorf("failed to add URI match %s with error: %s\n", match.URIPrefix, err.Error())
 		}

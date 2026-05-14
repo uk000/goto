@@ -170,8 +170,9 @@ func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName stri
 	var ct ClientTransport
 	if !h2 {
 		ht := NewHTTPTransportIntercept(&http.Transport{
-			MaxIdleConns:          300,
-			MaxIdleConnsPerHost:   300,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   100,
+			MaxConnsPerHost:       100,
 			IdleConnTimeout:       connIdleTimeout,
 			Proxy:                 http.ProxyFromEnvironment,
 			DisableCompression:    true,

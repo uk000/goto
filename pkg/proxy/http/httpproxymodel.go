@@ -44,6 +44,7 @@ type TargetEndpointResponse struct {
 }
 
 type TargetMatch struct {
+	URI       string                 `yaml:"uri" json:"uri"`
 	URIPrefix string                 `yaml:"uriPrefix" json:"uriPrefix"`
 	Headers   map[string]string      `yaml:"headers" json:"headers"`
 	Vars      map[string]*util.Match `yaml:"vars" json:"vars"`
@@ -104,6 +105,8 @@ type TargetTrigger struct {
 	CallCount     int               `yaml:"-" json:"callCount"`
 	name          string
 	epSpecs       map[string]*EndpointInvocation
+	exactMatches  []*TargetMatch
+	prefixMatches []*TargetMatch
 	lock          sync.RWMutex
 }
 

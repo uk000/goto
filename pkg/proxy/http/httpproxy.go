@@ -199,13 +199,25 @@ func (p *Proxy) AddTarget(t *Target) error {
 	for _, trigger := range t.Triggers {
 		for _, match := range trigger.MatchAny {
 			//Registering URI with mux, so that the URI's embedded vars are extracted by mux
-			rootURI, suffix := util.GetRootURI(match.URIPrefix)
+			uri := match.URI
+			prefix := false
+			if uri != "" {
+				trigger.exactMatches = append(trigger.exactMatches, match)
+				prefix = false
+			} else {
+				uri = match.URIPrefix
+				trigger.prefixMatches = append(trigger.prefixMatches, match)
+				prefix = true
+			}
+			rootURI, suffix := util.GetRootURI(uri)
 			if rootURI == "" {
 				rootURI = "/"
 				suffix = "*"
+			} else if match.URIPrefix != "" {
+				suffix += "*"
 			}
 			match.router = p.addProxyPath(rootURI)
-			if re, err := util.BuildURIMatcherForRouter(suffix, ProxyRequest, match.router); err == nil {
+			if re, err := util.BuildURIMatcherForRouter(suffix, prefix, ProxyRequest, match.router); err == nil {
 				match.uriRegexp = re
 			} else {
 				return err
@@ -562,7 +574,11 @@ func (m *TargetMatch) matchURI(matchedTarget *MatchedTarget, r *http.Request) bo
 	if m.uriRegexp != nil && !m.uriRegexp.MatchString(r.RequestURI) {
 		return false
 	}
-	keys := util.GetFillersUnmarked(m.URIPrefix)
+	uri := m.URI
+	if uri == "" {
+		uri = m.URIPrefix
+	}
+	keys := util.GetFillersUnmarked(uri)
 	uriVarsMatched := true
 	for _, key := range keys {
 		if varMatch := m.Vars[key]; varMatch != nil {
@@ -577,7 +593,7 @@ func (m *TargetMatch) matchURI(matchedTarget *MatchedTarget, r *http.Request) bo
 	if !uriVarsMatched {
 		return false
 	}
-	matchedTarget.matchedURI = m.URIPrefix
+	matchedTarget.matchedURI = uri
 	return true
 }
 
@@ -616,15 +632,30 @@ func (t *TargetTrigger) match(matchedTarget *MatchedTarget, r *http.Request) boo
 		return false
 	}
 	matched := false
-	for _, match := range t.MatchAny {
+	matchFunc := func(match *TargetMatch) bool {
 		if !match.matchURI(matchedTarget, r) {
-			continue
+			return false
 		}
 		if !match.matchHeaders(matchedTarget, r) {
+			return false
+		}
+		return true
+	}
+	for _, match := range t.exactMatches {
+		if !matchFunc(match) {
 			continue
 		}
 		matched = true
 		break
+	}
+	if !matched {
+		for _, match := range t.prefixMatches {
+			if !matchFunc(match) {
+				continue
+			}
+			matched = true
+			break
+		}
 	}
 	return matched
 }
@@ -633,34 +664,53 @@ func (p *Proxy) getMatchingProxyTargets(r *http.Request) ProxyTargets {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	matchedTargets := map[string]*MatchedTarget{}
-	for _, target := range p.Targets {
+	matchTargetFunc := func(target *Target, trigger *TargetTrigger) bool {
 		if !target.Enabled {
-			continue
+			return false
 		}
 		if len(target.Triggers) == 0 {
-			continue
+			return false
 		}
+		matchedTarget := &MatchedTarget{
+			target:      target,
+			trigger:     trigger,
+			captureKeys: map[string]string{},
+		}
+		if trigger.match(matchedTarget, r) {
+			matchedTarget.endpoints = trigger.epSpecs
+			if trigger.Transform != nil {
+				matchedTarget.transform = trigger.Transform
+			} else {
+				matchedTarget.transform = target.Transform
+			}
+			if trigger.TrafficConfig != nil {
+				matchedTarget.trafficConfig = trigger.TrafficConfig
+			} else {
+				matchedTarget.trafficConfig = target.TrafficConfig
+			}
+			matchedTargets[target.Name] = matchedTarget
+			return true
+		}
+		return false
+	}
+	matched := false
+	for _, target := range p.Targets {
 		for _, trigger := range target.Triggers {
-			matchedTarget := &MatchedTarget{
-				target:      target,
-				trigger:     trigger,
-				captureKeys: map[string]string{},
+			if len(trigger.exactMatches) > 0 && matchTargetFunc(target, trigger) {
+				matched = true
+				break
 			}
-			if trigger.match(matchedTarget, r) {
-				matchedTarget.endpoints = trigger.epSpecs
-				if trigger.Transform != nil {
-					matchedTarget.transform = trigger.Transform
-				} else {
-					matchedTarget.transform = target.Transform
+		}
+		if !matched {
+			for _, trigger := range target.Triggers {
+				if len(trigger.prefixMatches) > 0 && matchTargetFunc(target, trigger) {
+					matched = true
+					break
 				}
-				if trigger.TrafficConfig != nil {
-					matchedTarget.trafficConfig = trigger.TrafficConfig
-				} else {
-					matchedTarget.trafficConfig = target.TrafficConfig
-				}
-				matchedTargets[target.Name] = matchedTarget
-				continue
 			}
+		}
+		if matched {
+			break
 		}
 	}
 	return matchedTargets
@@ -711,6 +761,14 @@ func WillProxyHTTP(r *http.Request) (bool, *mux.Router) {
 			rs.ProxyTargets = matches
 			rootURI, _ := util.GetRootURI(r.RequestURI)
 			router := proxyRouters[port][rootURI]
+			if router == nil {
+				for _, m := range matches {
+					router = proxyRouters[port][m.matchedURI]
+					if router != nil {
+						break
+					}
+				}
+			}
 			if router == nil {
 				router = proxyRouters[port]["/"]
 			}
