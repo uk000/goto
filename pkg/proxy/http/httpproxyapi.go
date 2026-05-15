@@ -46,6 +46,9 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(httpTargetsRouter, "/clear", clearHTTPTarget, "POST", "PUT")
 	util.AddRoute(httpTargetsRouter, "/{target}/remove", removeHTTPTarget, "POST", "PUT")
 	util.AddRoute(httpTargetsRouter, "/{target}/{o:enable|disable}", enableHTTPTarget, "POST", "PUT")
+	util.AddRoute(httpTargetsRouter, "/{target}/{trigger}?/headers/add/{header}={value}", addRemoveHeader, "POST", "PUT")
+	util.AddRoute(httpTargetsRouter, "/{target}/{trigger}?/headers/remove/{header}", addRemoveHeader, "POST", "PUT")
+	util.AddRoute(httpTargetsRouter, "/{target}/{trigger}?/headers/clear/{header}?", clearHeaders, "POST", "PUT")
 	util.AddRoute(httpTargetsRouter, "", getProxyTargets, "GET")
 	util.AddRoute(httpTargetsRouter, "/all", getProxyTargets, "GET")
 	util.AddRoute(httpTargetsRouter, "/{target}/tracker", getProxyTargetTracker, "GET")
@@ -105,6 +108,46 @@ func addHTTPTarget(w http.ResponseWriter, r *http.Request) {
 			msg = fmt.Sprintf("Proxy [%d] added target [%s]", port, target.Name)
 		}
 	}
+	util.AddLogMessage(msg, r)
+}
+
+func addRemoveHeader(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	target := util.GetStringParamValue(r, "target")
+	trigger := util.GetStringParamValue(r, "trigger")
+	remove := strings.Contains(r.RequestURI, "remove")
+	header := util.GetStringParamValue(r, "header")
+	value := util.GetStringParamValue(r, "value")
+	msg := ""
+	if ok := GetPortProxy(port).addRemoveHeader(target, trigger, header, value, remove); ok {
+		if remove {
+			msg = fmt.Sprintf("Header [%s] will be removed from the upstream call for Target [%s] Trigger [%s]", header, target, trigger)
+		} else {
+			msg = fmt.Sprintf("Header [%s] Value [%s] will be added to the upstream call for Target [%s] Trigger [%s]", header, value, target, trigger)
+		}
+	} else {
+		msg = fmt.Sprintf("Failed to configure headers. Target [%s] or Trigger [%s] doesn't exist.", target, trigger)
+	}
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
+}
+
+func clearHeaders(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	target := util.GetStringParamValue(r, "target")
+	trigger := util.GetStringParamValue(r, "trigger")
+	header := util.GetStringParamValue(r, "header")
+	msg := ""
+	if ok := GetPortProxy(port).clearHeaders(target, trigger, header); ok {
+		if header != "" {
+			msg = fmt.Sprintf("Header [%s] cleared for upstream call to Target [%s] Trigger [%s]", header, target, trigger)
+		} else {
+			msg = fmt.Sprintf("All headers cleared for upstream call to Target [%s] Trigger [%s]", target, trigger)
+		}
+	} else {
+		msg = fmt.Sprintf("Failed to configure headers. Target [%s] or Trigger [%s] doesn't exist.", target, trigger)
+	}
+	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
 

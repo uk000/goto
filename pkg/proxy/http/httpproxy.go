@@ -17,7 +17,6 @@
 package httpproxy
 
 import (
-	"errors"
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/invocation"
@@ -107,18 +106,6 @@ func ClearPortProxy(port int) {
 	portProxy[port] = newProxy(port)
 }
 
-func newProxy(port int) *Proxy {
-	p := &Proxy{
-		Port:        port,
-		Targets:     map[string]*Target{},
-		Enabled:     true,
-		HTTPTracker: NewHTTPTracker(),
-		Router:      mux.NewRouter().SkipClean(true),
-	}
-	configureRouter(p.Router)
-	return p
-}
-
 func configureRouter(r *mux.Router) {
 	r.Use(setProxyFlag)
 	middleware.UseCore(r)
@@ -138,171 +125,10 @@ func setProxyFlag(next http.Handler) http.Handler {
 	})
 }
 
-func newHTTPTarget() *Target {
-	return &Target{}
-}
-
-func parseTarget(r io.Reader) (*Target, error) {
-	target := newHTTPTarget()
-	if err := util.ReadJsonPayloadFromBody(r, target); err != nil {
-		return nil, err
-	}
-	if target.Name == "" {
-		return nil, errors.New("target name missing")
-	}
-	if target.Endpoints == nil {
-		return nil, errors.New("target endpoints missing")
-	}
-	for name, ep := range target.Endpoints {
-		if ep.URL == "" {
-			return nil, fmt.Errorf("target endpoint [%s] missing url", name)
-		}
-	}
-	if len(target.Triggers) == 0 {
-		return nil, fmt.Errorf("At least one trigger is required")
-	}
-	for i, t := range target.Triggers {
-		if len(t.MatchAny) == 0 {
-			return nil, fmt.Errorf("target trigger [%s] must specify matchAny", i)
-		}
-		if len(t.Endpoints) == 0 {
-			return nil, fmt.Errorf("target trigger [%s] must specify one endpoint", i)
-		}
-	}
-	return target, nil
-}
-
 func (p *Proxy) initTracker() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.HTTPTracker = NewHTTPTracker()
-}
-
-func (p *Proxy) enable(enable bool) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	p.Enabled = enable
-}
-
-func (p *Proxy) addProxyPath(path string) *mux.Router {
-	proxyLock.Lock()
-	defer proxyLock.Unlock()
-	if proxyRouters[p.Port] == nil {
-		proxyRouters[p.Port] = map[string]*mux.Router{}
-	}
-	proxyRouters[p.Port][path] = p.Router.PathPrefix(path).Subrouter()
-	configureRouter(proxyRouters[p.Port][path])
-	return proxyRouters[p.Port][path]
-}
-
-func (p *Proxy) AddTarget(t *Target) error {
-	for _, trigger := range t.Triggers {
-		for _, match := range trigger.MatchAny {
-			//Registering URI with mux, so that the URI's embedded vars are extracted by mux
-			uri := match.URI
-			prefix := false
-			if uri != "" {
-				trigger.exactMatches = append(trigger.exactMatches, match)
-				prefix = false
-			} else {
-				uri = match.URIPrefix
-				trigger.prefixMatches = append(trigger.prefixMatches, match)
-				prefix = true
-			}
-			rootURI, suffix := util.GetRootURI(uri)
-			if rootURI == "" {
-				rootURI = "/"
-				suffix = "*"
-			} else if match.URIPrefix != "" {
-				suffix += "*"
-			}
-			match.router = p.addProxyPath(rootURI)
-			if re, err := util.BuildURIMatcherForRouter(suffix, prefix, ProxyRequest, match.router); err == nil {
-				match.uriRegexp = re
-			} else {
-				return err
-			}
-		}
-	}
-	for epName, ep := range t.Endpoints {
-		ep.name = epName
-		ep.target = t
-	}
-	for triggerName, trigger := range t.Triggers {
-		trigger.name = triggerName
-		for _, m := range trigger.MatchAny {
-			for _, v := range m.Vars {
-				v.Prepare()
-			}
-		}
-		if trigger.Transform != nil {
-			trigger.Transform.prepare()
-		}
-		trigger.epSpecs = map[string]*EndpointInvocation{}
-		for _, epName := range trigger.Endpoints {
-			ep := t.Endpoints[epName]
-			if ep == nil {
-				return fmt.Errorf("Target [%s] Trigger [%s] refers to Endpoint [%s] but endpoint not defined under target", t.Name, triggerName, epName)
-			}
-			tc := trigger.TrafficConfig
-			if tc == nil {
-				tc = t.TrafficConfig
-			}
-			if is, err := ep.prepareInvocationSpec(tc); err != nil {
-				return err
-			} else {
-				trigger.epSpecs[epName] = &EndpointInvocation{
-					ep:     ep,
-					is:     is,
-					target: t,
-				}
-			}
-			ep.target = t
-		}
-	}
-	if t.Transform != nil {
-		t.Transform.prepare()
-	}
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	p.Targets[t.Name] = t
-	return nil
-}
-
-func (p *Proxy) getTarget(name string) *Target {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	return p.Targets[name]
-}
-
-func (p *Proxy) clearTargets() {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	p.Targets = map[string]*Target{}
-}
-
-func (p *Proxy) removeTarget(target string) bool {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	if p.Targets[target] != nil {
-		delete(p.Targets, target)
-		return true
-	}
-	return false
-}
-
-func (p *Proxy) enableTarget(target string, enable bool) bool {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	if p.Targets[target] != nil {
-		p.Targets[target].Enabled = enable
-		return true
-	}
-	return false
-}
-
-func (p *Proxy) hasAnyTargets() bool {
-	return len(p.Targets) > 0
 }
 
 func (p *Proxy) incrementMatchCounts(matches map[string]*MatchedTarget, r *http.Request) {
@@ -328,7 +154,7 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 	go p.asyncStreamResponse(rc)
 	for _, match := range targetsMatches {
 		match.invoke(rc, out, wg, p.HTTPTracker)
-		if match.trafficConfig != nil && match.trafficConfig.Clean {
+		if match.trafficConfig != nil && match.trafficConfig.Transparent {
 			rc.clean = true
 		}
 	}

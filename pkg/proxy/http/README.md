@@ -71,6 +71,14 @@ In addition to request routing, the `goto` proxy also offers some chaos features
 | GET | /proxy/http | Get proxy details for the current port (or port referenced by `/port=<port>` prefix in the URI) |
 | GET | /proxy/http/all | Get proxy details for all ports |
 | PUT, POST | /proxy/http/targets/add | Add a new target based on the JSON payload given in request body. See `HTTP Proxy Target JSON Schema` for payload details. |
+| PUT, POST | /proxy/http/targets/`{target}`/headers/add/`{header}={value}` | Set header/value to be added for calls made to the given upstream target. |
+| PUT, POST | /proxy/http/targets/`{target}`/`{trigger}`/headers/add/`{header}={value}` | Set header/value to be added for calls made to the given upstream target when invoked through the given trigger match. |
+| PUT, POST | /proxy/http/targets/`{target}`/headers/remove/`{header}` | Set header to be removed for calls made to the given upstream target. If same header is configured to be added and removed, removal occurs before adding the header back. |
+| PUT, POST | /proxy/http/targets/`{target}`/`{trigger}`/headers/remove/`{header}` | Set header to be removed for calls made to the given upstream target when invoked through the given trigger match. If same header is configured to be added and removed, removal occurs before adding the header back. |
+| PUT, POST | /proxy/http/targets/`{target}`/headers/clear/`{header}` | Remove the given header from the set of headers configured to be added to the upstream call. Clear operation is different than Remove: clear should be used to remove a header previously configured for addition to the call, whereas remove adds a header to the remove list for removal from calls at runtime. |
+| PUT, POST | /proxy/http/targets/`{target}`/headers/clear | Remove all headers from the set of headers configured to be added to the upstream call. |
+| PUT, POST | /proxy/http/targets/`{target}`/`{trigger}`/headers/clear/`{header}` | Remove the given header from the set of headers configured to be added to the upstream call for the given trigger. |
+| PUT, POST | /proxy/http/targets/`{target}`/`{trigger}`/headers/clear | Remove all headers from the set of headers configured to be added to the upstream call for the given trigger. |
 | PUT, POST | /proxy/http/targets/clear | Clear all proxy targets for the current port |
 | PUT, POST | /proxy/http/targets/`{target}`/remove | Remove the proxy target with the given name |
 | PUT, POST | /proxy/http/targets/`{target}`/enable | Enable the proxy target with the given name |
@@ -136,6 +144,7 @@ In addition to request routing, the `goto` proxy also offers some chaos features
 
 |Field|Data Type|Description|
 |---|---|---|
+| uri | `string` | Exact URI match against the incoming request URI. Supports embedded path variables using `{varName}` syntax |
 | uriPrefix | `string` | URI prefix pattern to match against the incoming request URI. Supports embedded path variables using `{varName}` syntax |
 | headers | `map[string]string` | Map of header name to header value patterns to match. Values can be literal strings or `{varName}` fillers to capture header values |
 | vars | `map[string]Match` | Map of variable name to match criteria for validating captured path/header variables. See `Match JSON Schema` |

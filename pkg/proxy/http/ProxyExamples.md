@@ -22,7 +22,8 @@ proxy:
           triggers:
             trigger1:
               matchAny:
-                - uriPrefix: /
+                - uriPrefix: /foo
+                - uri: /bar
               endpoints:
                 - ep1
 
@@ -158,21 +159,21 @@ proxy:
         target1:
           enabled: true
           endpoints:
-            userService:
+            mcp1:
               url: http://user-service:9091
-            orderService:
+            mcp2:
               url: http://order-service:9092
           triggers:
             userTrigger:
               matchAny:
-                - uriPrefix: /api/users
+                - uriPrefix: /mcp
               endpoints:
-                - userService
+                - mcp1
             orderTrigger:
               matchAny:
-                - uriPrefix: /api/orders
+                - uri: /mcp/server1
               endpoints:
-                - orderService
+                - mcp2
 
 ```
 A single target can define multiple endpoints and multiple triggers. Each trigger routes to different endpoints based on the matched URI. Requests to `/api/users/*` go to `user-service:9091` and requests to `/api/orders/*` go to `order-service:9092`.

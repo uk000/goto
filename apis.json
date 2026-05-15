@@ -1192,6 +1192,54 @@
           "/proxy/http/targets/{target}/{o:enable|disable}": "[POST PUT]"
         },
         {
+          "/proxy/http/targets/{target}/{trigger}/headers/add/{header}={value}": "[POST PUT]"
+        },
+        {
+          "/proxy/http/targets/{target}/headers/add/{header}={value}": "[POST PUT]"
+        },
+        {
+          "/proxy/http/targets/{target}/{trigger}/headers/add/{header}={value}/": "[POST PUT]"
+        },
+        {
+          "/proxy/http/targets/{target}/headers/add/{header}={value}/": "[POST PUT]"
+        },
+        {
+          "/proxy/http/targets/{target}/{trigger}/headers/remove/{header}": "[POST PUT]"
+        },
+        {
+          "/proxy/http/targets/{target}/headers/remove/{header}": "[POST PUT]"
+        },
+        {
+          "/proxy/http/targets/{target}/{trigger}/headers/remove/{header}/": "[POST PUT]"
+        },
+        {
+          "/proxy/http/targets/{target}/headers/remove/{header}/": "[POST PUT]"
+        },
+        {
+          "/proxy/http/targets/{target}/{trigger}/headers/clear/{header}": "[POST PUT]"
+        },
+        {
+          "/proxy/http/targets/{target}/headers/clear/{header}": "[POST PUT]"
+        },
+        {
+          "/proxy/http/targets/{target}/{trigger}/headers/clear": "[POST PUT]"
+        },
+        {
+          "/proxy/http/targets/{target}/headers/clear": "[POST PUT]"
+        },
+        {
+          "/proxy/http/targets/{target}/{trigger}/headers/clear/{header}/": "[POST PUT]"
+        },
+        {
+          "/proxy/http/targets/{target}/headers/clear/{header}/": "[POST PUT]"
+        },
+        {
+          "/proxy/http/targets/{target}/{trigger}/headers/clear/": "[POST PUT]"
+        },
+        {
+          "/proxy/http/targets/{target}/headers/clear/": "[POST PUT]"
+        },
+        {
           "/proxy/http/targets": "[GET]"
         },
         {

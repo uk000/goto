@@ -1,11 +1,11 @@
 name: goto-test-config
 tls:
   - port: 8443
-    key: /Users/u0s00px/code/goto/1000488443NS-3K-local-8443-key.pem
-    cert: /Users/u0s00px/code/goto/1000488443NS-3K-local-8443-cert.pem
+    key: ~/key1.pem
+    cert: ~/cert1.pem
   - port: 4444
-    key: /Users/u0s00px/code/goto/17228108878443NS-3K-local-8443-key.pem
-    cert: /Users/u0s00px/code/goto/17228108878443NS-3K-local-8443-cert.pem
+    key: ~/key2.pem
+    cert: ~/cert2.pem
 mcp:
   toolSchemas:
     - name: default
@@ -322,62 +322,6 @@ mcp:
               properties:
                 theAsk:
                   type: string
-        - name: remote-serverdetails
-          tool:
-            name: remote-serverdetails
-            description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: ServerDetails] on remote MCP server at URL[localhost:4000/mcp/goto-mcp-1/serverdetails], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
-          schema: remote-tool-schema
-          behavior:
-            remote: true
-          config:
-            remote:
-              tool: "ServerDetails"
-              server: "goto-mcp-1"
-              url: "localhost:4000/mcp/goto-mcp-1/serverdetails"
-              sseURL: ""
-              forceSSE: false
-              authority: "localhost"
-              delay: "1s"
-              headers:
-                request:
-                  add:
-                    caller: "remote-server-details@goto-mcp-1@${POD_NAME}@ns@local"
-                  forward:
-                    - Traceparent
-                    - Tracestate
-                    - Authorization
-              args:
-                text: "Calling ServerDetails@goto-mcp-1 from MCP tool remote-serverdetails@goto-mcp-1@${POD_NAME}@ns@local"
-                headers:
-                  Accept: "application/json"
-        - name: remote-listservers
-          tool:
-            name: remote-listservers
-            description: 'From Server [goto-mcp-1@${POD_NAME}@ns@local], call tool [default: ListServers] on remote MCP server [goto-mcp-1] at URL[localhost:4000/mcp/goto-mcp-1/allservers], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
-          schema: remote-tool-schema
-          behavior:
-            remote: true
-          config:
-            remote:
-              tool: "ListServers"
-              server: "goto-mcp-1"
-              url: "localhost:4000/mcp/goto-mcp-1/listservers"
-              sseURL: ""
-              forceSSE: false
-              authority: "localhost"
-              delay: "1s"
-              headers:
-                request:
-                  add:
-                    caller: "remote-listservers@goto-mcp-1@${POD_NAME}@ns@local"
-                  forward:
-                    - Traceparent
-                    - Tracestate
-                    - Authorization
-              args:
-                text: "Calling ListServers@goto-mcp-1 from remote-listservers@goto-mcp-1@${POD_NAME}@ns@local"
-                headers:
-                  Accept: "application/json"
         - name: remote-echo
           tool:
             name: remote-echo
@@ -577,7 +521,7 @@ mcp:
                   Accept: "application/json"
       prompts:
         - prompt:
-            name: meeting_recap_prompt
+            name: prompt1
             description: Get meeting minutes and recap from goto-mcp-1@${POD_NAME}@ns@local
             arguments:
             - name: meeting_id
@@ -586,7 +530,7 @@ mcp:
           payload:
             text: Prompt from Server goto-mcp-1@${POD_NAME}@ns@local
         - prompt:
-            name: github_pr_comments_prompt
+            name: prompt2
             description: Get PR comments from goto-mcp-1@${POD_NAME}@ns@local
             arguments:
             - name: user_id
@@ -1657,11 +1601,12 @@ proxy:
           enabled: true
           trafficConfig:
             payload: true
-            clean: true
+            transparent: true
             delay:
-              min: 0s
-              max: 0s
+              min: 0.1s
+              max: 0.5s
             retries: 1
+            retryDelay: 1s
           endpoints:
             ep1:
               url: http://localhost:8081
@@ -1671,6 +1616,7 @@ proxy:
               tls: false
               requestCount: 1
               concurrent: 1
+              stream: false
             ep2:
               url: http://localhost:8082
               method: GET
@@ -1679,6 +1625,7 @@ proxy:
               tls: false
               requestCount: 1
               concurrent: 1
+              stream: false
           transform:
             uriMap:
               /foo/{foo}: /foox/{bar}/barx/{foo}
@@ -1688,6 +1635,7 @@ proxy:
                 main: "1"
               remove:
                 - "*"
+              lower: false
             queries:
               add:
                 main: "2"
@@ -1701,7 +1649,7 @@ proxy:
           triggers:
             trigger1:
               matchAny:
-                - uriPrefix: /foo/{foo}
+                - uri: /foo/{foo}
                   headers:
                     bar: "{bar}"
                   vars:
@@ -1711,7 +1659,7 @@ proxy:
                         - "2"
                     bar:
                       regex: aa.
-                - uriPrefix: /bar/{bar}
+                - uri: /bar
                   headers:
                     foo: "{foo}"
                   vars:
@@ -1719,8 +1667,6 @@ proxy:
                       in:
                         - "1"
                         - "2"
-                    bar:
-                      regex: bb.
               endpoints:
                 - ep1
               transform:
@@ -1799,7 +1745,7 @@ proxy:
           enabled: true
           trafficConfig:
             payload: false
-            clean: false
+            transparent: false
           endpoints:
             ep8081:
               url: http://localhost:8081
@@ -1849,7 +1795,7 @@ proxy:
           enabled: true
           trafficConfig:
             payload: false
-            clean: false
+            transparent: false
           endpoints:
             ep8082:
               url: http://localhost:8082
