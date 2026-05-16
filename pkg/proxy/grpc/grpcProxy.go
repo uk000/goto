@@ -81,6 +81,17 @@ type GRPCTarget struct {
 	lock           sync.RWMutex
 }
 
+type TargetMatch struct {
+	Method  string                 `yaml:"method" json:"method"`
+	Headers map[string]string      `yaml:"headers" json:"headers"`
+	Vars    map[string]*util.Match `yaml:"vars" json:"vars"`
+}
+
+type TargetTrigger struct {
+	MatchAny  []*TargetMatch `yaml:"matchAny" json:"matchAny"`
+	Endpoints []string       `yaml:"endpoints" json:"endpoints"`
+}
+
 type GRPCProxy struct {
 	Port        int                                   `json:"port"`
 	Enabled     bool                                  `json:"enabled"`

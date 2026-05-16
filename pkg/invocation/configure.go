@@ -80,6 +80,8 @@ type InvocationSpec struct {
 	TLS                  bool              `json:"tls"`
 	BodyReader           io.Reader         `json:"-"`
 	ResponseWriter       io.Writer         `json:"-"`
+	LongRunning          bool              `json:"-"`
+	Transport            transport.ClientTransport
 	httpVersionMajor     int
 	httpVersionMinor     int
 	tcp                  bool
@@ -96,6 +98,8 @@ type InvocationSpec struct {
 	retryDelayD          time.Duration
 	keepOpenD            time.Duration
 	autoPayloadSize      int
+	parent               *InvocationSpec
+	lock                 *sync.RWMutex
 }
 
 type RequestHeaders [][]string
@@ -185,181 +189,182 @@ func ValidateSpec(spec *InvocationSpec) error {
 	if spec.Assertions != nil {
 		spec.prepareAssertions()
 	}
+	spec.lock = &sync.RWMutex{}
 	return nil
 }
 
-func (spec *InvocationSpec) processProtocol() {
-	if spec.Protocol != "" {
-		lowerProto := strings.ToLower(spec.Protocol)
+func (is *InvocationSpec) processProtocol() {
+	if is.Protocol != "" {
+		lowerProto := strings.ToLower(is.Protocol)
 		if strings.EqualFold(lowerProto, "tcp") {
-			spec.tcp = true
-			spec.httpVersionMajor = 0
-			spec.httpVersionMinor = 0
+			is.tcp = true
+			is.httpVersionMajor = 0
+			is.httpVersionMinor = 0
 		} else if strings.EqualFold(lowerProto, "grpc") || strings.EqualFold(lowerProto, "grpcs") {
-			spec.grpc = true
-			spec.TLS = strings.EqualFold(lowerProto, "grpcs")
-			spec.httpVersionMajor = 2
-			spec.httpVersionMinor = 0
-		} else if major, minor, ok := http.ParseHTTPVersion(spec.Protocol); ok {
+			is.grpc = true
+			is.TLS = strings.EqualFold(lowerProto, "grpcs")
+			is.httpVersionMajor = 2
+			is.httpVersionMinor = 0
+		} else if major, minor, ok := http.ParseHTTPVersion(is.Protocol); ok {
 			if major == 1 && (minor == 0 || minor == 1) {
-				spec.httpVersionMajor = major
-				spec.httpVersionMinor = minor
+				is.httpVersionMajor = major
+				is.httpVersionMinor = minor
 			} else if major == 2 {
-				spec.httpVersionMajor = major
-				spec.httpVersionMinor = 0
+				is.httpVersionMajor = major
+				is.httpVersionMinor = 0
 			}
-		} else if strings.EqualFold(spec.Protocol, "HTTP/2") || strings.EqualFold(spec.Protocol, "HTTP/2.0") ||
-			strings.EqualFold(spec.Protocol, "H2") || strings.EqualFold(spec.Protocol, "H2C") {
-			spec.httpVersionMajor = 2
-			spec.httpVersionMinor = 0
-		} else if strings.HasPrefix(strings.ToLower(spec.URL), "http") {
-			spec.http = true
-			spec.httpVersionMajor = 1
-			spec.httpVersionMinor = 1
+		} else if strings.EqualFold(is.Protocol, "HTTP/2") || strings.EqualFold(is.Protocol, "HTTP/2.0") ||
+			strings.EqualFold(is.Protocol, "H2") || strings.EqualFold(is.Protocol, "H2C") {
+			is.httpVersionMajor = 2
+			is.httpVersionMinor = 0
+		} else if strings.HasPrefix(strings.ToLower(is.URL), "http") {
+			is.http = true
+			is.httpVersionMajor = 1
+			is.httpVersionMinor = 1
 		}
 	}
-	if !spec.tcp && spec.httpVersionMajor == 0 {
-		spec.httpVersionMajor = 1
-		spec.httpVersionMinor = 1
-		spec.Protocol = fmt.Sprintf("HTTP/%d.%d", spec.httpVersionMajor, spec.httpVersionMinor)
-	} else if spec.httpVersionMajor == 2 {
-		spec.h2 = true
+	if !is.tcp && is.httpVersionMajor == 0 {
+		is.httpVersionMajor = 1
+		is.httpVersionMinor = 1
+		is.Protocol = fmt.Sprintf("HTTP/%d.%d", is.httpVersionMajor, is.httpVersionMinor)
+	} else if is.httpVersionMajor == 2 {
+		is.h2 = true
 	}
-	if !spec.tcp && !spec.grpc {
-		spec.http = true
+	if !is.tcp && !is.grpc {
+		is.http = true
 	}
-	if strings.HasPrefix(strings.ToLower(spec.URL), "https") {
-		spec.TLS = true
+	if strings.HasPrefix(strings.ToLower(is.URL), "https") {
+		is.TLS = true
 	}
-	if spec.http && !strings.HasPrefix(spec.URL, "http") {
-		spec.URL = "http://" + spec.URL
+	if is.http && !strings.HasPrefix(is.URL, "http") {
+		is.URL = "http://" + is.URL
 	}
 }
 
-func (spec *InvocationSpec) processAuthority() {
-	spec.authority = spec.Host
-	if spec.authority == "" {
-		for h, v := range spec.Headers {
+func (is *InvocationSpec) processAuthority() {
+	is.authority = is.Host
+	if is.authority == "" {
+		for h, v := range is.Headers {
 			if strings.EqualFold(h, "host") {
-				spec.authority = v
+				is.authority = v
 			}
 		}
 	}
-	if spec.authority == "" {
-		if u, e := url.Parse(spec.URL); e == nil {
-			spec.authority = u.Host
+	if is.authority == "" {
+		if u, e := url.Parse(is.URL); e == nil {
+			is.authority = u.Host
 		}
 	}
 }
 
-func (spec *InvocationSpec) validatePayload() error {
-	if spec.AutoPayload != "" {
-		spec.autoPayloadSize = util.ParseSize(spec.AutoPayload)
-		if spec.autoPayloadSize <= 0 {
+func (is *InvocationSpec) validatePayload() error {
+	if is.AutoPayload != "" {
+		is.autoPayloadSize = util.ParseSize(is.AutoPayload)
+		if is.autoPayloadSize <= 0 {
 			return fmt.Errorf("invalid AutoPayload, must be a valid size like 100, 10K, etc")
 		}
 	}
-	if spec.StreamDelay != "" {
+	if is.StreamDelay != "" {
 		var err error
-		if spec.streamDelayD, err = time.ParseDuration(spec.StreamDelay); err != nil {
+		if is.streamDelayD, err = time.ParseDuration(is.StreamDelay); err != nil {
 			return fmt.Errorf("invalid delay")
 		}
 	} else {
-		spec.streamDelayD = 10 * time.Millisecond
-		spec.StreamDelay = "10ms"
+		is.streamDelayD = 10 * time.Millisecond
+		is.StreamDelay = "10ms"
 	}
 	return nil
 }
 
-func (spec *InvocationSpec) validateConnectionAndRequestConfigs() error {
+func (is *InvocationSpec) validateConnectionAndRequestConfigs() error {
 	var err error
-	if spec.ConnTimeout != "" {
-		if spec.connTimeoutD, err = time.ParseDuration(spec.ConnTimeout); err != nil {
+	if is.ConnTimeout != "" {
+		if is.connTimeoutD, err = time.ParseDuration(is.ConnTimeout); err != nil {
 			return fmt.Errorf("invalid ConnectionTimeout")
 		}
 	} else {
-		spec.connTimeoutD = 5 * time.Second
-		spec.ConnTimeout = "5s"
+		is.connTimeoutD = 5 * time.Second
+		is.ConnTimeout = "5s"
 	}
-	if spec.ConnIdleTimeout != "" {
-		if spec.connIdleTimeoutD, err = time.ParseDuration(spec.ConnIdleTimeout); err != nil {
+	if is.ConnIdleTimeout != "" {
+		if is.connIdleTimeoutD, err = time.ParseDuration(is.ConnIdleTimeout); err != nil {
 			return fmt.Errorf("invalid ConnectionIdleTimeout")
 		}
 	} else {
-		spec.connIdleTimeoutD = 5 * time.Minute
-		spec.ConnIdleTimeout = "5m"
+		is.connIdleTimeoutD = 5 * time.Minute
+		is.ConnIdleTimeout = "5m"
 	}
-	if spec.RequestTimeout != "" {
-		if spec.requestTimeoutD, err = time.ParseDuration(spec.RequestTimeout); err != nil {
+	if is.RequestTimeout != "" {
+		if is.requestTimeoutD, err = time.ParseDuration(is.RequestTimeout); err != nil {
 			return fmt.Errorf("invalid RequestIdleTimeout")
 		}
 	} else {
-		spec.requestTimeoutD = 30 * time.Second
-		spec.RequestTimeout = "30s"
+		is.requestTimeoutD = 30 * time.Second
+		is.RequestTimeout = "30s"
 	}
 	return nil
 }
 
-func (spec *InvocationSpec) validateTrafficConfig() error {
+func (is *InvocationSpec) validateTrafficConfig() error {
 	var err error
-	if spec.Name == "" {
+	if is.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	if spec.Method == "" {
-		spec.Method = "GET"
+	if is.Method == "" {
+		is.Method = "GET"
 	}
-	if spec.URL == "" {
+	if is.URL == "" {
 		return fmt.Errorf("url is required")
 	}
-	if (spec.AB || spec.Fallback || spec.Random) && len(spec.BURLS) == 0 {
+	if (is.AB || is.Fallback || is.Random) && len(is.BURLS) == 0 {
 		return fmt.Errorf("at least one B-URL is required for Fallback, ABMode or RandomMode")
 	}
-	if spec.Replicas < 0 {
+	if is.Replicas < 0 {
 		return fmt.Errorf("invalid replicas")
-	} else if spec.Replicas == 0 {
-		spec.Replicas = 1
+	} else if is.Replicas == 0 {
+		is.Replicas = 1
 	}
-	if spec.RequestCount < 0 {
+	if is.RequestCount < 0 {
 		return fmt.Errorf("invalid requestCount")
-	} else if spec.RequestCount == 0 {
-		spec.RequestCount = 1
+	} else if is.RequestCount == 0 {
+		is.RequestCount = 1
 	}
-	if spec.RequestCount < spec.Replicas {
+	if is.RequestCount < is.Replicas {
 		return fmt.Errorf("RequestCount cannot be less than replicas.")
 	}
-	if spec.InitialDelay != "" {
-		if spec.initialDelayD, err = time.ParseDuration(spec.InitialDelay); err != nil {
+	if is.InitialDelay != "" {
+		if is.initialDelayD, err = time.ParseDuration(is.InitialDelay); err != nil {
 			return fmt.Errorf("invalid initial delay")
 		}
 	}
-	if spec.Delay != "" {
-		if spec.delayD, err = time.ParseDuration(spec.Delay); err != nil {
+	if is.Delay != "" {
+		if is.delayD, err = time.ParseDuration(is.Delay); err != nil {
 			return fmt.Errorf("invalid delay")
 		}
 	} else {
-		spec.delayD = 10 * time.Millisecond
-		spec.Delay = "10ms"
+		is.delayD = 10 * time.Millisecond
+		is.Delay = "10ms"
 	}
-	if spec.RetryDelay != "" {
-		if spec.retryDelayD, err = time.ParseDuration(spec.RetryDelay); err != nil {
+	if is.RetryDelay != "" {
+		if is.retryDelayD, err = time.ParseDuration(is.RetryDelay); err != nil {
 			return fmt.Errorf("invalid retryDelay")
 		}
 	} else {
-		spec.retryDelayD = 1 * time.Second
-		spec.RetryDelay = "1s"
+		is.retryDelayD = 1 * time.Second
+		is.RetryDelay = "1s"
 	}
-	if spec.KeepOpen != "" {
-		if spec.keepOpenD, err = time.ParseDuration(spec.KeepOpen); err != nil {
+	if is.KeepOpen != "" {
+		if is.keepOpenD, err = time.ParseDuration(is.KeepOpen); err != nil {
 			return fmt.Errorf("invalid keepOpen")
 		}
 	}
 	return nil
 }
 
-func (spec *InvocationSpec) prepareAssertions() {
-	for _, a := range spec.Assertions {
+func (is *InvocationSpec) prepareAssertions() {
+	for _, a := range is.Assertions {
 		if len(a.Payload) > 0 {
-			if spec.Binary {
+			if is.Binary {
 				if b, err := base64.RawStdEncoding.DecodeString(a.Payload); err == nil {
 					a.payload = b
 				} else {
@@ -371,8 +376,8 @@ func (spec *InvocationSpec) prepareAssertions() {
 			a.PayloadSize = len(a.payload)
 		}
 		if a.PayloadSize > 0 {
-			spec.CollectResponse = true
-			spec.TrackPayload = true
+			is.CollectResponse = true
+			is.TrackPayload = true
 		}
 		if len(a.Headers) > 0 {
 			a.headersRegexp = map[string]*regexp.Regexp{}
@@ -387,6 +392,35 @@ func (spec *InvocationSpec) prepareAssertions() {
 			}
 		}
 	}
+}
+
+func (is *InvocationSpec) Clone() *InvocationSpec {
+	is2 := *is
+	is2.parent = is
+	return &is2
+}
+
+func (is *InvocationSpec) createTransport(tracker *InvocationTracker) transport.ClientTransport {
+	is.lock.Lock()
+	defer is.lock.Unlock()
+	var ct transport.ClientTransport
+	if is.LongRunning && is.parent != nil {
+		ct = is.parent.Transport
+	}
+	if ct == nil {
+		if is.http {
+			ct = getHttpClientForTarget(tracker)
+		} else if is.grpc {
+			ct = getGrpcClientForTarget(tracker)
+		}
+	}
+	if ct != nil && is.LongRunning {
+		is.Transport = ct
+		if is.parent != nil {
+			is.parent.Transport = ct
+		}
+	}
+	return ct
 }
 
 func GetActiveInvocations() map[string]map[uint32]*InvocationStatus {
@@ -502,17 +536,14 @@ func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) (
 			ResultChannel: make(chan *InvocationResult, 200),
 		},
 	}
-	tracker.client = &InvocationClient{tracker: tracker}
+	if err := tracker.createClient(target); err != nil {
+		return nil, err
+	}
 	tracker.Status = &InvocationStatus{tracker: tracker, lastStatusCode: -1}
 	for _, sinkFactory := range sinks {
 		if sink := sinkFactory(tracker); sink != nil {
 			tracker.Channels.Sinks = append(tracker.Channels.Sinks, sink)
 		}
-	}
-	if target.http {
-		tracker.client.transportClient = getHttpClientForTarget(tracker)
-	} else if target.grpc {
-		tracker.client.transportClient = getGrpcClientForTarget(tracker)
 	}
 	if len(target.StreamPayload) > 0 {
 		for _, p := range target.StreamPayload {
@@ -538,10 +569,16 @@ func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) (
 	} else {
 		tracker.Payloads = [][]byte{nil}
 	}
-	if tracker.client.transportClient == nil {
-		return tracker, fmt.Errorf("failed to create client for target [%s]", target.Name)
-	}
 	return tracker, nil
+}
+
+func (tracker *InvocationTracker) createClient(target *InvocationSpec) error {
+	tracker.client = &InvocationClient{tracker: tracker}
+	tracker.client.transportClient = target.createTransport(tracker)
+	if tracker.client.transportClient == nil {
+		return fmt.Errorf("failed to create client for target [%s]", target.Name)
+	}
+	return nil
 }
 
 func tlsConfig(host string, verifyCert bool) *tls.Config {
@@ -563,9 +600,11 @@ func getHttpClientForTarget(tracker *InvocationTracker) transport.ClientTranspor
 	if client == nil || client.HTTP() == nil {
 		client = transport.CreateHTTPClient(target.Name, target.h2, target.AutoUpgrade, target.TLS, target.authority, 0,
 			target.requestTimeoutD, target.connTimeoutD, target.connIdleTimeoutD, metrics.ConnTracker)
-		invocationsLock.Lock()
-		targetClients[target.Name] = client
-		invocationsLock.Unlock()
+		if !target.LongRunning {
+			invocationsLock.Lock()
+			targetClients[target.Name] = client
+			invocationsLock.Unlock()
+		}
 	}
 	return client
 }
@@ -591,9 +630,11 @@ func getGrpcClientForTarget(tracker *InvocationTracker) transport.ClientTranspor
 				KeepOpen:       target.keepOpenD,
 			}); err == nil {
 			client = grpcClient
-			invocationsLock.Lock()
-			targetClients[target.Name] = client
-			invocationsLock.Unlock()
+			if !target.LongRunning {
+				invocationsLock.Lock()
+				targetClients[target.Name] = client
+				invocationsLock.Unlock()
+			}
 		} else {
 			log.Println(err.Error())
 		}
@@ -622,8 +663,6 @@ func (tracker *InvocationTracker) deactivate() {
 	}
 	tracker.reportRepeatedResponse()
 	tracker.CloseChannels()
-	tracker.client.close()
-	tracker.client = nil
 	tracker.Status.Closed = true
 	invocationsLock.Lock()
 	delete(activeInvocations, tracker.ID)
@@ -639,6 +678,10 @@ func (tracker *InvocationTracker) deactivate() {
 			delete(activeTargets, tracker.Target.Name)
 			invocationsLock.Unlock()
 		}
+	}
+	if !tracker.Target.LongRunning {
+		tracker.client.close()
+		tracker.client = nil
 	}
 	tracker.logFinishedInvocation((tracker.Target.RequestCount * tracker.Target.Replicas) - tracker.Status.CompletedRequests)
 }

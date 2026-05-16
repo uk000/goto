@@ -20,9 +20,11 @@ import (
 	"errors"
 	"fmt"
 	"goto/pkg/invocation"
+	"goto/pkg/server/intercept"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
+	"net/http"
 	"regexp"
 	"slices"
 	"sync"
@@ -142,6 +144,42 @@ type TargetTracker struct {
 	writeSinceLastDrop int
 	isRunning          bool
 	stopChan           chan bool
+}
+
+type UpstreamResults map[string]map[string][]*invocation.InvocationResultResponse
+
+type ProxyResponse struct {
+	UpResponseRange []int `yaml:"upResponseRange" json:"upResponseRange"`
+	ProxyResponse   int   `yaml:"proxyResponse" json:"proxyResponse"`
+}
+
+type Proxy struct {
+	Port           int                `yaml:"port" json:"port"`
+	Targets        map[string]*Target `yaml:"targets" json:"targets"`
+	Enabled        bool               `yaml:"enabled" json:"enabled"`
+	ProxyResponses []*ProxyResponse   `yaml:"proxyResponses" json:"proxyResponses"`
+	HTTPTracker    *HTTPProxyTracker  `yaml:"-" json:"tracker"`
+	Router         *mux.Router
+	lock           sync.RWMutex
+}
+
+type ProxyTargets map[string]*MatchedTarget
+
+type RequestContext struct {
+	path     string
+	method   string
+	vars     map[string]string
+	headers  map[string]string
+	queries  map[string]string
+	body     io.Reader
+	r        *http.Request
+	respChan chan byte
+	w        http.ResponseWriter
+	fw       intercept.FlushWriter
+	c        chan []byte
+	cw       intercept.ChanWriter
+	yaml     bool
+	clean    bool
 }
 
 func newProxy(port int) *Proxy {

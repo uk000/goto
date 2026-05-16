@@ -26,7 +26,6 @@ import (
 	"goto/pkg/server/middleware"
 	"goto/pkg/server/response/status"
 	"goto/pkg/util"
-	"io"
 	"log"
 	"net/http"
 	"regexp"
@@ -35,42 +34,6 @@ import (
 
 	"github.com/gorilla/mux"
 )
-
-type UpstreamResults map[string]map[string][]*invocation.InvocationResultResponse
-
-type ProxyResponse struct {
-	UpResponseRange []int `yaml:"upResponseRange" json:"upResponseRange"`
-	ProxyResponse   int   `yaml:"proxyResponse" json:"proxyResponse"`
-}
-
-type Proxy struct {
-	Port           int                `yaml:"port" json:"port"`
-	Targets        map[string]*Target `yaml:"targets" json:"targets"`
-	Enabled        bool               `yaml:"enabled" json:"enabled"`
-	ProxyResponses []*ProxyResponse   `yaml:"proxyResponses" json:"proxyResponses"`
-	HTTPTracker    *HTTPProxyTracker  `yaml:"-" json:"tracker"`
-	Router         *mux.Router
-	lock           sync.RWMutex
-}
-
-type ProxyTargets map[string]*MatchedTarget
-
-type RequestContext struct {
-	path     string
-	method   string
-	vars     map[string]string
-	headers  map[string]string
-	queries  map[string]string
-	body     io.Reader
-	r        *http.Request
-	respChan chan byte
-	w        http.ResponseWriter
-	fw       intercept.FlushWriter
-	c        chan []byte
-	cw       intercept.ChanWriter
-	yaml     bool
-	clean    bool
-}
 
 var (
 	proxyRouters        = map[int]map[string]*mux.Router{}
@@ -326,6 +289,7 @@ func (ep *TargetEndpoint) prepareInvocationSpec(tc *TrafficConfig) (*invocation.
 		}
 		is.RetriableStatusCodes = tc.RetryOn
 	}
+	is.LongRunning = true
 	if err := invocation.ValidateSpec(is); err != nil {
 		return nil, err
 	}
@@ -339,7 +303,7 @@ func (tt *TrafficTransform) prepare() {
 }
 
 func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTransform, rc *RequestContext, pt *HTTPProxyTracker) *invocation.InvocationSpec {
-	is := *ep.is
+	is := ep.is.Clone()
 	is.URL = ep.prepareURL(matchedURI, tt, rc, pt)
 	is.Method = rc.method
 	var add map[string]string
@@ -364,7 +328,7 @@ func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTra
 		is.ResponseWriter = rc.cw
 	}
 	is.SendID = false
-	return &is
+	return is
 }
 
 func (ep *EndpointInvocation) prepareURL(matchedURI string, tt *TrafficTransform, rc *RequestContext, pt *HTTPProxyTracker) string {
