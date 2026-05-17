@@ -88,6 +88,7 @@ type Timeline struct {
 	Events          []*Event
 	Data            map[string]any
 	RemoteCalls     map[string]map[string]any
+	UpstreamHeaders map[string]any
 	Finished        bool
 	Success         bool
 	ResultOnly      bool
@@ -109,18 +110,19 @@ func Ptr(s string) *string { return &s }
 func NewTimeline(port int, label string, metadata map[string]any, inboundArgs *aicommon.ToolCallArgs, inboundHeaders http.Header,
 	stream chan *types.Pair[string, any], updateNotifier TimelineUpdateNotifierFunc, endNotifier TimelineEndNotifierFunc) *Timeline {
 	t := &Timeline{
-		TYPE:           TIMELINE,
-		Port:           port,
-		Label:          "TIMELINE>" + label,
-		Server:         CreateOrGetGotoServerInfo(port, metadata, inboundArgs, inboundHeaders),
-		Events:         []*Event{},
-		Data:           map[string]any{},
-		RemoteCalls:    map[string]map[string]any{},
-		Finished:       false,
-		stream:         stream,
-		updateNotifier: updateNotifier,
-		endNotifier:    endNotifier,
-		eventCounter:   atomic.Int32{},
+		TYPE:            TIMELINE,
+		Port:            port,
+		Label:           "TIMELINE>" + label,
+		Server:          CreateOrGetGotoServerInfo(port, metadata, inboundArgs, inboundHeaders),
+		Events:          []*Event{},
+		Data:            map[string]any{},
+		RemoteCalls:     map[string]map[string]any{},
+		UpstreamHeaders: map[string]any{},
+		Finished:        false,
+		stream:          stream,
+		updateNotifier:  updateNotifier,
+		endNotifier:     endNotifier,
+		eventCounter:    atomic.Int32{},
 	}
 	t.send("ServerInfo", t.Server.ServerInfo, true, false)
 	return t
@@ -308,12 +310,12 @@ func (t *Timeline) AddData(key string, data any, json bool) {
 }
 
 func (t *Timeline) AddRemoteCall(remoteID, callID string, data any) {
-	t.lock.Lock()
-	defer t.lock.Unlock()
-	if t.RemoteCalls[remoteID] == nil {
-		t.RemoteCalls[remoteID] = map[string]any{}
-	}
-	t.RemoteCalls[remoteID][callID] = data
+	// t.lock.Lock()
+	// defer t.lock.Unlock()
+	// if t.RemoteCalls[remoteID] == nil {
+	// 	t.RemoteCalls[remoteID] = map[string]any{}
+	// }
+	// t.RemoteCalls[remoteID][callID] = data
 }
 
 func (t *Timeline) send(key string, data any, json, finish bool) {

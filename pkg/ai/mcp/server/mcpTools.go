@@ -221,8 +221,9 @@ func (t *MCPTool) prepareResult(tctx *ToolCallContext, result *gomcp.CallToolRes
 				tctx.timeline.Data["remoteData"] = result.StructuredContent
 			}
 		}
+	} else {
+		result.StructuredContent = tctx.timeline
 	}
-	result.StructuredContent = tctx.timeline
 	// tctx.rs.GotoProtocol = "MCP"
 	// tctx.rs.IsJSONRPC = true
 	// tctx.rs.RequestPortNum = tctx.MCPTool.Server.Port

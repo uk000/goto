@@ -45,6 +45,7 @@ type ToolCallContext struct {
 	timeline       *timeline.Timeline
 	progress       atomic.Int32
 	log            []string
+	remoteGotos    map[string]bool
 }
 
 func NewToolCallContext(ctx context.Context, t *MCPTool, req *gomcp.CallToolRequest, args *aicommon.ToolCallArgs, isSSE bool) *ToolCallContext {

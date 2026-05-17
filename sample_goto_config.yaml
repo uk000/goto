@@ -1600,7 +1600,7 @@ proxy:
         agent1:
           enabled: true
           endpoints:
-            agent:
+            agent1:
               url: http://localhost:8080
               method: POST
               protocol: HTTP/1.1
@@ -1636,7 +1636,50 @@ proxy:
                         - bar
                   delay: 1s
               endpoints:
-                - agent
+                - agent1
+        mcp1:
+          enabled: true
+          endpoints:
+            mcp1:
+              url: http://localhost:8080
+              method: POST
+              protocol: HTTP/1.1
+              authority: goto.uk
+              tls: false
+              requestCount: 1
+              concurrent: 1
+          triggers:
+            trigger1:
+              matchAny:
+                - uriPrefix: /callmcp
+              transform:
+                uriMap:
+                  /callmcp: /mcpapi/client/call/tool
+                payload: |
+                  tool: "echo"
+                  url: "http://localhost:3000/mcp/goto-mcp"
+                  server: "goto-mcp"
+                  resultOnly: true
+                  noEvents: true
+                  noCallDetails: true
+                  delay: "1s"
+                  args:
+                    text: hello
+                  headers:
+                    request:
+                      add:
+                        x: y
+                      remove:
+                        - bar
+                      forward:
+                        - foo
+                    response:
+                      add:
+                        y: x
+                      remove:
+                        - bar
+              endpoints:
+                - mcp1
         target1:
           enabled: true
           trafficConfig:

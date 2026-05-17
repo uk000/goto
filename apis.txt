@@ -146,7 +146,7 @@
 /log/response/headers/{enable} [POST PUT]
 /log/response/minibody/{enable} [POST PUT]
 /log/server/{enable} [POST PUT]
-/mcpapi/client/call [POST]
+/mcpapi/client/call/tool [POST]
 /mcpapi/client/details [GET]
 /mcpapi/client/details/ [GET]
 /mcpapi/client/list/all?url={url} [POST GET]

@@ -29,6 +29,7 @@ import (
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"goto/pkg/util/timeline"
+	"io"
 	"log"
 	"net/http"
 	"slices"
@@ -49,25 +50,26 @@ type MCPClientPayload struct {
 }
 
 type ToolCall struct {
-	Tool         string                 `json:"tool"`
-	URL          string                 `json:"url"`
-	SSEURL       string                 `json:"sseURL"`
-	Server       string                 `json:"server,omitempty"`
-	Authority    string                 `json:"authority,omitempty"`
-	H2           bool                   `json:"h2,omitempty"`
-	TLS          bool                   `json:"tls,omitempty"`
-	ForceSSE     bool                   `json:"forceSSE,omitempty"`
-	Raw          bool                   `json:"neat,omitempty"`
-	Args         *aicommon.ToolCallArgs `json:"args,omitempty"`
-	Headers      *types.Headers         `json:"headers,omitempty"`
-	Delay        string                 `json:"delay,omitempty"`
-	RequestCount int                    `json:"requestCount"`
-	Concurrent   int                    `json:"concurrent"`
-	InitialDelay string                 `json:"initialDelay"`
-	ForcedStatus int                    `json:"forcedStatus"`
-	ResultOnly   bool                   `json:"resultOnly,omitempty"`
-	NoEvents     bool                   `json:"noEvents,omitempty"`
-	delayD       *types.Delay           `json:"-"`
+	Tool          string                 `json:"tool"`
+	URL           string                 `json:"url"`
+	SSEURL        string                 `json:"sseURL"`
+	Server        string                 `json:"server,omitempty"`
+	Authority     string                 `json:"authority,omitempty"`
+	H2            bool                   `json:"h2,omitempty"`
+	TLS           bool                   `json:"tls,omitempty"`
+	ForceSSE      bool                   `json:"forceSSE,omitempty"`
+	Raw           bool                   `json:"neat,omitempty"`
+	Args          *aicommon.ToolCallArgs `json:"args,omitempty"`
+	Headers       *types.Headers         `json:"headers,omitempty"`
+	Delay         string                 `json:"delay,omitempty"`
+	RequestCount  int                    `json:"requestCount"`
+	Concurrent    int                    `json:"concurrent"`
+	InitialDelay  string                 `json:"initialDelay"`
+	ForcedStatus  int                    `json:"forcedStatus"`
+	ResultOnly    bool                   `json:"resultOnly,omitempty"`
+	NoEvents      bool                   `json:"noEvents,omitempty"`
+	NoCallDetails bool                   `json:"noCallDetails,omitempty"`
+	delayD        *types.Delay           `json:"-"`
 }
 
 type ToolCallContext struct {
@@ -249,9 +251,9 @@ func (c *MCPClient) newMCPTransport(label, url string) gomcp.Transport {
 	return mcpTransport
 }
 
-func ParseToolCall(b []byte) (*ToolCall, error) {
+func ParseToolCall(r io.ReadCloser) (*ToolCall, error) {
 	tc := &ToolCall{}
-	err := json.Unmarshal(b, tc)
+	err := util.ReadJsonOrYamlPayloadFromBody(r, tc)
 	if err == nil {
 		if tc.Tool == "" || tc.URL == "" {
 			return nil, errors.New("invalid tool call payload")
@@ -494,6 +496,9 @@ func (tctx *ToolCallContext) call() (*MCPResult, error) {
 		viaGotos = append(viaGotos, v)
 	}
 	tctx.result.LastResponseHeaders[constants.HeaderViaGoto] = viaGotos
+	if tctx.tc.NoCallDetails {
+		tctx.result.CallResults = nil
+	}
 	return tctx.result, tctx.result.LastError
 }
 

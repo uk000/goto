@@ -91,13 +91,20 @@ func (r *MCPResult) storeCallResult(requestID string, result *gomcp.CallToolResu
 				t.Events = nil
 			}
 			cr.RemoteTimeline = t
+			r.LastRemoteHeaders = t.UpstreamHeaders
+			if t.UpstreamHeaders != nil {
+				viaGotos := util.GetViaGotosFromHeaders(t.UpstreamHeaders)
+				for v := range viaGotos {
+					r.RemoteGotos[v] = true
+				}
+			}
 		} else {
 			upresult, upheaders := timeline.CheckAndGetResultOrHeaders(result.StructuredContent)
 			if upresult != nil || upheaders != nil {
 				cr.RemoteResult = upresult
 				cr.RemoteHeaders = upheaders
 				r.LastRemoteHeaders = upheaders
-				if r.LastResponseHeaders != nil {
+				if upheaders != nil {
 					viaGotos := util.GetViaGotosFromHeaders(upheaders)
 					for v := range viaGotos {
 						r.RemoteGotos[v] = true
@@ -135,16 +142,27 @@ func (r *MCPResult) storeHeaders(requestID string, requestHeaders, responseHeade
 
 func (r *MCPResult) ToMCP() *gomcp.CallToolResult {
 	result := &gomcp.CallToolResult{}
-	if len(r.CallResults) > 0 {
-		r.Timeline.Data["MCPCalls"] = r.buildCallsData()
-		if !r.ToolCall.ResultOnly {
-			for _, cr := range r.CallResults {
-				result.Content = append(result.Content, cr.Content...)
+	if !r.ToolCall.NoCallDetails {
+		if len(r.CallResults) > 0 {
+			r.Timeline.Data["MCPCalls"] = r.buildCallsData()
+			if !r.ToolCall.ResultOnly {
+				for _, cr := range r.CallResults {
+					result.Content = append(result.Content, cr.Content...)
+				}
 			}
 		}
 	}
 	if r.ToolCall.NoEvents {
 		r.Timeline.Events = nil
+	}
+	if r.LastRemoteHeaders != nil {
+		for k, v := range r.LastRemoteHeaders {
+			r.Timeline.UpstreamHeaders[k] = v
+		}
+	}
+	r.Timeline.UpstreamHeaders[r.Tool] = map[string]any{
+		"RequestHeaders":  r.LastRequestHeaders,
+		"ResponseHeaders": r.LastResponseHeaders,
 	}
 	result.StructuredContent = r.Timeline
 	return result
