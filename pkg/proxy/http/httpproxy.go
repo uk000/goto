@@ -36,12 +36,13 @@ import (
 )
 
 var (
-	proxyRouters        = map[int]map[string]*mux.Router{}
-	portProxy           = map[int]*Proxy{}
-	interceptMiddleware = intercept.IntereceptMiddleware(nil, nil)
-	notFoundHandler     = catchall.Middleware.MiddlewareHandler(nil)
-	lowerViaGoto        = strings.ToLower(constants.HeaderViaGoto)
-	proxyLock           sync.RWMutex
+	proxyRouters             = map[int]map[string]*mux.Router{}
+	portProxy                = map[int]*Proxy{}
+	interceptMiddleware      = intercept.IntereceptMiddleware(nil, nil)
+	notFoundHandler          = catchall.Middleware.MiddlewareHandler(nil)
+	lowerViaGoto             = strings.ToLower(constants.HeaderViaGoto)
+	lowerProxyUpstreamStatus = strings.ToLower(constants.HeaderGotoProxyUpstreamStatus)
+	proxyLock                sync.RWMutex
 )
 
 func GetPortProxy(port int) *Proxy {
@@ -129,22 +130,34 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 }
 
 func (p *Proxy) processHeaders(rc *RequestContext, responses UpstreamResults, responseStatuses map[string]map[string]int) {
-	rc.w.Header().Add(constants.HeaderGotoProxyUpstreamStatus, util.ToJSONText(responseStatuses))
 	upstreamViaGoto := []string{}
-	for _, m := range responses {
-		for _, responses := range m {
-			for _, resp := range responses {
+	upstreamProxyStatuses := []map[string]map[string][]string{}
+	for target, targetResponses := range responses {
+		for ep, epResponses := range targetResponses {
+			for _, resp := range epResponses {
 				v := resp.Headers[constants.HeaderViaGoto]
 				if len(v) == 0 {
 					v = resp.Headers[lowerViaGoto]
 				}
 				if len(v) > 0 {
 					upstreamViaGoto = append(upstreamViaGoto, v...)
-					break
+				}
+				v = resp.Headers[constants.HeaderGotoProxyUpstreamStatus]
+				if len(v) == 0 {
+					v = resp.Headers[lowerProxyUpstreamStatus]
+				}
+				if len(v) > 0 {
+					upstreamProxyStatuses = append(upstreamProxyStatuses, map[string]map[string][]string{target: {ep: v}})
 				}
 			}
 		}
 	}
+	upstreamProxyStatusHeaders := []string{}
+	for _, v := range upstreamProxyStatuses {
+		upstreamProxyStatusHeaders = append(upstreamProxyStatusHeaders, util.ToJSONText(v))
+	}
+	upstreamProxyStatusHeaders = append(upstreamProxyStatusHeaders, util.ToJSONText(responseStatuses))
+	rc.w.Header()[constants.HeaderGotoProxyUpstreamStatus] = upstreamProxyStatusHeaders
 	rc.w.Header()[constants.HeaderViaGoto] = append(rc.w.Header()[constants.HeaderViaGoto], upstreamViaGoto...)
 	if rc.clean {
 		for _, m := range responses {
@@ -317,13 +330,13 @@ func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTra
 			remove = tt.Headers.Remove
 			is.LowerHeaders = tt.Headers.Lower
 		}
+		if tt.Payload != "" {
+			is.Body = tt.Payload
+		} else {
+			is.BodyReader = rc.body
+		}
 	}
 	is.Headers, is.Host = util.TransformHeaders(rc.vars, rc.headers, add, remove)
-	if tt.Payload != "" {
-		is.Body = tt.Payload
-	} else {
-		is.BodyReader = rc.body
-	}
 	if ep.ep.Stream {
 		if rc.cw == nil {
 			rc.cw = intercept.NewChanWriter(rc.c)
@@ -489,8 +502,8 @@ func (p *Proxy) getMatchingProxyTargets(r *http.Request) ProxyTargets {
 		}
 		return false
 	}
-	matched := false
 	for _, target := range p.Targets {
+		matched := false
 		for _, trigger := range target.Triggers {
 			if len(trigger.exactMatches) > 0 && matchTargetFunc(target, trigger) {
 				matched = true
@@ -504,9 +517,6 @@ func (p *Proxy) getMatchingProxyTargets(r *http.Request) ProxyTargets {
 					break
 				}
 			}
-		}
-		if matched {
-			break
 		}
 	}
 	return matchedTargets
