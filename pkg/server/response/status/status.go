@@ -328,7 +328,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 			return
 		}
 		overriddenStatus := false
-		irw := util.GetInterceptResponseWriter(r).(*intercept.InterceptResponseWriter)
+		irw := rs.InterceptResponseWriter.(*intercept.InterceptResponseWriter)
 		if !uri.HasURIStatus(r) {
 			remaining := 0
 			irw.StatusCode, remaining, overriddenStatus = computeResponseStatus(irw.StatusCode, r)

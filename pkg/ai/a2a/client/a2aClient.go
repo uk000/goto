@@ -91,18 +91,18 @@ func FetchAgentCard(ctx context.Context, url, authority string, call *AgentCall,
 	return
 }
 
-func CallAgent(ctx context.Context, port int, call *AgentCall, callback AgentResultsCallback, inHeaders http.Header) (err error) {
+func CallAgent(ctx context.Context, port int, call *AgentCall, callback AgentResultsCallback, inHeaders http.Header) (headers map[string]any, err error) {
 	return CallAgentWithTimeline(ctx, port, call, callback, inHeaders, timeline.NewTimeline(port, call.Name, nil, nil, inHeaders, nil, nil, nil))
 }
 
-func CallAgentWithTimeline(ctx context.Context, port int, call *AgentCall, callback AgentResultsCallback, inHeaders http.Header, timeline *timeline.Timeline) (err error) {
+func CallAgentWithTimeline(ctx context.Context, port int, call *AgentCall, callback AgentResultsCallback, inHeaders http.Header, timeline *timeline.Timeline) (headers map[string]any, err error) {
 	var card *goa2aserver.AgentCard
 	if call == nil || call.CardURL == "" {
-		return fmt.Errorf("Missing Agent Call spec/URL: %+v", call)
+		return nil, fmt.Errorf("Missing Agent Call spec/URL: %+v", call)
 	}
 	card, err = FetchAgentCard(ctx, call.CardURL, call.Authority, call, inHeaders)
 	if err != nil || card == nil {
-		return fmt.Errorf("Error fetching agent card from url [%s], authority [%s]: %s", call.AgentURL, call.Authority, err.Error())
+		return nil, fmt.Errorf("Error fetching agent card from url [%s], authority [%s]: %s", call.AgentURL, call.Authority, err.Error())
 	}
 	var agentURL string
 	if call.AgentURL != "" {
@@ -114,9 +114,14 @@ func CallAgentWithTimeline(ctx context.Context, port int, call *AgentCall, callb
 	session := NewA2ASessionWithTimeline(ctx, port, card, call, inHeaders, timeline)
 	err = session.Connect()
 	if err != nil {
-		return fmt.Errorf("Failed to load agent card with error [%s]. Agent Call: %+v", err.Error(), call)
+		return nil, fmt.Errorf("Failed to load agent card with error [%s]. Agent Call: %+v", err.Error(), call)
 	}
-	return session.CallAgent(callback, nil, nil)
+	err = session.CallAgent(callback, nil, nil)
+	headers = map[string]any{call.Name: map[string]any{
+		"RequestHeaders":  session.Result.LastRequestHeaders,
+		"ResponseHeaders": session.Result.LastResponseHeaders,
+	}}
+	return
 }
 
 func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, call *AgentCall, inHeaders http.Header) (card *goa2aserver.AgentCard, err error) {

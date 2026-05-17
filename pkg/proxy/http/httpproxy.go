@@ -317,7 +317,11 @@ func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTra
 		}
 	}
 	is.Headers, is.Host = util.TransformHeaders(rc.vars, rc.headers, add, remove)
-	is.BodyReader = rc.body
+	if tt.Payload != "" {
+		is.Body = tt.Payload
+	} else {
+		is.BodyReader = rc.body
+	}
 	if ep.ep.Stream {
 		if rc.cw == nil {
 			rc.cw = intercept.NewChanWriter(rc.c)
@@ -536,6 +540,7 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			yaml:    util.IsAcceptYAML(r),
 		}
 		proxy.invokeTargets(targets, rc)
+		util.SendGotoTrailers(w, r)
 	}
 }
 

@@ -18,6 +18,7 @@ package mcpclient
 
 import (
 	"fmt"
+	"goto/pkg/util"
 	"goto/pkg/util/timeline"
 	"net/http"
 
@@ -34,8 +35,10 @@ type MCPResult struct {
 	LastRequestHeaders  http.Header `json:"-"`
 	LastResponseHeaders http.Header `json:"-"`
 	LastResponseStatus  int         `json:"-"`
-	LastError           error       `json:"-"`
+	LastRemoteHeaders   map[string]any
+	LastError           error `json:"-"`
 	CallResults         map[string]*MCPCallResult
+	RemoteGotos         map[string]bool
 }
 
 type MCPCallResult struct {
@@ -45,9 +48,11 @@ type MCPCallResult struct {
 	ClientInfo      *timeline.GotoClientInfo `json:"ClientInfo,omitempty"`
 	RemoteTimeline  *timeline.Timeline       `json:"RemoteTimeline,omitempty"`
 	RemoteResult    any                      `json:"RemoteResult,omitempty"`
+	RemoteHeaders   any                      `json:"RemoteHeaders,omitempty"`
 	RequestHeaders  http.Header              `json:"RequestHeaders,omitempty"`
 	ResponseHeaders http.Header              `json:"ResponseHeaders,omitempty"`
 	ResponseStatus  int                      `json:"ResponseStatus,omitempty"`
+	parent          *MCPResult
 }
 
 func NewMCPResult(server string, tc *ToolCall, t *timeline.Timeline) *MCPResult {
@@ -59,6 +64,7 @@ func NewMCPResult(server string, tc *ToolCall, t *timeline.Timeline) *MCPResult 
 		ToolCall:    tc,
 		CallResults: map[string]*MCPCallResult{},
 		Timeline:    t,
+		RemoteGotos: map[string]bool{},
 	}
 }
 
@@ -66,6 +72,7 @@ func (r *MCPResult) getOrAddCall(requestID string) *MCPCallResult {
 	if r.CallResults[requestID] == nil {
 		r.CallResults[requestID] = &MCPCallResult{
 			RequestID: requestID,
+			parent:    r,
 		}
 	}
 	return r.CallResults[requestID]
@@ -84,10 +91,21 @@ func (r *MCPResult) storeCallResult(requestID string, result *gomcp.CallToolResu
 				t.Events = nil
 			}
 			cr.RemoteTimeline = t
-		} else if r := timeline.CheckAndGetResult(result.StructuredContent); r != nil {
-			cr.RemoteResult = r
 		} else {
-			cr.Data = result.StructuredContent
+			upresult, upheaders := timeline.CheckAndGetResultOrHeaders(result.StructuredContent)
+			if upresult != nil || upheaders != nil {
+				cr.RemoteResult = upresult
+				cr.RemoteHeaders = upheaders
+				r.LastRemoteHeaders = upheaders
+				if r.LastResponseHeaders != nil {
+					viaGotos := util.GetViaGotosFromHeaders(upheaders)
+					for v := range viaGotos {
+						r.RemoteGotos[v] = true
+					}
+				}
+			} else {
+				cr.Data = result.StructuredContent
+			}
 		}
 	}
 }

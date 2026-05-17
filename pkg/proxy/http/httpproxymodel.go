@@ -77,6 +77,7 @@ type TrafficTransform struct {
 	URIMap         map[string]string `yaml:"uriMap" json:"uriMap"`
 	Headers        *Keys             `yaml:"headers" json:"headers"`
 	Queries        *Keys             `yaml:"queries" json:"queries"`
+	Payload        string            `yaml:"payload" json:"payload"`
 	StripURI       string            `yaml:"stripURI" json:"stripURI"`
 	RequestId      *types.RequestId  `yaml:"requestId" json:"requestId"`
 	stripURIRegexp *regexp.Regexp
@@ -200,7 +201,7 @@ func newHTTPTarget() *Target {
 
 func parseTarget(r io.Reader) (*Target, error) {
 	target := newHTTPTarget()
-	if err := util.ReadJsonPayloadFromBody(r, target); err != nil {
+	if err := util.ReadJsonOrYamlPayloadFromBody(r, target); err != nil {
 		return nil, err
 	}
 	if target.Name == "" {

@@ -284,6 +284,15 @@ func WithHeadersIntercept(r *http.Request, w http.ResponseWriter) (http.Response
 	return w, irw
 }
 
+func GetInterceptWriter(r *http.Request) *InterceptResponseWriter {
+	var irw *InterceptResponseWriter
+	rs := util.GetRequestStore(r)
+	if rs.InterceptResponseWriter != nil {
+		irw = rs.InterceptResponseWriter.(*InterceptResponseWriter)
+	}
+	return irw
+}
+
 func NewHeadersInterceptResponseWriter(w http.ResponseWriter) *HeaderInterceptResponseWriter {
 	return &HeaderInterceptResponseWriter{
 		ResponseWriter: w,

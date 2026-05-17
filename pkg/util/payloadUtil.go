@@ -39,6 +39,18 @@ func ReadJsonPayloadFromBody(body io.Reader, t interface{}) error {
 	}
 }
 
+func ReadJsonOrYamlPayloadFromBody(body io.Reader, t interface{}) error {
+	if body, err := io.ReadAll(body); err == nil {
+		err = json.Unmarshal(body, t)
+		if err != nil {
+			err = yaml.Unmarshal(body, t)
+		}
+		return err
+	} else {
+		return err
+	}
+}
+
 func WriteJsonOrYAMLPayload(w http.ResponseWriter, t interface{}, yaml bool) error {
 	if yaml {
 		w.Header().Add(constants.HeaderContentType, constants.ContentTypeYAML)

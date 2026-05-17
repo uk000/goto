@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"goto/pkg/ai/a2a/model"
+	"goto/pkg/constants"
 	"goto/pkg/global"
 	"goto/pkg/server/intercept"
 	"goto/pkg/util"
@@ -70,18 +71,24 @@ func GetAgentNames(port int) map[int]map[string]map[string][]string {
 				if a.Config.Delegates.Agents != nil {
 					names[port][name]["agents"] = []string{}
 					for _, d := range a.Config.Delegates.Agents {
-						names[port][name]["agents"] = append(names[port][name]["agents"], d.AgentCall.Name)
+						if !d.Disabled {
+							names[port][name]["agents"] = append(names[port][name]["agents"], d.AgentCall.Name)
+						}
 					}
 					if a.Config.Delegates.Tools != nil {
 						names[port][name]["tools"] = []string{}
 						for _, d := range a.Config.Delegates.Tools {
-							names[port][name]["tools"] = append(names[port][name]["tools"], d.ToolCall.Tool)
+							if !d.Disabled {
+								names[port][name]["tools"] = append(names[port][name]["tools"], d.ToolCall.Tool)
+							}
 						}
 					}
 					if a.Config.Delegates.HTTP != nil {
 						names[port][name]["http"] = []string{}
 						for _, d := range a.Config.Delegates.HTTP {
-							names[port][name]["http"] = append(names[port][name]["http"], d.HTTPCall.URL)
+							if !d.Disabled {
+								names[port][name]["http"] = append(names[port][name]["http"], d.HTTPCall.URL)
+							}
 						}
 					}
 				}
@@ -202,18 +209,22 @@ func (a *A2AServer) Serve(name string, w http.ResponseWriter, r *http.Request) e
 	if agent == nil {
 		return fmt.Errorf("agent [%s] not found on server [%s] port [%d]", name, a.ID, a.Port)
 	}
+	w.Header().Add(constants.HeaderGotoA2AServer, a.ID)
+	w.Header().Add(constants.HeaderGotoA2AAgent, agent.ID)
 	ctx := r.Context()
 	_, rs := util.GetRequestStoreFromContext(ctx)
 	rs.RequestHeaders = r.Header
 	aCtx := newAgentContext(a.Port, a.ID, rs.ListenerLabel, agent, r.Header, rs)
 	r = r.WithContext(context.WithValue(ctx, util.AgentContextKey, aCtx))
 	aCtx.ctx = r.Context()
-	w, irw := intercept.WithIntercept(r, w)
+	irw := intercept.GetInterceptWriter(r)
 	if aCtx.forcedStatus > 0 {
 		irw.WriteHeader(aCtx.forcedStatus)
 		rs.StatusCode = aCtx.forcedStatus
 	}
 	agent.Serve(w, r)
-	irw.Proceed()
+	for v := range aCtx.remoteGotos {
+		rs.ViaGotos = append(rs.ViaGotos, v)
+	}
 	return nil
 }

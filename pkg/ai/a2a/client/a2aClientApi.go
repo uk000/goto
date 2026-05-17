@@ -19,10 +19,13 @@ package a2aclient
 import (
 	"encoding/json"
 	"fmt"
+	"goto/pkg/constants"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"io"
+	"maps"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -63,7 +66,7 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 	stream := strings.Contains(r.RequestURI, "stream")
 	result := strings.Contains(r.RequestURI, "result")
 	port := util.GetRequestOrListenerPortNum(r)
-	err := util.ReadJsonPayload(r, &call)
+	err := util.ReadJsonOrYamlPayloadFromBody(r.Body, &call)
 	if err != nil {
 		util.SendBadRequest(fmt.Sprintf("Failed to parse payload with error [%s]", err.Error()), w, r)
 		return
@@ -71,17 +74,32 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 	if name != "" {
 		call.Name = name
 	}
-	output := map[string][]any{}
-	err = CallAgent(r.Context(), port, call, streamAgentResponse(call.Name, stream, result, output, w, r), r.Header)
+	output := map[string]map[string]any{}
+	headers, err := CallAgent(r.Context(), port, call, streamAgentResponse(call.Name, stream, result, output, w, r), r.Header)
 	if err != nil {
 		msg := fmt.Sprintf("Error invoking agent [%s]: %s", call.Name, err.Error())
 		util.SendBadRequest(msg, w, r)
 		return
 	} else {
 		if stream {
+			util.WriteJsonPayload(w, headers)
 			msg := fmt.Sprintf("Invoked agent [%s] successfully on URL [%s] with input [%s], streamed result", call.Name, call.AgentURL, call.Message)
 			util.AddLogMessage(msg, r)
 		} else {
+			for _, upOut := range output {
+				for k, v := range upOut {
+					if strings.Contains(k, "headers") || strings.Contains(k, "Headers") && v != nil && !reflect.ValueOf(v).IsNil() {
+						if upstreamHeaders, ok := v.(map[string]any); ok {
+							maps.Copy(headers, upstreamHeaders)
+						}
+					}
+				}
+			}
+			output["headers"] = headers
+			viaGotos := util.GetViaGotosFromHeaders(headers)
+			for v := range viaGotos {
+				w.Header().Add(constants.HeaderViaGoto, v)
+			}
 			msg := fmt.Sprintf("Invoked agent [%s] successfully on URL [%s] with input [%s], JSON result", call.Name, call.AgentURL, call.Message)
 			util.AddLogMessage(msg, r)
 			util.WriteJsonPayload(w, output)
@@ -89,14 +107,15 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func streamAgentResponse(agent string, stream, result bool, output map[string][]any, w http.ResponseWriter, r *http.Request) AgentResultsCallback {
+func streamAgentResponse(agent string, stream, result bool, output map[string]map[string]any, w http.ResponseWriter, r *http.Request) AgentResultsCallback {
 	var fw http.Flusher
 	if stream {
 		if f, ok := w.(http.Flusher); ok {
 			fw = f
 		}
 	}
-	send := func(id, msg string, data any) {
+	messages := []string{}
+	send := func(id, msg string, data map[string]any, other any) {
 		if stream && fw != nil {
 			if msg != "" {
 				fmt.Fprintln(w, msg)
@@ -108,13 +127,23 @@ func streamAgentResponse(agent string, stream, result bool, output map[string][]
 			msg := fmt.Sprintf("Received stream response from agent [%s][%s], response: %s", agent, id, msg)
 			util.AddLogMessage(msg, r)
 		} else {
-			if msg != "" {
-				output[id] = append(output[id], msg)
+			if output[id] == nil {
+				output[id] = map[string]any{}
 			}
 			if data != nil {
-				output[id] = append(output[id], data)
+				if len(data) == 1 {
+					for k, v := range data {
+						output[id][k] = v
+					}
+				} else {
+					output[id][msg] = data
+				}
+			} else if other != nil && !reflect.ValueOf(other).IsNil() {
+				output[id][msg] = other
+			} else if msg != "" {
+				messages = append(messages, msg)
+				output[id]["messages"] = messages
 			}
-
 		}
 	}
 	return func(id, msg string, data any) {
@@ -125,12 +154,12 @@ func streamAgentResponse(agent string, stream, result bool, output map[string][]
 		if !isArtifact {
 			if result {
 				if m, ok := data.(map[string]any); ok {
-					if m["Result"] != nil || m["Timeline"] != nil {
-						send(id, msg, data)
-					}
+					send(id, msg, m, nil)
+				} else {
+					send(id, msg, nil, nil)
 				}
 			} else {
-				send(id, msg, data)
+				send(id, msg, nil, data)
 			}
 		}
 	}

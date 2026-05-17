@@ -32,7 +32,9 @@ type A2AResult struct {
 	LastRequestHeaders  http.Header `json:"-"`
 	LastResponseHeaders http.Header `json:"-"`
 	LastResponseStatus  int         `json:"-"`
+	LastRemoteHeaders   map[string]any
 	CallResults         map[string]*A2ACallResult
+	RemoteGotos         map[string]bool
 }
 
 type A2ACallResult struct {
@@ -42,6 +44,7 @@ type A2ACallResult struct {
 	ClientInfo      *timeline.GotoClientInfo `json:"ClientInfo,omitempty"`
 	RemoteTimeline  *timeline.Timeline       `json:"RemoteTimeline,omitempty"`
 	RemoteResult    any                      `json:"RemoteResult,omitempty"`
+	RemoteHeaders   map[string]any           `json:"RemoteHeaders,omitempty"`
 	RequestHeaders  http.Header              `json:"RequestHeaders,omitempty"`
 	ResponseHeaders http.Header              `json:"ResponseHeaders,omitempty"`
 	ResponseStatus  int                      `json:"ResponseStatus,omitempty"`
@@ -57,6 +60,7 @@ func NewA2AResult(server string, ac *AgentCall, t *timeline.Timeline) *A2AResult
 		ServerInfo:  t.Server,
 		CallResults: map[string]*A2ACallResult{},
 		Timeline:    t,
+		RemoteGotos: map[string]bool{},
 	}
 }
 

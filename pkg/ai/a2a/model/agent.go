@@ -83,6 +83,7 @@ type DelegateTracker struct {
 }
 
 type DelegateToolCall struct {
+	Disabled    bool                       `json:"disabled"`
 	GivenName   string                     `json:"givenName"`
 	Triggers    []string                   `yaml:"triggers" json:"triggers"`
 	ToolCall    *mcpclient.ToolCall        `yaml:"toolCall,omitempty" json:"toolCall,omitempty"`
@@ -91,6 +92,7 @@ type DelegateToolCall struct {
 }
 
 type DelegateAgentCall struct {
+	Disabled    bool                       `json:"disabled"`
 	GivenName   string                     `json:"givenName"`
 	Triggers    []string                   `yaml:"triggers" json:"triggers"`
 	AgentCall   *a2aclient.AgentCall       `yaml:"agentCall,omitempty" json:"agentCall,omitempty"`
@@ -99,6 +101,7 @@ type DelegateAgentCall struct {
 }
 
 type DelegateHTTPCall struct {
+	Disabled    bool                       `json:"disabled"`
 	GivenName   string                     `json:"givenName"`
 	Triggers    []string                   `yaml:"triggers" json:"triggers"`
 	HTTPCall    *HTTPCall                  `yaml:"httpCall,omitempty" json:"httpCall,omitempty"`

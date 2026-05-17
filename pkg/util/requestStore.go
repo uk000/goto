@@ -102,6 +102,7 @@ type RequestStore struct {
 	ResponseWriter          http.ResponseWriter
 	CurrentRouter           *mux.Router
 	MCPRequestStore         *MCPRequestStore
+	ViaGotos                []string
 }
 
 type MCPRequestStore struct {

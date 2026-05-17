@@ -268,13 +268,14 @@ func createPartsFromArrayIter(key string, arr reflect.Value, parts *[]a2aproto.P
 	}
 }
 
-func createHybridMessage(id string, toolResults, agentResults map[string]any) a2aproto.Message {
+func createHybridMessage(id string, toolResults, agentResults, headers map[string]any) a2aproto.Message {
 	parts := []a2aproto.Part{}
 	builder := &strings.Builder{}
 	createPartsFromMap(fmt.Sprintf("[%s] Reporting Result:", id), toolResults, &parts, builder, false)
 	createPartsFromMap(fmt.Sprintf("[%s] Reporting Result:", id), agentResults, &parts, builder, false)
 	parts = append(parts, a2aproto.NewDataPart(toolResults))
 	parts = append(parts, a2aproto.NewDataPart(agentResults))
+	parts = append(parts, a2aproto.NewDataPart(headers))
 	finalParts := []a2aproto.Part{a2aproto.NewTextPart(builder.String())}
 	finalParts = append(finalParts, parts...)
 	return a2aproto.NewMessage(a2aproto.MessageRoleAgent, finalParts)

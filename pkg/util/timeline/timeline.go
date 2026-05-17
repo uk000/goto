@@ -122,7 +122,7 @@ func NewTimeline(port int, label string, metadata map[string]any, inboundArgs *a
 		endNotifier:    endNotifier,
 		eventCounter:   atomic.Int32{},
 	}
-	t.send("ServerInfo", t.Server, true, false)
+	t.send("ServerInfo", t.Server.ServerInfo, true, false)
 	return t
 }
 
@@ -225,15 +225,19 @@ func CheckAndGetTimeline(data any) *Timeline {
 	return nil
 }
 
-func CheckAndGetResult(data any) map[string]any {
+func CheckAndGetResultOrHeaders(data any) (result, headers map[string]any) {
 	if m, ok := data.(map[string]any); ok {
 		for k := range m {
 			if strings.Contains(k, "Result") {
-				return m
+				return m, nil
+			} else if strings.Contains(k, "headers") || strings.Contains(k, "Headers") {
+				if m2, ok := m[k].(map[string]any); ok {
+					return nil, m2
+				}
 			}
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func (t *Timeline) SetStreamPreferred(stream chan *types.Pair[string, any]) {
@@ -289,7 +293,7 @@ func (t *Timeline) addEvent(label, text string, client *GotoClientInfo, remoteTe
 		t.send("ClientInfo", client, true, t.Finished)
 	}
 	if remoteServer != nil {
-		t.send("ServerInfo", remoteServer, true, t.Finished)
+		t.send("ServerInfo", remoteServer.ServerInfo, true, t.Finished)
 	}
 	if remoteData != nil {
 		t.send(label, remoteData, isJson, t.Finished)

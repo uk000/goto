@@ -318,10 +318,14 @@ func (c *MCPClient) newMCPSession(ctx context.Context, operLabel, url string, tc
 	id := fmt.Sprintf("%s.%d", c.ID, c.sessionCounter.Add(1))
 	url = addSessionIDQuery(url, id)
 	transport := c.newMCPTransport(c.Name, url)
-	if tc.Headers == nil {
-		tc.Headers = types.NewHeaders()
+	var outHeaders *types.Headers
+	if tc != nil {
+		if tc.Headers == nil {
+			tc.Headers = types.NewHeaders()
+		}
+		tc.Headers.NonNil()
+		outHeaders = tc.Headers.Clone()
 	}
-	tc.Headers.NonNil()
 	s := &MCPSession{
 		Ctx:          ctx,
 		ID:           id,
@@ -334,7 +338,7 @@ func (c *MCPClient) newMCPSession(ctx context.Context, operLabel, url string, tc
 		tc:           tc,
 		mcpClient:    c,
 		inHeaders:    inHeaders,
-		outHeaders:   tc.Headers.Clone(),
+		outHeaders:   outHeaders,
 		Timeline:     t,
 		transport:    transport,
 		ongoingCalls: map[string]*ToolCallContext{},
@@ -478,6 +482,18 @@ func (tctx *ToolCallContext) call() (*MCPResult, error) {
 			tctx.reportToolCallFailure(i, "No Error, No Result")
 		}
 	}
+	viaGotos := tctx.result.LastResponseHeaders[constants.HeaderViaGoto]
+	for _, v := range viaGotos {
+		tctx.result.RemoteGotos[v] = true
+	}
+	viaGotos = []string{}
+	for v := range tctx.result.RemoteGotos {
+		if !strings.Contains(v, "(A2A)") && !strings.Contains(v, "(MCP)") {
+			v = v + "(MCP)"
+		}
+		viaGotos = append(viaGotos, v)
+	}
+	tctx.result.LastResponseHeaders[constants.HeaderViaGoto] = viaGotos
 	return tctx.result, tctx.result.LastError
 }
 
@@ -501,14 +517,14 @@ func (c *MCPClient) InterceptRequest(r *http.Request) {
 		}
 		if s.tc != nil {
 			tool = s.tc.Tool
+			r.Header.Add(constants.HeaderGotoMCPServer, s.tc.Server)
+			r.Header.Add(constants.HeaderGotoMCPTool, s.tc.Tool)
 		}
 		if v := r.Context().Value(constants.HeaderGotoMCPRequestID); v != nil {
 			if requestID, ok := v.(string); ok {
 				r.Header.Add(constants.HeaderGotoMCPRequestID, requestID)
 			}
 		}
-		r.Header.Add(constants.HeaderGotoMCPServer, s.tc.Server)
-		r.Header.Add(constants.HeaderGotoMCPTool, s.tc.Tool)
 	}
 	if len(r.Header["Host"]) > 0 {
 		r.Host = r.Header["Host"][0]

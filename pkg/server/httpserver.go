@@ -20,8 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	a2aserver "goto/pkg/ai/a2a/server"
-	mcpserver "goto/pkg/ai/mcp/server"
 	. "goto/pkg/constants"
 	"goto/pkg/events"
 	"goto/pkg/global"
@@ -53,20 +51,15 @@ import (
 )
 
 var (
-	httpServer              *http.Server
-	jsonRPCServer           *http.Server
-	h2s                     = &http2.Server{}
-	coreRouter              *mux.Router
-	httpHandler             http.Handler
-	h2cHandler              http.Handler
-	mcpHandler              http.Handler
-	agentsHandler           http.Handler
-	aiHandler               http.Handler
-	httpStarted             bool
-	jsonRPCStarted          bool
-	httpListenersStarted    bool
-	jsonRPCListenersStarted bool
-	RootRouter              *mux.Router
+	httpServer           *http.Server
+	h2s                  = &http2.Server{}
+	coreRouter           *mux.Router
+	httpHandler          http.Handler
+	h2cHandler           http.Handler
+	mcpHandler           http.Handler
+	httpStarted          bool
+	httpListenersStarted bool
+	RootRouter           *mux.Router
 )
 
 func RunHttpServer() {
@@ -75,19 +68,13 @@ func RunHttpServer() {
 	gRPCHandler := GRPCHandler(coreRouter)
 	//h2cHandler = h2c.NewHandler(gRPCHandler, h2s)
 	h2cHandler = h2c.NewHandler(HTTPHandler(), h2s)
-	mcpHandler = mcpserver.MCPHandler()
-	agentsHandler = a2aserver.AgentsHandler()
-	aiHandler = configureAIRouter()
 	httpHandler = gRPCHandler
 	util.HTTPHandler = httpOnlyHandler()
 	err = configureAndStartHTTPServer()
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-	err = configureAndStartAIServer(global.Self.JSONRPCPort)
-	if err != nil {
-		log.Fatal(err.Error())
-	}
+	RunJsonRPCServer()
 	global.AddListenersStartWatcher(func() {
 		startup.Start()
 	})
@@ -103,7 +90,7 @@ func configureHTTPRouter() {
 	coreRouter.SkipClean(true)
 
 	adminRouter := coreRouter.PathPrefix("").Subrouter()
-	adminRouter.Use(intercept.IntereceptMiddleware(nil, nil))
+	adminRouter.Use(intercept.IntereceptMiddleware(preIntercept(), postIntercept()))
 	middleware.SetRoutesOnly(adminRouter)
 
 	RootRouter = util.CreateRouters(coreRouter)
@@ -117,24 +104,6 @@ func configureHTTPRouter() {
 
 	uninterceptedChainRouter := RootRouter.PathPrefix("").Subrouter()
 	middleware.LinkUnintercepted(uninterceptedChainRouter)
-
-}
-
-func configureAIRouter() *mux.Router {
-	aiRouter := mux.NewRouter()
-	middleware.UseCore(aiRouter)
-	//aiRouter.Use(intercept.IntereceptMiddleware(nil, nil))
-	aiRouter.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
-		return true
-	}).HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rs := util.GetRequestStore(r)
-		if rs.IsMCP {
-			mcpHandler.ServeHTTP(w, r)
-		} else if rs.IsAI {
-			agentsHandler.ServeHTTP(w, r)
-		}
-	})
-	return aiRouter
 }
 
 func httpOnlyHandler() http.Handler {
@@ -157,20 +126,6 @@ func configureAndStartHTTPServer() error {
 		ErrorLog: log.New(io.Discard, "discard", 0),
 	}
 	return StartHttpServer(httpServer, false)
-}
-
-func configureAndStartAIServer(port int) error {
-	jsonRPCServer = &http.Server{
-		Addr:         fmt.Sprintf("0.0.0.0:%d", port),
-		WriteTimeout: 10 * time.Hour,
-		ReadTimeout:  10 * time.Hour,
-		IdleTimeout:  1 * time.Hour,
-		ConnContext:  withConnContext,
-		//ConnState:    conn.ConnState,
-		Handler:  h2cHandler,
-		ErrorLog: log.New(io.Discard, "discard", 0),
-	}
-	return StartHttpServer(jsonRPCServer, true)
 }
 
 func StartHttpServer(server *http.Server, jsonRPC bool) error {
@@ -424,6 +379,7 @@ func postIntercept() http.Handler {
 				w.Header().Add(fmt.Sprintf("%s|%d", HeaderGotoTunnelStatus, rs.TunnelCount), strconv.Itoa(http.StatusInternalServerError))
 			}
 		}
+		util.SendGotoTrailers(w, r)
 	})
 }
 

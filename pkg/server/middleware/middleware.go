@@ -185,9 +185,15 @@ func RootPath(path string) *mux.Router {
 	if RootRouters[path] == nil {
 		r := mux.NewRouter().SkipClean(true).PathPrefix(path).Subrouter()
 		UseCore(r)
-		r.Use(intercept.IntereceptMiddleware(nil, nil))
+		r.Use(intercept.IntereceptMiddleware(nil, postIntercept()))
 		UseInterceptedCore(r)
 		RootRouters[path] = r
 	}
 	return RootRouters[path]
+}
+
+func postIntercept() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		util.SendGotoTrailers(w, r)
+	})
 }

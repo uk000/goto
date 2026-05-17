@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 
 	goa2aclient "trpc.group/trpc-go/trpc-a2a-go/client"
 	a2aproto "trpc.group/trpc-go/trpc-a2a-go/protocol"
@@ -48,7 +49,6 @@ type A2ASession struct {
 	outInput         string
 	inHeaders        http.Header
 	outHeaders       *types.Headers
-	ResponseHeaders  http.Header
 	Result           *A2AResult
 	callback         AgentResultsCallback
 	localProgress    chan *types.Pair[string, any]
@@ -109,11 +109,31 @@ func (acs *A2ASession) CallAgent(callback AgentResultsCallback, localProgress, u
 	}
 	inputParts := buildInputParts(input, data)
 	acs.configure(callback, localProgress, upstreamProgress, inputParts)
+	var errs map[string]error
 	if acs.Card.Capabilities.Streaming != nil && *acs.Card.Capabilities.Streaming {
-		err = acs.InvokeStream()
+		errs = acs.InvokeStream()
 	} else {
-		err = acs.InvokeUnary()
+		errs = acs.InvokeUnary()
 	}
+	if len(errs) == 1 {
+		for _, e := range errs {
+			err = e
+		}
+	} else if len(errs) > 1 {
+		err = errors.New(util.ToJSONText(errs))
+	}
+	viaGotos := acs.Result.LastResponseHeaders[constants.HeaderViaGoto]
+	for _, v := range viaGotos {
+		acs.Result.RemoteGotos[v] = true
+	}
+	viaGotos = []string{}
+	for v := range acs.Result.RemoteGotos {
+		if !strings.Contains(v, "(A2A)") && !strings.Contains(v, "(MCP)") {
+			v = v + "(A2A)"
+		}
+		viaGotos = append(viaGotos, v)
+	}
+	acs.Result.LastResponseHeaders[constants.HeaderViaGoto] = viaGotos
 	return
 }
 
@@ -125,7 +145,7 @@ func (acs *A2ASession) configure(callback AgentResultsCallback, localProgress, u
 	acs.timeline.SetStreamPreferred(localProgress)
 }
 
-func (acs *A2ASession) InvokeUnary() error {
+func (acs *A2ASession) InvokeUnary() map[string]error {
 	requestCount := acs.call.RequestCount
 	if requestCount == 0 {
 		requestCount = 1
@@ -137,29 +157,38 @@ func (acs *A2ASession) InvokeUnary() error {
 	rounds := requestCount / concurrent
 	acs.sendLocalProgress(acs.callerId, fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL))
 	results := map[string]*a2aproto.MessageResult{}
-	errors := map[string]error{}
+	errs := map[string]error{}
 	acs.reportInitiateCall()
-	for i := 1; i <= rounds; i++ {
-		requestID := fmt.Sprintf("[%s] Request#[%d]", acs.call.AgentURL, i)
+	callAgent := func(requestID string, wg *sync.WaitGroup) {
 		cr := acs.Result.getOrAddCall(requestID)
 		cr.ClientInfo = acs.clientInfo
 		result, err := acs.client.client.SendMessage(acs.ctx, a2aproto.SendMessageParams{
 			Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
 		})
 		if err != nil {
-			errors[requestID] = err
+			errs[requestID] = err
 		} else {
 			results[requestID] = result
 			acs.processResponse(requestID, result, cr)
 		}
+		wg.Done()
 	}
-	if len(errors) > 0 {
-		return fmt.Errorf("%+v", errors)
+	for i := 1; i <= rounds; i++ {
+		wg := &sync.WaitGroup{}
+		for j := 1; j <= concurrent; j++ {
+			wg.Add(1)
+			requestID := fmt.Sprintf("[%s @ %s] [Request# %d.%d]", acs.call.Name, acs.url, i, j)
+			go callAgent(requestID, wg)
+		}
+		wg.Wait()
+	}
+	if len(errs) > 0 {
+		return errs
 	}
 	return nil
 }
 
-func (acs *A2ASession) InvokeStream() error {
+func (acs *A2ASession) InvokeStream() map[string]error {
 	requestCount := acs.call.RequestCount
 	if requestCount == 0 {
 		requestCount = 1
@@ -171,20 +200,27 @@ func (acs *A2ASession) InvokeStream() error {
 	rounds := requestCount / concurrent
 	acs.sendLocalProgress(acs.callerId, fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL))
 	acs.reportInitiateCall()
-	for i := 0; i < rounds; i++ {
-		requestID := fmt.Sprintf("[%s @ %s] [Request# %d]", acs.call.Name, acs.url, i)
-		cr := acs.Result.getOrAddCall(requestID)
-		cr.ClientInfo = acs.clientInfo
-		ctx := context.WithValue(acs.ctx, constants.HeaderGotoA2ARequestID, requestID)
-		eventChan, err := acs.client.client.StreamMessage(ctx, a2aproto.SendMessageParams{
-			Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
-		})
-		if err != nil {
-			return err
+	errs := map[string]error{}
+	for i := 1; i <= rounds; i++ {
+		wg := &sync.WaitGroup{}
+		for j := 1; j <= concurrent; j++ {
+			wg.Add(1)
+			requestID := fmt.Sprintf("[%s @ %s] [Request# %d.%d]", acs.call.Name, acs.url, i, j)
+			cr := acs.Result.getOrAddCall(requestID)
+			cr.ClientInfo = acs.clientInfo
+			ctx := context.WithValue(acs.ctx, constants.HeaderGotoA2ARequestID, requestID)
+			eventChan, err := acs.client.client.StreamMessage(ctx, a2aproto.SendMessageParams{
+				Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
+			})
+			if err != nil {
+				errs[requestID] = err
+				continue
+			}
+			go acs.processStreamResponse(requestID, eventChan, cr, errs, wg)
 		}
-		acs.processStreamResponse(requestID, eventChan, cr)
+		wg.Wait()
 	}
-	return acs.err
+	return errs
 }
 
 func (acs *A2ASession) Handle(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, error) {
@@ -239,9 +275,13 @@ func (acs *A2ASession) updateResponseHeaders(r *http.Response) {
 		if acs.outHeaders.Response != nil {
 			acs.outHeaders.Response.UpdateHeaders(r.Header, fmt.Sprintf("A2A client response for caller %s", acs.callerId))
 		}
+		if v := r.Header[constants.HeaderViaGoto]; len(v) > 0 {
+			for _, viaGoto := range v {
+				acs.Result.RemoteGotos[viaGoto] = true
+			}
+		}
 		log.Printf("---------- Response headers received by A2A client [%s] from [%s] ------------\n", acs.callerId, acs.url)
 		log.Println(util.ToJSONText(r.Header))
-		acs.ResponseHeaders = r.Header
 	}
 }
 func buildInputParts(text string, data any) []a2aproto.Part {
@@ -271,23 +311,21 @@ func (acs *A2ASession) setPushConfig(taskID, url string) error {
 	return nil
 }
 
-func (acs *A2ASession) processStreamResponse(id string, eventChan <-chan a2aproto.StreamingMessageEvent, cr *A2ACallResult) {
+func (acs *A2ASession) processStreamResponse(id string, eventChan <-chan a2aproto.StreamingMessageEvent, cr *A2ACallResult, e map[string]error, wg *sync.WaitGroup) {
+	defer wg.Done()
 	for {
 		select {
 		case <-acs.ctx.Done():
 			msg := fmt.Sprintf("ERROR: Context timeout or cancellation while waiting for stream events: %v", acs.ctx.Err())
-			acs.err = acs.ctx.Err()
-			if acs.err == nil {
-				acs.err = errors.New(msg)
-			}
+			e[id] = errors.New(msg)
 			log.Println(msg)
 			return
 		case event, ok := <-eventChan:
 			if !ok {
 				log.Println("Stream channel closed.")
 				if acs.ctx.Err() != nil {
-					log.Printf("Context error after stream close: %v", acs.ctx.Err())
-					acs.err = acs.ctx.Err()
+					msg := fmt.Sprintf("Context error after stream close: %v", acs.ctx.Err())
+					e[id] = errors.New(msg)
 				}
 				return
 			}
@@ -404,17 +442,29 @@ func (acs *A2ASession) sendResponse(id, text string, data any, cr *A2ACallResult
 		}
 	}
 	if data != nil {
-		result := timeline.CheckAndGetResult(data)
+		result, headers := timeline.CheckAndGetResultOrHeaders(data)
 		if strings.Contains(dataKey, "Result") || result != nil {
-			cr.RemoteResult = data
+			cr.RemoteResult = result
+			data = result
+		} else if strings.Contains(dataKey, "headers") || strings.Contains(dataKey, "Headers") || headers != nil {
+			cr.RemoteHeaders = headers
+			cr.parent.LastRemoteHeaders = headers
+			data = headers
+			// dataKey = "UpstreamHeaders"
+			if acs.Result.LastResponseHeaders != nil {
+				viaGotos := util.GetViaGotosFromHeaders(headers)
+				for v := range viaGotos {
+					acs.Result.RemoteGotos[v] = true
+				}
+			}
 		} else {
 			t := timeline.CheckAndGetTimeline(data)
 			if strings.Contains(dataKey, "Timeline") || t != nil {
 				cr.RemoteTimeline = t
-			} else {
-				cr.Data[dataKey] = data
+				data = t
 			}
 		}
+		cr.Data[dataKey] = data
 	} else if text != "" {
 		cr.Content = append(cr.Content, text)
 	}

@@ -98,7 +98,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoTunnelHost, rs.TunnelCount), l.HostLabel)
 			w.Header().Add(fmt.Sprintf("%s_%d", HeaderViaGotoTunnel, rs.TunnelCount), l.Label)
 			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoProtocol, rs.TunnelCount), rs.GotoProtocol)
-		} else if !rs.ProxyRouter {
+		} else if !rs.ProxyRouter && !rs.IsProxy {
 			util.SendGotoHeaders(w, r)
 		}
 		pieces := strings.Split(r.RemoteAddr, ":")

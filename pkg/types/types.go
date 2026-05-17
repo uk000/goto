@@ -80,6 +80,13 @@ func NewPair[L any, R any](left L, right R) *Pair[L, R] {
 	}
 }
 
+func NewStringAnyPair(left string, right any) *Pair[string, any] {
+	return &Pair[string, any]{
+		Left:  left,
+		Right: right,
+	}
+}
+
 func NewStringPair(left, right string) *StringPair {
 	return &StringPair{
 		Left:  left,

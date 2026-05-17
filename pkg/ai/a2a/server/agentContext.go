@@ -49,35 +49,37 @@ type AgentTask struct {
 }
 
 type AgentContext struct {
-	port           int
-	label          string
-	serverID       string
-	listener       string
-	agent          *model.Agent
-	behavior       model.IAgentBehavior
-	ctx            context.Context
-	rs             *util.RequestStore
-	requestHeaders http.Header
-	delay          *types.Delay
-	triggers       DelegateTriggers
-	tools          map[string]map[string]*model.DelegateToolCall
-	agents         map[string]map[string]*model.DelegateAgentCall
-	input          *a2aproto.Message
-	inputData      map[string]any
-	inputText      string
-	options        *taskmanager.ProcessOptions
-	handler        taskmanager.TaskHandler
-	task           *AgentTask
-	logs           []string
-	localProgress  chan *types.Pair[string, any]
-	toolResults    map[string]any
-	agentResults   map[string]any
-	forcedStatus   int
-	overrideDelay  time.Duration
-	timeline       *timeline.Timeline
-	surfaceData    bool
-	reportTimeline bool
-	err            error
+	port            int
+	label           string
+	serverID        string
+	listener        string
+	agent           *model.Agent
+	behavior        model.IAgentBehavior
+	ctx             context.Context
+	rs              *util.RequestStore
+	requestHeaders  http.Header
+	delay           *types.Delay
+	triggers        DelegateTriggers
+	tools           map[string]map[string]*model.DelegateToolCall
+	agents          map[string]map[string]*model.DelegateAgentCall
+	input           *a2aproto.Message
+	inputData       map[string]any
+	inputText       string
+	options         *taskmanager.ProcessOptions
+	handler         taskmanager.TaskHandler
+	task            *AgentTask
+	logs            []string
+	localProgress   chan *types.Pair[string, any]
+	toolResults     map[string]any
+	agentResults    map[string]any
+	forcedStatus    int
+	overrideDelay   time.Duration
+	timeline        *timeline.Timeline
+	surfaceData     bool
+	reportTimeline  bool
+	err             error
+	upstreamHeaders map[string]any
+	remoteGotos     map[string]bool
 }
 
 type DelegateCallContext struct {
@@ -102,13 +104,15 @@ type agentOverrides struct {
 
 func newAgentContext(port int, serverID, listenerLabel string, agent *model.Agent, headers http.Header, rs *util.RequestStore) *AgentContext {
 	ac := &AgentContext{
-		port:           port,
-		label:          agent.ID,
-		serverID:       serverID,
-		listener:       listenerLabel,
-		agent:          agent,
-		requestHeaders: headers,
-		rs:             rs,
+		port:            port,
+		label:           agent.ID,
+		serverID:        serverID,
+		listener:        listenerLabel,
+		agent:           agent,
+		requestHeaders:  headers,
+		rs:              rs,
+		upstreamHeaders: map[string]any{},
+		remoteGotos:     map[string]bool{},
 	}
 	return ac
 }
@@ -262,7 +266,7 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 				tool.ToolCall.Authority = altDelegate.Authority
 			} else {
 				delegate := ac.agent.Config.Delegates.Tools[delegateHint]
-				if delegate != nil {
+				if delegate != nil && !delegate.Disabled {
 					toolCall = *delegate.ToolCall
 					tool.ToolCall = &toolCall
 				}
@@ -295,7 +299,7 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 				agent.AgentCall.Authority = altDelegate.Authority
 			} else {
 				delegate := ac.agent.Config.Delegates.Agents[delegateHint]
-				if delegate != nil {
+				if delegate != nil && !delegate.Disabled {
 					agentCall = *delegate.AgentCall
 					agent.AgentCall = &agentCall
 				}
@@ -311,14 +315,20 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 	}
 	haveExactMatches := false
 	for name := range inputs {
-		if ac.agent.Config.Delegates.Agents != nil && ac.agent.Config.Delegates.Agents[name] != nil {
-			if addAgent(ac.agent.Config.Delegates.Agents[name]) {
-				haveExactMatches = true
+		if ac.agent.Config.Delegates.Agents != nil {
+			d := ac.agent.Config.Delegates.Agents[name]
+			if d != nil && !d.Disabled {
+				if addAgent(ac.agent.Config.Delegates.Agents[name]) {
+					haveExactMatches = true
+				}
 			}
 		}
-		if ac.agent.Config.Delegates.Tools != nil && ac.agent.Config.Delegates.Tools[name] != nil {
-			if addTool(ac.agent.Config.Delegates.Tools[name]) {
-				haveExactMatches = true
+		if ac.agent.Config.Delegates.Tools != nil {
+			d := ac.agent.Config.Delegates.Tools[name]
+			if d != nil && !d.Disabled {
+				if addTool(ac.agent.Config.Delegates.Tools[name]) {
+					haveExactMatches = true
+				}
 			}
 		}
 		if len(ac.tools)+len(ac.agents) >= ac.agent.Config.Delegates.MaxCalls {
@@ -332,12 +342,12 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 			}
 			triggerPair := delegateTriple.First
 			if strings.EqualFold(triggerPair.Left, input) {
-				if delegateTriple.Second != nil {
+				if delegateTriple.Second != nil && !delegateTriple.Second.Disabled {
 					if addTool(delegateTriple.Second) {
 						haveExactMatches = true
 					}
 				}
-				if delegateTriple.Third != nil {
+				if delegateTriple.Third != nil && !delegateTriple.Third.Disabled {
 					if addAgent(delegateTriple.Third) {
 						haveExactMatches = true
 					}
@@ -353,10 +363,10 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 				}
 				triggerPair := delegateTriple.First
 				if triggerPair.Right.MatchString(input) || strings.Contains(triggerPair.Left, input) {
-					if delegateTriple.Second != nil {
+					if delegateTriple.Second != nil && !delegateTriple.Second.Disabled {
 						addTool(delegateTriple.Second)
 					}
-					if delegateTriple.Third != nil {
+					if delegateTriple.Third != nil && !delegateTriple.Third.Disabled {
 						addAgent(delegateTriple.Third)
 					}
 				}

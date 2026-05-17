@@ -386,8 +386,8 @@ func middlewareFunc(next http.Handler) http.Handler {
 		if next != nil {
 			next.ServeHTTP(w, r)
 		}
-		irw := util.GetInterceptResponseWriter(r).(*intercept.InterceptResponseWriter)
 		rs := util.GetRequestStore(r)
+		irw := rs.InterceptResponseWriter.(*intercept.InterceptResponseWriter)
 		if statusToReport > 0 {
 			irw.StatusCode = statusToReport
 			w.Header().Add(HeaderGotoURIStatus, strconv.Itoa(statusToReport))

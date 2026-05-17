@@ -36,14 +36,32 @@ var (
 func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
 	port := GetRequestOrListenerPort(r)
 	rs := GetRequestStore(r)
+	w.Header().Add("Trailer", constants.HeaderViaGoto)
+	w.Header().Add(constants.HeaderViaGoto, global.Funcs.GetListenerLabel(r))
 	w.Header().Add(constants.HeaderGotoRemoteAddress, r.RemoteAddr)
 	w.Header().Add(constants.HeaderGotoPort, port)
 	w.Header().Add(constants.HeaderGotoTLS, fmt.Sprintf("%t", rs.IsTLS))
 	w.Header().Add(constants.HeaderGotoHost, global.Self.HostLabel)
 	w.Header().Add(constants.HeaderGotoProtocol, rs.GotoProtocol)
-	w.Header().Add(constants.HeaderViaGoto, global.Funcs.GetListenerLabel(r))
 	CopyHeaders("Request", r, w, r.Header, true, true, false)
 	rs.IsHeadersSent = true
+}
+
+func SendGotoTrailers(w http.ResponseWriter, r *http.Request) {
+	rs := GetRequestStore(r)
+	viaGotos := map[string]bool{}
+	old := w.Header()[constants.HeaderViaGoto]
+	for _, v := range old {
+		viaGotos[v] = true
+	}
+	for _, v := range rs.ViaGotos {
+		viaGotos[v] = true
+	}
+	values := []string{}
+	for v := range viaGotos {
+		values = append(values, v)
+	}
+	w.Header()[constants.HeaderViaGoto] = values
 }
 
 func GotoProtocol(isH2, isTLS, isGRPC bool) string {
@@ -62,6 +80,35 @@ func GotoProtocol(isH2, isTLS, isGRPC bool) string {
 		protocol = "HTTP/1.1"
 	}
 	return protocol
+}
+
+func GetViaGotosFromHeaders(upheaders map[string]any) map[string]bool {
+	viaGotos := map[string]bool{}
+	for _, v := range upheaders {
+		if m, ok := v.(map[string]any); ok {
+			rh := m["ResponseHeaders"]
+			if rh == nil {
+				continue
+			}
+			if responseHeaders, ok := rh.(map[string]any); ok {
+				if v2 := responseHeaders[constants.HeaderViaGoto]; v2 != nil {
+					if values, ok := v2.([]any); ok {
+						for _, value := range values {
+							viaGotos[fmt.Sprint(value)] = true
+						}
+					}
+				}
+			} else if responseHeaders, ok := rh.(http.Header); ok {
+				if values := responseHeaders[constants.HeaderViaGoto]; values != nil {
+					for _, value := range values {
+						viaGotos[fmt.Sprint(value)] = true
+					}
+				}
+
+			}
+		}
+	}
+	return viaGotos
 }
 
 func SendBadRequest(msg string, w http.ResponseWriter, r *http.Request) {

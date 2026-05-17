@@ -1597,6 +1597,46 @@ proxy:
         - upResponseRange: [201,299]
           proxyResponse: 418
       targets:
+        agent1:
+          enabled: true
+          endpoints:
+            agent:
+              url: http://localhost:8080
+              method: POST
+              protocol: HTTP/1.1
+              authority: goto.uk
+              tls: false
+              requestCount: 1
+              concurrent: 1
+          triggers:
+            trigger1:
+              matchAny:
+                - uriPrefix: /callagent
+              transform:
+                uriMap:
+                  /callagent: /a2a/client/call/result
+                payload: |
+                  name: goto-agent
+                  agentURL: http://localhost:3000/agent/goto-agent
+                  cardURL: http://localhost:3000/agent/goto-agent
+                  authority: goto.goto
+                  message: echo
+                  headers:
+                    request:
+                      add:
+                        x: y
+                      remove:
+                        - bar
+                      forward:
+                        - foo
+                    response:
+                      add:
+                        y: x
+                      remove:
+                        - bar
+                  delay: 1s
+              endpoints:
+                - agent
         target1:
           enabled: true
           trafficConfig:
