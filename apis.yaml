@@ -327,7 +327,7 @@
     - /mcpapi/client/{name}/payload/roots: '[POST]'
     - /mcpapi/client/{name}/payload/roots/: '[POST]'
     /mcpapi/client/call:
-    - /mcpapi/client/call: '[POST]'
+    - /mcpapi/client/call/tool: '[POST]'
     /mcpapi/client/details:
     - /mcpapi/client/details: '[GET]'
     - /mcpapi/client/details/: '[GET]'

@@ -356,7 +356,7 @@ func createPortListener(port int, protocol, cn string, existing map[int]bool) *L
 		existing[port] = true
 		l := newListener(port, protocol, cn, true)
 		if protocol == "" {
-			protocol = "tcp"
+			protocol = "http"
 		}
 		l.Protocol = protocol
 		l.assignProtocol()

@@ -19,6 +19,7 @@ package mcpclient
 import (
 	"errors"
 	"fmt"
+	"goto/pkg/constants"
 	"goto/pkg/global"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
@@ -45,7 +46,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRouteWithMultiQ(mcpClient, "/list/tools", listTools, [][]string{{"url"}, {"sse", "tls", "authority"}}, "POST", "GET")
 	util.AddRouteWithMultiQ(mcpClient, "/list/tools/names", listTools, [][]string{{"url"}, {"sse", "tls", "authority"}}, "POST", "GET")
 
-	util.AddRoute(mcpClient, "/call", callTool, "POST")
+	util.AddRoute(mcpClient, "/call/tool", callTool, "POST")
 
 	util.AddRoute(mcpClient, "/{name}?/payload/{kind:sample|elicit}", addClientPayload, "POST")
 	util.AddRoute(mcpClient, "/{name}?/payload/roots", addRoots, "POST")
@@ -119,9 +120,8 @@ func listTools(w http.ResponseWriter, r *http.Request) {
 
 func callTool(w http.ResponseWriter, r *http.Request) {
 	rs := util.GetRequestStore(r)
-	b, _ := io.ReadAll(r.Body)
 	msg := ""
-	tc, err := ParseToolCall(b)
+	tc, err := ParseToolCall(r.Body)
 	var output *MCPResult
 	if err != nil || tc == nil {
 		if err != nil {
@@ -136,6 +136,11 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 		} else {
 			msg = fmt.Sprintf("Tool %s called successfully on url %s", tc.Tool, tc.URL)
 		}
+		if output != nil {
+			for v := range output.RemoteGotos {
+				w.Header().Add(constants.HeaderViaGoto, v)
+			}
+		}
 	}
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -149,7 +154,13 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 
 func doToolCall(port int, tc *ToolCall, w http.ResponseWriter, r *http.Request) (output *MCPResult, err error) {
 	clientId := fmt.Sprintf("[%s][API: tool/call][%s]", global.Self.HostLabel, tc.Tool)
-	client := NewClient(port, tc.ForceSSE, tc.H2, tc.TLS, clientId, util.GetCurrentListenerLabel(r), tc.Authority, nil, streamMCPResponse(tc.Tool, w, r), endMCPResponse(tc.Tool, w, r))
+	var streamHandler func(string, any, bool) error
+	var endHandler func(string, any, bool)
+	if !tc.NoEvents {
+		streamHandler = streamMCPResponse(tc.Tool, w, r)
+		endHandler = endMCPResponse(tc.Tool, w, r)
+	}
+	client := NewClient(port, tc.ForceSSE, tc.H2, tc.TLS, clientId, util.GetCurrentListenerLabel(r), tc.Authority, nil, streamHandler, endHandler)
 	session := client.CreateSession(r.Context(), tc.URL, tc.Tool, tc, r.Header)
 	session.SetAuthority(tc.Authority)
 	defer func() {

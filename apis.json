@@ -749,7 +749,7 @@
     "/mcpapi/client": {
       "/mcpapi/client/call": [
         {
-          "/mcpapi/client/call": "[POST]"
+          "/mcpapi/client/call/tool": "[POST]"
         }
       ],
       "/mcpapi/client/details": [

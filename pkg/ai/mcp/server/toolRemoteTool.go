@@ -71,8 +71,9 @@ func (t *MCPTool) callRemoteTool(tctx *ToolCallContext) (*gomcp.CallToolResult, 
 	} else {
 		msg := fmt.Sprintf("Remote operation [%s] successful on [%s]. Sending response...", operLabel, tc.URL)
 		tctx.Log(msg)
-		result = remoteResult.ToMCP()
 		tctx.applyDelay()
+		tctx.remoteGotos = remoteResult.RemoteGotos
+		result = remoteResult.ToMCP()
 	}
 	return result, err
 }

@@ -305,7 +305,9 @@ func (tt *TrafficTransform) prepare() {
 func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTransform, rc *RequestContext, pt *HTTPProxyTracker) *invocation.InvocationSpec {
 	is := ep.is.Clone()
 	is.URL = ep.prepareURL(matchedURI, tt, rc, pt)
-	is.Method = rc.method
+	if is.Method == "" {
+		is.Method = rc.method
+	}
 	var add map[string]string
 	var remove []string
 	if tt != nil {
