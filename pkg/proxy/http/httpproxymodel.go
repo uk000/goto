@@ -241,8 +241,10 @@ func (p *Proxy) addProxyPath(path string) *mux.Router {
 	if proxyRouters[p.Port] == nil {
 		proxyRouters[p.Port] = map[string]*mux.Router{}
 	}
-	proxyRouters[p.Port][path] = p.Router.PathPrefix(path).Subrouter()
-	configureRouter(proxyRouters[p.Port][path])
+	if proxyRouters[p.Port][path] == nil {
+		proxyRouters[p.Port][path] = p.Router.PathPrefix(path).Subrouter()
+		configureRouter(proxyRouters[p.Port][path])
+	}
 	return proxyRouters[p.Port][path]
 }
 
@@ -263,9 +265,6 @@ func (p *Proxy) AddTarget(t *Target) error {
 			rootURI, suffix := util.GetRootURI(uri)
 			if rootURI == "" {
 				rootURI = "/"
-				suffix = "*"
-			} else if match.URIPrefix != "" {
-				suffix += "*"
 			}
 			match.router = p.addProxyPath(rootURI)
 			if re, err := util.BuildURIMatcherForRouter(suffix, prefix, ProxyRequest, match.router); err == nil {
@@ -278,6 +277,12 @@ func (p *Proxy) AddTarget(t *Target) error {
 	for epName, ep := range t.Endpoints {
 		ep.name = epName
 		ep.target = t
+		if ep.RequestCount == 0 {
+			ep.RequestCount = 1
+		}
+		if ep.Concurrent == 0 {
+			ep.Concurrent = 1
+		}
 	}
 	for triggerName, trigger := range t.Triggers {
 		trigger.name = triggerName

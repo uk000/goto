@@ -358,9 +358,12 @@ func (ep *EndpointInvocation) prepareURL(matchedURI string, tt *TrafficTransform
 		if tt.stripURIRegexp != nil {
 			targetURI = tt.stripURIRegexp.ReplaceAllString(targetURI, "$1$3")
 		} else if len(tt.URIMap) > 0 {
-			uri := tt.URIMap[matchedURI]
+			uri := tt.URIMap[rc.r.RequestURI]
 			if uri == "" {
-				uri = tt.URIMap[matchedURI+"/*"]
+				uri = tt.URIMap[matchedURI]
+			}
+			if uri == "" {
+				uri = tt.URIMap[matchedURI+"*"]
 			}
 			if uri != "" {
 				targetURI = uri
