@@ -22,7 +22,6 @@ import (
 	"goto/pkg/server/middleware"
 	"goto/pkg/types"
 	"goto/pkg/util"
-	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -40,31 +39,10 @@ var (
 
 func setRoutes(r *mux.Router) {
 	infoRouter := middleware.RootPath("/goto")
-	util.AddRoute(infoRouter, "/test", test, "GET")
 	util.AddRoute(infoRouter, "/version", showVersion, "GET")
 	util.AddRoute(infoRouter, "/{k:routes|apis}/refresh", showApis, "GET")
 	util.AddRoute(infoRouter, "/{k:routes|apis}/level={level}", showApis, "GET")
 	util.AddRouteWithMultiQ(infoRouter, "/{k:routes|apis}", showApis, [][]string{{}, {"q"}, {"url"}}, "GET")
-}
-
-func test(w http.ResponseWriter, r *http.Request) {
-	// 1. Declare which headers will be trailers BEFORE writing any body data
-	w.Header().Add("Trailer", "AtEnd1")
-	w.Header().Add("Trailer", "AtEnd2")
-
-	// Set normal headers
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-
-	// Implicitly or explicitly write the header
-	w.WriteHeader(http.StatusOK)
-
-	// 2. Write response body
-	io.WriteString(w, "This body is sent before the trailers.\n")
-
-	// 3. Set the actual trailer values
-	// These will be sent at the very end of the chunked response
-	w.Header().Set("AtEnd1", "value 1")
-	w.Header().Set("AtEnd2", "value 2")
 }
 
 func showVersion(w http.ResponseWriter, r *http.Request) {

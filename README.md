@@ -225,7 +225,7 @@ See [Startup Command](cmd/README.md) doc.
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
-| GET       | /version    | Get version info of this `goto` instance.  |
+| GET       | /goto/version    | Get version info of this `goto` instance.  |
 
 ###### <small> [Back to TOC](#toc) </small>
 
@@ -238,7 +238,11 @@ This API returns a list of Goto's admin APIs, grouped by features (prefixes)
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
-| GET       | /apis    | Get a list of all APIs offered by this version of `Goto`.  |
+| GET       | /goto/apis, /goto/routes    | Get a list of all APIs offered by this version of `Goto`.  |
+| GET       | /goto/apis/refresh | Refresh cached APIs and present the refreshed list.  |
+| GET       | /goto/apis?level=`{level}`    | Get a list of APIs upto the given level depth  |
+| GET       | /goto/apis?q=`{query}`    | Filter the APIs based on the given query text  |
+| GET       | /goto/apis?url=`{url}`    | Show the APIs with `curl` command using the given base URL |
 
 ###### <small> [Back to TOC](#toc) </small>
 
