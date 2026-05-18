@@ -79,7 +79,7 @@ func (tctx *ToolCallContext) addForwardHeaders(headers types.SimpleHTTPHeaders, 
 			finalForwardHeaders[h] = true
 		}
 		if tctx.requestHeaders != nil {
-			types.ForwardHeaders(tctx.requestHeaders, headers, maps.Keys(finalForwardHeaders), tctx.Label)
+			types.ForwardHeaders(tctx.requestHeaders, headers, maps.Keys(finalForwardHeaders))
 		}
 	}
 	toolForwardHeaders := []string{}

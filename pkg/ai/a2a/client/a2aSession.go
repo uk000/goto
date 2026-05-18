@@ -234,21 +234,23 @@ func (acs *A2ASession) Handle(ctx context.Context, client *http.Client, req *htt
 	if client == nil {
 		return nil, fmt.Errorf("a2aClient.httpRequestHandler: http client is nil")
 	}
-	acs.updateRequestHeaders(req)
 	requestID := ""
+	agent := ""
 	if v := req.Context().Value(constants.HeaderGotoA2ARequestID); v != nil {
 		if s, ok := v.(string); ok {
 			requestID = s
 			req.Header.Add(constants.HeaderGotoA2ARequestID, requestID)
 			req.Header.Add(constants.HeaderGotoA2AServer, acs.url)
 			req.Header.Add(constants.HeaderGotoA2AAgent, acs.Card.Name)
+			agent = acs.Card.Name
 		}
 	}
+	acs.updateRequestHeaders(req, agent)
 	acs.Result.storeHeaders(requestID, req.Header, nil, 0)
 	acs.clientInfo.StoreHeaders(req.Header)
 	resp, err = client.Do(req)
 	if resp != nil {
-		acs.updateResponseHeaders(resp)
+		acs.updateResponseHeaders(resp, agent)
 		acs.Result.storeHeaders(requestID, req.Header, resp.Header, resp.StatusCode)
 	}
 	if err != nil {
@@ -258,19 +260,19 @@ func (acs *A2ASession) Handle(ctx context.Context, client *http.Client, req *htt
 	return resp, nil
 }
 
-func (acs *A2ASession) updateRequestHeaders(r *http.Request) {
+func (acs *A2ASession) updateRequestHeaders(r *http.Request, agent string) {
 	if acs.outHeaders.Request != nil {
 		acs.outHeaders.Request.UpdateHeaders(r.Header, fmt.Sprintf("A2A client request for caller %s", acs.callerId))
-		types.ForwardHeaders(acs.inHeaders, r.Header, slices.Values(acs.outHeaders.Request.Forward), acs.callerId)
+		types.ForwardHeaders(acs.inHeaders, r.Header, slices.Values(acs.outHeaders.Request.Forward))
 	}
 	if len(r.Header["Host"]) > 0 {
 		r.Host = r.Header["Host"][0]
 	}
-	log.Printf("---------- Outbound request headers from A2A client [%s] to %s ------------\n", acs.callerId, acs.url)
+	log.Printf("---------- Outbound request headers from A2A client [%s] for Agent Call to Agent [%s] at URL [%s] ------------\n", acs.callerId, agent, acs.url)
 	log.Println(util.ToJSONText(r.Header))
 }
 
-func (acs *A2ASession) updateResponseHeaders(r *http.Response) {
+func (acs *A2ASession) updateResponseHeaders(r *http.Response, agent string) {
 	if r != nil {
 		if acs.outHeaders.Response != nil {
 			acs.outHeaders.Response.UpdateHeaders(r.Header, fmt.Sprintf("A2A client response for caller %s", acs.callerId))
@@ -280,7 +282,7 @@ func (acs *A2ASession) updateResponseHeaders(r *http.Response) {
 				acs.Result.RemoteGotos[viaGoto] = true
 			}
 		}
-		log.Printf("---------- Response headers received by A2A client [%s] from [%s] ------------\n", acs.callerId, acs.url)
+		log.Printf("---------- Response headers received by A2A client [%s] for Agent Call to Agent [%s] from URL [%s] ------------\n", acs.callerId, agent, acs.url)
 		log.Println(util.ToJSONText(r.Header))
 	}
 }

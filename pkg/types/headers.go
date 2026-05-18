@@ -129,7 +129,7 @@ func (hc *HeadersConfig) UpdateHeaders(headers http.Header, info string) {
 	}
 }
 
-func ForwardHeaders(sourceHeaders ReadableHeaders, targetHeaders AddableHeaders, forwardHeaders iter.Seq[string], info string) {
+func ForwardHeaders(sourceHeaders ReadableHeaders, targetHeaders AddableHeaders, forwardHeaders iter.Seq[string]) {
 	forwardedHeaders := map[string]string{}
 	if forwardHeaders != nil && sourceHeaders != nil {
 		for h := range forwardHeaders {

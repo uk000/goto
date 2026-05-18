@@ -25,7 +25,9 @@ import (
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"goto/pkg/util/timeline"
+	"log"
 	"net/http"
+	"slices"
 	"time"
 
 	goa2aclient "trpc.group/trpc-go/trpc-a2a-go/client"
@@ -125,14 +127,16 @@ func CallAgentWithTimeline(ctx context.Context, port int, call *AgentCall, callb
 }
 
 func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, call *AgentCall, inHeaders http.Header) (card *goa2aserver.AgentCard, err error) {
-	if url == "" {
-		url = call.CardURL
-	}
-	if url == "" {
-		url = call.AgentURL
-	}
-	if authority == "" {
-		authority = call.Authority
+	if call != nil {
+		if url == "" {
+			url = call.CardURL
+		}
+		if url == "" {
+			url = call.AgentURL
+		}
+		if authority == "" {
+			authority = call.Authority
+		}
 	}
 	url = util.FixURL(url, ".well-known/agent.json", false)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -142,10 +146,17 @@ func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, c
 	if authority != "" {
 		req.Host = authority
 	}
+	if call != nil && call.Headers != nil && call.Headers.HasForwardHeaders() {
+		types.ForwardHeaders(inHeaders, req.Header, slices.Values(call.Headers.Request.Forward))
+	}
+	log.Printf("---------- Outbound request headers from A2A client to load Agent Card from %s ------------\n", url)
+	log.Println(util.ToJSONText(req.Header))
 	resp, err := ac.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch agent card: %w", err)
 	}
+	log.Printf("---------- Response headers received by A2A client for Agent Card from %s ------------\n", url)
+	log.Println(util.ToJSONText(resp.Header))
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("Agent card request failed with status code: %d", resp.StatusCode)

@@ -518,7 +518,7 @@ func (c *MCPClient) InterceptRequest(r *http.Request) {
 		if outHeaders != nil && outHeaders.Request != nil {
 			label := fmt.Sprintf("MCP client request for %s", s.mcpClient.CallerId)
 			outHeaders.Request.UpdateHeaders(r.Header, label)
-			types.ForwardHeaders(s.inHeaders, r.Header, slices.Values(outHeaders.Request.Forward), label)
+			types.ForwardHeaders(s.inHeaders, r.Header, slices.Values(outHeaders.Request.Forward))
 		}
 		if s.tc != nil {
 			tool = s.tc.Tool
