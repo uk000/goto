@@ -33,9 +33,7 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-var (
-	MCPRequestStoreBySession = map[string]*util.MCPRequestStore{}
-)
+var ()
 
 func MCPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -106,21 +104,16 @@ func MCPHybridHandler(server *MCPServer) http.Handler {
 
 func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler http.Handler) {
 	rs := util.GetRequestStore(r)
-	session := server.getOrSetSessionContext(r)
-	sessionId := r.Header.Get("X-MCP-Session-ID")
-	ms := MCPRequestStoreBySession[sessionId]
-	if ms == nil {
-		ms = &util.MCPRequestStore{}
-		MCPRequestStoreBySession[sessionId] = ms
-	}
-	rs.MCPRequestStore = ms
+	sessionID := r.Header.Get(HeaderMCPSessionID)
+	session := server.getOrSetSessionContext(sessionID)
+	ms := server.SetMCPSessionStore(r)
 	switch r.Method {
 	case "DELETE":
 		if session != nil {
 			handler.ServeHTTP(w, r)
 			close(session.finished)
 			server.removeSessionContext(session.SessionID)
-			delete(MCPRequestStoreBySession, sessionId)
+			server.DeleteMCPSessionStore(sessionID)
 		}
 	case "GET":
 		ctx, cancel := context.WithCancel(r.Context())

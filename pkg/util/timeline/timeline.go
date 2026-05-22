@@ -243,8 +243,10 @@ func CheckAndGetResultOrHeaders(data any) (result, headers map[string]any) {
 }
 
 func (t *Timeline) SetStreamPreferred(stream chan *types.Pair[string, any]) {
-	t.stream = stream
-	t.streamPreferred = true
+	if stream != nil {
+		t.stream = stream
+		t.streamPreferred = true
+	}
 }
 
 func (t *Timeline) EndTimeline(label, text string, data any, success bool) {

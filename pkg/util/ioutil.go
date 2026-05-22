@@ -329,3 +329,10 @@ func EmptyBody() io.Reader {
 func Sanitize(name string) string {
 	return replacer.Replace(name)
 }
+
+func LinkChannels[T any](from, to chan T) {
+	for v := range from {
+		to <- v
+	}
+	log.Println("Channel Link Finished")
+}

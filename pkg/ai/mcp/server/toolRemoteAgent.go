@@ -22,6 +22,7 @@ import (
 	a2aclient "goto/pkg/ai/a2a/client"
 	aicommon "goto/pkg/ai/common"
 	"goto/pkg/types"
+	"goto/pkg/util"
 	"sync"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -57,19 +58,23 @@ func (t *MCPTool) callRemoteAgent(tctx *ToolCallContext) (*gomcp.CallToolResult,
 		msg = fmt.Sprintf("Loaded agent card for Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.AgentURL, session.Card.Capabilities.Streaming)
 		tctx.AddEvent(msg)
 	}
-	stream := make(chan *types.Pair[string, any], 10)
+	localProgress := make(chan *types.Pair[string, any], 10)
+	upstreamProgress := make(chan *types.Pair[string, any], 10)
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	go tctx.processResults(ac.Name, ac.AgentURL, stream, result, &wg)
-	err = session.CallAgent(func(key, output string, data any) {
-		tctx.notifyClient(fmt.Sprintf("%s: %s", key, output), data, true)
-	}, nil, nil)
+	go util.LinkChannels(localProgress, upstreamProgress)
+	go tctx.processResults(ac.Name, ac.AgentURL, upstreamProgress, result, &wg)
+	// callback := func(key, output string, data any) {
+	// 	tctx.notifyClient(fmt.Sprintf("%s: %s", key, output), data, true)
+	// }
+	err = session.CallAgent(nil, localProgress, upstreamProgress)
 	wg.Wait()
+	close(localProgress)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to call Agent [%s] URL [%s] with error: %s", ac.Name, ac.AgentURL, err.Error())
-	} else {
-		msg = fmt.Sprintf("Finished Call to Agent [%s] URL [%s], Streaming [%d]", ac.Name, ac.AgentURL, session.Card.Capabilities.Streaming)
-		tctx.AddEvent(msg)
 	}
+	tctx.remoteGotos = session.Result.RemoteGotos
+	data := result.StructuredContent
+	result = session.Result.ToMCP(data.(map[string]any))
 	return result, nil
 }

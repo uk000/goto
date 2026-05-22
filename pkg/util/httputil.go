@@ -37,7 +37,13 @@ func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
 	port := GetRequestOrListenerPort(r)
 	rs := GetRequestStore(r)
 	w.Header().Add("Trailer", constants.HeaderViaGoto)
-	w.Header().Add(constants.HeaderViaGoto, global.Funcs.GetListenerLabel(r))
+	label := global.Funcs.GetListenerLabel(r)
+	if rs.IsMCP {
+		label += "(MCP)"
+	} else if rs.IsAI {
+		label += "(A2A)"
+	}
+	w.Header().Add(constants.HeaderViaGoto, label)
 	w.Header().Add(constants.HeaderGotoRemoteAddress, r.RemoteAddr)
 	w.Header().Add(constants.HeaderGotoPort, port)
 	w.Header().Add(constants.HeaderGotoTLS, fmt.Sprintf("%t", rs.IsTLS))

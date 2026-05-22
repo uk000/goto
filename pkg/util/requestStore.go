@@ -101,12 +101,13 @@ type RequestStore struct {
 	Request                 *http.Request
 	ResponseWriter          http.ResponseWriter
 	CurrentRouter           *mux.Router
-	MCPRequestStore         *MCPRequestStore
 	ViaGotos                []string
 }
 
 type MCPRequestStore struct {
 	ForcedStatus int
+	RS           *RequestStore
+	Ctx          context.Context
 }
 
 var (

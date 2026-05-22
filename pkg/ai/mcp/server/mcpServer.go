@@ -84,6 +84,7 @@ type MCPServerPayload struct {
 type SessionContext struct {
 	SessionID string
 	Server    *MCPServer
+	MS        *util.MCPRequestStore
 	finished  chan bool
 }
 
@@ -97,22 +98,24 @@ type PortServers struct {
 }
 
 const (
-	KindTools          = "tools"
-	KindPrompts        = "prompts"
-	KindResources      = "resources"
-	KindTemplates      = "templates"
-	HeaderMCPSessionID = "Mcp-Session-Id"
+	KindTools           = "tools"
+	KindPrompts         = "prompts"
+	KindResources       = "resources"
+	KindTemplates       = "templates"
+	HeaderMCPSessionID  = "Mcp-Session-Id"
+	HeaderXMCPSessionID = "X-MCP-Session-ID"
 )
 
 var (
-	DefaultStatelessServer *MCPServer
-	DefaultStatefulServer  *MCPServer
-	PortsServers           = map[int]*PortServers{}
-	ServerRoutes           = map[string]*types.Pair[string, string]{}
-	AllComponents          = map[string]map[string]map[string]IMCPComponent{}
-	Kinds                  = []string{KindTools, KindPrompts, KindResources, KindTemplates}
-	StatusManager          = status.NewStatusManager()
-	lock                   sync.RWMutex
+	DefaultStatelessServer   *MCPServer
+	DefaultStatefulServer    *MCPServer
+	PortsServers             = map[int]*PortServers{}
+	ServerRoutes             = map[string]*types.Pair[string, string]{}
+	AllComponents            = map[string]map[string]map[string]IMCPComponent{}
+	Kinds                    = []string{KindTools, KindPrompts, KindResources, KindTemplates}
+	StatusManager            = status.NewStatusManager()
+	MCPRequestStoreBySession = map[string]*util.MCPRequestStore{}
+	lock                     sync.RWMutex
 )
 
 func init() {
@@ -777,38 +780,6 @@ func (m *MCPServer) onUnsubscribed(ctx context.Context, req *gomcp.UnsubscribeRe
 	log.Println(msg)
 	notifyClient(ctx, req.Params, msg, req.Session, nil)
 	return nil
-}
-
-func (m *MCPServer) getSessionContext(sessionID string) *SessionContext {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-	return m.sessionContexts[sessionID]
-}
-
-func (m *MCPServer) removeSessionContext(sessionID string) {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-	delete(m.sessionContexts, sessionID)
-}
-
-func (m *MCPServer) setSessionContext(sessionID string, ctx *SessionContext) {
-	m.lock.Lock()
-	m.sessionContexts[sessionID] = ctx
-	m.lock.Unlock()
-}
-
-func (m *MCPServer) getOrSetSessionContext(r *http.Request) (session *SessionContext) {
-	sessionID := r.Header.Get(HeaderMCPSessionID)
-	if sessionID != "" {
-		session = m.getSessionContext(sessionID)
-		if session == nil {
-			session = &SessionContext{SessionID: sessionID, Server: m, finished: make(chan bool, 10)}
-			m.setSessionContext(sessionID, session)
-		} else {
-			session.Server = m
-		}
-	}
-	return
 }
 
 func (m *MCPServer) Middleware(next gomcp.MethodHandler) gomcp.MethodHandler {

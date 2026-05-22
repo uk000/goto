@@ -661,9 +661,14 @@ func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, h
 		clone.Delay = delay
 	}
 	clone.Headers = types.Union(tc.Headers, headers)
-	newArgs := *tc.Args
-	clone.Args = &newArgs
+	if tc.Args != nil {
+		newArgs := *tc.Args
+		clone.Args = &newArgs
+	}
 	if args != nil {
+		if clone.Args == nil {
+			clone.Args = aicommon.NewCallArgs()
+		}
 		clone.Args.UpdateFrom(args...)
 	}
 	return &clone

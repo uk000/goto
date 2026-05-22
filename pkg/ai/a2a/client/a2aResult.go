@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"goto/pkg/util/timeline"
 	"net/http"
+
+	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type A2AResult struct {
@@ -151,6 +153,39 @@ func (r *A2AResult) ToObject() map[string]any {
 		r.Timeline.Events = nil
 	}
 	result["Timeline"] = r.Timeline
+	return result
+}
+
+func (r *A2AResult) ToMCP(extras map[string]any) *gomcp.CallToolResult {
+	result := &gomcp.CallToolResult{}
+	if !r.AgentCall.NoCallDetails {
+		if len(r.CallResults) > 0 {
+			r.Timeline.Data["A2ACalls"] = r.buildCallsData()
+			if !r.AgentCall.ResultOnly {
+				for _, cr := range r.CallResults {
+					for _, text := range cr.Content {
+						result.Content = append(result.Content, &gomcp.TextContent{Text: text})
+					}
+				}
+			}
+		}
+	}
+	if r.AgentCall.NoEvents {
+		r.Timeline.Events = nil
+	}
+	if r.LastRemoteHeaders != nil {
+		for k, v := range r.LastRemoteHeaders {
+			r.Timeline.UpstreamHeaders[k] = v
+		}
+	}
+	r.Timeline.UpstreamHeaders[r.Agent] = map[string]any{
+		"RequestHeaders":  r.LastRequestHeaders,
+		"ResponseHeaders": r.LastResponseHeaders,
+	}
+	for k, v := range extras {
+		r.Timeline.Data[k] = v
+	}
+	result.StructuredContent = r.Timeline
 	return result
 }
 

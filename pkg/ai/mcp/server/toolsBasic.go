@@ -54,7 +54,7 @@ func (t *MCPTool) status(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	if tctx.args != nil {
 		if tctx.args.Status != 0 {
 			status = tctx.args.Status
-			tctx.rs.MCPRequestStore.ForcedStatus = status
+			tctx.ms.ForcedStatus = status
 		}
 	}
 	msg := ""

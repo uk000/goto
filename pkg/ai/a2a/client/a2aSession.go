@@ -182,6 +182,7 @@ func (acs *A2ASession) InvokeUnary() map[string]error {
 		}
 		wg.Wait()
 	}
+	close(acs.upstreamProgress)
 	if len(errs) > 0 {
 		return errs
 	}
@@ -219,6 +220,9 @@ func (acs *A2ASession) InvokeStream() map[string]error {
 			go acs.processStreamResponse(requestID, eventChan, cr, errs, wg)
 		}
 		wg.Wait()
+	}
+	if acs.upstreamProgress != nil {
+		close(acs.upstreamProgress)
 	}
 	return errs
 }

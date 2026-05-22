@@ -119,10 +119,9 @@ func newAgentContext(port int, serverID, listenerLabel string, agent *model.Agen
 
 func newDelegateCallContext(tc *mcpclient.ToolCall, ac *a2aclient.AgentCall, tracker *model.DelegateTracker) *DelegateCallContext {
 	dc := &DelegateCallContext{
-		toolCall:         tc,
-		agentCall:        ac,
-		tracker:          tracker,
-		upstreamProgress: make(chan *types.Pair[string, any], 10),
+		toolCall:  tc,
+		agentCall: ac,
+		tracker:   tracker,
 	}
 	if tc != nil {
 		dc.name = tc.Tool
@@ -130,6 +129,7 @@ func newDelegateCallContext(tc *mcpclient.ToolCall, ac *a2aclient.AgentCall, tra
 	} else if ac != nil {
 		dc.name = ac.Name
 		dc.url = ac.AgentURL
+		dc.upstreamProgress = make(chan *types.Pair[string, any], 10)
 	}
 	return dc
 }

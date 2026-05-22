@@ -143,7 +143,6 @@ func (ab *AgentBehaviorFederate) runTools(aCtx *AgentContext, runWG, resultsWG *
 	toolsWG.Wait()
 	for _, dCtx := range delegateContexts {
 		dCtx.tracker.Finish()
-		close(dCtx.upstreamProgress)
 	}
 	if runWG != nil {
 		runWG.Done()
@@ -177,7 +176,6 @@ func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentContext, runWG, resultsWG 
 	agentsWG.Wait()
 	for _, dCtx := range delegateContexts {
 		dCtx.tracker.Finish()
-		close(dCtx.upstreamProgress)
 	}
 	if runWG != nil {
 		runWG.Done()

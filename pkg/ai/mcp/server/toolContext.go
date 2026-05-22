@@ -37,6 +37,7 @@ type ToolCallContext struct {
 	sessionID      string
 	listener       string
 	rs             *util.RequestStore
+	ms             *util.MCPRequestStore
 	sse            bool
 	ctx            context.Context
 	requestHeaders http.Header
@@ -48,16 +49,15 @@ type ToolCallContext struct {
 	remoteGotos    map[string]bool
 }
 
-func NewToolCallContext(ctx context.Context, t *MCPTool, req *gomcp.CallToolRequest, args *aicommon.ToolCallArgs, isSSE bool) *ToolCallContext {
-	_, rs := util.GetRequestStoreFromContext(ctx)
-	requestHeaders := getRequestHeaders(ctx, req, rs)
+func NewToolCallContext(ms *util.MCPRequestStore, t *MCPTool, req *gomcp.CallToolRequest, args *aicommon.ToolCallArgs, isSSE bool) *ToolCallContext {
+	requestHeaders := getRequestHeaders(ms.Ctx, req, ms.RS)
 	tctx := &ToolCallContext{
 		MCPTool:        t,
 		sessionID:      req.Session.ID(),
-		listener:       rs.ListenerLabel,
-		rs:             rs,
+		listener:       ms.RS.ListenerLabel,
+		rs:             ms.RS,
 		sse:            isSSE,
-		ctx:            ctx,
+		ctx:            ms.Ctx,
 		requestHeaders: requestHeaders,
 		req:            req,
 		args:           args,

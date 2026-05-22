@@ -164,15 +164,17 @@ func (t *MCPTool) prepareBehavior() error {
 	return nil
 }
 
-func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (result *gomcp.CallToolResult, err error) {
-	_, rs := util.GetRequestStoreFromContext(ctx)
+func (t *MCPTool) Handle(ctxx context.Context, req *gomcp.CallToolRequest) (result *gomcp.CallToolResult, err error) {
+	sessionID := GetMCPSessionID(req.Extra.Header)
+	ms := t.Server.GetMCPSessionStore(sessionID)
+	rs := ms.RS
 	isSSE := false
 	if rs.RequestedMCPTool != "" && !strings.EqualFold(rs.RequestedMCPTool, t.Name) && !strings.Contains(t.Name, "toolcall") {
 		return nil, fmt.Errorf("URI [%s] doesn't match tool [%s] requested in RPC", rs.RequestedMCPTool, t.Name)
 	}
 	isSSE = rs.IsSSE
 	if !isSSE {
-		isSSE = util.IsSSE(ctx)
+		isSSE = util.IsSSE(ms.Ctx)
 	}
 	var args *aicommon.ToolCallArgs
 	if req.Params != nil && req.Params.Arguments != nil {
@@ -183,13 +185,16 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 		args = aicommon.NewCallArgs()
 	}
 	args.UpdateDelay(t.Config.Delay)
-	tctx := NewToolCallContext(ctx, t, req, args, isSSE)
+	tctx := NewToolCallContext(ms, t, req, args, isSSE)
 	// rs.ResponseWriter.Header().Add(constants.HeaderGotoMCPServer, t.Server.Name)
 	// rs.ResponseWriter.Header().Add(constants.HeaderGotoMCPTool, t.Name)
 	// t.notifyClient(t.Log("%s: Received request with Args [%+v] Remote Args [%+v] Headers [%+v]", t.Label, t.args, t.remoteArgs, t.requestHeaders), 0)
 	result, err = t.Behavior.run(tctx)
 	if result == nil {
 		result = &gomcp.CallToolResult{}
+	}
+	for v := range tctx.remoteGotos {
+		rs.ViaGotos = append(rs.ViaGotos, v)
 	}
 	t.prepareResult(tctx, result)
 	return
