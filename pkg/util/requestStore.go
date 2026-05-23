@@ -95,6 +95,7 @@ type RequestStore struct {
 	TunnelLock              sync.RWMutex
 	ProxiedRequest          bool
 	ProxyTargets            interface{}
+	ProxyStreaming          bool
 	ProxyRouter             bool
 	InterceptChunked        bool
 	ReReader                *ReReader

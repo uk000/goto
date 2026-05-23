@@ -119,13 +119,14 @@ type Assert struct {
 type Assertions []*Assert
 
 type InvocationTracker struct {
-	ID       uint32              `json:"id"`
-	Target   *InvocationSpec     `json:"target"`
-	Status   *InvocationStatus   `json:"status"`
-	Payloads [][]byte            `json:"-"`
-	Channels *InvocationChannels `json:"-"`
-	CustomID string              `json:"customID"`
-	client   *InvocationClient
+	ID        uint32              `json:"id"`
+	Target    *InvocationSpec     `json:"target"`
+	Status    *InvocationStatus   `json:"status"`
+	Payloads  [][]byte            `json:"-"`
+	Channels  *InvocationChannels `json:"-"`
+	CustomID  string              `json:"customID"`
+	OnHeaders func(http.Header, int)
+	client    *InvocationClient
 }
 
 type InvocationChannels struct {

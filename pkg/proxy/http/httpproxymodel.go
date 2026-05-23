@@ -126,6 +126,7 @@ type Target struct {
 	Transform     *TrafficTransform          `yaml:"transform" json:"transform"`
 	TrafficConfig *TrafficConfig             `yaml:"trafficConfig" json:"trafficConfig"`
 	CallCount     int                        `yaml:"-" json:"callCount"`
+	streaming     bool
 	lock          sync.RWMutex
 }
 
@@ -283,6 +284,9 @@ func (p *Proxy) AddTarget(t *Target) error {
 		}
 		if ep.Concurrent == 0 {
 			ep.Concurrent = 1
+		}
+		if ep.Stream {
+			t.streaming = true
 		}
 	}
 	for triggerName, trigger := range t.Triggers {

@@ -45,9 +45,7 @@ type InvocationRequest struct {
 	httpRequest     *http.Request
 	grpcInput       *pb.Input
 	grpcStreamInput *pb.StreamConfig
-	requestReader   io.ReadCloser
 	requestWriter   io.WriteCloser
-	responseWriter  io.Writer
 	client          transport.ClientTransport
 	tracker         *InvocationTracker
 	result          *InvocationResult
@@ -220,9 +218,7 @@ func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
 					req.Host = req.URL.Host
 				}
 				ir.uri = req.URL.Path
-				ir.requestReader = requestReader
 				ir.requestWriter = requestWriter
-				ir.responseWriter = ir.tracker.Target.ResponseWriter
 			} else {
 				ir.result.err = err
 				return false

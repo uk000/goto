@@ -38,7 +38,7 @@ var (
 )
 
 func setRoutes(r *mux.Router) {
-	streamRouter := util.PathRouter(r, "/stream")
+	streamRouter := middleware.RootPath("/stream")
 	util.AddRouteWithMultiQ(streamRouter, "", streamResponse, [][]string{{"count"}, {"delay"}, {"chunksize"}}, "GET", "PUT", "POST")
 	util.AddRouteWithMultiQ(streamRouter, "", streamResponse, [][]string{{}, {"duration"}, {"delay"}, {"chunksize"}}, "GET", "PUT", "POST")
 }

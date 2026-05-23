@@ -166,6 +166,7 @@ func (result *InvocationResult) processHTTPResponse(req *InvocationRequest, r *h
 	result.httpResponse = r
 	result.err = err
 	if err == nil {
+		result.tracker.OnHeaders(r.Header, r.StatusCode)
 		result.readHTTPResponsePayload()
 		if r != nil {
 			result.updateResult(req.url, req.uri, r.Status, r.StatusCode, r.Header)

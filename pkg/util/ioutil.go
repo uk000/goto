@@ -239,7 +239,9 @@ func ReadAndTrack(r io.Reader, collect bool, w io.Writer) ([]byte, int, time.Tim
 				result = append(result, data...)
 			}
 			if canWrite {
-				_, err = w.Write(data)
+				if _, err2 := w.Write(data); err2 != nil {
+					return result, readSize, first, last, err2.Error()
+				}
 			}
 		}
 		if err == io.EOF {

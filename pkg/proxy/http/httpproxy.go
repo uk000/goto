@@ -82,7 +82,7 @@ func setProxyFlag(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)
 		rs.ProxyRouter = true
-		rs.InterceptChunked = true
+		rs.InterceptChunked = !rs.ProxyStreaming
 		if next != nil {
 			next.ServeHTTP(w, r)
 		}
@@ -124,42 +124,23 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 	}
 	wg.Wait()
 	close(rc.c)
-	p.processHeaders(rc, responses, responseStatuses)
+	p.processResponses(rc, responses, responseStatuses)
 	rc.rs.StatusCode = proxyResponseStatus
 	rc.w.WriteHeader(proxyResponseStatus)
 	p.processPayload(rc, responses)
 }
 
-func (p *Proxy) processHeaders(rc *RequestContext, responses UpstreamResults, responseStatuses map[string]map[string]int) {
+func (p *Proxy) processResponses(rc *RequestContext, responses UpstreamResults, responseStatuses map[string]map[string]int) {
 	upstreamViaGoto := []string{}
 	upstreamProxyStatuses := []map[string]map[string][]string{}
 	for target, targetResponses := range responses {
 		for ep, epResponses := range targetResponses {
 			for _, resp := range epResponses {
-				v := resp.Headers[constants.HeaderViaGoto]
-				if len(v) == 0 {
-					v = resp.Headers[lowerViaGoto]
-				}
-				if len(v) > 0 {
-					upstreamViaGoto = append(upstreamViaGoto, v...)
-				}
-				v = resp.Headers[constants.HeaderGotoProxyUpstreamStatus]
-				if len(v) == 0 {
-					v = resp.Headers[lowerProxyUpstreamStatus]
-				}
-				if len(v) > 0 {
-					upstreamProxyStatuses = append(upstreamProxyStatuses, map[string]map[string][]string{target: {ep: v}})
-				}
+				rc.processResponseHeaders(target, ep, resp.Headers, &upstreamViaGoto, &upstreamProxyStatuses)
 			}
 		}
 	}
-	upstreamProxyStatusHeaders := []string{}
-	for _, v := range upstreamProxyStatuses {
-		upstreamProxyStatusHeaders = append(upstreamProxyStatusHeaders, util.ToJSONText(v))
-	}
-	upstreamProxyStatusHeaders = append(upstreamProxyStatusHeaders, util.ToJSONText(responseStatuses))
-	rc.w.Header()[constants.HeaderGotoProxyUpstreamStatus] = upstreamProxyStatusHeaders
-	rc.w.Header()[constants.HeaderViaGoto] = append(rc.w.Header()[constants.HeaderViaGoto], upstreamViaGoto...)
+	rc.sendProxyStatuses(upstreamViaGoto, upstreamProxyStatuses, responseStatuses)
 	if rc.clean {
 		for _, m := range responses {
 			for _, responses := range m {
@@ -171,6 +152,35 @@ func (p *Proxy) processHeaders(rc *RequestContext, responses UpstreamResults, re
 			}
 			break
 		}
+	}
+}
+
+func (rc *RequestContext) sendProxyStatuses(upstreamViaGoto []string, upstreamProxyStatuses []map[string]map[string][]string, responseStatuses map[string]map[string]int) {
+	upstreamProxyStatusHeaders := []string{}
+	for _, v := range upstreamProxyStatuses {
+		upstreamProxyStatusHeaders = append(upstreamProxyStatusHeaders, util.ToJSONText(v))
+	}
+	if len(responseStatuses) > 0 {
+		upstreamProxyStatusHeaders = append(upstreamProxyStatusHeaders, util.ToJSONText(responseStatuses))
+	}
+	rc.w.Header()[constants.HeaderGotoProxyUpstreamStatus] = upstreamProxyStatusHeaders
+	rc.w.Header()[constants.HeaderViaGoto] = append(rc.w.Header()[constants.HeaderViaGoto], upstreamViaGoto...)
+}
+
+func (rc *RequestContext) processResponseHeaders(target, ep string, headers http.Header, upstreamViaGoto *[]string, upstreamProxyStatuses *[]map[string]map[string][]string) {
+	v := headers[constants.HeaderViaGoto]
+	if len(v) == 0 {
+		v = headers[lowerViaGoto]
+	}
+	if len(v) > 0 {
+		*upstreamViaGoto = append(*upstreamViaGoto, v...)
+	}
+	v = headers[constants.HeaderGotoProxyUpstreamStatus]
+	if len(v) == 0 {
+		v = headers[lowerProxyUpstreamStatus]
+	}
+	if len(v) > 0 {
+		*upstreamProxyStatuses = append(*upstreamProxyStatuses, map[string]map[string][]string{target: {ep: v}})
 	}
 }
 
@@ -224,6 +234,7 @@ func (ep *EndpointInvocation) invoke(targetCounter, epCounter int, target string
 		return err
 	}
 	tracker.CustomID = fmt.Sprintf("%d.%d", targetCounter, epCounter)
+	tracker.OnHeaders = ep.onHeaders(rc)
 	go ep.asyncInvoke(target, tracker, out)
 	return nil
 }
@@ -241,6 +252,16 @@ func (ep *EndpointInvocation) asyncInvoke(target string, tracker *invocation.Inv
 			url:        ep.ep.URL,
 			response:   resp.Response,
 		}
+	}
+}
+
+func (ep *EndpointInvocation) onHeaders(rc *RequestContext) func(http.Header, int) {
+	return func(headers http.Header, status int) {
+		upstreamViaGoto := []string{}
+		upstreamProxyStatuses := []map[string]map[string][]string{}
+		responseStatuses := map[string]map[string]int{ep.target.Name: {ep.ep.name: status}}
+		rc.processResponseHeaders(ep.target.Name, ep.ep.name, headers, &upstreamViaGoto, &upstreamProxyStatuses)
+		rc.sendProxyStatuses(upstreamViaGoto, upstreamProxyStatuses, responseStatuses)
 	}
 }
 
@@ -340,7 +361,7 @@ func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTra
 	is.Headers, is.Host = util.TransformHeaders(rc.vars, rc.headers, add, remove)
 	if ep.ep.Stream {
 		if rc.cw == nil {
-			rc.cw = intercept.NewChanWriter(rc.c)
+			rc.cw = intercept.NewChanWriter(rc.c, rc.w)
 		}
 		if rc.fw == nil {
 			rc.fw = intercept.CreateOrGetFlushWriter(rc.w)
@@ -473,10 +494,11 @@ func (t *TargetTrigger) match(matchedTarget *MatchedTarget, r *http.Request) boo
 	return matched
 }
 
-func (p *Proxy) getMatchingProxyTargets(r *http.Request) ProxyTargets {
+func (p *Proxy) getMatchingProxyTargets(r *http.Request) (ProxyTargets, bool) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	matchedTargets := map[string]*MatchedTarget{}
+	streaming := false
 	matchTargetFunc := func(target *Target, trigger *TargetTrigger) bool {
 		if !target.Enabled {
 			return false
@@ -502,6 +524,7 @@ func (p *Proxy) getMatchingProxyTargets(r *http.Request) ProxyTargets {
 				matchedTarget.trafficConfig = target.TrafficConfig
 			}
 			matchedTargets[target.Name] = matchedTarget
+			streaming = streaming || matchedTarget.target.streaming
 			return true
 		}
 		return false
@@ -523,16 +546,18 @@ func (p *Proxy) getMatchingProxyTargets(r *http.Request) ProxyTargets {
 			}
 		}
 	}
-	return matchedTargets
+	return matchedTargets, streaming
 }
 
 func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	rs := util.GetRequestStore(r)
 	var targets ProxyTargets
+	streaming := false
 	proxy := GetPortProxy(port)
 	if rs.ProxyTargets == nil {
-		targets = proxy.getMatchingProxyTargets(r)
+		targets, streaming = proxy.getMatchingProxyTargets(r)
+		rs.ProxyStreaming = streaming
 	} else {
 		targets = rs.ProxyTargets.(ProxyTargets)
 	}
@@ -567,10 +592,11 @@ func WillProxyHTTP(r *http.Request) (bool, *mux.Router) {
 	rs := util.GetRequestStore(r)
 	rs.ProxiedRequest = false
 	if proxy.Enabled && proxy.hasAnyTargets() && !status.IsForcedStatus(r) {
-		matches := proxy.getMatchingProxyTargets(r)
+		matches, streaming := proxy.getMatchingProxyTargets(r)
 		rs.ProxiedRequest = len(matches) > 0
 		if rs.ProxiedRequest {
 			rs.ProxyTargets = matches
+			rs.ProxyStreaming = streaming
 			rootURI, _ := util.GetRootURI(r.RequestURI)
 			router := proxyRouters[port][rootURI]
 			if router == nil {

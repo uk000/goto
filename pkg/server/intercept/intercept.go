@@ -67,10 +67,11 @@ type FlushWriterImpl struct {
 }
 
 type ChanWriter interface {
-	io.Writer
+	http.ResponseWriter
 }
 
 type ChanWriterImpl struct {
+	http.ResponseWriter
 	c chan []byte
 }
 
@@ -116,8 +117,8 @@ func (fw *FlushWriterImpl) Flush() {
 	}
 }
 
-func NewChanWriter(c chan []byte) ChanWriter {
-	return &ChanWriterImpl{c: c}
+func NewChanWriter(c chan []byte, w http.ResponseWriter) ChanWriter {
+	return &ChanWriterImpl{c: c, ResponseWriter: w}
 }
 
 func (c *ChanWriterImpl) Write(p []byte) (int, error) {
