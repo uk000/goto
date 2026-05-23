@@ -29,6 +29,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	goa2aclient "trpc.group/trpc-go/trpc-a2a-go/client"
 	a2aproto "trpc.group/trpc-go/trpc-a2a-go/protocol"
@@ -199,8 +200,15 @@ func (acs *A2ASession) InvokeStream() map[string]error {
 		concurrent = 1
 	}
 	rounds := requestCount / concurrent
-	acs.sendLocalProgress(acs.callerId, fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL))
+	acs.sendLocalProgress(acs.callerId, fmt.Sprintf("A2A Client [%s]: Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL))
 	acs.reportInitiateCall()
+	initialDelay := types.ParseDelay(acs.call.InitialDelay)
+	delay := types.ParseDelay(acs.call.RequestDelay)
+	if initialDelay != nil && initialDelay.IsNonZero() {
+		initialDelay.ComputeAndApply(func(d time.Duration) {
+			log.Printf("A2A Client [%s]: Applying initial delay of %s before proceesing with A2A requests", acs.callerId, d)
+		})
+	}
 	errs := map[string]error{}
 	for i := 1; i <= rounds; i++ {
 		wg := &sync.WaitGroup{}
@@ -220,6 +228,11 @@ func (acs *A2ASession) InvokeStream() map[string]error {
 			go acs.processStreamResponse(requestID, eventChan, cr, errs, wg)
 		}
 		wg.Wait()
+		if (rounds-i) > 0 && delay != nil && delay.IsNonZero() {
+			delay.ComputeAndApply(func(d time.Duration) {
+				log.Printf("A2A Client [%s]: Delaying by %s before proceesing with next round of A2A requests", acs.callerId, d)
+			})
+		}
 	}
 	if acs.upstreamProgress != nil {
 		close(acs.upstreamProgress)

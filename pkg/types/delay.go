@@ -101,7 +101,7 @@ func (d *Delay) String() string {
 }
 
 func (d *Delay) IsNonZero() bool {
-	return d.Min != nil && d.Min.Duration > 0 && d.Max != nil && d.Max.Duration > 0 && d.Count > 0
+	return d.Min != nil && d.Min.Duration > 0 && d.Max != nil && d.Max.Duration > 0 && (d.Count > 0 || d.Count == -1)
 }
 
 func (d *Delay) IsLargerThan(d2 *Delay) bool {

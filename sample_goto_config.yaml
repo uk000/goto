@@ -60,9 +60,7 @@ mcp:
           count:
             type: int
             description: 'Count'
-        required:
-        - tool
-        - url
+        required: []
     - name: fetch-schema
       inputSchema:
         type: object
@@ -85,8 +83,7 @@ mcp:
           metadata:
             type: object
             description: metadata
-        required:
-        - url
+        required: []
     - name: remote-tool-schema
       inputSchema:
         type: object
@@ -100,6 +97,9 @@ mcp:
           authority:
             type: string
             description: HTTP Authority to use for the remote call
+          sse:
+            type: boolean
+            description: Whether to invoke the remote call over SSE or StreamableHTTP
           h2:
             type: boolean
             description: Whether to invoke the remote call over HTTP/2
@@ -112,9 +112,15 @@ mcp:
           concurrent:
             type: int
             description: Number of concurrent requests to send
+          initialDelay:
+            type: string
+            description: 'Initial delay on the client side before making the remote tool call  (duration syntax: 5s)'
+          requestDelay:
+            type: string
+            description: 'Delay before the next round of calls on the client side when multiple rounds of tool calls are to be made (duration syntax: 5s)'
           delay:
             type: string
-            description: 'Delay the response artificially (duration syntax: 5s)'
+            description: 'Request the remote tool to delay the response artificially on the server side (duration syntax: 5s)'
           headers:
             type: object
             description: Header configs to apply to tool call. {"request":{"add":{"h":"v"},"remove":["h"],"forward":["h"]},"response":{"add":{"h":"v"},"remove":["h"],"forward":["h"]}}
@@ -163,9 +169,15 @@ mcp:
           concurrent:
             type: int
             description: Number of concurrent requests to send
+          initialDelay:
+            type: string
+            description: 'Initial delay on the client side before making the remote agent call  (duration syntax: 5s)'
+          requestDelay:
+            type: string
+            description: 'Delay before the next round of calls on the client side when multiple rounds of agent calls are to be made (duration syntax: 5s)'
           delay:
             type: string
-            description: 'Delay the response artificially (duration syntax: 5s)'
+            description: 'Request the remote agent to delay the response artificially on the server side (duration syntax: 5s)'
           metadata:
             type: object
             description: metadata
@@ -339,6 +351,10 @@ mcp:
               forceSSE: false
               authority: "localhost"
               delay: "1s"
+              requestCount: 2
+              concurrent: 1
+              initialDelay: "1s"
+              requestDelay: "5s"
               headers:
                 request:
                   add:

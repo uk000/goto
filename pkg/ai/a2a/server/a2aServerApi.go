@@ -171,7 +171,7 @@ func addAgents(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	port := util.GetRequestOrListenerPortNum(r)
 	agents := []*model.Agent{}
-	err := util.ReadJsonPayload(r, &agents)
+	err := util.ReadJsonOrYamlPayloadFromBody(r.Body, &agents)
 	if err != nil || len(agents) == 0 {
 		w.WriteHeader(http.StatusBadRequest)
 		if err != nil {

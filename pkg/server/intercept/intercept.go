@@ -22,6 +22,7 @@ import (
 	. "goto/pkg/constants"
 	"goto/pkg/util"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -150,8 +151,12 @@ func (b *BodyTracker) Rewind() {
 }
 
 func (rw *InterceptResponseWriter) WriteHeader(statusCode int) {
-	rw.StatusCode = statusCode
-	rw.rs.StatusCode = statusCode
+	if rw.StatusCode == 0 {
+		rw.StatusCode = statusCode
+		rw.rs.StatusCode = statusCode
+	} else {
+		log.Printf("Ignoring status [%d] due to forced status  [%d]\n", statusCode, rw.StatusCode)
+	}
 	if !rw.Hijacked && !rw.Hold {
 		rw.ResponseWriter.WriteHeader(statusCode)
 	}
@@ -183,9 +188,11 @@ func (rw *InterceptResponseWriter) Write(b []byte) (int, error) {
 
 func (rw *InterceptResponseWriter) Flush() {
 	// util.PrintCallers(3, "InterceptResponseWriter.Flush")
-	rw.SetChunked()
-	if rw.Flusher != nil {
-		rw.Flusher.Flush()
+	if !rw.HoldChunked {
+		rw.SetChunked()
+		if rw.Flusher != nil {
+			rw.Flusher.Flush()
+		}
 	}
 }
 
@@ -247,13 +254,13 @@ func NewInterceptResponseWriter(r *http.Request, w http.ResponseWriter, hold boo
 	}
 }
 
-func WithInterceptAndStatus(r *http.Request, w http.ResponseWriter, status int) (http.ResponseWriter, *InterceptResponseWriter) {
-	_, irw := WithIntercept(r, w)
+func WithInterceptAndStatus(r *http.Request, w http.ResponseWriter, status int, chunked bool) (http.ResponseWriter, *InterceptResponseWriter) {
+	w, irw := GetOrCreateInterceptWriter(r, w)
 	if status > 0 {
 		w.WriteHeader(status)
 		irw.StatusCode = status
 	}
-	w = irw
+	irw.HoldChunked = chunked
 	return w, irw
 }
 
@@ -267,8 +274,7 @@ func WithIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter,
 }
 
 func WithInterceptChunked(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *InterceptResponseWriter) {
-	var irw *InterceptResponseWriter
-	w, irw = WithIntercept(r, w)
+	w, irw := GetOrCreateInterceptWriter(r, w)
 	irw.HoldChunked = true
 	return w, irw
 }
@@ -280,6 +286,18 @@ func WithHeadersIntercept(r *http.Request, w http.ResponseWriter) (http.Response
 		irw = NewHeadersInterceptResponseWriter(w)
 		rs.HeadersInterceptRW = irw
 		w = irw
+	}
+	return w, irw
+}
+
+func GetOrCreateInterceptWriter(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *InterceptResponseWriter) {
+	var irw *InterceptResponseWriter
+	rs := util.GetRequestStore(r)
+	if rs.InterceptResponseWriter != nil {
+		irw = rs.InterceptResponseWriter.(*InterceptResponseWriter)
+	}
+	if irw == nil {
+		w, irw = WithIntercept(r, w)
 	}
 	return w, irw
 }

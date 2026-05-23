@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"goto/pkg/constants"
+	"goto/pkg/global"
 	mcpproxy "goto/pkg/proxy/mcp"
 	"goto/pkg/rpc/jsonrpc"
 	"goto/pkg/server/intercept"
@@ -73,7 +74,9 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 				w.Header().Add(constants.HeaderGotoMCPTool, tool.Name)
 				rs.RequestURI = r.RequestURI
 				rs.RequestedMCPTool = tool.Name
-				log.Printf("Port [%d] Request [%s] will be served by Server [%s] (Stateless=%t) for Tool [%s]", l.Port, r.RequestURI, server.Name, server.Stateless, tool.Name)
+				if global.Flags.VerboseMCP {
+					log.Printf("Port [%d] Request [%s] will be served by Server [%s] (Stateless=%t) for Tool [%s]", l.Port, r.RequestURI, server.Name, server.Stateless, tool.Name)
+				}
 			}
 			server.handler.ServeHTTP(w, r)
 			rs.RequestServed = true
@@ -156,13 +159,17 @@ func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler ht
 			}
 		}
 		rr.Rewind()
-		w, irw = intercept.WithInterceptAndStatus(r, w, status)
+		w, irw = intercept.WithInterceptAndStatus(r, w, status, true)
 		if status > 0 {
 			ms.ForcedStatus = status
 			rs.StatusCode = status
-			sendStatus(server.ID, status, rem, w, r)
+			// rs.InterceptChunked = true
 		}
 		handler.ServeHTTP(w, r)
+		if status > 0 {
+			sendStatus(server.ID, status, rem, irw.ResponseWriter, r)
+		}
+		rs.StatusCode = irw.StatusCode
 		irw.Proceed()
 	}
 }
@@ -210,9 +217,13 @@ func getServerAndTool(r *http.Request) (*MCPServer, *MCPTool) {
 	if server != nil {
 		if toolName != "" {
 			tool = server.Tools[toolName]
-			log.Printf("Server [%s] will handle MCP Tool Request [%s] based on URI match [%s] on port [%d]", server.Name, toolName, uri, port)
+			if global.Flags.VerboseMCP {
+				log.Printf("Server [%s] will handle MCP Tool Request [%s] based on URI match [%s] on port [%d]", server.Name, toolName, uri, port)
+			}
 		} else {
-			log.Printf("Server [%s] will handle MCP request based on URI match [%s] on port [%d]", server.Name, uri, port)
+			if global.Flags.VerboseMCP {
+				log.Printf("Server [%s] will handle MCP request based on URI match [%s] on port [%d]", server.Name, uri, port)
+			}
 		}
 	} else {
 		log.Printf("getServerAndTool: Failed to find a server on port [%d]", port)

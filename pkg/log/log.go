@@ -52,12 +52,14 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(logRouter, "/response/minibody/{enable}", setLogLevel, "POST", "PUT")
 	util.AddRoute(logRouter, "/response/body/{enable}", setLogLevel, "POST", "PUT")
 	util.AddRoute(logRouter, "/request/headers/ignore/{header}", addExcludedHeader, "POST", "PUT")
+	util.AddRoute(logRouter, "/mcp/verbose={verbose}", setLogLevel, "POST", "PUT")
 	util.AddRoute(logRouter, "", getLogLevels, "GET")
 }
 
 func setLogLevel(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	enable := util.GetBoolParamValue(r, "enable")
+	verbose := util.GetBoolParamValue(r, "verbose")
 	server := strings.Contains(r.RequestURI, "server")
 	admin := strings.Contains(r.RequestURI, "admin")
 	client := strings.Contains(r.RequestURI, "client")
@@ -74,6 +76,7 @@ func setLogLevel(w http.ResponseWriter, r *http.Request) {
 	response := strings.Contains(r.RequestURI, "response")
 	headers := strings.Contains(r.RequestURI, "headers")
 	minibody := strings.Contains(r.RequestURI, "minibody")
+	mcp := strings.Contains(r.RequestURI, "mcp")
 	body := strings.Contains(r.RequestURI, "body")
 	if server {
 		global.Flags.EnableServerLogs = enable
@@ -147,6 +150,8 @@ func setLogLevel(w http.ResponseWriter, r *http.Request) {
 			}
 			msg = fmt.Sprintf("Response Body logging set to [%t]", enable)
 		}
+	} else if mcp {
+		global.Flags.VerboseMCP = verbose
 	}
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)

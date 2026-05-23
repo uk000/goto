@@ -125,6 +125,7 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 	wg.Wait()
 	close(rc.c)
 	p.processHeaders(rc, responses, responseStatuses)
+	rc.rs.StatusCode = proxyResponseStatus
 	rc.w.WriteHeader(proxyResponseStatus)
 	p.processPayload(rc, responses)
 }
@@ -548,6 +549,7 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			headers: util.GetHeaderValues(r),
 			queries: util.GetQueryParams(r),
 			body:    r.Body,
+			rs:      rs,
 			r:       r,
 			w:       w,
 			fw:      intercept.NewFlushWriter(w),

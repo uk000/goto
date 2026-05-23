@@ -19,6 +19,7 @@ package mcpclient
 import (
 	"context"
 	"fmt"
+	"goto/pkg/global"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"goto/pkg/util/timeline"
@@ -186,5 +187,7 @@ func (s *MCPSession) ProgressNotificationHandler(ctx context.Context, req *gomcp
 		}
 	}
 	s.Timeline.AddEventWithRemote(s.CallerId, msg, req.Params.Message, remoteServer, remoteClient, remoteData, isjson)
-	log.Println(msg)
+	if global.Flags.VerboseMCP {
+		log.Println(msg)
+	}
 }

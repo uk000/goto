@@ -226,5 +226,6 @@ func (a *A2AServer) Serve(name string, w http.ResponseWriter, r *http.Request) e
 	for v := range aCtx.remoteGotos {
 		rs.ViaGotos = append(rs.ViaGotos, v)
 	}
+	rs.StatusCode = irw.StatusCode
 	return nil
 }

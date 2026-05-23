@@ -50,26 +50,30 @@ type MCPClientPayload struct {
 }
 
 type ToolCall struct {
-	Tool          string                 `json:"tool"`
-	URL           string                 `json:"url"`
-	SSEURL        string                 `json:"sseURL"`
-	Server        string                 `json:"server,omitempty"`
-	Authority     string                 `json:"authority,omitempty"`
-	H2            bool                   `json:"h2,omitempty"`
-	TLS           bool                   `json:"tls,omitempty"`
-	ForceSSE      bool                   `json:"forceSSE,omitempty"`
-	Raw           bool                   `json:"neat,omitempty"`
-	Args          *aicommon.ToolCallArgs `json:"args,omitempty"`
-	Headers       *types.Headers         `json:"headers,omitempty"`
-	Delay         string                 `json:"delay,omitempty"`
-	RequestCount  int                    `json:"requestCount"`
-	Concurrent    int                    `json:"concurrent"`
-	InitialDelay  string                 `json:"initialDelay"`
-	ForcedStatus  int                    `json:"forcedStatus"`
-	ResultOnly    bool                   `json:"resultOnly,omitempty"`
-	NoEvents      bool                   `json:"noEvents,omitempty"`
-	NoCallDetails bool                   `json:"noCallDetails,omitempty"`
-	delayD        *types.Delay           `json:"-"`
+	Tool                 string                 `json:"tool"`
+	URL                  string                 `json:"url"`
+	SSEURL               string                 `json:"sseURL"`
+	Server               string                 `json:"server,omitempty"`
+	Authority            string                 `json:"authority,omitempty"`
+	H2                   bool                   `json:"h2,omitempty"`
+	TLS                  bool                   `json:"tls,omitempty"`
+	ForceSSE             bool                   `json:"forceSSE,omitempty"`
+	Raw                  bool                   `json:"neat,omitempty"`
+	Args                 *aicommon.ToolCallArgs `json:"args,omitempty"`
+	Headers              *types.Headers         `json:"headers,omitempty"`
+	Delay                string                 `json:"delay,omitempty"`
+	RequestCount         int                    `json:"requestCount"`
+	Concurrent           int                    `json:"concurrent"`
+	RequestDelay         string                 `json:"requestDelay"`
+	InitialDelay         string                 `json:"initialDelay"`
+	RetryDelay           string                 `json:"retryDelay"`
+	RetriableStatusCodes []int                  `json:"retriableStatusCodes"`
+	RequestId            *types.RequestId       `json:"requestId"`
+	ForcedStatus         int                    `json:"forcedStatus"`
+	ResultOnly           bool                   `json:"resultOnly,omitempty"`
+	NoEvents             bool                   `json:"noEvents,omitempty"`
+	NoCallDetails        bool                   `json:"noCallDetails,omitempty"`
+	delayD               *types.Delay           `json:"-"`
 }
 
 type ToolCallContext struct {
@@ -81,6 +85,7 @@ type ToolCallContext struct {
 	callerId   string
 	args       *aicommon.ToolCallArgs
 	rounds     int
+	concurrent int
 	result     *MCPResult
 }
 
@@ -426,6 +431,7 @@ func (tctx *ToolCallContext) prepare() {
 		tctx.tc.Concurrent = 1
 	}
 	tctx.rounds = tctx.tc.RequestCount / tctx.tc.Concurrent
+	tctx.concurrent = tctx.tc.Concurrent
 }
 
 func (tctx *ToolCallContext) reportInitiateToolCall() {
@@ -464,24 +470,44 @@ func (tctx *ToolCallContext) call() (*MCPResult, error) {
 	defer tctx.session.close()
 	tctx.prepare()
 	tctx.reportInitiateToolCall()
+	initialDelay := types.ParseDelay(tctx.tc.InitialDelay)
+	delay := types.ParseDelay(tctx.tc.RequestDelay)
+	if initialDelay != nil && initialDelay.IsNonZero() {
+		initialDelay.ComputeAndApply(func(d time.Duration) {
+			log.Printf("MCP Client [%s]: Applying initial delay of  %s before proceesing with MCP requests\n", tctx.callerId, d)
+		})
+	}
 	for i := 1; i <= tctx.rounds; i++ {
-		requestID := fmt.Sprintf("%s.%d", tctx.session.ID, i)
-		tctx.session.ongoingCalls[requestID] = tctx
-		args := tctx.args.Clone()
-		args.AddMetadata(constants.HeaderGotoMCPRequestID, requestID)
-		args.AddMetadata(constants.HeaderGotoMCPSessionID, tctx.session.ID)
-		args.AddMetadata(constants.HeaderGotoMCPCallerID, tctx.callerId)
-		tctx.reportToolCallRequest(i, args)
-		ctx := context.WithValue(tctx.ctx, constants.HeaderGotoMCPRequestID, requestID)
-		toolResult, err := tctx.session.session.CallTool(ctx, &gomcp.CallToolParams{Name: tctx.tc.Tool, Arguments: args})
-		if err != nil {
-			tctx.reportToolCallFailure(i, err.Error())
-			tctx.result.LastError = err
-		} else if toolResult != nil {
-			tctx.reportToolCallSuccess(i)
-			tctx.result.storeCallResult(requestID, toolResult, tctx.clientInfo)
-		} else {
-			tctx.reportToolCallFailure(i, "No Error, No Result")
+		wg := &sync.WaitGroup{}
+		for j := 1; j <= tctx.concurrent; j++ {
+			wg.Add(1)
+			requestID := fmt.Sprintf("%s.%d", tctx.session.ID, i)
+			tctx.session.ongoingCalls[requestID] = tctx
+			args := tctx.args.Clone()
+			args.AddMetadata(constants.HeaderGotoMCPRequestID, requestID)
+			args.AddMetadata(constants.HeaderGotoMCPSessionID, tctx.session.ID)
+			args.AddMetadata(constants.HeaderGotoMCPCallerID, tctx.callerId)
+			tctx.reportToolCallRequest(i, args)
+			ctx := context.WithValue(tctx.ctx, constants.HeaderGotoMCPRequestID, requestID)
+			go func(tool string, args *aicommon.ToolCallArgs) {
+				toolResult, err := tctx.session.session.CallTool(ctx, &gomcp.CallToolParams{Name: tool, Arguments: args})
+				if err != nil {
+					tctx.reportToolCallFailure(i, err.Error())
+					tctx.result.LastError = err
+				} else if toolResult != nil {
+					tctx.reportToolCallSuccess(i)
+					tctx.result.storeCallResult(requestID, toolResult, tctx.clientInfo)
+				} else {
+					tctx.reportToolCallFailure(i, "No Error, No Result")
+				}
+				wg.Done()
+			}(tctx.tc.Tool, tctx.args)
+		}
+		wg.Wait()
+		if (tctx.rounds-i) > 0 && delay != nil && delay.IsNonZero() {
+			delay.ComputeAndApply(func(d time.Duration) {
+				log.Printf("MCP Client [%s]: Delaying by %s before proceesing with next round of MCP requests\n", tctx.callerId, d)
+			})
 		}
 	}
 	viaGotos := tctx.result.LastResponseHeaders[constants.HeaderViaGoto]
@@ -534,8 +560,10 @@ func (c *MCPClient) InterceptRequest(r *http.Request) {
 	if len(r.Header["Host"]) > 0 {
 		r.Host = r.Header["Host"][0]
 	}
-	log.Printf("---------- Outbound request headers from MCP client {%s} for [tool: %s] to {%s} ------------\n", callerId, tool, r.URL.String())
-	log.Println(util.ToJSONText(r.Header))
+	if global.Flags.VerboseMCP {
+		log.Printf("---------- Outbound request headers from MCP client {%s} for [tool: %s] to {%s} ------------\n", callerId, tool, r.URL.String())
+		log.Println(util.ToJSONText(r.Header))
+	}
 }
 
 func (c *MCPClient) InterceptResponse(r *http.Response) {
@@ -567,8 +595,10 @@ func (c *MCPClient) InterceptResponse(r *http.Response) {
 			delete(s.ongoingCalls, requestID)
 		}
 	}
-	log.Printf("---------- Response headers from MCP client {%s} for {%s}[tool: %s] to {%s} ------------\n", callerId, s.currentRequest, tool, r.Request.URL.String())
-	log.Println(util.ToJSONText(r.Header))
+	if global.Flags.VerboseMCP {
+		log.Printf("---------- Response headers from MCP client {%s} for {%s}[tool: %s] to {%s} ------------\n", callerId, s.currentRequest, tool, r.Request.URL.String())
+		log.Println(util.ToJSONText(r.Header))
+	}
 }
 
 func (s *MCPSession) SendingMiddleware(next gomcp.MethodHandler) gomcp.MethodHandler {
@@ -578,7 +608,9 @@ func (s *MCPSession) SendingMiddleware(next gomcp.MethodHandler) gomcp.MethodHan
 		if s.tc != nil {
 			tool = s.tc.Tool
 		}
-		log.Printf("---------- Outbound request from MCP client {%s} for {%s}[tool: %s] to {%s} ------------\n", s.CallerId, method, tool, s.URL)
+		if global.Flags.VerboseMCP {
+			log.Printf("---------- Outbound request from MCP client {%s} for {%s}[tool: %s] to {%s} ------------\n", s.CallerId, method, tool, s.URL)
+		}
 		if ctp, ok := req.GetParams().(*gomcp.CallToolParams); ok {
 			if args, ok := ctp.Arguments.(*aicommon.ToolCallArgs); ok && args != nil {
 				args.AddMetadata("goto-client", global.Self.HostLabel)
@@ -596,7 +628,9 @@ func (s *MCPSession) ReceivingMiddleware(next gomcp.MethodHandler) gomcp.MethodH
 		if s.tc != nil {
 			tool = s.tc.Tool
 		}
-		log.Printf("---------- Response received by MCP client {%s} for {%s}[tool: %s] from {%s} ------------\n", s.CallerId, method, tool, s.URL)
+		if global.Flags.VerboseMCP {
+			log.Printf("---------- Response received by MCP client {%s} for {%s}[tool: %s] from {%s} ------------\n", s.CallerId, method, tool, s.URL)
+		}
 		return next(ctx, method, req)
 	}
 }

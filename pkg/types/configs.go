@@ -62,6 +62,7 @@ type Flags struct {
 	LogResponseHeaders           bool
 	LogResponseMiniBody          bool
 	LogResponseBody              bool
+	VerboseMCP                   bool
 }
 
 type CmdConfig struct {

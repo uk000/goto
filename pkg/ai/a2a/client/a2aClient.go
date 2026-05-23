@@ -49,6 +49,7 @@ type AgentCall struct {
 	Headers              *types.Headers   `json:"headers,omitempty"`
 	RequestCount         int              `json:"requestCount"`
 	Concurrent           int              `json:"concurrent"`
+	RequestDelay         string           `json:"requestDelay"`
 	InitialDelay         string           `json:"initialDelay"`
 	RetryDelay           string           `json:"retryDelay"`
 	RetriableStatusCodes []int            `json:"retriableStatusCodes"`

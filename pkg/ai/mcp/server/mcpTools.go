@@ -99,13 +99,33 @@ func NewMCPTool(name, desc string) *MCPTool {
 	}
 }
 
+func ParseTools(payload []byte) (tools []*MCPTool, err error) {
+	tools = []*MCPTool{}
+	if err = json.Unmarshal(payload, &tools); err != nil {
+		return
+	}
+	for _, tool := range tools {
+		if err = processTool(tool); err != nil {
+			return nil, err
+		}
+	}
+	return tools, nil
+}
+
 func ParseTool(payload []byte) (tool *MCPTool, err error) {
 	tool = &MCPTool{}
 	if err = json.Unmarshal(payload, tool); err != nil {
-		return
+		return nil, err
 	}
+	if err = processTool(tool); err != nil {
+		return nil, err
+	}
+	return
+}
+
+func processTool(tool *MCPTool) error {
 	if tool.Tool == nil {
-		return nil, fmt.Errorf("Missing tool definition")
+		return fmt.Errorf("Missing tool definition")
 	}
 	tool.Kind = KindTools
 	if tool.Name == "" {
@@ -113,9 +133,9 @@ func ParseTool(payload []byte) (tool *MCPTool, err error) {
 	}
 	tool.Name = strings.ReplaceAll(tool.Name, "\"", "")
 	if err := tool.prepareBehavior(); err != nil {
-		return nil, err
+		return err
 	}
-	return
+	return nil
 }
 
 func (t *MCPTool) prepareBehavior() error {

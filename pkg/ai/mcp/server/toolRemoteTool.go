@@ -60,8 +60,8 @@ func (t *MCPTool) callRemoteTool(tctx *ToolCallContext) (*gomcp.CallToolResult, 
 	remoteResult, err = session.CallTool(tc.Args)
 	session.Stop = true
 	if err != nil {
-		msg := fmt.Sprintf("Server [%s] Failed to invoke Remote tool [%s] at URL [%s] with error: %s",
-			tctx.Server.GetName(), tc.Tool, tc.URL, err.Error())
+		msg := fmt.Sprintf("MCP Server [%s]: Failed to invoke Remote tool [%s] at URL [%s] with error: %s",
+			tctx.Server.ID, tc.Tool, tc.URL, err.Error())
 		tctx.Log(msg)
 		result = &gomcp.CallToolResult{Content: []gomcp.Content{&gomcp.TextContent{Text: msg}}, IsError: true}
 	} else if remoteResult == nil {
@@ -69,7 +69,7 @@ func (t *MCPTool) callRemoteTool(tctx *ToolCallContext) (*gomcp.CallToolResult, 
 		tctx.Log(msg)
 		result = &gomcp.CallToolResult{Content: []gomcp.Content{&gomcp.TextContent{Text: msg}}, IsError: false}
 	} else {
-		msg := fmt.Sprintf("Remote operation [%s] successful on [%s]. Sending response...", operLabel, tc.URL)
+		msg := fmt.Sprintf("MCP Server [%s]: Remote operation [%s] successful on [%s]. Sending response...", tctx.Server.ID, operLabel, tc.URL)
 		tctx.Log(msg)
 		tctx.applyDelay()
 		tctx.remoteGotos = remoteResult.RemoteGotos

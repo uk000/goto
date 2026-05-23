@@ -540,20 +540,29 @@ func (s *MCPServer) AddComponents(kind string, b []byte) (names []string, err er
 	}
 }
 
-func (m *MCPServer) AddTools(b []byte) ([]string, error) {
+func (m *MCPServer) AddTools2(b []byte) ([]string, error) {
 	arr := util.ToJSONArray(b)
-	tools := []*MCPTool{}
 	names := []string{}
 	for _, b2 := range arr {
 		tool, err := ParseTool(b2)
 		if err != nil {
 			return nil, err
 		}
-		if tool.IsProxy {
-			mcpproxy.GetMCPProxyForPort(m.Port).SetupMCPProxy(m.Name, tool.Config.RemoteTool.URL, tool.Tool.Name, tool.Tool.Name, nil)
-		}
 		m.AddTool(tool)
-		tools = append(tools, tool)
+		names = append(names, tool.Name)
+	}
+	log.Printf("Server [%s][%d] added Tools [%+v] ", m.Name, m.Port, names)
+	return names, nil
+}
+
+func (m *MCPServer) AddTools(b []byte) ([]string, error) {
+	tools, err := ParseTools(b)
+	if err != nil {
+		return nil, err
+	}
+	names := []string{}
+	for _, tool := range tools {
+		m.AddTool(tool)
 		names = append(names, tool.Name)
 	}
 	//m.ps.defaultServer = m
@@ -562,6 +571,9 @@ func (m *MCPServer) AddTools(b []byte) ([]string, error) {
 }
 
 func (m *MCPServer) AddTool(tool *MCPTool) {
+	if tool.IsProxy {
+		mcpproxy.GetMCPProxyForPort(m.Port).SetupMCPProxy(m.Name, tool.Config.RemoteTool.URL, tool.Tool.Name, tool.Tool.Name, nil)
+	}
 	m.server.AddTool(tool.Tool, tool.Handle)
 	tool.Server = m
 	tool.SetName(tool.Tool.Name)
@@ -785,7 +797,9 @@ func (m *MCPServer) onUnsubscribed(ctx context.Context, req *gomcp.UnsubscribeRe
 func (m *MCPServer) Middleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
 		if method == "ping" {
-			log.Println("PING: MCP Ping handled")
+			if global.Flags.VerboseMCP {
+				log.Println("PING: MCP Ping handled")
+			}
 			return next(ctx, method, req)
 		}
 		log.Println("------ MCP ------")
@@ -793,14 +807,14 @@ func (m *MCPServer) Middleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 			log.Printf("===================== *** Tools/Prompts/Resources Call [Port: %d] *** ========================\n", m.Port)
 		}
 		session := req.GetSession()
-		callToolParams, ctOk := req.GetParams().(*gomcp.CallToolParams)
+		callToolParams, ctOk := req.GetParams().(*gomcp.CallToolParamsRaw)
 		var duration time.Duration
 		var toolName string
 		if ctOk && callToolParams != nil {
 			start := time.Now()
 			toolName := callToolParams.Name
 			TrackToolCall(m.Port, m.Name, session.ID(), toolName)
-			log.Printf("MCPServer[%d][%s]: Session [%s] Method [%s] Tool [%s] Params: [%s]", m.Port, m.Name, session.ID(), method, toolName, util.ToJSONText(req))
+			log.Printf("MCPServer[%d][%s]: Session [%s] Method [%s] Tool [%s] Params: [%s]", m.Port, m.Name, session.ID(), method, toolName, util.ToJSONText(callToolParams))
 			result, err = next(ctx, method, req)
 			duration = time.Since(start)
 		} else {

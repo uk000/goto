@@ -68,7 +68,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(mcpServerRouter, "/clear", clearServers, "POST")
 
 	util.AddRoute(mcpServerRouter, "/status/set/{status}", setStatus, "POST")
-	util.AddRoute(mcpServerRouter, "/status/set/{status}/tool/{tool}", setStatus, "POST")
+	util.AddRoute(mcpServerRouter, "/tool/{tool}/status/set/{status}", setStatus, "POST")
 	util.AddRoute(mcpServerRouter, "/status/set/{status}/header/{header}={value}", setStatus, "POST")
 	util.AddRoute(mcpServerRouter, "/status/set/{status}/header/{header}", setStatus, "POST")
 	util.AddRoute(mcpServerRouter, "/status/set/{status}/header/not/{header}", setStatus, "POST")
@@ -110,7 +110,7 @@ func getServers(w http.ResponseWriter, r *http.Request) {
 func addServers(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	payloads := []*MCPServerPayload{}
-	err := util.ReadJsonPayload(r, &payloads)
+	err := util.ReadJsonOrYamlPayloadFromBody(r.Body, &payloads)
 	msg := ""
 	if err != nil || len(payloads) == 0 {
 		w.WriteHeader(http.StatusBadRequest)

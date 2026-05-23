@@ -173,6 +173,7 @@ type RequestContext struct {
 	headers  map[string]string
 	queries  map[string]string
 	body     io.Reader
+	rs       *util.RequestStore
 	r        *http.Request
 	respChan chan byte
 	w        http.ResponseWriter
