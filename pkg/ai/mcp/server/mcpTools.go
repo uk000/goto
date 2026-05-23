@@ -44,7 +44,8 @@ import (
 type MCPTool struct {
 	MCPComponent
 	Tool     *gomcp.Tool  `json:"tool"`
-	Behavior ToolBehavior `json:"behavior,omitempty"`
+	Schema   string       `json:"schema,omitempty"`
+	Behavior ToolBehavior `json:"behavior"`
 	Config   ToolConfig   `json:"config"`
 	client   transport.ClientTransport
 }
@@ -99,9 +100,9 @@ func NewMCPTool(name, desc string) *MCPTool {
 	}
 }
 
-func ParseTools(payload []byte) (tools []*MCPTool, err error) {
+func ParseTools(b []byte) (tools []*MCPTool, err error) {
 	tools = []*MCPTool{}
-	if err = json.Unmarshal(payload, &tools); err != nil {
+	if err = util.ReadJsonOrYamlPayloadFromBytes(b, &tools); err != nil {
 		return
 	}
 	for _, tool := range tools {
@@ -126,6 +127,18 @@ func ParseTool(payload []byte) (tool *MCPTool, err error) {
 func processTool(tool *MCPTool) error {
 	if tool.Tool == nil {
 		return fmt.Errorf("Missing tool definition")
+	}
+	if tool.Tool.InputSchema == nil || reflect.ValueOf(tool.Tool.InputSchema).IsNil() {
+		if tool.Schema == "" {
+			return fmt.Errorf("Missing tool schema")
+		}
+		lock.RLock()
+		ts := ToolSchemas[tool.Schema]
+		lock.RUnlock()
+		if ts == nil {
+			return fmt.Errorf("Undefined tool schema [%s]", tool.Schema)
+		}
+		tool.Tool.InputSchema = ts
 	}
 	tool.Kind = KindTools
 	if tool.Name == "" {

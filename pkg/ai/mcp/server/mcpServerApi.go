@@ -40,6 +40,8 @@ func setRoutes(r *mux.Router) {
 	mcpServers := util.PathRouter(mcpapi, "/servers")
 	mcpServerRouter := util.PathRouter(mcpapi, "/server/{server}")
 
+	util.AddRoute(mcpapi, "/schemas/add", addToolSchemas, "POST")
+
 	util.AddRoute(mcpServers, "/add", addServers, "POST")
 	util.AddRoute(mcpServers, "", getServers, "GET")
 	util.AddRoute(mcpServers, "/all", getServers, "GET")
@@ -56,16 +58,19 @@ func setRoutes(r *mux.Router) {
 	util.AddRouteQ(mcpServerRouter, "/route", setServerRoute, "uri", "POST")
 	util.AddRoute(mcpServerRouter, "/start", startServer, "POST")
 	util.AddRoute(mcpServerRouter, "/stop", stopServer, "POST")
+
 	util.AddRouteQ(mcpServerRouter, "/payload/completion", addCompletionPayload, "type", "POST")
 	util.AddRouteQ(mcpServerRouter, "/payload/completion/delay={delay}", addCompletionPayload, "type", "POST")
+
+	util.AddRoute(mcpServerRouter, "/{kind:tools|prompts|resources|templates}/add", addComponent, "POST")
 	util.AddRoute(mcpServerRouter, "/{kind:tools|prompts|resources|templates}", getComponents, "GET")
 	util.AddRoute(mcpServerRouter, "/{kind:tools|prompts|resources|templates}/{name}", getComponents, "GET")
-	util.AddRoute(mcpServerRouter, "/{kind:tools|prompts|resources|templates}/add", addComponent, "POST")
-	util.AddRoute(mcpServerRouter, "/tool/{tool}/call", callTool, "POST")
 	util.AddRoute(mcpServerRouter, "/payload/{kind:tools|prompts|resources|templates}/{name}", addComponentPayload, "POST")
 	util.AddRoute(mcpServerRouter, "/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}", addComponentPayload, "POST")
 	util.AddRoute(mcpServerRouter, "/payload/{kind:tools|prompts|resources|templates}/{name}/stream/count={count}/delay={delay}", addComponentPayload, "POST")
 	util.AddRoute(mcpServerRouter, "/clear", clearServers, "POST")
+
+	util.AddRoute(mcpServerRouter, "/tool/{tool}/call", callTool, "POST")
 
 	util.AddRoute(mcpServerRouter, "/status/set/{status}", setStatus, "POST")
 	util.AddRoute(mcpServerRouter, "/tool/{tool}/status/set/{status}", setStatus, "POST")
@@ -368,6 +373,18 @@ func addComponent(w http.ResponseWriter, r *http.Request) {
 		} else {
 			msg = fmt.Sprintf("Added %s to server [%s] on port [%d]: %+v", kind, serverName, port, names)
 		}
+	}
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
+}
+
+func addToolSchemas(w http.ResponseWriter, r *http.Request) {
+	b, _ := io.ReadAll(r.Body)
+	msg := ""
+	if names, err := AddToolSchemas(b); err != nil {
+		msg = fmt.Sprintf("Failed to add tool schemas with error [%s]", err.Error())
+	} else {
+		msg = fmt.Sprintf("Added tool schemas: %+v", names)
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)

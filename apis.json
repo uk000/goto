@@ -664,6 +664,13 @@
         }
       ]
     },
+    "/log/mcp": {
+      "/log/mcp/verbose={verbose}": [
+        {
+          "/log/mcp/verbose={verbose}": "[POST PUT]"
+        }
+      ]
+    },
     "/log/metrics": {
       "/log/metrics/{enable}": [
         {
@@ -815,6 +822,13 @@
         }
       ]
     },
+    "/mcpapi/schemas": {
+      "/mcpapi/schemas/add": [
+        {
+          "/mcpapi/schemas/add": "[POST]"
+        }
+      ]
+    },
     "/mcpapi/server": {
       "/mcpapi/server/{server}": [
         {
@@ -836,16 +850,13 @@
           "/mcpapi/server/{server}/payload/completion/delay={delay}?type={type}": "[POST]"
         },
         {
+          "/mcpapi/server/{server}/{kind:tools|prompts|resources|templates}/add": "[POST]"
+        },
+        {
           "/mcpapi/server/{server}/{kind:tools|prompts|resources|templates}": "[GET]"
         },
         {
           "/mcpapi/server/{server}/{kind:tools|prompts|resources|templates}/{name}": "[GET]"
-        },
-        {
-          "/mcpapi/server/{server}/{kind:tools|prompts|resources|templates}/add": "[POST]"
-        },
-        {
-          "/mcpapi/server/{server}/tool/{tool}/call": "[POST]"
         },
         {
           "/mcpapi/server/{server}/payload/{kind:tools|prompts|resources|templates}/{name}": "[POST]"
@@ -860,10 +871,13 @@
           "/mcpapi/server/{server}/clear": "[POST]"
         },
         {
+          "/mcpapi/server/{server}/tool/{tool}/call": "[POST]"
+        },
+        {
           "/mcpapi/server/{server}/status/set/{status}": "[POST]"
         },
         {
-          "/mcpapi/server/{server}/status/set/{status}/tool/{tool}": "[POST]"
+          "/mcpapi/server/{server}/tool/{tool}/status/set/{status}": "[POST]"
         },
         {
           "/mcpapi/server/{server}/status/set/{status}/header/{header}={value}": "[POST]"

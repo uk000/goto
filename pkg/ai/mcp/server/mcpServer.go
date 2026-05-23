@@ -37,6 +37,11 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+type ToolSchema struct {
+	Name        string `json:"name"`
+	InputSchema any    `json:"inputSchema"`
+}
+
 type MCPServer struct {
 	gomcp.Implementation
 	ID                string                          `json:"id"`
@@ -112,6 +117,7 @@ var (
 	PortsServers             = map[int]*PortServers{}
 	ServerRoutes             = map[string]*types.Pair[string, string]{}
 	AllComponents            = map[string]map[string]map[string]IMCPComponent{}
+	ToolSchemas              = map[string]any{}
 	Kinds                    = []string{KindTools, KindPrompts, KindResources, KindTemplates}
 	StatusManager            = status.NewStatusManager()
 	MCPRequestStoreBySession = map[string]*util.MCPRequestStore{}
@@ -351,26 +357,6 @@ func (ps *PortServers) RemoveMCPServer(server string) {
 	}
 }
 
-func GetComponentType(kind string) (isTools, isPrompts, isResources, isTemplates bool) {
-	switch kind {
-	case KindTools:
-		isTools = true
-	case KindPrompts:
-		isPrompts = true
-	case KindResources:
-		isResources = true
-	case KindTemplates:
-		isTemplates = true
-	}
-	return
-}
-
-func GetAllComponents(kind string) map[string]map[string]IMCPComponent {
-	lock.RLock()
-	defer lock.RUnlock()
-	return AllComponents[kind]
-}
-
 func (ps *PortServers) AllServers() map[int]*PortServers {
 	return PortsServers
 }
@@ -540,21 +526,6 @@ func (s *MCPServer) AddComponents(kind string, b []byte) (names []string, err er
 	}
 }
 
-func (m *MCPServer) AddTools2(b []byte) ([]string, error) {
-	arr := util.ToJSONArray(b)
-	names := []string{}
-	for _, b2 := range arr {
-		tool, err := ParseTool(b2)
-		if err != nil {
-			return nil, err
-		}
-		m.AddTool(tool)
-		names = append(names, tool.Name)
-	}
-	log.Printf("Server [%s][%d] added Tools [%+v] ", m.Name, m.Port, names)
-	return names, nil
-}
-
 func (m *MCPServer) AddTools(b []byte) ([]string, error) {
 	tools, err := ParseTools(b)
 	if err != nil {
@@ -722,6 +693,42 @@ func (m *MCPServer) AddResourceTemplates(b []byte) ([]string, error) {
 			m.ps.addComponentToAll(template, m.Name)
 			names = append(names, template.Name)
 		}
+	}
+	return names, nil
+}
+
+func GetComponentType(kind string) (isTools, isPrompts, isResources, isTemplates bool) {
+	switch kind {
+	case KindTools:
+		isTools = true
+	case KindPrompts:
+		isPrompts = true
+	case KindResources:
+		isResources = true
+	case KindTemplates:
+		isTemplates = true
+	}
+	return
+}
+
+func GetAllComponents(kind string) map[string]map[string]IMCPComponent {
+	lock.RLock()
+	defer lock.RUnlock()
+	return AllComponents[kind]
+}
+
+func AddToolSchemas(b []byte) ([]string, error) {
+	toolSchemas := []*ToolSchema{}
+	if err := util.ReadJsonOrYamlPayloadFromBytes(b, &toolSchemas); err != nil {
+		log.Println(string(b))
+		return nil, err
+	}
+	names := []string{}
+	lock.Lock()
+	defer lock.Unlock()
+	for _, ts := range toolSchemas {
+		ToolSchemas[ts.Name] = ts.InputSchema
+		names = append(names, ts.Name)
 	}
 	return names, nil
 }

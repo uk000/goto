@@ -40,15 +40,19 @@ func ReadJsonPayloadFromBody(body io.Reader, t interface{}) error {
 }
 
 func ReadJsonOrYamlPayloadFromBody(body io.Reader, t interface{}) error {
-	if body, err := io.ReadAll(body); err == nil {
-		err = json.Unmarshal(body, t)
-		if err != nil {
-			err = yaml.Unmarshal(body, t)
-		}
-		return err
+	if b, err := io.ReadAll(body); err == nil {
+		return ReadJsonOrYamlPayloadFromBytes(b, t)
 	} else {
 		return err
 	}
+}
+
+func ReadJsonOrYamlPayloadFromBytes(b []byte, t interface{}) error {
+	err := json.Unmarshal(b, t)
+	if err != nil {
+		err = yaml.Unmarshal(b, t)
+	}
+	return err
 }
 
 func WriteJsonOrYAMLPayload(w http.ResponseWriter, t interface{}, yaml bool) error {
