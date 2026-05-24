@@ -18,11 +18,13 @@ package startup
 
 import (
 	"goto/ctl"
+	"goto/pkg/constants"
 	"goto/pkg/rpc/grpc"
 	"goto/pkg/rpc/grpc/protos"
 	grpcserver "goto/pkg/rpc/grpc/server"
 	"goto/pkg/server/response/payload"
 	"log"
+	"strings"
 )
 
 func clearGRPC(g *ctl.GRPC) {
@@ -74,17 +76,24 @@ func processGRRPCService(port int, gs *grpc.GRPCService, methods []*ctl.GRPCMeth
 			log.Printf("No gRPC Service Method configured by the name [%s]\n", m.Method)
 			continue
 		}
+		uri := strings.ToLower(sm.URI)
 		if m.Response != nil {
-			for _, rp := range m.Response.Payloads {
+			rp := m.Response.Payload
+			if rp != nil {
 				if rp.RequestMatches == nil {
-					rp.RequestMatches = append(rp.RequestMatches, payload.NewRequestMatch(sm.URI))
+					rp.RequestMatches = append(rp.RequestMatches, payload.NewRequestMatch(uri))
 				} else {
 					for _, m := range rp.RequestMatches {
-						m.URIPrefix = sm.URI
+						m.URIPrefix = uri
 					}
 				}
 				if err := payload.PayloadManager.SetURIResponsePayloadWithMatches(port, rp, true); err != nil {
-					log.Printf("Error processing HTTP response: %s\n", err.Error())
+					log.Printf("Error setting gRPC response: %s\n", err.Error())
+				}
+			}
+			if m.Response.Transforms != nil {
+				if err := payload.PayloadManager.SetRPCResponsePayloadTransform(port, sm.IsServerStream || sm.IsBidiStream, constants.ContentTypeJSON, uri, m.Response.Transforms, 0, 0); err != nil {
+					log.Printf("Error setting gRPC transform response: %s\n", err.Error())
 				}
 			}
 		}

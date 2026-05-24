@@ -93,3 +93,27 @@
 | remoteClosed | bool  | Whether the connection was closed by remote party |
 | readError | bool  | Whether the connection was closed due to a read error |
 | writeError | bool  | Whether the connection was closed due a write error |
+
+#### TCP Proxy Startup Config Example
+
+```
+proxy:
+  - tcp:
+      port: 10000
+      enabled: true
+      upstreams:
+        http-8081-8082:
+          delay:
+            min: 0s
+            max: 0s
+          retries: 1
+          retryDelay:
+            min: 0s
+            max: 0s
+          dropPct: 0
+          endpoints:
+            ep1:
+              address: "localhost:8081"
+            ep2:
+              address: "localhost:8082"
+```

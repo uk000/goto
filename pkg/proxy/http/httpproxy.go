@@ -40,7 +40,6 @@ var (
 	portProxy                = map[int]*Proxy{}
 	interceptMiddleware      = intercept.IntereceptMiddleware(nil, nil)
 	notFoundHandler          = catchall.Middleware.MiddlewareHandler(nil)
-	lowerViaGoto             = strings.ToLower(constants.HeaderViaGoto)
 	lowerProxyUpstreamStatus = strings.ToLower(constants.HeaderGotoProxyUpstreamStatus)
 	proxyLock                sync.RWMutex
 )
@@ -118,8 +117,16 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 	go p.asyncStreamResponse(rc)
 	for _, match := range targetsMatches {
 		match.invoke(rc, out, wg, p.HTTPTracker)
-		if match.trafficConfig != nil && match.trafficConfig.Transparent {
-			rc.clean = true
+		if match.trafficConfig != nil {
+			if match.trafficConfig.Transparent {
+				rc.sendHeaders = true
+				rc.sendPayload = true
+			}
+			if match.trafficConfig.JsonPayload || match.trafficConfig.YamlPayload {
+				rc.sendPayload = true
+				rc.parseJson = match.trafficConfig.JsonPayload
+				rc.parseYaml = match.trafficConfig.YamlPayload
+			}
 		}
 	}
 	wg.Wait()
@@ -141,7 +148,7 @@ func (p *Proxy) processResponses(rc *RequestContext, responses UpstreamResults, 
 		}
 	}
 	rc.sendProxyStatuses(upstreamViaGoto, upstreamProxyStatuses, responseStatuses)
-	if rc.clean {
+	if rc.sendHeaders {
 		for _, m := range responses {
 			for _, responses := range m {
 				for _, resp := range responses {
@@ -170,7 +177,7 @@ func (rc *RequestContext) sendProxyStatuses(upstreamViaGoto []string, upstreamPr
 func (rc *RequestContext) processResponseHeaders(target, ep string, headers http.Header, upstreamViaGoto *[]string, upstreamProxyStatuses *[]map[string]map[string][]string) {
 	v := headers[constants.HeaderViaGoto]
 	if len(v) == 0 {
-		v = headers[lowerViaGoto]
+		v = headers[util.LowerViaGoto]
 	}
 	if len(v) > 0 {
 		*upstreamViaGoto = append(*upstreamViaGoto, v...)
@@ -186,10 +193,21 @@ func (rc *RequestContext) processResponseHeaders(target, ep string, headers http
 
 func (p *Proxy) processPayload(rc *RequestContext, responses UpstreamResults) {
 	if len(responses) > 0 {
-		if rc.clean {
+		if rc.sendPayload {
 			for _, m := range responses {
 				for _, responses := range m {
 					for _, resp := range responses {
+						if rc.parseJson {
+							if json, ok := util.JSONFromJSONText(resp.PayloadText); ok {
+								util.WriteJsonOrYAMLPayload(rc.w, json, rc.yaml)
+								break
+							}
+						} else if rc.parseYaml {
+							if yaml, err := util.JsonOrYamlFromText(resp.PayloadText); err == nil {
+								util.WriteJsonOrYAMLPayload(rc.w, yaml, true)
+								break
+							}
+						}
 						util.WriteJsonOrYAMLPayload(rc.w, resp.PayloadText, false)
 						break
 					}
@@ -312,7 +330,7 @@ func (ep *TargetEndpoint) prepareInvocationSpec(tc *TrafficConfig) (*invocation.
 	is.Replicas = ep.Concurrent
 	is.TrackPayload = true
 	if tc != nil {
-		is.CollectResponse = tc.Payload
+		is.CollectResponse = tc.Payload || tc.JsonPayload || tc.YamlPayload
 		is.Retries = tc.Retries
 		if tc.Delay != nil {
 			is.Delay = tc.Delay.Compute().String()

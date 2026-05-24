@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/global"
-	"goto/pkg/rpc"
 	gotogrpc "goto/pkg/rpc/grpc"
 	grpcclient "goto/pkg/rpc/grpc/client"
 	"goto/pkg/types"
@@ -57,48 +56,46 @@ type GRPCSession struct {
 	DownstreamAddr string                      `json:"downstreamAddr"`
 	Method         *gotogrpc.GRPCServiceMethod `json:"method"`
 	Log            *GRPCSessionLog             `json:"log"`
-	target         *GRPCTarget
-	downstream     gotogrpc.GRPCStream
-	upstream       gotogrpc.GRPCStream
+	upstream       *GRPCUpstream
+	serviceProxy   *GRPCServiceProxy
+	streamDown     gotogrpc.GRPCStream
+	streamUp       gotogrpc.GRPCStream
 	teeport        int
 	tracker        *GRPCProxyTracker
 }
 
-type GRPCTarget struct {
-	Name           string                  `json:"name"`
-	Protocol       string                  `json:"protocol"`
+type GRPCUpstream struct {
+	ID             string                  `json:"id"`
 	Endpoint       string                  `json:"endpoint"`
 	Authority      string                  `json:"authority"`
-	Delay          *types.Delay            `json:"delay"`
-	Retries        int                     `json:"retries"`
-	RetryDelay     time.Duration           `json:"retryDelay"`
-	Methods        map[string]string       `json:"methods"`
 	ActiveSessions map[string]*GRPCSession `json:"activeSessions"`
 	PastSessions   map[string]*GRPCSession `json:"pastSessions"`
-	ProxyService   *gotogrpc.GRPCService   `json:"proxyService"`
-	TargetService  *gotogrpc.GRPCService   `json:"targetService"`
 	client         *grpcclient.GRPCClient
 	lock           sync.RWMutex
 }
 
-type TargetMatch struct {
-	Method  string                 `yaml:"method" json:"method"`
-	Headers map[string]string      `yaml:"headers" json:"headers"`
-	Vars    map[string]*util.Match `yaml:"vars" json:"vars"`
+type GRPCProxyConfig struct {
+	Delay *types.Delay `json:"delay"`
 }
 
-type TargetTrigger struct {
-	MatchAny  []*TargetMatch `yaml:"matchAny" json:"matchAny"`
-	Endpoints []string       `yaml:"endpoints" json:"endpoints"`
+type GRPCServiceProxy struct {
+	FromService   string            `json:"fromService"`
+	ToService     string            `json:"toService"`
+	Methods       map[string]string `json:"methods"`
+	Upstream      *GRPCUpstream     `json:"upstream"`
+	Config        *GRPCProxyConfig  `json:"config"`
+	proxyService  *gotogrpc.GRPCService
+	targetService *gotogrpc.GRPCService
+	tracker       *GRPCProxyTracker
 }
 
 type GRPCProxy struct {
-	Port        int                                   `json:"port"`
-	Enabled     bool                                  `json:"enabled"`
-	Targets     map[string]*GRPCTarget                `json:"targets"`
-	TeeServices map[string]map[string]*GRPCSessionLog `json:"teeServices"`
-	Tracker     *GRPCProxyTracker                     `json:"tracker"`
-	lock        sync.RWMutex
+	Port           int                                   `json:"port"`
+	Enabled        bool                                  `json:"enabled"`
+	ServiceProxies map[string]*GRPCServiceProxy          `json:"services"`
+	TeeServices    map[string]map[string]*GRPCSessionLog `json:"teeServices"`
+	Tracker        *GRPCProxyTracker                     `json:"tracker"`
+	lock           sync.RWMutex
 }
 
 var (
@@ -120,7 +117,7 @@ func _WillProxyGRPC(port int, method any) bool {
 
 func WillProxyGRPC(port int, method *gotogrpc.GRPCServiceMethod) bool {
 	p := GetPortProxy(port)
-	if !p.Enabled || (len(p.Targets) == 0 && len(p.TeeServices) == 0) {
+	if !p.Enabled || (len(p.ServiceProxies) == 0 && len(p.TeeServices) == 0) {
 		return false
 	}
 	if p.TeeServices[method.Service.Name] != nil {
@@ -132,9 +129,14 @@ func WillProxyGRPC(port int, method *gotogrpc.GRPCServiceMethod) bool {
 			return present
 		}
 	}
-	target := p.Targets[method.Service.Name]
-	if target == nil {
+	sp := p.ServiceProxies[method.Service.Name]
+	if sp == nil {
 		return false
+	}
+	if len(sp.Methods) > 0 {
+		if _, present := sp.Methods[method.URI]; !present {
+			return false
+		}
 	}
 	return true
 }
@@ -150,8 +152,12 @@ func ProxyGRPCUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceM
 			return proxy.teeProxyGRPCUnary(method, t)
 		}
 	}
-	t := proxy.Targets[method.Service.Name]
-	if t == nil {
+	sp := proxy.ServiceProxies[method.Service.Name]
+	if sp == nil {
+		return nil, nil, nil, fmt.Errorf("No proxy mapping found for service [%s] method [%s]", method.Service.Name, method.Name)
+	}
+	up := sp.Upstream
+	if up == nil {
 		return nil, nil, nil, fmt.Errorf("No upstream found for service [%s] method [%s]", method.Service.Name, method.Name)
 	}
 	sessionLog := newGRPCSessionLog()
@@ -166,17 +172,17 @@ func ProxyGRPCUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceM
 			sessionLog.ClientMessageLog[int(sessionLog.logCounter.Add(1))] = util.JSONFromBytes(b)
 		}
 	}
-	delay := t.applyDelay()
+	delay := sp.applyDelay()
 	if delay != "" {
 		log.Printf("[DEBUG] GRPCProxy.ProxyGRPCMethod: Service [%s] Method [%s] Delayed Upstream [%s] by [%s]\n",
-			method.Service.Name, method.Name, t.client.URL, delay)
+			method.Service.Name, method.Name, up.client.URL, delay)
 	}
 	if global.Flags.EnableProxyDebugLogs {
 		log.Printf("[DEBUG] GRPCProxy.ProxyGRPCMethod: Service [%s] Method [%s] Invoking Unary to Upstream [%s] Target Service [%s] Method [%s]",
-			method.Service.Name, method.Name, t.client.URL, t.client.Service.Name, toMethod.Name)
+			method.Service.Name, method.Name, up.client.URL, up.client.Service.Name, toMethod.Name)
 	}
 	start := time.Now()
-	output, respHeaders, respTrailers, err = t.client.InvokeRaw(toMethod, md, inputs)
+	output, respHeaders, respTrailers, err = up.client.InvokeRaw(toMethod, md, inputs)
 	end := time.Now()
 	tookNanos := end.Sub(start)
 	if err == nil {
@@ -184,7 +190,7 @@ func ProxyGRPCUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceM
 		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderGotoHost, global.Self.HostLabel, respHeaders)
 		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderGotoPort, strconv.Itoa(port), respHeaders)
 		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderViaGoto, global.Funcs.GetListenerLabelForPort(port), respHeaders)
-		respHeaders.Append(constants.HeaderViaGoto, global.Funcs.GetListenerLabelForPort(port))
+		respHeaders.Append(constants.HeaderViaGoto, fmt.Sprintf("%s(Proxy)", global.Funcs.GetListenerLabelForPort(port)))
 		if delay != "" {
 			respHeaders.Append(constants.HeaderGotoProxyDelay, delay)
 		}
@@ -197,11 +203,11 @@ func ProxyGRPCUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceM
 	} else {
 		sessionLog.err = err.Error()
 		log.Printf("[ERROR] GRPCProxy.ProxyGRPCMethod: Service [%s] Method [%s] Error while calling upstream [%s]: %s\n",
-			method.Service.Name, method.Name, t.Name, err.Error())
+			method.Service.Name, method.Name, up.ID, err.Error())
 	}
 	proxy.updateTeeSessionLog(teeport, method.Service.Name, method.Name, sessionLog)
-	proxy.Tracker.IncrementConnCounts(t.Name)
-	proxy.Tracker.AddMatchCounts(t.Name, t.ProxyService.Name, method.Name,
+	proxy.Tracker.IncrementConnCounts(up.ID)
+	proxy.Tracker.AddMatchCounts(up.ID, sp.proxyService.Name, method.Name,
 		string(method.InputType().Name()), 1, string(method.OutputType().Name()), len(output))
 	return
 }
@@ -373,49 +379,60 @@ func GetPortProxy(port int) *GRPCProxy {
 	return proxy
 }
 
+func AddPortProxy(p *GRPCProxy) {
+	proxyLock.Lock()
+	portProxy[p.Port] = p
+	proxyLock.Unlock()
+	p.initTracker()
+}
+
+func RemovePortProxy(port int) {
+	proxyLock.Lock()
+	delete(portProxy, port)
+	proxyLock.Unlock()
+}
+
 func newGRPCProxy(port int) *GRPCProxy {
 	p := &GRPCProxy{
-		Port:        port,
-		Enabled:     true,
-		Targets:     map[string]*GRPCTarget{},
-		TeeServices: map[string]map[string]*GRPCSessionLog{},
-		Tracker:     &GRPCProxyTracker{},
+		Port:           port,
+		Enabled:        true,
+		ServiceProxies: map[string]*GRPCServiceProxy{},
+		TeeServices:    map[string]map[string]*GRPCSessionLog{},
+		Tracker:        &GRPCProxyTracker{},
 	}
 	p.initTracker()
 	return p
 }
 
-func newGRPCTarget(from, to *gotogrpc.GRPCService, endpoint, authority string) (*GRPCTarget, error) {
+func newGRPCServiceProxy(from, to *gotogrpc.GRPCService, endpoint, authority string, tracker *GRPCProxyTracker) (*GRPCServiceProxy, error) {
 	if from == nil || endpoint == "" {
 		return nil, errors.New("no service/endpoint given")
 	}
 	if to == nil {
 		to = from
 	}
-	target := &GRPCTarget{
-		Name:           to.Name,
-		Protocol:       "grpc",
-		Endpoint:       endpoint,
-		Methods:        map[string]string{},
-		ActiveSessions: map[string]*GRPCSession{},
-		PastSessions:   map[string]*GRPCSession{},
-		ProxyService:   from,
-		TargetService:  to,
+	sp := &GRPCServiceProxy{
+		FromService:   from.Name,
+		ToService:     to.Name,
+		proxyService:  from,
+		targetService: to,
+		Methods:       map[string]string{},
+		Upstream: &GRPCUpstream{
+			ID:        to.Name,
+			Endpoint:  endpoint,
+			Authority: authority,
+		},
+		tracker: tracker,
 	}
-	target.Authority = authority
-	if host, port := util.ParseAddress(endpoint); host != "" && port > 0 {
-		if client, err := grpcclient.NewGRPCClient(to, endpoint, authority, host, &grpcclient.GRPCOptions{IsTLS: false, VerifyTLS: false}); err == nil {
-			target.client = client
-		} else {
-			return nil, err
-		}
+	if err := sp.init(tracker); err != nil {
+		return nil, err
 	}
-	return target, nil
+	return sp, nil
 }
 
-func (p *GRPCProxy) Init() {
+func (p *GRPCProxy) Clear() {
 	p.lock.Lock()
-	p.Targets = map[string]*GRPCTarget{}
+	p.ServiceProxies = map[string]*GRPCServiceProxy{}
 	p.TeeServices = map[string]map[string]*GRPCSessionLog{}
 	p.lock.Unlock()
 	p.initTracker()
@@ -425,18 +442,34 @@ func (p *GRPCProxy) initTracker() {
 	p.Tracker = NewGRPCProxyTracker()
 }
 
-func (p *GRPCProxy) RemoveProxy(service string) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	delete(p.Targets, service)
+func (sp *GRPCServiceProxy) init(tracker *GRPCProxyTracker) error {
+	sp.Upstream.ActiveSessions = map[string]*GRPCSession{}
+	sp.Upstream.PastSessions = map[string]*GRPCSession{}
+	sp.tracker = tracker
+	if host, port := util.ParseAddress(sp.Upstream.Endpoint); host != "" && port > 0 {
+		if client, err := grpcclient.NewGRPCClient(sp.targetService, sp.Upstream.Endpoint, sp.Upstream.Authority, host, &grpcclient.GRPCOptions{IsTLS: false, VerifyTLS: false}); err == nil {
+			sp.Upstream.client = client
+			return nil
+		} else {
+			return err
+		}
+	} else {
+		return fmt.Errorf("Failed to initialize gRPC client due to invalid endpoint: %s", sp.Upstream.Endpoint)
+	}
 }
 
-func (p *GRPCProxy) SetupGRPCProxy(from, to string, methods map[string]rpc.RPCMethod, endpoint, authority string, teeport int, delayMin, delayMax time.Duration, delayCount int) error {
-	fromService, oldToService, _ := GRPCServiceRegistry.GetProxyService(from)
-	fromService = GRPCServiceRegistry.GetService(from)
+func (p *GRPCProxy) RemoveServiceProxy(service string) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	delete(p.ServiceProxies, service)
+}
+
+func (p *GRPCProxy) SetupGRPCServiceProxy(from, to string, methods map[string]string, endpoint, authority string, teeport int, delayMin, delayMax time.Duration, delayCount int, sp *GRPCServiceProxy) (err error) {
+	fromService := GRPCServiceRegistry.GetService(from)
 	if reflect.ValueOf(fromService).IsNil() {
 		return fmt.Errorf("[ERROR] GRPCProxy.SetupGRPCProxy: no service found for [%s]", from)
 	}
+	_, oldToService, _ := GRPCServiceRegistry.GetProxyService(from)
 	toService := GRPCServiceRegistry.GetService(to)
 	if reflect.ValueOf(toService).IsNil() {
 		return fmt.Errorf("[ERROR] GRPCProxy.SetupGRPCProxy: no service found for [%s]", to)
@@ -452,22 +485,37 @@ func (p *GRPCProxy) SetupGRPCProxy(from, to string, methods map[string]rpc.RPCMe
 	if s == nil {
 		return fmt.Errorf("[ERROR] GRPCProxy.SetupGRPCProxy: could not setup proxy service for [%s]", from)
 	}
-
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	target, err := newGRPCTarget(fromService, toService, endpoint, authority)
-	if err != nil {
-		return err
-	}
-	p.Targets[from] = target
-	if methods != nil {
-		for _, method := range methods {
-			target.Methods[method.GetURI()] = method.GetName()
+	if sp == nil {
+		if sp, err = newGRPCServiceProxy(fromService, toService, endpoint, authority, p.Tracker); err != nil {
+			return err
 		}
 	} else {
-		target.Methods["*"] = ""
+		sp.proxyService = fromService
+		sp.targetService = toService
+		if err = sp.init(p.Tracker); err != nil {
+			return err
+		}
 	}
-	target.Delay = types.NewDelay(delayMin, delayMax, delayCount)
+	p.ServiceProxies[from] = sp
+	sp.Methods = map[string]string{}
+	if methods != nil {
+		for mFrom, mTo := range methods {
+			fromMethod := fromService.GetMethod(mFrom)
+			if fromMethod == nil {
+				return fmt.Errorf("[ERROR] GRPCProxy.SetupGRPCProxy: Method [%s] not found on proxied service [%s]", mFrom, from)
+			}
+			toMethod := fromService.GetMethod(mTo)
+			if toMethod == nil {
+				return fmt.Errorf("[ERROR] GRPCProxy.SetupGRPCProxy: Method [%s] not found on proxied service [%s]", mTo, to)
+			}
+			sp.Methods[fromMethod.GetURI()] = toMethod.GetName()
+		}
+	} else {
+		sp.Methods["*"] = ""
+	}
+	sp.Config.Delay = types.NewDelay(delayMin, delayMax, delayCount)
 	return nil
 }
 
@@ -505,42 +553,79 @@ func (p *GRPCProxy) readClientMessage(method *gotogrpc.GRPCServiceMethod, downst
 
 func (p *GRPCProxy) OpenGRPCSession(ctx context.Context, method *gotogrpc.GRPCServiceMethod, downstreamAddr string, md metadata.MD, downstream gotogrpc.GRPCStream) (*GRPCSession, error) {
 	p.lock.RLock()
-	t := p.Targets[method.Service.Name]
+	sp := p.ServiceProxies[method.Service.Name]
 	p.lock.RUnlock()
-	if t == nil {
+	if sp == nil {
 		return nil, fmt.Errorf("[ERROR] No upstream found for service [%s] method [%s]", method.Service.Name, method.Name)
 	}
 	clientMsg, toMethod, teeport, err := p.readClientMessage(method, downstream)
 	if err != nil {
 		return nil, err
 	}
-	upstream, err := t.client.OpenStream(p.Port, toMethod, md, clientMsg)
+	upstream, err := sp.Upstream.client.OpenStream(p.Port, toMethod, md, clientMsg)
 	if err != nil {
 		return nil, err
 	}
-	session := p.newGRPCSession(downstreamAddr, t, toMethod, downstream, upstream, teeport)
-	session.Log.clientTeeStream <- clientMsg
-	t.lock.Lock()
-	t.ActiveSessions[downstreamAddr] = session
+	session := sp.newGRPCSession(downstreamAddr, sp.Upstream, toMethod, downstream, upstream, teeport)
+	if session.Log != nil {
+		session.Log.clientTeeStream <- clientMsg
+	}
+	sp.Upstream.lock.Lock()
+	sp.Upstream.ActiveSessions[downstreamAddr] = session
 	p.updateTeeSessionLog(teeport, method.Service.Name, method.Name, session.Log)
-	t.lock.Unlock()
-	p.Tracker.IncrementConnCounts(t.Name)
+	sp.Upstream.lock.Unlock()
+	p.Tracker.IncrementConnCounts(sp.Upstream.ID)
 	if global.Flags.EnableProxyDebugLogs {
-		log.Printf("[DEBUG] Opened proxy session to upstream [%s] target service [%s] method [%s]", t.client.URL, t.client.Service.Name, method.Name)
+		log.Printf("[DEBUG] Opened proxy session to upstream [%s] target service [%s] method [%s]", sp.Upstream.client.URL, sp.Upstream.client.Service.Name, method.Name)
 	}
 	return session, nil
 }
 
-func (p *GRPCProxy) newGRPCSession(downstreamAddr string, target *GRPCTarget, method *gotogrpc.GRPCServiceMethod, downstream, upstream gotogrpc.GRPCStream, teeport int) *GRPCSession {
+func (sp *GRPCServiceProxy) Validate() error {
+	if sp.FromService == "" {
+		return fmt.Errorf("Intercepted Service Name Required")
+	}
+	if sp.ToService == "" {
+		return fmt.Errorf("Target Service Name Required")
+	}
+	if sp.Upstream == nil {
+		return fmt.Errorf("Upstrem Required")
+	}
+	sp.proxyService = GRPCServiceRegistry.GetService(sp.FromService)
+	if sp.proxyService == nil {
+		return fmt.Errorf("no service found for [%s]", sp.FromService)
+	}
+	sp.targetService = GRPCServiceRegistry.GetService(sp.ToService)
+	if sp.targetService == nil {
+		return fmt.Errorf("no service found for [%s]", sp.ToService)
+	}
+	for m1, m2 := range sp.Methods {
+		if sp.proxyService.Methods[m1] == nil {
+			return fmt.Errorf("method [%s] not found in service [%s]", m1, sp.FromService)
+		}
+		if sp.targetService.Methods[m2] == nil {
+			return fmt.Errorf("method [%s] not found in service [%s]", m2, sp.ToService)
+		}
+	}
+	if sp.Config == nil {
+		sp.Config = &GRPCProxyConfig{
+			Delay: types.NewDelay(0, 0, 0),
+		}
+	}
+	return nil
+}
+
+func (sp *GRPCServiceProxy) newGRPCSession(downstreamAddr string, target *GRPCUpstream, method *gotogrpc.GRPCServiceMethod, downstream, upstream gotogrpc.GRPCStream, teeport int) *GRPCSession {
 	session := &GRPCSession{
 		ID:             int(grpcSessionIdCounter.Add(1)),
 		DownstreamAddr: downstreamAddr,
-		target:         target,
+		upstream:       target,
+		serviceProxy:   sp,
 		Method:         method,
-		downstream:     downstream,
-		upstream:       upstream,
+		streamDown:     downstream,
+		streamUp:       upstream,
 		teeport:        teeport,
-		tracker:        p.Tracker,
+		tracker:        sp.tracker,
 	}
 	if teeport > 0 {
 		session.Log = newGRPCSessionLog()
@@ -548,24 +633,16 @@ func (p *GRPCProxy) newGRPCSession(downstreamAddr string, target *GRPCTarget, me
 	return session
 }
 
-func (p *GRPCProxy) getGRPCSession(port int, downstreamAddr string, method *gotogrpc.GRPCServiceMethod) *GRPCSession {
-	proxy := GetPortProxy(port)
-	if t := proxy.Targets[method.Service.Name]; t != nil {
-		return t.ActiveSessions[downstreamAddr]
-	}
-	return nil
+func (sp *GRPCServiceProxy) hasDelay() bool {
+	return (sp.Config.Delay != nil && sp.Config.Delay.IsNonZero())
 }
 
-func (t *GRPCTarget) hasDelay() bool {
-	return (t.Delay != nil && t.Delay.IsNonZero())
-}
-
-func (t *GRPCTarget) applyDelay() (delay string) {
-	if t.Delay != nil {
+func (sp *GRPCServiceProxy) applyDelay() (delay string) {
+	if sp.Config.Delay != nil {
 		if global.Flags.EnableProxyDebugLogs {
-			log.Printf("[DEBUG] Target [%s]: Delaying Upstream by [%s]\n", t.Name, delay)
+			log.Printf("[DEBUG] Upstream [%s]: Delaying by [%s]\n", sp.ToService, delay)
 		}
-		t.Delay.ComputeAndApply()
+		sp.Config.Delay.ComputeAndApply()
 	}
 	return
 }
@@ -580,8 +657,8 @@ func (s *GRPCSession) Stream() (receiveCount, sendCount int, err error) {
 	headersHook1 := gotogrpc.IdentityHeadersHook
 	headersHook2 := gotogrpc.IdentityHeadersHook
 	if s.isTee() {
-		if s.target.hasDelay() {
-			hook1 = gotogrpc.TeeHookWithDelay(s.Log.clientTeeStream, s.target.applyDelay)
+		if s.serviceProxy.hasDelay() {
+			hook1 = gotogrpc.TeeHookWithDelay(s.Log.clientTeeStream, s.serviceProxy.applyDelay)
 		} else {
 			hook1 = gotogrpc.TeeHook(s.Log.clientTeeStream)
 		}
@@ -589,39 +666,39 @@ func (s *GRPCSession) Stream() (receiveCount, sendCount int, err error) {
 		headersHook1 = gotogrpc.TeeHeadersHook(s.Log.onClientHeaders)
 		headersHook2 = gotogrpc.TeeHeadersHook(s.Log.onServerHeaders)
 		go s.Log.start()
-	} else if s.target.hasDelay() {
-		hook1 = gotogrpc.IdentityHookWithDelay(s.target.applyDelay)
+	} else if s.serviceProxy.hasDelay() {
+		hook1 = gotogrpc.IdentityHookWithDelay(s.serviceProxy.applyDelay)
 	}
-	receiveCount, sendCount, err = s.downstream.CrossHook(s.upstream, hook1, hook2, headersHook1, headersHook2)
-	s.downstream.Close()
-	s.upstream.Close()
+	receiveCount, sendCount, err = s.streamDown.CrossHook(s.streamUp, hook1, hook2, headersHook1, headersHook2)
+	s.streamDown.Close()
+	s.streamUp.Close()
 	if s.isTee() {
 		close(s.Log.clientTeeStream)
 		close(s.Log.serverTeeStream)
 	}
-	s.tracker.AddMatchCounts(s.target.Name, s.Method.Service.Name, s.Method.Name, string(s.Method.InputType().Name()), receiveCount, string(s.Method.OutputType().Name()), sendCount)
+	s.tracker.AddMatchCounts(s.upstream.ID, s.Method.Service.Name, s.Method.Name, string(s.Method.InputType().Name()), receiveCount, string(s.Method.OutputType().Name()), sendCount)
 	return
 }
 
 func (g *GRPCSession) Close() (err error) {
-	m, e := g.upstream.Close()
+	m, e := g.streamUp.Close()
 	if e != nil {
 		err = errors.Join(err, e)
 	}
 	if m != nil {
-		e = g.downstream.Send(m)
+		e = g.streamDown.Send(m)
 		if e != nil {
 			err = errors.Join(err, e)
 		}
 	}
-	_, e = g.downstream.Close()
+	_, e = g.streamDown.Close()
 	if e != nil {
 		err = errors.Join(err, e)
 	}
-	g.target.lock.Lock()
-	g.target.PastSessions[g.DownstreamAddr] = g
-	delete(g.target.ActiveSessions, g.DownstreamAddr)
-	g.target.lock.Unlock()
+	g.upstream.lock.Lock()
+	g.upstream.PastSessions[g.DownstreamAddr] = g
+	delete(g.upstream.ActiveSessions, g.DownstreamAddr)
+	g.upstream.lock.Unlock()
 	return
 }
 

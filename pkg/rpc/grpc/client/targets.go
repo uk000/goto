@@ -43,7 +43,7 @@ func newGRPCTargetsManager() *GRPCTargetsManager {
 		IsTLS:          false,
 		VerifyTLS:      false,
 		TLSVersion:     tls.VersionTLS13,
-		ConnectTimeout: 30 * time.Second,
+		ConnectTimeout: 2 * time.Second,
 		IdleTimeout:    5 * time.Minute,
 		RequestTimeout: 1 * time.Minute,
 		KeepOpen:       0,

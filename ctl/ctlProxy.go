@@ -19,6 +19,7 @@ package ctl
 import (
 	"bytes"
 	"fmt"
+	grpcproxy "goto/pkg/proxy/grpc"
 	httpproxy "goto/pkg/proxy/http"
 	tcpproxy "goto/pkg/proxy/tcp"
 	"goto/pkg/util"
@@ -27,8 +28,9 @@ import (
 )
 
 type Proxy struct {
-	HTTP *httpproxy.Proxy   `yaml:"http"`
-	TCP  *tcpproxy.TCPProxy `yaml:"tcp"`
+	HTTP *httpproxy.Proxy     `yaml:"http"`
+	TCP  *tcpproxy.TCPProxy   `yaml:"tcp"`
+	GRPC *grpcproxy.GRPCProxy `yaml:"grpc"`
 }
 
 func processProxy(config *GotoConfig) {

@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
@@ -83,6 +84,7 @@ func NewHTTPTransportInterceptWithWatch(orig any, label string, newConnNotifierC
 		Transport:              ht,
 		BaseTransportIntercept: &BaseTransportIntercept{},
 	}
+	t.Dialer.Timeout = 5 * time.Second
 	t.tlsConfigPtr = &ht.TLSClientConfig
 	dialer := t.getDialer()
 	t.Transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -108,6 +110,7 @@ func NewHTTP2TransportIntercept(orig any, label string, newConnNotifierChan chan
 		Transport:              ht,
 		BaseTransportIntercept: &BaseTransportIntercept{},
 	}
+	t.Dialer.Timeout = 5 * time.Second
 	t.tlsConfigPtr = &ht.TLSClientConfig
 	dialer := t.getDialer()
 	t.Transport.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {

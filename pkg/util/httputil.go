@@ -31,6 +31,7 @@ var (
 	WillTunnel    func(*http.Request, *RequestStore) bool
 	WillProxyGRPC func(int, any) bool
 	WillProxyMCP  func(*http.Request, *RequestStore) bool
+	LowerViaGoto  = strings.ToLower(constants.HeaderViaGoto)
 )
 
 func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
@@ -42,6 +43,11 @@ func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
 		label += "(MCP)"
 	} else if rs.IsAI {
 		label += "(A2A)"
+	} else {
+		if rs.IsProxy {
+			label += "(Proxy)"
+		}
+		label += "(HTTP)"
 	}
 	w.Header().Add(constants.HeaderViaGoto, label)
 	w.Header().Add(constants.HeaderGotoRemoteAddress, r.RemoteAddr)

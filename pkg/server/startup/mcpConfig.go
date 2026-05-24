@@ -55,7 +55,7 @@ func loadMCP(mcp *ctl.MCP) {
 		}
 		names, err := server.AddComponents(kind, data)
 		if err != nil {
-			log.Printf("Failed to add %s to server [%s] on port [%d] with error [%s]\n", kind, server.Name, server.Port, err.Error())
+			log.Printf("[*** ERROR ***] Failed to add %s to server [%s] on port [%d] with error [%s]\n", kind, server.Name, server.Port, err.Error())
 		} else {
 			log.Println("============================================================")
 			log.Printf("Added %s to server [%s] on port [%d]: %+v\n", kind, server.Name, server.Port, names)
@@ -93,7 +93,7 @@ func loadMCP(mcp *ctl.MCP) {
 					}
 					delayMin, delayMax, delayCount, _ := types.ParseDurationRange(sp.Payload.Delay)
 					if err := server.AddPayload(sp.Name, "tools", util.ToJSONBytes(sp.Payload.Data), true, true, sp.Payload.Count, delayMin, delayMax, delayCount); err != nil {
-						log.Printf("Failed to set stream payload for tool [%s] in MCP server [%s] on port [%d] with error [%s]\n", sp.Name, server.Name, server.Port, err.Error())
+						log.Printf("[*** ERROR ***] Failed to set stream payload for tool [%s] in MCP server [%s] on port [%d] with error [%s]\n", sp.Name, server.Name, server.Port, err.Error())
 					} else {
 						log.Printf("Set stream payload for tool [%s] in MCP server [%s] on port [%d]\n", sp.Name, server.Name, server.Port)
 					}
@@ -103,21 +103,21 @@ func loadMCP(mcp *ctl.MCP) {
 			if spc != nil {
 				if spc.Elicit != nil {
 					if err := mcpclient.AddPayload(server.Name, "elicit", util.ToJSONBytes(spc.Elicit)); err != nil {
-						log.Printf("Failed to set client elicit payload in MCP server [%s] on port [%d] with error [%s]\n", server.Name, server.Port, err.Error())
+						log.Printf("[*** ERROR ***] Failed to set client elicit payload in MCP server [%s] on port [%d] with error [%s]\n", server.Name, server.Port, err.Error())
 					} else {
 						log.Printf("Client elicit payload added for MCP server [%s] on port [%d]\n", server.Name, server.Port)
 					}
 				}
 				if spc.Sample != nil {
 					if err := mcpclient.AddPayload(server.Name, "sample", util.ToJSONBytes(spc.Sample)); err != nil {
-						log.Printf("Failed to set client sample payload in MCP server [%s] on port [%d] with error [%s]\n", server.Name, server.Port, err.Error())
+						log.Printf("[*** ERROR ***] Failed to set client sample payload in MCP server [%s] on port [%d] with error [%s]\n", server.Name, server.Port, err.Error())
 					} else {
 						log.Printf("Client sample payload added for MCP server [%s] on port [%d]\n", server.Name, server.Port)
 					}
 				}
 				if spc.Roots != nil {
 					if err := mcpclient.SetRoots(server.Name, util.ToJSONBytes(spc.Roots)); err != nil {
-						log.Printf("Failed to set client roots in MCP server [%s] on port [%d] with error [%s]\n", server.Name, server.Port, err.Error())
+						log.Printf("[*** ERROR ***] Failed to set client roots in MCP server [%s] on port [%d] with error [%s]\n", server.Name, server.Port, err.Error())
 					} else {
 						log.Printf("Client roots added for MCP server [%s] on port [%d]\n", server.Name, server.Port)
 					}

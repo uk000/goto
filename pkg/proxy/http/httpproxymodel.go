@@ -70,6 +70,8 @@ type TrafficConfig struct {
 	RetryDelay  *types.Delay `yaml:"retryDelay" json:"retryDelay"`
 	RetryOn     []int        `yaml:"retryOn" json:"retryOn"`
 	Payload     bool         `yaml:"payload" json:"payload"`
+	JsonPayload bool         `yaml:"jsonPayload" json:"jsonPayload"`
+	YamlPayload bool         `yaml:"yamlPayload" json:"yamlPayload"`
 	Transparent bool         `yaml:"transparent" json:"transparent"`
 }
 
@@ -168,21 +170,24 @@ type Proxy struct {
 type ProxyTargets map[string]*MatchedTarget
 
 type RequestContext struct {
-	path     string
-	method   string
-	vars     map[string]string
-	headers  map[string]string
-	queries  map[string]string
-	body     io.Reader
-	rs       *util.RequestStore
-	r        *http.Request
-	respChan chan byte
-	w        http.ResponseWriter
-	fw       intercept.FlushWriter
-	c        chan []byte
-	cw       intercept.ChanWriter
-	yaml     bool
-	clean    bool
+	path        string
+	method      string
+	vars        map[string]string
+	headers     map[string]string
+	queries     map[string]string
+	body        io.Reader
+	rs          *util.RequestStore
+	r           *http.Request
+	respChan    chan byte
+	w           http.ResponseWriter
+	fw          intercept.FlushWriter
+	c           chan []byte
+	cw          intercept.ChanWriter
+	sendPayload bool
+	sendHeaders bool
+	yaml        bool
+	parseJson   bool
+	parseYaml   bool
 }
 
 func newProxy(port int) *Proxy {

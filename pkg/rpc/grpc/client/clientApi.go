@@ -19,13 +19,18 @@ package grpcclient
 import (
 	"fmt"
 	"goto/pkg/constants"
+	"goto/pkg/server/intercept"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 var (
@@ -35,10 +40,41 @@ var (
 func setRoutes(r *mux.Router) {
 	router := middleware.RootPath("/grpc")
 	clientRouter := util.PathRouter(router, "/client")
-	util.AddRoute(clientRouter, "/call/{endpoint}/{service}/{method}", callServiceMethod, "POST")
+	util.AddRoute(clientRouter, "/call/{service}/{method}/{endpoint}", callServiceMethod, "POST")
+	util.AddRoute(clientRouter, "/call/{service}/{method}/{endpoint}/stream", callServiceMethod, "POST")
+	util.AddRoute(clientRouter, "/call", call, "POST")
+}
+
+func call(w http.ResponseWriter, r *http.Request) {
+	call := &GRPCCall{}
+	err := util.ReadJsonOrYamlPayloadFromBody(r.Body, &call)
+	if err != nil {
+		util.SendBadRequest(fmt.Sprintf("Failed to parse payload with error [%s]", err.Error()), w, r)
+		return
+	}
+	doCall(call, r, w)
 }
 
 func callServiceMethod(w http.ResponseWriter, r *http.Request) {
+	endpoint := util.GetStringParamValue(r, "endpoint")
+	serviceName := util.GetStringParamValue(r, "service")
+	methodName := util.GetStringParamValue(r, "method")
+	stream := strings.Contains(r.RequestURI, "stream")
+	if endpoint == "" || serviceName == "" || methodName == "" {
+		util.SendBadRequest("Missing endpoint/service/method", w, r)
+		return
+	}
+	call := &GRPCCall{
+		Service:  serviceName,
+		Method:   methodName,
+		Endpoint: endpoint,
+		Payloads: &GRPCPayloads{Linear: []*GRPCPayload{{Payload: util.Read(r.Body)}}},
+		Push:     stream,
+	}
+	doCall(call, r, w)
+}
+
+func doCall(call *GRPCCall, r *http.Request, w http.ResponseWriter) {
 	msg := ""
 	defer func() {
 		if msg != "" {
@@ -46,64 +82,104 @@ func callServiceMethod(w http.ResponseWriter, r *http.Request) {
 			util.AddLogMessage(msg, r)
 		}
 	}()
-	endpoint := util.GetStringParamValue(r, "endpoint")
-	serviceName := util.GetStringParamValue(r, "service")
-	methodName := util.GetStringParamValue(r, "method")
-	if endpoint == "" || serviceName == "" || methodName == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		msg = "Missing endpoint/service/method"
-		return
-	}
-	client, err := CreateGRPCClient(nil, "", endpoint, "", "", &GRPCOptions{IsTLS: false, VerifyTLS: false, KeepOpen: 1 * time.Minute})
+	call.RequestHeaders = r.Header
+	client, err := CreateGRPCClient(nil, "", call.Endpoint, "", "", &GRPCOptions{IsTLS: false, VerifyTLS: false, KeepOpen: 1 * time.Second})
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = err.Error()
 		return
 	}
-	err = client.LoadServiceMethodFromReflection(serviceName, methodName)
+	err = client.LoadServiceMethodFromReflection(call.Service, call.Method)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = err.Error()
 		return
 	}
-	method := client.Service.Methods[methodName]
+	method := client.Service.Methods[call.Method]
 	if method == nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "Invalid method"
 		return
 	}
-	var content [][]byte
-	if method.IsClientStream {
-		content = util.ReadArrayOfArrays(r.Body)
-	} else {
-		content = [][]byte{util.ReadBytes(r.Body)}
-	}
 	contentType := r.Header.Get(constants.HeaderContentType)
 	if contentType == "" {
 		contentType = "plain/text"
 	}
-	resp, err := client.Invoke(methodName, nil, content)
-	if err != nil || resp == nil {
-		w.WriteHeader(http.StatusBadRequest)
-		msg = err.Error()
-		return
+	rs := util.GetRequestStore(r)
+	headersReceived := false
+	lock := sync.Mutex{}
+	checkViaGotos := func(h metadata.MD) {
+		viaGotos := h[constants.HeaderViaGoto]
+		if len(viaGotos) == 0 {
+			viaGotos = h[util.LowerViaGoto]
+		}
+		if len(viaGotos) == 0 {
+			viaGotos = h[constants.HeaderViaGoto]
+		}
+		if len(viaGotos) == 0 {
+			viaGotos = h[util.LowerViaGoto]
+		}
+		if len(viaGotos) > 0 {
+			lock.Lock()
+			for _, v := range viaGotos {
+				rs.ViaGotos = append(rs.ViaGotos, fmt.Sprintf("%s(gRPC)", v))
+			}
+			util.SendGotoTrailers(w, r)
+			rs.ViaGotos = nil
+			headersReceived = true
+			lock.Unlock()
+		}
 	}
-	w.WriteHeader(http.StatusOK)
-	response := map[string]any{}
-	response["headers"] = metadata.Join(resp.ResponseHeaders, resp.ResponseTrailers)
-	if len(resp.ResponsePayload) > 0 {
-		jsons := []util.JSON{}
-		for _, r := range resp.ResponsePayload {
-			j, ok := util.JSONFromJSONText(r)
-			if ok && !j.IsEmpty() {
-				jsons = append(jsons, j)
+	var callback func(m proto.Message, h metadata.MD)
+	if call.Push {
+		fw := intercept.NewFlushWriter(w)
+		callback = func(m proto.Message, h metadata.MD) {
+			if !headersReceived {
+				checkViaGotos(h)
+			}
+			if b, err := protojson.Marshal(m); err == nil {
+				lock.Lock()
+				fmt.Fprintln(w, util.ToPrettyJSONText(util.JSONFromBytes(b)))
+				fw.Flush()
+				lock.Unlock()
 			}
 		}
-		response["payload"] = jsons
-	} else {
-		response["payload"] = "<No Payload>"
-
 	}
-	util.WriteJson(w, response)
-	util.AddLogMessage(fmt.Sprintf("Invoked Service [%s] Method [%s] with Response [%+v]", serviceName, methodName, response), r)
+	result := client.Invoke(call, callback)
+	if result == nil || len(result.Responses) == 0 || len(result.Errors) > 0 {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		msg = result.GetErrors()
+		if msg == "" {
+			msg = "Upstream Unavailable"
+		}
+		return
+	}
+	if call.Result {
+		type responseType struct {
+			Headers any
+			Payload any
+		}
+		response := []responseType{}
+		for _, resp := range result.Responses {
+			jsons := []util.JSON{}
+			if len(resp.ResponsePayload) > 0 {
+				for _, r := range resp.ResponsePayload {
+					j, ok := util.JSONFromJSONText(r)
+					if ok && !j.IsEmpty() {
+						jsons = append(jsons, j)
+					}
+				}
+			}
+			if !headersReceived {
+				checkViaGotos(resp.ResponseHeaders)
+			}
+			response = append(response, responseType{
+				Headers: metadata.Join(resp.ResponseHeaders, resp.ResponseTrailers),
+				Payload: jsons,
+			})
+		}
+		util.WriteJson(w, response)
+	}
+	w.WriteHeader(http.StatusOK)
+	util.AddLogMessage(fmt.Sprintf("Invoked Service [%s] Method [%s]", call.Service, call.Method), r)
 }

@@ -19,7 +19,7 @@ package grpcclient
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
+	"errors"
 	"goto/pkg/constants"
 	"goto/pkg/metrics"
 	gotogrpc "goto/pkg/rpc/grpc"
@@ -34,12 +34,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/dynamicpb"
 )
 
 type GRPCOptions struct {
@@ -53,16 +50,6 @@ type GRPCOptions struct {
 	DialOptions    []grpc.DialOption `json:"dialOptions"`
 }
 
-type GRPCResponse struct {
-	Status                   int
-	EquivalentHTTPStatusCode int
-	ResponseHeaders          map[string][]string
-	ResponseTrailers         map[string][]string
-	ResponsePayload          []string
-	ClientStreamCount        int
-	ServerStreamCount        int
-}
-
 type GRPCClient struct {
 	transport.BaseTransportIntercept
 	Service        *gotogrpc.GRPCService `json:"service"`
@@ -74,6 +61,7 @@ type GRPCClient struct {
 	tlsCredentials credentials.TransportCredentials
 	conn           *grpc.ClientConn
 	stub           *grpcdynamic.Stub
+	connErrorCount int
 }
 
 func CreateGRPCClient(service *gotogrpc.GRPCService, targetService, url, authority, serverName string, options *GRPCOptions) (*GRPCClient, error) {
@@ -98,6 +86,7 @@ func NewGRPCClient(service *gotogrpc.GRPCService, url, authority, serverName str
 		Authority:     authority,
 		Options:       *options,
 	}
+	c.Dialer.Timeout = 5 * time.Second
 	c.configureTLS()
 	return c, nil
 }
@@ -140,16 +129,31 @@ func (c *GRPCClient) UpdateTLSConfig(serverName string, tlsVersion uint16) {
 	c.configureTLS()
 }
 
+type permanentDialError struct {
+	error
+}
+
+func (e permanentDialError) Temporary() bool {
+	return false
+}
+func (e permanentDialError) Timeout() bool {
+	return false
+}
+
 func (c *GRPCClient) WithContextDialer() grpc.DialOption {
 	return grpc.WithContextDialer(func(ctx context.Context, address string) (net.Conn, error) {
+		if c.connErrorCount > 1 {
+			return nil, permanentDialError{error: errors.New("max connection attempt reached")}
+		}
 		if conn, err := c.Dialer.DialContext(ctx, "tcp", address); err == nil {
 			if c.Service != nil {
 				metrics.ConnTracker <- c.Service.Name
 			}
 			return transport.NewConnTracker(conn, &c.BaseTransportIntercept)
 		} else {
+			c.connErrorCount++
 			log.Printf("GRPCClient.WithContextDialer: Failed to dial address [%s] with error: %s\n", address, err.Error())
-			return nil, err
+			return nil, permanentDialError{error: err}
 		}
 	})
 }
@@ -160,6 +164,9 @@ func (c *GRPCClient) configureDialOptions() {
 	}
 	c.Options.DialOptions = append(Manager.options.DialOptions,
 		c.WithContextDialer(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDisableRetry(),
+		grpc.WithMaxCallAttempts(1),
 		grpc.WithAuthority(c.Authority),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:    c.Options.IdleTimeout / 2,
@@ -210,20 +217,22 @@ func (c *GRPCClient) IsH2() bool {
 	return false
 }
 
-func (c *GRPCClient) createContext(headers map[string]string, md metadata.MD) (context.Context, context.CancelFunc) {
+func (c *GRPCClient) createContext(headers map[string]string, md metadata.MD) (context.Context, metadata.MD) {
 	ctx := context.Background()
 	if md != nil {
 		ctx = metadata.NewOutgoingContext(ctx, md)
 	} else if len(headers) > 0 {
-		ctx = metadata.NewOutgoingContext(ctx, metadata.New(headers))
+		md = metadata.New(headers)
+		ctx = metadata.NewOutgoingContext(ctx, md)
 	}
-	if c.Options.ConnectTimeout == 0 {
-		return ctx, nil
+	if c.Options.RequestTimeout == 0 {
+		c.Options.RequestTimeout = 5 * time.Minute
 	}
-	return context.WithTimeout(ctx, c.Options.ConnectTimeout)
+	return ctx, md
 }
 
 func (c *GRPCClient) Connect() error {
+	c.connErrorCount = 0
 	if c.conn != nil {
 		connState := c.conn.GetState()
 		if connState != connectivity.Connecting && connState != connectivity.Idle && connState != connectivity.Ready {
@@ -238,17 +247,38 @@ func (c *GRPCClient) Connect() error {
 			return err
 		}
 	}
-	c.stub = grpcdynamic.NewStub(c.GRPC())
+	c.stub = grpcdynamic.NewStub(c.conn)
 	return nil
 }
 
-func (c *GRPCClient) ConnectWithHeadersOrMD(headers map[string]string, md metadata.MD) (context.Context, context.CancelFunc, error) {
+func (c *GRPCClient) monitorAndAbort() {
+	go func() {
+		time.Sleep(1 * time.Second)
+		for {
+			state := c.conn.GetState()
+			if state == connectivity.TransientFailure || state == connectivity.Connecting {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				log.Println("Connection failed. Monitoring deadline to abort retries...")
+				if !c.conn.WaitForStateChange(ctx, state) {
+					log.Println("Exceeded 5-second retry budget. Force closing gRPC channel pool.")
+					c.conn.Close()
+					return
+				}
+			} else {
+				return
+			}
+		}
+	}()
+}
+
+func (c *GRPCClient) ConnectWithHeadersOrMD(headers map[string]string, md metadata.MD) (context.Context, metadata.MD, error) {
 	err := c.Connect()
 	if err != nil {
 		return nil, nil, err
 	}
-	ctx, cancel := c.createContext(headers, md)
-	return ctx, cancel, nil
+	ctx, md := c.createContext(headers, md)
+	return ctx, md, nil
 }
 
 func (c *GRPCClient) LoadServiceMethodFromReflection(serviceName, methodName string) (err error) {
@@ -265,343 +295,4 @@ func LoadRemoteReflectedServices(upstream string) (err error) {
 		return err
 	}
 	return gotogrpc.LoadRemoteReflectedServices(c.conn)
-}
-
-func (c *GRPCClient) Invoke(method string, headers map[string]string, payloads [][]byte) (response *GRPCResponse, err error) {
-	if c.Service == nil || c.Service.Methods == nil {
-		return nil, fmt.Errorf("GRPCClient.Invoke: [ERROR] service [%s] not configured", c.Service.Name)
-	}
-	grpcMethod := c.Service.Methods[method]
-	if grpcMethod == nil {
-		return nil, fmt.Errorf("GRPCClient.Invoke: [ERROR] method [%s] not found in Service [%s]", method, c.Service.Name)
-	}
-	ctx, _, err := c.ConnectWithHeadersOrMD(headers, nil)
-	if err != nil {
-		return nil, err
-	}
-	if grpcMethod.IsUnary {
-		return c.InvokeUnary(grpcMethod, ctx, payloads[0])
-	} else if grpcMethod.IsClientStream && grpcMethod.IsServerStream {
-		return c.InvokeBidiStream(grpcMethod, payloads, c.Options.KeepOpen)
-	} else if grpcMethod.IsClientStream {
-		return c.InvokeClientStream(grpcMethod, payloads, c.Options.KeepOpen)
-	} else if grpcMethod.IsServerStream {
-		return c.InvokeServerStream(grpcMethod, payloads[0])
-	}
-	return nil, nil
-}
-
-func (c *GRPCClient) InvokeRaw(method *gotogrpc.GRPCServiceMethod, md metadata.MD, inputs []proto.Message) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
-	ctx, _, err := c.ConnectWithHeadersOrMD(nil, md)
-	if err != nil {
-		return
-	}
-	var input proto.Message
-	if len(inputs) > 0 {
-		input = inputs[0]
-	}
-	if method.IsUnary {
-		responses, respHeaders, respTrailers, err = c.InvokeUnaryRaw(ctx, method, input)
-		if err != nil {
-			log.Printf("GRPCClient.InvokeRaw: Service [%s] Method [%s] InvokeUnaryRaw failed with ERROR [%s]\n", method.Service.Name, method.Name, err.Error())
-		}
-	} else if method.IsClientStream && method.IsServerStream {
-		responses, respHeaders, respTrailers, err = c.InvokeBidiStreamRaw(method, inputs)
-		if err != nil {
-			log.Printf("GRPCClient.InvokeRaw: Service [%s] Method [%s] InvokeBidiStreamRaw failed with ERROR [%s]\n", method.Service.Name, method.Name, err.Error())
-		}
-	} else if method.IsClientStream {
-		responses, respHeaders, respTrailers, err = c.InvokeClientStreamRaw(method, inputs)
-		if err != nil {
-			log.Printf("GRPCClient.InvokeRaw: Service [%s] Method [%s] InvokeClientStreamRaw failed with ERROR [%s]\n", method.Service.Name, method.Name, err.Error())
-		}
-	} else if method.IsServerStream {
-		responses, respHeaders, respTrailers, err = c.InvokeServerStreamRaw(method, input)
-		if err != nil {
-			log.Printf("GRPCClient.InvokeRaw: Service [%s] Method [%s] InvokeServerStreamRaw failed with ERROR [%s]\n", method.Service.Name, method.Name, err.Error())
-		}
-	}
-	return
-}
-
-func (c *GRPCClient) OpenStream(port int, method *gotogrpc.GRPCServiceMethod, md metadata.MD, input proto.Message) (stream gotogrpc.GRPCStream, err error) {
-	ctx, _, err := c.ConnectWithHeadersOrMD(nil, md)
-	if err != nil {
-		return
-	}
-	if method.IsClientStream && method.IsServerStream {
-		if bs, e := c.stub.InvokeRpcBidiStream(ctx, method.PMD); e == nil {
-			stream = gotogrpc.NewGRPCStreamForClient(port, method, nil, nil, bs)
-			if input != nil {
-				stream.Send(input)
-			}
-		} else {
-			err = e
-		}
-	} else if method.IsClientStream {
-		if cs, e := c.stub.InvokeRpcClientStream(ctx, method.PMD); e == nil {
-			stream = gotogrpc.NewGRPCStreamForClient(port, method, cs, nil, nil)
-			if input != nil {
-				stream.Send(input)
-			}
-		} else {
-			err = e
-		}
-	} else if method.IsServerStream {
-		if ss, e := c.stub.InvokeRpcServerStream(ctx, method.PMD, input); e == nil {
-			stream = gotogrpc.NewGRPCStreamForClient(port, method, nil, ss, nil)
-		} else {
-			err = e
-		}
-	}
-	return
-}
-
-func (c *GRPCClient) InvokeUnary(m *gotogrpc.GRPCServiceMethod, ctx context.Context, payload []byte) (response *GRPCResponse, err error) {
-	input := dynamicpb.NewMessage(m.InputType())
-	if len(payload) > 0 {
-		if err = fillInput(input, payload); err != nil {
-			return
-		}
-	}
-	var respHeaders metadata.MD
-	var respTrailers metadata.MD
-	output, err := c.stub.InvokeRpc(ctx, m.PMD, input, grpc.Trailer(&respTrailers), grpc.Header(&respHeaders))
-	response = newGRPCResponse(respHeaders, respTrailers, []proto.Message{output}, 0, 0)
-	if processResponseStatus(m, response, err) {
-		return response, nil
-	} else {
-		return response, err
-	}
-}
-
-func (c *GRPCClient) InvokeUnaryRaw(ctx context.Context, m *gotogrpc.GRPCServiceMethod, input proto.Message) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
-	respHeaders = metadata.MD{}
-	respTrailers = metadata.MD{}
-	r, e := c.stub.InvokeRpc(ctx, m.PMD, input, grpc.Header(&respHeaders), grpc.Trailer(&respTrailers))
-	responses = []proto.Message{r}
-	err = e
-	return
-}
-
-func (c *GRPCClient) InvokeClientStream(m *gotogrpc.GRPCServiceMethod, payloads [][]byte, keepOpen time.Duration) (response *GRPCResponse, err error) {
-	responses, respHeaders, respTrailers, err := c.internalInvokeClientStream(m, nil, payloads, keepOpen)
-	response = newGRPCResponse(respHeaders, respTrailers, responses, len(payloads), 0)
-	if processResponseStatus(m, response, err) {
-		return response, nil
-	} else {
-		return response, err
-	}
-}
-
-func (c *GRPCClient) InvokeClientStreamRaw(m *gotogrpc.GRPCServiceMethod, messages []proto.Message) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
-	return c.internalInvokeClientStream(m, messages, nil, 0)
-}
-
-func (c *GRPCClient) internalInvokeClientStream(m *gotogrpc.GRPCServiceMethod, messages []proto.Message, payloads [][]byte, keepOpen time.Duration) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
-	var input proto.Message
-	input, messages, payloads, err = c.createFirstInput(m, messages, payloads)
-	if err != nil {
-		log.Printf("GRPCClient.InvokeClientStream: Service [%s] Method [%s] [ERROR] Failed to create stream input with error: %s\n", m.Service.Name, m.Name, err.Error())
-		return nil, nil, nil, err
-	}
-	stream, err := c.OpenStream(0, m, nil, input)
-	if err != nil {
-		log.Printf("GRPCClient.InvokeClientStream: Service [%s] Method [%s] [ERROR] Failed to initiate Client stream with error: %s\n", m.Service.Name, m.Name, err.Error())
-		return nil, nil, nil, err
-	}
-	if keepOpen > 0 {
-		stream.KeepOpen(keepOpen)
-	}
-	var output proto.Message
-	if messages != nil {
-		output, _, err = stream.SendMulti(messages)
-	} else {
-		output, _, err = stream.SendPayloads(payloads)
-	}
-	if err == nil {
-		respHeaders, err = stream.Headers()
-		respTrailers = stream.Trailers()
-		responses = []proto.Message{output}
-	}
-	return
-
-}
-
-func (c *GRPCClient) InvokeServerStream(m *gotogrpc.GRPCServiceMethod, payload []byte) (response *GRPCResponse, err error) {
-	input := dynamicpb.NewMessage(m.InputType())
-	if len(payload) > 0 {
-		if err = fillInput(input, payload); err != nil {
-			return
-		}
-	}
-	responses, respHeaders, respTrailers, err := c.InvokeServerStreamRaw(m, input)
-	response = newGRPCResponse(respHeaders, respTrailers, responses, 1, len(responses))
-	if processResponseStatus(m, response, err) {
-		return response, nil
-	} else {
-		return response, err
-	}
-}
-
-func (c *GRPCClient) InvokeServerStreamRaw(m *gotogrpc.GRPCServiceMethod, input proto.Message) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
-	stream, err := c.OpenStream(0, m, nil, input)
-	if err != nil {
-		log.Printf("GRPCClient.InvokeServerStreamRaw: Service [%s] Method [%s] [ERROR] Failed to initiate Server stream with error: %s\n", m.Service.Name, m.Name, err.Error())
-		return
-	}
-	in := make(chan proto.Message)
-	go func() {
-		receiveCount, e := stream.TeeStreamReceive(in, nil)
-		if e != nil {
-			err = e
-			log.Printf("GRPCClient.InvokeServerStream: Service [%s] Method [%s] Failed to initiate Server stream with error: %s\n", m.Service.Name, m.Name, err.Error())
-		} else {
-			log.Printf("GRPCClient.InvokeServerStream: Service [%s] Method [%s] stream received [%d] messages\n", m.Service.Name, m.Name, receiveCount)
-		}
-	}()
-	for msg := range in {
-		responses = append(responses, msg)
-	}
-	respHeaders, err = stream.Headers()
-	respTrailers = stream.Trailers()
-	return
-}
-
-func (c *GRPCClient) InvokeBidiStream(m *gotogrpc.GRPCServiceMethod, payloads [][]byte, keepOpen time.Duration) (response *GRPCResponse, err error) {
-	output, respHeaders, respTrailers, err := c.internalInvokeBidiStream(m, nil, payloads, keepOpen)
-	response = newGRPCResponse(respHeaders, respTrailers, output, len(payloads), len(output))
-	if processResponseStatus(m, response, err) {
-		return response, nil
-	} else {
-		return response, err
-	}
-}
-
-func (c *GRPCClient) InvokeBidiStreamRaw(m *gotogrpc.GRPCServiceMethod, messages []proto.Message) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
-	return c.internalInvokeBidiStream(m, messages, nil, 0)
-}
-
-func (c *GRPCClient) internalInvokeBidiStream(m *gotogrpc.GRPCServiceMethod, messages []proto.Message, payloads [][]byte, keepOpen time.Duration) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
-	// var input proto.Message
-	// input, messages, payloads, err = c.createFirstInput(m, messages, payloads)
-	stream, err := c.OpenStream(0, m, nil, nil)
-	if err != nil {
-		log.Printf("GRPCClient.InvokeBidiStreamRaw: Service [%s] Method [%s] [ERROR] Failed to initiate Bidi stream with error: %s\n", m.Service.Name, m.Name, err.Error())
-		return
-	}
-	if keepOpen > 0 {
-		stream.KeepOpen(keepOpen)
-	}
-	var finalResponse proto.Message
-	var sendError, recvError error
-	in := make(chan proto.Message)
-	go func() {
-		if messages != nil {
-			finalResponse, _, sendError = stream.SendMulti(messages)
-		} else {
-			finalResponse, _, sendError = stream.SendPayloads(payloads)
-		}
-		if sendError != nil {
-			log.Printf("GRPCClient.InvokeBidiStreamRaw: Service [%s] Method [%s] Failed to send to Bidi stream with error: %s. Closing stream.\n", m.Service.Name, m.Name, sendError.Error())
-			stream.Close()
-		}
-	}()
-	go func() {
-		receiveCount, e := stream.TeeStreamReceive(in, nil)
-		if e == nil {
-			log.Printf("GRPCClient.InvokeBidiStreamRaw: Service [%s] Method [%s] stream received [%d] messages\n", m.Service.Name, m.Name, receiveCount)
-		} else {
-			recvError = e
-			log.Printf("GRPCClient.InvokeBidiStreamRaw: Service [%s] Method [%s] Failed to initiate Bidi stream with error: %s\n", m.Service.Name, m.Name, err.Error())
-		}
-	}()
-	stream.Wait()
-	for msg := range in {
-		log.Printf("GRPCClient.InvokeBidiStreamRaw: Received message [%+v] from Service [%s] Method [%s] stream\n", msg, m.Service.Name, m.Name)
-		responses = append(responses, msg)
-	}
-	if sendError != nil {
-		err = sendError
-	} else if recvError != nil {
-		err = recvError
-	} else {
-		if finalResponse != nil {
-			responses = append(responses, finalResponse)
-		}
-	}
-	h, e := stream.Headers()
-	if e == nil {
-		respHeaders = h
-	} else {
-		err = e
-	}
-	t := stream.Trailers()
-	if t != nil {
-		respTrailers = t
-	}
-	return
-}
-
-func (c *GRPCClient) createFirstInput(m *gotogrpc.GRPCServiceMethod, messages []proto.Message, payloads [][]byte) (proto.Message, []proto.Message, [][]byte, error) {
-	var input proto.Message
-	if len(messages) > 0 {
-		input = messages[0]
-		messages = messages[1:]
-	} else if len(payloads) > 0 && len(payloads[0]) > 0 {
-		msg := dynamicpb.NewMessage(m.InputType())
-		if err := fillInput(msg, payloads[0]); err != nil {
-			return nil, nil, nil, err
-		}
-		input = msg
-		payloads = payloads[1:]
-	}
-	return input, messages, payloads, nil
-}
-
-func fillInput(input *dynamicpb.Message, payload []byte) error {
-	if err := protojson.Unmarshal(payload, input); err != nil {
-		log.Printf("GRPCClient.newInput: Failed to unmarshal payload into method input type [%s] with error: %s\n", input.Descriptor().FullName(), err.Error())
-		return err
-	}
-	return nil
-}
-
-func newGRPCResponse(respHeaders metadata.MD, respTrailers metadata.MD, responsePayloads []proto.Message, clientStreamCount, serverStreamCount int) *GRPCResponse {
-	r := &GRPCResponse{
-		ResponseHeaders:  respHeaders,
-		ResponseTrailers: respTrailers,
-	}
-	r.ClientStreamCount = clientStreamCount
-	r.ServerStreamCount = serverStreamCount
-	for _, resp := range responsePayloads {
-		if resp != nil {
-			if b, err := protojson.Marshal(resp); err == nil {
-				r.ResponsePayload = append(r.ResponsePayload, string(b))
-			}
-		}
-	}
-	return r
-}
-
-func processResponseStatus(m *gotogrpc.GRPCServiceMethod, r *GRPCResponse, err error) bool {
-	if status, ok := status.FromError(err); ok {
-		r.Status = int(status.Code())
-		if r.Status == 0 {
-			r.EquivalentHTTPStatusCode = http.StatusOK
-		} else {
-			r.EquivalentHTTPStatusCode = r.Status
-		}
-		return true
-	} else {
-		if err != nil {
-			log.Printf("GRPCClient.processResponseStatus: Method [%s] GRPC call failed with error: %s\n", m.Name, err.Error())
-		} else {
-			log.Printf("GRPCClient.processResponseStatus: Method [%s] GRPC call failed without any error!\n", m.Name)
-		}
-		if status != nil {
-			r.Status = int(status.Code())
-		}
-	}
-	return false
 }

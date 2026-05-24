@@ -1,4 +1,3 @@
-
 # HTTP Proxy
 - Any HTTP(S) listener that you open in `goto` is ready to act as an http proxy in addition to the other server duties it performs.
 - To use an HTTP(S) listener as a proxy, all you need to do is add one or more upstream targets. The request processing path in `goto` checks for the presence of proxy targets for the listener where a request arrives. If any proxy target is defined on the listener, `goto` matches the request with those targets and forwards it to the matched targets. If no match found, the listener processes the request as a server locally.
@@ -224,6 +223,99 @@ In addition to request routing, the `goto` proxy also offers some chaos features
 
 #### HTTP Target Tracker JSON Schema
 Same fields as `HTTP Proxy Tracker JSON Schema` above
+
+
+
+### HTTP Proxy Startup Config Example
+```
+proxy:
+  - http:
+      port: 8080
+      enabled: true
+      targets:
+        stream:
+          enabled: true
+          endpoints:
+            ep1:
+              url: http://localhost:7070
+              stream: true
+          triggers:
+            t1:
+              matchAny:
+                - uriPrefix: /stream
+              endpoints:
+                - ep1
+        agent:
+          enabled: false
+          endpoints:
+            ep1:
+              url: http://localhost:8080
+              method: POST
+          triggers:
+            t1:
+              matchAny:
+                - uriPrefix: /callagent
+              endpoints:
+                - ep1
+              transform:
+                uriMap:
+                  /callagent: /a2a/client/call/result
+                headers:
+                  add:
+                    foo: "123"
+                payload: |
+                  name: goto-agent
+                  agentURL: http://localhost:3000/agent/goto-agent
+                  cardURL: http://localhost:3000/agent/goto-agent
+                  message: echo
+                  headers:
+                    request:
+                      forward:
+                        - foo
+                    response:
+                      add:
+                        y: x
+                  delay: 1s                
+        a:
+          enabled: false
+          endpoints:
+            ep1:
+              url: http://localhost:7071
+            ep2:
+              url: http://localhost:7072
+          transform:
+            uriMap:
+              /abcd: /api/abcd
+              /abcx: /api/abcx
+              /abc: /api/foo
+              /ab*: /api/foobar
+          triggers:
+            t1:
+              matchAny:
+                - uriPrefix: /api/entry
+                - uriPrefix: /api/consprov
+                - uriPrefix: /api/with                
+              endpoints:
+                - ep1
+              transform:
+                uriMap:
+                  /api/with-no-valid-group: /api/foo
+                  /api/entry: /api/consprov
+                  /api/consprov: /api/bar
+                  /api/with-different-outbound-token-header-name: /api/consprov
+            t2:
+              matchAny:
+                - uriPrefix: /ab
+              endpoints:
+                - ep1
+            t3:
+              matchAny:
+                - uri: /abc
+              endpoints:
+                - ep2
+```
+
+
 
 ## HTTP Proxy Examples
 See [HTTP Proxy Examples][proxy-examples]

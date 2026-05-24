@@ -279,7 +279,7 @@ func (acs *A2ASession) Handle(ctx context.Context, client *http.Client, req *htt
 
 func (acs *A2ASession) updateRequestHeaders(r *http.Request, agent string) {
 	if acs.outHeaders.Request != nil {
-		acs.outHeaders.Request.UpdateHeaders(r.Header, fmt.Sprintf("A2A client request for caller %s", acs.callerId))
+		acs.outHeaders.Request.UpdateHeaders(r.Header)
 		types.ForwardHeaders(acs.inHeaders, r.Header, slices.Values(acs.outHeaders.Request.Forward))
 	}
 	if len(r.Header["Host"]) > 0 {
@@ -292,7 +292,7 @@ func (acs *A2ASession) updateRequestHeaders(r *http.Request, agent string) {
 func (acs *A2ASession) updateResponseHeaders(r *http.Response, agent string) {
 	if r != nil {
 		if acs.outHeaders.Response != nil {
-			acs.outHeaders.Response.UpdateHeaders(r.Header, fmt.Sprintf("A2A client response for caller %s", acs.callerId))
+			acs.outHeaders.Response.UpdateHeaders(r.Header)
 		}
 		if v := r.Header[constants.HeaderViaGoto]; len(v) > 0 {
 			for _, viaGoto := range v {

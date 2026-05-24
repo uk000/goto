@@ -102,7 +102,7 @@ func configureTCP(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
-func (tcp *TCPConfig) configure() string {
+func (tcp *TCPConfig) Configure() string {
 	msg := ""
 	if tcp.ReadTimeout != "" {
 		if tcp.ReadTimeoutD = util.ParseDuration(tcp.ReadTimeout); tcp.ReadTimeoutD < 0 {
@@ -432,7 +432,7 @@ func setModes(w http.ResponseWriter, r *http.Request) {
 		if responsePayload {
 			tcpConfig.Payload = enable
 			if enable {
-				tcpConfig.configure()
+				tcpConfig.Configure()
 			}
 			msg = fmt.Sprintf("Response Payload mode set to [%t] for listener %d", enable, port)
 		} else if stream {
@@ -444,7 +444,7 @@ func setModes(w http.ResponseWriter, r *http.Request) {
 		} else if echo {
 			tcpConfig.Echo = enable
 			if enable {
-				tcpConfig.configure()
+				tcpConfig.Configure()
 			}
 			msg = fmt.Sprintf("Echo mode set to [%t] for listener %d", enable, port)
 		} else if conversation {

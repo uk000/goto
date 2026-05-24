@@ -21,7 +21,6 @@ To test either of these 3 layers, you need at least one counterparty application
 It can act as:
 - An [A2A engine](pkg/ai/README.md#a2a-agent-features-server) that can dynamically create "No Code" Agents and Clients. The agents can call other agents (over A2A) or MCP servers, or respond with a custom unary or streaming payload.
 - An [MCP engine](pkg/ai/README.md#mcp-admin-apis) that can dynamically create MCP servers and clients. The MCP servers can expose any number of tools, and a tool can expose one of the supported behaviors. Supported behaviors include serving response based on data fetched from a remote HTTP call, a remote MCP call, a remote A2A agent call, or respond with a custom unary or streaming payload.
-- A [client](pkg/client/README.md) that can generate HTTP/S, TCP, and gRPC traffic to other services (including other `goto` instances), track summary results of the traffic, and report results via [APIs](pkg/client/README.md#client-apis) as well as publish results to a [Goto registry](pkg/registry/Overview.md). 
 - A [server](pkg/server/README.md) that can act as an
   -- HTTP server with arbitrary REST APIs with custom responses.
   -- gRPC server that supports any arbitrary RPC service/methods based on a given set of proto files (or specs extracted from remote reflection)
@@ -29,7 +28,8 @@ It can act as:
   -- UDP Server that can proxy UDP requests/responses to upstream endpoints.
   --  The server can track and report summary data about the received traffic.
   See the [TOC](#toc) for a complete list of server features. 
-- A [proxy](pkg/proxy/README.md) that can act as an HTTP/S, TCP, UDP, gRPC, or MCP passthrough proxy, allowing you to route traffic through a `goto` instance to an upstream server, and inspect the requests/responses.
+- A [client](pkg/client/README.md) that can generate HTTP/S, TCP, and gRPC traffic to other services (including other `goto` instances), track summary results of the traffic, and report results via [APIs](pkg/client/README.md#client-apis) as well as publish results to a [Goto registry](pkg/registry/Overview.md). 
+- A [proxy](pkg/proxy/README.md) that can act as an HTTP/S, TCP, UDP, gRPC, or MCP proxy, allowing you to chain traffic through a `goto` instance to an upstream server, and inspect the requests/responses. The HTTP proxy allows for triggering upstream endpoints based on match criteria, and perform request and response transformations.
 - A [tunnel](pkg/tunnel/README.md) that allows tunneling of HTTP/S and TCP traffic across multiple hops. This allows testing traffic behavior as it goes through overlay boundaries and through various intermediary proxies/gateways.
 - A [job executor](pkg/job/README.md) that can run shell commands/scripts as well as make HTTP calls, collect and report results. It allows chaining of jobs together so that output of one job triggers another job with input. Additionally, jobs can be auto-executed via cron, and can act as a source of data for pipelines (more on this under `pipelines`)
 - A [registry](pkg/registry/Overview.md) to orchestrate operations across other `goto` instances, collect and summarize results from those `goto` instances, and make the federated summary results available via APIs. A `goto` registry can also be paired with another `goto` registry instance and export/load data from one to the other to keep another backup of the collected results.
@@ -49,24 +49,27 @@ It can act as:
 ### Grab or Build
 #### Docker images (Alpine Linux based)
   #### core
-  - `docker.io/uk0000/goto:0.9.5`, `docker.io/uk0000/goto:0.9.5-arm64`
+  - `docker.io/uk0000/goto:0.9.8`, `docker.io/uk0000/goto:0.9.8-arm64`
   - Includes `bash, curl, jq`
   #### net
-  - `docker.io/uk0000/goto:0.9.5-net`, `docker.io/uk0000/goto:0.9.5-net-arm64`
+  - `docker.io/uk0000/goto:0.9.8-net`, `docker.io/uk0000/goto:0.9.8-net-arm64`
   - Includes core pack
   - Includes network utilities like `ncat, nc, nmap, socat, tcpdump, dig, nslookup, iptables, ipvsadm, openssl`
+  #### gRPC
+  - `docker.io/uk0000/goto:0.9.8-grpc`, `docker.io/uk0000/goto:0.9.8-grpc-arm64`
+  - Includes core and net packs
+  - Includes `grpcurl`
+
+#### Additional optional docker images
   #### kube
-  - `docker.io/uk0000/goto:0.9.5-kube`, `docker.io/uk0000/goto:0.9.5-kube-arm64`
+  - `docker.io/uk0000/goto:0.9.8-kube`, `docker.io/uk0000/goto:0.9.8-kube-arm64`
   - Includes core and net packs
   - Includes `kubectl and etcdctl`
   #### perf
-  - `docker.io/uk0000/goto:0.9.5-perf`, `docker.io/uk0000/goto:0.9.5-perf-arm64`
+  - `docker.io/uk0000/goto:0.9.8-perf`, `docker.io/uk0000/goto:0.9.8-perf-arm64`
   - Includes core and net packs
   - Includes `hey and iftop`
-  #### gRPC
-  - `docker.io/uk0000/goto:0.9.5-grpc`, `docker.io/uk0000/goto:0.9.5-grpc-arm64`
-  - Includes core and net packs
-  - Includes `grpcurl`
+
 
 <br/>
 Or, build it locally on your machine
@@ -82,23 +85,73 @@ Start `goto` as a server with multiple ports and protocols.
   ```
   goto --ports 8080,8081/http,8443/https,6000/grpc,7000/tcp,8000/rpc --rpcPort=3000 --grpcPort=9000
   ```
+At the minimum, `Goto` opens 3 ports:
+- An HTTP port: first port specified in the `ports` list
+- A JSON-RPC port (for A2A and MCP protocols): specified via `rpcPort` arg, defaults to 3000.
+- A gRPC port: specified via `grpcPort` arg, defaults to 1234.
 
 
-# Show me ~~the money~~ some use cases please!
 
-Now that you have `goto` running, what can you do with it?
+# Use Cases
+Now that you have `goto` running, what can you do with it? Below are a few of the many scenarios where `goto` can play a role.
 <br/>
-Before we look into detailed features and APIs exposed by the tool, let's look at how this tool can be used in a few scenarios to understand it better.
 
-## Basic Scenarios
+### A2A Scenarios
+- Use A2A client via REST API to interact with an A2A agent. The client API allows you to write scripts that can rely on curl or other HTTP clients to test some A2A traffic.
+- Configure and run one or more A2A agents using configs, where each agent is exposed via a URI and responds to both unary and streaming requests.
+- An agent can be configured to respond with some static payload, or make an upstream call to another agent or MCP server.
+- Using the ability of an agent to call another remote agent/MCP tool, a chain of A2A/MCP calls can be setup to test any combination of traffic.
+- Agents can be configured to call upstream agents/tools in sequence or concurrently, and send multiple requests to the each upstream agent/tool.
 
-### Scenario: [Use HTTP client to send requests and track results](docs/scenarios-basic.md#basic-client-usage)
+### MCP Scenarios
+- Use MCP client via REST API to interact with an MCP server. The client API allows you to write scripts that can rely on curl or other HTTP clients to test some MCP traffic.
+- Run one or more MCP servers, where server is exposed via a URI and responds to both unary and streaming tool calls.
+- Each server can expose one or more tools and other resources. Each tool can be configured to respond with some static payload, some pre-defined behavior (e.g. echo, time), or a tool can make an upstream A2A/MCP call to another agent or MCP tool.
+- Using the ability of a tool to call another remote agent/MCP tool, a chain of A2A/MCP calls can be setup to test any combination of traffic.
+- Tools can be configured to call upstream agents/tools in sequence or concurrently, and send multiple requests to the each upstream agent/tool.
 
-### Scenario: [Use HTTP server to respond to any arbitrary client HTTP requests](docs/scenarios-basic.md#basic-server-usage)
+### HTTP Proxy Scenarios
+- Setup a `goto` instance as an http application that makes upstream calls to remote HTTP servers based on inbound request metadata. Inbound request can undergo transformation to facilitate a different upstream request than the inbound request, and headers/queries can be added/removed/forwarded. This allows for testing of various behaviors around HTTP URIs, headers, etc.
+- The HTTP proxy supports fanout of a single inbound downstream request to multiple upstream requests in a fanout setup. The fanout may be configured to happen in sequence, or concurrently. Each upstream endpoint may be sent multiple requests.
 
-### Scenario: [HTTPS traffic with certificate validation](docs/scenarios-basic.md#basic-https-usage)
+### HTTP Server Scenarios
+- Ability to open/close HTTP(S) listener ports.
+- Use `goto` as an HTTP server that responds to any arbitrary unknown URI with 200 (default) or a given status code. Server responds with certain default HTTP headers that send the server's identity (derived from startup args, env variables, and IP/Port of the listener serving the request)
+- Configure response headers and payloads to be sent back based on URIs, Header and Query matches, including the ability to stream payload over a long period.
+- Configure request transformation such that the response sent to a URI is derived by combining a given payload template with values extracted from the inbound request.
+- Track counts based on inbound request URI and headers.
+- Simulate chaos by setting fault response codes and delays. Simulate and track request timeouts.
+- Trigger subsequent upstream calls to a different destination based on the response status code.
 
-### Scenario: [Count number of requests received at each server instance for certain headers](docs/scenarios-basic.md#basic-header-tracking)
+### HTTP Client Scenarios
+- Use REST APIs to trigger HTTP traffic to a remote server with configurable headers and payload. Track response counts by status, URIs, headers, etc.
+
+### gRPC Server Scenarios
+- Ability to open/close gRPC listener ports, with or without TLS.
+- Use `goto` as a gRPC service with pre-defined service methods that provide behaviors: echo, streamIn, streamOut, and streamInOut.
+- Use `goto` as a generic gRPC server to serve a service based on a given `proto` definition. Configure JSON payloads to be served as gRPC response for the service methods.
+
+### gRPC Client Scenarios
+- Use REST APIs to trigger gRPC traffic to a remote gRPC server based on a given `proto` definition.
+
+### gRPC Proxy Scenarios
+- Use REST APIs to trigger gRPC traffic to a remote gRPC server based on a given `proto` definition.
+
+
+### TCP Server/Proxy Scenarios
+- Ability to open/close TCP listener ports, with or without TLS
+- Either serve TPC from local instance or configure the instance to proxy tcp packets to an upstream endpoint.
+- Local TCP serving can be configured to achieve behaviors such as: close connection upon first byte from client, stream bytes from server upon connection open, receive and log all TCP bytes from the client without sending any response, echo client bytes back, or send custom payload.
+
+### HTTP Scenarios
+
+#### - [HTTP client to send requests and track results](docs/scenarios-basic.md#basic-client-usage)
+
+#### - [HTTP server that responds to any arbitrary client HTTP requests](docs/scenarios-basic.md#basic-server-usage)
+
+#### - [HTTPS traffic with certificate validation](docs/scenarios-basic.md#basic-https-usage)
+
+#### - [Count number of requests received at each server instance for certain headers](docs/scenarios-basic.md#basic-header-tracking)
 
 ## K8S Scenarios
 

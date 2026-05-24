@@ -1,5 +1,24 @@
 
-
+### gRPC Proxy Startup Config
+```
+proxy:
+  - grpc:
+      port: 8888
+      enabled: true
+      services:
+        Goto:
+          toService: Goto
+          methods:
+            echo: echo
+          upstream:
+            id: grpc-8000
+            endpoint: localhost:8000
+            authority: localhost
+          config:
+            delay:
+              min: 0s
+              max: 0s
+```
 
 #### GRPC Proxy APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>

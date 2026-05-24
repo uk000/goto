@@ -23,6 +23,7 @@ import (
 	"errors"
 	"goto/ctl"
 	"goto/pkg/global"
+	grpcproxy "goto/pkg/proxy/grpc"
 	httpproxy "goto/pkg/proxy/http"
 	tcpproxy "goto/pkg/proxy/tcp"
 	"goto/pkg/scripts"
@@ -42,8 +43,9 @@ var (
 	tlsConfigs       = map[string]ctl.PortTLS{}
 	a2aConfigs       = map[string]*ctl.A2A{}
 	mcpConfigs       = map[string]*ctl.MCP{}
-	httpProxyConfigs = map[string]*httpproxy.Proxy{}
-	tcpProxyConfigs  = map[string]*tcpproxy.TCPProxy{}
+	httpProxyConfigs = map[string]map[int]*httpproxy.Proxy{}
+	tcpProxyConfigs  = map[string]map[int]*tcpproxy.TCPProxy{}
+	grpcProxyConfigs = map[string]map[int]*grpcproxy.GRPCProxy{}
 	httpConfigs      = map[string]*ctl.HTTP{}
 	grpcConfigs      = map[string]*ctl.GRPC{}
 	loaded           = false
@@ -145,15 +147,26 @@ func removeAllConfigs() {
 		clearMCP(mcpConfigs[filename])
 		delete(mcpConfigs, filename)
 	}
-	for filename := range httpProxyConfigs {
-		log.Printf("Removing HTTP Proxy configs for %s.\n", filename)
-		removeHTTPProxy(httpProxyConfigs[filename])
+	for filename, m := range httpProxyConfigs {
+		for port := range m {
+			log.Printf("Removing HTTP Proxy configs for file [%s] port [%d] .\n", filename, port)
+			removeHTTPProxy(port)
+		}
 		delete(httpProxyConfigs, filename)
 	}
-	for filename := range tcpProxyConfigs {
-		log.Printf("Removing TCP Proxy configs for %s.\n", filename)
-		removeTCPProxy(tcpProxyConfigs[filename])
+	for filename, m := range tcpProxyConfigs {
+		for port := range m {
+			log.Printf("Removing TCP Proxy configs for file [%s] port [%d] .\n", filename, port)
+			removeTCPProxy(port)
+		}
 		delete(tcpProxyConfigs, filename)
+	}
+	for filename, m := range grpcProxyConfigs {
+		for port := range m {
+			log.Printf("Removing GRPC Proxy configs for file [%s] port [%d] .\n", filename, port)
+			removeGRPCProxy(port)
+		}
+		delete(grpcProxyConfigs, filename)
 	}
 	for filename := range httpConfigs {
 		log.Printf("Removing HTTP configs for %s.\n", filename)
@@ -187,11 +200,24 @@ func removeConfigs(filePath string) {
 	}
 	if httpProxyConfigs[filename] != nil {
 		log.Printf("File removed: %s. Removing HTTP Proxy configs.\n", filename)
-		removeHTTPProxy(httpProxyConfigs[filename])
+		for port := range httpProxyConfigs[filename] {
+			log.Printf("Removing HTTP Proxy configs for file [%s] port [%d] .\n", filename, port)
+			removeHTTPProxy(port)
+		}
 	}
 	if tcpProxyConfigs[filename] != nil {
 		log.Printf("File removed: %s. Removing TCP Proxy configs.\n", filename)
-		removeTCPProxy(tcpProxyConfigs[filename])
+		for port := range tcpProxyConfigs[filename] {
+			log.Printf("Removing TCP Proxy configs for file [%s] port [%d] .\n", filename, port)
+			removeTCPProxy(port)
+		}
+	}
+	if grpcProxyConfigs[filename] != nil {
+		log.Printf("File removed: %s. Removing GRPC Proxy configs.\n", filename)
+		for port := range grpcProxyConfigs[filename] {
+			log.Printf("Removing GRPC Proxy configs for file [%s] port [%d] .\n", filename, port)
+			removeGRPCProxy(port)
+		}
 	}
 	if httpConfigs[filename] != nil {
 		log.Printf("File removed: %s. Removing HTTP configs.\n", filename)
@@ -312,22 +338,52 @@ func loadConfig(filePath string, config *ctl.GotoConfig) {
 	if config.Proxies != nil {
 		for _, proxy := range config.Proxies {
 			if proxy.HTTP != nil {
-				if httpProxyConfigs[filename] != nil {
-					removeHTTPProxy(httpProxyConfigs[filename])
-				}
+				remove := false
 				lock.Lock()
-				httpProxyConfigs[filename] = proxy.HTTP
+				if httpProxyConfigs[filename] == nil {
+					httpProxyConfigs[filename] = map[int]*httpproxy.Proxy{}
+				}
+				if httpProxyConfigs[filename][proxy.HTTP.Port] != nil {
+					remove = true
+				}
+				httpProxyConfigs[filename][proxy.HTTP.Port] = proxy.HTTP
 				lock.Unlock()
+				if remove {
+					removeHTTPProxy(proxy.HTTP.Port)
+				}
 				loadHTTPProxy(proxy.HTTP)
 			}
 			if proxy.TCP != nil {
-				if tcpProxyConfigs[filename] != nil {
-					removeTCPProxy(tcpProxyConfigs[filename])
-				}
+				remove := false
 				lock.Lock()
-				tcpProxyConfigs[filename] = proxy.TCP
+				if tcpProxyConfigs[filename] == nil {
+					tcpProxyConfigs[filename] = map[int]*tcpproxy.TCPProxy{}
+				}
+				if tcpProxyConfigs[filename][proxy.TCP.Port] != nil {
+					remove = true
+				}
+				tcpProxyConfigs[filename][proxy.TCP.Port] = proxy.TCP
 				lock.Unlock()
+				if remove {
+					removeTCPProxy(proxy.TCP.Port)
+				}
 				loadTCPProxy(proxy.TCP)
+			}
+			if proxy.GRPC != nil {
+				remove := false
+				lock.Lock()
+				if grpcProxyConfigs[filename] == nil {
+					grpcProxyConfigs[filename] = map[int]*grpcproxy.GRPCProxy{}
+				}
+				if grpcProxyConfigs[filename][proxy.GRPC.Port] != nil {
+					remove = true
+				}
+				grpcProxyConfigs[filename][proxy.GRPC.Port] = proxy.GRPC
+				lock.Unlock()
+				if remove {
+					removeGRPCProxy(proxy.GRPC.Port)
+				}
+				loadGRPCProxy(proxy.GRPC)
 			}
 		}
 	}

@@ -176,5 +176,8 @@ func (p *MCPProxy) addMCPTarget(server, endpoint, fromTool, toTool string, heade
 		PastSessions:   map[string]*MCPSession{},
 	}
 	target.Tools[fromTool] = toTool
+	p.lock.Lock()
+	p.Targets[fromTool] = target
+	p.lock.Unlock()
 	return target, nil
 }

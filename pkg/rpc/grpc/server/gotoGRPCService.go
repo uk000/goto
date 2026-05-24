@@ -23,7 +23,6 @@ import (
 	"goto/pkg/events"
 	"goto/pkg/global"
 	gg "goto/pkg/rpc/grpc"
-	gotogrpc "goto/pkg/rpc/grpc"
 	"goto/pkg/rpc/grpc/pb"
 	"goto/pkg/server/response/payload"
 	"goto/pkg/types"
@@ -78,18 +77,18 @@ func OnGRPCStop() {
 func RegisterGotoServer(server global.IGRPCManager) {
 	if !IsGotoServiceRunning {
 		//pb.RegisterGotoServer(TheGRPCServer.Server, &GotoGRPCService{})
-		// server.InterceptAndServe(&pb.Goto_ServiceDesc, &GotoGRPCService{})
+		server.InterceptWithMiddleware(&pb.Goto_ServiceDesc, &GotoGRPCService{})
 		server.InterceptWithMiddleware(&pb.Goto2_ServiceDesc, &Goto2GRPCService{})
 		server.InterceptWithMiddleware(&pb.Goto3_ServiceDesc, &Goto3GRPCService{})
-		gotoService := gotogrpc.ServiceRegistry.NewGRPCServiceFromSD(&pb.Goto_ServiceDesc)
-		if gotoService != nil {
-			gotoService.Methods["echo"].In = TransformInput
-			gotoService.Methods["streamIn"].In = TransformInput
-			gotoService.Methods["streamOut"].In = TransformStreamConfig
-			gotoService.Methods["streamInOut"].In = TransformStreamConfig
-			server.InterceptAndServe(gotoService.GSD, gotoService)
-			// server.InterceptAndProxy(&pb.Goto3_ServiceDesc, &pb.Goto_ServiceDesc, pb.Goto3_ServiceDesc.ServiceName, &Goto3GRPCService{})
-		}
+		// gotoService := gotogrpc.ServiceRegistry.NewGRPCServiceFromSD(&pb.Goto_ServiceDesc)
+		// if gotoService != nil {
+		// 	gotoService.Methods["echo"].In = TransformInput
+		// 	gotoService.Methods["streamIn"].In = TransformInput
+		// 	gotoService.Methods["streamOut"].In = TransformStreamConfig
+		// 	gotoService.Methods["streamInOut"].In = TransformStreamConfig
+		// 	server.InterceptAndServe(gotoService.GSD, gotoService)
+		// 	// server.InterceptAndProxy(&pb.Goto3_ServiceDesc, &pb.Goto_ServiceDesc, pb.Goto3_ServiceDesc.ServiceName, &Goto3GRPCService{})
+		// }
 		IsGotoServiceRunning = true
 	}
 	log.Println("Registered Goto GRPC Server")
@@ -106,7 +105,7 @@ func TransformStreamConfig(req proto.Message) proto.Message {
 	req2.ChunkSize = int32(reqValues.Get(fields.ByName("chunkSize")).Int())
 	req2.ChunkCount = int32(reqValues.Get(fields.ByName("chunkCount")).Int())
 	req2.Interval = reqValues.Get(fields.ByName("interval")).String()
-	req2.Payload = reqValues.Get(fields.ByName("payload")).String()
+	req2.Text = reqValues.Get(fields.ByName("payload")).String()
 	return req2
 }
 
@@ -117,7 +116,7 @@ func TransformInput(req proto.Message) proto.Message {
 	req2 := new(pb.Input)
 	reqValues := req.ProtoReflect()
 	fields := req.ProtoReflect().Descriptor().Fields()
-	req2.Payload = reqValues.Get(fields.ByName("payload")).String()
+	req2.Text = reqValues.Get(fields.ByName("payload")).String()
 	return req2
 }
 
@@ -153,6 +152,23 @@ func SetHeaders(ctx context.Context, port int, hostLabel, listenerLabel string, 
 	return
 }
 
+func createOutput(ctx context.Context, port int, text string, requestHeaders, responseHeaders map[string]string) *pb.Output {
+	id := counter.Add(1)
+	method, _ := grpc.Method(ctx)
+	return &pb.Output{
+		Id:              strconv.Itoa(int(id)),
+		Text:            text,
+		At:              time.Now().Format(time.RFC3339Nano),
+		GotoHost:        global.Self.HostLabel,
+		GotoPort:        int32(port),
+		ViaGoto:         global.Funcs.GetListenerLabelForPort(port),
+		GotoTLS:         fmt.Sprint(global.Funcs.IsListenerTLS(port)),
+		RequestURI:      method,
+		RequestHeaders:  requestHeaders,
+		ResponseHeaders: responseHeaders,
+	}
+}
+
 func (gs *GotoGRPCService) Echo(ctx context.Context, input *pb.Input) (*pb.Output, error) {
 	port := util.GetGRPCPort(ctx)
 	events.TrackPortTrafficEvent(port, "GRPC.echo", 200)
@@ -160,16 +176,15 @@ func (gs *GotoGRPCService) Echo(ctx context.Context, input *pb.Input) (*pb.Outpu
 	requestHeaders, responseHeaders := SetHeaders(ctx, port, global.Self.HostLabel, listenerLabel, nil)
 	requestMiniBody := ""
 	if global.Flags.LogRequestBody {
-		requestMiniBody = input.Payload
+		requestMiniBody = input.Text
 	} else if global.Flags.LogRequestMiniBody {
-		requestMiniBody = input.Payload[:50]
+		requestMiniBody = input.Text[:50]
 	}
-	gg.LogRequest(ctx, port, "Goto", "echo", requestHeaders[constants.HeaderAuthority], requestHeaders, 1, len(input.Payload), requestMiniBody)
-	id := counter.Add(1)
+	gg.LogRequest(ctx, port, "Goto", "echo", requestHeaders[constants.HeaderAuthority], requestHeaders, 1, len(input.Text), requestMiniBody)
 	if _, rp, _, found := payload.PayloadManager.GetResponsePayload(port, true, "/Goto/echo", nil, nil, nil); found {
-		input.Payload = string(rp.Payload)
+		input.Text = string(rp.Payload)
 	}
-	response := &pb.Output{Id: strconv.Itoa(int(id)), Payload: input.Payload, At: time.Now().Format(time.RFC3339Nano), GotoHost: global.Self.HostLabel, GotoPort: int32(port), ViaGoto: listenerLabel}
+	response := createOutput(ctx, port, input.Text, requestHeaders, responseHeaders)
 	responseLength := -1
 	if global.Flags.LogResponseBody || global.Flags.LogResponseMiniBody {
 		responseBodyText := util.ToJSONText(response)
@@ -199,17 +214,16 @@ func (gs *GotoGRPCService) StreamIn(cs grpc.ClientStreamingServer[pb.Input, pb.O
 			return err
 		}
 		requestCount++
-		log.Printf("GRPC[%d]: Received client stream input [payload: [%s]]\n", port, input.Payload)
+		log.Printf("GRPC[%d]: Received client stream input [payload: [%s]]\n", port, input.Text)
 		if len(configPayload) > 0 {
-			input.Payload = configPayload
+			input.Text = configPayload
 		}
-		responsePayload.WriteString(fmt.Sprintf("[%s]", input.Payload))
+		responsePayload.WriteString(fmt.Sprintf("[%s]", input.Text))
 	}
 	events.TrackPortTrafficEvent(port, "GRPC.streamIn.end", 200)
 	gg.LogRequest(ctx, port, "Goto", "streamIn", requestHeaders[constants.HeaderAuthority], requestHeaders, requestCount, 0, "")
-	id := counter.Add(1)
 	payload := responsePayload.String()
-	response := &pb.Output{Id: strconv.Itoa(int(id)), Payload: payload, At: time.Now().Format(time.RFC3339Nano), GotoHost: global.Self.HostLabel, GotoPort: int32(port), ViaGoto: listenerLabel}
+	response := createOutput(ctx, port, payload, requestHeaders, responseHeaders)
 	log.Printf("GRPC[%d]: Sent stream response [payload: [%s]]\n", port, payload)
 	cs.SendAndClose(response)
 	responseLength := -1
@@ -221,11 +235,11 @@ func (gs *GotoGRPCService) StreamIn(cs grpc.ClientStreamingServer[pb.Input, pb.O
 	return nil
 }
 
-func (gs *GotoGRPCService) sendStreamResponse(ctx context.Context, port int, hostLabel, listenerLabel string, configInput *pb.StreamConfig, ss IGRPCService) (int, int) {
+func (gs *GotoGRPCService) sendStreamResponse(ctx context.Context, port int, hostLabel, listenerLabel string, requestHeaders, responseHeaders map[string]string, configInput *pb.StreamConfig, ss IGRPCService) (int, int) {
 	SetHeaders(ctx, port, hostLabel, listenerLabel, nil)
 	payload := ""
-	if configInput.Payload != "" {
-		payload = configInput.Payload
+	if configInput.Text != "" {
+		payload = configInput.Text
 	} else {
 		payload = types.GenerateRandomString(int(configInput.ChunkSize))
 	}
@@ -233,11 +247,10 @@ func (gs *GotoGRPCService) sendStreamResponse(ctx context.Context, port int, hos
 	if err != nil {
 		interval = 100 * time.Millisecond
 	}
-	for i := 0; i < int(configInput.ChunkCount); i++ {
-		id := counter.Add(1)
-		ss.Send(&pb.Output{Id: strconv.Itoa(int(id)), Payload: payload, At: time.Now().Format(time.RFC3339Nano),
-			GotoHost: hostLabel, GotoPort: int32(port), ViaGoto: listenerLabel})
-		if i < int(configInput.ChunkCount)-1 {
+	for i := 1; i <= int(configInput.ChunkCount); i++ {
+		response := createOutput(ctx, port, fmt.Sprintf("%s(%d/%d)", payload, i, configInput.ChunkCount), requestHeaders, responseHeaders)
+		ss.Send(response)
+		if i < int(configInput.ChunkCount) {
 			time.Sleep(interval)
 		}
 	}
@@ -253,16 +266,16 @@ func (gs *GotoGRPCService) StreamOut(configInput *pb.StreamConfig, ss grpc.Serve
 	gg.LogRequest(ctx, port, "Goto", "streamOut", requestHeaders[constants.HeaderAuthority], requestHeaders, 1, 0, "")
 	payloadType := ""
 	if _, rp, _, found := payload.PayloadManager.GetResponsePayload(port, true, "/Goto/streamOut", nil, nil, nil); found {
-		configInput.Payload = string(rp.Payload)
+		configInput.Text = string(rp.Payload)
 		payloadType = " pre-configured"
 	}
 	log.Printf("GotoGRPCService[%d]: Serving StreamOut with config [chunkSize: %d, chunkCount: %d, interval: %s,%s payload size: [%d]]\n",
-		port, configInput.ChunkSize, configInput.ChunkCount, configInput.Interval, payloadType, len(configInput.Payload))
-	responseCount, responseLength := gs.sendStreamResponse(ctx, port, global.Self.HostLabel, listenerLabel, configInput, ss)
+		port, configInput.ChunkSize, configInput.ChunkCount, configInput.Interval, payloadType, len(configInput.Text))
+	responseCount, responseLength := gs.sendStreamResponse(ctx, port, global.Self.HostLabel, listenerLabel, requestHeaders, responseHeaders, configInput, ss)
 	events.TrackPortTrafficEvent(port, "GRPC.streamOut.end", 200)
 	gg.LogResponse(ctx, responseHeaders, 200, responseCount, responseLength,
 		fmt.Sprintf("Served StreamOut with config [chunkSize: %d, chunkCount: %d, interval: %s,%s payload size: %d]",
-			configInput.ChunkSize, configInput.ChunkCount, configInput.Interval, payloadType, len(configInput.Payload)))
+			configInput.ChunkSize, configInput.ChunkCount, configInput.Interval, payloadType, len(configInput.Text)))
 	return nil
 }
 
@@ -283,23 +296,48 @@ func (gs *GotoGRPCService) StreamInOut(bidi grpc.BidiStreamingServer[pb.StreamCo
 	responseLength := 0
 	payloadLength := 0
 	chunkCount := 0
+	responsePayload := strings.Builder{}
+
+	responseSender := func(configInput *pb.StreamConfig, final bool) {
+		requestCount++
+		if requestCount > 1 {
+			responsePayload.WriteString(" | ")
+		}
+		if final {
+			responsePayload.WriteString(fmt.Sprintf("%s(FINAL)", configInput.Text))
+		} else {
+			responsePayload.WriteString(fmt.Sprintf("%s", configInput.Text))
+		}
+		chunkCount += int(configInput.ChunkCount)
+		if len(configPayload) > 0 {
+			configInput.Text = configPayload
+		} else {
+			configInput.Text = responsePayload.String()
+		}
+		log.Printf("GRPC[%d]: Serving StreamInOut with config [chunkSize: %d, chunkCount: %d, interval: %s,%s payload size: [%d]]\n",
+			port, configInput.ChunkSize, configInput.ChunkCount, configInput.Interval, payloadType, len(configInput.Text))
+		count, length := gs.sendStreamResponse(ctx, port, global.Self.HostLabel, listenerLabel, requestHeaders, responseHeaders, configInput, bidi)
+		responseCount += count
+		responseLength += length
+
+	}
+
+	var lastConfigInput *pb.StreamConfig
+	final := false
 	for {
 		configInput, err := bidi.Recv()
+		if err == io.EOF {
+			final = true
+		}
+		if lastConfigInput != nil {
+			responseSender(lastConfigInput, final)
+		}
 		if err == io.EOF {
 			break
 		} else if err != nil {
 			return err
 		}
-		requestCount++
-		chunkCount += int(configInput.ChunkCount)
-		if len(configPayload) > 0 {
-			configInput.Payload = configPayload
-		}
-		log.Printf("GRPC[%d]: Serving StreamInOut with config [chunkSize: %d, chunkCount: %d, interval: %s,%s payload size: [%d]]\n",
-			port, configInput.ChunkSize, configInput.ChunkCount, configInput.Interval, payloadType, len(configInput.Payload))
-		count, length := gs.sendStreamResponse(ctx, port, global.Self.HostLabel, listenerLabel, configInput, bidi)
-		responseCount += count
-		responseLength += length
+		lastConfigInput = configInput
 	}
 	events.TrackPortTrafficEvent(port, "GRPC.streamInOut.end", 200)
 	gg.LogRequest(ctx, port, "Goto", "streamInOut", requestHeaders[constants.HeaderAuthority], requestHeaders, requestCount, 0, "")

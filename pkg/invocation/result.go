@@ -24,6 +24,7 @@ import (
 	"goto/pkg/global"
 	"goto/pkg/metrics"
 	"goto/pkg/transport"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
 	"net/http"
@@ -47,15 +48,15 @@ type InvocationResultResponse struct {
 }
 
 type InvocationResultRequest struct {
-	ID             string            `json:"id"`
-	URL            string            `json:"url"`
-	URI            string            `json:"uri"`
-	Headers        map[string]string `json:"headers"`
-	PayloadSize    int               `json:"payloadSize"`
-	FirstByteOutAt string            `json:"firstByteOutAt"`
-	LastByteOutAt  string            `json:"lastByteOutAt"`
-	FirstRequestAt time.Time         `json:"firstRequestAt"`
-	LastRequestAt  time.Time         `json:"lastRequestAt"`
+	ID             string                `json:"id"`
+	URL            string                `json:"url"`
+	URI            string                `json:"uri"`
+	Headers        types.ReadableHeaders `json:"headers"`
+	PayloadSize    int                   `json:"payloadSize"`
+	FirstByteOutAt string                `json:"firstByteOutAt"`
+	LastByteOutAt  string                `json:"lastByteOutAt"`
+	FirstRequestAt time.Time             `json:"firstRequestAt"`
+	LastRequestAt  time.Time             `json:"lastRequestAt"`
 }
 
 type InvocationResult struct {

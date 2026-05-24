@@ -36,17 +36,17 @@ func processTLS(portTLS ctl.PortTLS) {
 	for _, tls := range portTLS {
 		l := listeners.GetListenerForPort(tls.Port)
 		if l == nil {
-			log.Printf("No Listener on Port [%d]", tls.Port)
+			log.Printf("[*** ERROR ***] No Listener on Port [%d]", tls.Port)
 			continue
 		}
 		log.Printf("Loading TLS Cert from path [%s]", tls.Cert)
 		cert, key, err := tls.Load()
 		if err != nil {
-			log.Printf("Failed to read TLS cert file [%s] with error: %s\n", tls.Cert, err.Error())
+			log.Printf("[*** ERROR ***] Failed to read TLS cert file [%s] with error: %s\n", tls.Cert, err.Error())
 			continue
 		}
 		if err = listeners.AddListenerCert(tls.Port, key, cert, true); err != nil {
-			log.Printf("Failed to add listener cert for port [%d] cert [%s] key [%s] with error: %s\n", tls.Port, tls.Cert, tls.Key, err.Error())
+			log.Printf("[*** ERROR ***] Failed to add listener cert for port [%d] cert [%s] key [%s] with error: %s\n", tls.Port, tls.Cert, tls.Key, err.Error())
 		}
 		log.Println("============================================================")
 		log.Printf("Loaded TLS cert for port [%d]", tls.Port)

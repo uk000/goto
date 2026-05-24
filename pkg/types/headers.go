@@ -19,10 +19,12 @@ package types
 import (
 	"iter"
 	"maps"
-	"net/http"
+
+	"google.golang.org/grpc/metadata"
 )
 
 type SimpleHTTPHeaders map[string]string
+type MD metadata.MD
 
 type HeadersConfig struct {
 	Add     map[string]string `yaml:"add,omitempty" json:"add,omitempty"`
@@ -35,8 +37,9 @@ type Headers struct {
 	Response *HeadersConfig `yaml:"response,omitempty" json:"response,omitempty"`
 }
 
-type AddableHeaders interface {
+type MutatingHeaders interface {
 	Add(string, string)
+	Del(string)
 }
 
 type ReadableHeaders interface {
@@ -116,7 +119,7 @@ func (hc *HeadersConfig) Union(hc2 *HeadersConfig) *HeadersConfig {
 	return hcNew
 }
 
-func (hc *HeadersConfig) UpdateHeaders(headers http.Header, info string) {
+func (hc *HeadersConfig) UpdateHeaders(headers MutatingHeaders) {
 	if len(hc.Remove) > 0 {
 		for _, h := range hc.Remove {
 			headers.Del(h)
@@ -129,7 +132,7 @@ func (hc *HeadersConfig) UpdateHeaders(headers http.Header, info string) {
 	}
 }
 
-func ForwardHeaders(sourceHeaders ReadableHeaders, targetHeaders AddableHeaders, forwardHeaders iter.Seq[string]) {
+func ForwardHeaders(sourceHeaders ReadableHeaders, targetHeaders MutatingHeaders, forwardHeaders iter.Seq[string]) {
 	forwardedHeaders := map[string]string{}
 	if forwardHeaders != nil && sourceHeaders != nil {
 		for h := range forwardHeaders {
@@ -148,4 +151,16 @@ func (sh SimpleHTTPHeaders) Get(k string) string {
 
 func (sh SimpleHTTPHeaders) Add(k, v string) {
 	sh[k] = v
+}
+
+func (sh SimpleHTTPHeaders) Del(k string) {
+	delete(sh, k)
+}
+
+func (md MD) Add(k, v string) {
+	md[k] = append(md[k], v)
+}
+
+func (md MD) Del(k string) {
+	delete(md, k)
 }

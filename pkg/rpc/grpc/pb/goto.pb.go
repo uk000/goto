@@ -1,5 +1,5 @@
 //*
-// Copyright 2026 uk
+// Copyright 2025 uk
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,12 +22,11 @@
 package pb
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -39,7 +38,7 @@ const (
 
 type Input struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       string                 `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -74,9 +73,9 @@ func (*Input) Descriptor() ([]byte, []int) {
 	return file_goto_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *Input) GetPayload() string {
+func (x *Input) GetText() string {
 	if x != nil {
-		return x.Payload
+		return x.Text
 	}
 	return ""
 }
@@ -86,7 +85,7 @@ type StreamConfig struct {
 	ChunkSize     int32                  `protobuf:"varint,1,opt,name=chunkSize,proto3" json:"chunkSize,omitempty"`
 	ChunkCount    int32                  `protobuf:"varint,2,opt,name=chunkCount,proto3" json:"chunkCount,omitempty"`
 	Interval      string                 `protobuf:"bytes,3,opt,name=interval,proto3" json:"interval,omitempty"`
-	Payload       string                 `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	Text          string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -142,23 +141,27 @@ func (x *StreamConfig) GetInterval() string {
 	return ""
 }
 
-func (x *StreamConfig) GetPayload() string {
+func (x *StreamConfig) GetText() string {
 	if x != nil {
-		return x.Payload
+		return x.Text
 	}
 	return ""
 }
 
 type Output struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Payload       string                 `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"`
-	At            string                 `protobuf:"bytes,3,opt,name=at,proto3" json:"at,omitempty"`
-	GotoHost      string                 `protobuf:"bytes,4,opt,name=gotoHost,proto3" json:"gotoHost,omitempty"`
-	GotoPort      int32                  `protobuf:"varint,5,opt,name=gotoPort,proto3" json:"gotoPort,omitempty"`
-	ViaGoto       string                 `protobuf:"bytes,6,opt,name=viaGoto,proto3" json:"viaGoto,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Text            string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	At              string                 `protobuf:"bytes,3,opt,name=at,proto3" json:"at,omitempty"`
+	GotoHost        string                 `protobuf:"bytes,4,opt,name=gotoHost,proto3" json:"gotoHost,omitempty"`
+	GotoPort        int32                  `protobuf:"varint,5,opt,name=gotoPort,proto3" json:"gotoPort,omitempty"`
+	ViaGoto         string                 `protobuf:"bytes,6,opt,name=viaGoto,proto3" json:"viaGoto,omitempty"`
+	GotoTLS         string                 `protobuf:"bytes,7,opt,name=gotoTLS,proto3" json:"gotoTLS,omitempty"`
+	RequestURI      string                 `protobuf:"bytes,8,opt,name=requestURI,proto3" json:"requestURI,omitempty"`
+	RequestHeaders  map[string]string      `protobuf:"bytes,9,rep,name=requestHeaders,proto3" json:"requestHeaders,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	ResponseHeaders map[string]string      `protobuf:"bytes,10,rep,name=responseHeaders,proto3" json:"responseHeaders,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Output) Reset() {
@@ -198,9 +201,9 @@ func (x *Output) GetId() string {
 	return ""
 }
 
-func (x *Output) GetPayload() string {
+func (x *Output) GetText() string {
 	if x != nil {
-		return x.Payload
+		return x.Text
 	}
 	return ""
 }
@@ -233,28 +236,69 @@ func (x *Output) GetViaGoto() string {
 	return ""
 }
 
+func (x *Output) GetGotoTLS() string {
+	if x != nil {
+		return x.GotoTLS
+	}
+	return ""
+}
+
+func (x *Output) GetRequestURI() string {
+	if x != nil {
+		return x.RequestURI
+	}
+	return ""
+}
+
+func (x *Output) GetRequestHeaders() map[string]string {
+	if x != nil {
+		return x.RequestHeaders
+	}
+	return nil
+}
+
+func (x *Output) GetResponseHeaders() map[string]string {
+	if x != nil {
+		return x.ResponseHeaders
+	}
+	return nil
+}
+
 var File_goto_proto protoreflect.FileDescriptor
 
 const file_goto_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"goto.proto\"!\n" +
-	"\x05Input\x12\x18\n" +
-	"\apayload\x18\x01 \x01(\tR\apayload\"\x82\x01\n" +
+	"goto.proto\"\x1b\n" +
+	"\x05Input\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"|\n" +
 	"\fStreamConfig\x12\x1c\n" +
 	"\tchunkSize\x18\x01 \x01(\x05R\tchunkSize\x12\x1e\n" +
 	"\n" +
 	"chunkCount\x18\x02 \x01(\x05R\n" +
 	"chunkCount\x12\x1a\n" +
-	"\binterval\x18\x03 \x01(\tR\binterval\x12\x18\n" +
-	"\apayload\x18\x04 \x01(\tR\apayload\"\x94\x01\n" +
+	"\binterval\x18\x03 \x01(\tR\binterval\x12\x12\n" +
+	"\x04text\x18\x04 \x01(\tR\x04text\"\xdc\x03\n" +
 	"\x06Output\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
-	"\apayload\x18\x02 \x01(\tR\apayload\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\x12\x0e\n" +
 	"\x02at\x18\x03 \x01(\tR\x02at\x12\x1a\n" +
 	"\bgotoHost\x18\x04 \x01(\tR\bgotoHost\x12\x1a\n" +
 	"\bgotoPort\x18\x05 \x01(\x05R\bgotoPort\x12\x18\n" +
-	"\aviaGoto\x18\x06 \x01(\tR\aviaGoto2\x98\x01\n" +
+	"\aviaGoto\x18\x06 \x01(\tR\aviaGoto\x12\x18\n" +
+	"\agotoTLS\x18\a \x01(\tR\agotoTLS\x12\x1e\n" +
+	"\n" +
+	"requestURI\x18\b \x01(\tR\n" +
+	"requestURI\x12C\n" +
+	"\x0erequestHeaders\x18\t \x03(\v2\x1b.Output.RequestHeadersEntryR\x0erequestHeaders\x12F\n" +
+	"\x0fresponseHeaders\x18\n" +
+	" \x03(\v2\x1c.Output.ResponseHeadersEntryR\x0fresponseHeaders\x1aA\n" +
+	"\x13RequestHeadersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1aB\n" +
+	"\x14ResponseHeadersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\x98\x01\n" +
 	"\x04Goto\x12\x19\n" +
 	"\x04echo\x12\x06.Input\x1a\a.Output\"\x00\x12\x1f\n" +
 	"\bstreamIn\x12\x06.Input\x1a\a.Output\"\x00(\x01\x12'\n" +
@@ -283,42 +327,46 @@ func file_goto_proto_rawDescGZIP() []byte {
 	return file_goto_proto_rawDescData
 }
 
-var file_goto_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_goto_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_goto_proto_goTypes = []any{
 	(*Input)(nil),        // 0: Input
 	(*StreamConfig)(nil), // 1: StreamConfig
 	(*Output)(nil),       // 2: Output
+	nil,                  // 3: Output.RequestHeadersEntry
+	nil,                  // 4: Output.ResponseHeadersEntry
 }
 var file_goto_proto_depIdxs = []int32{
-	0,  // 0: Goto.echo:input_type -> Input
-	0,  // 1: Goto.streamIn:input_type -> Input
-	1,  // 2: Goto.streamOut:input_type -> StreamConfig
-	1,  // 3: Goto.streamInOut:input_type -> StreamConfig
-	0,  // 4: Goto2.echo:input_type -> Input
-	0,  // 5: Goto2.streamIn:input_type -> Input
-	1,  // 6: Goto2.streamOut:input_type -> StreamConfig
-	1,  // 7: Goto2.streamInOut:input_type -> StreamConfig
-	0,  // 8: Goto3.echo:input_type -> Input
-	0,  // 9: Goto3.streamIn:input_type -> Input
-	1,  // 10: Goto3.streamOut:input_type -> StreamConfig
-	1,  // 11: Goto3.streamInOut:input_type -> StreamConfig
-	2,  // 12: Goto.echo:output_type -> Output
-	2,  // 13: Goto.streamIn:output_type -> Output
-	2,  // 14: Goto.streamOut:output_type -> Output
-	2,  // 15: Goto.streamInOut:output_type -> Output
-	2,  // 16: Goto2.echo:output_type -> Output
-	2,  // 17: Goto2.streamIn:output_type -> Output
-	2,  // 18: Goto2.streamOut:output_type -> Output
-	2,  // 19: Goto2.streamInOut:output_type -> Output
-	2,  // 20: Goto3.echo:output_type -> Output
-	2,  // 21: Goto3.streamIn:output_type -> Output
-	2,  // 22: Goto3.streamOut:output_type -> Output
-	2,  // 23: Goto3.streamInOut:output_type -> Output
-	12, // [12:24] is the sub-list for method output_type
-	0,  // [0:12] is the sub-list for method input_type
-	0,  // [0:0] is the sub-list for extension type_name
-	0,  // [0:0] is the sub-list for extension extendee
-	0,  // [0:0] is the sub-list for field type_name
+	3,  // 0: Output.requestHeaders:type_name -> Output.RequestHeadersEntry
+	4,  // 1: Output.responseHeaders:type_name -> Output.ResponseHeadersEntry
+	0,  // 2: Goto.echo:input_type -> Input
+	0,  // 3: Goto.streamIn:input_type -> Input
+	1,  // 4: Goto.streamOut:input_type -> StreamConfig
+	1,  // 5: Goto.streamInOut:input_type -> StreamConfig
+	0,  // 6: Goto2.echo:input_type -> Input
+	0,  // 7: Goto2.streamIn:input_type -> Input
+	1,  // 8: Goto2.streamOut:input_type -> StreamConfig
+	1,  // 9: Goto2.streamInOut:input_type -> StreamConfig
+	0,  // 10: Goto3.echo:input_type -> Input
+	0,  // 11: Goto3.streamIn:input_type -> Input
+	1,  // 12: Goto3.streamOut:input_type -> StreamConfig
+	1,  // 13: Goto3.streamInOut:input_type -> StreamConfig
+	2,  // 14: Goto.echo:output_type -> Output
+	2,  // 15: Goto.streamIn:output_type -> Output
+	2,  // 16: Goto.streamOut:output_type -> Output
+	2,  // 17: Goto.streamInOut:output_type -> Output
+	2,  // 18: Goto2.echo:output_type -> Output
+	2,  // 19: Goto2.streamIn:output_type -> Output
+	2,  // 20: Goto2.streamOut:output_type -> Output
+	2,  // 21: Goto2.streamInOut:output_type -> Output
+	2,  // 22: Goto3.echo:output_type -> Output
+	2,  // 23: Goto3.streamIn:output_type -> Output
+	2,  // 24: Goto3.streamOut:output_type -> Output
+	2,  // 25: Goto3.streamInOut:output_type -> Output
+	14, // [14:26] is the sub-list for method output_type
+	2,  // [2:14] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_goto_proto_init() }
@@ -332,7 +380,7 @@ func file_goto_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_goto_proto_rawDesc), len(file_goto_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   3,
 		},

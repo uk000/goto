@@ -78,12 +78,12 @@ func CreateOrGetReReader(body io.ReadCloser) *ReReader {
 	if rr2, ok := body.(*ReReader); ok {
 		rr = rr2
 	} else {
-		rr = newReReader(body)
+		rr = NewReReader(body)
 	}
 	return rr
 }
 
-func newReReader(r io.ReadCloser) *ReReader {
+func NewReReader(r io.ReadCloser) *ReReader {
 	content := ReadBytes(r)
 	return &ReReader{
 		ReadCloser: io.NopCloser(bytes.NewReader(content)),

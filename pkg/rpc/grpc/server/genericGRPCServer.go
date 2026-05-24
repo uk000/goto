@@ -39,17 +39,19 @@ func init() {
 }
 
 type GRPCMethodInterceptor struct {
-	originalServer  any
-	originalHandler grpc.MethodHandler
-	serviceMethod   *gotogrpc.GRPCServiceMethod
+	originalServer any
+	handler        grpc.MethodHandler
+	serviceMethod  *gotogrpc.GRPCServiceMethod
+	proxyMethod    *gotogrpc.GRPCServiceMethod
 }
 
 type GRPCStreamInterceptor struct {
 	isClientStreaming bool
 	isServerStreaming bool
 	originalServer    any
-	originalHandler   grpc.StreamHandler
+	handler           grpc.StreamHandler
 	serviceMethod     *gotogrpc.GRPCServiceMethod
+	proxyMethod       *gotogrpc.GRPCServiceMethod
 }
 
 func invokeMiddlewareChain(ctx context.Context, port int, method *gotogrpc.GRPCServiceMethod, md map[string][]string, body []byte) (*middleware.GrpcHTTPRequestAdapter, *middleware.GrpcHTTPResponseWriterAdapter) {
@@ -181,9 +183,9 @@ func (gi *GRPCMethodInterceptor) Intercept(srv any, ctx context.Context, dec fun
 		req := gotogrpc.ReadRequest(method, dec)
 		return ProxyUnary(ctx, port, method, remoteAddress, authority, md, req)
 	}
-	if gi.originalHandler != nil {
-		log.Println("GRPCMethodInterceptor: Original handler found, using original handler")
-		return gi.originalHandler(gi.originalServer, ctx, dec, interceptor)
+	if gi.handler != nil {
+		log.Println("GRPCMethodInterceptor: Delegating to method handler")
+		return gi.handler(gi.originalServer, ctx, dec, interceptor)
 	}
 	return GRPCUnaryHandler(method)(srv, ctx, dec, interceptor)
 }
@@ -205,9 +207,9 @@ func (gi *GRPCStreamInterceptor) Intercept(srv any, ss grpc.ServerStream) error 
 		gotogrpc.ProxyGRPCStream(ctx, port, method, remoteAddr.String(), md, stream)
 		return nil
 	}
-	if gi.originalHandler != nil {
-		log.Println("GRPCStreamInterceptor: Original handler found, using original handler")
-		return gi.originalHandler(gi.originalServer, ss)
+	if gi.handler != nil {
+		log.Println("GRPCStreamInterceptor: Delegating to stream handler")
+		return gi.handler(gi.originalServer, ss)
 	}
 	return GRPCStreamHandler(srv, ss)
 }

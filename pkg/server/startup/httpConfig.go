@@ -47,7 +47,7 @@ func processHTTPResponse(port int, hr *ctl.HTTPResponse) {
 	for _, rp := range hr.Payloads {
 		err := payload.PayloadManager.SetURIResponsePayloadWithMatches(port, rp, false)
 		if err != nil {
-			log.Printf("Error processing HTTP response: %s\n", err.Error())
+			log.Printf("[*** ERROR ***] Error processing HTTP response: %s\n", err.Error())
 		}
 	}
 	log.Println("============================================================")

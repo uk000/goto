@@ -19,7 +19,7 @@ Goto exposes a gRPC server with the following RPC methods:
 1. `Goto.echo`: Unary grpc method that echoes back the given payload along with headers. The `echo` input message is given below. It responds with a single instance of `Output` message described later.
    ```
    message Input {
-     string payload = 1;
+     string text = 1;
    }
    ```
 2. `Goto.streamIn`: This is a client-streaming method that accepts a stream of `Input` messages (described above under unary `echo` method). Once client ends the stream, the server responds with a single message of `Output` type (described further down).
@@ -27,10 +27,10 @@ Goto exposes a gRPC server with the following RPC methods:
 3. `Goto.streamOut`: This is a server streaming service method that accepts a `StreamConfig` input message allowing the client to configure the parameters of stream response. It responds with `chunkCount` number of `Output` messages, each output carrying a payload of size `chunkSize`, and there is `interval` delay between two output messages.
    ```
    message StreamConfig {
-     int32  chunkSize = 1;
-     int32  chunkCount = 2;
-     string interval = 3;
-     string payload = 4;
+    int32  chunkSize = 1;
+    int32  chunkCount = 2;
+    string interval = 3;
+    string text = 4;
    }
    ```
 4. `Goto.streamInOut`: This is a bi-directional streaming service method that accepts a stream of `StreamConfig` input messages as described in `streamOut` operation above. Each input `StreamConfig` message requests the server to send a stream response based on the given stream config. For each input message, the service responds with `chunkCount` number of `Output` messages, each output carrying a payload of size `chunkSize`, and there is `interval` delay between two output messages.
@@ -40,11 +40,15 @@ All `grpc` operations exposed by `goto` produce the following proto message as o
 ```
 message Output {
   string id = 1;
-  string payload = 2;
+  string text = 2;
   string at = 3;
   string gotoHost = 4;
   int32  gotoPort = 5;
   string viaGoto = 6;
+  string gotoTLS = 7;
+  string requestURI = 8;
+  map<string, string> requestHeaders = 9;
+  map<string, string> responseHeaders = 10;
 }
 ```
 The gRPC response from `goto` carries the following headers:
@@ -59,6 +63,7 @@ The gRPC response from `goto` carries the following headers:
 - `request-authority`
 - `request-content-type`
 - `request-host`
+- `request-...` (all custom headers)
 
 <br/>
 <details>
@@ -133,8 +138,140 @@ Goto can act as a generic gRPC client that can invoke any upstream gRPC service 
 
 |METHOD|URI|Description|
 |---|---|---|
-|POST     | /grpc/call/`{endpoint}`<br/>/`{service}`/`{method}` | Call an upstream service based on the given endpoint, service name, method name, and payload from request body. |
+|POST     | /grpc/call | Call an upstream service based on the given call payload (See below). |
+|POST     | /grpc/call/<br/>`{service}`/`{method}`<br/>/`{endpoint}` | Call an upstream service based on the given endpoint, service name, method name, and gRPC payload from request body. |
 
+#### gRPC Client Call Payload Examples
+```
+curl -XPOST localhost:8080/grpc/client/call -H'Foo:123' -d '
+{
+  "service": "Goto",
+  "method": "echo",
+  "endpoint": "localhost:8888",
+  "headers": {
+    "request": {
+      "forward":["foo"]
+    }
+  },
+  "payloads": {
+    "concurrent": [
+      {
+        "linear": [
+          {"payload": "{\"text\": \"hello 1.1\"}"},
+          {"payload": "{\"text\": \"hello 1.2\"}"}
+        ],
+        "headers": {"request":{"add":{"stream": "1"}}}
+      },
+      {
+        "linear": [
+          {"payload": "{\"text\": \"hello 2.1\"}"},
+          {"payload": "{\"text\": \"hello 2.2\"}"}
+        ],
+        "headers": {"request":{"add":{"stream": "2"}}}
+      }
+    ]
+  },
+  "push": false,
+  "result": true
+}
+'
+```
+```
+{
+  "service": "Goto",
+  "method": "streamIn",
+  "endpoint": "localhost:8888",
+  "headers": {"request":{"forward":["foo"]}},
+  "payloads": {
+    "concurrent": [
+      {
+        "stream": [
+          "{\"text\": \"hello 1.1\"}",
+          "{\"text\": \"hello 1.2\"}"
+        ],
+        "headers": {"request":{"add":{"stream": "1"}}}
+      },
+      {
+        "stream": [
+          "{\"text\": \"hello 2.1\"}",
+          "{\"text\": \"hello 2.2\"}"
+        ],
+        "headers": {"request":{"add":{"stream": "2"}}}
+      }
+    ]
+  },
+  "push": false,
+  "result": true
+}
+```
+```
+{
+  "service": "Goto",
+  "method": "streamOut",
+  "endpoint": "localhost:8888",
+  "headers": {"request":{"forward":["foo"]}},
+  "payloads": {
+    "concurrent": [
+      {
+        "linear": [
+          {
+            "payload": "{\"chunkCount\":2, \"interval\":\"1s\", \"text\": \"hello 1.1\"}",
+            "headers": {"request":{"add":{"stream": "1"}}}
+          },
+          {
+            "payload": "{\"chunkCount\":3, \"interval\":\"1s\", \"text\": \"hello 1.2\"}",
+            "headers": {"request":{"add":{"stream": "2"}}}
+          }
+        ]
+      },
+      {
+        "linear": [
+          {
+            "payload": "{\"chunkCount\":3, \"interval\":\"1s\", \"text\": \"hello 2.1\"}",
+            "headers": {"request":{"add":{"stream": "3"}}}
+          },
+          {
+            "payload": "{\"chunkCount\":2, \"interval\":\"1s\", \"text\": \"hello 2.2\"}",
+            "headers": {"request":{"add":{"stream": "4"}}}
+          }
+        ]
+      }
+    ]
+  },
+  "push": false,
+  "result": true
+}
+```
+```
+{
+  "service": "Goto",
+  "method": "streamInOut",
+  "endpoint": "localhost:8888",
+  "headers": {"request":{"forward":["foo"]}},
+  "payloads": {
+    "concurrent": [
+      {
+        "stream": [
+          "{\"chunkCount\":1, \"interval\":\"1s\", \"text\": \"hello 1.1\"}",
+          "{\"chunkCount\":3, \"interval\":\"1s\", \"text\": \"hello 1.2\"}",
+          "{\"chunkCount\":1, \"interval\":\"1s\", \"text\": \"hello 1.3\"}"
+        ],
+        "headers": {"request":{"add":{"stream": "1"}}}
+      },
+      {
+        "stream": [
+          "{\"chunkCount\":2, \"interval\":\"1s\", \"text\": \"hello 2.1\"}",
+          "{\"chunkCount\":1, \"interval\":\"1s\", \"text\": \"hello 2.2\"}",
+          "{\"chunkCount\":2, \"interval\":\"1s\", \"text\": \"hello 2.3\"}"
+        ],
+        "headers": {"request":{"add":{"stream": "2"}}}
+      }
+    ]
+  },
+  "push": false,
+  "result": true
+}
+```
 
 ## Notes
 - Replace `grpc` with `jsonrpc` in paths for JSON-RPC services

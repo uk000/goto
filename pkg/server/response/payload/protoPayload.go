@@ -245,6 +245,7 @@ func (rp *ResponsePayload) Process() error {
 		if match.URIPrefix == "" {
 			return fmt.Errorf("URI match is required")
 		}
+		match.URIPrefix = strings.ToLower(match.URIPrefix)
 		_, uriRE, rr, err := util.BuildURIMatcher(match.URIPrefix, true, handleURI)
 		if err != nil {
 			return fmt.Errorf("failed to add URI match %s with error: %s\n", match.URIPrefix, err.Error())
@@ -255,6 +256,7 @@ func (rp *ResponsePayload) Process() error {
 
 		for h, v := range match.Headers {
 			if h != "" {
+				h = strings.ToLower(h)
 				if util.IsFiller(v) {
 					if rp.RequestCapture.headerCaptureKeys[h] == nil {
 						captures, regexp := util.ReplaceFillersWithCaptureGroupRegex(v)
@@ -270,6 +272,7 @@ func (rp *ResponsePayload) Process() error {
 		}
 		for q, v := range match.Queries {
 			if q != "" {
+				q = strings.ToLower(q)
 				if util.IsFiller(v) {
 					if rp.RequestCapture.queryCaptureKeys[q] == nil {
 						captures, regexp := util.ReplaceFillersWithCaptureGroupRegex(v)

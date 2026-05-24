@@ -16,7 +16,10 @@
 
 package ctl
 
-import "goto/pkg/server/response/payload"
+import (
+	"goto/pkg/server/response/payload"
+	"goto/pkg/util"
+)
 
 type GRPC struct {
 	Protos   []*ProtoConfig       `yaml:"protos,omitempty"`
@@ -24,9 +27,10 @@ type GRPC struct {
 }
 
 type ProtoConfig struct {
-	Name    string `yaml:"name"`
-	Path    string `yaml:"path"`
-	Content string `yaml:"content"`
+	Name     string `yaml:"name"`
+	Path     string `yaml:"path"`
+	Content  string `yaml:"content"`
+	Register bool   `yaml:"register"`
 }
 
 type GRPCServiceConfig struct {
@@ -42,10 +46,6 @@ type GRPCMethodConfig struct {
 }
 
 type GRPCResponseConfig struct {
-	Payloads []*payload.ResponsePayload `yaml:"payloads"`
-}
-
-type StreamConfig struct {
-	Count int    `yaml:"count"`
-	Delay string `yaml:"delay,omitempty"`
+	Payload    *payload.ResponsePayload `yaml:"payload"`
+	Transforms []*util.Transform        `yaml:"transforms"`
 }

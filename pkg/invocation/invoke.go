@@ -41,7 +41,7 @@ type InvocationRequest struct {
 	url             string
 	uri             string
 	host            string
-	headers         map[string]string
+	headers         types.SimpleHTTPHeaders
 	httpRequest     *http.Request
 	grpcInput       *pb.Input
 	grpcStreamInput *pb.StreamConfig
@@ -114,7 +114,7 @@ func (tracker *InvocationTracker) newInvocationRequest(requestID, targetID strin
 	return tracker.newRequest(requestID, targetID, url, headers)
 }
 
-func (tracker *InvocationTracker) newRequest(requestID, targetID, url string, headers map[string]string) *InvocationRequest {
+func (tracker *InvocationTracker) newRequest(requestID, targetID, url string, headers types.SimpleHTTPHeaders) *InvocationRequest {
 	ir := &InvocationRequest{
 		requestID: requestID,
 		targetID:  targetID,
@@ -229,8 +229,8 @@ func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
 	return true
 }
 
-func (tracker *InvocationTracker) prepareRequestHeaders(requestID, targetID, url string) map[string]string {
-	headers := map[string]string{}
+func (tracker *InvocationTracker) prepareRequestHeaders(requestID, targetID, url string) types.SimpleHTTPHeaders {
+	headers := types.SimpleHTTPHeaders{}
 	for h, v := range tracker.Target.Headers {
 		if len(v) > 0 {
 			headers[h] = v
@@ -286,16 +286,38 @@ func (ir *InvocationRequest) invokeGRPC() {
 		log.Printf("Invocation: [ERROR] GRPC invocation attempted without a client")
 		return
 	}
+	payloads := &grpc.GRPCPayloads{Linear: []*grpc.GRPCPayload{}}
+	for _, p := range ir.tracker.Payloads {
+		payload := &grpc.GRPCPayload{Payload: string(p)}
+		payloads.Linear = append(payloads.Linear, payload)
+	}
+	gclient := ir.client.(*grpc.GRPCClient)
+	call := &grpc.GRPCCall{
+		Service:        gclient.Service.Name,
+		Method:         ir.tracker.Target.Method,
+		Payloads:       payloads,
+		RequestHeaders: ir.headers,
+		Result:         true,
+	}
 	start := time.Now()
-	response, err := ir.client.(*grpc.GRPCClient).Invoke(ir.tracker.Target.Method, ir.headers, ir.tracker.Payloads)
+	result := ir.client.(*grpc.GRPCClient).Invoke(call, nil)
 	end := time.Now()
 	ir.result.trackRequest(start, end)
 	ir.tracker.Status.trackRequest(end)
-	if err == nil {
-		ir.result.processGRPCResponse(ir, response.EquivalentHTTPStatusCode, response.ResponseHeaders,
-			response.ResponsePayload, response.ClientStreamCount, response.ServerStreamCount, err)
+	if result != nil {
+		var err error
+		if len(result.Errors) > 0 {
+			err = result.Errors[0]
+		}
+		if len(result.Responses) > 0 {
+			response := result.Responses[0]
+			ir.result.processGRPCResponse(ir, response.EquivalentHTTPStatusCode, response.ResponseHeaders,
+				response.ResponsePayload, response.ClientStreamCount, response.ServerStreamCount, err)
+		} else {
+			ir.tracker.logConnectionFailed(err.Error())
+		}
 	} else {
-		ir.tracker.logConnectionFailed(err.Error())
+		ir.tracker.logConnectionFailed("No result")
 	}
 }
 

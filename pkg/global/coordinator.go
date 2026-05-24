@@ -40,7 +40,8 @@ type IGRPCManager interface {
 
 type HTTPStartWatcher func(server *http.Server)
 type HTTPStopWatcher func()
-type TCPServeWatcher func(func(listenerID string, port int, listener net.Listener) error)
+type TCPServerWatcher func(func(listenerID string, port int, listener net.Listener) error)
+type UDPServerWatcher func(func(listenerID string, port int, listener net.Listener) error)
 type GRPCStartListener func()
 type GRPCStopListener func()
 type GRPCInterceptor func(server IGRPCManager)
@@ -51,7 +52,7 @@ var (
 	httpStopWatchers       []HTTPStopWatcher
 	mcpStartWatchers       []HTTPStartWatcher
 	mcpStopWatchers        []HTTPStopWatcher
-	tcpServeWatchers       []TCPServeWatcher
+	tcpServeWatchers       []TCPServerWatcher
 	grpcStartListeners     []GRPCStartListener
 	grpcStopListeners      []GRPCStopListener
 	grpcIntercepts         []GRPCInterceptor
@@ -77,7 +78,7 @@ func AddJSONRPCStopWatcher(w HTTPStopWatcher) {
 	mcpStopWatchers = append(mcpStopWatchers, w)
 }
 
-func AddTCPServeWatcher(w TCPServeWatcher) {
+func AddTCPServeWatcher(w TCPServerWatcher) {
 	tcpServeWatchers = append(tcpServeWatchers, w)
 }
 

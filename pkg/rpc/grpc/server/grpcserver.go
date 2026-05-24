@@ -97,56 +97,57 @@ func StartDefaultGRPCServer() {
 	GRPCManager.ServeListener(listeners.DefaultGRPCListener)
 }
 
-func (f *GRPCServerManager) AddListener(listener any) {
+func (sm *GRPCServerManager) AddListener(listener any) {
 	l := listener.(*listeners.Listener)
-	f.lock.Lock()
+	sm.lock.Lock()
 	TheGRPCServer.Listeners[l.ListenerID] = l
-	f.lock.Unlock()
+	sm.lock.Unlock()
 }
 
-func (f *GRPCServerManager) ServeListener(listener any) {
+func (sm *GRPCServerManager) ServeListener(listener any) {
 	l := listener.(*listeners.Listener)
-	f.AddListener(l)
+	sm.AddListener(l)
 	if !TheGRPCServer.Running {
 		TheGRPCServer.start()
 	} else {
-		f.restartServer()
+		sm.restartServer()
 	}
 }
 
-func (f *GRPCServerManager) Serve(port int, s *gotogrpc.GRPCService) {
+func (sm *GRPCServerManager) Serve(port int, s *gotogrpc.GRPCService) {
 	ServiceRegistry.AddActiveService(s)
-	f.refreshGRPCServer()
+	sm.refreshGRPCServer()
 	TheGRPCServer.start()
 	log.Printf("GRPC Service [%s] served on port [%d]", s.Name, port)
 }
 
-func (f *GRPCServerManager) ServeMulti(portServices map[int][]*gotogrpc.GRPCService) {
+func (sm *GRPCServerManager) ServeMulti(portServices map[int][]*gotogrpc.GRPCService) {
 	for port, services := range portServices {
 		for _, s := range services {
 			ServiceRegistry.AddActiveService(s)
 			log.Printf("GRPC Service [%s] served on port [%d]", s.Name, port)
 		}
 	}
-	f.refreshGRPCServer()
+	sm.refreshGRPCServer()
 	TheGRPCServer.start()
 }
 
-func (f *GRPCServerManager) InterceptAndServe(gsd *grpc.ServiceDesc, srv any) {
+func (sm *GRPCServerManager) InterceptAndServe(gsd *grpc.ServiceDesc, srv any) {
 	service := ServiceRegistry.GetOrCreateService(gsd)
-	f.InterceptServiceMethods(service, service, srv, true)
+	sm.InterceptServiceMethods(service, service, srv, true)
 	service.Server = srv
 	ServiceRegistry.AddActiveService(service)
 }
 
-func (f *GRPCServerManager) InterceptWithMiddleware(gsd *grpc.ServiceDesc, srv any) {
+func (sm *GRPCServerManager) InterceptWithMiddleware(gsd *grpc.ServiceDesc, srv any) {
 	service := ServiceRegistry.GetOrCreateService(gsd)
-	f.InterceptServiceMethods(service, nil, srv, false)
-	service.Server = &gotogrpc.DynamicServiceStub{}
+	sm.InterceptServiceMethods(service, service, srv, true)
+	//service.Server = &gotogrpc.DynamicServiceStub{}
+	service.Server = srv
 	ServiceRegistry.AddActiveService(service)
 }
 
-func (f *GRPCServerManager) InterceptAndProxy(fromGSD, toGSD *grpc.ServiceDesc, target string, srv any, teeport int) (global.IGRPCService, global.IGRPCService) {
+func (sm *GRPCServerManager) InterceptAndProxy(fromGSD, toGSD *grpc.ServiceDesc, target string, srv any, teeport int) (global.IGRPCService, global.IGRPCService) {
 	fromService := ServiceRegistry.GetService(fromGSD.ServiceName)
 	if fromService == nil {
 		psd, err := grpcreflect.LoadServiceDescriptor(fromGSD)
@@ -172,74 +173,140 @@ func (f *GRPCServerManager) InterceptAndProxy(fromGSD, toGSD *grpc.ServiceDesc, 
 	if toService == nil {
 		toService = ServiceRegistry.NewGRPCService(psd2)
 	}
-	f.InterceptServiceMethods(fromService, toService, srv, false)
+	sm.InterceptServiceMethods(fromService, toService, srv, false)
 	fromService.Server = &gotogrpc.DynamicServiceStub{}
 	ServiceRegistry.AddProxyService(fromService, toService, teeport)
 	SIP.AddService(fromService)
 	return fromService, toService
 }
 
-func (f *GRPCServerManager) Reflect(s *grpc.ServiceDesc) {
+func (sm *GRPCServerManager) Reflect(s *grpc.ServiceDesc) {
 	psd, _ := grpcreflect.LoadServiceDescriptor(s)
 	SIP.AddService(ServiceRegistry.NewGRPCService(psd))
 }
 
-func (f *GRPCServerManager) InterceptServiceMethods(proxy, original *gotogrpc.GRPCService, srv any, serviceByOriginal bool) {
-	var method *gotogrpc.GRPCServiceMethod
-	for i, stream := range proxy.GSD.Streams {
-		if original != nil {
-			method = original.GetMethod(stream.StreamName).(*gotogrpc.GRPCServiceMethod)
-		} else {
-			method = proxy.GetMethod(stream.StreamName).(*gotogrpc.GRPCServiceMethod)
+func (sm *GRPCServerManager) InterceptServiceMethods(proxy, original *gotogrpc.GRPCService, srv any, serviceByOriginal bool) error {
+	for i := range original.GSD.Streams {
+		stream := &original.GSD.Streams[i]
+		if err := sm.InterceptServiceMethod(proxy, original, stream.StreamName, stream.StreamName, srv, true, serviceByOriginal); err != nil {
+			return err
 		}
-		interceptor := &GRPCStreamInterceptor{
-			originalServer:    srv,
-			isClientStreaming: stream.ClientStreams,
-			isServerStreaming: stream.ServerStreams,
-			serviceMethod:     method,
-		}
-		if original != nil && serviceByOriginal {
-			interceptor.originalHandler = original.GSD.Streams[i].Handler
-		}
-		proxy.GSD.Streams[i].Handler = interceptor.Intercept
 	}
-	for i, unary := range proxy.GSD.Methods {
-		if original != nil {
-			method = original.GetMethod(unary.MethodName).(*gotogrpc.GRPCServiceMethod)
-		} else {
-			method = proxy.GetMethod(unary.MethodName).(*gotogrpc.GRPCServiceMethod)
+	for i := range original.GSD.Methods {
+		m := &original.GSD.Methods[i]
+		if err := sm.InterceptServiceMethod(proxy, original, m.MethodName, m.MethodName, srv, false, serviceByOriginal); err != nil {
+			return err
 		}
-		interceptor := &GRPCMethodInterceptor{
-			originalServer: srv,
-			serviceMethod:  method,
-		}
-		if original != nil && serviceByOriginal {
-			interceptor.originalHandler = original.GSD.Methods[i].Handler
-		}
-		proxy.GSD.Methods[i].Handler = interceptor.Intercept
 	}
+	return nil
 }
 
-func (f *GRPCServerManager) refreshGRPCServer() {
+func getStream(sd *grpc.ServiceDesc, stream string) *grpc.StreamDesc {
+	for i := range sd.Streams {
+		s := &sd.Streams[i]
+		if strings.EqualFold(s.StreamName, stream) {
+			return s
+		}
+	}
+	return nil
+}
+
+func getMethod(sd *grpc.ServiceDesc, method string) *grpc.MethodDesc {
+	for i := range sd.Methods {
+		m := &sd.Methods[i]
+		if strings.EqualFold(m.MethodName, method) {
+			return m
+		}
+	}
+	return nil
+}
+
+func (sm *GRPCServerManager) InterceptServiceMethod(proxy, original *gotogrpc.GRPCService, proxyMethodName, origMethodName string, srv any, stream bool, serviceByOriginal bool) error {
+	if proxy == nil || original == nil {
+		return fmt.Errorf("Original and Proxy services required")
+	}
+	origMethod := original.GetMethod(origMethodName).(*gotogrpc.GRPCServiceMethod)
+	proxyMethod := proxy.GetMethod(proxyMethodName).(*gotogrpc.GRPCServiceMethod)
+	if stream {
+		origStreamDesc := getStream(original.GSD, origMethodName)
+		if origStreamDesc == nil {
+			return fmt.Errorf("Stream [%s] not found on Service [%s]", origMethodName, original.Name)
+		}
+		proxyStreamDesc := getStream(proxy.GSD, proxyMethodName)
+		if proxyStreamDesc == nil {
+			return fmt.Errorf("Stream [%s] not found on Service [%s]", proxyMethodName, proxy.Name)
+		}
+		var interceptor *GRPCStreamInterceptor
+		if origMethod.Intercepted && origMethod.Interceptor != nil {
+			interceptor = origMethod.Interceptor.(*GRPCStreamInterceptor)
+		} else {
+			interceptor = &GRPCStreamInterceptor{
+				originalServer:    srv,
+				isClientStreaming: origStreamDesc.ClientStreams,
+				isServerStreaming: origStreamDesc.ServerStreams,
+				serviceMethod:     origMethod,
+				proxyMethod:       proxyMethod,
+			}
+			origMethod.Interceptor = interceptor
+			origMethod.Intercepted = true
+			if serviceByOriginal {
+				interceptor.handler = origStreamDesc.Handler
+			} else {
+				interceptor.handler = proxyStreamDesc.Handler
+			}
+		}
+		origStreamDesc.Handler = interceptor.Intercept
+	} else {
+		origMethodDesc := getMethod(original.GSD, origMethodName)
+		if origMethodDesc == nil {
+			return fmt.Errorf("Method [%s] not found on Service [%s]", origMethodName, original.Name)
+		}
+		proxyMethodDesc := getMethod(proxy.GSD, proxyMethodName)
+		if proxyMethodDesc == nil {
+			return fmt.Errorf("Method [%s] not found on Service [%s]", proxyMethodName, proxy.Name)
+		}
+		var interceptor *GRPCMethodInterceptor
+		if origMethod.Intercepted && origMethod.Interceptor != nil {
+			interceptor = origMethod.Interceptor.(*GRPCMethodInterceptor)
+		} else {
+			interceptor = &GRPCMethodInterceptor{
+				originalServer: srv,
+				serviceMethod:  origMethod,
+				proxyMethod:    proxyMethod,
+			}
+			origMethod.Interceptor = interceptor
+			origMethod.Intercepted = true
+			if serviceByOriginal {
+				interceptor.handler = origMethodDesc.Handler
+			} else {
+				interceptor.handler = proxyMethodDesc.Handler
+			}
+		}
+		origMethodDesc.Handler = interceptor.Intercept
+	}
+	return nil
+}
+
+func (sm *GRPCServerManager) refreshGRPCServer() {
 	TheGRPCServer.Stop()
 	log.Println("GRPC Server stopped")
 	TheGRPCServer.refreshServer()
 }
 
-func (f *GRPCServerManager) restartServer() {
-	f.refreshGRPCServer()
+func (sm *GRPCServerManager) restartServer() {
+	sm.refreshGRPCServer()
 	TheGRPCServer.start()
 }
 
-func (f *GRPCServerManager) StopService(s *gotogrpc.GRPCService) {
+func (sm *GRPCServerManager) StopService(s *gotogrpc.GRPCService) {
 	ServiceRegistry.RemoveActiveService(s.Name)
-	f.refreshGRPCServer()
+	sm.refreshGRPCServer()
 	TheGRPCServer.start()
 }
 
-func (f *GRPCServerManager) StartWithCallback(l *listeners.Listener, callback func()) {
-	f.refreshGRPCServer()
-	f.AddListener(l)
+func (sm *GRPCServerManager) StartWithCallback(l *listeners.Listener, callback func()) {
+	sm.refreshGRPCServer()
+	sm.AddListener(l)
 	callback()
 	TheGRPCServer.start()
 }

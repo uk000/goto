@@ -41,7 +41,7 @@ func loadA2A(a2a *ctl.A2A) {
 	for _, pa := range a2a.Servers {
 		for aname, agent := range pa.Agents {
 			if agent == nil || agent.Card == nil || agent.Config == nil {
-				log.Printf("Skipping agent [%s] due to missing Card/Config\n", aname)
+				log.Printf("[*** ERROR ***] Skipping agent [%s] due to missing Card/Config\n", aname)
 				continue
 			}
 			agent.Port = pa.Port
@@ -51,7 +51,7 @@ func loadA2A(a2a *ctl.A2A) {
 				registry.TheAgentRegistry.AddAgent(agent, agent.Port)
 				names = append(names, fmt.Sprintf("%s(%d)", name, agent.Port))
 			} else {
-				log.Printf("Failed to load agent [%s]: %s\n", aname, err.Error())
+				log.Printf("[*** ERROR ***] Failed to load agent [%s]: %s\n", aname, err.Error())
 			}
 		}
 	}

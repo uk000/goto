@@ -122,6 +122,7 @@ func Init() {
 	global.Funcs.GetListenerID = GetListenerID
 	global.Funcs.GetListenerLabel = GetListenerLabel
 	global.Funcs.GetListenerLabelForPort = GetListenerLabelForPort
+	global.Funcs.IsListenerTLS = IsListenerTLS
 
 	if DefaultLabel == "" {
 		DefaultLabel = global.Self.HostLabel
@@ -847,6 +848,13 @@ func IsListenerOpen(port int) bool {
 	defer listenersLock.RUnlock()
 	l := listeners[port]
 	return l != nil && l.Open
+}
+
+func IsListenerTLS(port int) bool {
+	listenersLock.RLock()
+	defer listenersLock.RUnlock()
+	l := listeners[port]
+	return l != nil && l.TLS
 }
 
 func GetListenerID(port int) string {

@@ -72,6 +72,8 @@ type GRPCServiceMethod struct {
 	GMD              *grpc.MethodDesc              `json:"-"`
 	GSD              *grpc.StreamDesc              `json:"-"`
 	PMD              protoreflect.MethodDescriptor `json:"-"`
+	Interceptor      any
+	Intercepted      bool
 }
 
 type GRPCResponsePayload []byte

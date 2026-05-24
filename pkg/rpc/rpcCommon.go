@@ -110,7 +110,7 @@ func SetServiceResponsePayload(w http.ResponseWriter, r *http.Request, reg RPCSe
 		if contentType == "" {
 			contentType = "plain/text"
 		}
-		methodURI := method.GetURI() + "*"
+		methodURI := method.GetURI()
 		if err := payload.PayloadManager.SetRPCResponsePayload(port, isStream, content, contentType, methodURI, header, value, regexes, paths, count, delayMin, delayMax); err != nil {
 			msg = fmt.Sprintf("Port [%d]: Failed to set %s payload for service [%s] method [%s], header [%s:%s], regexes [%s], paths [%s], content-type [%s], length [%d], count [%d], delay [%s-%s], with error [%s]",
 				port, serviceType, service.GetName(), method.GetName(), header, value, regexes, paths, contentType, len(content), count, delayMin, delayMax, err.Error())
@@ -137,7 +137,7 @@ func SetServicePayloadTransform(w http.ResponseWriter, r *http.Request, reg RPCS
 		var transforms []*util.Transform
 		if err := util.ReadJsonPayload(r, &transforms); err == nil {
 			if transforms != nil {
-				methodURI := method.GetURI() + "*"
+				methodURI := method.GetURI()
 				port := util.GetRequestOrListenerPortNum(r)
 				if err := payload.PayloadManager.SetRPCResponsePayloadTransform(port, isStream, contentType, methodURI, transforms, 0, 0); err != nil {
 					msg = fmt.Sprintf("Port [%d]: Failed to set %s payload transform for service [%s] method [%s], content-type [%s], transforms: [%+v] with error [%s]",

@@ -55,6 +55,15 @@ func ReadJsonOrYamlPayloadFromBytes(b []byte, t interface{}) error {
 	return err
 }
 
+func JsonOrYamlFromText(text string) (any, error) {
+	var obj any
+	err := json.Unmarshal([]byte(text), &obj)
+	if err != nil {
+		err = yaml.Unmarshal([]byte(text), &obj)
+	}
+	return obj, err
+}
+
 func WriteJsonOrYAMLPayload(w http.ResponseWriter, t interface{}, yaml bool) error {
 	if yaml {
 		w.Header().Add(constants.HeaderContentType, constants.ContentTypeYAML)
