@@ -129,7 +129,7 @@ func SetHeaders(ctx context.Context, port int, hostLabel, listenerLabel string, 
 
 	responseHeaders = map[string]string{
 		constants.HeaderGotoHost:          hostLabel,
-		constants.HeaderViaGoto:           listenerLabel,
+		constants.HeaderViaGoto:           util.GetViaGotoValue(port),
 		constants.HeaderGotoProtocol:      "GRPC",
 		constants.HeaderGotoPort:          fmt.Sprint(port),
 		constants.HeaderGotoRemoteAddress: remoteAddress,

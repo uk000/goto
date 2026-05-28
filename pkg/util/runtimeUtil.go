@@ -18,7 +18,6 @@ package util
 
 import (
 	"fmt"
-	"goto/pkg/global"
 	"reflect"
 	"runtime"
 	"strings"
@@ -73,10 +72,6 @@ func (c *Channel[T]) IsClosed() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.closed
-}
-
-func BuildListenerLabel(port int) string {
-	return fmt.Sprintf("[%s:%d].[%s@%s]", global.Self.PodIP, port, global.Self.Namespace, global.Self.Cluster)
 }
 
 func PrintCallers(level int, callee string) {

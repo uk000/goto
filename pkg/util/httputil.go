@@ -123,6 +123,20 @@ func GetViaGotosFromHeaders(upheaders map[string]any) map[string]bool {
 	return viaGotos
 }
 
+func BuildListenerLabel(port int) string {
+	selfLabel := ""
+	if global.Self.GivenName {
+		selfLabel = global.Self.Name
+	} else {
+		selfLabel = global.Self.PodIP
+	}
+	return fmt.Sprintf("[%s:%d][%s@%s@%s]", selfLabel, port, global.Self.PodName, global.Self.Namespace, global.Self.Cluster)
+}
+
+func GetViaGotoValue(port int) string {
+	return global.Funcs.GetListenerLabelForPort(port)
+}
+
 func SendBadRequest(msg string, w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusBadRequest)
 	fmt.Fprintln(w, msg)

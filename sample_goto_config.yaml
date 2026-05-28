@@ -2203,17 +2203,17 @@ grpc:
         syntax = "proto3";
         option go_package=".;pb";
         message xInput {
-          string payload = 1;
+          string text = 1;
         }
         message xStreamConfig {
           int32  chunkSize = 1;
           int32  chunkCount = 2;
           string interval = 3;
-          string payload = 4;
+          string text = 4;
         }
         message xOutput {
           string id = 1;
-          string payload = 2;
+          string text = 2;
           string at = 3;
           string gotoHost = 4;
           int32  gotoPort = 5;

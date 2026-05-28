@@ -189,7 +189,7 @@ func ProxyGRPCUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceM
 		respHeaders.Append(constants.HeaderGotoProxyUpstreamTook, tookNanos.String())
 		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderGotoHost, global.Self.HostLabel, respHeaders)
 		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderGotoPort, strconv.Itoa(port), respHeaders)
-		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderViaGoto, global.Funcs.GetListenerLabelForPort(port), respHeaders)
+		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderViaGoto, util.GetViaGotoValue(port), respHeaders)
 		respHeaders.Append(constants.HeaderViaGoto, fmt.Sprintf("%s(Proxy)", global.Funcs.GetListenerLabelForPort(port)))
 		if delay != "" {
 			respHeaders.Append(constants.HeaderGotoProxyDelay, delay)

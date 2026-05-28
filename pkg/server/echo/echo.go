@@ -162,7 +162,7 @@ func GetEchoResponse(listenerLabel, downstreamAddr, requestHost, requestURI, req
 		HeaderGotoListener:     listenerLabel,
 		HeaderGotoPort:         requestPortNum,
 		HeaderGotoTLS:          isTLS,
-		HeaderViaGoto:          listenerLabel,
+		HeaderViaGoto:          util.GetViaGotoValue(requestPortNum),
 		"headers":              outputHeaders,
 	}
 	return response

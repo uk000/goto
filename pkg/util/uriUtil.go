@@ -107,7 +107,9 @@ func getURIRegexpAndRoute(uri string, router *mux.Router, prefixRegexp string, p
 			subRouter = router.NewRoute().Subrouter()
 		}
 		finalURI = strings.TrimPrefix(finalURI, "/")
-		finalURI = fmt.Sprintf("/{path:(?i)%s}", finalURI)
+		if finalURI != "" {
+			finalURI = fmt.Sprintf("/{path:(?i)%s}", finalURI)
+		}
 		if prefix {
 			route = subRouter.PathPrefix(finalURI)
 		} else {

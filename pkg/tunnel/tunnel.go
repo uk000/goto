@@ -763,7 +763,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 					msg := fmt.Sprintf("Tunnel loop detected in header [%s] : %+v", HeaderGotoTunnelHost, r.Header[HeaderGotoTunnelHost])
 					util.AddLogMessage(msg, r)
 					fmt.Fprintln(w, msg)
-					w.Header().Add(HeaderViaGoto, l.Label+"[tunnel loop]")
+					w.Header().Add(HeaderViaGoto, util.GetViaGotoValue(l.Port)+"[tunnel loop]")
 					util.UnsetTunnelRequest(r)
 					return
 				}
