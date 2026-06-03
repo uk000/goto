@@ -61,6 +61,7 @@ type TargetMatch struct {
 type Keys struct {
 	Add    map[string]string `yaml:"add" json:"add"`
 	Remove []string          `yaml:"remove" json:"remove"`
+	Map    map[string]string `yaml:"map" json:"map"`
 	Lower  bool              `yaml:"lower" json:"lower"`
 }
 

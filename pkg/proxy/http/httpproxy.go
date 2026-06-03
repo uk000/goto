@@ -361,22 +361,24 @@ func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTra
 	if is.Method == "" {
 		is.Method = rc.method
 	}
-	var add map[string]string
-	var remove []string
+	var addHeaders, mapHeaders map[string]string
+	var removeHeaders []string
 	if tt != nil {
 		is.RequestId = tt.RequestId
 		if tt.Headers != nil {
-			add = tt.Headers.Add
-			remove = tt.Headers.Remove
+			addHeaders = tt.Headers.Add
+			mapHeaders = tt.Headers.Map
+			removeHeaders = tt.Headers.Remove
 			is.LowerHeaders = tt.Headers.Lower
 		}
 		if tt.Payload != "" {
 			is.Body = tt.Payload
+			removeHeaders = append(removeHeaders, constants.HeaderContentLength)
 		} else {
 			is.BodyReader = rc.body
 		}
 	}
-	is.Headers, is.Host = util.TransformHeaders(rc.vars, rc.headers, add, remove)
+	is.Headers, is.Host = util.TransformHeaders(rc.vars, rc.headers, addHeaders, mapHeaders, removeHeaders)
 	if ep.ep.Stream {
 		if rc.cw == nil {
 			rc.cw = intercept.NewChanWriter(rc.c, rc.w)

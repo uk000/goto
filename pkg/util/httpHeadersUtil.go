@@ -238,7 +238,7 @@ func ContainsAllHeaders(headers http.Header, expected map[string]*regexp.Regexp)
 	return true
 }
 
-func TransformHeaders(vars, sourceHeaders map[string]string, addHeaders map[string]string, removeHeaders []string) (map[string]string, string) {
+func TransformHeaders(vars, sourceHeaders map[string]string, addHeaders, mapHeaders map[string]string, removeHeaders []string) (map[string]string, string) {
 	headers := map[string]string{}
 	host := ""
 	cleanStart := false
@@ -246,11 +246,19 @@ func TransformHeaders(vars, sourceHeaders map[string]string, addHeaders map[stri
 		cleanStart = true
 		removeHeaders = nil
 	}
-	if !cleanStart {
-		for k, v := range sourceHeaders {
-			if strings.EqualFold(k, "Host") || strings.EqualFold(k, ":authority") {
-				host = v
-			} else {
+
+	for k, v := range sourceHeaders {
+		if strings.EqualFold(k, "Host") || strings.EqualFold(k, ":authority") {
+			host = v
+		} else {
+			k2, ok := mapHeaders[k]
+			if !ok {
+				k2, ok = mapHeaders[strings.ToLower(k)]
+			}
+			if ok {
+				k = k2
+			}
+			if !cleanStart || k2 != "" {
 				headers[k] = v
 			}
 		}

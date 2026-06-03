@@ -270,6 +270,10 @@ func (ir *InvocationRequest) invokeHTTP() {
 		log.Printf("Invocation: [ERROR] HTTP invocation attempted without a client")
 		return
 	}
+	if ir.httpRequest == nil || ir.tracker == nil || ir.tracker.Target == nil {
+		log.Printf("Invocation: [ERROR] HTTP invocation attempted without an initialized Request/Target")
+		return
+	}
 	ir.client.SetTLSConfig(tlsConfig(ir.httpRequest.Host, ir.tracker.Target.VerifyTLS))
 	ir.writeRequestPayload()
 

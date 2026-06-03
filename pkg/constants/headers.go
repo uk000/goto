@@ -32,6 +32,7 @@ const (
 	HeaderGotoRemoteAddress         = "Goto-Remote-Address"
 	HeaderGotoResponseStatus        = "Goto-Response-Status"
 	HeaderGotoResponseDelay         = "Goto-Response-Delay"
+	HeaderGotoUpstreamStatus        = "Goto-Upstream-Status"
 	HeaderGotoProxyDelay            = "Proxy-Goto-Delay"
 	HeaderGotoProxyUpstreamStatus   = "Proxy-Goto-Upstream-Status"
 	HeaderGotoProxyUpstreamTook     = "Proxy-Goto-Upstream-Took"

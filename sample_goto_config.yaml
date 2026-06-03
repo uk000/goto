@@ -1810,6 +1810,60 @@ proxy:
                               stream: "2"
                   push: false
                   result: true
+proxy:
+  - http:
+      port: 8080
+      enabled: true
+      targets:
+        stream:
+          enabled: false
+          endpoints:
+            ep1:
+              url: http://localhost:8083
+              stream: true
+          triggers:
+            t1:
+              matchAny:
+                - uriPrefix: /stream
+              endpoints:
+                - ep1
+        http-call:
+          enabled: true
+          endpoints:
+            ep1:
+              url: http://localhost:8080
+              method: POST
+              requestCount: 1
+              concurrent: 1
+          triggers:
+            trigger1:
+              matchAny:
+                - uri: /call
+              endpoints:
+                - ep1
+              transform:
+                uriMap:
+                  /call: /client/http/invoke
+                headers:
+                  add:
+                    bar: "456"
+                payload: |
+                  url: localhost:8083
+                  method: POST
+                  count: 2
+                  requestID: true
+                  h2: true
+                  tls: false
+                  streamDelay: 100ms
+                  payload:
+                    - message 1
+                    - message 2
+                    - message 3
+                  headers:
+                    add:
+                      foo: "123"
+                    forward:
+                      - bar
         agent1:
           enabled: true
           endpoints:
