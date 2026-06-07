@@ -142,3 +142,38 @@ func (t *MCPTool) listComponents(tctx *ToolCallContext) (*gomcp.CallToolResult, 
 	tctx.Log(fmt.Sprintf("%s sent all components", tctx.Label))
 	return result, nil
 }
+
+func (t *MCPTool) addTool(tctx *ToolCallContext) (result *gomcp.CallToolResult, err error) {
+	content := []gomcp.Content{}
+	status := 200
+	var tool *MCPTool
+	if tctx.args != nil {
+		if tctx.args.ToolDef != nil {
+			name := fmt.Sprint(tctx.args.ToolDef["name"])
+			tool = &MCPTool{
+				Tool: &gomcp.Tool{
+					Name:        name,
+					Description: fmt.Sprint(tctx.args.ToolDef["description"]),
+				},
+				Schema: fmt.Sprint(tctx.args.ToolDef["schema"]),
+			}
+			util.ReadJsonFromAny(tctx.args.ToolDef["behavior"], &tool.Behavior)
+			tool.Server = t.Server
+			tool.SetName(name)
+			err = processTool(tool)
+		}
+	}
+	msg := ""
+	if err == nil && tool != nil {
+		t.Server.AddTool(tool)
+		msg = fmt.Sprintf("%s[%s] Added Tool [%s] to Server at Time: %s", tctx.Label, global.Funcs.GetListenerLabelForPort(tctx.Server.GetPort()), tool.Name, time.Now().Format(time.RFC3339))
+	} else {
+		msg = fmt.Sprintf("%s[%s] Failed to add Tool [%s] to Server at Time: %s, Error: %v", tctx.Label, global.Funcs.GetListenerLabelForPort(tctx.Server.GetPort()), tool.Name, time.Now().Format(time.RFC3339), err)
+	}
+	content = append(content, &gomcp.TextContent{Text: msg})
+	tctx.applyDelay()
+	tctx.Log("Server %s Tool %s reporting status %d", tctx.Server.Host, tctx.Label, status)
+	msg = tctx.Flush(false, false)
+	content = append(content, &gomcp.TextContent{Text: msg})
+	return &gomcp.CallToolResult{Content: content}, nil
+}

@@ -68,6 +68,7 @@ type ToolBehavior struct {
 	ServerPaths   bool `json:"serverPaths,omitempty"`
 	AllServers    bool `json:"allServers,omitempty"`
 	AllComponents bool `json:"allComponents,omitempty"`
+	AddTool       bool `json:"addTool,omitempty"`
 	run           func(t *ToolCallContext) (*mcp.CallToolResult, error)
 }
 
@@ -191,6 +192,8 @@ func (t *MCPTool) prepareBehavior() error {
 		t.Behavior.run = t.listServers
 	} else if t.Behavior.AllComponents {
 		t.Behavior.run = t.listComponents
+	} else if t.Behavior.AddTool {
+		t.Behavior.run = t.addTool
 	} else {
 		t.Behavior.run = t.stream
 	}

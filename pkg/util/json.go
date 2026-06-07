@@ -770,6 +770,14 @@ func ReadJsonFromBytes(b []byte, t interface{}) error {
 	return json.Unmarshal(b, t)
 }
 
+func ReadJsonFromAny(a any, t interface{}) error {
+	b, err := json.Marshal(a)
+	if err == nil {
+		return json.Unmarshal(b, t)
+	}
+	return err
+}
+
 func ReadStringArray(b []byte) []string {
 	arr := []string{}
 	if err := json.Unmarshal(b, &arr); err != nil {

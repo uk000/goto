@@ -160,6 +160,10 @@ func parseArgs(raw json.RawMessage) (args *aicommon.ToolCallArgs, err error) {
 		args = aicommon.NewCallArgs()
 		err = json.Unmarshal([]byte(raw), &args)
 	}
+	if err == nil {
+		args.ToolDef = map[string]any{}
+		err = json.Unmarshal([]byte(raw), &args.ToolDef)
+	}
 	return
 }
 

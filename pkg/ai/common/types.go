@@ -24,12 +24,14 @@ import (
 type ToolCallArgs struct {
 	DelayText  string            `json:"delay,omitempty"`
 	Count      int               `json:"count,omitempty"`
+	Size       int               `json:"size,omitempty"`
 	Text       string            `json:"text,omitempty"`
 	Status     int               `json:"status,omitempty"`
 	ResultOnly bool              `json:"resultOnly,omitempty"`
 	NoEvents   bool              `json:"noEvents,omitempty"`
 	Remote     *RemoteCallArgs   `json:"remote,omitempty"`
 	Metadata   map[string]string `json:"metadata,omitempty"`
+	ToolDef    map[string]any    `json:"toolDef,omitempty"`
 	Delay      *types.Delay      `json:"-"`
 }
 

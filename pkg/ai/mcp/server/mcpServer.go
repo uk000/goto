@@ -128,6 +128,20 @@ func init() {
 	for _, kind := range Kinds {
 		AllComponents[kind] = map[string]map[string]IMCPComponent{}
 	}
+	ToolSchemas["default"] = map[string]any{
+		"type":     "object",
+		"required": []string{},
+	}
+	ToolSchemas["basic"] = map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"text":  map[string]any{"type": "string"},
+			"delay": map[string]any{"type": "string"},
+			"count": map[string]any{"type": "int"},
+			"size":  map[string]any{"type": "int"},
+		},
+		"required": []string{},
+	}
 }
 
 func InitDefaultServer() {
@@ -613,6 +627,24 @@ func (s *MCPServer) addDefaultTools() {
 		Behavior: ToolBehavior{AllComponents: true},
 	}
 	t.prepareBehavior()
+	t = &MCPTool{
+		Tool: &gomcp.Tool{
+			Name:        "AddTool",
+			Description: "Add a tool on-the-fly to the server",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					"name":        {Type: "string", Description: "Tool name"},
+					"description": {Type: "string", Description: "Tool description"},
+					"schema":      {Type: "string", Description: "Tool schema (default, basic-text-delay-schema, tool-call-schema, fetch-schema, remote-tool-schema, agent-call-schema)"},
+					"behavior":    {Type: "object", Description: "Tool Behavior"},
+				},
+				Required: []string{"name", "schema", "required"},
+			},
+		},
+		Behavior: ToolBehavior{AddTool: true},
+	}
+	t.prepareBehavior()
 	s.AddTool(t)
 }
 
@@ -804,9 +836,7 @@ func (m *MCPServer) onUnsubscribed(ctx context.Context, req *gomcp.UnsubscribeRe
 func (m *MCPServer) Middleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
 		if method == "ping" {
-			if global.Flags.VerboseMCP {
-				log.Println("PING: MCP Ping handled")
-			}
+			log.Println("PING: MCP Ping handled")
 			return next(ctx, method, req)
 		}
 		log.Println("------ MCP ------")
