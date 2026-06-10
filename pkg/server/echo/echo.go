@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 
+	"goto/pkg/constants"
 	. "goto/pkg/constants"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
@@ -123,7 +124,7 @@ func GetEchoResponseFromRS(rs *util.RequestStore) map[string]interface{} {
 		rs.ListenerLabel = global.Funcs.GetListenerLabelForPort(rs.RequestPortNum)
 	}
 	response := GetEchoResponse(rs.ListenerLabel, rs.DownstreamAddr, rs.RequestHost, rs.RequestURI, rs.RequestMethod, rs.RequestProtocol,
-		rs.RequestQuery, rs.RequestPortNum, rs.RequestPayloadSize, 0, rs.RequestHeaders, rs.IsTLS)
+		rs.RequestQuery, rs.ServerName, rs.RequestPortNum, rs.RequestPayloadSize, 0, rs.RequestHeaders, rs.IsTLS)
 
 	if rs.IsTunnelRequest {
 		response[HeaderGotoTargetURL] = rs.RequestHeaders[HeaderGotoTargetURL]
@@ -141,7 +142,7 @@ func GetEchoResponseWithAddendum(rs *util.RequestStore, addendum map[string]any)
 	return response
 }
 
-func GetEchoResponse(listenerLabel, downstreamAddr, requestHost, requestURI, requestMethod, requestProto, requestQuery string,
+func GetEchoResponse(listenerLabel, downstreamAddr, requestHost, requestURI, requestMethod, requestProto, requestQuery, requestSNI string,
 	requestPortNum, requestPayloadSize, responsePayloadSize int, requestHeaders map[string][]string, isTLS bool) map[string]interface{} {
 	outputHeaders := map[string][]string{}
 	for h, values := range requestHeaders {
@@ -150,20 +151,23 @@ func GetEchoResponse(listenerLabel, downstreamAddr, requestHost, requestURI, req
 		}
 	}
 	response := map[string]interface{}{
-		"Remote-Address":       downstreamAddr,
-		"Request-Host":         requestHost,
-		"Request-URI":          requestURI,
-		"Request-Method":       requestMethod,
-		"Request-Protocol":     requestProto,
-		"Request-Query":        requestQuery,
-		"Request-PayloadSize":  requestPayloadSize,
-		"Response-PayloadSize": responsePayloadSize,
-		HeaderGotoHost:         global.Self.HostLabel,
-		HeaderGotoListener:     listenerLabel,
-		HeaderGotoPort:         requestPortNum,
-		HeaderGotoTLS:          isTLS,
-		HeaderViaGoto:          util.GetViaGotoValue(requestPortNum),
-		"headers":              outputHeaders,
+		"Request-Host":          requestHost,
+		"Request-URI":           requestURI,
+		"Request-Method":        requestMethod,
+		"Request-Protocol":      requestProto,
+		"Request-Query":         requestQuery,
+		"Request-PayloadSize":   requestPayloadSize,
+		"Response-PayloadSize":  responsePayloadSize,
+		HeaderGotoRemoteAddress: downstreamAddr,
+		HeaderGotoHost:          global.Self.HostLabel,
+		HeaderGotoListener:      listenerLabel,
+		HeaderGotoPort:          requestPortNum,
+		HeaderGotoTLS:           isTLS,
+		HeaderViaGoto:           util.GetViaGotoValue(requestPortNum),
+		"headers":               outputHeaders,
+	}
+	if requestSNI != "" || isTLS {
+		response[constants.HeaderGotoSNI] = requestSNI
 	}
 	return response
 }

@@ -58,6 +58,7 @@ type RouteTo struct {
 	ResponseHeaders *Headers `json:"responseHeaders"`
 	IsH2            bool     `json:"http2"`
 	IsTLS           bool     `json:"tls"`
+	NoSNI           bool     `json:"noSNI"`
 }
 
 type Route struct {
@@ -90,6 +91,7 @@ type RouteTraffic struct {
 	ResponseHeaders     map[string][]string `json:"responseHeaders"`
 	RequestMethod       string              `json:"requestMethod"`
 	RequestProto        string              `json:"requestProto"`
+	RequestSNI          string              `json:"requestSNI"`
 	RequestPayloadSize  int                 `json:"requestPayloadSize"`
 	ResponsePayloadSize int                 `json:"responsePayloadSize"`
 }
@@ -144,7 +146,7 @@ func newPortRouter(port int) *PortRouter {
 		Routes:       map[string]*Route{},
 		RouteTraffic: map[string]*RouteTraffic{},
 	}
-	client := transport.CreateDefaultHTTPClient(pr.ID, false, false, "", metrics.ConnTracker)
+	client := transport.CreateDefaultHTTPClient(pr.ID, false, false, false, "", metrics.ConnTracker)
 	pr.intercept = client.Transport().AsHTTP()
 	//pr.intercept.SetResponseIntercept(pr)
 	pr.proxy = &httputil.ReverseProxy{
@@ -191,6 +193,10 @@ func (pr *PortRouter) AddRoute(r *Route) {
 func (pr *PortRouter) AddRouteTraffic(id string, r *Route, req *http.Request) *RouteTraffic {
 	pr.lock.Lock()
 	defer pr.lock.Unlock()
+	sni := ""
+	if req.TLS != nil {
+		sni = req.TLS.ServerName
+	}
 	a := &RouteTraffic{
 		Route:          *r,
 		Listener:       listeners.GetListenerLabelForPort(r.From.Port),
@@ -202,6 +208,7 @@ func (pr *PortRouter) AddRouteTraffic(id string, r *Route, req *http.Request) *R
 		RequestHeaders: req.Header,
 		RequestMethod:  req.Method,
 		RequestProto:   req.Proto,
+		RequestSNI:     sni,
 	}
 	pr.RouteTraffic[id] = a
 	return a
@@ -290,7 +297,7 @@ func (pr *PortRouter) Intercept(resp *http.Response) error {
 				content = body
 			}
 			selfHeaders := echo.GetEchoResponse(rt.Listener, rt.RemoteAddr, rt.RequestHost, rt.RequestURI, rt.RequestMethod, rt.RequestProto,
-				rt.RequestQuery, rt.Route.From.Port, rt.RequestPayloadSize, rt.ResponsePayloadSize, rt.RequestHeaders, rs.IsTLS)
+				rt.RequestQuery, rt.RequestSNI, rt.Route.From.Port, rt.RequestPayloadSize, rt.ResponsePayloadSize, rt.RequestHeaders, rs.IsTLS)
 			routeRequestAt := fmt.Sprintf("%s/%s", rt.Listener, rt.RequestAt.Format(time.RFC3339Nano))
 			routeResponseAt := fmt.Sprintf("%s/%s", rt.Listener, rt.ResponseAt.Format(time.RFC3339Nano))
 			routeTook := fmt.Sprintf("%s/%s", rt.Listener, rt.Took.String())
@@ -357,7 +364,7 @@ func (r *Route) Setup() error {
 	if prefix, re, err := util.GetURIRegexp(uri); err == nil {
 		r.basePrefix = prefix
 		r.re = re
-		r.client = transport.CreateDefaultHTTPClient(r.Label, r.To.IsH2, r.To.IsTLS, r.To.Authority, metrics.ConnTracker)
+		r.client = transport.CreateDefaultHTTPClient(r.Label, r.To.IsH2, r.To.IsTLS, r.To.NoSNI, r.To.Authority, metrics.ConnTracker)
 	} else {
 		log.Printf("Route: Failed to add URI match [%s] with error: %s\n", uri, err.Error())
 		return err

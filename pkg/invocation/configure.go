@@ -78,6 +78,7 @@ type InvocationSpec struct {
 	AutoUpgrade          bool              `json:"autoUpgrade"`
 	VerifyTLS            bool              `json:"verifyTLS"`
 	TLS                  bool              `json:"tls"`
+	NoSNI                bool              `json:"noSNI"`
 	BodyReader           io.Reader         `json:"-"`
 	ResponseWriter       io.Writer         `json:"-"`
 	LongRunning          bool              `json:"-"`
@@ -599,8 +600,9 @@ func getHttpClientForTarget(tracker *InvocationTracker) transport.ClientTranspor
 	client := targetClients[target.Name]
 	invocationsLock.RUnlock()
 	if client == nil || client.HTTP() == nil {
-		client = transport.CreateHTTPClient(target.Name, target.h2, target.AutoUpgrade, target.TLS, target.authority, 0,
-			target.requestTimeoutD, target.connTimeoutD, target.connIdleTimeoutD, metrics.ConnTracker)
+		client = transport.CreateHTTPClient(target.Name, target.h2, target.AutoUpgrade, target.TLS, target.NoSNI,
+			target.authority, 0, target.requestTimeoutD, target.connTimeoutD,
+			target.connIdleTimeoutD, metrics.ConnTracker)
 		if !target.LongRunning {
 			invocationsLock.Lock()
 			targetClients[target.Name] = client

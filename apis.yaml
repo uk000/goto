@@ -67,6 +67,9 @@
     "":
     - /agent/{agent}: '[GET POST DELETE]'
 /client:
+  /client/http:
+    /client/http/invoke:
+    - /client/http/invoke: '[GET POST PUT OPTIONS]'
   /client/results:
     "":
     - /client/results: '[GET]'
@@ -140,7 +143,9 @@
 /grpc:
   /grpc/client:
     /grpc/client/call:
-    - /grpc/client/call/{endpoint}/{service}/{method}: '[POST]'
+    - /grpc/client/call/{service}/{method}/{endpoint}: '[POST]'
+    - /grpc/client/call/{service}/{method}/{endpoint}/stream: '[POST]'
+    - /grpc/client/call: '[POST]'
   /grpc/protos:
     "":
     - /grpc/protos: '[GET]'

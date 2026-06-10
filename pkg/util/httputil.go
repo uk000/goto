@@ -53,6 +53,9 @@ func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add(constants.HeaderGotoRemoteAddress, r.RemoteAddr)
 	w.Header().Add(constants.HeaderGotoPort, port)
 	w.Header().Add(constants.HeaderGotoTLS, fmt.Sprintf("%t", rs.IsTLS))
+	if rs.ServerName != "" || rs.IsTLS {
+		w.Header().Add(constants.HeaderGotoSNI, rs.ServerName)
+	}
 	w.Header().Add(constants.HeaderGotoHost, global.Self.HostLabel)
 	w.Header().Add(constants.HeaderGotoProtocol, rs.GotoProtocol)
 	CopyHeaders("Request", r, w, r.Header, true, true, false)

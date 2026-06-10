@@ -161,7 +161,7 @@ func (t *MCPTool) prepareBehavior() error {
 	}
 	if t.Behavior.Fetch {
 		isTLS := strings.HasPrefix(t.Config.RemoteTool.URL, "https:")
-		client := transport.CreateDefaultHTTPClient(t.Name, false, isTLS, t.Config.RemoteTool.Authority, metrics.ConnTracker)
+		client := transport.CreateDefaultHTTPClient(t.Name, false, isTLS, false, t.Config.RemoteTool.Authority, metrics.ConnTracker)
 		t.client = client
 	}
 	if t.Behavior.Echo {

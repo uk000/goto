@@ -384,7 +384,7 @@ func postIntercept() http.Handler {
 }
 
 func withConnContext(ctx context.Context, conn net.Conn) context.Context {
-	return context.WithValue(ctx, util.ConnectionKey, conn)
+	return util.WithConn(ctx, conn)
 }
 
 func PrintLogMessages(statusCode, bodyLength int, payload []byte, headers http.Header, rs *util.RequestStore) {

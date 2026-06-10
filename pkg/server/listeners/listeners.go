@@ -45,11 +45,12 @@ type Listener struct {
 	Port          int                         `json:"port"`
 	Protocol      string                      `json:"protocol"`
 	L8Proto       string                      `json:"l8Proto"`
+	ALPN          []string                    `json:"alpn"`
 	Open          bool                        `json:"open"`
 	AutoCert      bool                        `json:"autoCert"`
 	AutoSNI       bool                        `json:"autoSNI"`
 	CommonName    string                      `json:"commonName"`
-	MutualTLS     bool                        `json:"mutualTLS"`
+	MTLS          bool                        `json:"mTLS"`
 	TLS           bool                        `json:"tls"`
 	TCP           *tcp.TCPConfig              `json:"tcp,omitempty"`
 	IsHTTP        bool                        `json:"isHTTP"`
@@ -187,7 +188,13 @@ func ConfigureXDSServer(serve func(*grpc.Server)) {
 	serveXDS = serve
 }
 func newListener(port int, protocol string, cn string, open bool) *Listener {
-	return &Listener{Port: port, Protocol: protocol, CommonName: cn, Open: open, CertsCache: map[string]*tls.Certificate{}}
+	return &Listener{
+		Port:       port,
+		Protocol:   protocol,
+		CommonName: cn,
+		Open:       open,
+		CertsCache: map[string]*tls.Certificate{},
+	}
 }
 
 func InitDefaultGRPCListener() {
@@ -314,15 +321,15 @@ func (l *Listener) assignProtocol() {
 
 func AddInitialListeners(portList []string) {
 	existing := map[int]bool{}
-	l := createPortListener(global.Self.JSONRPCPort, PROTOL_JSONRPC, constants.DefaultCommonName, existing)
+	l := createPortListener(global.Self.JSONRPCPort, PROTOL_JSONRPC, constants.DefaultCommonName, []string{}, false, existing)
 	if l != nil {
 		listenersLock.Lock()
 		listeners[l.Port] = l
 		listenersLock.Unlock()
 	}
 	for i, p := range portList {
-		portInfo := strings.Split(p, "/")
-		if port, err := strconv.Atoi(portInfo[0]); err == nil && port > 0 && port <= 65535 {
+		portProto := strings.Split(p, "/")
+		if port, err := strconv.Atoi(portProto[0]); err == nil && port > 0 && port <= 65535 {
 			if i == 0 {
 				global.Self.ServerPort = port
 				DefaultListener.Port = port
@@ -332,14 +339,23 @@ func AddInitialListeners(portList []string) {
 				DefaultListener.HostLabel = global.Self.HostLabel
 			} else {
 				protocol := ""
-				if len(portInfo) > 1 && portInfo[1] != "" {
-					protocol = strings.ToLower(portInfo[1])
+				alpn := []string{}
+				mtls := false
+				if len(portProto) > 1 && portProto[1] != "" {
+					protoAlpn := strings.Split(portProto[1], "|")
+					protocol = strings.ToLower(protoAlpn[0])
+					if len(protoAlpn) > 1 {
+						alpn = protoAlpn[1:]
+					}
 				}
 				cn := constants.DefaultCommonName
-				if len(portInfo) > 2 && portInfo[2] != "" {
-					cn = strings.ToLower(portInfo[2])
+				if len(portProto) > 2 && portProto[2] != "" {
+					cn = strings.ToLower(portProto[2])
 				}
-				l := createPortListener(port, protocol, cn, existing)
+				if len(portProto) > 3 && portProto[3] != "" {
+					mtls = strings.EqualFold(portProto[3], "mtls")
+				}
+				l := createPortListener(port, protocol, cn, alpn, mtls, existing)
 				if l != nil {
 					listenersLock.Lock()
 					initialListeners = append(initialListeners, l)
@@ -352,7 +368,7 @@ func AddInitialListeners(portList []string) {
 	}
 }
 
-func createPortListener(port int, protocol, cn string, existing map[int]bool) *Listener {
+func createPortListener(port int, protocol, cn string, alpn []string, mtls bool, existing map[int]bool) *Listener {
 	if !existing[port] {
 		existing[port] = true
 		l := newListener(port, protocol, cn, true)
@@ -363,6 +379,8 @@ func createPortListener(port int, protocol, cn string, existing map[int]bool) *L
 		l.assignProtocol()
 		l.Label = util.BuildListenerLabel(l.Port)
 		l.HostLabel = global.Self.HostLabel
+		l.ALPN = alpn
+		l.MTLS = mtls
 		return l
 	} else {
 		log.Printf("Error: Duplicate port [%d]\n", port)
@@ -479,16 +497,20 @@ func (l *Listener) InitListener() bool {
 	} else {
 		if listener, err := net.Listen("tcp", address); err == nil {
 			if tlsConfig != nil {
-				if l.MutualTLS {
+				if l.IsHTTP2 {
+					tlsConfig.NextProtos = []string{"h2"}
+				}
+				if len(l.ALPN) > 0 {
+					tlsConfig.NextProtos = append(tlsConfig.NextProtos, l.ALPN...)
+				}
+				if l.MTLS {
 					tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
 					tlsConfig.ClientCAs = l.CACerts
 				} else {
 					tlsConfig.ClientAuth = tls.NoClientCert
 				}
-				if l.IsHTTP2 {
-					tlsConfig.NextProtos = []string{"h2"}
-				}
-				listener = tls.NewListener(listener, tlsConfig)
+				//listener = tls.NewListener(listener, tlsConfig)
+				listener = gototls.NewTLSInspector(listener, tlsConfig)
 			}
 			l.Listener = listener
 			return true

@@ -69,7 +69,7 @@ type A2AClient struct {
 }
 
 func NewA2AClient(port int, clientId string, h2, tls bool, authority string) *A2AClient {
-	c := transport.CreateHTTPClient(clientId, h2, true, tls, authority, 0,
+	c := transport.CreateHTTPClient(clientId, h2, true, tls, false, authority, 0,
 		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
 	ac := &A2AClient{
 		ID:         clientId,

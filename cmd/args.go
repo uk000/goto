@@ -366,7 +366,9 @@ func initListeners() {
 	if len(ports) == 0 {
 		ports = []string{strconv.Itoa(global.Self.ServerPort)}
 	} else {
-		global.Self.ServerPort, _ = strconv.Atoi(ports[0])
+		if portProto := strings.Split(ports[0], "/"); len(portProto) > 0 {
+			global.Self.ServerPort, _ = strconv.Atoi(portProto[0])
+		}
 	}
 	global.Self.HostLabel = global.BuildHostLabel()
 	global.Self.Address = global.Self.PodIP + ":" + strconv.Itoa(global.Self.ServerPort)

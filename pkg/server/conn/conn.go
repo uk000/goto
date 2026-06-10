@@ -89,7 +89,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 		if p > 0 {
 			port = strconv.Itoa(p)
 		}
-		rs.GotoProtocol = util.GotoProtocol(r.ProtoMajor == 2, l.TLS, rs.IsGRPC)
+		rs.GotoProtocol = util.GotoProtocol(r.ProtoMajor == 2, rs.IsTLS, rs.IsGRPC)
 		rs.HostLabel = l.HostLabel
 		rs.ListenerLabel = l.Label
 		if util.IsTunnelRequest(r) {
@@ -98,6 +98,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoTunnelHost, rs.TunnelCount), l.HostLabel)
 			w.Header().Add(fmt.Sprintf("%s_%d", HeaderViaGotoTunnel, rs.TunnelCount), l.Label)
 			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoProtocol, rs.TunnelCount), rs.GotoProtocol)
+			w.Header().Add(fmt.Sprintf("%s_%d", HeaderGotoSNI, rs.TunnelCount), rs.ServerName)
 		} else if !rs.ProxyRouter && !rs.IsProxy {
 			util.SendGotoHeaders(w, r)
 		}

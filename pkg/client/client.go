@@ -48,6 +48,7 @@ type CallSpec struct {
 	RequestID    bool                 `json:"requestID"`
 	H2           bool                 `json:"h2"`
 	TLS          bool                 `json:"tls"`
+	NoSNI        bool                 `json:"noSNI"`
 	Payload      []string             `json:"payload"`
 	StreamDelay  string               `json:"streamDelay"`
 	Headers      *types.HeadersConfig `json:"headers"`
@@ -68,7 +69,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(clientRouter, "/http/invoke", invokeHTTP, "GET", "POST", "PUT", "OPTIONS")
 }
 
-func (c *CallSpec) PrepareRequest(r *http.Request) error {
+func (c *CallSpec) PrepareAuthority(r *http.Request) {
 	if !strings.HasPrefix(c.URL, "http") {
 		if c.TLS {
 			c.URL = "https://" + c.URL
@@ -79,6 +80,22 @@ func (c *CallSpec) PrepareRequest(r *http.Request) error {
 	if strings.HasPrefix(c.URL, "https") {
 		c.TLS = true
 	}
+	if c.Authority == "" {
+		u, e := url.Parse(c.URL)
+		if e == nil {
+			c.Authority = u.Host
+		}
+	}
+	if c.Authority == "" {
+		for h, v := range r.Header {
+			if strings.EqualFold(h, "host") {
+				c.Authority = v[0]
+			}
+		}
+	}
+}
+
+func (c *CallSpec) PrepareRequest(r *http.Request) error {
 	var bodyReader io.Reader
 	if len(c.Payload) > 1 {
 		bodyReader, c.streamWriter = io.Pipe()
@@ -106,6 +123,9 @@ func (c *CallSpec) PrepareRequest(r *http.Request) error {
 	if req.Host == "" {
 		req.Host = req.URL.Host
 	}
+	if c.Authority == "" {
+		c.Authority = req.Host
+	}
 	if c.RequestID {
 		uuid := uuid.New().String()
 		req.Header.Add("x-request-id", uuid)
@@ -121,9 +141,13 @@ func (c *CallSpec) PrepareRequest(r *http.Request) error {
 }
 
 func (c *CallSpec) Invoke(r *http.Request) ([]string, map[string]int, error) {
-	client := transport.CreateDefaultHTTPClient(global.Self.Name, c.H2, c.TLS, c.Authority, metrics.ConnTracker)
+	c.PrepareAuthority(r)
+	client := transport.CreateDefaultHTTPClient(global.Self.Name, c.H2, c.TLS, c.NoSNI, c.Authority, metrics.ConnTracker)
 	output := []string{}
 	statuses := map[string]int{}
+	if c.Count == 0 {
+		c.Count = 1
+	}
 	for i := 1; i <= c.Count; i++ {
 		err := c.PrepareRequest(r)
 		if err != nil {

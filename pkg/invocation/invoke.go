@@ -274,7 +274,11 @@ func (ir *InvocationRequest) invokeHTTP() {
 		log.Printf("Invocation: [ERROR] HTTP invocation attempted without an initialized Request/Target")
 		return
 	}
-	ir.client.SetTLSConfig(tlsConfig(ir.httpRequest.Host, ir.tracker.Target.VerifyTLS))
+	sni := ir.httpRequest.Host
+	if ir.tracker.Target.NoSNI {
+		sni = ""
+	}
+	ir.client.SetTLSConfig(tlsConfig(sni, ir.tracker.Target.VerifyTLS))
 	ir.writeRequestPayload()
 
 	start := time.Now()

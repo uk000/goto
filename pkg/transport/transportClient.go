@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"fmt"
 	"goto/pkg/util"
 	"io"
 	"io/ioutil"
@@ -161,12 +163,41 @@ func CreateSimpleHTTPClient() *http.Client {
 	return &http.Client{Transport: tr, Timeout: 10 * time.Minute}
 }
 
-func CreateDefaultHTTPClient(label string, h2, isTLS bool, serverName string, newConnNotifierChan chan string) ClientTransport {
-	return CreateHTTPClient(label, h2, true, isTLS, serverName, 0, 30*time.Second, 30*time.Second, 3*time.Minute, newConnNotifierChan)
+func CreateDefaultHTTPClient(label string, h2, isTLS, noSNI bool, serverName string, newConnNotifierChan chan string) ClientTransport {
+	return CreateHTTPClient(label, h2, true, isTLS, noSNI, serverName, 0, 30*time.Second, 30*time.Second, 3*time.Minute, newConnNotifierChan)
 }
 
-func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName string, tlsVersion uint16,
+func CreateHTTPClient(label string, h2, autoUpgrade, isTLS, noSNI bool, serverName string, tlsVersion uint16,
 	requestTimeout, connTimeout, connIdleTimeout time.Duration, newConnNotifierChan chan string) ClientTransport {
+	if noSNI {
+		serverName = ""
+	}
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: true,
+		ServerName:         serverName,
+		MinVersion:         tlsVersion,
+		MaxVersion:         tlsVersion,
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			fmt.Printf("VerifyConnection called! ServerName in state: '%s'\n", cs.ServerName)
+			return nil
+		},
+		VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			return nil
+		},
+	}
+	dialTLSContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialer := &net.Dialer{Timeout: connTimeout, KeepAlive: connIdleTimeout}
+		rawConn, err := dialer.DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		tlsConn := tls.Client(rawConn, tlsConfig)
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			rawConn.Close()
+			return nil, err
+		}
+		return tlsConn, nil
+	}
 	var ct ClientTransport
 	if !h2 {
 		ht := NewHTTPTransportIntercept(&http.Transport{
@@ -178,18 +209,10 @@ func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName stri
 			DisableCompression:    true,
 			ExpectContinueTimeout: requestTimeout,
 			ResponseHeaderTimeout: requestTimeout,
-			DialContext: (&net.Dialer{
-				Timeout:   connTimeout,
-				KeepAlive: connIdleTimeout,
-			}).DialContext,
-			TLSHandshakeTimeout: connTimeout,
-			ForceAttemptHTTP2:   autoUpgrade,
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-				ServerName:         serverName,
-				MinVersion:         tlsVersion,
-				MaxVersion:         tlsVersion,
-			},
+			DialTLSContext:        dialTLSContext,
+			TLSHandshakeTimeout:   connTimeout,
+			ForceAttemptHTTP2:     autoUpgrade,
+			TLSClientConfig:       tlsConfig,
 		}, label, newConnNotifierChan)
 		ct = NewClientTransport(&http.Client{Timeout: requestTimeout, Transport: ht}, nil, ht, nil, false)
 	} else {
@@ -197,16 +220,11 @@ func CreateHTTPClient(label string, h2, autoUpgrade, isTLS bool, serverName stri
 			ReadIdleTimeout: connIdleTimeout,
 			PingTimeout:     connTimeout,
 			AllowHTTP:       true,
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-				ServerName:         serverName,
-				MinVersion:         tlsVersion,
-				MaxVersion:         tlsVersion,
-			},
+			TLSClientConfig: tlsConfig,
 		}
 		tr.DialTLSContext = func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
 			if isTLS {
-				return tls.Dial(network, addr, cfg)
+				return dialTLSContext(ctx, network, addr)
 			}
 			return net.Dial(network, addr)
 		}

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/global"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -244,6 +245,10 @@ func (rs *RequestStore) ReportTime(w http.ResponseWriter) {
 
 func WithPort(ctx context.Context, port int) context.Context {
 	return context.WithValue(ctx, CurrentPortKey, port)
+}
+
+func WithConn(ctx context.Context, conn net.Conn) context.Context {
+	return context.WithValue(ctx, ConnectionKey, conn)
 }
 
 func SetSSE(ctx context.Context) context.Context {
