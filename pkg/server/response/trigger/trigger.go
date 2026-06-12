@@ -403,6 +403,7 @@ func (tt *TriggerTarget) toInvocationSpec(r *http.Request, w http.ResponseWriter
 
 func (t *Trigger) invokeHTTPTargets(targets map[string]*TriggerTarget, w http.ResponseWriter, r *http.Request) []*invocation.InvocationResult {
 	responses := []*invocation.InvocationResult{}
+	port := util.GetRequestOrListenerPortNum(r)
 	if len(targets) > 0 {
 		for _, target := range targets {
 			target.lock.Lock()
@@ -411,7 +412,7 @@ func (t *Trigger) invokeHTTPTargets(targets map[string]*TriggerTarget, w http.Re
 			events.SendRequestEventJSON("Trigger Target Invoked", target.Name, target, r)
 			metrics.UpdateTriggerCount(target.Name)
 			is, _ := target.toInvocationSpec(r, w)
-			if tracker, err := invocation.RegisterInvocation(is); err == nil {
+			if tracker, err := invocation.RegisterInvocation(port, is); err == nil {
 				results := invocation.StartInvocation(tracker, true)
 				responses = append(responses, results...)
 			} else {

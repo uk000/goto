@@ -21,7 +21,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"goto/pkg/constants"
 	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/server/tcp"
@@ -39,38 +38,42 @@ import (
 )
 
 type Listener struct {
-	ListenerID    string                      `json:"listenerID"`
-	Label         string                      `json:"label"`
-	HostLabel     string                      `json:"hostLabel"`
-	Port          int                         `json:"port"`
-	Protocol      string                      `json:"protocol"`
-	L8Proto       string                      `json:"l8Proto"`
-	ALPN          []string                    `json:"alpn"`
-	Open          bool                        `json:"open"`
-	AutoCert      bool                        `json:"autoCert"`
-	AutoSNI       bool                        `json:"autoSNI"`
-	CommonName    string                      `json:"commonName"`
-	MTLS          bool                        `json:"mTLS"`
-	TLS           bool                        `json:"tls"`
-	TCP           *tcp.TCPConfig              `json:"tcp,omitempty"`
-	IsHTTP        bool                        `json:"isHTTP"`
-	IsHTTP2       bool                        `json:"isH2"`
-	IsGRPC        bool                        `json:"isGRPC"`
-	IsJSONRPC     bool                        `json:"isJSONRPC"`
-	IsTCP         bool                        `json:"isTCP"`
-	IsUDP         bool                        `json:"isUDP"`
-	IsXDS         bool                        `json:"isXDS"`
-	ProtoAssigned bool                        `json:"-"`
-	Generation    int                         `json:"generation"`
-	Cert          *tls.Certificate            `json:"-"`
-	CACerts       *x509.CertPool              `json:"-"`
-	RawCert       []byte                      `json:"-"`
-	RawKey        []byte                      `json:"-"`
-	CertsCache    map[string]*tls.Certificate `json:"-"`
-	Listener      net.Listener                `json:"-"`
-	UDPConn       *net.UDPConn                `json:"-"`
-	Restarted     bool                        `json:"-"`
-	lock          sync.RWMutex                `json:"-"`
+	ListenerID       string                           `json:"listenerID"`
+	Label            string                           `json:"label"`
+	HostLabel        string                           `json:"hostLabel"`
+	Port             int                              `json:"port"`
+	Protocol         string                           `json:"protocol"`
+	L8Proto          string                           `json:"l8Proto"`
+	ALPN             []string                         `json:"alpn"`
+	Open             bool                             `json:"open"`
+	AutoCert         bool                             `json:"autoCert"`
+	AutoSNI          bool                             `json:"autoSNI"`
+	CommonName       string                           `json:"commonName"`
+	SpiffeID         string                           `json:"spiffeID"`
+	AltNames         []string                         `json:"altNames"`
+	TLS              bool                             `json:"tls"`
+	MTLS             bool                             `json:"mTLS"`
+	VerifyClientCert bool                             `json:"verifyClientCert"`
+	TCP              *tcp.TCPConfig                   `json:"tcp,omitempty"`
+	IsHTTP           bool                             `json:"isHTTP"`
+	IsHTTP2          bool                             `json:"isH2"`
+	IsGRPC           bool                             `json:"isGRPC"`
+	IsJSONRPC        bool                             `json:"isJSONRPC"`
+	IsTCP            bool                             `json:"isTCP"`
+	IsUDP            bool                             `json:"isUDP"`
+	IsXDS            bool                             `json:"isXDS"`
+	ProtoAssigned    bool                             `json:"-"`
+	Generation       int                              `json:"generation"`
+	Cert             *tls.Certificate                 `json:"-"`
+	CACerts          *x509.CertPool                   `json:"-"`
+	RawCert          []byte                           `json:"-"`
+	RawKey           []byte                           `json:"-"`
+	CertsCache       map[string]*tls.Certificate      `json:"-"`
+	Listener         net.Listener                     `json:"-"`
+	UDPConn          *net.UDPConn                     `json:"-"`
+	Restarted        bool                             `json:"-"`
+	peerCertInfos    map[string]*gototls.PeerCertInfo `json:"-"`
+	lock             sync.RWMutex                     `json:"-"`
 }
 
 const (
@@ -96,8 +99,8 @@ const (
 )
 
 var (
-	DefaultListener       = newListener(global.Self.ServerPort, PROTOL_HTTP, constants.DefaultCommonName, true)
-	DefaultGRPCListener   = newListener(global.Self.GRPCPort, PROTOL_GRPC, constants.DefaultCommonName, false)
+	DefaultListener       = newListener(global.Self.ServerPort, PROTOL_HTTP, global.ServerConfig.CommonName, true)
+	DefaultGRPCListener   = newListener(global.Self.GRPCPort, PROTOL_GRPC, global.ServerConfig.CommonName, false)
 	listeners             = map[int]*Listener{}
 	grpcListeners         = map[int]*Listener{}
 	udpListeners          = map[int]*Listener{}
@@ -124,6 +127,7 @@ func Init() {
 	global.Funcs.GetListenerLabel = GetListenerLabel
 	global.Funcs.GetListenerLabelForPort = GetListenerLabelForPort
 	global.Funcs.IsListenerTLS = IsListenerTLS
+	global.Funcs.GetPeerCertInfo = GetPeerCertInfo
 
 	if DefaultLabel == "" {
 		DefaultLabel = global.Self.HostLabel
@@ -189,11 +193,12 @@ func ConfigureXDSServer(serve func(*grpc.Server)) {
 }
 func newListener(port int, protocol string, cn string, open bool) *Listener {
 	return &Listener{
-		Port:       port,
-		Protocol:   protocol,
-		CommonName: cn,
-		Open:       open,
-		CertsCache: map[string]*tls.Certificate{},
+		Port:          port,
+		Protocol:      protocol,
+		CommonName:    cn,
+		Open:          open,
+		CertsCache:    map[string]*tls.Certificate{},
+		peerCertInfos: map[string]*gototls.PeerCertInfo{},
 	}
 }
 
@@ -321,7 +326,7 @@ func (l *Listener) assignProtocol() {
 
 func AddInitialListeners(portList []string) {
 	existing := map[int]bool{}
-	l := createPortListener(global.Self.JSONRPCPort, PROTOL_JSONRPC, constants.DefaultCommonName, []string{}, false, existing)
+	l := createPortListener(global.Self.JSONRPCPort, PROTOL_JSONRPC, false, existing)
 	if l != nil {
 		listenersLock.Lock()
 		listeners[l.Port] = l
@@ -329,7 +334,12 @@ func AddInitialListeners(portList []string) {
 	}
 	for i, p := range portList {
 		portProto := strings.Split(p, "/")
-		if port, err := strconv.Atoi(portProto[0]); err == nil && port > 0 && port <= 65535 {
+		port, err := strconv.Atoi(portProto[0])
+		if i == 0 && port <= 0 {
+			port = global.Self.ServerPort
+			err = nil
+		}
+		if err == nil && port > 0 && port <= 65535 {
 			if i == 0 {
 				global.Self.ServerPort = port
 				DefaultListener.Port = port
@@ -339,23 +349,14 @@ func AddInitialListeners(portList []string) {
 				DefaultListener.HostLabel = global.Self.HostLabel
 			} else {
 				protocol := ""
-				alpn := []string{}
-				mtls := false
 				if len(portProto) > 1 && portProto[1] != "" {
-					protoAlpn := strings.Split(portProto[1], "|")
-					protocol = strings.ToLower(protoAlpn[0])
-					if len(protoAlpn) > 1 {
-						alpn = protoAlpn[1:]
-					}
+					protocol = strings.ToLower(portProto[1])
 				}
-				cn := constants.DefaultCommonName
+				mtls := false
 				if len(portProto) > 2 && portProto[2] != "" {
-					cn = strings.ToLower(portProto[2])
+					mtls = strings.EqualFold(portProto[2], "mtls")
 				}
-				if len(portProto) > 3 && portProto[3] != "" {
-					mtls = strings.EqualFold(portProto[3], "mtls")
-				}
-				l := createPortListener(port, protocol, cn, alpn, mtls, existing)
+				l := createPortListener(port, protocol, mtls, existing)
 				if l != nil {
 					listenersLock.Lock()
 					initialListeners = append(initialListeners, l)
@@ -368,10 +369,10 @@ func AddInitialListeners(portList []string) {
 	}
 }
 
-func createPortListener(port int, protocol, cn string, alpn []string, mtls bool, existing map[int]bool) *Listener {
+func createPortListener(port int, protocol string, mtls bool, existing map[int]bool) *Listener {
 	if !existing[port] {
 		existing[port] = true
-		l := newListener(port, protocol, cn, true)
+		l := newListener(port, protocol, global.ServerConfig.CommonName, true)
 		if protocol == "" {
 			protocol = "http"
 		}
@@ -379,7 +380,7 @@ func createPortListener(port int, protocol, cn string, alpn []string, mtls bool,
 		l.assignProtocol()
 		l.Label = util.BuildListenerLabel(l.Port)
 		l.HostLabel = global.Self.HostLabel
-		l.ALPN = alpn
+		l.ALPN = global.ServerConfig.ALPN
 		l.MTLS = mtls
 		return l
 	} else {
@@ -442,39 +443,40 @@ func (l *Listener) serveTCP() {
 	}()
 }
 
+func (l *Listener) GetCertificate(chi *tls.ClientHelloInfo) (cert *tls.Certificate, err error) {
+	if cert = l.CertsCache[chi.ServerName]; cert != nil {
+		return
+	}
+	domains := []string{chi.ServerName, l.CommonName}
+	domains = append(domains, l.AltNames...)
+	if cert, err = gototls.CreateCertificate(domains, l.SpiffeID, ""); err == nil {
+		l.CertsCache[chi.ServerName] = cert
+	}
+	return
+}
+
 func (l *Listener) InitListener() bool {
 	l.lock.Lock()
 	defer l.lock.Unlock()
-	var tlsConfig *tls.Config
+	tlsConfig := &tls.Config{}
+	tlsConfig.GetConfigForClient = gototls.GetConfigForClient(l.Port, l.Label, tlsConfig, l.StoreALPN, l.StorePeerCertInfo, l.StoreSNI)
 	if l.AutoCert {
 		if l.CommonName == "" {
-			l.CommonName = constants.DefaultCommonName
+			l.CommonName = global.ServerConfig.CommonName
 		}
-		if cert, err := gototls.CreateCertificate(l.CommonName, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
+		domains := []string{l.CommonName}
+		domains = append(domains, l.AltNames...)
+		if cert, err := gototls.CreateCertificate(domains, l.SpiffeID, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
 			l.Cert = cert
 		}
 	}
 	if l.AutoSNI {
-		tlsConfig = &tls.Config{
-			GetCertificate: func(chi *tls.ClientHelloInfo) (cert *tls.Certificate, err error) {
-				if cert = l.CertsCache[chi.ServerName]; cert != nil {
-					return
-				}
-				if cert, err = gototls.CreateCertificate(chi.ServerName, ""); err == nil {
-					l.CertsCache[chi.ServerName] = cert
-				}
-				return
-			},
-		}
+		tlsConfig.GetCertificate = l.GetCertificate
 	} else if l.Cert != nil {
-		tlsConfig = &tls.Config{
-			Certificates: []tls.Certificate{*l.Cert},
-		}
+		tlsConfig.Certificates = []tls.Certificate{*l.Cert}
 	} else if len(l.RawCert) > 0 && len(l.RawKey) > 0 {
 		if x509Cert, err := tls.X509KeyPair(l.RawCert, l.RawKey); err == nil {
-			tlsConfig = &tls.Config{
-				Certificates: []tls.Certificate{x509Cert},
-			}
+			tlsConfig.Certificates = []tls.Certificate{x509Cert}
 		} else {
 			log.Printf("Failed to parse certificate with error: %s\n", err.Error())
 			return false
@@ -496,7 +498,7 @@ func (l *Listener) InitListener() bool {
 		}
 	} else {
 		if listener, err := net.Listen("tcp", address); err == nil {
-			if tlsConfig != nil {
+			if l.TLS {
 				if l.IsHTTP2 {
 					tlsConfig.NextProtos = []string{"h2"}
 				}
@@ -504,13 +506,18 @@ func (l *Listener) InitListener() bool {
 					tlsConfig.NextProtos = append(tlsConfig.NextProtos, l.ALPN...)
 				}
 				if l.MTLS {
-					tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+					if l.VerifyClientCert {
+						tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+					} else {
+						tlsConfig.ClientAuth = tls.RequireAnyClientCert
+					}
 					tlsConfig.ClientCAs = l.CACerts
 				} else {
 					tlsConfig.ClientAuth = tls.NoClientCert
 				}
+				tlsConfig.InsecureSkipVerify = true
 				//listener = tls.NewListener(listener, tlsConfig)
-				listener = gototls.NewTLSInspector(listener, tlsConfig)
+				listener = gototls.NewTLSInspector(l.Port, l.Label, listener, tlsConfig)
 			}
 			l.Listener = listener
 			return true
@@ -784,7 +791,7 @@ func AddListenerCert(port int, key []byte, cert []byte, reopen bool) error {
 	}
 	l.lock.Lock()
 	l.AutoCert = false
-	l.CommonName = ""
+	l.CommonName = "<from cert>"
 	l.Cert = nil
 	if len(key) > 0 {
 		l.RawKey = key
@@ -924,4 +931,56 @@ func SetListenerLabel(r *http.Request) string {
 	}
 	events.SendRequestEvent("Listener Label Updated", label, r)
 	return label
+}
+
+func (l *Listener) StorePeerCertInfo(remoteAddr string, commonName string, dnsNames, uris, issuers []string) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	pci := l.peerCertInfos[remoteAddr]
+	if pci == nil {
+		pci = &gototls.PeerCertInfo{}
+		l.peerCertInfos[remoteAddr] = pci
+	}
+	pci.CommonName = commonName
+	pci.DNSNames = dnsNames
+	pci.URIs = uris
+	pci.Issuers = issuers
+}
+
+func (l *Listener) StoreSNI(remoteAddr string, sni, alpn string) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	pci := l.peerCertInfos[remoteAddr]
+	if pci == nil {
+		pci = &gototls.PeerCertInfo{}
+		l.peerCertInfos[remoteAddr] = pci
+	}
+	pci.SNI = sni
+	pci.NegotiatedALPN = alpn
+}
+
+func (l *Listener) StoreALPN(remoteAddr string, alpn []string) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	pci := l.peerCertInfos[remoteAddr]
+	if pci == nil {
+		pci = &gototls.PeerCertInfo{}
+		l.peerCertInfos[remoteAddr] = pci
+	}
+	pci.ALPN = alpn
+}
+
+func GetPeerCertInfo(r *http.Request) string {
+	port := util.GetRequestOrListenerPortNum(r)
+	listenersLock.RLock()
+	l := listeners[port]
+	listenersLock.RUnlock()
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	if l.peerCertInfos[r.RemoteAddr] != nil {
+		v := util.ToJSONText(l.peerCertInfos[r.RemoteAddr])
+		delete(l.peerCertInfos, r.RemoteAddr)
+		return v
+	}
+	return ""
 }

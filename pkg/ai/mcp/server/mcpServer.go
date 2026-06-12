@@ -559,8 +559,8 @@ func (m *MCPServer) AddTool(tool *MCPTool) {
 	if tool.IsProxy {
 		mcpproxy.GetMCPProxyForPort(m.Port).SetupMCPProxy(m.Name, tool.Config.RemoteTool.URL, tool.Tool.Name, tool.Tool.Name, nil)
 	}
-	m.server.AddTool(tool.Tool, tool.Handle)
 	tool.Server = m
+	m.server.AddTool(tool.Tool, tool.Handle)
 	tool.SetName(tool.Tool.Name)
 	if tool.URI == "" {
 		tool.URI = strings.ToLower("/" + tool.Name)
@@ -577,6 +577,7 @@ func (m *MCPServer) AddTool(tool *MCPTool) {
 	if m.ps != nil {
 		m.ps.addComponentToAll(tool, m.Name)
 	}
+	tool.prepareBehavior()
 }
 
 func (s *MCPServer) addDefaultTools() {
@@ -590,7 +591,6 @@ func (s *MCPServer) addDefaultTools() {
 		},
 		Behavior: ToolBehavior{ServerDetails: true},
 	}
-	t.prepareBehavior()
 	s.AddTool(t)
 	t = &MCPTool{
 		Tool: &gomcp.Tool{
@@ -602,7 +602,6 @@ func (s *MCPServer) addDefaultTools() {
 		},
 		Behavior: ToolBehavior{ServerPaths: true},
 	}
-	t.prepareBehavior()
 	s.AddTool(t)
 	t = &MCPTool{
 		Tool: &gomcp.Tool{
@@ -614,7 +613,6 @@ func (s *MCPServer) addDefaultTools() {
 		},
 		Behavior: ToolBehavior{AllServers: true},
 	}
-	t.prepareBehavior()
 	s.AddTool(t)
 	t = &MCPTool{
 		Tool: &gomcp.Tool{
@@ -626,7 +624,7 @@ func (s *MCPServer) addDefaultTools() {
 		},
 		Behavior: ToolBehavior{AllComponents: true},
 	}
-	t.prepareBehavior()
+	s.AddTool(t)
 	t = &MCPTool{
 		Tool: &gomcp.Tool{
 			Name:        "AddTool",
@@ -644,7 +642,6 @@ func (s *MCPServer) addDefaultTools() {
 		},
 		Behavior: ToolBehavior{AddTool: true},
 	}
-	t.prepareBehavior()
 	s.AddTool(t)
 }
 

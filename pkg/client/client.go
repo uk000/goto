@@ -25,6 +25,7 @@ import (
 	"goto/pkg/invocation"
 	"goto/pkg/metrics"
 	"goto/pkg/server/middleware"
+	gototls "goto/pkg/tls"
 	"goto/pkg/transport"
 	"goto/pkg/types"
 	"goto/pkg/util"
@@ -49,6 +50,10 @@ type CallSpec struct {
 	H2           bool                 `json:"h2"`
 	TLS          bool                 `json:"tls"`
 	NoSNI        bool                 `json:"noSNI"`
+	VerifyTLS    bool                 `json:"verifyTLS"`
+	TLSVersion   uint16               `json:"tlsVersion"`
+	ClientCert   string               `json:"clientCert"`
+	ALPN         []string             `json:"alpn"`
 	Payload      []string             `json:"payload"`
 	StreamDelay  string               `json:"streamDelay"`
 	Headers      *types.HeadersConfig `json:"headers"`
@@ -56,6 +61,20 @@ type CallSpec struct {
 	client       transport.ClientTransport
 	streamWriter io.WriteCloser
 	streamDelayD time.Duration
+}
+
+type CallResult struct {
+	Headers      http.Header `json:"headers"`
+	Payload      string      `json:"payload"`
+	PeerCertInfo string      `json:"peerCert"`
+	Status       int
+}
+
+type CallResults struct {
+	URL       string `json:"url"`
+	Results   map[string]*CallResult
+	PeerCerts []string `json:"peerCerts"`
+	Statuses  []int
 }
 
 var (
@@ -66,7 +85,7 @@ var (
 func setRoutes(r *mux.Router) {
 	clientRouter := middleware.RootPath("/client")
 	middleware.AddRoutes(clientRouter, clientMiddlewares...)
-	util.AddRoute(clientRouter, "/http/invoke", invokeHTTP, "GET", "POST", "PUT", "OPTIONS")
+	util.AddRoute(clientRouter, "/http/{q:invoke|call}", invokeHTTP, "GET", "POST", "PUT", "OPTIONS")
 }
 
 func (c *CallSpec) PrepareAuthority(r *http.Request) {
@@ -116,6 +135,9 @@ func (c *CallSpec) PrepareRequest(r *http.Request) error {
 			}
 		}
 	}
+	if a := r.Header.Get("Accept"); a != "" {
+		req.Header.Add("Accept", a)
+	}
 	req.Header.Add("User-Agent", global.Self.HostLabel)
 	if c.Authority != "" {
 		req.Host = c.Authority
@@ -140,18 +162,35 @@ func (c *CallSpec) PrepareRequest(r *http.Request) error {
 	return nil
 }
 
-func (c *CallSpec) Invoke(r *http.Request) ([]string, map[string]int, error) {
+func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 	c.PrepareAuthority(r)
-	client := transport.CreateDefaultHTTPClient(global.Self.Name, c.H2, c.TLS, c.NoSNI, c.Authority, metrics.ConnTracker)
-	output := []string{}
-	statuses := map[string]int{}
+	sni := c.Authority
+	if c.NoSNI {
+		sni = ""
+	}
+	port := util.GetRequestOrListenerPortNum(r)
+	label := util.GetCurrentListenerLabel(r)
+	client := transport.CreateDefaultHTTPClient(port, label, c.H2, c.TLS, c.NoSNI, c.Authority, metrics.ConnTracker)
+	client.UpdateTLSConfig(sni, c.TLSVersion, c.VerifyTLS, c.ALPN)
+	if c.ClientCert != "" {
+		cert, err := gototls.GetCert(c.ClientCert)
+		if err != nil {
+			log.Printf("Invocation: [ERROR] Client Certificate Name given but Certificate not uploaded")
+			return nil, err
+		}
+		client.UpdateTLSCerts(gototls.RootCAs, cert)
+	}
+	callResults := &CallResults{URL: c.URL, Results: map[string]*CallResult{}}
 	if c.Count == 0 {
 		c.Count = 1
 	}
 	for i := 1; i <= c.Count; i++ {
+		requestID := fmt.Sprintf("%s[%d]", c.URL, i)
+		result := &CallResult{}
+		callResults.Results[requestID] = result
 		err := c.PrepareRequest(r)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if len(c.Payload) > 0 && c.streamWriter != nil {
 			go func() {
@@ -171,20 +210,28 @@ func (c *CallSpec) Invoke(r *http.Request) ([]string, map[string]int, error) {
 		}
 		resp, err := client.HTTP().Do(c.request)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		msg := fmt.Sprintf("Call to URL [%s] Authority [%s] succeeded with response [%s]", c.URL, c.Authority, resp.Status)
 		util.AddLogMessage(msg, r)
+		result.Headers = resp.Header
 		defer resp.Body.Close()
 		b := util.Read(resp.Body)
-		output = append(output, b)
-		key := fmt.Sprintf("%s[%d]", c.URL, i)
-		statuses[key] = resp.StatusCode
+		result.Payload = b
+		pci := client.GetPeerCertInfo()
+		if pci != nil {
+			v := util.ToJSONText(pci)
+			result.PeerCertInfo = v
+			callResults.PeerCerts = append(callResults.PeerCerts, v)
+		}
+		result.Status = resp.StatusCode
+		callResults.Statuses = append(callResults.Statuses, resp.StatusCode)
 	}
-	return output, statuses, nil
+	return callResults, nil
 }
 
 func invokeHTTP(w http.ResponseWriter, r *http.Request) {
+	rs := util.GetRequestStore(r)
 	call := &CallSpec{}
 	err := util.ReadJsonOrYamlPayloadFromBody(r.Body, call)
 	if err != nil {
@@ -194,7 +241,7 @@ func invokeHTTP(w http.ResponseWriter, r *http.Request) {
 		util.AddLogMessage(msg, r)
 		return
 	}
-	output, statuses, err := call.Invoke(r)
+	callResults, err := call.Invoke(r)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg := fmt.Sprintf("[HTTP Client] Failed to invoke URL [%s] Authority [%s] with error: %s", call.URL, call.Authority, err.Error())
@@ -202,8 +249,19 @@ func invokeHTTP(w http.ResponseWriter, r *http.Request) {
 		util.AddLogMessage(msg, r)
 		return
 	}
-	w.Header().Add(constants.HeaderGotoUpstreamStatus, util.ToJSONText(statuses))
-	util.WriteJsonOrYAMLPayload(w, output, true)
+	w.Header().Add(constants.HeaderGotoUpstreamStatus, util.ToJSONText(callResults.Statuses))
+	if len(callResults.PeerCerts) > 0 {
+		w.Header().Add(constants.HeaderGotoPeerCertInfo, util.ToJSONText(callResults.PeerCerts))
+	}
+	for _, cr := range callResults.Results {
+		viaGotos := cr.Headers[constants.HeaderViaGoto]
+		for _, v := range viaGotos {
+			if v != "" {
+				rs.ViaGotos = append(rs.ViaGotos, v)
+			}
+		}
+	}
+	util.WriteJsonOrYAMLPayload(w, callResults, true)
 }
 
 func Run() {

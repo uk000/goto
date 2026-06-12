@@ -27,17 +27,17 @@ import (
 )
 
 type GotoConfig struct {
-	Name     string    `yaml:"name"`
-	TLS      PortTLS   `yaml:"tls"`
-	Scripts  *Scripts  `yaml:"scripts,omitempty"`
-	GRPC     *GRPC     `yaml:"grpc,omitempty"`
-	Registry *Registry `yaml:"registry,omitempty"`
-	Traffic  *Traffic  `yaml:"traffic,omitempty"`
-	Jobs     *Jobs     `yaml:"jobs,omitempty"`
-	MCP      *MCP      `yaml:"mcp,omitempty"`
-	A2A      *A2A      `yaml:"a2a,omitempty"`
-	HTTP     *HTTP     `yaml:"http,omitempty"`
-	Proxies  []*Proxy  `yaml:"proxy,omitempty" json:"proxy,omitempty"`
+	Name     string      `yaml:"name"`
+	TLS      *TLSConfigs `yaml:"tls"`
+	Scripts  *Scripts    `yaml:"scripts,omitempty"`
+	GRPC     *GRPC       `yaml:"grpc,omitempty"`
+	Registry *Registry   `yaml:"registry,omitempty"`
+	Traffic  *Traffic    `yaml:"traffic,omitempty"`
+	Jobs     *Jobs       `yaml:"jobs,omitempty"`
+	MCP      *MCP        `yaml:"mcp,omitempty"`
+	A2A      *A2A        `yaml:"a2a,omitempty"`
+	HTTP     *HTTP       `yaml:"http,omitempty"`
+	Proxies  []*Proxy    `yaml:"proxy,omitempty" json:"proxy,omitempty"`
 }
 
 var (

@@ -23,6 +23,7 @@ import (
 	"goto/pkg/metrics"
 	grpc "goto/pkg/rpc/grpc/client"
 	"goto/pkg/rpc/grpc/pb"
+	gototls "goto/pkg/tls"
 	"goto/pkg/transport"
 	"goto/pkg/types"
 	"goto/pkg/util"
@@ -274,13 +275,21 @@ func (ir *InvocationRequest) invokeHTTP() {
 		log.Printf("Invocation: [ERROR] HTTP invocation attempted without an initialized Request/Target")
 		return
 	}
+	target := ir.tracker.Target
 	sni := ir.httpRequest.Host
-	if ir.tracker.Target.NoSNI {
+	if target.NoSNI {
 		sni = ""
 	}
-	ir.client.SetTLSConfig(tlsConfig(sni, ir.tracker.Target.VerifyTLS))
+	ir.client.UpdateTLSConfig(sni, target.TLSVersion, target.VerifyTLS, target.ALPN)
+	if target.ClientCert != "" {
+		cert, err := gototls.GetCert(target.ClientCert)
+		if err != nil {
+			log.Printf("Invocation: [ERROR] Client Certificate Name given but Certificate not uploaded")
+			return
+		}
+		ir.client.UpdateTLSCerts(gototls.RootCAs, cert)
+	}
 	ir.writeRequestPayload()
-
 	start := time.Now()
 	resp, err := ir.client.HTTP().Do(ir.httpRequest)
 	end := time.Now()

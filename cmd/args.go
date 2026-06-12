@@ -63,6 +63,8 @@ type ServerArgs struct {
 	GRPCPort            string
 	JSONRPCPort         string
 	Ports               string
+	ALPN                string
+	CommonName          string
 	Label               string
 	StartupDelay        string
 	ShutdownDelay       string
@@ -174,6 +176,8 @@ var (
 		GRPCPort:            "grpcPort",
 		JSONRPCPort:         "rpcPort",
 		Ports:               "ports",
+		ALPN:                "alpn",
+		CommonName:          "cn",
 		Label:               "label",
 		StartupDelay:        "startupDelay",
 		ShutdownDelay:       "shutdownDelay",
@@ -211,6 +215,8 @@ var (
 		GRPCPort:            "Default GRPC Server Listen Port",
 		JSONRPCPort:         "Default JSON-RPC Server Listen Port",
 		Ports:               "Comma-separated list of <port/protocol>. First port acts as primary HTTP port",
+		ALPN:                "Supoported Protos for ALPN",
+		CommonName:          "CommonName for TLS Cert",
 		Label:               "Default Server Label",
 		StartupDelay:        "Delay Server Startup (seconds)",
 		ShutdownDelay:       "Delay Server Shutdown (seconds)",
@@ -252,6 +258,7 @@ var (
 	portsList     string
 	startupScript types.ListArg
 	configPaths   types.ListArg
+	alpn          types.ListArg
 )
 
 func setupCtlArgs() {
@@ -302,6 +309,8 @@ func setupServerArgs() {
 	intFlag(&global.Self.GRPCPort, sa.GRPCPort, "gp", sh.GRPCPort, 1234)
 	intFlag(&global.Self.JSONRPCPort, sa.JSONRPCPort, "rpc", sh.JSONRPCPort, 3000)
 	stringFlag(&portsList, sa.Ports, "", sh.Ports, "")
+	flag.Var(&alpn, sa.ALPN, sh.ALPN)
+	stringFlag(&global.ServerConfig.CommonName, sa.CommonName, "", sh.CommonName, "goto.goto")
 	stringFlag(&global.Self.Name, sa.Label, "l", sh.Label, "")
 	stringFlag(&global.Self.RegistryURL, sa.Registry, "", sh.Registry, "")
 	boolFlag(&global.Flags.UseLocker, sa.Locker, "", sh.Locker, false)
@@ -345,7 +354,9 @@ func runInits() {
 func processServerArgs() {
 	setupRegistryConfigs()
 	setupLogs()
-
+	if alpn != nil {
+		global.ServerConfig.ALPN = alpn
+	}
 	if global.ServerConfig.CertPath != "" {
 		log.Printf("Will read certs from [%s]\n", global.ServerConfig.CertPath)
 	}
@@ -367,7 +378,9 @@ func initListeners() {
 		ports = []string{strconv.Itoa(global.Self.ServerPort)}
 	} else {
 		if portProto := strings.Split(ports[0], "/"); len(portProto) > 0 {
-			global.Self.ServerPort, _ = strconv.Atoi(portProto[0])
+			if port, _ := strconv.Atoi(portProto[0]); port > 0 {
+				global.Self.ServerPort = port
+			}
 		}
 	}
 	global.Self.HostLabel = global.BuildHostLabel()

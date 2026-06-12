@@ -36,6 +36,7 @@ type Target struct {
 }
 
 type TargetClient struct {
+	clientPort         int
 	targets            map[string]*Target
 	activeTargetsCount int
 	targetsLock        sync.RWMutex
@@ -45,13 +46,13 @@ type TargetClient struct {
 }
 
 var (
-	Client                     = NewTargetClient()
+	Client                     = NewTargetClient(global.Self.ServerPort)
 	portClientsLock            sync.RWMutex
 	InvocationResultsRetention int = 100
 )
 
-func NewTargetClient() *TargetClient {
-	c := &TargetClient{}
+func NewTargetClient(clientPort int) *TargetClient {
+	c := &TargetClient{clientPort: clientPort}
 	c.init()
 	return c
 }
@@ -247,7 +248,7 @@ func (tc *TargetClient) stopTargets(targetNames []string) (bool, bool) {
 }
 
 func (tc *TargetClient) invokeTarget(target *invocation.InvocationSpec) {
-	if tracker, err := invocation.RegisterInvocation(target, results.ResultChannelSinkFactory(target, tc.trackHeaders, tc.crossTrackHeaders, tc.trackTimeBuckets)); err == nil {
+	if tracker, err := invocation.RegisterInvocation(tc.clientPort, target, results.ResultChannelSinkFactory(target, tc.trackHeaders, tc.crossTrackHeaders, tc.trackTimeBuckets)); err == nil {
 		tc.targetsLock.Lock()
 		tc.activeTargetsCount++
 		tc.targetsLock.Unlock()

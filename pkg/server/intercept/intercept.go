@@ -79,13 +79,6 @@ type BodyTracker struct {
 	io.ReadCloser
 }
 
-func GetConn(r *http.Request) net.Conn {
-	if conn := r.Context().Value(util.ConnectionKey); conn != nil {
-		return conn.(net.Conn)
-	}
-	return nil
-}
-
 func CreateOrGetFlushWriter(w io.Writer) FlushWriter {
 	if fw, ok := w.(FlushWriter); ok {
 		return fw
@@ -251,7 +244,7 @@ func NewInterceptResponseWriter(r *http.Request, w http.ResponseWriter, hold boo
 		parent:         parent,
 		Hold:           hold,
 		IsH2C:          util.IsH2C(r),
-		conn:           GetConn(r),
+		conn:           util.GetConn(r),
 	}
 }
 

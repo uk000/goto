@@ -40,7 +40,7 @@ import (
 
 var (
 	configWatchers   []fswatcher.Watcher
-	tlsConfigs       = map[string]ctl.PortTLS{}
+	tlsConfigs       = map[string]*ctl.TLSConfigs{}
 	a2aConfigs       = map[string]*ctl.A2A{}
 	mcpConfigs       = map[string]*ctl.MCP{}
 	httpProxyConfigs = map[string]map[int]*httpproxy.Proxy{}

@@ -19,7 +19,6 @@ package stream
 import (
 	"fmt"
 	"goto/pkg/constants"
-	"goto/pkg/server/conn"
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/middleware"
 	"goto/pkg/server/response/payload"
@@ -93,7 +92,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Cannot stream")
 		return
 	}
-	if c := conn.GetConn(r); c != nil {
+	if c := util.GetConn(r); c != nil {
 		c.SetWriteDeadline(time.Time{})
 	}
 	util.AddLogMessage("Responding with streaming payload", r)

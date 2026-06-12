@@ -53,7 +53,7 @@ func NewRegistryClient() *RegistryClient {
 	baseURL := fmt.Sprintf("%s/registry", global.Self.RegistryURL)
 	basePeerURL := fmt.Sprintf("%s/peers/%s/%s", baseURL, global.Self.Name, global.Self.Address)
 	return &RegistryClient{
-		client:      transport.CreateDefaultHTTPClient("RegistryClient", false, false, false, "", nil),
+		client:      transport.CreateDefaultHTTPClient(global.Self.ServerPort, "RegistryClient", false, false, false, "", nil),
 		baseURL:     baseURL,
 		basePeerURL: basePeerURL,
 	}

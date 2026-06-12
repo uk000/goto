@@ -79,6 +79,8 @@ type GRPCProxyConfig struct {
 }
 
 type GRPCServiceProxy struct {
+	Label         string            `json:"label"`
+	Port          int               `json:"port"`
 	FromService   string            `json:"fromService"`
 	ToService     string            `json:"toService"`
 	Methods       map[string]string `json:"methods"`
@@ -404,7 +406,7 @@ func newGRPCProxy(port int) *GRPCProxy {
 	return p
 }
 
-func newGRPCServiceProxy(from, to *gotogrpc.GRPCService, endpoint, authority string, tracker *GRPCProxyTracker) (*GRPCServiceProxy, error) {
+func newGRPCServiceProxy(port int, from, to *gotogrpc.GRPCService, endpoint, authority string, tracker *GRPCProxyTracker) (*GRPCServiceProxy, error) {
 	if from == nil || endpoint == "" {
 		return nil, errors.New("no service/endpoint given")
 	}
@@ -412,6 +414,8 @@ func newGRPCServiceProxy(from, to *gotogrpc.GRPCService, endpoint, authority str
 		to = from
 	}
 	sp := &GRPCServiceProxy{
+		Port:          port,
+		Label:         fmt.Sprintf("Proxy(%s)", from.Name),
 		FromService:   from.Name,
 		ToService:     to.Name,
 		proxyService:  from,
@@ -447,7 +451,7 @@ func (sp *GRPCServiceProxy) init(tracker *GRPCProxyTracker) error {
 	sp.Upstream.PastSessions = map[string]*GRPCSession{}
 	sp.tracker = tracker
 	if host, port := util.ParseAddress(sp.Upstream.Endpoint); host != "" && port > 0 {
-		if client, err := grpcclient.NewGRPCClient(sp.targetService, sp.Upstream.Endpoint, sp.Upstream.Authority, host, &grpcclient.GRPCOptions{IsTLS: false, VerifyTLS: false}); err == nil {
+		if client, err := grpcclient.NewGRPCClient(sp.Label, sp.Port, sp.targetService, sp.Upstream.Endpoint, sp.Upstream.Authority, host, &grpcclient.GRPCOptions{IsTLS: false, VerifyTLS: false}); err == nil {
 			sp.Upstream.client = client
 			return nil
 		} else {
@@ -488,7 +492,7 @@ func (p *GRPCProxy) SetupGRPCServiceProxy(from, to string, methods map[string]st
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	if sp == nil {
-		if sp, err = newGRPCServiceProxy(fromService, toService, endpoint, authority, p.Tracker); err != nil {
+		if sp, err = newGRPCServiceProxy(p.Port, fromService, toService, endpoint, authority, p.Tracker); err != nil {
 			return err
 		}
 	} else {

@@ -21,9 +21,10 @@ Client sends header `From-Goto-Host` to pass its identity to the server.
 
 
 # <a name="client-apis"></a>
-#### Client APIs
+### Client APIs
 |METHOD|URI|Description|
 |---|---|---|
+| GET, POST, PUT, OPTIONS | /client/http/invoke | Invoke a single HTTP call using a `CallSpec` definition (see schema example below). |
 | POST      | /client/targets/add                   | Add a target for invocation. [See `Client Target JSON Schema` for Payload](#client-target-json-schema) |
 | POST      |	/client/targets/`{targets}`/remove      | Remove given targets |
 | POST      | /client/targets/`{targets}`/invoke      | Invoke given targets |
@@ -49,7 +50,43 @@ Client sends header `From-Goto-Host` to pass its identity to the server.
 | POST      | /client/results<br/>/all/`{enable}`          | Enable/disable collection of cumulative results across all targets. This gives a high level overview of all traffic, but at a performance overhead. Disabled by default. |
 | POST      | /client/results<br/>/invocations/`{enable}`          | Enable/disable collection of results by invocations. This gives more detailed visibility into results per invocation but has performance overhead. Disabled by default. |
 
+### One-off Call JSON schema
+```json
+curl -X POST localhost:8080/client/http/invoke \
+  -H 'Content-Type: application/json' \
+  -d '{
+    {
+      "url": "example.com/path",
+      "authority": "example.com",
+      "method": "GET",
+      "count": 2,
+      "requestID": true,
+      "h2": false,
+      "tls": true,
+      "noSNI": false,
+      "verifyTLS": false,
+      "tlsVersion": 1.3,
+      "clientCert": "SomePreLoadedClientCert",
+      "alpn": ["istio", "istio-peer-exchange", "h2"],
+      "payload": ["hello", "world"],
+      "streamDelay": "100ms",
+      "headers": {
+        "add": {
+          "x-test": "value"
+        },
+        "forward": ["x-forwarded-for"]
+      }
+    }'
+```
+
 ###### <small> [Back to TOC](#toc) </small>
+
+See [Client JSON Schemas](../../docs/client-api-json-schemas.md)
+
+See [Client APIs and Results Examples](../../docs/client-api-examples.md)
+
+See [Client GRPC Examples](../../docs/grpc-client-examples.md)
+
 
 
 #### Client Events
@@ -76,10 +113,3 @@ Client sends header `From-Goto-Host` to pass its identity to the server.
 - `Invocation Repeated Failure`: All request failures after a failed request are accumulated and reported in summary, either when the next request succeeds or when the invocation completes.
 </details>
 <br/>
-
-See [Client JSON Schemas](../../docs/client-api-json-schemas.md)
-
-See [Client APIs and Results Examples](../../docs/client-api-examples.md)
-
-See [Client GRPC Examples](../../docs/grpc-client-examples.md)
-

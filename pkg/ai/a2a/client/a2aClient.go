@@ -69,7 +69,7 @@ type A2AClient struct {
 }
 
 func NewA2AClient(port int, clientId string, h2, tls bool, authority string) *A2AClient {
-	c := transport.CreateHTTPClient(clientId, h2, true, tls, false, authority, 0,
+	c := transport.CreateHTTPClient(port, clientId, h2, true, tls, false, authority,
 		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
 	ac := &A2AClient{
 		ID:         clientId,
@@ -77,8 +77,6 @@ func NewA2AClient(port int, clientId string, h2, tls bool, authority string) *A2
 		httpClient: c.HTTP(),
 	}
 	if ht, ok := c.Transport().(*transport.HTTPTransportIntercept); ok {
-		ac.ht = ht
-	} else if ht, ok := c.Transport().(*transport.HTTP2TransportIntercept); ok {
 		ac.ht = ht
 	}
 	return ac

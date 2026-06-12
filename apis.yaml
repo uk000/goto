@@ -953,7 +953,7 @@
     "":
     - /server/listeners: '[GET]'
     /server/listeners/{port}:
-    - /server/listeners/{port}/cert/auto/{domain}: '[PUT POST]'
+    - /server/listeners/{port}/cert/auto/{domain}?spiffeID={spiffeID}: '[PUT POST]'
     - /server/listeners/{port}/cert/autosni: '[PUT POST]'
     - /server/listeners/{port}/cert/add: '[PUT POST]'
     - /server/listeners/{port}/key/add: '[PUT POST]'
@@ -1210,6 +1210,16 @@
     - /tls/cacert/add: '[PUT POST]'
     /tls/cacert/remove:
     - /tls/cacert/remove: '[PUT POST]'
+  /tls/cert:
+    /tls/cert/add:
+    - /tls/cert/add?name={name}: '[PUT POST]'
+    /tls/cert/remove:
+    - /tls/cert/remove?name={name}: '[PUT POST]'
+  /tls/key:
+    /tls/key/add:
+    - /tls/key/add?name={name}: '[PUT POST]'
+    /tls/key/remove:
+    - /tls/key/remove?name={name}: '[PUT POST]'
   /tls/workdir:
     /tls/workdir/set:
     - /tls/workdir/set?dir={dir}: '[POST PUT]'

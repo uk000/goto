@@ -23,6 +23,7 @@ import (
 	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
+	gototls "goto/pkg/tls"
 	"goto/pkg/transport"
 	"goto/pkg/types"
 	"goto/pkg/util"
@@ -35,16 +36,17 @@ import (
 )
 
 type InvocationResultResponse struct {
-	Status            string      `json:"status"`
-	StatusCode        int         `json:"statusCode"`
-	Headers           http.Header `json:"headers"`
-	PayloadSize       int         `json:"payloadSize"`
-	ClientStreamCount int         `json:"clientStreamCount"`
-	ServerStreamCount int         `json:"serverStreamCount"`
-	Payload           []byte      `json:"-"`
-	PayloadText       string      `json:"payload"`
-	FirstByteInAt     string      `json:"firstByteInAt"`
-	LastByteInAt      string      `json:"lastByteInAt"`
+	Status            string                `json:"status"`
+	StatusCode        int                   `json:"statusCode"`
+	Headers           http.Header           `json:"headers"`
+	PayloadSize       int                   `json:"payloadSize"`
+	ClientStreamCount int                   `json:"clientStreamCount"`
+	ServerStreamCount int                   `json:"serverStreamCount"`
+	Payload           []byte                `json:"-"`
+	PayloadText       string                `json:"payload"`
+	FirstByteInAt     string                `json:"firstByteInAt"`
+	LastByteInAt      string                `json:"lastByteInAt"`
+	PeerCertInfo      *gototls.PeerCertInfo `json:"peerCertInfo"`
 }
 
 type InvocationResultRequest struct {
@@ -166,8 +168,9 @@ func (tracker *InvocationTracker) processError(result *InvocationResult) {
 func (result *InvocationResult) processHTTPResponse(req *InvocationRequest, r *http.Response, err error) {
 	result.httpResponse = r
 	result.err = err
+	result.Response.PeerCertInfo = req.client.GetPeerCertInfo()
 	if err == nil {
-		result.tracker.OnHeaders(r.Header, r.StatusCode)
+		result.tracker.OnHeaders(r.Header, r.StatusCode, result.Response.PeerCertInfo)
 		result.readHTTPResponsePayload()
 		if r != nil {
 			result.updateResult(req.url, req.uri, r.Status, r.StatusCode, r.Header)

@@ -124,7 +124,7 @@ func GetEchoResponseFromRS(rs *util.RequestStore) map[string]interface{} {
 		rs.ListenerLabel = global.Funcs.GetListenerLabelForPort(rs.RequestPortNum)
 	}
 	response := GetEchoResponse(rs.ListenerLabel, rs.DownstreamAddr, rs.RequestHost, rs.RequestURI, rs.RequestMethod, rs.RequestProtocol,
-		rs.RequestQuery, rs.ServerName, rs.RequestPortNum, rs.RequestPayloadSize, 0, rs.RequestHeaders, rs.IsTLS)
+		rs.RequestQuery, rs.ServerName, rs.RequestPortNum, rs.RequestPayloadSize, 0, rs.RequestHeaders, rs.IsTLS, rs.IsMTLS, rs.PeerCertInfo)
 
 	if rs.IsTunnelRequest {
 		response[HeaderGotoTargetURL] = rs.RequestHeaders[HeaderGotoTargetURL]
@@ -143,7 +143,7 @@ func GetEchoResponseWithAddendum(rs *util.RequestStore, addendum map[string]any)
 }
 
 func GetEchoResponse(listenerLabel, downstreamAddr, requestHost, requestURI, requestMethod, requestProto, requestQuery, requestSNI string,
-	requestPortNum, requestPayloadSize, responsePayloadSize int, requestHeaders map[string][]string, isTLS bool) map[string]interface{} {
+	requestPortNum, requestPayloadSize, responsePayloadSize int, requestHeaders map[string][]string, isTLS, isMTLS bool, pci string) map[string]interface{} {
 	outputHeaders := map[string][]string{}
 	for h, values := range requestHeaders {
 		for _, v := range values {
@@ -163,8 +163,10 @@ func GetEchoResponse(listenerLabel, downstreamAddr, requestHost, requestURI, req
 		HeaderGotoListener:      listenerLabel,
 		HeaderGotoPort:          requestPortNum,
 		HeaderGotoTLS:           isTLS,
+		HeaderGotoMTLS:          isMTLS,
 		HeaderViaGoto:           util.GetViaGotoValue(requestPortNum),
 		"headers":               outputHeaders,
+		HeaderGotoPeerCertInfo:  pci,
 	}
 	if requestSNI != "" || isTLS {
 		response[constants.HeaderGotoSNI] = requestSNI

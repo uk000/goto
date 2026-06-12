@@ -217,7 +217,7 @@ func NewClient(port int, sse, h2, tls bool, callerId, listener, authority string
 
 func newMCPClient(port int, sse, h2, tls bool, name, callerId, listener, authority string, stream chan *types.Pair[string, any], updateCallback timeline.TimelineUpdateNotifierFunc, endCallback timeline.TimelineEndNotifierFunc) *MCPClient {
 	//httpClient := transport.CreateSimpleHTTPClient()
-	ht := transport.CreateHTTPClient(name, h2, true, tls, false, authority, 0,
+	ht := transport.CreateHTTPClient(port, name, h2, true, tls, false, authority,
 		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
 	mcpClient := &MCPClient{
 		Port:           port,
@@ -235,8 +235,6 @@ func newMCPClient(port int, sse, h2, tls bool, name, callerId, listener, authori
 		sessionCounter: atomic.Int32{},
 	}
 	if t, ok := ht.Transport().(*transport.HTTPTransportIntercept); ok {
-		mcpClient.ht = t
-	} else if t, ok := ht.Transport().(*transport.HTTP2TransportIntercept); ok {
 		mcpClient.ht = t
 	}
 	mcpClient.ht.SetRequestIntercept(mcpClient)

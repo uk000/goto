@@ -46,15 +46,21 @@ func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
 	} else {
 		if rs.IsProxy {
 			label += "(Proxy)"
+		} else if rs.IsClient {
+			label += "(Client)"
 		}
 		label += "(HTTP)"
 	}
 	w.Header().Add(constants.HeaderViaGoto, label)
 	w.Header().Add(constants.HeaderGotoRemoteAddress, r.RemoteAddr)
 	w.Header().Add(constants.HeaderGotoPort, port)
+	w.Header().Add(constants.HeaderGotoMTLS, fmt.Sprintf("%t", rs.IsMTLS))
 	w.Header().Add(constants.HeaderGotoTLS, fmt.Sprintf("%t", rs.IsTLS))
 	if rs.ServerName != "" || rs.IsTLS {
 		w.Header().Add(constants.HeaderGotoSNI, rs.ServerName)
+	}
+	if rs.IsTLS {
+		w.Header().Add(constants.HeaderGotoPeerCertInfo, rs.PeerCertInfo)
 	}
 	w.Header().Add(constants.HeaderGotoHost, global.Self.HostLabel)
 	w.Header().Add(constants.HeaderGotoProtocol, rs.GotoProtocol)

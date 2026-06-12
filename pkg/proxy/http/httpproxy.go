@@ -25,6 +25,7 @@ import (
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/middleware"
 	"goto/pkg/server/response/status"
+	gototls "goto/pkg/tls"
 	"goto/pkg/util"
 	"log"
 	"net/http"
@@ -140,14 +141,15 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 func (p *Proxy) processResponses(rc *RequestContext, responses UpstreamResults, responseStatuses map[string]map[string]int) {
 	upstreamViaGoto := []string{}
 	upstreamProxyStatuses := []map[string]map[string][]string{}
+	peerCertInfos := []string{}
 	for target, targetResponses := range responses {
 		for ep, epResponses := range targetResponses {
 			for _, resp := range epResponses {
-				rc.processResponseHeaders(target, ep, resp.Headers, &upstreamViaGoto, &upstreamProxyStatuses)
+				rc.processResponseHeaders(target, ep, resp.Headers, resp.PeerCertInfo, &peerCertInfos, &upstreamViaGoto, &upstreamProxyStatuses)
 			}
 		}
 	}
-	rc.sendProxyStatuses(upstreamViaGoto, upstreamProxyStatuses, responseStatuses)
+	rc.sendProxyStatuses(upstreamViaGoto, upstreamProxyStatuses, responseStatuses, peerCertInfos)
 	if rc.sendHeaders {
 		for _, m := range responses {
 			for _, responses := range m {
@@ -162,7 +164,7 @@ func (p *Proxy) processResponses(rc *RequestContext, responses UpstreamResults, 
 	}
 }
 
-func (rc *RequestContext) sendProxyStatuses(upstreamViaGoto []string, upstreamProxyStatuses []map[string]map[string][]string, responseStatuses map[string]map[string]int) {
+func (rc *RequestContext) sendProxyStatuses(upstreamViaGoto []string, upstreamProxyStatuses []map[string]map[string][]string, responseStatuses map[string]map[string]int, peerCertInfos []string) {
 	upstreamProxyStatusHeaders := []string{}
 	for _, v := range upstreamProxyStatuses {
 		upstreamProxyStatusHeaders = append(upstreamProxyStatusHeaders, util.ToJSONText(v))
@@ -172,9 +174,10 @@ func (rc *RequestContext) sendProxyStatuses(upstreamViaGoto []string, upstreamPr
 	}
 	rc.w.Header()[constants.HeaderGotoProxyUpstreamStatus] = upstreamProxyStatusHeaders
 	rc.w.Header()[constants.HeaderViaGoto] = append(rc.w.Header()[constants.HeaderViaGoto], upstreamViaGoto...)
+	rc.w.Header()[constants.HeaderGotoPeerCertInfo] = peerCertInfos
 }
 
-func (rc *RequestContext) processResponseHeaders(target, ep string, headers http.Header, upstreamViaGoto *[]string, upstreamProxyStatuses *[]map[string]map[string][]string) {
+func (rc *RequestContext) processResponseHeaders(target, ep string, headers http.Header, pci *gototls.PeerCertInfo, peerCertInfos *[]string, upstreamViaGoto *[]string, upstreamProxyStatuses *[]map[string]map[string][]string) {
 	v := headers[constants.HeaderViaGoto]
 	if len(v) == 0 {
 		v = headers[util.LowerViaGoto]
@@ -188,6 +191,9 @@ func (rc *RequestContext) processResponseHeaders(target, ep string, headers http
 	}
 	if len(v) > 0 {
 		*upstreamProxyStatuses = append(*upstreamProxyStatuses, map[string]map[string][]string{target: {ep: v}})
+	}
+	if pci != nil {
+		*peerCertInfos = append(*peerCertInfos, util.ToJSONText(pci))
 	}
 }
 
@@ -247,7 +253,7 @@ func (t *MatchedTarget) invoke(rc *RequestContext, out chan *TargetEndpointRespo
 
 func (ep *EndpointInvocation) invoke(targetCounter, epCounter int, target string, matchedURI string, tt *TrafficTransform, rc *RequestContext, out chan *TargetEndpointResponse, pt *HTTPProxyTracker) error {
 	is := ep.toInvocationSpec(matchedURI, tt, rc, pt)
-	tracker, err := invocation.RegisterInvocation(is)
+	tracker, err := invocation.RegisterInvocation(ep.proxyPort, is)
 	if err != nil {
 		return err
 	}
@@ -273,13 +279,14 @@ func (ep *EndpointInvocation) asyncInvoke(target string, tracker *invocation.Inv
 	}
 }
 
-func (ep *EndpointInvocation) onHeaders(rc *RequestContext) func(http.Header, int) {
-	return func(headers http.Header, status int) {
+func (ep *EndpointInvocation) onHeaders(rc *RequestContext) func(http.Header, int, *gototls.PeerCertInfo) {
+	return func(headers http.Header, status int, peerCertInfo *gototls.PeerCertInfo) {
 		upstreamViaGoto := []string{}
 		upstreamProxyStatuses := []map[string]map[string][]string{}
 		responseStatuses := map[string]map[string]int{ep.target.Name: {ep.ep.name: status}}
-		rc.processResponseHeaders(ep.target.Name, ep.ep.name, headers, &upstreamViaGoto, &upstreamProxyStatuses)
-		rc.sendProxyStatuses(upstreamViaGoto, upstreamProxyStatuses, responseStatuses)
+		peerCertInfos := []string{}
+		rc.processResponseHeaders(ep.target.Name, ep.ep.name, headers, peerCertInfo, &peerCertInfos, &upstreamViaGoto, &upstreamProxyStatuses)
+		rc.sendProxyStatuses(upstreamViaGoto, upstreamProxyStatuses, responseStatuses, peerCertInfos)
 	}
 }
 
@@ -326,6 +333,9 @@ func (ep *TargetEndpoint) prepareInvocationSpec(tc *TrafficConfig) (*invocation.
 	is.Protocol = ep.Protocol
 	is.URL = ep.URL
 	is.Host = ep.Authority
+	is.TLS = ep.IsTLS
+	is.ClientCert = ep.ClientCert
+	is.ALPN = ep.ALPN
 	is.RequestCount = ep.RequestCount
 	is.Replicas = ep.Concurrent
 	is.TrackPayload = true

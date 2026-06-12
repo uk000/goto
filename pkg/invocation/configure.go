@@ -79,6 +79,9 @@ type InvocationSpec struct {
 	VerifyTLS            bool              `json:"verifyTLS"`
 	TLS                  bool              `json:"tls"`
 	NoSNI                bool              `json:"noSNI"`
+	TLSVersion           uint16            `json:"tlsVersion"`
+	ClientCert           string            `json:"clientCert"`
+	ALPN                 []string          `json:"alpn"`
 	BodyReader           io.Reader         `json:"-"`
 	ResponseWriter       io.Writer         `json:"-"`
 	LongRunning          bool              `json:"-"`
@@ -120,14 +123,15 @@ type Assert struct {
 type Assertions []*Assert
 
 type InvocationTracker struct {
-	ID        uint32              `json:"id"`
-	Target    *InvocationSpec     `json:"target"`
-	Status    *InvocationStatus   `json:"status"`
-	Payloads  [][]byte            `json:"-"`
-	Channels  *InvocationChannels `json:"-"`
-	CustomID  string              `json:"customID"`
-	OnHeaders func(http.Header, int)
-	client    *InvocationClient
+	ID         uint32              `json:"id"`
+	ClientPort int                 `json:"clientPort"`
+	Target     *InvocationSpec     `json:"target"`
+	Status     *InvocationStatus   `json:"status"`
+	Payloads   [][]byte            `json:"-"`
+	Channels   *InvocationChannels `json:"-"`
+	CustomID   string              `json:"customID"`
+	OnHeaders  func(http.Header, int, *gototls.PeerCertInfo)
+	client     *InvocationClient
 }
 
 type InvocationChannels struct {
@@ -303,6 +307,14 @@ func (is *InvocationSpec) validateConnectionAndRequestConfigs() error {
 	} else {
 		is.requestTimeoutD = 30 * time.Second
 		is.RequestTimeout = "30s"
+	}
+	if is.TLSVersion == 0 {
+		is.TLSVersion = tls.VersionTLS13
+	}
+	if is.ClientCert != "" {
+		if c, _ := gototls.GetCert(is.ClientCert); c == nil {
+			return fmt.Errorf("ClientCert Not Uploaded")
+		}
 	}
 	return nil
 }
@@ -524,14 +536,15 @@ func ResetActiveInvocations() {
 	invocationsLock.Unlock()
 }
 
-func RegisterInvocation(target *InvocationSpec, sinks ...ResultSinkFactory) (*InvocationTracker, error) {
-	return newTracker(atomic.AddUint32(&invocationCounter, 1), target, sinks...)
+func RegisterInvocation(clientPort int, target *InvocationSpec, sinks ...ResultSinkFactory) (*InvocationTracker, error) {
+	return newTracker(atomic.AddUint32(&invocationCounter, 1), clientPort, target, sinks...)
 }
 
-func newTracker(id uint32, target *InvocationSpec, sinks ...ResultSinkFactory) (*InvocationTracker, error) {
+func newTracker(id uint32, clientPort int, target *InvocationSpec, sinks ...ResultSinkFactory) (*InvocationTracker, error) {
 	tracker := &InvocationTracker{
-		ID:     id,
-		Target: target,
+		ID:         id,
+		ClientPort: clientPort,
+		Target:     target,
 		Channels: &InvocationChannels{
 			StopChannel:   make(chan bool, 20),
 			DoneChannel:   make(chan bool, 2),
@@ -583,25 +596,14 @@ func (tracker *InvocationTracker) createClient(target *InvocationSpec) error {
 	return nil
 }
 
-func tlsConfig(host string, verifyCert bool) *tls.Config {
-	cfg := &tls.Config{
-		ServerName:         host,
-		InsecureSkipVerify: !verifyCert,
-	}
-	if gototls.RootCAs != nil {
-		cfg.RootCAs = gototls.RootCAs
-	}
-	return cfg
-}
-
 func getHttpClientForTarget(tracker *InvocationTracker) transport.ClientTransport {
 	target := tracker.Target
 	invocationsLock.RLock()
 	client := targetClients[target.Name]
 	invocationsLock.RUnlock()
 	if client == nil || client.HTTP() == nil {
-		client = transport.CreateHTTPClient(target.Name, target.h2, target.AutoUpgrade, target.TLS, target.NoSNI,
-			target.authority, 0, target.requestTimeoutD, target.connTimeoutD,
+		client = transport.CreateHTTPClient(0, target.Name, target.h2, target.AutoUpgrade, target.TLS, target.NoSNI,
+			target.authority, target.requestTimeoutD, target.connTimeoutD,
 			target.connIdleTimeoutD, metrics.ConnTracker)
 		if !target.LongRunning {
 			invocationsLock.Lock()
@@ -623,7 +625,7 @@ func getGrpcClientForTarget(tracker *InvocationTracker) transport.ClientTranspor
 			log.Printf("Service %s not found for target %s", target.Service, target.Name)
 			return nil
 		}
-		if grpcClient, err := grpc.NewGRPCClient(service, target.URL, target.authority, target.authority,
+		if grpcClient, err := grpc.NewGRPCClient(fmt.Sprintf("Client(%s)", target.Name), tracker.ClientPort, service, target.URL, target.authority, target.authority,
 			&grpc.GRPCOptions{
 				IsTLS:          target.TLS,
 				VerifyTLS:      target.VerifyTLS,

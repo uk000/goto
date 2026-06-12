@@ -38,11 +38,18 @@ var (
 )
 
 func setRoutes(r *mux.Router) {
-	router := middleware.RootPath("/grpc")
-	clientRouter := util.PathRouter(router, "/client")
-	util.AddRoute(clientRouter, "/call/{service}/{method}/{endpoint}", callServiceMethod, "POST")
-	util.AddRoute(clientRouter, "/call/{service}/{method}/{endpoint}/stream", callServiceMethod, "POST")
-	util.AddRoute(clientRouter, "/call", call, "POST")
+	grpcRouter := middleware.RootPath("/grpc")
+	clientRouter := middleware.RootPath("/client")
+	grpcClientRouter := util.PathRouter(grpcRouter, "/client")
+	clientGRPCRouter := util.PathRouter(clientRouter, "/grpc")
+	setRoutesWithRouter(grpcClientRouter)
+	setRoutesWithRouter(clientGRPCRouter)
+}
+
+func setRoutesWithRouter(r *mux.Router) {
+	util.AddRoute(r, "/call/{service}/{method}/{endpoint}", callServiceMethod, "POST")
+	util.AddRoute(r, "/call/{service}/{method}/{endpoint}/stream", callServiceMethod, "POST")
+	util.AddRoute(r, "/call", call, "POST")
 }
 
 func call(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +57,10 @@ func call(w http.ResponseWriter, r *http.Request) {
 	err := util.ReadJsonOrYamlPayloadFromBody(r.Body, &call)
 	if err != nil {
 		util.SendBadRequest(fmt.Sprintf("Failed to parse payload with error [%s]", err.Error()), w, r)
+		return
+	}
+	if call.Service == "" || call.Method == "" || call.Endpoint == "" || call.Payloads == nil {
+		util.SendBadRequest(fmt.Sprintf("Invalid payload: %+v", call), w, r)
 		return
 	}
 	doCall(call, r, w)
@@ -82,8 +93,9 @@ func doCall(call *GRPCCall, r *http.Request, w http.ResponseWriter) {
 			util.AddLogMessage(msg, r)
 		}
 	}()
+	port := util.GetRequestOrListenerPortNum(r)
 	call.RequestHeaders = r.Header
-	client, err := CreateGRPCClient(nil, "", call.Endpoint, "", "", &GRPCOptions{IsTLS: false, VerifyTLS: false, KeepOpen: 1 * time.Second})
+	client, err := CreateGRPCClient("GRPCClient", port, nil, "", call.Endpoint, "", "", &GRPCOptions{IsTLS: false, VerifyTLS: false, KeepOpen: 1 * time.Second})
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = err.Error()
@@ -154,13 +166,20 @@ func doCall(call *GRPCCall, r *http.Request, w http.ResponseWriter) {
 		}
 		return
 	}
-	if call.Result {
-		type responseType struct {
-			Headers any
-			Payload any
+	type CallResult struct {
+		Headers any
+		Payload any
+	}
+	output := []*CallResult{}
+	for _, resp := range result.Responses {
+		if !headersReceived {
+			checkViaGotos(resp.ResponseHeaders)
 		}
-		response := []responseType{}
-		for _, resp := range result.Responses {
+		callResult := &CallResult{
+			Headers: metadata.Join(resp.ResponseHeaders, resp.ResponseTrailers),
+		}
+		output = append(output, callResult)
+		if call.Result {
 			jsons := []util.JSON{}
 			if len(resp.ResponsePayload) > 0 {
 				for _, r := range resp.ResponsePayload {
@@ -170,16 +189,10 @@ func doCall(call *GRPCCall, r *http.Request, w http.ResponseWriter) {
 					}
 				}
 			}
-			if !headersReceived {
-				checkViaGotos(resp.ResponseHeaders)
-			}
-			response = append(response, responseType{
-				Headers: metadata.Join(resp.ResponseHeaders, resp.ResponseTrailers),
-				Payload: jsons,
-			})
+			callResult.Payload = jsons
 		}
-		util.WriteJson(w, response)
 	}
 	w.WriteHeader(http.StatusOK)
+	util.WriteJson(w, output)
 	util.AddLogMessage(fmt.Sprintf("Invoked Service [%s] Method [%s]", call.Service, call.Method), r)
 }

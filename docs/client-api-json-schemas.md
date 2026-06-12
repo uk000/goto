@@ -4,6 +4,7 @@
 |---|---|---|---|
 | name         | string         || Name for this target |
 | protocol     | string         |`HTTP/1.1`| Request Protocol to use. Supports `HTTP/1.1` (default), `HTTP/2.0`, `tcp` and `grpc`.|
+| host       | string         || HTTP Host/Authority |
 | method       | string         || HTTP method to use for this target |
 | service      | string         || Name of the GRPC Service. A proto must already be uploaded to the goto instance for this service. See `grpc` APIs for details. |
 | url          | string         || URL for this target   |
@@ -36,6 +37,11 @@
 | assertions | []Asssert  || List of assertions to be validated against each invocation response. Multiple assertions are applied with logical `OR` (disjunction) so that any one of them passing causes the result to be treated as passed. If all assertions fail, `errors` array in the result will contain the failure details.  |
 | autoUpgrade  | bool           |false| Whether client should negotiate auto-upgrade from http/1.1 to http/2. |
 | verifyTLS    | bool           |false| Whether the TLS certificate presented by the target is verified. (Also see `--certs` command arg) |
+| tls  | bool           |false| Whether client should send TLS traffic |
+| noSNI  | bool           |false| Whether client should remove SNI header in TLS traffic |
+| tlsVersion  | int           |1.3| TLS version to use |
+| clientCert  | string           || A pre-uploaded TLS cert/key pair to use as client cert |
+| alpn  | []string           || A  list of ALPNs that client should present to the server for negotiation |
 
 
 #### Assertion JSON Schema

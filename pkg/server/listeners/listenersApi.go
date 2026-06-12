@@ -40,7 +40,7 @@ func setRoutes(r *mux.Router) {
 	lRouter := util.PathRouter(server, "/listeners")
 	util.AddRoute(lRouter, "/add", addListener, "POST", "PUT")
 	util.AddRoute(lRouter, "/update", updateListener, "POST", "PUT")
-	util.AddRoute(lRouter, "/{port}/cert/auto/{domain}", autoCert, "PUT", "POST")
+	util.AddRouteQ(lRouter, "/{port}/cert/auto/{domain}", autoCert, "spiffeID", "PUT", "POST")
 	util.AddRoute(lRouter, "/{port}/cert/autosni", autoSNI, "PUT", "POST")
 	util.AddRoute(lRouter, "/{port}/cert/add", addListenerCert, "PUT", "POST")
 	util.AddRoute(lRouter, "/{port}/key/add", addListenerKey, "PUT", "POST")
@@ -183,8 +183,10 @@ func getListenerCertOrKey(w http.ResponseWriter, r *http.Request) {
 func autoCert(w http.ResponseWriter, r *http.Request) {
 	if l := validateListener(w, r); l != nil {
 		msg := ""
-		if domain := util.GetStringParamValue(r, "domain"); domain != "" {
-			if cert, err := gototls.CreateCertificate(domain, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
+		domain := util.GetStringParamValue(r, "domain")
+		spiffeID := util.GetStringParamValue(r, "spiffeID")
+		if domain != "" {
+			if cert, err := gototls.CreateCertificate([]string{domain}, spiffeID, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
 				l.Cert = cert
 				if l.ReopenListener() {
 					msg = fmt.Sprintf("Cert auto-generated for listener %d\n", l.Port)

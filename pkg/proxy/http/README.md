@@ -118,6 +118,7 @@ In addition to request routing, the `goto` proxy also offers some chaos features
 | transform | `TrafficTransform` | Optional transform configuration applied to all triggers unless overridden at trigger level. See `HTTP Proxy Target Transform JSON Schema` |
 | trafficConfig | `TrafficConfig` | Optional traffic configuration applied to all triggers unless overridden at trigger level. See `HTTP Proxy Traffic Config JSON Schema` |
 
+
 #### HTTP Proxy Target Endpoint JSON Schema
 
 |Field|Data Type|Description|
@@ -127,8 +128,12 @@ In addition to request routing, the `goto` proxy also offers some chaos features
 | protocol | `string` | Protocol to use for the upstream request (e.g. `HTTP/1.1`, `HTTP/2`) |
 | authority | `string` | Authority (host header) to use for the upstream request |
 | tls | `bool` | Whether TLS should be used for the upstream connection |
+| alpn | `[]string` | A list of ALPN protocols to present to the target for negotiation |
+| clientCert | `string` | A pre-uploaded cert/key pair to use as client cert |
 | requestCount | `int` | Number of requests to send per invocation |
 | concurrent | `int` | Number of concurrent replicas for the upstream request |
+| stream | `bool` | Whether proxy should stream the results back |
+
 
 #### HTTP Proxy Target Trigger JSON Schema
 
@@ -138,6 +143,7 @@ In addition to request routing, the `goto` proxy also offers some chaos features
 | endpoints | `[]string` | Array of endpoint names (referencing keys in the target's `endpoints` map) to invoke when this trigger matches. At least one endpoint is required |
 | transform | `TrafficTransform` | Optional transform configuration specific to this trigger, overrides target-level transform. See `HTTP Proxy Target Transform JSON Schema` |
 | trafficConfig | `TrafficConfig` | Optional traffic configuration specific to this trigger, overrides target-level traffic config. See `HTTP Proxy Traffic Config JSON Schema` |
+
 
 #### HTTP Proxy Target Match JSON Schema
 

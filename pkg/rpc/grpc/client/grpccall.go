@@ -163,6 +163,7 @@ func (c *GRPCClient) OpenStream(port int, method *gotogrpc.GRPCServiceMethod, md
 
 func (c *GRPCClient) InvokeUnary(call *GRPCCall, m *gotogrpc.GRPCServiceMethod, md metadata.MD, ctx context.Context, result *GRPCResult) {
 	if call == nil || call.Payloads == nil {
+		result.AddError(fmt.Errorf("No payload"))
 		return
 	}
 	invokeUnary := func(md metadata.MD, payload []byte, wg *sync.WaitGroup) {

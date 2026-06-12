@@ -57,6 +57,8 @@ type RequestStore struct {
 	IsH2                    bool
 	IsH2C                   bool
 	IsTLS                   bool
+	IsMTLS                  bool
+	IsClient                bool
 	IsGRPC                  bool
 	IsJSONRPC               bool
 	IsMCP                   bool
@@ -104,6 +106,7 @@ type RequestStore struct {
 	ResponseWriter          http.ResponseWriter
 	CurrentRouter           *mux.Router
 	ViaGotos                []string
+	PeerCertInfo            string
 }
 
 type MCPRequestStore struct {
@@ -118,6 +121,7 @@ var (
 	RequestPortKey      = &ContextKey{Key: "requestPort"}
 	IgnoredRequestKey   = &ContextKey{Key: "ignoredRequest"}
 	ConnectionKey       = &ContextKey{Key: "connection"}
+	RemoteAddrKey       = &ContextKey{Key: "remoteAddr"}
 	ProtocolKey         = &ContextKey{Key: "protocol"}
 	RequestHeadersKey   = &ContextKey{Key: "requestHeaders"}
 	HeadersKey          = &ContextKey{Key: "headers"}
@@ -205,6 +209,7 @@ func populateRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	rs.RequestHeaders = r.Header
 	rs.IsMCP = strings.Contains(r.RequestURI, "/mcp/") || strings.HasSuffix(r.RequestURI, "/mcp") || strings.Contains(r.RequestURI, "/sse")
 	rs.IsAI = strings.Contains(r.RequestURI, "/agent/")
+	rs.IsClient = strings.Contains(r.RequestURI, "/client/")
 	return ctx, rs
 }
 
@@ -248,7 +253,22 @@ func WithPort(ctx context.Context, port int) context.Context {
 }
 
 func WithConn(ctx context.Context, conn net.Conn) context.Context {
+	ctx = context.WithValue(ctx, RemoteAddrKey, conn.RemoteAddr().String())
 	return context.WithValue(ctx, ConnectionKey, conn)
+}
+
+func GetRemoteAddr(ctx context.Context) string {
+	if addr := ctx.Value(RemoteAddrKey); addr != nil {
+		return addr.(string)
+	}
+	return ""
+}
+
+func GetConn(r *http.Request) net.Conn {
+	if conn := r.Context().Value(ConnectionKey); conn != nil {
+		return conn.(net.Conn)
+	}
+	return nil
 }
 
 func SetSSE(ctx context.Context) context.Context {

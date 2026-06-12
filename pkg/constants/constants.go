@@ -25,6 +25,4 @@ const (
 	LockerCurrent          = "current"
 	LockerPeers            = "peerLockers"
 	LockerAll              = "all"
-
-	DefaultCommonName string = "goto.goto"
 )

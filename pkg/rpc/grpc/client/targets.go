@@ -19,6 +19,7 @@ package grpcclient
 import (
 	"crypto/tls"
 	"fmt"
+	"goto/pkg/global"
 	gotogrpc "goto/pkg/rpc/grpc"
 	"log"
 	"time"
@@ -57,7 +58,7 @@ func (g *GRPCTargetsManager) AddTarget(name, url, authority, serverName string, 
 	if service == nil {
 		return fmt.Errorf("Service not found for target %s", name)
 	}
-	if c, err := NewGRPCClient(service, url, authority, serverName, options); err == nil {
+	if c, err := NewGRPCClient(fmt.Sprintf("Client(%s)", name), global.Self.ServerPort, service, url, authority, serverName, options); err == nil {
 		g.targets[name] = c
 		return nil
 	} else {

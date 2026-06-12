@@ -87,24 +87,27 @@ type TrafficTransform struct {
 }
 
 type TargetEndpoint struct {
-	URL          string `yaml:"url" json:"url"`
-	Method       string `yaml:"method" json:"method"`
-	Protocol     string `yaml:"protocol" json:"protocol"`
-	Authority    string `yaml:"authority" json:"authority"`
-	IsTLS        bool   `yaml:"tls" json:"tls"`
-	RequestCount int    `yaml:"requestCount" json:"requestCount"`
-	Concurrent   int    `yaml:"concurrent" json:"concurrent"`
-	Stream       bool   `yaml:"stream" json:"stream"`
-	CallCount    int    `yaml:"-" json:"callCount"`
+	URL          string   `yaml:"url" json:"url"`
+	Method       string   `yaml:"method" json:"method"`
+	Protocol     string   `yaml:"protocol" json:"protocol"`
+	Authority    string   `yaml:"authority" json:"authority"`
+	IsTLS        bool     `yaml:"tls" json:"tls"`
+	ALPN         []string `yaml:"alpn" json:"alpn"`
+	ClientCert   string   `yaml:"clientCert" json:"clientCert"`
+	RequestCount int      `yaml:"requestCount" json:"requestCount"`
+	Concurrent   int      `yaml:"concurrent" json:"concurrent"`
+	Stream       bool     `yaml:"stream" json:"stream"`
+	CallCount    int      `yaml:"-" json:"callCount"`
 	name         string
 	target       *Target
 	lock         sync.RWMutex
 }
 
 type EndpointInvocation struct {
-	ep     *TargetEndpoint
-	is     *invocation.InvocationSpec
-	target *Target
+	proxyPort int
+	ep        *TargetEndpoint
+	is        *invocation.InvocationSpec
+	target    *Target
 }
 
 type TargetTrigger struct {
@@ -319,9 +322,10 @@ func (p *Proxy) AddTarget(t *Target) error {
 				return err
 			} else {
 				trigger.epSpecs[epName] = &EndpointInvocation{
-					ep:     ep,
-					is:     is,
-					target: t,
+					proxyPort: p.Port,
+					ep:        ep,
+					is:        is,
+					target:    t,
 				}
 			}
 			ep.target = t

@@ -146,22 +146,29 @@ func processTool(tool *MCPTool) error {
 		tool.Name = tool.Tool.Name
 	}
 	tool.Name = strings.ReplaceAll(tool.Name, "\"", "")
-	if err := tool.prepareBehavior(); err != nil {
+	if err := tool.validateBehavior(); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (t *MCPTool) prepareBehavior() error {
+func (t *MCPTool) validateBehavior() error {
 	if (t.Behavior.Fetch && (t.Config.RemoteTool == nil || t.Config.RemoteTool.URL == "")) ||
 		(t.Behavior.Remote && (t.Config.RemoteTool == nil || t.Config.RemoteTool.URL == "")) ||
 		(t.Behavior.MultiRemote && len(t.Config.MultiRemote) == 0) ||
 		(t.Behavior.Agents && (t.Config.Agent == nil || t.Config.Agent.AgentURL == "")) {
 		return errors.New("Incomplete remote configs")
 	}
+	return nil
+}
+
+func (t *MCPTool) prepareBehavior() error {
+	if err := t.validateBehavior(); err != nil {
+		return err
+	}
 	if t.Behavior.Fetch {
 		isTLS := strings.HasPrefix(t.Config.RemoteTool.URL, "https:")
-		client := transport.CreateDefaultHTTPClient(t.Name, false, isTLS, false, t.Config.RemoteTool.Authority, metrics.ConnTracker)
+		client := transport.CreateDefaultHTTPClient(t.Server.Port, t.Name, false, isTLS, false, t.Config.RemoteTool.Authority, metrics.ConnTracker)
 		t.client = client
 	}
 	if t.Behavior.Echo {

@@ -37,23 +37,17 @@ var (
 	Middleware = middleware.NewMiddleware("connection", nil, middlewareFunc)
 )
 
-func GetConn(r *http.Request) net.Conn {
-	if conn := r.Context().Value(util.ConnectionKey); conn != nil {
-		return conn.(net.Conn)
-	}
-	return nil
-}
-
 func captureTLSInfo(r *http.Request) {
 	var conn net.Conn
-	if conn = GetConn(r); conn == nil {
+	if conn = util.GetConn(r); conn == nil {
 		return
 	}
 	rs := util.GetRequestStore(r)
 	if rs == nil {
 		return
 	}
-	if l := listeners.GetListenerForPort(rs.RequestPortNum); l == nil || !l.TLS {
+	l := listeners.GetListenerForPort(rs.RequestPortNum)
+	if l == nil || !l.TLS {
 		return
 	}
 	tlsConn, ok := conn.(*tls.Conn)
@@ -64,7 +58,9 @@ func captureTLSInfo(r *http.Request) {
 	if !tlsState.HandshakeComplete {
 		return
 	}
+	rs.PeerCertInfo = listeners.GetPeerCertInfo(r)
 	rs.IsTLS = true
+	rs.IsMTLS = l.MTLS
 	rs.ServerName = tlsState.ServerName
 	rs.TLSVersionNum = tlsState.Version
 	rs.TLSVersion = gototls.GetTLSVersion(&tlsState)
@@ -73,7 +69,7 @@ func captureTLSInfo(r *http.Request) {
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		localAddr := ""
-		if conn := GetConn(r); conn != nil {
+		if conn := util.GetConn(r); conn != nil {
 			captureTLSInfo(r)
 			localAddr = conn.LocalAddr().String()
 		} else {

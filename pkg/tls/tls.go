@@ -20,49 +20,157 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha1"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"goto/pkg/global"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
 	"math/big"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
 var (
-	RootCAs = x509.NewCertPool()
-	CACert  []byte
+	RootCAs   = x509.NewCertPool()
+	CACerts   = map[string]*types.Pair[map[string]bool, []byte]{}
+	CAKeys    = map[string]*types.Pair[map[string]bool, []byte]{}
+	rawCerts  = map[string][]byte{}
+	rawKeys   = map[string][]byte{}
+	X509Certs = map[string]*tls.Certificate{}
+	lock      = sync.RWMutex{}
 )
 
-func StoreCACert(cert []byte) {
-	CACert = cert
-	loadCerts()
-	RootCAs.AppendCertsFromPEM(cert)
+func AddCert(name string, cert []byte) {
+	lock.Lock()
+	defer lock.Unlock()
+	rawCerts[name] = cert
 }
 
-func RemoveCACert() {
-	CACert = nil
+func RemoveCert(name string) {
+	lock.Lock()
+	defer lock.Unlock()
+	delete(rawCerts, name)
+}
+
+func AddKey(name string, cert []byte) {
+	lock.Lock()
+	defer lock.Unlock()
+	rawKeys[name] = cert
+}
+
+func RemoveKey(name string) {
+	lock.Lock()
+	defer lock.Unlock()
+	delete(rawKeys, name)
+}
+
+func AddAutoCert(name string, commonName string, altNames []string, spiffeID string) error {
+	domains := []string{commonName}
+	domains = append(domains, altNames...)
+	if cert, err := CreateCertificate(domains, spiffeID, name); err == nil {
+		lock.Lock()
+		defer lock.Unlock()
+		X509Certs[name] = cert
+	} else {
+		return err
+	}
+	return nil
+}
+
+func GetCert(name string) (*tls.Certificate, error) {
+	lock.Lock()
+	defer lock.Unlock()
+	cert := X509Certs[name]
+	if cert == nil {
+		rawCert := rawCerts[name]
+		rawKey := rawKeys[name]
+		if len(rawCert) > 0 && len(rawKey) > 0 {
+			if c, err := tls.X509KeyPair(rawCert, rawKey); err == nil {
+				cert = &c
+				X509Certs[name] = cert
+			} else {
+				return nil, fmt.Errorf("Failed to parse certificate with error: %s", err.Error())
+			}
+		} else {
+			return nil, fmt.Errorf("Cert/Key not uploaded yet for [%s]\n", name)
+		}
+	}
+	return cert, nil
+}
+
+func AddCACert(name, domain string, cert []byte) {
+	if len(cert) > 0 {
+		if d, err := base64.StdEncoding.DecodeString(string(cert)); err == nil {
+			cert = d
+		}
+	}
+	lock.Lock()
+	defer lock.Unlock()
+	domainsCert := CACerts[name]
+	if domainsCert == nil {
+		domainsCert = types.NewPair[map[string]bool, []byte](map[string]bool{}, cert)
+		CACerts[name] = domainsCert
+	}
+	domainsCert.Left[domain] = true
+	if len(domainsCert.Right) == 0 {
+		domainsCert.Right = cert
+	}
 	loadCerts()
+}
+
+func RemoveCACert(name string) {
+	lock.Lock()
+	defer lock.Unlock()
+	delete(CACerts, name)
+	loadCerts()
+}
+
+func AddCAKey(name, domain string, key []byte) {
+	if len(key) > 0 {
+		if d, err := base64.StdEncoding.DecodeString(string(key)); err == nil {
+			key = d
+		}
+	}
+	lock.Lock()
+	defer lock.Unlock()
+	domainsKey := CAKeys[name]
+	if domainsKey == nil {
+		domainsKey = types.NewPair(map[string]bool{}, key)
+		CAKeys[name] = domainsKey
+	}
+	domainsKey.Left[domain] = true
+	if len(domainsKey.Right) == 0 {
+		domainsKey.Right = key
+	}
+}
+
+func RemoveCAKey(name string) {
+	lock.Lock()
+	defer lock.Unlock()
+	delete(CAKeys, name)
 }
 
 func loadCerts() {
 	RootCAs = x509.NewCertPool()
-	found := false
 	if certs, err := filepath.Glob(global.ServerConfig.CertPath + "/*.crt"); err == nil {
 		for _, c := range certs {
 			if cert, err := os.ReadFile(c); err == nil {
 				RootCAs.AppendCertsFromPEM(cert)
-				found = true
 			}
 		}
 	}
@@ -70,41 +178,102 @@ func loadCerts() {
 		for _, c := range certs {
 			if cert, err := os.ReadFile(c); err == nil {
 				RootCAs.AppendCertsFromPEM(cert)
-				found = true
 			}
 		}
 	}
-	if !found {
-		RootCAs = nil
+	for _, domainsCert := range CACerts {
+		RootCAs.AppendCertsFromPEM(domainsCert.Right)
 	}
 }
 
-func CreateCertificate(domain string, saveWithPrefix string) (*tls.Certificate, error) {
+func CreateCertificate(domains []string, spiffeID, saveWithPrefix string) (outCert *tls.Certificate, err error) {
+	if len(domains) == 0 {
+		return nil, fmt.Errorf("no domains")
+	}
+	cn := domains[0]
+	var rawCACert, rawCAKey []byte
+	for _, domainsCert := range CACerts {
+		if domainsCert.Left[cn] {
+			rawCACert = domainsCert.Right
+			break
+		}
+	}
+	for _, domainsKey := range CAKeys {
+		if domainsKey.Left[cn] {
+			rawCAKey = domainsKey.Right
+			break
+		}
+	}
+	return CreateCertificateWithCA(rawCACert, rawCAKey, domains, spiffeID, saveWithPrefix)
+}
+
+func CreateCertificateWithCA(rawCACert, rawCAKey []byte, domains []string, spiffeID, saveWithPrefix string) (outCert *tls.Certificate, err error) {
+	var spiffeURL *url.URL
+	if spiffeID != "" {
+		spiffeURL, err = url.Parse(spiffeID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	priv, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	// priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return &tls.Certificate{}, err
+	}
+	pubDER, err := x509.MarshalPKIXPublicKey(priv.Public())
+	if err != nil {
+		return &tls.Certificate{}, fmt.Errorf("failed to marshal public key: %w", err)
+	}
+	subjectKeyID := sha1.Sum(pubDER)
+
 	now := time.Now()
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(now.Unix()),
 		Subject: pkix.Name{
-			CommonName:         domain,
-			Organization:       []string{domain},
-			OrganizationalUnit: []string{domain},
+			CommonName:         domains[0],
+			Organization:       []string{domains[0]},
+			OrganizationalUnit: []string{domains[0]},
 		},
-		DNSNames:              []string{domain},
+		URIs:                  []*url.URL{},
+		DNSNames:              domains,
 		NotBefore:             now,
 		NotAfter:              now.AddDate(1, 0, 0),
-		SubjectKeyId:          []byte{113, 117, 105, 99, 107, 115, 101, 114, 118, 101},
+		SubjectKeyId:          subjectKeyID[:],
 		BasicConstraintsValid: true,
-		IsCA:                  true,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		KeyUsage: x509.KeyUsageKeyEncipherment |
-			x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		IsCA:                  false,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		KeyUsage:              x509.KeyUsageDigitalSignature,
 	}
-
-	priv, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return &tls.Certificate{}, err
+	if spiffeURL != nil {
+		template.URIs = append(template.URIs, spiffeURL)
 	}
-
-	cert, err := x509.CreateCertificate(rand.Reader, template, template, priv.Public(), priv)
+	var caCert *x509.Certificate
+	var caKey any
+	if rawCACert != nil && rawCAKey != nil {
+		caCertPEM, _ := pem.Decode(rawCACert)
+		caKeyPEM, _ := pem.Decode(rawCAKey)
+		caCert, err = x509.ParseCertificate(caCertPEM.Bytes)
+		if err != nil {
+			fmt.Printf("Failed to parse CA certificate: %v\n", err)
+			return
+		}
+		template.AuthorityKeyId = caCert.SubjectKeyId
+		k, err := x509.ParsePKCS8PrivateKey(caKeyPEM.Bytes)
+		if err != nil {
+			k, err = x509.ParsePKCS1PrivateKey(caKeyPEM.Bytes)
+		}
+		if err != nil {
+			fmt.Printf("Failed to parse CA private key: %v\n", err)
+			return nil, err
+		}
+		caKey = k
+	} else {
+		template.IsCA = true
+		template.KeyUsage |= x509.KeyUsageCertSign | x509.KeyUsageCRLSign
+		caCert = template
+		caKey = priv
+	}
+	cert, err := x509.CreateCertificate(rand.Reader, template, caCert, priv.Public(), caKey)
 	if err != nil {
 		return &tls.Certificate{}, err
 	}
@@ -134,13 +303,15 @@ func CreateCertificate(domain string, saveWithPrefix string) (*tls.Certificate, 
 			} else if privBytes, err := x509.MarshalPKCS8PrivateKey(priv); err != nil {
 				fmt.Printf("Failed to marshal key with error: %s\n", err.Error())
 			} else if err = pem.Encode(keyOut, &pem.Block{Type: "PRIVATE KEY", Bytes: privBytes}); err != nil {
-				fmt.Printf("Failed to write PRIVATE KEY to file [%s] with error: %s. Will try writing as RSA key.\n", keyFile, err.Error())
-				if err = pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}); err != nil {
-					fmt.Printf("Failed to write RSA PRIVATE KEY to file [%s] with error: %s\n", keyFile, err.Error())
+				fmt.Printf("Failed to write PRIVATE KEY to file [%s] with error: %s. Will try writing as EC key.\n", keyFile, err.Error())
+				if ecBytes, err := x509.MarshalECPrivateKey(priv); err != nil {
+					fmt.Printf("Failed to marshal EC key with error: %s\n", err.Error())
+				} else if err = pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: ecBytes}); err != nil {
+					fmt.Printf("Failed to write EC PRIVATE KEY to file [%s] with error: %s\n", keyFile, err.Error())
 				} else if err := keyOut.Close(); err != nil {
 					fmt.Printf("Error closing file [%s] with error: %s\n", keyFile, err.Error())
 				} else {
-					fmt.Printf("Saved RSA PRIVATE KEY to file [%s]\n", keyFile)
+					fmt.Printf("Saved EC PRIVATE KEY to file [%s]\n", keyFile)
 				}
 			} else if err := keyOut.Close(); err != nil {
 				fmt.Printf("Error closing file [%s] with error: %s\n", keyFile, err.Error())
@@ -149,11 +320,14 @@ func CreateCertificate(domain string, saveWithPrefix string) (*tls.Certificate, 
 			}
 		}
 	}
-	var outCert tls.Certificate
+	outCert = &tls.Certificate{}
 	outCert.Certificate = append(outCert.Certificate, cert)
+	if caCert != nil && caCert != template {
+		outCert.Certificate = append(outCert.Certificate, caCert.Raw)
+	}
 	outCert.PrivateKey = priv
 
-	return &outCert, nil
+	return outCert, nil
 }
 
 func EncodeX509Cert(cert *tls.Certificate) ([]byte, error) {

@@ -11,14 +11,6 @@ The application accepts the following command arguments:
     </thead>
     <tbody>
         <tr>
-          <td rowspan="2"><pre>--port {port}</pre></td>
-          <td>Primary port the server listens on. Alternately use <strong>--ports</strong> for multiple startup ports. Additional ports can be opened by making listener API calls on this port. See <a href="#-listeners">Listeners</a> feature for more details. </td>
-          <td rowspan="2">8080</td>
-        </tr>
-        <tr>
-          <td>* Additional ports can be opened by making listener API calls on this port. See <a href="#-listeners">Listeners</a> feature for more details.</td>
-        </tr>
-        <tr>
           <td rowspan="4"><pre>--ports {ports}</pre></td>
           <td>Initial list of ports that the server should start with. Port list is given as comma-separated list of <pre>{port1},<br/>{port2}/{protocol2}/{commonName2},<br/>{port3}/{protocol3}/{commonName3},...</pre>  </td>
           <td rowspan="4">""</td>
@@ -30,17 +22,32 @@ The application accepts the following command arguments:
           <td>* Protocol <strong>https</strong> configures the port to serve HTTP requests with a self-signed TLS cert, whereas protocol <strong>tls</strong> configures a TCP port with self-signed TLS cert, and <strong>grpcs</strong> configures a gRPC port with self-signed TLS cert. <strong>CommonName</strong> is used for generating self-signed certs, and defaults to <strong>goto.goto</strong>. Use protocol <strong>http1</strong> or <strong>https1</strong> to configure a listener port that only serves HTTP/1.1 protocol and explicitly disallows HTTP/2 protocol.</td>
         </tr>
         <tr>
-          <td>* For example: <pre>--ports 8080,<br/>8081/http,8083/https,<br/>8443/https/foo.com,<br/>8000/tcp,9000/tls,10000/grpc,3000/rpc</pre>  In addition to the startup ports, additional ports can be opened by making listener API calls on this port. See <a href="#-listeners">Listeners</a> feature for more details.</td>
+          <td>* For example: <pre>--ports 8080,<br/>8081/http,8083/https,<br/>8443/https/foo.com/mtls,<br/>8000/tcp,9000/tls,10000/grpc,3000/rpc</pre>  In addition to the startup ports, additional ports can be opened by making listener API calls on this port. See <a href="#-listeners">Listeners</a> feature for more details.</td>
         </tr>
         <tr>
           <td><pre>--rpcPort {port}</pre></td>
           <td>A mandatory default RPC port that will be used to server A2A and MCP JSONRPC protocol traffic. Additional RPC ports can be opened via ports list above. </td>
-          <td>-</td>
+          <td>3000</td>
         </tr>
         <tr>
           <td><pre>--grpcPort {port}</pre></td>
           <td>A mandatory default gRPC port that will be used to server gRPC traffic. Additional gRPC ports can be opened via ports list above. </td>
+          <td>1234</td>
+        </tr>
+        <tr>
+          <td><pre>--config {path}</pre></td>
+          <td>A list of directory paths from where startup configs will be loaded. Goto will look for .yaml and .sh files in the config folders and load those. Shell scripts are executed and expected to produce yaml output.  </td>
           <td>-</td>
+        </tr>
+        <tr>
+          <td><pre>--alpn {alpn}</pre></td>
+          <td>A list of ALPNs that the server will negotiate with TLS clients. </td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><pre>--cn {alpn}</pre></td>
+          <td>CommonName to be used for Auto-Generated TLS Certs. </td>
+          <td>goto.goto</td>
         </tr>
         <tr>
           <td><pre>--label `{label}`</pre></td>

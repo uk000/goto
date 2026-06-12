@@ -19,8 +19,9 @@ package grpcclient
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
-	"goto/pkg/constants"
+	"goto/pkg/global"
 	"goto/pkg/metrics"
 	gotogrpc "goto/pkg/rpc/grpc"
 	gototls "goto/pkg/tls"
@@ -52,6 +53,8 @@ type GRPCOptions struct {
 
 type GRPCClient struct {
 	transport.BaseTransportIntercept
+	Label          string                `json:"label"`
+	ClientPort     int                   `json:"clientPort"`
 	Service        *gotogrpc.GRPCService `json:"service"`
 	URL            string                `json:"url"`
 	TLSServerName  string                `json:"tlsServerName"`
@@ -59,13 +62,14 @@ type GRPCClient struct {
 	Options        GRPCOptions           `json:"options"`
 	tlsConfig      *tls.Config
 	tlsCredentials credentials.TransportCredentials
+	PeerCertInfo   *gototls.PeerCertInfo
 	conn           *grpc.ClientConn
 	stub           *grpcdynamic.Stub
 	connErrorCount int
 }
 
-func CreateGRPCClient(service *gotogrpc.GRPCService, targetService, url, authority, serverName string, options *GRPCOptions) (*GRPCClient, error) {
-	client, err := NewGRPCClient(service, url, authority, serverName, options)
+func CreateGRPCClient(label string, clientPort int, service *gotogrpc.GRPCService, targetService, url, authority, serverName string, options *GRPCOptions) (*GRPCClient, error) {
+	client, err := NewGRPCClient(label, clientPort, service, url, authority, serverName, options)
 	if err != nil {
 		return nil, err
 	}
@@ -75,11 +79,13 @@ func CreateGRPCClient(service *gotogrpc.GRPCService, targetService, url, authori
 	return client, nil
 }
 
-func NewGRPCClient(service *gotogrpc.GRPCService, url, authority, serverName string, options *GRPCOptions) (*GRPCClient, error) {
+func NewGRPCClient(label string, clientPort int, service *gotogrpc.GRPCService, url, authority, serverName string, options *GRPCOptions) (*GRPCClient, error) {
 	if serverName == "" {
 		serverName = authority
 	}
 	c := &GRPCClient{
+		Label:         label,
+		ClientPort:    clientPort,
 		Service:       service,
 		URL:           url,
 		TLSServerName: serverName,
@@ -99,10 +105,11 @@ func (c *GRPCClient) configureTLS() {
 			MinVersion:         c.Options.TLSVersion,
 			MaxVersion:         c.Options.TLSVersion,
 		}
+		tlsConfig.GetConfigForClient = gototls.GetConfigForClient(c.ClientPort, c.Label, tlsConfig, c.StoreALPN, c.StorePeerCertInfo, c.StoreSNI)
 		if c.Options.VerifyTLS {
 			tlsConfig.RootCAs = gototls.RootCAs
 		}
-		if cert, err := gototls.CreateCertificate(constants.DefaultCommonName, ""); err == nil {
+		if cert, err := gototls.CreateCertificate([]string{global.ServerConfig.CommonName}, "", ""); err == nil {
 			tlsConfig.Certificates = []tls.Certificate{*cert}
 		}
 		c.SetTLSConfig(tlsConfig)
@@ -122,11 +129,53 @@ func (c *GRPCClient) SetTLSConfig(tlsConfig *tls.Config) {
 	}
 }
 
-func (c *GRPCClient) UpdateTLSConfig(serverName string, tlsVersion uint16) {
+func (c *GRPCClient) UpdateTLSConfig(serverName string, tlsVersion uint16, verify bool, alpn []string) {
 	c.TLSServerName = serverName
 	c.Authority = serverName
 	c.Options.TLSVersion = tlsVersion
 	c.configureTLS()
+}
+
+func (c *GRPCClient) UpdateTLSCerts(rootCAs *x509.CertPool, cert *tls.Certificate) {
+}
+
+func (c *GRPCClient) GetALPNHandler(string) func(authority string, c *tls.Conn) http.RoundTripper {
+	return nil
+}
+
+func (c *GRPCClient) SetALPNHandler(string, func(authority string, c *tls.Conn) http.RoundTripper) {
+}
+
+func (c *GRPCClient) StorePeerCertInfo(remoteAddr string, commonName string, dnsNames, uris, issuers []string) {
+	if c.PeerCertInfo == nil {
+		c.PeerCertInfo = &gototls.PeerCertInfo{}
+		c.PeerCertInfo.RemoteAddr = remoteAddr
+	}
+	c.PeerCertInfo.CommonName = commonName
+	c.PeerCertInfo.DNSNames = dnsNames
+	c.PeerCertInfo.URIs = uris
+	c.PeerCertInfo.Issuers = issuers
+}
+
+func (c *GRPCClient) StoreSNI(remoteAddr string, sni, alpn string) {
+	if c.PeerCertInfo == nil {
+		c.PeerCertInfo = &gototls.PeerCertInfo{}
+		c.PeerCertInfo.RemoteAddr = remoteAddr
+	}
+	c.PeerCertInfo.SNI = sni
+	c.PeerCertInfo.NegotiatedALPN = alpn
+}
+
+func (c *GRPCClient) StoreALPN(remoteAddr string, alpn []string) {
+	if c.PeerCertInfo == nil {
+		c.PeerCertInfo = &gototls.PeerCertInfo{}
+		c.PeerCertInfo.RemoteAddr = remoteAddr
+	}
+	c.PeerCertInfo.ALPN = alpn
+}
+
+func (c *GRPCClient) GetPeerCertInfo() *gototls.PeerCertInfo {
+	return c.PeerCertInfo
 }
 
 type permanentDialError struct {
@@ -290,7 +339,7 @@ func (c *GRPCClient) LoadServiceMethodFromReflection(serviceName, methodName str
 }
 
 func LoadRemoteReflectedServices(upstream string) (err error) {
-	c, err := CreateGRPCClient(nil, "", upstream, "", "", &GRPCOptions{IsTLS: false, VerifyTLS: false})
+	c, err := CreateGRPCClient("Reflect", global.Self.ServerPort, nil, "", upstream, "", "", &GRPCOptions{IsTLS: false, VerifyTLS: false})
 	if err != nil {
 		return err
 	}
