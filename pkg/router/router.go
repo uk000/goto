@@ -297,7 +297,7 @@ func (pr *PortRouter) Intercept(resp *http.Response) error {
 				content = body
 			}
 			selfHeaders := echo.GetEchoResponse(rt.Listener, rt.RemoteAddr, rt.RequestHost, rt.RequestURI, rt.RequestMethod, rt.RequestProto,
-				rt.RequestQuery, rt.RequestSNI, rt.Route.From.Port, rt.RequestPayloadSize, rt.ResponsePayloadSize, rt.RequestHeaders, rs.IsTLS, rs.IsMTLS, rs.PeerCertInfo)
+				rt.RequestQuery, rt.RequestSNI, rt.Route.From.Port, rt.RequestPayloadSize, rt.ResponsePayloadSize, rt.RequestHeaders, rs.IsTLS, rs.IsMTLS, rs.ServerCert, rs.ClientCert)
 			routeRequestAt := fmt.Sprintf("%s/%s", rt.Listener, rt.RequestAt.Format(time.RFC3339Nano))
 			routeResponseAt := fmt.Sprintf("%s/%s", rt.Listener, rt.ResponseAt.Format(time.RFC3339Nano))
 			routeTook := fmt.Sprintf("%s/%s", rt.Listener, rt.Took.String())

@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"golang.org/x/net/http2"
 )
 
 var (
@@ -79,6 +80,9 @@ func configureAndStartAIServer(port int) error {
 		//ConnState:    conn.ConnState,
 		Handler:  h2cHandler,
 		ErrorLog: log.New(io.Discard, "discard", 0),
+	}
+	if err := http2.ConfigureServer(jsonRPCServer, h2s); err != nil {
+		log.Fatalf("Failed to configure HTTP2 on JSONRPC Server: %v", err)
 	}
 	return StartHttpServer(jsonRPCServer, true)
 }

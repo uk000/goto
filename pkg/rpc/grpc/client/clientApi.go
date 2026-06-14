@@ -56,11 +56,11 @@ func call(w http.ResponseWriter, r *http.Request) {
 	call := &GRPCCall{}
 	err := util.ReadJsonOrYamlPayloadFromBody(r.Body, &call)
 	if err != nil {
-		util.SendBadRequest(fmt.Sprintf("Failed to parse payload with error [%s]", err.Error()), w, r)
+		util.SendBadRequest(w, r, "Failed to parse payload with error [%s]", err.Error())
 		return
 	}
 	if call.Service == "" || call.Method == "" || call.Endpoint == "" || call.Payloads == nil {
-		util.SendBadRequest(fmt.Sprintf("Invalid payload: %+v", call), w, r)
+		util.SendBadRequest(w, r, "Invalid payload: %+v", call)
 		return
 	}
 	doCall(call, r, w)
@@ -72,7 +72,7 @@ func callServiceMethod(w http.ResponseWriter, r *http.Request) {
 	methodName := util.GetStringParamValue(r, "method")
 	stream := strings.Contains(r.RequestURI, "stream")
 	if endpoint == "" || serviceName == "" || methodName == "" {
-		util.SendBadRequest("Missing endpoint/service/method", w, r)
+		util.SendBadRequest(w, r, "Missing endpoint/service/method")
 		return
 	}
 	call := &GRPCCall{

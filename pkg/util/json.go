@@ -435,6 +435,10 @@ func (v *Value) GetRaw() any {
 	return v
 }
 
+func (v *Value) String() string {
+	return fmt.Sprint(v.Value)
+}
+
 func (j *JSONValue) FindPaths(paths []string) map[string]*Value {
 	data := map[string]*Value{}
 	for _, path := range paths {

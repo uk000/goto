@@ -17,6 +17,7 @@
 package listeners
 
 import (
+	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"goto/pkg/constants"
@@ -143,8 +144,8 @@ func getListenerCertOrKey(w http.ResponseWriter, r *http.Request) {
 		var err error
 		if cert {
 			raw := l.RawCert
-			if raw == nil {
-				raw, err = gototls.EncodeX509Cert(l.Cert)
+			if raw == nil && len(l.Certificates) > 0 {
+				raw, err = gototls.EncodeX509Cert(l.Certificates[0])
 			}
 			if raw != nil {
 				w.Header().Set(constants.HeaderContentLength, strconv.Itoa(len(raw)))
@@ -158,8 +159,8 @@ func getListenerCertOrKey(w http.ResponseWriter, r *http.Request) {
 			}
 		} else if key {
 			raw := l.RawKey
-			if raw == nil {
-				raw, err = gototls.EncodeX509Key(l.Cert)
+			if raw == nil && len(l.Certificates) > 0 {
+				raw, err = gototls.EncodeX509Key(l.Certificates[0])
 			}
 			if raw != nil {
 				w.Header().Set(constants.HeaderContentLength, strconv.Itoa(len(raw)))
@@ -187,7 +188,7 @@ func autoCert(w http.ResponseWriter, r *http.Request) {
 		spiffeID := util.GetStringParamValue(r, "spiffeID")
 		if domain != "" {
 			if cert, err := gototls.CreateCertificate([]string{domain}, spiffeID, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
-				l.Cert = cert
+				l.Certificates = []*tls.Certificate{cert}
 				if l.ReopenListener() {
 					msg = fmt.Sprintf("Cert auto-generated for listener %d\n", l.Port)
 					events.SendRequestEvent("Listener Cert Generated", msg, r)

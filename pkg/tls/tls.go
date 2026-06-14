@@ -19,6 +19,7 @@ package tls
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -36,6 +37,7 @@ import (
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
+	"log"
 	"math/big"
 	"net"
 	"net/url"
@@ -43,7 +45,13 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	spiffe "github.com/spiffe/go-spiffe/v2/workloadapi"
 )
+
+type SpiffeCerts struct {
+	ByIDNameDomain map[string]*types.Pair[string, string]
+}
 
 var (
 	RootCAs   = x509.NewCertPool()
@@ -51,7 +59,8 @@ var (
 	CAKeys    = map[string]*types.Pair[map[string]bool, []byte]{}
 	rawCerts  = map[string][]byte{}
 	rawKeys   = map[string][]byte{}
-	X509Certs = map[string]*tls.Certificate{}
+	X509Certs = map[string][]*tls.Certificate{}
+	Spiffe    = &SpiffeCerts{}
 	lock      = sync.RWMutex{}
 )
 
@@ -79,38 +88,25 @@ func RemoveKey(name string) {
 	delete(rawKeys, name)
 }
 
-func AddAutoCert(name string, commonName string, altNames []string, spiffeID string) error {
-	domains := []string{commonName}
-	domains = append(domains, altNames...)
-	if cert, err := CreateCertificate(domains, spiffeID, name); err == nil {
-		lock.Lock()
-		defer lock.Unlock()
-		X509Certs[name] = cert
-	} else {
-		return err
-	}
-	return nil
-}
-
-func GetCert(name string) (*tls.Certificate, error) {
+func GetCerts(key string) (certs []*tls.Certificate, err error) {
 	lock.Lock()
 	defer lock.Unlock()
-	cert := X509Certs[name]
-	if cert == nil {
-		rawCert := rawCerts[name]
-		rawKey := rawKeys[name]
+	certs = X509Certs[key]
+	if len(certs) == 0 {
+		rawCert := rawCerts[key]
+		rawKey := rawKeys[key]
 		if len(rawCert) > 0 && len(rawKey) > 0 {
 			if c, err := tls.X509KeyPair(rawCert, rawKey); err == nil {
-				cert = &c
-				X509Certs[name] = cert
+				certs = []*tls.Certificate{&c}
+				X509Certs[key] = certs
 			} else {
-				return nil, fmt.Errorf("Failed to parse certificate with error: %s", err.Error())
+				err = fmt.Errorf("Failed to parse certificate with error: %s", err.Error())
 			}
 		} else {
-			return nil, fmt.Errorf("Cert/Key not uploaded yet for [%s]\n", name)
+			err = fmt.Errorf("Cert/Key not uploaded yet for [%s]\n", key)
 		}
 	}
-	return cert, nil
+	return certs, nil
 }
 
 func AddCACert(name, domain string, cert []byte) {
@@ -123,7 +119,7 @@ func AddCACert(name, domain string, cert []byte) {
 	defer lock.Unlock()
 	domainsCert := CACerts[name]
 	if domainsCert == nil {
-		domainsCert = types.NewPair[map[string]bool, []byte](map[string]bool{}, cert)
+		domainsCert = types.NewPair(map[string]bool{}, cert)
 		CACerts[name] = domainsCert
 	}
 	domainsCert.Left[domain] = true
@@ -163,6 +159,77 @@ func RemoveCAKey(name string) {
 	lock.Lock()
 	defer lock.Unlock()
 	delete(CAKeys, name)
+}
+
+func AddAutoCert(name string, commonName string, altNames []string, spiffeID string) error {
+	domains := []string{commonName}
+	domains = append(domains, altNames...)
+	if cert, err := CreateCertificate(domains, spiffeID, name); err == nil {
+		lock.Lock()
+		defer lock.Unlock()
+		X509Certs[name] = []*tls.Certificate{cert}
+	} else {
+		return err
+	}
+	return nil
+}
+
+func (s *SpiffeCerts) Add(name, domain, spiffeID string) {
+	if s.ByIDNameDomain == nil {
+		s.ByIDNameDomain = map[string]*types.Pair[string, string]{}
+	}
+	s.ByIDNameDomain[spiffeID] = types.NewPair(name, domain)
+}
+
+func (s *SpiffeCerts) IsEmpty() bool {
+	return len(s.ByIDNameDomain) == 0
+}
+
+func (s *SpiffeCerts) LoadSpiffeCerts(socketAddr string) error {
+	log.Printf("Loading Spiffe certs from socket: %s", socketAddr)
+	client, err := spiffe.New(context.Background(), spiffe.WithAddr(socketAddr))
+	if err != nil {
+		log.Printf("Failed to load Spiffe certs with error: %s", err.Error())
+		return err
+	}
+	defer client.Close()
+	svids, err := client.FetchX509SVIDs(context.Background())
+	if err != nil {
+		log.Printf("Failed to load Spiffe certs with error: %s", err.Error())
+		return err
+	}
+	lock.Lock()
+	defer lock.Unlock()
+	for _, svid := range svids {
+		spiffeID := svid.ID.String()
+		req := s.ByIDNameDomain[spiffeID]
+		if req == nil {
+			log.Printf("Skipping Cert of SpiffeID: %s", spiffeID)
+			continue
+		}
+		if len(svid.Certificates) == 0 {
+			log.Printf("No Certificates inside Cert of SpiffeID: %s", spiffeID)
+			continue
+		}
+		cert := &tls.Certificate{
+			Leaf:       svid.Certificates[0],
+			PrivateKey: svid.PrivateKey,
+		}
+		for _, c := range svid.Certificates {
+			if c == nil || len(c.Raw) == 0 {
+				continue
+			}
+			cert.Certificate = append(cert.Certificate, c.Raw)
+		}
+		if req.Left != "" {
+			X509Certs[req.Left] = []*tls.Certificate{cert}
+		}
+		if req.Right != "" {
+			X509Certs[req.Right] = []*tls.Certificate{cert}
+		}
+		log.Printf("Loaded Spiffe Cert (Name: [%s], Domain: [%s] SPIFFE ID: [%s]", req.Left, req.Right, spiffeID)
+	}
+	return nil
 }
 
 func loadCerts() {
@@ -248,19 +315,43 @@ func CreateCertificateWithCA(rawCACert, rawCAKey []byte, domains []string, spiff
 		template.URIs = append(template.URIs, spiffeURL)
 	}
 	var caCert *x509.Certificate
+	var caChainDER [][]byte // all certs from the CA PEM (signing cert + any intermediates/root)
 	var caKey any
 	if rawCACert != nil && rawCAKey != nil {
-		caCertPEM, _ := pem.Decode(rawCACert)
-		caKeyPEM, _ := pem.Decode(rawCAKey)
-		caCert, err = x509.ParseCertificate(caCertPEM.Bytes)
-		if err != nil {
-			fmt.Printf("Failed to parse CA certificate: %v\n", err)
-			return
+		// Parse ALL certificate blocks from the CA PEM.
+		// if we stop at the first block we lose the rest and can't build the chain to its trusted root.
+		rest := rawCACert
+		for {
+			var block *pem.Block
+			block, rest = pem.Decode(rest)
+			if block == nil {
+				break
+			}
+			if block.Type != "CERTIFICATE" {
+				continue
+			}
+			parsed, parseErr := x509.ParseCertificate(block.Bytes)
+			if parseErr != nil {
+				fmt.Printf("Failed to parse CA certificate in chain: %v\n", parseErr)
+				return nil, parseErr
+			}
+			if caCert == nil {
+				caCert = parsed // first cert is the direct signing CA
+			}
+			caChainDER = append(caChainDER, block.Bytes)
 		}
+		if caCert == nil {
+			return nil, fmt.Errorf("no CERTIFICATE block found in CA cert PEM")
+		}
+		// AuthorityKeyId links the leaf to its issuer for chain building (RFC 5280 §4.2.1.1).
 		template.AuthorityKeyId = caCert.SubjectKeyId
+		caKeyPEM, _ := pem.Decode(rawCAKey)
 		k, err := x509.ParsePKCS8PrivateKey(caKeyPEM.Bytes)
 		if err != nil {
 			k, err = x509.ParsePKCS1PrivateKey(caKeyPEM.Bytes)
+		}
+		if err != nil {
+			k, err = x509.ParseECPrivateKey(caKeyPEM.Bytes)
 		}
 		if err != nil {
 			fmt.Printf("Failed to parse CA private key: %v\n", err)
@@ -322,9 +413,7 @@ func CreateCertificateWithCA(rawCACert, rawCAKey []byte, domains []string, spiff
 	}
 	outCert = &tls.Certificate{}
 	outCert.Certificate = append(outCert.Certificate, cert)
-	if caCert != nil && caCert != template {
-		outCert.Certificate = append(outCert.Certificate, caCert.Raw)
-	}
+	outCert.Certificate = append(outCert.Certificate, caChainDER...)
 	outCert.PrivateKey = priv
 
 	return outCert, nil
@@ -428,9 +517,7 @@ func getClientHelloData(tlsBuff []byte) ([]byte, error) {
 	if len(buff) < 34 /*32 client random + 1 session id + 1 cipher suites*/ {
 		return nil, errors.New("Invalid ClientHello")
 	}
-	//skip client random
 	buff = buff[34:]
-	//skip session data
 	_, buff, err = parseByteRecordOfSize(buff, 1, "Session Data")
 	if err != nil {
 		return nil, err
@@ -514,17 +601,15 @@ func getClientCipherSuites(tlsBuff []byte) ([]string, error) {
 }
 
 func getClientHelloExtensions(tlsBuff []byte) ([]byte, error) {
-	//skip cipher suite
 	_, buff, err := parseByteRecordOfSize(tlsBuff, 2, "Cipher Suites")
 	if err != nil {
 		return nil, err
 	}
-	//skip compression
 	_, buff, err = parseByteRecordOfSize(buff, 1, "Compression")
 	if err != nil {
 		return nil, err
 	}
-	if len(buff) < 2 { //No extensions
+	if len(buff) < 2 {
 		return nil, nil
 	}
 	buff, _, err = parseByteRecordOfSize(buff, 2, "Client Extensions")
@@ -549,7 +634,6 @@ func getSNIExtensionEntries(extensions []byte) (sni string, err error) {
 		}
 	}
 	if found {
-		//While the extension data format is list type, a client can only send atmost 1 server name, so just read 1
 		sniListEntry, _, err := parseByteRecordOfSize(extData, 2, "SNI Record")
 		if err != nil {
 			return "", err
@@ -577,7 +661,6 @@ func getSignatureAlgorithms(extensions []byte) (algos []string, err error) {
 		}
 	}
 	if found {
-		//read redundant length again
 		length := int(binary.BigEndian.Uint16(extData[:2]))
 		extData = extData[2:]
 		for i := 0; i < length; i += 2 {

@@ -1,11 +1,21 @@
 name: goto-test-config
 tls:
-  - port: 8443
-    key: ~/key1.pem
-    cert: ~/cert1.pem
-  - port: 4444
-    key: ~/key2.pem
-    cert: ~/cert2.pem
+  spiffeSocket: "unix:///tmp/spire-agent/public/api.sock"
+  caCerts:
+    - name: myca
+      domain: "goto.client"
+    - name: myca
+      domain: "goto.goto"
+      key: "$caKey"
+      cert: "$caCert"
+  certs:
+    - port: 8443
+      domain: "goto.goto"
+      san: ["goto.1", "goto.2"]
+      spiffeID: "spiffe://cluster.local/ns/goto/sa/goto-8443"
+    - name: clientCert
+      domain: "goto.client"
+      spiffeID: "spiffe://cluster.local/ns/goto/sa/goto-client"
 mcp:
   toolSchemas:
     - name: default

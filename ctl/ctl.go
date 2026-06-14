@@ -59,8 +59,8 @@ func ctlApply(args []string) {
 	loadContext()
 	config := LoadConfig(global.CtlConfig.ConfigFile)
 	if config != nil {
-		processTLS(config)
-		processScripts(config)
+		processTLS(config.TLS)
+		processScripts(config.Scripts)
 		processMCP(config)
 		processA2A(config)
 		processProxy(config)

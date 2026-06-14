@@ -31,6 +31,10 @@ import (
 	"github.com/gorilla/mux"
 )
 
+const (
+	DefaultSocket = "unix:///tmp/spire-agent/public/api.sock"
+)
+
 var (
 	Middleware = middleware.NewMiddleware("tls", setRoutes, nil)
 )
@@ -42,12 +46,15 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(tlsRouter, "/ca/key/add/{name}/{domain}", addCACertOrKey, "PUT", "POST")
 	util.AddRoute(tlsRouter, "/ca/key/remove/{name}", removeCACertOrKey, "PUT", "POST")
 	util.AddRoute(tlsRouter, "/ca/certs", getCACerts, "GET")
-	util.AddRouteQ(tlsRouter, "/cert/add", addCertOrKey, "name", "PUT", "POST")
-	util.AddRouteQ(tlsRouter, "/cert/remove", removeCertOrKey, "name", "PUT", "POST")
-	util.AddRouteQ(tlsRouter, "/key/add", addCertOrKey, "name", "PUT", "POST")
-	util.AddRouteQ(tlsRouter, "/key/remove", removeCertOrKey, "name", "PUT", "POST")
+
+	util.AddRoute(tlsRouter, "/cert/add/{name}", addCertOrKey, "PUT", "POST")
+	util.AddRoute(tlsRouter, "/cert/remove/{name}", removeCertOrKey, "PUT", "POST")
+	util.AddRoute(tlsRouter, "/key/add/{name}", addCertOrKey, "PUT", "POST")
+	util.AddRoute(tlsRouter, "/key/remove/{name}", removeCertOrKey, "PUT", "POST")
+
 	util.AddRoute(tlsRouter, "/certs", getCerts, "GET")
 	util.AddRoute(tlsRouter, "/certs/raw", getCerts, "GET")
+
 	util.AddRouteQ(tlsRouter, "/workdir/set", setWorkDir, "dir", "POST", "PUT")
 }
 
@@ -135,56 +142,58 @@ func getCACerts(w http.ResponseWriter, r *http.Request) {
 }
 
 func getCerts(w http.ResponseWriter, r *http.Request) {
-	for name, tlsCert := range X509Certs {
-		cert, err := x509.ParseCertificate(tlsCert.Certificate[0])
-		if err != nil {
-			util.SendBadRequest(err.Error(), w, r)
-			return
-		}
-		b := &strings.Builder{}
-		b.WriteString(fmt.Sprintf("Certificate [%s]:\n", name))
-		b.WriteString(fmt.Sprintf("  Version: %d\n", cert.Version))
-		b.WriteString(fmt.Sprintf("  Serial Number: %s\n", cert.SerialNumber.String()))
-		b.WriteString(fmt.Sprintf("  Signature Algorithm: %s\n", cert.SignatureAlgorithm.String()))
-		b.WriteString(fmt.Sprintf("  Issuer: %s\n", cert.Issuer.String()))
-		b.WriteString(fmt.Sprintln("  Validity:"))
-		b.WriteString(fmt.Sprintf("    Not Before: %s\n", cert.NotBefore.UTC().Format("Jan  2 15:04:05 2006 GMT")))
-		b.WriteString(fmt.Sprintf("    Not After : %s\n", cert.NotAfter.UTC().Format("Jan  2 15:04:05 2006 GMT")))
-		b.WriteString(fmt.Sprintf("  Subject: %s\n", cert.Subject.String()))
-		b.WriteString(fmt.Sprintln("  Subject Public Key Info:"))
-		b.WriteString(fmt.Sprintf("    Public Key Algorithm: %s\n", cert.PublicKeyAlgorithm.String()))
-		b.WriteString(fmt.Sprintln("  X509v3 Extensions:"))
-		b.WriteString(fmt.Sprintf("    Basic Constraints: CA:%v\n", cert.IsCA))
-		if cert.KeyUsage != 0 {
-			b.WriteString(fmt.Sprintf("    Key Usage: %s\n", certKeyUsageString(cert.KeyUsage)))
-		}
-		if len(cert.ExtKeyUsage) > 0 {
-			b.WriteString(fmt.Sprintf("    Extended Key Usage: %s\n", certExtKeyUsageString(cert.ExtKeyUsage)))
-		}
-		if len(cert.SubjectKeyId) > 0 {
-			b.WriteString(fmt.Sprintf("    Subject Key Identifier: %s\n", certHexBytes(cert.SubjectKeyId)))
-		}
-		if len(cert.AuthorityKeyId) > 0 {
-			b.WriteString(fmt.Sprintf("    Authority Key Identifier: %s\n", certHexBytes(cert.AuthorityKeyId)))
-		}
-		if len(cert.DNSNames) > 0 || len(cert.IPAddresses) > 0 || len(cert.URIs) > 0 {
-			var sans []string
-			for _, dns := range cert.DNSNames {
-				sans = append(sans, "DNS:"+dns)
+	for name, certs := range X509Certs {
+		for _, tlsCert := range certs {
+			cert, err := x509.ParseCertificate(tlsCert.Certificate[0])
+			if err != nil {
+				util.SendBadRequest(w, r, err.Error())
+				return
 			}
-			for _, ip := range cert.IPAddresses {
-				sans = append(sans, "IP:"+ip.String())
+			b := &strings.Builder{}
+			b.WriteString(fmt.Sprintf("Certificate [%s]:\n", name))
+			b.WriteString(fmt.Sprintf("  Version: %d\n", cert.Version))
+			b.WriteString(fmt.Sprintf("  Serial Number: %s\n", cert.SerialNumber.String()))
+			b.WriteString(fmt.Sprintf("  Signature Algorithm: %s\n", cert.SignatureAlgorithm.String()))
+			b.WriteString(fmt.Sprintf("  Issuer: %s\n", cert.Issuer.String()))
+			b.WriteString(fmt.Sprintln("  Validity:"))
+			b.WriteString(fmt.Sprintf("    Not Before: %s\n", cert.NotBefore.UTC().Format("Jan  2 15:04:05 2006 GMT")))
+			b.WriteString(fmt.Sprintf("    Not After : %s\n", cert.NotAfter.UTC().Format("Jan  2 15:04:05 2006 GMT")))
+			b.WriteString(fmt.Sprintf("  Subject: %s\n", cert.Subject.String()))
+			b.WriteString(fmt.Sprintln("  Subject Public Key Info:"))
+			b.WriteString(fmt.Sprintf("    Public Key Algorithm: %s\n", cert.PublicKeyAlgorithm.String()))
+			b.WriteString(fmt.Sprintln("  X509v3 Extensions:"))
+			b.WriteString(fmt.Sprintf("    Basic Constraints: CA:%v\n", cert.IsCA))
+			if cert.KeyUsage != 0 {
+				b.WriteString(fmt.Sprintf("    Key Usage: %s\n", certKeyUsageString(cert.KeyUsage)))
 			}
-			for _, uri := range cert.URIs {
-				sans = append(sans, "URI:"+uri.String())
+			if len(cert.ExtKeyUsage) > 0 {
+				b.WriteString(fmt.Sprintf("    Extended Key Usage: %s\n", certExtKeyUsageString(cert.ExtKeyUsage)))
 			}
-			b.WriteString(fmt.Sprintf("    Subject Alternative Name: %s\n", strings.Join(sans, ", ")))
+			if len(cert.SubjectKeyId) > 0 {
+				b.WriteString(fmt.Sprintf("    Subject Key Identifier: %s\n", certHexBytes(cert.SubjectKeyId)))
+			}
+			if len(cert.AuthorityKeyId) > 0 {
+				b.WriteString(fmt.Sprintf("    Authority Key Identifier: %s\n", certHexBytes(cert.AuthorityKeyId)))
+			}
+			if len(cert.DNSNames) > 0 || len(cert.IPAddresses) > 0 || len(cert.URIs) > 0 {
+				var sans []string
+				for _, dns := range cert.DNSNames {
+					sans = append(sans, "DNS:"+dns)
+				}
+				for _, ip := range cert.IPAddresses {
+					sans = append(sans, "IP:"+ip.String())
+				}
+				for _, uri := range cert.URIs {
+					sans = append(sans, "URI:"+uri.String())
+				}
+				b.WriteString(fmt.Sprintf("    Subject Alternative Name: %s\n", strings.Join(sans, ", ")))
+			}
+			fpBytes := sha256.Sum256(tlsCert.Certificate[0])
+			b.WriteString(fmt.Sprintf("  SHA-256 Fingerprint: %s\n", certHexBytes(fpBytes[:])))
+			b.WriteString(fmt.Sprintf("  Chain Length: %d\n", len(tlsCert.Certificate)))
+			b.WriteString(fmt.Sprintln())
+			fmt.Fprintln(w, b.String())
 		}
-		fpBytes := sha256.Sum256(tlsCert.Certificate[0])
-		b.WriteString(fmt.Sprintf("  SHA-256 Fingerprint: %s\n", certHexBytes(fpBytes[:])))
-		b.WriteString(fmt.Sprintf("  Chain Length: %d\n", len(tlsCert.Certificate)))
-		b.WriteString(fmt.Sprintln())
-		fmt.Fprintln(w, b.String())
 	}
 }
 

@@ -52,7 +52,7 @@ func fetchAgentCard(w http.ResponseWriter, r *http.Request) {
 	authority := util.GetStringParamValue(r, "authority")
 	card, err := FetchAgentCard(r.Context(), url, authority, nil, r.Header)
 	if err != nil {
-		util.SendBadRequest(fmt.Sprintf("Error fetching agent card from url [%s], authority [%s]: %s", url, authority, err.Error()), w, r)
+		util.SendBadRequest(w, r, "Error fetching agent card from url [%s], authority [%s]: %s", url, authority, err.Error())
 		return
 	}
 	msg := fmt.Sprintf("Fetched agent card successfully for agent [%s], from url [%s], authority [%s]", card.Name, url, authority)
@@ -68,7 +68,7 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	err := util.ReadJsonOrYamlPayloadFromBody(r.Body, &call)
 	if err != nil {
-		util.SendBadRequest(fmt.Sprintf("Failed to parse payload with error [%s]", err.Error()), w, r)
+		util.SendBadRequest(w, r, "Failed to parse payload with error [%s]", err.Error())
 		return
 	}
 	if name != "" {
@@ -77,8 +77,7 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 	output := map[string]map[string]any{}
 	headers, err := CallAgent(r.Context(), port, call, streamAgentResponse(call.Name, stream, result, output, w, r), r.Header)
 	if err != nil {
-		msg := fmt.Sprintf("Error invoking agent [%s]: %s", call.Name, err.Error())
-		util.SendBadRequest(msg, w, r)
+		util.SendBadRequest(w, r, "Error invoking agent [%s]: %s", call.Name, err.Error())
 		return
 	} else {
 		if stream {

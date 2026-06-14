@@ -47,7 +47,7 @@ type CallSpec struct {
 	Method       string               `json:"method"`
 	Count        int                  `json:"count"`
 	RequestID    bool                 `json:"requestID"`
-	H2           bool                 `json:"h2"`
+	IsH2         bool                 `json:"h2"`
 	TLS          bool                 `json:"tls"`
 	NoSNI        bool                 `json:"noSNI"`
 	VerifyTLS    bool                 `json:"verifyTLS"`
@@ -64,17 +64,18 @@ type CallSpec struct {
 }
 
 type CallResult struct {
-	Headers      http.Header `json:"headers"`
-	Payload      string      `json:"payload"`
-	PeerCertInfo string      `json:"peerCert"`
-	Status       int
+	Headers    http.Header `json:"headers"`
+	Payload    string      `json:"payload"`
+	ServerCert string      `json:"serverCert"`
+	Status     int
 }
 
 type CallResults struct {
-	URL       string `json:"url"`
-	Results   map[string]*CallResult
-	PeerCerts []string `json:"peerCerts"`
-	Statuses  []int
+	URL         string `json:"url"`
+	Results     map[string]*CallResult
+	ServerCerts []string `json:"serverCerts"`
+	ClientCert  string   `json:"clientCert"`
+	Statuses    []int
 }
 
 var (
@@ -163,6 +164,7 @@ func (c *CallSpec) PrepareRequest(r *http.Request) error {
 }
 
 func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
+	callResults := &CallResults{URL: c.URL, Results: map[string]*CallResult{}}
 	c.PrepareAuthority(r)
 	sni := c.Authority
 	if c.NoSNI {
@@ -170,17 +172,30 @@ func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 	}
 	port := util.GetRequestOrListenerPortNum(r)
 	label := util.GetCurrentListenerLabel(r)
-	client := transport.CreateDefaultHTTPClient(port, label, c.H2, c.TLS, c.NoSNI, c.Authority, metrics.ConnTracker)
+	client := transport.CreateDefaultHTTPClient(port, label, c.IsH2, c.TLS, c.NoSNI, c.Authority, metrics.ConnTracker)
 	client.UpdateTLSConfig(sni, c.TLSVersion, c.VerifyTLS, c.ALPN)
 	if c.ClientCert != "" {
-		cert, err := gototls.GetCert(c.ClientCert)
+		certs, err := gototls.GetCerts(c.ClientCert)
 		if err != nil {
 			log.Printf("Invocation: [ERROR] Client Certificate Name given but Certificate not uploaded")
 			return nil, err
 		}
-		client.UpdateTLSCerts(gototls.RootCAs, cert)
+		client.UpdateTLSCerts(gototls.RootCAs, certs)
+		leaf := gototls.IdentifyLeaf(certs)
+		if leaf != nil {
+			uris := []string{}
+			for _, uri := range leaf.URIs {
+				uris = append(uris, uri.String())
+			}
+			callResults.ClientCert = util.ToJSONText(&gototls.PeerCertInfo{
+				Subject:  gototls.SubjectToString(leaf),
+				DNSNames: leaf.DNSNames,
+				URIs:     uris,
+				Issuer:   gototls.IssuerToString(leaf),
+				ALPN:     c.ALPN,
+			})
+		}
 	}
-	callResults := &CallResults{URL: c.URL, Results: map[string]*CallResult{}}
 	if c.Count == 0 {
 		c.Count = 1
 	}
@@ -210,6 +225,7 @@ func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 		}
 		resp, err := client.HTTP().Do(c.request)
 		if err != nil {
+			log.Printf("[HTTP Client] Call failed with error: %v", err)
 			return nil, err
 		}
 		msg := fmt.Sprintf("Call to URL [%s] Authority [%s] succeeded with response [%s]", c.URL, c.Authority, resp.Status)
@@ -221,8 +237,8 @@ func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 		pci := client.GetPeerCertInfo()
 		if pci != nil {
 			v := util.ToJSONText(pci)
-			result.PeerCertInfo = v
-			callResults.PeerCerts = append(callResults.PeerCerts, v)
+			result.ServerCert = v
+			callResults.ServerCerts = append(callResults.ServerCerts, v)
 		}
 		result.Status = resp.StatusCode
 		callResults.Statuses = append(callResults.Statuses, resp.StatusCode)
@@ -250,9 +266,10 @@ func invokeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Add(constants.HeaderGotoUpstreamStatus, util.ToJSONText(callResults.Statuses))
-	if len(callResults.PeerCerts) > 0 {
-		w.Header().Add(constants.HeaderGotoPeerCertInfo, util.ToJSONText(callResults.PeerCerts))
+	if len(callResults.ServerCerts) > 0 {
+		w.Header().Add(constants.HeaderGotoServerCert, util.ToJSONText(callResults.ServerCerts))
 	}
+	w.Header().Add(constants.HeaderGotoClientCert, callResults.ClientCert)
 	for _, cr := range callResults.Results {
 		viaGotos := cr.Headers[constants.HeaderViaGoto]
 		for _, v := range viaGotos {

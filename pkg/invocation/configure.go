@@ -312,8 +312,8 @@ func (is *InvocationSpec) validateConnectionAndRequestConfigs() error {
 		is.TLSVersion = tls.VersionTLS13
 	}
 	if is.ClientCert != "" {
-		if c, _ := gototls.GetCert(is.ClientCert); c == nil {
-			return fmt.Errorf("ClientCert Not Uploaded")
+		if _, err := gototls.GetCerts(is.ClientCert); err != nil {
+			return err
 		}
 	}
 	return nil

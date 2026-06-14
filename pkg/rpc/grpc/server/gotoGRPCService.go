@@ -130,10 +130,10 @@ func SetHeaders(ctx context.Context, port int, hostLabel, listenerLabel string, 
 	responseHeaders = map[string]string{
 		constants.HeaderGotoHost:          hostLabel,
 		constants.HeaderViaGoto:           util.GetViaGotoValue(port),
-		constants.HeaderGotoProtocol:      "GRPC",
+		constants.HeaderGotoProtocol:      "gRPC",
 		constants.HeaderGotoPort:          fmt.Sprint(port),
 		constants.HeaderGotoRemoteAddress: remoteAddress,
-		constants.HeaderGotoRPC:           methodInfo,
+		constants.HeaderGotoRPCMethod:     methodInfo,
 	}
 	requestHeaders = map[string]string{}
 	if md, ok := metadata.FromIncomingContext(ctx); ok {

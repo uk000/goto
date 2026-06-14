@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/http"
 
+	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
 )
 
@@ -38,7 +39,7 @@ type IGRPCManager interface {
 	InterceptAndProxy(fromGSD, toGSD *grpc.ServiceDesc, target string, srv any, teeport int) (IGRPCService, IGRPCService)
 }
 
-type HTTPStartWatcher func(server *http.Server)
+type HTTPStartWatcher func(server *http.Server, h2s *http2.Server)
 type HTTPStopWatcher func()
 type TCPServerWatcher func(func(listenerID string, port int, listener net.Listener) error)
 type UDPServerWatcher func(func(listenerID string, port int, listener net.Listener) error)
@@ -104,9 +105,9 @@ func OnListenersStarted() {
 	}
 }
 
-func OnHTTPStart(server *http.Server) {
+func OnHTTPStart(server *http.Server, h2s *http2.Server) {
 	for _, w := range httpStartWatchers {
-		w(server)
+		w(server, h2s)
 	}
 }
 
@@ -116,9 +117,9 @@ func OnHTTPStop() {
 	}
 }
 
-func OnJSONRPCStart(server *http.Server) {
+func OnJSONRPCStart(server *http.Server, h2s *http2.Server) {
 	for _, w := range mcpStartWatchers {
-		w(server)
+		w(server, h2s)
 	}
 }
 

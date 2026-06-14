@@ -42,13 +42,13 @@ type ScriptRun struct {
 	Args []string `yaml:"args,omitempty"`
 }
 
-func processScripts(config *GotoConfig) {
-	if config.Scripts == nil || (len(config.Scripts.Config) == 0 && len(config.Scripts.Run) == 0) {
+func processScripts(scripts *Scripts) {
+	if scripts == nil || (len(scripts.Config) == 0 && len(scripts.Run) == 0) {
 		log.Println("No scripts to configure or run")
 		return
 	}
-	if config.Scripts.Config != nil {
-		for _, script := range config.Scripts.Config {
+	if scripts.Config != nil {
+		for _, script := range scripts.Config {
 			if script == nil || script.Name == "" || (script.Content == "" && script.FilePath == "") {
 				log.Println("Script name and one of [content, path] must be given. Skipping empty or invalid script.")
 				continue
@@ -56,8 +56,8 @@ func processScripts(config *GotoConfig) {
 			sendScript(script)
 		}
 	}
-	if config.Scripts.Run != nil {
-		for _, script := range config.Scripts.Run {
+	if scripts.Run != nil {
+		for _, script := range scripts.Run {
 			if len(strings.TrimSpace(script.Name)) == 0 {
 				log.Println("Empty script name in run list. Skipping.")
 				continue

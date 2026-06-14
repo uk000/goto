@@ -282,12 +282,12 @@ func (ir *InvocationRequest) invokeHTTP() {
 	}
 	ir.client.UpdateTLSConfig(sni, target.TLSVersion, target.VerifyTLS, target.ALPN)
 	if target.ClientCert != "" {
-		cert, err := gototls.GetCert(target.ClientCert)
+		certs, err := gototls.GetCerts(target.ClientCert)
 		if err != nil {
 			log.Printf("Invocation: [ERROR] Client Certificate Name given but Certificate not uploaded")
 			return
 		}
-		ir.client.UpdateTLSCerts(gototls.RootCAs, cert)
+		ir.client.UpdateTLSCerts(gototls.RootCAs, certs)
 	}
 	ir.writeRequestPayload()
 	start := time.Now()

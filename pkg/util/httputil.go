@@ -60,7 +60,8 @@ func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add(constants.HeaderGotoSNI, rs.ServerName)
 	}
 	if rs.IsTLS {
-		w.Header().Add(constants.HeaderGotoPeerCertInfo, rs.PeerCertInfo)
+		w.Header().Add(constants.HeaderGotoClientCert, rs.ClientCert)
+		w.Header().Add(constants.HeaderGotoServerCert, rs.ServerCert)
 	}
 	w.Header().Add(constants.HeaderGotoHost, global.Self.HostLabel)
 	w.Header().Add(constants.HeaderGotoProtocol, rs.GotoProtocol)
@@ -146,8 +147,9 @@ func GetViaGotoValue(port int) string {
 	return global.Funcs.GetListenerLabelForPort(port)
 }
 
-func SendBadRequest(msg string, w http.ResponseWriter, r *http.Request) {
+func SendBadRequest(w http.ResponseWriter, r *http.Request, msg string, params ...any) {
 	w.WriteHeader(http.StatusBadRequest)
+	msg = fmt.Sprintf(msg, params...)
 	fmt.Fprintln(w, msg)
 	AddLogMessage(msg, r)
 }

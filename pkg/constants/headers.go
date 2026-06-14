@@ -31,7 +31,8 @@ const (
 	HeaderGotoTLS                   = "Goto-TLS"
 	HeaderGotoMTLS                  = "Goto-mTLS"
 	HeaderGotoSNI                   = "Goto-SNI"
-	HeaderGotoPeerCertInfo          = "Goto-Peer-Cert-Info"
+	HeaderGotoClientCert            = "Goto-Client-Cert"
+	HeaderGotoServerCert            = "Goto-Server-Cert"
 	HeaderGotoRemoteAddress         = "Goto-Remote-Address"
 	HeaderGotoResponseStatus        = "Goto-Response-Status"
 	HeaderGotoResponseDelay         = "Goto-Response-Delay"
@@ -88,13 +89,15 @@ const (
 	HeaderResponseContentType = "ResponseContent-Type"
 	HeaderContentTypeLower    = "content-type"
 	HeaderContentLength       = "Content-Length"
+	HeaderMethod              = "Method"
+	HeaderPayloadSize         = "Payload-Size"
 	HeaderCacheControl        = "Cache-Control"
 	HeaderTransferEncoding    = "Transfer-Encoding"
 	HeaderAuthority           = ":authority"
 	ContentTypeJSON           = "application/json"
 	ContentTypeYAML           = "application/yaml"
 
-	HeaderGotoRPC = "Goto-RPC"
+	HeaderGotoRPCMethod = "Goto-RPC-Method"
 
 	HeaderStoppingReadinessRequest = "Stopping-Readiness-Request"
 )

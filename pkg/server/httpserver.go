@@ -125,6 +125,12 @@ func configureAndStartHTTPServer() error {
 		Handler:  h2cHandler,
 		ErrorLog: log.New(io.Discard, "discard", 0),
 	}
+	h2s.WriteByteTimeout = httpServer.WriteTimeout
+	h2s.ReadIdleTimeout = httpServer.ReadTimeout
+	h2s.IdleTimeout = httpServer.IdleTimeout
+	if err := http2.ConfigureServer(httpServer, h2s); err != nil {
+		log.Fatalf("Failed to configure HTTP2 on HTTP Server: %v", err)
+	}
 	return StartHttpServer(httpServer, false)
 }
 
@@ -165,13 +171,13 @@ func startListeners() {
 		if httpStarted && !httpListenersStarted {
 			log.Printf("HTTP server [%s] is ready. Starting additional HTTP listeners.", httpServer.Addr)
 			time.Sleep(1 * time.Second)
-			global.OnHTTPStart(httpServer)
+			global.OnHTTPStart(httpServer, h2s)
 			httpListenersStarted = true
 			i++
 		} else if jsonRPCStarted && !jsonRPCListenersStarted {
 			log.Printf("JSONRPC server [%s] is ready. Starting additional JSONRPC listeners.", jsonRPCServer.Addr)
 			time.Sleep(1 * time.Second)
-			global.OnJSONRPCStart(jsonRPCServer)
+			global.OnJSONRPCStart(jsonRPCServer, h2s)
 			jsonRPCListenersStarted = true
 			i++
 		} else {
@@ -256,6 +262,8 @@ func HTTPHandler() http.Handler {
 			fmt.Fprintln(w, err.Error())
 			return
 		}
+		rs.JSONResponse = util.IsAcceptJSON(r)
+		rs.YAMLResponse = util.IsAcceptYAML(r)
 		routeHandler := router.WillRoute(rs.RequestPortNum, r)
 		if routeHandler != nil {
 			routeHandler.ServeHTTP(w, r)

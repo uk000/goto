@@ -58,7 +58,7 @@ func captureTLSInfo(r *http.Request) {
 	if !tlsState.HandshakeComplete {
 		return
 	}
-	rs.PeerCertInfo = listeners.GetPeerCertInfo(r)
+	rs.ServerCert, rs.ClientCert = listeners.GetCertInfo(r)
 	rs.IsTLS = true
 	rs.IsMTLS = l.MTLS
 	rs.ServerName = tlsState.ServerName
@@ -68,14 +68,14 @@ func captureTLSInfo(r *http.Request) {
 
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		l := listeners.GetCurrentListener(r)
 		localAddr := ""
 		if conn := util.GetConn(r); conn != nil {
 			captureTLSInfo(r)
 			localAddr = conn.LocalAddr().String()
 		} else {
-			localAddr = global.Self.Address
+			localAddr = l.Listener.Addr().String()
 		}
-		l := listeners.GetCurrentListener(r)
 		rs := util.GetRequestStore(r)
 		p := util.GetRequestOrListenerPortNum(r)
 		port := ""

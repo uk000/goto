@@ -29,6 +29,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jhump/protoreflect/v2/grpcdynamic"
@@ -100,12 +101,13 @@ func NewGRPCClient(label string, clientPort int, service *gotogrpc.GRPCService, 
 func (c *GRPCClient) configureTLS() {
 	if c.Options.IsTLS {
 		tlsConfig := &tls.Config{
-			InsecureSkipVerify: !c.Options.VerifyTLS,
-			ServerName:         c.TLSServerName,
-			MinVersion:         c.Options.TLSVersion,
-			MaxVersion:         c.Options.TLSVersion,
+			InsecureSkipVerify:    !c.Options.VerifyTLS,
+			ServerName:            c.TLSServerName,
+			MinVersion:            c.Options.TLSVersion,
+			MaxVersion:            c.Options.TLSVersion,
+			VerifyConnection:      gototls.ExtractSNI(strconv.Itoa(c.ClientPort), "Client-"+c.Label, func() string { return "" }, c.StoreSNI, nil),
+			VerifyPeerCertificate: gototls.ExtractPeerCertInfo(strconv.Itoa(c.ClientPort), "Client-"+c.Label, func() string { return "" }, c.StorePeerCertInfo, nil),
 		}
-		tlsConfig.GetConfigForClient = gototls.GetConfigForClient(c.ClientPort, c.Label, tlsConfig, c.StoreALPN, c.StorePeerCertInfo, c.StoreSNI)
 		if c.Options.VerifyTLS {
 			tlsConfig.RootCAs = gototls.RootCAs
 		}
@@ -136,7 +138,7 @@ func (c *GRPCClient) UpdateTLSConfig(serverName string, tlsVersion uint16, verif
 	c.configureTLS()
 }
 
-func (c *GRPCClient) UpdateTLSCerts(rootCAs *x509.CertPool, cert *tls.Certificate) {
+func (c *GRPCClient) UpdateTLSCerts(rootCAs *x509.CertPool, cert []*tls.Certificate) {
 }
 
 func (c *GRPCClient) GetALPNHandler(string) func(authority string, c *tls.Conn) http.RoundTripper {
@@ -146,15 +148,15 @@ func (c *GRPCClient) GetALPNHandler(string) func(authority string, c *tls.Conn) 
 func (c *GRPCClient) SetALPNHandler(string, func(authority string, c *tls.Conn) http.RoundTripper) {
 }
 
-func (c *GRPCClient) StorePeerCertInfo(remoteAddr string, commonName string, dnsNames, uris, issuers []string) {
+func (c *GRPCClient) StorePeerCertInfo(remoteAddr string, commonName string, dnsNames, uris []string, issuer string) {
 	if c.PeerCertInfo == nil {
 		c.PeerCertInfo = &gototls.PeerCertInfo{}
 		c.PeerCertInfo.RemoteAddr = remoteAddr
 	}
-	c.PeerCertInfo.CommonName = commonName
+	c.PeerCertInfo.Subject = commonName
 	c.PeerCertInfo.DNSNames = dnsNames
 	c.PeerCertInfo.URIs = uris
-	c.PeerCertInfo.Issuers = issuers
+	c.PeerCertInfo.Issuer = issuer
 }
 
 func (c *GRPCClient) StoreSNI(remoteAddr string, sni, alpn string) {

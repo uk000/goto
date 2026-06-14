@@ -17,6 +17,7 @@
 package listeners
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -34,7 +35,30 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
+)
+
+const (
+	PROTO_HTTP     = "HTTP"
+	PROTOL_HTTP    = "http"
+	PROTOL_HTTPS   = "https"
+	PROTOL_H2      = "h2"
+	PROTOL_H2C     = "h2c"
+	PROTO_GRPC     = "GRPC"
+	PROTOL_GRPC    = "grpc"
+	PROTO_UDP      = "UDP"
+	PROTOL_UDP     = "udp"
+	PROTO_JSONRPC  = "JSONRPC"
+	PROTOL_JSONRPC = "jsonrpc"
+	PROTO_RPC      = "RPC"
+	PROTOL_RPC     = "rpc"
+	PROTO_XDS      = "XDS"
+	PROTOL_XDS     = "xds"
+	PROTO_TCP      = "TCP"
+	PROTOL_TCP     = "tcp"
+	PROTO_TLS      = "TLS"
+	PROTOL_TLS     = "tls"
 )
 
 type Listener struct {
@@ -64,7 +88,8 @@ type Listener struct {
 	IsXDS            bool                             `json:"isXDS"`
 	ProtoAssigned    bool                             `json:"-"`
 	Generation       int                              `json:"generation"`
-	Cert             *tls.Certificate                 `json:"-"`
+	ServerCert       *gototls.PeerCertInfo            `json:"serverCert"`
+	Certificates     []*tls.Certificate               `json:"-"`
 	CACerts          *x509.CertPool                   `json:"-"`
 	RawCert          []byte                           `json:"-"`
 	RawKey           []byte                           `json:"-"`
@@ -75,28 +100,6 @@ type Listener struct {
 	peerCertInfos    map[string]*gototls.PeerCertInfo `json:"-"`
 	lock             sync.RWMutex                     `json:"-"`
 }
-
-const (
-	PROTO_HTTP     = "HTTP"
-	PROTOL_HTTP    = "http"
-	PROTOL_HTTPS   = "https"
-	PROTOL_H2      = "h2"
-	PROTOL_H2C     = "h2c"
-	PROTO_GRPC     = "GRPC"
-	PROTOL_GRPC    = "grpc"
-	PROTO_UDP      = "UDP"
-	PROTOL_UDP     = "udp"
-	PROTO_JSONRPC  = "JSONRPC"
-	PROTOL_JSONRPC = "jsonrpc"
-	PROTO_RPC      = "RPC"
-	PROTOL_RPC     = "rpc"
-	PROTO_XDS      = "XDS"
-	PROTOL_XDS     = "xds"
-	PROTO_TCP      = "TCP"
-	PROTOL_TCP     = "tcp"
-	PROTO_TLS      = "TLS"
-	PROTOL_TLS     = "tls"
-)
 
 var (
 	DefaultListener       = newListener(global.Self.ServerPort, PROTOL_HTTP, global.ServerConfig.CommonName, true)
@@ -113,6 +116,7 @@ var (
 	httpStarted           = false
 	jsonRPCStarted        = false
 	httpServer            *http.Server
+	h2Server              *http2.Server
 	jsonRPCServer         *http.Server
 	serveTCP              func(string, int, net.Listener) error
 	serveXDS              func(*grpc.Server)
@@ -127,7 +131,7 @@ func Init() {
 	global.Funcs.GetListenerLabel = GetListenerLabel
 	global.Funcs.GetListenerLabelForPort = GetListenerLabelForPort
 	global.Funcs.IsListenerTLS = IsListenerTLS
-	global.Funcs.GetPeerCertInfo = GetPeerCertInfo
+	global.Funcs.GetCertInfo = GetCertInfo
 
 	if DefaultLabel == "" {
 		DefaultLabel = global.Self.HostLabel
@@ -159,9 +163,10 @@ func OnGRPCStop() {
 	}
 }
 
-func OnHTTPStart(s *http.Server) {
+func OnHTTPStart(s *http.Server, h2s *http2.Server) {
 	httpStarted = true
 	httpServer = s
+	h2Server = h2s
 	if grpcStarted {
 		startInitialHTTPListeners(false)
 	}
@@ -172,7 +177,7 @@ func OnHTTPStop() {
 	httpServer = nil
 }
 
-func OnJSONRPCStart(s *http.Server) {
+func OnJSONRPCStart(s *http.Server, h2s *http2.Server) {
 	jsonRPCStarted = true
 	jsonRPCServer = s
 	startInitialHTTPListeners(true)
@@ -211,7 +216,9 @@ func InitDefaultGRPCListener() {
 func AddInitialGRPCListeners() {
 	for _, l := range initialListeners {
 		if l.IsGRPC {
-			addOrUpdateListener(l)
+			if err, _ := addOrUpdateListener(l); err != nil {
+				panic(err)
+			}
 		}
 	}
 }
@@ -221,7 +228,9 @@ func startInitialHTTPListeners(jsonRPC bool) {
 		time.Sleep(1 * time.Second)
 		for _, l := range initialListeners {
 			if (l.IsJSONRPC && jsonRPC) || (!l.IsJSONRPC && l.IsHTTP && !jsonRPC) {
-				addOrUpdateListener(l)
+				if err, _ := addOrUpdateListener(l); err != nil {
+					panic(err)
+				}
 			}
 		}
 		if jsonRPC {
@@ -238,7 +247,9 @@ func startInitialHTTPListeners(jsonRPC bool) {
 func startInitialTCPListeners() {
 	for _, l := range initialListeners {
 		if l.IsTCP {
-			addOrUpdateListener(l)
+			if err, _ := addOrUpdateListener(l); err != nil {
+				panic(err)
+			}
 		}
 	}
 	initialTCPStarted = true
@@ -317,7 +328,7 @@ func (l *Listener) assignProtocol() {
 		l.TLS = isTCPS
 	}
 	if l.TLS {
-		if l.Cert == nil && l.RawCert == nil {
+		if l.Certificates == nil && l.RawCert == nil {
 			l.AutoCert = true
 		}
 	}
@@ -443,6 +454,26 @@ func (l *Listener) serveTCP() {
 	}()
 }
 
+func (l *Listener) SetCertificates(certs []*tls.Certificate) {
+	if len(certs) > 0 {
+		l.Certificates = certs
+		uris := []string{}
+		leaf := gototls.IdentifyLeaf(certs)
+		if leaf != nil {
+			for _, uri := range leaf.URIs {
+				uris = append(uris, uri.String())
+			}
+			l.ServerCert = &gototls.PeerCertInfo{
+				Subject:  gototls.SubjectToString(leaf),
+				DNSNames: leaf.DNSNames,
+				URIs:     uris,
+				Issuer:   gototls.IssuerToString(leaf),
+				ALPN:     l.ALPN,
+			}
+		}
+	}
+}
+
 func (l *Listener) GetCertificate(chi *tls.ClientHelloInfo) (cert *tls.Certificate, err error) {
 	if cert = l.CertsCache[chi.ServerName]; cert != nil {
 		return
@@ -455,31 +486,84 @@ func (l *Listener) GetCertificate(chi *tls.ClientHelloInfo) (cert *tls.Certifica
 	return
 }
 
+func (l *Listener) alpnHandler(alpn string) func(s *http.Server, conn *tls.Conn, h http.Handler) {
+	return func(s *http.Server, conn *tls.Conn, h http.Handler) {
+		log.Printf("Listener %s: Serving negotiated ALPN: %s ---", l.Label, alpn)
+		var ctx context.Context
+		if s.BaseContext != nil {
+			ctx = s.BaseContext(l.Listener)
+		} else {
+			ctx = context.Background()
+		}
+		h2Server.ServeConn(conn, &http2.ServeConnOpts{
+			BaseConfig: s,
+			Context:    util.WithConn(ctx, conn),
+			Handler:    h,
+		})
+	}
+}
+
+func (l *Listener) prepareMTLS(tlsConfig *tls.Config) {
+	if l.VerifyClientCert {
+		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+	} else {
+		tlsConfig.ClientAuth = tls.RequireAnyClientCert
+	}
+	tlsConfig.ClientCAs = l.CACerts
+	if httpServer.TLSNextProto == nil {
+		httpServer.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler))
+	}
+	for _, alpn := range l.ALPN {
+		httpServer.TLSNextProto[alpn] = l.alpnHandler(alpn)
+	}
+	for _, alpn := range tlsConfig.NextProtos {
+		httpServer.TLSNextProto[alpn] = l.alpnHandler(alpn)
+	}
+}
+
+func (l *Listener) prepareTLS() *tls.Config {
+	tlsConfig := &tls.Config{}
+	if l.AutoSNI {
+		tlsConfig.GetCertificate = l.GetCertificate
+	} else if l.Certificates != nil {
+		for _, c := range l.Certificates {
+			tlsConfig.Certificates = append(tlsConfig.Certificates, *c)
+		}
+	} else if len(l.RawCert) > 0 && len(l.RawKey) > 0 {
+		if x509Cert, err := tls.X509KeyPair(l.RawCert, l.RawKey); err == nil {
+			tlsConfig.Certificates = []tls.Certificate{x509Cert}
+		} else {
+			log.Printf("Failed to parse certificate with error: %s\n", err.Error())
+			return nil
+		}
+	}
+	tlsConfig.GetConfigForClient = gototls.GetConfigForClient(strconv.Itoa(l.Port), "Server-"+l.Label, tlsConfig, l.StoreALPN, l.StorePeerCertInfo, l.StoreSNI, tlsConfig.VerifyConnection, tlsConfig.VerifyPeerCertificate)
+	if l.IsHTTP2 {
+		tlsConfig.NextProtos = []string{"h2"}
+	}
+	if len(l.ALPN) > 0 {
+		tlsConfig.NextProtos = append(tlsConfig.NextProtos, l.ALPN...)
+	}
+	if l.MTLS {
+		l.prepareMTLS(tlsConfig)
+	} else {
+		tlsConfig.ClientAuth = tls.NoClientCert
+	}
+	tlsConfig.InsecureSkipVerify = true
+	return tlsConfig
+}
+
 func (l *Listener) InitListener() bool {
 	l.lock.Lock()
 	defer l.lock.Unlock()
-	tlsConfig := &tls.Config{}
-	tlsConfig.GetConfigForClient = gototls.GetConfigForClient(l.Port, l.Label, tlsConfig, l.StoreALPN, l.StorePeerCertInfo, l.StoreSNI)
-	if l.AutoCert {
+	if l.AutoCert && l.SpiffeID == "" {
 		if l.CommonName == "" {
 			l.CommonName = global.ServerConfig.CommonName
 		}
 		domains := []string{l.CommonName}
 		domains = append(domains, l.AltNames...)
 		if cert, err := gototls.CreateCertificate(domains, l.SpiffeID, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
-			l.Cert = cert
-		}
-	}
-	if l.AutoSNI {
-		tlsConfig.GetCertificate = l.GetCertificate
-	} else if l.Cert != nil {
-		tlsConfig.Certificates = []tls.Certificate{*l.Cert}
-	} else if len(l.RawCert) > 0 && len(l.RawKey) > 0 {
-		if x509Cert, err := tls.X509KeyPair(l.RawCert, l.RawKey); err == nil {
-			tlsConfig.Certificates = []tls.Certificate{x509Cert}
-		} else {
-			log.Printf("Failed to parse certificate with error: %s\n", err.Error())
-			return false
+			l.SetCertificates([]*tls.Certificate{cert})
 		}
 	}
 	address := fmt.Sprintf("0.0.0.0:%d", l.Port)
@@ -499,25 +583,11 @@ func (l *Listener) InitListener() bool {
 	} else {
 		if listener, err := net.Listen("tcp", address); err == nil {
 			if l.TLS {
-				if l.IsHTTP2 {
-					tlsConfig.NextProtos = []string{"h2"}
-				}
-				if len(l.ALPN) > 0 {
-					tlsConfig.NextProtos = append(tlsConfig.NextProtos, l.ALPN...)
-				}
-				if l.MTLS {
-					if l.VerifyClientCert {
-						tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-					} else {
-						tlsConfig.ClientAuth = tls.RequireAnyClientCert
-					}
-					tlsConfig.ClientCAs = l.CACerts
+				if tlsConfig := l.prepareTLS(); tlsConfig == nil {
+					return false
 				} else {
-					tlsConfig.ClientAuth = tls.NoClientCert
+					listener = gototls.NewTLSInspector(l.Port, l.Label, listener, tlsConfig)
 				}
-				tlsConfig.InsecureSkipVerify = true
-				//listener = tls.NewListener(listener, tlsConfig)
-				listener = gototls.NewTLSInspector(l.Port, l.Label, listener, tlsConfig)
 			}
 			l.Listener = listener
 			return true
@@ -548,7 +618,7 @@ func (l *Listener) openListener(serve bool) bool {
 			}
 		}
 		l.Open = true
-		l.TLS = l.AutoCert || l.Cert != nil || len(l.RawCert) > 0 && len(l.RawKey) > 0
+		l.TLS = l.AutoCert || l.Certificates != nil || len(l.RawCert) > 0 && len(l.RawKey) > 0
 		return true
 	}
 	return false
@@ -635,8 +705,8 @@ func AddGRPCListener(port int, serve bool) (*Listener, error) {
 		l.closeListener()
 	}
 	l = newListener(port, "grpc", "", false)
-	if err, msg := addOrUpdateListener(l); err > 0 {
-		return nil, fmt.Errorf(msg)
+	if err, _ := addOrUpdateListener(l); err != nil {
+		return nil, err
 	}
 	if !l.openListener(serve) {
 		return nil, fmt.Errorf("failed to open GRPC listener on port [%d]", port)
@@ -660,8 +730,8 @@ func AddListener(port int, isTCP, isUDP bool, sni string) error {
 		protocol = "udp"
 	}
 	l = newListener(port, protocol, sni, false)
-	if err, msg := addOrUpdateListener(l); err > 0 {
-		return errors.New(msg)
+	if err, _ := addOrUpdateListener(l); err != nil {
+		return err
 	}
 	if !l.openListener(true) {
 		return fmt.Errorf("failed to open %s listener on port [%d]", protocol, port)
@@ -671,9 +741,10 @@ func AddListener(port int, isTCP, isUDP bool, sni string) error {
 
 func addOrUpdateListenerAndRespond(w http.ResponseWriter, r *http.Request) {
 	msg := ""
+	var err error
 	l := newListener(0, "", "", false)
 	body := util.Read(r.Body)
-	if err := util.ReadJson(body, l); err != nil {
+	if err = util.ReadJson(body, l); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("Failed to parse json with error: %s", err.Error())
 		events.SendRequestEventJSON("Listener Rejected", err.Error(),
@@ -682,17 +753,15 @@ func addOrUpdateListenerAndRespond(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, msg)
 		return
 	}
-	errorCode := 0
-	if errorCode, msg = addOrUpdateListener(l); errorCode > 0 {
-		w.WriteHeader(errorCode)
+	if err, msg = addOrUpdateListener(l); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
 
-func addOrUpdateListener(l *Listener) (int, string) {
+func addOrUpdateListener(l *Listener) (error, string) {
 	msg := ""
-	errorCode := 0
 	if l.Label == "" {
 		l.Label = util.BuildListenerLabel(l.Port)
 	}
@@ -709,7 +778,7 @@ func addOrUpdateListener(l *Listener) (int, string) {
 	}
 	if msg != "" {
 		events.SendEventJSON("Listener Rejected", msg, l)
-		return http.StatusBadRequest, msg
+		return errors.New(msg), msg
 	}
 
 	listenersLock.RLock()
@@ -721,7 +790,6 @@ func addOrUpdateListener(l *Listener) (int, string) {
 			msg = fmt.Sprintf("Listener %d already present, restarted.", l.Port)
 			events.SendEventJSON("Listener Updated", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
 		} else {
-			errorCode = http.StatusInternalServerError
 			msg = fmt.Sprintf("Listener %d already present, failed to restart.", l.Port)
 			events.SendEventJSON("Listener Updated", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
 		}
@@ -732,7 +800,6 @@ func addOrUpdateListener(l *Listener) (int, string) {
 				msg = fmt.Sprintf("Listener %d added and opened.", l.Port)
 				events.SendEventJSON("Listener Added", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
 			} else {
-				errorCode = http.StatusInternalServerError
 				msg = fmt.Sprintf("Listener %d added but failed to open.", l.Port)
 				events.SendEventJSON("Listener Added", l.HostLabel, map[string]interface{}{"listener": l, "status": msg})
 			}
@@ -747,7 +814,9 @@ func addOrUpdateListener(l *Listener) (int, string) {
 	} else if l.IsUDP {
 		udpListeners[l.Port] = l
 	}
-	return errorCode, msg
+	if msg != "" {
+	}
+	return nil, msg
 }
 
 func (l *Listener) store() {
@@ -792,7 +861,7 @@ func AddListenerCert(port int, key []byte, cert []byte, reopen bool) error {
 	l.lock.Lock()
 	l.AutoCert = false
 	l.CommonName = "<from cert>"
-	l.Cert = nil
+	l.Certificates = nil
 	if len(key) > 0 {
 		l.RawKey = key
 	}
@@ -816,7 +885,7 @@ func RemoveListenerCert(port int) error {
 	l.lock.Lock()
 	l.RawKey = nil
 	l.RawCert = nil
-	l.Cert = nil
+	l.Certificates = nil
 	l.TLS = false
 	l.AutoCert = false
 	l.CommonName = ""
@@ -933,7 +1002,7 @@ func SetListenerLabel(r *http.Request) string {
 	return label
 }
 
-func (l *Listener) StorePeerCertInfo(remoteAddr string, commonName string, dnsNames, uris, issuers []string) {
+func (l *Listener) StorePeerCertInfo(remoteAddr string, commonName string, dnsNames, uris []string, issuer string) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	pci := l.peerCertInfos[remoteAddr]
@@ -941,10 +1010,10 @@ func (l *Listener) StorePeerCertInfo(remoteAddr string, commonName string, dnsNa
 		pci = &gototls.PeerCertInfo{}
 		l.peerCertInfos[remoteAddr] = pci
 	}
-	pci.CommonName = commonName
+	pci.Subject = commonName
 	pci.DNSNames = dnsNames
 	pci.URIs = uris
-	pci.Issuers = issuers
+	pci.Issuer = issuer
 }
 
 func (l *Listener) StoreSNI(remoteAddr string, sni, alpn string) {
@@ -970,17 +1039,18 @@ func (l *Listener) StoreALPN(remoteAddr string, alpn []string) {
 	pci.ALPN = alpn
 }
 
-func GetPeerCertInfo(r *http.Request) string {
+func GetCertInfo(r *http.Request) (string, string) {
 	port := util.GetRequestOrListenerPortNum(r)
 	listenersLock.RLock()
 	l := listeners[port]
 	listenersLock.RUnlock()
 	l.lock.Lock()
 	defer l.lock.Unlock()
+	serverCert := util.ToJSONText(l.ServerCert)
+	var clientCert string
 	if l.peerCertInfos[r.RemoteAddr] != nil {
-		v := util.ToJSONText(l.peerCertInfos[r.RemoteAddr])
+		clientCert = util.ToJSONText(l.peerCertInfos[r.RemoteAddr])
 		delete(l.peerCertInfos, r.RemoteAddr)
-		return v
 	}
-	return ""
+	return serverCert, clientCert
 }

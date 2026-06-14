@@ -174,7 +174,7 @@ func (rc *RequestContext) sendProxyStatuses(upstreamViaGoto []string, upstreamPr
 	}
 	rc.w.Header()[constants.HeaderGotoProxyUpstreamStatus] = upstreamProxyStatusHeaders
 	rc.w.Header()[constants.HeaderViaGoto] = append(rc.w.Header()[constants.HeaderViaGoto], upstreamViaGoto...)
-	rc.w.Header()[constants.HeaderGotoPeerCertInfo] = peerCertInfos
+	rc.w.Header()[constants.HeaderGotoClientCert] = peerCertInfos
 }
 
 func (rc *RequestContext) processResponseHeaders(target, ep string, headers http.Header, pci *gototls.PeerCertInfo, peerCertInfos *[]string, upstreamViaGoto *[]string, upstreamProxyStatuses *[]map[string]map[string][]string) {
@@ -609,7 +609,7 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			w:       w,
 			fw:      intercept.NewFlushWriter(w),
 			c:       make(chan []byte, 2),
-			yaml:    util.IsAcceptYAML(r),
+			yaml:    rs.YAMLResponse,
 		}
 		proxy.invokeTargets(targets, rc)
 		util.SendGotoTrailers(w, r)

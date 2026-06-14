@@ -126,10 +126,23 @@
     }
   },
   "/client": {
-    "/client/http": {
-      "/client/http/invoke": [
+    "/client/grpc": {
+      "/client/grpc/call": [
         {
-          "/client/http/invoke": "[GET POST PUT OPTIONS]"
+          "/client/grpc/call/{service}/{method}/{endpoint}": "[POST]"
+        },
+        {
+          "/client/grpc/call/{service}/{method}/{endpoint}/stream": "[POST]"
+        },
+        {
+          "/client/grpc/call": "[POST]"
+        }
+      ]
+    },
+    "/client/http": {
+      "/client/http/{q:invoke|call}": [
+        {
+          "/client/http/{q:invoke|call}": "[GET POST PUT OPTIONS]"
         }
       ]
     },
@@ -3190,39 +3203,62 @@
     }
   },
   "/tls": {
-    "/tls/cacert": {
-      "/tls/cacert/add": [
+    "/tls/ca": {
+      "/tls/ca/cert": [
         {
-          "/tls/cacert/add": "[PUT POST]"
+          "/tls/ca/cert/add/{name}/{domain}": "[PUT POST]"
+        },
+        {
+          "/tls/ca/cert/remove/{name}": "[PUT POST]"
         }
       ],
-      "/tls/cacert/remove": [
+      "/tls/ca/certs": [
         {
-          "/tls/cacert/remove": "[PUT POST]"
+          "/tls/ca/certs": "[GET]"
+        }
+      ],
+      "/tls/ca/key": [
+        {
+          "/tls/ca/key/add/{name}/{domain}": "[PUT POST]"
+        },
+        {
+          "/tls/ca/key/remove/{name}": "[PUT POST]"
         }
       ]
     },
     "/tls/cert": {
       "/tls/cert/add": [
         {
-          "/tls/cert/add?name={name}": "[PUT POST]"
+          "/tls/cert/add/{name}": "[PUT POST]"
         }
       ],
       "/tls/cert/remove": [
         {
-          "/tls/cert/remove?name={name}": "[PUT POST]"
+          "/tls/cert/remove/{name}": "[PUT POST]"
+        }
+      ]
+    },
+    "/tls/certs": {
+      "": [
+        {
+          "/tls/certs": "[GET]"
+        }
+      ],
+      "/tls/certs/raw": [
+        {
+          "/tls/certs/raw": "[GET]"
         }
       ]
     },
     "/tls/key": {
       "/tls/key/add": [
         {
-          "/tls/key/add?name={name}": "[PUT POST]"
+          "/tls/key/add/{name}": "[PUT POST]"
         }
       ],
       "/tls/key/remove": [
         {
-          "/tls/key/remove?name={name}": "[PUT POST]"
+          "/tls/key/remove/{name}": "[PUT POST]"
         }
       ]
     },

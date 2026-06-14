@@ -106,7 +106,10 @@ type RequestStore struct {
 	ResponseWriter          http.ResponseWriter
 	CurrentRouter           *mux.Router
 	ViaGotos                []string
-	PeerCertInfo            string
+	ClientCert              string
+	ServerCert              string
+	JSONResponse            bool
+	YAMLResponse            bool
 }
 
 type MCPRequestStore struct {

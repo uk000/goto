@@ -19,6 +19,7 @@ package util
 import (
 	"context"
 	"fmt"
+	"goto/pkg/constants"
 	"goto/pkg/types"
 	"net/http"
 	"regexp"
@@ -107,7 +108,11 @@ func CopyRequestHeadersWithIgnore(prefix string, r *http.Request, out map[string
 	hostCopied := false
 	if prefix != "" {
 		prefix += "-"
-		AddHeaderWithPrefix(prefix, "Payload-Size", strconv.Itoa(rs.RequestPayloadSize), out)
+		if rs.RequestPayloadSize > 0 {
+			AddHeaderWithPrefix(prefix, constants.HeaderPayloadSize, strconv.Itoa(rs.RequestPayloadSize), out)
+		}
+		AddHeaderWithPrefix(prefix, constants.HeaderMethod, r.Method, out)
+
 		if !hostCopied && copyHost && r != nil {
 			AddHeaderWithPrefix(prefix, "Host", r.Host, out)
 			hostCopied = true
