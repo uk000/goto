@@ -68,7 +68,12 @@ tls:
       spiffeID: "spiffe://cluster.local/ns/goto/sa/goto-client"
 ```
 
-#### 4. Use client API with certificate reference
+#### 4. Check certs loaded on the client and server
+```
+curl -s localhost:8080/tls/certs
+```
+
+#### 5. Use client API with certificate reference
 ```
 curl -v localhost:8080/client/http/invoke -d '{"url": "localhost:8443", "tls": true, "authority": "goto.goto", "noSNI": false, "alpn":["istio-http/1.1", "istio-h2"], "clientCert": "clientCert"}' -H'Accept: yaml'
 ```
@@ -110,13 +115,26 @@ peerCerts:
 - '{"uris":["spiffe://cluster.local/ns/goto/sa/goto-8443"],"sni":"goto.goto","negotiated":"h2"}'
 ```
 
+#### 6. Check client certs recorded for a server port by calling the listener API
+This will show a list of cert info for all client requests received on this port since the last time it was cleared.
+```
+curl -s localhost:8080/server/listeners/8443/client/certs
+```
+
+#### 6. Clear the client cert records
+```
+curl -XPOST localhost:8080/server/listeners/8443/client/certs/clear
+```
+
+
 In the above response example, server on port 8443 reported the following headers to the client:
 `Goto-Mtls`: whether mTLS was performed on this request
-`Goto-Peer-Cert-Info`: cert presented by the client to the server, including Spiffe ID, SNI, and ALPNs presented and negotiated.
 `Goto-Sni`: SNI sent by the client
 `Goto-Tls`: whether TLS was performed
 `Goto-Protocol`: which protoco was used. HTTP/2 or HTTPS indicate TLS, whereas H2C or HTTP/1.1 indicate plain.
 `Request-Tls-Sni`: SNI sent by the client
 `Request-Tls-Version`: TLS version
+`Goto-Client-Cert`: cert presented by the client to the server, including Spiffe ID, SNI, and ALPNs presented and negotiated.
+`Goto-Server-Cert`: cert presented by the server to the client, including Spiffe ID, SNI, and ALPNs presented and negotiated.
 
-Client reports the server cert info under `peerCerts`, including Spiffe ID, SNI, and negotiated ALPN.
+Client reports the server cert info under `serverCert` for each request, and `serverCerts` as a cumulative list of all server certs. Client also reports its own cert that was used for mTLS under `clientCert`.

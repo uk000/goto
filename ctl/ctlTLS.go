@@ -124,6 +124,8 @@ func (cc *CertConfig) LoadSpiffeCert(remote bool) {
 			l := listeners.GetListenerForPort(cc.Port)
 			if certs, err := gototls.GetCerts(cc.Domain); err == nil {
 				l.SpiffeID = cc.SpiffeID
+				l.CommonName = cc.Domain
+				l.AltNames = cc.SAN
 				l.SetCertificates(certs)
 			}
 			if !l.ReopenListener() {

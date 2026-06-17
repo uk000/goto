@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"goto/pkg/util"
 	"log"
 	"net"
-	"sync"
+	"strings"
+	"time"
 )
 
 type TLSInspector struct {
@@ -19,20 +21,19 @@ type TLSInspector struct {
 }
 
 type PeerCertInfo struct {
-	RemoteAddr     string   `json:"remoteAddr,omitempty"`
-	Subject        string   `json:"subject,omitempty"`
-	DNSNames       []string `json:"dnsNames,omitempty"`
-	URIs           []string `json:"uris,omitempty"`
-	SNI            string   `json:"sni,omitempty"`
-	ALPN           []string `json:"alpn,omitempty"`
-	NegotiatedALPN string   `json:"negotiated,omitempty"`
-	Issuer         string   `json:"issuer,omitempty"`
+	StartAt        time.Time `json:"startAt,omitempty"`
+	EndAt          time.Time `json:"endAt,omitempty"`
+	Finished       bool      `json:"finished"`
+	Status         []string  `json:"status,omitempty"`
+	RemoteAddr     string    `json:"remoteAddr"`
+	Subject        string    `json:"subject,omitempty"`
+	DNSNames       []string  `json:"dnsNames,omitempty"`
+	URIs           []string  `json:"uris,omitempty"`
+	SNI            string    `json:"sni,omitempty"`
+	ALPN           []string  `json:"alpn,omitempty"`
+	NegotiatedALPN string    `json:"negotiated,omitempty"`
+	Issuer         string    `json:"issuer,omitempty"`
 }
-
-var (
-	PeerCertInfos = map[string]*PeerCertInfo{}
-	peerCertLock  = sync.RWMutex{}
-)
 
 func NewTLSInspector(port int, label string, l net.Listener, tlsConfig *tls.Config) net.Listener {
 	return &TLSInspector{
@@ -48,7 +49,7 @@ func (t *TLSInspector) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	buffered := newBufferedConn(c)
+	buffered := newPeekedConn(c)
 
 	// 0x16 (22 in decimal) is the standard TLS Handshake record type
 	b, err := buffered.Peek(1)
@@ -62,86 +63,106 @@ func (t *TLSInspector) Accept() (net.Conn, error) {
 	return buffered, nil
 }
 
-type bufferedConn struct {
+type PeekedConn struct {
 	net.Conn
 	r *bufio.Reader
 }
 
-func newBufferedConn(c net.Conn) *bufferedConn {
-	return &bufferedConn{
+func newPeekedConn(c net.Conn) *PeekedConn {
+	return &PeekedConn{
 		Conn: c,
 		r:    bufio.NewReader(c),
 	}
 }
 
-func (b *bufferedConn) Read(p []byte) (int, error) {
+func (b *PeekedConn) Read(p []byte) (int, error) {
 	return b.r.Read(p)
 }
 
-func (b *bufferedConn) Peek(n int) ([]byte, error) {
+func (b *PeekedConn) Peek(n int) ([]byte, error) {
 	return b.r.Peek(n)
 }
 
-func ExtractSNI(port, label string, getRemoteAddr func() string, callback func(string, string, string), origVerifyConn func(cs tls.ConnectionState) error) func(tls.ConnectionState) error {
+func ExtractSNI(port, label string, remoteAddr string, storeSNI func(string, string, string),
+	storeCertInfo func(remoteAddr string, commonName string, dnsNames, uris []string, issuer string),
+	updatePeerStatus func(remoteAddr string, success bool, e string)) func(tls.ConnectionState) error {
 	return func(cs tls.ConnectionState) error {
 		log.Printf("VerifyConnection: called on Port [%s] Label [%s]. SNI: '%s'\n", port, label, cs.ServerName)
-		callback(getRemoteAddr(), cs.ServerName, cs.NegotiatedProtocol)
-		if origVerifyConn != nil {
-			return origVerifyConn(cs)
+		storeSNI(remoteAddr, cs.ServerName, cs.NegotiatedProtocol)
+		msg := ""
+		if len(cs.PeerCertificates) == 0 {
+			msg = fmt.Sprintf("VerifyConnection: No client certificate provided on Port [%s] Label [%s] RemoteAddr [%s]. Stored SNI: [%s], NegotiatedProtocol: [%s]", port, label, remoteAddr, cs.ServerName, cs.NegotiatedProtocol)
+		} else {
+			peerCert := cs.PeerCertificates[0]
+			uris := []string{}
+			for _, url := range peerCert.URIs {
+				uris = append(uris, url.String())
+			}
+			issuer := IssuerToString(peerCert)
+			subject := SubjectToString(peerCert)
+			storeCertInfo(remoteAddr, subject, peerCert.DNSNames, uris, issuer)
+			msg = fmt.Sprintf("VerifyConnection: Stored Certificate Info on Port [%s] Label [%s] RemoteAddr [%s] - CN: [%s], SAN: %+v, URIs: %+v, Issuers: %+v, SNI: [%s], NegotiatedProtocol: [%s]",
+				port, label, remoteAddr, peerCert.Subject.CommonName, peerCert.DNSNames, uris, issuer, cs.ServerName, cs.NegotiatedProtocol)
 		}
-		log.Printf("VerifyConnection: stored on Port [%s] Label [%s] - SNI: [%s], NegotiatedProtocol: [%s].\n", port, label, cs.ServerName, cs.NegotiatedProtocol)
+		updatePeerStatus(remoteAddr, false, msg)
+		log.Println(msg)
 		return nil
 	}
 }
 
-func ExtractPeerCertInfo(port, label string, getRemoteAddr func() string, callback func(string, string, []string, []string, string),
-	origVeryPeerCert func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error) func([][]byte, [][]*x509.Certificate) error {
+func ExtractPeerCertInfo(port, label string, remoteAddr string,
+	callback func(string, string, []string, []string, string),
+	updatePeerStatus func(remoteAddr string, success bool, e string)) func([][]byte, [][]*x509.Certificate) error {
 	return func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-		remoteAddr := getRemoteAddr()
 		log.Printf("VerifyPeerCertificate: called on Port [%s] Label [%s] RemoteAddr [%s]\n", port, label, remoteAddr)
 		if len(rawCerts) == 0 {
-			return fmt.Errorf("VerifyPeerCertificate: No client certificate provided on Port [%s] Label [%s] RemoteAddr [%s]", port, label, remoteAddr)
+			msg := fmt.Sprintf("VerifyPeerCertificate: No client certificate provided on Port [%s] Label [%s] RemoteAddr [%s]", port, label, remoteAddr)
+			updatePeerStatus(remoteAddr, true, msg)
+			return errors.New(msg)
 		}
 		firstCert := rawCerts[0]
-		clientCert, err := x509.ParseCertificate(firstCert)
+		peerCert, err := x509.ParseCertificate(firstCert)
 		if err != nil {
-			return fmt.Errorf("VerifyPeerCertificate: Failed to parse client certificate on Port [%s] Label [%s] RemoteAddr [%s]: Error: %s", port, label, remoteAddr, err.Error())
+			msg := fmt.Sprintf("VerifyPeerCertificate: Failed to parse client certificate on Port [%s] Label [%s] RemoteAddr [%s]: Error: %s", port, label, remoteAddr, err.Error())
+			updatePeerStatus(remoteAddr, true, msg)
+			return errors.New(msg)
 		}
 		uris := []string{}
-		for _, url := range clientCert.URIs {
+		for _, url := range peerCert.URIs {
 			uris = append(uris, url.String())
 		}
-		issuer := IssuerToString(clientCert)
-		subject := SubjectToString(clientCert)
-		callback(remoteAddr, subject, clientCert.DNSNames, uris, issuer)
-		log.Printf("VerifyPeerCertificate: Stored Certificate Info on Port [%s] Label [%s] RemoteAddr [%s] - CN: [%s], SAN: %+v, URIs: %+v, Issuers: %+v\n",
-			port, label, remoteAddr, clientCert.Subject.CommonName, clientCert.DNSNames, uris, issuer)
-		if origVeryPeerCert != nil {
-			return origVeryPeerCert(rawCerts, verifiedChains)
-		}
+		issuer := IssuerToString(peerCert)
+		subject := SubjectToString(peerCert)
+		callback(remoteAddr, subject, peerCert.DNSNames, uris, issuer)
+		msg := fmt.Sprintf("VerifyPeerCertificate: Stored Certificate Info on Port [%s] Label [%s] RemoteAddr [%s] - CN: [%s], SAN: %+v, URIs: %+v, Issuers: %+v",
+			port, label, remoteAddr, peerCert.Subject.CommonName, peerCert.DNSNames, uris, issuer)
+		updatePeerStatus(remoteAddr, false, msg)
+		log.Println(msg)
 		return nil
 	}
 }
 
-func GetConfigForClient(port, label string, tlsConfig *tls.Config, storeALPN func(string, []string),
+func HandleClientHello(port, label string, tlsConfig *tls.Config,
+	storeALPN func(string, []string),
 	storeCertInfo func(remoteAddr string, commonName string, dnsNames, uris []string, issuer string),
 	storeSNI func(remoteAddr string, sni, alpn string),
-	origVerifyConn func(cs tls.ConnectionState) error,
-	origVeryPeerCert func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error) func(*tls.ClientHelloInfo) (*tls.Config, error) {
-	remoteAddr := ""
-	getRemoteAddr := func() string { return remoteAddr }
-	tlsConfig.VerifyConnection = ExtractSNI(port, label, getRemoteAddr, storeSNI, origVerifyConn)
-	tlsConfig.VerifyPeerCertificate = ExtractPeerCertInfo(port, label, getRemoteAddr, storeCertInfo, origVeryPeerCert)
+	updatePeerStatus func(remoteAddr string, success bool, e string)) func(*tls.ClientHelloInfo) (*tls.Config, error) {
 	return func(clientHello *tls.ClientHelloInfo) (*tls.Config, error) {
-		log.Printf("GetConfigForClient called on Port [%s] Label [%s] - SNI: [%s], SupportedProtos: %+v\n", port, label, clientHello.ServerName, clientHello.SupportedProtos)
+		log.Printf("HandleClientHello called on Port [%s] Label [%s] - SNI: [%s], SupportedProtos: %+v\n", port, label, clientHello.ServerName, clientHello.SupportedProtos)
 		if clientHello == nil {
-			return nil, fmt.Errorf("[%s]Port[%s]: GetConfigForClient: No clientHello provided", label, port)
+			msg := fmt.Sprintf("HandleClientHello on Port [%s] Label [%s] - No clientHello provided", port, label)
+			return nil, errors.New(msg)
 		}
-		remoteAddr = util.GetRemoteAddr(clientHello.Context())
+		remoteAddr := util.GetRemoteAddr(clientHello.Context())
 		storeALPN(remoteAddr, clientHello.SupportedProtos)
 		storeSNI(remoteAddr, clientHello.ServerName, "")
-		log.Printf("GetConfigForClient: Server Reporting ALPNs on Port [%s] Label [%s] RemoteAddr [%s] - ALPNs: %+v\n", port, label, remoteAddr, tlsConfig.NextProtos)
-		return tlsConfig, nil
+		msg := fmt.Sprintf("HandleClientHello: Server Reporting ALPNs on Port [%s] Label [%s] RemoteAddr [%s] - ALPNs: %+v", port, label, remoteAddr, tlsConfig.NextProtos)
+		updatePeerStatus(remoteAddr, false, msg)
+		log.Println(msg)
+		t2 := tlsConfig.Clone()
+		t2.VerifyConnection = ExtractSNI(port, label, remoteAddr, storeSNI, storeCertInfo, updatePeerStatus)
+		t2.VerifyPeerCertificate = ExtractPeerCertInfo(port, label, remoteAddr, storeCertInfo, updatePeerStatus)
+		return t2, nil
 	}
 }
 
@@ -164,4 +185,43 @@ func IdentifyLeaf(certs []*tls.Certificate) *x509.Certificate {
 		leaf = certs[0].Leaf
 	}
 	return leaf
+}
+
+func NewPeerCertInfo(remoteAddr string) *PeerCertInfo {
+	return &PeerCertInfo{
+		StartAt:    time.Now(),
+		RemoteAddr: remoteAddr,
+	}
+}
+
+func (pci *PeerCertInfo) Summary() string {
+	pci.Finished = true
+	pci.Status = append(pci.Status, "Peer Cert Reported")
+	b := &strings.Builder{}
+	if pci.RemoteAddr != "" {
+		b.WriteString(fmt.Sprintf("RemoteAddr: %s;; ", pci.RemoteAddr))
+	}
+	if pci.Subject != "" {
+		b.WriteString(fmt.Sprintf("Subject: %s;; ", pci.Subject))
+	}
+	if len(pci.DNSNames) > 0 {
+		b.WriteString(fmt.Sprintf("DNSNames: %+v;; ", pci.DNSNames))
+	}
+	if len(pci.URIs) > 0 {
+		b.WriteString(fmt.Sprintf("URIs: %+v;; ", pci.URIs))
+	}
+	if pci.SNI != "" {
+		b.WriteString(fmt.Sprintf("SNI: %s;; ", pci.SNI))
+	}
+	if len(pci.ALPN) > 0 {
+		b.WriteString(fmt.Sprintf("ALPN: %+v;; ", pci.ALPN))
+	}
+	if pci.Issuer != "" {
+		b.WriteString(fmt.Sprintf("Issuer: %s;;", pci.Issuer))
+	}
+	if pci.NegotiatedALPN != "" {
+		b.WriteString(fmt.Sprintf("NegotiatedALPN: %s;;", pci.NegotiatedALPN))
+	}
+	b.WriteString(fmt.Sprintf("Finished: %t;;", pci.Finished))
+	return b.String()
 }

@@ -53,6 +53,7 @@ type CallSpec struct {
 	VerifyTLS    bool                 `json:"verifyTLS"`
 	TLSVersion   uint16               `json:"tlsVersion"`
 	ClientCert   string               `json:"clientCert"`
+	DefaultALPN  bool                 `json:"defaultALPN"`
 	ALPN         []string             `json:"alpn"`
 	Payload      []string             `json:"payload"`
 	StreamDelay  string               `json:"streamDelay"`
@@ -149,6 +150,16 @@ func (c *CallSpec) PrepareRequest(r *http.Request) error {
 	if c.Authority == "" {
 		c.Authority = req.Host
 	}
+	if c.TLS {
+		req.Header.Add(constants.HeaderGotoClientTLS, "true")
+		if c.ClientCert != "" {
+			req.Header.Add(constants.HeaderGotoClientMTLS, "true")
+		} else {
+			req.Header.Add(constants.HeaderGotoClientMTLS, "false")
+		}
+	} else {
+		req.Header.Add(constants.HeaderGotoClientTLS, "false")
+	}
 	if c.RequestID {
 		uuid := uuid.New().String()
 		req.Header.Add("x-request-id", uuid)
@@ -173,7 +184,7 @@ func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 	port := util.GetRequestOrListenerPortNum(r)
 	label := util.GetCurrentListenerLabel(r)
 	client := transport.CreateDefaultHTTPClient(port, label, c.IsH2, c.TLS, c.NoSNI, c.Authority, metrics.ConnTracker)
-	client.UpdateTLSConfig(sni, c.TLSVersion, c.VerifyTLS, c.ALPN)
+	client.UpdateTLSConfig(sni, c.TLSVersion, c.VerifyTLS, c.ALPN, c.DefaultALPN)
 	if c.ClientCert != "" {
 		certs, err := gototls.GetCerts(c.ClientCert)
 		if err != nil {
@@ -187,13 +198,16 @@ func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 			for _, uri := range leaf.URIs {
 				uris = append(uris, uri.String())
 			}
-			callResults.ClientCert = util.ToJSONText(&gototls.PeerCertInfo{
-				Subject:  gototls.SubjectToString(leaf),
-				DNSNames: leaf.DNSNames,
-				URIs:     uris,
-				Issuer:   gototls.IssuerToString(leaf),
-				ALPN:     c.ALPN,
-			})
+			pci := &gototls.PeerCertInfo{
+				StartAt:    time.Now(),
+				RemoteAddr: r.RemoteAddr,
+				Subject:    gototls.SubjectToString(leaf),
+				DNSNames:   leaf.DNSNames,
+				URIs:       uris,
+				Issuer:     gototls.IssuerToString(leaf),
+				ALPN:       c.ALPN,
+			}
+			callResults.ClientCert = pci.Summary()
 		}
 	}
 	if c.Count == 0 {
@@ -236,9 +250,8 @@ func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 		result.Payload = b
 		pci := client.GetPeerCertInfo()
 		if pci != nil {
-			v := util.ToJSONText(pci)
-			result.ServerCert = v
-			callResults.ServerCerts = append(callResults.ServerCerts, v)
+			result.ServerCert = pci.Summary()
+			callResults.ServerCerts = append(callResults.ServerCerts, result.ServerCert)
 		}
 		result.Status = resp.StatusCode
 		callResults.Statuses = append(callResults.Statuses, resp.StatusCode)

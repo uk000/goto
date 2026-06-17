@@ -30,6 +30,8 @@ const (
 	HeaderGotoProtocol              = "Goto-Protocol"
 	HeaderGotoTLS                   = "Goto-TLS"
 	HeaderGotoMTLS                  = "Goto-mTLS"
+	HeaderGotoClientTLS             = "Goto-Client-TLS"
+	HeaderGotoClientMTLS            = "Goto-Client-mTLS"
 	HeaderGotoSNI                   = "Goto-SNI"
 	HeaderGotoClientCert            = "Goto-Client-Cert"
 	HeaderGotoServerCert            = "Goto-Server-Cert"

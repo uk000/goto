@@ -17,7 +17,9 @@
 package conn
 
 import (
+	"crypto/tls"
 	"goto/pkg/global"
+	gototls "goto/pkg/tls"
 	"net"
 	"net/http"
 	"sync"
@@ -26,8 +28,7 @@ import (
 type ConnectionWatcher struct {
 	connections map[int]map[net.Conn]struct{}
 	connCounts  map[int]int
-	mu          sync.Mutex
-	wg          sync.WaitGroup
+	lock        sync.Mutex
 }
 
 var (
@@ -42,10 +43,25 @@ func init() {
 	global.Funcs.CloseConnectionsForPort = ConnWatcher.CloseConnectionsForPort
 }
 
+func getTCPConn(c net.Conn) *net.TCPConn {
+	switch conn := c.(type) {
+	case *net.TCPConn:
+		return conn
+	case *tls.Conn:
+		return getTCPConn(conn.NetConn())
+	case *gototls.PeekedConn:
+		return getTCPConn(conn.Conn)
+	}
+	return nil
+}
+
 func (cw *ConnectionWatcher) ConnState(c net.Conn, state http.ConnState) {
-	cw.mu.Lock()
-	defer cw.mu.Unlock()
-	tcpConn := c.(*net.TCPConn)
+	cw.lock.Lock()
+	defer cw.lock.Unlock()
+	tcpConn := getTCPConn(c)
+	if tcpConn == nil {
+		return
+	}
 	tcpAddr := tcpConn.LocalAddr().(*net.TCPAddr)
 	switch state {
 	case http.StateNew:
@@ -54,20 +70,20 @@ func (cw *ConnectionWatcher) ConnState(c net.Conn, state http.ConnState) {
 		}
 		cw.connections[tcpAddr.Port][c] = struct{}{}
 		cw.connCounts[tcpAddr.Port]++
-		cw.wg.Add(1)
+		global.OnConnOpen(c)
 	case http.StateClosed, http.StateHijacked:
 		if cw.connections[tcpAddr.Port] != nil {
 			delete(cw.connections[tcpAddr.Port], c)
 		}
 		cw.connCounts[tcpAddr.Port]--
-		cw.wg.Done()
+		global.OnConnClose(c)
 	}
 	//log.Printf("ConnState [%s]: Port [%d] Current Conn Count [%d].", state, tcpAddr.Port, cw.connCounts[tcpAddr.Port])
 }
 
 func (cw *ConnectionWatcher) CloseConnectionsForPort(port int) {
-	cw.mu.Lock()
-	defer cw.mu.Unlock()
+	cw.lock.Lock()
+	defer cw.lock.Unlock()
 	//log.Printf("CloseConnectionsForPort: Port [%d] Current Conn Count [%d].", port, cw.connCounts[port])
 	if cw.connections[port] != nil {
 		for c := range cw.connections[port] {

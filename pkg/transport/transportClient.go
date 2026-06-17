@@ -36,7 +36,7 @@ import (
 
 type ClientTransport interface {
 	SetTLSConfig(tlsConfig *tls.Config)
-	UpdateTLSConfig(sni string, tlsVersion uint16, verify bool, alpn []string)
+	UpdateTLSConfig(sni string, tlsVersion uint16, verify bool, alpn []string, defaultALPN bool)
 	UpdateTLSCerts(rootCAs *x509.CertPool, certs []*tls.Certificate)
 	GetPeerCertInfo() *gototls.PeerCertInfo
 	Transport() ITransportIntercept
@@ -61,6 +61,11 @@ type DefaultClientTransport struct {
 	h2Transport        *http2.Transport
 	port               int
 	label              string
+}
+
+type ClientTLSConfig struct {
+	*tls.Config
+	RemoteAddress string
 }
 
 func (ct *DefaultClientTransport) UpdateTransport(c *http.Client, gc *grpc.ClientConn, h1 *http.Transport, intercept ITransportIntercept, grpcIntercept *GRPCIntercept, isH2 bool) {
@@ -106,7 +111,7 @@ func (e *errRoundTripper) RoundTrip(*http.Request) (*http.Response, error) { ret
 
 func (c *DefaultClientTransport) alpnHandler(authority string, conn *tls.Conn) http.RoundTripper {
 	log.Printf("Client Port [%d] Label [%s]: TLS Handshake Complete. Negotiated ALPN: %s ---\n", c.port, c.label, conn.ConnectionState().NegotiatedProtocol)
-	if strings.Contains(conn.ConnectionState().NegotiatedProtocol, "h2") {
+	if c.isH2 {
 		cc, err := c.h2Transport.NewClientConn(struct{ net.Conn }{conn})
 		if err != nil {
 			log.Printf("Client Port [%d] Label %s: NewClientConn failed: %v", c.port, c.label, err)
@@ -121,7 +126,7 @@ func (c *DefaultClientTransport) alpnHandler(authority string, conn *tls.Conn) h
 	}
 }
 
-func (c *DefaultClientTransport) UpdateTLSConfig(sni string, tlsVersion uint16, verify bool, alpns []string) {
+func (c *DefaultClientTransport) UpdateTLSConfig(sni string, tlsVersion uint16, verify bool, alpns []string, defaultALPN bool) {
 	tlsConfig := c.GetTLSConfig()
 	if c.SNI != tlsConfig.ServerName || c.TLSVersion != tlsConfig.MinVersion {
 		c.CloseIdleConnections()
@@ -130,7 +135,9 @@ func (c *DefaultClientTransport) UpdateTLSConfig(sni string, tlsVersion uint16, 
 	tlsConfig.ServerName = sni
 	tlsConfig.MinVersion = tlsVersion
 	tlsConfig.MaxVersion = tlsVersion
-	if !c.isH2 {
+	if !defaultALPN {
+		tlsConfig.NextProtos = alpns
+	} else if !c.isH2 {
 		tlsConfig.NextProtos = append(alpns, "http/1.1")
 	} else if len(alpns) > 0 {
 		tlsConfig.NextProtos = append(tlsConfig.NextProtos, alpns...)
@@ -162,7 +169,7 @@ func (c *DefaultClientTransport) UpdateTLSCerts(rootCAs *x509.CertPool, certs []
 
 func (c *DefaultClientTransport) StorePeerCertInfo(remoteAddr string, commonName string, dnsNames, uris []string, issuer string) {
 	if c.PeerCertInfo == nil {
-		c.PeerCertInfo = &gototls.PeerCertInfo{}
+		c.PeerCertInfo = gototls.NewPeerCertInfo(remoteAddr)
 		c.PeerCertInfo.RemoteAddr = remoteAddr
 	}
 	c.PeerCertInfo.Subject = commonName
@@ -173,7 +180,7 @@ func (c *DefaultClientTransport) StorePeerCertInfo(remoteAddr string, commonName
 
 func (c *DefaultClientTransport) StoreSNI(remoteAddr string, sni, alpn string) {
 	if c.PeerCertInfo == nil {
-		c.PeerCertInfo = &gototls.PeerCertInfo{}
+		c.PeerCertInfo = gototls.NewPeerCertInfo(remoteAddr)
 		c.PeerCertInfo.RemoteAddr = remoteAddr
 	}
 	c.PeerCertInfo.SNI = sni
@@ -182,10 +189,20 @@ func (c *DefaultClientTransport) StoreSNI(remoteAddr string, sni, alpn string) {
 
 func (c *DefaultClientTransport) StoreALPN(remoteAddr string, alpn []string) {
 	if c.PeerCertInfo == nil {
-		c.PeerCertInfo = &gototls.PeerCertInfo{}
+		c.PeerCertInfo = gototls.NewPeerCertInfo(remoteAddr)
 		c.PeerCertInfo.RemoteAddr = remoteAddr
 	}
 	c.PeerCertInfo.ALPN = alpn
+}
+
+func (c *DefaultClientTransport) UpdatePeerStatus(remoteAddr string, finished bool, status string) {
+	if c.PeerCertInfo == nil {
+		c.PeerCertInfo = gototls.NewPeerCertInfo(remoteAddr)
+		c.PeerCertInfo.RemoteAddr = remoteAddr
+	}
+	c.PeerCertInfo.Finished = finished
+	c.PeerCertInfo.Status = append(c.PeerCertInfo.Status, status)
+	c.PeerCertInfo.EndAt = time.Now()
 }
 
 func (c *DefaultClientTransport) GetPeerCertInfo() *gototls.PeerCertInfo {
@@ -281,10 +298,8 @@ func CreateHTTPClient(port int, label string, h2, autoUpgrade, isTLS, noSNI bool
 		serverName = ""
 	}
 	tlsConfig := &tls.Config{
-		InsecureSkipVerify:    true,
-		ServerName:            serverName,
-		VerifyConnection:      gototls.ExtractSNI("-", "Client-"+label, func() string { return "" }, ct.StoreSNI, nil),
-		VerifyPeerCertificate: gototls.ExtractPeerCertInfo("-", "Client-"+label, func() string { return "" }, ct.StorePeerCertInfo, nil),
+		InsecureSkipVerify: true,
+		ServerName:         serverName,
 	}
 	if h2 {
 		tlsConfig.NextProtos = []string{"h2"}
@@ -294,6 +309,11 @@ func CreateHTTPClient(port int, label string, h2, autoUpgrade, isTLS, noSNI bool
 		rawConn, err := dialer.DialContext(ctx, network, addr)
 		if err != nil {
 			return nil, err
+		}
+		tlsConfig.VerifyConnection = gototls.ExtractSNI(network, "Client-"+label, addr, ct.StoreSNI, ct.StorePeerCertInfo, ct.UpdatePeerStatus)
+		tlsConfig.VerifyPeerCertificate = gototls.ExtractPeerCertInfo(network, "Client-"+label, addr, ct.StorePeerCertInfo, ct.UpdatePeerStatus)
+		if h2 {
+			tlsConfig.NextProtos = []string{"h2"}
 		}
 		tlsConn := tls.Client(rawConn, tlsConfig)
 		if err := tlsConn.HandshakeContext(ctx); err != nil {

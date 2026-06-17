@@ -972,8 +972,13 @@
     - /server/listeners/{port}/reopen: '[PUT POST]'
     - /server/listeners/{port}/close: '[PUT POST]'
     - /server/listeners/{port}: '[GET]'
+    - /server/listeners/{port}/client/certs: '[GET]'
+    - /server/listeners/{port}/client/certs/clear: '[POST]'
     /server/listeners/add:
     - /server/listeners/add: '[POST PUT]'
+    /server/listeners/client:
+    - /server/listeners/client/certs: '[GET]'
+    - /server/listeners/client/certs/clear: '[POST]'
     /server/listeners/ports:
     - /server/listeners/ports: '[GET]'
     /server/listeners/update:

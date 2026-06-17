@@ -83,6 +83,9 @@ func checkRequestPort(r *http.Request, rs *RequestStore) (port string, portNum i
 	if strings.HasPrefix(uri, "/port=") {
 		rs.RequestPort = strings.Split(strings.Split(uri, "/port=")[1], "/")[0]
 		rs.RequestPortNum, _ = strconv.Atoi(rs.RequestPort)
+	} else if port := GetStringParamValue(r, "port"); port != "" {
+		rs.RequestPortNum, _ = strconv.Atoi(port)
+		rs.RequestPort = port
 	} else {
 		rs.RequestPortNum = GetListenerPortNum(r)
 		rs.RequestPort = strconv.Itoa(rs.RequestPortNum)

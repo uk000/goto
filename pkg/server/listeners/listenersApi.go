@@ -57,6 +57,11 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(lRouter, "/ports", getListeners, "GET")
 	util.AddRoute(lRouter, "/{port}", getListeners, "GET")
 	util.AddRoute(lRouter, "", getListeners, "GET")
+	util.AddRoute(lRouter, "/{port}/client/certs", getClientCerts, "GET")
+	util.AddRoute(lRouter, "/{port}/client/certs/clear", clearClientCerts, "POST")
+	util.AddRoute(lRouter, "/client/certs", getClientCerts, "GET")
+	util.AddRoute(lRouter, "/client/certs/clear", clearClientCerts, "POST")
+
 }
 
 func addListener(w http.ResponseWriter, r *http.Request) {
@@ -179,6 +184,19 @@ func getListenerCertOrKey(w http.ResponseWriter, r *http.Request) {
 		}
 		util.AddLogMessage(msg, r)
 	}
+}
+
+func getClientCerts(w http.ResponseWriter, r *http.Request) {
+	util.AddLogMessage("Sent Active certs", r)
+	port := util.GetIntParamValue(r, "port")
+	output := GetPeerCerts(port)
+	fmt.Fprintln(w, util.ToYaml(output))
+}
+
+func clearClientCerts(w http.ResponseWriter, r *http.Request) {
+	util.AddLogMessage("Cleared Active certs", r)
+	port := util.GetIntParamValue(r, "port")
+	ClearPeerCerts(port)
 }
 
 func autoCert(w http.ResponseWriter, r *http.Request) {

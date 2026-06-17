@@ -54,7 +54,7 @@ type Funcs struct {
 	GetListenerLabel          func(*http.Request) string
 	GetListenerLabelForPort   func(int) string
 	IsListenerTLS             func(int) bool
-	GetCertInfo               func(*http.Request) (ss string, cs string)
+	GetCertInfo               func(int, string) (string, string)
 	CloseConnectionsForPort   func(int)
 	StoreEventInCurrentLocker func(interface{})
 }

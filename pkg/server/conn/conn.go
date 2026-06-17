@@ -58,7 +58,7 @@ func captureTLSInfo(r *http.Request) {
 	if !tlsState.HandshakeComplete {
 		return
 	}
-	rs.ServerCert, rs.ClientCert = listeners.GetCertInfo(r)
+	rs.ServerCert, rs.ClientCert = listeners.GetPeerCert(rs.RequestPortNum, rs.DownstreamAddr)
 	rs.IsTLS = true
 	rs.IsMTLS = l.MTLS
 	rs.ServerName = tlsState.ServerName

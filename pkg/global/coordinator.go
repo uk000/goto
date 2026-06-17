@@ -19,6 +19,7 @@ package global
 import (
 	"net"
 	"net/http"
+	"sync"
 
 	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
@@ -47,6 +48,8 @@ type GRPCStartListener func()
 type GRPCStopListener func()
 type GRPCInterceptor func(server IGRPCManager)
 type ListenersStartWatcher func()
+type ConnOpenWatcher func(net.Conn)
+type ConnCloseWatcher func(net.Conn)
 
 var (
 	httpStartWatchers      []HTTPStartWatcher
@@ -58,90 +61,157 @@ var (
 	grpcStopListeners      []GRPCStopListener
 	grpcIntercepts         []GRPCInterceptor
 	listenersStartWatchers []ListenersStartWatcher
-	GRPCServer             IGRPCServer
-	GRPCManager            IGRPCManager
-	ShutdownFuncs          = []func(){}
+	connOpenWatchers       []ConnOpenWatcher
+	connCloseWatchers      []ConnCloseWatcher
+
+	GRPCServer    IGRPCServer
+	GRPCManager   IGRPCManager
+	ShutdownFuncs = []func(){}
+
+	lock sync.RWMutex
 )
 
 func AddHTTPStartWatcher(w HTTPStartWatcher) {
+	lock.Lock()
+	defer lock.Unlock()
 	httpStartWatchers = append(httpStartWatchers, w)
 }
 
 func AddHTTPStopWatcher(w HTTPStopWatcher) {
+	lock.Lock()
+	defer lock.Unlock()
 	httpStopWatchers = append(httpStopWatchers, w)
 }
 
 func AddJSONRPCStartWatcher(w HTTPStartWatcher) {
+	lock.Lock()
+	defer lock.Unlock()
 	mcpStartWatchers = append(mcpStartWatchers, w)
 }
 
 func AddJSONRPCStopWatcher(w HTTPStopWatcher) {
+	lock.Lock()
+	defer lock.Unlock()
 	mcpStopWatchers = append(mcpStopWatchers, w)
 }
 
 func AddTCPServeWatcher(w TCPServerWatcher) {
+	lock.Lock()
+	defer lock.Unlock()
 	tcpServeWatchers = append(tcpServeWatchers, w)
 }
 
 func AddGRPCStartWatcher(w GRPCStartListener) {
+	lock.Lock()
+	defer lock.Unlock()
 	grpcStartListeners = append(grpcStartListeners, w)
 }
 
 func AddGRPCStopWatcher(w GRPCStopListener) {
+	lock.Lock()
+	defer lock.Unlock()
 	grpcStopListeners = append(grpcStopListeners, w)
 }
 
 func AddGRPCIntercept(w GRPCInterceptor) {
+	lock.Lock()
+	defer lock.Unlock()
 	grpcIntercepts = append(grpcIntercepts, w)
 }
 
 func AddListenersStartWatcher(w ListenersStartWatcher) {
+	lock.Lock()
+	defer lock.Unlock()
 	listenersStartWatchers = append(listenersStartWatchers, w)
 }
 
+func AddConnOpenWatcher(w ConnOpenWatcher) {
+	lock.Lock()
+	defer lock.Unlock()
+	connOpenWatchers = append(connOpenWatchers, w)
+}
+
+func AddConnCloseWatcher(w ConnCloseWatcher) {
+	lock.Lock()
+	defer lock.Unlock()
+	connCloseWatchers = append(connCloseWatchers, w)
+}
+
 func OnListenersStarted() {
+	lock.RLock()
+	defer lock.RUnlock()
 	for _, w := range listenersStartWatchers {
 		w()
 	}
 }
 
 func OnHTTPStart(server *http.Server, h2s *http2.Server) {
+	lock.RLock()
+	defer lock.RUnlock()
 	for _, w := range httpStartWatchers {
 		w(server, h2s)
 	}
 }
 
 func OnHTTPStop() {
+	lock.RLock()
+	defer lock.RUnlock()
 	for _, w := range httpStopWatchers {
 		w()
 	}
 }
 
 func OnJSONRPCStart(server *http.Server, h2s *http2.Server) {
+	lock.RLock()
+	defer lock.RUnlock()
 	for _, w := range mcpStartWatchers {
 		w(server, h2s)
 	}
 }
 
 func OnMCPStop() {
+	lock.RLock()
+	defer lock.RUnlock()
 	for _, w := range mcpStopWatchers {
 		w()
 	}
 }
 
+func OnConnOpen(c net.Conn) {
+	lock.RLock()
+	defer lock.RUnlock()
+	for _, w := range connOpenWatchers {
+		w(c)
+	}
+}
+
+func OnConnClose(c net.Conn) {
+	lock.RLock()
+	defer lock.RUnlock()
+	for _, w := range connCloseWatchers {
+		w(c)
+	}
+}
+
 func ConfigureTCPServer(serve func(listenerID string, port int, listener net.Listener) error) {
+	lock.RLock()
+	defer lock.RUnlock()
 	for _, w := range tcpServeWatchers {
 		w(serve)
 	}
 }
 
 func OnGRPCStart() {
+	lock.RLock()
+	defer lock.RUnlock()
 	for _, w := range grpcStartListeners {
 		w()
 	}
 }
 
 func OnGRPCStop() {
+	lock.RLock()
+	defer lock.RUnlock()
 	for _, w := range grpcStopListeners {
 		w()
 	}

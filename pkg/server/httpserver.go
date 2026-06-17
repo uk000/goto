@@ -28,6 +28,7 @@ import (
 	"goto/pkg/registry/peer"
 	"goto/pkg/router"
 	grpcserver "goto/pkg/rpc/grpc/server"
+	"goto/pkg/server/conn"
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/listeners"
 	"goto/pkg/server/middleware"
@@ -121,9 +122,9 @@ func configureAndStartHTTPServer() error {
 		ReadTimeout:  1 * time.Minute,
 		IdleTimeout:  1 * time.Minute,
 		ConnContext:  withConnContext,
-		//ConnState:    conn.ConnState,
-		Handler:  h2cHandler,
-		ErrorLog: log.New(io.Discard, "discard", 0),
+		ConnState:    conn.ConnState,
+		Handler:      h2cHandler,
+		ErrorLog:     log.New(io.Discard, "discard", 0),
 	}
 	h2s.WriteByteTimeout = httpServer.WriteTimeout
 	h2s.ReadIdleTimeout = httpServer.ReadTimeout
@@ -190,27 +191,6 @@ func startListeners() {
 		}
 		time.Sleep(1 * time.Second)
 	}
-}
-
-func ServeHTTPListener(l *listeners.Listener) {
-	go func() {
-		msg := ""
-		var server *http.Server
-		if l.IsJSONRPC {
-			msg = fmt.Sprintf("Starting JSONRPC Listener [%s]", l.ListenerID)
-			server = jsonRPCServer
-		} else {
-			msg = fmt.Sprintf("Starting HTTP Listener [%s]", l.ListenerID)
-			server = httpServer
-		}
-		if l.TLS {
-			msg += fmt.Sprintf(" With TLS [CN: %s]", l.CommonName)
-		}
-		log.Println(msg)
-		if err := server.Serve(l.Listener); err != nil {
-			log.Printf("Listener [%d]: %s", l.Port, err.Error())
-		}
-	}()
 }
 
 func WaitForHttpServer() {
