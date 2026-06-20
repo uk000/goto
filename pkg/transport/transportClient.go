@@ -36,7 +36,7 @@ import (
 
 type ClientTransport interface {
 	SetTLSConfig(tlsConfig *tls.Config)
-	UpdateTLSConfig(sni string, tlsVersion uint16, verify bool, alpn []string, defaultALPN bool)
+	UpdateTLSConfig(sni string, tlsVersion uint16, verify bool, alpn *gototls.ALPN)
 	UpdateTLSCerts(rootCAs *x509.CertPool, certs []*tls.Certificate)
 	GetPeerCertInfo() *gototls.PeerCertInfo
 	Transport() ITransportIntercept
@@ -61,6 +61,7 @@ type DefaultClientTransport struct {
 	h2Transport        *http2.Transport
 	port               int
 	label              string
+	alpn               *gototls.ALPN
 }
 
 type ClientTLSConfig struct {
@@ -126,7 +127,7 @@ func (c *DefaultClientTransport) alpnHandler(authority string, conn *tls.Conn) h
 	}
 }
 
-func (c *DefaultClientTransport) UpdateTLSConfig(sni string, tlsVersion uint16, verify bool, alpns []string, defaultALPN bool) {
+func (c *DefaultClientTransport) UpdateTLSConfig(sni string, tlsVersion uint16, verify bool, alpn *gototls.ALPN) {
 	tlsConfig := c.GetTLSConfig()
 	if c.SNI != tlsConfig.ServerName || c.TLSVersion != tlsConfig.MinVersion {
 		c.CloseIdleConnections()
@@ -135,19 +136,19 @@ func (c *DefaultClientTransport) UpdateTLSConfig(sni string, tlsVersion uint16, 
 	tlsConfig.ServerName = sni
 	tlsConfig.MinVersion = tlsVersion
 	tlsConfig.MaxVersion = tlsVersion
-	if !defaultALPN {
-		tlsConfig.NextProtos = alpns
-	} else if !c.isH2 {
-		tlsConfig.NextProtos = append(alpns, "http/1.1")
-	} else if len(alpns) > 0 {
-		tlsConfig.NextProtos = append(tlsConfig.NextProtos, alpns...)
-	}
-	c.h1Transport.TLSNextProto = map[string]func(authority string, conn *tls.Conn) http.RoundTripper{}
-	for _, alpn := range alpns {
-		c.h1Transport.TLSNextProto[alpn] = c.alpnHandler
-	}
-	for _, alpn := range tlsConfig.NextProtos {
-		c.h1Transport.TLSNextProto[alpn] = c.alpnHandler
+	c.alpn = alpn
+	if alpn != nil {
+		if !alpn.KeepDefault {
+			tlsConfig.NextProtos = alpn.Protos
+		} else if !c.isH2 {
+			tlsConfig.NextProtos = append(alpn.Protos, "http/1.1")
+		} else if len(alpn.Protos) > 0 {
+			tlsConfig.NextProtos = append(tlsConfig.NextProtos, alpn.Protos...)
+		}
+		c.h1Transport.TLSNextProto = map[string]func(authority string, conn *tls.Conn) http.RoundTripper{}
+		for _, alpn := range tlsConfig.NextProtos {
+			c.h1Transport.TLSNextProto[alpn] = c.alpnHandler
+		}
 	}
 }
 
@@ -312,13 +313,21 @@ func CreateHTTPClient(port int, label string, h2, autoUpgrade, isTLS, noSNI bool
 		}
 		tlsConfig.VerifyConnection = gototls.ExtractSNI(network, "Client-"+label, addr, ct.StoreSNI, ct.StorePeerCertInfo, ct.UpdatePeerStatus)
 		tlsConfig.VerifyPeerCertificate = gototls.ExtractPeerCertInfo(network, "Client-"+label, addr, ct.StorePeerCertInfo, ct.UpdatePeerStatus)
-		if h2 {
-			tlsConfig.NextProtos = []string{"h2"}
-		}
 		tlsConn := tls.Client(rawConn, tlsConfig)
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
 			rawConn.Close()
 			return nil, err
+		}
+		if ct.alpn != nil {
+			if data, err := ct.alpn.Handle(tlsConn); err == nil && data != nil {
+				if j := util.ProtoToJSON(data); j != nil {
+					log.Printf("TransportClient [%d][%s]: Read TLS Handshake Preamble: %s\n", port, label, j.ToJSONText())
+				} else {
+					log.Printf("TransportClient [%d][%s]: Read TLS Handshake Preamble: %s\n", port, label, util.CleanText(data))
+				}
+			} else {
+				log.Printf("TransportClient [%d][%s]: TLS Handshake Finished with No Preamble. Error: %+v\n", port, label, err)
+			}
 		}
 		return tlsConn, nil
 	}

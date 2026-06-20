@@ -30,6 +30,9 @@ func removeHTTPProxy(port int) {
 }
 
 func loadHTTPProxy(p *httpproxy.Proxy) {
+	if p == nil {
+		return
+	}
 	proxy := httpproxy.GetPortProxy(p.Port)
 	proxy.Enabled = p.Enabled
 	proxy.ProxyResponses = p.ProxyResponses
@@ -40,9 +43,9 @@ func loadHTTPProxy(p *httpproxy.Proxy) {
 		if err := proxy.AddTarget(target); err != nil {
 			log.Printf("[*** ERROR ***] Failed to process HTTP Proxy target [%s] with error: %s", name, err.Error())
 		} else {
-			log.Println("============================================================")
+			log.Println("------------------------------------")
 			log.Printf("HTTP Proxy target [%s] loaded successfully", name)
-			log.Println("============================================================")
+			log.Println("------------------------------------")
 		}
 	}
 }
@@ -52,15 +55,18 @@ func removeTCPProxy(port int) {
 }
 
 func loadTCPProxy(p *tcpproxy.TCPProxy) {
+	if p == nil {
+		return
+	}
 	if err := tcpproxy.ValidateUpstreams(p.Upstreams); err != nil {
 		log.Printf("[*** ERROR ***] TCP Proxy [%d] Upstreams failed validation: %s\n", p.Port, err.Error())
 		return
 	}
 	log.Printf("Loading TCP Proxy [%d]\n", p.Port)
 	tcpproxy.GetPortProxy(p.Port).AddUpstreams(p.Upstreams)
-	log.Println("============================================================")
+	log.Println("------------------------------------")
 	log.Printf("TCP Proxy [%d] loaded [%d] upstreams successfully", p.Port, len(p.Upstreams))
-	log.Println("============================================================")
+	log.Println("------------------------------------")
 }
 
 func removeGRPCProxy(port int) {
@@ -68,6 +74,9 @@ func removeGRPCProxy(port int) {
 }
 
 func loadGRPCProxy(p *grpcproxy.GRPCProxy) {
+	if p == nil {
+		return
+	}
 	if !p.Enabled {
 		log.Printf("GRPC Proxy [%d] not enabled. Skipping.\n", p.Port)
 		return
@@ -86,7 +95,7 @@ func loadGRPCProxy(p *grpcproxy.GRPCProxy) {
 		log.Printf("GRPC Proxy [%d] configured from Service [%s] to Service [%s]\n", p.Port, from, sp.ToService)
 		success++
 	}
-	log.Println("============================================================")
+	log.Println("------------------------------------")
 	msg := fmt.Sprintf("GRPC Proxy [%d]", p.Port)
 	if success > 0 {
 		msg = fmt.Sprintf("%s %d services successfully loaded, ", msg, success)
@@ -95,5 +104,5 @@ func loadGRPCProxy(p *grpcproxy.GRPCProxy) {
 		msg = fmt.Sprintf("%s %d services failed to load", msg, failure)
 	}
 	log.Println(msg)
-	log.Println("============================================================")
+	log.Println("------------------------------------")
 }

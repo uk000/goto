@@ -53,8 +53,7 @@ type CallSpec struct {
 	VerifyTLS    bool                 `json:"verifyTLS"`
 	TLSVersion   uint16               `json:"tlsVersion"`
 	ClientCert   string               `json:"clientCert"`
-	DefaultALPN  bool                 `json:"defaultALPN"`
-	ALPN         []string             `json:"alpn"`
+	ALPN         *gototls.ALPN        `json:"alpn"`
 	Payload      []string             `json:"payload"`
 	StreamDelay  string               `json:"streamDelay"`
 	Headers      *types.HeadersConfig `json:"headers"`
@@ -183,8 +182,9 @@ func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 	}
 	port := util.GetRequestOrListenerPortNum(r)
 	label := util.GetCurrentListenerLabel(r)
-	client := transport.CreateDefaultHTTPClient(port, label, c.IsH2, c.TLS, c.NoSNI, c.Authority, metrics.ConnTracker)
-	client.UpdateTLSConfig(sni, c.TLSVersion, c.VerifyTLS, c.ALPN, c.DefaultALPN)
+	client := transport.CreateHTTPClient(port, label, c.IsH2, true, c.TLS, c.NoSNI, c.Authority,
+		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
+	client.UpdateTLSConfig(sni, c.TLSVersion, c.VerifyTLS, c.ALPN)
 	if c.ClientCert != "" {
 		certs, err := gototls.GetCerts(c.ClientCert)
 		if err != nil {
@@ -198,14 +198,19 @@ func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 			for _, uri := range leaf.URIs {
 				uris = append(uris, uri.String())
 			}
+			alpn := []string{}
+			if c.ALPN != nil {
+				alpn = c.ALPN.Protos
+			}
 			pci := &gototls.PeerCertInfo{
 				StartAt:    time.Now(),
 				RemoteAddr: r.RemoteAddr,
 				Subject:    gototls.SubjectToString(leaf),
 				DNSNames:   leaf.DNSNames,
 				URIs:       uris,
+				SNI:        c.Authority,
 				Issuer:     gototls.IssuerToString(leaf),
-				ALPN:       c.ALPN,
+				ALPN:       alpn,
 			}
 			callResults.ClientCert = pci.Summary()
 		}
@@ -270,6 +275,7 @@ func invokeHTTP(w http.ResponseWriter, r *http.Request) {
 		util.AddLogMessage(msg, r)
 		return
 	}
+	log.Printf("HTTP Client: Invoking [%s], Authority: [%s], TLS Cert: [%s], ALPN: [%s]\n", call.URL, call.Authority, call.ClientCert, util.ToJSONText(call.ALPN))
 	callResults, err := call.Invoke(r)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)

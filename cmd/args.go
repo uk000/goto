@@ -258,7 +258,6 @@ var (
 	portsList     string
 	startupScript types.ListArg
 	configPaths   types.ListArg
-	alpn          types.ListArg
 )
 
 func setupCtlArgs() {
@@ -309,7 +308,6 @@ func setupServerArgs() {
 	intFlag(&global.Self.GRPCPort, sa.GRPCPort, "gp", sh.GRPCPort, 1234)
 	intFlag(&global.Self.JSONRPCPort, sa.JSONRPCPort, "rpc", sh.JSONRPCPort, 3000)
 	stringFlag(&portsList, sa.Ports, "", sh.Ports, "")
-	flag.Var(&alpn, sa.ALPN, sh.ALPN)
 	stringFlag(&global.ServerConfig.CommonName, sa.CommonName, "", sh.CommonName, "goto.goto")
 	stringFlag(&global.Self.Name, sa.Label, "l", sh.Label, "")
 	stringFlag(&global.Self.RegistryURL, sa.Registry, "", sh.Registry, "")
@@ -354,9 +352,6 @@ func runInits() {
 func processServerArgs() {
 	setupRegistryConfigs()
 	setupLogs()
-	if alpn != nil {
-		global.ServerConfig.ALPN = alpn
-	}
 	if global.ServerConfig.CertPath != "" {
 		log.Printf("Will read certs from [%s]\n", global.ServerConfig.CertPath)
 	}

@@ -1,4 +1,44 @@
 name: goto-test-config
+order: 1
+listeners:
+  8443:
+    label: listener-8443
+    protocol: https
+    open: true
+    tls: true
+    mtls: true
+    verifyClientCert: false
+    alpn: 
+      protos: ["istio", "istio-h2", "istio-peer-exchange"]
+      keepDefault: false
+  9443:
+    label: listener-9443
+    protocol: https
+    open: true
+    tls: true
+  8000:
+    label: listener-8000
+    protocol: tcp
+    open: true
+    forward: 8443
+    alpn:
+      handshake:
+        protos: ["istio-peer-exchange"]
+        seq:
+        - read:
+            len: 8
+        - read:
+            len: 4
+            nextSize: true
+        - read:
+            collect: true
+        - write:
+            preamble: "a16e3c2e54424d45000000140a120a044e414d45120a0a08746573742d706f64"
+  10000:
+    label: listener-10000
+    protocol: tcp
+    open: true
+    forward: 8080
 tls:
   spiffeSocket: "unix:///tmp/spire-agent/public/api.sock"
   caCerts:

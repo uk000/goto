@@ -52,6 +52,16 @@ func RunJsonRPCServer() {
 	}
 }
 
+func RestartJsonRPCServer() {
+	if jsonRPCServer != nil {
+		_ = jsonRPCServer.Close()
+	}
+
+	if err := configureAndStartAIServer(global.Self.JSONRPCPort); err != nil {
+		log.Fatal(err.Error())
+	}
+}
+
 func configureAIRouter() *mux.Router {
 	aiRouter := mux.NewRouter()
 	aiRouter.SkipClean(true)

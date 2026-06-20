@@ -60,7 +60,7 @@ func processTLS(tls *TLSConfigs) {
 }
 
 func (tls *TLSConfigs) LoadCACerts(remote bool) {
-	log.Println("============================ CA Certs ================================")
+	log.Println("-------- CA Certs --------")
 	if len(tls.CACerts) == 0 {
 		log.Println("No Cert configs to configure")
 		return
@@ -78,11 +78,11 @@ func (tls *TLSConfigs) LoadCACerts(remote bool) {
 			log.Printf("Stored CA cert for Name [%s] Domain [%s]", caCert.Name, caCert.Domain)
 		}
 	}
-	log.Println("============================================================")
+	log.Println("------------------")
 }
 
 func (tls *TLSConfigs) LoadCerts(remote bool) {
-	log.Println("============================ Certs ================================")
+	log.Println("------------------ Certs ------------------")
 	if len(tls.Certs) == 0 {
 		log.Println("No Certs to configure")
 		return
@@ -113,7 +113,7 @@ func (tls *TLSConfigs) LoadCerts(remote bool) {
 			cc.LoadSpiffeCert(remote)
 		}
 	}
-	log.Println("============================================================")
+	log.Println("------------------------------------")
 }
 
 func (cc *CertConfig) LoadSpiffeCert(remote bool) {
@@ -122,6 +122,10 @@ func (cc *CertConfig) LoadSpiffeCert(remote bool) {
 			//No remote loading of spiffe certs yet
 		} else {
 			l := listeners.GetListenerForPort(cc.Port)
+			if l == nil {
+				log.Printf("No Listener present to load cert for port [%d]", cc.Port)
+				return
+			}
 			if certs, err := gototls.GetCerts(cc.Domain); err == nil {
 				l.SpiffeID = cc.SpiffeID
 				l.CommonName = cc.Domain

@@ -17,14 +17,19 @@
 package server
 
 import (
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"goto/pkg/global"
 	tcpproxy "goto/pkg/proxy/tcp"
+	"goto/pkg/server/listeners"
 	"goto/pkg/server/tcp"
+	gototls "goto/pkg/tls"
 	"goto/pkg/util"
 	"log"
 	"net"
 	"sync"
+	"time"
 )
 
 var (
@@ -46,8 +51,42 @@ func serveTCPRequests(listenerID string, port int, listener net.Listener) error 
 			lock.Lock()
 			requestCounter++
 			lock.Unlock()
+			l := listeners.GetListenerForPort(port)
+			fl := l.ForwardListener
+			isTLS := l.TLS
+			tlsConfig := l.TLSConfig
+			alpn := l.ALPN
+			if fl != nil {
+				isTLS = fl.TLS
+				if tlsConfig == nil {
+					tlsConfig = fl.TLSConfig
+				}
+				if alpn == nil {
+					alpn = fl.ALPN
+				} else if len(alpn.Protos) == 0 {
+					alpn.Protos = fl.ALPN.Protos
+				}
+			}
+			if isTLS {
+				tlsConn, pre, err := PeerHandshake(conn, tlsConfig, alpn)
+				if err != nil || tlsConn == nil {
+					log.Printf("[Listener: %s] TLS Handshake Failed with Error: %s.", listenerID, err.Error())
+					conn.Close()
+					continue
+				}
+				if j := util.ProtoToJSON(pre); j != nil {
+					log.Printf("[Listener: %s] Read TLS Handshake Preamble from Client: %s.", listenerID, j.ToJSONText())
+				} else {
+					log.Printf("[Listener: %s] Read TLS Handshake Preamble from Client: %s.", listenerID, util.CleanText(pre))
+				}
+				conn = tlsConn
+			}
 			if tcpproxy.WillProxyTCP(port) {
 				go tcpproxy.ProxyTCPConnection(port, conn)
+			} else if fl != nil {
+				var wrappedConn net.Conn = tcp.NewWrappedConn(conn, fl.Port)
+				nonClosing := tcp.NewNonClosingListener(wrappedConn)
+				httpServer.Serve(nonClosing.Listener())
 			} else {
 				go tcp.ServeClientConnection(port, requestCounter, conn)
 			}
@@ -66,4 +105,30 @@ func serveTCPRequests(listenerID string, port int, listener net.Listener) error 
 	log.Printf("[Listener: %s] Force closing active client connections for closed listener.", listenerID)
 	tcp.CloseListenerConnections(listenerID)
 	return nil
+}
+
+func PeerHandshake(conn net.Conn, tlsConfig *tls.Config, alpn *gototls.ALPN) (*tls.Conn, []byte, error) {
+	tlsConn, ok := conn.(*tls.Conn)
+	if !ok {
+		tlsConn = tls.Server(conn, tlsConfig)
+		ok = true
+	}
+	if !ok || tlsConfig == nil {
+		return nil, nil, errors.New("Invalid TLS Conn")
+	}
+	_ = tlsConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if err := tlsConn.Handshake(); err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	_ = tlsConn.SetReadDeadline(time.Time{}) // reset
+	state := tlsConn.ConnectionState()
+	if alpn != nil {
+		if b, err := alpn.HandleServer(tlsConn, &state); err != nil {
+			return nil, nil, err
+		} else {
+			return tlsConn, b, nil
+		}
+	}
+	return tlsConn, nil, nil
 }

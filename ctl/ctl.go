@@ -27,17 +27,20 @@ import (
 )
 
 type GotoConfig struct {
-	Name     string      `yaml:"name"`
-	TLS      *TLSConfigs `yaml:"tls"`
-	Scripts  *Scripts    `yaml:"scripts,omitempty"`
-	GRPC     *GRPC       `yaml:"grpc,omitempty"`
-	Registry *Registry   `yaml:"registry,omitempty"`
-	Traffic  *Traffic    `yaml:"traffic,omitempty"`
-	Jobs     *Jobs       `yaml:"jobs,omitempty"`
-	MCP      *MCP        `yaml:"mcp,omitempty"`
-	A2A      *A2A        `yaml:"a2a,omitempty"`
-	HTTP     *HTTP       `yaml:"http,omitempty"`
-	Proxies  []*Proxy    `yaml:"proxy,omitempty" json:"proxy,omitempty"`
+	Filepath  string      `yaml:"-"`
+	Name      string      `yaml:"name"`
+	Order     int         `yaml:"order"`
+	TLS       *TLSConfigs `yaml:"tls"`
+	Listeners Listeners   `yaml:"listeners"`
+	Scripts   *Scripts    `yaml:"scripts,omitempty"`
+	GRPC      *GRPC       `yaml:"grpc,omitempty"`
+	Registry  *Registry   `yaml:"registry,omitempty"`
+	Traffic   *Traffic    `yaml:"traffic,omitempty"`
+	Jobs      *Jobs       `yaml:"jobs,omitempty"`
+	MCP       *MCP        `yaml:"mcp,omitempty"`
+	A2A       *A2A        `yaml:"a2a,omitempty"`
+	HTTP      *HTTP       `yaml:"http,omitempty"`
+	Proxies   []*Proxy    `yaml:"proxy,omitempty" json:"proxy,omitempty"`
 }
 
 var (
@@ -57,9 +60,10 @@ func Ctl(args []string) {
 func ctlApply(args []string) {
 	ApplyFlagSet.Parse(args)
 	loadContext()
-	config := LoadConfig(global.CtlConfig.ConfigFile)
+	config := ReadConfigFromFile(global.CtlConfig.ConfigFile)
 	if config != nil {
 		processTLS(config.TLS)
+		processListeners(config.Listeners)
 		processScripts(config.Scripts)
 		processMCP(config)
 		processA2A(config)
@@ -67,16 +71,16 @@ func ctlApply(args []string) {
 	}
 }
 
-func LoadConfig(path string) *GotoConfig {
-	if data, err := os.ReadFile(path); err == nil {
-		return ParseConfig(data)
+func ReadConfigFromFile(filePath string) *GotoConfig {
+	if data, err := os.ReadFile(filePath); err == nil {
+		return ParseConfig(filePath, data)
 	} else {
-		log.Printf("Failed to read config path [%s] with error: %s\n", path, err.Error())
+		log.Printf("Failed to read config path [%s] with error: %s\n", filePath, err.Error())
 	}
 	return nil
 }
 
-func ParseConfig(yamlData []byte) *GotoConfig {
+func ParseConfig(filePath string, yamlData []byte) *GotoConfig {
 	config := &GotoConfig{}
 	jsonData, err := yaml.YAMLToJSON(yamlData)
 	if err != nil {
@@ -87,5 +91,6 @@ func ParseConfig(yamlData []byte) *GotoConfig {
 		log.Printf("Failed to unmarshal json config with error: %s\n", err.Error())
 		return nil
 	}
+	config.Filepath = filePath
 	return config
 }

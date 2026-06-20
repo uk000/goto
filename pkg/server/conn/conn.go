@@ -29,6 +29,7 @@ import (
 	"goto/pkg/metrics"
 	"goto/pkg/server/listeners"
 	"goto/pkg/server/middleware"
+	"goto/pkg/server/tcp"
 	gototls "goto/pkg/tls"
 	"goto/pkg/util"
 )
@@ -51,6 +52,11 @@ func captureTLSInfo(r *http.Request) {
 		return
 	}
 	tlsConn, ok := conn.(*tls.Conn)
+	if !ok {
+		if wc, ok2 := conn.(*tcp.WrappedConn); ok2 {
+			tlsConn, ok = wc.Conn.(*tls.Conn)
+		}
+	}
 	if !ok {
 		return
 	}

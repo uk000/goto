@@ -27,6 +27,9 @@ import (
 )
 
 func clearMCP(mcp *ctl.MCP) {
+	if mcp == nil {
+		return
+	}
 	for _, s := range mcp.Servers {
 		if s.Server != nil {
 			mcpserver.RemoveMCPServer(s.Server.Port, s.Server.Name)
@@ -35,6 +38,9 @@ func clearMCP(mcp *ctl.MCP) {
 }
 
 func loadMCP(mcp *ctl.MCP) {
+	if mcp == nil {
+		return
+	}
 	mcp.ProcessToolSchemas()
 	servers := []*mcpserver.MCPServerPayload{}
 	clearMCP(mcp)
@@ -45,9 +51,9 @@ func loadMCP(mcp *ctl.MCP) {
 		names = append(names, fmt.Sprintf("%s (port: %d)", s.Server.Name, s.Server.Port))
 	}
 	mcpserver.AddMCPServers(0, servers)
-	log.Println("============================================================")
+	log.Println("------------------------------------")
 	log.Printf("Added MCP Servers: %+v\n", names)
-	log.Println("============================================================")
+	log.Println("------------------------------------")
 
 	addComponents := func(kind string, server *mcpserver.MCPServer, data []byte) {
 		if len(data) == 0 {
@@ -57,9 +63,9 @@ func loadMCP(mcp *ctl.MCP) {
 		if err != nil {
 			log.Printf("[*** ERROR ***] Failed to add %s to server [%s] on port [%d] with error [%s]\n", kind, server.Name, server.Port, err.Error())
 		} else {
-			log.Println("============================================================")
+			log.Println("------------------------------------")
 			log.Printf("Added %s to server [%s] on port [%d]: %+v\n", kind, server.Name, server.Port, names)
-			log.Println("============================================================")
+			log.Println("------------------------------------")
 		}
 	}
 	for _, s := range mcp.Servers {

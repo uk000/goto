@@ -280,7 +280,7 @@ func (ir *InvocationRequest) invokeHTTP() {
 	if target.NoSNI {
 		sni = ""
 	}
-	ir.client.UpdateTLSConfig(sni, target.TLSVersion, target.VerifyTLS, target.ALPN, true)
+	ir.client.UpdateTLSConfig(sni, target.TLSVersion, target.VerifyTLS, target.ALPN)
 	if target.ClientCert != "" {
 		certs, err := gototls.GetCerts(target.ClientCert)
 		if err != nil {

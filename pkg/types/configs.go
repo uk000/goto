@@ -96,7 +96,6 @@ type CmdClientConfig struct {
 }
 
 type ServerConfig struct {
-	ALPN          []string
 	CommonName    string
 	CertPath      string
 	WorkDir       string

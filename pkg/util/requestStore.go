@@ -257,7 +257,13 @@ func WithPort(ctx context.Context, port int) context.Context {
 
 func WithConn(ctx context.Context, conn net.Conn) context.Context {
 	ctx = context.WithValue(ctx, RemoteAddrKey, conn.RemoteAddr().String())
-	return context.WithValue(ctx, ConnectionKey, conn)
+	ctx = context.WithValue(ctx, ConnectionKey, conn)
+	if localAddr := conn.LocalAddr(); localAddr != nil {
+		if port := GetPortFromAddress(localAddr.String()); port > 0 {
+			ctx = context.WithValue(ctx, CurrentPortKey, port)
+		}
+	}
+	return ctx
 }
 
 func GetRemoteAddr(ctx context.Context) string {

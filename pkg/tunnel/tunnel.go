@@ -630,7 +630,7 @@ func (pt *PortTunnel) tunnelToEndpoint(ep *Endpoint, uri, tunnelHostLabel, viaTu
 			ep.client = transport.CreateHTTPClient(pt.Port, fmt.Sprintf("Tunnel[%s]", ep.Address), isH2, false, isTLS, false,
 				ep.Host, 30*time.Second, 30*time.Second, 3*time.Minute, metrics.ConnTracker)
 		}
-		ep.client.UpdateTLSConfig(rs.ServerName, rs.TLSVersionNum, false, nil, true)
+		ep.client.UpdateTLSConfig(rs.ServerName, rs.TLSVersionNum, false, nil)
 		if global.Debug {
 			log.Printf("Tunneling URI [%s] to endpoint [%s] - Sending Request\n", uri, ep.ID)
 		}

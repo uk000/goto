@@ -28,16 +28,17 @@ import (
 )
 
 func clearGRPC(g *ctl.GRPC) {
-	if g != nil {
-		for _, p := range g.Protos {
-			log.Printf("Removing proto definitions: %s", p.Name)
-			protos.ProtosRegistry.RemoveProto(p.Name)
-		}
-		for _, s := range g.Services {
-			log.Printf("Removing gRPC service definition: %s", s.Service)
-			grpc.ServiceRegistry.RemoveService(s.Service)
-			grpc.ServiceRegistry.RemoveActiveService(s.Service)
-		}
+	if g == nil {
+		return
+	}
+	for _, p := range g.Protos {
+		log.Printf("Removing proto definitions: %s", p.Name)
+		protos.ProtosRegistry.RemoveProto(p.Name)
+	}
+	for _, s := range g.Services {
+		log.Printf("Removing gRPC service definition: %s", s.Service)
+		grpc.ServiceRegistry.RemoveService(s.Service)
+		grpc.ServiceRegistry.RemoveActiveService(s.Service)
 	}
 }
 
@@ -64,9 +65,9 @@ func loadGRPC(g *ctl.GRPC) {
 		serviceNames = append(serviceNames, s.Service)
 	}
 	grpcserver.GRPCManager.ServeMulti(services)
-	log.Println("============================================================")
+	log.Println("------------------------------------")
 	log.Printf("gRPC Services loaded successfully: %+v", serviceNames)
-	log.Println("============================================================")
+	log.Println("------------------------------------")
 }
 
 func processGRRPCService(port int, gs *grpc.GRPCService, methods []*ctl.GRPCMethodConfig) {

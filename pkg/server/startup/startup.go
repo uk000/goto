@@ -31,6 +31,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,7 @@ import (
 var (
 	configWatchers   []fswatcher.Watcher
 	tlsConfigs       = map[string]*ctl.TLSConfigs{}
+	listenerConfigs  = map[string]ctl.Listeners{}
 	a2aConfigs       = map[string]*ctl.A2A{}
 	mcpConfigs       = map[string]*ctl.MCP{}
 	httpProxyConfigs = map[string]map[int]*httpproxy.Proxy{}
@@ -137,6 +139,11 @@ func removeAllConfigs() {
 		clearTLS(tlsConfigs[filename])
 		delete(tlsConfigs, filename)
 	}
+	for filename := range listenerConfigs {
+		log.Printf("Removing Listener configs for %s.\n", filename)
+		clearListeners(listenerConfigs[filename])
+		delete(listenerConfigs, filename)
+	}
 	for filename := range a2aConfigs {
 		log.Printf("Removing A2A configs for %s.\n", filename)
 		clearA2A(a2aConfigs[filename])
@@ -189,14 +196,22 @@ func removeConfigs(filePath string) {
 	if tlsConfigs[filename] != nil {
 		log.Printf("File removed: %s. Removing TLS configs.\n", filename)
 		clearTLS(tlsConfigs[filename])
+		delete(tlsConfigs, filename)
+	}
+	if listenerConfigs[filename] != nil {
+		log.Printf("File removed: %s. Removing Listener configs.\n", filename)
+		clearListeners(listenerConfigs[filename])
+		delete(listenerConfigs, filename)
 	}
 	if a2aConfigs[filename] != nil {
 		log.Printf("File removed: %s. Removing A2A configs.\n", filename)
 		clearA2A(a2aConfigs[filename])
+		delete(a2aConfigs, filename)
 	}
 	if mcpConfigs[filename] != nil {
 		log.Printf("File removed: %s. Removing MCP configs.\n", filename)
 		clearMCP(mcpConfigs[filename])
+		delete(mcpConfigs, filename)
 	}
 	if httpProxyConfigs[filename] != nil {
 		log.Printf("File removed: %s. Removing HTTP Proxy configs.\n", filename)
@@ -204,6 +219,7 @@ func removeConfigs(filePath string) {
 			log.Printf("Removing HTTP Proxy configs for file [%s] port [%d] .\n", filename, port)
 			removeHTTPProxy(port)
 		}
+		delete(httpProxyConfigs, filename)
 	}
 	if tcpProxyConfigs[filename] != nil {
 		log.Printf("File removed: %s. Removing TCP Proxy configs.\n", filename)
@@ -211,6 +227,7 @@ func removeConfigs(filePath string) {
 			log.Printf("Removing TCP Proxy configs for file [%s] port [%d] .\n", filename, port)
 			removeTCPProxy(port)
 		}
+		delete(tcpProxyConfigs, filename)
 	}
 	if grpcProxyConfigs[filename] != nil {
 		log.Printf("File removed: %s. Removing GRPC Proxy configs.\n", filename)
@@ -218,14 +235,17 @@ func removeConfigs(filePath string) {
 			log.Printf("Removing GRPC Proxy configs for file [%s] port [%d] .\n", filename, port)
 			removeGRPCProxy(port)
 		}
+		delete(grpcProxyConfigs, filename)
 	}
 	if httpConfigs[filename] != nil {
 		log.Printf("File removed: %s. Removing HTTP configs.\n", filename)
 		clearHTTP(httpConfigs[filename])
+		delete(httpConfigs, filename)
 	}
 	if grpcConfigs[filename] != nil {
 		log.Printf("File removed: %s. Removing gRPC configs.\n", filename)
 		clearGRPC(grpcConfigs[filename])
+		delete(grpcConfigs, filename)
 	}
 }
 
@@ -249,13 +269,31 @@ func loadConfigsFromPaths(changeLog ChangeLog) {
 			log.Printf("Failed to read config path [%s] with error: %s\n", configPath, err.Error())
 			continue
 		}
+		configs := []*ctl.GotoConfig{}
 		for _, file := range files {
 			filePath := filepath.Join(configPath, file.Name())
 			if len(changeLog) == 0 || changeLog.Contains(filePath) {
-				loadConfigFromFile(filePath)
+				if c := getFileConfig(filePath); c != nil {
+					configs = append(configs, c)
+				}
+				delete(changeLog, filePath)
 			} else {
 				log.Printf("Skipping unchanged file [%s]", filePath)
 			}
+		}
+		sort.Slice(configs, func(i, j int) bool {
+			if configs[i] == nil {
+				return false
+			}
+			if configs[j] == nil {
+				return true
+			}
+			return configs[i].Order < configs[j].Order
+		})
+		for _, config := range configs {
+			log.Printf("============== Loading Config: %s ===================", config.Filepath)
+			loadConfig(config)
+			log.Printf("============== Finished Loading Config: %s ===================", config.Filepath)
 		}
 	}
 }
@@ -275,20 +313,20 @@ func loadChanges(changeChan chan string) {
 		})
 	}
 }
-
-func loadConfigFromFile(filePath string) {
+func getFileConfig(filePath string) *ctl.GotoConfig {
 	if strings.HasSuffix(filePath, ".yaml") || strings.HasSuffix(filePath, ".yml") {
-		log.Printf("Loading config from file: %s\n", filePath)
-		loadConfig(filePath, ctl.LoadConfig(filePath))
+		log.Printf("Reading YAML config from file: %s\n", filePath)
+		return ctl.ReadConfigFromFile(filePath)
 	} else if strings.HasSuffix(filePath, ".sh") {
-		log.Printf("Loading config from script: %s\n", filePath)
-		loadConfigFromScript(filePath)
+		log.Printf("Reading YAML config from script: %s\n", filePath)
+		return readConfigFromScript(filePath)
 	} else {
 		log.Printf("Ignoring non-config file: %s\n", filePath)
 	}
+	return nil
 }
 
-func loadConfigFromScript(filePath string) {
+func readConfigFromScript(filePath string) *ctl.GotoConfig {
 	script := &scripts.Script{
 		Name:     "GotoConfig",
 		FilePath: filePath,
@@ -297,16 +335,26 @@ func loadConfigFromScript(filePath string) {
 	w := bufio.NewWriter(&buff)
 	script.RunWithStdIn(w)
 	w.Flush()
-	loadConfig(filePath, ctl.ParseConfig(buff.Bytes()))
+	return ctl.ParseConfig(filePath, buff.Bytes())
 }
 
-func loadConfig(filePath string, config *ctl.GotoConfig) {
-	parts := strings.Split(filePath, string(os.PathSeparator))
+func loadConfig(config *ctl.GotoConfig) {
+	parts := strings.Split(config.Filepath, string(os.PathSeparator))
 	filename := parts[len(parts)-1]
 	if config == nil {
 		log.Println("No config loaded")
 		return
 	}
+	loadTLSConfig(filename, config)
+	loadListenersConfig(filename, config)
+	loadMCPConfig(filename, config)
+	loadA2AConfig(filename, config)
+	loadHTTPConfig(filename, config)
+	loadGRPCConfig(filename, config)
+	loadProxyConfig(filename, config)
+}
+
+func loadTLSConfig(filename string, config *ctl.GotoConfig) {
 	if config.TLS != nil {
 		if tlsConfigs[filename] != nil {
 			clearTLS(tlsConfigs[filename])
@@ -315,8 +363,23 @@ func loadConfig(filePath string, config *ctl.GotoConfig) {
 		tlsConfigs[filename] = config.TLS
 		lock.Unlock()
 		processTLS(config.TLS)
-
 	}
+}
+
+func loadListenersConfig(filename string, config *ctl.GotoConfig) {
+	if config.Listeners != nil {
+		old := listenerConfigs[filename]
+		if old != nil {
+			clearRemovedListeners(old, config.Listeners)
+		}
+		lock.Lock()
+		listenerConfigs[filename] = config.Listeners
+		lock.Unlock()
+		processListeners(config.Listeners)
+	}
+}
+
+func loadMCPConfig(filename string, config *ctl.GotoConfig) {
 	if config.MCP != nil {
 		if mcpConfigs[filename] != nil {
 			clearMCP(mcpConfigs[filename])
@@ -326,6 +389,9 @@ func loadConfig(filePath string, config *ctl.GotoConfig) {
 		lock.Unlock()
 		loadMCP(config.MCP)
 	}
+}
+
+func loadA2AConfig(filename string, config *ctl.GotoConfig) {
 	if config.A2A != nil {
 		if a2aConfigs[filename] != nil {
 			clearA2A(a2aConfigs[filename])
@@ -335,6 +401,33 @@ func loadConfig(filePath string, config *ctl.GotoConfig) {
 		lock.Unlock()
 		loadA2A(config.A2A)
 	}
+}
+
+func loadHTTPConfig(filename string, config *ctl.GotoConfig) {
+	if config.HTTP != nil {
+		if httpConfigs[filename] != nil {
+			clearHTTP(httpConfigs[filename])
+		}
+		lock.Lock()
+		httpConfigs[filename] = config.HTTP
+		lock.Unlock()
+		loadHTTP(config.HTTP)
+	}
+}
+
+func loadGRPCConfig(filename string, config *ctl.GotoConfig) {
+	if config.GRPC != nil {
+		if grpcConfigs[filename] != nil {
+			clearGRPC(grpcConfigs[filename])
+		}
+		lock.Lock()
+		grpcConfigs[filename] = config.GRPC
+		lock.Unlock()
+		loadGRPC(config.GRPC)
+	}
+}
+
+func loadProxyConfig(filename string, config *ctl.GotoConfig) {
 	if config.Proxies != nil {
 		for _, proxy := range config.Proxies {
 			if proxy.HTTP != nil {
@@ -386,24 +479,6 @@ func loadConfig(filePath string, config *ctl.GotoConfig) {
 				loadGRPCProxy(proxy.GRPC)
 			}
 		}
-	}
-	if config.HTTP != nil {
-		if httpConfigs[filename] != nil {
-			clearHTTP(httpConfigs[filename])
-		}
-		lock.Lock()
-		httpConfigs[filename] = config.HTTP
-		lock.Unlock()
-		loadHTTP(config.HTTP)
-	}
-	if config.GRPC != nil {
-		if grpcConfigs[filename] != nil {
-			clearGRPC(grpcConfigs[filename])
-		}
-		lock.Lock()
-		grpcConfigs[filename] = config.GRPC
-		lock.Unlock()
-		loadGRPC(config.GRPC)
 	}
 }
 

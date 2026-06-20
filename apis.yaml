@@ -954,35 +954,36 @@
     - /server/label/clear: '[POST]'
     /server/label/set:
     - /server/label/set/{label}: '[PUT POST]'
-  /server/listeners:
+  /server/listener{s:s|}:
     "":
-    - /server/listeners: '[GET]'
-    /server/listeners/{port}:
-    - /server/listeners/{port}/cert/auto/{domain}?spiffeID={spiffeID}: '[PUT POST]'
-    - /server/listeners/{port}/cert/autosni: '[PUT POST]'
-    - /server/listeners/{port}/cert/add: '[PUT POST]'
-    - /server/listeners/{port}/key/add: '[PUT POST]'
-    - /server/listeners/{port}/cert/remove: '[PUT POST]'
-    - /server/listeners/{port}/cert: '[GET]'
-    - /server/listeners/{port}/key: '[GET]'
-    - /server/listeners/{port}/ca/add: '[PUT POST]'
-    - /server/listeners/{port}/ca/clear: '[PUT POST]'
-    - /server/listeners/{port}/remove: '[PUT POST]'
-    - /server/listeners/{port}/open: '[PUT POST]'
-    - /server/listeners/{port}/reopen: '[PUT POST]'
-    - /server/listeners/{port}/close: '[PUT POST]'
-    - /server/listeners/{port}: '[GET]'
-    - /server/listeners/{port}/client/certs: '[GET]'
-    - /server/listeners/{port}/client/certs/clear: '[POST]'
-    /server/listeners/add:
-    - /server/listeners/add: '[POST PUT]'
-    /server/listeners/client:
-    - /server/listeners/client/certs: '[GET]'
-    - /server/listeners/client/certs/clear: '[POST]'
-    /server/listeners/ports:
-    - /server/listeners/ports: '[GET]'
-    /server/listeners/update:
-    - /server/listeners/update: '[POST PUT]'
+    - /server/listener{s:s|}: '[GET]'
+    /server/listener{s:s|}/{port}:
+    - /server/listener{s:s|}/{port}/cert/auto/{domain}?spiffeID={spiffeID}: '[PUT
+        POST]'
+    - /server/listener{s:s|}/{port}/cert/autosni: '[PUT POST]'
+    - /server/listener{s:s|}/{port}/cert/add: '[PUT POST]'
+    - /server/listener{s:s|}/{port}/key/add: '[PUT POST]'
+    - /server/listener{s:s|}/{port}/cert/remove: '[PUT POST]'
+    - /server/listener{s:s|}/{port}/cert: '[GET]'
+    - /server/listener{s:s|}/{port}/key: '[GET]'
+    - /server/listener{s:s|}/{port}/ca/add: '[PUT POST]'
+    - /server/listener{s:s|}/{port}/ca/clear: '[PUT POST]'
+    - /server/listener{s:s|}/{port}/remove: '[PUT POST]'
+    - /server/listener{s:s|}/{port}/open: '[PUT POST]'
+    - /server/listener{s:s|}/{port}/reopen: '[PUT POST]'
+    - /server/listener{s:s|}/{port}/close: '[PUT POST]'
+    - /server/listener{s:s|}/{port}: '[GET]'
+    - /server/listener{s:s|}/{port}/client/certs: '[GET]'
+    - /server/listener{s:s|}/{port}/client/certs/clear: '[POST]'
+    /server/listener{s:s|}/add:
+    - /server/listener{s:s|}/add: '[POST PUT]'
+    /server/listener{s:s|}/client:
+    - /server/listener{s:s|}/client/certs: '[GET]'
+    - /server/listener{s:s|}/client/certs/clear: '[POST]'
+    /server/listener{s:s|}/ports:
+    - /server/listener{s:s|}/ports: '[GET]'
+    /server/listener{s:s|}/update:
+    - /server/listener{s:s|}/update: '[POST PUT]'
   /server/request:
     /server/request/bypass:
     - /server/request/bypass/add?uri={uri}: '[PUT POST]'

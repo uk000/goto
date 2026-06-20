@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"goto/pkg/invocation"
 	"goto/pkg/server/intercept"
+	gototls "goto/pkg/tls"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
@@ -87,17 +88,17 @@ type TrafficTransform struct {
 }
 
 type TargetEndpoint struct {
-	URL          string   `yaml:"url" json:"url"`
-	Method       string   `yaml:"method" json:"method"`
-	Protocol     string   `yaml:"protocol" json:"protocol"`
-	Authority    string   `yaml:"authority" json:"authority"`
-	IsTLS        bool     `yaml:"tls" json:"tls"`
-	ALPN         []string `yaml:"alpn" json:"alpn"`
-	ClientCert   string   `yaml:"clientCert" json:"clientCert"`
-	RequestCount int      `yaml:"requestCount" json:"requestCount"`
-	Concurrent   int      `yaml:"concurrent" json:"concurrent"`
-	Stream       bool     `yaml:"stream" json:"stream"`
-	CallCount    int      `yaml:"-" json:"callCount"`
+	URL          string        `yaml:"url" json:"url"`
+	Method       string        `yaml:"method" json:"method"`
+	Protocol     string        `yaml:"protocol" json:"protocol"`
+	Authority    string        `yaml:"authority" json:"authority"`
+	IsTLS        bool          `yaml:"tls" json:"tls"`
+	ALPN         *gototls.ALPN `yaml:"alpn" json:"alpn"`
+	ClientCert   string        `yaml:"clientCert" json:"clientCert"`
+	RequestCount int           `yaml:"requestCount" json:"requestCount"`
+	Concurrent   int           `yaml:"concurrent" json:"concurrent"`
+	Stream       bool          `yaml:"stream" json:"stream"`
+	CallCount    int           `yaml:"-" json:"callCount"`
 	name         string
 	target       *Target
 	lock         sync.RWMutex

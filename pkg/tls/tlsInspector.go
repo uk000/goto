@@ -1,3 +1,19 @@
+/**
+ * Copyright 2026 uk
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package tls
 
 import (
@@ -6,7 +22,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"goto/pkg/util"
 	"log"
 	"net"
 	"strings"
@@ -111,7 +126,7 @@ func ExtractSNI(port, label string, remoteAddr string, storeSNI func(string, str
 }
 
 func ExtractPeerCertInfo(port, label string, remoteAddr string,
-	callback func(string, string, []string, []string, string),
+	storeCertInfo func(remoteAddr string, commonName string, dnsNames, uris []string, issuer string),
 	updatePeerStatus func(remoteAddr string, success bool, e string)) func([][]byte, [][]*x509.Certificate) error {
 	return func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 		log.Printf("VerifyPeerCertificate: called on Port [%s] Label [%s] RemoteAddr [%s]\n", port, label, remoteAddr)
@@ -120,24 +135,24 @@ func ExtractPeerCertInfo(port, label string, remoteAddr string,
 			updatePeerStatus(remoteAddr, true, msg)
 			return errors.New(msg)
 		}
-		firstCert := rawCerts[0]
-		peerCert, err := x509.ParseCertificate(firstCert)
-		if err != nil {
-			msg := fmt.Sprintf("VerifyPeerCertificate: Failed to parse client certificate on Port [%s] Label [%s] RemoteAddr [%s]: Error: %s", port, label, remoteAddr, err.Error())
-			updatePeerStatus(remoteAddr, true, msg)
-			return errors.New(msg)
-		}
-		uris := []string{}
-		for _, url := range peerCert.URIs {
-			uris = append(uris, url.String())
-		}
-		issuer := IssuerToString(peerCert)
-		subject := SubjectToString(peerCert)
-		callback(remoteAddr, subject, peerCert.DNSNames, uris, issuer)
-		msg := fmt.Sprintf("VerifyPeerCertificate: Stored Certificate Info on Port [%s] Label [%s] RemoteAddr [%s] - CN: [%s], SAN: %+v, URIs: %+v, Issuers: %+v",
-			port, label, remoteAddr, peerCert.Subject.CommonName, peerCert.DNSNames, uris, issuer)
-		updatePeerStatus(remoteAddr, false, msg)
-		log.Println(msg)
+		// firstCert := rawCerts[0]
+		// peerCert, err := x509.ParseCertificate(firstCert)
+		// if err != nil {
+		// 	msg := fmt.Sprintf("VerifyPeerCertificate: Failed to parse client certificate on Port [%s] Label [%s] RemoteAddr [%s]: Error: %s", port, label, remoteAddr, err.Error())
+		// 	updatePeerStatus(remoteAddr, true, msg)
+		// 	return errors.New(msg)
+		// }
+		// uris := []string{}
+		// for _, url := range peerCert.URIs {
+		// 	uris = append(uris, url.String())
+		// }
+		// issuer := IssuerToString(peerCert)
+		// subject := SubjectToString(peerCert)
+		// storeCertInfo(remoteAddr, subject, peerCert.DNSNames, uris, issuer)
+		// msg := fmt.Sprintf("VerifyPeerCertificate: Stored Certificate Info on Port [%s] Label [%s] RemoteAddr [%s] - CN: [%s], SAN: %+v, URIs: %+v, Issuers: %+v",
+		// 	port, label, remoteAddr, peerCert.Subject.CommonName, peerCert.DNSNames, uris, issuer)
+		// updatePeerStatus(remoteAddr, false, msg)
+		// log.Println(msg)
 		return nil
 	}
 }
@@ -153,7 +168,7 @@ func HandleClientHello(port, label string, tlsConfig *tls.Config,
 			msg := fmt.Sprintf("HandleClientHello on Port [%s] Label [%s] - No clientHello provided", port, label)
 			return nil, errors.New(msg)
 		}
-		remoteAddr := util.GetRemoteAddr(clientHello.Context())
+		remoteAddr := clientHello.Conn.RemoteAddr().String()
 		storeALPN(remoteAddr, clientHello.SupportedProtos)
 		storeSNI(remoteAddr, clientHello.ServerName, "")
 		msg := fmt.Sprintf("HandleClientHello: Server Reporting ALPNs on Port [%s] Label [%s] RemoteAddr [%s] - ALPNs: %+v", port, label, remoteAddr, tlsConfig.NextProtos)
@@ -167,11 +182,11 @@ func HandleClientHello(port, label string, tlsConfig *tls.Config,
 }
 
 func SubjectToString(cert *x509.Certificate) string {
-	return fmt.Sprintf("org=%s;co=%s,cn=[%s]", cert.Subject.Organization, cert.Subject.Country, cert.Subject.CommonName)
+	return fmt.Sprintf("org=%s,co=%s,cn=[%s]", cert.Subject.Organization, cert.Subject.Country, cert.Subject.CommonName)
 }
 
 func IssuerToString(cert *x509.Certificate) string {
-	return fmt.Sprintf("org=%s;co=%s,sn=[%s]", cert.Issuer.Organization, cert.Issuer.Country, cert.Issuer.SerialNumber)
+	return fmt.Sprintf("org=%s,co=%s,sn=[%s]", cert.Issuer.Organization, cert.Issuer.Country, cert.Issuer.SerialNumber)
 }
 
 func IdentifyLeaf(certs []*tls.Certificate) *x509.Certificate {
@@ -198,6 +213,7 @@ func (pci *PeerCertInfo) Summary() string {
 	pci.Finished = true
 	pci.Status = append(pci.Status, "Peer Cert Reported")
 	b := &strings.Builder{}
+	b.Grow(300)
 	if pci.RemoteAddr != "" {
 		b.WriteString(fmt.Sprintf("RemoteAddr: %s;; ", pci.RemoteAddr))
 	}
@@ -217,10 +233,10 @@ func (pci *PeerCertInfo) Summary() string {
 		b.WriteString(fmt.Sprintf("ALPN: %+v;; ", pci.ALPN))
 	}
 	if pci.Issuer != "" {
-		b.WriteString(fmt.Sprintf("Issuer: %s;;", pci.Issuer))
+		b.WriteString(fmt.Sprintf("Issuer: %s;; ", pci.Issuer))
 	}
 	if pci.NegotiatedALPN != "" {
-		b.WriteString(fmt.Sprintf("NegotiatedALPN: %s;;", pci.NegotiatedALPN))
+		b.WriteString(fmt.Sprintf("NegotiatedALPN: %s;; ", pci.NegotiatedALPN))
 	}
 	b.WriteString(fmt.Sprintf("Finished: %t;;", pci.Finished))
 	return b.String()

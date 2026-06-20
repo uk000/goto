@@ -29,7 +29,11 @@ import (
 	"sync"
 	"text/template"
 	"time"
+	"unicode"
 
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 )
@@ -823,4 +827,143 @@ func RemoveEmpty(arr []string) []string {
 		}
 	}
 	return values
+}
+
+func ProtoToJSON2(b []byte) (JSON, error) {
+	pbStruct := &structpb.Struct{}
+	err := proto.Unmarshal(b, pbStruct)
+	if err != nil {
+		fmt.Printf("Failed to unmarshal protobuf data: %v\n", err)
+		return nil, err
+	}
+	goMap := pbStruct.AsMap()
+	jsonBytes, err := json.Marshal(goMap)
+	if err != nil {
+		fmt.Printf("Failed to marshal JSON: %v\n", err)
+		return nil, err
+	}
+	return JSONFromBytes(jsonBytes), nil
+}
+
+func ProtoToJSON(b []byte) JSON {
+	resultMap := map[string]any{}
+
+	// Step 1: Walk the outer payload buffer
+	outerBytes := b
+	for len(outerBytes) > 0 {
+		_, outerWireType, n := protowire.ConsumeTag(outerBytes)
+		if n < 0 {
+			break
+		}
+		outerBytes = outerBytes[n:]
+
+		if outerWireType == protowire.BytesType {
+			// This extracts the nested kv-pair packet block
+			kvPairBlock, n := protowire.ConsumeBytes(outerBytes)
+			if n < 0 {
+				break
+			}
+			outerBytes = outerBytes[n:]
+
+			// Step 2: Parse inside the kv-pair packet block
+			var currentKey string
+			var currentValue string
+
+			innerBytes := kvPairBlock
+			for len(innerBytes) > 0 {
+				fieldNum, innerWireType, innerN := protowire.ConsumeTag(innerBytes)
+				if innerN < 0 {
+					break
+				}
+				innerBytes = innerBytes[innerN:]
+
+				if innerWireType == protowire.BytesType {
+					stringBytes, innerN := protowire.ConsumeBytes(innerBytes)
+					if innerN < 0 {
+						break
+					}
+					innerBytes = innerBytes[innerN:]
+					cleanStr := cleanPrintableString(stringBytes)
+					if fieldNum == 1 {
+						currentKey = cleanStr
+					} else if fieldNum == 2 {
+						currentValue = cleanStr
+					}
+				} else {
+					innerN := protowire.ConsumeFieldValue(fieldNum, innerWireType, innerBytes)
+					if innerN < 0 {
+						break
+					}
+					innerBytes = innerBytes[innerN:]
+				}
+			}
+			if currentKey != "" && currentValue != "" {
+				resultMap[currentKey] = currentValue
+			}
+		} else {
+			n := protowire.ConsumeFieldValue(1, outerWireType, outerBytes)
+			if n < 0 {
+				break
+			}
+			outerBytes = outerBytes[n:]
+		}
+	}
+	return JSONFromMap(resultMap)
+}
+
+func parseNestedBytes(data []byte, stringsFound *[]string) {
+	b := data
+	for len(b) > 0 {
+		_, wireType, n := protowire.ConsumeTag(b)
+		if n < 0 {
+			break
+		}
+		b = b[n:]
+
+		if wireType == protowire.BytesType {
+			v, n := protowire.ConsumeBytes(b)
+			if n < 0 {
+				break
+			}
+			b = b[n:]
+
+			// Check if this block contains nested protobuf fields
+			if isProtobufStructure(v) {
+				parseNestedBytes(v, stringsFound)
+			} else {
+				// If it is just clean text, save it
+				cleanText := cleanPrintableString(v)
+				if len(cleanText) > 0 {
+					*stringsFound = append(*stringsFound, cleanText)
+				}
+			}
+		} else {
+			// Skip primitive field types (varints, fixed32, etc.)
+			n := protowire.ConsumeFieldValue(1, wireType, b)
+			if n < 0 {
+				break
+			}
+			b = b[n:]
+		}
+	}
+}
+
+// isProtobufStructure checks if a sub-buffer looks like a nested message
+func isProtobufStructure(data []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+	// A simple heuristic: if it can be parsed as a valid tag, it's likely a nested struct
+	_, _, n := protowire.ConsumeTag(data)
+	return n > 0
+}
+
+func cleanPrintableString(data []byte) string {
+	var sb strings.Builder
+	for _, b := range data {
+		if unicode.IsPrint(rune(b)) && b >= 32 && b <= 126 {
+			sb.WriteByte(b)
+		}
+	}
+	return sb.String()
 }

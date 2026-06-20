@@ -131,7 +131,7 @@ func (c *GRPCClient) SetTLSConfig(tlsConfig *tls.Config) {
 	}
 }
 
-func (c *GRPCClient) UpdateTLSConfig(serverName string, tlsVersion uint16, verify bool, alpn []string, defaultALPN bool) {
+func (c *GRPCClient) UpdateTLSConfig(serverName string, tlsVersion uint16, verify bool, alpn *gototls.ALPN) {
 	c.TLSServerName = serverName
 	c.Authority = serverName
 	c.Options.TLSVersion = tlsVersion

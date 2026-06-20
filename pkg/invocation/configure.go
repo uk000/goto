@@ -81,7 +81,7 @@ type InvocationSpec struct {
 	NoSNI                bool              `json:"noSNI"`
 	TLSVersion           uint16            `json:"tlsVersion"`
 	ClientCert           string            `json:"clientCert"`
-	ALPN                 []string          `json:"alpn"`
+	ALPN                 *gototls.ALPN     `json:"alpn"`
 	BodyReader           io.Reader         `json:"-"`
 	ResponseWriter       io.Writer         `json:"-"`
 	LongRunning          bool              `json:"-"`

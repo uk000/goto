@@ -23,10 +23,11 @@ import (
 )
 
 func clearHTTP(h *ctl.HTTP) {
-	if h != nil {
-		for _, s := range h.Servers {
-			payload.PayloadManager.ClearRPCResponsePayloads(s.Port)
-		}
+	if h == nil {
+		return
+	}
+	for _, s := range h.Servers {
+		payload.PayloadManager.ClearRPCResponsePayloads(s.Port)
 	}
 }
 
@@ -50,7 +51,7 @@ func processHTTPResponse(port int, hr *ctl.HTTPResponse) {
 			log.Printf("[*** ERROR ***] Error processing HTTP response: %s\n", err.Error())
 		}
 	}
-	log.Println("============================================================")
+	log.Println("------------------------------------")
 	log.Printf("[%d] HTTP Response Payloads loaded successfully", len(hr.Payloads))
-	log.Println("============================================================")
+	log.Println("------------------------------------")
 }

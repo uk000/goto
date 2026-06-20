@@ -30,6 +30,8 @@ import (
 type TCPConfig struct {
 	ListenerID             string        `json:"-"`
 	Port                   int           `json:"-"`
+	TLS                    bool          `json:"tls"`
+	MTLS                   bool          `json:"mtls"`
 	ReadTimeout            string        `json:"readTimeout"`
 	WriteTimeout           string        `json:"writeTimeout"`
 	ConnectTimeout         string        `json:"connectTimeout"`
@@ -208,3 +210,12 @@ func CloseClientConnection(listenerID string, requestID int) {
 		}
 	}
 }
+
+// type PeerMetadata struct {
+// 	Name      string            `json:"name,omitempty"`
+// 	Namespace string            `json:"namespace,omitempty"`
+// 	Labels    map[string]string `json:"labels,omitempty"`
+// 	Owner     string            `json:"owner,omitempty"`
+// 	Platform  string            `json:"platform,omitempty"`
+// 	Workload  string            `json:"workload_name,omitempty"`
+// }

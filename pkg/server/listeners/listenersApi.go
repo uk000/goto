@@ -38,7 +38,7 @@ var (
 
 func setRoutes(r *mux.Router) {
 	server := middleware.RootPath("/server")
-	lRouter := util.PathRouter(server, "/listeners")
+	lRouter := util.PathRouter(server, "/listener{s:s|}")
 	util.AddRoute(lRouter, "/add", addListener, "POST", "PUT")
 	util.AddRoute(lRouter, "/update", updateListener, "POST", "PUT")
 	util.AddRouteQ(lRouter, "/{port}/cert/auto/{domain}", autoCert, "spiffeID", "PUT", "POST")
@@ -293,7 +293,7 @@ func closeListener(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			msg = fmt.Sprintf("Port %d not open\n", l.Port)
 		} else {
-			l.closeListener()
+			l.Close()
 			msg = fmt.Sprintf("Listener on port %d closed\n", l.Port)
 			events.SendRequestEvent("Listener Closed", msg, r)
 		}
@@ -310,14 +310,8 @@ func removeListener(w http.ResponseWriter, r *http.Request) {
 			l.Listener = nil
 		}
 		l.lock.Unlock()
-		listenersLock.Lock()
-		if l.IsGRPC {
-			delete(grpcListeners, l.Port)
-		} else if l.IsUDP {
-			delete(udpListeners, l.Port)
-		}
-		delete(listeners, l.Port)
-		listenersLock.Unlock()
+		RemoveListener(l)
+		LinkForwardListeners()
 		msg := fmt.Sprintf("Listener on port %d removed", l.Port)
 		events.SendRequestEvent("Listener Removed", msg, r)
 		fmt.Fprintln(w, msg)

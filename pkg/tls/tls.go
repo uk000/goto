@@ -204,11 +204,11 @@ func (s *SpiffeCerts) LoadSpiffeCerts(socketAddr string) error {
 		spiffeID := svid.ID.String()
 		req := s.ByIDNameDomain[spiffeID]
 		if req == nil {
-			log.Printf("Skipping Cert of SpiffeID: %s", spiffeID)
+			log.Printf("LoadSpiffeCerts: Skipping unrelated SVID of SpiffeID: %s", spiffeID)
 			continue
 		}
 		if len(svid.Certificates) == 0 {
-			log.Printf("No Certificates inside Cert of SpiffeID: %s", spiffeID)
+			log.Printf("LoadSpiffeCerts: No Certificates inside Cert of SpiffeID: %s", spiffeID)
 			continue
 		}
 		cert := &tls.Certificate{

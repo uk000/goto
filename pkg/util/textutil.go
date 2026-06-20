@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 var (
@@ -247,4 +248,38 @@ func FindFirstMatch(arr1, arr2 []string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func CompareStringSlices(a, b []string) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	counts := map[string]int{}
+	for _, s := range a {
+		counts[s]++
+	}
+	for _, s := range b {
+		if counts[s] == 0 {
+			return false
+		}
+		counts[s]--
+		if counts[s] == 0 {
+			delete(counts, s)
+		}
+	}
+	return len(counts) == 0
+}
+
+func CleanText(rawBytes []byte) string {
+	sb := &strings.Builder{}
+	for _, b := range rawBytes {
+		// Only print characters that are letters, numbers, punctuation, or regular spaces
+		if unicode.IsPrint(rune(b)) {
+			sb.WriteByte(b)
+		}
+	}
+	return sb.String()
 }

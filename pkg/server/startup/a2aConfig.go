@@ -25,6 +25,9 @@ import (
 )
 
 func clearA2A(a2a *ctl.A2A) {
+	if a2a == nil {
+		return
+	}
 	for _, pa := range a2a.Servers {
 		for _, a2aAgent := range pa.Agents {
 			if a2aAgent != nil && a2aAgent.Card != nil {
@@ -36,6 +39,9 @@ func clearA2A(a2a *ctl.A2A) {
 }
 
 func loadA2A(a2a *ctl.A2A) {
+	if a2a == nil {
+		return
+	}
 	names := []string{}
 	clearA2A(a2a)
 	for _, pa := range a2a.Servers {
@@ -55,7 +61,7 @@ func loadA2A(a2a *ctl.A2A) {
 			}
 		}
 	}
-	log.Println("============================================================")
+	log.Println("------------------------------------")
 	log.Printf("Added Agents: %+v\n", names)
-	log.Println("============================================================")
+	log.Println("------------------------------------")
 }

@@ -14,30 +14,23 @@
  * limitations under the License.
  */
 
-package startup
+package ctl
 
 import (
-	"goto/ctl"
 	"goto/pkg/server/listeners"
-	"goto/pkg/tls"
+	"log"
 )
 
-func clearTLS(tlsConfigs *ctl.TLSConfigs) {
-	if tlsConfigs == nil {
-		return
-	}
-	for _, tls := range tlsConfigs.Certs {
-		listeners.RemoveListenerCert(tls.Port)
-	}
-	for _, ca := range tlsConfigs.CACerts {
-		tls.RemoveCACert(ca.Name)
-	}
-}
+type Listeners map[int]*listeners.Listener
 
-func processTLS(tls *ctl.TLSConfigs) {
-	if tlsConfigs == nil {
+func processListeners(ll Listeners) {
+	if len(ll) == 0 {
+		log.Println("No Listeners to configure")
 		return
 	}
-	tls.LoadCACerts(false)
-	tls.LoadCerts(false)
+	for port, l := range ll {
+		l.Port = port
+		_, msg := listeners.AddOrUpdateListener(l)
+		log.Println(msg)
+	}
 }
