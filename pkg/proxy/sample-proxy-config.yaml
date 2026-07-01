@@ -1,0 +1,644 @@
+name: goto-test-config
+order: 1
+proxy:
+  - http:
+      port: 8080
+      enabled: true
+      proxyResponses:
+        - upResponseRange: [500,510]
+          proxyResponse: 500
+        - upResponseRange: [400,499]
+          proxyResponse: 418
+        - upResponseRange: [300,399]
+          proxyResponse: 300
+        - upResponseRange: [201,299]
+          proxyResponse: 418
+      targets:
+        grpc-echo:
+          enabled: true
+          endpoints:
+            ep1:
+              url: http://localhost:8080
+              method: POST
+          trafficConfig:
+            yamlPayload: true
+          triggers:
+            t1:
+              matchAny:
+                - uri: /g/echo
+              endpoints:
+                - ep1
+              transform:
+                uriMap:
+                  /g/echo: /grpc/client/call
+                headers:
+                  add:
+                    foo: "123"
+                payload: |
+                  service: Goto
+                  method: echo
+                  endpoint: localhost:9000
+                  headers:
+                    request:
+                      forward:
+                        - foo
+                  payloads:
+                    concurrent:
+                      - linear:
+                          - payload: '{"text": "hello 1.1"}'
+                          - payload: '{"text": "hello 1.2"}'
+                        headers:
+                          request:
+                            add:
+                              stream: "1"
+                      - linear:
+                          - payload: '{"text": "hello 2.1"}'
+                          - payload: '{"text": "hello 2.2"}'
+                        headers:
+                          request:
+                            add:
+                              stream: "2"
+                  push: false
+                  result: true
+        grpc-streamOut:
+          enabled: true
+          endpoints:
+            ep1:
+              url: http://localhost:8080
+              method: POST
+              stream: false
+          trafficConfig:
+            jsonPayload: true
+          triggers:
+            t1:
+              matchAny:
+                - uri: /g/streamOut
+              endpoints:
+                - ep1
+              transform:
+                uriMap:
+                  /g/streamOut: /grpc/client/call
+                headers:
+                  add:
+                    foo: "1234"
+                payload: |
+                  service: Goto
+                  method: streamOut
+                  endpoint: localhost:9000
+                  headers:
+                    request:
+                      forward:
+                        - foo
+                  payloads:
+                    concurrent:
+                      - linear:
+                          - payload: '{"chunkCount":2, "interval":"1s", "text": "hello 1.1"}'
+                            headers:
+                              request:
+                                add:
+                                  stream: "1"
+                          - payload: '{"chunkCount":3, "interval":"1s", "text": "hello 1.2"}'
+                            headers:
+                              request:
+                                add:
+                                  stream: "2"
+                      - linear:
+                          - payload: '{"chunkCount":3, "interval":"1s", "text": "hello 2.1"}'
+                            headers:
+                              request:
+                                add:
+                                  stream: "3"
+                          - payload: '{"chunkCount":2, "interval":"1s", "text": "hello 2.2"}'
+                            headers:
+                              request:
+                                add:
+                                  stream: "4"
+                  push: false
+                  result: true
+        grpc-streamIn:
+          enabled: true
+          endpoints:
+            ep1:
+              url: http://localhost:8080
+              method: POST
+              stream: false
+          trafficConfig:
+            yamlPayload: true
+          triggers:
+            t1:
+              matchAny:
+                - uri: /g/streamIn
+              endpoints:
+                - ep1
+              transform:
+                uriMap:
+                  /g/streamIn: /grpc/client/call
+                headers:
+                  add:
+                    foo: "123"
+                payload: |
+                  service: Goto
+                  method: streamIn
+                  endpoint: localhost:9000
+                  headers:
+                    request:
+                      forward:
+                        - foo
+                  payloads:
+                    concurrent:
+                      - stream:
+                          - '{"text": "hello 1.1"}'
+                          - '{"text": "hello 1.2"}'
+                        headers:
+                          request:
+                            add:
+                              stream: "1"
+                      - stream:
+                          - '{"text": "hello 2.1"}'
+                          - '{"text": "hello 2.2"}'
+                        headers:
+                          request:
+                            add:
+                              stream: "2"
+                  push: false
+                  result: true
+        grpc-streamInOut:
+          enabled: true
+          endpoints:
+            ep1:
+              url: http://localhost:8080
+              method: POST
+              stream: false
+          trafficConfig:
+            jsonPayload: true
+          triggers:
+            t1:
+              matchAny:
+                - uri: /g/streamInOut
+              endpoints:
+                - ep1
+              transform:
+                uriMap:
+                  /g/streamInOut: /grpc/client/call
+                headers:
+                  add:
+                    foo: "123"
+                payload: |
+                  service: Goto
+                  method: streamInOut
+                  endpoint: localhost:9000
+                  headers:
+                    request:
+                      forward:
+                        - foo
+                  payloads:
+                    concurrent:
+                      - stream:
+                          - '{"chunkCount":1, "interval":"1s", "text": "hello 1.1"}'
+                          - '{"chunkCount":3, "interval":"1s", "text": "hello 1.2"}'
+                          - '{"chunkCount":1, "interval":"1s", "text": "hello 1.3"}'
+                        headers:
+                          request:
+                            add:
+                              stream: "1"
+                      - stream:
+                          - '{"chunkCount":2, "interval":"1s", "text": "hello 2.1"}'
+                          - '{"chunkCount":1, "interval":"1s", "text": "hello 2.2"}'
+                          - '{"chunkCount":2, "interval":"1s", "text": "hello 2.3"}'
+                        headers:
+                          request:
+                            add:
+                              stream: "2"
+                  push: false
+                  result: true
+        stream:
+          enabled: false
+          endpoints:
+            ep1:
+              url: http://localhost:8083
+              stream: true
+          triggers:
+            t1:
+              matchAny:
+                - uriPrefix: /stream
+              endpoints:
+                - ep1
+        http-call:
+          enabled: true
+          endpoints:
+            ep1:
+              url: http://localhost:8080
+              method: POST
+              requestCount: 1
+              concurrent: 1
+          triggers:
+            trigger1:
+              matchAny:
+                - uri: /call
+              endpoints:
+                - ep1
+              transform:
+                uriMap:
+                  /call: /client/http/invoke
+                headers:
+                  add:
+                    bar: "456"
+                payload: |
+                  url: localhost:8083
+                  method: POST
+                  count: 2
+                  requestID: true
+                  h2: true
+                  tls: false
+                  streamDelay: 100ms
+                  payload:
+                    - message 1
+                    - message 2
+                    - message 3
+                  headers:
+                    add:
+                      foo: "123"
+                    forward:
+                      - bar
+        agent1:
+          enabled: true
+          endpoints:
+            agent1:
+              url: http://localhost:8080
+              method: POST
+              protocol: HTTP/1.1
+              authority: goto.uk
+              tls: false
+              requestCount: 1
+              concurrent: 1
+          triggers:
+            trigger1:
+              matchAny:
+                - uriPrefix: /callagent
+              transform:
+                uriMap:
+                  /callagent: /a2a/client/call/result
+                payload: |
+                  name: goto-agent
+                  agentURL: http://localhost:3000/agent/goto-agent
+                  cardURL: http://localhost:3000/agent/goto-agent
+                  authority: goto.goto
+                  message: echo
+                  headers:
+                    request:
+                      add:
+                        x: y
+                      remove:
+                        - bar
+                      forward:
+                        - foo
+                    response:
+                      add:
+                        y: x
+                      remove:
+                        - bar
+                  delay: 1s
+              endpoints:
+                - agent1
+        mcp1:
+          enabled: true
+          endpoints:
+            mcp1:
+              url: http://localhost:8080
+              method: POST
+              protocol: HTTP/1.1
+              authority: goto.uk
+              tls: false
+              requestCount: 1
+              concurrent: 1
+          triggers:
+            trigger1:
+              matchAny:
+                - uriPrefix: /callmcp
+              transform:
+                uriMap:
+                  /callmcp: /mcpapi/client/call/tool
+                payload: |
+                  tool: "echo"
+                  url: "http://localhost:3000/mcp/goto-mcp"
+                  server: "goto-mcp"
+                  resultOnly: true
+                  noEvents: true
+                  noCallDetails: true
+                  delay: "1s"
+                  args:
+                    text: hello
+                  headers:
+                    request:
+                      add:
+                        x: y
+                      remove:
+                        - bar
+                      forward:
+                        - foo
+                    response:
+                      add:
+                        y: x
+                      remove:
+                        - bar
+              endpoints:
+                - mcp1
+        target1:
+          enabled: true
+          trafficConfig:
+            payload: true
+            transparent: true
+            delay:
+              min: 0.1s
+              max: 0.5s
+            retries: 1
+            retryDelay: 1s
+          endpoints:
+            ep1:
+              url: http://localhost:8081
+              method: GET
+              protocol: HTTP/1.1
+              authority: goto.uk
+              tls: false
+              requestCount: 1
+              concurrent: 1
+              stream: false
+            ep2:
+              url: http://localhost:8082
+              method: GET
+              protocol: HTTP/2
+              authority: goto.uk
+              tls: false
+              requestCount: 1
+              concurrent: 1
+              stream: false
+          transform:
+            uriMap:
+              /foo/{foo}: /foox/{bar}/barx/{foo}
+              /bar/{bar}: /barxfoox/{foo}
+            headers:
+              add:
+                main: "1"
+              remove:
+                - "*"
+              lower: false
+            queries:
+              add:
+                main: "2"
+              remove:
+                - "*"
+            requestId:
+              send: true
+              uuid: true
+              header: x-request-id
+              query: request-id
+          triggers:
+            trigger1:
+              matchAny:
+                - uri: /foo/{foo}
+                  headers:
+                    bar: "{bar}"
+                  vars:
+                    foo:
+                      in:
+                        - "1"
+                        - "2"
+                    bar:
+                      regex: aa.
+                - uri: /bar
+                  headers:
+                    foo: "{foo}"
+                  vars:
+                    foo:
+                      in:
+                        - "1"
+                        - "2"
+              endpoints:
+                - ep1
+              transform:
+                uriMap:
+                  /foo/{foo}: /bar/{bar}
+                  /bar/{bar}: /foo/{foo}
+                headers:
+                  add:
+                    abc: "111"
+                  remove:
+                    - foo
+                queries:
+                  add:
+                    a: qqq
+                  remove:
+                    - b
+                requestId:
+                  send: true
+                  uuid: false
+                  header: x-request-id
+                  query: request-id
+              trafficConfig:
+                delay:
+                  min: 0s
+                  max: 0s
+                retries: 1
+            trigger2:
+              matchAny:
+                - uriPrefix: /foo/{foo}
+                  headers:
+                    bar: "{bar}"
+                  vars:
+                    foo:
+                      exact: "11"
+                    bar:
+                      inRegex:
+                        - a.
+                        - b.
+                - uriPrefix: /bar/{bar}
+                  headers:
+                    foo: "{foo}"
+                  vars:
+                    foo:
+                      exact: "11"
+                    bar:
+                      inRegex:
+                        - a.
+                        - b.
+              endpoints:
+                - ep1
+                - ep2
+              transform:
+                uriMap:
+                  /foo/{foo}: /foo/{bar}/bar/{foo}
+                  /bar/{bar}: /barfoo/{foo}
+                headers:
+                  add:
+                    abc: "222"
+                  remove:
+                    - bar
+                queries:
+                  add:
+                    b: zzz
+                  remove:
+                    - a
+                requestId:
+                  send: true
+                  uuid: false
+                  header: x-request-id
+                  query: request-id
+              trafficConfig:
+                delay:
+                  min: 0.1s
+                  max: 0.1s
+        target1.1:
+          enabled: true
+          trafficConfig:
+            payload: false
+            transparent: false
+          endpoints:
+            ep8081:
+              url: http://localhost:8081
+              method: GET
+              protocol: HTTP/1.1
+              authority: goto.uk
+              tls: false
+              requestCount: 1
+              concurrent: 1
+          triggers:
+            t1:
+              matchAny:
+                - uriPrefix: /foo/{foo}
+                  headers:
+                    bar: "{bar}"
+                - uriPrefix: /bar/{bar}
+                  headers:
+                    foo: "{foo}"
+              endpoints:
+                - ep8081
+              transform:
+                uriMap:
+                  /foo/{foo}: /bar/{bar}
+                  /bar/{bar}: /foo/{foo}
+                headers:
+                  add:
+                    target: "target1.1"
+                    endpoint: "ep8081"
+                    foo: "foo-8081"
+                  remove:
+                    - foo
+                    - bar
+                queries:
+                  add:
+                    a: qqq
+                requestId:
+                  send: true
+                  uuid: true
+                  header: x-request-id
+                  query: request-id
+              trafficConfig:
+                delay:
+                  min: 0s
+                  max: 0s
+                retries: 1
+        target1.2:
+          enabled: true
+          trafficConfig:
+            payload: false
+            transparent: false
+          endpoints:
+            ep8082:
+              url: http://localhost:8082
+              method: GET
+              protocol: HTTP/2
+              authority: goto.uk
+              tls: false
+              requestCount: 1
+              concurrent: 1
+          triggers:
+            t1:
+              matchAny:
+                - uriPrefix: /foo/{foo}
+                  headers:
+                    bar: "{bar}"
+                - uriPrefix: /bar/{bar}
+                  headers:
+                    foo: "{foo}"
+              endpoints:
+                - ep8082
+              transform:
+                uriMap:
+                  /foo/{foo}: /foobar/{foo}-{bar}
+                  /bar/{bar}: /barfoo/{bar}-{foo}
+                headers:
+                  add:
+                    target: "target1.2"
+                    endpoint: "ep8082"
+                    bar: "bar-8081"
+                requestId:
+                  send: true
+                  uuid: true
+                  header: x-request-id
+                  query: request-id
+              trafficConfig:
+                delay:
+                  min: 0s
+                  max: 0s
+                retries: 1
+  - tcp:
+      port: 10000
+      enabled: true
+      upstreams:
+        http-8081-8082:
+          delay:
+            min: 0s
+            max: 0s
+          retries: 1
+          retryDelay:
+            min: 0s
+            max: 0s
+          dropPct: 0
+          endpoints:
+            ep1:
+              address: "localhost:8081"
+            ep2:
+              address: "localhost:8082"
+  - tcp:
+      port: 9000
+      enabled: true
+      upstreams:
+        grpc-8000:
+          delay:
+            min: 0s
+            max: 0s
+          retries: 1
+          retryDelay:
+            min: 0s
+            max: 0s
+          endpoints:
+            ep1:
+              address: "localhost:8000"
+  - grpc:
+      port: 9000
+      enabled: true
+      services:
+        Goto:
+          toService: Goto
+          methods:
+            echo: echo
+          upstream:
+            id: grpc-8888
+            endpoint: localhost:8888
+            authority: localhost
+          config:
+            delay:
+              min: 0s
+              max: 0s
+        Goto2:
+          toService: Goto3
+          methods:
+            streamInOut: streamInOut
+          upstream:
+            id: grpc-8888
+            endpoint: localhost:8888
+            authority: localhost
+          config:
+            delay:
+              min: 0s
+              max: 0s
