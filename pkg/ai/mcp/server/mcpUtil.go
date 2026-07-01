@@ -13,7 +13,7 @@ func GetMCPSessionID(headers http.Header) string {
 	return sessionID
 }
 
-func (server *MCPServer) SetMCPSessionStore(r *http.Request) *util.MCPRequestStore {
+func (server *MCPServer) SetMCPSessionStore(r *http.Request) (*util.MCPRequestStore, *util.RequestStore) {
 	rs := util.GetRequestStore(r)
 	sessionID := GetMCPSessionID(r.Header)
 	ms := MCPRequestStoreBySession[sessionID]
@@ -23,7 +23,7 @@ func (server *MCPServer) SetMCPSessionStore(r *http.Request) *util.MCPRequestSto
 	}
 	ms.Ctx = r.Context()
 	ms.RS = rs
-	return ms
+	return ms, rs
 }
 
 func (server *MCPServer) GetMCPSessionStore(sessionID string) *util.MCPRequestStore {

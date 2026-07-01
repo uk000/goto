@@ -42,6 +42,7 @@ var (
 	utf8Regexp              = regexp.MustCompile("(?i)utf-8")
 	knownTextMimeTypeRegexp = regexp.MustCompile(".*(text|html|json|yaml|form).*")
 	upgradeRegexp           = regexp.MustCompile("(?i)upgrade")
+	muxTemplate             = regexp.MustCompile(`\(\?P<(v\d+)>(?:\(\?i\))?\{([^:]+):([^\}]+)\}\)`)
 )
 
 func IsFiller(key string) bool {
@@ -161,6 +162,10 @@ func Unglob(s string) (string, bool) {
 		glob = true
 	}
 	return s, glob
+}
+
+func DeMux(muxRegex string) string {
+	return muxTemplate.ReplaceAllString(muxRegex, "(?P<${1}>${3})")
 }
 
 func (m *Match) Prepare() {

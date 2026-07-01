@@ -305,8 +305,8 @@ func (is *InvocationSpec) validateConnectionAndRequestConfigs() error {
 			return fmt.Errorf("invalid RequestIdleTimeout")
 		}
 	} else {
-		is.requestTimeoutD = 30 * time.Second
-		is.RequestTimeout = "30s"
+		is.requestTimeoutD = 5 * time.Minute
+		is.RequestTimeout = "5m"
 	}
 	if is.TLSVersion == 0 {
 		is.TLSVersion = tls.VersionTLS13

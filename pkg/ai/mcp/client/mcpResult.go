@@ -32,6 +32,7 @@ type MCPResult struct {
 	ToolCall            *ToolCall
 	ServerInfo          *timeline.GotoServerInfo
 	Timeline            *timeline.Timeline
+	UpstreamStatuses    map[string]int
 	LastRequestHeaders  http.Header `json:"-"`
 	LastResponseHeaders http.Header `json:"-"`
 	LastResponseStatus  int         `json:"-"`
@@ -57,14 +58,15 @@ type MCPCallResult struct {
 
 func NewMCPResult(server string, tc *ToolCall, t *timeline.Timeline) *MCPResult {
 	return &MCPResult{
-		ID:          fmt.Sprintf("[%s]@%s", tc.Tool, server),
-		Server:      server,
-		ServerInfo:  t.Server,
-		Tool:        tc.Tool,
-		ToolCall:    tc,
-		CallResults: map[string]*MCPCallResult{},
-		Timeline:    t,
-		RemoteGotos: map[string]bool{},
+		ID:               fmt.Sprintf("[%s]@%s", tc.Tool, server),
+		Server:           server,
+		ServerInfo:       t.Server,
+		Tool:             tc.Tool,
+		ToolCall:         tc,
+		CallResults:      map[string]*MCPCallResult{},
+		Timeline:         t,
+		RemoteGotos:      map[string]bool{},
+		UpstreamStatuses: map[string]int{},
 	}
 }
 
@@ -93,7 +95,7 @@ func (r *MCPResult) storeCallResult(requestID string, result *gomcp.CallToolResu
 			cr.RemoteTimeline = t
 			r.LastRemoteHeaders = t.UpstreamHeaders
 			if t.UpstreamHeaders != nil {
-				viaGotos := util.GetViaGotosFromHeaders(t.UpstreamHeaders)
+				viaGotos := util.GetViaGotosFromUpstreamHeaders(t.UpstreamHeaders)
 				for v := range viaGotos {
 					r.RemoteGotos[v] = true
 				}
@@ -105,7 +107,7 @@ func (r *MCPResult) storeCallResult(requestID string, result *gomcp.CallToolResu
 				cr.RemoteHeaders = upheaders
 				r.LastRemoteHeaders = upheaders
 				if upheaders != nil {
-					viaGotos := util.GetViaGotosFromHeaders(upheaders)
+					viaGotos := util.GetViaGotosFromUpstreamHeaders(upheaders)
 					for v := range viaGotos {
 						r.RemoteGotos[v] = true
 					}
@@ -138,6 +140,7 @@ func (r *MCPResult) storeHeaders(requestID string, requestHeaders, responseHeade
 	r.LastRequestHeaders = requestHeaders
 	r.LastResponseHeaders = responseHeaders
 	r.LastResponseStatus = status
+	r.UpstreamStatuses[r.Tool] = status
 }
 
 func (r *MCPResult) ToMCP() *gomcp.CallToolResult {
@@ -164,6 +167,8 @@ func (r *MCPResult) ToMCP() *gomcp.CallToolResult {
 		"RequestHeaders":  r.LastRequestHeaders,
 		"ResponseHeaders": r.LastResponseHeaders,
 	}
+	r.Timeline.UpstreamStatuses = r.UpstreamStatuses
+	r.Timeline.Status = r.LastResponseStatus
 	result.StructuredContent = r.Timeline
 	return result
 }

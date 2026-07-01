@@ -75,6 +75,9 @@ mcp:
           count:
             type: int
             description: 'Count'
+          status:
+            type: int
+            description: 'Status'
           metadata:
             type: object
             description: metadata
@@ -384,6 +387,49 @@ mcp:
               properties:
                 theAsk:
                   type: string
+        - name: status
+          tool:
+            name: status
+            description: Status check from server goto-mcp-1@${POD_NAME}:3000@ns@local
+          schema: basic-text-delay-schema
+          behavior:
+            status: true
+        - name: remote-status
+          tool:
+            name: remote-status
+            description: 'From Server [goto-mcp-1@${POD_NAME}:3000@ns@local], call tool [default: status] on remote MCP server [goto-mcp-4000] at URL[http://localhost:4000/mcp/goto-mcp-4000], SSE[false], Authority[localhost],  Headers[foo:bar], Args[]'
+          schema: remote-tool-schema
+          behavior:
+            remote: true
+          config:
+            remote:
+              tool: "status"
+              server: "goto-mcp-4000"
+              url: "localhost:4000/mcp/goto-mcp-4000/status"
+              tls: false
+              sseURL: ""
+              forceSSE: false
+              authority: "localhost"
+              delay: "1s"
+              requestCount: 1
+              concurrent: 1
+              initialDelay: "1s"
+              requestDelay: "1s"
+              headers:
+                request:
+                  add:
+                    caller: "remote-echo@goto-mcp-1@${POD_NAME}:3000@ns@local"
+                    foo: "remote-echo-3000"
+                  forward:
+                    - Traceparent
+                    - Tracestate
+                    - Authorization
+                    - caller
+              args:
+                remoteArgs:
+                  status: 401
+                headers:
+                  Accept: "application/json"
         - name: remote-echo
           tool:
             name: remote-echo
@@ -1017,6 +1063,45 @@ a2a:
                     mcp3:
                       url: localhost:4000/mcp/goto-mcp-3/stream
                       authority: localhost
+                status:
+                  triggers:
+                    - status
+                  toolCall:
+                    tool: status
+                    url: http://localhost:4000/mcp/goto-mcp-4000
+                    tls: false
+                    server: goto-mcp-4000
+                    requestCount: 1
+                    concurrent: 1
+                    delay: 0.5s
+                    args:
+                      status: 418
+                    headers:
+                      request:
+                        add:
+                          foo: bar
+                        forward:
+                          - bar
+                remote-status:
+                  triggers:
+                    - remote-status
+                  toolCall:
+                    tool: remote-status
+                    url: http://localhost:3000/mcp/goto-mcp
+                    tls: false
+                    server: goto-mcp
+                    requestCount: 1
+                    concurrent: 1
+                    delay: 0.5s
+                    args:
+                      remoteArgs:
+                        status: 418
+                    headers:
+                      request:
+                        add:
+                          foo: bar
+                        forward:
+                          - bar
               agents:
                 agent1:
                   triggers: [agent1]

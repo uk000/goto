@@ -69,17 +69,11 @@ type ClientTLSConfig struct {
 	RemoteAddress string
 }
 
-func (ct *DefaultClientTransport) UpdateTransport(c *http.Client, gc *grpc.ClientConn, h1 *http.Transport, intercept ITransportIntercept, grpcIntercept *GRPCIntercept, isH2 bool) {
+func (ct *DefaultClientTransport) UpdateTransport(c *http.Client, gc *grpc.ClientConn, h1 *http.Transport, h2 *http2.Transport, intercept ITransportIntercept, grpcIntercept *GRPCIntercept, isH2 bool) {
 	ct.Client = c
 	ct.GrpcConn = gc
 	ct.h1Transport = h1
-	ct.h2Transport = &http2.Transport{
-		AllowHTTP:       true,
-		TLSClientConfig: h1.TLSClientConfig,
-		DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-			return h1.DialTLSContext(context.Background(), network, addr)
-		},
-	}
+	ct.h2Transport = h2
 	ct.TransportIntercept = intercept
 	ct.GRPCIntercept = grpcIntercept
 	ct.isH2 = isH2
@@ -112,7 +106,7 @@ func (e *errRoundTripper) RoundTrip(*http.Request) (*http.Response, error) { ret
 
 func (c *DefaultClientTransport) alpnHandler(authority string, conn *tls.Conn) http.RoundTripper {
 	log.Printf("Client Port [%d] Label [%s]: TLS Handshake Complete. Negotiated ALPN: %s ---\n", c.port, c.label, conn.ConnectionState().NegotiatedProtocol)
-	if c.isH2 {
+	if c.isH2 && c.h2Transport != nil {
 		cc, err := c.h2Transport.NewClientConn(struct{ net.Conn }{conn})
 		if err != nil {
 			log.Printf("Client Port [%d] Label %s: NewClientConn failed: %v", c.port, c.label, err)
@@ -145,9 +139,11 @@ func (c *DefaultClientTransport) UpdateTLSConfig(sni string, tlsVersion uint16, 
 		} else if len(alpn.Protos) > 0 {
 			tlsConfig.NextProtos = append(tlsConfig.NextProtos, alpn.Protos...)
 		}
-		c.h1Transport.TLSNextProto = map[string]func(authority string, conn *tls.Conn) http.RoundTripper{}
-		for _, alpn := range tlsConfig.NextProtos {
-			c.h1Transport.TLSNextProto[alpn] = c.alpnHandler
+		if c.h1Transport != nil {
+			c.h1Transport.TLSNextProto = map[string]func(authority string, conn *tls.Conn) http.RoundTripper{}
+			for _, alpn := range tlsConfig.NextProtos {
+				c.h1Transport.TLSNextProto[alpn] = c.alpnHandler
+			}
 		}
 	}
 }
@@ -331,26 +327,42 @@ func CreateHTTPClient(port int, label string, h2, autoUpgrade, isTLS, noSNI bool
 		}
 		return tlsConn, nil
 	}
-	t := &http.Transport{
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   100,
-		MaxConnsPerHost:       100,
-		IdleConnTimeout:       connIdleTimeout,
-		Proxy:                 http.ProxyFromEnvironment,
-		DisableCompression:    true,
-		ExpectContinueTimeout: requestTimeout,
-		ResponseHeaderTimeout: requestTimeout,
-		DialTLSContext:        dialTLSContext,
-		TLSHandshakeTimeout:   connTimeout,
-		ForceAttemptHTTP2:     autoUpgrade,
-		TLSClientConfig:       tlsConfig,
-	}
+	var ht IHTTPTransportIntercept
 	if h2 {
-		if err := http2.ConfigureTransport(t); err != nil {
-			panic(err)
+		h2t := &http2.Transport{
+			ReadIdleTimeout: connIdleTimeout,
+			PingTimeout:     connTimeout,
+			AllowHTTP:       true,
+			TLSClientConfig: tlsConfig,
 		}
+		h2t.DialTLSContext = func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+			if isTLS {
+				return dialTLSContext(ctx, network, addr)
+			}
+			return net.Dial(network, addr)
+		}
+		ht = NewHTTP2TransportIntercept(h2t, label, newConnNotifierChan)
+		ct.UpdateTransport(&http.Client{Timeout: requestTimeout, Transport: ht}, nil, nil, h2t, ht, nil, true)
+		// if err := http2.ConfigureTransport(t); err != nil {
+		// 	panic(err)
+		// }
+	} else {
+		t := &http.Transport{
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   100,
+			MaxConnsPerHost:       100,
+			IdleConnTimeout:       connIdleTimeout,
+			Proxy:                 http.ProxyFromEnvironment,
+			DisableCompression:    true,
+			ExpectContinueTimeout: requestTimeout,
+			ResponseHeaderTimeout: requestTimeout,
+			DialTLSContext:        dialTLSContext,
+			TLSHandshakeTimeout:   connTimeout,
+			ForceAttemptHTTP2:     autoUpgrade,
+			TLSClientConfig:       tlsConfig,
+		}
+		ht = NewHTTPTransportIntercept(t, label, newConnNotifierChan)
+		ct.UpdateTransport(&http.Client{Timeout: requestTimeout, Transport: ht}, nil, t, nil, ht, nil, false)
 	}
-	ht := NewHTTPTransportIntercept(t, label, newConnNotifierChan)
-	ct.UpdateTransport(&http.Client{Timeout: requestTimeout, Transport: ht}, nil, t, ht, nil, h2)
 	return ct
 }

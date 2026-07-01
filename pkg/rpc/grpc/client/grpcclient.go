@@ -141,13 +141,6 @@ func (c *GRPCClient) UpdateTLSConfig(serverName string, tlsVersion uint16, verif
 func (c *GRPCClient) UpdateTLSCerts(rootCAs *x509.CertPool, cert []*tls.Certificate) {
 }
 
-func (c *GRPCClient) GetALPNHandler(string) func(authority string, c *tls.Conn) http.RoundTripper {
-	return nil
-}
-
-func (c *GRPCClient) SetALPNHandler(string, func(authority string, c *tls.Conn) http.RoundTripper) {
-}
-
 func (c *GRPCClient) StorePeerCertInfo(remoteAddr string, commonName string, dnsNames, uris []string, issuer string) {
 	if c.PeerCertInfo == nil {
 		c.PeerCertInfo = gototls.NewPeerCertInfo(remoteAddr)

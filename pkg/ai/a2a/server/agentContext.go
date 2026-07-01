@@ -49,37 +49,38 @@ type AgentTask struct {
 }
 
 type AgentContext struct {
-	port            int
-	label           string
-	serverID        string
-	listener        string
-	agent           *model.Agent
-	behavior        model.IAgentBehavior
-	ctx             context.Context
-	rs              *util.RequestStore
-	requestHeaders  http.Header
-	delay           *types.Delay
-	triggers        DelegateTriggers
-	tools           map[string]map[string]*model.DelegateToolCall
-	agents          map[string]map[string]*model.DelegateAgentCall
-	input           *a2aproto.Message
-	inputData       map[string]any
-	inputText       string
-	options         *taskmanager.ProcessOptions
-	handler         taskmanager.TaskHandler
-	task            *AgentTask
-	logs            []string
-	localProgress   chan *types.Pair[string, any]
-	toolResults     map[string]any
-	agentResults    map[string]any
-	forcedStatus    int
-	overrideDelay   time.Duration
-	timeline        *timeline.Timeline
-	surfaceData     bool
-	reportTimeline  bool
-	err             error
-	upstreamHeaders map[string]any
-	remoteGotos     map[string]bool
+	port             int
+	label            string
+	serverID         string
+	listener         string
+	agent            *model.Agent
+	behavior         model.IAgentBehavior
+	ctx              context.Context
+	rs               *util.RequestStore
+	requestHeaders   http.Header
+	delay            *types.Delay
+	triggers         DelegateTriggers
+	tools            map[string]map[string]*model.DelegateToolCall
+	agents           map[string]map[string]*model.DelegateAgentCall
+	input            *a2aproto.Message
+	inputData        map[string]any
+	inputText        string
+	options          *taskmanager.ProcessOptions
+	handler          taskmanager.TaskHandler
+	task             *AgentTask
+	logs             []string
+	localProgress    chan *types.Pair[string, any]
+	toolResults      map[string]any
+	agentResults     map[string]any
+	forcedStatus     int
+	overrideDelay    time.Duration
+	timeline         *timeline.Timeline
+	surfaceData      bool
+	reportTimeline   bool
+	err              error
+	upstreamHeaders  map[string]any
+	upstreamStatuses map[string]int
+	remoteGotos      map[string]bool
 }
 
 type DelegateCallContext struct {
@@ -104,15 +105,16 @@ type agentOverrides struct {
 
 func newAgentContext(port int, serverID, listenerLabel string, agent *model.Agent, headers http.Header, rs *util.RequestStore) *AgentContext {
 	ac := &AgentContext{
-		port:            port,
-		label:           agent.ID,
-		serverID:        serverID,
-		listener:        listenerLabel,
-		agent:           agent,
-		requestHeaders:  headers,
-		rs:              rs,
-		upstreamHeaders: map[string]any{},
-		remoteGotos:     map[string]bool{},
+		port:             port,
+		label:            agent.ID,
+		serverID:         serverID,
+		listener:         listenerLabel,
+		agent:            agent,
+		requestHeaders:   headers,
+		rs:               rs,
+		upstreamHeaders:  map[string]any{},
+		upstreamStatuses: map[string]int{},
+		remoteGotos:      map[string]bool{},
 	}
 	return ac
 }
@@ -569,7 +571,7 @@ func (ac *AgentContext) sendTaskStatusUpdate(state a2aproto.TaskState, msg strin
 }
 
 func (ac *AgentContext) endTask(success bool, msg string) {
-	ac.timeline.EndTimeline(ac.label, msg, nil, success)
+	ac.timeline.EndTimeline(ac.label, msg, ac.forcedStatus, ac.upstreamStatuses, nil, success)
 	if ac.task.subscriber != nil {
 		ac.task.subscriber.Close()
 	}

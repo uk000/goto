@@ -81,24 +81,27 @@ type Event struct {
 }
 
 type Timeline struct {
-	TYPE            string `json:"TYPE,omitempty"`
-	Port            int
-	Label           string
-	Server          *GotoServerInfo
-	Events          []*Event
-	Data            map[string]any
-	RemoteCalls     map[string]map[string]any
-	UpstreamHeaders map[string]any
-	Finished        bool
-	Success         bool
-	ResultOnly      bool
-	NoEvents        bool
-	stream          chan *types.Pair[string, any]
-	streamPreferred bool
-	updateNotifier  TimelineUpdateNotifierFunc
-	endNotifier     TimelineEndNotifierFunc
-	eventCounter    atomic.Int32
-	lock            sync.RWMutex
+	TYPE             string `json:"TYPE,omitempty"`
+	Port             int
+	Label            string
+	Server           *GotoServerInfo
+	Events           []*Event
+	Data             map[string]any
+	RemoteCalls      map[string]map[string]any
+	UpstreamHeaders  map[string]any
+	Status           int
+	UpstreamStatuses map[string]int
+	Finished         bool
+	Success          bool
+	ResultOnly       bool
+	NoEvents         bool
+	RemoteGotos      map[string]bool
+	stream           chan *types.Pair[string, any]
+	streamPreferred  bool
+	updateNotifier   TimelineUpdateNotifierFunc
+	endNotifier      TimelineEndNotifierFunc
+	eventCounter     atomic.Int32
+	lock             sync.RWMutex
 }
 
 var (
@@ -249,9 +252,13 @@ func (t *Timeline) SetStreamPreferred(stream chan *types.Pair[string, any]) {
 	}
 }
 
-func (t *Timeline) EndTimeline(label, text string, data any, success bool) {
+func (t *Timeline) EndTimeline(label, text string, status int, upstreamStatuses map[string]int, data any, success bool) {
 	t.Finished = true
 	t.Success = success
+	if status > 0 {
+		t.Status = status
+	}
+	t.UpstreamStatuses = upstreamStatuses
 	if data != nil {
 		t.AddData(text, data, true)
 	} else {

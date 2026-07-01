@@ -131,12 +131,18 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		output, err = doToolCall(rs.RequestPortNum, tc, w, r)
-		if err != nil {
+		if !util.IsNil(err) {
 			msg = err.Error()
 		} else {
 			msg = fmt.Sprintf("Tool %s called successfully on url %s", tc.Tool, tc.URL)
 		}
 		if output != nil {
+			if output.LastResponseStatus > 0 {
+				w.WriteHeader(output.LastResponseStatus)
+			}
+			if len(output.UpstreamStatuses) > 0 {
+				w.Header().Add(constants.HeaderGotoUpstreamStatus, util.ToJSONText(output.UpstreamStatuses))
+			}
 			for v := range output.RemoteGotos {
 				w.Header().Add(constants.HeaderViaGoto, v)
 			}
@@ -168,7 +174,7 @@ func doToolCall(port int, tc *ToolCall, w http.ResponseWriter, r *http.Request) 
 			log.Println("*** defer called with Nil output ***")
 		}
 	}()
-	output, err = session.CallTool(nil)
+	output, err = session.CallTool(tc.Args)
 	return
 }
 

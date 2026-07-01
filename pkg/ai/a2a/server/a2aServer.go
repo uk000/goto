@@ -217,15 +217,24 @@ func (a *A2AServer) Serve(name string, w http.ResponseWriter, r *http.Request) e
 	aCtx := newAgentContext(a.Port, a.ID, rs.ListenerLabel, agent, r.Header, rs)
 	r = r.WithContext(context.WithValue(ctx, util.AgentContextKey, aCtx))
 	aCtx.ctx = r.Context()
-	irw := intercept.GetInterceptWriter(r)
-	if aCtx.forcedStatus > 0 {
-		irw.WriteHeader(aCtx.forcedStatus)
-		rs.StatusCode = aCtx.forcedStatus
+	status, rem := statusManager.GetStatusFor(a.Port, agent.URI, r.Header, r.Method)
+	w, irw := intercept.WithInterceptAndStatus(r, w, status, true)
+	if status > 0 {
+		aCtx.forcedStatus = status
+		rs.StatusCode = status
 	}
 	agent.Serve(w, r)
 	for v := range aCtx.remoteGotos {
 		rs.ViaGotos = append(rs.ViaGotos, v)
 	}
+	if aCtx.forcedStatus > 0 {
+		status = aCtx.forcedStatus
+		rs.StatusCode = aCtx.forcedStatus
+	}
+	if status > 0 {
+		sendStatus(a.ID, status, rem, irw.ResponseWriter, r)
+	}
 	rs.StatusCode = irw.StatusCode
+	irw.Proceed()
 	return nil
 }

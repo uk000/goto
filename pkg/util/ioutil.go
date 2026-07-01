@@ -29,6 +29,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -54,6 +55,13 @@ type reader struct {
 type ReReader struct {
 	io.ReadCloser
 	Content []byte
+}
+
+type ResponseTracker struct {
+	io.ReadCloser
+	resp       *http.Response
+	onTrailers func(http.Header)
+	once       sync.Once
 }
 
 func (r reader) Read(p []byte) (n int, err error) {
@@ -134,6 +142,39 @@ func Reader(ctx context.Context, r io.Reader) io.Reader {
 		}
 	}
 	return reader{ctx, r}
+}
+
+func NewResponseTracker(resp *http.Response, onTrailers func(http.Header)) *ResponseTracker {
+	return &ResponseTracker{
+		ReadCloser: resp.Body,
+		resp:       resp,
+		onTrailers: onTrailers,
+	}
+}
+
+func (rt *ResponseTracker) Read(p []byte) (n int, err error) {
+	n, err = rt.ReadCloser.Read(p)
+	if err == io.EOF {
+		rt.once.Do(rt.onClose)
+	}
+	return
+}
+
+func (rt *ResponseTracker) Close() error {
+	if rt.resp != nil {
+		io.Copy(io.Discard, rt.ReadCloser)
+		err := rt.ReadCloser.Close()
+		rt.once.Do(rt.onClose)
+		return err
+	}
+	return nil
+}
+
+func (rt *ResponseTracker) onClose() {
+	for k, v := range rt.resp.Trailer {
+		rt.resp.Header[k] = append(rt.resp.Header[k], v...)
+	}
+	rt.onTrailers(rt.resp.Header)
 }
 
 func BuildFilePath(filePath, fileName string) string {

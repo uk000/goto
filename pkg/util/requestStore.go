@@ -68,6 +68,7 @@ type RequestStore struct {
 	RequestPortChecked      bool
 	RequestServed           bool
 	StatusCode              int
+	UpstreamStatuses        map[string]int
 	BodyLength              int
 	RequestPayloadSize      int
 	RequestPortNum          int
@@ -152,6 +153,13 @@ func GetRequestStoreFromContext(ctx context.Context) (context.Context, *RequestS
 
 func GetRequestStoreIfPresent(r *http.Request) *RequestStore {
 	if val := r.Context().Value(RequestStoreKey); val != nil {
+		return val.(*RequestStore)
+	}
+	return nil
+}
+
+func GetRequestStoreFromContextIfPresent(ctx context.Context) *RequestStore {
+	if val := ctx.Value(RequestStoreKey); val != nil {
 		return val.(*RequestStore)
 	}
 	return nil

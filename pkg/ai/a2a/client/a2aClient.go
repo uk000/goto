@@ -60,6 +60,11 @@ type AgentCall struct {
 	NoCallDetails        bool             `json:"noCallDetails,omitempty"`
 }
 
+type AgentError struct {
+	error
+	StatusCode int
+}
+
 type A2AClient struct {
 	ID         string
 	port       int
@@ -93,17 +98,17 @@ func FetchAgentCard(ctx context.Context, url, authority string, call *AgentCall,
 	return
 }
 
-func CallAgent(ctx context.Context, port int, call *AgentCall, callback AgentResultsCallback, inHeaders http.Header) (headers map[string]any, err error) {
+func CallAgent(ctx context.Context, port int, call *AgentCall, callback AgentResultsCallback, inHeaders http.Header) (*A2AResult, error) {
 	return CallAgentWithTimeline(ctx, port, call, callback, inHeaders, timeline.NewTimeline(port, call.Name, nil, nil, inHeaders, nil, nil, nil))
 }
 
-func CallAgentWithTimeline(ctx context.Context, port int, call *AgentCall, callback AgentResultsCallback, inHeaders http.Header, timeline *timeline.Timeline) (headers map[string]any, err error) {
+func CallAgentWithTimeline(ctx context.Context, port int, call *AgentCall, callback AgentResultsCallback, inHeaders http.Header, timeline *timeline.Timeline) (result *A2AResult, err error) {
 	var card *goa2aserver.AgentCard
 	if call == nil || call.CardURL == "" {
 		return nil, fmt.Errorf("Missing Agent Call spec/URL: %+v", call)
 	}
 	card, err = FetchAgentCard(ctx, call.CardURL, call.Authority, call, inHeaders)
-	if err != nil || card == nil {
+	if !util.IsNil(err) || card == nil {
 		return nil, fmt.Errorf("Error fetching agent card from url [%s], authority [%s]: %s", call.AgentURL, call.Authority, err.Error())
 	}
 	var agentURL string
@@ -115,14 +120,11 @@ func CallAgentWithTimeline(ctx context.Context, port int, call *AgentCall, callb
 	call.AgentURL = agentURL
 	session := NewA2ASessionWithTimeline(ctx, port, card, call, inHeaders, timeline)
 	err = session.Connect()
-	if err != nil {
+	if !util.IsNil(err) {
 		return nil, fmt.Errorf("Failed to load agent card with error [%s]. Agent Call: %+v", err.Error(), call)
 	}
 	err = session.CallAgent(callback, nil, nil)
-	headers = map[string]any{call.Name: map[string]any{
-		"RequestHeaders":  session.Result.LastRequestHeaders,
-		"ResponseHeaders": session.Result.LastResponseHeaders,
-	}}
+	result = session.Result
 	return
 }
 
@@ -140,7 +142,7 @@ func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, c
 	}
 	url = util.FixURL(url, ".well-known/agent.json", false)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
+	if !util.IsNil(err) {
 		return nil, fmt.Errorf("failed to create request wtih error: %w", err)
 	}
 	if authority != "" {
@@ -152,7 +154,7 @@ func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, c
 	log.Printf("---------- Outbound request headers from A2A client to load Agent Card from %s ------------\n", url)
 	log.Println(util.ToJSONText(req.Header))
 	resp, err := ac.httpClient.Do(req)
-	if err != nil {
+	if !util.IsNil(err) {
 		return nil, fmt.Errorf("failed to fetch agent card: %w", err)
 	}
 	log.Printf("---------- Response headers received by A2A client for Agent Card from %s ------------\n", url)
@@ -163,7 +165,7 @@ func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, c
 	}
 	card = &goa2aserver.AgentCard{}
 	rr := util.CreateOrGetReReader(resp.Body)
-	if err := json.NewDecoder(rr).Decode(card); err != nil {
+	if err := json.NewDecoder(rr).Decode(card); !util.IsNil(err) {
 		rr.Rewind()
 		return nil, fmt.Errorf("failed to parse agent card: %s. Body: %s", err.Error(), string(rr.Content))
 	}
@@ -172,7 +174,7 @@ func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, c
 
 func (ac *A2AClient) ConnectWithAgentCard(ctx context.Context, call *AgentCall, cardURL, authority string, inHeaders http.Header, timeline *timeline.Timeline) (*A2ASession, error) {
 	card, err := ac.loadAgentCard(ctx, cardURL, authority, call, inHeaders)
-	if err != nil {
+	if !util.IsNil(err) {
 		return nil, err
 	}
 	session := ac.newSession(ctx, ac.port, ac.ID, authority, card, call, inHeaders, timeline)

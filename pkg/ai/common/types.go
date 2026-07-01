@@ -22,75 +22,85 @@ import (
 )
 
 type ToolCallArgs struct {
-	DelayText  string            `json:"delay,omitempty"`
-	Count      int               `json:"count,omitempty"`
-	Size       int               `json:"size,omitempty"`
-	Text       string            `json:"text,omitempty"`
-	Status     int               `json:"status,omitempty"`
-	ResultOnly bool              `json:"resultOnly,omitempty"`
-	NoEvents   bool              `json:"noEvents,omitempty"`
-	Remote     *RemoteCallArgs   `json:"remote,omitempty"`
-	Metadata   map[string]string `json:"metadata,omitempty"`
-	ToolDef    map[string]any    `json:"toolDef,omitempty"`
-	Delay      *types.Delay      `json:"-"`
+	DelayText      string            `json:"delay,omitempty"`
+	Count          int               `json:"count,omitempty"`
+	Size           int               `json:"size,omitempty"`
+	Text           string            `json:"text,omitempty"`
+	Status         int               `json:"status,omitempty"`
+	ResultOnly     bool              `json:"resultOnly,omitempty"`
+	NoEvents       bool              `json:"noEvents,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+	ToolDef        map[string]any    `json:"toolDef,omitempty"`
+	Delay          *types.Delay      `json:"-"`
+	ToolName       string            `json:"tool,omitempty"`
+	AgentName      string            `json:"agent,omitempty"`
+	URL            string            `json:"url,omitempty"`
+	Authority      string            `json:"authority,omitempty"`
+	SSE            bool              `json:"sse,omitempty"`
+	Headers        *types.Headers    `json:"headers,omitempty"`
+	ForwardHeaders []string          `json:"forwardHeaders,omitempty"`
+	AgentMessage   string            `json:"agentMessage,omitempty"`
+	AgentData      map[string]any    `json:"agentData,omitempty"`
+	RemoteArgs     *ToolCallArgs     `json:"remoteArgs,omitempty"`
 }
 
-type RemoteCallArgs struct {
-	ToolName       string         `json:"tool,omitempty"`
-	AgentName      string         `json:"agent,omitempty"`
-	URL            string         `json:"url,omitempty"`
-	Authority      string         `json:"authority,omitempty"`
-	SSE            bool           `json:"sse,omitempty"`
-	Headers        *types.Headers `json:"headers,omitempty"`
-	ForwardHeaders []string       `json:"forwardHeaders,omitempty"`
-	AgentMessage   string         `json:"agentMessage,omitempty"`
-	AgentData      map[string]any `json:"agentData,omitempty"`
-	Args           *ToolCallArgs  `json:"args,omitempty"`
-}
-
-func NewCallArgs(remoteArgs ...bool) *ToolCallArgs {
+func NewCallArgs() *ToolCallArgs {
 	return &ToolCallArgs{
-		Remote:   NewRemoteCallArgs(remoteArgs...),
-		Metadata: map[string]string{},
-		Delay:    types.NewDelay(0, 0, 0),
+		Metadata:   map[string]string{},
+		Delay:      types.NewDelay(0, 0, 0),
+		RemoteArgs: &ToolCallArgs{},
 	}
 }
 
-func NewRemoteCallArgs(remoteArgs ...bool) *RemoteCallArgs {
-	remote := &RemoteCallArgs{}
-	if len(remoteArgs) == 0 || remoteArgs[0] {
-		remote.Args = NewCallArgs(false)
+func (a *ToolCallArgs) NonNil() {
+	if a.Metadata == nil {
+		a.Metadata = map[string]string{}
 	}
-	return remote
-}
-
-func (a *ToolCallArgs) UpdateFrom(argsList ...*ToolCallArgs) {
-	for _, args := range argsList {
-		if args.Count > 0 {
-			a.Count = args.Count
-		}
-		if args.DelayText != "" {
-			a.DelayText = args.DelayText
-		}
-		if args.Text != "" {
-			a.Text = args.Text
-		}
-		if a.Metadata == nil {
-			a.Metadata = map[string]string{}
-		}
-		for k, v := range args.Metadata {
-			a.Metadata[k] = v
-		}
-		if args.Remote != nil {
-			if a.Remote == nil {
-				a.Remote = NewRemoteCallArgs(false)
-			}
-			a.Remote.UpdateFrom(args.Remote)
-		}
+	if a.ToolDef == nil {
+		a.ToolDef = map[string]any{}
+	}
+	if a.Delay == nil {
+		a.Delay = types.NewDelay(0, 0, 0)
+	}
+	if a.Headers == nil {
+		a.Headers = types.NewHeaders()
+	}
+	if a.ForwardHeaders == nil {
+		a.ForwardHeaders = []string{}
+	}
+	if a.AgentData == nil {
+		a.AgentData = map[string]any{}
+	}
+	if a.RemoteArgs == nil {
+		a.RemoteArgs = NewCallArgs()
 	}
 }
 
-func (a *RemoteCallArgs) UpdateFrom(args *RemoteCallArgs) {
+func (a *ToolCallArgs) UpdateFrom(args *ToolCallArgs) {
+	if args == nil {
+		return
+	}
+	if args.Count > 0 {
+		a.Count = args.Count
+	}
+	if args.Size > 0 {
+		a.Size = args.Size
+	}
+	if args.DelayText != "" {
+		a.DelayText = args.DelayText
+	}
+	if args.Text != "" {
+		a.Text = args.Text
+	}
+	if args.Status > 0 {
+		a.Status = args.Status
+	}
+	if a.Metadata == nil {
+		a.Metadata = map[string]string{}
+	}
+	for k, v := range args.Metadata {
+		a.Metadata[k] = v
+	}
 	if args.ToolName != "" {
 		a.ToolName = args.ToolName
 	}
@@ -118,15 +128,18 @@ func (a *RemoteCallArgs) UpdateFrom(args *RemoteCallArgs) {
 	if args.AgentData != nil {
 		a.AgentData = args.AgentData
 	}
-	if args.Args != nil {
-		if a.Args == nil {
-			a.Args = NewCallArgs(false)
+	if args.RemoteArgs != nil {
+		if a.RemoteArgs == nil {
+			a.RemoteArgs = NewCallArgs()
 		}
-		a.Args.UpdateFrom(args.Args)
+		a.RemoteArgs.UpdateFrom(args.RemoteArgs)
 	}
 }
 
 func (a *ToolCallArgs) UpdateFromInputArgs(args map[string]any) {
+	if args == nil {
+		return
+	}
 	if args["count"] != nil {
 		a.Count = util.AnyToInt(args["count"])
 	}
@@ -136,10 +149,9 @@ func (a *ToolCallArgs) UpdateFromInputArgs(args map[string]any) {
 	if args["text"] != nil {
 		a.Text = args["text"].(string)
 	}
-	a.Remote.UpdateFromInputArgs(args)
-}
-
-func (a *RemoteCallArgs) UpdateFromInputArgs(args map[string]any) {
+	if args["status"] != nil {
+		a.Status = util.AnyToInt(args["status"])
+	}
 	if args["tool"] != nil {
 		a.ToolName = args["tool"].(string)
 	}
@@ -190,11 +202,12 @@ func (a *RemoteCallArgs) UpdateFromInputArgs(args map[string]any) {
 		}
 	}
 	if args["args"] != nil {
-		if a.Args == nil {
-			a.Args = NewCallArgs(true, true)
+		if remoteArgs, ok := args["args"].(map[string]any); ok {
+			if a.RemoteArgs == nil {
+				a.RemoteArgs = NewCallArgs()
+			}
+			a.RemoteArgs.UpdateFromInputArgs(remoteArgs)
 		}
-		remoteArgs := args["args"].(map[string]any)
-		a.Args.UpdateFromInputArgs(remoteArgs)
 	}
 }
 
@@ -220,10 +233,9 @@ func (a *ToolCallArgs) Clone() *ToolCallArgs {
 }
 
 func (a *ToolCallArgs) IsEmpty() bool {
-	return a.Text == "" && a.DelayText == "" && a.Count == 0 && a.Delay == nil && len(a.Metadata) == 0 && (a.Remote == nil || a.Remote.IsEmpty())
-}
-
-func (a *RemoteCallArgs) IsEmpty() bool {
-	return a.ToolName == "" && a.AgentName == "" && a.URL == "" && a.Authority == "" && a.Headers == nil && len(a.ForwardHeaders) == 0 &&
-		a.AgentMessage == "" && len(a.AgentData) == 0 && (a.Args == nil || a.Args.IsEmpty())
+	return a.Text == "" && a.DelayText == "" && a.Count == 0 && a.Delay == nil &&
+		a.ToolName == "" && a.AgentName == "" && a.URL == "" && a.Authority == "" &&
+		a.Headers == nil && len(a.ForwardHeaders) == 0 && a.AgentMessage == "" &&
+		len(a.Metadata) == 0 && len(a.AgentData) == 0 &&
+		(a.RemoteArgs == nil || a.RemoteArgs.IsEmpty())
 }

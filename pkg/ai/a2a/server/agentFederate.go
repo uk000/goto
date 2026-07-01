@@ -126,10 +126,10 @@ func (ab *AgentBehaviorFederate) runTools(aCtx *AgentContext, runWG, resultsWG *
 			dCtx := newDelegateCallContext(tc.ToolCall, nil, tc.Tracker)
 			dCtx.tracker.IncrementCall()
 			delegateContexts = append(delegateContexts, dCtx)
-			if resultsWG != nil {
-				resultsWG.Add(1)
-				go ab.processUpstreamUpdates(aCtx, dCtx, resultsWG)
-			}
+			// if resultsWG != nil {
+			// 	resultsWG.Add(1)
+			// 	go ab.processUpstreamUpdates(aCtx, dCtx, resultsWG)
+			// }
 			toolsWG.Add(1)
 			if parallel {
 				go func(dCtx *DelegateCallContext) {
@@ -189,10 +189,12 @@ func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentContext, dCtx *DelegateCal
 		aCtx.err = err
 		msg := fmt.Sprintf("Failed to invoke Agent [%s] at URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, err.Error())
 		aCtx.AddEvent(msg)
+		log.Println(msg)
 	} else {
 		msg := fmt.Sprintf("Successfully invoked Agent [%s] at URL [%s]. Call Count [%d], Response Count [%d]",
 			dCtx.agentCall.Name, dCtx.agentCall.AgentURL, dCtx.tracker.CallCount.Load(), dCtx.tracker.ResponseCount.Load())
 		aCtx.AddEvent(msg)
+		log.Println(msg)
 	}
 	if result != nil {
 		aCtx.sendData("Result", result.ToObject())
@@ -206,6 +208,8 @@ func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentContext, dCtx *DelegateCal
 			"RequestHeaders":  result.LastRequestHeaders,
 			"ResponseHeaders": result.LastResponseHeaders,
 		}
+		aCtx.upstreamStatuses = result.UpstreamStatuses
+		aCtx.timeline.Status = result.LastResponseStatus
 	}
 }
 
@@ -216,6 +220,7 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 		aCtx.err = err
 		msg := fmt.Sprintf("Failed to invoke MCP tool [%s] at URL [%s] with error: %s", dCtx.toolCall.Tool, dCtx.toolCall.URL, err.Error())
 		aCtx.AddEvent(msg)
+		log.Println(msg)
 	}
 	if respHeaders != nil {
 		msg := fmt.Sprintf("MCP tool [%s] sent response headers", dCtx.toolCall.Tool)
@@ -226,6 +231,7 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 		msg := fmt.Sprintf("Successfully invoked MCP tool [%s] at URL [%s]. Call Count [%d], Response Count [%d]",
 			dCtx.toolCall.Tool, dCtx.toolCall.URL, dCtx.tracker.CallCount.Load(), dCtx.tracker.ResponseCount.Load())
 		aCtx.AddEvent(msg)
+		log.Println(msg)
 		aCtx.sendData("Result", result.ToObject())
 		aCtx.remoteGotos = result.RemoteGotos
 		if result.LastRemoteHeaders != nil {
@@ -237,6 +243,13 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 			"RequestHeaders":  result.LastRequestHeaders,
 			"ResponseHeaders": result.LastResponseHeaders,
 		}
+		aCtx.upstreamStatuses = result.UpstreamStatuses
+		if result.LastResponseStatus > 0 {
+			aCtx.timeline.Status = result.LastResponseStatus
+			if aCtx.forcedStatus == 0 {
+				aCtx.forcedStatus = result.LastResponseStatus
+			}
+		}
 	}
 	//processMCPCallResults(dCtx.toolCall.Tool, remoteResult, dCtx.results, dCtx.upstreamProgress, ab.agent.Streaming)
 }
@@ -244,7 +257,7 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 func (ab *AgentBehaviorFederate) prepareArgs(args *aicommon.ToolCallArgs, forwardHeaders []string) *aicommon.ToolCallArgs {
 	newArgs := aicommon.NewCallArgs()
 	newArgs.UpdateFrom(args)
-	newArgs.Remote.ForwardHeaders = forwardHeaders
+	newArgs.RemoteArgs.ForwardHeaders = forwardHeaders
 	return newArgs
 }
 
@@ -274,7 +287,7 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 		}
 	}
 	err = session.CallAgent(unaryCallback, aCtx.localProgress, dCtx.upstreamProgress)
-	if err != nil {
+	if !util.IsNil(err) {
 		msg := fmt.Sprintf("Failed to call Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, err.Error())
 		aCtx.AddEvent(msg)
 		return nil, err
@@ -295,12 +308,20 @@ func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCal
 	args := ab.prepareArgs(dCtx.toolCall.Args, dCtx.toolCall.Headers.Request.Forward)
 	msg := fmt.Sprintf("Agent [%s] Invoking MCP tool [%s] at URL [%s]", aCtx.agent.ID, dCtx.toolCall.Tool, dCtx.toolCall.URL)
 	aCtx.AddEvent(msg)
+	log.Println(msg)
 	client := mcpclient.NewClient(ab.agent.Port, false, dCtx.toolCall.H2, dCtx.toolCall.TLS, ab.agent.ID,
 		aCtx.rs.ListenerLabel, dCtx.toolCall.Authority, aCtx.localProgress, aCtx.notifyUpdate, aCtx.notifyEndSession)
 	session := client.CreateSessionWithTimeline(aCtx.ctx, dCtx.toolCall.URL, dCtx.toolCall.Tool, dCtx.toolCall, aCtx.requestHeaders, aCtx.timeline)
 	mcpResult, err = session.CallTool(args)
 	if mcpResult != nil {
 		respHeaders = mcpResult.LastResponseHeaders
+		if aCtx.timeline.UpstreamStatuses != nil {
+			aCtx.upstreamStatuses = aCtx.timeline.UpstreamStatuses
+		} else {
+			aCtx.upstreamStatuses[dCtx.name] = mcpResult.LastResponseStatus
+		}
+		aCtx.timeline.UpstreamStatuses = aCtx.upstreamStatuses
+		aCtx.rs.UpstreamStatuses = aCtx.upstreamStatuses
 	}
 	return
 }

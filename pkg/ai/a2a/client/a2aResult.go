@@ -31,6 +31,7 @@ type A2AResult struct {
 	AgentCall           *AgentCall
 	ServerInfo          *timeline.GotoServerInfo
 	Timeline            *timeline.Timeline
+	UpstreamStatuses    map[string]int
 	LastRequestHeaders  http.Header `json:"-"`
 	LastResponseHeaders http.Header `json:"-"`
 	LastResponseStatus  int         `json:"-"`
@@ -55,14 +56,15 @@ type A2ACallResult struct {
 
 func NewA2AResult(server string, ac *AgentCall, t *timeline.Timeline) *A2AResult {
 	return &A2AResult{
-		ID:          fmt.Sprintf("[%s]@%s", ac.Name, server),
-		Server:      server,
-		Agent:       ac.Name,
-		AgentCall:   ac,
-		ServerInfo:  t.Server,
-		CallResults: map[string]*A2ACallResult{},
-		Timeline:    t,
-		RemoteGotos: map[string]bool{},
+		ID:               fmt.Sprintf("[%s]@%s", ac.Name, server),
+		Server:           server,
+		Agent:            ac.Name,
+		AgentCall:        ac,
+		ServerInfo:       t.Server,
+		CallResults:      map[string]*A2ACallResult{},
+		UpstreamStatuses: map[string]int{},
+		Timeline:         t,
+		RemoteGotos:      map[string]bool{},
 	}
 }
 
@@ -109,6 +111,7 @@ func (r *A2AResult) storeHeaders(requestID string, requestHeaders, responseHeade
 	r.LastRequestHeaders = requestHeaders
 	r.LastResponseHeaders = responseHeaders
 	r.LastResponseStatus = status
+	r.UpstreamStatuses[r.Agent] = status
 }
 
 func (cr *A2ACallResult) merge(other *A2ACallResult) {
@@ -185,6 +188,8 @@ func (r *A2AResult) ToMCP(extras map[string]any) *gomcp.CallToolResult {
 	for k, v := range extras {
 		r.Timeline.Data[k] = v
 	}
+	r.Timeline.UpstreamStatuses = r.UpstreamStatuses
+	r.Timeline.Status = r.LastResponseStatus
 	result.StructuredContent = r.Timeline
 	return result
 }

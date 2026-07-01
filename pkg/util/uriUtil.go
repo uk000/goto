@@ -77,6 +77,7 @@ func GetURIRegexpAndRoute(uri string, prefix bool, router *mux.Router) (string, 
 func getURIRegexpAndRoute(uri string, router *mux.Router, prefixRegexp string, prefix, buildOnly bool) (string, *regexp.Regexp, *mux.Router, *mux.Route, error) {
 	finalURI, glob := Unglob(strings.ToLower(uri))
 	vars := fillerRegexp.FindAllString(finalURI, -1)
+	hasFiller := len(vars) > 0
 	var prefixURI string
 	if len(vars) > 0 {
 		if pieces := strings.Split(finalURI, vars[0]); len(pieces) > 0 {
@@ -87,11 +88,11 @@ func getURIRegexpAndRoute(uri string, router *mux.Router, prefixRegexp string, p
 		prefixURI = finalURI
 	}
 	for _, v := range vars {
-		v2, hasFiller := GetFillerUnmarked(v)
+		v2, found := GetFillerUnmarked(v)
 		if router != nil {
 			v2 = MarkFiller(v2 + ":[^/&\\?]*")
 			finalURI = strings.ReplaceAll(finalURI, v, v2)
-		} else if hasFiller {
+		} else if found {
 			v2 = fmt.Sprintf("(?P<%s>[^/&\\?]*)", v2)
 			finalURI = strings.ReplaceAll(finalURI, v, v2)
 		}
@@ -108,7 +109,11 @@ func getURIRegexpAndRoute(uri string, router *mux.Router, prefixRegexp string, p
 		}
 		finalURI = strings.TrimPrefix(finalURI, "/")
 		if finalURI != "" {
-			finalURI = fmt.Sprintf("/{path:(?i)%s}", finalURI)
+			if hasFiller {
+				finalURI = "/" + finalURI
+			} else {
+				finalURI = fmt.Sprintf("/{path:(?i)%s}", finalURI)
+			}
 		}
 		if prefix {
 			route = subRouter.PathPrefix(finalURI)
@@ -116,8 +121,11 @@ func getURIRegexpAndRoute(uri string, router *mux.Router, prefixRegexp string, p
 			route = subRouter.Path(finalURI)
 		}
 		pathRegex, err = route.GetPathRegexp()
-		if prefix {
-			pathRegex = prefixRegexp + pathRegex + "(.*)?"
+		if err == nil {
+			pathRegex = DeMux(pathRegex)
+			if prefix {
+				pathRegex = prefixRegexp + pathRegex + "(.*)?"
+			}
 		}
 	} else {
 		pathRegex = prefixRegexp + finalURI

@@ -26,7 +26,9 @@ import (
 	"goto/pkg/util/timeline"
 	"log"
 	"net/http"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -58,6 +60,10 @@ type A2ASession struct {
 	timeline         *timeline.Timeline
 	err              error
 }
+
+var (
+	re = regexp.MustCompile(`(?i)http status\s+(\d+)`)
+)
 
 func NewA2ASession(ctx context.Context, port int, card *goa2aserver.AgentCard, call *AgentCall, inHeaders http.Header) *A2ASession {
 	client := NewA2AClient(port, call.Name, call.H2, call.TLS, call.Authority)
@@ -94,14 +100,14 @@ func (acs *A2ASession) Connect() error {
 	acs.url = util.FixURL(acs.url, "/", false)
 	c, err := goa2aclient.NewA2AClient(acs.url, goa2aclient.WithHTTPClient(acs.client.httpClient),
 		goa2aclient.WithHTTPReqHandler(acs), goa2aclient.WithUserAgent(acs.callerId))
-	if err != nil {
+	if !util.IsNil(err) {
 		return err
 	}
 	acs.client.client = c
 	return nil
 }
 
-func (acs *A2ASession) CallAgent(callback AgentResultsCallback, localProgress, upstreamProgress chan *types.Pair[string, any]) (err error) {
+func (acs *A2ASession) CallAgent(callback AgentResultsCallback, localProgress, upstreamProgress chan *types.Pair[string, any]) (err *AgentError) {
 	input := acs.call.Message
 	data := acs.call.Data
 	data["resultOnly"] = acs.call.ResultOnly
@@ -116,12 +122,20 @@ func (acs *A2ASession) CallAgent(callback AgentResultsCallback, localProgress, u
 	} else {
 		errs = acs.InvokeUnary()
 	}
-	if len(errs) == 1 {
-		for _, e := range errs {
-			err = e
+	if len(errs) > 0 {
+		if len(errs) == 1 {
+			for _, e := range errs {
+				err = &AgentError{error: e}
+			}
+		} else {
+			err = &AgentError{error: errors.New(util.ToJSONText(errs))}
 		}
-	} else if len(errs) > 1 {
-		err = errors.New(util.ToJSONText(errs))
+		match := re.FindStringSubmatch(err.Error())
+		if len(match) > 1 {
+			if s, e := strconv.Atoi(match[1]); e == nil {
+				err.StatusCode = s
+			}
+		}
 	}
 	viaGotos := acs.Result.LastResponseHeaders[constants.HeaderViaGoto]
 	for _, v := range viaGotos {
@@ -166,7 +180,7 @@ func (acs *A2ASession) InvokeUnary() map[string]error {
 		result, err := acs.client.client.SendMessage(acs.ctx, a2aproto.SendMessageParams{
 			Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
 		})
-		if err != nil {
+		if !util.IsNil(err) {
 			errs[requestID] = err
 		} else {
 			results[requestID] = result
@@ -221,8 +235,9 @@ func (acs *A2ASession) InvokeStream() map[string]error {
 			eventChan, err := acs.client.client.StreamMessage(ctx, a2aproto.SendMessageParams{
 				Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
 			})
-			if err != nil {
+			if !util.IsNil(err) {
 				errs[requestID] = err
+				wg.Done()
 				continue
 			}
 			go acs.processStreamResponse(requestID, eventChan, cr, errs, wg)
@@ -244,7 +259,7 @@ func (acs *A2ASession) Handle(ctx context.Context, client *http.Client, req *htt
 	var err error
 	var resp *http.Response
 	defer func() {
-		if err != nil && resp != nil {
+		if !util.IsNil(err) && resp != nil {
 			resp.Body.Close()
 		}
 	}()
@@ -267,10 +282,14 @@ func (acs *A2ASession) Handle(ctx context.Context, client *http.Client, req *htt
 	acs.clientInfo.StoreHeaders(req.Header)
 	resp, err = client.Do(req)
 	if resp != nil {
-		acs.updateResponseHeaders(resp, agent)
-		acs.Result.storeHeaders(requestID, req.Header, resp.Header, resp.StatusCode)
+		rs := util.GetRequestStore(req)
+		resp.Body = util.NewResponseTracker(resp, func(h http.Header) {
+			rs.UpstreamStatuses = util.GetUpstreamStatuses(h)
+			acs.updateResponseHeaders(h, agent)
+			acs.Result.storeHeaders(requestID, req.Header, resp.Header, resp.StatusCode)
+		})
 	}
-	if err != nil {
+	if !util.IsNil(err) {
 		return nil, fmt.Errorf("a2aClient.httpRequestHandler: http request failed: %w", err)
 	}
 
@@ -289,18 +308,18 @@ func (acs *A2ASession) updateRequestHeaders(r *http.Request, agent string) {
 	log.Println(util.ToJSONText(r.Header))
 }
 
-func (acs *A2ASession) updateResponseHeaders(r *http.Response, agent string) {
-	if r != nil {
+func (acs *A2ASession) updateResponseHeaders(headers http.Header, agent string) {
+	if headers != nil {
 		if acs.outHeaders.Response != nil {
-			acs.outHeaders.Response.UpdateHeaders(r.Header)
+			acs.outHeaders.Response.UpdateHeaders(headers)
 		}
-		if v := r.Header[constants.HeaderViaGoto]; len(v) > 0 {
+		if v := headers[constants.HeaderViaGoto]; len(v) > 0 {
 			for _, viaGoto := range v {
 				acs.Result.RemoteGotos[viaGoto] = true
 			}
 		}
 		log.Printf("---------- Response headers received by A2A client [%s] for Agent Call to Agent [%s] from URL [%s] ------------\n", acs.callerId, agent, acs.url)
-		log.Println(util.ToJSONText(r.Header))
+		log.Println(util.ToJSONText(headers))
 	}
 }
 func buildInputParts(text string, data any) []a2aproto.Part {
@@ -323,7 +342,7 @@ func (acs *A2ASession) setPushConfig(taskID, url string) error {
 		PushNotificationConfig: pushConfig,
 	}
 	result, err := acs.client.client.SetPushNotification(acs.ctx, taskPushConfig)
-	if err != nil {
+	if !util.IsNil(err) {
 		return err
 	}
 	log.Printf("Push notification config set successfully: %+v\n", result)
@@ -471,7 +490,7 @@ func (acs *A2ASession) sendResponse(id, text string, data any, cr *A2ACallResult
 			data = headers
 			// dataKey = "UpstreamHeaders"
 			if acs.Result.LastResponseHeaders != nil {
-				viaGotos := util.GetViaGotosFromHeaders(headers)
+				viaGotos := util.GetViaGotosFromUpstreamHeaders(headers)
 				for v := range viaGotos {
 					acs.Result.RemoteGotos[v] = true
 				}

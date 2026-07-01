@@ -64,7 +64,6 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 	call := &AgentCall{}
 	name := util.GetStringParamValue(r, "agent")
 	stream := strings.Contains(r.RequestURI, "stream")
-	result := strings.Contains(r.RequestURI, "result")
 	port := util.GetRequestOrListenerPortNum(r)
 	err := util.ReadJsonOrYamlPayloadFromBody(r.Body, &call)
 	if err != nil {
@@ -75,38 +74,57 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 		call.Name = name
 	}
 	output := map[string]map[string]any{}
-	headers, err := CallAgent(r.Context(), port, call, streamAgentResponse(call.Name, stream, result, output, w, r), r.Header)
-	if err != nil {
-		util.SendBadRequest(w, r, "Error invoking agent [%s]: %s", call.Name, err.Error())
-		return
+	msg := ""
+	result, err := CallAgent(r.Context(), port, call, streamAgentResponse(call.Name, stream, output, w, r), r.Header)
+	var headers map[string]any
+	var viaGotos map[string]bool
+	status := http.StatusBadGateway
+	if result != nil {
+		status = result.LastResponseStatus
+		if len(result.UpstreamStatuses) > 0 {
+			w.Header().Add(constants.HeaderGotoUpstreamStatus, util.ToJSONText(result.UpstreamStatuses))
+		}
+		headers = map[string]any{call.Name: map[string]any{
+			"RequestHeaders":  result.LastRequestHeaders,
+			"ResponseHeaders": result.LastResponseHeaders,
+		}}
+		viaGotos = util.GetViaGotosFromUpstreamHeaders(headers)
+		for v := range result.RemoteGotos {
+			viaGotos[v] = true
+		}
+		for v := range viaGotos {
+			w.Header().Add(constants.HeaderViaGoto, v)
+		}
+	}
+	if !util.IsNil(err) {
+		if e, ok := err.(*AgentError); ok {
+			status = e.StatusCode
+		}
+		msg = fmt.Sprintf("Error invoking agent [%s] on URL [%s] with input [%s]: Status [%d] - %s", call.Name, call.AgentURL, call.Message, status, err.Error())
 	} else {
-		if stream {
-			util.WriteJsonPayload(w, headers)
-			msg := fmt.Sprintf("Invoked agent [%s] successfully on URL [%s] with input [%s], streamed result", call.Name, call.AgentURL, call.Message)
-			util.AddLogMessage(msg, r)
-		} else {
-			for _, upOut := range output {
-				for k, v := range upOut {
-					if strings.Contains(k, "headers") || strings.Contains(k, "Headers") && v != nil && !reflect.ValueOf(v).IsNil() {
-						if upstreamHeaders, ok := v.(map[string]any); ok {
-							maps.Copy(headers, upstreamHeaders)
-						}
+		msg = fmt.Sprintf("Invoked agent [%s] successfully on URL [%s] with input [%s]", call.Name, call.AgentURL, call.Message)
+	}
+	w.WriteHeader(status)
+	util.AddLogMessage(msg, r)
+	if stream {
+		util.WriteJsonPayload(w, headers)
+		util.AddLogMessage(msg, r)
+	} else {
+		for _, upOut := range output {
+			for k, v := range upOut {
+				if strings.Contains(k, "headers") || strings.Contains(k, "Headers") && v != nil && !reflect.ValueOf(v).IsNil() {
+					if upstreamHeaders, ok := v.(map[string]any); ok {
+						maps.Copy(headers, upstreamHeaders)
 					}
 				}
 			}
-			output["headers"] = headers
-			viaGotos := util.GetViaGotosFromHeaders(headers)
-			for v := range viaGotos {
-				w.Header().Add(constants.HeaderViaGoto, v)
-			}
-			msg := fmt.Sprintf("Invoked agent [%s] successfully on URL [%s] with input [%s], JSON result", call.Name, call.AgentURL, call.Message)
-			util.AddLogMessage(msg, r)
-			util.WriteJsonPayload(w, output)
 		}
+		output["headers"] = headers
+		util.WriteJsonPayload(w, output)
 	}
 }
 
-func streamAgentResponse(agent string, stream, result bool, output map[string]map[string]any, w http.ResponseWriter, r *http.Request) AgentResultsCallback {
+func streamAgentResponse(agent string, stream bool, output map[string]map[string]any, w http.ResponseWriter, r *http.Request) AgentResultsCallback {
 	var fw http.Flusher
 	if stream {
 		if f, ok := w.(http.Flusher); ok {
@@ -151,7 +169,7 @@ func streamAgentResponse(agent string, stream, result bool, output map[string]ma
 			_, isArtifact = data.(a2aproto.Artifact)
 		}
 		if !isArtifact {
-			if result {
+			if !stream {
 				if m, ok := data.(map[string]any); ok {
 					send(id, msg, m, nil)
 				} else {

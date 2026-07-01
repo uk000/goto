@@ -33,19 +33,19 @@ func (t *MCPTool) fetch(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	url := tctx.Config.RemoteTool.URL
 	authority := tctx.Config.RemoteTool.Authority
 	if tctx.args == nil {
-		tctx.args = aicommon.NewCallArgs(false)
+		tctx.args = aicommon.NewCallArgs()
 	}
-	if tctx.args.Remote.URL != "" {
-		url = tctx.args.Remote.URL
+	if tctx.args.RemoteArgs.URL != "" {
+		url = tctx.args.RemoteArgs.URL
 	}
-	if tctx.args.Remote.Authority != "" {
-		authority = tctx.args.Remote.Authority
+	if tctx.args.RemoteArgs.Authority != "" {
+		authority = tctx.args.RemoteArgs.Authority
 	}
 	count := tctx.args.Count
 	if count == 0 {
 		count = 1
 	}
-	finalHeaders := types.Union(tctx.Config.RemoteTool.Headers, tctx.args.Remote.Headers)
+	finalHeaders := types.Union(tctx.Config.RemoteTool.Headers, tctx.args.RemoteArgs.Headers)
 	if !strings.HasPrefix(url, "http") {
 		url = "http://" + url
 	}
@@ -68,7 +68,7 @@ func (t *MCPTool) fetch(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	}
 	req.Header["User-Agent"] = []string{tctx.Label}
 	if authority != "" {
-		req.Host = tctx.args.Remote.Authority
+		req.Host = tctx.args.RemoteArgs.Authority
 	}
 	if req.Host == "" {
 		req.Host = req.URL.Host

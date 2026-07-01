@@ -66,14 +66,14 @@ outer:
 
 func (tctx *ToolCallContext) addForwardHeaders(headers types.SimpleHTTPHeaders, forwardHeaders []string, args *aicommon.ToolCallArgs) {
 	finalForwardHeaders := map[string]bool{}
-	if tctx.args != nil && tctx.args.Remote != nil {
-		if tctx.args.Remote.ForwardHeaders != nil {
-			for _, h := range tctx.args.Remote.ForwardHeaders {
+	if tctx.args != nil && tctx.args.RemoteArgs != nil {
+		if tctx.args.RemoteArgs.ForwardHeaders != nil {
+			for _, h := range tctx.args.RemoteArgs.ForwardHeaders {
 				finalForwardHeaders[h] = true
 			}
 		}
-		if tctx.args.Remote.Headers != nil && tctx.args.Remote.Headers.HasForwardHeaders() {
-			forwardHeaders = append(forwardHeaders, tctx.args.Remote.Headers.Request.Forward...)
+		if tctx.args.RemoteArgs.Headers != nil && tctx.args.RemoteArgs.Headers.HasForwardHeaders() {
+			forwardHeaders = append(forwardHeaders, tctx.args.RemoteArgs.Headers.Request.Forward...)
 		}
 		for _, h := range forwardHeaders {
 			finalForwardHeaders[h] = true
@@ -86,9 +86,9 @@ func (tctx *ToolCallContext) addForwardHeaders(headers types.SimpleHTTPHeaders, 
 	for h := range finalForwardHeaders {
 		toolForwardHeaders = append(toolForwardHeaders, h)
 	}
-	tctx.args.Remote.ForwardHeaders = toolForwardHeaders
-	if args.Remote == nil {
-		args.Remote = aicommon.NewRemoteCallArgs(true)
+	tctx.args.RemoteArgs.ForwardHeaders = toolForwardHeaders
+	if args.RemoteArgs == nil {
+		args.RemoteArgs = aicommon.NewCallArgs()
 	}
-	args.Remote.ForwardHeaders = toolForwardHeaders
+	args.RemoteArgs.ForwardHeaders = toolForwardHeaders
 }

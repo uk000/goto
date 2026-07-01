@@ -35,16 +35,17 @@ func (t *MCPTool) callRemoteAgent(tctx *ToolCallContext) (*gomcp.CallToolResult,
 	if tctx.args == nil {
 		tctx.args = aicommon.NewCallArgs()
 	}
+	tctx.args.NonNil()
 	tctx.Config.Agent.NonNil()
-	ac := tctx.Config.Agent.CloneWithUpdate(tctx.args.Remote.AgentName, tctx.args.Remote.URL, tctx.args.Remote.Authority, tctx.args.Remote.AgentMessage, tctx.args.Remote.AgentData)
+	ac := tctx.Config.Agent.CloneWithUpdate(tctx.args.RemoteArgs.AgentName, tctx.args.RemoteArgs.URL, tctx.args.RemoteArgs.Authority, tctx.args.RemoteArgs.AgentMessage, tctx.args.RemoteArgs.AgentData)
 	if tctx.timeline.ResultOnly {
 		ac.ResultOnly = true
 	}
 	if tctx.timeline.NoEvents {
 		ac.NoEvents = true
 	}
-	finalHeaders := types.Union(ac.Headers, tctx.args.Remote.Headers)
-	tctx.addForwardHeaders(finalHeaders.Request.Add, finalHeaders.Request.Forward, tctx.args.Remote.Args)
+	finalHeaders := types.Union(ac.Headers, tctx.args.RemoteArgs.Headers)
+	tctx.addForwardHeaders(finalHeaders.Request.Add, finalHeaders.Request.Forward, tctx.args.RemoteArgs)
 	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s]", ac.Name, ac.AgentURL)
 	tctx.AddEvent(msg)
 	client := a2aclient.NewA2AClient(tctx.Server.Port, tctx.Name, ac.H2, ac.TLS, ac.Authority)
@@ -70,10 +71,10 @@ func (t *MCPTool) callRemoteAgent(tctx *ToolCallContext) (*gomcp.CallToolResult,
 	err = session.CallAgent(nil, localProgress, upstreamProgress)
 	wg.Wait()
 	close(localProgress)
-	if err != nil {
+	if !util.IsNil(err) {
 		return nil, fmt.Errorf("Failed to call Agent [%s] URL [%s] with error: %s", ac.Name, ac.AgentURL, err.Error())
 	}
-	tctx.remoteGotos = session.Result.RemoteGotos
+	tctx.timeline.RemoteGotos = session.Result.RemoteGotos
 	data := result.StructuredContent
 	result = session.Result.ToMCP(data.(map[string]any))
 	return result, nil

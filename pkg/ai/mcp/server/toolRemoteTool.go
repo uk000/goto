@@ -29,8 +29,9 @@ func (t *MCPTool) callRemoteTool(tctx *ToolCallContext) (*gomcp.CallToolResult, 
 	if tctx.args == nil {
 		tctx.args = aicommon.NewCallArgs()
 	}
-	tc := tctx.Config.RemoteTool.UpdateAndClone(tctx.args.Remote.ToolName, tctx.args.Remote.URL, "", tctx.args.Remote.Authority,
-		tctx.args.DelayText, tctx.args.Remote.Headers, tctx.args, tctx.args.Remote.Args)
+	tctx.args.NonNil()
+	tc := tctx.Config.RemoteTool.UpdateAndClone(tctx.args.RemoteArgs.ToolName, tctx.args.RemoteArgs.URL, "", tctx.args.RemoteArgs.Authority,
+		tctx.args.DelayText, tctx.args.RemoteArgs.Headers, tctx.args.RemoteArgs)
 	if tctx.args.ResultOnly {
 		tc.ResultOnly = true
 	}
@@ -39,11 +40,11 @@ func (t *MCPTool) callRemoteTool(tctx *ToolCallContext) (*gomcp.CallToolResult, 
 	}
 	//t.addForwardHeaders(tc.Headers.Request.Add, tc.Headers.Request.Forward, tc.Args)
 	isSSE := tctx.sse
-	if tctx.args.Remote.SSE || tc.ForceSSE {
+	if tctx.args.RemoteArgs.SSE || tc.ForceSSE {
 		isSSE = true
 	}
 	url := tc.URL
-	argHasURL := tctx.args.Remote.URL != ""
+	argHasURL := tctx.args.RemoteArgs.URL != ""
 	if isSSE && !argHasURL {
 		url = tc.SSEURL
 	}
@@ -59,21 +60,27 @@ func (t *MCPTool) callRemoteTool(tctx *ToolCallContext) (*gomcp.CallToolResult, 
 	session := client.CreateSessionWithTimeline(tctx.ctx, url, tctx.Label, tc, tctx.requestHeaders, tctx.timeline)
 	remoteResult, err = session.CallTool(tc.Args)
 	session.Stop = true
+	tctx.applyDelay()
+	if remoteResult != nil {
+		result = remoteResult.ToMCP()
+		tctx.timeline.RemoteGotos = remoteResult.RemoteGotos
+		tctx.ms.ForcedStatus = remoteResult.LastResponseStatus
+	} else {
+		result = &gomcp.CallToolResult{}
+	}
 	if err != nil {
 		msg := fmt.Sprintf("MCP Server [%s]: Failed to invoke Remote tool [%s] at URL [%s] with error: %s",
 			tctx.Server.ID, tc.Tool, tc.URL, err.Error())
 		tctx.Log(msg)
-		result = &gomcp.CallToolResult{Content: []gomcp.Content{&gomcp.TextContent{Text: msg}}, IsError: true}
+		result.Content = append(result.Content, &gomcp.TextContent{Text: msg})
+		result.IsError = true
 	} else if remoteResult == nil {
 		msg := fmt.Sprintf("Server [%s] Remote tool [%s] at URL [%s] produced no result", tctx.Server.GetName(), tc.Tool, tc.URL)
 		tctx.Log(msg)
-		result = &gomcp.CallToolResult{Content: []gomcp.Content{&gomcp.TextContent{Text: msg}}, IsError: false}
+		result.Content = append(result.Content, &gomcp.TextContent{Text: msg})
 	} else {
 		msg := fmt.Sprintf("MCP Server [%s]: Remote operation [%s] successful on [%s]. Sending response...", tctx.Server.ID, operLabel, tc.URL)
 		tctx.Log(msg)
-		tctx.applyDelay()
-		tctx.remoteGotos = remoteResult.RemoteGotos
-		result = remoteResult.ToMCP()
 	}
 	return result, err
 }

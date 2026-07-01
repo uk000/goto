@@ -207,7 +207,7 @@ func (t *MCPTool) prepareBehavior() error {
 	return nil
 }
 
-func (t *MCPTool) Handle(ctxx context.Context, req *gomcp.CallToolRequest) (result *gomcp.CallToolResult, err error) {
+func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (result *gomcp.CallToolResult, err error) {
 	sessionID := GetMCPSessionID(req.Extra.Header)
 	ms := t.Server.GetMCPSessionStore(sessionID)
 	rs := ms.RS
@@ -236,9 +236,10 @@ func (t *MCPTool) Handle(ctxx context.Context, req *gomcp.CallToolRequest) (resu
 	if result == nil {
 		result = &gomcp.CallToolResult{}
 	}
-	for v := range tctx.remoteGotos {
+	for v := range tctx.timeline.RemoteGotos {
 		rs.ViaGotos = append(rs.ViaGotos, v)
 	}
+	rs.UpstreamStatuses = tctx.timeline.UpstreamStatuses
 	t.prepareResult(tctx, result)
 	return
 }

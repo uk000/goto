@@ -106,10 +106,9 @@ func MCPHybridHandler(server *MCPServer) http.Handler {
 }
 
 func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler http.Handler) {
-	rs := util.GetRequestStore(r)
 	sessionID := r.Header.Get(HeaderMCPSessionID)
 	session := server.getOrSetSessionContext(sessionID)
-	ms := server.SetMCPSessionStore(r)
+	ms, rs := server.SetMCPSessionStore(r)
 	switch r.Method {
 	case "DELETE":
 		if session != nil {
@@ -166,6 +165,10 @@ func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler ht
 			// rs.InterceptChunked = true
 		}
 		handler.ServeHTTP(w, r)
+		if ms.ForcedStatus > 0 {
+			status = ms.ForcedStatus
+			// irw.StatusCode = ms.ForcedStatus
+		}
 		if status > 0 {
 			sendStatus(server.ID, status, rem, irw.ResponseWriter, r)
 		}

@@ -46,16 +46,22 @@ type ToolCallContext struct {
 	timeline       *timeline.Timeline
 	progress       atomic.Int32
 	log            []string
-	remoteGotos    map[string]bool
 }
 
 func NewToolCallContext(ms *util.MCPRequestStore, t *MCPTool, req *gomcp.CallToolRequest, args *aicommon.ToolCallArgs, isSSE bool) *ToolCallContext {
 	requestHeaders := getRequestHeaders(ms.Ctx, req, ms.RS)
+	if args == nil {
+		args = aicommon.NewCallArgs()
+	}
+	if t.Behavior.Remote && args.RemoteArgs == nil {
+		args.RemoteArgs = aicommon.NewCallArgs()
+	}
 	tctx := &ToolCallContext{
 		MCPTool:        t,
 		sessionID:      req.Session.ID(),
 		listener:       ms.RS.ListenerLabel,
 		rs:             ms.RS,
+		ms:             ms,
 		sse:            isSSE,
 		ctx:            ms.Ctx,
 		requestHeaders: requestHeaders,

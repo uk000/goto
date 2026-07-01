@@ -268,6 +268,7 @@ func ParseToolCall(r io.ReadCloser) (*ToolCall, error) {
 		if tc.Args == nil {
 			tc.Args = aicommon.NewCallArgs()
 		}
+		tc.Args.NonNil()
 		if tc.Delay != "" {
 			tc.delayD = types.ParseDelay(tc.Delay)
 		}
@@ -397,6 +398,7 @@ func (s *MCPSession) newToolCallContext(args *aicommon.ToolCallArgs) *ToolCallCo
 	if tctx.args == nil {
 		tctx.args = s.tc.Args
 	}
+	tctx.args.NonNil()
 	if tctx.args.DelayText == "" {
 		tctx.args.DelayText = s.tc.Delay
 	}
@@ -412,9 +414,9 @@ func (s *MCPSession) CallTool(args *aicommon.ToolCallArgs) (*MCPResult, error) {
 }
 
 func (tctx *ToolCallContext) prepare() {
-	if tctx.args.Remote != nil {
-		if len(tctx.args.Remote.ForwardHeaders) == 0 && tctx.session.outHeaders != nil && tctx.session.outHeaders.Request != nil {
-			tctx.args.Remote.ForwardHeaders = tctx.session.outHeaders.Request.Forward
+	if tctx.args.RemoteArgs != nil {
+		if len(tctx.args.RemoteArgs.ForwardHeaders) == 0 && tctx.session.outHeaders != nil && tctx.session.outHeaders.Request != nil {
+			tctx.args.RemoteArgs.ForwardHeaders = tctx.session.outHeaders.Request.Forward
 		}
 	}
 	if !tctx.tc.Raw {
@@ -489,12 +491,14 @@ func (tctx *ToolCallContext) call() (*MCPResult, error) {
 			ctx := context.WithValue(tctx.ctx, constants.HeaderGotoMCPRequestID, requestID)
 			go func(tool string, args *aicommon.ToolCallArgs) {
 				toolResult, err := tctx.session.session.CallTool(ctx, &gomcp.CallToolParams{Name: tool, Arguments: args})
+				if toolResult != nil {
+					tctx.result.storeCallResult(requestID, toolResult, tctx.clientInfo)
+				}
 				if err != nil {
 					tctx.reportToolCallFailure(i, err.Error())
 					tctx.result.LastError = err
 				} else if toolResult != nil {
 					tctx.reportToolCallSuccess(i)
-					tctx.result.storeCallResult(requestID, toolResult, tctx.clientInfo)
 				} else {
 					tctx.reportToolCallFailure(i, "No Error, No Result")
 				}
@@ -508,18 +512,6 @@ func (tctx *ToolCallContext) call() (*MCPResult, error) {
 			})
 		}
 	}
-	viaGotos := tctx.result.LastResponseHeaders[constants.HeaderViaGoto]
-	for _, v := range viaGotos {
-		tctx.result.RemoteGotos[v] = true
-	}
-	viaGotos = []string{}
-	for v := range tctx.result.RemoteGotos {
-		if !strings.Contains(v, "(A2A)") && !strings.Contains(v, "(MCP)") {
-			v = v + "(MCP)"
-		}
-		viaGotos = append(viaGotos, v)
-	}
-	tctx.result.LastResponseHeaders[constants.HeaderViaGoto] = viaGotos
 	if tctx.tc.NoCallDetails {
 		tctx.result.CallResults = nil
 	}
@@ -581,21 +573,40 @@ func (c *MCPClient) InterceptResponse(r *http.Response) {
 		}
 		if s.tc != nil {
 			tool = s.tc.Tool
-		}
-		requestID := r.Request.Header.Get(constants.HeaderGotoMCPRequestID)
-		if requestID != "" {
-			tctx := s.ongoingCalls[requestID]
-			if tctx != nil {
-				tctx.result.storeHeaders(requestID, r.Request.Header, r.Header, r.StatusCode)
-				tctx.clientInfo.StoreHeaders(r.Request.Header)
+			requestID := r.Request.Header.Get(constants.HeaderGotoMCPRequestID)
+			if requestID != "" {
+				tctx := s.ongoingCalls[requestID]
+				if tctx != nil {
+					tctx.result.storeHeaders(requestID, r.Request.Header, r.Header, r.StatusCode)
+					tctx.clientInfo.StoreHeaders(r.Request.Header)
+					tctx.result.RemoteGotos = util.GetViaGotosFromHeaders(r.Header)
+					r.Body = util.NewResponseTracker(r, func(h http.Header) {
+						tctx.processHeaders(h)
+						rs := util.GetRequestStore(r.Request)
+						rs.UpstreamStatuses = util.GetUpstreamStatuses(h)
+					})
+				}
+				delete(s.ongoingCalls, requestID)
 			}
-			delete(s.ongoingCalls, requestID)
 		}
 	}
 	if global.Flags.VerboseMCP {
 		log.Printf("---------- Response headers from MCP client {%s} for {%s}[tool: %s] to {%s} ------------\n", callerId, s.currentRequest, tool, r.Request.URL.String())
 		log.Println(util.ToJSONText(r.Header))
 	}
+}
+
+func (tctx *ToolCallContext) processHeaders(h http.Header) {
+	tctx.result.LastResponseHeaders = h
+	tctx.result.RemoteGotos = util.GetViaGotosFromHeaders(h)
+	viaGotos := []string{}
+	for v := range tctx.result.RemoteGotos {
+		if !strings.Contains(v, "(A2A)") && !strings.Contains(v, "(MCP)") {
+			v = v + "(MCP)"
+		}
+		viaGotos = append(viaGotos, v)
+	}
+	tctx.result.LastResponseHeaders[constants.HeaderViaGoto] = viaGotos
 }
 
 func (s *MCPSession) SendingMiddleware(next gomcp.MethodHandler) gomcp.MethodHandler {
@@ -674,7 +685,7 @@ func (s *MCPSession) ListResources() (*gomcp.ListResourcesResult, error) {
 	return s.session.ListResources(util.WithRequestHeaders(context.Background(), map[string][]string{"Host": []string{s.Authority}}), &gomcp.ListResourcesParams{})
 }
 
-func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, headers *types.Headers, args ...*aicommon.ToolCallArgs) *ToolCall {
+func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, headers *types.Headers, args *aicommon.ToolCallArgs) *ToolCall {
 	clone := *tc
 	if tool != "" {
 		clone.Tool = tool
@@ -700,7 +711,8 @@ func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, h
 		if clone.Args == nil {
 			clone.Args = aicommon.NewCallArgs()
 		}
-		clone.Args.UpdateFrom(args...)
+		clone.Args.NonNil()
+		clone.Args.UpdateFrom(args)
 	}
 	return &clone
 }

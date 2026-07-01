@@ -42,6 +42,7 @@ var (
 	interceptMiddleware      = intercept.IntereceptMiddleware(nil, nil)
 	notFoundHandler          = catchall.Middleware.MiddlewareHandler(nil)
 	lowerProxyUpstreamStatus = strings.ToLower(constants.HeaderGotoProxyUpstreamStatus)
+	lowerGotoUpstreamStatus  = strings.ToLower(constants.HeaderGotoUpstreamStatus)
 	proxyLock                sync.RWMutex
 )
 
@@ -139,17 +140,18 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 }
 
 func (p *Proxy) processResponses(rc *RequestContext, responses UpstreamResults, responseStatuses map[string]map[string]int) {
+	upstreamStatuses := []string{}
 	upstreamViaGoto := []string{}
 	upstreamProxyStatuses := []map[string]map[string][]string{}
 	peerCertInfos := []string{}
 	for target, targetResponses := range responses {
 		for ep, epResponses := range targetResponses {
 			for _, resp := range epResponses {
-				rc.processResponseHeaders(target, ep, resp.Headers, resp.PeerCertInfo, &peerCertInfos, &upstreamViaGoto, &upstreamProxyStatuses)
+				rc.processResponseHeaders(target, ep, resp.Headers, resp.PeerCertInfo, &peerCertInfos, &upstreamStatuses, &upstreamViaGoto, &upstreamProxyStatuses)
 			}
 		}
 	}
-	rc.sendProxyStatuses(upstreamViaGoto, upstreamProxyStatuses, responseStatuses, peerCertInfos)
+	rc.sendProxyStatuses(upstreamViaGoto, upstreamStatuses, upstreamProxyStatuses, responseStatuses, peerCertInfos)
 	if rc.sendHeaders {
 		for _, m := range responses {
 			for _, responses := range m {
@@ -164,7 +166,7 @@ func (p *Proxy) processResponses(rc *RequestContext, responses UpstreamResults, 
 	}
 }
 
-func (rc *RequestContext) sendProxyStatuses(upstreamViaGoto []string, upstreamProxyStatuses []map[string]map[string][]string, responseStatuses map[string]map[string]int, peerCertInfos []string) {
+func (rc *RequestContext) sendProxyStatuses(upstreamViaGoto, upstreamStatuses []string, upstreamProxyStatuses []map[string]map[string][]string, responseStatuses map[string]map[string]int, peerCertInfos []string) {
 	upstreamProxyStatusHeaders := []string{}
 	for _, v := range upstreamProxyStatuses {
 		upstreamProxyStatusHeaders = append(upstreamProxyStatusHeaders, util.ToJSONText(v))
@@ -173,11 +175,12 @@ func (rc *RequestContext) sendProxyStatuses(upstreamViaGoto []string, upstreamPr
 		upstreamProxyStatusHeaders = append(upstreamProxyStatusHeaders, util.ToJSONText(responseStatuses))
 	}
 	rc.w.Header()[constants.HeaderGotoProxyUpstreamStatus] = upstreamProxyStatusHeaders
+	rc.w.Header()[constants.HeaderGotoUpstreamStatus] = upstreamStatuses
 	rc.w.Header()[constants.HeaderViaGoto] = append(rc.w.Header()[constants.HeaderViaGoto], upstreamViaGoto...)
 	rc.w.Header()[constants.HeaderGotoClientCert] = peerCertInfos
 }
 
-func (rc *RequestContext) processResponseHeaders(target, ep string, headers http.Header, pci *gototls.PeerCertInfo, peerCertInfos *[]string, upstreamViaGoto *[]string, upstreamProxyStatuses *[]map[string]map[string][]string) {
+func (rc *RequestContext) processResponseHeaders(target, ep string, headers http.Header, pci *gototls.PeerCertInfo, peerCertInfos *[]string, upstreamStatuses *[]string, upstreamViaGoto *[]string, upstreamProxyStatuses *[]map[string]map[string][]string) {
 	v := headers[constants.HeaderViaGoto]
 	if len(v) == 0 {
 		v = headers[util.LowerViaGoto]
@@ -194,6 +197,13 @@ func (rc *RequestContext) processResponseHeaders(target, ep string, headers http
 	}
 	if pci != nil {
 		*peerCertInfos = append(*peerCertInfos, util.ToJSONText(pci))
+	}
+	v = headers[constants.HeaderGotoUpstreamStatus]
+	if len(v) == 0 {
+		v = headers[lowerGotoUpstreamStatus]
+	}
+	if len(v) > 0 {
+		*upstreamStatuses = append(*upstreamStatuses, v...)
 	}
 }
 
@@ -282,11 +292,12 @@ func (ep *EndpointInvocation) asyncInvoke(target string, tracker *invocation.Inv
 func (ep *EndpointInvocation) onHeaders(rc *RequestContext) func(http.Header, int, *gototls.PeerCertInfo) {
 	return func(headers http.Header, status int, peerCertInfo *gototls.PeerCertInfo) {
 		upstreamViaGoto := []string{}
+		upstreamStatuses := []string{}
 		upstreamProxyStatuses := []map[string]map[string][]string{}
 		responseStatuses := map[string]map[string]int{ep.target.Name: {ep.ep.name: status}}
 		peerCertInfos := []string{}
-		rc.processResponseHeaders(ep.target.Name, ep.ep.name, headers, peerCertInfo, &peerCertInfos, &upstreamViaGoto, &upstreamProxyStatuses)
-		rc.sendProxyStatuses(upstreamViaGoto, upstreamProxyStatuses, responseStatuses, peerCertInfos)
+		rc.processResponseHeaders(ep.target.Name, ep.ep.name, headers, peerCertInfo, &peerCertInfos, &upstreamStatuses, &upstreamViaGoto, &upstreamProxyStatuses)
+		rc.sendProxyStatuses(upstreamViaGoto, upstreamStatuses, upstreamProxyStatuses, responseStatuses, peerCertInfos)
 	}
 }
 
@@ -300,7 +311,7 @@ func (p *Proxy) asyncStreamResponse(rc *RequestContext) {
 }
 
 func (p *Proxy) asyncCollectResponses(out chan *TargetEndpointResponse, wg *sync.WaitGroup, proxyResponseStatus *int, responseStatuses map[string]map[string]int, responses UpstreamResults) {
-	*proxyResponseStatus = http.StatusOK
+	*proxyResponseStatus = 0
 	for resp := range out {
 		if responseStatuses[resp.target] == nil {
 			responseStatuses[resp.target] = map[string]int{}
@@ -311,16 +322,26 @@ func (p *Proxy) asyncCollectResponses(out chan *TargetEndpointResponse, wg *sync
 		responseStatuses[resp.target][resp.endpoint] = resp.response.StatusCode
 		responses[resp.target][resp.endpoint] = append(responses[resp.target][resp.endpoint], resp.response)
 		p.HTTPTracker.IncrementTargetUpstreamStatusCounts(resp.target, resp.endpoint, resp.requestURI, resp.response.StatusCode)
+		remapped := false
 		if p.ProxyResponses != nil {
 			for _, pr := range p.ProxyResponses {
-				if len(pr.UpResponseRange) < 2 {
+				if len(pr.UpResponseRange) == 0 {
 					continue
 				}
-				if resp.response.StatusCode >= pr.UpResponseRange[0] && resp.response.StatusCode <= pr.UpResponseRange[1] {
+				responseFrom := pr.UpResponseRange[0]
+				responseTo := responseFrom
+				if len(pr.UpResponseRange) >= 2 {
+					responseTo = pr.UpResponseRange[1]
+				}
+				if resp.response.StatusCode >= responseFrom && resp.response.StatusCode <= responseTo {
 					*proxyResponseStatus = pr.ProxyResponse
+					remapped = true
 					break
 				}
 			}
+		}
+		if !remapped {
+			*proxyResponseStatus = resp.response.StatusCode
 		}
 		wg.Done()
 	}
@@ -382,7 +403,7 @@ func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTra
 			is.LowerHeaders = tt.Headers.Lower
 		}
 		if tt.Payload != "" {
-			is.Body = tt.Payload
+			is.Body = util.GetFilledText(tt.Payload, rc.vars)
 			removeHeaders = append(removeHeaders, constants.HeaderContentLength)
 		} else {
 			is.BodyReader = rc.body

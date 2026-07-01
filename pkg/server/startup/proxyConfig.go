@@ -39,6 +39,7 @@ func loadHTTPProxy(p *httpproxy.Proxy) {
 	log.Printf("Proxy [%d] will use responses: %+v", p.Port, util.ToJSONText(proxy.ProxyResponses))
 	for name, target := range p.Targets {
 		target.Name = name
+		target.Port = p.Port
 		log.Printf("Loading HTTP Proxy Target [%s]\n", name)
 		if err := proxy.AddTarget(target); err != nil {
 			log.Printf("[*** ERROR ***] Failed to process HTTP Proxy target [%s] with error: %s", name, err.Error())

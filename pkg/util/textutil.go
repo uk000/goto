@@ -229,6 +229,10 @@ func AnyToInt(value any) int {
 	switch v := value.(type) {
 	case int:
 		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
 	case string:
 		i, _ := strconv.Atoi(v)
 		return i
@@ -282,4 +286,11 @@ func CleanText(rawBytes []byte) string {
 		}
 	}
 	return sb.String()
+}
+
+func GetFilledText(text string, captures map[string]string) string {
+	for k, v := range captures {
+		text = strings.Replace(text, MarkFiller(k), v, -1)
+	}
+	return text
 }

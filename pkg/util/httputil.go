@@ -21,6 +21,7 @@ import (
 	"goto/pkg/constants"
 	"goto/pkg/global"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -38,6 +39,7 @@ func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
 	port := GetRequestOrListenerPort(r)
 	rs := GetRequestStore(r)
 	w.Header().Add("Trailer", constants.HeaderViaGoto)
+	w.Header().Add("Trailer", constants.HeaderGotoUpstreamStatus)
 	label := global.Funcs.GetListenerLabel(r)
 	if rs.IsMCP {
 		label += "(MCP)"
@@ -84,6 +86,9 @@ func SendGotoTrailers(w http.ResponseWriter, r *http.Request) {
 		values = append(values, v)
 	}
 	w.Header()[constants.HeaderViaGoto] = values
+	if len(rs.UpstreamStatuses) > 0 {
+		w.Header().Add(constants.HeaderGotoUpstreamStatus, ToJSONText(rs.UpstreamStatuses))
+	}
 }
 
 func GotoProtocol(isH2, isTLS, isGRPC bool) string {
@@ -104,7 +109,7 @@ func GotoProtocol(isH2, isTLS, isGRPC bool) string {
 	return protocol
 }
 
-func GetViaGotosFromHeaders(upheaders map[string]any) map[string]bool {
+func GetViaGotosFromUpstreamHeaders(upheaders map[string]any) map[string]bool {
 	viaGotos := map[string]bool{}
 	for _, v := range upheaders {
 		if m, ok := v.(map[string]any); ok {
@@ -133,6 +138,16 @@ func GetViaGotosFromHeaders(upheaders map[string]any) map[string]bool {
 	return viaGotos
 }
 
+func GetViaGotosFromHeaders(headers http.Header) map[string]bool {
+	viaGotos := map[string]bool{}
+	if values := headers[constants.HeaderViaGoto]; values != nil {
+		for _, value := range values {
+			viaGotos[value] = true
+		}
+	}
+	return viaGotos
+}
+
 func BuildListenerLabel(port int) string {
 	selfLabel := ""
 	if global.Self.GivenName {
@@ -147,11 +162,39 @@ func GetViaGotoValue(port int) string {
 	return global.Funcs.GetListenerLabelForPort(port)
 }
 
-func SendBadRequest(w http.ResponseWriter, r *http.Request, msg string, params ...any) {
-	w.WriteHeader(http.StatusBadRequest)
+func GetUpstreamStatuses(headers http.Header) map[string]int {
+	m := map[string]int{}
+	if v, ok := headers[constants.HeaderGotoUpstreamStatus]; ok && len(v) > 0 {
+		if json, ok := JSONFromJSONText(v[0]); ok {
+			for k, v := range json.Object() {
+				m[k] = AnyToInt(v)
+			}
+		}
+	}
+	return m
+}
+
+func GetIntHeaderValue(headers http.Header, k string) int {
+	if v, ok := headers[k]; !ok || len(v) == 0 {
+		return 0
+	} else {
+		if i, err := strconv.Atoi(v[0]); err != nil {
+			return 0
+		} else {
+			return i
+		}
+	}
+}
+
+func SendResponse(w http.ResponseWriter, r *http.Request, status int, msg string, params ...any) {
+	w.WriteHeader(status)
 	msg = fmt.Sprintf(msg, params...)
 	fmt.Fprintln(w, msg)
 	AddLogMessage(msg, r)
+}
+
+func SendBadRequest(w http.ResponseWriter, r *http.Request, msg string, params ...any) {
+	SendResponse(w, r, http.StatusBadRequest, msg, params...)
 }
 
 func FixURL(url, suffix string, https bool) string {
