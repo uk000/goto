@@ -79,7 +79,7 @@ type AgentContext struct {
 	reportTimeline   bool
 	err              error
 	upstreamHeaders  map[string]any
-	upstreamStatuses map[string]int
+	upstreamStatuses map[string]any
 	remoteGotos      map[string]bool
 }
 
@@ -113,7 +113,7 @@ func newAgentContext(port int, serverID, listenerLabel string, agent *model.Agen
 		requestHeaders:   headers,
 		rs:               rs,
 		upstreamHeaders:  map[string]any{},
-		upstreamStatuses: map[string]int{},
+		upstreamStatuses: map[string]any{},
 		remoteGotos:      map[string]bool{},
 	}
 	return ac
@@ -164,7 +164,17 @@ func (ac *AgentContext) detectAndConfigureFeature(k string, v any) {
 	} else if strings.Contains(k, "timeline") {
 		ac.reportTimeline = util.AnyToBool(v)
 	} else if strings.Contains(k, "events") {
-		ac.timeline.ResultOnly = !util.AnyToBool(v)
+		if strings.Contains(k, "no") {
+			ac.timeline.NoEvents = true
+		} else {
+			ac.timeline.NoEvents = !util.AnyToBool(v)
+		}
+	} else if strings.Contains(k, "results") {
+		if strings.Contains(k, "only") {
+			ac.timeline.ResultOnly = true
+		} else {
+			ac.timeline.ResultOnly = !util.AnyToBool(v)
+		}
 	} else if strings.Contains(k, "show") || strings.Contains(k, "data") {
 		ac.surfaceData = util.AnyToBool(v)
 	}
@@ -407,10 +417,10 @@ func (ac *AgentContext) setOverrideParamsFromInput(jsons []map[string]any, input
 					a.AgentCall.AgentURL = override.url
 				}
 				if override.args != nil {
-					msg := fmt.Sprintf("Will use Data %+v instead of %+v for Agent [%s]", override.args, a.AgentCall.Data, a.AgentCall.Name)
+					msg := fmt.Sprintf("Will use Data %+v instead of %+v for Agent [%s]", override.args, a.AgentCall.Args, a.AgentCall.Name)
 					log.Println(msg)
 					ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg)
-					a.AgentCall.Data = override.args
+					a.AgentCall.Args = override.args
 				}
 				if override.remoteInput != "" {
 					msg := fmt.Sprintf("Will use Message %s instead of %s for Agent [%s]", override.remoteInput, a.AgentCall.Message, a.AgentCall.Name)

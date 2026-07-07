@@ -138,6 +138,9 @@ func CopyRequestHeadersWithIgnore(prefix string, r *http.Request, out map[string
 func CopyHeadersWithIgnore(prefix string, in, out http.Header, ignoreHeaders map[string]bool, copyHost, copyURI, copyContentType bool) {
 	for h, values := range in {
 		lh := strings.ToLower(h)
+		if out.Get(h) != "" || out.Get(lh) != "" {
+			continue
+		}
 		if ignoreHeaders[lh] {
 			continue
 		}

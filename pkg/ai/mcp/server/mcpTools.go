@@ -69,7 +69,7 @@ type ToolBehavior struct {
 	AllServers    bool `json:"allServers,omitempty"`
 	AllComponents bool `json:"allComponents,omitempty"`
 	AddTool       bool `json:"addTool,omitempty"`
-	run           func(t *ToolCallContext) (*mcp.CallToolResult, error)
+	run           func(t *ToolContext) (*mcp.CallToolResult, error)
 }
 
 type ToolConfig struct {
@@ -228,7 +228,7 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 		args = aicommon.NewCallArgs()
 	}
 	args.UpdateDelay(t.Config.Delay)
-	tctx := NewToolCallContext(ms, t, req, args, isSSE)
+	tctx := NewToolContext(ms, t, req, args, isSSE)
 	// rs.ResponseWriter.Header().Add(constants.HeaderGotoMCPServer, t.Server.Name)
 	// rs.ResponseWriter.Header().Add(constants.HeaderGotoMCPTool, t.Name)
 	// t.notifyClient(t.Log("%s: Received request with Args [%+v] Remote Args [%+v] Headers [%+v]", t.Label, t.args, t.remoteArgs, t.requestHeaders), 0)
@@ -244,7 +244,7 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 	return
 }
 
-func (t *MCPTool) prepareResult(tctx *ToolCallContext, result *gomcp.CallToolResult) {
+func (t *MCPTool) prepareResult(tctx *ToolContext, result *gomcp.CallToolResult) {
 	msg := tctx.Flush(true, true)
 	if len(msg) > 0 {
 		tctx.AddEvent(msg)
@@ -273,12 +273,6 @@ func (t *MCPTool) prepareResult(tctx *ToolCallContext, result *gomcp.CallToolRes
 	} else {
 		result.StructuredContent = tctx.timeline
 	}
-	// tctx.rs.GotoProtocol = "MCP"
-	// tctx.rs.IsJSONRPC = true
-	// tctx.rs.RequestPortNum = tctx.MCPTool.Server.Port
-	// if tctx.rs.RequestHeaders == nil {
-	// 	tctx.rs.RequestHeaders = tctx.requestHeaders
-	// }
 }
 
 func createContent(key string, result any) (gomcp.Content, any) {

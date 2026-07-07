@@ -27,7 +27,7 @@ import (
 	"trpc.group/trpc-go/trpc-a2a-go/protocol"
 )
 
-func (tctx *ToolCallContext) processResults(name, url string, stream chan *types.Pair[string, any], result *gomcp.CallToolResult, wg *sync.WaitGroup) {
+func (tctx *ToolContext) processResults(name, url string, stream chan *types.Pair[string, any], result *gomcp.CallToolResult, wg *sync.WaitGroup) {
 	structuredContent := map[string]any{}
 	structuredCount := 1
 outer:
@@ -64,7 +64,7 @@ outer:
 	wg.Done()
 }
 
-func (tctx *ToolCallContext) addForwardHeaders(headers types.SimpleHTTPHeaders, forwardHeaders []string, args *aicommon.ToolCallArgs) {
+func (tctx *ToolContext) addForwardHeaders(headers types.SimpleHTTPHeaders, forwardHeaders []string, args *aicommon.ToolCallArgs) {
 	finalForwardHeaders := map[string]bool{}
 	if tctx.args != nil && tctx.args.RemoteArgs != nil {
 		if tctx.args.RemoteArgs.ForwardHeaders != nil {

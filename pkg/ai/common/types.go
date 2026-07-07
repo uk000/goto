@@ -40,7 +40,7 @@ type ToolCallArgs struct {
 	Headers        *types.Headers    `json:"headers,omitempty"`
 	ForwardHeaders []string          `json:"forwardHeaders,omitempty"`
 	AgentMessage   string            `json:"agentMessage,omitempty"`
-	AgentData      map[string]any    `json:"agentData,omitempty"`
+	AgentArgs      map[string]any    `json:"agentArgs,omitempty"`
 	RemoteArgs     *ToolCallArgs     `json:"remoteArgs,omitempty"`
 }
 
@@ -68,8 +68,8 @@ func (a *ToolCallArgs) NonNil() {
 	if a.ForwardHeaders == nil {
 		a.ForwardHeaders = []string{}
 	}
-	if a.AgentData == nil {
-		a.AgentData = map[string]any{}
+	if a.AgentArgs == nil {
+		a.AgentArgs = map[string]any{}
 	}
 	if a.RemoteArgs == nil {
 		a.RemoteArgs = NewCallArgs()
@@ -125,8 +125,8 @@ func (a *ToolCallArgs) UpdateFrom(args *ToolCallArgs) {
 	if args.AgentMessage != "" {
 		a.AgentMessage = args.AgentMessage
 	}
-	if args.AgentData != nil {
-		a.AgentData = args.AgentData
+	if args.AgentArgs != nil {
+		a.AgentArgs = args.AgentArgs
 	}
 	if args.RemoteArgs != nil {
 		if a.RemoteArgs == nil {
@@ -192,17 +192,21 @@ func (a *ToolCallArgs) UpdateFromInputArgs(args map[string]any) {
 	if args["input"] != nil {
 		a.AgentMessage = args["input"].(string)
 	}
-	if args["agentData"] != nil {
-		if a.AgentData == nil {
-			a.AgentData = map[string]any{}
+	if args["agentArgs"] != nil {
+		if a.AgentArgs == nil {
+			a.AgentArgs = map[string]any{}
 		}
-		agentData := args["agentData"].(map[string]string)
+		agentData := args["agentArgs"].(map[string]string)
 		for k, v := range agentData {
-			a.AgentData[k] = v
+			a.AgentArgs[k] = v
 		}
 	}
-	if args["args"] != nil {
-		if remoteArgs, ok := args["args"].(map[string]any); ok {
+	ra := args["args"]
+	if ra == nil {
+		ra = args["remoteArgs"]
+	}
+	if ra != nil {
+		if remoteArgs, ok := ra.(map[string]any); ok {
 			if a.RemoteArgs == nil {
 				a.RemoteArgs = NewCallArgs()
 			}
@@ -236,6 +240,6 @@ func (a *ToolCallArgs) IsEmpty() bool {
 	return a.Text == "" && a.DelayText == "" && a.Count == 0 && a.Delay == nil &&
 		a.ToolName == "" && a.AgentName == "" && a.URL == "" && a.Authority == "" &&
 		a.Headers == nil && len(a.ForwardHeaders) == 0 && a.AgentMessage == "" &&
-		len(a.Metadata) == 0 && len(a.AgentData) == 0 &&
+		len(a.Metadata) == 0 && len(a.AgentArgs) == 0 &&
 		(a.RemoteArgs == nil || a.RemoteArgs.IsEmpty())
 }

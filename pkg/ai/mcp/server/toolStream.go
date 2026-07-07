@@ -26,7 +26,7 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func (t *MCPTool) stream(tctx *ToolCallContext) (result *gomcp.CallToolResult, err error) {
+func (t *MCPTool) stream(tctx *ToolContext) (result *gomcp.CallToolResult, err error) {
 	result = &gomcp.CallToolResult{}
 	var delay time.Duration
 	d := tctx.args.Delay

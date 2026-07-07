@@ -90,7 +90,7 @@ type Timeline struct {
 	RemoteCalls      map[string]map[string]any
 	UpstreamHeaders  map[string]any
 	Status           int
-	UpstreamStatuses map[string]int
+	UpstreamStatuses map[string]any
 	Finished         bool
 	Success          bool
 	ResultOnly       bool
@@ -252,7 +252,7 @@ func (t *Timeline) SetStreamPreferred(stream chan *types.Pair[string, any]) {
 	}
 }
 
-func (t *Timeline) EndTimeline(label, text string, status int, upstreamStatuses map[string]int, data any, success bool) {
+func (t *Timeline) EndTimeline(label, text string, status int, upstreamStatuses map[string]any, data any, success bool) {
 	t.Finished = true
 	t.Success = success
 	if status > 0 {

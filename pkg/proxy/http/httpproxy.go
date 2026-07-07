@@ -151,7 +151,7 @@ func (p *Proxy) processResponses(rc *RequestContext, responses UpstreamResults, 
 			}
 		}
 	}
-	rc.sendProxyStatuses(upstreamViaGoto, upstreamStatuses, upstreamProxyStatuses, responseStatuses, peerCertInfos)
+	rc.sendProxyStatuses(upstreamViaGoto, upstreamProxyStatuses, responseStatuses, peerCertInfos)
 	if rc.sendHeaders {
 		for _, m := range responses {
 			for _, responses := range m {
@@ -163,10 +163,12 @@ func (p *Proxy) processResponses(rc *RequestContext, responses UpstreamResults, 
 			}
 			break
 		}
+	} else {
+		rc.w.Header()[constants.HeaderGotoUpstreamStatus] = upstreamStatuses
 	}
 }
 
-func (rc *RequestContext) sendProxyStatuses(upstreamViaGoto, upstreamStatuses []string, upstreamProxyStatuses []map[string]map[string][]string, responseStatuses map[string]map[string]int, peerCertInfos []string) {
+func (rc *RequestContext) sendProxyStatuses(upstreamViaGoto []string, upstreamProxyStatuses []map[string]map[string][]string, responseStatuses map[string]map[string]int, peerCertInfos []string) {
 	upstreamProxyStatusHeaders := []string{}
 	for _, v := range upstreamProxyStatuses {
 		upstreamProxyStatusHeaders = append(upstreamProxyStatusHeaders, util.ToJSONText(v))
@@ -175,7 +177,6 @@ func (rc *RequestContext) sendProxyStatuses(upstreamViaGoto, upstreamStatuses []
 		upstreamProxyStatusHeaders = append(upstreamProxyStatusHeaders, util.ToJSONText(responseStatuses))
 	}
 	rc.w.Header()[constants.HeaderGotoProxyUpstreamStatus] = upstreamProxyStatusHeaders
-	rc.w.Header()[constants.HeaderGotoUpstreamStatus] = upstreamStatuses
 	rc.w.Header()[constants.HeaderViaGoto] = append(rc.w.Header()[constants.HeaderViaGoto], upstreamViaGoto...)
 	rc.w.Header()[constants.HeaderGotoClientCert] = peerCertInfos
 }
@@ -297,7 +298,7 @@ func (ep *EndpointInvocation) onHeaders(rc *RequestContext) func(http.Header, in
 		responseStatuses := map[string]map[string]int{ep.target.Name: {ep.ep.name: status}}
 		peerCertInfos := []string{}
 		rc.processResponseHeaders(ep.target.Name, ep.ep.name, headers, peerCertInfo, &peerCertInfos, &upstreamStatuses, &upstreamViaGoto, &upstreamProxyStatuses)
-		rc.sendProxyStatuses(upstreamViaGoto, upstreamStatuses, upstreamProxyStatuses, responseStatuses, peerCertInfos)
+		rc.sendProxyStatuses(upstreamViaGoto, upstreamProxyStatuses, responseStatuses, peerCertInfos)
 	}
 }
 

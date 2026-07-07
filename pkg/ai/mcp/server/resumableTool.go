@@ -31,7 +31,7 @@ func getRegistryClient() *registryclient.RegistryClient {
 	return MCPRegistryClient
 }
 
-func (tctx *ToolCallContext) saveState(ts *ToolState) error {
+func (tctx *ToolContext) saveState(ts *ToolState) error {
 	rc := getRegistryClient()
 	if lc, err := rc.OpenLocker(tctx.sessionID, tctx.Kind); err != nil {
 		return err
@@ -41,7 +41,7 @@ func (tctx *ToolCallContext) saveState(ts *ToolState) error {
 	return nil
 }
 
-func (tctx *ToolCallContext) loadState() (*ToolState, error) {
+func (tctx *ToolContext) loadState() (*ToolState, error) {
 	rc := getRegistryClient()
 	lc, err := rc.OpenLocker(tctx.sessionID, tctx.Kind)
 	if err != nil {

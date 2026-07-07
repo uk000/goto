@@ -28,7 +28,7 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func (t *MCPTool) callRemoteAgent(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) callRemoteAgent(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{},
 	}
@@ -37,7 +37,7 @@ func (t *MCPTool) callRemoteAgent(tctx *ToolCallContext) (*gomcp.CallToolResult,
 	}
 	tctx.args.NonNil()
 	tctx.Config.Agent.NonNil()
-	ac := tctx.Config.Agent.CloneWithUpdate(tctx.args.RemoteArgs.AgentName, tctx.args.RemoteArgs.URL, tctx.args.RemoteArgs.Authority, tctx.args.RemoteArgs.AgentMessage, tctx.args.RemoteArgs.AgentData)
+	ac := tctx.Config.Agent.CloneWithUpdate(tctx.args.RemoteArgs.AgentName, tctx.args.RemoteArgs.URL, tctx.args.RemoteArgs.Authority, tctx.args.RemoteArgs.AgentMessage, tctx.args.RemoteArgs.AgentArgs)
 	if tctx.timeline.ResultOnly {
 		ac.ResultOnly = true
 	}
@@ -68,7 +68,7 @@ func (t *MCPTool) callRemoteAgent(tctx *ToolCallContext) (*gomcp.CallToolResult,
 	// callback := func(key, output string, data any) {
 	// 	tctx.notifyClient(fmt.Sprintf("%s: %s", key, output), data, true)
 	// }
-	err = session.CallAgent(nil, localProgress, upstreamProgress)
+	err = session.CallAgent(tctx.args.RemoteArgs.AgentMessage, tctx.args.RemoteArgs.AgentArgs, nil, localProgress, upstreamProgress)
 	wg.Wait()
 	close(localProgress)
 	if !util.IsNil(err) {

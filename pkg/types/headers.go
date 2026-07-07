@@ -84,8 +84,16 @@ func (h *Headers) NonNil() {
 	if h.Request == nil {
 		h.Request = NewHeadersConfig()
 	}
+	h.Request.NonNil()
 	if h.Response == nil {
 		h.Response = NewHeadersConfig()
+	}
+	h.Response.NonNil()
+}
+
+func (hc *HeadersConfig) NonNil() {
+	if hc.Add == nil {
+		hc.Add = map[string]string{}
 	}
 }
 

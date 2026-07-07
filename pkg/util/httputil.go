@@ -87,7 +87,9 @@ func SendGotoTrailers(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header()[constants.HeaderViaGoto] = values
 	if len(rs.UpstreamStatuses) > 0 {
-		w.Header().Add(constants.HeaderGotoUpstreamStatus, ToJSONText(rs.UpstreamStatuses))
+		if w.Header().Get(constants.HeaderGotoUpstreamStatus) == "" {
+			w.Header().Add(constants.HeaderGotoUpstreamStatus, ToJSONText(rs.UpstreamStatuses))
+		}
 	}
 }
 
@@ -162,16 +164,13 @@ func GetViaGotoValue(port int) string {
 	return global.Funcs.GetListenerLabelForPort(port)
 }
 
-func GetUpstreamStatuses(headers http.Header) map[string]int {
-	m := map[string]int{}
+func GetUpstreamStatuses(headers http.Header) map[string]any {
 	if v, ok := headers[constants.HeaderGotoUpstreamStatus]; ok && len(v) > 0 {
 		if json, ok := JSONFromJSONText(v[0]); ok {
-			for k, v := range json.Object() {
-				m[k] = AnyToInt(v)
-			}
+			return json.Object()
 		}
 	}
-	return m
+	return nil
 }
 
 func GetIntHeaderValue(headers http.Header, k string) int {

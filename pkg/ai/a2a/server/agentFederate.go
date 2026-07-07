@@ -254,9 +254,10 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 	//processMCPCallResults(dCtx.toolCall.Tool, remoteResult, dCtx.results, dCtx.upstreamProgress, ab.agent.Streaming)
 }
 
-func (ab *AgentBehaviorFederate) prepareArgs(args *aicommon.ToolCallArgs, forwardHeaders []string) *aicommon.ToolCallArgs {
+func (ab *AgentBehaviorFederate) prepareArgs(args map[string]any, tcArgs *aicommon.ToolCallArgs, forwardHeaders []string) *aicommon.ToolCallArgs {
 	newArgs := aicommon.NewCallArgs()
-	newArgs.UpdateFrom(args)
+	newArgs.UpdateFrom(tcArgs)
+	newArgs.UpdateFromInputArgs(args)
 	newArgs.RemoteArgs.ForwardHeaders = forwardHeaders
 	return newArgs
 }
@@ -286,16 +287,23 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 			agentResults[id] = append(agentResults[id], data)
 		}
 	}
-	err = session.CallAgent(unaryCallback, aCtx.localProgress, dCtx.upstreamProgress)
-	if !util.IsNil(err) {
-		msg := fmt.Sprintf("Failed to call Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, err.Error())
-		aCtx.AddEvent(msg)
-		return nil, err
+	agentMessage := dCtx.agentCall.Message
+	if agentMessage == "" {
+		agentMessage = aCtx.inputText
 	}
+	err = session.CallAgent(agentMessage, aCtx.inputData, unaryCallback, aCtx.localProgress, dCtx.upstreamProgress)
 	if aCtx.agentResults != nil && len(agentResults) > 0 {
 		aCtx.agentResults[dCtx.agentCall.Name] = agentResults
 	}
-	return session.Result, nil
+	if session.Result != nil {
+		result = session.Result
+		aCtx.forcedStatus = session.Result.LastResponseStatus
+	}
+	if !util.IsNil(err) {
+		msg := fmt.Sprintf("Failed to call Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, err.Error())
+		aCtx.AddEvent(msg)
+	}
+	return
 }
 
 func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCallContext) (mcpResult *mcpclient.MCPResult, respHeaders http.Header, err error) {
@@ -305,7 +313,7 @@ func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCal
 	if aCtx.timeline.NoEvents {
 		dCtx.toolCall.NoEvents = true
 	}
-	args := ab.prepareArgs(dCtx.toolCall.Args, dCtx.toolCall.Headers.Request.Forward)
+	args := ab.prepareArgs(aCtx.inputData, dCtx.toolCall.Args, dCtx.toolCall.Headers.Request.Forward)
 	msg := fmt.Sprintf("Agent [%s] Invoking MCP tool [%s] at URL [%s]", aCtx.agent.ID, dCtx.toolCall.Tool, dCtx.toolCall.URL)
 	aCtx.AddEvent(msg)
 	log.Println(msg)
@@ -315,13 +323,14 @@ func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCal
 	mcpResult, err = session.CallTool(args)
 	if mcpResult != nil {
 		respHeaders = mcpResult.LastResponseHeaders
-		if aCtx.timeline.UpstreamStatuses != nil {
-			aCtx.upstreamStatuses = aCtx.timeline.UpstreamStatuses
+		if mcpResult.UpstreamStatuses != nil {
+			aCtx.upstreamStatuses = mcpResult.UpstreamStatuses
 		} else {
 			aCtx.upstreamStatuses[dCtx.name] = mcpResult.LastResponseStatus
 		}
 		aCtx.timeline.UpstreamStatuses = aCtx.upstreamStatuses
 		aCtx.rs.UpstreamStatuses = aCtx.upstreamStatuses
+		aCtx.forcedStatus = mcpResult.LastResponseStatus
 	}
 	return
 }

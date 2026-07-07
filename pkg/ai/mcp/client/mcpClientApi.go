@@ -123,6 +123,7 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	tc, err := ParseToolCall(r.Body)
 	var output *MCPResult
+	responseStatus := 0
 	if err != nil || tc == nil {
 		if err != nil {
 			msg = fmt.Sprintf("Failed to parse tool call payload with error [%s]", err.Error())
@@ -138,24 +139,27 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 		}
 		if output != nil {
 			if output.LastResponseStatus > 0 {
-				w.WriteHeader(output.LastResponseStatus)
-			}
-			if len(output.UpstreamStatuses) > 0 {
-				w.Header().Add(constants.HeaderGotoUpstreamStatus, util.ToJSONText(output.UpstreamStatuses))
+				responseStatus = output.LastResponseStatus
 			}
 			for v := range output.RemoteGotos {
 				w.Header().Add(constants.HeaderViaGoto, v)
 			}
 		}
 	}
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
-	} else {
-		util.WriteJsonPayload(w, output)
-		util.AddLogMessage(msg, r)
+	if responseStatus == 0 {
+		if err != nil {
+			responseStatus = http.StatusBadRequest
+		} else {
+			responseStatus = http.StatusOK
+		}
 	}
+	w.WriteHeader(responseStatus)
+	if output != nil {
+		util.WriteJsonPayload(w, output)
+	} else {
+		fmt.Fprintln(w, msg)
+	}
+	util.AddLogMessage(msg, r)
 }
 
 func doToolCall(port int, tc *ToolCall, w http.ResponseWriter, r *http.Request) (output *MCPResult, err error) {

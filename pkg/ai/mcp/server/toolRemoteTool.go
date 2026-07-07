@@ -24,7 +24,7 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func (t *MCPTool) callRemoteTool(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) callRemoteTool(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	var result *gomcp.CallToolResult
 	if tctx.args == nil {
 		tctx.args = aicommon.NewCallArgs()

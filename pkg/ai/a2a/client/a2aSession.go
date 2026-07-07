@@ -107,14 +107,18 @@ func (acs *A2ASession) Connect() error {
 	return nil
 }
 
-func (acs *A2ASession) CallAgent(callback AgentResultsCallback, localProgress, upstreamProgress chan *types.Pair[string, any]) (err *AgentError) {
-	input := acs.call.Message
-	data := acs.call.Data
-	data["resultOnly"] = acs.call.ResultOnly
+func (acs *A2ASession) CallAgent(input string, inputData map[string]any, callback AgentResultsCallback, localProgress, upstreamProgress chan *types.Pair[string, any]) (err *AgentError) {
 	if input == "" {
 		input = acs.call.Message
 	}
-	inputParts := buildInputParts(input, data)
+	if len(inputData) == 0 {
+		inputData = acs.call.Args
+	}
+	inputData["resultOnly"] = acs.call.ResultOnly
+	if input == "" {
+		input = acs.call.Message
+	}
+	inputParts := buildInputParts(input, inputData)
 	acs.configure(callback, localProgress, upstreamProgress, inputParts)
 	var errs map[string]error
 	if acs.Card.Capabilities.Streaming != nil && *acs.Card.Capabilities.Streaming {
@@ -284,7 +288,13 @@ func (acs *A2ASession) Handle(ctx context.Context, client *http.Client, req *htt
 	if resp != nil {
 		rs := util.GetRequestStore(req)
 		resp.Body = util.NewResponseTracker(resp, func(h http.Header) {
-			rs.UpstreamStatuses = util.GetUpstreamStatuses(h)
+			upstreamStatuses := util.GetUpstreamStatuses(h)
+			rs.UpstreamStatuses = map[string]any{}
+			for k, v := range acs.Result.UpstreamStatuses {
+				rs.UpstreamStatuses[k] = v
+			}
+			rs.UpstreamStatuses["-"] = upstreamStatuses
+			acs.Result.UpstreamStatuses = rs.UpstreamStatuses
 			acs.updateResponseHeaders(h, agent)
 			acs.Result.storeHeaders(requestID, req.Header, resp.Header, resp.StatusCode)
 		})

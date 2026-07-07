@@ -25,7 +25,7 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func (t *MCPTool) echo(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) echo(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	content := []gomcp.Content{}
 	input := ""
 	if tctx.args != nil {
@@ -48,7 +48,7 @@ func (t *MCPTool) echo(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	return &gomcp.CallToolResult{Content: content}, nil
 }
 
-func (t *MCPTool) status(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) status(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	content := []gomcp.Content{}
 	status := 200
 	if tctx.args != nil {
@@ -71,7 +71,7 @@ func (t *MCPTool) status(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	return &gomcp.CallToolResult{Content: content}, nil
 }
 
-func (t *MCPTool) ping(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) ping(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	if err := tctx.req.Session.Ping(tctx.ctx, &gomcp.PingParams{}); err != nil {
 		return nil, fmt.Errorf("ping failed with error: %s", err.Error())
 	}
@@ -84,7 +84,7 @@ func (t *MCPTool) ping(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	}, nil
 }
 
-func (t *MCPTool) sendTime(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) sendTime(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	content := []gomcp.Content{&gomcp.TextContent{Text: fmt.Sprintf("Time: %s", time.Now().Format(time.RFC3339))}}
 	content = append(content, &gomcp.TextContent{Text: fmt.Sprintf("Client Data: %s", tctx.req.Params.Arguments)})
 	tctx.Log("Server [%s] sent time back", tctx.Server.GetName())
@@ -92,7 +92,7 @@ func (t *MCPTool) sendTime(tctx *ToolCallContext) (*gomcp.CallToolResult, error)
 	return &gomcp.CallToolResult{Content: content}, nil
 }
 
-func (t *MCPTool) listRoots(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) listRoots(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	res, err := tctx.req.Session.ListRoots(tctx.ctx, &gomcp.ListRootsParams{})
 	if err != nil {
 		tctx.Log("Server [%s] failed to get roots from client", tctx.Server.GetName())
@@ -115,35 +115,35 @@ func (t *MCPTool) listRoots(tctx *ToolCallContext) (*gomcp.CallToolResult, error
 	return result, nil
 }
 
-func (t *MCPTool) serverDetails(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) serverDetails(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	result.Content = append(result.Content, &gomcp.TextContent{Text: util.ToJSONText(tctx.MCPTool.Server)})
 	tctx.Log(fmt.Sprintf("%s sent Server [%s] details", tctx.Label, tctx.Server.GetName()))
 	return result, nil
 }
 
-func (t *MCPTool) listServers(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) listServers(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	result.Content = append(result.Content, &gomcp.TextContent{Text: util.ToJSONText(tctx.MCPTool.Server.ps.AllServers())})
 	tctx.Log(fmt.Sprintf("%s sent All Servers", tctx.Label))
 	return result, nil
 }
 
-func (t *MCPTool) serverPaths(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) serverPaths(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	result.Content = append(result.Content, &gomcp.TextContent{Text: util.ToJSONText(ServerRoutes)})
 	tctx.Log(fmt.Sprintf("%s sent Server Routes", tctx.Label))
 	return result, nil
 }
 
-func (t *MCPTool) listComponents(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) listComponents(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	result.Content = append(result.Content, &gomcp.TextContent{Text: util.ToJSONText(AllComponents)})
 	tctx.Log(fmt.Sprintf("%s sent all components", tctx.Label))
 	return result, nil
 }
 
-func (t *MCPTool) addTool(tctx *ToolCallContext) (result *gomcp.CallToolResult, err error) {
+func (t *MCPTool) addTool(tctx *ToolContext) (result *gomcp.CallToolResult, err error) {
 	content := []gomcp.Content{}
 	status := 200
 	var tool *MCPTool

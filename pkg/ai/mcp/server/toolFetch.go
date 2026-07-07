@@ -28,7 +28,7 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func (t *MCPTool) fetch(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) fetch(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	url := tctx.Config.RemoteTool.URL
 	authority := tctx.Config.RemoteTool.Authority

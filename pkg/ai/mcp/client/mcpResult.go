@@ -32,7 +32,7 @@ type MCPResult struct {
 	ToolCall            *ToolCall
 	ServerInfo          *timeline.GotoServerInfo
 	Timeline            *timeline.Timeline
-	UpstreamStatuses    map[string]int
+	UpstreamStatuses    map[string]any
 	LastRequestHeaders  http.Header `json:"-"`
 	LastResponseHeaders http.Header `json:"-"`
 	LastResponseStatus  int         `json:"-"`
@@ -66,7 +66,7 @@ func NewMCPResult(server string, tc *ToolCall, t *timeline.Timeline) *MCPResult 
 		CallResults:      map[string]*MCPCallResult{},
 		Timeline:         t,
 		RemoteGotos:      map[string]bool{},
-		UpstreamStatuses: map[string]int{},
+		UpstreamStatuses: map[string]any{},
 	}
 }
 

@@ -32,7 +32,7 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-type ToolCallContext struct {
+type ToolContext struct {
 	*MCPTool
 	sessionID      string
 	listener       string
@@ -48,7 +48,7 @@ type ToolCallContext struct {
 	log            []string
 }
 
-func NewToolCallContext(ms *util.MCPRequestStore, t *MCPTool, req *gomcp.CallToolRequest, args *aicommon.ToolCallArgs, isSSE bool) *ToolCallContext {
+func NewToolContext(ms *util.MCPRequestStore, t *MCPTool, req *gomcp.CallToolRequest, args *aicommon.ToolCallArgs, isSSE bool) *ToolContext {
 	requestHeaders := getRequestHeaders(ms.Ctx, req, ms.RS)
 	if args == nil {
 		args = aicommon.NewCallArgs()
@@ -56,7 +56,7 @@ func NewToolCallContext(ms *util.MCPRequestStore, t *MCPTool, req *gomcp.CallToo
 	if t.Behavior.Remote && args.RemoteArgs == nil {
 		args.RemoteArgs = aicommon.NewCallArgs()
 	}
-	tctx := &ToolCallContext{
+	tctx := &ToolContext{
 		MCPTool:        t,
 		sessionID:      req.Session.ID(),
 		listener:       ms.RS.ListenerLabel,
@@ -79,12 +79,12 @@ func NewToolCallContext(ms *util.MCPRequestStore, t *MCPTool, req *gomcp.CallToo
 	return tctx
 }
 
-func (tctx *ToolCallContext) notifyClientWithError(msg string, data any, json bool) error {
+func (tctx *ToolContext) notifyClientWithError(msg string, data any, json bool) error {
 	tctx.notifyClient(msg, data, json)
 	return nil
 }
 
-func (tctx *ToolCallContext) notifyClient(msg string, data any, json bool) {
+func (tctx *ToolContext) notifyClient(msg string, data any, json bool) {
 	if json {
 		// if msg != "" {
 		// 	notifyClient(tctx.ctx, msg, tctx.req.Session, nil)
@@ -99,31 +99,31 @@ func (tctx *ToolCallContext) notifyClient(msg string, data any, json bool) {
 	}
 }
 
-func (tctx *ToolCallContext) AddEvent(msg string) {
+func (tctx *ToolContext) AddEvent(msg string) {
 	if msg != "" {
 		tctx.timeline.AddEvent(tctx.Label, msg)
 	}
 }
 
-func (tctx *ToolCallContext) AddRemoteEvent(msg string, remoteText string, remoteData any, json bool) {
+func (tctx *ToolContext) AddRemoteEvent(msg string, remoteText string, remoteData any, json bool) {
 	if msg != "" || remoteData != nil {
 		tctx.timeline.AddEventWithRemote(tctx.Label, msg, remoteText, nil, nil, remoteData, json)
 	}
 }
 
-func (tctx *ToolCallContext) AddData(data any, json bool) {
+func (tctx *ToolContext) AddData(data any, json bool) {
 	if data != nil {
 		tctx.timeline.AddData(tctx.Label, data, json)
 	}
 }
 
-func (tctx *ToolCallContext) Log(msg string, args ...any) string {
+func (tctx *ToolContext) Log(msg string, args ...any) string {
 	msg = fmt.Sprintf(msg, args...)
 	tctx.log = append(tctx.log, msg)
 	return msg
 }
 
-func (tctx *ToolCallContext) Flush(print, clear bool) string {
+func (tctx *ToolContext) Flush(print, clear bool) string {
 	msg := strings.Join(tctx.log, " --> ")
 	if clear {
 		tctx.log = []string{}
@@ -134,7 +134,7 @@ func (tctx *ToolCallContext) Flush(print, clear bool) string {
 	return msg
 }
 
-func (tctx *ToolCallContext) applyDelay() {
+func (tctx *ToolContext) applyDelay() {
 	if tctx.args.Delay != nil {
 		d := tctx.args.Delay.Compute()
 		tctx.Log("Server %s Tool %s: \U0001F634\U0001F4A4 sleeping for [%s]", tctx.Label, tctx.Tool.Name, d)

@@ -25,7 +25,7 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func (t *MCPTool) elicit(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) elicit(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	tctx.AddEvent(fmt.Sprintf("Server [%s] sent elicit request to client", tctx.Server.GetName()))
 	params := &gomcp.ElicitParams{}
 	if tctx.Response != nil && tctx.Response.JSON != nil {
@@ -68,7 +68,7 @@ func (t *MCPTool) elicit(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
 	return result, nil
 }
 
-func (t *MCPTool) sample(tctx *ToolCallContext) (*gomcp.CallToolResult, error) {
+func (t *MCPTool) sample(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	res, err := tctx.req.Session.CreateMessage(tctx.ctx, &gomcp.CreateMessageParams{
 		Messages: []*gomcp.SamplingMessage{{
 			Role:    "user",

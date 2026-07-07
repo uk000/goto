@@ -31,7 +31,7 @@ type A2AResult struct {
 	AgentCall           *AgentCall
 	ServerInfo          *timeline.GotoServerInfo
 	Timeline            *timeline.Timeline
-	UpstreamStatuses    map[string]int
+	UpstreamStatuses    map[string]any
 	LastRequestHeaders  http.Header `json:"-"`
 	LastResponseHeaders http.Header `json:"-"`
 	LastResponseStatus  int         `json:"-"`
@@ -62,7 +62,7 @@ func NewA2AResult(server string, ac *AgentCall, t *timeline.Timeline) *A2AResult
 		AgentCall:        ac,
 		ServerInfo:       t.Server,
 		CallResults:      map[string]*A2ACallResult{},
-		UpstreamStatuses: map[string]int{},
+		UpstreamStatuses: map[string]any{},
 		Timeline:         t,
 		RemoteGotos:      map[string]bool{},
 	}

@@ -331,6 +331,8 @@ func (c *MCPClient) newMCPSession(ctx context.Context, operLabel, url string, tc
 		}
 		tc.Headers.NonNil()
 		outHeaders = tc.Headers.Clone()
+		t.NoEvents = tc.NoEvents
+		t.ResultOnly = tc.ResultOnly
 	}
 	s := &MCPSession{
 		Ctx:          ctx,
@@ -422,6 +424,12 @@ func (tctx *ToolCallContext) prepare() {
 	if !tctx.tc.Raw {
 		tctx.session.outHeaders.Request.Add["Host"] = tctx.tc.Authority
 		tctx.session.outHeaders.Request.Add["User-Agent"] = tctx.callerId
+	}
+	if tctx.tc.ResultOnly {
+		tctx.args.ResultOnly = true
+	}
+	if tctx.tc.NoEvents {
+		tctx.args.NoEvents = true
 	}
 	tctx.ctx = util.WithContextHeaders(tctx.ctx, tctx.session.outHeaders)
 	if tctx.tc.RequestCount == 0 {
@@ -583,7 +591,13 @@ func (c *MCPClient) InterceptResponse(r *http.Response) {
 					r.Body = util.NewResponseTracker(r, func(h http.Header) {
 						tctx.processHeaders(h)
 						rs := util.GetRequestStore(r.Request)
-						rs.UpstreamStatuses = util.GetUpstreamStatuses(h)
+						upstreamStatuses := util.GetUpstreamStatuses(h)
+						rs.UpstreamStatuses = map[string]any{}
+						for k, v := range tctx.result.UpstreamStatuses {
+							rs.UpstreamStatuses[k] = v
+						}
+						rs.UpstreamStatuses["-"] = upstreamStatuses
+						tctx.result.UpstreamStatuses = rs.UpstreamStatuses
 					})
 				}
 				delete(s.ongoingCalls, requestID)
@@ -718,7 +732,7 @@ func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, h
 }
 
 func (tctx *ToolCallContext) AddEvent(msg string) {
-	if msg != "" {
+	if msg != "" && (tctx.args == nil || !tctx.args.NoEvents) {
 		tctx.session.Timeline.AddEvent(tctx.callerId, msg)
 	}
 }

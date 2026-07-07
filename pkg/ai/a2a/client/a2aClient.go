@@ -45,7 +45,7 @@ type AgentCall struct {
 	TLS                  bool             `json:"tls,omitempty"`
 	Delay                string           `json:"delay,omitempty"`
 	Message              string           `json:"message,omitempty"`
-	Data                 map[string]any   `json:"data,omitempty"`
+	Args                 map[string]any   `json:"args,omitempty"`
 	Headers              *types.Headers   `json:"headers,omitempty"`
 	RequestCount         int              `json:"requestCount"`
 	Concurrent           int              `json:"concurrent"`
@@ -123,7 +123,7 @@ func CallAgentWithTimeline(ctx context.Context, port int, call *AgentCall, callb
 	if !util.IsNil(err) {
 		return nil, fmt.Errorf("Failed to load agent card with error [%s]. Agent Call: %+v", err.Error(), call)
 	}
-	err = session.CallAgent(callback, nil, nil)
+	err = session.CallAgent(call.Message, call.Args, callback, nil, nil)
 	result = session.Result
 	return
 }
@@ -198,14 +198,14 @@ func (ac *AgentCall) CloneWithUpdate(name, url, authority, message string, data 
 		clone.Message = message
 	}
 	if data != nil {
-		clone.Data = data
+		clone.Args = data
 	}
 	return &clone
 }
 
 func (ac *AgentCall) NonNil() {
-	if ac.Data == nil {
-		ac.Data = map[string]any{}
+	if ac.Args == nil {
+		ac.Args = map[string]any{}
 	}
 	if ac.Headers == nil {
 		ac.Headers = types.NewHeaders()
