@@ -147,7 +147,7 @@ func (b *AgentBehaviorImpl) handleUnary(aCtx *AgentContext) (result *taskmanager
 		return nil, fmt.Errorf("Agent [%s] doesn't support Unary behavior.", b.agent.ID)
 	}
 	result, err = b.doUnary(aCtx)
-	if err == nil && result != nil {
+	if util.IsNil(err) && result != nil {
 		if result.Result == nil {
 			result.Result = &a2aproto.Message{}
 		}
@@ -172,7 +172,7 @@ func (b *AgentBehaviorImpl) handleStream(aCtx *AgentContext) (*taskmanager.Messa
 
 func (b *AgentBehaviorImpl) stream(aCtx *AgentContext) {
 	status, err := b.doStream(aCtx)
-	if err != nil {
+	if !util.IsNil(err) {
 		aCtx.endTask(false, fmt.Sprintf("%s | Error: %s", status, err.Error()))
 	} else {
 		aCtx.endTask(true, status)

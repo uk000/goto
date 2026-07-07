@@ -107,7 +107,7 @@ func (ab *AgentBehaviorFederate) DoStream(aCtx *AgentContext) (string, error) {
 		close(aCtx.localProgress)
 		resultsWG.Wait()
 	}
-	if aCtx.err != nil {
+	if !util.IsNil(aCtx.err) {
 		return "Agent federation done with error \u274C", aCtx.err
 	}
 	return "Agent federation done \U000026F3", nil
@@ -185,7 +185,7 @@ func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentContext, runWG, resultsWG 
 func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentContext, dCtx *DelegateCallContext, agentsWG *sync.WaitGroup) {
 	defer agentsWG.Done()
 	result, err := ab.invokeAgent(aCtx, dCtx)
-	if err != nil {
+	if !util.IsNil(err) {
 		aCtx.err = err
 		msg := fmt.Sprintf("Failed to invoke Agent [%s] at URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, err.Error())
 		aCtx.AddEvent(msg)
@@ -216,7 +216,7 @@ func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentContext, dCtx *DelegateCal
 func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCallContext, toolsWG *sync.WaitGroup) {
 	defer toolsWG.Done()
 	result, respHeaders, err := ab.invokeMCP(aCtx, dCtx)
-	if err != nil {
+	if !util.IsNil(err) {
 		aCtx.err = err
 		msg := fmt.Sprintf("Failed to invoke MCP tool [%s] at URL [%s] with error: %s", dCtx.toolCall.Tool, dCtx.toolCall.URL, err.Error())
 		aCtx.AddEvent(msg)
@@ -276,7 +276,7 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 		return nil, errors.New("failed to create A2A client")
 	}
 	session, err := client.ConnectWithAgentCard(aCtx.ctx, dCtx.agentCall, dCtx.agentCall.CardURL, dCtx.agentCall.Authority, aCtx.requestHeaders, aCtx.timeline)
-	if err != nil {
+	if !util.IsNil(err) {
 		return nil, fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.CardURL, err.Error())
 	}
 	agentResults := map[string][]any{}

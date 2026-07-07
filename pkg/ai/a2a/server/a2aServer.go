@@ -231,7 +231,7 @@ func (a *A2AServer) Serve(name string, w http.ResponseWriter, r *http.Request) e
 		status = aCtx.forcedStatus
 		rs.StatusCode = aCtx.forcedStatus
 	}
-	if status > 0 {
+	if status > 0 && status != 200 {
 		sendStatus(a.ID, status, rem, irw.ResponseWriter, r)
 	}
 	rs.StatusCode = irw.StatusCode

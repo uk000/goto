@@ -157,9 +157,7 @@ func (ac *AgentContext) setContext(ctx context.Context, b *AgentBehaviorImpl, ta
 
 func (ac *AgentContext) detectAndConfigureFeature(k string, v any) {
 	k = strings.ToLower(k)
-	if strings.Contains(k, "result") && strings.Contains(k, "only") {
-		ac.timeline.ResultOnly = util.AnyToBool(v)
-	} else if strings.Contains(k, "content") || strings.Contains(k, "message") {
+	if strings.Contains(k, "content") || strings.Contains(k, "message") {
 		ac.timeline.ResultOnly = !util.AnyToBool(v)
 	} else if strings.Contains(k, "timeline") {
 		ac.reportTimeline = util.AnyToBool(v)
@@ -169,7 +167,7 @@ func (ac *AgentContext) detectAndConfigureFeature(k string, v any) {
 		} else {
 			ac.timeline.NoEvents = !util.AnyToBool(v)
 		}
-	} else if strings.Contains(k, "results") {
+	} else if strings.Contains(k, "result") {
 		if strings.Contains(k, "only") {
 			ac.timeline.ResultOnly = true
 		} else {
@@ -191,7 +189,13 @@ func (ac *AgentContext) loadInputs(input *a2aproto.Message) {
 				if m, ok := dp.Data.(map[string]any); ok {
 					for k, v := range m {
 						ac.inputData[k] = v
-						ac.detectAndConfigureFeature(k, v)
+						if vm, ok := v.(map[string]any); ok {
+							for k2, v2 := range vm {
+								ac.detectAndConfigureFeature(k2, v2)
+							}
+						} else {
+							ac.detectAndConfigureFeature(k, v)
+						}
 					}
 				}
 			}

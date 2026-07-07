@@ -51,7 +51,7 @@ func fetchAgentCard(w http.ResponseWriter, r *http.Request) {
 	url := util.GetStringParamValue(r, "url")
 	authority := util.GetStringParamValue(r, "authority")
 	card, err := FetchAgentCard(r.Context(), url, authority, nil, r.Header)
-	if err != nil {
+	if !util.IsNil(err) {
 		util.SendBadRequest(w, r, "Error fetching agent card from url [%s], authority [%s]: %s", url, authority, err.Error())
 		return
 	}
