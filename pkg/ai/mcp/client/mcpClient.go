@@ -68,12 +68,15 @@ type ToolCall struct {
 	InitialDelay         string                 `json:"initialDelay"`
 	RetryDelay           string                 `json:"retryDelay"`
 	RetriableStatusCodes []int                  `json:"retriableStatusCodes"`
+	RequestTimeout       string                 `json:"requestTimeout"`
 	RequestId            *types.RequestId       `json:"requestId"`
 	ForcedStatus         int                    `json:"forcedStatus"`
 	ResultOnly           bool                   `json:"resultOnly,omitempty"`
 	NoEvents             bool                   `json:"noEvents,omitempty"`
 	NoCallDetails        bool                   `json:"noCallDetails,omitempty"`
+	Stream               bool                   `json:"stream,omitempty"`
 	delayD               *types.Delay           `json:"-"`
+	RequestTimeoutD      time.Duration          `json:"-"`
 }
 
 type ToolCallContext struct {
@@ -207,18 +210,21 @@ func SetRoots(name string, payload []byte) error {
 	return nil
 }
 
-func NewClient(port int, sse, h2, tls bool, callerId, listener, authority string, stream chan *types.Pair[string, any], updateCallback timeline.TimelineUpdateNotifierFunc, endCallback timeline.TimelineEndNotifierFunc) *MCPClient {
-	name := fmt.Sprintf("GotoMCP[%s][%s]", global.Funcs.GetListenerLabelForPort(port), callerId)
+func NewClient(port int, sse, h2, tls bool, callerId, listener, authority string, requestTimeout time.Duration, stream chan *types.Pair[string, any], updateCallback timeline.TimelineUpdateNotifierFunc, endCallback timeline.TimelineEndNotifierFunc) *MCPClient {
+	name := fmt.Sprintf("GotoMCP[%s]", global.Funcs.GetListenerLabelForPort(port))
 	if sse {
 		name += "[sse]"
 	}
-	return newMCPClient(port, sse, h2, tls, name, callerId, listener, authority, stream, updateCallback, endCallback)
+	return newMCPClient(port, sse, h2, tls, name, callerId, listener, authority, requestTimeout, stream, updateCallback, endCallback)
 }
 
-func newMCPClient(port int, sse, h2, tls bool, name, callerId, listener, authority string, stream chan *types.Pair[string, any], updateCallback timeline.TimelineUpdateNotifierFunc, endCallback timeline.TimelineEndNotifierFunc) *MCPClient {
+func newMCPClient(port int, sse, h2, tls bool, name, callerId, listener, authority string, requestTimeout time.Duration, stream chan *types.Pair[string, any], updateCallback timeline.TimelineUpdateNotifierFunc, endCallback timeline.TimelineEndNotifierFunc) *MCPClient {
 	//httpClient := transport.CreateSimpleHTTPClient()
+	if requestTimeout == 0 {
+		requestTimeout = 1 * time.Hour
+	}
 	ht := transport.CreateHTTPClient(port, name, h2, true, tls, false, authority,
-		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
+		requestTimeout, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
 	mcpClient := &MCPClient{
 		Port:           port,
 		ID:             fmt.Sprint(ClientCounter.Add(1)),
@@ -261,17 +267,7 @@ func ParseToolCall(r io.ReadCloser) (*ToolCall, error) {
 		if tc.Tool == "" || tc.URL == "" {
 			return nil, errors.New("invalid tool call payload")
 		}
-		tc.Tool = strings.Trim(strings.Trim(tc.Tool, "\""), "'")
-		if tc.Server == "" {
-			tc.Server = tc.Authority
-		}
-		if tc.Args == nil {
-			tc.Args = aicommon.NewCallArgs()
-		}
-		tc.Args.NonNil()
-		if tc.Delay != "" {
-			tc.delayD = types.ParseDelay(tc.Delay)
-		}
+		tc.Prepare()
 	}
 	return tc, err
 }
@@ -497,8 +493,10 @@ func (tctx *ToolCallContext) call() (*MCPResult, error) {
 			args.AddMetadata(constants.HeaderGotoMCPCallerID, tctx.callerId)
 			tctx.reportToolCallRequest(i, args)
 			ctx := context.WithValue(tctx.ctx, constants.HeaderGotoMCPRequestID, requestID)
-			go func(tool string, args *aicommon.ToolCallArgs) {
-				toolResult, err := tctx.session.session.CallTool(ctx, &gomcp.CallToolParams{Name: tool, Arguments: args})
+			go func(tc *ToolCall, args *aicommon.ToolCallArgs) {
+				ctx, cancel := context.WithDeadline(ctx, time.Now().Add(tc.RequestTimeoutD))
+				defer cancel()
+				toolResult, err := tctx.session.session.CallTool(ctx, &gomcp.CallToolParams{Name: tc.Tool, Arguments: args})
 				if toolResult != nil {
 					tctx.result.storeCallResult(requestID, toolResult, tctx.clientInfo)
 				}
@@ -511,7 +509,7 @@ func (tctx *ToolCallContext) call() (*MCPResult, error) {
 					tctx.reportToolCallFailure(i, "No Error, No Result")
 				}
 				wg.Done()
-			}(tctx.tc.Tool, tctx.args)
+			}(tctx.tc, tctx.args)
 		}
 		wg.Wait()
 		if (tctx.rounds-i) > 0 && delay != nil && delay.IsNonZero() {
@@ -697,6 +695,25 @@ func (s *MCPSession) ListResources() (*gomcp.ListResourcesResult, error) {
 	}
 	defer s.close()
 	return s.session.ListResources(util.WithRequestHeaders(context.Background(), map[string][]string{"Host": []string{s.Authority}}), &gomcp.ListResourcesParams{})
+}
+
+func (tc *ToolCall) Prepare() {
+	tc.Tool = strings.Trim(strings.Trim(tc.Tool, "\""), "'")
+	if tc.Server == "" {
+		tc.Server = tc.Authority
+	}
+	if tc.Args == nil {
+		tc.Args = aicommon.NewCallArgs()
+	}
+	tc.Args.NonNil()
+	if tc.Delay != "" {
+		tc.delayD = types.ParseDelay(tc.Delay)
+	}
+	if tc.RequestTimeout != "" {
+		tc.RequestTimeoutD = util.ParseDuration(tc.RequestTimeout)
+	} else {
+		tc.RequestTimeoutD = 10 * time.Hour
+	}
 }
 
 func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, headers *types.Headers, args *aicommon.ToolCallArgs) *ToolCall {

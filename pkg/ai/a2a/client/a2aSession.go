@@ -66,12 +66,12 @@ var (
 )
 
 func NewA2ASession(ctx context.Context, port int, card *goa2aserver.AgentCard, call *AgentCall, inHeaders http.Header) *A2ASession {
-	client := NewA2AClient(port, call.Name, call.H2, call.TLS, call.Authority)
+	client := NewA2AClient(port, call.Name, call.H2, call.TLS, call.Authority, call.RequestTimeoutD)
 	return newSession(client, ctx, client.port, client.ID, call.Authority, card, call, inHeaders, timeline.NewTimeline(port, call.Name, nil, nil, inHeaders, nil, nil, nil))
 }
 
 func NewA2ASessionWithTimeline(ctx context.Context, port int, card *goa2aserver.AgentCard, call *AgentCall, inHeaders http.Header, timeline *timeline.Timeline) *A2ASession {
-	client := NewA2AClient(port, card.Name, call.H2, call.TLS, call.Authority)
+	client := NewA2AClient(port, card.Name, call.H2, call.TLS, call.Authority, call.RequestTimeoutD)
 	return newSession(client, ctx, client.port, client.ID, call.Authority, card, call, inHeaders, timeline)
 }
 

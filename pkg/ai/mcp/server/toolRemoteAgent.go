@@ -48,7 +48,7 @@ func (t *MCPTool) callRemoteAgent(tctx *ToolContext) (*gomcp.CallToolResult, err
 	tctx.addForwardHeaders(finalHeaders.Request.Add, finalHeaders.Request.Forward, tctx.args.RemoteArgs)
 	msg := fmt.Sprintf("Invoking Agent [%s] at URL [%s]", ac.Name, ac.AgentURL)
 	tctx.AddEvent(msg)
-	client := a2aclient.NewA2AClient(tctx.Server.Port, tctx.Name, ac.H2, ac.TLS, ac.Authority)
+	client := a2aclient.NewA2AClient(tctx.Server.Port, tctx.Name, ac.H2, ac.TLS, ac.Authority, ac.RequestTimeoutD)
 	if client == nil {
 		return nil, errors.New("failed to create A2A client")
 	}

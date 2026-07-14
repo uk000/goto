@@ -52,12 +52,15 @@ type AgentCall struct {
 	RequestDelay         string           `json:"requestDelay"`
 	InitialDelay         string           `json:"initialDelay"`
 	RetryDelay           string           `json:"retryDelay"`
+	RequestTimeout       string           `json:"requestTimeout"`
 	RetriableStatusCodes []int            `json:"retriableStatusCodes"`
 	RequestId            *types.RequestId `json:"requestId"`
 	ForcedStatus         int              `json:"forcedStatus"`
 	ResultOnly           bool             `json:"resultOnly,omitempty"`
 	NoEvents             bool             `json:"noEvents,omitempty"`
 	NoCallDetails        bool             `json:"noCallDetails,omitempty"`
+	Stream               bool             `json:"stream,omitempty"`
+	RequestTimeoutD      time.Duration    `json:"-"`
 }
 
 type AgentError struct {
@@ -73,9 +76,12 @@ type A2AClient struct {
 	client     *goa2aclient.A2AClient
 }
 
-func NewA2AClient(port int, clientId string, h2, tls bool, authority string) *A2AClient {
+func NewA2AClient(port int, clientId string, h2, tls bool, authority string, requestTimeout time.Duration) *A2AClient {
+	if requestTimeout == 0 {
+		requestTimeout = 1 * time.Hour
+	}
 	c := transport.CreateHTTPClient(port, clientId, h2, true, tls, false, authority,
-		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
+		requestTimeout, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
 	ac := &A2AClient{
 		ID:         clientId,
 		port:       port,
@@ -93,7 +99,7 @@ func (ac *A2AClient) newSession(ctx context.Context, port int, callerId, authori
 
 func FetchAgentCard(ctx context.Context, url, authority string, call *AgentCall, inHeaders http.Header) (card *goa2aserver.AgentCard, err error) {
 	port := util.GetContextPort(ctx)
-	client := NewA2AClient(port, "", call.H2, call.TLS, call.Authority)
+	client := NewA2AClient(port, "", call.H2, call.TLS, call.Authority, call.RequestTimeoutD)
 	card, err = client.loadAgentCard(ctx, url, authority, call, inHeaders)
 	return
 }
@@ -181,6 +187,14 @@ func (ac *A2AClient) ConnectWithAgentCard(ctx context.Context, call *AgentCall, 
 	session.inHeaders = inHeaders
 	err = session.Connect()
 	return session, err
+}
+
+func (ac *AgentCall) Prepare() {
+	if ac.RequestTimeout != "" {
+		ac.RequestTimeoutD = util.ParseDuration(ac.RequestTimeout)
+	} else {
+		ac.RequestTimeoutD = 10 * time.Hour
+	}
 }
 
 func (ac *AgentCall) CloneWithUpdate(name, url, authority, message string, data map[string]any) *AgentCall {

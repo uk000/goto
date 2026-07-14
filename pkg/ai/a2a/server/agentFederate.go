@@ -119,6 +119,9 @@ func (ab *AgentBehaviorFederate) runTools(aCtx *AgentContext, runWG, resultsWG *
 	delegateContexts := []*DelegateCallContext{}
 	for _, tcalls := range aCtx.tools {
 		for _, tc := range tcalls {
+			if tc.ToolCall.Stream {
+				aCtx.irw.HoldChunked = false
+			}
 			if tc.ToolCall.Headers == nil {
 				tc.ToolCall.Headers = types.NewHeaders()
 			}
@@ -126,10 +129,6 @@ func (ab *AgentBehaviorFederate) runTools(aCtx *AgentContext, runWG, resultsWG *
 			dCtx := newDelegateCallContext(tc.ToolCall, nil, tc.Tracker)
 			dCtx.tracker.IncrementCall()
 			delegateContexts = append(delegateContexts, dCtx)
-			// if resultsWG != nil {
-			// 	resultsWG.Add(1)
-			// 	go ab.processUpstreamUpdates(aCtx, dCtx, resultsWG)
-			// }
 			toolsWG.Add(1)
 			if parallel {
 				go func(dCtx *DelegateCallContext) {
@@ -156,6 +155,9 @@ func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentContext, runWG, resultsWG 
 	for _, acalls := range aCtx.agents {
 		for _, a := range acalls {
 			a.AgentCall.NonNil()
+			if a.AgentCall.Stream {
+				aCtx.irw.HoldChunked = false
+			}
 			dCtx := newDelegateCallContext(nil, a.AgentCall, a.Tracker)
 			dCtx.tracker.IncrementCall()
 			delegateContexts = append(delegateContexts, dCtx)
@@ -191,7 +193,7 @@ func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentContext, dCtx *DelegateCal
 		aCtx.AddEvent(msg)
 		log.Println(msg)
 	} else {
-		msg := fmt.Sprintf("Successfully invoked Agent [%s] at URL [%s]. Call Count [%d], Response Count [%d]",
+		msg := fmt.Sprintf("Successfully invoked Agent [%s] at URL [%s]. (Tracker: Call#[%d], Response#[%d])",
 			dCtx.agentCall.Name, dCtx.agentCall.AgentURL, dCtx.tracker.CallCount.Load(), dCtx.tracker.ResponseCount.Load())
 		aCtx.AddEvent(msg)
 		log.Println(msg)
@@ -204,9 +206,11 @@ func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentContext, dCtx *DelegateCal
 				aCtx.upstreamHeaders[k] = v
 			}
 		}
-		aCtx.upstreamHeaders[dCtx.name] = map[string]any{
-			"RequestHeaders":  result.LastRequestHeaders,
-			"ResponseHeaders": result.LastResponseHeaders,
+		aCtx.upstreamHeaders["UpstreamHeaders"] = map[string]any{
+			fmt.Sprintf("%s (A2A)", dCtx.name): map[string]any{
+				"RequestHeaders":  result.LastRequestHeaders,
+				"ResponseHeaders": result.LastResponseHeaders,
+			},
 		}
 		aCtx.upstreamStatuses = result.UpstreamStatuses
 		aCtx.timeline.Status = result.LastResponseStatus
@@ -225,7 +229,7 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 	if respHeaders != nil {
 		msg := fmt.Sprintf("MCP tool [%s] sent response headers", dCtx.toolCall.Tool)
 		aCtx.AddEvent(msg)
-		aCtx.AddData(map[string]any{"responseHeaders": respHeaders}, true)
+		// aCtx.AddData("UpstreamHeaders", map[string]any{fmt.Sprintf("UpstreamHeaders[%s]", dCtx.toolCall.Tool): respHeaders}, true)
 	}
 	if result != nil {
 		msg := fmt.Sprintf("Successfully invoked MCP tool [%s] at URL [%s]. Call Count [%d], Response Count [%d]",
@@ -239,9 +243,11 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 				aCtx.upstreamHeaders[k] = v
 			}
 		}
-		aCtx.upstreamHeaders[dCtx.name] = map[string]any{
-			"RequestHeaders":  result.LastRequestHeaders,
-			"ResponseHeaders": result.LastResponseHeaders,
+		aCtx.upstreamHeaders["UpstreamHeaders"] = map[string]any{
+			fmt.Sprintf("%s (MCP)", dCtx.name): map[string]any{
+				"RequestHeaders":  result.LastRequestHeaders,
+				"ResponseHeaders": result.LastResponseHeaders,
+			},
 		}
 		aCtx.upstreamStatuses = result.UpstreamStatuses
 		if result.LastResponseStatus > 0 {
@@ -271,7 +277,7 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 	if aCtx.timeline.NoEvents {
 		dCtx.agentCall.NoEvents = true
 	}
-	client := a2aclient.NewA2AClient(ab.agent.Port, ab.agent.ID, dCtx.agentCall.H2, dCtx.agentCall.TLS, dCtx.agentCall.Authority)
+	client := a2aclient.NewA2AClient(ab.agent.Port, ab.agent.ID, dCtx.agentCall.H2, dCtx.agentCall.TLS, dCtx.agentCall.Authority, dCtx.agentCall.RequestTimeoutD)
 	if client == nil {
 		return nil, errors.New("failed to create A2A client")
 	}
@@ -318,7 +324,7 @@ func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCal
 	aCtx.AddEvent(msg)
 	log.Println(msg)
 	client := mcpclient.NewClient(ab.agent.Port, false, dCtx.toolCall.H2, dCtx.toolCall.TLS, ab.agent.ID,
-		aCtx.rs.ListenerLabel, dCtx.toolCall.Authority, aCtx.localProgress, aCtx.notifyUpdate, aCtx.notifyEndSession)
+		aCtx.rs.ListenerLabel, dCtx.toolCall.Authority, dCtx.toolCall.RequestTimeoutD, aCtx.localProgress, aCtx.notifyUpdate, aCtx.notifyEndSession)
 	session := client.CreateSessionWithTimeline(aCtx.ctx, dCtx.toolCall.URL, dCtx.toolCall.Tool, dCtx.toolCall, aCtx.requestHeaders, aCtx.timeline)
 	mcpResult, err = session.CallTool(args)
 	if mcpResult != nil {

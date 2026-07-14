@@ -42,25 +42,26 @@ import (
 )
 
 type CallSpec struct {
-	URL          string               `json:"url"`
-	Authority    string               `json:"authority"`
-	Method       string               `json:"method"`
-	Count        int                  `json:"count"`
-	RequestID    bool                 `json:"requestID"`
-	IsH2         bool                 `json:"h2"`
-	TLS          bool                 `json:"tls"`
-	NoSNI        bool                 `json:"noSNI"`
-	VerifyTLS    bool                 `json:"verifyTLS"`
-	TLSVersion   uint16               `json:"tlsVersion"`
-	ClientCert   string               `json:"clientCert"`
-	ALPN         *gototls.ALPN        `json:"alpn"`
-	Payload      []string             `json:"payload"`
-	StreamDelay  string               `json:"streamDelay"`
-	Headers      *types.HeadersConfig `json:"headers"`
-	request      *http.Request
-	client       transport.ClientTransport
-	streamWriter io.WriteCloser
-	streamDelayD time.Duration
+	URL            string               `json:"url"`
+	Authority      string               `json:"authority"`
+	Method         string               `json:"method"`
+	Count          int                  `json:"count"`
+	RequestID      bool                 `json:"requestID"`
+	IsH2           bool                 `json:"h2"`
+	TLS            bool                 `json:"tls"`
+	NoSNI          bool                 `json:"noSNI"`
+	VerifyTLS      bool                 `json:"verifyTLS"`
+	TLSVersion     uint16               `json:"tlsVersion"`
+	ClientCert     string               `json:"clientCert"`
+	ALPN           *gototls.ALPN        `json:"alpn"`
+	Payload        []string             `json:"payload"`
+	StreamDelay    string               `json:"streamDelay"`
+	Headers        *types.HeadersConfig `json:"headers"`
+	RequestTimeout time.Duration        `json:"requestTimeout"`
+	request        *http.Request
+	client         transport.ClientTransport
+	streamWriter   io.WriteCloser
+	streamDelayD   time.Duration
 }
 
 type CallResult struct {

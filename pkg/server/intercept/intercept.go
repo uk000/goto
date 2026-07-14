@@ -47,6 +47,7 @@ type InterceptResponseWriter struct {
 	Hijacked    bool
 	Chunked     bool
 	IsH2C       bool
+	Proceeded   bool
 	BodyLength  int
 }
 
@@ -215,6 +216,10 @@ func (rw *InterceptResponseWriter) SetChunked() {
 }
 
 func (rw *InterceptResponseWriter) Proceed() {
+	if rw.Proceeded {
+		return
+	}
+	rw.Proceeded = true
 	if rw.Hijacked || rw.Hold || rw.HoldChunked || !rw.Chunked {
 		if rw.StatusCode <= 0 {
 			rw.StatusCode = 200

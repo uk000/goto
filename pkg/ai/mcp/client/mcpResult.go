@@ -46,7 +46,7 @@ type MCPCallResult struct {
 	RequestID       string
 	Content         []gomcp.Content          `json:"Content,omitempty"`
 	Data            any                      `json:"Data,omitempty"`
-	ClientInfo      *timeline.GotoClientInfo `json:"ClientInfo,omitempty"`
+	ClientInfo      *timeline.GotoClientInfo `json:"-"`
 	RemoteTimeline  *timeline.Timeline       `json:"RemoteTimeline,omitempty"`
 	RemoteResult    any                      `json:"RemoteResult,omitempty"`
 	RemoteHeaders   any                      `json:"RemoteHeaders,omitempty"`
@@ -163,7 +163,7 @@ func (r *MCPResult) ToMCP() *gomcp.CallToolResult {
 			r.Timeline.UpstreamHeaders[k] = v
 		}
 	}
-	r.Timeline.UpstreamHeaders[r.Tool] = map[string]any{
+	r.Timeline.UpstreamHeaders[fmt.Sprintf("%s (MCP)", r.Tool)] = map[string]any{
 		"RequestHeaders":  r.LastRequestHeaders,
 		"ResponseHeaders": r.LastResponseHeaders,
 	}

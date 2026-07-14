@@ -73,6 +73,7 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 	if name != "" {
 		call.Name = name
 	}
+	call.Prepare()
 	output := map[string]map[string]any{}
 	msg := ""
 	result, err := CallAgent(r.Context(), port, call, streamAgentResponse(call.Name, stream, output, w, r), r.Header)
@@ -84,7 +85,7 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 		if len(result.UpstreamStatuses) > 0 {
 			w.Header().Add(constants.HeaderGotoUpstreamStatus, util.ToJSONText(result.UpstreamStatuses))
 		}
-		headers = map[string]any{call.Name: map[string]any{
+		headers = map[string]any{fmt.Sprintf("%s (A2A)", call.Name): map[string]any{
 			"RequestHeaders":  result.LastRequestHeaders,
 			"ResponseHeaders": result.LastResponseHeaders,
 		}}

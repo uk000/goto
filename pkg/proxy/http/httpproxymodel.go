@@ -75,6 +75,7 @@ type TrafficConfig struct {
 	JsonPayload bool         `yaml:"jsonPayload" json:"jsonPayload"`
 	YamlPayload bool         `yaml:"yamlPayload" json:"yamlPayload"`
 	Transparent bool         `yaml:"transparent" json:"transparent"`
+	Stream      bool         `yaml:"stream" json:"stream"`
 }
 
 type TrafficTransform struct {
@@ -97,6 +98,10 @@ type TargetEndpoint struct {
 	ClientCert   string        `yaml:"clientCert" json:"clientCert"`
 	RequestCount int           `yaml:"requestCount" json:"requestCount"`
 	Concurrent   int           `yaml:"concurrent" json:"concurrent"`
+	Payload      bool          `yaml:"payload" json:"payload"`
+	JsonPayload  bool          `yaml:"jsonPayload" json:"jsonPayload"`
+	YamlPayload  bool          `yaml:"yamlPayload" json:"yamlPayload"`
+	Transparent  bool          `yaml:"transparent" json:"transparent"`
 	Stream       bool          `yaml:"stream" json:"stream"`
 	CallCount    int           `yaml:"-" json:"callCount"`
 	name         string
@@ -294,6 +299,20 @@ func (p *Proxy) AddTarget(t *Target) error {
 		}
 		if ep.Concurrent == 0 {
 			ep.Concurrent = 1
+		}
+		if t.TrafficConfig != nil {
+			if t.TrafficConfig.Stream {
+				ep.Stream = true
+			}
+			if t.TrafficConfig.Payload {
+				ep.Payload = true
+			}
+			if t.TrafficConfig.JsonPayload {
+				ep.JsonPayload = true
+			}
+			if t.TrafficConfig.YamlPayload {
+				ep.YamlPayload = true
+			}
 		}
 		if ep.Stream {
 			t.streaming = true

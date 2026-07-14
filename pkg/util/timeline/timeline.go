@@ -34,17 +34,15 @@ type TimelineUpdateNotifierFunc func(string, any, bool) error
 type TimelineEndNotifierFunc func(string, any, bool)
 
 type InstanceInfo struct {
-	Label          string
-	Host           string
-	Listener       string
-	Pod            string
-	PodIP          string
-	Node           string
-	Namespace      string
-	Cluster        string
-	InboundArgs    *aicommon.ToolCallArgs
-	InboundHeaders http.Header
-	Metadata       map[string]any
+	Label     string
+	Host      string
+	Listener  string
+	Pod       string
+	PodIP     string
+	Node      string
+	Namespace string
+	Cluster   string
+	Metadata  map[string]any
 }
 
 type RemoteInfo struct {
@@ -115,7 +113,7 @@ func NewTimeline(port int, label string, metadata map[string]any, inboundArgs *a
 	t := &Timeline{
 		TYPE:            TIMELINE,
 		Port:            port,
-		Label:           "TIMELINE>" + label,
+		Label:           label,
 		Server:          CreateOrGetGotoServerInfo(port, metadata, inboundArgs, inboundHeaders),
 		Events:          []*Event{},
 		Data:            map[string]any{},
@@ -207,11 +205,15 @@ func CheckAndGetServerInfo(data any) (*GotoServerInfo, bool) {
 	}
 	if s, ok := data.(*GotoServerInfo); ok {
 		return s, true
-	} else if m, ok := data.(map[string]any); ok {
-		if m["ServerInfo"] != nil {
-			s := &GotoServerInfo{}
-			if err := json.Unmarshal(util.ToJSONBytes(m), s); err == nil {
-				return s, true
+	} else {
+		s := &GotoServerInfo{}
+		if err := util.ReadJsonFromAny(data, s); err == nil {
+			return s, true
+		} else if m, ok := data.(map[string]any); ok {
+			if m["ServerInfo"] != nil {
+				if err := json.Unmarshal(util.ToJSONBytes(m), s); err == nil {
+					return s, true
+				}
 			}
 		}
 	}
@@ -297,14 +299,14 @@ func (t *Timeline) addEvent(label, text string, client *GotoClientInfo, remoteTe
 			t.send(text, nil, false, t.Finished)
 		}
 	}
-	if client != nil {
-		t.send("ClientInfo", client, true, t.Finished)
-	}
-	if remoteClient != nil {
-		t.send("ClientInfo", client, true, t.Finished)
-	}
-	if remoteServer != nil {
-		t.send("ServerInfo", remoteServer.ServerInfo, true, t.Finished)
+	// if client != nil {
+	// 	t.send("ClientInfo", client, true, t.Finished)
+	// }
+	// if remoteClient != nil {
+	// 	t.send("RemoteClientInfo", client, true, t.Finished)
+	// }
+	if !util.IsNil(remoteServer) && !util.IsNil(remoteServer.ServerInfo) {
+		t.send("RemoteServerInfo", remoteServer.ServerInfo, true, t.Finished)
 	}
 	if remoteData != nil {
 		t.send(label, remoteData, isJson, t.Finished)
@@ -365,17 +367,15 @@ func CreateInstanceInfo(port int, label string, metadata map[string]any, inbound
 		inboundArgs = nil
 	}
 	return &InstanceInfo{
-		Label:          label,
-		Host:           global.Self.HostLabel,
-		Listener:       global.Funcs.GetListenerLabelForPort(port),
-		Pod:            global.Self.PodName,
-		PodIP:          global.Self.PodIP,
-		Node:           global.Self.NodeName,
-		Namespace:      global.Self.Namespace,
-		Cluster:        global.Self.Cluster,
-		InboundArgs:    inboundArgs,
-		InboundHeaders: inboundHeaders,
-		Metadata:       metadata,
+		Label:     label,
+		Host:      global.Self.HostLabel,
+		Listener:  global.Funcs.GetListenerLabelForPort(port),
+		Pod:       global.Self.PodName,
+		PodIP:     global.Self.PodIP,
+		Node:      global.Self.NodeName,
+		Namespace: global.Self.Namespace,
+		Cluster:   global.Self.Cluster,
+		Metadata:  metadata,
 	}
 }
 

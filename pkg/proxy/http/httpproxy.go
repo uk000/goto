@@ -361,8 +361,8 @@ func (ep *TargetEndpoint) prepareInvocationSpec(tc *TrafficConfig) (*invocation.
 	is.RequestCount = ep.RequestCount
 	is.Replicas = ep.Concurrent
 	is.TrackPayload = true
+	is.CollectResponse = ep.Payload || ep.JsonPayload || ep.YamlPayload
 	if tc != nil {
-		is.CollectResponse = tc.Payload || tc.JsonPayload || tc.YamlPayload
 		is.Retries = tc.Retries
 		if tc.Delay != nil {
 			is.Delay = tc.Delay.Compute().String()

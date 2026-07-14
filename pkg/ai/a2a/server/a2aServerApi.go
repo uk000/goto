@@ -298,7 +298,6 @@ func sendStatus(id string, status, rem int, w http.ResponseWriter, r *http.Reque
 	b, _ := io.ReadAll(r.Body)
 	msg := fmt.Sprintf("%s Reporting status [%d], Remaining status count [%d]. A2A Request Headers [%s], Payload: %s", id, status, rem, util.ToJSONText(r.Header), string(b))
 	util.AddLogMessage(msg, r)
-	fmt.Fprintln(w, msg)
 }
 
 func serveAgent(w http.ResponseWriter, r *http.Request) {

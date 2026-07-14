@@ -143,6 +143,7 @@ func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler ht
 	default:
 		var irw *intercept.InterceptResponseWriter
 		var status, rem int
+		stream := false
 		rr := util.CreateOrGetReReader(r.Body)
 		r.Body = rr
 		j, err := jsonrpc.ParseJSONRPCRequest(r.Body)
@@ -152,13 +153,14 @@ func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler ht
 				if status == 0 {
 					toolName := j.Params["name"].(string)
 					if tool := server.GetTool(toolName); tool != nil {
+						stream = tool.Behavior.Stream
 						status, rem = StatusManager.GetStatusFor(server.Port, tool.ServerURI, r.Header, r.Method)
 					}
 				}
 			}
 		}
 		rr.Rewind()
-		w, irw = intercept.WithInterceptAndStatus(r, w, status, true)
+		w, irw = intercept.WithInterceptAndStatus(r, w, status, !stream)
 		if status > 0 {
 			ms.ForcedStatus = status
 			rs.StatusCode = status

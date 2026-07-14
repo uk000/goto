@@ -56,7 +56,7 @@ func (t *MCPTool) callRemoteTool(tctx *ToolContext) (*gomcp.CallToolResult, erro
 	var remoteResult *mcpclient.MCPResult
 	var err error
 	client := mcpclient.NewClient(tctx.Server.GetPort(), false, tctx.Config.RemoteTool.H2, tctx.Config.RemoteTool.TLS,
-		tctx.Server.ID, tctx.rs.ListenerLabel, tctx.Config.RemoteTool.Authority, nil, tctx.notifyClientWithError, tctx.notifyClient)
+		tctx.Server.ID, tctx.rs.ListenerLabel, tctx.Config.RemoteTool.Authority, tc.RequestTimeoutD, nil, tctx.notifyClientWithError, tctx.notifyClient)
 	session := client.CreateSessionWithTimeline(tctx.ctx, url, tctx.Label, tc, tctx.requestHeaders, tctx.timeline)
 	remoteResult, err = session.CallTool(tc.Args)
 	session.Stop = true

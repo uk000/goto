@@ -81,6 +81,9 @@ func (t *MCPTool) stream(tctx *ToolContext) (result *gomcp.CallToolResult, err e
 		if !keepSending {
 			return false, nil
 		}
+		if err := tctx.ctx.Err(); err != nil {
+			return false, err
+		}
 		if argText != "" {
 			text = argText
 		}
@@ -110,7 +113,9 @@ func (t *MCPTool) stream(tctx *ToolContext) (result *gomcp.CallToolResult, err e
 		}
 		return true, nil
 	})
-	if keepSending {
+	if err != nil {
+		tctx.Log(fmt.Sprintf("%s Server [%s] stopped sending response after count [%d] due to error [%s]", tctx.Label, tctx.Server.GetName(), responseCount, err.Error()))
+	} else if keepSending {
 		tctx.Log(fmt.Sprintf("%s Server [%s] sent response: count [%d] after delay [%s]", tctx.Label, tctx.Server.GetName(), responseCount, delay))
 	} else {
 		tctx.Log(fmt.Sprintf("%s Server [%s] sent partial response: count [%d] after delay [%s], kept the rest for resumable operation", tctx.Label, tctx.Server.GetName(), responseCount, delay))

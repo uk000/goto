@@ -24,6 +24,7 @@ import (
 	"goto/pkg/ai/a2a/model"
 	mcpclient "goto/pkg/ai/mcp/client"
 	"goto/pkg/constants"
+	"goto/pkg/server/intercept"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"goto/pkg/util/timeline"
@@ -81,6 +82,7 @@ type AgentContext struct {
 	upstreamHeaders  map[string]any
 	upstreamStatuses map[string]any
 	remoteGotos      map[string]bool
+	irw              *intercept.InterceptResponseWriter
 }
 
 type DelegateCallContext struct {
@@ -112,6 +114,7 @@ func newAgentContext(port int, serverID, listenerLabel string, agent *model.Agen
 		agent:            agent,
 		requestHeaders:   headers,
 		rs:               rs,
+		surfaceData:      true,
 		upstreamHeaders:  map[string]any{},
 		upstreamStatuses: map[string]any{},
 		remoteGotos:      map[string]bool{},
@@ -609,8 +612,8 @@ func (ac *AgentContext) AddEvent(msg string) {
 	}
 }
 
-func (ac *AgentContext) AddData(data any, json bool) {
+func (ac *AgentContext) AddData(label string, data any, json bool) {
 	if data != nil {
-		ac.timeline.AddData(ac.label, data, json)
+		ac.timeline.AddData(label, data, json)
 	}
 }

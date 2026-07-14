@@ -166,6 +166,12 @@ func (t *MCPTool) prepareBehavior() error {
 	if err := t.validateBehavior(); err != nil {
 		return err
 	}
+	if t.Config.RemoteTool != nil {
+		t.Config.RemoteTool.Prepare()
+	}
+	if t.Config.Agent != nil {
+		t.Config.Agent.Prepare()
+	}
 	if t.Behavior.Fetch {
 		isTLS := strings.HasPrefix(t.Config.RemoteTool.URL, "https:")
 		client := transport.CreateDefaultHTTPClient(t.Server.Port, t.Name, false, isTLS, false, t.Config.RemoteTool.Authority, metrics.ConnTracker)

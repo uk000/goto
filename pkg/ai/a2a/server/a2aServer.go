@@ -175,9 +175,15 @@ func (a *A2AServer) PrepareAgent(agent *model.Agent) error {
 	if agent.Config != nil && agent.Config.Delegates != nil {
 		for dName, d := range agent.Config.Delegates.Agents {
 			d.GivenName = dName
+			if d.AgentCall != nil {
+				d.AgentCall.Prepare()
+			}
 		}
 		for dName, d := range agent.Config.Delegates.Tools {
 			d.GivenName = dName
+			if d.ToolCall != nil {
+				d.ToolCall.Prepare()
+			}
 		}
 		for dName, d := range agent.Config.Delegates.HTTP {
 			d.GivenName = dName
@@ -218,7 +224,8 @@ func (a *A2AServer) Serve(name string, w http.ResponseWriter, r *http.Request) e
 	r = r.WithContext(context.WithValue(ctx, util.AgentContextKey, aCtx))
 	aCtx.ctx = r.Context()
 	status, rem := statusManager.GetStatusFor(a.Port, agent.URI, r.Header, r.Method)
-	w, irw := intercept.WithInterceptAndStatus(r, w, status, true)
+	w, irw := intercept.WithInterceptAndStatus(r, w, status, !agent.Behavior.Stream)
+	aCtx.irw = irw
 	if status > 0 {
 		aCtx.forcedStatus = status
 		rs.StatusCode = status

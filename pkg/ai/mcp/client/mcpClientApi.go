@@ -61,8 +61,8 @@ func listTools(w http.ResponseWriter, r *http.Request) {
 	toolsOnly := strings.Contains(r.RequestURI, "tools")
 	namesOnly := strings.Contains(r.RequestURI, "names")
 	msg := ""
-	clientId := fmt.Sprintf("[%s][Client: tool/list]", global.Self.HostLabel)
-	client := NewClient(rs.RequestPortNum, sse, false, tls, clientId, util.GetCurrentListenerLabel(r), authority, nil, nil, nil)
+	clientId := fmt.Sprintf("MCPClient[%s][tool/list]", global.Self.HostLabel)
+	client := NewClient(rs.RequestPortNum, sse, false, tls, clientId, util.GetCurrentListenerLabel(r), authority, 0, nil, nil, nil)
 	session := client.CreateSession(r.Context(), url, "tool/list", nil, r.Header)
 	session.SetAuthority(authority)
 	var toolsList *mcp.ListToolsResult
@@ -163,15 +163,15 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 }
 
 func doToolCall(port int, tc *ToolCall, w http.ResponseWriter, r *http.Request) (output *MCPResult, err error) {
-	clientId := fmt.Sprintf("[%s][API: tool/call][%s]", global.Self.HostLabel, tc.Tool)
+	clientId := fmt.Sprintf("MCPClient[%s][tool/call][%s]", global.Self.HostLabel, tc.Tool)
 	var streamHandler func(string, any, bool) error
 	var endHandler func(string, any, bool)
 	if !tc.NoEvents {
 		streamHandler = streamMCPResponse(tc.Tool, w, r)
 		endHandler = endMCPResponse(tc.Tool, w, r)
 	}
-	client := NewClient(port, tc.ForceSSE, tc.H2, tc.TLS, clientId, util.GetCurrentListenerLabel(r), tc.Authority, nil, streamHandler, endHandler)
-	session := client.CreateSession(r.Context(), tc.URL, tc.Tool, tc, r.Header)
+	client := NewClient(port, tc.ForceSSE, tc.H2, tc.TLS, clientId, util.GetCurrentListenerLabel(r), tc.Authority, tc.RequestTimeoutD, nil, streamHandler, endHandler)
+	session := client.CreateSession(r.Context(), tc.URL, clientId, tc, r.Header)
 	session.SetAuthority(tc.Authority)
 	defer func() {
 		if output == nil {
