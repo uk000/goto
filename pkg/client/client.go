@@ -31,6 +31,7 @@ import (
 	"goto/pkg/util"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -178,6 +179,9 @@ func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 	callResults := &CallResults{URL: c.URL, Results: map[string]*CallResult{}}
 	c.PrepareAuthority(r)
 	sni := c.Authority
+	if host, _, err := net.SplitHostPort(c.Authority); err == nil {
+		sni = host
+	}
 	if c.NoSNI {
 		sni = ""
 	}
@@ -298,7 +302,7 @@ func invokeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	util.WriteJsonOrYAMLPayload(w, callResults, true)
+	util.WriteJsonOrYAMLPayload(w, callResults, !util.IsAcceptJSON(r))
 }
 
 func Run() {

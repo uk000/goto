@@ -317,7 +317,7 @@ func CreateCertificateWithCA(rawCACert, rawCAKey []byte, domains []string, spiff
 	var caCert *x509.Certificate
 	var caChainDER [][]byte // all certs from the CA PEM (signing cert + any intermediates/root)
 	var caKey any
-	if rawCACert != nil && rawCAKey != nil {
+	if len(rawCACert) > 0 && len(rawCAKey) > 0 {
 		// Parse ALL certificate blocks from the CA PEM.
 		// if we stop at the first block we lose the rest and can't build the chain to its trusted root.
 		rest := rawCACert

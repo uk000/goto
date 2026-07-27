@@ -71,15 +71,20 @@ func processListeners(ll ctl.Listeners) {
 				} else {
 					log.Printf("----------------- Adding Listener [%d]. --------------", nl.Port)
 				}
-				listeners.AddOrUpdateListener(nl)
 				var tlsConfig *ctl.TLSConfigs
+				var lc *ctl.CertConfig
 				for _, tls := range tlsConfigs {
 					for _, c := range tls.Certs {
 						if c.Port == nl.Port {
 							tlsConfig = tls
+							lc = c
 						}
 					}
 				}
+				if lc != nil {
+					nl.SpiffeID = lc.SpiffeID
+				}
+				listeners.AddOrUpdateListener(nl)
 				if tlsConfig != nil {
 					for _, cc := range tlsConfig.Certs {
 						cc.LoadSpiffeCert(false)

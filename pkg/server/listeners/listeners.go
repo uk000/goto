@@ -648,6 +648,8 @@ func (l *Listener) InitListener() bool {
 		domains = append(domains, l.AltNames...)
 		if cert, err := gototls.CreateCertificate(domains, l.SpiffeID, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
 			l.SetCertificates([]*tls.Certificate{cert})
+		} else {
+			log.Printf("Failed to create certificate for Listener [%s], Domains %+v, SpiffeID [%s], with error: %s\n", l.Label, domains, l.SpiffeID, err.Error())
 		}
 	}
 	address := fmt.Sprintf("0.0.0.0:%d", l.Port)
