@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>goto API Console</title>
+<style>
+  :root {
+    --bg: #14161a;
+    --panel: #1c2026;
+    --panel-2: #232830;
+    --border: #313842;
+    --text: #dfe5ec;
+    --muted: #8b95a3;
+    --accent: #52d273;
+    --accent-dim: #2f7d47;
+    --blue: #5aa9e6;
+    --purple: #c08bf0;
+    --orange: #e6a24f;
+    --red: #e66a6a;
+    --mono: "SFMono-Regular", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  a { color: var(--blue); }
+
+  /* ---------- Top bar ---------- */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex: none;
+  }
+  header .logo { font-weight: 700; font-size: 16px; letter-spacing: .5px; }
+  header .logo .g { color: var(--accent); }
+  header .sub { color: var(--muted); font-size: 12px; }
+  header .spacer { flex: 1; }
+  .chip {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 3px 10px;
+  }
+  .chip b { color: var(--text); font-weight: 600; }
+
+  /* ---------- Main layout ---------- */
+  main { display: flex; flex: 1; min-height: 0; }
+  .sidebar {
+    width: 250px;
+    flex: none;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 10px 0;
+  }
+  .content { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; padding: 16px 20px; }
+
+  /* ---------- Sidebar ---------- */
+  .pkg { margin-bottom: 8px; }
+  .pkg-header {
+    padding: 6px 14px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+  }
+  .pkg-header .count { color: var(--accent); font-weight: 600; }
+  .api-item {
+    padding: 7px 14px 7px 24px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .api-item:hover { background: var(--panel-2); }
+  .api-item.active {
+    background: var(--panel-2);
+    border-left-color: var(--accent);
+  }
+  .api-item .method {
+    display: inline-block;
+    width: 46px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  /* ---------- Form ---------- */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .card h2 { margin: 0 0 4px; font-size: 16px; }
+  .card .path {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--blue);
+    margin-bottom: 8px;
+  }
+  .card .desc { color: var(--muted); font-size: 13px; margin: 0 0 14px; line-height: 1.5; }
+  .field-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .field.full { grid-column: 1 / -1; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+  .field label .opt { color: #556; }
+  .field .help { font-size: 11px; color: #5f6875; margin-top: 4px; line-height: 1.4; }
+  input[type=text], input[type=number], select, textarea {
+    width: 100%;
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 7px 9px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-dim); }
+  textarea { resize: vertical; min-height: 60px; }
+  .check {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 0;
+  }
+  .check input { width: auto; }
+  .check label { margin: 0; font-size: 13px; color: var(--text); cursor: pointer; }
+
+  /* KV editor */
+  .kv-rows { display: flex; flex-direction: column; gap: 6px; }
+  .kv-row { display: flex; gap: 6px; }
+  .kv-row input { flex: 1; }
+  .kv-row .del {
+    flex: none; width: 30px;
+    background: var(--panel-2); color: var(--muted);
+    border: 1px solid var(--border); border-radius: 5px; cursor: pointer;
+  }
+  .kv-row .del:hover { color: var(--red); border-color: var(--red); }
+  .kv-add {
+    margin-top: 6px; width: 100%;
+    background: var(--panel-2); color: var(--accent);
+    border: 1px dashed var(--border); border-radius: 5px; padding: 6px;
+    cursor: pointer; font-size: 12px;
+  }
+  .kv-add:hover { border-color: var(--accent-dim); }
+
+  /* ---------- Invoke method bar ---------- */
+  .method-bar {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 12px; margin-bottom: 12px;
+  }
+  .method-bar label { font-size: 12px; color: var(--muted); margin: 0; }
+  .method-bar label em { color: #5f6875; font-style: italic; }
+  .method-bar select { width: auto; min-width: 120px; font-weight: 700; color: var(--accent); }
+
+  /* ---------- Actions ---------- */
+  .actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  button.primary {
+    background: var(--accent);
+    color: #06130a;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 22px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  button.primary:hover { filter: brightness(1.08); }
+  button.primary:disabled { background: var(--accent-dim); cursor: progress; }
+  button.ghost {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  button.ghost:hover { color: var(--text); border-color: var(--muted); }
+
+  /* ---------- Output ---------- */
+  .tabs { display: flex; gap: 4px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .tab {
+    padding: 7px 14px; cursor: pointer; font-size: 12px; color: var(--muted);
+    border-bottom: 2px solid transparent;
+  }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .summary { margin-bottom: 8px; font-family: var(--mono); font-size: 12px; }
+  .summary .status-green { color: var(--accent); font-weight: 700; }
+  .summary .status-red { color: var(--red); font-weight: 700; }
+  .response {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    overflow: auto;
+    max-height: 46vh;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .empty { color: var(--muted); font-style: italic; }
+
+  /* JSON syntax highlighting */
+  .j-s { color: #8b95a3; }      /* punctuation / string quotes handled in strings */
+  .j-k { color: var(--blue); }  /* keys */
+  .j-str { color: var(--accent); }
+  .j-num { color: var(--orange); }
+  .j-bool { color: var(--purple); }
+  .j-null { color: var(--red); }
+
+  .json-preview { background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 12px; overflow: auto; max-height: 30vh; font-family: var(--mono); font-size: 12px; line-height: 1.5; }
+  .error-banner {
+    background: #3a2222; border: 1px solid var(--red); color: #ffb0b0;
+    border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; font-family: var(--mono); font-size: 12px; white-space: pre-wrap;
+  }
+  .hidden { display: none !important; }
+  .spinner {
+    display: inline-block; width: 14px; height: 14px; margin-right: 8px;
+    border: 2px solid var(--accent-dim); border-top-color: var(--accent); border-radius: 50%;
+    animation: spin .7s linear infinite; vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo"><span class="g">goto</span> API Console</div>
+  <div class="sub">select an API, fill its input, invoke it against this server, and inspect the output</div>
+  <div class="spacer"></div>
+  <div class="chip" id="origin-chip">server: <b id="origin-label">…</b></div>
+</header>
+
+<main>
+  <!-- Sidebar: package -> API tree -->
+  <nav class="sidebar" id="sidebar"></nav>
+
+  <!-- Content -->
+  <section class="content">
+    <div id="no-select" class="card">
+      <h2>Select an API</h2>
+      <p class="desc">Choose an API from the list on the left (grouped by package) to load its input form.</p>
+    </div>
+
+    <!-- API detail card -->
+    <div id="api-card" class="hidden">
+      <div class="card">
+        <h2 id="api-title"></h2>
+        <div class="path" id="api-path"></div>
+        <p class="desc" id="api-desc"></p>
+
+        <div id="form-mode">
+          <div class="method-bar" id="method-bar">
+            <label for="req-method">Invoke method <em>(applied to the upstream call)</em></label>
+            <select id="req-method"></select>
+          </div>
+          <div class="field-grid" id="field-grid"></div>
+          <div id="body-input" style="margin-top:14px">
+            <div class="tabs">
+              <div class="tab active" data-jsonmode="0">Form</div>
+              <div class="tab" data-jsonmode="1">Raw JSON</div>
+            </div>
+            <div id="json-preview-wrap" class="json-preview"></div>
+          </div>
+        </div>
+
+        <div id="json-mode" class="hidden" style="margin-top:14px">
+          <div class="tabs">
+            <div class="tab" data-jsonmode="0">Form</div>
+            <div class="tab active" data-jsonmode="1">Raw JSON</div>
+          </div>
+          <textarea id="raw-json" rows="12" spellcheck="false"></textarea>
+        </div>
+
+        <div class="actions" style="margin-top:16px">
+          <button class="primary" id="invoke-btn">Invoke</button>
+          <button class="ghost" id="clear-btn">Clear output</button>
+        </div>
+      </div>
+
+      <div id="error-banner" class="hidden"></div>
+
+      <div class="card">
+        <div class="tabs" id="output-tabs">
+          <div class="tab active" data-outtab="body">Response</div>
+          <div class="tab" data-outtab="headers">Headers</div>
+        </div>
+        <div id="summary-line" class="summary"></div>
+        <div id="response-view" class="response empty">No request made yet.</div>
+        <div id="headers-view" class="response hidden"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+/* =====================================================================
+   API definitions. Data-driven: add a package + APIs to extend the UI.
+   Each field type renders a control and knows how to read a value back:
+     text       -> single-line string (omitted when blank)
+     number     -> numeric          (omitted when blank)
+     bool       -> checkbox         (omitted when unchecked)
+     select     -> dropdown          (options)
+     multiline  -> newline-separated -> array of strings (omitted when empty)
+     json       -> multiline textarea -> parsed JSON value (omitted when blank)
+     kv         -> dynamic key/value rows -> object (omitted when empty)
+   A dotted `key` (e.g. "headers.add") builds nested JSON objects.
+   A field's `where` selects where its value goes on the wire:
+     body  (default) -> inside the JSON request body
+     query            -> appended to the request URL as ?key=value
+     path             -> substituted into a {key} token in the API path
+   ===================================================================== */
+
+/* Shared field sets (referenced from multiple API entries). */
+const A2A_CALL_FIELDS = [
+  { key: "cardURL", label: "Agent Card URL", type: "text", required: true,
+    help: "URL of the agent card (.well-known/agent.json). Required to start a call." },
+  { key: "name", label: "Agent name", type: "text",
+    help: "Logical name for the agent (used in logs / result labels)." },
+  { key: "agentURL", label: "Agent URL", type: "text",
+    help: "URL to invoke the agent on. If blank, taken from the fetched agent card." },
+  { key: "authority", label: "Authority", type: "text",
+    help: "Host to use for the request. Defaults to the URL host part." },
+  { key: "message", label: "Message", type: "multiline", full: true,
+    help: "Text message sent to the agent as the prompt." },
+  { key: "args", label: "Args (JSON)", type: "json", full: true,
+    help: "Additional structured arguments sent to the agent, as a JSON object." },
+  { key: "h2", label: "Use HTTP/2", type: "bool" },
+  { key: "tls", label: "Enable TLS", type: "bool" },
+  { key: "stream", label: "Stream response", type: "bool",
+    help: "Emit the agent response as it streams in." },
+  { key: "resultOnly", label: "Result only", type: "bool",
+    help: "Return only the final result and strip the event log." },
+  { key: "noEvents", label: "No events", type: "bool" },
+  { key: "noCallDetails", label: "No call details", type: "bool" },
+  { key: "requestCount", label: "Request count", type: "number",
+    help: "Number of requests to send in this invocation." },
+  { key: "concurrent", label: "Concurrent", type: "number",
+    help: "Requests to run concurrently per round." },
+  { key: "requestDelay", label: "Request delay", type: "text",
+    help: "Delay between request rounds (e.g. 100ms)." },
+  { key: "initialDelay", label: "Initial delay", type: "text" },
+  { key: "retryDelay", label: "Retry delay", type: "text" },
+  { key: "requestTimeout", label: "Request timeout", type: "text",
+    help: "Per-request timeout (e.g. 30s)." },
+  { key: "forcedStatus", label: "Forced status", type: "number",
+    help: "Force a specific response status for the upstream call." },
+  { key: "headers.request.add", label: "Add headers", type: "kv", full: true,
+    help: "Additional headers to send on the upstream request." },
+  { key: "headers.request.forward", label: "Forward headers", type: "multiline", full: true,
+    help: "Names of inbound request headers to forward to the upstream agent." },
+];
+
+const A2A_CALL_BY_NAME_FIELDS = [
+  { key: "agent", label: "Agent name (path)", type: "text", where: "path", required: true,
+    help: "Names the agent in the request path; also set as the call's agent name." },
+  ...A2A_CALL_FIELDS,
+];
+
+const MCP_LIST_QUERY = [
+  { key: "url", label: "Server URL", type: "text", where: "query", required: true,
+    help: "MCP server endpoint (e.g. http://host:port/mcp)." },
+  { key: "authority", label: "Authority", type: "text", where: "query",
+    help: "Host to use for the request." },
+  { key: "sse", label: "Use SSE transport", type: "bool", where: "query" },
+  { key: "tls", label: "Enable TLS", type: "bool", where: "query" },
+];
+
+const PACKAGES = [
+  {
+    id: "a2a",
+    name: "A2A",
+    apis: [
+      {
+        id: "a2a-agent-card",
+        name: "Fetch Agent Card",
+        path: "/agent/card",
+        method: "GET",
+        desc: "Fetch an A2A agent card from a remote agent so you can inspect its capabilities before calling it.",
+        fields: [
+          { key: "url", label: "Agent URL", type: "text", where: "query", required: true,
+            help: "Agent URL. A bare host gets '.well-known/agent.json' appended." },
+          { key: "authority", label: "Authority", type: "text", where: "query",
+            help: "Host to use for the request." },
+        ],
+      },
+      {
+        id: "a2a-call",
+        name: "Invoke Agent (call)",
+        path: "/call",
+        method: "POST",
+        desc: "Invoke a remote A2A agent: fetch its card, open a session and send a message with optional args.",
+        fields: A2A_CALL_FIELDS,
+      },
+      {
+        id: "a2a-call-stream",
+        name: "Invoke Agent (stream)",
+        path: "/call/stream",
+        method: "POST",
+        desc: "Invoke a remote A2A agent and stream its response back as it is produced.",
+        fields: A2A_CALL_FIELDS,
+      },
+      {
+        id: "a2a-call-result",
+        name: "Invoke Agent (result)",
+        path: "/call/result",
+        method: "POST",
+        desc: "Invoke a remote A2A agent and return the collected result of the call.",
+        fields: A2A_CALL_FIELDS,
+      },
+      {
+        id: "a2a-call-by-name",
+        name: "Invoke Agent (by name)",
+        path: "/agent/{agent}/call",
+        method: "POST",
+        desc: "Invoke a remote A2A agent, naming it via the request path.",
+        fields: A2A_CALL_BY_NAME_FIELDS,
+      },
+      {
+        id: "a2a-push",
+        name: "Push Notification",
+        path: "/push",
+        method: "POST",
+        desc: "Deliver an A2A push notification payload to this server's push receiver.",
+        fields: [
+          { key: "body", label: "Payload (JSON)", type: "json", full: true,
+            help: "Raw JSON payload to POST (e.g. an A2A notification object)." },
+        ],
+      },
+    ],
+  },
+  {
+    id: "mcp",
+    name: "MCP",
+    apis: [
+      {
+        id: "mcp-details",
+        name: "Client Details",
+        path: "/details",
+        method: "GET",
+        desc: "Inspect the named MCP client payloads currently configured (sample, elicit, roots).",
+        fields: [],
+      },
+      {
+        id: "mcp-list-all",
+        name: "List All (tools · prompts · resources)",
+        path: "/list/all",
+        method: "POST",
+        methods: ["POST", "GET"],
+        desc: "List the tools, prompts and resources exposed by a remote MCP server.",
+        fields: MCP_LIST_QUERY,
+      },
+      {
+        id: "mcp-list-tools",
+        name: "List Tools",
+        path: "/list/tools",
+        method: "POST",
+        methods: ["POST", "GET"],
+        desc: "List only the tools exposed by a remote MCP server.",
+        fields: MCP_LIST_QUERY,
+      },
+      {
+        id: "mcp-list-names",
+        name: "List Tool / Prompt / Resource Names",
+        path: "/list/tools/names",
+        method: "POST",
+        methods: ["POST", "GET"],
+        desc: "List just the names of tools, prompts and resources exposed by a remote MCP server.",
+        fields: MCP_LIST_QUERY,
+      },
+      {
+        id: "mcp-call-tool",
+        name: "Call Tool",
+        path: "/call/tool",
+        method: "POST",
+        desc: "Call a tool on a remote MCP server with the given arguments.",
+        fields: [
+          { key: "tool", label: "Tool name", type: "text", required: true,
+            help: "The name of the tool to invoke." },
+          { key: "url", label: "Server URL", type: "text", required: true,
+            help: "MCP server endpoint." },
+          { key: "sseURL", label: "SSE URL", type: "text",
+            help: "Explicit SSE endpoint, if different from the server URL." },
+          { key: "server", label: "Server ID", type: "text",
+            help: "Logical identity for the upstream server (defaults to authority)." },
+          { key: "authority", label: "Authority", type: "text" },
+          { key: "h2", label: "Use HTTP/2", type: "bool" },
+          { key: "tls", label: "Enable TLS", type: "bool" },
+          { key: "forceSSE", label: "Force SSE transport", type: "bool" },
+          { key: "neat", label: "Neat result", type: "bool",
+            help: "Return a compact result instead of the full call envelope." },
+          { key: "stream", label: "Stream response", type: "bool" },
+          { key: "resultOnly", label: "Result only", type: "bool" },
+          { key: "noEvents", label: "No events", type: "bool" },
+          { key: "noCallDetails", label: "No call details", type: "bool" },
+          { key: "delay", label: "Delay", type: "text", help: "Delay between requests (e.g. 100ms)." },
+          { key: "requestTimeout", label: "Request timeout", type: "text", help: "Per-request timeout (e.g. 30s)." },
+          { key: "requestCount", label: "Request count", type: "number" },
+          { key: "concurrent", label: "Concurrent", type: "number" },
+          { key: "requestDelay", label: "Request delay", type: "text" },
+          { key: "initialDelay", label: "Initial delay", type: "text" },
+          { key: "retryDelay", label: "Retry delay", type: "text" },
+          { key: "forcedStatus", label: "Forced status", type: "number" },
+          { key: "args.text", label: "Args · text", type: "text", full: true,
+            help: "Text input passed as the tool's arguments." },
+          { key: "args.count", label: "Args · count", type: "number" },
+          { key: "args.size", label: "Args · size", type: "number" },
+          { key: "args.status", label: "Args · status", type: "number" },
+          { key: "args.delay", label: "Args · delay", type: "text" },
+          { key: "args.metadata", label: "Args · metadata", type: "kv", full: true,
+            help: "Key/value metadata attached to the tool call arguments." },
+          { key: "args.forwardHeaders", label: "Args · forward headers", type: "multiline", full: true,
+            help: "Names of inbound headers to forward with the tool call." },
+          { key: "headers.request.add", label: "Add headers", type: "kv", full: true,
+            help: "Additional headers to send on the upstream request." },
+        ],
+      },
+      {
+        id: "mcp-add-payload",
+        name: "Add Client Payload",
+        path: "/payload/{kind}",
+        method: "POST",
+        desc: "Register a named sample or elicit client payload used for sampling/elicitation during MCP calls.",
+        fields: [
+          { key: "kind", label: "Payload kind (path)", type: "select", where: "path",
+            options: ["sample", "elicit"], default: "sample" },
+          { key: "contents", label: "Contents", type: "multiline", full: true,
+            help: "One content string per line." },
+          { key: "roles", label: "Roles", type: "multiline", full: true },
+          { key: "models", label: "Models", type: "multiline", full: true },
+          { key: "actions", label: "Actions", type: "multiline", full: true },
+          { key: "delay", label: "Delay", type: "text", help: "Delay spec, e.g. 500ms." },
+        ],
+      },
+      {
+        id: "mcp-set-roots",
+        name: "Set Client Roots",
+        path: "/payload/roots",
+        method: "POST",
+        desc: "Set the MCP client roots used for resource access on this server.",
+        fields: [
+          { key: "roots", label: "Roots (JSON)", type: "json", full: true,
+            help: "JSON array of MCP Root objects, e.g. [{\"uri\":\"file:///tmp\",\"name\":\"tmp\"}]." },
+        ],
+      },
+    ],
+  },
+  {
+    id: "client",
+    name: "client",
+    apis: [
+      {
+        id: "client-http-invoke",
+        name: "HTTP Invoke",
+        path: "/client/http/invoke",
+        method: "POST",
+        methods: ["POST", "PUT", "OPTIONS"],
+        desc: "Invoke a single HTTP call using a CallSpec definition. Supports TLS/mTLS, HTTP/2, streaming payloads, request-ID tagging and response tracking. Note: the http method selected below is applied to the upstream call (the call spec's own 'method' field is ignored by the server), and only methods that can carry a request body are offered.",
+        fields: [
+          { key: "url",          label: "URL",                    type: "text",     required: true,
+            help: "The URL to invoke. If it has no scheme, 'http(s)://' is prepended based on the tls flag." },
+          { key: "authority",    label: "Authority",              type: "text",
+            help: "Host to use for the request. Defaults to the URL host part." },
+          { key: "count",        label: "Count",                  type: "number",   default: 1,
+            help: "Number of requests to send in this invocation." },
+          { key: "requestID",    label: "Add request ID",         type: "bool",
+            help: "Add a 'x-request-id' header + query param with a fresh UUID per request." },
+          { key: "h2",           label: "Use HTTP/2",             type: "bool" },
+          { key: "tls",          label: "Enable TLS",             type: "bool" },
+          { key: "noSNI",        label: "Disable SNI",            type: "bool" },
+          { key: "verifyTLS",    label: "Verify TLS cert",        type: "bool" },
+          { key: "tlsVersion",   label: "TLS version (wire value)", type: "number",
+            help: "Optional numeric TLS version wire value: 771 = TLS 1.2, 772 = TLS 1.3. Leave blank for the Go default. (A float like 1.3 is rejected by the API.)" },
+          { key: "clientCert",   label: "Client cert",            type: "text",
+            help: "Name of a pre-loaded client certificate (enables mTLS)." },
+          { key: "streamDelay",  label: "Stream delay",           type: "text",
+            help: "Delay between streamed payload chunks (e.g. 100ms)." },
+          { key: "payload",      label: "Payload",                type: "multiline", full: true,
+            help: "Newline-separated values. A single value is sent as the body; multiple values stream as chunks with streamDelay." },
+          { key: "alpn",         label: "ALPN protocols",         type: "multiline", full: true,
+            help: "Newline-separated ALPN protocols (e.g. istio, h2)." },
+          { key: "headers.add",    label: "Add headers",          type: "kv",        full: true,
+            help: "Additional headers to send on the request." },
+          { key: "headers.forward", label: "Forward headers",     type: "multiline", full: true,
+            help: "Names of inbound request headers to forward to the upstream call." },
+        ],
+      },
+    ],
+  },
+];
+
+/* =====================================================================
+   State + element refs
+   ===================================================================== */
+const state = { pkg: null, api: null, jsonMode: false };
+const $ = (id) => document.getElementById(id);
+const fieldGrid = $("field-grid");
+
+/* =====================================================================
+   Sidebar rendering
+   ===================================================================== */
+function renderSidebar() {
+  const sb = $("sidebar");
+  sb.innerHTML = "";
+  for (const pkg of PACKAGES) {
+    const div = document.createElement("div");
+    div.className = "pkg";
+    const h = document.createElement("div");
+    h.className = "pkg-header";
+    h.innerHTML = `${escapeHtml(pkg.name)} <span class="count">(${pkg.apis.length})</span>`;
+    div.appendChild(h);
+    for (const api of pkg.apis) {
+      const item = document.createElement("div");
+      item.className = "api-item";
+      item.setAttribute("data-pkg", pkg.id);
+      item.setAttribute("data-api", api.id);
+      item.innerHTML = `<span class="method">${api.method}</span>${escapeHtml(api.path)}`;
+      item.addEventListener("click", () => selectApi(pkg.id, api.id));
+      div.appendChild(item);
+    }
+    sb.appendChild(div);
+  }
+}
+
+function selectApi(pkgId, apiId) {
+  const pkg = PACKAGES.find((p) => p.id === pkgId);
+  const api = pkg.apis.find((a) => a.id === apiId);
+  state.pkg = pkg;
+  state.api = api;
+  state.jsonMode = false;
+
+  document.querySelectorAll(".api-item").forEach((el) => {
+    el.classList.toggle("active", el.dataset.pkg === pkgId && el.dataset.api === apiId);
+  });
+
+  $("no-select").classList.add("hidden");
+  $("api-card").classList.remove("hidden");
+  $("api-title").textContent = `${pkg.name} · ${api.name}`;
+  $("api-path").textContent = `${api.method} ${api.path}`;
+  $("api-desc").textContent = api.desc || "";
+
+  buildForm(api);
+  const hasBody = apiHasBody();
+  $("body-input").classList.toggle("hidden", !hasBody);
+  $("json-mode").classList.toggle("hidden", !hasBody);
+  setMode(false);
+  clearOutput();
+}
+
+/* =====================================================================
+   Form rendering from schema
+   ===================================================================== */
+function buildForm(api) {
+  const bar = $("method-bar");
+  const sel = $("req-method");
+  const methods = api.methods || [api.method || "POST"];
+  sel.innerHTML = "";
+  for (const m of methods) {
+    const opt = document.createElement("option");
+    opt.value = m; opt.textContent = m;
+    if (m === (api.method || "POST")) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  bar.classList.toggle("hidden", !methods.length);
+  fieldGrid.innerHTML = "";
+  for (const f of api.fields) {
+    const wrap = document.createElement("div");
+    wrap.className = "field" + (f.full ? " full" : "");
+    wrap.dataset.key = f.key;
+
+    let control;
+    if (f.type === "bool") {
+      control = document.createElement("div");
+      control.className = "check";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.dataset.k = f.key; cb.dataset.t = "bool";
+      cb.checked = !!f.default;
+      const lb = document.createElement("label");
+      lb.textContent = f.label;
+      cb.addEventListener("change", updatePreview);
+      control.appendChild(cb); control.appendChild(lb);
+      wrap.appendChild(control);
+    } else {
+      const lb = document.createElement("label");
+      lb.textContent = f.label + (f.required ? "" : "  <span class='opt'>(optional)</span>");
+      lb.textContent = f.label + (f.required ? "" : " · optional");
+      wrap.appendChild(lb);
+      control = document.createElement((f.type === "multiline" || f.type === "json") ? "textarea"
+        : (f.type === "select" ? "select" : "input"));
+      control.dataset.k = f.key; control.dataset.t = f.type;
+      if (f.type === "text" || f.type === "number") {
+        control.type = f.type === "number" ? "number" : "text";
+        if (f.default !== undefined) control.value = f.default;
+        // A convenient working default for the URL field: point at this very
+        // goto instance's catch-all so a first invoke succeeds with no edits.
+        if (f.type === "text" && f.default === undefined && f.key === "url") control.value = location.origin + "/hello";
+      }
+      if (f.type === "select") {
+        for (const o of f.options) {
+          const opt = document.createElement("option");
+          opt.value = o; opt.textContent = o;
+          if (o === f.default) opt.selected = true;
+          control.appendChild(opt);
+        }
+      }
+      if (f.type === "multiline") {
+        control.rows = Math.max(2, Math.min(4, String(f.default || "").split("\n").length || 2));
+      }
+      if (f.type === "json") {
+        control.rows = Math.max(3, Math.min(8, String(f.default || "").split("\n").length || 3));
+        control.placeholder = f.default !== undefined ? "" : "{ }";
+        control.spellcheck = false;
+      }
+      if (f.type === "kv") {
+        control = buildKvEditor(f);
+        wrap.appendChild(control);
+      } else {
+        control.addEventListener("input", updatePreview);
+        wrap.appendChild(control);
+      }
+    }
+    if (f.help) {
+      const h = document.createElement("div");
+      h.className = "help";
+      h.textContent = f.help;
+      wrap.appendChild(h);
+    }
+    fieldGrid.appendChild(wrap);
+  }
+}
+
+function buildKvEditor(f) {
+  const holder = document.createElement("div");
+  holder.className = "kv-rows";
+  holder.dataset.k = f.key; holder.dataset.t = "kv";
+  const addRow = (k, v) => {
+    const row = document.createElement("div");
+    row.className = "kv-row";
+    const ki = document.createElement("input");
+    ki.type = "text"; ki.placeholder = "header name"; ki.value = k || ""; ki.dataset.part = "k";
+    const vi = document.createElement("input");
+    vi.type = "text"; vi.placeholder = "value"; vi.value = v || ""; vi.dataset.part = "v";
+    const del = document.createElement("button");
+    del.type = "button"; del.className = "del"; del.textContent = "✕";
+    del.addEventListener("click", () => { row.remove(); updatePreview(); });
+    ki.addEventListener("input", updatePreview);
+    vi.addEventListener("input", updatePreview);
+    row.appendChild(ki); row.appendChild(vi); row.appendChild(del);
+    holder.appendChild(row);
+  };
+  const addBtn = document.createElement("button");
+  addBtn.type = "button"; addBtn.className = "kv-add";
+  addBtn.textContent = "+ Add header";
+  addBtn.addEventListener("click", () => { addRow(); updatePreview(); });
+  holder.appendChild(addBtn);
+  holder._addRow = addRow;
+  return holder;
+}
+
+/* =====================================================================
+   Read field values from the DOM and assemble the JSON body
+   ===================================================================== */
+function readField(f) {
+  const wrap = fieldGrid.querySelector(`.field[data-key="${cssEscape(f.key)}"]`);
+  if (!wrap) return undefined;
+  const el = wrap.querySelector(`[data-k="${cssEscape(f.key)}"]`);
+  if (!el) return undefined;
+  const t = el.dataset.t || f.type;
+
+  if (t === "bool") {
+    return el.checked ? true : undefined;
+  }
+  if (t === "kv") {
+    const obj = {};
+    el.querySelectorAll(".kv-row").forEach((row) => {
+      const k = row.querySelector('[data-part="k"]').value.trim();
+      const v = row.querySelector('[data-part="v"]').value;
+      if (k) obj[k] = v;
+    });
+    return Object.keys(obj).length ? obj : undefined;
+  }
+  if (t === "multiline") {
+    const arr = el.value.split("\n").map((s) => s.trim()).filter(Boolean);
+    return arr.length ? arr : undefined;
+  }
+  if (t === "json") {
+    const v = el.value.trim();
+    if (v === "") return undefined;
+    return JSON.parse(v); // throws -> surfaced by buildBody/invoke as an error
+  }
+  if (t === "number") {
+    const v = el.value.trim();
+    if (v === "") return undefined;
+    const n = Number(v);
+    return Number.isNaN(n) ? undefined : n;
+  }
+  if (t === "select") {
+    // An empty select value means "use the server default" -> omit the key.
+    return el.value === "" ? undefined : el.value;
+  }
+  // text
+  const v = el.value.trim();
+  return v === "" ? undefined : v;
+}
+
+function setPath(obj, path, value) {
+  const parts = path.split(".");
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (!cur[parts[i]]) cur[parts[i]] = {};
+    cur = cur[parts[i]];
+  }
+  cur[parts[parts.length - 1]] = value;
+}
+
+function buildBody() {
+  const body = {};
+  for (const f of state.api.fields) {
+    if ((f.where || "body") !== "body") continue;
+    let v;
+    try {
+      v = readField(f);
+    } catch (err) {
+      throw new Error(`'${f.label}': invalid JSON - ${err.message}`);
+    }
+    if (v !== undefined) setPath(body, f.key, v);
+  }
+  return body;
+}
+
+function apiHasBody() {
+  return (state.api.fields || []).some((f) => (f.where || "body") === "body");
+}
+
+function collectQuery() {
+  const qp = new URLSearchParams();
+  for (const f of state.api.fields) {
+    if ((f.where || "body") !== "query") continue;
+    const v = readField(f);
+    if (v !== undefined) qp.append(f.key, String(v));
+  }
+  return qp;
+}
+
+function fillPath(tmpl) {
+  let out = tmpl;
+  for (const f of state.api.fields) {
+    if ((f.where || "body") !== "path") continue;
+    const v = readField(f);
+    if (v !== undefined && (out.includes(`{${f.key}}`))) {
+      out = out.replace(`{${f.key}}`, encodeURIComponent(String(v)));
+    }
+  }
+  return out;
+}
+
+function updatePreview() {
+  if (!state.api || state.jsonMode) return;
+  $("json-preview-wrap").innerHTML = highlightJson(JSON.stringify(buildBody(), null, 2));
+}
+
+/* =====================================================================
+   Tab / mode switching
+   ===================================================================== */
+function setMode(jsonMode) {
+  state.jsonMode = jsonMode;
+  $("form-mode").classList.toggle("hidden", jsonMode);
+  $("json-mode").classList.toggle("hidden", !jsonMode);
+  document.querySelectorAll('[data-jsonmode]').forEach((t) => {
+    t.classList.toggle("active", Number(t.dataset.jsonmode) === (jsonMode ? 1 : 0));
+  });
+  if (!jsonMode) {
+    updatePreview();
+  } else {
+    $("raw-json").value = JSON.stringify(buildBody(), null, 2);
+  }
+}
+
+document.addEventListener("click", (e) => {
+  const tab = e.target.closest(".tab");
+  if (!tab || !tab.dataset.jsonmode) return;
+  const mode = Number(tab.dataset.jsonmode) === 1;
+  setMode(mode);
+  // also switch output tab view for output tabs
+});
+document.addEventListener("click", (e) => {
+  const tab = e.target.closest(".tab[data-outtab]");
+  if (!tab) return;
+  document.querySelectorAll('[data-outtab]').forEach((t) => t.classList.toggle("active", t === tab));
+  $("response-view").classList.toggle("hidden", tab.dataset.outtab !== "body");
+  $("headers-view").classList.toggle("hidden", tab.dataset.outtab !== "headers");
+});
+
+/* =====================================================================
+   JSON syntax highlighting
+   ===================================================================== */
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function highlightJson(json) {
+  if (!json) return "";
+  return escapeHtml(json).replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+    (match) => {
+      let cls = "j-num";
+      if (/^"/.test(match)) {
+        cls = /:$/.test(match) ? "j-k" : "j-str";
+      } else if (/true|false/.test(match)) cls = "j-bool";
+      else if (/null/.test(match)) cls = "j-null";
+      return `<span class="${cls}">${match}</span>`;
+    }
+  );
+}
+
+/* =====================================================================
+   Invoke + output
+   ===================================================================== */
+function clearOutput() {
+  $("summary-line").innerHTML = "";
+  $("response-view").textContent = "No request made yet.";
+  $("response-view").classList.add("empty");
+  $("headers-view").textContent = "";
+  $("headers-view").classList.add("hidden");
+  $("error-banner").classList.add("hidden");
+}
+$("clear-btn").addEventListener("click", clearOutput);
+
+function setError(msg) {
+  const b = $("error-banner");
+  b.textContent = msg;
+  b.classList.toggle("hidden", !msg);
+}
+
+async function invoke() {
+  if (!state.api) return;
+  setError("");
+  const btn = $("invoke-btn");
+  btn.disabled = true;
+
+  const method = state.api.methods && state.api.methods.length ? $("req-method").value : state.api.method;
+  const hasBody = apiHasBody();
+
+  let body;
+  try {
+    body = state.jsonMode ? JSON.parse($("raw-json").value) : buildBody();
+  } catch (err) {
+    setError("Invalid JSON body: " + err.message);
+    btn.disabled = false;
+    return;
+  }
+
+  // Assemble the request against this same server: fill any {path} tokens,
+  // append any query-param fields, then attach the JSON body if the API has one.
+  let url = fillPath(state.api.path);
+  const qp = collectQuery();
+  if (qp.size) url += (url.includes("?") ? "&" : "?") + qp.toString();
+
+  const init = { method, headers: { "Accept": "application/json" } };
+  if (hasBody && (method !== "GET" && method !== "HEAD")) {
+    init.headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+
+  const start = Date.now();
+  try {
+    const resp = await fetch(url, init);
+    const text = await resp.text();
+    const dt = Date.now() - start;
+
+    // render headers
+    const hdr = {};
+    resp.headers.forEach((v, k) => { (hdr[k] = hdr[k] || []).push(v); });
+    const hdrLines = Object.entries(hdr)
+      .map(([k, v]) => `${k}: ${v.join(", ")}`)
+      .join("\n");
+    $("headers-view").textContent = (resp.status + " " + resp.statusText + "\n" + hdrLines) || "(no headers)";
+
+    // render body
+    const view = $("response-view");
+    const okColor = String(resp.status).startsWith("2") ? "status-green" : "status-red";
+    $("summary-line").innerHTML =
+      `<span class="${okColor}">${resp.status} ${escapeHtml(resp.statusText)}</span>` +
+      ` · <span class="j-num">${dt}ms</span> · ${escapeHtml(resp.url)}`;
+    view.classList.remove("empty");
+    try {
+      const pretty = JSON.stringify(JSON.parse(text), null, 2);
+      view.innerHTML = highlightJson(pretty);
+    } catch {
+      view.textContent = text || "(empty response body)";
+    }
+  } catch (err) {
+    const dt = Date.now() - start;
+    $("summary-line").innerHTML = `<span class="status-red">ERROR</span> · <span class="j-num">${dt}ms</span>`;
+    setError("Request failed: " + (err && err.message ? err.message : String(err)));
+  } finally {
+    btn.disabled = false;
+  }
+}
+$("invoke-btn").addEventListener("click", invoke);
+
+/* =====================================================================
+   Init
+   ===================================================================== */
+function cssEscape(s) {
+  // Our keys are alnum + dots/dashes; the css.escape polyfill for safety.
+  if (window.CSS && CSS.escape) return CSS.escape(s);
+  return s.replace(/([^a-zA-Z0-9_-])/g, "\\$1");
+}
+
+(function init() {
+  $("origin-label").textContent = location.origin;
+  renderSidebar();
+  clearOutput();
+  if (PACKAGES.length) {
+    // Pre-select the first API of the first package for immediate demo.
+    selectApi(PACKAGES[0].id, PACKAGES[0].apis[0].id);
+  }
+})();
+</script>
+</body>
+</html>

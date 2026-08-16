@@ -39,10 +39,15 @@ func setRoutes(r *mux.Router) {
 	uiRouter := middleware.RootPath("/ui")
 	util.AddRoute(uiRouter, "", showUI, "GET")
 	util.AddRoute(uiRouter, "/ws", handleWebsocket, "GET")
+	util.AddRoute(uiRouter, "/api", showAPIConsole, "GET")
 }
 
 func showUI(w http.ResponseWriter, r *http.Request) {
-	http.ServeFileFS(w, r, staticUI, "ui/static/index.html")
+	http.ServeFileFS(w, r, staticUI, "static/index.html")
+}
+
+func showAPIConsole(w http.ResponseWriter, r *http.Request) {
+	http.ServeFileFS(w, r, staticUI, "static/api-console.html")
 }
 
 func handleWebsocket(w http.ResponseWriter, r *http.Request) {
