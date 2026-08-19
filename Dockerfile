@@ -1,10 +1,10 @@
 FROM golang:1.25-alpine AS builder-base
 
-ARG GOOS
-ARG GOARCH
+ARG TARGETOS
+ARG TARGETARCH
 
-RUN echo 'http://nl.alpinelinux.org/alpine/v3.22/main' > /etc/apk/repositories
-RUN echo 'http://nl.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories
+RUN echo 'http://dl-cdn.alpinelinux.org/alpine/v3.22/main' > /etc/apk/repositories
+RUN echo 'http://dl-cdn.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories
 RUN apk update \
 		&& apk add --no-cache openssl \
 		&& apk add --no-cache ca-certificates \
@@ -22,12 +22,14 @@ RUN mkdir /goto
 ADD ./go.mod /goto/go.mod
 
 WORKDIR /goto
-RUN GOOS=${GOOS} GOARCH=${GOARCH} go mod download
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} go mod download
 
 FROM builder-base AS builder
 
-ARG COMMIT 
-ARG VERSION 
+ARG TARGETOS
+ARG TARGETARCH
+ARG COMMIT
+ARG VERSION
 
 ADD ./cmd/ /goto/cmd
 ADD ./ctl/ /goto/ctl
@@ -36,7 +38,7 @@ ADD ./main.go /goto/main.go
 
 WORKDIR /goto
 
-RUN --mount=type=cache,target="/root/.cache/go-build" GOOS=${GOOS} GOARCH=${GOARCH} go build -mod=mod -o goto -ldflags="-extldflags \"-static\" -w -s -X goto/pkg/global.Version=$VERSION -X goto/pkg/global.Commit=$COMMIT" .
+RUN --mount=type=cache,target="/root/.cache/go-build" GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -mod=mod -o goto -ldflags="-extldflags \"-static\" -w -s -X goto/pkg/global.Version=$VERSION -X goto/pkg/global.Commit=$COMMIT" .
 
 WORKDIR /tmp
 
@@ -45,8 +47,8 @@ FROM alpine:3.22 AS release-base-core
 
 ARG utils
 
-RUN echo 'http://nl.alpinelinux.org/alpine/v3.22/main' > /etc/apk/repositories && \
-    echo 'http://nl.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories
+RUN echo 'http://dl-cdn.alpinelinux.org/alpine/v3.22/main' > /etc/apk/repositories && \
+    echo 'http://dl-cdn.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories
 
 RUN apk update && apk add bash sudo su-exec;
 RUN if [[ -n "$utils" ]] ; then apk add curl jq; echo "utils=$utils"; fi

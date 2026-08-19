@@ -124,7 +124,7 @@ func (c *CallSpec) PrepareRequest(r *http.Request) error {
 	} else if len(c.Payload) == 1 {
 		bodyReader = strings.NewReader(c.Payload[0])
 	}
-	req, err := http.NewRequest(r.Method, c.URL, bodyReader)
+	req, err := http.NewRequest(c.Method, c.URL, bodyReader)
 	if err != nil {
 		return err
 	}
