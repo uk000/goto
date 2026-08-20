@@ -17,7 +17,9 @@
 package grpcserver
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"goto/pkg/rpc"
 	"goto/pkg/rpc/grpc"
 	gotogrpc "goto/pkg/rpc/grpc"
@@ -50,6 +52,69 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(serverRouter, "/services/{service}/stop", stopService, "POST")
 	util.AddRoute(serverRouter, "/services/active", getActiveServices, "GET")
 	util.AddRoute(serverRouter, "/services", getActiveServices, "GET")
+	extAuthzRouter := util.PathRouter(grpcRouter, "/extauthz")
+	util.AddRoute(extAuthzRouter, "/rules", getExtAuthzRulesAPI, "GET")
+	util.AddRoute(extAuthzRouter, "/rules", addExtAuthzRulesAPI, "POST")
+	util.AddRoute(extAuthzRouter, "/rules", removeExtAuthzRulesAPI, "DELETE")
+}
+
+func addExtAuthzRulesAPI(w http.ResponseWriter, r *http.Request) {
+	rule := ExtAuthzRule{}
+	rules := []ExtAuthzRule{}
+	msg := ""
+	status := http.StatusOK
+	body, err := io.ReadAll(r.Body)
+	if err == nil {
+		err = util.ReadJsonPayloadFromBody(bytes.NewReader(body), &rule)
+	}
+	if err == nil && rule.Header != "" {
+		rules = append(rules, rule)
+	} else {
+		if err := util.ReadJsonPayloadFromBody(bytes.NewReader(body), &rules); err != nil {
+			status = http.StatusBadRequest
+			msg = "Invalid ext authz rules payload"
+		} else if len(rules) == 0 {
+			status = http.StatusBadRequest
+			msg = "No ext authz rules given"
+		}
+	}
+	if status == http.StatusOK {
+		stored := 0
+		for i := range rules {
+			if StoreExtAuthzRule(&rules[i]) {
+				stored++
+			}
+		}
+		if stored == 0 {
+			status = http.StatusBadRequest
+			msg = "No valid ext authz rules stored; each rule needs a header and an action of allow or deny"
+		} else {
+			msg = fmt.Sprintf("Stored [%d] ext authz rules", stored)
+		}
+	}
+	w.WriteHeader(status)
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
+}
+
+func getExtAuthzRulesAPI(w http.ResponseWriter, r *http.Request) {
+	util.WriteJsonPayload(w, GetExtAuthzRules())
+}
+
+func removeExtAuthzRulesAPI(w http.ResponseWriter, r *http.Request) {
+	header := strings.ToLower(r.URL.Query().Get("header"))
+	value := r.URL.Query().Get("value")
+	msg := ""
+	if header == "" {
+		ClearExtAuthzRules()
+		msg = "Cleared all ext authz rules"
+	} else if RemoveExtAuthzRule(header, value) {
+		msg = fmt.Sprintf("Removed ext authz rule for header [%s]", header)
+	} else {
+		msg = fmt.Sprintf("No ext authz rule found for header [%s]", header)
+	}
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
 }
 
 func openGRPCPort(w http.ResponseWriter, r *http.Request) {

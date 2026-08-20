@@ -1,7 +1,7 @@
 # usage: make VERSION=1.0.0 GOOS=darwin|linux|window release
 
 # always run these targets
-.PHONY: all clean docker-build docker-build-utils docker-build-net docker-build-kube docker-build-perf docker-build-grpc docker-push docker-push-utils docker-push-net docker-push-kube docker-push-perf docker-push-grpc docker-run
+.PHONY: all clean docker-build docker-build-utils docker-build-net docker-build-kube docker-build-perf docker-build-grpc docker-push docker-push-utils docker-push-net docker-push-kube docker-push-perf docker-push-grpc docker-run gen gen-extauthz
 
 # variables
 OUT := goto
@@ -13,8 +13,11 @@ IMAGE := uk0000/goto
 
 all: build
 
-gen:
+gen: gen-extauthz
 	protoc --proto_path=pkg/rpc/grpc/protos pkg/rpc/grpc/protos/goto.proto --go-grpc_out=pkg/rpc/grpc/pb
+
+gen-extauthz:
+	protoc --proto_path=pkg/rpc/grpc/extauthz --go_out=pkg/rpc/grpc/extauthz --go_opt=paths=source_relative --go-grpc_out=pkg/rpc/grpc/extauthz --go-grpc_opt=paths=source_relative pkg/rpc/grpc/extauthz/extauthz.proto
 
 clean:
 	rm -rf pkg/server/grpc/pb/*.go

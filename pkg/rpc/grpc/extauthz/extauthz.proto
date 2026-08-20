@@ -1,0 +1,603 @@
+// A self-contained definition of Envoy's external authorization protocol
+// adapted from envoyproxy/envoy api/envoy/service/auth/v3/{external_auth,attribute_context}.proto,
+// with the referenced envoy.config.core.v3 and envoy.type.v3 messages inlined.
+// Proto package, service, method names and field numbers are kept identical to Envoy's
+// definitions for wire compatibility, so Envoy's ext_authz filter can talk to this service.
+// The envoy.type.v3.StatusCode enum values are inlined from api/envoy/type/v3/http_status.proto.
+
+syntax = "proto3";
+
+package envoy.service.auth.v3;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+option go_package = "goto/pkg/rpc/grpc/extauthz;extauthz";
+
+// A generic interface for performing authorization check on incoming
+// requests to a networked service.
+service Authorization {
+  // Performs authorization check based on the attributes associated with the
+  // incoming request, and returns status `OK` or not `OK`.
+  rpc Check(CheckRequest) returns (CheckResponse) {
+  }
+}
+
+// The authorization service request message used by external authorization
+// :ref:`network filter <config_network_filters_ext_authz>` and
+// :ref:`HTTP filter <config_http_filters_ext_authz>`.
+message CheckRequest {
+  // The request attributes.
+  AttributeContext attributes = 1;
+}
+
+// HTTP attributes for a denied response.
+message DeniedHttpResponse {
+  // This field allows the authorization service to send an HTTP response status code to the
+  // downstream client. If not set, Envoy sends ``403 Forbidden`` HTTP status code by default.
+  HttpStatus status = 1;
+
+  // This field allows the authorization service to send HTTP response headers
+  // to the downstream client. Note that the ``append`` field in ``HeaderValueOption``
+  // defaults to false when used in this message.
+  repeated HeaderValueOption headers = 2;
+
+  // This field allows the authorization service to send a response body data
+  // to the downstream client.
+  string body = 3;
+}
+
+// HTTP attributes for an OK response.
+message OkHttpResponse {
+  // HTTP entity headers in addition to the original request headers. This allows the authorization
+  // service to append, to add or to override headers from the original request before
+  // dispatching it to the upstream. Note that the ``append`` field in ``HeaderValueOption``
+  // defaults to false when used in this message. By setting the ``append`` field to ``true``,
+  // the filter will append the correspondent header value to the matched request header.
+  // By leaving ``append`` as false, the filter will either add a new header, or override an
+  // existing one if there is a match.
+  repeated HeaderValueOption headers = 2;
+
+  // This field has been deprecated in favor of ``CheckResponse.dynamic_metadata``. Until it is
+  // removed, setting this field overrides ``CheckResponse.dynamic_metadata``.
+  google.protobuf.Struct dynamic_metadata = 3 [deprecated = true];
+
+  // HTTP entity headers to remove from the original request before dispatching it to the
+  // upstream. This allows the authorization service to act on auth related headers (such as
+  // ``Authorization``), process them, and consume them.
+  // Pseudo headers (such as ``:authority``, ``:method``, ``:path`` etc), as well as the header
+  // ``Host``, may not be removed as that would make the request malformed. If mentioned in
+  // ``headers_to_remove`` these special headers will be ignored.
+  repeated string headers_to_remove = 5;
+
+  // This field allows the authorization service to send HTTP response headers
+  // to the downstream client on success. Note that the ``append`` field in ``HeaderValueOption``
+  // defaults to false when used in this message.
+  repeated HeaderValueOption response_headers_to_add = 6;
+
+  // This field allows the authorization service to set (and overwrite) query
+  // string parameters on the original request before it is sent upstream.
+  repeated QueryParameter query_parameters_to_set = 7;
+
+  // This field allows the authorization service to specify which query parameters
+  // should be removed from the original request before it is sent upstream. Each
+  // element in this list is a case-sensitive query parameter name to be removed.
+  repeated string query_parameters_to_remove = 8;
+}
+
+// Intended for gRPC and Network Authorization servers ``only``.
+message CheckResponse {
+  // Status ``OK`` allows the request. Any other status indicates the request should be denied,
+  // and for HTTP filter, if not overridden by the denied HTTP response status, Envoy sends
+  // ``403 Forbidden`` HTTP status code by default.
+  Status status = 1;
+
+  // A message that contains HTTP response attributes. This message is
+  // used when the authorization service needs to send custom responses to the
+  // downstream client or, to modify/add request headers being dispatched to the upstream.
+  oneof http_response {
+    // Supplies http attributes for a denied response.
+    DeniedHttpResponse denied_response = 2;
+
+    // Supplies http attributes for an ok response.
+    OkHttpResponse ok_response = 3;
+
+    // Supplies http attributes for an error response. This is used when the authorization
+    // service encounters an internal error and wants to return custom headers and body to the
+    // downstream client. The HTTP status code, headers, and body are taken from the
+    // ``DeniedHttpResponse`` message.
+    DeniedHttpResponse error_response = 5;
+  }
+
+  // Optional response metadata that will be emitted as dynamic metadata to be consumed by the
+  // next filter.
+  google.protobuf.Struct dynamic_metadata = 4;
+}
+
+// An attribute is a piece of metadata that describes an activity on a network.
+// For example, the size of an HTTP request, or the status code of an HTTP response.
+// The ``AttributeContext`` is a collection of individual attributes
+// supported by Envoy authorization system.
+message AttributeContext {
+  // This message defines attributes for a node that handles a network request.
+  // The node can be either a service or an application that sends, forwards,
+  // or receives the request. Service peers should fill in the ``service``,
+  // ``principal``, and ``labels`` as appropriate.
+  message Peer {
+    // The address of the peer, this is typically the IP address.
+    // It can also be UDS path, or others.
+    Address address = 1;
+
+    // The canonical service name of the peer.
+    // It should be set to the HTTP ``x-envoy-downstream-service-cluster`` header value.
+    // If a more trusted source of the service name is available through mTLS/secure naming,
+    // it should be used.
+    string service = 2;
+
+    // The labels associated with the peer.
+    // These could be pod labels for Kubernetes or tags for VMs.
+    // The source of the labels could be an X.509 certificate or other configuration.
+    map<string, string> labels = 3;
+
+    // The authenticated identity of this peer.
+    // For example, the identity associated with the workload such as a service account.
+    // If an X.509 certificate is used to assert the identity this field should be sourced from
+    // ``URI Subject Alternative Names``, ``DNS Subject Alternate Names`` or ``Subject`` in that
+    // order. The primary identity should be the principal. The principal format is issuer
+    // specific.
+    //
+    // Examples:
+    //
+    // - SPIFFE format is ``spiffe://trust-domain/path``.
+    // - Google account format is ``https://accounts.google.com/{userid}``.
+    string principal = 4;
+
+    // The X.509 certificate used to authenticate the identity of this peer.
+    // When present, the certificate contents are encoded in URL and PEM format.
+    string certificate = 5;
+  }
+
+  // Represents a network request, such as an HTTP request.
+  message Request {
+    // The timestamp when the proxy receives the first byte of the request.
+    google.protobuf.Timestamp time = 1;
+
+    // Represents an HTTP request or an HTTP-like request.
+    HttpRequest http = 2;
+  }
+
+  // This message defines attributes for an HTTP request.
+  // HTTP/1.x, HTTP/2, gRPC are all considered as HTTP requests.
+  message HttpRequest {
+    // The unique ID for a request, which can be propagated to downstream
+    // systems. The ID should have low probability of collision
+    // within a single day for a specific service.
+    // For HTTP requests, it should be X-Request-ID or equivalent.
+    string id = 1;
+
+    // The HTTP request method, such as ``GET``, ``POST``.
+    string method = 2;
+
+    // The HTTP request headers. If multiple headers share the same key, they
+    // must be merged according to the HTTP spec. All header keys must be
+    // lower-cased, because HTTP header keys are case-insensitive.
+    // Header value is encoded as UTF-8 string. Non-UTF-8 characters will be replaced by "!".
+    // This field will not be set if ``encode_raw_headers`` is set to true.
+    map<string, string> headers = 3;
+
+    // The request target, as it appears in the first line of the HTTP request. This includes
+    // the URL path and query-string. No decoding is performed.
+    string path = 4;
+
+    // The HTTP request ``Host`` or ``:authority`` header value.
+    string host = 5;
+
+    // The HTTP URL scheme, such as ``http`` and ``https``.
+    string scheme = 6;
+
+    // This field is always empty, and exists for compatibility reasons. The HTTP URL query is
+    // included in the ``path`` field.
+    string query = 7;
+
+    // This field is always empty, and exists for compatibility reasons. The URL fragment is
+    // not submitted as part of HTTP requests; it is unknowable.
+    string fragment = 8;
+
+    // The HTTP request size in bytes. If unknown, it must be -1.
+    int64 size = 9;
+
+    // The network protocol used with the request, such as "HTTP/1.0", "HTTP/1.1", or "HTTP/2".
+    string protocol = 10;
+
+    // The HTTP request body.
+    string body = 11;
+
+    // The HTTP request body in bytes. This is used instead of ``body`` when
+    // ``pack_as_bytes`` is set to true.
+    bytes raw_body = 12;
+
+    // A list of the raw HTTP request headers. This is used instead of ``headers`` when
+    // ``encode_raw_headers`` is set to true. Note that this is not actually a map type.
+    // ``header_map`` contains a single repeated field ``headers``. Here, only the ``key``
+    // and ``raw_value`` fields will be populated for each ``HeaderValue``, and that is only
+    // when ``encode_raw_headers`` is set to true. Also, unlike the ``headers`` field, headers
+    // with the same key are not combined into a single comma separated header.
+    HeaderMap header_map = 13;
+  }
+
+  // This message defines attributes for the underlying TLS session.
+  message TLSSession {
+    // SNI used for TLS session.
+    string sni = 1;
+  }
+
+  // The source of a network activity, such as starting a TCP connection.
+  // In a multi hop network activity, the source represents the sender of the last hop.
+  Peer source = 1;
+
+  // The destination of a network activity, such as accepting a TCP connection.
+  // In a multi hop network activity, the destination represents the receiver of the last hop.
+  Peer destination = 2;
+
+  // Represents a network request, such as an HTTP request.
+  Request request = 4;
+
+  // This is analogous to http_request.headers, however these contents will not be sent to the
+  // upstream server. Context_extensions provide an extension mechanism for sending additional
+  // information to the auth server without modifying the proto definition. It maps to the
+  // internal opaque context in the filter chain.
+  map<string, string> context_extensions = 10;
+
+  // Dynamic metadata associated with the request.
+  Metadata metadata_context = 11;
+
+  // TLS session details of the underlying connection.
+  // This is not populated by default and will be populated only if the ext_authz filter has
+  // been specifically configured to include this information.
+  TLSSession tls_session = 12;
+
+  // Metadata associated with the selected route.
+  Metadata route_metadata_context = 13;
+}
+
+// ---------------------------------------------------------------------------
+// Inlined from envoy/config/core/v3/{base,address}.proto, field numbers intact.
+// ---------------------------------------------------------------------------
+
+// Header name/value pair.
+message HeaderValue {
+  // Header name.
+  string key = 1;
+
+  // Header value.
+  string value = 2;
+
+  // Header value in bytes.
+  bytes raw_value = 3;
+}
+
+// Header name/value pair plus option to control append behavior.
+message HeaderValueOption {
+  // Action to take when a header already exists in the request.
+  enum HeaderAppendAction {
+    // Append if a header already exists, otherwise add.
+    APPEND_IF_EXISTS_OR_ADD = 0;
+
+    // Add the header only if it does not already exist.
+    ADD_IF_ABSENT = 1;
+
+    // Overwrite the header if it already exists, otherwise add.
+    OVERWRITE_IF_EXISTS_OR_ADD = 2;
+
+    // Overwrite the header only if it already exists, otherwise do nothing.
+    OVERWRITE_IF_EXISTS = 3;
+  }
+
+  // Header name/value pair that will be appended to the request or response.
+  HeaderValue header = 1;
+
+  // Should the header be appended or overwritten.
+  google.protobuf.BoolValue append = 2 [deprecated = true];
+
+  // An action to take when a header already exists in the request.
+  HeaderAppendAction append_action = 3;
+
+  // If true, the header will be kept even if the value is empty.
+  bool keep_empty_value = 4;
+}
+
+// Wrapper message for a list of headers.
+message HeaderMap {
+  // The list of headers.
+  repeated HeaderValue headers = 1;
+}
+
+// Query parameter name/value pair.
+message QueryParameter {
+  // The key of the query parameter.
+  string key = 1;
+
+  // The value of the query parameter.
+  string value = 2;
+}
+
+// Metadata provides additional inputs to filters based on matched peer metadata.
+message Metadata {
+  // Opaque metadata from the filter.
+  map<string, google.protobuf.Struct> filter_metadata = 1;
+
+  // Typed metadata from the filter.
+  map<string, google.protobuf.Any> typed_filter_metadata = 2;
+}
+
+// The address of a peer, this is typically the IP address. It can also be UDS path, or others.
+// Inlined from envoy/config/core/v3/address.proto.
+message Address {
+  oneof address {
+    SocketAddress socket_address = 1;
+
+    Pipe pipe = 2;
+
+    EnvoyInternalAddress envoy_internal_address = 3;
+  }
+}
+
+// A unix domain socket address.
+message Pipe {
+  // Unix Domain Socket path.
+  string path = 1;
+
+  // The mode of the pipe.
+  uint32 mode = 2;
+}
+
+// The internal address of an envoy internal listener.
+message EnvoyInternalAddress {
+  // Specifies the name of the internal listener.
+  string server_listener_name = 1;
+
+  // Specifies an endpoint identifier to distinguish between multiple endpoints for the same
+  // internal listener in a single upstream pool.
+  string endpoint_id = 2;
+}
+
+// A socket address, consisting of an address (IP or hostname) and a port.
+message SocketAddress {
+  enum Protocol {
+    // TCP.
+    TCP = 0;
+
+    // UDP.
+    UDP = 1;
+  }
+
+  // The protocol for the socket.
+  Protocol protocol = 1;
+
+  // The address, either an IP or a hostname.
+  string address = 2;
+
+  oneof port_specifier {
+    // The port number.
+    uint32 port_value = 3;
+
+    // The named port.
+    string named_port = 4;
+  }
+
+  // The name of a custom resolver.
+  string resolver_name = 5;
+
+  // Whether the address is IPv4 compatible.
+  bool ipv4_compat = 6;
+
+  // The path to the network namespace.
+  string network_namespace_filepath = 7;
+}
+
+// ---------------------------------------------------------------------------
+// Inlined from envoy/type/v3/http_status.proto, field numbers intact.
+// ---------------------------------------------------------------------------
+
+// HTTP response codes supported by Envoy.
+// For more details visit https://datatracker.ietf.org/doc/html/rfc9110
+enum StatusCode {
+  // Empty - default value.
+  Empty = 0;
+
+  // Continue.
+  Continue = 100;
+
+  // OK.
+  OK = 200;
+
+  // Created.
+  Created = 201;
+
+  // Accepted.
+  Accepted = 202;
+
+  // Non-Authoritative Information.
+  NonAuthoritativeInformation = 203;
+
+  // No Content.
+  NoContent = 204;
+
+  // Reset Content.
+  ResetContent = 205;
+
+  // Partial Content.
+  PartialContent = 206;
+
+  // Multi-Status.
+  MultiStatus = 207;
+
+  // Already Reported.
+  AlreadyReported = 208;
+
+  // IM Used.
+  IMUsed = 226;
+
+  // Multiple Choices.
+  MultipleChoices = 300;
+
+  // Moved Permanently.
+  MovedPermanently = 301;
+
+  // Found.
+  Found = 302;
+
+  // See Other.
+  SeeOther = 303;
+
+  // Not Modified.
+  NotModified = 304;
+
+  // Use Proxy.
+  UseProxy = 305;
+
+  // Temporary Redirect.
+  TemporaryRedirect = 307;
+
+  // Permanent Redirect.
+  PermanentRedirect = 308;
+
+  // Bad Request.
+  BadRequest = 400;
+
+  // Unauthorized.
+  Unauthorized = 401;
+
+  // Payment Required.
+  PaymentRequired = 402;
+
+  // Forbidden.
+  Forbidden = 403;
+
+  // Not Found.
+  NotFound = 404;
+
+  // Method Not Allowed.
+  MethodNotAllowed = 405;
+
+  // Not Acceptable.
+  NotAcceptable = 406;
+
+  // Proxy Authentication Required.
+  ProxyAuthenticationRequired = 407;
+
+  // Request Timeout.
+  RequestTimeout = 408;
+
+  // Conflict.
+  Conflict = 409;
+
+  // Gone.
+  Gone = 410;
+
+  // Length Required.
+  LengthRequired = 411;
+
+  // Precondition Failed.
+  PreconditionFailed = 412;
+
+  // Payload Too Large.
+  PayloadTooLarge = 413;
+
+  // URI Too Long.
+  URITooLong = 414;
+
+  // Unsupported Media Type.
+  UnsupportedMediaType = 415;
+
+  // Range Not Satisfiable.
+  RangeNotSatisfiable = 416;
+
+  // Expectation Failed.
+  ExpectationFailed = 417;
+
+  // Misdirected Request.
+  MisdirectedRequest = 421;
+
+  // Unprocessable Entity.
+  UnprocessableEntity = 422;
+
+  // Locked.
+  Locked = 423;
+
+  // Failed Dependency.
+  FailedDependency = 424;
+
+  // Too Early.
+  TooEarly = 425;
+
+  // Upgrade Required.
+  UpgradeRequired = 426;
+
+  // Precondition Required.
+  PreconditionRequired = 428;
+
+  // Too Many Requests.
+  TooManyRequests = 429;
+
+  // Request Header Fields Too Large.
+  RequestHeaderFieldsTooLarge = 431;
+
+  // Internal Server Error.
+  InternalServerError = 500;
+
+  // Not Implemented.
+  NotImplemented = 501;
+
+  // Bad Gateway.
+  BadGateway = 502;
+
+  // Service Unavailable.
+  ServiceUnavailable = 503;
+
+  // Gateway Timeout.
+  GatewayTimeout = 504;
+
+  // HTTP Version Not Supported.
+  HTTPVersionNotSupported = 505;
+
+  // Variant Also Negotiates.
+  VariantAlsoNegotiates = 506;
+
+  // Insufficient Storage.
+  InsufficientStorage = 507;
+
+  // Loop Detected.
+  LoopDetected = 508;
+
+  // Not Extended.
+  NotExtended = 510;
+
+  // Network Authentication Required.
+  NetworkAuthenticationRequired = 511;
+}
+
+// HTTP status code used by Envoy.
+message HttpStatus {
+  // Supplies HTTP response code.
+  StatusCode code = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Inlined from google/rpc/status.proto, field numbers intact for wire
+// compatibility with google.rpc.Status used by Envoy.
+// ---------------------------------------------------------------------------
+
+// The `Status` type defines a logical error model.
+message Status {
+  // The status code.
+  int32 code = 1;
+
+  // A developer-facing error message.
+  string message = 2;
+
+  // A list of messages that carry the error details.
+  repeated google.protobuf.Any details = 3;
+}
