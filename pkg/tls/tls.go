@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -53,16 +54,40 @@ type SpiffeCerts struct {
 	ByIDNameDomain map[string]*types.Pair[string, string]
 }
 
+type JWK struct {
+	Kty string   `json:"kty"`
+	Use string   `json:"use"`
+	Alg string   `json:"alg,omitempty"`
+	Kid string   `json:"kid"`
+	N   string   `json:"n"`
+	E   string   `json:"e"`
+	X5c []string `json:"x5c,omitempty"`
+	X5t string   `json:"x5t,omitempty"`
+}
+
+type JWKS struct {
+	Keys []JWK `json:"keys"`
+}
+
 var (
-	RootCAs   = x509.NewCertPool()
-	CACerts   = map[string]*types.Pair[map[string]bool, []byte]{}
-	CAKeys    = map[string]*types.Pair[map[string]bool, []byte]{}
-	rawCerts  = map[string][]byte{}
-	rawKeys   = map[string][]byte{}
-	X509Certs = map[string][]*tls.Certificate{}
-	Spiffe    = &SpiffeCerts{}
-	lock      = sync.RWMutex{}
+	RootCAs       = x509.NewCertPool()
+	CACerts       = map[string]*types.Pair[map[string]bool, []byte]{}
+	CAKeys        = map[string]*types.Pair[map[string]bool, []byte]{}
+	rawCerts      = map[string][]byte{}
+	rawKeys       = map[string][]byte{}
+	X509Certs     = map[string][]*tls.Certificate{}
+	Spiffe        = &SpiffeCerts{}
+	DefaultCAKey  *rsa.PrivateKey
+	DefaultCAJWKS *JWKS
+	lock          = sync.RWMutex{}
 )
+
+func init() {
+	var err error
+	if DefaultCAKey, DefaultCAJWKS, err = createDefaultCAKeys(); err != nil {
+		log.Printf("ERROR: failed to initialize IDP keys: %v\n", err)
+	}
+}
 
 func AddCert(name string, cert []byte) {
 	lock.Lock()
@@ -111,7 +136,7 @@ func GetCerts(key string) (certs []*tls.Certificate, err error) {
 
 func AddCACert(name, domain string, cert []byte) {
 	if len(cert) > 0 {
-		if d, err := base64.StdEncoding.DecodeString(string(cert)); err == nil {
+		if d, err := base64.RawURLEncoding.DecodeString(string(cert)); err == nil {
 			cert = d
 		}
 	}
@@ -138,7 +163,7 @@ func RemoveCACert(name string) {
 
 func AddCAKey(name, domain string, key []byte) {
 	if len(key) > 0 {
-		if d, err := base64.StdEncoding.DecodeString(string(key)); err == nil {
+		if d, err := base64.RawURLEncoding.DecodeString(string(key)); err == nil {
 			key = d
 		}
 	}
@@ -159,6 +184,34 @@ func RemoveCAKey(name string) {
 	lock.Lock()
 	defer lock.Unlock()
 	delete(CAKeys, name)
+}
+
+func SetDefaultCA(name string) {
+	lock.Lock()
+	defer lock.Unlock()
+
+	domainsKey := CAKeys[name]
+	if domainsKey == nil {
+		return
+	}
+	k, err := parsePrivateKeyPEM(domainsKey.Right)
+	if err != nil {
+		log.Printf("SetDefaultCA: failed to parse CA key [%s]: %v", name, err)
+		return
+	}
+	rsaKey, ok := k.(*rsa.PrivateKey)
+	if !ok {
+		log.Printf("SetDefaultCA: CA key [%s] is not an RSA private key", name)
+		return
+	}
+	var certDER []byte
+	if domainsCert := CACerts[name]; domainsCert != nil {
+		if block, _ := pem.Decode(domainsCert.Right); block != nil && block.Type == "CERTIFICATE" {
+			certDER = block.Bytes
+		}
+	}
+	DefaultCAKey = rsaKey
+	DefaultCAJWKS = buildRSAJWKS(rsaKey, certDER)
 }
 
 func AddAutoCert(name string, commonName string, altNames []string, spiffeID string) error {
@@ -271,10 +324,10 @@ func CreateCertificate(domains []string, spiffeID, saveWithPrefix string) (outCe
 			break
 		}
 	}
-	return CreateCertificateWithCA(rawCACert, rawCAKey, domains, spiffeID, saveWithPrefix)
+	return CreateCertificateWithCA(rawCACert, rawCAKey, domains, spiffeID, saveWithPrefix, false)
 }
 
-func CreateCertificateWithCA(rawCACert, rawCAKey []byte, domains []string, spiffeID, saveWithPrefix string) (outCert *tls.Certificate, err error) {
+func CreateCertificateWithCA(rawCACert, rawCAKey []byte, domains []string, spiffeID, saveWithPrefix string, useRSA bool) (outCert *tls.Certificate, err error) {
 	var spiffeURL *url.URL
 	if spiffeID != "" {
 		spiffeURL, err = url.Parse(spiffeID)
@@ -282,12 +335,24 @@ func CreateCertificateWithCA(rawCACert, rawCAKey []byte, domains []string, spiff
 			return nil, err
 		}
 	}
-	priv, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	// priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	var ecdsaPriv *ecdsa.PrivateKey
+	var rsaPrivKey *rsa.PrivateKey
+	var pubKey crypto.PublicKey
+	var privKey crypto.PrivateKey
+	if useRSA {
+		rsaPrivKey, err = rsa.GenerateKey(rand.Reader, 2048)
+		privKey = rsaPrivKey
+		pubKey = rsaPrivKey.Public()
+	} else {
+		ecdsaPriv, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+		privKey = ecdsaPriv
+		pubKey = ecdsaPriv.Public()
+	}
 	if err != nil {
 		return &tls.Certificate{}, err
 	}
-	pubDER, err := x509.MarshalPKIXPublicKey(priv.Public())
+
+	pubDER, err := x509.MarshalPKIXPublicKey(pubKey)
 	if err != nil {
 		return &tls.Certificate{}, fmt.Errorf("failed to marshal public key: %w", err)
 	}
@@ -315,11 +380,9 @@ func CreateCertificateWithCA(rawCACert, rawCAKey []byte, domains []string, spiff
 		template.URIs = append(template.URIs, spiffeURL)
 	}
 	var caCert *x509.Certificate
-	var caChainDER [][]byte // all certs from the CA PEM (signing cert + any intermediates/root)
+	var caChainDER [][]byte
 	var caKey any
 	if len(rawCACert) > 0 && len(rawCAKey) > 0 {
-		// Parse ALL certificate blocks from the CA PEM.
-		// if we stop at the first block we lose the rest and can't build the chain to its trusted root.
 		rest := rawCACert
 		for {
 			var block *pem.Block
@@ -343,16 +406,8 @@ func CreateCertificateWithCA(rawCACert, rawCAKey []byte, domains []string, spiff
 		if caCert == nil {
 			return nil, fmt.Errorf("no CERTIFICATE block found in CA cert PEM")
 		}
-		// AuthorityKeyId links the leaf to its issuer for chain building (RFC 5280 §4.2.1.1).
 		template.AuthorityKeyId = caCert.SubjectKeyId
-		caKeyPEM, _ := pem.Decode(rawCAKey)
-		k, err := x509.ParsePKCS8PrivateKey(caKeyPEM.Bytes)
-		if err != nil {
-			k, err = x509.ParsePKCS1PrivateKey(caKeyPEM.Bytes)
-		}
-		if err != nil {
-			k, err = x509.ParseECPrivateKey(caKeyPEM.Bytes)
-		}
+		k, err := parsePrivateKeyPEM(rawCAKey)
 		if err != nil {
 			fmt.Printf("Failed to parse CA private key: %v\n", err)
 			return nil, err
@@ -362,9 +417,9 @@ func CreateCertificateWithCA(rawCACert, rawCAKey []byte, domains []string, spiff
 		template.IsCA = true
 		template.KeyUsage |= x509.KeyUsageCertSign | x509.KeyUsageCRLSign
 		caCert = template
-		caKey = priv
+		caKey = privKey
 	}
-	cert, err := x509.CreateCertificate(rand.Reader, template, caCert, priv.Public(), caKey)
+	cert, err := x509.CreateCertificate(rand.Reader, template, caCert, pubKey, caKey)
 	if err != nil {
 		return &tls.Certificate{}, err
 	}
@@ -391,11 +446,11 @@ func CreateCertificateWithCA(rawCACert, rawCAKey []byte, domains []string, spiff
 			keyFile := saveWithPrefix + "-key.pem"
 			if keyOut, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600); err != nil {
 				fmt.Printf("Failed to open file [%s] for writing key with error: %s\n", keyFile, err.Error())
-			} else if privBytes, err := x509.MarshalPKCS8PrivateKey(priv); err != nil {
+			} else if privBytes, err := x509.MarshalPKCS8PrivateKey(privKey); err != nil {
 				fmt.Printf("Failed to marshal key with error: %s\n", err.Error())
 			} else if err = pem.Encode(keyOut, &pem.Block{Type: "PRIVATE KEY", Bytes: privBytes}); err != nil {
 				fmt.Printf("Failed to write PRIVATE KEY to file [%s] with error: %s. Will try writing as EC key.\n", keyFile, err.Error())
-				if ecBytes, err := x509.MarshalECPrivateKey(priv); err != nil {
+				if ecBytes, err := x509.MarshalECPrivateKey(ecdsaPriv); err != nil {
 					fmt.Printf("Failed to marshal EC key with error: %s\n", err.Error())
 				} else if err = pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: ecBytes}); err != nil {
 					fmt.Printf("Failed to write EC PRIVATE KEY to file [%s] with error: %s\n", keyFile, err.Error())
@@ -414,9 +469,85 @@ func CreateCertificateWithCA(rawCACert, rawCAKey []byte, domains []string, spiff
 	outCert = &tls.Certificate{}
 	outCert.Certificate = append(outCert.Certificate, cert)
 	outCert.Certificate = append(outCert.Certificate, caChainDER...)
-	outCert.PrivateKey = priv
+	outCert.PrivateKey = privKey
 
 	return outCert, nil
+}
+
+// parsePrivateKeyPEM decodes a PEM-encoded private key and tries PKCS8, PKCS1,
+// and EC formats in order. Returns the parsed key or an error.
+func parsePrivateKeyPEM(rawKey []byte) (any, error) {
+	block, _ := pem.Decode(rawKey)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block found in private key")
+	}
+	if k, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		return k, nil
+	}
+	if k, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return k, nil
+	}
+	if k, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
+		return k, nil
+	}
+	return nil, fmt.Errorf("failed to parse private key: unsupported format")
+}
+
+func buildRSAJWKS(priv *rsa.PrivateKey, certDER []byte) *JWKS {
+	pub := &priv.PublicKey
+	// Encode the public exponent as minimal big-endian bytes.
+	eBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(eBytes, uint32(pub.E))
+	for len(eBytes) > 1 && eBytes[0] == 0 {
+		eBytes = eBytes[1:]
+	}
+	var x5c []string
+	var x5t, kid string
+	if len(certDER) > 0 {
+		h := sha1.Sum(certDER)
+		x5t = base64.RawURLEncoding.EncodeToString(h[:])
+		kid = x5t
+		x5c = []string{base64.RawURLEncoding.EncodeToString(certDER)}
+	} else {
+		nBytes := pub.N.Bytes()
+		if len(nBytes) > 8 {
+			nBytes = nBytes[:8]
+		}
+		kid = base64.RawURLEncoding.EncodeToString(nBytes)
+	}
+	return &JWKS{
+		Keys: []JWK{{
+			Kty: "RSA",
+			Use: "sig",
+			Alg: "RS256",
+			Kid: kid,
+			N:   base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
+			E:   base64.RawURLEncoding.EncodeToString(eBytes),
+			X5c: x5c,
+			X5t: x5t,
+		}},
+	}
+}
+
+func createDefaultCAKeys() (*rsa.PrivateKey, *JWKS, error) {
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate RSA private key: %w", err)
+	}
+
+	certTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "IDP Signing Key"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(10 * 365 * 24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, certTemplate, certTemplate, &privKey.PublicKey, privKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create self-signed IDP certificate: %w", err)
+	}
+
+	return privKey, buildRSAJWKS(privKey, certDER), nil
 }
 
 func EncodeX509Cert(cert *tls.Certificate) ([]byte, error) {

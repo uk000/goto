@@ -17,17 +17,22 @@
 package tls
 
 import (
+	"bytes"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"goto/pkg/global"
 	"goto/pkg/server/middleware"
 	"goto/pkg/types"
 	"goto/pkg/util"
+	"math/big"
 	"net/http"
 	"strings"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 )
 
@@ -45,6 +50,9 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(tlsRouter, "/ca/cert/remove/{name}", removeCACertOrKey, "PUT", "POST")
 	util.AddRoute(tlsRouter, "/ca/key/add/{name}/{domain}", addCACertOrKey, "PUT", "POST")
 	util.AddRoute(tlsRouter, "/ca/key/remove/{name}", removeCACertOrKey, "PUT", "POST")
+	util.AddRoute(tlsRouter, "/ca/set/default/{name}", setDefaultCA, "PUT", "POST")
+	util.AddRoute(tlsRouter, "/ca/jwks", getCAJWKS, "GET")
+	util.AddRoute(tlsRouter, "/ca/verify", verifyCAJWT, "POST", "PUT")
 	util.AddRoute(tlsRouter, "/ca/certs", getCACerts, "GET")
 
 	util.AddRoute(tlsRouter, "/cert/add/{name}", addCertOrKey, "PUT", "POST")
@@ -64,7 +72,7 @@ func addCertOrKey(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	data := util.ReadBytes(r.Body)
 	if len(data) > 0 {
-		if d, err := base64.StdEncoding.DecodeString(string(data)); err == nil {
+		if d, err := base64.RawURLEncoding.DecodeString(string(data)); err == nil {
 			data = d
 		}
 		if isKey {
@@ -129,6 +137,99 @@ func removeCACertOrKey(w http.ResponseWriter, r *http.Request) {
 	msg = fmt.Sprintf("%s for name [%s]", msg, name)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
+}
+
+func setDefaultCA(w http.ResponseWriter, r *http.Request) {
+	msg := ""
+	name := util.GetStringParamValue(r, "name")
+	if name != "" {
+		SetDefaultCA(name)
+		msg = fmt.Sprintf("CA [%s] set as default signing authority", name)
+	} else {
+		msg = "No CA name given"
+	}
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
+}
+
+func getCAJWKS(w http.ResponseWriter, r *http.Request) {
+	lock.RLock()
+	jwks := DefaultCAJWKS
+	lock.RUnlock()
+	util.AddLogMessage("Sent CA JWKS", r)
+	util.WriteJsonPayload(w, jwks)
+}
+
+func jwkToRSAPublicKey(jwk JWK) (*rsa.PublicKey, error) {
+	nBytes, err := base64.RawURLEncoding.DecodeString(jwk.N)
+	if err != nil {
+		return nil, fmt.Errorf("invalid JWK N: %w", err)
+	}
+	eBytes, err := base64.RawURLEncoding.DecodeString(jwk.E)
+	if err != nil {
+		return nil, fmt.Errorf("invalid JWK E: %w", err)
+	}
+	n := new(big.Int).SetBytes(nBytes)
+	e := new(big.Int).SetBytes(eBytes)
+	return &rsa.PublicKey{N: n, E: int(e.Int64())}, nil
+}
+
+func verifyCAJWT(w http.ResponseWriter, r *http.Request) {
+	tokenBytes := util.ReadBytes(r.Body)
+	if len(tokenBytes) == 0 {
+		util.SendBadRequest(w, r, "No JWT payload")
+		return
+	}
+	// rawParts := strings.Split(strings.TrimSpace(string(tokenBytes)), ".")
+	// for i, p := range rawParts {
+	// 	rawParts[i] = strings.TrimRight(p, "=")
+	// }
+	// tokenString := strings.Join(rawParts, ".")
+	tokenString := strings.TrimSpace(string(tokenBytes))
+	lock.RLock()
+	jwks := DefaultCAJWKS
+	lock.RUnlock()
+
+	if jwks == nil || len(jwks.Keys) == 0 {
+		util.SendBadRequest(w, r, "No CA JWKS configured")
+		return
+	}
+
+	_, jwtErr := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		kid, _ := token.Header["kid"].(string)
+		for _, key := range jwks.Keys {
+			if kid == "" || key.Kid == kid {
+				return jwkToRSAPublicKey(key)
+			}
+		}
+		return nil, fmt.Errorf("no matching key for kid %q", kid)
+	}, jwt.WithoutClaimsValidation())
+
+	var payloadOutput string
+	parts := strings.Split(tokenString, ".")
+	if len(parts) >= 2 {
+		payloadBytes, decErr := base64.RawURLEncoding.DecodeString(parts[1])
+		if decErr != nil {
+			payloadOutput = fmt.Sprintf("Payload (base64 decode error): %s", decErr.Error())
+		} else {
+			var buf bytes.Buffer
+			if jsonErr := json.Indent(&buf, payloadBytes, "", "  "); jsonErr != nil {
+				payloadOutput = fmt.Sprintf("Payload (plain text — JSON parse error: %s):\n%s", jsonErr.Error(), string(payloadBytes))
+			} else {
+				payloadOutput = buf.String()
+			}
+		}
+	}
+
+	// HTTP status reflects JWT validity only; body carries payload content.
+	if jwtErr != nil {
+		w.WriteHeader(http.StatusBadRequest)
+	}
+	fmt.Fprintln(w, payloadOutput)
+	util.AddLogMessage(fmt.Sprintf("JWT verify: jwtErr=%v", jwtErr), r)
 }
 
 func getCACerts(w http.ResponseWriter, r *http.Request) {

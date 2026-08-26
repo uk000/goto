@@ -33,7 +33,10 @@ tls:
 |POST     | /tls/ca/cert/remove/{name} | Remove CA Certificate |
 |POST     | /tls/ca/key/add/{name}/{domain} | Add CA Key |
 |POST     | /tls/ca/key/remove/{name} | Remove CA Key |
+|POST     | /tls/ca/set/default/{name} | Sets a CA Key to be used as default signing key for signing |
 |GET     | /tls/ca/certs | Get CA Certificates |
+|GET     | /tls/ca/jwks | Serves Default Signing CA's JWKS for client-side signature verification |
+|POST     | /tls/ca/verify | Verifies a given JWT (from request payload). Verification result is reflected in HTTP status code, and the JWT payload is parsed and reported in response body of the API. |
 |POST     | /tls/cert/add/{name} | Add Certificate under a Name to be referenced for client configs. Note: Server certs are added via listeners. |
 |POST     | /tls/cert/remove/{name} | Remove a Named Certificate |
 |POST     | /tls/key/add/{name} | Add Key under a Name to be referenced for client configs. Note: Server certs are added via listeners.|

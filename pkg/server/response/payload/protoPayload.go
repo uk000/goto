@@ -18,10 +18,15 @@ package payload
 
 import (
 	"bytes"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"goto/pkg/constants"
+	"goto/pkg/tls"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
@@ -62,6 +67,7 @@ type PayloadPartProcess struct {
 	Base64Encode []bool `json:"base64Encode,omitempty"`
 	Base64Decode []bool `json:"base64Decode,omitempty"`
 	Keep         []bool `json:"keep,omitempty"`
+	Sign         []bool `json:"sign,omitempty"`
 }
 
 type PayloadParts struct {
@@ -622,14 +628,14 @@ func (rc *RequestCapture) NonNil() {
 }
 
 func (rp *ResponsePayload) encodePayload(payload []byte) []byte {
-	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(payload)))
-	base64.StdEncoding.Encode(encoded, []byte(payload))
+	encoded := make([]byte, base64.RawURLEncoding.EncodedLen(len(payload)))
+	base64.RawURLEncoding.Encode(encoded, []byte(payload))
 	return encoded
 }
 
 func (rp *ResponsePayload) decodePayload(payload []byte) []byte {
-	decoded := make([]byte, base64.StdEncoding.DecodedLen(len(payload)))
-	if _, err := base64.StdEncoding.Decode(decoded, payload); err != nil {
+	decoded := make([]byte, base64.RawURLEncoding.DecodedLen(len(payload)))
+	if _, err := base64.RawURLEncoding.Decode(decoded, payload); err != nil {
 		log.Printf("Failed to decode payload with error: %s\n", err.Error())
 	} else {
 		decoded = util.CleanJSONBytes(decoded)
@@ -687,29 +693,58 @@ func joinSplit(parts [][]byte, sep []byte) [][]byte {
 	return bytes.Split(joined, sep)
 }
 
+func (rp *ResponsePayload) signParts(parts [][]byte) {
+	signableParts := [][]byte{}
+	for i, p := range parts {
+		if len(rp.Parts.Post.Sign) > i && rp.Parts.Post.Sign[i] {
+			signableParts = append(signableParts, p)
+		}
+	}
+	signatureInput := bytes.Join(signableParts, []byte(rp.Parts.Post.JoinWith))
+	hasher := sha256.New()
+	hasher.Write(signatureInput)
+	hash := hasher.Sum(nil)
+	signatureBytes, err := rsa.SignPKCS1v15(rand.Reader, tls.DefaultCAKey, crypto.SHA256, hash)
+	if err != nil {
+		fmt.Printf("Signing failed: %v\n", err)
+		return
+	}
+	for i, part := range parts {
+		if bytes.Contains(part, []byte("[SIGNATURE]")) {
+			parts[i] = bytes.ReplaceAll(part, []byte("[SIGNATURE]"),
+				[]byte(base64.RawURLEncoding.EncodeToString(signatureBytes)))
+		}
+	}
+}
+
 func (rp *ResponsePayload) postProcess(parts [][]byte) []byte {
 	var payload []byte
-	if rp.Parts != nil && rp.Parts.Post != nil {
-		if rp.Parts.Post.SplitWith != "" {
-			parts = joinSplit(parts, []byte(rp.Parts.Post.SplitWith))
-		}
-		keptParts := [][]byte{}
-		for i, part := range parts {
-			if len(rp.Parts.Post.Keep) > i {
-				if rp.Parts.Post.Keep[i] {
+	if rp.Parts != nil {
+		if rp.Parts.Post != nil {
+			if rp.Parts.Post.SplitWith != "" {
+				parts = joinSplit(parts, []byte(rp.Parts.Post.SplitWith))
+			}
+			keptParts := [][]byte{}
+			for i, part := range parts {
+				if len(rp.Parts.Post.Keep) > i {
+					if rp.Parts.Post.Keep[i] {
+						keptParts = append(keptParts, part)
+					}
+				} else {
 					keptParts = append(keptParts, part)
 				}
-			} else {
-				keptParts = append(keptParts, part)
 			}
+			parts = keptParts
+			parts = rp.encodeDecodeParts(parts, rp.Parts.Post.Base64Encode, rp.Parts.Post.Base64Decode)
+			if len(rp.Parts.Post.Sign) > 0 {
+				rp.signParts(parts)
+			}
+			if rp.Parts.Post.JoinWith != "" {
+				payload = bytes.Join(parts, []byte(rp.Parts.Post.JoinWith))
+			}
+		} else {
+			parts = rp.encodeDecodeParts(parts, []bool{rp.Base64Encode}, []bool{rp.Base64Decode})
 		}
-		parts = keptParts
-		parts = rp.encodeDecodeParts(parts, rp.Parts.Post.Base64Encode, rp.Parts.Post.Base64Decode)
-		if rp.Parts.Post.JoinWith != "" {
-			payload = bytes.Join(parts, []byte(rp.Parts.Post.JoinWith))
-		}
-	} else {
-		parts = rp.encodeDecodeParts(parts, []bool{rp.Base64Encode}, []bool{rp.Base64Decode})
 	}
 	if len(payload) == 0 {
 		for _, b := range parts {

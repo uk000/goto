@@ -61,7 +61,7 @@ cat token.json
   "st": "{st}"
 }
 {{}}
-foobar
+[SIGNATURE]
 
 jq -Rs '{"payload": .,
   "matches": [
@@ -87,7 +87,8 @@ jq -Rs '{"payload": .,
     },
     "post": {
       "joinWith": ".",
-      "base64Encode": [true, true, false]
+      "base64Encode": [true, true, false],
+      sign: [true, true, false]
     }
   },
   "replace": {"=": ""},
@@ -112,6 +113,7 @@ curl -X POST localhost:8080/server/response/payload/set/matches -d '{
     "post": {
       "splitWith": ".",
       "base64Decode": [true, true, false],
+      sign: [true, true, false],
       "keep": [false, true, false],
       "joinWith": "."
     }

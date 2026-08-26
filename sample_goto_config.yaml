@@ -2509,7 +2509,7 @@ http:
                 "st": "{st}"
               }
               {{}}
-              foobar
+              [SIGNATURE]
             contentType: "text/plain"
             parts:
               pre:
@@ -2517,6 +2517,7 @@ http:
               post:
                 joinWith: "."
                 base64Encode: [true, true, false]
+                sign: [true, true, false]
             replace:
               "=": ""
             detectJSON: true
