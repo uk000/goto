@@ -2455,27 +2455,6 @@ http:
       response:
         payloads:
           - matches:
-              - uriPrefix: "/foo"
-                headers:
-                  foo: "{f}"
-                  bar: "{bar}"
-                queries:
-                  a: "1"
-            capture:
-              headers:
-                b: "{b}"
-                foo: "{foo}"
-              queries:
-                a: "{a}"
-            payload: |
-              {
-                "foo": "{foo}",
-                "bar": "{bar}",
-                "a": "{a}",
-                "b": "{b}"
-              }
-            contentType: "application/json"
-          - matches:
               - uriPrefix: "/token"
             capture:
               headers:
@@ -2487,7 +2466,7 @@ http:
                 co: "{co}"
                 st: "{st}"
             payload: |
-              {"alg":"HS256","typ":"JWT"}
+              {"alg":"RS256","typ":"JWT"}
               {{}}
               {
                 "scope": "openid full",
@@ -2537,6 +2516,27 @@ http:
             contentType: "application/json"
             detectJSON: false
             escapeJSON: false
+          - matches:
+              - uriPrefix: "/foo"
+                headers:
+                  foo: "{f}"
+                  bar: "{bar}"
+                queries:
+                  a: "1"
+            capture:
+              headers:
+                b: "{b}"
+                foo: "{foo}"
+              queries:
+                a: "{a}"
+            payload: |
+              {
+                "foo": "{foo}",
+                "bar": "{bar}",
+                "a": "{a}",
+                "b": "{b}"
+              }
+            contentType: "application/json"
 grpc:
   services:
     - service: xGoto

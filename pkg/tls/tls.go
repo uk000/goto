@@ -136,7 +136,7 @@ func GetCerts(key string) (certs []*tls.Certificate, err error) {
 
 func AddCACert(name, domain string, cert []byte) {
 	if len(cert) > 0 {
-		if d, err := base64.RawURLEncoding.DecodeString(string(cert)); err == nil {
+		if d, err := base64.StdEncoding.DecodeString(string(cert)); err == nil {
 			cert = d
 		}
 	}
@@ -163,7 +163,7 @@ func RemoveCACert(name string) {
 
 func AddCAKey(name, domain string, key []byte) {
 	if len(key) > 0 {
-		if d, err := base64.RawURLEncoding.DecodeString(string(key)); err == nil {
+		if d, err := base64.StdEncoding.DecodeString(string(key)); err == nil {
 			key = d
 		}
 	}
@@ -507,7 +507,7 @@ func buildRSAJWKS(priv *rsa.PrivateKey, certDER []byte) *JWKS {
 		h := sha1.Sum(certDER)
 		x5t = base64.RawURLEncoding.EncodeToString(h[:])
 		kid = x5t
-		x5c = []string{base64.RawURLEncoding.EncodeToString(certDER)}
+		x5c = []string{base64.StdEncoding.EncodeToString(certDER)}
 	} else {
 		nBytes := pub.N.Bytes()
 		if len(nBytes) > 8 {

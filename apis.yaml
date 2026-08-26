@@ -151,6 +151,11 @@
     - /grpc/client/call/{service}/{method}/{endpoint}: '[POST]'
     - /grpc/client/call/{service}/{method}/{endpoint}/stream: '[POST]'
     - /grpc/client/call: '[POST]'
+  /grpc/extauthz:
+    /grpc/extauthz/rules:
+    - /grpc/extauthz/rules: '[GET]'
+    - /grpc/extauthz/rules: '[POST]'
+    - /grpc/extauthz/rules: '[DELETE]'
   /grpc/protos:
     "":
     - /grpc/protos: '[GET]'
@@ -1220,11 +1225,20 @@
     /tls/ca/cert:
     - /tls/ca/cert/add/{name}/{domain}: '[PUT POST]'
     - /tls/ca/cert/remove/{name}: '[PUT POST]'
+    - /tls/ca/cert: '[GET]'
     /tls/ca/certs:
     - /tls/ca/certs: '[GET]'
+    /tls/ca/jwks:
+    - /tls/ca/jwks: '[GET]'
     /tls/ca/key:
     - /tls/ca/key/add/{name}/{domain}: '[PUT POST]'
     - /tls/ca/key/remove/{name}: '[PUT POST]'
+    /tls/ca/pubkey:
+    - /tls/ca/pubkey: '[GET]'
+    /tls/ca/set:
+    - /tls/ca/set/default/{name}: '[PUT POST]'
+    /tls/ca/verify:
+    - /tls/ca/verify: '[POST PUT]'
   /tls/cert:
     /tls/cert/add:
     - /tls/cert/add/{name}: '[PUT POST]'
@@ -1288,6 +1302,9 @@
   "":
     "":
     - /ui: '[GET]'
+  /ui/api:
+    "":
+    - /ui/api: '[GET]'
   /ui/ws:
     "":
     - /ui/ws: '[GET]'

@@ -39,7 +39,7 @@ curl -X POST localhost:8080/server/response/payload/clear
 echo
 
 cat token.json
-{"alg":"HS256","typ":"JWT"}
+{"alg":"RS256","typ":"JWT"}
 {{}}
 {
   "scope": "openid full",

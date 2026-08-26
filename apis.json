@@ -337,6 +337,19 @@
         }
       ]
     },
+    "/grpc/extauthz": {
+      "/grpc/extauthz/rules": [
+        {
+          "/grpc/extauthz/rules": "[GET]"
+        },
+        {
+          "/grpc/extauthz/rules": "[POST]"
+        },
+        {
+          "/grpc/extauthz/rules": "[DELETE]"
+        }
+      ]
+    },
     "/grpc/protos": {
       "": [
         {
@@ -3224,11 +3237,19 @@
         },
         {
           "/tls/ca/cert/remove/{name}": "[PUT POST]"
+        },
+        {
+          "/tls/ca/cert": "[GET]"
         }
       ],
       "/tls/ca/certs": [
         {
           "/tls/ca/certs": "[GET]"
+        }
+      ],
+      "/tls/ca/jwks": [
+        {
+          "/tls/ca/jwks": "[GET]"
         }
       ],
       "/tls/ca/key": [
@@ -3237,6 +3258,21 @@
         },
         {
           "/tls/ca/key/remove/{name}": "[PUT POST]"
+        }
+      ],
+      "/tls/ca/pubkey": [
+        {
+          "/tls/ca/pubkey": "[GET]"
+        }
+      ],
+      "/tls/ca/set": [
+        {
+          "/tls/ca/set/default/{name}": "[PUT POST]"
+        }
+      ],
+      "/tls/ca/verify": [
+        {
+          "/tls/ca/verify": "[POST PUT]"
         }
       ]
     },
@@ -3393,6 +3429,13 @@
       "": [
         {
           "/ui": "[GET]"
+        }
+      ]
+    },
+    "/ui/api": {
+      "": [
+        {
+          "/ui/api": "[GET]"
         }
       ]
     },

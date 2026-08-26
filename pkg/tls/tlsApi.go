@@ -23,6 +23,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"goto/pkg/global"
 	"goto/pkg/server/middleware"
@@ -52,6 +53,8 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(tlsRouter, "/ca/key/remove/{name}", removeCACertOrKey, "PUT", "POST")
 	util.AddRoute(tlsRouter, "/ca/set/default/{name}", setDefaultCA, "PUT", "POST")
 	util.AddRoute(tlsRouter, "/ca/jwks", getCAJWKS, "GET")
+	util.AddRoute(tlsRouter, "/ca/pubkey", getDefaultCACert, "GET")
+	util.AddRoute(tlsRouter, "/ca/cert", getDefaultCACertPEM, "GET")
 	util.AddRoute(tlsRouter, "/ca/verify", verifyCAJWT, "POST", "PUT")
 	util.AddRoute(tlsRouter, "/ca/certs", getCACerts, "GET")
 
@@ -153,11 +156,63 @@ func setDefaultCA(w http.ResponseWriter, r *http.Request) {
 }
 
 func getCAJWKS(w http.ResponseWriter, r *http.Request) {
+	util.AddLogMessage("Sent CA JWKS", r)
+	util.WriteJsonPayload(w, DefaultCAJWKS)
+}
+
+func getDefaultCACert(w http.ResponseWriter, r *http.Request) {
 	lock.RLock()
 	jwks := DefaultCAJWKS
 	lock.RUnlock()
-	util.AddLogMessage("Sent CA JWKS", r)
-	util.WriteJsonPayload(w, jwks)
+	if jwks == nil || len(jwks.Keys) == 0 {
+		util.SendBadRequest(w, r, "No CA JWKS configured")
+		return
+	}
+	pubKey, err := jwkToRSAPublicKey(jwks.Keys[0])
+	if err != nil {
+		util.SendBadRequest(w, r, fmt.Sprintf("Failed to reconstruct public key: %s", err.Error()))
+		return
+	}
+	der, err := x509.MarshalPKIXPublicKey(pubKey)
+	if err != nil {
+		util.SendBadRequest(w, r, fmt.Sprintf("Failed to marshal public key: %s", err.Error()))
+		return
+	}
+	if err = pem.Encode(w, &pem.Block{Type: "PUBLIC KEY", Bytes: der}); err != nil {
+		util.SendBadRequest(w, r, fmt.Sprintf("Failed to encode public key as PEM: %s", err.Error()))
+		return
+	}
+	util.AddLogMessage("Sent CA public key", r)
+}
+
+func getDefaultCACertPEM(w http.ResponseWriter, r *http.Request) {
+	lock.RLock()
+	jwks := DefaultCAJWKS
+	lock.RUnlock()
+	if jwks == nil || len(jwks.Keys) == 0 || len(jwks.Keys[0].X5c) == 0 {
+		util.SendBadRequest(w, r, "No CA certificate available")
+		return
+	}
+	x5c := strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\n' || r == '\r' || r == '\t' {
+			return -1
+		}
+		return r
+	}, jwks.Keys[0].X5c[0])
+	der, err := base64.StdEncoding.DecodeString(x5c)
+	if err != nil {
+		// Fall back to no-padding variant in case the encoder omitted '='.
+		der, err = base64.RawStdEncoding.DecodeString(x5c)
+	}
+	if err != nil {
+		util.SendBadRequest(w, r, fmt.Sprintf("Failed to decode certificate: %s", err.Error()))
+		return
+	}
+	if err = pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
+		util.SendBadRequest(w, r, fmt.Sprintf("Failed to encode certificate as PEM: %s", err.Error()))
+		return
+	}
+	util.AddLogMessage("Sent CA certificate", r)
 }
 
 func jwkToRSAPublicKey(jwk JWK) (*rsa.PublicKey, error) {
