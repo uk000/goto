@@ -263,7 +263,7 @@ func HasURIStatus(r *http.Request) bool {
 func GetURIStatus(r *http.Request) *URIStatusConfig {
 	if present, glob, v := hasURIConfig(r, uriStatusByPort); present {
 		uriStatus := v.(*URIStatusConfig)
-		if len(uriStatus.Statuses) > 0 && uriStatus.Statuses[0] > 0 && uriStatus.Times >= 0 && (!glob || uriStatus.Glob) {
+		if len(uriStatus.Statuses) > 0 && uriStatus.Statuses[0] > 0 && (uriStatus.Times > 0 || uriStatus.Times == -1) && (!glob || uriStatus.Glob) {
 			return uriStatus
 		}
 	}

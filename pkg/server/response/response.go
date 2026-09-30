@@ -41,6 +41,9 @@ func setRoutes(r *mux.Router) {
 	responseRouter := util.PathRouter(server, "/response")
 	middleware.AddRoutes(responseRouter, CoreMiddlewares...)
 	middleware.AddRoutes(responseRouter, responseMiddlewares...)
+	responseRouter = middleware.RootPath("/response")
+	middleware.AddRoutes(responseRouter, CoreMiddlewares...)
+	middleware.AddRoutes(responseRouter, responseMiddlewares...)
 }
 
 func middlewareFunc(next http.Handler) http.Handler {
