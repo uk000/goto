@@ -48,8 +48,8 @@
     - /a2a/agents/names/all: '[GET]'
   /a2a/client:
     /a2a/client/agent:
-    - /a2a/client/agent/card?url={url}&authority={authority}: '[GET]'
-    - /a2a/client/agent/card?url={url}: '[GET]'
+    - /a2a/client/agent/card?authority={authority}&url={url}: '[GET]'
+    - /a2a/client/agent/card?authority={authority}: '[GET]'
     - /a2a/client/agent/{agent}/call: '[POST]'
     /a2a/client/call:
     - /a2a/client/call/stream: '[POST]'
@@ -135,8 +135,8 @@
 /goto:
   /goto/{k:routes|apis}:
     "":
-    - /goto/{k:routes|apis}?q={q}&url={url}: '[GET]'
-    - /goto/{k:routes|apis}?q={q}: '[GET]'
+    - /goto/{k:routes|apis}?url={url}&q={q}: '[GET]'
+    - /goto/{k:routes|apis}?url={url}: '[GET]'
     - /goto/{k:routes|apis}: '[GET]'
     /goto/{k:routes|apis}/level={level}:
     - /goto/{k:routes|apis}/level={level}: '[GET]'
@@ -350,15 +350,17 @@
     - /mcpapi/client/details: '[GET]'
     - /mcpapi/client/details/: '[GET]'
     /mcpapi/client/list:
-    - /mcpapi/client/list/all?url={url}&sse={sse}&tls={tls}&authority={authority}: '[POST
+    - /mcpapi/client/list/all?sse={sse}&tls={tls}&authority={authority}&url={url}: '[POST
         GET]'
-    - /mcpapi/client/list/all?url={url}: '[POST GET]'
-    - /mcpapi/client/list/tools?url={url}&sse={sse}&tls={tls}&authority={authority}: '[POST
+    - /mcpapi/client/list/all?sse={sse}&tls={tls}&authority={authority}: '[POST GET]'
+    - /mcpapi/client/list/tools?sse={sse}&tls={tls}&authority={authority}&url={url}: '[POST
         GET]'
-    - /mcpapi/client/list/tools?url={url}: '[POST GET]'
-    - /mcpapi/client/list/tools/names?url={url}&sse={sse}&tls={tls}&authority={authority}: '[POST
+    - /mcpapi/client/list/tools?sse={sse}&tls={tls}&authority={authority}: '[POST
         GET]'
-    - /mcpapi/client/list/tools/names?url={url}: '[POST GET]'
+    - /mcpapi/client/list/tools/names?sse={sse}&tls={tls}&authority={authority}&url={url}: '[POST
+        GET]'
+    - /mcpapi/client/list/tools/names?sse={sse}&tls={tls}&authority={authority}: '[POST
+        GET]'
     /mcpapi/client/payload:
     - /mcpapi/client/payload/{kind:sample|elicit}: '[POST]'
     - /mcpapi/client/payload/{kind:sample|elicit}/: '[POST]'
@@ -544,11 +546,11 @@
     - /proxy/http/trackers/: '[GET]'
   /proxy/mcp:
     /proxy/mcp/proxy:
-    - /proxy/mcp/proxy?endpoint={endpoint}&headers={headers}: '[POST]'
-    - /proxy/mcp/proxy?endpoint={endpoint}: '[POST]'
-    - /proxy/mcp/proxy/{tool}?endpoint={endpoint}&to={to}&sni={sni}&headers={headers}: '[POST]'
-    - /proxy/mcp/proxy/{tool}?endpoint={endpoint}&to={to}: '[POST]'
-    - /proxy/mcp/proxy/{tool}?endpoint={endpoint}: '[POST]'
+    - /proxy/mcp/proxy?headers={headers}&endpoint={endpoint}: '[POST]'
+    - /proxy/mcp/proxy?headers={headers}: '[POST]'
+    - /proxy/mcp/proxy/{tool}?sni={sni}&headers={headers}&to={to}&endpoint={endpoint}: '[POST]'
+    - /proxy/mcp/proxy/{tool}?sni={sni}&headers={headers}&to={to}: '[POST]'
+    - /proxy/mcp/proxy/{tool}?sni={sni}&headers={headers}: '[POST]'
   /proxy/tcp:
     "":
     - /proxy/tcp: '[GET]'
@@ -582,7 +584,10 @@
     - /registry/context/{context}/lockers/{label}/close: '[POST]'
     - /registry/context/{context}/lockers/{label}/clear: '[POST]'
     - /registry/context/{context}/lockers/{label}/store/{path}: '[POST]'
+    - /registry/context/{context}/lockers/{label}/{path}/store: '[POST]'
+    - /registry/context/{context}/lockers/{label}/{path}/add: '[POST]'
     - /registry/context/{context}/lockers/{label}/get/{path}: '[GET]'
+    - /registry/context/{context}/lockers/{label}/{path}/get: '[GET]'
   /registry/dump:
     "":
     - /registry/dump: '[GET]'
@@ -598,15 +603,22 @@
     - /registry/lockers/{label}/close: '[POST]'
     - /registry/lockers/{label}/clear: '[POST]'
     - /registry/lockers/{label}/store/{path}: '[POST]'
+    - /registry/lockers/{label}/{path}/store: '[POST]'
+    - /registry/lockers/{label}/{path}/add: '[POST]'
     - /registry/lockers/{label}/remove/{path}: '[POST]'
-    - /registry/lockers/{label}?data={data}&events={events}&peers={peers}&level={level}: '[GET]'
+    - /registry/lockers/{label}/{path}/remove: '[POST]'
+    - /registry/lockers/{label}?md={md}&data={data}&events={events}&peers={peers}&level={level}: '[GET]'
+    - /registry/lockers/{label}?md={md}: '[GET]'
     - /registry/lockers/{label}: '[GET]'
-    - /registry/lockers/{label}/data?data={data}&level={level}: '[GET]'
-    - /registry/lockers/{label}/data/?data={data}&level={level}: '[GET]'
+    - /registry/lockers/{label}/get/{path}?md={md}&data={data}&level={level}: '[GET]'
+    - /registry/lockers/{label}/get/{path}?md={md}: '[GET]'
+    - /registry/lockers/{label}/get/{path}: '[GET]'
+    - /registry/lockers/{label}/data?md={md}&data={data}&level={level}: '[GET]'
+    - /registry/lockers/{label}/data/?md={md}&data={data}&level={level}: '[GET]'
+    - /registry/lockers/{label}/data?md={md}: '[GET]'
+    - /registry/lockers/{label}/data/?md={md}: '[GET]'
     - /registry/lockers/{label}/data: '[GET]'
     - /registry/lockers/{label}/data/: '[GET]'
-    - /registry/lockers/{label}/get/{path}?data={data}&level={level}: '[GET]'
-    - /registry/lockers/{label}/get/{path}: '[GET]'
     - /registry/lockers/{label}/data/keys: '[GET]'
     - /registry/lockers/{label}/data/keys/: '[GET]'
     - /registry/lockers/{label}/data/paths: '[GET]'
@@ -616,12 +628,16 @@
     /registry/lockers/all:
     - /registry/lockers/all: '[GET]'
     /registry/lockers/clear:
+    - /registry/lockers/clear/{label}: '[POST]'
     - /registry/lockers/clear: '[POST]'
     /registry/lockers/close:
+    - /registry/lockers/close/{label}: '[POST]'
     - /registry/lockers/close: '[POST]'
     /registry/lockers/data:
-    - /registry/lockers/data?data={data}&level={level}: '[GET]'
-    - /registry/lockers/data/?data={data}&level={level}: '[GET]'
+    - /registry/lockers/data?md={md}&data={data}&level={level}: '[GET]'
+    - /registry/lockers/data/?md={md}&data={data}&level={level}: '[GET]'
+    - /registry/lockers/data?md={md}: '[GET]'
+    - /registry/lockers/data/?md={md}: '[GET]'
     - /registry/lockers/data: '[GET]'
     - /registry/lockers/data/: '[GET]'
     - /registry/lockers/data/keys: '[GET]'
@@ -630,33 +646,33 @@
     - /registry/lockers/data/paths/: '[GET]'
     /registry/lockers/labels:
     - /registry/lockers/labels: '[GET]'
+    /registry/lockers/open:
+    - /registry/lockers/open/{label}: '[POST]'
     /registry/lockers/search:
     - /registry/lockers/search/{text}: '[GET]'
     - /registry/lockers/search/{text}/: '[GET]'
   /registry/peers:
     "":
     - /registry/peers: '[GET]'
-    /registry/peers/{address}:
-    - /registry/peers/{address}/lockers/clear: '[POST]'
-    - /registry/peers/{address}/lockers/clear/: '[POST]'
-    - /registry/peers/{address}/lockers?data={data}&events={events}&level={level}: '[GET]'
-    - /registry/peers/{address}/lockers/?data={data}&events={events}&level={level}: '[GET]'
-    - /registry/peers/{address}/lockers: '[GET]'
-    - /registry/peers/{address}/lockers/: '[GET]'
+    /registry/peers/{label}:
+    - /registry/peers/{label}/lockers?data={data}&events={events}&level={level}: '[GET]'
+    - /registry/peers/{label}/lockers/?data={data}&events={events}&level={level}: '[GET]'
+    - /registry/peers/{label}/lockers: '[GET]'
+    - /registry/peers/{label}/lockers/: '[GET]'
     /registry/peers/{peer}:
-    - /registry/peers/{peer}/{address}/lockers/clear: '[POST]'
+    - /registry/peers/{peer}/{peerlabel}/lockers/clear: '[POST]'
     - /registry/peers/{peer}/lockers/clear: '[POST]'
-    - /registry/peers/{peer}/{address}/lockers/clear/: '[POST]'
+    - /registry/peers/{peer}/{peerlabel}/lockers/clear/: '[POST]'
     - /registry/peers/{peer}/lockers/clear/: '[POST]'
-    - /registry/peers/{peer}/{address}/locker/store/{path}: '[POST]'
+    - /registry/peers/{peer}/{peerlabel}/locker/store/{path}: '[POST]'
     - /registry/peers/{peer}/locker/store/{path}: '[POST]'
-    - /registry/peers/{peer}/{address}/locker/store/{path}/: '[POST]'
+    - /registry/peers/{peer}/{peerlabel}/locker/store/{path}/: '[POST]'
     - /registry/peers/{peer}/locker/store/{path}/: '[POST]'
-    - /registry/peers/{peer}/{address}/locker/remove/{path}: '[POST]'
+    - /registry/peers/{peer}/{peerlabel}/locker/remove/{path}: '[POST]'
     - /registry/peers/{peer}/locker/remove/{path}: '[POST]'
-    - /registry/peers/{peer}/{address}/locker/remove/{path}/: '[POST]'
+    - /registry/peers/{peer}/{peerlabel}/locker/remove/{path}/: '[POST]'
     - /registry/peers/{peer}/locker/remove/{path}/: '[POST]'
-    - /registry/peers/{peer}/{address}/events/store: '[POST]'
+    - /registry/peers/{peer}/{peerlabel}/events/store: '[POST]'
     - /registry/peers/{peer}/events/search/{text}?data={data}&reverse={reverse}: '[GET]'
     - /registry/peers/{peer}/events/search/{text}/?data={data}&reverse={reverse}: '[GET]'
     - /registry/peers/{peer}/events/search/{text}: '[GET]'
@@ -665,13 +681,13 @@
     - /registry/peers/{peer}/events/?data={data}&reverse={reverse}: '[GET]'
     - /registry/peers/{peer}/events: '[GET]'
     - /registry/peers/{peer}/events/: '[GET]'
-    - /registry/peers/{peer}/{address}/locker/get/{path}?data={data}&level={level}: '[GET]'
+    - /registry/peers/{peer}/{peerlabel}/locker/get/{path}?data={data}&level={level}: '[GET]'
     - /registry/peers/{peer}/locker/get/{path}?data={data}&level={level}: '[GET]'
-    - /registry/peers/{peer}/{address}/locker/get/{path}/?data={data}&level={level}: '[GET]'
+    - /registry/peers/{peer}/{peerlabel}/locker/get/{path}/?data={data}&level={level}: '[GET]'
     - /registry/peers/{peer}/locker/get/{path}/?data={data}&level={level}: '[GET]'
-    - /registry/peers/{peer}/{address}/locker/get/{path}: '[GET]'
+    - /registry/peers/{peer}/{peerlabel}/locker/get/{path}: '[GET]'
     - /registry/peers/{peer}/locker/get/{path}: '[GET]'
-    - /registry/peers/{peer}/{address}/locker/get/{path}/: '[GET]'
+    - /registry/peers/{peer}/{peerlabel}/locker/get/{path}/: '[GET]'
     - /registry/peers/{peer}/locker/get/{path}/: '[GET]'
     - /registry/peers/{peer}/instances/client/results/targets={targets}: '[GET]'
     - /registry/peers/{peer}/instances/client/results: '[GET]'
@@ -689,13 +705,13 @@
     - /registry/peers/{peer}/client/results: '[GET]'
     - /registry/peers/{peer}/client/results/targets={targets}/: '[GET]'
     - /registry/peers/{peer}/client/results/: '[GET]'
-    - /registry/peers/{peer}/{address}/lockers?data={data}&events={events}&level={level}: '[GET]'
+    - /registry/peers/{peer}/{label}/lockers?data={data}&events={events}&level={level}: '[GET]'
     - /registry/peers/{peer}/lockers?data={data}&events={events}&level={level}: '[GET]'
-    - /registry/peers/{peer}/{address}/lockers/?data={data}&events={events}&level={level}: '[GET]'
+    - /registry/peers/{peer}/{label}/lockers/?data={data}&events={events}&level={level}: '[GET]'
     - /registry/peers/{peer}/lockers/?data={data}&events={events}&level={level}: '[GET]'
-    - /registry/peers/{peer}/{address}/lockers: '[GET]'
+    - /registry/peers/{peer}/{label}/lockers: '[GET]'
     - /registry/peers/{peer}/lockers: '[GET]'
-    - /registry/peers/{peer}/{address}/lockers/: '[GET]'
+    - /registry/peers/{peer}/{label}/lockers/: '[GET]'
     - /registry/peers/{peer}/lockers/: '[GET]'
     - /registry/peers/{peer}/remember: '[POST]'
     - /registry/peers/{peer}/remove/{address}: '[PUT POST]'
@@ -742,6 +758,9 @@
     - /registry/peers/{peer}/jobs/clear/: '[POST]'
     - /registry/peers/{peer}/jobs: '[GET]'
     - /registry/peers/{peer}/jobs/: '[GET]'
+    /registry/peers/{peerlabel}:
+    - /registry/peers/{peerlabel}/lockers/clear: '[POST]'
+    - /registry/peers/{peerlabel}/lockers/clear/: '[POST]'
     /registry/peers/add:
     - /registry/peers/add: '[POST]'
     /registry/peers/apis:
@@ -868,29 +887,29 @@
     - /registry/peers/lockers/{label}/peers/client/results/targets={targets}/: '[GET]'
     - /registry/peers/lockers/{label}/peers/{peer}/client/results/: '[GET]'
     - /registry/peers/lockers/{label}/peers/client/results/: '[GET]'
-    - /registry/peers/lockers/{label}/peers/{peer}/{address}?data={data}&events={events}&level={level}: '[GET]'
-    - /registry/peers/lockers/{label}/peers/{address}?data={data}&events={events}&level={level}: '[GET]'
+    - /registry/peers/lockers/{label}/peers/{peer}/{label}?data={data}&events={events}&level={level}: '[GET]'
+    - /registry/peers/lockers/{label}/peers/{label}?data={data}&events={events}&level={level}: '[GET]'
     - /registry/peers/lockers/{label}/peers/{peer}?data={data}&events={events}&level={level}: '[GET]'
     - /registry/peers/lockers/{label}/peers?data={data}&events={events}&level={level}: '[GET]'
-    - /registry/peers/lockers/{label}/peers/{peer}/{address}/?data={data}&events={events}&level={level}: '[GET]'
-    - /registry/peers/lockers/{label}/peers/{address}/?data={data}&events={events}&level={level}: '[GET]'
+    - /registry/peers/lockers/{label}/peers/{peer}/{label}/?data={data}&events={events}&level={level}: '[GET]'
+    - /registry/peers/lockers/{label}/peers/{label}/?data={data}&events={events}&level={level}: '[GET]'
     - /registry/peers/lockers/{label}/peers/{peer}/?data={data}&events={events}&level={level}: '[GET]'
     - /registry/peers/lockers/{label}/peers/?data={data}&events={events}&level={level}: '[GET]'
-    - /registry/peers/lockers/{label}/peers/{peer}/{address}: '[GET]'
-    - /registry/peers/lockers/{label}/peers/{address}: '[GET]'
+    - /registry/peers/lockers/{label}/peers/{peer}/{label}: '[GET]'
+    - /registry/peers/lockers/{label}/peers/{label}: '[GET]'
     - /registry/peers/lockers/{label}/peers/{peer}: '[GET]'
     - /registry/peers/lockers/{label}/peers: '[GET]'
-    - /registry/peers/lockers/{label}/peers/{peer}/{address}/: '[GET]'
-    - /registry/peers/lockers/{label}/peers/{address}/: '[GET]'
+    - /registry/peers/lockers/{label}/peers/{peer}/{label}/: '[GET]'
+    - /registry/peers/lockers/{label}/peers/{label}/: '[GET]'
     - /registry/peers/lockers/{label}/peers/{peer}/: '[GET]'
     - /registry/peers/lockers/{label}/peers/: '[GET]'
-    - /registry/peers/lockers/{label}/peers/{peer}/{address}/get/{path}?data={data}&level={level}: '[GET]'
+    - /registry/peers/lockers/{label}/peers/{peer}/{peerlabel}/get/{path}?data={data}&level={level}: '[GET]'
     - /registry/peers/lockers/{label}/peers/{peer}/get/{path}?data={data}&level={level}: '[GET]'
-    - /registry/peers/lockers/{label}/peers/{peer}/{address}/get/{path}/?data={data}&level={level}: '[GET]'
+    - /registry/peers/lockers/{label}/peers/{peer}/{peerlabel}/get/{path}/?data={data}&level={level}: '[GET]'
     - /registry/peers/lockers/{label}/peers/{peer}/get/{path}/?data={data}&level={level}: '[GET]'
-    - /registry/peers/lockers/{label}/peers/{peer}/{address}/get/{path}: '[GET]'
+    - /registry/peers/lockers/{label}/peers/{peer}/{peerlabel}/get/{path}: '[GET]'
     - /registry/peers/lockers/{label}/peers/{peer}/get/{path}: '[GET]'
-    - /registry/peers/lockers/{label}/peers/{peer}/{address}/get/{path}/: '[GET]'
+    - /registry/peers/lockers/{label}/peers/{peer}/{peerlabel}/get/{path}/: '[GET]'
     - /registry/peers/lockers/{label}/peers/{peer}/get/{path}/: '[GET]'
     /registry/peers/probes:
     - /registry/peers/probes/{type}/set?uri={uri}: '[POST PUT]'
@@ -914,6 +933,225 @@
     - /registry/peers/track/time/clear: '[POST PUT]'
     - /registry/peers/track/time/{buckets}: '[POST PUT]'
     - /registry/peers/track/time: '[GET]'
+/request:
+  /request/bypass:
+    "":
+    - /request/bypass: '[GET]'
+    /request/bypass/add:
+    - /request/bypass/add?uri={uri}: '[PUT POST]'
+    - /request/bypass/add/header/{header}={value}: '[PUT POST]'
+    - /request/bypass/add/header/{header}: '[PUT POST]'
+    /request/bypass/clear:
+    - /request/bypass/clear: '[PUT POST]'
+    /request/bypass/count:
+    - /request/bypass/count: '[GET]'
+    /request/bypass/remove:
+    - /request/bypass/remove/header/{header}={value}: '[PUT POST]'
+    - /request/bypass/remove/header/{header}: '[PUT POST]'
+    - /request/bypass/remove?uri={uri}: '[PUT POST]'
+    /request/bypass/set:
+    - /request/bypass/set/status={status}: '[PUT POST]'
+  /request/ignore:
+    "":
+    - /request/ignore: '[GET]'
+    /request/ignore/add:
+    - /request/ignore/add?uri={uri}: '[PUT POST]'
+    - /request/ignore/add/header/{header}={value}: '[PUT POST]'
+    - /request/ignore/add/header/{header}: '[PUT POST]'
+    /request/ignore/clear:
+    - /request/ignore/clear: '[PUT POST]'
+    /request/ignore/count:
+    - /request/ignore/count: '[GET]'
+    /request/ignore/remove:
+    - /request/ignore/remove/header/{header}={value}: '[PUT POST]'
+    - /request/ignore/remove/header/{header}: '[PUT POST]'
+    - /request/ignore/remove?uri={uri}: '[PUT POST]'
+    /request/ignore/set:
+    - /request/ignore/set/status={status}: '[PUT POST]'
+  /request/timeout:
+    "":
+    - /request/timeout: '[GET]'
+    /request/timeout/status:
+    - /request/timeout/status: '[GET]'
+    /request/timeout/track:
+    - /request/timeout/track/headers/{headers}: '[PUT POST]'
+    - /request/timeout/track/all: '[PUT POST]'
+    - /request/timeout/track/clear: '[POST]'
+  /request/track:
+    "":
+    - /request/track?uri={uri}: '[POST]'
+    - /request/track: '[GET]'
+    /request/track/{header}={value}:
+    - /request/track/{header}={value}?uri={uri}: '[POST]'
+    /request/track/counts:
+    - /request/track/counts: '[GET]'
+    /request/track/headers:
+    - /request/track/headers/clear: '[POST]'
+    - /request/track/headers/remove/{headers}: '[POST]'
+    - /request/track/headers/counts/clear/{headers}: '[POST]'
+    - /request/track/headers/counts/clear: '[POST]'
+    - /request/track/headers/counts: '[GET]'
+    - /request/track/headers/add/{headers}: '[POST]'
+    - /request/track/headers/{headers}: '[POST]'
+    - /request/track/headers: '[GET]'
+    - /request/track/headers/{headers}?uri={uri}: '[POST]'
+  /request/uri:
+    "":
+    - /request/uri: '[GET]'
+    /request/uri/counts:
+    - /request/uri/counts/enable: '[POST PUT]'
+    - /request/uri/counts/disable: '[POST PUT]'
+    - /request/uri/counts: '[GET]'
+    - /request/uri/counts/clear: '[POST]'
+    /request/uri/reroute:
+    - /request/uri/reroute?from={from}&to={to}: '[POST PUT]'
+    /request/uri/set:
+    - /request/uri/set/status={status}?uri={uri}: '[POST PUT]'
+    - /request/uri/set/delay={delay}?uri={uri}: '[POST PUT]'
+/response:
+  /response/delay:
+    "":
+    - /response/delay: '[GET]'
+    /response/delay/clear:
+    - /response/delay/clear: '[POST PUT]'
+    /response/delay/set:
+    - /response/delay/set/{delay}: '[POST PUT]'
+  /response/headers:
+    "":
+    - /response/headers: '[GET]'
+    /response/headers/add:
+    - /response/headers/add/{header}={value}: '[PUT POST]'
+    /response/headers/clear:
+    - /response/headers/clear: '[PUT POST]'
+    /response/headers/remove:
+    - /response/headers/remove/{header}: '[PUT POST]'
+  /response/payload:
+    "":
+    - /response/payload: '[GET]'
+    /response/payload/{grpc}:
+    - /response/payload/{grpc}/transform?uri={uri}: '[POST]'
+    - /response/payload/{grpc}/transform/?uri={uri}: '[POST]'
+    - /response/payload/{grpc}/transform/delay={delay}?uri={uri}: '[POST]'
+    - /response/payload/{grpc}/transform/delay={delay}/?uri={uri}: '[POST]'
+    /response/payload/{size}:
+    - /response/payload/{size}: '[GET PUT POST]'
+    /response/payload/clear:
+    - /response/payload/clear: '[POST]'
+    /response/payload/set:
+    - /response/payload/set/{grpc}/matches: '[POST]'
+    - /response/payload/set/matches: '[POST]'
+    - /response/payload/set/{grpc}/matches/: '[POST]'
+    - /response/payload/set/matches/: '[POST]'
+    - /response/payload/set/{grpc}/stream/count={count}/delay={delay}?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/stream/count={count}/delay={delay}: '[POST]'
+    - /response/payload/set/stream/count={count}/delay={delay}?uri={uri}: '[POST]'
+    - /response/payload/set/stream/count={count}/delay={delay}: '[POST]'
+    - /response/payload/set/{grpc}/stream/count={count}/delay={delay}/?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/stream/count={count}/delay={delay}/: '[POST]'
+    - /response/payload/set/stream/count={count}/delay={delay}/?uri={uri}: '[POST]'
+    - /response/payload/set/stream/count={count}/delay={delay}/: '[POST]'
+    - /response/payload/set/{grpc}/stream/count={count}/delay={delay}/header/{header}?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/stream/count={count}/delay={delay}/header/{header}: '[POST]'
+    - /response/payload/set/stream/count={count}/delay={delay}/header/{header}?uri={uri}: '[POST]'
+    - /response/payload/set/stream/count={count}/delay={delay}/header/{header}: '[POST]'
+    - /response/payload/set/{grpc}/stream/count={count}/delay={delay}/header/{header}/?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/stream/count={count}/delay={delay}/header/{header}/: '[POST]'
+    - /response/payload/set/stream/count={count}/delay={delay}/header/{header}/?uri={uri}: '[POST]'
+    - /response/payload/set/stream/count={count}/delay={delay}/header/{header}/: '[POST]'
+    - /response/payload/set/{grpc}/default/binary/{size}: '[POST]'
+    - /response/payload/set/default/binary/{size}: '[POST]'
+    - /response/payload/set/{grpc}/default/binary/{size}/: '[POST]'
+    - /response/payload/set/default/binary/{size}/: '[POST]'
+    - /response/payload/set/{grpc}/default/binary: '[POST]'
+    - /response/payload/set/default/binary: '[POST]'
+    - /response/payload/set/{grpc}/default/binary/: '[POST]'
+    - /response/payload/set/default/binary/: '[POST]'
+    - /response/payload/set/{grpc}/default/{size}: '[POST]'
+    - /response/payload/set/default/{size}: '[POST]'
+    - /response/payload/set/{grpc}/default/{size}/: '[POST]'
+    - /response/payload/set/default/{size}/: '[POST]'
+    - /response/payload/set/{grpc}/default: '[POST]'
+    - /response/payload/set/default: '[POST]'
+    - /response/payload/set/{grpc}/default/: '[POST]'
+    - /response/payload/set/default/: '[POST]'
+    - /response/payload/set/{grpc}?uri={uri}: '[POST]'
+    - /response/payload/set?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/?uri={uri}: '[POST]'
+    - /response/payload/set/?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/header/{header}={value}?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/header/{header}={value}: '[POST]'
+    - /response/payload/set/header/{header}={value}?uri={uri}: '[POST]'
+    - /response/payload/set/header/{header}={value}: '[POST]'
+    - /response/payload/set/{grpc}/header/{header}={value}/?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/header/{header}={value}/: '[POST]'
+    - /response/payload/set/header/{header}={value}/?uri={uri}: '[POST]'
+    - /response/payload/set/header/{header}={value}/: '[POST]'
+    - /response/payload/set/{grpc}/header/{header}?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/header/{header}: '[POST]'
+    - /response/payload/set/header/{header}?uri={uri}: '[POST]'
+    - /response/payload/set/header/{header}: '[POST]'
+    - /response/payload/set/{grpc}/header/{header}/?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/header/{header}/: '[POST]'
+    - /response/payload/set/header/{header}/?uri={uri}: '[POST]'
+    - /response/payload/set/header/{header}/: '[POST]'
+    - /response/payload/set/{grpc}/query/{q}={value}?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/query/{q}={value}: '[POST]'
+    - /response/payload/set/query/{q}={value}?uri={uri}: '[POST]'
+    - /response/payload/set/query/{q}={value}: '[POST]'
+    - /response/payload/set/{grpc}/query/{q}={value}/?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/query/{q}={value}/: '[POST]'
+    - /response/payload/set/query/{q}={value}/?uri={uri}: '[POST]'
+    - /response/payload/set/query/{q}={value}/: '[POST]'
+    - /response/payload/set/{grpc}/query/{q}?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/query/{q}: '[POST]'
+    - /response/payload/set/query/{q}?uri={uri}: '[POST]'
+    - /response/payload/set/query/{q}: '[POST]'
+    - /response/payload/set/{grpc}/query/{q}/?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/query/{q}/: '[POST]'
+    - /response/payload/set/query/{q}/?uri={uri}: '[POST]'
+    - /response/payload/set/query/{q}/: '[POST]'
+    - /response/payload/set/{grpc}/body~{regexes}?uri={uri}: '[POST]'
+    - /response/payload/set/body~{regexes}?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/body~{regexes}/?uri={uri}: '[POST]'
+    - /response/payload/set/body~{regexes}/?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/body/paths/{paths}?uri={uri}: '[POST]'
+    - /response/payload/set/body/paths/{paths}?uri={uri}: '[POST]'
+    - /response/payload/set/{grpc}/body/paths/{paths}/?uri={uri}: '[POST]'
+    - /response/payload/set/body/paths/{paths}/?uri={uri}: '[POST]'
+    /response/payload/transform:
+    - /response/payload/transform?uri={uri}: '[POST]'
+    - /response/payload/transform/?uri={uri}: '[POST]'
+    - /response/payload/transform/delay={delay}?uri={uri}: '[POST]'
+    - /response/payload/transform/delay={delay}/?uri={uri}: '[POST]'
+  /response/status:
+    "":
+    - /response/status: '[GET]'
+    /response/status/clear:
+    - /response/status/clear?uri={uri}: '[POST]'
+    - /response/status/clear: '[POST]'
+    /response/status/configure:
+    - /response/status/configure: '[POST]'
+    /response/status/counts:
+    - /response/status/counts/clear: '[POST]'
+    - /response/status/counts/{status}: '[GET]'
+    - /response/status/counts: '[GET]'
+    /response/status/flipflop:
+    - /response/status/flipflop: '[GET]'
+    /response/status/set:
+    - /response/status/set/{status}?uriPrefix={uriPrefix}: '[POST]'
+    - /response/status/set/{status}?uri={uri}: '[POST]'
+    - /response/status/set/{status}: '[POST]'
+  /response/triggers:
+    /response/triggers/{trigger}:
+    - /response/triggers/{trigger}/remove: '[PUT POST]'
+    - /response/triggers/{trigger}/enable: '[PUT POST]'
+    - /response/triggers/{trigger}/disable: '[PUT POST]'
+    /response/triggers/{triggers}:
+    - /response/triggers/{triggers}/invoke: '[POST]'
+    /response/triggers/add:
+    - /response/triggers/add: '[POST]'
+    /response/triggers/clear:
+    - /response/triggers/clear: '[POST]'
 /routing:
   "":
     "":
@@ -1046,7 +1284,6 @@
     - /server/response/delay/set/{delay}: '[POST PUT]'
     - /server/response/delay/clear: '[POST PUT]'
     - /server/response/delay: '[GET]'
-    - /server/response/delay/{delay}: '[GET PUT POST]'
     /server/response/headers:
     - /server/response/headers/add/{header}={value}: '[PUT POST]'
     - /server/response/headers/remove/{header}: '[PUT POST]'
@@ -1199,10 +1436,6 @@
     - /server/udp/{port}/proxy/{upstream}: '[POST]'
     - /server/udp/{port}/proxy/{upstream}/delay/{delay}: '[POST]'
     - /server/udp/{port}/delay/{upstream}/{delay}: '[POST]'
-/sleep:
-  /sleep/{delay}:
-    "":
-    - /sleep/{delay}: '[GET PUT POST]'
 /stats:
   "":
     "":
@@ -1213,12 +1446,12 @@
 /stream:
   "":
     "":
-    - /stream?count={count}&delay={delay}&chunksize={chunksize}: '[GET PUT POST]'
-    - /stream?count={count}&delay={delay}: '[GET PUT POST]'
-    - /stream?count={count}: '[GET PUT POST]'
-    - /stream?duration={duration}&delay={delay}&chunksize={chunksize}: '[GET PUT POST]'
-    - /stream?duration={duration}&delay={delay}: '[GET PUT POST]'
-    - /stream?duration={duration}: '[GET PUT POST]'
+    - /stream?chunksize={chunksize}&delay={delay}&count={count}: '[GET PUT POST]'
+    - /stream?chunksize={chunksize}&delay={delay}: '[GET PUT POST]'
+    - /stream?chunksize={chunksize}: '[GET PUT POST]'
+    - /stream?chunksize={chunksize}&delay={delay}&duration={duration}: '[GET PUT POST]'
+    - /stream?chunksize={chunksize}&delay={delay}: '[GET PUT POST]'
+    - /stream?chunksize={chunksize}: '[GET PUT POST]'
     - /stream: '[GET PUT POST]'
 /tls:
   /tls/ca:

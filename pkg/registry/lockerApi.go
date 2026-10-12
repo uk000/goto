@@ -32,23 +32,29 @@ import (
 
 func addLockerMaintenanceRoutes(registryRouter, peersRouter *mux.Router) {
 	util.AddRoute(registryRouter, "/lockers/{label}/open", openLabeledLocker, "POST")
+	util.AddRoute(registryRouter, "/lockers/open/{label}", openLabeledLocker, "POST")
 	util.AddRoute(registryRouter, "/lockers/{label}/close", closeOrClearLabeledLocker, "POST")
+	util.AddRoute(registryRouter, "/lockers/close/{label}", closeOrClearLabeledLocker, "POST")
 	util.AddRoute(registryRouter, "/lockers/{label}/clear", closeOrClearLabeledLocker, "POST")
+	util.AddRoute(registryRouter, "/lockers/clear/{label}", closeOrClearLabeledLocker, "POST")
 	util.AddRoute(registryRouter, "/lockers/close", closeOrClearLabeledLocker, "POST")
 	util.AddRoute(registryRouter, "/lockers/clear", closeOrClearLabeledLocker, "POST")
-	util.AddRoute(peersRouter, "/{peer}?/{address}?/lockers/clear", clearLocker, "POST")
+	util.AddRoute(peersRouter, "/{peer}?/{peerlabel}?/lockers/clear", clearLocker, "POST")
 }
 
 func addLockerStoreRoutes(registryRouter, peersRouter *mux.Router) {
 	util.AddRoute(registryRouter, "/lockers/{label}/store/{path}", storeInLabeledLocker, "POST")
+	util.AddRoute(registryRouter, "/lockers/{label}/{path}/store", storeInLabeledLocker, "POST")
+	util.AddRoute(registryRouter, "/lockers/{label}/{path}/add", storeInLabeledLocker, "POST")
 	util.AddRoute(registryRouter, "/lockers/{label}/remove/{path}", removeFromLabeledLocker, "POST")
-	util.AddRoute(peersRouter, "/{peer}/{address}?/locker/store/{path}", storeInPeerLocker, "POST")
-	util.AddRoute(peersRouter, "/{peer}/{address}?/locker/remove/{path}", removeFromPeerLocker, "POST")
+	util.AddRoute(registryRouter, "/lockers/{label}/{path}/remove", removeFromLabeledLocker, "POST")
+	util.AddRoute(peersRouter, "/{peer}/{peerlabel}?/locker/store/{path}", storeInPeerLocker, "POST")
+	util.AddRoute(peersRouter, "/{peer}/{peerlabel}?/locker/remove/{path}", removeFromPeerLocker, "POST")
 
 }
 
 func addLockerEventsRoutes(peersRouter *mux.Router) {
-	util.AddRoute(peersRouter, "/{peer}/{address}/events/store", storePeerEvent, "POST")
+	util.AddRoute(peersRouter, "/{peer}/{peerlabel}/events/store", storePeerEvent, "POST")
 	util.AddRouteWithMultiQ(peersRouter, "/{peer}?/events/search/{text}", searchInPeerEvents, [][]string{{}, {"data", "reverse"}}, "GET")
 	util.AddRouteWithMultiQ(peersRouter, "/{peer}?/events", getPeerEvents, [][]string{{}, {"data", "reverse"}}, "GET")
 	util.AddRoute(peersRouter, "/events/flush", flushPeerEvents, "POST")
@@ -56,22 +62,22 @@ func addLockerEventsRoutes(peersRouter *mux.Router) {
 }
 
 func addPeerLockerReadRoutes(peersRouter *mux.Router) {
-	util.AddRouteWithMultiQ(peersRouter, "/{peer}/{address}?/locker/get/{path}", getFromPeerLocker, [][]string{{}, {"data", "level"}}, "GET")
+	util.AddRouteWithMultiQ(peersRouter, "/{peer}/{peerlabel}?/locker/get/{path}", getFromPeerLocker, [][]string{{}, {"data", "level"}}, "GET")
 	util.AddRoute(peersRouter, "/{peer}?/instances/client/results/targets={targets}?", getPeersClientResults, "GET")
 	util.AddRoute(peersRouter, "/{peer}?/client/results/details/targets={targets}?", getPeersClientResults, "GET")
 	util.AddRoute(peersRouter, "/{peer}?/client/results/summary/targets={targets}?", getPeersClientResults, "GET")
 	util.AddRoute(peersRouter, "/{peer}?/client/results/targets={targets}?", getPeersClientResults, "GET")
-	util.AddRouteWithMultiQ(peersRouter, "/{peer}?/{address}?/lockers", getPeerLocker, [][]string{{}, {"data", "events", "level"}}, "GET")
+	util.AddRouteWithMultiQ(peersRouter, "/{peer}?/{label}?/lockers", getPeerLocker, [][]string{{}, {"data", "events", "level"}}, "GET")
 
 }
 
 func addLockerReadRoutes(registryRouter *mux.Router) {
 	util.AddRouteWithMultiQ(registryRouter, "/lockers", getAllLockers, [][]string{{}, {"data", "events", "peers", "level"}}, "GET")
 	util.AddRoute(registryRouter, "/lockers/all", getAllLockers, "GET")
-	util.AddRouteWithMultiQ(registryRouter, "/lockers/{label}", getLabeledLocker, [][]string{{}, {"data", "events", "peers", "level"}}, "GET")
-	util.AddRouteWithMultiQ(registryRouter, "/lockers/{label}?/data", getDataLockers, [][]string{{}, {"data", "level"}}, "GET")
-	util.AddRouteWithMultiQ(registryRouter, "/lockers/{label}/get/{path}", getFromDataLocker, [][]string{{}, {"data", "level"}}, "GET")
 	util.AddRoute(registryRouter, "/lockers/labels", getLockerLabels, "GET")
+	util.AddRouteWithMultiQ(registryRouter, "/lockers/{label}", getLabeledLocker, [][]string{{}, {"data", "events", "peers", "level"}, {"md"}}, "GET")
+	util.AddRouteWithMultiQ(registryRouter, "/lockers/{label}/get/{path}", getFromDataLocker, [][]string{{}, {"data", "level"}, {"md"}}, "GET")
+	util.AddRouteWithMultiQ(registryRouter, "/lockers/{label}?/data", getDataLockers, [][]string{{}, {"data", "level"}, {"md"}}, "GET")
 	util.AddRoute(registryRouter, "/lockers/{label}?/data/keys", getDataLockerPaths, "GET")
 	util.AddRoute(registryRouter, "/lockers/{label}?/data/paths", getDataLockerPaths, "GET")
 	util.AddRoute(registryRouter, "/lockers/{label}?/search/{text}", searchInDataLockers, "GET")
@@ -82,7 +88,10 @@ func addContextLockerRoutes(registryRouter *mux.Router) {
 	util.AddRoute(registryRouter, "/context/{context}/lockers/{label}/close", closeOrClearLabeledLocker, "POST")
 	util.AddRoute(registryRouter, "/context/{context}/lockers/{label}/clear", closeOrClearLabeledLocker, "POST")
 	util.AddRoute(registryRouter, "/context/{context}/lockers/{label}/store/{path}", storeInLabeledLocker, "POST")
+	util.AddRoute(registryRouter, "/context/{context}/lockers/{label}/{path}/store", storeInLabeledLocker, "POST")
+	util.AddRoute(registryRouter, "/context/{context}/lockers/{label}/{path}/add", storeInLabeledLocker, "POST")
 	util.AddRoute(registryRouter, "/context/{context}/lockers/{label}/get/{path}", getFromDataLocker, "GET")
+	util.AddRoute(registryRouter, "/context/{context}/lockers/{label}/{path}/get", getFromDataLocker, "GET")
 }
 
 func addLockerPeerRoutes(registryRouter *mux.Router) {
@@ -93,8 +102,8 @@ func addLockerPeerRoutes(registryRouter *mux.Router) {
 	util.AddRoute(lockerPeersRouter, "/{peer}?/client/results/details/targets={targets}?", getPeersClientResults, "GET")
 	util.AddRoute(lockerPeersRouter, "/{peer}?/client/results/summary/targets={targets}?", getPeersClientResults, "GET")
 	util.AddRoute(lockerPeersRouter, "/{peer}?/client/results/targets={targets}?", getPeersClientResults, "GET")
-	util.AddRouteWithMultiQ(lockerPeersRouter, "/{peer}?/{address}?", getPeerLocker, [][]string{{}, {"data", "events", "level"}}, "GET")
-	util.AddRouteWithMultiQ(lockerPeersRouter, "/{peer}/{address}?/get/{path}", getFromPeerLocker, [][]string{{}, {"data", "level"}}, "GET")
+	util.AddRouteWithMultiQ(lockerPeersRouter, "/{peer}?/{label}?", getPeerLocker, [][]string{{}, {"data", "events", "level"}}, "GET")
+	util.AddRouteWithMultiQ(lockerPeersRouter, "/{peer}/{peerlabel}?/get/{path}", getFromPeerLocker, [][]string{{}, {"data", "level"}}, "GET")
 }
 
 func openLabeledLocker(w http.ResponseWriter, r *http.Request) {
@@ -171,6 +180,7 @@ func getLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	getEvents := util.GetBoolParamValue(r, "events")
 	getPeerLockers := util.GetBoolParamValue(r, "peers")
 	level := util.GetIntParamValue(r, "level", 2)
+	sendMD := util.GetBoolParamValue(r, "md")
 	var locker *locker.CombiLocker
 	if label != "" {
 		locker = registry.labeledLockers.GetLocker(label)
@@ -195,7 +205,12 @@ func getLabeledLocker(w http.ResponseWriter, r *http.Request) {
 			locker = locker.GetLockerWithoutEvents()
 		}
 		msg = fmt.Sprintf("Labeled locker [%s] reported", label)
-		util.WriteJsonPayload(w, locker)
+		if sendMD {
+			w.Header().Set(constants.HeaderContentType, constants.ContentTypeMarkdown)
+			fmt.Fprint(w, renderLockersMarkdown(locker))
+		} else {
+			util.WriteJsonPayload(w, locker)
+		}
 	}
 	if global.Flags.EnableRegistryLockerLogs {
 		util.AddLogMessage(msg, r)
@@ -207,6 +222,7 @@ func getDataLockers(w http.ResponseWriter, r *http.Request) {
 	label := util.GetStringParamValue(r, "label")
 	getData := util.GetBoolParamValue(r, "data")
 	level := util.GetIntParamValue(r, "level", 2)
+	sendMD := util.GetBoolParamValue(r, "md")
 	registry.lockersLock.RLock()
 	labeledLockers := registry.labeledLockers
 	registry.lockersLock.RUnlock()
@@ -226,7 +242,12 @@ func getDataLockers(w http.ResponseWriter, r *http.Request) {
 			output[label] = dl
 		}
 	}
-	util.WriteJsonPayload(w, output)
+	if sendMD {
+		w.Header().Set(constants.HeaderContentType, constants.ContentTypeMarkdown)
+		fmt.Fprint(w, renderLockersMarkdown(output))
+	} else {
+		util.WriteJsonPayload(w, output)
+	}
 	if global.Flags.EnableRegistryLockerLogs {
 		util.AddLogMessage(msg, r)
 	}
@@ -305,6 +326,7 @@ func storeInLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	label := util.GetStringParamValue(r, "label")
 	path, _ := util.GetListParam(r, "path")
 	context := util.GetStringParamValue(r, "context")
+	add := strings.Contains(r.RequestURI, "/add")
 	var ll *locker.LabeledLockers
 	registry.lockersLock.Lock()
 	if context != "" {
@@ -315,7 +337,7 @@ func storeInLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	registry.lockersLock.Unlock()
 	if label != "" && len(path) > 0 {
 		data := util.Read(r.Body)
-		ll.GetOrCreateLocker(label).Store(path, data)
+		ll.GetOrCreateLocker(label).Store(path, data, add)
 		w.WriteHeader(http.StatusOK)
 		msg = fmt.Sprintf("Data stored in [Context: %s] labeled locker %s for path %+v", context, label, path)
 		events.SendRequestEvent(events.Registry_LockerDataStored, msg, r)
@@ -354,6 +376,7 @@ func getFromDataLocker(w http.ResponseWriter, r *http.Request) {
 	path, _ := util.GetListParam(r, "path")
 	getData := util.GetBoolParamValue(r, "data")
 	level := util.GetIntParamValue(r, "level", 0)
+	sendMD := util.GetBoolParamValue(r, "md")
 	if level > 0 {
 		level = len(path) + level
 	}
@@ -372,7 +395,12 @@ func getFromDataLocker(w http.ResponseWriter, r *http.Request) {
 		if dataAtKey {
 			fmt.Fprint(w, data)
 		} else if data != nil {
-			util.WriteJsonPayload(w, data)
+			if sendMD {
+				w.Header().Set(constants.HeaderContentType, constants.ContentTypeMarkdown)
+				fmt.Fprint(w, renderLockersMarkdown(data))
+			} else {
+				util.WriteJsonPayload(w, data)
+			}
 		} else {
 			fmt.Fprint(w, "{}")
 		}
@@ -389,11 +417,11 @@ func getFromDataLocker(w http.ResponseWriter, r *http.Request) {
 func storeInPeerLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	peerName := util.GetStringParamValue(r, "peer")
-	address := util.GetStringParamValue(r, "address")
+	peerLabel := util.GetStringParamValue(r, "peerlabel")
 	path, _ := util.GetListParam(r, "path")
 	if peerName != "" && len(path) > 0 {
 		data := util.Read(r.Body)
-		registry.getCurrentLocker().StorePeerData(peerName, address, path, data)
+		registry.getCurrentLocker().StorePeerData(peerName, peerLabel, path, data)
 		w.WriteHeader(http.StatusOK)
 		msg = fmt.Sprintf("Peer %s data stored for path %+v", peerName, path)
 	} else {
@@ -409,6 +437,7 @@ func storeInPeerLocker(w http.ResponseWriter, r *http.Request) {
 func storePeerEvent(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	peerName := util.GetStringParamValue(r, "peer")
+	peerLabel := util.GetStringParamValue(r, "peerlabel")
 	registry.peersLock.RLock()
 	peer := registry.peers[peerName]
 	registry.peersLock.RUnlock()
@@ -418,9 +447,9 @@ func storePeerEvent(w http.ResponseWriter, r *http.Request) {
 		peer.eventsCounter++
 		index := peer.eventsCounter
 		peer.lock.Unlock()
-		registry.getCurrentLocker().StorePeerData(peerName, "", []string{"events", strconv.Itoa(index)}, data)
+		registry.getCurrentLocker().StorePeerData(peerName, peerLabel, []string{"events", strconv.Itoa(index)}, data)
 		w.WriteHeader(http.StatusOK)
-		msg = fmt.Sprintf("Peer [%s] event [%d] stored", peerName, index)
+		msg = fmt.Sprintf("Peer [%s] Instance Label [%s] event [%d] stored", peerName, peerLabel, index)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "No Peer"
@@ -434,10 +463,10 @@ func storePeerEvent(w http.ResponseWriter, r *http.Request) {
 func removeFromPeerLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	peerName := util.GetStringParamValue(r, "peer")
-	address := util.GetStringParamValue(r, "address")
+	peerLabel := util.GetStringParamValue(r, "peerlabel")
 	path, _ := util.GetListParam(r, "path")
 	if peerName != "" && len(path) > 0 {
-		registry.getCurrentLocker().RemovePeerData(peerName, address, path)
+		registry.getCurrentLocker().RemovePeerData(peerName, peerLabel, path)
 		w.WriteHeader(http.StatusOK)
 		msg = fmt.Sprintf("Peer %s data removed for path %+v", peerName, path)
 	} else {
@@ -453,13 +482,13 @@ func removeFromPeerLocker(w http.ResponseWriter, r *http.Request) {
 func clearLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	peerName := util.GetStringParamValue(r, "peer")
-	address := util.GetStringParamValue(r, "address")
-	result := registry.clearLocker(peerName, address, r)
+	peerLabel := util.GetStringParamValue(r, "peerlabel")
+	result := registry.clearLocker(peerName, peerLabel, r)
 	w.WriteHeader(http.StatusOK)
 	util.WriteJsonPayload(w, result)
 	if peerName != "" {
-		if address != "" {
-			msg = fmt.Sprintf("Peer %s Instance %s data cleared", peerName, address)
+		if peerLabel != "" {
+			msg = fmt.Sprintf("Peer %s Instance %s data cleared", peerName, peerLabel)
 			events.SendRequestEvent(events.Registry_PeerInstanceLockerCleared, msg, r)
 		} else {
 			msg = fmt.Sprintf("Peer %s data cleared for all instances", peerName)
@@ -478,7 +507,7 @@ func getFromPeerLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")
 	peerName := util.GetStringParamValue(r, "peer")
-	peerAddress := util.GetStringParamValue(r, "address")
+	peerLabel := util.GetStringParamValue(r, "peerlabel")
 	val := util.GetStringParamValue(r, "path")
 	path, _ := util.GetListParam(r, "path")
 	getData := util.GetBoolParamValue(r, "data")
@@ -490,7 +519,7 @@ func getFromPeerLocker(w http.ResponseWriter, r *http.Request) {
 		msg = "Not enough parameters to access locker"
 		fmt.Fprint(w, msg)
 	} else {
-		data, dataAtKey := registry.labeledLockers.GetFromPeerInstanceLocker(label, peerName, peerAddress, path, getData, level)
+		data, dataAtKey := registry.labeledLockers.GetFromPeerInstanceLocker(label, peerName, peerLabel, path, getData, level)
 		if dataAtKey {
 			fmt.Fprint(w, data)
 		} else {
@@ -507,7 +536,7 @@ func getPeerLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")
 	peerName := util.GetStringParamValue(r, "peer")
-	peerAddress := util.GetStringParamValue(r, "address")
+	peerLabel := util.GetStringParamValue(r, "label")
 	getData := util.GetBoolParamValue(r, "data")
 	getEvents := util.GetBoolParamValue(r, "events")
 	level := util.GetIntParamValue(r, "level", 2)
@@ -526,7 +555,7 @@ func getPeerLocker(w http.ResponseWriter, r *http.Request) {
 		if level > 0 {
 			locker = locker.Trim(level)
 		}
-		result = locker.GetPeerLockersView(peerName, peerAddress, getData, getEvents)
+		result = locker.GetPeerLockersView(peerName, peerLabel, getData, getEvents)
 		util.WriteJsonPayload(w, result)
 		if peerName != "" {
 			msg = fmt.Sprintf("Peer %s data reported", peerName)

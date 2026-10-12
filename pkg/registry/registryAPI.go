@@ -834,7 +834,7 @@ func copyPeersToLocker(w http.ResponseWriter, r *http.Request) {
 	registry.peersLock.RLock()
 	defer registry.peersLock.RUnlock()
 	currentLocker := registry.getCurrentLocker()
-	currentLocker.Store([]string{"peers"}, util.ToJSONText(registry.peers))
+	currentLocker.Store([]string{"peers"}, util.ToJSONText(registry.peers), false)
 	w.WriteHeader(http.StatusOK)
 	msg := fmt.Sprintf("Peers [len: %d] stored in labeled locker %s under path 'peers'",
 		len(registry.peers), currentLocker.Label)

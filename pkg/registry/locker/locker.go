@@ -99,7 +99,7 @@ func createOrGetLockerData(locker Locker, key string, now time.Time, level int) 
 	return lockerData
 }
 
-func unsafeStoreKeysInLocker(locker Locker, keys []string, value string) {
+func unsafeStoreKeysInLocker(locker Locker, keys []string, value string, add bool) {
 	if len(keys) == 0 {
 		return
 	}
@@ -112,7 +112,20 @@ func unsafeStoreKeysInLocker(locker Locker, keys []string, value string) {
 		lockerData = lockerData.SubKeys[keys[i]]
 		lockerData.LastReported = now
 	}
-	lockerData.Data = value
+	if add {
+		values := []any{}
+		if !util.IsNil(lockerData.Data) {
+			if v2, ok := lockerData.Data.([]any); ok {
+				values = v2
+			} else {
+				values = append(values, lockerData.Data)
+			}
+		}
+		values = append(values, value)
+		lockerData.Data = values
+	} else {
+		lockerData.Data = value
+	}
 }
 
 func unsafeRemoveSubKeys(lockerData *LockerData, keys []string, index int) {
@@ -280,7 +293,11 @@ func (ld *LockerData) MarshalJSON() ([]byte, error) {
 	}
 	if len(ld.SubKeys) > 0 {
 		for k, v := range ld.SubKeys {
-			data[k] = v
+			if util.IsNil(v) {
+				data[k] = ""
+			} else {
+				data[k] = v
+			}
 		}
 	}
 	if ld.Data != "" {
@@ -306,13 +323,13 @@ func (dl *DataLocker) MarshalJSON() ([]byte, error) {
 	return json.Marshal(dl.Locker)
 }
 
-func (dl *DataLocker) Store(keys []string, value string) {
+func (dl *DataLocker) Store(keys []string, value string, add bool) {
 	if len(keys) == 0 {
 		return
 	}
 	dl.lock.Lock()
 	defer dl.lock.Unlock()
-	unsafeStoreKeysInLocker(dl.Locker, keys, value)
+	unsafeStoreKeysInLocker(dl.Locker, keys, value, add)
 }
 
 func (dl *DataLocker) Remove(keys []string) {
@@ -366,41 +383,41 @@ func (pl *PeerLocker) MarshalJSON() ([]byte, error) {
 	return json.Marshal(data)
 }
 
-func (pl *PeerLocker) createOrGetInstanceLocker(peerAddress string) *DataLocker {
+func (pl *PeerLocker) createOrGetInstanceLocker(peerLabel string) *DataLocker {
 	pl.lock.RLock()
-	il := pl.InstanceLockers[peerAddress]
+	il := pl.InstanceLockers[peerLabel]
 	pl.lock.RUnlock()
 	if il == nil {
 		pl.lock.Lock()
 		il = newDataLocker()
-		pl.InstanceLockers[peerAddress] = il
+		pl.InstanceLockers[peerLabel] = il
 		pl.lock.Unlock()
 	}
 	return il
 }
 
-func (pl *PeerLocker) clearInstanceLocker(peerAddress string) bool {
+func (pl *PeerLocker) clearInstanceLocker(peerLabel string) bool {
 	pl.lock.RLock()
-	_, present := pl.InstanceLockers[peerAddress]
+	_, present := pl.InstanceLockers[peerLabel]
 	pl.lock.RUnlock()
 	if present {
 		pl.lock.Lock()
-		pl.InstanceLockers[peerAddress] = newDataLocker()
+		pl.InstanceLockers[peerLabel] = newDataLocker()
 		pl.lock.Unlock()
 	}
 	return present
 }
 
-func (pl *PeerLocker) removeInstanceLocker(peerAddress string) {
+func (pl *PeerLocker) removeInstanceLocker(peerLabel string) {
 	pl.lock.Lock()
 	defer pl.lock.Unlock()
-	delete(pl.InstanceLockers, peerAddress)
+	delete(pl.InstanceLockers, peerLabel)
 }
 
 func (pl *PeerLocker) Store(keys []string, value string) {
 	pl.lock.Lock()
 	defer pl.lock.Unlock()
-	pl.DataLocker.Store(keys, value)
+	pl.DataLocker.Store(keys, value, false)
 }
 
 func (pl *PeerLocker) Remove(keys []string) {
@@ -430,9 +447,9 @@ func (pl *PeerLocker) GetLockerView(data, events bool) *PeerLocker {
 	if !events {
 		delete(plView.Locker, constants.LockerEventsKey)
 	}
-	for address, il := range pl.InstanceLockers {
+	for label, il := range pl.InstanceLockers {
 		ilView := newDataLocker()
-		plView.InstanceLockers[address] = ilView
+		plView.InstanceLockers[label] = ilView
 		unsafeGetLockerView(il.Locker, ilView.Locker, data)
 		ilView.Active = il.Active
 	}
@@ -445,9 +462,9 @@ func (pl *PeerLocker) Trim(level int) *PeerLocker {
 	plView := newPeerLocker()
 	unsafeTrimLocker(pl.DataLocker.Locker, plView.DataLocker.Locker, level)
 	plView.DataLocker.Active = pl.DataLocker.Active
-	for address, il := range pl.InstanceLockers {
+	for label, il := range pl.InstanceLockers {
 		ilView := newDataLocker()
-		plView.InstanceLockers[address] = ilView
+		plView.InstanceLockers[label] = ilView
 		unsafeTrimLocker(il.Locker, ilView.Locker, level)
 		ilView.Active = il.Active
 	}
@@ -567,15 +584,15 @@ func (cl *CombiLocker) GetSubLocker(labels []string) *CombiLocker {
 	return sub
 }
 
-func (cl *CombiLocker) InitPeerLocker(peerName string, peerAddress string) bool {
+func (cl *CombiLocker) InitPeerLocker(peerName string, peerLabel string) bool {
 	if peerName != "" {
 		peerName = strings.ToLower(peerName)
 		cl.lock.Lock()
-		if peerAddress == "" || cl.PeerLockers[peerName] == nil {
+		if peerLabel == "" || cl.PeerLockers[peerName] == nil {
 			cl.PeerLockers[peerName] = newPeerLocker()
 		}
-		if peerAddress != "" {
-			cl.PeerLockers[peerName].clearInstanceLocker(peerAddress)
+		if peerLabel != "" {
+			cl.PeerLockers[peerName].clearInstanceLocker(peerLabel)
 		}
 		cl.lock.Unlock()
 	} else {
@@ -655,41 +672,41 @@ func (cl *CombiLocker) getPeersLockers(peerNames []string) map[string]*PeerLocke
 	return peerLockers
 }
 
-func (cl *CombiLocker) createOrGetInstanceLocker(peerName string, peerAddress string) *DataLocker {
-	return cl.createOrGetPeerLocker(peerName).createOrGetInstanceLocker(peerAddress)
+func (cl *CombiLocker) createOrGetInstanceLocker(peerName string, peerLabel string) *DataLocker {
+	return cl.createOrGetPeerLocker(peerName).createOrGetInstanceLocker(peerLabel)
 }
 
-func (cl *CombiLocker) DeactivateInstanceLocker(peerName string, peerAddress string) {
-	cl.createOrGetPeerLocker(peerName).createOrGetInstanceLocker(peerAddress).Deactivate()
+func (cl *CombiLocker) DeactivateInstanceLocker(peerName string, peerLabel string) {
+	cl.createOrGetPeerLocker(peerName).createOrGetInstanceLocker(peerLabel).Deactivate()
 }
 
-func (cl *CombiLocker) StorePeerData(peerName, peerAddress string, keys []string, value string) {
+func (cl *CombiLocker) StorePeerData(peerName, peerLabel string, keys []string, value string) {
 	if len(keys) == 0 {
 		return
 	}
-	if peerAddress == "" {
+	if peerLabel == "" {
 		cl.createOrGetPeerLocker(peerName).Store(keys, value)
 	} else {
-		cl.createOrGetInstanceLocker(peerName, peerAddress).Store(keys, value)
+		cl.createOrGetInstanceLocker(peerName, peerLabel).Store(keys, value, false)
 	}
 }
 
-func (cl *CombiLocker) RemovePeerData(peerName, peerAddress string, keys []string) {
+func (cl *CombiLocker) RemovePeerData(peerName, peerLabel string, keys []string) {
 	if len(keys) == 0 {
 		return
 	}
-	if peerAddress == "" {
+	if peerLabel == "" {
 		cl.createOrGetPeerLocker(peerName).Remove(keys)
 	} else {
-		cl.createOrGetInstanceLocker(peerName, peerAddress).Remove(keys)
+		cl.createOrGetInstanceLocker(peerName, peerLabel).Remove(keys)
 	}
 }
 
-func (cl *CombiLocker) Store(keys []string, value string) {
+func (cl *CombiLocker) Store(keys []string, value string, add bool) {
 	cl.lock.Lock()
 	dl := cl.DataLocker
 	cl.lock.Unlock()
-	dl.Store(keys, value)
+	dl.Store(keys, value, add)
 }
 
 func (cl *CombiLocker) Remove(keys []string) {
@@ -734,13 +751,13 @@ func (cl *CombiLocker) Get(keys []string, data bool, level int) (interface{}, bo
 	return nil, false, false
 }
 
-func (cl *CombiLocker) ClearInstanceLocker(peerName, peerAddress string) bool {
+func (cl *CombiLocker) ClearInstanceLocker(peerName, peerLabel string) bool {
 	peerName = strings.ToLower(peerName)
 	cl.lock.Lock()
 	peerLocker := cl.PeerLockers[peerName]
 	cl.lock.Unlock()
 	if peerLocker != nil {
-		return peerLocker.clearInstanceLocker(peerAddress)
+		return peerLocker.clearInstanceLocker(peerLabel)
 	}
 	return false
 }
@@ -752,7 +769,7 @@ func (cl *CombiLocker) RemovePeerLocker(peerName string) {
 	delete(cl.PeerLockers, peerName)
 }
 
-func (cl *CombiLocker) GetFromPeerInstanceLocker(peerName, peerAddress string, keys []string, data bool, level int) (interface{}, bool, bool) {
+func (cl *CombiLocker) GetFromPeerInstanceLocker(peerName, peerLabel string, keys []string, data bool, level int) (interface{}, bool, bool) {
 	if len(keys) == 0 || peerName == "" {
 		return nil, false, false
 	}
@@ -765,13 +782,13 @@ func (cl *CombiLocker) GetFromPeerInstanceLocker(peerName, peerAddress string, k
 	}
 	instanceLockers := DataLockers{}
 	pl.lock.RLock()
-	if peerAddress != "" {
-		if pl.InstanceLockers[peerAddress] != nil {
-			instanceLockers[peerAddress] = pl.InstanceLockers[peerAddress]
+	if peerLabel != "" {
+		if pl.InstanceLockers[peerLabel] != nil {
+			instanceLockers[peerLabel] = pl.InstanceLockers[peerLabel]
 		}
 	} else {
-		for address, il := range pl.InstanceLockers {
-			instanceLockers[address] = il
+		for label, il := range pl.InstanceLockers {
+			instanceLockers[label] = il
 		}
 	}
 	pl.lock.RUnlock()
@@ -792,10 +809,10 @@ func (cl *CombiLocker) GetFromPeerInstanceLocker(peerName, peerAddress string, k
 		}
 	}
 	result := map[string]interface{}{}
-	for address, il := range instanceLockers {
+	for label, il := range instanceLockers {
 		instanceData, present, _ := il.Get(keys, true, 0)
 		if present {
-			result[address] = instanceData
+			result[label] = instanceData
 		}
 	}
 	if len(result) == 0 {
@@ -807,7 +824,7 @@ func (cl *CombiLocker) GetFromPeerInstanceLocker(peerName, peerAddress string, k
 	return result, true, false
 }
 
-func (cl *CombiLocker) GetPeerLockers(peerName, peerAddress string, events bool) map[string]map[string]interface{} {
+func (cl *CombiLocker) GetPeerLockers(peerName, peerLabel string, events bool) map[string]map[string]interface{} {
 	peerName = strings.ToLower(peerName)
 	peerLockers := cl.getPeerLockers(peerName)
 	if len(peerLockers) == 0 {
@@ -822,17 +839,17 @@ func (cl *CombiLocker) GetPeerLockers(peerName, peerAddress string, events bool)
 			if !events {
 				pl = pl.GetLockerWithoutEvents()
 			}
-			if peerAddress == "" {
+			if peerLabel == "" {
 				lockers[label][peer] = pl
 			} else {
-				lockers[label][peer] = pl.createOrGetInstanceLocker(peerAddress)
+				lockers[label][peer] = pl.createOrGetInstanceLocker(peerLabel)
 			}
 		}
 	}
 	return lockers
 }
 
-func (cl *CombiLocker) GetPeerLockersView(peerName, peerAddress string, data, events bool) map[string]map[string]interface{} {
+func (cl *CombiLocker) GetPeerLockersView(peerName, peerLabel string, data, events bool) map[string]map[string]interface{} {
 	peerName = strings.ToLower(peerName)
 	peerLockers := cl.getPeerLockers(peerName)
 	if len(peerLockers) == 0 {
@@ -845,10 +862,10 @@ func (cl *CombiLocker) GetPeerLockersView(peerName, peerAddress string, data, ev
 		}
 		for peer, pl := range pls {
 			plView := pl.GetLockerView(data, events)
-			if peerAddress == "" {
+			if peerLabel == "" {
 				lockers[label][peer] = plView
 			} else {
-				lockers[label][peer] = plView.createOrGetInstanceLocker(peerAddress)
+				lockers[label][peer] = plView.createOrGetInstanceLocker(peerLabel)
 			}
 		}
 	}
@@ -980,9 +997,9 @@ func (cl *CombiLocker) getPeersClientResults(peerName string, targets []string, 
 			peersClientResults[peer] = map[string]*results.TargetResults{}
 		}
 		peerLocker.lock.RLock()
-		for address, instanceLocker := range peerLocker.InstanceLockers {
+		for label, instanceLocker := range peerLocker.InstanceLockers {
 			if byInstances {
-				peersInstanceClientResults[peer][address] = map[string]*results.TargetResults{}
+				peersInstanceClientResults[peer][label] = map[string]*results.TargetResults{}
 			}
 			instanceLocker.lock.RLock()
 			lockerData := instanceLocker.Locker[constants.LockerClientKey]
@@ -997,15 +1014,15 @@ func (cl *CombiLocker) getPeersClientResults(peerName string, targets []string, 
 					if !byInstances && peersClientResults[peer][target] == nil {
 						peersClientResults[peer][target] = results.NewTargetResults(target, trackingHeaders, crossTrackingHeaders, trackingTimeBuckets)
 					}
-					if byInstances && peersInstanceClientResults[peer][address][target] == nil {
-						peersInstanceClientResults[peer][address][target] = results.NewTargetResults(target, trackingHeaders, crossTrackingHeaders, trackingTimeBuckets)
+					if byInstances && peersInstanceClientResults[peer][label][target] == nil {
+						peersInstanceClientResults[peer][label][target] = results.NewTargetResults(target, trackingHeaders, crossTrackingHeaders, trackingTimeBuckets)
 					}
 					if data := targetData.Data; data != "" {
 						result := &results.TargetResults{}
 						if val, ok := data.(string); ok {
 							if err := util.ReadJson(val, result); err == nil {
 								if byInstances {
-									results.AddDeltaResults(peersInstanceClientResults[peer][address][target], result, detailed)
+									results.AddDeltaResults(peersInstanceClientResults[peer][label][target], result, detailed)
 								} else {
 									results.AddDeltaResults(peersClientResults[peer][target], result, detailed)
 								}
@@ -1035,10 +1052,10 @@ func (cl *CombiLocker) GetPeersClientResults(peerName string, targets []string, 
 	if byInstances {
 		for peer, instanceResults := range peersInstanceClientResults {
 			summaryPeersInstanceResults[peer] = map[string]*results.ClientTargetsAggregateResultsView{}
-			for address, targetsResults := range instanceResults {
-				summaryPeersInstanceResults[peer][address] = results.NewClientTargetsAggregateResults()
+			for label, targetsResults := range instanceResults {
+				summaryPeersInstanceResults[peer][label] = results.NewClientTargetsAggregateResults()
 				for _, targetResult := range targetsResults {
-					summaryPeersInstanceResults[peer][address].AddTargetResult(targetResult, detailed)
+					summaryPeersInstanceResults[peer][label].AddTargetResult(targetResult, detailed)
 				}
 			}
 		}
@@ -1521,7 +1538,7 @@ func (ll *LabeledLockers) Get(label string, keys []string, data bool, level int)
 	return result, false
 }
 
-func (ll *LabeledLockers) GetFromPeerInstanceLocker(label, peerName, peerAddress string, keys []string, data bool, level int) (interface{}, bool) {
+func (ll *LabeledLockers) GetFromPeerInstanceLocker(label, peerName, peerLabel string, keys []string, data bool, level int) (interface{}, bool) {
 	if len(keys) == 0 {
 		return nil, false
 	}
@@ -1531,7 +1548,7 @@ func (ll *LabeledLockers) GetFromPeerInstanceLocker(label, peerName, peerAddress
 			if level > 0 {
 				cl = cl.Trim(level)
 			}
-			result, _, dataAtKey := cl.GetFromPeerInstanceLocker(peerName, peerAddress, keys, data, level)
+			result, _, dataAtKey := cl.GetFromPeerInstanceLocker(peerName, peerLabel, keys, data, level)
 			return result, dataAtKey
 		}
 		return nil, false
@@ -1539,7 +1556,7 @@ func (ll *LabeledLockers) GetFromPeerInstanceLocker(label, peerName, peerAddress
 	result := map[string]interface{}{}
 	for _, cl := range lockers {
 		if cl != nil {
-			if data, present, _ := cl.GetFromPeerInstanceLocker(peerName, peerAddress, keys, data, level); present {
+			if data, present, _ := cl.GetFromPeerInstanceLocker(peerName, peerLabel, keys, data, level); present {
 				result[cl.PathLabel] = data
 			}
 		}

@@ -245,6 +245,7 @@ func HTTPHandler() http.Handler {
 		rs.JSONResponse = util.IsAcceptJSON(r)
 		rs.YAMLResponse = util.IsAcceptYAML(r)
 		routeHandler := router.WillRoute(rs.RequestPortNum, r)
+		w, statusIRW := intercept.WithIntercept(r, w)
 		if routeHandler != nil {
 			routeHandler.ServeHTTP(w, r)
 		} else {
@@ -259,11 +260,13 @@ func HTTPHandler() http.Handler {
 				} else {
 					handleHTTP(l, w, r, rs)
 				}
-				statusCodeText := strconv.Itoa(rs.StatusCode)
-				metrics.UpdateURIRequestCount(r.RequestURI, statusCodeText)
-				metrics.UpdatePortRequestCount(rs.RequestPort, r.RequestURI)
 			}
 		}
+		statusIRW.Proceed()
+		rs.StatusCode = statusIRW.StatusCode
+		statusCodeText := strconv.Itoa(rs.StatusCode)
+		metrics.UpdateURIRequestCount(r.RequestURI, statusCodeText)
+		metrics.UpdatePortRequestCount(rs.RequestPort, r.RequestURI)
 		go PrintLogMessages(rs.StatusCode, 0, nil, w.Header(), r.Context().Value(util.RequestStoreKey).(*util.RequestStore))
 		if rs.ReReader != nil {
 			rs.ReReader.ReallyClose()

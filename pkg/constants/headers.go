@@ -98,6 +98,7 @@ const (
 	HeaderAuthority           = ":authority"
 	ContentTypeJSON           = "application/json"
 	ContentTypeYAML           = "application/yaml"
+	ContentTypeMarkdown       = "text/markdown; charset=utf-8"
 
 	HeaderGotoRPCMethod = "Goto-RPC-Method"
 

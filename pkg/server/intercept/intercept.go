@@ -278,17 +278,6 @@ func WithInterceptChunked(r *http.Request, w http.ResponseWriter) (http.Response
 	return w, irw
 }
 
-func WithHeadersIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *HeaderInterceptResponseWriter) {
-	var irw *HeaderInterceptResponseWriter
-	rs := util.GetRequestStore(r)
-	if !rs.IsKnownNonTraffic {
-		irw = NewHeadersInterceptResponseWriter(w)
-		rs.HeadersInterceptRW = irw
-		w = irw
-	}
-	return w, irw
-}
-
 func GetOrCreateInterceptWriter(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *InterceptResponseWriter) {
 	var irw *InterceptResponseWriter
 	rs := util.GetRequestStore(r)
@@ -308,6 +297,17 @@ func GetInterceptWriter(r *http.Request) *InterceptResponseWriter {
 		irw = rs.InterceptResponseWriter.(*InterceptResponseWriter)
 	}
 	return irw
+}
+
+func WithHeadersIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *HeaderInterceptResponseWriter) {
+	var irw *HeaderInterceptResponseWriter
+	rs := util.GetRequestStore(r)
+	if !rs.IsKnownNonTraffic {
+		irw = NewHeadersInterceptResponseWriter(w)
+		rs.HeadersInterceptRW = irw
+		w = irw
+	}
+	return w, irw
 }
 
 func NewHeadersInterceptResponseWriter(w http.ResponseWriter) *HeaderInterceptResponseWriter {

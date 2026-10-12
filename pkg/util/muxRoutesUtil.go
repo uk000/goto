@@ -218,7 +218,8 @@ func AddRouteWithMultiQ(r *mux.Router, path string, f func(http.ResponseWriter, 
 	altPaths := GetAltPaths(path, true)
 	qPairSets := [][]string{}
 	qPairs := []string{}
-	for _, qParams := range qParamsSets {
+	for i := len(qParamsSets) - 1; i >= 0; i-- {
+		qParams := qParamsSets[i]
 		changed := false
 		for _, q := range qParams {
 			if len(q) > 0 {
