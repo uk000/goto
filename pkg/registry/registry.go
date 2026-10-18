@@ -472,6 +472,10 @@ func (registry *Registry) addPeerTarget(peerName string, target *PeerTarget) Pee
 }
 
 func (registry *Registry) removePeerTargets(peerName string, targets []string) PeerResults {
+	if len(targets) == 0 {
+		// The client has no remove-all route (/client/targets//remove is invalid), so removing all means clearing.
+		return registry.clearPeerTargets(peerName)
+	}
 	targetList := strings.Join(targets, ",")
 	removed := true
 	return invokeForPods(registry.loadPodsForPeerWithData(peerName),
@@ -648,6 +652,9 @@ func (registry *Registry) addPeerJobScriptOrFile(peerName string, filePath, file
 }
 
 func (registry *Registry) removePeerJobs(peerName string, jobs []string) PeerResults {
+	if len(jobs) == 0 {
+		return registry.clearPeerJobs(peerName)
+	}
 	jobList := strings.Join(jobs, ",")
 	removed := true
 	return invokeForPods(registry.loadPodsForPeerWithData(peerName, true),
@@ -916,7 +923,7 @@ func (registry *Registry) clonePeersFrom(registryURL string) error {
 }
 
 func (registry *Registry) cloneLockersFrom(registryURL string) error {
-	if resp, err := http.Get(registryURL + "/registry/lockers?data=y"); err == nil {
+	if resp, err := http.Get(registryURL + "/registry/lockers?data=y&events=y&peers=y&level=0"); err == nil {
 		lockers := map[string]*locker.CombiLocker{}
 		if err := util.ReadJsonPayloadFromBody(resp.Body, &lockers); err == nil {
 			registry.lockersLock.Lock()
@@ -947,10 +954,23 @@ func (registry *Registry) clonePeersTargetsFrom(registryURL string) error {
 	}
 }
 
+// fillJobNames sets the name of jobs from their key, for jobs that came from a v0.8.x registry
+// (which identified jobs by "id", so they have no name in the payload).
+func fillJobNames(peerJobs map[string]PeerJobs) {
+	for _, jobs := range peerJobs {
+		for name, pj := range jobs {
+			if pj != nil && pj.Job != nil && pj.Name == "" {
+				pj.Name = name
+			}
+		}
+	}
+}
+
 func (registry *Registry) clonePeersJobsFrom(registryURL string) error {
 	if resp, err := http.Get(registryURL + "/registry/peers/jobs"); err == nil {
 		peerJobs := map[string]PeerJobs{}
 		if err := util.ReadJsonPayloadFromBody(resp.Body, &peerJobs); err == nil {
+			fillJobNames(peerJobs)
 			registry.peersLock.Lock()
 			registry.peerJobs = peerJobs
 			registry.peersLock.Unlock()

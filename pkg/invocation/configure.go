@@ -181,6 +181,10 @@ func Shutdown() {
 
 func ValidateSpec(spec *InvocationSpec) error {
 	var err error
+	if spec.Headers == nil {
+		// Specs given without headers must still be safe for callers that add headers to them (e.g. TargetClient.AddTarget).
+		spec.Headers = map[string]string{}
+	}
 	if err = spec.validateTrafficConfig(); err != nil {
 		return err
 	}

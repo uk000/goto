@@ -795,7 +795,7 @@ func ReadStringArray(b []byte) []string {
 }
 
 func ToJSONText(o interface{}) (result string) {
-	if o == nil || reflect.ValueOf(o).IsNil() {
+	if IsNil(o) {
 		return ""
 	}
 	defer func() {

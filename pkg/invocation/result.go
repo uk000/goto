@@ -170,7 +170,9 @@ func (result *InvocationResult) processHTTPResponse(req *InvocationRequest, r *h
 	result.err = err
 	result.Response.PeerCertInfo = req.client.GetPeerCertInfo()
 	if err == nil {
-		result.tracker.OnHeaders(r.Header, r.StatusCode, result.Response.PeerCertInfo)
+		if result.tracker.OnHeaders != nil {
+			result.tracker.OnHeaders(r.Header, r.StatusCode, result.Response.PeerCertInfo)
+		}
 		result.readHTTPResponsePayload()
 		if r != nil {
 			result.updateResult(req.url, req.uri, r.Status, r.StatusCode, r.Header)

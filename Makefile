@@ -1,7 +1,7 @@
 # usage: make VERSION=1.0.0 GOOS=darwin|linux|window release
 
 # always run these targets
-.PHONY: all clean docker-build docker-build-utils docker-build-net docker-build-kube docker-build-perf docker-build-grpc docker-push docker-push-utils docker-push-net docker-push-kube docker-push-perf docker-push-grpc docker-run gen gen-extauthz
+.PHONY: all clean docker-build docker-build-utils docker-build-net docker-build-kube docker-build-perf docker-build-grpc docker-push docker-push-utils docker-push-net docker-push-kube docker-push-perf docker-push-grpc docker-run gen gen-extauthz e2e-test
 
 # variables
 OUT := goto
@@ -10,6 +10,9 @@ GO_FILES := $(shell find . -name '*.go' | grep -v /vendor/)
 COMMIT := $(shell git log -1 --pretty=tformat:%h)
 
 IMAGE := uk0000/goto
+
+E2E_BIN := bin/goto
+PYTHON ?= python3
 
 all: build
 
@@ -28,6 +31,13 @@ build: $(GO_FILES)
 
 run: build
 	./$(OUT) --port 8080
+
+# builds the binary into bin/ and runs all the e2e tests (tests/*/*-e2e-test.py) against it, via the driver in
+# tests/e2e. To run only some of them: make e2e-test E2E_ARGS="registry startup"
+e2e-test:
+	@mkdir -p $(dir $(E2E_BIN))
+	go build -o $(E2E_BIN) .
+	GOTO_BIN=$(E2E_BIN) $(PYTHON) tests/e2e/run-e2e-tests.py -v $(E2E_ARGS)
 
 docker-build: Dockerfile $(GO_FILES)
 	docker buildx build --load --build-arg utils=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) .

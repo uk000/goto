@@ -84,8 +84,10 @@ func GetBoolParamValue(r *http.Request, param string, defaultVal ...bool) bool {
 func GetListParam(r *http.Request, param string) ([]string, bool) {
 	values := r.URL.Query()[param]
 	if len(values) == 0 {
-		vars := mux.Vars(r)
-		values = []string{vars[param]}
+		// An absent param yields an empty list (not [""]), so callers can tell "not given" from "given".
+		if v := mux.Vars(r)[param]; v != "" {
+			values = []string{v}
+		}
 	}
 	if len(values) == 1 {
 		values = strings.Split(values[0], ",")

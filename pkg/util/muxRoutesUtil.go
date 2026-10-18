@@ -68,6 +68,11 @@ func CreateRouters(coreRouter *mux.Router) *mux.Router {
 	return RootRouter
 }
 
+// GetAltPaths expands the optional segments of a path (segments ending with `?`) into all the concrete paths they
+// stand for, the most complete one first. Adjacent optional segments are filled left to right: for
+// "/{peer}?/{label}?/x" the alternatives are "/{peer}/{label}/x", "/{peer}/x" and "/x", but not "/{label}/x", because a
+// request for "/p1/x" could not be told apart from one for "/{peer}/x" and would bind to the wrong variable.
+// Alternatives with a trailing slash are added for every path that has optional segments.
 func GetAltPaths(path string, key bool) []string {
 	var matches [][]int
 	if key {
@@ -75,38 +80,75 @@ func GetAltPaths(path string, key bool) []string {
 	} else {
 		matches = optionalPathRegexp.FindAllStringIndex(path, -1)
 	}
+	if len(matches) == 0 {
+		return []string{path}
+	}
 	var paths []string
-	addSubpath := func(subPath string) {
-		canSkip := strings.HasSuffix(subPath, "?") && !strings.HasSuffix(subPath, "??")
-		subPath = strings.ReplaceAll(subPath, "?", "")
-		if len(paths) > 0 {
-			for i, prefixPath := range paths {
-				if canSkip {
-					paths = append(paths, prefixPath)
-				}
-				paths[i] = prefixPath + subPath
-			}
-		} else {
+	// skipped[i] is true if the optional segment just before the current one was skipped in paths[i]
+	var skipped []bool
+	addStatic := func(subPath string) {
+		if len(paths) == 0 {
 			paths = append(paths, subPath)
+			skipped = append(skipped, false)
+			return
+		}
+		for i := range paths {
+			paths[i] += subPath
+			if subPath != "" {
+				skipped[i] = false
+			}
 		}
 	}
-	if len(matches) > 0 {
-		start := 0
-		end := 0
-		for _, m := range matches {
-			addSubpath(path[start:m[0]])
-			addSubpath(path[m[0]:m[1]])
-			start = m[1]
-			end = m[1]
+	addOptional := func(subPath string, adjacent bool) {
+		canSkip := strings.HasSuffix(subPath, "?") && !strings.HasSuffix(subPath, "??")
+		subPath = strings.ReplaceAll(subPath, "?", "")
+		for i, prefixPath := range paths {
+			if adjacent && skipped[i] && canSkip {
+				// An earlier adjacent optional segment was skipped, so this one has to be skipped too.
+				continue
+			}
+			if canSkip {
+				paths = append(paths, prefixPath)
+				skipped = append(skipped, true)
+			}
+			paths[i] = prefixPath + subPath
+			skipped[i] = false
 		}
-		if end < len(path) {
-			addSubpath(path[end:])
+	}
+	start := 0
+	for i, m := range matches {
+		addStatic(path[start:m[0]])
+		addOptional(path[m[0]:m[1]], i > 0 && m[0] == start)
+		start = m[1]
+	}
+	if start < len(path) {
+		addStatic(path[start:])
+	}
+	for _, prefixPath := range paths {
+		paths = append(paths, prefixPath+"/")
+	}
+	return paths
+}
+
+// routePaths returns the paths to register a route for: the expanded alternatives of the optional segments, plus a
+// trailing slash variant of every path that doesn't already have one.
+func routePaths(path string) []string {
+	altPaths := GetAltPaths(path, true)
+	paths := make([]string, 0, 2*len(altPaths))
+	seen := map[string]bool{}
+	add := func(p string) {
+		if !seen[p] {
+			seen[p] = true
+			paths = append(paths, p)
 		}
-		for _, prefixPath := range paths {
-			paths = append(paths, prefixPath+"/")
+	}
+	for _, p := range altPaths {
+		add(p)
+	}
+	for _, p := range altPaths {
+		if !strings.HasSuffix(p, "/") {
+			add(p + "/")
 		}
-	} else {
-		paths = []string{path}
 	}
 	return paths
 }
@@ -162,7 +204,7 @@ func addRoutes(r *mux.Router, altPaths []string, f func(http.ResponseWriter, *ht
 }
 
 func AddRoute(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), methods ...string) {
-	addRoutes(r, GetAltPaths(path, true), f, methods)
+	addRoutes(r, routePaths(path), f, methods)
 }
 
 // func RegisterPortRoute(r *mux.Router, hijackPort bool, path string, f func(http.ResponseWriter, *http.Request), methods ...string) error {
@@ -194,7 +236,7 @@ func AddRouteQO(r *mux.Router, path string, f func(http.ResponseWriter, *http.Re
 
 func addRouteQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParam string, queryOptional bool, methods ...string) {
 	queryKey := fmt.Sprintf("{%s}", queryParam)
-	for _, p := range GetAltPaths(path, true) {
+	for _, p := range routePaths(path) {
 		r.HandleFunc(p, f).Queries(queryParam, queryKey).Methods(methods...)
 		if queryOptional {
 			r.HandleFunc(p, f).Methods(methods...)
@@ -214,12 +256,16 @@ func addQueries(r *mux.Router, altPaths []string, f func(http.ResponseWriter, *h
 	}
 }
 
+// AddRouteWithMultiQ registers a route per set of query params, where the params accumulate from one set to the
+// next, and the params of a set are all expected together. For sets {a,b},{c},{d,e} it registers routes matching
+// (a,b), (a,b,c) and (a,b,c,d,e), most specific first. Handlers read these params from the route vars, which only
+// carry the params the matched route was registered with. A route without any query params is registered only if the
+// first set is empty, e.g. {},{a,b} registers a route without params and one for (a,b).
 func AddRouteWithMultiQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), qParamsSets [][]string, methods ...string) {
-	altPaths := GetAltPaths(path, true)
+	altPaths := routePaths(path)
 	qPairSets := [][]string{}
 	qPairs := []string{}
-	for i := len(qParamsSets) - 1; i >= 0; i-- {
-		qParams := qParamsSets[i]
+	for _, qParams := range qParamsSets {
 		changed := false
 		for _, q := range qParams {
 			if len(q) > 0 {
@@ -228,7 +274,7 @@ func AddRouteWithMultiQ(r *mux.Router, path string, f func(http.ResponseWriter, 
 			}
 		}
 		if changed {
-			qPairSets = append(qPairSets, qPairs)
+			qPairSets = append(qPairSets, append([]string{}, qPairs...))
 		}
 	}
 	for i := len(qPairSets) - 1; i >= 0; i-- {

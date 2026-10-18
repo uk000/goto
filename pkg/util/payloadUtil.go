@@ -22,7 +22,6 @@ import (
 	"goto/pkg/constants"
 	"io"
 	"net/http"
-	"reflect"
 
 	"sigs.k8s.io/yaml"
 )
@@ -87,7 +86,7 @@ func WriteStringJsonPayload(w http.ResponseWriter, json string) {
 func WriteJson(w io.Writer, j interface{}) error {
 	if s, ok := j.(string); ok {
 		fmt.Fprintln(w, s)
-	} else if reflect.ValueOf(j).IsNil() {
+	} else if IsNil(j) {
 		fmt.Fprintln(w, "")
 	} else {
 		if bytes, err := json.MarshalIndent(j, "", "  "); err == nil {
@@ -115,7 +114,7 @@ func WriteYaml(w io.Writer, t interface{}) error {
 
 func ToYaml(t interface{}) string {
 	data := ""
-	if !reflect.ValueOf(t).IsNil() {
+	if !IsNil(t) {
 		if b, err := yaml.Marshal(t); err == nil {
 			data = string(b)
 		} else {

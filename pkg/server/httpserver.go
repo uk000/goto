@@ -35,7 +35,6 @@ import (
 	"goto/pkg/server/startup"
 	"goto/pkg/tunnel"
 	"goto/pkg/util"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -124,7 +123,7 @@ func configureAndStartHTTPServer() error {
 		ConnContext:  withConnContext,
 		ConnState:    conn.ConnState,
 		Handler:      h2cHandler,
-		ErrorLog:     log.New(io.Discard, "discard", 0),
+		ErrorLog:     newServerErrorLog(),
 	}
 	h2s.WriteByteTimeout = httpServer.WriteTimeout
 	h2s.ReadIdleTimeout = httpServer.ReadTimeout
@@ -349,7 +348,7 @@ func initRequestStore(w http.ResponseWriter, r *http.Request) (*http.Request, *u
 	_, r, rs := util.WithRequestStore(r, w)
 	l := listeners.GetListenerForPort(rs.RequestPortNum)
 	if l == nil {
-		return nil, nil, nil, fmt.Errorf("Port [%s] not configured", rs.RequestPortNum)
+		return nil, nil, nil, fmt.Errorf("Port [%d] not configured", rs.RequestPortNum)
 	}
 	rs.IsJSONRPC = rs.IsJSONRPC || l.IsJSONRPC
 	rs.IsGRPC = rs.IsGRPC || l.IsGRPC

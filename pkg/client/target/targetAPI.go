@@ -49,6 +49,7 @@ func SetRoutes(r *mux.Router) {
 
 	util.AddRoute(r, "/track/headers/clear", clearTrackingHeaders, "POST")
 	util.AddRoute(r, "/track/headers/{headers}", addTrackingHeaders, "POST", "PUT")
+	util.AddRoute(r, "/track/headers/add/{headers}", addTrackingHeaders, "POST", "PUT")
 	util.AddRoute(r, "/track/headers", getTrackingHeaders, "GET")
 
 	util.AddRoute(r, "/track/time/clear", clearTrackingTimeBuckets, "POST")
