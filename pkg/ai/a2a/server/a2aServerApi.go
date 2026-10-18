@@ -285,7 +285,7 @@ func clearStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func getStatuses(w http.ResponseWriter, r *http.Request) {
-	util.WriteJsonPayload(w, statusManager.PortStatus)
+	util.WriteJsonPayload(w, statusManager.Snapshot())
 	util.AddLogMessage("Delivered statuses", r)
 }
 

@@ -244,9 +244,13 @@ func (h *Hooks) AddHTTPTracking(key, uri string, headers Headers, isJSONRPC bool
 func (h *Hooks) registerURI(uri string, httpHandler middleware.MiddlewareFunc) (luri, uriPrefix string, re *regexp.Regexp, err error) {
 	luri = strings.ToLower(uri)
 	if httpHandler != nil {
+		// The handler serves the URI, so a route is needed.
 		uriPrefix, re, _, err = util.BuildURIMatcher(luri, true, httpHandler)
 	} else {
-		uriPrefix, re, _, err = util.BuildURIMatcher(luri, true, func(w http.ResponseWriter, r *http.Request) {})
+		// A hook without a handler only observes the requests that match, which the hooks middleware finds with the
+		// regexp. A route would answer these requests itself, with an empty response, instead of the handlers
+		// that serve them (and with a catch-all route for the empty URI of header-only hooks, all of them).
+		uriPrefix, re, err = util.BuildURIRegexp(luri, true)
 	}
 	return
 }

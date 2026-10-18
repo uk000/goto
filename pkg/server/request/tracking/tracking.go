@@ -16,6 +16,7 @@
 package tracking
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -26,6 +27,7 @@ import (
 	"goto/pkg/util"
 )
 
+// Locks are taken in the order RequestTracking, TrackingData, HeaderData, and never the other way round.
 type HeaderData struct {
 	RequestCountsByHeader      int            `json:"requestCounts"`
 	RequestCountsByHeaderValue map[string]int `json:"requestCountsByHeaderValue"`
@@ -124,7 +126,7 @@ func (rt *RequestTracking) clearHeaderCounts(key string, r *http.Request) []stri
 	rtd := rt.getRequestTrackingData(key, r)
 	if headersP, hp := util.GetStringParam(r, "headers"); hp {
 		headers := strings.Split(headersP, ",")
-		rtd.initHeaders(headers)
+		rtd.clearHeaderCounts(headers)
 		return headers
 	}
 	rtd.clearCounts()
@@ -183,6 +185,20 @@ func (rtd *TrackingData) removeHeader(header string) bool {
 	return present
 }
 
+// clearHeaderCounts clears the counts of the given headers. Headers that are not tracked yet start being tracked.
+func (rtd *TrackingData) clearHeaderCounts(headers []string) {
+	rtd.lock.Lock()
+	defer rtd.lock.Unlock()
+	for _, h := range headers {
+		if hd := rtd.ByHeader[h]; hd != nil {
+			hd.init()
+		} else {
+			rtd.ByHeader[h] = &HeaderData{}
+			rtd.ByHeader[h].init()
+		}
+	}
+}
+
 func (rtd *TrackingData) clearCounts() {
 	rtd.lock.Lock()
 	defer rtd.lock.Unlock()
@@ -209,40 +225,77 @@ func (rtd *TrackingData) getHeaders() []string {
 	return headers
 }
 
+// Every request is counted once for each kind of tracking, by the one that owns it:
+//   - the tracked URIs, and the headers tracked for them, are counted by the hook that is registered for each of them
+//     (TrackCall, which finds the requests of a URI prefix too). Hooks run before the middleware.
+//   - the tracked headers are counted by the middleware (track), for the requests of all URIs.
+//
+// If both counted the same thing, the tracking of a URI would count its requests twice. For the same reason the hooks
+// of this tracking are registered without headers, which would have the hooks middleware call Track as well. Track is
+// for hooks that have a key of their own (e.g. the rpc services), which are counted by it alone.
+
+// track is how the hook of a tracked URI counts a request of it.
 func (rtd *TrackingData) track(uri string, headers map[string][]string) {
 	rtd.lock.Lock()
 	defer rtd.lock.Unlock()
 	rtd.ByURI[uri]++
 	for h, hd := range rtd.ByURIAndHeader[uri] {
-		if headers[h] != nil {
+		if values := headerValues(headers, h); values != nil {
 			if hd == nil {
 				hd = &HeaderData{}
 				hd.init()
 				rtd.ByURIAndHeader[uri][h] = hd
 			}
-			for _, hv := range headers[h] {
-				hd.trackRequest(hv)
-			}
-		}
-	}
-	for h, hd := range rtd.ByHeader {
-		if headers[h] != nil {
-			if hd == nil {
-				hd = &HeaderData{}
-				hd.init()
-				rtd.ByHeader[h] = hd
-			}
-			for _, hv := range headers[h] {
+			for _, hv := range values {
 				hd.trackRequest(hv)
 			}
 		}
 	}
 }
 
+// headerValues finds the values of a header whatever the case of the name it was added with, since the names of the
+// headers of requests are canonicalized (e.g. x-request-id is sent as X-Request-Id).
+func headerValues(headers map[string][]string, name string) []string {
+	if values := headers[name]; values != nil {
+		return values
+	}
+	return http.Header(headers).Values(name)
+}
+
 func (hd *HeaderData) init() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	hd.RequestCountsByHeader = 0
 	hd.RequestCountsByHeaderValue = map[string]int{}
+}
+
+// The JSON encoding of the tracking data is done with the locks of the data held, as it is read while requests
+// are being tracked.
+func (hd *HeaderData) MarshalJSON() ([]byte, error) {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return json.Marshal(struct {
+		RequestCountsByHeader      int            `json:"requestCounts"`
+		RequestCountsByHeaderValue map[string]int `json:"requestCountsByHeaderValue"`
+	}{hd.RequestCountsByHeader, hd.RequestCountsByHeaderValue})
+}
+
+func (rtd *TrackingData) MarshalJSON() ([]byte, error) {
+	rtd.lock.RLock()
+	defer rtd.lock.RUnlock()
+	return json.Marshal(struct {
+		ByHeader       map[string]*HeaderData            `json:"byHeader"`
+		ByURI          map[string]int                    `json:"byURI"`
+		ByURIAndHeader map[string]map[string]*HeaderData `json:"byURIAndHeader"`
+	}{rtd.ByHeader, rtd.ByURI, rtd.ByURIAndHeader})
+}
+
+func (rt *RequestTracking) MarshalJSON() ([]byte, error) {
+	rt.lock.RLock()
+	defer rt.lock.RUnlock()
+	return json.Marshal(struct {
+		KeyPort map[string]map[int]*TrackingData `json:"byPort"`
+	}{rt.KeyPort})
 }
 
 func (hd *HeaderData) trackRequest(headerValue string) {
@@ -254,21 +307,16 @@ func (hd *HeaderData) trackRequest(headerValue string) {
 	}
 }
 
+// track is how the middleware counts a request for the tracked headers. The URIs are left to the hooks, see above.
 func track(port string, headers http.Header, uri string, rtd *TrackingData) {
 	if rtd == nil {
 		return
 	}
-	if _, present := rtd.ByURI[uri]; present {
-		rtd.ByURI[uri]++
-	}
+	rtd.lock.Lock()
+	defer rtd.lock.Unlock()
 	for h, hd := range rtd.ByHeader {
 		if hv := headers.Get(h); hv != "" {
 			metrics.UpdateHeaderRequestCount(port, uri, h, hv)
-			hd.trackRequest(hv)
-		}
-	}
-	for h, hd := range rtd.ByURIAndHeader[uri] {
-		if hv := headers.Get(h); hv != "" {
 			hd.trackRequest(hv)
 		}
 	}
@@ -276,6 +324,8 @@ func track(port string, headers http.Header, uri string, rtd *TrackingData) {
 
 func Track(port int, key, uri string, matchedHeaders map[string][]string) {
 	rtd := Tracker.getPortRequestTrackingData(port, key)
+	rtd.lock.Lock()
+	defer rtd.lock.Unlock()
 	rtd.ByURI[uri]++
 	uriHeaders := rtd.ByURIAndHeader[uri]
 	if uriHeaders == nil {

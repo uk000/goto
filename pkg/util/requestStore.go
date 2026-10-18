@@ -68,6 +68,7 @@ type RequestStore struct {
 	RequestPortChecked      bool
 	RequestServed           bool
 	StatusCode              int
+	AppliedURIStatus        int
 	UpstreamStatuses        map[string]any
 	BodyLength              int
 	RequestPayloadSize      int

@@ -35,10 +35,12 @@ type TimeoutData struct {
 	RequestCompleted int `json:"requestCompleted"`
 }
 
+// TimeoutTracking holds the timeout tracking of a port. All access to its fields, and to the TimeoutData it points
+// to, is guarded by timeoutTrackingLock, which is shared by all ports. A lock of its own would not be enough, since
+// the end-of-request goroutines of the middleware update counts of tracking that may be replaced or cleared meanwhile.
 type TimeoutTracking struct {
 	headersMap  map[string]map[string]*TimeoutData
 	allTimeouts *TimeoutData
-	lock        sync.RWMutex
 }
 
 var (
@@ -56,23 +58,26 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(timeoutRouter, "", reportTimeoutTracking, "GET")
 }
 
+// init must be called before the tracking is shared, or with timeoutTrackingLock held.
 func (tt *TimeoutTracking) init() {
-	tt.lock.Lock()
-	defer tt.lock.Unlock()
 	if tt.headersMap == nil {
 		tt.headersMap = map[string]map[string]*TimeoutData{}
 	}
 }
 
 func (tt *TimeoutTracking) addHeaders(w http.ResponseWriter, r *http.Request) {
-	tt.lock.Lock()
-	defer tt.lock.Unlock()
 	msg := ""
 	if param, present := util.GetStringParam(r, "headers"); present {
 		headers := strings.Split(param, ",")
+		timeoutTrackingLock.Lock()
 		for _, h := range headers {
-			tt.headersMap[h] = map[string]*TimeoutData{}
+			// Counts of a header that is already tracked are kept. Replacing them would also drop the entries that
+			// requests in flight are about to update.
+			if tt.headersMap[h] == nil {
+				tt.headersMap[h] = map[string]*TimeoutData{}
+			}
 		}
+		timeoutTrackingLock.Unlock()
 		msg = fmt.Sprintf("Will track request timeout for Headers %s", headers)
 		events.SendRequestEvent("Timeout Tracking Headers Added", msg, r)
 		w.WriteHeader(http.StatusOK)
@@ -85,9 +90,9 @@ func (tt *TimeoutTracking) addHeaders(w http.ResponseWriter, r *http.Request) {
 }
 
 func (tt *TimeoutTracking) trackAll(w http.ResponseWriter, r *http.Request) {
-	tt.lock.Lock()
-	defer tt.lock.Unlock()
+	timeoutTrackingLock.Lock()
 	tt.allTimeouts = &TimeoutData{}
+	timeoutTrackingLock.Unlock()
 	w.WriteHeader(http.StatusOK)
 	msg := "Activated timeout tracking for all requests"
 	util.AddLogMessage(msg, r)
@@ -117,13 +122,13 @@ func trackAll(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearTimeoutTracking(w http.ResponseWriter, r *http.Request) {
-	timeoutTrackingLock.Lock()
-	defer timeoutTrackingLock.Unlock()
 	listenerPort := util.GetRequestOrListenerPort(r)
+	timeoutTrackingLock.Lock()
 	if tt := timeoutTrackingByPort[listenerPort]; tt != nil {
 		timeoutTrackingByPort[listenerPort] = &TimeoutTracking{}
 		timeoutTrackingByPort[listenerPort].init()
 	}
+	timeoutTrackingLock.Unlock()
 	w.WriteHeader(http.StatusOK)
 	msg := "Timeout Tracking Headers Cleared"
 	util.AddLogMessage(msg, r)
@@ -134,12 +139,12 @@ func clearTimeoutTracking(w http.ResponseWriter, r *http.Request) {
 func reportTimeoutTracking(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reporting timeout tracking counts", r)
 	tt := getTimeoutTracking(r)
-	timeoutTrackingLock.RLock()
-	defer timeoutTrackingLock.RUnlock()
 	result := map[string]interface{}{}
+	timeoutTrackingLock.RLock()
 	result["headers"] = tt.headersMap
 	result["all"] = tt.allTimeouts
 	output := util.ToJSONText(result)
+	timeoutTrackingLock.RUnlock()
 	util.AddLogMessage(output, r)
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, output)
@@ -154,25 +159,9 @@ func middlewareFunc(next http.Handler) http.Handler {
 			}
 			return
 		}
-		trackedHeaders := [][]string{}
 		tt := getTimeoutTracking(r)
-		timeoutTrackingLock.RLock()
-		for header, valueMap := range tt.headersMap {
-			headerValue := r.Header.Get(header)
-			if len(headerValue) > 0 {
-				timeoutData, present := valueMap[headerValue]
-				if !present {
-					timeoutData = &TimeoutData{}
-					timeoutTrackingLock.RUnlock()
-					timeoutTrackingLock.Lock()
-					valueMap[headerValue] = timeoutData
-					timeoutTrackingLock.Unlock()
-					timeoutTrackingLock.RLock()
-				}
-				trackedHeaders = append(trackedHeaders, []string{header, headerValue})
-			}
-		}
-		if len(trackedHeaders) > 0 || tt.allTimeouts != nil {
+		trackedHeaders, trackAll := findTrackedHeaders(tt, r)
+		if len(trackedHeaders) > 0 || trackAll {
 			notify := w.(http.CloseNotifier).CloseNotify()
 			go func(trackedHeaders [][]string) {
 				connectionClosed := 0
@@ -189,8 +178,11 @@ func middlewareFunc(next http.Handler) http.Handler {
 				}
 				timeoutTrackingLock.Lock()
 				for _, kv := range trackedHeaders {
-					tt.headersMap[kv[0]][kv[1]].ConnectionClosed += connectionClosed
-					tt.headersMap[kv[0]][kv[1]].RequestCompleted += requestCompleted
+					// The tracking may have been changed while the request was in flight.
+					if timeoutData := tt.headersMap[kv[0]][kv[1]]; timeoutData != nil {
+						timeoutData.ConnectionClosed += connectionClosed
+						timeoutData.RequestCompleted += requestCompleted
+					}
 				}
 				if tt.allTimeouts != nil {
 					tt.allTimeouts.ConnectionClosed += connectionClosed
@@ -199,9 +191,35 @@ func middlewareFunc(next http.Handler) http.Handler {
 				timeoutTrackingLock.Unlock()
 			}(trackedHeaders)
 		}
-		timeoutTrackingLock.RUnlock()
 		if next != nil {
 			next.ServeHTTP(w, r)
 		}
 	})
+}
+
+// findTrackedHeaders returns the [header, value] pairs of the request that are tracked, adding the values that are
+// seen for the first time, and tells if all requests are tracked.
+func findTrackedHeaders(tt *TimeoutTracking, r *http.Request) (trackedHeaders [][]string, trackAll bool) {
+	timeoutTrackingLock.RLock()
+	newValues := [][]string{}
+	for header, valueMap := range tt.headersMap {
+		if headerValue := r.Header.Get(header); len(headerValue) > 0 {
+			trackedHeaders = append(trackedHeaders, []string{header, headerValue})
+			if valueMap[headerValue] == nil {
+				newValues = append(newValues, []string{header, headerValue})
+			}
+		}
+	}
+	trackAll = tt.allTimeouts != nil
+	timeoutTrackingLock.RUnlock()
+	if len(newValues) > 0 {
+		timeoutTrackingLock.Lock()
+		for _, kv := range newValues {
+			if valueMap := tt.headersMap[kv[0]]; valueMap != nil && valueMap[kv[1]] == nil {
+				valueMap[kv[1]] = &TimeoutData{}
+			}
+		}
+		timeoutTrackingLock.Unlock()
+	}
+	return
 }

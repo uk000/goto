@@ -116,7 +116,7 @@ func GetStatusParam(r *http.Request) (statusCodes []int, times int, present bool
 	if times == 0 {
 		times = -1
 	}
-	return statusCodes, times, true
+	return statusCodes, times, len(statusCodes) > 0
 }
 
 func ParseSize(value string) int {

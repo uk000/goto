@@ -154,8 +154,10 @@ func (rf *RequestFilter) removeIgnoreHeaderOrURI(w http.ResponseWriter, r *http.
 	if uri != "" {
 		uri = strings.ToLower(uri)
 		rf.lock.Lock()
-		delete(rf.UriUpdates, uri)
-		delete(rf.NotUriUpdates, uri)
+		// Filters are added under the URI exactly as given, but they match case insensitively, so they are also
+		// removed case insensitively.
+		deleteFold(rf.UriUpdates, uri)
+		deleteFold(rf.NotUriUpdates, uri)
 		rf.PendingUpdates = true
 		rf.lock.Unlock()
 		msg = fmt.Sprintf("Will not %s URI[%s]", rf.filterType, uri)
@@ -166,9 +168,9 @@ func (rf *RequestFilter) removeIgnoreHeaderOrURI(w http.ResponseWriter, r *http.
 			value = strings.ToLower(value)
 		}
 		rf.lock.Lock()
-		if rf.HeaderUpdates[header] != nil {
-			delete(rf.HeaderUpdates[header], value)
-			if len(rf.HeaderUpdates[header]) == 0 {
+		if values := rf.HeaderUpdates[header]; values != nil {
+			deleteFold(values, value)
+			if len(values) == 0 {
 				delete(rf.HeaderUpdates, header)
 			}
 		}
@@ -188,15 +190,53 @@ func (rf *RequestFilter) removeIgnoreHeaderOrURI(w http.ResponseWriter, r *http.
 func (rf *RequestFilter) setOrGetIgnoreStatus(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	statusCodes, _, present := util.GetStatusParam(r)
-	if present {
+	if raw := util.GetStringParamValue(r, "status"); raw != "" && (!present || len(statusCodes) == 0 || !validStatusCode(statusCodes[0])) {
+		// A status was given but can't be used. Reporting the current status instead would hide the mistake.
+		msg = fmt.Sprintf("Invalid status [%s]", raw)
+		w.WriteHeader(http.StatusBadRequest)
+	} else if present {
+		rf.lock.Lock()
 		rf.Status = statusCodes[0]
+		rf.lock.Unlock()
 		msg = fmt.Sprintf("Status for %s set to [%d]", rf.filterType, statusCodes[0])
 		events.SendRequestEvent("Request Filter Status Configured", msg, r)
 	} else {
-		msg = fmt.Sprintf("Status for %s: %d", rf.filterType, rf.Status)
+		msg = fmt.Sprintf("Status for %s: %d", rf.filterType, rf.getStatus())
 	}
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
+}
+
+// validStatusCode tells if a status can be written to a response, which panics for codes that are out of range.
+func validStatusCode(status int) bool {
+	return status >= 100 && status <= 999
+}
+
+func (rf *RequestFilter) getStatus() int {
+	rf.lock.RLock()
+	defer rf.lock.RUnlock()
+	return rf.Status
+}
+
+func (rf *RequestFilter) getFilteredCount() int64 {
+	rf.lock.RLock()
+	defer rf.lock.RUnlock()
+	return rf.FilteredCount
+}
+
+func (rf *RequestFilter) countFilteredRequest() {
+	rf.lock.Lock()
+	defer rf.lock.Unlock()
+	rf.FilteredCount++
+}
+
+// deleteFold removes the entries of a map whose key equals the given key, ignoring case.
+func deleteFold[V any](m map[string]V, key string) {
+	for k := range m {
+		if strings.EqualFold(k, key) {
+			delete(m, k)
+		}
+	}
 }
 
 func (rf *RequestFilter) clear(w http.ResponseWriter, r *http.Request) {
@@ -215,8 +255,9 @@ func (rf *RequestFilter) clear(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rf *RequestFilter) getFilteredRequestCount(w http.ResponseWriter, r *http.Request) {
-	msg := fmt.Sprintf("Request filter %s count: %d", rf.FilteredCount)
-	util.WriteJsonPayload(w, map[string]interface{}{"ignoredRequests": rf.FilteredCount})
+	count := rf.getFilteredCount()
+	msg := fmt.Sprintf("Request filter %s count: %d", rf.filterType, count)
+	util.WriteJsonPayload(w, map[string]interface{}{"ignoredRequests": count})
 	util.AddLogMessage(msg, r)
 }
 
@@ -246,20 +287,32 @@ func cloneHeaders(orig map[string]map[string]*regexp.Regexp) map[string]map[stri
 	return copy
 }
 
+// applyUpdates makes the pending updates the active filters. It must not be called with rf.lock held.
 func (rf *RequestFilter) applyUpdates() {
-	if rf.PendingUpdates {
-		rf.lock.Lock()
-		rf.Uris = cloneUris(rf.UriUpdates)
-		rf.NotUris = cloneUris(rf.NotUriUpdates)
-		rf.Headers = cloneHeaders(rf.HeaderUpdates)
-		rf.PendingUpdates = false
-		rf.hasURIs = len(rf.Uris) > 0 || len(rf.NotUris) > 0
-		rf.lock.Unlock()
+	rf.lock.RLock()
+	pending := rf.PendingUpdates
+	rf.lock.RUnlock()
+	if !pending {
+		return
 	}
+	rf.lock.Lock()
+	defer rf.lock.Unlock()
+	if !rf.PendingUpdates { // applied by someone else in the meantime
+		return
+	}
+	rf.Uris = cloneUris(rf.UriUpdates)
+	rf.NotUris = cloneUris(rf.NotUriUpdates)
+	rf.Headers = cloneHeaders(rf.HeaderUpdates)
+	rf.PendingUpdates = false
+	rf.hasURIs = len(rf.Uris) > 0 || len(rf.NotUris) > 0
+	rf.hasHeaders = len(rf.Headers) > 0
 }
 
 func (rf *RequestFilter) matchURI(r *http.Request) bool {
-	if !rf.hasURIs {
+	rf.lock.RLock()
+	hasURIs := rf.hasURIs
+	rf.lock.RUnlock()
+	if !hasURIs {
 		return false
 	}
 	filters := []*regexp.Regexp{}
@@ -278,7 +331,7 @@ func (rf *RequestFilter) matchURI(r *http.Request) bool {
 	}
 	for _, re := range filters {
 		if re.MatchString(r.RequestURI) {
-			rf.FilteredCount++
+			rf.countFilteredRequest()
 			return true
 		}
 	}
@@ -290,14 +343,17 @@ func (rf *RequestFilter) matchURI(r *http.Request) bool {
 		}
 	}
 	if negativeMatch {
-		rf.FilteredCount++
+		rf.countFilteredRequest()
 		return true
 	}
 	return false
 }
 
 func (rf *RequestFilter) matchHeaders(r *http.Request) bool {
-	if !rf.hasHeaders {
+	rf.lock.RLock()
+	hasHeaders := rf.hasHeaders
+	rf.lock.RUnlock()
+	if !hasHeaders {
 		return false
 	}
 	rf.applyUpdates()
@@ -314,13 +370,13 @@ func (rf *RequestFilter) matchHeaders(r *http.Request) bool {
 			continue
 		}
 		if hvIgnoreMap[""] != nil {
-			rf.FilteredCount++
+			rf.countFilteredRequest()
 			return true
 		}
 		for _, re := range hvIgnoreMap {
 			for _, v := range values {
 				if re.MatchString(v) {
-					rf.FilteredCount++
+					rf.countFilteredRequest()
 					return true
 				}
 			}
@@ -332,13 +388,13 @@ func (rf *RequestFilter) matchHeaders(r *http.Request) bool {
 func filterRequest(w http.ResponseWriter, r *http.Request) bool {
 	statusCode := 0
 	if ignoreFilter.matchURI(r) {
-		statusCode = ignoreFilter.Status
+		statusCode = ignoreFilter.getStatus()
 	} else if bypassFilter.matchURI(r) {
-		statusCode = bypassFilter.Status
+		statusCode = bypassFilter.getStatus()
 	} else if ignoreFilter.matchHeaders(r) {
-		statusCode = ignoreFilter.Status
+		statusCode = ignoreFilter.getStatus()
 	} else if bypassFilter.matchHeaders(r) {
-		statusCode = bypassFilter.Status
+		statusCode = bypassFilter.getStatus()
 	}
 	if statusCode > 0 {
 		w.Header().Add(HeaderGotoFilteredRequest, "true")

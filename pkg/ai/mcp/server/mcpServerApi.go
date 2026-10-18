@@ -261,7 +261,7 @@ func getStatuses(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
 	} else {
-		util.WriteJsonPayload(w, StatusManager.PortStatus)
+		util.WriteJsonPayload(w, StatusManager.Snapshot())
 		util.AddLogMessage("Delivered statuses", r)
 	}
 }

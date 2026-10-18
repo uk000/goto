@@ -23,6 +23,7 @@ import (
 	"goto/pkg/util"
 	"io"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -164,8 +165,35 @@ func (s *StatusManager) ApplyStatusConfig(port int, sc *StatusConfig) (err error
 	if s.PortStatus[sc.Port] == nil {
 		s.PortStatus[sc.Port] = []*StatusConfig{}
 	}
-	s.PortStatus[sc.Port] = append(s.PortStatus[sc.Port], sc)
+	// The manager keeps a copy. The caller keeps reading the config that it gave, while requests use the one of the
+	// manager and count it down.
+	s.PortStatus[sc.Port] = append(s.PortStatus[sc.Port], sc.snapshot())
 	return nil
+}
+
+// snapshot returns a copy of the config, which is safe to read, report and return while requests use the original.
+// It must be called with the lock held, or on a config that is not shared yet.
+func (s *StatusConfig) snapshot() *StatusConfig {
+	cp := *s
+	cp.Statuses = slices.Clone(s.Statuses)
+	// Match is not changed after a config is created.
+	return &cp
+}
+
+// Snapshot returns a copy of the configured statuses of all ports, for reporting them. They must not be read
+// directly while requests are using them.
+func (s *StatusManager) Snapshot() map[int][]*StatusConfig {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	snapshot := make(map[int][]*StatusConfig, len(s.PortStatus))
+	for port, configs := range s.PortStatus {
+		copies := make([]*StatusConfig, len(configs))
+		for i, sc := range configs {
+			copies[i] = sc.snapshot()
+		}
+		snapshot[port] = copies
+	}
+	return snapshot
 }
 
 func (s *StatusManager) SetStatus(port int, statusCodes []int, times int, present bool) *StatusConfig {
@@ -173,8 +201,13 @@ func (s *StatusManager) SetStatus(port int, statusCodes []int, times int, presen
 }
 
 func (s *StatusManager) findOrRemoveStatusConfig(port int, uriExact, uriPrefix, header, headerValue string, present bool, remove bool) *StatusConfig {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	return s.findOrRemoveStatusConfigLocked(port, uriExact, uriPrefix, header, headerValue, present, remove)
+}
+
+// findOrRemoveStatusConfigLocked must be called with the lock held, since it removes configs.
+func (s *StatusManager) findOrRemoveStatusConfigLocked(port int, uriExact, uriPrefix, header, headerValue string, present bool, remove bool) *StatusConfig {
 	statuses := s.PortStatus[port]
 	for i, sc := range statuses {
 		if strings.EqualFold(sc.Match.URIMatch.Exact, uriExact) && strings.EqualFold(sc.Match.URIMatch.Prefix, uriPrefix) {
@@ -198,42 +231,51 @@ func (s *StatusManager) findOrRemoveStatusConfig(port int, uriExact, uriPrefix, 
 }
 
 func (s *StatusManager) SetStatusFor(port int, uriExact, uriPrefix, header, headerValue string, methods []string, statusCodes []int, times int, present bool) *StatusConfig {
-	s.lock.Lock()
-	statuses := s.PortStatus[port]
-	if statuses == nil {
-		statuses = []*StatusConfig{}
-		s.PortStatus[port] = statuses
-	}
-	s.lock.Unlock()
 	uriExact = strings.ToLower(uriExact)
 	uriPrefix = strings.ToLower(uriPrefix)
 	header = strings.ToLower(header)
-	sc := s.findOrRemoveStatusConfig(port, uriExact, uriPrefix, header, headerValue, present, false)
+	// Requests use the configs while they are being changed, so finding, changing and adding them is done under the
+	// lock, as using a status is.
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	sc := s.findOrRemoveStatusConfigLocked(port, uriExact, uriPrefix, header, headerValue, present, false)
 	if sc != nil {
 		sc.SetStatus(statusCodes, times)
 	} else {
 		sc = newStatusConfig(uriExact, uriPrefix, header, headerValue, methods, statusCodes, times, present)
 		s.PortStatus[port] = append(s.PortStatus[port], sc)
 	}
-	return sc
+	// A copy, as the caller reports it while requests use the config.
+	return sc.snapshot()
 }
 
 func (s *StatusManager) GetStatus(port int) (status int, times int) {
 	return s.GetStatusFor(port, "", nil, "")
 }
 
+// GetStatusFor finds the status that the request gets, and counts the use of it. The first status that matches the
+// request and is not used up is the one. A status that is used up is passed over, so that the statuses that were set
+// after it apply to the requests that it matches.
 func (s *StatusManager) GetStatusFor(port int, uri string, headers map[string][]string, method string) (status int, times int) {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
+	// Not a read lock, as using a status counts it down.
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	statuses := s.PortStatus[port]
 	uri = strings.ToLower(uri)
 	lowerHeaders := util.ToLowerHeadersValues(headers)
 	for _, sc := range statuses {
-		if sc.Match.match(uri, lowerHeaders) {
+		if !sc.isUsedUp() && sc.Match.match(uri, lowerHeaders) {
 			return sc.GetStatus()
 		}
 	}
 	return 0, 0
+}
+
+// isUsedUp tells if the status was given a number of times, and all of them were used. A status that was set to 0
+// is not used up, it never had a status to give. It is left as it was before: it still matches the requests, and
+// the statuses that are set after it do not apply to them.
+func (s *StatusConfig) isUsedUp() bool {
+	return s.Times == 0 && len(s.Statuses) > 0
 }
 
 func (sm *StatusMatch) match(uri string, headers map[string]string) bool {
@@ -292,6 +334,8 @@ func (m *StatusHeaderMatch) matchOne(h, hv string, present bool) bool {
 	return true
 }
 
+// SetStatus changes the config. It must be called with the lock of the StatusManager held (not a read lock), or on a
+// config that is not shared.
 func (s *StatusConfig) SetStatus(statusCodes []int, times int) bool {
 	if len(statusCodes) > 0 && statusCodes[0] > 0 {
 		s.Statuses = statusCodes
@@ -306,6 +350,8 @@ func (s *StatusConfig) SetStatus(statusCodes []int, times int) bool {
 	return true
 }
 
+// GetStatus gives the status of the config, and counts its use down. Since it changes the config, it must be called
+// with the lock of the StatusManager held (not a read lock), or on a config that is not shared.
 func (s *StatusConfig) GetStatus() (status int, times int) {
 	if s.Times >= 1 || s.Times == -1 {
 		if s.Times >= 1 {

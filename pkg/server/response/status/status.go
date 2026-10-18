@@ -29,7 +29,6 @@ import (
 	"goto/pkg/metrics"
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/middleware"
-	"goto/pkg/server/request/uri"
 	"goto/pkg/server/response/trigger"
 	"goto/pkg/types"
 	"goto/pkg/util"
@@ -103,6 +102,30 @@ func getOrCreatePortStatus(r *http.Request) *PortStatus {
 	return portStatus
 }
 
+// snapshotPortStatuses returns a copy of the flipflop configs of all ports, for reporting them. The ports are created,
+// and their flipflop configs are changed, as requests come in.
+func snapshotPortStatuses() map[string]*PortStatus {
+	statusLock.RLock()
+	defer statusLock.RUnlock()
+	snapshot := make(map[string]*PortStatus, len(portStatusMap))
+	for port, portStatus := range portStatusMap {
+		snapshot[port] = &PortStatus{FlipflopConfigs: portStatus.snapshotFlipflops()}
+	}
+	return snapshot
+}
+
+// snapshotFlipflops returns a copy of the flipflop configs, for reporting them while requests change them.
+func (ps *PortStatus) snapshotFlipflops() map[string]*FlipFlopConfig {
+	ps.lock.RLock()
+	defer ps.lock.RUnlock()
+	snapshot := make(map[string]*FlipFlopConfig, len(ps.FlipflopConfigs))
+	for id, config := range ps.FlipflopConfigs {
+		c := *config
+		snapshot[id] = &c
+	}
+	return snapshot
+}
+
 func configureStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	sc, err := TheStatusManager.ParseAndApplyStatusConfig(port, r.Body)
@@ -155,8 +178,8 @@ func computeResponseStatus(originalStatus int, r *http.Request) (int, int, bool)
 
 func getStatus(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{
-		"PortStatuses":        TheStatusManager.PortStatus,
-		"PortFlipFlopConfigs": portStatusMap,
+		"PortStatuses":        TheStatusManager.Snapshot(),
+		"PortFlipFlopConfigs": snapshotPortStatuses(),
 	}
 	util.WriteJsonPayload(w, data)
 	util.AddLogMessage("Delivered statuses", r)
@@ -170,7 +193,7 @@ func getStatusCount(w http.ResponseWriter, r *http.Request) {
 	statusLock.RUnlock()
 	if portStatus != nil {
 		if strings.Contains(r.RequestURI, "flipflop") {
-			util.WriteJsonPayload(w, portStatus.FlipflopConfigs)
+			util.WriteJsonPayload(w, portStatus.snapshotFlipflops())
 			msg = "FlipFlop Status Reproted"
 		} else if status, present := util.GetIntParam(r, "status"); present {
 			portStatus.lock.RLock()
@@ -335,7 +358,12 @@ func middlewareFunc(next http.Handler) http.Handler {
 		}
 		overriddenStatus := false
 		irw := rs.InterceptResponseWriter.(*intercept.InterceptResponseWriter)
-		if !uri.HasURIStatus(r) {
+		if uriStatus := rs.AppliedURIStatus; uriStatus > 0 {
+			// The URI middleware, which is outside of this one, sets the URI status on the response when the rest of the
+			// chain is done, and runs the triggers for it. A status that is set for all requests does not apply to
+			// the request. The response is counted like any other, under the status that it gets.
+			IncrementStatusCount(uriStatus, r)
+		} else {
 			remaining := 0
 			irw.StatusCode, remaining, overriddenStatus = computeResponseStatus(irw.StatusCode, r)
 			if irw.StatusCode == 0 {

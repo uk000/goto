@@ -165,6 +165,24 @@ func BuildURIMatcher(uri string, prefix bool, handlerFunc func(w http.ResponseWr
 	}
 }
 
+// BuildURIRegexp builds the same regexp as BuildURIMatcher does, but registers no route. It is for callers that match
+// URIs themselves and only observe the requests (e.g. hooks). A route registered on MatchRouter is matched by the
+// server's router before the handlers that serve traffic, and it answers every request matching its URI with an
+// empty response, so such callers must not use BuildURIMatcher: tracking a URI would take over that URI, and
+// tracking just headers (the empty URI matches everything) would take over all traffic.
+func BuildURIRegexp(uri string, prefix bool) (string, *regexp.Regexp, error) {
+	// The route that the regexp is built from lives on a router of its own, so that nothing is added to MatchRouter.
+	// The root of that router has no path of its own, so the regexp is the same as the one built on MatchRouter.
+	prefixURI, re, _, _, err := getURIRegexpAndRoute(uri, mux.NewRouter(), "", prefix, true)
+	if err == nil && re == nil {
+		err = fmt.Errorf("no regexp for uri [%s]", uri)
+	}
+	if err != nil {
+		return uri, nil, err
+	}
+	return prefixURI, re, nil
+}
+
 func BuildURIMatcherForRouter(uri string, prefix bool, handlerFunc func(w http.ResponseWriter, r *http.Request), router *mux.Router) (*regexp.Regexp, error) {
 	if _, re, _, err := registerURIRouteAndGetRegex(uri, prefix, handlerFunc, router); err == nil {
 		return re, nil
