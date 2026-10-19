@@ -25,6 +25,7 @@ import (
 	"goto/pkg/util"
 	"goto/pkg/util/timeline"
 	"log"
+	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -59,6 +60,60 @@ type A2ASession struct {
 	inputParts       []a2aproto.Part
 	timeline         *timeline.Timeline
 	err              error
+	// mu serializes what the concurrent requests of the session report (to the callback and to the progress channels),
+	// since the callbacks and the consumers of the channels are not written for being called concurrently.
+	mu sync.Mutex
+}
+
+// errCollector collects the errors of the requests that run concurrently, by request ID.
+type errCollector struct {
+	mu   sync.Mutex
+	errs map[string]error
+}
+
+func (e *errCollector) add(id string, err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.errs == nil {
+		e.errs = map[string]error{}
+	}
+	e.errs[id] = err
+}
+
+func (e *errCollector) all() map[string]error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.errs) == 0 {
+		return nil
+	}
+	return maps.Clone(e.errs)
+}
+
+// rsLock serializes the updates of the upstream statuses of request stores. A request store is shared by all the
+// calls that are made on behalf of a request, and these run concurrently when the delegates of an agent are parallel.
+var rsLock sync.Mutex
+
+// requestPlan tells how many requests are made, how many of them run at the same time, and in how many rounds.
+// A call without a count is a single request, and there are never more concurrent requests than requests.
+func (acs *A2ASession) requestPlan() (requestCount, concurrent, rounds int) {
+	requestCount = acs.call.RequestCount
+	if requestCount <= 0 {
+		requestCount = 1
+	}
+	concurrent = acs.call.Concurrent
+	if concurrent <= 0 {
+		concurrent = 1
+	}
+	if concurrent > requestCount {
+		concurrent = requestCount
+	}
+	rounds = (requestCount + concurrent - 1) / concurrent
+	return
+}
+
+// requestsInRound tells how many requests are made in the round (1 based). The last round has the rest.
+func requestsInRound(round, requestCount, concurrent int) int {
+	return min(concurrent, requestCount-(round-1)*concurrent)
 }
 
 var (
@@ -114,6 +169,11 @@ func (acs *A2ASession) CallAgent(input string, inputData map[string]any, callbac
 	if len(inputData) == 0 {
 		inputData = acs.call.Args
 	}
+	// The input data is the one of the caller, which may be used by calls that run concurrently, so it is not changed.
+	inputData = maps.Clone(inputData)
+	if inputData == nil {
+		inputData = map[string]any{}
+	}
 	inputData["resultOnly"] = acs.call.ResultOnly
 	if input == "" {
 		input = acs.call.Message
@@ -141,18 +201,7 @@ func (acs *A2ASession) CallAgent(input string, inputData map[string]any, callbac
 			}
 		}
 	}
-	viaGotos := acs.Result.LastResponseHeaders[constants.HeaderViaGoto]
-	for _, v := range viaGotos {
-		acs.Result.RemoteGotos[v] = true
-	}
-	viaGotos = []string{}
-	for v := range acs.Result.RemoteGotos {
-		if !strings.Contains(v, "(A2A)") && !strings.Contains(v, "(MCP)") {
-			v = v + "(A2A)"
-		}
-		viaGotos = append(viaGotos, v)
-	}
-	acs.Result.LastResponseHeaders[constants.HeaderViaGoto] = viaGotos
+	acs.Result.markRemoteGotos()
 	return
 }
 
@@ -161,63 +210,45 @@ func (acs *A2ASession) configure(callback AgentResultsCallback, localProgress, u
 	acs.localProgress = localProgress
 	acs.upstreamProgress = upstreamProgress
 	acs.inputParts = inputParts
-	acs.timeline.SetStreamPreferred(localProgress)
+	UpdateTimeline(acs.timeline, func() { acs.timeline.SetStreamPreferred(localProgress) })
 }
 
 func (acs *A2ASession) InvokeUnary() map[string]error {
-	requestCount := acs.call.RequestCount
-	if requestCount == 0 {
-		requestCount = 1
-	}
-	concurrent := acs.call.Concurrent
-	if concurrent == 0 {
-		concurrent = 1
-	}
-	rounds := requestCount / concurrent
+	requestCount, concurrent, rounds := acs.requestPlan()
 	acs.sendLocalProgress(acs.callerId, fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL))
-	results := map[string]*a2aproto.MessageResult{}
-	errs := map[string]error{}
+	errs := &errCollector{}
 	acs.reportInitiateCall()
 	callAgent := func(requestID string, wg *sync.WaitGroup) {
+		defer wg.Done()
 		cr := acs.Result.getOrAddCall(requestID)
 		cr.ClientInfo = acs.clientInfo
-		result, err := acs.client.client.SendMessage(acs.ctx, a2aproto.SendMessageParams{
+		ctx := context.WithValue(acs.ctx, constants.HeaderGotoA2ARequestID, requestID)
+		result, err := acs.client.client.SendMessage(ctx, a2aproto.SendMessageParams{
 			Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
 		})
 		if !util.IsNil(err) {
-			errs[requestID] = err
+			errs.add(requestID, err)
 		} else {
-			results[requestID] = result
 			acs.processResponse(requestID, result, cr)
 		}
-		wg.Done()
 	}
 	for i := 1; i <= rounds; i++ {
 		wg := &sync.WaitGroup{}
-		for j := 1; j <= concurrent; j++ {
+		for j := 1; j <= requestsInRound(i, requestCount, concurrent); j++ {
 			wg.Add(1)
 			requestID := fmt.Sprintf("[%s @ %s] [Request# %d.%d]", acs.call.Name, acs.url, i, j)
 			go callAgent(requestID, wg)
 		}
 		wg.Wait()
 	}
-	close(acs.upstreamProgress)
-	if len(errs) > 0 {
-		return errs
+	if acs.upstreamProgress != nil {
+		close(acs.upstreamProgress)
 	}
-	return nil
+	return errs.all()
 }
 
 func (acs *A2ASession) InvokeStream() map[string]error {
-	requestCount := acs.call.RequestCount
-	if requestCount == 0 {
-		requestCount = 1
-	}
-	concurrent := acs.call.Concurrent
-	if concurrent == 0 {
-		concurrent = 1
-	}
-	rounds := requestCount / concurrent
+	requestCount, concurrent, rounds := acs.requestPlan()
 	acs.sendLocalProgress(acs.callerId, fmt.Sprintf("A2A Client [%s]: Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL))
 	acs.reportInitiateCall()
 	initialDelay := types.ParseDelay(acs.call.InitialDelay)
@@ -227,10 +258,10 @@ func (acs *A2ASession) InvokeStream() map[string]error {
 			log.Printf("A2A Client [%s]: Applying initial delay of %s before proceesing with A2A requests", acs.callerId, d)
 		})
 	}
-	errs := map[string]error{}
+	errs := &errCollector{}
 	for i := 1; i <= rounds; i++ {
 		wg := &sync.WaitGroup{}
-		for j := 1; j <= concurrent; j++ {
+		for j := 1; j <= requestsInRound(i, requestCount, concurrent); j++ {
 			wg.Add(1)
 			requestID := fmt.Sprintf("[%s @ %s] [Request# %d.%d]", acs.call.Name, acs.url, i, j)
 			cr := acs.Result.getOrAddCall(requestID)
@@ -240,7 +271,7 @@ func (acs *A2ASession) InvokeStream() map[string]error {
 				Message: a2aproto.NewMessage(a2aproto.MessageRoleUser, acs.inputParts),
 			})
 			if !util.IsNil(err) {
-				errs[requestID] = err
+				errs.add(requestID, err)
 				wg.Done()
 				continue
 			}
@@ -256,7 +287,7 @@ func (acs *A2ASession) InvokeStream() map[string]error {
 	if acs.upstreamProgress != nil {
 		close(acs.upstreamProgress)
 	}
-	return errs
+	return errs.all()
 }
 
 func (acs *A2ASession) Handle(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, error) {
@@ -283,20 +314,16 @@ func (acs *A2ASession) Handle(ctx context.Context, client *http.Client, req *htt
 	}
 	acs.updateRequestHeaders(req, agent)
 	acs.Result.storeHeaders(requestID, req.Header, nil, 0)
-	acs.clientInfo.StoreHeaders(req.Header)
+	// The client info is reported with the timeline that it is in, which is shared with the results of other calls.
+	UpdateTimeline(acs.timeline, func() { acs.clientInfo.StoreHeaders(req.Header) })
 	resp, err = client.Do(req)
 	if resp != nil {
 		rs := util.GetRequestStore(req)
 		resp.Body = util.NewResponseTracker(resp, func(h http.Header) {
 			upstreamStatuses := util.GetUpstreamStatuses(h)
-			rs.UpstreamStatuses = map[string]any{}
-			for k, v := range acs.Result.UpstreamStatuses {
-				rs.UpstreamStatuses[k] = v
-			}
-			rs.UpstreamStatuses["-"] = upstreamStatuses
-			acs.Result.UpstreamStatuses = rs.UpstreamStatuses
 			acs.updateResponseHeaders(h, agent)
 			acs.Result.storeHeaders(requestID, req.Header, resp.Header, resp.StatusCode)
+			acs.Result.recordUpstreamStatuses(rs, upstreamStatuses)
 		})
 	}
 	if !util.IsNil(err) {
@@ -323,11 +350,7 @@ func (acs *A2ASession) updateResponseHeaders(headers http.Header, agent string) 
 		if acs.outHeaders.Response != nil {
 			acs.outHeaders.Response.UpdateHeaders(headers)
 		}
-		if v := headers[constants.HeaderViaGoto]; len(v) > 0 {
-			for _, viaGoto := range v {
-				acs.Result.RemoteGotos[viaGoto] = true
-			}
-		}
+		acs.Result.addRemoteGotos(headers[constants.HeaderViaGoto]...)
 		log.Printf("---------- Response headers received by A2A client [%s] for Agent Call to Agent [%s] from URL [%s] ------------\n", acs.callerId, agent, acs.url)
 		log.Println(util.ToJSONText(headers))
 	}
@@ -359,13 +382,13 @@ func (acs *A2ASession) setPushConfig(taskID, url string) error {
 	return nil
 }
 
-func (acs *A2ASession) processStreamResponse(id string, eventChan <-chan a2aproto.StreamingMessageEvent, cr *A2ACallResult, e map[string]error, wg *sync.WaitGroup) {
+func (acs *A2ASession) processStreamResponse(id string, eventChan <-chan a2aproto.StreamingMessageEvent, cr *A2ACallResult, e *errCollector, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for {
 		select {
 		case <-acs.ctx.Done():
 			msg := fmt.Sprintf("ERROR: Context timeout or cancellation while waiting for stream events: %v", acs.ctx.Err())
-			e[id] = errors.New(msg)
+			e.add(id, errors.New(msg))
 			log.Println(msg)
 			return
 		case event, ok := <-eventChan:
@@ -373,7 +396,7 @@ func (acs *A2ASession) processStreamResponse(id string, eventChan <-chan a2aprot
 				log.Println("Stream channel closed.")
 				if acs.ctx.Err() != nil {
 					msg := fmt.Sprintf("Context error after stream close: %v", acs.ctx.Err())
-					e[id] = errors.New(msg)
+					e.add(id, errors.New(msg))
 				}
 				return
 			}
@@ -408,12 +431,6 @@ func (acs *A2ASession) processEventResult(id string, event *a2aproto.StreamingMe
 	case *a2aproto.TaskStatusUpdateEvent:
 		if e.Status.Message != nil {
 			acs.processParts(id, e.Status.Message.Parts, cr)
-		}
-		text := []string{}
-		for _, p := range e.Status.Message.Parts {
-			if t, ok := p.(*a2aproto.TextPart); ok {
-				text = append(text, t.Text)
-			}
 		}
 		msg := fmt.Sprintf("Agent: %s, Timestamp: %s\n", acs.callerId, e.Status.Timestamp)
 		msg2 := ""
@@ -496,15 +513,10 @@ func (acs *A2ASession) sendResponse(id, text string, data any, cr *A2ACallResult
 			data = result
 		} else if strings.Contains(dataKey, "headers") || strings.Contains(dataKey, "Headers") || headers != nil {
 			cr.RemoteHeaders = headers
-			cr.parent.LastRemoteHeaders = headers
+			cr.parent.setLastRemoteHeaders(headers)
 			data = headers
 			// dataKey = "UpstreamHeaders"
-			if acs.Result.LastResponseHeaders != nil {
-				viaGotos := util.GetViaGotosFromUpstreamHeaders(headers)
-				for v := range viaGotos {
-					acs.Result.RemoteGotos[v] = true
-				}
-			}
+			acs.Result.addRemoteGotosFromUpstreamHeaders(headers)
 		} else {
 			t := timeline.CheckAndGetTimeline(data)
 			if strings.Contains(dataKey, "Timeline") || t != nil {
@@ -516,6 +528,9 @@ func (acs *A2ASession) sendResponse(id, text string, data any, cr *A2ACallResult
 	} else if text != "" {
 		cr.Content = append(cr.Content, text)
 	}
+	// The requests of a session run concurrently, and report to the same callback and channel.
+	acs.mu.Lock()
+	defer acs.mu.Unlock()
 	if acs.callback != nil {
 		if data != nil {
 			acs.callback(id, dataKey, data)
@@ -539,5 +554,5 @@ func (as *A2ASession) reportInitiateCall() {
 		nil, nil, as.call.RequestCount, as.call.Concurrent, map[string]any{
 			"Agent-Call": as.call,
 		})
-	as.timeline.AddEventWithClient(as.callerId, msg, as.clientInfo)
+	UpdateTimeline(as.timeline, func() { as.timeline.AddEventWithClient(as.callerId, msg, as.clientInfo) })
 }

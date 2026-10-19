@@ -17,10 +17,13 @@
 package mcpclient
 
 import (
+	"encoding/json"
 	"fmt"
 	"goto/pkg/util"
 	"goto/pkg/util/timeline"
+	"maps"
 	"net/http"
+	"sync"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -40,6 +43,9 @@ type MCPResult struct {
 	LastError           error `json:"-"`
 	CallResults         map[string]*MCPCallResult
 	RemoteGotos         map[string]bool
+	// lock guards the fields above. Calls of a tool run concurrently, and their responses (and the trailers of those)
+	// are stored by the goroutines of the HTTP transport, while the caller waits for the result.
+	lock sync.Mutex
 }
 
 type MCPCallResult struct {
@@ -70,7 +76,11 @@ func NewMCPResult(server string, tc *ToolCall, t *timeline.Timeline) *MCPResult 
 	}
 }
 
+// getOrAddCall returns the result of the request. The caller holds the lock.
 func (r *MCPResult) getOrAddCall(requestID string) *MCPCallResult {
+	if r.CallResults == nil {
+		r.CallResults = map[string]*MCPCallResult{}
+	}
 	if r.CallResults[requestID] == nil {
 		r.CallResults[requestID] = &MCPCallResult{
 			RequestID: requestID,
@@ -81,40 +91,46 @@ func (r *MCPResult) getOrAddCall(requestID string) *MCPCallResult {
 }
 
 func (r *MCPResult) storeCallResult(requestID string, result *gomcp.CallToolResult, clientInfo *timeline.GotoClientInfo) {
-	if result != nil {
-		cr := r.getOrAddCall(requestID)
-		if !r.ToolCall.ResultOnly {
-			cr.Content = result.Content
+	if result == nil {
+		return
+	}
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	if r.RemoteGotos == nil {
+		r.RemoteGotos = map[string]bool{}
+	}
+	cr := r.getOrAddCall(requestID)
+	if !r.ToolCall.ResultOnly {
+		cr.Content = result.Content
+	}
+	cr.ClientInfo = clientInfo
+	t := timeline.CheckAndGetTimeline(result.StructuredContent)
+	if t != nil {
+		if r.ToolCall.NoEvents {
+			t.Events = nil
 		}
-		cr.ClientInfo = clientInfo
-		t := timeline.CheckAndGetTimeline(result.StructuredContent)
-		if t != nil {
-			if r.ToolCall.NoEvents {
-				t.Events = nil
+		cr.RemoteTimeline = t
+		r.LastRemoteHeaders = t.UpstreamHeaders
+		if t.UpstreamHeaders != nil {
+			viaGotos := util.GetViaGotosFromUpstreamHeaders(t.UpstreamHeaders)
+			for v := range viaGotos {
+				r.RemoteGotos[v] = true
 			}
-			cr.RemoteTimeline = t
-			r.LastRemoteHeaders = t.UpstreamHeaders
-			if t.UpstreamHeaders != nil {
-				viaGotos := util.GetViaGotosFromUpstreamHeaders(t.UpstreamHeaders)
+		}
+	} else {
+		upresult, upheaders := timeline.CheckAndGetResultOrHeaders(result.StructuredContent)
+		if upresult != nil || upheaders != nil {
+			cr.RemoteResult = upresult
+			cr.RemoteHeaders = upheaders
+			r.LastRemoteHeaders = upheaders
+			if upheaders != nil {
+				viaGotos := util.GetViaGotosFromUpstreamHeaders(upheaders)
 				for v := range viaGotos {
 					r.RemoteGotos[v] = true
 				}
 			}
 		} else {
-			upresult, upheaders := timeline.CheckAndGetResultOrHeaders(result.StructuredContent)
-			if upresult != nil || upheaders != nil {
-				cr.RemoteResult = upresult
-				cr.RemoteHeaders = upheaders
-				r.LastRemoteHeaders = upheaders
-				if upheaders != nil {
-					viaGotos := util.GetViaGotosFromUpstreamHeaders(upheaders)
-					for v := range viaGotos {
-						r.RemoteGotos[v] = true
-					}
-				}
-			} else {
-				cr.Data = result.StructuredContent
-			}
+			cr.Data = result.StructuredContent
 		}
 	}
 }
@@ -133,6 +149,8 @@ func extractDataAndTimeline(v any) (data map[string]any, t *timeline.Timeline) {
 }
 
 func (r *MCPResult) storeHeaders(requestID string, requestHeaders, responseHeaders http.Header, status int) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
 	cr := r.getOrAddCall(requestID)
 	cr.RequestHeaders = requestHeaders
 	cr.ResponseHeaders = responseHeaders
@@ -140,10 +158,82 @@ func (r *MCPResult) storeHeaders(requestID string, requestHeaders, responseHeade
 	r.LastRequestHeaders = requestHeaders
 	r.LastResponseHeaders = responseHeaders
 	r.LastResponseStatus = status
-	r.UpstreamStatuses[r.Tool] = status
+	// The statuses map may be shared with whoever got it before (the request store of the inbound request), so it's
+	// replaced instead of being updated.
+	statuses := maps.Clone(r.UpstreamStatuses)
+	if statuses == nil {
+		statuses = map[string]any{}
+	}
+	statuses[r.Tool] = status
+	r.UpstreamStatuses = statuses
+}
+
+// storeResponseDone stores what is known of a response when its body is done: the headers, which by then have the
+// trailers, the via-gotos of the remote, and the upstream statuses that the remote reported. The upstream statuses are
+// also handed to the request store of the inbound request, if given.
+func (r *MCPResult) storeResponseDone(requestID string, headers http.Header, remoteGotos map[string]bool, upstreamStatuses map[string]any, rs *util.RequestStore) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	r.LastResponseHeaders = headers
+	if cr := r.CallResults[requestID]; cr != nil {
+		cr.ResponseHeaders = headers
+	}
+	r.addRemoteGotos(remoteGotos)
+	statuses := maps.Clone(r.UpstreamStatuses)
+	if statuses == nil {
+		statuses = map[string]any{}
+	}
+	statuses["-"] = upstreamStatuses
+	r.UpstreamStatuses = statuses
+	if rs != nil {
+		rs.UpstreamStatuses = statuses
+	}
+}
+
+func (r *MCPResult) addRemoteGotos(gotos map[string]bool) {
+	if r.RemoteGotos == nil {
+		r.RemoteGotos = map[string]bool{}
+	}
+	for v := range gotos {
+		r.RemoteGotos[v] = true
+	}
+}
+
+func (r *MCPResult) storeRemoteGotos(gotos map[string]bool) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	r.addRemoteGotos(gotos)
+}
+
+func (r *MCPResult) setLastError(err error) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	r.LastError = err
+}
+
+func (r *MCPResult) lastError() error {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	return r.LastError
+}
+
+func (r *MCPResult) clearCallResults() {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	r.CallResults = nil
+}
+
+// MarshalJSON encodes the result while holding its lock, since the responses of calls may still be stored.
+func (r *MCPResult) MarshalJSON() ([]byte, error) {
+	type plainResult MCPResult
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	return json.Marshal((*plainResult)(r))
 }
 
 func (r *MCPResult) ToMCP() *gomcp.CallToolResult {
+	r.lock.Lock()
+	defer r.lock.Unlock()
 	result := &gomcp.CallToolResult{}
 	if !r.ToolCall.NoCallDetails {
 		if len(r.CallResults) > 0 {
@@ -174,6 +264,8 @@ func (r *MCPResult) ToMCP() *gomcp.CallToolResult {
 }
 
 func (r *MCPResult) ToObject() map[string]any {
+	r.lock.Lock()
+	defer r.lock.Unlock()
 	result := map[string]any{}
 	if len(r.CallResults) > 0 {
 		r.Timeline.Data["MCPCalls"] = r.buildCallsData()

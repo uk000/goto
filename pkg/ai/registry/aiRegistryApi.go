@@ -38,18 +38,30 @@ func setRoutes(r *mux.Router) {
 }
 
 func getAgents(w http.ResponseWriter, r *http.Request) {
+	agents := TheAgentRegistry.snapshot()
+	util.WriteJsonOrYAMLPayload(w, agents, util.IsAcceptYAML(r))
+	util.AddLogMessage(fmt.Sprintf("Reported [%d] agents from registry", len(agents)), r)
 }
 
 func addAgents(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	agents := []*model.Agent{}
 	err := util.ReadJsonPayload(r, &agents)
-	if err != nil || len(agents) == 0 {
+	invalid := -1
+	for i, a := range agents {
+		if !isRegistrable(a) {
+			invalid = i
+			break
+		}
+	}
+	if err != nil || len(agents) == 0 || invalid >= 0 {
 		w.WriteHeader(http.StatusBadRequest)
 		if err != nil {
 			msg = fmt.Sprintf("Failed to parse payload with error [%s]", err.Error())
-		} else {
+		} else if len(agents) == 0 {
 			msg = "Failed to add agents, no agent cards in the payload"
+		} else {
+			msg = fmt.Sprintf("Failed to add agents, agent #%d in the payload has no card with a name", invalid+1)
 		}
 	} else {
 		port := util.GetRequestOrListenerPortNum(r)
@@ -65,8 +77,7 @@ func addAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearAgents(w http.ResponseWriter, r *http.Request) {
-	count := len(TheAgentRegistry.Agents)
-	TheAgentRegistry.init()
+	count := TheAgentRegistry.clearAll()
 	msg := fmt.Sprintf("%d Agents removed from registry", count)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)

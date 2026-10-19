@@ -31,8 +31,10 @@ import (
 	"goto/pkg/util/timeline"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -123,6 +125,13 @@ type MCPSession struct {
 	outHeaders        *types.Headers
 	currentClientInfo *timeline.GotoClientInfo
 	transport         gomcp.Transport
+	// mu guards currentRequest, ongoingCalls, outHeaders and the response tracking below, which the callbacks and the
+	// HTTP transport use from their own goroutines.
+	mu sync.Mutex
+	// pending counts the responses whose bodies are still to be done (their trailers are processed then), and
+	// pendingChanged is closed (and replaced) whenever one of them is done.
+	pending        int
+	pendingChanged chan struct{}
 }
 
 type MCPClient struct {
@@ -164,16 +173,33 @@ var (
 	lock                 sync.RWMutex
 )
 
-func getOrCreateNamedClientPayload(name string) *MCPNamedClientPayload {
+// defaultRequestTimeout is the time that a request is given when no (valid) timeout is configured.
+const defaultRequestTimeout = 10 * time.Hour
+
+// responseWait is how long a call waits, after its requests are done, for the bodies of their responses to be done,
+// which is when the trailers of the responses are stored in the result.
+const responseWait = 2 * time.Second
+
+// updateNamedClientPayload changes the payload of the named client, which is created when it doesn't exist. Payloads
+// are never changed after they are published: the update is made to a copy that replaces the payload, so that the
+// sessions and the API that use a payload don't race with the updates.
+func updateNamedClientPayload(name string, update func(np *MCPNamedClientPayload)) {
 	lock.Lock()
 	defer lock.Unlock()
-	namedClientPayload := NamedClientPayloads[name]
-	if namedClientPayload == nil {
-		namedClientPayload = &MCPNamedClientPayload{}
-		NamedClientPayloads[name] = namedClientPayload
-		DefaultClientPayload = namedClientPayload
+	if NamedClientPayloads == nil {
+		NamedClientPayloads = map[string]*MCPNamedClientPayload{}
 	}
-	return namedClientPayload
+	old := NamedClientPayloads[name]
+	np := &MCPNamedClientPayload{}
+	if old != nil {
+		*np = *old
+	}
+	np.Name = name
+	update(np)
+	NamedClientPayloads[name] = np
+	if old == nil || DefaultClientPayload == old {
+		DefaultClientPayload = np
+	}
 }
 
 func getNamedClientPayload(name string) *MCPNamedClientPayload {
@@ -186,17 +212,25 @@ func getNamedClientPayload(name string) *MCPNamedClientPayload {
 	return namedClientPayload
 }
 
+// namedClientPayloadsSnapshot returns a copy of the registry of client payloads.
+func namedClientPayloadsSnapshot() map[string]*MCPNamedClientPayload {
+	lock.RLock()
+	defer lock.RUnlock()
+	return maps.Clone(NamedClientPayloads)
+}
+
 func AddPayload(name, kind string, b []byte) error {
 	payload := &MCPClientPayload{}
 	if err := json.Unmarshal(b, &payload); err != nil {
 		return err
 	}
-	namedClientPayload := getOrCreateNamedClientPayload(name)
-	if kind == "elicit" {
-		namedClientPayload.ElicitPayload = payload
-	} else {
-		namedClientPayload.SamplePayload = payload
-	}
+	updateNamedClientPayload(name, func(np *MCPNamedClientPayload) {
+		if kind == "elicit" {
+			np.ElicitPayload = payload
+		} else {
+			np.SamplePayload = payload
+		}
+	})
 	return nil
 }
 
@@ -205,8 +239,9 @@ func SetRoots(name string, payload []byte) error {
 	if err := util.ReadJsonFromBytes(payload, &roots); err != nil {
 		return err
 	}
-	namedClientPayload := getOrCreateNamedClientPayload(name)
-	namedClientPayload.Roots = roots
+	updateNamedClientPayload(name, func(np *MCPNamedClientPayload) {
+		np.Roots = roots
+	})
 	return nil
 }
 
@@ -220,7 +255,7 @@ func NewClient(port int, sse, h2, tls bool, callerId, listener, authority string
 
 func newMCPClient(port int, sse, h2, tls bool, name, callerId, listener, authority string, requestTimeout time.Duration, stream chan *types.Pair[string, any], updateCallback timeline.TimelineUpdateNotifierFunc, endCallback timeline.TimelineEndNotifierFunc) *MCPClient {
 	//httpClient := transport.CreateSimpleHTTPClient()
-	if requestTimeout == 0 {
+	if requestTimeout <= 0 {
 		requestTimeout = 1 * time.Hour
 	}
 	ht := transport.CreateHTTPClient(port, name, h2, true, tls, false, authority,
@@ -240,11 +275,12 @@ func newMCPClient(port int, sse, h2, tls bool, name, callerId, listener, authori
 		endCallback:    endCallback,
 		sessionCounter: atomic.Int32{},
 	}
-	if t, ok := ht.Transport().(*transport.HTTPTransportIntercept); ok {
+	// The transport is an HTTP/1 or an HTTP/2 one, which both can be intercepted.
+	if t, ok := ht.Transport().(transport.IHTTPTransportIntercept); ok {
 		mcpClient.ht = t
+		mcpClient.ht.SetRequestIntercept(mcpClient)
+		mcpClient.ht.SetResponseIntercept(mcpClient)
 	}
-	mcpClient.ht.SetRequestIntercept(mcpClient)
-	mcpClient.ht.SetResponseIntercept(mcpClient)
 	return mcpClient
 }
 
@@ -274,19 +310,50 @@ func ParseToolCall(r io.ReadCloser) (*ToolCall, error) {
 
 func (c *MCPClient) GetSession(sessionID string) *MCPSession {
 	c.lock.RLock()
-	defer c.lock.RLock()
+	defer c.lock.RUnlock()
 	return c.ActiveSessions[sessionID]
 }
 
+func (c *MCPClient) addSession(s *MCPSession) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	if c.ActiveSessions == nil {
+		c.ActiveSessions = map[string]*MCPSession{}
+	}
+	c.ActiveSessions[s.ID] = s
+}
+
 func (c *MCPClient) RemoveSession(sessionID string) {
-	c.lock.RLock()
-	defer c.lock.RLock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	delete(c.ActiveSessions, sessionID)
 }
 
 func (c *MCPClient) OnConnClose() {
 	log.Println("Received connection close notification")
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	c.ActiveSessions = map[string]*MCPSession{}
+}
+
+// sessionOf finds the session that a request of the client belongs to. The URL of the session carries its ID, but the
+// requests that the SSE transport posts go to an endpoint that the server gives, which doesn't have it, so the ID that
+// the requests of a session carry in their context is the fallback.
+func (c *MCPClient) sessionOf(r *http.Request) *MCPSession {
+	if r == nil {
+		return nil
+	}
+	if r.URL != nil {
+		if ids := r.URL.Query()[constants.HeaderGotoMCPSessionID]; len(ids) > 0 && len(ids[0]) > 0 {
+			if s := c.GetSession(ids[0]); s != nil {
+				return s
+			}
+		}
+	}
+	if id, ok := r.Context().Value(constants.HeaderGotoMCPSessionID).(string); ok && id != "" {
+		return c.GetSession(id)
+	}
+	return nil
 }
 
 func (c *MCPClient) CreateSession(ctx context.Context, url, operLabel string, tc *ToolCall, inHeaders http.Header) *MCPSession {
@@ -326,7 +393,7 @@ func (c *MCPClient) newMCPSession(ctx context.Context, operLabel, url string, tc
 			tc.Headers = types.NewHeaders()
 		}
 		tc.Headers.NonNil()
-		outHeaders = tc.Headers.Clone()
+		outHeaders = aicommon.CloneHeaders(tc.Headers)
 		t.NoEvents = tc.NoEvents
 		t.ResultOnly = tc.ResultOnly
 	}
@@ -347,9 +414,7 @@ func (c *MCPClient) newMCPSession(ctx context.Context, operLabel, url string, tc
 		transport:    transport,
 		ongoingCalls: map[string]*ToolCallContext{},
 	}
-	c.lock.Lock()
-	c.ActiveSessions[s.ID] = s
-	c.lock.Unlock()
+	c.addSession(s)
 	s.prepareClient()
 	return s
 }
@@ -374,8 +439,22 @@ func (s *MCPSession) prepareClient() {
 	}
 }
 
+// sessionContext adds the ID of the session to the context, so that the requests that are made with it can be matched
+// to the session even when their URL doesn't have the ID.
+func (s *MCPSession) sessionContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, constants.HeaderGotoMCPSessionID, s.ID)
+}
+
 func (s *MCPSession) connect() error {
-	cs, err := s.client.Connect(context.Background(), s.transport, &gomcp.ClientSessionOptions{})
+	// A session that was closed by an earlier operation (listing closes it) has to be known to the client again, since
+	// that's how its requests are matched to it.
+	if s.mcpClient != nil {
+		s.mcpClient.addSession(s)
+	}
+	cs, err := s.client.Connect(s.sessionContext(context.Background()), s.transport, &gomcp.ClientSessionOptions{})
 	if err == nil {
 		s.session = cs
 		return nil
@@ -396,6 +475,11 @@ func (s *MCPSession) newToolCallContext(args *aicommon.ToolCallArgs) *ToolCallCo
 	if tctx.args == nil {
 		tctx.args = s.tc.Args
 	}
+	if tctx.args == nil {
+		tctx.args = aicommon.NewCallArgs()
+	}
+	// The call works on its own copy, which it fills in, instead of changing the args it was given.
+	tctx.args = tctx.args.Clone()
 	tctx.args.NonNil()
 	if tctx.args.DelayText == "" {
 		tctx.args.DelayText = s.tc.Delay
@@ -404,6 +488,9 @@ func (s *MCPSession) newToolCallContext(args *aicommon.ToolCallArgs) *ToolCallCo
 }
 
 func (s *MCPSession) CallTool(args *aicommon.ToolCallArgs) (*MCPResult, error) {
+	if s.tc == nil {
+		return nil, errors.New("no tool call is configured for the session")
+	}
 	if err := s.connect(); err != nil {
 		return nil, err
 	}
@@ -411,15 +498,126 @@ func (s *MCPSession) CallTool(args *aicommon.ToolCallArgs) (*MCPResult, error) {
 	return tctx.call()
 }
 
+func (s *MCPSession) addOngoingCall(requestID string, tctx *ToolCallContext) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ongoingCalls == nil {
+		s.ongoingCalls = map[string]*ToolCallContext{}
+	}
+	s.ongoingCalls[requestID] = tctx
+}
+
+// takeOngoingCall returns the call that the request ID belongs to, which is no longer ongoing after that.
+func (s *MCPSession) takeOngoingCall(requestID string) *ToolCallContext {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tctx := s.ongoingCalls[requestID]
+	delete(s.ongoingCalls, requestID)
+	return tctx
+}
+
+func (s *MCPSession) setCurrentRequest(method string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.currentRequest = method
+}
+
+func (s *MCPSession) getCurrentRequest() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentRequest
+}
+
+// headers returns the headers that the session's requests get and its responses are updated with. The headers are
+// never changed once they are set (setRequestHeaders replaces them), so that they are read without a lock.
+func (s *MCPSession) headers() *types.Headers {
+	s.mu.Lock()
+	outHeaders := s.outHeaders
+	s.mu.Unlock()
+	if outHeaders == nil && s.Ctx != nil {
+		if h, ok := s.Ctx.Value(util.HeadersKey).(*types.Headers); ok {
+			outHeaders = h
+		}
+	}
+	return outHeaders
+}
+
+// setRequestHeaders adds the headers to the ones that the requests of the session get. The headers of the session are
+// replaced by a copy that has them, because requests are already using the headers (the connection is made before the
+// call is prepared).
+func (s *MCPSession) setRequestHeaders(add map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	h := aicommon.CloneHeaders(s.outHeaders)
+	if h == nil {
+		h = types.NewHeaders()
+	}
+	h.NonNil()
+	maps.Copy(h.Request.Add, add)
+	s.outHeaders = h
+}
+
+// trackResponse registers a response whose body is not done yet.
+func (s *MCPSession) trackResponse() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pending++
+}
+
+// responseDone is called when the body of a tracked response is done, and its trailers are stored.
+func (s *MCPSession) responseDone() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pending--
+	if s.pendingChanged != nil {
+		close(s.pendingChanged)
+		s.pendingChanged = nil
+	}
+}
+
+// waitForResponses waits for the bodies of the tracked responses to be done, so that what they add to the result is
+// there when the call returns. It gives up after the timeout, as bodies that are never read to the end are never done.
+func (s *MCPSession) waitForResponses(timeout time.Duration) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		s.mu.Lock()
+		if s.pending <= 0 {
+			s.mu.Unlock()
+			return
+		}
+		if s.pendingChanged == nil {
+			s.pendingChanged = make(chan struct{})
+		}
+		changed := s.pendingChanged
+		s.mu.Unlock()
+		select {
+		case <-changed:
+		case <-timer.C:
+			return
+		}
+	}
+}
+
 func (tctx *ToolCallContext) prepare() {
-	if tctx.args.RemoteArgs != nil {
-		if len(tctx.args.RemoteArgs.ForwardHeaders) == 0 && tctx.session.outHeaders != nil && tctx.session.outHeaders.Request != nil {
-			tctx.args.RemoteArgs.ForwardHeaders = tctx.session.outHeaders.Request.Forward
+	if tctx.ctx == nil {
+		tctx.ctx = context.Background()
+	}
+	if tctx.args.RemoteArgs != nil && len(tctx.args.RemoteArgs.ForwardHeaders) == 0 {
+		if outHeaders := tctx.session.headers(); outHeaders != nil && outHeaders.Request != nil {
+			tctx.args.RemoteArgs.ForwardHeaders = slices.Clone(outHeaders.Request.Forward)
 		}
 	}
 	if !tctx.tc.Raw {
-		tctx.session.outHeaders.Request.Add["Host"] = tctx.tc.Authority
-		tctx.session.outHeaders.Request.Add["User-Agent"] = tctx.callerId
+		add := map[string]string{}
+		// A host or a user agent that is configured is kept, unless there is another to replace it.
+		if tctx.tc.Authority != "" {
+			add["Host"] = tctx.tc.Authority
+		}
+		if tctx.callerId != "" {
+			add["User-Agent"] = tctx.callerId
+		}
+		tctx.session.setRequestHeaders(add)
 	}
 	if tctx.tc.ResultOnly {
 		tctx.args.ResultOnly = true
@@ -427,15 +625,17 @@ func (tctx *ToolCallContext) prepare() {
 	if tctx.tc.NoEvents {
 		tctx.args.NoEvents = true
 	}
-	tctx.ctx = util.WithContextHeaders(tctx.ctx, tctx.session.outHeaders)
-	if tctx.tc.RequestCount == 0 {
+	tctx.ctx = util.WithContextHeaders(tctx.ctx, tctx.session.headers())
+	if tctx.tc.RequestCount <= 0 {
 		tctx.tc.RequestCount = 1
 	}
-	if tctx.tc.Concurrent == 0 {
+	if tctx.tc.Concurrent <= 0 {
 		tctx.tc.Concurrent = 1
 	}
-	tctx.rounds = tctx.tc.RequestCount / tctx.tc.Concurrent
-	tctx.concurrent = tctx.tc.Concurrent
+	// The requests are made in rounds of concurrent requests. The last round has the requests that are left, when the
+	// request count can't be divided by the concurrency, and there are no more concurrent requests than requests.
+	tctx.concurrent = min(tctx.tc.Concurrent, tctx.tc.RequestCount)
+	tctx.rounds = (tctx.tc.RequestCount + tctx.concurrent - 1) / tctx.concurrent
 }
 
 func (tctx *ToolCallContext) reportInitiateToolCall() {
@@ -481,37 +681,48 @@ func (tctx *ToolCallContext) call() (*MCPResult, error) {
 			log.Printf("MCP Client [%s]: Applying initial delay of  %s before proceesing with MCP requests\n", tctx.callerId, d)
 		})
 	}
+	requestTimeout := tctx.tc.RequestTimeoutD
+	if requestTimeout <= 0 {
+		requestTimeout = defaultRequestTimeout
+	}
 	for i := 1; i <= tctx.rounds; i++ {
+		requestsInRound := tctx.concurrent
+		if i == tctx.rounds {
+			requestsInRound = tctx.tc.RequestCount - (tctx.rounds-1)*tctx.concurrent
+		}
 		wg := &sync.WaitGroup{}
-		for j := 1; j <= tctx.concurrent; j++ {
-			wg.Add(1)
-			requestID := fmt.Sprintf("%s.%d", tctx.session.ID, i)
-			tctx.session.ongoingCalls[requestID] = tctx
+		for j := 1; j <= requestsInRound; j++ {
+			// Every request has an ID of its own, that its results are stored under.
+			index := (i-1)*tctx.concurrent + j
+			requestID := fmt.Sprintf("%s.%d", tctx.session.ID, index)
+			tctx.session.addOngoingCall(requestID, tctx)
 			args := tctx.args.Clone()
 			args.AddMetadata(constants.HeaderGotoMCPRequestID, requestID)
 			args.AddMetadata(constants.HeaderGotoMCPSessionID, tctx.session.ID)
 			args.AddMetadata(constants.HeaderGotoMCPCallerID, tctx.callerId)
-			tctx.reportToolCallRequest(i, args)
-			ctx := context.WithValue(tctx.ctx, constants.HeaderGotoMCPRequestID, requestID)
-			go func(tc *ToolCall, args *aicommon.ToolCallArgs) {
-				ctx, cancel := context.WithDeadline(ctx, time.Now().Add(tc.RequestTimeoutD))
+			tctx.reportToolCallRequest(index, args)
+			ctx := context.WithValue(tctx.session.sessionContext(tctx.ctx), constants.HeaderGotoMCPRequestID, requestID)
+			wg.Add(1)
+			go func(ctx context.Context, index int, requestID string, args *aicommon.ToolCallArgs) {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 				defer cancel()
-				toolResult, err := tctx.session.session.CallTool(ctx, &gomcp.CallToolParams{Name: tc.Tool, Arguments: args})
+				toolResult, err := tctx.session.session.CallTool(ctx, &gomcp.CallToolParams{Name: tctx.tc.Tool, Arguments: args})
 				if toolResult != nil {
 					tctx.result.storeCallResult(requestID, toolResult, tctx.clientInfo)
 				}
 				if err != nil {
-					tctx.reportToolCallFailure(i, err.Error())
-					tctx.result.LastError = err
+					tctx.reportToolCallFailure(index, err.Error())
+					tctx.result.setLastError(err)
 				} else if toolResult != nil {
-					tctx.reportToolCallSuccess(i)
+					tctx.reportToolCallSuccess(index)
 				} else {
-					tctx.reportToolCallFailure(i, "No Error, No Result")
+					tctx.reportToolCallFailure(index, "No Error, No Result")
 				}
-				wg.Done()
-			}(tctx.tc, tctx.args)
+			}(ctx, index, requestID, args)
 		}
 		wg.Wait()
+		tctx.session.waitForResponses(responseWait)
 		if (tctx.rounds-i) > 0 && delay != nil && delay.IsNonZero() {
 			delay.ComputeAndApply(func(d time.Duration) {
 				log.Printf("MCP Client [%s]: Delaying by %s before proceesing with next round of MCP requests\n", tctx.callerId, d)
@@ -519,24 +730,18 @@ func (tctx *ToolCallContext) call() (*MCPResult, error) {
 		}
 	}
 	if tctx.tc.NoCallDetails {
-		tctx.result.CallResults = nil
+		tctx.result.clearCallResults()
 	}
-	return tctx.result, tctx.result.LastError
+	return tctx.result, tctx.result.lastError()
 }
 
 func (c *MCPClient) InterceptRequest(r *http.Request) {
-	qp := r.URL.Query()
-	var s *MCPSession
-	var tool, callerId string
-	if sessionID := qp[constants.HeaderGotoMCPSessionID]; len(sessionID) > 0 && len(sessionID[0]) > 0 {
-		s = c.ActiveSessions[sessionID[0]]
-	}
+	var tool, callerId, currentRequest string
+	s := c.sessionOf(r)
 	if s != nil {
 		callerId = s.CallerId
-		outHeaders := s.outHeaders
-		if outHeaders == nil && s.Ctx != nil {
-			outHeaders = util.GetContextHeaders(s.Ctx)
-		}
+		currentRequest = s.getCurrentRequest()
+		outHeaders := s.headers()
 		if outHeaders != nil && outHeaders.Request != nil {
 			outHeaders.Request.UpdateHeaders(r.Header)
 			types.ForwardHeaders(s.inHeaders, r.Header, slices.Values(outHeaders.Request.Forward))
@@ -556,24 +761,21 @@ func (c *MCPClient) InterceptRequest(r *http.Request) {
 		r.Host = r.Header["Host"][0]
 	}
 	if global.Flags.VerboseMCP {
-		log.Printf("---------- Outbound request headers from MCP client {%s} for [tool: %s] to {%s} ------------\n", callerId, tool, r.URL.String())
+		log.Printf("---------- Outbound request headers from MCP client {%s} for {%s}[tool: %s] to {%s} ------------\n", callerId, currentRequest, tool, r.URL.String())
 		log.Println(util.ToJSONText(r.Header))
 	}
 }
 
 func (c *MCPClient) InterceptResponse(r *http.Response) {
+	var tool, callerId, currentRequest string
 	var s *MCPSession
-	var tool, callerId string
-	qp := r.Request.URL.Query()
-	if sessionID := qp[constants.HeaderGotoMCPSessionID]; len(sessionID) > 0 && len(sessionID[0]) > 0 {
-		s = c.ActiveSessions[sessionID[0]]
+	if r.Request != nil {
+		s = c.sessionOf(r.Request)
 	}
 	if s != nil {
 		callerId = s.CallerId
-		outHeaders := s.outHeaders
-		if outHeaders == nil && s.Ctx != nil {
-			outHeaders = util.GetContextHeaders(s.Ctx)
-		}
+		currentRequest = s.getCurrentRequest()
+		outHeaders := s.headers()
 		if outHeaders != nil && outHeaders.Response != nil {
 			outHeaders.Response.UpdateHeaders(r.Header)
 		}
@@ -581,49 +783,64 @@ func (c *MCPClient) InterceptResponse(r *http.Response) {
 			tool = s.tc.Tool
 			requestID := r.Request.Header.Get(constants.HeaderGotoMCPRequestID)
 			if requestID != "" {
-				tctx := s.ongoingCalls[requestID]
-				if tctx != nil {
-					tctx.result.storeHeaders(requestID, r.Request.Header, r.Header, r.StatusCode)
-					tctx.clientInfo.StoreHeaders(r.Request.Header)
-					tctx.result.RemoteGotos = util.GetViaGotosFromHeaders(r.Header)
-					r.Body = util.NewResponseTracker(r, func(h http.Header) {
-						tctx.processHeaders(h)
-						rs := util.GetRequestStore(r.Request)
-						upstreamStatuses := util.GetUpstreamStatuses(h)
-						rs.UpstreamStatuses = map[string]any{}
-						for k, v := range tctx.result.UpstreamStatuses {
-							rs.UpstreamStatuses[k] = v
-						}
-						rs.UpstreamStatuses["-"] = upstreamStatuses
-						tctx.result.UpstreamStatuses = rs.UpstreamStatuses
-					})
+				if tctx := s.takeOngoingCall(requestID); tctx != nil {
+					c.trackResponse(s, tctx, requestID, r)
 				}
-				delete(s.ongoingCalls, requestID)
 			}
 		}
 	}
 	if global.Flags.VerboseMCP {
-		log.Printf("---------- Response headers from MCP client {%s} for {%s}[tool: %s] to {%s} ------------\n", callerId, s.currentRequest, tool, r.Request.URL.String())
+		target := ""
+		if r.Request != nil && r.Request.URL != nil {
+			target = r.Request.URL.String()
+		}
+		log.Printf("---------- Response headers from MCP client {%s} for {%s}[tool: %s] to {%s} ------------\n", callerId, currentRequest, tool, target)
 		log.Println(util.ToJSONText(r.Header))
 	}
 }
 
-func (tctx *ToolCallContext) processHeaders(h http.Header) {
-	tctx.result.LastResponseHeaders = h
-	tctx.result.RemoteGotos = util.GetViaGotosFromHeaders(h)
+// trackResponse stores what the response of a request of a tool call tells, and arranges for the trailers of the
+// response to be stored too, when its body is done. The session knows of the response until then, so that the call
+// that is waiting for the results can wait for it.
+func (c *MCPClient) trackResponse(s *MCPSession, tctx *ToolCallContext, requestID string, r *http.Response) {
+	tctx.result.storeHeaders(requestID, r.Request.Header.Clone(), r.Header.Clone(), r.StatusCode)
+	tctx.result.lock.Lock()
+	if tctx.clientInfo != nil {
+		tctx.clientInfo.StoreHeaders(r.Request.Header.Clone())
+	}
+	tctx.result.lock.Unlock()
+	tctx.result.storeRemoteGotos(util.GetViaGotosFromHeaders(r.Header))
+	rs := util.GetRequestStore(r.Request)
+	s.trackResponse()
+	r.Body = util.NewResponseTracker(r, func(h http.Header) {
+		defer s.responseDone()
+		tctx.processHeaders(requestID, h, rs)
+	})
+}
+
+// processHeaders is called when the body of a response is done, and the trailers of the response are among its headers.
+// The header map is owned by the response, so the result gets a copy of it.
+func (tctx *ToolCallContext) processHeaders(requestID string, h http.Header, rs *util.RequestStore) {
+	h = h.Clone()
+	if h == nil {
+		h = http.Header{}
+	}
+	remoteGotos := util.GetViaGotosFromHeaders(h)
 	viaGotos := []string{}
-	for v := range tctx.result.RemoteGotos {
+	for v := range remoteGotos {
 		if !strings.Contains(v, "(A2A)") && !strings.Contains(v, "(MCP)") {
 			v = v + "(MCP)"
 		}
 		viaGotos = append(viaGotos, v)
 	}
-	tctx.result.LastResponseHeaders[constants.HeaderViaGoto] = viaGotos
+	sort.Strings(viaGotos)
+	h[constants.HeaderViaGoto] = viaGotos
+	tctx.result.storeResponseDone(requestID, h, remoteGotos, util.GetUpstreamStatuses(h), rs)
 }
 
 func (s *MCPSession) SendingMiddleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
-		s.currentRequest = method
+		s.setCurrentRequest(method)
 		tool := ""
 		if s.tc != nil {
 			tool = s.tc.Tool
@@ -643,7 +860,7 @@ func (s *MCPSession) SendingMiddleware(next gomcp.MethodHandler) gomcp.MethodHan
 
 func (s *MCPSession) ReceivingMiddleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
-		s.currentRequest = method
+		s.setCurrentRequest(method)
 		tool := ""
 		if s.tc != nil {
 			tool = s.tc.Tool
@@ -659,8 +876,15 @@ func (t *MCPClientInterceptTransport) Connect(ctx context.Context) (gomcp.Connec
 	return t.Transport.Connect(ctx)
 }
 
+// SetAuthority sets the authority that the requests of the session are made to. A session that has no tool call (one
+// that lists tools, prompts and resources) has no headers to put it in, so it gets them.
 func (s *MCPSession) SetAuthority(authority string) {
+	s.mu.Lock()
 	s.Authority = authority
+	s.mu.Unlock()
+	if s.tc == nil && authority != "" {
+		s.setRequestHeaders(map[string]string{"Host": authority})
+	}
 }
 
 func (s *MCPSession) close() {
@@ -673,12 +897,19 @@ func (s *MCPSession) close() {
 	}
 }
 
+func (s *MCPSession) listContext() context.Context {
+	s.mu.Lock()
+	authority := s.Authority
+	s.mu.Unlock()
+	return s.sessionContext(util.WithRequestHeaders(context.Background(), map[string][]string{"Host": []string{authority}}))
+}
+
 func (s *MCPSession) ListTools() (*gomcp.ListToolsResult, error) {
 	if err := s.connect(); err != nil {
 		return nil, err
 	}
 	defer s.close()
-	return s.session.ListTools(util.WithRequestHeaders(context.Background(), map[string][]string{"Host": []string{s.Authority}}), &gomcp.ListToolsParams{})
+	return s.session.ListTools(s.listContext(), &gomcp.ListToolsParams{})
 }
 
 func (s *MCPSession) ListPrompts() (*gomcp.ListPromptsResult, error) {
@@ -686,7 +917,7 @@ func (s *MCPSession) ListPrompts() (*gomcp.ListPromptsResult, error) {
 		return nil, err
 	}
 	defer s.close()
-	return s.session.ListPrompts(util.WithRequestHeaders(context.Background(), map[string][]string{"Host": []string{s.Authority}}), &gomcp.ListPromptsParams{})
+	return s.session.ListPrompts(s.listContext(), &gomcp.ListPromptsParams{})
 }
 
 func (s *MCPSession) ListResources() (*gomcp.ListResourcesResult, error) {
@@ -694,7 +925,7 @@ func (s *MCPSession) ListResources() (*gomcp.ListResourcesResult, error) {
 		return nil, err
 	}
 	defer s.close()
-	return s.session.ListResources(util.WithRequestHeaders(context.Background(), map[string][]string{"Host": []string{s.Authority}}), &gomcp.ListResourcesParams{})
+	return s.session.ListResources(s.listContext(), &gomcp.ListResourcesParams{})
 }
 
 func (tc *ToolCall) Prepare() {
@@ -711,8 +942,11 @@ func (tc *ToolCall) Prepare() {
 	}
 	if tc.RequestTimeout != "" {
 		tc.RequestTimeoutD = util.ParseDuration(tc.RequestTimeout)
-	} else {
-		tc.RequestTimeoutD = 10 * time.Hour
+	}
+	// A timeout that is not there, doesn't parse or is not positive would make every request time out as soon as it's
+	// sent, so the default is used instead.
+	if tc.RequestTimeoutD <= 0 {
+		tc.RequestTimeoutD = defaultRequestTimeout
 	}
 }
 
@@ -735,8 +969,7 @@ func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, h
 	}
 	clone.Headers = types.Union(tc.Headers, headers)
 	if tc.Args != nil {
-		newArgs := *tc.Args
-		clone.Args = &newArgs
+		clone.Args = tc.Args.Clone()
 	}
 	if args != nil {
 		if clone.Args == nil {

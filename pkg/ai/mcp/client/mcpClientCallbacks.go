@@ -24,10 +24,47 @@ import (
 	"goto/pkg/util"
 	"goto/pkg/util/timeline"
 	"log"
+	"math/rand/v2"
 	"strings"
+	"sync"
+	"time"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// payloadDelayLock guards the state of the delays of client payloads. A payload is shared by all the sessions that use
+// it, and its delay counts how many times it's been applied.
+var payloadDelayLock sync.Mutex
+
+// pick returns a random index below n, which must be positive. It's used instead of types.Random, which uses a random
+// source that can't be shared by goroutines, as the callbacks of concurrent requests do.
+func pick(n int) int {
+	return rand.IntN(n)
+}
+
+// applyPayloadDelay waits for the delay of a client payload, and returns how long it waited. The state of the delay is
+// updated under a lock, and the wait happens outside of it, so that concurrent requests wait together.
+func applyPayloadDelay(d *types.Delay) time.Duration {
+	if d == nil || d.Min == nil || d.Max == nil {
+		return 0
+	}
+	payloadDelayLock.Lock()
+	var delay time.Duration
+	if d.Count > 0 || d.Count == -1 {
+		delay = d.Min.Duration
+		if span := (d.Max.Duration - d.Min.Duration).Milliseconds(); span > 0 {
+			delay += time.Duration(rand.Int64N(span)) * time.Millisecond
+		}
+		if delay > 0 && d.Count > 0 {
+			d.Count--
+		}
+	}
+	payloadDelayLock.Unlock()
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+	return delay
+}
 
 func (s *MCPSession) ElicitationHandler(ctx context.Context, req *gomcp.ElicitRequest) (result *gomcp.ElicitResult, err error) {
 	if s.Stop {
@@ -37,7 +74,7 @@ func (s *MCPSession) ElicitationHandler(ctx context.Context, req *gomcp.ElicitRe
 	label := fmt.Sprintf("%s[Elicitation]", s.CallerId)
 	msg := ""
 	output := map[string]any{}
-	if req.Params != nil {
+	if req != nil && req.Params != nil {
 		output["requestParams"] = req.Params
 	}
 	action := "approve"
@@ -45,17 +82,21 @@ func (s *MCPSession) ElicitationHandler(ctx context.Context, req *gomcp.ElicitRe
 	if s.clientPayload != nil {
 		elicitPayload = s.clientPayload.ElicitPayload
 	}
-	if elicitPayload != nil {
-		msg = fmt.Sprintf("%s --> %s", label, elicitPayload.Contents[types.Random(len(elicitPayload.Contents))])
-		if elicitPayload.Delay != nil {
-			msg = fmt.Sprintf("%s --> Will delay", msg)
-		}
-		action = elicitPayload.Actions[types.Random(len(elicitPayload.Actions))]
+	if elicitPayload != nil && len(elicitPayload.Contents) > 0 {
+		msg = fmt.Sprintf("%s --> %s", label, elicitPayload.Contents[pick(len(elicitPayload.Contents))])
 	} else {
 		msg = fmt.Sprintf("%s --> No Elicitation Content", label)
 	}
+	if elicitPayload != nil {
+		if elicitPayload.Delay != nil {
+			msg = fmt.Sprintf("%s --> Will delay", msg)
+		}
+		if len(elicitPayload.Actions) > 0 {
+			action = elicitPayload.Actions[pick(len(elicitPayload.Actions))]
+		}
+	}
 	if elicitPayload != nil && elicitPayload.Delay != nil {
-		delay := elicitPayload.Delay.ComputeAndApply()
+		delay := applyPayloadDelay(elicitPayload.Delay)
 		msg = fmt.Sprintf("%s --> Delaying for %s", msg, delay.String())
 	}
 	log.Println(msg)
@@ -75,7 +116,15 @@ func (s *MCPSession) CreateMessageHandler(ctx context.Context, req *gomcp.Create
 		log.Println("Received message after client stopped. Ignoring.")
 		return nil, nil
 	}
-	isElicit := strings.Contains(req.Params.SystemPrompt, "elicit")
+	var params *gomcp.CreateMessageParams
+	if req != nil {
+		params = req.Params
+	}
+	systemPrompt := ""
+	if params != nil {
+		systemPrompt = params.SystemPrompt
+	}
+	isElicit := strings.Contains(systemPrompt, "elicit")
 	task := "Sampling/Message"
 	var payload *MCPClientPayload
 	if s.clientPayload != nil {
@@ -96,13 +145,13 @@ func (s *MCPSession) CreateMessageHandler(ctx context.Context, req *gomcp.Create
 			msg = fmt.Sprintf("%s --> Will delay", msg)
 		}
 		if len(payload.Models) > 0 {
-			model = payload.Models[types.Random(len(payload.Models))]
+			model = payload.Models[pick(len(payload.Models))]
 		}
 		if len(payload.Roles) > 0 {
-			role = payload.Roles[types.Random(len(payload.Roles))]
+			role = payload.Roles[pick(len(payload.Roles))]
 		}
 		if len(payload.Contents) > 0 {
-			content = payload.Contents[types.Random(len(payload.Contents))]
+			content = payload.Contents[pick(len(payload.Contents))]
 		}
 	}
 	if model == "" {
@@ -114,8 +163,8 @@ func (s *MCPSession) CreateMessageHandler(ctx context.Context, req *gomcp.Create
 	if content == "" {
 		msg = fmt.Sprintf("%s %s --> Responding to [%s] request with no defined payload", label, msg, task)
 	}
-	if payload.Delay != nil {
-		delay := payload.Delay.ComputeAndApply()
+	if payload != nil && payload.Delay != nil {
+		delay := applyPayloadDelay(payload.Delay)
 		msg = fmt.Sprintf("%s --> Delaying for %s", msg, delay.String())
 	}
 	log.Println(msg)
@@ -125,13 +174,13 @@ func (s *MCPSession) CreateMessageHandler(ctx context.Context, req *gomcp.Create
 	output := map[string]any{}
 	output["Content"] = content
 	output["Timeline"] = t
-	if req.Params != nil {
-		output["requestParams"] = req.Params
+	if params != nil {
+		output["requestParams"] = params
 	}
 	result.Model = model
 	result.Role = gomcp.Role(role)
 	result.Content = &gomcp.TextContent{Text: util.ToJSONText(output)}
-	result.StopReason = req.Params.SystemPrompt
+	result.StopReason = systemPrompt
 	return result, nil
 }
 
@@ -158,6 +207,9 @@ func (s *MCPSession) LoggingMessageHandler(ctx context.Context, req *gomcp.Loggi
 func (s *MCPSession) ProgressNotificationHandler(ctx context.Context, req *gomcp.ProgressNotificationClientRequest) {
 	if s.Stop {
 		log.Println("Received progress notification after client stopped. Ignoring.")
+		return
+	}
+	if req == nil || req.Params == nil {
 		return
 	}
 	msg := fmt.Sprintf("%s: [ProgressNotification]. Received Upstream Message", s.Operation)

@@ -18,6 +18,8 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"goto/pkg/global"
 	mcpproxy "goto/pkg/proxy/mcp"
@@ -27,7 +29,9 @@ import (
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
+	"maps"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -87,10 +91,17 @@ type MCPServerPayload struct {
 }
 
 type SessionContext struct {
-	SessionID string
-	Server    *MCPServer
-	MS        *util.MCPRequestStore
-	finished  chan bool
+	SessionID  string
+	Server     *MCPServer
+	MS         *util.MCPRequestStore
+	finished   chan bool
+	finishOnce sync.Once
+}
+
+// finish tells the requests that wait for the session that it is over. It can be called any number of times, e.g. when
+// the session is deleted more than once at the same time.
+func (s *SessionContext) finish() {
+	s.finishOnce.Do(func() { close(s.finished) })
 }
 
 type PortServers struct {
@@ -215,9 +226,15 @@ func NewMCPServer(p *MCPServerPayload) *MCPServer {
 		HasTools:                    p.HasTools,
 	})
 	if server.URIRegex != "" {
-		server.uriRegexp = regexp.MustCompile(server.URIRegex)
-	} else if server.URI != "" {
-		server.uriRegexp = regexp.MustCompile(fmt.Sprintf("%s%s%s", util.URIPrefixRegexParts[0], server.URI, util.URIPrefixRegexParts[1]))
+		if re, err := regexp.Compile(server.URIRegex); err == nil {
+			server.uriRegexp = re
+		} else {
+			log.Printf("MCP Server [%s] ignoring invalid URI regex [%s]: %s", server.Name, server.URIRegex, err.Error())
+			server.URIRegex = ""
+		}
+	}
+	if server.uriRegexp == nil && server.URI != "" {
+		server.uriRegexp = uriRegexpFor(server.URI)
 	}
 	server.streamHTTPHandler = gomcp.NewStreamableHTTPHandler(getServer, &gomcp.StreamableHTTPOptions{Stateless: p.Stateless})
 	server.sseHandler = gomcp.NewSSEHandler(getServer, &gomcp.SSEOptions{})
@@ -227,60 +244,118 @@ func NewMCPServer(p *MCPServerPayload) *MCPServer {
 	return server
 }
 
+// uriRegexpFor is the regexp that the URIs of a server match. The URI is used as it is, unless it has characters that make
+// it an invalid regexp.
+func uriRegexpFor(uri string) *regexp.Regexp {
+	for _, u := range []string{uri, regexp.QuoteMeta(uri)} {
+		if re, err := regexp.Compile(fmt.Sprintf("%s%s%s", util.URIPrefixRegexParts[0], u, util.URIPrefixRegexParts[1])); err == nil {
+			return re
+		}
+	}
+	return nil
+}
+
 func SetServerRoute(uri string, server *MCPServer) {
 	lock.Lock()
 	defer lock.Unlock()
 	uri = strings.ToLower(uri)
+	server.lock.Lock()
+	defer server.lock.Unlock()
 	if strings.Contains(uri, "/mcp") {
-		parts := strings.Split(uri, "/mcp")
+		parts := strings.SplitN(uri, "/mcp", 2)
 		server.SSEURI = parts[0] + "/mcp/sse" + parts[1]
 	}
 	pair := types.NewPair(server.Name, "")
 	ServerRoutes[uri] = pair
-	ServerRoutes[server.SSEURI] = pair
+	if server.SSEURI != "" {
+		ServerRoutes[server.SSEURI] = pair
+	}
 	for tool := range server.Tools {
 		tool = strings.ToLower(tool)
 		pair := types.NewPair(server.Name, tool)
 		ServerRoutes[uri+"/"+tool] = pair
-		ServerRoutes[server.SSEURI+"/"+tool] = pair
+		if server.SSEURI != "" {
+			ServerRoutes[server.SSEURI+"/"+tool] = pair
+		}
 	}
 }
 
-func GetMCPServerNames() map[int]map[string][]string {
+// addToolRoutes routes the URIs of the tool to the server. A server that has no route has no SSE URI either, which is
+// not a prefix to route the tool under.
+func (m *MCPServer) addToolRoutes(tool *MCPTool) {
+	lock.Lock()
+	defer lock.Unlock()
+	pair := types.NewPair(m.Name, tool.Name)
+	ServerRoutes[tool.ServerURI] = pair
+	m.lock.RLock()
+	sseURI := m.SSEURI
+	m.lock.RUnlock()
+	if sseURI != "" {
+		ServerRoutes[sseURI+tool.URI] = pair
+	}
+}
+
+func allPortServers() []*PortServers {
 	lock.RLock()
 	defer lock.RUnlock()
+	all := make([]*PortServers, 0, len(PortsServers))
+	for _, ps := range PortsServers {
+		all = append(all, ps)
+	}
+	return all
+}
+
+func (ps *PortServers) allServers() []*MCPServer {
+	ps.lock.RLock()
+	defer ps.lock.RUnlock()
+	servers := make([]*MCPServer, 0, len(ps.Servers))
+	for _, s := range ps.Servers {
+		servers = append(servers, s)
+	}
+	return servers
+}
+
+func GetMCPServerNames() map[int]map[string][]string {
 	byPort := map[int]map[string][]string{}
-	for port, servers := range PortsServers {
-		byPort[port] = map[string][]string{}
-		for serverName, server := range servers.Servers {
-			byPort[port][serverName] = make([]string, len(server.Tools))
-			i := 0
+	for _, ps := range allPortServers() {
+		servers := map[string][]string{}
+		ps.lock.RLock()
+		names := make(map[string]*MCPServer, len(ps.Servers))
+		maps.Copy(names, ps.Servers)
+		ps.lock.RUnlock()
+		for serverName, server := range names {
+			server.lock.RLock()
+			tools := make([]string, 0, len(server.Tools))
 			for _, tool := range server.Tools {
-				byPort[port][serverName][i] = tool.Tool.Name
-				i++
+				tools = append(tools, tool.Tool.Name)
 			}
+			server.lock.RUnlock()
+			servers[serverName] = tools
 		}
+		byPort[ps.Port] = servers
 	}
 	return byPort
 }
 
 func GetPortMCPServers(port int) *PortServers {
 	lock.RLock()
-	defer lock.RUnlock()
-	if PortsServers[port] == nil {
-		PortsServers[port] = NewPortMCPServers(port)
+	ps := PortsServers[port]
+	lock.RUnlock()
+	if ps != nil {
+		return ps
 	}
-	return PortsServers[port]
+	lock.Lock()
+	defer lock.Unlock()
+	// Another request could have added it in the meantime.
+	if ps = PortsServers[port]; ps == nil {
+		ps = NewPortMCPServers(port)
+		PortsServers[port] = ps
+	}
+	return ps
 }
 
 func GetMCPServer(port int, name string) (server *MCPServer) {
-	name = strings.ToLower(name)
-	lock.RLock()
-	defer lock.RUnlock()
-	if ps := GetPortMCPServers(port); ps != nil {
-		return ps.GetMCPServer(name)
-	}
-	return nil
+	return GetPortMCPServers(port).GetMCPServer(name)
 }
 
 func NewPortMCPServers(port int) *PortServers {
@@ -319,6 +394,29 @@ func RemoveMCPServer(port int, server string) {
 	GetPortMCPServers(port).RemoveMCPServer(server)
 }
 
+func snapshotAllComponents(src map[string]map[string]map[string]IMCPComponent) map[string]map[string]map[string]IMCPComponent {
+	out := make(map[string]map[string]map[string]IMCPComponent, len(src))
+	for kind, byName := range src {
+		out[kind] = make(map[string]map[string]IMCPComponent, len(byName))
+		for name, byServer := range byName {
+			out[kind][name] = maps.Clone(byServer)
+		}
+	}
+	return out
+}
+
+func currentComponents() map[string]map[string]map[string]IMCPComponent {
+	lock.RLock()
+	defer lock.RUnlock()
+	return snapshotAllComponents(AllComponents)
+}
+
+func snapshotServerRoutes() map[string]*types.Pair[string, string] {
+	lock.RLock()
+	defer lock.RUnlock()
+	return maps.Clone(ServerRoutes)
+}
+
 func ClearAllMCPServers() {
 	lock.Lock()
 	defer lock.Unlock()
@@ -348,11 +446,17 @@ func (ps *PortServers) AddMCPServer(p *MCPServerPayload) *MCPServer {
 }
 
 func (ps *PortServers) RemoveMCPServer(server string) {
-	ps.removeServerComponents(server)
+	// Servers are kept by their lower case name, and their components by the name that they were given.
+	key := strings.ToLower(server)
+	s := ps.GetMCPServer(key)
+	if s == nil {
+		return
+	}
+	ps.removeServerComponents(s.Name)
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
-	delete(ps.Servers, server)
-	if server == ps.DefaultServer {
+	delete(ps.Servers, key)
+	if ps.defaultServer == s || strings.EqualFold(server, ps.DefaultServer) {
 		count := len(ps.Servers)
 		if count > 0 {
 			i := 0
@@ -364,15 +468,56 @@ func (ps *PortServers) RemoveMCPServer(server string) {
 				}
 				i++
 			}
-		} else {
+		} else if DefaultStatefulServer != nil {
 			ps.defaultServer = DefaultStatefulServer
 			ps.DefaultServer = DefaultStatefulServer.Name
+		} else {
+			ps.defaultServer = nil
+			ps.DefaultServer = ""
 		}
 	}
 }
 
+// getDefaultServer gives the server that serves the requests that don't tell which server they are for, and the number
+// of servers of the port.
+func (ps *PortServers) getDefaultServer() (*MCPServer, int) {
+	ps.lock.RLock()
+	defer ps.lock.RUnlock()
+	return ps.defaultServer, len(ps.Servers)
+}
+
 func (ps *PortServers) AllServers() map[int]*PortServers {
-	return PortsServers
+	lock.RLock()
+	defer lock.RUnlock()
+	return maps.Clone(PortsServers)
+}
+
+// MarshalJSON reports the servers of the port, without them changing while it does.
+func (ps *PortServers) MarshalJSON() ([]byte, error) {
+	type portServers PortServers
+	ps.lock.RLock()
+	defer ps.lock.RUnlock()
+	return json.Marshal((*portServers)(ps))
+}
+
+// MarshalJSON reports the server, without its components changing while it does.
+func (m *MCPServer) MarshalJSON() ([]byte, error) {
+	type mcpServer MCPServer
+	m.lock.RLock()
+	defer m.lock.RUnlock()
+	return json.Marshal((*mcpServer)(m))
+}
+
+func (m *MCPServer) isEnabled() bool {
+	m.lock.RLock()
+	defer m.lock.RUnlock()
+	return m.Enabled
+}
+
+func (m *MCPServer) setEnabled(enabled bool) {
+	m.lock.Lock()
+	m.Enabled = enabled
+	m.lock.Unlock()
 }
 
 func (ps *PortServers) GetMCPServer(name string) *MCPServer {
@@ -383,39 +528,27 @@ func (ps *PortServers) GetMCPServer(name string) *MCPServer {
 }
 
 func (ps *PortServers) Start(server string) {
-	ps.lock.Lock()
-	defer ps.lock.Unlock()
-	for _, s := range ps.Servers {
-		if server != "" {
-			if strings.EqualFold(s.Name, server) {
-				s.Enabled = true
-				break
-			}
-		} else {
-			s.Enabled = true
-		}
-	}
+	ps.setEnabled(server, true)
 }
 
 func (ps *PortServers) Stop(server string) {
-	ps.lock.Lock()
-	defer ps.lock.Unlock()
-	for _, s := range ps.Servers {
-		if server != "" {
-			if strings.EqualFold(s.Name, server) {
-				s.Enabled = false
-				break
-			}
-		} else {
-			s.Enabled = false
+	ps.setEnabled(server, false)
+}
+
+// setEnabled starts or stops the server of the given name, or all servers of the port if there is no name.
+func (ps *PortServers) setEnabled(server string, enabled bool) {
+	for _, s := range ps.allServers() {
+		if server == "" {
+			s.setEnabled(enabled)
+		} else if strings.EqualFold(s.Name, server) {
+			s.setEnabled(enabled)
+			break
 		}
 	}
 }
 
 func (ps *PortServers) Clear() {
-	ps.lock.Lock()
-	defer ps.lock.Unlock()
-	for _, s := range ps.Servers {
+	for _, s := range ps.allServers() {
 		s.Clear()
 	}
 }
@@ -423,7 +556,12 @@ func (ps *PortServers) Clear() {
 func (ps *PortServers) GetComponents(kind string) any {
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
-	return ps.AllComponents[kind]
+	byName := ps.AllComponents[kind]
+	out := make(map[string]map[string]IMCPComponent, len(byName))
+	for name, byServer := range byName {
+		out[name] = maps.Clone(byServer)
+	}
+	return out
 }
 
 func (m *MCPServer) GetID() string {
@@ -442,7 +580,10 @@ func (m *MCPServer) GetPort() int {
 }
 
 func (m *MCPServer) Clear() {
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	m.Tools = map[string]*MCPTool{}
+	m.ToolsByURI = map[string]*MCPTool{}
 	m.Prompts = map[string]*MCPPrompt{}
 	m.Resources = map[string]*MCPResource{}
 	m.ResourceTemplates = map[string]*MCPResourceTemplate{}
@@ -450,18 +591,19 @@ func (m *MCPServer) Clear() {
 	m.sessionContexts = map[string]*SessionContext{}
 }
 
+// GetComponents gives a copy of the components of the kind, as they are while the server is changed.
 func (m *MCPServer) GetComponents(kind string) any {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 	switch kind {
 	case KindTools:
-		return m.Tools
+		return maps.Clone(m.Tools)
 	case KindPrompts:
-		return m.Prompts
+		return maps.Clone(m.Prompts)
 	case KindResources:
-		return m.Resources
+		return maps.Clone(m.Resources)
 	case KindTemplates:
-		return m.ResourceTemplates
+		return maps.Clone(m.ResourceTemplates)
 	}
 	return nil
 }
@@ -481,6 +623,17 @@ func (m *MCPServer) GetTool(name string) *MCPTool {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 	return m.Tools[name]
+}
+
+// safely turns the panic of the SDK, for the components that it doesn't accept, into an error.
+func safely(what string, f func()) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%s: %v", what, r)
+		}
+	}()
+	f()
+	return nil
 }
 
 func (m *MCPServer) AddPayload(name, kind string, payload []byte, isJSON, isStream bool, streamCount int, delayMin, delayMax time.Duration, delayCount int) error {
@@ -547,37 +700,56 @@ func (m *MCPServer) AddTools(b []byte) ([]string, error) {
 	}
 	names := []string{}
 	for _, tool := range tools {
-		m.AddTool(tool)
+		if err := m.addTool(tool); err != nil {
+			return names, err
+		}
 		names = append(names, tool.Name)
 	}
-	//m.ps.defaultServer = m
 	log.Printf("Server [%s][%d] added Tools [%+v] ", m.Name, m.Port, names)
 	return names, nil
 }
 
 func (m *MCPServer) AddTool(tool *MCPTool) {
-	if tool.IsProxy {
-		mcpproxy.GetMCPProxyForPort(m.Port).SetupMCPProxy(m.Name, tool.Config.RemoteTool.URL, tool.Tool.Name, tool.Tool.Name, nil)
+	if err := m.addTool(tool); err != nil {
+		log.Printf("Server [%s][%d] failed to add Tool: %s", m.Name, m.Port, err.Error())
 	}
+}
+
+// addTool adds the tool to the server, if the tool is one that the server can serve. It is ready to run when the SDK
+// gets to know it, so a call can't find a tool that has nothing to run.
+func (m *MCPServer) addTool(tool *MCPTool) error {
+	if tool == nil || tool.Tool == nil {
+		return errors.New("Missing tool definition")
+	}
+	if err := tool.validateBehavior(); err != nil {
+		return err
+	}
+	tool.Kind = KindTools
 	tool.Server = m
-	m.server.AddTool(tool.Tool, tool.Handle)
 	tool.SetName(tool.Tool.Name)
 	if tool.URI == "" {
 		tool.URI = strings.ToLower("/" + tool.Name)
 	}
 	tool.ServerURI = m.URI + tool.URI
 	tool.BuildLabel()
+	if err := tool.prepareBehavior(); err != nil {
+		return err
+	}
+	if err := safely("Tool ["+tool.Name+"]", func() { m.server.AddTool(tool.Tool, tool.Handle) }); err != nil {
+		return err
+	}
+	if tool.IsProxy {
+		mcpproxy.GetMCPProxyForPort(m.Port).SetupMCPProxy(m.Name, tool.Config.RemoteTool.URL, tool.Tool.Name, tool.Tool.Name, nil)
+	}
 	m.lock.Lock()
 	m.Tools[tool.Tool.Name] = tool
 	m.ToolsByURI[tool.URI] = tool
-	pair := types.NewPair(m.Name, tool.Name)
-	ServerRoutes[tool.ServerURI] = pair
-	ServerRoutes[m.SSEURI+tool.URI] = pair
 	m.lock.Unlock()
+	m.addToolRoutes(tool)
 	if m.ps != nil {
 		m.ps.addComponentToAll(tool, m.Name)
 	}
-	tool.prepareBehavior()
+	return nil
 }
 
 func (s *MCPServer) addDefaultTools() {
@@ -637,7 +809,7 @@ func (s *MCPServer) addDefaultTools() {
 					"schema":      {Type: "string", Description: "Tool schema (default, basic-text-delay-schema, tool-call-schema, fetch-schema, remote-tool-schema, agent-call-schema)"},
 					"behavior":    {Type: "object", Description: "Tool Behavior"},
 				},
-				Required: []string{"name", "schema", "required"},
+				Required: []string{"name", "schema"},
 			},
 		},
 		Behavior: ToolBehavior{AddTool: true},
@@ -651,16 +823,21 @@ func (m *MCPServer) AddPrompts(b []byte) ([]string, error) {
 	names := []string{}
 	for _, b2 := range arr {
 		prompt, err := ParsePrompt(b2)
-		if err != nil || prompt.Prompt == nil {
+		if err != nil {
 			return nil, err
 		}
-		m.server.AddPrompt(prompt.Prompt, prompt.Handle)
-		prompt.Server = m
-		prompt.SetName(prompt.Prompt.Name)
-		prompt.BuildLabel()
+		if prompt.Prompt == nil || prompt.Prompt.Name == "" {
+			return nil, errors.New("Missing prompt definition")
+		}
 		prompts = append(prompts, prompt)
 	}
 	for _, prompt := range prompts {
+		if err := safely("Prompt ["+prompt.Prompt.Name+"]", func() { m.server.AddPrompt(prompt.Prompt, prompt.Handle) }); err != nil {
+			return nil, err
+		}
+		prompt.Server = m
+		prompt.SetName(prompt.Prompt.Name)
+		prompt.BuildLabel()
 		m.lock.Lock()
 		m.Prompts[prompt.Prompt.Name] = prompt
 		m.lock.Unlock()
@@ -678,16 +855,24 @@ func (m *MCPServer) AddResources(b []byte) ([]string, error) {
 	names := []string{}
 	for _, b2 := range arr {
 		resource, err := ParseResource(b2)
-		if err != nil || resource == nil {
+		if err != nil {
 			return nil, err
 		}
-		m.server.AddResource(resource.Resource, resource.Handle)
-		resource.Server = m
-		resource.SetName(resource.Resource.Name)
-		resource.BuildLabel()
+		if resource == nil || resource.Resource == nil {
+			return nil, errors.New("Missing resource definition")
+		}
+		if _, err := url.Parse(resource.Resource.URI); err != nil {
+			return nil, fmt.Errorf("Resource [%s] has an invalid URI: %s", resource.Resource.Name, err.Error())
+		}
 		resources = append(resources, resource)
 	}
 	for _, resource := range resources {
+		if err := safely("Resource ["+resource.Resource.Name+"]", func() { m.server.AddResource(resource.Resource, resource.Handle) }); err != nil {
+			return nil, err
+		}
+		resource.Server = m
+		resource.SetName(resource.Resource.Name)
+		resource.BuildLabel()
 		m.lock.Lock()
 		m.Resources[resource.Resource.Name] = resource
 		m.lock.Unlock()
@@ -705,23 +890,28 @@ func (m *MCPServer) AddResourceTemplates(b []byte) ([]string, error) {
 	names := []string{}
 	for _, b2 := range arr {
 		template, err := ParseResourceTemplate(b2)
-		if err != nil || template == nil {
+		if err != nil {
 			return nil, err
 		}
-		m.server.AddResourceTemplate(template.ResourceTemplate, template.Handle)
-		template.Server = m
-		template.SetName(template.ResourceTemplate.Name)
-		template.BuildLabel()
+		if template == nil || template.ResourceTemplate == nil {
+			return nil, errors.New("Missing resource template definition")
+		}
 		templates = append(templates, template)
 	}
 	for _, template := range templates {
+		if err := safely("Resource template ["+template.ResourceTemplate.Name+"]", func() { m.server.AddResourceTemplate(template.ResourceTemplate, template.Handle) }); err != nil {
+			return nil, err
+		}
+		template.Server = m
+		template.SetName(template.ResourceTemplate.Name)
+		template.BuildLabel()
 		m.lock.Lock()
 		m.ResourceTemplates[template.ResourceTemplate.Name] = template
 		m.lock.Unlock()
 		if m.ps != nil {
 			m.ps.addComponentToAll(template, m.Name)
-			names = append(names, template.Name)
 		}
+		names = append(names, template.Name)
 	}
 	return names, nil
 }
@@ -740,10 +930,16 @@ func GetComponentType(kind string) (isTools, isPrompts, isResources, isTemplates
 	return
 }
 
+// GetAllComponents gives a copy of the components of the kind of all servers, as they are while servers are changed.
 func GetAllComponents(kind string) map[string]map[string]IMCPComponent {
 	lock.RLock()
 	defer lock.RUnlock()
-	return AllComponents[kind]
+	byName := AllComponents[kind]
+	out := make(map[string]map[string]IMCPComponent, len(byName))
+	for name, byServer := range byName {
+		out[name] = maps.Clone(byServer)
+	}
+	return out
 }
 
 func AddToolSchemas(b []byte) ([]string, error) {
@@ -774,14 +970,22 @@ func (m *MCPServer) onInitialized(ctx context.Context, req *gomcp.InitializedReq
 	log.Println(msg)
 }
 
+// requestHeaders gives the headers that the request came with, if it came with any.
+func requestHeaders(extra *gomcp.RequestExtra) http.Header {
+	if extra == nil {
+		return nil
+	}
+	return extra.Header
+}
+
 func (m *MCPServer) onRootsListChanged(ctx context.Context, req *gomcp.RootsListChangedRequest) {
-	msg := fmt.Sprintf("MCPServer[%d][%s]: Roots List Changed: [%s]", m.Port, m.Name, util.ToJSONText(req.Extra.Header))
+	msg := fmt.Sprintf("MCPServer[%d][%s]: Roots List Changed: [%s]", m.Port, m.Name, util.ToJSONText(requestHeaders(req.Extra)))
 	log.Println(msg)
 	notifyClient(ctx, req.Params, msg, req.Session, nil)
 }
 
 func (m *MCPServer) onProgressNotification(ctx context.Context, req *gomcp.ProgressNotificationServerRequest) {
-	msg := fmt.Sprintf("MCPServer[%d][%s]: Progress Notification Received: [%s]", m.Port, m.Name, util.ToJSONText(req.Extra.Header))
+	msg := fmt.Sprintf("MCPServer[%d][%s]: Progress Notification Received: [%s]", m.Port, m.Name, util.ToJSONText(requestHeaders(req.Extra)))
 	log.Println(msg)
 	notifyClient(ctx, req.Params, msg, req.Session, nil)
 }
@@ -794,13 +998,18 @@ func (m *MCPServer) AddCompletionPayload(completionType string, b []byte, delayM
 }
 
 func (m *MCPServer) onCompletion(ctx context.Context, req *gomcp.CompleteRequest) (*gomcp.CompleteResult, error) {
-	msg := fmt.Sprintf("MCPServer[%d][%s]: Completion Request Received: [%s]", m.Port, m.Name, util.ToJSONText(req.Extra.Header))
+	msg := fmt.Sprintf("MCPServer[%d][%s]: Completion Request Received: [%s]", m.Port, m.Name, util.ToJSONText(requestHeaders(req.Extra)))
 	log.Println(msg)
 	notifyClient(ctx, req.Params, msg, req.Session, nil)
-	payload := m.CompletionPayload[req.Params.Ref.Type]
+	var completion *payload.Payload
+	if req.Params != nil && req.Params.Ref != nil {
+		m.lock.RLock()
+		completion = m.CompletionPayload[req.Params.Ref.Type]
+		m.lock.RUnlock()
+	}
 	suggestions := []string{}
-	if payload != nil {
-		payload.RangeTextWithDelay(0, nil, func(s string, count int, restarted bool) (bool, error) {
+	if completion != nil {
+		completion.RangeTextWithDelay(0, nil, func(s string, count int, restarted bool) (bool, error) {
 			suggestions = append(suggestions, s)
 			return true, nil
 		})
@@ -816,15 +1025,24 @@ func (m *MCPServer) onCompletion(ctx context.Context, req *gomcp.CompleteRequest
 	}, nil
 }
 
+func clientInfoOf(session *gomcp.ServerSession) *gomcp.Implementation {
+	if session != nil {
+		if params := session.InitializeParams(); params != nil {
+			return params.ClientInfo
+		}
+	}
+	return nil
+}
+
 func (m *MCPServer) onSubscribed(ctx context.Context, req *gomcp.SubscribeRequest) error {
-	msg := fmt.Sprintf("MCPServer[%d][%s]: Session [%s] Client [%+v] Subscribed to [%s]", m.Port, m.Name, req.Session.ID(), req.Session.InitializeParams().ClientInfo, req.Params.URI)
+	msg := fmt.Sprintf("MCPServer[%d][%s]: Session [%s] Client [%+v] Subscribed to [%s]", m.Port, m.Name, req.Session.ID(), clientInfoOf(req.Session), req.Params.URI)
 	log.Println(msg)
 	notifyClient(ctx, req.Params, msg, req.Session, nil)
 	return nil
 }
 
 func (m *MCPServer) onUnsubscribed(ctx context.Context, req *gomcp.UnsubscribeRequest) error {
-	msg := fmt.Sprintf("MCPServer[%d][%s]: Session [%s] Client [%+v] Unsubscribed to [%s]", m.Port, m.Name, req.Session.ID(), req.Session.InitializeParams().ClientInfo, req.Params.URI)
+	msg := fmt.Sprintf("MCPServer[%d][%s]: Session [%s] Client [%+v] Unsubscribed to [%s]", m.Port, m.Name, req.Session.ID(), clientInfoOf(req.Session), req.Params.URI)
 	log.Println(msg)
 	notifyClient(ctx, req.Params, msg, req.Session, nil)
 	return nil
@@ -841,12 +1059,13 @@ func (m *MCPServer) Middleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 			log.Printf("===================== *** Tools/Prompts/Resources Call [Port: %d] *** ========================\n", m.Port)
 		}
 		session := req.GetSession()
-		callToolParams, ctOk := req.GetParams().(*gomcp.CallToolParamsRaw)
+		callToolParams, isToolCall := req.GetParams().(*gomcp.CallToolParamsRaw)
+		isToolCall = isToolCall && callToolParams != nil
 		var duration time.Duration
 		var toolName string
-		if ctOk && callToolParams != nil {
+		if isToolCall {
 			start := time.Now()
-			toolName := callToolParams.Name
+			toolName = callToolParams.Name
 			TrackToolCall(m.Port, m.Name, session.ID(), toolName)
 			log.Printf("MCPServer[%d][%s]: Session [%s] Method [%s] Tool [%s] Params: [%s]", m.Port, m.Name, session.ID(), method, toolName, util.ToJSONText(callToolParams))
 			result, err = next(ctx, method, req)
@@ -858,11 +1077,12 @@ func (m *MCPServer) Middleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 		if err != nil {
 			msg = fmt.Sprintf("MCPServer[%d][%s]: Session [%s] Method [%s] Tool [%s] call finished in [%s] with error [%s]",
 				m.Port, m.Name, session.ID(), method, toolName, duration.String(), err.Error())
-			TrackToolCallResult(m.Port, m.Name, toolName, duration, false)
 		} else {
 			msg = fmt.Sprintf("MCPServer[%d][%s]: Session [%s] Method [%s] Tool [%s] call finished in [%s]",
 				m.Port, m.Name, session.ID(), method, toolName, duration.String())
-			TrackToolCallResult(m.Port, m.Name, toolName, duration, true)
+		}
+		if isToolCall {
+			TrackToolCallResult(m.Port, m.Name, toolName, duration, err == nil)
 		}
 		log.Println(msg)
 		log.Println("----- End MCP -----")

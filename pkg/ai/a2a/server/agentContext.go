@@ -17,7 +17,9 @@
 package a2aserver
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	a2aclient "goto/pkg/ai/a2a/client"
@@ -32,6 +34,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -83,6 +86,13 @@ type AgentContext struct {
 	upstreamStatuses map[string]any
 	remoteGotos      map[string]bool
 	irw              *intercept.InterceptResponseWriter
+
+	// lock guards err, forcedStatus, remoteGotos, upstreamHeaders, upstreamStatuses and agentResults, which the
+	// delegates of an agent update from their own goroutines when they run in parallel.
+	lock sync.Mutex
+	// handlerLock serializes the calls to the handler of the task. The task manager does not take updates of a task
+	// from several goroutines at once, which is what the delegates, what reads their progress and the timeline make.
+	handlerLock sync.Mutex
 }
 
 type DelegateCallContext struct {
@@ -166,13 +176,13 @@ func (ac *AgentContext) detectAndConfigureFeature(k string, v any) {
 		ac.reportTimeline = util.AnyToBool(v)
 	} else if strings.Contains(k, "events") {
 		if strings.Contains(k, "no") {
-			ac.timeline.NoEvents = true
+			ac.timeline.NoEvents = util.AnyToBool(v)
 		} else {
 			ac.timeline.NoEvents = !util.AnyToBool(v)
 		}
 	} else if strings.Contains(k, "result") {
 		if strings.Contains(k, "only") {
-			ac.timeline.ResultOnly = true
+			ac.timeline.ResultOnly = util.AnyToBool(v)
 		} else {
 			ac.timeline.ResultOnly = !util.AnyToBool(v)
 		}
@@ -263,6 +273,9 @@ func (ac *AgentContext) sendDelegatesMatchUpdate() {
 func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint string, inputs map[string]string) {
 	ac.tools = map[string]map[string]*model.DelegateToolCall{}
 	ac.agents = map[string]map[string]*model.DelegateAgentCall{}
+	if ac.agent.Config == nil || ac.agent.Config.Delegates == nil {
+		return
+	}
 	addTool := func(d *model.DelegateToolCall) bool {
 		tool := *d
 		toolCall := *d.ToolCall
@@ -441,6 +454,9 @@ func (ac *AgentContext) setOverrideParamsFromInput(jsons []map[string]any, input
 			}
 		}
 	}
+	if ac.agent.Config == nil || ac.agent.Config.Delegates == nil {
+		return
+	}
 	for name, input := range inputs {
 		agent := ac.agent.Config.Delegates.Agents[name]
 		tool := ac.agent.Config.Delegates.Tools[name]
@@ -471,37 +487,56 @@ func (ac *AgentContext) setOverrideParamsFromInput(jsons []map[string]any, input
 	}
 }
 
+// extractJSONValues reads the overrides of delegates from the JSONs that the input has. The input is text that
+// anybody can send, so the values are used only if they are of the type that they should be.
 func extractJSONValues(jsons []map[string]any) map[string]*agentOverrides {
 	overrides := map[string]*agentOverrides{}
 	for _, json := range jsons {
 		override := &agentOverrides{}
-		if json["tool"] != nil {
-			override.tool = json["tool"].(string)
+		if s, ok := json["tool"].(string); ok && s != "" {
+			override.tool = s
 			overrides[override.tool] = override
 		}
-		if json["agent"] != nil {
-			override.agent = json["agent"].(string)
+		if s, ok := json["agent"].(string); ok && s != "" {
+			override.agent = s
 			overrides[override.agent] = override
 		}
-		if json["url"] != nil {
-			override.url = json["url"].(string)
+		if s, ok := json["url"].(string); ok {
+			override.url = s
 		}
-		if json["input"] != nil {
-			if s, ok := json["input"].(string); ok {
-				override.remoteInput = s
-			}
+		if s, ok := json["input"].(string); ok {
+			override.remoteInput = s
 		}
-		if json["args"] != nil {
-			if m, ok := json["args"].(map[string]any); ok {
-				override.args = m
-			}
+		if m, ok := json["args"].(map[string]any); ok {
+			override.args = m
 		}
 	}
 	return overrides
 }
 
+// detach copies the data to what has none of the objects that others go on to change. What is sent to the client is
+// marshaled later, by the task manager, on the goroutine that serves the client, while the agent and its delegates keep
+// changing the timeline and the maps that the data is made of.
+func detach(data any) any {
+	switch data.(type) {
+	case nil, string, bool, int, int32, int64, float32, float64:
+		return data
+	}
+	b, err := json.Marshal(data)
+	if err != nil {
+		return data
+	}
+	decoder := json.NewDecoder(bytes.NewReader(b))
+	decoder.UseNumber()
+	var copied any
+	if err := decoder.Decode(&copied); err != nil {
+		return data
+	}
+	return copied
+}
+
 func (ac *AgentContext) sendData(key string, data any) error {
-	data = map[string]any{key: data}
+	data = map[string]any{key: detach(data)}
 	if ac.surfaceData {
 		a := a2aproto.Artifact{
 			ArtifactID:  uuid.New().String(),
@@ -509,13 +544,13 @@ func (ac *AgentContext) sendData(key string, data any) error {
 			Description: util.Ptr(""),
 			Parts:       []a2aproto.Part{a2aproto.NewDataPart(data)},
 		}
-		if err := ac.task.handler.AddArtifact(&ac.task.taskID, a, false, false); err != nil {
+		if err := ac.addArtifact(a); err != nil {
 			return err
 		}
 	} else {
 		msg := fmt.Sprintf("'%s' Reported", key)
 		m := a2aproto.NewMessage(a2aproto.MessageRoleAgent, []a2aproto.Part{a2aproto.NewTextPart(msg), a2aproto.NewDataPart(data)})
-		if err := ac.task.handler.UpdateTaskState(&ac.task.taskID, a2aproto.TaskStateWorking, &m); err != nil {
+		if err := ac.updateTaskState(a2aproto.TaskStateWorking, &m); err != nil {
 			log.Printf("Failed to notify client about [%s] with error: %s", msg, err.Error())
 			return err
 		}
@@ -536,7 +571,7 @@ func (ac *AgentContext) prepareAndSendUpdate(msg string, data any, json bool, pr
 		if finish {
 			state = a2aproto.TaskStateCompleted
 		}
-		if err := ac.task.handler.UpdateTaskState(&ac.task.taskID, state, &m); err != nil {
+		if err := ac.updateTaskState(state, &m); err != nil {
 			log.Printf("Failed to notify client about [%s] with error: %s", msg, err.Error())
 			return err
 		}
@@ -576,10 +611,13 @@ func (ac *AgentContext) notifyEndSession(msg string, data any, success bool) {
 }
 
 func (ac *AgentContext) sendTaskStatusUpdate(state a2aproto.TaskState, msg string) (err error) {
+	if ac.task == nil || ac.task.handler == nil {
+		return errors.New("Agent not initialized")
+	}
 	if msg != "" {
 		msg = fmt.Sprintf("[%s]: Agent [%s]: %s", time.Now().Format(time.RFC3339Nano), ac.agent.ID, msg)
 		m := a2aproto.NewMessage(a2aproto.MessageRoleAgent, []a2aproto.Part{a2aproto.NewTextPart(msg)})
-		err = ac.task.handler.UpdateTaskState(&ac.task.taskID, state, &m)
+		err = ac.updateTaskState(state, &m)
 		if err != nil {
 			return
 		}
@@ -588,18 +626,25 @@ func (ac *AgentContext) sendTaskStatusUpdate(state a2aproto.TaskState, msg strin
 }
 
 func (ac *AgentContext) endTask(success bool, msg string) {
-	ac.timeline.EndTimeline(ac.label, msg, ac.forcedStatus, ac.upstreamStatuses, nil, success)
+	ac.lock.Lock()
+	if len(ac.upstreamStatuses) > 0 {
+		ac.rs.UpstreamStatuses = ac.upstreamStatuses
+	}
+	ac.lock.Unlock()
+	a2aclient.UpdateTimeline(ac.timeline, func() {
+		ac.timeline.EndTimeline(ac.label, msg, ac.forcedStatus, ac.upstreamStatuses, nil, success)
+	})
 	if ac.task.subscriber != nil {
 		ac.task.subscriber.Close()
 	}
-	ac.task.handler.CleanTask(&ac.task.taskID)
+	ac.cleanTask()
 }
 
 func (ac *AgentContext) waitBeforeNextStep() (time.Duration, error) {
 	select {
 	case <-ac.ctx.Done():
 		log.Printf("Task %s cancelled during delay: %v", ac.task.taskID, ac.ctx.Err())
-		ac.task.handler.UpdateTaskState(&ac.task.taskID, a2aproto.TaskStateCanceled, nil)
+		ac.updateTaskState(a2aproto.TaskStateCanceled, nil)
 		return 0, ac.ctx.Err()
 	case delay := <-ac.delay.Block():
 		return delay, nil
@@ -608,12 +653,94 @@ func (ac *AgentContext) waitBeforeNextStep() (time.Duration, error) {
 
 func (ac *AgentContext) AddEvent(msg string) {
 	if msg != "" {
-		ac.timeline.AddEvent(ac.label, msg)
+		a2aclient.UpdateTimeline(ac.timeline, func() { ac.timeline.AddEvent(ac.label, msg) })
 	}
 }
 
 func (ac *AgentContext) AddData(label string, data any, json bool) {
 	if data != nil {
-		ac.timeline.AddData(label, data, json)
+		a2aclient.UpdateTimeline(ac.timeline, func() { ac.timeline.AddData(label, data, json) })
 	}
+}
+
+func (ac *AgentContext) setErr(err error) {
+	ac.lock.Lock()
+	defer ac.lock.Unlock()
+	ac.err = err
+}
+
+func (ac *AgentContext) getErr() error {
+	ac.lock.Lock()
+	defer ac.lock.Unlock()
+	return ac.err
+}
+
+func (ac *AgentContext) setAgentResults(name string, results map[string][]any) {
+	ac.lock.Lock()
+	defer ac.lock.Unlock()
+	ac.agentResults[name] = results
+}
+
+// recordUpstream keeps what the call of a delegate found out about the upstream it called: the gotos that the call
+// went through, the headers and the statuses that they responded with. The delegates can run in parallel, so what each
+// reports is added to what the others did.
+func (ac *AgentContext) recordUpstream(via, name string, remoteGotos map[string]bool, remoteHeaders map[string]any,
+	requestHeaders, responseHeaders http.Header, statuses map[string]any, status int) {
+	ac.lock.Lock()
+	defer ac.lock.Unlock()
+	for k, v := range remoteGotos {
+		ac.remoteGotos[k] = v
+	}
+	for k, v := range remoteHeaders {
+		ac.upstreamHeaders[k] = v
+	}
+	reported := map[string]any{}
+	if existing, ok := ac.upstreamHeaders["UpstreamHeaders"].(map[string]any); ok {
+		for k, v := range existing {
+			reported[k] = v
+		}
+	}
+	reported[fmt.Sprintf("%s (%s)", name, via)] = map[string]any{
+		"RequestHeaders":  requestHeaders,
+		"ResponseHeaders": responseHeaders,
+	}
+	ac.upstreamHeaders["UpstreamHeaders"] = reported
+	if statuses != nil {
+		for k, v := range statuses {
+			ac.upstreamStatuses[k] = v
+		}
+	} else {
+		ac.upstreamStatuses[name] = status
+	}
+	if status > 0 {
+		// The request store and the timeline get the upstream statuses, and the timeline the status, when the task
+		// ends. They are not written to from here: the delegates run in parallel, the calls that they make write to the
+		// request store too, and the timeline is read by the events that they add.
+		ac.forcedStatus = status
+	}
+}
+
+// closeUpstreamProgress ends the progress of a call that was not made, as the call is what ends it.
+func (dc *DelegateCallContext) closeUpstreamProgress() {
+	if dc.upstreamProgress != nil {
+		close(dc.upstreamProgress)
+	}
+}
+
+func (ac *AgentContext) updateTaskState(state a2aproto.TaskState, message *a2aproto.Message) error {
+	ac.handlerLock.Lock()
+	defer ac.handlerLock.Unlock()
+	return ac.task.handler.UpdateTaskState(&ac.task.taskID, state, message)
+}
+
+func (ac *AgentContext) addArtifact(artifact a2aproto.Artifact) error {
+	ac.handlerLock.Lock()
+	defer ac.handlerLock.Unlock()
+	return ac.task.handler.AddArtifact(&ac.task.taskID, artifact, false, false)
+}
+
+func (ac *AgentContext) cleanTask() {
+	ac.handlerLock.Lock()
+	defer ac.handlerLock.Unlock()
+	ac.task.handler.CleanTask(&ac.task.taskID)
 }

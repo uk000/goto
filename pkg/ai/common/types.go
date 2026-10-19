@@ -17,6 +17,10 @@
 package aicommon
 
 import (
+	"fmt"
+	"maps"
+	"slices"
+
 	"goto/pkg/types"
 	"goto/pkg/util"
 )
@@ -136,6 +140,52 @@ func (a *ToolCallArgs) UpdateFrom(args *ToolCallArgs) {
 	}
 }
 
+// inputString returns the value if it's text. Values of any other type are left out by the callers, instead of the
+// process panicking on a type assertion.
+func inputString(v any) (string, bool) {
+	s, ok := v.(string)
+	return s, ok
+}
+
+// inputStringMap accepts the maps of strings that the code builds (map[string]string) and the maps that come out of
+// decoded JSON (map[string]any, whose non-text values are converted to text).
+func inputStringMap(v any) (map[string]string, bool) {
+	switch m := v.(type) {
+	case map[string]string:
+		return m, true
+	case map[string]any:
+		out := make(map[string]string, len(m))
+		for k, val := range m {
+			if s, ok := val.(string); ok {
+				out[k] = s
+			} else if val != nil {
+				out[k] = fmt.Sprint(val)
+			}
+		}
+		return out, true
+	}
+	return nil, false
+}
+
+// inputStringSlice accepts []string and the []any that comes out of decoded JSON.
+func inputStringSlice(v any) ([]string, bool) {
+	switch l := v.(type) {
+	case []string:
+		return slices.Clone(l), true
+	case []any:
+		out := make([]string, 0, len(l))
+		for _, val := range l {
+			if s, ok := val.(string); ok {
+				out = append(out, s)
+			} else if val != nil {
+				out = append(out, fmt.Sprint(val))
+			}
+		}
+		return out, true
+	}
+	return nil, false
+}
+
 func (a *ToolCallArgs) UpdateFromInputArgs(args map[string]any) {
 	if args == nil {
 		return
@@ -143,62 +193,59 @@ func (a *ToolCallArgs) UpdateFromInputArgs(args map[string]any) {
 	if args["count"] != nil {
 		a.Count = util.AnyToInt(args["count"])
 	}
-	if args["delay"] != nil {
-		a.DelayText = args["delay"].(string)
+	if s, ok := inputString(args["delay"]); ok {
+		a.DelayText = s
 	}
-	if args["text"] != nil {
-		a.Text = args["text"].(string)
+	if s, ok := inputString(args["text"]); ok {
+		a.Text = s
 	}
 	if args["status"] != nil {
 		a.Status = util.AnyToInt(args["status"])
 	}
-	if args["tool"] != nil {
-		a.ToolName = args["tool"].(string)
+	if s, ok := inputString(args["tool"]); ok {
+		a.ToolName = s
 	}
-	if args["agent"] != nil {
-		a.AgentName = args["agent"].(string)
+	if s, ok := inputString(args["agent"]); ok {
+		a.AgentName = s
 	}
-	if args["url"] != nil {
-		a.URL = args["url"].(string)
+	if s, ok := inputString(args["url"]); ok {
+		a.URL = s
 	}
-	if args["authority"] != nil {
-		a.Authority = args["authority"].(string)
+	if s, ok := inputString(args["authority"]); ok {
+		a.Authority = s
 	}
 	if args["sse"] != nil {
 		a.SSE = util.AnyToBool(args["sse"])
 	}
-	if args["headers"] != nil {
-		if a.Headers == nil {
-			a.Headers = types.NewHeaders()
-		}
-		headers := args["headers"].(map[string]string)
-		for h, v := range headers {
-			a.Headers.Request.Add[h] = v
-		}
+	if headers, ok := inputStringMap(args["headers"]); ok {
+		a.requestHeaders().Add = mergeStrings(a.requestHeaders().Add, headers)
 	}
-	if args["forwardHeaders"] != nil {
-		if a.Headers == nil {
-			a.Headers = types.NewHeaders()
-		}
-		forwardHeaders := args["forwardHeaders"].([]string)
-		a.Headers.Request.Forward = forwardHeaders
+	if forwardHeaders, ok := inputStringSlice(args["forwardHeaders"]); ok {
+		a.requestHeaders().Forward = forwardHeaders
 	}
-	if args["message"] != nil {
-		a.AgentMessage = args["message"].(string)
+	if s, ok := inputString(args["message"]); ok {
+		a.AgentMessage = s
 	}
-	if args["prompt"] != nil {
-		a.AgentMessage = args["prompt"].(string)
+	if s, ok := inputString(args["prompt"]); ok {
+		a.AgentMessage = s
 	}
-	if args["input"] != nil {
-		a.AgentMessage = args["input"].(string)
+	if s, ok := inputString(args["input"]); ok {
+		a.AgentMessage = s
 	}
 	if args["agentArgs"] != nil {
-		if a.AgentArgs == nil {
-			a.AgentArgs = map[string]any{}
-		}
-		agentData := args["agentArgs"].(map[string]string)
-		for k, v := range agentData {
-			a.AgentArgs[k] = v
+		switch agentData := args["agentArgs"].(type) {
+		case map[string]string:
+			if a.AgentArgs == nil {
+				a.AgentArgs = map[string]any{}
+			}
+			for k, v := range agentData {
+				a.AgentArgs[k] = v
+			}
+		case map[string]any:
+			if a.AgentArgs == nil {
+				a.AgentArgs = map[string]any{}
+			}
+			maps.Copy(a.AgentArgs, agentData)
 		}
 	}
 	ra := args["args"]
@@ -213,6 +260,23 @@ func (a *ToolCallArgs) UpdateFromInputArgs(args map[string]any) {
 			a.RemoteArgs.UpdateFromInputArgs(remoteArgs)
 		}
 	}
+}
+
+// requestHeaders returns the request headers config of the args, creating the headers and the config if they're missing.
+func (a *ToolCallArgs) requestHeaders() *types.HeadersConfig {
+	if a.Headers == nil {
+		a.Headers = types.NewHeaders()
+	}
+	a.Headers.NonNil()
+	return a.Headers.Request
+}
+
+func mergeStrings(to, from map[string]string) map[string]string {
+	if to == nil {
+		to = make(map[string]string, len(from))
+	}
+	maps.Copy(to, from)
+	return to
 }
 
 func (a *ToolCallArgs) UpdateDelay(delay *types.Delay) {
@@ -231,8 +295,36 @@ func (a *ToolCallArgs) AddMetadata(k, v string) {
 	a.Metadata[k] = v
 }
 
+// CloneHeaders makes a deep copy of the headers, which stay nil when they are. types.Headers.Clone is not used here,
+// because it fails for headers without a request config, and leaves out the response config.
+func CloneHeaders(h *types.Headers) *types.Headers {
+	if h == nil {
+		return nil
+	}
+	return &types.Headers{Request: cloneHeadersConfig(h.Request), Response: cloneHeadersConfig(h.Response)}
+}
+
+func cloneHeadersConfig(hc *types.HeadersConfig) *types.HeadersConfig {
+	if hc == nil {
+		return nil
+	}
+	return &types.HeadersConfig{Add: maps.Clone(hc.Add), Remove: slices.Clone(hc.Remove), Forward: slices.Clone(hc.Forward)}
+}
+
+// Clone makes a deep copy of the args, so that the clone can be updated without changing the original, and by
+// concurrent requests. The Delay is the only part that is shared, because it's the one stateful piece of the args
+// (the number of times it's applied is counted down).
 func (a *ToolCallArgs) Clone() *ToolCallArgs {
+	if a == nil {
+		return nil
+	}
 	args := *a
+	args.Metadata = maps.Clone(a.Metadata)
+	args.ToolDef = maps.Clone(a.ToolDef)
+	args.AgentArgs = maps.Clone(a.AgentArgs)
+	args.ForwardHeaders = slices.Clone(a.ForwardHeaders)
+	args.Headers = CloneHeaders(a.Headers)
+	args.RemoteArgs = a.RemoteArgs.Clone()
 	return &args
 }
 

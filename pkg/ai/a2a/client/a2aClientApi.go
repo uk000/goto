@@ -25,7 +25,6 @@ import (
 	"io"
 	"maps"
 	"net/http"
-	"reflect"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -41,7 +40,7 @@ func setRoutes(r *mux.Router) {
 	a2aClientRouter := util.PathRouter(a2a, "/client")
 	util.AddRouteWithMultiQ(a2aClientRouter, "/agent/card", fetchAgentCard, [][]string{{"url"}, {"authority"}}, "GET")
 	util.AddRoute(a2aClientRouter, "/agent/{agent}/call", callAgent, "POST")
-	util.AddRoute(a2aClientRouter, "/call/stream", callAgent, "POST")
+	util.AddRoute(a2aClientRouter, "/call/stream", callAgentStream, "POST")
 	util.AddRoute(a2aClientRouter, "/call/result", callAgent, "POST")
 	util.AddRoute(a2aClientRouter, "/call", callAgent, "POST")
 	util.AddRoute(a2aClientRouter, "/push", pushReceiver, "POST")
@@ -61,9 +60,16 @@ func fetchAgentCard(w http.ResponseWriter, r *http.Request) {
 }
 
 func callAgent(w http.ResponseWriter, r *http.Request) {
+	invokeAgent(w, r, false)
+}
+
+func callAgentStream(w http.ResponseWriter, r *http.Request) {
+	invokeAgent(w, r, true)
+}
+
+func invokeAgent(w http.ResponseWriter, r *http.Request, stream bool) {
 	call := &AgentCall{}
 	name := util.GetStringParamValue(r, "agent")
-	stream := strings.Contains(r.RequestURI, "stream")
 	port := util.GetRequestOrListenerPortNum(r)
 	err := util.ReadJsonOrYamlPayloadFromBody(r.Body, &call)
 	if err != nil {
@@ -74,6 +80,7 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 		call.Name = name
 	}
 	call.Prepare()
+	call.NonNil()
 	output := map[string]map[string]any{}
 	msg := ""
 	result, err := CallAgent(r.Context(), port, call, streamAgentResponse(call.Name, stream, output, w, r), r.Header)
@@ -105,15 +112,22 @@ func callAgent(w http.ResponseWriter, r *http.Request) {
 	} else {
 		msg = fmt.Sprintf("Invoked agent [%s] successfully on URL [%s] with input [%s]", call.Name, call.AgentURL, call.Message)
 	}
+	if status < 100 || status > 999 {
+		// There is no status of the agent when the request didn't get a response from it.
+		status = http.StatusBadGateway
+	}
 	w.WriteHeader(status)
 	util.AddLogMessage(msg, r)
 	if stream {
 		util.WriteJsonPayload(w, headers)
 		util.AddLogMessage(msg, r)
 	} else {
+		if headers == nil {
+			headers = map[string]any{}
+		}
 		for _, upOut := range output {
 			for k, v := range upOut {
-				if strings.Contains(k, "headers") || strings.Contains(k, "Headers") && v != nil && !reflect.ValueOf(v).IsNil() {
+				if strings.Contains(k, "headers") || strings.Contains(k, "Headers") && !util.IsNil(v) {
 					if upstreamHeaders, ok := v.(map[string]any); ok {
 						maps.Copy(headers, upstreamHeaders)
 					}
@@ -140,6 +154,9 @@ func streamAgentResponse(agent string, stream bool, output map[string]map[string
 			}
 			if data != nil {
 				util.WriteJsonPayload(w, data)
+			} else if !util.IsNil(other) {
+				// The structured data of a stream is given as other data.
+				util.WriteJsonPayload(w, other)
 			}
 			fw.Flush()
 			msg := fmt.Sprintf("Received stream response from agent [%s][%s], response: %s", agent, id, msg)
@@ -156,7 +173,7 @@ func streamAgentResponse(agent string, stream bool, output map[string]map[string
 				} else {
 					output[id][msg] = data
 				}
-			} else if other != nil && !reflect.ValueOf(other).IsNil() {
+			} else if !util.IsNil(other) {
 				output[id][msg] = other
 			} else if msg != "" {
 				messages = append(messages, msg)

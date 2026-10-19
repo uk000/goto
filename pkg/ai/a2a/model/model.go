@@ -25,9 +25,19 @@ type Message struct {
 	*goa2a.Message
 }
 
+// Text returns the text of the first text part of the message. The parts are values when an agent builds a
+// message, and pointers when a message is decoded, so both are read.
 func (m *Message) Text() string {
+	if m == nil || m.Message == nil {
+		return ""
+	}
 	for _, part := range m.Parts {
-		if textPart, ok := part.(*protocol.TextPart); ok {
+		switch textPart := part.(type) {
+		case *protocol.TextPart:
+			if textPart != nil {
+				return textPart.Text
+			}
+		case protocol.TextPart:
 			return textPart.Text
 		}
 	}

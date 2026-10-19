@@ -19,6 +19,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	aicommon "goto/pkg/ai/common"
 	"goto/pkg/constants"
@@ -53,12 +54,16 @@ func NewToolContext(ms *util.MCPRequestStore, t *MCPTool, req *gomcp.CallToolReq
 	if args == nil {
 		args = aicommon.NewCallArgs()
 	}
-	if t.Behavior.Remote && args.RemoteArgs == nil {
+	if args.RemoteArgs == nil {
 		args.RemoteArgs = aicommon.NewCallArgs()
+	}
+	sessionID := ""
+	if req.Session != nil {
+		sessionID = req.Session.ID()
 	}
 	tctx := &ToolContext{
 		MCPTool:        t,
-		sessionID:      req.Session.ID(),
+		sessionID:      sessionID,
 		listener:       ms.RS.ListenerLabel,
 		rs:             ms.RS,
 		ms:             ms,
@@ -117,8 +122,11 @@ func (tctx *ToolContext) AddData(data any, json bool) {
 	}
 }
 
+// Log keeps the message of the call. A message that has no args is not a format, so a "%" in it stays as it is.
 func (tctx *ToolContext) Log(msg string, args ...any) string {
-	msg = fmt.Sprintf(msg, args...)
+	if len(args) > 0 {
+		msg = fmt.Sprintf(msg, args...)
+	}
 	tctx.log = append(tctx.log, msg)
 	return msg
 }
@@ -143,7 +151,13 @@ func (tctx *ToolContext) applyDelay() {
 }
 
 func getRequestHeaders(ctx context.Context, req *gomcp.CallToolRequest, rs *util.RequestStore) http.Header {
-	headers := req.Extra.Header
+	var headers http.Header
+	if req.Extra != nil && req.Extra.Header != nil {
+		// A copy, since the request is served while the headers are read, and the ones that are added below are not the
+		// ones of the client.
+		headers = req.Extra.Header.Clone()
+		headers.Del(headerRequestKey)
+	}
 	if rs != nil {
 		if headers != nil {
 			rs.RequestHeaders = headers
@@ -161,23 +175,43 @@ func getRequestHeaders(ctx context.Context, req *gomcp.CallToolRequest, rs *util
 	return headers
 }
 
-func parseArgs(raw json.RawMessage) (args *aicommon.ToolCallArgs, err error) {
-	if len(raw) > 0 {
-		args = aicommon.NewCallArgs()
-		err = json.Unmarshal([]byte(raw), &args)
+// parseArgs reads the args of a call. A call with no args has the default ones.
+func parseArgs(raw json.RawMessage) (*aicommon.ToolCallArgs, error) {
+	args := aicommon.NewCallArgs()
+	if len(raw) == 0 {
+		return args, nil
 	}
-	if err == nil {
-		args.ToolDef = map[string]any{}
-		err = json.Unmarshal([]byte(raw), &args.ToolDef)
+	if err := json.Unmarshal(raw, args); err != nil {
+		return nil, err
 	}
-	return
+	args.ToolDef = map[string]any{}
+	if err := json.Unmarshal(raw, &args.ToolDef); err != nil {
+		return nil, err
+	}
+	return args, nil
+}
+
+var errNoSession = errors.New("the call has no client session")
+
+// session gives the session of the client that the call came from. A call that didn't come from a client, like the
+// one of the admin API, has none.
+func (tctx *ToolContext) session() (*gomcp.ServerSession, error) {
+	if tctx.req == nil || tctx.req.Session == nil {
+		return nil, errNoSession
+	}
+	return tctx.req.Session, nil
 }
 
 func notifyClient(ctx context.Context, params gomcp.Params, msg string, session *gomcp.ServerSession, meta gomcp.Meta) {
+	if session == nil {
+		return
+	}
 	np := &gomcp.ProgressNotificationParams{
-		Meta:          meta,
-		ProgressToken: params.GetMeta()["progressToken"],
-		Message:       msg,
+		Meta:    meta,
+		Message: msg,
+	}
+	if params != nil {
+		np.ProgressToken = params.GetMeta()["progressToken"]
 	}
 	session.NotifyProgress(ctx, np)
 }

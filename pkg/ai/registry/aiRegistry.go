@@ -19,6 +19,7 @@ package registry
 import (
 	a2amodel "goto/pkg/ai/a2a/model"
 	mcpserver "goto/pkg/ai/mcp/server"
+	"maps"
 	"sync"
 )
 
@@ -74,7 +75,16 @@ func (r *AgentRegistry) AddAgents(agents []*a2amodel.Agent, port int) {
 	}
 }
 
+// isRegistrable tells whether the agent has a card with a name, which is what the registry keys agents by.
+func isRegistrable(agent *a2amodel.Agent) bool {
+	return agent != nil && agent.Card != nil && agent.Card.Name != ""
+}
+
+// AddAgent registers the agent under its card name and the port. An agent without a named card is ignored.
 func (r *AgentRegistry) AddAgent(agent *a2amodel.Agent, port int) {
+	if !isRegistrable(agent) {
+		return
+	}
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	if r.Agents[agent.Card.Name] == nil {
@@ -83,16 +93,36 @@ func (r *AgentRegistry) AddAgent(agent *a2amodel.Agent, port int) {
 	r.Agents[agent.Card.Name][port] = agent
 }
 
+// GetAgents returns the agents of the given name by port. The map is a copy that the caller owns, so that it doesn't
+// change (or race) with the registry.
 func (r *AgentRegistry) GetAgents(name string) map[int]*a2amodel.Agent {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
-	return r.Agents[name]
+	return maps.Clone(r.Agents[name])
+}
+
+// snapshot returns a copy of the registry: agents by name, and by port.
+func (r *AgentRegistry) snapshot() map[string]map[int]*a2amodel.Agent {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	agents := make(map[string]map[int]*a2amodel.Agent, len(r.Agents))
+	for name, byPort := range r.Agents {
+		agents[name] = maps.Clone(byPort)
+	}
+	return agents
+}
+
+// clearAll empties the registry, and returns the number of agent names that were registered.
+func (r *AgentRegistry) clearAll() int {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	count := len(r.Agents)
+	r.Agents = map[string]map[int]*a2amodel.Agent{}
+	return count
 }
 
 func (r *AgentRegistry) Clear() {
-	r.lock.Lock()
-	defer r.lock.Unlock()
-	r.Agents = map[string]map[int]*a2amodel.Agent{}
+	r.clearAll()
 }
 
 func (r *AgentRegistry) RemoveAgent(name string) {

@@ -17,6 +17,7 @@
 package mcpserver
 
 import (
+	"encoding/json"
 	"fmt"
 	"goto/pkg/server/response/payload"
 	"goto/pkg/util"
@@ -58,11 +59,28 @@ func (m *MCPComponent) SetName(name string) {
 	m.BuildLabel()
 }
 
+// BuildLabel builds the label of the component, which has the ID of its server. A component that isn't added to a server
+// yet doesn't have one.
 func (m *MCPComponent) BuildLabel() {
-	m.Label = fmt.Sprintf("%s/%s/%s", m.Server.ID, m.Kind, m.Name)
+	serverID := ""
+	if m.Server != nil {
+		serverID = m.Server.ID
+	}
+	m.Label = fmt.Sprintf("%s/%s/%s", serverID, m.Kind, m.Name)
 }
 
+// SetPayload sets what the component answers with. A body that is meant to be JSON but isn't is not lost: it is kept as
+// the "data" of a JSON payload, as the text that it is.
 func (m *MCPComponent) SetPayload(b []byte, isJSON, isStream bool, streamCount int, delayMin, delayMax time.Duration, delayCount int) {
+	if isJSON && len(b) > 0 && !json.Valid(b) {
+		wrapped := util.JSONFromMap(map[string]any{"data": string(b)})
+		if isStream {
+			m.Response = payload.NewStreamJSONPayload([]util.JSON{wrapped}, nil, streamCount, delayMin, delayMax, delayCount)
+		} else {
+			m.Response = payload.NewJSONPayload(wrapped, nil, delayMin, delayMax, delayCount)
+		}
+		return
+	}
 	if isStream {
 		if isJSON {
 			m.Response = payload.NewStreamJSONPayload(nil, b, streamCount, delayMin, delayMax, delayCount)
@@ -73,8 +91,5 @@ func (m *MCPComponent) SetPayload(b []byte, isJSON, isStream bool, streamCount i
 		m.Response = payload.NewJSONPayload(nil, b, delayMin, delayMax, delayCount)
 	} else {
 		m.Response = payload.NewRawPayload(b, "", delayMin, delayMax, delayCount)
-	}
-	if m.Response == nil {
-		m.Response = payload.NewJSONPayload(util.JSONFromMap(map[string]any{"data": string(b)}), nil, delayMin, delayMax, delayCount)
 	}
 }

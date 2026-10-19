@@ -24,6 +24,7 @@ import (
 	"goto/pkg/server/response/payload"
 	"goto/pkg/types"
 	"net/http"
+	"sync"
 	"sync/atomic"
 
 	a2aproto "trpc.group/trpc-go/trpc-a2a-go/protocol"
@@ -47,11 +48,14 @@ type Agent struct {
 	Card      *trpcserver.AgentCard `yaml:"card" json:"card"`
 	Behavior  *AgentBehavior        `yaml:"behavior,omitempty" json:"behavior,omitempty"`
 	Config    *AgentConfig          `yaml:"config,omitempty" json:"config,omitempty"`
-	Handler   http.Handler
+	Handler   http.Handler          `yaml:"-" json:"-"`
 	URI       string                `yaml:"-" json:"-"`
 	Server    *trpcserver.A2AServer `yaml:"-" json:"-"`
 	Port      int                   `yaml:"-" json:"-"`
 	Streaming bool                  `yaml:"-" json:"-"`
+
+	// payloadLock guards Config.ResponsePayload, which the admin API replaces while the agent is serving.
+	payloadLock sync.RWMutex
 }
 
 type AgentBehavior struct {
@@ -76,10 +80,18 @@ type DelegateConfig struct {
 	Parallel bool                          `yaml:"parallel,omitempty" json:"parallel,omitempty"`
 }
 
+// DelegateTracker counts the calls made to a delegate and the responses received from it. It is updated by the
+// goroutines that run the delegates, and reported by the admin API at the same time.
 type DelegateTracker struct {
-	CallCount     atomic.Int32 `json:"callCount"`
-	ResponseCount atomic.Int32 `json:"responseCount"`
-	Done          bool         `json:"done"`
+	CallCount     atomic.Int32
+	ResponseCount atomic.Int32
+	done          atomic.Bool
+}
+
+type delegateTrackerJSON struct {
+	CallCount     int32 `json:"callCount"`
+	ResponseCount int32 `json:"responseCount"`
+	Done          bool  `json:"done"`
 }
 
 type DelegateToolCall struct {
@@ -122,10 +134,27 @@ type HTTPCall struct {
 }
 
 func NewDelegateTracker() *DelegateTracker {
-	return &DelegateTracker{
-		CallCount:     atomic.Int32{},
-		ResponseCount: atomic.Int32{},
+	return &DelegateTracker{}
+}
+
+// MarshalJSON reports the counts, as the atomics that hold them have no JSON form of their own.
+func (t *DelegateTracker) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&delegateTrackerJSON{
+		CallCount:     t.CallCount.Load(),
+		ResponseCount: t.ResponseCount.Load(),
+		Done:          t.done.Load(),
+	})
+}
+
+func (t *DelegateTracker) UnmarshalJSON(b []byte) error {
+	v := &delegateTrackerJSON{}
+	if err := json.Unmarshal(b, v); err != nil {
+		return err
 	}
+	t.CallCount.Store(v.CallCount)
+	t.ResponseCount.Store(v.ResponseCount)
+	t.done.Store(v.Done)
+	return nil
 }
 
 func (t *DelegateTracker) IncrementCall() {
@@ -137,7 +166,11 @@ func (t *DelegateTracker) IncrementResponse() {
 }
 
 func (t *DelegateTracker) Finish() {
-	t.Done = true
+	t.done.Store(true)
+}
+
+func (t *DelegateTracker) IsDone() bool {
+	return t.done.Load()
 }
 
 func (a *Agent) GetCard() *trpcserver.AgentCard {
@@ -150,10 +183,49 @@ func (a *Agent) SetPayload(b []byte) error {
 	if err != nil {
 		return err
 	}
+	a.payloadLock.Lock()
+	defer a.payloadLock.Unlock()
+	if a.Config == nil {
+		a.Config = &AgentConfig{}
+	}
 	a.Config.ResponsePayload = p
 	return nil
 }
 
+// GetPayload returns the response payload of the agent, which is nil if there is none.
+func (a *Agent) GetPayload() *payload.Payload {
+	a.payloadLock.RLock()
+	defer a.payloadLock.RUnlock()
+	if a.Config == nil {
+		return nil
+	}
+	return a.Config.ResponsePayload
+}
+
+type agentReport struct {
+	ID       string                `json:"id"`
+	Card     *trpcserver.AgentCard `json:"card"`
+	Behavior *AgentBehavior        `json:"behavior,omitempty"`
+	Config   *AgentConfig          `json:"config,omitempty"`
+}
+
+// MarshalJSON reports the agent. The payload of an agent is replaced by the admin API while the agent serves and is
+// reported, so the config is copied with the lock held.
+func (a *Agent) MarshalJSON() ([]byte, error) {
+	a.payloadLock.RLock()
+	report := agentReport{ID: a.ID, Card: a.Card, Behavior: a.Behavior}
+	if a.Config != nil {
+		config := *a.Config
+		report.Config = &config
+	}
+	a.payloadLock.RUnlock()
+	return json.Marshal(report)
+}
+
 func (a *Agent) Serve(w http.ResponseWriter, r *http.Request) {
+	if a.Handler == nil {
+		http.Error(w, "agent is not ready to serve", http.StatusServiceUnavailable)
+		return
+	}
 	a.Handler.ServeHTTP(w, r)
 }

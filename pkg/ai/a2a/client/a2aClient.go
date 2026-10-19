@@ -25,6 +25,7 @@ import (
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"goto/pkg/util/timeline"
+	timelinepkg "goto/pkg/util/timeline"
 	"log"
 	"net/http"
 	"slices"
@@ -97,14 +98,24 @@ func (ac *A2AClient) newSession(ctx context.Context, port int, callerId, authori
 	return newSession(ac, ctx, port, callerId, authority, card, call, inHeaders, timeline)
 }
 
+// FetchAgentCard fetches the card of the agent at the URL. The call is optional, it tells how to reach the agent.
 func FetchAgentCard(ctx context.Context, url, authority string, call *AgentCall, inHeaders http.Header) (card *goa2aserver.AgentCard, err error) {
 	port := util.GetContextPort(ctx)
-	client := NewA2AClient(port, "", call.H2, call.TLS, call.Authority, call.RequestTimeoutD)
+	var h2, tls bool
+	var callAuthority string
+	var requestTimeout time.Duration
+	if call != nil {
+		h2, tls, callAuthority, requestTimeout = call.H2, call.TLS, call.Authority, call.RequestTimeoutD
+	}
+	client := NewA2AClient(port, "", h2, tls, callAuthority, requestTimeout)
 	card, err = client.loadAgentCard(ctx, url, authority, call, inHeaders)
 	return
 }
 
 func CallAgent(ctx context.Context, port int, call *AgentCall, callback AgentResultsCallback, inHeaders http.Header) (*A2AResult, error) {
+	if call == nil {
+		return nil, fmt.Errorf("Missing Agent Call spec/URL: %+v", call)
+	}
 	return CallAgentWithTimeline(ctx, port, call, callback, inHeaders, timeline.NewTimeline(port, call.Name, nil, nil, inHeaders, nil, nil, nil))
 }
 
@@ -113,9 +124,16 @@ func CallAgentWithTimeline(ctx context.Context, port int, call *AgentCall, callb
 	if call == nil || call.CardURL == "" {
 		return nil, fmt.Errorf("Missing Agent Call spec/URL: %+v", call)
 	}
+	if timeline == nil {
+		timeline = timelinepkg.NewTimeline(port, call.Name, nil, nil, inHeaders, nil, nil, nil)
+	}
 	card, err = FetchAgentCard(ctx, call.CardURL, call.Authority, call, inHeaders)
 	if !util.IsNil(err) || card == nil {
-		return nil, fmt.Errorf("Error fetching agent card from url [%s], authority [%s]: %s", call.AgentURL, call.Authority, err.Error())
+		reason := "no card"
+		if !util.IsNil(err) {
+			reason = err.Error()
+		}
+		return nil, fmt.Errorf("Error fetching agent card from url [%s], authority [%s]: %s", call.CardURL, call.Authority, reason)
 	}
 	var agentURL string
 	if call.AgentURL != "" {
@@ -129,9 +147,12 @@ func CallAgentWithTimeline(ctx context.Context, port int, call *AgentCall, callb
 	if !util.IsNil(err) {
 		return nil, fmt.Errorf("Failed to load agent card with error [%s]. Agent Call: %+v", err.Error(), call)
 	}
-	err = session.CallAgent(call.Message, call.Args, callback, nil, nil)
 	result = session.Result
-	return
+	// The error of the call is a *AgentError, which must not make a nil error of the interface when there is none.
+	if agentErr := session.CallAgent(call.Message, call.Args, callback, nil, nil); agentErr != nil {
+		return result, agentErr
+	}
+	return result, nil
 }
 
 func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, call *AgentCall, inHeaders http.Header) (card *goa2aserver.AgentCard, err error) {

@@ -26,6 +26,7 @@ import (
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"goto/pkg/util/timeline"
+	"net/http"
 	"reflect"
 	"strings"
 	"time"
@@ -125,11 +126,47 @@ func ParseTool(payload []byte) (tool *MCPTool, err error) {
 	return
 }
 
+// isNilSchema tells if the schema is not given, whatever it is made of: a schema that is not a pointer or a map (e.g.
+// a string in the payload of a tool) is given, even if it is not a valid one.
+func isNilSchema(schema any) bool {
+	if schema == nil {
+		return true
+	}
+	switch v := reflect.ValueOf(schema); v.Kind() {
+	case reflect.Map, reflect.Pointer, reflect.Slice, reflect.Interface, reflect.Func, reflect.Chan:
+		return v.IsNil()
+	}
+	return false
+}
+
+// validateObjectSchema checks that the schema is the one of an object, which is what the input of a tool is. The SDK
+// doesn't take a tool otherwise, it panics.
+func validateObjectSchema(schema any) error {
+	if s, ok := schema.(*jsonschema.Schema); ok {
+		if s.Type != "object" {
+			return fmt.Errorf("Tool schema must have type \"object\", got [%s]", s.Type)
+		}
+		return nil
+	}
+	b, err := json.Marshal(schema)
+	if err != nil {
+		return fmt.Errorf("Invalid tool schema: %s", err.Error())
+	}
+	m := map[string]any{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return fmt.Errorf("Tool schema must be an object: %s", err.Error())
+	}
+	if m["type"] != "object" {
+		return fmt.Errorf("Tool schema must have type \"object\", got [%v]", m["type"])
+	}
+	return nil
+}
+
 func processTool(tool *MCPTool) error {
 	if tool.Tool == nil {
 		return fmt.Errorf("Missing tool definition")
 	}
-	if tool.Tool.InputSchema == nil || reflect.ValueOf(tool.Tool.InputSchema).IsNil() {
+	if isNilSchema(tool.Tool.InputSchema) {
 		if tool.Schema == "" {
 			return fmt.Errorf("Missing tool schema")
 		}
@@ -141,11 +178,18 @@ func processTool(tool *MCPTool) error {
 		}
 		tool.Tool.InputSchema = ts
 	}
+	if err := validateObjectSchema(tool.Tool.InputSchema); err != nil {
+		return err
+	}
 	tool.Kind = KindTools
 	if tool.Name == "" {
 		tool.Name = tool.Tool.Name
 	}
 	tool.Name = strings.ReplaceAll(tool.Name, "\"", "")
+	if tool.Name == "" {
+		return fmt.Errorf("Missing tool name")
+	}
+	tool.Tool.Name = tool.Name
 	if err := tool.validateBehavior(); err != nil {
 		return err
 	}
@@ -155,6 +199,7 @@ func processTool(tool *MCPTool) error {
 func (t *MCPTool) validateBehavior() error {
 	if (t.Behavior.Fetch && (t.Config.RemoteTool == nil || t.Config.RemoteTool.URL == "")) ||
 		(t.Behavior.Remote && (t.Config.RemoteTool == nil || t.Config.RemoteTool.URL == "")) ||
+		(t.IsProxy && (t.Config.RemoteTool == nil || t.Config.RemoteTool.URL == "")) ||
 		(t.Behavior.MultiRemote && len(t.Config.MultiRemote) == 0) ||
 		(t.Behavior.Agents && (t.Config.Agent == nil || t.Config.Agent.AgentURL == "")) {
 		return errors.New("Incomplete remote configs")
@@ -214,8 +259,11 @@ func (t *MCPTool) prepareBehavior() error {
 }
 
 func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (result *gomcp.CallToolResult, err error) {
-	sessionID := GetMCPSessionID(req.Extra.Header)
-	ms := t.Server.GetMCPSessionStore(sessionID)
+	var header http.Header
+	if req.Extra != nil {
+		header = req.Extra.Header
+	}
+	shared, ms := t.Server.callStoreOf(storeKeyOf(header), ctx)
 	rs := ms.RS
 	isSSE := false
 	if rs.RequestedMCPTool != "" && !strings.EqualFold(rs.RequestedMCPTool, t.Name) && !strings.Contains(t.Name, "toolcall") {
@@ -239,6 +287,9 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 	// rs.ResponseWriter.Header().Add(constants.HeaderGotoMCPTool, t.Name)
 	// t.notifyClient(t.Log("%s: Received request with Args [%+v] Remote Args [%+v] Headers [%+v]", t.Label, t.args, t.remoteArgs, t.requestHeaders), 0)
 	result, err = t.Behavior.run(tctx)
+	if shared != nil && ms.ForcedStatus > 0 {
+		setForcedStatus(shared, ms.ForcedStatus)
+	}
 	if result == nil {
 		result = &gomcp.CallToolResult{}
 	}

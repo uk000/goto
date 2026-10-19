@@ -107,8 +107,8 @@ func (ab *AgentBehaviorFederate) DoStream(aCtx *AgentContext) (string, error) {
 		close(aCtx.localProgress)
 		resultsWG.Wait()
 	}
-	if !util.IsNil(aCtx.err) {
-		return "Agent federation done with error \u274C", aCtx.err
+	if err := aCtx.getErr(); !util.IsNil(err) {
+		return "Agent federation done with error \u274C", err
 	}
 	return "Agent federation done \U000026F3", nil
 }
@@ -164,6 +164,10 @@ func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentContext, runWG, resultsWG 
 			if resultsWG != nil {
 				resultsWG.Add(1)
 				go ab.processUpstreamUpdates(aCtx, dCtx, resultsWG)
+			} else {
+				// Nobody reads the progress of a unary call, which would stop the call after the first few updates.
+				// Its results are collected by the callback instead.
+				dCtx.upstreamProgress = nil
 			}
 			agentsWG.Add(1)
 			if parallel {
@@ -188,7 +192,7 @@ func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentContext, dCtx *DelegateCal
 	defer agentsWG.Done()
 	result, err := ab.invokeAgent(aCtx, dCtx)
 	if !util.IsNil(err) {
-		aCtx.err = err
+		aCtx.setErr(err)
 		msg := fmt.Sprintf("Failed to invoke Agent [%s] at URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, err.Error())
 		aCtx.AddEvent(msg)
 		log.Println(msg)
@@ -199,21 +203,9 @@ func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentContext, dCtx *DelegateCal
 		log.Println(msg)
 	}
 	if result != nil {
-		aCtx.sendData("Result", result.ToObject())
-		aCtx.remoteGotos = result.RemoteGotos
-		if result.LastRemoteHeaders != nil {
-			for k, v := range result.LastRemoteHeaders {
-				aCtx.upstreamHeaders[k] = v
-			}
-		}
-		aCtx.upstreamHeaders["UpstreamHeaders"] = map[string]any{
-			fmt.Sprintf("%s (A2A)", dCtx.name): map[string]any{
-				"RequestHeaders":  result.LastRequestHeaders,
-				"ResponseHeaders": result.LastResponseHeaders,
-			},
-		}
-		aCtx.upstreamStatuses = result.UpstreamStatuses
-		aCtx.timeline.Status = result.LastResponseStatus
+		aCtx.sendData("Result", result.Snapshot())
+		aCtx.recordUpstream("A2A", dCtx.name, result.RemoteGotos, result.LastRemoteHeaders,
+			result.LastRequestHeaders, result.LastResponseHeaders, result.UpstreamStatuses, result.LastResponseStatus)
 	}
 }
 
@@ -221,7 +213,7 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 	defer toolsWG.Done()
 	result, respHeaders, err := ab.invokeMCP(aCtx, dCtx)
 	if !util.IsNil(err) {
-		aCtx.err = err
+		aCtx.setErr(err)
 		msg := fmt.Sprintf("Failed to invoke MCP tool [%s] at URL [%s] with error: %s", dCtx.toolCall.Tool, dCtx.toolCall.URL, err.Error())
 		aCtx.AddEvent(msg)
 		log.Println(msg)
@@ -229,7 +221,6 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 	if respHeaders != nil {
 		msg := fmt.Sprintf("MCP tool [%s] sent response headers", dCtx.toolCall.Tool)
 		aCtx.AddEvent(msg)
-		// aCtx.AddData("UpstreamHeaders", map[string]any{fmt.Sprintf("UpstreamHeaders[%s]", dCtx.toolCall.Tool): respHeaders}, true)
 	}
 	if result != nil {
 		msg := fmt.Sprintf("Successfully invoked MCP tool [%s] at URL [%s]. Call Count [%d], Response Count [%d]",
@@ -237,27 +228,9 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 		aCtx.AddEvent(msg)
 		log.Println(msg)
 		aCtx.sendData("Result", result.ToObject())
-		aCtx.remoteGotos = result.RemoteGotos
-		if result.LastRemoteHeaders != nil {
-			for k, v := range result.LastRemoteHeaders {
-				aCtx.upstreamHeaders[k] = v
-			}
-		}
-		aCtx.upstreamHeaders["UpstreamHeaders"] = map[string]any{
-			fmt.Sprintf("%s (MCP)", dCtx.name): map[string]any{
-				"RequestHeaders":  result.LastRequestHeaders,
-				"ResponseHeaders": result.LastResponseHeaders,
-			},
-		}
-		aCtx.upstreamStatuses = result.UpstreamStatuses
-		if result.LastResponseStatus > 0 {
-			aCtx.timeline.Status = result.LastResponseStatus
-			if aCtx.forcedStatus == 0 {
-				aCtx.forcedStatus = result.LastResponseStatus
-			}
-		}
+		aCtx.recordUpstream("MCP", dCtx.name, result.RemoteGotos, result.LastRemoteHeaders,
+			result.LastRequestHeaders, result.LastResponseHeaders, result.UpstreamStatuses, result.LastResponseStatus)
 	}
-	//processMCPCallResults(dCtx.toolCall.Tool, remoteResult, dCtx.results, dCtx.upstreamProgress, ab.agent.Streaming)
 }
 
 func (ab *AgentBehaviorFederate) prepareArgs(args map[string]any, tcArgs *aicommon.ToolCallArgs, forwardHeaders []string) *aicommon.ToolCallArgs {
@@ -279,16 +252,22 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 	}
 	client := a2aclient.NewA2AClient(ab.agent.Port, ab.agent.ID, dCtx.agentCall.H2, dCtx.agentCall.TLS, dCtx.agentCall.Authority, dCtx.agentCall.RequestTimeoutD)
 	if client == nil {
+		dCtx.closeUpstreamProgress()
 		return nil, errors.New("failed to create A2A client")
 	}
 	session, err := client.ConnectWithAgentCard(aCtx.ctx, dCtx.agentCall, dCtx.agentCall.CardURL, dCtx.agentCall.Authority, aCtx.requestHeaders, aCtx.timeline)
 	if !util.IsNil(err) {
+		// The call that closes the progress is not made, and what reads the progress waits for that.
+		dCtx.closeUpstreamProgress()
 		return nil, fmt.Errorf("Failed to load agent card for Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.CardURL, err.Error())
 	}
 	agentResults := map[string][]any{}
 	var unaryCallback a2aclient.AgentResultsCallback
 	if dCtx.upstreamProgress == nil {
+		var callbackLock sync.Mutex
 		unaryCallback = func(id, aOutput string, data any) {
+			callbackLock.Lock()
+			defer callbackLock.Unlock()
 			agentResults[id] = append(agentResults[id], aOutput)
 			agentResults[id] = append(agentResults[id], data)
 		}
@@ -299,11 +278,10 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 	}
 	err = session.CallAgent(agentMessage, aCtx.inputData, unaryCallback, aCtx.localProgress, dCtx.upstreamProgress)
 	if aCtx.agentResults != nil && len(agentResults) > 0 {
-		aCtx.agentResults[dCtx.agentCall.Name] = agentResults
+		aCtx.setAgentResults(dCtx.agentCall.Name, agentResults)
 	}
 	if session.Result != nil {
 		result = session.Result
-		aCtx.forcedStatus = session.Result.LastResponseStatus
 	}
 	if !util.IsNil(err) {
 		msg := fmt.Sprintf("Failed to call Agent [%s] URL [%s] with error: %s", dCtx.agentCall.Name, dCtx.agentCall.AgentURL, err.Error())
@@ -329,14 +307,6 @@ func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCal
 	mcpResult, err = session.CallTool(args)
 	if mcpResult != nil {
 		respHeaders = mcpResult.LastResponseHeaders
-		if mcpResult.UpstreamStatuses != nil {
-			aCtx.upstreamStatuses = mcpResult.UpstreamStatuses
-		} else {
-			aCtx.upstreamStatuses[dCtx.name] = mcpResult.LastResponseStatus
-		}
-		aCtx.timeline.UpstreamStatuses = aCtx.upstreamStatuses
-		aCtx.rs.UpstreamStatuses = aCtx.upstreamStatuses
-		aCtx.forcedStatus = mcpResult.LastResponseStatus
 	}
 	return
 }
@@ -361,13 +331,19 @@ outer:
 		select {
 		case <-aCtx.ctx.Done():
 			aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Stream was cancelled")
+			// The ones that send the progress wait for it to be read until they are done.
+			for range aCtx.localProgress {
+			}
 			break outer
 		case pair, ok := <-aCtx.localProgress:
 			if !ok {
 				break outer
 			}
 			if err := processResult(pair); err != nil {
-				aCtx.err = err
+				aCtx.setErr(err)
+				// The ones that send the progress wait for it to be read until they are done.
+				for range aCtx.localProgress {
+				}
 				break outer
 			}
 		}
@@ -383,6 +359,9 @@ outer:
 		select {
 		case <-aCtx.ctx.Done():
 			aCtx.sendTaskStatusUpdate(a2aproto.TaskStateWorking, "Stream was cancelled")
+			// The call that sends the progress waits for it to be read until it is done.
+			for range dCtx.upstreamProgress {
+			}
 			break outer
 		case p, ok := <-dCtx.upstreamProgress:
 			if !ok {
@@ -396,7 +375,10 @@ outer:
 					err = aCtx.notifyUpdate(fmt.Sprintf("%s[%s]: %s", dCtx.name, dCtx.url, p.Left), nil, false)
 				}
 				if err != nil {
-					aCtx.err = err
+					aCtx.setErr(err)
+					// The call that sends the progress waits for it to be read until it is done.
+					for range dCtx.upstreamProgress {
+					}
 					break outer
 				} else {
 					dCtx.tracker.IncrementResponse()
@@ -418,7 +400,7 @@ func processMCPCallResults(key string, mcpResult *mcpclient.MCPResult, output ma
 		}
 		for i, callResult := range mcpResult.CallResults {
 			if !isStreamed {
-				callId := fmt.Sprintf("%s.%d", key, i)
+				callId := fmt.Sprintf("%s.%s", key, i)
 				processRemoteContent(callId, callResult.Content, output, resultsChan)
 				processRemoteContent(callId, callResult.Data, output, resultsChan)
 			}
@@ -524,7 +506,7 @@ func (ab *AgentBehaviorFederate) prepareDelegates() error {
 	var nilToolCall *model.DelegateToolCall
 	var nilAgentCall *model.DelegateAgentCall
 	for name, a := range d.Agents {
-		if a == nil {
+		if a == nil || a.AgentCall == nil {
 			return fmt.Errorf("Missing agent call spec for [%s]", name)
 		}
 		a.Tracker = model.NewDelegateTracker()
@@ -541,7 +523,7 @@ func (ab *AgentBehaviorFederate) prepareDelegates() error {
 		}
 	}
 	for name, t := range d.Tools {
-		if d == nil {
+		if t == nil || t.ToolCall == nil {
 			return fmt.Errorf("Missing tool call spec for [%s]", name)
 		}
 		if len(t.Triggers) == 0 {
@@ -557,7 +539,10 @@ func (ab *AgentBehaviorFederate) prepareDelegates() error {
 			}
 		}
 	}
-	for _, h := range d.HTTP {
+	for name, h := range d.HTTP {
+		if h == nil {
+			return fmt.Errorf("Missing http call spec for [%s]", name)
+		}
 		h.Tracker = model.NewDelegateTracker()
 	}
 	if d.MaxCalls <= 0 {

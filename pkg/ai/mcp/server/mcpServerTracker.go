@@ -36,6 +36,10 @@ var (
 func trackPortServer[T any](port int, server string, m TrackerByPortServer[T]) map[string]T {
 	trackLock.Lock()
 	defer trackLock.Unlock()
+	return trackPortServerLocked(port, server, m)
+}
+
+func trackPortServerLocked[T any](port int, server string, m TrackerByPortServer[T]) map[string]T {
 	if m[port] == nil {
 		m[port] = map[string]map[string]T{}
 	}
@@ -48,18 +52,16 @@ func trackPortServer[T any](port int, server string, m TrackerByPortServer[T]) m
 func trackAndIncrementPortServer[T int](port int, server, key string, m TrackerByPortServer[T]) {
 	trackLock.Lock()
 	defer trackLock.Unlock()
-	if m[port] == nil {
-		m[port] = map[string]map[string]T{}
-	}
-	if m[port][server] == nil {
-		m[port][server] = map[string]T{}
-	}
-	m[port][server][key]++
+	trackPortServerLocked(port, server, m)[key]++
 }
 
 func getPortServerCount(port int, server, key string, m TrackerByPortServer[int]) int {
 	trackLock.RLock()
 	defer trackLock.RUnlock()
+	return getPortServerCountLocked(port, server, key, m)
+}
+
+func getPortServerCountLocked(port int, server, key string, m TrackerByPortServer[int]) int {
 	if m[port] != nil && m[port][server] != nil {
 		return m[port][server][key]
 	}
@@ -75,17 +77,18 @@ func TrackToolCall(port int, server, sessionID, tool string) {
 	trackAndIncrementPortServer(port, server, sessionID, ToolCallsByPortServerSession)
 }
 
+// TrackToolCallResult counts the result of a call, and keeps the average duration of the calls of the tool. It is done
+// in one go, so the average is of the calls that were counted, whatever other calls finish at the same time.
 func TrackToolCallResult(port int, server, tool string, duration time.Duration, success bool) {
-	if success {
-		trackAndIncrementPortServer(port, server, tool, ToolCallSuccessByPortServer)
-	} else {
-		trackAndIncrementPortServer(port, server, tool, ToolCallFailureByPortServer)
-	}
-	dmap := trackPortServer(port, server, ToolCallDurationByPortServer)
-	successCount := getPortServerCount(port, server, tool, ToolCallSuccessByPortServer)
-	failureCount := getPortServerCount(port, server, tool, ToolCallFailureByPortServer)
-	total := successCount + failureCount
 	trackLock.Lock()
+	defer trackLock.Unlock()
+	if success {
+		trackPortServerLocked(port, server, ToolCallSuccessByPortServer)[tool]++
+	} else {
+		trackPortServerLocked(port, server, ToolCallFailureByPortServer)[tool]++
+	}
+	dmap := trackPortServerLocked(port, server, ToolCallDurationByPortServer)
+	total := getPortServerCountLocked(port, server, tool, ToolCallSuccessByPortServer) +
+		getPortServerCountLocked(port, server, tool, ToolCallFailureByPortServer)
 	dmap[tool] = (dmap[tool]*int64(total-1) + duration.Milliseconds()) / int64(total)
-	trackLock.Unlock()
 }

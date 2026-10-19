@@ -35,6 +35,7 @@ func (t *MCPTool) fetch(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	if tctx.args == nil {
 		tctx.args = aicommon.NewCallArgs()
 	}
+	tctx.args.NonNil()
 	if tctx.args.RemoteArgs.URL != "" {
 		url = tctx.args.RemoteArgs.URL
 	}
@@ -68,7 +69,7 @@ func (t *MCPTool) fetch(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	}
 	req.Header["User-Agent"] = []string{tctx.Label}
 	if authority != "" {
-		req.Host = tctx.args.RemoteArgs.Authority
+		req.Host = authority
 	}
 	if req.Host == "" {
 		req.Host = req.URL.Host
@@ -90,6 +91,7 @@ func (t *MCPTool) fetch(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 		} else {
 			tctx.Log(fmt.Sprintf("Server [%s] fetched response from remote URL [%s]", tctx.Server.GetName(), url))
 			output := util.Read(resp.Body)
+			resp.Body.Close()
 			result.Content = append(result.Content, &gomcp.TextContent{Text: output})
 			results = append(results, output)
 		}

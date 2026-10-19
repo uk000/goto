@@ -18,13 +18,19 @@ package mcpserver
 
 import (
 	registryclient "goto/pkg/registry/client"
+	"sync"
 )
 
 var (
-	MCPRegistryClient *registryclient.RegistryClient
+	MCPRegistryClient  *registryclient.RegistryClient
+	registryClientLock sync.Mutex
 )
 
+// getRegistryClient gives the client of the registry, which is made when it is first needed, by whichever of the
+// resumable calls that run at the same time gets here first.
 func getRegistryClient() *registryclient.RegistryClient {
+	registryClientLock.Lock()
+	defer registryClientLock.Unlock()
 	if MCPRegistryClient == nil {
 		MCPRegistryClient = registryclient.NewRegistryClient()
 	}

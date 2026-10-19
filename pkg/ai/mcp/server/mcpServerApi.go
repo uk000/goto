@@ -25,6 +25,7 @@ import (
 	"goto/pkg/util"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -82,20 +83,26 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(mcpServerRouter, "/status", getStatuses, "GET")
 }
 
+// pathEndsWith tells if the path of the request is the route, which is how the handlers that are the handlers of several
+// routes tell which of them is for the request. The URI of the request can't tell it, since it has the name of the server.
+func pathEndsWith(r *http.Request, route string) bool {
+	return strings.HasSuffix(strings.TrimRight(r.URL.Path, "/"), route)
+}
+
 func getServers(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	all := strings.Contains(r.RequestURI, "all")
-	names := strings.Contains(r.RequestURI, "names")
+	all := pathEndsWith(r, "/servers/all")
+	names := pathEndsWith(r, "/servers/names")
 	name := util.GetStringParamValue(r, "server")
 	yaml := util.IsAcceptYAML(r)
 	if names {
 		util.WriteJsonOrYAMLPayload(w, GetMCPServerNames(), yaml)
 	} else if all {
-		util.WriteJsonOrYAMLPayload(w, PortsServers, yaml)
+		util.WriteJsonOrYAMLPayload(w, (*PortServers)(nil).AllServers(), yaml)
 	} else if name != "" {
 		var server *MCPServer
 		name = strings.ToLower(name)
-		for _, ps := range PortsServers {
+		for _, ps := range allPortServers() {
 			server = ps.GetMCPServer(name)
 			if server != nil {
 				break
@@ -111,7 +118,6 @@ func getServers(w http.ResponseWriter, r *http.Request) {
 		util.WriteJsonOrYAMLPayload(w, GetPortMCPServers(port), yaml)
 	}
 }
-
 func addServers(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	payloads := []*MCPServerPayload{}
@@ -127,6 +133,18 @@ func addServers(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
 		return
+	}
+	for _, p := range payloads {
+		if p == nil || p.Name == "" {
+			sendBadRequest("Failed to add servers, an MCP Server has no name", w, r)
+			return
+		}
+		if p.URIRegex != "" {
+			if _, err := regexp.Compile(p.URIRegex); err != nil {
+				sendBadRequest(fmt.Sprintf("Failed to add servers, MCP Server [%s] has an invalid URI regex: %s", p.Name, err.Error()), w, r)
+				return
+			}
+		}
 	}
 	AddMCPServers(port, payloads)
 	names := []string{}
@@ -161,46 +179,38 @@ func setServerRoute(w http.ResponseWriter, r *http.Request) {
 func configureStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	serverName := util.GetStringParamValue(r, "server")
-	sc, err := StatusManager.ParseStatusConfig(r.Body)
-	msg := ""
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		msg = fmt.Sprintf("Failed to parse status config with error: %s", err.Error())
-		fmt.Fprintln(w, msg)
-	} else {
-		server := GetMCPServer(port, serverName)
-		if server == nil {
-			w.WriteHeader(http.StatusBadRequest)
-			msg = fmt.Sprintf("MCP Server [%s] not configured on any port", serverName)
-		} else {
-			if sc.Match == nil {
-				sc.Match = &status.StatusMatch{}
-			}
-			if sc.Match.URIMatch == nil {
-				sc.Match.URIMatch = &status.StatusURIMatch{}
-			}
-			sc.Match.URIMatch.Exact = server.URI
-		}
-		err = StatusManager.ApplyStatusConfig(port, sc)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			msg = fmt.Sprintf("Failed to apply status config with error: %s", err.Error())
-			fmt.Fprintln(w, msg)
-		} else {
-			msg = fmt.Sprintf("Applied status config: %s", sc.Log("MCP", port))
-			util.WriteJsonPayload(w, sc)
-		}
+	server := GetMCPServer(port, serverName)
+	if server == nil {
+		sendBadRequest(fmt.Sprintf("MCP Server [%s] not configured on any port", serverName), w, r)
+		return
 	}
-	util.AddLogMessage(msg, r)
+	sc, err := StatusManager.ParseStatusConfig(r.Body)
+	if err != nil {
+		sendBadRequest(fmt.Sprintf("Failed to parse status config with error: %s", err.Error()), w, r)
+		return
+	}
+	if sc.Match == nil {
+		sc.Match = &status.StatusMatch{}
+	}
+	if sc.Match.URIMatch == nil {
+		sc.Match.URIMatch = &status.StatusURIMatch{}
+	}
+	sc.Match.URIMatch.Exact = server.URI
+	if err = StatusManager.ApplyStatusConfig(port, sc); err != nil {
+		sendBadRequest(fmt.Sprintf("Failed to apply status config with error: %s", err.Error()), w, r)
+		return
+	}
+	util.WriteJsonPayload(w, sc)
+	util.AddLogMessage(fmt.Sprintf("Applied status config: %s", sc.Log("MCP", port)), r)
 }
-
 func setStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	serverName := util.GetStringParamValue(r, "server")
 	toolName := util.GetStringParamValue(r, "tool")
 	header := util.GetStringParamValue(r, "header")
 	value := util.GetStringParamValue(r, "value")
-	noHeader := strings.Contains(r.RequestURI, "not")
+	// By the route, since the name of a server or of a header can have "not" in it.
+	noHeader := strings.Contains(r.URL.Path, "/header/not/")
 	statusCodes, times, ok := util.GetStatusParam(r)
 	if !ok {
 		util.AddLogMessage("Invalid status", r)
@@ -228,7 +238,8 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		uri = tool.ServerURI
 	}
-	status := StatusManager.SetStatusFor(port, uri, "", header, value, []string{"POST"}, statusCodes, times, noHeader)
+	// The status is for the calls that have the header, or for the ones that don't if it is the "not" route.
+	status := StatusManager.SetStatusFor(port, uri, "", header, value, []string{"POST"}, statusCodes, times, !noHeader)
 	msg := status.Log("MCP", port)
 	util.AddLogMessage(msg, r)
 	w.WriteHeader(http.StatusOK)
@@ -238,37 +249,73 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 func clearStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	serverName := util.GetStringParamValue(r, "server")
-	server := GetMCPServer(port, serverName)
 	msg := ""
-	if server == nil {
+	if serverName == "" {
 		StatusManager.Clear(port, "", "")
 		msg = fmt.Sprintf("Status cleared on port [%d]", port)
+	} else if server := GetMCPServer(port, serverName); server == nil {
+		sendBadRequest(fmt.Sprintf("MCP Server [%s] not configured on any port", serverName), w, r)
+		return
 	} else {
-		StatusManager.Clear(port, server.URI, server.URI)
+		clearServerStatus(port, server)
 		msg = fmt.Sprintf("Status cleared on port [%d] for server [%s]", port, serverName)
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
 
+// clearServerStatus clears the statuses of the URI of the server, and of the URIs of its tools. A status that is for
+// the calls that have a header can't be cleared one by one, only with the ones of the port.
+func clearServerStatus(port int, server *MCPServer) {
+	if server.URI == "" {
+		StatusManager.Clear(port, "", "")
+		return
+	}
+	uris := []string{server.URI}
+	server.lock.RLock()
+	for _, tool := range server.Tools {
+		uris = append(uris, tool.ServerURI)
+	}
+	server.lock.RUnlock()
+	type exactAndPrefix struct{ exact, prefix string }
+	var configs []exactAndPrefix
+	for _, sc := range StatusManager.Snapshot()[port] {
+		if sc.Match == nil || sc.Match.URIMatch == nil || len(sc.Match.HeaderMatches) > 0 {
+			continue
+		}
+		for _, uri := range uris {
+			if strings.EqualFold(sc.Match.URIMatch.Exact, uri) {
+				configs = append(configs, exactAndPrefix{uri, sc.Match.URIMatch.Prefix})
+				break
+			}
+		}
+	}
+	for _, c := range configs {
+		StatusManager.Clear(port, c.exact, c.prefix)
+	}
+}
 func getStatuses(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	serverName := util.GetStringParamValue(r, "server")
-	server := GetMCPServer(port, serverName)
-	if server != nil {
-		status, times := StatusManager.GetStatusFor(port, server.URI, nil, "")
-		msg := fmt.Sprintf("Port [%d] Server [%s] Reporting Status [%d] for [%d] times", port, serverName, status, times)
-		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
-	} else {
+	if serverName == "" {
 		util.WriteJsonPayload(w, StatusManager.Snapshot())
 		util.AddLogMessage("Delivered statuses", r)
+		return
 	}
+	server := GetMCPServer(port, serverName)
+	if server == nil {
+		sendBadRequest(fmt.Sprintf("MCP Server [%s] not configured on any port", serverName), w, r)
+		return
+	}
+	// Only reports the status, so it must not count as a use of it.
+	status, times := StatusManager.PeekStatusFor(port, server.URI, nil, "")
+	msg := fmt.Sprintf("Port [%d] Server [%s] Reporting Status [%d] for [%d] times", port, serverName, status, times)
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
 }
-
 func clearServers(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	all := strings.Contains(r.RequestURI, "all")
+	all := pathEndsWith(r, "/servers/clear/all")
 	name := util.GetStringParamValue(r, "server")
 	msg := ""
 	if all {
@@ -280,6 +327,7 @@ func clearServers(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			msg = fmt.Sprintf("MCP Server [%s] not configured on any port", name)
 		} else {
+			server.Clear()
 			msg = fmt.Sprintf("Cleared MCP server [%s] on port [%d]", name, port)
 		}
 	} else {
@@ -290,29 +338,40 @@ func clearServers(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
-
 func startServer(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "server")
-	msg := ""
 	ps := GetPortMCPServers(port)
+	count := len(ps.allServers())
+	if name != "" {
+		if ps.GetMCPServer(name) == nil {
+			sendBadRequest(fmt.Sprintf("MCP Server [%s] not configured on port [%d]", name, port), w, r)
+			return
+		}
+		count = 1
+	}
 	ps.Start(name)
-	msg = fmt.Sprintf("Started [%d] MCP Servers at port [%d]", len(ps.Servers), port)
+	msg := fmt.Sprintf("Started [%d] MCP Servers at port [%d]", count, port)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
-
 func stopServer(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "server")
-	msg := ""
 	ps := GetPortMCPServers(port)
+	count := len(ps.allServers())
+	if name != "" {
+		if ps.GetMCPServer(name) == nil {
+			sendBadRequest(fmt.Sprintf("MCP Server [%s] not configured on port [%d]", name, port), w, r)
+			return
+		}
+		count = 1
+	}
 	ps.Stop(name)
-	msg = fmt.Sprintf("Stopped [%d] MCP Servers at port [%d]", len(ps.Servers), port)
+	msg := fmt.Sprintf("Stopped [%d] MCP Servers at port [%d]", count, port)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
-
 func getComponent(kind string) (isTools, isPrompts, isResources, isTemplates bool) {
 	switch kind {
 	case "tools":
@@ -380,16 +439,15 @@ func addComponent(w http.ResponseWriter, r *http.Request) {
 
 func addToolSchemas(w http.ResponseWriter, r *http.Request) {
 	b, _ := io.ReadAll(r.Body)
-	msg := ""
-	if names, err := AddToolSchemas(b); err != nil {
-		msg = fmt.Sprintf("Failed to add tool schemas with error [%s]", err.Error())
-	} else {
-		msg = fmt.Sprintf("Added tool schemas: %+v", names)
+	names, err := AddToolSchemas(b)
+	if err != nil {
+		sendBadRequest(fmt.Sprintf("Failed to add tool schemas with error [%s]", err.Error()), w, r)
+		return
 	}
+	msg := fmt.Sprintf("Added tool schemas: %+v", names)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
-
 func addCompletionPayload(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "server")
@@ -417,7 +475,8 @@ func addComponentPayload(w http.ResponseWriter, r *http.Request) {
 	serverName := util.GetStringParamValue(r, "server")
 	kind := util.GetStringParamValue(r, "kind")
 	name := util.GetStringParamValue(r, "name")
-	isStream := strings.Contains(r.RequestURI, "stream")
+	// By the route, since the name of a server or of a component can have "stream" in it.
+	isStream := strings.Contains(r.URL.Path, "/stream/count=")
 	streamCount := util.GetIntParamValue(r, "count")
 	delayMin, delayMax, delayCount, _ := util.GetDurationParam(r, "delay")
 	if delayCount == 0 {
@@ -472,16 +531,19 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args := json.RawMessage{}
-	err = args.UnmarshalJSON(b)
-	if err != nil {
-		sendBadRequest(fmt.Sprintf("Failed to parse args from request body. Calling Tool [%s] without payload", toolName), w, r)
+	if len(b) > 0 {
+		if !json.Valid(b) {
+			sendBadRequest(fmt.Sprintf("Failed to parse args of Tool [%s] from request body", toolName), w, r)
+			return
+		}
+		args = json.RawMessage(b)
 	}
 	req := &gomcp.CallToolRequest{
 		Params: &gomcp.CallToolParamsRaw{
 			Name:      toolName,
 			Arguments: args,
 		},
-		Session: &gomcp.ServerSession{},
+		// There is no client on the other end of this call, so there is no session either.
 	}
 	result, err := tool.Handle(r.Context(), req)
 	if err != nil {

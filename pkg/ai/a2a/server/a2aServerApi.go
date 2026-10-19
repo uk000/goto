@@ -40,20 +40,20 @@ var (
 func setRoutes(r *mux.Router) {
 	a2a := middleware.RootPath("/a2a")
 	agentsRouter := util.PathRouter(a2a, "/agents")
-	util.AddRoute(agentsRouter, "", getAgents, "GET")
-	util.AddRoute(agentsRouter, "/all", getAgents, "GET")
-	util.AddRoute(agentsRouter, "/names", getAgents, "GET")
-	util.AddRoute(agentsRouter, "/names/all", getAgents, "GET")
+	util.AddRoute(agentsRouter, "", getRegistryAgents, "GET")
+	util.AddRoute(agentsRouter, "/all", getAllServerAgents, "GET")
+	util.AddRoute(agentsRouter, "/names", getAgentNames, "GET")
+	util.AddRoute(agentsRouter, "/names/all", getAllAgentNames, "GET")
 	util.AddRoute(agentsRouter, "/add", addAgents, "POST")
 	util.AddRoute(agentsRouter, "/clear", clearAgents, "POST")
 
 	agentRouter := util.PathRouter(agentsRouter, "/{agent}")
-	util.AddRoute(agentRouter, "", getAgents, "GET")
-	util.AddRoute(agentRouter, "/delegates", getAgentDelegates, "GET")
-	util.AddRoute(agentRouter, "/delegates/tools", getAgentDelegates, "GET")
-	util.AddRoute(agentRouter, "/delegates/tools/{delegate}", getAgentDelegates, "GET")
-	util.AddRoute(agentRouter, "/delegates/agents", getAgentDelegates, "GET")
-	util.AddRoute(agentRouter, "/delegates/agents/{delegate}", getAgentDelegates, "GET")
+	util.AddRoute(agentRouter, "", getAgent, "GET")
+	util.AddRoute(agentRouter, "/delegates", getAgentDelegates(delegatesAll), "GET")
+	util.AddRoute(agentRouter, "/delegates/tools", getAgentDelegates(delegatesTools), "GET")
+	util.AddRoute(agentRouter, "/delegates/tools/{delegate}", getAgentDelegates(delegatesTools), "GET")
+	util.AddRoute(agentRouter, "/delegates/agents", getAgentDelegates(delegatesAgents), "GET")
+	util.AddRoute(agentRouter, "/delegates/agents/{delegate}", getAgentDelegates(delegatesAgents), "GET")
 	util.AddRoute(agentRouter, "/payload", setAgentPayload, "POST")
 
 	a2aServersRouter := util.PathRouter(a2a, "/servers")
@@ -64,7 +64,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(a2aStatusRouter, "/set/{status}", setStatus, "POST")
 	util.AddRoute(a2aStatusRouter, "/set/{status}/header/{header}={value}", setStatus, "POST")
 	util.AddRoute(a2aStatusRouter, "/set/{status}/header/{header}", setStatus, "POST")
-	util.AddRoute(a2aStatusRouter, "/set/{status}/header/not/{header}", setStatus, "POST")
+	util.AddRoute(a2aStatusRouter, "/set/{status}/header/not/{header}", setStatusWithoutHeader, "POST")
 
 	util.AddRoute(a2aStatusRouter, "/configure", configureStatus, "POST")
 	util.AddRoute(a2aStatusRouter, "/clear", clearStatus, "POST")
@@ -74,96 +74,113 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(agentCallRouter, "/{agent}", serveAgent, "GET", "POST", "DELETE")
 }
 
-func getAgents(w http.ResponseWriter, r *http.Request) {
+// getRegistryAgents reports the agents of the registry, which has the agents by name and port.
+func getRegistryAgents(w http.ResponseWriter, r *http.Request) {
+	util.WriteJsonOrYAMLPayload(w, registry.TheAgentRegistry.Agents, util.IsAcceptYAML(r))
+	util.AddLogMessage("All agents sent", r)
+}
+
+func getAllServerAgents(w http.ResponseWriter, r *http.Request) {
+	util.WriteJsonOrYAMLPayload(w, snapshotServers(), util.IsAcceptYAML(r))
+	util.AddLogMessage("Details sent for all agents", r)
+}
+
+func getAgentNames(w http.ResponseWriter, r *http.Request) {
+	util.WriteJsonOrYAMLPayload(w, GetAgentNames(util.GetRequestOrListenerPortNum(r)), util.IsAcceptYAML(r))
+	util.AddLogMessage("Names sent for all agents and delegates", r)
+}
+
+func getAllAgentNames(w http.ResponseWriter, r *http.Request) {
+	util.WriteJsonOrYAMLPayload(w, GetAgentNames(0), util.IsAcceptYAML(r))
+	util.AddLogMessage("Names sent for all agents and delegates", r)
+}
+
+func getAgent(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "agent")
-	all := strings.Contains(r.RequestURI, "all")
-	names := strings.Contains(r.RequestURI, "names")
-	yaml := util.IsAcceptYAML(r)
 	msg := ""
-	if names {
-		if all {
-			util.WriteJsonOrYAMLPayload(w, GetAgentNames(0), yaml)
-		} else {
-			util.WriteJsonOrYAMLPayload(w, GetAgentNames(port), yaml)
-		}
-		msg = "Names sent for all agents and delegates"
-	} else if all {
-		util.WriteJsonOrYAMLPayload(w, PortServers, yaml)
-		msg = "Details sent for all agents"
-	} else if name != "" {
-		agent := GetAgent(port, name)
-		if agent == nil {
-			w.WriteHeader(http.StatusBadRequest)
-			msg = fmt.Sprintf("Bad agent [%s]", name)
-		} else {
-			util.WriteJsonOrYAMLPayload(w, agent, yaml)
-			msg = fmt.Sprintf("Details sent for agent [%s]", name)
-		}
+	agent := GetAgent(port, name)
+	if agent == nil {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = fmt.Sprintf("Bad agent [%s]", name)
+		fmt.Fprintln(w, msg)
 	} else {
-		util.WriteJsonOrYAMLPayload(w, registry.TheAgentRegistry.Agents, yaml)
-		msg = "All agents sent"
+		util.WriteJsonOrYAMLPayload(w, agent, util.IsAcceptYAML(r))
+		msg = fmt.Sprintf("Details sent for agent [%s]", name)
 	}
 	util.AddLogMessage(msg, r)
 }
 
-func getAgentDelegates(w http.ResponseWriter, r *http.Request) {
-	port := util.GetRequestOrListenerPortNum(r)
-	name := util.GetStringParamValue(r, "agent")
-	delegate := util.GetStringParamValue(r, "delegate")
-	yaml := util.IsAcceptYAML(r)
-	msg := ""
-	agent := GetAgent(port, name)
-	if name == "" || agent == nil {
-		w.WriteHeader(http.StatusBadRequest)
-		msg = fmt.Sprintf("Bad agent [%s]", name)
-	} else if agent.Config.Delegates == nil {
-		w.WriteHeader(http.StatusBadRequest)
-		msg = fmt.Sprintf("No delegates for agent [%s]", name)
-	} else if strings.Contains(r.RequestURI, "/tools") {
-		if agent.Config.Delegates.Tools == nil {
+// delegatesKind tells which delegates of an agent are reported.
+type delegatesKind int
+
+const (
+	delegatesAll delegatesKind = iota
+	delegatesTools
+	delegatesAgents
+)
+
+func getAgentDelegates(kind delegatesKind) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		port := util.GetRequestOrListenerPortNum(r)
+		name := util.GetStringParamValue(r, "agent")
+		delegate := util.GetStringParamValue(r, "delegate")
+		yaml := util.IsAcceptYAML(r)
+		msg := ""
+		agent := GetAgent(port, name)
+		if name == "" || agent == nil {
 			w.WriteHeader(http.StatusBadRequest)
-			msg = fmt.Sprintf("No Tool delegates for agent [%s]", name)
-		} else if delegate != "" {
-			d := agent.Config.Delegates.Tools[delegate]
-			if d == nil {
+			msg = fmt.Sprintf("Bad agent [%s]", name)
+		} else if agent.Config == nil || agent.Config.Delegates == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = fmt.Sprintf("No delegates for agent [%s]", name)
+		} else if kind == delegatesTools {
+			if agent.Config.Delegates.Tools == nil {
 				w.WriteHeader(http.StatusBadRequest)
-				msg = fmt.Sprintf("No Tool delegate [%s] for agent [%s]", delegate, name)
+				msg = fmt.Sprintf("No Tool delegates for agent [%s]", name)
+			} else if delegate != "" {
+				d := agent.Config.Delegates.Tools[delegate]
+				if d == nil {
+					w.WriteHeader(http.StatusBadRequest)
+					msg = fmt.Sprintf("No Tool delegate [%s] for agent [%s]", delegate, name)
+				} else {
+					util.WriteJsonOrYAMLPayload(w, d, yaml)
+					msg = fmt.Sprintf("Delegate Tool [%s] sent for agent [%s]", delegate, name)
+				}
 			} else {
-				util.WriteJsonOrYAMLPayload(w, d, yaml)
-				msg = fmt.Sprintf("Delegate Tool [%s] sent for agent [%s]", delegate, name)
+				util.WriteJsonOrYAMLPayload(w, agent.Config.Delegates.Tools, yaml)
+				msg = fmt.Sprintf("Delegate Tools sent for agent [%s]", name)
+			}
+		} else if kind == delegatesAgents {
+			if agent.Config.Delegates.Agents == nil {
+				w.WriteHeader(http.StatusBadRequest)
+				msg = fmt.Sprintf("No Agent delegates for agent [%s]", name)
+			} else if delegate != "" {
+				d := agent.Config.Delegates.Agents[delegate]
+				if d == nil {
+					w.WriteHeader(http.StatusBadRequest)
+					msg = fmt.Sprintf("No Agents delegate [%s] for agent [%s]", delegate, name)
+				} else {
+					util.WriteJsonOrYAMLPayload(w, d, yaml)
+					msg = fmt.Sprintf("Delegate Agents [%s] sent for agent [%s]", delegate, name)
+				}
+			} else {
+				util.WriteJsonOrYAMLPayload(w, agent.Config.Delegates.Agents, yaml)
+				msg = fmt.Sprintf("Delegate Agents sent for agent [%s]", name)
 			}
 		} else {
-			util.WriteJsonOrYAMLPayload(w, agent.Config.Delegates.Tools, yaml)
-			msg = fmt.Sprintf("Delegate Tools sent for agent [%s]", name)
+			util.WriteJsonOrYAMLPayload(w, agent.Config.Delegates, yaml)
+			msg = fmt.Sprintf("Delegates sent for agent [%s]", name)
 		}
-	} else if strings.Contains(r.RequestURI, "/agents") {
-		if agent.Config.Delegates.Agents == nil {
-			w.WriteHeader(http.StatusBadRequest)
-			msg = fmt.Sprintf("No Agent delegates for agent [%s]", name)
-		} else if delegate != "" {
-			d := agent.Config.Delegates.Agents[delegate]
-			if d == nil {
-				w.WriteHeader(http.StatusBadRequest)
-				msg = fmt.Sprintf("No Agents delegate [%s] for agent [%s]", delegate, name)
-			} else {
-				util.WriteJsonOrYAMLPayload(w, d, yaml)
-				msg = fmt.Sprintf("Delegate Agents [%s] sent for agent [%s]", delegate, name)
-			}
-		} else {
-			util.WriteJsonOrYAMLPayload(w, agent.Config.Delegates.Agents, yaml)
-			msg = fmt.Sprintf("Delegate Agents sent for agent [%s]", name)
+		if w.Header().Get(constants.HeaderContentType) == "" {
+			fmt.Fprintln(w, msg)
 		}
-	} else {
-		util.WriteJsonOrYAMLPayload(w, agent.Config.Delegates, yaml)
-		msg = fmt.Sprintf("Delegates sent for agent [%s]", name)
+		util.AddLogMessage(msg, r)
 	}
-	util.AddLogMessage(msg, r)
 }
 
 func getServers(w http.ResponseWriter, r *http.Request) {
-	yaml := util.IsAcceptYAML(r)
-	util.WriteJsonOrYAMLPayload(w, PortServers, yaml)
+	util.WriteJsonOrYAMLPayload(w, snapshotServers(), util.IsAcceptYAML(r))
 	util.AddLogMessage("All A2A servers reported", r)
 }
 
@@ -181,13 +198,25 @@ func addAgents(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		names := []string{}
+		failures := []string{}
 		server := GetOrAddServer(port)
-		for _, agent := range agents {
-			server.AddAgent(agent)
+		for i, agent := range agents {
+			if agent == nil || agent.Card == nil {
+				failures = append(failures, fmt.Sprintf("#%d: agent has no card", i+1))
+				continue
+			}
+			if err := server.AddAgent(agent); err != nil {
+				failures = append(failures, fmt.Sprintf("%s: %s", agent.Card.Name, err.Error()))
+				continue
+			}
 			registry.TheAgentRegistry.AddAgent(agent, port)
 			names = append(names, agent.Card.Name)
 		}
 		msg = fmt.Sprintf("Port [%d] Added Agents: %+v", port, names)
+		if len(failures) > 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = fmt.Sprintf("%s. Failed Agents: %+v", msg, failures)
+		}
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
@@ -208,6 +237,7 @@ func setAgentPayload(w http.ResponseWriter, r *http.Request) {
 			msg = fmt.Sprintf("Bad agent [%s]", name)
 		} else {
 			if err := agent.SetPayload(payload); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
 				msg = fmt.Sprintf("Failed to set payload for agent [%s] with error: %s", name, err.Error())
 			} else {
 				msg = fmt.Sprintf("Payload set successfully for agent [%s]", name)
@@ -243,18 +273,26 @@ func configureStatus(w http.ResponseWriter, r *http.Request) {
 		msg = fmt.Sprintf("Failed to parse status config with error: %s", err.Error())
 		fmt.Fprintln(w, msg)
 	} else {
-		msg = fmt.Sprintf("Parsed status config: %s", sc.Log("MCP", port))
+		msg = fmt.Sprintf("Parsed status config: %s", sc.Log("A2A", port))
 		util.WriteJsonPayload(w, sc)
 	}
 	util.AddLogMessage(msg, r)
 }
 
 func setStatus(w http.ResponseWriter, r *http.Request) {
+	setAgentStatus(w, r, true)
+}
+
+// setStatusWithoutHeader sets a status for the requests that don't have the header.
+func setStatusWithoutHeader(w http.ResponseWriter, r *http.Request) {
+	setAgentStatus(w, r, false)
+}
+
+func setAgentStatus(w http.ResponseWriter, r *http.Request, headerPresent bool) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "agent")
 	header := util.GetStringParamValue(r, "header")
 	value := util.GetStringParamValue(r, "value")
-	notPresent := strings.Contains(r.RequestURI, "not")
 	statusCodes, times, ok := util.GetStatusParam(r)
 	if !ok {
 		util.AddLogMessage("Invalid status", r)
@@ -270,7 +308,9 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, msg)
 		return
 	}
-	status := statusManager.SetStatusFor(port, agent.URI, agent.URI, header, value, []string{"POST"}, statusCodes, times, !notPresent)
+	// Agents are called with POST. The requests that fetch the card of an agent, or that stream from it, are not
+	// given the status.
+	status := statusManager.SetStatusFor(port, agent.URI, agent.URI, header, value, []string{http.MethodPost}, statusCodes, times, headerPresent)
 	msg := status.Log("A2A", port)
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
@@ -302,36 +342,60 @@ func sendStatus(id string, status, rem int, w http.ResponseWriter, r *http.Reque
 
 func serveAgent(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	agent := util.GetStringParamValue(r, "agent")
-	if agent == "" {
-		agent = getAgentNameFromURI(r.RequestURI)
+	name := util.GetStringParamValue(r, "agent")
+	if name == "" {
+		name = getAgentNameFromURI(r.RequestURI)
 	}
 	msg := ""
-	if agent == "" {
+	if name == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "Agent name needed"
 		fmt.Fprintln(w, msg)
 	} else {
-		if status, rem := statusManager.GetStatusFor(port, r.RequestURI, r.Header, r.Method); status > 0 {
-			sendStatus(agent, status, rem, w, r)
+		server := GetOrAddServer(port)
+		agent := server.GetAgent(name)
+		if agent == nil {
+			w.WriteHeader(http.StatusNotFound)
+			msg = fmt.Sprintf("Failed to serve agent [%s] on port [%d]: %s", name, port, errAgentNotFound(name, server).Error())
+			fmt.Fprintln(w, msg)
 		} else {
-			err := GetOrAddServer(port).Serve(agent, w, r)
-			if err != nil {
-				msg = fmt.Sprintf("Failed to serve agent [%s] on port [%d]: %s", agent, port, err.Error())
-				fmt.Fprintln(w, err.Error())
+			// A forced status is counted once per request, here, and a request that gets one is not served by the agent.
+			status, rem := statusManager.GetStatusFor(port, statusURI(agent, r), r.Header, r.Method)
+			if status > 0 && status != http.StatusOK {
+				sendStatus(name, status, rem, w, r)
 			} else {
-				msg = fmt.Sprintf("Handled agent [%s] on port: %d", agent, port)
+				server.serve(agent, status, rem, w, r)
 			}
+			msg = fmt.Sprintf("Handled agent [%s] on port: %d", name, port)
 		}
 	}
 	util.AddLogMessage(msg, r)
+}
+
+// statusURI is the URI that the statuses are matched with for a request to the agent. It is the path of the request,
+// without the query. The endpoint of the agent is always the URI of the agent, with or without the trailing slash.
+func statusURI(agent *model.Agent, r *http.Request) string {
+	path := r.URL.Path
+	if strings.TrimSuffix(path, "/") == strings.TrimSuffix(agent.URI, "/") {
+		return agent.URI
+	}
+	return path
+}
+
+func errAgentNotFound(name string, s *A2AServer) error {
+	return fmt.Errorf("agent [%s] not found on server [%s] port [%d]", name, s.ID, s.Port)
 }
 
 func AgentsHandler() http.Handler {
 	return http.HandlerFunc(serveAgent)
 }
 
+// getAgentNameFromURI finds the name of the agent in the URI of a request to /agent/{agent}, which can have more
+// path, and a query.
 func getAgentNameFromURI(uri string) string {
+	if i := strings.IndexAny(uri, "?#"); i >= 0 {
+		uri = uri[:i]
+	}
 	parts := strings.Split(uri, "/agent/")
 	if len(parts) >= 2 {
 		parts2 := strings.Split(parts[1], "/")

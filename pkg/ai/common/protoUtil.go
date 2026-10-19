@@ -22,10 +22,20 @@ import (
 	a2aproto "trpc.group/trpc-go/trpc-a2a-go/protocol"
 )
 
+// GetInputTextFromMessage joins the text of all text parts of the message. Parts that are built in the code are values
+// of TextPart, and the ones that are decoded from JSON are pointers, so both are accepted.
 func GetInputTextFromMessage(m *a2aproto.Message) string {
+	if m == nil {
+		return ""
+	}
 	b := strings.Builder{}
 	for _, p := range m.Parts {
-		if tp, ok := p.(*a2aproto.TextPart); ok {
+		switch tp := p.(type) {
+		case *a2aproto.TextPart:
+			if tp != nil {
+				b.WriteString(tp.Text)
+			}
+		case a2aproto.TextPart:
 			b.WriteString(tp.Text)
 		}
 	}

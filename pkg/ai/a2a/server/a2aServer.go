@@ -18,14 +18,18 @@ package a2aserver
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"goto/pkg/ai/a2a/model"
 	"goto/pkg/constants"
 	"goto/pkg/global"
 	"goto/pkg/server/intercept"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"net/http"
 	"net/url"
+	"sort"
 	"sync"
 
 	trpcserver "trpc.group/trpc-go/trpc-a2a-go/server"
@@ -61,48 +65,90 @@ func GetAgent(port int, name string) *model.Agent {
 	return s.GetAgent(name)
 }
 
+// GetAgentNames lists the delegates of the agents, by port and agent. It lists the ports of the given one, or all of
+// them if the port is not positive. A delegate is listed by the name of its tool, agent or URL, unless it's disabled.
 func GetAgentNames(port int) map[int]map[string]map[string][]string {
 	names := map[int]map[string]map[string][]string{}
 	buildNames := func(port int, s *A2AServer) {
 		names[port] = map[string]map[string][]string{}
-		for name, a := range s.Agents {
-			names[port][name] = map[string][]string{}
-			if a.Config != nil && a.Config.Delegates != nil {
-				if a.Config.Delegates.Agents != nil {
-					names[port][name]["agents"] = []string{}
-					for _, d := range a.Config.Delegates.Agents {
-						if !d.Disabled {
-							names[port][name]["agents"] = append(names[port][name]["agents"], d.AgentCall.Name)
-						}
-					}
-					if a.Config.Delegates.Tools != nil {
-						names[port][name]["tools"] = []string{}
-						for _, d := range a.Config.Delegates.Tools {
-							if !d.Disabled {
-								names[port][name]["tools"] = append(names[port][name]["tools"], d.ToolCall.Tool)
-							}
-						}
-					}
-					if a.Config.Delegates.HTTP != nil {
-						names[port][name]["http"] = []string{}
-						for _, d := range a.Config.Delegates.HTTP {
-							if !d.Disabled {
-								names[port][name]["http"] = append(names[port][name]["http"], d.HTTPCall.URL)
-							}
-						}
+		for name, a := range s.agentsSnapshot() {
+			delegateNames := map[string][]string{}
+			names[port][name] = delegateNames
+			if a.Config == nil || a.Config.Delegates == nil {
+				continue
+			}
+			d := a.Config.Delegates
+			if d.Agents != nil {
+				delegateNames["agents"] = []string{}
+				for _, c := range d.Agents {
+					if c != nil && !c.Disabled && c.AgentCall != nil {
+						delegateNames["agents"] = append(delegateNames["agents"], c.AgentCall.Name)
 					}
 				}
+			}
+			if d.Tools != nil {
+				delegateNames["tools"] = []string{}
+				for _, c := range d.Tools {
+					if c != nil && !c.Disabled && c.ToolCall != nil {
+						delegateNames["tools"] = append(delegateNames["tools"], c.ToolCall.Tool)
+					}
+				}
+			}
+			if d.HTTP != nil {
+				delegateNames["http"] = []string{}
+				for _, c := range d.HTTP {
+					if c != nil && !c.Disabled && c.HTTPCall != nil {
+						delegateNames["http"] = append(delegateNames["http"], c.HTTPCall.URL)
+					}
+				}
+			}
+			for _, list := range delegateNames {
+				sort.Strings(list)
 			}
 		}
 	}
 	if port > 0 {
 		buildNames(port, GetOrAddServer(port))
 	} else {
-		for port, s := range PortServers {
+		for port, s := range snapshotServers() {
 			buildNames(port, s)
 		}
 	}
 	return names
+}
+
+// snapshotServers returns the servers of all the ports. The map is the caller's to read, the servers are not.
+func snapshotServers() map[int]*A2AServer {
+	lock.RLock()
+	defer lock.RUnlock()
+	servers := make(map[int]*A2AServer, len(PortServers))
+	for port, s := range PortServers {
+		servers[port] = s
+	}
+	return servers
+}
+
+// agentsSnapshot returns the agents of the server. The map is the caller's to read, the agents are not.
+func (a *A2AServer) agentsSnapshot() map[string]*model.Agent {
+	a.lock.RLock()
+	defer a.lock.RUnlock()
+	agents := make(map[string]*model.Agent, len(a.Agents))
+	for name, agent := range a.Agents {
+		agents[name] = agent
+	}
+	return agents
+}
+
+// MarshalJSON reports the server with the agents that it has at the moment, which change while it is reported.
+func (a *A2AServer) MarshalJSON() ([]byte, error) {
+	a.lock.RLock()
+	defer a.lock.RUnlock()
+	return json.Marshal(&struct {
+		ID      string
+		Port    int
+		Agents  map[string]*model.Agent `json:"agents"`
+		Enabled bool                    `json:"enabled"`
+	}{a.ID, a.Port, a.Agents, a.Enabled})
 }
 
 func RemoveAgent(port int, name string) {
@@ -132,10 +178,14 @@ func newA2AServer(port int) *A2AServer {
 }
 
 func (a *A2AServer) Enable() {
+	a.lock.Lock()
+	defer a.lock.Unlock()
 	a.Enabled = true
 }
 
 func (a *A2AServer) Disable() {
+	a.lock.Lock()
+	defer a.lock.Unlock()
 	a.Enabled = false
 }
 
@@ -150,52 +200,73 @@ func (a *A2AServer) AddAgent(agent *model.Agent) error {
 }
 
 func (a *A2AServer) PrepareAgent(agent *model.Agent) error {
-	PrepareAgentBehavior(agent)
+	if agent == nil || agent.Card == nil {
+		return errors.New("agent has no card")
+	}
+	if agent.Card.Name == "" {
+		return errors.New("agent card has no name")
+	}
+	cardURL, err := url.Parse(agent.Card.URL)
+	if err != nil {
+		return err
+	}
+	// A prepared agent always has a config. The admin API sets the payload of the agent while it serves, and must not
+	// be the one that creates the config that the requests read.
+	if agent.Config == nil {
+		agent.Config = &model.AgentConfig{}
+	}
+	if err := PrepareAgentBehavior(agent); err != nil {
+		return err
+	}
 	if agent.ID == "" {
 		agent.ID = fmt.Sprintf("%s(%s)", agent.Card.Name, a.ID)
 	}
 	agent.Port = a.Port
-	if agent.Card != nil {
-		agent.Streaming = *agent.Card.Capabilities.Streaming
-	}
-	if url, err := url.Parse(agent.Card.URL); err != nil {
-		return err
-	} else {
-		agent.URI = url.Path
-	}
+	// The agent doesn't stream unless its card says that it does.
+	streaming := agent.Card.Capabilities.Streaming
+	agent.Streaming = streaming != nil && *streaming
+	agent.URI = cardURL.Path
 	tm, err := trpctask.NewMemoryTaskManager(agent.Behavior.Impl)
 	if err != nil {
 		return err
 	}
 	srv, err := trpcserver.NewA2AServer(*agent.Card, tm)
-	if err == nil {
-		agent.Server = srv
-		agent.Handler = srv.Handler()
+	if err != nil {
+		return err
 	}
+	agent.Server = srv
+	agent.Handler = srv.Handler()
 	if agent.Config != nil && agent.Config.Delegates != nil {
 		for dName, d := range agent.Config.Delegates.Agents {
 			d.GivenName = dName
 			if d.AgentCall != nil {
 				d.AgentCall.Prepare()
+				d.AgentCall.NonNil()
 			}
 		}
 		for dName, d := range agent.Config.Delegates.Tools {
 			d.GivenName = dName
 			if d.ToolCall != nil {
 				d.ToolCall.Prepare()
+				// The requests share the headers of the call, so they are completed once, here.
+				if d.ToolCall.Headers == nil {
+					d.ToolCall.Headers = types.NewHeaders()
+				}
+				d.ToolCall.Headers.NonNil()
 			}
 		}
 		for dName, d := range agent.Config.Delegates.HTTP {
 			d.GivenName = dName
 		}
 	}
-	return err
+	return nil
 }
 
-func PrepareAgentBehavior(agent *model.Agent) {
+// PrepareAgentBehavior sets the behavior of the agent up, and what the behavior needs of the config of the agent.
+func PrepareAgentBehavior(agent *model.Agent) error {
 	b := newAgentBehavior(agent)
 	b.prepareDelay()
-	b.prepareDelegates()
+	return b.prepareDelegates()
 }
 
 func (a *A2AServer) GetAgent(name string) *model.Agent {
@@ -205,16 +276,26 @@ func (a *A2AServer) GetAgent(name string) *model.Agent {
 }
 
 func (a *A2AServer) RemoveAgent(name string) {
-	a.lock.RLock()
-	defer a.lock.RUnlock()
+	a.lock.Lock()
+	defer a.lock.Unlock()
 	delete(a.Agents, name)
 }
 
+// Serve serves the request with the agent. A status that is forced for the agent is given to the response, after the
+// agent has served the request.
 func (a *A2AServer) Serve(name string, w http.ResponseWriter, r *http.Request) error {
 	agent := a.GetAgent(name)
 	if agent == nil {
-		return fmt.Errorf("agent [%s] not found on server [%s] port [%d]", name, a.ID, a.Port)
+		return errAgentNotFound(name, a)
 	}
+	status, rem := statusManager.GetStatusFor(a.Port, statusURI(agent, r), r.Header, r.Method)
+	a.serve(agent, status, rem, w, r)
+	return nil
+}
+
+// serve serves the request with the agent, and gives the response the status if there is one. The status is the one
+// that is forced for the request, which is counted by the caller.
+func (a *A2AServer) serve(agent *model.Agent, status, rem int, w http.ResponseWriter, r *http.Request) {
 	w.Header().Add(constants.HeaderGotoA2AServer, a.ID)
 	w.Header().Add(constants.HeaderGotoA2AAgent, agent.ID)
 	ctx := r.Context()
@@ -223,7 +304,6 @@ func (a *A2AServer) Serve(name string, w http.ResponseWriter, r *http.Request) e
 	aCtx := newAgentContext(a.Port, a.ID, rs.ListenerLabel, agent, r.Header, rs)
 	r = r.WithContext(context.WithValue(ctx, util.AgentContextKey, aCtx))
 	aCtx.ctx = r.Context()
-	status, rem := statusManager.GetStatusFor(a.Port, agent.URI, r.Header, r.Method)
 	w, irw := intercept.WithInterceptAndStatus(r, w, status, !agent.Behavior.Stream)
 	aCtx.irw = irw
 	if status > 0 {
@@ -243,5 +323,4 @@ func (a *A2AServer) Serve(name string, w http.ResponseWriter, r *http.Request) e
 	}
 	rs.StatusCode = irw.StatusCode
 	irw.Proceed()
-	return nil
 }

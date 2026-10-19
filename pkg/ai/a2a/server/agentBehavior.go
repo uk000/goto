@@ -46,11 +46,12 @@ type AgentBehaviorImpl struct {
 }
 
 func newAgentBehavior(agent *model.Agent) *AgentBehaviorImpl {
-	useDefault := false
 	if agent.Behavior == nil {
-		useDefault = true
 		agent.Behavior = &model.AgentBehavior{}
 	}
+	// An agent that is not told how to behave echoes.
+	b := agent.Behavior
+	useDefault := !b.Echo && !b.Stream && !b.Federate && !b.HTTPProxy
 	impl := &AgentBehaviorImpl{
 		agent: agent,
 	}

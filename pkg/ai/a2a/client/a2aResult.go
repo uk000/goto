@@ -17,9 +17,18 @@
 package a2aclient
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"goto/pkg/constants"
+	"goto/pkg/util"
 	"goto/pkg/util/timeline"
+	"maps"
 	"net/http"
+	"runtime"
+	"strings"
+	"sync"
+	"weak"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -38,6 +47,8 @@ type A2AResult struct {
 	LastRemoteHeaders   map[string]any
 	CallResults         map[string]*A2ACallResult
 	RemoteGotos         map[string]bool
+	// lock guards the fields that the requests of a call update, as they run concurrently.
+	lock sync.Mutex
 }
 
 type A2ACallResult struct {
@@ -69,6 +80,12 @@ func NewA2AResult(server string, ac *AgentCall, t *timeline.Timeline) *A2AResult
 }
 
 func (r *A2AResult) getOrAddCall(requestID string) *A2ACallResult {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	return r.getOrAddCallLocked(requestID)
+}
+
+func (r *A2AResult) getOrAddCallLocked(requestID string) *A2ACallResult {
 	result := r.CallResults[requestID]
 	if result == nil {
 		result = &A2ACallResult{
@@ -82,8 +99,10 @@ func (r *A2AResult) getOrAddCall(requestID string) *A2ACallResult {
 }
 
 func (r *A2AResult) addOrUpdateCall(requestID string, result *A2ACallResult, clientInfo *timeline.GotoClientInfo) *A2ACallResult {
+	r.lock.Lock()
+	defer r.lock.Unlock()
 	if result == nil {
-		result = r.getOrAddCall(requestID)
+		result = r.getOrAddCallLocked(requestID)
 	} else {
 		existing := r.CallResults[requestID]
 		if existing == nil {
@@ -104,7 +123,9 @@ func (r *A2AResult) storeA2ACallResult(requestID string, result *A2ACallResult, 
 }
 
 func (r *A2AResult) storeHeaders(requestID string, requestHeaders, responseHeaders http.Header, status int) {
-	cr := r.getOrAddCall(requestID)
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	cr := r.getOrAddCallLocked(requestID)
 	cr.RequestHeaders = requestHeaders
 	cr.ResponseHeaders = responseHeaders
 	cr.ResponseStatus = status
@@ -112,6 +133,69 @@ func (r *A2AResult) storeHeaders(requestID string, requestHeaders, responseHeade
 	r.LastResponseHeaders = responseHeaders
 	r.LastResponseStatus = status
 	r.UpstreamStatuses[r.Agent] = status
+}
+
+// markRemoteGotos reports the remotes that took part in the responses on the last response headers, marking each of
+// them as reached through A2A unless it says how it was reached.
+func (r *A2AResult) markRemoteGotos() {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	if r.LastResponseHeaders == nil {
+		// There is no response when the request failed before it got one.
+		r.LastResponseHeaders = http.Header{}
+	}
+	for _, v := range r.LastResponseHeaders[constants.HeaderViaGoto] {
+		r.RemoteGotos[v] = true
+	}
+	viaGotos := []string{}
+	for v := range r.RemoteGotos {
+		if !strings.Contains(v, "(A2A)") && !strings.Contains(v, "(MCP)") {
+			v = v + "(A2A)"
+		}
+		viaGotos = append(viaGotos, v)
+	}
+	r.LastResponseHeaders[constants.HeaderViaGoto] = viaGotos
+}
+
+func (r *A2AResult) addRemoteGotos(gotos ...string) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	for _, g := range gotos {
+		r.RemoteGotos[g] = true
+	}
+}
+
+func (r *A2AResult) addRemoteGotosFromUpstreamHeaders(headers map[string]any) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	// The gotos that the remote reported are only relevant once there is a response from the remote.
+	if r.LastResponseHeaders != nil {
+		for v := range util.GetViaGotosFromUpstreamHeaders(headers) {
+			r.RemoteGotos[v] = true
+		}
+	}
+}
+
+func (r *A2AResult) setLastRemoteHeaders(headers map[string]any) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	r.LastRemoteHeaders = headers
+}
+
+// recordUpstreamStatuses adds the upstream statuses reported by the response to the ones of the call. The request
+// store gets a copy, as it is shared by the calls that are made for a request and read by the ones that report it.
+func (r *A2AResult) recordUpstreamStatuses(rs *util.RequestStore, upstreamStatuses any) {
+	rsLock.Lock()
+	defer rsLock.Unlock()
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	statuses := maps.Clone(r.UpstreamStatuses)
+	if statuses == nil {
+		statuses = map[string]any{}
+	}
+	statuses["-"] = upstreamStatuses
+	r.UpstreamStatuses = statuses
+	rs.UpstreamStatuses = maps.Clone(statuses)
 }
 
 func (cr *A2ACallResult) merge(other *A2ACallResult) {
@@ -140,7 +224,65 @@ func (cr *A2ACallResult) storeRemoteTimeline(data any) {
 	}
 }
 
-func (r *A2AResult) ToObject() map[string]any {
+// timelineLocks has the lock of each timeline that is shared with the results of calls. The results of the calls that an
+// agent makes in parallel are all made with the timeline of the agent, and the timeline has no lock of its own for what
+// a result reads and sets. The lock is of the timeline, so that the calls of one agent don't wait for the calls of the
+// others, and it is forgotten with the timeline.
+var timelineLocks sync.Map
+
+func lockOfTimeline(t *timeline.Timeline) *sync.Mutex {
+	key := weak.Make(t)
+	if lock, ok := timelineLocks.Load(key); ok {
+		return lock.(*sync.Mutex)
+	}
+	lock, loaded := timelineLocks.LoadOrStore(key, &sync.Mutex{})
+	if !loaded {
+		runtime.AddCleanup(t, func(key weak.Pointer[timeline.Timeline]) { timelineLocks.Delete(key) }, key)
+	}
+	return lock.(*sync.Mutex)
+}
+
+// UpdateTimeline runs what is done to a timeline that is shared with the results of calls, in step with what the results
+// do to it.
+func UpdateTimeline(t *timeline.Timeline, update func()) {
+	if t == nil {
+		update()
+		return
+	}
+	lock := lockOfTimeline(t)
+	lock.Lock()
+	defer lock.Unlock()
+	update()
+}
+
+// ToObject reports the result with the timeline that it was made with. The timeline is the live one, which goes on to
+// change if it is shared. Snapshot is for what is to be handed over to others.
+func (r *A2AResult) ToObject() (object map[string]any) {
+	UpdateTimeline(r.Timeline, func() { object = r.toObject() })
+	return
+}
+
+// Snapshot is what ToObject reports, taken as it is now: it has none of the objects that are changed after it is
+// taken, so it can be marshaled later, on another goroutine, while the timeline goes on to change.
+func (r *A2AResult) Snapshot() (snapshot map[string]any) {
+	UpdateTimeline(r.Timeline, func() {
+		object := r.toObject()
+		snapshot = object
+		b, err := json.Marshal(object)
+		if err != nil {
+			return
+		}
+		copied := map[string]any{}
+		decoder := json.NewDecoder(bytes.NewReader(b))
+		decoder.UseNumber()
+		if err := decoder.Decode(&copied); err == nil {
+			snapshot = copied
+		}
+	})
+	return
+}
+
+func (r *A2AResult) toObject() map[string]any {
 	result := map[string]any{}
 	if len(r.CallResults) > 0 {
 		r.Timeline.Data["A2ACalls"] = r.buildCallsData()
@@ -159,7 +301,12 @@ func (r *A2AResult) ToObject() map[string]any {
 	return result
 }
 
-func (r *A2AResult) ToMCP(extras map[string]any) *gomcp.CallToolResult {
+func (r *A2AResult) ToMCP(extras map[string]any) (result *gomcp.CallToolResult) {
+	UpdateTimeline(r.Timeline, func() { result = r.toMCP(extras) })
+	return
+}
+
+func (r *A2AResult) toMCP(extras map[string]any) *gomcp.CallToolResult {
 	result := &gomcp.CallToolResult{}
 	if !r.AgentCall.NoCallDetails {
 		if len(r.CallResults) > 0 {

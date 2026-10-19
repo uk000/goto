@@ -41,7 +41,11 @@ func (t *MCPTool) elicit(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 			Properties: properties,
 		}
 	}
-	res, err := tctx.req.Session.Elicit(tctx.ctx, params)
+	session, err := tctx.session()
+	if err != nil {
+		return nil, fmt.Errorf("Server [%s] failed to get elicit response from client with error [%s]", tctx.Server.GetName(), err.Error())
+	}
+	res, err := session.Elicit(tctx.ctx, params)
 	var msg string
 	if err != nil {
 		msg = fmt.Sprintf("Server [%s] failed to get elicit response from client with error [%s]", tctx.Server.GetName(), err.Error())
@@ -69,7 +73,11 @@ func (t *MCPTool) elicit(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 }
 
 func (t *MCPTool) sample(tctx *ToolContext) (*gomcp.CallToolResult, error) {
-	res, err := tctx.req.Session.CreateMessage(tctx.ctx, &gomcp.CreateMessageParams{
+	session, err := tctx.session()
+	if err != nil {
+		return nil, fmt.Errorf("sampling failed: %s", err.Error())
+	}
+	res, err := session.CreateMessage(tctx.ctx, &gomcp.CreateMessageParams{
 		Messages: []*gomcp.SamplingMessage{{
 			Role:    "user",
 			Content: &gomcp.TextContent{Text: util.ToJSONText(tctx.Response)},
@@ -81,6 +89,9 @@ func (t *MCPTool) sample(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	var msg string
 	if err != nil || res == nil {
 		msg = tctx.Log("Server [%s] failed to get sample from client", tctx.Server.GetName())
+		if err == nil {
+			err = errors.New("no response from the client")
+		}
 		return nil, fmt.Errorf("sampling failed: %v", err)
 	}
 	msg = fmt.Sprintf("Server [%s] got sample from client", tctx.Server.GetName())

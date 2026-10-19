@@ -52,14 +52,27 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(mcpClient, "/{name}?/payload/roots", addRoots, "POST")
 }
 
+// queryParam returns the value of a param of the request. The routes group the query params, and a request that has
+// only some of the params of a group is matched with the routes of other groups, which don't have the others as vars,
+// so the query of the request is the fallback.
+func queryParam(r *http.Request, name string) string {
+	if v := util.GetStringParamValue(r, name); v != "" {
+		return v
+	}
+	return r.URL.Query().Get(name)
+}
+
 func listTools(w http.ResponseWriter, r *http.Request) {
 	rs := util.GetRequestStore(r)
-	url := util.GetStringParamValue(r, "url")
-	sse := util.GetBoolParamValue(r, "sse")
-	tls := util.GetBoolParamValue(r, "tls")
-	authority := util.GetStringParamValue(r, "authority")
-	toolsOnly := strings.Contains(r.RequestURI, "tools")
-	namesOnly := strings.Contains(r.RequestURI, "names")
+	url := queryParam(r, "url")
+	sse := util.IsYes(queryParam(r, "sse"))
+	tls := util.IsYes(queryParam(r, "tls"))
+	authority := queryParam(r, "authority")
+	// What to list comes from the path of the request. The request URI has the query too, where a URL may have
+	// anything, like tools.
+	path := strings.TrimSuffix(r.URL.Path, "/")
+	namesOnly := strings.HasSuffix(path, "/names")
+	toolsOnly := strings.HasSuffix(strings.TrimSuffix(path, "/names"), "/tools")
 	msg := ""
 	clientId := fmt.Sprintf("MCPClient[%s][tool/list]", global.Self.HostLabel)
 	client := NewClient(rs.RequestPortNum, sse, false, tls, clientId, util.GetCurrentListenerLabel(r), authority, 0, nil, nil, nil)
@@ -140,6 +153,11 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 		if output != nil {
 			if output.LastResponseStatus > 0 {
 				responseStatus = output.LastResponseStatus
+				// The SSE transport posts its messages, which the server acknowledges with 202. That is not the
+				// status of the call.
+				if tc.ForceSSE && responseStatus == http.StatusAccepted && err == nil {
+					responseStatus = 0
+				}
 			}
 			for v := range output.RemoteGotos {
 				w.Header().Add(constants.HeaderViaGoto, v)
@@ -186,10 +204,12 @@ func mcpUpdateHandler(msg string, data any, json bool, toolLabel string, fw http
 	if data != nil {
 		msg = fmt.Sprintf("%s : %+v", msg, data)
 	}
-	if fw != nil && msg != "" {
+	if msg != "" {
 		fmt.Fprintln(w, msg)
 	}
-	fw.Flush()
+	if fw != nil {
+		fw.Flush()
+	}
 	util.AddLogMessage(fmt.Sprintf("Received stream response from tool [%s], response: %s", toolLabel, msg), r)
 }
 
@@ -223,7 +243,7 @@ func addClientPayload(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("Failed to add client payload for MCP [%s] kind [%s] with error [%s]", name, kind, err.Error())
 	} else {
-		msg = fmt.Sprintf("Client payload added for MCP [%s] kind [%s]", kind)
+		msg = fmt.Sprintf("Client payload added for MCP [%s] kind [%s]", name, kind)
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
@@ -250,7 +270,7 @@ func getDetails(w http.ResponseWriter, r *http.Request) {
 	if name != "" {
 		output = getNamedClientPayload(name)
 	} else {
-		output = NamedClientPayloads
+		output = namedClientPayloadsSnapshot()
 	}
 	util.WriteJsonOrYAMLPayload(w, output, yaml)
 	util.AddLogMessage(fmt.Sprintf("Client [%s] details: [%+v]", name, output), r)

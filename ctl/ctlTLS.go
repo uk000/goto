@@ -250,7 +250,7 @@ func (c *CACertConfig) load() {
 		return
 	}
 	if c.Cert == "" || c.Key == "" {
-		log.Printf("Cert and Key are required for Name [%s] Domain [%d]\n", c.Name, c.Domain)
+		log.Printf("Cert and Key are required for Name [%s] Domain [%s]\n", c.Name, c.Domain)
 		return
 	}
 	c.sendCACertOrKey("cert")
