@@ -17,10 +17,12 @@
 package rpc
 
 import (
+	"encoding/json"
+	"fmt"
 	"goto/pkg/server/hooks"
 	"goto/pkg/server/request/tracking"
-	"goto/pkg/util"
 	"io"
+	"net/http"
 	"strings"
 	"sync"
 )
@@ -75,48 +77,129 @@ func (r *RPCTracker) TrackServiceMethod(port int, s RPCService, m RPCMethod, hea
 		hookHeaders = hooks.Headers{[2]string{header, value}}
 		headers = []string{header}
 	} else {
-		hookHeaders = util.ConvertHeadersArrayToMultiArray(headers)
+		hookHeaders = anyValueHeaders(headers)
 	}
+	// The hooks match header names without regard to case, but the headers of the matched requests are reported to the
+	// tracking by the names that the requests carry, which are canonical. The tracking only counts the headers that
+	// it was initialized with by those names.
+	headers = canonicalHeaderNames(headers)
 	serviceName := s.GetName()
 	isGRPC := s.IsGRPC()
 	track := func(id, uri string) {
 		tracking.Tracker.Init(port, serviceName, uri, headers)
 		hooks.GetPortHooks(port).AddHTTPHookWithListener(serviceName, id, uri+"/*", hookHeaders, !isGRPC, trackCallCounts(s))
 	}
-	track(s.GetName(), s.GetURI())
+	// A hook is identified by its id, and ids must not repeat: a method named like another service, or the methods
+	// of different services that have the same name, would replace each other's hooks otherwise.
+	track(serviceName, s.GetURI())
 	if m != nil {
-		track(m.GetName(), m.GetURI())
+		track(methodHookID(serviceName, m), m.GetURI())
 	} else {
-		s.ForEachMethod(func(r RPCMethod) {
-			track(r.GetName(), r.GetURI())
+		s.ForEachMethod(func(method RPCMethod) {
+			track(methodHookID(serviceName, method), method.GetURI())
 		})
 	}
+}
+
+// anyValueHeaders gives the headers to a hook so that it matches them whatever their value is. A hook doesn't match a
+// header that is given without a value (the empty value matches nothing), but the glob matches any value.
+func anyValueHeaders(headers []string) hooks.Headers {
+	hookHeaders := make(hooks.Headers, 0, len(headers))
+	for _, h := range headers {
+		hookHeaders = append(hookHeaders, [2]string{h, "*"})
+	}
+	return hookHeaders
+}
+
+func methodHookID(serviceName string, m RPCMethod) string {
+	return fmt.Sprintf("%s:%s", serviceName, m.GetURI())
+}
+
+func canonicalHeaderNames(headers []string) []string {
+	if len(headers) == 0 {
+		return headers
+	}
+	names := make([]string, len(headers))
+	for i, h := range headers {
+		names[i] = http.CanonicalHeaderKey(h)
+	}
+	return names
 }
 
 func (r *RPCTracker) IncrementServiceCount(s RPCService, requestURI string) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
+	requestURI = strings.ToLower(requestURI)
 	serviceURI := s.GetURI()
 	if r.ServiceTrackers[serviceURI] != nil {
 		r.ServiceTrackers[serviceURI].ServiceCallCounts++
 		s.ForEachMethod(func(method RPCMethod) {
-			if strings.HasPrefix(requestURI, method.GetURI()) {
+			if hasURIPrefix(requestURI, method.GetURI()) {
 				r.ServiceTrackers[serviceURI].ServiceMethodCallCounts[method.GetURI()]++
 			}
 		})
 	}
 }
 
+// GetServiceTrackerJSON returns a snapshot of the tracker of the service, or nil if the service isn't tracked. The
+// snapshot is the caller's to keep and to change, it is not affected by calls that are counted later.
 func (r *RPCTracker) GetServiceTrackerJSON(s RPCService) *ServiceTracker {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
-	return r.ServiceTrackers[s.GetURI()]
+	st := r.ServiceTrackers[s.GetURI()]
+	if st == nil {
+		return nil
+	}
+	snapshot := &ServiceTracker{
+		ServiceCallCounts:       st.ServiceCallCounts,
+		ServiceMethodCallCounts: make(map[string]int, len(st.ServiceMethodCallCounts)),
+		PortTracking:            st.PortTracking,
+	}
+	for uri, count := range st.ServiceMethodCallCounts {
+		snapshot.ServiceMethodCallCounts[uri] = count
+	}
+	return snapshot
+}
+
+// portTrackingOf returns the request tracking of a service, which holds the tracking data by port. The tracking is only
+// read through its JSON encoding, which holds the locks of the tracking: its maps change as requests are tracked.
+func portTrackingOf(key string) any {
+	b, err := json.Marshal(tracking.Tracker)
+	if err != nil {
+		return nil
+	}
+	var all struct {
+		ByPort map[string]json.RawMessage `json:"byPort"`
+	}
+	if err := json.Unmarshal(b, &all); err != nil {
+		return nil
+	}
+	if data, found := all.ByPort[key]; found {
+		return data
+	}
+	return nil
+}
+
+// hasURIPrefix tells if a request URI is the given URI, or one below it: the URI is followed by a path separator, or
+// a query (or is the end of the request URI). A plain string prefix would take /svc/m1 for a URI below /svc/m.
+func hasURIPrefix(requestURI, uri string) bool {
+	if !strings.HasPrefix(requestURI, uri) {
+		return false
+	}
+	if len(requestURI) == len(uri) || strings.HasSuffix(uri, "/") {
+		return true
+	}
+	switch requestURI[len(uri)] {
+	case '/', '?', '#':
+		return true
+	}
+	return false
 }
 
 func trackCallCounts(s RPCService) func(port int, uri string, requestHeaders map[string][]string, body io.Reader) bool {
 	return func(port int, uri string, requestHeaders map[string][]string, body io.Reader) bool {
 		uri = strings.ToLower(uri)
-		if strings.HasPrefix(uri, s.GetURI()) {
+		if hasURIPrefix(uri, s.GetURI()) {
 			GetRPCTracker(port).IncrementServiceCount(s, uri)
 		}
 		return true

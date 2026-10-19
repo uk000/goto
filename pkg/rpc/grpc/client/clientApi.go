@@ -23,7 +23,6 @@ import (
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -48,7 +47,7 @@ func setRoutes(r *mux.Router) {
 
 func setRoutesWithRouter(r *mux.Router) {
 	util.AddRoute(r, "/call/{service}/{method}/{endpoint}", callServiceMethod, "POST")
-	util.AddRoute(r, "/call/{service}/{method}/{endpoint}/stream", callServiceMethod, "POST")
+	util.AddRoute(r, "/call/{service}/{method}/{endpoint}/stream", callServiceMethodStream, "POST")
 	util.AddRoute(r, "/call", call, "POST")
 }
 
@@ -67,10 +66,19 @@ func call(w http.ResponseWriter, r *http.Request) {
 }
 
 func callServiceMethod(w http.ResponseWriter, r *http.Request) {
+	callServiceMethodWithPush(w, r, false)
+}
+
+func callServiceMethodStream(w http.ResponseWriter, r *http.Request) {
+	callServiceMethodWithPush(w, r, true)
+}
+
+// callServiceMethodWithPush is for the routes of the call with the service, method and endpoint in the URI. Whether
+// the messages of the call are pushed as they arrive is up to the route, and not to what the URI happens to contain.
+func callServiceMethodWithPush(w http.ResponseWriter, r *http.Request, stream bool) {
 	endpoint := util.GetStringParamValue(r, "endpoint")
 	serviceName := util.GetStringParamValue(r, "service")
 	methodName := util.GetStringParamValue(r, "method")
-	stream := strings.Contains(r.RequestURI, "stream")
 	if endpoint == "" || serviceName == "" || methodName == "" {
 		util.SendBadRequest(w, r, "Missing endpoint/service/method")
 		return
@@ -101,6 +109,7 @@ func doCall(call *GRPCCall, r *http.Request, w http.ResponseWriter) {
 		msg = err.Error()
 		return
 	}
+	defer client.Close()
 	err = client.LoadServiceMethodFromReflection(call.Service, call.Method)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -126,33 +135,31 @@ func doCall(call *GRPCCall, r *http.Request, w http.ResponseWriter) {
 			viaGotos = h[util.LowerViaGoto]
 		}
 		if len(viaGotos) == 0 {
-			viaGotos = h[constants.HeaderViaGoto]
+			return
 		}
-		if len(viaGotos) == 0 {
-			viaGotos = h[util.LowerViaGoto]
+		lock.Lock()
+		defer lock.Unlock()
+		if headersReceived {
+			return
 		}
-		if len(viaGotos) > 0 {
-			lock.Lock()
-			for _, v := range viaGotos {
-				rs.ViaGotos = append(rs.ViaGotos, fmt.Sprintf("%s(gRPC)", v))
-			}
-			util.SendGotoTrailers(w, r)
-			rs.ViaGotos = nil
-			headersReceived = true
-			lock.Unlock()
+		for _, v := range viaGotos {
+			rs.ViaGotos = append(rs.ViaGotos, fmt.Sprintf("%s(gRPC)", v))
 		}
+		util.SendGotoTrailers(w, r)
+		rs.ViaGotos = nil
+		headersReceived = true
 	}
 	var callback func(m proto.Message, h metadata.MD)
 	if call.Push {
 		fw := intercept.NewFlushWriter(w)
 		callback = func(m proto.Message, h metadata.MD) {
-			if !headersReceived {
-				checkViaGotos(h)
-			}
+			checkViaGotos(h)
 			if b, err := protojson.Marshal(m); err == nil {
 				lock.Lock()
 				fmt.Fprintln(w, util.ToPrettyJSONText(util.JSONFromBytes(b)))
-				fw.Flush()
+				if fw != nil {
+					fw.Flush()
+				}
 				lock.Unlock()
 			}
 		}
@@ -172,9 +179,7 @@ func doCall(call *GRPCCall, r *http.Request, w http.ResponseWriter) {
 	}
 	output := []*CallResult{}
 	for _, resp := range result.Responses {
-		if !headersReceived {
-			checkViaGotos(resp.ResponseHeaders)
-		}
+		checkViaGotos(resp.ResponseHeaders)
 		callResult := &CallResult{
 			Headers: metadata.Join(resp.ResponseHeaders, resp.ResponseTrailers),
 		}

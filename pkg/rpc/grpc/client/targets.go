@@ -22,6 +22,7 @@ import (
 	"goto/pkg/global"
 	gotogrpc "goto/pkg/rpc/grpc"
 	"log"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -31,6 +32,7 @@ import (
 type GRPCTargetsManager struct {
 	targets map[string]*GRPCClient
 	options GRPCOptions
+	lock    sync.Mutex
 }
 
 var (
@@ -59,6 +61,8 @@ func (g *GRPCTargetsManager) AddTarget(name, url, authority, serverName string, 
 		return fmt.Errorf("Service not found for target %s", name)
 	}
 	if c, err := NewGRPCClient(fmt.Sprintf("Client(%s)", name), global.Self.ServerPort, service, url, authority, serverName, options); err == nil {
+		g.lock.Lock()
+		defer g.lock.Unlock()
 		g.targets[name] = c
 		return nil
 	} else {
@@ -67,6 +71,8 @@ func (g *GRPCTargetsManager) AddTarget(name, url, authority, serverName string, 
 }
 
 func (g *GRPCTargetsManager) RemoveTarget(name string) {
+	g.lock.Lock()
+	defer g.lock.Unlock()
 	if t := g.targets[name]; t != nil {
 		t.Close()
 		delete(g.targets, name)
@@ -74,6 +80,8 @@ func (g *GRPCTargetsManager) RemoveTarget(name string) {
 }
 
 func (g *GRPCTargetsManager) ClearTargets() {
+	g.lock.Lock()
+	defer g.lock.Unlock()
 	for _, t := range g.targets {
 		t.Close()
 	}
@@ -91,6 +99,8 @@ func (g *GRPCTargetsManager) configureDialOptions() {
 }
 
 func (g *GRPCTargetsManager) SetTargetTLS(name string, isTLS, verifyTLS bool) {
+	g.lock.Lock()
+	defer g.lock.Unlock()
 	t := g.targets[name]
 	if t == nil {
 		log.Printf("GRPCClient.SetTargetTLS: Target [%s] not found", name)
@@ -102,6 +112,8 @@ func (g *GRPCTargetsManager) SetTargetTLS(name string, isTLS, verifyTLS bool) {
 }
 
 func (g *GRPCTargetsManager) ConnectTarget(name string) {
+	g.lock.Lock()
+	defer g.lock.Unlock()
 	if t := g.targets[name]; t != nil {
 		t.Connect()
 	} else {
@@ -110,6 +122,8 @@ func (g *GRPCTargetsManager) ConnectTarget(name string) {
 }
 
 func (g *GRPCTargetsManager) ConnectTargetWithHeaders(name string, headers map[string]string) {
+	g.lock.Lock()
+	defer g.lock.Unlock()
 	if client := g.targets[name]; client != nil {
 		client.ConnectWithHeadersOrMD(headers, nil)
 	} else {

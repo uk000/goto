@@ -39,10 +39,14 @@ func OnExtAuthzStart() {
 }
 
 func OnExtAuthzStop() {
+	servicesLock.Lock()
+	defer servicesLock.Unlock()
 	IsExtAuthzServiceRunning = false
 }
 
 func RegisterExtAuthzServer(server global.IGRPCManager) {
+	servicesLock.Lock()
+	defer servicesLock.Unlock()
 	if !IsExtAuthzServiceRunning {
 		server.InterceptWithMiddleware(&extauthz.Authorization_ServiceDesc, &ExtAuthzGRPCService{})
 		IsExtAuthzServiceRunning = true

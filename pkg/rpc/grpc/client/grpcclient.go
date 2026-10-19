@@ -30,6 +30,8 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jhump/protoreflect/v2/grpcdynamic"
@@ -64,9 +66,11 @@ type GRPCClient struct {
 	tlsConfig      *tls.Config
 	tlsCredentials credentials.TransportCredentials
 	PeerCertInfo   *gototls.PeerCertInfo
+	// connLock guards conn, stub and the request timeout default, which concurrent calls on the client all use
+	connLock       sync.Mutex
 	conn           *grpc.ClientConn
 	stub           *grpcdynamic.Stub
-	connErrorCount int
+	connErrorCount atomic.Int32
 }
 
 func CreateGRPCClient(label string, clientPort int, service *gotogrpc.GRPCService, targetService, url, authority, serverName string, options *GRPCOptions) (*GRPCClient, error) {
@@ -81,6 +85,9 @@ func CreateGRPCClient(label string, clientPort int, service *gotogrpc.GRPCServic
 }
 
 func NewGRPCClient(label string, clientPort int, service *gotogrpc.GRPCService, url, authority, serverName string, options *GRPCOptions) (*GRPCClient, error) {
+	if options == nil {
+		options = &GRPCOptions{}
+	}
 	if serverName == "" {
 		serverName = authority
 	}
@@ -135,6 +142,7 @@ func (c *GRPCClient) UpdateTLSConfig(serverName string, tlsVersion uint16, verif
 	c.TLSServerName = serverName
 	c.Authority = serverName
 	c.Options.TLSVersion = tlsVersion
+	c.Options.VerifyTLS = verify
 	c.configureTLS()
 }
 
@@ -196,16 +204,16 @@ func (e permanentDialError) Timeout() bool {
 
 func (c *GRPCClient) WithContextDialer() grpc.DialOption {
 	return grpc.WithContextDialer(func(ctx context.Context, address string) (net.Conn, error) {
-		if c.connErrorCount > 1 {
+		if c.connErrorCount.Load() > 1 {
 			return nil, permanentDialError{error: errors.New("max connection attempt reached")}
 		}
 		if conn, err := c.Dialer.DialContext(ctx, "tcp", address); err == nil {
-			if c.Service != nil {
-				metrics.ConnTracker <- c.Service.Name
+			if name := c.serviceName(); name != "" {
+				metrics.ConnTracker <- name
 			}
 			return transport.NewConnTracker(conn, &c.BaseTransportIntercept)
 		} else {
-			c.connErrorCount++
+			c.connErrorCount.Add(1)
 			log.Printf("GRPCClient.WithContextDialer: Failed to dial address [%s] with error: %s\n", address, err.Error())
 			return nil, permanentDialError{error: err}
 		}
@@ -246,8 +254,11 @@ func (c *GRPCClient) Transport() transport.ITransportIntercept {
 }
 
 func (c *GRPCClient) Close() {
-	if c.conn != nil {
-		c.conn.Close()
+	c.connLock.Lock()
+	conn := c.conn
+	c.connLock.Unlock()
+	if conn != nil {
+		conn.Close()
 	}
 }
 
@@ -256,7 +267,30 @@ func (c *GRPCClient) HTTP() *http.Client {
 }
 
 func (c *GRPCClient) GRPC() *grpc.ClientConn {
+	c.connLock.Lock()
+	defer c.connLock.Unlock()
 	return c.conn
+}
+
+func (c *GRPCClient) serviceName() string {
+	c.connLock.Lock()
+	defer c.connLock.Unlock()
+	if c.Service != nil {
+		return c.Service.Name
+	}
+	return ""
+}
+
+func (c *GRPCClient) getStub() *grpcdynamic.Stub {
+	c.connLock.Lock()
+	defer c.connLock.Unlock()
+	return c.stub
+}
+
+func (c *GRPCClient) requestTimeout() time.Duration {
+	c.connLock.Lock()
+	defer c.connLock.Unlock()
+	return c.Options.RequestTimeout
 }
 
 func (c *GRPCClient) IsGRPC() bool {
@@ -279,14 +313,18 @@ func (c *GRPCClient) createContext(headers map[string]string, md metadata.MD) (c
 		md = metadata.New(headers)
 		ctx = metadata.NewOutgoingContext(ctx, md)
 	}
+	c.connLock.Lock()
 	if c.Options.RequestTimeout == 0 {
 		c.Options.RequestTimeout = 5 * time.Minute
 	}
+	c.connLock.Unlock()
 	return ctx, md
 }
 
 func (c *GRPCClient) Connect() error {
-	c.connErrorCount = 0
+	c.connLock.Lock()
+	defer c.connLock.Unlock()
+	c.connErrorCount.Store(0)
 	if c.conn != nil {
 		connState := c.conn.GetState()
 		if connState != connectivity.Connecting && connState != connectivity.Idle && connState != connectivity.Ready {
@@ -297,26 +335,38 @@ func (c *GRPCClient) Connect() error {
 	if c.conn == nil {
 		var err error
 		if c.conn, err = grpc.NewClient(c.URL, c.Options.DialOptions...); err != nil {
-			log.Printf("GRPCClient.Connect: [ERROR] Failed to connect to target [%s] url [%s] with error: %s\n", c.Service.Name, c.URL, err.Error())
+			serviceName := ""
+			if c.Service != nil {
+				serviceName = c.Service.Name
+			}
+			log.Printf("GRPCClient.Connect: [ERROR] Failed to connect to target [%s] url [%s] with error: %s\n", serviceName, c.URL, err.Error())
+			c.conn = nil
 			return err
 		}
+		c.stub = grpcdynamic.NewStub(c.conn)
+	} else if c.stub == nil {
+		c.stub = grpcdynamic.NewStub(c.conn)
 	}
-	c.stub = grpcdynamic.NewStub(c.conn)
 	return nil
 }
 
 func (c *GRPCClient) monitorAndAbort() {
+	conn := c.GRPC()
+	if conn == nil {
+		return
+	}
 	go func() {
 		time.Sleep(1 * time.Second)
 		for {
-			state := c.conn.GetState()
+			state := conn.GetState()
 			if state == connectivity.TransientFailure || state == connectivity.Connecting {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
 				log.Println("Connection failed. Monitoring deadline to abort retries...")
-				if !c.conn.WaitForStateChange(ctx, state) {
+				changed := conn.WaitForStateChange(ctx, state)
+				cancel()
+				if !changed {
 					log.Println("Exceeded 5-second retry budget. Force closing gRPC channel pool.")
-					c.conn.Close()
+					conn.Close()
 					return
 				}
 			} else {
@@ -336,10 +386,14 @@ func (c *GRPCClient) ConnectWithHeadersOrMD(headers map[string]string, md metada
 }
 
 func (c *GRPCClient) LoadServiceMethodFromReflection(serviceName, methodName string) (err error) {
-	c.Service, err = gotogrpc.LoadRemoteReflectedServiceV1(c.conn, serviceName, methodName)
+	conn := c.GRPC()
+	service, err := gotogrpc.LoadRemoteReflectedServiceV1(conn, serviceName, methodName)
 	if err != nil {
-		c.Service, err = gotogrpc.LoadRemoteReflectedServiceV1Alpha(c.conn, serviceName, methodName)
+		service, err = gotogrpc.LoadRemoteReflectedServiceV1Alpha(conn, serviceName, methodName)
 	}
+	c.connLock.Lock()
+	c.Service = service
+	c.connLock.Unlock()
 	return
 }
 
@@ -348,5 +402,6 @@ func LoadRemoteReflectedServices(upstream string) (err error) {
 	if err != nil {
 		return err
 	}
-	return gotogrpc.LoadRemoteReflectedServices(c.conn)
+	defer c.Close()
+	return gotogrpc.LoadRemoteReflectedServices(c.GRPC())
 }

@@ -64,13 +64,22 @@ type GRPCResponse struct {
 }
 
 func (c *GRPCClient) Invoke(call *GRPCCall, callback func(proto.Message, metadata.MD)) (result *GRPCResult) {
+	result = newGRPCResult()
 	if c.Service == nil || c.Service.Methods == nil {
-		result.AddError(fmt.Errorf("GRPCClient.Invoke: [ERROR] service [%s] not configured", c.Service.Name))
+		name := call.Service
+		if c.Service != nil {
+			name = c.Service.Name
+		}
+		result.AddError(fmt.Errorf("GRPCClient.Invoke: [ERROR] service [%s] not configured", name))
 		return
 	}
 	grpcMethod := c.Service.Methods[call.Method]
 	if grpcMethod == nil {
 		result.AddError(fmt.Errorf("GRPCClient.Invoke: [ERROR] method [%s] not found in Service [%s]", call.Method, c.Service.Name))
+		return
+	}
+	if call.Payloads == nil {
+		result.AddError(fmt.Errorf("GRPCClient.Invoke: [ERROR] No payload for method [%s] of Service [%s]", call.Method, c.Service.Name))
 		return
 	}
 	headers := types.SimpleHTTPHeaders{}
@@ -80,7 +89,6 @@ func (c *GRPCClient) Invoke(call *GRPCCall, callback func(proto.Message, metadat
 		result.AddError(err)
 		return
 	}
-	result = newGRPCResult()
 	c.monitorAndAbort()
 	if grpcMethod.IsUnary {
 		c.InvokeUnary(call, grpcMethod, md, ctx, result)
@@ -129,12 +137,16 @@ func (c *GRPCClient) InvokeRaw(method *gotogrpc.GRPCServiceMethod, inMD metadata
 }
 
 func (c *GRPCClient) OpenStream(port int, method *gotogrpc.GRPCServiceMethod, md metadata.MD, input proto.Message) (stream gotogrpc.GRPCStream, err error) {
+	if !method.IsClientStream && !method.IsServerStream {
+		return nil, fmt.Errorf("GRPCClient.OpenStream: method [%s] is not a streaming method", method.Name)
+	}
 	ctx, _, err := c.ConnectWithHeadersOrMD(nil, md)
 	if err != nil {
 		return
 	}
+	stub := c.getStub()
 	if method.IsClientStream && method.IsServerStream {
-		if bs, e := c.stub.InvokeRpcBidiStream(ctx, method.PMD); e == nil {
+		if bs, e := stub.InvokeRpcBidiStream(ctx, method.PMD); e == nil {
 			stream = gotogrpc.NewGRPCStreamForClient(port, method, nil, nil, bs)
 			if input != nil {
 				stream.Send(input)
@@ -143,7 +155,7 @@ func (c *GRPCClient) OpenStream(port int, method *gotogrpc.GRPCServiceMethod, md
 			err = e
 		}
 	} else if method.IsClientStream {
-		if cs, e := c.stub.InvokeRpcClientStream(ctx, method.PMD); e == nil {
+		if cs, e := stub.InvokeRpcClientStream(ctx, method.PMD); e == nil {
 			stream = gotogrpc.NewGRPCStreamForClient(port, method, cs, nil, nil)
 			if input != nil {
 				stream.Send(input)
@@ -152,7 +164,7 @@ func (c *GRPCClient) OpenStream(port int, method *gotogrpc.GRPCServiceMethod, md
 			err = e
 		}
 	} else if method.IsServerStream {
-		if ss, e := c.stub.InvokeRpcServerStream(ctx, method.PMD, input); e == nil {
+		if ss, e := stub.InvokeRpcServerStream(ctx, method.PMD, input); e == nil {
 			stream = gotogrpc.NewGRPCStreamForClient(port, method, nil, ss, nil)
 		} else {
 			err = e
@@ -179,8 +191,14 @@ func (c *GRPCClient) InvokeUnary(call *GRPCCall, m *gotogrpc.GRPCServiceMethod, 
 		}
 		var respHeaders metadata.MD
 		var respTrailers metadata.MD
-		ctx = metadata.NewOutgoingContext(ctx, md)
-		output, err := c.stub.InvokeRpc(ctx, m.PMD, input, grpc.Trailer(&respTrailers), grpc.Header(&respHeaders))
+		// every call has a context of its own, as the payloads may be sent concurrently
+		callCtx := metadata.NewOutgoingContext(ctx, md)
+		if timeout := c.requestTimeout(); timeout > 0 {
+			var cancel context.CancelFunc
+			callCtx, cancel = context.WithTimeout(callCtx, timeout)
+			defer cancel()
+		}
+		output, err := c.getStub().InvokeRpc(callCtx, m.PMD, input, grpc.Trailer(&respTrailers), grpc.Header(&respHeaders))
 		response := newGRPCResponse(respHeaders, respTrailers, []proto.Message{output}, 0, 0)
 		if processResponseStatus(m, response, err) {
 			result.AddResponse(response)
@@ -195,7 +213,7 @@ func (c *GRPCClient) InvokeUnary(call *GRPCCall, m *gotogrpc.GRPCServiceMethod, 
 func (c *GRPCClient) InvokeUnaryRaw(ctx context.Context, m *gotogrpc.GRPCServiceMethod, input proto.Message) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
 	respHeaders = metadata.MD{}
 	respTrailers = metadata.MD{}
-	r, e := c.stub.InvokeRpc(ctx, m.PMD, input, grpc.Header(&respHeaders), grpc.Trailer(&respTrailers))
+	r, e := c.getStub().InvokeRpc(ctx, m.PMD, input, grpc.Header(&respHeaders), grpc.Trailer(&respTrailers))
 	responses = []proto.Message{r}
 	err = e
 	return
@@ -283,23 +301,28 @@ func (c *GRPCClient) InvokeServerStreamRaw(m *gotogrpc.GRPCServiceMethod, md met
 		return
 	}
 	in := make(chan proto.Message)
+	recvDone := make(chan error, 1)
 	go func() {
 		receiveCount, e := stream.TeeStreamReceive(in, nil)
 		if e != nil {
-			err = e
-			log.Printf("GRPCClient.InvokeServerStream: Service [%s] Method [%s] Failed to initiate Server stream with error: %s\n", m.Service.Name, m.Name, err.Error())
+			log.Printf("GRPCClient.InvokeServerStream: Service [%s] Method [%s] Failed to receive from Server stream with error: %s\n", m.Service.Name, m.Name, e.Error())
 		} else {
 			log.Printf("GRPCClient.InvokeServerStream: Service [%s] Method [%s] stream received [%d] messages\n", m.Service.Name, m.Name, receiveCount)
 		}
+		recvDone <- e
 	}()
 	respHeaders, err = stream.Headers()
-	respTrailers = stream.Trailers()
 	for msg := range in {
 		responses = append(responses, msg)
 		if callback != nil {
 			callback(msg, respHeaders)
 		}
 	}
+	if e := <-recvDone; e != nil && err == nil {
+		err = e
+	}
+	// the trailers are there only after the stream is done
+	respTrailers = stream.Trailers()
 	return
 }
 
@@ -325,8 +348,6 @@ func (c *GRPCClient) InvokeBidiStreamRaw(m *gotogrpc.GRPCServiceMethod, md metad
 }
 
 func (c *GRPCClient) internalInvokeBidiStream(m *gotogrpc.GRPCServiceMethod, md metadata.MD, messages []proto.Message, payloads [][]byte, keepOpen time.Duration, callback func(proto.Message, metadata.MD)) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
-	// var input proto.Message
-	// input, messages, payloads, err = c.createFirstInput(m, messages, payloads)
 	stream, err := c.OpenStream(0, m, md, nil)
 	if err != nil {
 		log.Printf("GRPCClient.InvokeBidiStreamRaw: Service [%s] Method [%s] [ERROR] Failed to initiate Bidi stream with error: %s\n", m.Service.Name, m.Name, err.Error())
@@ -338,7 +359,11 @@ func (c *GRPCClient) internalInvokeBidiStream(m *gotogrpc.GRPCServiceMethod, md 
 	var finalResponse proto.Message
 	var sendError, recvError error
 	in := make(chan proto.Message)
+	// the results of the sender and the receiver are read after both are done
+	var done sync.WaitGroup
+	done.Add(2)
 	go func() {
+		defer done.Done()
 		if messages != nil {
 			finalResponse, _, sendError = stream.SendMulti(messages)
 		} else {
@@ -350,15 +375,15 @@ func (c *GRPCClient) internalInvokeBidiStream(m *gotogrpc.GRPCServiceMethod, md 
 		}
 	}()
 	go func() {
+		defer done.Done()
 		receiveCount, e := stream.TeeStreamReceive(in, nil)
 		if e == nil {
 			log.Printf("GRPCClient.InvokeBidiStreamRaw: Service [%s] Method [%s] stream received [%d] messages\n", m.Service.Name, m.Name, receiveCount)
 		} else {
 			recvError = e
-			log.Printf("GRPCClient.InvokeBidiStreamRaw: Service [%s] Method [%s] Failed to initiate Bidi stream with error: %s\n", m.Service.Name, m.Name, err.Error())
+			log.Printf("GRPCClient.InvokeBidiStreamRaw: Service [%s] Method [%s] Failed to receive from Bidi stream with error: %s\n", m.Service.Name, m.Name, e.Error())
 		}
 	}()
-	stream.Wait()
 	h, e := stream.Headers()
 	if e == nil {
 		respHeaders = h
@@ -372,6 +397,7 @@ func (c *GRPCClient) internalInvokeBidiStream(m *gotogrpc.GRPCServiceMethod, md 
 			callback(msg, respHeaders)
 		}
 	}
+	done.Wait()
 	if sendError != nil {
 		err = sendError
 	} else if recvError != nil {
@@ -389,7 +415,7 @@ func (c *GRPCClient) internalInvokeBidiStream(m *gotogrpc.GRPCServiceMethod, md 
 }
 
 func (call *GRPCCall) UpdateHeaders(headers types.MutatingHeaders) {
-	if call.Headers.Request != nil {
+	if call.Headers != nil && call.Headers.Request != nil {
 		call.Headers.Request.UpdateHeaders(headers)
 		if call.Headers.Request.Forward != nil {
 			types.ForwardHeaders(call.RequestHeaders, headers, slices.Values(call.Headers.Request.Forward))
@@ -423,6 +449,11 @@ func (r *GRPCResult) AddResponse(response *GRPCResponse) {
 }
 
 func (r *GRPCResult) GetErrors() string {
+	if r == nil {
+		return ""
+	}
+	r.lock.Lock()
+	defer r.lock.Unlock()
 	b := strings.Builder{}
 	for _, err := range r.Errors {
 		b.WriteString(err.Error())

@@ -94,6 +94,9 @@ type ProxyGRPCStreamFunc func(context.Context, int, *GRPCServiceMethod, string, 
 var _ DynamicServiceInterface = (*DynamicServiceStub)(nil)
 
 var (
+	// methodLock guards what the APIs configure on the methods (the stream settings and the response payload), which
+	// the servers read while they serve. It's a lock of the package, as the methods are copied by value.
+	methodLock        sync.RWMutex
 	ServiceRegistry   = &GRPCServiceRegistry{lock: sync.RWMutex{}}
 	GRPCUnaryHandler  func(*GRPCServiceMethod) grpc.MethodHandler
 	GRPCStreamHandler func(interface{}, grpc.ServerStream) error
@@ -121,10 +124,16 @@ func (gsr *GRPCServiceRegistry) GetService(name string) *GRPCService {
 	return gsr.Services[name]
 }
 
+// GetOrCreateService returns the registered service of the descriptor, and creates it if there isn't one yet. It
+// returns nil if the service isn't registered and a descriptor of it can't be loaded.
 func (gsr *GRPCServiceRegistry) GetOrCreateService(gsd *grpc.ServiceDesc) *GRPCService {
 	service := gsr.GetService(gsd.ServiceName)
 	if service == nil {
-		psd, _ := grpcreflect.LoadServiceDescriptor(gsd)
+		psd, err := grpcreflect.LoadServiceDescriptor(gsd)
+		if err != nil || psd == nil {
+			log.Printf("Error loading service descriptor of [%s]: %v", gsd.ServiceName, err)
+			return nil
+		}
 		service = gsr.NewGRPCServiceFromDescriptors(gsd, psd)
 	}
 	return service
@@ -190,7 +199,32 @@ func (gsr *GRPCServiceRegistry) RemoveTeeService(port int) {
 }
 
 func (gsr *GRPCServiceRegistry) GetRPCService(name string) rpc.RPCService {
-	return gsr.GetService(name)
+	if s := gsr.GetService(name); s != nil {
+		return s
+	}
+	return nil
+}
+
+// MarshalJSON encodes the services with the lock of the registry held, since services are added and removed while the
+// registry is being listed.
+func (gsr *GRPCServiceRegistry) MarshalJSON() ([]byte, error) {
+	gsr.lock.RLock()
+	defer gsr.lock.RUnlock()
+	return json.Marshal(struct {
+		Services       map[string]*GRPCService
+		ActiveServices map[string]*GRPCService
+		ProxyServices  map[string]*types.Triple[*GRPCService, *GRPCService, int]
+		TeeServices    map[int]*types.Pair[*GRPCService, *GRPCService]
+	}{gsr.Services, gsr.ActiveServices, gsr.ProxyServices, gsr.TeeServices})
+}
+
+// MarshalJSON encodes the service with the lock of the methods held, since the APIs configure the methods while the
+// services are being listed.
+func (s *GRPCService) MarshalJSON() ([]byte, error) {
+	type plain GRPCService
+	methodLock.RLock()
+	defer methodLock.RUnlock()
+	return json.Marshal((*plain)(s))
 }
 
 func (gsr *GRPCServiceRegistry) RemoveService(name string) {
@@ -321,31 +355,44 @@ func (gsr *GRPCServiceRegistry) CloneService(service *GRPCService, target string
 	if targetService != nil {
 		return
 	}
+	if service == nil || service.GSD == nil {
+		return nil, fmt.Errorf("service [%s] has no service descriptor to clone", target)
+	}
 	s2 := *service
 	s2.Name = target
 	s2.URI = strings.ToLower(fmt.Sprintf("/%s", target))
 	s2.Methods = make(map[string]*GRPCServiceMethod)
+	// The descriptor is a shallow copy, so the slices of its methods and streams have to be copied too: the handlers
+	// of the clone are set into them, which must not change the handlers of the service that is cloned.
 	gsd2 := *service.GSD
 	gsd2.ServiceName = target
+	gsd2.Methods = append([]grpc.MethodDesc(nil), service.GSD.Methods...)
+	gsd2.Streams = append([]grpc.StreamDesc(nil), service.GSD.Streams...)
 	for i, gsdm := range gsd2.Methods {
 		m := service.Methods[gsdm.MethodName]
+		methodLock.RLock()
 		m2 := *m
+		methodLock.RUnlock()
 		m2.Service = &s2
 		m2.URI = strings.ToLower(fmt.Sprintf("/%s/%s", target, m.Name))
+		m2.GMD = &gsd2.Methods[i]
 		gsd2.Methods[i].Handler = GRPCUnaryHandler(&m2)
 		s2.Methods[m2.Name] = &m2
 	}
 	for i, gsds := range gsd2.Streams {
 		m := service.Methods[gsds.StreamName]
+		methodLock.RLock()
 		m2 := *m
+		methodLock.RUnlock()
 		m2.Service = &s2
 		m2.URI = strings.ToLower(fmt.Sprintf("/%s/%s", target, m.Name))
+		m2.GSD = &gsd2.Streams[i]
 		gsd2.Streams[i].Handler = GRPCStreamHandler
 		s2.Methods[m2.Name] = &m2
 	}
 	var psd2 protoreflect.ServiceDescriptor
 	if psd2, err = grpcreflect.LoadServiceDescriptor(&gsd2); err != nil {
-		return
+		return nil, err
 	}
 	s2.GSD = &gsd2
 	s2.PSD = psd2
@@ -416,17 +463,37 @@ func (m *GRPCServiceMethod) GetURI() string {
 }
 
 func (m *GRPCServiceMethod) SetStreamCount(count int) {
+	methodLock.Lock()
+	defer methodLock.Unlock()
 	m.StreamCount = count
 }
 
 func (m *GRPCServiceMethod) SetStreamDelay(min, max time.Duration, count int) {
+	methodLock.Lock()
+	defer methodLock.Unlock()
 	m.StreamDelayMin = min
 	m.StreamDelayMax = max
 	m.StreamDelayCount = count
 }
 
 func (m *GRPCServiceMethod) SetResponsePayload(payload []byte) {
+	methodLock.Lock()
+	defer methodLock.Unlock()
 	m.ResponsePayload = payload
+}
+
+// GetStreamConfig returns the stream settings of the method: the number of responses, and the delay between them.
+func (m *GRPCServiceMethod) GetStreamConfig() (count int, delayMin, delayMax time.Duration, delayCount int) {
+	methodLock.RLock()
+	defer methodLock.RUnlock()
+	return m.StreamCount, m.StreamDelayMin, m.StreamDelayMax, m.StreamDelayCount
+}
+
+// GetResponsePayload returns the response payload that was set for the method.
+func (m *GRPCServiceMethod) GetResponsePayload() GRPCResponsePayload {
+	methodLock.RLock()
+	defer methodLock.RUnlock()
+	return m.ResponsePayload
 }
 
 func (m *GRPCServiceMethod) ProcessAndSetPayload(port int, data any, matches []*payload.RequestMatch, capture *payload.RequestCapture, contentType, delay string, streamCount int) error {

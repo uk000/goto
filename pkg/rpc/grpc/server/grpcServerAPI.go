@@ -18,8 +18,8 @@ package grpcserver
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
-	"io"
 	"goto/pkg/rpc"
 	"goto/pkg/rpc/grpc"
 	gotogrpc "goto/pkg/rpc/grpc"
@@ -27,7 +27,9 @@ import (
 	"goto/pkg/server/listeners"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -51,7 +53,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(serverRouter, "/services/{service}/serve", serveService, "POST")
 	util.AddRoute(serverRouter, "/services/{service}/stop", stopService, "POST")
 	util.AddRoute(serverRouter, "/services/active", getActiveServices, "GET")
-	util.AddRoute(serverRouter, "/services", getActiveServices, "GET")
+	util.AddRoute(serverRouter, "/services", getServices, "GET")
 	extAuthzRouter := util.PathRouter(grpcRouter, "/extauthz")
 	util.AddRoute(extAuthzRouter, "/rules", getExtAuthzRulesAPI, "GET")
 	util.AddRoute(extAuthzRouter, "/rules", addExtAuthzRulesAPI, "POST")
@@ -117,8 +119,18 @@ func removeExtAuthzRulesAPI(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// requestedPort gives the port that a request names, in the port param of its path or in the one of its query. The
+// routes here have no port in their paths, and the port of the path is only a param of the routes that have it.
+func requestedPort(r *http.Request) int {
+	if port := util.GetIntParamValue(r, "port"); port > 0 {
+		return port
+	}
+	port, _ := strconv.Atoi(r.URL.Query().Get("port"))
+	return port
+}
+
 func openGRPCPort(w http.ResponseWriter, r *http.Request) {
-	port := util.GetIntParamValue(r, "port")
+	port := requestedPort(r)
 	msg := ""
 	status := http.StatusOK
 	if port <= 0 || port > 65535 {
@@ -166,24 +178,38 @@ func stopService(w http.ResponseWriter, r *http.Request) {
 			delete(ActiveServices, port)
 		}
 		lock.Unlock()
-		msg = fmt.Sprintf("Service [%s] registered for serving on port [%d]", service.Name, port)
+		msg = fmt.Sprintf("Service [%s] stopped on port [%d]", service.Name, port)
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
 
+// getActiveServices reports the services that are served, of all the ports or of the port that is asked for.
 func getActiveServices(w http.ResponseWriter, r *http.Request) {
-	port := util.GetIntParamValue(r, "port")
-	active := strings.Contains(r.RequestURI, "active")
-	if active {
-		if port > 0 {
-			util.WriteJsonPayload(w, ActiveServices[port])
-		} else {
-			util.WriteJsonPayload(w, ActiveServices)
-		}
+	port := requestedPort(r)
+	lock.RLock()
+	defer lock.RUnlock()
+	if port > 0 {
+		util.WriteJsonPayload(w, ActiveServices[port])
 	} else {
-		util.WriteJsonPayload(w, gotogrpc.ServiceRegistry.Services)
+		util.WriteJsonPayload(w, ActiveServices)
 	}
+}
+
+// knownServices gives the services of the registry as they are now. Services are added to the registry while the
+// APIs report them, and the registry encodes itself with its lock held, which the map of services can't be read with
+// from here.
+func knownServices() any {
+	services := struct{ Services json.RawMessage }{}
+	if b, err := json.Marshal(gotogrpc.ServiceRegistry); err != nil || json.Unmarshal(b, &services) != nil || len(services.Services) == 0 {
+		return map[string]any{}
+	}
+	return services.Services
+}
+
+// getServices reports the services that are known, whether they are served or not.
+func getServices(w http.ResponseWriter, r *http.Request) {
+	util.WriteJsonPayload(w, knownServices())
 }
 
 func loadReflectedServices(w http.ResponseWriter, r *http.Request) {
@@ -206,6 +232,6 @@ func loadReflectedServices(w http.ResponseWriter, r *http.Request) {
 		msg = err.Error()
 		return
 	}
-	util.WriteJsonPayload(w, gotogrpc.ServiceRegistry.Services)
+	util.WriteJsonPayload(w, knownServices())
 	util.AddLogMessage("Remote services loaded", r)
 }

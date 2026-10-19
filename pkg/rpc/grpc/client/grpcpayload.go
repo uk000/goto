@@ -18,7 +18,6 @@ package grpcclient
 
 import (
 	"goto/pkg/types"
-	"maps"
 	"sync"
 
 	"google.golang.org/grpc/metadata"
@@ -53,7 +52,8 @@ func (gp *GRPCPayload) Count() int {
 func (gp *GRPCPayload) Process(call *GRPCCall, md metadata.MD, uCall UnaryCallHandler, sCall StreamCallHandler, wg *sync.WaitGroup) {
 	finalMD := md
 	if gp.Headers != nil {
-		finalMD = maps.Clone(md)
+		// a copy, so that the headers of a payload apply to it only, whether or not there are headers to start with
+		finalMD = md.Copy()
 		call.UpdateStreamHeaders(types.MD(finalMD), gp)
 	}
 	if len(gp.Linear) > 0 {
@@ -65,7 +65,20 @@ func (gp *GRPCPayload) Process(call *GRPCCall, md metadata.MD, uCall UnaryCallHa
 		for _, payload := range gp.Stream {
 			streamPayload = append(streamPayload, []byte(payload))
 		}
-		sCall(finalMD, streamPayload, wg)
+		if sCall != nil {
+			sCall(finalMD, streamPayload, wg)
+		} else if uCall != nil {
+			// a unary call has no stream to send the messages to, so each of them is a call
+			for i, payload := range streamPayload {
+				if i == len(streamPayload)-1 {
+					uCall(finalMD, payload, wg)
+				} else {
+					uCall(finalMD, payload, nil)
+				}
+			}
+		} else if wg != nil {
+			wg.Done()
+		}
 	} else if gp.Payload != "" {
 		if uCall != nil {
 			uCall(finalMD, []byte(gp.Payload), wg)
@@ -83,8 +96,13 @@ func (gp *GRPCPayloads) Process(call *GRPCCall, md metadata.MD, uCall UnaryCallH
 	} else if len(gp.Concurrent) > 0 {
 		wg := &sync.WaitGroup{}
 		for _, gp2 := range gp.Concurrent {
-			wg.Add(gp2.Count())
-			go gp2.Process(call, md, uCall, sCall, wg)
+			wg.Add(1)
+			go func() {
+				// the payloads run in order within a payload, and the wait is for the payloads, not the calls that
+				// each of them makes, so the handlers are given no wait group
+				defer wg.Done()
+				gp2.Process(call, md, uCall, sCall, nil)
+			}()
 		}
 		wg.Wait()
 	}

@@ -96,6 +96,9 @@ func ReadRequest(method *GRPCServiceMethod, dec func(interface{}) error) *dynami
 }
 
 func SendStreamResponse(method *GRPCServiceMethod, stream grpc.ServerStream, responses []proto.Message, from, to int) error {
+	if len(responses) == 0 {
+		return nil
+	}
 	rem := to - from
 	if from > len(responses) {
 		from = 0
@@ -136,7 +139,10 @@ func CommonHandler(ctx context.Context, stream grpc.ServerStream) (ctx2 context.
 		err = fmt.Errorf("failed to get peer info")
 		return
 	}
-	port = p.LocalAddr.(*net.TCPAddr).Port
+	// The local address is not always a TCP address: it's another kind for in-memory connections, and it may be missing.
+	if localAddr, ok := p.LocalAddr.(*net.TCPAddr); ok && localAddr != nil {
+		port = localAddr.Port
+	}
 	if port == 0 {
 		port = util.GetContextPort(ctx)
 	}

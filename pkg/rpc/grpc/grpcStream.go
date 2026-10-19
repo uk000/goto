@@ -123,10 +123,13 @@ type StreamHook struct {
 	debugout    chan proto.Message
 }
 
+// GRPCStreamTracker counts the messages of a stream. The two directions of a stream are served by different goroutines
+// that update the counts at the same time, so the counts are not to be read or written but by its methods.
 type GRPCStreamTracker struct {
 	RequestCount  int             `json:"requestCount"`
 	ResponseCount int             `json:"responseCount"`
 	MessageLog    []proto.Message `json:"messageLog"`
+	lock          sync.Mutex
 }
 
 func init() {
@@ -134,7 +137,7 @@ func init() {
 }
 
 func NewGRPCStreamForClient(port int, method *GRPCServiceMethod, cs *grpcdynamic.ClientStream, ss *grpcdynamic.ServerStream, bs *grpcdynamic.BidiStream) GRPCStream {
-	if method == nil && cs == nil && ss == nil && bs == nil {
+	if method == nil {
 		return nil
 	}
 	stream := &GRPCClientStream{
@@ -171,7 +174,7 @@ func NewGRPCStreamForClient(port int, method *GRPCServiceMethod, cs *grpcdynamic
 }
 
 func NewServerStream(port int, method *GRPCServiceMethod, ss grpc.ServerStream, cancelFunc context.CancelFunc) GRPCStream {
-	if method == nil && ss == nil {
+	if method == nil || ss == nil {
 		return nil
 	}
 	stream := &GRPCServerStream{
@@ -199,7 +202,12 @@ func (s *GRPCBaseStream) Init() {
 	s.wg.Add(2)
 }
 
+// Self returns the stream that this base is a part of (the client or server stream), which is what the methods of the
+// base have to call to get to the methods that the streams implement.
 func (s *GRPCBaseStream) Self() GRPCStream {
+	if s.self != nil {
+		return s.self
+	}
 	return s
 }
 
@@ -384,9 +392,10 @@ func (s *GRPCBaseStream) internalReceiveMulti(in, tee chan proto.Message, tracke
 	if !s.hasStream {
 		return 0, errors.New("no stream")
 	}
-	receiveCount = s.tracker.RequestCount
+	requestCount, responseCount := s.tracker.Counts()
+	receiveCount = requestCount
 	if isOutput {
-		receiveCount = s.tracker.ResponseCount
+		receiveCount = responseCount
 	}
 	for {
 		msg, e := s.self.Receive()
@@ -402,6 +411,7 @@ func (s *GRPCBaseStream) internalReceiveMulti(in, tee chan proto.Message, tracke
 			if global.Flags.EnableGRPCDebugLogs {
 				log.Printf("%s.internalReceiveMulti: [%s] [ERROR] %s\n", selfType, s.label, e.Error())
 			}
+			err = e
 			break
 		} else if msg == nil {
 			if global.Flags.EnableGRPCDebugLogs {
@@ -525,10 +535,13 @@ func (s *GRPCBaseStream) internalSendMulti(messages []proto.Message, in, out, te
 			log.Printf("%s.internalSendMulti: [%s] [INFO] Out channel closed. Sender closing stream.\n", selfType, s.label)
 		}
 	}
-	msg, err = s.self.Close()
-	if err != nil {
+	// The error of a send must not be lost to the result of closing the stream, which succeeds for a server stream.
+	sendErr := err
+	var closeErr error
+	msg, closeErr = s.self.Close()
+	if closeErr != nil {
 		if global.Flags.EnableGRPCDebugLogs {
-			log.Printf("%s.internalSendMulti: [%s] [ERROR] Error while closing stream: %s\n", selfType, s.label, err.Error())
+			log.Printf("%s.internalSendMulti: [%s] [ERROR] Error while closing stream: %s\n", selfType, s.label, closeErr.Error())
 		}
 	} else if msg == nil {
 		if global.Flags.EnableGRPCDebugLogs {
@@ -539,6 +552,13 @@ func (s *GRPCBaseStream) internalSendMulti(messages []proto.Message, in, out, te
 			log.Printf("%s.internalSendMulti: [%s] [INFO] Read final message upon close [%+v]\n", selfType, s.label, msg)
 		}
 		s.handleReceivedMessage(msg, in, tee, tracker, true)
+	}
+	// A send that finds the call ended by the server gets io.EOF, and the status that the server ended it with is what
+	// closing the stream gives.
+	if sendErr == nil || (errors.Is(sendErr, io.EOF) && closeErr != nil) {
+		err = closeErr
+	} else {
+		err = sendErr
 	}
 	if s.keepOpen > 0 {
 		sleep := s.keepOpen - time.Since(startTime)
@@ -561,13 +581,19 @@ func (s *GRPCBaseStream) AsyncSendReceive(outMessages []proto.Message) (inMessag
 	s.Init()
 	var finalResponse proto.Message
 	var sendError, recvError error
+	// The results are read once both are done. The stream's own wait group is done before the results are assigned (it
+	// is released by the stream operations themselves), so it can't tell when it's safe to read them.
+	var done sync.WaitGroup
+	done.Add(2)
 	go func() {
+		defer done.Done()
 		finalResponse, _, sendError = s.self.SendMulti(outMessages)
 	}()
 	go func() {
+		defer done.Done()
 		_, recvError = s.self.TeeStreamReceive(nil, nil)
 	}()
-	s.wg.Wait()
+	done.Wait()
 
 	respHeaders, err = s.self.Headers()
 	respTrailers = s.self.Trailers()
@@ -609,13 +635,18 @@ func (s *GRPCBaseStream) ChainedSendReceive(in, out chan proto.Message) (receive
 	}
 	s.Init()
 	var sendError, recvError error
+	// See AsyncSendReceive on why the stream's wait group isn't used to wait for the results.
+	var done sync.WaitGroup
+	done.Add(2)
 	go func() {
+		defer done.Done()
 		receiveCount, recvError = s.self.TeeStreamReceive(in, nil)
 	}()
 	go func() {
+		defer done.Done()
 		sendCount, sendError = s.self.TeeStreamSend(in, out, nil)
 	}()
-	s.wg.Wait()
+	done.Wait()
 
 	if sendError != nil {
 		err = sendError
@@ -632,14 +663,18 @@ func (s *GRPCBaseStream) ChainedTeeStream(in, out, teeIn, teeOut chan proto.Mess
 	}
 	s.Init()
 	var sendError, recvError error
-
+	// See AsyncSendReceive on why the stream's wait group isn't used to wait for the results.
+	var done sync.WaitGroup
+	done.Add(2)
 	go func() {
+		defer done.Done()
 		receiveCount, recvError = s.self.TeeStreamReceive(in, teeIn)
 	}()
 	go func() {
+		defer done.Done()
 		sendCount, sendError = s.self.TeeStreamSend(in, out, teeOut)
 	}()
-	s.wg.Wait()
+	done.Wait()
 
 	if sendError != nil {
 		err = sendError
@@ -761,7 +796,7 @@ func (s *GRPCClientStream) SendJSONs(jsons []any) (message proto.Message, sendCo
 }
 
 func (s *GRPCClientStream) SendMulti(messages []proto.Message) (message proto.Message, sendCount int, err error) {
-	message, _, err = s.internalSendMulti(messages, nil, nil, nil, s.tracker.IncrementRequestCount, false)
+	message, sendCount, err = s.internalSendMulti(messages, nil, nil, nil, s.tracker.IncrementRequestCount, false)
 	return
 }
 
@@ -875,15 +910,28 @@ func (s *GRPCServerStream) Close() (proto.Message, error) {
 }
 
 func (t *GRPCStreamTracker) AddMessage(msg proto.Message) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
 	t.MessageLog = append(t.MessageLog, msg)
 }
 
 func (t *GRPCStreamTracker) IncrementRequestCount() {
+	t.lock.Lock()
+	defer t.lock.Unlock()
 	t.RequestCount++
 }
 
 func (t *GRPCStreamTracker) IncrementResponseCount() {
+	t.lock.Lock()
+	defer t.lock.Unlock()
 	t.ResponseCount++
+}
+
+// Counts returns the number of requests and responses that were counted.
+func (t *GRPCStreamTracker) Counts() (requests, responses int) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	return t.RequestCount, t.ResponseCount
 }
 
 func NewStreamHook(label string, ctx context.Context, hook HookFunc, isInStream, isOutStream bool) *StreamHook {

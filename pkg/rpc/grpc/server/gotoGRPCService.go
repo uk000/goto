@@ -38,6 +38,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 type IGRPCService interface {
@@ -71,10 +72,14 @@ func OnGRPCStart() {
 }
 
 func OnGRPCStop() {
+	servicesLock.Lock()
+	defer servicesLock.Unlock()
 	IsGotoServiceRunning = false
 }
 
 func RegisterGotoServer(server global.IGRPCManager) {
+	servicesLock.Lock()
+	defer servicesLock.Unlock()
 	if !IsGotoServiceRunning {
 		//pb.RegisterGotoServer(TheGRPCServer.Server, &GotoGRPCService{})
 		server.InterceptWithMiddleware(&pb.Goto_ServiceDesc, &GotoGRPCService{})
@@ -94,18 +99,40 @@ func RegisterGotoServer(server global.IGRPCManager) {
 	log.Println("Registered Goto GRPC Server")
 }
 
+// field gives the value of a field of a message, and tells if the message has the field. The transformers apply to
+// messages of any service, so the fields they read may not be there.
+func field(msg protoreflect.Message, name string) (protoreflect.Value, bool) {
+	fd := msg.Descriptor().Fields().ByName(protoreflect.Name(name))
+	if fd == nil {
+		return protoreflect.Value{}, false
+	}
+	return msg.Get(fd), true
+}
+
+func stringField(msg protoreflect.Message, name string) string {
+	if v, ok := field(msg, name); ok {
+		return v.String()
+	}
+	return ""
+}
+
+func intField(msg protoreflect.Message, name string) int32 {
+	if v, ok := field(msg, name); ok {
+		return int32(v.Int())
+	}
+	return 0
+}
+
 func TransformStreamConfig(req proto.Message) proto.Message {
 	if req == nil {
 		return nil
 	}
 	req2 := new(pb.StreamConfig)
 	reqValues := req.ProtoReflect()
-	fields := req.ProtoReflect().Descriptor().Fields()
-
-	req2.ChunkSize = int32(reqValues.Get(fields.ByName("chunkSize")).Int())
-	req2.ChunkCount = int32(reqValues.Get(fields.ByName("chunkCount")).Int())
-	req2.Interval = reqValues.Get(fields.ByName("interval")).String()
-	req2.Text = reqValues.Get(fields.ByName("payload")).String()
+	req2.ChunkSize = intField(reqValues, "chunkSize")
+	req2.ChunkCount = intField(reqValues, "chunkCount")
+	req2.Interval = stringField(reqValues, "interval")
+	req2.Text = stringField(reqValues, "payload")
 	return req2
 }
 
@@ -114,9 +141,7 @@ func TransformInput(req proto.Message) proto.Message {
 		return nil
 	}
 	req2 := new(pb.Input)
-	reqValues := req.ProtoReflect()
-	fields := req.ProtoReflect().Descriptor().Fields()
-	req2.Text = reqValues.Get(fields.ByName("payload")).String()
+	req2.Text = stringField(req.ProtoReflect(), "payload")
 	return req2
 }
 
@@ -178,7 +203,10 @@ func (gs *GotoGRPCService) Echo(ctx context.Context, input *pb.Input) (*pb.Outpu
 	if global.Flags.LogRequestBody {
 		requestMiniBody = input.Text
 	} else if global.Flags.LogRequestMiniBody {
-		requestMiniBody = input.Text[:50]
+		requestMiniBody = input.Text
+		if len(requestMiniBody) > 50 {
+			requestMiniBody = requestMiniBody[:50]
+		}
 	}
 	gg.LogRequest(ctx, port, "Goto", "echo", requestHeaders[constants.HeaderAuthority], requestHeaders, 1, len(input.Text), requestMiniBody)
 	if _, rp, _, found := payload.PayloadManager.GetResponsePayload(port, true, "/Goto/echo", nil, nil, nil); found {
@@ -294,7 +322,6 @@ func (gs *GotoGRPCService) StreamInOut(bidi grpc.BidiStreamingServer[pb.StreamCo
 	requestCount := 0
 	responseCount := 0
 	responseLength := 0
-	payloadLength := 0
 	chunkCount := 0
 	responsePayload := strings.Builder{}
 
@@ -343,6 +370,6 @@ func (gs *GotoGRPCService) StreamInOut(bidi grpc.BidiStreamingServer[pb.StreamCo
 	gg.LogRequest(ctx, port, "Goto", "streamInOut", requestHeaders[constants.HeaderAuthority], requestHeaders, requestCount, 0, "")
 
 	gg.LogResponse(ctx, responseHeaders, 200, responseCount, responseLength,
-		fmt.Sprintf("Served StreamInOut with total chunks [%d] and total payload length [%d]", chunkCount, payloadLength))
+		fmt.Sprintf("Served StreamInOut with total chunks [%d] and total payload length [%d]", chunkCount, responseLength))
 	return nil
 }

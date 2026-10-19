@@ -57,7 +57,12 @@ func CheckService(w http.ResponseWriter, r *http.Request, reg RPCServiceRegistry
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "No service"
 		ok = false
-	} else if service = reg.GetRPCService(s); reflect.ValueOf(service).IsNil() {
+	} else if isNil(reg) {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = fmt.Sprintf("Service proto not defined [%s]", s)
+		ok = false
+	} else if service = reg.GetRPCService(s); isNil(service) {
+		service = nil
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("Service proto not defined [%s]", s)
 		ok = false
@@ -79,9 +84,35 @@ func CheckService(w http.ResponseWriter, r *http.Request, reg RPCServiceRegistry
 	return
 }
 
+// isNil tells if an interface holds nothing: it is nil, or it holds a nil pointer (or map, slice, etc.), which is what
+// the registries return for a service that they don't have. A value that can't be nil is not nil.
+func isNil(v any) bool {
+	if v == nil {
+		return true
+	}
+	switch rv := reflect.ValueOf(v); rv.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Interface, reflect.Chan:
+		return rv.IsNil()
+	}
+	return false
+}
+
+// checkMethod is for the APIs that work on a method of the service, which the request must have named. It writes the
+// response when it doesn't.
+func checkMethod(w http.ResponseWriter, method RPCMethod) (msg string, ok bool) {
+	if isNil(method) {
+		w.WriteHeader(http.StatusBadRequest)
+		return "No method", false
+	}
+	return "", true
+}
+
 func ClearServiceResponsePayload(w http.ResponseWriter, r *http.Request, reg RPCServiceRegistry) {
 	service, method, serviceType, msg, ok := CheckService(w, r, reg)
-	if ok && service != nil && method != nil {
+	if ok {
+		msg, ok = checkMethod(w, method)
+	}
+	if ok {
 		port := util.GetRequestOrListenerPortNum(r)
 		payload.PayloadManager.ClearRPCResponsePayloads(port)
 		msg = fmt.Sprintf("Port [%d]: Cleared %s payloads for service [%s] method [%s]",
@@ -93,7 +124,10 @@ func ClearServiceResponsePayload(w http.ResponseWriter, r *http.Request, reg RPC
 
 func SetServiceResponsePayload(w http.ResponseWriter, r *http.Request, reg RPCServiceRegistry) {
 	service, method, serviceType, msg, ok := CheckService(w, r, reg)
-	if ok && service != nil && method != nil {
+	if ok {
+		msg, ok = checkMethod(w, method)
+	}
+	if ok {
 		content := util.ReadBytes(r.Body)
 		port := util.GetRequestOrListenerPortNum(r)
 		isStream := strings.Contains(r.RequestURI, "stream")
@@ -128,7 +162,10 @@ func SetServiceResponsePayload(w http.ResponseWriter, r *http.Request, reg RPCSe
 
 func SetServicePayloadTransform(w http.ResponseWriter, r *http.Request, reg RPCServiceRegistry) {
 	service, method, serviceType, msg, ok := CheckService(w, r, reg)
-	if ok && service != nil {
+	if ok {
+		msg, ok = checkMethod(w, method)
+	}
+	if ok {
 		isStream := strings.Contains(r.RequestURI, "stream")
 		contentType := r.Header.Get(constants.HeaderResponseContentType)
 		if contentType == "" {

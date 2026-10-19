@@ -28,7 +28,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/dynamicpb"
 )
@@ -59,11 +61,13 @@ func invokeMiddlewareChain(ctx context.Context, port int, method *gotogrpc.GRPCS
 }
 
 func unaryHandler(ctx context.Context, req interface{}) (resp interface{}, err error) {
-	ctx, method, port, _, authority, md, err := gotogrpc.CommonHandler(ctx, nil)
+	// The context that the common handler gives is not there if it fails, so the one of the call is what is logged to.
+	ctx2, method, port, _, authority, md, err := gotogrpc.CommonHandler(ctx, nil)
 	if err != nil {
 		util.LogMessage(ctx, err.Error())
 		return nil, err
 	}
+	ctx = ctx2
 	gotogrpc.LogRequest(ctx, port, method.Service.Name, method.Name, authority, md, 1, 0, "")
 	b, err := gotogrpc.ParseRequest(req)
 	if err != nil {
@@ -169,11 +173,12 @@ func GRPCStreamHandler(_ interface{}, ss grpc.ServerStream) error {
 }
 
 func (gi *GRPCMethodInterceptor) Intercept(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	ctx, method, port, remoteAddr, authority, md, err := gotogrpc.CommonHandler(ctx, nil)
+	ctx2, method, port, remoteAddr, authority, md, err := gotogrpc.CommonHandler(ctx, nil)
 	if err != nil {
 		util.LogMessage(ctx, err.Error())
 		return nil, err
 	}
+	ctx = ctx2
 	var remoteAddress string
 	if remoteAddr != nil {
 		remoteAddress = remoteAddr.String()
@@ -191,11 +196,12 @@ func (gi *GRPCMethodInterceptor) Intercept(srv any, ctx context.Context, dec fun
 }
 
 func (gi *GRPCStreamInterceptor) Intercept(srv any, ss grpc.ServerStream) error {
-	ctx, method, port, remoteAddr, _, md, err := gotogrpc.CommonHandler(ss.Context(), nil)
+	ctx2, method, port, remoteAddr, _, md, err := gotogrpc.CommonHandler(ss.Context(), nil)
 	if err != nil {
-		util.LogMessage(ctx, err.Error())
+		util.LogMessage(ss.Context(), err.Error())
 		return err
 	}
+	ctx := ctx2
 	var remoteAddress string
 	if remoteAddr != nil {
 		remoteAddress = remoteAddr.String()
@@ -215,7 +221,14 @@ func (gi *GRPCStreamInterceptor) Intercept(srv any, ss grpc.ServerStream) error 
 }
 
 func ProxyUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceMethod, remoteAddr, authority string, md metadata.MD, req interface{}) (resp interface{}, err error) {
-	output, respHeaders, _, e := gotogrpc.ProxyGRPCUnary(ctx, port, method, md, []proto.Message{req.(*dynamicpb.Message)})
+	// ReadRequest gives no message if the request can't be decoded.
+	msg, ok := req.(*dynamicpb.Message)
+	if !ok || msg == nil {
+		err = status.Error(codes.InvalidArgument, "request can't be read")
+		util.LogMessage(ctx, fmt.Sprintf("GRPC Proxy[%d]: Not proxying a request that can't be read, downstream [%s], method [%s], authority [%s]", port, remoteAddr, method.Name, authority))
+		return
+	}
+	output, respHeaders, _, e := gotogrpc.ProxyGRPCUnary(ctx, port, method, md, []proto.Message{msg})
 	if e != nil {
 		err = e
 		util.LogMessage(ctx, fmt.Sprintf("GRPC Proxy[%d]: Failed to proxy request [%+v], downstream [%s], method [%s], authority [%s], md [%+v], error [%s]", port, req, remoteAddr, method.Name, authority, md, err.Error()))
