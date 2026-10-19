@@ -28,6 +28,9 @@ func clearListeners(ll ctl.Listeners) {
 		return
 	}
 	for _, l := range ll {
+		if l == nil {
+			continue
+		}
 		log.Printf("----------------- Removing Listener [%d]. --------------", l.Port)
 		l.Close()
 		listeners.RemoveListener(l)
@@ -39,7 +42,7 @@ func clearRemovedListeners(old, new ctl.Listeners) {
 		return
 	}
 	for port, ol := range old {
-		if new[port] == nil {
+		if ol != nil && new[port] == nil {
 			log.Printf("----------------- Removing Listener [%d]. --------------", port)
 			ol.Close()
 			listeners.RemoveListener(ol)
@@ -52,6 +55,10 @@ func processListeners(ll ctl.Listeners) {
 		return
 	}
 	for port, nl := range ll {
+		if nl == nil {
+			log.Printf("[ERROR]: Listener [%d] has no config", port)
+			continue
+		}
 		switch port {
 		case global.Self.JSONRPCPort:
 			log.Printf("[ERROR]: Default JSONRPC Port [%d] cannot be reconfigured", port)

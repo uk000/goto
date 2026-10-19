@@ -31,7 +31,7 @@ func clearMCP(mcp *ctl.MCP) {
 		return
 	}
 	for _, s := range mcp.Servers {
-		if s.Server != nil {
+		if s != nil && s.Server != nil {
 			mcpserver.RemoveMCPServer(s.Server.Port, s.Server.Name)
 		}
 	}
@@ -46,6 +46,10 @@ func loadMCP(mcp *ctl.MCP) {
 	clearMCP(mcp)
 	names := []string{}
 	for _, s := range mcp.Servers {
+		if s == nil || s.Server == nil {
+			log.Println("[*** ERROR ***] Skipping MCP server config without a server")
+			continue
+		}
 		mcp.ProcessMCPServer(s)
 		servers = append(servers, s.Server)
 		names = append(names, fmt.Sprintf("%s (port: %d)", s.Server.Name, s.Server.Port))
@@ -55,8 +59,10 @@ func loadMCP(mcp *ctl.MCP) {
 	log.Printf("Added MCP Servers: %+v\n", names)
 	log.Println("------------------------------------")
 
-	addComponents := func(kind string, server *mcpserver.MCPServer, data []byte) {
-		if len(data) == 0 {
+	addComponents := func(kind string, server *mcpserver.MCPServer, count int, data []byte) {
+		// A server that has none of a kind of component has nothing to add: the JSON of a nil list is not empty, it is "null",
+		// which the server refuses as a missing definition, and that is no error of the config.
+		if count == 0 {
 			return
 		}
 		names, err := server.AddComponents(kind, data)
@@ -73,10 +79,14 @@ func loadMCP(mcp *ctl.MCP) {
 			continue
 		}
 		server := mcpserver.GetMCPServer(s.Server.Port, s.Server.Name)
-		addComponents("tools", server, util.ToJSONBytes(s.Tools))
-		addComponents("prompts", server, util.ToJSONBytes(s.Prompts))
-		addComponents("resources", server, util.ToJSONBytes(s.Resources))
-		addComponents("templates", server, util.ToJSONBytes(s.Templates))
+		if server == nil {
+			log.Printf("[*** ERROR ***] MCP server [%s] on port [%d] was not added\n", s.Server.Name, s.Server.Port)
+			continue
+		}
+		addComponents("tools", server, len(s.Tools), util.ToJSONBytes(s.Tools))
+		addComponents("prompts", server, len(s.Prompts), util.ToJSONBytes(s.Prompts))
+		addComponents("resources", server, len(s.Resources), util.ToJSONBytes(s.Resources))
+		addComponents("templates", server, len(s.Templates), util.ToJSONBytes(s.Templates))
 
 		if s.Payloads != nil {
 			sps := s.Payloads.Server

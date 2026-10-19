@@ -95,15 +95,22 @@ var (
 	lock          = sync.RWMutex{}
 )
 
+// GetPortHooks gives the hooks of the port, which are made on first use. They are made once, whoever asks for them at the
+// same time: the callers share the hooks, and the ones that are added to them.
 func GetPortHooks(port int) *Hooks {
-	if portHooks[port] == nil {
-		lock.Lock()
-		portHooks[port] = newHooks(port)
-		lock.Unlock()
-	}
 	lock.RLock()
-	defer lock.RUnlock()
-	return portHooks[port]
+	hooks := portHooks[port]
+	lock.RUnlock()
+	if hooks != nil {
+		return hooks
+	}
+	lock.Lock()
+	defer lock.Unlock()
+	if hooks = portHooks[port]; hooks == nil {
+		hooks = newHooks(port)
+		portHooks[port] = hooks
+	}
+	return hooks
 }
 
 func setRoutes(r *mux.Router) {
@@ -437,7 +444,11 @@ func (h *Hook) matchHeader(header string, values []string) (bool, string) {
 	header = strings.ToLower(header)
 	for _, hm := range h.Match.HeaderMatches {
 		if hm.re.MatchString(header) {
-			if hm.Values == nil {
+			if len(hm.Values) == 0 {
+				// The header is given without values: it matches by its presence, reported with the value that it has first.
+				if len(values) > 0 {
+					return true, values[0]
+				}
 				return true, ""
 			}
 			for _, vre := range hm.Values {

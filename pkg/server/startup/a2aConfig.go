@@ -29,6 +29,9 @@ func clearA2A(a2a *ctl.A2A) {
 		return
 	}
 	for _, pa := range a2a.Servers {
+		if pa == nil {
+			continue
+		}
 		for _, a2aAgent := range pa.Agents {
 			if a2aAgent != nil && a2aAgent.Card != nil {
 				a2aserver.RemoveAgent(a2aAgent.Port, a2aAgent.Card.Name)
@@ -45,6 +48,9 @@ func loadA2A(a2a *ctl.A2A) {
 	names := []string{}
 	clearA2A(a2a)
 	for _, pa := range a2a.Servers {
+		if pa == nil {
+			continue
+		}
 		for aname, agent := range pa.Agents {
 			if agent == nil || agent.Card == nil || agent.Config == nil {
 				log.Printf("[*** ERROR ***] Skipping agent [%s] due to missing Card/Config\n", aname)

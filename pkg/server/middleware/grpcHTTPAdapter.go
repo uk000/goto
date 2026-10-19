@@ -39,7 +39,11 @@ type GrpcHTTPRequestAdapter struct {
 }
 
 func NewGrpcHTTPRequestAdapter(ctx context.Context, method, host, uri string, headers map[string][]string, body []byte) *GrpcHTTPRequestAdapter {
-	u, _ := url.Parse(uri)
+	u, err := url.Parse(uri)
+	if err != nil {
+		// A uri that doesn't parse is still the path of the request, and the request must have a URL.
+		u = &url.URL{Path: uri}
+	}
 	h := http.Header{}
 	for k, v := range headers {
 		for _, vv := range v {
@@ -117,6 +121,9 @@ func (g *GrpcHTTPResponseWriterAdapter) Write(b []byte) (int, error) {
 		g.WriteHeader(http.StatusOK)
 	}
 	if len(b) > 0 {
+		if g.desc == nil {
+			return 0, fmt.Errorf("failed to unmarshal response: the type of the response is not known")
+		}
 		dmsg := dynamicpb.NewMessage(g.desc)
 		if err := protojson.Unmarshal(b, dmsg); err != nil {
 			return 0, fmt.Errorf("failed to unmarshal response to dynamic message: %w", err)

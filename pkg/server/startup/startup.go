@@ -51,22 +51,41 @@ var (
 	httpConfigs      = map[string]*ctl.HTTP{}
 	grpcConfigs      = map[string]*ctl.GRPC{}
 	loaded           = false
-	lock             = sync.Mutex{}
+	// lock guards the maps of the configs, and loaded.
+	lock = sync.Mutex{}
+	// configLock makes loading or removing the configs of a file one step at a time: the changes of the files come from
+	// the goroutines of the watchers, and the debounced loads, which would otherwise read the maps while another changes
+	// them. It is taken before lock.
+	configLock sync.Mutex
+	// watchersLock guards configWatchers.
+	watchersLock sync.Mutex
+	// configDebounce is how long the changes of the config files are waited on before they are loaded or removed: an
+	// editor or a copy makes a burst of events for one change.
+	configDebounce = 5 * time.Second
 )
 
 type ChangeLog map[string]any
 
 func Start() {
-	if !loaded {
-		loaded = true
+	lock.Lock()
+	first := !loaded
+	loaded = true
+	lock.Unlock()
+	if first {
 		loadStartupConfigs()
 	}
 	//runStartupScript()
 }
 
 func Stop() {
-	for _, cw := range configWatchers {
-		if cw.IsRunning() {
+	watchersLock.Lock()
+	watchers := configWatchers
+	configWatchers = nil
+	watchersLock.Unlock()
+	for _, cw := range watchers {
+		// A watcher is started by a goroutine of its own, so it may not be running yet, and it has to be closed all the same
+		// or it starts after this. Closing a watcher that is closed already, or never started, does nothing.
+		if cw != nil {
 			cw.Close()
 		}
 	}
@@ -82,19 +101,24 @@ func loadStartupConfigs() {
 				log.Printf("Will load config without watching\n")
 			} else {
 				watchStartupConfig(configWatcher)
+				watchersLock.Lock()
+				configWatchers = append(configWatchers, configWatcher)
+				watchersLock.Unlock()
 			}
-			configWatchers = append(configWatchers, configWatcher)
 		}
 	}
 }
 
 func watchStartupConfig(configWatcher fswatcher.Watcher) {
-	debounceRemove := util.Debounce(5 * time.Second)
-	debounceLoad := util.Debounce(5 * time.Second)
+	interval := configDebounce
+	debounceRemove := util.Debounce(interval)
+	debounceLoad := util.Debounce(interval)
 	changeChan := make(chan string, 10)
-	go loadChanges(changeChan)
+	go loadChanges(changeChan, interval)
 	go configWatcher.Watch(context.Background())
 	go func() {
+		// the loader of the changes has nothing more to wait for once the watcher is closed
+		defer close(changeChan)
 		for event := range configWatcher.Events() {
 			removed := false
 			for _, t := range event.Types {
@@ -134,6 +158,10 @@ func watchStartupConfig(configWatcher fswatcher.Watcher) {
 }
 
 func removeAllConfigs() {
+	configLock.Lock()
+	defer configLock.Unlock()
+	lock.Lock()
+	defer lock.Unlock()
 	for filename := range tlsConfigs {
 		log.Printf("Removing TLS configs for %s.\n", filename)
 		clearTLS(tlsConfigs[filename])
@@ -190,6 +218,8 @@ func removeAllConfigs() {
 func removeConfigs(filePath string) {
 	parts := strings.Split(filePath, string(os.PathSeparator))
 	filename := parts[len(parts)-1]
+	configLock.Lock()
+	defer configLock.Unlock()
 	lock.Lock()
 	defer lock.Unlock()
 	log.Printf("File [%s] removed.", filename)
@@ -270,9 +300,12 @@ func loadConfigsFromPaths(changeLog ChangeLog) {
 			continue
 		}
 		configs := []*ctl.GotoConfig{}
+		// the files are told from the changes that there were when the path was started: the changes are taken off the
+		// log as they are loaded, and the log being empty then doesn't make the files that follow changed
+		onlyChanged := len(changeLog) > 0
 		for _, file := range files {
 			filePath := filepath.Join(configPath, file.Name())
-			if len(changeLog) == 0 || changeLog.Contains(filePath) {
+			if !onlyChanged || changeLog.Contains(filePath) {
 				if c := getFileConfig(filePath); c != nil {
 					configs = append(configs, c)
 				}
@@ -298,8 +331,8 @@ func loadConfigsFromPaths(changeLog ChangeLog) {
 	}
 }
 
-func loadChanges(changeChan chan string) {
-	debounce := util.Debounce(5 * time.Second)
+func loadChanges(changeChan chan string, interval time.Duration) {
+	debounce := util.Debounce(interval)
 	lock := sync.Mutex{}
 	changeLog := ChangeLog{}
 	for path := range changeChan {
@@ -339,19 +372,33 @@ func readConfigFromScript(filePath string) *ctl.GotoConfig {
 }
 
 func loadConfig(config *ctl.GotoConfig) {
-	parts := strings.Split(config.Filepath, string(os.PathSeparator))
-	filename := parts[len(parts)-1]
 	if config == nil {
 		log.Println("No config loaded")
 		return
 	}
-	loadTLSConfig(filename, config)
-	loadListenersConfig(filename, config)
-	loadMCPConfig(filename, config)
-	loadA2AConfig(filename, config)
-	loadHTTPConfig(filename, config)
-	loadGRPCConfig(filename, config)
-	loadProxyConfig(filename, config)
+	parts := strings.Split(config.Filepath, string(os.PathSeparator))
+	filename := parts[len(parts)-1]
+	configLock.Lock()
+	defer configLock.Unlock()
+	guarded("TLS", filename, func() { loadTLSConfig(filename, config) })
+	guarded("Listeners", filename, func() { loadListenersConfig(filename, config) })
+	guarded("MCP", filename, func() { loadMCPConfig(filename, config) })
+	guarded("A2A", filename, func() { loadA2AConfig(filename, config) })
+	guarded("HTTP", filename, func() { loadHTTPConfig(filename, config) })
+	guarded("gRPC", filename, func() { loadGRPCConfig(filename, config) })
+	guarded("Proxy", filename, func() { loadProxyConfig(filename, config) })
+}
+
+// guarded loads a section of a config. The sections are read from files that people write and change while the server
+// runs, and the code that reads them trusts the type of what it finds (a name that is a number, a schema that is a
+// list): a section that can't be read must not take the server down, nor keep the other sections from loading.
+func guarded(section, filename string, load func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[*** ERROR ***] Failed to load %s configs of file [%s]: %v\n", section, filename, r)
+		}
+	}()
+	load()
 }
 
 func loadTLSConfig(filename string, config *ctl.GotoConfig) {
@@ -430,6 +477,9 @@ func loadGRPCConfig(filename string, config *ctl.GotoConfig) {
 func loadProxyConfig(filename string, config *ctl.GotoConfig) {
 	if config.Proxies != nil {
 		for _, proxy := range config.Proxies {
+			if proxy == nil {
+				continue
+			}
 			if proxy.HTTP != nil {
 				remove := false
 				lock.Lock()

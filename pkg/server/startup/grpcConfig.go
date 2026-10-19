@@ -27,15 +27,27 @@ import (
 	"strings"
 )
 
+// serveGRPCServices has the gRPC server serve the services by the ports. It is what restarts the server, which tests of
+// the configs don't want to do.
+var serveGRPCServices = func(services map[int][]*grpc.GRPCService) {
+	grpcserver.GRPCManager.ServeMulti(services)
+}
+
 func clearGRPC(g *ctl.GRPC) {
 	if g == nil {
 		return
 	}
 	for _, p := range g.Protos {
+		if p == nil {
+			continue
+		}
 		log.Printf("Removing proto definitions: %s", p.Name)
 		protos.ProtosRegistry.RemoveProto(p.Name)
 	}
 	for _, s := range g.Services {
+		if s == nil {
+			continue
+		}
 		log.Printf("Removing gRPC service definition: %s", s.Service)
 		grpc.ServiceRegistry.RemoveService(s.Service)
 		grpc.ServiceRegistry.RemoveActiveService(s.Service)
@@ -47,12 +59,18 @@ func loadGRPC(g *ctl.GRPC) {
 		return
 	}
 	for _, p := range g.Protos {
+		if p == nil {
+			continue
+		}
 		log.Printf("Loading proto definitions: %s", p.Name)
 		protos.ProtosRegistry.AddProto(p.Name, p.Path, []byte(p.Content), false)
 	}
 	services := map[int][]*grpc.GRPCService{}
 	serviceNames := []string{}
 	for _, s := range g.Services {
+		if s == nil {
+			continue
+		}
 		gs := grpc.ServiceRegistry.GetService(s.Service)
 		if gs == nil {
 			log.Printf("No gRPC Service configured by the name [%s]\n", s.Service)
@@ -64,7 +82,7 @@ func loadGRPC(g *ctl.GRPC) {
 		}
 		serviceNames = append(serviceNames, s.Service)
 	}
-	grpcserver.GRPCManager.ServeMulti(services)
+	serveGRPCServices(services)
 	log.Println("------------------------------------")
 	log.Printf("gRPC Services loaded successfully: %+v", serviceNames)
 	log.Println("------------------------------------")
@@ -72,6 +90,9 @@ func loadGRPC(g *ctl.GRPC) {
 
 func processGRRPCService(port int, gs *grpc.GRPCService, methods []*ctl.GRPCMethodConfig) {
 	for _, m := range methods {
+		if m == nil {
+			continue
+		}
 		sm := gs.Methods[m.Method]
 		if sm == nil {
 			log.Printf("No gRPC Service Method configured by the name [%s]\n", m.Method)

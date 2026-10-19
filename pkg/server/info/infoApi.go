@@ -172,7 +172,7 @@ func getCurls(matches APIRoutes, baseURL string) APIRoutes {
 						curl = strings.ReplaceAll(curl, `&`, `\&`)
 						curls = append(curls, curl)
 					}
-					matches[k1][k2][k3] = append(matches[k1][k2][k3], types.Pair[string, []string]{v4.Left, curls})
+					matches[k1][k2][k3] = append(matches[k1][k2][k3], types.Pair[string, []string]{Left: v4.Left, Right: curls})
 				}
 			}
 		}
@@ -238,12 +238,12 @@ func loadAPIsFromRouter(r *mux.Router) {
 					}
 				}
 			}
-			routes[root][subroot][subpath] = append(routes[root][subroot][subpath], types.Pair[string, []string]{fullPath, methods})
+			routes[root][subroot][subpath] = append(routes[root][subroot][subpath], types.Pair[string, []string]{Left: fullPath, Right: methods})
 			curls := []string{}
 			for _, method := range methods {
 				curls = append(curls, fmt.Sprintf("curl -v -X%s %s%s", method, "%s", fullPath))
 			}
-			routesWithCurl[root][subroot][subpath] = append(routesWithCurl[root][subroot][subpath], types.Pair[string, []string]{fullPath, curls})
+			routesWithCurl[root][subroot][subpath] = append(routesWithCurl[root][subroot][subpath], types.Pair[string, []string]{Left: fullPath, Right: curls})
 		}
 		return nil
 	})

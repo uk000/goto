@@ -73,11 +73,11 @@ func updateListener(w http.ResponseWriter, r *http.Request) {
 }
 
 func addListenerCert(w http.ResponseWriter, r *http.Request) {
-	addListenerCertOrKey(w, r, true)
+	addListenerCertOrKey(w, r, false)
 }
 
 func addListenerKey(w http.ResponseWriter, r *http.Request) {
-	addListenerCertOrKey(w, r, false)
+	addListenerCertOrKey(w, r, true)
 }
 
 func removeListenerCertAndKey(w http.ResponseWriter, r *http.Request) {
@@ -206,7 +206,9 @@ func autoCert(w http.ResponseWriter, r *http.Request) {
 		spiffeID := util.GetStringParamValue(r, "spiffeID")
 		if domain != "" {
 			if cert, err := gototls.CreateCertificate([]string{domain}, spiffeID, fmt.Sprintf("%s-%d", l.Label, l.Port)); err == nil {
+				l.lock.Lock()
 				l.Certificates = []*tls.Certificate{cert}
+				l.lock.Unlock()
 				if l.ReopenListener() {
 					msg = fmt.Sprintf("Cert auto-generated for listener %d\n", l.Port)
 					events.SendRequestEvent("Listener Cert Generated", msg, r)
@@ -228,8 +230,10 @@ func autoCert(w http.ResponseWriter, r *http.Request) {
 
 func autoSNI(w http.ResponseWriter, r *http.Request) {
 	if l := validateListener(w, r); l != nil {
+		l.lock.Lock()
 		l.AutoSNI = true
 		l.AutoCert = false
+		l.lock.Unlock()
 		msg := ""
 		if l.ReopenListener() {
 			msg = fmt.Sprintf("Listener [%d] configured to auto-generate cert for any SNI", l.Port)
@@ -241,11 +245,18 @@ func autoSNI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// isListening tells if the listener has the listener of the network that serves its port.
+func (l *Listener) isListening() bool {
+	l.lock.RLock()
+	defer l.lock.RUnlock()
+	return l.Listener != nil
+}
+
 func getListeners(w http.ResponseWriter, r *http.Request) {
 	port := util.GetIntParamValue(r, "port")
 	ports := strings.Contains(r.RequestURI, "ports")
-	listenersLock.RLock()
-	defer listenersLock.RUnlock()
+	// The lock is taken by the getters, and it must not be held here: a waiting writer blocks a reader that takes the
+	// lock again.
 	if port > 0 {
 		util.WriteJsonPayload(w, GetListenerForPort(port))
 	} else if ports {
@@ -258,7 +269,7 @@ func getListeners(w http.ResponseWriter, r *http.Request) {
 func openListener(w http.ResponseWriter, r *http.Request) {
 	if l := validateListener(w, r); l != nil {
 		msg := ""
-		if l.Listener == nil {
+		if !l.isListening() {
 			if l.openListener(true) {
 				if l.TLS {
 					msg = fmt.Sprintf("TLS Listener opened on port %d\n", l.Port)
@@ -289,7 +300,7 @@ func openListener(w http.ResponseWriter, r *http.Request) {
 func closeListener(w http.ResponseWriter, r *http.Request) {
 	if l := validateListener(w, r); l != nil {
 		msg := ""
-		if l.Listener == nil {
+		if !l.isListening() {
 			w.WriteHeader(http.StatusBadRequest)
 			msg = fmt.Sprintf("Port %d not open\n", l.Port)
 		} else {

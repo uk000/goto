@@ -73,13 +73,18 @@ func AddRoutes(r *mux.Router, handlers ...*Middleware) {
 	}
 }
 
+// BaseHandlerFunc is the handler at the end of a chain, which hands the request to the handler that it is given when
+// there is one, and responds with 200 when there is none. The handler is looked up as the request comes, since the
+// chain that it stands for is linked after this one is made.
 func BaseHandlerFunc(getHandler func() http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if getHandler != nil {
-			getHandler().ServeHTTP(w, r)
-		} else {
-			w.WriteHeader(http.StatusOK)
+			if h := getHandler(); h != nil {
+				h.ServeHTTP(w, r)
+				return
+			}
 		}
+		w.WriteHeader(http.StatusOK)
 	})
 }
 
@@ -176,7 +181,12 @@ func InvokeMiddlewareChainForGRPC(ctx context.Context, port int, method, host, u
 	r = r.WithContext(ctx)
 	ctx, r, _ = util.WithRequestStore(r, wa)
 	w, irw := intercept.WithIntercept(r, wa)
-	MiddlewareGRPCChainHead.ServeHTTP(w, r)
+	// A chain that is not linked, which is the case until the HTTP server is configured, has no middlewares to run.
+	head := MiddlewareGRPCChainHead
+	if head == nil {
+		head = BaseHandlerFunc(nil)
+	}
+	head.ServeHTTP(w, r)
 	irw.Proceed()
 	return ra, wa
 }

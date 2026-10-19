@@ -27,7 +27,9 @@ func clearHTTP(h *ctl.HTTP) {
 		return
 	}
 	for _, s := range h.Servers {
-		payload.PayloadManager.ClearRPCResponsePayloads(s.Port)
+		if s != nil {
+			payload.PayloadManager.ClearRPCResponsePayloads(s.Port)
+		}
 	}
 }
 
@@ -36,7 +38,9 @@ func loadHTTP(h *ctl.HTTP) {
 		return
 	}
 	for _, s := range h.Servers {
-		processHTTPResponse(s.Port, s.Response)
+		if s != nil {
+			processHTTPResponse(s.Port, s.Response)
+		}
 	}
 }
 
@@ -46,6 +50,9 @@ func processHTTPResponse(port int, hr *ctl.HTTPResponse) {
 		return
 	}
 	for _, rp := range hr.Payloads {
+		if rp == nil {
+			continue
+		}
 		err := payload.PayloadManager.SetURIResponsePayloadWithMatches(port, rp, false)
 		if err != nil {
 			log.Printf("[*** ERROR ***] Error processing HTTP response: %s\n", err.Error())

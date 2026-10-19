@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"goto/pkg/events"
@@ -30,9 +31,11 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -107,6 +110,17 @@ type Listener struct {
 	lock             sync.RWMutex                     `json:"-"`
 }
 
+// listenerJSON has the fields of a listener, and none of its methods, so that it is marshaled as the struct that it is.
+type listenerJSON Listener
+
+// MarshalJSON gives the listener as it is at one moment: a listener is reported while it opens, closes, and is
+// handshaken with, which change what is reported.
+func (l *Listener) MarshalJSON() ([]byte, error) {
+	l.lock.RLock()
+	defer l.lock.RUnlock()
+	return json.Marshal((*listenerJSON)(l))
+}
+
 var (
 	DefaultListener       = newListener(global.Self.ServerPort, PROTOL_HTTP, global.ServerConfig.CommonName, true)
 	DefaultGRPCListener   = newListener(global.Self.GRPCPort, PROTOL_GRPC, global.ServerConfig.CommonName, false)
@@ -118,16 +132,22 @@ var (
 	initialHTTPStarted    = false
 	initialJSONRPCStarted = false
 	initialTCPStarted     = false
-	grpcStarted           = false
-	httpStarted           = false
-	jsonRPCStarted        = false
-	httpServer            *http.Server
-	h2Server              *http2.Server
-	jsonRPCServer         *http.Server
-	serveTCP              func(string, int, net.Listener) error
-	serveXDS              func(*grpc.Server)
-	DefaultLabel          string
-	listenersLock         sync.RWMutex
+	// The flags of the servers that are started are set by the watchers of the servers, and read as listeners open.
+	grpcStarted     atomic.Bool
+	httpStarted     atomic.Bool
+	jsonRPCStarted  atomic.Bool
+	httpServer      *http.Server
+	h2Server        *http2.Server
+	jsonRPCServer   *http.Server
+	serveTCP        func(string, int, net.Listener) error
+	serveXDS        func(*grpc.Server)
+	DefaultLabel    string
+	listenersLock   sync.RWMutex
+	generationsLock sync.Mutex
+	// reopenRetryDelay is how long ReopenListener waits before it tries again to open a port that is still in use, and
+	// initialListenersDelay is how long the initial HTTP/JSONRPC listeners wait for the servers to be ready to serve.
+	reopenRetryDelay      = 5 * time.Second
+	initialListenersDelay = 1 * time.Second
 )
 
 func Init() {
@@ -156,41 +176,49 @@ func Init() {
 }
 
 func OnGRPCStart() {
-	grpcStarted = true
-	if httpStarted {
+	grpcStarted.Store(true)
+	if httpStarted.Load() {
 		startInitialHTTPListeners(false)
 	}
 }
 
 func OnGRPCStop() {
-	grpcStarted = false
+	grpcStarted.Store(false)
+	// The listeners are closed outside of the lock: closing takes the lock of the listener, and closing the connections
+	// of the port takes other locks.
+	listenersLock.RLock()
+	toClose := make([]*Listener, 0, len(grpcListeners))
 	for _, l := range grpcListeners {
+		toClose = append(toClose, l)
+	}
+	listenersLock.RUnlock()
+	for _, l := range toClose {
 		l.Close()
 	}
 }
 
 func OnHTTPStart(s *http.Server, h2s *http2.Server) {
-	httpStarted = true
+	httpStarted.Store(true)
 	httpServer = s
 	h2Server = h2s
-	if grpcStarted {
+	if grpcStarted.Load() {
 		startInitialHTTPListeners(false)
 	}
 }
 
 func OnHTTPStop() {
-	httpStarted = false
+	httpStarted.Store(false)
 	httpServer = nil
 }
 
 func OnJSONRPCStart(s *http.Server, h2s *http2.Server) {
-	jsonRPCStarted = true
+	jsonRPCStarted.Store(true)
 	jsonRPCServer = s
 	startInitialHTTPListeners(true)
 }
 
 func OnJSONRPCStop() {
-	jsonRPCStarted = false
+	jsonRPCStarted.Store(false)
 	jsonRPCServer = nil
 }
 
@@ -237,7 +265,7 @@ func AddInitialGRPCListeners() {
 
 func startInitialHTTPListeners(jsonRPC bool) {
 	if jsonRPC && !initialJSONRPCStarted || !jsonRPC && !initialHTTPStarted {
-		time.Sleep(1 * time.Second)
+		time.Sleep(initialListenersDelay)
 		for _, l := range initialListeners {
 			if (l.IsJSONRPC && jsonRPC) || (!l.IsJSONRPC && l.IsHTTP && !jsonRPC) {
 				if err, _ := AddOrUpdateListener(l); err != nil {
@@ -465,65 +493,87 @@ func LinkForwardListeners() {
 	}
 }
 
+// describeTLS describes the TLS config of the listener for the log. The listeners are served by goroutines, which must
+// not read the listener, as it keeps changing after it is opened: what they need is read before they start.
+func (l *Listener) describeTLS() string {
+	if !l.TLS {
+		return ""
+	}
+	msg := fmt.Sprintf(" With TLS [CN: %s]", l.CommonName)
+	if l.MTLS {
+		msg += " With mTLS"
+	}
+	if l.IsHTTP {
+		msg += fmt.Sprintf(" [Verify: %t]", l.VerifyClientCert)
+	}
+	return msg
+}
+
 func (l *Listener) serveJSONRPC() {
+	// The server is the one that is there when the listener opens, and not the one that is there when the goroutine runs.
+	server := jsonRPCServer
+	if server == nil {
+		log.Printf("JSONRPC Listener [%s] is open, but the JSONRPC server is not running to serve it", l.ListenerID)
+		return
+	}
+	ln, port := l.Listener, l.Port
+	msg := fmt.Sprintf("Starting JSONRPC Listener [%s]", l.ListenerID) + l.describeTLS()
 	go func() {
-		msg := fmt.Sprintf("Starting JSONRPC Listener [%s]", l.ListenerID)
-		if l.TLS {
-			msg += fmt.Sprintf(" With TLS [CN: %s]", l.CommonName)
-			if l.MTLS {
-				msg += " With mTLS"
-			}
-			msg += fmt.Sprintf(" [Verify: %t]", l.VerifyClientCert)
-		}
 		log.Println(msg)
-		if err := jsonRPCServer.Serve(l.Listener); err != nil {
-			log.Printf("JSONRPC Listener [%d]: %s", l.Port, err.Error())
+		if err := server.Serve(ln); err != nil {
+			log.Printf("JSONRPC Listener [%d]: %s", port, err.Error())
 		}
 	}()
 }
 
 func (l *Listener) serveHTTP() {
+	server := httpServer
+	if server == nil {
+		log.Printf("HTTP Listener [%s] is open, but the HTTP server is not running to serve it", l.ListenerID)
+		return
+	}
+	ln, port := l.Listener, l.Port
+	msg := fmt.Sprintf("Starting HTTP Listener [%s]", l.ListenerID) + l.describeTLS()
 	go func() {
-		msg := fmt.Sprintf("Starting HTTP Listener [%s]", l.ListenerID)
-		if l.TLS {
-			msg += fmt.Sprintf(" With TLS [CN: %s]", l.CommonName)
-			if l.MTLS {
-				msg += " With mTLS"
-			}
-			msg += fmt.Sprintf(" [Verify: %t]", l.VerifyClientCert)
-		}
 		log.Println(msg)
-		if err := httpServer.Serve(l.Listener); err != nil {
-			log.Printf("HTTP Listener [%d]: %s", l.Port, err.Error())
+		if err := server.Serve(ln); err != nil {
+			log.Printf("HTTP Listener [%d]: %s", port, err.Error())
 		}
 	}()
 }
 
 func (l *Listener) serveGRPC() {
-	if grpcStarted {
+	server := global.GRPCServer
+	if server == nil {
+		log.Printf("GRPC Listener [%s] is open, but there is no GRPC server to serve it", l.ListenerID)
+		return
+	}
+	if grpcStarted.Load() {
+		port := l.Port
+		msg := fmt.Sprintf("Starting GRPC Listener %s", l.ListenerID)
 		go func() {
-			msg := fmt.Sprintf("Starting GRPC Listener %s", l.ListenerID)
 			log.Println(msg)
-			global.GRPCServer.ServeListener(l)
-			events.SendEventForPort(l.Port, "GRPC Listener Started", msg)
+			server.ServeListener(l)
+			events.SendEventForPort(port, "GRPC Listener Started", msg)
 		}()
 	} else {
-		global.GRPCServer.AddListener(l)
+		server.AddListener(l)
 	}
-
 }
 
 func (l *Listener) serveTCP() {
-	l.TCP.ListenerID = l.ListenerID
-	msg := fmt.Sprintf("Starting TCP Listener [%s]", l.ListenerID)
-	if l.TLS {
-		msg += fmt.Sprintf(" With TLS [CN: %s]", l.CommonName)
+	serve := serveTCP
+	if serve == nil {
+		log.Printf("TCP Listener [%s] is open, but there is no TCP server to serve it", l.ListenerID)
+		return
 	}
-	log.Println(msg)
+	l.TCP.ListenerID = l.ListenerID
+	id, ln, port := l.ListenerID, l.Listener, l.Port
+	log.Println(fmt.Sprintf("Starting TCP Listener [%s]", id) + l.describeTLS())
 	go func() {
-		log.Printf("TCP Listener [%s] Listening\n", l.ListenerID)
-		if err := serveTCP(l.ListenerID, l.Port, l.Listener); err != nil {
-			log.Printf("Listener [%d]: %s", l.Port, err.Error())
+		log.Printf("TCP Listener [%s] Listening\n", id)
+		if err := serve(id, port, ln); err != nil {
+			log.Printf("Listener [%d]: %s", port, err.Error())
 		}
 	}()
 }
@@ -554,19 +604,32 @@ func (l *Listener) SetCertificates(certs []*tls.Certificate) {
 }
 
 func (l *Listener) GetCertificate(chi *tls.ClientHelloInfo) (cert *tls.Certificate, err error) {
-	if cert = l.CertsCache[chi.ServerName]; cert != nil {
-		return
-	}
+	// Handshakes run concurrently, so the cache is accessed with the lock of the listener.
+	l.lock.RLock()
+	cert = l.CertsCache[chi.ServerName]
 	domains := []string{chi.ServerName, l.CommonName}
 	domains = append(domains, l.AltNames...)
-	if cert, err = gototls.CreateCertificate(domains, l.SpiffeID, ""); err == nil {
+	spiffeID := l.SpiffeID
+	l.lock.RUnlock()
+	if cert != nil {
+		return
+	}
+	if cert, err = gototls.CreateCertificate(domains, spiffeID, ""); err == nil {
+		l.lock.Lock()
 		l.CertsCache[chi.ServerName] = cert
+		l.lock.Unlock()
 	}
 	return
 }
 
 func (l *Listener) alpnHandler(alpn string) func(s *http.Server, conn *tls.Conn, h http.Handler) {
+	h2s := h2Server
 	return func(s *http.Server, conn *tls.Conn, h http.Handler) {
+		if h2s == nil {
+			log.Printf("Listener %s: No HTTP2 server to serve negotiated ALPN: %s", l.Label, alpn)
+			conn.Close()
+			return
+		}
 		log.Printf("Listener %s: Serving negotiated ALPN: %s ---", l.Label, alpn)
 		var ctx context.Context
 		if s.BaseContext != nil {
@@ -574,7 +637,7 @@ func (l *Listener) alpnHandler(alpn string) func(s *http.Server, conn *tls.Conn,
 		} else {
 			ctx = context.Background()
 		}
-		h2Server.ServeConn(conn, &http2.ServeConnOpts{
+		h2s.ServeConn(conn, &http2.ServeConnOpts{
 			BaseConfig: s,
 			Context:    util.WithConn(ctx, conn),
 			Handler:    h,
@@ -589,16 +652,20 @@ func (l *Listener) prepareMTLS(tlsConfig *tls.Config) {
 		tlsConfig.ClientAuth = tls.RequireAnyClientCert
 	}
 	tlsConfig.ClientCAs = l.CACerts
-	if httpServer.TLSNextProto == nil {
-		httpServer.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler))
+	server := httpServer
+	if server == nil {
+		return
+	}
+	if server.TLSNextProto == nil {
+		server.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler))
 	}
 	if l.ALPN != nil {
 		for _, alpn := range l.ALPN.Protos {
-			httpServer.TLSNextProto[alpn] = l.alpnHandler(alpn)
+			server.TLSNextProto[alpn] = l.alpnHandler(alpn)
 		}
 	}
 	for _, alpn := range tlsConfig.NextProtos {
-		httpServer.TLSNextProto[alpn] = l.alpnHandler(alpn)
+		server.TLSNextProto[alpn] = l.alpnHandler(alpn)
 	}
 }
 
@@ -637,9 +704,11 @@ func (l *Listener) prepareTLS() *tls.Config {
 	return tlsConfig
 }
 
-func (l *Listener) InitListener() bool {
+// InitListener binds the port of the listener, which makes it open if it works out, and not open if it doesn't.
+func (l *Listener) InitListener() (opened bool) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
+	defer func() { l.Open = opened }()
 	if l.AutoCert && l.SpiffeID == "" {
 		if l.CommonName == "" {
 			l.CommonName = global.ServerConfig.CommonName
@@ -657,6 +726,7 @@ func (l *Listener) InitListener() bool {
 		if udpAddr, err := net.ResolveUDPAddr("udp4", address); err == nil {
 			if udpConn, err := net.ListenUDP("udp", udpAddr); err == nil {
 				l.UDPConn = udpConn
+				l.Open = true
 				return true
 			} else {
 				log.Printf("Failed to open UDP listener with error: %s\n", err.Error())
@@ -670,6 +740,8 @@ func (l *Listener) InitListener() bool {
 		if listener, err := net.Listen("tcp", address); err == nil {
 			if l.TLS {
 				if tlsConfig := l.prepareTLS(); tlsConfig == nil {
+					// The port was taken, and must not stay taken by a listener that is not used.
+					listener.Close()
 					return false
 				} else {
 					l.TLSConfig = tlsConfig
@@ -689,8 +761,10 @@ func (l *Listener) openListener(serve bool) bool {
 	if l.InitListener() {
 		l.lock.Lock()
 		defer l.lock.Unlock()
-		listenerGenerations[l.Port] = listenerGenerations[l.Port] + 1
+		generationsLock.Lock()
+		listenerGenerations[l.Port]++
 		l.Generation = listenerGenerations[l.Port]
+		generationsLock.Unlock()
 		l.ListenerID = fmt.Sprintf("%d-%d", l.Port, l.Generation)
 		log.Printf("Opening [%s] listener [%s] on port [%d].", l.L8Proto, l.ListenerID, l.Port)
 		if serve {
@@ -709,6 +783,12 @@ func (l *Listener) openListener(serve bool) bool {
 		return true
 	}
 	return false
+}
+
+func (l *Listener) isOpen() bool {
+	l.lock.RLock()
+	defer l.lock.RUnlock()
+	return l.Open
 }
 
 func (l *Listener) Close() {
@@ -744,7 +824,7 @@ func (l *Listener) ReopenListener() bool {
 			return true
 		} else {
 			log.Printf("Couldn't reopen listener %s on port %d since previous listener is still running. Retrying...", l.ListenerID, l.Port)
-			time.Sleep(5 * time.Second)
+			time.Sleep(reopenRetryDelay)
 		}
 	}
 	return false
@@ -796,7 +876,8 @@ func AddGRPCListener(port int, serve bool) (*Listener, error) {
 	if err, _ := AddOrUpdateListener(l); err != nil {
 		return nil, err
 	}
-	if !l.openListener(serve) {
+	// A listener that took over a port that had another one is opened by AddOrUpdateListener, and must not be opened twice.
+	if !l.isOpen() && !l.openListener(serve) {
 		return nil, fmt.Errorf("failed to open GRPC listener on port [%d]", port)
 	}
 	return l, nil
@@ -821,7 +902,7 @@ func AddListener(port int, isTCP, isUDP bool, sni string) error {
 	if err, _ := AddOrUpdateListener(l); err != nil {
 		return err
 	}
-	if !l.openListener(true) {
+	if !l.isOpen() && !l.openListener(true) {
 		return fmt.Errorf("failed to open %s listener on port [%d]", protocol, port)
 	}
 	return nil
@@ -863,7 +944,8 @@ func AddOrUpdateListener(l *Listener) (error, string) {
 	if !l.ProtoAssigned {
 		l.assignProtocol()
 	}
-	if l.IsTCP && l.TCP == nil {
+	if l.IsTCP && l.TCP == nil && msg == "" {
+		// The config of the listener is not made when the port is not valid, and the message of that is not replaced.
 		l.TCP, msg = tcp.InitTCPConfig(l.Port, l.TCP)
 	}
 	if msg != "" {
@@ -899,11 +981,13 @@ func AddOrUpdateListener(l *Listener) (error, string) {
 			events.SendEventJSON("Listener Added", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
 		}
 	}
+	listenersLock.Lock()
 	if l.IsGRPC {
 		grpcListeners[l.Port] = l
 	} else if l.IsUDP {
 		udpListeners[l.Port] = l
 	}
+	listenersLock.Unlock()
 	return nil, msg
 }
 
@@ -996,6 +1080,8 @@ func RemoveListenerCert(port int) error {
 }
 
 func GetListeners() map[int]*Listener {
+	listenersLock.RLock()
+	defer listenersLock.RUnlock()
 	listenersView := map[int]*Listener{}
 	listenersView[DefaultListener.Port] = DefaultListener
 	for port, l := range listeners {
@@ -1005,6 +1091,8 @@ func GetListeners() map[int]*Listener {
 }
 
 func GetListenerPorts() map[int]string {
+	listenersLock.RLock()
+	defer listenersLock.RUnlock()
 	listenersView := map[int]string{}
 	listenersView[DefaultListener.Port] = DefaultListener.Protocol
 	for port, l := range listeners {
@@ -1101,9 +1189,9 @@ func SetListenerLabel(r *http.Request) string {
 	return label
 }
 
+// getPeerCertInfo gives the info of the peer, which is made when the peer is new. It must be called with the lock of the
+// listener held, as it is written to as the handshake progresses, and read from by whoever reports the peers.
 func (l *Listener) getPeerCertInfo(remoteAddr string) *gototls.PeerCertInfo {
-	l.lock.Lock()
-	defer l.lock.Unlock()
 	pci := l.peerCertInfos[remoteAddr]
 	if pci == nil {
 		pci = gototls.NewPeerCertInfo(remoteAddr)
@@ -1113,6 +1201,8 @@ func (l *Listener) getPeerCertInfo(remoteAddr string) *gototls.PeerCertInfo {
 }
 
 func (l *Listener) StorePeerCertInfo(remoteAddr string, subject string, dnsNames, uris []string, issuer string) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
 	pci := l.getPeerCertInfo(remoteAddr)
 	pci.Subject = subject
 	pci.DNSNames = dnsNames
@@ -1121,34 +1211,47 @@ func (l *Listener) StorePeerCertInfo(remoteAddr string, subject string, dnsNames
 }
 
 func (l *Listener) StoreSNI(remoteAddr string, sni, alpn string) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
 	pci := l.getPeerCertInfo(remoteAddr)
 	pci.SNI = sni
 	pci.NegotiatedALPN = alpn
 }
 
 func (l *Listener) StoreALPN(remoteAddr string, alpn []string) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
 	pci := l.getPeerCertInfo(remoteAddr)
 	pci.ALPN = alpn
 }
 
 func (l *Listener) UpdatePeerStatus(remoteAddr string, finished bool, status string) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
 	pci := l.getPeerCertInfo(remoteAddr)
 	pci.Finished = finished
 	pci.Status = append(pci.Status, status)
 	pci.EndAt = time.Now()
 }
 
+// GetPeerCert gives the summaries of the cert of the server and of the cert of the peer, and nothing for the one that
+// is not known: a port without a listener, a listener that has no cert info of its own (its cert was uploaded, and not
+// generated), or a peer that didn't present a cert.
 func GetPeerCert(port int, remoteAddr string) (string, string) {
-	listenersLock.RLock()
-	l := listeners[port]
-	listenersLock.RUnlock()
-	var clientCert string
-	l.lock.RLock()
-	serverCert := l.ServerCert.Summary()
-	if l.peerCertInfos[remoteAddr] != nil {
-		clientCert = l.peerCertInfos[remoteAddr].Summary()
+	l := GetListenerForPort(port)
+	if l == nil {
+		return "", ""
 	}
-	l.lock.RUnlock()
+	var serverCert, clientCert string
+	// A summary marks the info as reported, so it is not only a read.
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	if l.ServerCert != nil {
+		serverCert = l.ServerCert.Summary()
+	}
+	if pci := l.peerCertInfos[remoteAddr]; pci != nil {
+		clientCert = pci.Summary()
+	}
 	return serverCert, clientCert
 }
 
@@ -1164,16 +1267,24 @@ func ClearPeerCerts(port int) {
 	}
 }
 
+// GetPeerCerts gives a copy of the peers of the listeners, since the ones of a listener keep changing, and the caller
+// reports them after the lock is released.
 func GetPeerCerts(port int) map[int]map[string]*gototls.PeerCertInfo {
 	output := map[int]map[string]*gototls.PeerCertInfo{}
 	listenersLock.RLock()
 	defer listenersLock.RUnlock()
 	for p, l := range listeners {
 		if port == 0 || p == port {
-			output[p] = map[string]*gototls.PeerCertInfo{}
 			l.lock.RLock()
-			output[p] = l.peerCertInfos
+			peers := make(map[string]*gototls.PeerCertInfo, len(l.peerCertInfos))
+			for addr, pci := range l.peerCertInfos {
+				// The slices are copied too: the copy is appended to when it is summarized.
+				c := *pci
+				c.Status, c.DNSNames, c.URIs, c.ALPN = slices.Clone(pci.Status), slices.Clone(pci.DNSNames), slices.Clone(pci.URIs), slices.Clone(pci.ALPN)
+				peers[addr] = &c
+			}
 			l.lock.RUnlock()
+			output[p] = peers
 		}
 	}
 	return output

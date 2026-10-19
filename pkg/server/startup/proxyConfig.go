@@ -21,8 +21,10 @@ import (
 	grpcproxy "goto/pkg/proxy/grpc"
 	httpproxy "goto/pkg/proxy/http"
 	tcpproxy "goto/pkg/proxy/tcp"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
+	"time"
 )
 
 func removeHTTPProxy(port int) {
@@ -38,6 +40,10 @@ func loadHTTPProxy(p *httpproxy.Proxy) {
 	proxy.ProxyResponses = p.ProxyResponses
 	log.Printf("Proxy [%d] will use responses: %+v", p.Port, util.ToJSONText(proxy.ProxyResponses))
 	for name, target := range p.Targets {
+		if target == nil {
+			log.Printf("[*** ERROR ***] HTTP Proxy target [%s] has no config", name)
+			continue
+		}
 		target.Name = name
 		target.Port = p.Port
 		log.Printf("Loading HTTP Proxy Target [%s]\n", name)
@@ -86,13 +92,23 @@ func loadGRPCProxy(p *grpcproxy.GRPCProxy) {
 	success := 0
 	failure := 0
 	for from, sp := range p.ServiceProxies {
+		if sp == nil {
+			log.Printf("[*** ERROR ***] GRPC Proxy [%d] Service [%s] has no config\n", p.Port, from)
+			failure++
+			continue
+		}
 		sp.FromService = from
 		if err := sp.Validate(); err != nil {
 			log.Printf("[*** ERROR ***] GRPC Proxy [%d] Service [%s] Failed validation: %s\n", p.Port, from, err.Error())
 			failure++
 			continue
 		}
-		p.SetupGRPCServiceProxy(sp.FromService, sp.ToService, sp.Methods, sp.Upstream.Endpoint, sp.Upstream.Authority, 0, sp.Config.Delay.Min.Duration, sp.Config.Delay.Max.Duration, sp.Config.Delay.Count, sp)
+		delayMin, delayMax, delayCount := delayRange(sp.Config.Delay)
+		if err := p.SetupGRPCServiceProxy(sp.FromService, sp.ToService, sp.Methods, sp.Upstream.Endpoint, sp.Upstream.Authority, 0, delayMin, delayMax, delayCount, sp); err != nil {
+			log.Printf("[*** ERROR ***] GRPC Proxy [%d] Service [%s] Failed to be set up: %s\n", p.Port, from, err.Error())
+			failure++
+			continue
+		}
 		log.Printf("GRPC Proxy [%d] configured from Service [%s] to Service [%s]\n", p.Port, from, sp.ToService)
 		success++
 	}
@@ -106,4 +122,19 @@ func loadGRPCProxy(p *grpcproxy.GRPCProxy) {
 	}
 	log.Println(msg)
 	log.Println("------------------------------------")
+}
+
+// delayRange gives the bounds and the count of a delay. A delay that has no bound (a config of only a max, or none at all)
+// has no time to delay by for that bound.
+func delayRange(d *types.Delay) (min, max time.Duration, count int) {
+	if d == nil {
+		return 0, 0, 0
+	}
+	if d.Min != nil {
+		min = d.Min.Duration
+	}
+	if d.Max != nil {
+		max = d.Max.Duration
+	}
+	return min, max, d.Count
 }

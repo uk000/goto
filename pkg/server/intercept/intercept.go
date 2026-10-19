@@ -115,8 +115,10 @@ func NewChanWriter(c chan []byte, w http.ResponseWriter) ChanWriter {
 	return &ChanWriterImpl{c: c, ResponseWriter: w}
 }
 
+// Write hands a copy of the data to the channel: the writer is given buffers that are reused, e.g. by io.Copy, once the
+// write returns, and what the receiver gets must not change with them.
 func (c *ChanWriterImpl) Write(p []byte) (int, error) {
-	c.c <- p
+	c.c <- append([]byte(nil), p...)
 	return len(p), nil
 }
 
@@ -197,6 +199,9 @@ func (rw *InterceptResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error)
 		rw.Hijacked = true
 		return rw.Hijacker.Hijack()
 	}
+	if rw.conn == nil {
+		return nil, nil, http.ErrNotSupported
+	}
 	return rw.conn, bufio.NewReadWriter(bufio.NewReader(rw.conn), bufio.NewWriter(rw.conn)), nil
 
 }
@@ -229,7 +234,9 @@ func (rw *InterceptResponseWriter) Proceed() {
 		rw.ResponseWriter.WriteHeader(rw.StatusCode)
 		if _, err := rw.ResponseWriter.Write(rw.Data); err == http.ErrHijacked {
 			rw.Hijacked = true
-			if _, err := rw.conn.Write(rw.Data); err != nil {
+			if rw.conn == nil {
+				fmt.Printf("InterceptResponseWriter.Proceed: the connection was hijacked, and there is no connection to write [%d] bytes to\n", len(rw.Data))
+			} else if _, err := rw.conn.Write(rw.Data); err != nil {
 				fmt.Printf("InterceptResponseWriter.Proceed: failed to write [%d] bytes with error: %s\n", len(rw.Data), err.Error())
 			}
 		}
