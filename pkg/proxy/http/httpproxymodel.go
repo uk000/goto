@@ -17,6 +17,8 @@
 package httpproxy
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"goto/pkg/invocation"
@@ -25,6 +27,7 @@ import (
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
+	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -86,6 +89,8 @@ type TrafficTransform struct {
 	StripURI       string            `yaml:"stripURI" json:"stripURI"`
 	RequestId      *types.RequestId  `yaml:"requestId" json:"requestId"`
 	stripURIRegexp *regexp.Regexp
+	// The headers are changed through the admin API while requests use them.
+	lock sync.RWMutex
 }
 
 type TargetEndpoint struct {
@@ -114,6 +119,9 @@ type EndpointInvocation struct {
 	ep        *TargetEndpoint
 	is        *invocation.InvocationSpec
 	target    *Target
+	// The invocations of requests are registered one at a time. Registering one sets the transport of the shared spec,
+	// which creating the spec of another one (a copy of the shared one) reads.
+	registerLock sync.Mutex
 }
 
 type TargetTrigger struct {
@@ -173,7 +181,7 @@ type Proxy struct {
 	Enabled        bool               `yaml:"enabled" json:"enabled"`
 	ProxyResponses []*ProxyResponse   `yaml:"proxyResponses" json:"proxyResponses"`
 	HTTPTracker    *HTTPProxyTracker  `yaml:"-" json:"tracker"`
-	Router         *mux.Router
+	Router         *mux.Router        `yaml:"-" json:"-"`
 	lock           sync.RWMutex
 }
 
@@ -192,12 +200,32 @@ type RequestContext struct {
 	w           http.ResponseWriter
 	fw          intercept.FlushWriter
 	c           chan []byte
-	cw          intercept.ChanWriter
+	cw          io.Writer
 	sendPayload bool
 	sendHeaders bool
 	yaml        bool
 	parseJson   bool
 	parseYaml   bool
+	// The endpoints of a request report their response headers to the same response, from goroutines of their own.
+	headersLock sync.Mutex
+	bodyOnce    sync.Once
+	bodyContent []byte
+}
+
+// bodyReader gives a reader of the body of the request for an endpoint of its own, as the endpoints of a request all
+// send the same body, and a body can be read once.
+func (rc *RequestContext) bodyReader() io.Reader {
+	rc.bodyOnce.Do(func() {
+		if rr, ok := rc.body.(*util.ReReader); ok {
+			rc.bodyContent = rr.Content
+		} else if rc.body != nil {
+			rc.bodyContent = util.ReadBytes(rc.body)
+		}
+	})
+	if len(rc.bodyContent) == 0 {
+		return nil
+	}
+	return bytes.NewReader(rc.bodyContent)
 }
 
 func newProxy(port int) *Proxy {
@@ -250,6 +278,66 @@ func (p *Proxy) enable(enable bool) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.Enabled = enable
+}
+
+func (p *Proxy) isEnabled() bool {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	return p.Enabled
+}
+
+func (p *Proxy) setProxyResponses(responses []*ProxyResponse) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	p.ProxyResponses = responses
+}
+
+func (p *Proxy) getProxyResponses() []*ProxyResponse {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	return p.ProxyResponses
+}
+
+// getTargets returns the targets, as a copy of the map that is changed as targets are added and removed.
+func (p *Proxy) getTargets() map[string]*Target {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	return maps.Clone(p.Targets)
+}
+
+// MarshalJSON reports the proxy as it is at the moment, while requests keep updating its trackers and targets.
+func (p *Proxy) MarshalJSON() ([]byte, error) {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	return json.Marshal(struct {
+		Port           int                `json:"port"`
+		Targets        map[string]*Target `json:"targets"`
+		Enabled        bool               `json:"enabled"`
+		ProxyResponses []*ProxyResponse   `json:"proxyResponses"`
+		HTTPTracker    *HTTPProxyTracker  `json:"tracker"`
+	}{p.Port, p.Targets, p.Enabled, p.ProxyResponses, p.HTTPTracker.snapshot()})
+}
+
+// MarshalJSON reports the target as it is at the moment, while requests keep updating its call counts.
+func (t *Target) MarshalJSON() ([]byte, error) {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	type plain Target
+	return json.Marshal((*plain)(t))
+}
+
+func (t *TargetTrigger) MarshalJSON() ([]byte, error) {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	type plain TargetTrigger
+	return json.Marshal((*plain)(t))
+}
+
+func (ep *TargetEndpoint) MarshalJSON() ([]byte, error) {
+	ep.lock.RLock()
+	defer ep.lock.RUnlock()
+	type plain TargetEndpoint
+	return json.Marshal((*plain)(ep))
 }
 
 func (p *Proxy) addProxyPath(path string) *mux.Router {
@@ -385,14 +473,19 @@ func (p *Proxy) removeTarget(target string) bool {
 func (p *Proxy) enableTarget(target string, enable bool) bool {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if p.Targets[target] != nil {
-		p.Targets[target].Enabled = enable
+	if t := p.Targets[target]; t != nil {
+		// The target is also reported (marshalled) under its own lock, without the one of the proxy.
+		t.lock.Lock()
+		t.Enabled = enable
+		t.lock.Unlock()
 		return true
 	}
 	return false
 }
 
 func (p *Proxy) hasAnyTargets() bool {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
 	return len(p.Targets) > 0
 }
 
@@ -421,11 +514,14 @@ func (t *Target) addRemoveHeader(triggerName, header, value string, remove bool)
 	}
 	t.Transform.addRemoveHeader(header, value, remove)
 	for _, tr := range t.Triggers {
+		tr.lock.Lock()
 		if tr.Transform == nil {
 			tr.Transform = t.Transform
-		} else {
+		} else if tr.Transform != t.Transform {
+			// A trigger that shares the transform of the target has the header already.
 			tr.Transform.addRemoveHeader(header, value, remove)
 		}
+		tr.lock.Unlock()
 	}
 	return true
 }
@@ -440,11 +536,15 @@ func (t *TargetTrigger) addRemoveHeader(header, value string, remove bool) bool 
 }
 
 func (t *TrafficTransform) addRemoveHeader(header, value string, remove bool) bool {
+	t.lock.Lock()
+	defer t.lock.Unlock()
 	if t.Headers == nil {
 		t.Headers = &Keys{}
 	}
 	if remove {
-		t.Headers.Remove = append(t.Headers.Remove, header)
+		if !slices.Contains(t.Headers.Remove, header) {
+			t.Headers.Remove = append(t.Headers.Remove, header)
+		}
 	} else {
 		if t.Headers.Add == nil {
 			t.Headers.Add = map[string]string{}
@@ -478,8 +578,11 @@ func (t *Target) clearHeaders(triggerName, header string) bool {
 		t.Transform.clearHeaders(header)
 	}
 	for _, tr := range t.Triggers {
-		if tr.Transform != nil {
-			tr.Transform.clearHeaders(header)
+		tr.lock.RLock()
+		transform := tr.Transform
+		tr.lock.RUnlock()
+		if transform != nil && transform != t.Transform {
+			transform.clearHeaders(header)
 		}
 	}
 	return true
@@ -495,12 +598,12 @@ func (t *TargetTrigger) clearHeaders(header string) bool {
 }
 
 func (t *TrafficTransform) clearHeaders(header string) bool {
+	t.lock.Lock()
+	defer t.lock.Unlock()
 	if t.Headers != nil {
 		if header != "" {
 			delete(t.Headers.Add, header)
-			if idx := slices.Index(t.Headers.Remove, header); idx != -1 {
-				t.Headers.Remove = slices.Delete(t.Headers.Remove, idx, idx+1)
-			}
+			t.Headers.Remove = slices.DeleteFunc(t.Headers.Remove, func(h string) bool { return h == header })
 		} else {
 			t.Headers.Add = map[string]string{}
 			t.Headers.Remove = []string{}

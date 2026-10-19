@@ -46,8 +46,8 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(httpTargetsRouter, "/clear", clearHTTPTarget, "POST", "PUT")
 	util.AddRoute(httpTargetsRouter, "/{target}/remove", removeHTTPTarget, "POST", "PUT")
 	util.AddRoute(httpTargetsRouter, "/{target}/{o:enable|disable}", enableHTTPTarget, "POST", "PUT")
-	util.AddRoute(httpTargetsRouter, "/{target}/{trigger}?/headers/add/{header}={value}", addRemoveHeader, "POST", "PUT")
-	util.AddRoute(httpTargetsRouter, "/{target}/{trigger}?/headers/remove/{header}", addRemoveHeader, "POST", "PUT")
+	util.AddRoute(httpTargetsRouter, "/{target}/{trigger}?/headers/add/{header}={value}", addHeader, "POST", "PUT")
+	util.AddRoute(httpTargetsRouter, "/{target}/{trigger}?/headers/remove/{header}", removeHeader, "POST", "PUT")
 	util.AddRoute(httpTargetsRouter, "/{target}/{trigger}?/headers/clear/{header}?", clearHeaders, "POST", "PUT")
 	util.AddRoute(httpTargetsRouter, "", getProxyTargets, "GET")
 	util.AddRoute(httpTargetsRouter, "/all", getProxyTargets, "GET")
@@ -71,10 +71,11 @@ func setProxyResponses(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	msg := ""
 	if err := util.ReadJsonPayload(r, &proxyResponses); err != nil {
-		GetPortProxy(port).ProxyResponses = proxyResponses
-		msg = fmt.Sprintf("Proxy [%d] will use responses [%+v]", port, proxyResponses)
-	} else {
+		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("Proxy [%d] failed to parse responses: %s", port, err.Error())
+	} else {
+		GetPortProxy(port).setProxyResponses(proxyResponses)
+		msg = fmt.Sprintf("Proxy [%d] will use responses [%s]", port, util.ToJSONText(proxyResponses))
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
@@ -83,7 +84,7 @@ func setProxyResponses(w http.ResponseWriter, r *http.Request) {
 func getProxyResponses(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	proxy := GetPortProxy(port)
-	util.WriteJsonPayload(w, proxy.ProxyResponses)
+	util.WriteJsonPayload(w, proxy.getProxyResponses())
 	util.AddLogMessage("Reported proxy responses", r)
 }
 
@@ -111,11 +112,20 @@ func addHTTPTarget(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
-func addRemoveHeader(w http.ResponseWriter, r *http.Request) {
+// addHeader and removeHeader are separate handlers, as the route is what tells them apart: the URI can have "remove" in
+// the name of a target, a trigger or a header.
+func addHeader(w http.ResponseWriter, r *http.Request) {
+	addRemoveHeader(w, r, false)
+}
+
+func removeHeader(w http.ResponseWriter, r *http.Request) {
+	addRemoveHeader(w, r, true)
+}
+
+func addRemoveHeader(w http.ResponseWriter, r *http.Request, remove bool) {
 	port := util.GetRequestOrListenerPortNum(r)
 	target := util.GetStringParamValue(r, "target")
 	trigger := util.GetStringParamValue(r, "trigger")
-	remove := strings.Contains(r.RequestURI, "remove")
 	header := util.GetStringParamValue(r, "header")
 	value := util.GetStringParamValue(r, "value")
 	msg := ""
@@ -191,7 +201,7 @@ func getProxy(w http.ResponseWriter, r *http.Request) {
 	all := strings.Contains(r.RequestURI, "all")
 	result := map[string]any{}
 	if all {
-		for port, proxy := range portProxy {
+		for port, proxy := range snapshotProxies() {
 			result[strconv.Itoa(port)] = proxy
 		}
 	} else {
@@ -208,14 +218,14 @@ func getProxyTargets(w http.ResponseWriter, r *http.Request) {
 	all := strings.Contains(r.RequestURI, "all")
 	result := map[string]any{}
 	if all {
-		for port, proxy := range portProxy {
-			result[strconv.Itoa(port)] = proxy.Targets
+		for port, proxy := range snapshotProxies() {
+			result[strconv.Itoa(port)] = proxy.getTargets()
 		}
 	} else {
 		port := util.GetRequestOrListenerPortNum(r)
 		proxy := GetPortProxy(port)
 		result["port"] = port
-		result["http"] = proxy.Targets
+		result["http"] = proxy.getTargets()
 	}
 	util.WriteJsonPayload(w, result)
 	util.AddLogMessage("Reported proxy targets", r)
@@ -235,10 +245,14 @@ func getProxyTargetTracker(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	proxy := GetPortProxy(port)
 	target := checkAndGetTarget(proxy, w, r)
+	if target == nil {
+		return
+	}
+	tracker := proxy.getTracker().snapshot()
 	result := map[string]any{}
 	result["port"] = port
-	result["total"] = proxy.HTTPTracker.HTTPCounts
-	if t := proxy.HTTPTracker.TargetTrackers[target.Name]; t != nil {
+	result["total"] = tracker.HTTPCounts
+	if t := tracker.TargetTrackers[target.Name]; t != nil {
 		result[target.Name] = t
 	} else {
 		result[target.Name] = nil
@@ -253,17 +267,17 @@ func getProxyTrackers(w http.ResponseWriter, r *http.Request) {
 	all := strings.Contains(r.RequestURI, "all")
 	result := map[string]any{}
 	if all {
-		for port, proxy := range portProxy {
+		for port, proxy := range snapshotProxies() {
 			result[strconv.Itoa(port)] = map[string]any{
-				"enabled": proxy.Enabled,
-				"http":    proxy.HTTPTracker,
+				"enabled": proxy.isEnabled(),
+				"http":    proxy.getTracker().snapshot(),
 			}
 		}
 	} else {
 		proxy := GetPortProxy(port)
 		result["port"] = port
-		result["enabled"] = proxy.Enabled
-		result["http"] = proxy.HTTPTracker
+		result["enabled"] = proxy.isEnabled()
+		result["http"] = proxy.getTracker().snapshot()
 	}
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, util.ToJSONText(result))
@@ -274,7 +288,7 @@ func clearProxyTrackers(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	all := strings.Contains(r.RequestURI, "all")
 	if all {
-		for _, proxy := range portProxy {
+		for _, proxy := range snapshotProxies() {
 			proxy.initTracker()
 		}
 	} else {

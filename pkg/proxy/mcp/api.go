@@ -40,22 +40,38 @@ func setRoutes(r *mux.Router) {
 
 func setupMCPProxy(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
-	serverName := util.GetStringParamValue(r, "server")
 	tool := util.GetStringParamValue(r, "tool")
 	toTool := util.GetStringParamValue(r, "to")
 	endpoint := util.GetStringParamValue(r, "endpoint")
+	// The server is given as a query param that the routes don't list, and is named after the tool when it is not given.
+	serverName := util.GetStringParamValue(r, "server")
+	if serverName == "" {
+		serverName = r.URL.Query().Get("server")
+	}
+	if serverName == "" {
+		serverName = tool
+	}
+	if serverName == "" {
+		serverName = "*"
+	}
 	h, present := util.GetListParam(r, "headers")
 	headers := map[string]string{}
 	if present {
 		for _, val := range h {
-			kv := strings.Split(val, ":")
-			if len(kv) == 2 {
-				headers[kv[0]] = kv[1]
+			// The value of a header can have colons in it.
+			kv := strings.SplitN(val, ":", 2)
+			if len(kv) == 2 && strings.TrimSpace(kv[0]) != "" {
+				headers[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
 			}
 		}
 	}
-	GetMCPProxyForPort(port).SetupMCPProxy(serverName, endpoint, tool, toTool, headers)
-	msg := fmt.Sprintf("Setup MCP proxy at port [%d] for server [%s] tool [%s] to endpoint [%s] tool [%s]", port, serverName, tool, endpoint, toTool)
+	msg := ""
+	if err := GetMCPProxyForPort(port).SetupMCPProxy(serverName, endpoint, tool, toTool, headers); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = fmt.Sprintf("Failed to setup MCP proxy at port [%d] for server [%s] tool [%s]: %s", port, serverName, tool, err.Error())
+	} else {
+		msg = fmt.Sprintf("Setup MCP proxy at port [%d] for server [%s] tool [%s] to endpoint [%s] tool [%s]", port, serverName, tool, endpoint, toTool)
+	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }

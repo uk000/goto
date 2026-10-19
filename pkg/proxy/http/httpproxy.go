@@ -28,8 +28,11 @@ import (
 	gototls "goto/pkg/tls"
 	"goto/pkg/util"
 	"log"
+	"maps"
 	"net/http"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -44,6 +47,9 @@ var (
 	lowerProxyUpstreamStatus = strings.ToLower(constants.HeaderGotoProxyUpstreamStatus)
 	lowerGotoUpstreamStatus  = strings.ToLower(constants.HeaderGotoUpstreamStatus)
 	proxyLock                sync.RWMutex
+	// util.TransposeURI adds a route to a router that is shared by all the callers each time it is called, and a router
+	// can't be changed by several goroutines at a time.
+	transposeLock sync.Mutex
 )
 
 func GetPortProxy(port int) *Proxy {
@@ -53,10 +59,25 @@ func GetPortProxy(port int) *Proxy {
 	if proxy == nil {
 		proxyLock.Lock()
 		defer proxyLock.Unlock()
-		proxy = newProxy(port)
-		portProxy[port] = proxy
+		// Another request may have created the proxy since the read lock was released, and the callers must all get
+		// that one, or the targets that are added to the one that gets replaced are lost.
+		if proxy = portProxy[port]; proxy == nil {
+			proxy = newProxy(port)
+			portProxy[port] = proxy
+		}
 	}
 	return proxy
+}
+
+// snapshotProxies returns the proxies of all the ports, for the callers that go over them while proxies get created.
+func snapshotProxies() map[int]*Proxy {
+	proxyLock.RLock()
+	defer proxyLock.RUnlock()
+	proxies := make(map[int]*Proxy, len(portProxy))
+	for port, proxy := range portProxy {
+		proxies[port] = proxy
+	}
+	return proxies
 }
 
 func ClearAllProxies() {
@@ -96,29 +117,45 @@ func (p *Proxy) initTracker() {
 	p.HTTPTracker = NewHTTPTracker()
 }
 
+// getTracker returns the tracker of the proxy, which is replaced when the trackers are cleared.
+func (p *Proxy) getTracker() *HTTPProxyTracker {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	return p.HTTPTracker
+}
+
 func (p *Proxy) incrementMatchCounts(matches map[string]*MatchedTarget, r *http.Request) {
-	p.HTTPTracker.IncrementDownstreamRequestCounts(r.RequestURI)
+	tracker := p.getTracker()
+	tracker.IncrementDownstreamRequestCounts(r.RequestURI)
 	for _, match := range matches {
-		p.HTTPTracker.IncrementTargetDownstreamCounts(match.target.Name, r.RequestURI)
+		tracker.IncrementTargetDownstreamCounts(match.target.Name, r.RequestURI)
 		if match.matchedURI != "" {
-			p.HTTPTracker.IncrementTargetMatchCounts(match.target.Name, match.matchedURI, "", "", "", "")
+			tracker.IncrementTargetMatchCounts(match.target.Name, match.matchedURI, "", "", "", "")
 		}
 		for k, v := range match.matchedHeaders {
-			p.HTTPTracker.IncrementTargetMatchCounts(match.target.Name, "", k, v, "", "")
+			tracker.IncrementTargetMatchCounts(match.target.Name, "", k, v, "", "")
 		}
 	}
 }
 
 func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *RequestContext) {
+	tracker := p.getTracker()
+	proxyResponses := p.getProxyResponses()
 	out := make(chan *TargetEndpointResponse, 10)
+	quit := make(chan struct{})
 	wg := &sync.WaitGroup{}
 	responses := UpstreamResults{}
 	responseStatuses := map[string]map[string]int{}
 	var proxyResponseStatus int
-	go p.asyncCollectResponses(out, wg, &proxyResponseStatus, responseStatuses, responses)
-	go p.asyncStreamResponse(rc)
+	collectorDone := make(chan struct{})
+	go func() {
+		defer close(collectorDone)
+		p.asyncCollectResponses(out, quit, wg, tracker, proxyResponses, &proxyResponseStatus, responseStatuses, responses)
+	}()
+	streamDone := make(chan struct{})
+	go p.asyncStreamResponse(rc, streamDone)
 	for _, match := range targetsMatches {
-		match.invoke(rc, out, wg, p.HTTPTracker)
+		match.invoke(rc, out, wg, tracker)
 		if match.trafficConfig != nil {
 			if match.trafficConfig.Transparent {
 				rc.sendHeaders = true
@@ -132,7 +169,13 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 		}
 	}
 	wg.Wait()
+	// Every response has been collected, so the collector is not needed anymore. What it collected is read once it ends,
+	// also when it had nothing to collect because no upstream could be called.
+	close(quit)
+	<-collectorDone
 	close(rc.c)
+	// What was streamed must reach the response before the rest of it is written.
+	<-streamDone
 	p.processResponses(rc, responses, responseStatuses)
 	rc.rs.StatusCode = proxyResponseStatus
 	rc.w.WriteHeader(proxyResponseStatus)
@@ -254,17 +297,22 @@ func (t *MatchedTarget) invoke(rc *RequestContext, out chan *TargetEndpointRespo
 		epCounter := ep.ep.CallCount
 		ep.ep.lock.Unlock()
 		metrics.UpdateProxiedRequestCount(ep.ep.name)
-		err := ep.invoke(targetCounter, epCounter, t.target.Name, t.matchedURI, t.transform, rc, out, pt)
-		if err != nil {
+		// The responses are counted down as they come, so the wait group must know about them before the call is
+		// made, and must forget them if the call can't be made, as nothing will report them.
+		expected := ep.ep.RequestCount * ep.ep.Concurrent
+		wg.Add(expected)
+		if err := ep.invoke(targetCounter, epCounter, t.target.Name, t.matchedURI, t.transform, rc, out, pt); err != nil {
 			log.Println(err.Error())
+			wg.Add(-expected)
 		}
-		wg.Add(ep.ep.RequestCount * ep.ep.Concurrent)
 	}
 }
 
 func (ep *EndpointInvocation) invoke(targetCounter, epCounter int, target string, matchedURI string, tt *TrafficTransform, rc *RequestContext, out chan *TargetEndpointResponse, pt *HTTPProxyTracker) error {
+	ep.registerLock.Lock()
 	is := ep.toInvocationSpec(matchedURI, tt, rc, pt)
 	tracker, err := invocation.RegisterInvocation(ep.proxyPort, is)
+	ep.registerLock.Unlock()
 	if err != nil {
 		return err
 	}
@@ -292,6 +340,9 @@ func (ep *EndpointInvocation) asyncInvoke(target string, tracker *invocation.Inv
 
 func (ep *EndpointInvocation) onHeaders(rc *RequestContext) func(http.Header, int, *gototls.PeerCertInfo) {
 	return func(headers http.Header, status int, peerCertInfo *gototls.PeerCertInfo) {
+		// The endpoints of a request are called concurrently, and all of them report to the same response headers.
+		rc.headersLock.Lock()
+		defer rc.headersLock.Unlock()
 		upstreamViaGoto := []string{}
 		upstreamStatuses := []string{}
 		upstreamProxyStatuses := []map[string]map[string][]string{}
@@ -302,18 +353,43 @@ func (ep *EndpointInvocation) onHeaders(rc *RequestContext) func(http.Header, in
 	}
 }
 
-func (p *Proxy) asyncStreamResponse(rc *RequestContext) {
+func (p *Proxy) asyncStreamResponse(rc *RequestContext, done chan struct{}) {
+	defer close(done)
 	for data := range rc.c {
 		if len(data) == 0 {
-			return
+			// Not the end of the stream, which is when the channel is closed. Keep draining the channel, as the
+			// writers of the stream block when it is full.
+			continue
 		}
-		rc.fw.Write(data)
+		if rc.fw != nil {
+			rc.fw.Write(data)
+		}
 	}
 }
 
-func (p *Proxy) asyncCollectResponses(out chan *TargetEndpointResponse, wg *sync.WaitGroup, proxyResponseStatus *int, responseStatuses map[string]map[string]int, responses UpstreamResults) {
+// chanWriter sends what it is given to a channel. Unlike intercept.ChanWriter it sends a copy, as the callers reuse the
+// buffer that they write from.
+type chanWriter struct {
+	c chan []byte
+}
+
+func (w *chanWriter) Write(p []byte) (int, error) {
+	w.c <- append([]byte(nil), p...)
+	return len(p), nil
+}
+
+// asyncCollectResponses collects the responses of the upstreams until quit is closed, which is after all the expected
+// responses were collected.
+func (p *Proxy) asyncCollectResponses(out chan *TargetEndpointResponse, quit chan struct{}, wg *sync.WaitGroup, tracker *HTTPProxyTracker, proxyResponses []*ProxyResponse,
+	proxyResponseStatus *int, responseStatuses map[string]map[string]int, responses UpstreamResults) {
 	*proxyResponseStatus = 0
-	for resp := range out {
+	for {
+		var resp *TargetEndpointResponse
+		select {
+		case resp = <-out:
+		case <-quit:
+			return
+		}
 		if responseStatuses[resp.target] == nil {
 			responseStatuses[resp.target] = map[string]int{}
 		}
@@ -322,10 +398,10 @@ func (p *Proxy) asyncCollectResponses(out chan *TargetEndpointResponse, wg *sync
 		}
 		responseStatuses[resp.target][resp.endpoint] = resp.response.StatusCode
 		responses[resp.target][resp.endpoint] = append(responses[resp.target][resp.endpoint], resp.response)
-		p.HTTPTracker.IncrementTargetUpstreamStatusCounts(resp.target, resp.endpoint, resp.requestURI, resp.response.StatusCode)
+		tracker.IncrementTargetUpstreamStatusCounts(resp.target, resp.endpoint, resp.requestURI, resp.response.StatusCode)
 		remapped := false
-		if p.ProxyResponses != nil {
-			for _, pr := range p.ProxyResponses {
+		if proxyResponses != nil {
+			for _, pr := range proxyResponses {
 				if len(pr.UpResponseRange) == 0 {
 					continue
 				}
@@ -363,6 +439,8 @@ func (ep *TargetEndpoint) prepareInvocationSpec(tc *TrafficConfig) (*invocation.
 	is.TrackPayload = true
 	is.CollectResponse = ep.Payload || ep.JsonPayload || ep.YamlPayload
 	if tc != nil {
+		// The traffic config of the trigger (or the one of the target) decides what its requests collect.
+		is.CollectResponse = is.CollectResponse || tc.Payload || tc.JsonPayload || tc.YamlPayload
 		is.Retries = tc.Retries
 		if tc.Delay != nil {
 			is.Delay = tc.Delay.Compute().String()
@@ -378,6 +456,8 @@ func (ep *TargetEndpoint) prepareInvocationSpec(tc *TrafficConfig) (*invocation.
 	if err := invocation.ValidateSpec(is); err != nil {
 		return nil, err
 	}
+	// The method is the one of the downstream request unless the endpoint has one, but validation defaults it to GET.
+	is.Method = ep.Method
 	return is, nil
 }
 
@@ -397,23 +477,34 @@ func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTra
 	var removeHeaders []string
 	if tt != nil {
 		is.RequestId = tt.RequestId
+		// The headers can be changed through the admin API while requests are served, and the ones of a request
+		// get changed below (the removed headers get another one), so the request works on copies.
+		tt.lock.RLock()
 		if tt.Headers != nil {
-			addHeaders = tt.Headers.Add
-			mapHeaders = tt.Headers.Map
-			removeHeaders = tt.Headers.Remove
+			addHeaders = maps.Clone(tt.Headers.Add)
+			mapHeaders = maps.Clone(tt.Headers.Map)
+			removeHeaders = slices.Clone(tt.Headers.Remove)
 			is.LowerHeaders = tt.Headers.Lower
 		}
-		if tt.Payload != "" {
-			is.Body = util.GetFilledText(tt.Payload, rc.vars)
-			removeHeaders = append(removeHeaders, constants.HeaderContentLength)
-		} else {
-			is.BodyReader = rc.body
-		}
+		tt.lock.RUnlock()
 	}
-	is.Headers, is.Host = util.TransformHeaders(rc.vars, rc.headers, addHeaders, mapHeaders, removeHeaders)
+	if tt != nil && tt.Payload != "" {
+		is.Body = util.GetFilledText(tt.Payload, rc.vars)
+		removeHeaders = append(removeHeaders, constants.HeaderContentLength)
+	} else {
+		// The request body goes to the upstream as it is when there is no payload to replace it with, whether or not
+		// the request is transformed in any other way.
+		is.BodyReader = rc.bodyReader()
+	}
+	var host string
+	is.Headers, host = util.TransformHeaders(rc.vars, rc.headers, addHeaders, mapHeaders, removeHeaders)
+	if host != "" {
+		// The authority of the endpoint is what the upstream gets, unless the transformation sets the host.
+		is.Host = host
+	}
 	if ep.ep.Stream {
 		if rc.cw == nil {
-			rc.cw = intercept.NewChanWriter(rc.c, rc.w)
+			rc.cw = &chanWriter{c: rc.c}
 		}
 		if rc.fw == nil {
 			rc.fw = intercept.CreateOrGetFlushWriter(rc.w)
@@ -448,7 +539,9 @@ func (ep *EndpointInvocation) prepareURL(matchedURI string, tt *TrafficTransform
 			remove = tt.Queries.Remove
 		}
 	}
+	transposeLock.Lock()
 	targetURI = util.TransposeURI(rc.path, matchedURI, targetURI, rc.vars, rc.headers, rc.queries, add, remove)
+	transposeLock.Unlock()
 	pt.IncrementUpstreamRequestCounts(targetURI)
 	pt.IncrementTargetUpstreamCounts(ep.ep.target.Name, ep.ep.name, targetURI)
 	url := ep.ep.URL
@@ -457,7 +550,8 @@ func (ep *EndpointInvocation) prepareURL(matchedURI string, tt *TrafficTransform
 }
 
 func (m *TargetMatch) matchURI(matchedTarget *MatchedTarget, r *http.Request) bool {
-	if m.uriRegexp != nil && !m.uriRegexp.MatchString(r.RequestURI) {
+	// The URI regexp of an exact URI ends the path, so it can't match a request URI that has a query.
+	if m.uriRegexp != nil && !m.uriRegexp.MatchString(r.URL.Path) {
 		return false
 	}
 	uri := m.URI
@@ -565,10 +659,17 @@ func (p *Proxy) getMatchingProxyTargets(r *http.Request) (ProxyTargets, bool) {
 		}
 		if trigger.match(matchedTarget, r) {
 			matchedTarget.endpoints = trigger.epSpecs
-			if trigger.Transform != nil {
-				matchedTarget.transform = trigger.Transform
+			// The transforms are created for the first header that is added to a target or a trigger, while requests
+			// are matched.
+			trigger.lock.RLock()
+			triggerTransform := trigger.Transform
+			trigger.lock.RUnlock()
+			if triggerTransform != nil {
+				matchedTarget.transform = triggerTransform
 			} else {
+				target.lock.RLock()
 				matchedTarget.transform = target.Transform
+				target.lock.RUnlock()
 			}
 			if trigger.TrafficConfig != nil {
 				matchedTarget.trafficConfig = trigger.TrafficConfig
@@ -607,11 +708,13 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	var targets ProxyTargets
 	streaming := false
 	proxy := GetPortProxy(port)
-	if rs.ProxyTargets == nil {
+	// The targets are in the request store if WillProxyHTTP looked for them. Other proxies (e.g. MCP) put their own kind
+	// of targets there, which are not for this one.
+	if matched, ok := rs.ProxyTargets.(ProxyTargets); ok && matched != nil {
+		targets = matched
+	} else {
 		targets, streaming = proxy.getMatchingProxyTargets(r)
 		rs.ProxyStreaming = streaming
-	} else {
-		targets = rs.ProxyTargets.(ProxyTargets)
 	}
 	if len(targets) > 0 {
 		rs.ProxiedRequest = true
@@ -638,31 +741,44 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getProxyRouter finds the router to serve a request that matched the given targets. The routers are per root URI of
+// the URIs that the targets are triggered by, and only a router that has a route for the URI that a target matched is
+// sure to serve the request, so the routers of the matches are looked up first, in the order of the target names.
+func getProxyRouter(port int, r *http.Request, matches ProxyTargets) *mux.Router {
+	proxyLock.RLock()
+	defer proxyLock.RUnlock()
+	routers := proxyRouters[port]
+	names := util.GetMapKeys(matches)
+	sort.Strings(names)
+	for _, name := range names {
+		rootURI, _ := util.GetRootURI(matches[name].matchedURI)
+		if rootURI == "" {
+			rootURI = "/"
+		}
+		if router := routers[rootURI]; router != nil {
+			return router
+		}
+	}
+	if rootURI, _ := util.GetRootURI(r.RequestURI); rootURI != "" {
+		if router := routers[rootURI]; router != nil {
+			return router
+		}
+	}
+	return routers["/"]
+}
+
 func WillProxyHTTP(r *http.Request) (bool, *mux.Router) {
 	port := util.GetRequestOrListenerPortNum(r)
 	proxy := GetPortProxy(port)
 	rs := util.GetRequestStore(r)
 	rs.ProxiedRequest = false
-	if proxy.Enabled && proxy.hasAnyTargets() && !status.IsForcedStatus(r) {
+	if proxy.isEnabled() && proxy.hasAnyTargets() && !status.IsForcedStatus(r) {
 		matches, streaming := proxy.getMatchingProxyTargets(r)
 		rs.ProxiedRequest = len(matches) > 0
 		if rs.ProxiedRequest {
 			rs.ProxyTargets = matches
 			rs.ProxyStreaming = streaming
-			rootURI, _ := util.GetRootURI(r.RequestURI)
-			router := proxyRouters[port][rootURI]
-			if router == nil {
-				for _, m := range matches {
-					router = proxyRouters[port][m.matchedURI]
-					if router != nil {
-						break
-					}
-				}
-			}
-			if router == nil {
-				router = proxyRouters[port]["/"]
-			}
-			return true, router
+			return true, getProxyRouter(port, r, matches)
 		}
 	}
 	return false, nil

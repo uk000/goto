@@ -23,15 +23,30 @@ import (
 	"goto/pkg/server/listeners"
 	"goto/pkg/types"
 	"log"
+	"math/rand"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
+const maxPacketSize = 65535
+
 var (
 	udpProxyByPort = map[int]*UDPProxy{}
 	proxyLock      sync.RWMutex
+
+	// upstreamTimeout is how long the proxy waits for an upstream to answer a packet.
+	upstreamTimeout = 2 * time.Second
+	// maxInFlight is how many packets the proxy of a port deals with at a time. The packets that arrive while that many
+	// are being dealt with are dropped.
+	maxInFlight = 1024
+
+	bufferPool = sync.Pool{New: func() any {
+		b := make([]byte, maxPacketSize)
+		return &b
+	}}
 )
 
 type UDPUpstream struct {
@@ -41,8 +56,6 @@ type UDPUpstream struct {
 	Delay        *types.Delay `json:"delay"`
 	upstreamAddr *net.UDPAddr
 	isRunning    bool
-	conn         *net.UDPConn
-	stopChan     chan bool
 	lock         sync.RWMutex
 }
 
@@ -51,8 +64,11 @@ type UDPProxy struct {
 	Enabled    bool                    `json:"enabled"`
 	Upstreams  map[string]*UDPUpstream `json:"upstreams"`
 	UDPTracker *UDPProxyTracker        `json:"udpTracker"`
-	stopChan   chan bool
-	lock       sync.RWMutex
+	// the listener that the proxy reads packets from, and the number of the upstream that gets the next packet
+	conn     net.PacketConn
+	next     int
+	inFlight chan struct{}
+	lock     sync.RWMutex
 }
 
 func newUDPProxy(port int) *UDPProxy {
@@ -61,12 +77,11 @@ func newUDPProxy(port int) *UDPProxy {
 		Enabled:    true,
 		Upstreams:  map[string]*UDPUpstream{},
 		UDPTracker: NewUDPTracker(),
-		stopChan:   make(chan bool),
-		lock:       sync.RWMutex{},
+		inFlight:   make(chan struct{}, maxInFlight),
 	}
 }
 
-func newUDPUpstream(name, address string, delayMin, delayMax time.Duration) *UDPUpstream {
+func newUDPUpstream(name, address string) *UDPUpstream {
 	return &UDPUpstream{
 		Name:     name,
 		Protocol: "udp",
@@ -80,24 +95,57 @@ func getUDPProxyForPort(port int) *UDPProxy {
 	proxyLock.RUnlock()
 	if proxy == nil {
 		proxyLock.Lock()
-		defer proxyLock.Unlock()
-		proxy = newUDPProxy(port)
-		udpProxyByPort[port] = proxy
+		if proxy = udpProxyByPort[port]; proxy == nil {
+			proxy = newUDPProxy(port)
+			udpProxyByPort[port] = proxy
+		}
+		proxyLock.Unlock()
 	}
 	return proxy
 }
 
+func findUDPProxy(port int) *UDPProxy {
+	proxyLock.RLock()
+	defer proxyLock.RUnlock()
+	return udpProxyByPort[port]
+}
+
+// ProxyUDPUpstream starts proxying the packets that arrive at the UDP listener of the port to the upstream, which is
+// the address of a UDP server. The packets and the answers to them are delayed by a time between the given ones.
+// Packets go to the upstreams that the port has in turn.
 func ProxyUDPUpstream(port int, upstream string, delayMin, delayMax time.Duration) {
+	if err := proxyUDPUpstream(port, upstream, delayMin, delayMax); err != nil {
+		log.Printf("UDP Proxy[%d]: Failed to proxy to upstream [%s]: %s\n", port, upstream, err.Error())
+	}
+}
+
+func proxyUDPUpstream(port int, upstream string, delayMin, delayMax time.Duration) error {
+	l := listeners.GetListenerForPort(port)
+	if l == nil || l.UDPConn == nil {
+		return fmt.Errorf("no open UDP listener on port [%d]", port)
+	}
 	name := fmt.Sprintf("%d-%s", port, upstream)
-	getUDPProxyForPort(port).startUpstream(name, upstream, delayMin, delayMax)
+	return getUDPProxyForPort(port).startUpstream(name, upstream, l.UDPConn, delayMin, delayMax)
 }
 
+// SetUDPDelay sets the delay of the upstream, or of all the upstreams of the port if no upstream is given.
 func SetUDPDelay(port int, upstream string, delayMin, delayMax time.Duration) {
-	getUDPProxyForPort(port).setUDPDelay(upstream, delayMin, delayMax)
+	setUDPDelayOfPort(port, upstream, delayMin, delayMax)
 }
 
+// setUDPDelayOfPort tells how many upstreams it set the delay of.
+func setUDPDelayOfPort(port int, upstream string, delayMin, delayMax time.Duration) int {
+	if p := findUDPProxy(port); p != nil {
+		return p.setUDPDelay(upstream, delayMin, delayMax)
+	}
+	return 0
+}
+
+// StopUDPUpstream stops proxying to the upstream. The upstream is kept, and starts again if it's asked for again.
 func StopUDPUpstream(port int, upstream string) {
-	getUDPProxyForPort(port).stopUpstream(upstream)
+	if p := findUDPProxy(port); p != nil {
+		p.stopUpstream(upstream)
+	}
 }
 
 func (p *UDPProxy) initTracker() {
@@ -106,35 +154,63 @@ func (p *UDPProxy) initTracker() {
 	p.UDPTracker = NewUDPTracker()
 }
 
-func (p *UDPProxy) setUDPDelay(upstream string, delayMin, delayMax time.Duration) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	up := p.Upstreams[upstream]
-	if up != nil {
-		up.setUDPDelay(delayMin, delayMax)
-	}
+func (p *UDPProxy) tracker() *UDPProxyTracker {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	return p.UDPTracker
 }
 
-func (p *UDPProxy) startUpstream(name, upstream string, delayMin, delayMax time.Duration) {
+func (p *UDPProxy) setUDPDelay(upstream string, delayMin, delayMax time.Duration) int {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	n := 0
+	for endpoint, up := range p.Upstreams {
+		if upstream == "" || upstream == endpoint {
+			up.setUDPDelay(delayMin, delayMax)
+			n++
+		}
+	}
+	return n
+}
+
+// startUpstream sets the upstream up, and has the proxy read packets from the connection, unless it already does.
+func (p *UDPProxy) startUpstream(name, upstream string, conn net.PacketConn, delayMin, delayMax time.Duration) error {
+	addr, err := resolveUpstream(upstream)
+	if err != nil {
+		return err
+	}
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	up := p.Upstreams[upstream]
 	if up == nil {
-		up = newUDPUpstream(name, upstream, delayMin, delayMax)
-		up.connect()
+		up = newUDPUpstream(name, upstream)
 		p.Upstreams[upstream] = up
-	} else if up.isRunning {
-		up.Stop()
 	}
-	up.setUDPDelay(delayMin, delayMax)
-	go p.runProxy(up)
+	up.start(addr, delayMin, delayMax)
+	if conn != nil && p.conn != conn {
+		p.conn = conn
+		go p.serve(conn)
+	}
+	return nil
+}
+
+// resolveUpstream makes an address of the upstream, which must be a host and a port.
+func resolveUpstream(upstream string) (*net.UDPAddr, error) {
+	addr, err := net.ResolveUDPAddr("udp", upstream)
+	if err != nil {
+		return nil, fmt.Errorf("invalid upstream address [%s]: %w", upstream, err)
+	}
+	if addr.Port <= 0 {
+		return nil, fmt.Errorf("invalid upstream address [%s]: no port", upstream)
+	}
+	return addr, nil
 }
 
 func (p *UDPProxy) stopUpstream(upstream string) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
+	p.lock.RLock()
 	up := p.Upstreams[upstream]
-	if up != nil && up.isRunning {
+	p.lock.RUnlock()
+	if up != nil {
 		up.Stop()
 	}
 }
@@ -142,85 +218,161 @@ func (p *UDPProxy) stopUpstream(upstream string) {
 func (p *UDPProxy) removeUpstream(upstream string) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if p.Upstreams[upstream] != nil {
-		p.Upstreams[upstream].Stop()
+	if up := p.Upstreams[upstream]; up != nil {
+		up.Stop()
 		delete(p.Upstreams, upstream)
 	}
 }
 
-func (p *UDPProxy) runProxy(up *UDPUpstream) error {
-	l := listeners.GetListenerForPort(p.Port)
-	for {
-		select {
-		case <-p.stopChan:
-			return nil
-		case <-up.stopChan:
-			return nil
-		default:
+// nextUpstream picks the upstream for the next packet, going through the running ones in the order of their addresses.
+func (p *UDPProxy) nextUpstream() *UDPUpstream {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	endpoints := make([]string, 0, len(p.Upstreams))
+	for endpoint, up := range p.Upstreams {
+		if up.running() {
+			endpoints = append(endpoints, endpoint)
 		}
+	}
+	if len(endpoints) == 0 {
+		return nil
+	}
+	sort.Strings(endpoints)
+	up := p.Upstreams[endpoints[p.next%len(endpoints)]]
+	p.next++
+	return up
+}
 
-		packet, clientAddr, err := up.readFromDownstream(l.UDPConn)
+func (p *UDPProxy) isServing(conn net.PacketConn) bool {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	return p.conn == conn
+}
+
+func (p *UDPProxy) stoppedServing(conn net.PacketConn) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	if p.conn == conn {
+		p.conn = nil
+	}
+}
+
+// serve reads the packets that arrive at the connection, and has them proxied, until the connection is closed.
+func (p *UDPProxy) serve(conn net.PacketConn) {
+	defer p.stoppedServing(conn)
+	buff := make([]byte, maxPacketSize)
+	for {
+		n, client, err := conn.ReadFrom(buff)
 		if err != nil {
-			log.Println("ReadFrom error:", err)
+			if errors.Is(err, net.ErrClosed) || !p.isServing(conn) {
+				return
+			}
+			log.Printf("UDP Proxy[%d]: ReadFrom error: %s\n", p.Port, err.Error())
+			time.Sleep(10 * time.Millisecond)
 			continue
 		}
-		if up.conn == nil {
-			up.connect()
+		up := p.nextUpstream()
+		if up == nil {
+			log.Printf("UDP Proxy[%d]: No upstream is running, dropped a packet from [%s]\n", p.Port, client)
+			continue
 		}
-		if up.conn != nil {
-			go up.handlePacket(l.UDPConn, clientAddr, packet, p.UDPTracker)
-		} else {
-			log.Printf("Upstream [%s] not connected\n", up.Endpoint)
+		select {
+		case p.inFlight <- struct{}{}:
+		default:
+			log.Printf("UDP Proxy[%d]: Too many packets in flight, dropped a packet from [%s]\n", p.Port, client)
+			continue
 		}
+		// The packet is dealt with while the next one is read, so it can't stay in the read buffer
+		packet := append([]byte(nil), buff[:n]...)
+		tracker := p.tracker()
+		go func() {
+			defer func() { <-p.inFlight }()
+			tracker.TrackClient(client.String())
+			up.handlePacket(conn, client, packet, tracker)
+		}()
 	}
 }
 
-func (up *UDPUpstream) readFromDownstream(conn *net.UDPConn) (packet []byte, clientAddr net.Addr, err error) {
-	if conn == nil || conn.RemoteAddr() == nil {
-		err = errors.New("connection is nil")
+// handlePacket sends the packet to the upstream, and the answer of the upstream back to the client. Every packet goes
+// out of a socket of its own, so that what an upstream answers to a packet is never taken for the answer to another.
+func (up *UDPUpstream) handlePacket(listenerConn net.PacketConn, clientAddr net.Addr, packet []byte, tracker *UDPProxyTracker) {
+	domain := extractDomain(packet)
+	address := up.Endpoint
+	tracker.IncrementPacketCounts(address, domain)
+	delay := up.applyDelay()
+	conn, err := net.DialUDP("udp", nil, up.addr())
+	if err != nil {
+		log.Printf("Failed to connect to upstream [%s] for domain [%s]: error [%s]\n", address, domain, err)
 		return
 	}
-	packet = make([]byte, 4096)
-	_, clientAddr, err = conn.ReadFrom(packet)
-	if err != nil {
-		log.Printf("Error reading packet from downstream [%s], error: %s\n", conn.RemoteAddr().String(), err.Error())
-	}
-	return
-}
-
-func (up *UDPUpstream) handlePacket(listenerConn net.PacketConn, clientAddr net.Addr, packet []byte, tracker *UDPProxyTracker) {
-	if up.Delay != nil {
-		up.Delay.ComputeAndApply()
-	}
-	domain := extractDomain(packet)
-	up.lock.RLock()
-	address := up.Endpoint
-	up.lock.RUnlock()
-	if domain != "" {
-		tracker.IncrementPacketCounts(address, domain)
-	}
-	_, err := up.conn.Write(packet)
-	if err != nil {
+	defer conn.Close()
+	if _, err = conn.Write(packet); err != nil {
 		log.Printf("Failed to send packet to upstream [%s] for domain [%s]: error [%s]\n", address, domain, err)
 		return
 	}
-	resp := make([]byte, 4096)
-	up.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	n, _, err := up.conn.ReadFrom(resp)
+	bp := bufferPool.Get().(*[]byte)
+	defer bufferPool.Put(bp)
+	conn.SetReadDeadline(time.Now().Add(upstreamTimeout))
+	n, err := conn.Read(*bp)
 	if err != nil {
 		log.Printf("Failed to read packet from upstream [%s] for domain [%s]: error [%s]\n", address, domain, err)
 		return
 	}
-	delay := ""
-	if up.Delay != nil {
-		delay = up.Delay.Apply().String()
-	}
-	_, err = listenerConn.WriteTo(resp[:n], clientAddr)
-	if err != nil {
+	delay += up.applyDelay()
+	if _, err = listenerConn.WriteTo((*bp)[:n], clientAddr); err != nil {
 		log.Printf("Failed to send packet to downstream [%s] for domain [%s]: error [%s]\n", clientAddr, domain, err)
 		return
 	}
 	log.Printf("Proxied UDP query from downstream [%s] to upstream [%s] for domain [%s] with delay [%s]\n", clientAddr, address, domain, delay)
+}
+
+// applyDelay waits for the delay of the upstream, if it has one, and tells how long it waited.
+func (up *UDPUpstream) applyDelay() time.Duration {
+	d := up.nextDelay()
+	if d > 0 {
+		time.Sleep(d)
+	}
+	return d
+}
+
+// nextDelay computes the next delay that the upstream asks for, and uses up a count of it.
+func (up *UDPUpstream) nextDelay() time.Duration {
+	up.lock.Lock()
+	defer up.lock.Unlock()
+	d := up.Delay
+	if d == nil || d.Min == nil || d.Max == nil || !(d.Count > 0 || d.Count == -1) {
+		return 0
+	}
+	delay := randomDelay(d.Min.Duration, d.Max.Duration)
+	if delay <= 0 {
+		return 0
+	}
+	if d.Count > 0 {
+		d.Count--
+	}
+	return delay
+}
+
+// randomDelay picks a delay between min and max. The function of the types package for this panics for a range of less
+// than a millisecond, and shares a random source that is not safe for use by several goroutines, which every packet
+// of the proxy is.
+func randomDelay(min, max time.Duration) time.Duration {
+	if max <= min {
+		return min
+	}
+	return min + time.Duration(rand.Int63n(int64(max-min)))
+}
+
+func (up *UDPUpstream) addr() *net.UDPAddr {
+	up.lock.RLock()
+	defer up.lock.RUnlock()
+	return up.upstreamAddr
+}
+
+func (up *UDPUpstream) running() bool {
+	up.lock.RLock()
+	defer up.lock.RUnlock()
+	return up.isRunning
 }
 
 func (up *UDPUpstream) setUDPDelay(delayMin, delayMax time.Duration) {
@@ -229,34 +381,23 @@ func (up *UDPUpstream) setUDPDelay(delayMin, delayMax time.Duration) {
 	up.Delay = types.NewDelay(delayMin, delayMax, -1)
 }
 
-func (up *UDPUpstream) connect() (err error) {
-	if up.conn != nil {
-		up.Stop()
-	}
+func (up *UDPUpstream) start(addr *net.UDPAddr, delayMin, delayMax time.Duration) {
 	up.lock.Lock()
 	defer up.lock.Unlock()
-	up.upstreamAddr, err = net.ResolveUDPAddr("udp", up.Endpoint)
-	if err != nil {
-		return err
-	}
-	up.conn, err = net.DialUDP("udp", nil, up.upstreamAddr)
+	up.upstreamAddr = addr
 	up.isRunning = true
-	return
+	up.Delay = types.NewDelay(delayMin, delayMax, -1)
 }
 
+// Stop makes the upstream stop getting packets. It can be started again.
 func (up *UDPUpstream) Stop() {
 	up.lock.Lock()
 	defer up.lock.Unlock()
-	if up.stopChan != nil {
-		up.stopChan <- true
-		up.stopChan = nil
-	}
-	if up.conn != nil {
-		up.conn.Close()
-		up.conn = nil
-	}
+	up.isRunning = false
 }
 
+// extractDomain gets the name that a DNS query asks about. It returns an empty string for packets that aren't a DNS
+// query.
 func extractDomain(packet []byte) string {
 	if len(packet) < 12 {
 		return ""
@@ -275,6 +416,10 @@ func extractDomain(packet []byte) string {
 		if l == 0 {
 			break
 		}
+		if l&0xC0 != 0 {
+			// not a label, but a pointer to one, which a question doesn't have
+			return ""
+		}
 		i++
 		if i+l > len(packet) {
 			return ""
@@ -284,88 +429,3 @@ func extractDomain(packet []byte) string {
 	}
 	return strings.Join(labels, ".")
 }
-
-// func (p *UDPDNSProxy) StartBidirectional() error {
-// 	listener, err := net.ListenPacket("udp", p.ListenAddr)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	defer listener.Close()
-
-// 	upstreamAddr, err := net.ResolveUDPAddr("udp", p.UpstreamAddr)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	upstreamListener, err := net.ListenPacket("udp", "")
-// 	if err != nil {
-// 		return err
-// 	}
-// 	defer upstreamListener.Close()
-
-// 	clientMap := sync.Map{} // map[string]net.Addr
-
-// 	// Downstream -> Upstream
-// 	go func() {
-// 		buf := make([]byte, 4096)
-// 		for {
-// 			select {
-// 			case <-p.stopCh:
-// 				return
-// 			default:
-// 			}
-// 			n, clientAddr, err := listener.ReadFrom(buf)
-// 			if err != nil {
-// 				log.Println("ReadFrom downstream error:", err)
-// 				continue
-// 			}
-// 			packet := make([]byte, n)
-// 			copy(packet, buf[:n])
-
-// 			// Track client for upstream response
-// 			clientMap.Store(clientAddr.String(), clientAddr)
-
-// 			go func(pkt []byte, cAddr net.Addr) {
-// 				time.Sleep(p.Delay)
-// 				domain := extractDomain(pkt)
-// 				if domain != "" {
-// 					p.mu.Lock()
-// 					p.PacketCounts[domain]++
-// 					p.mu.Unlock()
-// 				}
-// 				_, err := upstreamListener.WriteTo(pkt, upstreamAddr)
-// 				if err != nil {
-// 					log.Println("WriteTo upstream error:", err)
-// 				}
-// 			}(packet, clientAddr)
-// 		}
-// 	}()
-
-// 	// Upstream -> Downstream
-// 	buf := make([]byte, 4096)
-// 	for {
-// 		select {
-// 		case <-p.stopCh:
-// 			return nil
-// 		default:
-// 		}
-// 		n, _, err := upstreamListener.ReadFrom(buf)
-// 		if err != nil {
-// 			log.Println("ReadFrom upstream error:", err)
-// 			continue
-// 		}
-// 		packet := make([]byte, n)
-// 		copy(packet, buf[:n])
-
-// 		// For DNS, we can't always know the client, so here we just forward to all known clients
-// 		clientMap.Range(func(_, v interface{}) bool {
-// 			clientAddr := v.(net.Addr)
-// 			time.Sleep(p.Delay)
-// 			_, err := listener.WriteTo(packet, clientAddr)
-// 			if err != nil {
-// 				log.Println("WriteTo client error:", err)
-// 			}
-// 			return true
-// 		})
-// 	}
-// }

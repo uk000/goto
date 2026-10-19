@@ -17,6 +17,7 @@
 package httpproxy
 
 import (
+	"maps"
 	"strconv"
 	"sync"
 )
@@ -189,16 +190,85 @@ func (pt *HTTPProxyTracker) IncrementTargetUpstreamStatusCounts(targetName, endp
 
 func (pt *HTTPProxyTracker) IncrementTargetMatchCounts(targetName string, uri, header, headerValue, query, queryValue string) {
 	pt.IncrementMatchCounts(uri, header, headerValue, query, queryValue)
-	if pt.TargetTrackers[targetName] == nil {
-		pt.TargetTrackers[targetName] = NewHTTPTargetTracker()
-	}
-	pt.TargetTrackers[targetName].IncrementMatchCounts(uri, header, headerValue, query, queryValue)
+	pt.getOrCreateTargetTracker(targetName).IncrementMatchCounts(uri, header, headerValue, query, queryValue)
 }
 
 func (pt *HTTPProxyTracker) IncrementTargetDropCount(targetName string, requestURI string, requestDropped bool) {
 	pt.IncrementDropCount(requestURI, requestDropped)
+	pt.getOrCreateTargetTracker(targetName).IncrementDropCount(requestURI, requestDropped)
+}
+
+// getOrCreateTargetTracker finds the tracker of the target, which requests for other targets may be adding at the
+// same time.
+func (pt *HTTPProxyTracker) getOrCreateTargetTracker(targetName string) *HTTPTargetTracker {
+	pt.lock.Lock()
+	defer pt.lock.Unlock()
 	if pt.TargetTrackers[targetName] == nil {
 		pt.TargetTrackers[targetName] = NewHTTPTargetTracker()
 	}
-	pt.TargetTrackers[targetName].IncrementDropCount(requestURI, requestDropped)
+	return pt.TargetTrackers[targetName]
+}
+
+// GetTargetTracker returns the tracker of the target, or nil if the target has not been tracked.
+func (pt *HTTPProxyTracker) GetTargetTracker(targetName string) *HTTPTargetTracker {
+	pt.lock.RLock()
+	defer pt.lock.RUnlock()
+	return pt.TargetTrackers[targetName]
+}
+
+func cloneNested(m map[string]map[string]int) map[string]map[string]int {
+	c := make(map[string]map[string]int, len(m))
+	for k, v := range m {
+		c[k] = maps.Clone(v)
+	}
+	return c
+}
+
+// snapshot returns a copy of the counts, for reporting them while requests keep counting.
+func (hc *HTTPCounts) snapshot() *HTTPCounts {
+	hc.lock.RLock()
+	defer hc.lock.RUnlock()
+	return &HTTPCounts{
+		DownstreamRequestCount:                hc.DownstreamRequestCount,
+		UpstreamRequestCount:                  hc.UpstreamRequestCount,
+		RequestDropCount:                      hc.RequestDropCount,
+		ResponseDropCount:                     hc.ResponseDropCount,
+		DownstreamRequestCountsByURI:          maps.Clone(hc.DownstreamRequestCountsByURI),
+		UpstreamRequestCountsByURI:            maps.Clone(hc.UpstreamRequestCountsByURI),
+		UpstreamRequestCountsByEndpoint:       maps.Clone(hc.UpstreamRequestCountsByEndpoint),
+		UpstreamRequestCountByStatus:          maps.Clone(hc.UpstreamRequestCountByStatus),
+		UpstreamRequestCountsByURIStatus:      cloneNested(hc.UpstreamRequestCountsByURIStatus),
+		UpstreamRequestCountsByEndpointStatus: cloneNested(hc.UpstreamRequestCountsByEndpointStatus),
+		RequestDropCountsByURI:                maps.Clone(hc.RequestDropCountsByURI),
+		ResponseDropCountsByURI:               maps.Clone(hc.ResponseDropCountsByURI),
+		URIMatchCounts:                        maps.Clone(hc.URIMatchCounts),
+		HeaderMatchCounts:                     maps.Clone(hc.HeaderMatchCounts),
+		HeaderValueMatchCounts:                cloneNested(hc.HeaderValueMatchCounts),
+		QueryMatchCounts:                      maps.Clone(hc.QueryMatchCounts),
+		QueryValueMatchCounts:                 cloneNested(hc.QueryValueMatchCounts),
+	}
+}
+
+// snapshot returns a copy of the tracker with the trackers of its targets, for reporting them while requests keep
+// counting. It returns nil for a nil tracker.
+func (pt *HTTPProxyTracker) snapshot() *HTTPProxyTracker {
+	if pt == nil {
+		return nil
+	}
+	pt.lock.RLock()
+	targetTrackers := maps.Clone(pt.TargetTrackers)
+	pt.lock.RUnlock()
+	snap := &HTTPProxyTracker{HTTPCounts: pt.HTTPCounts.snapshot(), TargetTrackers: make(map[string]*HTTPTargetTracker, len(targetTrackers))}
+	for name, tt := range targetTrackers {
+		snap.TargetTrackers[name] = tt.snapshot()
+	}
+	return snap
+}
+
+// snapshot returns a copy of the counts of the target. It returns nil for a nil tracker.
+func (tt *HTTPTargetTracker) snapshot() *HTTPTargetTracker {
+	if tt == nil {
+		return nil
+	}
+	return &HTTPTargetTracker{HTTPCounts: tt.HTTPCounts.snapshot()}
 }

@@ -62,6 +62,7 @@ func proxyGRPCService(w http.ResponseWriter, r *http.Request) {
 		port := util.GetRequestOrListenerPortNum(r)
 		proxy := GetPortProxy(port)
 		if err := proxy.SetupGRPCServiceProxy(rs.GetName(), targetService, nil, upstream, "", teeport, delayMin, delayMax, delayCount, nil); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
 			msg = fmt.Sprintf("Failed to setup gRPC proxy for Service [%s]on port [%d] to upstream [%s] target service [%s] with error: %s", rs.GetName(), port, upstream, targetService, err.Error())
 		} else {
 			msg = fmt.Sprintf("Service [%s] will be proxied on port [%d] to upstream [%s] target service [%s]", rs.GetName(), port, upstream, targetService)

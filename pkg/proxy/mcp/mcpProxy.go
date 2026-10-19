@@ -17,13 +17,13 @@
 package mcpproxy
 
 import (
+	"bytes"
 	"errors"
 	"goto/pkg/server/response/status"
 	"goto/pkg/types"
 	"goto/pkg/util"
-	"io"
+	"maps"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,6 +49,7 @@ type MCPTarget struct {
 	Protocol       string                 `json:"protocol"`
 	Endpoint       string                 `json:"endpoint"`
 	Authority      string                 `json:"authority"`
+	Headers        map[string]string      `json:"headers"`
 	Delay          *types.Delay           `json:"delay"`
 	Retries        int                    `json:"retries"`
 	RetryDelay     time.Duration          `json:"retryDelay"`
@@ -76,43 +77,37 @@ var (
 	mcpProxyLock   sync.RWMutex
 )
 
+// WillProxyMCP tells if the request is a call of a tool that has a proxy target on the port, and if so puts the matched
+// targets in the request store. The body of the request is left as it was for whoever serves the request next.
 func WillProxyMCP(port int, r *http.Request) (willProxy bool) {
 	rs := util.GetRequestStore(r)
 	if rs.IsAdminRequest || !rs.IsMCP {
 		return false
 	}
 	p := GetMCPProxyForPort(port)
-	if !p.Enabled || len(p.Targets) == 0 || status.IsForcedStatus(r) {
+	if !p.isEnabled() || !p.hasTargets() || status.IsForcedStatus(r) {
 		return false
 	}
-	tool := ""
-	if reReader, ok := r.Body.(*util.ReReader); ok {
-		b, err := io.ReadAll(r.Body)
-		if err != nil {
-			return false
-		}
-		bodyText := string(b)
-		if !strings.Contains(bodyText, "tools/call") {
-			return false
-		}
-		json := util.JSONFromReader(reReader)
-		reReader.Rewind()
-		tool = json.GetText("params.name")
+	// The body is kept by the reader, which is read without moving it, as a request that is not proxied is served
+	// by reading the same body.
+	reReader, ok := r.Body.(*util.ReReader)
+	if !ok {
+		return false
 	}
+	body := reReader.Content
+	if !bytes.Contains(body, []byte("tools/call")) {
+		return false
+	}
+	tool := util.JSONFromBytes(body).GetText("params.name")
 	if tool == "" {
 		return false
 	}
-	target := p.Targets[tool]
-	if target == nil {
-		target = p.Targets["*"]
-	}
-	if target != nil {
-		matches := map[string]*MatchedTarget{tool: {target: target, matchedTool: tool}}
+	if target := p.getTarget(tool); target != nil {
 		rs.ProxiedRequest = true
-		rs.ProxyTargets = matches
+		rs.ProxyTargets = map[string]*MatchedTarget{tool: {target: target, matchedTool: tool}}
 		return true
 	}
-	return
+	return false
 }
 
 func (p *MCPProxy) SetupMCPProxy(server, endpoint, fromTool, toTool string, headers map[string]string) error {
@@ -128,12 +123,37 @@ func GetMCPProxyForPort(port int) *MCPProxy {
 	proxy := mcpProxyByPort[port]
 	mcpProxyLock.RUnlock()
 	if proxy == nil {
-		proxy = newMCPProxy(port)
 		mcpProxyLock.Lock()
-		mcpProxyByPort[port] = proxy
-		mcpProxyLock.Unlock()
+		defer mcpProxyLock.Unlock()
+		// Another caller may have created the proxy since the read lock was released, and all callers must get that one.
+		if proxy = mcpProxyByPort[port]; proxy == nil {
+			proxy = newMCPProxy(port)
+			mcpProxyByPort[port] = proxy
+		}
 	}
 	return proxy
+}
+
+func (p *MCPProxy) isEnabled() bool {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	return p.Enabled
+}
+
+func (p *MCPProxy) hasTargets() bool {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	return len(p.Targets) > 0
+}
+
+// getTarget finds the target of the tool, which is the one for all tools ("*") if the tool has none of its own.
+func (p *MCPProxy) getTarget(tool string) *MCPTarget {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	if target := p.Targets[tool]; target != nil {
+		return target
+	}
+	return p.Targets["*"]
 }
 
 func newMCPProxy(port int) *MCPProxy {
@@ -160,17 +180,29 @@ func (p *MCPProxy) initTracker() {
 	p.MCPTracker = NewMCPProxyTracker()
 }
 
+// RemoveProxy removes the target of the tool of the given name, and the targets of the server of the given name.
 func (p *MCPProxy) RemoveProxy(server string) {
-	delete(p.Targets, server)
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	for tool, target := range p.Targets {
+		if tool == server || target.Name == server {
+			delete(p.Targets, tool)
+		}
+	}
 }
 
 func (p *MCPProxy) addMCPTarget(server, endpoint, fromTool, toTool string, headers map[string]string) (*MCPTarget, error) {
 	if server == "" || endpoint == "" {
 		return nil, errors.New("no endpoint given")
 	}
+	if fromTool == "" {
+		// A proxy that is not for a tool is for all of them.
+		fromTool = "*"
+	}
 	target := &MCPTarget{
 		Name:           server,
 		Endpoint:       endpoint,
+		Headers:        maps.Clone(headers),
 		Tools:          map[string]string{},
 		ActiveSessions: map[string]*MCPSession{},
 		PastSessions:   map[string]*MCPSession{},

@@ -16,7 +16,10 @@
 
 package grpcproxy
 
-import "sync"
+import (
+	"encoding/json"
+	"sync"
+)
 
 type GRPCProxyTracker struct {
 	ConnCount                int                       `json:"connCount"`
@@ -81,4 +84,12 @@ func (pt *GRPCProxyTracker) AddMatchCounts(upstream, service, method, requestMes
 	if responseMessageType != "" {
 		pt.MessageCountByType[responseMessageType] += responseCount
 	}
+}
+
+// MarshalJSON reports the counts as they are at the moment, while calls keep adding to them.
+func (pt *GRPCProxyTracker) MarshalJSON() ([]byte, error) {
+	pt.lock.RLock()
+	defer pt.lock.RUnlock()
+	type plain GRPCProxyTracker
+	return json.Marshal((*plain)(pt))
 }

@@ -18,6 +18,7 @@ package grpcproxy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"goto/pkg/constants"
@@ -89,6 +90,8 @@ type GRPCServiceProxy struct {
 	proxyService  *gotogrpc.GRPCService
 	targetService *gotogrpc.GRPCService
 	tracker       *GRPCProxyTracker
+	// The delay counts down as it is applied, and the calls of a service are made concurrently.
+	delayLock sync.Mutex
 }
 
 type GRPCProxy struct {
@@ -114,62 +117,123 @@ func init() {
 }
 
 func _WillProxyGRPC(port int, method any) bool {
-	return WillProxyGRPC(port, method.(*gotogrpc.GRPCServiceMethod))
+	m, ok := method.(*gotogrpc.GRPCServiceMethod)
+	if !ok {
+		return false
+	}
+	return WillProxyGRPC(port, m)
 }
 
 func WillProxyGRPC(port int, method *gotogrpc.GRPCServiceMethod) bool {
+	if method == nil || method.Service == nil {
+		return false
+	}
 	p := GetPortProxy(port)
+	p.lock.RLock()
+	defer p.lock.RUnlock()
 	if !p.Enabled || (len(p.ServiceProxies) == 0 && len(p.TeeServices) == 0) {
 		return false
 	}
-	if p.TeeServices[method.Service.Name] != nil {
-		target, present := p.TeeServices[method.Service.Name][method.Name]
-		if !present {
-			target, present = p.TeeServices[method.Service.Name]["*"]
-		}
-		if present && target != nil {
-			return present
-		}
+	if p.getTeeLogLocked(method.Service.Name, method.Name) != nil {
+		return true
 	}
 	sp := p.ServiceProxies[method.Service.Name]
 	if sp == nil {
 		return false
 	}
 	if len(sp.Methods) > 0 {
-		if _, present := sp.Methods[method.URI]; !present {
+		// A proxy that was set up for all the methods of the service has "*" for its methods.
+		_, present := sp.Methods[method.URI]
+		if !present {
+			_, present = sp.Methods["*"]
+		}
+		if !present {
 			return false
 		}
 	}
 	return true
 }
 
+// getTeeLogLocked finds the session log that is recorded for the method of the service, or for all the methods of the
+// service. The lock of the proxy is held by the caller.
+func (p *GRPCProxy) getTeeLogLocked(service, method string) *GRPCSessionLog {
+	teeMethods := p.TeeServices[service]
+	if teeMethods == nil {
+		return nil
+	}
+	if t := teeMethods[method]; t != nil {
+		return t
+	}
+	return teeMethods["*"]
+}
+
+func (p *GRPCProxy) getTeeLog(service, method string) *GRPCSessionLog {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	return p.getTeeLogLocked(service, method)
+}
+
+func (p *GRPCProxy) getServiceProxy(service string) *GRPCServiceProxy {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	return p.ServiceProxies[service]
+}
+
+// getTargetMethodName tells the method of the target service that calls of the method are proxied to: the one that the
+// proxy was set up to map the method to, or the one of the same name.
+func (p *GRPCProxy) getTargetMethodName(sp *GRPCServiceProxy, method *gotogrpc.GRPCServiceMethod) string {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	if name := sp.Methods[method.URI]; name != "" {
+		return name
+	}
+	return method.Name
+}
+
+func (p *GRPCProxy) getTracker() *GRPCProxyTracker {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	return p.Tracker
+}
+
+// MarshalJSON reports the proxy as it is at the moment, while services are being proxied and set up.
+func (p *GRPCProxy) MarshalJSON() ([]byte, error) {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	type plain GRPCProxy
+	return json.Marshal((*plain)(p))
+}
+
 func ProxyGRPCUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceMethod, md metadata.MD, inputs []proto.Message) (output []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
 	proxy := GetPortProxy(port)
-	if teeMethods := proxy.TeeServices[method.Service.Name]; teeMethods != nil {
-		t := teeMethods[method.Name]
-		if t == nil {
-			t = teeMethods["*"]
-		}
-		if t != nil {
-			return proxy.teeProxyGRPCUnary(method, t)
-		}
+	if t := proxy.getTeeLog(method.Service.Name, method.Name); t != nil {
+		return proxy.teeProxyGRPCUnary(method, t)
 	}
-	sp := proxy.ServiceProxies[method.Service.Name]
+	sp := proxy.getServiceProxy(method.Service.Name)
 	if sp == nil {
 		return nil, nil, nil, fmt.Errorf("No proxy mapping found for service [%s] method [%s]", method.Service.Name, method.Name)
 	}
 	up := sp.Upstream
-	if up == nil {
+	if up == nil || up.client == nil {
 		return nil, nil, nil, fmt.Errorf("No upstream found for service [%s] method [%s]", method.Service.Name, method.Name)
+	}
+	_, toService, teeport := gotogrpc.ServiceRegistry.GetProxyService(method.Service.Name)
+	if toService == nil {
+		return nil, nil, nil, fmt.Errorf("No target service found for service [%s] method [%s]", method.Service.Name, method.Name)
+	}
+	toMethod := toService.Methods[proxy.getTargetMethodName(sp, method)]
+	if toMethod == nil {
+		return nil, nil, nil, fmt.Errorf("No target method found for service [%s] method [%s]", method.Service.Name, method.Name)
 	}
 	sessionLog := newGRPCSessionLog()
 	sessionLog.ClientHeaders[int(sessionLog.logCounter.Add(1))] = md
-	_, toService, teeport := gotogrpc.ServiceRegistry.GetProxyService(method.Service.Name)
-	toMethod := toService.Methods[method.Name]
+	// What the upstream is sent is the input as it is made for the target method.
+	upstreamInputs := make([]proto.Message, 0, len(inputs))
 	for _, input := range inputs {
 		if toMethod.In != nil {
 			input = toMethod.In(input)
 		}
+		upstreamInputs = append(upstreamInputs, input)
 		if b, err := protojson.Marshal(input); err == nil {
 			sessionLog.ClientMessageLog[int(sessionLog.logCounter.Add(1))] = util.JSONFromBytes(b)
 		}
@@ -184,10 +248,13 @@ func ProxyGRPCUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceM
 			method.Service.Name, method.Name, up.client.URL, up.client.Service.Name, toMethod.Name)
 	}
 	start := time.Now()
-	output, respHeaders, respTrailers, err = up.client.InvokeRaw(toMethod, md, inputs)
+	output, respHeaders, respTrailers, err = up.client.InvokeRaw(toMethod, md, upstreamInputs)
 	end := time.Now()
 	tookNanos := end.Sub(start)
 	if err == nil {
+		if respHeaders == nil {
+			respHeaders = metadata.MD{}
+		}
 		respHeaders.Append(constants.HeaderGotoProxyUpstreamTook, tookNanos.String())
 		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderGotoHost, global.Self.HostLabel, respHeaders)
 		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderGotoPort, strconv.Itoa(port), respHeaders)
@@ -208,23 +275,28 @@ func ProxyGRPCUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceM
 			method.Service.Name, method.Name, up.ID, err.Error())
 	}
 	proxy.updateTeeSessionLog(teeport, method.Service.Name, method.Name, sessionLog)
-	proxy.Tracker.IncrementConnCounts(up.ID)
-	proxy.Tracker.AddMatchCounts(up.ID, sp.proxyService.Name, method.Name,
-		string(method.InputType().Name()), 1, string(method.OutputType().Name()), len(output))
+	// A call that failed has no responses, whatever the client reports for it.
+	responseCount := 0
+	if err != nil {
+		output = nil
+	}
+	for _, o := range output {
+		if o != nil {
+			responseCount++
+		}
+	}
+	tracker := proxy.getTracker()
+	tracker.IncrementConnCounts(up.ID)
+	tracker.AddMatchCounts(up.ID, sp.proxyService.Name, method.Name,
+		string(method.InputType().Name()), 1, string(method.OutputType().Name()), responseCount)
 	return
 }
 
 func ProxyGRPCStream(ctx context.Context, port int, method *gotogrpc.GRPCServiceMethod, downstreamAddr string,
 	md metadata.MD, downstream gotogrpc.GRPCStream) (receiveCount, sendCount int, err error) {
 	proxy := GetPortProxy(port)
-	if teeMethods := proxy.TeeServices[method.Service.Name]; teeMethods != nil {
-		t := teeMethods[method.Name]
-		if t == nil {
-			t = teeMethods["*"]
-		}
-		if t != nil {
-			return proxy.teeProxyGRPCStream(method, downstream, t)
-		}
+	if t := proxy.getTeeLog(method.Service.Name, method.Name); t != nil {
+		return proxy.teeProxyGRPCStream(method, downstream, t)
 	}
 	session, err := proxy.OpenGRPCSession(ctx, method, downstreamAddr, md, downstream)
 	if err != nil {
@@ -297,7 +369,11 @@ func (p *GRPCProxy) teeProxyGRPCStream(method *gotogrpc.GRPCServiceMethod, downs
 		return
 	}
 	messageIDs, headerIDs := p.getLogIDs(sessionLog)
-	maxMsgId := messageIDs[len(messageIDs)-1]
+	// A log can have no messages, for a call that failed or had nothing to send.
+	maxMsgId := 0
+	if len(messageIDs) > 0 {
+		maxMsgId = messageIDs[len(messageIDs)-1]
+	}
 
 	readClientStream := func(in chan proto.Message, wg *sync.WaitGroup) {
 		receiveCount, _ = downstream.TeeStreamReceive(in, nil)
@@ -318,7 +394,7 @@ func (p *GRPCProxy) teeProxyGRPCStream(method *gotogrpc.GRPCServiceMethod, downs
 				}
 			}
 		} else {
-			sendIndex, sendCount, err = p.sendTeeProxyMessages(method, maxMsgId, -1, -1, headerIDs, sessionLog.ServerMessageLog, downstream)
+			sendIndex, sendCount, err = p.sendTeeProxyMessages(method, maxMsgId, -1, 0, headerIDs, sessionLog.ServerMessageLog, downstream)
 		}
 		if wg != nil {
 			wg.Done()
@@ -373,10 +449,13 @@ func GetPortProxy(port int) *GRPCProxy {
 	proxy := portProxy[port]
 	proxyLock.RUnlock()
 	if proxy == nil {
-		proxy = newGRPCProxy(port)
 		proxyLock.Lock()
-		portProxy[port] = proxy
-		proxyLock.Unlock()
+		defer proxyLock.Unlock()
+		// Another caller may have created the proxy since the read lock was released, and all callers must get that one.
+		if proxy = portProxy[port]; proxy == nil {
+			proxy = newGRPCProxy(port)
+			portProxy[port] = proxy
+		}
 	}
 	return proxy
 }
@@ -426,6 +505,7 @@ func newGRPCServiceProxy(port int, from, to *gotogrpc.GRPCService, endpoint, aut
 			Endpoint:  endpoint,
 			Authority: authority,
 		},
+		Config:  &GRPCProxyConfig{},
 		tracker: tracker,
 	}
 	if err := sp.init(tracker); err != nil {
@@ -443,6 +523,8 @@ func (p *GRPCProxy) Clear() {
 }
 
 func (p *GRPCProxy) initTracker() {
+	p.lock.Lock()
+	defer p.lock.Unlock()
 	p.Tracker = NewGRPCProxyTracker()
 }
 
@@ -478,12 +560,47 @@ func (p *GRPCProxy) SetupGRPCServiceProxy(from, to string, methods map[string]st
 	if reflect.ValueOf(toService).IsNil() {
 		return fmt.Errorf("[ERROR] GRPCProxy.SetupGRPCProxy: no service found for [%s]", to)
 	}
+	// The methods are checked before anything is set up, so that a proxy that fails to be set up leaves nothing behind.
+	methodMap := map[string]string{}
+	if methods != nil {
+		for mFrom, mTo := range methods {
+			fromMethod := fromService.Methods[mFrom]
+			if fromMethod == nil {
+				return fmt.Errorf("[ERROR] GRPCProxy.SetupGRPCProxy: Method [%s] not found on proxied service [%s]", mFrom, from)
+			}
+			toMethod := toService.Methods[mTo]
+			if toMethod == nil {
+				return fmt.Errorf("[ERROR] GRPCProxy.SetupGRPCProxy: Method [%s] not found on proxied service [%s]", mTo, to)
+			}
+			methodMap[fromMethod.GetURI()] = toMethod.GetName()
+		}
+	} else {
+		methodMap["*"] = ""
+	}
 	if global.Flags.EnableProxyDebugLogs {
 		msg := fmt.Sprintf("[DEBUG] GRPCProxy.SetupGRPCProxy: Proxying service [%s] to target [%s @ %s]", from, to, endpoint)
-		if !reflect.ValueOf(oldToService).IsNil() {
+		if oldToService != nil {
 			msg += fmt.Sprintf(", replacing old target [%s]", oldToService.Name)
 		}
 		log.Println(msg)
+	}
+	// The service proxy is made before the server is told to intercept the service, so that an endpoint that can't be
+	// used leaves nothing behind.
+	tracker := p.getTracker()
+	if sp == nil {
+		if sp, err = newGRPCServiceProxy(p.Port, fromService, toService, endpoint, authority, tracker); err != nil {
+			return err
+		}
+	} else {
+		sp.proxyService = fromService
+		sp.targetService = toService
+		sp.Port = p.Port
+		if sp.Label == "" {
+			sp.Label = fmt.Sprintf("Proxy(%s)", from)
+		}
+		if err = sp.init(tracker); err != nil {
+			return err
+		}
 	}
 	_, s := global.GRPCManager.InterceptAndProxy(fromService.GSD, toService.GSD, to, nil, teeport)
 	if s == nil {
@@ -491,35 +608,12 @@ func (p *GRPCProxy) SetupGRPCServiceProxy(from, to string, methods map[string]st
 	}
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if sp == nil {
-		if sp, err = newGRPCServiceProxy(p.Port, fromService, toService, endpoint, authority, p.Tracker); err != nil {
-			return err
-		}
-	} else {
-		sp.proxyService = fromService
-		sp.targetService = toService
-		if err = sp.init(p.Tracker); err != nil {
-			return err
-		}
-	}
-	p.ServiceProxies[from] = sp
-	sp.Methods = map[string]string{}
-	if methods != nil {
-		for mFrom, mTo := range methods {
-			fromMethod := fromService.GetMethod(mFrom)
-			if fromMethod == nil {
-				return fmt.Errorf("[ERROR] GRPCProxy.SetupGRPCProxy: Method [%s] not found on proxied service [%s]", mFrom, from)
-			}
-			toMethod := fromService.GetMethod(mTo)
-			if toMethod == nil {
-				return fmt.Errorf("[ERROR] GRPCProxy.SetupGRPCProxy: Method [%s] not found on proxied service [%s]", mTo, to)
-			}
-			sp.Methods[fromMethod.GetURI()] = toMethod.GetName()
-		}
-	} else {
-		sp.Methods["*"] = ""
+	sp.Methods = methodMap
+	if sp.Config == nil {
+		sp.Config = &GRPCProxyConfig{}
 	}
 	sp.Config.Delay = types.NewDelay(delayMin, delayMax, delayCount)
+	p.ServiceProxies[from] = sp
 	return nil
 }
 
@@ -528,13 +622,15 @@ func (p *GRPCProxy) updateTeeSessionLog(teeport int, service, methodName string,
 		return
 	}
 	teeProxy := GetPortProxy(teeport)
+	teeProxy.lock.Lock()
+	defer teeProxy.lock.Unlock()
 	if teeProxy.TeeServices[service] == nil {
 		teeProxy.TeeServices[service] = map[string]*GRPCSessionLog{}
 	}
 	teeProxy.TeeServices[service][methodName] = sessionLog
 }
 
-func (p *GRPCProxy) readClientMessage(method *gotogrpc.GRPCServiceMethod, downstream gotogrpc.GRPCStream) (clientMsg proto.Message, toMethod *gotogrpc.GRPCServiceMethod, teeport int, err error) {
+func (p *GRPCProxy) readClientMessage(method *gotogrpc.GRPCServiceMethod, toName string, downstream gotogrpc.GRPCStream) (clientMsg proto.Message, toMethod *gotogrpc.GRPCServiceMethod, teeport int, err error) {
 	clientMsg, err = downstream.Receive()
 	if err != nil {
 		return
@@ -548,7 +644,11 @@ func (p *GRPCProxy) readClientMessage(method *gotogrpc.GRPCServiceMethod, downst
 	}
 	var toService *gotogrpc.GRPCService
 	_, toService, teeport = gotogrpc.ServiceRegistry.GetProxyService(method.Service.Name)
-	toMethod = toService.Methods[method.Name]
+	if toService == nil || toService.Methods[toName] == nil {
+		err = fmt.Errorf("No target method found for service [%s] method [%s]", method.Service.Name, method.Name)
+		return
+	}
+	toMethod = toService.Methods[toName]
 	if toMethod.In != nil {
 		clientMsg = toMethod.In(clientMsg)
 	}
@@ -562,7 +662,7 @@ func (p *GRPCProxy) OpenGRPCSession(ctx context.Context, method *gotogrpc.GRPCSe
 	if sp == nil {
 		return nil, fmt.Errorf("[ERROR] No upstream found for service [%s] method [%s]", method.Service.Name, method.Name)
 	}
-	clientMsg, toMethod, teeport, err := p.readClientMessage(method, downstream)
+	clientMsg, toMethod, teeport, err := p.readClientMessage(method, p.getTargetMethodName(sp, method), downstream)
 	if err != nil {
 		return nil, err
 	}
@@ -578,7 +678,7 @@ func (p *GRPCProxy) OpenGRPCSession(ctx context.Context, method *gotogrpc.GRPCSe
 	sp.Upstream.ActiveSessions[downstreamAddr] = session
 	p.updateTeeSessionLog(teeport, method.Service.Name, method.Name, session.Log)
 	sp.Upstream.lock.Unlock()
-	p.Tracker.IncrementConnCounts(sp.Upstream.ID)
+	p.getTracker().IncrementConnCounts(sp.Upstream.ID)
 	if global.Flags.EnableProxyDebugLogs {
 		log.Printf("[DEBUG] Opened proxy session to upstream [%s] target service [%s] method [%s]", sp.Upstream.client.URL, sp.Upstream.client.Service.Name, method.Name)
 	}
@@ -612,9 +712,11 @@ func (sp *GRPCServiceProxy) Validate() error {
 		}
 	}
 	if sp.Config == nil {
-		sp.Config = &GRPCProxyConfig{
-			Delay: types.NewDelay(0, 0, 0),
-		}
+		sp.Config = &GRPCProxyConfig{}
+	}
+	if sp.Config.Delay == nil {
+		// A delay that has no time, which is what a proxy without a delay has to be configured with.
+		sp.Config.Delay = &types.Delay{Min: &types.Duration{}, Max: &types.Duration{}}
 	}
 	return nil
 }
@@ -638,17 +740,32 @@ func (sp *GRPCServiceProxy) newGRPCSession(downstreamAddr string, target *GRPCUp
 }
 
 func (sp *GRPCServiceProxy) hasDelay() bool {
-	return (sp.Config.Delay != nil && sp.Config.Delay.IsNonZero())
+	sp.delayLock.Lock()
+	defer sp.delayLock.Unlock()
+	return sp.Config != nil && sp.Config.Delay != nil && sp.Config.Delay.IsNonZero()
 }
 
+// applyDelay delays the call by the delay of the proxy, counting the call against the number of calls that the delay is
+// for, and tells how long the call was delayed by.
 func (sp *GRPCServiceProxy) applyDelay() (delay string) {
-	if sp.Config.Delay != nil {
-		if global.Flags.EnableProxyDebugLogs {
-			log.Printf("[DEBUG] Upstream [%s]: Delaying by [%s]\n", sp.ToService, delay)
+	sp.delayLock.Lock()
+	var d time.Duration
+	if cfg := sp.Config; cfg != nil && cfg.Delay != nil && cfg.Delay.Min != nil && cfg.Delay.Max != nil && (cfg.Delay.Count > 0 || cfg.Delay.Count == -1) {
+		d = types.RandomDuration(cfg.Delay.Min.Duration, cfg.Delay.Max.Duration)
+		if d > 0 && cfg.Delay.Count > 0 {
+			cfg.Delay.Count--
 		}
-		sp.Config.Delay.ComputeAndApply()
 	}
-	return
+	sp.delayLock.Unlock()
+	if d <= 0 {
+		return ""
+	}
+	delay = d.String()
+	if global.Flags.EnableProxyDebugLogs {
+		log.Printf("[DEBUG] Upstream [%s]: Delaying by [%s]\n", sp.ToService, delay)
+	}
+	time.Sleep(d)
+	return delay
 }
 
 func (s *GRPCSession) isTee() bool {

@@ -69,6 +69,9 @@ func proxyTCP(w http.ResponseWriter, r *http.Request) {
 	if port <= 0 || address == "" {
 		status = http.StatusBadRequest
 		msg = fmt.Sprintf("Invalid port [%d] or upstream address [%s]", port, address)
+	} else if err := validateAddress(address); err != nil {
+		status = http.StatusBadRequest
+		msg = fmt.Sprintf("Invalid upstream address: %s", err.Error())
 	} else if err := listeners.AddListener(port, true, false, ""); err == nil {
 		proxy := GetPortProxy(port)
 		proxy.addNewUpstream("default", address)
@@ -82,11 +85,15 @@ func proxyTCP(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// isAllRequest tells whether the request is for the data of all the ports, i.e. the URI ends with /all.
+func isAllRequest(r *http.Request) bool {
+	return strings.HasSuffix(strings.TrimRight(r.URL.Path, "/"), "/all")
+}
+
 func getProxy(w http.ResponseWriter, r *http.Request) {
-	all := strings.Contains(r.RequestURI, "all")
 	result := map[string]any{}
-	if all {
-		for port, proxy := range portProxy {
+	if isAllRequest(r) {
+		for port, proxy := range snapshotProxies() {
 			result[strconv.Itoa(port)] = proxy
 		}
 	} else {
@@ -100,17 +107,16 @@ func getProxy(w http.ResponseWriter, r *http.Request) {
 }
 
 func getProxyUpstreams(w http.ResponseWriter, r *http.Request) {
-	all := strings.Contains(r.RequestURI, "all")
 	result := map[string]any{}
-	if all {
-		for port, proxy := range portProxy {
-			result[strconv.Itoa(port)] = proxy.Upstreams
+	if isAllRequest(r) {
+		for port, proxy := range snapshotProxies() {
+			result[strconv.Itoa(port)] = proxy.getUpstreams()
 		}
 	} else {
 		port := util.GetRequestOrListenerPortNum(r)
 		proxy := GetPortProxy(port)
 		result["port"] = port
-		result["tcp"] = proxy.Upstreams
+		result["tcp"] = proxy.getUpstreams()
 	}
 	util.WriteJsonPayload(w, result)
 	util.AddLogMessage("Reported proxy upstreams", r)

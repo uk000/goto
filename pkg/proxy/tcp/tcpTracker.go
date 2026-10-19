@@ -17,13 +17,14 @@
 package tcpproxy
 
 import (
-	"context"
-	"net"
+	"encoding/json"
 	"sync"
 	"time"
 )
 
-type ConnTracker struct {
+// connTrackerData is the data of a ConnTracker. A ConnTracker is updated by the goroutines that pump the connection
+// while the admin APIs report it, so the data is only read or written with the lock of the ConnTracker held.
+type connTrackerData struct {
 	ProxyPort         int       `json:"proxyPort"`
 	Upstream          string    `json:"upstream"`
 	RemoteAddress     string    `json:"remoteAddress"`
@@ -43,23 +44,22 @@ type ConnTracker struct {
 	RemoteClosed      bool      `json:"remoteClosed"`
 	ReadError         bool      `json:"readError"`
 	WriteError        bool      `json:"writeError"`
+	ConnectFailed     bool      `json:"connectFailed"`
+}
+
+type ConnTracker struct {
+	connTrackerData
+	lock sync.Mutex
 }
 
 type TCPSessionTracker struct {
-	ProxyPort         int            `json:"proxyPort"`
-	Upstream          string         `json:"upstream"`
-	DownAddress       string         `json:"downAddress"`
-	SNI               string         `json:"sni"`
-	DownConnTracker   *ConnTracker   `json:"downConn"`
-	UpConnTracker     []*ConnTracker `json:"upConn"`
-	up                *TCPUpstream
-	downConn          net.Conn
-	endpointNames     []string       `json:"-"`
-	endpointAddresses []*net.TCPAddr `json:"-"`
-	upConns           []*net.TCPConn `json:"-"`
-	ctx               context.Context
-	cancel            context.CancelFunc
-	canceled          bool
+	ProxyPort       int            `json:"proxyPort"`
+	Upstream        string         `json:"upstream"`
+	DownAddress     string         `json:"downAddress"`
+	SNI             string         `json:"sni"`
+	DownConnTracker *ConnTracker   `json:"downConn"`
+	UpConnTracker   []*ConnTracker `json:"upConn"`
+	lock            sync.RWMutex
 }
 
 type TCPTargetTracker struct {
@@ -108,6 +108,200 @@ func NewTCPSessionTracker(port int, upstream, downAddr string) *TCPSessionTracke
 		DownConnTracker: &ConnTracker{},
 		UpConnTracker:   []*ConnTracker{},
 	}
+}
+
+func (ct *ConnTracker) snapshot() connTrackerData {
+	ct.lock.Lock()
+	defer ct.lock.Unlock()
+	return ct.connTrackerData
+}
+
+func (ct *ConnTracker) MarshalJSON() ([]byte, error) {
+	return json.Marshal(ct.snapshot())
+}
+
+func (ct *ConnTracker) init(port int, upstream, remoteAddr string, startTime time.Time) {
+	ct.lock.Lock()
+	defer ct.lock.Unlock()
+	ct.connTrackerData = connTrackerData{
+		ProxyPort:     port,
+		Upstream:      upstream,
+		RemoteAddress: remoteAddr,
+		StartTime:     startTime,
+	}
+}
+
+// recordPreRead accounts for bytes that were read from the connection before the proxy started to pump it (the TLS
+// client hello that gets inspected to find the SNI).
+func (ct *ConnTracker) recordPreRead(n int, at time.Time) {
+	ct.lock.Lock()
+	defer ct.lock.Unlock()
+	ct.TotalBytesRead = n
+	ct.TotalReads = 1
+	ct.FirstByteInAt = at
+	ct.LastByteInAt = at
+}
+
+func (ct *ConnTracker) recordRead(n int, at time.Time) {
+	ct.lock.Lock()
+	defer ct.lock.Unlock()
+	ct.TotalReads++
+	ct.TotalBytesRead += n
+	if ct.FirstByteInAt.IsZero() {
+		ct.FirstByteInAt = at
+	}
+	ct.LastByteInAt = at
+}
+
+func (ct *ConnTracker) recordWrite(n int, at time.Time) {
+	ct.lock.Lock()
+	defer ct.lock.Unlock()
+	ct.TotalWrites++
+	ct.TotalBytesWritten += n
+	if ct.FirstByteOutAt.IsZero() {
+		ct.FirstByteOutAt = at
+	}
+	ct.LastByteOutAt = at
+}
+
+func (ct *ConnTracker) recordDelay() {
+	ct.lock.Lock()
+	defer ct.lock.Unlock()
+	ct.DelayCount++
+}
+
+func (ct *ConnTracker) recordDrop() {
+	ct.lock.Lock()
+	defer ct.lock.Unlock()
+	ct.DropCount++
+}
+
+func (ct *ConnTracker) markRemoteClosed() {
+	ct.lock.Lock()
+	defer ct.lock.Unlock()
+	ct.RemoteClosed = true
+}
+
+func (ct *ConnTracker) markReadError() {
+	ct.lock.Lock()
+	defer ct.lock.Unlock()
+	ct.ReadError = true
+}
+
+func (ct *ConnTracker) markWriteError() {
+	ct.lock.Lock()
+	defer ct.lock.Unlock()
+	ct.WriteError = true
+}
+
+func (ct *ConnTracker) markConnectFailed() {
+	ct.lock.Lock()
+	defer ct.lock.Unlock()
+	ct.ConnectFailed = true
+}
+
+func (ct *ConnTracker) markClosed(at time.Time) {
+	ct.lock.Lock()
+	defer ct.lock.Unlock()
+	if !ct.Closed {
+		ct.Closed = true
+		ct.EndTime = at
+	}
+}
+
+func (st *TCPSessionTracker) MarshalJSON() ([]byte, error) {
+	st.lock.RLock()
+	type sessionJSON struct {
+		ProxyPort       int            `json:"proxyPort"`
+		Upstream        string         `json:"upstream"`
+		DownAddress     string         `json:"downAddress"`
+		SNI             string         `json:"sni"`
+		DownConnTracker *ConnTracker   `json:"downConn"`
+		UpConnTracker   []*ConnTracker `json:"upConn"`
+	}
+	s := sessionJSON{
+		ProxyPort:       st.ProxyPort,
+		Upstream:        st.Upstream,
+		DownAddress:     st.DownAddress,
+		SNI:             st.SNI,
+		DownConnTracker: st.DownConnTracker,
+		UpConnTracker:   append([]*ConnTracker{}, st.UpConnTracker...),
+	}
+	st.lock.RUnlock()
+	return json.Marshal(s)
+}
+
+// begin readies the session for a new downstream connection. Sessions are tracked per client address, so a client
+// that connects again from the same address gets its session back, and whatever the previous connection left behind
+// is dropped.
+func (st *TCPSessionTracker) begin(downConn string, startTime time.Time) {
+	st.lock.Lock()
+	defer st.lock.Unlock()
+	st.SNI = ""
+	st.DownConnTracker = &ConnTracker{}
+	st.DownConnTracker.init(st.ProxyPort, st.Upstream, downConn, startTime)
+	st.UpConnTracker = []*ConnTracker{}
+}
+
+func (st *TCPSessionTracker) setSNI(sni string) {
+	st.lock.Lock()
+	defer st.lock.Unlock()
+	st.SNI = sni
+}
+
+func (st *TCPSessionTracker) downTracker() *ConnTracker {
+	st.lock.RLock()
+	defer st.lock.RUnlock()
+	return st.DownConnTracker
+}
+
+func (st *TCPSessionTracker) addUpTracker(upstream, remoteAddr string, startTime time.Time) *ConnTracker {
+	t := &ConnTracker{}
+	t.init(st.ProxyPort, upstream, remoteAddr, startTime)
+	st.lock.Lock()
+	defer st.lock.Unlock()
+	st.UpConnTracker = append(st.UpConnTracker, t)
+	return t
+}
+
+func (tt *TCPTargetTracker) MarshalJSON() ([]byte, error) {
+	tt.lock.RLock()
+	defer tt.lock.RUnlock()
+	type targetJSON struct {
+		ProxyPort         int                           `json:"proxyPort"`
+		Upstream          string                        `json:"upstream"`
+		DownAddress       string                        `json:"downAddress"`
+		ConnCount         int                           `json:"connCount"`
+		ConnCountsBySNI   map[string]int                `json:"connCountsBySNI"`
+		TCPSessionTracker map[string]*TCPSessionTracker `json:"tcpSessions"`
+	}
+	return json.Marshal(targetJSON{
+		ProxyPort:         tt.ProxyPort,
+		Upstream:          tt.Upstream,
+		DownAddress:       tt.DownAddress,
+		ConnCount:         tt.ConnCount,
+		ConnCountsBySNI:   tt.ConnCountsBySNI,
+		TCPSessionTracker: tt.TCPSessionTracker,
+	})
+}
+
+func (pt *TCPProxyTracker) MarshalJSON() ([]byte, error) {
+	pt.lock.RLock()
+	defer pt.lock.RUnlock()
+	type proxyJSON struct {
+		ProxyPort         int                          `json:"proxyPort"`
+		ConnCount         int                          `json:"connCount"`
+		ConnCountsBySNI   map[string]int               `json:"connCountsBySNI"`
+		RejectCountsBySNI map[string]int               `json:"rejectCountsBySNI"`
+		TargetTrackers    map[string]*TCPTargetTracker `json:"targetTrackers"`
+	}
+	return json.Marshal(proxyJSON{
+		ProxyPort:         pt.ProxyPort,
+		ConnCount:         pt.ConnCount,
+		ConnCountsBySNI:   pt.ConnCountsBySNI,
+		RejectCountsBySNI: pt.RejectCountsBySNI,
+		TargetTrackers:    pt.TargetTrackers,
+	})
 }
 
 func (pt *TCPProxyTracker) GetOrAddTargetSessionTracker(port int, targetName, downAddr string) *TCPSessionTracker {
