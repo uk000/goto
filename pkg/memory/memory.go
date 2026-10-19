@@ -17,6 +17,8 @@
 package memory
 
 import (
+	"encoding/json"
+	"fmt"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
@@ -118,20 +120,68 @@ func (m *MemoryManager) Init() {
 	m.ContextMemory = map[string]*Memory{}
 	m.MemoryExtractors = map[string]*MemoryExtractor{}
 	m.allHeaderMatches = []string{}
+	m.hasMatches = false
 }
 
 func (m *MemoryManager) HasAnyMatches() bool {
+	m.lock.RLock()
+	defer m.lock.RUnlock()
 	return m.hasMatches
 }
 
+// clone is a copy of the extractor that doesn't change when the extractor is extended. The compiled expressions, the
+// JSON paths and the transforms are not changed after they are added, so the copy shares them.
+func (mx *MemoryExtractor) clone() *MemoryExtractor {
+	if mx == nil {
+		return nil
+	}
+	c := *mx
+	c.HeaderMatches = append([]string{}, mx.HeaderMatches...)
+	c.QueryMatches = append([]string{}, mx.QueryMatches...)
+	c.BodyJsonPathMatches = append([]*util.JSONPath{}, mx.BodyJsonPathMatches...)
+	c.BodyTransforms = append([]*util.Transform{}, mx.BodyTransforms...)
+	c.BodyRegexMatches = make(map[string]string, len(mx.BodyRegexMatches))
+	for k, v := range mx.BodyRegexMatches {
+		c.BodyRegexMatches[k] = v
+	}
+	c.bodyMatchRegexps = make(map[string]*regexp.Regexp, len(mx.bodyMatchRegexps))
+	for k, v := range mx.bodyMatchRegexps {
+		c.bodyMatchRegexps[k] = v
+	}
+	return &c
+}
+
+// getExtractor is a copy of an extractor, which can be used without holding the lock of the manager.
+func (m *MemoryManager) getExtractor(ctxKey string) *MemoryExtractor {
+	m.lock.RLock()
+	defer m.lock.RUnlock()
+	return m.MemoryExtractors[ctxKey].clone()
+}
+
+// GetContextExtractors returns a copy of the extractor of the context key, or the copies of all the extractors when no
+// key is given, which can be read while the extractors are being added to.
 func (m *MemoryManager) GetContextExtractors(ctxKey string) any {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 	if ctxKey != "" {
-		return m.MemoryExtractors[ctxKey]
-	} else {
-		return m.MemoryExtractors
+		return m.MemoryExtractors[ctxKey].clone()
 	}
+	all := make(map[string]*MemoryExtractor, len(m.MemoryExtractors))
+	for k, mx := range m.MemoryExtractors {
+		all[k] = mx.clone()
+	}
+	return all
+}
+
+// GetContexts returns the memory of all the contexts, which can be read while contexts are being added.
+func (m *MemoryManager) GetContexts() map[string]*Memory {
+	m.lock.RLock()
+	defer m.lock.RUnlock()
+	all := make(map[string]*Memory, len(m.ContextMemory))
+	for k, v := range m.ContextMemory {
+		all[k] = v
+	}
+	return all
 }
 
 func (m *MemoryManager) MatchContext(headers http.Header) (bool, string, string) {
@@ -147,9 +197,7 @@ func (m *MemoryManager) MatchContext(headers http.Header) (bool, string, string)
 }
 
 func (m *MemoryManager) ExtractFromHeaders(ctxKey, ctx string, headers http.Header) {
-	m.lock.RLock()
-	defer m.lock.RUnlock()
-	mx := m.MemoryExtractors[ctxKey]
+	mx := m.getExtractor(ctxKey)
 	if mx != nil {
 		for _, k := range mx.HeaderMatches {
 			v := headers.Get(k)
@@ -161,9 +209,7 @@ func (m *MemoryManager) ExtractFromHeaders(ctxKey, ctx string, headers http.Head
 }
 
 func (m *MemoryManager) ExtractFromQuery(ctxKey, ctx string, query url.Values) {
-	m.lock.RLock()
-	defer m.lock.RUnlock()
-	mx := m.MemoryExtractors[ctxKey]
+	mx := m.getExtractor(ctxKey)
 	if mx != nil {
 		for _, k := range mx.QueryMatches {
 			v := query.Get(k)
@@ -175,9 +221,7 @@ func (m *MemoryManager) ExtractFromQuery(ctxKey, ctx string, query url.Values) {
 }
 
 func (m *MemoryManager) ExtractFromBody(ctxKey, ctx string, body io.ReadCloser, isYAML bool) {
-	m.lock.RLock()
-	defer m.lock.RUnlock()
-	mx := m.MemoryExtractors[ctxKey]
+	mx := m.getExtractor(ctxKey)
 	if mx == nil {
 		return
 	}
@@ -220,30 +264,43 @@ func (m *MemoryManager) GetOrAddContext(ctx string) *Memory {
 	memory := m.ContextMemory[ctx]
 	m.lock.RUnlock()
 	if memory == nil {
-		return m.AddContext(ctx)
+		m.lock.Lock()
+		defer m.lock.Unlock()
+		// another caller may have added it while the lock was not held
+		if memory = m.ContextMemory[ctx]; memory == nil {
+			memory = newMemory()
+			m.ContextMemory[ctx] = memory
+		}
 	}
 	return memory
 }
 
-func (m *MemoryManager) GetOrAddContextExtractor(ctxKey string) *MemoryExtractor {
-	m.lock.Lock()
-	defer m.lock.Unlock()
+// unsafeGetOrAddContextExtractor expects the caller to hold the lock of the manager.
+func (m *MemoryManager) unsafeGetOrAddContextExtractor(ctxKey string) *MemoryExtractor {
 	if m.MemoryExtractors[ctxKey] == nil {
 		m.MemoryExtractors[ctxKey] = newMemoryExtractor(ctxKey)
 	}
 	return m.MemoryExtractors[ctxKey]
 }
 
+// GetOrAddContextExtractor returns the extractor that is in use, and not a copy of it, so it must not be read while
+// extractors are being added. Use GetContextExtractors for that.
+func (m *MemoryManager) GetOrAddContextExtractor(ctxKey string) *MemoryExtractor {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	return m.unsafeGetOrAddContextExtractor(ctxKey)
+}
+
 func (m *MemoryManager) AddContextMatch(ctxKey, match string) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	m.GetOrAddContextExtractor(ctxKey).ContextHeaderMatch = match
+	m.unsafeGetOrAddContextExtractor(ctxKey).ContextHeaderMatch = match
 }
 
 func (m *MemoryManager) AddHeaderMatch(ctxKey, match string) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	mx := m.GetOrAddContextExtractor(ctxKey)
+	mx := m.unsafeGetOrAddContextExtractor(ctxKey)
 	mx.HeaderMatches = append(mx.HeaderMatches, match)
 	mx.hasMatches = true
 	m.hasMatches = true
@@ -252,44 +309,70 @@ func (m *MemoryManager) AddHeaderMatch(ctxKey, match string) {
 func (m *MemoryManager) AddQueryMatch(ctxKey, match string) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	mx := m.GetOrAddContextExtractor(ctxKey)
+	mx := m.unsafeGetOrAddContextExtractor(ctxKey)
 	mx.QueryMatches = append(mx.QueryMatches, match)
 	mx.hasMatches = true
 	m.hasMatches = true
 }
 
-func (m *MemoryManager) AddBodyRegexMatch(ctxKey, key, match string) {
+// AddBodyRegexMatch fails, and adds nothing, when the regex isn't valid.
+func (m *MemoryManager) AddBodyRegexMatch(ctxKey, key, match string) error {
+	re, err := regexp.Compile("(?i)" + match)
+	if err != nil {
+		return fmt.Errorf("invalid regex [%s]: %w", match, err)
+	}
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	mx := m.GetOrAddContextExtractor(ctxKey)
+	mx := m.unsafeGetOrAddContextExtractor(ctxKey)
 	mx.BodyRegexMatches[key] = match
-	mx.bodyMatchRegexps[key] = regexp.MustCompile("(?i)" + match)
+	mx.bodyMatchRegexps[key] = re
 	mx.hasMatches = true
 	m.hasMatches = true
+	return nil
 }
 
 func (m *MemoryManager) AddBodyJsonPathMatch(ctxKey, match string) {
 	paths := strings.Split(match, ",")
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	mx := m.GetOrAddContextExtractor(ctxKey)
+	mx := m.unsafeGetOrAddContextExtractor(ctxKey)
 	mx.BodyJsonPathMatches = append(mx.BodyJsonPathMatches, util.NewJSONPath().Parse(paths))
 	mx.hasMatches = true
 	m.hasMatches = true
 }
 
-func (m *MemoryManager) SetBodyTransformation(ctxKey string, transforms []*util.Transform) {
+// SetBodyTransformation fails, and changes nothing, when a mapping has an invalid condition.
+func (m *MemoryManager) SetBodyTransformation(ctxKey string, transforms []*util.Transform) error {
 	for _, t := range transforms {
-		for _, m := range t.Mappings {
-			m.Init()
+		if t == nil {
+			return fmt.Errorf("invalid transform: null")
+		}
+		for _, jm := range t.Mappings {
+			if jm == nil {
+				return fmt.Errorf("invalid transform: null mapping")
+			}
+			// the conditions of the mappings are compiled by Init, which panics for the ones that aren't valid
+			for _, cond := range []string{jm.IfContains, jm.IfNotContains} {
+				if cond != "" {
+					if _, err := regexp.Compile("(?i)" + cond); err != nil {
+						return fmt.Errorf("invalid condition [%s]: %w", cond, err)
+					}
+				}
+			}
+		}
+	}
+	for _, t := range transforms {
+		for _, jm := range t.Mappings {
+			jm.Init()
 		}
 	}
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	mx := m.GetOrAddContextExtractor(ctxKey)
+	mx := m.unsafeGetOrAddContextExtractor(ctxKey)
 	mx.BodyTransforms = transforms
 	mx.hasMatches = true
 	m.hasMatches = true
+	return nil
 }
 
 func (m *Memory) Add(key string, value string) {
@@ -310,13 +393,23 @@ func (m *Memory) Clear() {
 	m.Items = map[string]string{}
 }
 
+// MarshalJSON reports the items while they can be added to.
+func (m *Memory) MarshalJSON() ([]byte, error) {
+	m.lock.RLock()
+	defer m.lock.RUnlock()
+	return json.Marshal(struct {
+		Context string            `json:"context"`
+		Items   map[string]string `json:"items"`
+	}{m.Context, m.Items})
+}
+
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)
 		if !rs.IsKnownNonTraffic {
 			port := util.GetRequestOrListenerPortNum(r)
 			m := GetMemoryManager(port)
-			if m.hasMatches {
+			if m.HasAnyMatches() {
 				found, ctxKey, ctx := m.MatchContext(r.Header)
 				if found {
 					m.ExtractFromHeaders(ctxKey, ctx, r.Header)

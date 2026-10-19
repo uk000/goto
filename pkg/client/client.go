@@ -350,7 +350,7 @@ func Run() {
 			AutoInvoke:           false,
 			LowerHeaders:         true,
 		}
-		if err := target.Client.AddTarget(&target.Target{is}); err != nil {
+		if err := target.Client.AddTarget(&target.Target{InvocationSpec: is}); err != nil {
 			log.Printf("Invalid target spec: %s", err.Error())
 		}
 	}

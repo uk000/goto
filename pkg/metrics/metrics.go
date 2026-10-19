@@ -18,6 +18,7 @@ package metrics
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"sync"
 
@@ -77,17 +78,19 @@ var (
 )
 
 func init() {
-	go func() {
-	ConnTracker:
-		for {
-			select {
-			case target := <-ConnTracker:
-				IncrementTargetConnCount(target)
-			case <-stopConnTracker:
-				break ConnTracker
-			}
+	go trackConnections()
+}
+
+// trackConnections counts the connections that are reported on ConnTracker, until Shutdown.
+func trackConnections() {
+	for {
+		select {
+		case target := <-ConnTracker:
+			IncrementTargetConnCount(target)
+		case <-stopConnTracker:
+			return
 		}
-	}()
+	}
 }
 
 func Shutdown() {
@@ -181,6 +184,45 @@ func (ss *ServerStats) init() {
 	ss.RequestCountsByPortAndHeaders = map[string]map[string]int{}
 	ss.RequestCountsByPortAndHeaderValues = map[string]map[string]map[string]int{}
 	ss.RequestCountsByURIsAndProtocol = map[string]map[string]int{}
+}
+
+// snapshot returns a copy of the stats that is not shared with the goroutines that count requests into them, so that it
+// can be encoded while they are at it.
+func (ss *ServerStats) snapshot() *ServerStats {
+	ss.lock.RLock()
+	defer ss.lock.RUnlock()
+	return &ServerStats{
+		RequestCountsByHeaders:             maps.Clone(ss.RequestCountsByHeaders),
+		RequestCountsByURIs:                maps.Clone(ss.RequestCountsByURIs),
+		RequestCountsByURIsAndHeaders:      cloneCounts2(ss.RequestCountsByURIsAndHeaders),
+		RequestCountsByURIsAndHeaderValues: cloneCounts3(ss.RequestCountsByURIsAndHeaderValues),
+		RequestCountsByPortAndURIs:         cloneCounts2(ss.RequestCountsByPortAndURIs),
+		RequestCountsByPortAndHeaders:      cloneCounts2(ss.RequestCountsByPortAndHeaders),
+		RequestCountsByPortAndHeaderValues: cloneCounts3(ss.RequestCountsByPortAndHeaderValues),
+		RequestCountsByURIsAndProtocol:     cloneCounts2(ss.RequestCountsByURIsAndProtocol),
+	}
+}
+
+func cloneCounts2(m map[string]map[string]int) map[string]map[string]int {
+	if m == nil {
+		return nil
+	}
+	c := make(map[string]map[string]int, len(m))
+	for k, v := range m {
+		c[k] = maps.Clone(v)
+	}
+	return c
+}
+
+func cloneCounts3(m map[string]map[string]map[string]int) map[string]map[string]map[string]int {
+	if m == nil {
+		return nil
+	}
+	c := make(map[string]map[string]map[string]int, len(m))
+	for k, v := range m {
+		c[k] = cloneCounts2(v)
+	}
+	return c
 }
 
 func UpdateRequestCount(reqType string) {
@@ -308,7 +350,7 @@ func clearStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func getStats(w http.ResponseWriter, r *http.Request) {
-	util.WriteJsonPayload(w, serverStats)
+	util.WriteJsonPayload(w, serverStats.snapshot())
 }
 
 func setRoutes(r *mux.Router) {

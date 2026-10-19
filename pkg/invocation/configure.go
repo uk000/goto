@@ -412,7 +412,14 @@ func (is *InvocationSpec) prepareAssertions() {
 	}
 }
 
+// Clone returns a copy of the spec that has the spec as its parent, and shares the lock of its parent. The lock guards the
+// transport that the clones of a long running spec share through their parent, which one of them stores in the parent when
+// it creates it, so the parent is copied while holding that lock.
 func (is *InvocationSpec) Clone() *InvocationSpec {
+	if is.lock != nil {
+		is.lock.RLock()
+		defer is.lock.RUnlock()
+	}
 	is2 := *is
 	is2.parent = is
 	return &is2

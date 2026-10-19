@@ -31,6 +31,20 @@ func GetLatestJobResults(name string) []*JobResult {
 	return Manager.GetLatestJobResults(name)
 }
 
+// state tells whether the run has finished, and whether it was stopped.
+func (jr *JobRunContext) state() (finished, stopped bool) {
+	jr.lock.RLock()
+	defer jr.lock.RUnlock()
+	return jr.finished, jr.stopped
+}
+
+// getResults is a copy of the results of the run, which doesn't change when more results are added to the run.
+func (jr *JobRunContext) getResults() []*JobResult {
+	jr.lock.RLock()
+	defer jr.lock.RUnlock()
+	return append([]*JobResult{}, jr.jobResults...)
+}
+
 func (jm *JobManager) getJobResults(name string) map[int][]interface{} {
 	results := map[int][]interface{}{}
 
@@ -66,7 +80,7 @@ func (jm *JobManager) GetLatestJobResults(name string) []*JobResult {
 	}
 	jm.lock.RUnlock()
 	if latestJobRun != nil {
-		return latestJobRun.jobResults
+		return latestJobRun.getResults()
 	}
 	return nil
 }
@@ -91,11 +105,14 @@ func (jm *JobManager) getAllJobsResults() map[string]map[int][]interface{} {
 	return results
 }
 
+// registryClient doesn't wait for a registry that doesn't answer for longer than this
+var registryClient = &http.Client{Timeout: 30 * time.Second}
+
 func storeJobResultsInRegistryLocker(jobID string, runIndex int, jobResults []*JobResult) {
 	if global.Flags.UseLocker && global.Self.RegistryURL != "" {
 		key := "job_" + jobID + "_" + strconv.Itoa(runIndex)
 		url := global.Self.RegistryURL + "/registry/peers/" + global.Self.Name + "/" + global.Self.Address + "/locker/store/" + key
-		if resp, err := http.Post(url, ContentTypeJSON,
+		if resp, err := registryClient.Post(url, ContentTypeJSON,
 			strings.NewReader(util.ToJSONText(jobResults))); err == nil {
 			util.CloseResponse(resp)
 		}
@@ -109,7 +126,6 @@ func storeJobResult(job *Job, jobRun *JobRunContext, iteration int, data interfa
 	keepFirst := job.KeepFirst
 	job.lock.RUnlock()
 	jobRun.lock.Lock()
-	defer jobRun.lock.Unlock()
 	jobRun.resultCount++
 	index := strconv.Itoa(jobRun.id) + "." + strconv.Itoa(iteration) + "." + strconv.Itoa(jobRun.resultCount)
 	jobResult := &JobResult{ID: index, Last: last, Stopped: jobRun.stopped,
@@ -122,8 +138,11 @@ func storeJobResult(job *Job, jobRun *JobRunContext, iteration int, data interfa
 			jobRun.jobResults = jobRun.jobResults[1:]
 		}
 	}
-	storeJobResultsInRegistryLocker(jobID, jobRun.id, jobRun.jobResults)
-
+	kept := append([]*JobResult{}, jobRun.jobResults...)
+	runID := jobRun.id
+	jobRun.lock.Unlock()
+	// the registry is called with no lock held, because the run can't be stopped or reported while it's waited for
+	storeJobResultsInRegistryLocker(jobID, runID, kept)
 }
 
 func storeHttpResult(result *invocation.InvocationResult, job *Job, iteration int, jobRun *JobRunContext, last bool) {

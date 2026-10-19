@@ -81,7 +81,7 @@ func storeJobScriptOrFile(w http.ResponseWriter, r *http.Request) {
 	if script || path == "" {
 		path, _ = os.Getwd()
 	}
-	exists := Manager.scripts[name] != nil
+	exists := Manager.getScripts()[name] != nil
 	if scriptName, path, ok := Manager.StoreJobScriptOrFile(path, name, content, script); ok {
 		existingOrNew := "Stored New"
 		if exists {
@@ -118,12 +118,12 @@ func removeJob(w http.ResponseWriter, r *http.Request) {
 
 func getJobs(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reporting jobs", r)
-	util.WriteJsonPayload(w, Manager.jobs)
+	util.WriteJsonPayload(w, Manager.getJobs())
 }
 
 func getScripts(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reporting job scripts ", r)
-	util.WriteJsonPayload(w, Manager.scripts)
+	util.WriteJsonPayload(w, Manager.getScripts())
 }
 
 func runJobs(w http.ResponseWriter, r *http.Request) {

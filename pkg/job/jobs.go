@@ -24,6 +24,7 @@ import (
 	"goto/pkg/util"
 	"log"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 
@@ -105,7 +106,6 @@ type Job struct {
 	httpTask      *HttpJobTask
 	commandTask   *CommandJobTask
 	jobRunCounter int
-	cronScheduler *gocron.Scheduler
 	cronJob       *gocron.Job
 	lock          sync.RWMutex
 }
@@ -120,6 +120,7 @@ type JobManager struct {
 	watchers      map[string]map[string]JobWatcher
 	watchChannel  chan *JobRunContext
 	stopJobWatch  chan bool
+	scheduleLock  sync.Mutex
 	lock          sync.RWMutex
 }
 
@@ -133,13 +134,32 @@ func newJobManager() *JobManager {
 func (jm *JobManager) init() {
 	jm.lock.Lock()
 	defer jm.lock.Unlock()
+	previous := jm.cronScheduler
 	jm.jobs = map[string]*Job{}
 	jm.jobRuns = map[string]map[int]*JobRunContext{}
 	jm.scripts = map[string]*Script{}
 	jm.cronScheduler = gocron.NewScheduler(time.UTC)
 	jm.watchers = map[string]map[string]JobWatcher{}
-	jm.watchChannel = make(chan *JobRunContext, 100)
-	jm.stopJobWatch = make(chan bool, 2)
+	// The job watcher is already waiting on these channels once the manager was created, and so it keeps them for good.
+	if jm.watchChannel == nil {
+		jm.watchChannel = make(chan *JobRunContext, 100)
+	}
+	if jm.stopJobWatch == nil {
+		jm.stopJobWatch = make(chan bool, 2)
+	}
+	if previous != nil {
+		// stopping waits for the cron runs that are going, which may need the lock that is held here
+		go func() {
+			previous.Clear()
+			previous.Stop()
+		}()
+	}
+}
+
+func (jm *JobManager) getCronScheduler() *gocron.Scheduler {
+	jm.lock.RLock()
+	defer jm.lock.RUnlock()
+	return jm.cronScheduler
 }
 
 func (jm *JobManager) StopJobWatch() {
@@ -186,8 +206,11 @@ WatchLoop:
 					watchers = append(watchers, w)
 				}
 				jm.lock.RUnlock()
-				for _, w := range watchers {
-					w(jobRun.jobName, jobRun.id, jobRun.jobResults)
+				if len(watchers) > 0 {
+					results := jobRun.getResults()
+					for _, w := range watchers {
+						w(jobRun.jobName, jobRun.id, results)
+					}
 				}
 			}()
 		}
@@ -196,25 +219,35 @@ WatchLoop:
 
 func (jm *JobManager) RunJob(job *Job) {
 	if job.Cron != "" {
-		if err := job.schedule(); err != nil {
-			log.Printf("Jobs: Failed to schedule cron job: %+v\n", job)
+		if err := jm.schedule(job); err != nil {
+			log.Printf("Jobs: Failed to schedule cron job [%s] with error: %s\n", job.Name, err.Error())
 		}
-		job.cronScheduler.StartAsync()
 	} else {
 		jm.runJob(job, nil, nil, nil)
 	}
 }
 
 func (jm *JobManager) StoreJobScriptOrFile(filePath, fileName string, content []byte, scriptJob bool) (string, string, bool) {
+	if fileName == "" {
+		fmt.Printf("Jobs: Failed to store job file [%s] without a name\n", filePath)
+		return "", "", false
+	}
 	if path, err := util.StoreFile(filePath, fileName, content); err == nil {
 		var extension = filepath.Ext(fileName)
 		scriptName := fileName[0 : len(fileName)-len(extension)]
-		script := &Script{Name: scriptName, Path: filepath.FromSlash(filePath + "/" + fileName), Shell: extension == ".sh"}
+		// the script is run from wherever the file was stored, which is what the path of the file says
+		scriptPath := path
+		if abs, err := filepath.Abs(path); err == nil {
+			scriptPath = abs
+		}
+		script := &Script{Name: scriptName, Path: scriptPath, Shell: extension == ".sh"}
+		jm.lock.Lock()
 		jm.scripts[scriptName] = script
+		jm.lock.Unlock()
 		if scriptJob {
 			task := &CommandJobTask{Script: scriptName}
 			job := &Job{Name: scriptName, Task: task, commandTask: task, Count: 1, KeepResults: 3}
-			Manager.AddJob(job)
+			jm.AddJob(job)
 		}
 		return scriptName, path, true
 	} else {
@@ -227,10 +260,9 @@ func (jm *JobManager) removeJobs(jobs []string) {
 	jm.lock.Lock()
 	defer jm.lock.Unlock()
 	for _, j := range jobs {
-		job := jm.jobs[j]
-		if job != nil {
-			job.lock.Lock()
-			defer job.lock.Unlock()
+		if jm.jobs[j] != nil {
+			// a job that is removed must not be run again by its schedule
+			jm.cronScheduler.RemoveByTag(j)
 			delete(jm.jobs, j)
 			delete(jm.jobRuns, j)
 		}
@@ -241,13 +273,69 @@ func (jm *JobManager) AddJob(job *Job) (bool, error) {
 	jm.lock.Lock()
 	defer jm.lock.Unlock()
 	exists := jm.jobs[job.Name] != nil
+	if exists {
+		// the job that is replaced must not go on running by its schedule
+		jm.cronScheduler.RemoveByTag(job.Name)
+	}
 	jm.jobs[job.Name] = job
 	delete(jm.jobRuns, job.Name)
+	if job.Cron != "" {
+		job.Auto = true
+	}
 	if job.Auto || job.Cron != "" {
 		log.Printf("Jobs: Auto-invoking Job: %s\n", job.Name)
 		go jm.RunJob(job)
 	}
 	return exists, nil
+}
+
+// getJobs and getScripts are the jobs and the scripts, which can be reported while they are being changed.
+func (jm *JobManager) getJobs() map[string]*Job {
+	jm.lock.RLock()
+	defer jm.lock.RUnlock()
+	jobs := make(map[string]*Job, len(jm.jobs))
+	for k, v := range jm.jobs {
+		jobs[k] = v
+	}
+	return jobs
+}
+
+func (jm *JobManager) getScripts() map[string]*Script {
+	jm.lock.RLock()
+	defer jm.lock.RUnlock()
+	scripts := make(map[string]*Script, len(jm.scripts))
+	for k, v := range jm.scripts {
+		scripts[k] = v
+	}
+	return scripts
+}
+
+// validateTransforms refuses the mappings that have a condition that isn't a regex, which would otherwise make
+// initializing them panic, and initializes the mappings, which makes them honor their mode and conditions.
+func validateTransforms(transforms []*util.Transform) error {
+	for _, t := range transforms {
+		if t == nil {
+			return errors.New("null transform")
+		}
+		for _, m := range t.Mappings {
+			if m == nil {
+				return errors.New("null transform mapping")
+			}
+			for _, cond := range []string{m.IfContains, m.IfNotContains} {
+				if cond != "" {
+					if _, err := regexp.Compile("(?i)" + cond); err != nil {
+						return fmt.Errorf("invalid transform condition [%s]: %s", cond, err.Error())
+					}
+				}
+			}
+		}
+	}
+	for _, t := range transforms {
+		for _, m := range t.Mappings {
+			m.Init()
+		}
+	}
+	return nil
 }
 
 func ParseJobFromPayload(payload string) (*Job, error) {
@@ -279,11 +367,10 @@ func ParseJobFromPayload(payload string) (*Job, error) {
 			task := util.ToJSONText(job.Task)
 			if httpTaskError = util.ReadJson(task, &httpTask); httpTaskError == nil {
 				if httpTaskError = invocation.ValidateSpec(&httpTask.InvocationSpec); httpTaskError == nil {
-					httpTask.CollectResponse = true
-					httpTask.TrackPayload = true
-					job.httpTask = &httpTask
-					if len(httpTask.Transforms) > 0 {
+					if httpTaskError = validateTransforms(httpTask.Transforms); httpTaskError == nil {
 						httpTask.CollectResponse = true
+						httpTask.TrackPayload = true
+						job.httpTask = &httpTask
 					}
 				}
 			}
@@ -306,17 +393,17 @@ func ParseJobFromPayload(payload string) (*Job, error) {
 				return job, nil
 			} else {
 				msg := ""
+				if httpTaskError != nil {
+					msg += "Jobs: HTTP Task Error: [" + httpTaskError.Error() + "] "
+				}
 				if cmdTaskError != nil {
 					msg += "Jobs: Command Task Error: [" + cmdTaskError.Error() + "] "
-				}
-				if httpTaskError != nil {
-					msg = "Jobs: HTTP Task Error: [" + httpTaskError.Error() + "] "
 				}
 				err := errors.New(msg)
 				return job, err
 			}
 		} else {
-			return nil, fmt.Errorf("Jobs: Invalid Task: %s", err.Error())
+			return nil, errors.New("Jobs: Invalid Task: no task given")
 		}
 	} else {
 		return nil, fmt.Errorf("Jobs: Failed to parse json with error: %s", err.Error())

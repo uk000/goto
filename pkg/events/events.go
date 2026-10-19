@@ -62,6 +62,8 @@ var (
 	stopSender          = make(chan bool, 10)
 	registryClient      = transport.CreateDefaultHTTPClient(global.Self.ServerPort, "EventsRegistrySender", true, false, false, "", nil)
 	lock                sync.RWMutex
+	// senders has the goroutines that StartSender starts, for the ones that need to know that those are done.
+	senders sync.WaitGroup
 )
 
 func setRoutes(r *mux.Router) {
@@ -74,14 +76,24 @@ func setRoutes(r *mux.Router) {
 
 func StartSender() {
 	if global.Flags.EnableEvents {
-		go eventSender()
-		go trafficEventsProcessor()
+		senders.Add(2)
+		go func() {
+			defer senders.Done()
+			eventSender()
+		}()
+		go func() {
+			defer senders.Done()
+			trafficEventsProcessor()
+		}()
 	}
 }
 
+// StopSender flushes the traffic report and stops the two goroutines that StartSender starts, each of which takes one
+// stop signal.
 func StopSender() {
 	if global.Flags.EnableEvents {
 		FlushEvents()
+		stopSender <- true
 		stopSender <- true
 	}
 }
@@ -129,11 +141,14 @@ func SendEvent(title, data string) time.Time {
 
 func SendEventForPort(port int, title, data string) time.Time {
 	at := time.Now()
-	if global.Flags.EnableEvents {
-		event := newPortEvent(title, "", data, at, port)
-		eventChannel <- event
-	}
+	sendEventForPortAt(at, port, title, "", data)
 	return at
+}
+
+func sendEventForPortAt(at time.Time, port int, title, summary string, data interface{}) {
+	if global.Flags.EnableEvents {
+		eventChannel <- newPortEvent(title, summary, data, at, port)
+	}
 }
 
 func SendEventDirect(title, data string) time.Time {
@@ -191,18 +206,18 @@ func TrackPortTrafficEvent(port int, operation string, statusCode int, details .
 
 func FlushEvents() {
 	if global.Flags.EnableEvents {
-		lock.RLock()
+		// The trackers are copied, and removed in the same step, as the ones that are being counted into must not be
+		// reported (and encoded) while they change, and what is counted between a report and a reset must not be lost.
+		lock.Lock()
 		trackers := []*EventTracker{}
 		for _, tt := range trafficEventTracker {
 			for _, t := range tt {
-				trackers = append(trackers, t)
+				trackers = append(trackers, t.copy())
 			}
 		}
-		lock.RUnlock()
-		SendEventJSONDirect("Flushed Traffic Report", "", trackers)
-		lock.Lock()
 		trafficEventTracker = map[int]map[string]*EventTracker{}
 		lock.Unlock()
+		SendEventJSONDirect("Flushed Traffic Report", "", trackers)
 	}
 }
 
@@ -220,7 +235,7 @@ func trafficEventsProcessor() {
 TrafficLoop:
 	for {
 		if len(trafficChannel) > 50 {
-			log.Printf("trafficEventsProcessor: trafficChannel length %d\n", len(eventChannel))
+			log.Printf("trafficEventsProcessor: trafficChannel length %d\n", len(trafficChannel))
 		}
 		select {
 		case <-stopSender:
@@ -236,15 +251,27 @@ func (t *EventTracker) summary() string {
 		t.Port, t.URI, t.StatusCode, strings.Join(t.TrafficDetails, ","), t.StatusRepeatCount)
 }
 
+func (t *EventTracker) copy() *EventTracker {
+	c := *t
+	c.TrafficDetails = append([]string{}, t.TrafficDetails...)
+	return &c
+}
+
 func processTrafficEvent(traffic []interface{}) {
-	if len(traffic) < 3 {
+	if len(traffic) < 4 {
 		return
 	}
-	port := traffic[0].(int)
-	uri := traffic[1].(string)
-	statusCode := traffic[2].(int)
-	trafficDetails := traffic[3].([]string)
-
+	port, ok1 := traffic[0].(int)
+	uri, ok2 := traffic[1].(string)
+	statusCode, ok3 := traffic[2].(int)
+	trafficDetails, ok4 := traffic[3].([]string)
+	if !ok1 || !ok2 || !ok3 || !ok4 {
+		return
+	}
+	// The tracker is changed with the lock held, but the events are queued after it is released: the sender that takes
+	// events off the queue needs the lock to store them, so a full queue would not drain.
+	var sends []func()
+	lock.Lock()
 	portTrafficEventTracker := trafficEventTracker[port]
 	if portTrafficEventTracker == nil {
 		portTrafficEventTracker = map[string]*EventTracker{}
@@ -260,7 +287,11 @@ func processTrafficEvent(traffic []interface{}) {
 		oldStatusCode = tracker.StatusCode
 		oldDetails = tracker.TrafficDetails
 		if tracker.StatusRepeatCount > 1 {
-			SendEventJSONForPort(port, "Repeated URI Status", tracker.summary(), tracker)
+			repeated := tracker.copy()
+			now := time.Now()
+			sends = append(sends, func() {
+				sendEventForPortAt(now, port, "Repeated URI Status", repeated.summary(), repeated)
+			})
 		}
 		tracker = nil
 	}
@@ -275,12 +306,17 @@ func processTrafficEvent(traffic []interface{}) {
 			details = fmt.Sprintf("Port [%d] URI [%s] Old Status [%d] New Status [%d] Traffic Old Details [%s] New Details [%s]",
 				port, uri, oldStatusCode, statusCode, strings.Join(oldDetails, ","), strings.Join(trafficDetails, ","))
 		}
-		ts := SendEventForPort(port, title, details)
+		ts := time.Now()
+		sends = append(sends, func() { sendEventForPortAt(ts, port, title, "", details) })
 		tracker = &EventTracker{Port: port, URI: uri, StatusCode: statusCode, TrafficDetails: trafficDetails, StatusRepeatCount: 1, FirstEventAt: ts, LastEventAt: ts}
 		portTrafficEventTracker[uri] = tracker
 	} else {
 		tracker.LastEventAt = time.Now()
 		tracker.StatusRepeatCount++
+	}
+	lock.Unlock()
+	for _, send := range sends {
+		send()
 	}
 }
 
@@ -381,9 +417,16 @@ func searchEvents(w http.ResponseWriter, r *http.Request) {
 		msg = "Cannot search. No key given."
 		fmt.Fprintln(w, msg)
 	} else {
+		pattern, err := regexp.Compile("(?i)" + key)
+		if err != nil {
+			msg = fmt.Sprintf("Cannot search. Invalid key [%s]: %s", key, err.Error())
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintln(w, msg)
+			util.AddLogMessage(msg, r)
+			return
+		}
 		filteredEvents := []*Event{}
 		unfilteredEvents := []*Event{}
-		pattern := regexp.MustCompile("(?i)" + key)
 		lock.RLock()
 		for _, event := range eventsList {
 			unfilteredEvents = append(unfilteredEvents, event)

@@ -161,7 +161,7 @@ func addExcludedHeader(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	header := util.GetStringParamValue(r, "header")
 	if header != "" {
-		util.ExcludedHeaders[strings.ToLower(header)] = true
+		util.ExcludeHeader(header)
 		msg = fmt.Sprintf("Header [%s] will not be logged", header)
 	} else {
 		msg = "No header specified"

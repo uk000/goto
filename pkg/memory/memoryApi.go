@@ -96,7 +96,7 @@ func addItem(w http.ResponseWriter, r *http.Request) {
 	}
 	msg := ""
 	if ctx != "" && key != "" && value != "" {
-		GetMemoryManager(port).AddContext(ctx).Add(key, value)
+		GetMemoryManager(port).GetOrAddContext(ctx).Add(key, value)
 		msg = fmt.Sprintf("Stored [%s: %s] into Context [%s] in memory of port [%d]", key, value, ctx, port)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
@@ -151,8 +151,12 @@ func addBodyRegexMatch(w http.ResponseWriter, r *http.Request) {
 	m := GetMemoryManager(port)
 	msg := ""
 	if key != "" && regex != "" {
-		m.AddBodyRegexMatch(ctxkey, key, regex)
-		msg = fmt.Sprintf("Added Context Key [%s] Memory Extraction from Body Regex match [%s: %s] for memory of port [%d]", ctxkey, key, regex, port)
+		if err := m.AddBodyRegexMatch(ctxkey, key, regex); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = fmt.Sprintf("Failed to add Body Regex match [%s: %s] with error: %s", key, regex, err.Error())
+		} else {
+			msg = fmt.Sprintf("Added Context Key [%s] Memory Extraction from Body Regex match [%s: %s] for memory of port [%d]", ctxkey, key, regex, port)
+		}
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "Missing key or regex"
@@ -185,8 +189,12 @@ func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
 	if err := util.ReadJsonPayload(r, &transforms); err == nil {
 		m := GetMemoryManager(port)
 		ctxkey := util.GetStringParamValue(r, "ctxkey")
-		m.SetBodyTransformation(ctxkey, transforms)
-		msg = fmt.Sprintf("Added Context Key [%s] Pre-Extraction Body Transform match [%s] for memory of port [%d]", ctxkey, util.ToJSONText(transforms), port)
+		if err := m.SetBodyTransformation(ctxkey, transforms); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = fmt.Sprintf("Invalid payload: %s", err.Error())
+		} else {
+			msg = fmt.Sprintf("Added Context Key [%s] Pre-Extraction Body Transform match [%s] for memory of port [%d]", ctxkey, util.ToJSONText(transforms), port)
+		}
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "Invalid payload"
@@ -245,7 +253,7 @@ func getMemory(w http.ResponseWriter, r *http.Request) {
 	} else if ctx != "" {
 		util.WriteJsonPayload(w, memory)
 	} else {
-		util.WriteJsonPayload(w, mm.ContextMemory)
+		util.WriteJsonPayload(w, mm.GetContexts())
 	}
 	util.AddLogMessage(fmt.Sprintf("Reported Memory for Context [%s] Key [%s]", ctx, key), r)
 }

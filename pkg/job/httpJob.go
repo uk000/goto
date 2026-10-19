@@ -33,6 +33,7 @@ func (jm *JobManager) invokeHttpTarget(job *Job, jobRun *JobRunContext, iteratio
 	target := &job.httpTask.InvocationSpec
 	outputTrigger := job.OutputTrigger
 	maxResults := job.MaxResults
+	timeout := job.Timeout
 	job.lock.RUnlock()
 	tracker, err := invocation.RegisterInvocation(global.Self.ServerPort, target)
 	if err != nil {
@@ -70,14 +71,15 @@ func (jm *JobManager) invokeHttpTarget(job *Job, jobRun *JobRunContext, iteratio
 				storeHttpResult(result, job, iteration, jobRun, last)
 				if outputTrigger != nil {
 					jm.lock.RLock()
-					job := jm.jobs[outputTrigger.Name]
+					triggered := jm.jobs[outputTrigger.Name]
 					jm.lock.RUnlock()
-					if job != nil {
+					if triggered != nil {
 						var payload []byte
 						if outputTrigger.ForwardPayload {
 							payload = result.Response.Payload
-							if len(job.httpTask.Transforms) > 0 {
-								payload = []byte(util.TransformPayload(string(payload), job.httpTask.Transforms, util.IsYAMLContentType(result.Response.Headers)))
+							// the transforms are those of the job that gets the payload, which may not be an HTTP job
+							if triggered.httpTask != nil && len(triggered.httpTask.Transforms) > 0 {
+								payload = []byte(util.TransformPayload(string(payload), triggered.httpTask.Transforms, util.IsYAMLContentType(result.Response.Headers)))
 							}
 						}
 						go jm.runJobWithInput(outputTrigger.Name, nil, payload)
@@ -89,10 +91,18 @@ func (jm *JobManager) invokeHttpTarget(job *Job, jobRun *JobRunContext, iteratio
 		return false
 	}
 
+	if timeout <= 0 {
+		timeout = 24 * time.Hour
+	}
+	// the call is given this long to finish, whatever results it produces in the meantime
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	// a channel that is closed is always ready to be read, so it's left alone once there are no more results
+	results := resultChannel
 Done:
 	for {
 		select {
-		case <-time.After(job.Timeout):
+		case <-timer.C:
 			sendStopSignal()
 			break Done
 		case <-stopChannel:
@@ -100,19 +110,24 @@ Done:
 			break Done
 		case <-doneChannel:
 			break Done
-		case result := <-resultChannel:
+		case result, ok := <-results:
+			if !ok {
+				results = nil
+				continue
+			}
 			if !storeResult(result) {
 				sendStopSignal()
 			}
 		}
 	}
-	jobRun.lock.Lock()
-	jobRun.finished = true
-	jobRun.lock.Unlock()
+	if last {
+		jobRun.lock.Lock()
+		jobRun.finished = true
+		jobRun.lock.Unlock()
+	}
 	for result := range resultChannel {
 		if !storeResult(result) {
 			break
 		}
 	}
-	jobRun.outDoneChannel <- true
 }

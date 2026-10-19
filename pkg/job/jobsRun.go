@@ -19,9 +19,12 @@ package job
 import (
 	"fmt"
 	"goto/pkg/events"
+	"goto/pkg/invocation"
 	"goto/pkg/util"
 	"log"
 	"time"
+
+	"github.com/go-co-op/gocron"
 )
 
 func RunJobWithInput(job string, input map[string]string, rawInput []byte) int {
@@ -93,17 +96,20 @@ func (jm *JobManager) waitForJob(jobName string, runId int, timeout time.Duratio
 		jobRun = jm.jobRuns[jobName][runId]
 	}
 	jm.lock.RUnlock()
-	if jobRun != nil && !jobRun.finished && !jobRun.stopped {
+	if jobRun == nil {
+		return false
+	}
+	if finished, stopped := jobRun.state(); !finished && !stopped {
 		select {
 		case <-jobRun.outDoneChannel:
-			fmt.Println("job outdone")
 			return true
 		case <-time.After(timeout):
 			return false
 		}
 	}
 	time.Sleep(1 * time.Second)
-	return jobRun.finished
+	finished, _ := jobRun.state()
+	return finished
 }
 
 func (jm *JobManager) runJobWithInput(jobName string, markers map[string]string, rawInput []byte) *JobRunContext {
@@ -140,8 +146,12 @@ func (jm *JobManager) executeJobRun(job *Job, jobRun *JobRunContext) {
 	delay := job.delayD
 	initialDelay := job.initialDelayD
 	finishTrigger := job.FinishTrigger
-	if job.commandTask != nil && jobRun.jobArgs == nil {
-		jobRun.jobArgs = job.commandTask.Args
+	if job.commandTask != nil {
+		jobRun.lock.Lock()
+		if jobRun.jobArgs == nil {
+			jobRun.jobArgs = job.commandTask.Args
+		}
+		jobRun.lock.Unlock()
 	}
 	job.lock.Unlock()
 
@@ -156,30 +166,36 @@ func (jm *JobManager) executeJobRun(job *Job, jobRun *JobRunContext) {
 		} else if job.httpTask != nil {
 			jm.invokeHttpTarget(job, jobRun, i+1, i == count-1)
 		}
-		jobRun.lock.RLock()
-		running := !jobRun.stopped && !jobRun.finished
-		jobRun.lock.RUnlock()
-		if !running {
+		finished, stopped := jobRun.state()
+		if finished || stopped {
 			break
 		}
 	}
-	job.lock.Lock()
+	// The run is over, which the jobs that stop it need to know. The channels of the run are not closed, because the
+	// goroutines that read the output of a command may still be sending on them.
 	jobRun.lock.Lock()
-	close(jobRun.stopChannel)
-	close(jobRun.doneChannel)
+	jobRun.finished = true
+	jobRun.lock.Unlock()
+	select {
+	case jobRun.outDoneChannel <- true:
+	default:
+	}
 	msg := fmt.Sprintf("Jobs: Job [%s] Run [%d] Finished", job.Name, jobRun.id)
 	log.Println(msg)
 	events.SendEvent(events.Jobs_JobFinished, msg)
-	jobRun.lock.Unlock()
-	job.lock.Unlock()
 
 	if finishTrigger != nil {
 		var payload []byte
 		if finishTrigger.ForwardPayload {
-			if latestResults := GetLatestJobResults(job.Name); len(latestResults) > 0 {
+			if latestResults := jobRun.getResults(); len(latestResults) > 0 {
 				var data []interface{}
 				for _, r := range latestResults {
-					data = append(data, r.Data)
+					// the response of an HTTP call is what is forwarded, and not where the result of the call is kept
+					if ir, ok := r.Data.(*invocation.InvocationResult); ok && ir != nil {
+						data = append(data, string(ir.Response.Payload))
+					} else {
+						data = append(data, r.Data)
+					}
 				}
 				payload = []byte(fmt.Sprint(data))
 			}
@@ -189,31 +205,41 @@ func (jm *JobManager) executeJobRun(job *Job, jobRun *JobRunContext) {
 		}
 		jm.runJobWithInput(finishTrigger.Name, nil, payload)
 	}
-	jm.watchChannel <- jobRun
+	select {
+	case jm.watchChannel <- jobRun:
+	default:
+		log.Printf("Jobs: Job [%s] Run [%d] couldn't be reported to the watchers\n", job.Name, jobRun.id)
+	}
 }
 
 func (jm *JobManager) stopJob(j string) bool {
-	jm.lock.Lock()
-	defer jm.lock.Unlock()
+	jm.lock.RLock()
 	job := jm.jobs[j]
-	jobRuns := jm.jobRuns[j]
-	if job == nil || jobRuns == nil {
+	scheduler := jm.cronScheduler
+	var jobRuns []*JobRunContext
+	for _, jobRun := range jm.jobRuns[j] {
+		jobRuns = append(jobRuns, jobRun)
+	}
+	jm.lock.RUnlock()
+	if job == nil {
 		return false
 	}
-	done := false
+	// Only the schedule of this job is removed. The scheduler is shared by all the cron jobs, and stopping it would wait
+	// for the runs that are going, which can't end while this holds the locks that they need.
+	scheduler.RemoveByTag(job.Name)
+	job.lock.Lock()
+	job.cronJob = nil
+	job.lock.Unlock()
+	if len(jobRuns) == 0 {
+		return false
+	}
 	for _, jobRun := range jobRuns {
 		jobRun.lock.Lock()
-		select {
-		case done = <-jobRun.doneChannel:
-		default:
-		}
-		if !done && !jobRun.finished && !jobRun.stopped {
-			jobRun.stopChannel <- true
-		}
-		if job.cronScheduler != nil {
-			job.cronScheduler.Stop()
-			job.cronJob = nil
-			jm.cronScheduler.RemoveByTag(job.Name)
+		if !jobRun.finished && !jobRun.stopped {
+			select {
+			case jobRun.stopChannel <- true:
+			default:
+			}
 		}
 		jobRun.lock.Unlock()
 		events.SendEventJSON(events.Jobs_JobStopped, job.Name, job)
@@ -248,17 +274,30 @@ func (jm *JobManager) stopJobs(jobs []string) {
 	}
 }
 
-func (job *Job) schedule() error {
-	job.Auto = true
+// schedule makes the manager run the job at the frequency of its cron, and starts the scheduler if it isn't going.
+func (jm *JobManager) schedule(job *Job) error {
+	// the scheduler builds a job in steps, which isn't safe for jobs to be scheduled at the same time
+	jm.scheduleLock.Lock()
+	defer jm.scheduleLock.Unlock()
+	scheduler := jm.getCronScheduler()
+	// a job runs once at a time by its schedule, however many times it is started
+	scheduler.RemoveByTag(job.Name)
+	var builder *gocron.Scheduler
 	if d, err := time.ParseDuration(job.Cron); err == nil {
-		job.cronScheduler = Manager.cronScheduler.Every(d).Tag(job.Name)
+		builder = scheduler.Every(d)
 	} else {
-		job.cronScheduler = Manager.cronScheduler.Cron(job.Cron).Tag(job.Name)
+		builder = scheduler.Cron(job.Cron)
 	}
-	var err error
-	job.cronJob, err = job.cronScheduler.Do(func() {
+	cronJob, err := builder.Tag(job.Name).Do(func() {
 		log.Printf("Jobs: Running cron job [%s]\n", job.Name)
-		Manager.runJob(job, nil, nil, nil)
+		jm.runJob(job, nil, nil, nil)
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	job.lock.Lock()
+	job.cronJob = cronJob
+	job.lock.Unlock()
+	scheduler.StartAsync()
+	return nil
 }

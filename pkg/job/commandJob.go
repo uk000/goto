@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -71,6 +72,7 @@ func (jm *JobManager) runCommandJob(job *Job, jobRun *JobRunContext, iteration i
 	cmd := exec.Command(targetCommand, args...)
 	outputTrigger := job.OutputTrigger
 	maxResults := job.MaxResults
+	timeout := job.Timeout
 	stopChannel := jobRun.stopChannel
 	doneChannel := jobRun.doneChannel
 	jobRun.lock.RUnlock()
@@ -91,19 +93,17 @@ func (jm *JobManager) runCommandJob(job *Job, jobRun *JobRunContext, iteration i
 		return
 	}
 	outputChannel := make(chan string)
-	stop := false
+	// the readers of the output look at this while the command is being stopped
+	var stop atomic.Bool
 	resultCount := 0
 
 	readOutput := func(scanner *bufio.Scanner) {
 		for scanner.Scan() {
-			if !stop {
-				out := scanner.Text()
-				if len(out) > 0 {
-					outputChannel <- out
-				}
-			}
-			if stop {
+			if stop.Load() {
 				break
+			}
+			if out := scanner.Text(); len(out) > 0 {
+				outputChannel <- out
 			}
 		}
 	}
@@ -126,7 +126,7 @@ func (jm *JobManager) runCommandJob(job *Job, jobRun *JobRunContext, iteration i
 	}()
 
 	stopCommand := func() {
-		stop = true
+		stop.Store(true)
 		jobRun.lock.Lock()
 		jobRun.stopped = true
 		jobRun.lock.Unlock()
@@ -151,24 +151,30 @@ func (jm *JobManager) runCommandJob(job *Job, jobRun *JobRunContext, iteration i
 		}
 	}
 
-	timeout := job.Timeout
 	if timeout <= 0 {
 		timeout = 24 * time.Hour
 	}
+	// the command is given this long to run, whatever output it produces in the meantime
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	// a channel that is closed is always ready to be read, so it's left alone once the output is over
+	outputs := outputChannel
 Done:
 	for {
 		select {
-		case <-time.After(timeout):
-			if job.Timeout > 0 {
-				stopCommand()
-				break Done
-			}
+		case <-timer.C:
+			stopCommand()
+			break Done
 		case <-stopChannel:
 			stopCommand()
 			break Done
 		case <-doneChannel:
 			break Done
-		case out := <-outputChannel:
+		case out, ok := <-outputs:
+			if !ok {
+				outputs = nil
+				continue
+			}
 			processOutput(out, true)
 		}
 	}
@@ -182,7 +188,6 @@ Done:
 		jobRun.lock.Unlock()
 		storeJobResult(job, jobRun, iteration, "", last)
 	}
-	jobRun.outDoneChannel <- true
 }
 
 func prepareCommandMarkers(output string, sourceCommand *CommandJobTask, jobRun *JobRunContext) map[string]string {
