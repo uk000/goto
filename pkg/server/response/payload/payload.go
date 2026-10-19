@@ -17,6 +17,7 @@
 package payload
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"goto/pkg/types"
@@ -46,6 +47,18 @@ var (
 	payloadKey     = &util.ContextKey{Key: "payloadKey"}
 	captureKey     = &util.ContextKey{Key: "captureKey"}
 )
+
+// MarshalJSON reports the payloads of the port under its lock, and the payloads of each protocol under theirs.
+func (pr *PortResponsePayloads) MarshalJSON() ([]byte, error) {
+	pr.lock.RLock()
+	port, httpPayloads, rpcPayloads := pr.Port, pr.HTTPPayloads, pr.RPCPayloads
+	pr.lock.RUnlock()
+	return json.Marshal(struct {
+		Port         int
+		HTTPPayloads *ProtoPayloads `json:"http"`
+		RPCPayloads  *ProtoPayloads `json:"rpc"`
+	}{port, httpPayloads, rpcPayloads})
+}
 
 func (pm *ResponsePayloadManager) init() *ResponsePayloadManager {
 	pm.payloads = map[int]*PortResponsePayloads{}
@@ -263,7 +276,7 @@ func (pr *PortResponsePayloads) setResponsePayloadForURIWithQuery(isGRPC bool, p
 	value = strings.ToLower(value)
 	if len(payload) > 0 {
 		if rp, err := newResponsePayload(payload, false, binary, contentType, uri, "", query, value, nil, nil, nil, delayMin, delayMax); err == nil {
-			pp.setURIWithHeaderResponsePayload(uri, query, rp)
+			pp.setURIWithQueryResponsePayload(uri, query, rp)
 		} else {
 			return err
 		}

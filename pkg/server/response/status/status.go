@@ -158,10 +158,11 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// IsForcedStatus tells if a status is forced for the request, for a limited number of times or forever. It only looks,
+// as the status is counted when the response status is applied.
 func IsForcedStatus(r *http.Request) bool {
 	port := util.GetRequestOrListenerPortNum(r)
-	status, rem := TheStatusManager.GetStatusFor(port, r.RequestURI, r.Header, r.Method)
-	return status > 0 && rem > 0
+	return TheStatusManager.HasStatusFor(port, r.RequestURI, r.Header, r.Method)
 }
 
 func computeResponseStatus(originalStatus int, r *http.Request) (int, int, bool) {

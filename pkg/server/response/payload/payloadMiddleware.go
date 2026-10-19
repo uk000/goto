@@ -17,6 +17,7 @@
 package payload
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"goto/pkg/constants"
@@ -26,7 +27,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 )
 
 func middlewareFunc(next http.Handler) http.Handler {
@@ -42,14 +42,9 @@ func middlewareFunc(next http.Handler) http.Handler {
 		p := PayloadManager.getPortResponse(r)
 		pr := p.protoPayload(util.IsGRPC(r) || util.IsJSONRPC(r))
 		if !util.IsPayloadRequest(r) && pr.HasAnyPayload() {
-			body := util.Read(r.Body)
-			newBody, rp, captures, found := pr.GetMatchingResponsePayload(r.RequestURI, r.Header, r.URL.Query(), io.NopCloser(strings.NewReader(body)))
+			body := readAndRestoreBody(r)
+			_, rp, captures, found := pr.GetMatchingResponsePayload(r.RequestURI, r.Header, r.URL.Query(), io.NopCloser(bytes.NewReader(body)))
 			if found {
-				if newBody != nil {
-					r.Body = newBody
-				} else {
-					r.Body = io.NopCloser(strings.NewReader(body))
-				}
 				payload = rp
 				r = r.WithContext(context.WithValue(context.WithValue(r.Context(), payloadKey, payload), captureKey, captures))
 				processPayload(w, r, rp, captures)
@@ -59,6 +54,19 @@ func middlewareFunc(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 	})
+}
+
+// readAndRestoreBody reads the body of the request to look for a payload that it matches, and leaves it to be read from
+// the start by whoever handles the request after that, whether or not a payload is found for it. The body of a request
+// is kept as a re-reader, which the handlers that come after this one look for, so it stays one.
+func readAndRestoreBody(r *http.Request) []byte {
+	if r.Body == nil {
+		return nil
+	}
+	rr := util.AsReReader(r.Body)
+	rr.Rewind()
+	r.Body = rr
+	return rr.Content
 }
 
 func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload, captures map[string]string) {
@@ -118,9 +126,9 @@ func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload,
 	if !payloadSent {
 		w.Header().Set(constants.HeaderGotoPayloadLength, strconv.Itoa(len(payload)))
 		if n, err := w.Write(payload); err != nil {
-			msg = fmt.Sprintf("Failed to write payload of length [%s] with error: %s", len(payload), err.Error())
+			msg = fmt.Sprintf("Failed to write payload of length [%d] with error: %s", len(payload), err.Error())
 		} else {
-			msg = fmt.Sprintf("Written payload of length [%d] compared to configured size [%s]", n, len(payload))
+			msg = fmt.Sprintf("Written payload of length [%d] compared to configured size [%d]", n, len(payload))
 		}
 	}
 	util.AddLogMessage(msg, r)
@@ -132,14 +140,9 @@ func handleURI(w http.ResponseWriter, r *http.Request) {
 	p := PayloadManager.getPortResponse(r)
 	pr := p.protoPayload(util.IsGRPC(r) || util.IsJSONRPC(r))
 	if !util.IsPayloadRequest(r) && pr.HasAnyPayload() {
-		body := util.Read(r.Body)
-		newBody, rp, captures, found := pr.GetMatchingResponsePayload(r.RequestURI, r.Header, r.URL.Query(), io.NopCloser(strings.NewReader(body)))
+		body := readAndRestoreBody(r)
+		_, rp, captures, found := pr.GetMatchingResponsePayload(r.RequestURI, r.Header, r.URL.Query(), io.NopCloser(bytes.NewReader(body)))
 		if found {
-			if newBody != nil {
-				r.Body = newBody
-			} else {
-				r.Body = io.NopCloser(strings.NewReader(body))
-			}
 			payload = rp
 			r = r.WithContext(context.WithValue(context.WithValue(r.Context(), payloadKey, payload), captureKey, captures))
 			processPayload(w, r, rp, captures)

@@ -349,9 +349,8 @@ func TestUsedUpStatusLeavesRequestsWithoutAnyOtherStatusAlone(t *testing.T) {
 	}
 }
 
-// A status that was set to 0 for a URI still matches its requests, and the statuses that are set after it do not
-// apply to them. That is how it worked before used up statuses were passed over, and is not the same as a status
-// that is used up. It depends on the order that the statuses were set in.
+// A status that was set to 0 for a URI still matches its requests, so the status that is set for all requests does not
+// apply to them. That is not the same as a status that is used up, which is passed over.
 func TestURIThatWasSetToStatusZeroKeepsMatchingItsRequests(t *testing.T) {
 	s := newTestServer(t)
 	s.configure(t, "POST", "/status/set/0?uri=/exempt")
@@ -633,5 +632,257 @@ func TestReportingFlipflopConfigsWhileTheyAreUsed(t *testing.T) {
 	wg.Wait()
 	if badReports.Load() != 0 {
 		t.Errorf("%d reports of the flipflop configs failed or were empty", badReports.Load())
+	}
+}
+
+// A status that was set to 0 for a URI keeps the status that is set for all requests from applying to it, and that
+// must not depend on which of them was set first.
+func TestURIThatWasSetToStatusZeroIsExemptWhateverTheOrder(t *testing.T) {
+	for name, order := range map[string][]string{
+		"exempt first": {"/status/set/0?uri=/exempt", "/status/set/500"},
+		"exempt last":  {"/status/set/500", "/status/set/0?uri=/exempt"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newTestServer(t)
+			for _, target := range order {
+				s.configure(t, "POST", target)
+			}
+			var codes []int
+			for _, path := range []string{"/exempt", "/exempt", "/plain", "/plain"} {
+				codes = append(codes, s.serve(path).rr.Code)
+			}
+			expectCodes(t, codes, 200, 200, 500, 500)
+			s.expectCounts(t, map[int]int{200: 2, 500: 2})
+		})
+	}
+}
+
+// A status that is set for a URI applies to it, whether it was set before or after the status for all requests.
+func TestStatusOfURIAppliesWhateverTheOrderOfStatusForAllRequests(t *testing.T) {
+	for name, order := range map[string][]string{
+		"uri first": {"/status/set/418?uri=/foo", "/status/set/500"},
+		"uri last":  {"/status/set/500", "/status/set/418?uri=/foo"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newTestServer(t)
+			for _, target := range order {
+				s.configure(t, "POST", target)
+			}
+			var codes []int
+			for _, path := range []string{"/foo", "/bar", "/foo"} {
+				codes = append(codes, s.serve(path).rr.Code)
+			}
+			expectCodes(t, codes, 418, 500, 418)
+			s.expectCounts(t, map[int]int{418: 2, 500: 1})
+		})
+	}
+}
+
+// Setting the status for all requests to 0 puts back the requests to respond normally, and the status ahead of it that
+// was set for a URI must not be kept from applying by what is left of the status for all requests.
+func TestStatusZeroForAllRequestsDoesNotShadowLaterStatuses(t *testing.T) {
+	s := newTestServer(t)
+	s.configure(t, "POST", "/status/set/500")
+	s.configure(t, "POST", "/status/set/0")
+	s.configure(t, "POST", "/status/set/418?uri=/foo")
+	var codes []int
+	for _, path := range []string{"/foo", "/bar", "/foo"} {
+		codes = append(codes, s.serve(path).rr.Code)
+	}
+	expectCodes(t, codes, 418, 200, 418)
+	s.expectCounts(t, map[int]int{418: 2, 200: 1})
+
+	// A status for all requests that is set again applies as it did.
+	s.configure(t, "POST", "/status/set/503")
+	codes = nil
+	for _, path := range []string{"/foo", "/bar"} {
+		codes = append(codes, s.serve(path).rr.Code)
+	}
+	expectCodes(t, codes, 418, 503)
+}
+
+// Statuses of more specific requests keep the order that they were set in, and the first that was set applies.
+func TestStatusesOfURIsKeepTheOrderTheyWereSetIn(t *testing.T) {
+	stubOnce.Do(stubGlobalFuncs)
+	port := int(40000 + portSeq.Add(1))
+	t.Cleanup(func() { TheStatusManager.Clear(port, "", "") })
+	TheStatusManager.SetStatusFor(port, "", "/api", "", "", nil, []int{503}, -1, true)
+	TheStatusManager.SetStatusFor(port, "/api/x", "", "", "", nil, []int{418}, -1, true)
+	if status, _ := TheStatusManager.GetStatusFor(port, "/api/x", nil, "GET"); status != 503 {
+		t.Errorf("/api/x = %d, want 503 from the prefix that was set first", status)
+	}
+	if status, _ := TheStatusManager.GetStatusFor(port, "/api/y", nil, "GET"); status != 503 {
+		t.Errorf("/api/y = %d, want 503", status)
+	}
+}
+
+func TestPeekingAtStatusDoesNotUseItUp(t *testing.T) {
+	stubOnce.Do(stubGlobalFuncs)
+	port := int(40000 + portSeq.Add(1))
+	t.Cleanup(func() { TheStatusManager.Clear(port, "", "") })
+	TheStatusManager.SetStatusFor(port, "/limited", "", "", "", nil, []int{503}, 2, true)
+	for i := 0; i < 10; i++ {
+		if status, times := TheStatusManager.PeekStatusFor(port, "/limited", nil, "GET"); status != 503 || times != 2 {
+			t.Fatalf("peek %d = (%d, %d), want (503, 2)", i, status, times)
+		}
+		if !TheStatusManager.HasStatusFor(port, "/limited", nil, "GET") {
+			t.Fatalf("peek %d: status not reported as forced", i)
+		}
+	}
+	if TheStatusManager.HasStatusFor(port, "/other", nil, "GET") {
+		t.Errorf("status reported as forced for a URI that has none")
+	}
+	if status, times := TheStatusManager.GetStatusFor(port, "/limited", nil, "GET"); status != 503 || times != 1 {
+		t.Errorf("first use = (%d, %d), want (503, 1)", status, times)
+	}
+	if status, times := TheStatusManager.GetStatusFor(port, "/limited", nil, "GET"); status != 503 || times != 0 {
+		t.Errorf("second use = (%d, %d), want (503, 0)", status, times)
+	}
+	if TheStatusManager.HasStatusFor(port, "/limited", nil, "GET") {
+		t.Errorf("status reported as forced after it was used up")
+	}
+}
+
+func TestIsForcedStatusDoesNotUseUpTheStatus(t *testing.T) {
+	for name, tt := range map[string]struct {
+		set        string
+		wantCodes  []int
+		wantForced []bool
+	}{
+		"limited":   {"/status/set/503:2", []int{503, 503, 200}, []bool{true, true, false}},
+		"last one":  {"/status/set/503:1", []int{503, 200, 200}, []bool{true, false, false}},
+		"unlimited": {"/status/set/503", []int{503, 503, 503}, []bool{true, true, true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newTestServer(t)
+			s.configure(t, "POST", tt.set)
+			var codes []int
+			var forced []bool
+			for range tt.wantCodes {
+				p := s.prepare("/foo")
+				// What the proxies do before they decide to send the request on.
+				forced = append(forced, IsForcedStatus(p.req), IsForcedStatus(p.req))
+				codes = append(codes, s.run(p).rr.Code)
+			}
+			for i, want := range tt.wantForced {
+				if forced[2*i] != want || forced[2*i+1] != want {
+					t.Errorf("request %d: IsForcedStatus = %v, %v, want %v", i, forced[2*i], forced[2*i+1], want)
+				}
+			}
+			expectCodes(t, codes, tt.wantCodes...)
+		})
+	}
+}
+
+// The /status/{code} URI reports the status that was asked for unless a status is forced, and it must not use up a
+// forced status by checking for it.
+func TestStatusURIDoesNotUseUpForcedStatus(t *testing.T) {
+	s := newTestServer(t)
+	s.configure(t, "POST", "/status/set/503:2")
+	handler := uri.Middleware.MiddlewareHandler(Middleware.MiddlewareHandler(s.api))
+	var codes []int
+	for i := 0; i < 4; i++ {
+		p := s.prepare("/status/200")
+		handler.ServeHTTP(p.w, p.req)
+		p.irw.Proceed()
+		codes = append(codes, p.rr.Code)
+	}
+	expectCodes(t, codes, 503, 503, 200, 200)
+}
+
+func applyConfig(t *testing.T, port int, body string) {
+	t.Helper()
+	if _, err := TheStatusManager.ParseAndApplyStatusConfig(port, strings.NewReader(body)); err != nil {
+		t.Fatalf("applying %s: %v", body, err)
+	}
+}
+
+func TestStatusConfigOfMethodsAppliesToThoseMethodsOnly(t *testing.T) {
+	stubOnce.Do(stubGlobalFuncs)
+	port := int(40000 + portSeq.Add(1))
+	t.Cleanup(func() { TheStatusManager.Clear(port, "", "") })
+	applyConfig(t, port, `{"statuses":[503],"match":{"methods":["post","PUT"]}}`)
+	for _, tt := range []struct {
+		method string
+		want   int
+	}{
+		{"POST", 503}, {"put", 503}, {"GET", 0}, {"DELETE", 0},
+		{"", 503}, // the method is not known, e.g. for gRPC and for reporting
+	} {
+		if status, _ := TheStatusManager.GetStatusFor(port, "/foo", nil, tt.method); status != tt.want {
+			t.Errorf("method %q = %d, want %d", tt.method, status, tt.want)
+		}
+	}
+}
+
+func TestStatusConfigOfURIRegex(t *testing.T) {
+	stubOnce.Do(stubGlobalFuncs)
+	port := int(40000 + portSeq.Add(1))
+	t.Cleanup(func() { TheStatusManager.Clear(port, "", "") })
+	applyConfig(t, port, `{"statuses":[503],"match":{"uri":{"regex":"^/API/v[0-9]+/"}}}`)
+	applyConfig(t, port, `{"statuses":[418],"match":{"uri":{"regex":"^/internal/","not":true}}}`)
+	for uri, want := range map[string]int{
+		"/api/v2/users": 503, // matched in any case
+		"/Api/V10/x":    503,
+		"/api/users":    418,
+		"/internal/x":   0,
+	} {
+		if status, _ := TheStatusManager.GetStatusFor(port, uri, nil, "GET"); status != want {
+			t.Errorf("%s = %d, want %d", uri, status, want)
+		}
+	}
+	if _, err := TheStatusManager.ParseAndApplyStatusConfig(port, strings.NewReader(`{"statuses":[503],"match":{"uri":{"regex":"("}}}`)); err == nil {
+		t.Errorf("invalid regex was accepted")
+	}
+}
+
+// Clearing the status of a URI removes whatever was set for it, however it was set: for the exact URI or as a prefix,
+// and with or without a header or a method to match.
+func TestClearStatusOfURIRemovesWhatWasSetForIt(t *testing.T) {
+	for name, set := range map[string][]string{
+		"exact uri":        {"/status/set/503?uri=/foo"},
+		"uri prefix":       {"/status/set/503?uriPrefix=/foo"},
+		"exact and prefix": {"/status/set/503?uri=/foo&uriPrefix=/foo"},
+		"twice":            {"/status/set/503?uri=/foo", "/status/set/503?uriPrefix=/foo"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newTestServer(t)
+			for _, target := range set {
+				s.configure(t, "POST", target)
+			}
+			s.configure(t, "POST", "/status/set/418?uri=/other")
+			if code := s.serve("/foo").rr.Code; code != 503 {
+				t.Fatalf("before clear /foo = %d, want 503", code)
+			}
+			s.configure(t, "POST", "/status/clear?uri=/foo")
+			if code := s.serve("/foo").rr.Code; code != 200 {
+				t.Errorf("after clear /foo = %d, want 200", code)
+			}
+			if code := s.serve("/other").rr.Code; code != 418 {
+				t.Errorf("status of another URI = %d after clear, want it kept at 418", code)
+			}
+		})
+	}
+}
+
+func TestClearStatusOfURIRemovesConfigsThatMatchHeaders(t *testing.T) {
+	stubOnce.Do(stubGlobalFuncs)
+	port := int(40000 + portSeq.Add(1))
+	t.Cleanup(func() { TheStatusManager.Clear(port, "", "") })
+	TheStatusManager.SetStatusFor(port, "/svc", "/svc", "x-env", "dev", []string{"POST"}, []int{503}, -1, true)
+	TheStatusManager.SetStatusFor(port, "/svc", "/svc", "x-env", "", []string{"POST"}, []int{502}, -1, true)
+	TheStatusManager.SetStatusFor(port, "/svc", "/svc", "x-env", "", []string{"POST"}, []int{504}, -1, false)
+	TheStatusManager.SetStatusFor(port, "/svc", "/svc", "", "", []string{"POST"}, []int{500}, -1, true)
+	TheStatusManager.SetStatusFor(port, "/svc2", "/svc2", "x-env", "dev", nil, []int{501}, -1, true)
+
+	TheStatusManager.Clear(port, "/svc", "/svc")
+	if status, _ := TheStatusManager.GetStatusFor(port, "/svc", map[string][]string{"X-Env": {"dev"}}, "POST"); status != 0 {
+		t.Errorf("status of the cleared URI = %d, want none", status)
+	}
+	if status, _ := TheStatusManager.GetStatusFor(port, "/svc", nil, "POST"); status != 0 {
+		t.Errorf("status of the cleared URI without the header = %d, want none", status)
+	}
+	if status, _ := TheStatusManager.GetStatusFor(port, "/svc2", map[string][]string{"X-Env": {"dev"}}, "GET"); status != 501 {
+		t.Errorf("status of another URI = %d, want it kept at 501", status)
 	}
 }

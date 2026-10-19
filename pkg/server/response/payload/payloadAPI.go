@@ -24,6 +24,7 @@ import (
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -42,12 +43,14 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(payloadRouter, "/set/{grpc}?/default/binary", setResponsePayload, "POST")
 	util.AddRoute(payloadRouter, "/set/{grpc}?/default/{size}", setResponsePayload, "POST")
 	util.AddRoute(payloadRouter, "/set/{grpc}?/default", setResponsePayload, "POST")
+	// The body match is registered before /set/{grpc}?, which takes any one segment after /set as the protocol, so it
+	// would otherwise take /set/body~{regexes} for a URI payload of a protocol named "body~{regexes}".
+	util.AddRouteQ(payloadRouter, "/set/{grpc}?/body~{regexes}", setResponsePayload, "uri", "POST")
 	util.AddRouteQ(payloadRouter, "/set/{grpc}?", setResponsePayload, "uri", "POST")
 	util.AddRouteQO(payloadRouter, "/set/{grpc}?/header/{header}={value}", setResponsePayload, "uri", "POST")
 	util.AddRouteQO(payloadRouter, "/set/{grpc}?/header/{header}", setResponsePayload, "uri", "POST")
 	util.AddRouteQO(payloadRouter, "/set/{grpc}?/query/{q}={value}", setResponsePayload, "uri", "POST")
 	util.AddRouteQO(payloadRouter, "/set/{grpc}?/query/{q}", setResponsePayload, "uri", "POST")
-	util.AddRouteQ(payloadRouter, "/set/{grpc}?/body~{regexes}", setResponsePayload, "uri", "POST")
 	util.AddRouteQ(payloadRouter, "/set/{grpc}?/body/paths/{paths}", setResponsePayload, "uri", "POST")
 	util.AddRouteQ(payloadRouter, "/{grpc}?/transform", setPayloadTransform, "uri", "POST")
 	util.AddRouteQ(payloadRouter, "/{grpc}?/transform/delay={delay}", setPayloadTransform, "uri", "POST")
@@ -62,14 +65,14 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
 	payload := util.ReadBytes(r.Body)
 	pr := PayloadManager.getPortResponse(r)
 	isGRPC := util.GetStringParamValue(r, "grpc") != ""
-	binary := util.IsBinaryContentHeader(r.Header) || strings.Contains(r.RequestURI, "binary")
+	binary := util.IsBinaryContentHeader(r.Header) || routeHasSegment(r, "binary")
 	uri := util.GetStringParamValue(r, "uri")
 	header := util.GetStringParamValue(r, "header")
 	query := util.GetStringParamValue(r, "q")
 	value := util.GetStringParamValue(r, "value")
 	regexes := util.GetStringParamValue(r, "regexes")
 	paths := util.GetStringParamValue(r, "paths")
-	isStream := strings.Contains(r.RequestURI, "stream")
+	isStream := routeHasSegment(r, "stream")
 	count := util.GetIntParamValue(r, "count")
 	delayMin, delayMax, _, _ := util.GetDurationParam(r, "delay")
 	contentType := r.Header.Get(constants.HeaderResponseContentType)
@@ -116,17 +119,29 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
 				port, uri, match, contentType, len(payload), err.Error())
 		}
 	} else if uri != "" {
-		pr.setURIResponsePayload(isGRPC, false, payload, binary, uri, contentType, nil, delayMin, delayMax)
-		msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] : content-type [%s], length [%d]",
-			port, uri, contentType, len(payload))
+		if err := pr.setURIResponsePayload(isGRPC, false, payload, binary, uri, contentType, nil, delayMin, delayMax); err == nil {
+			msg = fmt.Sprintf("Port [%s] Payload set for URI [%s] : content-type [%s], length [%d]",
+				port, uri, contentType, len(payload))
+		} else {
+			msg = fmt.Sprintf("Port [%s] Failed to set payload for URI [%s] : content-type [%s], length [%d] with error [%s]",
+				port, uri, contentType, len(payload), err.Error())
+		}
 	} else if header != "" {
-		pr.setHeaderResponsePayload(isGRPC, payload, binary, header, value, contentType, delayMin, delayMax)
-		msg = fmt.Sprintf("Port [%s] Payload set for header [%s : %s] : content-type [%s], length [%d]",
-			port, header, value, contentType, len(payload))
+		if err := pr.setHeaderResponsePayload(isGRPC, payload, binary, header, value, contentType, delayMin, delayMax); err == nil {
+			msg = fmt.Sprintf("Port [%s] Payload set for header [%s : %s] : content-type [%s], length [%d]",
+				port, header, value, contentType, len(payload))
+		} else {
+			msg = fmt.Sprintf("Port [%s] Failed to set payload for header [%s : %s] : content-type [%s], length [%d] with error [%s]",
+				port, header, value, contentType, len(payload), err.Error())
+		}
 	} else if query != "" {
-		pr.setQueryResponsePayload(isGRPC, payload, binary, query, value, contentType, delayMin, delayMax)
-		msg = fmt.Sprintf("Port [%s] Payload set for query [%s : %s] : content-type [%s], length [%d]",
-			port, query, value, contentType, len(payload))
+		if err := pr.setQueryResponsePayload(isGRPC, payload, binary, query, value, contentType, delayMin, delayMax); err == nil {
+			msg = fmt.Sprintf("Port [%s] Payload set for query [%s : %s] : content-type [%s], length [%d]",
+				port, query, value, contentType, len(payload))
+		} else {
+			msg = fmt.Sprintf("Port [%s] Failed to set payload for query [%s : %s] : content-type [%s], length [%d] with error [%s]",
+				port, query, value, contentType, len(payload), err.Error())
+		}
 	} else {
 		size := util.GetSizeParam(r, "size")
 		if err := pr.setDefaultResponsePayload(isGRPC, payload, contentType, size, delayMin, delayMax); err == nil {
@@ -146,12 +161,30 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
 	events.SendRequestEvent("Response Payload Configured", msg, r)
 }
 
+// routeHasSegment tells whether the path of the route that serves the request has the given segment (e.g. "stream" in
+// /set/stream/count={count}/delay={delay}). The URI that is being configured (the "uri" query param) and the values in
+// the path are not looked at, so a URI or a header with such a name doesn't change what the request does.
+func routeHasSegment(r *http.Request, segment string) bool {
+	path := r.URL.Path
+	if route := mux.CurrentRoute(r); route != nil {
+		if template, err := route.GetPathTemplate(); err == nil {
+			path = template
+		}
+	}
+	for _, s := range strings.Split(path, "/") {
+		if s == segment {
+			return true
+		}
+	}
+	return false
+}
+
 func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	port := util.GetRequestOrListenerPort(r)
 	pr := PayloadManager.getPortResponse(r)
 	isGRPC := util.GetStringParamValue(r, "grpc") != ""
-	isStream := strings.Contains(r.RequestURI, "stream")
+	isStream := routeHasSegment(r, "stream")
 	contentType := r.Header.Get(constants.HeaderResponseContentType)
 	delayMin, delayMax, _, _ := util.GetDurationParam(r, "delay")
 	if contentType == "" {
@@ -203,7 +236,11 @@ func setResponsePayloadWithMatches(w http.ResponseWriter, r *http.Request) {
 			err = PayloadManager.SetURIResponsePayloadWithMatches(port, rp, isGRPC)
 		}
 		if err == nil {
-			msg = fmt.Sprintf("Port [%d] Response Payload set: %+v", port, util.ToJSONText(rp))
+			var configured any = rp
+			if len(rps) > 0 {
+				configured = rps
+			}
+			msg = fmt.Sprintf("Port [%d] Response Payload set: %+v", port, util.ToJSONText(configured))
 			events.SendRequestEvent("Response Payload Configured", msg, r)
 		} else {
 			msg = fmt.Sprintf("Invalid Response Payload: %s", err.Error())
@@ -229,15 +266,17 @@ func getResponsePayload(w http.ResponseWriter, r *http.Request) {
 }
 
 func respondWithPayload(w http.ResponseWriter, r *http.Request) {
-	sizeV := util.GetStringParamValue(r, "size")
 	size := util.GetSizeParam(r, "size")
 	if size <= 0 {
 		size = 100
 	}
 	payload := types.GenerateRandomString(size)
-	fmt.Fprint(w, payload)
-	w.Header().Set(constants.HeaderContentLength, sizeV)
+	// The headers describe the payload that is sent, and they have to be set before it is written. The size in the URI
+	// can be given with units (e.g. 2K), which is not the length of the payload.
+	length := strconv.Itoa(len(payload))
+	w.Header().Set(constants.HeaderContentLength, length)
 	w.Header().Set(constants.HeaderContentType, "plain/text")
-	w.Header().Set(constants.HeaderGotoPayloadLength, sizeV)
+	w.Header().Set(constants.HeaderGotoPayloadLength, length)
+	fmt.Fprint(w, payload)
 	util.AddLogMessage(fmt.Sprintf("Responding with requested payload of length %d", size), r)
 }

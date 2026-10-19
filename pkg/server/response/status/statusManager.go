@@ -91,14 +91,25 @@ func newStatusConfig(uriExact, uriPrefix, header, headerValue string, methods []
 	return sc
 }
 
+// Clear removes the statuses of the port. Without a URI it removes all of them. With one, it removes every status that
+// was set for the URI as the exact URI or as the prefix, whether or not it also matches headers or methods.
 func (s *StatusManager) Clear(port int, uriExact, uriPrefix string) {
-	if uriExact != "" {
-		s.findOrRemoveStatusConfig(port, uriExact, uriPrefix, "", "", false, true)
-	} else {
-		s.lock.Lock()
-		defer s.lock.Unlock()
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if uriExact == "" && uriPrefix == "" {
 		s.PortStatus[port] = []*StatusConfig{}
+		return
 	}
+	kept := []*StatusConfig{}
+	for _, sc := range s.PortStatus[port] {
+		um := sc.Match.URIMatch
+		if um != nil && ((uriExact != "" && strings.EqualFold(um.Exact, uriExact)) ||
+			(uriPrefix != "" && strings.EqualFold(um.Prefix, uriPrefix))) {
+			continue
+		}
+		kept = append(kept, sc)
+	}
+	s.PortStatus[port] = kept
 }
 
 func (s *StatusManager) ParseStatusConfig(body io.Reader) (sc *StatusConfig, err error) {
@@ -144,7 +155,8 @@ func (s *StatusManager) ApplyStatusConfig(port int, sc *StatusConfig) (err error
 		sc.Match.URIMatch = &StatusURIMatch{}
 	}
 	if sc.Match.URIMatch.Regex != "" {
-		if sc.Match.URIMatch.regexp, err = regexp.Compile(sc.Match.URIMatch.Regex); err != nil {
+		// Request URIs are matched in lower case, as they are for the prefix and the exact URI.
+		if sc.Match.URIMatch.regexp, err = regexp.Compile("(?i)" + sc.Match.URIMatch.Regex); err != nil {
 			return err
 		}
 	}
@@ -253,41 +265,119 @@ func (s *StatusManager) GetStatus(port int) (status int, times int) {
 	return s.GetStatusFor(port, "", nil, "")
 }
 
-// GetStatusFor finds the status that the request gets, and counts the use of it. The first status that matches the
-// request and is not used up is the one. A status that is used up is passed over, so that the statuses that were set
-// after it apply to the requests that it matches.
+// GetStatusFor finds the status that the request gets, and counts the use of it. See findStatusConfigLocked for which
+// of the configured statuses is the one.
 func (s *StatusManager) GetStatusFor(port int, uri string, headers map[string][]string, method string) (status int, times int) {
 	// Not a read lock, as using a status counts it down.
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	statuses := s.PortStatus[port]
-	uri = strings.ToLower(uri)
-	lowerHeaders := util.ToLowerHeadersValues(headers)
-	for _, sc := range statuses {
-		if !sc.isUsedUp() && sc.Match.match(uri, lowerHeaders) {
-			return sc.GetStatus()
-		}
+	if sc := s.findStatusConfigLocked(port, uri, headers, method); sc != nil {
+		return sc.GetStatus()
 	}
 	return 0, 0
 }
 
+// PeekStatusFor tells the status that a request gets, and how many times it is left, without counting a use of it. It
+// is for the ones that need to know if a status is forced, or to report it. Where the status is one of several, it is
+// the first one.
+func (s *StatusManager) PeekStatusFor(port int, uri string, headers map[string][]string, method string) (status int, times int) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	if sc := s.findStatusConfigLocked(port, uri, headers, method); sc != nil && len(sc.Statuses) > 0 {
+		return sc.Statuses[0], sc.Times
+	}
+	return 0, 0
+}
+
+// HasStatusFor tells if a status is forced for the request, whether for a limited number of times or forever, without
+// counting a use of it.
+func (s *StatusManager) HasStatusFor(port int, uri string, headers map[string][]string, method string) bool {
+	status, _ := s.PeekStatusFor(port, uri, headers, method)
+	return status > 0
+}
+
+// findStatusConfigLocked finds the config whose status the request gets. It does not change anything, but needs the
+// lock to be held, since the configs change while they are used.
+//
+//   - The configs that match some of the requests (by URI, header, method) are tried before the ones that match every
+//     request, so a status that is set for everything is what the requests get that no other status applies to. It
+//     does not matter which of them was set first.
+//   - Of the ones in a group, the first that was set and matches the request is the one.
+//   - A config that is used up is passed over, so that the statuses that were set after it apply to the requests that
+//     it matches.
+//   - A config that was set to 0 for some requests keeps them from getting the status that is set for every request,
+//     and the ones that were set after it. A config that was set to 0 for every request has nothing to say, it is
+//     passed over like one that was never set.
+func (s *StatusManager) findStatusConfigLocked(port int, uri string, headers map[string][]string, method string) *StatusConfig {
+	statuses := s.PortStatus[port]
+	if len(statuses) == 0 {
+		return nil
+	}
+	uri = strings.ToLower(uri)
+	lowerHeaders := util.ToLowerHeadersValues(headers)
+	var forAll *StatusConfig
+	for _, sc := range statuses {
+		if sc.isUsedUp() || !sc.Match.match(uri, lowerHeaders, method) {
+			continue
+		}
+		if !sc.Match.matchesAll() {
+			return sc
+		}
+		if forAll == nil && len(sc.Statuses) > 0 {
+			forAll = sc
+		}
+	}
+	return forAll
+}
+
 // isUsedUp tells if the status was given a number of times, and all of them were used. A status that was set to 0
-// is not used up, it never had a status to give. It is left as it was before: it still matches the requests, and
-// the statuses that are set after it do not apply to them.
+// is not used up, it never had a status to give.
 func (s *StatusConfig) isUsedUp() bool {
 	return s.Times == 0 && len(s.Statuses) > 0
 }
 
-func (sm *StatusMatch) match(uri string, headers map[string]string) bool {
-	if sm.URIMatch.Prefix != "" {
-		hasPrefix := strings.HasPrefix(uri, sm.URIMatch.Prefix)
-		if hasPrefix == sm.URIMatch.Not {
-			return false
+// matchesAll tells if the match has nothing to tell the requests apart, so that it applies to all of them.
+func (sm *StatusMatch) matchesAll() bool {
+	if sm == nil {
+		return true
+	}
+	if um := sm.URIMatch; um != nil && (um.Prefix != "" || um.Exact != "" || um.Regex != "") {
+		return false
+	}
+	return len(sm.HeaderMatches) == 0 && len(sm.MethodMatch) == 0
+}
+
+// match tells if the request is the one that the match is for. The method is not matched when it is not known (empty),
+// as it is not for the gRPC requests, or when the status is looked up to be reported.
+func (sm *StatusMatch) match(uri string, headers map[string]string, method string) bool {
+	if sm.URIMatch != nil {
+		if sm.URIMatch.Prefix != "" {
+			hasPrefix := strings.HasPrefix(uri, sm.URIMatch.Prefix)
+			if hasPrefix == sm.URIMatch.Not {
+				return false
+			}
+		}
+		if sm.URIMatch.Exact != "" {
+			isEqual := strings.EqualFold(uri, sm.URIMatch.Exact)
+			if isEqual == sm.URIMatch.Not {
+				return false
+			}
+		}
+		if sm.URIMatch.regexp != nil {
+			if sm.URIMatch.regexp.MatchString(uri) == sm.URIMatch.Not {
+				return false
+			}
 		}
 	}
-	if sm.URIMatch.Exact != "" {
-		isEqual := strings.EqualFold(uri, sm.URIMatch.Exact)
-		if isEqual == sm.URIMatch.Not {
+	if len(sm.MethodMatch) > 0 && method != "" {
+		found := false
+		for _, m := range sm.MethodMatch {
+			if strings.EqualFold(m, method) {
+				found = true
+				break
+			}
+		}
+		if !found {
 			return false
 		}
 	}

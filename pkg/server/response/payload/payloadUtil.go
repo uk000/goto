@@ -22,6 +22,7 @@ import (
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -103,8 +104,12 @@ func NewRawStreamPayload(raw []any, strArr []string, byteArr [][]byte, streamCou
 	return payload
 }
 
+type payloadYAML Payload
+
+// MarshalYAML marshals the payload as the structure that it is. It used to marshal the payload with yaml.Marshal, which
+// calls this method again.
 func (p *Payload) MarshalYAML() (any, error) {
-	return yaml.Marshal(p)
+	return (*payloadYAML)(p), nil
 }
 
 func (p *Payload) UnmarshalYAML(node *yaml.Node) error {
@@ -263,6 +268,10 @@ func (p *Payload) ToText() string {
 }
 
 func (p *Payload) sendJSONStream(from, to int, f TextRangeFunc, f2 DataRangeFunc) (err error) {
+	if len(p.JSONStream) == 0 {
+		// There is nothing to send, however many times it would be repeated.
+		return nil
+	}
 	count := 0
 	restarted := false
 	cont := true
@@ -298,6 +307,10 @@ func (p *Payload) sendJSONStream(from, to int, f TextRangeFunc, f2 DataRangeFunc
 }
 
 func (p *Payload) sendTextStream(from, to int, f TextRangeFunc, f2 DataRangeFunc) (err error) {
+	if len(p.TextStream) == 0 {
+		// There is nothing to send, however many times it would be repeated.
+		return nil
+	}
 	count := 0
 	restarted := false
 	cont := true
@@ -333,6 +346,10 @@ func (p *Payload) sendTextStream(from, to int, f TextRangeFunc, f2 DataRangeFunc
 }
 
 func (p *Payload) sendRawStream(from, to int, f TextRangeFunc, f2 DataRangeFunc) (err error) {
+	if len(p.RawStream) == 0 {
+		// There is nothing to send, however many times it would be repeated.
+		return nil
+	}
 	count := 0
 	restarted := false
 	cont := true
@@ -407,7 +424,10 @@ func (p *Payload) RangeText(to int, f TextRangeFunc) (err error) {
 }
 
 func (p *Payload) RangeTextWithDelay(to int, delay *types.Duration, f TextRangeFunc) (err error) {
-	var d types.Delay = *p.Delay
+	d := types.Delay{Count: -1}
+	if p.Delay != nil {
+		d = *p.Delay
+	}
 	if delay != nil && delay.Abs() != 0 {
 		d.Min = delay
 		d.Max = delay
@@ -465,47 +485,67 @@ func (p *Payload) RangeAnyFrom(from, to int, f DataRangeFunc) (err error) {
 	return nil
 }
 
+// getPayloadForBodyMatch reads the body and finds the payload that matches it. The reader that is returned gives the
+// body again, whether or not a payload was found.
 func getPayloadForBodyMatch(bodyReader io.ReadCloser, bodyMatchResponses map[string]*ResponsePayload) (newBodyReader io.ReadCloser, matchedResponsePayload *ResponsePayload, captures map[string]string, matched bool) {
-	if len(bodyMatchResponses) == 0 {
+	if len(bodyMatchResponses) == 0 || bodyReader == nil {
 		return nil, nil, nil, false
 	}
 	body := util.Read(bodyReader)
+	matchedResponsePayload, captures, matched = matchBody(body, bodyMatchResponses)
+	return io.NopCloser(strings.NewReader(body)), matchedResponsePayload, captures, matched
+}
+
+// matchBody finds the payload that matches the body: a payload that is matched with keywords is preferred over one that
+// is matched with JSON paths, and the payloads of a kind are tried in the order of their keys, so that the same body
+// always gets the same payload. The body is not required to be JSON, unless a payload is matched with JSON paths.
+func matchBody(body string, bodyMatchResponses map[string]*ResponsePayload) (*ResponsePayload, map[string]string, bool) {
+	keys := make([]string, 0, len(bodyMatchResponses))
+	for k := range bodyMatchResponses {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	lowerBody := strings.ToLower(body)
-	for _, rp := range bodyMatchResponses {
-		if rp.bodyMatchRegexp != nil && rp.bodyMatchRegexp.MatchString(lowerBody) {
-			matchedResponsePayload = rp
-			break
-		} else if rp.bodyJsonPath != nil && !rp.bodyJsonPath.IsEmpty() {
-			allMatched := true
-			captures = map[string]string{}
-			var data map[string]interface{}
-			if err := util.ReadJson(body, &data); err == nil {
-				captures, allMatched = rp.bodyJsonPath.FindResults(data)
-			} else {
-				allMatched = false
-				break
-			}
-			if allMatched {
-				matchedResponsePayload = rp
-				break
-			}
+	for _, k := range keys {
+		if rp := bodyMatchResponses[k]; rp != nil && rp.bodyMatchRegexp != nil && rp.bodyMatchRegexp.MatchString(lowerBody) {
+			return rp, nil, true
 		}
 	}
-	newBodyReader = io.NopCloser(strings.NewReader(body))
-	if matchedResponsePayload != nil {
-		return newBodyReader, matchedResponsePayload, captures, true
+	var data map[string]any
+	parsed := false
+	for _, k := range keys {
+		rp := bodyMatchResponses[k]
+		if rp == nil || rp.bodyJsonPath == nil || rp.bodyJsonPath.IsEmpty() {
+			continue
+		}
+		if !parsed {
+			if util.ReadJson(body, &data) != nil {
+				// No JSON path can be found in a body that is not JSON.
+				break
+			}
+			parsed = true
+		}
+		if captures, allMatched := rp.bodyJsonPath.FindResults(data); allMatched {
+			return rp, captures, true
+		}
 	}
-	return nil, nil, nil, false
+	return nil, nil, false
 }
 
 func getPayloadForKV(kvMap map[string][]string, payloadMap map[string]map[string]*ResponsePayload) (*ResponsePayload, bool) {
 	if len(kvMap) == 0 || len(payloadMap) == 0 {
 		return nil, false
 	}
-	for k, kv := range kvMap {
-		k = strings.ToLower(k)
+	// The keys are tried in order, so that a request that matches several payloads always gets the same one.
+	keys := make([]string, 0, len(kvMap))
+	for k := range kvMap {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		k := strings.ToLower(key)
 		if payloadMap[k] != nil {
-			for _, v := range kv {
+			for _, v := range kvMap[key] {
 				v = strings.ToLower(v)
 				if p, found := payloadMap[k][v]; found {
 					return p, found
@@ -519,11 +559,20 @@ func getPayloadForKV(kvMap map[string][]string, payloadMap map[string]map[string
 	return nil, false
 }
 
+// FixPayload makes the payload as long as the given size, by trimming it, or by appending random characters to it. An
+// empty payload is replaced with a random one. A size that is not positive leaves the payload as it is.
 func FixPayload(payload []byte, size int) []byte {
-	if len(payload) == 0 && size > 0 {
+	if size <= 0 {
+		return payload
+	}
+	if len(payload) == 0 {
 		payload = types.GenerateRandomPayload(size)
 	} else if len(payload) > size {
 		payload = payload[:size]
+	} else if len(payload) < size {
+		fixed := make([]byte, 0, size)
+		fixed = append(fixed, payload...)
+		payload = append(fixed, types.GenerateRandomPayload(size-len(payload))...)
 	}
 	return payload
 }

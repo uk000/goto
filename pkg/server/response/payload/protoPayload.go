@@ -34,6 +34,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -124,6 +125,16 @@ type ProtoPayloads struct {
 	lock                    sync.RWMutex
 }
 
+type protoPayloadsJSON ProtoPayloads
+
+// MarshalJSON reports the payloads while holding the lock that protects them, so that listing the payloads is safe while
+// they are being changed.
+func (pp *ProtoPayloads) MarshalJSON() ([]byte, error) {
+	pp.lock.RLock()
+	defer pp.lock.RUnlock()
+	return json.Marshal((*protoPayloadsJSON)(pp))
+}
+
 func NewRequestMatch(uriPrefix string) *RequestMatch {
 	return &RequestMatch{
 		URIPrefix: uriPrefix,
@@ -134,6 +145,17 @@ func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, h
 	bodyRegexes []string, paths []string, transforms []*util.Transform, delayMin, delayMax time.Duration) (*ResponsePayload, error) {
 	if contentType == "" {
 		contentType = constants.ContentTypeJSON
+	}
+	// The matches are validated before the URI is registered, so that a payload that is refused leaves no route behind.
+	queryMatchRegexp, err := regexp.Compile("(?i)" + query)
+	if err != nil {
+		return nil, fmt.Errorf("invalid query match [%s]: %s", query, err.Error())
+	}
+	var bodyMatchRegexp *regexp.Regexp
+	if len(bodyRegexes) > 0 {
+		if bodyMatchRegexp, err = compileBodyMatch(bodyRegexes); err != nil {
+			return nil, err
+		}
 	}
 	_, uriRegExp, responseRouter, err := util.BuildURIMatcher(uri, true, handleURI)
 	if err != nil {
@@ -155,12 +177,7 @@ func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, h
 		queryValueMatch = value
 	}
 
-	jsonPaths := util.NewJSONPath().Parse(paths)
-
-	var bodyMatchRegexp *regexp.Regexp
-	if len(bodyRegexes) > 0 {
-		bodyMatchRegexp = regexp.MustCompile("(?i)" + strings.Join(bodyRegexes, ".*") + ".*")
-	}
+	jsonPaths := util.NewJSONPath().Parse(normalizeBodyPaths(paths))
 
 	var fillers []string
 	if !binary {
@@ -184,7 +201,7 @@ func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, h
 		BodyMatch:        bodyRegexes,
 		BodyPaths:        jsonPaths.TextPaths,
 		uriRegexp:        uriRegExp,
-		queryMatchRegexp: regexp.MustCompile("(?i)" + query),
+		queryMatchRegexp: queryMatchRegexp,
 		bodyMatchRegexp:  bodyMatchRegexp,
 		bodyJsonPath:     jsonPaths,
 		URICaptureKeys:   util.GetFillersUnmarked(uri),
@@ -195,6 +212,34 @@ func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, h
 		fillers:          fillers,
 		router:           responseRouter,
 	}, nil
+}
+
+// normalizeBodyPaths lets the JSON paths of a body match be written the way the documentation writes them, the path
+// first and then the name that its value is captured into (.foo.bar={a}). JSON paths are parsed from the other order,
+// the name first and then the path (a={.foo.bar}), under which the documented form is a path that never matches.
+func normalizeBodyPaths(paths []string) []string {
+	normalized := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if pieces := strings.Split(p, "="); len(pieces) == 2 && strings.HasPrefix(pieces[0], ".") {
+			name := pieces[1]
+			if strings.HasPrefix(name, "{") && strings.HasSuffix(name, "}") && !strings.HasPrefix(name, "{.") &&
+				!strings.ContainsAny(name[1:len(name)-1], "{}") {
+				p = name[1:len(name)-1] + "={" + pieces[0] + "}"
+			}
+		}
+		normalized = append(normalized, p)
+	}
+	return normalized
+}
+
+// compileBodyMatch builds the regular expression that a body is matched with: the keywords have to appear in the body
+// in the given order.
+func compileBodyMatch(keywords []string) (*regexp.Regexp, error) {
+	re, err := regexp.Compile("(?i)" + strings.Join(keywords, ".*") + ".*")
+	if err != nil {
+		return nil, fmt.Errorf("invalid body match %v: %s", keywords, err.Error())
+	}
+	return re, nil
 }
 
 func NewResponsePayload(payload []byte, matches []*RequestMatch, capture *RequestCapture, contentType string, base64Encode, base64Decode, detectJSON, escapeJSON bool) *ResponsePayload {
@@ -216,6 +261,14 @@ func (rp *ResponsePayload) Process() error {
 	}
 	if len(rp.Payload) == 0 && len(rp.StreamPayload) == 0 {
 		return fmt.Errorf("Payload required")
+	}
+	// The body match is validated first, so that a payload that is refused leaves no route behind.
+	var bodyMatchRegexp *regexp.Regexp
+	if len(rp.BodyMatch) > 0 {
+		var err error
+		if bodyMatchRegexp, err = compileBodyMatch(rp.BodyMatch); err != nil {
+			return err
+		}
 	}
 	if rp.ContentType == "" {
 		rp.ContentType = constants.ContentTypeJSON
@@ -294,9 +347,7 @@ func (rp *ResponsePayload) Process() error {
 		}
 	}
 	rp.fillers = util.GetFillersUnmarked(string(rp.Payload))
-	if len(rp.BodyMatch) > 0 {
-		rp.bodyMatchRegexp = regexp.MustCompile("(?i)" + strings.Join(rp.BodyMatch, ".*") + ".*")
-	}
+	rp.bodyMatchRegexp = bodyMatchRegexp
 	return nil
 }
 
@@ -322,8 +373,8 @@ func (rp *ResponsePayload) PrepareJSONStreamPayload(count int) {
 }
 
 func (pp *ProtoPayloads) init() {
-	pp.lock.RLock()
-	defer pp.lock.RUnlock()
+	pp.lock.Lock()
+	defer pp.lock.Unlock()
 	pp.DefaultPayload = nil
 	pp.PayloadByURIWithMatches = map[string][]*ResponsePayload{}
 	pp.PayloadByURIs = map[string]*ResponsePayload{}
@@ -520,59 +571,93 @@ func (pp *ProtoPayloads) HasAnyPayload() bool {
 		len(pp.PayloadByHeaders) > 0 || len(pp.PayloadByQuery) > 0 || pp.DefaultPayload != nil
 }
 
+// sortedURIs orders URIs so that the more specific one (the longer one) comes first, and the order of URIs of the same
+// length is the same every time.
+func sortedURIs(uris []string) []string {
+	sort.Slice(uris, func(i, j int) bool {
+		if len(uris[i]) != len(uris[j]) {
+			return len(uris[i]) > len(uris[j])
+		}
+		return uris[i] < uris[j]
+	})
+	return uris
+}
+
+// GetMatchingResponsePayload finds the payload for a request. The candidates are tried in this order, and the first one
+// that matches wins: payloads with request matches, URI with header, URI with query, URI with body keywords, URI with
+// body JSON paths, URI alone, header, query, and the default payload. A candidate category is tried against all the
+// URIs that match the request before the next category is, so that the choice doesn't depend on the number or the names
+// of the URIs that match. If the body was read to look for a match, the reader that is returned gives it again.
 func (pp *ProtoPayloads) GetMatchingResponsePayload(requestURI string, header http.Header, query url.Values, body io.ReadCloser) (
 	newBodyReader io.ReadCloser, responsePayload *ResponsePayload, captures map[string]string, found bool) {
 	pp.lock.RLock()
 	defer pp.lock.RUnlock()
-outer:
-	for _, payloads := range pp.PayloadByURIWithMatches {
-		for _, rp := range payloads {
+	withMatches := make([]string, 0, len(pp.PayloadByURIWithMatches))
+	for uri := range pp.PayloadByURIWithMatches {
+		withMatches = append(withMatches, uri)
+	}
+	for _, uri := range sortedURIs(withMatches) {
+		for _, rp := range pp.PayloadByURIWithMatches[uri] {
 			for _, m := range rp.RequestMatches {
 				if m.match(requestURI, header, query) {
-					responsePayload = rp
-					found = true
-					break outer
+					return nil, rp, nil, true
 				}
 			}
 		}
 	}
-	if !found {
-		for uri, rp := range pp.allURIResponsePayloads {
-			uriMatched := false
-			if rp.uriRegexp != nil && rp.uriRegexp.MatchString(requestURI) {
-				uriMatched = true
-			}
-			if uriMatched {
-				if !found && pp.PayloadByURIAndHeaders[uri] != nil {
-					responsePayload, found = getPayloadForKV(header, pp.PayloadByURIAndHeaders[uri])
-				}
-				if !found && pp.PayloadByURIAndQuery[uri] != nil {
-					responsePayload, found = getPayloadForKV(query, pp.PayloadByURIAndQuery[uri])
-				}
-				if !found && pp.PayloadByURIAndBody[uri] != nil && body != nil {
-					newBodyReader, responsePayload, captures, found = getPayloadForBodyMatch(body, pp.PayloadByURIAndBody[uri])
-				}
-				if !found && pp.PayloadByURIs[uri] != nil {
-					responsePayload = pp.PayloadByURIs[uri]
-					found = true
-				}
-				if found {
-					break
-				}
+	matchingURIs := []string{}
+	for uri, rp := range pp.allURIResponsePayloads {
+		if rp.uriRegexp != nil && rp.uriRegexp.MatchString(requestURI) {
+			matchingURIs = append(matchingURIs, uri)
+		}
+	}
+	sortedURIs(matchingURIs)
+	for _, uri := range matchingURIs {
+		if pp.PayloadByURIAndHeaders[uri] != nil {
+			if responsePayload, found = getPayloadForKV(header, pp.PayloadByURIAndHeaders[uri]); found {
+				return
 			}
 		}
 	}
-	if !found {
-		responsePayload, found = getPayloadForKV(header, pp.PayloadByHeaders)
+	for _, uri := range matchingURIs {
+		if pp.PayloadByURIAndQuery[uri] != nil {
+			if responsePayload, found = getPayloadForKV(query, pp.PayloadByURIAndQuery[uri]); found {
+				return
+			}
+		}
 	}
-	if !found {
-		responsePayload, found = getPayloadForKV(query, pp.PayloadByQuery)
+	if body != nil {
+		bodyRead := false
+		bodyText := ""
+		for _, uri := range matchingURIs {
+			if len(pp.PayloadByURIAndBody[uri]) == 0 {
+				continue
+			}
+			if !bodyRead {
+				bodyText = util.Read(body)
+				bodyRead = true
+				newBodyReader = io.NopCloser(strings.NewReader(bodyText))
+			}
+			if responsePayload, captures, found = matchBody(bodyText, pp.PayloadByURIAndBody[uri]); found {
+				return
+			}
+		}
 	}
-	if !found && pp.DefaultPayload != nil {
-		responsePayload = pp.DefaultPayload
-		found = true
+	for _, uri := range matchingURIs {
+		if pp.PayloadByURIs[uri] != nil {
+			return newBodyReader, pp.PayloadByURIs[uri], nil, true
+		}
 	}
-	return
+	if responsePayload, found = getPayloadForKV(header, pp.PayloadByHeaders); found {
+		return
+	}
+	if responsePayload, found = getPayloadForKV(query, pp.PayloadByQuery); found {
+		return
+	}
+	if pp.DefaultPayload != nil {
+		return newBodyReader, pp.DefaultPayload, nil, true
+	}
+	return newBodyReader, nil, nil, false
 }
 
 func (m *RequestMatch) match(requestURI string, headers http.Header, query url.Values) bool {
@@ -602,7 +687,8 @@ func matchKV(k string, valueMatches map[string]string, v string) bool {
 	if len(v) == 0 {
 		return false
 	}
-	if v2 := valueMatches[k]; v2 != "" {
+	// The value matches are kept under the lowercase name of the header or the query.
+	if v2 := valueMatches[strings.ToLower(k)]; v2 != "" {
 		if !strings.EqualFold(v, v2) {
 			return false
 		}
@@ -719,32 +805,32 @@ func (rp *ResponsePayload) signParts(parts [][]byte) {
 
 func (rp *ResponsePayload) postProcess(parts [][]byte) []byte {
 	var payload []byte
-	if rp.Parts != nil {
-		if rp.Parts.Post != nil {
-			if rp.Parts.Post.SplitWith != "" {
-				parts = joinSplit(parts, []byte(rp.Parts.Post.SplitWith))
-			}
-			keptParts := [][]byte{}
-			for i, part := range parts {
-				if len(rp.Parts.Post.Keep) > i {
-					if rp.Parts.Post.Keep[i] {
-						keptParts = append(keptParts, part)
-					}
-				} else {
+	if rp.Parts != nil && rp.Parts.Post != nil {
+		if rp.Parts.Post.SplitWith != "" {
+			parts = joinSplit(parts, []byte(rp.Parts.Post.SplitWith))
+		}
+		keptParts := [][]byte{}
+		for i, part := range parts {
+			if len(rp.Parts.Post.Keep) > i {
+				if rp.Parts.Post.Keep[i] {
 					keptParts = append(keptParts, part)
 				}
+			} else {
+				keptParts = append(keptParts, part)
 			}
-			parts = keptParts
-			parts = rp.encodeDecodeParts(parts, rp.Parts.Post.Base64Encode, rp.Parts.Post.Base64Decode)
-			if len(rp.Parts.Post.Sign) > 0 {
-				rp.signParts(parts)
-			}
-			if rp.Parts.Post.JoinWith != "" {
-				payload = bytes.Join(parts, []byte(rp.Parts.Post.JoinWith))
-			}
-		} else {
-			parts = rp.encodeDecodeParts(parts, []bool{rp.Base64Encode}, []bool{rp.Base64Decode})
 		}
+		parts = keptParts
+		parts = rp.encodeDecodeParts(parts, rp.Parts.Post.Base64Encode, rp.Parts.Post.Base64Decode)
+		if len(rp.Parts.Post.Sign) > 0 {
+			rp.signParts(parts)
+		}
+		if rp.Parts.Post.JoinWith != "" {
+			payload = bytes.Join(parts, []byte(rp.Parts.Post.JoinWith))
+		}
+	} else {
+		// Without post-processing of parts, the base64Encode and base64Decode of the payload apply to the payload. They
+		// used to apply only to a payload that had parts (of which none had post-processing).
+		parts = rp.encodeDecodeParts(parts, []bool{rp.Base64Encode}, []bool{rp.Base64Decode})
 	}
 	if len(payload) == 0 {
 		for _, b := range parts {
