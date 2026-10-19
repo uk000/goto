@@ -38,6 +38,42 @@ type KindResourcesMap map[string]ResourcesByName
 type NamespaceKindMap map[string]KindResourcesMap
 type YamlNamespaceMap map[string]NamespaceKindMap
 
+// copy methods give the maps back to callers as they are now. The store changes its maps while other requests are served,
+// and what a caller does with a map that it got (like writing it out) must not be seen by them. The resources in the maps
+// are not copied: the store replaces a resource when it stores another one of its name, and does not change it.
+func (r ResourcesByName) copy() ResourcesByName {
+	if r == nil {
+		return nil
+	}
+	c := make(ResourcesByName, len(r))
+	for name, kr := range r {
+		c[name] = kr
+	}
+	return c
+}
+
+func (k KindResourcesMap) copy() KindResourcesMap {
+	if k == nil {
+		return nil
+	}
+	c := make(KindResourcesMap, len(k))
+	for kind, resources := range k {
+		c[kind] = resources.copy()
+	}
+	return c
+}
+
+func (n NamespaceKindMap) copy() NamespaceKindMap {
+	if n == nil {
+		return nil
+	}
+	c := make(NamespaceKindMap, len(n))
+	for namespace, kinds := range n {
+		c[namespace] = kinds.copy()
+	}
+	return c
+}
+
 type K8sResourceStore struct {
 	YamlResources YamlNamespaceMap
 	lock          *sync.Mutex
@@ -57,11 +93,11 @@ func (k *K8sResourceStore) Clear(yamlName, namespace string) {
 	if yamlName != "" {
 		if namespace != "" {
 			if k.YamlResources[yamlName] != nil {
-				k.YamlResources[yamlName][namespace] = nil
+				delete(k.YamlResources[yamlName], namespace)
 				log.Printf("Cleared resources for unit [%s] and namespace [%s]\n", yamlName, namespace)
 			}
 		} else {
-			k.YamlResources[yamlName] = nil
+			delete(k.YamlResources, yamlName)
 			log.Printf("Cleared resources for unit [%s]\n", yamlName)
 		}
 	} else {
@@ -87,11 +123,11 @@ func (k *K8sResourceStore) Get(yamlName, namespace, kind string) interface{} {
 			return nil
 		}
 		if len(kind) > 0 {
-			return nsResources[kind]
+			return nsResources[kind].copy()
 		}
-		return nsResources
+		return nsResources.copy()
 	}
-	return unitResources
+	return unitResources.copy()
 }
 
 func (k *K8sResourceStore) StoreYaml(yamlName string, body io.ReadCloser) (NamespaceKindMap, []error) {
@@ -132,7 +168,7 @@ func (k *K8sResourceStore) StoreYaml(yamlName string, body io.ReadCloser) (Names
 			Name:      item.GetName(),
 		})
 	}
-	return k.YamlResources[yamlName], nil
+	return k.YamlResources[yamlName].copy(), nil
 }
 
 func (k *K8sResourceStore) GetTargetResources(yamlName, namespace, kind, name string) (NamespaceKindMap, error) {
@@ -179,11 +215,16 @@ func (k *K8sResourceStore) GetTargetResources(yamlName, namespace, kind, name st
 			}
 		}
 	}
-	return targetResources, nil
+	return targetResources.copy(), nil
 }
 
-func decodeResourceID(id string) (group, version, resource, namespace, name string) {
+// decodeResourceID splits the id of a resource, which is group/version/resource[/namespace[/name]], where the group of
+// the core resources is empty. It is not ok when the id does not have the group, version and resource.
+func decodeResourceID(id string) (group, version, resource, namespace, name string, ok bool) {
 	pieces := strings.Split(id, "/")
+	if len(pieces) < 3 {
+		return "", "", "", "", "", false
+	}
 	group = pieces[0]
 	version = pieces[1]
 	resource = pieces[2]
@@ -200,14 +241,18 @@ func decodeResourceID(id string) (group, version, resource, namespace, name stri
 	} else if resource == "svc" || resource == "services" {
 		resource = "service"
 	}
-	return
+	return group, version, resource, namespace, name, true
 }
 
+// reinterpretResource turns the name of a resource, which can be a short name or the plural, into its kind. The name of
+// a namespace is the namespace that it is given for, as namespaces are not in a namespace.
 func reinterpretResource(resource, namespace, name string) (string, string, string) {
 	if kr := k8s.K8sApiResourcesMap[resource]; kr != nil {
 		resource = kr.Kind
 		if kr.Kind == k8s.KindNamespace {
-			name = namespace
+			if namespace != "" {
+				name = namespace
+			}
 			namespace = ""
 		}
 	}

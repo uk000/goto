@@ -17,6 +17,7 @@
 package k8s
 
 import (
+	"errors"
 	k8sClient "goto/pkg/k8s/client"
 	"log"
 	"strings"
@@ -50,6 +51,10 @@ type K8sResource struct {
 }
 
 func GetGVRMapping(gvk *schema.GroupVersionKind) (*meta.RESTMapping, error) {
+	// There is no default client when no kube config or cluster is found at startup.
+	if k8sClient.Client == nil || k8sClient.Client.Mapper == nil {
+		return nil, errors.New("k8s client is not configured")
+	}
 	gvr, err := k8sClient.Client.Mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 	if err != nil {
 		log.Printf("Failed to covert GVK to GVR with error: %s\n", err.Error())
@@ -212,7 +217,7 @@ var (
 				ShortName:  "ns",
 				Version:    "v1",
 				Kind:       "Namespace",
-				Namespaced: true,
+				Namespaced: false,
 				Verbs:      []string{"create", "delete", "get", "list", "patch", "update", "watch"},
 				OtherName:  "",
 				GVK:        "v1/Namespace",
@@ -332,7 +337,7 @@ var (
 				Namespaced: true,
 				Verbs:      []string{"create", "delete", "deletecollection", "get", "list", "patch", "update", "watch"},
 				OtherName:  "",
-				GVK:        "gateway.networking.k8s.io/v1/Gateway",
+				GVK:        "networking.istio.io/v1/ServiceEntry",
 			},
 			"services": &K8sApiResource{
 				ShortName:  "svc",
@@ -344,7 +349,7 @@ var (
 				GVK:        "v1/Service",
 			},
 			"sidecars": &K8sApiResource{
-				ShortName:  "sc",
+				ShortName:  "",
 				Version:    "networking.istio.io/v1",
 				Kind:       "Sidecar",
 				Namespaced: true,

@@ -18,6 +18,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"goto/pkg/global"
 	"goto/pkg/k8s"
 	k8sClient "goto/pkg/k8s/client"
@@ -78,29 +79,48 @@ var (
 )
 
 func init() {
-	go func() {
-		for {
-			var obj interface{}
-			var isAdd, isUpdate, isDelete bool
-			select {
-			case <-k8sWatchStopChannel:
-				return
-			case obj = <-k8sResourceWatch.allAdds:
-				isAdd = true
-				log.Printf("Notifying Add: %s\n", obj)
-			case obj = <-k8sResourceWatch.allUpdates:
-				isUpdate = true
-				log.Printf("Notifying Update: %s\n", obj)
-			case obj = <-k8sResourceWatch.allDeletes:
-				isDelete = true
-				log.Printf("Notifying Delete: %s\n", obj)
-			}
-			metadata := obj.(*unstructured.Unstructured).Object["metadata"].(map[string]interface{})
-			name := metadata["name"].(string)
-			namespace := metadata["namespace"].(string)
-			k8sResourceWatch.notifyWatchers(namespace, name, obj, isAdd, isUpdate, isDelete)
+	go runWatchNotifier()
+}
+
+// runWatchNotifier hands the changes of the watched resources, which the informers report, to the watchers of those, until
+// StopWatch.
+func runWatchNotifier() {
+	for {
+		var obj interface{}
+		var isAdd, isUpdate, isDelete bool
+		select {
+		case <-k8sWatchStopChannel:
+			return
+		case obj = <-k8sResourceWatch.allAdds:
+			isAdd = true
+			log.Printf("Notifying Add: %s\n", obj)
+		case obj = <-k8sResourceWatch.allUpdates:
+			isUpdate = true
+			log.Printf("Notifying Update: %s\n", obj)
+		case obj = <-k8sResourceWatch.allDeletes:
+			isDelete = true
+			log.Printf("Notifying Delete: %s\n", obj)
 		}
-	}()
+		namespace, name, ok := objectNamespaceAndName(obj)
+		if !ok {
+			log.Printf("K8s: Ignoring a change of an object that has no name: %T\n", obj)
+			continue
+		}
+		k8sResourceWatch.notifyWatchers(namespace, name, obj, isAdd, isUpdate, isDelete)
+	}
+}
+
+// objectNamespaceAndName reads the namespace and the name of what an informer reports. The namespace is empty for the
+// resources that are not in a namespace. What is reported for a delete that the informer saw late is not the resource.
+func objectNamespaceAndName(obj interface{}) (namespace, name string, ok bool) {
+	if tombstone, isTombstone := obj.(cache.DeletedFinalStateUnknown); isTombstone {
+		obj = tombstone.Obj
+	}
+	u, isUnstructured := obj.(*unstructured.Unstructured)
+	if !isUnstructured || u == nil {
+		return "", "", false
+	}
+	return u.GetNamespace(), u.GetName(), u.GetName() != ""
 }
 
 func StopWatch() {
@@ -167,19 +187,23 @@ func (kw *K8sResourceWatch) notifyWatchers(namespace, name string, obj interface
 	} else if kw.watches[""] != nil && kw.watches[""][name] != nil {
 		watchers = kw.watches[""][name]
 	}
-	for name, watcher := range watchers {
-		if isAdd {
-			watcher.OnAdd(name, namespace, obj)
-		} else if isUpdate {
-			watcher.OnUpdate(name, namespace, obj)
-		} else if isDelete {
-			watcher.OnDelete(name, namespace, obj)
+	for _, watcher := range watchers {
+		if isAdd && watcher.OnAdd != nil {
+			watcher.OnAdd(namespace, name, obj)
+		} else if isUpdate && watcher.OnUpdate != nil {
+			watcher.OnUpdate(namespace, name, obj)
+		} else if isDelete && watcher.OnDelete != nil {
+			watcher.OnDelete(namespace, name, obj)
 		}
 	}
 }
 
 func WatchResourceById(id string, watcher *K8sResourceWatchCallback) {
-	group, version, kind, namespace, name := decodeResourceID(id)
+	group, version, kind, namespace, name, ok := decodeResourceID(id)
+	if !ok {
+		log.Printf("K8s: Cannot watch resource: invalid resource id [%s]\n", id)
+		return
+	}
 	kind, namespace, name = reinterpretResource(kind, namespace, name)
 	WatcheResource(group, version, kind, namespace, name, watcher)
 }
@@ -196,7 +220,11 @@ func WatcheResource(group, version, resource, namespace, name string, watcher *K
 }
 
 func UnwatchResourceById(id string, watcher *K8sResourceWatchCallback) {
-	group, version, kind, namespace, name := decodeResourceID(id)
+	group, version, kind, namespace, name, ok := decodeResourceID(id)
+	if !ok {
+		log.Printf("K8s: Cannot unwatch resource: invalid resource id [%s]\n", id)
+		return
+	}
 	kind, namespace, name = reinterpretResource(kind, namespace, name)
 	UnwatchResource(group, version, kind, namespace, name, watcher)
 }
@@ -208,6 +236,10 @@ func UnwatchResource(group, version, resource, namespace, name string, watcher *
 }
 
 func setupWatchForResource(gvr *schema.GroupVersionResource, namespace, name string) {
+	if k8sClient.Client == nil {
+		log.Printf("K8s: Cannot watch resource [%s/%s]: no k8s client is configured\n", namespace, name)
+		return
+	}
 	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(k8sClient.Client.Client, CacheRefreshPeriod, namespace,
 		func(opts *metav1.ListOptions) {
 			opts.FieldSelector = fields.OneTermEqualSelector(metav1.ObjectNameField, name).String()
@@ -230,11 +262,15 @@ func setupWatchForResource(gvr *schema.GroupVersionResource, namespace, name str
 }
 
 func GetResourceByID(id string) (util.JSON, error) {
-	group, version, resource, namespace, name := decodeResourceID(id)
+	group, version, resource, namespace, name, ok := decodeResourceID(id)
+	if !ok {
+		return nil, fmt.Errorf("invalid resource id [%s]: want group/version/resource[/namespace[/name]]", id)
+	}
+	kind, namespace, name := reinterpretResource(resource, namespace, name)
 	gvk := &schema.GroupVersionKind{
 		Group:   group,
 		Version: version,
-		Kind:    resource,
+		Kind:    kind,
 	}
 	return getResource(gvk, namespace, name, nil, nil)
 }
@@ -252,7 +288,7 @@ func GetResource(kind, namespace, name string, jp *util.JSONPath, jq *util.JQ, r
 }
 
 func getResource(gvk *schema.GroupVersionKind, namespace, name string, jp *util.JSONPath, jq *util.JQ) (util.JSON, error) {
-	json := getResourceFromCache(namespace, name)
+	json := getResourceFromCache(gvk, namespace, name)
 	var err error
 	if json == nil {
 		if json, err = fetchResource(gvk, namespace, name); err != nil {
@@ -270,8 +306,14 @@ func getResource(gvk *schema.GroupVersionKind, namespace, name string, jp *util.
 	return json, nil
 }
 
-func getResourceFromCache(namespace, name string) util.JSON {
-	obj := Cache.Get(namespace, name)
+// cacheName is the name that a resource is cached by. Names are only unique among the resources of a kind, so the kind is
+// a part of it: a config map and a pod of the same name in a namespace are two resources.
+func cacheName(gvk *schema.GroupVersionKind, name string) string {
+	return gvk.String() + "/" + name
+}
+
+func getResourceFromCache(gvk *schema.GroupVersionKind, namespace, name string) util.JSON {
+	obj := Cache.Get(namespace, cacheName(gvk, name))
 	if obj != nil {
 		log.Printf("K8s: Serving Resource [%s/%s] from cache.\n", namespace, name)
 		return util.JSONFromObject(obj)
@@ -282,7 +324,7 @@ func getResourceFromCache(namespace, name string) util.JSON {
 func fetchResource(gvk *schema.GroupVersionKind, namespace, name string) (util.JSON, error) {
 	if obj, err := getResourceFromK8s(gvk, namespace, name); err == nil && obj != nil {
 		if name != "" {
-			Cache.Store(namespace, name, obj)
+			Cache.Store(namespace, cacheName(gvk, name), obj)
 		}
 		return util.JSONFromJSON(obj), nil
 	} else {

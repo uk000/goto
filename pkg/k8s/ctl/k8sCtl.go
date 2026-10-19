@@ -42,10 +42,15 @@ func ApplyYaml(yamlName, namespace, kind, name, to string, delete bool) (rlist [
 					log.Printf("No resource exists for yamlName [%s], namespace [%s]. kind [%s] name [%s]\n", yamlName, ns, kind, name)
 					continue
 				}
+				// A resource goes to its own namespace, unless it is moved to the one that is asked for.
+				dest := to
+				if dest == "" {
+					dest = ns
+				}
 				if to != namespace {
+					// The resource is moved on a copy, as the one that is stored is not the one to change.
 					krCopy := *kr
-					r := *kr.Resource
-					krCopy.Resource = &r
+					krCopy.Resource = kr.Resource.DeepCopy()
 					krCopy.Namespace = to
 					kr = &krCopy
 					if kr.GVK.Kind == k8s.KindNamespace {
@@ -55,7 +60,7 @@ func ApplyYaml(yamlName, namespace, kind, name, to string, delete bool) (rlist [
 						kr.Resource.SetNamespace(to)
 					}
 				}
-				if err := applyResource(to, name, kr, delete); err != nil {
+				if err := applyResource(dest, kr.Name, kr, delete); err != nil {
 					errs = append(errs, err)
 					log.Printf("Failed to process resource [%s/%s] with error: %s\n", ns, name, err.Error())
 				} else {

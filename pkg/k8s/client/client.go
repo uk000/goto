@@ -23,6 +23,7 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -52,17 +53,33 @@ var (
 	CurrentClient *K8sClient
 	Client        = createDefaultK8sClient()
 	Clients       = map[string]*K8sClient{}
+	// lock guards Clients and CurrentClient, which the admin APIs change while requests read them.
+	lock sync.RWMutex
 )
 
+// SetCurrentK8sClient switches the current client to the one of the given name. The current client stays as it is when
+// there is no client of that name.
 func SetCurrentK8sClient(name string) bool {
-	CurrentClient = Clients[name]
-	if CurrentClient == nil {
+	lock.Lock()
+	defer lock.Unlock()
+	k8sClient := Clients[name]
+	if k8sClient == nil {
 		return false
 	}
+	CurrentClient = k8sClient
 	return true
 }
 
-func CreateK8sClientForConfig(name, url, caData string) error {
+// GetClient returns the client that was configured with the given name, or nil.
+func GetClient(name string) *K8sClient {
+	lock.RLock()
+	defer lock.RUnlock()
+	return Clients[name]
+}
+
+// NewK8sClientForConfig makes a client for the API server at the url, which verifies the server with the CA certificate
+// given as base 64 text. It does not contact the server.
+func NewK8sClientForConfig(url, caData string) (*K8sClient, error) {
 	caBytes, _ := io.ReadAll(base64.NewDecoder(base64.StdEncoding, strings.NewReader(caData)))
 	k8sClient := &K8sClient{
 		Config: &rest.Config{
@@ -74,9 +91,19 @@ func CreateK8sClientForConfig(name, url, caData string) error {
 		},
 	}
 	if err := configureClient(k8sClient); err != nil {
+		return nil, err
+	}
+	return k8sClient, nil
+}
+
+func CreateK8sClientForConfig(name, url, caData string) error {
+	k8sClient, err := NewK8sClientForConfig(url, caData)
+	if err != nil {
 		log.Printf("K8s: Failed to load kube client with error: %s\n", err.Error())
 		return err
 	}
+	lock.Lock()
+	defer lock.Unlock()
 	Clients[name] = k8sClient
 	return nil
 }
@@ -102,7 +129,9 @@ func createDefaultK8sClient() *K8sClient {
 		log.Printf("K8s: Failed to load kube client with error: %s\n", err.Error())
 		return nil
 	}
+	lock.Lock()
 	Clients["default"] = k8sClient
+	lock.Unlock()
 	return k8sClient
 }
 

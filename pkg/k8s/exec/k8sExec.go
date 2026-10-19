@@ -19,6 +19,8 @@ package exec
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	k8sClient "goto/pkg/k8s/client"
 	"log"
 
@@ -30,12 +32,15 @@ import (
 )
 
 func PodExec(namespace, label, container string, command string) (string, error) {
+	if k8sClient.Client == nil || k8sClient.Client.TypedClient == nil {
+		return "", errors.New("k8s client is not configured")
+	}
 	var podName string
 	if pods, err := k8sClient.Client.TypedClient.Pods(namespace).List(context.Background(),
 		metav1.ListOptions{LabelSelector: label}); err == nil {
 		if len(pods.Items) == 0 {
 			log.Printf("K8s: No pods in namespace [%s] for label [%s]\n", namespace, label)
-			return "", err
+			return "", fmt.Errorf("no pods in namespace [%s] for label [%s]", namespace, label)
 		} else {
 			podName = pods.Items[0].Name
 		}

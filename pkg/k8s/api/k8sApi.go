@@ -23,7 +23,6 @@ import (
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
-	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -85,13 +84,19 @@ func apiGetResource(w http.ResponseWriter, r *http.Request) {
 	//all := strings.Contains(r.RequestURI, "/all")
 	var jp *util.JSONPath
 	var jq *util.JQ
-	if strings.Contains(r.RequestURI, "jp") {
+	// The queries are looked for as the params that they are: "jp" and "jq" are in the name of any resource that has them.
+	if query := r.URL.Query(); query.Has("jp") {
 		jp = util.ParseJSONPathsFromRequest("jp", r)
-	} else if strings.Contains(r.RequestURI, "jq") {
+	} else if query.Has("jq") {
 		jq = util.ParseJQFromRequest("jq", r)
 	}
 	gvk, json, err := store.GetResource(kind, namespace, name, jp, jq, r)
-	sendResourceResponse(gvk.Group, gvk.Version, gvk.Kind, namespace, name, json, err, w, r)
+	// There is no GVK for a kind that is not known.
+	group, version, gvkKind := "", "", kind
+	if gvk != nil {
+		group, version, gvkKind = gvk.Group, gvk.Version, gvk.Kind
+	}
+	sendResourceResponse(group, version, gvkKind, namespace, name, json, err, w, r)
 }
 
 func sendResourceResponse(group, version, kind, namespace, name string, json util.JSON, err error, w http.ResponseWriter, r *http.Request) {
