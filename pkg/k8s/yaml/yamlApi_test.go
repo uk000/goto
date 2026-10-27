@@ -55,7 +55,7 @@ func router() http.Handler {
 		stubOnce.Do(stubGlobalFuncs)
 		Middleware.SetRoutes(nil)
 	})
-	return middleware.RootRouters["/k8s/yaml"]
+	return middleware.RootRouters["/k8s"]
 }
 
 // setup makes the default client of k8s talk to an API server of the test, and leaves the stored yaml and the cache

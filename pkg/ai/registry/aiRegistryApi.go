@@ -22,6 +22,7 @@ import (
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -30,8 +31,21 @@ var (
 	Middleware = middleware.NewMiddleware("airegistry", setRoutes, nil)
 )
 
+// isAgentsRequest tells if the request is for the API of the agents: the other requests under /ai have no API to serve
+// them, and are handled as any other request.
+func isAgentsRequest(r *http.Request) bool {
+	uri := r.RequestURI
+	if i := strings.IndexAny(uri, "?#"); i >= 0 {
+		uri = uri[:i]
+	}
+	return uri == "/ai/agents" || strings.HasPrefix(uri, "/ai/agents/")
+}
+
 func setRoutes(r *mux.Router) {
-	agentRouter := middleware.RootPath("/ai/agents")
+	// The server hands a request to the router of the first segment of its path, which is /ai: a router of a root path
+	// of /ai/agents is never given a request, so the routes are under the /agents of the router of /ai, which is given
+	// only the requests for them.
+	agentRouter := util.PathRouter(middleware.RootPathIf("/ai", isAgentsRequest), "/agents")
 	util.AddRoute(agentRouter, "", getAgents, "GET")
 	util.AddRoute(agentRouter, "/add", addAgents, "POST")
 	util.AddRoute(agentRouter, "/clear", clearAgents, "POST")

@@ -117,3 +117,62 @@ func TestJSONRPCRouterTakesOnlyTheAPIs(t *testing.T) {
 		}
 	}
 }
+
+// The APIs of the TCP and UDP servers were on routers of the root paths /server/tcp and /server/udp, which no request is
+// given to, as a request goes to the router of the first segment of its path, which is /server: they were all a 404.
+func TestTCPAndUDPServerAPIsAreRoutedToTheirHandlers(t *testing.T) {
+	for _, tt := range []struct{ method, uri string }{
+		{"GET", "/server/tcp/active"},
+		{"GET", "/server/tcp/history"},
+		{"POST", "/server/tcp/9999/configure"},
+		{"POST", "/server/tcp/9999/mode/stream=y"},
+		{"POST", "/server/udp/9999/proxy/127.0.0.1:9"},
+		{"POST", "/server/udp/9999/stop/127.0.0.1:9"},
+	} {
+		rr := serveAdmin(t, tt.method, tt.uri)
+		// Whatever the handler answers for a port that is not a listener, the router answers a route that it does not
+		// have with its page not found.
+		if strings.Contains(rr.Body.String(), "404 page not found") {
+			t.Errorf("%s %s = %d %q, want the handler of the API to answer", tt.method, tt.uri, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+// The APIs of the k8s yaml and of the registry of agents were on routers of the root paths /k8s/yaml and /ai/agents,
+// which no request is given to, as a request goes to the router of the first segment of its path. Those of the agents
+// were not among the routes that the server sets at all.
+func TestK8sYamlAndAgentsAPIsAreRoutedToTheirHandlers(t *testing.T) {
+	for _, tt := range []struct{ method, uri string }{
+		{"GET", "/k8s/yaml"},
+		{"GET", "/k8s/yaml/nosuchyaml"},
+		{"POST", "/k8s/yaml/clear"},
+		{"POST", "/k8s/yaml/apply/nosuchyaml"},
+		{"GET", "/ai/agents"},
+		{"POST", "/ai/agents/clear"},
+		{"POST", "/ai/agents/add"},
+	} {
+		rr := serveAdmin(t, tt.method, tt.uri)
+		if strings.Contains(rr.Body.String(), "404 page not found") {
+			t.Errorf("%s %s = %d %q, want the handler of the API to answer", tt.method, tt.uri, rr.Code, rr.Body.String())
+		}
+	}
+	// The routes that were already there under /k8s are still served.
+	if rr := serveAdmin(t, "POST", "/k8s/clear"); rr.Code != http.StatusOK {
+		t.Errorf("POST /k8s/clear = %d %q", rr.Code, rr.Body.String())
+	}
+}
+
+// Only the requests for the API of the agents are given to the router of /ai, and the others are handled as any other.
+func TestAIRouterTakesOnlyTheAgentsAPI(t *testing.T) {
+	setRPCRoutes()
+	for uri, want := range map[string]bool{
+		"/ai": false, "/ai/": false, "/ai/other": false, "/ai/agentsx": false, "/aix/agents": false,
+		"/ai/agents": true, "/ai/agents/add": true, "/ai/agents?x=1": true,
+	} {
+		r := httptest.NewRequest("GET", uri, nil)
+		root, _ := util.GetRootURI(r.RequestURI)
+		if got := middleware.RootRouterFor(root, r) != nil; got != want {
+			t.Errorf("%s is given to a router: %v, want %v", uri, got, want)
+		}
+	}
+}

@@ -23,6 +23,7 @@ import (
 	a2aserver "goto/pkg/ai/a2a/server"
 	mcpclient "goto/pkg/ai/mcp/client"
 	mcpserver "goto/pkg/ai/mcp/server"
+	airegistry "goto/pkg/ai/registry"
 	"goto/pkg/client"
 	"goto/pkg/events"
 	"goto/pkg/global"
@@ -87,7 +88,7 @@ func init() {
 	middleware.RoutesOnly = []*middleware.Middleware{
 		router.Middleware, httpproxy.Middleware, grpcproxy.Middleware, mcpproxy.Middleware,
 		tcpproxy.Middleware, udpproxy.Middleware,
-		a2aserver.Middleware, a2aclient.Middleware, mcpclient.Middleware, mcpserver.Middleware,
+		a2aserver.Middleware, a2aclient.Middleware, mcpclient.Middleware, mcpserver.Middleware, airegistry.Middleware,
 		tcp.Middleware, udp.Middleware,
 		client.Middleware, listeners.Middleware, registry.Middleware,
 		grpcapi.Middleware, grpcclient.Middleware, protos.Middleware,

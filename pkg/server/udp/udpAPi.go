@@ -32,7 +32,9 @@ var (
 )
 
 func setRoutes(r *mux.Router) {
-	udpRouter := middleware.RootPath("/server/udp")
+	// The server hands a request to the router of the first segment of its path, which is /server: a router of a root
+	// path of /server/udp is never given a request, so the routes are under the /udp of the router of /server.
+	udpRouter := util.PathRouter(middleware.RootPath("/server"), "/udp")
 	util.AddRoute(udpRouter, "/{port}/stop/{upstream}", stopUDPProxy, "POST")
 	util.AddRoute(udpRouter, "/{port}/proxy/{upstream}", proxyUDP, "POST")
 	util.AddRoute(udpRouter, "/{port}/proxy/{upstream}/delay/{delay}", proxyUDP, "POST")

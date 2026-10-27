@@ -57,7 +57,7 @@ func router() *mux.Router {
 		stubOnce.Do(stubGlobalFuncs)
 		setRoutes(nil)
 	})
-	return middleware.RootRouters["/ai/agents"]
+	return middleware.RootRouters["/ai"]
 }
 
 // resetRegistry empties the process wide registry, now and when the test is done.

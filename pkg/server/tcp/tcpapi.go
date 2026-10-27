@@ -36,7 +36,9 @@ var (
 )
 
 func setRoutes(r *mux.Router) {
-	tcpRouter := middleware.RootPath("/server/tcp")
+	// The server hands a request to the router of the first segment of its path, which is /server: a router of a root
+	// path of /server/tcp is never given a request, so the routes are under the /tcp of the router of /server.
+	tcpRouter := util.PathRouter(middleware.RootPath("/server"), "/tcp")
 	util.AddRoute(tcpRouter, "/{port}/configure", configureTCP, "POST")
 	util.AddRoute(tcpRouter, "/{port}/timeout/set/read={duration}", setConnectionDurationConfig, "PUT", "POST")
 	util.AddRoute(tcpRouter, "/{port}/timeout/set/write={duration}", setConnectionDurationConfig, "PUT", "POST")

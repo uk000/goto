@@ -32,7 +32,9 @@ var (
 )
 
 func setRoutes(r *mux.Router) {
-	k8sYamlRouter := middleware.RootPath("/k8s/yaml")
+	// The server hands a request to the router of the first segment of its path, which is /k8s: a router of a root path of
+	// /k8s/yaml is never given a request, so the routes are under the /yaml of the router of /k8s.
+	k8sYamlRouter := util.PathRouter(middleware.RootPath("/k8s"), "/yaml")
 
 	util.AddRoute(k8sYamlRouter, "/store/{yamlName}", apiStoreYaml, "POST")
 

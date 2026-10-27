@@ -57,7 +57,7 @@ func call(method, target string) *httptest.ResponseRecorder {
 	req = req.WithContext(context.WithValue(req.Context(), util.CurrentPortKey, 8080))
 	_, req, _ = util.WithRequestStore(req, nil)
 	rr := httptest.NewRecorder()
-	middleware.RootRouters["/server/udp"].ServeHTTP(rr, req)
+	middleware.RootRouters["/server"].ServeHTTP(rr, req)
 	return rr
 }
 

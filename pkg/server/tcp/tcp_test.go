@@ -329,7 +329,7 @@ func initAdmin(t *testing.T) {
 	stubOnce.Do(stubGlobalFuncs)
 	routerOnce.Do(func() {
 		setRoutes(nil)
-		adminRouter = middleware.RootRouters["/server/tcp"]
+		adminRouter = middleware.RootRouters["/server"]
 	})
 	if adminRouter == nil {
 		t.Fatal("the TCP routes were not registered")
