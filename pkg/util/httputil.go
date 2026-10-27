@@ -20,20 +20,54 @@ import (
 	"fmt"
 	"goto/pkg/constants"
 	"goto/pkg/global"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 var (
-	ExcludedHeaders = map[string]bool{}
-	HTTPHandler     http.Handler
+	// ExcludedHeaders has the headers (in lower case) that are left out of the headers that are logged and copied. It is
+	// changed while requests are served, so it is to be changed and read through ExcludeHeader, IncludeHeader and
+	// IsHeaderExcluded, which guard it. Code that uses the map directly does it without the guard.
+	ExcludedHeaders     = map[string]bool{}
+	excludedHeadersLock sync.RWMutex
+	HTTPHandler         http.Handler
 
 	WillTunnel    func(*http.Request, *RequestStore) bool
 	WillProxyGRPC func(int, any) bool
 	WillProxyMCP  func(*http.Request, *RequestStore) bool
 	LowerViaGoto  = strings.ToLower(constants.HeaderViaGoto)
 )
+
+// ExcludeHeader leaves the header out of the headers that are logged and copied.
+func ExcludeHeader(header string) {
+	excludedHeadersLock.Lock()
+	defer excludedHeadersLock.Unlock()
+	ExcludedHeaders[strings.ToLower(header)] = true
+}
+
+// IncludeHeader undoes ExcludeHeader.
+func IncludeHeader(header string) {
+	excludedHeadersLock.Lock()
+	defer excludedHeadersLock.Unlock()
+	delete(ExcludedHeaders, strings.ToLower(header))
+}
+
+func IsHeaderExcluded(header string) bool {
+	excludedHeadersLock.RLock()
+	defer excludedHeadersLock.RUnlock()
+	return ExcludedHeaders[strings.ToLower(header)]
+}
+
+// excludedHeadersSnapshot returns the excluded headers as they are now, for what iterates through them while others may
+// be excluding more.
+func excludedHeadersSnapshot() map[string]bool {
+	excludedHeadersLock.RLock()
+	defer excludedHeadersLock.RUnlock()
+	return maps.Clone(ExcludedHeaders)
+}
 
 func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
 	port := GetRequestOrListenerPort(r)

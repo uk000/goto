@@ -69,9 +69,15 @@ func (s *Sockets) HasOpenSockets() bool {
 func (s *Sockets) AddSocket(id string, conn *websocket.Conn) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.sockets[id] = &Socket{id: id, conn: conn, stream: make(chan *SocketMessage, 100)}
+	if old := s.sockets[id]; old != nil {
+		// What runs for a socket of the same ID stops, and it does not take the new socket out when it does.
+		log.Printf("Connection replaced for ID: %s\n", id)
+		closeSocket(old)
+	}
+	socket := &Socket{id: id, conn: conn, stream: make(chan *SocketMessage, 100)}
+	s.sockets[id] = socket
 	log.Printf("Connection added for ID: %s\n", id)
-	go s.Run(id)
+	go s.run(socket)
 	log.Printf("Socket for ID %s is now running\n", id)
 }
 
@@ -79,10 +85,31 @@ func (s *Sockets) RemoveSocket(id string) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	if socket, ok := s.sockets[id]; ok {
-		socket.conn.Close()
 		delete(s.sockets, id)
+		closeSocket(socket)
 	}
 	log.Printf("Connection removed for ID: %s\n", id)
+}
+
+// removeSocket takes the socket out when it is still the one of its ID, which it is not when another socket has replaced it.
+func (s *Sockets) removeSocket(id string, socket *Socket) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if s.sockets[id] == socket {
+		delete(s.sockets, id)
+		closeSocket(socket)
+		log.Printf("Connection removed for ID: %s\n", id)
+	}
+}
+
+// closeSocket closes the connection of a socket that is not in the map anymore, and its stream, which is what tells what
+// runs for the socket to stop. It is called only by the one that took the socket out of the map, with the lock held,
+// which is why the stream is closed once, and is not sent to by a broadcast.
+func closeSocket(socket *Socket) {
+	close(socket.stream)
+	if socket.conn != nil {
+		socket.conn.Close()
+	}
 }
 func (s *Sockets) GetSocket(id string) (*Socket, bool) {
 	s.lock.Lock()
@@ -97,7 +124,12 @@ func (s *Sockets) Run(id string) {
 		log.Printf("No connection found for ID: %s\n", id)
 		return
 	}
-	defer s.RemoveSocket(id)
+	s.run(socket)
+}
+
+func (s *Sockets) run(socket *Socket) {
+	id := socket.id
+	defer s.removeSocket(id, socket)
 	defer socket.conn.Close()
 	for {
 		select {
@@ -127,19 +159,21 @@ func (s *Sockets) Run(id string) {
 }
 
 func (s *Sockets) Broadcast(requestURI string, requestHeaders http.Header, statusCode int, responseHeaders http.Header, body []byte) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+	// The message is written out by the socket after this returns, while the request goes on, and sets the headers of its
+	// response, so the message has the headers as they are now.
 	data := &SocketMessage{
 		Request: RequestDetails{
 			URI:     requestURI,
-			Headers: requestHeaders,
+			Headers: requestHeaders.Clone(),
 		},
 		Response: ResponseDetails{
 			StatusCode: statusCode,
-			Headers:    responseHeaders,
+			Headers:    responseHeaders.Clone(),
 			Body:       string(body),
 		},
 	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	log.Printf("Broadcasting message: %s\n", data.Request.URI)
 	for id, socket := range s.sockets {
 		select {

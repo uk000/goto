@@ -19,6 +19,7 @@ package types
 import (
 	"bytes"
 	"math/rand"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -27,18 +28,35 @@ const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 var (
 	randomCharsetLength = len(charset)
-	random              = rand.New(rand.NewSource(time.Now().UnixNano()))
-	IDCounter           = atomic.Uint32{}
+	// A rand.Rand is not safe for concurrent use, but the requests of the server all draw from this one.
+	random    = rand.New(rand.NewSource(time.Now().UnixNano()))
+	randomMu  sync.Mutex
+	IDCounter = atomic.Uint32{}
 )
 
+// Random returns a random number in [0, max), or 0 if there is no such number (max <= 0). It is safe for concurrent use.
 func Random(max int) int {
+	if max <= 0 {
+		return 0
+	}
+	randomMu.Lock()
+	defer randomMu.Unlock()
 	return random.Intn(max)
 }
 
+// Random64 returns a random number in [0, max), or 0 if there is no such number (max <= 0). It is safe for concurrent
+// use.
 func Random64(max int64) int64 {
+	if max <= 0 {
+		return 0
+	}
+	randomMu.Lock()
+	defer randomMu.Unlock()
 	return random.Int63n(max)
 }
 
+// RandomDuration returns a random duration in [min, max), at nanosecond resolution. If max is not larger than min then
+// it is min, and if both are 0 then it is the fallback (when given), or 0.
 func RandomDuration(min, max time.Duration, fallback ...time.Duration) time.Duration {
 	if min == 0 && max == 0 {
 		if len(fallback) > 0 {
@@ -49,14 +67,17 @@ func RandomDuration(min, max time.Duration, fallback ...time.Duration) time.Dura
 	}
 	d := min
 	if max > min {
-		addOn := max - d
-		d = d + time.Millisecond*time.Duration(Random64(addOn.Milliseconds()))
+		d = d + time.Duration(Random64(int64(max-min)))
 	}
 	return d
 }
 
+// RandomFrom returns one of the values at random, or 0 if there are none.
 func RandomFrom(vals []int) int {
-	return vals[random.Intn(len(vals))]
+	if len(vals) == 0 {
+		return 0
+	}
+	return vals[Random(len(vals))]
 }
 
 func GenerateRandomPayload(size int, prefix ...string) []byte {

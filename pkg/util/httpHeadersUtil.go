@@ -32,8 +32,8 @@ func WithRequestHeaders(ctx context.Context, headers map[string][]string) contex
 }
 
 func GetRequestHeaders(ctx context.Context) map[string][]string {
-	if val := ctx.Value(RequestHeadersKey); val != nil {
-		return val.(map[string][]string)
+	if headers, ok := ctx.Value(RequestHeadersKey).(map[string][]string); ok {
+		return headers
 	}
 	return nil
 }
@@ -43,8 +43,8 @@ func WithContextHeaders(ctx context.Context, headers *types.Headers) context.Con
 }
 
 func GetContextHeaders(ctx context.Context) *types.Headers {
-	if val := ctx.Value(RequestHeadersKey); val != nil {
-		return val.(*types.Headers)
+	if headers, ok := ctx.Value(HeadersKey).(*types.Headers); ok {
+		return headers
 	}
 	return nil
 }
@@ -100,7 +100,7 @@ func CopyHeadersWithPrefix(prefix string, in, out map[string][]string) {
 }
 
 func CopyHeaders(prefix string, r *http.Request, w http.ResponseWriter, headers http.Header, copyHost, copyURI, copyContentType bool) {
-	CopyRequestHeadersWithIgnore(prefix, r, w.Header(), headers, ExcludedHeaders, copyHost, copyURI, copyContentType)
+	CopyRequestHeadersWithIgnore(prefix, r, w.Header(), headers, excludedHeadersSnapshot(), copyHost, copyURI, copyContentType)
 }
 
 func CopyRequestHeadersWithIgnore(prefix string, r *http.Request, out map[string][]string, headers http.Header, ignoreHeaders map[string]bool, copyHost, copyURI, copyContentType bool) {
@@ -185,7 +185,7 @@ func ToLowerHeader(headers map[string]string) map[string]string {
 func GetHeadersLog(header http.Header) string {
 	headers := map[string][]string{}
 	for k, v := range header {
-		if !ExcludedHeaders[strings.ToLower(k)] {
+		if !IsHeaderExcluded(k) {
 			headers[k] = v
 		}
 	}

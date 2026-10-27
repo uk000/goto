@@ -27,7 +27,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -62,6 +64,14 @@ type DefaultClientTransport struct {
 	port               int
 	label              string
 	alpn               *gototls.ALPN
+	// tlsConfig is the config that the dialers use for the connections they open. It is replaced by a changed copy
+	// whenever a request updates it (never changed in place), and is handed out as copies, so that requests running
+	// concurrently never share a config that one of them is changing. tlsLock guards the fields below.
+	tlsLock       sync.RWMutex
+	tlsConfig     *tls.Config
+	nextProtosSet bool
+	nextProtos    []string
+	peerLock      sync.Mutex
 }
 
 type ClientTLSConfig struct {
@@ -79,24 +89,65 @@ func (ct *DefaultClientTransport) UpdateTransport(c *http.Client, gc *grpc.Clien
 	ct.isH2 = isH2
 }
 
-func (c *DefaultClientTransport) GetTLSConfig() *tls.Config {
-	tlsConfig := c.TransportIntercept.GetTLSConfig()
-	if tlsConfig == nil {
-		tlsConfig = &tls.Config{}
-		c.TransportIntercept.SetTLSConfig(tlsConfig)
+// currentTLSConfigLocked returns the config that is in use, which is never to be changed by the caller. It requires tlsLock
+// to be held for writing, as it sets up the config if there isn't one.
+func (c *DefaultClientTransport) currentTLSConfigLocked() *tls.Config {
+	if c.tlsConfig == nil {
+		if c.TransportIntercept != nil {
+			c.tlsConfig = c.TransportIntercept.GetTLSConfig().Clone()
+		}
+		if c.tlsConfig == nil {
+			c.tlsConfig = &tls.Config{}
+		}
 	}
-	return tlsConfig
+	return c.tlsConfig
 }
 
+// GetTLSConfig returns a copy of the TLS config that the transport uses for its new connections. Changes made to the
+// copy do not affect the transport, which is only changed by UpdateTLSConfig, UpdateTLSCerts and SetTLSConfig.
+func (c *DefaultClientTransport) GetTLSConfig() *tls.Config {
+	c.tlsLock.Lock()
+	defer c.tlsLock.Unlock()
+	return c.currentTLSConfigLocked().Clone()
+}
+
+// SetTLSConfig makes the transport use a copy of the given config for its new connections.
 func (c *DefaultClientTransport) SetTLSConfig(tlsConfig *tls.Config) {
 	if tlsConfig != nil {
-		if c.SNI != tlsConfig.ServerName || c.TLSVersion != tlsConfig.MinVersion {
-			c.CloseIdleConnections()
-		}
-		c.TransportIntercept.SetTLSConfig(tlsConfig)
+		c.tlsLock.Lock()
+		closeIdle := c.SNI != tlsConfig.ServerName || c.TLSVersion != tlsConfig.MinVersion
+		c.tlsConfig = tlsConfig.Clone()
+		c.nextProtosSet = true
 		c.SNI = tlsConfig.ServerName
 		c.TLSVersion = tlsConfig.MinVersion
+		c.tlsLock.Unlock()
+		if closeIdle {
+			c.closeIdleConnections()
+		}
 	}
+}
+
+func (c *DefaultClientTransport) closeIdleConnections() {
+	if c.Client != nil {
+		c.CloseIdleConnections()
+	}
+}
+
+// dialTLSConfig returns what a dialer needs for a new connection: a config of its own, that it can set up for the
+// connection, and the ALPN handshake to run on it.
+func (c *DefaultClientTransport) dialTLSConfig() (*tls.Config, *gototls.ALPN) {
+	c.tlsLock.RLock()
+	defer c.tlsLock.RUnlock()
+	cfg := c.tlsConfig.Clone()
+	if cfg == nil {
+		cfg = &tls.Config{}
+	}
+	if !c.nextProtosSet && c.h1Transport != nil && c.h1Transport.TLSClientConfig != nil {
+		// The protocols that net/http negotiates for the transport on its own (h2, when it is allowed to upgrade) are
+		// set up in the config that the transport was created with, which is not changed by anyone from there on.
+		cfg.NextProtos = slices.Clone(c.h1Transport.TLSClientConfig.NextProtos)
+	}
+	return cfg, c.alpn
 }
 
 type opaqueConn struct{ net.Conn }
@@ -121,11 +172,14 @@ func (c *DefaultClientTransport) alpnHandler(authority string, conn *tls.Conn) h
 	}
 }
 
+// UpdateTLSConfig sets the SNI, TLS version, verification and ALPN that the new connections of the transport are opened
+// with. It is called for every request, from requests that run concurrently, so it replaces the config of the transport
+// with a changed copy, instead of changing the config that the dialers of other requests may be reading.
 func (c *DefaultClientTransport) UpdateTLSConfig(sni string, tlsVersion uint16, verify bool, alpn *gototls.ALPN) {
-	tlsConfig := c.GetTLSConfig()
-	if c.SNI != tlsConfig.ServerName || c.TLSVersion != tlsConfig.MinVersion {
-		c.CloseIdleConnections()
-	}
+	c.tlsLock.Lock()
+	current := c.currentTLSConfigLocked()
+	closeIdle := c.SNI != current.ServerName || c.TLSVersion != current.MinVersion
+	tlsConfig := current.Clone()
 	tlsConfig.InsecureSkipVerify = !verify
 	tlsConfig.ServerName = sni
 	tlsConfig.MinVersion = tlsVersion
@@ -133,77 +187,122 @@ func (c *DefaultClientTransport) UpdateTLSConfig(sni string, tlsVersion uint16, 
 	c.alpn = alpn
 	if alpn != nil {
 		if !alpn.KeepDefault {
-			tlsConfig.NextProtos = alpn.Protos
+			tlsConfig.NextProtos = slices.Clone(alpn.Protos)
 		} else if !c.isH2 {
-			tlsConfig.NextProtos = append(alpn.Protos, "http/1.1")
-		} else if len(alpn.Protos) > 0 {
-			tlsConfig.NextProtos = append(tlsConfig.NextProtos, alpn.Protos...)
-		}
-		if c.h1Transport != nil {
-			c.h1Transport.TLSNextProto = map[string]func(authority string, conn *tls.Conn) http.RoundTripper{}
-			for _, alpn := range tlsConfig.NextProtos {
-				c.h1Transport.TLSNextProto[alpn] = c.alpnHandler
+			tlsConfig.NextProtos = append(slices.Clone(alpn.Protos), "http/1.1")
+		} else {
+			for _, proto := range alpn.Protos {
+				if !slices.Contains(tlsConfig.NextProtos, proto) {
+					tlsConfig.NextProtos = append(tlsConfig.NextProtos, proto)
+				}
 			}
 		}
+		c.nextProtosSet = true
+		if c.h1Transport != nil && !slices.Equal(c.nextProtos, tlsConfig.NextProtos) {
+			// The transport looks its protocol handlers up while requests are running, so they are replaced only when
+			// the protocols change, and not by every request that applies the same ALPN.
+			c.nextProtos = slices.Clone(tlsConfig.NextProtos)
+			handlers := map[string]func(authority string, conn *tls.Conn) http.RoundTripper{}
+			for _, proto := range tlsConfig.NextProtos {
+				handlers[proto] = c.alpnHandler
+			}
+			c.h1Transport.TLSNextProto = handlers
+		}
+	}
+	c.tlsConfig = tlsConfig
+	c.tlsLock.Unlock()
+	if closeIdle {
+		c.closeIdleConnections()
 	}
 }
 
+// UpdateTLSCerts sets the root CAs and the client certificates that the new connections of the transport are opened with.
+// Applying a certificate that is already there again leaves the config as it is.
 func (c *DefaultClientTransport) UpdateTLSCerts(rootCAs *x509.CertPool, certs []*tls.Certificate) {
-	c.CloseIdleConnections()
-	tlsConfig := c.GetTLSConfig()
+	c.closeIdleConnections()
+	c.tlsLock.Lock()
+	defer c.tlsLock.Unlock()
+	tlsConfig := c.currentTLSConfigLocked().Clone()
 	if rootCAs != nil {
 		tlsConfig.RootCAs = rootCAs
 	}
 	if certs != nil {
 		for _, cert := range certs {
-			tlsConfig.Certificates = append(tlsConfig.Certificates, *cert)
+			if cert != nil && !hasCertificate(tlsConfig.Certificates, cert) {
+				tlsConfig.Certificates = append(tlsConfig.Certificates, *cert)
+			}
 		}
-		tlsConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-			return &tlsConfig.Certificates[0], nil
+		if len(tlsConfig.Certificates) > 0 {
+			tlsConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+				return &tlsConfig.Certificates[0], nil
+			}
 		}
 	}
+	c.tlsConfig = tlsConfig
+}
+
+func hasCertificate(certs []tls.Certificate, cert *tls.Certificate) bool {
+	for i := range certs {
+		if slices.EqualFunc(certs[i].Certificate, cert.Certificate, bytes.Equal) {
+			return true
+		}
+	}
+	return false
+}
+
+// peerCertInfoLocked returns the info of the peer that the transport connects to, which requires peerLock to be held.
+func (c *DefaultClientTransport) peerCertInfoLocked(remoteAddr string) *gototls.PeerCertInfo {
+	if c.PeerCertInfo == nil {
+		c.PeerCertInfo = gototls.NewPeerCertInfo(remoteAddr)
+		c.PeerCertInfo.RemoteAddr = remoteAddr
+	}
+	return c.PeerCertInfo
 }
 
 func (c *DefaultClientTransport) StorePeerCertInfo(remoteAddr string, commonName string, dnsNames, uris []string, issuer string) {
-	if c.PeerCertInfo == nil {
-		c.PeerCertInfo = gototls.NewPeerCertInfo(remoteAddr)
-		c.PeerCertInfo.RemoteAddr = remoteAddr
-	}
-	c.PeerCertInfo.Subject = commonName
-	c.PeerCertInfo.DNSNames = dnsNames
-	c.PeerCertInfo.URIs = uris
-	c.PeerCertInfo.Issuer = issuer
+	c.peerLock.Lock()
+	defer c.peerLock.Unlock()
+	pci := c.peerCertInfoLocked(remoteAddr)
+	pci.Subject = commonName
+	pci.DNSNames = dnsNames
+	pci.URIs = uris
+	pci.Issuer = issuer
 }
 
 func (c *DefaultClientTransport) StoreSNI(remoteAddr string, sni, alpn string) {
-	if c.PeerCertInfo == nil {
-		c.PeerCertInfo = gototls.NewPeerCertInfo(remoteAddr)
-		c.PeerCertInfo.RemoteAddr = remoteAddr
-	}
-	c.PeerCertInfo.SNI = sni
-	c.PeerCertInfo.NegotiatedALPN = alpn
+	c.peerLock.Lock()
+	defer c.peerLock.Unlock()
+	pci := c.peerCertInfoLocked(remoteAddr)
+	pci.SNI = sni
+	pci.NegotiatedALPN = alpn
 }
 
 func (c *DefaultClientTransport) StoreALPN(remoteAddr string, alpn []string) {
-	if c.PeerCertInfo == nil {
-		c.PeerCertInfo = gototls.NewPeerCertInfo(remoteAddr)
-		c.PeerCertInfo.RemoteAddr = remoteAddr
-	}
-	c.PeerCertInfo.ALPN = alpn
+	c.peerLock.Lock()
+	defer c.peerLock.Unlock()
+	c.peerCertInfoLocked(remoteAddr).ALPN = alpn
 }
 
 func (c *DefaultClientTransport) UpdatePeerStatus(remoteAddr string, finished bool, status string) {
-	if c.PeerCertInfo == nil {
-		c.PeerCertInfo = gototls.NewPeerCertInfo(remoteAddr)
-		c.PeerCertInfo.RemoteAddr = remoteAddr
-	}
-	c.PeerCertInfo.Finished = finished
-	c.PeerCertInfo.Status = append(c.PeerCertInfo.Status, status)
-	c.PeerCertInfo.EndAt = time.Now()
+	c.peerLock.Lock()
+	defer c.peerLock.Unlock()
+	pci := c.peerCertInfoLocked(remoteAddr)
+	pci.Finished = finished
+	pci.Status = append(pci.Status, status)
+	pci.EndAt = time.Now()
 }
 
+// GetPeerCertInfo returns a copy of what the handshakes of the transport found out about its peer, which is not
+// affected by the handshakes that follow.
 func (c *DefaultClientTransport) GetPeerCertInfo() *gototls.PeerCertInfo {
-	return c.PeerCertInfo
+	c.peerLock.Lock()
+	defer c.peerLock.Unlock()
+	if c.PeerCertInfo == nil {
+		return nil
+	}
+	pci := *c.PeerCertInfo
+	pci.Status = slices.Clone(pci.Status)
+	return &pci
 }
 
 func (c *DefaultClientTransport) Close() {
@@ -301,21 +400,25 @@ func CreateHTTPClient(port int, label string, h2, autoUpgrade, isTLS, noSNI bool
 	if h2 {
 		tlsConfig.NextProtos = []string{"h2"}
 	}
+	// The config that the dialers use is kept by the client, which changes it as requests ask for other TLS settings. The
+	// transports below get configs of their own, which nobody changes, as they read these while requests are running.
+	ct.tlsConfig = tlsConfig
 	dialTLSContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
 		dialer := &net.Dialer{Timeout: connTimeout, KeepAlive: connIdleTimeout}
 		rawConn, err := dialer.DialContext(ctx, network, addr)
 		if err != nil {
 			return nil, err
 		}
-		tlsConfig.VerifyConnection = gototls.ExtractSNI(network, "Client-"+label, addr, ct.StoreSNI, ct.StorePeerCertInfo, ct.UpdatePeerStatus)
-		tlsConfig.VerifyPeerCertificate = gototls.ExtractPeerCertInfo(network, "Client-"+label, addr, ct.StorePeerCertInfo, ct.UpdatePeerStatus)
-		tlsConn := tls.Client(rawConn, tlsConfig)
+		connTLSConfig, alpn := ct.dialTLSConfig()
+		connTLSConfig.VerifyConnection = gototls.ExtractSNI(network, "Client-"+label, addr, ct.StoreSNI, ct.StorePeerCertInfo, ct.UpdatePeerStatus)
+		connTLSConfig.VerifyPeerCertificate = gototls.ExtractPeerCertInfo(network, "Client-"+label, addr, ct.StorePeerCertInfo, ct.UpdatePeerStatus)
+		tlsConn := tls.Client(rawConn, connTLSConfig)
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
 			rawConn.Close()
 			return nil, err
 		}
-		if ct.alpn != nil {
-			if data, err := ct.alpn.Handle(tlsConn); err == nil && data != nil {
+		if alpn != nil {
+			if data, err := alpn.Handle(tlsConn); err == nil && data != nil {
 				if j := util.ProtoToJSON(data); j != nil {
 					log.Printf("TransportClient [%d][%s]: Read TLS Handshake Preamble: %s\n", port, label, j.ToJSONText())
 				} else {
@@ -333,7 +436,7 @@ func CreateHTTPClient(port int, label string, h2, autoUpgrade, isTLS, noSNI bool
 			ReadIdleTimeout: connIdleTimeout,
 			PingTimeout:     connTimeout,
 			AllowHTTP:       true,
-			TLSClientConfig: tlsConfig,
+			TLSClientConfig: tlsConfig.Clone(),
 		}
 		h2t.DialTLSContext = func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
 			if isTLS {
@@ -359,7 +462,7 @@ func CreateHTTPClient(port int, label string, h2, autoUpgrade, isTLS, noSNI bool
 			DialTLSContext:        dialTLSContext,
 			TLSHandshakeTimeout:   connTimeout,
 			ForceAttemptHTTP2:     autoUpgrade,
-			TLSClientConfig:       tlsConfig,
+			TLSClientConfig:       tlsConfig.Clone(),
 		}
 		ht = NewHTTPTransportIntercept(t, label, newConnNotifierChan)
 		ct.UpdateTransport(&http.Client{Timeout: requestTimeout, Transport: ht}, nil, t, nil, ht, nil, false)

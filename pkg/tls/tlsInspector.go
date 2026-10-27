@@ -60,22 +60,26 @@ func NewTLSInspector(port int, label string, l net.Listener, tlsConfig *tls.Conf
 }
 
 func (t *TLSInspector) Accept() (net.Conn, error) {
-	c, err := t.Listener.Accept()
-	if err != nil {
-		return nil, err
-	}
-	buffered := newPeekedConn(c)
+	for {
+		c, err := t.Listener.Accept()
+		if err != nil {
+			return nil, err
+		}
+		buffered := newPeekedConn(c)
 
-	// 0x16 (22 in decimal) is the standard TLS Handshake record type
-	b, err := buffered.Peek(1)
-	if err != nil {
-		c.Close()
-		return nil, err
+		// 0x16 (22 in decimal) is the standard TLS Handshake record type
+		b, err := buffered.Peek(1)
+		if err != nil {
+			// A client that connects and goes away without sending anything (a port probe, a health check) is no
+			// reason to fail the listener: servers stop accepting on an error that is not a temporary one.
+			c.Close()
+			continue
+		}
+		if b[0] == 0x16 {
+			return tls.Server(buffered, t.tlsConfig), nil
+		}
+		return buffered, nil
 	}
-	if b[0] == 0x16 {
-		return tls.Server(buffered, t.tlsConfig), nil
-	}
-	return buffered, nil
 }
 
 type PeekedConn struct {
@@ -163,11 +167,11 @@ func HandleClientHello(port, label string, tlsConfig *tls.Config,
 	storeSNI func(remoteAddr string, sni, alpn string),
 	updatePeerStatus func(remoteAddr string, success bool, e string)) func(*tls.ClientHelloInfo) (*tls.Config, error) {
 	return func(clientHello *tls.ClientHelloInfo) (*tls.Config, error) {
-		log.Printf("HandleClientHello called on Port [%s] Label [%s] - SNI: [%s], SupportedProtos: %+v\n", port, label, clientHello.ServerName, clientHello.SupportedProtos)
 		if clientHello == nil {
 			msg := fmt.Sprintf("HandleClientHello on Port [%s] Label [%s] - No clientHello provided", port, label)
 			return nil, errors.New(msg)
 		}
+		log.Printf("HandleClientHello called on Port [%s] Label [%s] - SNI: [%s], SupportedProtos: %+v\n", port, label, clientHello.ServerName, clientHello.SupportedProtos)
 		remoteAddr := clientHello.Conn.RemoteAddr().String()
 		storeALPN(remoteAddr, clientHello.SupportedProtos)
 		storeSNI(remoteAddr, clientHello.ServerName, "")
@@ -192,6 +196,9 @@ func IssuerToString(cert *x509.Certificate) string {
 func IdentifyLeaf(certs []*tls.Certificate) *x509.Certificate {
 	var leaf *x509.Certificate
 	var err error
+	if len(certs) == 0 || certs[0] == nil {
+		return nil
+	}
 	if certs[0].Leaf == nil && len(certs[0].Certificate) > 0 {
 		if leaf, err = x509.ParseCertificate(certs[0].Certificate[0]); err == nil {
 			certs[0].Leaf = leaf

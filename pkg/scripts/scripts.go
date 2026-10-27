@@ -131,6 +131,13 @@ func (sm *ScriptManager) RunScript(name string, args []string, in io.Reader, out
 	sm.scriptsLock.RLock()
 	script := sm.scripts[name]
 	sm.scriptsLock.RUnlock()
+	if script == nil {
+		// There is no script to run when the name was never added, was removed, or could not be stored.
+		msg := fmt.Sprintf("Script: Script [%s] not found", name)
+		log.Println(msg)
+		fmt.Fprintln(out, msg)
+		return
+	}
 	if args == nil {
 		args = []string{}
 	}

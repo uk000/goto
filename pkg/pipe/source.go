@@ -34,10 +34,17 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 type SourceType string
+
+// The callbacks of the sources that are triggered by the traffic are registered through these, which the tests replace.
+var (
+	registerTriggerPipeCallback = trigger.RegisterPipeCallback
+	registerTunnelPipeCallback  = tunnel.RegisterPipeCallback
+)
 
 const (
 	SourceK8s         SourceType = "K8s"
@@ -105,16 +112,22 @@ type ScriptSource struct {
 	AbstractSource
 }
 
+// HTTPRequestSource keeps the last request that the trigger reported. It's written by the goroutine of the request that
+// is reported and read by the run of the pipe, which are not the same goroutine when the pipe is running already.
 type HTTPRequestSource struct {
 	AbstractSource
 	request  map[string]interface{}
 	response map[string]interface{}
+	lock     sync.Mutex
 }
 
+// TunnelSource keeps the last request and response that the tunnel reported, under the same circumstances as the
+// HTTPRequestSource does.
 type TunnelSource struct {
 	AbstractSource
 	request  map[string]interface{}
 	response map[string]interface{}
+	lock     sync.Mutex
 }
 
 func (s *AbstractSource) Init(*Pipe) {}
@@ -161,7 +174,7 @@ func (s *AbstractSource) pipelineSource() *PipelineSource {
 }
 
 func NewSource(name string, sourceType SourceType, spec string, pipe *Pipe) *PipelineSource {
-	ps := &PipelineSource{Type: sourceType}
+	ps := &PipelineSource{Type: sourceType, Spec: spec}
 	return ps.Init(name, pipe).pipelineSource()
 }
 
@@ -181,7 +194,13 @@ func (ps *PipelineSource) Init(name string, pipe *Pipe) Source {
 		realSource = &HTTPRequestSource{AbstractSource: AbstractSource{PipelineSource: ps}}
 	case SourceTunnel:
 		realSource = &TunnelSource{AbstractSource: AbstractSource{PipelineSource: ps}}
+	default:
+		// a source of an unknown type has nothing to generate, but it can still be a part of the pipe
+		log.Printf("Pipe: Source [%s] has unknown type [%s]\n", name, ps.Type)
+		realSource = &AbstractSource{PipelineSource: ps}
 	}
+	// the fillers are found again whenever the source is initialised, so they are not to be added to the earlier ones
+	ps.specFillers, ps.contentFillers, ps.inputFillers = nil, nil, nil
 	if ps.Spec != "" {
 		for _, filler := range util.GetFillers(ps.Spec) {
 			ps.specFillers = append(ps.specFillers, filler)
@@ -312,6 +331,10 @@ func (k *K8sPodExecSource) prepareCommand() string {
 
 func (k *K8sPodExecSource) generate() interface{} {
 	podID := strings.Split(k.finalSpec, "/")
+	if len(podID) != 3 {
+		log.Printf("Pipe: Invalid pod [%s] for source [%s], want namespace/label/container\n", k.finalSpec, k.Name)
+		return nil
+	}
 	command := k.prepareCommand()
 	if out, err := k8sExec.PodExec(podID[0], podID[1], podID[2], command); err == nil {
 		return out
@@ -378,7 +401,11 @@ func (j *JobSource) generate() interface{} {
 }
 
 func (s *ScriptSource) generate() interface{} {
-	r := strings.NewReader(fmt.Sprint(s.finalInput))
+	input := ""
+	if s.finalInput != nil {
+		input = fmt.Sprint(s.finalInput)
+	}
+	r := strings.NewReader(input)
 	var buff bytes.Buffer
 	w := bufio.NewWriter(&buff)
 	scripts.Scripts.RunScript(s.finalSpec, nil, r, w)
@@ -392,18 +419,21 @@ func (s *ScriptSource) IsScript() bool {
 
 func (h *HTTPRequestSource) watch() {
 	if h.triggerPipe != nil && !h.watching {
-		trigger.RegisterPipeCallback(h.Spec, h.Name, func(trigger, source string, port int, r *http.Request, statusCode int, responseHeaders http.Header) {
+		registerTriggerPipeCallback(h.Spec, h.Name, func(trigger, source string, port int, r *http.Request, statusCode int, responseHeaders http.Header) {
 			log.Printf("HTTP Request Trigger [%s] Source [%s] triggered pipe [%s]\n", trigger, source, h.triggerPipe.Name)
 			rs := util.GetRequestStore(r)
-			h.request = map[string]interface{}{}
-			h.request["trigger"] = trigger
-			h.request["host"] = r.Host
-			h.request["uri"] = r.RequestURI
-			h.request["headers"] = r.Header
-			h.request["body"] = rs.RequestPayload
-			h.response = map[string]interface{}{}
-			h.response["status"] = statusCode
-			h.response["headers"] = responseHeaders
+			request := map[string]interface{}{}
+			request["trigger"] = trigger
+			request["host"] = r.Host
+			request["uri"] = r.RequestURI
+			request["headers"] = r.Header.Clone()
+			request["body"] = rs.RequestPayload
+			response := map[string]interface{}{}
+			response["status"] = statusCode
+			response["headers"] = responseHeaders.Clone()
+			h.lock.Lock()
+			h.request, h.response = request, response
+			h.lock.Unlock()
 			h.triggerPipe.Trigger()
 		})
 	}
@@ -416,23 +446,28 @@ func (h *HTTPRequestSource) init() {
 func (h *HTTPRequestSource) generate() interface{} {
 	h.watch()
 	h.watching = true
+	h.lock.Lock()
+	defer h.lock.Unlock()
 	return map[string]interface{}{"request": h.request, "response": h.response}
 }
 
 func (t *TunnelSource) watch() {
 	if t.triggerPipe != nil && !t.watching {
-		tunnel.RegisterPipeCallback(t.Spec, t.Name, func(endpoint, source string, port int, r *http.Request, statusCode int, responseHeaders http.Header, responseBody io.ReadCloser) {
+		registerTunnelPipeCallback(t.Spec, t.Name, func(endpoint, source string, port int, r *http.Request, statusCode int, responseHeaders http.Header, responseBody io.ReadCloser) {
 			log.Printf("Tunnel Endpoint [%s] Source [%s] triggered pipe [%s]\n", endpoint, source, t.triggerPipe.Name)
-			t.request = map[string]interface{}{}
-			t.request["host"] = r.Host
-			t.request["uri"] = r.RequestURI
-			t.request["headers"] = r.Header
-			t.request["body"] = util.Read(r.Body)
-			t.response = map[string]interface{}{}
-			t.response["endpoint"] = endpoint
-			t.response["headers"] = responseHeaders
-			t.response["body"] = util.Read(responseBody)
-			t.response["status"] = statusCode
+			request := map[string]interface{}{}
+			request["host"] = r.Host
+			request["uri"] = r.RequestURI
+			request["headers"] = r.Header.Clone()
+			request["body"] = util.Read(r.Body)
+			response := map[string]interface{}{}
+			response["endpoint"] = endpoint
+			response["headers"] = responseHeaders.Clone()
+			response["body"] = util.Read(responseBody)
+			response["status"] = statusCode
+			t.lock.Lock()
+			t.request, t.response = request, response
+			t.lock.Unlock()
 			t.triggerPipe.Trigger()
 		})
 	}
@@ -445,5 +480,7 @@ func (t *TunnelSource) init() {
 func (t *TunnelSource) generate() interface{} {
 	t.watch()
 	t.watching = true
+	t.lock.Lock()
+	defer t.lock.Unlock()
 	return map[string]interface{}{"request": t.request, "response": t.response}
 }

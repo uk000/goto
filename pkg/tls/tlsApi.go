@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -47,10 +48,10 @@ var (
 
 func setRoutes(r *mux.Router) {
 	tlsRouter := middleware.RootPath("/tls")
-	util.AddRoute(tlsRouter, "/ca/cert/add/{name}/{domain}", addCACertOrKey, "PUT", "POST")
-	util.AddRoute(tlsRouter, "/ca/cert/remove/{name}", removeCACertOrKey, "PUT", "POST")
-	util.AddRoute(tlsRouter, "/ca/key/add/{name}/{domain}", addCACertOrKey, "PUT", "POST")
-	util.AddRoute(tlsRouter, "/ca/key/remove/{name}", removeCACertOrKey, "PUT", "POST")
+	util.AddRoute(tlsRouter, "/ca/cert/add/{name}/{domain}", addCACertOrKey(false), "PUT", "POST")
+	util.AddRoute(tlsRouter, "/ca/cert/remove/{name}", removeCACertOrKey(false), "PUT", "POST")
+	util.AddRoute(tlsRouter, "/ca/key/add/{name}/{domain}", addCACertOrKey(true), "PUT", "POST")
+	util.AddRoute(tlsRouter, "/ca/key/remove/{name}", removeCACertOrKey(true), "PUT", "POST")
 	util.AddRoute(tlsRouter, "/ca/set/default/{name}", setDefaultCA, "PUT", "POST")
 	util.AddRoute(tlsRouter, "/ca/jwks", getCAJWKS, "GET")
 	util.AddRoute(tlsRouter, "/ca/pubkey", getDefaultCACert, "GET")
@@ -58,10 +59,10 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(tlsRouter, "/ca/verify", verifyCAJWT, "POST", "PUT")
 	util.AddRoute(tlsRouter, "/ca/certs", getCACerts, "GET")
 
-	util.AddRoute(tlsRouter, "/cert/add/{name}", addCertOrKey, "PUT", "POST")
-	util.AddRoute(tlsRouter, "/cert/remove/{name}", removeCertOrKey, "PUT", "POST")
-	util.AddRoute(tlsRouter, "/key/add/{name}", addCertOrKey, "PUT", "POST")
-	util.AddRoute(tlsRouter, "/key/remove/{name}", removeCertOrKey, "PUT", "POST")
+	util.AddRoute(tlsRouter, "/cert/add/{name}", addCertOrKey(false), "PUT", "POST")
+	util.AddRoute(tlsRouter, "/cert/remove/{name}", removeCertOrKey(false), "PUT", "POST")
+	util.AddRoute(tlsRouter, "/key/add/{name}", addCertOrKey(true), "PUT", "POST")
+	util.AddRoute(tlsRouter, "/key/remove/{name}", removeCertOrKey(true), "PUT", "POST")
 
 	util.AddRoute(tlsRouter, "/certs", getCerts, "GET")
 	util.AddRoute(tlsRouter, "/certs/raw", getCerts, "GET")
@@ -69,77 +70,84 @@ func setRoutes(r *mux.Router) {
 	util.AddRouteQ(tlsRouter, "/workdir/set", setWorkDir, "dir", "POST", "PUT")
 }
 
-func addCertOrKey(w http.ResponseWriter, r *http.Request) {
-	msg := ""
-	isKey := strings.Contains(r.RequestURI, "key")
-	name := util.GetStringParamValue(r, "name")
-	data := util.ReadBytes(r.Body)
-	if len(data) > 0 {
-		if d, err := base64.RawURLEncoding.DecodeString(string(data)); err == nil {
-			data = d
-		}
-		if isKey {
-			AddKey(name, data)
-			msg = fmt.Sprintf("Key stored for name [%s]", name)
+// The handlers below are told by the route whether they deal with keys or certs. Telling it from the request URI
+// would take any name or domain that has "key" in it (e.g. "monkey", "keycloak.example.com") for a key.
+
+func addCertOrKey(isKey bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		msg := ""
+		name := util.GetStringParamValue(r, "name")
+		data := util.ReadBytes(r.Body)
+		if len(data) > 0 {
+			if d, err := base64.RawURLEncoding.DecodeString(string(data)); err == nil {
+				data = d
+			}
+			if isKey {
+				AddKey(name, data)
+				msg = fmt.Sprintf("Key stored for name [%s]", name)
+			} else {
+				AddCert(name, data)
+				msg = fmt.Sprintf("Cert stored for name [%s]", name)
+			}
 		} else {
-			AddCert(name, data)
-			msg = fmt.Sprintf("Cert stored for name [%s]", name)
+			w.WriteHeader(http.StatusBadRequest)
+			msg = "No Payload"
 		}
-	} else {
-		w.WriteHeader(http.StatusBadRequest)
-		msg = "No Payload"
+		fmt.Fprintln(w, msg)
+		util.AddLogMessage(msg, r)
 	}
-	fmt.Fprintln(w, msg)
-	util.AddLogMessage(msg, r)
 }
 
-func removeCertOrKey(w http.ResponseWriter, r *http.Request) {
-	isKey := strings.Contains(r.RequestURI, "key")
-	name := util.GetStringParamValue(r, "name")
-	msg := ""
-	if isKey {
-		RemoveKey(name)
-		msg = "Key Removed"
-	} else {
-		RemoveCert(name)
-		msg = "Cert Removed"
+func removeCertOrKey(isKey bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := util.GetStringParamValue(r, "name")
+		msg := ""
+		if isKey {
+			RemoveKey(name)
+			msg = "Key Removed"
+		} else {
+			RemoveCert(name)
+			msg = "Cert Removed"
+		}
+		msg = fmt.Sprintf("%s for name [%s]", msg, name)
+		fmt.Fprintln(w, msg)
+		util.AddLogMessage(msg, r)
 	}
-	msg = fmt.Sprintf("%s for name [%s]", msg, name)
-	fmt.Fprintln(w, msg)
-	util.AddLogMessage(msg, r)
 }
 
-func addCACertOrKey(w http.ResponseWriter, r *http.Request) {
-	msg := ""
-	isKey := strings.Contains(r.RequestURI, "key")
-	name := util.GetStringParamValue(r, "name")
-	domain := util.GetStringParamValue(r, "domain")
-	data := util.ReadBytes(r.Body)
-	if isKey {
-		AddCAKey(name, domain, data)
-		msg = fmt.Sprintf("CA Key stored for name [%s]", name)
-	} else {
-		AddCACert(name, domain, data)
-		msg = fmt.Sprintf("CA Cert stored for name [%s]", name)
+func addCACertOrKey(isKey bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		msg := ""
+		name := util.GetStringParamValue(r, "name")
+		domain := util.GetStringParamValue(r, "domain")
+		data := util.ReadBytes(r.Body)
+		if isKey {
+			AddCAKey(name, domain, data)
+			msg = fmt.Sprintf("CA Key stored for name [%s]", name)
+		} else {
+			AddCACert(name, domain, data)
+			msg = fmt.Sprintf("CA Cert stored for name [%s]", name)
+		}
+		fmt.Fprintln(w, msg)
+		util.AddLogMessage(msg, r)
 	}
-	fmt.Fprintln(w, msg)
-	util.AddLogMessage(msg, r)
 }
 
-func removeCACertOrKey(w http.ResponseWriter, r *http.Request) {
-	isKey := strings.Contains(r.RequestURI, "key")
-	name := util.GetStringParamValue(r, "name")
-	msg := ""
-	if isKey {
-		RemoveCAKey(name)
-		msg = "CA Key Removed"
-	} else {
-		RemoveCACert(name)
-		msg = "CA Cert Removed"
+func removeCACertOrKey(isKey bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := util.GetStringParamValue(r, "name")
+		msg := ""
+		if isKey {
+			RemoveCAKey(name)
+			msg = "CA Key Removed"
+		} else {
+			RemoveCACert(name)
+			msg = "CA Cert Removed"
+		}
+		msg = fmt.Sprintf("%s for name [%s]", msg, name)
+		fmt.Fprintln(w, msg)
+		util.AddLogMessage(msg, r)
 	}
-	msg = fmt.Sprintf("%s for name [%s]", msg, name)
-	fmt.Fprintln(w, msg)
-	util.AddLogMessage(msg, r)
 }
 
 func setDefaultCA(w http.ResponseWriter, r *http.Request) {
@@ -156,8 +164,11 @@ func setDefaultCA(w http.ResponseWriter, r *http.Request) {
 }
 
 func getCAJWKS(w http.ResponseWriter, r *http.Request) {
+	lock.RLock()
+	jwks := DefaultCAJWKS
+	lock.RUnlock()
 	util.AddLogMessage("Sent CA JWKS", r)
-	util.WriteJsonPayload(w, DefaultCAJWKS)
+	util.WriteJsonPayload(w, jwks)
 }
 
 func getDefaultCACert(w http.ResponseWriter, r *http.Request) {
@@ -289,17 +300,31 @@ func verifyCAJWT(w http.ResponseWriter, r *http.Request) {
 
 func getCACerts(w http.ResponseWriter, r *http.Request) {
 	caCerts := map[string]*types.Pair[map[string]bool, string]{}
+	lock.RLock()
 	for name, pair := range CACerts {
-		cert := string(pair.Right)
-		caCerts[name] = types.NewPair(pair.Left, cert)
+		domains := make(map[string]bool, len(pair.Left))
+		for domain, present := range pair.Left {
+			domains[domain] = present
+		}
+		caCerts[name] = types.NewPair(domains, string(pair.Right))
 	}
+	lock.RUnlock()
 	util.AddLogMessage("Sent CA certs", r)
 	fmt.Fprintln(w, util.ToYaml(caCerts))
 }
 
 func getCerts(w http.ResponseWriter, r *http.Request) {
+	lock.RLock()
+	certsByName := make(map[string][]*tls.Certificate, len(X509Certs))
 	for name, certs := range X509Certs {
+		certsByName[name] = append([]*tls.Certificate(nil), certs...)
+	}
+	lock.RUnlock()
+	for name, certs := range certsByName {
 		for _, tlsCert := range certs {
+			if tlsCert == nil || len(tlsCert.Certificate) == 0 {
+				continue
+			}
 			cert, err := x509.ParseCertificate(tlsCert.Certificate[0])
 			if err != nil {
 				util.SendBadRequest(w, r, err.Error())

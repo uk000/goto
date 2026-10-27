@@ -69,6 +69,16 @@ func removeScript(w http.ResponseWriter, r *http.Request) {
 func runScript(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	args, _ := util.GetListParam(r, "args")
+	Scripts.scriptsLock.RLock()
+	found := Scripts.scripts[name] != nil
+	Scripts.scriptsLock.RUnlock()
+	if !found {
+		msg := fmt.Sprintf("Script [%s] not found", name)
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprintln(w, msg)
+		util.AddLogMessage(msg, r)
+		return
+	}
 	w.Header().Set(constants.HeaderContentType, "application/octet-stream")
 	Scripts.RunScript(name, args, r.Body, w)
 	msg := fmt.Sprintf("Script [%s] run successfully", name)

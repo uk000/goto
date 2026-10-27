@@ -56,9 +56,12 @@ type RemoteInfo struct {
 	Concurrent             int
 }
 
+// GotoClientInfo is shared between the goroutines that make a call and the ones that report on it. What is stored in it
+// after it is made, with StoreHeaders, is guarded by its lock, which JSON of it is written under.
 type GotoClientInfo struct {
 	*InstanceInfo
 	*RemoteInfo
+	lock sync.RWMutex
 }
 
 type GotoServerInfo struct {
@@ -99,7 +102,12 @@ type Timeline struct {
 	updateNotifier   TimelineUpdateNotifierFunc
 	endNotifier      TimelineEndNotifierFunc
 	eventCounter     atomic.Int32
-	lock             sync.RWMutex
+	// lock guards the fields above, and the choice of the stream, which is made by SetStreamPreferred. It is not held
+	// while the notifiers are called: they report on the timeline, and the timeline has to be readable for them.
+	lock sync.RWMutex
+	// sendLock keeps the notifications in the order of the updates that they report. It is taken before lock and never
+	// the other way around.
+	sendLock sync.Mutex
 }
 
 var (
@@ -139,7 +147,7 @@ func IsTimeline(data any) bool {
 	if _, ok := data.(*Timeline); ok {
 		return true
 	} else if m, ok := data.(map[string]any); ok {
-		if m["TYPE"] != nil && m["TYPE"].(string) == TIMELINE {
+		if typ, ok := m["TYPE"].(string); ok && typ == TIMELINE {
 			return true
 		}
 	}
@@ -249,18 +257,22 @@ func CheckAndGetResultOrHeaders(data any) (result, headers map[string]any) {
 
 func (t *Timeline) SetStreamPreferred(stream chan *types.Pair[string, any]) {
 	if stream != nil {
+		t.lock.Lock()
+		defer t.lock.Unlock()
 		t.stream = stream
 		t.streamPreferred = true
 	}
 }
 
 func (t *Timeline) EndTimeline(label, text string, status int, upstreamStatuses map[string]any, data any, success bool) {
+	t.lock.Lock()
 	t.Finished = true
 	t.Success = success
 	if status > 0 {
 		t.Status = status
 	}
 	t.UpstreamStatuses = upstreamStatuses
+	t.lock.Unlock()
 	if data != nil {
 		t.AddData(text, data, true)
 	} else {
@@ -288,35 +300,45 @@ func (t *Timeline) addEvent(label, text string, client *GotoClientInfo, remoteTe
 			remoteData = nil
 		}
 	}
-	if !t.NoEvents {
-		event := t.NewEvent(label, text, client, remoteClient, remoteServer, remoteTimeline, remoteText, remoteData)
-		t.lock.Lock()
-		defer t.lock.Unlock()
-		t.Events = append(t.Events, event)
+	// The notifications are sent in the order of the events, which are numbered and stored in that order too.
+	t.sendLock.Lock()
+	defer t.sendLock.Unlock()
+	t.lock.Lock()
+	noEvents, finished := t.NoEvents, t.Finished
+	if !noEvents {
+		t.Events = append(t.Events, t.NewEvent(label, text, client, remoteClient, remoteServer, remoteTimeline, remoteText, remoteData))
+	}
+	t.lock.Unlock()
+	if !noEvents {
 		if remoteText != "" {
-			t.send(fmt.Sprintf("%s: %s", text, remoteText), nil, false, t.Finished)
+			t.send(fmt.Sprintf("%s: %s", text, remoteText), nil, false, finished)
 		} else {
-			t.send(text, nil, false, t.Finished)
+			t.send(text, nil, false, finished)
 		}
 	}
 	// if client != nil {
-	// 	t.send("ClientInfo", client, true, t.Finished)
+	// 	t.send("ClientInfo", client, true, finished)
 	// }
 	// if remoteClient != nil {
-	// 	t.send("RemoteClientInfo", client, true, t.Finished)
+	// 	t.send("RemoteClientInfo", client, true, finished)
 	// }
 	if !util.IsNil(remoteServer) && !util.IsNil(remoteServer.ServerInfo) {
-		t.send("RemoteServerInfo", remoteServer.ServerInfo, true, t.Finished)
+		t.send("RemoteServerInfo", remoteServer.ServerInfo, true, finished)
 	}
 	if remoteData != nil {
-		t.send(label, remoteData, isJson, t.Finished)
+		t.send(label, remoteData, isJson, finished)
 	}
 }
 
 func (t *Timeline) AddData(key string, data any, json bool) {
+	t.sendLock.Lock()
+	defer t.sendLock.Unlock()
 	t.send(key, data, json, false)
 	t.lock.Lock()
 	defer t.lock.Unlock()
+	if t.Data == nil {
+		t.Data = map[string]any{}
+	}
 	t.Data[key] = data
 }
 
@@ -329,21 +351,26 @@ func (t *Timeline) AddRemoteCall(remoteID, callID string, data any) {
 	// t.RemoteCalls[remoteID][callID] = data
 }
 
+// send reports an update to the notifier of the timeline, or to its stream if there is no notifier to report to. It is
+// called with sendLock held, and without lock: the notifiers are free to read the timeline.
 func (t *Timeline) send(key string, data any, json, finish bool) {
+	t.lock.RLock()
+	stream, streamPreferred, success := t.stream, t.streamPreferred, t.Success
+	t.lock.RUnlock()
 	sent := false
 	if finish {
 		if t.endNotifier != nil {
-			t.endNotifier(key, data, t.Success)
+			t.endNotifier(key, data, success)
 			sent = true
 		}
-	} else if !t.streamPreferred {
+	} else if !streamPreferred {
 		if t.updateNotifier != nil {
 			t.updateNotifier(key, data, json)
 			sent = true
 		}
 	}
-	if !sent && t.stream != nil {
-		t.stream <- types.NewPair[string, any](key, data)
+	if !sent && stream != nil {
+		stream <- types.NewPair[string, any](key, data)
 	}
 }
 
@@ -406,6 +433,158 @@ func BuildGotoClientInfo(port int, label, target, url, server string, inHeaders,
 	}
 }
 
+// StoreHeaders keeps the headers that the client sent. The map belongs to the caller, as it did before: this is about the
+// reference to it, which the reports of the client are written from.
 func (c *GotoClientInfo) StoreHeaders(request http.Header) {
+	if c == nil {
+		return
+	}
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	if c.RemoteInfo == nil {
+		c.RemoteInfo = &RemoteInfo{}
+	}
 	c.OutboundRequestHeaders = request
+}
+
+// MarshalJSON writes the client as its embedded infos, which is what it is without the lock, while it is not changed.
+func (c *GotoClientInfo) MarshalJSON() ([]byte, error) {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	return json.Marshal(struct {
+		*InstanceInfo
+		*RemoteInfo
+	}{c.InstanceInfo, c.RemoteInfo})
+}
+
+// clone is a copy of the client that is not changed by what is stored in the client after it.
+func (c *GotoClientInfo) clone() *GotoClientInfo {
+	if c == nil {
+		return nil
+	}
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	c2 := &GotoClientInfo{}
+	if c.InstanceInfo != nil {
+		info := *c.InstanceInfo
+		c2.InstanceInfo = &info
+	}
+	if c.RemoteInfo != nil {
+		remote := *c.RemoteInfo
+		c2.RemoteInfo = &remote
+	}
+	return c2
+}
+
+func (s *GotoServerInfo) clone() *GotoServerInfo {
+	if s == nil {
+		return nil
+	}
+	s2 := *s
+	if s.ServerInfo != nil {
+		info := *s.ServerInfo
+		s2.ServerInfo = &info
+	}
+	return &s2
+}
+
+// timelineJSON has the fields of a timeline that are reported, as they are in the JSON of a timeline.
+type timelineJSON struct {
+	TYPE             string `json:"TYPE,omitempty"`
+	Port             int
+	Label            string
+	Server           *GotoServerInfo
+	Events           []*Event
+	Data             map[string]any
+	RemoteCalls      map[string]map[string]any
+	UpstreamHeaders  map[string]any
+	Status           int
+	UpstreamStatuses map[string]any
+	Finished         bool
+	Success          bool
+	ResultOnly       bool
+	NoEvents         bool
+	RemoteGotos      map[string]bool
+}
+
+// MarshalJSON writes the timeline while it is read-locked, so a timeline that goes on to change is written as it was at
+// some point, and not in pieces.
+func (t *Timeline) MarshalJSON() ([]byte, error) {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	return json.Marshal(&timelineJSON{
+		TYPE:             t.TYPE,
+		Port:             t.Port,
+		Label:            t.Label,
+		Server:           t.Server,
+		Events:           t.Events,
+		Data:             t.Data,
+		RemoteCalls:      t.RemoteCalls,
+		UpstreamHeaders:  t.UpstreamHeaders,
+		Status:           t.Status,
+		UpstreamStatuses: t.UpstreamStatuses,
+		Finished:         t.Finished,
+		Success:          t.Success,
+		ResultOnly:       t.ResultOnly,
+		NoEvents:         t.NoEvents,
+		RemoteGotos:      t.RemoteGotos,
+	})
+}
+
+func copyMap[V any](m map[string]V) map[string]V {
+	if m == nil {
+		return nil
+	}
+	m2 := make(map[string]V, len(m))
+	for k, v := range m {
+		m2[k] = v
+	}
+	return m2
+}
+
+// Snapshot is a copy of the timeline as it is now, which is not changed by what is added to the timeline after it, and
+// does not change the timeline. It has no stream and no notifiers, so what is added to it is not reported to anyone.
+// The values that were added as data are shared with the timeline, the events and the maps of the timeline are not.
+func (t *Timeline) Snapshot() *Timeline {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	s := &Timeline{
+		TYPE:             t.TYPE,
+		Port:             t.Port,
+		Label:            t.Label,
+		Server:           t.Server.clone(),
+		Data:             copyMap(t.Data),
+		UpstreamHeaders:  copyMap(t.UpstreamHeaders),
+		Status:           t.Status,
+		UpstreamStatuses: copyMap(t.UpstreamStatuses),
+		Finished:         t.Finished,
+		Success:          t.Success,
+		ResultOnly:       t.ResultOnly,
+		NoEvents:         t.NoEvents,
+		RemoteGotos:      copyMap(t.RemoteGotos),
+	}
+	if t.Events != nil {
+		s.Events = make([]*Event, len(t.Events))
+		for i, e := range t.Events {
+			if e == nil {
+				continue
+			}
+			e2 := *e
+			e2.Client = e.Client.clone()
+			e2.RemoteClient = e.RemoteClient.clone()
+			e2.RemoteServer = e.RemoteServer.clone()
+			if e.RemoteTimeline != nil {
+				e2.RemoteTimeline = e.RemoteTimeline.Snapshot()
+			}
+			s.Events[i] = &e2
+		}
+	}
+	if t.RemoteCalls != nil {
+		s.RemoteCalls = make(map[string]map[string]any, len(t.RemoteCalls))
+		for k, v := range t.RemoteCalls {
+			s.RemoteCalls[k] = copyMap(v)
+		}
+	}
+	s.eventCounter.Store(t.eventCounter.Load())
+	return s
 }

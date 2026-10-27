@@ -89,28 +89,35 @@ func init() {
 	}
 }
 
+// The parsed certs in X509Certs are built from the raw cert and key of a name, so they are dropped whenever the raw
+// cert or key of the name changes. Otherwise a cert that was uploaded again (or removed) would keep being served.
+
 func AddCert(name string, cert []byte) {
 	lock.Lock()
 	defer lock.Unlock()
 	rawCerts[name] = cert
+	delete(X509Certs, name)
 }
 
 func RemoveCert(name string) {
 	lock.Lock()
 	defer lock.Unlock()
 	delete(rawCerts, name)
+	delete(X509Certs, name)
 }
 
 func AddKey(name string, cert []byte) {
 	lock.Lock()
 	defer lock.Unlock()
 	rawKeys[name] = cert
+	delete(X509Certs, name)
 }
 
 func RemoveKey(name string) {
 	lock.Lock()
 	defer lock.Unlock()
 	delete(rawKeys, name)
+	delete(X509Certs, name)
 }
 
 func GetCerts(key string) (certs []*tls.Certificate, err error) {
@@ -228,6 +235,8 @@ func AddAutoCert(name string, commonName string, altNames []string, spiffeID str
 }
 
 func (s *SpiffeCerts) Add(name, domain, spiffeID string) {
+	lock.Lock()
+	defer lock.Unlock()
 	if s.ByIDNameDomain == nil {
 		s.ByIDNameDomain = map[string]*types.Pair[string, string]{}
 	}
@@ -235,6 +244,8 @@ func (s *SpiffeCerts) Add(name, domain, spiffeID string) {
 }
 
 func (s *SpiffeCerts) IsEmpty() bool {
+	lock.RLock()
+	defer lock.RUnlock()
 	return len(s.ByIDNameDomain) == 0
 }
 
@@ -312,6 +323,7 @@ func CreateCertificate(domains []string, spiffeID, saveWithPrefix string) (outCe
 	}
 	cn := domains[0]
 	var rawCACert, rawCAKey []byte
+	lock.RLock()
 	for _, domainsCert := range CACerts {
 		if domainsCert.Left[cn] {
 			rawCACert = domainsCert.Right
@@ -324,6 +336,7 @@ func CreateCertificate(domains []string, spiffeID, saveWithPrefix string) (outCe
 			break
 		}
 	}
+	lock.RUnlock()
 	return CreateCertificateWithCA(rawCACert, rawCAKey, domains, spiffeID, saveWithPrefix, false)
 }
 
@@ -358,9 +371,15 @@ func CreateCertificateWithCA(rawCACert, rawCAKey []byte, domains []string, spiff
 	}
 	subjectKeyID := sha1.Sum(pubDER)
 
+	// Certs issued by the same CA need distinct serial numbers, and several certs get created within a second.
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 127))
+	if err != nil {
+		return &tls.Certificate{}, fmt.Errorf("failed to generate serial number: %w", err)
+	}
+	serial.Add(serial, big.NewInt(1))
 	now := time.Now()
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(now.Unix()),
+		SerialNumber: serial,
 		Subject: pkix.Name{
 			CommonName:         domains[0],
 			Organization:       []string{domains[0]},
@@ -426,7 +445,7 @@ func CreateCertificateWithCA(rawCACert, rawCAKey []byte, domains []string, spiff
 	if saveWithPrefix != "" {
 		folder := filepath.Join(global.ServerConfig.WorkDir)
 		if _, err = os.Stat(folder); os.IsNotExist(err) {
-			err = os.MkdirAll(folder, os.ModeTemporary)
+			err = os.MkdirAll(folder, 0755)
 		}
 		if err != nil {
 			fmt.Printf("Failed to create path [%s] for writing cert with error: %s\n", saveWithPrefix, err.Error())
@@ -596,6 +615,10 @@ func pemBlockForKey(priv interface{}) *pem.Block {
 	}
 }
 
+// ErrMalformedClientHello is what ReadTLSSNIFromConn reports for a TLS handshake record whose content is not a client
+// hello that can be parsed. Errors of reading the connection, and of data that is not a TLS handshake at all, are not it.
+var ErrMalformedClientHello = errors.New("malformed TLS client hello")
+
 func ReadTLSSNIFromConn(conn net.Conn) (sni string, buff bytes.Buffer, err error) {
 	r := io.TeeReader(conn, &buff)
 	tlsBuff, err := readTLSHandshake(r)
@@ -604,6 +627,7 @@ func ReadTLSSNIFromConn(conn net.Conn) (sni string, buff bytes.Buffer, err error
 	}
 	tlsBuff, err = getClientHelloData(tlsBuff)
 	if err != nil {
+		err = fmt.Errorf("%w: %v", ErrMalformedClientHello, err)
 		return
 	}
 	cipherSuites, _ := getClientCipherSuites(tlsBuff)
@@ -638,7 +662,7 @@ func readTLSHandshake(r io.Reader) (buff []byte, err error) {
 }
 
 func getClientHelloData(tlsBuff []byte) ([]byte, error) {
-	if tlsBuff[0] != 0x01 {
+	if len(tlsBuff) == 0 || tlsBuff[0] != 0x01 {
 		return nil, errors.New("Invalid ClientHello")
 	}
 	buff, _, err := parseByteRecordOfSize(tlsBuff[1:], 3, "Client Hello Header")
@@ -753,12 +777,26 @@ func getClientHelloExtensions(tlsBuff []byte) ([]byte, error) {
 	return buff, nil
 }
 
+// nextExtension splits the first extension off the extensions of a ClientHello, which come from the network and so
+// can be cut anywhere.
+func nextExtension(extensions []byte) (extType uint16, extData, rest []byte, err error) {
+	if len(extensions) < 2 {
+		return 0, nil, nil, errors.New("Buffer doesn't have enough bytes to read the extension type")
+	}
+	extType = binary.BigEndian.Uint16(extensions[:2])
+	extData, rest, err = parseByteRecordOfSize(extensions[2:], 2, "Extension Data")
+	return
+}
+
 func getSNIExtensionEntries(extensions []byte) (sni string, err error) {
 	found := false
 	var extData []byte
 	for len(extensions) > 0 {
-		extType := binary.BigEndian.Uint16(extensions[:2])
-		extData, extensions, err = parseByteRecordOfSize(extensions[2:], 2, "Extension Data")
+		var extType uint16
+		extType, extData, extensions, err = nextExtension(extensions)
+		if err != nil {
+			return "", err
+		}
 		if extType == 0x0 { //SNI record
 			found = true
 			break
@@ -769,7 +807,7 @@ func getSNIExtensionEntries(extensions []byte) (sni string, err error) {
 		if err != nil {
 			return "", err
 		}
-		if sniListEntry[0] == 0x0 { //type of list entry is DNS hostname
+		if len(sniListEntry) > 0 && sniListEntry[0] == 0x0 { //type of list entry is DNS hostname
 			sniEntry, _, err := parseByteRecordOfSize(sniListEntry[1:], 2, "SNI Hostname")
 			if err != nil {
 				return "", err
@@ -784,17 +822,26 @@ func getSignatureAlgorithms(extensions []byte) (algos []string, err error) {
 	found := false
 	var extData []byte
 	for len(extensions) > 0 {
-		extType := binary.BigEndian.Uint16(extensions[:2])
-		extData, extensions, err = parseByteRecordOfSize(extensions[2:], 2, "Extension Data")
+		var extType uint16
+		extType, extData, extensions, err = nextExtension(extensions)
+		if err != nil {
+			return nil, err
+		}
 		if extType == 0x0d { //Signature Algorithms
 			found = true
 			break
 		}
 	}
 	if found {
+		if len(extData) < 2 {
+			return nil, errors.New("Invalid Signature Algorithms extension")
+		}
 		length := int(binary.BigEndian.Uint16(extData[:2]))
 		extData = extData[2:]
-		for i := 0; i < length; i += 2 {
+		if length > len(extData) {
+			length = len(extData)
+		}
+		for i := 0; i+1 < length; i += 2 {
 			algo := ""
 			if extData[i] == 0x07 {
 				switch extData[i+1] {

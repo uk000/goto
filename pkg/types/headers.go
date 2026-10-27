@@ -72,15 +72,29 @@ func Union(h1, h2 *Headers) *Headers {
 	return hNew
 }
 
+// Clone returns a deep copy of the headers, that has nothing in common with them. The copy is always set up (NonNil):
+// what is missing in the headers (the request, the response, their maps) is empty in the copy.
 func (h *Headers) Clone() *Headers {
-	h2 := NewHeaders()
-	h2.Request.Add = maps.Clone(h.Request.Add)
-	h2.Request.Remove = h.Request.Remove
-	h2.Request.Forward = h.Request.Forward
-	return h2
+	if h == nil {
+		return nil
+	}
+	return &Headers{Request: h.Request.clone(), Response: h.Response.clone()}
+}
+
+func (hc *HeadersConfig) clone() *HeadersConfig {
+	c := NewHeadersConfig()
+	if hc != nil {
+		maps.Copy(c.Add, hc.Add)
+		c.Remove = append(c.Remove, hc.Remove...)
+		c.Forward = append(c.Forward, hc.Forward...)
+	}
+	return c
 }
 
 func (h *Headers) NonNil() {
+	if h == nil {
+		return
+	}
 	if h.Request == nil {
 		h.Request = NewHeadersConfig()
 	}
@@ -92,27 +106,30 @@ func (h *Headers) NonNil() {
 }
 
 func (hc *HeadersConfig) NonNil() {
-	if hc.Add == nil {
+	if hc != nil && hc.Add == nil {
 		hc.Add = map[string]string{}
 	}
 }
 
 func (hc *Headers) HasForwardHeaders() bool {
-	return hc.Request != nil && len(hc.Request.Forward) > 0
+	return hc != nil && hc.Request != nil && len(hc.Request.Forward) > 0
 }
 
+// Merge adds the headers of h2 to these headers, which are set up if they are not (a Headers{} has no request or response).
 func (h *Headers) Merge(h2 *Headers) {
-	if h2 == nil {
+	if h == nil || h2 == nil {
 		return
 	}
+	h.NonNil()
 	h.Request.Merge(h2.Request)
 	h.Response.Merge(h2.Response)
 }
 
 func (hc *HeadersConfig) Merge(hc2 *HeadersConfig) {
-	if hc2 == nil {
+	if hc == nil || hc2 == nil {
 		return
 	}
+	hc.NonNil()
 	for k, v := range hc2.Add {
 		hc.Add[k] = v
 	}
@@ -128,6 +145,9 @@ func (hc *HeadersConfig) Union(hc2 *HeadersConfig) *HeadersConfig {
 }
 
 func (hc *HeadersConfig) UpdateHeaders(headers MutatingHeaders) {
+	if hc == nil {
+		return
+	}
 	if len(hc.Remove) > 0 {
 		for _, h := range hc.Remove {
 			headers.Del(h)

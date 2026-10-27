@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"goto/pkg/util"
+	"log"
 	"regexp"
 	"strings"
 	"text/template"
@@ -131,6 +132,10 @@ func (pt *PipelineTransform) InitTransform() {
 		pt.transform = &TemplateTransform{AbstractTransform: pt.AbstractTransform}
 	case TransformRegex:
 		pt.transform = &RegexTransform{AbstractTransform: pt.AbstractTransform}
+	default:
+		// a transform of an unknown type does nothing
+		pt.transform = nil
+		return
 	}
 	pt.transform.SetSpec(pt.Spec)
 }
@@ -227,6 +232,10 @@ func (t *TemplateTransform) SetSpec(spec string) {
 }
 
 func (t *TemplateTransform) Out() util.JSON {
+	// the template is missing when the spec could not be parsed
+	if t.template == nil {
+		return util.JSONFromJSON(map[string]interface{}{t.Name: ""})
+	}
 	return util.JSONFromJSON(map[string]interface{}{
 		t.Name: util.JSONFromJSON(t.input).ExecuteTemplate(t.template),
 	})
@@ -238,12 +247,22 @@ func (j *TemplateTransform) IsTemplate() bool {
 
 func (r *RegexTransform) SetSpec(spec string) {
 	r.Spec = spec
-	r.regexp = regexp.MustCompile(spec)
+	re, err := regexp.Compile(spec)
+	if err != nil {
+		log.Printf("Pipe: Transform [%s] has an invalid regex [%s]: %s\n", r.Name, spec, err.Error())
+		re = nil
+	}
+	r.regexp = re
 }
 
 func (r *RegexTransform) Out() util.JSON {
+	var matches []string
+	// a regex that couldn't be compiled finds nothing
+	if r.regexp != nil {
+		matches = r.regexp.FindAllString(fmt.Sprint(r.input), -1)
+	}
 	return util.JSONFromJSON(map[string]interface{}{
-		r.Name: r.regexp.FindAllString(fmt.Sprint(r.input), -1),
+		r.Name: matches,
 	})
 }
 

@@ -83,7 +83,7 @@ func (jm *JobManager) initJobRun(job *Job, jobArgs []string, markers map[string]
 	if jm.jobRuns[job.Name] == nil {
 		jm.jobRuns[job.Name] = map[int]*JobRunContext{}
 	}
-	jm.jobRuns[job.Name][job.jobRunCounter] = jobRun
+	jm.jobRuns[job.Name][jobRun.id] = jobRun
 	jm.lock.Unlock()
 
 	return jobRun

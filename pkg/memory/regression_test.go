@@ -38,7 +38,9 @@ func TestRegression_AddingExtractionsDoesNotDeadlock(t *testing.T) {
 		"query":         func(m *MemoryManager) { m.AddQueryMatch("k", "q") },
 		"regex":         func(m *MemoryManager) { m.AddBodyRegexMatch("k", "r", "x+") },
 		"json path":     func(m *MemoryManager) { m.AddBodyJsonPathMatch("k", "a={.a}") },
-		"transform":     func(m *MemoryManager) { m.SetBodyTransformation("k", []*util.Transform{{Payload: map[string]any{"a": ""}}}) },
+		"transform": func(m *MemoryManager) {
+			m.SetBodyTransformation("k", []*util.Transform{{Payload: map[string]any{"a": ""}}})
+		},
 		"get extractor": func(m *MemoryManager) { m.GetOrAddContextExtractor("k") },
 	}
 	for name, add := range adds {

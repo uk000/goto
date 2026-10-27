@@ -60,8 +60,10 @@ func (w *Watch) addWebhookWatcher(name, url string) {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 	w.Watchers[name] = &Watcher{
-		Name: name,
-		URL:  url,
+		Name:          name,
+		URL:           url,
+		FilterURIs:    map[string]bool{},
+		FilterHeaders: map[string]string{},
 	}
 }
 
@@ -85,16 +87,19 @@ func (w *Watch) addWatcherFilter(name, uri, header, value string) bool {
 	return watched
 }
 
+// removeWatcher takes the watcher of the name out, and returns it, or nil when there is none.
 func (w *Watch) removeWatcher(name string) *Watcher {
 	w.lock.Lock()
 	defer w.lock.Unlock()
-	return w.Watchers[name]
+	watcher := w.Watchers[name]
+	delete(w.Watchers, name)
+	return watcher
 }
 
-func (w *Watch) getWatcher(name string) {
-	w.lock.Lock()
-	defer w.lock.Unlock()
-	delete(w.Watchers, name)
+func (w *Watch) getWatcher(name string) *Watcher {
+	w.lock.RLock()
+	defer w.lock.RUnlock()
+	return w.Watchers[name]
 }
 
 func addWebhookWatcher(w http.ResponseWriter, r *http.Request) {

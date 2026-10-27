@@ -243,6 +243,10 @@ func addRouteQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Req
 		}
 		for _, coRouter := range coRoutersMap[r] {
 			coRouter.HandleFunc(p, f).Queries(queryParam, queryKey).Methods(methods...)
+			if queryOptional {
+				// The route without the query is also for the co-routers, which serve the alternative paths.
+				coRouter.HandleFunc(p, f).Methods(methods...)
+			}
 		}
 	}
 }

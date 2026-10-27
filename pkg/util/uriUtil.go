@@ -23,6 +23,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/reverse"
@@ -70,10 +71,38 @@ func IsURIInMap(uri string, m map[string]interface{}) bool {
 	return FindURIInMap(uri, m) != ""
 }
 
+// routeRegistry serializes the registration of routes on the routers that URI matchers are built for (most importantly
+// MatchRouter, which every payload that is set adds a route to), as a router can't be added to by concurrent calls. It also
+// remembers the routes that it registered with a handler, so that a URI that is registered again (a payload set again for
+// the same URI) gets what its first registration got, instead of a route that is behind the first one and never gets
+// a request.
+var routeRegistry = struct {
+	lock   sync.Mutex
+	routes map[registeredRouteKey]*registeredRoute
+}{routes: map[registeredRouteKey]*registeredRoute{}}
+
+type registeredRouteKey struct {
+	router *mux.Router
+	uri    string
+	prefix bool
+}
+
+type registeredRoute struct {
+	prefixURI string
+	re        *regexp.Regexp
+	subRouter *mux.Router
+}
+
 func GetURIRegexpAndRoute(uri string, prefix bool, router *mux.Router) (string, *regexp.Regexp, *mux.Router, *mux.Route, error) {
+	if router != nil {
+		routeRegistry.lock.Lock()
+		defer routeRegistry.lock.Unlock()
+	}
 	return getURIRegexpAndRoute(uri, router, "", prefix, false)
 }
 
+// getURIRegexpAndRoute builds the regexp for a URI, along with a route on the given router when there is one. Adding the route
+// changes the router, so callers that give a router that is shared must hold routeRegistry.lock.
 func getURIRegexpAndRoute(uri string, router *mux.Router, prefixRegexp string, prefix, buildOnly bool) (string, *regexp.Regexp, *mux.Router, *mux.Route, error) {
 	finalURI, glob := Unglob(strings.ToLower(uri))
 	vars := fillerRegexp.FindAllString(finalURI, -1)
@@ -125,6 +154,10 @@ func getURIRegexpAndRoute(uri string, router *mux.Router, prefixRegexp string, p
 			pathRegex = DeMux(pathRegex)
 			if prefix {
 				pathRegex = prefixRegexp + pathRegex + "(.*)?"
+			} else {
+				// The regexp of a path that is not a prefix ends the string, which would leave the query that is
+				// added to it below behind.
+				pathRegex = strings.TrimSuffix(pathRegex, "$")
 			}
 		}
 	} else {
@@ -192,10 +225,20 @@ func BuildURIMatcherForRouter(uri string, prefix bool, handlerFunc func(w http.R
 }
 
 func registerURIRouteAndGetRegex(uri string, prefix bool, handler func(http.ResponseWriter, *http.Request), router *mux.Router) (string, *regexp.Regexp, *mux.Router, error) {
+	if router == nil {
+		return uri, nil, nil, fmt.Errorf("no router to register uri [%s] on", uri)
+	}
+	routeRegistry.lock.Lock()
+	defer routeRegistry.lock.Unlock()
+	key := registeredRouteKey{router: router, uri: strings.ToLower(uri), prefix: prefix}
+	if registered := routeRegistry.routes[key]; registered != nil {
+		return registered.prefixURI, registered.re, registered.subRouter, nil
+	}
 	if prefixURI, re, subRouter, route, err := getURIRegexpAndRoute(uri, router, "", prefix, false); err == nil {
 		route = route.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
 			return re.MatchString(r.URL.Path)
 		}).HandlerFunc(handler)
+		routeRegistry.routes[key] = &registeredRoute{prefixURI: prefixURI, re: re, subRouter: subRouter}
 		return prefixURI, re, subRouter, nil
 	} else {
 		return uri, nil, nil, err
@@ -210,7 +253,9 @@ func TransposeURI(requestURI, sourceURI, targetURI string, vars, headers, querie
 	if targetURI == "/" {
 		targetURI = "/*"
 	}
-	targetRoute := MatchRouter.NewRoute().BuildOnly().Path(targetURI)
+	// The route is only there to build the target URI from, so it lives on a router of its own. A route added to MatchRouter
+	// would stay there for good, and be added to it by concurrent requests.
+	targetRoute := mux.NewRouter().NewRoute().BuildOnly().Path(targetURI)
 	targetVars := []string{}
 	if targetPath, err := reverse.NewGorillaPath(targetURI, false); err == nil {
 		for _, k := range targetPath.Groups() {

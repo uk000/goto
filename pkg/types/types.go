@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 )
 
@@ -108,9 +107,18 @@ func (p *Pair[L, R]) RightS() string {
 	return fmt.Sprintf("%+v", p.Right)
 }
 
+// MarshalJSON writes the pair as an object of one key, with the text of the left as the key and the one of the right as
+// the value. The texts are quoted as JSON strings (strconv.Quote makes Go escapes, like \x01, that are not JSON).
 func (p *Pair[L, R]) MarshalJSON() ([]byte, error) {
-	data := fmt.Sprintf("{%v: %v}", strconv.Quote(fmt.Sprint(p.Left)), strconv.Quote(fmt.Sprint(p.Right)))
-	return []byte(data), nil
+	left, err := json.Marshal(fmt.Sprint(p.Left))
+	if err != nil {
+		return nil, err
+	}
+	right, err := json.Marshal(fmt.Sprint(p.Right))
+	if err != nil {
+		return nil, err
+	}
+	return []byte(fmt.Sprintf("{%s: %s}", left, right)), nil
 }
 
 func NewTriple[F any, S any, T any](first F, second S, third T) *Triple[F, S, T] {

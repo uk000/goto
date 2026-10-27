@@ -84,9 +84,12 @@ type JSONObject struct {
 }
 
 type JSONValue struct {
-	JsonMap      map[string]interface{} `json:",inline"`
-	JsonArr      []interface{}          `json:",inline"`
-	Raw          any
+	JsonMap map[string]interface{} `json:",inline"`
+	JsonArr []interface{}          `json:",inline"`
+	Raw     any
+	// scalar is what a value that is neither an object nor an array is (a string, number or boolean of an array or an
+	// object). It's not what the JSON is parsed or stored into, which is only ever an object or an array.
+	scalar       interface{}
 	at           time.Time
 	jsonPatterns *JSONPatterns
 }
@@ -223,6 +226,8 @@ func ToJSONValue(v interface{}) *JSONValue {
 		jsonValue.JsonMap = vv
 	} else if vv, ok := v.([]interface{}); ok {
 		jsonValue.JsonArr = vv
+	} else {
+		jsonValue.scalar = v
 	}
 	return jsonValue
 }
@@ -293,6 +298,9 @@ func (j *JSONValue) At() *time.Time {
 func (j *JSONValue) Value() interface{} {
 	if j.JsonMap != nil {
 		return j.JsonMap
+	}
+	if j.JsonArr == nil && j.scalar != nil {
+		return j.scalar
 	}
 	return j.JsonArr
 }

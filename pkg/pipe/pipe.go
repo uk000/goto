@@ -17,6 +17,7 @@
 package pipe
 
 import (
+	"encoding/json"
 	"fmt"
 	"goto/pkg/job"
 	"goto/pkg/scripts"
@@ -25,6 +26,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"sort"
 	"sync"
 	"time"
 )
@@ -44,6 +46,8 @@ type Pipe struct {
 	Outs       []string                      `json:"outs"`
 	Running    bool                          `json:"running"`
 	lock       sync.RWMutex
+	// runLock is held by the run of the pipe, as the sources and the transforms keep the state of the run in them
+	runLock sync.Mutex
 }
 
 type PipeRun struct {
@@ -74,6 +78,15 @@ func (pm *PipeManager) init() *PipeManager {
 	return pm
 }
 
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func NewPipe(name string) *Pipe {
 	pipe := &Pipe{Name: name}
 	pipe.Init()
@@ -88,26 +101,44 @@ func (pm *PipeManager) CreatePipe(name string) {
 }
 
 func (pm *PipeManager) AddPipe(pipe *Pipe) {
+	if pipe == nil {
+		return
+	}
 	pipe.Running = false
+	// entries without details, and the maps that were not given, are what a pipe that was posted may have
+	if pipe.Sources == nil {
+		pipe.Sources = map[string]*PipelineSource{}
+	}
+	for name, s := range pipe.Sources {
+		if s == nil {
+			delete(pipe.Sources, name)
+		}
+	}
+	for name, t := range pipe.Transforms {
+		if t == nil {
+			delete(pipe.Transforms, name)
+		}
+	}
 	for _, s := range pipe.Sources {
 		if s.Type == SourceJob {
 			job.Manager.ClearJobWatchers(s.Spec)
 		}
 	}
 	if len(pipe.Stages) == 0 {
+		// the order of the sources and the transforms is the order that they are run in, so it must not depend on the
+		// order that the maps give them in
 		pipe.Stages = []*PipeStage{{Label: "default"}}
-		for _, source := range pipe.Sources {
-			pipe.Stages[0].Sources = append(pipe.Stages[0].Sources, source.Name)
-		}
-		for _, transform := range pipe.Transforms {
-			pipe.Stages[0].Transforms = append(pipe.Stages[0].Transforms, transform.Name)
-		}
+		// the sources and the transforms are known by the keys of their maps, which are their names even when they were
+		// given without names
+		pipe.Stages[0].Sources = sortedKeys(pipe.Sources)
+		pipe.Stages[0].Transforms = sortedKeys(pipe.Transforms)
 	}
+	// the pipe is made ready before it's visible to anyone else
+	pipe.InitSources()
+	pipe.InitTransforms()
 	pm.lock.Lock()
 	pm.Pipes[pipe.Name] = pipe
 	pm.lock.Unlock()
-	pipe.InitSources()
-	pipe.InitTransforms()
 }
 
 func (pm *PipeManager) ClearPipe(name string) {
@@ -119,14 +150,16 @@ func (pm *PipeManager) ClearPipe(name string) {
 			pipe.Init()
 		}
 	} else {
+		pm.lock.Lock()
 		pm.init()
+		pm.lock.Unlock()
 	}
 }
 
 func (pm *PipeManager) RemovePipe(name string) {
-	pm.lock.RLock()
+	pm.lock.Lock()
 	delete(pm.Pipes, name)
-	pm.lock.RUnlock()
+	pm.lock.Unlock()
 }
 
 func (pm *PipeManager) DumpPipes() string {
@@ -215,22 +248,28 @@ func (pm *PipeManager) RunPipe(name string, w io.Writer, yaml bool) error {
 
 func (pipe *Pipe) AddK8sSource(sourceName, resourceID string) {
 	pipe.lock.Lock()
+	pipe.initSources()
 	pipe.Sources[sourceName] = NewSource(sourceName, SourceK8s, resourceID, pipe)
 	pipe.lock.Unlock()
 }
 
 func (pipe *Pipe) AddScriptSource(sourceName, scriptName string) {
 	pipe.lock.Lock()
+	pipe.initSources()
 	pipe.Sources[sourceName] = NewSource(sourceName, SourceScript, scriptName, pipe)
 	pipe.lock.Unlock()
 }
 
+// AddSource adds the source to the pipe, and initialises that source. The other sources and the transforms of the pipe
+// are left as they are, as they have the state of what was reported to them in them, and a run may be using them.
 func (pipe *Pipe) AddSource(source *PipelineSource) {
+	if source == nil {
+		return
+	}
 	pipe.lock.Lock()
-	pipe.Sources[source.Name] = source
-	pipe.InitSources()
-	pipe.InitTransforms()
-	pipe.lock.Unlock()
+	defer pipe.lock.Unlock()
+	pipe.initSources()
+	pipe.initSource(source.Name, source)
 }
 
 func (pipe *Pipe) RemoveSource(sourceName string) {
@@ -245,32 +284,73 @@ func (pipe *Pipe) Init() {
 	pipe.lock.Unlock()
 }
 
+// initSources makes the map of the sources, if the pipe doesn't have it, as it doesn't when it was posted without any
+// sources. It's called with the lock of the pipe held.
+func (pipe *Pipe) initSources() {
+	if pipe.Sources == nil {
+		pipe.Sources = map[string]*PipelineSource{}
+	}
+}
+
 func (pipe *Pipe) InitSources() {
 	for name, source := range pipe.Sources {
-		pipe.Sources[name] = source.Init(name, pipe).pipelineSource()
-		if source.IsScript() && len(source.GetContent()) > 0 {
-			scripts.Scripts.AddScript(source.GetSpec(), source.GetContent(), false)
+		if source == nil {
+			delete(pipe.Sources, name)
+			continue
 		}
+		pipe.initSource(name, source)
 	}
+}
+
+// initSource makes the source ready to be run as a part of the pipe, under the name that the pipe knows it by.
+func (pipe *Pipe) initSource(name string, source *PipelineSource) {
+	pipe.Sources[name] = source.Init(name, pipe).pipelineSource()
+	if source.IsScript() && len(source.GetContent()) > 0 {
+		scripts.Scripts.AddScript(source.GetSpec(), source.GetContent(), false)
+	}
+}
+
+// MarshalJSON reports the pipe as it is at a moment, which is not when the pipe is being changed.
+func (pipe *Pipe) MarshalJSON() ([]byte, error) {
+	pipe.lock.RLock()
+	defer pipe.lock.RUnlock()
+	return json.Marshal(struct {
+		Name       string                        `json:"name"`
+		Sources    map[string]*PipelineSource    `json:"sources"`
+		Transforms map[string]*PipelineTransform `json:"transforms"`
+		Stages     []*PipeStage                  `json:"stages"`
+		Outs       []string                      `json:"outs"`
+		Running    bool                          `json:"running"`
+	}{pipe.Name, pipe.Sources, pipe.Transforms, pipe.Stages, pipe.Outs, pipe.Running})
 }
 
 func (pipe *Pipe) InitTransforms() {
 	for name, transform := range pipe.Transforms {
+		if transform == nil {
+			delete(pipe.Transforms, name)
+			continue
+		}
 		transform.Name = name
 		transform.InitTransform()
 	}
 }
 
+// Trigger runs the pipe, unless it is already running, as it is when the run itself causes the trigger.
 func (pipe *Pipe) Trigger() {
-	pipe.lock.RLock()
-	running := pipe.Running
-	pipe.lock.RUnlock()
-	if !running {
-		pipe.Run(os.Stdout, true)
+	if pipe.runLock.TryLock() {
+		defer pipe.runLock.Unlock()
+		pipe.run(os.Stdout, true)
 	}
 }
 
+// Run runs the pipe, after the run that is on, if there is one.
 func (pipe *Pipe) Run(w io.Writer, yaml bool) {
+	pipe.runLock.Lock()
+	defer pipe.runLock.Unlock()
+	pipe.run(w, yaml)
+}
+
+func (pipe *Pipe) run(w io.Writer, yaml bool) {
 	pipe.lock.Lock()
 	pipe.Running = true
 	stages := pipe.Stages
@@ -289,8 +369,11 @@ func (pipe *Pipe) Run(w io.Writer, yaml bool) {
 			pipe.lock.Unlock()
 			if source != nil {
 				log.Printf("Pipe: Fetching Source [%s]\n", s)
-				if source.GetInputSource() != "" {
-					source.SetInput(workspace[source.GetInputSource()])
+				if inputSource := source.GetInputSource(); inputSource != "" {
+					// the input is a part of what is reported of the pipe
+					pipe.lock.Lock()
+					source.SetInput(workspace[inputSource])
+					pipe.lock.Unlock()
 				}
 				source.Generate(workspace)
 			}
@@ -302,9 +385,11 @@ func (pipe *Pipe) Run(w io.Writer, yaml bool) {
 				pipe.lock.Unlock()
 				if transform != nil {
 					log.Printf("Pipe: Applying Transform [%s]\n", t)
-					json := transform.Map(workspace)
-					for k, v := range json.Object() {
-						workspace[k] = v
+					// a transform that has no type gives nothing
+					if json := transform.Map(workspace); json != nil {
+						for k, v := range json.Object() {
+							workspace[k] = v
+						}
 					}
 				}
 			}

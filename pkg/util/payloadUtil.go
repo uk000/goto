@@ -164,14 +164,17 @@ func TransformPayload(sourcePayload string, transforms []*Transform, isYaml bool
 	} else {
 		sourceJSON, ok = JSONFromJSONText(sourcePayload)
 	}
-	if ok && !sourceJSON.IsEmpty() {
+	// A payload that isn't JSON (or YAML), or has nothing in it to read values from, is served as it is.
+	if !ok || sourceJSON.IsEmpty() {
 		return sourcePayload
 	}
 	targetPayload := ""
 	for _, t := range transforms {
 		var targetJSON JSON
 		if t.Payload != nil {
-			targetJSON = JSONFromJSON(t.Payload).Clone()
+			// Applying the mappings changes the template, which is the same one for every request, so they are applied
+			// to a copy of it that has nothing shared with it.
+			targetJSON = JSONFromJSON(Clone(t.Payload))
 		} else {
 			targetJSON = sourceJSON
 		}
