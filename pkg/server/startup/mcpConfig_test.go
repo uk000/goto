@@ -18,7 +18,9 @@ package startup
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -146,12 +148,32 @@ mcp:
         name: item
         uriTemplate: "file:///items/{id}"
 `, port)))
-	names := mcpToolNames(port, "startup-mcp-components")
-	for _, want := range []string{"greet", "readme", "item"} {
+	server := mcpserver.GetMCPServer(port, "startup-mcp-components")
+	if server == nil {
+		t.Fatalf("the server is not added\nlog:\n%s", logged.String())
+	}
+	// The names that the server reports are the ones of its tools: the other components are looked for by their kind.
+	for kind, want := range map[string]string{
+		mcpserver.KindPrompts:   "greet",
+		mcpserver.KindResources: "readme",
+		mcpserver.KindTemplates: "item",
+	} {
+		names := mcpComponentNames(server, kind)
 		if !slices.Contains(names, want) {
-			t.Errorf("components of the server = %v, want %q among them\nlog:\n%s", names, want, logged.String())
+			t.Errorf("%s of the server = %v, want %q among them\nlog:\n%s", kind, names, want, logged.String())
 		}
 	}
+}
+
+func mcpComponentNames(server *mcpserver.MCPServer, kind string) []string {
+	names := []string{}
+	if components := reflect.ValueOf(server.GetComponents(kind)); components.Kind() == reflect.Map {
+		for _, key := range components.MapKeys() {
+			names = append(names, key.String())
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func TestLoadMCPSkipsToolsOfUnknownSchema(t *testing.T) {

@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/gorilla/mux"
 )
@@ -32,9 +33,13 @@ import (
 type APIRoutes map[string]map[string]map[string][]types.Pair[string, []string]
 
 var (
-	Middleware     = middleware.NewMiddleware("info", setRoutes, nil)
+	Middleware = middleware.NewMiddleware("info", setRoutes, nil)
+	// routes has the routes that are found, and routesWithCurl the curl commands of the same routes, where the base URL
+	// of the server is a %s. They are replaced when the routes are loaded, and are read by requests as they come, so
+	// both are guarded by routesLock.
 	routes         = APIRoutes{}
 	routesWithCurl = APIRoutes{}
+	routesLock     sync.Mutex
 )
 
 func setRoutes(r *mux.Router) {
@@ -61,16 +66,7 @@ func showApis(w http.ResponseWriter, r *http.Request) {
 }
 
 func PrintRoutes(w http.ResponseWriter, level int, query, baseURL string, refresh, text, yaml bool) {
-	if refresh || len(routes) == 0 {
-		loadAPIs()
-	}
-	outputRoutes := filterAPIs(query)
-	if level > 0 {
-		outputRoutes = trimAPIs(outputRoutes, level)
-	}
-	if baseURL != "" {
-		outputRoutes = getCurls(outputRoutes, baseURL)
-	}
+	outputRoutes := selectRoutes(level, query, baseURL, refresh)
 	if text {
 		output := []string{}
 		for k1, v1 := range outputRoutes {
@@ -103,9 +99,37 @@ func PrintRoutes(w http.ResponseWriter, level int, query, baseURL string, refres
 	}
 }
 
+// selectRoutes makes the output for a request: the routes that match the query, down to the given level, and as curl
+// commands for the base URL if there is one. The output has maps and slices of its own where it is changed, and the
+// ones it shares with the cached routes are only read, since loading replaces the cache and does not change it.
+func selectRoutes(level int, query, baseURL string, refresh bool) APIRoutes {
+	routesLock.Lock()
+	defer routesLock.Unlock()
+	if refresh || len(routes) == 0 {
+		loadAPIs()
+	}
+	var outputRoutes APIRoutes
+	if baseURL != "" {
+		outputRoutes = filterRoutes(routesWithCurl, query)
+	} else {
+		outputRoutes = filterAPIs(query)
+	}
+	if level > 0 {
+		outputRoutes = trimAPIs(outputRoutes, level)
+	}
+	if baseURL != "" {
+		outputRoutes = getCurls(outputRoutes, baseURL)
+	}
+	return outputRoutes
+}
+
 func filterAPIs(query string) APIRoutes {
+	return filterRoutes(routes, query)
+}
+
+func filterRoutes(source APIRoutes, query string) APIRoutes {
 	outputRoutes := APIRoutes{}
-	for r, subRoutes := range routes {
+	for r, subRoutes := range source {
 		rootMatched := strings.Contains(r, query)
 		if rootMatched || query == "" {
 			outputRoutes[r] = map[string]map[string][]types.Pair[string, []string]{}
@@ -123,6 +147,10 @@ func filterAPIs(query string) APIRoutes {
 				if subPMatched || query == "" {
 					if outputRoutes[r] == nil {
 						outputRoutes[r] = map[string]map[string][]types.Pair[string, []string]{}
+					}
+					// The sub root is not in the output when only the sub path matches.
+					if outputRoutes[r][subR] == nil {
+						outputRoutes[r][subR] = map[string][]types.Pair[string, []string]{}
 					}
 					outputRoutes[r][subR][subP] = paths
 				}
@@ -160,27 +188,38 @@ func trimAPIs(matches APIRoutes, level int) APIRoutes {
 	return outputRoutes
 }
 
+// getCurls makes the curl commands of the matches, which are the curls of the routes (see routesWithCurl) with the base
+// URL put in them, and escapes what the shell takes in them. The matches are not changed.
 func getCurls(matches APIRoutes, baseURL string) APIRoutes {
+	outputRoutes := APIRoutes{}
 	for k1, v1 := range matches {
+		outputRoutes[k1] = map[string]map[string][]types.Pair[string, []string]{}
 		for k2, v2 := range v1 {
+			outputRoutes[k1][k2] = map[string][]types.Pair[string, []string]{}
 			for k3, v3 := range v2 {
+				pairs := make([]types.Pair[string, []string], 0, len(v3))
 				for _, v4 := range v3 {
-					curls := []string{}
+					curls := make([]string, 0, len(v4.Right))
 					for _, c := range v4.Right {
-						curl := fmt.Sprintf(c, baseURL)
+						// The curl has the base URL as its first %s. The rest of it can have a % of its own.
+						curl := strings.Replace(c, "%s", baseURL, 1)
 						curl = strings.ReplaceAll(curl, `?`, `\?`)
 						curl = strings.ReplaceAll(curl, `&`, `\&`)
 						curls = append(curls, curl)
 					}
-					matches[k1][k2][k3] = append(matches[k1][k2][k3], types.Pair[string, []string]{Left: v4.Left, Right: curls})
+					pairs = append(pairs, types.Pair[string, []string]{Left: v4.Left, Right: curls})
 				}
+				outputRoutes[k1][k2][k3] = pairs
 			}
 		}
 	}
-	return matches
+	return outputRoutes
 }
 
+// loadAPIs replaces the cached routes with the ones that are found now. It must be called with routesLock held.
 func loadAPIs() {
+	routes = APIRoutes{}
+	routesWithCurl = APIRoutes{}
 	loadAPIsFromRouter(util.CoreRouter)
 	for _, router := range middleware.RootRouters {
 		loadAPIsFromRouter(router)
@@ -188,6 +227,10 @@ func loadAPIs() {
 }
 
 func loadAPIsFromRouter(r *mux.Router) {
+	// The core router is not there until the server is set up.
+	if r == nil {
+		return
+	}
 	r.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
 		methods, _ := route.GetMethods()
 		if len(methods) == 0 {

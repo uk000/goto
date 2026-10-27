@@ -79,7 +79,8 @@ func middlewareFunc(next http.Handler) http.Handler {
 		if conn := util.GetConn(r); conn != nil {
 			captureTLSInfo(r)
 			localAddr = conn.LocalAddr().String()
-		} else {
+		} else if l.Listener != nil {
+			// Not every listener has a net listener: the default one, which serves the ports that have no listener, doesn't.
 			localAddr = l.Listener.Addr().String()
 		}
 		rs := util.GetRequestStore(r)

@@ -49,6 +49,7 @@ type InterceptResponseWriter struct {
 	IsH2C       bool
 	Proceeded   bool
 	BodyLength  int
+	headerSent  bool
 }
 
 type HeaderInterceptResponseWriter struct {
@@ -187,9 +188,32 @@ func (rw *InterceptResponseWriter) Flush() {
 	// util.PrintCallers(3, "InterceptResponseWriter.Flush")
 	if !rw.HoldChunked {
 		rw.SetChunked()
+		rw.sendHeld()
 		if rw.Flusher != nil {
 			rw.Flusher.Flush()
 		}
+	}
+}
+
+// sendHeld sends the status and the data that the writer has held back so far. It is for a handler that flushes, which
+// is a handler that streams: the client is to get what was written before the flush when it is flushed, with the status
+// that was set, and not with the next write, or with the end of the response.
+func (rw *InterceptResponseWriter) sendHeld() {
+	if !rw.Hold || rw.Hijacked || rw.headerSent {
+		return
+	}
+	if rw.StatusCode <= 0 {
+		rw.StatusCode = http.StatusOK
+		rw.rs.StatusCode = rw.StatusCode
+	}
+	rw.rs.ReportTime(rw.ResponseWriter)
+	rw.ResponseWriter.WriteHeader(rw.StatusCode)
+	rw.headerSent = true
+	if len(rw.Data) > 0 {
+		if _, err := rw.ResponseWriter.Write(rw.Data); err != nil {
+			log.Printf("InterceptResponseWriter.Flush: failed to write [%d] held bytes with error: %s\n", len(rw.Data), err.Error())
+		}
+		rw.Data = []byte{}
 	}
 }
 
@@ -230,8 +254,10 @@ func (rw *InterceptResponseWriter) Proceed() {
 			rw.StatusCode = 200
 			rw.rs.StatusCode = rw.StatusCode
 		}
-		rw.rs.ReportTime(rw.ResponseWriter)
-		rw.ResponseWriter.WriteHeader(rw.StatusCode)
+		if !rw.headerSent {
+			rw.rs.ReportTime(rw.ResponseWriter)
+			rw.ResponseWriter.WriteHeader(rw.StatusCode)
+		}
 		if _, err := rw.ResponseWriter.Write(rw.Data); err == http.ErrHijacked {
 			rw.Hijacked = true
 			if rw.conn == nil {

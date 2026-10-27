@@ -21,7 +21,6 @@ import (
 	"goto/pkg/constants"
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/middleware"
-	"goto/pkg/server/response/payload"
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
@@ -59,21 +58,26 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
 	if delay == 0 {
 		delay = 1 * time.Second
 	}
-	if duration > 0 {
-		count = int(duration.Milliseconds()/delay.Milliseconds()) + 1
-	}
-	if chunkSize == 0 {
+	if chunkSize <= 0 {
 		chunkSize = 10
+	}
+	if duration > 0 {
+		// The delay is not divided in milliseconds, which is zero for a delay that is shorter than one.
+		count = int(duration/delay) + 1
 	}
 	if count == 0 {
 		count = 10
 	}
 	if len(data) == 0 {
 		data = types.GenerateRandomPayload(chunkSize, util.GetCurrentListenerLabel(r))
+		// The label of the listener that leads the payload may be longer than a chunk, and is not cut by the generator.
+		if len(data) > chunkSize {
+			data = data[:chunkSize]
+		}
 		repeat = true
-	} else if len(data) < chunkSize {
-		data = payload.FixPayload(data, chunkSize)
 	}
+	// A payload that is shorter than a chunk is the one chunk, as the last chunk of a longer payload is what is left of
+	// it. It is streamed as it was given, and not padded.
 	w.Header().Set(constants.HeaderContentType, contentType)
 	w.Header().Set(constants.HeaderXContentTypeOptions, "nosniff")
 	w.Header().Set(constants.HeaderGotoChunkCount, strconv.Itoa(count))
@@ -108,8 +112,10 @@ func streamResponse(w http.ResponseWriter, r *http.Request) {
 		if end > payloadSize {
 			end = payloadSize
 		}
-		chunkData := data[start:end]
-		chunkData = append(chunkData, []byte("\n")...)
+		// The chunk is copied, as appending to a slice of the payload would overwrite the start of the next chunk.
+		chunkData := make([]byte, 0, end-start+1)
+		chunkData = append(chunkData, data[start:end]...)
+		chunkData = append(chunkData, '\n')
 		if _, err := fw.Write(chunkData); err != nil {
 			log.Printf("Failed to write stream response with error: %s", err.Error())
 			fmt.Fprintf(w, "Failed to write stream response with error: %s", err.Error())

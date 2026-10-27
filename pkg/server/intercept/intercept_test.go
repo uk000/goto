@@ -201,13 +201,56 @@ func TestInterceptStreamsOnceFlushed(t *testing.T) {
 		t.Error("a flushed writer is not marked as chunked")
 	}
 	w.Write([]byte("-late"))
-	// What was held goes first, and what comes after is sent as it comes.
-	want := []string{"Flush", "Write(early)", "Write(-late)"}
+	// What was held goes out with the flush, and what comes after is sent as it comes. A flush that sent nothing would
+	// leave the client without what the handler flushed until the handler writes more, or is done.
+	want := []string{"WriteHeader(200)", "Write(early)", "Flush", "Write(-late)"}
 	if got := sp.got(); !reflect.DeepEqual(got, want) {
 		t.Errorf("writer was sent %v, want %v", got, want)
 	}
 	if body := sp.rec().Body.String(); body != "early-late" {
 		t.Errorf("body = %q, want early-late", body)
+	}
+}
+
+func TestInterceptFlushSendsWhatWasHeldWithTheStatusOfTheHandler(t *testing.T) {
+	r, rs := newRequest("GET", "/x", nil)
+	sp := newSpy()
+	w, irw := WithIntercept(r, sp)
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte("first"))
+	if got := sp.got(); len(got) != 0 {
+		t.Fatalf("writer was sent %v before the flush, want everything held", got)
+	}
+	w.(http.Flusher).Flush()
+	if got, want := sp.got(), []string{"WriteHeader(202)", "Write(first)", "Flush"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("writer was sent %v by the flush, want %v", got, want)
+	}
+	w.Write([]byte("-second"))
+	irw.Proceed()
+	headers := 0
+	for _, c := range sp.got() {
+		if strings.HasPrefix(c, "WriteHeader") {
+			headers++
+		}
+	}
+	if headers != 1 {
+		t.Errorf("the status was sent %d times (%v), want once", headers, sp.got())
+	}
+	if code, body := sp.rec().Code, sp.rec().Body.String(); code != http.StatusAccepted || body != "first-second" || rs.StatusCode != http.StatusAccepted {
+		t.Errorf("response = %d %q, store status = %d, want 202 first-second", code, body, rs.StatusCode)
+	}
+}
+
+// A writer with a status that is forced on it sends that status when it flushes, and not the one that the handler sets.
+func TestInterceptFlushSendsTheForcedStatus(t *testing.T) {
+	r, rs := newRequest("GET", "/x", nil)
+	sp := newSpy()
+	w, _ := WithInterceptAndStatus(r, sp, http.StatusServiceUnavailable, false)
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("data"))
+	w.(http.Flusher).Flush()
+	if code := sp.rec().Code; code != http.StatusServiceUnavailable || rs.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("response = %d, store status = %d, want the forced 503", code, rs.StatusCode)
 	}
 }
 
@@ -408,8 +451,13 @@ func TestInterceptWriterLookup(t *testing.T) {
 		t.Fatalf("GetOrCreateInterceptWriter = %v, %v, want a new writer that is kept by the request store", w, irw)
 	}
 	w2, irw2 := GetOrCreateInterceptWriter(r, sp)
-	if irw2 != irw || w2 != w {
+	if irw2 != irw {
 		t.Error("a second GetOrCreateInterceptWriter made another writer")
+	}
+	// What the caller hands in is what it gets back when the request has its interceptor already: the caller may have
+	// wrapped the interceptor, and the wrapper is not for the lookup to take away.
+	if w2 != http.ResponseWriter(sp) {
+		t.Errorf("a second GetOrCreateInterceptWriter returned %v, want the writer that was handed in", w2)
 	}
 	if got := GetInterceptWriter(r); got != irw {
 		t.Errorf("GetInterceptWriter = %v, want the writer that was made", got)

@@ -19,6 +19,7 @@ package status
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -884,5 +885,99 @@ func TestClearStatusOfURIRemovesConfigsThatMatchHeaders(t *testing.T) {
 	}
 	if status, _ := TheStatusManager.GetStatusFor(port, "/svc2", map[string][]string{"X-Env": {"dev"}}, "GET"); status != 501 {
 		t.Errorf("status of another URI = %d, want it kept at 501", status)
+	}
+}
+
+func TestParseMethods(t *testing.T) {
+	for name, tt := range map[string]struct {
+		param string
+		def   []string
+		want  []string
+		ok    bool
+	}{
+		"empty uses the default":       {"", []string{"POST"}, []string{"POST"}, true},
+		"blank uses the default":       {"  ", []string{"POST"}, []string{"POST"}, true},
+		"empty without a default":      {"", nil, nil, true},
+		"one":                          {"get", []string{"POST"}, []string{"GET"}, true},
+		"several in any case":          {"get, Post ,DELETE", []string{"POST"}, []string{"GET", "POST", "DELETE"}, true},
+		"repeated":                     {"GET,get,GET", nil, []string{"GET"}, true},
+		"star is all methods":          {"*", []string{"POST"}, nil, true},
+		"any is all methods":           {"any", []string{"POST"}, nil, true},
+		"all is all methods":           {"ALL", []string{"POST"}, nil, true},
+		"star among others":            {"GET,*", []string{"POST"}, nil, true},
+		"trailing comma":               {"GET,", nil, []string{"GET"}, true},
+		"only commas":                  {",,", []string{"POST"}, nil, false},
+		"not a name":                   {"GET,P0ST", nil, nil, false},
+		"with a space inside":          {"GE T", nil, nil, false},
+		"with punctuation":             {"GET;POST", nil, nil, false},
+		"not even http method letters": {"GÉT", nil, nil, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, ok := ParseMethods(tt.param, tt.def...)
+			if ok != tt.ok || !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ParseMethods(%q, %v) = %v, %v; want %v, %v", tt.param, tt.def, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+// A status that is set for some methods is a status of its own: setting one for GET doesn't change the one that was set
+// for POST of the same URI, and setting it again changes the one that it was.
+func TestStatusesOfDifferentMethodsOfAURIAreSeparate(t *testing.T) {
+	stubOnce.Do(stubGlobalFuncs)
+	port := int(40000 + portSeq.Add(1))
+	t.Cleanup(func() { TheStatusManager.Clear(port, "", "") })
+	TheStatusManager.SetStatusFor(port, "/m", "/m", "", "", []string{"POST"}, []int{502}, -1, true)
+	TheStatusManager.SetStatusFor(port, "/m", "/m", "", "", []string{"GET"}, []int{503}, -1, true)
+	TheStatusManager.SetStatusFor(port, "/m", "/m", "", "", []string{"get"}, []int{429}, 1, true)
+	if n := len(TheStatusManager.Snapshot()[port]); n != 2 {
+		t.Fatalf("%d statuses were set, want 2: one for POST and one for GET", n)
+	}
+	for _, tt := range []struct {
+		method string
+		want   int
+	}{
+		{"POST", 502}, {"GET", 429}, {"GET", 0}, {"DELETE", 0}, {"POST", 502},
+	} {
+		// The GET status was set again, for 1 request: 429 once, and then it is used up.
+		if status, _ := TheStatusManager.GetStatusFor(port, "/m", nil, tt.method); status != tt.want {
+			t.Errorf("%s /m = %d, want %d", tt.method, status, tt.want)
+		}
+	}
+}
+
+func TestStatusesForAllMethodsAndForOneAreSeparate(t *testing.T) {
+	stubOnce.Do(stubGlobalFuncs)
+	port := int(40000 + portSeq.Add(1))
+	t.Cleanup(func() { TheStatusManager.Clear(port, "", "") })
+	TheStatusManager.SetStatusFor(port, "/m", "", "", "", []string{"GET"}, []int{503}, -1, true)
+	TheStatusManager.SetStatusFor(port, "/m", "", "", "", nil, []int{500}, -1, true)
+	if n := len(TheStatusManager.Snapshot()[port]); n != 2 {
+		t.Fatalf("%d statuses were set, want 2", n)
+	}
+	for method, want := range map[string]int{"GET": 503, "POST": 500, "PUT": 500} {
+		if status, _ := TheStatusManager.GetStatusFor(port, "/m", nil, method); status != want {
+			t.Errorf("%s /m = %d, want %d", method, status, want)
+		}
+	}
+}
+
+// A status that is set for a header is not the status of the URI without the header. Looking for the config of the one
+// found the other, since a config that has no header to match matched whatever header it was looked up with.
+func TestStatusWithAHeaderAndWithoutAreSeparate(t *testing.T) {
+	stubOnce.Do(stubGlobalFuncs)
+	port := int(40000 + portSeq.Add(1))
+	t.Cleanup(func() { TheStatusManager.Clear(port, "", "") })
+	TheStatusManager.SetStatusFor(port, "/h", "", "", "", nil, []int{500}, -1, true)
+	TheStatusManager.SetStatusFor(port, "/h", "", "x-env", "dev", nil, []int{503}, -1, true)
+	TheStatusManager.SetStatusFor(port, "/h", "", "x-env", "dev", nil, []int{504}, -1, true)
+	TheStatusManager.SetStatusFor(port, "/h", "", "x-env", "dev", nil, []int{418}, -1, false)
+
+	var got []string
+	for _, sc := range TheStatusManager.Snapshot()[port] {
+		got = append(got, fmt.Sprintf("%v:%d", sc.Statuses, len(sc.Match.HeaderMatches)))
+	}
+	if want := []string{"[500]:0", "[504]:1", "[418]:1"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("statuses = %v, want %v: one without a header, and one for the header present and one for it not present", got, want)
 	}
 }

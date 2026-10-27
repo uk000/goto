@@ -71,18 +71,20 @@ func echo(w http.ResponseWriter, r *http.Request) {
 func echoStream(w http.ResponseWriter, r *http.Request) {
 	metrics.UpdateRequestCount("echo")
 	util.AddLogMessage("Streaming Echo", r)
-	var writer io.Writer = w
 	fw := intercept.NewFlushWriter(w)
+	if fw == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintln(w, "Cannot stream")
+		return
+	}
 	util.CopyHeaders("Request", r, w, r.Header, true, true, false)
 	util.SetHeadersSent(r, true)
 	fw.Flush()
-	writer = fw
-	// }
 	reader := bufio.NewReader(r.Body)
 	for {
 		line, err := reader.ReadBytes('\n')
 		if line != nil {
-			if _, err := writer.Write(line); err != nil {
+			if _, err := fw.Write(line); err != nil {
 				fmt.Println(err.Error())
 				break
 			}

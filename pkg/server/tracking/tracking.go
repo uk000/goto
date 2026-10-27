@@ -17,6 +17,7 @@
 package tracking
 
 import (
+	"encoding/json"
 	"goto/pkg/server/hooks"
 	"sync"
 )
@@ -91,4 +92,12 @@ func (t *Tracking) clear(port int, key string) {
 
 func (t *Tracking) clearCounts(port int, key string) {
 	t.getKeyPort(port, key).clearCounts()
+}
+
+func (t *Tracking) MarshalJSON() ([]byte, error) {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	return json.Marshal(struct {
+		KeyPort map[string]map[int]*TrackingData `json:"keyPortTracking"`
+	}{t.KeyPort})
 }

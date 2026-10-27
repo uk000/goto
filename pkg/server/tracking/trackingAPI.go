@@ -46,8 +46,10 @@ func configureRoutes(r *mux.Router) {
 func configureTrackingRoutes(r *mux.Router) {
 	router := util.PathRouter(r, "/uri")
 	util.AddRouteWithMultiQ(router, "", trackURIAndHeaders, [][]string{{"key", "uri"}}, "POST")
-	util.AddRouteWithMultiQ(router, "/headers/{headers}", trackURIAndHeaders, [][]string{{"key", "uri"}}, "POST")
+	// Must be registered before the {headers} route below, which matches everything that this one does, and would
+	// leave this route unreachable.
 	util.AddRouteWithMultiQ(router, "/headers/{header}={value}", trackURIAndHeaderValue, [][]string{{"key", "uri"}}, "POST")
+	util.AddRouteWithMultiQ(router, "/headers/{headers}", trackURIAndHeaders, [][]string{{"key", "uri"}}, "POST")
 	hrouter := util.PathRouter(r, "/headers")
 	util.AddRouteQ(hrouter, "/add/{headers}", trackURIAndHeaders, "key", "POST")
 	util.AddRouteQ(r, "/clear", clear, "key", "POST")

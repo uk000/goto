@@ -16,7 +16,11 @@
 
 package tracking
 
-import "sync"
+import (
+	"encoding/json"
+	"net/http"
+	"sync"
+)
 
 type HeaderValueCounts struct {
 	CountsByHeader      int            `json:"countsByHeader"`
@@ -113,6 +117,8 @@ func (td *TrackingData) clearCounts() {
 }
 
 func (td *TrackingData) addRequestTracking(uri string, headers []string) {
+	td.lock.Lock()
+	defer td.lock.Unlock()
 	if uri != "" {
 		td.ByURI[uri] = 0
 		if len(headers) > 0 {
@@ -128,6 +134,8 @@ func (td *TrackingData) addRequestTracking(uri string, headers []string) {
 }
 
 func (td *TrackingData) addResponseTracking(uri string, headers []string) {
+	td.lock.Lock()
+	defer td.lock.Unlock()
 	if uri != "" {
 		if td.ByURIAndRespStatus[uri] == nil {
 			td.ByURIAndRespStatus[uri] = newStatusCounts()
@@ -150,6 +158,8 @@ func (td *TrackingData) addResponseTracking(uri string, headers []string) {
 }
 
 func (td *TrackingData) addUpstreamRequestTracking(uri string, headers []string) {
+	td.lock.Lock()
+	defer td.lock.Unlock()
 	if uri != "" {
 		td.ByUpURI[uri] = 0
 		if len(headers) > 0 {
@@ -165,6 +175,8 @@ func (td *TrackingData) addUpstreamRequestTracking(uri string, headers []string)
 }
 
 func (td *TrackingData) addUpstreamResponseTracking(uri string, headers []string) {
+	td.lock.Lock()
+	defer td.lock.Unlock()
 	if uri != "" {
 		if td.ByUpURIAndRespStatus[uri] == nil {
 			td.ByUpURIAndRespStatus[uri] = newStatusCounts()
@@ -201,17 +213,14 @@ func (td *TrackingData) trackResponse(uri string, statusCode int, headers map[st
 	defer td.lock.Unlock()
 	td.ByRespStatus.track(statusCode)
 	td.ByRespHeader.track(headers)
-	if td.ByURIAndRespStatus[uri] != nil {
-		td.ByURIAndRespStatus[uri].track(statusCode)
+	if sc := td.ByURIAndRespStatus[uri]; sc != nil {
+		sc.track(statusCode)
 	}
-	for h, hv := range headers {
-		if td.ByRespHeaderAndStatus[h] != nil {
-			td.ByRespHeaderAndStatus[h].track(hv[0], statusCode)
-		}
-		if td.ByURIAndRespHeader[uri] != nil {
-			td.ByURIAndRespHeader[uri].track(headers)
-		}
+	// A response is counted once for the headers of its URI, whatever number of headers it has.
+	if htd := td.ByURIAndRespHeader[uri]; htd != nil {
+		htd.track(headers)
 	}
+	trackHeaderStatuses(td.ByRespHeaderAndStatus, headers, statusCode)
 }
 
 func (td *TrackingData) trackUpstreamRequest(uri string, headers map[string][]string) {
@@ -229,15 +238,20 @@ func (td *TrackingData) trackUpstreamResponse(uri string, statusCode int, header
 	defer td.lock.Unlock()
 	td.ByUpRespStatus.track(statusCode)
 	td.ByUpRespHeader.track(headers)
-	if td.ByUpURIAndRespStatus[uri] != nil {
-		td.ByUpURIAndRespStatus[uri].track(statusCode)
+	if sc := td.ByUpURIAndRespStatus[uri]; sc != nil {
+		sc.track(statusCode)
 	}
-	for h, hv := range headers {
-		if td.ByUpRespHeaderAndStatus[h] != nil {
-			td.ByUpRespHeaderAndStatus[h].track(hv[0], statusCode)
-		}
-		if td.ByUpURIAndRespHeader[uri] != nil {
-			td.ByUpURIAndRespHeader[uri].track(headers)
+	if htd := td.ByUpURIAndRespHeader[uri]; htd != nil {
+		htd.track(headers)
+	}
+	trackHeaderStatuses(td.ByUpRespHeaderAndStatus, headers, statusCode)
+}
+
+// trackHeaderStatuses counts the status of a response for the value that it has for each of the tracked headers.
+func trackHeaderStatuses(tracked map[string]HeaderValueStatusCounts, headers map[string][]string, statusCode int) {
+	for h, counts := range tracked {
+		if values := headerValues(headers, h); len(values) > 0 {
+			counts.track(values[0], statusCode)
 		}
 	}
 }
@@ -275,11 +289,19 @@ func (htd HeaderTrackingData) add(headers []string) {
 
 func (htd HeaderTrackingData) track(headers map[string][]string) {
 	for h, hvc := range htd {
-		hValues := headers[h]
-		for _, hv := range hValues {
+		for _, hv := range headerValues(headers, h) {
 			hvc.track(hv)
 		}
 	}
+}
+
+// headerValues finds the values of a header whatever the case of the name it was added with, since the names of the
+// headers of requests and responses are canonicalized (e.g. x-request-id is sent as X-Request-Id).
+func headerValues(headers map[string][]string, name string) []string {
+	if values := headers[name]; values != nil {
+		return values
+	}
+	return http.Header(headers).Values(name)
 }
 
 func (htd HeaderTrackingData) clearCounts() {
@@ -311,6 +333,28 @@ func (hvc *HeaderValueCounts) track(headerValue string) {
 }
 
 func (hvc *HeaderValueCounts) clearCounts() {
+	hvc.lock.Lock()
+	defer hvc.lock.Unlock()
 	hvc.CountsByHeader = 0
 	hvc.CountsByHeaderValue = map[string]int{}
+}
+
+// The JSON encoding of the tracking data is done with the locks of the data held, as it is read while requests are
+// being tracked. The locks are taken in the order Tracking, TrackingData, HeaderValueCounts, which is the order that
+// they are held in while counting.
+
+type trackingDataJSON TrackingData
+
+func (td *TrackingData) MarshalJSON() ([]byte, error) {
+	td.lock.RLock()
+	defer td.lock.RUnlock()
+	return json.Marshal((*trackingDataJSON)(td))
+}
+
+type headerValueCountsJSON HeaderValueCounts
+
+func (hvc *HeaderValueCounts) MarshalJSON() ([]byte, error) {
+	hvc.lock.RLock()
+	defer hvc.lock.RUnlock()
+	return json.Marshal((*headerValueCountsJSON)(hvc))
 }

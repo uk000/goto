@@ -212,34 +212,100 @@ func (s *StatusManager) SetStatus(port int, statusCodes []int, times int, presen
 	return s.SetStatusFor(port, "", "", "", "", nil, statusCodes, times, present)
 }
 
-func (s *StatusManager) findOrRemoveStatusConfig(port int, uriExact, uriPrefix, header, headerValue string, present bool, remove bool) *StatusConfig {
+func (s *StatusManager) findOrRemoveStatusConfig(port int, uriExact, uriPrefix, header, headerValue string, methods []string, present bool, remove bool) *StatusConfig {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	return s.findOrRemoveStatusConfigLocked(port, uriExact, uriPrefix, header, headerValue, present, remove)
+	return s.findOrRemoveStatusConfigLocked(port, uriExact, uriPrefix, header, headerValue, methods, present, remove)
 }
 
-// findOrRemoveStatusConfigLocked must be called with the lock held, since it removes configs.
-func (s *StatusManager) findOrRemoveStatusConfigLocked(port int, uriExact, uriPrefix, header, headerValue string, present bool, remove bool) *StatusConfig {
+// findOrRemoveStatusConfigLocked must be called with the lock held, since it removes configs. It finds the config that
+// was set for exactly the given URI, header and methods: one that has other, or more, things to match is another
+// config, as is one that was configured with a regex, which isn't something that can be set by the URI.
+func (s *StatusManager) findOrRemoveStatusConfigLocked(port int, uriExact, uriPrefix, header, headerValue string, methods []string, present bool, remove bool) *StatusConfig {
 	statuses := s.PortStatus[port]
 	for i, sc := range statuses {
-		if strings.EqualFold(sc.Match.URIMatch.Exact, uriExact) && strings.EqualFold(sc.Match.URIMatch.Prefix, uriPrefix) {
-			matched := true
-			for _, m := range sc.Match.HeaderMatches {
-				if !m.matchOne(header, headerValue, present) {
-					matched = false
-					break
-				}
+		if sc.isSetFor(uriExact, uriPrefix, header, headerValue, methods, present) {
+			if remove {
+				s.PortStatus[port] = statuses[0:i]
+				s.PortStatus[port] = append(s.PortStatus[port], statuses[i+1:]...)
 			}
-			if matched {
-				if remove {
-					s.PortStatus[port] = statuses[0:i]
-					s.PortStatus[port] = append(s.PortStatus[port], statuses[i+1:]...)
-				}
-				return sc
-			}
+			return sc
 		}
 	}
 	return nil
+}
+
+// isSetFor tells if the config is the one that is made by setting a status for the URI, header and methods.
+func (s *StatusConfig) isSetFor(uriExact, uriPrefix, header, headerValue string, methods []string, present bool) bool {
+	if s.Match == nil {
+		return false
+	}
+	um := s.Match.URIMatch
+	if um == nil {
+		um = &StatusURIMatch{}
+	}
+	if !strings.EqualFold(um.Exact, uriExact) || !strings.EqualFold(um.Prefix, uriPrefix) || um.Regex != "" || um.Not {
+		return false
+	}
+	if header == "" {
+		if len(s.Match.HeaderMatches) != 0 {
+			return false
+		}
+	} else if len(s.Match.HeaderMatches) != 1 || !s.Match.HeaderMatches[0].matchOne(header, headerValue, present) {
+		return false
+	}
+	return sameMethods(s.Match.MethodMatch, methods)
+}
+
+// sameMethods tells if the lists have the same methods, whatever the case and the order. None means all methods.
+func sameMethods(a, b []string) bool {
+	set := func(methods []string) map[string]bool {
+		m := map[string]bool{}
+		for _, method := range methods {
+			m[strings.ToUpper(strings.TrimSpace(method))] = true
+		}
+		return m
+	}
+	sa, sb := set(a), set(b)
+	if len(sa) != len(sb) {
+		return false
+	}
+	for method := range sa {
+		if !sb[method] {
+			return false
+		}
+	}
+	return true
+}
+
+// ParseMethods reads the methods that a status is set for, given as a comma separated list (e.g. "GET,POST"). The
+// default is used when there is none. "*", "any" and "all" stand for every method, and are returned as no methods, as
+// a status that is set for no particular method applies to all of them. It is not ok when a method isn't a name.
+func ParseMethods(param string, defaultMethods ...string) (methods []string, ok bool) {
+	param = strings.TrimSpace(param)
+	if param == "" {
+		return defaultMethods, true
+	}
+	seen := map[string]bool{}
+	for _, m := range strings.Split(param, ",") {
+		m = strings.ToUpper(strings.TrimSpace(m))
+		if m == "" {
+			continue
+		}
+		if m == "*" || m == "ANY" || m == "ALL" {
+			return nil, true
+		}
+		for _, c := range m {
+			if c < 'A' || c > 'Z' {
+				return nil, false
+			}
+		}
+		if !seen[m] {
+			seen[m] = true
+			methods = append(methods, m)
+		}
+	}
+	return methods, len(methods) > 0
 }
 
 func (s *StatusManager) SetStatusFor(port int, uriExact, uriPrefix, header, headerValue string, methods []string, statusCodes []int, times int, present bool) *StatusConfig {
@@ -250,7 +316,7 @@ func (s *StatusManager) SetStatusFor(port int, uriExact, uriPrefix, header, head
 	// lock, as using a status is.
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	sc := s.findOrRemoveStatusConfigLocked(port, uriExact, uriPrefix, header, headerValue, present, false)
+	sc := s.findOrRemoveStatusConfigLocked(port, uriExact, uriPrefix, header, headerValue, methods, present, false)
 	if sc != nil {
 		sc.SetStatus(statusCodes, times)
 	} else {

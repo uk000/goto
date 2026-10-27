@@ -18,6 +18,7 @@ package tcp
 
 import (
 	"bufio"
+	"encoding/json"
 	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
@@ -93,6 +94,32 @@ type ConnectionStatus struct {
 	IdleTimeout    bool      `json:"idleTimeout"`
 	LifeTimeout    bool      `json:"lifeTimeout"`
 	WriteErrors    int       `json:"writeErrors"`
+	// mu guards the fields above: the connection's goroutine updates them while the admin APIs and the events report them,
+	// and the listener's shutdown flags them from a third goroutine.
+	mu sync.Mutex
+}
+
+type connectionStatusJSON ConnectionStatus
+
+// MarshalJSON reports the status as it is at one moment, as the connection keeps updating it while it is reported.
+func (s *ConnectionStatus) MarshalJSON() ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return json.Marshal((*connectionStatusJSON)(s))
+}
+
+// update changes the status while holding its lock.
+func (s *ConnectionStatus) update(f func(s *ConnectionStatus)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f(s)
+}
+
+// bytesRead gives the total bytes read so far.
+func (s *ConnectionStatus) bytesRead() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.TotalBytesRead
 }
 
 type ConnectionHistory struct {
@@ -159,24 +186,68 @@ func getTCPConfig(port int) *TCPConfig {
 	return tcpListeners[port]
 }
 
+// updateTCPConfig changes the config of a port while holding the lock that guards the configs, which the connections
+// copy from. It tells whether the port has a config.
+func updateTCPConfig(port int, update func(c *TCPConfig)) bool {
+	lock.Lock()
+	defer lock.Unlock()
+	c := tcpListeners[port]
+	if c == nil {
+		return false
+	}
+	update(c)
+	return true
+}
+
+// mode tells which of the modes a connection with this config operates in. It is the order in which the modes win
+// when more than one of them is configured.
+func (tcp *TCPConfig) mode() string {
+	switch {
+	case tcp.Payload:
+		return Response
+	case tcp.Stream:
+		return Stream
+	case tcp.Conversation:
+		return Conversation
+	case tcp.ValidatePayloadContent || tcp.ValidatePayloadLength:
+		return PayloadValidation
+	case tcp.ConnectionLifeD > 0:
+		return SilentLife
+	case tcp.CloseAtFirstByte:
+		return CloseAtFirstByte
+	}
+	return Echo
+}
+
+// ServeClientConnection serves the connection in the mode that the port is configured with, in a goroutine of its own. A
+// connection to a port that has no config is closed, as there is nothing to serve it with.
 func ServeClientConnection(port, requestID int, conn net.Conn) bool {
 	metrics.UpdateConnCount("tcp")
-	tcpConfig := getTCPConfig(port)
+	lock.Lock()
+	tcpConfig := tcpListeners[port]
 	if tcpConfig == nil {
+		lock.Unlock()
 		log.Printf("Cannot serve TCP on port %d without any config", port)
+		if conn != nil {
+			conn.Close()
+		}
 		return false
 	}
 	connectionStatus := &ConnectionStatus{Port: port, ListenerID: tcpConfig.ListenerID, RequestID: requestID, ConnStartTime: time.Now()}
 	tcpHandler := &TCPConnectionHandler{conn: conn, requestID: requestID, status: connectionStatus}
+	// The connection works on a copy of the config, that the changes to the config of the port don't reach.
 	tcpHandler.TCPConfig = *tcpConfig
-	events.SendEventJSONForPort(port, "New TCP Client Connection", tcpConfig.ListenerID, tcpHandler)
-	lock.Lock()
+	if tcpHandler.mode() == SilentLife {
+		// The mode is reported by the config of the connection, which must not change once the connection is reported.
+		tcpHandler.SilentLife = true
+	}
 	connectionHistory[port] = append(connectionHistory[port], &ConnectionHistory{Config: &tcpHandler.TCPConfig, Status: connectionStatus})
 	if activeConnections[tcpConfig.ListenerID] == nil {
 		activeConnections[tcpConfig.ListenerID] = map[int]*TCPConnectionHandler{}
 	}
 	activeConnections[tcpConfig.ListenerID][requestID] = tcpHandler
 	lock.Unlock()
+	events.SendEventJSONForPort(port, "New TCP Client Connection", tcpHandler.ListenerID, tcpHandler)
 	tcpHandler.reader = bufio.NewReader(conn)
 	tcpHandler.scanner = bufio.NewScanner(tcpHandler.reader)
 	tcpHandler.readBufferSize = 100
@@ -187,27 +258,38 @@ func ServeClientConnection(port, requestID int, conn net.Conn) bool {
 	return true
 }
 
+// CloseListenerConnections closes all the connections that a listener has, which are the ones of the listener's port that
+// were accepted by that listener (and not by the one that it replaced).
 func CloseListenerConnections(listenerID string) {
 	lock.Lock()
-	defer lock.Unlock()
+	handlers := make([]*TCPConnectionHandler, 0, len(activeConnections[listenerID]))
 	for _, tcpHandler := range activeConnections[listenerID] {
-		tcpHandler.status.ServerClosed = true
-		tcpHandler.closeClientConnection()
+		handlers = append(handlers, tcpHandler)
 	}
 	delete(activeConnections, listenerID)
+	lock.Unlock()
+	// The connections are closed after the lock is let go: closing a connection may take time, and the APIs and the other
+	// connections wait for that lock.
+	for _, tcpHandler := range handlers {
+		tcpHandler.status.update(func(s *ConnectionStatus) { s.ServerClosed = true })
+		tcpHandler.closeClientConnection()
+	}
 }
 
+// CloseClientConnection closes a connection of a listener, if the listener still has it.
 func CloseClientConnection(listenerID string, requestID int) {
+	var tcpHandler *TCPConnectionHandler
 	lock.Lock()
-	defer lock.Unlock()
 	if activeConnections[listenerID] != nil {
-		if tcpHandler := activeConnections[listenerID][requestID]; tcpHandler != nil {
-			tcpHandler.closeClientConnection()
-			delete(activeConnections[listenerID], requestID)
-		}
+		tcpHandler = activeConnections[listenerID][requestID]
+		delete(activeConnections[listenerID], requestID)
 		if len(activeConnections[listenerID]) == 0 {
 			delete(activeConnections, listenerID)
 		}
+	}
+	lock.Unlock()
+	if tcpHandler != nil {
+		tcpHandler.closeClientConnection()
 	}
 }
 

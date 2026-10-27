@@ -3,7 +3,6 @@ package tcp
 import (
 	"bufio"
 	"bytes"
-	"errors"
 	"fmt"
 	"goto/pkg/events"
 	"goto/pkg/global"
@@ -15,13 +14,14 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
 type TCPConnectionHandler struct {
 	TCPConfig
 	conn            net.Conn
-	closed          bool
+	closed          atomic.Bool
 	requestID       int
 	status          *ConnectionStatus
 	reader          *bufio.Reader
@@ -29,10 +29,10 @@ type TCPConnectionHandler struct {
 	readBuffer      []byte
 	writeBuffer     []byte
 	readText        string
-	expectedPayload []byte
 	readBufferSize  int
 	writeBufferSize int
-	closing         bool
+	// closing and closed are set by the goroutine of the connection, and by the one that closes the listener's connections.
+	closing atomic.Bool
 }
 
 func (tcp *TCPConnectionHandler) resetReadBuffer() {
@@ -46,11 +46,13 @@ func (tcp *TCPConnectionHandler) resetWriteBuffer() {
 
 func (tcp *TCPConnectionHandler) closeClientConnection() {
 	if tcp.conn != nil {
-		tcp.closing = true
+		tcp.closing.Store(true)
 		tcp.conn.Close()
-		tcp.closed = true
-		tcp.status.Closed = true
-		tcp.status.ConnCloseTime = time.Now().UTC().String()
+		tcp.closed.Store(true)
+		tcp.status.update(func(s *ConnectionStatus) {
+			s.Closed = true
+			s.ConnCloseTime = time.Now().UTC().String()
+		})
 	}
 }
 
@@ -59,18 +61,18 @@ func (tcp *TCPConnectionHandler) close() {
 }
 
 func (tcp *TCPConnectionHandler) isClosingOrClosed() bool {
-	return tcp.closing || tcp.closed || !global.Funcs.IsListenerOpen(tcp.Port)
+	return tcp.closing.Load() || tcp.closed.Load() || !global.Funcs.IsListenerOpen(tcp.Port)
 }
 
 func (tcp *TCPConnectionHandler) processConnectionError(err error, whatFor string) {
-	tcp.closing = true
+	tcp.closing.Store(true)
 	switch err {
 	case io.EOF:
 		log.Printf("[Listener: %s][Request: %d][%s]: Connection closed by client on port [%d]",
 			tcp.ListenerID, tcp.requestID, whatFor, tcp.Port)
-		tcp.status.ClientClosed = true
+		tcp.status.update(func(s *ConnectionStatus) { s.ClientClosed = true })
 	default:
-		tcp.status.ServerClosed = true
+		tcp.status.update(func(s *ConnectionStatus) { s.ServerClosed = true })
 		if util.IsConnectionCloseError(err) {
 			log.Printf("[Listener: %s][Request: %d][%s]: Connection closed by server on port [%d]",
 				tcp.ListenerID, tcp.requestID, whatFor, tcp.Port)
@@ -79,20 +81,20 @@ func (tcp *TCPConnectionHandler) processConnectionError(err error, whatFor strin
 			if balanceLife < 0 {
 				log.Printf("[Listener: %s][Request: %d][%s]: Max connection life [%s] reached. Closing connection on port [%d]",
 					tcp.ListenerID, tcp.requestID, whatFor, tcp.ConnectionLifeD, tcp.Port)
-				tcp.status.LifeTimeout = true
+				tcp.status.update(func(s *ConnectionStatus) { s.LifeTimeout = true })
 			} else if tcp.ConnIdleTimeoutD < tcp.ReadTimeoutD {
 				log.Printf("[Listener: %s][Request: %d][%s]: Connection idle timeout [%s] reached. Closing connection on port [%d]",
 					tcp.ListenerID, tcp.requestID, whatFor, tcp.ConnIdleTimeoutD, tcp.Port)
-				tcp.status.IdleTimeout = true
+				tcp.status.update(func(s *ConnectionStatus) { s.IdleTimeout = true })
 			} else {
 				log.Printf("[Listener: %s][Request: %d][%s]: Read timeout on port [%d]: %s",
 					tcp.ListenerID, tcp.requestID, whatFor, tcp.Port, err.Error())
-				tcp.status.ReadTimeout = true
+				tcp.status.update(func(s *ConnectionStatus) { s.ReadTimeout = true })
 			}
 		} else {
 			log.Printf("[Listener: %s][Request: %d][%s]: Error reading TCP data on port [%d]: %s",
 				tcp.ListenerID, tcp.requestID, whatFor, tcp.Port, err.Error())
-			tcp.status.ErrorClosed = true
+			tcp.status.update(func(s *ConnectionStatus) { s.ErrorClosed = true })
 		}
 	}
 }
@@ -102,26 +104,22 @@ func (tcp *TCPConnectionHandler) processRequest() {
 	log.Printf("[Listener: %s][Request: %d]: Processing new request on port [%d] - {response=%t, echo=%t, stream=%t, conversation=%t, readTimeout=%s, writeTimeout=%s, connIdleTimeout=%s, connectionLife=%s}",
 		tcp.ListenerID, tcp.requestID, tcp.Port, tcp.Payload, tcp.Echo, tcp.Stream, tcp.Conversation, tcp.ReadTimeout, tcp.WriteTimeout, tcp.ConnIdleTimeout, tcp.ConnectionLife)
 
-	if tcp.Payload {
-		metrics.UpdateTCPConnCount(Response)
+	mode := tcp.mode()
+	metrics.UpdateTCPConnCount(mode)
+	switch mode {
+	case Response:
 		tcp.doResponsePayload()
-	} else if tcp.Stream {
-		metrics.UpdateTCPConnCount(Stream)
+	case Stream:
 		tcp.doStream()
-	} else if tcp.Conversation {
-		metrics.UpdateTCPConnCount(Conversation)
+	case Conversation:
 		tcp.doConversation()
-	} else if tcp.ValidatePayloadContent || tcp.ValidatePayloadLength {
-		metrics.UpdateTCPConnCount(PayloadValidation)
+	case PayloadValidation:
 		tcp.doPayloadValidation()
-	} else if tcp.ConnectionLifeD > 0 {
-		metrics.UpdateTCPConnCount(SilentLife)
+	case SilentLife:
 		tcp.doSilentLife()
-	} else if tcp.CloseAtFirstByte {
-		metrics.UpdateTCPConnCount(CloseAtFirstByte)
+	case CloseAtFirstByte:
 		tcp.doCloseAtFirstByte()
-	} else {
-		metrics.UpdateTCPConnCount(Echo)
+	default:
 		tcp.doEcho()
 	}
 	if !global.Funcs.IsListenerOpen(tcp.Port) {
@@ -131,43 +129,46 @@ func (tcp *TCPConnectionHandler) processRequest() {
 }
 
 func (tcp *TCPConnectionHandler) doSilentLife() {
-	tcp.SilentLife = true
-	tcp.status.TotalBytesRead = 0
+	tcp.status.update(func(s *ConnectionStatus) { s.TotalBytesRead = 0 })
 	log.Printf("[Listener: %s][Request: %d][%s]: Living silent life with max connection life of [%s] on port [%d]",
 		tcp.ListenerID, tcp.requestID, SilentLife, tcp.ConnectionLife, tcp.Port)
 	for {
 		if tcp.isClosingOrClosed() {
 			log.Printf("[Listener: %s][Request: %d][%s]: Connection is closing on port [%d]",
 				tcp.ListenerID, tcp.requestID, SilentLife, tcp.Port)
-			tcp.sendMessage(strconv.Itoa(tcp.status.TotalBytesRead), SilentLife)
+			tcp.sendMessage(strconv.Itoa(tcp.status.bytesRead()), SilentLife)
 			return
 		}
 		if success, readSize := tcp.read(SilentLife); success {
 			log.Printf("[Listener: %s][Request: %d][%s]: Read data of length [%d] for SilentLife on port [%d]. Total read so far [%d].",
-				tcp.ListenerID, tcp.requestID, SilentLife, readSize, tcp.Port, tcp.status.TotalBytesRead)
+				tcp.ListenerID, tcp.requestID, SilentLife, readSize, tcp.Port, tcp.status.bytesRead())
 		}
 	}
 }
 
 func (tcp *TCPConnectionHandler) doCloseAtFirstByte() {
-	tcp.CloseAtFirstByte = true
 	log.Printf("[Listener: %s][Request: %d][%s]: Will close at first byte on port [%d]",
 		tcp.ListenerID, tcp.requestID, CloseAtFirstByte, tcp.Port)
 	tcp.conn.SetReadDeadline(time.Time{})
-	tcp.status.TotalReads++
+	tcp.status.update(func(s *ConnectionStatus) { s.TotalReads++ })
 	len, err := tcp.reader.Read(make([]byte, 1))
 	switch err {
 	case nil:
-		tcp.status.FirstByteInAt = time.Now().UTC().String()
-		tcp.status.LastByteInAt = tcp.status.FirstByteInAt
+		firstByteAt := time.Now().UTC().String()
+		tcp.status.update(func(s *ConnectionStatus) {
+			s.FirstByteInAt = firstByteAt
+			s.LastByteInAt = firstByteAt
+		})
 		tcp.sendMessage(GoodByeMessage, CloseAtFirstByte)
-		tcp.status.FirstByteOutAt = time.Now().UTC().String()
-		tcp.status.LastByteOutAt = tcp.status.FirstByteOutAt
-		tcp.status.TotalBytesRead = 1
+		tcp.status.update(func(s *ConnectionStatus) {
+			s.FirstByteOutAt = time.Now().UTC().String()
+			s.LastByteOutAt = s.FirstByteOutAt
+			s.TotalBytesRead = 1
+			s.ServerClosed = true
+		})
 		log.Printf("[Listener: %s][Request: %d][%s]: Received %d bytes, closing port [%d]",
 			tcp.ListenerID, tcp.requestID, CloseAtFirstByte, len, tcp.Port)
-		tcp.closing = true
-		tcp.status.ServerClosed = true
+		tcp.closing.Store(true)
 	default:
 		tcp.processConnectionError(err, CloseAtFirstByte)
 	}
@@ -184,7 +185,7 @@ func (tcp *TCPConnectionHandler) doPayloadValidation() {
 		log.Printf("[Listener: %s][Request: %d][%s]: Will validate payload length [%d] over total connection life of [%s] with read timeout [%s] and idle timeout [%s] on port %d\n",
 			tcp.ListenerID, tcp.requestID, PayloadValidation, tcp.ExpectedPayloadLength, tcp.ConnectionLifeD, tcp.ReadTimeoutD, tcp.ConnIdleTimeoutD, tcp.Port)
 	}
-	tcp.status.TotalBytesRead = 0
+	tcp.status.update(func(s *ConnectionStatus) { s.TotalBytesRead = 0 })
 	tcp.resetReadBuffer()
 	tcp.resetWriteBuffer()
 	var receivedPayload []byte
@@ -200,39 +201,42 @@ func (tcp *TCPConnectionHandler) doPayloadValidation() {
 				tcp.ListenerID, tcp.requestID, PayloadValidation, tcp.Port)
 			break
 		}
-		prevBytesRead := tcp.status.TotalBytesRead
+		prevBytesRead := tcp.status.bytesRead()
 		if success, readSize := tcp.read(PayloadValidation); success {
-			if tcp.ValidatePayloadContent && tcp.status.TotalBytesRead <= tcp.ExpectedPayloadLength {
+			totalRead := tcp.status.bytesRead()
+			if tcp.ValidatePayloadContent && totalRead <= tcp.ExpectedPayloadLength {
 				copy(receivedPayload[prevBytesRead:prevBytesRead+readSize], tcp.readBuffer[:readSize])
 			}
 			log.Printf("[Listener: %s][Request: %d][%s]: Read data of length [%d] for payload validation on port [%d]. Total read so far [%d].",
-				tcp.ListenerID, tcp.requestID, PayloadValidation, readSize, tcp.Port, tcp.status.TotalBytesRead)
-			if tcp.status.TotalBytesRead == tcp.ExpectedPayloadLength {
+				tcp.ListenerID, tcp.requestID, PayloadValidation, readSize, tcp.Port, totalRead)
+			if totalRead == tcp.ExpectedPayloadLength {
 				log.Printf("[Listener: %s][Request: %d][%s]: Toal payload size matches the expected length [%d] on port [%d]. Waiting for any excess byte to show up.",
-					tcp.ListenerID, tcp.requestID, PayloadValidation, tcp.status.TotalBytesRead, tcp.Port)
+					tcp.ListenerID, tcp.requestID, PayloadValidation, totalRead, tcp.Port)
 				isPayloadReady = true
 				checkForExcess = true
-			} else if tcp.status.TotalBytesRead < tcp.ExpectedPayloadLength {
+			} else if totalRead < tcp.ExpectedPayloadLength {
 				log.Printf("[Listener: %s][Request: %d][%s]: Total received data of length [%d] not enough to match expected length [%d], waiting for more data on port [%d].",
-					tcp.ListenerID, tcp.requestID, PayloadValidation, tcp.status.TotalBytesRead, tcp.ExpectedPayloadLength, tcp.Port)
+					tcp.ListenerID, tcp.requestID, PayloadValidation, totalRead, tcp.ExpectedPayloadLength, tcp.Port)
 			} else {
 				log.Printf("[Listener: %s][Request: %d][%s]: Total received data of length [%d] exceeded expected length [%d] on port [%d].",
-					tcp.ListenerID, tcp.requestID, PayloadValidation, tcp.status.TotalBytesRead, tcp.ExpectedPayloadLength, tcp.Port)
+					tcp.ListenerID, tcp.requestID, PayloadValidation, totalRead, tcp.ExpectedPayloadLength, tcp.Port)
 				isPayloadExcess = true
 				isPayloadReady = true
+				// there is no more to wait for: more than expected has come, however it came
+				checkForExcess = false
 			}
 		}
 	}
+	totalRead := tcp.status.bytesRead()
 	msg := ""
 	if !isPayloadReady {
 		msg = fmt.Sprintf("[ERROR:TIMEOUT] - Timed out before receiving payload of expected length [%d] on port [%d]", tcp.ExpectedPayloadLength, tcp.Port)
 	} else if isPayloadExcess {
-		msg = fmt.Sprintf("[ERROR:EXCEEDED] - Payload length [%d] exceeded expected length [%d] on port [%d]", tcp.status.TotalBytesRead, tcp.ExpectedPayloadLength, tcp.Port)
-	} else if tcp.ValidatePayloadContent &&
-		!(bytes.Equal(receivedPayload[:tcp.ExpectedPayloadLength], tcp.expectedPayload) && tcp.readBuffer[tcp.ExpectedPayloadLength] == 0) {
-		msg = fmt.Sprintf("[ERROR:CONTENT] - Payload content of length [%d] didn't match expected payload of length [%d] on port [%d]", tcp.status.TotalBytesRead, tcp.ExpectedPayloadLength, tcp.Port)
+		msg = fmt.Sprintf("[ERROR:EXCEEDED] - Payload length [%d] exceeded expected length [%d] on port [%d]", totalRead, tcp.ExpectedPayloadLength, tcp.Port)
+	} else if tcp.ValidatePayloadContent && !bytes.Equal(receivedPayload, tcp.ExpectedPayload) {
+		msg = fmt.Sprintf("[ERROR:CONTENT] - Payload content of length [%d] didn't match expected payload of length [%d] on port [%d]", totalRead, tcp.ExpectedPayloadLength, tcp.Port)
 	} else {
-		msg = fmt.Sprintf("[SUCCESS]: Received payload matches expected payload of length [%d] on port [%d]", tcp.status.TotalBytesRead, tcp.Port)
+		msg = fmt.Sprintf("[SUCCESS]: Received payload matches expected payload of length [%d] on port [%d]", totalRead, tcp.Port)
 	}
 	log.Printf("[Listener: %s][Request: %d][%s]: Sending validation result: %s.", tcp.ListenerID, tcp.requestID, PayloadValidation, msg)
 	tcp.sendMessageWithDeadline(msg, PayloadValidation, false)
@@ -242,7 +246,7 @@ func (tcp *TCPConnectionHandler) doEcho() {
 	log.Printf("[Listener: %s][Request: %d][%s]: Will echo response of size [%d] with response delay [%s] on port %d\n",
 		tcp.ListenerID, tcp.requestID, Echo, tcp.EchoResponseSize, tcp.EchoResponseDelayD, tcp.Port)
 
-	tcp.status.TotalBytesRead = 0
+	tcp.status.update(func(s *ConnectionStatus) { s.TotalBytesRead = 0 })
 	tcp.writeBufferSize = tcp.EchoResponseSize
 	tcp.resetWriteBuffer()
 	leftover := 0
@@ -254,7 +258,7 @@ func (tcp *TCPConnectionHandler) doEcho() {
 		}
 		if success, readSize := tcp.read(Echo); success {
 			log.Printf("[Listener: %s][Request: %d][%s]: Read data of length [%d] for echo on port [%d]. Total read so far [%d].",
-				tcp.ListenerID, tcp.requestID, Echo, readSize, tcp.Port, tcp.status.TotalBytesRead)
+				tcp.ListenerID, tcp.requestID, Echo, readSize, tcp.Port, tcp.status.bytesRead())
 			if readSize+leftover >= tcp.EchoResponseSize {
 				remaining := readSize + leftover
 				tcp.copyInputHeadToOutput(tcp.EchoResponseSize-leftover, leftover, len(tcp.writeBuffer))
@@ -299,6 +303,11 @@ func (tcp *TCPConnectionHandler) echoBack() {
 
 func (tcp *TCPConnectionHandler) doResponsePayload() {
 	payloadCount := len(tcp.ResponsePayloads)
+	if payloadCount == 0 {
+		log.Printf("[Listener: %s][Request: %d][%s]: No response payloads configured, nothing to send on port [%d]",
+			tcp.ListenerID, tcp.requestID, Response, tcp.Port)
+		return
+	}
 	connectionLife := tcp.ConnectionLifeD
 	if connectionLife <= 0 {
 		connectionLife = 30 * time.Second
@@ -319,7 +328,7 @@ func (tcp *TCPConnectionHandler) doResponsePayload() {
 		if tcp.RespondAfterRead {
 			if success, readSize := tcp.read(Response); success {
 				log.Printf("[Listener: %s][Request: %d][%s]: Read data of length [%d] on port [%d]. Total read so far [%d].",
-					tcp.ListenerID, tcp.requestID, Response, readSize, tcp.Port, tcp.status.TotalBytesRead)
+					tcp.ListenerID, tcp.requestID, Response, readSize, tcp.Port, tcp.status.bytesRead())
 			}
 		}
 		time.Sleep(tcp.ResponseDelayD)
@@ -371,7 +380,11 @@ func (tcp *TCPConnectionHandler) doStream() {
 				tcp.ListenerID, tcp.requestID, Stream, tcp.ConnectionLifeD, tcp.Port)
 			break
 		}
-		tcp.sendDataToClient(payload, Stream)
+		if !tcp.sendDataToClient(payload, Stream) {
+			log.Printf("[Listener: %s][Request: %d][%s]: Ending stream as failed to send data on port [%d]",
+				tcp.ListenerID, tcp.requestID, Stream, tcp.Port)
+			return
+		}
 	}
 }
 
@@ -457,13 +470,14 @@ func (tcp *TCPConnectionHandler) readOrScan(scan bool, whatFor string) (bool, in
 	tcp.updateReadDeadline()
 	readSize := 0
 	var err error
-	tcp.status.TotalReads++
+	tcp.status.update(func(s *ConnectionStatus) { s.TotalReads++ })
 	if scan {
 		if tcp.scanner.Scan() {
 			tcp.readText = tcp.scanner.Text()
 			readSize = len(tcp.readText)
-		} else {
-			err = errors.New("No text scanned")
+		} else if err = tcp.scanner.Err(); err == nil {
+			// The scanner is out of text, which is the client having closed the connection.
+			err = io.EOF
 		}
 	} else {
 		readSize, err = tcp.reader.Read(tcp.readBuffer)
@@ -471,16 +485,19 @@ func (tcp *TCPConnectionHandler) readOrScan(scan bool, whatFor string) (bool, in
 	switch err {
 	case nil:
 		now := time.Now().UTC().String()
-		if tcp.status.FirstByteInAt == "" {
-			tcp.status.FirstByteInAt = now
-		}
-		tcp.status.LastByteInAt = now
-		tcp.status.TotalBytesRead += readSize
+		tcp.status.update(func(s *ConnectionStatus) {
+			if s.FirstByteInAt == "" {
+				s.FirstByteInAt = now
+			}
+			s.LastByteInAt = now
+			s.TotalBytesRead += readSize
+		})
 		return true, readSize
 	case io.EOF:
 		log.Printf("[Listener: %s][Request: %d][%s]: Connection closed by client on port [%d]",
 			tcp.ListenerID, tcp.requestID, whatFor, tcp.Port)
-		tcp.closing = true
+		tcp.closing.Store(true)
+		tcp.status.update(func(s *ConnectionStatus) { s.ClientClosed = true })
 		return false, 0
 	default:
 		tcp.processConnectionError(err, whatFor)
@@ -524,19 +541,21 @@ func (tcp *TCPConnectionHandler) sendDataToClientWithDeadline(data []byte, whatF
 	sentLength := 0
 	dataLength := len(data)
 	for {
-		tcp.status.TotalWrites++
+		tcp.status.update(func(s *ConnectionStatus) { s.TotalWrites++ })
 		if len, err := tcp.conn.Write(data); err != nil {
-			tcp.status.WriteErrors++
+			tcp.status.update(func(s *ConnectionStatus) { s.WriteErrors++ })
 			log.Printf("[Listener: %s][Request: %d][%s]: Error sending data of length %d: %s",
 				tcp.ListenerID, tcp.requestID, whatFor, dataLength, err.Error())
 			return false
 		} else {
 			now := time.Now().UTC().String()
-			if tcp.status.FirstByteOutAt == "" {
-				tcp.status.FirstByteOutAt = now
-			}
-			tcp.status.LastByteOutAt = now
-			tcp.status.TotalBytesSent += len
+			tcp.status.update(func(s *ConnectionStatus) {
+				if s.FirstByteOutAt == "" {
+					s.FirstByteOutAt = now
+				}
+				s.LastByteOutAt = now
+				s.TotalBytesSent += len
+			})
 			sentLength += len
 			if sentLength < dataLength {
 				log.Printf("[Listener: %s][Request: %d][%s]: Sent data of length %d, remaining to send: %d. Will keep sending.",

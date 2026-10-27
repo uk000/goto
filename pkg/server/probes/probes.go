@@ -62,10 +62,16 @@ func setRoutes(r *mux.Router) {
 }
 
 func IsLivenessProbe(r *http.Request) bool {
-	return strings.EqualFold(r.RequestURI, initPortProbes(r).LivenessProbe)
+	pp := initPortProbes(r)
+	pp.lock.RLock()
+	defer pp.lock.RUnlock()
+	return strings.EqualFold(r.RequestURI, pp.LivenessProbe)
 }
 func IsReadinessProbe(r *http.Request) bool {
-	return strings.EqualFold(r.RequestURI, initPortProbes(r).ReadinessProbe)
+	pp := initPortProbes(r)
+	pp.lock.RLock()
+	defer pp.lock.RUnlock()
+	return strings.EqualFold(r.RequestURI, pp.ReadinessProbe)
 }
 
 func GetPortProbes(port string) *PortProbes {
@@ -186,13 +192,15 @@ func middlewareFunc(next http.Handler) http.Handler {
 			if pp.ReadinessCount == 0 {
 				pp.ReadinessOverflowCount++
 			}
+			// What is reported is what this probe made it, and not what the probes that come after it do.
+			count, overflowCount, probe := pp.ReadinessCount, pp.ReadinessOverflowCount, pp.ReadinessProbe
 			pp.lock.Unlock()
 			util.CopyHeaders("Readiness-Request", r, w, nil, true, true, false)
-			w.Header().Add(HeaderReadinessRequestCount, fmt.Sprint(pp.ReadinessCount))
-			w.Header().Add(HeaderReadinessOverflowCount, fmt.Sprint(pp.ReadinessOverflowCount))
+			w.Header().Add(HeaderReadinessRequestCount, fmt.Sprint(count))
+			w.Header().Add(HeaderReadinessOverflowCount, fmt.Sprint(overflowCount))
 			w.WriteHeader(status)
 			util.SetHeadersSent(r, true)
-			util.AddLogMessage(fmt.Sprintf("Serving Readiness Probe: [%s]", pp.ReadinessProbe), r)
+			util.AddLogMessage(fmt.Sprintf("Serving Readiness Probe: [%s]", probe), r)
 		} else if IsLivenessProbe(r) {
 			metrics.UpdateRequestCount("livenessProbe")
 			pp.lock.Lock()
@@ -208,13 +216,14 @@ func middlewareFunc(next http.Handler) http.Handler {
 			if pp.LivenessCount == 0 {
 				pp.LivenessOverflowCount++
 			}
+			count, overflowCount, probe := pp.LivenessCount, pp.LivenessOverflowCount, pp.LivenessProbe
 			pp.lock.Unlock()
 			util.CopyHeaders("Liveness-Request", r, w, nil, true, true, false)
-			w.Header().Add(HeaderLivenessRequestCount, fmt.Sprint(pp.LivenessCount))
-			w.Header().Add(HeaderLivenessOverflowCount, fmt.Sprint(pp.LivenessOverflowCount))
+			w.Header().Add(HeaderLivenessRequestCount, fmt.Sprint(count))
+			w.Header().Add(HeaderLivenessOverflowCount, fmt.Sprint(overflowCount))
 			w.WriteHeader(status)
 			util.SetHeadersSent(r, true)
-			util.AddLogMessage(fmt.Sprintf("Serving Liveness Probe: [%s]", pp.LivenessProbe), r)
+			util.AddLogMessage(fmt.Sprintf("Serving Liveness Probe: [%s]", probe), r)
 		} else if next != nil {
 			next.ServeHTTP(w, r)
 		}

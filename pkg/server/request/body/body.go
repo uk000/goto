@@ -42,11 +42,13 @@ func middlewareFunc(next http.Handler) http.Handler {
 				log.Println("Reading Request.Body")
 			}
 			rs := util.GetRequestStore(r)
-			body := util.Read(r.Body)
+			raw := util.ReadBytes(r.Body)
 			if rr, ok := r.Body.(util.IReReader); ok {
 				rr.Rewind()
 			}
-			bodyLength := len(body)
+			// The payload is kept without the spaces around it, but the size is of what was received.
+			body := strings.Trim(string(raw), " ")
+			bodyLength := len(raw)
 			rs.RequestPayload = body
 			rs.RequestPayloadSize = bodyLength
 			if global.Debug {
@@ -61,7 +63,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 				bodyLog := ""
 				if global.Flags.LogRequestMiniBody && len(body) > 50 {
 					bodyLog = fmt.Sprintf("%s...", body[:50])
-					bodyLog += fmt.Sprintf("%s", body[bodyLength-50:])
+					bodyLog += fmt.Sprintf("%s", body[len(body)-50:])
 				} else {
 					bodyLog = body
 				}
