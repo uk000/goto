@@ -619,3 +619,61 @@ func TestMarshalRegistryAndServiceJSON(t *testing.T) {
 		t.Errorf("service JSON = %s", b)
 	}
 }
+
+// Only the methods of the services that are made from a descriptor in another way were told to be bidirectional, so the
+// ones of the services that are uploaded as protos or loaded by reflection never were, and what chooses by that (the tee
+// of a stream) took them for streams of one direction.
+func TestNewGRPCServiceMarksBidiStreams(t *testing.T) {
+	stubHandlers(t)
+	s := newRegistry().NewGRPCService(echoDesc())
+	for name, want := range map[string]bool{"Unary": false, "ClientStream": false, "ServerStream": false, "Bidi": true} {
+		m := s.Methods[name]
+		if m == nil {
+			t.Fatalf("method %s is not there", name)
+		}
+		if m.IsBidiStream != want {
+			t.Errorf("%s: IsBidiStream = %v, want %v", name, m.IsBidiStream, want)
+		}
+	}
+	if m := s.Methods["Bidi"]; !m.IsClientStream || !m.IsServerStream || m.IsUnary {
+		t.Errorf("Bidi = %+v, want a stream both ways", m)
+	}
+}
+
+// The server takes one service of a name, so a service that is served and also proxied is given once, as the service of
+// the proxy.
+func TestServicesToRegisterGivesAServiceOnce(t *testing.T) {
+	stubHandlers(t)
+	r := newRegistry()
+	_, psd := healthDesc()
+	health := r.NewGRPCService(psd)
+	echo := r.NewGRPCService(echoDesc())
+	if got := r.ServicesToRegister(); len(got) != 0 {
+		t.Fatalf("a registry with nothing served or proxied gives %d services", len(got))
+	}
+	r.AddActiveService(health)
+	r.AddActiveService(echo)
+	r.AddProxyService(echo, echo, 0)
+	got := r.ServicesToRegister()
+	if len(got) != 2 {
+		t.Fatalf("services to register = %d, want the 2 that there are by name", len(got))
+	}
+	if got[0].Name > got[1].Name {
+		t.Errorf("services are not in the order of their names: %s, %s", got[0].Name, got[1].Name)
+	}
+	// A proxy of a service that is not served is registered too, as it is the only one there is.
+	r.RemoveActiveService(echo.Name)
+	r.RemoveActiveService(health.Name)
+	if got := r.ServicesToRegister(); len(got) != 1 || got[0] != echo {
+		t.Errorf("services to register = %v, want the proxied one", got)
+	}
+	// When the service that is served is not the object that is proxied (it was uploaded again), the proxy goes.
+	r.AddActiveService(health)
+	other := r.NewGRPCService(echoDesc())
+	r.AddActiveService(other)
+	for _, s := range r.ServicesToRegister() {
+		if s.Name == echo.Name && s != echo {
+			t.Errorf("the service to register for %s is not the one of the proxy", s.Name)
+		}
+	}
+}

@@ -21,6 +21,7 @@ import (
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -30,25 +31,74 @@ var (
 	GetServiceRegistry = map[string]func(int) RPCServiceRegistry{}
 )
 
+const (
+	grpcRoot    = "/grpc"
+	jsonrpcRoot = "/jsonrpc"
+)
+
+// RootRouter gives the router of the root path that the APIs of the type of rpc (grpc, jsonrpc) are served from. The
+// server hands a request to the router of the first segment of its path, which is the root path of the type, so the
+// routes of the APIs have to be on that router to be reached: a router of a pattern that spans the types, which no
+// root path is equal to, is never given a request.
+func RootRouter(rpcType string) *mux.Router {
+	if rpcType == "grpc" {
+		return middleware.RootPath(grpcRoot)
+	}
+	// The root path of jsonrpc is also one that other requests can have, and those are not for the APIs: only the paths
+	// of the APIs are given to the router.
+	return middleware.RootPathIf(jsonrpcRoot, IsJSONRPCAdminRequest)
+}
+
+// IsJSONRPCAdminRequest tells if the request is for one of the APIs of jsonrpc, as opposed to a request that has no API
+// to serve it, and is handled as any other request.
+func IsJSONRPCAdminRequest(r *http.Request) bool {
+	uri := r.RequestURI
+	if i := strings.IndexAny(uri, "?#"); i >= 0 {
+		uri = uri[:i]
+	}
+	return uri == jsonrpcRoot+"/server" || strings.HasPrefix(uri, jsonrpcRoot+"/server/") ||
+		uri == jsonrpcRoot+"/services" || strings.HasPrefix(uri, jsonrpcRoot+"/services/")
+}
+
+// forRPC gives the handler the type of rpc that the routes of the router are for, as the param that it takes it from.
+func forRPC(rpcType string, f func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := map[string]string{}
+		for k, v := range mux.Vars(r) {
+			vars[k] = v
+		}
+		vars["rpc"] = rpcType
+		f(w, mux.SetURLVars(r, vars))
+	}
+}
+
 func setRoutes(r *mux.Router) {
-	rpcRouter := middleware.RootPath("/{rpc:grpc|jsonrpc}")
+	for _, rpcType := range []string{"grpc", "jsonrpc"} {
+		setRPCRoutes(rpcType, RootRouter(rpcType))
+	}
+}
+
+func setRPCRoutes(rpcType string, rpcRouter *mux.Router) {
 	rpcServiceRouter := util.PathRouter(rpcRouter, "/server")
-	util.AddRoute(rpcServiceRouter, "", getServices, "GET")
-	util.AddRoute(rpcServiceRouter, "/{service}", getService, "GET")
-	util.AddRoute(rpcServiceRouter, "/{service}/track", trackService, "POST")
-	util.AddRoute(rpcServiceRouter, "/{service}/track/headers/{headers}", trackService, "POST")
-	util.AddRoute(rpcServiceRouter, "/{service}/track/{header}={value}", trackService, "POST")
-	util.AddRoute(rpcServiceRouter, "/{service}/tracking", getServiceTracking, "GET")
-	util.AddRoute(rpcServiceRouter, "/{service}/{method}/payload/clear", clearServiceResponsePayload, "POST")
-	util.AddRoute(rpcServiceRouter, "/{service}/{method}/payload", setServiceResponsePayload, "POST")
-	util.AddRoute(rpcServiceRouter, "/{service}/{method}/payload/header/{header}={value}", setServiceResponsePayload, "POST")
-	util.AddRoute(rpcServiceRouter, "/{service}/{method}/payload/header/{header}", setServiceResponsePayload, "POST")
-	util.AddRoute(rpcServiceRouter, "/{service}/{method}/payload/body~{regexes}", setServiceResponsePayload, "POST")
-	util.AddRoute(rpcServiceRouter, "/{service}/{method}/payload/body/paths/{paths}", setServiceResponsePayload, "POST")
-	util.AddRoute(rpcServiceRouter, "/{service}/{method}/payload/transform", setServicePayloadTransform, "POST")
-	util.AddRoute(rpcServiceRouter, "/{service}/{method}/payload/stream/count={count}/delay={delay}", setServiceResponsePayload, "POST")
-	util.AddRoute(rpcServiceRouter, "/{service}/{method}/payload/stream/count={count}/delay={delay}/header/{header}={value}", setServiceResponsePayload, "POST")
-	util.AddRoute(rpcServiceRouter, "/{service}/{method}/payload/stream/count={count}/delay={delay}/header/{header}", setServiceResponsePayload, "POST")
+	add := func(path string, f func(http.ResponseWriter, *http.Request), methods ...string) {
+		util.AddRoute(rpcServiceRouter, path, forRPC(rpcType, f), methods...)
+	}
+	add("", getServices, "GET")
+	add("/{service}", getService, "GET")
+	add("/{service}/track", trackService, "POST")
+	add("/{service}/track/headers/{headers}", trackService, "POST")
+	add("/{service}/track/{header}={value}", trackService, "POST")
+	add("/{service}/tracking", getServiceTracking, "GET")
+	add("/{service}/{method}/payload/clear", clearServiceResponsePayload, "POST")
+	add("/{service}/{method}/payload", setServiceResponsePayload, "POST")
+	add("/{service}/{method}/payload/header/{header}={value}", setServiceResponsePayload, "POST")
+	add("/{service}/{method}/payload/header/{header}", setServiceResponsePayload, "POST")
+	add("/{service}/{method}/payload/body~{regexes}", setServiceResponsePayload, "POST")
+	add("/{service}/{method}/payload/body/paths/{paths}", setServiceResponsePayload, "POST")
+	add("/{service}/{method}/payload/transform", setServicePayloadTransform, "POST")
+	add("/{service}/{method}/payload/stream/count={count}/delay={delay}", setServiceResponsePayload, "POST")
+	add("/{service}/{method}/payload/stream/count={count}/delay={delay}/header/{header}={value}", setServiceResponsePayload, "POST")
+	add("/{service}/{method}/payload/stream/count={count}/delay={delay}/header/{header}", setServiceResponsePayload, "POST")
 }
 
 // serviceRegistry returns the registry of services of the given type (grpc, jsonrpc) for the port, or nil if there

@@ -81,13 +81,17 @@ func init() {
 	middleware.Intercepted = []*middleware.Middleware{
 		request.Middleware, response.Middleware, catchall.Middleware, ui.Middleware,
 	}
+	// The routes of a root path are matched in the order that they are added. The rpc routes take any service name as
+	// /grpc/server/{service}, so they come after the grpc routes under the same path (/grpc/server/services, ...), which
+	// they would otherwise answer for.
 	middleware.RoutesOnly = []*middleware.Middleware{
 		router.Middleware, httpproxy.Middleware, grpcproxy.Middleware, mcpproxy.Middleware,
 		tcpproxy.Middleware, udpproxy.Middleware,
 		a2aserver.Middleware, a2aclient.Middleware, mcpclient.Middleware, mcpserver.Middleware,
-		tcp.Middleware, udp.Middleware, rpc.Middleware, jsonrpc.Middleware,
+		tcp.Middleware, udp.Middleware,
 		client.Middleware, listeners.Middleware, registry.Middleware,
 		grpcapi.Middleware, grpcclient.Middleware, protos.Middleware,
+		rpc.Middleware, jsonrpc.Middleware,
 		scripts.Middleware, job.Middleware, tls.Middleware, log.Middleware,
 		label.Middleware, info.Middleware, echo.Middleware, stream.Middleware,
 		pipe.Middleware, k8sYaml.Middleware, k8sApi.Middleware, k8sMock.Middleware,

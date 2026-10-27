@@ -26,6 +26,7 @@ import (
 	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -143,6 +144,33 @@ func (gsr *GRPCServiceRegistry) GetActiveService(name string) *GRPCService {
 	gsr.lock.RLock()
 	defer gsr.lock.RUnlock()
 	return gsr.ActiveServices[name]
+}
+
+// ServicesToRegister gives the services that a gRPC server registers when it starts: the ones that are served and the
+// ones that are proxied, by name. A server takes one service of a name, and registering a second is fatal, so a service
+// that is served and also proxied is given once. It is the service of the proxy, whose handlers choose for each call
+// whether to proxy it or serve it, by the port that the call came in on: that is how a service is served on one port
+// and proxied on another.
+func (gsr *GRPCServiceRegistry) ServicesToRegister() []*GRPCService {
+	gsr.lock.RLock()
+	defer gsr.lock.RUnlock()
+	byName := make(map[string]*GRPCService, len(gsr.ActiveServices)+len(gsr.ProxyServices))
+	for _, s := range gsr.ActiveServices {
+		byName[s.Name] = s
+	}
+	for _, triple := range gsr.ProxyServices {
+		byName[triple.First.Name] = triple.First
+	}
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	services := make([]*GRPCService, 0, len(names))
+	for _, name := range names {
+		services = append(services, byName[name])
+	}
+	return services
 }
 
 func (gsr *GRPCServiceRegistry) GetProxyService(name string) (*GRPCService, *GRPCService, int) {
@@ -314,6 +342,7 @@ func (gsr *GRPCServiceRegistry) NewGRPCService(psd protoreflect.ServiceDescripto
 			PMD:            pmd,
 			IsClientStream: pmd.IsStreamingClient(),
 			IsServerStream: pmd.IsStreamingServer(),
+			IsBidiStream:   pmd.IsStreamingClient() && pmd.IsStreamingServer(),
 			IsUnary:        !pmd.IsStreamingClient() && !pmd.IsStreamingServer(),
 			Service:        &service,
 		}

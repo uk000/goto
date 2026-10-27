@@ -88,7 +88,10 @@ const (
 )
 
 var (
-	TheGRPCServer   *GRPCServer
+	// TheGRPCServer exists from the start of the process, and not from the start of the default gRPC server: the APIs
+	// that open gRPC ports and the handlers of the HTTP server can reach it while the server is still starting, and
+	// listeners that are added to it then are the ones that the default server starts with.
+	TheGRPCServer   = newGRPCServer()
 	ServiceRegistry *gotogrpc.GRPCServiceRegistry
 	GRPCManager     = &GRPCServerManager{}
 	SIP             = &ServiceInfoProvider{
@@ -104,10 +107,16 @@ func init() {
 	global.GRPCServer = GRPCManager
 	global.GRPCManager = GRPCManager
 	ServiceRegistry = gotogrpc.ServiceRegistry
+	TheGRPCServer.refreshServer()
 }
 
+// StartDefaultGRPCServer starts the server on the listeners that it has by now, which are the default one and the ones
+// of the initial config, along with any that was opened before the server was started. The server that exists already
+// is the one to start, since a new one would lose those.
 func StartDefaultGRPCServer() {
-	TheGRPCServer = newGRPCServer()
+	if TheGRPCServer == nil {
+		TheGRPCServer = newGRPCServer()
+	}
 	TheGRPCServer.refreshServer()
 	listeners.InitDefaultGRPCListener()
 	listeners.AddInitialGRPCListeners()
@@ -367,6 +376,18 @@ func (sm *GRPCServerManager) restartServer() {
 	TheGRPCServer.start()
 }
 
+// RefreshServices has a server that is running take the services as they are now. A server registers its services only
+// when it starts, so a service that was made a proxy since then keeps the handlers that it was registered with, which
+// don't proxy anything, until the server starts again. A server that is not running has nothing to do: it registers the
+// services when it starts.
+func (sm *GRPCServerManager) RefreshServices() {
+	sm.lock.Lock()
+	defer sm.lock.Unlock()
+	if TheGRPCServer != nil && TheGRPCServer.isRunning() {
+		sm.restartServer()
+	}
+}
+
 func (sm *GRPCServerManager) StopService(s *gotogrpc.GRPCService) {
 	sm.lock.Lock()
 	defer sm.lock.Unlock()
@@ -511,16 +532,12 @@ func (g *GRPCServer) recycleListeners(port int) {
 
 func (g *GRPCServer) registerServices() {
 	registeredServices := g.Server.GetServiceInfo()
-	for _, svc := range ServiceRegistry.ActiveServices {
+	// The services are given once for a name, as the server can't take a service twice: one that is served and also
+	// proxied is registered with the handlers of its proxy, which serve the calls of the ports that it isn't proxied on.
+	for _, svc := range ServiceRegistry.ServicesToRegister() {
 		if _, present := registeredServices[svc.Name]; !present {
 			g.Server.RegisterService(svc.GSD, svc.Server)
 			SIP.AddService(svc)
-		}
-	}
-	for _, triple := range ServiceRegistry.ProxyServices {
-		svc := triple.First
-		if _, present := registeredServices[svc.Name]; !present {
-			g.Server.RegisterService(svc.GSD, svc.Server)
 		}
 	}
 

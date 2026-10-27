@@ -205,12 +205,23 @@ func uniqueName(prefix string) string {
 type testEnv struct {
 	t      *testing.T
 	port   int
-	router *mux.Router
+	router http.Handler
 	grpc   *fakeRegistry
 	json   *fakeRegistry
 }
 
-const rpcRootPath = "/{rpc:grpc|jsonrpc}"
+// serverRouting hands a request to the router of its root path, as the server does, so the tests reach the routes the
+// way a request to the server does: through the router of the first segment of the path.
+type serverRouting struct{}
+
+func (serverRouting) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	root, _ := util.GetRootURI(r.RequestURI)
+	if router := middleware.RootRouterFor(root, r); router != nil {
+		router.ServeHTTP(w, r)
+		return
+	}
+	http.NotFound(w, r)
+}
 
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
@@ -221,11 +232,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	e := &testEnv{
 		t:      t,
 		port:   int(41000 + portSeq.Add(1)),
-		router: middleware.RootRouters[rpcRootPath],
+		router: serverRouting{},
 		grpc:   newFakeRegistry(true),
 		json:   newFakeRegistry(false),
 	}
-	if e.router == nil {
+	if middleware.RootRouters[grpcRoot] == nil || middleware.RootRouters[jsonrpcRoot] == nil {
 		t.Fatalf("rpc routes are not registered")
 	}
 	prevGRPC, prevJSON := GetServiceRegistry["grpc"], GetServiceRegistry["jsonrpc"]

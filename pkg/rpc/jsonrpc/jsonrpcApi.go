@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"fmt"
+	"goto/pkg/rpc"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
@@ -30,7 +31,9 @@ var (
 )
 
 func setRoutes(r *mux.Router) {
-	jsonrpc := middleware.RootPath("/jsonrpc/services")
+	// The server hands a request to the router of the first segment of its path, so the routes are on the router of
+	// /jsonrpc: a router of a longer root path is never given a request.
+	jsonrpc := util.PathRouter(rpc.RootRouter("jsonrpc"), "/services")
 	util.AddRouteQ(jsonrpc, "/add/{service}", addService, "fromGRPC", "POST")
 	util.AddRoute(jsonrpc, "/add/{service}", addService, "POST")
 	util.AddRoute(jsonrpc, "/remove/{service}", removeService, "POST")

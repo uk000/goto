@@ -384,17 +384,10 @@ func (p *GRPCProxy) teeProxyGRPCStream(method *gotogrpc.GRPCServiceMethod, downs
 			downstream.SendHeaders(p.addTeeHeaders(headers.Copy()))
 			break
 		}
-		sendIndex := 0
 		if in != nil {
-			for range in {
-				sendIndex++
-				sendIndex, sendCount, err = p.sendTeeProxyMessages(method, maxMsgId, sendIndex, sendCount, headerIDs, sessionLog.ServerMessageLog, downstream)
-				if err != nil {
-					break
-				}
-			}
+			sendCount, err = p.replayTeeBidiStream(method, sessionLog, in, downstream)
 		} else {
-			sendIndex, sendCount, err = p.sendTeeProxyMessages(method, maxMsgId, -1, 0, headerIDs, sessionLog.ServerMessageLog, downstream)
+			_, sendCount, err = p.sendTeeProxyMessages(method, maxMsgId, -1, 0, headerIDs, sessionLog.ServerMessageLog, downstream)
 		}
 		if wg != nil {
 			wg.Done()
@@ -412,6 +405,55 @@ func (p *GRPCProxy) teeProxyGRPCStream(method *gotogrpc.GRPCServiceMethod, downs
 		go sendServerStream(in, wg)
 		wg.Wait()
 	}
+	return
+}
+
+// replayTeeBidiStream answers the messages that the client sends as the log has the server answer them: a message of the
+// server is sent once the client has sent as many messages as it had when that message of the server was logged. A log
+// that has the messages of the client and the ones of the server taking turns is replayed in turns, and one that has the
+// client send all of its messages before the server answers (which is what a proxy logs when the client is faster than
+// the upstream) is replayed after the last message of the client. The messages that the log has for the server before
+// any message of the client are sent at once, and the ones that are left when the client is done are sent then.
+func (p *GRPCProxy) replayTeeBidiStream(method *gotogrpc.GRPCServiceMethod, sessionLog *GRPCSessionLog, in chan proto.Message, downstream gotogrpc.GRPCStream) (sendCount int, err error) {
+	clientIDs := make([]int, 0, len(sessionLog.ClientMessageLog))
+	for id := range sessionLog.ClientMessageLog {
+		clientIDs = append(clientIDs, id)
+	}
+	sort.Ints(clientIDs)
+	serverIDs := make([]int, 0, len(sessionLog.ServerMessageLog))
+	for id, msg := range sessionLog.ServerMessageLog {
+		if msg != nil {
+			serverIDs = append(serverIDs, id)
+		}
+	}
+	sort.Ints(serverIDs)
+	next := 0
+	sendDue := func(clientCount int) {
+		for err == nil && next < len(serverIDs) {
+			id := serverIDs[next]
+			// the number of messages of the client that were logged before this one of the server
+			if sort.SearchInts(clientIDs, id) > clientCount {
+				return
+			}
+			var msg proto.Message
+			if msg, err = p.createResponse(method, sessionLog.ServerMessageLog[id]); err == nil {
+				err = downstream.Send(msg)
+			}
+			if err == nil {
+				sendCount++
+			}
+			next++
+		}
+	}
+	sendDue(0)
+	received := 0
+	// The messages of the client are read to the end even when there is nothing more to send, so that the one that
+	// reads them is not left blocked.
+	for range in {
+		received++
+		sendDue(received)
+	}
+	sendDue(len(clientIDs))
 	return
 }
 
@@ -607,14 +649,24 @@ func (p *GRPCProxy) SetupGRPCServiceProxy(from, to string, methods map[string]st
 		return fmt.Errorf("[ERROR] GRPCProxy.SetupGRPCProxy: could not setup proxy service for [%s]", from)
 	}
 	p.lock.Lock()
-	defer p.lock.Unlock()
 	sp.Methods = methodMap
 	if sp.Config == nil {
 		sp.Config = &GRPCProxyConfig{}
 	}
 	sp.Config.Delay = types.NewDelay(delayMin, delayMax, delayCount)
 	p.ServiceProxies[from] = sp
+	p.lock.Unlock()
+	// A server that is running has the service with the handlers that it was registered with, and has to take the ones
+	// that proxy it. The lock of the proxy is not held for that, as the calls that the server stops are waiting on it.
+	if refresher, ok := global.GRPCManager.(serviceRefresher); ok {
+		refresher.RefreshServices()
+	}
 	return nil
+}
+
+// serviceRefresher is what the gRPC server manager does to have a running server use the services as they are now.
+type serviceRefresher interface {
+	RefreshServices()
 }
 
 func (p *GRPCProxy) updateTeeSessionLog(teeport int, service, methodName string, sessionLog *GRPCSessionLog) {
@@ -777,6 +829,7 @@ func (s *GRPCSession) Stream() (receiveCount, sendCount int, err error) {
 	hook2 := gotogrpc.IdentityHook
 	headersHook1 := gotogrpc.IdentityHeadersHook
 	headersHook2 := gotogrpc.IdentityHeadersHook
+	var logDone chan struct{}
 	if s.isTee() {
 		if s.serviceProxy.hasDelay() {
 			hook1 = gotogrpc.TeeHookWithDelay(s.Log.clientTeeStream, s.serviceProxy.applyDelay)
@@ -786,7 +839,11 @@ func (s *GRPCSession) Stream() (receiveCount, sendCount int, err error) {
 		hook2 = gotogrpc.TeeHook(s.Log.serverTeeStream)
 		headersHook1 = gotogrpc.TeeHeadersHook(s.Log.onClientHeaders)
 		headersHook2 = gotogrpc.TeeHeadersHook(s.Log.onServerHeaders)
-		go s.Log.start()
+		logDone = make(chan struct{})
+		go func() {
+			defer close(logDone)
+			s.Log.start()
+		}()
 	} else if s.serviceProxy.hasDelay() {
 		hook1 = gotogrpc.IdentityHookWithDelay(s.serviceProxy.applyDelay)
 	}
@@ -796,6 +853,8 @@ func (s *GRPCSession) Stream() (receiveCount, sendCount int, err error) {
 	if s.isTee() {
 		close(s.Log.clientTeeStream)
 		close(s.Log.serverTeeStream)
+		// The session is over when its log has all that was sent to it, which a status of the proxy can then report.
+		<-logDone
 	}
 	s.tracker.AddMatchCounts(s.upstream.ID, s.Method.Service.Name, s.Method.Name, string(s.Method.InputType().Name()), receiveCount, string(s.Method.OutputType().Name()), sendCount)
 	return
@@ -835,14 +894,21 @@ func newGRPCSessionLog() *GRPCSessionLog {
 }
 
 func (s *GRPCSessionLog) start() {
-	for {
+	// A channel that is closed is left alone, and the log goes on with the other until it is closed too: the session
+	// closes the one of the client first, and what the server still has in its channel is logged after that.
+	clientStream, serverStream := s.clientTeeStream, s.serverTeeStream
+	for clientStream != nil || serverStream != nil {
 		select {
-		case msg, ok := <-s.clientTeeStream:
-			if !ok || msg == nil {
+		case msg, ok := <-clientStream:
+			if !ok {
 				if global.Flags.EnableProxyDebugLogs {
 					log.Println("[DEBUG] GRPCSessionLog: Client TEE channel was closed. Ending client session log.")
 				}
-				return
+				clientStream = nil
+				continue
+			}
+			if msg == nil {
+				continue
 			}
 			counter := int(s.logCounter.Add(1))
 			if global.Flags.EnableProxyDebugLogs {
@@ -851,18 +917,27 @@ func (s *GRPCSessionLog) start() {
 			if b, err := protojson.Marshal(msg); err == nil {
 				s.ClientMessageLog[counter] = util.JSONFromBytes(b)
 			}
-		case msg, ok := <-s.serverTeeStream:
-			if !ok || msg == nil {
+		case msg, ok := <-serverStream:
+			if !ok {
 				if global.Flags.EnableProxyDebugLogs {
 					log.Println("[DEBUG] GRPCSessionLog: Server TEE channel was closed. Ending server session log.")
 				}
-				return
+				serverStream = nil
+				continue
+			}
+			if msg == nil {
+				continue
 			}
 			counter := int(s.logCounter.Add(1))
 			if global.Flags.EnableProxyDebugLogs {
 				log.Printf("[DEBUG] GRPCSessionLog: Read message #%d from server TEE channel: [%+v].\n", counter, msg)
 			}
-			s.ServerMessageLog[counter] = msg
+			// The messages of the server are logged as JSON, as the ones of the client are: a message that is kept as it
+			// is has no fields that the log can be written with, so the status of the proxy reported it as {}, and a
+			// replay of the log made empty messages of it.
+			if b, err := protojson.Marshal(msg); err == nil {
+				s.ServerMessageLog[counter] = util.JSONFromBytes(b)
+			}
 		}
 	}
 }

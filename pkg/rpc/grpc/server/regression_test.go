@@ -557,3 +557,68 @@ func TestRegressionServiceInfoProviderIsGuarded(t *testing.T) {
 		t.Errorf("services = %d, want %d", n, 6*50+1)
 	}
 }
+
+// A service that was served and also proxied was registered with the server twice, and the server doesn't take a service
+// twice: it ends the process. It is registered once, with the handlers of the proxy, which serve the calls of the ports
+// that the service isn't proxied on.
+func TestRegressionServiceServedAndProxiedIsRegisteredOnce(t *testing.T) {
+	lc := startLifecycle(t)
+	svc := sampleService(t)
+	ServiceRegistry.AddProxyService(svc, svc, 0)
+	if n := len(ServiceRegistry.ServicesToRegister()); n != 1 {
+		t.Fatalf("services to register = %d, want the service once", n)
+	}
+	l := lc.newListener(t, "served-and-proxied-1")
+	GRPCManager.ServeListener(l)
+	if _, present := lc.services()[svc.Name]; !present {
+		t.Fatalf("the service is not registered with the server: %v", lc.services())
+	}
+	if resp, err := call(t, l.Port, "one"); err != nil || resp.Content != "re:one" {
+		t.Errorf("a call on a port that the service is not proxied on = %v %v, want it served", resp, err)
+	}
+}
+
+// A service that was made a proxy while the server was running kept the handlers that it was registered with, which
+// don't proxy, until the server was started again for some other reason.
+func TestRegressionRefreshServicesStartsARunningServerAgain(t *testing.T) {
+	lc := startLifecycle(t)
+	l := lc.newListener(t, "refresh-1")
+	GRPCManager.ServeListener(l)
+	lc.g.lock.Lock()
+	before := lc.g.Server
+	lc.g.lock.Unlock()
+	GRPCManager.RefreshServices()
+	lc.g.lock.Lock()
+	after := lc.g.Server
+	lc.g.lock.Unlock()
+	if !lc.g.isRunning() || before == after {
+		t.Errorf("RefreshServices of a running server: running %v, same server %v, want it started again", lc.g.isRunning(), before == after)
+	}
+	if resp, err := call(t, l.Port, "again"); err != nil || resp.Content != "re:again" {
+		t.Errorf("call after the refresh = %v %v", resp, err)
+	}
+	lc.g.Stop()
+	GRPCManager.RefreshServices()
+	if lc.g.isRunning() {
+		t.Errorf("RefreshServices must not start a server that is not running: it registers the services when it starts")
+	}
+}
+
+// The server was made when the default gRPC server was started, which is later than the HTTP server that serves the API
+// to open a port, and than the requests that the HTTP server hands to it: they found no server, and panicked.
+func TestRegressionServerExistsBeforeTheDefaultServerStarts(t *testing.T) {
+	if TheGRPCServer == nil || TheGRPCServer.Server == nil {
+		t.Fatalf("the server must exist from the start of the process, not from the start of the default server")
+	}
+	startLifecycle(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	l := &listeners.Listener{ListenerID: "early-1", Port: ln.Addr().(*net.TCPAddr).Port, Listener: ln, IsGRPC: true, Open: true}
+	mustNotPanic(t, "AddListener before the server was started", func() { GRPCManager.AddListener(l) })
+	if n := len(TheGRPCServer.listenerList()); n != 1 {
+		t.Errorf("listeners of the server = %d, want the one that was added", n)
+	}
+}

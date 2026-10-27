@@ -845,3 +845,145 @@ func (p *GRPCProxy) mu(f func()) {
 	defer p.lock.Unlock()
 	f()
 }
+
+// bidiStream is the downstream of a stream both ways: the messages that its client sends are given to the channel that
+// the replay reads, and the ones that it is sent are kept.
+type bidiStream struct {
+	fakeStream
+	clientMessages []proto.Message
+}
+
+func (b *bidiStream) TeeStreamReceive(in, _ chan proto.Message) (int, error) {
+	defer close(in)
+	for _, m := range b.clientMessages {
+		in <- m
+	}
+	return len(b.clientMessages), nil
+}
+
+// A stream both ways is replayed from the log in the turns that the log has: a log that has the server answer after
+// all the messages of the client (the proxy logs that when the client is faster than the upstream) is answered after the
+// last of them, and not never, as it was when the replay took the numbers of the log for the numbers of the messages.
+func TestTeeProxyGRPCStreamReplaysAStreamBothWays(t *testing.T) {
+	e := newEnv(t)
+	bidi := *e.front.Methods["Watch"]
+	bidi.IsBidiStream, bidi.IsClientStream = true, true
+	in := func(texts ...string) []proto.Message {
+		var msgs []proto.Message
+		for _, text := range texts {
+			msgs = append(msgs, e.message(e.front.Methods["Say"], text))
+		}
+		return msgs
+	}
+	texts := func(down *bidiStream) []string {
+		down.lock.Lock()
+		defer down.lock.Unlock()
+		var got []string
+		for _, m := range down.sent {
+			got = append(got, textOf(m))
+		}
+		return got
+	}
+	for name, tt := range map[string]struct {
+		clientIDs, serverIDs []int
+		clientCount          int
+		want                 []string
+	}{
+		// the client sent 3 messages (1, 3, 4) and the server answered them all (6, 7, 8), as the logs of a proxy have it
+		"the server answers after all the messages of the client": {[]int{1, 3, 4}, []int{6, 7, 8}, 3, []string{"s6", "s7", "s8"}},
+		"the server and the client take turns":                    {[]int{1, 3, 5}, []int{2, 4, 6}, 3, []string{"s2", "s4", "s6"}},
+		"the server sends before the client does":                 {[]int{3}, []int{1, 2, 4}, 1, []string{"s1", "s2", "s4"}},
+		"the client sends no more than it did":                    {[]int{1, 2}, []int{3}, 0, []string{"s3"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			log := newGRPCSessionLog()
+			var clientTexts []string
+			for _, id := range tt.clientIDs {
+				log.ClientMessageLog[id] = map[string]any{"text": fmt.Sprintf("c%d", id)}
+			}
+			for i := 0; i < tt.clientCount; i++ {
+				clientTexts = append(clientTexts, fmt.Sprintf("c%d", i))
+			}
+			for _, id := range tt.serverIDs {
+				log.ServerMessageLog[id] = map[string]any{"text": fmt.Sprintf("s%d", id)}
+			}
+			down := &bidiStream{clientMessages: in(clientTexts...)}
+			done := make(chan struct{})
+			var sent int
+			var err error
+			go func() {
+				defer close(done)
+				_, sent, err = e.proxy.teeProxyGRPCStream(&bidi, down, log)
+			}()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the replay does not end")
+			}
+			if got := texts(down); err != nil || sent != len(tt.want) || fmt.Sprint(got) != fmt.Sprint(tt.want) {
+				t.Errorf("replay sent %d %v (%v), want %v", sent, got, err, tt.want)
+			}
+		})
+	}
+}
+
+// The messages of the server of a stream were logged as they are, as messages and not as JSON as the messages of the
+// client are, so the status of the proxy had {} for each of them, and replaying the log made empty messages.
+func TestSessionLogKeepsTheMessagesOfTheServerAsJSON(t *testing.T) {
+	e := newEnv(t)
+	say := e.front.Methods["Say"]
+	log := newGRPCSessionLog()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		log.start()
+	}()
+	log.serverStream() <- e.message(say, "from the server")
+	log.clientStream() <- e.message(say, "from the client")
+	close(log.clientStream())
+	close(log.serverStream())
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the log does not end with its channels")
+	}
+	b, err := json.Marshal(log.ServerMessageLog)
+	if err != nil || !strings.Contains(string(b), "from the server") {
+		t.Errorf("server messages of the log = %s (%v), want the text of the message", b, err)
+	}
+	for _, logged := range log.ServerMessageLog {
+		if msg, err := e.proxy.createResponse(say, logged); err != nil || textOf(msg) != "from the server" {
+			t.Errorf("replayed message = %v (%v)", msg, err)
+		}
+	}
+}
+
+// The session closes the channel of the client before the one of the server, and the log stopped at the first one that
+// was closed, so the messages of the server that were still in its channel (the last ones of a stream) were never logged,
+// and a replay of the log had fewer messages than the stream had.
+func TestSessionLogKeepsTheMessagesLeftWhenAChannelIsClosed(t *testing.T) {
+	e := newEnv(t)
+	say := e.front.Methods["Say"]
+	for round := 0; round < 50; round++ {
+		log := newGRPCSessionLog()
+		for i := 0; i < 5; i++ {
+			log.serverStream() <- e.message(say, fmt.Sprintf("s%d", i))
+		}
+		log.clientStream() <- e.message(say, "c")
+		close(log.clientStream())
+		close(log.serverStream())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			log.start()
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the log does not end when its channels are closed")
+		}
+		if len(log.ServerMessageLog) != 5 || len(log.ClientMessageLog) != 1 {
+			t.Fatalf("round %d: logged %d server and %d client messages, want 5 and 1", round, len(log.ServerMessageLog), len(log.ClientMessageLog))
+		}
+	}
+}

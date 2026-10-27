@@ -48,7 +48,8 @@ func newAPIEnv(t *testing.T) *apiEnv {
 		stubOnce.Do(stubGlobalFuncs)
 		setRoutes(nil)
 	})
-	e := &apiEnv{t: t, port: uniquePort(), router: middleware.RootRouters[apiRoot]}
+	// The server gives a request to the router of the first segment of its path, which is /jsonrpc.
+	e := &apiEnv{t: t, port: uniquePort(), router: middleware.RootRouters["/jsonrpc"]}
 	if e.router == nil {
 		t.Fatalf("the routes of %s are not registered", apiRoot)
 	}
