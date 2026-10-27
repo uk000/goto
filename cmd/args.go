@@ -292,6 +292,9 @@ func processClientArgs() {
 	for _, h := range hlist {
 		hv := strings.Split(h, ":")
 		if len(hv) == 2 {
+			if global.CmdClientConfig.Headers == nil {
+				global.CmdClientConfig.Headers = map[string]string{}
+			}
 			global.CmdClientConfig.Headers[hv[0]] = hv[1]
 		}
 	}

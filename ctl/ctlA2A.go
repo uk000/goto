@@ -47,9 +47,13 @@ func sendAgents(a2a *A2A) {
 		log.Println("No A2A Agents to configure")
 		return
 	}
-	agentPayload := []*model.Agent{}
 	for _, pa := range a2a.Servers {
+		if pa == nil {
+			continue
+		}
 		url := fmt.Sprintf("%s/port=%d/a2a/agents/add", currentContext.RemoteGotoURL, pa.Port)
+		// A server is sent its own agents, and not the ones of the servers that came before it.
+		agentPayload := []*model.Agent{}
 		for _, agent := range pa.Agents {
 			agentPayload = append(agentPayload, agent)
 		}

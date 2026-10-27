@@ -39,7 +39,7 @@ func processProxy(config *GotoConfig) {
 		return
 	}
 	for _, proxy := range config.Proxies {
-		if proxy.HTTP != nil {
+		if proxy != nil && proxy.HTTP != nil {
 			sendHTTPProxy(proxy.HTTP)
 		}
 	}
@@ -66,6 +66,9 @@ func sendHTTPProxy(httpProxy *httpproxy.Proxy) {
 		log.Printf("HTTP Proxy [%d] Responses sent successfully. Response: [%s]\n", httpProxy.Port, util.Read(resp.Body))
 	}
 	for name, target := range httpProxy.Targets {
+		if target == nil {
+			continue
+		}
 		target.Name = name
 		url := fmt.Sprintf("%s/proxy/http/targets/add", currentContext.RemoteGotoURL)
 		json := util.ToJSONBytes(target)
@@ -91,6 +94,9 @@ func sendHTTPProxy(httpProxy *httpproxy.Proxy) {
 
 func sendTCPPProxy(tcpProxy *tcpproxy.TCPProxy) {
 	for name, target := range tcpProxy.Upstreams {
+		if target == nil {
+			continue
+		}
 		target.Name = name
 		url := fmt.Sprintf("%s/proxy/tcp/upstreams/add", currentContext.RemoteGotoURL)
 		json := util.ToJSONBytes(target)

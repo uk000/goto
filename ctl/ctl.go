@@ -48,6 +48,10 @@ var (
 )
 
 func Ctl(args []string) {
+	if len(args) == 0 {
+		log.Println("No command given. Commands are [ctx] and [apply].")
+		return
+	}
 	loadOrCreateContextFile()
 	switch args[0] {
 	case "ctx":
@@ -60,6 +64,11 @@ func Ctl(args []string) {
 func ctlApply(args []string) {
 	ApplyFlagSet.Parse(args)
 	loadContext()
+	if currentContext == nil {
+		// Without the default context either, there is no goto to send the config to.
+		log.Printf("Context [%s] not found, and there is no default context. Nothing was applied.\n", global.CtlConfig.Context)
+		return
+	}
 	config := ReadConfigFromFile(global.CtlConfig.ConfigFile)
 	if config != nil {
 		processTLS(config.TLS)

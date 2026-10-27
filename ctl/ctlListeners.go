@@ -17,6 +17,7 @@
 package ctl
 
 import (
+	"goto/pkg/global"
 	"goto/pkg/server/listeners"
 	"log"
 )
@@ -28,7 +29,15 @@ func processListeners(ll Listeners) {
 		log.Println("No Listeners to configure")
 		return
 	}
+	if global.Funcs.GetListenerID == nil {
+		// The server sets this when it starts, which a command does not. TCP listeners look up their ID with it.
+		global.Funcs.GetListenerID = listeners.GetListenerID
+	}
 	for port, l := range ll {
+		if l == nil {
+			log.Printf("No listener config for port [%d]\n", port)
+			continue
+		}
 		l.Port = port
 		_, msg := listeners.AddOrUpdateListener(l)
 		log.Println(msg)

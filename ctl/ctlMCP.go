@@ -94,12 +94,18 @@ func processMCP(config *GotoConfig) {
 	}
 	config.MCP.ProcessToolSchemas()
 	servers := []any{}
+	valid := []*MCPServer{}
 	for _, s := range config.MCP.Servers {
+		if s == nil || s.Server == nil {
+			log.Println("Skipping an MCP server that has no server config")
+			continue
+		}
 		config.MCP.ProcessMCPServer(s)
 		servers = append(servers, s.Server)
+		valid = append(valid, s)
 	}
 	config.MCP.sendMCPServers(servers)
-	for _, s := range config.MCP.Servers {
+	for _, s := range valid {
 		config.MCP.sendMCPConfigs(s)
 	}
 }
@@ -107,9 +113,12 @@ func processMCP(config *GotoConfig) {
 func (m *MCP) ProcessToolSchemas() {
 	m.toolInputSchemas = map[string]map[string]any{}
 	for _, s := range m.ToolSchemas {
-		if s["name"] != nil && s["inputSchema"] != nil {
-			name := s["name"].(string)
-			m.toolInputSchemas[name] = s["inputSchema"].(map[string]any)
+		name, hasName := s["name"].(string)
+		schema, hasSchema := s["inputSchema"].(map[string]any)
+		if hasName && hasSchema {
+			m.toolInputSchemas[name] = schema
+		} else if s["name"] != nil || s["inputSchema"] != nil {
+			log.Printf("Invalid tool schema [%v]: it needs a name and an input schema that is an object", s["name"])
 		}
 	}
 
@@ -121,22 +130,28 @@ func (m *MCP) ProcessMCPServer(server *MCPServer) {
 	}
 	server.name = server.Server.Name
 	if server.Tools != nil {
+		// A tool that refers to a schema that is not defined is left out, as the log says, and not left in without an
+		// input schema: the server refuses a tool without one, and it stops adding the tools that come after it.
+		tools := make([]map[string]any, 0, len(server.Tools))
 		for _, t := range server.Tools {
-			if t["tool"] == nil {
+			tool, ok := t["tool"].(map[string]any)
+			if !ok {
+				tools = append(tools, t)
 				continue
 			}
-			tool := t["tool"].(map[string]any)
 			if t["schema"] != nil {
-				schemaName := t["schema"].(string)
+				schemaName, _ := t["schema"].(string)
 				if m.toolInputSchemas[schemaName] == nil {
-					log.Printf("Invalid tool schema reference: %s", schemaName)
+					log.Printf("Invalid tool schema reference: %v. Skipping tool [%v]", t["schema"], tool["name"])
 					continue
 				}
 				tool["inputSchema"] = m.toolInputSchemas[schemaName]
 			} else if tool["inputSchema"] == nil {
 				tool["inputSchema"] = defaultInputSchema
 			}
+			tools = append(tools, t)
 		}
+		server.Tools = tools
 	}
 }
 
@@ -207,10 +222,13 @@ func (m *MCP) sendMCPConfigs(server *MCPServer) {
 				sendData(server.name, "completions", serverURL(server.name, fmt.Sprintf("payload/completion/delay=%s?type=ref/prompt", sps.Completions.Delay)), sps.Completions.List)
 			}
 			for _, tp := range sps.ToolPayloads {
+				if tp == nil {
+					continue
+				}
 				sendData(server.name, tp.Name+" payload", serverURL(server.name, fmt.Sprintf("payload/tools/%s", tp.Name)), tp.Payload)
 			}
 			for _, sp := range sps.StreamPayloads {
-				if sp.Payload == nil && sp.Payload.Data == nil {
+				if sp == nil || sp.Payload == nil || sp.Payload.Data == nil {
 					continue
 				}
 				url := ""

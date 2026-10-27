@@ -58,7 +58,7 @@ func processScripts(scripts *Scripts) {
 	}
 	if scripts.Run != nil {
 		for _, script := range scripts.Run {
-			if len(strings.TrimSpace(script.Name)) == 0 {
+			if script == nil || len(strings.TrimSpace(script.Name)) == 0 {
 				log.Println("Empty script name in run list. Skipping.")
 				continue
 			}
@@ -102,16 +102,16 @@ func runScript(script *ScriptRun) {
 		args.Add("args", arg)
 	}
 	url := fmt.Sprintf("%s/scripts/%s/run?%s", currentContext.RemoteGotoURL, script.Name, args.Encode())
-	log.Printf("Sending run request for script [%s] to [%s]\n", script, url)
+	log.Printf("Sending run request for script [%s] to [%s]\n", script.Name, url)
 	resp, err := http.Post(url, "text/plain", nil)
 	if err != nil {
-		log.Printf("Failed to trigger execution for script [%s]: %v\n", script, err)
+		log.Printf("Failed to trigger execution for script [%s]: %v\n", script.Name, err)
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		log.Printf("Server returned non-OK status: %s\n", resp.Status)
 	} else {
-		log.Printf("Script [%s] executed successfully. Response: [%s]\n", script, util.Read(resp.Body))
+		log.Printf("Script [%s] executed successfully. Response: [%s]\n", script.Name, util.Read(resp.Body))
 	}
 }

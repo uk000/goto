@@ -259,7 +259,7 @@ func (c *CACertConfig) load() {
 }
 
 func (c *CACertConfig) sendCACertOrKey(certOrKey string) {
-	url := fmt.Sprintf("%s/tls/ca/cert/add/%s/%s", currentContext.RemoteGotoURL, c.Name, c.Domain)
+	url := fmt.Sprintf("%s/tls/ca/%s/add/%s/%s", currentContext.RemoteGotoURL, certOrKey, c.Name, c.Domain)
 	log.Printf("Sending CA %s to URL [%s]\n", certOrKey, url)
 	var data []byte
 	if certOrKey == "key" {
