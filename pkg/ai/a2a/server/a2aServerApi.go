@@ -61,10 +61,10 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(a2aServersRouter, "/clear", clearServers, "POST")
 
 	a2aStatusRouter := util.PathRouter(agentRouter, "/status")
-	util.AddRoute(a2aStatusRouter, "/set/{status}", setStatus, "POST")
-	util.AddRoute(a2aStatusRouter, "/set/{status}/header/{header}={value}", setStatus, "POST")
-	util.AddRoute(a2aStatusRouter, "/set/{status}/header/{header}", setStatus, "POST")
-	util.AddRoute(a2aStatusRouter, "/set/{status}/header/not/{header}", setStatusWithoutHeader, "POST")
+	util.AddRouteQO(a2aStatusRouter, "/set/{status}", setStatus, "methods", "POST")
+	util.AddRouteQO(a2aStatusRouter, "/set/{status}/header/{header}={value}", setStatus, "methods", "POST")
+	util.AddRouteQO(a2aStatusRouter, "/set/{status}/header/{header}", setStatus, "methods", "POST")
+	util.AddRouteQO(a2aStatusRouter, "/set/{status}/header/not/{header}", setStatusWithoutHeader, "methods", "POST")
 
 	util.AddRoute(a2aStatusRouter, "/configure", configureStatus, "POST")
 	util.AddRoute(a2aStatusRouter, "/clear", clearStatus, "POST")
@@ -308,10 +308,19 @@ func setAgentStatus(w http.ResponseWriter, r *http.Request, headerPresent bool) 
 		fmt.Fprintln(w, msg)
 		return
 	}
-	// Agents are called with POST. The requests that fetch the card of an agent, or that stream from it, are not
-	// given the status.
-	status := statusManager.SetStatusFor(port, agent.URI, agent.URI, header, value, []string{http.MethodPost}, statusCodes, times, headerPresent)
-	msg := status.Log("A2A", port)
+	// Agents are called with POST, so that is what a status is for unless the methods are given (methods=GET,POST, or
+	// methods=* for all of them): the requests that fetch the card of an agent, or that stream from it, are not given
+	// the status otherwise.
+	methods, ok := status.ParseMethods(util.GetStringParamValue(r, "methods"), http.MethodPost)
+	if !ok {
+		msg := fmt.Sprintf("Invalid methods [%s]", util.GetStringParamValue(r, "methods"))
+		util.AddLogMessage(msg, r)
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintln(w, msg)
+		return
+	}
+	sc := statusManager.SetStatusFor(port, agent.URI, agent.URI, header, value, methods, statusCodes, times, headerPresent)
+	msg := sc.Log("A2A", port)
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
 }
@@ -360,7 +369,7 @@ func serveAgent(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, msg)
 		} else {
 			// A forced status is counted once per request, here, and a request that gets one is not served by the agent.
-			status, rem := statusManager.GetStatusFor(port, statusURI(agent, r), r.Header, r.Method)
+			status, rem := forcedStatusFor(port, agent, r)
 			if status > 0 && status != http.StatusOK {
 				sendStatus(name, status, rem, w, r)
 			} else {
@@ -380,6 +389,19 @@ func statusURI(agent *model.Agent, r *http.Request) string {
 		return agent.URI
 	}
 	return path
+}
+
+// forcedStatusFor finds the status that is forced for the request to the agent, and counts the use of it. A status is
+// found by the path of the request, and then, for the requests that are not POST and are for a path under the agent,
+// such as the one that fetches its card, by the URI of the agent, which is what a status that is set for the agent
+// with methods=GET is for. A status is used up by one of them at most.
+func forcedStatusFor(port int, agent *model.Agent, r *http.Request) (status, rem int) {
+	uri := statusURI(agent, r)
+	status, rem = statusManager.GetStatusFor(port, uri, r.Header, r.Method)
+	if status == 0 && r.Method != http.MethodPost && uri != agent.URI && strings.HasPrefix(uri, strings.TrimSuffix(agent.URI, "/")+"/") {
+		status, rem = statusManager.GetStatusFor(port, agent.URI, r.Header, r.Method)
+	}
+	return status, rem
 }
 
 func errAgentNotFound(name string, s *A2AServer) error {

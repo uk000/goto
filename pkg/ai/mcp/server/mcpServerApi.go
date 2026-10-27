@@ -73,11 +73,11 @@ func setRoutes(r *mux.Router) {
 
 	util.AddRoute(mcpServerRouter, "/tool/{tool}/call", callTool, "POST")
 
-	util.AddRoute(mcpServerRouter, "/status/set/{status}", setStatus, "POST")
-	util.AddRoute(mcpServerRouter, "/tool/{tool}/status/set/{status}", setStatus, "POST")
-	util.AddRoute(mcpServerRouter, "/status/set/{status}/header/{header}={value}", setStatus, "POST")
-	util.AddRoute(mcpServerRouter, "/status/set/{status}/header/{header}", setStatus, "POST")
-	util.AddRoute(mcpServerRouter, "/status/set/{status}/header/not/{header}", setStatus, "POST")
+	util.AddRouteQO(mcpServerRouter, "/status/set/{status}", setStatus, "methods", "POST")
+	util.AddRouteQO(mcpServerRouter, "/tool/{tool}/status/set/{status}", setStatus, "methods", "POST")
+	util.AddRouteQO(mcpServerRouter, "/status/set/{status}/header/{header}={value}", setStatus, "methods", "POST")
+	util.AddRouteQO(mcpServerRouter, "/status/set/{status}/header/{header}", setStatus, "methods", "POST")
+	util.AddRouteQO(mcpServerRouter, "/status/set/{status}/header/not/{header}", setStatus, "methods", "POST")
 	util.AddRoute(mcpServerRouter, "/status/configure", configureStatus, "POST")
 	util.AddRoute(mcpServerRouter, "/status/clear", clearStatus, "POST")
 	util.AddRoute(mcpServerRouter, "/status", getStatuses, "GET")
@@ -239,8 +239,15 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 		uri = tool.ServerURI
 	}
 	// The status is for the calls that have the header, or for the ones that don't if it is the "not" route.
-	status := StatusManager.SetStatusFor(port, uri, "", header, value, []string{"POST"}, statusCodes, times, !noHeader)
-	msg := status.Log("MCP", port)
+	// MCP is called with POST, so that is what a status is for unless the methods are given (methods=GET,POST, or
+	// methods=* for all of them): the requests that open a stream with GET are not given the status otherwise.
+	methods, ok := status.ParseMethods(util.GetStringParamValue(r, "methods"), http.MethodPost)
+	if !ok {
+		sendBadRequest(fmt.Sprintf("Invalid methods [%s]", util.GetStringParamValue(r, "methods")), w, r)
+		return
+	}
+	sc := StatusManager.SetStatusFor(port, uri, "", header, value, methods, statusCodes, times, !noHeader)
+	msg := sc.Log("MCP", port)
 	util.AddLogMessage(msg, r)
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, msg)

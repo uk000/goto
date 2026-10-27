@@ -288,7 +288,7 @@ func (a *A2AServer) Serve(name string, w http.ResponseWriter, r *http.Request) e
 	if agent == nil {
 		return errAgentNotFound(name, a)
 	}
-	status, rem := statusManager.GetStatusFor(a.Port, statusURI(agent, r), r.Header, r.Method)
+	status, rem := forcedStatusFor(a.Port, agent, r)
 	a.serve(agent, status, rem, w, r)
 	return nil
 }

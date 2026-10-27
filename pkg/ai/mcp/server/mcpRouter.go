@@ -132,6 +132,13 @@ func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler ht
 			server.DeleteMCPSessionStore(sessionID)
 		}
 	case "GET":
+		// The requests that open a stream are given a status only if it was set for GET (methods=GET or methods=*), as
+		// the status of a tool call, which is for POST, doesn't apply to them.
+		if status, rem := StatusManager.GetStatusFor(server.Port, server.URI, r.Header, r.Method); status > 0 && status != http.StatusOK {
+			rs.StatusCode = status
+			sendStatus(server.ID, status, rem, w, r)
+			return
+		}
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 		r = r.WithContext(ctx)

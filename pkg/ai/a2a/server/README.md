@@ -48,6 +48,13 @@ These APIs are used to add/remove/configure A2A agents to be exposed by `Goto`.
 | POST | /a2a/status/configure                                                  | Configures status via a JSON `StatusConfig` payload with match rules (URI regex, header matches). |
 | POST | /a2a/status/clear                                                      | Clears all forced statuses on the current port. |
 
+Every `/a2a/status/set/...` URI above takes an optional query param `methods`, the HTTP methods that the status is for:
+a comma separated list such as `methods=GET`, `methods=GET,POST`, or `methods=*` for all methods. Without it the status is for `POST`, which is how
+agents are called. A status for `GET` also applies to the requests that fetch the card of the agent (the paths under the agent), and the ones that read from
+its stream. The statuses of different methods for the same agent are separate: each has its own `times` count, and setting one again changes it
+and leaves the others as they are, e.g. `/a2a/agents/{agent}/status/set/503:2?methods=GET` and `/a2a/agents/{agent}/status/set/502` give GET requests
+`503` twice, and POST requests `502`.
+
 <br/>
 
 # <a name="agent-json-schema"></a>

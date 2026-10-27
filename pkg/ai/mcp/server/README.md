@@ -77,6 +77,12 @@ when the specified header is NOT present. Optional `uri` query param. |
 | POST | /mcpapi/server/{server}/status/set/{status}/header/{header}={value} | Set a status code for calls to this MCP server with the specified header present with the given value. |
 | POST | /mcpapi/server/{server}/status/set/{status}/header/{header} | Set a status code for calls to this MCP server with the specified header present. |
 | POST | /mcpapi/server/{server}/status/set/{status}/header/not/{header} | Set a status code for calls to this MCP server with the specified header is not present. 
+
+Every `/mcpapi/server/{server}/status/set/...` URI above takes an optional query param `methods`, the HTTP methods that the status is for: a comma
+separated list such as `methods=GET`, `methods=GET,POST`, or `methods=*` for all methods. Without it the status is for `POST`, which is how tools are called.
+A status for `POST` applies to tool calls. A status for `GET` applies to the requests that open the stream of events of the server, which are answered with the
+status instead of opening it. The statuses of different methods for the same server are separate: each has its own `times` count, and setting one again
+changes it and leaves the others as they are.
 ---
 
 ## MCP JSON Schemas
