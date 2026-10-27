@@ -55,7 +55,7 @@ var (
 	// connections that are being proxied for listeners
 	regServed   sync.Map
 	regAccepted sync.Map
-	regConns    sync.WaitGroup
+	regConns    connWG
 )
 
 func regSetup() {
@@ -112,7 +112,7 @@ func regNextPort() int {
 	return 71000 + regPortSeq
 }
 
-func regWaitGroup(t *testing.T, wg *sync.WaitGroup, what string) {
+func regWaitGroup(t *testing.T, wg interface{ Wait() }, what string) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {
@@ -129,7 +129,7 @@ func regWaitGroup(t *testing.T, wg *sync.WaitGroup, what string) {
 // regServer is a loopback server running a handler per connection.
 type regServer struct {
 	ln    net.Listener
-	wg    sync.WaitGroup
+	wg    connWG
 	mu    sync.Mutex
 	conns []net.Conn
 }
@@ -196,7 +196,7 @@ type regHarness struct {
 	ln     net.Listener
 	port   int
 	proxy  *TCPProxy
-	wg     sync.WaitGroup
+	wg     connWG
 	mu     sync.Mutex
 	panics []any
 }

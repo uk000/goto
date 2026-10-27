@@ -89,7 +89,38 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-func waitGroup(t *testing.T, wg *sync.WaitGroup, what string) {
+// connWG is the WaitGroup for the connections that a server accepts. A sync.WaitGroup is not for that: the Add for a
+// connection that is accepted has no happens-before relation with the Wait that a test does once its client has seen the
+// connection handled (the network is not one the race detector sees), and so it is reported as a race. The mutex is.
+type connWG struct {
+	mu   sync.Mutex
+	n    int
+	cond *sync.Cond
+}
+
+func (g *connWG) Add(delta int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.n += delta
+	if g.n <= 0 && g.cond != nil {
+		g.cond.Broadcast()
+	}
+}
+
+func (g *connWG) Done() { g.Add(-1) }
+
+func (g *connWG) Wait() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.cond == nil {
+		g.cond = sync.NewCond(&g.mu)
+	}
+	for g.n > 0 {
+		g.cond.Wait()
+	}
+}
+
+func waitGroup(t *testing.T, wg interface{ Wait() }, what string) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {
@@ -106,7 +137,7 @@ func waitGroup(t *testing.T, wg *sync.WaitGroup, what string) {
 // upstreamServer is a loopback TCP server that runs a handler for each connection it accepts.
 type upstreamServer struct {
 	ln       net.Listener
-	wg       sync.WaitGroup
+	wg       connWG
 	mu       sync.Mutex
 	conns    []net.Conn
 	accepted atomic.Int32
@@ -218,7 +249,7 @@ type proxyHarness struct {
 	ln    net.Listener
 	port  int
 	proxy *TCPProxy
-	wg    sync.WaitGroup
+	wg    connWG
 }
 
 func newProxyHarness(t *testing.T) *proxyHarness {
@@ -1084,7 +1115,8 @@ func TestReadClientSNIOfNonTLSClient(t *testing.T) {
 
 func TestReadClientSNIOfEmptyHandshakeRecord(t *testing.T) {
 	setup()
-	// A handshake record of zero length makes the SNI parser of the tls package index an empty buffer
+	// A handshake record of zero length has no hello in it: unlike data that is not TLS (which is routed on, without an
+	// SNI), it is a malformed hello, which is rejected.
 	client, server := net.Pipe()
 	defer client.Close()
 	defer server.Close()

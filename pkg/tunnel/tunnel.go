@@ -49,6 +49,7 @@ type Endpoint struct {
 	IsH2            bool   `json:"isH2"`
 	UseRequestProto bool   `json:"useRequestProto"`
 	client          transport.ClientTransport
+	clientLock      sync.Mutex
 }
 
 type TunnelTrafficLog struct {
@@ -123,6 +124,19 @@ func newPortTunnel(port int) *PortTunnel {
 	return (&PortTunnel{Port: port}).init()
 }
 
+// hasScheme tells whether an endpoint address (scheme:host:port) starts with a scheme. A host that just starts with
+// the letters of a scheme (e.g. httpbin.org, h2o.example.com) doesn't.
+func hasScheme(pieces []string) bool {
+	if len(pieces) < 2 {
+		return false
+	}
+	switch pieces[0] {
+	case "http", "https", "h2", "h2c":
+		return true
+	}
+	return false
+}
+
 func newEndpoint(address string, tls, transparent bool) *Endpoint {
 	id := address
 	proto := ""
@@ -133,7 +147,7 @@ func newEndpoint(address string, tls, transparent bool) *Endpoint {
 	if len(pieces) > 1 {
 		port, _ = strconv.Atoi(pieces[len(pieces)-1])
 	}
-	if strings.HasPrefix(address, "http") || strings.HasPrefix(address, "h2") {
+	if hasScheme(pieces) {
 		useRequestProto = false
 		if pieces[0] == "h2" {
 			proto = "https://"
@@ -216,18 +230,23 @@ func CheckTunnelRequest(r *http.Request) {
 			r.RequestURI = ""
 		}
 		if u, err := url.Parse(r.RequestURI); err == nil {
+			// The URI is what's sent to the endpoint, so the query comes along with the path
 			r.RequestURI = u.Path
+			if u.RawQuery != "" {
+				r.RequestURI += "?" + u.RawQuery
+			}
 		}
 	}
 	return
 }
 
 func WillTunnel(r *http.Request, rs *util.RequestStore) bool {
-	tunnelLock.Lock()
-	defer tunnelLock.Unlock()
 	port := util.GetRequestOrListenerPortNum(r)
-	if tunnels[port] != nil {
-		if willTunnel, endpoints := tunnels[port].checkTunnelsForRequest(r); willTunnel {
+	tunnelLock.RLock()
+	pt := tunnels[port]
+	tunnelLock.RUnlock()
+	if pt != nil {
+		if willTunnel, endpoints := pt.checkTunnelsForRequest(r); willTunnel {
 			if willTunnel && len(endpoints) > 0 {
 				rs.TunnelEndpoints = endpoints
 			}
@@ -244,19 +263,24 @@ func HijackConnect(r *http.Request, w http.ResponseWriter) bool {
 	if hijacker, ok := w.(http.Hijacker); ok {
 		if clientConn, _, err := hijacker.Hijack(); err == nil {
 			rs := util.GetRequestStore(r)
-			return GetOrCreatePortTunnel(util.GetRequestOrListenerPortNum(r)).
-				openProxyTunnel(r.RemoteAddr, r.Host, rs.IsH2, rs.IsH2C, rs.IsTLS, clientConn)
+			if GetOrCreatePortTunnel(util.GetRequestOrListenerPortNum(r)).
+				openProxyTunnel(r.RemoteAddr, r.Host, rs.IsH2, rs.IsH2C, rs.IsTLS, clientConn) {
+				return true
+			}
+			// The connection has been taken over from the server, so no one else is going to close it.
+			clientConn.Close()
 		}
 	}
 	return false
 }
 
-func copy(dest io.WriteCloser, source io.ReadCloser, wg *sync.WaitGroup) {
-	wg.Add(1)
+// pipeData copies the data from the source to the destination until either of them ends, and closes both. The caller
+// adds to the wait group before starting this: adding from here could be after a Wait that is meant to wait for it.
+func pipeData(dest io.WriteCloser, source io.ReadCloser, wg *sync.WaitGroup) {
+	defer wg.Done()
 	defer dest.Close()
 	defer source.Close()
 	io.Copy(dest, source)
-	wg.Done()
 }
 
 func RegisterPipeCallback(tunnel, pipe string, callback PipeCallback) {
@@ -275,13 +299,18 @@ func (pt *PortTunnel) init() *PortTunnel {
 	pt.URITunnels = map[string][]string{}
 	pt.HeaderTunnels = map[string]map[string][]string{}
 	pt.URIHeaderTunnels = map[string]map[string]map[string][]string{}
-	pt.initTracking()
+	pt.initTrackingLocked()
 	return pt
 }
 
 func (pt *PortTunnel) initTracking() {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
+	pt.initTrackingLocked()
+}
+
+// initTrackingLocked is for the callers that have the lock of the tunnel, or that don't share it yet.
+func (pt *PortTunnel) initTrackingLocked() {
 	pt.TunnelTrackingHeaders = []string{}
 	pt.TunnelTrackingQueries = []string{}
 	pt.Traffic = &TunnelTraffic{
@@ -312,6 +341,8 @@ func (pt *PortTunnel) checkTunnelsForRequest(r *http.Request) (willTunnel bool, 
 		return true, nil
 	}
 
+	pt.lock.RLock()
+	defer pt.lock.RUnlock()
 	if len(pt.URIHeaderTunnels) == 0 && len(pt.URITunnels) == 0 &&
 		len(pt.HeaderTunnels) == 0 && len(pt.BroadTunnels) == 0 {
 		return false, nil
@@ -319,13 +350,15 @@ func (pt *PortTunnel) checkTunnelsForRequest(r *http.Request) (willTunnel bool, 
 
 	checkHeaders := func(headersEndpointMap map[string]map[string][]string, r *http.Request) {
 		for h, hMap := range headersEndpointMap {
+			if len(r.Header.Values(h)) == 0 {
+				// A tunnel for a header is for the requests that carry the header
+				continue
+			}
 			if hv := r.Header.Get(h); hv != "" {
 				endpoints = hMap[hv]
-				if len(endpoints) > 0 {
-					break
-				}
 			}
 			if len(endpoints) == 0 {
+				// A tunnel that was added without a value is for any value of the header
 				endpoints = hMap[""]
 			}
 			if len(endpoints) > 0 {
@@ -346,19 +379,22 @@ func (pt *PortTunnel) checkTunnelsForRequest(r *http.Request) (willTunnel bool, 
 	if len(endpoints) == 0 && len(pt.BroadTunnels) > 0 {
 		endpoints = pt.BroadTunnels
 	}
+	// The request keeps these, while the tunnels can change
+	endpoints = append([]string(nil), endpoints...)
 	return len(endpoints) > 0, endpoints
 }
 
 func (pt *PortTunnel) openProxyTunnel(fromAddress, toAddress string, isH2, isH2C, isTLS bool, clientConn net.Conn) bool {
-	selfAddress := fmt.Sprintf("%s:%d", global.Self.PodIP, pt.Port)
+	selfAddress := net.JoinHostPort(global.Self.PodIP, strconv.Itoa(pt.Port))
 	if selfConn, err := net.DialTimeout("tcp", selfAddress, 10*time.Second); err == nil {
 		selfAddress = selfConn.LocalAddr().String()
 		pt.lock.Lock()
 		pt.ProxyTunnels[selfAddress] = &ProxyTunnel{FromAddress: fromAddress, ToAddress: toAddress, IsH2: isH2, IsH2C: isH2C, IsTLS: isTLS}
 		pt.lock.Unlock()
 		wg := &sync.WaitGroup{}
-		go copy(selfConn, clientConn, wg)
-		go copy(clientConn, selfConn, wg)
+		wg.Add(2)
+		go pipeData(selfConn, clientConn, wg)
+		go pipeData(clientConn, selfConn, wg)
 		go func() {
 			wg.Wait()
 			log.Printf("Tunnel finished from client [%s] via self [%s] to [%s]\n", fromAddress, selfAddress, toAddress)
@@ -385,17 +421,40 @@ func (pt *PortTunnel) addTunnel(endpoint string, tls, transparent bool, uri, hea
 		if pt.URIHeaderTunnels[uri][header] == nil {
 			pt.URIHeaderTunnels[uri][header] = map[string][]string{}
 		}
-		pt.URIHeaderTunnels[uri][header][value] = append(pt.URIHeaderTunnels[uri][header][value], ep.ID)
+		pt.URIHeaderTunnels[uri][header][value] = appendID(pt.URIHeaderTunnels[uri][header][value], ep.ID)
 	} else if uri != "" {
-		pt.URITunnels[uri] = append(pt.URITunnels[uri], ep.ID)
+		pt.URITunnels[uri] = appendID(pt.URITunnels[uri], ep.ID)
 	} else if header != "" {
 		if pt.HeaderTunnels[header] == nil {
 			pt.HeaderTunnels[header] = map[string][]string{}
 		}
-		pt.HeaderTunnels[header][value] = append(pt.HeaderTunnels[header][value], ep.ID)
+		pt.HeaderTunnels[header][value] = appendID(pt.HeaderTunnels[header][value], ep.ID)
 	} else {
-		pt.BroadTunnels = append(pt.BroadTunnels, ep.ID)
+		pt.BroadTunnels = appendID(pt.BroadTunnels, ep.ID)
 	}
+}
+
+// appendID adds the endpoint ID to the list unless it's there already, so that removing it once removes it for good.
+func appendID(ids []string, id string) []string {
+	for _, v := range ids {
+		if v == id {
+			return ids
+		}
+	}
+	return append(ids, id)
+}
+
+// removeID returns the IDs without the given one, as a new list: the requests that are being served keep the lists
+// that they were given.
+func removeID(ids []string, id string) (kept []string, removed bool) {
+	for _, v := range ids {
+		if v == id {
+			removed = true
+		} else {
+			kept = append(kept, v)
+		}
+	}
+	return kept, removed
 }
 
 func (pt *PortTunnel) removeTunnel(endpoint, uri, header, value string) (exists bool) {
@@ -407,12 +466,7 @@ func (pt *PortTunnel) removeTunnel(endpoint, uri, header, value string) (exists 
 				hvEndpoints := pt.URIHeaderTunnels[uri][header][value]
 				if len(hvEndpoints) > 0 {
 					if endpoint != "" {
-						for i, ep := range hvEndpoints {
-							if ep == endpoint {
-								exists = true
-								hvEndpoints = append(hvEndpoints[:i], hvEndpoints[i+1:]...)
-							}
-						}
+						hvEndpoints, exists = removeID(hvEndpoints, endpoint)
 						if len(hvEndpoints) == 0 {
 							delete(pt.URIHeaderTunnels[uri][header], value)
 						} else {
@@ -434,12 +488,7 @@ func (pt *PortTunnel) removeTunnel(endpoint, uri, header, value string) (exists 
 	} else if uri != "" {
 		if pt.URITunnels[uri] != nil {
 			if endpoint != "" {
-				for i, ep := range pt.URITunnels[uri] {
-					if ep == endpoint {
-						exists = true
-						pt.URITunnels[uri] = append(pt.URITunnels[uri][:i], pt.URITunnels[uri][i+1:]...)
-					}
-				}
+				pt.URITunnels[uri], exists = removeID(pt.URITunnels[uri], endpoint)
 				if len(pt.URITunnels[uri]) == 0 {
 					delete(pt.URITunnels, uri)
 				}
@@ -454,12 +503,7 @@ func (pt *PortTunnel) removeTunnel(endpoint, uri, header, value string) (exists 
 				hvEndpoints := pt.HeaderTunnels[header][value]
 				if len(hvEndpoints) > 0 {
 					if endpoint != "" {
-						for i, ep := range hvEndpoints {
-							if ep == endpoint {
-								exists = true
-								hvEndpoints = append(hvEndpoints[:i], hvEndpoints[i+1:]...)
-							}
-						}
+						hvEndpoints, exists = removeID(hvEndpoints, endpoint)
 						if len(hvEndpoints) == 0 {
 							delete(pt.HeaderTunnels[header], value)
 						} else {
@@ -477,11 +521,9 @@ func (pt *PortTunnel) removeTunnel(endpoint, uri, header, value string) (exists 
 		}
 	} else {
 		if endpoint != "" {
-			for i, ep := range pt.BroadTunnels {
-				if ep == endpoint {
-					exists = true
-					pt.BroadTunnels = append(pt.BroadTunnels[:i], pt.BroadTunnels[i+1:]...)
-				}
+			pt.BroadTunnels, exists = removeID(pt.BroadTunnels, endpoint)
+			if pt.BroadTunnels == nil {
+				pt.BroadTunnels = []string{}
 			}
 		} else {
 			pt.BroadTunnels = []string{}
@@ -516,6 +558,8 @@ func (pt *PortTunnel) captureTunnelTraffic(flag bool) {
 
 func (pt *PortTunnel) trackRequest(r *http.Request, ep *Endpoint) {
 	uri := strings.ToLower(r.RequestURI)
+	pt.lock.Lock()
+	defer pt.lock.Unlock()
 	c := pt.Traffic
 	util.UpdateTrackingCountsByURIAndID(ep.ID, uri, c.ByEndpoints, c.ByURIs, c.ByURIEndpoints)
 	util.UpdateTrackingCountsByURIKeyValuesID(ep.ID, uri, pt.TunnelTrackingHeaders, r.Header,
@@ -525,6 +569,8 @@ func (pt *PortTunnel) trackRequest(r *http.Request, ep *Endpoint) {
 }
 
 func (pt *PortTunnel) trackResponse(uri string, r *http.Response, ep *Endpoint) {
+	pt.lock.Lock()
+	defer pt.lock.Unlock()
 	c := pt.Traffic
 
 	c.ByResponseStatus[r.StatusCode]++
@@ -580,7 +626,32 @@ func (ep *Endpoint) sendTunnelResponse(viaTunnelLabel, uri string, r *http.Reque
 	}
 }
 
+// getClient returns the client of the endpoint, which is created for the first request that is tunneled to it. The
+// requests to an endpoint can be tunneled at the same time.
+func (ep *Endpoint) getClient(port int, isH2, isTLS bool) transport.ClientTransport {
+	ep.clientLock.Lock()
+	defer ep.clientLock.Unlock()
+	if ep.client == nil {
+		if global.Debug {
+			log.Printf("Tunneling to endpoint [%s] - Creating HTTP Client\n", ep.ID)
+		}
+		ep.client = transport.CreateHTTPClient(port, fmt.Sprintf("Tunnel[%s]", ep.Address), isH2, false, isTLS, false,
+			ep.Host, 30*time.Second, 30*time.Second, 3*time.Minute, metrics.ConnTracker)
+	}
+	return ep.client
+}
+
+// addLogMessage adds the message to the log of the request. The endpoints of a request are tunneled to at the same
+// time, and the log of a request can't take messages being added from several goroutines.
+func addLogMessage(msg string, r *http.Request) {
+	rs := util.GetRequestStore(r)
+	rs.TunnelLock.Lock()
+	defer rs.TunnelLock.Unlock()
+	util.AddLogMessage(msg, r)
+}
+
 func (pt *PortTunnel) tunnelToEndpoint(ep *Endpoint, uri, tunnelHostLabel, viaTunnelLabel string, r *http.Request, w http.ResponseWriter, wg *sync.WaitGroup, trafficLog *TunnelTrafficLog) {
+	defer wg.Done()
 	url := ep.URL + uri
 	rs := util.GetRequestStore(r)
 	isH2 := ep.IsH2
@@ -593,12 +664,13 @@ func (pt *PortTunnel) tunnelToEndpoint(ep *Endpoint, uri, tunnelHostLabel, viaTu
 	if global.Debug {
 		log.Println(msg)
 	}
-	util.AddLogMessage(msg, r)
+	addLogMessage(msg, r)
 	reqHeaders := http.Header{}
 	reqHeaders[HeaderGotoViaTunnelCount] = []string{strconv.Itoa(rs.TunnelCount)}
 	if !ep.Transparent {
-		reqHeaders[HeaderGotoTunnelHost] = append(r.Header[HeaderGotoTunnelHost], tunnelHostLabel)
-		reqHeaders[HeaderViaGotoTunnel] = append(r.Header[HeaderViaGotoTunnel], viaTunnelLabel)
+		// The tunnels of a request run together, so they must not append to the slices of the request's headers.
+		reqHeaders[HeaderGotoTunnelHost] = append(append([]string(nil), r.Header[HeaderGotoTunnelHost]...), tunnelHostLabel)
+		reqHeaders[HeaderViaGotoTunnel] = append(append([]string(nil), r.Header[HeaderViaGotoTunnel]...), viaTunnelLabel)
 	}
 	for h, hv := range r.Header {
 		if strings.EqualFold(h, HeaderProxyConnection) {
@@ -621,49 +693,48 @@ func (pt *PortTunnel) tunnelToEndpoint(ep *Endpoint, uri, tunnelHostLabel, viaTu
 			method = "GET"
 		}
 	}
-	if req, err := transport.CreateRequest(method, url, reqHeaders, nil, r.Body); err == nil {
+	// Each endpoint gets its own reader of the payload, as the endpoints are tunneled to at the same time
+	if req, err := transport.CreateRequest(method, url, reqHeaders, rr.Content, nil); err == nil {
 		req.Host = ep.Host
-		if ep.client == nil {
-			if global.Debug {
-				log.Printf("Tunneling URI [%s] to endpoint [%s] - Creating HTTP Client\n", uri, ep.ID)
-			}
-			ep.client = transport.CreateHTTPClient(pt.Port, fmt.Sprintf("Tunnel[%s]", ep.Address), isH2, false, isTLS, false,
-				ep.Host, 30*time.Second, 30*time.Second, 3*time.Minute, metrics.ConnTracker)
-		}
-		ep.client.UpdateTLSConfig(rs.ServerName, rs.TLSVersionNum, false, nil)
+		client := ep.getClient(pt.Port, isH2, isTLS)
+		client.UpdateTLSConfig(rs.ServerName, rs.TLSVersionNum, false, nil)
 		if global.Debug {
 			log.Printf("Tunneling URI [%s] to endpoint [%s] - Sending Request\n", uri, ep.ID)
 		}
-		if resp, err := ep.client.HTTP().Do(req); err == nil {
-			r.Body.Close()
+		if resp, err := client.HTTP().Do(req); err == nil {
 			rr := util.CreateOrGetReReader(resp.Body)
 			resp.Body = rr
 			msg = fmt.Sprintf("Got response from tunnel [%s]: %s", url, resp.Status)
 			if global.Debug {
 				log.Println(msg)
 			}
-			util.AddLogMessage(msg, r)
+			addLogMessage(msg, r)
 			pt.trackResponse(uri, resp, ep)
 			ep.sendTunnelResponse(viaTunnelLabel, uri, r, w, resp)
 			if trafficLog != nil {
+				pt.lock.Lock()
 				trafficLog.ResponseHeaders = append(trafficLog.ResponseHeaders, resp.Header)
 				trafficLog.ResponsePayloadLengths = append(trafficLog.ResponsePayloadLengths, len(rr.Content))
 				trafficLog.ResponseProtocol = util.GotoProtocol(ep.IsH2, ep.IsTLS, rs.IsGRPC)
+				pt.lock.Unlock()
 			}
 		} else {
 			msg := fmt.Sprintf("Error invoking tunnel to [%s]: %s", url, err.Error())
 			if global.Debug {
 				log.Println(msg)
 			}
+			rs.TunnelLock.Lock()
 			fmt.Fprintln(w, msg)
-			util.AddLogMessage(msg, r)
+			rs.TunnelLock.Unlock()
+			addLogMessage(msg, r)
 		}
 	} else {
 		msg := fmt.Sprintf("Error creating tunnel request for [%s]: %s", url, err.Error())
+		rs.TunnelLock.Lock()
 		fmt.Fprintln(w, msg)
-		util.AddLogMessage(msg, r)
+		rs.TunnelLock.Unlock()
+		addLogMessage(msg, r)
 	}
-	wg.Done()
 }
 
 func (pt *PortTunnel) tunnel(addresses []string, uri string, r *http.Request, w http.ResponseWriter) {
@@ -680,9 +751,14 @@ func (pt *PortTunnel) tunnel(addresses []string, uri string, r *http.Request, w 
 		rs := util.GetRequestStore(r)
 		if rs.TunnelEndpoints != nil {
 			if eps, ok := rs.TunnelEndpoints.([]string); ok {
+				pt.lock.RLock()
 				for _, ep := range eps {
-					endpoints[ep] = pt.Tunnels[ep]
+					// A tunnel that was removed since the request was matched to it is not there anymore
+					if pt.Tunnels[ep] != nil {
+						endpoints[ep] = pt.Tunnels[ep]
+					}
 				}
+				pt.lock.RUnlock()
 			}
 		}
 	}
@@ -699,7 +775,10 @@ func (pt *PortTunnel) tunnel(addresses []string, uri string, r *http.Request, w 
 	viaTunnelLabel := fmt.Sprintf("%s|%d", l.Label, tunnelCount)
 	rr := util.AsReReader(r.Body)
 	var trafficLog *TunnelTrafficLog
-	if pt.CaptureTrafficLog {
+	pt.lock.RLock()
+	captureTraffic := pt.CaptureTrafficLog
+	pt.lock.RUnlock()
+	if captureTraffic {
 		trafficLog = &TunnelTrafficLog{
 			RequestURI:           r.RequestURI,
 			RequestHeaders:       r.Header,
@@ -717,8 +796,12 @@ func (pt *PortTunnel) tunnel(addresses []string, uri string, r *http.Request, w 
 		go pt.tunnelToEndpoint(ep, uri, tunnelHostLabel, viaTunnelLabel, r, w, wg, trafficLog)
 	}
 	wg.Wait()
+	// The endpoints were sent copies of the payload, and the payload of the request is left to be read again
+	rr.Rewind()
 	if trafficLog != nil {
+		pt.lock.Lock()
 		pt.Traffic.Logs = append(pt.Traffic.Logs, trafficLog)
+		pt.lock.Unlock()
 	}
 	if global.Debug {
 		log.Printf("Tunnel: Exit [%s] - %+v\n", uri, addresses)
@@ -753,12 +836,21 @@ func tunnel(w http.ResponseWriter, r *http.Request) {
 	tunnel.tunnel(addresses, uri, r, w)
 }
 
+// tunnelHostName is the host that a value of the tunnel host header is for. The value is the label of the host
+// followed by the tunnel count at the host, as tunnelHostLabel has it.
+func tunnelHostName(headerValue string) string {
+	if i := strings.LastIndex(headerValue, "|"); i >= 0 {
+		return headerValue[:i]
+	}
+	return headerValue
+}
+
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if util.IsTunnelRequest(r) {
 			l := listeners.GetCurrentListener(r)
 			for _, hv := range r.Header[HeaderGotoTunnelHost] {
-				if strings.EqualFold(hv, l.HostLabel) {
+				if strings.EqualFold(tunnelHostName(hv), l.HostLabel) {
 					msg := fmt.Sprintf("Tunnel loop detected in header [%s] : %+v", HeaderGotoTunnelHost, r.Header[HeaderGotoTunnelHost])
 					util.AddLogMessage(msg, r)
 					fmt.Fprintln(w, msg)

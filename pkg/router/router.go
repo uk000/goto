@@ -220,13 +220,22 @@ func (pr *PortRouter) GetRouteTraffic(id string) *RouteTraffic {
 	return pr.RouteTraffic[id]
 }
 
+// GetMatchingRoute finds the route that the request is for: the one that matches the URI of the request and will route
+// it. Where several routes do, it is the one with the longest prefix, and the one of the first label if they have the same.
 func (pr *PortRouter) GetMatchingRoute(r *http.Request) *Route {
+	pr.lock.RLock()
+	defer pr.lock.RUnlock()
+	var matched *Route
 	for _, route := range pr.Routes {
-		if route.re.MatchString(r.RequestURI) {
-			return route
+		if !route.re.MatchString(r.RequestURI) || !route.WillReroute(r) {
+			continue
+		}
+		if matched == nil || len(route.basePrefix) > len(matched.basePrefix) ||
+			(len(route.basePrefix) == len(matched.basePrefix) && route.Label < matched.Label) {
+			matched = route
 		}
 	}
-	return nil
+	return matched
 }
 
 func (pr *PortRouter) GetRewriter() func(*httputil.ProxyRequest) {
@@ -334,8 +343,10 @@ func (pr *PortRouter) Intercept(resp *http.Response) error {
 	return nil
 }
 
+// WillReroute tells if the request has the prefix of the route. The prefix is in lower case, and is matched with the
+// URI in any case, as the matcher of the route does.
 func (r *Route) WillReroute(req *http.Request) bool {
-	return strings.HasPrefix(req.RequestURI, r.basePrefix)
+	return strings.HasPrefix(strings.ToLower(req.RequestURI), r.basePrefix)
 }
 
 func (r *Route) IsValid() bool {
@@ -412,7 +423,11 @@ func (r *Route) prepareRequest(inReq *http.Request, id string) (req *http.Reques
 	rs = util.GetRequestStore(inReq)
 	uri := inReq.RequestURI
 	if r.To.URIPrefix != "" {
-		uri = strings.Replace(uri, r.From.URIPrefix, r.To.URIPrefix, 1)
+		from := r.basePrefix
+		if from == "" {
+			from = r.From.URIPrefix
+		}
+		uri = rewriteURI(uri, from, r.To.URIPrefix)
 	}
 	req, err = http.NewRequest(inReq.Method, r.To.URL+uri, rs.ReReader)
 	if err != nil {
@@ -428,6 +443,27 @@ func (r *Route) prepareRequest(inReq *http.Request, id string) (req *http.Reques
 	req.ContentLength = inReq.ContentLength
 	req.Header.Set("X-Correlation-ID", id)
 	return
+}
+
+// rewriteURI replaces the prefix of the URI with another one, keeping the query. The prefixes are matched in any case,
+// with or without a trailing slash, and the rest of the path is joined to the new prefix with one slash: /api/v1/x
+// from /api/v1 to / is /x, and /api from / to /v2 is /v2/api. A URI that doesn't have the prefix is left as it is.
+func rewriteURI(uri, from, to string) string {
+	path, query := uri, ""
+	if i := strings.IndexAny(uri, "?#"); i >= 0 {
+		path, query = uri[:i], uri[i:]
+	}
+	from = strings.TrimSuffix(from, "/")
+	to = strings.TrimSuffix(to, "/")
+	idx := strings.Index(strings.ToLower(path), strings.ToLower(from))
+	if idx < 0 {
+		return uri
+	}
+	path = path[:idx] + to + path[idx+len(from):]
+	if path == "" {
+		path = "/"
+	}
+	return path + query
 }
 
 func prepareHeaders(inHeaders, outHeaders http.Header, overrides *Headers) {

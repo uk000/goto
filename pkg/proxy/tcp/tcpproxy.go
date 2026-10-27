@@ -48,7 +48,7 @@ var (
 	sniReadTimeout = 5 * time.Second
 
 	// errMalformedHello is reported for client hellos that the SNI parser can't make sense of at all.
-	errMalformedHello = errors.New("malformed TLS client hello")
+	errMalformedHello = gototls.ErrMalformedClientHello
 )
 
 type TCPProxy struct {

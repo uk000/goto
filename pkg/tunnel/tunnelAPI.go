@@ -17,6 +17,7 @@
 package tunnel
 
 import (
+	"encoding/json"
 	"fmt"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
@@ -104,9 +105,33 @@ func clearTunnelTracking(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// snapshotTunnels returns the tunnels as they are now, as copies that can be sent while the tunnels change.
+func snapshotTunnels() map[int]*PortTunnel {
+	tunnelLock.RLock()
+	all := make(map[int]*PortTunnel, len(tunnels))
+	for port, pt := range tunnels {
+		all[port] = pt
+	}
+	tunnelLock.RUnlock()
+	copies := make(map[int]*PortTunnel, len(all))
+	for port, pt := range all {
+		pt.lock.RLock()
+		data, err := json.Marshal(pt)
+		pt.lock.RUnlock()
+		if err != nil {
+			continue
+		}
+		c := &PortTunnel{}
+		if json.Unmarshal(data, c) == nil {
+			copies[port] = c
+		}
+	}
+	return copies
+}
+
 func getTunnelTracking(w http.ResponseWriter, r *http.Request) {
 	counts := map[int]*TunnelTraffic{}
-	for port, pt := range tunnels {
+	for port, pt := range snapshotTunnels() {
 		counts[port] = pt.Traffic
 	}
 	util.WriteJsonPayload(w, counts)
@@ -146,6 +171,6 @@ func getActiveTunnels(w http.ResponseWriter, r *http.Request) {
 }
 
 func getTunnels(w http.ResponseWriter, r *http.Request) {
-	util.WriteJsonPayload(w, tunnels)
+	util.WriteJsonPayload(w, snapshotTunnels())
 	util.AddLogMessage("Reported Tunnels", r)
 }
