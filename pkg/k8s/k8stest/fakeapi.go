@@ -15,8 +15,8 @@
  */
 
 // Package k8stest has an in-memory API server of Kubernetes for the tests of the packages that talk to one. It serves
-// discovery and the resources (list, get, apply and delete) of a few kinds, on a listener of the loopback interface,
-// and makes the k8s client of the package the one that talks to it. It is not used by the code of the server.
+// discovery and the resources (list, get, watch, apply and delete) of a few kinds, on a listener of the loopback
+// interface, and makes the k8s client of the package the one that talks to it. It is not used by the code of the server.
 package k8stest
 
 import (
@@ -26,9 +26,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	k8sClient "goto/pkg/k8s/client"
 )
@@ -59,22 +61,49 @@ var resources = []resource{
 type API struct {
 	Server *httptest.Server
 
-	mu       sync.Mutex
-	objects  map[string]map[string]map[string]interface{}
-	requests []Request
-	failCode int
+	mu            sync.Mutex
+	objects       map[string]map[string]map[string]interface{}
+	requests      []Request
+	watchRequests []Request
+	failCode      int
+	version       int64
+	watchers      map[*watcher]struct{}
+	done          chan struct{}
+}
+
+// watcher is a watch that is being served, which is told of the changes of what it watches.
+type watcher struct {
+	res       *resource
+	namespace string
+	name      string
+	selector  string
+	events    chan watchEvent
+}
+
+// watchEvent is an event of a watch, as the API server of Kubernetes writes it.
+type watchEvent struct {
+	Type   string                 `json:"type"`
+	Object map[string]interface{} `json:"object"`
 }
 
 // New starts an API server that is stopped when the test is done.
 func New(t *testing.T) *API {
 	t.Helper()
-	a := &API{objects: map[string]map[string]map[string]interface{}{}}
+	a := &API{
+		objects:  map[string]map[string]map[string]interface{}{},
+		watchers: map[*watcher]struct{}{},
+		done:     make(chan struct{}),
+	}
 	a.Server = httptest.NewServer(http.HandlerFunc(a.serve))
 	t.Cleanup(a.Server.Close)
+	// Closing the server waits for the requests that are being served, which the watches are until this ends them. This
+	// is done before, as the cleanups are done in the reverse order.
+	t.Cleanup(func() { close(a.done) })
 	return a
 }
 
-// Install starts an API server, and makes it the one that the default client of k8s talks to until the test is done.
+// Install starts an API server, and makes it the one that the default client of k8s talks to until the test is done. The
+// client that was switched to is put aside for that time, as it would be the one that is talked to otherwise.
 func Install(t *testing.T) *API {
 	t.Helper()
 	a := New(t)
@@ -83,8 +112,12 @@ func Install(t *testing.T) *API {
 		t.Fatal(err)
 	}
 	old := k8sClient.Client
+	oldCurrent := k8sClient.ReplaceCurrentClient(nil)
 	k8sClient.Client = c
-	t.Cleanup(func() { k8sClient.Client = old })
+	t.Cleanup(func() {
+		k8sClient.Client = old
+		k8sClient.ReplaceCurrentClient(oldCurrent)
+	})
 	return a
 }
 
@@ -105,11 +138,27 @@ func (a *API) Requests() []Request {
 	return append([]Request{}, a.requests...)
 }
 
+// WatchRequests returns the requests for watches that were made, in order. They are not among Requests, so that the ones
+// that informers make do not get in the way of what is looked for there.
+func (a *API) WatchRequests() []Request {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]Request{}, a.watchRequests...)
+}
+
 // ClearRequests forgets the requests that were made.
 func (a *API) ClearRequests() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.requests = nil
+	a.watchRequests = nil
+}
+
+// Watchers tells how many watches are being served.
+func (a *API) Watchers() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.watchers)
 }
 
 func find(apiVersion, kind string) *resource {
@@ -159,6 +208,29 @@ func (a *API) Put(obj map[string]interface{}) {
 	a.store(r, namespace, name, obj)
 }
 
+// Delete removes a stored object, as if it had been deleted, and tells the watches of it. It returns false when there
+// was none.
+func (a *API) Delete(apiVersion, kind, namespace, name string) bool {
+	r := find(apiVersion, kind)
+	if r == nil {
+		return false
+	}
+	if !r.namespaced {
+		namespace = ""
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	key := r.collection(namespace)
+	deleted := a.objects[key][name]
+	if deleted == nil {
+		return false
+	}
+	delete(a.objects[key], name)
+	a.version++
+	a.emit(r, namespace, name, "DELETED", deleted)
+	return true
+}
+
 // Get returns a stored object, or nil.
 func (a *API) Get(apiVersion, kind, namespace, name string) map[string]interface{} {
 	r := find(apiVersion, kind)
@@ -175,7 +247,31 @@ func (a *API) store(r *resource, namespace, name string, obj map[string]interfac
 	if a.objects[key] == nil {
 		a.objects[key] = map[string]map[string]interface{}{}
 	}
+	_, existed := a.objects[key][name]
 	a.objects[key][name] = obj
+	a.version++
+	if existed {
+		a.emit(r, namespace, name, "MODIFIED", obj)
+	} else {
+		a.emit(r, namespace, name, "ADDED", obj)
+	}
+}
+
+// emit tells the watches of the object what happened to it. A watch that does not keep up is not told, as the server does
+// not wait for it.
+func (a *API) emit(r *resource, namespace, name, eventType string, obj map[string]interface{}) {
+	for w := range a.watchers {
+		if w.accepts(r, namespace, name, obj) {
+			select {
+			case w.events <- watchEvent{Type: eventType, Object: obj}:
+			default:
+			}
+		}
+	}
+}
+
+func (w *watcher) accepts(r *resource, namespace, name string, obj map[string]interface{}) bool {
+	return w.res == r && (w.namespace == "" || w.namespace == namespace) && (w.name == "" || w.name == name) && matches(obj, w.selector)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
@@ -231,6 +327,10 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 200, map[string]interface{}{"kind": "APIResourceList", "groupVersion": res.gv(), "resources": list})
 			return
 		}
+	}
+	if watch := r.URL.Query().Get("watch"); r.Method == "GET" && (watch == "true" || watch == "1") {
+		a.serveWatch(w, r, path)
+		return
 	}
 	body, _ := io.ReadAll(r.Body)
 	a.mu.Lock()
@@ -327,7 +427,10 @@ func (a *API) handle(w http.ResponseWriter, r *http.Request, res *resource, name
 				}
 			}
 		}
-		writeJSON(w, 200, map[string]interface{}{"kind": res.kind + "List", "apiVersion": res.gv(), "metadata": map[string]interface{}{}, "items": items})
+		writeJSON(w, 200, map[string]interface{}{
+			"kind": res.kind + "List", "apiVersion": res.gv(),
+			"metadata": map[string]interface{}{"resourceVersion": strconv.FormatInt(a.version, 10)}, "items": items,
+		})
 	case "PATCH", "POST", "PUT":
 		var obj map[string]interface{}
 		if err := json.Unmarshal(body, &obj); err != nil {
@@ -345,7 +448,10 @@ func (a *API) handle(w http.ResponseWriter, r *http.Request, res *resource, name
 			writeStatus(w, 404, "NotFound", fmt.Sprintf("%s %q not found", res.plural, name))
 			return
 		}
+		deleted := a.objects[key][name]
 		delete(a.objects[key], name)
+		a.version++
+		a.emit(res, namespace, name, "DELETED", deleted)
 		writeStatus(w, 200, "", "deleted")
 	default:
 		writeStatus(w, 405, "MethodNotAllowed", "method not allowed")
@@ -366,4 +472,138 @@ func matches(obj map[string]interface{}, selector string) bool {
 		}
 	}
 	return true
+}
+
+// serveWatch streams the events of the resources that the path is of, one JSON object on each line, until the client
+// goes away, the time of the watch is over or the server is closed. The objects that exist are reported as added first,
+// unless the watch is from a resource version, and the end of them is told with a bookmark when they are asked for.
+func (a *API) serveWatch(w http.ResponseWriter, r *http.Request, path string) {
+	var res *resource
+	var namespace, name string
+	for i := range resources {
+		candidate := &resources[i]
+		if !strings.HasPrefix(path, candidate.prefix()+"/") {
+			continue
+		}
+		if ns, n, ok := parse(candidate, strings.TrimPrefix(path, candidate.prefix()+"/")); ok {
+			res, namespace, name = candidate, ns, n
+			break
+		}
+	}
+	query := r.URL.Query()
+	// A name can be given as a field selector, which is how the name of a resource is watched by clients.
+	for _, term := range strings.Split(query.Get("fieldSelector"), ",") {
+		if kv := strings.SplitN(term, "=", 2); len(kv) == 2 && kv[0] == "metadata.name" {
+			name = kv[1]
+		}
+	}
+	wt := &watcher{res: res, namespace: namespace, name: name, selector: query.Get("labelSelector"), events: make(chan watchEvent, 256)}
+	sendInitial := query.Get("sendInitialEvents") == "true"
+	resourceVersion := query.Get("resourceVersion")
+
+	a.mu.Lock()
+	a.watchRequests = append(a.watchRequests, Request{Method: r.Method, Path: r.URL.Path, RawQuery: r.URL.RawQuery})
+	if res == nil {
+		a.mu.Unlock()
+		writeStatus(w, 404, "NotFound", "the server could not find the requested resource")
+		return
+	}
+	if a.failCode != 0 {
+		code := a.failCode
+		a.mu.Unlock()
+		writeStatus(w, code, "InternalError", "the server failed the request")
+		return
+	}
+	// The objects are taken and the watch is registered under the same lock, so that no change is missed in between.
+	var initial []watchEvent
+	if sendInitial || resourceVersion == "" || resourceVersion == "0" {
+		initial = a.snapshot(wt)
+	}
+	version := a.version
+	a.watchers[wt] = struct{}{}
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		delete(a.watchers, wt)
+		a.mu.Unlock()
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	flusher, _ := w.(http.Flusher)
+	flush := func() {
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+	enc := json.NewEncoder(w)
+	send := func(event watchEvent) bool {
+		if err := enc.Encode(event); err != nil {
+			return false
+		}
+		flush()
+		return true
+	}
+	flush()
+	for _, event := range initial {
+		if !send(event) {
+			return
+		}
+	}
+	if sendInitial {
+		send(watchEvent{Type: "BOOKMARK", Object: map[string]interface{}{
+			"kind": res.kind, "apiVersion": res.gv(),
+			"metadata": map[string]interface{}{
+				"resourceVersion": strconv.FormatInt(version, 10),
+				"annotations":     map[string]interface{}{"k8s.io/initial-events-end": "true"},
+			},
+		}})
+	}
+	var timeout <-chan time.Time
+	if seconds, err := strconv.Atoi(query.Get("timeoutSeconds")); err == nil && seconds > 0 {
+		timer := time.NewTimer(time.Duration(seconds) * time.Second)
+		defer timer.Stop()
+		timeout = timer.C
+	}
+	for {
+		select {
+		case event := <-wt.events:
+			if !send(event) {
+				return
+			}
+		case <-timeout:
+			return
+		case <-r.Context().Done():
+			return
+		case <-a.done:
+			return
+		}
+	}
+}
+
+// snapshot has the objects that a watch is of, as added events, in the order of their namespaces and names.
+func (a *API) snapshot(wt *watcher) []watchEvent {
+	prefix := wt.res.collection("")
+	var keys []string
+	for key := range a.objects {
+		if strings.HasPrefix(key, prefix) {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	var events []watchEvent
+	for _, key := range keys {
+		namespace := strings.TrimPrefix(key, prefix)
+		var names []string
+		for name := range a.objects[key] {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if obj := a.objects[key][name]; wt.accepts(wt.res, namespace, name, obj) {
+				events = append(events, watchEvent{Type: "ADDED", Object: obj})
+			}
+		}
+	}
+	return events
 }

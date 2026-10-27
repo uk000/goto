@@ -99,8 +99,9 @@ func apiGetResources(w http.ResponseWriter, r *http.Request) {
 			util.WriteYaml(w, result)
 		}
 	} else {
-		fmt.Fprintf(w, "No resources found for yamlName [%s] and namespace [%s]\n", yamlName, namespace)
+		// The status is written before the body, or it is the one of the body: 200.
 		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprintf(w, "No resources found for yamlName [%s] and namespace [%s]\n", yamlName, namespace)
 	}
 }
 

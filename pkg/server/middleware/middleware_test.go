@@ -362,6 +362,54 @@ func TestLinkInterceptedWithoutMiddlewaresLeavesNoChain(t *testing.T) {
 	}
 }
 
+func TestRootPathIfServesOnlyTheRequestsThatTheGuardAllows(t *testing.T) {
+	saveChains(t)
+	path := fmt.Sprintf("/mwguarded%d", pathSeq.Add(1))
+	unguarded := fmt.Sprintf("/mwunguarded%d", pathSeq.Add(1))
+	t.Cleanup(func() {
+		delete(RootRouters, path)
+		delete(RootGuards, path)
+		delete(RootRouters, unguarded)
+	})
+	allowHost := func(host string) func(*http.Request) bool {
+		return func(r *http.Request) bool { return r.Host == host }
+	}
+
+	r := RootPathIf(path, allowHost("a.example.com"))
+	if r == nil || r != RootRouters[path] || r != RootPath(path) {
+		t.Fatalf("RootPathIf = %v, want the router that RootPath gives for the path", r)
+	}
+	req := func(host string) *http.Request {
+		q := newRequest("GET", path+"/x")
+		q.Host = host
+		return q
+	}
+	if got := RootRouterFor(path, req("a.example.com")); got != r {
+		t.Errorf("router for a request that the guard allows = %v, want %v", got, r)
+	}
+	if got := RootRouterFor(path, req("b.example.com")); got != nil {
+		t.Errorf("router for a request that the guard does not allow = %v, want none", got)
+	}
+	// A later guard replaces the earlier one, for the same router.
+	if again := RootPathIf(path, allowHost("b.example.com")); again != r {
+		t.Error("a second guard made another router for the same path")
+	}
+	if got := RootRouterFor(path, req("a.example.com")); got != nil {
+		t.Errorf("router after the guard was replaced, for the host of the old one = %v, want none", got)
+	}
+	if got := RootRouterFor(path, req("b.example.com")); got != r {
+		t.Errorf("router after the guard was replaced, for the host of the new one = %v, want %v", got, r)
+	}
+	// Without a guard, or without a router, there is no check.
+	plain := RootPath(unguarded)
+	if got := RootRouterFor(unguarded, req("any.example.com")); got != plain {
+		t.Errorf("router of a root path without a guard = %v, want %v", got, plain)
+	}
+	if got := RootRouterFor("/mwmissing", req("a.example.com")); got != nil {
+		t.Errorf("router of a root path that has none = %v, want none", got)
+	}
+}
+
 func TestRootPath(t *testing.T) {
 	saveChains(t)
 	rec := &recorder{}

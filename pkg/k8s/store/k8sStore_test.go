@@ -259,12 +259,27 @@ func TestKstoreGetTargetResources(t *testing.T) {
 			t.Errorf("got %v, %v", got, err)
 		}
 	})
+	t.Run("kind in all namespaces", func(t *testing.T) {
+		got, err := Kstore.GetTargetResources("unit", "", "cm", "")
+		if err != nil || !reflect.DeepEqual(names(got), []string{"ns1"}) || !reflect.DeepEqual(names(got["ns1"]), []string{"ConfigMap"}) ||
+			!reflect.DeepEqual(names(got["ns1"]["ConfigMap"]), []string{"cm1", "cm2"}) {
+			t.Errorf("got %v, %v, want the config maps only", got, err)
+		}
+	})
+	t.Run("name in all namespaces", func(t *testing.T) {
+		got, err := Kstore.GetTargetResources("unit", "", "cm", "cm2")
+		if err != nil || !reflect.DeepEqual(names(got), []string{"ns1"}) || !reflect.DeepEqual(names(got["ns1"]["ConfigMap"]), []string{"cm2"}) {
+			t.Errorf("got %v, %v, want cm2 only", got, err)
+		}
+	})
 	for name, c := range map[string]struct{ unit, ns, kind, resource string }{
-		"no unit":           {"", "", "", ""},
-		"unknown unit":      {"missing", "", "", ""},
-		"unknown namespace": {"unit", "missing", "", ""},
-		"unknown kind":      {"unit", "ns1", "Deployment", ""},
-		"unknown name":      {"unit", "ns1", "cm", "cm9"},
+		"unknown kind in all namespaces": {"unit", "", "Secret", ""},
+		"unknown name in all namespaces": {"unit", "", "cm", "cm9"},
+		"no unit":                        {"", "", "", ""},
+		"unknown unit":                   {"missing", "", "", ""},
+		"unknown namespace":              {"unit", "missing", "", ""},
+		"unknown kind":                   {"unit", "ns1", "Deployment", ""},
+		"unknown name":                   {"unit", "ns1", "cm", "cm9"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got, err := Kstore.GetTargetResources(c.unit, c.ns, c.kind, c.resource); err == nil || got != nil {

@@ -333,7 +333,7 @@ func loadRouter(r *http.Request, rs *util.RequestStore) {
 			rs.IsProxy = true
 		}
 		if uriRouter == nil {
-			uriRouter = middleware.RootRouters[rootURI]
+			uriRouter = middleware.RootRouterFor(rootURI, r)
 		}
 		if uriRouter != nil {
 			rs.CurrentRouter = uriRouter

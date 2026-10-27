@@ -50,12 +50,17 @@ type K8sResource struct {
 	Name      string                     `json:"name"`
 }
 
+// GetGVRMapping maps the kind to the resource of it on the cluster of the active client.
 func GetGVRMapping(gvk *schema.GroupVersionKind) (*meta.RESTMapping, error) {
+	return restMapping(k8sClient.Active(), gvk)
+}
+
+func restMapping(c *k8sClient.K8sClient, gvk *schema.GroupVersionKind) (*meta.RESTMapping, error) {
 	// There is no default client when no kube config or cluster is found at startup.
-	if k8sClient.Client == nil || k8sClient.Client.Mapper == nil {
+	if c == nil || c.Mapper == nil {
 		return nil, errors.New("k8s client is not configured")
 	}
-	gvr, err := k8sClient.Client.Mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	gvr, err := c.Mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 	if err != nil {
 		log.Printf("Failed to covert GVK to GVR with error: %s\n", err.Error())
 		return nil, err
@@ -63,16 +68,46 @@ func GetGVRMapping(gvk *schema.GroupVersionKind) (*meta.RESTMapping, error) {
 	return gvr, nil
 }
 
+// GetResourceInterface returns the interface for the resources of the kind on the cluster of the active client, in the
+// namespace when the kind is in namespaces. An empty namespace is all the namespaces.
 func GetResourceInterface(gvk *schema.GroupVersionKind, namespace string) (dynamic.ResourceInterface, *meta.RESTMapping, error) {
-	gvr, err := GetGVRMapping(gvk)
+	c := k8sClient.Active()
+	gvr, err := restMapping(c, gvk)
 	if err != nil {
 		return nil, nil, err
 	}
-	if gvr.Scope.Name() == meta.RESTScopeNameNamespace {
-		return k8sClient.Client.Client.Resource(gvr.Resource).Namespace(namespace), gvr, nil
-	} else {
-		return k8sClient.Client.Client.Resource(gvr.Resource), gvr, nil
+	return resourceInterface(c.Client, gvr, namespace), gvr, nil
+}
+
+// GetWatchInterface is GetResourceInterface for a watch, which lasts longer than what the timeout of the client allows.
+func GetWatchInterface(gvk *schema.GroupVersionKind, namespace string) (dynamic.ResourceInterface, *meta.RESTMapping, error) {
+	c := k8sClient.Active()
+	gvr, err := restMapping(c, gvk)
+	if err != nil {
+		return nil, nil, err
 	}
+	streamClient, err := c.StreamDynamic()
+	if err != nil {
+		return nil, nil, err
+	}
+	return resourceInterface(streamClient, gvr, namespace), gvr, nil
+}
+
+func resourceInterface(client dynamic.Interface, gvr *meta.RESTMapping, namespace string) dynamic.ResourceInterface {
+	if gvr.Scope.Name() == meta.RESTScopeNameNamespace {
+		return client.Resource(gvr.Resource).Namespace(namespace)
+	}
+	return client.Resource(gvr.Resource)
+}
+
+// ResolveResource finds the resource (as the API names it, the plural) for a group and version, from the name of a
+// resource, which can be that plural, the singular of it, or the kind. It uses the cluster of the active client.
+func ResolveResource(group, version, name string) (schema.GroupVersionResource, error) {
+	c := k8sClient.Active()
+	if c == nil || c.Mapper == nil {
+		return schema.GroupVersionResource{}, errors.New("k8s client is not configured")
+	}
+	return c.Mapper.ResourceFor(schema.GroupVersionResource{Group: group, Version: version, Resource: name})
 }
 
 var (

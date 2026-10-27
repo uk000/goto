@@ -28,6 +28,7 @@ import (
 	"goto/pkg/global"
 	"goto/pkg/job"
 	k8sApi "goto/pkg/k8s/api"
+	k8sMock "goto/pkg/k8s/apiserver"
 	k8sYaml "goto/pkg/k8s/yaml"
 	"goto/pkg/log"
 	"goto/pkg/memory"
@@ -89,7 +90,7 @@ func init() {
 		grpcapi.Middleware, grpcclient.Middleware, protos.Middleware,
 		scripts.Middleware, job.Middleware, tls.Middleware, log.Middleware,
 		label.Middleware, info.Middleware, echo.Middleware, stream.Middleware,
-		pipe.Middleware, k8sYaml.Middleware, k8sApi.Middleware,
+		pipe.Middleware, k8sYaml.Middleware, k8sApi.Middleware, k8sMock.Middleware,
 	}
 }
 

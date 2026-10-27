@@ -79,6 +79,12 @@ func applyResource(namespace, name string, kr *k8s.K8sResource, delete bool) err
 		log.Printf("Failed to get resource interface with error: %s\n", err.Error())
 		return err
 	}
+	// What is cached of the resource is not what it is after this, whether it fails half way or not.
+	cachedNamespace := namespace
+	if kr.GVK.Kind == k8s.KindNamespace {
+		cachedNamespace = ""
+	}
+	defer store.InvalidateResource(kr.GVK, cachedNamespace, name)
 	if delete {
 		if err := ri.Delete(context.TODO(), name, metav1.DeleteOptions{}); err != nil {
 			log.Printf("Failed to delete resource [%s/%s] with error: %s\n", namespace, name, err.Error())

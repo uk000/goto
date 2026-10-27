@@ -36,6 +36,8 @@ var (
 	MiddlewareChainHead     http.Handler
 	middlewareRouter        *mux.Router
 	RootRouters             = map[string]*mux.Router{}
+	// RootGuards has, by root path, the check that a request must pass to be served by the router of the root path.
+	RootGuards = map[string]func(*http.Request) bool{}
 )
 
 type MiddlewareFunc func(http.ResponseWriter, *http.Request)
@@ -200,6 +202,29 @@ func RootPath(path string) *mux.Router {
 		RootRouters[path] = r
 	}
 	return RootRouters[path]
+}
+
+// RootPathIf is RootPath for a root path that is served only for the requests that the guard allows. The other requests
+// are handled as if there was no router for the root path, i.e. like those of any other URI, so a guard that fails does
+// not turn what would have been responded to by the catch all into a not found. The guard belongs to the root path, so
+// it applies to all the routes that are added under it, and replaces any that was set earlier.
+func RootPathIf(path string, allow func(*http.Request) bool) *mux.Router {
+	r := RootPath(path)
+	RootGuards[path] = allow
+	return r
+}
+
+// RootRouterFor returns the router of the root path, if there is one that serves the request: it has none when no router
+// is registered for the root path, or when its guard does not allow the request.
+func RootRouterFor(rootURI string, r *http.Request) *mux.Router {
+	router := RootRouters[rootURI]
+	if router == nil {
+		return nil
+	}
+	if allow := RootGuards[rootURI]; allow != nil && !allow(r) {
+		return nil
+	}
+	return router
 }
 
 func postIntercept() http.Handler {

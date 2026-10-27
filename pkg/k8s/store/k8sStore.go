@@ -214,6 +214,31 @@ func (k *K8sResourceStore) GetTargetResources(yamlName, namespace, kind, name st
 				targetResources = temp
 			}
 		}
+	} else if kind != "" {
+		// Without a namespace, the kind and name are looked for in all the namespaces, and the rest is left out. They
+		// are not to be ignored, as what is asked for would then be all the resources of the unit.
+		temp := NamespaceKindMap{}
+		for ns, kinds := range targetResources {
+			resources := kinds[kind]
+			if resources == nil {
+				continue
+			}
+			if name != "" {
+				if resources[name] == nil {
+					continue
+				}
+				resources = ResourcesByName{name: resources[name]}
+			}
+			if temp[ns] == nil {
+				temp[ns] = KindResourcesMap{}
+			}
+			temp[ns][kind] = resources
+		}
+		if len(temp) == 0 {
+			log.Printf("No resources found for unit [%s]. kind [%s] name [%s]\n", yamlName, kind, name)
+			return nil, fmt.Errorf("no resources found for unit [%s]. kind [%s] name [%s]", yamlName, kind, name)
+		}
+		targetResources = temp
 	}
 	return targetResources.copy(), nil
 }

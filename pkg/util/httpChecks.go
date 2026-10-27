@@ -74,6 +74,10 @@ func IsAdminRequest(r *http.Request) bool {
 	return GetRequestStore(r).IsAdminRequest
 }
 
+// CheckAdminRequest tells if the request is for one of the root paths of the goto APIs, which are not traffic: the filters
+// and the rules for the traffic (forced status, delay and the like) do not apply to them. /api and /apis are not among
+// them, as those are the root paths of the k8s API that goto serves as a mock, and the requests that a k8s client makes
+// are traffic like any other.
 func CheckAdminRequest(r *http.Request) bool {
 	uri := r.RequestURI
 	if strings.HasPrefix(uri, "/port=") {
@@ -86,7 +90,7 @@ func CheckAdminRequest(r *http.Request) bool {
 		// 	uri2 = pieces[2]
 		// }
 	}
-	return uri == "version" || uri == "routes" || uri == "apis" || uri == "metrics" ||
+	return uri == "version" || uri == "routes" || uri == "metrics" ||
 		uri == "server" || uri == "request" || uri == "response" || uri == "listeners" ||
 		uri == "label" || uri == "registry" || uri == "client" || uri == "proxy" ||
 		uri == "job" || uri == "probes" || uri == "tcp" || uri == "grpc" || uri == "jsonrpc" ||

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	k8sClient "goto/pkg/k8s/client"
 	"log"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,12 +32,21 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 )
 
+// ExecTimeout is how long a command that is executed in a pod may take, listing the pods included.
+var ExecTimeout = 2 * time.Minute
+
+// PodExec runs the command in the container of the first pod of the namespace that has the label, on the cluster of the
+// active client, and returns what the command writes to its output (or to its error output if it writes nothing to the
+// output).
 func PodExec(namespace, label, container string, command string) (string, error) {
-	if k8sClient.Client == nil || k8sClient.Client.TypedClient == nil {
+	c := k8sClient.Active()
+	if c == nil || c.TypedClient == nil {
 		return "", errors.New("k8s client is not configured")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), ExecTimeout)
+	defer cancel()
 	var podName string
-	if pods, err := k8sClient.Client.TypedClient.Pods(namespace).List(context.Background(),
+	if pods, err := c.TypedClient.Pods(namespace).List(ctx,
 		metav1.ListOptions{LabelSelector: label}); err == nil {
 		if len(pods.Items) == 0 {
 			log.Printf("K8s: No pods in namespace [%s] for label [%s]\n", namespace, label)
@@ -48,7 +58,7 @@ func PodExec(namespace, label, container string, command string) (string, error)
 		log.Printf("K8s: Failed to load pods list with error: %s\n", err.Error())
 		return "", err
 	}
-	req := k8sClient.Client.TypedClient.RESTClient().Post().Namespace(namespace).
+	req := c.TypedClient.RESTClient().Post().Namespace(namespace).
 		Resource("pods").Name(podName).SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: container,
@@ -58,14 +68,16 @@ func PodExec(namespace, label, container string, command string) (string, error)
 			Stderr:    true,
 			TTY:       false,
 		}, scheme.ParameterCodec)
-	exec, err := remotecommand.NewSPDYExecutor(k8sClient.Client.Config, "POST", req.URL())
+	// The stream of the command lasts, so it does not get the timeout that the client has for requests that are answered
+	// at once. The context ends it instead.
+	exec, err := remotecommand.NewSPDYExecutor(c.StreamConfig(), "POST", req.URL())
 	if err != nil {
 		log.Printf("K8s: Failed to execute pod command with error: %s\n", err.Error())
 		return "", err
 	}
 	var outBuf bytes.Buffer
 	var errBuf bytes.Buffer
-	err = exec.StreamWithContext(context.Background(), remotecommand.StreamOptions{
+	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
 		Stdin:  nil,
 		Stdout: &outBuf,
 		Stderr: &errBuf,

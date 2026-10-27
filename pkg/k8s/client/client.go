@@ -18,6 +18,7 @@ package client
 
 import (
 	"encoding/base64"
+	"fmt"
 	"goto/pkg/global"
 	"io"
 	"log"
@@ -77,10 +78,65 @@ func GetClient(name string) *K8sClient {
 	return Clients[name]
 }
 
+// Active returns the client that the APIs talk to: the one that was switched to, or the default one when there was no
+// switch. It is nil when there is neither. A caller that makes more than one request for what it does should call this
+// once and use the client that it got, so that a switch in between does not mix two clusters.
+func Active() *K8sClient {
+	lock.RLock()
+	defer lock.RUnlock()
+	if CurrentClient != nil {
+		return CurrentClient
+	}
+	return Client
+}
+
+// ReplaceCurrentClient makes the client given the current one (nil for none) and returns the one that was current.
+func ReplaceCurrentClient(c *K8sClient) *K8sClient {
+	lock.Lock()
+	defer lock.Unlock()
+	old := CurrentClient
+	CurrentClient = c
+	return old
+}
+
+// ID tells the cluster that the client is for, which is what the data that is kept for a cluster is kept by. It is empty
+// for a client that is not configured.
+func (c *K8sClient) ID() string {
+	if c == nil || c.Config == nil {
+		return ""
+	}
+	return c.Config.Host
+}
+
+// StreamConfig returns a copy of the config of the client for requests that last, like watches and streams of exec. The
+// timeout of the config is for requests that are answered at once, and cuts those that last.
+func (c *K8sClient) StreamConfig() *rest.Config {
+	cfg := rest.CopyConfig(c.Config)
+	cfg.Timeout = 0
+	return cfg
+}
+
+// StreamDynamic returns a dynamic client for requests that last (see StreamConfig).
+func (c *K8sClient) StreamDynamic() (dynamic.Interface, error) {
+	return dynamic.NewForConfig(c.StreamConfig())
+}
+
+// NewK8sClientForRestConfig makes a client for the config, which is not changed. It does not contact the server.
+func NewK8sClientForRestConfig(config *rest.Config) (*K8sClient, error) {
+	k8sClient := &K8sClient{Config: rest.CopyConfig(config)}
+	if err := configureClient(k8sClient); err != nil {
+		return nil, err
+	}
+	return k8sClient, nil
+}
+
 // NewK8sClientForConfig makes a client for the API server at the url, which verifies the server with the CA certificate
 // given as base 64 text. It does not contact the server.
 func NewK8sClientForConfig(url, caData string) (*K8sClient, error) {
-	caBytes, _ := io.ReadAll(base64.NewDecoder(base64.StdEncoding, strings.NewReader(caData)))
+	caBytes, err := io.ReadAll(base64.NewDecoder(base64.StdEncoding, strings.NewReader(caData)))
+	if err != nil {
+		return nil, fmt.Errorf("CA data is not base 64: %w", err)
+	}
 	k8sClient := &K8sClient{
 		Config: &rest.Config{
 			Host: url,
@@ -120,7 +176,7 @@ func createDefaultK8sClient() *K8sClient {
 		if k8sClient.Config, err = rest.InClusterConfig(); err != nil {
 			kubeconfig := filepath.Join(homedir.HomeDir(), ".kube", "config")
 			if k8sClient.Config, err = clientcmd.BuildConfigFromFlags("", kubeconfig); err != nil {
-				log.Printf("K8s: Failed to load kube config [%s] with error: %s\n", global.ServerConfig.KubeConfig, err.Error())
+				log.Printf("K8s: Failed to load kube config [%s] with error: %s\n", kubeconfig, err.Error())
 				return nil
 			}
 		}
