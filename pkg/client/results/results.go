@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -155,11 +156,20 @@ var (
 	registryClient               = transport.CreateDefaultHTTPClient(global.Self.ServerPort, "ResultsRegistrySender", true, false, false, "", nil)
 	sendingToRegistry            bool
 	registrySendLock             sync.Mutex
-	collectTargetsResults        bool = true
-	collectAllTargetsResults     bool = false
-	collectInvocationResults     bool = false
-	_                                 = global.OnShutdown(StopRegistrySender)
+	// registrySenders is for waiting until the senders have stopped
+	registrySenders sync.WaitGroup
+	// the flags are read by the sinks of the invocations that are running, while the API changes them
+	collectTargetsResults    atomic.Bool
+	collectAllTargetsResults atomic.Bool
+	collectInvocationResults atomic.Bool
+	// registrySendInterval is the pause between the rounds in which a sender collects more results to send together.
+	registrySendInterval = time.Second
+	_                    = global.OnShutdown(StopRegistrySender)
 )
+
+func init() {
+	collectTargetsResults.Store(true)
+}
 
 func (kr KeyResult) MarshalJSON() ([]byte, error) {
 	data := map[string]interface{}{}
@@ -326,10 +336,11 @@ func (c *CountInfo) incrementBy(retries int, by *CountInfo) {
 	c.ClientStreamCount += by.ClientStreamCount
 	c.ServerStreamCount += by.ServerStreamCount
 	c.Retries += by.Retries
-	if c.FirstResultAt.IsZero() || by.FirstResultAt.Before(c.FirstResultAt) {
+	// the counts that have no timestamps (nothing was counted in them) must not reset the timestamps
+	if !by.FirstResultAt.IsZero() && (c.FirstResultAt.IsZero() || by.FirstResultAt.Before(c.FirstResultAt)) {
 		c.FirstResultAt = by.FirstResultAt
 	}
-	if c.LastResultAt.IsZero() || c.LastResultAt.Before(by.LastResultAt) {
+	if !by.LastResultAt.IsZero() && (c.LastResultAt.IsZero() || c.LastResultAt.Before(by.LastResultAt)) {
 		c.LastResultAt = by.LastResultAt
 	}
 }
@@ -445,11 +456,23 @@ func addKeyResultCounts(counts map[string]*KeyResultCounts, key string, statusCo
 	resultCount := counts[key]
 	resultCount.increment(retries, csCount, ssCount, ts)
 	if withStatusCodes {
+		if resultCount.ByStatusCodes == nil {
+			resultCount.ByStatusCodes = KeyResult{}
+		}
 		if resultCount.ByStatusCodes[statusCode] == nil {
 			resultCount.ByStatusCodes[statusCode] = &KeyResultCounts{}
 		}
 		resultCount.ByStatusCodes[statusCode].increment(retries, csCount, ssCount, ts)
 	}
+}
+
+// timeBuckets is the time buckets of the counts, which are missing in the counts that were loaded from JSON, as the
+// empty maps are not kept by it.
+func (kr *KeyResultCounts) timeBuckets() KeyResult {
+	if kr.ByTimeBuckets == nil {
+		kr.ByTimeBuckets = KeyResult{}
+	}
+	return kr.ByTimeBuckets
 }
 
 func (tr *TargetResults) addTimeBucketResult(tb []int, ir *invocation.InvocationResult) {
@@ -460,34 +483,35 @@ func (tr *TargetResults) addTimeBucketResult(tb []int, ir *invocation.Invocation
 	statusCode := strconv.Itoa(ir.Response.StatusCode)
 	addKeyResultCounts(tr.CountsByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
 
-	if uriCount := tr.CountsByURIs[ir.Request.URI]; uriCount != nil {
-		addKeyResultCounts(uriCount.ByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
+	// the URIs are counted in lower case
+	if uriCount := tr.CountsByURIs[strings.ToLower(ir.Request.URI)]; uriCount != nil {
+		addKeyResultCounts(uriCount.timeBuckets(), bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
 	}
 
 	if rpc := tr.CountsByRequestPayloadSizes[strconv.Itoa(ir.Request.PayloadSize)]; rpc != nil {
-		addKeyResultCounts(rpc.ByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
+		addKeyResultCounts(rpc.timeBuckets(), bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
 	}
 
 	if rpc := tr.CountsByResponsePayloadSizes[strconv.Itoa(ir.Response.PayloadSize)]; rpc != nil {
-		addKeyResultCounts(rpc.ByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
+		addKeyResultCounts(rpc.timeBuckets(), bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
 	}
 
 	if rc := tr.CountsByRetries[strconv.Itoa(ir.Retries)]; rc != nil {
-		addKeyResultCounts(rc.ByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
+		addKeyResultCounts(rc.timeBuckets(), bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
 	}
 
 	if rrc := tr.CountsByRetryReasons[ir.LastRetryReason]; rrc != nil {
-		addKeyResultCounts(rrc.ByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
+		addKeyResultCounts(rrc.timeBuckets(), bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
 	}
 
 	for e := range ir.Errors {
 		if ec := tr.CountsByErrors[strconv.Itoa(e)]; ec != nil {
-			addKeyResultCounts(ec.ByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
+			addKeyResultCounts(ec.timeBuckets(), bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, true, false)
 		}
 	}
 
 	if sc := tr.CountsByStatusCodes[statusCode]; sc != nil {
-		addKeyResultCounts(sc.ByTimeBuckets, bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, false, false)
+		addKeyResultCounts(sc.timeBuckets(), bucket, statusCode, ir.Retries, ir.Response.ClientStreamCount, ir.Response.ServerStreamCount, ir.Request.LastRequestAt, false, false)
 	}
 }
 
@@ -615,29 +639,44 @@ func (ir *InvocationsResults) getInvocation(index uint32) *InvocationResults {
 	invocationResults := ir.Results[index]
 	ir.lock.RUnlock()
 	if invocationResults == nil {
-		invocationResults = &InvocationResults{lock: &ir.lock}
-		invocationResults.unsafeInit(true)
-		invocationResults.InvocationIndex = index
 		ir.lock.Lock()
-		ir.Results[index] = invocationResults
-		ir.lock.Unlock()
+		defer ir.lock.Unlock()
+		// the results may have been added by another caller, or replaced, while the lock was not held
+		if ir.Results == nil {
+			ir.Results = map[uint32]*InvocationResults{}
+		}
+		invocationResults = ir.Results[index]
+		if invocationResults == nil {
+			invocationResults = &InvocationResults{lock: &ir.lock}
+			invocationResults.unsafeInit(true)
+			invocationResults.InvocationIndex = index
+			ir.Results[index] = invocationResults
+		}
 	}
 	return invocationResults
+}
+
+// setTarget tells which target and invocation the results are for.
+func (ir *InvocationResults) setTarget(target *invocation.InvocationSpec, status *invocation.InvocationStatus) {
+	ir.lock.Lock()
+	ir.Target = target
+	ir.Status = status
+	ir.lock.Unlock()
 }
 
 func resultSink(invocationIndex uint32, result *invocation.InvocationResult,
 	invocationResults *InvocationResults, targetResults *TargetResults, allResults *TargetResults) {
 	if result != nil {
 		result.Response.Headers = util.ToLowerHeaders(result.Response.Headers)
-		if collectInvocationResults {
+		if collectInvocationResults.Load() {
 			invocationResults.addResult(result)
 			chanSendInvocationToRegistry <- invocationResults
 		}
-		if collectTargetsResults {
+		if collectTargetsResults.Load() {
 			targetResults.addResult(result)
 			chanSendTargetsToRegistry <- targetResults
 		}
-		if collectAllTargetsResults {
+		if collectAllTargetsResults.Load() {
 			allResults.addResult(result)
 			chanSendTargetsToRegistry <- allResults
 		}
@@ -676,14 +715,21 @@ Results:
 
 func processTrackingConfig(targetResults *TargetResults, allResults *TargetResults, trackingHeaders []string,
 	crossTrackingHeaders map[string][]string, trackingTimeBuckets [][]int) {
+	crossHeadersMap := util.BuildCrossHeadersMap(crossTrackingHeaders)
+	// the invocations that are still running add their results while the tracking is changed, and the two results may
+	// be one and the same, so the locks are taken one after the other
+	targetResults.lock.Lock()
 	targetResults.trackingHeaders = trackingHeaders
 	targetResults.crossTrackingHeaders = crossTrackingHeaders
-	targetResults.crossHeadersMap = util.BuildCrossHeadersMap(crossTrackingHeaders)
+	targetResults.crossHeadersMap = crossHeadersMap
 	targetResults.trackingTimeBuckets = trackingTimeBuckets
-	if allResults != nil {
-		allResults.trackingHeaders = targetResults.trackingHeaders
-		allResults.crossTrackingHeaders = targetResults.crossTrackingHeaders
-		allResults.crossHeadersMap = targetResults.crossHeadersMap
+	targetResults.lock.Unlock()
+	if allResults != nil && allResults != targetResults {
+		allResults.lock.Lock()
+		allResults.trackingHeaders = trackingHeaders
+		allResults.crossTrackingHeaders = crossTrackingHeaders
+		allResults.crossHeadersMap = crossHeadersMap
+		allResults.lock.Unlock()
 	}
 }
 
@@ -693,8 +739,7 @@ func ResultChannelSinkFactory(target *invocation.InvocationSpec, trackingHeaders
 	processTrackingConfig(targetResults, allResults, trackingHeaders, crossTrackingHeaders, trackingTimeBuckets)
 	return func(tracker *invocation.InvocationTracker) invocation.ResultSink {
 		invocationResults := invocationsResults.getInvocation(tracker.ID)
-		invocationResults.Target = target
-		invocationResults.Status = tracker.Status
+		invocationResults.setTarget(target, tracker.Status)
 		startRegistrySender()
 		tracker.Channels.Lock.RLock()
 		go channelSink(tracker.ID, tracker.Channels.ResultChannel, tracker.Channels.DoneChannel, invocationResults, targetResults, allResults)
@@ -709,8 +754,7 @@ func ResultSinkFactory(target *invocation.InvocationSpec, trackingHeaders []stri
 	processTrackingConfig(targetResults, allResults, trackingHeaders, crossTrackingHeaders, trackingTimeBuckets)
 	return func(tracker *invocation.InvocationTracker) invocation.ResultSink {
 		invocationResults := invocationsResults.getInvocation(tracker.ID)
-		invocationResults.Target = target
-		invocationResults.Status = tracker.Status
+		invocationResults.setTarget(target, tracker.Status)
 		startRegistrySender()
 		return func(result *invocation.InvocationResult) {
 			resultSink(tracker.ID, result, invocationResults, targetResults, allResults)
@@ -725,22 +769,40 @@ func ClearResults() {
 
 func GetTargetsResultsJSON(pretty bool) string {
 	targetsResults.lock.RLock()
-	defer targetsResults.lock.RUnlock()
-	if targetsResults.Results != nil {
-		if pretty {
-			return util.ToPrettyJSONText(targetsResults.Results)
-		}
-		return util.ToJSONText(targetsResults.Results)
+	if targetsResults.Results == nil {
+		targetsResults.lock.RUnlock()
+		return "{}"
 	}
-	return "{}"
+	snapshot := make(map[string]*TargetResults, len(targetsResults.Results))
+	for target, tr := range targetsResults.Results {
+		if tr != nil {
+			snapshot[target] = tr
+		}
+	}
+	targetsResults.lock.RUnlock()
+	// the sinks of the invocations that are running add to the results of a target while holding only its lock, so the
+	// results are read under their locks
+	for _, tr := range snapshot {
+		tr.lock.RLock()
+		defer tr.lock.RUnlock()
+	}
+	if pretty {
+		return util.ToPrettyJSONText(snapshot)
+	}
+	return util.ToJSONText(snapshot)
 }
 
 func LoadTargetsResultsJSON(content string) error {
-	targetsResults.lock.RLock()
-	defer targetsResults.lock.RUnlock()
+	targetsResults.lock.Lock()
+	defer targetsResults.lock.Unlock()
 	err := util.ReadJson(content, &targetsResults.Results)
+	for target, tr := range targetsResults.Results {
+		if tr == nil {
+			delete(targetsResults.Results, target)
+		}
+	}
 	targetsResults.unsafeInitMissing()
-	log.Printf("targetsResults.Results: %+v\n", targetsResults.Results)
+	log.Printf("Loaded results of %d targets\n", len(targetsResults.Results))
 	return err
 }
 
@@ -754,9 +816,18 @@ func GetInvocationResultsJSON(pretty bool) string {
 }
 
 func LoadInvocationResultsJSON(content string) error {
-	invocationsResults.lock.RLock()
-	defer invocationsResults.lock.RUnlock()
-	return util.ReadJson(content, &invocationsResults.Results)
+	invocationsResults.lock.Lock()
+	defer invocationsResults.lock.Unlock()
+	err := util.ReadJson(content, &invocationsResults.Results)
+	// the lock is not a part of the JSON, and the results are going to be used by the invocations that get the same index
+	for index, ir := range invocationsResults.Results {
+		if ir == nil {
+			delete(invocationsResults.Results, index)
+			continue
+		}
+		ir.lock = &invocationsResults.lock
+	}
+	return err
 }
 
 func addDeltaCrossHeaders(result, delta map[string]*HeaderCounts, crossTrackingHeaders map[string][]string, crossHeadersMap map[string]string, detailed bool) {
@@ -834,6 +905,9 @@ func processDeltaHeaderCounts(result, delta map[string]*HeaderCounts, crossTrack
 
 func processDeltaTimeBucketCounts(delta, result *KeyResultCounts, updateStatusCodes bool) {
 	for tb, count := range delta.ByTimeBuckets {
+		if result.ByTimeBuckets == nil {
+			result.ByTimeBuckets = KeyResult{}
+		}
 		if result.ByTimeBuckets[tb] == nil {
 			result.ByTimeBuckets[tb] = newKeyResultCounts(updateStatusCodes, false)
 		}
@@ -858,6 +932,9 @@ func processDeltaKeyResultCounts(delta KeyResult, resultPtr *KeyResult, updateSt
 		resultCount.incrementBy(deltaCount.Retries, &deltaCount.CountInfo)
 		if updateStatusCodes {
 			for sc, count := range deltaCount.ByStatusCodes {
+				if resultCount.ByStatusCodes == nil {
+					resultCount.ByStatusCodes = KeyResult{}
+				}
 				if resultCount.ByStatusCodes[sc] == nil {
 					resultCount.ByStatusCodes[sc] = newKeyResultCounts(false, updateTimeBuckets)
 				}
@@ -872,10 +949,12 @@ func processDeltaKeyResultCounts(delta KeyResult, resultPtr *KeyResult, updateSt
 
 func AddDeltaResults(results, delta *TargetResults, detailed bool) {
 	fmt.Printf("AddDeltaResults: Target [%s] first response [%s] last response [%s]\n", delta.Target, delta.FirstResultAt.UTC().String(), delta.LastResultAt.UTC().String())
-	if results.FirstResultAt.IsZero() || delta.FirstResultAt.Before(results.FirstResultAt) {
+	results.unsafeInitMissing()
+	// a delta without any results has no timestamps, and mustn't reset the ones that the results have
+	if !delta.FirstResultAt.IsZero() && (results.FirstResultAt.IsZero() || delta.FirstResultAt.Before(results.FirstResultAt)) {
 		results.FirstResultAt = delta.FirstResultAt
 	}
-	if results.LastResultAt.IsZero() || results.LastResultAt.Before(delta.LastResultAt) {
+	if !delta.LastResultAt.IsZero() && (results.LastResultAt.IsZero() || results.LastResultAt.Before(delta.LastResultAt)) {
 		results.LastResultAt = delta.LastResultAt
 	}
 	results.InvocationCount += delta.InvocationCount
@@ -1040,6 +1119,7 @@ func sendResultToRegistry(keys []string, data interface{}) {
 }
 
 func registrySender(id int) {
+	defer registrySenders.Done()
 RegistrySend:
 	for {
 		if len(chanSendTargetsToRegistry) > 50 {
@@ -1061,13 +1141,14 @@ RegistrySend:
 			}
 			tr.lock.Unlock()
 		case ir := <-chanSendInvocationToRegistry:
-			ir.lock.RLock()
+			// the flag is changed here, which is not to be done by senders that share a read lock
+			ir.lock.Lock()
 			if !ir.pendingRegistrySend {
 				hasResultsToSend = true
 				ir.pendingRegistrySend = true
 				collectedInvocationResults[ir.InvocationIndex] = ir
 			}
-			ir.lock.RUnlock()
+			ir.lock.Unlock()
 		case <-stopRegistrySender:
 			break RegistrySend
 		}
@@ -1086,19 +1167,19 @@ RegistrySend:
 						}
 						tr.lock.Unlock()
 					case ir := <-chanSendInvocationToRegistry:
-						ir.lock.RLock()
+						ir.lock.Lock()
 						if !ir.pendingRegistrySend || collectedInvocationResults[ir.InvocationIndex] != nil {
 							ir.pendingRegistrySend = true
 							collectedInvocationResults[ir.InvocationIndex] = ir
 							hasMoreResults = true
 						}
-						ir.lock.RUnlock()
+						ir.lock.Unlock()
 					default:
 						break MoreResults
 					}
 				}
 				if i < SendDelayMin-1 || (hasMoreResults && i < SendDelayMax-1) {
-					time.Sleep(time.Second)
+					time.Sleep(registrySendInterval)
 				}
 			}
 			for target, tr := range collectedTargetsResults {
@@ -1124,21 +1205,29 @@ func startRegistrySender() {
 	if !sendingToRegistry {
 		sendingToRegistry = true
 		for i := 1; i < SenderCount; i++ {
+			registrySenders.Add(1)
 			go registrySender(i)
 		}
 	}
 }
 
 func StopRegistrySender() {
+	registrySendLock.Lock()
+	defer registrySendLock.Unlock()
+	// stop signals that no sender is there to take would stay in the channel, and stop the senders that are started later
+	if !sendingToRegistry {
+		return
+	}
+	sendingToRegistry = false
 	for i := 1; i < SenderCount; i++ {
 		stopRegistrySender <- true
 	}
 }
 
 func EnableAllTargetResults(enable bool) {
-	collectAllTargetsResults = enable
+	collectAllTargetsResults.Store(enable)
 }
 
 func EnableInvocationResults(enable bool) {
-	collectInvocationResults = enable
+	collectInvocationResults.Store(enable)
 }

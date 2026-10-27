@@ -30,11 +30,22 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
+const maxRegisterAttempts = 6
+
 var (
-	chanStopReminder chan bool = make(chan bool, 1)
+	// reminderStop is closed to stop the reminders of the registration that is current
+	reminderStop chan struct{}
+	reminderLock sync.Mutex
+	// registerRetryDelay is the wait between attempts to register with the registry, and reminderInterval is the
+	// period of the reminders that are sent to the registry once the peer is registered.
+	registerRetryDelay = 10 * time.Second
+	reminderInterval   = 5 * time.Second
+	// background is for waiting until the startup tasks and the reminders, which run on their own, have ended
+	background sync.WaitGroup
 )
 
 func RegisterPeer(peerName, peerAddress string) {
@@ -46,49 +57,58 @@ func RegisterPeer(peerName, peerAddress string) {
 		Node:      global.Self.NodeName,
 		Cluster:   global.Self.Cluster,
 	}
-	if global.Self.RegistryURL != "" {
-		registered := false
-		retries := 0
-		for !registered && retries < 6 {
-			if resp, err := http.Post(global.Self.RegistryURL+"/registry/peers/add", constants.ContentTypeJSON,
-				strings.NewReader(util.ToJSONText(peer))); err == nil {
-				defer resp.Body.Close()
-				if resp.StatusCode == 200 || resp.StatusCode == 202 {
-					events.SendEventJSONDirect("Peer Registered", peerName, peer)
-					registered = true
-					log.Printf("Registered as peer [%s] with registry [%s]\n", global.Self.Name, global.Self.RegistryURL)
-					data := &registry.PeerData{}
-					if err := util.ReadJsonPayloadFromBody(resp.Body, data); err == nil {
-						events.SendEventJSONDirect("Peer Startup Data", peerName, data)
-						log.Println("Read startup data from registry")
-						go setupStartupTasks(data)
-						go startRegistryReminder(peer)
-					} else {
-						log.Printf("Failed to read peer targets with error: %s\n", err.Error())
-					}
-				} else {
-					log.Printf("Failed to register as peer to registry due to response code %d\n", resp.StatusCode)
-				}
-			} else {
-				log.Printf("Failed to register as peer to registry due to error: %s\n", err.Error())
-			}
-			if !registered {
-				retries++
-				if retries < 6 {
-					log.Printf("Will retry registering with registry, retries: %d\n", retries)
-					time.Sleep(10 * time.Second)
-				} else {
-					log.Printf("Failed to register as peer to registry after %d retries. Giving up.\n", retries)
-				}
-			}
+	if global.Self.RegistryURL == "" {
+		return
+	}
+	for attempt := 1; attempt <= maxRegisterAttempts; attempt++ {
+		if registerWithRegistry(peerName, peer) {
+			return
+		}
+		if attempt < maxRegisterAttempts {
+			log.Printf("Will retry registering with registry, retries: %d\n", attempt)
+			time.Sleep(registerRetryDelay)
+		} else {
+			log.Printf("Failed to register as peer to registry after %d retries. Giving up.\n", attempt)
 		}
 	}
+}
+
+// registerWithRegistry makes one attempt to register, and tells whether the registry accepted the peer.
+func registerWithRegistry(peerName string, peer *registry.Peer) bool {
+	resp, err := http.Post(global.Self.RegistryURL+"/registry/peers/add", constants.ContentTypeJSON,
+		strings.NewReader(util.ToJSONText(peer)))
+	if err != nil {
+		log.Printf("Failed to register as peer to registry due to error: %s\n", err.Error())
+		return false
+	}
+	defer util.CloseResponse(resp)
+	if resp.StatusCode != 200 && resp.StatusCode != 202 {
+		log.Printf("Failed to register as peer to registry due to response code %d\n", resp.StatusCode)
+		return false
+	}
+	events.SendEventJSONDirect("Peer Registered", peerName, peer)
+	log.Printf("Registered as peer [%s] with registry [%s]\n", global.Self.Name, global.Self.RegistryURL)
+	data := &registry.PeerData{}
+	if err := util.ReadJsonPayloadFromBody(resp.Body, data); err == nil {
+		events.SendEventJSONDirect("Peer Startup Data", peerName, data)
+		log.Println("Read startup data from registry")
+		background.Add(1)
+		go func() {
+			defer background.Done()
+			setupStartupTasks(data)
+		}()
+	} else {
+		log.Printf("Failed to read peer targets with error: %s\n", err.Error())
+	}
+	// the registry has accepted the peer, so it needs to be reminded whether or not it gave any startup data
+	startReminders(peer)
+	return true
 }
 
 func DeregisterPeer(peerName, peerAddress string) {
 	events.SendEventDirect("Peer Deregistered", fmt.Sprintf("%s - %s", peerName, peerAddress))
 	if global.Self.RegistryURL != "" {
-		chanStopReminder <- true
+		stopReminders()
 		url := global.Self.RegistryURL + "/registry/peers/" + peerName + "/remove/" + peerAddress
 		if resp, err := http.Post(url, "plain/text", nil); err == nil {
 			util.CloseResponse(resp)
@@ -98,12 +118,41 @@ func DeregisterPeer(peerName, peerAddress string) {
 	}
 }
 
-func startRegistryReminder(peer *registry.Peer) {
+// startReminders starts the reminders to the registry, in place of the ones that were started by an earlier registration.
+func startReminders(peer *registry.Peer) {
+	stop := make(chan struct{})
+	reminderLock.Lock()
+	if reminderStop != nil {
+		close(reminderStop)
+	}
+	reminderStop = stop
+	reminderLock.Unlock()
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		startRegistryReminder(peer, stop)
+	}()
+}
+
+// stopReminders stops the reminders, if there are any. It never waits for anyone, and doesn't leave anything behind
+// for the reminders that are started later.
+func stopReminders() {
+	reminderLock.Lock()
+	if reminderStop != nil {
+		close(reminderStop)
+		reminderStop = nil
+	}
+	reminderLock.Unlock()
+}
+
+func startRegistryReminder(peer *registry.Peer, stop <-chan struct{}) {
+	ticker := time.NewTicker(reminderInterval)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-chanStopReminder:
+		case <-stop:
 			return
-		case <-time.Tick(5 * time.Second):
+		case <-ticker.C:
 			url := global.Self.RegistryURL + "/registry/peers/" + peer.Name + "/remember"
 			if resp, err := http.Post(url, constants.ContentTypeJSON, strings.NewReader(util.ToJSONText(peer))); err == nil {
 				util.CloseResponse(resp)
@@ -155,13 +204,30 @@ func setupStartupTasks(peerData *registry.PeerData) {
 		job.Manager.StoreJobScriptOrFile("", fileName, content, true)
 	}
 
-	for _, j := range peerData.Jobs {
+	for name, j := range peerData.Jobs {
 		log.Printf("%+v\n", j)
-		job.Manager.AddJob(j.Job)
+		if j == nil || j.Job == nil {
+			log.Printf("Ignoring job [%s] that has no details\n", name)
+			continue
+		}
+		// The task of the job is not a part of its JSON, but is made from it when the job is parsed, which a job that
+		// came from the registry as JSON has not been.
+		parsed, err := job.ParseJobFromPayload(util.ToJSONText(j.Job))
+		if err != nil {
+			log.Printf("Ignoring invalid job [%s]: %s\n", name, err.Error())
+			continue
+		}
+		job.Manager.AddJob(parsed)
 	}
 
-	for _, t := range peerData.Targets {
+	for name, t := range peerData.Targets {
 		log.Printf("%+v\n", t)
-		target.Client.AddTarget(&target.Target{t.InvocationSpec})
+		if t == nil || t.InvocationSpec == nil {
+			log.Printf("Ignoring target [%s] that has no details\n", name)
+			continue
+		}
+		if err := target.Client.AddTarget(&target.Target{InvocationSpec: t.InvocationSpec}); err != nil {
+			log.Printf("Ignoring invalid target [%s]: %s\n", name, err.Error())
+		}
 	}
 }

@@ -92,14 +92,15 @@ func setRoutes(r *mux.Router) {
 }
 
 func (c *CallSpec) PrepareAuthority(r *http.Request) {
-	if !strings.HasPrefix(c.URL, "http") {
+	// it's the scheme that is looked for, and not just text that starts like one, as the name of a host may be httpbin
+	if !strings.HasPrefix(c.URL, "http://") && !strings.HasPrefix(c.URL, "https://") {
 		if c.TLS {
 			c.URL = "https://" + c.URL
 		} else {
 			c.URL = "http://" + c.URL
 		}
 	}
-	if strings.HasPrefix(c.URL, "https") {
+	if strings.HasPrefix(c.URL, "https://") {
 		c.TLS = true
 	}
 	if c.Authority == "" {
@@ -162,10 +163,11 @@ func (c *CallSpec) PrepareRequest(r *http.Request) error {
 		req.Header.Add(constants.HeaderGotoClientTLS, "false")
 	}
 	if c.RequestID {
-		uuid := uuid.New().String()
-		req.Header.Add("x-request-id", uuid)
-		q := url.Values{}
-		q.Add("x-request-id", uuid)
+		requestID := uuid.New().String()
+		req.Header.Add("x-request-id", requestID)
+		// the query that the URL has is kept, with the request id added to it
+		q := req.URL.Query()
+		q.Set("x-request-id", requestID)
 		req.URL.RawQuery = q.Encode()
 	}
 	c.request = req
@@ -173,6 +175,23 @@ func (c *CallSpec) PrepareRequest(r *http.Request) error {
 		c.streamDelayD = util.ParseDuration(c.StreamDelay)
 	}
 	return nil
+}
+
+// streamPayloads sends the chunks of the payload one after the other, with the delay before each, and closes the writer
+// after the last one.
+func streamPayloads(w io.WriteCloser, payloads []string, delay time.Duration) {
+	defer w.Close()
+	for _, payload := range payloads {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		log.Printf("[HTTP Client] Streaming input: %s", payload)
+		if _, err := w.Write([]byte(payload)); err != nil {
+			log.Printf("[HTTP Client] Error sending data to remote: %v", err)
+			return
+		}
+	}
+	log.Println("[HTTP Client] Finished streaming data chunks.")
 }
 
 func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
@@ -232,20 +251,8 @@ func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 			return nil, err
 		}
 		if len(c.Payload) > 0 && c.streamWriter != nil {
-			go func() {
-				defer c.streamWriter.Close()
-				for _, payload := range c.Payload {
-					if c.streamDelayD > 0 {
-						time.Sleep(c.streamDelayD)
-					}
-					log.Printf("[HTTP Client] Streaming input: %s", payload)
-					if _, err := c.streamWriter.Write([]byte(payload)); err != nil {
-						log.Printf("[HTTP Client] Error sending data to remote: %v", err)
-						return
-					}
-				}
-				log.Println("[HTTP Client] Finished streaming data chunks.")
-			}()
+			// the writer of this request is what the chunks are for, and not the one that the next request gets
+			go streamPayloads(c.streamWriter, c.Payload, c.streamDelayD)
 		}
 		resp, err := client.HTTP().Do(c.request)
 		if err != nil {

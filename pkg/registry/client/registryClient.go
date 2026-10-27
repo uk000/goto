@@ -115,7 +115,9 @@ func (rc *RegistryLockerClient) getJSONFromLocker(peer bool, keys []string) (map
 		return nil, err
 	}
 	j := map[string]any{}
-	json.Unmarshal(b, &j)
+	if err := json.Unmarshal(b, &j); err != nil {
+		return nil, err
+	}
 	return j, nil
 }
 
@@ -202,6 +204,8 @@ func (rc *RegistryClient) get(url string) (data []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
+	// the body is to be read and closed whatever the status is, or the connection can't be used again
+	defer util.CloseResponse(resp)
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("Failed to get data from registry with status code: %d, status: %s. URL: %s", resp.StatusCode, resp.Status, url)
 	}
