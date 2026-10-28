@@ -338,8 +338,8 @@ func TestProxyResponseReportsEachUpstreamResponse(t *testing.T) {
 	if got := s.rr.Header().Get(constants.HeaderViaGoto); !strings.Contains(got, "(Proxy)") {
 		t.Errorf("%s = %q, want it to tell that the request was proxied", constants.HeaderViaGoto, got)
 	}
-	if got := s.rr.Header().Get("Proxy-" + constants.HeaderGotoResponseStatus); got == "" {
-		t.Errorf("response has no Proxy-%s header: %v", constants.HeaderGotoResponseStatus, s.rr.Header())
+	if got := s.rr.Header().Get(constants.HeaderGotoProxyResponseStatus); got == "" {
+		t.Errorf("response has no %s header: %v", constants.HeaderGotoProxyResponseStatus, s.rr.Header())
 	}
 	var statuses map[string]map[string]int
 	if err := json.Unmarshal([]byte(s.rr.Header().Get(constants.HeaderGotoProxyUpstreamStatus)), &statuses); err != nil {
@@ -470,6 +470,66 @@ func TestProxyDelayDelaysUpstreamCall(t *testing.T) {
 	expectProxied(t, e.get("/foo"), 200)
 	if took := time.Since(start); took < 150*time.Millisecond {
 		t.Errorf("request took %s, want at least the 150ms delay", took)
+	}
+}
+
+// The delay of the traffic config is told to the client, as the delay that the proxy slept for, and only when there is one.
+func TestProxyReportsArtificialDelay(t *testing.T) {
+	e := newEnv(t)
+	up := newUpstream(t, 200, "ok")
+	e.addTargetSpec(targetSpec("t", "/delayed", `"trafficConfig":{"delay":{"min":"40ms","max":"40ms"}}`, up.URL))
+	e.addTargetSpec(targetSpec("plain", "/plain", "", up.URL))
+	s := e.get("/delayed/x")
+	expectProxied(t, s, 200)
+	if got := s.rr.Header()[constants.HeaderGotoProxyDelay]; !reflect.DeepEqual(got, []string{"40ms"}) {
+		t.Errorf("%s = %q, want 40ms", constants.HeaderGotoProxyDelay, got)
+	}
+	// The default delay of the invocations is not one that the proxy adds
+	s = e.get("/plain/x")
+	expectProxied(t, s, 200)
+	if got := s.rr.Header()[constants.HeaderGotoProxyDelay]; len(got) != 0 {
+		t.Errorf("%s = %q, want none when the traffic config has no delay", constants.HeaderGotoProxyDelay, got)
+	}
+}
+
+// The time that the proxy took is told after the last byte of the response is written, so it is a trailer, and it covers
+// the delay and the time that the upstream took.
+func TestProxyReportsTookInTrailer(t *testing.T) {
+	e := newEnv(t)
+	up := newUpstreamFunc(t, func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(30 * time.Millisecond)
+		io.WriteString(w, "ok")
+	})
+	e.addTargetSpec(targetSpec("t", "/", `"trafficConfig":{"delay":{"min":"40ms","max":"40ms"}}`, up.URL))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(context.WithValue(r.Context(), util.CurrentPortKey, e.port))
+		_, r, _ = util.WithRequestStore(r, nil)
+		if ok, router := WillProxyHTTP(r); ok && router != nil {
+			util.GetRequestStore(r).IsProxy = true
+			router.ServeHTTP(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	resp, err := http.Get(srv.URL + "/foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatal(err)
+	}
+	if _, declared := resp.Trailer[constants.HeaderGotoProxyTook]; !declared {
+		t.Fatalf("%s is not a trailer of the response: %v", constants.HeaderGotoProxyTook, resp.Trailer)
+	}
+	took, err := time.ParseDuration(resp.Trailer.Get(constants.HeaderGotoProxyTook))
+	if err != nil {
+		t.Fatalf("%s = %q is not a duration: %v", constants.HeaderGotoProxyTook, resp.Trailer.Get(constants.HeaderGotoProxyTook), err)
+	}
+	if took < 70*time.Millisecond || took > 5*time.Second {
+		t.Errorf("%s = %s, want the delay and the time of the upstream (70ms) to be in it", constants.HeaderGotoProxyTook, took)
+	}
+	if got := resp.Header.Get(constants.HeaderGotoProxyDelay); got != "40ms" {
+		t.Errorf("%s = %q, want 40ms", constants.HeaderGotoProxyDelay, got)
 	}
 }
 

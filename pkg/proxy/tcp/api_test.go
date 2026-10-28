@@ -71,14 +71,15 @@ func callWith(t *testing.T, listenerPort, requestPort int, method, target, body 
 	t.Helper()
 	r := router()
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
-	req = req.WithContext(context.WithValue(req.Context(), util.CurrentPortKey, listenerPort))
-	_, req, rs := util.WithRequestStore(req, nil)
 	if requestPort > 0 {
-		// what the /port={port} prefix of a URI does
-		rs.RequestPort = strconv.Itoa(requestPort)
-		rs.RequestPortNum = requestPort
-		rs.RequestPortChecked = true
+		// the prefix is in the URI that the server gets (the routes match the path without it), and it is what makes the
+		// current port of the request the one that it names, as it does in the server
+		req.RequestURI = fmt.Sprintf("/port=%d%s", requestPort, target)
 	}
+	// what net/http says about the connection that the request came over
+	ctx := context.WithValue(req.Context(), http.LocalAddrContextKey, net.Addr(&net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: listenerPort}))
+	req = req.WithContext(context.WithValue(ctx, util.CurrentPortKey, listenerPort))
+	_, req, _ = util.WithRequestStore(req, nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 	return rr

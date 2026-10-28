@@ -22,9 +22,12 @@ import (
 	grpcproxy "goto/pkg/proxy/grpc"
 	httpproxy "goto/pkg/proxy/http"
 	tcpproxy "goto/pkg/proxy/tcp"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"log"
 	"net/http"
+	"strconv"
+	"time"
 )
 
 type Proxy struct {
@@ -39,8 +42,14 @@ func processProxy(config *GotoConfig) {
 		return
 	}
 	for _, proxy := range config.Proxies {
-		if proxy != nil && proxy.HTTP != nil {
+		if proxy == nil {
+			continue
+		}
+		if proxy.HTTP != nil {
 			sendHTTPProxy(proxy.HTTP)
+		}
+		if proxy.TCP != nil {
+			sendTCPPProxy(proxy.TCP)
 		}
 	}
 }
@@ -92,13 +101,30 @@ func sendHTTPProxy(httpProxy *httpproxy.Proxy) {
 	}
 }
 
+// tcpProxyURL is the URL of a TCP proxy API of the remote goto, for the port of the proxy that is passed as the port
+// override. The port is required in the proxy.tcp config, so it's always part of the URL.
+func tcpProxyURL(tcpProxy *tcpproxy.TCPProxy, api string) string {
+	return fmt.Sprintf("%s/port=%d/proxy/tcp%s", currentContext.RemoteGotoURL, tcpProxy.Port, api)
+}
+
+// sendTCPPProxy sends the config of a TCP proxy port: its upstreams, and the http part of it, which makes the port an HTTP
+// CONNECT proxy. The port is required: a TCP proxy config without one is skipped.
 func sendTCPPProxy(tcpProxy *tcpproxy.TCPProxy) {
+	if tcpProxy.Port <= 0 {
+		log.Println("TCP Port is required for TCP Proxy config. Skipping.")
+		return
+	}
+	sendTCPUpstreams(tcpProxy)
+	sendTCPConnectProxy(tcpProxy)
+}
+
+func sendTCPUpstreams(tcpProxy *tcpproxy.TCPProxy) {
 	for name, target := range tcpProxy.Upstreams {
 		if target == nil {
 			continue
 		}
 		target.Name = name
-		url := fmt.Sprintf("%s/proxy/tcp/upstreams/add", currentContext.RemoteGotoURL)
+		url := tcpProxyURL(tcpProxy, "/upstreams/add")
 		json := util.ToJSONBytes(target)
 		if json == nil {
 			log.Printf("JSON marshalling failed for TCP Proxy Target [%s] JSON: %+v", name, target)
@@ -118,4 +144,64 @@ func sendTCPPProxy(tcpProxy *tcpproxy.TCPProxy) {
 			log.Printf("TCP Proxy Target [%s] sent successfully. Response: [%s]\n", name, util.Read(resp.Body))
 		}
 	}
+}
+
+// sendTCPConnectProxy sends the http part of a TCP proxy to the remote: the delay of the CONNECT proxy, and then the mode
+// that makes the port one. The delay goes first, for it to apply to the first connection of the proxy.
+func sendTCPConnectProxy(tcpProxy *tcpproxy.TCPProxy) {
+	connect := tcpProxy.HTTP.Connect
+	delay := tcpProxy.HTTP.ConnectDelay
+	if !connect && delay == nil {
+		return
+	}
+	if delay != nil {
+		if val := connectDelayParam(delay); val == "" {
+			log.Printf("HTTP CONNECT Proxy [%d] delay has no max, so it is not a delay. Skipping it.\n", tcpProxy.Port)
+		} else {
+			postTCPConnectAPI(tcpProxy, "/http/connect/delay/"+val, "HTTP CONNECT Proxy ["+strconv.Itoa(tcpProxy.Port)+"] delay ["+val+"]")
+		}
+	}
+	if connect {
+		postTCPConnectAPI(tcpProxy, "/http/connect/enable", "HTTP CONNECT Proxy ["+strconv.Itoa(tcpProxy.Port)+"] mode")
+	}
+}
+
+func postTCPConnectAPI(tcpProxy *tcpproxy.TCPProxy, api, what string) {
+	url := tcpProxyURL(tcpProxy, api)
+	log.Printf("Sending %s to URL [%s]\n", what, url)
+	resp, err := http.Post(url, "application/json", nil)
+	if err != nil {
+		log.Printf("Failed to send %s. Error [%s]\n", what, err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		log.Printf("Non-OK status for %s: %s. Response: [%s]\n", what, resp.Status, util.Read(resp.Body))
+	} else {
+		log.Printf("%s sent successfully. Response: [%s]\n", what, util.Read(resp.Body))
+	}
+}
+
+// connectDelayParam gives the delay as the API of the CONNECT proxy takes it: min-max, followed by :count when the delay
+// is for a number of events. It is empty for a delay that has no max, which isn't a delay (a missing min is no time, as it
+// is for the startup of the server).
+func connectDelayParam(d *types.Delay) string {
+	var min, max time.Duration
+	if d.Min != nil {
+		min = d.Min.Duration
+	}
+	if d.Max != nil {
+		max = d.Max.Duration
+	}
+	if max <= 0 {
+		return ""
+	}
+	if min < 0 {
+		min = 0
+	}
+	val := min.String() + "-" + max.String()
+	if d.Count > 0 {
+		val += ":" + strconv.Itoa(d.Count)
+	}
+	return val
 }

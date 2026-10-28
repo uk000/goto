@@ -45,16 +45,16 @@ var (
 func setRoutes(r *mux.Router) {
 	infoRouter := middleware.RootPath("/goto")
 	util.AddRoute(infoRouter, "/version", showVersion, "GET")
-	util.AddRoute(infoRouter, "/{k:routes|apis}/refresh", showApis, "GET")
-	util.AddRoute(infoRouter, "/{k:routes|apis}/level={level}", showApis, "GET")
-	util.AddRouteWithMultiQ(infoRouter, "/{k:routes|apis}", showApis, [][]string{{}, {"q"}, {"url"}}, "GET")
+	util.AddRoute(infoRouter, "/{k:routes|apis}/refresh", printRoutes, "GET")
+	util.AddRoute(infoRouter, "/{k:routes|apis}/level={level}", printRoutes, "GET")
+	util.AddRouteWithMultiQ(infoRouter, "/{k:routes|apis}", printRoutes, [][]string{{}, {"q"}, {"url"}}, "GET")
 }
 
 func showVersion(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, map[string]string{"version": global.Version, "commit": global.Commit})
 }
 
-func showApis(w http.ResponseWriter, r *http.Request) {
+func printRoutes(w http.ResponseWriter, r *http.Request) {
 	level := util.GetIntParamValue(r, "level")
 	q := util.GetStringParamValue(r, "q")
 	baseURL := util.GetStringParamValue(r, "url")
@@ -231,12 +231,16 @@ func loadAPIsFromRouter(r *mux.Router) {
 	if r == nil {
 		return
 	}
+	// Routes are registered both with and without a trailing slash, but are the same route, so they are reported once,
+	// without the trailing slash. The set has the routes (path with queries, and methods) that are already reported.
+	seen := map[string]struct{}{}
 	r.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
 		methods, _ := route.GetMethods()
 		if len(methods) == 0 {
 			return nil
 		}
 		path, _ := route.GetPathTemplate()
+		path = strings.TrimRight(path, "/")
 		pieces := strings.Split(path, "/")
 		if len(pieces) < 2 || pieces[1] == "" {
 			return nil
@@ -281,6 +285,11 @@ func loadAPIsFromRouter(r *mux.Router) {
 					}
 				}
 			}
+			key := fullPath + " " + strings.Join(methods, ",")
+			if _, found := seen[key]; found {
+				return nil
+			}
+			seen[key] = struct{}{}
 			routes[root][subroot][subpath] = append(routes[root][subroot][subpath], types.Pair[string, []string]{Left: fullPath, Right: methods})
 			curls := []string{}
 			for _, method := range methods {

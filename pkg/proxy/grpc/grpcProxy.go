@@ -256,8 +256,8 @@ func ProxyGRPCUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceM
 			respHeaders = metadata.MD{}
 		}
 		respHeaders.Append(constants.HeaderGotoProxyUpstreamTook, tookNanos.String())
-		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderGotoHost, global.Self.HostLabel, respHeaders)
-		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderGotoPort, strconv.Itoa(port), respHeaders)
+		respHeaders.Append(constants.HeaderGotoProxyHost, global.Self.HostLabel)
+		respHeaders.Append(constants.HeaderGotoProxyPort, strconv.Itoa(port))
 		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderViaGoto, util.GetViaGotoValue(port), respHeaders)
 		respHeaders.Append(constants.HeaderViaGoto, fmt.Sprintf("%s(Proxy)", global.Funcs.GetListenerLabelForPort(port)))
 		if delay != "" {
@@ -802,11 +802,8 @@ func (sp *GRPCServiceProxy) hasDelay() bool {
 func (sp *GRPCServiceProxy) applyDelay() (delay string) {
 	sp.delayLock.Lock()
 	var d time.Duration
-	if cfg := sp.Config; cfg != nil && cfg.Delay != nil && cfg.Delay.Min != nil && cfg.Delay.Max != nil && (cfg.Delay.Count > 0 || cfg.Delay.Count == -1) {
-		d = types.RandomDuration(cfg.Delay.Min.Duration, cfg.Delay.Max.Duration)
-		if d > 0 && cfg.Delay.Count > 0 {
-			cfg.Delay.Count--
-		}
+	if cfg := sp.Config; cfg != nil {
+		d = cfg.Delay.Claim()
 	}
 	sp.delayLock.Unlock()
 	if d <= 0 {

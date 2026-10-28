@@ -23,7 +23,6 @@ import (
 	"goto/pkg/server/listeners"
 	"goto/pkg/types"
 	"log"
-	"math/rand"
 	"net"
 	"sort"
 	"strings"
@@ -338,29 +337,9 @@ func (up *UDPUpstream) applyDelay() time.Duration {
 // nextDelay computes the next delay that the upstream asks for, and uses up a count of it.
 func (up *UDPUpstream) nextDelay() time.Duration {
 	up.lock.Lock()
-	defer up.lock.Unlock()
 	d := up.Delay
-	if d == nil || d.Min == nil || d.Max == nil || !(d.Count > 0 || d.Count == -1) {
-		return 0
-	}
-	delay := randomDelay(d.Min.Duration, d.Max.Duration)
-	if delay <= 0 {
-		return 0
-	}
-	if d.Count > 0 {
-		d.Count--
-	}
-	return delay
-}
-
-// randomDelay picks a delay between min and max. The function of the types package for this panics for a range of less
-// than a millisecond, and shares a random source that is not safe for use by several goroutines, which every packet
-// of the proxy is.
-func randomDelay(min, max time.Duration) time.Duration {
-	if max <= min {
-		return min
-	}
-	return min + time.Duration(rand.Int63n(int64(max-min)))
+	up.lock.Unlock()
+	return d.Claim()
 }
 
 func (up *UDPUpstream) addr() *net.UDPAddr {

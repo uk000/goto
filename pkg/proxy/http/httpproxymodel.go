@@ -119,6 +119,9 @@ type EndpointInvocation struct {
 	ep        *TargetEndpoint
 	is        *invocation.InvocationSpec
 	target    *Target
+	// delay is the artificial delay that the traffic config of the endpoint makes the proxy apply before each call to
+	// the endpoint, as a duration. It is empty if the traffic config has no delay.
+	delay string
 	// The invocations of requests are registered one at a time. Registering one sets the transport of the shared spec,
 	// which creating the spec of another one (a copy of the shared one) reads.
 	registerLock sync.Mutex
@@ -434,6 +437,7 @@ func (p *Proxy) AddTarget(t *Target) error {
 					ep:        ep,
 					is:        is,
 					target:    t,
+					delay:     artificialDelay(tc, is),
 				}
 			}
 			ep.target = t

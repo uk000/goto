@@ -391,6 +391,34 @@ func TestLoadAPIsFromRouterMakesRoutesAndCurls(t *testing.T) {
 	}
 }
 
+func TestLoadAPIsFromRouterReportsTrailingSlashRoutesOnce(t *testing.T) {
+	seed(t, APIRoutes{}, APIRoutes{})
+	h := func(http.ResponseWriter, *http.Request) {}
+	r := mux.NewRouter()
+	r.HandleFunc("/alpha/beta/gamma", h).Methods("GET")
+	r.HandleFunc("/alpha/beta/gamma/", h).Methods("GET")
+	r.HandleFunc("/alpha/beta", h).Methods("GET")
+	r.HandleFunc("/alpha/beta/", h).Methods("GET")
+	// Different methods of the same path are different routes.
+	r.HandleFunc("/alpha/beta/gamma", h).Methods("POST")
+	r.HandleFunc("/alpha/beta/gamma/", h).Methods("POST")
+	loadAPIsFromRouter(r)
+
+	wantRoutes := APIRoutes{"/alpha": {"/alpha/beta": {
+		"/alpha/beta/gamma": {
+			{Left: "/alpha/beta/gamma", Right: []string{"GET"}},
+			{Left: "/alpha/beta/gamma", Right: []string{"POST"}},
+		},
+		"": {{Left: "/alpha/beta", Right: []string{"GET"}}},
+	}}}
+	if !reflect.DeepEqual(routes, wantRoutes) {
+		t.Errorf("routes = %v, want %v", routes, wantRoutes)
+	}
+	if len(routesWithCurl["/alpha"]["/alpha/beta"]["/alpha/beta/gamma"]) != 2 {
+		t.Errorf("curls = %v, want 2 without the trailing slash duplicates", routesWithCurl)
+	}
+}
+
 func TestPrintRoutesWritesToTheGivenWriter(t *testing.T) {
 	seedSample(t)
 	rr := httptest.NewRecorder()

@@ -2353,6 +2353,19 @@ proxy:
           endpoints:
             ep1:
               address: "localhost:8000"
+  - tcp:
+      port: 9100
+      enabled: true
+      # The port is an HTTP CONNECT proxy: its connections are the ones of clients that ask for a tunnel to a destination.
+      # The port becomes a TCP port (a TCP or TLS listener that it has is kept, e.g. one from the listeners config).
+      http:
+        connect: true
+        # Optional delay for the connections of the clients, and for every transfer of their tunnels. A count (here the next 5
+        # of these events) is optional, and the delay is unlimited without it.
+        connectDelay:
+          min: 100ms
+          max: 300ms
+          count: 5
   - grpc:
       port: 9000
       enabled: true

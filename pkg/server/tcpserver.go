@@ -81,7 +81,11 @@ func serveTCPRequests(listenerID string, port int, listener net.Listener) error 
 				}
 				conn = tlsConn
 			}
-			if tcpproxy.WillProxyTCP(port) {
+			if tcpproxy.WillProxyConnect(port) {
+				// A CONNECT proxy port is a TCP port, so its connections never reach the HTTP server. They are
+				// tunneled to the destinations that the clients ask for, over the TLS connection of a TLS port.
+				go tcpproxy.ProxyConnectConnection(port, conn)
+			} else if tcpproxy.WillProxyTCP(port) {
 				go tcpproxy.ProxyTCPConnection(port, conn)
 			} else if fl != nil {
 				var wrappedConn net.Conn = tcp.NewWrappedConn(conn, fl.Port)

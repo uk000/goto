@@ -17,6 +17,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"goto/pkg/client/results"
 	"goto/pkg/client/target"
@@ -44,6 +45,7 @@ import (
 
 type CallSpec struct {
 	URL            string               `json:"url"`
+	Proxy          string               `json:"proxy"`
 	Authority      string               `json:"authority"`
 	Method         string               `json:"method"`
 	Count          int                  `json:"count"`
@@ -78,6 +80,8 @@ type CallResults struct {
 	ServerCerts []string `json:"serverCerts"`
 	ClientCert  string   `json:"clientCert"`
 	Statuses    []int
+	// what each call went through, which is reported in the headers of the response and is not part of its payload
+	timings []*transport.CallTimings
 }
 
 var (
@@ -194,9 +198,33 @@ func streamPayloads(w io.WriteCloser, payloads []string, delay time.Duration) {
 	log.Println("[HTTP Client] Finished streaming data chunks.")
 }
 
+// proxyURL validates the proxy of the call, and returns its URL, which is nil if the call has no proxy. What a call asks for
+// that can't be done for a request that goes via a proxy is an error, and not left to be ignored: net/http does the TLS
+// handshake with the target on its own after the proxy has set up the tunnel, with no say for h2 (which has no proxy
+// support), SNI to be left out, or a handshake preamble.
+func (c *CallSpec) proxyURL() (*url.URL, error) {
+	if c.Proxy == "" {
+		return nil, nil
+	}
+	if c.IsH2 {
+		return nil, errors.New("h2 calls can't be sent via a proxy")
+	}
+	if c.TLS && c.NoSNI {
+		return nil, errors.New("TLS calls via a proxy are always sent with SNI, noSNI can't be used")
+	}
+	if c.TLS && c.ALPN != nil && c.ALPN.Handshake != nil {
+		return nil, errors.New("TLS calls via a proxy can't have an ALPN handshake")
+	}
+	return transport.ParseProxyURL(c.Proxy)
+}
+
 func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 	callResults := &CallResults{URL: c.URL, Results: map[string]*CallResult{}}
 	c.PrepareAuthority(r)
+	proxy, err := c.proxyURL()
+	if err != nil {
+		return nil, err
+	}
 	sni := c.Authority
 	if host, _, err := net.SplitHostPort(c.Authority); err == nil {
 		sni = host
@@ -208,6 +236,18 @@ func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 	label := util.GetCurrentListenerLabel(r)
 	client := transport.CreateHTTPClient(port, label, c.IsH2, true, c.TLS, c.NoSNI, c.Authority,
 		10*time.Minute, 10*time.Minute, 10*time.Minute, metrics.ConnTracker)
+	// the client is the call's own, so what it keeps open for reuse (the tunnels of a proxy, for one) goes with the call
+	defer client.Close()
+	if proxy != nil {
+		// the proxy is set before the TLS settings are, as these are applied to the tunneled connections along with it
+		pc, ok := client.(transport.ProxyClient)
+		if !ok {
+			return nil, errors.New("the client can't be sent via a proxy")
+		}
+		if err := pc.SetProxy(proxy); err != nil {
+			return nil, err
+		}
+	}
 	client.UpdateTLSConfig(sni, c.TLSVersion, c.VerifyTLS, c.ALPN)
 	if c.ClientCert != "" {
 		certs, err := gototls.GetCerts(c.ClientCert)
@@ -254,16 +294,24 @@ func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 			// the writer of this request is what the chunks are for, and not the one that the next request gets
 			go streamPayloads(c.streamWriter, c.Payload, c.streamDelayD)
 		}
+		timings := transport.NewCallTimings()
+		c.request = c.request.WithContext(timings.Context(c.request.Context()))
 		resp, err := client.HTTP().Do(c.request)
 		if err != nil {
 			log.Printf("[HTTP Client] Call failed with error: %v", err)
 			return nil, err
 		}
+		timings.HeadReceived()
 		msg := fmt.Sprintf("Call to URL [%s] Authority [%s] succeeded with response [%s]", c.URL, c.Authority, resp.Status)
+		if proxy != nil {
+			msg = fmt.Sprintf("Call to URL [%s] Authority [%s] via proxy [%s] succeeded with response [%s]", c.URL, c.Authority, proxy.Redacted(), resp.Status)
+		}
 		util.AddLogMessage(msg, r)
 		result.Headers = resp.Header
 		defer resp.Body.Close()
 		b := util.Read(resp.Body)
+		timings.BodyRead()
+		callResults.timings = append(callResults.timings, timings)
 		result.Payload = b
 		pci := client.GetPeerCertInfo()
 		if pci != nil {
@@ -274,6 +322,46 @@ func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 		callResults.Statuses = append(callResults.Statuses, resp.StatusCode)
 	}
 	return callResults, nil
+}
+
+// timingHeaders are the headers that report the time that the calls took, in the order that they are added to the response.
+var timingHeaders = []string{
+	constants.HeaderGotoClientDNSTook,
+	constants.HeaderGotoClientTCPTook,
+	constants.HeaderGotoClientProxyTLSTook,
+	constants.HeaderGotoClientTunnelTook,
+	constants.HeaderGotoClientTLSTook,
+	constants.HeaderGotoClientResponseHeadTook,
+	constants.HeaderGotoClientBodyTook,
+	constants.HeaderGotoClientTotalTook,
+	constants.HeaderGotoConnectProxyTook,
+	constants.HeaderGotoConnectProxyDNSTook,
+	constants.HeaderGotoConnectProxyDialTook,
+	constants.HeaderGotoConnectProxyDelay,
+}
+
+// reportTimings adds a header for each phase that the calls went through, which has the time of the phase for each call, as
+// a JSON array. The proxy that the calls were sent through reports the phases of its answer to the CONNECT request in
+// the same way. Nothing is reported for the headers that no call has a time for.
+func reportTimings(h http.Header, calls []*transport.CallTimings) {
+	if len(calls) == 0 {
+		return
+	}
+	perCall := make([]map[string]string, len(calls))
+	for i, call := range calls {
+		perCall[i] = call.Headers()
+	}
+	for _, name := range timingHeaders {
+		values := make([]string, len(calls))
+		reported := false
+		for i := range calls {
+			values[i] = perCall[i][name]
+			reported = reported || values[i] != "-"
+		}
+		if reported {
+			h.Add(name, util.ToJSONText(values))
+		}
+	}
 }
 
 func invokeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -301,6 +389,7 @@ func invokeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add(constants.HeaderGotoServerCert, util.ToJSONText(callResults.ServerCerts))
 	}
 	w.Header().Add(constants.HeaderGotoClientCert, callResults.ClientCert)
+	reportTimings(w.Header(), callResults.timings)
 	for _, cr := range callResults.Results {
 		viaGotos := cr.Headers[constants.HeaderViaGoto]
 		for _, v := range viaGotos {

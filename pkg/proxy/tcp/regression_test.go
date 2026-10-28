@@ -93,7 +93,13 @@ func regServeListener(listenerID string, port int, ln net.Listener) error {
 		if err != nil {
 			return nil
 		}
-		if WillProxyTCP(port) {
+		if WillProxyConnect(port) {
+			regConns.Add(1)
+			go func() {
+				defer regConns.Done()
+				ProxyConnectConnection(port, c)
+			}()
+		} else if WillProxyTCP(port) {
 			regConns.Add(1)
 			go func() {
 				defer regConns.Done()

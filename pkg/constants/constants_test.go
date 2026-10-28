@@ -162,10 +162,39 @@ func TestHeaderConstantValues(t *testing.T) {
 	}
 }
 
-func TestProxyHeadersAreMarkedAsFromProxy(t *testing.T) {
+// The headers that a proxy adds are named for it: Goto-Proxy- for the proxies of requests, Goto-Connect-Proxy- for the
+// CONNECT proxy, and Goto-Client- for the client, and none of them is shared between those.
+func TestProxyHeadersAreNamedForTheirProxy(t *testing.T) {
+	groups := []struct{ constPrefix, valuePrefix string }{
+		{"HeaderGotoProxy", "Goto-Proxy-"},
+		{"HeaderGotoConnectProxy", "Goto-Connect-Proxy-"},
+		{"HeaderGotoClient", "Goto-Client-"},
+	}
+	owner := map[string]string{}
 	for name, v := range stringConstants(t, "headers.go") {
-		if strings.HasPrefix(name, "HeaderGotoProxy") && !strings.HasPrefix(v, "Proxy-Goto-") {
-			t.Errorf("%s = %q, want it to start with Proxy-Goto-", name, v)
+		for _, g := range groups {
+			if !strings.HasPrefix(name, g.constPrefix) {
+				continue
+			}
+			if !strings.HasPrefix(v, g.valuePrefix) {
+				t.Errorf("%s = %q, want it to start with %s", name, v, g.valuePrefix)
+			}
+			if other, ok := owner[strings.ToLower(v)]; ok {
+				t.Errorf("%s and %s have the same value %q", name, other, v)
+			}
+			owner[strings.ToLower(v)] = name
+		}
+	}
+	// the headers of the two proxies that tell the same thing are told apart by their names
+	for proxy, connect := range map[string]string{
+		HeaderGotoProxyHost:           HeaderGotoConnectProxyHost,
+		HeaderGotoProxyPort:           HeaderGotoConnectProxyPort,
+		HeaderGotoProxyUpstreamStatus: HeaderGotoConnectProxyUpstreamStatus,
+		HeaderGotoProxyDelay:          HeaderGotoConnectProxyDelay,
+		HeaderGotoProxyTook:           HeaderGotoConnectProxyTook,
+	} {
+		if strings.EqualFold(proxy, connect) {
+			t.Errorf("the proxy and the CONNECT proxy both use %q", proxy)
 		}
 	}
 }

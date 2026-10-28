@@ -17,19 +17,25 @@
 package transport
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
+	"errors"
+	"fmt"
 	gototls "goto/pkg/tls"
 	"goto/pkg/util"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -48,6 +54,13 @@ type ClientTransport interface {
 	IsGRPC() bool
 	IsHTTP() bool
 	IsH2() bool
+}
+
+// ProxyClient is implemented by the transports that can send their requests via an HTTP proxy.
+type ProxyClient interface {
+	// SetProxy makes the transport send its requests via the proxy (nil goes back to the default, which is the proxy that
+	// the environment has for the request). It is to be called before the requests are made.
+	SetProxy(proxyURL *url.URL) error
 }
 
 type DefaultClientTransport struct {
@@ -72,6 +85,8 @@ type DefaultClientTransport struct {
 	nextProtosSet bool
 	nextProtos    []string
 	peerLock      sync.Mutex
+	// proxyURL is the proxy that the requests are sent via, if one was set (see SetProxy).
+	proxyURL atomic.Pointer[url.URL]
 }
 
 type ClientTLSConfig struct {
@@ -120,6 +135,7 @@ func (c *DefaultClientTransport) SetTLSConfig(tlsConfig *tls.Config) {
 		c.nextProtosSet = true
 		c.SNI = tlsConfig.ServerName
 		c.TLSVersion = tlsConfig.MinVersion
+		c.syncProxyTLSLocked()
 		c.tlsLock.Unlock()
 		if closeIdle {
 			c.closeIdleConnections()
@@ -210,6 +226,7 @@ func (c *DefaultClientTransport) UpdateTLSConfig(sni string, tlsVersion uint16, 
 		}
 	}
 	c.tlsConfig = tlsConfig
+	c.syncProxyTLSLocked()
 	c.tlsLock.Unlock()
 	if closeIdle {
 		c.closeIdleConnections()
@@ -239,6 +256,205 @@ func (c *DefaultClientTransport) UpdateTLSCerts(rootCAs *x509.CertPool, certs []
 		}
 	}
 	c.tlsConfig = tlsConfig
+	c.syncProxyTLSLocked()
+}
+
+// ParseProxyURL parses the URL of a proxy, which is an http or https URL. A host (with port) alone is taken as an http proxy.
+func ParseProxyURL(proxy string) (*url.URL, error) {
+	proxy = strings.TrimSpace(proxy)
+	if proxy == "" {
+		return nil, errors.New("proxy URL is empty")
+	}
+	if !strings.Contains(proxy, "://") {
+		proxy = "http://" + proxy
+	}
+	u, err := url.Parse(proxy)
+	if err != nil {
+		// the URL is left out of the message, as it may have a password
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return nil, fmt.Errorf("invalid proxy URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("proxy URL scheme [%s] is not supported, it must be http or https", u.Scheme)
+	}
+	if u.Hostname() == "" {
+		return nil, errors.New("proxy URL has no host")
+	}
+	return u, nil
+}
+
+// proxyAddress is the address that the connections to the proxy are made to, as net/http works it out for the proxy.
+func proxyAddress(proxy *url.URL) string {
+	port := proxy.Port()
+	if port == "" {
+		if proxy.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	return net.JoinHostPort(proxy.Hostname(), port)
+}
+
+// SetProxy makes the requests of the transport go via the given proxy, through a tunnel that the proxy is asked for
+// (CONNECT) for the target of the request, whether it is an https or an http one. Without a proxy, requests go via the
+// proxy that the environment has for them, if any, which gets the requests for http targets as proxy requests.
+//
+// The tunnels for https targets are net/http's own, which takes the TLS settings of the transport as it opens them, so
+// SetProxy is to be called before requests are made. The ones for http targets are opened by the dialer of the transport.
+func (c *DefaultClientTransport) SetProxy(proxyURL *url.URL) error {
+	if proxyURL != nil && c.h1Transport == nil {
+		return errors.New("proxy is not supported by the HTTP/2 transport")
+	}
+	c.proxyURL.Store(proxyURL)
+	if c.h1Transport != nil {
+		c.tlsLock.Lock()
+		c.syncProxyTLSLocked()
+		c.tlsLock.Unlock()
+		c.closeIdleConnections()
+	}
+	return nil
+}
+
+// proxyFor tells net/http which proxy a request is to go via: the proxy that was set, or else the one from the
+// environment. The requests for http targets are not given the proxy that was set: net/http would send them to the proxy
+// as proxy requests, and it only asks the proxy for a tunnel for the https ones. They are sent through a tunnel that the
+// dialer opens instead (see dialTunnel).
+func (c *DefaultClientTransport) proxyFor(req *http.Request) (*url.URL, error) {
+	if proxy := c.proxyURL.Load(); proxy != nil {
+		if req.URL.Scheme == "http" {
+			return nil, nil
+		}
+		return proxy, nil
+	}
+	return http.ProxyFromEnvironment(req)
+}
+
+// syncProxyTLSLocked makes net/http use the TLS settings of the transport for the connections that it tunnels through the
+// proxy. These are not opened by the dialers of the transport: net/http connects to the proxy, asks for the tunnel, and
+// does the TLS handshake with the target on its own, using the config of its transport. It requires tlsLock to be held
+// for writing, and does nothing unless a proxy is set.
+func (c *DefaultClientTransport) syncProxyTLSLocked() {
+	if c.h1Transport == nil || c.proxyURL.Load() == nil {
+		return
+	}
+	cfg := c.currentTLSConfigLocked().Clone()
+	if !c.nextProtosSet && c.h1Transport.TLSClientConfig != nil {
+		cfg.NextProtos = slices.Clone(c.h1Transport.TLSClientConfig.NextProtos)
+	}
+	// The peer that the connection is made to is the proxy, so the target is what the peer info is kept for.
+	target := cfg.ServerName
+	cfg.VerifyConnection = func(cs tls.ConnectionState) error {
+		return gototls.ExtractSNI("tcp", "Client-"+c.label, target, c.StoreSNI, c.StorePeerCertInfo, c.UpdatePeerStatus)(cs)
+	}
+	cfg.VerifyPeerCertificate = gototls.ExtractPeerCertInfo("tcp", "Client-"+c.label, target, c.StorePeerCertInfo, c.UpdatePeerStatus)
+	c.h1Transport.TLSClientConfig = cfg
+}
+
+// proxyTLSConfig is the config for the connection to a proxy that is reached over TLS, which is not the connection to
+// the target: it is verified for the proxy, is not offered protocols other than the proxy protocol needs, and is not what
+// the peer info is about.
+func (c *DefaultClientTransport) proxyTLSConfig(proxy *url.URL) *tls.Config {
+	cfg, _ := c.dialTLSConfig()
+	cfg.ServerName = proxy.Hostname()
+	cfg.NextProtos = nil
+	cfg.MinVersion, cfg.MaxVersion = 0, 0
+	cfg.VerifyConnection, cfg.VerifyPeerCertificate = nil, nil
+	return cfg
+}
+
+// tlsToProxy does the TLS handshake with a proxy over the connection to it, which is closed if the handshake fails.
+func (c *DefaultClientTransport) tlsToProxy(ctx context.Context, conn net.Conn, proxy *url.URL) (net.Conn, error) {
+	start := time.Now()
+	tlsConn := tls.Client(conn, c.proxyTLSConfig(proxy))
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	callTimingsOf(ctx).proxyTLSDone(start)
+	return tlsConn, nil
+}
+
+// dialProxyTLS opens the connection to a proxy that is reached over TLS, for the tunnel that net/http asks it for.
+func (c *DefaultClientTransport) dialProxyTLS(ctx context.Context, network, addr string, proxy *url.URL, connTimeout, keepAlive time.Duration) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: connTimeout, KeepAlive: keepAlive}
+	rawConn, err := dialer.DialContext(ctx, network, addr)
+	if err != nil {
+		return nil, err
+	}
+	return c.tlsToProxy(ctx, rawConn, proxy)
+}
+
+// dialTunnel opens a connection to the target of an http request through the proxy: it connects to the proxy (over TLS
+// if the proxy is an https one), asks it for a tunnel to the target, and gives the connection that the tunnel is on. The
+// proxy is connected to by the dial function given, which is the one that the transport had.
+func (c *DefaultClientTransport) dialTunnel(ctx context.Context, dial func(context.Context, string, string) (net.Conn, error), proxy *url.URL, target string) (net.Conn, error) {
+	conn, err := dial(ctx, "tcp", proxyAddress(proxy))
+	if err != nil {
+		return nil, err
+	}
+	if proxy.Scheme == "https" {
+		if conn, err = c.tlsToProxy(ctx, conn, proxy); err != nil {
+			return nil, err
+		}
+	}
+	tunnel, err := openTunnel(ctx, conn, proxy, target)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return tunnel, nil
+}
+
+// bufferedConn is a connection that has bytes that were read from it ahead of the reads, to be read first.
+type bufferedConn struct {
+	net.Conn
+	r io.Reader
+}
+
+func (c *bufferedConn) Read(p []byte) (int, error) { return c.r.Read(p) }
+
+// openTunnel asks the proxy at the other end of the connection for a tunnel to the target, the way net/http does, and
+// gives the connection once the proxy has said that the tunnel is there. Anything that the proxy sends right behind its
+// answer is the first of what comes through the tunnel. The exchange ends with the context.
+func openTunnel(ctx context.Context, conn net.Conn, proxy *url.URL, target string) (net.Conn, error) {
+	req := &http.Request{Method: http.MethodConnect, URL: &url.URL{Opaque: target}, Host: target, Header: http.Header{}}
+	if user := proxy.User; user != nil {
+		password, _ := user.Password()
+		req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(user.Username()+":"+password)))
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Unix(1, 0)) })
+	br := bufio.NewReader(conn)
+	var resp *http.Response
+	err := req.Write(conn)
+	if err == nil {
+		resp, err = http.ReadResponse(br, req)
+	}
+	if !stop() {
+		// the context was done, which is what made the exchange fail, if it did
+		if err == nil {
+			resp.Body.Close()
+		}
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to ask the proxy for a tunnel to %s: %w", target, err)
+	}
+	callTimingsOf(ctx).tunnelAnswered(resp.Header)
+	resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("the proxy refused a tunnel to %s: %s", target, resp.Status)
+	}
+	_ = conn.SetDeadline(time.Time{})
+	if n := br.Buffered(); n > 0 {
+		ahead := make([]byte, n)
+		_, _ = io.ReadFull(br, ahead)
+		return &bufferedConn{Conn: conn, r: io.MultiReader(bytes.NewReader(ahead), conn)}, nil
+	}
+	return conn, nil
 }
 
 func hasCertificate(certs []tls.Certificate, cert *tls.Certificate) bool {
@@ -404,6 +620,9 @@ func CreateHTTPClient(port int, label string, h2, autoUpgrade, isTLS, noSNI bool
 	// transports below get configs of their own, which nobody changes, as they read these while requests are running.
 	ct.tlsConfig = tlsConfig
 	dialTLSContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if proxy := ct.proxyURL.Load(); proxy != nil && proxy.Scheme == "https" && addr == proxyAddress(proxy) {
+			return ct.dialProxyTLS(ctx, network, addr, proxy, connTimeout, connIdleTimeout)
+		}
 		dialer := &net.Dialer{Timeout: connTimeout, KeepAlive: connIdleTimeout}
 		rawConn, err := dialer.DialContext(ctx, network, addr)
 		if err != nil {
@@ -413,10 +632,12 @@ func CreateHTTPClient(port int, label string, h2, autoUpgrade, isTLS, noSNI bool
 		connTLSConfig.VerifyConnection = gototls.ExtractSNI(network, "Client-"+label, addr, ct.StoreSNI, ct.StorePeerCertInfo, ct.UpdatePeerStatus)
 		connTLSConfig.VerifyPeerCertificate = gototls.ExtractPeerCertInfo(network, "Client-"+label, addr, ct.StorePeerCertInfo, ct.UpdatePeerStatus)
 		tlsConn := tls.Client(rawConn, connTLSConfig)
+		tlsStart := time.Now()
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
 			rawConn.Close()
 			return nil, err
 		}
+		callTimingsOf(ctx).targetTLSDone(tlsStart)
 		if alpn != nil {
 			if data, err := alpn.Handle(tlsConn); err == nil && data != nil {
 				if j := util.ProtoToJSON(data); j != nil {
@@ -455,7 +676,7 @@ func CreateHTTPClient(port int, label string, h2, autoUpgrade, isTLS, noSNI bool
 			MaxIdleConnsPerHost:   100,
 			MaxConnsPerHost:       100,
 			IdleConnTimeout:       connIdleTimeout,
-			Proxy:                 http.ProxyFromEnvironment,
+			Proxy:                 ct.proxyFor,
 			DisableCompression:    true,
 			ExpectContinueTimeout: requestTimeout,
 			ResponseHeaderTimeout: requestTimeout,
@@ -465,6 +686,22 @@ func CreateHTTPClient(port int, label string, h2, autoUpgrade, isTLS, noSNI bool
 			TLSClientConfig:       tlsConfig.Clone(),
 		}
 		ht = NewHTTPTransportIntercept(t, label, newConnNotifierChan)
+		// The tunnels that net/http asks the proxy for (for https targets) are timed here, as the ones of http targets are in
+		// openTunnel.
+		t.OnProxyConnectResponse = func(ctx context.Context, _ *url.URL, _ *http.Request, res *http.Response) error {
+			callTimingsOf(ctx).tunnelAnswered(res.Header)
+			return nil
+		}
+		// The dials of net/http to the proxy are its own (for the tunnels that it asks the proxy for, for https targets),
+		// and all others are for the targets of http requests, which are reached through a tunnel of the proxy when
+		// there is one. An http target that has the address of the proxy can't be told from the proxy.
+		tracked := t.DialContext
+		t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if proxy := ct.proxyURL.Load(); proxy != nil && addr != proxyAddress(proxy) {
+				return ct.dialTunnel(ctx, tracked, proxy, addr)
+			}
+			return tracked(ctx, network, addr)
+		}
 		ct.UpdateTransport(&http.Client{Timeout: requestTimeout, Transport: ht}, nil, t, nil, ht, nil, false)
 	}
 	return ct

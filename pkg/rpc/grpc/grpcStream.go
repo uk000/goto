@@ -312,8 +312,8 @@ func (s *GRPCBaseStream) SendChainHeaders(other GRPCStream, headersHook HeadersH
 			respHeaders = metadata.MD{}
 		}
 		viaGoto := util.GetViaGotoValue(s.port)
-		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderGotoHost, global.Self.HostLabel, respHeaders)
-		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderGotoPort, strconv.Itoa(s.port), respHeaders)
+		respHeaders.Append(constants.HeaderGotoProxyHost, global.Self.HostLabel)
+		respHeaders.Append(constants.HeaderGotoProxyPort, strconv.Itoa(s.port))
 		util.AddHeaderWithPrefixL("Proxy-", constants.HeaderViaGoto, viaGoto, respHeaders)
 		respHeaders.Append(constants.HeaderViaGoto, fmt.Sprintf("%s(proxy)", viaGoto))
 	}

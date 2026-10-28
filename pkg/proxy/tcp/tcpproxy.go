@@ -26,7 +26,6 @@ import (
 	"goto/pkg/util"
 	"io"
 	"log"
-	"math/rand"
 	"net"
 	"regexp"
 	"sort"
@@ -55,8 +54,27 @@ type TCPProxy struct {
 	Port      int                     `yaml:"port" json:"port"`
 	Enabled   bool                    `yaml:"enabled" json:"enabled"`
 	Upstreams map[string]*TCPUpstream `yaml:"upstreams" json:"upstreams"`
-	Tracker   *TCPProxyTracker        `yaml:"tracker" json:"tracker"`
-	lock      sync.RWMutex
+	// HTTP is what the port does for the HTTP clients that connect to it: it can be an HTTP CONNECT proxy.
+	HTTP    TCPProxyHTTP     `yaml:"http" json:"http"`
+	Tracker *TCPProxyTracker `yaml:"tracker" json:"tracker"`
+	lock    sync.RWMutex
+}
+
+// TCPProxyHTTP is the HTTP side of a TCP proxy port, which is the config of its CONNECT proxy mode:
+//
+//	http:
+//	  connect: true
+//	  connectDelay:
+//	    min: 1s
+//	    max: 2s
+//	    count: 5
+type TCPProxyHTTP struct {
+	// Connect makes the port an HTTP CONNECT proxy: the connections of the port are the ones of clients that ask for a
+	// tunnel to a destination, instead of the ones that get proxied to the upstreams. See proxyconnect.go.
+	Connect bool `yaml:"connect" json:"connect"`
+	// ConnectDelay is the delay that a CONNECT proxy port applies to the connection of a client, and to every transfer of
+	// the tunnels that it has. Its count, if it has one, is for the connections and the transfers of the port altogether.
+	ConnectDelay *types.Delay `yaml:"connectDelay,omitempty" json:"connectDelay,omitempty"`
 }
 
 type TCPEndpoint struct {
@@ -133,14 +151,31 @@ func snapshotProxies() map[int]*TCPProxy {
 
 func ClearAllProxies() {
 	proxyLock.Lock()
-	defer proxyLock.Unlock()
+	old := portProxy
 	portProxy = map[int]*TCPProxy{}
+	proxyLock.Unlock()
+	for _, p := range old {
+		p.releaseConnect()
+	}
 }
 
 func ClearPortProxy(port int) {
 	proxyLock.Lock()
-	defer proxyLock.Unlock()
+	old := portProxy[port]
 	portProxy[port] = newTCPProxy(port)
+	proxyLock.Unlock()
+	old.releaseConnect()
+}
+
+// releaseConnect takes the CONNECT config away from a proxy that was replaced. The tunnels that are open keep the proxy
+// that they were made through, and would go on delaying their transfers with the delay that it had.
+func (p *TCPProxy) releaseConnect() {
+	if p == nil {
+		return
+	}
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	p.HTTP = TCPProxyHTTP{}
 }
 
 func parseUpstreams(r io.Reader) (upstreams map[string]*TCPUpstream, err error) {
@@ -292,9 +327,12 @@ func (p *TCPProxy) MarshalJSON() ([]byte, error) {
 		Port      int                     `json:"port"`
 		Enabled   bool                    `json:"enabled"`
 		Upstreams map[string]*TCPUpstream `json:"upstreams"`
+		HTTP      TCPProxyHTTP            `json:"http"`
 		Tracker   *TCPProxyTracker        `json:"tracker"`
 	}
-	v := proxyJSON{Port: p.Port, Enabled: p.Enabled, Upstreams: copyUpstreams(p.Upstreams), Tracker: p.Tracker}
+	// the delay is a copy of its own, as the tunnels of the port count it down while the proxy is marshaled
+	httpSide := TCPProxyHTTP{Connect: p.HTTP.Connect, ConnectDelay: p.HTTP.ConnectDelay.Clone()}
+	v := proxyJSON{Port: p.Port, Enabled: p.Enabled, Upstreams: copyUpstreams(p.Upstreams), HTTP: httpSide, Tracker: p.Tracker}
 	p.lock.RUnlock()
 	return json.Marshal(v)
 }
@@ -474,41 +512,14 @@ func (t *TCPUpstream) MarshalJSON() ([]byte, error) {
 		DropPct    int                     `json:"dropPct"`
 	}
 	v := upstreamJSON{Name: t.Name, Endpoints: t.Endpoints, Match: t.Match, Retries: t.Retries, DropPct: t.DropPct}
-	if t.Delay != nil {
-		d := *t.Delay
-		v.Delay = &d
-	}
-	if t.RetryDelay != nil {
-		d := *t.RetryDelay
-		v.RetryDelay = &d
-	}
+	v.Delay = t.Delay.Clone()
+	v.RetryDelay = t.RetryDelay.Clone()
 	return json.Marshal(v)
 }
 
-// nextDelay computes the next delay that the given delay config asks for, and uses up a count of it. The caller holds
-// the lock of the upstream, which also keeps the (not thread safe) delay config consistent.
+// nextDelay computes the next delay that the given delay config asks for, and uses up a count of it.
 func nextDelay(d *types.Delay) time.Duration {
-	if d == nil || d.Min == nil || d.Max == nil || !(d.Count > 0 || d.Count == -1) {
-		return 0
-	}
-	delay := randomDelay(d.Min.Duration, d.Max.Duration)
-	if delay <= 0 {
-		return 0
-	}
-	if d.Count > 0 {
-		d.Count--
-	}
-	return delay
-}
-
-// randomDelay picks a delay between min and max. The function of the types package for this panics for a range of less
-// than a millisecond, and shares a random source that is not safe for use by several goroutines, which every
-// connection of the proxy is.
-func randomDelay(min, max time.Duration) time.Duration {
-	if max <= min {
-		return min
-	}
-	return min + time.Duration(rand.Int63n(int64(max-min)))
+	return d.Claim()
 }
 
 func (t *TCPUpstream) nextDelay() time.Duration {

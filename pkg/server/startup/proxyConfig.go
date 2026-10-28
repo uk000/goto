@@ -18,6 +18,7 @@ package startup
 
 import (
 	"fmt"
+	"goto/pkg/global"
 	grpcproxy "goto/pkg/proxy/grpc"
 	httpproxy "goto/pkg/proxy/http"
 	tcpproxy "goto/pkg/proxy/tcp"
@@ -57,14 +58,30 @@ func loadHTTPProxy(p *httpproxy.Proxy) {
 	}
 }
 
+// removeTCPProxy takes the config of a TCP proxy port away: its upstreams, and its CONNECT proxy mode and delay. The TCP
+// listener that the port may have got for the CONNECT proxy mode stays, as the one that the API makes does when the mode
+// is turned off.
 func removeTCPProxy(port int) {
 	tcpproxy.ClearPortProxy(port)
 }
 
+// loadTCPProxy loads the config of a TCP proxy port: its upstreams, and the http part of it that makes the port an HTTP
+// CONNECT proxy. A port can have either of them, or both.
 func loadTCPProxy(p *tcpproxy.TCPProxy) {
 	if p == nil {
 		return
 	}
+	connect := p.HTTP.Connect || p.HTTP.ConnectDelay != nil
+	// a port that is only a CONNECT proxy has no upstreams to load
+	if len(p.Upstreams) > 0 || !connect {
+		loadTCPUpstreams(p)
+	}
+	if connect {
+		loadConnectProxy(p)
+	}
+}
+
+func loadTCPUpstreams(p *tcpproxy.TCPProxy) {
 	if err := tcpproxy.ValidateUpstreams(p.Upstreams); err != nil {
 		log.Printf("[*** ERROR ***] TCP Proxy [%d] Upstreams failed validation: %s\n", p.Port, err.Error())
 		return
@@ -73,6 +90,44 @@ func loadTCPProxy(p *tcpproxy.TCPProxy) {
 	tcpproxy.GetPortProxy(p.Port).AddUpstreams(p.Upstreams)
 	log.Println("------------------------------------")
 	log.Printf("TCP Proxy [%d] loaded [%d] upstreams successfully", p.Port, len(p.Upstreams))
+	log.Println("------------------------------------")
+}
+
+// loadConnectProxy loads the http part of a TCP proxy: the delay of the CONNECT proxy, and the CONNECT proxy mode, which
+// makes the port a TCP port (it keeps the TCP listener that it has, e.g. a tls one that the listeners of the config made).
+// The ports that serve the admin APIs, which can't stop serving HTTP, can't be CONNECT proxy ports.
+func loadConnectProxy(p *tcpproxy.TCPProxy) {
+	port := p.Port
+	if port <= 0 || port > 65535 {
+		log.Printf("[*** ERROR ***] TCP Proxy [%d] has an invalid port for an HTTP CONNECT proxy\n", port)
+		return
+	}
+	log.Printf("Loading HTTP CONNECT Proxy [%d]\n", port)
+	// the delay is set first, for it to apply to the first connection
+	if c := p.HTTP.ConnectDelay; c != nil {
+		min, max, count := delayRange(c)
+		// the delay that the proxy counts down is a copy of its own, not the one that the config keeps
+		if delay := types.NewDelay(min, max, count); delay != nil {
+			tcpproxy.SetConnectDelay(port, delay)
+		} else {
+			log.Printf("[*** ERROR ***] HTTP CONNECT Proxy [%d] delay has no max, so it is not a delay. Ignoring it.\n", port)
+			tcpproxy.SetConnectDelay(port, nil)
+		}
+	}
+	if !p.HTTP.Connect {
+		return
+	}
+	switch port {
+	case global.Self.ServerPort, global.Self.JSONRPCPort, global.Self.GRPCPort:
+		log.Printf("[*** ERROR ***] Default Port [%d] cannot be an HTTP CONNECT Proxy port\n", port)
+		return
+	}
+	if err := tcpproxy.EnableConnectProxy(port); err != nil {
+		log.Printf("[*** ERROR ***] Failed to enable HTTP CONNECT Proxy [%d]: %s\n", port, err.Error())
+		return
+	}
+	log.Println("------------------------------------")
+	log.Printf("HTTP CONNECT Proxy [%d] enabled, the port is a TCP port", port)
 	log.Println("------------------------------------")
 }
 

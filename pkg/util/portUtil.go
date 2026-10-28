@@ -78,6 +78,24 @@ func GetListenerPortNum(r *http.Request) int {
 	return GetContextPort(r.Context())
 }
 
+// GetConnectionPortNum is the port of the listener that the request came in over. Unlike GetListenerPortNum, it is not
+// the port that the /port={port} prefix of the request names: the server makes that the current port of the request.
+func GetConnectionPortNum(r *http.Request) int {
+	if val := GetPortValueFromLocalAddressContext(r.Context()); val != "" {
+		if port, err := strconv.Atoi(val); err == nil && port > 0 {
+			return port
+		}
+	}
+	if conn := GetConn(r); conn != nil {
+		if addr := conn.LocalAddr(); addr != nil {
+			if port := GetPortFromAddress(addr.String()); port > 0 {
+				return port
+			}
+		}
+	}
+	return GetListenerPortNum(r)
+}
+
 func checkRequestPort(r *http.Request, rs *RequestStore) (port string, portNum int) {
 	uri := r.RequestURI
 	if strings.HasPrefix(uri, "/port=") {

@@ -18,8 +18,10 @@ package tcpproxy
 
 import (
 	"fmt"
+	"goto/pkg/global"
 	"goto/pkg/server/listeners"
 	"goto/pkg/server/middleware"
+	"goto/pkg/types"
 	"goto/pkg/util"
 	"net/http"
 	"strconv"
@@ -43,6 +45,67 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(upRouter, "/add", addTCPProxyUpstreams, "POST", "PUT")
 	util.AddRoute(upRouter, "", getProxyUpstreams, "GET")
 	util.AddRoute(upRouter, "/all", getProxyUpstreams, "GET")
+
+	util.AddRoute(tcpProxyRouter, "/http/connect/{o:enable|disable}", enableConnect, "POST", "PUT")
+	util.AddRoute(tcpProxyRouter, "/http/connect/delay/{delay}", setConnectDelay, "POST", "PUT")
+}
+
+// enableConnect turns the HTTP CONNECT proxy mode of a port on or off. A port in this mode is a TCP port, as the tunnels
+// of CONNECT are streams of bytes that the HTTP server has no part in: enabling the mode makes the port a TCP listener
+// (the TCP listener of the port is kept if it has one, which is how a port is made a TLS one: add it as a tls listener
+// first), and the tunneling is done by the proxy. See proxyconnect.go.
+func enableConnect(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	o := util.GetStringParamValue(r, "o")
+	enable := strings.EqualFold(o, "enable")
+	msg := ""
+	if !enable {
+		EnableConnect(port, false)
+		msg = fmt.Sprintf("Port [%d]: CONNECT proxy mode disabled", port)
+	} else if port == util.GetConnectionPortNum(r) || port == global.Self.ServerPort {
+		// The port would stop serving HTTP, which is what this very request came over, or the main port of the server.
+		w.WriteHeader(http.StatusBadRequest)
+		msg = fmt.Sprintf("Port [%d] can't be a CONNECT proxy port, as it has to serve HTTP requests. Use another port, which can be configured via this one with the prefix /port={port}", port)
+	} else if err := EnableConnectProxy(port); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = fmt.Sprintf("Port [%d] failed to enable CONNECT proxy mode: %s", port, err.Error())
+	} else {
+		msg = fmt.Sprintf("Port [%d]: CONNECT proxy mode enabled, and the port is a TCP port", port)
+	}
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
+}
+
+// setConnectDelay sets the delay that the CONNECT proxy of a port applies to the connection of a client, and to every
+// transfer of its tunnels. The delay is a duration, or a range of durations to pick from (e.g. 100ms-1s), and a count after
+// a colon (e.g. 1s:5) makes it apply to the next so many of these events of the port, which is the connections and the
+// transfers altogether. 0s, or clear, takes the delay away. See proxyconnect.go.
+func setConnectDelay(w http.ResponseWriter, r *http.Request) {
+	port := util.GetRequestOrListenerPortNum(r)
+	val := util.GetStringParamValue(r, "delay")
+	msg := ""
+	if strings.EqualFold(val, "clear") {
+		SetConnectDelay(port, nil)
+		msg = fmt.Sprintf("Port [%d]: CONNECT proxy delay cleared", port)
+	} else if low, high, count, ok := util.GetDurationParam(r, "delay"); !ok {
+		w.WriteHeader(http.StatusBadRequest)
+		msg = fmt.Sprintf("Invalid delay value [%s], expected a duration or a range of durations, with an optional count (e.g. 1s, 100ms-1s, 1s:5)", val)
+	} else if delay := types.NewDelay(low, high, count); delay == nil {
+		SetConnectDelay(port, nil)
+		msg = fmt.Sprintf("Port [%d]: CONNECT proxy delay cleared", port)
+	} else {
+		SetConnectDelay(port, delay)
+		times := "unlimited"
+		if delay.Count > 0 {
+			times = strconv.Itoa(delay.Count)
+		}
+		msg = fmt.Sprintf("Port [%d]: CONNECT proxy delay set to [%s], count [%s]", port, delay.String(), times)
+		if !WillProxyConnect(port) {
+			msg += ", which applies once CONNECT proxy mode is enabled on the port"
+		}
+	}
+	fmt.Fprintln(w, msg)
+	util.AddLogMessage(msg, r)
 }
 
 func addTCPProxyUpstreams(w http.ResponseWriter, r *http.Request) {

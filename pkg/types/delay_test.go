@@ -248,19 +248,19 @@ func TestDelayUnmarshalJSON(t *testing.T) {
 				t.Fatalf("Unmarshal(%s) failed: %v", c.in, err)
 			}
 			if d.Min == nil || d.Max == nil || d.Min.Duration != c.min || d.Max.Duration != c.max || d.Count != c.count {
-				t.Errorf("Unmarshal(%s) = %+v, want min %s max %s count %d", c.in, d, c.min, c.max, c.count)
+				t.Errorf("Unmarshal(%s) = %s count %d, want min %s max %s count %d", c.in, &d, d.Count, c.min, c.max, c.count)
 			}
 		})
 	}
 	var d Delay
 	if err := json.Unmarshal([]byte(`{"min":"soon","max":"1s"}`), &d); err == nil {
-		t.Errorf("Unmarshal of an invalid duration succeeded: %+v", d)
+		t.Errorf("Unmarshal of an invalid duration succeeded: %s", &d)
 	}
 	if err := json.Unmarshal([]byte(`{"min":true,"max":"1s"}`), &d); err == nil {
-		t.Errorf("Unmarshal of a boolean duration succeeded: %+v", d)
+		t.Errorf("Unmarshal of a boolean duration succeeded: %s", &d)
 	}
 	if err := json.Unmarshal([]byte(`[1]`), &d); err == nil {
-		t.Errorf("Unmarshal of an array succeeded: %+v", d)
+		t.Errorf("Unmarshal of an array succeeded: %s", &d)
 	}
 }
 
@@ -270,7 +270,7 @@ func TestDelayUnmarshalYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 	if d.Min == nil || d.Max == nil || d.Min.Duration != ms(10) || d.Max.Duration != ms(20) || d.Count != 2 {
-		t.Errorf("Unmarshal = %+v, want min 10ms max 20ms count 2", d)
+		t.Errorf("Unmarshal = %s count %d, want min 10ms max 20ms count 2", &d, d.Count)
 	}
 	d = Delay{}
 	if err := yaml.Unmarshal([]byte("min: 1s\nmax: 10ms\n"), &d); err != nil {
@@ -281,7 +281,7 @@ func TestDelayUnmarshalYAML(t *testing.T) {
 	}
 	d = Delay{}
 	if err := yaml.Unmarshal([]byte("min: soon\nmax: 1s\n"), &d); err == nil {
-		t.Errorf("Unmarshal of an invalid duration succeeded: %+v", d)
+		t.Errorf("Unmarshal of an invalid duration succeeded: %s", &d)
 	}
 }
 
@@ -698,5 +698,179 @@ func TestDelayBlockAbandonedDoesNotLeakGoroutines(t *testing.T) {
 	}
 	if after > before+2 {
 		t.Errorf("%d goroutines are left from 30 abandoned Block() calls (%d before), want them to end", after-before, before)
+	}
+}
+
+func TestDelayClone(t *testing.T) {
+	var none *Delay
+	if none.Clone() != nil {
+		t.Error("the clone of no delay is a delay")
+	}
+	d := NewDelay(ms(1), ms(2), 3)
+	// the delay that was computed is what the clone applies as well
+	computed := d.Compute()
+	c := d.Clone()
+	if c == d || c.Min == d.Min || c.Max == d.Max {
+		t.Fatal("the clone shares what the delay is made of")
+	}
+	if c.Min.Duration != ms(1) || c.Max.Duration != ms(2) || c.Count != 3 || c.Compute() != computed {
+		t.Errorf("clone = %s count %d computed %s, want 1ms-2ms count 3 computed %s", c, c.Count, c.Compute(), computed)
+	}
+	// what happens to the one doesn't happen to the other
+	c.Apply()
+	c.Apply()
+	c.Min.Duration = ms(1)
+	c.Max = &Duration{ms(1)}
+	if d.Count != 3 || d.Max.Duration != ms(2) || d.Compute() != computed {
+		t.Errorf("the delay changed with its clone: %s count %d", d, d.Count)
+	}
+	if c.Count != 1 {
+		t.Errorf("clone count = %d, want the 2 applications counted", c.Count)
+	}
+	// a delay with no bounds is cloned as it is
+	partial := (&Delay{Count: 2}).Clone()
+	if partial.Min != nil || partial.Max != nil || partial.Count != 2 {
+		t.Errorf("clone of a delay without bounds = %+v", partial)
+	}
+}
+
+// IsLargerThan looks at two delays, which two callers may do the other way round at the same time.
+func TestDelayIsLargerThanOfTheSameDelaysInBothOrdersDoesNotBlock(t *testing.T) {
+	a, b := NewDelay(ms(1), ms(2), -1), NewDelay(ms(1), ms(3), -1)
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 2000; j++ {
+				if i%2 == 0 {
+					a.IsLargerThan(b)
+				} else {
+					b.IsLargerThan(a)
+				}
+			}
+		}(i)
+	}
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the comparisons of the same delays in both orders are waiting for each other")
+	}
+	if a.IsLargerThan(b) || !b.IsLargerThan(a) {
+		t.Error("comparison is wrong")
+	}
+}
+
+// Every way of using a delay is used at once, for the race detector to look at.
+func TestDelayAllMethodsAreSafeToUseConcurrently(t *testing.T) {
+	d := NewDelay(time.Microsecond, 2*time.Microsecond, 1000)
+	other := NewDelay(time.Microsecond, time.Millisecond, -1)
+	var wg sync.WaitGroup
+	run := func(f func()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 300; i++ {
+				f()
+			}
+		}()
+	}
+	run(func() { d.Compute() })
+	run(func() { d.Apply() })
+	run(func() { d.ComputeAndApply(func(time.Duration) {}) })
+	run(func() { <-d.Block() })
+	run(func() { d.IsNonZero() })
+	run(func() { _ = d.String() })
+	run(func() { d.IsLargerThan(other) })
+	run(func() { other.IsLargerThan(d) })
+	run(func() { d.Prepare() })
+	run(func() { d.Clone() })
+	run(func() {
+		if _, err := json.Marshal(d); err != nil {
+			t.Error(err)
+		}
+	})
+	run(func() {
+		if _, err := yaml.Marshal(d); err != nil {
+			t.Error(err)
+		}
+	})
+	run(func() {
+		if err := json.Unmarshal([]byte(`{"min":"1us","max":"2us","count":1000}`), d); err != nil {
+			t.Error(err)
+		}
+	})
+	wg.Wait()
+}
+
+// What a delay is marshaled as is what it is at the time, with the count that is left.
+func TestDelayMarshalHasTheCountThatIsLeft(t *testing.T) {
+	d := NewDelay(ms(1), ms(1), 3)
+	d.Apply()
+	b, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != `{"min":"1ms","max":"1ms","count":2}` {
+		t.Errorf("json = %s", b)
+	}
+	b, err = yaml.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "min: 1ms\nmax: 1ms\ncount: 2\n" {
+		t.Errorf("yaml = %q", b)
+	}
+	var none *Delay
+	if b, err := json.Marshal(none); err != nil || string(b) != "null" {
+		t.Errorf("json of no delay = %s, %v", b, err)
+	}
+	// a delay that is a field of a struct, with or without a delay
+	type holder struct {
+		Delay *Delay `json:"delay"`
+	}
+	if b, _ := json.Marshal(holder{}); string(b) != `{"delay":null}` {
+		t.Errorf("json of a holder of no delay = %s", b)
+	}
+	if b, _ := json.Marshal(holder{Delay: d}); string(b) != `{"delay":{"min":"1ms","max":"1ms","count":2}}` {
+		t.Errorf("json of a holder of a delay = %s", b)
+	}
+}
+
+func TestDelayClaim(t *testing.T) {
+	var none *Delay
+	if none.Claim() != 0 {
+		t.Error("claim of no delay is not 0")
+	}
+	if got := (&Delay{}).Claim(); got != 0 {
+		t.Errorf("claim of a delay without bounds = %s", got)
+	}
+	// it counts without sleeping, and uses the delay that was computed
+	d := NewDelay(time.Hour, 2*time.Hour, 2)
+	computed := d.Compute()
+	start := time.Now()
+	if got := d.Claim(); got != computed {
+		t.Errorf("claim = %s, want the computed %s", got, computed)
+	}
+	if got := d.Claim(); got < time.Hour || got >= 2*time.Hour {
+		t.Errorf("second claim = %s, want one from the range", got)
+	}
+	if got := d.Claim(); got != 0 || d.Count != 0 {
+		t.Errorf("claim after the count was used up = %s, count %d", got, d.Count)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Error("claim slept")
+	}
+	// an unlimited delay stays so
+	u := NewDelay(ms(1), ms(1), -1)
+	for i := 0; i < 5; i++ {
+		if got := u.Claim(); got != ms(1) {
+			t.Fatalf("claim %d = %s", i, got)
+		}
+	}
+	if u.Count != -1 {
+		t.Errorf("count = %d", u.Count)
 	}
 }

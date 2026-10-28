@@ -11,11 +11,27 @@ RUN apk update \
 		&& rm -rf /var/cache/apk/* \
 		&& update-ca-certificates
 
-RUN openssl s_client -showcerts -connect github.com:443 </dev/null 2>/dev/null | openssl x509 -outform PEM > /usr/local/share/ca-certificates/github.crt \
-	&& openssl s_client -showcerts -connect proxy.golang.org:443 </dev/null 2>/dev/null | openssl x509 -outform PEM >  /usr/local/share/ca-certificates/golang-proxy.crt \
-	&& openssl s_client -showcerts -connect sum.golang.org:443 </dev/null 2>/dev/null | openssl x509 -outform PEM >  /usr/local/share/ca-certificates/golang-sum.crt \
-	&& openssl s_client -showcerts -connect dl-cdn.alpinelinux.org:443 </dev/null 2>/dev/null | openssl x509 -outform PEM > /usr/local/share/ca-certificates/alpine.crt \
-	&& update-ca-certificates
+# Behind a TLS-intercepting corporate proxy (https_proxy/HTTPS_PROXY build args, see PROXY_ARGS in the Makefile), connect
+# through the proxy and trust the self-signed root CA at the top of the chain it presents. Without a proxy, fetch each
+# host's cert directly.
+RUN proxy="${https_proxy:-$HTTPS_PROXY}"; proxy="${proxy#*://}"; proxy="${proxy%/}"; \
+	if [ -n "$proxy" ]; then \
+		openssl s_client -proxy "$proxy" -servername github.com -showcerts -connect github.com:443 </dev/null 2>/dev/null \
+			| awk '/BEGIN CERTIFICATE/{buf=""} {buf=buf $0 "\n"} /END CERTIFICATE/{last=buf} END{printf "%s", last}' > /tmp/proxy-root.crt; \
+		if [ -s /tmp/proxy-root.crt ] \
+			&& [ "$(openssl x509 -in /tmp/proxy-root.crt -noout -subject_hash)" = "$(openssl x509 -in /tmp/proxy-root.crt -noout -issuer_hash)" ]; then \
+			cp /tmp/proxy-root.crt /usr/local/share/ca-certificates/proxy-root.crt && update-ca-certificates; \
+		else \
+			echo "WARNING: proxy $proxy did not present a self-signed root CA, not adding it to trusted certs"; \
+		fi; \
+		rm -f /tmp/proxy-root.crt; \
+	else \
+		openssl s_client -showcerts -connect github.com:443 </dev/null 2>/dev/null | openssl x509 -outform PEM > /usr/local/share/ca-certificates/github.crt \
+		&& openssl s_client -showcerts -connect proxy.golang.org:443 </dev/null 2>/dev/null | openssl x509 -outform PEM >  /usr/local/share/ca-certificates/golang-proxy.crt \
+		&& openssl s_client -showcerts -connect sum.golang.org:443 </dev/null 2>/dev/null | openssl x509 -outform PEM >  /usr/local/share/ca-certificates/golang-sum.crt \
+		&& openssl s_client -showcerts -connect dl-cdn.alpinelinux.org:443 </dev/null 2>/dev/null | openssl x509 -outform PEM > /usr/local/share/ca-certificates/alpine.crt \
+		&& update-ca-certificates; \
+	fi
 
 
 RUN mkdir /goto

@@ -237,6 +237,12 @@ func (rs *RequestStore) Start() {
 	}
 }
 
+// StartTime is when the request started, which is the time of its first byte as far as the server can tell. It is zero if
+// the request was not started.
+func (rs *RequestStore) StartTime() time.Time {
+	return rs.startTime
+}
+
 func (rs *RequestStore) ReportTime(w http.ResponseWriter) {
 	if !rs.endTime.IsZero() {
 		return
@@ -250,9 +256,10 @@ func (rs *RequestStore) ReportTime(w http.ResponseWriter) {
 		w.Header().Add(fmt.Sprintf("%s-%d", constants.HeaderGotoOutAt, rs.TunnelCount), endTime)
 		w.Header().Add(fmt.Sprintf("%s-%d", constants.HeaderGotoTook, rs.TunnelCount), took)
 	} else if rs.ProxiedRequest {
-		w.Header().Add(fmt.Sprintf("Proxy-%s", constants.HeaderGotoInAt), startTime)
-		w.Header().Add(fmt.Sprintf("Proxy-%s", constants.HeaderGotoOutAt), endTime)
-		w.Header().Add(fmt.Sprintf("Proxy-%s", constants.HeaderGotoTook), took)
+		// the time that the proxy took to send the head of the response, and not to send all of it (Goto-Proxy-Took tells that)
+		w.Header().Add(constants.HeaderGotoProxyInAt, startTime)
+		w.Header().Add(constants.HeaderGotoProxyOutAt, endTime)
+		w.Header().Add(constants.HeaderGotoProxyHeadTook, took)
 	} else {
 		w.Header().Add(constants.HeaderGotoInAt, startTime)
 		w.Header().Add(constants.HeaderGotoOutAt, endTime)

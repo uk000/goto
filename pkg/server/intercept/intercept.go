@@ -360,7 +360,7 @@ func postIntercept(w http.ResponseWriter, r *http.Request) {
 	if rs.IsTunnelRequest {
 		w.Header()[HeaderGotoTunnel] = r.Header[HeaderGotoRequestedTunnel]
 	} else if rs.ProxiedRequest {
-		w.Header().Add(fmt.Sprintf("Proxy-%s", HeaderGotoResponseStatus), statusCodeText)
+		w.Header().Add(HeaderGotoProxyResponseStatus, statusCodeText)
 	} else {
 		w.Header().Add(HeaderGotoResponseStatus, statusCodeText)
 	}

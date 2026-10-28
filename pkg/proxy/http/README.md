@@ -50,6 +50,8 @@ A target must be defined with one or more triggers. Each trigger defines one or 
 - Traffic config flag `clean: true` changes the default behavior such that proxy will pick the first response from upstream endpoint invocations and send the response headers and payload as-is to the downstream client, adding additional proxy response headers to indicate that the call was proxied. The `clean` mode ignores the responses from additional endpoints, and allows downstream client to operate on the response as if the client was directly connected to the proxied upstream endpoint.
 
 
+- The proxy tells about the time it took and the delay it added in headers of the response: `Goto-Proxy-Took` is the time from the first byte of the request to the last byte of the response written by the proxy, and is sent as a trailer (it's only known after the response is written), so clients must read the body to the end to get it, and it's not sent when the response has a `Content-Length`; `Goto-Proxy-Delay` is the artificial delay of the traffic config (`delay`), once per endpoint that has one, as a duration. `Goto-Proxy-In-At`, `Goto-Proxy-Out-At` and `Goto-Proxy-Head-Took` are when the request was received, when the response head was sent, and the time between them, so they are about the head of the response and not all of it. (A CONNECT port has headers of its own, `Goto-Connect-Proxy-*`: see the [CONNECT proxy](../tcp/README.md#http-connect-proxy).)
+
 ## Chaos
 In addition to request routing, the `goto` proxy also offers some chaos features:
 - A `delay` can be configured per target that's applied to all communication in either direction for that target. For HTTP proxy, the delay is applied before sending the request and response.

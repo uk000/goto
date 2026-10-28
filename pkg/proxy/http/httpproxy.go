@@ -35,6 +35,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -318,6 +319,7 @@ func (ep *EndpointInvocation) invoke(targetCounter, epCounter int, target string
 	}
 	tracker.CustomID = fmt.Sprintf("%d.%d", targetCounter, epCounter)
 	tracker.OnHeaders = ep.onHeaders(rc)
+	rc.reportDelay(ep.delay)
 	go ep.asyncInvoke(target, tracker, out)
 	return nil
 }
@@ -459,6 +461,29 @@ func (ep *TargetEndpoint) prepareInvocationSpec(tc *TrafficConfig) (*invocation.
 	// The method is the one of the downstream request unless the endpoint has one, but validation defaults it to GET.
 	is.Method = ep.Method
 	return is, nil
+}
+
+// artificialDelay tells the delay that the proxy applies before each call to an endpoint because its traffic config says
+// so, as the duration that the spec of the endpoint sleeps for. An endpoint whose traffic config has no delay has none.
+func artificialDelay(tc *TrafficConfig, is *invocation.InvocationSpec) string {
+	if tc == nil || tc.Delay == nil || is == nil {
+		return ""
+	}
+	if d, err := time.ParseDuration(is.Delay); err == nil && d > 0 {
+		return d.String()
+	}
+	return ""
+}
+
+// reportDelay tells the downstream client about the artificial delay that the proxy applies to an endpoint that it calls.
+// The endpoints of a request all report to the same response, and all of them are reported before anything is sent.
+func (rc *RequestContext) reportDelay(delay string) {
+	if delay == "" {
+		return
+	}
+	rc.headersLock.Lock()
+	defer rc.headersLock.Unlock()
+	rc.w.Header().Add(constants.HeaderGotoProxyDelay, delay)
 }
 
 func (tt *TrafficTransform) prepare() {
@@ -718,7 +743,14 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(targets) > 0 {
 		rs.ProxiedRequest = true
+		// The time that the proxy takes is told by a trailer, as it is only known when the last byte of the response is
+		// written, which is long after the headers are sent.
+		start := rs.StartTime()
+		if start.IsZero() {
+			start = time.Now()
+		}
 		util.SendGotoHeaders(w, r)
+		w.Header().Add("Trailer", constants.HeaderGotoProxyTook)
 		// w.Header()["Trailer"] = []string{constants.HeaderGotoProxyUpstreamStatus, fmt.Sprintf("Proxy-%s", constants.HeaderGotoInAt), fmt.Sprintf("Proxy-%s", constants.HeaderGotoOutAt), fmt.Sprintf("Proxy-%s", constants.HeaderGotoTook)}
 		util.AddLogMessage(fmt.Sprintf("Proxying to matching targets %s", util.GetMapKeys(targets)), r)
 		proxy.incrementMatchCounts(targets, r)
@@ -737,6 +769,7 @@ func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			yaml:    rs.YAMLResponse,
 		}
 		proxy.invokeTargets(targets, rc)
+		w.Header().Set(constants.HeaderGotoProxyTook, time.Since(start).String())
 		util.SendGotoTrailers(w, r)
 	}
 }

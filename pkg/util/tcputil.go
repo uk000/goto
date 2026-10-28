@@ -18,11 +18,30 @@ package util
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"strings"
 	"time"
 )
+
+const (
+	// connectReadTimeout bounds the wait for the CONNECT request of a client.
+	connectReadTimeout = 10 * time.Second
+	// connectDialTimeout bounds the attempt to connect to the destination of a tunnel.
+	connectDialTimeout = 10 * time.Second
+	// connectIdleTimeout is how long a tunnel may stay silent, in both directions, before the proxy gives up on it.
+	// Unlike the connections of a TCP proxy, the ones of a tunnel are the long lived ones of the clients of the proxy.
+	connectIdleTimeout = 5 * time.Minute
+	// connectMaxRequestBytes bounds what the proxy reads for the CONNECT request, which is the request line and headers.
+	connectMaxRequestBytes int64 = 64 * 1024
+)
+
+// firstByteReader remembers when it first gave bytes.
+type FirstByteReader struct {
+	Reader io.Reader
+	At     time.Time
+}
 
 func IsConnectionCloseError(err error) bool {
 	return strings.Contains(err.Error(), "closed network connection")
@@ -109,4 +128,12 @@ func ParseAddress(address string) (endpoint string, port int) {
 		port, _ = strconv.Atoi(pieces[len(pieces)-1])
 	}
 	return
+}
+
+func (f *FirstByteReader) Read(p []byte) (int, error) {
+	n, err := f.Reader.Read(p)
+	if n > 0 && f.At.IsZero() {
+		f.At = time.Now()
+	}
+	return n, err
 }

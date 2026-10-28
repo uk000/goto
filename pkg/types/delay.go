@@ -32,6 +32,9 @@ type Duration struct {
 	time.Duration
 }
 
+// Delay is a range of delays, with the number of times that it applies (a count of -1 is unlimited). A delay is shared by
+// the concurrent requests that it applies to, and is safe for them to use through its methods. Its lock is only held for
+// the bookkeeping, never while sleeping or calling back, and makes the delay one that must not be copied (see Clone).
 type Delay struct {
 	Min   *Duration `yaml:"min,omitempty" json:"min,omitempty"`
 	Max   *Duration `yaml:"max,omitempty" json:"max,omitempty"`
@@ -39,12 +42,9 @@ type Delay struct {
 	// The delay that Compute() computed, for Apply() to apply.
 	computedDelay time.Duration
 	hasComputed   bool
+	// lock guards the state of the delay: its Count, and the computed delay that waits to be applied.
+	lock sync.Mutex
 }
-
-// delayMu guards the state of the delays: their Count, and the computed delay that waits to be applied. A delay is shared
-// by the concurrent requests that it applies to. It is one lock for all delays instead of a field of Delay, as Delays are
-// copied by value (a lock must not be), and it is only held for the bookkeeping, never while sleeping or calling back.
-var delayMu sync.Mutex
 
 type delayPayload struct {
 	Min   *Duration `yaml:"min,omitempty" json:"min,omitempty"`
@@ -106,17 +106,22 @@ func (d *Delay) String() string {
 	if d == nil {
 		return ""
 	}
-	delayMu.Lock()
-	defer delayMu.Unlock()
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	if d.Min != nil && d.Max != nil {
 		return fmt.Sprintf("%s-%s", d.Min.Duration.String(), d.Max.Duration.String())
 	}
 	return ""
 }
 
-// rangeLocked gives the bounds of the delay. A delay that is missing, or misses a bound, is no delay (0-0).
-func (d *Delay) rangeLocked() (min, max time.Duration) {
-	if d == nil || d.Min == nil || d.Max == nil {
+// bounds gives the bounds of the delay. A delay that is missing, or misses a bound, is no delay (0-0).
+func (d *Delay) bounds() (min, max time.Duration) {
+	if d == nil {
+		return 0, 0
+	}
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	if d.Min == nil || d.Max == nil {
 		return 0, 0
 	}
 	return d.Min.Duration, d.Max.Duration
@@ -133,17 +138,17 @@ func (d *Delay) IsNonZero() bool {
 	if d == nil {
 		return false
 	}
-	delayMu.Lock()
-	defer delayMu.Unlock()
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	return d.Min != nil && d.Min.Duration > 0 && d.Max != nil && d.Max.Duration > 0 && d.countLeft()
 }
 
 // IsLargerThan compares by max, then by min. A delay that is missing, or misses a bound, counts as no delay.
 func (d *Delay) IsLargerThan(d2 *Delay) bool {
-	delayMu.Lock()
-	defer delayMu.Unlock()
-	min, max := d.rangeLocked()
-	min2, max2 := d2.rangeLocked()
+	// the delays are looked at one after the other, and never both locked, as two callers that compare the same two
+	// delays the other way round would wait for each other
+	min, max := d.bounds()
+	min2, max2 := d2.bounds()
 	return (max > max2) || (max == max2 && min > min2)
 }
 
@@ -162,8 +167,8 @@ func (d *Delay) Prepare() {
 	if d == nil {
 		return
 	}
-	delayMu.Lock()
-	defer delayMu.Unlock()
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	d.normalizeLocked()
 }
 
@@ -185,8 +190,8 @@ func (d *Delay) computeLocked() time.Duration {
 // claim takes the delay to apply (the computed one if there is, or a new one), and counts it. The delay is counted when
 // it is taken, so that the callers that share the delay don't all take the last count while the first is sleeping.
 func (d *Delay) claim() time.Duration {
-	delayMu.Lock()
-	defer delayMu.Unlock()
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	delay := d.computeLocked()
 	d.hasComputed = false
 	if delay > 0 && d.Count > 0 {
@@ -195,14 +200,23 @@ func (d *Delay) claim() time.Duration {
 	return delay
 }
 
+// Claim takes the delay that is next to be applied (the computed one, if there is), and counts it, without sleeping, for
+// the callers that sleep on their own, e.g. in a way that they can give up on. It is 0 if the delay doesn't delay anymore.
+func (d *Delay) Claim() time.Duration {
+	if d == nil {
+		return 0
+	}
+	return d.claim()
+}
+
 // Compute computes the delay that Apply() will apply, and returns it. Until it is applied, computing again returns the
 // same delay. It is 0 if the delay doesn't delay anymore.
 func (d *Delay) Compute() time.Duration {
 	if d == nil {
 		return 0
 	}
-	delayMu.Lock()
-	defer delayMu.Unlock()
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	return d.computeLocked()
 }
 
@@ -242,6 +256,52 @@ func (d *Delay) Block() chan time.Duration {
 		delayChan <- d.ComputeAndApply()
 	}()
 	return delayChan
+}
+
+// Clone gives a delay of its own that is the same as this one, with the bounds that it has now and the count that is left,
+// and the delay that was computed for Apply(). A delay is not copied by value, which would copy its lock.
+func (d *Delay) Clone() *Delay {
+	if d == nil {
+		return nil
+	}
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	c := &Delay{Count: d.Count, computedDelay: d.computedDelay, hasComputed: d.hasComputed}
+	if d.Min != nil {
+		c.Min = &Duration{d.Min.Duration}
+	}
+	if d.Max != nil {
+		c.Max = &Duration{d.Max.Duration}
+	}
+	return c
+}
+
+// payload gives what the delay is made of as it is now, in a payload that doesn't change with the delay.
+func (d *Delay) payload() *delayPayload {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	dp := &delayPayload{Count: d.Count}
+	if d.Min != nil {
+		dp.Min = &Duration{d.Min.Duration}
+	}
+	if d.Max != nil {
+		dp.Max = &Duration{d.Max.Duration}
+	}
+	return dp
+}
+
+func (d *Delay) MarshalJSON() ([]byte, error) {
+	if d == nil {
+		return []byte("null"), nil
+	}
+	return json.Marshal(d.payload())
+}
+
+func (d *Delay) MarshalYAML() (any, error) {
+	if d == nil {
+		return nil, nil
+	}
+	return d.payload(), nil
 }
 
 func (d *Duration) MarshalJSON() ([]byte, error) {
@@ -320,8 +380,8 @@ func (d *Delay) UnmarshalYAML(node *yaml.Node) error {
 }
 
 func (d *Delay) load(dp *delayPayload) {
-	delayMu.Lock()
-	defer delayMu.Unlock()
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	d.Min = dp.Min
 	d.Max = dp.Max
 	d.Count = dp.Count

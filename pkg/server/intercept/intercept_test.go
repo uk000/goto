@@ -519,7 +519,7 @@ func TestPostInterceptHeaders(t *testing.T) {
 		value  string
 	}{
 		{"plain", func(r *http.Request, rs *util.RequestStore) {}, "Goto-Response-Status", "418"},
-		{"proxied", func(r *http.Request, rs *util.RequestStore) { rs.ProxiedRequest = true }, "Proxy-Goto-Response-Status", "418"},
+		{"proxied", func(r *http.Request, rs *util.RequestStore) { rs.ProxiedRequest = true }, "Goto-Proxy-Response-Status", "418"},
 		{"tunnel", func(r *http.Request, rs *util.RequestStore) {
 			rs.IsTunnelRequest = true
 			r.Header["Goto-Requested-Tunnel"] = []string{"t1", "t2"}

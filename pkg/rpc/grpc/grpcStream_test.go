@@ -415,7 +415,7 @@ func TestServerStreamSendChainHeaders(t *testing.T) {
 	}
 	proxyHeaders := 0
 	for k := range got {
-		if strings.HasPrefix(k, "proxy-") {
+		if strings.HasPrefix(k, "goto-proxy-") || k == "proxy-via-goto" {
 			proxyHeaders++
 		}
 	}

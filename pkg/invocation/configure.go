@@ -279,9 +279,6 @@ func (is *InvocationSpec) validatePayload() error {
 		if is.streamDelayD, err = time.ParseDuration(is.StreamDelay); err != nil {
 			return fmt.Errorf("invalid delay")
 		}
-	} else {
-		is.streamDelayD = 10 * time.Millisecond
-		is.StreamDelay = "10ms"
 	}
 	return nil
 }
@@ -359,9 +356,6 @@ func (is *InvocationSpec) validateTrafficConfig() error {
 		if is.delayD, err = time.ParseDuration(is.Delay); err != nil {
 			return fmt.Errorf("invalid delay")
 		}
-	} else {
-		is.delayD = 10 * time.Millisecond
-		is.Delay = "10ms"
 	}
 	if is.RetryDelay != "" {
 		if is.retryDelayD, err = time.ParseDuration(is.RetryDelay); err != nil {

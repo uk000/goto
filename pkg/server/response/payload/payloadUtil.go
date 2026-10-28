@@ -424,9 +424,9 @@ func (p *Payload) RangeText(to int, f TextRangeFunc) (err error) {
 }
 
 func (p *Payload) RangeTextWithDelay(to int, delay *types.Duration, f TextRangeFunc) (err error) {
-	d := types.Delay{Count: -1}
+	d := &types.Delay{Count: -1}
 	if p.Delay != nil {
-		d = *p.Delay
+		d = p.Delay.Clone()
 	}
 	if delay != nil && delay.Abs() != 0 {
 		d.Min = delay

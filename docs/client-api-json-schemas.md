@@ -16,7 +16,7 @@
 | requestCount | int            |1| Number of requests to be made per replica for this target. The final request count becomes replicas * requestCount   |
 | warmupCount | int            |1| Number of requests to be sent as warmup before starting the real traffic.   |
 | initialDelay | duration       || Minimum delay to wait before starting traffic to a target. Actual delay will be the max of all the targets being invoked in a given round of invocation. |
-| delay        | duration       |10ms| Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
+| delay        | duration       || Minimum delay to be added per request. The actual added delay will be the max of all the targets being invoked in a given round of invocation, but guaranteed to be greater than this delay |
 | retries      | int            |0| Number of retries to perform for requests to this target for connection errors or for `retriableStatusCodes`.|
 | retryDelay   | duration       |1s| Time to wait between retries.|
 | retriableStatusCodes| []int|| HTTP response status codes for which requests should be retried |
@@ -30,7 +30,7 @@
 | ab      | bool |false| If enabled, each request will simultaneously be sent to all secondary urls (`burls`) in addition to the primary url. The query param `x-request-id` will carry suffixes of `-B-<index>` for each secondary URL. |
 | random      | bool |false| If enabled, each request will pick a random URL from either the primary URL or the B-URLs. |
 | streamPayload  | []string  || If specified, elements of this array are sent to the target server as a stream with delay between each chunk applied based on `streamDelay`. |
-| streamDelay | duration |"10ms"| For streaming request payload (`streamPayload` field), this configures the delay to be applied between payload chunks. |
+| streamDelay | duration || For streaming request payload (`streamPayload` field), this configures the delay to be applied between payload chunks. |
 | binary      | bool |false| Indicates whether request and response payload should be treated as binary data for this target |
 | collectResponse | bool  |false| Indicates whether response payload should be kept in the results for this target. By default, response payload is discarded. |
 | trackPayload   | bool   |false| Whether the response payload should be tracked (time of receipt of first and last bytes, total size, content, etc). Tracking payload is expensive, hence it's off by default. |

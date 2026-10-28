@@ -30,19 +30,27 @@ The following response headers are added conditionally under different scenarios
 - `Goto-Retry-Count`: Sent by `goto` client instance when traffic invocations are retried (if a target was configured for retries)
 
 #### Proxy response headers
-- `Proxy-Goto-Host`: identifies the `goto` instance that acted as a proxy for this request
+- `Goto-Proxy-Host`: identifies the `goto` instance that acted as a proxy for this request
 - `Proxy-Via-Goto`: label of the `goto` instance that acted as a proxy for this request
-- `Proxy-Goto-Port`: port number on which the `goto` proxy instance received this request, which may be different than the upstream service port
-- `Proxy-Goto-Protocol`: Protocol over which the `goto` proxy instance served this request, which may be different than the protocol used for the upstream service call
-- `Proxy-Goto-Response-Status`: HTTP response status code that `goto` proxy instance responded with. Upstream's response status code is preserved in another header listed below.
-- `Proxy-Goto-In-At`: UTC timestamp when the request was received by the `goto` proxy instance
-- `Proxy-Goto-Out-At`: UTC timestamp when the `goto` proxy instance finished processing the request and sent a response
-- `Proxy-Goto-Took`: Total processing time taken by the `goto` proxy instance to process the request
+- `Goto-Proxy-Port`: port number on which the `goto` proxy instance received this request, which may be different than the upstream service port
+- `Goto-Proxy-Protocol`: Protocol over which the `goto` proxy instance served this request, which may be different than the protocol used for the upstream service call
+- `Goto-Proxy-Response-Status`: HTTP response status code that `goto` proxy instance responded with. Upstream's response status code is preserved in another header listed below.
+- `Goto-Proxy-In-At`: UTC timestamp when the request was received by the `goto` proxy instance
+- `Goto-Proxy-Out-At`: UTC timestamp when the `goto` proxy instance finished processing the request and sent a response
+- `Goto-Proxy-Head-Took`: Time taken by the `goto` proxy instance from receiving the request to sending the head of the response
+- `Goto-Proxy-Took`: Time taken by the `goto` proxy instance from the first byte of the request to the last byte of the response. It is a trailer, so it is only there if the response has no `Content-Length` and the body is read to the end
 - `Goto-Proxy-Upstream-Status_<upstream-name>`: status the `goto` proxy's upstream service responded with, which may be different than the status `goto` responded with to the downstream client
-- `Proxy-Goto-Upstream-Took_<upstream-name>`: Total roundtrip time the proxy's upstream call took
-- `Proxy-Goto-Delay`: any delay added to the request/response by `goto` as a proxy
-- `Proxy-Goto-Request-Dropped`: sent back with response when the proxy drops the downstream request based on the drop percentage defined for the upstream target (see proxy feature)
-- `Proxy-Goto-Response-Dropped`: sent back with response when the proxy drops the upstream response based on the drop percentage defined for the upstream target (see proxy feature)
+- `Goto-Proxy-Upstream-Took_<upstream-name>`: Total roundtrip time the proxy's upstream call took
+- `Goto-Proxy-Delay`: any delay added to the request/response by `goto` as a proxy
+- `Goto-Proxy-Request-Dropped`: sent back with response when the proxy drops the downstream request based on the drop percentage defined for the upstream target (see proxy feature)
+- `Goto-Proxy-Response-Dropped`: sent back with response when the proxy drops the upstream response based on the drop percentage defined for the upstream target (see proxy feature)
+
+#### CONNECT proxy response headers
+A port in CONNECT mode (see the [CONNECT proxy](proxy/tcp/README.md#http-connect-proxy)) has headers of its own, which are none of the ones above, so the two proxies can be told apart. The proxy sends them to any client, `curl -x` included (`-v` shows the answer to the CONNECT request).
+- `Goto-Connect-Proxy-Took`: time taken by the proxy from the first byte of the request to the answer to the CONNECT request, and, in the responses of a tunnel that carries HTTP, to the head of each response
+- `Goto-Connect-Proxy-Delay`: any delay that the proxy added, in the same two places
+- `Goto-Connect-Proxy-DNS-Took`, `Goto-Connect-Proxy-Dial-Took`: how much of the time of the answer to the CONNECT request went to resolving the name of the destination, and to connecting to it (only in the answer)
+- `Goto-Connect-Proxy-Host`, `Goto-Connect-Proxy-Port`, `Goto-Connect-Proxy-Remote-Address`, `Goto-Connect-Proxy-Upstream-Status`: the identity of the proxy, the address of the client, and the status that the destination answered with (only in the responses of a tunnel that carries HTTP)
 
 #### Tunnel response headers:
 - `Goto-Tunnel-Host-<seq>`: identifies `goto` instance hosts through which this request was tunneled along with the sequence number of each instance in the tunnel chain.

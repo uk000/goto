@@ -57,6 +57,7 @@ curl -X POST localhost:8080/client/http/invoke \
   -d '{
     {
       "url": "example.com/path",
+      "proxy": "http://localhost:9000",
       "authority": "example.com",
       "method": "GET",
       "count": 2,
@@ -78,6 +79,56 @@ curl -X POST localhost:8080/client/http/invoke \
       }
     }'
 ```
+
+#### Calling via a Proxy
+The `proxy` field of a one-off call is the URL of an HTTP proxy (`http://host:port`, or `https://host:port` for a proxy that is reached over TLS; a bare `host:port` is taken as `http`) that the call goes through. The call asks the proxy for a tunnel to its target (`CONNECT host:port`), and is sent through the tunnel, for an `http` target as well as an `https` one. This is what a port of `goto` in [CONNECT mode](../proxy/tcp/README.md#http-connect-proxy), plain or TLS, serves.
+- For an `https` target (`"tls": true`) the TLS handshake with the target happens over the tunnel. The TLS settings of the call (SNI, TLS version, certificate verification, client cert, ALPN protocols) apply to the connection with the target, and the server cert is reported as for any TLS call.
+- For an `http` target the request goes through the tunnel as it would go to the target directly. If the proxy is a `goto` port, its identity is added to the `Via-Goto` header of the responses (see the proxy README), which shows in the headers of the results as well as in `Via-Goto` of the response of the API. The `Via-Goto` that the proxy adds to its answer to the CONNECT request is not part of the results.
+- The tunnel is shared by the calls of a request (`count`), and a proxy that doesn't give a tunnel (any answer to the CONNECT request that is not a success, e.g. a proxy that can only forward requests, or one that doesn't tunnel to the port of the target) fails the call with an error that says so.
+- Without `proxy`, the proxy of the environment (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`) applies as before, which is never used for localhost targets and gets `http` requests as proxy requests. With `proxy`, the proxy applies to all targets, localhost included.
+- A call that has a `proxy` is rejected (`400`) if it also has `h2` (the HTTP/2 transport has no proxy support), or if it is a TLS call that has `noSNI` or an ALPN `handshake` (the handshake over the tunnel is done by `net/http`, always with SNI and without a preamble), or if the proxy URL is not an `http`/`https` URL with a host.
+
+```
+# Go through a goto port 9000 that is in CONNECT mode, to an http target and to an https one
+curl -X POST localhost:8080/port=9000/proxy/tcp/http/connect/enable
+curl -X POST localhost:8080/client/http/invoke -d '{"url": "http://localhost:8081", "proxy": "http://localhost:9000"}'
+curl -X POST localhost:8080/client/http/invoke -d '{"url": "https://example.com", "proxy": "http://localhost:9000"}'
+```
+
+#### Timings of a One-off Call
+The response of a one-off call tells what each of its calls went through, in headers of its own. Each header is a JSON array that has a time for each call (`count`), in the order that the calls were made, like `Goto-Upstream-Status` has the statuses. A phase that a call didn't go through (an IP address has no name to resolve, a call that reuses the connection of an earlier one has nothing to connect to) is `"-"` in the array, and a header that no call has a time for is left out.
+(Header names are case-insensitive, and are sent in the canonical form of Go: `Goto-Client-Dns-Took` for `Goto-Client-DNS-Took`.)
+
+| Header | The time of |
+|---|---|
+| `Goto-Client-DNS-Took` | Resolving the name of the first hop: the proxy if the call goes through one, the target if not. |
+| `Goto-Client-TCP-Took` | Connecting to the first hop once its name is resolved. It has the wait for the other address family in it (the dialer tries the second one 300ms after the first). |
+| `Goto-Client-Proxy-TLS-Took` | The TLS handshake with the proxy, if it is an `https` one. |
+| `Goto-Client-Tunnel-Took` | The exchange that asks the proxy for the tunnel, from the connection to the proxy being ready to its answer. The proxy connects to the target before it answers, so this has the lookup and the connecting of the proxy in it. |
+| `Goto-Client-TLS-Took` | The TLS handshake with the target. |
+| `Goto-Client-Response-Head-Took` | From the request being written to the head of the response being received. This has the time that the target (and a proxy that tunnels to it) took. |
+| `Goto-Client-Body-Took` | Reading the body of the response. |
+| `Goto-Client-Total-Took` | From the start of the call to the end of the body. |
+
+The CONNECT proxy tells the time that it spent in its answer to the CONNECT request in headers of its own (`Goto-Connect-Proxy-*`, see the [proxy README](../proxy/tcp/README.md#http-connect-proxy)), which it sends to any client that opens a tunnel, `curl -x` included. The client passes them on in its response, under the same names and in the same form as the headers above: `Goto-Connect-Proxy-Took` (all of it), `Goto-Connect-Proxy-DNS-Took` (resolving the name of the target), `Goto-Connect-Proxy-Dial-Took` (connecting to it), and `Goto-Connect-Proxy-Delay` (the delay that the proxy added, if it did). The lookup and the connecting add up to a part of `Goto-Connect-Proxy-Took`, which is a part of `Goto-Client-Tunnel-Took`, and the phases add up to a part of `Goto-Client-Total-Took`: what is left is the time that the client spent on its own.
+
+So a call through a proxy shows the time of each of the three: the client in the `Goto-Client-*` headers, the proxy in the `Goto-Connect-Proxy-*` ones (and, for the requests that went through the tunnel, in the `Goto-Connect-Proxy-*` headers of the results, which are the ones of each request), and a `goto` target in the `Goto-Took` header of the results. `connectprobe` (see `tools/connectprobe`) measures the same phases from outside of the client.
+
+```
+Goto-Client-DNS-Took: ["104.2ms","-"]
+Goto-Client-TCP-Took: ["0.6ms","-"]
+Goto-Client-Tunnel-Took: ["88.1ms","-"]
+Goto-Client-Response-Head-Took: ["6.9ms","2.1ms"]
+Goto-Client-Body-Took: ["0.1ms","0.1ms"]
+Goto-Client-Total-Took: ["200ms","2.3ms"]
+Goto-Connect-Proxy-Took: ["84.3ms","-"]
+Goto-Connect-Proxy-DNS-Took: ["83.9ms","-"]
+Goto-Connect-Proxy-Dial-Took: ["0.3ms","-"]
+```
+
+Only calls that got a response are reported: a call that failed fails the request, and the error is its report.
+
+The phases are the ones of the calls, so the time that the client spends before its first call (reading the call, setting up its transport and TLS settings) is in none of them: it is the `Goto-Took` of the response of the API, less the `Goto-Client-Total-Took` of the calls. Calls over plain HTTP/2 (`h2` without `tls`) have no `dns` and `tcp` times, as the HTTP/2 transport dials without the context of the call.
 
 ###### <small> [Back to TOC](#toc) </small>
 
