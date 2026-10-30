@@ -25,7 +25,6 @@ import (
 	mcpserver "goto/pkg/ai/mcp/server"
 	airegistry "goto/pkg/ai/registry"
 	"goto/pkg/client"
-	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/job"
 	k8sApi "goto/pkg/k8s/api"
@@ -76,7 +75,7 @@ func init() {
 
 	middleware.Unintercepted = []*middleware.Middleware{
 		tunnel.TunnelCountMiddleware, tunnel.Middleware, probes.Middleware,
-		memory.Middleware, events.Middleware, metrics.Middleware,
+		memory.Middleware, metrics.Middleware,
 		body.Middleware,
 	}
 	middleware.Intercepted = []*middleware.Middleware{

@@ -18,7 +18,6 @@ package invocation
 
 import (
 	"fmt"
-	"goto/pkg/events"
 	"goto/pkg/global"
 	"log"
 )
@@ -45,8 +44,6 @@ func (tracker *InvocationTracker) logStoppingInvocation() {
 }
 
 func (tracker *InvocationTracker) logFinishedInvocation(remaining int) {
-	events.SendEventJSON(events.Client_InvocationFinished, fmt.Sprintf("%d-%s", tracker.ID, tracker.Target.Name),
-		map[string]interface{}{"id": tracker.ID, "target": tracker.Target.Name, "status": tracker.Status})
 	if global.Flags.EnableInvocationLogs {
 		log.Printf("[%s]: Invocation[%d]: finished for target [%s] with remaining requests [%d]\n",
 			global.Self.Name, tracker.ID, tracker.Target.Name, remaining)
@@ -99,7 +96,6 @@ func (tracker *InvocationTracker) reportRepeatedResponse() {
 	tracker.Status.lock.RUnlock()
 	msg := fmt.Sprintf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Response Status [%d] Repeated x[%d]",
 		global.Self.Name, tracker.ID, tracker.Target.Name, tracker.Target.URL, tracker.Target.BURLS, lastStatusCode, lastStatusCount)
-	events.SendEventJSON(events.Client_InvocationRepeatedResponse, fmt.Sprintf("%d-%s", tracker.ID, tracker.Target.Name), map[string]interface{}{"id": tracker.ID, "details": msg})
 	if global.Flags.EnableInvocationLogs {
 		log.Println(msg)
 	}
@@ -108,7 +104,6 @@ func (tracker *InvocationTracker) reportRepeatedResponse() {
 func (tracker *InvocationTracker) reportRepeatedFailure() {
 	msg := fmt.Sprintf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Failiure [%s] Repeated x[%d]",
 		global.Self.Name, tracker.ID, tracker.Target.Name, tracker.Target.URL, tracker.Target.BURLS, tracker.Status.lastError, tracker.Status.lastErrorCount)
-	events.SendEventJSON(events.Client_InvocationRepeatedFailure, fmt.Sprintf("%d-%s", tracker.ID, tracker.Target.Name), map[string]interface{}{"id": tracker.ID, "details": msg})
 	if global.Flags.EnableInvocationLogs {
 		log.Println(msg)
 	}
@@ -117,11 +112,6 @@ func (tracker *InvocationTracker) reportRepeatedFailure() {
 func (tracker *InvocationTracker) reportError(result *InvocationResult) {
 	msg := fmt.Sprintf("[%s]: Invocation[%d]: Request[%s]: Target %s, url [%s] failed to invoke with error: %s, repeat count: [%d]",
 		global.Self.Name, tracker.ID, result.Request.ID, result.TargetID, result.Request.URL, result.err.Error(), tracker.Status.lastErrorCount)
-	if tracker.Status.lastErrorCount == 0 {
-		events.SendEventJSON(events.Client_InvocationFailure,
-			fmt.Sprintf("%d-%s-%s", tracker.ID, result.TargetID, result.Request.ID),
-			map[string]interface{}{"id": tracker.ID, "details": msg})
-	}
 	if global.Flags.EnableInvocationLogs {
 		log.Println(msg)
 	}

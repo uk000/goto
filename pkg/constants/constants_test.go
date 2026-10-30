@@ -203,7 +203,7 @@ func TestLockerKeys(t *testing.T) {
 	consts := stringConstants(t, "constants.go")
 	want := map[string]string{
 		"LockerClientKey": "client", "LockerClientResultsKey": "results", "LockerInvocationsKey": "invocations",
-		"LockerEventsKey": "events", "LockerDefaultLabel": "default", "LockerCurrent": "current",
+		"LockerDefaultLabel": "default", "LockerCurrent": "current",
 		"LockerPeers": "peerLockers", "LockerAll": "all",
 	}
 	if len(consts) != len(want) {

@@ -18,7 +18,6 @@ package invocation
 
 import (
 	"fmt"
-	"goto/pkg/events"
 	"sync/atomic"
 	"time"
 )
@@ -46,7 +45,6 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
 	tracker.activate()
 	target := tracker.Target
 	time.Sleep(target.initialDelayD)
-	events.SendEventJSON(events.Client_InvocationStarted, fmt.Sprintf("%d-%s", tracker.ID, target.Name), target)
 	tracker.logStartInvocation()
 
 	doWarmupRounds(tracker)

@@ -18,16 +18,6 @@ When a delay is applied to a request, the response carries a header `Response-De
 | GET       |	/server/response/delay             | Get currently set delay |
 
 
-<br/>
-<details>
-<summary>Response Delay Events</summary>
-
-- `Delay Configured`
-- `Delay Cleared`
-- `Response Delay Applied`: generated when a configured response delay is applied to requests not explicitly asking for a delay, i.e. not generated for `/delay` API call.
-
-</details>
-
 <details>
 <summary>Response Delay API Examples</summary>
 

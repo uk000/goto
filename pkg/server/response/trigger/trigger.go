@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"goto/pkg/events"
 	"goto/pkg/invocation"
 	"goto/pkg/metrics"
 	"goto/pkg/server/middleware"
@@ -172,7 +171,6 @@ func clearTriggers(w http.ResponseWriter, r *http.Request) {
 	msg := fmt.Sprintf("Port [%s] Triggers Cleared", listenerPort)
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
-	events.SendRequestEvent("Triggers Cleared", msg, r)
 }
 
 func getTriggerCounts(w http.ResponseWriter, r *http.Request) {
@@ -352,7 +350,6 @@ func (t *Trigger) addTrigger(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, msg)
-	events.SendRequestEventJSON("Trigger Added", tt.Name, tt, r)
 }
 
 // unsafeDeleteTrigger removes the target from the maps of the Trigger, which the caller must hold the lock of. It
@@ -410,7 +407,6 @@ func (t *Trigger) removeTrigger(w http.ResponseWriter, r *http.Request) {
 		util.AddLogMessage(msg, r)
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, msg)
-		events.SendRequestEvent("Trigger Removed", msg, r)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintln(w, "No triggers")
@@ -433,7 +429,6 @@ func (t *Trigger) enableOrDisableTrigger(w http.ResponseWriter, r *http.Request)
 		util.AddLogMessage(msg, r)
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, msg)
-		events.SendRequestEvent("Trigger Enabled/Disabled", msg, r)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "Port [%s] Trigger [%s] not found\n", util.GetRequestOrListenerPort(r), name)
@@ -512,7 +507,6 @@ func (t *Trigger) invokeHTTPTargets(targets map[string]*TriggerTarget, port int,
 		target.lock.Lock()
 		target.TriggerCount++
 		target.lock.Unlock()
-		events.SendRequestEventJSON("Trigger Target Invoked", target.Name, target, r)
 		metrics.UpdateTriggerCount(target.Name)
 		is, _ := target.toInvocationSpec(r, responseHeaders)
 		if tracker, err := invocation.RegisterInvocation(port, is); err == nil {

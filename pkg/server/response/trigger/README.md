@@ -38,16 +38,5 @@
 
 </details>
 
-<details>
-<summary>Triggers Events</summary>
-
-- `Trigger Target Added`
-- `Trigger Target Removed`
-- `Trigger Target Enabled`
-- `Trigger Target Disabled`
-- `Trigger Target Invoked`
-
-</details>
-
 See [Triggers Example](docs/triggers-example.md)
 

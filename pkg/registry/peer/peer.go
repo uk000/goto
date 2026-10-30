@@ -17,10 +17,8 @@
 package peer
 
 import (
-	"fmt"
 	"goto/pkg/client/target"
 	"goto/pkg/constants"
-	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/job"
 	"goto/pkg/registry"
@@ -86,11 +84,9 @@ func registerWithRegistry(peerName string, peer *registry.Peer) bool {
 		log.Printf("Failed to register as peer to registry due to response code %d\n", resp.StatusCode)
 		return false
 	}
-	events.SendEventJSONDirect("Peer Registered", peerName, peer)
 	log.Printf("Registered as peer [%s] with registry [%s]\n", global.Self.Name, global.Self.RegistryURL)
 	data := &registry.PeerData{}
 	if err := util.ReadJsonPayloadFromBody(resp.Body, data); err == nil {
-		events.SendEventJSONDirect("Peer Startup Data", peerName, data)
 		log.Println("Read startup data from registry")
 		background.Add(1)
 		go func() {
@@ -106,7 +102,6 @@ func registerWithRegistry(peerName string, peer *registry.Peer) bool {
 }
 
 func DeregisterPeer(peerName, peerAddress string) {
-	events.SendEventDirect("Peer Deregistered", fmt.Sprintf("%s - %s", peerName, peerAddress))
 	if global.Self.RegistryURL != "" {
 		stopReminders()
 		url := global.Self.RegistryURL + "/registry/peers/" + peerName + "/remove/" + peerAddress

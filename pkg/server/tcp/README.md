@@ -113,20 +113,4 @@ In all cases, the client may close the connection proactively causing the ongoin
 
 </details>
 
-<details>
-<summary>TCP Events</summary>
-
-- `TCP Configuration Rejected`
-- `TCP Configured`
-- `TCP Connection Duration Configured`
-- `TCP Streaming Configured`
-- `TCP Expected Payload Configured`
-- `TCP Payload Validation Configured`
-- `TCP Mode Configured`
-- `TCP Connection History Cleared`
-- `New TCP Client Connection`
-- `TCP Client Connection Closed`
-
-</details>
-
 See [TCP Example](tcp-example.md)

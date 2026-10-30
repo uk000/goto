@@ -21,7 +21,6 @@ import (
 	"io"
 	"net/http"
 
-	"goto/pkg/events"
 	"goto/pkg/server/hooks"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
@@ -63,7 +62,6 @@ func trackURI(w http.ResponseWriter, r *http.Request) {
 		Tracker.Init(port, "", uri, nil)
 		hooks.GetPortHooks(port).AddHTTPHookWithListener("", uri, uri, nil, false, trackCallCounts)
 		msg = fmt.Sprintf("Port [%d] will track URI [%s]", port, uri)
-		events.SendRequestEvent("Tracking URI Added", msg, r)
 		w.WriteHeader(http.StatusOK)
 	} else {
 		msg = "Invalid URI"
@@ -82,7 +80,6 @@ func trackHeaders(w http.ResponseWriter, r *http.Request) {
 		// without a URI would match every request, and count every URI that gets requested.
 		Tracker.initHeaders(port, "", headers)
 		msg = fmt.Sprintf("Port [%d] will track Headers [%+v]", port, headers)
-		events.SendRequestEvent("Tracking Headers Added", msg, r)
 	} else {
 		msg = "Invalid Headers"
 		w.WriteHeader(http.StatusBadRequest)
@@ -102,7 +99,6 @@ func trackURIAndHeaders(w http.ResponseWriter, r *http.Request) {
 		// headers to the hook too would have the hooks middleware count the request a second time (see Track).
 		hooks.GetPortHooks(port).AddHTTPHookWithListener("", uri, uri, nil, false, trackCallCounts)
 		msg = fmt.Sprintf("Port [%d] will track URI [%s] and Headers [%+v]", port, uri, headers)
-		events.SendRequestEvent("Tracking URI and Headers Added", msg, r)
 	} else {
 		msg = "Invalid URI/Headers"
 		w.WriteHeader(http.StatusBadRequest)
@@ -122,7 +118,6 @@ func trackURIAndHeaderValue(w http.ResponseWriter, r *http.Request) {
 		// As above: the hook matches the URI only. The counts of the header are kept per value.
 		hooks.GetPortHooks(port).AddHTTPHookWithListener("", uri, uri, nil, false, trackCallCounts)
 		msg = fmt.Sprintf("Port [%d] will track URI [%s] with Header:Value [%s:%s]", port, uri, header, value)
-		events.SendRequestEvent("Tracking URI and Headers Added", msg, r)
 	} else {
 		msg = "Invalid URI/Header/Value"
 		w.WriteHeader(http.StatusBadRequest)
@@ -140,7 +135,6 @@ func addHeaders(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if headers := Tracker.initRequestHeaders("", r); headers != nil {
 		msg = fmt.Sprintf("Port [%s] will track headers %s", util.GetRequestOrListenerPort(r), headers)
-		events.SendRequestEvent("Tracking Headers Added", msg, r)
 		w.WriteHeader(http.StatusOK)
 	} else {
 		msg = "Cannot add. Invalid header"
@@ -155,7 +149,6 @@ func removeHeaders(w http.ResponseWriter, r *http.Request) {
 	headers, present := Tracker.removeHeaders("", r)
 	if present {
 		msg = fmt.Sprintf("Port [%s] tracking headers %s removed", util.GetRequestOrListenerPort(r), headers)
-		events.SendRequestEvent("Tracking Headers Removed", msg, r)
 		w.WriteHeader(http.StatusOK)
 	} else {
 		msg = "No headers to remove"
@@ -169,7 +162,6 @@ func clearHeaders(w http.ResponseWriter, r *http.Request) {
 	Tracker.clear("", r)
 	msg := fmt.Sprintf("Port [%s] tracking headers cleared", util.GetRequestOrListenerPort(r))
 	util.AddLogMessage(msg, r)
-	events.SendRequestEvent("Tracking Headers Cleared", msg, r)
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, msg)
 }
@@ -181,7 +173,6 @@ func clearHeaderCounts(w http.ResponseWriter, r *http.Request) {
 	} else {
 		msg = fmt.Sprintf("Port [%s] tracking counts reset for all headers", util.GetRequestOrListenerPort(r))
 	}
-	events.SendRequestEvent("Tracked Header Counts Cleared", msg, r)
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
 }

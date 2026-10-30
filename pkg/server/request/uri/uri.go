@@ -25,7 +25,6 @@ import (
 	"time"
 
 	. "goto/pkg/constants"
-	"goto/pkg/events"
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/middleware"
 	"goto/pkg/server/response/trigger"
@@ -116,15 +115,12 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 				uriStatusByPort[port][matchURI] = &URIStatusConfig{URI: matchURI, Glob: glob, Statuses: statusCodes, Times: times}
 				if times > 0 {
 					msg = fmt.Sprintf("Port [%s] URI [%s] status set to %d for next [%d] calls", port, uri, statusCodes, times)
-					events.SendRequestEvent("URI Status Configured", msg, r)
 				} else {
 					msg = fmt.Sprintf("Port [%s] URI [%s] status set to %d forever", port, uri, statusCodes)
-					events.SendRequestEvent("URI Status Configured", msg, r)
 				}
 			} else {
 				delete(uriStatusByPort[port], matchURI)
 				msg = fmt.Sprintf("Port [%s] URI [%s] status cleared", port, uri)
-				events.SendRequestEvent("URI Status Cleared", msg, r)
 			}
 			w.WriteHeader(http.StatusOK)
 		}
@@ -166,15 +162,12 @@ func setDelay(w http.ResponseWriter, r *http.Request) {
 			uriDelayByPort[port][matchURI] = &DelayConfig{URI: matchURI, Glob: glob, Delay: delay, Times: times}
 			if times > 0 {
 				msg = fmt.Sprintf("Port [%s] will delay next [%d] requests for URI [%s] by [%s]", port, times, uri, delay)
-				events.SendRequestEvent("URI Delay Configured", msg, r)
 			} else {
 				msg = fmt.Sprintf("Port [%s] will delay all requests for URI [%s] by [%s] forever", port, uri, delay)
-				events.SendRequestEvent("URI Delay Configured", msg, r)
 			}
 		} else {
 			delete(uriDelayByPort[port], matchURI)
 			msg = fmt.Sprintf("Port [%s] URI [%s] delay cleared", port, uri)
-			events.SendRequestEvent("URI Delay Cleared", msg, r)
 		}
 		w.WriteHeader(http.StatusOK)
 	} else {
@@ -215,7 +208,6 @@ func clearURICallCounts(w http.ResponseWriter, r *http.Request) {
 	msg := fmt.Sprintf("Port [%s] URI Call Counts Cleared", port)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
-	events.SendRequestEvent("URI Call Counts Cleared", msg, r)
 }
 
 func enableURICallCounts(w http.ResponseWriter, r *http.Request) {
@@ -225,7 +217,6 @@ func enableURICallCounts(w http.ResponseWriter, r *http.Request) {
 	msg := fmt.Sprintf("Port [%s] URI Call Counts Enabled", util.GetRequestOrListenerPort(r))
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
-	events.SendRequestEvent("URI Call Counts Enabled", msg, r)
 }
 
 func disableURICallCounts(w http.ResponseWriter, r *http.Request) {
@@ -235,7 +226,6 @@ func disableURICallCounts(w http.ResponseWriter, r *http.Request) {
 	msg := fmt.Sprintf("Port [%s] URI Call Counts Disabled", util.GetRequestOrListenerPort(r))
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
-	events.SendRequestEvent("URI Call Counts Disabled", msg, r)
 }
 
 // validStatuses tells if the given statuses can be used. A single 0 is valid too, as it clears the status of a URI.
@@ -448,7 +438,6 @@ func computeURIStatus(uri, port string, uriStatus *URIStatusConfig, r *http.Requ
 		msg = fmt.Sprintf("Reporting URI status: [%d] for URI [%s].", statusToReport, uri)
 	}
 	util.AddLogMessage(msg, r)
-	events.SendRequestEvent("URI Status Applied", msg, r)
 	return statusToReport
 }
 
@@ -481,7 +470,6 @@ func applyURIDelay(uri, port string, uriDelay *DelayConfig, r *http.Request, w h
 	if delay > 0 {
 		msg := fmt.Sprintf("Delaying URI [%s] by [%s]. Remaining delay count [%d]", uri, delay, delayTimesLeft-1)
 		util.AddLogMessage(msg, r)
-		events.SendRequestEvent("URI Delay Applied", msg, r)
 		w.Header().Add(HeaderGotoResponseDelay, delay.String())
 		time.Sleep(delay)
 	}
@@ -536,7 +524,6 @@ func middlewareFunc(next http.Handler) http.Handler {
 			irw.StatusCode = http.StatusOK
 		}
 		rs.StatusCode = irw.StatusCode
-		util.UpdateTrafficEventStatusCode(r, irw.StatusCode)
 		trigger.RunTriggers(r, irw, irw.StatusCode)
 	})
 }

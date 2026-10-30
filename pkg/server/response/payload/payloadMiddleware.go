@@ -132,7 +132,6 @@ func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload,
 		}
 	}
 	util.AddLogMessage(msg, r)
-	util.UpdateTrafficEventDetails(r, "Response Payload Applied")
 }
 
 func handleURI(w http.ResponseWriter, r *http.Request) {

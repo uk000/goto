@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
 	"goto/pkg/types"
@@ -125,7 +124,6 @@ func (tcp *TCPConnectionHandler) processRequest() {
 	if !global.Funcs.IsListenerOpen(tcp.Port) {
 		log.Printf("[Listener: %s][Request: %d]: Listener is closed for port [%d]", tcp.ListenerID, tcp.requestID, tcp.Port)
 	}
-	events.SendEventJSONForPort(tcp.Port, "TCP Client Connection Closed", tcp.ListenerID, tcp.status)
 }
 
 func (tcp *TCPConnectionHandler) doSilentLife() {

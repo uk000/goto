@@ -61,18 +61,6 @@ In addition to request routing, the `goto` proxy also offers some chaos features
 
 </details>
 
-<details>
-<summary>Proxy Events</summary>
-
-- `Proxy Target Rejected`
-- `Proxy Target Added`
-- `Proxy Target Removed`
-- `Proxy Target Enabled`
-- `Proxy Target Disabled`
-- `Proxy Target Invoked`
-
-</details>
-
 See [Proxy Example](../../docs/proxy-example.md)
 
 

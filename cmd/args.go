@@ -70,8 +70,6 @@ type ServerArgs struct {
 	ShutdownDelay       string
 	Registry            string
 	Locker              string
-	Events              string
-	PublishEvents       string
 	Certs               string
 	ServerLogs          string
 	AdminLogs           string
@@ -81,7 +79,6 @@ type ServerArgs struct {
 	InvocationLogs      string
 	RegistryLogs        string
 	LockerLogs          string
-	EventsLogs          string
 	ReminderLogs        string
 	PeerHealthLogs      string
 	ProxyDebugLogs      string
@@ -183,8 +180,6 @@ var (
 		ShutdownDelay:       "shutdownDelay",
 		Registry:            "registry",
 		Locker:              "locker",
-		Events:              "events",
-		PublishEvents:       "publishEvents",
 		Certs:               "certs",
 		ServerLogs:          "serverLogs",
 		AdminLogs:           "adminLogs",
@@ -194,7 +189,6 @@ var (
 		InvocationLogs:      "invocationLogs",
 		RegistryLogs:        "registryLogs",
 		LockerLogs:          "lockerLogs",
-		EventsLogs:          "eventsLogs",
 		ReminderLogs:        "reminderLogs",
 		PeerHealthLogs:      "peerHealthLogs",
 		ProxyDebugLogs:      "proxyDebugLogs",
@@ -222,8 +216,6 @@ var (
 		ShutdownDelay:       "Delay Server Shutdown (seconds)",
 		Registry:            "Registry URL for Peer Registration",
 		Locker:              "Store Results in Registry Locker",
-		Events:              "Generate and store events on local instance",
-		PublishEvents:       "Publish events to registry (if events are enabled)",
 		Certs:               "Directory Path for TLS Certificates",
 		ServerLogs:          "Enable/Disable All Server Logs",
 		AdminLogs:           "Enable/Disable Admin Logs",
@@ -233,7 +225,6 @@ var (
 		InvocationLogs:      "Enable/Disable Client's Target Invocation Logs",
 		RegistryLogs:        "Enable/Disable All Registry Logs",
 		LockerLogs:          "Enable/Disable Registry Locker Logs",
-		EventsLogs:          "Enable/Disable Registry Peer Events Logs",
 		ReminderLogs:        "Enable/Disable Registry Reminder Logs",
 		PeerHealthLogs:      "Enable/Disable Registry-to-Peer Health Check Logs",
 		ProxyDebugLogs:      "Enable/Disable Proxy Debug Logs",
@@ -315,8 +306,6 @@ func setupServerArgs() {
 	stringFlag(&global.Self.Name, sa.Label, "l", sh.Label, "")
 	stringFlag(&global.Self.RegistryURL, sa.Registry, "", sh.Registry, "")
 	boolFlag(&global.Flags.UseLocker, sa.Locker, "", sh.Locker, false)
-	boolFlag(&global.Flags.EnableEvents, sa.Events, "", sh.Events, false)
-	boolFlag(&global.Flags.PublishEvents, sa.PublishEvents, "", sh.PublishEvents, false)
 	boolFlag(&global.Flags.EnableServerLogs, sa.ServerLogs, "", sh.ServerLogs, true)
 	boolFlag(&global.Flags.EnableAdminLogs, sa.AdminLogs, "", sh.AdminLogs, true)
 	boolFlag(&global.Flags.EnableMetricsLogs, sa.MetricsLogs, "", sh.MetricsLogs, true)
@@ -325,7 +314,6 @@ func setupServerArgs() {
 	boolFlag(&global.Flags.EnableInvocationLogs, sa.InvocationLogs, "", sh.InvocationLogs, true)
 	boolFlag(&global.Flags.EnableRegistryLogs, sa.RegistryLogs, "", sh.RegistryLogs, true)
 	boolFlag(&global.Flags.EnableRegistryLockerLogs, sa.LockerLogs, "", sh.LockerLogs, false)
-	boolFlag(&global.Flags.EnableRegistryEventsLogs, sa.EventsLogs, "", sh.EventsLogs, false)
 	boolFlag(&global.Flags.EnableRegistryReminderLogs, sa.ReminderLogs, "", sh.ReminderLogs, false)
 	boolFlag(&global.Flags.EnablePeerHealthLogs, sa.PeerHealthLogs, "", sh.PeerHealthLogs, true)
 	boolFlag(&global.Flags.EnableProxyDebugLogs, sa.ProxyDebugLogs, "", sh.ProxyDebugLogs, false)
@@ -397,27 +385,16 @@ func initListeners() {
 }
 
 func setupRegistryConfigs() {
-	if global.Flags.EnableEvents {
-		log.Println("Will generate and store events locally")
-	}
 	if global.Self.RegistryURL != "" {
 		log.Printf("Registry [%s]\n", global.Self.RegistryURL)
 		if global.Flags.UseLocker {
 			log.Printf("Will Store Results in Locker at Registry [%s]\n", global.Self.RegistryURL)
-		}
-		if global.Flags.EnableEvents && global.Flags.PublishEvents {
-			log.Println("Will publish events to registry")
 		}
 	}
 	if global.Flags.EnableRegistryLockerLogs {
 		log.Println("Will Print Registry Locker Logs")
 	} else {
 		log.Println("Will Not Print Registry Locker Logs")
-	}
-	if global.Flags.EnableRegistryEventsLogs {
-		log.Println("Will Print Registry Peer Events Logs")
-	} else {
-		log.Println("Will Not Print Registry Peer Events Logs")
 	}
 	if global.Flags.EnableRegistryReminderLogs {
 		log.Println("Will Print Registry Reminder Logs")

@@ -18,7 +18,6 @@ package job
 
 import (
 	"fmt"
-	"goto/pkg/events"
 	"goto/pkg/invocation"
 	"goto/pkg/util"
 	"log"
@@ -156,7 +155,6 @@ func (jm *JobManager) executeJobRun(job *Job, jobRun *JobRunContext) {
 	job.lock.Unlock()
 
 	log.Printf("Jobs: Job [%s] Run [%d] Started \n", job.Name, jobRun.id)
-	events.SendEventJSON(events.Jobs_JobStarted, job.Name, map[string]interface{}{"job": job, "jobRun": jobRun.id})
 
 	time.Sleep(initialDelay)
 	for i := 0; i < count; i++ {
@@ -182,7 +180,6 @@ func (jm *JobManager) executeJobRun(job *Job, jobRun *JobRunContext) {
 	}
 	msg := fmt.Sprintf("Jobs: Job [%s] Run [%d] Finished", job.Name, jobRun.id)
 	log.Println(msg)
-	events.SendEvent(events.Jobs_JobFinished, msg)
 
 	if finishTrigger != nil {
 		var payload []byte
@@ -242,7 +239,6 @@ func (jm *JobManager) stopJob(j string) bool {
 			}
 		}
 		jobRun.lock.Unlock()
-		events.SendEventJSON(events.Jobs_JobStopped, job.Name, job)
 	}
 	return true
 }

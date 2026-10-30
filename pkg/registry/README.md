@@ -169,14 +169,14 @@ These APIs manage client invocation targets on peers, allowing to add, remove, s
 
 #### Lockers Data Read APIs
 
-These APIs read either all contents of one or more lockers, or read data stored at specific paths/keys. Where applicable, query param `data` controls whether locker is returned with or without stored data (default value is `n` and only locker metadata is fetched). Query param `events` controls whether the locker is returned with or without peers' events data. Query param `peers` controls whether the returned locker(s) should include peer sub-lockers (containing data published by various peers). Query param `level` controls how many levels of subkeys are returned (default level is 2). Label `current` can be used with APIs that take a locker label param to get data from the currently active locker. Comma-separated labels can be used to read from a nested locker.
+These APIs read either all contents of one or more lockers, or read data stored at specific paths/keys. Where applicable, query param `data` controls whether locker is returned with or without stored data (default value is `n` and only locker metadata is fetched). Query param `peers` controls whether the returned locker(s) should include peer sub-lockers (containing data published by various peers). Query param `level` controls how many levels of subkeys are returned (default level is 2). Label `current` can be used with APIs that take a locker label param to get data from the currently active locker. Comma-separated labels can be used to read from a nested locker.
 
 #### <a name="locker-data-read-apis"></a>
 |METHOD            |URI                                             |Description|
 |------------------|------------------------------------------------|-----------|
 | GET              | /registry/lockers/{label}/get/{path}?data={data}&level={level} | Get data from a locker |
 | GET       | /registry/lockers/labels | Get a list of all existing locker labels, regardless of whether or not it has data.  |
-| GET              | /registry/lockers?data={data}&events={events}&peers={peers}&level={level} | Get all lockers data with events and peers |
+| GET              | /registry/lockers?data={data}&peers={peers}&level={level} | Get all lockers data with peers |
 | GET      | /registry/lockers<br/>/`{label}`/data/keys| Get a list of keys where some data is stored, from the given locker. |
 | GET      | /registry/lockers<br/>/`{label}`/data/paths| Get a list of key paths (URIs) where some data is stored, from the given locker. The returned URIs are valid for invocation against the base URL of the registry. |
 | GET      | /registry/lockers<br/>/data/keys| Get a list of keys where some data is stored, from all lockers.  |
@@ -190,7 +190,7 @@ These APIs read either all contents of one or more lockers, or read data stored 
 
 #### Lockers Peers Data Read APIs
 
-These APIs read either all contents of one or more lockers, or read data stored at specific paths/keys. Where applicable, query param `data` controls whether locker is returned with or without stored data (default value is `n` and only locker metadata is fetched). Query param `events` controls whether the locker is returned with or without peers' events data. Query param `peers` controls whether the returned locker(s) should include peer sub-lockers (containing data published by various peers). Query param `level` controls how many levels of subkeys are returned (default level is 2). Label `current` can be used with APIs that take a locker label param to get data from the currently active locker. Comma-separated labels can be used to read from a nested locker.
+These APIs read either all contents of one or more lockers, or read data stored at specific paths/keys. Where applicable, query param `data` controls whether locker is returned with or without stored data (default value is `n` and only locker metadata is fetched). Query param `peers` controls whether the returned locker(s) should include peer sub-lockers (containing data published by various peers). Query param `level` controls how many levels of subkeys are returned (default level is 2). Label `current` can be used with APIs that take a locker label param to get data from the currently active locker. Comma-separated labels can be used to read from a nested locker.
 
 #### <a name="locker-peers-data-read-apis"></a>
 |METHOD            |URI                                             |Description|
@@ -215,87 +215,14 @@ These APIs read either all contents of one or more lockers, or read data stored 
 | GET       | /registry/peers<br/>/instances/client/results<br/>`[/targets={targets}]` | Get detailed invocation results for all peer instances (reported per instance) from the current locker, optionally filtered for the given targets (comma-separated list).  |
 | GET       | /registry/peers/client<br/>/results/summary<br/>`[/targets={targets}]` | Get invocation summary results for all peers from the current locker, optionally filtered for the given targets (comma-separated list).  |
 | GET       | /registry/peers<br/>/client/results<br/>`[/targets={targets}]` | Get invocation summary results for all peers from the current locker, optionally filtered for the given targets (comma-separated list).  |
-| GET       | /registry/peers<br/>/`{peer}`/`{address}`/lockers?<br/>data=`[y/n]`&events=`[y/n]`<br/>&level=`{level}` | Get the peer instance's locker from the current active labeled locker. |
-| GET       | /registry/peers/`{peer}`<br/>/lockers?data=`[y/n]`<br/>&events=`[y/n]`&level=`{level}` | Get locker's data for all instances of the peer from the currently active labeled locker |
-| GET       | /registry/peers<br/>/lockers?data=`[y/n]`<br/>&events=`[y/n]`&level=`{level}` | Get the lockers of all peers from the currently active labeled locker. |
-| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/`{address}`?<br/>data=`[y/n]`&events=`[y/n]`<br/>&level=`{level}` | Get the peer instance's locker from the given labeled locker. |
-| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`?data=`[y/n]`<br/>&events=`[y/n]`&level=`{level}` | Get the lockers of all instances of the given peer from the given labeled locker. |
-| GET       | /registry/lockers/`{label}`<br/>/peers?data=`[y/n]`<br/>&events=`[y/n]`&level=`{level}` | Get the lockers of all peers from the given labeled locker. |
-| GET       | /registry/lockers/`{label}`?<br/>data=`[y/n]`&events=`[y/n]`<br/>&peers=`[y/n]`&level=`{level}` | Get the given labeled locker.  |
-| GET       | /registry/lockers?<br/>data=`[y/n]`&events=`[y/n]`<br/>&peers=`[y/n]`&level=`{level}` | Get all lockers. |
+| GET       | /registry/peers<br/>/`{peer}`/`{address}`/lockers?<br/>data=`[y/n]`<br/>&level=`{level}` | Get the peer instance's locker from the current active labeled locker. |
+| GET       | /registry/peers/`{peer}`<br/>/lockers?data=`[y/n]`<br/>&level=`{level}` | Get locker's data for all instances of the peer from the currently active labeled locker |
+| GET       | /registry/peers<br/>/lockers?data=`[y/n]`<br/>&level=`{level}` | Get the lockers of all peers from the currently active labeled locker. |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`/`{address}`?<br/>data=`[y/n]`<br/>&level=`{level}` | Get the peer instance's locker from the given labeled locker. |
+| GET       | /registry/lockers/`{label}`<br/>/peers/`{peer}`?data=`[y/n]`<br/>&level=`{level}` | Get the lockers of all instances of the given peer from the given labeled locker. |
+| GET       | /registry/lockers/`{label}`<br/>/peers?data=`[y/n]`<br/>&level=`{level}` | Get the lockers of all peers from the given labeled locker. |
+| GET       | /registry/lockers/`{label}`?<br/>data=`[y/n]`<br/>&peers=`[y/n]`&level=`{level}` | Get the given labeled locker.  |
+| GET       | /registry/lockers?<br/>data=`[y/n]`<br/>&peers=`[y/n]`&level=`{level}` | Get all lockers. |
 
-
-#### Lockers Events APIs
-
-Label `current` and `all` can be used with these APIs to get data from the currently active locker or all lockers. Param `unified=y` produces a single timeline of events combined from various peers. Param `reverse=y` produces the timeline in reverse chronological order. By default events are returned with their `data` field set to `...` to reduce the amount of data returned. Param `data=y` returns the events with data. 
-
-#### <a name="locker-events-apis"></a>
-|METHOD            |URI                                             |Description|
-|------------------|------------------------------------------------|-----------|
-| POST      | /registry/peers<br/>/`{peer}`/`{address}`<br/>/events/store | API invoked by peers to publish their events to the currently active locker. Event timeline can be retrieved from the registry via various `/events` GET APIs. |
-| POST      | /registry/peers<br/>/events/flush | Requests all peer instances to publish any pending events to registry, and clears events timeline on the peer instances. Registry still retains the peers' events in the current locker. |
-| POST      | /registry/peers<br/>/events/clear | Requests all peer instances to clear their events timeline, and also removes the peers events from the current registry locker. |
-| GET       | /registry/lockers<br/>/`{label}`/peers<br/>/`{peers}`/events?<br/>reverse=`[y/n]`<br/>&data=`[y/n]` | Get the events timeline for all instances of the given peers (comma-separated list) from the given labeled locker. |
-| GET       | /registry/lockers/`{label}`<br/>/peers/events?<br/>unified=`[y/n]`<br/>&reverse=`[y/n]`<br/>&data=`[y/n]` | Get the events timeline for all instances of all peers from the given labeled locker, grouped by peer label. |
-| GET       | /registry/peers<br/>/`{peer}`/events?<br/>reverse=`[y/n]`<br/>&data=`[y/n]` | Get the events timeline for all instances of the given peer from the current locker. |
-| GET       | /registry/peers/events?<br/>unified=`[y/n]`<br/>&reverse=`[y/n]`<br/>&data=`[y/n]` | Get the events timeline for all instances of all peers from the current locker, grouped by peer label. |
-| GET       | /registry/lockers/`{label}`<br/>/peers/`{peers}`<br/>/events/search/`{text}`?<br/>reverse=`[y/n]`<br/>&data=`[y/n]` | Search in the events timeline for all instances of the given peers (comma-separated list) from the given labeled locker. |
-| GET       | /registry/lockers/`{label}`<br/>/peers/events<br/>/search/`{text}`?<br/>unified=`[y/n]`<br/>&reverse=`[y/n]`<br/>&data=`[y/n]` | Search in the events timeline of all peers from the given labeled locker, grouped by peer label. |
-| GET       | /registry/peers/`{peer}`<br/>/events/search/`{text}`?<br/>reverse=`[y/n]`&<br/>data=`[y/n]` | Search in the events timeline for all instances of the given peer from the current locker. |
-| GET       | /registry/peers/events<br/>/search/`{text}`?<br/>unified=`[y/n]`<br/>&reverse=`[y/n]`<br/>&data=`[y/n]` | Search in the events timeline of all peers from the current locker, grouped by peer label. |
-
-
-<details>
-<summary> Registry Timeline Events </summary>
-
-- `Registry: Peer Added`
-- `Registry: Peer Rejected`
-- `Registry: Peer Removed`
-- `Registry: Checked Peers Health`
-- `Registry: Cleaned Up Unhealthy Peers`
-- `Registry: Locker Opened`
-- `Registry: Locker Closed`
-- `Registry: Locker Cleared`
-- `Registry: All Lockers Cleared`
-- `Registry: Locker Data Stored`
-- `Registry: Locker Data Removed`
-- `Registry: Peer Instance Locker Cleared`
-- `Registry: Peer Locker Cleared`
-- `Registry: All Peer Lockers Cleared`
-- `Registry: Peer Events Cleared`
-- `Registry: Peer Results Cleared`
-- `Registry: Peer Target Rejected`
-- `Registry: Peer Target Added`
-- `Registry: Peer Targets Removed`
-- `Registry: Peer Targets Stopped`
-- `Registry: Peer Targets Invoked`
-- `Registry: Peer Job Rejected`
-- `Registry: Peer Job Added`
-- `Registry: Peer Job File Added`
-- `Registry: Peer Job Rejected`
-- `Registry: Peer Job Script Rejected`
-- `Registry: Peer Jobs Removed`
-- `Registry: Peer Jobs Stopped`
-- `Registry: Peer Jobs Invoked`
-- `Registry: Peers Epochs Cleared`
-- `Registry: Peers Cleared`
-- `Registry: Peer Targets Cleared`
-- `Registry: Peer Jobs Cleared`
-- `Registry: Peer Tracking Headers Added`
-- `Registry: Peer Probe Set`
-- `Registry: Peer Probe Status Set`
-- `Registry: Peer Called`
-- `Registry: Peers Copied`
-- `Registry: Lockers Dumped`
-- `Registry: Dumped`
-- `Registry: Dump Loaded`
-- `Registry: Cloned`
-
-#### Peer Timeline Events for registry interactions
-- `Peer Registered`
-- `Peer Startup Data`
-- `Peer Deregistered`
-
-</details>
 
 See [Registry Schema JSONs and APIs Examples](../../docs/registry-api-examples.md)

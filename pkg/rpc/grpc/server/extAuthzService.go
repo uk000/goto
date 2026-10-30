@@ -19,7 +19,6 @@ package grpcserver
 import (
 	"context"
 	"goto/pkg/constants"
-	"goto/pkg/events"
 	"goto/pkg/global"
 	gg "goto/pkg/rpc/grpc"
 	"goto/pkg/rpc/grpc/extauthz"
@@ -62,7 +61,6 @@ type ExtAuthzGRPCService struct {
 
 func (es *ExtAuthzGRPCService) Check(ctx context.Context, request *extauthz.CheckRequest) (*extauthz.CheckResponse, error) {
 	port := util.GetGRPCPort(ctx)
-	events.TrackPortTrafficEvent(port, "GRPC.extauthz.check", 200)
 	listenerLabel := global.Funcs.GetListenerLabelForPort(port)
 	requestHeaders, responseHeaders := SetHeaders(ctx, port, global.Self.HostLabel, listenerLabel, nil)
 	requestMiniBody := ""

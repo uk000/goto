@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	. "goto/pkg/constants"
-	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
 	httpproxy "goto/pkg/proxy/http"
@@ -81,7 +80,6 @@ func RunHttpServer() {
 	go startListeners()
 	grpcserver.StartDefaultGRPCServer()
 	peer.RegisterPeer(global.Self.Name, global.Self.Address)
-	events.SendEventJSONDirect("Server Started", global.Self.HostLabel, listeners.GetListeners())
 	WaitForHttpServer()
 }
 
@@ -142,7 +140,6 @@ func StartHttpServer(server *http.Server, jsonRPC bool) error {
 		log.Printf("Sleeping %s before starting", global.ServerConfig.StartupDelay)
 		time.Sleep(global.ServerConfig.StartupDelay)
 	}
-	events.StartSender()
 	go func(server *http.Server) {
 		time.AfterFunc(2*time.Second, func() {
 			if jsonRPC {
@@ -211,7 +208,6 @@ func WaitForHttpServer() {
 		}
 	}
 	go grpcserver.TheGRPCServer.Stop()
-	go events.StopSender()
 	log.Printf("Deregistering peer [%s : %s] from registry", global.Self.Name, global.Self.Address)
 	go peer.DeregisterPeer(global.Self.Name, global.Self.Address)
 	startup.Stop()
@@ -225,7 +221,6 @@ func StopHttpServer(server *http.Server) {
 	defer cancel()
 	time.Sleep(time.Second)
 	server.Shutdown(ctx)
-	events.SendEventJSONDirect("Server Stopped", global.Self.HostLabel, listeners.GetListeners())
 	log.Printf("HTTP Server %s finished shutting down", server.Addr)
 }
 
@@ -379,7 +374,6 @@ func withConnContext(ctx context.Context, conn net.Conn) context.Context {
 
 func PrintLogMessages(statusCode, bodyLength int, payload []byte, headers http.Header, rs *util.RequestStore) {
 	if (!rs.IsLockerRequest || global.Flags.EnableRegistryLockerLogs) &&
-		(!rs.IsPeerEventsRequest || global.Flags.EnableRegistryEventsLogs) &&
 		(!rs.IsAdminRequest || global.Flags.EnableAdminLogs) &&
 		(!rs.IsReminderRequest || global.Flags.EnableRegistryReminderLogs) &&
 		(!rs.IsProbeRequest || global.Flags.EnableProbeLogs) &&

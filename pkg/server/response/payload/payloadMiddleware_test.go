@@ -303,16 +303,6 @@ func TestMiddlewareReportsWhatItWrote(t *testing.T) {
 	}
 }
 
-func TestMiddlewareMarksTheRequestAsServedWithAPayload(t *testing.T) {
-	e := newTestEnv(t)
-	e.set(t, "/set/default", "x")
-	req := e.newRequest("GET", "/x", "")
-	e.direct.ServeHTTP(httptest.NewRecorder(), req)
-	if got := util.GetRequestStore(req).TrafficDetails; len(got) != 1 || got[0] != "Response Payload Applied" {
-		t.Errorf("traffic details = %v, want the payload to be reported as applied", got)
-	}
-}
-
 func TestMiddlewareMatchesTheURIWithItsQueryAndAnyCase(t *testing.T) {
 	e := newTestEnv(t)
 	uri := e.uri("/Mixed/Case")

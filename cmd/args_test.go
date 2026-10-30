@@ -136,9 +136,9 @@ func TestEveryFlagIsRegisteredUnderItsNames(t *testing.T) {
 		"contextFile": "ctxf", "context": "ctx",
 		"client": "", "protocol": "pr", "urls": "u", "headers": "h", "reqCount": "req", "parallel": "par", "method": "X",
 		"payload": "data", "autodata": "a", "delay": "d", "retries": "r", "retrydelay": "rd", "retryon": "ro", "persist": "", "verbose": "v",
-		"port": "p", "grpcPort": "gp", "rpcPort": "rpc", "ports": "", "cn": "", "label": "l", "registry": "", "locker": "", "events": "",
-		"publishEvents": "", "serverLogs": "", "adminLogs": "", "metricsLogs": "", "probeLogs": "", "clientLogs": "", "invocationLogs": "",
-		"registryLogs": "", "lockerLogs": "", "eventsLogs": "", "reminderLogs": "", "peerHealthLogs": "", "proxyDebugLogs": "",
+		"port": "p", "grpcPort": "gp", "rpcPort": "rpc", "ports": "", "cn": "", "label": "l", "registry": "", "locker": "",
+		"serverLogs": "", "adminLogs": "", "metricsLogs": "", "probeLogs": "", "clientLogs": "", "invocationLogs": "",
+		"registryLogs": "", "lockerLogs": "", "reminderLogs": "", "peerHealthLogs": "", "proxyDebugLogs": "",
 		"logRequestHeaders": "", "logRequestBody": "", "logRPCRequestBody": "", "logRequestMiniBody": "", "logResponseHeaders": "",
 		"logResponseBody": "", "logResponseMiniBody": "", "debug": "", "certs": "", "kubeConfig": "", "startupDelay": "", "shutdownDelay": "",
 		"startupScript": "", "config": "",
@@ -272,8 +272,8 @@ func TestSetupServerArgsDefaults(t *testing.T) {
 		}
 	}
 	for name, v := range map[string]bool{
-		"UseLocker": f.UseLocker, "EnableEvents": f.EnableEvents, "PublishEvents": f.PublishEvents, "EnableProbeLogs": f.EnableProbeLogs,
-		"EnableRegistryLockerLogs": f.EnableRegistryLockerLogs, "EnableRegistryEventsLogs": f.EnableRegistryEventsLogs,
+		"UseLocker": f.UseLocker, "EnableProbeLogs": f.EnableProbeLogs,
+		"EnableRegistryLockerLogs":   f.EnableRegistryLockerLogs,
 		"EnableRegistryReminderLogs": f.EnableRegistryReminderLogs, "EnableProxyDebugLogs": f.EnableProxyDebugLogs,
 		"LogRequestBody": f.LogRequestBody, "LogRequestMiniBody": f.LogRequestMiniBody, "LogResponseHeaders": f.LogResponseHeaders,
 		"LogResponseBody": f.LogResponseBody, "LogResponseMiniBody": f.LogResponseMiniBody, "Debug": global.Debug,
@@ -291,7 +291,7 @@ func TestSetupServerArgsParsing(t *testing.T) {
 	isolate(t)
 	setupServerArgs()
 	parse(t, "-port", "9090", "-grpcPort", "9091", "-rpcPort", "9092", "-ports", "9090,9093/tcp", "-cn", "my.cn", "-label", "my-label",
-		"-registry", "http://registry:1", "-locker", "-events", "-publishEvents", "-probeLogs", "-serverLogs=false", "-adminLogs=false",
+		"-registry", "http://registry:1", "-locker", "-probeLogs", "-serverLogs=false", "-adminLogs=false",
 		"-lockerLogs", "-logRequestBody", "-logResponseMiniBody", "-debug", "-certs", "/my/certs", "-kubeConfig", "/my/kube",
 		"-startupDelay", "5s", "-shutdownDelay", "2s", "-startupScript", "echo one", "-startupScript", "echo two", "-config", "/c1", "-config", "/c2")
 	if global.Self.ServerPort != 9090 || global.Self.GRPCPort != 9091 || global.Self.JSONRPCPort != 9092 || global.Self.Name != "my-label" || global.Self.RegistryURL != "http://registry:1" {
@@ -302,7 +302,7 @@ func TestSetupServerArgsParsing(t *testing.T) {
 		t.Errorf("server config = %+v", sc)
 	}
 	f := global.Flags
-	if !f.UseLocker || !f.EnableEvents || !f.PublishEvents || !f.EnableProbeLogs || f.EnableServerLogs || f.EnableAdminLogs || !f.EnableRegistryLockerLogs ||
+	if !f.UseLocker || !f.EnableProbeLogs || f.EnableServerLogs || f.EnableAdminLogs || !f.EnableRegistryLockerLogs ||
 		!f.LogRequestBody || !f.LogResponseMiniBody || !global.Debug {
 		t.Errorf("flags = %+v, debug = %v", f, global.Debug)
 	}
@@ -397,33 +397,22 @@ func TestProcessServerArgsWithoutListsLeavesTheConfigAsItIs(t *testing.T) {
 
 func TestSetupRegistryConfigsReportsWhatItWillDo(t *testing.T) {
 	logged := isolate(t)
-	global.Flags.EnableEvents = true
-	global.Flags.PublishEvents = true
 	global.Flags.UseLocker = true
 	global.Flags.EnableRegistryLockerLogs = true
 	global.Self.RegistryURL = "http://registry:9"
 	setupRegistryConfigs()
-	hasAll(t, logged, "Will generate and store events locally", "Registry [http://registry:9]", "Will Store Results in Locker at Registry [http://registry:9]",
-		"Will publish events to registry", "Will Print Registry Locker Logs", "Will Not Print Registry Peer Events Logs", "Will Not Print Registry Reminder Logs")
+	hasAll(t, logged, "Registry [http://registry:9]", "Will Store Results in Locker at Registry [http://registry:9]",
+		"Will Print Registry Locker Logs", "Will Not Print Registry Reminder Logs")
 }
 
 func TestSetupRegistryConfigsWithoutARegistry(t *testing.T) {
 	logged := isolate(t)
-	global.Flags.EnableEvents, global.Flags.PublishEvents, global.Flags.UseLocker = false, true, true
-	global.Flags.EnableRegistryLockerLogs, global.Flags.EnableRegistryEventsLogs, global.Flags.EnableRegistryReminderLogs = false, true, true
+	global.Flags.UseLocker = true
+	global.Flags.EnableRegistryLockerLogs, global.Flags.EnableRegistryReminderLogs = false, true
 	global.Self.RegistryURL = ""
 	setupRegistryConfigs()
-	hasNone(t, logged, "Will generate", "Registry [", "Locker at", "publish events", "Will Print Registry Locker")
-	hasAll(t, logged, "Will Not Print Registry Locker Logs", "Will Print Registry Peer Events Logs", "Will Print Registry Reminder Logs")
-}
-
-func TestSetupRegistryConfigsPublishesEventsOnlyWhenTheyAreOn(t *testing.T) {
-	logged := isolate(t)
-	global.Flags.EnableEvents, global.Flags.PublishEvents = false, true
-	global.Self.RegistryURL = "http://registry:9"
-	setupRegistryConfigs()
-	hasAll(t, logged, "Registry [http://registry:9]")
-	hasNone(t, logged, "Will publish events to registry")
+	hasNone(t, logged, "Registry [", "Locker at", "Will Print Registry Locker")
+	hasAll(t, logged, "Will Not Print Registry Locker Logs", "Will Print Registry Reminder Logs")
 }
 
 func TestSetupLogsReportsWhatItWillLog(t *testing.T) {

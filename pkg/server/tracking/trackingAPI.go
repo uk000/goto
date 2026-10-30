@@ -18,7 +18,6 @@ package tracking
 
 import (
 	"fmt"
-	"goto/pkg/events"
 	"goto/pkg/server/hooks"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
@@ -73,11 +72,11 @@ func trackURIAndHeaders(w http.ResponseWriter, r *http.Request) {
 		}
 		hooks.GetPortHooks(port).AddHTTPTracking(key, uri, util.ConvertHeadersArrayToMultiArray(headers), false)
 		msg = fmt.Sprintf("Port [%d] will track URI [%s] and Headers [%+v]", port, uri, headers)
-		events.SendRequestEvent("Tracking URI and Headers Added", msg, r)
 	} else {
 		msg = "Invalid URI/Headers"
 		w.WriteHeader(http.StatusBadRequest)
 	}
+	util.AddLogMessage(msg, r)
 }
 
 func trackURIAndHeaderValue(w http.ResponseWriter, r *http.Request) {
@@ -97,11 +96,11 @@ func trackURIAndHeaderValue(w http.ResponseWriter, r *http.Request) {
 		}
 		hooks.GetPortHooks(port).AddHTTPTracking(key, uri, hooks.Headers{[2]string{header, value}}, false)
 		msg = fmt.Sprintf("Port [%d] will track URI [%s] with Header:Value [%s:%s]", port, uri, header, value)
-		events.SendRequestEvent("Tracking URI and Headers Added", msg, r)
 	} else {
 		msg = "Invalid URI/Header/Value"
 		w.WriteHeader(http.StatusBadRequest)
 	}
+	util.AddLogMessage(msg, r)
 }
 
 func clear(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +109,6 @@ func clear(w http.ResponseWriter, r *http.Request) {
 	Tracker.clear(port, key)
 	msg := fmt.Sprintf("Port [%d] Key [%s] tracking cleared", port, key)
 	util.AddLogMessage(msg, r)
-	events.SendRequestEvent("Tracking Cleared", msg, r)
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, msg)
 }
@@ -120,7 +118,6 @@ func clearCounts(w http.ResponseWriter, r *http.Request) {
 	key := util.GetStringParamValue(r, "key")
 	Tracker.clearCounts(port, key)
 	msg := fmt.Sprintf("Port [%d] Key [%s] tracking counts cleared", port, key)
-	events.SendRequestEvent("Tracking Counts Cleared", msg, r)
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
 }

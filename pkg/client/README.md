@@ -15,7 +15,7 @@ As a client tool, `goto` offers the feature to configure multiple targets and se
 
 The invocation results get accumulated across multiple invocations until cleared explicitly. Various results APIs can be used to read the accumulated results. Clearing of all results resets the invocation counter too, causing the next invocation to start at counter 1 again. When a peer is connected to a registry instance, it stores all its invocation results in a registry locker. The peer publishes its invocation results to the registry at an interval of 3-5 seconds depending on the flow of results. See Registry APIs for detail on how to query results accumulated from multiple peers.
 
-In addition to keeping the results in the `goto` client instance, those are also stored in a locker on the registry instance if enabled. (See `--locker` command arg). Various events are added to the peer timeline related to target invocations it performs, which are also reported to the registry. These events can be seen in the event timeline on the peer instance as well as its event timeline from the registry.
+In addition to keeping the results in the `goto` client instance, those are also stored in a locker on the registry instance if enabled. (See `--locker` command arg).
 
 Client sends header `From-Goto-Host` to pass its identity to the server.
 
@@ -137,30 +137,3 @@ See [Client JSON Schemas](../../docs/client-api-json-schemas.md)
 See [Client APIs and Results Examples](../../docs/client-api-examples.md)
 
 See [Client GRPC Examples](../../docs/grpc-client-examples.md)
-
-
-
-#### Client Events
-<details>
-<summary>Client Events List</summary>
-
-- `Target Added`: an invocation target was added
-- `Targets Removed`: one or more invocation targets were removed
-- `Targets Cleared`: all invocation targets were removed
-- `Tracking Headers Added`: headers added for tracking against invocation responses
-- `Tracking Headers Cleared`: all tracking headers were removed
-- `Tracking Time Buckets Added`: time buckets added for tracking against invocation responses
-- `Tracking Time Buckets Cleared`: all tracking time buckets were removed
-- `Client CA Cert Stored`: CA cert was added for validating TLS cert presented by target
-- `Client CA Cert Removed`: CA cert was removed
-- `Results Cleared`: all collected invocation results were cleared
-- `Target Invoked`: one or more invocation targets were invoked
-- `Targets Stopped`: one or more invocation targets were stopped
-- `Invocation Started`: invocation started for a target
-- `Invocation Finished`: invocation finished for a target
-- `Invocation Response Status`: Either first invocation response received, or the HTTP response status was different from previous response from a target during an invocation
-- `Invocation Repeated Response Status`: All HTTP responses after the first response from a target where the response status code was the same as the previous, are accumulated and reported in summary. This event is sent out when the next response is found to carry a different response status code, or if all requests to a target completed for an invocation.
-- `Invocation Failure`: Event reported upon first failed request, or if a request fails after previous successful request.
-- `Invocation Repeated Failure`: All request failures after a failed request are accumulated and reported in summary, either when the next request succeeds or when the invocation completes.
-</details>
-<br/>

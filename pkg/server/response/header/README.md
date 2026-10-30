@@ -12,16 +12,6 @@ This feature allows adding custom response headers to all responses sent by the 
 | POST      |	/server/response<br/>/headers/clear                 | Remove all configured custom response headers |
 | GET       |	/server/response/headers                       | Get list of configured custom response headers |
 
-<br/>
-<details>
-<summary>Response Headers Events</summary>
-
-- `Response Header Added`
-- `Response Header Removed`
-- `Response Header Cleared`
-
-</details>
-
 <details>
 <summary>Response Headers API Examples</summary>
 

@@ -58,7 +58,6 @@ func stubGlobalFuncs() {
 	global.Funcs.IsListenerTLS = func(int) bool { return false }
 	global.Funcs.GetCertInfo = func(int, string) (string, string) { return "", "" }
 	global.Funcs.CloseConnectionsForPort = func(int) {}
-	global.Funcs.StoreEventInCurrentLocker = func(interface{}) {}
 	util.WillTunnel = func(*http.Request, *util.RequestStore) bool { return false }
 }
 

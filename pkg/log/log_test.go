@@ -87,7 +87,6 @@ var levelRoutes = []levelRoute{
 	{"invocation/response", func(f *types.Flags) *bool { return &f.EnableInvocationResponseLogs }, "Invocation Response logging set to [%t]"},
 	{"registry", func(f *types.Flags) *bool { return &f.EnableRegistryLogs }, "All Registry logging set to [%t]"},
 	{"registry/locker", func(f *types.Flags) *bool { return &f.EnableRegistryLockerLogs }, "Registry Locker logging set to [%t]"},
-	{"registry/events", func(f *types.Flags) *bool { return &f.EnableRegistryEventsLogs }, "Registry Events logging set to [%t]"},
 	{"registry/reminder", func(f *types.Flags) *bool { return &f.EnableRegistryReminderLogs }, "Registry Reminder logging set to [%t]"},
 	{"health", func(f *types.Flags) *bool { return &f.EnablePeerHealthLogs }, "Health logging set to [%t]"},
 	{"probe", func(f *types.Flags) *bool { return &f.EnableProbeLogs }, "Probe logging set to [%t]"},
@@ -261,7 +260,7 @@ func TestGetLogLevels(t *testing.T) {
 	}
 	want := map[string]bool{
 		"server": true, "admin": false, "client": true, "invocation": false, "registry": false, "locker": true,
-		"events": false, "reminder": true, "health": false, "probe": true, "metrics": false, "proxy": true,
+		"reminder": true, "health": false, "probe": true, "metrics": false, "proxy": true,
 		"request": false, "response": true,
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -273,13 +272,13 @@ func TestGetLogLevelsFollowsChanges(t *testing.T) {
 	saveFlags(t)
 	global.Flags = types.Flags{}
 	admin("POST", "/log/probe/true")
-	admin("POST", "/log/registry/events/true")
+	admin("POST", "/log/registry/reminder/true")
 	admin("POST", "/log/request/headers/true")
 	var got map[string]bool
 	if err := json.Unmarshal(admin("GET", "/log").Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"probe", "events", "request"} {
+	for _, k := range []string{"probe", "reminder", "request"} {
 		if !got[k] {
 			t.Errorf("level %q is off after turning it on: %v", k, got)
 		}

@@ -44,18 +44,17 @@ type Triple[F any, S any, T any] struct {
 type StringTriple Triple[string, string, string]
 
 type Funcs struct {
-	GetPeers                  func(string, *http.Request) map[string]string
-	IsReadinessProbe          func(*http.Request) bool
-	IsLivenessProbe           func(*http.Request) bool
-	IsListenerPresent         func(int) bool
-	IsListenerOpen            func(int) bool
-	GetListenerID             func(int) string
-	GetListenerLabel          func(*http.Request) string
-	GetListenerLabelForPort   func(int) string
-	IsListenerTLS             func(int) bool
-	GetCertInfo               func(int, string) (string, string)
-	CloseConnectionsForPort   func(int)
-	StoreEventInCurrentLocker func(interface{})
+	GetPeers                func(string, *http.Request) map[string]string
+	IsReadinessProbe        func(*http.Request) bool
+	IsLivenessProbe         func(*http.Request) bool
+	IsListenerPresent       func(int) bool
+	IsListenerOpen          func(int) bool
+	GetListenerID           func(int) string
+	GetListenerLabel        func(*http.Request) string
+	GetListenerLabelForPort func(int) string
+	IsListenerTLS           func(int) bool
+	GetCertInfo             func(int, string) (string, string)
+	CloseConnectionsForPort func(int)
 }
 
 type ListArg []string

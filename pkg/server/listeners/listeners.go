@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/server/tcp"
 	gototls "goto/pkg/tls"
@@ -549,12 +548,10 @@ func (l *Listener) serveGRPC() {
 		return
 	}
 	if grpcStarted.Load() {
-		port := l.Port
 		msg := fmt.Sprintf("Starting GRPC Listener %s", l.ListenerID)
 		go func() {
 			log.Println(msg)
 			server.ServeListener(l)
-			events.SendEventForPort(port, "GRPC Listener Started", msg)
 		}()
 	} else {
 		server.AddListener(l)
@@ -844,8 +841,7 @@ func validateListener(w http.ResponseWriter, r *http.Request) *Listener {
 }
 
 func ValidateUDPListener(w http.ResponseWriter, r *http.Request) bool {
-	if ok, msg := util.ValidateListener(w, r); !ok {
-		events.SendRequestEvent("UDP Configuration Rejected", msg, r)
+	if ok, _ := util.ValidateListener(w, r); !ok {
 		return false
 	}
 	port := util.GetIntParamValue(r, "port")
@@ -855,7 +851,6 @@ func ValidateUDPListener(w http.ResponseWriter, r *http.Request) bool {
 		msg := fmt.Sprintf("Port %d is not a UDP listener", port)
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
-		events.SendRequestEvent("UDP Configuration Rejected", msg, r)
 		return false
 	}
 	return true
@@ -916,8 +911,6 @@ func addOrUpdateListenerAndRespond(w http.ResponseWriter, r *http.Request) {
 	if err = util.ReadJson(body, l); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("Failed to parse json with error: %s", err.Error())
-		events.SendRequestEventJSON("Listener Rejected", err.Error(),
-			map[string]interface{}{"error": err.Error(), "payload": body}, r)
 		util.AddLogMessage(msg, r)
 		fmt.Fprintln(w, msg)
 		return
@@ -949,7 +942,6 @@ func AddOrUpdateListener(l *Listener) (error, string) {
 		l.TCP, msg = tcp.InitTCPConfig(l.Port, l.TCP)
 	}
 	if msg != "" {
-		events.SendEventJSON("Listener Rejected", msg, l)
 		return errors.New(msg), msg
 	}
 
@@ -960,25 +952,20 @@ func AddOrUpdateListener(l *Listener) (error, string) {
 		if l.ReopenListener() {
 			l.store()
 			msg = fmt.Sprintf("Listener %d already present, restarted.", l.Port)
-			events.SendEventJSON("Listener Updated", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
 		} else {
 			msg = fmt.Sprintf("Listener %d already present, failed to restart.", l.Port)
-			events.SendEventJSON("Listener Updated", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
 		}
 	} else {
 		if l.Open {
 			if l.openListener(true) {
 				l.store()
 				msg = fmt.Sprintf("Listener %d added and opened.", l.Port)
-				events.SendEventJSON("Listener Added", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
 			} else {
 				msg = fmt.Sprintf("Listener %d added but failed to open.", l.Port)
-				events.SendEventJSON("Listener Added", l.HostLabel, map[string]interface{}{"listener": l, "status": msg})
 			}
 		} else {
 			l.store()
 			msg = fmt.Sprintf("Listener %d added.", l.Port)
-			events.SendEventJSON("Listener Added", l.ListenerID, map[string]interface{}{"listener": l, "status": msg})
 		}
 	}
 	listenersLock.Lock()
@@ -1023,10 +1010,8 @@ func addListenerCertOrKey(w http.ResponseWriter, r *http.Request, isKey bool) {
 			msg = err.Error()
 		} else if isKey {
 			msg = fmt.Sprintf("Key added for listener %d\n", l.Port)
-			events.SendRequestEvent("Listener Key Added", msg, r)
 		} else {
 			msg = fmt.Sprintf("Cert added for listener %d\n", l.Port)
-			events.SendRequestEvent("Listener Cert Added", msg, r)
 		}
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
@@ -1185,7 +1170,6 @@ func SetListenerLabel(r *http.Request) string {
 		DefaultLabel = label
 		DefaultListener.Label = label
 	}
-	events.SendRequestEvent("Listener Label Updated", label, r)
 	return label
 }
 

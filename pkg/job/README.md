@@ -93,19 +93,4 @@ Jobs can also trigger another job for each line of output produced, as well as u
 
 </details>
 
-<details>
-<summary> Jobs Timeline Events </summary>
-
-- `Job Added`
-- `Job Script Stored`
-- `Job File Stored`
-- `Jobs Removed`
-- `Jobs Cleared`
-- `Job Results Cleared`
-- `Job Started`
-- `Job Finished`
-- `Job Stopped`
-
-</details>
-
 See [Jobs Example](../../docs/jobs-example.md)

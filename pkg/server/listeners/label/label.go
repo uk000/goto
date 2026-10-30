@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"goto/pkg/events"
 	"goto/pkg/server/listeners"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
@@ -43,11 +42,9 @@ func setRoutes(r *mux.Router) {
 func setLabel(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if label := listeners.SetListenerLabel(r); label == "" {
-		msg := fmt.Sprintf("Port [%s] Label Cleared", util.GetRequestOrListenerPort(r))
-		events.SendRequestEvent("Label Cleared", msg, r)
+		msg = fmt.Sprintf("Port [%s] Label Cleared", util.GetRequestOrListenerPort(r))
 	} else {
 		msg = fmt.Sprintf("Will use label %s for all responses on port %s", label, util.GetRequestOrListenerPort(r))
-		events.SendRequestEvent("Label Set", msg, r)
 	}
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)

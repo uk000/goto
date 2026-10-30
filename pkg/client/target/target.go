@@ -25,7 +25,6 @@ import (
 
 	"goto/pkg/client/results"
 	"goto/pkg/constants"
-	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/invocation"
 	"goto/pkg/util"
@@ -252,7 +251,6 @@ func (tc *TargetClient) invokeTarget(target *invocation.InvocationSpec) {
 		tc.targetsLock.Lock()
 		tc.activeTargetsCount++
 		tc.targetsLock.Unlock()
-		events.SendEventJSON(events.Client_TargetInvoked, target.Name, tracker)
 		invocation.StartInvocation(tracker)
 		tc.targetsLock.Lock()
 		tc.activeTargetsCount--

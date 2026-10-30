@@ -19,7 +19,6 @@ package target
 import (
 	"fmt"
 	"goto/pkg/client/results"
-	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/invocation"
 	"goto/pkg/server/middleware"
@@ -73,7 +72,6 @@ func addTarget(w http.ResponseWriter, r *http.Request) {
 		} else {
 			w.WriteHeader(http.StatusOK)
 			msg = fmt.Sprintf("Added target: %s", util.ToJSONText(t))
-			events.SendRequestEventJSON(events.Client_TargetAdded, t.Name, t, r)
 		}
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
@@ -91,7 +89,6 @@ func removeTargets(w http.ResponseWriter, r *http.Request) {
 		if Client.removeTargets(targets) {
 			w.WriteHeader(http.StatusOK)
 			msg = fmt.Sprintf("Targets Removed: %+v", targets)
-			events.SendRequestEventJSON(events.Client_TargetsRemoved, util.GetStringParamValue(r, "targets"), targets, r)
 		} else {
 			w.WriteHeader(http.StatusNotAcceptable)
 			msg = fmt.Sprintf("Targets cannot be removed while traffic is running")
@@ -111,7 +108,6 @@ func clearTargets(w http.ResponseWriter, r *http.Request) {
 	if Client.init() {
 		w.WriteHeader(http.StatusOK)
 		msg = "Targets cleared"
-		events.SendRequestEvent(events.Client_TargetsCleared, "", r)
 	} else {
 		w.WriteHeader(http.StatusNotAcceptable)
 		msg = fmt.Sprintf("Targets cannot be cleared while traffic is running")
@@ -143,7 +139,6 @@ func addTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 		Client.AddTrackingHeaders(h)
 		w.WriteHeader(http.StatusOK)
 		msg = fmt.Sprintf("Header %s will be tracked", h)
-		events.SendRequestEvent(events.Client_TrackingHeadersAdded, msg, r)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "Invalid header name"
@@ -157,7 +152,6 @@ func addTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 func clearTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 	Client.clearTrackingHeaders()
 	msg := "All tracking headers cleared"
-	events.SendRequestEvent(events.Client_TrackingHeadersCleared, msg, r)
 	fmt.Fprintln(w, msg)
 	if global.Flags.EnableClientLogs {
 		util.AddLogMessage(msg, r)
@@ -180,7 +174,6 @@ func addTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 		msg = "Invalid time bucket"
 	} else {
 		msg = fmt.Sprintf("Time Buckets [%s] will be tracked", b)
-		events.SendRequestEvent(events.Client_TrackingTimeBucketAdded, msg, r)
 	}
 	if global.Flags.EnableClientLogs {
 		util.AddLogMessage(msg, r)
@@ -191,7 +184,6 @@ func addTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 func clearTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 	Client.clearTrackingTimeBuckets()
 	msg := "All tracking time buckets cleared"
-	events.SendRequestEvent(events.Client_TrackingTimeBucketsCleared, msg, r)
 	fmt.Fprintln(w, msg)
 	if global.Flags.EnableClientLogs {
 		util.AddLogMessage(msg, r)
@@ -235,8 +227,7 @@ func getActiveTargets(w http.ResponseWriter, r *http.Request) {
 func clearResults(w http.ResponseWriter, r *http.Request) {
 	results.ClearResults()
 	w.WriteHeader(http.StatusOK)
-	msg := events.Client_ResultsCleared
-	events.SendRequestEvent(msg, "", r)
+	msg := "Results Cleared"
 	if global.Flags.EnableClientLogs {
 		util.AddLogMessage(msg, r)
 	}
@@ -275,7 +266,6 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
 	if hasActive {
 		w.WriteHeader(http.StatusOK)
 		msg = fmt.Sprintf("Targets %+v stopped", targets)
-		events.SendRequestEvent(events.Client_TargetsStopped, msg, r)
 	} else {
 		w.WriteHeader(http.StatusOK)
 		msg = "No targets to stop"

@@ -39,8 +39,6 @@ type SelfInfo struct {
 
 type Flags struct {
 	UseLocker                    bool
-	EnableEvents                 bool
-	PublishEvents                bool
 	EnableServerLogs             bool
 	EnableAdminLogs              bool
 	EnableClientLogs             bool
@@ -48,7 +46,6 @@ type Flags struct {
 	EnableInvocationResponseLogs bool
 	EnableRegistryLogs           bool
 	EnableRegistryLockerLogs     bool
-	EnableRegistryEventsLogs     bool
 	EnableRegistryReminderLogs   bool
 	EnablePeerHealthLogs         bool
 	EnableProbeLogs              bool

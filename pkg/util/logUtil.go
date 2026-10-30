@@ -33,29 +33,6 @@ func LogMessage(ctx context.Context, msg string) {
 	rs.LogMessages = append(rs.LogMessages, msg)
 }
 
-func UpdateTrafficEventStatusCode(r *http.Request, statusCode int) {
-	rs := GetRequestStore(r)
-	if rs != nil && !rs.IsTrafficEventReported {
-		rs.StatusCode = statusCode
-	}
-}
-
-func UpdateTrafficEventDetails(r *http.Request, details string) {
-	rs := GetRequestStore(r)
-	if !rs.IsTrafficEventReported {
-		rs.TrafficDetails = append(rs.TrafficDetails, details)
-	}
-}
-
-func ReportTrafficEvent(r *http.Request) (int, []string) {
-	rs := GetRequestStore(r)
-	if !rs.IsTrafficEventReported {
-		rs.IsTrafficEventReported = true
-		return rs.StatusCode, rs.TrafficDetails
-	}
-	return 0, nil
-}
-
 func PrintRequest(context string, r *http.Request) {
 	log.Printf("======== %s ==========\n", context)
 	if b, err := httputil.DumpRequest(r, true); err == nil {

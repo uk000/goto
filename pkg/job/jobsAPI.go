@@ -18,7 +18,6 @@ package job
 
 import (
 	"fmt"
-	"goto/pkg/events"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
@@ -62,7 +61,6 @@ func addOrUpdateJob(w http.ResponseWriter, r *http.Request) {
 		} else {
 			msg = fmt.Sprintf("Added Job: %s", util.ToJSONText(job))
 		}
-		events.SendRequestEventJSON(events.Jobs_JobAdded, job.Name, job, r)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("Failed to add job with error: %s", err.Error())
@@ -89,10 +87,8 @@ func storeJobScriptOrFile(w http.ResponseWriter, r *http.Request) {
 		}
 		if script {
 			msg = fmt.Sprintf("%s Job Script [%s] at path [%s], and Job created with name [%s]", existingOrNew, scriptName, path, scriptName)
-			events.SendRequestEvent(events.Jobs_JobScriptStored, msg, r)
 		} else {
 			msg = fmt.Sprintf("%s File [%s] at path [%s]", existingOrNew, name, path)
-			events.SendRequestEvent(events.Jobs_JobFileStored, msg, r)
 		}
 	} else {
 		msg = fmt.Sprintf("Failed to store Job file [%s] at path [%s]", name, path)
@@ -107,7 +103,6 @@ func removeJob(w http.ResponseWriter, r *http.Request) {
 	if jobs, present := util.GetListParam(r, "jobs"); present {
 		Manager.removeJobs(jobs)
 		msg = fmt.Sprintf("Jobs Removed: %s", jobs)
-		events.SendRequestEventJSON(events.Jobs_JobsRemoved, util.GetStringParamValue(r, "jobs"), jobs, r)
 	} else {
 		w.WriteHeader(http.StatusNotAcceptable)
 		msg = "No jobs"
@@ -159,14 +154,12 @@ func stopJobs(w http.ResponseWriter, r *http.Request) {
 func clearJobs(w http.ResponseWriter, r *http.Request) {
 	Manager.init()
 	msg := "Jobs Cleared"
-	events.SendRequestEvent(events.Jobs_JobsCleared, "", r)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
 
 func clearJobResults(w http.ResponseWriter, r *http.Request) {
 	msg := "Job Results Cleared"
-	events.SendRequestEvent(events.Jobs_JobResultsCleared, "", r)
 	Manager.lock.Lock()
 	Manager.jobRuns = map[string]map[int]*JobRunContext{}
 	Manager.lock.Unlock()

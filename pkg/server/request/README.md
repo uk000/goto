@@ -19,17 +19,6 @@ This feature allows tracking request counts by headers.
 |GET      | /server/request/headers/track									      | Get list of tracked headers |
 
 
-<br/>
-<details>
-<summary> Request Headers Tracking Events </summary>
-
-- `Tracking Headers Added`
-- `Tracking Headers Removed`
-- `Tracking Headers Cleared`
-- `Tracked Header Counts Cleared`
-
-</details>
-
 <details>
 <summary>Request Headers Tracking API Examples</summary>
 
@@ -110,17 +99,6 @@ This feature allows tracking request timeouts by headers.
 |GET      |	/server/request<br/>/timeout/status                   | Get a report of tracked request timeouts so far |
 
 
-<br/>
-<details>
-<summary> Request Timeout Tracking Events </summary>
-
-- `Timeout Tracking Headers Added`
-- `All Timeout Tracking Enabled`
-- `Timeout Tracking Headers Cleared`
-- `Timeout Tracked`
-
-</details>
-
 <details>
 <summary>Request Timeout Tracking API Examples</summary>
 
@@ -193,22 +171,6 @@ Note: To configure a `goto` server to respond with custom/random response payloa
 |GET     |	/server/request/uri               | Get current configurations for all configured URIs |
 
 
-<br/>
-<details>
-<summary> URIs Events </summary>
-
-- `URI Status Configured`
-- `URI Status Cleared`
-- `URI Delay Configured`
-- `URI Delay Cleared`
-- `URI Call Counts Cleared`
-- `URI Call Counts Enabled`
-- `URI Call Counts Disabled`
-- `URI Delay Applied`
-- `URI Status Applied`
-
-</details>
-
 <details>
 <summary>URI API Examples</summary>
 
@@ -273,17 +235,6 @@ This feature allows bypassing or ignoring some requests based on URIs and Header
 |GET      |	/server/request<br/>/`[ignore\|bypass]`/count               | Get ignored or bypassed request count |
 |GET      |	/server/request<br/>/`[ignore\|bypass]`                     | Get current ignore or bypass configs |
 
-
-<br/>
-<details>
-<summary>Request Filter (Ignore/Bypass) Events</summary>
-
-- `Request Filter Added`
-- `Request Filter Removed`
-- `Request Filter Status Configured`
-- `Request Filters Cleared`
-
-</details>
 
 <details>
 <summary>Request Filter (Ignore/Bypass) API Examples</summary>

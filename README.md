@@ -203,7 +203,6 @@ See [Use Cases](docs/use-cases.md) for more examples.
 - [Goto Headers](pkg/server/README.md#http-headers)
 - [Goto Server Logs](pkg/server/README.md#goto-logs)
 - [Log APIs](pkg/log/README.md)
-- [Events](pkg/events/README.md)
 - [Metrics](pkg/metrics/README.md)
 - [Listeners](pkg/server/README.md#listeners)
 - [Listener Label](pkg/server/README.md#listener-label)

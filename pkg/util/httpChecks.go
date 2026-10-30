@@ -66,10 +66,6 @@ func SetHeadersSent(r *http.Request, sent bool) {
 	GetRequestStore(r).IsHeadersSent = sent
 }
 
-func IsTrafficEventReported(r *http.Request) bool {
-	return GetRequestStore(r).IsTrafficEventReported
-}
-
 func IsAdminRequest(r *http.Request) bool {
 	return GetRequestStore(r).IsAdminRequest
 }
@@ -94,7 +90,7 @@ func CheckAdminRequest(r *http.Request) bool {
 		uri == "server" || uri == "request" || uri == "response" || uri == "listeners" ||
 		uri == "label" || uri == "registry" || uri == "client" || uri == "proxy" ||
 		uri == "job" || uri == "probes" || uri == "tcp" || uri == "grpc" || uri == "jsonrpc" ||
-		uri == "log" || uri == "events" || uri == "tunnels" || uri == "pipes" || uri == "scripts" ||
+		uri == "log" || uri == "tunnels" || uri == "pipes" || uri == "scripts" ||
 		uri == "k8s" || uri == "tls" || uri == "routing" || uri == "mcpapi" || uri == "a2a"
 }
 
@@ -108,10 +104,6 @@ func IsReminderRequest(r *http.Request) bool {
 
 func IsLockerRequest(r *http.Request) bool {
 	return GetRequestStore(r).IsLockerRequest
-}
-
-func IsPeerEventsRequest(r *http.Request) bool {
-	return GetRequestStore(r).IsPeerEventsRequest
 }
 
 func IsStatusRequest(r *http.Request) bool {

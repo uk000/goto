@@ -86,22 +86,6 @@ The application accepts the following command arguments:
           <td>* An instance can be asked to report its results to the Goto registry in case the  instance is transient, e.g. pods.</td>
         </tr>
         <tr>
-          <td rowspan="2"><pre>--events<br/>={true|false}</pre></td>
-          <td> Whether this instance should generate events and build a timeline locally. </td>
-          <td rowspan="2"> true </td>
-        </tr>
-        <tr>
-          <td>* Events timeline can be helpful in observing how various operations and traffic were interleaved, and help reason about some outcome.</td>
-        </tr>
-        <tr>
-          <td rowspan="2"><pre>--publishEvents<br/>={true|false}</pre></td>
-          <td> Whether this instance should publish its events to the registry to let registry build a unified timeline of events collected from various peer instances. This flag takes effect only if a registry URL is specified to let this instance connect to a registry instance. </td>
-          <td rowspan="2"> false </td>
-        </tr>
-        <tr>
-          <td>* Events timeline can be helpful in observing how various operations and traffic were interleaved, and help reason about some outcome.</td>
-        </tr>
-        <tr>
           <td rowspan="2"><pre>--certs `{path}`</pre></td>
           <td> Directory path from where to load TLS root certificates. </td>
           <td rowspan="2"> "/etc/certs" </td>
@@ -147,11 +131,6 @@ The application accepts the following command arguments:
         <tr>
           <td rowspan="1"><pre>--lockerLogs<br/>={true|false}</pre></td>
           <td>Enable/Disable logging of locker requests on Registry instance. </td>
-          <td rowspan="1">false</td>
-        </tr>
-        <tr>
-          <td rowspan="1"><pre>--eventsLogs<br/>={true|false}</pre></td>
-          <td>Enable/Disable logging of store event calls from peers on Registry instance. </td>
           <td rowspan="1">false</td>
         </tr>
         <tr>

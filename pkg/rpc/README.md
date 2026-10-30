@@ -65,22 +65,6 @@ The gRPC response from `goto` carries the following headers:
 - `request-host`
 - `request-...` (all custom headers)
 
-<br/>
-<details>
-<summary> GRPC Tracking Events </summary>
-
-- `GRPC Server Started`
-- `GRPC Server Stopped`
-- `GRPC Listener Started`
-- `GRPC.echo`
-- `GRPC.streamOut.start`
-- `GRPC.streamOut.end`
-- `GRPC.streamInOut.start`
-- `GRPC.streamInOut.end`
-
-</details>
-
-
 See [Goto GRPC Server Example](../../docs/grpc-server-example.md)
 
 ### Generic gRPC Server

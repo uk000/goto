@@ -18,7 +18,6 @@ package tcp
 
 import (
 	"fmt"
-	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
@@ -64,8 +63,7 @@ func setRoutes(r *mux.Router) {
 }
 
 func validateTCPListener(w http.ResponseWriter, r *http.Request) bool {
-	if ok, msg := util.ValidateListener(w, r); !ok {
-		events.SendRequestEvent("TCP Configuration Rejected", msg, r)
+	if ok, _ := util.ValidateListener(w, r); !ok {
 		return false
 	}
 	port := util.GetIntParamValue(r, "port")
@@ -74,15 +72,13 @@ func validateTCPListener(w http.ResponseWriter, r *http.Request) bool {
 		msg := fmt.Sprintf("Port %d is not a TCP listener", port)
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
-		events.SendRequestEvent("TCP Configuration Rejected", msg, r)
 		return false
 	}
 	return true
 }
 
 func configureTCP(w http.ResponseWriter, r *http.Request) {
-	if ok, msg := util.ValidateListener(w, r); !ok {
-		events.SendRequestEvent("TCP Configuration Rejected", msg, r)
+	if ok, _ := util.ValidateListener(w, r); !ok {
 		return
 	}
 	msg := ""
@@ -91,18 +87,12 @@ func configureTCP(w http.ResponseWriter, r *http.Request) {
 	if err := util.ReadJsonPayload(r, tcpConfig); err == nil {
 		if _, msg = InitTCPConfig(port, tcpConfig); msg == "" {
 			msg = fmt.Sprintf("TCP configuration applied to port %d", port)
-			// The config is what the port serves its connections with, which other requests change: it is reported as a copy.
-			lock.RLock()
-			applied := *tcpConfig
-			lock.RUnlock()
-			events.SendRequestEventJSON("TCP Configured", applied.ListenerID, &applied, r)
 		} else {
 			w.WriteHeader(http.StatusBadRequest)
 		}
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = fmt.Sprintf("Failed to parse json with error: %s", err.Error())
-		events.SendRequestEvent("TCP Configuration Rejected", msg, r)
 	}
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
@@ -354,7 +344,6 @@ func setConnectionDurationConfig(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			msg = fmt.Sprintf("Port [%d]: Invalid duration: %s", port, dur)
 		}
-		events.SendRequestEvent("TCP Connection Duration Configured", msg, r)
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
 	}
@@ -383,7 +372,6 @@ func setStreamConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
-		events.SendRequestEvent("TCP Streaming Configured", msg, r)
 	}
 }
 
@@ -400,7 +388,6 @@ func setExpectedPayloadLength(w http.ResponseWriter, r *http.Request) {
 		msg := fmt.Sprintf("Stored expected payload length [%d]", length)
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
-		events.SendRequestEvent("TCP Expected Payload Configured", msg, r)
 	}
 }
 
@@ -418,7 +405,6 @@ func setExpectedPayload(w http.ResponseWriter, r *http.Request) {
 		msg := fmt.Sprintf("Stored expected payload content of length [%d]", len(expected))
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
-		events.SendRequestEvent("TCP Expected Payload Configured", msg, r)
 	}
 }
 
@@ -445,7 +431,6 @@ func configurePayloadValidation(w http.ResponseWriter, r *http.Request) {
 		})
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
-		events.SendRequestEvent("TCP Payload Validation Configured", msg, r)
 	}
 }
 
@@ -496,7 +481,6 @@ func setModes(w http.ResponseWriter, r *http.Request) {
 		})
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
-		events.SendRequestEvent("TCP Mode Configured", msg, r)
 	}
 }
 
@@ -585,7 +569,6 @@ func clearConnectionHistory(w http.ResponseWriter, r *http.Request) {
 	lock.Unlock()
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
-	events.SendRequestEvent(msg, "", r)
 }
 
 func (tcpConfig *TCPConfig) turnOffAllModes() {

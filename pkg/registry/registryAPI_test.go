@@ -357,42 +357,21 @@ func routeCases() []routeCase {
 		rc("getDataLockers", L+"/L1/data", "GET"),
 		rc("getDataLockers", L+"/L1/data?data=y", "GET"),
 		rc("getLabeledLocker", L+"/L1", "GET"),
-		rc("getLabeledLocker", L+"/L1?data=y&events=y&peers=y&level=2", "GET"),
+		rc("getLabeledLocker", L+"/L1?data=y&peers=y&level=2", "GET"),
 		rc("getAllLockers", L, "GET"),
-		rc("getAllLockers", L+"?data=y&events=y&peers=y&level=2", "GET"),
+		rc("getAllLockers", L+"?data=y&peers=y&level=2", "GET"),
 
-		// --- peer lockers and events
+		// --- peer lockers
 		rc("storeInPeerLocker", P+"/p1/"+addr+"/locker/store/k1", "POST"),
 		rc("removeFromPeerLocker", P+"/p1/"+addr+"/locker/remove/k1", "POST"),
 		rc("storeInPeerLocker", P+"/p1/locker/store/k1", "POST"),
 		rc("removeFromPeerLocker", P+"/p1/locker/remove/k1", "POST"),
-		rc("storePeerEvent", P+"/p1/"+addr+"/events/store", "POST"),
 		rc("clearLocker", P+"/p1/"+addr+"/lockers/clear", "POST"),
 		rc("clearLocker", P+"/p1/lockers/clear", "POST"),
 		rc("clearLocker", P+"/lockers/clear", "POST"),
 		// backward compatible v0.8.x path
 		rc("clearLocker", P+"/p1/"+addr+"/locker/clear", "POST"),
 		rc("clearLocker", P+"/p1/locker/clear", "POST"),
-		rc("flushPeerEvents", P+"/events/flush", "POST"),
-		rc("clearPeerEvents", P+"/events/clear", "POST"),
-
-		rc("getPeerEvents", L+"/L1/peers/p1,p2/events", "GET"),
-		rc("getPeerEvents", L+"/L1/peers/p1,p2/events?data=y&reverse=y", "GET"),
-		rc("getPeerEvents", L+"/L1/peers/events", "GET"),
-		rc("getPeerEvents", L+"/L1/peers/events?data=y&unified=y&reverse=y", "GET"),
-		rc("getPeerEvents", P+"/p1/events", "GET"),
-		rc("getPeerEvents", P+"/p1/events?data=y&reverse=y", "GET"),
-		rc("getPeerEvents", P+"/events", "GET"),
-		rc("getPeerEvents", P+"/events?data=y&unified=y&reverse=y", "GET"),
-
-		rc("searchInPeerEvents", L+"/L1/peers/p1,p2/events/search/txt", "GET"),
-		rc("searchInPeerEvents", L+"/L1/peers/p1,p2/events/search/txt?data=y&reverse=y", "GET"),
-		rc("searchInPeerEvents", L+"/L1/peers/events/search/txt", "GET"),
-		rc("searchInPeerEvents", L+"/L1/peers/events/search/txt?data=y&unified=y&reverse=y", "GET"),
-		rc("searchInPeerEvents", P+"/p1/events/search/txt", "GET"),
-		rc("searchInPeerEvents", P+"/p1/events/search/txt?data=y&reverse=y", "GET"),
-		rc("searchInPeerEvents", P+"/events/search/txt", "GET"),
-		rc("searchInPeerEvents", P+"/events/search/txt?data=y&unified=y&reverse=y", "GET"),
 
 		rc("getTargetsResultsCompat", L+"/L1/peers/p1/targets/results", "GET"),
 		rc("getTargetsResultsCompat", L+"/L1/peers/p1/targets/results?detailed=y", "GET"),
@@ -409,19 +388,19 @@ func routeCases() []routeCase {
 		rc("getFromPeerLocker", L+"/L1/peers/p1/"+addr+"/get/k1", "GET"),
 		rc("getFromPeerLocker", L+"/L1/peers/p1/"+addr+"/locker/get/k1", "GET"),
 		rc("getPeerLocker", L+"/L1/peers/p1/"+addr, "GET"),
-		rc("getPeerLocker", L+"/L1/peers/p1/"+addr+"?data=y&events=y&level=2", "GET"),
+		rc("getPeerLocker", L+"/L1/peers/p1/"+addr+"?data=y&level=2", "GET"),
 		rc("getPeerLocker", L+"/L1/peers/p1", "GET"),
 		rc("getPeerLocker", L+"/L1/peers/p1?data=y", "GET"),
 		rc("getPeerLocker", L+"/L1/peers", "GET"),
-		rc("getPeerLocker", L+"/L1/peers?data=y&events=y&level=2", "GET"),
+		rc("getPeerLocker", L+"/L1/peers?data=y&level=2", "GET"),
 		rc("getFromPeerLocker", P+"/p1/locker/get/k1", "GET"),
 		rc("getFromPeerLocker", P+"/p1/locker/get/k1?data=y&level=1", "GET"),
 		rc("getFromPeerLocker", P+"/p1/"+addr+"/locker/get/k1", "GET"),
 		rc("getPeerLocker", P+"/p1/"+addr+"/lockers", "GET"),
-		rc("getPeerLocker", P+"/p1/"+addr+"/lockers?data=y&events=y&level=2", "GET"),
+		rc("getPeerLocker", P+"/p1/"+addr+"/lockers?data=y&level=2", "GET"),
 		rc("getPeerLocker", P+"/p1/lockers", "GET"),
 		rc("getPeerLocker", P+"/lockers", "GET"),
-		rc("getPeerLocker", P+"/lockers?data=y&events=y&level=2", "GET"),
+		rc("getPeerLocker", P+"/lockers?data=y&level=2", "GET"),
 
 		// --- targets
 		rc("addPeerTarget", P+"/p1/targets/add", "POST"),
@@ -1043,7 +1022,7 @@ func TestGetLabeledLocker(t *testing.T) {
 	assertEqual(t, "current", dig(t, locker, "current"), true)
 	assertEqual(t, "masked data", dig(t, locker, "dataLocker", "a", "b", "data"), "...")
 
-	resp = h.get(lockersPath + "/L1?data=y&events=n&peers=n&level=2")
+	resp = h.get(lockersPath + "/L1?data=y&peers=n&level=2")
 	assertEqual(t, "data", dig(t, resp.asMap(t), "dataLocker", "a", "b", "data"), "hello")
 
 	resp = h.get(lockersPath + "/current")
@@ -1054,28 +1033,19 @@ func TestGetLabeledLocker(t *testing.T) {
 	assertEqual(t, "body", resp.Body, "Locker not found")
 }
 
-func TestGetLabeledLocker_PeersAndEventsAreOptIn(t *testing.T) {
+func TestGetLabeledLocker_PeersAreOptIn(t *testing.T) {
 	h := newHarness(t)
 	h.addPeer("p1", "10.0.0.1:8080", "p1-pod")
 	h.post(peersPath+"/p1/locker/store/k1", "v1")
-	h.post(peersPath+"/p1/10.0.0.1:8080/events/store", `{"title":"Ev","summary":"s","data":"d","at":"2026-10-12T10:00:00Z","peer":"p1"}`)
 
-	plain := h.get(lockersPath + "/default?data=y&events=n&peers=n&level=2").asMap(t)
+	plain := h.get(lockersPath + "/default?data=y&peers=n&level=2").asMap(t)
 	assertEqual(t, "peer lockers hidden by default", len(dig(t, plain, "peerLockers").(map[string]interface{})), 0)
 
-	withPeers := h.get(lockersPath + "/default?data=y&events=n&peers=y&level=2").asMap(t)
+	withPeers := h.get(lockersPath + "/default?data=y&peers=y&level=2").asMap(t)
 	assertEqual(t, "peer data included", dig(t, withPeers, "peerLockers", "p1", "k1", "data"), "v1")
-	assertEqual(t, "events hidden by default", hasKey(withPeers, "peerLockers", "p1", "events"), false)
 
-	// Events need level=0 (unlimited) or a deeper level to be reported alongside peer data.
-	withEvents := h.get(lockersPath + "/default?data=y&peers=y&events=y&level=0").asMap(t)
-	// (events reported by a peer instance are kept in the locker of that instance)
-	assertEqual(t, "events included", hasKey(withEvents, "peerLockers", "p1", "instanceLockers", "10.0.0.1:8080", "events", "1"), true)
-	assertEqual(t, "peer data still included", dig(t, withEvents, "peerLockers", "p1", "k1", "data"), "v1")
-
-	// Unlike v0.8.x, peer lockers are not trimmed away at the default level (2) when events are requested.
-	trimmed := h.get(lockersPath + "/default?data=y&events=y&peers=y&level=2").asMap(t)
-	assertEqual(t, "peer data included at level 2", dig(t, trimmed, "peerLockers", "p1", "k1", "data"), "v1")
+	unlimited := h.get(lockersPath + "/default?data=y&peers=y&level=0").asMap(t)
+	assertEqual(t, "peer data included at level 0", dig(t, unlimited, "peerLockers", "p1", "k1", "data"), "v1")
 }
 
 func TestGetAllLockers(t *testing.T) {
@@ -1088,7 +1058,7 @@ func TestGetAllLockers(t *testing.T) {
 	assertEqual(t, "default present", hasKey(all, "default"), true)
 	assertEqual(t, "L1 masked", dig(t, all, "L1", "dataLocker", "a", "b", "data"), "...")
 
-	resp = h.get(lockersPath + "?data=y&peers=y&events=y&level=3")
+	resp = h.get(lockersPath + "?data=y&peers=y&level=3")
 	assertEqual(t, "L1 data", dig(t, resp.asMap(t), "L1", "dataLocker", "a", "b", "data"), "hello")
 }
 
@@ -1134,9 +1104,9 @@ func TestGetDataLockers_LevelTrimsDepth(t *testing.T) {
 	assertEqual(t, "level=0 is unlimited", dig(t, resp, "L1", "a", "b", "c", "d", "data"), "deep")
 
 	// The per-locker view and /lockers apply the same trimming.
-	assertEqual(t, "locker view level=1", hasKey(h.get(lockersPath+"/L1?data=y&events=n&peers=n&level=1").asMap(t), "dataLocker", "a", "..."), true)
-	assertEqual(t, "all lockers level=1", hasKey(h.get(lockersPath+"?data=y&events=n&peers=n&level=1").asMap(t), "L1", "dataLocker", "a", "..."), true)
-	assertEqual(t, "all lockers level=0", dig(t, h.get(lockersPath+"?data=y&events=n&peers=n&level=0").asMap(t), "L1", "dataLocker", "a", "b", "c", "d", "data"), "deep")
+	assertEqual(t, "locker view level=1", hasKey(h.get(lockersPath+"/L1?data=y&peers=n&level=1").asMap(t), "dataLocker", "a", "..."), true)
+	assertEqual(t, "all lockers level=1", hasKey(h.get(lockersPath+"?data=y&peers=n&level=1").asMap(t), "L1", "dataLocker", "a", "..."), true)
+	assertEqual(t, "all lockers level=0", dig(t, h.get(lockersPath+"?data=y&peers=n&level=0").asMap(t), "L1", "dataLocker", "a", "b", "c", "d", "data"), "deep")
 }
 
 // For /get/{path}, level is relative to the requested path.
@@ -1296,7 +1266,7 @@ func TestCloseOrClearLabeledLocker_WithoutLabelResetsAllLockersAndClearsPeers(t 
 
 			resp := h.post(lockersPath+target, "")
 			assertStatus(t, resp, http.StatusOK)
-			// Body is the per-pod result of clearing events and results on peers.
+			// Body is the per-pod result of clearing results on peers.
 			assertEqual(t, "peer results", PeerResults{"p1": {p.address(): true}}, func() PeerResults {
 				r := PeerResults{}
 				if err := json.Unmarshal([]byte(strings.TrimSpace(resp.Body)), &r); err != nil {
@@ -1304,7 +1274,6 @@ func TestCloseOrClearLabeledLocker_WithoutLabelResetsAllLockersAndClearsPeers(t 
 				}
 				return r
 			}())
-			p.assertCalled(t, "POST", "/events/clear")
 			p.assertCalled(t, "POST", "/client/results/clear")
 
 			labels := h.get(lockersPath + "/labels").asMap(t)
@@ -1326,11 +1295,8 @@ func TestGetLockerLabels_Default(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Peer lockers, peer events, targets results
+// Peer lockers, targets results
 // ---------------------------------------------------------------------------------------------
-
-const eventOne = `{"title":"Ev One","summary":"first event","data":"payload","at":"2026-10-12T10:00:00Z","peer":"p1","peerHost":"h"}`
-const eventTwo = `{"title":"Ev Two","summary":"second event","data":"payload2","at":"2026-10-12T10:00:05Z","peer":"p1","peerHost":"h"}`
 
 // v0.8.x panicked here (nil passed to util.WriteJsonPayload): with the current locker label, or without a label
 // (the peer routes under /registry/peers read the current locker), or for a key that doesn't exist.
@@ -1432,20 +1398,20 @@ func TestGetPeerLocker(t *testing.T) {
 		assertEqual(t, "p1 pod data", hasKey(all, "p1", "default", "instanceLockers", addr, "k2"), true)
 		assertEqual(t, "p2 present", hasKey(all, "p2"), true)
 
-		resp = h.get(peersPath + "/lockers?data=y&events=n&level=3")
+		resp = h.get(peersPath + "/lockers?data=y&level=3")
 		assertEqual(t, "p1 data", dig(t, resp.asMap(t), "p1", "default", "k1", "data"), "v1")
 		assertEqual(t, "p1 pod data", dig(t, resp.asMap(t), "p1", "default", "instanceLockers", addr, "k2", "x", "data"), "v2")
 	})
 
 	t.Run("one peer", func(t *testing.T) {
-		resp := h.get(peersPath + "/p1/lockers?data=y&events=n&level=3")
+		resp := h.get(peersPath + "/p1/lockers?data=y&level=3")
 		assertStatus(t, resp, http.StatusOK)
 		assertEqual(t, "p2 excluded", hasKey(resp.asMap(t), "p2"), false)
 		assertEqual(t, "p1 data", dig(t, resp.asMap(t), "p1", "default", "k1", "data"), "v1")
 	})
 
 	t.Run("one pod of a peer", func(t *testing.T) {
-		resp := h.get(peersPath + "/p1/" + addr + "/lockers?data=y&events=n&level=2")
+		resp := h.get(peersPath + "/p1/" + addr + "/lockers?data=y&level=2")
 		assertStatus(t, resp, http.StatusOK)
 		assertEqual(t, "pod data", dig(t, resp.asMap(t), "p1", "default", "k2", "x", "data"), "v2")
 	})
@@ -1454,8 +1420,8 @@ func TestGetPeerLocker(t *testing.T) {
 		for _, target := range []string{"/default/peers", "/default/peers/p1", "/default/peers/p1/" + addr, "/current/peers/p1"} {
 			assertStatus(t, h.get(lockersPath+target), http.StatusOK)
 		}
-		assertEqual(t, "p1 via label", hasKey(h.get(lockersPath+"/default/peers/p1?data=y&events=n&level=3").asMap(t), "p1"), true)
-		assertEqual(t, "p2 filtered out", hasKey(h.get(lockersPath+"/default/peers/p1?data=y&events=n&level=3").asMap(t), "p2"), false)
+		assertEqual(t, "p1 via label", hasKey(h.get(lockersPath+"/default/peers/p1?data=y&level=3").asMap(t), "p1"), true)
+		assertEqual(t, "p2 filtered out", hasKey(h.get(lockersPath+"/default/peers/p1?data=y&level=3").asMap(t), "p2"), false)
 	})
 
 	t.Run("unknown locker", func(t *testing.T) {
@@ -1473,135 +1439,6 @@ func TestGetPeerLocker(t *testing.T) {
 		assertStatus(t, resp, http.StatusOK)
 		assertEqual(t, "no peers in L1", strings.TrimSpace(resp.Body), "")
 	})
-}
-
-func TestStorePeerEvent_AndGetPeerEvents(t *testing.T) {
-	h := newHarness(t)
-	addr := "10.0.0.1:8080"
-	h.addPeer("p1", addr, "p1-pod")
-
-	t.Run("unknown peer is rejected", func(t *testing.T) {
-		resp := h.post(peersPath+"/p9/"+addr+"/events/store", eventOne)
-		assertStatus(t, resp, http.StatusBadRequest)
-		assertContains(t, resp.Body, "No Peer")
-	})
-
-	t.Run("events are numbered per peer", func(t *testing.T) {
-		resp := h.post(peersPath+"/p1/"+addr+"/events/store", eventOne)
-		assertStatus(t, resp, http.StatusOK)
-		assertContains(t, resp.Body, "Peer [p1] Instance Label ["+addr+"] event [1] stored")
-		resp = h.post(peersPath+"/p1/"+addr+"/events/store", eventTwo)
-		assertStatus(t, resp, http.StatusOK)
-		assertContains(t, resp.Body, "Peer [p1] Instance Label ["+addr+"] event [2] stored")
-	})
-
-	titles := func(resp response, peer string) []string {
-		assertStatus(t, resp, http.StatusOK)
-		events := dig(t, resp.asMap(t), peer).([]interface{})
-		titles := []string{}
-		for _, e := range events {
-			titles = append(titles, e.(map[string]interface{})["title"].(string))
-		}
-		return titles
-	}
-	firstEventData := func(resp response, peer string) interface{} {
-		return dig(t, resp.asMap(t), peer).([]interface{})[0].(map[string]interface{})["data"]
-	}
-
-	t.Run("by peer within a locker", func(t *testing.T) {
-		resp := h.get(lockersPath + "/default/peers/p1/events")
-		assertEqual(t, "titles", titles(resp, "p1"), []string{"Ev One", "Ev Two"})
-		assertEqual(t, "data is masked by default", firstEventData(resp, "p1"), "...")
-
-		resp = h.get(lockersPath + "/default/peers/p1/events?data=y&reverse=n")
-		assertEqual(t, "data", firstEventData(resp, "p1"), "payload")
-
-		resp = h.get(lockersPath + "/default/peers/p1/events?data=y&reverse=y")
-		assertEqual(t, "reversed titles", titles(resp, "p1"), []string{"Ev Two", "Ev One"})
-	})
-
-	t.Run("multiple peers by comma separated list and unknown peers", func(t *testing.T) {
-		h.addPeer("p2", "10.0.0.2:8080", "p2-pod")
-		assertEqual(t, "p1,p2", titles(h.get(lockersPath+"/default/peers/p1,p2/events"), "p1"), []string{"Ev One", "Ev Two"})
-		resp := h.get(lockersPath + "/default/peers/p9/events")
-		assertStatus(t, resp, http.StatusOK)
-		assertEqual(t, "unknown peer", resp.Body, "{}\n")
-	})
-
-	t.Run("all peers, unified", func(t *testing.T) {
-		resp := h.get(peersPath + "/events?data=y&reverse=n&unified=y")
-		assertEqual(t, "unified titles", titles(resp, "all"), []string{"Ev One", "Ev Two"})
-		// With an explicit locker, unified results are keyed by the locker label instead of "all".
-		resp = h.get(lockersPath + "/default/peers/events?data=n&reverse=n&unified=y")
-		assertEqual(t, "unified titles via locker", titles(resp, "default"), []string{"Ev One", "Ev Two"})
-	})
-
-	t.Run("locker labels current and all", func(t *testing.T) {
-		for _, label := range []string{"current", "all", "default"} {
-			assertEqual(t, label, titles(h.get(lockersPath+"/"+label+"/peers/events"), "p1"), []string{"Ev One", "Ev Two"})
-		}
-	})
-
-	t.Run("unknown locker", func(t *testing.T) {
-		resp := h.get(lockersPath + "/NOPE/peers/events")
-		assertStatus(t, resp, http.StatusNotFound)
-		assertEqual(t, "body", resp.Body, "Locker not found")
-	})
-
-	t.Run("peer name in /registry/peers/{peer}/events filters the events", func(t *testing.T) {
-		// (v0.8.x and the first main ignored {peer} here and returned the events of all peers)
-		assertEqual(t, "p1", titles(h.get(peersPath+"/p1/events"), "p1"), []string{"Ev One", "Ev Two"})
-		resp := h.get(peersPath + "/p9/events")
-		assertStatus(t, resp, http.StatusOK)
-		assertEqual(t, "unknown peer", resp.Body, "{}\n")
-		resp = h.get(peersPath + "/p2/events")
-		assertEqual(t, "peer without events", resp.Body, "{}\n")
-	})
-}
-
-func TestSearchInPeerEvents(t *testing.T) {
-	h := newHarness(t)
-	addr := "10.0.0.1:8080"
-	h.addPeer("p1", addr, "p1-pod")
-	h.post(peersPath+"/p1/"+addr+"/events/store", eventOne)
-	h.post(peersPath+"/p1/"+addr+"/events/store", eventTwo)
-
-	titles := func(resp response, peer string) []string {
-		assertStatus(t, resp, http.StatusOK)
-		titles := []string{}
-		for _, e := range dig(t, resp.asMap(t), peer).([]interface{}) {
-			titles = append(titles, e.(map[string]interface{})["title"].(string))
-		}
-		return titles
-	}
-
-	assertEqual(t, "match on title", titles(h.get(peersPath+"/events/search/Two"), "p1"), []string{"Ev Two"})
-	assertEqual(t, "match on data", titles(h.get(lockersPath+"/default/peers/p1/events/search/payload2"), "p1"), []string{"Ev Two"})
-	assertEqual(t, "regexp", titles(h.get(lockersPath+"/default/peers/events/search/Ev%20(One|Two)"), "p1"), []string{"Ev One", "Ev Two"})
-	assertEqual(t, "reverse", titles(h.get(lockersPath+"/default/peers/p1/events/search/Ev?data=n&reverse=y"), "p1"), []string{"Ev Two", "Ev One"})
-	assertEqual(t, "unified", titles(h.get(peersPath+"/events/search/Ev?data=n&reverse=n&unified=y"), "all"), []string{"Ev One", "Ev Two"})
-
-	resp := h.get(peersPath + "/events/search/payload?data=y&reverse=n")
-	assertEqual(t, "data revealed", dig(t, resp.asMap(t), "p1").([]interface{})[0].(map[string]interface{})["data"], "payload")
-	resp = h.get(peersPath + "/events/search/payload")
-	assertEqual(t, "data masked", dig(t, resp.asMap(t), "p1").([]interface{})[0].(map[string]interface{})["data"], "...")
-
-	resp = h.get(peersPath + "/events/search/zzz")
-	assertStatus(t, resp, http.StatusOK)
-	assertEqual(t, "no match", resp.Body, "{}\n")
-
-	resp = h.get(lockersPath + "/NOPE/peers/events/search/Ev")
-	assertStatus(t, resp, http.StatusNotFound)
-	assertEqual(t, "unknown locker", resp.Body, "Locker not found")
-
-	// {peer} filters on /registry/peers/{peer}/events/search/{text}, as it does on /registry/peers/{peer}/events.
-	assertEqual(t, "peer filter", titles(h.get(peersPath+"/p1/events/search/Two"), "p1"), []string{"Ev Two"})
-	assertEqual(t, "unknown peer", h.get(peersPath+"/p9/events/search/Two").Body, "{}\n")
-
-	// The text is a regular expression, an invalid one is a bad request (it used to panic the handler).
-	resp = h.get(peersPath + "/events/search/%28")
-	assertStatus(t, resp, http.StatusBadRequest)
-	assertContains(t, resp.Body, "Invalid search expression")
 }
 
 // v0.8.x paths to report client results of peers. They are kept as aliases of main's /client/results APIs, so the
@@ -1659,7 +1496,6 @@ func TestClearLocker(t *testing.T) {
 	assertCleared := func(t *testing.T, calls ...*fakePeer) {
 		t.Helper()
 		for _, p := range calls {
-			p.assertCalled(t, "POST", "/events/clear")
 			p.assertCalled(t, "POST", "/client/results/clear")
 		}
 	}
@@ -1718,31 +1554,6 @@ func TestClearLocker(t *testing.T) {
 		a.assertNoCalls(t)
 		b.assertNoCalls(t)
 	})
-}
-
-func TestFlushAndClearPeerEvents(t *testing.T) {
-	h := newHarness(t)
-	a := h.addFakePeer("p1", http.StatusOK)
-	b := h.addFakePeer("p2", http.StatusOK)
-	h.post(peersPath+"/p1/"+a.address()+"/events/store", eventOne)
-	assertEqual(t, "stored events", len(dig(t, h.get(peersPath+"/events").asMap(t), "p1").([]interface{})), 1)
-
-	resp := h.post(peersPath+"/events/flush", "")
-	assertStatus(t, resp, http.StatusOK)
-	assertEqual(t, "flush results", resp.peerResults(t), PeerResults{"p1": {a.address(): true}, "p2": {b.address(): true}})
-	a.assertCalled(t, "POST", "/events/flush")
-	b.assertCalled(t, "POST", "/events/flush")
-	assertEqual(t, "flush keeps stored events", len(dig(t, h.get(peersPath+"/events").asMap(t), "p1").([]interface{})), 1)
-
-	a.reset()
-	b.reset()
-	resp = h.post(peersPath+"/events/clear", "")
-	assertStatus(t, resp, http.StatusOK)
-	assertEqual(t, "clear results", resp.peerResults(t), PeerResults{"p1": {a.address(): true}, "p2": {b.address(): true}})
-	a.assertCalled(t, "POST", "/events/clear")
-	b.assertCalled(t, "POST", "/events/clear")
-	// Stored events are cleared in the registry too.
-	assertEqual(t, "events after clear", h.get(peersPath+"/events").Body, "{}\n")
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2416,15 +2227,15 @@ func TestGetPeersAPIs(t *testing.T) {
 	apis := decode(h.get(peersPath + "/apis"))
 	assertEqual(t, "peers", len(apis), 2)
 	all := apis["p1"]["all"]
-	assertEqual(t, "number of generic apis", len(all), 15)
+	assertEqual(t, "number of generic apis", len(all), 14)
 	assertEqual(t, "first generic api", all[0], "http://registry.test:8080/registry/peers/p1/call?uri=/version")
 	assertContains(t, strings.Join(all, " "), "/registry/peers/p1/call?uri=/client/targets", "/registry/peers/p1/call?uri=/jobs")
 
 	pod := apis["p1"]["p1-pod"]
 	assertContains(t, strings.Join(pod, " "),
 		"http://10.0.0.1:8080/version", "http://10.0.0.1:8080/client/results", "http://10.0.0.1:8080/jobs",
-		"http://registry.test:8080/registry/peers/p1/lockers?data=y&events=n&level=3",
-		"http://registry.test:8080/registry/lockers/default/peers/p1?data=y&events=n&level=3")
+		"http://registry.test:8080/registry/peers/p1/lockers?data=y&level=3",
+		"http://registry.test:8080/registry/lockers/default/peers/p1?data=y&level=3")
 	assertNotContains(t, strings.Join(pod, " "), "10.0.0.2")
 
 	single := decode(h.get(peersPath + "/p2/apis"))
@@ -2500,7 +2311,7 @@ func TestLoadRegistryDump_RestoresDumpedState(t *testing.T) {
 	p.assertNoCalls(t)
 }
 
-// Lockers survive a dump/load (and cloneFrom, which uses the same code): data, nested lockers, peer lockers, events,
+// Lockers survive a dump/load (and cloneFrom, which uses the same code): data, nested lockers, peer lockers,
 // the current locker, and the labels used to look them up.
 func TestLoadRegistryDump_RestoresLockers(t *testing.T) {
 	h := newHarness(t)
@@ -2511,7 +2322,6 @@ func TestLoadRegistryDump_RestoresLockers(t *testing.T) {
 	h.post(lockersPath+"/L1,sub/store/x", "nested")
 	h.post(peersPath+"/p1/locker/store/k1", "v1")
 	h.post(peersPath+"/p1/"+addr+"/locker/store/k2,x", "v2")
-	assertStatus(t, h.post(peersPath+"/p1/"+addr+"/events/store", eventOne), http.StatusOK)
 	dump := h.get("/registry/dump")
 	assertStatus(t, dump, http.StatusOK)
 
@@ -2533,10 +2343,6 @@ func TestLoadRegistryDump_RestoresLockers(t *testing.T) {
 	assertEqual(t, "peer data", h.get(lockersPath+"/L1,sub/peers/p1/get/k1").Body, "v1")
 	assertEqual(t, "peer instance data", h.get(lockersPath+"/L1,sub/peers/p1/"+addr+"/get/k2,x").Body, "v2")
 	assertEqual(t, "peer data via the current locker", h.get(peersPath+"/p1/locker/get/k1").Body, "v1")
-	events := dig(t, h.get(lockersPath+"/L1,sub/peers/p1/events?data=y&reverse=n").asMap(t), "p1").([]interface{})
-	assertEqual(t, "number of events", len(events), 1)
-	assertEqual(t, "event title", events[0].(map[string]interface{})["title"], "Ev One")
-	assertEqual(t, "event data", events[0].(map[string]interface{})["data"], "payload")
 
 	// The loaded lockers are fully usable: they can be written to, and are linked to their parents.
 	assertStatus(t, h.post(lockersPath+"/L1/store/c", "new"), http.StatusOK)
@@ -2672,7 +2478,7 @@ func TestCloneFromRegistry(t *testing.T) {
 	assertStatus(t, resp, http.StatusOK)
 	assertContains(t, resp.Body, "Cloned data from registry ["+server.URL+"]")
 	assertEqual(t, "source requests", requested(), []string{
-		"/registry/lockers?data=y&events=y&peers=y&level=0", "/registry/peers", "/registry/peers/jobs", "/registry/peers/probes",
+		"/registry/lockers?data=y&peers=y&level=0", "/registry/peers", "/registry/peers/jobs", "/registry/peers/probes",
 		"/registry/peers/targets", "/registry/peers/track/headers"})
 
 	// Peers are replaced (not merged), and cloned pods are marked offline.

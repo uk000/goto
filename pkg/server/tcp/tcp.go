@@ -19,7 +19,6 @@ package tcp
 import (
 	"bufio"
 	"encoding/json"
-	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
 	"log"
@@ -94,7 +93,7 @@ type ConnectionStatus struct {
 	IdleTimeout    bool      `json:"idleTimeout"`
 	LifeTimeout    bool      `json:"lifeTimeout"`
 	WriteErrors    int       `json:"writeErrors"`
-	// mu guards the fields above: the connection's goroutine updates them while the admin APIs and the events report them,
+	// mu guards the fields above: the connection's goroutine updates them while the admin APIs report them,
 	// and the listener's shutdown flags them from a third goroutine.
 	mu sync.Mutex
 }
@@ -247,7 +246,6 @@ func ServeClientConnection(port, requestID int, conn net.Conn) bool {
 	}
 	activeConnections[tcpConfig.ListenerID][requestID] = tcpHandler
 	lock.Unlock()
-	events.SendEventJSONForPort(port, "New TCP Client Connection", tcpHandler.ListenerID, tcpHandler)
 	tcpHandler.reader = bufio.NewReader(conn)
 	tcpHandler.scanner = bufio.NewScanner(tcpHandler.reader)
 	tcpHandler.readBufferSize = 100

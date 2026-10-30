@@ -19,8 +19,6 @@ package invocation
 import (
 	"bytes"
 	"errors"
-	"fmt"
-	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
 	gototls "goto/pkg/tls"
@@ -361,12 +359,6 @@ func (is *InvocationStatus) trackStatus(result *InvocationResult) {
 		if global.Flags.EnableInvocationResponseLogs {
 			log.Println(util.ToJSONText(result))
 		}
-		is.lock.Lock()
-		if !isRepeatStatus {
-			events.SendEventJSON(events.Client_InvocationResponse,
-				fmt.Sprintf("%d-%s-%s", is.tracker.ID, result.request.targetID, result.request.requestID), result)
-		}
-		is.lock.Unlock()
 	}
 }
 

@@ -39,7 +39,6 @@ type RequestStore struct {
 	IsVersionRequest        bool
 	IsFilteredRequest       bool
 	IsLockerRequest         bool
-	IsPeerEventsRequest     bool
 	IsAdminRequest          bool
 	IsMetricsRequest        bool
 	IsReminderRequest       bool
@@ -51,7 +50,6 @@ type RequestStore struct {
 	IsTunnelConnectRequest  bool
 	IsTunnelRequest         bool
 	IsTunnelConfigRequest   bool
-	IsTrafficEventReported  bool
 	IsHeadersSent           bool
 	IsTunnelResponseSent    bool
 	IsH2                    bool
@@ -90,7 +88,6 @@ type RequestStore struct {
 	TLSVersion              string
 	TLSVersionNum           uint16
 	RequestHeaders          map[string][]string
-	TrafficDetails          []string
 	LogMessages             []string
 	InterceptResponseWriter interface{}
 	HeadersInterceptRW      interface{}
@@ -198,7 +195,6 @@ func populateRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	rs.IsAdminRequest = isAdminRequest
 	rs.IsVersionRequest = strings.HasPrefix(r.RequestURI, "/version")
 	rs.IsLockerRequest = strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/locker")
-	rs.IsPeerEventsRequest = strings.HasPrefix(r.RequestURI, "/registry") && strings.Contains(r.RequestURI, "/events")
 	rs.IsMetricsRequest = strings.HasPrefix(r.RequestURI, "/metrics") || strings.HasPrefix(r.RequestURI, "/stats")
 	rs.IsReminderRequest = strings.Contains(r.RequestURI, "/remember")
 	rs.IsProbeRequest = global.Funcs.IsReadinessProbe(r) || global.Funcs.IsLivenessProbe(r)

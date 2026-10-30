@@ -203,24 +203,6 @@ A port in CONNECT mode (see the [CONNECT proxy](proxy/tcp/README.md#http-connect
 
 </details>
 
-<details>
-<summary>Listener Events</summary>
-
-- `Listener Rejected`
-- `Listener Added`
-- `Listener Updated`
-- `Listener Removed`
-- `Listener Cert Added`
-- `Listener Key Added`
-- `Listener Cert Removed`
-- `Listener Cert Generated`
-- `Listener Label Updated`
-- `Listener Opened`
-- `Listener Reopened`
-- `Listener Closed`
-- `gRPC Listener Started`
-</details>
-
 See [Listeners Example](listeners-example.md)
 
 

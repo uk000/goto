@@ -22,7 +22,6 @@ import (
 	"strings"
 	"sync"
 
-	"goto/pkg/events"
 	"goto/pkg/metrics"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
@@ -79,7 +78,6 @@ func (tt *TimeoutTracking) addHeaders(w http.ResponseWriter, r *http.Request) {
 		}
 		timeoutTrackingLock.Unlock()
 		msg = fmt.Sprintf("Will track request timeout for Headers %s", headers)
-		events.SendRequestEvent("Timeout Tracking Headers Added", msg, r)
 		w.WriteHeader(http.StatusOK)
 	} else {
 		msg = "Cannot track. Invalid header"
@@ -97,7 +95,6 @@ func (tt *TimeoutTracking) trackAll(w http.ResponseWriter, r *http.Request) {
 	msg := "Activated timeout tracking for all requests"
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
-	events.SendRequestEvent("All Timeout Tracking Enabled", msg, r)
 }
 
 func getTimeoutTracking(r *http.Request) *TimeoutTracking {
@@ -133,7 +130,6 @@ func clearTimeoutTracking(w http.ResponseWriter, r *http.Request) {
 	msg := "Timeout Tracking Headers Cleared"
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
-	events.SendRequestEvent(msg, "", r)
 }
 
 func reportTimeoutTracking(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +170,6 @@ func middlewareFunc(next http.Handler) http.Handler {
 				}
 				if connectionClosed > 0 {
 					metrics.UpdateRequestCount("timeout")
-					events.SendRequestEvent("Timeout Tracked", r.RequestURI, r)
 				}
 				timeoutTrackingLock.Lock()
 				for _, kv := range trackedHeaders {

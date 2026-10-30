@@ -19,7 +19,6 @@ package filter
 import (
 	"fmt"
 	. "goto/pkg/constants"
-	"goto/pkg/events"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 	"net/http"
@@ -121,7 +120,6 @@ func (rf *RequestFilter) addFilterHeaderOrURI(w http.ResponseWriter, r *http.Req
 		rf.hasURIs = true
 		rf.lock.Unlock()
 		msg = fmt.Sprintf("Will %s URI [%s]", rf.filterType, uri)
-		events.SendRequestEvent("Request Filter Added", msg, r)
 	} else if header != "" {
 		header = strings.ToLower(header)
 		hvalue, glob := util.Unglob(strings.ToLower(value))
@@ -137,7 +135,6 @@ func (rf *RequestFilter) addFilterHeaderOrURI(w http.ResponseWriter, r *http.Req
 		rf.hasHeaders = true
 		rf.lock.Unlock()
 		msg = fmt.Sprintf("Will %s header [%s : %s]", rf.filterType, header, value)
-		events.SendRequestEvent("Request Filter Added", msg, r)
 	} else {
 		msg = "Cannot add request filter. No URI or Header"
 		w.WriteHeader(http.StatusBadRequest)
@@ -161,7 +158,6 @@ func (rf *RequestFilter) removeIgnoreHeaderOrURI(w http.ResponseWriter, r *http.
 		rf.PendingUpdates = true
 		rf.lock.Unlock()
 		msg = fmt.Sprintf("Will not %s URI[%s]", rf.filterType, uri)
-		events.SendRequestEvent("Request Filter Removed", msg, r)
 	} else if header != "" {
 		header = strings.ToLower(header)
 		if value != "" {
@@ -178,7 +174,6 @@ func (rf *RequestFilter) removeIgnoreHeaderOrURI(w http.ResponseWriter, r *http.
 		rf.hasHeaders = len(rf.HeaderUpdates) > 0
 		rf.lock.Unlock()
 		msg = fmt.Sprintf("Will not %s Header [%s: %s]", rf.filterType, header, value)
-		events.SendRequestEvent("Request Filter Removed", msg, r)
 	} else {
 		msg = "Cannot remove request filter. No URI or Header"
 		w.WriteHeader(http.StatusBadRequest)
@@ -199,7 +194,6 @@ func (rf *RequestFilter) setOrGetIgnoreStatus(w http.ResponseWriter, r *http.Req
 		rf.Status = statusCodes[0]
 		rf.lock.Unlock()
 		msg = fmt.Sprintf("Status for %s set to [%d]", rf.filterType, statusCodes[0])
-		events.SendRequestEvent("Request Filter Status Configured", msg, r)
 	} else {
 		msg = fmt.Sprintf("Status for %s: %d", rf.filterType, rf.getStatus())
 	}
@@ -251,7 +245,6 @@ func (rf *RequestFilter) clear(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
-	events.SendRequestEvent("Request Filters Cleared", msg, r)
 }
 
 func (rf *RequestFilter) getFilteredRequestCount(w http.ResponseWriter, r *http.Request) {

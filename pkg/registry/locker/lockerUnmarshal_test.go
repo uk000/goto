@@ -25,7 +25,7 @@ import (
 
 func roundTrip(t *testing.T, ll *LabeledLockers) *LabeledLockers {
 	t.Helper()
-	b, err := json.Marshal(ll.GetAllLockers(true, true, true, 0))
+	b, err := json.Marshal(ll.GetAllLockers(true, true, 0))
 	if err != nil {
 		t.Fatal(err)
 	}

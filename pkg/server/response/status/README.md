@@ -14,16 +14,6 @@ This feature allows setting a forced response status for all requests except byp
 | GET       |	/server/response<br/>/status/counts           | Get request counts for all response statuses so far |
 | GET       |	/server/response/status                  | Get the currently configured forced response statuses for all ports |
 
-<br/>
-<details>
-<summary>Response Status Events</summary>
-
-- `Response Status Configured`
-- `Response Status Cleared`
-- `Response Status Counts Cleared`
-
-</details>
-
 <details>
 <summary>Response Status API Examples</summary>
 

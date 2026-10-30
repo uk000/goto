@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"goto/pkg/constants"
-	"goto/pkg/events"
 	"goto/pkg/metrics"
 	"goto/pkg/server/middleware"
 	"goto/pkg/types"
@@ -77,7 +76,6 @@ func setDelay(w http.ResponseWriter, r *http.Request) {
 	} else {
 		msg = fmt.Sprintf("Port [%s] will delay requests with %s forever", listenerPort, delayRange)
 	}
-	events.SendRequestEvent("Delay Configured", msg, r)
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
 }
@@ -89,7 +87,6 @@ func clearDelay(w http.ResponseWriter, r *http.Request) {
 	delete(delayCountByPort, listenerPort)
 	delayLock.Unlock()
 	msg := fmt.Sprintf("Port [%s] delay cleared", listenerPort)
-	events.SendRequestEvent("Delay Cleared", msg, r)
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
 }
@@ -162,7 +159,6 @@ func middlewareFunc(next http.Handler) http.Handler {
 			if delay, remaining, apply := takeResponseDelay(r); apply {
 				msg := fmt.Sprintf("Delaying [%s] for [%s]. Remaining delay count [%d].", r.RequestURI, delay.String(), remaining)
 				util.AddLogMessage(msg, r)
-				util.UpdateTrafficEventDetails(r, "Response Delay Applied")
 				w.Header().Add(constants.HeaderGotoResponseDelay, delay.String())
 				time.Sleep(delay)
 			}

@@ -21,7 +21,6 @@ import (
 	"crypto/x509"
 	"fmt"
 	"goto/pkg/constants"
-	"goto/pkg/events"
 	"goto/pkg/server/middleware"
 	gototls "goto/pkg/tls"
 	"goto/pkg/util"
@@ -89,7 +88,6 @@ func removeListenerCertAndKey(w http.ResponseWriter, r *http.Request) {
 		} else {
 			msg = fmt.Sprintf("Cert and Key removed for listener %d, and reopened\n", l.Port)
 		}
-		events.SendRequestEvent("Listener Cert Removed", msg, r)
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
 	}
@@ -106,7 +104,6 @@ func addListenerCACert(w http.ResponseWriter, r *http.Request) {
 			}
 			l.CACerts.AppendCertsFromPEM(data)
 			l.lock.Unlock()
-			events.SendRequestEvent("Listener CA Cert Added", msg, r)
 			if l.ReopenListener() {
 				msg = fmt.Sprintf("CA Cert added for listener %d, and reopened\n", l.Port)
 			} else {
@@ -135,7 +132,6 @@ func clearListenerCACerts(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 			msg = fmt.Sprintf("CA Certs cleared for listener %d but failed to reopen\n", l.Port)
 		}
-		events.SendRequestEvent("Listener CA Certs Cleared", msg, r)
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
 	}
@@ -211,7 +207,6 @@ func autoCert(w http.ResponseWriter, r *http.Request) {
 				l.lock.Unlock()
 				if l.ReopenListener() {
 					msg = fmt.Sprintf("Cert auto-generated for listener %d\n", l.Port)
-					events.SendRequestEvent("Listener Cert Generated", msg, r)
 				} else {
 					msg = fmt.Sprintf("Failed to reopen listener %d for auto-generate cert\n", l.Port)
 				}
@@ -276,8 +271,6 @@ func openListener(w http.ResponseWriter, r *http.Request) {
 				} else {
 					msg = fmt.Sprintf("Listener opened on port %d\n", l.Port)
 				}
-				events.SendRequestEventJSON("Listener Opened", l.ListenerID,
-					map[string]interface{}{"listener": l, "status": msg}, r)
 			} else {
 				w.WriteHeader(http.StatusInternalServerError)
 				msg = fmt.Sprintf("Failed to listen on port %d\n", l.Port)
@@ -289,8 +282,6 @@ func openListener(w http.ResponseWriter, r *http.Request) {
 			} else {
 				msg = fmt.Sprintf("Listener reopened on port %d\n", l.Port)
 			}
-			events.SendRequestEventJSON("Listener Reopened", l.ListenerID,
-				map[string]interface{}{"listener": l, "status": msg}, r)
 		}
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
@@ -306,7 +297,6 @@ func closeListener(w http.ResponseWriter, r *http.Request) {
 		} else {
 			l.Close()
 			msg = fmt.Sprintf("Listener on port %d closed\n", l.Port)
-			events.SendRequestEvent("Listener Closed", msg, r)
 		}
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
@@ -324,7 +314,6 @@ func removeListener(w http.ResponseWriter, r *http.Request) {
 		RemoveListener(l)
 		LinkForwardListeners()
 		msg := fmt.Sprintf("Listener on port %d removed", l.Port)
-		events.SendRequestEvent("Listener Removed", msg, r)
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
 	}

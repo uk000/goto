@@ -22,7 +22,6 @@ import (
 	"strings"
 	"sync"
 
-	"goto/pkg/events"
 	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 
@@ -62,7 +61,6 @@ func addResponseHeader(w http.ResponseWriter, r *http.Request) {
 		headerMap[header] = append(values, value)
 		headersLock.Unlock()
 		msg = fmt.Sprintf("Port [%s] Will add header [%s : %s] to responses", listenerPort, header, value)
-		events.SendRequestEvent("Response Header Added", msg, r)
 	} else {
 		msg = "Cannot add. Invalid header"
 		w.WriteHeader(http.StatusBadRequest)
@@ -86,7 +84,6 @@ func removeResponseHeader(w http.ResponseWriter, r *http.Request) {
 		util.ExcludedHeaders[lh] = true
 		headersLock.Unlock()
 		msg = fmt.Sprintf("Port [%s] Will remove header [%s] from responses", listenerPort, header)
-		events.SendRequestEvent("Response Header Removed", msg, r)
 	} else {
 		msg = "Cannot remove. Invalid header"
 		w.WriteHeader(http.StatusBadRequest)
@@ -102,7 +99,6 @@ func clearResponseHeader(w http.ResponseWriter, r *http.Request) {
 	responseHeadersToRemoveByPort[listenerPort] = map[string]bool{}
 	headersLock.Unlock()
 	msg := fmt.Sprintf("Port [%s] Response header cleared", listenerPort)
-	events.SendRequestEvent("Response Header Cleared", msg, r)
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
 }

@@ -19,7 +19,6 @@ package payload
 import (
 	"fmt"
 	"goto/pkg/constants"
-	"goto/pkg/events"
 	"goto/pkg/server/middleware"
 	"goto/pkg/types"
 	"goto/pkg/util"
@@ -158,7 +157,6 @@ func setResponsePayload(w http.ResponseWriter, r *http.Request) {
 	}
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
-	events.SendRequestEvent("Response Payload Configured", msg, r)
 }
 
 // routeHasSegment tells whether the path of the route that serves the request has the given segment (e.g. "stream" in
@@ -197,7 +195,6 @@ func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
 			pr.setURIResponsePayload(isGRPC, isStream, nil, false, uri, contentType, transforms, delayMin, delayMax)
 			msg = fmt.Sprintf("Port [%s] transform paths set for URI [%s] : [%s: %+v]",
 				port, uri, contentType, util.ToJSONText(transforms))
-			events.SendRequestEvent("Response Payload Configured", msg, r)
 		} else {
 			msg = "Invalid transformation. Missing URI or payload."
 		}
@@ -241,7 +238,6 @@ func setResponsePayloadWithMatches(w http.ResponseWriter, r *http.Request) {
 				configured = rps
 			}
 			msg = fmt.Sprintf("Port [%d] Response Payload set: %+v", port, util.ToJSONText(configured))
-			events.SendRequestEvent("Response Payload Configured", msg, r)
 		} else {
 			msg = fmt.Sprintf("Invalid Response Payload: %s", err.Error())
 		}
@@ -258,7 +254,6 @@ func clearResponsePayload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
-	events.SendRequestEvent("Response Payload Cleared", msg, r)
 }
 
 func getResponsePayload(w http.ResponseWriter, r *http.Request) {

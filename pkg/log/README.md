@@ -12,7 +12,6 @@ The log APIs can be used to see the current logging config and turn logging on/o
 | POST | /log/invocation<br/>/response/{enable} | Enable/disable logging of response received for each invocation call |
 | POST | /log/registry/{enable} | Enable/disable registry logs |
 | POST | /log/registry<br/>/locker/{enable} | Enable/disable registry locker logs |
-| POST | /log/registry<br/>/events/{enable} | Enable/disable registry events logs |
 | POST | /log/registry<br/>/reminder/{enable} | Enable/disable logging of reminder calls that registry receives from peers |
 | POST | /log/health/{enable} | Enable/disable logging of health calls that peers receive from registry |
 | POST | /log/probe/{enable} | Enable/disable readiness and liveness probe logs |

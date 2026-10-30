@@ -19,8 +19,6 @@ package registry
 import (
 	"fmt"
 	"goto/pkg/client/results"
-	"goto/pkg/constants"
-	"goto/pkg/events"
 	"goto/pkg/global"
 	"goto/pkg/invocation"
 	"goto/pkg/job"
@@ -68,12 +66,11 @@ type Pod struct {
 }
 
 type Peers struct {
-	Name          string                 `json:"name"`
-	Namespace     string                 `json:"namespace"`
-	Pods          map[string]*Pod        `json:"pods"`
-	PodEpochs     map[string][]*PodEpoch `json:"podEpochs"`
-	eventsCounter int
-	lock          sync.RWMutex
+	Name      string                 `json:"name"`
+	Namespace string                 `json:"namespace"`
+	Pods      map[string]*Pod        `json:"pods"`
+	PodEpochs map[string][]*PodEpoch `json:"podEpochs"`
+	lock      sync.RWMutex
 }
 
 type PeerPods map[string][]*Pod
@@ -126,10 +123,8 @@ type Registry struct {
 	peerProbes              *PeerProbes
 	labeledLockers          *locker.LabeledLockers
 	contextLockers          *locker.ContextLockers
-	eventsCounter           int
 	peersLock               sync.RWMutex
 	lockersLock             sync.RWMutex
-	eventsLock              sync.RWMutex
 }
 
 var (
@@ -145,17 +140,7 @@ var (
 )
 
 func init() {
-	global.Funcs.StoreEventInCurrentLocker = StoreEventInCurrentLocker
 	global.Funcs.GetPeers = GetPeers
-}
-
-func StoreEventInCurrentLocker(data interface{}) {
-	event := data.(*events.Event)
-	registry.eventsLock.Lock()
-	registry.eventsCounter++
-	registry.eventsLock.Unlock()
-	registry.getCurrentLocker().StorePeerData(global.Self.Name, "",
-		[]string{constants.LockerEventsKey, fmt.Sprintf("%s-%d", event.Title, registry.eventsCounter)}, util.ToJSONText(event))
 }
 
 func (registry *Registry) reset() {
@@ -396,21 +381,8 @@ func (registry *Registry) cleanupUnhealthyPeers(peerName string) PeerResults {
 		})
 }
 
-func clearPeersResultsAndEvents(peersToClear PeerPods, r *http.Request) PeerResults {
-	events.ClearEvents()
-	result := invokeForPods(peersToClear, "POST", "/events/clear", http.StatusOK, 2, false,
-		func(peer string, pod *Pod, response interface{}, err error) {
-			if err == nil {
-				log.Printf("Events cleared on peer %s address %s\n", peer, pod.Address)
-			} else {
-				log.Printf("failed to clear events on peer %s address %s with error %s\n", peer, pod.Address, err.Error())
-			}
-		})
-
-	events.SendRequestEventJSON(events.Registry_PeerEventsCleared,
-		fmt.Sprintf("Events cleared on %d peer pods", len(peersToClear)), result, r)
-
-	result = invokeForPods(peersToClear, "POST", "/client/results/clear", http.StatusOK, 2, false,
+func clearPeersResults(peersToClear PeerPods, r *http.Request) PeerResults {
+	result := invokeForPods(peersToClear, "POST", "/client/results/clear", http.StatusOK, 2, false,
 		func(peer string, pod *Pod, response interface{}, err error) {
 			if err == nil {
 				log.Printf("Results cleared on peer %s address %s\n", peer, pod.Address)
@@ -419,8 +391,6 @@ func clearPeersResultsAndEvents(peersToClear PeerPods, r *http.Request) PeerResu
 				log.Printf("failed to clear results on peer %s address %s with error %s\n", peer, pod.Address, err.Error())
 			}
 		})
-	events.SendRequestEventJSON(events.Registry_PeerResultsCleared,
-		fmt.Sprintf("Results cleared on %d peer pods", len(peersToClear)), result, r)
 	return result
 }
 
@@ -435,7 +405,7 @@ func (registry *Registry) clearLocker(peerName, peerAddress string, r *http.Requ
 			peersToClear = registry.loadPeerPods(peerName, "")
 		}
 	}
-	return clearPeersResultsAndEvents(peersToClear, r)
+	return clearPeersResults(peersToClear, r)
 }
 
 func (registry *Registry) addPeerTarget(peerName string, target *PeerTarget) PeerResults {
@@ -868,29 +838,6 @@ func (registry *Registry) sendProbeStatus(probeType string, status int) PeerResu
 		})
 }
 
-func (registry *Registry) flushPeersEvents() PeerResults {
-	return invokeForPods(registry.loadAllPeerPods(), "POST", "/events/flush", http.StatusOK, 2, false,
-		func(peer string, pod *Pod, response interface{}, err error) {
-			if err == nil {
-				log.Printf("Flushed events on peer %s address %s\n", peer, pod.Address)
-			} else {
-				log.Printf("failed to flush events on peer %s address %s with error %s\n", peer, pod.Address, err.Error())
-			}
-		})
-}
-
-func (registry *Registry) clearPeersEvents() PeerResults {
-	registry.getCurrentLocker().ClearPeerEvents()
-	return invokeForPods(registry.loadAllPeerPods(), "POST", "/events/clear", http.StatusOK, 2, false,
-		func(peer string, pod *Pod, response interface{}, err error) {
-			if err == nil {
-				log.Printf("Cleared events on peer %s address %s\n", peer, pod.Address)
-			} else {
-				log.Printf("failed to clear events on peer %s address %s with error %s\n", peer, pod.Address, err.Error())
-			}
-		})
-}
-
 func (registry *Registry) preparePeerStartupData(peer *Peer, peerData *PeerData) {
 	peerData.Targets = registry.peerTargets[peer.Name]
 	peerData.Jobs = registry.peerJobs[peer.Name]
@@ -923,7 +870,7 @@ func (registry *Registry) clonePeersFrom(registryURL string) error {
 }
 
 func (registry *Registry) cloneLockersFrom(registryURL string) error {
-	if resp, err := http.Get(registryURL + "/registry/lockers?data=y&events=y&peers=y&level=0"); err == nil {
+	if resp, err := http.Get(registryURL + "/registry/lockers?data=y&peers=y&level=0"); err == nil {
 		lockers := map[string]*locker.CombiLocker{}
 		if err := util.ReadJsonPayloadFromBody(resp.Body, &lockers); err == nil {
 			registry.lockersLock.Lock()

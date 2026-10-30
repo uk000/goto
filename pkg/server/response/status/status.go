@@ -25,7 +25,6 @@ import (
 	"time"
 
 	. "goto/pkg/constants"
-	"goto/pkg/events"
 	"goto/pkg/metrics"
 	"goto/pkg/server/intercept"
 	"goto/pkg/server/middleware"
@@ -238,7 +237,6 @@ func clearStatus(w http.ResponseWriter, r *http.Request) {
 		portStatus.countsByRequestedStatus = map[int]int{}
 		portStatus.countsByResponseStatus = map[int]int{}
 		msg = fmt.Sprintf("Port [%s] Response Status Counts Cleared", util.GetRequestOrListenerPort(r))
-		events.SendRequestEvent("Response Status Counts Cleared", msg, r)
 	} else {
 		TheStatusManager.Clear(port, uri, uri)
 		portStatus.FlipflopConfigs = map[string]*FlipFlopConfig{}
@@ -246,7 +244,6 @@ func clearStatus(w http.ResponseWriter, r *http.Request) {
 		if uri != "" {
 			msg = fmt.Sprintf("%s for URI [%s]", msg, uri)
 		}
-		events.SendRequestEvent("Response Status Cleared", msg, r)
 	}
 	portStatus.lock.Unlock()
 	util.AddLogMessage(msg, r)
@@ -383,7 +380,6 @@ func middlewareFunc(next http.Handler) http.Handler {
 			} else {
 				msg = fmt.Sprintf("Reporting status: [%d] for URI [%s].", irw.StatusCode, r.RequestURI)
 			}
-			util.UpdateTrafficEventStatusCode(r, irw.StatusCode)
 			util.AddLogMessage(msg, r)
 			trigger.RunTriggers(r, irw, irw.StatusCode)
 		}

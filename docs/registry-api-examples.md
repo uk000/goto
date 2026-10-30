@@ -120,9 +120,6 @@ curl -s localhost:8080/registry/lockers/search/foo
 #get data from lockerA at path A->B->C
 curl -v localhost:8080/registry/lockers/lockerA/get/XX,1,2
 
-#search across all peer events and get results in unified reverse order
-curl -s localhost:8080/registry/lockers/all/peers/events/search/some search text?unified=y&reverse=y&data=y
-
 #dump all contents of lockerA
 curl -s localhost:8080/registry/lockers/lockerA/dump
 

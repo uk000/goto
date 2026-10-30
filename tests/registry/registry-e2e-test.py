@@ -165,7 +165,6 @@ class GotoRegistryPeersTest(unittest.TestCase):
                             "--registry",
                             cls.registry_url,
                             "--reminderLogs=false",
-                            "--publishEvents=true",
                         ]
                     )
                 )

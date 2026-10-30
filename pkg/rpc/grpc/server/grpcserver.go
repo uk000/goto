@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"goto/pkg/constants"
-	"goto/pkg/events"
 	"goto/pkg/global"
 	gotogrpc "goto/pkg/rpc/grpc"
 	"goto/pkg/server/listeners"
@@ -573,7 +572,6 @@ func (g *GRPCServer) start() {
 		msg += fmt.Sprintf(" [%s]", svc)
 	}
 	log.Println(msg)
-	events.SendEventDirect(msg, "")
 	done := make(chan struct{})
 	g.lock.Lock()
 	g.done = done
@@ -628,7 +626,6 @@ func (g *GRPCServer) Stop() {
 		}
 		g.setRunning(false)
 		global.OnGRPCStop()
-		events.SendEventDirect("GRPC Server Stopped", "")
 	}
 }
 

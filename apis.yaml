@@ -133,21 +133,6 @@
     - /client/track/time/clear: '[POST]'
     - /client/track/time/{buckets}: '[POST PUT]'
     - /client/track/time: '[GET]'
-/events:
-  "":
-    "":
-    - /events?data={data}&reverse={reverse}: '[GET]'
-    - /events: '[GET]'
-  /events/clear:
-    "":
-    - /events/clear: '[POST]'
-  /events/flush:
-    "":
-    - /events/flush: '[POST]'
-  /events/search:
-    /events/search/{text}:
-    - /events/search/{text}?data={data}&reverse={reverse}: '[GET]'
-    - /events/search/{text}: '[GET]'
 /goto:
   /goto/{k:routes|apis}:
     "":
@@ -370,8 +355,6 @@
   /log/registry:
     /log/registry/{enable}:
     - /log/registry/{enable}: '[POST PUT]'
-    /log/registry/events:
-    - /log/registry/events/{enable}: '[POST PUT]'
     /log/registry/locker:
     - /log/registry/locker/{enable}: '[POST PUT]'
     /log/registry/reminder:
@@ -642,7 +625,7 @@
     - /registry/load: '[POST]'
   /registry/lockers:
     "":
-    - /registry/lockers?data={data}&events={events}&peers={peers}&level={level}: '[GET]'
+    - /registry/lockers?data={data}&peers={peers}&level={level}: '[GET]'
     - /registry/lockers: '[GET]'
     /registry/lockers/{label}:
     - /registry/lockers/{label}/open: '[POST]'
@@ -662,21 +645,9 @@
     - /registry/lockers/{label}/get/{path}?data={data}&level={level}&md={md}: '[GET]'
     - /registry/lockers/{label}/get/{path}?data={data}&level={level}: '[GET]'
     - /registry/lockers/{label}/get/{path}: '[GET]'
-    - /registry/lockers/{label}?data={data}&events={events}&peers={peers}&level={level}&md={md}: '[GET]'
-    - /registry/lockers/{label}?data={data}&events={events}&peers={peers}&level={level}: '[GET]'
+    - /registry/lockers/{label}?data={data}&peers={peers}&level={level}&md={md}: '[GET]'
+    - /registry/lockers/{label}?data={data}&peers={peers}&level={level}: '[GET]'
     - /registry/lockers/{label}: '[GET]'
-    - /registry/lockers/{label}/peers/{peers}/events?data={data}&reverse={reverse}&unified={unified}: '[GET]'
-    - /registry/lockers/{label}/peers/events?data={data}&reverse={reverse}&unified={unified}: '[GET]'
-    - /registry/lockers/{label}/peers/{peers}/events?data={data}&reverse={reverse}: '[GET]'
-    - /registry/lockers/{label}/peers/events?data={data}&reverse={reverse}: '[GET]'
-    - /registry/lockers/{label}/peers/{peers}/events: '[GET]'
-    - /registry/lockers/{label}/peers/events: '[GET]'
-    - /registry/lockers/{label}/peers/{peers}/events/search/{text}?data={data}&reverse={reverse}&unified={unified}: '[GET]'
-    - /registry/lockers/{label}/peers/events/search/{text}?data={data}&reverse={reverse}&unified={unified}: '[GET]'
-    - /registry/lockers/{label}/peers/{peers}/events/search/{text}?data={data}&reverse={reverse}: '[GET]'
-    - /registry/lockers/{label}/peers/events/search/{text}?data={data}&reverse={reverse}: '[GET]'
-    - /registry/lockers/{label}/peers/{peers}/events/search/{text}: '[GET]'
-    - /registry/lockers/{label}/peers/events/search/{text}: '[GET]'
     - /registry/lockers/{label}/peers/{peer}/instances/client/results/targets={targets}: '[GET]'
     - /registry/lockers/{label}/peers/instances/client/results/targets={targets}: '[GET]'
     - /registry/lockers/{label}/peers/{peer}/instances/client/results: '[GET]'
@@ -705,9 +676,9 @@
     - /registry/lockers/{label}/peers/{peer}/locker/get/{path}?data={data}&level={level}: '[GET]'
     - /registry/lockers/{label}/peers/{peer}/{peerlabel}/locker/get/{path}: '[GET]'
     - /registry/lockers/{label}/peers/{peer}/locker/get/{path}: '[GET]'
-    - /registry/lockers/{label}/peers/{peer}/{peerlabel}?data={data}&events={events}&level={level}: '[GET]'
-    - /registry/lockers/{label}/peers?data={data}&events={events}&level={level}: '[GET]'
-    - /registry/lockers/{label}/peers/{peer}?data={data}&events={events}&level={level}: '[GET]'
+    - /registry/lockers/{label}/peers/{peer}/{peerlabel}?data={data}&level={level}: '[GET]'
+    - /registry/lockers/{label}/peers?data={data}&level={level}: '[GET]'
+    - /registry/lockers/{label}/peers/{peer}?data={data}&level={level}: '[GET]'
     - /registry/lockers/{label}/peers/{peer}/{peerlabel}: '[GET]'
     - /registry/lockers/{label}/peers: '[GET]'
     - /registry/lockers/{label}/peers/{peer}: '[GET]'
@@ -743,13 +714,6 @@
     - /registry/peers/{peer}/locker/store/{path}: '[POST]'
     - /registry/peers/{peer}/{peerlabel}/locker/remove/{path}: '[POST]'
     - /registry/peers/{peer}/locker/remove/{path}: '[POST]'
-    - /registry/peers/{peer}/{peerlabel}/events/store: '[POST]'
-    - /registry/peers/{peer}/events/search/{text}?data={data}&reverse={reverse}&unified={unified}: '[GET]'
-    - /registry/peers/{peer}/events/search/{text}?data={data}&reverse={reverse}: '[GET]'
-    - /registry/peers/{peer}/events/search/{text}: '[GET]'
-    - /registry/peers/{peer}/events?data={data}&reverse={reverse}&unified={unified}: '[GET]'
-    - /registry/peers/{peer}/events?data={data}&reverse={reverse}: '[GET]'
-    - /registry/peers/{peer}/events: '[GET]'
     - /registry/peers/{peer}/{peerlabel}/locker/get/{path}?data={data}&level={level}: '[GET]'
     - /registry/peers/{peer}/locker/get/{path}?data={data}&level={level}: '[GET]'
     - /registry/peers/{peer}/{peerlabel}/locker/get/{path}: '[GET]'
@@ -762,8 +726,8 @@
     - /registry/peers/{peer}/client/results/summary: '[GET]'
     - /registry/peers/{peer}/client/results/targets={targets}: '[GET]'
     - /registry/peers/{peer}/client/results: '[GET]'
-    - /registry/peers/{peer}/{peerlabel}/lockers?data={data}&events={events}&level={level}: '[GET]'
-    - /registry/peers/{peer}/lockers?data={data}&events={events}&level={level}: '[GET]'
+    - /registry/peers/{peer}/{peerlabel}/lockers?data={data}&level={level}: '[GET]'
+    - /registry/peers/{peer}/lockers?data={data}&level={level}: '[GET]'
     - /registry/peers/{peer}/{peerlabel}/lockers: '[GET]'
     - /registry/peers/{peer}/lockers: '[GET]'
     - /registry/peers/{peer}/targets/results?detailed={detailed}: '[GET]'
@@ -815,15 +779,6 @@
     - /registry/peers/client/results/invocations/{enable}: '[POST PUT]'
     /registry/peers/copyToLocker:
     - /registry/peers/copyToLocker: '[POST]'
-    /registry/peers/events:
-    - /registry/peers/events/search/{text}?data={data}&reverse={reverse}&unified={unified}: '[GET]'
-    - /registry/peers/events/search/{text}?data={data}&reverse={reverse}: '[GET]'
-    - /registry/peers/events/search/{text}: '[GET]'
-    - /registry/peers/events?data={data}&reverse={reverse}&unified={unified}: '[GET]'
-    - /registry/peers/events?data={data}&reverse={reverse}: '[GET]'
-    - /registry/peers/events: '[GET]'
-    - /registry/peers/events/flush: '[POST]'
-    - /registry/peers/events/clear: '[POST]'
     /registry/peers/health:
     - /registry/peers/health/{address}: '[GET]'
     - /registry/peers/health: '[GET]'
@@ -845,7 +800,7 @@
     - /registry/peers/jobs: '[GET]'
     /registry/peers/lockers:
     - /registry/peers/lockers/clear: '[POST]'
-    - /registry/peers/lockers?data={data}&events={events}&level={level}: '[GET]'
+    - /registry/peers/lockers?data={data}&level={level}: '[GET]'
     - /registry/peers/lockers: '[GET]'
     /registry/peers/probes:
     - /registry/peers/probes/{type}/set?uri={uri}: '[POST PUT]'

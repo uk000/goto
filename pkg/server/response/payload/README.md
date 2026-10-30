@@ -391,14 +391,6 @@ This schema is used to describe currently configured response payload, as the ou
 | transforms | []PayloadTransformation | Transformations defined in this config. See `Payload Transformation schema` |
 
 
-<details>
-<summary> Response Payload Events </summary>
-
-- `Response Payload Configured`
-- `Response Payload Cleared`
-- `Response Payload Applied`: generated when a configured response payload is applied to a request that wasn't explicitly asking for a custom payload (i.e. not for `/payload` and `/stream` URIs).
-
-</details>
 </br>
 
 See [Response Payload API Examples](docs/response-payload-api-examples.md)

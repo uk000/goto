@@ -40,7 +40,6 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(logRouter, "/invocation/response/{enable}", setLogLevel, "POST", "PUT")
 	util.AddRoute(logRouter, "/registry/{enable}", setLogLevel, "POST", "PUT")
 	util.AddRoute(logRouter, "/registry/locker/{enable}", setLogLevel, "POST", "PUT")
-	util.AddRoute(logRouter, "/registry/events/{enable}", setLogLevel, "POST", "PUT")
 	util.AddRoute(logRouter, "/registry/reminder/{enable}", setLogLevel, "POST", "PUT")
 	util.AddRoute(logRouter, "/health/{enable}", setLogLevel, "POST", "PUT")
 	util.AddRoute(logRouter, "/probe/{enable}", setLogLevel, "POST", "PUT")
@@ -67,7 +66,6 @@ func setLogLevel(w http.ResponseWriter, r *http.Request) {
 	invocationResponse := strings.Contains(r.RequestURI, "invocation/response")
 	registry := strings.Contains(r.RequestURI, "registry")
 	locker := strings.Contains(r.RequestURI, "locker")
-	events := strings.Contains(r.RequestURI, "events")
 	reminder := strings.Contains(r.RequestURI, "reminder")
 	health := strings.Contains(r.RequestURI, "health")
 	probe := strings.Contains(r.RequestURI, "probe")
@@ -97,9 +95,6 @@ func setLogLevel(w http.ResponseWriter, r *http.Request) {
 		if locker {
 			global.Flags.EnableRegistryLockerLogs = enable
 			msg = fmt.Sprintf("Registry Locker logging set to [%t]", enable)
-		} else if events {
-			global.Flags.EnableRegistryEventsLogs = enable
-			msg = fmt.Sprintf("Registry Events logging set to [%t]", enable)
 		} else if reminder {
 			global.Flags.EnableRegistryReminderLogs = enable
 			msg = fmt.Sprintf("Registry Reminder logging set to [%t]", enable)
@@ -178,7 +173,6 @@ func getLogLevels(w http.ResponseWriter, r *http.Request) {
 		"invocation": global.Flags.EnableInvocationLogs,
 		"registry":   global.Flags.EnableRegistryLogs,
 		"locker":     global.Flags.EnableRegistryLockerLogs,
-		"events":     global.Flags.EnableRegistryEventsLogs,
 		"reminder":   global.Flags.EnableRegistryReminderLogs,
 		"health":     global.Flags.EnablePeerHealthLogs,
 		"probe":      global.Flags.EnableProbeLogs,

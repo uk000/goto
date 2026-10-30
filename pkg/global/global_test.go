@@ -80,10 +80,10 @@ func TestDefaultFlags(t *testing.T) {
 		}
 	}
 	off := map[string]bool{
-		"EnableEvents": Flags.EnableEvents, "PublishEvents": Flags.PublishEvents, "UseLocker": Flags.UseLocker,
+		"UseLocker":       Flags.UseLocker,
 		"EnableProbeLogs": Flags.EnableProbeLogs, "LogRequestBody": Flags.LogRequestBody,
 		"LogResponseHeaders": Flags.LogResponseHeaders, "LogResponseBody": Flags.LogResponseBody,
-		"EnableRegistryLockerLogs": Flags.EnableRegistryLockerLogs, "EnableRegistryEventsLogs": Flags.EnableRegistryEventsLogs,
+		"EnableRegistryLockerLogs":   Flags.EnableRegistryLockerLogs,
 		"EnableRegistryReminderLogs": Flags.EnableRegistryReminderLogs, "VerboseMCP": Flags.VerboseMCP,
 	}
 	for name, v := range off {
