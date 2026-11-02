@@ -796,22 +796,51 @@ func TestWatchedRenameOfAFileThatIsStillThereIsAChange(t *testing.T) {
 	waitFor(t, "the file to be loaded", func() bool { return hasHTTPConfig("moved-in.yaml") })
 }
 
-func TestWatchedEventOfTheWholePath(t *testing.T) {
+func TestWatchedEventOfTheEntriesOfAnUpdateOfTheWholePath(t *testing.T) {
 	resetState(t)
 	shortDebounce(t)
 	dir := t.TempDir()
 	global.ServerConfig.ConfigPaths = []string{dir}
 	writeFile(t, dir, "a.yaml", httpYAML(newPort(), "/a", "a"))
-	writeFile(t, dir, "b.yaml", httpYAML(newPort(), "/b", "b"))
+	b := writeFile(t, dir, "b.yaml", httpYAML(newPort(), "/b", "b"))
 	fw := newFakeWatcher()
 	watchStartupConfig(fw)
 	t.Cleanup(fw.Close)
 
-	// an event for the parent of the path (it has ".." in it) is a change of everything
-	fw.send(dir+"/../x", fswatcher.EventCreate)
+	// an event of an entry that an update of the volume is made of ("..data") is a change of everything
+	fw.send(filepath.Join(dir, "..data"), fswatcher.EventCreate)
 	waitFor(t, "everything to be loaded", func() bool { return hasHTTPConfig("a.yaml") && hasHTTPConfig("b.yaml") })
-	fw.send(dir+"/../x", fswatcher.EventRemove)
-	waitFor(t, "everything to be removed", func() bool { return !hasHTTPConfig("a.yaml") && !hasHTTPConfig("b.yaml") })
+
+	// the removal of an entry of the update (the directory of the old files) is not the removal of the files: the files
+	// that are there keep their configs, and only the ones that are gone lose them
+	if err := os.Remove(b); err != nil {
+		t.Fatal(err)
+	}
+	fw.send(filepath.Join(dir, "..2026_10_30_21_36_09.499384338"), fswatcher.EventRemove)
+	waitFor(t, "the config of the file that is gone to be removed", func() bool { return !hasHTTPConfig("b.yaml") })
+	time.Sleep(3 * configDebounce)
+	if !hasHTTPConfig("a.yaml") {
+		t.Error("the config of a file that is still there was removed with the entry of the old files")
+	}
+}
+
+func TestIsAtomicUpdateEntry(t *testing.T) {
+	for path, want := range map[string]bool{
+		"/etc/goto-config/..data":                          true,
+		"/etc/goto-config/..2026_10_30_21_36_09.499384338": true,
+		"..data":                              true,
+		"/etc/goto-config/goto-tls-config.sh": false,
+		"/etc/goto-config/a..yaml":            false,
+		"/etc/goto-config/.hidden.yaml":       false,
+		"/etc/../goto-config/a.yaml":          false,
+		"/etc/goto-config/../x":               false,
+		"/etc/goto-config/sub/..data/a.yaml":  false,
+		"":                                    false,
+	} {
+		if got := isAtomicUpdateEntry(path); got != want {
+			t.Errorf("isAtomicUpdateEntry(%q) = %t, want %t", path, got, want)
+		}
+	}
 }
 
 func TestWatcherOfTheStartupIsClosedByStopWhetherOrNotItRuns(t *testing.T) {

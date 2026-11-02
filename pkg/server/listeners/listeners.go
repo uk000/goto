@@ -149,6 +149,11 @@ var (
 	initialListenersDelay = 1 * time.Second
 )
 
+// initialDefs are what the startup arguments define for the ports of the initial listeners, by port (guarded by
+// listenersLock). The listeners themselves change as they are opened, closed and reconfigured, and can't tell what they
+// were defined as.
+var initialDefs = map[int]*PortProtoConfig{}
+
 func Init() {
 	global.Funcs.IsListenerPresent = IsListenerPresent
 	global.Funcs.IsListenerOpen = IsListenerOpen
@@ -445,14 +450,65 @@ func AddInitialListeners(portList []string) {
 	DefaultListener.Label = util.BuildListenerLabel(portProtos[0].Port)
 	DefaultListener.HostLabel = global.Self.HostLabel
 	for i := 1; i < len(portProtos); i++ {
-		pp := portProtos[i]
-		l := createPortListener(pp.Port, pp.Forward, pp.Proto, pp.MTLS, pp.Verify, existing)
-		if l != nil {
-			listenersLock.Lock()
-			initialListeners = append(initialListeners, l)
-			listenersLock.Unlock()
+		addInitialListener(portProtos[i], existing)
+	}
+}
+
+func addInitialListener(pp *PortProtoConfig, existing map[int]bool) *Listener {
+	l := createPortListener(pp.Port, pp.Forward, pp.Proto, pp.MTLS, pp.Verify, existing)
+	if l != nil {
+		listenersLock.Lock()
+		initialListeners = append(initialListeners, l)
+		initialDefs[pp.Port] = pp
+		listenersLock.Unlock()
+	}
+	return l
+}
+
+// AddInitialListener adds one listener the way AddInitialListeners adds the ones of the startup arguments: it is started
+// with the process, and it is what the port goes back to when a config that took the port over goes away. It gives the
+// listener, or nil if the port is already one of the initial listeners.
+func AddInitialListener(pp *PortProtoConfig) *Listener {
+	listenersLock.RLock()
+	_, duplicate := initialDefs[pp.Port]
+	listenersLock.RUnlock()
+	return addInitialListener(pp, map[int]bool{pp.Port: duplicate})
+}
+
+// RemoveInitialListener makes the port not one of the initial listeners anymore, which leaves a listener on the port
+// that is already open as it is.
+func RemoveInitialListener(port int) {
+	listenersLock.Lock()
+	defer listenersLock.Unlock()
+	delete(initialDefs, port)
+	kept := make([]*Listener, 0, len(initialListeners))
+	for _, l := range initialListeners {
+		if l.Port != port {
+			kept = append(kept, l)
 		}
 	}
+	initialListeners = kept
+}
+
+// RestoreInitialListener gives a port that is one of the initial listeners back to what the startup arguments define for
+// it, after the config that took it over is gone. It tells if the port is one of them: a port that is not has nothing
+// to go back to, and it is for the caller to close and remove its listener. A listener that is already as the
+// arguments define it is left alone, as it is not worth a restart.
+func RestoreInitialListener(port int) bool {
+	listenersLock.RLock()
+	pp := initialDefs[port]
+	listenersLock.RUnlock()
+	if pp == nil {
+		return false
+	}
+	l := createPortListener(pp.Port, pp.Forward, pp.Proto, pp.MTLS, pp.Verify, map[int]bool{})
+	if live := GetListenerForPort(port); live != nil && live.isOpen() && !Diff(live, l) {
+		return true
+	}
+	if err, msg := AddOrUpdateListener(l); err != nil {
+		log.Printf("[ERROR]: Failed to restore the listener of the startup arguments on port [%d]: %s", port, msg)
+	}
+	return true
 }
 
 func createPortListener(port, forward int, protocol string, mtls, verify bool, existing map[int]bool) *Listener {
@@ -978,15 +1034,24 @@ func AddOrUpdateListener(l *Listener) (error, string) {
 	return nil, msg
 }
 
+// RemoveListener takes the listener out of the ones that the process has. A listener that is not the one registered for
+// its port is left out of it: it only has the port in common with the registered one, which keeps the port bound and
+// would be unreachable (and so never closed) if it were dropped.
 func RemoveListener(l *Listener) {
 	listenersLock.Lock()
 	defer listenersLock.Unlock()
 	if l.IsGRPC {
-		delete(grpcListeners, l.Port)
+		if grpcListeners[l.Port] == l {
+			delete(grpcListeners, l.Port)
+		}
 	} else if l.IsUDP {
-		delete(udpListeners, l.Port)
+		if udpListeners[l.Port] == l {
+			delete(udpListeners, l.Port)
+		}
 	}
-	delete(listeners, l.Port)
+	if listeners[l.Port] == l {
+		delete(listeners, l.Port)
+	}
 }
 
 func (l *Listener) store() {

@@ -226,10 +226,12 @@ func saveDefaults(t *testing.T) {
 	}
 	saved := state{d.Port, d.Protocol, d.L8Proto, d.Label, d.HostLabel, d.IsHTTP, d.IsHTTP2, d.TLS, d.ProtoAssigned, d.VerifyClientCert, d.AutoCert}
 	serverPort, jsonRPCPort := global.Self.ServerPort, global.Self.JSONRPCPort
-	initial := initialListeners
+	initial, initialDefsBefore := initialListeners, initialDefs
+	initialDefs = map[int]*PortProtoConfig{}
 	t.Cleanup(func() {
 		listenersLock.Lock()
 		delete(listeners, global.Self.JSONRPCPort)
+		initialDefs = initialDefsBefore
 		listenersLock.Unlock()
 		d.Port, d.Protocol, d.L8Proto, d.Label, d.HostLabel = saved.port, saved.protocol, saved.l8Proto, saved.label, saved.hostLabel
 		d.IsHTTP, d.IsHTTP2, d.TLS, d.ProtoAssigned, d.VerifyClientCert, d.AutoCert = saved.isHTTP, saved.isHTTP2, saved.tls, saved.assigned, saved.verify, saved.ac
@@ -392,6 +394,131 @@ func TestAddInitialListeners(t *testing.T) {
 	if c := byPort[9304]; c == nil || !c.IsTCP || c.ForwardPort != 9302 {
 		t.Errorf("listener 9304 = %+v, want tcp that forwards to 9302", c)
 	}
+
+	// what the arguments define is kept apart from the listeners, for the ports that go back to it
+	if len(initialDefs) != 3 {
+		t.Errorf("definitions = %d, want one for each of the initial listeners", len(initialDefs))
+	}
+	if d := initialDefs[9302]; d == nil || d.Proto != "grpc" || d.MTLS {
+		t.Errorf("definition of 9302 = %+v, want the grpc one, which came first", d)
+	}
+	if d := initialDefs[9303]; d == nil || d.Proto != "https" || !d.MTLS {
+		t.Errorf("definition of 9303 = %+v, want https with mTLS", d)
+	}
+	if d := initialDefs[9304]; d == nil || d.Proto != "tcp" || d.Forward != 9302 {
+		t.Errorf("definition of 9304 = %+v, want tcp that forwards to 9302", d)
+	}
+	if initialDefs[9301] != nil {
+		t.Error("the first port is the default listener, and is not one of the initial listeners")
+	}
+}
+
+func TestAddAndRemoveInitialListener(t *testing.T) {
+	setup(t)
+	saveDefaults(t)
+	initialListeners = nil
+	port := freePort(t)
+	pp := &PortProtoConfig{Port: port, Proto: "tcp", Forward: 9302}
+	l := AddInitialListener(pp)
+	if l == nil || l.Port != port || !l.IsTCP || l.ForwardPort != 9302 || !l.Open {
+		t.Fatalf("initial listener = %+v, want a tcp listener to open on port %d that forwards to 9302", l, port)
+	}
+	if len(initialListeners) != 1 || initialListeners[0] != l || initialDefs[port] != pp {
+		t.Errorf("initial listeners = %v, definition = %v, want the listener and the definition that were added", initialListeners, initialDefs[port])
+	}
+	if again := AddInitialListener(pp); again != nil || len(initialListeners) != 1 {
+		t.Errorf("a port that is already an initial listener was added again: %v, initial listeners = %d", again, len(initialListeners))
+	}
+
+	RemoveInitialListener(port)
+	if len(initialListeners) != 0 || initialDefs[port] != nil {
+		t.Errorf("initial listeners = %d, definition = %v after the port was removed, want none", len(initialListeners), initialDefs[port])
+	}
+	RemoveInitialListener(port) // a port that is not one is nothing to remove
+}
+
+func TestRestoreInitialListenerIsNotForOtherPorts(t *testing.T) {
+	l := addAndOpen(t, "tcp")
+	saveDefaults(t)
+	if RestoreInitialListener(l.Port) {
+		t.Error("a port that is not an initial listener was restored")
+	}
+	if GetListenerForPort(l.Port) != l || !isListening(l.Port) {
+		t.Error("the listener of a port that is not an initial listener was touched")
+	}
+}
+
+func TestRestoreInitialListenerPutsBackWhatTheArgumentsDefine(t *testing.T) {
+	setup(t)
+	saveDefaults(t)
+	port := freePort(t)
+	forget(t, port)
+	initial := AddInitialListener(&PortProtoConfig{Port: port, Proto: "tcp"})
+	t.Cleanup(func() { RemoveInitialListener(port) })
+	if err, msg := AddOrUpdateListener(initial); err != nil || !isListening(port) {
+		t.Fatalf("the initial listener did not open: %v %s", err, msg)
+	}
+
+	// a config takes the port over with settings of its own
+	changed := newListener(port, "tcp", "changed.test", true)
+	changed.Label = "changed"
+	if err, msg := AddOrUpdateListener(changed); err != nil || GetListenerForPort(port) != changed {
+		t.Fatalf("the changed listener did not take the port: %v %s", err, msg)
+	}
+
+	if !RestoreInitialListener(port) {
+		t.Fatal("an initial listener was not restored")
+	}
+	restored := GetListenerForPort(port)
+	if restored == nil || restored == changed || restored.CommonName != global.ServerConfig.CommonName || !restored.IsTCP {
+		t.Fatalf("listener after the restore = %+v, want a new one with the settings of the arguments (not %+v)", restored, changed)
+	}
+	if !isListening(port) {
+		t.Errorf("port %d is not open after the restore", port)
+	}
+	if changed.isOpen() {
+		t.Error("the listener of the config is still open after the restore")
+	}
+}
+
+func TestRestoreInitialListenerLeavesAListenerThatIsAsDefinedAlone(t *testing.T) {
+	setup(t)
+	saveDefaults(t)
+	port := freePort(t)
+	forget(t, port)
+	initial := AddInitialListener(&PortProtoConfig{Port: port, Proto: "tcp"})
+	t.Cleanup(func() { RemoveInitialListener(port) })
+	if err, msg := AddOrUpdateListener(initial); err != nil || !isListening(port) {
+		t.Fatalf("the initial listener did not open: %v %s", err, msg)
+	}
+	generation := initial.Generation
+
+	if !RestoreInitialListener(port) {
+		t.Fatal("an initial listener was not restored")
+	}
+	if GetListenerForPort(port) != initial || initial.Generation != generation {
+		t.Errorf("a listener that is as the arguments define it was replaced or restarted (generation %d, was %d)", initial.Generation, generation)
+	}
+}
+
+func TestRestoreInitialListenerOpensAListenerThatIsClosed(t *testing.T) {
+	setup(t)
+	saveDefaults(t)
+	port := freePort(t)
+	forget(t, port)
+	initial := AddInitialListener(&PortProtoConfig{Port: port, Proto: "tcp"})
+	t.Cleanup(func() { RemoveInitialListener(port) })
+	if err, msg := AddOrUpdateListener(initial); err != nil || !isListening(port) {
+		t.Fatalf("the initial listener did not open: %v %s", err, msg)
+	}
+	initial.Close()
+	if isListening(port) {
+		t.Fatal("the listener is still open after it was closed")
+	}
+
+	if !RestoreInitialListener(port) || !isListening(port) {
+		t.Errorf("a closed initial listener was not opened again by the restore (port %d accepting %t)", port, isListening(port))
+	}
 }
 
 func TestLinkForwardListeners(t *testing.T) {
@@ -416,6 +543,63 @@ func TestLinkForwardListeners(t *testing.T) {
 	LinkForwardListeners()
 	if from.ForwardListener != nil {
 		t.Errorf("forward listener = %v, want none after the target was removed", from.ForwardListener)
+	}
+}
+
+// Removing a listener that has the port of the registered one, but is not it, must leave the registered one alone: a
+// listener that is dropped while it is open keeps the port bound, and nothing can close it anymore.
+func TestRemoveListenerLeavesTheRegisteredListenerOfThePortAlone(t *testing.T) {
+	l := addAndOpen(t, "tcp")
+	other := newListener(l.Port, "tcp", "l.test", false)
+
+	RemoveListener(other)
+	if got := GetListenerForPort(l.Port); got != l {
+		t.Fatalf("listener of port %d = %v after removing another listener of the port, want the registered one", l.Port, got)
+	}
+	if !isListening(l.Port) {
+		t.Errorf("port %d stopped accepting connections", l.Port)
+	}
+
+	RemoveListener(l)
+	if got := GetListenerForPort(l.Port); got != nil {
+		t.Errorf("listener of port %d = %v after removing the registered one, want none", l.Port, got)
+	}
+}
+
+func TestRemoveListenerChecksTheRegisteredListenerOfEachKind(t *testing.T) {
+	setup(t)
+	for _, kind := range []string{"grpc", "udp"} {
+		t.Run(kind, func(t *testing.T) {
+			port := freePort(t)
+			registered := &Listener{Port: port, IsGRPC: kind == "grpc", IsUDP: kind == "udp"}
+			other := &Listener{Port: port, IsGRPC: registered.IsGRPC, IsUDP: registered.IsUDP}
+			byKind := func() map[int]*Listener {
+				if registered.IsGRPC {
+					return grpcListeners
+				}
+				return udpListeners
+			}
+			listenersLock.Lock()
+			listeners[port], byKind()[port] = registered, registered
+			listenersLock.Unlock()
+			t.Cleanup(func() { RemoveListener(registered) })
+
+			RemoveListener(other)
+			listenersLock.RLock()
+			inAll, inKind := listeners[port] == registered, byKind()[port] == registered
+			listenersLock.RUnlock()
+			if !inAll || !inKind {
+				t.Errorf("after removing another %s listener of the port: registered in all listeners %t, in the %s ones %t, want both", kind, inAll, kind, inKind)
+			}
+
+			RemoveListener(registered)
+			listenersLock.RLock()
+			inAll, inKind = listeners[port] != nil, byKind()[port] != nil
+			listenersLock.RUnlock()
+			if inAll || inKind {
+				t.Errorf("after removing the registered %s listener: still in all listeners %t, in the %s ones %t, want neither", kind, inAll, kind, inKind)
+			}
+		})
 	}
 }
 

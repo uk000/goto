@@ -57,6 +57,9 @@ var (
 	// the goroutines of the watchers, and the debounced loads, which would otherwise read the maps while another changes
 	// them. It is taken before lock.
 	configLock sync.Mutex
+	// loadLock makes loading the config paths one load at a time: the loads come from the start, and from the debounced
+	// reactions to the changes of the files, which would otherwise read and apply the files of the paths at the same time.
+	loadLock sync.Mutex
 	// watchersLock guards configWatchers.
 	watchersLock sync.Mutex
 	// configDebounce is how long the changes of the config files are waited on before they are loaded or removed: an
@@ -109,10 +112,17 @@ func loadStartupConfigs() {
 	}
 }
 
+// isAtomicUpdateEntry tells if the path is one of the entries that a volume of a config map is updated with. An update
+// puts the new files in a directory named "..<timestamp>", points the link "..data" at it, and removes the directory of the
+// old files; the files themselves are links through "..data" that stay where they are. So these entries say that files
+// may have changed, and the removal of one of them says nothing about any file being removed.
+func isAtomicUpdateEntry(path string) bool {
+	return strings.HasPrefix(filepath.Base(path), "..")
+}
+
 func watchStartupConfig(configWatcher fswatcher.Watcher) {
 	interval := configDebounce
-	debounceRemove := util.Debounce(interval)
-	debounceLoad := util.Debounce(interval)
+	debounceReconcile := util.Debounce(interval)
 	changeChan := make(chan string, 10)
 	go loadChanges(changeChan, interval)
 	go configWatcher.Watch(context.Background())
@@ -130,20 +140,11 @@ func watchStartupConfig(configWatcher fswatcher.Watcher) {
 					removed = true
 				}
 			}
-			all := false
-			if strings.Contains(event.Path, "..") {
-				all = true
-			}
-			if all {
-				if removed {
-					debounceRemove(func() {
-						removeAllConfigs()
-					})
-				} else {
-					debounceLoad(func() {
-						loadConfigsFromPaths(nil)
-					})
-				}
+			if isAtomicUpdateEntry(event.Path) {
+				// The entries of one update (the new directory, the swap of "..data", the removal of the old directory)
+				// all come to the same reconciliation, which runs once. It must not be one step for the removals and
+				// another for the rest: they would run at the same time, and could wipe the configs that the other loads.
+				debounceReconcile(reconcileConfigs)
 			} else {
 				if removed {
 					log.Printf("Files removed in [%s]. Will cleanup configs.", event.Path)
@@ -155,6 +156,75 @@ func watchStartupConfig(configWatcher fswatcher.Watcher) {
 			}
 		}
 	}()
+}
+
+// reconcileConfigs makes the configs that are loaded the ones of the files that are there: every file is loaded again,
+// and the configs of the files that are not there anymore are removed. A listener that a file keeps unchanged is not
+// touched by it.
+func reconcileConfigs() {
+	loadConfigsFromPaths(nil)
+	removeConfigsOfMissingFiles()
+}
+
+// removeConfigsOfMissingFiles removes the configs of the files that are not in any of the config paths. A path that
+// can't be read for any reason but not being there says nothing of its files, so nothing is removed then.
+func removeConfigsOfMissingFiles() {
+	present := map[string]bool{}
+	for _, configPath := range global.ServerConfig.ConfigPaths {
+		files, err := os.ReadDir(configPath)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			log.Printf("Failed to read config path [%s] with error: %s. Keeping the configs that are loaded.\n", configPath, err.Error())
+			return
+		}
+		for _, file := range files {
+			present[file.Name()] = true
+		}
+	}
+	for _, filename := range loadedConfigFiles() {
+		if !present[filename] {
+			removeConfigs(filename)
+		}
+	}
+}
+
+// loadedConfigFiles gives the names of the files that have a config of any kind loaded.
+func loadedConfigFiles() []string {
+	lock.Lock()
+	defer lock.Unlock()
+	names := map[string]bool{}
+	for name := range tlsConfigs {
+		names[name] = true
+	}
+	for name := range listenerConfigs {
+		names[name] = true
+	}
+	for name := range a2aConfigs {
+		names[name] = true
+	}
+	for name := range mcpConfigs {
+		names[name] = true
+	}
+	for name := range httpProxyConfigs {
+		names[name] = true
+	}
+	for name := range tcpProxyConfigs {
+		names[name] = true
+	}
+	for name := range grpcProxyConfigs {
+		names[name] = true
+	}
+	for name := range httpConfigs {
+		names[name] = true
+	}
+	for name := range grpcConfigs {
+		names[name] = true
+	}
+	files := make([]string, 0, len(names))
+	for name := range names {
+		files = append(files, name)
+	}
+	sort.Strings(files)
+	return files
 }
 
 func removeAllConfigs() {
@@ -292,6 +362,8 @@ func (c ChangeLog) Contains(v string) bool {
 }
 
 func loadConfigsFromPaths(changeLog ChangeLog) {
+	loadLock.Lock()
+	defer loadLock.Unlock()
 	for _, configPath := range global.ServerConfig.ConfigPaths {
 		log.Printf("Loading configs from path [%s]", configPath)
 		files, err := os.ReadDir(configPath)
@@ -403,13 +475,18 @@ func guarded(section, filename string, load func()) {
 
 func loadTLSConfig(filename string, config *ctl.GotoConfig) {
 	if config.TLS != nil {
-		if tlsConfigs[filename] != nil {
-			clearTLS(tlsConfigs[filename])
+		old := tlsConfigs[filename]
+		// The certs that did not change are not cleared and loaded again: that restarts their listeners, which serve
+		// without their certs in between. The CAs are, as nothing serves from them.
+		toClear, toLoad := diffCerts(old, config.TLS)
+		if old != nil {
+			clearCerts(toClear)
+			clearCAs(old.CACerts)
 		}
 		lock.Lock()
 		tlsConfigs[filename] = config.TLS
 		lock.Unlock()
-		processTLS(config.TLS)
+		processTLSCerts(config.TLS, toLoad)
 	}
 }
 
