@@ -22,6 +22,7 @@ import (
 	"log"
 )
 
+// clearHTTP removes the response payloads that an HTTP config set on its server ports.
 func clearHTTP(h *ctl.HTTP) {
 	if h == nil {
 		return
@@ -33,6 +34,7 @@ func clearHTTP(h *ctl.HTTP) {
 	}
 }
 
+// loadHTTP applies the configured HTTP response of each server port of an HTTP config.
 func loadHTTP(h *ctl.HTTP) {
 	if h == nil {
 		return
@@ -44,6 +46,7 @@ func loadHTTP(h *ctl.HTTP) {
 	}
 }
 
+// processHTTPResponse sets the URI response payloads of an HTTP response config on the port.
 func processHTTPResponse(port int, hr *ctl.HTTPResponse) {
 	if hr == nil {
 		log.Println("No HTTP response")

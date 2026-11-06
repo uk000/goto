@@ -39,10 +39,12 @@ var (
 	ConnState = ConnWatcher.ConnState
 )
 
+// init exposes CloseConnectionsForPort through the global funcs.
 func init() {
 	global.Funcs.CloseConnectionsForPort = ConnWatcher.CloseConnectionsForPort
 }
 
+// getTCPConn unwraps TLS and peeked connections to find the underlying *net.TCPConn.
 func getTCPConn(c net.Conn) *net.TCPConn {
 	switch conn := c.(type) {
 	case *net.TCPConn:
@@ -55,6 +57,7 @@ func getTCPConn(c net.Conn) *net.TCPConn {
 	return nil
 }
 
+// ConnState is the http.Server ConnState hook that tracks open connections per local port and notifies the global conn open/close callbacks.
 func (cw *ConnectionWatcher) ConnState(c net.Conn, state http.ConnState) {
 	cw.lock.Lock()
 	defer cw.lock.Unlock()
@@ -81,6 +84,7 @@ func (cw *ConnectionWatcher) ConnState(c net.Conn, state http.ConnState) {
 	//log.Printf("ConnState [%s]: Port [%d] Current Conn Count [%d].", state, tcpAddr.Port, cw.connCounts[tcpAddr.Port])
 }
 
+// CloseConnectionsForPort closes all tracked connections on the given port.
 func (cw *ConnectionWatcher) CloseConnectionsForPort(port int) {
 	cw.lock.Lock()
 	defer cw.lock.Unlock()

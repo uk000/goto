@@ -28,6 +28,7 @@ import (
 	"time"
 )
 
+// runCommandWithInput runs a command job with its argument fillers replaced by the given marker values.
 func (jm *JobManager) runCommandWithInput(job *Job, markers map[string]string, rawInput []byte) *JobRunContext {
 	job.lock.Lock()
 	args := []string{}
@@ -48,6 +49,7 @@ func (jm *JobManager) runCommandWithInput(job *Job, markers map[string]string, r
 	return jm.runJob(job, args, markers, rawInput)
 }
 
+// runCommandJob executes the job's command or script, storing its output lines as results and enforcing the job's timeout, max results and stop signal.
 func (jm *JobManager) runCommandJob(job *Job, jobRun *JobRunContext, iteration int, last bool) {
 	job.lock.RLock()
 	jobRun.lock.RLock()
@@ -190,6 +192,7 @@ Done:
 	}
 }
 
+// prepareCommandMarkers splits a command output line by the task's separator and maps the pieces to filler markers (merged with the run's markers) for the triggered job.
 func prepareCommandMarkers(output string, sourceCommand *CommandJobTask, jobRun *JobRunContext) map[string]string {
 	markers := map[string]string{}
 	outputMarkers := sourceCommand.OutputMarkers

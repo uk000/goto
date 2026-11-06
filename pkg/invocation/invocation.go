@@ -41,6 +41,7 @@ var (
 	NextRunnerId atomic.Uint32
 )
 
+// StartInvocation runs a tracker's whole invocation (initial delay, warmups, then replica runners until all requests complete or it is stopped) and returns the results if asked to wait.
 func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*InvocationResult {
 	tracker.activate()
 	target := tracker.Target
@@ -84,6 +85,7 @@ func StartInvocation(tracker *InvocationTracker, waitForResponse ...bool) []*Inv
 	return results
 }
 
+// computeInvocationIDs counts a newly assigned request and builds its target and request IDs, including the tracker's custom ID if set.
 func computeInvocationIDs(tracker *InvocationTracker, runnerId RunnerId) (targetID string, requestID string) {
 	tracker.Status.AssignedRequests++
 	if tracker.CustomID != "" {
@@ -96,10 +98,12 @@ func computeInvocationIDs(tracker *InvocationTracker, runnerId RunnerId) (target
 	return
 }
 
+// invokeTarget runs a single invocation through a temporary runner.
 func invokeTarget(tracker *InvocationTracker, requestID string, targetID string, publish bool) {
 	NewTargetRunner(0, tracker, nil).invoke(&InvocationIDs{requestID: requestID, targetID: targetID}, publish)
 }
 
+// NewTargetRunner creates a runner with its own request and stop channels for the given tracker.
 func NewTargetRunner(id RunnerId, tracker *InvocationTracker, doneChan chan RunnerId) *TargetRunner {
 	return &TargetRunner{
 		id:           id,
@@ -110,10 +114,12 @@ func NewTargetRunner(id RunnerId, tracker *InvocationTracker, doneChan chan Runn
 	}
 }
 
+// sendInvocation queues a request for the runner to invoke.
 func (t *TargetRunner) sendInvocation(requestID, targetID string) {
 	t.requestsChan <- &InvocationIDs{requestID: requestID, targetID: targetID}
 }
 
+// processInvocations loops over queued requests, invoking each after the target's delay and reporting the runner as done, until stopped.
 func (t *TargetRunner) processInvocations() {
 	for !t.tracker.Status.Stopped && !t.tracker.Status.StopRequested {
 		time.Sleep(t.tracker.Target.delayD)
@@ -129,6 +135,7 @@ func (t *TargetRunner) processInvocations() {
 	}
 }
 
+// invoke invokes a request with retries and, when publishing and not stopped, runs the A/B calls and publishes the result.
 func (t *TargetRunner) invoke(i *InvocationIDs, publish bool) {
 	target := t.tracker.Target
 	if result := t.tracker.invokeWithRetries(i.requestID, i.targetID); result != nil {
@@ -143,6 +150,7 @@ func (t *TargetRunner) invoke(i *InvocationIDs, publish bool) {
 	}
 }
 
+// doWarmupRounds sends the target's warmup requests without publishing their results, stopping early if a stop is requested.
 func doWarmupRounds(tracker *InvocationTracker) {
 	for i := 0; i < tracker.Target.WarmupCount; i++ {
 		if tracker.Status.StopRequested {
@@ -155,6 +163,7 @@ func doWarmupRounds(tracker *InvocationTracker) {
 	}
 }
 
+// handleABCall invokes each of the target's B-URLs for an A/B request, publishing each result and counting the A/B calls.
 func handleABCall(tracker *InvocationTracker, requestID string, targetID string, publish bool) {
 	for i, burl := range tracker.Target.BURLS {
 		if tracker.Status.StopRequested || tracker.Status.Stopped {

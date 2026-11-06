@@ -24,10 +24,12 @@ type AgentBehaviorRemoteHttp struct {
 	*AgentBehaviorImpl
 }
 
+// DoUnary does nothing yet: the HTTP proxy behavior produces no result.
 func (ab *AgentBehaviorRemoteHttp) DoUnary(aCtx *AgentContext) (*taskmanager.MessageProcessingResult, error) {
 	return nil, nil
 }
 
+// DoStream does nothing yet: the HTTP proxy behavior streams nothing.
 func (ab *AgentBehaviorRemoteHttp) DoStream(aCtx *AgentContext) (string, error) {
 	return "", nil
 }

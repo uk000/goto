@@ -31,6 +31,7 @@ type AgentBehaviorEcho struct {
 	*AgentBehaviorImpl
 }
 
+// DoUnary responds with the echo response of the request.
 func (ab *AgentBehaviorEcho) DoUnary(aCtx *AgentContext) (*taskmanager.MessageProcessingResult, error) {
 	msg := createDataMessage(util.ToJSONText(echo.GetEchoResponseFromRS(aCtx.rs)))
 	return &taskmanager.MessageProcessingResult{
@@ -38,6 +39,7 @@ func (ab *AgentBehaviorEcho) DoUnary(aCtx *AgentContext) (*taskmanager.MessagePr
 	}, nil
 }
 
+// DoStream adds an event with the received input to the timeline, and finishes the stream.
 func (ab *AgentBehaviorEcho) DoStream(aCtx *AgentContext) (string, error) {
 	msg := fmt.Sprintf("Agent: %s[%s]. Received Input: %s at Time: %s", ab.agent.ID, global.Funcs.GetListenerLabelForPort(ab.agent.Port),
 		aicommon.GetInputTextFromMessage(aCtx.input), time.Now().Format(time.RFC3339))

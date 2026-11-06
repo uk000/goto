@@ -34,15 +34,18 @@ type TCPConnectionHandler struct {
 	closing atomic.Bool
 }
 
+// resetReadBuffer allocates a fresh read buffer and clears the last text read.
 func (tcp *TCPConnectionHandler) resetReadBuffer() {
 	tcp.readBuffer = make([]byte, tcp.readBufferSize)
 	tcp.readText = ""
 }
 
+// resetWriteBuffer allocates a fresh write buffer of the configured write buffer size.
 func (tcp *TCPConnectionHandler) resetWriteBuffer() {
 	tcp.writeBuffer = make([]byte, tcp.writeBufferSize)
 }
 
+// closeClientConnection closes the client connection and marks the connection status closed with the close time.
 func (tcp *TCPConnectionHandler) closeClientConnection() {
 	if tcp.conn != nil {
 		tcp.closing.Store(true)
@@ -55,14 +58,17 @@ func (tcp *TCPConnectionHandler) closeClientConnection() {
 	}
 }
 
+// close closes the connection through the listener's registry of active connections.
 func (tcp *TCPConnectionHandler) close() {
 	CloseClientConnection(tcp.ListenerID, tcp.requestID)
 }
 
+// isClosingOrClosed tells if the connection is closing or closed, or its listener is no longer open.
 func (tcp *TCPConnectionHandler) isClosingOrClosed() bool {
 	return tcp.closing.Load() || tcp.closed.Load() || !global.Funcs.IsListenerOpen(tcp.Port)
 }
 
+// processConnectionError marks the connection as closing, and records in its status whether the client closed it, or it timed out (life, idle or read), or it failed.
 func (tcp *TCPConnectionHandler) processConnectionError(err error, whatFor string) {
 	tcp.closing.Store(true)
 	switch err {
@@ -98,6 +104,7 @@ func (tcp *TCPConnectionHandler) processConnectionError(err error, whatFor strin
 	}
 }
 
+// processRequest serves the connection in the mode that its config selects, and closes the connection when done.
 func (tcp *TCPConnectionHandler) processRequest() {
 	defer tcp.close()
 	log.Printf("[Listener: %s][Request: %d]: Processing new request on port [%d] - {response=%t, echo=%t, stream=%t, conversation=%t, readTimeout=%s, writeTimeout=%s, connIdleTimeout=%s, connectionLife=%s}",
@@ -126,6 +133,7 @@ func (tcp *TCPConnectionHandler) processRequest() {
 	}
 }
 
+// doSilentLife reads and discards what the client sends until the connection ends, then reports the total bytes read.
 func (tcp *TCPConnectionHandler) doSilentLife() {
 	tcp.status.update(func(s *ConnectionStatus) { s.TotalBytesRead = 0 })
 	log.Printf("[Listener: %s][Request: %d][%s]: Living silent life with max connection life of [%s] on port [%d]",
@@ -144,6 +152,7 @@ func (tcp *TCPConnectionHandler) doSilentLife() {
 	}
 }
 
+// doCloseAtFirstByte waits for the first byte from the client, responds with GOODBYE, and closes the connection.
 func (tcp *TCPConnectionHandler) doCloseAtFirstByte() {
 	log.Printf("[Listener: %s][Request: %d][%s]: Will close at first byte on port [%d]",
 		tcp.ListenerID, tcp.requestID, CloseAtFirstByte, tcp.Port)
@@ -172,6 +181,7 @@ func (tcp *TCPConnectionHandler) doCloseAtFirstByte() {
 	}
 }
 
+// doPayloadValidation reads until the expected payload length arrives (checking the content if configured, and for any excess), then sends the validation result.
 func (tcp *TCPConnectionHandler) doPayloadValidation() {
 	if tcp.ConnectionLifeD <= 0 {
 		tcp.ConnectionLifeD = 30 * time.Second
@@ -240,6 +250,7 @@ func (tcp *TCPConnectionHandler) doPayloadValidation() {
 	tcp.sendMessageWithDeadline(msg, PayloadValidation, false)
 }
 
+// doEcho echoes the data it reads back to the client in responses of the configured echo size, with the configured delay.
 func (tcp *TCPConnectionHandler) doEcho() {
 	log.Printf("[Listener: %s][Request: %d][%s]: Will echo response of size [%d] with response delay [%s] on port %d\n",
 		tcp.ListenerID, tcp.requestID, Echo, tcp.EchoResponseSize, tcp.EchoResponseDelayD, tcp.Port)
@@ -288,6 +299,7 @@ func (tcp *TCPConnectionHandler) doEcho() {
 	}
 }
 
+// echoBack sends the write buffer to the client after the echo response delay, if any.
 func (tcp *TCPConnectionHandler) echoBack() {
 	if tcp.EchoResponseDelayD > 0 {
 		log.Printf("[Listener: %s][Request: %d][%s]: Delaying response by [%s] before echo on port [%d]",
@@ -299,6 +311,7 @@ func (tcp *TCPConnectionHandler) echoBack() {
 	tcp.send(Echo)
 }
 
+// doResponsePayload sends the preconfigured response payloads in turn, with the response delay, optionally after reading, and keeps the connection open for its remaining life if configured.
 func (tcp *TCPConnectionHandler) doResponsePayload() {
 	payloadCount := len(tcp.ResponsePayloads)
 	if payloadCount == 0 {
@@ -359,6 +372,7 @@ func (tcp *TCPConnectionHandler) doResponsePayload() {
 		tcp.ListenerID, tcp.requestID, Response, payloadCount, tcp.Port)
 }
 
+// doStream sends the configured count of random payload chunks to the client, with the chunk delay between them.
 func (tcp *TCPConnectionHandler) doStream() {
 	log.Printf("[Listener: %s][Request: %d][%s]: Streaming [%d] chunks of size [%d] with delay [%s] for a duration of [%s] to serve total payload of [%d] on port %d\n",
 		tcp.ListenerID, tcp.requestID, Stream, tcp.StreamChunkCount, tcp.StreamChunkSizeV, tcp.StreamChunkDelayD, tcp.StreamDurationD, tcp.StreamPayloadSizeV, tcp.Port)
@@ -386,6 +400,7 @@ func (tcp *TCPConnectionHandler) doStream() {
 	}
 }
 
+// doConversation exchanges messages with the client after the hello, until the client says goodbye or the connection closes.
 func (tcp *TCPConnectionHandler) doConversation() {
 	log.Printf("[Listener: %s][Request: %d][%s]: Starting conversation with client with read timeout [%s], write timeout [%s], for total connection life of [%s] on port %d\n",
 		tcp.ListenerID, tcp.requestID, Conversation, tcp.ReadTimeoutD, tcp.WriteTimeoutD, tcp.ConnectionLifeD, tcp.Port)
@@ -411,6 +426,7 @@ func (tcp *TCPConnectionHandler) doConversation() {
 	tcp.sendMessage(GoodByeMessage, Conversation)
 }
 
+// doHello waits for the client's hello message and replies with hello.
 func (tcp *TCPConnectionHandler) doHello() {
 	if tcp.isClosingOrClosed() {
 		log.Printf("[Listener: %s][Request: %d][Hello]: doHello called on a closing connection on port [%d]", tcp.ListenerID, tcp.requestID, tcp.Port)
@@ -429,6 +445,7 @@ func (tcp *TCPConnectionHandler) doHello() {
 	}
 }
 
+// processClientMessage acknowledges a client message of the form BEGIN/text/END with ACK/text/END, and replies ERROR to any other.
 func (tcp *TCPConnectionHandler) processClientMessage(message string) {
 	parts := strings.Split(message, "/")
 	if len(parts) == 3 {
@@ -446,20 +463,24 @@ func (tcp *TCPConnectionHandler) processClientMessage(message string) {
 	tcp.sendMessage("ERROR", Conversation)
 }
 
+// read reads the available bytes from the client into the read buffer, and tells if it succeeded with the size read.
 func (tcp *TCPConnectionHandler) read(whatFor string) (bool, int) {
 	return tcp.readOrScan(false, whatFor)
 }
 
+// scan reads the next line of text from the client, and gives the text read (the previous text if the read failed).
 func (tcp *TCPConnectionHandler) scan(whatFor string) string {
 	tcp.readOrScan(true, whatFor)
 	return tcp.readText
 }
 
+// readMessage reads a line of text from the client as a conversation message.
 func (tcp *TCPConnectionHandler) readMessage() string {
 	tcp.resetReadBuffer()
 	return tcp.scan(Conversation)
 }
 
+// readOrScan reads bytes or scans a line from the client under the read deadlines, and updates the status with the bytes read or the way the connection ended.
 func (tcp *TCPConnectionHandler) readOrScan(scan bool, whatFor string) (bool, int) {
 	if tcp.isClosingOrClosed() {
 		log.Printf("[Listener: %s][Request: %d][%s]: ReadOrScan called on a closing connection on port [%d]", tcp.ListenerID, tcp.requestID, whatFor, tcp.Port)
@@ -503,14 +524,17 @@ func (tcp *TCPConnectionHandler) readOrScan(scan bool, whatFor string) (bool, in
 	}
 }
 
+// send sends the write buffer to the client.
 func (tcp *TCPConnectionHandler) send(whatFor string) bool {
 	return tcp.sendDataToClient(tcp.writeBuffer, whatFor)
 }
 
+// sendMessage sends a text message to the client.
 func (tcp *TCPConnectionHandler) sendMessage(message, whatFor string) {
 	tcp.sendMessageWithDeadline(message, whatFor, false)
 }
 
+// sendMessageWithDeadline sends a message prefixed with the host label, using the connection's write deadline only if asked to.
 func (tcp *TCPConnectionHandler) sendMessageWithDeadline(message, whatFor string, useConnDeadline bool) {
 	message = fmt.Sprintf("[%s]%s", global.Self.HostLabel, message)
 	if tcp.sendDataToClientWithDeadline([]byte(message), whatFor, useConnDeadline) {
@@ -522,10 +546,12 @@ func (tcp *TCPConnectionHandler) sendMessageWithDeadline(message, whatFor string
 	}
 }
 
+// sendDataToClient sends the data to the client under the connection's write deadline.
 func (tcp *TCPConnectionHandler) sendDataToClient(data []byte, whatFor string) bool {
 	return tcp.sendDataToClientWithDeadline(data, whatFor, true)
 }
 
+// sendDataToClientWithDeadline writes all of the data to the client and records the bytes and writes in the status, failing if the connection is closing or the write fails.
 func (tcp *TCPConnectionHandler) sendDataToClientWithDeadline(data []byte, whatFor string, useConnDeadline bool) bool {
 	if useConnDeadline && tcp.isClosingOrClosed() {
 		log.Printf("[Listener: %s][Request: %d][%s]: Send called on a closing/closed connection", tcp.ListenerID, tcp.requestID, whatFor)
@@ -567,18 +593,22 @@ func (tcp *TCPConnectionHandler) sendDataToClientWithDeadline(data []byte, whatF
 	}
 }
 
+// updateReadDeadline sets the connection's read deadline from the connection life, read and idle timeouts.
 func (tcp *TCPConnectionHandler) updateReadDeadline() {
 	util.UpdateReadDeadline(tcp.conn, tcp.status.ConnStartTime, tcp.ConnectionLifeD, tcp.ReadTimeoutD, tcp.ConnIdleTimeoutD)
 }
 
+// updateWriteDeadline sets the connection's write deadline from the connection life, write and idle timeouts.
 func (tcp *TCPConnectionHandler) updateWriteDeadline() {
 	util.UpdateWriteDeadline(tcp.conn, tcp.status.ConnStartTime, tcp.ConnectionLifeD, tcp.WriteTimeoutD, tcp.ConnIdleTimeoutD)
 }
 
+// copyInputHeadToOutput copies the head of the read buffer into a range of the write buffer.
 func (tcp *TCPConnectionHandler) copyInputHeadToOutput(inHead, outFrom, outTo int) {
 	util.CopyInputHeadToOutput(tcp.writeBuffer, tcp.readBuffer, inHead, outFrom, outTo)
 }
 
+// copyInputTailToOutput copies the tail of the read buffer into a range of the write buffer.
 func (tcp *TCPConnectionHandler) copyInputTailToOutput(tail, outFrom, outTo int) {
 	util.CopyInputTailToOutput(tcp.writeBuffer, tcp.readBuffer, tail, outFrom, outTo)
 }

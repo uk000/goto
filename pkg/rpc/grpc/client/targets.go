@@ -39,6 +39,7 @@ var (
 	Manager = newGRPCTargetsManager()
 )
 
+// newGRPCTargetsManager creates a targets manager with the default client options and dial options.
 func newGRPCTargetsManager() *GRPCTargetsManager {
 	g := &GRPCTargetsManager{}
 	g.targets = map[string]*GRPCClient{}
@@ -55,6 +56,7 @@ func newGRPCTargetsManager() *GRPCTargetsManager {
 	return g
 }
 
+// AddTarget creates a client for a registered service and stores it as a named target.
 func (g *GRPCTargetsManager) AddTarget(name, url, authority, serverName string, options *GRPCOptions) error {
 	service := gotogrpc.ServiceRegistry.GetService(name)
 	if service == nil {
@@ -70,6 +72,7 @@ func (g *GRPCTargetsManager) AddTarget(name, url, authority, serverName string, 
 	}
 }
 
+// RemoveTarget closes and removes the named target.
 func (g *GRPCTargetsManager) RemoveTarget(name string) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
@@ -79,6 +82,7 @@ func (g *GRPCTargetsManager) RemoveTarget(name string) {
 	}
 }
 
+// ClearTargets closes and removes all targets.
 func (g *GRPCTargetsManager) ClearTargets() {
 	g.lock.Lock()
 	defer g.lock.Unlock()
@@ -88,6 +92,7 @@ func (g *GRPCTargetsManager) ClearTargets() {
 	g.targets = map[string]*GRPCClient{}
 }
 
+// configureDialOptions sets the default keepalive and user agent dial options.
 func (g *GRPCTargetsManager) configureDialOptions() {
 	g.options.DialOptions = []grpc.DialOption{
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
@@ -98,6 +103,7 @@ func (g *GRPCTargetsManager) configureDialOptions() {
 	}
 }
 
+// SetTargetTLS updates the TLS settings of the named target and reconfigures its TLS.
 func (g *GRPCTargetsManager) SetTargetTLS(name string, isTLS, verifyTLS bool) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
@@ -111,6 +117,7 @@ func (g *GRPCTargetsManager) SetTargetTLS(name string, isTLS, verifyTLS bool) {
 	t.configureTLS()
 }
 
+// ConnectTarget connects the named target.
 func (g *GRPCTargetsManager) ConnectTarget(name string) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
@@ -121,6 +128,7 @@ func (g *GRPCTargetsManager) ConnectTarget(name string) {
 	}
 }
 
+// ConnectTargetWithHeaders connects the named target using the given headers as call metadata.
 func (g *GRPCTargetsManager) ConnectTargetWithHeaders(name string, headers map[string]string) {
 	g.lock.Lock()
 	defer g.lock.Unlock()

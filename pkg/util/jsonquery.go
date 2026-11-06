@@ -50,10 +50,12 @@ type JSONPathWriter struct {
 
 type JSONPathPair types.Pair[*JSONPath, *JSONPath]
 
+// NewJQ creates an empty JQ query set.
 func NewJQ() *JQ {
 	return &JQ{Queries: map[string]*gojq.Code{}, TextQueries: map[string]string{}}
 }
 
+// Parse parses and compiles jq queries given as "key=query" or just "query" (auto-numbered key), logging and skipping invalid ones.
 func (jq *JQ) Parse(queries []string) *JQ {
 	if len(queries) == 0 || queries[0] == "" {
 		return jq
@@ -86,6 +88,7 @@ func (jq *JQ) Parse(queries []string) *JQ {
 	return jq
 }
 
+// Apply runs all queries against the JSON value and returns the results keyed by query id, with single results unwrapped.
 func (jq *JQ) Apply(j JSON) JSON {
 	if j == nil {
 		return nil
@@ -124,14 +127,17 @@ func (jq *JQ) Apply(j JSON) JSON {
 	return JSONFromJSON(out)
 }
 
+// IsEmpty reports whether no queries are registered.
 func (jq *JQ) IsEmpty() bool {
 	return len(jq.Queries) == 0
 }
 
+// NewJSONPath creates an empty JSONPath set.
 func NewJSONPath() *JSONPath {
 	return &JSONPath{TextPaths: map[string]string{}, Paths: map[string]*jsonpath.JSONPath{}}
 }
 
+// Parse2 registers one JSONPath expression given as "key=path" or just "path" (auto-numbered key).
 func (jp *JSONPath) Parse2(path string) {
 	pieces := strings.Split(path, "=")
 	key := ""
@@ -150,6 +156,7 @@ func (jp *JSONPath) Parse2(path string) {
 	jp.Paths[key] = j
 }
 
+// Parse registers each of the given JSONPath expressions and returns the receiver.
 func (jp *JSONPath) Parse(paths []string) *JSONPath {
 	if len(paths) == 0 || paths[0] == "" {
 		return jp
@@ -160,6 +167,7 @@ func (jp *JSONPath) Parse(paths []string) *JSONPath {
 	return jp
 }
 
+// Apply runs all JSONPath expressions against the JSON value and returns the results keyed by path id, with single results unwrapped.
 func (jp *JSONPath) Apply(j JSON) JSON {
 	if j == nil {
 		return nil
@@ -185,6 +193,7 @@ func (jp *JSONPath) Apply(j JSON) JSON {
 	return JSONFromJSON(out)
 }
 
+// FindResults evaluates the paths against json, returning the first match of each as a string capture and whether every path matched.
 func (jp *JSONPath) FindResults(json map[string]any) (captures map[string]string, allMatched bool) {
 	captures = map[string]string{}
 	allMatched = true
@@ -200,15 +209,18 @@ func (jp *JSONPath) FindResults(json map[string]any) (captures map[string]string
 	return
 }
 
+// IsEmpty reports whether no paths are registered.
 func (jp *JSONPath) IsEmpty() bool {
 	return len(jp.Paths) == 0
 }
 
+// Write records each written chunk as a string result under the current path key.
 func (jpw *JSONPathWriter) Write(p []byte) (n int, err error) {
 	jpw.results[jpw.currentKey] = append(jpw.results[jpw.currentKey], string(p))
 	return len(p), nil
 }
 
+// ExecuteTemplates executes each template against the value and returns the outputs as a JSON array.
 func (j *JSONValue) ExecuteTemplates(templates []*template.Template) JSON {
 	data := []interface{}{}
 	for _, t := range templates {
@@ -217,6 +229,7 @@ func (j *JSONValue) ExecuteTemplates(templates []*template.Template) JSON {
 	return JSONFromJSON(data)
 }
 
+// ExecuteTemplate executes the template with the value as its data and returns the output, or empty on error.
 func (j *JSONValue) ExecuteTemplate(t *template.Template) string {
 	buf := &bytes.Buffer{}
 	if err := t.Execute(buf, j.Value()); err == nil {

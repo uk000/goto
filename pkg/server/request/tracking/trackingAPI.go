@@ -32,6 +32,7 @@ var (
 	Middleware = middleware.NewMiddleware("tracking", setRoutes, middlewareFunc)
 )
 
+// setRoutes registers the /track routes for tracking URIs, headers and their counts.
 func setRoutes(r *mux.Router) {
 	trackRouter := util.PathRouter(r, "/track")
 	// Must be registered before the /headers router below, which would otherwise take /headers/{headers} first
@@ -54,6 +55,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(trackRouter, "", getCounts, "GET")
 }
 
+// trackURI starts tracking the requests of a URI on the request's port by adding a hook for it.
 func trackURI(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	uri := util.GetStringParamValue(r, "uri")
@@ -71,6 +73,7 @@ func trackURI(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// trackHeaders starts tracking the given headers on the request's port, counted for all URIs by the tracking middleware.
 func trackHeaders(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	headers, present := util.GetListParam(r, "headers")
@@ -88,6 +91,7 @@ func trackHeaders(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// trackURIAndHeaders starts tracking a URI, and the given headers for it, on the request's port via a URI hook.
 func trackURIAndHeaders(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	uri := util.GetStringParamValue(r, "uri")
@@ -107,6 +111,7 @@ func trackURIAndHeaders(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// trackURIAndHeaderValue starts tracking a URI and a header for it on the request's port via a URI hook, with the header counted per value.
 func trackURIAndHeaderValue(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	uri := util.GetStringParamValue(r, "uri")
@@ -126,11 +131,13 @@ func trackURIAndHeaderValue(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// trackCallCounts is the hook listener that counts a request of a tracked URI; it always returns true.
 func trackCallCounts(port int, uri string, requestHeaders map[string][]string, body io.Reader) bool {
 	Tracker.TrackCall(port, "", uri, requestHeaders)
 	return true
 }
 
+// addHeaders adds the given headers to the port's tracked headers; 400 if none are given.
 func addHeaders(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if headers := Tracker.initRequestHeaders("", r); headers != nil {
@@ -144,6 +151,7 @@ func addHeaders(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// removeHeaders removes the given headers from the port's tracked headers; 400 if none are given.
 func removeHeaders(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	headers, present := Tracker.removeHeaders("", r)
@@ -158,6 +166,7 @@ func removeHeaders(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearHeaders resets the tracked headers and counts of the port.
 func clearHeaders(w http.ResponseWriter, r *http.Request) {
 	Tracker.clear("", r)
 	msg := fmt.Sprintf("Port [%s] tracking headers cleared", util.GetRequestOrListenerPort(r))
@@ -166,6 +175,7 @@ func clearHeaders(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearHeaderCounts resets the counts of the given headers, or of all tracked headers if none are given.
 func clearHeaderCounts(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if headers := Tracker.clearHeaderCounts("", r); headers != nil {
@@ -177,11 +187,13 @@ func clearHeaderCounts(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getCounts reports all tracking data as JSON.
 func getCounts(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(fmt.Sprintf("Port [%s] reporting tracking data", util.GetRequestOrListenerPort(r)), r)
 	util.WriteJsonPayload(w, Tracker)
 }
 
+// getHeaders reports the port's tracked headers as JSON.
 func getHeaders(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, util.ToJSONText(Tracker.getHeaders("", r)))
 }

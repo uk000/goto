@@ -88,6 +88,7 @@ type ToolState struct {
 	ResponseCount  int                    `json:"responseCount,omitempty"`
 }
 
+// NewMCPTool creates a tool with the given name and description, and empty schemas.
 func NewMCPTool(name, desc string) *MCPTool {
 	return &MCPTool{
 		Tool: &gomcp.Tool{
@@ -102,6 +103,7 @@ func NewMCPTool(name, desc string) *MCPTool {
 	}
 }
 
+// ParseTools parses a JSON or YAML list of tools, and validates each of them.
 func ParseTools(b []byte) (tools []*MCPTool, err error) {
 	tools = []*MCPTool{}
 	if err = util.ReadJsonOrYamlPayloadFromBytes(b, &tools); err != nil {
@@ -115,6 +117,7 @@ func ParseTools(b []byte) (tools []*MCPTool, err error) {
 	return tools, nil
 }
 
+// ParseTool parses a JSON tool, and validates it.
 func ParseTool(payload []byte) (tool *MCPTool, err error) {
 	tool = &MCPTool{}
 	if err = json.Unmarshal(payload, tool); err != nil {
@@ -162,6 +165,7 @@ func validateObjectSchema(schema any) error {
 	return nil
 }
 
+// processTool validates a parsed tool, resolving its input schema (from the named tool schemas if not given) and name.
 func processTool(tool *MCPTool) error {
 	if tool.Tool == nil {
 		return fmt.Errorf("Missing tool definition")
@@ -196,6 +200,7 @@ func processTool(tool *MCPTool) error {
 	return nil
 }
 
+// validateBehavior checks that the behaviors that call a remote have the remote config that they need.
 func (t *MCPTool) validateBehavior() error {
 	if (t.Behavior.Fetch && (t.Config.RemoteTool == nil || t.Config.RemoteTool.URL == "")) ||
 		(t.Behavior.Remote && (t.Config.RemoteTool == nil || t.Config.RemoteTool.URL == "")) ||
@@ -207,6 +212,7 @@ func (t *MCPTool) validateBehavior() error {
 	return nil
 }
 
+// prepareBehavior validates the behavior and prepares the remote configs, and picks the function that runs the tool (streaming is the default).
 func (t *MCPTool) prepareBehavior() error {
 	if err := t.validateBehavior(); err != nil {
 		return err
@@ -258,6 +264,7 @@ func (t *MCPTool) prepareBehavior() error {
 	return nil
 }
 
+// Handle serves a call of the tool by parsing the args and running its behavior, and records the forced status and upstream results.
 func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (result *gomcp.CallToolResult, err error) {
 	var header http.Header
 	if req.Extra != nil {
@@ -301,6 +308,7 @@ func (t *MCPTool) Handle(ctx context.Context, req *gomcp.CallToolRequest) (resul
 	return
 }
 
+// prepareResult flushes the log into the timeline, and merges the structured content of the result with the timeline.
 func (t *MCPTool) prepareResult(tctx *ToolContext, result *gomcp.CallToolResult) {
 	msg := tctx.Flush(true, true)
 	if len(msg) > 0 {
@@ -332,6 +340,7 @@ func (t *MCPTool) prepareResult(tctx *ToolContext, result *gomcp.CallToolResult)
 	}
 }
 
+// createContent makes the text content for a result, along with the data to send for results that are not text.
 func createContent(key string, result any) (gomcp.Content, any) {
 	content := &gomcp.TextContent{}
 	var data any

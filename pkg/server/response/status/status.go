@@ -56,6 +56,7 @@ var (
 	statusLock       sync.RWMutex
 )
 
+// setRoutes registers the status config routes under /status, plus the /status/{status} endpoints that respond with a requested status.
 func setRoutes(r *mux.Router) {
 	statusRouter := util.PathRouter(r, "/status")
 
@@ -85,6 +86,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRouteQO(statusRouter, "={status}/delay={delay}/flipflop", status, "x-request-id")
 }
 
+// getOrCreatePortStatus returns the status counts and flipflop state of the request's port, creating them if missing.
 func getOrCreatePortStatus(r *http.Request) *PortStatus {
 	listenerPort := util.GetRequestOrListenerPort(r)
 	statusLock.Lock()
@@ -125,6 +127,7 @@ func (ps *PortStatus) snapshotFlipflops() map[string]*FlipFlopConfig {
 	return snapshot
 }
 
+// configureStatus parses and applies the status config in the request body for the port; 400 if it can't be parsed.
 func configureStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	sc, err := TheStatusManager.ParseAndApplyStatusConfig(port, r.Body)
@@ -140,6 +143,7 @@ func configureStatus(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// setStatus sets the status (optionally limited to a number of times) to force on responses of an exact URI or URI prefix, or on all requests.
 func setStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	uriExact := util.GetStringParamValue(r, "uri")
@@ -164,6 +168,7 @@ func IsForcedStatus(r *http.Request) bool {
 	return TheStatusManager.HasStatusFor(port, r.RequestURI, r.Header, r.Method)
 }
 
+// computeResponseStatus returns the status the response should have: a forced status configured for the request if any, else the original one, with its remaining count and whether it was overridden.
 func computeResponseStatus(originalStatus int, r *http.Request) (int, int, bool) {
 	port := util.GetRequestOrListenerPortNum(r)
 	overriddenStatus := false
@@ -176,6 +181,7 @@ func computeResponseStatus(originalStatus int, r *http.Request) (int, int, bool)
 	return responseStatus, remaining, overriddenStatus
 }
 
+// getStatus reports the configured port statuses and flipflop configs as JSON.
 func getStatus(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{
 		"PortStatuses":        TheStatusManager.Snapshot(),
@@ -185,6 +191,7 @@ func getStatus(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Delivered statuses", r)
 }
 
+// getStatusCount reports the flipflop state, or the requested and response counts of one status or of all statuses, for the port.
 func getStatusCount(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	port := util.GetRequestOrListenerPort(r)
@@ -226,6 +233,7 @@ func getStatusCount(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// clearStatus clears the port's response status counts, or else its configured statuses (for a URI if given) and flipflop configs.
 func clearStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	portStatus := getOrCreatePortStatus(r)
@@ -250,6 +258,7 @@ func clearStatus(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// flipflop picks the status of a request id from a sequence of statuses, or repeats a status for the given number of times and then flips to 200 (restarting if asked), tracking its progress per request id.
 func (ps *PortStatus) flipflop(requestId string, requestedStatuses []int, times int, restart bool, r *http.Request, w http.ResponseWriter) int {
 	flipflopConfig := ps.FlipflopConfigs[requestId]
 	if flipflopConfig == nil {
@@ -299,6 +308,7 @@ func (ps *PortStatus) flipflop(requestId string, requestedStatuses []int, times 
 	return requestedStatus
 }
 
+// status responds with the requested status (a random pick, or flipflopping if asked) after an optional delay, and counts it as requested.
 func status(w http.ResponseWriter, r *http.Request) {
 	portStatus := getOrCreatePortStatus(r)
 	requestedStatuses, times, _ := util.GetStatusParam(r)
@@ -338,6 +348,7 @@ func status(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// IncrementStatusCount counts a response with the given status on the request's port.
 func IncrementStatusCount(statusCode int, r *http.Request) {
 	portStatus := getOrCreatePortStatus(r)
 	portStatus.lock.Lock()
@@ -345,6 +356,7 @@ func IncrementStatusCount(statusCode int, r *http.Request) {
 	portStatus.countsByResponseStatus[statusCode]++
 }
 
+// middlewareFunc, after calling next, applies any forced status to the response of non-admin requests (unless the URI middleware already did), counts it and runs the triggers.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {

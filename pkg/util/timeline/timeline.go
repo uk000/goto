@@ -114,8 +114,10 @@ var (
 	TIMELINE string = "TIMELINE"
 )
 
+// Ptr returns a pointer to the string.
 func Ptr(s string) *string { return &s }
 
+// NewTimeline creates a timeline for the port with the server info of this instance, and reports that info to the notifier or the stream.
 func NewTimeline(port int, label string, metadata map[string]any, inboundArgs *aicommon.ToolCallArgs, inboundHeaders http.Header,
 	stream chan *types.Pair[string, any], updateNotifier TimelineUpdateNotifierFunc, endNotifier TimelineEndNotifierFunc) *Timeline {
 	t := &Timeline{
@@ -137,12 +139,14 @@ func NewTimeline(port int, label string, metadata map[string]any, inboundArgs *a
 	return t
 }
 
+// LoadTimeline rebuilds a timeline from its JSON-like map form.
 func LoadTimeline(data map[string]any) (t *Timeline, e error) {
 	t = &Timeline{}
 	e = json.Unmarshal(util.ToJSONBytes(data), t)
 	return
 }
 
+// IsTimeline tells if the data is a Timeline, or a map that is tagged with the timeline type.
 func IsTimeline(data any) bool {
 	if _, ok := data.(*Timeline); ok {
 		return true
@@ -154,6 +158,7 @@ func IsTimeline(data any) bool {
 	return false
 }
 
+// IsResult tells if the data is a map that holds a Result.
 func IsResult(data any) bool {
 	if m, ok := data.(map[string]any); ok {
 		if m["Result"] != nil {
@@ -163,6 +168,7 @@ func IsResult(data any) bool {
 	return false
 }
 
+// IsClientInfo tells if the data is a GotoClientInfo, or a map that holds ClientInfo.
 func IsClientInfo(data any) bool {
 	if util.IsNil(data) {
 		return false
@@ -177,6 +183,7 @@ func IsClientInfo(data any) bool {
 	return false
 }
 
+// CheckAndGetClientInfo returns the data as a GotoClientInfo, converting it from a map that holds ClientInfo if needed.
 func CheckAndGetClientInfo(data any) (*GotoClientInfo, bool) {
 	if util.IsNil(data) {
 		return nil, false
@@ -193,6 +200,8 @@ func CheckAndGetClientInfo(data any) (*GotoClientInfo, bool) {
 	}
 	return nil, false
 }
+
+// IsServerInfo tells if the data is a GotoServerInfo, or a map that holds ServerInfo.
 func IsServerInfo(data any) bool {
 	if util.IsNil(data) {
 		return false
@@ -207,6 +216,7 @@ func IsServerInfo(data any) bool {
 	return false
 }
 
+// CheckAndGetServerInfo returns the data as a GotoServerInfo, decoding it from its JSON-like form if needed.
 func CheckAndGetServerInfo(data any) (*GotoServerInfo, bool) {
 	if util.IsNil(data) {
 		return nil, false
@@ -228,6 +238,7 @@ func CheckAndGetServerInfo(data any) (*GotoServerInfo, bool) {
 	return nil, false
 }
 
+// CheckAndGetTimeline returns the data as a Timeline, loading it from its map form if needed, or nil if it is not one.
 func CheckAndGetTimeline(data any) *Timeline {
 	if IsTimeline(data) {
 		if t, ok := data.(*Timeline); ok {
@@ -240,6 +251,7 @@ func CheckAndGetTimeline(data any) *Timeline {
 	return nil
 }
 
+// CheckAndGetResultOrHeaders returns the map itself if it holds a Result, or else its headers map if it has one, and nil for the one that is not found.
 func CheckAndGetResultOrHeaders(data any) (result, headers map[string]any) {
 	if m, ok := data.(map[string]any); ok {
 		for k := range m {
@@ -255,6 +267,7 @@ func CheckAndGetResultOrHeaders(data any) (result, headers map[string]any) {
 	return nil, nil
 }
 
+// SetStreamPreferred makes the timeline report its updates to the given stream in preference to its update notifier.
 func (t *Timeline) SetStreamPreferred(stream chan *types.Pair[string, any]) {
 	if stream != nil {
 		t.lock.Lock()
@@ -264,6 +277,7 @@ func (t *Timeline) SetStreamPreferred(stream chan *types.Pair[string, any]) {
 	}
 }
 
+// EndTimeline marks the timeline as finished with its status and outcome, and then records the closing data or event, which is the final update that is reported.
 func (t *Timeline) EndTimeline(label, text string, status int, upstreamStatuses map[string]any, data any, success bool) {
 	t.lock.Lock()
 	t.Finished = true
@@ -280,18 +294,22 @@ func (t *Timeline) EndTimeline(label, text string, status int, upstreamStatuses 
 	}
 }
 
+// AddEvent appends an event with the label and text, and reports it.
 func (t *Timeline) AddEvent(label, text string) {
 	t.addEvent(label, text, nil, "", nil, nil, nil, false)
 }
 
+// AddEventWithClient appends an event that is attached to the info of the client that made the call, and reports it.
 func (t *Timeline) AddEventWithClient(label, text string, client *GotoClientInfo) {
 	t.addEvent(label, text, client, "", nil, nil, nil, false)
 }
 
+// AddEventWithRemote appends an event that carries what came back from a remote goto (text, server, client, data or timeline), and reports it.
 func (t *Timeline) AddEventWithRemote(label, text string, remoteText string, remoteServer *GotoServerInfo, remoteClient *GotoClientInfo, remoteData any, isJson bool) {
 	t.addEvent(label, text, nil, remoteText, remoteServer, remoteClient, remoteData, isJson)
 }
 
+// addEvent appends the event unless events are turned off, and reports it with any remote server info or data, in order.
 func (t *Timeline) addEvent(label, text string, client *GotoClientInfo, remoteText string, remoteServer *GotoServerInfo, remoteClient *GotoClientInfo, remoteData any, isJson bool) {
 	var remoteTimeline *Timeline
 	if remoteData != nil {
@@ -330,6 +348,7 @@ func (t *Timeline) addEvent(label, text string, client *GotoClientInfo, remoteTe
 	}
 }
 
+// AddData reports the data and stores it in the timeline under the key.
 func (t *Timeline) AddData(key string, data any, json bool) {
 	t.sendLock.Lock()
 	defer t.sendLock.Unlock()
@@ -342,6 +361,7 @@ func (t *Timeline) AddData(key string, data any, json bool) {
 	t.Data[key] = data
 }
 
+// AddRemoteCall does nothing for now: the recording of remote calls is commented out.
 func (t *Timeline) AddRemoteCall(remoteID, callID string, data any) {
 	// t.lock.Lock()
 	// defer t.lock.Unlock()
@@ -374,6 +394,7 @@ func (t *Timeline) send(key string, data any, json, finish bool) {
 	}
 }
 
+// NewEvent builds an event with the next index and the current time, without adding it to the timeline.
 func (t *Timeline) NewEvent(label, text string, client, remoteClient *GotoClientInfo, remoteServer *GotoServerInfo, timeline *Timeline, remoteText string, remoteData any) *Event {
 	return &Event{
 		Label:          label,
@@ -389,6 +410,7 @@ func (t *Timeline) NewEvent(label, text string, client, remoteClient *GotoClient
 	}
 }
 
+// CreateInstanceInfo builds the info of this goto instance (host, listener, pod, node, namespace, cluster) with the given label and metadata.
 func CreateInstanceInfo(port int, label string, metadata map[string]any, inboundArgs *aicommon.ToolCallArgs, inboundHeaders http.Header) *InstanceInfo {
 	if inboundArgs != nil && inboundArgs.IsEmpty() {
 		inboundArgs = nil
@@ -406,6 +428,7 @@ func CreateInstanceInfo(port int, label string, metadata map[string]any, inbound
 	}
 }
 
+// CreateRemoteInfo builds the info about a remote call: its target, URL, label, outbound request and counts.
 func CreateRemoteInfo(target, url, server string, outArgs, outHeaders any, requestCount, concurrent int) *RemoteInfo {
 	return &RemoteInfo{
 		RemoteTarget:           target,
@@ -419,12 +442,14 @@ func CreateRemoteInfo(target, url, server string, outArgs, outHeaders any, reque
 	}
 }
 
+// CreateOrGetGotoServerInfo builds the server info of this instance for the port.
 func CreateOrGetGotoServerInfo(port int, metadata map[string]any, inboundArgs *aicommon.ToolCallArgs, inboundHeaders http.Header) *GotoServerInfo {
 	return &GotoServerInfo{
 		ServerInfo: CreateInstanceInfo(port, global.Self.Name, metadata, inboundArgs, inboundHeaders),
 	}
 }
 
+// BuildGotoClientInfo builds the client info that combines the info of this instance with the info of the remote call it makes.
 func BuildGotoClientInfo(port int, label, target, url, server string, inHeaders, outHeaders http.Header,
 	inArgs, outArgs *aicommon.ToolCallArgs, requestCount, concurrent int, metadata map[string]any) *GotoClientInfo {
 	return &GotoClientInfo{
@@ -476,6 +501,7 @@ func (c *GotoClientInfo) clone() *GotoClientInfo {
 	return c2
 }
 
+// clone copies the server info, so that the copy is not changed by what is changed in the original.
 func (s *GotoServerInfo) clone() *GotoServerInfo {
 	if s == nil {
 		return nil
@@ -531,6 +557,7 @@ func (t *Timeline) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// copyMap makes a shallow copy of the map, and keeps a nil map nil.
 func copyMap[V any](m map[string]V) map[string]V {
 	if m == nil {
 		return nil

@@ -66,6 +66,7 @@ func applyPayloadDelay(d *types.Delay) time.Duration {
 	return delay
 }
 
+// ElicitationHandler answers an elicitation request of the server with an action and content picked from the client's elicit payload, applying the payload's delay.
 func (s *MCPSession) ElicitationHandler(ctx context.Context, req *gomcp.ElicitRequest) (result *gomcp.ElicitResult, err error) {
 	if s.Stop {
 		log.Println("Received elicitation after client stopped. Ignoring.")
@@ -111,6 +112,7 @@ func (s *MCPSession) ElicitationHandler(ctx context.Context, req *gomcp.ElicitRe
 	return
 }
 
+// CreateMessageHandler answers a sampling request of the server with a model, role and content picked from the client's sample (or elicit, for elicit prompts) payload, applying its delay.
 func (s *MCPSession) CreateMessageHandler(ctx context.Context, req *gomcp.CreateMessageRequest) (*gomcp.CreateMessageResult, error) {
 	if s.Stop {
 		log.Println("Received message after client stopped. Ignoring.")
@@ -184,26 +186,32 @@ func (s *MCPSession) CreateMessageHandler(ctx context.Context, req *gomcp.Create
 	return result, nil
 }
 
+// ToolListChangedHandler ignores the notification that the tool list changed.
 func (s *MCPSession) ToolListChangedHandler(ctx context.Context, req *gomcp.ToolListChangedRequest) {
 
 }
 
+// PromptListChangedHandler ignores the notification that the prompt list changed.
 func (s *MCPSession) PromptListChangedHandler(ctx context.Context, req *gomcp.PromptListChangedRequest) {
 
 }
 
+// ResourceListChangedHandler ignores the notification that the resource list changed.
 func (s *MCPSession) ResourceListChangedHandler(ctx context.Context, req *gomcp.ResourceListChangedRequest) {
 
 }
 
+// ResourceUpdatedHandler ignores the notification that a resource was updated.
 func (s *MCPSession) ResourceUpdatedHandler(ctx context.Context, req *gomcp.ResourceUpdatedNotificationRequest) {
 
 }
 
+// LoggingMessageHandler ignores the logging messages of the server.
 func (s *MCPSession) LoggingMessageHandler(ctx context.Context, req *gomcp.LoggingMessageRequest) {
 
 }
 
+// ProgressNotificationHandler adds the progress notification of the server to the timeline, recognizing the client info, server info, timeline or result that it carries as JSON.
 func (s *MCPSession) ProgressNotificationHandler(ctx context.Context, req *gomcp.ProgressNotificationClientRequest) {
 	if s.Stop {
 		log.Println("Received progress notification after client stopped. Ignoring.")

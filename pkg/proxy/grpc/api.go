@@ -31,6 +31,7 @@ var (
 	Middleware = middleware.NewMiddleware("grpc", setRoutes, nil)
 )
 
+// setRoutes registers the REST routes that show and clear the gRPC proxies and set up the proxy of a service, with optional tee and delay.
 func setRoutes(r *mux.Router) {
 	proxyRouter := middleware.RootPath("/proxy")
 	grpcRouter := util.PathPrefix(proxyRouter, "/grpc")
@@ -44,6 +45,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(grpcRouter, "/{service}/{upstream}/delay/{delay}", proxyGRPCService, "POST")
 }
 
+// proxyGRPCService sets up the proxy of the service on the port to the upstream, for a target service, tee port and delay if given.
 func proxyGRPCService(w http.ResponseWriter, r *http.Request) {
 	rs, _, _, msg, ok := rpc.CheckService(w, r, grpc.ServiceRegistry)
 	upstream := util.GetStringParamValue(r, "upstream")
@@ -72,6 +74,7 @@ func proxyGRPCService(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// getGRPCProxyDetails returns the gRPC proxy of the port as JSON.
 func getGRPCProxyDetails(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	proxy := GetPortProxy(port)
@@ -79,6 +82,7 @@ func getGRPCProxyDetails(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("GRPC Proxy Details Returned", r)
 }
 
+// clearGRPCProxies removes all the service proxies of the port and resets its tracker.
 func clearGRPCProxies(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	proxy := GetPortProxy(port)
@@ -86,6 +90,7 @@ func clearGRPCProxies(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("GRPC Proxy cleared", r)
 }
 
+// removeGRPCProxy removes the proxy of the service from the proxy of the port.
 func removeGRPCProxy(w http.ResponseWriter, r *http.Request) {
 	service := util.GetStringParamValue(r, "service")
 	port := util.GetRequestOrListenerPortNum(r)

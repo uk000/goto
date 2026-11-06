@@ -152,6 +152,7 @@ func NewK8sClientForConfig(url, caData string) (*K8sClient, error) {
 	return k8sClient, nil
 }
 
+// CreateK8sClientForConfig builds a client for the API server URL and CA data and registers it under the given name in Clients.
 func CreateK8sClientForConfig(name, url, caData string) error {
 	k8sClient, err := NewK8sClientForConfig(url, caData)
 	if err != nil {
@@ -164,6 +165,7 @@ func CreateK8sClientForConfig(name, url, caData string) error {
 	return nil
 }
 
+// createDefaultK8sClient builds the default client from the configured kubeconfig, else in-cluster config, else ~/.kube/config, and registers it as "default".
 func createDefaultK8sClient() *K8sClient {
 	k8sClient := &K8sClient{}
 	var err error
@@ -191,6 +193,7 @@ func createDefaultK8sClient() *K8sClient {
 	return k8sClient
 }
 
+// configureClient initializes the clientset, dynamic, typed and discovery clients and the deferred REST mapper of the client from its config.
 func configureClient(k8sClient *K8sClient) (err error) {
 	k8sClient.Config.NegotiatedSerializer = serializer.NewCodecFactory(scheme.Scheme)
 	if k8sClient.clientset, err = kubernetes.NewForConfig(k8sClient.Config); err != nil {

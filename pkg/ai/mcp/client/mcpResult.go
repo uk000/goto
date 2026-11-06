@@ -62,6 +62,7 @@ type MCPCallResult struct {
 	parent          *MCPResult
 }
 
+// NewMCPResult creates the result of a tool call on a server, with the timeline that the call records to.
 func NewMCPResult(server string, tc *ToolCall, t *timeline.Timeline) *MCPResult {
 	return &MCPResult{
 		ID:               fmt.Sprintf("[%s]@%s", tc.Tool, server),
@@ -90,6 +91,7 @@ func (r *MCPResult) getOrAddCall(requestID string) *MCPCallResult {
 	return r.CallResults[requestID]
 }
 
+// storeCallResult stores the content of a tool result for the request, keeping the remote timeline, result or headers it carries and the remote via-gotos.
 func (r *MCPResult) storeCallResult(requestID string, result *gomcp.CallToolResult, clientInfo *timeline.GotoClientInfo) {
 	if result == nil {
 		return
@@ -135,6 +137,7 @@ func (r *MCPResult) storeCallResult(requestID string, result *gomcp.CallToolResu
 	}
 }
 
+// extractDataAndTimeline splits a map into the timeline that it carries (removed from the map) and the remaining data.
 func extractDataAndTimeline(v any) (data map[string]any, t *timeline.Timeline) {
 	if v != nil {
 		if m, ok := v.(map[string]any); ok {
@@ -148,6 +151,7 @@ func extractDataAndTimeline(v any) (data map[string]any, t *timeline.Timeline) {
 	return
 }
 
+// storeHeaders stores the request and response headers and status of a request, and the upstream status of the tool.
 func (r *MCPResult) storeHeaders(requestID string, requestHeaders, responseHeaders http.Header, status int) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
@@ -190,6 +194,7 @@ func (r *MCPResult) storeResponseDone(requestID string, headers http.Header, rem
 	}
 }
 
+// addRemoteGotos merges the gotos into the remote gotos of the result. The caller holds the lock.
 func (r *MCPResult) addRemoteGotos(gotos map[string]bool) {
 	if r.RemoteGotos == nil {
 		r.RemoteGotos = map[string]bool{}
@@ -199,24 +204,28 @@ func (r *MCPResult) addRemoteGotos(gotos map[string]bool) {
 	}
 }
 
+// storeRemoteGotos merges the gotos into the remote gotos of the result.
 func (r *MCPResult) storeRemoteGotos(gotos map[string]bool) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	r.addRemoteGotos(gotos)
 }
 
+// setLastError records the last error of the calls.
 func (r *MCPResult) setLastError(err error) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	r.LastError = err
 }
 
+// lastError returns the last error of the calls.
 func (r *MCPResult) lastError() error {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	return r.LastError
 }
 
+// clearCallResults drops the results of the individual calls.
 func (r *MCPResult) clearCallResults() {
 	r.lock.Lock()
 	defer r.lock.Unlock()
@@ -231,6 +240,7 @@ func (r *MCPResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*plainResult)(r))
 }
 
+// ToMCP converts the result to an MCP tool result whose structured content is the timeline, with the call details and the upstream headers and statuses added.
 func (r *MCPResult) ToMCP() *gomcp.CallToolResult {
 	r.lock.Lock()
 	defer r.lock.Unlock()
@@ -263,6 +273,7 @@ func (r *MCPResult) ToMCP() *gomcp.CallToolResult {
 	return result
 }
 
+// ToObject returns the result as a map of the text contents of the calls and the timeline, with the call details added.
 func (r *MCPResult) ToObject() map[string]any {
 	r.lock.Lock()
 	defer r.lock.Unlock()
@@ -288,6 +299,7 @@ func (r *MCPResult) ToObject() map[string]any {
 	return result
 }
 
+// buildCallsData collects the call results by request ID, and adds their remote timelines to the timeline.
 func (r *MCPResult) buildCallsData() map[string]map[string]any {
 	callsData := map[string]map[string]any{}
 	callsData[r.ID] = map[string]any{}

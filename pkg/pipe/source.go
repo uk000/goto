@@ -130,54 +130,68 @@ type TunnelSource struct {
 	lock     sync.Mutex
 }
 
+// Init is a no-op default, as the real initialisation is done by PipelineSource.Init.
 func (s *AbstractSource) Init(*Pipe) {}
 
+// init is a no-op default for the sources that need no setup.
 func (s *AbstractSource) init() {}
 
+// Generate is a no-op default, as the work is done by PipelineSource.Generate.
 func (s *AbstractSource) Generate(workspace map[string]interface{}) {
 }
 
+// IsScript reports false, as only ScriptSource overrides it.
 func (s *AbstractSource) IsScript() bool {
 	return false
 }
 
+// GetName returns the name of the source.
 func (s *AbstractSource) GetName() string {
 	return s.Name
 }
 
+// GetSpec returns the spec (the resource or script identifier) of the source.
 func (s *AbstractSource) GetSpec() string {
 	return s.Spec
 }
 
+// GetContent returns the content of the source, e.g. script text or a command.
 func (s *AbstractSource) GetContent() string {
 	return s.Content
 }
 
+// GetInput returns the input that is given to the source.
 func (s *AbstractSource) GetInput() interface{} {
 	return s.Input
 }
 
+// GetInputSource returns the name of the workspace entry that is fed to the source as its input.
 func (s *AbstractSource) GetInputSource() string {
 	return s.InputSource
 }
 
+// SetInput sets the input that is given to the source.
 func (s *AbstractSource) SetInput(input interface{}) {
 	s.Input = input
 }
 
+// generate is a default that produces nothing, which each source type overrides.
 func (s *AbstractSource) generate() interface{} {
 	return nil
 }
 
+// pipelineSource returns the PipelineSource that this source wraps.
 func (s *AbstractSource) pipelineSource() *PipelineSource {
 	return s.PipelineSource
 }
 
+// NewSource creates and initialises a PipelineSource of the given type and spec for the pipe.
 func NewSource(name string, sourceType SourceType, spec string, pipe *Pipe) *PipelineSource {
 	ps := &PipelineSource{Type: sourceType, Spec: spec}
 	return ps.Init(name, pipe).pipelineSource()
 }
 
+// Init creates the concrete source for the source type (an unknown type gets a no-op one), finds the fillers in its spec, content and input, and sets up its trigger.
 func (ps *PipelineSource) Init(name string, pipe *Pipe) Source {
 	ps.Name = name
 	var realSource Source
@@ -233,6 +247,7 @@ func (ps *PipelineSource) Init(name string, pipe *Pipe) Source {
 //   return json.Marshal(data)
 // }
 
+// processFillers resolves the fillers in the spec, content and input from the workspace into the final values used by this run.
 func (ps *PipelineSource) processFillers(workspace map[string]interface{}) {
 	if ps.Spec != "" {
 		ps.finalSpec = ps.Spec
@@ -257,6 +272,7 @@ func (ps *PipelineSource) processFillers(workspace map[string]interface{}) {
 	}
 }
 
+// Generate resolves the fillers, runs the concrete source, optionally parses the result as JSON or a number, and stores it in the workspace under the source name.
 func (ps *PipelineSource) Generate(workspace map[string]interface{}) {
 	ps.processFillers(workspace)
 	result := ps.generate()
@@ -282,6 +298,7 @@ func (ps *PipelineSource) Generate(workspace map[string]interface{}) {
 	workspace[ps.Name] = result
 }
 
+// watch registers a K8s resource watch that triggers the pipe whenever the resource is added, updated or deleted.
 func (k *K8sSource) watch() {
 	if k.triggerPipe != nil && k.Watch && !k.watching {
 		resourceID := k.finalSpec
@@ -307,10 +324,12 @@ func (k *K8sSource) watch() {
 	}
 }
 
+// init starts watching the K8s resource.
 func (k *K8sSource) init() {
 	k.watch()
 }
 
+// generate returns the current value of the K8s resource, and starts watching it if it isn't yet.
 func (k *K8sSource) generate() interface{} {
 	k.watch()
 	k.watching = true
@@ -320,6 +339,7 @@ func (k *K8sSource) generate() interface{} {
 	return nil
 }
 
+// prepareCommand builds the command to run, piping the input (if any) through xargs ahead of the content.
 func (k *K8sPodExecSource) prepareCommand() string {
 	cmd := ""
 	if k.finalInput != nil {
@@ -329,6 +349,7 @@ func (k *K8sPodExecSource) prepareCommand() string {
 	return cmd
 }
 
+// generate executes the command in the container of the pod (namespace/label/container) and returns its output.
 func (k *K8sPodExecSource) generate() interface{} {
 	podID := strings.Split(k.finalSpec, "/")
 	if len(podID) != 3 {
@@ -344,6 +365,7 @@ func (k *K8sPodExecSource) generate() interface{} {
 	return nil
 }
 
+// watch registers a job watcher that triggers the pipe whenever the job reports results.
 func (j *JobSource) watch() {
 	if j.triggerPipe != nil && !j.watching {
 		j.watching = true
@@ -354,6 +376,7 @@ func (j *JobSource) watch() {
 	}
 }
 
+// processJobResult returns the data of a job result, JSON-encoding it if it is an invocation result.
 func (j *JobSource) processJobResult(r *job.JobResult) interface{} {
 	var result interface{}
 	switch data := r.Data.(type) {
@@ -369,6 +392,7 @@ func (j *JobSource) processJobResult(r *job.JobResult) interface{} {
 	return result
 }
 
+// generate returns the latest results of the job if reuse is set and there are any, else runs the job with the input and waits up to 10s for its results.
 func (j *JobSource) generate() interface{} {
 	var result interface{}
 	if j.ReuseIfExists {
@@ -400,6 +424,7 @@ func (j *JobSource) generate() interface{} {
 	return result
 }
 
+// generate runs the script with the input as its stdin and returns what it wrote.
 func (s *ScriptSource) generate() interface{} {
 	input := ""
 	if s.finalInput != nil {
@@ -413,10 +438,12 @@ func (s *ScriptSource) generate() interface{} {
 	return buff.String()
 }
 
+// IsScript reports true, which makes the pipe register the script content as a script.
 func (s *ScriptSource) IsScript() bool {
 	return true
 }
 
+// watch registers a trigger callback that records the request and response that the trigger reported, and triggers the pipe.
 func (h *HTTPRequestSource) watch() {
 	if h.triggerPipe != nil && !h.watching {
 		registerTriggerPipeCallback(h.Spec, h.Name, func(trigger, source string, port int, r *http.Request, statusCode int, responseHeaders http.Header) {
@@ -439,10 +466,12 @@ func (h *HTTPRequestSource) watch() {
 	}
 }
 
+// init starts watching the HTTP request trigger.
 func (h *HTTPRequestSource) init() {
 	h.watch()
 }
 
+// generate returns the last request and response that the trigger reported, and starts watching it if it isn't yet.
 func (h *HTTPRequestSource) generate() interface{} {
 	h.watch()
 	h.watching = true
@@ -451,6 +480,7 @@ func (h *HTTPRequestSource) generate() interface{} {
 	return map[string]interface{}{"request": h.request, "response": h.response}
 }
 
+// watch registers a tunnel callback that records the request and response that the tunnel reported, and triggers the pipe.
 func (t *TunnelSource) watch() {
 	if t.triggerPipe != nil && !t.watching {
 		registerTunnelPipeCallback(t.Spec, t.Name, func(endpoint, source string, port int, r *http.Request, statusCode int, responseHeaders http.Header, responseBody io.ReadCloser) {
@@ -473,10 +503,12 @@ func (t *TunnelSource) watch() {
 	}
 }
 
+// init starts watching the tunnel.
 func (t *TunnelSource) init() {
 	t.watch()
 }
 
+// generate returns the last request and response that the tunnel reported, and starts watching it if it isn't yet.
 func (t *TunnelSource) generate() interface{} {
 	t.watch()
 	t.watching = true

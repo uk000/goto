@@ -231,6 +231,7 @@ func (rc *RequestContext) bodyReader() io.Reader {
 	return bytes.NewReader(rc.bodyContent)
 }
 
+// newProxy creates an enabled proxy for the port, with no targets, a fresh tracker and a router for its target URIs.
 func newProxy(port int) *Proxy {
 	p := &Proxy{
 		Port:        port,
@@ -243,10 +244,12 @@ func newProxy(port int) *Proxy {
 	return p
 }
 
+// newHTTPTarget creates an empty target.
 func newHTTPTarget() *Target {
 	return &Target{}
 }
 
+// parseTarget reads a target as JSON or YAML from the reader, and checks that it has a name, endpoints with URLs, and triggers with matches and endpoints.
 func parseTarget(r io.Reader) (*Target, error) {
 	target := newHTTPTarget()
 	if err := util.ReadJsonOrYamlPayloadFromBody(r, target); err != nil {
@@ -277,24 +280,28 @@ func parseTarget(r io.Reader) (*Target, error) {
 	return target, nil
 }
 
+// enable enables or disables the proxy.
 func (p *Proxy) enable(enable bool) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.Enabled = enable
 }
 
+// isEnabled tells whether the proxy is enabled.
 func (p *Proxy) isEnabled() bool {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	return p.Enabled
 }
 
+// setProxyResponses replaces the status mappings that the proxy uses for the responses of its upstreams.
 func (p *Proxy) setProxyResponses(responses []*ProxyResponse) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.ProxyResponses = responses
 }
 
+// getProxyResponses returns the status mappings that the proxy uses for the responses of its upstreams.
 func (p *Proxy) getProxyResponses() []*ProxyResponse {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
@@ -329,6 +336,7 @@ func (t *Target) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*plain)(t))
 }
 
+// MarshalJSON serializes the trigger under its read lock.
 func (t *TargetTrigger) MarshalJSON() ([]byte, error) {
 	t.lock.RLock()
 	defer t.lock.RUnlock()
@@ -336,6 +344,7 @@ func (t *TargetTrigger) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*plain)(t))
 }
 
+// MarshalJSON serializes the endpoint under its read lock.
 func (ep *TargetEndpoint) MarshalJSON() ([]byte, error) {
 	ep.lock.RLock()
 	defer ep.lock.RUnlock()
@@ -343,6 +352,7 @@ func (ep *TargetEndpoint) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*plain)(ep))
 }
 
+// addProxyPath returns the subrouter of the proxy for the path prefix, creating and registering it if it doesn't exist.
 func (p *Proxy) addProxyPath(path string) *mux.Router {
 	proxyLock.Lock()
 	defer proxyLock.Unlock()
@@ -356,6 +366,7 @@ func (p *Proxy) addProxyPath(path string) *mux.Router {
 	return proxyRouters[p.Port][path]
 }
 
+// AddTarget registers the URI matches of the target's triggers with the router, prepares their endpoint invocations and transforms, and adds the target to the proxy.
 func (p *Proxy) AddTarget(t *Target) error {
 	for _, trigger := range t.Triggers {
 		for _, match := range trigger.MatchAny {
@@ -452,18 +463,21 @@ func (p *Proxy) AddTarget(t *Target) error {
 	return nil
 }
 
+// getTarget returns the named target, or nil if there is none.
 func (p *Proxy) getTarget(name string) *Target {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	return p.Targets[name]
 }
 
+// clearTargets removes all the targets of the proxy.
 func (p *Proxy) clearTargets() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.Targets = map[string]*Target{}
 }
 
+// removeTarget removes the named target, and tells whether it existed.
 func (p *Proxy) removeTarget(target string) bool {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -474,6 +488,7 @@ func (p *Proxy) removeTarget(target string) bool {
 	return false
 }
 
+// enableTarget enables or disables the named target, and tells whether it exists.
 func (p *Proxy) enableTarget(target string, enable bool) bool {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -487,12 +502,14 @@ func (p *Proxy) enableTarget(target string, enable bool) bool {
 	return false
 }
 
+// hasAnyTargets tells whether the proxy has any targets.
 func (p *Proxy) hasAnyTargets() bool {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	return len(p.Targets) > 0
 }
 
+// addRemoveHeader adds a header to, or removes it from, the transform of the named target's trigger, and tells whether the target exists.
 func (p *Proxy) addRemoveHeader(targetName, triggerName, header, value string, remove bool) bool {
 	p.lock.Lock()
 	target := p.Targets[targetName]
@@ -503,6 +520,7 @@ func (p *Proxy) addRemoveHeader(targetName, triggerName, header, value string, r
 	return target.addRemoveHeader(triggerName, header, value, remove)
 }
 
+// addRemoveHeader changes the header in the transform of the trigger if one is named, or else in the transform of the target and of all its triggers.
 func (t *Target) addRemoveHeader(triggerName, header, value string, remove bool) bool {
 	t.lock.Lock()
 	defer t.lock.Unlock()
@@ -530,6 +548,7 @@ func (t *Target) addRemoveHeader(triggerName, header, value string, remove bool)
 	return true
 }
 
+// addRemoveHeader changes the header in the transform of the trigger, creating the transform if it has none.
 func (t *TargetTrigger) addRemoveHeader(header, value string, remove bool) bool {
 	t.lock.Lock()
 	defer t.lock.Unlock()
@@ -539,6 +558,7 @@ func (t *TargetTrigger) addRemoveHeader(header, value string, remove bool) bool 
 	return t.Transform.addRemoveHeader(header, value, remove)
 }
 
+// addRemoveHeader records the header to add with its value, or to remove, in the transform.
 func (t *TrafficTransform) addRemoveHeader(header, value string, remove bool) bool {
 	t.lock.Lock()
 	defer t.lock.Unlock()
@@ -558,6 +578,7 @@ func (t *TrafficTransform) addRemoveHeader(header, value string, remove bool) bo
 	return true
 }
 
+// clearHeaders clears the header, or all the headers if none is given, of the named target's trigger, and tells whether the target exists.
 func (p *Proxy) clearHeaders(targetName, triggerName, header string) bool {
 	p.lock.Lock()
 	target := p.Targets[targetName]
@@ -568,6 +589,7 @@ func (p *Proxy) clearHeaders(targetName, triggerName, header string) bool {
 	return false
 }
 
+// clearHeaders clears the header in the transform of the trigger if one is named, or else in the transforms of the target and of all its triggers.
 func (t *Target) clearHeaders(triggerName, header string) bool {
 	t.lock.Lock()
 	defer t.lock.Unlock()
@@ -592,6 +614,7 @@ func (t *Target) clearHeaders(triggerName, header string) bool {
 	return true
 }
 
+// clearHeaders clears the header in the transform of the trigger, and tells whether the trigger has one.
 func (t *TargetTrigger) clearHeaders(header string) bool {
 	t.lock.Lock()
 	defer t.lock.Unlock()
@@ -601,6 +624,7 @@ func (t *TargetTrigger) clearHeaders(header string) bool {
 	return false
 }
 
+// clearHeaders removes the header, or all the headers if none is given, from the add and remove lists of the transform.
 func (t *TrafficTransform) clearHeaders(header string) bool {
 	t.lock.Lock()
 	defer t.lock.Unlock()

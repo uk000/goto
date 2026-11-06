@@ -40,6 +40,7 @@ var (
 	optionalPathKeyRegexp = regexp.MustCompile(`(\/(?:[^\/{}]+=)?{[^{}]+?}\?\??)`)
 )
 
+// CreateRouters sets up the port, root and match routers on the core router, and returns the root router.
 func CreateRouters(coreRouter *mux.Router) *mux.Router {
 	CoreRouter = coreRouter
 	portRoute := coreRouter.PathPrefix("/port={port}")
@@ -153,6 +154,7 @@ func routePaths(path string) []string {
 	return paths
 }
 
+// PathRouter creates a subrouter for the path prefix, along with matching subrouters on the co-routers of the router.
 func PathRouter(r *mux.Router, path string) *mux.Router {
 	pathRouter := PathPrefix(r, path)
 	for _, coRouter := range coRoutersMap[r] {
@@ -161,6 +163,7 @@ func PathRouter(r *mux.Router, path string) *mux.Router {
 	return pathRouter
 }
 
+// PathPrefix creates a subrouter for the path prefix, registering the alternatives of its optional segments and the co-router variants as co-routers of the subrouter.
 func PathPrefix(r *mux.Router, path string) *mux.Router {
 	var subRouter *mux.Router
 	// var portSubRouter *mux.Router
@@ -187,6 +190,7 @@ func PathPrefix(r *mux.Router, path string) *mux.Router {
 	return subRouter
 }
 
+// addRoutes registers the handler for each path on the router and its co-routers, limited to the methods if any are given.
 func addRoutes(r *mux.Router, altPaths []string, f func(http.ResponseWriter, *http.Request), methods []string) {
 	for _, p := range altPaths {
 		if len(methods) > 0 {
@@ -203,6 +207,7 @@ func addRoutes(r *mux.Router, altPaths []string, f func(http.ResponseWriter, *ht
 	}
 }
 
+// AddRoute registers the handler for the path on the router and its co-routers, along with the alternatives of the optional segments and the trailing slash variants.
 func AddRoute(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), methods ...string) {
 	addRoutes(r, routePaths(path), f, methods)
 }
@@ -221,19 +226,23 @@ func AddRoute(r *mux.Router, path string, f func(http.ResponseWriter, *http.Requ
 // 	return nil
 // }
 
+// AddRouteWithPort registers the route as AddRoute does; the registration of a port specific route is commented out.
 func AddRouteWithPort(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), methods ...string) {
 	AddRoute(r, path, f, methods...)
 	//RegisterPortRoute(r, false, path, f, methods...)
 }
 
+// AddRouteQ registers a route that matches only when the query param is present, and binds its value to a route var of the same name.
 func AddRouteQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParam string, methods ...string) {
 	addRouteQ(r, path, f, queryParam, false, methods...)
 }
 
+// AddRouteQO registers routes for the path with the query param, and without it, as the param is optional.
 func AddRouteQO(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParam string, methods ...string) {
 	addRouteQ(r, path, f, queryParam, true, methods...)
 }
 
+// addRouteQ registers the route with the query param on the router and its co-routers, and one without the param if it is optional.
 func addRouteQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request), queryParam string, queryOptional bool, methods ...string) {
 	queryKey := fmt.Sprintf("{%s}", queryParam)
 	for _, p := range routePaths(path) {
@@ -251,6 +260,7 @@ func addRouteQ(r *mux.Router, path string, f func(http.ResponseWriter, *http.Req
 	}
 }
 
+// addQueries registers the handler for each path, matching the given query pairs, on the router and its co-routers.
 func addQueries(r *mux.Router, altPaths []string, f func(http.ResponseWriter, *http.Request), qPairs []string, methods []string) {
 	for _, p := range altPaths {
 		r.HandleFunc(p, f).Queries(qPairs...).Methods(methods...)
@@ -289,6 +299,7 @@ func AddRouteWithMultiQ(r *mux.Router, path string, f func(http.ResponseWriter, 
 	}
 }
 
+// GetRootURI splits the URI into its first path segment and the rest, or returns empty strings if it has none.
 func GetRootURI(uri string) (string, string) {
 	uriMatch := RootURIRegexp.FindStringSubmatch(uri)
 	if len(uriMatch) > 2 {

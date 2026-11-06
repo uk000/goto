@@ -24,6 +24,7 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// callRemoteTool calls a tool of a remote MCP server (over streamable HTTP or SSE), and gives its result as the result.
 func (t *MCPTool) callRemoteTool(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	var result *gomcp.CallToolResult
 	if tctx.args == nil {

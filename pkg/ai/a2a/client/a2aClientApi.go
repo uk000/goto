@@ -35,6 +35,7 @@ var (
 	Middleware = middleware.NewMiddleware("a2a", setRoutes, nil)
 )
 
+// setRoutes registers the /a2a/client routes for fetching agent cards, calling agents (unary and stream) and receiving push notifications.
 func setRoutes(r *mux.Router) {
 	a2a := middleware.RootPath("/a2a")
 	a2aClientRouter := util.PathRouter(a2a, "/client")
@@ -46,6 +47,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(a2aClientRouter, "/push", pushReceiver, "POST")
 }
 
+// fetchAgentCard fetches the agent card from the url and authority query params and returns it as JSON.
 func fetchAgentCard(w http.ResponseWriter, r *http.Request) {
 	url := util.GetStringParamValue(r, "url")
 	authority := util.GetStringParamValue(r, "authority")
@@ -59,14 +61,17 @@ func fetchAgentCard(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// callAgent handles a request to call an agent and respond with the collected output.
 func callAgent(w http.ResponseWriter, r *http.Request) {
 	invokeAgent(w, r, false)
 }
 
+// callAgentStream handles a request to call an agent and stream its responses back as they arrive.
 func callAgentStream(w http.ResponseWriter, r *http.Request) {
 	invokeAgent(w, r, true)
 }
 
+// invokeAgent reads the AgentCall from the payload, calls the agent, and writes the response status, via-goto headers and either the streamed or collected output.
 func invokeAgent(w http.ResponseWriter, r *http.Request, stream bool) {
 	call := &AgentCall{}
 	name := util.GetStringParamValue(r, "agent")
@@ -139,6 +144,7 @@ func invokeAgent(w http.ResponseWriter, r *http.Request, stream bool) {
 	}
 }
 
+// streamAgentResponse returns the callback that either streams each agent response to the caller or collects it into output, skipping artifacts.
 func streamAgentResponse(agent string, stream bool, output map[string]map[string]any, w http.ResponseWriter, r *http.Request) AgentResultsCallback {
 	var fw http.Flusher
 	if stream {
@@ -200,6 +206,7 @@ func streamAgentResponse(agent string, stream bool, output map[string]map[string
 	}
 }
 
+// pushReceiver accepts a push notification, rejecting a body that is unreadable or not valid JSON; the notification is otherwise ignored.
 func pushReceiver(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	msg := ""

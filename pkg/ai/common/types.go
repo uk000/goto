@@ -48,6 +48,7 @@ type ToolCallArgs struct {
 	RemoteArgs     *ToolCallArgs     `json:"remoteArgs,omitempty"`
 }
 
+// NewCallArgs returns args with empty metadata, a zero delay and empty remote args.
 func NewCallArgs() *ToolCallArgs {
 	return &ToolCallArgs{
 		Metadata:   map[string]string{},
@@ -56,6 +57,7 @@ func NewCallArgs() *ToolCallArgs {
 	}
 }
 
+// NonNil fills every nil map, slice and pointer field of the args with an empty default.
 func (a *ToolCallArgs) NonNil() {
 	if a.Metadata == nil {
 		a.Metadata = map[string]string{}
@@ -80,6 +82,7 @@ func (a *ToolCallArgs) NonNil() {
 	}
 }
 
+// UpdateFrom overlays the non-empty fields of the given args onto these args, merging metadata and remote args recursively.
 func (a *ToolCallArgs) UpdateFrom(args *ToolCallArgs) {
 	if args == nil {
 		return
@@ -186,6 +189,7 @@ func inputStringSlice(v any) ([]string, bool) {
 	return nil, false
 }
 
+// UpdateFromInputArgs sets the args from a loosely typed input map (e.g. decoded JSON), ignoring values of unexpected types.
 func (a *ToolCallArgs) UpdateFromInputArgs(args map[string]any) {
 	if args == nil {
 		return
@@ -271,6 +275,7 @@ func (a *ToolCallArgs) requestHeaders() *types.HeadersConfig {
 	return a.Headers.Request
 }
 
+// mergeStrings copies the entries of from into to, creating to if it is nil, and returns it.
 func mergeStrings(to, from map[string]string) map[string]string {
 	if to == nil {
 		to = make(map[string]string, len(from))
@@ -279,6 +284,7 @@ func mergeStrings(to, from map[string]string) map[string]string {
 	return to
 }
 
+// UpdateDelay sets the args' delay, preferring one parsed from DelayText over the given delay.
 func (a *ToolCallArgs) UpdateDelay(delay *types.Delay) {
 	if a.DelayText != "" {
 		if delay2 := types.ParseDelay(a.DelayText); delay2 != nil {
@@ -288,6 +294,7 @@ func (a *ToolCallArgs) UpdateDelay(delay *types.Delay) {
 	a.Delay = delay
 }
 
+// AddMetadata sets a metadata key/value on the args, creating the metadata map if needed.
 func (a *ToolCallArgs) AddMetadata(k, v string) {
 	if a.Metadata == nil {
 		a.Metadata = map[string]string{}
@@ -304,6 +311,7 @@ func CloneHeaders(h *types.Headers) *types.Headers {
 	return &types.Headers{Request: cloneHeadersConfig(h.Request), Response: cloneHeadersConfig(h.Response)}
 }
 
+// cloneHeadersConfig deep copies a headers config, returning nil for a nil config.
 func cloneHeadersConfig(hc *types.HeadersConfig) *types.HeadersConfig {
 	if hc == nil {
 		return nil
@@ -328,6 +336,7 @@ func (a *ToolCallArgs) Clone() *ToolCallArgs {
 	return &args
 }
 
+// IsEmpty tells whether none of the args' fields (including remote args) are set.
 func (a *ToolCallArgs) IsEmpty() bool {
 	return a.Text == "" && a.DelayText == "" && a.Count == 0 && a.Delay == nil &&
 		a.ToolName == "" && a.AgentName == "" && a.URL == "" && a.Authority == "" &&

@@ -56,6 +56,7 @@ type PayloadMarshal struct {
 type TextRangeFunc func(text string, count int, restarted bool) (bool, error)
 type DataRangeFunc func(data any, count int, restarted bool) (bool, error)
 
+// NewJSONPayload creates a payload from JSON, or from raw bytes parsed as JSON if no JSON is given, with the given delay.
 func NewJSONPayload(json util.JSON, raw []byte, delayMin, delayMax time.Duration, delayCount int) *Payload {
 	if json == nil && len(raw) > 0 {
 		json = util.JSONFromBytes(raw)
@@ -66,6 +67,7 @@ func NewJSONPayload(json util.JSON, raw []byte, delayMin, delayMax time.Duration
 	}
 }
 
+// NewRawPayload creates a payload of raw bytes and text with the given delay.
 func NewRawPayload(raw []byte, text string, delayMin, delayMax time.Duration, delayCount int) *Payload {
 	return &Payload{
 		Delay: types.NewDelay(delayMin, delayMax, delayCount),
@@ -74,6 +76,7 @@ func NewRawPayload(raw []byte, text string, delayMin, delayMax time.Duration, de
 	}
 }
 
+// NewStreamJSONPayload creates a stream payload of JSON items (or of the JSON array in raw bytes) with the given delay.
 func NewStreamJSONPayload(jsonArr []util.JSON, raw []byte, streamCount int, delayMin, delayMax time.Duration, delayCount int) *Payload {
 	payload := &Payload{
 		IsStream:    true,
@@ -84,6 +87,7 @@ func NewStreamJSONPayload(jsonArr []util.JSON, raw []byte, streamCount int, dela
 	return payload
 }
 
+// NewStreamTextPayload creates a stream payload of text items (or of the string array in the bytes) with the given delay.
 func NewStreamTextPayload(textArr []string, b []byte, streamCount int, delayMin, delayMax time.Duration, delayCount int) *Payload {
 	payload := &Payload{
 		IsStream:    true,
@@ -94,6 +98,7 @@ func NewStreamTextPayload(textArr []string, b []byte, streamCount int, delayMin,
 	return payload
 }
 
+// NewRawStreamPayload creates a stream payload of raw items, taken from whichever of the raw, string or byte arrays is set, with the given delay.
 func NewRawStreamPayload(raw []any, strArr []string, byteArr [][]byte, streamCount int, delayMin, delayMax time.Duration, delayCount int) *Payload {
 	payload := &Payload{
 		IsStream:    true,
@@ -112,6 +117,7 @@ func (p *Payload) MarshalYAML() (any, error) {
 	return (*payloadYAML)(p), nil
 }
 
+// UnmarshalYAML decodes the payload from YAML via PayloadMarshal.
 func (p *Payload) UnmarshalYAML(node *yaml.Node) error {
 	pm := &PayloadMarshal{}
 	if err := node.Decode(&pm); err != nil {
@@ -120,6 +126,7 @@ func (p *Payload) UnmarshalYAML(node *yaml.Node) error {
 	return p.Unmarshal(pm)
 }
 
+// UnmarshalJSON decodes the payload from JSON via PayloadMarshal.
 func (p *Payload) UnmarshalJSON(b []byte) error {
 	pm := &PayloadMarshal{}
 	if err := json.Unmarshal(b, pm); err != nil {
@@ -128,6 +135,7 @@ func (p *Payload) UnmarshalJSON(b []byte) error {
 	return p.Unmarshal(pm)
 }
 
+// Unmarshal fills the payload from PayloadMarshal as a stream or as JSON, text or raw content, and prepares its delay.
 func (p *Payload) Unmarshal(pm *PayloadMarshal) error {
 	if pm.StreamCount > 0 || len(pm.JSONStream) > 0 || len(pm.TextStream) > 0 || len(pm.RawStream) > 0 {
 		p.StreamCount = pm.StreamCount
@@ -152,6 +160,7 @@ func (p *Payload) Unmarshal(pm *PayloadMarshal) error {
 	return nil
 }
 
+// prepareJSONStream makes the payload a JSON stream of the given items, defaulting the stream count to the item count.
 func (p *Payload) prepareJSONStream(jsonArr []util.JSON, jsonMapArr []map[string]any, jsonMap map[string]any, raw []byte) {
 	if len(jsonArr) == 0 && len(jsonMapArr) == 0 && len(raw) == 0 && jsonMap == nil {
 		return
@@ -173,6 +182,7 @@ func (p *Payload) prepareJSONStream(jsonArr []util.JSON, jsonMapArr []map[string
 	p.JSONStream = jsonArr
 }
 
+// prepareTextStream makes the payload a text stream of the given items, defaulting the stream count to the item count.
 func (p *Payload) prepareTextStream(textArr []string, b []byte) {
 	if textArr == nil {
 		textArr = util.ReadStringArray(b)
@@ -184,6 +194,7 @@ func (p *Payload) prepareTextStream(textArr []string, b []byte) {
 	p.TextStream = textArr
 }
 
+// prepareRawStream makes the payload a stream of the raw, string or byte items given, defaulting the stream count to the item count.
 func (p *Payload) prepareRawStream(raw []any, strArr []string, byteArr [][]byte) {
 	payload := []any{}
 	streamCount := 0
@@ -210,6 +221,7 @@ func (p *Payload) prepareRawStream(raw []any, strArr []string, byteArr [][]byte)
 	p.RawStream = payload
 }
 
+// Count returns the number of items in the payload: the stream length, or 1 for a single payload, or 0 if empty.
 func (p *Payload) Count() int {
 	if p.JSONStream != nil {
 		return len(p.JSONStream)
@@ -223,6 +235,7 @@ func (p *Payload) Count() int {
 	return 0
 }
 
+// ToText renders the payload as text; stream items are joined with commas.
 func (p *Payload) ToText() string {
 	output := strings.Builder{}
 	if p.Text != "" {
@@ -267,6 +280,7 @@ func (p *Payload) ToText() string {
 	return output.String()
 }
 
+// sendJSONStream feeds the JSON stream items, starting at item from and repeating the stream until to items are sent (or the callback stops it), to the text or data callback.
 func (p *Payload) sendJSONStream(from, to int, f TextRangeFunc, f2 DataRangeFunc) (err error) {
 	if len(p.JSONStream) == 0 {
 		// There is nothing to send, however many times it would be repeated.
@@ -306,6 +320,7 @@ func (p *Payload) sendJSONStream(from, to int, f TextRangeFunc, f2 DataRangeFunc
 	return nil
 }
 
+// sendTextStream feeds the text stream items, starting at item from and repeating the stream until to items are sent (or the callback stops it), to the text or data callback.
 func (p *Payload) sendTextStream(from, to int, f TextRangeFunc, f2 DataRangeFunc) (err error) {
 	if len(p.TextStream) == 0 {
 		// There is nothing to send, however many times it would be repeated.
@@ -345,6 +360,7 @@ func (p *Payload) sendTextStream(from, to int, f TextRangeFunc, f2 DataRangeFunc
 	return nil
 }
 
+// sendRawStream feeds the raw stream items as text, starting at item from and repeating the stream until to items are sent (or the callback stops it), to the text or data callback.
 func (p *Payload) sendRawStream(from, to int, f TextRangeFunc, f2 DataRangeFunc) (err error) {
 	if len(p.RawStream) == 0 {
 		// There is nothing to send, however many times it would be repeated.
@@ -396,6 +412,7 @@ func (p *Payload) sendRawStream(from, to int, f TextRangeFunc, f2 DataRangeFunc)
 	return nil
 }
 
+// sendRaw feeds the raw payload, converted to text, to the text or data callback once.
 func (p *Payload) sendRaw(f TextRangeFunc, f2 DataRangeFunc) (err error) {
 	text := ""
 	if s, ok := p.Raw.(string); ok {
@@ -419,10 +436,12 @@ func (p *Payload) sendRaw(f TextRangeFunc, f2 DataRangeFunc) (err error) {
 	return nil
 }
 
+// RangeText feeds the payload as text items, up to to items, to f.
 func (p *Payload) RangeText(to int, f TextRangeFunc) (err error) {
 	return p.RangeTextFrom(0, to, f)
 }
 
+// RangeTextWithDelay feeds the payload as text items to f, applying the payload's delay (or the given one, if non-zero) before each item.
 func (p *Payload) RangeTextWithDelay(to int, delay *types.Duration, f TextRangeFunc) (err error) {
 	d := &types.Delay{Count: -1}
 	if p.Delay != nil {
@@ -443,6 +462,7 @@ func (p *Payload) RangeTextWithDelay(to int, delay *types.Duration, f TextRangeF
 	return p.RangeTextFrom(0, to, f)
 }
 
+// RangeTextFrom feeds the payload as text items, from item from up to to, to f.
 func (p *Payload) RangeTextFrom(from, to int, f TextRangeFunc) (err error) {
 	if p.JSONStream != nil {
 		return p.sendJSONStream(from, to, f, nil)
@@ -462,10 +482,12 @@ func (p *Payload) RangeTextFrom(from, to int, f TextRangeFunc) (err error) {
 	return nil
 }
 
+// RangeAny feeds the payload as data items, up to to items, to f.
 func (p *Payload) RangeAny(to int, f DataRangeFunc) (err error) {
 	return p.RangeAnyFrom(0, to, f)
 }
 
+// RangeAnyFrom feeds the payload as data items, from item from up to to, to f.
 func (p *Payload) RangeAnyFrom(from, to int, f DataRangeFunc) (err error) {
 	if p.JSONStream != nil {
 		return p.sendJSONStream(from, to, nil, f)
@@ -532,6 +554,7 @@ func matchBody(body string, bodyMatchResponses map[string]*ResponsePayload) (*Re
 	return nil, nil, false
 }
 
+// getPayloadForKV finds the payload for the first key (in sorted order) whose value matches a configured payload, falling back to that key's any-value payload.
 func getPayloadForKV(kvMap map[string][]string, payloadMap map[string]map[string]*ResponsePayload) (*ResponsePayload, bool) {
 	if len(kvMap) == 0 || len(payloadMap) == 0 {
 		return nil, false

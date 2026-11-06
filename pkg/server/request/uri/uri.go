@@ -63,6 +63,7 @@ var (
 	uriLock            sync.RWMutex
 )
 
+// setRoutes registers the /uri routes for URI status, delay and call count configuration.
 func setRoutes(r *mux.Router) {
 	uriRouter := util.PathRouter(r, "/uri")
 	// util.AddRouteWithMultiQ(uriRouter, "/reroute", setStatus, [][]string{{"from", "to"}}, "POST", "PUT")
@@ -75,6 +76,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(uriRouter, "", getURIConfigs, "GET")
 }
 
+// initPort returns the request's port, creating the per-port URI count, status and delay maps if missing.
 func initPort(r *http.Request) string {
 	port := util.GetRequestOrListenerPort(r)
 	uriLock.Lock()
@@ -92,6 +94,7 @@ func initPort(r *http.Request) string {
 	return port
 }
 
+// setStatus sets (or clears, for status 0) the status, with an optional call limit, to respond with for a URI; a trailing * makes it a prefix match.
 func setStatus(w http.ResponseWriter, r *http.Request) {
 	port := initPort(r)
 	msg := ""
@@ -132,6 +135,7 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// setDelay sets (or clears, for no valid delay) the delay, with an optional call limit, applied to requests of a URI; a trailing * makes it a prefix match.
 func setDelay(w http.ResponseWriter, r *http.Request) {
 	port := initPort(r)
 	msg := ""
@@ -178,6 +182,7 @@ func setDelay(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getURIConfigs reports the port's URI delays, statuses and call counts as JSON.
 func getURIConfigs(w http.ResponseWriter, r *http.Request) {
 	port := initPort(r)
 	uriLock.RLock()
@@ -191,6 +196,7 @@ func getURIConfigs(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "%s\n", result)
 }
 
+// getURICallCounts reports the port's URI call counts as JSON.
 func getURICallCounts(w http.ResponseWriter, r *http.Request) {
 	port := initPort(r)
 	uriLock.RLock()
@@ -200,6 +206,7 @@ func getURICallCounts(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "%s\n", result)
 }
 
+// clearURICallCounts resets the port's URI call counts.
 func clearURICallCounts(w http.ResponseWriter, r *http.Request) {
 	port := initPort(r)
 	uriLock.Lock()
@@ -210,6 +217,7 @@ func clearURICallCounts(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// enableURICallCounts turns on counting of calls per URI.
 func enableURICallCounts(w http.ResponseWriter, r *http.Request) {
 	uriLock.Lock()
 	trackURICallCounts = true
@@ -219,6 +227,7 @@ func enableURICallCounts(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// disableURICallCounts turns off counting of calls per URI.
 func disableURICallCounts(w http.ResponseWriter, r *http.Request) {
 	uriLock.Lock()
 	trackURICallCounts = false
@@ -278,6 +287,7 @@ func snapshotConfigs(configs map[string]any) map[string]any {
 	return snapshot
 }
 
+// isGlobConfig tells if a URI status or delay config applies to URI prefixes.
 func isGlobConfig(config any) bool {
 	switch c := config.(type) {
 	case *URIStatusConfig:
@@ -337,6 +347,7 @@ func HasURIStatus(r *http.Request) bool {
 	return GetURIStatus(r) != nil
 }
 
+// GetURIStatus returns the URI status config that applies to the request, or nil if none is configured or it is used up.
 func GetURIStatus(r *http.Request) *URIStatusConfig {
 	if present, glob, v := hasURIConfig(r, uriStatusByPort); present {
 		uriStatus := v.(*URIStatusConfig)
@@ -349,6 +360,7 @@ func GetURIStatus(r *http.Request) *URIStatusConfig {
 	return nil
 }
 
+// GetURIDelay returns the URI delay config that applies to the request, or nil if none is configured or it is used up.
 func GetURIDelay(r *http.Request) *DelayConfig {
 	if present, glob, v := hasURIConfig(r, uriDelayByPort); present {
 		delayConfig := v.(*DelayConfig)
@@ -378,6 +390,7 @@ func HasAnyURIStatusOrDelay() bool {
 	return false
 }
 
+// checkAndSkip returns the URI status and delay configs for the request, or calls next and reports skipped if the request is non-traffic or has neither.
 func checkAndSkip(w http.ResponseWriter, r *http.Request, next http.Handler) (*URIStatusConfig, *DelayConfig, bool) {
 	rs := util.GetRequestStore(r)
 	if rs.IsKnownNonTraffic || !HasAnyURIStatusOrDelay() {
@@ -397,6 +410,7 @@ func checkAndSkip(w http.ResponseWriter, r *http.Request, next http.Handler) (*U
 	return uriStatus, uriDelay, false
 }
 
+// computeURIStatus picks the configured status for the request (randomly if several), consumes one of its limited calls and removes the config once used up; returns 0 if none.
 func computeURIStatus(uri, port string, uriStatus *URIStatusConfig, r *http.Request, w http.ResponseWriter) int {
 	if uriStatus == nil {
 		return 0
@@ -441,6 +455,7 @@ func computeURIStatus(uri, port string, uriStatus *URIStatusConfig, r *http.Requ
 	return statusToReport
 }
 
+// applyURIDelay sleeps for the configured URI delay, consuming one of its limited calls and removing the config once used up.
 func applyURIDelay(uri, port string, uriDelay *DelayConfig, r *http.Request, w http.ResponseWriter) {
 	if uriDelay == nil {
 		return
@@ -495,6 +510,7 @@ func countURICall(r *http.Request) {
 	}
 }
 
+// middlewareFunc counts URI calls, applies the URI delay, calls next, and overrides the response status with the URI status (if any) before running the triggers.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Calls are counted for all URIs, not only for the ones that have a status or a delay.

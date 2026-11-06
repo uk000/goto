@@ -910,6 +910,13 @@ func TestGetPeersExportedHelper(t *testing.T) {
 	assertEqual(t, "pod name -> address", GetPeers("p1", nil), map[string]string{"pod-a": "10.0.0.1:8080", "pod-b": "10.0.0.2:8080"})
 }
 
+// An unknown peer has no pods, and asking for it must not panic.
+func TestGetPeersOfUnknownPeerIsEmpty(t *testing.T) {
+	h := newHarness(t)
+	h.addPeer("p1", "10.0.0.1:8080", "pod-a")
+	assertEqual(t, "pods of unknown peer", GetPeers("nosuchpeer", nil), map[string]string{})
+}
+
 // ---------------------------------------------------------------------------------------------
 // Labeled lockers
 // ---------------------------------------------------------------------------------------------

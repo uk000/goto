@@ -71,72 +71,84 @@ var (
 	lock sync.RWMutex
 )
 
+// AddHTTPStartWatcher registers a watcher to be called when the HTTP server starts.
 func AddHTTPStartWatcher(w HTTPStartWatcher) {
 	lock.Lock()
 	defer lock.Unlock()
 	httpStartWatchers = append(httpStartWatchers, w)
 }
 
+// AddHTTPStopWatcher registers a watcher to be called when the HTTP server stops.
 func AddHTTPStopWatcher(w HTTPStopWatcher) {
 	lock.Lock()
 	defer lock.Unlock()
 	httpStopWatchers = append(httpStopWatchers, w)
 }
 
+// AddJSONRPCStartWatcher registers a watcher to be called when the JSON-RPC (MCP) server starts.
 func AddJSONRPCStartWatcher(w HTTPStartWatcher) {
 	lock.Lock()
 	defer lock.Unlock()
 	mcpStartWatchers = append(mcpStartWatchers, w)
 }
 
+// AddJSONRPCStopWatcher registers a watcher to be called when the JSON-RPC (MCP) server stops.
 func AddJSONRPCStopWatcher(w HTTPStopWatcher) {
 	lock.Lock()
 	defer lock.Unlock()
 	mcpStopWatchers = append(mcpStopWatchers, w)
 }
 
+// AddTCPServeWatcher registers a watcher that is handed the TCP serve function when TCP servers are configured.
 func AddTCPServeWatcher(w TCPServerWatcher) {
 	lock.Lock()
 	defer lock.Unlock()
 	tcpServeWatchers = append(tcpServeWatchers, w)
 }
 
+// AddGRPCStartWatcher registers a listener to be called when the gRPC server starts.
 func AddGRPCStartWatcher(w GRPCStartListener) {
 	lock.Lock()
 	defer lock.Unlock()
 	grpcStartListeners = append(grpcStartListeners, w)
 }
 
+// AddGRPCStopWatcher registers a listener to be called when the gRPC server stops.
 func AddGRPCStopWatcher(w GRPCStopListener) {
 	lock.Lock()
 	defer lock.Unlock()
 	grpcStopListeners = append(grpcStopListeners, w)
 }
 
+// AddGRPCIntercept registers an interceptor that is given the gRPC manager to wrap or register services.
 func AddGRPCIntercept(w GRPCInterceptor) {
 	lock.Lock()
 	defer lock.Unlock()
 	grpcIntercepts = append(grpcIntercepts, w)
 }
 
+// AddListenersStartWatcher registers a watcher to be called once the listeners have started.
 func AddListenersStartWatcher(w ListenersStartWatcher) {
 	lock.Lock()
 	defer lock.Unlock()
 	listenersStartWatchers = append(listenersStartWatchers, w)
 }
 
+// AddConnOpenWatcher registers a watcher to be called with each newly opened connection.
 func AddConnOpenWatcher(w ConnOpenWatcher) {
 	lock.Lock()
 	defer lock.Unlock()
 	connOpenWatchers = append(connOpenWatchers, w)
 }
 
+// AddConnCloseWatcher registers a watcher to be called with each closed connection.
 func AddConnCloseWatcher(w ConnCloseWatcher) {
 	lock.Lock()
 	defer lock.Unlock()
 	connCloseWatchers = append(connCloseWatchers, w)
 }
 
+// OnListenersStarted notifies all registered listeners-start watchers.
 func OnListenersStarted() {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -145,6 +157,7 @@ func OnListenersStarted() {
 	}
 }
 
+// OnHTTPStart calls all registered HTTP start watchers with the server.
 func OnHTTPStart(server *http.Server, h2s *http2.Server) {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -153,6 +166,7 @@ func OnHTTPStart(server *http.Server, h2s *http2.Server) {
 	}
 }
 
+// OnHTTPStop calls all registered HTTP stop watchers.
 func OnHTTPStop() {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -161,6 +175,7 @@ func OnHTTPStop() {
 	}
 }
 
+// OnJSONRPCStart calls all registered JSON-RPC (MCP) start watchers with the server.
 func OnJSONRPCStart(server *http.Server, h2s *http2.Server) {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -169,6 +184,7 @@ func OnJSONRPCStart(server *http.Server, h2s *http2.Server) {
 	}
 }
 
+// OnMCPStop calls all registered JSON-RPC (MCP) stop watchers.
 func OnMCPStop() {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -177,6 +193,7 @@ func OnMCPStop() {
 	}
 }
 
+// OnConnOpen calls all registered watchers with the opened connection.
 func OnConnOpen(c net.Conn) {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -185,6 +202,7 @@ func OnConnOpen(c net.Conn) {
 	}
 }
 
+// OnConnClose calls all registered watchers with the closed connection.
 func OnConnClose(c net.Conn) {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -193,6 +211,7 @@ func OnConnClose(c net.Conn) {
 	}
 }
 
+// ConfigureTCPServer hands the TCP serve function to every registered TCP serve watcher.
 func ConfigureTCPServer(serve func(listenerID string, port int, listener net.Listener) error) {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -201,6 +220,7 @@ func ConfigureTCPServer(serve func(listenerID string, port int, listener net.Lis
 	}
 }
 
+// OnGRPCStart calls all registered gRPC start listeners.
 func OnGRPCStart() {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -209,6 +229,7 @@ func OnGRPCStart() {
 	}
 }
 
+// OnGRPCStop calls all registered gRPC stop listeners.
 func OnGRPCStop() {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -217,12 +238,14 @@ func OnGRPCStop() {
 	}
 }
 
+// GRPCIntercept gives the gRPC manager to every registered interceptor.
 func GRPCIntercept(server IGRPCManager) {
 	for _, w := range grpcIntercepts {
 		w(server)
 	}
 }
 
+// Shutdown runs all registered shutdown functions in registration order.
 func Shutdown() {
 	for _, f := range ShutdownFuncs {
 		if f != nil {
@@ -231,6 +254,7 @@ func Shutdown() {
 	}
 }
 
+// OnShutdown registers the non-nil functions to run at Shutdown, and returns true so it can initialize a package var.
 func OnShutdown(funcs ...func()) bool {
 	for _, fn := range funcs {
 		if fn != nil {

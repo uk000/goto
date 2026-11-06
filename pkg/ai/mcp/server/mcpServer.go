@@ -135,6 +135,7 @@ var (
 	lock                     sync.RWMutex
 )
 
+// init sets up the empty component registries of every kind and the default tool input schemas.
 func init() {
 	for _, kind := range Kinds {
 		AllComponents[kind] = map[string]map[string]IMCPComponent{}
@@ -155,6 +156,7 @@ func init() {
 	}
 }
 
+// InitDefaultServer creates the default stateless and stateful MCP servers on the JSON-RPC port.
 func InitDefaultServer() {
 	p := &MCPServerPayload{
 		Port:         global.Self.JSONRPCPort,
@@ -188,6 +190,7 @@ func InitDefaultServer() {
 
 }
 
+// NewMCPServer builds an MCP server from the payload, wiring the SDK server with its handlers and middleware, and adds the default tools.
 func NewMCPServer(p *MCPServerPayload) *MCPServer {
 	server := &MCPServer{
 		ID:          fmt.Sprintf("[%s:%d][%s][%s]", p.Name, p.Port, global.Self.Namespace, global.Self.Cluster),
@@ -255,6 +258,7 @@ func uriRegexpFor(uri string) *regexp.Regexp {
 	return nil
 }
 
+// SetServerRoute routes the URI of the server, its SSE variant, and a sub-URI for each of its tools, to the server.
 func SetServerRoute(uri string, server *MCPServer) {
 	lock.Lock()
 	defer lock.Unlock()
@@ -295,6 +299,7 @@ func (m *MCPServer) addToolRoutes(tool *MCPTool) {
 	}
 }
 
+// allPortServers gives a snapshot list of the server groups of all ports.
 func allPortServers() []*PortServers {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -305,6 +310,7 @@ func allPortServers() []*PortServers {
 	return all
 }
 
+// allServers gives a snapshot list of the servers of the port.
 func (ps *PortServers) allServers() []*MCPServer {
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
@@ -315,6 +321,7 @@ func (ps *PortServers) allServers() []*MCPServer {
 	return servers
 }
 
+// GetMCPServerNames gives the tool names of each server, by port and server name.
 func GetMCPServerNames() map[int]map[string][]string {
 	byPort := map[int]map[string][]string{}
 	for _, ps := range allPortServers() {
@@ -337,6 +344,7 @@ func GetMCPServerNames() map[int]map[string][]string {
 	return byPort
 }
 
+// GetPortMCPServers gives the server group of the port, creating it on first use.
 func GetPortMCPServers(port int) *PortServers {
 	lock.RLock()
 	ps := PortsServers[port]
@@ -354,10 +362,12 @@ func GetPortMCPServers(port int) *PortServers {
 	return ps
 }
 
+// GetMCPServer gives the server of the given name on the port, if there is one.
 func GetMCPServer(port int, name string) (server *MCPServer) {
 	return GetPortMCPServers(port).GetMCPServer(name)
 }
 
+// NewPortMCPServers creates an empty server group for the port, with empty component registries of every kind.
 func NewPortMCPServers(port int) *PortServers {
 	ps := &PortServers{
 		Port:          port,
@@ -370,6 +380,7 @@ func NewPortMCPServers(port int) *PortServers {
 	return ps
 }
 
+// GetPortDefaultMCPServer gives the default server of the port, or the default stateless server if the port has no servers.
 func GetPortDefaultMCPServer(port int) *MCPServer {
 	ps := GetPortMCPServers(port)
 	if len(ps.Servers) > 0 {
@@ -381,6 +392,7 @@ func GetPortDefaultMCPServer(port int) *MCPServer {
 	return DefaultStatelessServer
 }
 
+// AddMCPServers adds the servers of the payloads, each on the port it names, or on the given port if it names none.
 func AddMCPServers(port int, payloads []*MCPServerPayload) {
 	for _, p := range payloads {
 		if p.Port <= 0 {
@@ -390,10 +402,12 @@ func AddMCPServers(port int, payloads []*MCPServerPayload) {
 	}
 }
 
+// RemoveMCPServer removes the server of the given name from the port.
 func RemoveMCPServer(port int, server string) {
 	GetPortMCPServers(port).RemoveMCPServer(server)
 }
 
+// snapshotAllComponents gives a copy of the component registry that shares no maps with the source.
 func snapshotAllComponents(src map[string]map[string]map[string]IMCPComponent) map[string]map[string]map[string]IMCPComponent {
 	out := make(map[string]map[string]map[string]IMCPComponent, len(src))
 	for kind, byName := range src {
@@ -405,18 +419,21 @@ func snapshotAllComponents(src map[string]map[string]map[string]IMCPComponent) m
 	return out
 }
 
+// currentComponents gives a snapshot of the components of all servers.
 func currentComponents() map[string]map[string]map[string]IMCPComponent {
 	lock.RLock()
 	defer lock.RUnlock()
 	return snapshotAllComponents(AllComponents)
 }
 
+// snapshotServerRoutes gives a copy of the server routes.
 func snapshotServerRoutes() map[string]*types.Pair[string, string] {
 	lock.RLock()
 	defer lock.RUnlock()
 	return maps.Clone(ServerRoutes)
 }
 
+// ClearAllMCPServers removes the servers of all ports and all registered components.
 func ClearAllMCPServers() {
 	lock.Lock()
 	defer lock.Unlock()
@@ -427,6 +444,7 @@ func ClearAllMCPServers() {
 	}
 }
 
+// AddMCPServer creates the server, makes it the default server of the port, and routes its URI to it.
 func (ps *PortServers) AddMCPServer(p *MCPServerPayload) *MCPServer {
 	s := NewMCPServer(p)
 	s.ps = ps
@@ -445,6 +463,7 @@ func (ps *PortServers) AddMCPServer(p *MCPServerPayload) *MCPServer {
 	return s
 }
 
+// RemoveMCPServer removes the server and its components, and picks another default server of the port if it was the default.
 func (ps *PortServers) RemoveMCPServer(server string) {
 	// Servers are kept by their lower case name, and their components by the name that they were given.
 	key := strings.ToLower(server)
@@ -486,6 +505,7 @@ func (ps *PortServers) getDefaultServer() (*MCPServer, int) {
 	return ps.defaultServer, len(ps.Servers)
 }
 
+// AllServers gives a copy of the server groups of all ports.
 func (ps *PortServers) AllServers() map[int]*PortServers {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -508,18 +528,21 @@ func (m *MCPServer) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*mcpServer)(m))
 }
 
+// isEnabled tells whether the server is enabled to serve requests.
 func (m *MCPServer) isEnabled() bool {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 	return m.Enabled
 }
 
+// setEnabled enables or disables the server.
 func (m *MCPServer) setEnabled(enabled bool) {
 	m.lock.Lock()
 	m.Enabled = enabled
 	m.lock.Unlock()
 }
 
+// GetMCPServer gives the server of the given name (case-insensitive), if the port has one.
 func (ps *PortServers) GetMCPServer(name string) *MCPServer {
 	name = strings.ToLower(name)
 	ps.lock.RLock()
@@ -527,10 +550,12 @@ func (ps *PortServers) GetMCPServer(name string) *MCPServer {
 	return ps.Servers[name]
 }
 
+// Start enables the server of the given name, or all servers of the port if there is no name.
 func (ps *PortServers) Start(server string) {
 	ps.setEnabled(server, true)
 }
 
+// Stop disables the server of the given name, or all servers of the port if there is no name.
 func (ps *PortServers) Stop(server string) {
 	ps.setEnabled(server, false)
 }
@@ -547,12 +572,14 @@ func (ps *PortServers) setEnabled(server string, enabled bool) {
 	}
 }
 
+// Clear removes the components of all servers of the port.
 func (ps *PortServers) Clear() {
 	for _, s := range ps.allServers() {
 		s.Clear()
 	}
 }
 
+// GetComponents gives a copy of the components of the kind that were added to the servers of the port.
 func (ps *PortServers) GetComponents(kind string) any {
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
@@ -564,21 +591,27 @@ func (ps *PortServers) GetComponents(kind string) any {
 	return out
 }
 
+// GetID gives the ID of the server.
 func (m *MCPServer) GetID() string {
 	return m.ID
 }
 
+// GetHost gives the host label of the server.
 func (m *MCPServer) GetHost() string {
 	return m.Host
 }
+
+// GetName gives the name of the server.
 func (m *MCPServer) GetName() string {
 	return m.Name
 }
 
+// GetPort gives the port of the server.
 func (m *MCPServer) GetPort() int {
 	return m.Port
 }
 
+// Clear removes all tools, prompts, resources, templates, completion payloads and sessions of the server.
 func (m *MCPServer) Clear() {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -608,6 +641,7 @@ func (m *MCPServer) GetComponents(kind string) any {
 	return nil
 }
 
+// GetComponent gives the component of the given name and kind that belongs to the server, if there is one.
 func (m *MCPServer) GetComponent(name, kind string) IMCPComponent {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -619,6 +653,7 @@ func (m *MCPServer) GetComponent(name, kind string) IMCPComponent {
 	return nil
 }
 
+// GetTool gives the tool of the given name, if the server has one.
 func (m *MCPServer) GetTool(name string) *MCPTool {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
@@ -636,6 +671,7 @@ func safely(what string, f func()) (err error) {
 	return nil
 }
 
+// AddPayload sets the response payload of the component of the given name and kind, or fails if there is no such component.
 func (m *MCPServer) AddPayload(name, kind string, payload []byte, isJSON, isStream bool, streamCount int, delayMin, delayMax time.Duration, delayCount int) error {
 	c := m.GetComponent(name, kind)
 	if c != nil {
@@ -645,6 +681,7 @@ func (m *MCPServer) AddPayload(name, kind string, payload []byte, isJSON, isStre
 	return fmt.Errorf("%s [%s] not found", kind, name)
 }
 
+// addComponentToAll records the component of the server in the component registries of the port and of all ports.
 func (ps *PortServers) addComponentToAll(c IMCPComponent, server string) {
 	ps.lock.Lock()
 	kind := c.GetKind()
@@ -662,6 +699,7 @@ func (ps *PortServers) addComponentToAll(c IMCPComponent, server string) {
 	lock.Unlock()
 }
 
+// removeServerComponents removes the components of the server from the component registries of the port and of all ports.
 func (ps *PortServers) removeServerComponents(server string) {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
@@ -675,6 +713,7 @@ func (ps *PortServers) removeServerComponents(server string) {
 	}
 }
 
+// AddComponents adds the components of the kind that the payload describes to the server, and gives their names.
 func (s *MCPServer) AddComponents(kind string, b []byte) (names []string, err error) {
 	switch kind {
 	case KindTools:
@@ -693,6 +732,7 @@ func (s *MCPServer) AddComponents(kind string, b []byte) (names []string, err er
 	}
 }
 
+// AddTools parses the tools from the payload and adds them to the server, stopping at the first one that fails.
 func (m *MCPServer) AddTools(b []byte) ([]string, error) {
 	tools, err := ParseTools(b)
 	if err != nil {
@@ -709,6 +749,7 @@ func (m *MCPServer) AddTools(b []byte) ([]string, error) {
 	return names, nil
 }
 
+// AddTool adds the tool to the server, and logs the failure if it can't.
 func (m *MCPServer) AddTool(tool *MCPTool) {
 	if err := m.addTool(tool); err != nil {
 		log.Printf("Server [%s][%d] failed to add Tool: %s", m.Name, m.Port, err.Error())
@@ -752,6 +793,7 @@ func (m *MCPServer) addTool(tool *MCPTool) error {
 	return nil
 }
 
+// addDefaultTools adds the built-in tools (ServerDetails, ServerPaths, ListServers, ListComponents, AddTool) to the server.
 func (s *MCPServer) addDefaultTools() {
 	t := &MCPTool{
 		Tool: &gomcp.Tool{
@@ -817,6 +859,7 @@ func (s *MCPServer) addDefaultTools() {
 	s.AddTool(t)
 }
 
+// AddPrompts adds the prompts of the payload to the server, once all of them are parsed and found valid.
 func (m *MCPServer) AddPrompts(b []byte) ([]string, error) {
 	arr := util.ToJSONArray(b)
 	prompts := []*MCPPrompt{}
@@ -849,6 +892,7 @@ func (m *MCPServer) AddPrompts(b []byte) ([]string, error) {
 	return names, nil
 }
 
+// AddResources adds the resources of the payload to the server, once all of them are parsed and found valid.
 func (m *MCPServer) AddResources(b []byte) ([]string, error) {
 	arr := util.ToJSONArray(b)
 	resources := []*MCPResource{}
@@ -884,6 +928,7 @@ func (m *MCPServer) AddResources(b []byte) ([]string, error) {
 	return names, nil
 }
 
+// AddResourceTemplates adds the resource templates of the payload to the server, once all of them are parsed and found valid.
 func (m *MCPServer) AddResourceTemplates(b []byte) ([]string, error) {
 	arr := util.ToJSONArray(b)
 	templates := []*MCPResourceTemplate{}
@@ -916,6 +961,7 @@ func (m *MCPServer) AddResourceTemplates(b []byte) ([]string, error) {
 	return names, nil
 }
 
+// GetComponentType tells which of tools, prompts, resources and templates the kind is.
 func GetComponentType(kind string) (isTools, isPrompts, isResources, isTemplates bool) {
 	switch kind {
 	case KindTools:
@@ -942,6 +988,7 @@ func GetAllComponents(kind string) map[string]map[string]IMCPComponent {
 	return out
 }
 
+// AddToolSchemas parses the tool input schemas from the payload and registers them by name for the tools to use.
 func AddToolSchemas(b []byte) ([]string, error) {
 	toolSchemas := []*ToolSchema{}
 	if err := util.ReadJsonOrYamlPayloadFromBytes(b, &toolSchemas); err != nil {
@@ -958,6 +1005,7 @@ func AddToolSchemas(b []byte) ([]string, error) {
 	return names, nil
 }
 
+// onInitialized logs that a client has initialized its session with the server.
 func (m *MCPServer) onInitialized(ctx context.Context, req *gomcp.InitializedRequest) {
 	msg := fmt.Sprintf("MCPServer[%d][%s]: Initialized.", m.Port, m.Name)
 	// params := &gomcp.ProgressNotificationParams{
@@ -978,18 +1026,21 @@ func requestHeaders(extra *gomcp.RequestExtra) http.Header {
 	return extra.Header
 }
 
+// onRootsListChanged logs the change of the roots list of the client, and notifies the client about it.
 func (m *MCPServer) onRootsListChanged(ctx context.Context, req *gomcp.RootsListChangedRequest) {
 	msg := fmt.Sprintf("MCPServer[%d][%s]: Roots List Changed: [%s]", m.Port, m.Name, util.ToJSONText(requestHeaders(req.Extra)))
 	log.Println(msg)
 	notifyClient(ctx, req.Params, msg, req.Session, nil)
 }
 
+// onProgressNotification logs the progress notification that the client sent, and notifies the client about it.
 func (m *MCPServer) onProgressNotification(ctx context.Context, req *gomcp.ProgressNotificationServerRequest) {
 	msg := fmt.Sprintf("MCPServer[%d][%s]: Progress Notification Received: [%s]", m.Port, m.Name, util.ToJSONText(requestHeaders(req.Extra)))
 	log.Println(msg)
 	notifyClient(ctx, req.Params, msg, req.Session, nil)
 }
 
+// AddCompletionPayload sets the stream of suggestions for the completion type, and gives the number of suggestions.
 func (m *MCPServer) AddCompletionPayload(completionType string, b []byte, delayMin, delayMax time.Duration, delayCount int) int {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -997,6 +1048,7 @@ func (m *MCPServer) AddCompletionPayload(completionType string, b []byte, delayM
 	return len(m.CompletionPayload[completionType].TextStream)
 }
 
+// onCompletion answers a completion request with the suggestions set for the reference type, or a placeholder if none are set.
 func (m *MCPServer) onCompletion(ctx context.Context, req *gomcp.CompleteRequest) (*gomcp.CompleteResult, error) {
 	msg := fmt.Sprintf("MCPServer[%d][%s]: Completion Request Received: [%s]", m.Port, m.Name, util.ToJSONText(requestHeaders(req.Extra)))
 	log.Println(msg)
@@ -1025,6 +1077,7 @@ func (m *MCPServer) onCompletion(ctx context.Context, req *gomcp.CompleteRequest
 	}, nil
 }
 
+// clientInfoOf gives the client information that the session was initialized with, if there is any.
 func clientInfoOf(session *gomcp.ServerSession) *gomcp.Implementation {
 	if session != nil {
 		if params := session.InitializeParams(); params != nil {
@@ -1034,6 +1087,7 @@ func clientInfoOf(session *gomcp.ServerSession) *gomcp.Implementation {
 	return nil
 }
 
+// onSubscribed logs the subscription of the client to a resource, and notifies the client about it.
 func (m *MCPServer) onSubscribed(ctx context.Context, req *gomcp.SubscribeRequest) error {
 	msg := fmt.Sprintf("MCPServer[%d][%s]: Session [%s] Client [%+v] Subscribed to [%s]", m.Port, m.Name, req.Session.ID(), clientInfoOf(req.Session), req.Params.URI)
 	log.Println(msg)
@@ -1041,6 +1095,7 @@ func (m *MCPServer) onSubscribed(ctx context.Context, req *gomcp.SubscribeReques
 	return nil
 }
 
+// onUnsubscribed logs that the client unsubscribed from a resource, and notifies the client about it.
 func (m *MCPServer) onUnsubscribed(ctx context.Context, req *gomcp.UnsubscribeRequest) error {
 	msg := fmt.Sprintf("MCPServer[%d][%s]: Session [%s] Client [%+v] Unsubscribed to [%s]", m.Port, m.Name, req.Session.ID(), clientInfoOf(req.Session), req.Params.URI)
 	log.Println(msg)
@@ -1048,6 +1103,7 @@ func (m *MCPServer) onUnsubscribed(ctx context.Context, req *gomcp.UnsubscribeRe
 	return nil
 }
 
+// Middleware logs every request that the server receives, and tracks the calls of tools with their duration and outcome.
 func (m *MCPServer) Middleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
 		if method == "ping" {

@@ -55,6 +55,7 @@ type ALPN struct {
 	Handshake   *TCPHandshake `json:"handshake,omitempty"`
 }
 
+// NewALPN creates an ALPN config for the protocols with an optional TCP handshake to perform after they are negotiated.
 func NewALPN(protos []string, handshake *TCPHandshake) *ALPN {
 	return &ALPN{
 		Protos:    protos,
@@ -85,6 +86,7 @@ func (a *ALPN) Handle(conn net.Conn) (preamble []byte, err error) {
 	return a.handle(conn, false)
 }
 
+// handle runs the steps of the handshake in sequence on the connection, where a read that delivers the next size sets the length of the following read, and returns the data collected by a read step.
 func (a *ALPN) handle(conn net.Conn, server bool) (preamble []byte, err error) {
 	if a.Handshake == nil {
 		return nil, nil
@@ -106,10 +108,12 @@ func (a *ALPN) handle(conn net.Conn, server bool) (preamble []byte, err error) {
 	return
 }
 
+// Handle runs the step on the client side of the connection with the given read size, and returns the size of the next read and any collected data.
 func (h *HandshakeStep) Handle(conn net.Conn, readSize uint32) (nextSize uint32, data []byte, err error) {
 	return h.handle(conn, readSize, 0, false)
 }
 
+// handle performs the read or write of the step on the connection, and logs it with the side that it is on.
 func (h *HandshakeStep) handle(conn net.Conn, readSize uint32, index int, server bool) (nextSize uint32, data []byte, err error) {
 	if h.Read != nil {
 		log.Printf("TCPHandshake[%s]: Reading [%d] Bytes\n", side(server), readSize)
@@ -121,6 +125,7 @@ func (h *HandshakeStep) handle(conn net.Conn, readSize uint32, index int, server
 	return
 }
 
+// side names the side of the handshake, server or client, for logging.
 func side(server bool) string {
 	if server {
 		return "server"
@@ -128,10 +133,12 @@ func side(server bool) string {
 	return "client"
 }
 
+// Handle reads the preamble from the connection on the client side.
 func (p *PreambleRead) Handle(conn net.Conn, size uint32) (uint32, []byte, error) {
 	return p.handle(conn, size, 0, false)
 }
 
+// handle reads the frame of the given size (or the configured length) from the connection, and returns either the size of the next read taken from its first 4 bytes, or the data if it is to be collected.
 func (p *PreambleRead) handle(conn net.Conn, size uint32, index int, server bool) (uint32, []byte, error) {
 	var b []byte
 	if size > 0 {
@@ -155,10 +162,12 @@ func (p *PreambleRead) handle(conn net.Conn, size uint32, index int, server bool
 	return 0, nil, nil
 }
 
+// Handle writes the preamble to the connection on the client side.
 func (p *PreambleWrite) Handle(conn net.Conn) (err error) {
 	return p.handle(conn, 0, false)
 }
 
+// handle hex-decodes the preamble and writes it to the connection, closing the connection if the write fails.
 func (p *PreambleWrite) handle(conn net.Conn, index int, server bool) (err error) {
 	data, err := hex.DecodeString(p.Preamble)
 	if err != nil {

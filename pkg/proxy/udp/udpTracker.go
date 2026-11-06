@@ -35,6 +35,7 @@ type UDPProxyTracker struct {
 	lock                        sync.RWMutex
 }
 
+// NewUDPTracker creates a tracker with empty counters.
 func NewUDPTracker() *UDPProxyTracker {
 	return &UDPProxyTracker{
 		PacketCountByUpstream:       map[string]int{},
@@ -44,6 +45,7 @@ func NewUDPTracker() *UDPProxyTracker {
 	}
 }
 
+// IncrementConnCount counts one more connection.
 func (ut *UDPProxyTracker) IncrementConnCount() {
 	ut.lock.Lock()
 	defer ut.lock.Unlock()
@@ -86,6 +88,7 @@ func (ut *UDPProxyTracker) IncrementPacketCounts(upstream, domain string) {
 	ut.PacketCountByUpstreamDomain[upstream][domain]++
 }
 
+// MarshalJSON serializes the counters of the tracker, leaving out the set of known clients.
 func (ut *UDPProxyTracker) MarshalJSON() ([]byte, error) {
 	ut.lock.RLock()
 	defer ut.lock.RUnlock()

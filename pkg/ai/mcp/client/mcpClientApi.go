@@ -36,6 +36,7 @@ var (
 	Middleware = middleware.NewMiddleware("mcpClient", setRoutes, nil)
 )
 
+// setRoutes registers the /mcpapi/client routes for listing tools, calling a tool, adding client payloads and roots, and getting details.
 func setRoutes(r *mux.Router) {
 	mcpapi := middleware.RootPath("/mcpapi")
 	mcpClient := util.PathRouter(mcpapi, "/client")
@@ -62,6 +63,7 @@ func queryParam(r *http.Request, name string) string {
 	return r.URL.Query().Get(name)
 }
 
+// listTools lists the tools (and, unless tools only, the prompts and resources) of the MCP server at the URL, as names or in full.
 func listTools(w http.ResponseWriter, r *http.Request) {
 	rs := util.GetRequestStore(r)
 	url := queryParam(r, "url")
@@ -131,6 +133,7 @@ func listTools(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// callTool parses a tool call payload, makes the call, and responds with its result and the last response status.
 func callTool(w http.ResponseWriter, r *http.Request) {
 	rs := util.GetRequestStore(r)
 	msg := ""
@@ -180,6 +183,7 @@ func callTool(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// doToolCall makes the tool call with a new client, streaming the updates to the response unless events are disabled.
 func doToolCall(port int, tc *ToolCall, w http.ResponseWriter, r *http.Request) (output *MCPResult, err error) {
 	clientId := fmt.Sprintf("MCPClient[%s][tool/call][%s]", global.Self.HostLabel, tc.Tool)
 	var streamHandler func(string, any, bool) error
@@ -200,6 +204,7 @@ func doToolCall(port int, tc *ToolCall, w http.ResponseWriter, r *http.Request) 
 	return
 }
 
+// mcpUpdateHandler writes an update of a tool call to the response, flushing it, and logs it.
 func mcpUpdateHandler(msg string, data any, json bool, toolLabel string, fw http.Flusher, w http.ResponseWriter, r *http.Request) {
 	if data != nil {
 		msg = fmt.Sprintf("%s : %+v", msg, data)
@@ -213,6 +218,7 @@ func mcpUpdateHandler(msg string, data any, json bool, toolLabel string, fw http
 	util.AddLogMessage(fmt.Sprintf("Received stream response from tool [%s], response: %s", toolLabel, msg), r)
 }
 
+// streamMCPResponse returns the callback that streams the updates of a tool call to the response.
 func streamMCPResponse(toolLabel string, w http.ResponseWriter, r *http.Request) func(string, any, bool) error {
 	var fw http.Flusher
 	if f, ok := w.(http.Flusher); ok {
@@ -224,6 +230,7 @@ func streamMCPResponse(toolLabel string, w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// endMCPResponse returns the callback that writes the final update of a tool call to the response.
 func endMCPResponse(toolLabel string, w http.ResponseWriter, r *http.Request) func(string, any, bool) {
 	var fw http.Flusher
 	if f, ok := w.(http.Flusher); ok {
@@ -234,6 +241,7 @@ func endMCPResponse(toolLabel string, w http.ResponseWriter, r *http.Request) fu
 	}
 }
 
+// addClientPayload stores the request body as the sample or elicit payload of the named client.
 func addClientPayload(w http.ResponseWriter, r *http.Request) {
 	kind := util.GetStringParamValue(r, "kind")
 	name := util.GetStringParamValue(r, "name")
@@ -249,6 +257,7 @@ func addClientPayload(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// addRoots stores the request body as the roots of the named client.
 func addRoots(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	payload, _ := io.ReadAll(r.Body)
@@ -263,6 +272,7 @@ func addRoots(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// getDetails responds with the payload of the named client, or with all the client payloads, as JSON or YAML.
 func getDetails(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	yaml := util.IsAcceptYAML(r)

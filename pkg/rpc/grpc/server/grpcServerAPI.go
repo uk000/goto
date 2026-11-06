@@ -43,6 +43,7 @@ var (
 	lock           = sync.RWMutex{}
 )
 
+// setRoutes adds the routes of the gRPC server and ext authz admin APIs.
 func setRoutes(r *mux.Router) {
 	grpcRouter := middleware.RootPath("/grpc")
 	serverRouter := util.PathRouter(grpcRouter, "/server")
@@ -60,6 +61,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(extAuthzRouter, "/rules", removeExtAuthzRulesAPI, "DELETE")
 }
 
+// addExtAuthzRulesAPI stores the ext authz rules of the request body, which is a rule or a list of them, and fails if none of them is valid.
 func addExtAuthzRulesAPI(w http.ResponseWriter, r *http.Request) {
 	rule := ExtAuthzRule{}
 	rules := []ExtAuthzRule{}
@@ -99,10 +101,12 @@ func addExtAuthzRulesAPI(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// getExtAuthzRulesAPI reports the stored ext authz rules.
 func getExtAuthzRulesAPI(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, GetExtAuthzRules())
 }
 
+// removeExtAuthzRulesAPI removes the ext authz rule of the header and value in the query, or all of the rules if no header is given.
 func removeExtAuthzRulesAPI(w http.ResponseWriter, r *http.Request) {
 	header := strings.ToLower(r.URL.Query().Get("header"))
 	value := r.URL.Query().Get("value")
@@ -129,6 +133,7 @@ func requestedPort(r *http.Request) int {
 	return port
 }
 
+// openGRPCPort opens a gRPC listener on the requested port and serves on it.
 func openGRPCPort(w http.ResponseWriter, r *http.Request) {
 	port := requestedPort(r)
 	msg := ""
@@ -148,6 +153,7 @@ func openGRPCPort(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// serveService serves the requested service on the port, which restarts the gRPC server, and records it in the active services of the port.
 func serveService(w http.ResponseWriter, r *http.Request) {
 	rs, _, _, msg, ok := rpc.CheckService(w, r, grpc.ServiceRegistry)
 	if ok {
@@ -166,6 +172,7 @@ func serveService(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// stopService stops serving the requested service, and removes it from the active services of the port.
 func stopService(w http.ResponseWriter, r *http.Request) {
 	rs, _, _, msg, ok := rpc.CheckService(w, r, grpc.ServiceRegistry)
 	if ok {
@@ -212,6 +219,7 @@ func getServices(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, knownServices())
 }
 
+// loadReflectedServices loads the services of an upstream gRPC server through reflection, and reports the known services.
 func loadReflectedServices(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	defer func() {

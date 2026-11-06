@@ -25,6 +25,7 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// elicit asks the client for input as described by the response payload of the tool, and reports the reply.
 func (t *MCPTool) elicit(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	tctx.AddEvent(fmt.Sprintf("Server [%s] sent elicit request to client", tctx.Server.GetName()))
 	params := &gomcp.ElicitParams{}
@@ -72,6 +73,7 @@ func (t *MCPTool) elicit(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	return result, nil
 }
 
+// sample asks the client to create a message from the response payload of the tool, and reports the sample that it got.
 func (t *MCPTool) sample(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	session, err := tctx.session()
 	if err != nil {
@@ -109,6 +111,7 @@ func (t *MCPTool) sample(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	return result, nil
 }
 
+// extractClientData turns the content that the client sent into a map, parsing it as JSON if it is text.
 func extractClientData(content any) map[string]any {
 	if m, ok := content.(map[string]any); ok {
 		return m

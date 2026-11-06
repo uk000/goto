@@ -85,6 +85,7 @@ func ParseDurationRange(val string) (low, high time.Duration, count int, ok bool
 	return low, high, count, true
 }
 
+// NewDelay creates a delay between min and max that applies count times (0 is unlimited), or nil if max isn't positive or count is below -1.
 func NewDelay(min, max time.Duration, count int) *Delay {
 	if max > 0 && (count >= -1) {
 		if count == 0 {
@@ -95,6 +96,7 @@ func NewDelay(min, max time.Duration, count int) *Delay {
 	return nil
 }
 
+// ParseDelay parses a "low-high:count" range into a Delay, or gives nil if it is invalid.
 func ParseDelay(val string) *Delay {
 	if min, max, count, ok := ParseDurationRange(val); ok {
 		return NewDelay(min, max, count)
@@ -102,6 +104,7 @@ func ParseDelay(val string) *Delay {
 	return nil
 }
 
+// String returns the delay as "min-max", or "" if there is no delay or it has no bounds.
 func (d *Delay) String() string {
 	if d == nil {
 		return ""
@@ -152,6 +155,7 @@ func (d *Delay) IsLargerThan(d2 *Delay) bool {
 	return (max > max2) || (max == max2 && min > min2)
 }
 
+// normalizeLocked cuts the min to the max and turns an invalid count into unlimited (-1), and requires the lock to be held.
 func (d *Delay) normalizeLocked() {
 	if d.Min != nil && d.Max != nil && d.Min.Duration > d.Max.Duration {
 		d.Min.Duration = d.Max.Duration
@@ -290,6 +294,7 @@ func (d *Delay) payload() *delayPayload {
 	return dp
 }
 
+// MarshalJSON encodes a snapshot of the delay, or null if there is no delay.
 func (d *Delay) MarshalJSON() ([]byte, error) {
 	if d == nil {
 		return []byte("null"), nil
@@ -297,6 +302,7 @@ func (d *Delay) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d.payload())
 }
 
+// MarshalYAML encodes a snapshot of the delay, or nothing if there is no delay.
 func (d *Delay) MarshalYAML() (any, error) {
 	if d == nil {
 		return nil, nil
@@ -304,6 +310,7 @@ func (d *Delay) MarshalYAML() (any, error) {
 	return d.payload(), nil
 }
 
+// MarshalJSON encodes the duration as a string like "1s", or null if there is none.
 func (d *Duration) MarshalJSON() ([]byte, error) {
 	if d == nil {
 		return []byte("null"), nil
@@ -311,6 +318,7 @@ func (d *Duration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d.String())
 }
 
+// MarshalYAML encodes the duration as a string like "1s", or nothing if there is none.
 func (d *Duration) MarshalYAML() (any, error) {
 	if d == nil {
 		return nil, nil
@@ -318,6 +326,7 @@ func (d *Duration) MarshalYAML() (any, error) {
 	return d.String(), nil
 }
 
+// UnmarshalJSON decodes the duration from a JSON number (nanoseconds) or string, and leaves it as it is for null.
 func (d *Duration) UnmarshalJSON(b []byte) error {
 	var v interface{}
 	if err := json.Unmarshal(b, &v); err != nil {
@@ -330,6 +339,7 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 	return d.Unmarshal(v)
 }
 
+// UnmarshalYAML decodes the duration from a YAML number (nanoseconds) or string.
 func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
 	var v any
 	if err := node.Decode(&v); err != nil {
@@ -338,6 +348,7 @@ func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
 	return d.Unmarshal(v)
 }
 
+// Unmarshal sets the duration from a number (nanoseconds) or a duration string, and fails for any other type.
 func (d *Duration) Unmarshal(v interface{}) error {
 	switch value := v.(type) {
 	case float64:
@@ -361,6 +372,7 @@ func (d *Duration) Unmarshal(v interface{}) error {
 	return nil
 }
 
+// UnmarshalJSON loads the delay from its JSON payload and normalises it.
 func (d *Delay) UnmarshalJSON(b []byte) error {
 	dp := &delayPayload{}
 	if err := json.Unmarshal(b, dp); err != nil {
@@ -370,6 +382,7 @@ func (d *Delay) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// UnmarshalYAML loads the delay from its YAML payload and normalises it.
 func (d *Delay) UnmarshalYAML(node *yaml.Node) error {
 	dp := &delayPayload{}
 	if err := node.Decode(dp); err != nil {
@@ -379,6 +392,7 @@ func (d *Delay) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+// load replaces the state of the delay with the payload, dropping any computed delay and normalising it.
 func (d *Delay) load(dp *delayPayload) {
 	d.lock.Lock()
 	defer d.lock.Unlock()

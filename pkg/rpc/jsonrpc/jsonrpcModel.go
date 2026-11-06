@@ -74,6 +74,7 @@ type JSONRPCError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
+// NewJSONRPCRequest builds a JSON-RPC 2.0 request with the given id, method and params.
 func NewJSONRPCRequest(id int, method string, params map[string]any) *JSONRPCRequest {
 	return &JSONRPCRequest{
 		JSONRPCMessage: JSONRPCMessage{
@@ -85,6 +86,7 @@ func NewJSONRPCRequest(id int, method string, params map[string]any) *JSONRPCReq
 	}
 }
 
+// NewJSONRPCResponse builds a JSON-RPC 2.0 success response with the given id and result.
 func NewJSONRPCResponse(id int, result map[string]any) *JSONRPCResponse {
 	return &JSONRPCResponse{
 		JSONRPCMessage: JSONRPCMessage{
@@ -95,6 +97,7 @@ func NewJSONRPCResponse(id int, result map[string]any) *JSONRPCResponse {
 	}
 }
 
+// NewJSONRPCError builds a JSON-RPC 2.0 error response with the given id, code, message and data.
 func NewJSONRPCError(id int, code int, message string, data any) *JSONRPCResponse {
 	return &JSONRPCResponse{
 		JSONRPCMessage: JSONRPCMessage{
@@ -109,6 +112,7 @@ func NewJSONRPCError(id int, code int, message string, data any) *JSONRPCRespons
 	}
 }
 
+// NewJSONRPCNotification builds a JSON-RPC 2.0 notification, which is a request without an id.
 func NewJSONRPCNotification(method string, params map[string]any) *JSONRPCRequest {
 	return &JSONRPCRequest{
 		JSONRPCMessage: JSONRPCMessage{
@@ -119,6 +123,7 @@ func NewJSONRPCNotification(method string, params map[string]any) *JSONRPCReques
 	}
 }
 
+// ParseJSONRPCRequest reads a JSON-RPC request and flags which MCP method it is for.
 func ParseJSONRPCRequest(b io.Reader) (*JSONRPCRequest, error) {
 	m := &JSONRPCRequest{
 		MCPMethod: &MCPMethods{},

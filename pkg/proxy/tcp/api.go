@@ -34,6 +34,7 @@ var (
 	Middleware = middleware.NewMiddleware("tcpproxy", setRoutes, nil)
 )
 
+// setRoutes registers the REST routes to set up, show and add upstreams of a TCP proxy, and to control its HTTP CONNECT mode.
 func setRoutes(r *mux.Router) {
 	proxyRouter := middleware.RootPath("/proxy")
 	tcpProxyRouter := util.PathPrefix(proxyRouter, "/tcp")
@@ -108,6 +109,7 @@ func setConnectDelay(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// addTCPProxyUpstreams parses the upstreams from the request body and adds them to the TCP proxy of the port.
 func addTCPProxyUpstreams(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	msg := ""
@@ -124,6 +126,7 @@ func addTCPProxyUpstreams(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// proxyTCP opens a TCP listener on the port and adds the address as the default upstream of its TCP proxy.
 func proxyTCP(w http.ResponseWriter, r *http.Request) {
 	port := util.GetIntParamValue(r, "port")
 	address := util.GetStringParamValue(r, "address")
@@ -153,6 +156,7 @@ func isAllRequest(r *http.Request) bool {
 	return strings.HasSuffix(strings.TrimRight(r.URL.Path, "/"), "/all")
 }
 
+// getProxy reports the TCP proxy of the port, or of all the ports if the URI ends with /all.
 func getProxy(w http.ResponseWriter, r *http.Request) {
 	result := map[string]any{}
 	if isAllRequest(r) {
@@ -169,6 +173,7 @@ func getProxy(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reported proxy targets", r)
 }
 
+// getProxyUpstreams reports the upstreams of the TCP proxy of the port, or of all the ports if the URI ends with /all.
 func getProxyUpstreams(w http.ResponseWriter, r *http.Request) {
 	result := map[string]any{}
 	if isAllRequest(r) {

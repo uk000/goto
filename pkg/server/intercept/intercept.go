@@ -81,6 +81,7 @@ type BodyTracker struct {
 	io.ReadCloser
 }
 
+// CreateOrGetFlushWriter returns w if it already is a FlushWriter, otherwise wraps it in a new one (nil if w can't flush).
 func CreateOrGetFlushWriter(w io.Writer) FlushWriter {
 	if fw, ok := w.(FlushWriter); ok {
 		return fw
@@ -88,6 +89,7 @@ func CreateOrGetFlushWriter(w io.Writer) FlushWriter {
 	return NewFlushWriter(w)
 }
 
+// NewFlushWriter wraps w in a FlushWriter that flushes after each write, marking an intercept writer as chunked; it returns nil if w can't flush.
 func NewFlushWriter(w io.Writer) FlushWriter {
 	if f, ok := w.(http.Flusher); ok {
 		if irw, ok := w.(*InterceptResponseWriter); ok {
@@ -98,6 +100,7 @@ func NewFlushWriter(w io.Writer) FlushWriter {
 	return nil
 }
 
+// Write writes p to the underlying writer and flushes after a successful write.
 func (fw *FlushWriterImpl) Write(p []byte) (int, error) {
 	n, err := fw.w.Write(p)
 	if err == nil {
@@ -106,12 +109,14 @@ func (fw *FlushWriterImpl) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// Flush flushes the underlying flusher, if there is one.
 func (fw *FlushWriterImpl) Flush() {
 	if fw.flusher != nil {
 		fw.flusher.Flush()
 	}
 }
 
+// NewChanWriter returns a response writer that sends the data written to its body to the channel.
 func NewChanWriter(c chan []byte, w http.ResponseWriter) ChanWriter {
 	return &ChanWriterImpl{c: c, ResponseWriter: w}
 }
@@ -123,24 +128,29 @@ func (c *ChanWriterImpl) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// Chan returns the channel that receives the written data.
 func (c *ChanWriterImpl) Chan() chan []byte {
 	return c.c
 }
 
+// trackRequestBody wraps the request body in a BodyTracker.
 func trackRequestBody(r *http.Request) {
 	r.Body = &BodyTracker{r.Body}
 }
 
+// Read reads from the wrapped body unchanged.
 func (b *BodyTracker) Read(p []byte) (n int, err error) {
 	// util.PrintCallers(3, "BodyTracker.Read")
 	return b.ReadCloser.Read(p)
 }
 
+// Close closes the wrapped body.
 func (b *BodyTracker) Close() error {
 	//util.PrintCallers(3, "BodyTracker.Close")
 	return b.ReadCloser.Close()
 }
 
+// Rewind rewinds the wrapped body if it is a ReReader.
 func (b *BodyTracker) Rewind() {
 	// util.PrintCallers(3, "BodyTracker.Close")
 	if rr, ok := b.ReadCloser.(*util.ReReader); ok {
@@ -148,6 +158,7 @@ func (b *BodyTracker) Rewind() {
 	}
 }
 
+// WriteHeader records the first status code (later ones are ignored and logged) and passes it down unless the response is held or hijacked.
 func (rw *InterceptResponseWriter) WriteHeader(statusCode int) {
 	if rw.StatusCode == 0 {
 		rw.StatusCode = statusCode
@@ -160,6 +171,7 @@ func (rw *InterceptResponseWriter) WriteHeader(statusCode int) {
 	}
 }
 
+// Write counts the body length and either writes the data through or, while the response is held, buffers it; nothing is written once hijacked.
 func (rw *InterceptResponseWriter) Write(b []byte) (int, error) {
 	// util.PrintCallers(3, "InterceptResponseWriter.Write")
 	l := len(b)
@@ -184,6 +196,7 @@ func (rw *InterceptResponseWriter) Write(b []byte) (int, error) {
 	return l, nil
 }
 
+// Flush marks the response chunked, sends the held status and data, and flushes the underlying writer, unless chunked data is held.
 func (rw *InterceptResponseWriter) Flush() {
 	// util.PrintCallers(3, "InterceptResponseWriter.Flush")
 	if !rw.HoldChunked {
@@ -217,6 +230,7 @@ func (rw *InterceptResponseWriter) sendHeld() {
 	}
 }
 
+// Hijack hijacks the underlying connection, or falls back to a reader/writer over the request's connection, failing if neither is available.
 func (rw *InterceptResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	// util.PrintCallers(3, "InterceptResponseWriter.Hijack")
 	if rw.Hijacker != nil {
@@ -230,6 +244,7 @@ func (rw *InterceptResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error)
 
 }
 
+// SetHijacked flags the response as hijacked, as well as the parent interceptor.
 func (rw *InterceptResponseWriter) SetHijacked() {
 	rw.Hijacked = true
 	if rw.parent != nil {
@@ -237,6 +252,7 @@ func (rw *InterceptResponseWriter) SetHijacked() {
 	}
 }
 
+// SetChunked flags the response as chunked, as well as the parent interceptor.
 func (rw *InterceptResponseWriter) SetChunked() {
 	rw.Chunked = true
 	if rw.parent != nil {
@@ -244,6 +260,7 @@ func (rw *InterceptResponseWriter) SetChunked() {
 	}
 }
 
+// Proceed sends the held status (default 200) and data to the client, only once, unless the response was already streamed in chunks.
 func (rw *InterceptResponseWriter) Proceed() {
 	if rw.Proceeded {
 		return
@@ -269,6 +286,7 @@ func (rw *InterceptResponseWriter) Proceed() {
 	}
 }
 
+// NewInterceptResponseWriter wraps w in an InterceptResponseWriter bound to the request store, optionally holding the response until Proceed.
 func NewInterceptResponseWriter(r *http.Request, w http.ResponseWriter, hold bool) *InterceptResponseWriter {
 	parent, _ := w.(ResponseInterceptor)
 	hijacker, _ := w.(http.Hijacker)
@@ -286,6 +304,7 @@ func NewInterceptResponseWriter(r *http.Request, w http.ResponseWriter, hold boo
 	}
 }
 
+// WithInterceptAndStatus gets or creates the intercept writer of the request, forcing the given status if positive and setting whether chunked data is held.
 func WithInterceptAndStatus(r *http.Request, w http.ResponseWriter, status int, chunked bool) (http.ResponseWriter, *InterceptResponseWriter) {
 	w, irw := GetOrCreateInterceptWriter(r, w)
 	if status > 0 {
@@ -296,6 +315,7 @@ func WithInterceptAndStatus(r *http.Request, w http.ResponseWriter, status int, 
 	return w, irw
 }
 
+// WithIntercept wraps w in a new response-holding intercept writer and registers it in the request store.
 func WithIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *InterceptResponseWriter) {
 	var irw *InterceptResponseWriter
 	irw = NewInterceptResponseWriter(r, w, true)
@@ -305,12 +325,14 @@ func WithIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter,
 	return w, irw
 }
 
+// WithInterceptChunked gets or creates the intercept writer of the request and makes it hold chunked data too.
 func WithInterceptChunked(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *InterceptResponseWriter) {
 	w, irw := GetOrCreateInterceptWriter(r, w)
 	irw.HoldChunked = true
 	return w, irw
 }
 
+// GetOrCreateInterceptWriter returns the intercept writer of the request, creating one if it has none.
 func GetOrCreateInterceptWriter(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *InterceptResponseWriter) {
 	var irw *InterceptResponseWriter
 	rs := util.GetRequestStore(r)
@@ -323,6 +345,7 @@ func GetOrCreateInterceptWriter(r *http.Request, w http.ResponseWriter) (http.Re
 	return w, irw
 }
 
+// GetInterceptWriter returns the intercept writer of the request, or nil if it has none.
 func GetInterceptWriter(r *http.Request) *InterceptResponseWriter {
 	var irw *InterceptResponseWriter
 	rs := util.GetRequestStore(r)
@@ -332,6 +355,7 @@ func GetInterceptWriter(r *http.Request) *InterceptResponseWriter {
 	return irw
 }
 
+// WithHeadersIntercept wraps w in a headers-intercepting writer registered in the request store, except for known non-traffic requests.
 func WithHeadersIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter, *HeaderInterceptResponseWriter) {
 	var irw *HeaderInterceptResponseWriter
 	rs := util.GetRequestStore(r)
@@ -343,6 +367,7 @@ func WithHeadersIntercept(r *http.Request, w http.ResponseWriter) (http.Response
 	return w, irw
 }
 
+// NewHeadersInterceptResponseWriter wraps w in a writer that keeps the response headers for inspection.
 func NewHeadersInterceptResponseWriter(w http.ResponseWriter) *HeaderInterceptResponseWriter {
 	return &HeaderInterceptResponseWriter{
 		ResponseWriter: w,
@@ -350,10 +375,12 @@ func NewHeadersInterceptResponseWriter(w http.ResponseWriter) *HeaderInterceptRe
 	}
 }
 
+// HeadersSent reports whether any response headers have been set.
 func (rw *HeaderInterceptResponseWriter) HeadersSent() bool {
 	return len(rw.Headers) > 0
 }
 
+// postIntercept adds the response status header (tunnel, proxy or goto status as applicable) to the response.
 func postIntercept(w http.ResponseWriter, r *http.Request) {
 	rs := util.GetRequestStore(r)
 	statusCodeText := strconv.Itoa(rs.StatusCode)
@@ -366,6 +393,7 @@ func postIntercept(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// IntereceptMiddleware returns middleware that wraps the response in an intercept writer, runs the optional pre and post handlers around next, records the status, and then sends the held response.
 func IntereceptMiddleware(pre, post http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

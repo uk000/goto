@@ -271,6 +271,7 @@ func doDeleteCollection(w http.ResponseWriter, r *http.Request, group, version, 
 
 // ─── Discovery handlers ───────────────────────────────────────────────────────
 
+// handleAPIVersions serves the /api discovery document listing the core API versions.
 func handleAPIVersions(w http.ResponseWriter, r *http.Request) {
 	util.PrintRequest("K8sMockServer", r)
 	util.AddLogMessage("[K8sMockServer] Discovery: /api", r)
@@ -284,6 +285,7 @@ func handleAPIVersions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleCoreV1Resources serves the /api/v1 discovery document listing the core v1 resources.
 func handleCoreV1Resources(w http.ResponseWriter, r *http.Request) {
 	util.PrintRequest("K8sMockServer", r)
 	util.AddLogMessage("[K8sMockServer] Discovery: /api/v1", r)
@@ -295,6 +297,7 @@ func handleCoreV1Resources(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleAPIGroupList serves the /apis discovery document listing the supported API groups.
 func handleAPIGroupList(w http.ResponseWriter, r *http.Request) {
 	util.PrintRequest("K8sMockServer", r)
 	util.AddLogMessage("[K8sMockServer] Discovery: /apis", r)
@@ -305,6 +308,7 @@ func handleAPIGroupList(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleAPIGroupVersions serves the discovery document of one API group, or 404 if the group is unknown.
 func handleAPIGroupVersions(w http.ResponseWriter, r *http.Request) {
 	util.PrintRequest("K8sMockServer", r)
 	groupName := util.GetStringParamValue(r, "group")
@@ -318,6 +322,7 @@ func handleAPIGroupVersions(w http.ResponseWriter, r *http.Request) {
 	writeStatus(w, http.StatusNotFound, "NotFound", fmt.Sprintf("API group %q not found", groupName))
 }
 
+// handleAPIGroupResources serves the resource list of a group/version, which is empty for groups that are not known (e.g. CRDs).
 func handleAPIGroupResources(w http.ResponseWriter, r *http.Request) {
 	util.PrintRequest("K8sMockServer", r)
 	groupName := util.GetStringParamValue(r, "group")
@@ -447,6 +452,7 @@ func jsonMerge(base, patch json.RawMessage) json.RawMessage {
 	return out
 }
 
+// mergeMap recursively merges patch into a copy of base per JSON merge-patch rules, where a null value deletes the key.
 func mergeMap(base, patch map[string]interface{}) map[string]interface{} {
 	result := make(map[string]interface{}, len(base))
 	for k, v := range base {

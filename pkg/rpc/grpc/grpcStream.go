@@ -132,10 +132,12 @@ type GRPCStreamTracker struct {
 	lock          sync.Mutex
 }
 
+// init turns the gRPC debug logs flag off by default.
 func init() {
 	global.Flags.EnableGRPCDebugLogs = false
 }
 
+// NewGRPCStreamForClient wraps the client, server or bidi stream of a method call as a GRPCStream, or returns nil if there is no method.
 func NewGRPCStreamForClient(port int, method *GRPCServiceMethod, cs *grpcdynamic.ClientStream, ss *grpcdynamic.ServerStream, bs *grpcdynamic.BidiStream) GRPCStream {
 	if method == nil {
 		return nil
@@ -173,6 +175,7 @@ func NewGRPCStreamForClient(port int, method *GRPCServiceMethod, cs *grpcdynamic
 	return stream
 }
 
+// NewServerStream wraps the server side of a gRPC call of the method as a GRPCStream, or returns nil if the method or the stream is missing.
 func NewServerStream(port int, method *GRPCServiceMethod, ss grpc.ServerStream, cancelFunc context.CancelFunc) GRPCStream {
 	if method == nil || ss == nil {
 		return nil
@@ -195,6 +198,7 @@ func NewServerStream(port int, method *GRPCServiceMethod, ss grpc.ServerStream, 
 	return stream
 }
 
+// Init resets the done channels and the wait group (one count for the receiver and one for the sender) before a send and receive round.
 func (s *GRPCBaseStream) Init() {
 	s.receiveDone = make(chan bool, 10)
 	s.sendDone = make(chan bool, 10)
@@ -211,54 +215,66 @@ func (s *GRPCBaseStream) Self() GRPCStream {
 	return s
 }
 
+// Type returns the type name of the base stream, which the client and server streams override.
 func (s *GRPCBaseStream) Type() string {
 	return "GRPCBaseStream"
 }
 
+// Label returns the label of the stream, which is the method URI with the side of the stream.
 func (s *GRPCBaseStream) Label() string {
 	return s.label
 }
 
+// HasStream tells if there is an underlying stream.
 func (s *GRPCBaseStream) HasStream() bool {
 	return s.hasStream
 }
 
+// IsClientStreaming tells if the method streams from the client.
 func (s *GRPCBaseStream) IsClientStreaming() bool {
 	return s.method.IsClientStream
 }
 
+// IsServerStreaming tells if the method streams from the server.
 func (s *GRPCBaseStream) IsServerStreaming() bool {
 	return s.method.IsServerStream
 }
 
+// Context returns the context of the stream, which the client and server streams override.
 func (s *GRPCBaseStream) Context() context.Context {
 	return s.ctx
 }
 
+// KeepOpen sets how long the sender keeps the stream open after it starts sending.
 func (s *GRPCBaseStream) KeepOpen(d time.Duration) {
 	s.keepOpen = d
 }
 
+// Wait blocks until the send and receive of the stream are done, if they were started.
 func (s *GRPCBaseStream) Wait() {
 	if s.wg != nil {
 		s.wg.Wait()
 	}
 }
 
+// Close does nothing in the base stream, which the client and server streams override.
 func (s *GRPCBaseStream) Close() (proto.Message, error) {
 	return nil, nil
 }
 
+// Method returns the service method that the stream is for.
 func (s *GRPCBaseStream) Method() *GRPCServiceMethod {
 	return s.method
 }
 
+// SetDelay sets the range of the delay applied before sending a message, and the count of the messages to delay (-1 for all).
 func (s *GRPCBaseStream) SetDelay(delayMin, delayMax time.Duration, delayCount int) {
 	s.delayMin = delayMin
 	s.delayMax = delayMax
 	s.delayCount = delayCount
 }
 
+// applyDelay sleeps for a random duration in the delay range before a send, while the delay count lasts.
 func (s *GRPCBaseStream) applyDelay() {
 	if (s.delayMin > 0 || s.delayMax > 0) && (s.delayCount > 0 || s.delayCount == -1) {
 		time.Sleep(types.RandomDuration(s.delayMin, s.delayMax))
@@ -268,6 +284,7 @@ func (s *GRPCBaseStream) applyDelay() {
 	}
 }
 
+// Headers returns the headers of the stream, or an error if there is no stream.
 func (s *GRPCBaseStream) Headers() (metadata.MD, error) {
 	if s.headerFunc == nil {
 		return nil, errors.New("no stream")
@@ -275,6 +292,7 @@ func (s *GRPCBaseStream) Headers() (metadata.MD, error) {
 	return s.headerFunc()
 }
 
+// headerFromContext returns the incoming metadata of the context of the stream as its headers.
 func (s *GRPCBaseStream) headerFromContext() (metadata.MD, error) {
 	if s.ctx == nil {
 		return nil, errors.New("no stream")
@@ -285,6 +303,7 @@ func (s *GRPCBaseStream) headerFromContext() (metadata.MD, error) {
 	return nil, errors.New("failed to get headers from context")
 }
 
+// Trailers returns the trailers of the stream, or nil if there are none.
 func (s *GRPCBaseStream) Trailers() metadata.MD {
 	if s.trailerFunc != nil {
 		return s.trailerFunc()
@@ -292,10 +311,12 @@ func (s *GRPCBaseStream) Trailers() metadata.MD {
 	return nil
 }
 
+// SendHeaders sends the headers on the call of the stream.
 func (s *GRPCBaseStream) SendHeaders(md metadata.MD) error {
 	return grpc.SendHeader(s.ctx, md)
 }
 
+// SendChainHeaders takes the headers of this stream, applies the hook, adds the goto proxy and via headers if asked to, and sends them on the other stream.
 func (s *GRPCBaseStream) SendChainHeaders(other GRPCStream, headersHook HeadersHookFunc, addProxyHeaders bool) (err error) {
 	respHeaders, err := s.Headers()
 	if err != nil {
@@ -323,18 +344,22 @@ func (s *GRPCBaseStream) SendChainHeaders(other GRPCStream, headersHook HeadersH
 	return
 }
 
+// Receive does nothing in the base stream, which the client and server streams override to receive a message.
 func (s *GRPCBaseStream) Receive() (proto.Message, error) {
 	return nil, nil
 }
 
+// TeeStreamReceive does nothing in the base stream, which the client and server streams override.
 func (s *GRPCBaseStream) TeeStreamReceive(in, tee chan proto.Message) (int, error) {
 	return 0, nil
 }
 
+// ReceiveAndDiscard reads the messages of the stream until it ends without keeping them, and returns how many it read.
 func (s *GRPCBaseStream) ReceiveAndDiscard() (int, error) {
 	return s.internalReceiveMulti(nil, nil, nil, false)
 }
 
+// handleReceivedMessage applies the In or Out transformer of the method to a received message, counts it, and passes it to the in and tee channels.
 func (s *GRPCBaseStream) handleReceivedMessage(msg proto.Message, in, tee chan proto.Message, tracker func(), isOutput bool) {
 	selfType := s.self.Type()
 	if !isOutput && s.method.In != nil {
@@ -359,6 +384,7 @@ func (s *GRPCBaseStream) handleReceivedMessage(msg proto.Message, in, tee chan p
 	}
 }
 
+// debugReceive logs a received message when the debug hook is enabled.
 func (s *GRPCBaseStream) debugReceive(msg proto.Message) {
 	log.Printf("%s.debugReceive: [%s] [%+v].\n", s.self.Type(), s.label, msg)
 	if s.self.Type() == "GRPCClientStream" {
@@ -369,6 +395,7 @@ func (s *GRPCBaseStream) debugReceive(msg proto.Message) {
 	}
 }
 
+// internalReceiveMulti receives messages until the stream ends or fails, passing each to the in and tee channels, and closes the channels and signals done when it finishes.
 func (s *GRPCBaseStream) internalReceiveMulti(in, tee chan proto.Message, tracker func(), isOutput bool) (receiveCount int, err error) {
 	selfType := s.self.Type()
 	defer func() {
@@ -433,26 +460,32 @@ func (s *GRPCBaseStream) internalReceiveMulti(in, tee chan proto.Message, tracke
 	return
 }
 
+// Send does nothing in the base stream, which the client and server streams override to send a message.
 func (s *GRPCBaseStream) Send(proto.Message) error {
 	return nil
 }
 
+// SendMulti does nothing in the base stream, which the client and server streams override.
 func (s *GRPCBaseStream) SendMulti(messages []proto.Message) (message proto.Message, sendCount int, err error) {
 	return nil, 0, nil
 }
 
+// SendPayloads does nothing in the base stream, which the client and server streams override.
 func (s *GRPCBaseStream) SendPayloads(payloads [][]byte) (message proto.Message, sendCount int, err error) {
 	return nil, 0, nil
 }
 
+// SendJSONs does nothing in the base stream, which the client and server streams override.
 func (s *GRPCBaseStream) SendJSONs([]any) (proto.Message, int, error) {
 	return nil, 0, nil
 }
 
+// TeeStreamSend does nothing in the base stream, which the client and server streams override.
 func (s *GRPCBaseStream) TeeStreamSend(in, out, tee chan proto.Message) (int, error) {
 	return 0, nil
 }
 
+// debugSend logs a sent message when the debug hook is enabled.
 func (s *GRPCBaseStream) debugSend(msg proto.Message) {
 	log.Printf("%s.debugSend: [%s] [%+v].\n", s.self.Type(), s.label, msg)
 	if s.self.Type() == "GRPCClientStream" {
@@ -463,6 +496,7 @@ func (s *GRPCBaseStream) debugSend(msg proto.Message) {
 	}
 }
 
+// internalSendMulti sends the given messages, or the ones read from the out channel, then closes the stream; it reports the send error ahead of the close result, and keeps the stream open for the KeepOpen time.
 func (s *GRPCBaseStream) internalSendMulti(messages []proto.Message, in, out, tee chan proto.Message, tracker func(), isOutput bool) (msg proto.Message, sendCount int, err error) {
 	selfType := s.self.Type()
 	defer func() {
@@ -573,6 +607,7 @@ func (s *GRPCBaseStream) internalSendMulti(messages []proto.Message, in, out, te
 	return
 }
 
+// AsyncSendReceive sends the messages while receiving at the same time, and returns the final response with the headers and trailers once both are done.
 func (s *GRPCBaseStream) AsyncSendReceive(outMessages []proto.Message) (inMessages []proto.Message, respHeaders, respTrailers metadata.MD, err error) {
 	if !s.hasStream {
 		err = errors.New("no stream")
@@ -607,6 +642,7 @@ func (s *GRPCBaseStream) AsyncSendReceive(outMessages []proto.Message) (inMessag
 	return
 }
 
+// AsyncSendReceiveRaw does AsyncSendReceive for JSON payloads, converting them to input messages and the responses back to JSON.
 func (s *GRPCBaseStream) AsyncSendReceiveRaw(outPayloads [][]byte) (inPayloads [][]byte, respHeaders, respTrailers map[string][]string, err error) {
 	var messages []proto.Message
 	messages, err = s.method.PayloadsToInputs(outPayloads)
@@ -628,6 +664,7 @@ func (s *GRPCBaseStream) AsyncSendReceiveRaw(outPayloads [][]byte) (inPayloads [
 	return
 }
 
+// ChainedSendReceive receives into the in channel while sending what is read from the out channel, and returns the receive and send counts.
 func (s *GRPCBaseStream) ChainedSendReceive(in, out chan proto.Message) (receiveCount, sendCount int, err error) {
 	if !s.hasStream {
 		err = errors.New("no stream")
@@ -656,6 +693,7 @@ func (s *GRPCBaseStream) ChainedSendReceive(in, out chan proto.Message) (receive
 	return
 }
 
+// ChainedTeeStream does ChainedSendReceive and also copies the received and sent messages to the teeIn and teeOut channels.
 func (s *GRPCBaseStream) ChainedTeeStream(in, out, teeIn, teeOut chan proto.Message) (receiveCount, sendCount int, err error) {
 	if !s.hasStream {
 		err = errors.New("no stream")
@@ -684,6 +722,7 @@ func (s *GRPCBaseStream) ChainedTeeStream(in, out, teeIn, teeOut chan proto.Mess
 	return
 }
 
+// ChainInOut passes each received message through the hook and sends the outputs of the hook back on the same stream.
 func (s *GRPCBaseStream) ChainInOut(hook HookFunc, headersHook HeadersHookFunc) (receiveCount, sendCount int, err error) {
 	s.Init()
 	sh := NewStreamHook(s.label, s.ctx, hook, s.method.IsClientStream, s.method.IsServerStream)
@@ -692,6 +731,7 @@ func (s *GRPCBaseStream) ChainInOut(hook HookFunc, headersHook HeadersHookFunc) 
 	return s.self.ChainedSendReceive(sh.in, sh.out)
 }
 
+// CrossHook connects this stream and the upstream stream to each other, each through its own hook, relaying the headers both ways, and returns the errors of both directions joined.
 func (s *GRPCBaseStream) CrossHook(upstream GRPCStream, hook1, hook2 HookFunc, headersHook1, headersHook2 HeadersHookFunc) (receiveCount, sendCount int, err error) {
 	s.Init()
 	downInUpOut := NewStreamHook(s.label+"-downup", s.ctx, hook1, s.method.IsClientStream, s.method.IsClientStream)
@@ -719,6 +759,7 @@ func (s *GRPCBaseStream) CrossHook(upstream GRPCStream, hook1, hook2 HookFunc, h
 	return
 }
 
+// Context returns the context of whichever client stream the call has.
 func (s *GRPCClientStream) Context() (ctx context.Context) {
 	if s.cStream != nil {
 		ctx = s.cStream.Context()
@@ -730,6 +771,7 @@ func (s *GRPCClientStream) Context() (ctx context.Context) {
 	return
 }
 
+// Receive receives one message, for a client-streaming call by closing the send side after the sender is done and receiving the response.
 func (s *GRPCClientStream) Receive() (message proto.Message, err error) {
 	if !s.hasStream {
 		return nil, errors.New("no stream")
@@ -749,14 +791,17 @@ func (s *GRPCClientStream) Receive() (message proto.Message, err error) {
 	return
 }
 
+// Type returns the type name of the client stream.
 func (s *GRPCClientStream) Type() string {
 	return "GRPCClientStream"
 }
 
+// TeeStreamReceive receives the responses into the in and tee channels, counting them.
 func (s *GRPCClientStream) TeeStreamReceive(in, tee chan proto.Message) (receiveCount int, err error) {
 	return s.internalReceiveMulti(in, tee, s.tracker.IncrementResponseCount, true)
 }
 
+// Send sends a message on the client or bidi stream after the delay, and counts the request.
 func (s *GRPCClientStream) Send(msg proto.Message) (err error) {
 	if !s.hasStream {
 		return errors.New("no stream")
@@ -773,6 +818,7 @@ func (s *GRPCClientStream) Send(msg proto.Message) (err error) {
 	return
 }
 
+// SendPayloads converts JSON payloads to input messages and sends them.
 func (s *GRPCClientStream) SendPayloads(payloads [][]byte) (message proto.Message, sendCount int, err error) {
 	if !s.hasStream {
 		return nil, 0, errors.New("no stream")
@@ -784,6 +830,7 @@ func (s *GRPCClientStream) SendPayloads(payloads [][]byte) (message proto.Messag
 	return s.SendMulti(messages)
 }
 
+// SendJSONs converts JSON values to input messages and sends them.
 func (s *GRPCClientStream) SendJSONs(jsons []any) (message proto.Message, sendCount int, err error) {
 	if !s.hasStream {
 		return nil, 0, errors.New("no stream")
@@ -795,16 +842,19 @@ func (s *GRPCClientStream) SendJSONs(jsons []any) (message proto.Message, sendCo
 	return s.SendMulti(messages)
 }
 
+// SendMulti sends the messages as requests and closes the stream, returning the final response.
 func (s *GRPCClientStream) SendMulti(messages []proto.Message) (message proto.Message, sendCount int, err error) {
 	message, sendCount, err = s.internalSendMulti(messages, nil, nil, nil, s.tracker.IncrementRequestCount, false)
 	return
 }
 
+// TeeStreamSend sends the requests read from the out channel, copying each to the tee channel.
 func (s *GRPCClientStream) TeeStreamSend(in, out, tee chan proto.Message) (sendCount int, err error) {
 	_, sendCount, err = s.internalSendMulti(nil, in, out, tee, s.tracker.IncrementRequestCount, false)
 	return
 }
 
+// Close closes the send side of the stream, returning the final response for a client-streaming call.
 func (s *GRPCClientStream) Close() (proto.Message, error) {
 	if !s.hasStream {
 		return nil, errors.New("no stream")
@@ -820,10 +870,12 @@ func (s *GRPCClientStream) Close() (proto.Message, error) {
 	return nil, errors.New("no stream")
 }
 
+// Type returns the type name of the server stream.
 func (s *GRPCServerStream) Type() string {
 	return "GRPCServerStream"
 }
 
+// Context returns the context of the server stream.
 func (s *GRPCServerStream) Context() (ctx context.Context) {
 	if s.stream != nil {
 		ctx = s.stream.Context()
@@ -831,6 +883,7 @@ func (s *GRPCServerStream) Context() (ctx context.Context) {
 	return
 }
 
+// Receive receives one request into a dynamic message of the input type of the method, and counts it.
 func (s *GRPCServerStream) Receive() (message proto.Message, err error) {
 	if !s.hasStream {
 		return nil, errors.New("no stream")
@@ -848,10 +901,12 @@ func (s *GRPCServerStream) Receive() (message proto.Message, err error) {
 	return
 }
 
+// TeeStreamReceive receives the requests into the in and tee channels, counting them.
 func (s *GRPCServerStream) TeeStreamReceive(in, tee chan proto.Message) (receiveCount int, err error) {
 	return s.internalReceiveMulti(in, tee, s.tracker.IncrementRequestCount, false)
 }
 
+// Send sends a response on the stream after the delay, and counts it.
 func (s *GRPCServerStream) Send(msg proto.Message) (err error) {
 	if !s.hasStream {
 		return errors.New("no stream")
@@ -866,16 +921,19 @@ func (s *GRPCServerStream) Send(msg proto.Message) (err error) {
 	return
 }
 
+// SendMulti sends the messages as responses and closes the stream.
 func (s *GRPCServerStream) SendMulti(messages []proto.Message) (message proto.Message, sendCount int, err error) {
 	message, sendCount, err = s.internalSendMulti(messages, nil, nil, nil, s.tracker.IncrementResponseCount, true)
 	return
 }
 
+// TeeStreamSend sends the responses read from the out channel, copying each to the tee channel.
 func (s *GRPCServerStream) TeeStreamSend(in, out, tee chan proto.Message) (sendCount int, err error) {
 	_, sendCount, err = s.internalSendMulti(nil, in, out, tee, s.tracker.IncrementResponseCount, true)
 	return
 }
 
+// SendPayloads converts JSON payloads to output messages and sends them.
 func (s *GRPCServerStream) SendPayloads(payloads [][]byte) (output proto.Message, sendCount int, err error) {
 	if !s.hasStream {
 		return nil, 0, errors.New("no stream")
@@ -887,6 +945,7 @@ func (s *GRPCServerStream) SendPayloads(payloads [][]byte) (output proto.Message
 	return s.SendMulti(messages)
 }
 
+// SendJSONs converts JSON values to output messages and sends them.
 func (s *GRPCServerStream) SendJSONs(jsons []any) (output proto.Message, sendCount int, err error) {
 	if !s.hasStream {
 		return nil, 0, errors.New("no stream")
@@ -898,6 +957,7 @@ func (s *GRPCServerStream) SendJSONs(jsons []any) (output proto.Message, sendCou
 	return s.SendMulti(messages)
 }
 
+// Close returns no final message, as a server stream ends when its handler returns.
 func (s *GRPCServerStream) Close() (proto.Message, error) {
 	if !s.hasStream {
 		return nil, errors.New("no stream")
@@ -909,18 +969,21 @@ func (s *GRPCServerStream) Close() (proto.Message, error) {
 	return nil, errors.New("no stream")
 }
 
+// AddMessage appends the message to the message log.
 func (t *GRPCStreamTracker) AddMessage(msg proto.Message) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	t.MessageLog = append(t.MessageLog, msg)
 }
 
+// IncrementRequestCount counts one more request.
 func (t *GRPCStreamTracker) IncrementRequestCount() {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	t.RequestCount++
 }
 
+// IncrementResponseCount counts one more response.
 func (t *GRPCStreamTracker) IncrementResponseCount() {
 	t.lock.Lock()
 	defer t.lock.Unlock()
@@ -934,6 +997,7 @@ func (t *GRPCStreamTracker) Counts() (requests, responses int) {
 	return t.RequestCount, t.ResponseCount
 }
 
+// NewStreamHook creates a hook runner for a stream, with buffered in, out and link channels.
 func NewStreamHook(label string, ctx context.Context, hook HookFunc, isInStream, isOutStream bool) *StreamHook {
 	return &StreamHook{
 		label:       label,
@@ -949,6 +1013,7 @@ func NewStreamHook(label string, ctx context.Context, hook HookFunc, isInStream,
 	}
 }
 
+// Run starts the goroutines that read the input through the hook and send its output.
 func (sh *StreamHook) Run() {
 	go sh.sendOutput()
 	go sh.readInput()
@@ -957,6 +1022,7 @@ func (sh *StreamHook) Run() {
 	}
 }
 
+// debugSend logs each message of the debug channel, passes it to the out channel, and closes the out channel at the end.
 func (sh *StreamHook) debugSend() {
 	for msg := range sh.debugout {
 		log.Printf("StreamHook.debugSend: [%s] [%+v].\n", sh.label, msg)
@@ -970,6 +1036,8 @@ func (sh *StreamHook) debugSend() {
 	}
 	close(sh.out)
 }
+
+// processMessage runs the hook on the input, sends the headers of the hook once, and passes its outputs to the link for an output stream or retains them to flush at the end.
 func (sh *StreamHook) processMessage(input proto.Message) {
 	if global.Flags.EnableGRPCDebugLogs {
 		log.Printf("StreamHook: [%s] Invoking hook with input [%+v].\n", sh.label, input)
@@ -1004,6 +1072,7 @@ func (sh *StreamHook) processMessage(input proto.Message) {
 	}
 }
 
+// flushOut passes the retained output to the link, and closes the link.
 func (sh *StreamHook) flushOut() {
 	if len(sh.output) > 0 {
 		if global.Flags.EnableGRPCDebugLogs {
@@ -1018,6 +1087,7 @@ func (sh *StreamHook) flushOut() {
 	close(sh.link)
 }
 
+// sendOutput sends the outputs that come from the link to the out channel, applying their delay, and closes the out channel when the link closes.
 func (sh *StreamHook) sendOutput() {
 	for pair := range sh.link {
 		delay := pair.Right
@@ -1045,6 +1115,7 @@ func (sh *StreamHook) sendOutput() {
 	}
 }
 
+// readInput feeds the messages of the in channel through the hook, all of them for an input stream and only the first otherwise, and then flushes the output.
 func (sh *StreamHook) readInput() {
 	if sh.isInStream {
 		if global.Flags.EnableGRPCDebugLogs {
@@ -1072,10 +1143,12 @@ func (sh *StreamHook) readInput() {
 	sh.flushOut()
 }
 
+// IdentityHook passes the message through as the only output.
 func IdentityHook(msg proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
 	return nil, []proto.Message{msg}, nil, nil
 }
 
+// IdentityHookWithDelay gives an identity hook that calls delayFunc before it passes the message through.
 func IdentityHookWithDelay(delayFunc func() string) func(proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
 	return func(msg proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
 		if delayFunc != nil {
@@ -1088,10 +1161,12 @@ func IdentityHookWithDelay(delayFunc func() string) func(proto.Message) (metadat
 	}
 }
 
+// IdentityHeadersHook gives a copy of the headers unchanged.
 func IdentityHeadersHook(md metadata.MD) (metadata.MD, error) {
 	return md.Copy(), nil
 }
 
+// doTee sends the message to the tee channel and passes it through as the only output.
 func doTee(tee chan proto.Message, msg proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
 	if global.Flags.EnableGRPCDebugLogs {
 		log.Printf("[DEBUG] TeeHook: Sending message to TEE channel: [%+v].\n", msg)
@@ -1100,12 +1175,14 @@ func doTee(tee chan proto.Message, msg proto.Message) (metadata.MD, []proto.Mess
 	return nil, []proto.Message{msg}, nil, nil
 }
 
+// TeeHook gives a hook that copies each message to the tee channel and passes it through.
 func TeeHook(tee chan proto.Message) func(proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
 	return func(msg proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
 		return doTee(tee, msg)
 	}
 }
 
+// TeeHookWithDelay gives a hook that calls delayFunc, copies the message to the tee channel and passes it through.
 func TeeHookWithDelay(tee chan proto.Message, delayFunc func() string) func(proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
 	return func(msg proto.Message) (metadata.MD, []proto.Message, *types.Delay, error) {
 		if delayFunc != nil {
@@ -1118,6 +1195,7 @@ func TeeHookWithDelay(tee chan proto.Message, delayFunc func() string) func(prot
 	}
 }
 
+// TeeHeadersHook gives a headers hook that hands a copy of the headers to onHeaders and passes the headers through.
 func TeeHeadersHook(onHeaders func(md metadata.MD)) func(md metadata.MD) (metadata.MD, error) {
 	return func(md metadata.MD) (metadata.MD, error) {
 		if global.Flags.EnableGRPCDebugLogs {

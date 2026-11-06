@@ -52,6 +52,7 @@ type HTTPProxyTracker struct {
 	TargetTrackers map[string]*HTTPTargetTracker `json:"targetTrackers"`
 }
 
+// NewHTTPCounts creates counts with empty maps for all the breakdowns.
 func NewHTTPCounts() *HTTPCounts {
 	return &HTTPCounts{
 		DownstreamRequestCountsByURI:          map[string]int{},
@@ -70,6 +71,7 @@ func NewHTTPCounts() *HTTPCounts {
 	}
 }
 
+// IncrementMatchCounts counts the matches of a URI, a header (and its value) and a query (and its value), for those that are given.
 func (hc *HTTPCounts) IncrementMatchCounts(uri, header, headerValue, query, queryValue string) {
 	hc.lock.Lock()
 	defer hc.lock.Unlock()
@@ -98,6 +100,7 @@ func (hc *HTTPCounts) IncrementMatchCounts(uri, header, headerValue, query, quer
 	}
 }
 
+// IncrementDropCount counts a dropped request or response, in total and for the URI if it is given.
 func (hc *HTTPCounts) IncrementDropCount(uri string, requestDropped bool) {
 	hc.lock.Lock()
 	defer hc.lock.Unlock()
@@ -115,6 +118,7 @@ func (hc *HTTPCounts) IncrementDropCount(uri string, requestDropped bool) {
 	}
 }
 
+// NewHTTPTracker creates a proxy tracker with empty counts and no target trackers.
 func NewHTTPTracker() *HTTPProxyTracker {
 	return &HTTPProxyTracker{
 		HTTPCounts:     NewHTTPCounts(),
@@ -122,12 +126,14 @@ func NewHTTPTracker() *HTTPProxyTracker {
 	}
 }
 
+// NewHTTPTargetTracker creates a target tracker with empty counts.
 func NewHTTPTargetTracker() *HTTPTargetTracker {
 	return &HTTPTargetTracker{
 		HTTPCounts: NewHTTPCounts(),
 	}
 }
 
+// IncrementDownstreamRequestCounts counts a request from the downstream, in total and by URI.
 func (pt *HTTPProxyTracker) IncrementDownstreamRequestCounts(requestURI string) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
@@ -135,6 +141,7 @@ func (pt *HTTPProxyTracker) IncrementDownstreamRequestCounts(requestURI string) 
 	pt.DownstreamRequestCountsByURI[requestURI]++
 }
 
+// IncrementUpstreamRequestCounts counts a request to an upstream, in total and by URI.
 func (pt *HTTPProxyTracker) IncrementUpstreamRequestCounts(requestURI string) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
@@ -142,6 +149,7 @@ func (pt *HTTPProxyTracker) IncrementUpstreamRequestCounts(requestURI string) {
 	pt.UpstreamRequestCountsByURI[requestURI]++
 }
 
+// IncrementTargetDownstreamCounts counts a downstream request for the target, in total and by URI, creating its tracker if needed.
 func (pt *HTTPProxyTracker) IncrementTargetDownstreamCounts(targetName string, requestURI string) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
@@ -154,6 +162,7 @@ func (pt *HTTPProxyTracker) IncrementTargetDownstreamCounts(targetName string, r
 	pt.TargetTrackers[targetName].lock.Unlock()
 }
 
+// IncrementTargetUpstreamCounts counts an upstream request of the target, in total and by URI and endpoint, creating its tracker if needed.
 func (pt *HTTPProxyTracker) IncrementTargetUpstreamCounts(targetName, endpoint, requestURI string) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
@@ -167,6 +176,7 @@ func (pt *HTTPProxyTracker) IncrementTargetUpstreamCounts(targetName, endpoint, 
 	pt.TargetTrackers[targetName].lock.Unlock()
 }
 
+// IncrementTargetUpstreamStatusCounts counts an upstream response status, for the proxy and the target, by URI and endpoint as well for the target.
 func (pt *HTTPProxyTracker) IncrementTargetUpstreamStatusCounts(targetName, endpoint, requestURI string, statusCode int) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
@@ -188,11 +198,13 @@ func (pt *HTTPProxyTracker) IncrementTargetUpstreamStatusCounts(targetName, endp
 	pt.TargetTrackers[targetName].lock.Unlock()
 }
 
+// IncrementTargetMatchCounts counts the matches for both the proxy and the target.
 func (pt *HTTPProxyTracker) IncrementTargetMatchCounts(targetName string, uri, header, headerValue, query, queryValue string) {
 	pt.IncrementMatchCounts(uri, header, headerValue, query, queryValue)
 	pt.getOrCreateTargetTracker(targetName).IncrementMatchCounts(uri, header, headerValue, query, queryValue)
 }
 
+// IncrementTargetDropCount counts a dropped request or response for both the proxy and the target.
 func (pt *HTTPProxyTracker) IncrementTargetDropCount(targetName string, requestURI string, requestDropped bool) {
 	pt.IncrementDropCount(requestURI, requestDropped)
 	pt.getOrCreateTargetTracker(targetName).IncrementDropCount(requestURI, requestDropped)
@@ -216,6 +228,7 @@ func (pt *HTTPProxyTracker) GetTargetTracker(targetName string) *HTTPTargetTrack
 	return pt.TargetTrackers[targetName]
 }
 
+// cloneNested returns a copy of a map of maps, with a copy of each inner map.
 func cloneNested(m map[string]map[string]int) map[string]map[string]int {
 	c := make(map[string]map[string]int, len(m))
 	for k, v := range m {

@@ -35,6 +35,7 @@ var (
 	Middleware = middleware.NewMiddleware("listeners", setRoutes, nil)
 )
 
+// setRoutes registers the /server/listener routes to add, update, open, close and remove listeners and to manage their certs, keys and CA certs.
 func setRoutes(r *mux.Router) {
 	server := middleware.RootPath("/server")
 	lRouter := util.PathRouter(server, "/listener{s:s|}")
@@ -63,22 +64,27 @@ func setRoutes(r *mux.Router) {
 
 }
 
+// addListener adds a listener from the request body.
 func addListener(w http.ResponseWriter, r *http.Request) {
 	addOrUpdateListenerAndRespond(w, r)
 }
 
+// updateListener updates a listener from the request body.
 func updateListener(w http.ResponseWriter, r *http.Request) {
 	addOrUpdateListenerAndRespond(w, r)
 }
 
+// addListenerCert adds the request body as the TLS cert of a listener.
 func addListenerCert(w http.ResponseWriter, r *http.Request) {
 	addListenerCertOrKey(w, r, false)
 }
 
+// addListenerKey adds the request body as the TLS key of a listener.
 func addListenerKey(w http.ResponseWriter, r *http.Request) {
 	addListenerCertOrKey(w, r, true)
 }
 
+// removeListenerCertAndKey removes the cert and key of a listener and reopens it.
 func removeListenerCertAndKey(w http.ResponseWriter, r *http.Request) {
 	if l := validateListener(w, r); l != nil {
 		msg := ""
@@ -93,6 +99,7 @@ func removeListenerCertAndKey(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// addListenerCACert adds the request body to the CA cert pool of a listener and reopens it.
 func addListenerCACert(w http.ResponseWriter, r *http.Request) {
 	if l := validateListener(w, r); l != nil {
 		msg := ""
@@ -120,6 +127,7 @@ func addListenerCACert(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// clearListenerCACerts empties the CA cert pool of a listener and reopens it.
 func clearListenerCACerts(w http.ResponseWriter, r *http.Request) {
 	if l := validateListener(w, r); l != nil {
 		msg := ""
@@ -137,6 +145,7 @@ func clearListenerCACerts(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getListenerCertOrKey serves the raw or generated TLS cert or key of a listener.
 func getListenerCertOrKey(w http.ResponseWriter, r *http.Request) {
 	cert := strings.Contains(r.RequestURI, "cert")
 	key := strings.Contains(r.RequestURI, "key")
@@ -182,6 +191,7 @@ func getListenerCertOrKey(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getClientCerts reports the certs of the clients that connected to a listener, or to all listeners, as YAML.
 func getClientCerts(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Sent Active certs", r)
 	port := util.GetIntParamValue(r, "port")
@@ -189,12 +199,14 @@ func getClientCerts(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, util.ToYaml(output))
 }
 
+// clearClientCerts clears the recorded client certs of a listener, or of all listeners.
 func clearClientCerts(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Cleared Active certs", r)
 	port := util.GetIntParamValue(r, "port")
 	ClearPeerCerts(port)
 }
 
+// autoCert generates a cert for the requested domain, with an optional SPIFFE ID, for a listener and reopens it.
 func autoCert(w http.ResponseWriter, r *http.Request) {
 	if l := validateListener(w, r); l != nil {
 		msg := ""
@@ -223,6 +235,7 @@ func autoCert(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// autoSNI makes a listener generate certs on demand for any SNI and reopens it.
 func autoSNI(w http.ResponseWriter, r *http.Request) {
 	if l := validateListener(w, r); l != nil {
 		l.lock.Lock()
@@ -247,6 +260,7 @@ func (l *Listener) isListening() bool {
 	return l.Listener != nil
 }
 
+// getListeners reports the listener of a port, the listener ports, or all listeners as JSON.
 func getListeners(w http.ResponseWriter, r *http.Request) {
 	port := util.GetIntParamValue(r, "port")
 	ports := strings.Contains(r.RequestURI, "ports")
@@ -261,6 +275,7 @@ func getListeners(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// openListener opens a listener that isn't listening, or reopens one that is.
 func openListener(w http.ResponseWriter, r *http.Request) {
 	if l := validateListener(w, r); l != nil {
 		msg := ""
@@ -288,6 +303,7 @@ func openListener(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// closeListener closes a listener that is open.
 func closeListener(w http.ResponseWriter, r *http.Request) {
 	if l := validateListener(w, r); l != nil {
 		msg := ""
@@ -303,6 +319,7 @@ func closeListener(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// removeListener closes a listener and removes it from the registered listeners.
 func removeListener(w http.ResponseWriter, r *http.Request) {
 	if l := validateListener(w, r); l != nil {
 		l.lock.Lock()

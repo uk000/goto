@@ -55,6 +55,7 @@ func IncludeHeader(header string) {
 	delete(ExcludedHeaders, strings.ToLower(header))
 }
 
+// IsHeaderExcluded tells if the header (case-insensitive) is among the excluded headers, reading them under the lock.
 func IsHeaderExcluded(header string) bool {
 	excludedHeadersLock.RLock()
 	defer excludedHeadersLock.RUnlock()
@@ -69,6 +70,7 @@ func excludedHeadersSnapshot() map[string]bool {
 	return maps.Clone(ExcludedHeaders)
 }
 
+// SendGotoHeaders sets the Goto identity headers and the echoed request headers on the response, and declares the trailers.
 func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
 	port := GetRequestOrListenerPort(r)
 	rs := GetRequestStore(r)
@@ -105,6 +107,7 @@ func SendGotoHeaders(w http.ResponseWriter, r *http.Request) {
 	rs.IsHeadersSent = true
 }
 
+// SendGotoTrailers merges the Via-Goto values on the response with the ones collected in the request store, and sets the upstream statuses.
 func SendGotoTrailers(w http.ResponseWriter, r *http.Request) {
 	rs := GetRequestStore(r)
 	viaGotos := map[string]bool{}
@@ -127,6 +130,7 @@ func SendGotoTrailers(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// GotoProtocol names the protocol (GRPC, HTTP/2, HTTPS, H2C or HTTP/1.1) that the h2, tls and grpc flags describe.
 func GotoProtocol(isH2, isTLS, isGRPC bool) string {
 	protocol := "HTTP"
 	if isGRPC {
@@ -145,6 +149,7 @@ func GotoProtocol(isH2, isTLS, isGRPC bool) string {
 	return protocol
 }
 
+// GetViaGotosFromUpstreamHeaders collects the Via-Goto values from the response headers of each upstream call result.
 func GetViaGotosFromUpstreamHeaders(upheaders map[string]any) map[string]bool {
 	viaGotos := map[string]bool{}
 	for _, v := range upheaders {
@@ -174,6 +179,7 @@ func GetViaGotosFromUpstreamHeaders(upheaders map[string]any) map[string]bool {
 	return viaGotos
 }
 
+// GetViaGotosFromHeaders collects the Via-Goto header values as a set.
 func GetViaGotosFromHeaders(headers http.Header) map[string]bool {
 	viaGotos := map[string]bool{}
 	if values := headers[constants.HeaderViaGoto]; values != nil {
@@ -184,6 +190,7 @@ func GetViaGotosFromHeaders(headers http.Header) map[string]bool {
 	return viaGotos
 }
 
+// BuildListenerLabel builds the [self:port][pod@namespace@cluster] label of the listener on the port.
 func BuildListenerLabel(port int) string {
 	selfLabel := ""
 	if global.Self.GivenName {
@@ -194,10 +201,12 @@ func BuildListenerLabel(port int) string {
 	return fmt.Sprintf("[%s:%d][%s@%s@%s]", selfLabel, port, global.Self.PodName, global.Self.Namespace, global.Self.Cluster)
 }
 
+// GetViaGotoValue returns the label of the listener on the port, which is used as the Via-Goto value.
 func GetViaGotoValue(port int) string {
 	return global.Funcs.GetListenerLabelForPort(port)
 }
 
+// GetUpstreamStatuses parses the JSON of the Goto-Upstream-Status header into a map, or returns nil.
 func GetUpstreamStatuses(headers http.Header) map[string]any {
 	if v, ok := headers[constants.HeaderGotoUpstreamStatus]; ok && len(v) > 0 {
 		if json, ok := JSONFromJSONText(v[0]); ok {
@@ -207,6 +216,7 @@ func GetUpstreamStatuses(headers http.Header) map[string]any {
 	return nil
 }
 
+// GetIntHeaderValue returns the first value of the header as an int, or 0 if it is absent or not a number.
 func GetIntHeaderValue(headers http.Header, k string) int {
 	if v, ok := headers[k]; !ok || len(v) == 0 {
 		return 0
@@ -219,6 +229,7 @@ func GetIntHeaderValue(headers http.Header, k string) int {
 	}
 }
 
+// SendResponse writes the status and the formatted message to the response, and adds the message to the request's log.
 func SendResponse(w http.ResponseWriter, r *http.Request, status int, msg string, params ...any) {
 	w.WriteHeader(status)
 	msg = fmt.Sprintf(msg, params...)
@@ -226,10 +237,12 @@ func SendResponse(w http.ResponseWriter, r *http.Request, status int, msg string
 	AddLogMessage(msg, r)
 }
 
+// SendBadRequest sends a 400 response with the formatted message.
 func SendBadRequest(w http.ResponseWriter, r *http.Request, msg string, params ...any) {
 	SendResponse(w, r, http.StatusBadRequest, msg, params...)
 }
 
+// FixURL adds a missing http/https scheme to the URL and makes sure that it ends with the suffix path.
 func FixURL(url, suffix string, https bool) string {
 	if !strings.HasPrefix(url, "http") {
 		if https {
@@ -249,14 +262,17 @@ func FixURL(url, suffix string, https bool) string {
 	return url
 }
 
+// IsAcceptJSON tells if the Accept header of the request mentions json.
 func IsAcceptJSON(r *http.Request) bool {
 	return strings.Contains(r.Header.Get("Accept"), "json")
 }
 
+// IsAcceptYAML tells if the Accept header of the request mentions yaml.
 func IsAcceptYAML(r *http.Request) bool {
 	return strings.Contains(r.Header.Get("Accept"), "yaml")
 }
 
+// IsAcceptText tells if the Accept header of the request mentions text.
 func IsAcceptText(r *http.Request) bool {
 	return strings.Contains(r.Header.Get("Accept"), "text")
 }

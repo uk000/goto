@@ -46,6 +46,7 @@ type ReadableHeaders interface {
 	Get(string) string
 }
 
+// NewHeaders creates headers with empty request and response configs.
 func NewHeaders() *Headers {
 	return &Headers{
 		Request:  NewHeadersConfig(),
@@ -53,6 +54,7 @@ func NewHeaders() *Headers {
 	}
 }
 
+// NewHeadersConfig creates a headers config with empty add, remove and forward entries.
 func NewHeadersConfig() *HeadersConfig {
 	return &HeadersConfig{
 		Add:     map[string]string{},
@@ -61,6 +63,7 @@ func NewHeadersConfig() *HeadersConfig {
 	}
 }
 
+// Union returns new headers that merge h1 and then h2, either of which can be nil.
 func Union(h1, h2 *Headers) *Headers {
 	hNew := NewHeaders()
 	if h1 != nil {
@@ -81,6 +84,7 @@ func (h *Headers) Clone() *Headers {
 	return &Headers{Request: h.Request.clone(), Response: h.Response.clone()}
 }
 
+// clone returns a deep copy of the config, which is an empty one if the config is nil.
 func (hc *HeadersConfig) clone() *HeadersConfig {
 	c := NewHeadersConfig()
 	if hc != nil {
@@ -91,6 +95,7 @@ func (hc *HeadersConfig) clone() *HeadersConfig {
 	return c
 }
 
+// NonNil makes sure that the request and response configs, and their maps, exist.
 func (h *Headers) NonNil() {
 	if h == nil {
 		return
@@ -105,12 +110,14 @@ func (h *Headers) NonNil() {
 	h.Response.NonNil()
 }
 
+// NonNil makes sure that the Add map exists.
 func (hc *HeadersConfig) NonNil() {
 	if hc != nil && hc.Add == nil {
 		hc.Add = map[string]string{}
 	}
 }
 
+// HasForwardHeaders tells if the request config lists any headers to forward.
 func (hc *Headers) HasForwardHeaders() bool {
 	return hc != nil && hc.Request != nil && len(hc.Request.Forward) > 0
 }
@@ -125,6 +132,7 @@ func (h *Headers) Merge(h2 *Headers) {
 	h.Response.Merge(h2.Response)
 }
 
+// Merge adds the entries of hc2 to this config: Add entries override, and Remove and Forward are appended.
 func (hc *HeadersConfig) Merge(hc2 *HeadersConfig) {
 	if hc == nil || hc2 == nil {
 		return
@@ -137,6 +145,7 @@ func (hc *HeadersConfig) Merge(hc2 *HeadersConfig) {
 	hc.Forward = append(hc.Forward, hc2.Forward...)
 }
 
+// Union returns a new config that merges hc and then hc2.
 func (hc *HeadersConfig) Union(hc2 *HeadersConfig) *HeadersConfig {
 	hcNew := NewHeadersConfig()
 	hcNew.Merge(hc)
@@ -144,6 +153,7 @@ func (hc *HeadersConfig) Union(hc2 *HeadersConfig) *HeadersConfig {
 	return hcNew
 }
 
+// UpdateHeaders applies the config to the headers by removing the Remove ones first and then adding the Add ones.
 func (hc *HeadersConfig) UpdateHeaders(headers MutatingHeaders) {
 	if hc == nil {
 		return
@@ -160,6 +170,7 @@ func (hc *HeadersConfig) UpdateHeaders(headers MutatingHeaders) {
 	}
 }
 
+// ForwardHeaders copies those of the named headers that have a value from the source headers to the target headers.
 func ForwardHeaders(sourceHeaders ReadableHeaders, targetHeaders MutatingHeaders, forwardHeaders iter.Seq[string]) {
 	forwardedHeaders := map[string]string{}
 	if forwardHeaders != nil && sourceHeaders != nil {
@@ -173,22 +184,27 @@ func ForwardHeaders(sourceHeaders ReadableHeaders, targetHeaders MutatingHeaders
 	}
 }
 
+// Get returns the value of the header.
 func (sh SimpleHTTPHeaders) Get(k string) string {
 	return sh[k]
 }
 
+// Add sets the header, replacing any earlier value.
 func (sh SimpleHTTPHeaders) Add(k, v string) {
 	sh[k] = v
 }
 
+// Del removes the header.
 func (sh SimpleHTTPHeaders) Del(k string) {
 	delete(sh, k)
 }
 
+// Add appends the value to the metadata key.
 func (md MD) Add(k, v string) {
 	md[k] = append(md[k], v)
 }
 
+// Del removes the metadata key.
 func (md MD) Del(k string) {
 	delete(md, k)
 }

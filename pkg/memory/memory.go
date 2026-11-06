@@ -78,6 +78,7 @@ var (
 	lock     sync.RWMutex
 )
 
+// GetMemoryManager returns the memory manager of the port, creating it on first use.
 func GetMemoryManager(port int) *MemoryManager {
 	lock.Lock()
 	defer lock.Unlock()
@@ -89,18 +90,21 @@ func GetMemoryManager(port int) *MemoryManager {
 	return m
 }
 
+// newMemoryManager creates and initializes a memory manager for the port.
 func newMemoryManager(port int) *MemoryManager {
 	m := &MemoryManager{Port: port}
 	m.Init()
 	return m
 }
 
+// newMemory creates an empty Memory.
 func newMemory() *Memory {
 	return &Memory{
 		Items: map[string]string{},
 	}
 }
 
+// newMemoryExtractor creates an empty extractor for the context key.
 func newMemoryExtractor(ctxKey string) *MemoryExtractor {
 	return &MemoryExtractor{
 		ContextKey:          ctxKey,
@@ -114,6 +118,7 @@ func newMemoryExtractor(ctxKey string) *MemoryExtractor {
 	}
 }
 
+// Init resets the manager's contexts, extractors and match state.
 func (m *MemoryManager) Init() {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -123,6 +128,7 @@ func (m *MemoryManager) Init() {
 	m.hasMatches = false
 }
 
+// HasAnyMatches reports whether any extraction match has been configured.
 func (m *MemoryManager) HasAnyMatches() bool {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
@@ -184,6 +190,7 @@ func (m *MemoryManager) GetContexts() map[string]*Memory {
 	return all
 }
 
+// MatchContext finds the first extractor whose context header is present in the headers, returning its context key and the header value as the context.
 func (m *MemoryManager) MatchContext(headers http.Header) (bool, string, string) {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
@@ -196,6 +203,7 @@ func (m *MemoryManager) MatchContext(headers http.Header) (bool, string, string)
 	return false, "", ""
 }
 
+// ExtractFromHeaders stores into the context's memory the headers that the context key's extractor matches.
 func (m *MemoryManager) ExtractFromHeaders(ctxKey, ctx string, headers http.Header) {
 	mx := m.getExtractor(ctxKey)
 	if mx != nil {
@@ -208,6 +216,7 @@ func (m *MemoryManager) ExtractFromHeaders(ctxKey, ctx string, headers http.Head
 	}
 }
 
+// ExtractFromQuery stores into the context's memory the query params that the context key's extractor matches.
 func (m *MemoryManager) ExtractFromQuery(ctxKey, ctx string, query url.Values) {
 	mx := m.getExtractor(ctxKey)
 	if mx != nil {
@@ -220,6 +229,7 @@ func (m *MemoryManager) ExtractFromQuery(ctxKey, ctx string, query url.Values) {
 	}
 }
 
+// ExtractFromBody applies the extractor's body transforms, regexes and JSON paths to the body and stores the captures in the context's memory.
 func (m *MemoryManager) ExtractFromBody(ctxKey, ctx string, body io.ReadCloser, isYAML bool) {
 	mx := m.getExtractor(ctxKey)
 	if mx == nil {
@@ -252,6 +262,7 @@ func (m *MemoryManager) ExtractFromBody(ctxKey, ctx string, body io.ReadCloser, 
 	}
 }
 
+// AddContext creates a fresh, empty memory for the context, replacing any existing one.
 func (m *MemoryManager) AddContext(ctx string) *Memory {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -259,6 +270,7 @@ func (m *MemoryManager) AddContext(ctx string) *Memory {
 	return m.ContextMemory[ctx]
 }
 
+// GetOrAddContext returns the memory of the context, creating it if it doesn't exist.
 func (m *MemoryManager) GetOrAddContext(ctx string) *Memory {
 	m.lock.RLock()
 	memory := m.ContextMemory[ctx]
@@ -291,12 +303,14 @@ func (m *MemoryManager) GetOrAddContextExtractor(ctxKey string) *MemoryExtractor
 	return m.unsafeGetOrAddContextExtractor(ctxKey)
 }
 
+// AddContextMatch sets the header whose value identifies the context for the context key.
 func (m *MemoryManager) AddContextMatch(ctxKey, match string) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	m.unsafeGetOrAddContextExtractor(ctxKey).ContextHeaderMatch = match
 }
 
+// AddHeaderMatch adds a header to extract into memory for the context key.
 func (m *MemoryManager) AddHeaderMatch(ctxKey, match string) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -306,6 +320,7 @@ func (m *MemoryManager) AddHeaderMatch(ctxKey, match string) {
 	m.hasMatches = true
 }
 
+// AddQueryMatch adds a query param to extract into memory for the context key.
 func (m *MemoryManager) AddQueryMatch(ctxKey, match string) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -331,6 +346,7 @@ func (m *MemoryManager) AddBodyRegexMatch(ctxKey, key, match string) error {
 	return nil
 }
 
+// AddBodyJsonPathMatch adds comma-separated JSON paths to extract from the body into memory for the context key.
 func (m *MemoryManager) AddBodyJsonPathMatch(ctxKey, match string) {
 	paths := strings.Split(match, ",")
 	m.lock.Lock()
@@ -375,18 +391,21 @@ func (m *MemoryManager) SetBodyTransformation(ctxKey string, transforms []*util.
 	return nil
 }
 
+// Add stores a key and value in the memory.
 func (m *Memory) Add(key string, value string) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	m.Items[key] = value
 }
 
+// Get returns the value stored for the key.
 func (m *Memory) Get(key string) string {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 	return m.Items[key]
 }
 
+// Clear removes all items from the memory.
 func (m *Memory) Clear() {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -403,6 +422,7 @@ func (m *Memory) MarshalJSON() ([]byte, error) {
 	}{m.Context, m.Items})
 }
 
+// middlewareFunc extracts configured headers, query params and body values of matching requests into memory, then calls the next handler.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)

@@ -33,6 +33,7 @@ var serveGRPCServices = func(services map[int][]*grpc.GRPCService) {
 	grpcserver.GRPCManager.ServeMulti(services)
 }
 
+// clearGRPC removes the protos and services that a gRPC config registered.
 func clearGRPC(g *ctl.GRPC) {
 	if g == nil {
 		return
@@ -54,6 +55,7 @@ func clearGRPC(g *ctl.GRPC) {
 	}
 }
 
+// loadGRPC registers the protos of a gRPC config, sets up the configured service methods and serves the services marked to be served.
 func loadGRPC(g *ctl.GRPC) {
 	if g == nil {
 		return
@@ -88,6 +90,7 @@ func loadGRPC(g *ctl.GRPC) {
 	log.Println("------------------------------------")
 }
 
+// processGRRPCService sets the configured response payloads and transforms of a service's methods on the port, keyed by the method URIs.
 func processGRRPCService(port int, gs *grpc.GRPCService, methods []*ctl.GRPCMethodConfig) {
 	for _, m := range methods {
 		if m == nil {

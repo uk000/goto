@@ -54,6 +54,7 @@ type TrackingData struct {
 	lock                    sync.RWMutex
 }
 
+// init resets the tracking data to empty tracking maps, dropping the tracked URIs and headers.
 func (td *TrackingData) init() {
 	td.lock.Lock()
 	defer td.lock.Unlock()
@@ -75,6 +76,7 @@ func (td *TrackingData) init() {
 	td.ByUpRespHeaderAndStatus = map[string]HeaderValueStatusCounts{}
 }
 
+// clearCounts zeroes all the counts while keeping the URIs and headers being tracked.
 func (td *TrackingData) clearCounts() {
 	td.lock.Lock()
 	defer td.lock.Unlock()
@@ -116,6 +118,7 @@ func (td *TrackingData) clearCounts() {
 	}
 }
 
+// addRequestTracking starts tracking the request URI and headers, for the URI alone and for the headers in the URI and overall.
 func (td *TrackingData) addRequestTracking(uri string, headers []string) {
 	td.lock.Lock()
 	defer td.lock.Unlock()
@@ -133,6 +136,7 @@ func (td *TrackingData) addRequestTracking(uri string, headers []string) {
 	}
 }
 
+// addResponseTracking starts tracking the response status and headers, for the URI and overall.
 func (td *TrackingData) addResponseTracking(uri string, headers []string) {
 	td.lock.Lock()
 	defer td.lock.Unlock()
@@ -157,6 +161,7 @@ func (td *TrackingData) addResponseTracking(uri string, headers []string) {
 	}
 }
 
+// addUpstreamRequestTracking starts tracking the upstream request URI and headers, for the URI alone and for the headers in the URI and overall.
 func (td *TrackingData) addUpstreamRequestTracking(uri string, headers []string) {
 	td.lock.Lock()
 	defer td.lock.Unlock()
@@ -174,6 +179,7 @@ func (td *TrackingData) addUpstreamRequestTracking(uri string, headers []string)
 	}
 }
 
+// addUpstreamResponseTracking starts tracking the upstream response status and headers, for the URI and overall.
 func (td *TrackingData) addUpstreamResponseTracking(uri string, headers []string) {
 	td.lock.Lock()
 	defer td.lock.Unlock()
@@ -198,6 +204,7 @@ func (td *TrackingData) addUpstreamResponseTracking(uri string, headers []string
 	}
 }
 
+// trackRequest counts a request by its URI and by the tracked headers.
 func (td *TrackingData) trackRequest(uri string, headers map[string][]string) {
 	td.lock.Lock()
 	defer td.lock.Unlock()
@@ -208,6 +215,7 @@ func (td *TrackingData) trackRequest(uri string, headers map[string][]string) {
 	td.ByReqHeader.track(headers)
 }
 
+// trackResponse counts a response by status and tracked headers, overall and for its URI.
 func (td *TrackingData) trackResponse(uri string, statusCode int, headers map[string][]string) {
 	td.lock.Lock()
 	defer td.lock.Unlock()
@@ -223,6 +231,7 @@ func (td *TrackingData) trackResponse(uri string, statusCode int, headers map[st
 	trackHeaderStatuses(td.ByRespHeaderAndStatus, headers, statusCode)
 }
 
+// trackUpstreamRequest counts an upstream request by its URI and by the tracked headers.
 func (td *TrackingData) trackUpstreamRequest(uri string, headers map[string][]string) {
 	td.lock.Lock()
 	defer td.lock.Unlock()
@@ -233,6 +242,7 @@ func (td *TrackingData) trackUpstreamRequest(uri string, headers map[string][]st
 	td.ByUpReqHeader.track(headers)
 }
 
+// trackUpstreamResponse counts an upstream response by status and tracked headers, overall and for its URI.
 func (td *TrackingData) trackUpstreamResponse(uri string, statusCode int, headers map[string][]string) {
 	td.lock.Lock()
 	defer td.lock.Unlock()
@@ -256,22 +266,27 @@ func trackHeaderStatuses(tracked map[string]HeaderValueStatusCounts, headers map
 	}
 }
 
+// newHeaderTrackingData makes an empty set of tracked headers.
 func newHeaderTrackingData() HeaderTrackingData {
 	return HeaderTrackingData{}
 }
 
+// newStatusCounts makes an empty map of counts by status.
 func newStatusCounts() StatusCounts {
 	return map[int]int{}
 }
 
+// newHeaderValueStatusCounts makes an empty map of status counts by header value.
 func newHeaderValueStatusCounts() HeaderValueStatusCounts {
 	return map[string]map[int]int{}
 }
 
+// track counts one response of the status.
 func (sc StatusCounts) track(status int) {
 	sc[status]++
 }
 
+// track counts one response of the status for the header value, ignoring an empty value.
 func (sc HeaderValueStatusCounts) track(hv string, status int) {
 	if hv != "" {
 		if sc[hv] == nil {
@@ -281,12 +296,14 @@ func (sc HeaderValueStatusCounts) track(hv string, status int) {
 	}
 }
 
+// add starts tracking the headers, with fresh counts.
 func (htd HeaderTrackingData) add(headers []string) {
 	for _, h := range headers {
 		htd[h] = newHeaderValueCounts()
 	}
 }
 
+// track counts the values that the message headers have for each of the tracked headers.
 func (htd HeaderTrackingData) track(headers map[string][]string) {
 	for h, hvc := range htd {
 		for _, hv := range headerValues(headers, h) {
@@ -304,18 +321,21 @@ func headerValues(headers map[string][]string, name string) []string {
 	return http.Header(headers).Values(name)
 }
 
+// clearCounts zeroes the counts of every tracked header.
 func (htd HeaderTrackingData) clearCounts() {
 	for h := range htd {
 		htd[h].clearCounts()
 	}
 }
 
+// newHeaderValueCounts makes empty counts for a tracked header.
 func newHeaderValueCounts() *HeaderValueCounts {
 	hvc := &HeaderValueCounts{}
 	hvc.init()
 	return hvc
 }
 
+// init zeroes the counts of the header and its values.
 func (hvc *HeaderValueCounts) init() {
 	hvc.lock.Lock()
 	defer hvc.lock.Unlock()
@@ -323,6 +343,7 @@ func (hvc *HeaderValueCounts) init() {
 	hvc.CountsByHeaderValue = map[string]int{}
 }
 
+// track counts one occurrence of the header, and of its non-empty value.
 func (hvc *HeaderValueCounts) track(headerValue string) {
 	hvc.lock.Lock()
 	defer hvc.lock.Unlock()
@@ -332,6 +353,7 @@ func (hvc *HeaderValueCounts) track(headerValue string) {
 	}
 }
 
+// clearCounts zeroes the counts of the header and its values.
 func (hvc *HeaderValueCounts) clearCounts() {
 	hvc.lock.Lock()
 	defer hvc.lock.Unlock()
@@ -345,6 +367,7 @@ func (hvc *HeaderValueCounts) clearCounts() {
 
 type trackingDataJSON TrackingData
 
+// MarshalJSON encodes the tracking data under its read lock, as it is updated while requests are tracked.
 func (td *TrackingData) MarshalJSON() ([]byte, error) {
 	td.lock.RLock()
 	defer td.lock.RUnlock()
@@ -353,6 +376,7 @@ func (td *TrackingData) MarshalJSON() ([]byte, error) {
 
 type headerValueCountsJSON HeaderValueCounts
 
+// MarshalJSON encodes the header counts under their read lock, as they are updated while requests are tracked.
 func (hvc *HeaderValueCounts) MarshalJSON() ([]byte, error) {
 	hvc.lock.RLock()
 	defer hvc.lock.RUnlock()

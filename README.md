@@ -19,8 +19,8 @@ To test either of these 3 layers, you need at least one counterparty application
 `Goto` can play all the above roles to fill the missing piece of the puzzle, all based on configs so that you don't have to write any code.
 
 It can act as:
-- An [A2A engine](pkg/ai/README.md#a2a-agent-features-server) that can dynamically create "No Code" Agents and Clients. The agents can call other agents (over A2A) or MCP servers, or respond with a custom unary or streaming payload.
-- An [MCP engine](pkg/ai/README.md#mcp-admin-apis) that can dynamically create MCP servers and clients. The MCP servers can expose any number of tools, and a tool can expose one of the supported behaviors. Supported behaviors include serving response based on data fetched from a remote HTTP call, a remote MCP call, a remote A2A agent call, or respond with a custom unary or streaming payload.
+- An [A2A engine](pkg/ai/a2a/server/README.md#a2a-agent-server-features) that can dynamically create "No Code" Agents and Clients. The agents can call other agents (over A2A) or MCP servers, or respond with a custom unary or streaming payload.
+- An [MCP engine](pkg/ai/mcp/server/README.md#mcp-admin-apis) that can dynamically create MCP servers and clients. The MCP servers can expose any number of tools, and a tool can expose one of the supported behaviors. Supported behaviors include serving response based on data fetched from a remote HTTP call, a remote MCP call, a remote A2A agent call, or respond with a custom unary or streaming payload.
 - A [server](pkg/server/README.md) that can act as an
   -- HTTP server with arbitrary REST APIs with custom responses.
   -- gRPC server that supports any arbitrary RPC service/methods based on a given set of proto files (or specs extracted from remote reflection)
@@ -163,7 +163,7 @@ Now that you have `goto` running, what can you do with it? Below are a few of th
 
 ## Resiliency Scenarios
 
-### Scenario: [Test a client's behavior upon service failure](docs/scenarios-resiliency.md#scenario-test-a-clients-behavior-upon-service-failure)
+### Scenario: [Test a client's behavior upon service failure](docs/scenarios-resiliency.md#client-resiliency-upon-service-failure)
 
 ### Scenario: [Track client hang-ups on server via request/connection timeouts](docs/scenarios-resiliency.md#server-resiliency-client-hangups)
 
@@ -186,8 +186,8 @@ See [Use Cases](docs/use-cases.md) for more examples.
 - [APIs](#-goto-apis)
 
 ### AI
-- [A2A Agent](pkg/ai/README.md#a2a-agent-features-server)
-- [MCP Server and Client](pkg/ai/README.md#mcp-admin-apis)
+- [A2A Agent](pkg/ai/a2a/server/README.md#a2a-agent-server-features)
+- [MCP Server and Client](pkg/ai/mcp/server/README.md#mcp-admin-apis)
 
 ### Traffic (Client)
 - [Goto's HTTP/gRPC/TCP Client Features (To run Traffic)](pkg/client/README.md)
@@ -211,15 +211,15 @@ See [Use Cases](docs/use-cases.md) for more examples.
 - [URIs](pkg/server/request/README.md#request-uri-tracking)
 - [Probes](pkg/server/probes/README.md)
 - [Requests Filtering](pkg/server/request/README.md#requests-filtering)
-- [Response Delay](pkg/server/response/README.md#response-delay)
-- [Response Headers](pkg/server/response/README.md#response-headers)
-- [Response Payload](pkg/server/response/README.md#response-payload)
-- [Ad-hoc Payload](pkg/server/response/README.md#ad-hoc-payload)
-- [Stream (Chunked) Payload](pkg/server/response/README.md#-stream-chunked-payload)
-- [Response Status](pkg/server/response/README.md#response-status)
-- [Response Triggers](pkg/server/response/README.md#response-triggers)
-- [Status API](pkg/server/response/README.md#status)
-- [Delay API](pkg/server/response/README.md#delay)
+- [Response Delay](pkg/server/response/delay/README.md#response-delay)
+- [Response Headers](pkg/server/response/header/README.md#response-headers)
+- [Response Payload](pkg/server/response/payload/README.md#response-payload)
+- [Ad-hoc Payload](pkg/server/response/payload/README.md#ad-hoc-payload)
+- [Stream (Chunked) Payload](pkg/server/stream/README.md#-stream-chunked-payload)
+- [Response Status](pkg/server/response/status/README.md#response-status)
+- [Response Triggers](pkg/server/response/trigger/README.md#response-triggers)
+- [Status API](pkg/server/response/status/README.md#status)
+- [Delay API](pkg/server/response/delay/README.md#delay)
 - [Echo API](pkg/server/README.md#echo-api)
 - [Catch All](#-catch-all)
 
@@ -253,7 +253,7 @@ See [Use Cases](docs/use-cases.md) for more examples.
 ### Goto Registry
 
 - [Registry Features](pkg/registry/Overview.md)
-- [Registry APIs](pkg/registry/README.m)
+- [Registry APIs](pkg/registry/README.md)
 
   <br/>
 

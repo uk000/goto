@@ -51,6 +51,7 @@ func getSampleItems(resource, namespace string) []json.RawMessage {
 	}
 }
 
+// minLen returns the smaller of two ints.
 func minLen(a, b int) int {
 	if a < b {
 		return a
@@ -93,6 +94,7 @@ var sampleBuilders = map[string]func(namespace, name string) json.RawMessage{
 
 // ─── Sample builders ──────────────────────────────────────────────────────────
 
+// samplePod builds a sample running Pod with one nginx container.
 func samplePod(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "v1",
@@ -138,6 +140,7 @@ func samplePod(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleService builds a sample ClusterIP Service that selects the pods by the app label.
 func sampleService(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "v1",
@@ -157,6 +160,7 @@ func sampleService(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleEndpoints builds a sample Endpoints object with one address and port.
 func sampleEndpoints(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "v1",
@@ -175,6 +179,7 @@ func sampleEndpoints(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleConfigMap builds a sample ConfigMap with a couple of config files as data.
 func sampleConfigMap(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "v1",
@@ -187,6 +192,7 @@ func sampleConfigMap(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleSecret builds a sample Opaque Secret with base64-encoded username and password.
 func sampleSecret(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "v1",
@@ -200,6 +206,7 @@ func sampleSecret(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleNamespace builds a sample cluster-scoped Namespace in the Active phase.
 func sampleNamespace(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "v1",
@@ -214,6 +221,7 @@ func sampleNamespace(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleNode builds a sample cluster-scoped Ready Node with capacity, addresses and node info.
 func sampleNode(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "v1",
@@ -264,6 +272,7 @@ func sampleNode(namespace, name string) json.RawMessage {
 	})
 }
 
+// samplePersistentVolume builds a sample cluster-scoped 10Gi hostPath PersistentVolume.
 func samplePersistentVolume(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "v1",
@@ -282,6 +291,7 @@ func samplePersistentVolume(namespace, name string) json.RawMessage {
 	})
 }
 
+// samplePVC builds a sample Bound 5Gi PersistentVolumeClaim.
 func samplePVC(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "v1",
@@ -302,6 +312,7 @@ func samplePVC(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleServiceAccount builds a sample ServiceAccount with a token secret reference.
 func sampleServiceAccount(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "v1",
@@ -311,6 +322,7 @@ func sampleServiceAccount(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleDeployment builds a sample two-replica nginx Deployment with a rolling update strategy.
 func sampleDeployment(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "apps/v1",
@@ -355,6 +367,7 @@ func sampleDeployment(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleReplicaSet builds a sample two-replica nginx ReplicaSet.
 func sampleReplicaSet(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "apps/v1",
@@ -383,6 +396,7 @@ func sampleReplicaSet(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleDaemonSet builds a sample nginx DaemonSet that tolerates all taints.
 func sampleDaemonSet(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "apps/v1",
@@ -414,6 +428,7 @@ func sampleDaemonSet(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleStatefulSet builds a sample three-replica nginx StatefulSet.
 func sampleStatefulSet(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "apps/v1",
@@ -443,6 +458,7 @@ func sampleStatefulSet(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleJob builds a sample completed busybox Job.
 func sampleJob(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "batch/v1",
@@ -469,6 +485,7 @@ func sampleJob(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleCronJob builds a sample hourly busybox CronJob.
 func sampleCronJob(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "batch/v1",
@@ -496,6 +513,7 @@ func sampleCronJob(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleIngress builds a sample nginx Ingress that routes name.example.com to the service of the same name.
 func sampleIngress(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "networking.k8s.io/v1",
@@ -531,6 +549,7 @@ func sampleIngress(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleNetworkPolicy builds a sample NetworkPolicy that allows ingress to the app from frontend pods.
 func sampleNetworkPolicy(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "networking.k8s.io/v1",
@@ -555,6 +574,7 @@ func sampleNetworkPolicy(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleStorageClass builds a sample cluster-scoped StorageClass with no provisioner.
 func sampleStorageClass(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion":        "storage.k8s.io/v1",
@@ -566,6 +586,7 @@ func sampleStorageClass(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleHPA builds a sample HorizontalPodAutoscaler that scales a Deployment on 80% CPU.
 func sampleHPA(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "autoscaling/v2",
@@ -599,6 +620,7 @@ func sampleHPA(namespace, name string) json.RawMessage {
 	})
 }
 
+// samplePDB builds a sample PodDisruptionBudget with minAvailable of 1.
 func samplePDB(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "policy/v1",
@@ -619,6 +641,7 @@ func samplePDB(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleRole builds a sample namespaced Role with read access to pods and services.
 func sampleRole(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "rbac.authorization.k8s.io/v1",
@@ -634,6 +657,7 @@ func sampleRole(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleRoleBinding builds a sample RoleBinding that binds the default service account to the Role of the same name.
 func sampleRoleBinding(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "rbac.authorization.k8s.io/v1",
@@ -650,6 +674,7 @@ func sampleRoleBinding(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleClusterRole builds a sample ClusterRole with read access to core resources and read-write on deployments.
 func sampleClusterRole(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "rbac.authorization.k8s.io/v1",
@@ -670,6 +695,7 @@ func sampleClusterRole(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleClusterRoleBinding builds a sample ClusterRoleBinding of the kube-system default service account to the ClusterRole of the same name.
 func sampleClusterRoleBinding(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "rbac.authorization.k8s.io/v1",
@@ -686,6 +712,7 @@ func sampleClusterRoleBinding(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleVolumeAttachment builds a sample attached VolumeAttachment.
 func sampleVolumeAttachment(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "storage.k8s.io/v1",
@@ -702,6 +729,7 @@ func sampleVolumeAttachment(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleVirtualService builds a sample Istio VirtualService that routes all traffic for name.example.com to the service of the same name.
 func sampleVirtualService(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "networking.istio.io/v1",
@@ -729,6 +757,7 @@ func sampleVirtualService(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleDestinationRule builds a sample Istio DestinationRule with connection pool limits and v1/v2 subsets.
 func sampleDestinationRule(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "networking.istio.io/v1",
@@ -759,6 +788,7 @@ func sampleDestinationRule(namespace, name string) json.RawMessage {
 	})
 }
 
+// sampleGateway builds a sample Istio-class Gateway API Gateway with an HTTP listener.
 func sampleGateway(namespace, name string) json.RawMessage {
 	return marshal(map[string]interface{}{
 		"apiVersion": "gateway.networking.k8s.io/v1",

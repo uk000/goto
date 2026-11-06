@@ -37,6 +37,7 @@ var (
 	Middleware = middleware.NewMiddleware("registry", setRoutes, nil)
 )
 
+// setRoutes registers all the registry routes under /registry, plus the clone, dump and load routes.
 func setRoutes(r *mux.Router) {
 	registryRouter := middleware.RootPath("/registry")
 	peersRouter := registryRouter.PathPrefix("/peers").Subrouter()
@@ -57,6 +58,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(registryRouter, "/load", loadRegistryDump, "POST")
 }
 
+// addPeerManagementRoutes adds the routes to add, remove, list, health-check and call peers.
 func addPeerManagementRoutes(peersRouter *mux.Router) {
 	util.AddRoute(peersRouter, "/add", addPeer, "POST")
 	util.AddRoute(peersRouter, "/{peer}/remember", addPeer, "POST")
@@ -71,6 +73,7 @@ func addPeerManagementRoutes(peersRouter *mux.Router) {
 	util.AddRoute(peersRouter, "/{peer}?/apis", getPeersAPIs, "GET")
 }
 
+// addPeerTargetsRoutes adds the routes to manage and invoke peer targets and to toggle results collection.
 func addPeerTargetsRoutes(peersRouter *mux.Router) {
 	util.AddRoute(peersRouter, "/{peer}?/targets/add", addPeerTarget, "POST")
 	util.AddRoute(peersRouter, "/{peer}/targets/{targets}/remove", removePeerTargets, "PUT", "POST")
@@ -88,6 +91,7 @@ func addPeerTargetsRoutes(peersRouter *mux.Router) {
 	util.AddRoute(peersRouter, "/targets/results/invocations/{enable}", enableInvocationResultsCollection, "POST", "PUT")
 }
 
+// addPeerJobsRoutes adds the routes to manage, run and stop peer jobs, scripts and files.
 func addPeerJobsRoutes(peersRouter *mux.Router) {
 	util.AddRoute(peersRouter, "/{peer}?/jobs/add", addPeerJob, "POST", "PUT")
 	util.AddRoute(peersRouter, "/{peer}/jobs/add/script/{name}", addPeerJobScriptOrFile, "POST", "PUT")
@@ -103,6 +107,7 @@ func addPeerJobsRoutes(peersRouter *mux.Router) {
 	util.AddRoute(peersRouter, "/{peer}?/jobs", getPeerJobs, "GET")
 }
 
+// addPeerTrackingRoutes adds the routes to manage the tracking headers and time buckets of peers.
 func addPeerTrackingRoutes(peersRouter *mux.Router) {
 	util.AddRoute(peersRouter, "/track/headers/clear", clearPeersTrackingHeaders, "POST", "PUT")
 	util.AddRoute(peersRouter, "/track/headers/{headers}", addPeersTrackingHeaders, "POST", "PUT")
@@ -112,12 +117,14 @@ func addPeerTrackingRoutes(peersRouter *mux.Router) {
 	util.AddRoute(peersRouter, "/track/time", getPeersTrackingTimeBuckets, "GET")
 }
 
+// addPeerProbesRoutes adds the routes to set and read the probes of peers.
 func addPeerProbesRoutes(peersRouter *mux.Router) {
 	util.AddRouteQ(peersRouter, "/probes/{type}/set", setPeersProbe, "uri", "POST", "PUT")
 	util.AddRoute(peersRouter, "/probes/{type}/set/status={status}", setPeersProbeStatus, "POST", "PUT")
 	util.AddRoute(peersRouter, "/probes", getPeersProbes, "GET")
 }
 
+// addPeer adds a peer and returns its startup data, or only refreshes a known peer when called to remember it.
 func addPeer(w http.ResponseWriter, r *http.Request) {
 	peerName := util.GetStringParamValue(r, "peer")
 	peer := &Peer{}
@@ -148,6 +155,7 @@ func addPeer(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// removePeer removes the peer pod at the given address.
 func removePeer(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if peerName, present := util.GetStringParam(r, "peer"); present {
@@ -173,6 +181,7 @@ func removePeer(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// checkPeerHealth health-checks the pods of a peer (or all peers) and reports the results.
 func checkPeerHealth(w http.ResponseWriter, r *http.Request) {
 	peerName := util.GetStringParamValue(r, "peer")
 	address := util.GetStringParamValue(r, "address")
@@ -183,6 +192,7 @@ func checkPeerHealth(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// cleanupUnhealthyPeers removes the pods of a peer (or all peers) that fail the health check.
 func cleanupUnhealthyPeers(w http.ResponseWriter, r *http.Request) {
 	result := registry.cleanupUnhealthyPeers(util.GetStringParamValue(r, "peer"))
 	util.WriteJsonPayload(w, result)
@@ -191,6 +201,7 @@ func cleanupUnhealthyPeers(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getPeers reports all the registered peers.
 func getPeers(w http.ResponseWriter, r *http.Request) {
 	registry.peersLock.RLock()
 	defer registry.peersLock.RUnlock()
@@ -224,6 +235,7 @@ func checkBadPods(result PeerResults, w http.ResponseWriter) {
 	}
 }
 
+// addPeerTarget validates the target in the payload, then saves it and pushes it to the peer pods.
 func addPeerTarget(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	peerName := util.GetStringParamValue(r, "peer")
@@ -250,6 +262,7 @@ func addPeerTarget(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// removePeerTargets removes the given targets, or all if none are given, from the peer pods.
 func removePeerTargets(w http.ResponseWriter, r *http.Request) {
 	peerName := util.GetStringParamValue(r, "peer")
 	targets, _ := util.GetListParam(r, "targets")
@@ -262,6 +275,7 @@ func removePeerTargets(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// stopPeerTargets stops the given targets, or all if none are given, on the peer pods.
 func stopPeerTargets(w http.ResponseWriter, r *http.Request) {
 	peerName := util.GetStringParamValue(r, "peer")
 	targets := util.GetStringParamValue(r, "targets")
@@ -272,6 +286,7 @@ func stopPeerTargets(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// invokePeerTargets invokes the given targets, or all if none are given, on the peer pods.
 func invokePeerTargets(w http.ResponseWriter, r *http.Request) {
 	peerName := util.GetStringParamValue(r, "peer")
 	targets := util.GetStringParamValue(r, "targets")
@@ -284,6 +299,7 @@ func invokePeerTargets(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getPeerTargets reports the targets of a peer, or of all peers.
 func getPeerTargets(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if peerName, present := util.GetStringParam(r, "peer"); present {
@@ -308,6 +324,7 @@ func getPeerTargets(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// enableAllClientResultsCollection enables or disables results collection for all targets in the registry and on peers.
 func enableAllClientResultsCollection(w http.ResponseWriter, r *http.Request) {
 	result := registry.enableAllOrInvocationsTargetsResultsCollection(util.GetStringParamValue(r, "enable"), true)
 	checkBadPods(result, w)
@@ -316,6 +333,7 @@ func enableAllClientResultsCollection(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// enableInvocationResultsCollection enables or disables invocation results collection in the registry and on peers.
 func enableInvocationResultsCollection(w http.ResponseWriter, r *http.Request) {
 	result := registry.enableAllOrInvocationsTargetsResultsCollection(util.GetStringParamValue(r, "enable"), false)
 	checkBadPods(result, w)
@@ -326,6 +344,7 @@ func enableInvocationResultsCollection(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// addPeerJob parses the job in the payload (name required, legacy "id" accepted), then saves it and pushes it to the peer pods.
 func addPeerJob(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	peerName := util.GetStringParamValue(r, "peer")
@@ -360,6 +379,7 @@ func addPeerJob(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// addPeerJobScriptOrFile stores the payload as a job script or file for a peer (or all peers) and pushes it to their pods.
 func addPeerJobScriptOrFile(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	peerName := util.GetStringParamValue(r, "peer")
@@ -382,6 +402,7 @@ func addPeerJobScriptOrFile(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// removePeerJobs removes the given jobs, or all if none are given, from the peer pods.
 func removePeerJobs(w http.ResponseWriter, r *http.Request) {
 	peerName := util.GetStringParamValue(r, "peer")
 	jobs, _ := util.GetListParam(r, "jobs")
@@ -394,6 +415,7 @@ func removePeerJobs(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// stopPeerJobs stops the given jobs, or all if none are given, on the peer pods.
 func stopPeerJobs(w http.ResponseWriter, r *http.Request) {
 	peerName := util.GetStringParamValue(r, "peer")
 	jobs := util.GetStringParamValue(r, "jobs")
@@ -406,6 +428,7 @@ func stopPeerJobs(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// runPeerJobs runs the given jobs, or all if none are given, on the peer pods.
 func runPeerJobs(w http.ResponseWriter, r *http.Request) {
 	peerName := util.GetStringParamValue(r, "peer")
 	jobs := util.GetStringParamValue(r, "jobs")
@@ -418,6 +441,7 @@ func runPeerJobs(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getPeerJobs reports the jobs of a peer, or of all peers.
 func getPeerJobs(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if peerName, present := util.GetStringParam(r, "peer"); present {
@@ -442,6 +466,7 @@ func getPeerJobs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// clearPeerEpochs clears the past epochs of all peer pods.
 func clearPeerEpochs(w http.ResponseWriter, r *http.Request) {
 	registry.clearPeerEpochs()
 	w.WriteHeader(http.StatusOK)
@@ -452,6 +477,7 @@ func clearPeerEpochs(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearPeers resets the registry's peers, targets, jobs and lockers.
 func clearPeers(w http.ResponseWriter, r *http.Request) {
 	registry.reset()
 	w.WriteHeader(http.StatusOK)
@@ -462,6 +488,7 @@ func clearPeers(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearPeerTargets clears the targets of a peer (or all peers).
 func clearPeerTargets(w http.ResponseWriter, r *http.Request) {
 	peerName := util.GetStringParamValue(r, "peer")
 	result := registry.clearPeerTargets(peerName)
@@ -473,6 +500,7 @@ func clearPeerTargets(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// clearPeerJobs clears the jobs of a peer (or all peers).
 func clearPeerJobs(w http.ResponseWriter, r *http.Request) {
 	peerName := util.GetStringParamValue(r, "peer")
 	result := registry.clearPeerJobs(peerName)
@@ -484,6 +512,7 @@ func clearPeerJobs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// addPeersTrackingHeaders sets the tracking headers in the registry and pushes them to all peers.
 func addPeersTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if h, present := util.GetStringParam(r, "headers"); present {
@@ -500,6 +529,7 @@ func addPeersTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearPeersTrackingHeaders clears the tracking headers in the registry and on all peers.
 func clearPeersTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	result := registry.clearPeersTrackingHeaders()
@@ -511,6 +541,7 @@ func clearPeersTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getPeersTrackingHeaders reports the tracking headers set for peers.
 func getPeersTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 	registry.peersLock.RLock()
 	defer registry.peersLock.RUnlock()
@@ -521,6 +552,7 @@ func getPeersTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// addPeersTrackingTimeBuckets sets the tracking time buckets in the registry and pushes them to all peers, rejecting invalid buckets.
 func addPeersTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if b, present := util.GetStringParam(r, "buckets"); present {
@@ -541,6 +573,7 @@ func addPeersTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearPeersTrackingTimeBuckets clears the tracking time buckets in the registry and on all peers.
 func clearPeersTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	result := registry.clearPeersTrackingTimeBuckets()
@@ -552,6 +585,7 @@ func clearPeersTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getPeersTrackingTimeBuckets reports the tracking time buckets set for peers.
 func getPeersTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 	registry.peersLock.RLock()
 	defer registry.peersLock.RUnlock()
@@ -561,6 +595,7 @@ func getPeersTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// setPeersProbe sets the readiness or liveness probe URI in the registry and pushes it to all peers.
 func setPeersProbe(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	probeType := util.GetStringParamValue(r, "type")
@@ -584,6 +619,7 @@ func setPeersProbe(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// setPeersProbeStatus sets the readiness or liveness probe status in the registry and pushes it to all peers.
 func setPeersProbeStatus(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	probeType := util.GetStringParamValue(r, "type")
@@ -610,6 +646,7 @@ func setPeersProbeStatus(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getPeersProbes reports the probes set for peers, or null if none are set.
 func getPeersProbes(w http.ResponseWriter, r *http.Request) {
 	registry.peersLock.RLock()
 	defer registry.peersLock.RUnlock()
@@ -625,6 +662,7 @@ func getPeersProbes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// buildPeerAPIs lists the URLs of the useful APIs of a peer at the given address.
 func buildPeerAPIs(peer, address string) []string {
 	apis := []string{
 		fmt.Sprintf("http://%s/version", address),
@@ -645,6 +683,7 @@ func buildPeerAPIs(peer, address string) []string {
 	return apis
 }
 
+// getPeersAPIs reports useful API URLs for each peer and pod, including via-registry call URLs and locker URLs.
 func getPeersAPIs(w http.ResponseWriter, r *http.Request) {
 	peerName := util.GetStringParamValue(r, "peer")
 	peersAPIs := map[string]map[string][]string{}
@@ -668,6 +707,7 @@ func getPeersAPIs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// callPeer forwards the request (method, headers and body) to the given URI on the pods of a peer, or all peers.
 func callPeer(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	peerName := util.GetStringParamValue(r, "peer")
@@ -687,6 +727,7 @@ func callPeer(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// copyPeersToLocker stores the registered peers in the current locker under the "peers" path.
 func copyPeersToLocker(w http.ResponseWriter, r *http.Request) {
 	registry.peersLock.RLock()
 	defer registry.peersLock.RUnlock()
@@ -701,6 +742,7 @@ func copyPeersToLocker(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// cloneFromRegistry replaces the peers, lockers, targets, jobs, tracking headers and probes with the ones cloned from another registry.
 func cloneFromRegistry(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	url := util.GetStringParamValue(r, "url")
@@ -737,6 +779,7 @@ func cloneFromRegistry(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// dumpRegistry writes the registry's lockers, peers, targets, jobs, tracking headers and probes as JSON.
 func dumpRegistry(w http.ResponseWriter, r *http.Request) {
 	dump := map[string]interface{}{}
 	registry.lockersLock.RLock()
@@ -756,6 +799,7 @@ func dumpRegistry(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// loadRegistryDump loads a registry dump, replacing the registry data only if every section of the dump parses.
 func loadRegistryDump(w http.ResponseWriter, r *http.Request) {
 	dump := map[string]json.RawMessage{}
 	if err := util.ReadJsonPayload(r, &dump); err != nil {

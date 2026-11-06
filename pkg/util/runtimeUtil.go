@@ -31,6 +31,7 @@ type Channel[T any] struct {
 	closed bool
 }
 
+// NewChannel creates a Channel that buffers up to 10 values.
 func NewChannel[T any]() *Channel[T] {
 	return &Channel[T]{
 		Ch: make(chan T, 10),
@@ -38,6 +39,7 @@ func NewChannel[T any]() *Channel[T] {
 	}
 }
 
+// ReadNoWait returns a value that is already in the channel, or the zero value if there is none, without blocking.
 func (c *Channel[T]) ReadNoWait() T {
 	var val T
 	select {
@@ -47,6 +49,7 @@ func (c *Channel[T]) ReadNoWait() T {
 	return val
 }
 
+// Write sends the value unless the channel is closed, which the lock makes safe against a concurrent Close.
 func (c *Channel[T]) Write(val T) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -55,10 +58,12 @@ func (c *Channel[T]) Write(val T) {
 	}
 }
 
+// Wait blocks until a value is received or the channel is closed, and discards the value.
 func (c *Channel[T]) Wait() {
 	<-c.Ch
 }
 
+// Close closes the channel the first time that it is called, and does nothing after that.
 func (c *Channel[T]) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -68,12 +73,14 @@ func (c *Channel[T]) Close() {
 	}
 }
 
+// IsClosed tells if the channel was closed.
 func (c *Channel[T]) IsClosed() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.closed
 }
 
+// PrintCallers prints up to level callers from goto code (outside util) found on the stack, labelled with the callee.
 func PrintCallers(level int, callee string) {
 	pc := make([]uintptr, 16)
 	n := runtime.Callers(1, pc)
@@ -96,6 +103,7 @@ func PrintCallers(level int, callee string) {
 	fmt.Println("-----------------------------------------------")
 }
 
+// Debounce returns a function that runs f after the interval, restarting the wait if it is called again before the interval elapses.
 func Debounce(interval time.Duration) func(f func()) {
 	var timer *time.Timer
 	var mu sync.Mutex
@@ -108,6 +116,8 @@ func Debounce(interval time.Duration) func(f func()) {
 		timer = time.AfterFunc(interval, f)
 	}
 }
+
+// IsNil tells if the value is nil, which includes typed nil pointers, maps, slices, funcs, channels and interfaces.
 func IsNil(i interface{}) bool {
 	if i == nil {
 		return true

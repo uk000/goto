@@ -29,6 +29,7 @@ var panicMarker = []byte("panic serving")
 // net/http recovers it, closes the connection (the client just sees an empty reply or EOF), and reports it only here.
 type serverErrorLogWriter struct{}
 
+// Write drops everything written to the server error log except panics of request handlers, which are logged as errors.
 func (serverErrorLogWriter) Write(p []byte) (int, error) {
 	if bytes.Contains(p, panicMarker) {
 		log.Printf("[ERROR] %s", strings.TrimRight(string(p), "\n"))

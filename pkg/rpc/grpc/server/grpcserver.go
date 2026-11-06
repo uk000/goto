@@ -102,6 +102,7 @@ var (
 // goroutine that serves when it stops.
 var servicesLock sync.Mutex
 
+// init registers the manager as the global gRPC manager and server, and prepares the first server.
 func init() {
 	global.GRPCServer = GRPCManager
 	global.GRPCManager = GRPCManager
@@ -132,12 +133,14 @@ func asListener(listener any) *listeners.Listener {
 	return l
 }
 
+// AddListener adds the listener to the server without starting it.
 func (sm *GRPCServerManager) AddListener(listener any) {
 	if l := asListener(listener); l != nil {
 		TheGRPCServer.addListener(l)
 	}
 }
 
+// ServeListener adds the listener to the server, and starts the server or restarts it if it is running.
 func (sm *GRPCServerManager) ServeListener(listener any) {
 	l := asListener(listener)
 	if l == nil {
@@ -153,6 +156,7 @@ func (sm *GRPCServerManager) ServeListener(listener any) {
 	}
 }
 
+// Serve marks the service as served and restarts the server to serve it.
 func (sm *GRPCServerManager) Serve(port int, s *gotogrpc.GRPCService) {
 	sm.lock.Lock()
 	defer sm.lock.Unlock()
@@ -162,6 +166,7 @@ func (sm *GRPCServerManager) Serve(port int, s *gotogrpc.GRPCService) {
 	log.Printf("GRPC Service [%s] served on port [%d]", s.Name, port)
 }
 
+// ServeMulti marks the services of all the ports as served and restarts the server once.
 func (sm *GRPCServerManager) ServeMulti(portServices map[int][]*gotogrpc.GRPCService) {
 	sm.lock.Lock()
 	defer sm.lock.Unlock()
@@ -175,10 +180,12 @@ func (sm *GRPCServerManager) ServeMulti(portServices map[int][]*gotogrpc.GRPCSer
 	TheGRPCServer.start()
 }
 
+// InterceptAndServe makes the methods of the service go through the interceptors and serves it with srv.
 func (sm *GRPCServerManager) InterceptAndServe(gsd *grpc.ServiceDesc, srv any) {
 	sm.interceptAndServe(gsd, srv)
 }
 
+// InterceptWithMiddleware does the same as InterceptAndServe, for the services whose calls go through the middleware chain.
 func (sm *GRPCServerManager) InterceptWithMiddleware(gsd *grpc.ServiceDesc, srv any) {
 	sm.interceptAndServe(gsd, srv)
 }
@@ -198,6 +205,7 @@ func (sm *GRPCServerManager) interceptAndServe(gsd *grpc.ServiceDesc, srv any) {
 	ServiceRegistry.AddActiveService(service)
 }
 
+// InterceptAndProxy intercepts the methods of the from service to proxy them to a target service, which is given by toGSD or is the from service under the name target, optionally tee'd on teeport, and returns both services or nils.
 func (sm *GRPCServerManager) InterceptAndProxy(fromGSD, toGSD *grpc.ServiceDesc, target string, srv any, teeport int) (global.IGRPCService, global.IGRPCService) {
 	fromService := ServiceRegistry.GetService(fromGSD.ServiceName)
 	if fromService == nil {
@@ -236,6 +244,7 @@ func (sm *GRPCServerManager) InterceptAndProxy(fromGSD, toGSD *grpc.ServiceDesc,
 	return fromService, toService
 }
 
+// Reflect loads the descriptor of the service and records the service in the service info provider.
 func (sm *GRPCServerManager) Reflect(s *grpc.ServiceDesc) {
 	psd, err := grpcreflect.LoadServiceDescriptor(s)
 	if err != nil || psd == nil {
@@ -245,6 +254,7 @@ func (sm *GRPCServerManager) Reflect(s *grpc.ServiceDesc) {
 	SIP.AddService(ServiceRegistry.NewGRPCService(psd))
 }
 
+// InterceptServiceMethods intercepts every stream and unary method of the original service.
 func (sm *GRPCServerManager) InterceptServiceMethods(proxy, original *gotogrpc.GRPCService, srv any, serviceByOriginal bool) error {
 	if proxy == nil || original == nil || original.GSD == nil {
 		return fmt.Errorf("Original and Proxy services required")
@@ -264,6 +274,7 @@ func (sm *GRPCServerManager) InterceptServiceMethods(proxy, original *gotogrpc.G
 	return nil
 }
 
+// getStream finds the stream descriptor of the name, ignoring case.
 func getStream(sd *grpc.ServiceDesc, stream string) *grpc.StreamDesc {
 	for i := range sd.Streams {
 		s := &sd.Streams[i]
@@ -274,6 +285,7 @@ func getStream(sd *grpc.ServiceDesc, stream string) *grpc.StreamDesc {
 	return nil
 }
 
+// getMethod finds the method descriptor of the name, ignoring case.
 func getMethod(sd *grpc.ServiceDesc, method string) *grpc.MethodDesc {
 	for i := range sd.Methods {
 		m := &sd.Methods[i]
@@ -284,6 +296,7 @@ func getMethod(sd *grpc.ServiceDesc, method string) *grpc.MethodDesc {
 	return nil
 }
 
+// InterceptServiceMethod replaces the handler of a stream or unary method with an interceptor that proxies the call or delegates to the original or proxy handler, reusing the interceptor that the method has.
 func (sm *GRPCServerManager) InterceptServiceMethod(proxy, original *gotogrpc.GRPCService, proxyMethodName, origMethodName string, srv any, stream bool, serviceByOriginal bool) error {
 	if proxy == nil || original == nil || proxy.GSD == nil || original.GSD == nil {
 		return fmt.Errorf("Original and Proxy services required")
@@ -364,12 +377,14 @@ func (sm *GRPCServerManager) InterceptServiceMethod(proxy, original *gotogrpc.GR
 	return nil
 }
 
+// refreshGRPCServer stops the server and gives it a new grpc server.
 func (sm *GRPCServerManager) refreshGRPCServer() {
 	TheGRPCServer.Stop()
 	log.Println("GRPC Server stopped")
 	TheGRPCServer.refreshServer()
 }
 
+// restartServer refreshes the server and starts it.
 func (sm *GRPCServerManager) restartServer() {
 	sm.refreshGRPCServer()
 	TheGRPCServer.start()
@@ -387,6 +402,7 @@ func (sm *GRPCServerManager) RefreshServices() {
 	}
 }
 
+// StopService removes the service from the active services and restarts the server.
 func (sm *GRPCServerManager) StopService(s *gotogrpc.GRPCService) {
 	sm.lock.Lock()
 	defer sm.lock.Unlock()
@@ -395,6 +411,7 @@ func (sm *GRPCServerManager) StopService(s *gotogrpc.GRPCService) {
 	TheGRPCServer.start()
 }
 
+// StartWithCallback restarts the server with the listener added, running the callback before the server starts.
 func (sm *GRPCServerManager) StartWithCallback(l *listeners.Listener, callback func()) {
 	sm.lock.Lock()
 	defer sm.lock.Unlock()
@@ -415,12 +432,14 @@ func (sp *ServiceInfoProvider) GetServiceInfo() map[string]grpc.ServiceInfo {
 	return services
 }
 
+// GetService returns the info of the service of the name.
 func (sp *ServiceInfoProvider) GetService(name string) grpc.ServiceInfo {
 	sp.lock.Lock()
 	defer sp.lock.Unlock()
 	return sp.services[name]
 }
 
+// AddService records the methods and metadata of the service as service info, which reflection lists.
 func (sp *ServiceInfoProvider) AddService(s *gotogrpc.GRPCService) {
 	if s == nil {
 		return
@@ -444,6 +463,7 @@ func (sp *ServiceInfoProvider) AddService(s *gotogrpc.GRPCService) {
 	sp.services[s.Name] = si
 }
 
+// newGRPCServer creates a server with the keepalive, stream limit, tracing and middleware options.
 func newGRPCServer() *GRPCServer {
 	return &GRPCServer{
 		Listeners: map[string]*listeners.Listener{},
@@ -465,18 +485,21 @@ func newGRPCServer() *GRPCServer {
 	}
 }
 
+// addListener adds the listener by its ID.
 func (g *GRPCServer) addListener(l *listeners.Listener) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 	g.Listeners[l.ListenerID] = l
 }
 
+// isRunning tells if the server is running.
 func (g *GRPCServer) isRunning() bool {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 	return g.Running
 }
 
+// setRunning sets if the server is running.
 func (g *GRPCServer) setRunning(running bool) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
@@ -494,6 +517,7 @@ func (g *GRPCServer) listenerList() []*listeners.Listener {
 	return list
 }
 
+// refreshServer gives the server a new grpc server, unless it is running.
 func (g *GRPCServer) refreshServer() {
 	g.lock.Lock()
 	defer g.lock.Unlock()
@@ -514,6 +538,7 @@ func (g *GRPCServer) refreshServerIfServed() {
 	}
 }
 
+// recycleListeners initializes the listeners that have no net listener yet and reopens the one on the port, and stops if a listener fails to initialize.
 func (g *GRPCServer) recycleListeners(port int) {
 	for _, l := range g.listenerList() {
 		if l.Listener == nil {
@@ -529,6 +554,7 @@ func (g *GRPCServer) recycleListeners(port int) {
 	}
 }
 
+// registerServices registers the services of the registry once for each name, and reflection, on the grpc server if they aren't there.
 func (g *GRPCServer) registerServices() {
 	registeredServices := g.Server.GetServiceInfo()
 	// The services are given once for a name, as the server can't take a service twice: one that is served and also
@@ -547,6 +573,7 @@ func (g *GRPCServer) registerServices() {
 	}
 }
 
+// start starts the server, or restarts it if it is running: reopens the listeners, registers the services, and serves in a goroutine.
 func (g *GRPCServer) start() {
 	msg := ""
 	if g.isRunning() {
@@ -606,6 +633,7 @@ func (g *GRPCServer) run(server *grpc.Server, lns []net.Listener, done chan stru
 	global.OnGRPCStop()
 }
 
+// Stop stops a running server and waits, for up to 2 seconds, for the goroutine that serves to finish.
 func (g *GRPCServer) Stop() {
 	if g == nil {
 		return
@@ -629,10 +657,12 @@ func (g *GRPCServer) Stop() {
 	}
 }
 
+// NewWrappedStream wraps the stream so that its context is the one given.
 func NewWrappedStream(ss grpc.ServerStream, ctx context.Context) grpc.ServerStream {
 	return WrappedStream{ServerStream: ss, ctx: ctx}
 }
 
+// Context returns the context that the stream was wrapped with.
 func (ws WrappedStream) Context() context.Context {
 	return ws.ctx
 }
@@ -652,6 +682,7 @@ func getForcedStatus(ctx context.Context, port int, method string, md metadata.M
 	return gotostatus.TheStatusManager.GetStatusFor(port, method, headers, "")
 }
 
+// unaryMiddleware sets up the port and the request store of a unary call, fails it with the forced status if one is set, and otherwise runs the handler and logs its error and the access log.
 func unaryMiddleware(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	port := util.GetGRPCPort(ctx)
 	if port <= 0 {
@@ -679,6 +710,7 @@ func unaryMiddleware(ctx context.Context, req interface{}, info *grpc.UnaryServe
 	return resp, err
 }
 
+// streamMiddleware sets up the port and the request store of a stream call, fails it with the forced status if one is set, and otherwise runs the handler and logs its error and the access log.
 func streamMiddleware(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 	ctx := ss.Context()
 	port := util.GetGRPCPort(ctx)

@@ -31,6 +31,7 @@ var (
 	Middleware = middleware.NewMiddleware("tunnel", setRoutes, middlewareFunc)
 )
 
+// setRoutes registers the /tunnel={address} passthrough route and the /tunnels APIs to add, remove, track, capture and report tunnels.
 func setRoutes(r *mux.Router) {
 	r.PathPrefix("/tunnel={address}").Subrouter().MatcherFunc(func(*http.Request, *mux.RouteMatch) bool { return true }).HandlerFunc(tunnel)
 	tunnelRouter := middleware.RootPath("/tunnels")
@@ -55,6 +56,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(tunnelRouter, "", getTunnels, "GET")
 }
 
+// addTunnel adds a tunnel on the port to the endpoint, optionally limited to a URI and header (or transparent).
 func addTunnel(w http.ResponseWriter, r *http.Request) {
 	endpoint := util.GetStringParamValue(r, "endpoint")
 	uri := util.GetStringParamValue(r, "uri")
@@ -68,6 +70,7 @@ func addTunnel(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// clearTunnel removes the tunnel to the endpoint (or all tunnels) on the port, optionally for a URI and header.
 func clearTunnel(w http.ResponseWriter, r *http.Request) {
 	endpoint := util.GetStringParamValue(r, "endpoint")
 	uri := util.GetStringParamValue(r, "uri")
@@ -85,6 +88,7 @@ func clearTunnel(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// addTunnelTracking adds headers and query params to track in the tunnel traffic of the port.
 func addTunnelTracking(w http.ResponseWriter, r *http.Request) {
 	headers, _ := util.GetListParam(r, "headers")
 	queryParams, _ := util.GetListParam(r, "params")
@@ -96,6 +100,7 @@ func addTunnelTracking(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// clearTunnelTracking clears the tracking config and the traffic counts of the tunnels on the port.
 func clearTunnelTracking(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	pt := GetOrCreatePortTunnel(port)
@@ -129,6 +134,7 @@ func snapshotTunnels() map[int]*PortTunnel {
 	return copies
 }
 
+// getTunnelTracking reports the tunnel traffic counts of every port.
 func getTunnelTracking(w http.ResponseWriter, r *http.Request) {
 	counts := map[int]*TunnelTraffic{}
 	for port, pt := range snapshotTunnels() {
@@ -138,6 +144,7 @@ func getTunnelTracking(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reported Tunnel Tracking", r)
 }
 
+// captureTunnelTraffic enables or disables capture of the tunnel traffic log on the port.
 func captureTunnelTraffic(w http.ResponseWriter, r *http.Request) {
 	yn := util.GetBoolParamValue(r, "yn")
 	port := util.GetRequestOrListenerPortNum(r)
@@ -152,6 +159,7 @@ func captureTunnelTraffic(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// getTunnelTrafficLog reports the tunnel traffic, including any captured logs, of the port.
 func getTunnelTrafficLog(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	pt := GetOrCreatePortTunnel(port)
@@ -161,6 +169,7 @@ func getTunnelTrafficLog(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reported Tunnel Tracking", r)
 }
 
+// getActiveTunnels reports the proxy-connect tunnels that are currently open on the port.
 func getActiveTunnels(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	pt := GetOrCreatePortTunnel(port)
@@ -170,6 +179,7 @@ func getActiveTunnels(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reported Active Tunnels", r)
 }
 
+// getTunnels reports the configured tunnels of every port.
 func getTunnels(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, snapshotTunnels())
 	util.AddLogMessage("Reported Tunnels", r)

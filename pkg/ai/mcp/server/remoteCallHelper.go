@@ -27,6 +27,7 @@ import (
 	"trpc.group/trpc-go/trpc-a2a-go/protocol"
 )
 
+// processResults relays the results streamed from the upstream to the client, and keeps them as the structured content of the result.
 func (tctx *ToolContext) processResults(name, url string, stream chan *types.Pair[string, any], result *gomcp.CallToolResult, wg *sync.WaitGroup) {
 	structuredContent := map[string]any{}
 	structuredCount := 1
@@ -64,6 +65,7 @@ outer:
 	wg.Done()
 }
 
+// addForwardHeaders copies the headers to forward from the request into the headers, and records their names in the args.
 func (tctx *ToolContext) addForwardHeaders(headers types.SimpleHTTPHeaders, forwardHeaders []string, args *aicommon.ToolCallArgs) {
 	finalForwardHeaders := map[string]bool{}
 	if tctx.args != nil && tctx.args.RemoteArgs != nil {

@@ -53,6 +53,7 @@ var (
 	transposeLock sync.Mutex
 )
 
+// GetPortProxy returns the HTTP proxy of the port, creating and registering it if it doesn't exist.
 func GetPortProxy(port int) *Proxy {
 	proxyLock.RLock()
 	proxy := portProxy[port]
@@ -81,18 +82,21 @@ func snapshotProxies() map[int]*Proxy {
 	return proxies
 }
 
+// ClearAllProxies drops the proxies of all the ports.
 func ClearAllProxies() {
 	proxyLock.Lock()
 	defer proxyLock.Unlock()
 	portProxy = map[int]*Proxy{}
 }
 
+// ClearPortProxy replaces the proxy of the port with a new empty one.
 func ClearPortProxy(port int) {
 	proxyLock.Lock()
 	defer proxyLock.Unlock()
 	portProxy[port] = newProxy(port)
 }
 
+// configureRouter sets up the middleware chain of a proxy router, with the proxy flag, the core and the intercept middleware, and the catch-all not found handler.
 func configureRouter(r *mux.Router) {
 	r.Use(setProxyFlag)
 	middleware.UseCore(r)
@@ -101,6 +105,7 @@ func configureRouter(r *mux.Router) {
 	r.NotFoundHandler = notFoundHandler
 }
 
+// setProxyFlag is middleware that marks the request as served by a proxy router, and as chunked unless the proxy is streaming.
 func setProxyFlag(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)
@@ -112,6 +117,7 @@ func setProxyFlag(next http.Handler) http.Handler {
 	})
 }
 
+// initTracker replaces the tracker of the proxy with a fresh one.
 func (p *Proxy) initTracker() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -125,6 +131,7 @@ func (p *Proxy) getTracker() *HTTPProxyTracker {
 	return p.HTTPTracker
 }
 
+// incrementMatchCounts counts a downstream request for the proxy and for each matched target, with the URI and headers that matched.
 func (p *Proxy) incrementMatchCounts(matches map[string]*MatchedTarget, r *http.Request) {
 	tracker := p.getTracker()
 	tracker.IncrementDownstreamRequestCounts(r.RequestURI)
@@ -139,6 +146,7 @@ func (p *Proxy) incrementMatchCounts(matches map[string]*MatchedTarget, r *http.
 	}
 }
 
+// invokeTargets calls the endpoints of the matched targets, collects and streams their responses, and writes the proxy response with the status derived from them.
 func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *RequestContext) {
 	tracker := p.getTracker()
 	proxyResponses := p.getProxyResponses()
@@ -183,6 +191,7 @@ func (p *Proxy) invokeTargets(targetsMatches map[string]*MatchedTarget, rc *Requ
 	p.processPayload(rc, responses)
 }
 
+// processResponses adds the upstream Via-Goto, proxy status and upstream status headers of the collected responses to the downstream response.
 func (p *Proxy) processResponses(rc *RequestContext, responses UpstreamResults, responseStatuses map[string]map[string]int) {
 	upstreamStatuses := []string{}
 	upstreamViaGoto := []string{}
@@ -212,6 +221,7 @@ func (p *Proxy) processResponses(rc *RequestContext, responses UpstreamResults, 
 	}
 }
 
+// sendProxyStatuses sets the proxy upstream status, Via-Goto and client cert headers on the downstream response.
 func (rc *RequestContext) sendProxyStatuses(upstreamViaGoto []string, upstreamProxyStatuses []map[string]map[string][]string, responseStatuses map[string]map[string]int, peerCertInfos []string) {
 	upstreamProxyStatusHeaders := []string{}
 	for _, v := range upstreamProxyStatuses {
@@ -225,6 +235,7 @@ func (rc *RequestContext) sendProxyStatuses(upstreamViaGoto []string, upstreamPr
 	rc.w.Header()[constants.HeaderGotoClientCert] = peerCertInfos
 }
 
+// processResponseHeaders collects the Via-Goto, proxy status, upstream status and peer cert info of an upstream response into the given lists.
 func (rc *RequestContext) processResponseHeaders(target, ep string, headers http.Header, pci *gototls.PeerCertInfo, peerCertInfos *[]string, upstreamStatuses *[]string, upstreamViaGoto *[]string, upstreamProxyStatuses *[]map[string]map[string][]string) {
 	v := headers[constants.HeaderViaGoto]
 	if len(v) == 0 {
@@ -252,6 +263,7 @@ func (rc *RequestContext) processResponseHeaders(target, ep string, headers http
 	}
 }
 
+// processPayload writes the response payload, which is the first upstream payload if it was asked for, or else all the upstream responses.
 func (p *Proxy) processPayload(rc *RequestContext, responses UpstreamResults) {
 	if len(responses) > 0 {
 		if rc.sendPayload {
@@ -284,6 +296,7 @@ func (p *Proxy) processPayload(rc *RequestContext, responses UpstreamResults) {
 	}
 }
 
+// invoke calls every endpoint of the matched target, counting the calls and the responses that are expected from them.
 func (t *MatchedTarget) invoke(rc *RequestContext, out chan *TargetEndpointResponse, wg *sync.WaitGroup, pt *HTTPProxyTracker) {
 	for _, ep := range t.endpoints {
 		t.target.lock.Lock()
@@ -309,6 +322,7 @@ func (t *MatchedTarget) invoke(rc *RequestContext, out chan *TargetEndpointRespo
 	}
 }
 
+// invoke registers an invocation of the endpoint for the request and starts it in the background, which sends its responses to the channel.
 func (ep *EndpointInvocation) invoke(targetCounter, epCounter int, target string, matchedURI string, tt *TrafficTransform, rc *RequestContext, out chan *TargetEndpointResponse, pt *HTTPProxyTracker) error {
 	ep.registerLock.Lock()
 	is := ep.toInvocationSpec(matchedURI, tt, rc, pt)
@@ -324,6 +338,7 @@ func (ep *EndpointInvocation) invoke(targetCounter, epCounter int, target string
 	return nil
 }
 
+// asyncInvoke runs the invocation and sends each of its responses, as text unless it is binary, to the channel.
 func (ep *EndpointInvocation) asyncInvoke(target string, tracker *invocation.InvocationTracker, out chan *TargetEndpointResponse) {
 	responses := invocation.StartInvocation(tracker, true)
 	for _, resp := range responses {
@@ -340,6 +355,7 @@ func (ep *EndpointInvocation) asyncInvoke(target string, tracker *invocation.Inv
 	}
 }
 
+// onHeaders returns the callback that reports the response headers of the endpoint to the downstream response, as soon as they arrive.
 func (ep *EndpointInvocation) onHeaders(rc *RequestContext) func(http.Header, int, *gototls.PeerCertInfo) {
 	return func(headers http.Header, status int, peerCertInfo *gototls.PeerCertInfo) {
 		// The endpoints of a request are called concurrently, and all of them report to the same response headers.
@@ -355,6 +371,7 @@ func (ep *EndpointInvocation) onHeaders(rc *RequestContext) func(http.Header, in
 	}
 }
 
+// asyncStreamResponse writes the data that arrives on the stream channel to the downstream, until the channel is closed.
 func (p *Proxy) asyncStreamResponse(rc *RequestContext, done chan struct{}) {
 	defer close(done)
 	for data := range rc.c {
@@ -375,6 +392,7 @@ type chanWriter struct {
 	c chan []byte
 }
 
+// Write sends a copy of the bytes to the channel.
 func (w *chanWriter) Write(p []byte) (int, error) {
 	w.c <- append([]byte(nil), p...)
 	return len(p), nil
@@ -426,6 +444,7 @@ func (p *Proxy) asyncCollectResponses(out chan *TargetEndpointResponse, quit cha
 	}
 }
 
+// prepareInvocationSpec builds and validates the invocation spec of the endpoint, with the retries and delays of the traffic config.
 func (ep *TargetEndpoint) prepareInvocationSpec(tc *TrafficConfig) (*invocation.InvocationSpec, error) {
 	is := &invocation.InvocationSpec{}
 	is.Name = ep.name
@@ -486,12 +505,14 @@ func (rc *RequestContext) reportDelay(delay string) {
 	rc.w.Header().Add(constants.HeaderGotoProxyDelay, delay)
 }
 
+// prepare compiles the pattern that strips a part of the URI, if the transform has one.
 func (tt *TrafficTransform) prepare() {
 	if tt.StripURI != "" {
 		tt.stripURIRegexp = regexp.MustCompile("^(.*)(" + tt.StripURI + ")(/.+).*$")
 	}
 }
 
+// toInvocationSpec makes the invocation spec of the request for the endpoint, with the transformed URL, headers and body.
 func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTransform, rc *RequestContext, pt *HTTPProxyTracker) *invocation.InvocationSpec {
 	is := ep.is.Clone()
 	is.URL = ep.prepareURL(matchedURI, tt, rc, pt)
@@ -540,6 +561,7 @@ func (ep *EndpointInvocation) toInvocationSpec(matchedURI string, tt *TrafficTra
 	return is
 }
 
+// prepareURL makes the upstream URL for the request by applying the URI and query transforms of the target, and counts the upstream request.
 func (ep *EndpointInvocation) prepareURL(matchedURI string, tt *TrafficTransform, rc *RequestContext, pt *HTTPProxyTracker) string {
 	targetURI := rc.path
 	var add map[string]string
@@ -574,6 +596,7 @@ func (ep *EndpointInvocation) prepareURL(matchedURI string, tt *TrafficTransform
 	return url
 }
 
+// matchURI tells whether the request URI matches, including its variables, and records what matched.
 func (m *TargetMatch) matchURI(matchedTarget *MatchedTarget, r *http.Request) bool {
 	// The URI regexp of an exact URI ends the path, so it can't match a request URI that has a query.
 	if m.uriRegexp != nil && !m.uriRegexp.MatchString(r.URL.Path) {
@@ -602,6 +625,7 @@ func (m *TargetMatch) matchURI(matchedTarget *MatchedTarget, r *http.Request) bo
 	return true
 }
 
+// matchHeaders tells whether the request has all the headers of the match with their values, and records what matched.
 func (m *TargetMatch) matchHeaders(matchedTarget *MatchedTarget, r *http.Request) bool {
 	headerValuesMap := util.GetHeaderValues(r)
 	for h, v := range m.Headers {
@@ -632,6 +656,7 @@ func (m *TargetMatch) matchHeaders(matchedTarget *MatchedTarget, r *http.Request
 	return true
 }
 
+// match tells whether any of the URI and header matches of the trigger match the request, trying the exact URIs before the prefixes.
 func (t *TargetTrigger) match(matchedTarget *MatchedTarget, r *http.Request) bool {
 	if len(t.Endpoints) == 0 {
 		return false
@@ -665,6 +690,7 @@ func (t *TargetTrigger) match(matchedTarget *MatchedTarget, r *http.Request) boo
 	return matched
 }
 
+// getMatchingProxyTargets finds the enabled targets that have a trigger that matches the request, and tells whether any of them streams.
 func (p *Proxy) getMatchingProxyTargets(r *http.Request) (ProxyTargets, bool) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
@@ -727,6 +753,7 @@ func (p *Proxy) getMatchingProxyTargets(r *http.Request) (ProxyTargets, bool) {
 	return matchedTargets, streaming
 }
 
+// ProxyRequest is the handler that proxies the request to the matched targets, and tells the time that the proxy took in a trailer.
 func ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	rs := util.GetRequestStore(r)
@@ -800,6 +827,7 @@ func getProxyRouter(port int, r *http.Request, matches ProxyTargets) *mux.Router
 	return routers["/"]
 }
 
+// WillProxyHTTP tells whether the request is to be proxied to any targets of its port, and if so stores them in the request and returns the router to serve it.
 func WillProxyHTTP(r *http.Request) (bool, *mux.Router) {
 	port := util.GetRequestOrListenerPortNum(r)
 	proxy := GetPortProxy(port)
@@ -817,6 +845,7 @@ func WillProxyHTTP(r *http.Request) (bool, *mux.Router) {
 	return false, nil
 }
 
+// middlewareFunc is middleware that sends the request to the proxy router if it is to be proxied, or else to the next handler.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if ok, router := WillProxyHTTP(r); ok {

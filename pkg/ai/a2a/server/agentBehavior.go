@@ -45,6 +45,7 @@ type AgentBehaviorImpl struct {
 	doStream StreamHandler
 }
 
+// newAgentBehavior creates the agent's behavior (echo, stream, federate or HTTP proxy) from its config.
 func newAgentBehavior(agent *model.Agent) *AgentBehaviorImpl {
 	if agent.Behavior == nil {
 		agent.Behavior = &model.AgentBehavior{}
@@ -85,6 +86,7 @@ func newAgentBehavior(agent *model.Agent) *AgentBehaviorImpl {
 	return impl
 }
 
+// prepareDelay prepares the delay of the agent's config, if it has one, for the behavior to use.
 func (bd *AgentBehaviorImpl) prepareDelay() {
 	if bd.agent.Config == nil || bd.agent.Config.Delay == nil {
 		return
@@ -93,6 +95,7 @@ func (bd *AgentBehaviorImpl) prepareDelay() {
 	bd.delay = bd.agent.Config.Delay
 }
 
+// prepareDelegates prepares the delegates if the behavior is federate, and does nothing otherwise.
 func (b *AgentBehaviorImpl) prepareDelegates() error {
 	bd, ok := b.self.(*AgentBehaviorFederate)
 	if !ok {
@@ -101,6 +104,7 @@ func (b *AgentBehaviorImpl) prepareDelegates() error {
 	return bd.prepareDelegates()
 }
 
+// newAgentTask builds the task for the message with the handler, and subscribes to its events.
 func (bd *AgentBehaviorImpl) newAgentTask(aCtx *AgentContext, input *a2aproto.Message, options *taskmanager.ProcessOptions,
 	handler taskmanager.TaskHandler) (*AgentTask, error) {
 	taskID, err := handler.BuildTask(nil, nil)
@@ -122,6 +126,7 @@ func (bd *AgentBehaviorImpl) newAgentTask(aCtx *AgentContext, input *a2aproto.Me
 	}, nil
 }
 
+// ProcessMessage handles an incoming message by building its task and context and running the stream or unary behavior.
 func (b *AgentBehaviorImpl) ProcessMessage(ctx context.Context, input a2aproto.Message, options taskmanager.ProcessOptions,
 	handler taskmanager.TaskHandler) (*taskmanager.MessageProcessingResult, error) {
 	var aCtx *AgentContext
@@ -143,6 +148,7 @@ func (b *AgentBehaviorImpl) ProcessMessage(ctx context.Context, input a2aproto.M
 	}
 }
 
+// handleUnary runs the unary behavior, and adds the timeline to its result message if the timeline is to be reported.
 func (b *AgentBehaviorImpl) handleUnary(aCtx *AgentContext) (result *taskmanager.MessageProcessingResult, err error) {
 	if b.doUnary == nil {
 		return nil, fmt.Errorf("Agent [%s] doesn't support Unary behavior.", b.agent.ID)
@@ -161,6 +167,7 @@ func (b *AgentBehaviorImpl) handleUnary(aCtx *AgentContext) (result *taskmanager
 	return
 }
 
+// handleStream starts the stream behavior in a goroutine and returns the subscriber that its events are read from.
 func (b *AgentBehaviorImpl) handleStream(aCtx *AgentContext) (*taskmanager.MessageProcessingResult, error) {
 	if b.doStream == nil {
 		return nil, fmt.Errorf("Agent [%s] doesn't support Streaming behavior.", b.agent.ID)
@@ -171,6 +178,7 @@ func (b *AgentBehaviorImpl) handleStream(aCtx *AgentContext) (*taskmanager.Messa
 	}, nil
 }
 
+// stream runs the stream behavior and ends the task with its status, as a failure if it returns an error.
 func (b *AgentBehaviorImpl) stream(aCtx *AgentContext) {
 	status, err := b.doStream(aCtx)
 	if !util.IsNil(err) {
@@ -180,6 +188,7 @@ func (b *AgentBehaviorImpl) stream(aCtx *AgentContext) {
 	}
 }
 
+// createTextMessage makes an agent message of one text part.
 func createTextMessage(data string) a2aproto.Message {
 	return a2aproto.NewMessage(
 		a2aproto.MessageRoleAgent,
@@ -187,6 +196,7 @@ func createTextMessage(data string) a2aproto.Message {
 	)
 }
 
+// createDataMessage makes an agent message of one data part.
 func createDataMessage(data any) a2aproto.Message {
 	return a2aproto.NewMessage(
 		a2aproto.MessageRoleAgent,
@@ -194,6 +204,7 @@ func createDataMessage(data any) a2aproto.Message {
 	)
 }
 
+// createTextPartsFromArrayOrString adds a "key: text" part for each string in the value, and reports whether any was found.
 func createTextPartsFromArrayOrString(key string, val any, parts *[]a2aproto.Part, builder *strings.Builder) bool {
 	hasText := false
 	if arr, ok := val.([]any); ok {
@@ -223,6 +234,7 @@ func createTextPartsFromArrayOrString(key string, val any, parts *[]a2aproto.Par
 	return hasText
 }
 
+// createPartsFromMap adds the text parts of the values of the map, going into the values that are maps or arrays.
 func createPartsFromMap(key string, m map[string]any, parts *[]a2aproto.Part, builder *strings.Builder, deep bool) {
 	for k, any := range m {
 		v := reflect.ValueOf(any)
@@ -239,6 +251,7 @@ func createPartsFromMap(key string, m map[string]any, parts *[]a2aproto.Part, bu
 	}
 }
 
+// createPartsFromMapIter walks a map by reflection and adds text parts of its values, recursing into maps and arrays.
 func createPartsFromMapIter(key string, m reflect.Value, parts *[]a2aproto.Part, builder *strings.Builder, deep bool) {
 	iter := m.MapRange()
 	for iter.Next() {
@@ -255,6 +268,7 @@ func createPartsFromMapIter(key string, m reflect.Value, parts *[]a2aproto.Part,
 	}
 }
 
+// createPartsFromArrayIter walks an array by reflection and adds text parts of its elements, recursing into maps and arrays.
 func createPartsFromArrayIter(key string, arr reflect.Value, parts *[]a2aproto.Part, builder *strings.Builder, deep bool) {
 	for i := 0; i < arr.Len(); i++ {
 		any := arr.Index(i)
@@ -269,6 +283,7 @@ func createPartsFromArrayIter(key string, arr reflect.Value, parts *[]a2aproto.P
 	}
 }
 
+// createHybridMessage makes a message of the text of the tool and agent results, followed by their data and headers.
 func createHybridMessage(id string, toolResults, agentResults, upstreamHeaders map[string]any) a2aproto.Message {
 	parts := []a2aproto.Part{}
 	builder := &strings.Builder{}
@@ -282,6 +297,7 @@ func createHybridMessage(id string, toolResults, agentResults, upstreamHeaders m
 	return a2aproto.NewMessage(a2aproto.MessageRoleAgent, finalParts)
 }
 
+// createAnyPart makes a part of the result: timestamped text for a string, the part itself, or data keyed by the message.
 func createAnyPart(msg string, result any) a2aproto.Part {
 	if s, ok := result.(string); ok {
 		return a2aproto.NewTextPart(fmt.Sprintf("[%s] %s: %s", time.Now().Format(time.RFC3339Nano), msg, s))

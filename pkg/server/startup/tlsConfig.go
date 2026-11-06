@@ -33,6 +33,7 @@ func clearTLS(tlsConfigs *ctl.TLSConfigs) {
 	clearCAs(tlsConfigs.CACerts)
 }
 
+// clearCerts removes the certs, from the listener of their port or by their name.
 func clearCerts(certs []*ctl.CertConfig) {
 	for _, cert := range certs {
 		if cert == nil {
@@ -48,6 +49,7 @@ func clearCerts(certs []*ctl.CertConfig) {
 	}
 }
 
+// clearCAs removes the CA certs and their keys by name.
 func clearCAs(cas []*ctl.CACertConfig) {
 	for _, ca := range cas {
 		if ca != nil {
@@ -65,6 +67,7 @@ type certKey struct {
 	name string
 }
 
+// indexCerts maps the entries of the certs of a TLS config by their port and name.
 func indexCerts(tlsConfigs *ctl.TLSConfigs) map[certKey]*ctl.CertConfig {
 	index := map[certKey]*ctl.CertConfig{}
 	if tlsConfigs != nil {
@@ -90,6 +93,7 @@ func certKind(cert *ctl.CertConfig) string {
 	return ""
 }
 
+// sameCAs tells if two lists of CA configs are equal, with empty lists being equal to each other.
 func sameCAs(a, b []*ctl.CACertConfig) bool {
 	return (len(a) == 0 && len(b) == 0) || reflect.DeepEqual(a, b)
 }
@@ -140,6 +144,7 @@ func diffCerts(old, new *ctl.TLSConfigs) (toClear, toLoad []*ctl.CertConfig) {
 	return toClear, toLoad
 }
 
+// processTLS loads the CAs and all the certs of a TLS config.
 func processTLS(tlsConfigs *ctl.TLSConfigs) {
 	if tlsConfigs == nil {
 		return

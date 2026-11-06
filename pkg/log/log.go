@@ -31,6 +31,7 @@ var (
 	Middleware = middleware.NewMiddleware("log", setRoutes, nil)
 )
 
+// setRoutes registers the /log routes that toggle each kind of logging, exclude a header from request logging, and report the log levels.
 func setRoutes(r *mux.Router) {
 	logRouter := middleware.RootPath("/log")
 	util.AddRoute(logRouter, "/server/{enable}", setLogLevel, "POST", "PUT")
@@ -55,6 +56,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(logRouter, "", getLogLevels, "GET")
 }
 
+// setLogLevel enables or disables the kind of logging named in the request URI (server, client, registry, request/response headers and bodies, MCP, etc.).
 func setLogLevel(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	enable := util.GetBoolParamValue(r, "enable")
@@ -152,6 +154,7 @@ func setLogLevel(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// addExcludedHeader excludes the given header from being logged.
 func addExcludedHeader(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	header := util.GetStringParamValue(r, "header")
@@ -165,6 +168,7 @@ func addExcludedHeader(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getLogLevels reports the on/off state of each logging category as JSON.
 func getLogLevels(w http.ResponseWriter, r *http.Request) {
 	levels := map[string]bool{
 		"server":     global.Flags.EnableServerLogs,

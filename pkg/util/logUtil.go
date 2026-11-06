@@ -23,16 +23,19 @@ import (
 	"net/http/httputil"
 )
 
+// AddLogMessage appends the message to the log messages of the request.
 func AddLogMessage(msg string, r *http.Request) {
 	rs := GetRequestStore(r)
 	rs.LogMessages = append(rs.LogMessages, msg)
 }
 
+// LogMessage appends the message to the log messages of the request store in the context.
 func LogMessage(ctx context.Context, msg string) {
 	_, rs := GetRequestStoreFromContext(ctx)
 	rs.LogMessages = append(rs.LogMessages, msg)
 }
 
+// PrintRequest logs the dump of the request (method, URI, headers, query, body) under the given context label.
 func PrintRequest(context string, r *http.Request) {
 	log.Printf("======== %s ==========\n", context)
 	if b, err := httputil.DumpRequest(r, true); err == nil {
@@ -47,6 +50,7 @@ func PrintRequest(context string, r *http.Request) {
 	}
 }
 
+// PrintResponse logs the response writer as JSON text.
 func PrintResponse(w http.ResponseWriter) {
 	log.Println(ToJSONText(w))
 }

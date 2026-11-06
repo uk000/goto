@@ -98,6 +98,7 @@ func SetConnectDelay(port int, delay *types.Delay) {
 	}
 }
 
+// setConnectDelay sets the delay that the CONNECT proxy applies to connections and transfers, or clears it if nil.
 func (p *TCPProxy) setConnectDelay(delay *types.Delay) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -125,12 +126,14 @@ func WillProxyConnect(port int) bool {
 	return p != nil && p.isConnectEnabled()
 }
 
+// enableConnect turns the CONNECT mode of the proxy on or off.
 func (p *TCPProxy) enableConnect(enable bool) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.HTTP.Connect = enable
 }
 
+// isConnectEnabled tells whether the proxy is in CONNECT mode.
 func (p *TCPProxy) isConnectEnabled() bool {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
@@ -353,6 +356,7 @@ type connectTunnel struct {
 	cancel context.CancelFunc
 }
 
+// touch records the current time as the last time that the tunnel moved data.
 func (tn *connectTunnel) touch() {
 	tn.lastActive.Store(time.Now().UnixNano())
 }
@@ -399,6 +403,7 @@ func (tn *connectTunnel) transferTook(first time.Time) time.Duration {
 	return max(0, time.Unix(0, last).Sub(first))
 }
 
+// idleFor tells how long the tunnel has been without moving data.
 func (tn *connectTunnel) idleFor() time.Duration {
 	return time.Since(time.Unix(0, tn.lastActive.Load()))
 }
@@ -415,6 +420,7 @@ func (tn *connectTunnel) abort() {
 	})
 }
 
+// run relays the client to the destination and back, each direction in its own goroutine, until both are done, and then aborts the tunnel.
 func (tn *connectTunnel) run() {
 	tn.ctx, tn.cancel = context.WithCancel(context.Background())
 	tn.touch()
@@ -462,6 +468,7 @@ type tunnelReader struct {
 	err  error
 }
 
+// Read reads from the source, and tracks the bytes read, holding them back for the transfer delay of the proxy.
 func (r *tunnelReader) Read(p []byte) (int, error) {
 	if r.err != nil {
 		return 0, r.err
@@ -499,6 +506,7 @@ type tunnelWriter struct {
 	side string
 }
 
+// Write writes to the destination, tracks the bytes written, and aborts the tunnel if the write fails.
 func (w *tunnelWriter) Write(p []byte) (int, error) {
 	_ = w.dst.SetWriteDeadline(time.Now().Add(connectIdleTimeout))
 	n, err := w.dst.Write(p)
@@ -559,6 +567,7 @@ func (tn *connectTunnel) read(src io.Reader, srcConn net.Conn, buff []byte) (n i
 	}
 }
 
+// noteReadError classifies the error of a read (closed, reset, timeout or other) and marks it on the tracker, unless the tunnel is aborted.
 func (tn *connectTunnel) noteReadError(err error, t *ConnTracker, side string) {
 	if tn.aborted.Load() {
 		return

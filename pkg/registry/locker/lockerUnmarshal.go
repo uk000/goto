@@ -27,6 +27,7 @@ import (
 // "instanceLockers", etc.), so the default decoder cannot read a dump back into the locker types. The unmarshalers
 // below are the inverse of those marshalers, and are used to load a registry dump or to clone a registry.
 
+// isNullOrEmptyJSON tells whether the raw JSON is empty, null or an empty string.
 func isNullOrEmptyJSON(raw json.RawMessage) bool {
 	t := bytes.TrimSpace(raw)
 	return len(t) == 0 || bytes.Equal(t, []byte("null")) || bytes.Equal(t, []byte(`""`))
@@ -37,6 +38,7 @@ func (ld *LockerData) UnmarshalJSON(b []byte) error {
 	return ld.unmarshal(b, 1)
 }
 
+// unmarshal reads a locker entry at the level, taking "data" as its data and the other keys as sub-keys.
 func (ld *LockerData) unmarshal(b []byte, level int) error {
 	fields := map[string]json.RawMessage{}
 	if err := json.Unmarshal(b, &fields); err != nil {

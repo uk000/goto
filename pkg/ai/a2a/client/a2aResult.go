@@ -65,6 +65,7 @@ type A2ACallResult struct {
 	parent          *A2AResult
 }
 
+// NewA2AResult creates the result of a call to an agent on the given server, tracked with the given timeline.
 func NewA2AResult(server string, ac *AgentCall, t *timeline.Timeline) *A2AResult {
 	return &A2AResult{
 		ID:               fmt.Sprintf("[%s]@%s", ac.Name, server),
@@ -79,12 +80,14 @@ func NewA2AResult(server string, ac *AgentCall, t *timeline.Timeline) *A2AResult
 	}
 }
 
+// getOrAddCall returns the call result of the request ID, creating it if there is none, with the lock held.
 func (r *A2AResult) getOrAddCall(requestID string) *A2ACallResult {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	return r.getOrAddCallLocked(requestID)
 }
 
+// getOrAddCallLocked returns the call result of the request ID, creating it if there is none; the caller must hold the lock.
 func (r *A2AResult) getOrAddCallLocked(requestID string) *A2ACallResult {
 	result := r.CallResults[requestID]
 	if result == nil {
@@ -98,6 +101,7 @@ func (r *A2AResult) getOrAddCallLocked(requestID string) *A2ACallResult {
 	return result
 }
 
+// addOrUpdateCall stores the call result of the request ID, merging it into an existing one, and sets its client info.
 func (r *A2AResult) addOrUpdateCall(requestID string, result *A2ACallResult, clientInfo *timeline.GotoClientInfo) *A2ACallResult {
 	r.lock.Lock()
 	defer r.lock.Unlock()
@@ -116,12 +120,14 @@ func (r *A2AResult) addOrUpdateCall(requestID string, result *A2ACallResult, cli
 	return result
 }
 
+// storeA2ACallResult stores the call result of the request ID unless it is nil.
 func (r *A2AResult) storeA2ACallResult(requestID string, result *A2ACallResult, clientInfo *timeline.GotoClientInfo) {
 	if result != nil {
 		result = r.addOrUpdateCall(requestID, result, clientInfo)
 	}
 }
 
+// storeHeaders records the headers and status of a request on its call result and as the last ones of the call, and the status as the upstream status of the agent.
 func (r *A2AResult) storeHeaders(requestID string, requestHeaders, responseHeaders http.Header, status int) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
@@ -157,6 +163,7 @@ func (r *A2AResult) markRemoteGotos() {
 	r.LastResponseHeaders[constants.HeaderViaGoto] = viaGotos
 }
 
+// addRemoteGotos marks the given gotos as remotes that took part in the call.
 func (r *A2AResult) addRemoteGotos(gotos ...string) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
@@ -165,6 +172,7 @@ func (r *A2AResult) addRemoteGotos(gotos ...string) {
 	}
 }
 
+// addRemoteGotosFromUpstreamHeaders marks the gotos found in the upstream headers as remotes, once a response has been received.
 func (r *A2AResult) addRemoteGotosFromUpstreamHeaders(headers map[string]any) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
@@ -176,6 +184,7 @@ func (r *A2AResult) addRemoteGotosFromUpstreamHeaders(headers map[string]any) {
 	}
 }
 
+// setLastRemoteHeaders sets the last headers that the remote reported.
 func (r *A2AResult) setLastRemoteHeaders(headers map[string]any) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
@@ -198,6 +207,7 @@ func (r *A2AResult) recordUpstreamStatuses(rs *util.RequestStore, upstreamStatus
 	rs.UpstreamStatuses = maps.Clone(statuses)
 }
 
+// merge adds the content of the other call result to this one, and takes its data, headers and remote timeline when it has them.
 func (cr *A2ACallResult) merge(other *A2ACallResult) {
 	cr.Content = append(cr.Content, other.Content...)
 	if other.Data != nil {
@@ -214,6 +224,7 @@ func (cr *A2ACallResult) merge(other *A2ACallResult) {
 	}
 }
 
+// storeRemoteTimeline keeps the timeline found in the data as the remote timeline, without its events for a result-only call.
 func (cr *A2ACallResult) storeRemoteTimeline(data any) {
 	t := timeline.CheckAndGetTimeline(data)
 	if t != nil {
@@ -230,6 +241,7 @@ func (cr *A2ACallResult) storeRemoteTimeline(data any) {
 // others, and it is forgotten with the timeline.
 var timelineLocks sync.Map
 
+// lockOfTimeline returns the lock of the timeline, creating it on first use and arranging for it to be forgotten with the timeline.
 func lockOfTimeline(t *timeline.Timeline) *sync.Mutex {
 	key := weak.Make(t)
 	if lock, ok := timelineLocks.Load(key); ok {
@@ -282,6 +294,7 @@ func (r *A2AResult) Snapshot() (snapshot map[string]any) {
 	return
 }
 
+// toObject builds the result map with the content of the calls and the timeline, adding the calls data to the timeline.
 func (r *A2AResult) toObject() map[string]any {
 	result := map[string]any{}
 	if len(r.CallResults) > 0 {
@@ -301,11 +314,13 @@ func (r *A2AResult) toObject() map[string]any {
 	return result
 }
 
+// ToMCP reports the result as an MCP tool result, in step with the other users of the timeline.
 func (r *A2AResult) ToMCP(extras map[string]any) (result *gomcp.CallToolResult) {
 	UpdateTimeline(r.Timeline, func() { result = r.toMCP(extras) })
 	return
 }
 
+// toMCP builds the MCP tool result with the content of the calls as text and the timeline, updated with the upstream headers, statuses and extras, as structured content.
 func (r *A2AResult) toMCP(extras map[string]any) *gomcp.CallToolResult {
 	result := &gomcp.CallToolResult{}
 	if !r.AgentCall.NoCallDetails {
@@ -341,6 +356,7 @@ func (r *A2AResult) toMCP(extras map[string]any) *gomcp.CallToolResult {
 	return result
 }
 
+// buildCallsData builds the data of the calls by request ID, and attaches the remote timeline or result of each call to the timeline.
 func (r *A2AResult) buildCallsData() map[string]map[string]any {
 	callsData := map[string]map[string]any{}
 	callsData[r.ID] = map[string]any{}

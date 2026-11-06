@@ -12,6 +12,7 @@ import (
 // sessionStoreLock guards the request stores of the sessions, and what the requests and the tools put in them.
 var sessionStoreLock sync.RWMutex
 
+// GetMCPSessionID returns the MCP session ID of the headers, which is the X-MCP-Session-ID header, or else the standard Mcp-Session-Id.
 func GetMCPSessionID(headers http.Header) string {
 	sessionID := headers.Get(HeaderXMCPSessionID)
 	if sessionID == "" {
@@ -27,6 +28,7 @@ const headerRequestKey = "Goto-Mcp-Request-Key"
 
 var requestKeySeq atomic.Uint64
 
+// newRequestKey returns a request key that is unique in the process.
 func newRequestKey() string {
 	return fmt.Sprintf("req-%d", requestKeySeq.Add(1))
 }
@@ -40,6 +42,7 @@ func storeKeyOf(headers http.Header) string {
 	return GetMCPSessionID(headers)
 }
 
+// SetMCPSessionStore gets or makes the store of the request (by request key or session), and points it to the request.
 func (server *MCPServer) SetMCPSessionStore(r *http.Request) (*util.MCPRequestStore, *util.RequestStore) {
 	rs := util.GetRequestStore(r)
 	key := storeKeyOf(r.Header)
@@ -55,12 +58,14 @@ func (server *MCPServer) SetMCPSessionStore(r *http.Request) (*util.MCPRequestSt
 	return ms, rs
 }
 
+// GetMCPSessionStore returns the store that the key is for, or nil if there is none.
 func (server *MCPServer) GetMCPSessionStore(sessionID string) *util.MCPRequestStore {
 	sessionStoreLock.RLock()
 	defer sessionStoreLock.RUnlock()
 	return MCPRequestStoreBySession[sessionID]
 }
 
+// DeleteMCPSessionStore removes the store that the key is for.
 func (server *MCPServer) DeleteMCPSessionStore(sessionID string) {
 	sessionStoreLock.Lock()
 	defer sessionStoreLock.Unlock()
@@ -81,30 +86,35 @@ func (server *MCPServer) callStoreOf(sessionID string, ctx context.Context) (sha
 	return shared, &util.MCPRequestStore{Ctx: shared.Ctx, RS: shared.RS}
 }
 
+// getForcedStatus returns the status that the calls forced on the store.
 func getForcedStatus(ms *util.MCPRequestStore) int {
 	sessionStoreLock.RLock()
 	defer sessionStoreLock.RUnlock()
 	return ms.ForcedStatus
 }
 
+// setForcedStatus sets the status that the calls force on the store.
 func setForcedStatus(ms *util.MCPRequestStore, status int) {
 	sessionStoreLock.Lock()
 	defer sessionStoreLock.Unlock()
 	ms.ForcedStatus = status
 }
 
+// getSessionContext returns the context of the session, or nil if there is none.
 func (m *MCPServer) getSessionContext(sessionID string) *SessionContext {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 	return m.sessionContexts[sessionID]
 }
 
+// removeSessionContext removes the context of the session.
 func (m *MCPServer) removeSessionContext(sessionID string) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	delete(m.sessionContexts, sessionID)
 }
 
+// setSessionContext sets the context of the session.
 func (m *MCPServer) setSessionContext(sessionID string, ctx *SessionContext) {
 	m.lock.Lock()
 	m.sessionContexts[sessionID] = ctx

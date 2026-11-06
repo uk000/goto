@@ -29,6 +29,7 @@ import (
 	"strconv"
 )
 
+// middlewareFunc responds with the configured payload matching the request (if any), and calls next only if none matched or the request is a status or delay request.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)
@@ -69,6 +70,7 @@ func readAndRestoreBody(r *http.Request) []byte {
 	return rr.Content
 }
 
+// processPayload writes the matching payload as the response, as a flushed stream, JSON or raw bytes, with its content type and length headers.
 func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload, captures map[string]string) {
 	var payload []byte
 	contentType := ""
@@ -134,6 +136,7 @@ func processPayload(w http.ResponseWriter, r *http.Request, rp *ResponsePayload,
 	util.AddLogMessage(msg, r)
 }
 
+// handleURI responds with the payload matching the request, or with the echo of the request if none matches.
 func handleURI(w http.ResponseWriter, r *http.Request) {
 	var payload *ResponsePayload
 	p := PayloadManager.getPortResponse(r)

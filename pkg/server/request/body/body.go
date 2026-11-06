@@ -32,6 +32,7 @@ var (
 	Middleware = middleware.NewMiddleware("body", nil, middlewareFunc)
 )
 
+// middlewareFunc stores the HTTP/1 request body and its size in the request store for non-admin requests (logging it per flags), calls next, then drains the body.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if global.Debug {

@@ -94,6 +94,7 @@ type ClientTLSConfig struct {
 	RemoteAddress string
 }
 
+// UpdateTransport replaces the HTTP client, gRPC connection, transports and intercepts that the client transport uses.
 func (ct *DefaultClientTransport) UpdateTransport(c *http.Client, gc *grpc.ClientConn, h1 *http.Transport, h2 *http2.Transport, intercept ITransportIntercept, grpcIntercept *GRPCIntercept, isH2 bool) {
 	ct.Client = c
 	ct.GrpcConn = gc
@@ -143,6 +144,7 @@ func (c *DefaultClientTransport) SetTLSConfig(tlsConfig *tls.Config) {
 	}
 }
 
+// closeIdleConnections closes the idle connections of the HTTP client, if there is one.
 func (c *DefaultClientTransport) closeIdleConnections() {
 	if c.Client != nil {
 		c.CloseIdleConnections()
@@ -169,8 +171,10 @@ func (c *DefaultClientTransport) dialTLSConfig() (*tls.Config, *gototls.ALPN) {
 type opaqueConn struct{ net.Conn }
 type errRoundTripper struct{ err error }
 
+// RoundTrip always fails with the error that it holds.
 func (e *errRoundTripper) RoundTrip(*http.Request) (*http.Response, error) { return nil, e.err }
 
+// alpnHandler gives the round tripper for a connection that completed TLS: an HTTP/2 client connection when h2 is on, else an HTTP/1 transport that reuses the connection.
 func (c *DefaultClientTransport) alpnHandler(authority string, conn *tls.Conn) http.RoundTripper {
 	log.Printf("Client Port [%d] Label [%s]: TLS Handshake Complete. Negotiated ALPN: %s ---\n", c.port, c.label, conn.ConnectionState().NegotiatedProtocol)
 	if c.isH2 && c.h2Transport != nil {
@@ -415,6 +419,7 @@ type bufferedConn struct {
 	r io.Reader
 }
 
+// Read reads from the buffered reader, which gives the bytes that were read ahead before those of the connection.
 func (c *bufferedConn) Read(p []byte) (int, error) { return c.r.Read(p) }
 
 // openTunnel asks the proxy at the other end of the connection for a tunnel to the target, the way net/http does, and
@@ -457,6 +462,7 @@ func openTunnel(ctx context.Context, conn net.Conn, proxy *url.URL, target strin
 	return conn, nil
 }
 
+// hasCertificate tells if the certificate is already in the list.
 func hasCertificate(certs []tls.Certificate, cert *tls.Certificate) bool {
 	for i := range certs {
 		if slices.EqualFunc(certs[i].Certificate, cert.Certificate, bytes.Equal) {
@@ -475,6 +481,7 @@ func (c *DefaultClientTransport) peerCertInfoLocked(remoteAddr string) *gototls.
 	return c.PeerCertInfo
 }
 
+// StorePeerCertInfo records the subject, DNS names, URIs and issuer of the peer certificate for the remote address.
 func (c *DefaultClientTransport) StorePeerCertInfo(remoteAddr string, commonName string, dnsNames, uris []string, issuer string) {
 	c.peerLock.Lock()
 	defer c.peerLock.Unlock()
@@ -485,6 +492,7 @@ func (c *DefaultClientTransport) StorePeerCertInfo(remoteAddr string, commonName
 	pci.Issuer = issuer
 }
 
+// StoreSNI records the SNI and the negotiated ALPN of the connection to the remote address.
 func (c *DefaultClientTransport) StoreSNI(remoteAddr string, sni, alpn string) {
 	c.peerLock.Lock()
 	defer c.peerLock.Unlock()
@@ -493,12 +501,14 @@ func (c *DefaultClientTransport) StoreSNI(remoteAddr string, sni, alpn string) {
 	pci.NegotiatedALPN = alpn
 }
 
+// StoreALPN records the ALPN protocols for the remote address.
 func (c *DefaultClientTransport) StoreALPN(remoteAddr string, alpn []string) {
 	c.peerLock.Lock()
 	defer c.peerLock.Unlock()
 	c.peerCertInfoLocked(remoteAddr).ALPN = alpn
 }
 
+// UpdatePeerStatus records whether the handshake with the remote address finished, and adds a status message to it.
 func (c *DefaultClientTransport) UpdatePeerStatus(remoteAddr string, finished bool, status string) {
 	c.peerLock.Lock()
 	defer c.peerLock.Unlock()
@@ -521,6 +531,7 @@ func (c *DefaultClientTransport) GetPeerCertInfo() *gototls.PeerCertInfo {
 	return &pci
 }
 
+// Close closes the gRPC connection and the idle connections of the HTTP client, and lets go of both.
 func (c *DefaultClientTransport) Close() {
 	if c.GrpcConn != nil {
 		c.GrpcConn.Close()
@@ -532,36 +543,44 @@ func (c *DefaultClientTransport) Close() {
 	}
 }
 
+// Transport returns the transport intercept.
 func (c *DefaultClientTransport) Transport() ITransportIntercept {
 	return c.TransportIntercept
 }
 
+// RoundTrip sends the request through the transport of the HTTP client.
 func (c *DefaultClientTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	log.Println("ClientTracker Roundtrip called")
 	util.PrintCallers(3, "ClientTracker.RoundTrip")
 	return c.Client.Transport.RoundTrip(r)
 }
 
+// HTTP returns the HTTP client, which is nil for a gRPC transport.
 func (c *DefaultClientTransport) HTTP() *http.Client {
 	return c.Client
 }
 
+// GRPC returns the gRPC connection, which is nil for an HTTP transport.
 func (c *DefaultClientTransport) GRPC() *grpc.ClientConn {
 	return c.GrpcConn
 }
 
+// IsGRPC tells if the transport has a gRPC connection.
 func (c *DefaultClientTransport) IsGRPC() bool {
 	return c.GrpcConn != nil
 }
 
+// IsHTTP tells if the transport has an HTTP client.
 func (c *DefaultClientTransport) IsHTTP() bool {
 	return c.HTTP() != nil
 }
 
+// IsH2 tells if the transport is an HTTP client that uses HTTP/2.
 func (c *DefaultClientTransport) IsH2() bool {
 	return c.HTTP() != nil && c.isH2
 }
 
+// CreateRequest builds an HTTP request with the payload (or the reader) as its body, and sets the headers, using the Host header as the host of the request.
 func CreateRequest(method string, url string, headers http.Header, payload []byte, payloadReader io.ReadCloser) (*http.Request, error) {
 	if payloadReader == nil {
 		if payload == nil {
@@ -582,6 +601,7 @@ func CreateRequest(method string, url string, headers http.Header, payload []byt
 	}
 }
 
+// CreateSimpleHTTPClient creates an HTTP client with a pooled transport that uses the proxy of the environment and long (10 minute) timeouts.
 func CreateSimpleHTTPClient() *http.Client {
 	tr := &http.Transport{
 		MaxIdleConns:        100,
@@ -596,10 +616,12 @@ func CreateSimpleHTTPClient() *http.Client {
 	return &http.Client{Transport: tr, Timeout: 10 * time.Minute}
 }
 
+// CreateDefaultHTTPClient creates a client transport with the default timeouts (10m for requests, 3m to connect and idle) and HTTP/2 auto-upgrade.
 func CreateDefaultHTTPClient(port int, label string, h2, isTLS, noSNI bool, serverName string, newConnNotifierChan chan string) ClientTransport {
 	return CreateHTTPClient(port, label, h2, true, isTLS, noSNI, serverName, 10*time.Minute, 3*time.Minute, 3*time.Minute, newConnNotifierChan)
 }
 
+// CreateHTTPClient creates an HTTP/1 or HTTP/2 client transport with intercepts that track connections, a TLS dialer that records the peer cert info and ALPN, and proxy support.
 func CreateHTTPClient(port int, label string, h2, autoUpgrade, isTLS, noSNI bool, serverName string,
 	requestTimeout, connTimeout, connIdleTimeout time.Duration, newConnNotifierChan chan string) ClientTransport {
 	ct := &DefaultClientTransport{

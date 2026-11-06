@@ -38,6 +38,7 @@ type GrpcHTTPRequestAdapter struct {
 	Ctx context.Context
 }
 
+// NewGrpcHTTPRequestAdapter builds an HTTP/2 request from the method, host, URI, headers and body of a gRPC call, taking the remote address from the peer in ctx.
 func NewGrpcHTTPRequestAdapter(ctx context.Context, method, host, uri string, headers map[string][]string, body []byte) *GrpcHTTPRequestAdapter {
 	u, err := url.Parse(uri)
 	if err != nil {
@@ -73,14 +74,17 @@ func NewGrpcHTTPRequestAdapter(ctx context.Context, method, host, uri string, he
 	}
 }
 
+// Read reads from the request body.
 func (g *GrpcHTTPRequestAdapter) Read(p []byte) (n int, err error) {
 	return g.Body.Read(p)
 }
 
+// Close closes the request body.
 func (g *GrpcHTTPRequestAdapter) Close() error {
 	return g.Body.Close()
 }
 
+// Context returns the context of the adapter, or a background context if it has none.
 func (g *GrpcHTTPRequestAdapter) Context() context.Context {
 	if g.Ctx != nil {
 		return g.Ctx
@@ -88,6 +92,7 @@ func (g *GrpcHTTPRequestAdapter) Context() context.Context {
 	return context.Background()
 }
 
+// ToHTTPRequest returns the underlying http.Request bound to the context of the adapter.
 func (g *GrpcHTTPRequestAdapter) ToHTTPRequest() *http.Request {
 	if g.Ctx == nil {
 		g.Ctx = context.Background()
@@ -103,6 +108,7 @@ type GrpcHTTPResponseWriterAdapter struct {
 	desc        protoreflect.MessageDescriptor
 }
 
+// NewGrpcHTTPResponseWriterAdapter creates a response writer that collects what is written as messages of the given protobuf type.
 func NewGrpcHTTPResponseWriterAdapter(desc protoreflect.MessageDescriptor) *GrpcHTTPResponseWriterAdapter {
 	return &GrpcHTTPResponseWriterAdapter{
 		HeaderMap:  make(http.Header),
@@ -112,10 +118,12 @@ func NewGrpcHTTPResponseWriterAdapter(desc protoreflect.MessageDescriptor) *Grpc
 	}
 }
 
+// Header returns the response headers.
 func (g *GrpcHTTPResponseWriterAdapter) Header() http.Header {
 	return g.HeaderMap
 }
 
+// Write unmarshals the JSON response data into a dynamic message of the response type and collects it, setting status 200 if no status was written.
 func (g *GrpcHTTPResponseWriterAdapter) Write(b []byte) (int, error) {
 	if !g.wroteHeader {
 		g.WriteHeader(http.StatusOK)
@@ -133,6 +141,7 @@ func (g *GrpcHTTPResponseWriterAdapter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
+// WriteHeader records the status code, only the first time it is called.
 func (g *GrpcHTTPResponseWriterAdapter) WriteHeader(statusCode int) {
 	if g.wroteHeader {
 		return
@@ -141,10 +150,12 @@ func (g *GrpcHTTPResponseWriterAdapter) WriteHeader(statusCode int) {
 	g.wroteHeader = true
 }
 
+// Status returns the response status code.
 func (g *GrpcHTTPResponseWriterAdapter) Status() int {
 	return g.StatusCode
 }
 
+// HTTPToMDHeaders converts HTTP headers to gRPC metadata keys, lower-cased and without colons.
 func HTTPToMDHeaders(h http.Header) map[string][]string {
 	md := make(map[string][]string)
 	for k, v := range h {
@@ -154,6 +165,7 @@ func HTTPToMDHeaders(h http.Header) map[string][]string {
 	return md
 }
 
+// ToMetadata returns the response headers as gRPC metadata.
 func (g *GrpcHTTPResponseWriterAdapter) ToMetadata() map[string][]string {
 	return HTTPToMDHeaders(g.HeaderMap)
 }

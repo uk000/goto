@@ -63,10 +63,12 @@ type StatusManager struct {
 	lock       sync.RWMutex
 }
 
+// NewStatusManager creates a status manager with no configured statuses.
 func NewStatusManager() *StatusManager {
 	return &StatusManager{PortStatus: map[int][]*StatusConfig{}}
 }
 
+// newStatusConfig creates a status config for the given URI, optional header (with presence flag) and method match.
 func newStatusConfig(uriExact, uriPrefix, header, headerValue string, methods []string, statusCodes []int, times int, present bool) *StatusConfig {
 	sc := &StatusConfig{
 		Statuses: statusCodes,
@@ -112,6 +114,7 @@ func (s *StatusManager) Clear(port int, uriExact, uriPrefix string) {
 	s.PortStatus[port] = kept
 }
 
+// ParseStatusConfig reads a status config from a JSON body.
 func (s *StatusManager) ParseStatusConfig(body io.Reader) (sc *StatusConfig, err error) {
 	sc = &StatusConfig{}
 	if err = util.ReadJsonPayloadFromBody(body, sc); err != nil {
@@ -120,6 +123,7 @@ func (s *StatusManager) ParseStatusConfig(body io.Reader) (sc *StatusConfig, err
 	return sc, nil
 }
 
+// ParseAndApplyStatusConfig reads a status config from a JSON body and applies it to the port.
 func (s *StatusManager) ParseAndApplyStatusConfig(port int, body io.Reader) (sc *StatusConfig, err error) {
 	sc, err = s.ParseStatusConfig(body)
 	if err == nil {
@@ -131,6 +135,7 @@ func (s *StatusManager) ParseAndApplyStatusConfig(port int, body io.Reader) (sc 
 	return sc, nil
 }
 
+// ApplyStatusConfig validates the config, fills in its defaults (times, match, port) and adds a copy of it to the port's statuses.
 func (s *StatusManager) ApplyStatusConfig(port int, sc *StatusConfig) (err error) {
 	if len(sc.Statuses) == 0 {
 		return errors.New("no status")
@@ -208,10 +213,12 @@ func (s *StatusManager) Snapshot() map[int][]*StatusConfig {
 	return snapshot
 }
 
+// SetStatus sets a status for all requests of the port.
 func (s *StatusManager) SetStatus(port int, statusCodes []int, times int, present bool) *StatusConfig {
 	return s.SetStatusFor(port, "", "", "", "", nil, statusCodes, times, present)
 }
 
+// findOrRemoveStatusConfig finds (or removes) the config set for exactly the given URI, header and methods, under the lock.
 func (s *StatusManager) findOrRemoveStatusConfig(port int, uriExact, uriPrefix, header, headerValue string, methods []string, present bool, remove bool) *StatusConfig {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -308,6 +315,7 @@ func ParseMethods(param string, defaultMethods ...string) (methods []string, ok 
 	return methods, len(methods) > 0
 }
 
+// SetStatusFor sets the status (limited to times, or forever) for the given URI, header and methods on the port, updating the config set for exactly those or else adding one; returns a copy.
 func (s *StatusManager) SetStatusFor(port int, uriExact, uriPrefix, header, headerValue string, methods []string, statusCodes []int, times int, present bool) *StatusConfig {
 	uriExact = strings.ToLower(uriExact)
 	uriPrefix = strings.ToLower(uriPrefix)
@@ -327,6 +335,7 @@ func (s *StatusManager) SetStatusFor(port int, uriExact, uriPrefix, header, head
 	return sc.snapshot()
 }
 
+// GetStatus returns the status that applies to any request on the port, counting its use.
 func (s *StatusManager) GetStatus(port int) (status int, times int) {
 	return s.GetStatusFor(port, "", nil, "")
 }
@@ -460,6 +469,7 @@ func (sm *StatusMatch) match(uri string, headers map[string]string, method strin
 	return matched
 }
 
+// match tells if the headers satisfy the match: the header is absent if it is not meant to be present, else present and equal to the value if one is set.
 func (m *StatusHeaderMatch) match(headers map[string]string) bool {
 	hv, present := headers[m.Header]
 	if !*m.Present {
@@ -477,6 +487,7 @@ func (m *StatusHeaderMatch) match(headers map[string]string) bool {
 	return false
 }
 
+// matchOne tells if the header name, value and presence are exactly the ones of the match.
 func (m *StatusHeaderMatch) matchOne(h, hv string, present bool) bool {
 	if *m.Present != present {
 		return false
@@ -522,6 +533,7 @@ func (s *StatusConfig) GetStatus() (status int, times int) {
 	return 0, 0
 }
 
+// Log describes in text what the config does on the port, for the given scope.
 func (s *StatusConfig) Log(scope string, port int) string {
 	statusFor := ""
 	notURI := ""

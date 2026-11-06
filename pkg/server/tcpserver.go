@@ -37,10 +37,12 @@ var (
 	lock           sync.RWMutex
 )
 
+// InitTCPServer registers serveTCPRequests as the TCP serving function of the global TCP server config.
 func InitTCPServer() {
 	global.ConfigureTCPServer(serveTCPRequests)
 }
 
+// serveTCPRequests accepts connections on a TCP listener, does the TLS handshake if needed, and hands each to a CONNECT proxy, TCP proxy, forwarded HTTP server or TCP handler.
 func serveTCPRequests(listenerID string, port int, listener net.Listener) error {
 	if listener == nil {
 		return fmt.Errorf("Listener [%s] not open for business", listenerID)
@@ -111,6 +113,7 @@ func serveTCPRequests(listenerID string, port int, listener net.Listener) error 
 	return nil
 }
 
+// PeerHandshake performs a server-side TLS handshake with a 5 second deadline and returns the TLS connection and any ALPN preamble.
 func PeerHandshake(conn net.Conn, tlsConfig *tls.Config, alpn *gototls.ALPN) (*tls.Conn, []byte, error) {
 	tlsConn, ok := conn.(*tls.Conn)
 	if !ok {

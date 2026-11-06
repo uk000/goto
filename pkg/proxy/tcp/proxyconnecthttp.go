@@ -91,6 +91,7 @@ type methodQueue struct {
 	exchanges []exchange
 }
 
+// push queues a request to be matched with its response, as long as the queue is not full.
 func (q *methodQueue) push(ex exchange) {
 	q.lock.Lock()
 	defer q.lock.Unlock()
@@ -285,6 +286,7 @@ func nextHTTPHead(br *bufio.Reader, w io.Writer, response bool, lost func()) (*h
 	return head, nil
 }
 
+// notifyLost calls the function that tells that a direction is not followed anymore, if there is one.
 func notifyLost(lost func()) {
 	if lost != nil {
 		lost()
@@ -363,12 +365,14 @@ func copyLine(w io.Writer, br *bufio.Reader) ([]byte, error) {
 	return line, err
 }
 
+// parseChunkSize reads the hexadecimal size of a chunk from its line, ignoring the extensions, and tells whether it is valid.
 func parseChunkSize(line []byte) (int64, bool) {
 	size := strings.TrimSpace(strings.SplitN(string(line), ";", 2)[0])
 	n, err := strconv.ParseUint(size, 16, 62)
 	return int64(n), err == nil
 }
 
+// isBlankLine tells whether the line is only a line break.
 func isBlankLine(line []byte) bool {
 	return len(line) == 1 && line[0] == '\n' || len(line) == 2 && line[0] == '\r' && line[1] == '\n'
 }
@@ -463,6 +467,7 @@ func parseHTTPHead(raw []byte, response bool) (*httpHead, error) {
 	return head, nil
 }
 
+// isHTTPMethod tells whether the string is not empty and has only the characters that make up a method.
 func isHTTPMethod(s string) bool {
 	if s == "" {
 		return false
@@ -475,6 +480,7 @@ func isHTTPMethod(s string) bool {
 	return true
 }
 
+// isMethodChar tells whether the byte is a character that can be in a method: an upper case letter, a hyphen or an underscore.
 func isMethodChar(c byte) bool {
 	return c >= 'A' && c <= 'Z' || c == '-' || c == '_'
 }

@@ -115,11 +115,13 @@ var (
 	lock                 sync.RWMutex
 )
 
+// Init resets all port routers and the request correlation counter.
 func Init() {
 	PortRouters = map[int]*PortRouter{}
 	RequestCorrelationID = atomic.Int64{}
 }
 
+// WillRoute returns the handler of the route that matches the request on the port, or nil if the request is not to be rerouted.
 func WillRoute(port int, r *http.Request) http.Handler {
 	route := GetPortRouter(port).GetMatchingRoute(r)
 	if route != nil {
@@ -130,6 +132,7 @@ func WillRoute(port int, r *http.Request) http.Handler {
 	return nil
 }
 
+// GetPortRouter returns the router of the port, creating it on first use.
 func GetPortRouter(port int) *PortRouter {
 	lock.Lock()
 	defer lock.Unlock()
@@ -139,6 +142,7 @@ func GetPortRouter(port int) *PortRouter {
 	return PortRouters[port]
 }
 
+// newPortRouter creates a port's router around a reverse proxy, with handler chains for the routes that process requests and/or responses.
 func newPortRouter(port int) *PortRouter {
 	pr := &PortRouter{
 		ID:           fmt.Sprintf("PortRouter-%d", port),
@@ -161,6 +165,7 @@ func newPortRouter(port int) *PortRouter {
 	return pr
 }
 
+// Clear removes all routes and recorded traffic of the port router.
 func (pr *PortRouter) Clear() {
 	pr.lock.Lock()
 	defer pr.lock.Unlock()
@@ -168,6 +173,7 @@ func (pr *PortRouter) Clear() {
 	pr.RouteTraffic = map[string]*RouteTraffic{}
 }
 
+// AddRoute sets up and registers the route by label, and picks its handler by whether it processes requests and/or responses.
 func (pr *PortRouter) AddRoute(r *Route) {
 	r.Setup()
 	pr.lock.Lock()
@@ -190,6 +196,7 @@ func (pr *PortRouter) AddRoute(r *Route) {
 	}
 }
 
+// AddRouteTraffic records the details of a request routed by the route under the given ID.
 func (pr *PortRouter) AddRouteTraffic(id string, r *Route, req *http.Request) *RouteTraffic {
 	pr.lock.Lock()
 	defer pr.lock.Unlock()
@@ -214,6 +221,7 @@ func (pr *PortRouter) AddRouteTraffic(id string, r *Route, req *http.Request) *R
 	return a
 }
 
+// GetRouteTraffic returns the traffic recorded under the ID, or nil.
 func (pr *PortRouter) GetRouteTraffic(id string) *RouteTraffic {
 	pr.lock.RLock()
 	defer pr.lock.RUnlock()
@@ -238,6 +246,7 @@ func (pr *PortRouter) GetMatchingRoute(r *http.Request) *Route {
 	return matched
 }
 
+// GetRewriter returns the reverse proxy rewrite function that points the outgoing request at the matching route's upstream and records its traffic.
 func (pr *PortRouter) GetRewriter() func(*httputil.ProxyRequest) {
 	return func(proxyReq *httputil.ProxyRequest) {
 		route := pr.GetMatchingRoute(proxyReq.In)
@@ -265,6 +274,7 @@ func (pr *PortRouter) GetRewriter() func(*httputil.ProxyRequest) {
 	}
 }
 
+// Intercept is the reverse proxy response hook: it records the upstream response against the routed traffic, applies header overrides, and with LogHops replaces the body with hop details.
 func (pr *PortRouter) Intercept(resp *http.Response) error {
 	req := resp.Request
 	rs := util.GetRequestStore(req)
@@ -349,6 +359,7 @@ func (r *Route) WillReroute(req *http.Request) bool {
 	return strings.HasPrefix(strings.ToLower(req.RequestURI), r.basePrefix)
 }
 
+// IsValid reports whether the route has a source port and target URL, defaulting the target URI prefix to the source prefix.
 func (r *Route) IsValid() bool {
 	if r.From.Port <= 0 || r.To.URL == "" {
 		return false
@@ -359,6 +370,7 @@ func (r *Route) IsValid() bool {
 	return true
 }
 
+// Setup normalizes the target URL scheme, compiles the URI prefix matcher and creates the route's HTTP client.
 func (r *Route) Setup() error {
 	if !strings.HasPrefix(r.To.URL, "http") {
 		if r.To.IsTLS {
@@ -419,6 +431,7 @@ func (r *Route) Setup() error {
 // 	util.AddLogMessage(msg, hr)
 // }
 
+// prepareRequest builds the upstream request: rewrites the URI prefix, applies the request header overrides and authority, and sets X-Correlation-ID.
 func (r *Route) prepareRequest(inReq *http.Request, id string) (req *http.Request, rs *util.RequestStore, err error) {
 	rs = util.GetRequestStore(inReq)
 	uri := inReq.RequestURI
@@ -466,6 +479,7 @@ func rewriteURI(uri, from, to string) string {
 	return path + query
 }
 
+// prepareHeaders copies the headers not already set, dropping those in the overrides' remove list, then applies the overrides' additions.
 func prepareHeaders(inHeaders, outHeaders http.Header, overrides *Headers) {
 	for k, v := range inHeaders {
 		if overrides != nil {

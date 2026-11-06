@@ -46,14 +46,17 @@ type MCPComponent struct {
 type MCPCallLog struct {
 }
 
+// GetName returns the name of the component.
 func (m *MCPComponent) GetName() string {
 	return m.Name
 }
 
+// GetKind returns the kind of the component (tools, prompts, resources or templates).
 func (m *MCPComponent) GetKind() string {
 	return m.Kind
 }
 
+// SetName sets the name of the component and rebuilds its label.
 func (m *MCPComponent) SetName(name string) {
 	m.Name = name
 	m.BuildLabel()

@@ -31,6 +31,7 @@ type ExtAuthzRule struct {
 	Action string `json:"action"` // "allow" or "deny"
 }
 
+// matches tells if the headers satisfy the rule: any request for the "*" header, else the header's presence, and its value if the rule has one.
 func (r ExtAuthzRule) matches(headers map[string]string) bool {
 	if r.Header == "*" {
 		return true
@@ -47,6 +48,7 @@ var (
 	extAuthzRuleLock = sync.RWMutex{}
 )
 
+// StoreExtAuthzRule stores the rule with its header lowercased, replacing a rule of the same header and value, and returns false if the rule is invalid.
 func StoreExtAuthzRule(rule *ExtAuthzRule) bool {
 	if rule.Header == "" || (rule.Action != "allow" && rule.Action != "deny") {
 		return false
@@ -65,6 +67,7 @@ func StoreExtAuthzRule(rule *ExtAuthzRule) bool {
 	return true
 }
 
+// GetExtAuthzRules returns a copy of the stored rules.
 func GetExtAuthzRules() []ExtAuthzRule {
 	extAuthzRuleLock.RLock()
 	defer extAuthzRuleLock.RUnlock()
@@ -73,6 +76,7 @@ func GetExtAuthzRules() []ExtAuthzRule {
 	return rules
 }
 
+// RemoveExtAuthzRule removes the rule of the header and value, and tells if there was one.
 func RemoveExtAuthzRule(header, value string) bool {
 	header = strings.ToLower(header)
 	extAuthzRuleLock.Lock()
@@ -86,6 +90,7 @@ func RemoveExtAuthzRule(header, value string) bool {
 	return false
 }
 
+// ClearExtAuthzRules removes all the stored rules.
 func ClearExtAuthzRules() {
 	extAuthzRuleLock.Lock()
 	defer extAuthzRuleLock.Unlock()

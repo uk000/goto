@@ -171,14 +171,17 @@ var (
 	_                 = global.OnShutdown(Shutdown)
 )
 
+// init starts the background goroutine that monitors target HTTP clients.
 func init() {
 	go monitorHttpClients()
 }
 
+// Shutdown signals the HTTP client monitor goroutine to stop.
 func Shutdown() {
 	chanStopCleanup <- true
 }
 
+// ValidateSpec validates an InvocationSpec and fills in its defaults and derived settings (timeouts, protocol, authority, assertions, lock).
 func ValidateSpec(spec *InvocationSpec) error {
 	var err error
 	if spec.Headers == nil {
@@ -203,6 +206,7 @@ func ValidateSpec(spec *InvocationSpec) error {
 	return nil
 }
 
+// processProtocol derives the tcp/grpc/http/h2 flags, HTTP version and TLS setting from the spec's protocol and URL, defaulting to HTTP/1.1.
 func (is *InvocationSpec) processProtocol() {
 	if is.Protocol != "" {
 		lowerProto := strings.ToLower(is.Protocol)
@@ -251,6 +255,7 @@ func (is *InvocationSpec) processProtocol() {
 	}
 }
 
+// processAuthority resolves the request authority from the spec's host, then its Host header, then the URL's host.
 func (is *InvocationSpec) processAuthority() {
 	is.authority = is.Host
 	if is.authority == "" {
@@ -267,6 +272,7 @@ func (is *InvocationSpec) processAuthority() {
 	}
 }
 
+// validatePayload validates the auto payload size and stream delay and stores their parsed values.
 func (is *InvocationSpec) validatePayload() error {
 	if is.AutoPayload != "" {
 		is.autoPayloadSize = util.ParseSize(is.AutoPayload)
@@ -283,6 +289,7 @@ func (is *InvocationSpec) validatePayload() error {
 	return nil
 }
 
+// validateConnectionAndRequestConfigs parses the connection, idle and request timeouts (applying defaults), defaults the TLS version, and checks that the client cert exists.
 func (is *InvocationSpec) validateConnectionAndRequestConfigs() error {
 	var err error
 	if is.ConnTimeout != "" {
@@ -320,6 +327,7 @@ func (is *InvocationSpec) validateConnectionAndRequestConfigs() error {
 	return nil
 }
 
+// validateTrafficConfig validates the required fields, B-URLs, replicas and request count, and parses the delays, applying defaults.
 func (is *InvocationSpec) validateTrafficConfig() error {
 	var err error
 	if is.Name == "" {
@@ -373,6 +381,7 @@ func (is *InvocationSpec) validateTrafficConfig() error {
 	return nil
 }
 
+// prepareAssertions precomputes assertion payloads and header regexps, turning on response payload tracking when a payload or size is asserted.
 func (is *InvocationSpec) prepareAssertions() {
 	for _, a := range is.Assertions {
 		if len(a.Payload) > 0 {
@@ -419,6 +428,7 @@ func (is *InvocationSpec) Clone() *InvocationSpec {
 	return &is2
 }
 
+// createTransport returns the client transport for the spec, sharing the parent's transport for long-running specs and creating an HTTP or gRPC one otherwise.
 func (is *InvocationSpec) createTransport(tracker *InvocationTracker) transport.ClientTransport {
 	is.lock.Lock()
 	defer is.lock.Unlock()
@@ -442,6 +452,7 @@ func (is *InvocationSpec) createTransport(tracker *InvocationTracker) transport.
 	return ct
 }
 
+// GetActiveInvocations returns the status of all currently active invocations, keyed by target name and invocation ID.
 func GetActiveInvocations() map[string]map[uint32]*InvocationStatus {
 	results := map[string]map[uint32]*InvocationStatus{}
 	currentActiveTargets := map[string]*TargetInvocations{}
@@ -461,6 +472,7 @@ func GetActiveInvocations() map[string]map[uint32]*InvocationStatus {
 	return results
 }
 
+// IsAnyTargetActive reports whether any of the given targets has an active invocation.
 func IsAnyTargetActive(targets []string) bool {
 	invocationsLock.RLock()
 	defer invocationsLock.RUnlock()
@@ -472,6 +484,7 @@ func IsAnyTargetActive(targets []string) bool {
 	return false
 }
 
+// StopTarget sends a stop request to every active invocation of the target that isn't already done, stopping or stopped.
 func StopTarget(target string) {
 	invocationsLock.RLock()
 	targetInvocations := activeTargets[target]
@@ -500,6 +513,7 @@ func StopTarget(target string) {
 	}
 }
 
+// processStopRequest polls the tracker's stop channel until a stop request arrives, then flags the invocation status as stop requested.
 func processStopRequest(tracker *InvocationTracker) {
 	for !tracker.Status.StopRequested && !tracker.Status.Stopped {
 		tracker.Channels.Lock.RLock()
@@ -533,6 +547,7 @@ func processStopRequest(tracker *InvocationTracker) {
 	}
 }
 
+// ResetActiveInvocations resets the invocation counter and forgets all active invocations and targets.
 func ResetActiveInvocations() {
 	invocationsLock.Lock()
 	invocationCounter = 0
@@ -541,10 +556,12 @@ func ResetActiveInvocations() {
 	invocationsLock.Unlock()
 }
 
+// RegisterInvocation creates a tracker with the next invocation ID for the given target spec and result sinks.
 func RegisterInvocation(clientPort int, target *InvocationSpec, sinks ...ResultSinkFactory) (*InvocationTracker, error) {
 	return newTracker(atomic.AddUint32(&invocationCounter, 1), clientPort, target, sinks...)
 }
 
+// newTracker builds an InvocationTracker with its channels, transport client, result sinks and the request payloads (stream, auto, body or reader).
 func newTracker(id uint32, clientPort int, target *InvocationSpec, sinks ...ResultSinkFactory) (*InvocationTracker, error) {
 	tracker := &InvocationTracker{
 		ID:         id,
@@ -592,6 +609,7 @@ func newTracker(id uint32, clientPort int, target *InvocationSpec, sinks ...Resu
 	return tracker, nil
 }
 
+// createClient creates the tracker's client and its transport, failing if no transport can be created for the target.
 func (tracker *InvocationTracker) createClient(target *InvocationSpec) error {
 	tracker.client = &InvocationClient{tracker: tracker}
 	tracker.client.transportClient = target.createTransport(tracker)
@@ -601,6 +619,7 @@ func (tracker *InvocationTracker) createClient(target *InvocationSpec) error {
 	return nil
 }
 
+// getHttpClientForTarget returns the cached HTTP client of the target or creates one, caching it unless the target is long running.
 func getHttpClientForTarget(tracker *InvocationTracker) transport.ClientTransport {
 	target := tracker.Target
 	invocationsLock.RLock()
@@ -619,6 +638,7 @@ func getHttpClientForTarget(tracker *InvocationTracker) transport.ClientTranspor
 	return client
 }
 
+// getGrpcClientForTarget returns the cached gRPC client of the target or creates one from the registered service, or nil if that fails.
 func getGrpcClientForTarget(tracker *InvocationTracker) transport.ClientTransport {
 	target := tracker.Target
 	invocationsLock.RLock()
@@ -652,6 +672,7 @@ func getGrpcClientForTarget(tracker *InvocationTracker) transport.ClientTranspor
 	return client
 }
 
+// activate registers the tracker in the active invocations and active targets.
 func (tracker *InvocationTracker) activate() {
 	invocationsLock.Lock()
 	activeInvocations[tracker.ID] = tracker
@@ -666,6 +687,7 @@ func (tracker *InvocationTracker) activate() {
 	targetInvocations.lock.Unlock()
 }
 
+// deactivate completes the invocation: signals done, closes the channels, unregisters the tracker, and closes the client unless the target is long running.
 func (tracker *InvocationTracker) deactivate() {
 	if tracker.Channels != nil {
 		tracker.Channels.Done()
@@ -696,6 +718,7 @@ func (tracker *InvocationTracker) deactivate() {
 	tracker.logFinishedInvocation((tracker.Target.RequestCount * tracker.Target.Replicas) - tracker.Status.CompletedRequests)
 }
 
+// RemoveHttpClientForTarget closes and forgets the cached client of the target.
 func RemoveHttpClientForTarget(target string) {
 	invocationsLock.Lock()
 	if client := targetClients[target]; client != nil {
@@ -705,6 +728,7 @@ func RemoveHttpClientForTarget(target string) {
 	invocationsLock.Unlock()
 }
 
+// monitorHttpClients periodically reports active connection counts per target and evicts clients of inactive targets after repeated idle checks, until shutdown.
 func monitorHttpClients() {
 	watchListForRemoval := map[string]int{}
 	for {
@@ -741,36 +765,35 @@ func monitorHttpClients() {
 	}
 }
 
+// CloseChannels closes the tracker's channels, if it has any.
 func (t *InvocationTracker) CloseChannels() {
 	if t.Channels != nil {
 		t.Channels.Close()
 	}
 }
 
+// AddSink adds a result sink to the tracker's channels, if it has any.
 func (t *InvocationTracker) AddSink(sink ResultSink) {
 	if t.Channels != nil {
 		t.Channels.AddSink(sink)
 	}
 }
 
+// Stop sends a stop request on the tracker's channels, if it has any.
 func (t *InvocationTracker) Stop() {
 	if t.Channels != nil {
 		t.Channels.Stop()
 	}
 }
 
-func (t *InvocationTracker) IsStopped() {
-	if t.Channels != nil {
-		t.Channels.Stop()
-	}
-}
-
+// AddSink appends a result sink to the channels under their lock.
 func (c *InvocationChannels) AddSink(sink ResultSink) {
 	c.Lock.Lock()
 	defer c.Lock.Unlock()
 	c.Sinks = append(c.Sinks, sink)
 }
 
+// Done signals completion on the done channel, if it is still open.
 func (c *InvocationChannels) Done() {
 	c.Lock.Lock()
 	defer c.Lock.Unlock()
@@ -779,6 +802,7 @@ func (c *InvocationChannels) Done() {
 	}
 }
 
+// ReadStopRequest drains a pending stop request from the stop channel without blocking.
 func (c *InvocationChannels) ReadStopRequest() {
 	c.Lock.RLock()
 	defer c.Lock.RUnlock()
@@ -790,6 +814,7 @@ func (c *InvocationChannels) ReadStopRequest() {
 	}
 }
 
+// Stop sends a stop request on the stop channel, if it is still open.
 func (c *InvocationChannels) Stop() {
 	c.Lock.Lock()
 	defer c.Lock.Unlock()
@@ -798,6 +823,7 @@ func (c *InvocationChannels) Stop() {
 	}
 }
 
+// Close closes the stop, done and result channels and clears them so they are only closed once.
 func (c *InvocationChannels) Close() {
 	c.Lock.Lock()
 	defer c.Lock.Unlock()

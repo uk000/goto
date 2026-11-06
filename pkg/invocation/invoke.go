@@ -53,6 +53,7 @@ type InvocationRequest struct {
 	lowerHeaders    bool
 }
 
+// invokeWithRetries invokes a request, retrying per the target's retry settings (fallback B-URLs, retry headers) until it succeeds or is stopped, then records the outcome in the status.
 func (tracker *InvocationTracker) invokeWithRetries(requestID string, targetID string, urls ...string) *InvocationResult {
 	status := tracker.Status
 	target := tracker.Target
@@ -106,6 +107,7 @@ func (tracker *InvocationTracker) invokeWithRetries(requestID string, targetID s
 	return result
 }
 
+// newInvocationRequest builds a request for the resolved URL and headers, or returns nil if the tracker has no client.
 func (tracker *InvocationTracker) newInvocationRequest(requestID, targetID string, substituteURL ...string) *InvocationRequest {
 	if tracker.client == nil {
 		return nil
@@ -115,6 +117,7 @@ func (tracker *InvocationTracker) newInvocationRequest(requestID, targetID strin
 	return tracker.newRequest(requestID, targetID, url, headers)
 }
 
+// newRequest creates the InvocationRequest and its result and prepares the underlying transport request.
 func (tracker *InvocationTracker) newRequest(requestID, targetID, url string, headers types.SimpleHTTPHeaders) *InvocationRequest {
 	ir := &InvocationRequest{
 		requestID: requestID,
@@ -130,6 +133,7 @@ func (tracker *InvocationTracker) newRequest(requestID, targetID, url string, he
 	return ir
 }
 
+// prepareRequestURL picks the request URL: randomly among the URL and B-URLs in random mode, else the substitute URL or the target URL.
 func (tracker *InvocationTracker) prepareRequestURL(requestID, targetID string, substituteURL ...string) string {
 	var url string
 	target := tracker.Target
@@ -147,12 +151,14 @@ func (tracker *InvocationTracker) prepareRequestURL(requestID, targetID string, 
 	return url
 }
 
+// addOrUpdateHeader sets a header on both the request's header map and its HTTP request.
 func (ir *InvocationRequest) addOrUpdateHeader(header, value string) {
 	ir.headers[header] = value
 	ir.httpRequest.Header.Del(header)
 	ir.httpRequest.Header.Add(header, value)
 }
 
+// addOrUpdateRequestId adds the request ID to the header and/or query as configured by the target, then refreshes the request URL and target-URL header.
 func (ir *InvocationRequest) addOrUpdateRequestId() {
 	if ir.httpRequest == nil {
 		return
@@ -189,6 +195,7 @@ func (ir *InvocationRequest) addOrUpdateRequestId() {
 	ir.addOrUpdateHeader(HeaderGotoTargetURL, ir.url)
 }
 
+// prepareRequest builds the transport-specific request: the gRPC URI, or an HTTP request with its payload reader (a pipe for streamed payloads), headers and host.
 func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
 	client.lock.Lock()
 	defer client.lock.Unlock()
@@ -230,6 +237,7 @@ func (client *InvocationClient) prepareRequest(ir *InvocationRequest) bool {
 	return true
 }
 
+// prepareRequestHeaders builds the request headers from the target's non-empty headers plus the target ID header.
 func (tracker *InvocationTracker) prepareRequestHeaders(requestID, targetID, url string) types.SimpleHTTPHeaders {
 	headers := types.SimpleHTTPHeaders{}
 	for h, v := range tracker.Target.Headers {
@@ -241,6 +249,7 @@ func (tracker *InvocationTracker) prepareRequestHeaders(requestID, targetID, url
 	return headers
 }
 
+// writeRequestPayload asynchronously writes the streamed payloads to the request writer, tracking payload size and timing when enabled.
 func (ir *InvocationRequest) writeRequestPayload() {
 	if ir.requestWriter != nil {
 		go func() {
@@ -258,6 +267,7 @@ func (ir *InvocationRequest) writeRequestPayload() {
 	}
 }
 
+// invoke dispatches the request to the gRPC or HTTP invocation based on the client type.
 func (ir *InvocationRequest) invoke() {
 	if ir.client.IsGRPC() {
 		ir.invokeGRPC()
@@ -266,6 +276,7 @@ func (ir *InvocationRequest) invoke() {
 	}
 }
 
+// invokeHTTP applies the TLS config and client certs, sends the HTTP request, and records the timing and response in the result and status.
 func (ir *InvocationRequest) invokeHTTP() {
 	if ir.client == nil || ir.client.Transport() == nil || ir.client.HTTP() == nil {
 		log.Printf("Invocation: [ERROR] HTTP invocation attempted without a client")
@@ -298,6 +309,7 @@ func (ir *InvocationRequest) invokeHTTP() {
 	ir.result.processHTTPResponse(ir, resp, err)
 }
 
+// invokeGRPC makes the gRPC call with the tracker's payloads and headers, timing it and recording the first response, or logging a connection failure.
 func (ir *InvocationRequest) invokeGRPC() {
 	if ir.client == nil {
 		log.Printf("Invocation: [ERROR] GRPC invocation attempted without a client")
@@ -338,6 +350,7 @@ func (ir *InvocationRequest) invokeGRPC() {
 	}
 }
 
+// close closes the underlying transport client, if any.
 func (c *InvocationClient) close() {
 	c.lock.Lock()
 	defer c.lock.Unlock()

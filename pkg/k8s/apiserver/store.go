@@ -107,6 +107,7 @@ func (s *ResourceStore) Seed(group, version, resource, namespace, name string, d
 	return s.put(group, version, resource, namespace, name, data, false)
 }
 
+// put stamps a fresh resourceVersion on the item and stores it, marking the collection as touched by a client if touch is set.
 func (s *ResourceStore) put(group, version, resource, namespace, name string, data json.RawMessage, touch bool) json.RawMessage {
 	rv := s.nextRV()
 	data = patchMetaField(data, "resourceVersion", rv)

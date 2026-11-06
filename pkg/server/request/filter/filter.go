@@ -52,11 +52,13 @@ var (
 	lock         sync.RWMutex
 )
 
+// setRoutes registers the routes of the ignore and bypass filters.
 func setRoutes(r *mux.Router) {
 	ignoreFilter.SetRoutes("ignore", r)
 	bypassFilter.SetRoutes("bypass", r)
 }
 
+// SetRoutes sets the filter type and registers its add/remove/status/clear/count/config routes under /<filterType>.
 func (rf *RequestFilter) SetRoutes(filterType string, r *mux.Router) {
 	rf.filterType = filterType
 	filterRouter := util.PathRouter(r, "/"+filterType)
@@ -73,6 +75,7 @@ func (rf *RequestFilter) SetRoutes(filterType string, r *mux.Router) {
 	util.AddRoute(filterRouter, "", rf.getRequestFilterConfig, "GET")
 }
 
+// newRequestFilter creates an empty filter that responds with status 200.
 func newRequestFilter() *RequestFilter {
 	rf := &RequestFilter{
 		Uris:          map[string]*regexp.Regexp{},
@@ -86,12 +89,14 @@ func newRequestFilter() *RequestFilter {
 	return rf
 }
 
+// ResetCount zeroes the count of requests matched by the filter.
 func (rf *RequestFilter) ResetCount() {
 	rf.lock.Lock()
 	defer rf.lock.Unlock()
 	rf.FilteredCount = 0
 }
 
+// addFilterHeaderOrURI queues a case-insensitive URI regex (a leading ! negates it) or a header (value may be a glob) filter as a pending update; responds 400 if neither is given.
 func (rf *RequestFilter) addFilterHeaderOrURI(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	uri := util.GetStringParamValue(r, "uri")
@@ -143,6 +148,7 @@ func (rf *RequestFilter) addFilterHeaderOrURI(w http.ResponseWriter, r *http.Req
 	fmt.Fprintln(w, msg)
 }
 
+// removeIgnoreHeaderOrURI queues removal of a URI or header filter (matched case-insensitively) as a pending update; responds 400 if neither is given.
 func (rf *RequestFilter) removeIgnoreHeaderOrURI(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	uri := util.GetStringParamValue(r, "uri")
@@ -182,6 +188,7 @@ func (rf *RequestFilter) removeIgnoreHeaderOrURI(w http.ResponseWriter, r *http.
 	fmt.Fprintln(w, msg)
 }
 
+// setOrGetIgnoreStatus sets the status returned for filtered requests if a valid one is given (400 if invalid), otherwise reports the current one.
 func (rf *RequestFilter) setOrGetIgnoreStatus(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	statusCodes, _, present := util.GetStatusParam(r)
@@ -206,18 +213,21 @@ func validStatusCode(status int) bool {
 	return status >= 100 && status <= 999
 }
 
+// getStatus returns the status used to respond to filtered requests.
 func (rf *RequestFilter) getStatus() int {
 	rf.lock.RLock()
 	defer rf.lock.RUnlock()
 	return rf.Status
 }
 
+// getFilteredCount returns the number of requests filtered so far.
 func (rf *RequestFilter) getFilteredCount() int64 {
 	rf.lock.RLock()
 	defer rf.lock.RUnlock()
 	return rf.FilteredCount
 }
 
+// countFilteredRequest increments the filtered request count.
 func (rf *RequestFilter) countFilteredRequest() {
 	rf.lock.Lock()
 	defer rf.lock.Unlock()
@@ -233,6 +243,7 @@ func deleteFold[V any](m map[string]V, key string) {
 	}
 }
 
+// clear discards all URI and header filters (taking effect on the next match) and resets the filtered count.
 func (rf *RequestFilter) clear(w http.ResponseWriter, r *http.Request) {
 	rf.lock.Lock()
 	rf.UriUpdates = map[string]*regexp.Regexp{}
@@ -247,6 +258,7 @@ func (rf *RequestFilter) clear(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getFilteredRequestCount reports the filtered request count as JSON.
 func (rf *RequestFilter) getFilteredRequestCount(w http.ResponseWriter, r *http.Request) {
 	count := rf.getFilteredCount()
 	msg := fmt.Sprintf("Request filter %s count: %d", rf.filterType, count)
@@ -254,6 +266,7 @@ func (rf *RequestFilter) getFilteredRequestCount(w http.ResponseWriter, r *http.
 	util.AddLogMessage(msg, r)
 }
 
+// getRequestFilterConfig reports the filter configuration as JSON.
 func (rf *RequestFilter) getRequestFilterConfig(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reporting Request Filter Config", r)
 	rf.lock.RLock()
@@ -261,6 +274,7 @@ func (rf *RequestFilter) getRequestFilterConfig(w http.ResponseWriter, r *http.R
 	util.WriteJsonPayload(w, rf)
 }
 
+// cloneUris returns a copy of a URI regex map.
 func cloneUris(orig map[string]*regexp.Regexp) map[string]*regexp.Regexp {
 	copy := map[string]*regexp.Regexp{}
 	for k, v := range orig {
@@ -269,6 +283,7 @@ func cloneUris(orig map[string]*regexp.Regexp) map[string]*regexp.Regexp {
 	return copy
 }
 
+// cloneHeaders returns a deep copy of a header regex map.
 func cloneHeaders(orig map[string]map[string]*regexp.Regexp) map[string]map[string]*regexp.Regexp {
 	copy := map[string]map[string]*regexp.Regexp{}
 	for h, vMap := range orig {
@@ -301,6 +316,7 @@ func (rf *RequestFilter) applyUpdates() {
 	rf.hasHeaders = len(rf.Headers) > 0
 }
 
+// matchURI tells if the request URI matches a positive filter, or matches none of the negative filters, counting the request when it does.
 func (rf *RequestFilter) matchURI(r *http.Request) bool {
 	rf.lock.RLock()
 	hasURIs := rf.hasURIs
@@ -342,6 +358,7 @@ func (rf *RequestFilter) matchURI(r *http.Request) bool {
 	return false
 }
 
+// matchHeaders tells if a request header matches a header filter (an empty value matches any value), counting the request when it does.
 func (rf *RequestFilter) matchHeaders(r *http.Request) bool {
 	rf.lock.RLock()
 	hasHeaders := rf.hasHeaders
@@ -378,6 +395,7 @@ func (rf *RequestFilter) matchHeaders(r *http.Request) bool {
 	return false
 }
 
+// filterRequest checks the ignore then bypass filters (URIs before headers) and, on a match, writes that filter's status with the filtered-request header and marks the request as filtered.
 func filterRequest(w http.ResponseWriter, r *http.Request) bool {
 	statusCode := 0
 	if ignoreFilter.matchURI(r) {
@@ -397,6 +415,7 @@ func filterRequest(w http.ResponseWriter, r *http.Request) bool {
 	return statusCode > 0
 }
 
+// middlewareFunc short-circuits requests that match a filter (known non-traffic requests are never filtered) and passes the rest to next.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)

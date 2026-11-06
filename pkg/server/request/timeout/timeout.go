@@ -48,6 +48,7 @@ var (
 	timeoutTrackingLock   sync.RWMutex
 )
 
+// setRoutes registers the timeout tracking routes under /timeout.
 func setRoutes(r *mux.Router) {
 	timeoutRouter := util.PathRouter(r, "/timeout")
 	util.AddRoute(timeoutRouter, "/track/headers/{headers}", trackHeaders, "PUT", "POST")
@@ -64,6 +65,7 @@ func (tt *TimeoutTracking) init() {
 	}
 }
 
+// addHeaders starts tracking request timeouts for the comma-separated headers given, keeping the counts of headers already tracked.
 func (tt *TimeoutTracking) addHeaders(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if param, present := util.GetStringParam(r, "headers"); present {
@@ -87,6 +89,7 @@ func (tt *TimeoutTracking) addHeaders(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// trackAll starts tracking request timeouts for all requests, resetting their counts.
 func (tt *TimeoutTracking) trackAll(w http.ResponseWriter, r *http.Request) {
 	timeoutTrackingLock.Lock()
 	tt.allTimeouts = &TimeoutData{}
@@ -97,6 +100,7 @@ func (tt *TimeoutTracking) trackAll(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getTimeoutTracking returns the timeout tracking of the request's port, creating it if missing.
 func getTimeoutTracking(r *http.Request) *TimeoutTracking {
 	listenerPort := util.GetRequestOrListenerPort(r)
 	timeoutTrackingLock.Lock()
@@ -110,14 +114,17 @@ func getTimeoutTracking(r *http.Request) *TimeoutTracking {
 	return tt
 }
 
+// trackHeaders starts tracking request timeouts for the given headers on the request's port.
 func trackHeaders(w http.ResponseWriter, r *http.Request) {
 	getTimeoutTracking(r).addHeaders(w, r)
 }
 
+// trackAll starts tracking request timeouts for all requests on the request's port.
 func trackAll(w http.ResponseWriter, r *http.Request) {
 	getTimeoutTracking(r).trackAll(w, r)
 }
 
+// clearTimeoutTracking replaces the port's timeout tracking with a fresh, empty one.
 func clearTimeoutTracking(w http.ResponseWriter, r *http.Request) {
 	listenerPort := util.GetRequestOrListenerPort(r)
 	timeoutTrackingLock.Lock()
@@ -132,6 +139,7 @@ func clearTimeoutTracking(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// reportTimeoutTracking reports the per-header and all-request timeout counts of the port as JSON.
 func reportTimeoutTracking(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reporting timeout tracking counts", r)
 	tt := getTimeoutTracking(r)
@@ -146,6 +154,7 @@ func reportTimeoutTracking(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, output)
 }
 
+// middlewareFunc, for tracked requests, counts in the background whether the client connection closed or the request completed, per tracked header value and for all requests.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)

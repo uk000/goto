@@ -167,10 +167,12 @@ var (
 	_                    = global.OnShutdown(StopRegistrySender)
 )
 
+// init turns on collection of the per-target summary results by default.
 func init() {
 	collectTargetsResults.Store(true)
 }
 
+// MarshalJSON serializes the key results as a JSON object with string keys.
 func (kr KeyResult) MarshalJSON() ([]byte, error) {
 	data := map[string]interface{}{}
 	for k, v := range kr {
@@ -179,6 +181,7 @@ func (kr KeyResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal(data)
 }
 
+// UnmarshalJSON loads key results from JSON, turning empty status code and time bucket maps into nil.
 func (kr *KeyResult) UnmarshalJSON(b []byte) error {
 	data := map[string]*KeyResultCounts{}
 	if err := json.Unmarshal(b, &data); err != nil {
@@ -197,6 +200,7 @@ func (kr *KeyResult) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// MarshalJSON emits just the count when there are no status code or time bucket breakdowns, otherwise the full counts object.
 func (s *SummaryCounts) MarshalJSON() ([]byte, error) {
 	if len(s.ByStatusCodes) == 0 && len(s.ByTimeBuckets) == 0 {
 		return json.Marshal(s.Count)
@@ -222,6 +226,7 @@ func (s *SummaryCounts) MarshalJSON() ([]byte, error) {
 	return json.Marshal(data)
 }
 
+// MarshalJSON serializes the summary results as a JSON object with string keys.
 func (s SummaryResult) MarshalJSON() ([]byte, error) {
 	data := map[string]interface{}{}
 	for k, v := range s {
@@ -230,6 +235,7 @@ func (s SummaryResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal(data)
 }
 
+// unsafeInit allocates the count maps and zeroes the totals when they are unset or reset is true; the caller must hold the lock.
 func (tr *TargetResults) unsafeInit(reset bool) {
 	if tr.CountsByStatus == nil || reset {
 		tr.InvocationCount = 0
@@ -248,6 +254,7 @@ func (tr *TargetResults) unsafeInit(reset bool) {
 	}
 }
 
+// unsafeInitMissing allocates only the count maps that are nil, keeping existing counts (e.g. after loading from JSON).
 func (tr *TargetResults) unsafeInitMissing() {
 	if tr.CountsByStatus == nil {
 		tr.CountsByStatus = map[string]int{}
@@ -281,6 +288,7 @@ func (tr *TargetResults) unsafeInitMissing() {
 	}
 }
 
+// NewTargetResults creates empty results for a target along with its tracking headers, cross headers and time buckets.
 func NewTargetResults(target string, trackingHeaders []string, crossTrackingHeaders map[string][]string, trackingTimeBuckets [][]int) *TargetResults {
 	tr := &TargetResults{Target: target}
 	tr.unsafeInit(true)
@@ -291,6 +299,7 @@ func NewTargetResults(target string, trackingHeaders []string, crossTrackingHead
 	return tr
 }
 
+// newHeaderCounts creates the counts of a header with all its maps initialized.
 func newHeaderCounts(header string) *HeaderCounts {
 	return &HeaderCounts{
 		Header:                    header,
@@ -302,6 +311,7 @@ func newHeaderCounts(header string) *HeaderCounts {
 	}
 }
 
+// newKeyResultCounts creates key counts, allocating the status code and time bucket maps only when asked.
 func newKeyResultCounts(withStatusCodes, withTimeBuckets bool) *KeyResultCounts {
 	r := &KeyResultCounts{}
 	if withStatusCodes {
@@ -313,6 +323,7 @@ func newKeyResultCounts(withStatusCodes, withTimeBuckets bool) *KeyResultCounts 
 	return r
 }
 
+// setTimestamps moves the first result time back to ts if earlier and sets the last result time to ts.
 func (c *HeaderCounts) setTimestamps(ts time.Time) {
 	if c.FirstResultAt.IsZero() || ts.Before(c.FirstResultAt) {
 		c.FirstResultAt = ts
@@ -320,6 +331,7 @@ func (c *HeaderCounts) setTimestamps(ts time.Time) {
 	c.LastResultAt = ts
 }
 
+// increment counts one more result with its retries and stream counts, and widens the first/last result timestamps.
 func (c *CountInfo) increment(retries, csCount, ssCount int, ts time.Time) {
 	c.Count++
 	c.ClientStreamCount += csCount
@@ -331,6 +343,7 @@ func (c *CountInfo) increment(retries, csCount, ssCount int, ts time.Time) {
 	c.LastResultAt = ts
 }
 
+// incrementBy adds another CountInfo's counts, merging its timestamps while ignoring unset (zero) ones.
 func (c *CountInfo) incrementBy(retries int, by *CountInfo) {
 	c.Count += by.Count
 	c.ClientStreamCount += by.ClientStreamCount
@@ -345,6 +358,7 @@ func (c *CountInfo) incrementBy(retries int, by *CountInfo) {
 	}
 }
 
+// incrementHeaderCount counts a result under the status code in m, creating its entry if missing.
 func incrementHeaderCount(m map[string]*CountInfo, statusCode string, retries, csCount, ssCount int, ts time.Time) {
 	if m[statusCode] == nil {
 		m[statusCode] = &CountInfo{}
@@ -352,6 +366,7 @@ func incrementHeaderCount(m map[string]*CountInfo, statusCode string, retries, c
 	m[statusCode].increment(retries, csCount, ssCount, ts)
 }
 
+// incrementHeaderCountBy adds the given counts under the status code in m, creating its entry if missing.
 func incrementHeaderCountBy(m map[string]*CountInfo, statusCode string, retries int, by *CountInfo) {
 	if m[statusCode] == nil {
 		m[statusCode] = &CountInfo{}
@@ -359,6 +374,7 @@ func incrementHeaderCountBy(m map[string]*CountInfo, statusCode string, retries 
 	m[statusCode].incrementBy(retries, by)
 }
 
+// incrementHeaderValueCount counts a result under the header value in m, creating its entry if missing.
 func incrementHeaderValueCount(m map[string]*CountInfo, value string, retries, csCount, ssCount int, ts time.Time) {
 	if m[value] == nil {
 		m[value] = &CountInfo{}
@@ -366,6 +382,7 @@ func incrementHeaderValueCount(m map[string]*CountInfo, value string, retries, c
 	m[value].increment(retries, csCount, ssCount, ts)
 }
 
+// incrementHeaderValueCountBy adds the given counts under the header value in m, creating its entry if missing.
 func incrementHeaderValueCountBy(m map[string]*CountInfo, value string, retries int, by *CountInfo) {
 	if m[value] == nil {
 		m[value] = &CountInfo{}
@@ -373,12 +390,14 @@ func incrementHeaderValueCountBy(m map[string]*CountInfo, value string, retries 
 	m[value].incrementBy(retries, by)
 }
 
+// processCrossHeadersForHeader counts the result under the cross headers configured for the header, if any.
 func (tr *TargetResults) processCrossHeadersForHeader(header string, values []string, statusCode string, retries, csCount, ssCount int, ts time.Time, allHeaders map[string][]string) {
 	if crossHeaders := tr.crossTrackingHeaders[header]; crossHeaders != nil {
 		processSubCrossHeadersForHeader(header, values, statusCode, retries, csCount, ssCount, ts, tr.CountsByHeaders[header], crossHeaders, allHeaders)
 	}
 }
 
+// processSubCrossHeadersForHeader recursively counts the values of each cross header found in the response, overall and per value of the parent header.
 func processSubCrossHeadersForHeader(header string, values []string, statusCode string, retries, csCount, ssCount int, ts time.Time,
 	headerCounts *HeaderCounts, crossHeaders []string, allHeaders map[string][]string) {
 	for _, value := range values {
@@ -432,6 +451,7 @@ func processSubCrossHeadersForHeader(header string, values []string, statusCode 
 	}
 }
 
+// addHeaderResult counts a result for a tracked header overall, by status code, by each of its values, and by value and status code.
 func (tr *TargetResults) addHeaderResult(header string, values []string, statusCode string, retries, csCount, ssCount int, ts time.Time) {
 	if tr.CountsByHeaders[header] == nil {
 		tr.CountsByHeaders[header] = newHeaderCounts(header)
@@ -449,6 +469,7 @@ func (tr *TargetResults) addHeaderResult(header string, values []string, statusC
 	}
 }
 
+// addKeyResultCounts counts a result under the key, and under its status code too when withStatusCodes is set.
 func addKeyResultCounts(counts map[string]*KeyResultCounts, key string, statusCode string, retries, csCount, ssCount int, ts time.Time, withStatusCodes, withTimeBuckets bool) {
 	if counts[key] == nil {
 		counts[key] = newKeyResultCounts(withStatusCodes, withTimeBuckets)
@@ -475,6 +496,7 @@ func (kr *KeyResultCounts) timeBuckets() KeyResult {
 	return kr.ByTimeBuckets
 }
 
+// addTimeBucketResult counts the result under its time bucket (or "[]" if none matched), overall and within the already-tracked URI, size, retry, error and status counts.
 func (tr *TargetResults) addTimeBucketResult(tb []int, ir *invocation.InvocationResult) {
 	bucket := "[]"
 	if tb != nil {
@@ -515,6 +537,7 @@ func (tr *TargetResults) addTimeBucketResult(tb []int, ir *invocation.Invocation
 	}
 }
 
+// addResult records an invocation result into all the target's counters (status, URI, sizes, retries, errors, tracked headers, time buckets) under its lock.
 func (tr *TargetResults) addResult(ir *invocation.InvocationResult) {
 	tr.lock.Lock()
 	defer tr.lock.Unlock()
@@ -575,6 +598,7 @@ func (tr *TargetResults) addResult(ir *invocation.InvocationResult) {
 	}
 }
 
+// init (re)creates the results map, with the overall results under the empty key, when reset or unset.
 func (tr *TargetsResults) init(reset bool) {
 	tr.lock.Lock()
 	defer tr.lock.Unlock()
@@ -585,12 +609,14 @@ func (tr *TargetsResults) init(reset bool) {
 	}
 }
 
+// unsafeInitMissing fills in the missing count maps of every target's results; the caller must hold the lock.
 func (tr *TargetsResults) unsafeInitMissing() {
 	for _, r := range tr.Results {
 		r.unsafeInitMissing()
 	}
 }
 
+// getTargetResults returns the results of the target, created if needed, along with the overall results across all targets.
 func (tr *TargetsResults) getTargetResults(target string) (*TargetResults, *TargetResults) {
 	tr.init(false)
 	tr.lock.Lock()
@@ -604,6 +630,7 @@ func (tr *TargetsResults) getTargetResults(target string) (*TargetResults, *Targ
 	return targetResults, allResults
 }
 
+// unsafeInit clears the results and finished flag when unset or reset is true; the caller must hold the lock.
 func (ir *InvocationResults) unsafeInit(reset bool) {
 	if reset || ir.Results == nil {
 		ir.Finished = false
@@ -612,6 +639,7 @@ func (ir *InvocationResults) unsafeInit(reset bool) {
 	}
 }
 
+// addResult appends an invocation result under the lock.
 func (ir *InvocationResults) addResult(result *invocation.InvocationResult) {
 	ir.lock.Lock()
 	defer ir.lock.Unlock()
@@ -619,12 +647,14 @@ func (ir *InvocationResults) addResult(result *invocation.InvocationResult) {
 	ir.Results = append(ir.Results, result)
 }
 
+// finish marks the invocation's results as finished.
 func (ir *InvocationResults) finish() {
 	ir.lock.Lock()
 	ir.Finished = true
 	ir.lock.Unlock()
 }
 
+// init (re)creates the map of invocation results when reset or unset.
 func (ir *InvocationsResults) init(reset bool) {
 	ir.lock.Lock()
 	defer ir.lock.Unlock()
@@ -633,6 +663,7 @@ func (ir *InvocationsResults) init(reset bool) {
 	}
 }
 
+// getInvocation returns the results of the invocation index, creating them if absent, safely under concurrent callers.
 func (ir *InvocationsResults) getInvocation(index uint32) *InvocationResults {
 	ir.init(false)
 	ir.lock.RLock()
@@ -664,6 +695,7 @@ func (ir *InvocationResults) setTarget(target *invocation.InvocationSpec, status
 	ir.lock.Unlock()
 }
 
+// resultSink lowercases the response headers and adds the result to whichever of the invocation, target and overall results are enabled, queueing them for the registry.
 func resultSink(invocationIndex uint32, result *invocation.InvocationResult,
 	invocationResults *InvocationResults, targetResults *TargetResults, allResults *TargetResults) {
 	if result != nil {
@@ -683,6 +715,7 @@ func resultSink(invocationIndex uint32, result *invocation.InvocationResult,
 	}
 }
 
+// channelSink feeds results from the result channel to resultSink until done, drains what is left, then marks the invocation finished.
 func channelSink(invocationIndex uint32, resultChannel chan *invocation.InvocationResult, doneChannel chan bool,
 	invocationResults *InvocationResults, targetResults *TargetResults, allResults *TargetResults) {
 	done := false
@@ -713,6 +746,7 @@ Results:
 	invocationResults.finish()
 }
 
+// processTrackingConfig applies the tracking headers, cross headers and time buckets to a target's results and the overall results, taking their locks one at a time.
 func processTrackingConfig(targetResults *TargetResults, allResults *TargetResults, trackingHeaders []string,
 	crossTrackingHeaders map[string][]string, trackingTimeBuckets [][]int) {
 	crossHeadersMap := util.BuildCrossHeadersMap(crossTrackingHeaders)
@@ -733,6 +767,7 @@ func processTrackingConfig(targetResults *TargetResults, allResults *TargetResul
 	}
 }
 
+// ResultChannelSinkFactory returns an invocation sink factory that processes the invocation's results from its result channel in a goroutine.
 func ResultChannelSinkFactory(target *invocation.InvocationSpec, trackingHeaders []string,
 	crossTrackingHeaders map[string][]string, trackingTimeBuckets [][]int) invocation.ResultSinkFactory {
 	targetResults, allResults := targetsResults.getTargetResults(target.Name)
@@ -748,6 +783,7 @@ func ResultChannelSinkFactory(target *invocation.InvocationSpec, trackingHeaders
 	}
 }
 
+// ResultSinkFactory returns an invocation sink factory whose sink adds each result directly to the invocation, target and overall results.
 func ResultSinkFactory(target *invocation.InvocationSpec, trackingHeaders []string,
 	crossTrackingHeaders map[string][]string, trackingTimeBuckets [][]int) invocation.ResultSinkFactory {
 	targetResults, allResults := targetsResults.getTargetResults(target.Name)
@@ -762,11 +798,13 @@ func ResultSinkFactory(target *invocation.InvocationSpec, trackingHeaders []stri
 	}
 }
 
+// ClearResults resets all invocation and target results.
 func ClearResults() {
 	invocationsResults.init(true)
 	targetsResults.init(true)
 }
 
+// GetTargetsResultsJSON returns the per-target results as JSON ("{}" if none), read under each target's lock.
 func GetTargetsResultsJSON(pretty bool) string {
 	targetsResults.lock.RLock()
 	if targetsResults.Results == nil {
@@ -792,6 +830,7 @@ func GetTargetsResultsJSON(pretty bool) string {
 	return util.ToJSONText(snapshot)
 }
 
+// LoadTargetsResultsJSON replaces the targets' results with those parsed from JSON, dropping null entries and filling in missing maps.
 func LoadTargetsResultsJSON(content string) error {
 	targetsResults.lock.Lock()
 	defer targetsResults.lock.Unlock()
@@ -806,6 +845,7 @@ func LoadTargetsResultsJSON(content string) error {
 	return err
 }
 
+// GetInvocationResultsJSON returns the per-invocation results as JSON.
 func GetInvocationResultsJSON(pretty bool) string {
 	invocationsResults.lock.RLock()
 	defer invocationsResults.lock.RUnlock()
@@ -815,6 +855,7 @@ func GetInvocationResultsJSON(pretty bool) string {
 	return util.ToJSONText(invocationsResults.Results)
 }
 
+// LoadInvocationResultsJSON replaces the invocation results with those parsed from JSON, dropping null entries and restoring their shared lock.
 func LoadInvocationResultsJSON(content string) error {
 	invocationsResults.lock.Lock()
 	defer invocationsResults.lock.Unlock()
@@ -830,6 +871,7 @@ func LoadInvocationResultsJSON(content string) error {
 	return err
 }
 
+// addDeltaCrossHeaders merges the delta's cross header counts into result, creating entries as needed.
 func addDeltaCrossHeaders(result, delta map[string]*HeaderCounts, crossTrackingHeaders map[string][]string, crossHeadersMap map[string]string, detailed bool) {
 	for ch, chCounts := range delta {
 		if result[ch] == nil {
@@ -839,6 +881,7 @@ func addDeltaCrossHeaders(result, delta map[string]*HeaderCounts, crossTrackingH
 	}
 }
 
+// addDeltaCrossHeadersValues merges the delta's cross header counts, grouped by parent header value, into result.
 func addDeltaCrossHeadersValues(result, delta map[string]map[string]*HeaderCounts, crossTrackingHeaders map[string][]string, crossHeadersMap map[string]string, detailed bool) {
 	for value, chCounts := range delta {
 		if result[value] == nil {
@@ -853,6 +896,7 @@ func addDeltaCrossHeadersValues(result, delta map[string]map[string]*HeaderCount
 	}
 }
 
+// addDeltaHeaderCounts merges a delta's header counts into result, adding status code and cross header counts when detailed.
 func addDeltaHeaderCounts(result, delta *HeaderCounts, crossTrackingHeaders map[string][]string, crossHeadersMap map[string]string, detailed bool) {
 	result.setTimestamps(delta.LastResultAt)
 	result.incrementBy(0, &delta.CountInfo)
@@ -894,6 +938,7 @@ func addDeltaHeaderCounts(result, delta *HeaderCounts, crossTrackingHeaders map[
 	}
 }
 
+// processDeltaHeaderCounts merges each header's delta counts into result, creating entries as needed.
 func processDeltaHeaderCounts(result, delta map[string]*HeaderCounts, crossTrackingHeaders map[string][]string, crossHeadersMap map[string]string, detailed bool) {
 	for header, counts := range delta {
 		if result[header] == nil {
@@ -903,6 +948,7 @@ func processDeltaHeaderCounts(result, delta map[string]*HeaderCounts, crossTrack
 	}
 }
 
+// processDeltaTimeBucketCounts merges the delta's per-time-bucket counts into result.
 func processDeltaTimeBucketCounts(delta, result *KeyResultCounts, updateStatusCodes bool) {
 	for tb, count := range delta.ByTimeBuckets {
 		if result.ByTimeBuckets == nil {
@@ -916,6 +962,7 @@ func processDeltaTimeBucketCounts(delta, result *KeyResultCounts, updateStatusCo
 
 }
 
+// processDeltaKeyResultCounts merges delta key results into *resultPtr, with status code and time bucket breakdowns when requested.
 func processDeltaKeyResultCounts(delta KeyResult, resultPtr *KeyResult, updateStatusCodes, updateTimeBuckets bool) {
 	if delta == nil {
 		return
@@ -947,6 +994,7 @@ func processDeltaKeyResultCounts(delta KeyResult, resultPtr *KeyResult, updateSt
 	}
 }
 
+// AddDeltaResults merges a delta of a target's results (such as from a peer) into results, with detailed breakdowns if asked.
 func AddDeltaResults(results, delta *TargetResults, detailed bool) {
 	fmt.Printf("AddDeltaResults: Target [%s] first response [%s] last response [%s]\n", delta.Target, delta.FirstResultAt.UTC().String(), delta.LastResultAt.UTC().String())
 	results.unsafeInitMissing()
@@ -981,6 +1029,7 @@ func AddDeltaResults(results, delta *TargetResults, detailed bool) {
 	processDeltaKeyResultCounts(delta.CountsByTimeBuckets, &results.CountsByTimeBuckets, detailed, false)
 }
 
+// incrementKeyResultCounts reflects over a map of KeyResultCounts and adds its totals, plus status code and time bucket totals if detailed, into the summary.
 func incrementKeyResultCounts(result SummaryResult, delta interface{}, detailed bool) {
 	v := reflect.ValueOf(delta)
 	if v.Kind() != reflect.Map {
@@ -1018,6 +1067,7 @@ func incrementKeyResultCounts(result SummaryResult, delta interface{}, detailed 
 	}
 }
 
+// addTargetResult adds a target's header, status, URI, payload size, retry, error and time bucket counts to the aggregate view.
 func (sr *AggregateResultsView) addTargetResult(tr *TargetResults, detailed bool) {
 	if tr.CountsByHeaders != nil {
 		for h, counts := range tr.CountsByHeaders {
@@ -1056,6 +1106,7 @@ func (sr *AggregateResultsView) addTargetResult(tr *TargetResults, detailed bool
 	}
 }
 
+// addTargetResult adds a target's invocation count and result time range, then its counts, to the client's aggregate view.
 func (car *ClientAggregateResultsView) addTargetResult(tr *TargetResults, detailed bool) {
 	car.InvocationCount += tr.InvocationCount
 	if car.FirstResultAt.IsZero() || tr.FirstResultAt.Before(car.FirstResultAt) {
@@ -1067,6 +1118,7 @@ func (car *ClientAggregateResultsView) addTargetResult(tr *TargetResults, detail
 	car.AggregateResultsView.addTargetResult(tr, detailed)
 }
 
+// AddTargetResult adds a target's results to both the overall aggregate and the target's own view.
 func (ctar *ClientTargetsAggregateResultsView) AddTargetResult(tr *TargetResults, detailed bool) {
 	fmt.Printf("TargetsSummaryResults.AddTargetResult: Target [%s] first response [%s] last response [%s]\n",
 		tr.Target, tr.FirstResultAt.UTC().String(), tr.LastResultAt.UTC().String())
@@ -1078,6 +1130,7 @@ func (ctar *ClientTargetsAggregateResultsView) AddTargetResult(tr *TargetResults
 	ctar.ResultsByTargets[tr.Target].addTargetResult(tr, detailed)
 }
 
+// init allocates all the maps of the aggregate view.
 func (ar *AggregateResultsView) init() {
 	ar.CountsByStatusCodes = SummaryResult{}
 	ar.CountsByHeaders = map[string]int{}
@@ -1091,6 +1144,7 @@ func (ar *AggregateResultsView) init() {
 	ar.CountsByTimeBuckets = SummaryResult{}
 }
 
+// NewClientTargetsAggregateResults creates an empty aggregate view across targets, with its per-target views map.
 func NewClientTargetsAggregateResults() *ClientTargetsAggregateResultsView {
 	ctar := &ClientTargetsAggregateResultsView{}
 	ctar.AggregateResultsView.init()
@@ -1098,6 +1152,7 @@ func NewClientTargetsAggregateResults() *ClientTargetsAggregateResultsView {
 	return ctar
 }
 
+// lockInvocationRegistryLocker asks the registry to lock the invocation's key in its locker, when the locker and a registry are in use.
 func lockInvocationRegistryLocker(invocationIndex uint32) {
 	if global.Flags.UseLocker && global.Self.RegistryURL != "" {
 		url := fmt.Sprintf("%s/registry/peers/%s/%s/locker/lock/%s_%d", global.Self.RegistryURL,
@@ -1108,6 +1163,7 @@ func lockInvocationRegistryLocker(invocationIndex uint32) {
 	}
 }
 
+// sendResultToRegistry stores the data in the registry's locker under the keys, when the locker and a registry are in use.
 func sendResultToRegistry(keys []string, data interface{}) {
 	if global.Flags.UseLocker && global.Self.RegistryURL != "" {
 		url := fmt.Sprintf("%s/registry/peers/%s/%s/locker/store/%s", global.Self.RegistryURL, global.Self.Name, global.Self.Address, strings.Join(keys, ","))
@@ -1118,6 +1174,7 @@ func sendResultToRegistry(keys []string, data interface{}) {
 	}
 }
 
+// registrySender is a sender goroutine that batches queued target and invocation results, deduplicated by key, and posts them to the registry until stopped.
 func registrySender(id int) {
 	defer registrySenders.Done()
 RegistrySend:
@@ -1199,6 +1256,7 @@ RegistrySend:
 	}
 }
 
+// startRegistrySender starts the registry sender goroutines, once.
 func startRegistrySender() {
 	registrySendLock.Lock()
 	defer registrySendLock.Unlock()
@@ -1211,6 +1269,7 @@ func startRegistrySender() {
 	}
 }
 
+// StopRegistrySender signals the running registry senders to stop, and lets them be started again later.
 func StopRegistrySender() {
 	registrySendLock.Lock()
 	defer registrySendLock.Unlock()
@@ -1224,10 +1283,12 @@ func StopRegistrySender() {
 	}
 }
 
+// EnableAllTargetResults turns collection of the results across all targets on or off.
 func EnableAllTargetResults(enable bool) {
 	collectAllTargetsResults.Store(enable)
 }
 
+// EnableInvocationResults turns collection of per-invocation results on or off.
 func EnableInvocationResults(enable bool) {
 	collectInvocationResults.Store(enable)
 }

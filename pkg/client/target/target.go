@@ -50,12 +50,14 @@ var (
 	InvocationResultsRetention int = 100
 )
 
+// NewTargetClient creates a target client for the client port, with no targets and no tracking config.
 func NewTargetClient(clientPort int) *TargetClient {
 	c := &TargetClient{clientPort: clientPort}
 	c.init()
 	return c
 }
 
+// init clears the targets and tracking config, returning false and changing nothing if a target is being invoked.
 func (tc *TargetClient) init() bool {
 	tc.targetsLock.Lock()
 	defer tc.targetsLock.Unlock()
@@ -69,6 +71,7 @@ func (tc *TargetClient) init() bool {
 	return true
 }
 
+// AddTarget validates and registers a target, tagging its headers with this goto, and auto-invokes it if asked.
 func (tc *TargetClient) AddTarget(t *Target, r ...*http.Request) error {
 	invocationSpec := t.InvocationSpec
 	if err := invocation.ValidateSpec(invocationSpec); err == nil {
@@ -95,6 +98,7 @@ func (tc *TargetClient) AddTarget(t *Target, r ...*http.Request) error {
 	}
 }
 
+// removeTargets deletes the named targets, refusing (false) while any target is active.
 func (tc *TargetClient) removeTargets(targets []string) bool {
 	tc.targetsLock.Lock()
 	defer tc.targetsLock.Unlock()
@@ -107,6 +111,7 @@ func (tc *TargetClient) removeTargets(targets []string) bool {
 	return true
 }
 
+// prepareTargetForPeer resolves a peer placeholder in the target's URL to the peer's address, returning a modified copy of the target.
 func (tc *TargetClient) prepareTargetForPeer(target *invocation.InvocationSpec, r *http.Request) *invocation.InvocationSpec {
 	if target == nil || r == nil {
 		return target
@@ -131,6 +136,7 @@ func (tc *TargetClient) prepareTargetForPeer(target *invocation.InvocationSpec, 
 	return target
 }
 
+// PrepareTarget returns the invocation spec of the named target, also trying its "{name}" placeholder form, or nil if not found.
 func (tc *TargetClient) PrepareTarget(name string) *invocation.InvocationSpec {
 	var targetToInvoke *invocation.InvocationSpec
 	if name != "" {
@@ -147,6 +153,7 @@ func (tc *TargetClient) PrepareTarget(name string) *invocation.InvocationSpec {
 	return targetToInvoke
 }
 
+// getTargetsToInvoke returns the targets named in the request's targets param, resolved for peers, or all targets if none are named.
 func (tc *TargetClient) getTargetsToInvoke(r *http.Request) []*invocation.InvocationSpec {
 	var names []string
 	if r != nil {
@@ -167,12 +174,14 @@ func (tc *TargetClient) getTargetsToInvoke(r *http.Request) []*invocation.Invoca
 	return targetsToInvoke
 }
 
+// AddTrackingHeaders parses and sets the headers, and cross headers, whose values are tracked in the results.
 func (tc *TargetClient) AddTrackingHeaders(headers string) {
 	tc.targetsLock.Lock()
 	defer tc.targetsLock.Unlock()
 	tc.trackHeaders, tc.crossTrackHeaders = util.ParseTrackingHeaders(headers)
 }
 
+// clearTrackingHeaders removes all tracked headers and cross headers.
 func (tc *TargetClient) clearTrackingHeaders() {
 	tc.targetsLock.Lock()
 	tc.trackHeaders = []string{}
@@ -180,6 +189,7 @@ func (tc *TargetClient) clearTrackingHeaders() {
 	tc.targetsLock.Unlock()
 }
 
+// getTrackingHeaders returns the tracked headers, each header that has cross headers preceded by its "header|cross1|cross2" form.
 func (tc *TargetClient) getTrackingHeaders() []string {
 	headers := []string{}
 	tc.targetsLock.RLock()
@@ -193,6 +203,7 @@ func (tc *TargetClient) getTrackingHeaders() []string {
 	return headers
 }
 
+// AddTrackingTimeBuckets parses and sets the time buckets for tracking response times, returning false if the spec is invalid.
 func (tc *TargetClient) AddTrackingTimeBuckets(b string) bool {
 	tc.targetsLock.Lock()
 	defer tc.targetsLock.Unlock()
@@ -203,12 +214,14 @@ func (tc *TargetClient) AddTrackingTimeBuckets(b string) bool {
 	return ok
 }
 
+// clearTrackingTimeBuckets removes all tracked time buckets.
 func (tc *TargetClient) clearTrackingTimeBuckets() {
 	tc.targetsLock.Lock()
 	tc.trackTimeBuckets = [][]int{}
 	tc.targetsLock.Unlock()
 }
 
+// stopTargets stops the named targets (all if none named), waits up to 10s for them to go idle, and returns whether any were stopping and whether they stopped.
 func (tc *TargetClient) stopTargets(targetNames []string) (bool, bool) {
 	tc.targetsLock.RLock()
 	defer tc.targetsLock.RUnlock()
@@ -246,6 +259,7 @@ func (tc *TargetClient) stopTargets(targetNames []string) (bool, bool) {
 	return len(stoppingTargets) > 0, stopped
 }
 
+// invokeTarget registers and runs an invocation of the target, counting it as active until it finishes.
 func (tc *TargetClient) invokeTarget(target *invocation.InvocationSpec) {
 	if tracker, err := invocation.RegisterInvocation(tc.clientPort, target, results.ResultChannelSinkFactory(target, tc.trackHeaders, tc.crossTrackHeaders, tc.trackTimeBuckets)); err == nil {
 		tc.targetsLock.Lock()
@@ -260,6 +274,7 @@ func (tc *TargetClient) invokeTarget(target *invocation.InvocationSpec) {
 	}
 }
 
+// InvokeAll invokes all targets concurrently and waits for them to finish.
 func (tc *TargetClient) InvokeAll() {
 	wg := &sync.WaitGroup{}
 	for _, t := range tc.targets {

@@ -48,6 +48,7 @@ var (
 	}
 )
 
+// setRoutes registers the /watch routes to add a webhook watcher and to open the watch websocket.
 func setRoutes(r *mux.Router) {
 	watchRouter := middleware.RootPath("/watch")
 	util.AddRouteQ(watchRouter, "/add/{name}", addWebhookWatcher, "url", "POST")
@@ -56,6 +57,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(watchRouter, "/ws", handleWebsocket, "GET")
 }
 
+// addWebhookWatcher registers (or replaces) a watcher by name with its URL and empty filters.
 func (w *Watch) addWebhookWatcher(name, url string) {
 	w.lock.Lock()
 	defer w.lock.Unlock()
@@ -67,6 +69,7 @@ func (w *Watch) addWebhookWatcher(name, url string) {
 	}
 }
 
+// addWatcherFilter adds a URI and/or header filter to the named watcher, returning false if it doesn't exist or no filter was given.
 func (w *Watch) addWatcherFilter(name, uri, header, value string) bool {
 	w.lock.Lock()
 	defer w.lock.Unlock()
@@ -96,12 +99,14 @@ func (w *Watch) removeWatcher(name string) *Watcher {
 	return watcher
 }
 
+// getWatcher returns the watcher of the name, or nil.
 func (w *Watch) getWatcher(name string) *Watcher {
 	w.lock.RLock()
 	defer w.lock.RUnlock()
 	return w.Watchers[name]
 }
 
+// addWebhookWatcher registers a webhook watcher with the name and URL taken from the request.
 func addWebhookWatcher(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	url := util.GetStringParamValue(r, "url")
@@ -124,6 +129,7 @@ func addWebhookWatcher(w http.ResponseWriter, r *http.Request) {
 // 	util.AddLogMessage(msg, r)
 // }
 
+// handleWebsocket upgrades the request to a websocket and registers it, by remote address, to receive watched traffic.
 func handleWebsocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := Upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -133,6 +139,7 @@ func handleWebsocket(w http.ResponseWriter, r *http.Request) {
 	WebSockets.AddSocket(r.RemoteAddr, conn)
 }
 
+// middlewareFunc wraps the handler so that, while websockets are open, each response is captured and broadcast to them before it is sent.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var irw *intercept.InterceptResponseWriter

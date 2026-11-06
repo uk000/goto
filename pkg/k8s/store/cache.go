@@ -87,6 +87,7 @@ var (
 	_                   = global.OnShutdown(StopWatch)
 )
 
+// init starts the background notifier that delivers informer changes to the resource watchers.
 func init() {
 	go runWatchNotifier()
 }
@@ -136,6 +137,7 @@ func StopWatch() {
 	k8sWatchStopChannel <- true
 }
 
+// Clear drops every cached object and its stored time, and triggers a GC.
 func (k *K8sCache) Clear() {
 	k.lock.Lock()
 	k.Cache = map[string]map[string]interface{}{}
@@ -144,6 +146,7 @@ func (k *K8sCache) Clear() {
 	runtime.GC()
 }
 
+// Store caches the object under the namespace and name and stamps the time it was stored, which is what CacheTTL is measured from.
 func (k *K8sCache) Store(namespace, name string, obj interface{}) {
 	k.lock.Lock()
 	defer k.lock.Unlock()
@@ -182,6 +185,7 @@ func (k *K8sCache) Delete(namespace, name string) {
 	k.remove(namespace, name)
 }
 
+// remove deletes the object and its stored time, pruning empty namespaces; the caller must hold the lock.
 func (k *K8sCache) remove(namespace, name string) {
 	delete(k.Cache[namespace], name)
 	if len(k.Cache[namespace]) == 0 {
@@ -193,6 +197,7 @@ func (k *K8sCache) remove(namespace, name string) {
 	}
 }
 
+// addWatch registers the callback under its name for the namespace and name of the resource.
 func (kw *K8sResourceWatch) addWatch(namespace, name string, watcher *K8sResourceWatchCallback) {
 	kw.lock.Lock()
 	defer kw.lock.Unlock()
@@ -205,6 +210,7 @@ func (kw *K8sResourceWatch) addWatch(namespace, name string, watcher *K8sResourc
 	kw.watches[namespace][name][watcher.Name] = watcher
 }
 
+// removeWatch unregisters the callback and prunes the namespace and name entries that become empty.
 func (kw *K8sResourceWatch) removeWatch(namespace, name string, watcher *K8sResourceWatchCallback) {
 	kw.lock.Lock()
 	defer kw.lock.Unlock()
@@ -219,6 +225,7 @@ func (kw *K8sResourceWatch) removeWatch(namespace, name string, watcher *K8sReso
 	}
 }
 
+// notifyWatchers calls the add, update or delete callback of each watcher of the namespace and name, falling back to the watchers registered for any namespace.
 func (kw *K8sResourceWatch) notifyWatchers(namespace, name string, obj interface{}, isAdd, isUpdate, isDelete bool) {
 	kw.lock.RLock()
 	defer kw.lock.RUnlock()
@@ -239,6 +246,7 @@ func (kw *K8sResourceWatch) notifyWatchers(namespace, name string, obj interface
 	}
 }
 
+// WatchResourceById is WatcheResource for a resource given as an id of the form group/version/resource[/namespace[/name]].
 func WatchResourceById(id string, watcher *K8sResourceWatchCallback) {
 	group, version, kind, namespace, name, ok := decodeResourceID(id)
 	if !ok {
@@ -273,6 +281,7 @@ func WatcheResource(group, version, resource, namespace, name string, watcher *K
 	startInformer(gvr, namespace, name)
 }
 
+// UnwatchResourceById is UnwatchResource for a resource given as an id of the form group/version/resource[/namespace[/name]].
 func UnwatchResourceById(id string, watcher *K8sResourceWatchCallback) {
 	group, version, kind, namespace, name, ok := decodeResourceID(id)
 	if !ok {
@@ -293,6 +302,7 @@ func UnwatchResource(group, version, resource, namespace, name string, watcher *
 	}
 }
 
+// isWatched tells if any watcher is registered for the namespace and name.
 func (kw *K8sResourceWatch) isWatched(namespace, name string) bool {
 	kw.lock.RLock()
 	defer kw.lock.RUnlock()
@@ -369,6 +379,7 @@ func stopInformers(match func(informerKey) bool) {
 	}
 }
 
+// GetResourceByID gets the resource (or list) named by an id of the form group/version/resource[/namespace[/name]], from the cache or the cluster.
 func GetResourceByID(id string) (util.JSON, error) {
 	group, version, resource, namespace, name, ok := decodeResourceID(id)
 	if !ok {
@@ -383,6 +394,7 @@ func GetResourceByID(id string) (util.JSON, error) {
 	return getResource(gvk, namespace, name, nil, nil)
 }
 
+// GetResource resolves the kind through the known API resources and gets the resource (or list) from the cache or the cluster, applying the jsonpath or jq query if given.
 func GetResource(kind, namespace, name string, jp *util.JSONPath, jq *util.JQ, r *http.Request) (*schema.GroupVersionKind, util.JSON, error) {
 	kind, namespace, name = reinterpretResource(kind, namespace, name)
 	k8sApi := k8s.K8sApiResourcesMap[strings.ToLower(kind)]
@@ -395,6 +407,7 @@ func GetResource(kind, namespace, name string, jp *util.JSONPath, jq *util.JQ, r
 	return &gvk, json, err
 }
 
+// getResource serves the resource from the cache, else fetches it from the cluster, and then applies the jsonpath or jq query.
 func getResource(gvk *schema.GroupVersionKind, namespace, name string, jp *util.JSONPath, jq *util.JQ) (util.JSON, error) {
 	json := getResourceFromCache(gvk, namespace, name)
 	var err error
@@ -427,6 +440,7 @@ func InvalidateResource(gvk *schema.GroupVersionKind, namespace, name string) {
 	Cache.Delete(namespace, cacheName(k8sClient.Active().ID(), gvk, name))
 }
 
+// getResourceFromCache returns the cached resource of the active cluster as JSON, or nil if it is not cached or has expired.
 func getResourceFromCache(gvk *schema.GroupVersionKind, namespace, name string) util.JSON {
 	obj := Cache.Get(namespace, cacheName(k8sClient.Active().ID(), gvk, name))
 	if obj != nil {
@@ -436,6 +450,7 @@ func getResourceFromCache(gvk *schema.GroupVersionKind, namespace, name string) 
 	return nil
 }
 
+// fetchResource reads the resource from the cluster, caching a named one, and returns nil without an error when it is not found.
 func fetchResource(gvk *schema.GroupVersionKind, namespace, name string) (util.JSON, error) {
 	cluster := k8sClient.Active().ID()
 	if obj, err := getResourceFromK8s(gvk, namespace, name); err == nil && obj != nil {
@@ -457,6 +472,7 @@ func fetchResource(gvk *schema.GroupVersionKind, namespace, name string) (util.J
 	}
 }
 
+// getResourceFromK8s gets the named resource, or lists the resources when there is no name, from the cluster of the active client.
 func getResourceFromK8s(gvk *schema.GroupVersionKind, namespace, name string) (result interface{}, err error) {
 	ri, _, err := k8s.GetResourceInterface(gvk, namespace)
 	if err != nil {

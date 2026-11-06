@@ -51,6 +51,7 @@ var (
 	lock         sync.RWMutex
 )
 
+// setRoutes registers the /probes routes to set probe URIs and statuses, clear counts and report the probes, and exposes the probe checks through the global funcs.
 func setRoutes(r *mux.Router) {
 	probeRouter := middleware.RootPath("/probes")
 	util.AddRouteQ(probeRouter, "/{type}/set", setProbe, "uri", "PUT", "POST")
@@ -61,12 +62,15 @@ func setRoutes(r *mux.Router) {
 	global.Funcs.IsReadinessProbe = IsReadinessProbe
 }
 
+// IsLivenessProbe reports whether the request URI is the liveness probe URI of its port.
 func IsLivenessProbe(r *http.Request) bool {
 	pp := initPortProbes(r)
 	pp.lock.RLock()
 	defer pp.lock.RUnlock()
 	return strings.EqualFold(r.RequestURI, pp.LivenessProbe)
 }
+
+// IsReadinessProbe reports whether the request URI is the readiness probe URI of its port.
 func IsReadinessProbe(r *http.Request) bool {
 	pp := initPortProbes(r)
 	pp.lock.RLock()
@@ -74,6 +78,7 @@ func IsReadinessProbe(r *http.Request) bool {
 	return strings.EqualFold(r.RequestURI, pp.ReadinessProbe)
 }
 
+// GetPortProbes returns the probes of a port, creating them on first use with /ready and /live returning 200.
 func GetPortProbes(port string) *PortProbes {
 	lock.Lock()
 	defer lock.Unlock()
@@ -83,10 +88,12 @@ func GetPortProbes(port string) *PortProbes {
 	return probesByPort[port]
 }
 
+// initPortProbes returns the probes of the request's port.
 func initPortProbes(r *http.Request) *PortProbes {
 	return GetPortProbes(util.GetRequestOrListenerPort(r))
 }
 
+// setProbe sets the readiness or liveness probe URI of the request's port and resets its count.
 func setProbe(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	probeType := util.GetStringParamValue(r, "type")
@@ -116,6 +123,7 @@ func setProbe(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// setProbeStatus sets the status that the readiness or liveness probe of the request's port returns, optionally for a limited number of calls.
 func setProbeStatus(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	probeType := util.GetStringParamValue(r, "type")
@@ -155,6 +163,7 @@ func setProbeStatus(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getProbes reports the probes and their counts for the request's port as JSON.
 func getProbes(w http.ResponseWriter, r *http.Request) {
 	pp := initPortProbes(r)
 	pp.lock.RLock()
@@ -163,6 +172,7 @@ func getProbes(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reporting probe counts", r)
 }
 
+// clearProbeCounts resets the readiness and liveness counts of the request's port.
 func clearProbeCounts(w http.ResponseWriter, r *http.Request) {
 	pp := initPortProbes(r)
 	pp.lock.Lock()
@@ -174,6 +184,7 @@ func clearProbeCounts(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// middlewareFunc answers readiness and liveness probe requests with their configured status and count headers, and passes other requests to next.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pp := initPortProbes(r)

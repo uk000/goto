@@ -69,6 +69,7 @@ var (
 	Manager = (&PipeManager{}).init()
 )
 
+// init resets the manager to an empty state, with no pipes, runs or files.
 func (pm *PipeManager) init() *PipeManager {
 	pm.Pipes = map[string]*Pipe{}
 	pm.PipeRuns = map[string][]*PipeRun{}
@@ -78,6 +79,7 @@ func (pm *PipeManager) init() *PipeManager {
 	return pm
 }
 
+// sortedKeys returns the keys of the map in sorted order, so that iterating over them is deterministic.
 func sortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -87,12 +89,14 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+// NewPipe creates and initialises a pipe with the given name.
 func NewPipe(name string) *Pipe {
 	pipe := &Pipe{Name: name}
 	pipe.Init()
 	return pipe
 }
 
+// CreatePipe creates an empty pipe with the given name and registers it, replacing any pipe of that name.
 func (pm *PipeManager) CreatePipe(name string) {
 	pipeline := NewPipe(name)
 	pm.lock.Lock()
@@ -100,6 +104,7 @@ func (pm *PipeManager) CreatePipe(name string) {
 	pm.lock.Unlock()
 }
 
+// AddPipe registers a posted pipe, defaulting to one stage of all sources and transforms (sorted by name), and initialises them before the pipe becomes visible.
 func (pm *PipeManager) AddPipe(pipe *Pipe) {
 	if pipe == nil {
 		return
@@ -141,6 +146,7 @@ func (pm *PipeManager) AddPipe(pipe *Pipe) {
 	pm.lock.Unlock()
 }
 
+// ClearPipe clears the sources of the named pipe, or resets the whole manager (all pipes and runs) if no name is given.
 func (pm *PipeManager) ClearPipe(name string) {
 	if name != "" {
 		pm.lock.RLock()
@@ -156,18 +162,21 @@ func (pm *PipeManager) ClearPipe(name string) {
 	}
 }
 
+// RemovePipe deletes the named pipe from the manager.
 func (pm *PipeManager) RemovePipe(name string) {
 	pm.lock.Lock()
 	delete(pm.Pipes, name)
 	pm.lock.Unlock()
 }
 
+// DumpPipes returns all pipes as JSON text.
 func (pm *PipeManager) DumpPipes() string {
 	pm.lock.RLock()
 	defer pm.lock.RUnlock()
 	return util.ToJSONText(pm.Pipes)
 }
 
+// AddRun records the output of a run of the pipe under a new run ID.
 func (pm *PipeManager) AddRun(pipe *Pipe, out map[string]interface{}) {
 	pm.lock.Lock()
 	defer pm.lock.Unlock()
@@ -179,12 +188,14 @@ func (pm *PipeManager) AddRun(pipe *Pipe, out map[string]interface{}) {
 	})
 }
 
+// GetRuns returns the named pipe together with the runs that were recorded for it.
 func (pm *PipeManager) GetRuns(pipe string) interface{} {
 	pm.lock.RLock()
 	defer pm.lock.RUnlock()
 	return map[string]interface{}{"pipe": pm.Pipes[pipe], "runs": pm.PipeRuns[pipe]}
 }
 
+// AddK8sSource adds a K8s resource source to the named pipe, failing if the pipe doesn't exist.
 func (pm *PipeManager) AddK8sSource(pipeName, sourceName, resourceID string) error {
 	pm.lock.RLock()
 	pipe := pm.Pipes[pipeName]
@@ -196,6 +207,7 @@ func (pm *PipeManager) AddK8sSource(pipeName, sourceName, resourceID string) err
 	return nil
 }
 
+// AddScriptSource adds a script source to the named pipe, registering the script content first if given, and fails if the pipe doesn't exist.
 func (pm *PipeManager) AddScriptSource(pipeName, sourceName, scriptContent string) error {
 	pm.lock.RLock()
 	pipe := pm.Pipes[pipeName]
@@ -210,6 +222,7 @@ func (pm *PipeManager) AddScriptSource(pipeName, sourceName, scriptContent strin
 	return nil
 }
 
+// AddSource adds the source to the named pipe, failing if the source is nil or the pipe doesn't exist.
 func (pm *PipeManager) AddSource(pipeName string, source *PipelineSource) error {
 	if source == nil {
 		return fmt.Errorf("No source")
@@ -224,6 +237,7 @@ func (pm *PipeManager) AddSource(pipeName string, source *PipelineSource) error 
 	return nil
 }
 
+// RemoveSource removes the named source from the named pipe, failing if the pipe doesn't exist.
 func (pm *PipeManager) RemoveSource(pipeName, sourceName string) error {
 	pm.lock.RLock()
 	pipe := pm.Pipes[pipeName]
@@ -235,6 +249,7 @@ func (pm *PipeManager) RemoveSource(pipeName, sourceName string) error {
 	return nil
 }
 
+// RunPipe runs the named pipe and writes its output to w as YAML or JSON, failing if the pipe doesn't exist.
 func (pm *PipeManager) RunPipe(name string, w io.Writer, yaml bool) error {
 	pm.lock.RLock()
 	pipe := pm.Pipes[name]
@@ -246,6 +261,7 @@ func (pm *PipeManager) RunPipe(name string, w io.Writer, yaml bool) error {
 	return nil
 }
 
+// AddK8sSource adds a K8s resource source with the given name and resource ID to the pipe.
 func (pipe *Pipe) AddK8sSource(sourceName, resourceID string) {
 	pipe.lock.Lock()
 	pipe.initSources()
@@ -253,6 +269,7 @@ func (pipe *Pipe) AddK8sSource(sourceName, resourceID string) {
 	pipe.lock.Unlock()
 }
 
+// AddScriptSource adds a source with the given name that runs the named script.
 func (pipe *Pipe) AddScriptSource(sourceName, scriptName string) {
 	pipe.lock.Lock()
 	pipe.initSources()
@@ -272,12 +289,14 @@ func (pipe *Pipe) AddSource(source *PipelineSource) {
 	pipe.initSource(source.Name, source)
 }
 
+// RemoveSource removes the named source from the pipe.
 func (pipe *Pipe) RemoveSource(sourceName string) {
 	pipe.lock.Lock()
 	delete(pipe.Sources, sourceName)
 	pipe.lock.Unlock()
 }
 
+// Init resets the sources of the pipe to an empty set.
 func (pipe *Pipe) Init() {
 	pipe.lock.Lock()
 	pipe.Sources = map[string]*PipelineSource{}
@@ -292,6 +311,7 @@ func (pipe *Pipe) initSources() {
 	}
 }
 
+// InitSources initialises every source of the pipe under its map key, dropping nil ones.
 func (pipe *Pipe) InitSources() {
 	for name, source := range pipe.Sources {
 		if source == nil {
@@ -324,6 +344,7 @@ func (pipe *Pipe) MarshalJSON() ([]byte, error) {
 	}{pipe.Name, pipe.Sources, pipe.Transforms, pipe.Stages, pipe.Outs, pipe.Running})
 }
 
+// InitTransforms names every transform after its map key and initialises it, dropping nil ones.
 func (pipe *Pipe) InitTransforms() {
 	for name, transform := range pipe.Transforms {
 		if transform == nil {
@@ -350,6 +371,7 @@ func (pipe *Pipe) Run(w io.Writer, yaml bool) {
 	pipe.run(w, yaml)
 }
 
+// run executes the stages in order (delay, sources, then transforms) over a shared workspace, records the selected outs as a run, and writes them to w.
 func (pipe *Pipe) run(w io.Writer, yaml bool) {
 	pipe.lock.Lock()
 	pipe.Running = true

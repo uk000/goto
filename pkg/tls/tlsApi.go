@@ -46,6 +46,7 @@ var (
 	Middleware = middleware.NewMiddleware("tls", setRoutes, nil)
 )
 
+// setRoutes registers the /tls APIs to manage certs, keys and CA certs and keys, the default CA JWKS and JWT verification, and the work dir.
 func setRoutes(r *mux.Router) {
 	tlsRouter := middleware.RootPath("/tls")
 	util.AddRoute(tlsRouter, "/ca/cert/add/{name}/{domain}", addCACertOrKey(false), "PUT", "POST")
@@ -73,6 +74,7 @@ func setRoutes(r *mux.Router) {
 // The handlers below are told by the route whether they deal with keys or certs. Telling it from the request URI
 // would take any name or domain that has "key" in it (e.g. "monkey", "keycloak.example.com") for a key.
 
+// addCertOrKey returns a handler that stores the (base64 or PEM) request body as the cert, or as the key if isKey, of the name.
 func addCertOrKey(isKey bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		msg := ""
@@ -98,6 +100,7 @@ func addCertOrKey(isKey bool) http.HandlerFunc {
 	}
 }
 
+// removeCertOrKey returns a handler that removes the cert, or the key if isKey, of the name.
 func removeCertOrKey(isKey bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := util.GetStringParamValue(r, "name")
@@ -115,6 +118,7 @@ func removeCertOrKey(isKey bool) http.HandlerFunc {
 	}
 }
 
+// addCACertOrKey returns a handler that stores the request body as the CA cert, or the CA key if isKey, of the name for the domain.
 func addCACertOrKey(isKey bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		msg := ""
@@ -133,6 +137,7 @@ func addCACertOrKey(isKey bool) http.HandlerFunc {
 	}
 }
 
+// removeCACertOrKey returns a handler that removes the CA cert, or the CA key if isKey, of the name.
 func removeCACertOrKey(isKey bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := util.GetStringParamValue(r, "name")
@@ -150,6 +155,7 @@ func removeCACertOrKey(isKey bool) http.HandlerFunc {
 	}
 }
 
+// setDefaultCA sets the named CA as the default signing authority.
 func setDefaultCA(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	name := util.GetStringParamValue(r, "name")
@@ -163,6 +169,7 @@ func setDefaultCA(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// getCAJWKS returns the JWKS of the default CA signing key.
 func getCAJWKS(w http.ResponseWriter, r *http.Request) {
 	lock.RLock()
 	jwks := DefaultCAJWKS
@@ -171,6 +178,7 @@ func getCAJWKS(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, jwks)
 }
 
+// getDefaultCACert returns the public key of the default CA signing key as PEM.
 func getDefaultCACert(w http.ResponseWriter, r *http.Request) {
 	lock.RLock()
 	jwks := DefaultCAJWKS
@@ -196,6 +204,7 @@ func getDefaultCACert(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Sent CA public key", r)
 }
 
+// getDefaultCACertPEM returns the certificate of the default CA signing key as PEM, taken from the x5c of its JWKS.
 func getDefaultCACertPEM(w http.ResponseWriter, r *http.Request) {
 	lock.RLock()
 	jwks := DefaultCAJWKS
@@ -226,6 +235,7 @@ func getDefaultCACertPEM(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Sent CA certificate", r)
 }
 
+// jwkToRSAPublicKey rebuilds the RSA public key from the base64url modulus and exponent of the JWK.
 func jwkToRSAPublicKey(jwk JWK) (*rsa.PublicKey, error) {
 	nBytes, err := base64.RawURLEncoding.DecodeString(jwk.N)
 	if err != nil {
@@ -240,6 +250,7 @@ func jwkToRSAPublicKey(jwk JWK) (*rsa.PublicKey, error) {
 	return &rsa.PublicKey{N: n, E: int(e.Int64())}, nil
 }
 
+// verifyCAJWT verifies the RS256 signature of the JWT in the request body against the default CA JWKS and returns its pretty-printed payload, with a 400 status if verification fails.
 func verifyCAJWT(w http.ResponseWriter, r *http.Request) {
 	tokenBytes := util.ReadBytes(r.Body)
 	if len(tokenBytes) == 0 {
@@ -298,6 +309,7 @@ func verifyCAJWT(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(fmt.Sprintf("JWT verify: jwtErr=%v", jwtErr), r)
 }
 
+// getCACerts reports the registered CA certs, with the domains they cover, as YAML.
 func getCACerts(w http.ResponseWriter, r *http.Request) {
 	caCerts := map[string]*types.Pair[map[string]bool, string]{}
 	lock.RLock()
@@ -313,6 +325,7 @@ func getCACerts(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, util.ToYaml(caCerts))
 }
 
+// getCerts reports the details of each registered certificate (issuer, validity, subject, usages, SANs and fingerprint) in an openssl-like text format.
 func getCerts(w http.ResponseWriter, r *http.Request) {
 	lock.RLock()
 	certsByName := make(map[string][]*tls.Certificate, len(X509Certs))
@@ -378,6 +391,7 @@ func getCerts(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// certHexBytes formats bytes as colon-separated upper-case hex.
 func certHexBytes(b []byte) string {
 	parts := make([]string, len(b))
 	for i, v := range b {
@@ -386,6 +400,7 @@ func certHexBytes(b []byte) string {
 	return strings.Join(parts, ":")
 }
 
+// certKeyUsageString lists the names of the key usage bits that are set, separated by commas.
 func certKeyUsageString(ku x509.KeyUsage) string {
 	var names []string
 	if ku&x509.KeyUsageDigitalSignature != 0 {
@@ -418,6 +433,7 @@ func certKeyUsageString(ku x509.KeyUsage) string {
 	return strings.Join(names, ", ")
 }
 
+// certExtKeyUsageString lists the names of the extended key usages, separated by commas.
 func certExtKeyUsageString(ekus []x509.ExtKeyUsage) string {
 	var names []string
 	for _, eku := range ekus {
@@ -449,6 +465,7 @@ func certExtKeyUsageString(ekus []x509.ExtKeyUsage) string {
 	return strings.Join(names, ", ")
 }
 
+// setWorkDir sets the server's work directory, where generated certs are saved.
 func setWorkDir(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	dir := util.GetStringParamValue(r, "dir")

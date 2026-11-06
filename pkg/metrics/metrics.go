@@ -77,6 +77,7 @@ var (
 	_               = global.OnShutdown(Shutdown)
 )
 
+// init starts the goroutine that counts the connections reported on ConnTracker.
 func init() {
 	go trackConnections()
 }
@@ -93,16 +94,19 @@ func trackConnections() {
 	}
 }
 
+// Shutdown signals the connection tracker goroutine to stop.
 func Shutdown() {
 	stopConnTracker <- true
 }
 
+// NewServerStats creates a ServerStats with its count maps initialized.
 func NewServerStats() *ServerStats {
 	ss := &ServerStats{}
 	ss.init()
 	return ss
 }
 
+// NewPrometheusMetrics creates a PrometheusMetrics with its own registry and all the goto counters and gauges registered.
 func NewPrometheusMetrics() *PrometheusMetrics {
 	pm := &PrometheusMetrics{}
 	pm.registry = prometheus.NewRegistry()
@@ -150,6 +154,7 @@ func NewPrometheusMetrics() *PrometheusMetrics {
 	return pm
 }
 
+// reset clears all the Prometheus counters and gauges.
 func (pm *PrometheusMetrics) reset() {
 	pm.requestCounts.Reset()
 	pm.requestCountsByHeaders.Reset()
@@ -173,6 +178,7 @@ func (pm *PrometheusMetrics) reset() {
 	pm.activeConnCountsByTargets.Reset()
 }
 
+// init resets all the stat count maps under the lock.
 func (ss *ServerStats) init() {
 	ss.lock.Lock()
 	defer ss.lock.Unlock()
@@ -203,6 +209,7 @@ func (ss *ServerStats) snapshot() *ServerStats {
 	}
 }
 
+// cloneCounts2 returns a copy of a two-level count map.
 func cloneCounts2(m map[string]map[string]int) map[string]map[string]int {
 	if m == nil {
 		return nil
@@ -214,6 +221,7 @@ func cloneCounts2(m map[string]map[string]int) map[string]map[string]int {
 	return c
 }
 
+// cloneCounts3 returns a copy of a three-level count map.
 func cloneCounts3(m map[string]map[string]map[string]int) map[string]map[string]map[string]int {
 	if m == nil {
 		return nil
@@ -225,10 +233,12 @@ func cloneCounts3(m map[string]map[string]map[string]int) map[string]map[string]
 	return c
 }
 
+// UpdateRequestCount asynchronously increments the request counter for the given request type.
 func UpdateRequestCount(reqType string) {
 	go promMetrics.requestCounts.WithLabelValues(reqType).Inc()
 }
 
+// UpdateHeaderRequestCount asynchronously counts a request by header, header value, URI and port in both Prometheus and the server stats.
 func UpdateHeaderRequestCount(port, uri, header, headerValue string) {
 	go func() {
 		promMetrics.requestCountsByHeaders.WithLabelValues(header).Inc()
@@ -268,6 +278,7 @@ func UpdateHeaderRequestCount(port, uri, header, headerValue string) {
 	}()
 }
 
+// UpdateURIRequestCount asynchronously counts a request by URI in both Prometheus and the server stats.
 func UpdateURIRequestCount(uri, statusCode string) {
 	go func() {
 		promMetrics.requestCountsByURIs.WithLabelValues(uri).Inc()
@@ -277,6 +288,7 @@ func UpdateURIRequestCount(uri, statusCode string) {
 	}()
 }
 
+// UpdatePortRequestCount asynchronously counts a request by port and by port and URI in both Prometheus and the server stats.
 func UpdatePortRequestCount(port, uri string) {
 	go func() {
 		promMetrics.requestCountsByPort.WithLabelValues(port).Inc()
@@ -290,6 +302,7 @@ func UpdatePortRequestCount(port, uri string) {
 	}()
 }
 
+// UpdateProtocolRequestCount asynchronously counts a request by protocol and by protocol and URI in both Prometheus and the server stats.
 func UpdateProtocolRequestCount(protocol, uri string) {
 	go func() {
 		promMetrics.requestCountsByProtocol.WithLabelValues(protocol).Inc()
@@ -303,56 +316,69 @@ func UpdateProtocolRequestCount(protocol, uri string) {
 	}()
 }
 
+// UpdateTargetRequestCount asynchronously increments the client invocation count of the target.
 func UpdateTargetRequestCount(target string) {
 	go promMetrics.requestCountsByTargets.WithLabelValues(target).Inc()
 }
 
+// UpdateTargetFailureCount asynchronously increments the failed invocation count of the target.
 func UpdateTargetFailureCount(target string) {
 	go promMetrics.failureCountsByTargets.WithLabelValues(target).Inc()
 }
 
+// UpdateClientRequestCount asynchronously increments the server request count of the client.
 func UpdateClientRequestCount(client string) {
 	go promMetrics.requestCountsByClient.WithLabelValues(client).Inc()
 }
 
+// UpdateProxiedRequestCount asynchronously increments the proxied request count of the target.
 func UpdateProxiedRequestCount(target string) {
 	go promMetrics.proxiedRequestCounts.WithLabelValues(target).Inc()
 }
 
+// UpdateTriggerCount asynchronously increments the triggered request count of the target.
 func UpdateTriggerCount(target string) {
 	go promMetrics.triggerCounts.WithLabelValues(target).Inc()
 }
 
+// UpdateConnCount asynchronously increments the connection count of the given type.
 func UpdateConnCount(connType string) {
 	go promMetrics.connCounts.WithLabelValues(connType).Inc()
 }
 
+// UpdateTCPConnCount asynchronously increments the TCP connection count of the given type.
 func UpdateTCPConnCount(tcpType string) {
 	go promMetrics.tcpConnections.WithLabelValues(tcpType).Inc()
 }
 
+// IncrementTargetConnCount asynchronously increments the total connection count of the target.
 func IncrementTargetConnCount(target string) {
 	go promMetrics.totalConnectionsByTargets.WithLabelValues(target).Inc()
 }
 
+// UpdateActiveTargetConnCount asynchronously sets the active connection gauge of the target.
 func UpdateActiveTargetConnCount(target string, count int) {
 	go promMetrics.activeConnCountsByTargets.WithLabelValues(target).Set(float64(count))
 }
 
+// clearMetrics resets the Prometheus metrics.
 func clearMetrics(w http.ResponseWriter, r *http.Request) {
 	promMetrics.reset()
 	fmt.Fprintln(w, "Metrics cleared")
 }
 
+// clearStats resets the server stats.
 func clearStats(w http.ResponseWriter, r *http.Request) {
 	serverStats.init()
 	fmt.Fprintln(w, "Stats cleared")
 }
 
+// getStats reports a snapshot of the server stats as JSON.
 func getStats(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, serverStats.snapshot())
 }
 
+// setRoutes registers the /metrics and /stats routes for reporting and clearing metrics and stats.
 func setRoutes(r *mux.Router) {
 	metricsRouter := middleware.RootPath("/metrics")
 	util.AddRoute(metricsRouter, "", promhttp.HandlerFor(promMetrics.registry, promhttp.HandlerOpts{}).ServeHTTP, "GET")
@@ -363,6 +389,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(statsRouter, "", getStats, "GET")
 }
 
+// middlewareFunc counts every request, plus metrics and admin requests separately, after calling the next handler.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {

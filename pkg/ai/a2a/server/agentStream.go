@@ -38,6 +38,7 @@ type AgentBehaviorStream struct {
 	streaming    atomic.Int32
 }
 
+// DoStream handles a stop request in the input, or else streams the payload of the agent.
 func (ab *AgentBehaviorStream) DoStream(aCtx *AgentContext) (string, error) {
 	if ab.processStop(aCtx) {
 		return "Stream Stop Requested", nil
@@ -45,6 +46,7 @@ func (ab *AgentBehaviorStream) DoStream(aCtx *AgentContext) (string, error) {
 	return ab.sendStream(aCtx)
 }
 
+// sendStream streams the payload text of the agent in counted updates with delays, until it is done, stopped or fails.
 func (ab *AgentBehaviorStream) sendStream(aCtx *AgentContext) (string, error) {
 	if ab.streaming.Add(1) == 1 {
 		// A stop that was asked for while no stream was sent is not for this one.
@@ -114,6 +116,7 @@ func (ab *AgentBehaviorStream) sendStream(aCtx *AgentContext) (string, error) {
 	return "Stream finished \U000026F3", nil
 }
 
+// processStop records a stop, and an error with it, if the input asks for them, and reports whether it was a stop.
 func (ab *AgentBehaviorStream) processStop(aCtx *AgentContext) bool {
 	if strings.Contains(aCtx.inputText, "stop") {
 		ab.stopReqested.Store(true)

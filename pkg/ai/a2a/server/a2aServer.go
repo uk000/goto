@@ -49,6 +49,7 @@ var (
 	lock        sync.RWMutex
 )
 
+// GetOrAddServer returns the server of the port, creating and registering one if the port has none.
 func GetOrAddServer(port int) *A2AServer {
 	lock.Lock()
 	defer lock.Unlock()
@@ -60,6 +61,7 @@ func GetOrAddServer(port int) *A2AServer {
 	return s
 }
 
+// GetAgent returns the named agent of the port's server (creating the server if needed), or nil if there is none.
 func GetAgent(port int, name string) *model.Agent {
 	s := GetOrAddServer(port)
 	return s.GetAgent(name)
@@ -151,23 +153,27 @@ func (a *A2AServer) MarshalJSON() ([]byte, error) {
 	}{a.ID, a.Port, a.Agents, a.Enabled})
 }
 
+// RemoveAgent deletes the named agent from the server of the port.
 func RemoveAgent(port int, name string) {
 	server := GetOrAddServer(port)
 	server.RemoveAgent(name)
 }
 
+// ClearServer replaces the server of the port with a fresh, empty one.
 func ClearServer(port int) {
 	lock.Lock()
 	defer lock.Unlock()
 	PortServers[port] = newA2AServer(port)
 }
 
+// ClearAllServers drops the servers of all ports.
 func ClearAllServers() {
 	lock.Lock()
 	defer lock.Unlock()
 	PortServers = map[int]*A2AServer{}
 }
 
+// newA2AServer creates an enabled, empty server for the port, labelled with the port's listener label.
 func newA2AServer(port int) *A2AServer {
 	return &A2AServer{
 		ID:      global.Funcs.GetListenerLabelForPort(port),
@@ -177,18 +183,21 @@ func newA2AServer(port int) *A2AServer {
 	}
 }
 
+// Enable marks the server as enabled.
 func (a *A2AServer) Enable() {
 	a.lock.Lock()
 	defer a.lock.Unlock()
 	a.Enabled = true
 }
 
+// Disable marks the server as disabled.
 func (a *A2AServer) Disable() {
 	a.lock.Lock()
 	defer a.lock.Unlock()
 	a.Enabled = false
 }
 
+// AddAgent prepares the agent and, if that succeeds, registers it on the server by its card name.
 func (a *A2AServer) AddAgent(agent *model.Agent) error {
 	err := a.PrepareAgent(agent)
 	if err == nil {
@@ -199,6 +208,7 @@ func (a *A2AServer) AddAgent(agent *model.Agent) error {
 	return err
 }
 
+// PrepareAgent validates the agent's card and wires up its behavior, task manager, handler and delegates.
 func (a *A2AServer) PrepareAgent(agent *model.Agent) error {
 	if agent == nil || agent.Card == nil {
 		return errors.New("agent has no card")
@@ -269,12 +279,14 @@ func PrepareAgentBehavior(agent *model.Agent) error {
 	return b.prepareDelegates()
 }
 
+// GetAgent returns the agent with the given name, or nil if the server has none.
 func (a *A2AServer) GetAgent(name string) *model.Agent {
 	a.lock.RLock()
 	defer a.lock.RUnlock()
 	return a.Agents[name]
 }
 
+// RemoveAgent deletes the named agent from the server.
 func (a *A2AServer) RemoveAgent(name string) {
 	a.lock.Lock()
 	defer a.lock.Unlock()

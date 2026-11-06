@@ -60,10 +60,12 @@ var (
 	lock         sync.RWMutex
 )
 
+// init registers the jsonrpc service registry provider with the rpc package.
 func init() {
 	rpc.GetServiceRegistry["jsonrpc"] = func(port int) rpc.RPCServiceRegistry { return GetPortRegistry(port) }
 }
 
+// GetJSONRPCRegistry returns the registry of the port that the request is for.
 func GetJSONRPCRegistry(r *http.Request) *JSONRPCServiceRegistry {
 	return GetPortRegistry(util.GetRequestOrListenerPortNum(r))
 }
@@ -91,18 +93,21 @@ func (jr *JSONRPCServiceRegistry) MarshalJSON() ([]byte, error) {
 	}{jr.Services})
 }
 
+// Init clears all services of the registry.
 func (jr *JSONRPCServiceRegistry) Init() {
 	jr.lock.Lock()
 	defer jr.lock.Unlock()
 	jr.Services = map[string]*JSONRPCService{}
 }
 
+// GetService returns the named service, or nil if it isn't registered.
 func (jr *JSONRPCServiceRegistry) GetService(name string) *JSONRPCService {
 	jr.lock.RLock()
 	defer jr.lock.RUnlock()
 	return jr.Services[name]
 }
 
+// GetRPCService returns the named service as an rpc.RPCService, or a nil interface if it isn't registered.
 func (jr *JSONRPCServiceRegistry) GetRPCService(name string) rpc.RPCService {
 	if s := jr.GetService(name); s != nil {
 		return s
@@ -110,18 +115,21 @@ func (jr *JSONRPCServiceRegistry) GetRPCService(name string) rpc.RPCService {
 	return nil
 }
 
+// RemoveService removes the named service.
 func (jr *JSONRPCServiceRegistry) RemoveService(name string) {
 	jr.lock.Lock()
 	defer jr.lock.Unlock()
 	delete(jr.Services, name)
 }
 
+// TrackService starts call tracking for the named service if it is registered.
 func (jr *JSONRPCServiceRegistry) TrackService(port int, name string, headers []string, header, value string) {
 	if service := jr.GetService(name); service != nil {
 		rpc.GetRPCTracker(port).TrackService(port, service, headers, header, value)
 	}
 }
 
+// GetServiceTracker returns a snapshot of the call tracking of the named service, or nil if it isn't registered or tracked.
 func (jr *JSONRPCServiceRegistry) GetServiceTracker(port int, name string) *rpc.ServiceTracker {
 	if service := jr.GetService(name); service != nil {
 		return rpc.GetRPCTracker(port).GetServiceTrackerJSON(service)
@@ -151,6 +159,7 @@ func (jr *JSONRPCServiceRegistry) NewJSONRPCService(body io.ReadCloser) (*JSONRP
 	return service, nil
 }
 
+// FromGRPCService registers a JSONRPC service that mirrors the methods and stream settings of the named gRPC service.
 func (jr *JSONRPCServiceRegistry) FromGRPCService(name string) (*JSONRPCService, error) {
 	g := grpc.ServiceRegistry.GetService(name)
 	if g == nil {
@@ -211,54 +220,66 @@ func (s *JSONRPCService) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// IsGRPC returns false as this is a JSONRPC service.
 func (s *JSONRPCService) IsGRPC() bool {
 	return false
 }
 
+// IsJSONRPC returns true as this is a JSONRPC service.
 func (s *JSONRPCService) IsJSONRPC() bool {
 	return true
 }
 
+// GetName returns the name of the service.
 func (s *JSONRPCService) GetName() string {
 	return s.Name
 }
 
+// GetURI returns the URI of the service.
 func (s *JSONRPCService) GetURI() string {
 	return s.URI
 }
 
+// HasMethod tells if the service has the named method.
 func (s *JSONRPCService) HasMethod(m string) bool {
 	return s.Methods != nil && s.Methods[m] != nil
 }
 
+// GetMethodCount returns the number of methods of the service.
 func (s *JSONRPCService) GetMethodCount() int {
 	return len(s.Methods)
 }
 
+// ForEachMethod calls f for each method of the service.
 func (s *JSONRPCService) ForEachMethod(f func(rpc.RPCMethod)) {
 	for _, m := range s.Methods {
 		f(m)
 	}
 }
 
+// GetMethod returns the named method, or nil if there isn't one.
 func (s *JSONRPCService) GetMethod(name string) rpc.RPCMethod {
 	return s.Methods[name]
 }
 
+// GetName returns the name of the method.
 func (m *JSONRPCMethod) GetName() string {
 	return m.Name
 }
 
+// GetURI returns the URI of the method.
 func (m *JSONRPCMethod) GetURI() string {
 	return m.URI
 }
 
+// SetStreamCount sets the number of responses that the method streams.
 func (m *JSONRPCMethod) SetStreamCount(count int) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	m.StreamCount = count
 }
 
+// SetStreamDelay sets the delay range and delay count between the streamed responses.
 func (m *JSONRPCMethod) SetStreamDelay(min, max time.Duration, count int) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -267,6 +288,7 @@ func (m *JSONRPCMethod) SetStreamDelay(min, max time.Duration, count int) {
 	m.StreamDelayCount = count
 }
 
+// SetResponsePayload sets the response payload of the method.
 func (m *JSONRPCMethod) SetResponsePayload(payload []byte) {
 	m.lock.Lock()
 	defer m.lock.Unlock()

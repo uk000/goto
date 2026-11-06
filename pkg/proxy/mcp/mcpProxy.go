@@ -110,6 +110,7 @@ func WillProxyMCP(port int, r *http.Request) (willProxy bool) {
 	return false
 }
 
+// SetupMCPProxy adds a proxy target for the tool, which proxies it to the endpoint under the name of the other tool.
 func (p *MCPProxy) SetupMCPProxy(server, endpoint, fromTool, toTool string, headers map[string]string) error {
 	_, err := p.addMCPTarget(server, endpoint, fromTool, toTool, headers)
 	if err != nil {
@@ -118,6 +119,7 @@ func (p *MCPProxy) SetupMCPProxy(server, endpoint, fromTool, toTool string, head
 	return nil
 }
 
+// GetMCPProxyForPort returns the MCP proxy of the port, creating and registering it if it doesn't exist.
 func GetMCPProxyForPort(port int) *MCPProxy {
 	mcpProxyLock.RLock()
 	proxy := mcpProxyByPort[port]
@@ -134,12 +136,14 @@ func GetMCPProxyForPort(port int) *MCPProxy {
 	return proxy
 }
 
+// isEnabled tells whether the proxy is enabled.
 func (p *MCPProxy) isEnabled() bool {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	return p.Enabled
 }
 
+// hasTargets tells whether the proxy has any targets.
 func (p *MCPProxy) hasTargets() bool {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
@@ -156,6 +160,7 @@ func (p *MCPProxy) getTarget(tool string) *MCPTarget {
 	return p.Targets["*"]
 }
 
+// newMCPProxy creates an enabled proxy for the port, with no targets and a fresh tracker.
 func newMCPProxy(port int) *MCPProxy {
 	p := &MCPProxy{
 		Port:       port,
@@ -167,6 +172,7 @@ func newMCPProxy(port int) *MCPProxy {
 	return p
 }
 
+// Init removes all the targets of the proxy and resets its tracker.
 func (p *MCPProxy) Init() {
 	p.lock.Lock()
 	p.Targets = map[string]*MCPTarget{}
@@ -174,6 +180,7 @@ func (p *MCPProxy) Init() {
 	p.initTracker()
 }
 
+// initTracker replaces the tracker of the proxy with a fresh one.
 func (p *MCPProxy) initTracker() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -191,6 +198,7 @@ func (p *MCPProxy) RemoveProxy(server string) {
 	}
 }
 
+// addMCPTarget creates a target for the tool ("*" if none) with a copy of the headers, and registers it on the proxy.
 func (p *MCPProxy) addMCPTarget(server, endpoint, fromTool, toTool string, headers map[string]string) (*MCPTarget, error) {
 	if server == "" || endpoint == "" {
 		return nil, errors.New("no endpoint given")

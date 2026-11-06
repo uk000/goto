@@ -89,12 +89,14 @@ var (
 	clientMiddlewares = []*middleware.Middleware{&target.Middleware}
 )
 
+// setRoutes registers the /client routes: the target client middleware and the HTTP invoke/call endpoint.
 func setRoutes(r *mux.Router) {
 	clientRouter := middleware.RootPath("/client")
 	middleware.AddRoutes(clientRouter, clientMiddlewares...)
 	util.AddRoute(clientRouter, "/http/{q:invoke|call}", invokeHTTP, "GET", "POST", "PUT", "OPTIONS")
 }
 
+// PrepareAuthority gives the call URL an http(s) scheme (setting TLS for https) and defaults the authority to the URL host or the request's Host header.
 func (c *CallSpec) PrepareAuthority(r *http.Request) {
 	// it's the scheme that is looked for, and not just text that starts like one, as the name of a host may be httpbin
 	if !strings.HasPrefix(c.URL, "http://") && !strings.HasPrefix(c.URL, "https://") {
@@ -122,6 +124,7 @@ func (c *CallSpec) PrepareAuthority(r *http.Request) {
 	}
 }
 
+// PrepareRequest builds the outgoing request from the spec: payload (streamed via a pipe if chunked), headers, authority, TLS marker headers and optional x-request-id.
 func (c *CallSpec) PrepareRequest(r *http.Request) error {
 	var bodyReader io.Reader
 	if len(c.Payload) > 1 {
@@ -218,6 +221,7 @@ func (c *CallSpec) proxyURL() (*url.URL, error) {
 	return transport.ParseProxyURL(c.Proxy)
 }
 
+// Invoke sends the call Count times via a per-call HTTP client (optional proxy, TLS, client cert, ALPN) and collects each response's headers, payload, status, certs and timings.
 func (c *CallSpec) Invoke(r *http.Request) (*CallResults, error) {
 	callResults := &CallResults{URL: c.URL, Results: map[string]*CallResult{}}
 	c.PrepareAuthority(r)
@@ -364,6 +368,7 @@ func reportTimings(h http.Header, calls []*transport.CallTimings) {
 	}
 }
 
+// invokeHTTP is the client invoke API: it parses the call spec from the body, invokes it, and replies with the results plus upstream status, cert and timing headers.
 func invokeHTTP(w http.ResponseWriter, r *http.Request) {
 	rs := util.GetRequestStore(r)
 	call := &CallSpec{}
@@ -401,6 +406,7 @@ func invokeHTTP(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonOrYAMLPayload(w, callResults, !util.IsAcceptJSON(r))
 }
 
+// Run is the CLI client mode: it adds a target per configured URL, invokes them all, and logs (and optionally persists and reloads) the summary and detailed results.
 func Run() {
 	if global.CmdClientConfig.Verbose {
 		results.EnableInvocationResults(true)
