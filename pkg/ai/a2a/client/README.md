@@ -102,7 +102,7 @@ The `requestId` field is parsed but **not applied** by the A2A client: it always
 
 The format below applies to `/call`, `/call/result` and `/agent/{agent}/call`. For `/call/stream` see [Streaming vs JSON Response](#streaming-vs-json-response).
 
-- **Body**: a JSON object keyed by request ID. Each request's entry has `messages` (the text replies of the agent, in order), plus any data parts the agent returned (a data part with a single field is merged in under that field name, otherwise it is nested under a generated key). A top-level `headers` entry holds `<name> (A2A)` with the `RequestHeaders` and `ResponseHeaders` of the call, merged with any upstream headers that a remote `Goto` agent reported. Illustrative example (the content depends on the agent):
+- **Body**: a JSON object keyed by request ID. Each request's entry has `messages` (the text replies of the agent, in order), plus any data parts the agent returned (a data part with a single field is merged in under that field name, otherwise it is nested under a generated key). When the agent is a `Goto` agent, the entry also has a `ServerInfo` object (cluster, host, pod, listener, and the `Goto-A2A-Agent`/`Goto-A2A-Server` metadata) that identifies the `Goto` instance that served the call. A top-level `headers` entry holds `<name> (A2A)` with the `RequestHeaders` and `ResponseHeaders` of the call, merged with any upstream headers that a remote `Goto` agent reported. Illustrative example (the content depends on the agent):
   ```json
   {
     "[my-agent @ http://localhost:9090/agent/my-agent/] [Request# 1.1]": {

@@ -28,7 +28,7 @@ curl localhost:8080/registry/peers/peer1/targets/add --data '
 "name": "t1",
 "method":	"POST",
 "url": "http://somewhere/foo",
-"headers":[["x", "x1"],["y", "y1"]],
+"headers":{"x": "x1", "y": "y1"},
 "body": "{\"test\":\"this\"}",
 "replicas": 2, 
 "requestCount": 2, 
@@ -49,12 +49,12 @@ curl -X POST http://localhost:8080/registry/peers/peer1/jobs/clear
 
 curl localhost:8080/registry/peers/peer1/jobs/add --data '
 { 
-"id": "job1",
+"name": "job1",
 "task": {
 	"name": "job1",
 	"method":	"POST",
 	"url": "http://somewhere/echo",
-	"headers":[["x", "x1"],["y", "y1"]],
+	"headers":{"x": "x1", "y": "y1"},
 	"body": "{\"test\":\"this\"}",
 	"replicas": 1, 
   "requestCount": 1, 
@@ -70,7 +70,7 @@ curl localhost:8080/registry/peers/peer1/jobs/add --data '
 
 curl localhost:8080/registry/peers/peer1/jobs/add --data '
 { 
-"id": "job2",
+"name": "job2",
 "task": {"cmd": "sh", "args": ["-c", "date +%s; echo Hello; sleep 1;"]},
 "auto": true,
 "count": 10,
@@ -93,9 +93,14 @@ curl http://localhost:8080/registry/peers/jobs
 
 curl http://localhost:8080/registry/peers/peer1/jobs
 
-curl -X POST http://localhost:8080/registry/peers/peer1/jobs/job1,job2/invoke
+#run jobs job1 and job2 on all instances of peer1 (there is no `invoke` for jobs, use `run` and `stop`)
+curl -X POST http://localhost:8080/registry/peers/peer1/jobs/job1,job2/run
 
-curl -X POST http://localhost:8080/registry/peers/peer1/jobs/invoke/all
+curl -X POST http://localhost:8080/registry/peers/peer1/jobs/run/all
+
+curl -X POST http://localhost:8080/registry/peers/peer1/jobs/job1/stop
+
+curl -X POST http://localhost:8080/registry/peers/peer1/jobs/stop/all
 
 #store data in the peer1 locker under subkeys A->B->C
 curl -X POST http://localhost:8080/registry/peers/peer1/locker/store/A,B,C --data '{"some":"data"}'
@@ -117,20 +122,23 @@ curl -s localhost:8080/registry/lockers/data/paths
 #find all paths where text `foo` appears
 curl -s localhost:8080/registry/lockers/search/foo
 
-#get data from lockerA at path A->B->C
+#get data from lockerA at path XX->1->2
 curl -v localhost:8080/registry/lockers/lockerA/get/XX,1,2
 
-#dump all contents of lockerA
-curl -s localhost:8080/registry/lockers/lockerA/dump
+#dump all contents of lockerA (with data and peer lockers, 5 levels deep)
+curl -s "localhost:8080/registry/lockers/lockerA?data=y&peers=y&level=5"
 
 #dump all contents of all lockers
-curl -s localhost:8080/registry/lockers/all/dump
+curl -s localhost:8080/registry/lockers/all
 
 #generate a dump of registry
 curl -s localhost:8080/registry/dump
 
 #Load registry data from a previously generated dump
 curl -X POST http://localhost:8080/registry/load --data-binary @registry.dump
+
+#clone the registry data (peers, lockers, targets, jobs, tracking headers and probes) from another registry
+curl -X POST "localhost:8080/registry/cloneFrom?url=http://other-registry:8080"
 
 ```
 <br/>
@@ -251,157 +259,49 @@ $ curl -s localhost:8080/registry/peers | jq
 <summary>Registry Locker Example</summary>
 <p>
 
+Lockers of all peers in the current locker (label `default`), as a map of peer label (lower-cased) to the labeled locker holding the peer's data. Values are hidden (`"..."`) unless `?data=y&level={level}` are given. Each reporting pod has its own instance locker. Keys stored for the peer itself (`notes` below) sit next to `instanceLockers`.
+
 ```json
 $ curl -s localhost:8080/registry/peers/lockers
-
 {
-  "default": {
-    "label": "default",
-    "peerLockers": {
-      "peer1": {
-        "instanceLockers": {
-          "1.0.0.1:8081": {
-            "locker": {
-              "client": {
-                "data": "",
-                "subKeys": {
-                  "peer1_to_peer2": {
-                    "data": "...",
-                    "subKeys": {},
-                    "firstReported": "2020-11-20T23:34:58.059154-08:00",
-                    "lastReported": "2020-11-20T23:35:02.299239-08:00"
-                  },
-                  "peer1_to_peer3": {
-                    "data": "...",
-                    "subKeys": {},
-                    "firstReported": "2020-11-20T23:34:58.057888-08:00",
-                    "lastReported": "2020-11-20T23:35:02.297347-08:00"
-                  }
-                },
-                "firstReported": "2020-11-20T23:34:58.052197-08:00",
-                "lastReported": "0001-01-01T00:00:00Z"
-              }
-            },
-            "active": true
+  "peera": {
+    "default": {
+      "instanceLockers": {
+        "10.0.0.1:8081": {
+          "client": {
+            "firstReported": "2026-11-07T15:54:01.756122-08:00",
+            "lastReported": "2026-11-07T15:54:01.756122-08:00",
+            "tx": {
+              "data": "..."
+            }
           },
-          "1.0.0.1:9091": {
-            "locker": {
-              "client": {
-                "data": "",
-                "subKeys": {
-                  "peer1_to_peer2": {
-                    "data": "...",
-                    "subKeys": {},
-                    "firstReported": "2020-11-20T23:34:58.057506-08:00",
-                    "lastReported": "2020-11-20T23:35:02.281845-08:00"
-                  },
-                  "peer1_to_peer4": {
-                    "data": "...",
-                    "subKeys": {},
-                    "firstReported": "2020-11-20T23:34:58.053469-08:00",
-                    "lastReported": "2020-11-20T23:35:02.276481-08:00"
-                  }
-                },
-                "firstReported": "2020-11-20T23:34:58.053469-08:00",
-                "lastReported": "0001-01-01T00:00:00Z"
-              }
-            },
-            "active": true
+          "job_jall_1": {
+            "data": "...",
+            "firstReported": "2026-11-07T15:57:23.67841-08:00",
+            "lastReported": "2026-11-07T15:57:23.67841-08:00"
+          },
+          "job_scriptjob_1": {
+            "data": "...",
+            "firstReported": "2026-11-07T15:58:09.282276-08:00",
+            "lastReported": "2026-11-07T15:58:09.282276-08:00"
           }
-        },
-        "locker": {
-          "locker": {},
-          "active": true
         }
       },
-      "peer2": {
-        "instanceLockers": {
-          "1.0.0.1:8082": {
-            "locker": {
-              "client": {
-                "data": "",
-                "subKeys": {
-                  "peer2_to_peer1": {
-                    "data": "...",
-                    "subKeys": {},
-                    "firstReported": "2020-11-20T23:34:58.068331-08:00",
-                    "lastReported": "2020-11-20T23:35:02.301491-08:00"
-                  },
-                  "peer2_to_peer5": {
-                    "data": "...",
-                    "subKeys": {},
-                    "firstReported": "2020-11-20T23:34:58.055716-08:00",
-                    "lastReported": "2020-11-20T23:35:02.27662-08:00"
-                  }
-                },
-                "firstReported": "2020-11-20T23:34:58.052091-08:00",
-                "lastReported": "0001-01-01T00:00:00Z"
-              }
-            },
-            "active": true
-          },
+      "notes": {
+        "a": {
+          "data": "..."
         },
-        "locker": {
-          "locker": {},
-          "active": true
-        }
+        "firstReported": "2026-11-07T16:09:31.531901-08:00",
+        "lastReported": "2026-11-07T16:09:31.531901-08:00"
       }
-    },
-    "dataLocker": {
-      "locker": {},
-      "active": true
-    },
-    "current": true
+    }
   },
-  "lockerA": {
-    "label": "lockerA",
-    "peerLockers": {},
-    "dataLocker": {
-      "locker": {
-        "AA": {
-          "data": "",
-          "subKeys": {
-            "B": {
-              "data": "...",
-              "subKeys": {},
-              "firstReported": "2020-11-20T23:47:17.564845-08:00",
-              "lastReported": "2020-11-20T23:47:17.564845-08:00"
-            }
-          },
-          "firstReported": "2020-11-20T23:47:17.564845-08:00",
-          "lastReported": "0001-01-01T00:00:00Z"
-        }
-      },
-      "active": true
-    },
-    "current": false
-  },
-  "lockerB": {
-    "label": "lockerB",
-    "peerLockers": {},
-    "dataLocker": {
-      "locker": {
-        "XX": {
-          "data": "",
-          "subKeys": {
-            "XY": {
-              "data": "...",
-              "subKeys": {},
-              "firstReported": "2020-11-20T23:46:52.861559-08:00",
-              "lastReported": "0001-01-01T00:00:00Z"
-            }
-          },
-          "firstReported": "2020-11-20T23:46:52.861559-08:00",
-          "lastReported": "0001-01-01T00:00:00Z"
-        }
-      },
-      "active": true
-    },
-    "current": false
+  "peerb": {
+    "default": {}
   }
 }
-
 ```
+
 </p>
 </details>
 
@@ -8543,6 +8443,8 @@ $ curl -s localhost:8080/registry/peers/client/results/details
 <details>
 <summary>Peers Instances Client Results Example</summary>
 <p>
+
+**Note:** the sample below was produced by an older release that reported detailed per-instance results (`details` and `summary`). The current `/registry/peers/instances/client/results` API reports per-instance *summary* results only, as shown in the Peers Client Results Examples at the end of this page; a URI ending in `/instances/client/results/details` is not a registry API (it is read as the peer named `instances`).
 
 ```json
 
@@ -21739,3 +21641,803 @@ $ curl localhost:8080/registry/peers/instances/client/results
 
 </p>
 </details>
+
+<br/>
+
+### More Registry API Examples
+
+The examples below show the requests and the (abbreviated, where noted) responses of the registry APIs that are not covered above. Response bodies of the APIs that push configuration to peers are a map of peer to pod address to a success flag (see [Peer Push Results](registry-api-json-schemas.md#peer-push-results-json-schema)). `localhost:8080` is the registry, and `peerA` is a peer with one pod at `10.0.0.1:8081`.
+
+<details>
+<summary>Peer Registration Examples</summary>
+<p>
+
+Register a peer pod (what a peer sends at startup) and get its startup data:
+
+```
+$ curl -X POST localhost:8080/registry/peers/add --data '{"name":"peerC","address":"10.9.9.9:80","pod":"pc","namespace":"ns"}'
+{"Targets": {}, "Jobs": {}, "JobScripts": {}, "Files": {}, "TrackingHeaders": "x-foo,y-bar", "TrackingTimeBuckets": "0-100,101-300", "Probes": {"ReadinessProbe": "/ready", "LivenessProbe": "/live", "ReadinessStatus": 200, "LivenessStatus": 200}, "Message": ""}
+```
+
+A payload that is not a peer gets `400` and the parse error in `Message`:
+
+```
+$ curl -X POST localhost:8080/registry/peers/add --data 'not json'
+HTTP 400
+{"Targets":null,"Jobs":null,"JobScripts":null,"Files":null,"TrackingHeaders":"","TrackingTimeBuckets":"","Probes":null,"Message":"failed to parse json with error: invalid character 'o' in literal null (expecting 'u')"}
+```
+
+Remove the pod, and health-check a peer:
+
+```
+$ curl -X POST localhost:8080/registry/peers/peerC/remove/10.9.9.9:80
+Peer Removed: peerC
+
+$ curl localhost:8080/registry/peers/peerA/health
+{
+  "peerA": {
+    "10.0.0.1:8081": true
+  }
+}
+```
+
+</p>
+</details>
+
+<br/>
+
+<details>
+<summary>Peer Targets Examples</summary>
+<p>
+
+Add a target to a peer (the target is saved in the registry, and pushed to all pods of the peer). `headers` is a map of header name to a string value:
+
+```
+$ curl -X POST localhost:8080/registry/peers/peerA/targets/add --data '{"name":"t1","method":"GET","url":"http://localhost:8081/version","headers":{"x":"x1"},"requestCount":2,"delay":"100ms"}'
+{"peerA":{"10.0.0.1:8081":true}}
+```
+
+Validation errors (`400`, nothing is pushed):
+
+```
+$ curl -X POST localhost:8080/registry/peers/peerA/targets/add --data '{"name":"t1"}'
+HTTP 400
+Invalid target spec: url is required
+
+$ curl -X POST localhost:8080/registry/peers/peerA/targets/add --data '{"name":"t1","url":"http://x","headers":[["x","x1"]]}'
+HTTP 400
+failed to parse json
+```
+
+Get the targets saved for the peer (a map of target name to target; shortened):
+
+```
+$ curl localhost:8080/registry/peers/peerA/targets
+{
+  "t1": {
+    "name": "t1",
+    "protocol": "HTTP/1.1",
+    "method": "GET",
+    "url": "http://localhost:8081/version",
+    "headers": {
+      "x": "x1"
+    },
+    "replicas": 1,
+    "requestCount": 2,
+    "delay": "100ms",
+    "retryDelay": "1s",
+    "connTimeout": "5s",
+    "connIdleTimeout": "5m",
+    "requestTimeout": "5m",
+    "autoInvoke": false,
+    "...": "remaining target fields"
+  }
+}
+```
+
+Invoke, stop and remove targets. `424` means that no pod of a targeted peer accepted the request (here the target name is not known to the pod):
+
+```
+$ curl -X POST localhost:8080/registry/peers/peerA/targets/t1/invoke
+{"peerA":{"10.0.0.1:8081":true}}
+
+$ curl -X POST localhost:8080/registry/peers/peerA/targets/nosuch/invoke
+HTTP 424
+{"peerA":{"10.0.0.1:8081":false}}
+
+$ curl -X POST localhost:8080/registry/peers/peerA/targets/t1/stop
+{"peerA":{"10.0.0.1:8081":true}}
+
+$ curl -X POST localhost:8080/registry/peers/peerA/targets/t1/remove
+{"peerA":{"10.0.0.1:8081":true}}
+```
+
+</p>
+</details>
+
+<br/>
+
+<details>
+<summary>Peer Jobs Examples</summary>
+<p>
+
+```
+$ curl -X POST localhost:8080/registry/peers/peerA/jobs/add --data '{"name":"j1","task":{"cmd":"date"},"count":1}'
+{"peerA":{"10.0.0.1:8081":true}}
+
+$ curl localhost:8080/registry/peers/peerA/jobs
+{
+  "j1": {
+    "name": "j1",
+    "task": {
+      "cmd": "date"
+    },
+    "auto": false,
+    "delay": "",
+    "initialDelay": "",
+    "count": 1,
+    "cron": "",
+    "maxResults": 20,
+    "keepResults": 5,
+    "keepFirst": false,
+    "timeout": 600000000000,
+    "outputTrigger": null,
+    "finishTrigger": null
+  }
+}
+
+$ curl -X POST localhost:8080/registry/peers/peerA/jobs/j1/run
+{"peerA":{"10.0.0.1:8081":true}}
+
+$ curl -X POST localhost:8080/registry/peers/peerA/jobs/j1/remove
+{"peerA":{"10.0.0.1:8081":true}}
+```
+
+There is no `invoke` for jobs: jobs are started with `run` and `stop`ped.
+
+</p>
+</details>
+
+<br/>
+
+<details>
+<summary>Peer Tracking Headers, Time Buckets and Probes Examples</summary>
+<p>
+
+```
+$ curl -X POST localhost:8080/registry/peers/track/headers/x-foo,y-bar
+{"peerA":{"10.0.0.1:8081":true},"peerB":{}}
+
+$ curl localhost:8080/registry/peers/track/headers
+"x-foo,y-bar"
+
+$ curl -X POST localhost:8080/registry/peers/track/time/0-100,101-300
+{"peerA":{"10.0.0.1:8081":true},"peerB":{}}
+
+$ curl localhost:8080/registry/peers/track/time
+0-100,101-300
+
+$ curl -X POST 'localhost:8080/registry/peers/probes/readiness/set?uri=/ready'
+{"peerA":{"10.0.0.1:8081":true},"peerB":{}}
+
+$ curl -X POST localhost:8080/registry/peers/probes/liveness/set/status=200
+(same response format)
+
+$ curl localhost:8080/registry/peers/probes
+{"ReadinessProbe":"/ready","LivenessProbe":"/live","ReadinessStatus":200,"LivenessStatus":200}
+```
+
+Note that `GET .../track/headers` returns a JSON string, `GET .../track/time` returns plain text, and `GET .../probes` returns the capitalized [Peer Probes](registry-api-json-schemas.md#peer-probes-json-schema) fields. The registry's responses above include `"peerB": {}` when a peer without any callable pod is registered.
+
+</p>
+</details>
+
+<br/>
+
+<details>
+<summary>Peer Remote API Examples</summary>
+<p>
+
+```
+$ curl localhost:8080/registry/peers/peerA/apis
+{
+  "peerA": {
+    "all": [
+      "http://10.0.0.1:8080/registry/peers/peerA/call?uri=/version",
+      "http://10.0.0.1:8080/registry/peers/peerA/call?uri=/client/results",
+      "http://10.0.0.1:8080/registry/peers/peerA/call?uri=/client/targets",
+      "..."
+    ],
+    "p1": [
+      "http://10.0.0.1:8081/version",
+      "http://10.0.0.1:8081/client/results",
+      "http://10.0.0.1:8081/client/targets",
+      "..."
+    ]
+  }
+}
+```
+
+Call a URI on all pods of a peer (`/version` here answers with its headers):
+
+```
+$ curl 'localhost:8080/registry/peers/peerA/call?uri=/version'
+{
+  "peerA": {
+    "10.0.0.1:8081": {
+      "Goto-Host": "host1.local[10.0.0.1](LocalNode[0.0.0.0]@LocalCluster)",
+      "Goto-Port": "8081",
+      "Request-Method": "GET",
+      "Request-URI": "/version",
+      "Via-Goto": "[peerA:8081][host1@local@LocalCluster]",
+      "...": ""
+    }
+  }
+}
+```
+
+</p>
+</details>
+
+<br/>
+
+<br/>
+
+<details>
+<summary>Lockers Examples</summary>
+<p>
+
+Open a nested locker (`sub1` inside `lockerA`, it becomes the current locker), store data and append to a list:
+
+```
+$ curl -X POST localhost:8080/registry/lockers/open/lockerA,sub1
+[Context: ] Locker lockerA,sub1 is open and active
+
+$ curl -X POST localhost:8080/registry/lockers/lockerA/store/A,B,C --data '{"some":"data"}'
+Data stored in [Context: ] labeled locker lockerA for path [A B C]
+
+$ curl -X POST localhost:8080/registry/lockers/lockerA/store/A,D --data 'text for D'
+Data stored in [Context: ] labeled locker lockerA for path [A D]
+
+$ curl -X POST localhost:8080/registry/lockers/lockerA/L/add --data 'one'
+Data stored in [Context: ] labeled locker lockerA for path [L]
+
+$ curl -X POST localhost:8080/registry/lockers/lockerA/L/add --data 'two'
+Data stored in [Context: ] labeled locker lockerA for path [L]
+```
+
+Read data: a leaf returns its text (a list prints as `[a b]`), and a key that has sub-keys returns the sub-tree (values are hidden unless `data=y`). Reading a path that has nothing returns `200` with `{}`:
+
+```
+$ curl localhost:8080/registry/lockers/lockerA/get/A,B,C
+{"some":"data"}
+
+$ curl localhost:8080/registry/lockers/lockerA/get/L
+[one two]
+
+$ curl localhost:8080/registry/lockers/lockerA/get/A
+{
+  "A": {
+    "B": {
+      "C": {
+        "data": "..."
+      }
+    },
+    "D": {
+      "data": "..."
+    },
+    "firstReported": "2026-11-07T16:12:04.869349-08:00",
+    "lastReported": "2026-11-07T16:12:04.885804-08:00"
+  }
+}
+
+$ curl 'localhost:8080/registry/lockers/lockerA/get/A?data=y&level=2'
+{
+  "A": {
+    "B": {
+      "C": {
+        "data": "{\"some\":\"data\"}"
+      }
+    },
+    "D": {
+      "data": "text for D"
+    },
+    "firstReported": "2026-11-07T16:12:04.869349-08:00",
+    "lastReported": "2026-11-07T16:12:04.885804-08:00"
+  }
+}
+
+$ curl localhost:8080/registry/lockers/lockerA/get/nosuch
+{}
+```
+
+Get the whole locker with its data (a stored text that is a JSON object is shown as an object in this view), the data lockers as markdown, and the locker labels:
+
+```
+$ curl 'localhost:8080/registry/lockers/lockerA?data=y&peers=n&level=3'
+{
+  "current": true,
+  "dataLocker": {
+    "A": {
+      "B": {
+        "C": {
+          "data": {
+            "some": "data"
+          }
+        }
+      },
+      "D": {
+        "data": "text for D"
+      },
+      "firstReported": "2026-11-07T16:12:04.869349-08:00",
+      "lastReported": "2026-11-07T16:12:04.885804-08:00"
+    },
+    "L": {
+      "data": [
+        "one",
+        "two"
+      ],
+      "firstReported": "2026-11-07T16:12:04.902374-08:00",
+      "lastReported": "2026-11-07T16:12:04.91874-08:00"
+    }
+  },
+  "firstOpened": "2026-11-07T16:12:05.074952-08:00",
+  "label": "lockerA",
+  "lastOpened": "2026-11-07T16:12:05.074952-08:00",
+  "peerLockers": {},
+  "subLockers": {
+    "sub1": {
+      "current": true,
+      "dataLocker": {},
+      "firstOpened": "2026-11-07T16:12:05.074953-08:00",
+      "label": "sub1",
+      "lastOpened": "2026-11-07T16:12:05.074953-08:00",
+      "peerLockers": {},
+      "subLockers": {}
+    }
+  }
+}
+
+$ curl 'localhost:8080/registry/lockers/lockerA/data?data=y&level=2&md=y'
+## lockerA
+**A**
+- B
+  - ...
+- D:  
+  text for D
+
+**L**
+- one
+- two
+
+$ curl localhost:8080/registry/lockers/labels
+{
+  "default": {
+    "current": false,
+    "firstOpened": "2026-11-07T16:10:56.186171-08:00",
+    "lastOpened": "2026-11-07T16:10:56.186171-08:00"
+  },
+  "lockerA": {
+    ".": {
+      "current": true,
+      "firstOpened": "2026-11-07T16:12:04.851325-08:00",
+      "lastOpened": "2026-11-07T16:12:04.851325-08:00"
+    },
+    "lockerA,sub1": {
+      "current": true,
+      "firstOpened": "2026-11-07T16:12:04.851326-08:00",
+      "lastOpened": "2026-11-07T16:12:04.851326-08:00"
+    }
+  }
+}
+```
+
+Keys, paths and search (`search` matches key names with a case-insensitive regular expression, and responds `400` if the expression is not valid):
+
+```
+$ curl localhost:8080/registry/lockers/lockerA/data/keys
+{
+  "lockerA": {
+    "data": [
+      "A,D",
+      "A,B,C",
+      "L"
+    ],
+    "peerLockers": {},
+    "subLockers": {
+      "sub1": {
+        "peerLockers": {}
+      }
+    }
+  }
+}
+
+$ curl localhost:8080/registry/lockers/lockerA/data/paths
+{
+  "lockerA": {
+    "data": {
+      "A": {
+        "B": {
+          "C": "/registry/lockers/lockerA/get/A,B,C"
+        },
+        "D": "/registry/lockers/lockerA/get/A,D"
+      },
+      "L": "/registry/lockers/lockerA/get/L"
+    },
+    "peerLockers": {},
+    "subLockers": {
+      "sub1": {
+        ".": "/registry/lockers/lockerA,sub1/data/paths",
+        "peerLockers": {}
+      }
+    }
+  }
+}
+
+$ curl localhost:8080/registry/lockers/lockerA/search/L
+{
+  "lockerA": {
+    "data": {
+      "L": "/registry/lockers/lockerA/get/L"
+    },
+    "peerLockers": {}
+  }
+}
+
+$ curl 'localhost:8080/registry/lockers/search/%5B'
+HTTP 400
+Cannot search. Invalid search expression: error parsing regexp: missing closing ]: `[`
+```
+
+Remove data, clear and close lockers, and the error responses:
+
+```
+$ curl -X POST localhost:8080/registry/lockers/lockerA/remove/A,B,C
+Data removed from labeled locker lockerA for path [A B C]
+
+$ curl -X POST localhost:8080/registry/lockers/lockerA/clear
+[Context: ] Locker lockerA is cleared
+
+$ curl -X POST localhost:8080/registry/lockers/lockerA/close
+[Context: ] Locker lockerA is closed
+
+$ curl -X POST localhost:8080/registry/lockers/default/close
+HTTP 400
+Default locker cannot be closed
+
+$ curl -X POST localhost:8080/registry/lockers/NoSuch/close
+HTTP 404
+Locker not found
+
+$ curl 'localhost:8080/registry/lockers/NoSuch?data=y&peers=y&level=2'
+HTTP 404
+Locker not found
+```
+
+Context lockers are a separate set of lockers per context:
+
+```
+$ curl -X POST localhost:8080/registry/context/c1/lockers/Q/open
+[Context: c1] Locker Q is open and active
+
+$ curl -X POST localhost:8080/registry/context/c1/lockers/Q/store/a,b --data 'ctx data'
+Data stored in [Context: c1] labeled locker Q for path [a b]
+
+$ curl localhost:8080/registry/context/c1/lockers/Q/get/a,b
+ctx data
+```
+
+</p>
+</details>
+
+<br/>
+
+<details>
+<summary>Peer Lockers Examples</summary>
+<p>
+
+Store data in the locker of a peer instance (this is what the peers do to report their results, under the key `client`), and read it back. Reading a key that has sub-keys at the peer level returns a map of instance address (and the peer label for the peer's own data) to the sub-tree:
+
+```
+$ curl -X POST localhost:8080/registry/peers/peerA/10.0.0.1:8081/locker/store/notes,1 --data 'hello from the registry'
+Peer peerA data stored for path [notes 1]
+
+$ curl localhost:8080/registry/peers/peerA/10.0.0.1:8081/locker/get/notes,1
+hello from the registry
+
+$ curl localhost:8080/registry/peers/peerA/locker/get/notes
+{
+  "10.0.0.1:8081": {
+    "...": "",
+    "firstReported": "2026-11-07T16:10:15.295998-08:00",
+    "lastReported": "2026-11-07T16:10:15.295998-08:00"
+  },
+  "peera": {
+    "...": "",
+    "firstReported": "2026-11-07T16:09:31.531901-08:00",
+    "lastReported": "2026-11-07T16:09:31.531901-08:00"
+  }
+}
+```
+
+</p>
+</details>
+
+<br/>
+
+<details>
+<summary>Peers Client Results Examples</summary>
+<p>
+
+Summary results of all peers (the same as `.../client/results/summary`). The same output restricted to some targets with the path segment `targets=`, and the empty cases (an unknown peer gives `{}`, targets that match nothing give an empty object per peer, an unknown locker label gives `404`):
+
+```
+$ curl localhost:8080/registry/peers/client/results
+{
+  "peera": {
+    "countsByStatusCodes": {
+      "200": 2
+    },
+    "countsByURIs": {
+      "/version": 2
+    },
+    "countsByTimeBuckets": {
+      "[0 100]": 2
+    },
+    "byTargets": {
+      "t1": {
+        "countsByStatusCodes": {
+          "200": 2
+        },
+        "countsByURIs": {
+          "/version": 2
+        },
+        "countsByTimeBuckets": {
+          "[0 100]": 2
+        },
+        "invocationCount": 2,
+        "firstResultAt": "2026-11-07T16:11:17.67865-08:00",
+        "lastResultAt": "2026-11-07T16:11:17.783553-08:00"
+      }
+    }
+  }
+}
+
+$ curl localhost:8080/registry/peers/client/results/targets=nosuch
+{
+  "peera": {},
+  "peerb": {}
+}
+
+$ curl localhost:8080/registry/peers/nosuch/client/results
+{}
+
+$ curl localhost:8080/registry/lockers/NoSuch/peers/client/results
+HTTP 404
+Locker not found
+```
+
+Summary results per peer instance (`/registry/peers/instances/client/results`). The instance results are summaries, there is no detailed per-instance output:
+
+```
+$ curl localhost:8080/registry/peers/instances/client/results
+{
+  "peera": {
+    "10.0.0.1:8081": {
+      "countsByStatusCodes": {
+        "200": 2
+      },
+      "countsByURIs": {
+        "/version": 2
+      },
+      "countsByTimeBuckets": {
+        "[0 100]": 2
+      },
+      "byTargets": {
+        "t1": {
+          "countsByStatusCodes": {
+            "200": 2
+          },
+          "countsByURIs": {
+            "/version": 2
+          },
+          "countsByTimeBuckets": {
+            "[0 100]": 2
+          },
+          "invocationCount": 2,
+          "firstResultAt": "2026-11-07T16:11:17.67865-08:00",
+          "lastResultAt": "2026-11-07T16:11:17.783553-08:00"
+        }
+      }
+    }
+  }
+}
+```
+
+Detailed results (`summary` per peer plus `details` per peer and target; shortened here, see the larger example above):
+
+```
+$ curl localhost:8080/registry/peers/peera/client/results/details
+{
+  "summary": {
+    "peera": {
+      "countsByStatusCodes": {
+        "200": {
+          "byTimeBuckets": {
+            "[0 100]": 2
+          },
+          "clientStreamCount": 0,
+          "count": 2,
+          "serverStreamCount": 0
+        }
+      },
+      "countsByURIs": {
+        "/version": {
+          "byStatusCodes": {
+            "200": 2
+          },
+          "byTimeBuckets": {
+            "[0 100]": 2
+          },
+          "clientStreamCount": 0,
+          "count": 2,
+          "serverStreamCount": 0
+        }
+      },
+      "countsByTimeBuckets": {
+        "[0 100]": {
+          "byStatusCodes": {
+            "200": 2
+          },
+          "clientStreamCount": 0,
+          "count": 2,
+          "serverStreamCount": 0
+        }
+      },
+      "byTargets": {
+        "t1": {
+          "...": "same fields as the peer, plus invocationCount, firstResultAt and lastResultAt"
+        }
+      }
+    }
+  },
+  "details": {
+    "peera": {
+      "t1": {
+        "target": "t1",
+        "invocationCount": 2,
+        "firstResultAt": "2026-11-07T16:11:17.67865-08:00",
+        "lastResultAt": "2026-11-07T16:11:17.783553-08:00",
+        "clientStreamCount": 0,
+        "serverStreamCount": 0,
+        "retriedInvocationCounts": 0,
+        "countsByStatus": {
+          "200 OK": 2
+        },
+        "countsByStatusCodes": "...",
+        "countsByURIs": "...",
+        "countsByTimeBuckets": "..."
+      }
+    }
+  }
+}
+```
+
+</p>
+</details>
+
+<br/>
+
+<details>
+<summary>Registry Dump, Load and Clone Examples</summary>
+<p>
+
+The dump has one section each for the lockers, peers, targets, jobs, tracking headers and probes (shown here cut to two levels deep):
+
+```
+$ curl -s localhost:8080/registry/dump
+{
+  "lockers": {
+    "Z": {
+      "current": true,
+      "dataLocker": {
+        "...": ""
+      },
+      "firstOpened": "2026-11-07T16:03:22.527973-08:00",
+      "label": "Z",
+      "lastOpened": "2026-11-07T16:03:22.527973-08:00",
+      "peerLockers": {},
+      "subLockers": {
+        "...": ""
+      }
+    },
+    "default": {
+      "current": true,
+      "dataLocker": {},
+      "firstOpened": "2026-11-07T15:53:59.686098-08:00",
+      "label": "default",
+      "lastOpened": "2026-11-07T16:09:31.517321-08:00",
+      "peerLockers": {
+        "...": ""
+      },
+      "subLockers": {}
+    }
+  },
+  "peerJobs": {
+    "peerA": {
+      "scriptjob": {
+        "...": ""
+      }
+    },
+    "peerB": {}
+  },
+  "peerProbes": {
+    "ReadinessProbe": "/ready",
+    "LivenessProbe": "/live",
+    "ReadinessStatus": 200,
+    "LivenessStatus": 200
+  },
+  "peerTargets": {
+    "peerA": {
+      "t2": {
+        "...": ""
+      },
+      "t4": {
+        "...": ""
+      },
+      "tc": {
+        "...": ""
+      },
+      "tx": {
+        "...": ""
+      }
+    },
+    "peerB": {}
+  },
+  "peerTrackingHeaders": "x-foo,y-bar",
+  "peers": {
+    "peerA": {
+      "name": "peerA",
+      "namespace": "local",
+      "pods": {
+        "...": ""
+      },
+      "podEpochs": {
+        "...": ""
+      }
+    },
+    "peerB": {
+      "name": "peerB",
+      "namespace": "ns",
+      "pods": {},
+      "podEpochs": {
+        "...": ""
+      }
+    }
+  }
+}
+```
+
+Loading replaces only the sections that are present in the payload, and only if all the sections parse (else `400` and nothing is changed). Cloning from an unreachable registry fails with `500`:
+
+```
+$ curl -X POST localhost:8080/registry/load --data '{"peerTargets": "x"}'
+HTTP 400
+Registry data not loaded. [failed to load peerTargets with error: json: cannot unmarshal string into Go value of type map[string]registry.PeerTargets]
+
+$ curl -X POST localhost:8080/registry/load --data 'not json'
+HTTP 400
+failed to load data with error: invalid character 'o' in literal null (expecting 'u')
+
+$ curl -X POST localhost:8080/registry/load --data @registry.dump
+Registry data loaded
+
+$ curl -X POST 'localhost:8080/registry/cloneFrom?url=http://localhost:1'
+HTTP 500
+failed to clone peers data from registry [http://localhost:1], error: Get "http://localhost:1/registry/peers": dial tcp [::1]:1: connect: connection refused
+```
+
+</p>
+</details>
+
+<br/>

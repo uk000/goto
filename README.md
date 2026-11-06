@@ -28,7 +28,7 @@ It can act as:
   -- UDP Server that can proxy UDP requests/responses to upstream endpoints.
   --  The server can track and report summary data about the received traffic.
   See the [TOC](#toc) for a complete list of server features. 
-- A [client](pkg/client/README.md) that can generate HTTP/S, TCP, and gRPC traffic to other services (including other `goto` instances), track summary results of the traffic, and report results via [APIs](pkg/client/README.md#client-apis) as well as publish results to a [Goto registry](pkg/registry/Overview.md). 
+- A [client](pkg/client/README.md) that can generate HTTP/S, HTTP/2 and gRPC traffic to other services (a `tcp` client target is accepted by the API but cannot currently be invoked; use [TCP proxy/server](pkg/server/tcp/README.md) features for TCP testing) (including other `goto` instances), track summary results of the traffic, and report results via [APIs](pkg/client/README.md#client-apis) as well as publish results to a [Goto registry](pkg/registry/Overview.md). 
 - A [proxy](pkg/proxy/README.md) that can act as an HTTP/S, TCP, UDP, gRPC, or MCP proxy, allowing you to chain traffic through a `goto` instance to an upstream server, and inspect the requests/responses. The HTTP proxy allows for triggering upstream endpoints based on match criteria, and perform request and response transformations.
 - A [tunnel](pkg/tunnel/README.md) that allows tunneling of HTTP/S and TCP traffic across multiple hops. This allows testing traffic behavior as it goes through overlay boundaries and through various intermediary proxies/gateways.
 - A [job executor](pkg/job/README.md) that can run shell commands/scripts as well as make HTTP calls, collect and report results. It allows chaining of jobs together so that output of one job triggers another job with input. Additionally, jobs can be auto-executed via cron, and can act as a source of data for pipelines (more on this under `pipelines`)
@@ -135,7 +135,7 @@ Now that you have `goto` running, what can you do with it? Below are a few of th
 - Use REST APIs to trigger gRPC traffic to a remote gRPC server based on a given `proto` definition.
 
 ### gRPC Proxy Scenarios
-- Use REST APIs to trigger gRPC traffic to a remote gRPC server based on a given `proto` definition.
+- Use `goto` as a gRPC proxy that forwards gRPC calls (unary and streaming) received on a port to an upstream gRPC server, tracking them on the way. See [gRPC proxy](pkg/proxy/grpc/README.md).
 
 
 ### TCP Server/Proxy Scenarios
@@ -186,8 +186,12 @@ See [Use Cases](docs/use-cases.md) for more examples.
 - [APIs](#-goto-apis)
 
 ### AI
-- [A2A Agent](pkg/ai/a2a/server/README.md#a2a-agent-server-features)
-- [MCP Server and Client](pkg/ai/mcp/server/README.md#mcp-admin-apis)
+- [AI Overview (A2A, MCP, JSON-RPC)](pkg/ai/README.md)
+- [A2A Agent Server](pkg/ai/a2a/server/README.md#a2a-agent-server-features)
+- [A2A Client](pkg/ai/a2a/client/README.md)
+- [MCP Server](pkg/ai/mcp/server/README.md#mcp-admin-apis)
+- [MCP Client](pkg/ai/mcp/client/README.md)
+- [MCP Proxy](pkg/proxy/mcp/README.md)
 
 ### Traffic (Client)
 - [Goto's HTTP/gRPC/TCP Client Features (To run Traffic)](pkg/client/README.md)
@@ -226,6 +230,15 @@ See [Use Cases](docs/use-cases.md) for more examples.
 ### TCP Server
 - [TCP Server](pkg/server/tcp/README.md)
 
+### Stats, Routing and UI
+- [Stats, Routing and UI APIs](#-goto-stats-routing-and-ui)
+- [Router (runtime routes)](pkg/router/README.md)
+
+### TLS
+- [TLS certs, keys and listeners](pkg/tls/README.md)
+
+### Memory
+- [Memory (contexts and extraction)](pkg/memory/README.md)
 
 ### Tunnel
 - [Tunnel](pkg/tunnel/README.md)
@@ -279,22 +292,63 @@ See [Startup Command](cmd/README.md) doc.
 |---|---|---|
 | GET       | /goto/version    | Get version info of this `goto` instance.  |
 
+Response is a JSON object with the `version` of the build, and the `commit` it was built from (empty for local builds):
+```
+$ curl localhost:8080/goto/version
+{
+  "commit": "",
+  "version": "0.9.20"
+}
+```
+
 ###### <small> [Back to TOC](#toc) </small>
 
 <br/>
 
 # <a name="goto-apis"></a>
 ## > Goto APIs
-This API returns a list of Goto's admin APIs, grouped by features (prefixes)
+This API returns a list of Goto's admin APIs, grouped by features (prefixes). The listing is the authoritative index of everything this build serves: each entry is a `[METHODS] URI` pair, where `{name}` is a path parameter, `?name={name}` is a query parameter, and `{name:a|b}` is a path parameter restricted to the listed values.
 
 #### APIs
 |METHOD|URI|Description|
 |---|---|---|
 | GET       | /goto/apis, /goto/routes    | Get a list of all APIs offered by this version of `Goto`.  |
 | GET       | /goto/apis/refresh | Refresh cached APIs and present the refreshed list.  |
-| GET       | /goto/apis?level=`{level}`    | Get a list of APIs upto the given level depth  |
-| GET       | /goto/apis?q=`{query}`    | Filter the APIs based on the given query text  |
-| GET       | /goto/apis?url=`{url}`    | Show the APIs with `curl` command using the given base URL |
+| GET       | /goto/apis/level=`{level}`    | Get a list of APIs only upto the given level depth: `1` for the feature prefixes (e.g. `/server`), `2` for sub-roots, `3` for sub-paths. Note that `level` is a path segment, not a query param (`?level=` is ignored).  |
+| GET       | /goto/apis?q=`{query}`    | Filter the APIs to the ones whose root, sub-root or path contains the query text  |
+| GET       | /goto/apis?url=`{url}`    | Show the APIs as `curl` commands using the given base URL. Can be combined with `q`: `/goto/apis?q={query}&url={url}` |
+
+The output format follows the `Accept` header of the request: JSON by default (nested by prefix), `Accept: application/yaml` for YAML, and `Accept: text/plain` for a flat sorted list with one API per line.
+
+```
+# All APIs whose URI has `memory` in it, as a flat list
+$ curl -H 'Accept: text/plain' 'localhost:8080/goto/apis?q=memory'
+/memory/context/{context}/add/{key}={value} [POST]
+/memory/context/{context}/memory [GET]
+...
+
+# Same, but as ready-to-run curl commands against a base URL
+$ curl -H 'Accept: text/plain' 'localhost:8080/goto/apis?q=version&url=http://localhost:8080'
+
+# Only the feature prefixes
+$ curl localhost:8080/goto/apis/level=1
+```
+
+###### <small> [Back to TOC](#toc) </small>
+
+<br/>
+
+# <a name="goto-stats"></a>
+## > Goto Stats, Routing and UI
+These APIs are served on every port of the `goto` instance (use the `/port={port}/...` prefix to reach another port).
+
+|METHOD|URI|Description|
+|---|---|---|
+| GET       | /stats    | Request counts tracked by the server on this port, by headers, URIs, URI+headers, and so on. See [Metrics](pkg/metrics/README.md). |
+| POST      | /stats/clear    | Clear the tracked request counts. |
+| GET       | /routing, /routing/all    | Show the runtime routes (rules that forward matching inbound requests to another URL) and the traffic recorded for them, for this port or all ports. See [Router](pkg/router/README.md). |
+| POST      | /routing/add, /routing/clear, /routing/clear/all    | Add a route, or clear the routes of this port or of all ports. See [Router](pkg/router/README.md). |
+| GET       | /ui, /ui/api, /ui/ws    | Built-in web UI (served as `text/html`), its API console page, and the websocket it uses for live updates. |
 
 ###### <small> [Back to TOC](#toc) </small>
 

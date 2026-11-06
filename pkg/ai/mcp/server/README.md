@@ -24,6 +24,7 @@ Once an MCP server is configured, a client can call `/mcp/{server-name}` to inte
   - [Servers APIs](#servers-apis) and [Server APIs](#server-apis)
   - [Component Management](#component-management), [Component Payload Configuration](#component-payload-configuration), [Tool Call](#tool-call-server-side)
   - [MCP Status Management](#mcp-status-management)
+- [Startup configuration](#mcp-startup-config)
 - [MCP JSON Schemas](#mcp-json-schemas): [MCPServerPayload](#mcpserverpayload), [MCPServer](#mcpserver), [ToolSchema](#toolschema), [MCPTool](#mcptool), [Tool](#tool), [ToolAnnotations](#toolannotations), [ToolBehavior](#toolbehavior), [ToolConfig](#toolconfig), [ToolCall](#toolcall), [AgentCall](#agentcall), [ToolCallArgs](#toolcallargs), [Tool Behavior Details](#tool-behavior-details), [MCPPrompt](#mcpprompt), [MCPResource](#mcpresource), [MCPResourceTemplate](#mcpresourcetemplate), [StatusConfig](#statusconfig), [Payload](#payload), [Headers](#headers), [Delay](#delay), [Status Path Parameter Format](#status-path-parameter-format)
 
 ## <a name="mcp-request-routing"></a>Request Routing and Response Headers
@@ -138,7 +139,72 @@ separated list such as `methods=GET`, `methods=GET,POST`, or `methods=*` for all
 A status for `POST` applies to tool calls. A status for `GET` applies to the requests that open the stream of events of the server, which are answered with the
 status instead of opening it. The statuses of different methods for the same server are separate: each has its own `times` count, and setting one again
 changes it and leaves the others as they are.
+
 ---
+
+## <a name="mcp-startup-config"></a>Startup configuration
+MCP servers can also be loaded at startup from the `mcp` section of a config yaml file, in a folder given with `--config` (see the [command line options](../../../../cmd/README.md)). The file is loaded once the listeners are up, and the servers are removed again when the file is removed. The same section is what `goto ctl apply` sends to a running instance, through the admin APIs above. The keys are the field names of the JSON schemas below. See [sample-mcp-config.yaml](../sample-mcp-config.yaml) for a long example.
+
+```
+mcp:
+  toolSchemas:                   # input schemas that tools of this file can name in `schema`
+    - name: textonly
+      inputSchema:
+        type: object
+        properties:
+          text:
+            type: string
+  servers:
+    - server:                    # an MCPServerPayload
+        name: s1
+        version: "1.0"
+        port: 8080               # set it: there is no request to take the port from
+        hasTools: true
+        enabled: true
+        uri: /mcp/s1
+      tools:                     # MCPTool, as for /tools/add
+        - tool:
+            name: echo
+            description: echo
+          schema: textonly
+          behavior:
+            echo: true
+        - tool:
+            name: stream1
+          behavior:
+            stream: true
+      prompts: []                # MCPPrompt, MCPResource, MCPResourceTemplate, as for the add APIs
+      resources: []
+      templates: []
+      payloads:
+        server:
+          completions:           # completion suggestions, for the type ref/prompt
+            list: [a, b]
+            delay: 10ms-20ms
+          toolPayloads:          # a JSON payload of a tool, as for /payload/tools/{name}
+            - name: echo
+              payload: {a: 1}
+          streamPayloads:        # a stream payload of a tool, as for /payload/tools/{name}/stream/...
+            - name: stream1
+              payload:
+                data: [{a: 1}, {a: 2}]
+                count: 2
+                delay: 10ms
+        client:                  # payloads of the MCP client of the server's name
+          sample:                # as for /mcpapi/client/{name}/payload/sample
+            contents: ["sampled on client"]
+          elicit:                # ... /payload/elicit
+            contents: ["ok"]
+            actions: ["approve"]
+          roots:                 # ... /payload/roots
+            - uri: file:///tmp/work
+              name: work
+```
+
+Notes:
+- `server.port` is not defaulted from a listener at startup (the API defaults it to the port of the request), so set it.
+- A tool's `schema` must name an entry of the file's `toolSchemas`: the built-in schemas `default` and `basic`, which `/tools/add` accepts, are not available in a startup file. A tool that names an unknown schema is left out, with the log line `Invalid tool schema reference: x. Skipping tool [name]`. A tool that has neither `schema` nor `inputSchema` gets the schema `{"type":"object","required":[]}`.
+- The servers are added first, then their tools, prompts, resources, templates and payloads. An error in one of these is logged (`[*** ERROR ***] ...`) and the rest of the file continues to load, except that an entry of `toolPayloads` or `streamPayloads` that is empty (`-` with nothing after it) stops the loading of the rest of the `mcp` section.
 
 ## MCP JSON Schemas
 # <a name="mcp-json-schemas"></a>
@@ -213,7 +279,7 @@ The `/mcpapi/server/{server}/tools/add` API accepts a JSON array of `MCPTool` ob
 | uri | string | No | Custom URI subpath for this tool. Defaults to `"/<tool-name>"` (lowercased). |
 | serverURI | string | No | Output only: the full URI of the tool, which is the server's URI followed by `uri`. |
 | response | [Payload](#payload) | No | Pre-configured static or streaming response payload for the tool. |
-| proxy | bool | No | If `true`, the tool is a proxy that forwards calls to a remote MCP server, through the MCP proxy of the port. Requires `config.remote.url`. |
+| proxy | bool | No | If `true`, the tool is meant to be a proxy that forwards calls to a remote MCP server, through the MCP proxy of the port. Requires `config.remote.url`. Adding the tool sets up an [MCP proxy target](../../../proxy/mcp/README.md) for it, but the MCP proxy doesn't forward requests yet: a `tools/call` for such a tool isn't answered by the tool, it gets the regular `Goto` request echo (see the notes of the MCP proxy README). Use the `remote` behavior to call a tool of another MCP server. |
 
 #### Tool
 <a name="tool"></a>
