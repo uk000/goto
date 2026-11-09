@@ -131,9 +131,13 @@ func openLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	}
 	registry.lockersLock.Unlock()
 	if label != "" {
-		ll.OpenLocker(label)
-		w.WriteHeader(http.StatusOK)
-		msg = fmt.Sprintf("[Context: %s] Locker %s is open and active", context, label)
+		if err := ll.OpenLocker(label); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = fmt.Sprintf("[Context: %s] Locker not opened: %s", context, err.Error())
+		} else {
+			w.WriteHeader(http.StatusOK)
+			msg = fmt.Sprintf("[Context: %s] Locker %s is open and active", context, label)
+		}
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "Locker label needed"
@@ -357,9 +361,14 @@ func storeInLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	registry.lockersLock.Unlock()
 	if label != "" && len(path) > 0 {
 		data := util.Read(r.Body)
-		ll.GetOrCreateLocker(label).Store(path, data, add)
-		w.WriteHeader(http.StatusOK)
-		msg = fmt.Sprintf("Data stored in [Context: %s] labeled locker %s for path %+v", context, label, path)
+		if cl := ll.GetOrCreateLocker(label); cl != nil {
+			cl.Store(path, data, add)
+			w.WriteHeader(http.StatusOK)
+			msg = fmt.Sprintf("Data stored in [Context: %s] labeled locker %s for path %+v", context, label, path)
+		} else {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = fmt.Sprintf("Data not stored. Invalid locker label: %s", label)
+		}
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "Not enough parameters to access locker"
@@ -376,9 +385,17 @@ func removeFromLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	label := util.GetStringParamValue(r, "label")
 	path, _ := util.GetListParam(r, "path")
 	if label != "" && len(path) > 0 {
-		registry.labeledLockers.GetOrCreateLocker(label).Remove(path)
-		w.WriteHeader(http.StatusOK)
-		msg = fmt.Sprintf("Data removed from labeled locker %s for path %+v", label, path)
+		registry.lockersLock.RLock()
+		ll := registry.labeledLockers
+		registry.lockersLock.RUnlock()
+		if cl := ll.GetOrCreateLocker(label); cl != nil {
+			cl.Remove(path)
+			w.WriteHeader(http.StatusOK)
+			msg = fmt.Sprintf("Data removed from labeled locker %s for path %+v", label, path)
+		} else {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = fmt.Sprintf("Data not removed. Invalid locker label: %s", label)
+		}
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "Not enough parameters to access locker"

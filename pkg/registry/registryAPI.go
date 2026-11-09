@@ -130,12 +130,15 @@ func addPeer(w http.ResponseWriter, r *http.Request) {
 	peer := &Peer{}
 	peerData := &PeerData{}
 	msg := ""
+	reply := ""
 	payload := util.Read(r.Body)
 	if err := util.ReadJson(payload, peer); err == nil {
 		if peerName == "" {
 			registry.addPeer(peer)
+			// The startup data refers to the registry's live maps, so it is encoded while the lock is held
 			registry.peersLock.RLock()
 			registry.preparePeerStartupData(peer, peerData)
+			reply = util.ToJSONText(peerData)
 			registry.peersLock.RUnlock()
 			msg = fmt.Sprintf("Added Peer: %+v", *peer)
 		} else {
@@ -149,7 +152,10 @@ func addPeer(w http.ResponseWriter, r *http.Request) {
 		msg = fmt.Sprintf("failed to parse json with error: %s", err.Error())
 		peerData.Message = msg
 	}
-	fmt.Fprintln(w, util.ToJSONText(peerData))
+	if reply == "" {
+		reply = util.ToJSONText(peerData)
+	}
+	fmt.Fprintln(w, reply)
 	if global.Flags.EnableRegistryLogs {
 		util.AddLogMessage(msg, r)
 	}
@@ -303,10 +309,10 @@ func invokePeerTargets(w http.ResponseWriter, r *http.Request) {
 func getPeerTargets(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if peerName, present := util.GetStringParam(r, "peer"); present {
-		peerTargets := registry.getPeerTargets(peerName)
-		if peerTargets != nil {
+		// The targets are encoded while the peers lock is held, since the maps are updated under that lock
+		if payload, found := registry.encodeUnderPeersLock(func() any { return registry.peerTargets[peerName] }); found {
 			msg = fmt.Sprintf("Registry: Reporting peer targets for peer: %s", peerName)
-			util.WriteJsonPayload(w, peerTargets)
+			util.WriteStringJsonPayload(w, payload)
 		} else {
 			w.WriteHeader(http.StatusNoContent)
 			msg = fmt.Sprintf("Peer not found: %s\n", peerName)
@@ -314,10 +320,8 @@ func getPeerTargets(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		msg = "Reporting all peer targets"
-		registry.peersLock.RLock()
-		peerTargets := registry.peerTargets
-		registry.peersLock.RUnlock()
-		util.WriteJsonPayload(w, peerTargets)
+		payload, _ := registry.encodeUnderPeersLock(func() any { return registry.peerTargets })
+		util.WriteStringJsonPayload(w, payload)
 	}
 	if global.Flags.EnableRegistryLogs {
 		util.AddLogMessage(msg, r)
@@ -445,10 +449,10 @@ func runPeerJobs(w http.ResponseWriter, r *http.Request) {
 func getPeerJobs(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if peerName, present := util.GetStringParam(r, "peer"); present {
-		peerJobs := registry.getPeerJobs(peerName)
-		if peerJobs != nil {
+		// The jobs are encoded while the peers lock is held, since the maps are updated under that lock
+		if payload, found := registry.encodeUnderPeersLock(func() any { return registry.peerJobs[peerName] }); found {
 			msg = fmt.Sprintf("Reporting peer jobs for peer: %s", peerName)
-			util.WriteJsonPayload(w, peerJobs)
+			util.WriteStringJsonPayload(w, payload)
 		} else {
 			w.WriteHeader(http.StatusNoContent)
 			msg = fmt.Sprintf("No jobs for peer %s\n", peerName)
@@ -456,10 +460,8 @@ func getPeerJobs(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		msg = "Reporting all peer jobs"
-		registry.peersLock.RLock()
-		peerJobs := registry.peerJobs
-		registry.peersLock.RUnlock()
-		util.WriteJsonPayload(w, peerJobs)
+		payload, _ := registry.encodeUnderPeersLock(func() any { return registry.peerJobs })
+		util.WriteStringJsonPayload(w, payload)
 	}
 	if global.Flags.EnableRegistryLogs {
 		util.AddLogMessage(msg, r)
@@ -785,14 +787,17 @@ func dumpRegistry(w http.ResponseWriter, r *http.Request) {
 	registry.lockersLock.RLock()
 	dump["lockers"] = registry.labeledLockers.GetAllLockers(true, true, 0)
 	registry.lockersLock.RUnlock()
+	// The dump refers to the registry's live maps (and lockers, which lock themselves when they are encoded), so it
+	// is encoded while the peers lock is held, and written after it is released.
 	registry.peersLock.RLock()
 	dump["peers"] = registry.peers
 	dump["peerTargets"] = registry.peerTargets
 	dump["peerJobs"] = registry.peerJobs
 	dump["peerTrackingHeaders"] = registry.peerTrackingHeaders
 	dump["peerProbes"] = registry.peerProbes
+	payload := util.ToJSONText(dump)
 	registry.peersLock.RUnlock()
-	fmt.Fprintln(w, util.ToJSONText(dump))
+	fmt.Fprintln(w, payload)
 	msg := "Registry data dumped"
 	if global.Flags.EnableRegistryLogs {
 		util.AddLogMessage(msg, r)
@@ -845,6 +850,11 @@ func loadRegistryDump(w http.ResponseWriter, r *http.Request) {
 			registry.labeledLockers.ReplaceLockers(lockers)
 			registry.lockersLock.Unlock()
 		}
+		// A dump can hold null or partial peers, pods, targets and jobs (e.g. a hand-edited one), which the peer
+		// APIs would later run into, so those are cleaned up before they replace the registry data.
+		peers = normalizePeers(peers, false)
+		peerTargets = normalizePeerTargets(peerTargets)
+		peerJobs = normalizePeerJobs(peerJobs)
 		registry.peersLock.Lock()
 		if hasPeers {
 			registry.peers = peers
@@ -853,7 +863,6 @@ func loadRegistryDump(w http.ResponseWriter, r *http.Request) {
 			registry.peerTargets = peerTargets
 		}
 		if hasPeerJobs {
-			fillJobNames(peerJobs)
 			registry.peerJobs = peerJobs
 		}
 		if hasTrackingHeaders {
