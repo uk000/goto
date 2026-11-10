@@ -26,6 +26,7 @@ var (
 	Version       string
 	Commit        string
 	ServerPort    int
+	UDSPath       string
 	PeerName      string
 	PeerAddress   string
 	PodName       string

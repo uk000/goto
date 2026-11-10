@@ -54,6 +54,7 @@ func Execute() {
 	var startupScript ListArg
 	flag.IntVar(&global.ServerPort, "port", 8080, "Primary HTTP Server Listen Port")
 	flag.StringVar(&portsList, "ports", "", "Comma-separated list of <port/protocol>. First port acts as primary HTTP port")
+	flag.StringVar(&global.UDSPath, "uds", "", "Unix Domain Socket path for an additional HTTP listener (e.g. /tmp/goto.sock)")
 	flag.StringVar(&global.PeerName, "label", "", "Default Server Label")
 	flag.DurationVar(&global.StartupDelay, "startupDelay", 1*time.Second, "Delay Server Startup (seconds)")
 	flag.DurationVar(&global.ShutdownDelay, "shutdownDelay", 1*time.Second, "Delay Server Shutdown (seconds)")
@@ -95,6 +96,9 @@ func Execute() {
 	}
 	listeners.DefaultLabel = global.PeerName
 	log.Printf("Server [%s] will listen on port [%d]\n", global.PeerName, global.ServerPort)
+	if global.UDSPath != "" {
+		log.Printf("Server will also listen on unix socket [%s]\n", global.UDSPath)
+	}
 
 	if global.EnableEvents {
 		log.Println("Will generate and store events locally")

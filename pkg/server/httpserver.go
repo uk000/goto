@@ -77,6 +77,7 @@ func RunHttpServer(handlers ...util.ServerHandler) {
 		ErrorLog:     log.New(ioutil.Discard, "discard", 0),
 	}
 	StartHttpServer(httpServer)
+	StartUDSListener(httpServer, global.UDSPath)
 	listeners.StartInitialListeners()
 	RunStartupScript()
 	peer.RegisterPeer(global.PeerName, global.PeerAddress)
@@ -178,7 +179,11 @@ func withIntercept(r *http.Request, w http.ResponseWriter) (http.ResponseWriter,
 }
 
 func withConnContext(ctx context.Context, conn net.Conn) context.Context {
-	return context.WithValue(ctx, util.ConnectionKey, conn)
+	ctx = context.WithValue(ctx, util.ConnectionKey, conn)
+	if port := listeners.GetPortForUDSAddr(conn.LocalAddr()); port > 0 {
+		ctx = withPort(ctx, port)
+	}
+	return ctx
 }
 
 func withPort(ctx context.Context, port int) context.Context {
@@ -211,6 +216,22 @@ func StartHttpServer(server *http.Server) {
 		log.Printf("Server %s ready", server.Addr)
 		if err := server.ListenAndServe(); err != nil {
 			log.Println(err)
+		}
+	}()
+}
+
+func StartUDSListener(server *http.Server, path string) {
+	if path == "" {
+		return
+	}
+	listener, err := util.ListenUDS(path)
+	if err != nil {
+		log.Fatalf("Failed to open UDS listener [%s]: %s", path, err.Error())
+	}
+	go func() {
+		log.Printf("Starting UDS Listener [%s]", path)
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			log.Printf("UDS Listener [%s]: %s", path, err.Error())
 		}
 	}()
 }
