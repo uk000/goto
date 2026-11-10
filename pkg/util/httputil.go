@@ -203,6 +203,11 @@ func UnsetTunnelRequest(r *http.Request) {
 }
 
 func GetPortNumFromGRPCAuthority(ctx context.Context) int {
+	if val := ctx.Value(CurrentPortKey); val != nil {
+		if port, ok := val.(int); ok && port > 0 {
+			return port
+		}
+	}
 	if headers, ok := metadata.FromIncomingContext(ctx); ok && len(headers[":authority"]) > 0 {
 		if pieces := strings.Split(headers[":authority"][0], ":"); len(pieces) > 1 {
 			if portNum, err := strconv.Atoi(pieces[1]); err == nil {
@@ -225,6 +230,12 @@ func GetPortFromAddress(addr string) int {
 func GetPortValueFromLocalAddressContext(ctx context.Context) string {
 	if val := ctx.Value(http.LocalAddrContextKey); val != nil {
 		srvAddr := ctx.Value(http.LocalAddrContextKey).(net.Addr)
+		if IsUnixAddr(srvAddr) {
+			if port, ok := ctx.Value(CurrentPortKey).(int); ok && port > 0 {
+				return strconv.Itoa(port)
+			}
+			return ""
+		}
 		if pieces := strings.Split(srvAddr.String(), ":"); len(pieces) > 1 {
 			return pieces[len(pieces)-1]
 		}

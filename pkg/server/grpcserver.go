@@ -35,6 +35,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/stats"
 )
 
 type IGRPCServer interface {
@@ -53,13 +54,33 @@ var (
 )
 
 func StartGRPCServer() {
-	grpcServer = grpc.NewServer(grpc.UnaryInterceptor(ContextGRPCMiddleware), grpc.StreamInterceptor(ContextGRPCStreamMiddleware))
+	grpcServer = grpc.NewServer(grpc.UnaryInterceptor(ContextGRPCMiddleware), grpc.StreamInterceptor(ContextGRPCStreamMiddleware),
+		grpc.StatsHandler(&udsConnTagger{}))
 	reflection.Register(grpcServer)
 	pb.RegisterGotoServer(grpcServer, &GRPCServer{})
 	msg := "GRPC Server Started"
 	log.Println(msg)
 	events.SendEventDirect(msg, "")
 }
+
+// udsConnTagger tags connections accepted on unix domain socket listeners with the listener's port,
+// since the local address of such connections carries no port.
+type udsConnTagger struct{}
+
+func (t *udsConnTagger) TagConn(ctx context.Context, info *stats.ConnTagInfo) context.Context {
+	if port := listeners.GetPortForUDSAddr(info.LocalAddr); port > 0 {
+		return withPort(ctx, port)
+	}
+	return ctx
+}
+
+func (t *udsConnTagger) HandleConn(context.Context, stats.ConnStats) {}
+
+func (t *udsConnTagger) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context {
+	return ctx
+}
+
+func (t *udsConnTagger) HandleRPC(context.Context, stats.RPCStats) {}
 
 func GRPCHandler(httpHandler http.Handler) http.Handler {
 	StartGRPCServer()

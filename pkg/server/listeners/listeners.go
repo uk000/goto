@@ -42,6 +42,7 @@ type Listener struct {
 	HostLabel  string                      `json:"hostLabel"`
 	Port       int                         `json:"port"`
 	Protocol   string                      `json:"protocol"`
+	UDS        string                      `json:"uds,omitempty"`
 	Open       bool                        `json:"open"`
 	AutoCert   bool                        `json:"autoCert"`
 	AutoSNI    bool                        `json:"autoSNI"`
@@ -77,6 +78,7 @@ var (
 	DefaultLabel        string
 	serverStarted       bool
 	listenersLock       sync.RWMutex
+	udsPorts            sync.Map
 	Handler             util.ServerHandler = util.ServerHandler{Name: "listeners", SetRoutes: SetRoutes}
 )
 
@@ -209,7 +211,28 @@ func (l *Listener) initListener() bool {
 		}
 	}
 	address := fmt.Sprintf("0.0.0.0:%d", l.Port)
-	if l.isUDP {
+	if l.UDS != "" {
+		if listener, err := util.ListenUDS(l.UDS); err == nil {
+			if tlsConfig != nil {
+				if l.MutualTLS {
+					tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+					tlsConfig.ClientCAs = l.CACerts
+				} else {
+					tlsConfig.ClientAuth = tls.NoClientCert
+				}
+				if l.IsHTTP2 {
+					tlsConfig.NextProtos = []string{"h2"}
+				}
+				listener = tls.NewListener(listener, tlsConfig)
+			}
+			udsPorts.Store(l.UDS, l.Port)
+			l.Listener = listener
+			return true
+		} else {
+			log.Printf("Failed to open UDS listener [%s] with error: %s\n", l.UDS, err.Error())
+			return false
+		}
+	} else if l.isUDP {
 		if udpAddr, err := net.ResolveUDPAddr("udp4", address); err == nil {
 			if udpConn, err := net.ListenUDP("udp", udpAddr); err == nil {
 				l.UDPConn = udpConn
@@ -253,7 +276,11 @@ func (l *Listener) openListener() bool {
 		listenerGenerations[l.Port] = listenerGenerations[l.Port] + 1
 		l.Generation = listenerGenerations[l.Port]
 		l.ListenerID = fmt.Sprintf("%d-%d", l.Port, l.Generation)
-		log.Printf("Opening [%s] listener [%s] on port [%d].", l.Protocol, l.ListenerID, l.Port)
+		if l.UDS != "" {
+			log.Printf("Opening [%s] listener [%s] on port [%d] via UDS [%s].", l.Protocol, l.ListenerID, l.Port, l.UDS)
+		} else {
+			log.Printf("Opening [%s] listener [%s] on port [%d].", l.Protocol, l.ListenerID, l.Port)
+		}
 		if l.isHTTP {
 			ServeHTTPListener(l)
 		} else if l.isGRPC {
@@ -358,6 +385,22 @@ func addOrUpdateListener(l *Listener, update bool) (int, string) {
 	l.Protocol = strings.ToLower(l.Protocol)
 	if l.Port <= 0 || l.Port > 65535 {
 		msg = fmt.Sprintf("[Invalid port number: %d]", l.Port)
+	}
+	if l.UDS != "" {
+		if strings.EqualFold(l.Protocol, "udp") {
+			msg = "[UDS is not supported for UDP listeners]"
+		} else if l.UDS == global.UDSPath {
+			msg = fmt.Sprintf("[UDS path %s is already used by the server]", l.UDS)
+		} else {
+			listenersLock.RLock()
+			for port, other := range listeners {
+				if port != l.Port && other.UDS == l.UDS {
+					msg = fmt.Sprintf("[UDS path %s is already used by listener %d]", l.UDS, port)
+					break
+				}
+			}
+			listenersLock.RUnlock()
+		}
 	}
 	l.IsHTTP2 = true
 	if strings.EqualFold(l.Protocol, "http1") {
@@ -650,6 +693,16 @@ func getListeners(w http.ResponseWriter, r *http.Request) {
 	} else {
 		util.WriteJsonPayload(w, GetListeners())
 	}
+}
+
+// GetPortForUDSAddr returns the listener port for a connection's local unix socket address, or 0 if not applicable.
+func GetPortForUDSAddr(addr net.Addr) int {
+	if addr != nil && util.IsUnixAddr(addr) {
+		if port, ok := udsPorts.Load(addr.String()); ok {
+			return port.(int)
+		}
+	}
+	return 0
 }
 
 func GetListenerForPort(port int) *Listener {
