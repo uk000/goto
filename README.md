@@ -90,7 +90,7 @@ At the minimum, `Goto` opens 3 ports:
 - A JSON-RPC port (for A2A and MCP protocols): specified via `rpcPort` arg, defaults to 3000.
 - A gRPC port: specified via `grpcPort` arg, defaults to 1234.
 
-To also serve HTTP on a Unix domain socket, add `--uds /tmp/goto.sock`. A listener added via API can use a socket instead of its TCP port by setting `"uds":"/tmp/goto-9091.sock"` in the listener payload (e.g. `{"port":9091, "protocol":"grpc", "uds":"/tmp/goto-9091.sock", "open":true}`).
+To also serve HTTP on a Unix domain socket, add `--uds /tmp/goto.sock`. A listener added via API can use a socket instead of its TCP port by setting `"uds":"/tmp/goto-9091.sock"` in the listener payload (e.g. `{"port":9091, "protocol":"grpc", "uds":"/tmp/goto-9091.sock", "open":true}`). See [Unix Domain Sockets](docs/listeners-example.md#unix-domain-sockets-uds) for details.
 
 
 

@@ -1081,6 +1081,7 @@ func CloseUDSListeners() {
 			closing = append(closing, l)
 		}
 	}
+	log.Printf("Shutting down %d UDS listeners", len(closing))
 	listenersLock.RUnlock()
 	for _, l := range closing {
 		l.Close()

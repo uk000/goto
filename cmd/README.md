@@ -30,7 +30,7 @@ The application accepts the following command arguments:
           <td rowspan="2">""</td>
         </tr>
         <tr>
-          <td>* Test with: <pre>curl --unix-socket /tmp/goto.sock http://localhost/version</pre> A listener added via the listeners API can also use a socket by setting its <code>uds</code> field.</td>
+          <td>* Test with: <pre>curl --unix-socket /tmp/goto.sock http://localhost/version</pre> A listener added via the listeners API can also use a socket by setting its <code>uds</code> field. See <a href="../docs/listeners-example.md#unix-domain-sockets-uds">Unix Domain Sockets</a>.</td>
         </tr>
         <tr>
           <td><pre>--rpcPort {port}</pre></td>

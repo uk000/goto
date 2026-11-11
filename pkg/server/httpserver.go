@@ -232,6 +232,8 @@ func WaitForHttpServer() {
 	startup.Stop()
 	StopHttpServer(httpServer)
 	StopHttpServer(jsonRPCServer)
+	// The listeners that the servers don't close are closed too, so as not to leave their socket files behind.
+	listeners.CloseUDSListeners()
 }
 
 func StopHttpServer(server *http.Server) {
@@ -239,7 +241,7 @@ func StopHttpServer(server *http.Server) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	time.Sleep(time.Second)
-	if path := global.ServerConfig.UDSPath; path != "" {
+	if path := global.ServerConfig.UDSPath; path != "" && server == httpServer {
 		log.Printf("Closing http listener: %d (UDS: %s)\n", global.Self.ServerPort, path)
 	}
 	server.Shutdown(ctx)
