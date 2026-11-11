@@ -125,13 +125,14 @@ func clearTargets(w http.ResponseWriter, r *http.Request) {
 // getTargets reports the named target, or all targets if none is named.
 func getTargets(w http.ResponseWriter, r *http.Request) {
 	if t, present := util.GetStringParam(r, "target"); present {
-		if Client.targets[t] != nil {
-			util.WriteJsonPayload(w, Client.targets[t])
+		if payload, found := Client.getTargetsPayload(t); found {
+			util.WriteStringJsonPayload(w, payload)
 		} else {
 			util.WriteErrorJson(w, "Target not found: "+t)
 		}
 	} else {
-		util.WriteJsonPayload(w, Client.targets)
+		payload, _ := Client.getTargetsPayload("")
+		util.WriteStringJsonPayload(w, payload)
 	}
 	if global.Flags.EnableClientLogs {
 		util.AddLogMessage("Reporting targets", r)
@@ -202,7 +203,7 @@ func clearTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 
 // getTrackingTimeBuckets reports the tracked time buckets as JSON.
 func getTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
-	util.WriteJsonPayload(w, Client.trackTimeBuckets)
+	util.WriteJsonPayload(w, Client.getTrackingTimeBuckets())
 	if global.Flags.EnableClientLogs {
 		util.AddLogMessage("Tracking TimeBuckets Reported", r)
 	}

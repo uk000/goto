@@ -490,12 +490,18 @@ func StopTarget(target string) {
 	targetInvocations := activeTargets[target]
 	invocationsLock.RUnlock()
 	if targetInvocations != nil {
+		// The trackers are copied so that the lock of the target's invocations isn't held while waiting for the lock of the
+		// channels of each one, which an invocation that is publishing results holds for as long as the result channel is full.
 		targetInvocations.lock.RLock()
+		trackers := make([]*InvocationTracker, 0, len(targetInvocations.trackers))
 		for _, tracker := range targetInvocations.trackers {
+			trackers = append(trackers, tracker)
+		}
+		targetInvocations.lock.RUnlock()
+		for _, tracker := range trackers {
 			done := false
 			tracker.Channels.Lock.RLock()
 			doneChannel := tracker.Channels.DoneChannel
-			stopChannel := tracker.Channels.StopChannel
 			stopRequested := tracker.Status.StopRequested
 			stopped := tracker.Status.Stopped
 			tracker.Channels.Lock.RUnlock()
@@ -505,11 +511,12 @@ func StopTarget(target string) {
 			}
 			if !done {
 				if !stopRequested && !stopped {
-					stopChannel <- true
+					// The send is done by the channels under their lock: the invocation can finish, and close its
+					// channels, at any point after the lock above was released.
+					tracker.Stop()
 				}
 			}
 		}
-		targetInvocations.lock.RUnlock()
 	}
 }
 
@@ -814,12 +821,17 @@ func (c *InvocationChannels) ReadStopRequest() {
 	}
 }
 
-// Stop sends a stop request on the stop channel, if it is still open.
+// Stop sends a stop request on the stop channel, if it is still open. The send is done under the lock that Close
+// takes, so it can't hit a closed channel, and it doesn't block: when the channel's buffer is full there are enough stop
+// requests pending already.
 func (c *InvocationChannels) Stop() {
 	c.Lock.Lock()
 	defer c.Lock.Unlock()
 	if c.StopChannel != nil {
-		c.StopChannel <- true
+		select {
+		case c.StopChannel <- true:
+		default:
+		}
 	}
 }
 

@@ -98,25 +98,31 @@ func (tracker *InvocationTracker) logResultChannelBacklog(result *InvocationResu
 	}
 }
 
-// reportRepeatedResponse logs the last response status code and the number of consecutive times it repeated.
+// reportRepeatedResponse logs the last response status code and the number of consecutive times it repeated. It reads
+// them under the status lock, so it must not be called by code that already holds that lock.
 func (tracker *InvocationTracker) reportRepeatedResponse() {
 	tracker.Status.lock.RLock()
 	lastStatusCode := tracker.Status.lastStatusCode
 	lastStatusCount := tracker.Status.lastStatusCount
 	tracker.Status.lock.RUnlock()
-	msg := fmt.Sprintf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Response Status [%d] Repeated x[%d]",
-		global.Self.Name, tracker.ID, tracker.Target.Name, tracker.Target.URL, tracker.Target.BURLS, lastStatusCode, lastStatusCount)
+	tracker.logRepeatedResponse(lastStatusCode, lastStatusCount)
+}
+
+// logRepeatedResponse logs the given response status code and the number of consecutive times it repeated. It doesn't
+// take any lock, so it is safe to call while holding the status lock.
+func (tracker *InvocationTracker) logRepeatedResponse(lastStatusCode, lastStatusCount int) {
 	if global.Flags.EnableInvocationLogs {
-		log.Println(msg)
+		log.Printf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Response Status [%d] Repeated x[%d]",
+			global.Self.Name, tracker.ID, tracker.Target.Name, tracker.Target.URL, tracker.Target.BURLS, lastStatusCode, lastStatusCount)
 	}
 }
 
-// reportRepeatedFailure logs the last failure and the number of consecutive times it repeated.
-func (tracker *InvocationTracker) reportRepeatedFailure() {
-	msg := fmt.Sprintf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Failiure [%s] Repeated x[%d]",
-		global.Self.Name, tracker.ID, tracker.Target.Name, tracker.Target.URL, tracker.Target.BURLS, tracker.Status.lastError, tracker.Status.lastErrorCount)
+// logRepeatedFailure logs the given failure and the number of consecutive times it repeated. It doesn't take any
+// lock, so it is safe to call while holding the status lock.
+func (tracker *InvocationTracker) logRepeatedFailure(lastError string, lastErrorCount int) {
 	if global.Flags.EnableInvocationLogs {
-		log.Println(msg)
+		log.Printf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Failiure [%s] Repeated x[%d]",
+			global.Self.Name, tracker.ID, tracker.Target.Name, tracker.Target.URL, tracker.Target.BURLS, lastError, lastErrorCount)
 	}
 }
 

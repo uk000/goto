@@ -124,7 +124,10 @@ func (t *InvocationTracker) SendResult(r *InvocationResult) {
 	if t.Channels != nil {
 		t.Channels.Lock.Lock()
 		defer t.Channels.Lock.Unlock()
-		t.Channels.ResultChannel <- r
+		// the channel is nil once the invocation is done, and sending on a nil channel blocks forever
+		if t.Channels.ResultChannel != nil {
+			t.Channels.ResultChannel <- r
+		}
 	}
 }
 
@@ -358,7 +361,7 @@ func (is *InvocationStatus) trackStatus(result *InvocationResult) {
 	is.lock.Lock()
 	isRepeatStatus := is.lastStatusCode == result.Response.StatusCode
 	if !isRepeatStatus && is.lastStatusCount > 1 || is.lastErrorCount > 1 {
-		is.reportRepeatedResponse()
+		is.unsafeReportRepeatedResponse()
 		is.lastStatusCode = -1
 	}
 	if is.lastStatusCode >= 0 && isRepeatStatus {
@@ -393,19 +396,26 @@ func (is *InvocationStatus) trackError(result *InvocationResult) {
 }
 
 // reportRepeatedResponse reports and resets the repeated response and failure counters that repeated more than once.
+// It takes the status lock, so it must not be called by code that already holds it (use unsafeReportRepeatedResponse).
 func (is *InvocationStatus) reportRepeatedResponse() {
 	is.lock.Lock()
 	defer is.lock.Unlock()
+	is.unsafeReportRepeatedResponse()
+}
+
+// unsafeReportRepeatedResponse is reportRepeatedResponse for callers that already hold the status lock. sync.RWMutex
+// is not reentrant, so nothing here (including the logging helpers it calls) may take the status lock again.
+func (is *InvocationStatus) unsafeReportRepeatedResponse() {
 	if is.lastStatusCount <= 0 {
 		return
 	}
 	if is.lastStatusCount > 1 {
-		is.tracker.reportRepeatedResponse()
+		is.tracker.logRepeatedResponse(is.lastStatusCode, is.lastStatusCount)
 		is.lastStatusCount = 0
 		is.lastStatusCode = -1
 	}
 	if is.lastErrorCount > 1 {
-		is.tracker.reportRepeatedFailure()
+		is.tracker.logRepeatedFailure(is.lastError, is.lastErrorCount)
 		is.lastErrorCount = 0
 		is.lastError = ""
 	}

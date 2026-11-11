@@ -151,11 +151,14 @@ func (tracker *InvocationTracker) prepareRequestURL(requestID, targetID string, 
 	return url
 }
 
-// addOrUpdateHeader sets a header on both the request's header map and its HTTP request.
+// addOrUpdateHeader sets a header on the request's header map, and on its HTTP request if it has one (a gRPC request
+// doesn't have one, and sends the header map as the call's request headers).
 func (ir *InvocationRequest) addOrUpdateHeader(header, value string) {
 	ir.headers[header] = value
-	ir.httpRequest.Header.Del(header)
-	ir.httpRequest.Header.Add(header, value)
+	if ir.httpRequest != nil {
+		ir.httpRequest.Header.Del(header)
+		ir.httpRequest.Header.Add(header, value)
+	}
 }
 
 // addOrUpdateRequestId adds the request ID to the header and/or query as configured by the target, then refreshes the request URL and target-URL header.
@@ -333,20 +336,30 @@ func (ir *InvocationRequest) invokeGRPC() {
 	end := time.Now()
 	ir.result.trackRequest(start, end)
 	ir.tracker.Status.trackRequest(end)
-	if result != nil {
-		var err error
-		if len(result.Errors) > 0 {
-			err = result.Errors[0]
-		}
-		if len(result.Responses) > 0 {
-			response := result.Responses[0]
-			ir.result.processGRPCResponse(ir, response.EquivalentHTTPStatusCode, response.ResponseHeaders,
-				response.ResponsePayload, response.ClientStreamCount, response.ServerStreamCount, err)
-		} else {
-			ir.tracker.logConnectionFailed(err.Error())
-		}
-	} else {
+	ir.processGRPCResult(result)
+}
+
+// processGRPCResult records the first response of the gRPC call, along with its first error if any, or logs a failure if the call produced no response.
+func (ir *InvocationRequest) processGRPCResult(result *grpc.GRPCResult) {
+	if result == nil {
 		ir.tracker.logConnectionFailed("No result")
+		return
+	}
+	var err error
+	if len(result.Errors) > 0 {
+		err = result.Errors[0]
+	}
+	if len(result.Responses) > 0 {
+		response := result.Responses[0]
+		ir.result.processGRPCResponse(ir, response.EquivalentHTTPStatusCode, response.ResponseHeaders,
+			response.ResponsePayload, response.ClientStreamCount, response.ServerStreamCount, err)
+	} else {
+		// no responses doesn't imply an error: e.g. a stream that delivered nothing
+		msg := "No response"
+		if err != nil {
+			msg = err.Error()
+		}
+		ir.tracker.logConnectionFailed(msg)
 	}
 }
 

@@ -312,6 +312,13 @@ func (jm *JobManager) getJobs() map[string]*Job {
 	return jobs
 }
 
+// getScript returns the stored script of the name, or nil if there is none.
+func (jm *JobManager) getScript(name string) *Script {
+	jm.lock.RLock()
+	defer jm.lock.RUnlock()
+	return jm.scripts[name]
+}
+
 // getScripts returns a copy of the stored scripts.
 func (jm *JobManager) getScripts() map[string]*Script {
 	jm.lock.RLock()
