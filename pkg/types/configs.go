@@ -95,6 +95,7 @@ type CmdClientConfig struct {
 type ServerConfig struct {
 	CommonName    string
 	CertPath      string
+	UDSPath       string
 	WorkDir       string
 	KubeConfig    string
 	StartupDelay  time.Duration

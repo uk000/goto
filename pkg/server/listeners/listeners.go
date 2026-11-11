@@ -73,6 +73,7 @@ type Listener struct {
 	Port             int                              `json:"port"`
 	ForwardPort      int                              `json:"forward"`
 	Protocol         string                           `json:"protocol"`
+	UDS              string                           `json:"uds,omitempty"`
 	L8Proto          string                           `json:"l8Proto"`
 	ALPN             *gototls.ALPN                    `json:"alpn"`
 	Open             bool                             `json:"open"`
@@ -775,6 +776,25 @@ func (l *Listener) InitListener() (opened bool) {
 		}
 	}
 	address := fmt.Sprintf("0.0.0.0:%d", l.Port)
+	if l.UDS != "" {
+		if listener, err := util.ListenUDS(l.UDS); err == nil {
+			if l.TLS {
+				if tlsConfig := l.prepareTLS(); tlsConfig == nil {
+					listener.Close()
+					return false
+				} else {
+					l.TLSConfig = tlsConfig
+					listener = gototls.NewTLSInspector(l.Port, l.Label, listener, tlsConfig)
+				}
+			}
+			util.RegisterUDSPort(l.UDS, l.Port)
+			l.Listener = listener
+			return true
+		} else {
+			log.Printf("Failed to open UDS listener [%s] with error: %s\n", l.UDS, err.Error())
+			return false
+		}
+	}
 	if l.IsUDP {
 		if udpAddr, err := net.ResolveUDPAddr("udp4", address); err == nil {
 			if udpConn, err := net.ListenUDP("udp", udpAddr); err == nil {
@@ -819,7 +839,11 @@ func (l *Listener) openListener(serve bool) bool {
 		l.Generation = listenerGenerations[l.Port]
 		generationsLock.Unlock()
 		l.ListenerID = fmt.Sprintf("%d-%d", l.Port, l.Generation)
-		log.Printf("Opening [%s] listener [%s] on port [%d].", l.L8Proto, l.ListenerID, l.Port)
+		if l.UDS != "" {
+			log.Printf("Opening [%s] listener [%s] on port [%d] via UDS [%s].", l.L8Proto, l.ListenerID, l.Port, l.UDS)
+		} else {
+			log.Printf("Opening [%s] listener [%s] on port [%d].", l.L8Proto, l.ListenerID, l.Port)
+		}
 		if serve {
 			if l.IsJSONRPC {
 				l.serveJSONRPC()
@@ -847,7 +871,11 @@ func (l *Listener) isOpen() bool {
 func (l *Listener) Close() {
 	l.lock.Lock()
 	defer l.lock.Unlock()
-	log.Printf("Closing %s listener: %d\n", l.Protocol, l.Port)
+	if l.UDS != "" {
+		log.Printf("Closing %s listener: %d (UDS: %s)\n", l.Protocol, l.Port, l.UDS)
+	} else {
+		log.Printf("Closing %s listener: %d\n", l.Protocol, l.Port)
+	}
 	if l.Listener != nil {
 		l.Listener.Close()
 		global.Funcs.CloseConnectionsForPort(l.Port)
@@ -997,6 +1025,9 @@ func AddOrUpdateListener(l *Listener) (error, string) {
 		// The config of the listener is not made when the port is not valid, and the message of that is not replaced.
 		l.TCP, msg = tcp.InitTCPConfig(l.Port, l.TCP)
 	}
+	if msg == "" && l.UDS != "" {
+		msg = validateUDS(l)
+	}
 	if msg != "" {
 		return errors.New(msg), msg
 	}
@@ -1032,6 +1063,24 @@ func AddOrUpdateListener(l *Listener) (error, string) {
 	}
 	listenersLock.Unlock()
 	return nil, msg
+}
+
+// validateUDS tells why the listener can't use the unix domain socket path that it has, or gives "" if it can.
+func validateUDS(l *Listener) string {
+	if l.IsUDP {
+		return "[UDS is not supported for UDP listeners]"
+	}
+	if l.UDS == global.ServerConfig.UDSPath {
+		return fmt.Sprintf("[UDS path %s is already used by the server]", l.UDS)
+	}
+	listenersLock.RLock()
+	defer listenersLock.RUnlock()
+	for port, other := range listeners {
+		if port != l.Port && other.UDS == l.UDS {
+			return fmt.Sprintf("[UDS path %s is already used by listener %d]", l.UDS, port)
+		}
+	}
+	return ""
 }
 
 // RemoveListener takes the listener out of the ones that the process has. A listener that is not the one registered for
@@ -1364,6 +1413,7 @@ func Diff(l1, l2 *Listener) bool {
 	return l1.Port != l2.Port ||
 		l1.ForwardPort != l2.ForwardPort ||
 		l1.Protocol != l2.Protocol ||
+		l1.UDS != l2.UDS ||
 		alpnChanged ||
 		l1.Open != l2.Open ||
 		l1.AutoSNI != l2.AutoSNI ||

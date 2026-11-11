@@ -63,6 +63,7 @@ type ServerArgs struct {
 	GRPCPort            string
 	JSONRPCPort         string
 	Ports               string
+	UDS                 string
 	ALPN                string
 	CommonName          string
 	Label               string
@@ -173,6 +174,7 @@ var (
 		GRPCPort:            "grpcPort",
 		JSONRPCPort:         "rpcPort",
 		Ports:               "ports",
+		UDS:                 "uds",
 		ALPN:                "alpn",
 		CommonName:          "cn",
 		Label:               "label",
@@ -209,6 +211,7 @@ var (
 		GRPCPort:            "Default GRPC Server Listen Port",
 		JSONRPCPort:         "Default JSON-RPC Server Listen Port",
 		Ports:               "Comma-separated list of <port/protocol>. First port acts as primary HTTP port",
+		UDS:                 "Unix Domain Socket path for an additional HTTP listener (e.g. /tmp/goto.sock)",
 		ALPN:                "Supoported Protos for ALPN",
 		CommonName:          "CommonName for TLS Cert",
 		Label:               "Default Server Label",
@@ -302,6 +305,7 @@ func setupServerArgs() {
 	intFlag(&global.Self.GRPCPort, sa.GRPCPort, "gp", sh.GRPCPort, 1234)
 	intFlag(&global.Self.JSONRPCPort, sa.JSONRPCPort, "rpc", sh.JSONRPCPort, 3000)
 	stringFlag(&portsList, sa.Ports, "", sh.Ports, "")
+	stringFlag(&global.ServerConfig.UDSPath, sa.UDS, "", sh.UDS, "")
 	stringFlag(&global.ServerConfig.CommonName, sa.CommonName, "", sh.CommonName, "goto.goto")
 	stringFlag(&global.Self.Name, sa.Label, "l", sh.Label, "")
 	stringFlag(&global.Self.RegistryURL, sa.Registry, "", sh.Registry, "")
@@ -381,6 +385,9 @@ func initListeners() {
 	listeners.Init()
 	listeners.AddInitialListeners(ports)
 	log.Printf("Server [%s] will listen on port [%d]\n", global.Self.Name, global.Self.ServerPort)
+	if global.ServerConfig.UDSPath != "" {
+		log.Printf("Server will also listen on unix socket [%s]\n", global.ServerConfig.UDSPath)
+	}
 
 }
 
