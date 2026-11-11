@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -82,8 +83,12 @@ func udsClient(path string) *http.Client {
 func TestHTTPListenerOnUDS(t *testing.T) {
 	path := udsPath(t, "h.sock")
 	l := newUDSListener(t, "http", path)
-	if err, msg := AddOrUpdateListener(l); err != nil {
+	err, msg := AddOrUpdateListener(l)
+	if err != nil {
 		t.Fatalf("AddOrUpdateListener failed: %s", msg)
+	}
+	if want := fmt.Sprintf("Listener %d added and opened on UDS %s.", l.Port, path); msg != want {
+		t.Errorf("message = %q, want %q", msg, want)
 	}
 	if !l.Open {
 		t.Fatal("the listener is not open")
@@ -220,6 +225,35 @@ func TestValidateUDS(t *testing.T) {
 	if GetListenerForPort(l2.Port) != nil {
 		t.Error("the rejected listener must not be stored")
 	}
+}
+
+func TestCloseUDSListenersClosesOnlyTheListenersOnSockets(t *testing.T) {
+	setup(t)
+	httpPath, tcpPath := udsPath(t, "h.sock"), udsPath(t, "t.sock")
+	onHTTP := newUDSListener(t, "http", httpPath)
+	onTCP := newUDSListener(t, "tcp", tcpPath)
+	for _, l := range []*Listener{onHTTP, onTCP} {
+		if err, msg := AddOrUpdateListener(l); err != nil {
+			t.Fatalf("AddOrUpdateListener failed: %s", msg)
+		}
+	}
+	onPort := addAndOpen(t, "tcp")
+
+	CloseUDSListeners()
+
+	for _, path := range []string{httpPath, tcpPath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("stat %s = %v, want the socket file removed", path, err)
+		}
+	}
+	if onHTTP.isListening() || onTCP.isListening() {
+		t.Error("the listeners on sockets must be closed")
+	}
+	if !onPort.isListening() || !isListening(onPort.Port) {
+		t.Error("a listener on a TCP port must be left as it is")
+	}
+	// Closing again, as when the servers have closed some of them already, is fine.
+	CloseUDSListeners()
 }
 
 func TestDiffTellsOfAChangedUDS(t *testing.T) {

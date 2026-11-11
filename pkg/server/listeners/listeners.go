@@ -1032,27 +1032,32 @@ func AddOrUpdateListener(l *Listener) (error, string) {
 		return errors.New(msg), msg
 	}
 
+	// Listeners on a unix domain socket say so in what they report, which is no different for the others.
+	where := ""
+	if l.UDS != "" {
+		where = fmt.Sprintf(" on UDS %s", l.UDS)
+	}
 	listenersLock.RLock()
 	_, exists := listeners[l.Port]
 	listenersLock.RUnlock()
 	if exists {
 		if l.ReopenListener() {
 			l.store()
-			msg = fmt.Sprintf("Listener %d already present, restarted.", l.Port)
+			msg = fmt.Sprintf("Listener %d already present, restarted%s.", l.Port, where)
 		} else {
-			msg = fmt.Sprintf("Listener %d already present, failed to restart.", l.Port)
+			msg = fmt.Sprintf("Listener %d already present, failed to restart%s.", l.Port, where)
 		}
 	} else {
 		if l.Open {
 			if l.openListener(true) {
 				l.store()
-				msg = fmt.Sprintf("Listener %d added and opened.", l.Port)
+				msg = fmt.Sprintf("Listener %d added and opened%s.", l.Port, where)
 			} else {
-				msg = fmt.Sprintf("Listener %d added but failed to open.", l.Port)
+				msg = fmt.Sprintf("Listener %d added but failed to open%s.", l.Port, where)
 			}
 		} else {
 			l.store()
-			msg = fmt.Sprintf("Listener %d added.", l.Port)
+			msg = fmt.Sprintf("Listener %d added%s.", l.Port, where)
 		}
 	}
 	listenersLock.Lock()
@@ -1063,6 +1068,23 @@ func AddOrUpdateListener(l *Listener) (error, string) {
 	}
 	listenersLock.Unlock()
 	return nil, msg
+}
+
+// CloseUDSListeners closes the listeners that are on unix domain sockets, which removes their socket files. The servers
+// close the listeners that they serve when they stop, and this is for the others (TCP ones), as the files would be left
+// behind when the process exits.
+func CloseUDSListeners() {
+	listenersLock.RLock()
+	var closing []*Listener
+	for _, l := range listeners {
+		if l.UDS != "" {
+			closing = append(closing, l)
+		}
+	}
+	listenersLock.RUnlock()
+	for _, l := range closing {
+		l.Close()
+	}
 }
 
 // validateUDS tells why the listener can't use the unix domain socket path that it has, or gives "" if it can.
