@@ -194,6 +194,7 @@ A port in CONNECT mode (see the [CONNECT proxy](proxy/tcp/README.md#http-connect
 | hostLabel    | string | The host label is auto-generated and assigned to the listeners to uniquely identify the host while still differentiating between multiple listeners active on the `goto` instance. This is auto-generated using format `<hostname>@<ipaddress>:<port>`. Host Label is also sent back in the `Goto-Host` response header.  |
 | port     | int    | Port on which the new listener will listen on. |
 | protocol | string | `http`, `http1`, `https`, `https1`, `grpc`, `grpcs`, `tcp`, or `tls`. Protocol `tls` implies TCP+TLS and `grpcs` implies gRPC+TLS as opposed to `tcp` and `grpc` being plain-text versions. |
+| uds | string | Optional Unix domain socket path. If set, the listener binds this socket instead of TCP `port` (which remains the listener's ID). Not supported for UDP. |
 | open | bool | Controls whether the listener should be opened as soon as it's added. Also reflects the listener's current status when queried. |
 | autoCert | bool | Controls whether a TLS certificate should be auto-generated for an HTTPS or TLS listener. If enabled, the TLS cert for the listener is generated using the `CommonName` field if configured, or else the cert common name is defaulted to `goto.goto`. |
 | commonName | string | If given, this common name is used to generate self-signed cert for this listener. |

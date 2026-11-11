@@ -25,6 +25,14 @@ The application accepts the following command arguments:
           <td>* For example: <pre>--ports 8080,<br/>8081/http,8083/https,<br/>8443/https/foo.com/mtls,<br/>8000/tcp,9000/tls,10000/grpc,3000/rpc</pre>  In addition to the startup ports, additional ports can be opened by making listener API calls on this port. See <a href="#-listeners">Listeners</a> feature for more details.</td>
         </tr>
         <tr>
+          <td rowspan="2"><pre>--uds {path}</pre></td>
+          <td>Unix domain socket path for an additional HTTP listener, e.g. <pre>--uds /tmp/goto.sock</pre> </td>
+          <td rowspan="2">""</td>
+        </tr>
+        <tr>
+          <td>* Test with: <pre>curl --unix-socket /tmp/goto.sock http://localhost/version</pre> A listener added via the listeners API can also use a socket by setting its <code>uds</code> field.</td>
+        </tr>
+        <tr>
           <td><pre>--rpcPort {port}</pre></td>
           <td>A mandatory default RPC port that will be used to server A2A and MCP JSONRPC protocol traffic. Additional RPC ports can be opened via ports list above. </td>
           <td>3000</td>
