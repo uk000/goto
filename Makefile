@@ -56,6 +56,9 @@ build: $(GO_FILES)
 run: build
 	./$(OUT) --port 8080
 
+test:
+	go test -v ./...
+
 # builds the binary into bin/ and runs all the e2e tests (tests/*/*-e2e-test.py) against it, via the driver in
 # tests/e2e. To run only some of them: make e2e-test E2E_ARGS="registry startup"
 e2e-test:
