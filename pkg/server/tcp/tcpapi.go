@@ -156,8 +156,20 @@ func (tcp *TCPConfig) Configure() string {
 	if tcp.EchoResponseSize <= 0 {
 		tcp.EchoResponseSize = 10
 	}
+	if !isValidExpectedPayloadLength(tcp.ExpectedPayloadLength) {
+		msg += invalidExpectedPayloadLengthMessage(tcp.ExpectedPayloadLength)
+	}
 	tcp.configureStream()
 	return msg
+}
+
+// isValidExpectedPayloadLength tells if a port can be set to expect a payload of the length.
+func isValidExpectedPayloadLength(length int) bool {
+	return length >= 0 && length <= maxExpectedPayloadLength
+}
+
+func invalidExpectedPayloadLengthMessage(length int) string {
+	return fmt.Sprintf("[Invalid expected payload length: %d, must be between 0 and %d]", length, maxExpectedPayloadLength)
 }
 
 // configureStream configures the stream params from the config's own stream fields.
@@ -393,13 +405,19 @@ func setExpectedPayloadLength(w http.ResponseWriter, r *http.Request) {
 	if validateTCPListener(w, r) {
 		port := util.GetIntParamValue(r, "port")
 		length := util.GetIntParamValue(r, "length")
-		updateTCPConfig(port, func(tcpConfig *TCPConfig) {
-			tcpConfig.ExpectedPayloadLength = length
-			tcpConfig.turnOffAllModes()
-			tcpConfig.ValidatePayloadLength = true
-			tcpConfig.ExpectedPayload = nil
-		})
-		msg := fmt.Sprintf("Stored expected payload length [%d]", length)
+		msg := ""
+		if !isValidExpectedPayloadLength(length) {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = invalidExpectedPayloadLengthMessage(length)
+		} else {
+			updateTCPConfig(port, func(tcpConfig *TCPConfig) {
+				tcpConfig.ExpectedPayloadLength = length
+				tcpConfig.turnOffAllModes()
+				tcpConfig.ValidatePayloadLength = true
+				tcpConfig.ExpectedPayload = nil
+			})
+			msg = fmt.Sprintf("Stored expected payload length [%d]", length)
+		}
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
 	}
@@ -410,14 +428,20 @@ func setExpectedPayload(w http.ResponseWriter, r *http.Request) {
 	if validateTCPListener(w, r) {
 		port := util.GetIntParamValue(r, "port")
 		expected := util.ReadBytes(r.Body)
-		updateTCPConfig(port, func(tcpConfig *TCPConfig) {
-			tcpConfig.ExpectedPayload = expected
-			tcpConfig.ExpectedPayloadLength = len(expected)
-			tcpConfig.turnOffAllModes()
-			tcpConfig.ValidatePayloadLength = true
-			tcpConfig.ValidatePayloadContent = true
-		})
-		msg := fmt.Sprintf("Stored expected payload content of length [%d]", len(expected))
+		msg := ""
+		if !isValidExpectedPayloadLength(len(expected)) {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = invalidExpectedPayloadLengthMessage(len(expected))
+		} else {
+			updateTCPConfig(port, func(tcpConfig *TCPConfig) {
+				tcpConfig.ExpectedPayload = expected
+				tcpConfig.ExpectedPayloadLength = len(expected)
+				tcpConfig.turnOffAllModes()
+				tcpConfig.ValidatePayloadLength = true
+				tcpConfig.ValidatePayloadContent = true
+			})
+			msg = fmt.Sprintf("Stored expected payload content of length [%d]", len(expected))
+		}
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
 	}

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gorilla/mux"
@@ -287,5 +288,56 @@ func TestURIRegexpsOfURIsWithoutQueries(t *testing.T) {
 		if err != nil || !re.MatchString(uri) {
 			t.Errorf("prefix match of /foo for %q = (%v, %v), want a match", uri, re, err)
 		}
+	}
+}
+
+// The empty URI matches every request of every port, so a route for it would take over all the traffic, and a route can't be
+// taken back from the router.
+func TestBuildURIMatcherForTheEmptyURIRegistersNoRoute(t *testing.T) {
+	core := newRouters(t)
+	before := countRoutes(MatchRouter, true)
+	prefix, re, router, err := BuildURIMatcher("", true, writer("taken"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if router != nil || prefix != "" || re == nil {
+		t.Errorf("BuildURIMatcher of the empty URI = (%q, %v, %v), want its regexp only", prefix, re, router)
+	}
+	for _, path := range []string{"/", "/foo", "/foo/bar?x=y"} {
+		if !re.MatchString(path) {
+			t.Errorf("regexp %s doesn't match %q", re, path)
+		}
+		if got := serveBody(core, path); got != "real" {
+			t.Errorf("GET %s = %q, want %q: the request was taken over", path, got, "real")
+		}
+	}
+	if got := countRoutes(MatchRouter, true); got != before {
+		t.Errorf("routes with a handler = %d, want the %d there were", got, before)
+	}
+}
+
+func TestBuildURIMatcherWhenTakesOverTheRequestsThatMeetTheCondition(t *testing.T) {
+	core := newRouters(t)
+	var on atomic.Bool
+	if _, _, _, err := BuildURIMatcherWhen("/cond", true, writer("handled"), func(*http.Request) bool { return on.Load() }); err != nil {
+		t.Fatal(err)
+	}
+	for i, tt := range []struct {
+		on   bool
+		path string
+		want string
+	}{{false, "/cond/x", "real"}, {true, "/cond/x", "handled"}, {true, "/other", "real"}, {false, "/cond/x", "real"}, {true, "/cond", "handled"}} {
+		on.Store(tt.on)
+		if got := serveBody(core, tt.path); got != tt.want {
+			t.Errorf("case %d: GET %s with the condition %v = %q, want %q", i, tt.path, tt.on, got, tt.want)
+		}
+	}
+	// the URI is registered once, with the condition of the first registration
+	if _, _, _, err := BuildURIMatcherWhen("/cond", true, writer("later"), nil); err != nil {
+		t.Fatal(err)
+	}
+	on.Store(false)
+	if got := serveBody(core, "/cond/x"); got != "real" {
+		t.Errorf("GET /cond/x = %q, want %q: the condition of the first registration stays", got, "real")
 	}
 }

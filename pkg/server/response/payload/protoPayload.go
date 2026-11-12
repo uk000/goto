@@ -159,7 +159,7 @@ func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, h
 			return nil, err
 		}
 	}
-	_, uriRegExp, responseRouter, err := util.BuildURIMatcher(uri, true, handleURI)
+	_, uriRegExp, responseRouter, err := util.BuildURIMatcherWhen(uri, true, handleURI, payloadsApplyTo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add URI match %s with error: %s\n", uri, err.Error())
 	}
@@ -309,7 +309,7 @@ func (rp *ResponsePayload) Process() error {
 			return fmt.Errorf("URI match is required")
 		}
 		match.URIPrefix = strings.ToLower(match.URIPrefix)
-		_, uriRE, rr, err := util.BuildURIMatcher(match.URIPrefix, true, handleURI)
+		_, uriRE, rr, err := util.BuildURIMatcherWhen(match.URIPrefix, true, handleURI, payloadsApplyTo)
 		if err != nil {
 			return fmt.Errorf("failed to add URI match %s with error: %s\n", match.URIPrefix, err.Error())
 		}
@@ -591,6 +591,33 @@ func (pp *ProtoPayloads) HasAnyPayload() bool {
 	defer pp.lock.RUnlock()
 	return len(pp.allURIResponsePayloads) > 0 || len(pp.PayloadByURIWithMatches) > 0 ||
 		len(pp.PayloadByHeaders) > 0 || len(pp.PayloadByQuery) > 0 || pp.DefaultPayload != nil
+}
+
+// HasPayloadFor tells if the payloads that are configured have something to do with a request with the URI, headers and
+// queries, the body left out: the request has a payload that answers it (the one that GetMatchingResponsePayload finds, or
+// one of a URI that the request has, that the body chooses), or has the URI of a payload that its headers, queries or body
+// don't match, which is answered by the echo of the request.
+func (pp *ProtoPayloads) HasPayloadFor(requestURI string, header http.Header, query url.Values) bool {
+	if _, _, _, found := pp.GetMatchingResponsePayload(requestURI, header, query, nil); found {
+		return true
+	}
+	pp.lock.RLock()
+	defer pp.lock.RUnlock()
+	for _, rp := range pp.allURIResponsePayloads {
+		if rp.uriRegexp != nil && rp.uriRegexp.MatchString(requestURI) {
+			return true
+		}
+	}
+	for _, rps := range pp.PayloadByURIWithMatches {
+		for _, rp := range rps {
+			for _, m := range rp.RequestMatches {
+				if m.uriRegexp != nil && m.uriRegexp.MatchString(requestURI) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // sortedURIs orders URIs so that the more specific one (the longer one) comes first, and the order of URIs of the same

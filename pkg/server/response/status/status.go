@@ -240,20 +240,22 @@ func clearStatus(w http.ResponseWriter, r *http.Request) {
 	counts := strings.Contains(r.RequestURI, "counts")
 	uri := util.GetStringParamValue(r, "uri")
 	msg := ""
-	portStatus.lock.Lock()
-	if counts {
-		portStatus.countsByRequestedStatus = map[int]int{}
-		portStatus.countsByResponseStatus = map[int]int{}
-		msg = fmt.Sprintf("Port [%s] Response Status Counts Cleared", util.GetRequestOrListenerPort(r))
-	} else {
-		TheStatusManager.Clear(port, uri, uri)
-		portStatus.FlipflopConfigs = map[string]*FlipFlopConfig{}
-		msg = fmt.Sprintf("Port [%s] Response Status State Cleared", util.GetRequestOrListenerPort(r))
-		if uri != "" {
-			msg = fmt.Sprintf("%s for URI [%s]", msg, uri)
+	func() {
+		portStatus.lock.Lock()
+		defer portStatus.lock.Unlock()
+		if counts {
+			portStatus.countsByRequestedStatus = map[int]int{}
+			portStatus.countsByResponseStatus = map[int]int{}
+			msg = fmt.Sprintf("Port [%s] Response Status Counts Cleared", util.GetRequestOrListenerPort(r))
+		} else {
+			TheStatusManager.Clear(port, uri, uri)
+			portStatus.FlipflopConfigs = map[string]*FlipFlopConfig{}
+			msg = fmt.Sprintf("Port [%s] Response Status State Cleared", util.GetRequestOrListenerPort(r))
+			if uri != "" {
+				msg = fmt.Sprintf("%s for URI [%s]", msg, uri)
+			}
 		}
-	}
-	portStatus.lock.Unlock()
+	}()
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
 }
@@ -271,6 +273,11 @@ func (ps *PortStatus) flipflop(requestId string, requestedStatuses []int, times 
 	}
 	requestedStatus := http.StatusOK
 	if len(requestedStatuses) > 1 {
+		if flipflopConfig.LastStatusIndex > len(requestedStatuses) {
+			// The progress was made through a longer list of statuses than this one (the config is kept per request id,
+			// and the requests of an id can ask for different lists), so there is no progress in this list: it starts over.
+			flipflopConfig.LastStatusIndex = 0
+		}
 		if len(requestedStatuses) > flipflopConfig.LastStatusIndex {
 			requestedStatus = requestedStatuses[flipflopConfig.LastStatusIndex]
 			flipflopConfig.LastStatusIndex++
@@ -322,16 +329,20 @@ func status(w http.ResponseWriter, r *http.Request) {
 	} else {
 		times = len(requestedStatuses)
 	}
-	portStatus.lock.Lock()
-	if flipflop {
-		requestedStatus = portStatus.flipflop(requestId, requestedStatuses, times, restart, r, w)
-	} else if len(requestedStatuses) == 1 {
-		requestedStatus = requestedStatuses[0]
-	} else if len(requestedStatuses) > 1 {
-		requestedStatus = types.RandomFrom(requestedStatuses)
-	}
-	portStatus.countsByRequestedStatus[requestedStatus]++
-	portStatus.lock.Unlock()
+	func() {
+		// The lock is released by a defer: a panic in here (which net/http recovers, serving the next request) must not leave
+		// the lock of the port's status held, which every request of the port takes.
+		portStatus.lock.Lock()
+		defer portStatus.lock.Unlock()
+		if flipflop {
+			requestedStatus = portStatus.flipflop(requestId, requestedStatuses, times, restart, r, w)
+		} else if len(requestedStatuses) == 1 {
+			requestedStatus = requestedStatuses[0]
+		} else if len(requestedStatuses) > 1 {
+			requestedStatus = types.RandomFrom(requestedStatuses)
+		}
+		portStatus.countsByRequestedStatus[requestedStatus]++
+	}()
 	metrics.UpdateRequestCount("status")
 	delay := 0 * time.Second
 	delayText := ""

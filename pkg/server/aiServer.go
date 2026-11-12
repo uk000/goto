@@ -26,6 +26,7 @@ import (
 	"goto/pkg/util"
 	"log"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -36,8 +37,8 @@ var (
 	jsonRPCServer           *http.Server
 	agentsHandler           http.Handler
 	aiHandler               http.Handler
-	jsonRPCStarted          bool
-	jsonRPCListenersStarted bool
+	jsonRPCStarted          atomic.Bool
+	jsonRPCListenersStarted atomic.Bool
 )
 
 // RunJsonRPCServer builds the MCP and A2A handlers and the AI router, then starts the JSON-RPC server on the configured port.

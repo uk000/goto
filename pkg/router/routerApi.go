@@ -80,7 +80,7 @@ func getRoutes(w http.ResponseWriter, r *http.Request) {
 	var data any
 	msg := ""
 	if all {
-		data = PortRouters
+		data = getPortRouters()
 		msg = "All Routes reported"
 	} else {
 		data = GetPortRouter(port)

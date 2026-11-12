@@ -137,6 +137,24 @@ func (pm *ResponsePayloadManager) getPortResponse(r *http.Request) *PortResponse
 	return pm.GetPortResponse(util.GetRequestOrListenerPortNum(r))
 }
 
+// hasPayloadsFor tells whether handleURI has anything to do for the request: its port has a payload that can answer it, and
+// the request is not one that asks for a payload of its own. It is the condition of the routes of the payload URIs (a route
+// stays for good once it is registered, while the payloads of its URI don't), and it creates nothing for a port that has no payloads.
+func (pm *ResponsePayloadManager) hasPayloadsFor(r *http.Request) bool {
+	pm.lock.RLock()
+	pr := pm.payloads[util.GetRequestOrListenerPortNum(r)]
+	pm.lock.RUnlock()
+	if pr == nil || util.IsPayloadRequest(r) {
+		return false
+	}
+	return pr.protoPayload(util.IsGRPC(r) || util.IsJSONRPC(r)).HasPayloadFor(r.RequestURI, r.Header, r.URL.Query())
+}
+
+// payloadsApplyTo is the condition of the routes of the payload URIs. It looks the manager up as it is called.
+func payloadsApplyTo(r *http.Request) bool {
+	return PayloadManager.hasPayloadsFor(r)
+}
+
 // GetPortResponse returns the payloads of the port, creating them if missing.
 func (pm *ResponsePayloadManager) GetPortResponse(port int) *PortResponsePayloads {
 	pm.lock.Lock()

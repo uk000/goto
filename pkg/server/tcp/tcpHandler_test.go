@@ -400,6 +400,57 @@ func TestPayloadValidationContentLongerThanReadBuffer(t *testing.T) {
 	}
 }
 
+// A length that is not valid is not stored by the API, but the config of a connection is only as good as the code that
+// stored it. A negative length used to make the connection allocate a buffer of that size, which panicked in the goroutine
+// of the connection and ended the whole server, and a huge one tried to allocate what the server doesn't have.
+func TestPayloadValidationOfALengthThatCannotBeServedEndsTheConnectionOnly(t *testing.T) {
+	for _, length := range []int{-1, 1 << 40} {
+		t.Run(strconv.Itoa(length), func(t *testing.T) {
+			stubOnce.Do(stubGlobalFuncs)
+			port := newPort(t)
+			storeTCPConfig(&TCPConfig{Port: port, ValidatePayloadContent: true, ValidatePayloadLength: true, ExpectedPayloadLength: length,
+				ReadTimeoutD: 5 * time.Second, WriteTimeoutD: 5 * time.Second, ConnIdleTimeoutD: 5 * time.Second})
+			s := serve(t, port)
+			conn := s.dial()
+			write(t, conn, "abc")
+			closeWrite(t, conn)
+			readAll(t, conn)
+			s.waitIdle()
+		})
+	}
+}
+
+// What a connection panics with, wherever it comes from, ends the connection and not the server, which a goroutine that
+// doesn't recover does.
+func TestProcessRequestRecoversFromAPanic(t *testing.T) {
+	stubOnce.Do(stubGlobalFuncs)
+	port := newPort(t)
+	// there is no connection to read from, which the first read of the echo panics with
+	h := &TCPConnectionHandler{TCPConfig: TCPConfig{Port: port, ListenerID: listenerID(port), Echo: true}, requestID: 1, status: &ConnectionStatus{Port: port}}
+	lock.Lock()
+	activeConnections[h.ListenerID] = map[int]*TCPConnectionHandler{1: h}
+	lock.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.processRequest()
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the connection that panicked was not ended")
+	}
+	h.status.mu.Lock()
+	errored := h.status.ErrorClosed
+	h.status.mu.Unlock()
+	if !errored {
+		t.Error("the connection that panicked is not reported as ended by an error")
+	}
+	if n := activeCount(port); n != 0 {
+		t.Errorf("active connections after the panic = %d, want the connection to be gone", n)
+	}
+}
+
 // ---- conversation ----
 
 func TestConversation(t *testing.T) {

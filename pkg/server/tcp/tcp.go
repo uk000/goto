@@ -126,6 +126,10 @@ type ConnectionHistory struct {
 	Status *ConnectionStatus `json:"status"`
 }
 
+// maxExpectedPayloadLength is the longest payload that a port can be set to expect (64 MiB): the connections that validate
+// the content keep what they receive, and the length is what a client can make them keep.
+var maxExpectedPayloadLength = 64 << 20
+
 const HelloMessage string = "HELLO"
 const GoodByeMessage string = "GOODBYE"
 const Response string = "Response"

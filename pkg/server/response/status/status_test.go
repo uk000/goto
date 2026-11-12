@@ -981,3 +981,76 @@ func TestStatusWithAHeaderAndWithoutAreSeparate(t *testing.T) {
 		t.Errorf("statuses = %v, want %v: one without a header, and one for the header present and one for it not present", got, want)
 	}
 }
+
+// serveRecovering serves the request the way net/http serves it, which recovers a panic of a handler and goes on to the next
+// request, and tells whether the handler panicked.
+func (s *testServer) serveRecovering(target string) (rr *httptest.ResponseRecorder, panicked any) {
+	rr = httptest.NewRecorder()
+	defer func() { panicked = recover() }()
+	req := httptest.NewRequest("GET", target, nil)
+	req = req.WithContext(context.WithValue(req.Context(), util.CurrentPortKey, s.port))
+	_, req, _ = util.WithRequestStore(req, nil)
+	s.api.ServeHTTP(rr, req)
+	return rr, nil
+}
+
+func (s *testServer) portStatus() *PortStatus {
+	statusLock.RLock()
+	defer statusLock.RUnlock()
+	return portStatusMap[strconv.Itoa(s.port)]
+}
+
+// The progress through a list of statuses is kept for the request id, which requests with lists of other lengths share. A
+// list that is shorter than the progress that was made through a longer one used to read past its end while the status of the
+// port was locked, and the lock was never released: the next request of the port, whatever it was for, waited for it forever.
+func TestFlipflopWithAListShorterThanTheProgressMadeThroughALongerOne(t *testing.T) {
+	s := newTestServer(t)
+	for i, want := range []int{200, 201, 202} {
+		if rr, p := s.serveRecovering("/status/200,201,202,203:5"); p != nil || rr.Code != want {
+			t.Fatalf("request %d of the long list = %d, panic %v, want %d", i+1, rr.Code, p, want)
+		}
+	}
+	for i, want := range []int{418, 419} {
+		rr, p := s.serveRecovering("/status/418,419:5")
+		if p != nil {
+			t.Fatalf("request %d of the shorter list panicked: %v", i+1, p)
+		}
+		if rr.Code != want {
+			t.Errorf("request %d of the shorter list = %d, want %d: the list starts over", i+1, rr.Code, want)
+		}
+	}
+	// the list is done, and the status flips to 200
+	if rr, p := s.serveRecovering("/status/418,419:5"); p != nil || rr.Code != 200 || rr.Header().Get(constants.HeaderGotoStatusFlip) != "419" {
+		t.Errorf("request after the list = %d %v, panic %v, want 200 flipping from 419", rr.Code, rr.Header(), p)
+	}
+	ps := s.portStatus()
+	if ps == nil || !ps.lock.TryLock() {
+		t.Fatal("the status of the port is still locked, or there is none")
+	}
+	ps.lock.Unlock()
+	if rr, _ := s.serveRecovering("/status/counts"); rr.Code != 200 {
+		t.Errorf("status counts of the port = %d, want 200", rr.Code)
+	}
+}
+
+func TestStatusOfAPortIsNotLeftLockedWhenServingAStatusPanics(t *testing.T) {
+	s := newTestServer(t)
+	if rr, p := s.serveRecovering("/status/200"); p != nil || rr.Code != 200 {
+		t.Fatalf("first request = %d, panic %v, want 200", rr.Code, p)
+	}
+	ps := s.portStatus()
+	if ps == nil {
+		t.Fatal("the port has no status")
+	}
+	// writing to the nil map of the flipflop configs panics while the status is locked
+	ps.lock.Lock()
+	ps.FlipflopConfigs = nil
+	ps.lock.Unlock()
+	if _, p := s.serveRecovering("/status/418:3"); p == nil {
+		t.Fatal("serving a flipflop status with no flipflop configs didn't panic, which the test needs")
+	}
+	if !ps.lock.TryLock() {
+		t.Fatal("the status of the port is still locked after the panic")
+	}
+	ps.lock.Unlock()
+}

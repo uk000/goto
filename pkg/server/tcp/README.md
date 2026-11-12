@@ -50,7 +50,7 @@ Defaults: `readTimeout`, `writeTimeout`, `connectTimeout` and `connIdleTimeout` 
     - `[ERROR:EXCEEDED] - Payload length [l] exceeded expected length [e] on port [p]`
     - `[ERROR:CONTENT] - Payload content of length [l] didn't match expected payload of length [e] on port [p]`
     - `[ERROR:TIMEOUT] - Timed out before receiving payload of expected length [l] on port [p]`
-  - `expectedPayloadLength` must not be negative when `validatePayloadContent` is on (a negative value makes the server crash on the first connection).
+  - `expectedPayloadLength` must be between `0` and `67108864` (64 MiB). A configuration with any other value is rejected with a `400`, and so are `expect/payload/length={length}` with such a length and `expect/payload` with a body longer than that; the port keeps the expectation it had.
 - <strong>Mode: `Conversation`</strong>
   - The listener waits for the client to send a line of text containing `HELLO` (any case) to which server also responds back with `HELLO`.
   - All subsequent lines from the client should follow the format `BEGIN/`{text}`/END`, and the server echoes the received text back in the format of `ACK/`{text}`/END`. A line in any other format gets the reply `ERROR`.
@@ -189,7 +189,7 @@ Note that in the example above the config says `echo: true`, and the mode of the
 | closeAtFirstByte | bool | Controls whether the listener should operate in `CloseAtFirstByte` mode. |
 | validatePayloadLength | bool | Controls whether the listener should operate in `Payload Validation` mode for length. |
 | validatePayloadContent | bool | Controls whether the listener should operate in `Payload Validation` mode for both content and length. |
-| expectedPayloadLength | int | Set the expected payload length explicitly for length verification. Also used to auto-store the expected payload content length when validating content. See API for providing expected payload content. Must not be negative. The expected payload content itself can only be set via API `expect/payload`; a `configure` call clears it. |
+| expectedPayloadLength | int | Set the expected payload length explicitly for length verification. Also used to auto-store the expected payload content length when validating content. See API for providing expected payload content. Must be between `0` and `67108864` (64 MiB), otherwise the configuration is rejected. The expected payload content itself can only be set via API `expect/payload`; a `configure` call clears it. |
 | echoResponseSize | int | Configures the size of payload to be echoed back to the client. Server will only echo back when it has these many bytes received from the client. Default `10` (also used when the value is zero or negative). |
 | echoResponseDelay | duration | Delay to be applied when sending response back to the client in echo mode. |
 | responsePayloads | []string | A list of payloads to be used in `Payload` mode. When more than one payload is configured, each is sent in succession after applying the `responseDelay`. |

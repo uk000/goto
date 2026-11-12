@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -107,6 +108,15 @@ func (tcp *TCPConnectionHandler) processConnectionError(err error, whatFor strin
 // processRequest serves the connection in the mode that its config selects, and closes the connection when done.
 func (tcp *TCPConnectionHandler) processRequest() {
 	defer tcp.close()
+	// The connection is served by a goroutine of its own, where a panic is not recovered by anything and ends the whole
+	// server: it ends the connection instead.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[Listener: %s][Request: %d]: Recovered from panic on port [%d]: %v\n%s", tcp.ListenerID, tcp.requestID, tcp.Port, r, debug.Stack())
+			tcp.closing.Store(true)
+			tcp.status.update(func(s *ConnectionStatus) { s.ErrorClosed = true })
+		}
+	}()
 	log.Printf("[Listener: %s][Request: %d]: Processing new request on port [%d] - {response=%t, echo=%t, stream=%t, conversation=%t, readTimeout=%s, writeTimeout=%s, connIdleTimeout=%s, connectionLife=%s}",
 		tcp.ListenerID, tcp.requestID, tcp.Port, tcp.Payload, tcp.Echo, tcp.Stream, tcp.Conversation, tcp.ReadTimeout, tcp.WriteTimeout, tcp.ConnIdleTimeout, tcp.ConnectionLife)
 
@@ -196,10 +206,8 @@ func (tcp *TCPConnectionHandler) doPayloadValidation() {
 	tcp.status.update(func(s *ConnectionStatus) { s.TotalBytesRead = 0 })
 	tcp.resetReadBuffer()
 	tcp.resetWriteBuffer()
+	// what is received is kept as it arrives, as a connection that sends nothing keeps nothing
 	var receivedPayload []byte
-	if tcp.ValidatePayloadContent {
-		receivedPayload = make([]byte, tcp.ExpectedPayloadLength)
-	}
 	isPayloadReady := false
 	checkForExcess := false
 	isPayloadExcess := false
@@ -209,11 +217,10 @@ func (tcp *TCPConnectionHandler) doPayloadValidation() {
 				tcp.ListenerID, tcp.requestID, PayloadValidation, tcp.Port)
 			break
 		}
-		prevBytesRead := tcp.status.bytesRead()
 		if success, readSize := tcp.read(PayloadValidation); success {
 			totalRead := tcp.status.bytesRead()
 			if tcp.ValidatePayloadContent && totalRead <= tcp.ExpectedPayloadLength {
-				copy(receivedPayload[prevBytesRead:prevBytesRead+readSize], tcp.readBuffer[:readSize])
+				receivedPayload = append(receivedPayload, tcp.readBuffer[:readSize]...)
 			}
 			log.Printf("[Listener: %s][Request: %d][%s]: Read data of length [%d] for payload validation on port [%d]. Total read so far [%d].",
 				tcp.ListenerID, tcp.requestID, PayloadValidation, readSize, tcp.Port, totalRead)

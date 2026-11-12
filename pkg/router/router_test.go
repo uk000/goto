@@ -30,6 +30,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -722,5 +723,244 @@ func TestRouteJSON(t *testing.T) {
 		if !strings.Contains(out, part) {
 			t.Errorf("JSON of the route lacks %s: %s", part, out)
 		}
+	}
+}
+
+// completesWithin fails the test if f doesn't return in time, which is how a deadlock shows up.
+func completesWithin(t *testing.T, d time.Duration, f func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f()
+	}()
+	select {
+	case <-done:
+	case <-time.After(d):
+		t.Fatalf("did not complete within %v", d)
+	}
+}
+
+// getRoutesBody serves the request of the routing API that reports the routes, and returns the report decoded.
+func getRoutesBody(port int, uri string) (map[string]any, error) {
+	rr := httptest.NewRecorder()
+	getRoutes(rr, newRequest(port, "GET", uri, nil))
+	var report map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &report); err != nil {
+		return nil, fmt.Errorf("GET %s: invalid report: %w", uri, err)
+	}
+	return report, nil
+}
+
+// routeOnce sends a request through the router of the port, the way the server does, and returns the status of the answer.
+// A request that the router has no route for (as when the routes are being cleared) is not an error here.
+func routeOnce(port int, method, target, body string) (status int, routed bool) {
+	req := newRequest(port, method, target, strings.NewReader(body))
+	h := WillRoute(port, req)
+	if h == nil {
+		return 0, false
+	}
+	rr := httptest.NewRecorder()
+	w, irw := intercept.WithIntercept(req, rr)
+	h.ServeHTTP(w, req)
+	irw.Proceed()
+	return rr.Code, true
+}
+
+func TestRoutingAPIReportsRoutesAndTraffic(t *testing.T) {
+	port := newPort(t)
+	up := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Upstream", "yes")
+		fmt.Fprint(w, "pong")
+	})
+	route := newRoute(port, "r", "/rt", up.addr())
+	route.LogBody = true
+	registerRoute(port, route)
+	if status, routed := routeOnce(port, "POST", "/rt/x?a=b", "hello"); !routed || status != http.StatusOK {
+		t.Fatalf("routed = %v, status = %d", routed, status)
+	}
+
+	report, err := getRoutesBody(port, "/routing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report["id"] != fmt.Sprintf("PortRouter-%d", port) || report["port"] != float64(port) {
+		t.Errorf("report of the port = %v", report)
+	}
+	if routes, _ := report["routes"].(map[string]any); routes["r"] == nil {
+		t.Errorf("routes = %v, want the route r", report["routes"])
+	}
+	traffic, _ := report["traffic"].(map[string]any)
+	if len(traffic) != 1 {
+		t.Fatalf("traffic = %v, want one record", report["traffic"])
+	}
+	for _, v := range traffic {
+		rt := v.(map[string]any)
+		if rt["requestMethod"] != "POST" || rt["requestURI"] != "/rt/x?a=b" || rt["requestPayloadSize"] != float64(5) ||
+			rt["responsePayloadSize"] != float64(4) {
+			t.Errorf("traffic = %v", rt)
+		}
+		if h, _ := rt["responseHeaders"].(map[string]any); h["X-Upstream"] == nil {
+			t.Errorf("response headers = %v, want the one of the upstream", rt["responseHeaders"])
+		}
+		if rt["responseAt"] == "0001-01-01T00:00:00Z" || rt["took"] == float64(0) {
+			t.Errorf("response of the traffic isn't recorded: %v", rt)
+		}
+	}
+
+	all, err := getRoutesBody(port, "/routing/all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one, _ := all[fmt.Sprint(port)].(map[string]any); one == nil || one["id"] != report["id"] {
+		t.Errorf("report of all the routers = %v, want the one of port %d", all, port)
+	}
+}
+
+// Reporting the routes marshals what the routed requests record at the same time: the traffic added by one request, and the
+// response that another one records. Without the lock of the router that is a fatal "concurrent map read and map write".
+func TestRoutingAPIReportsWhileTrafficFlowsAndARouteIsReplaced(t *testing.T) {
+	port := newPort(t)
+	up := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Upstream", "yes")
+		fmt.Fprint(w, "{\"pong\":true}")
+	})
+	newRouteForTest := func() *Route {
+		r := newRoute(port, "r", "/rt", up.addr())
+		r.LogHops, r.LogBody = true, true
+		return r
+	}
+	pr := registerRoute(port, newRouteForTest())
+
+	const workers, requests = 6, 40
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	failures := make(chan error, 100)
+	fail := func(err error) {
+		select {
+		case failures <- err:
+		default:
+		}
+	}
+	var routed atomic.Int32
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < requests; i++ {
+				status, ok := routeOnce(port, "POST", fmt.Sprintf("/rt/w%d/%d", w, i), "payload")
+				if ok {
+					routed.Add(1)
+					if status != http.StatusOK {
+						fail(fmt.Errorf("routed request answered %d", status))
+					}
+				}
+			}
+		}(w)
+	}
+	var reporters sync.WaitGroup
+	for _, uri := range []string{"/routing", "/routing/all", "/routing"} {
+		reporters.Add(1)
+		go func(uri string) {
+			defer reporters.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if _, err := getRoutesBody(port, uri); err != nil {
+					fail(err)
+					return
+				}
+			}
+		}(uri)
+	}
+	reporters.Add(1)
+	go func() {
+		defer reporters.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			// the route is replaced by another one under its label, and is there for the requests that are being routed
+			pr.AddRoute(newRouteForTest())
+		}
+	}()
+	completesWithin(t, 60*time.Second, wg.Wait)
+	close(stop)
+	completesWithin(t, 30*time.Second, reporters.Wait)
+	close(failures)
+	for err := range failures {
+		t.Error(err)
+	}
+	if routed.Load() == 0 {
+		t.Error("no request was routed")
+	}
+}
+
+// Routers are created by the requests of ports that have none yet, while the routes are reported for all ports, and while all
+// the routers are dropped.
+func TestRoutingAPIReportsAllPortsWhileRoutersAreCreatedAndDropped(t *testing.T) {
+	port := newPort(t)
+	t.Cleanup(Init)
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	failures := make(chan error, 100)
+	for g := 0; g < 4; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < 15; i++ {
+				GetPortRouter(port + 100*(g+1) + i)
+			}
+		}(g)
+	}
+	var reporters sync.WaitGroup
+	reporters.Add(2)
+	go func() {
+		defer reporters.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if _, err := getRoutesBody(port, "/routing/all"); err != nil {
+				select {
+				case failures <- err:
+				default:
+				}
+				return
+			}
+		}
+	}()
+	go func() {
+		defer reporters.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			rr := httptest.NewRecorder()
+			clearRoutes(rr, newRequest(port, "POST", "/routing/clear/all", nil))
+			if !strings.Contains(rr.Body.String(), "cleared") {
+				select {
+				case failures <- fmt.Errorf("clear of all routes answered %q", rr.Body.String()):
+				default:
+				}
+				return
+			}
+		}
+	}()
+	completesWithin(t, 60*time.Second, wg.Wait)
+	close(stop)
+	completesWithin(t, 30*time.Second, reporters.Wait)
+	close(failures)
+	for err := range failures {
+		t.Error(err)
 	}
 }

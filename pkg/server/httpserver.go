@@ -41,6 +41,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -50,14 +51,15 @@ import (
 )
 
 var (
-	httpServer           *http.Server
-	h2s                  = &http2.Server{}
-	coreRouter           *mux.Router
-	httpHandler          http.Handler
-	h2cHandler           http.Handler
-	mcpHandler           http.Handler
-	httpStarted          bool
-	httpListenersStarted bool
+	httpServer  *http.Server
+	h2s         = &http2.Server{}
+	coreRouter  *mux.Router
+	httpHandler http.Handler
+	h2cHandler  http.Handler
+	mcpHandler  http.Handler
+	// The servers are flagged as started by the timer that runs 2 seconds after they are started, and the flags are read by startListeners.
+	httpStarted          atomic.Bool
+	httpListenersStarted atomic.Bool
 	RootRouter           *mux.Router
 )
 
@@ -148,9 +150,9 @@ func StartHttpServer(server *http.Server, jsonRPC bool) error {
 	go func(server *http.Server) {
 		time.AfterFunc(2*time.Second, func() {
 			if jsonRPC {
-				jsonRPCStarted = true
+				jsonRPCStarted.Store(true)
 			} else {
-				httpStarted = true
+				httpStarted.Store(true)
 			}
 		})
 		if err := server.ListenAndServe(); err != nil {
@@ -171,23 +173,23 @@ func startListeners() {
 		serverCount++
 	}
 	for i := 0; i < serverCount; {
-		if httpStarted && !httpListenersStarted {
+		if httpStarted.Load() && !httpListenersStarted.Load() {
 			log.Printf("HTTP server [%s] is ready. Starting additional HTTP listeners.", httpServer.Addr)
 			time.Sleep(1 * time.Second)
 			global.OnHTTPStart(httpServer, h2s)
-			httpListenersStarted = true
+			httpListenersStarted.Store(true)
 			i++
-		} else if jsonRPCStarted && !jsonRPCListenersStarted {
+		} else if jsonRPCStarted.Load() && !jsonRPCListenersStarted.Load() {
 			log.Printf("JSONRPC server [%s] is ready. Starting additional JSONRPC listeners.", jsonRPCServer.Addr)
 			time.Sleep(1 * time.Second)
 			global.OnJSONRPCStart(jsonRPCServer, h2s)
-			jsonRPCListenersStarted = true
+			jsonRPCListenersStarted.Store(true)
 			i++
 		} else {
-			if !httpStarted && httpServer != nil {
+			if !httpStarted.Load() && httpServer != nil {
 				log.Printf("Waiting for HTTP server [%s] before starting additional HTTP listeners.", httpServer.Addr)
 			}
-			if !jsonRPCStarted && jsonRPCServer != nil {
+			if !jsonRPCStarted.Load() && jsonRPCServer != nil {
 				log.Printf("Waiting for JSONRPC server [%s] before starting additional JSONRPC listeners.", jsonRPCServer.Addr)
 			}
 		}
@@ -218,8 +220,19 @@ func WaitForHttpServer() {
 	log.Printf("Deregistering peer [%s : %s] from registry", global.Self.Name, global.Self.Address)
 	go peer.DeregisterPeer(global.Self.Name, global.Self.Address)
 	startup.Stop()
+	// The listeners that have ALPN handlers of their own are served by servers of their own, which shut down with the others.
+	listenersStopped := make(chan struct{})
+	go func() {
+		defer close(listenersStopped)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		// as StopHttpServer waits before it shuts down, so that they stop accepting connections together
+		time.Sleep(time.Second)
+		listeners.ShutdownServers(ctx)
+	}()
 	StopHttpServer(httpServer)
 	StopHttpServer(jsonRPCServer)
+	<-listenersStopped
 }
 
 // StopHttpServer gracefully shuts down the given server with a 10 second timeout.

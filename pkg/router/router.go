@@ -18,6 +18,7 @@ package router
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"goto/pkg/global"
 	"goto/pkg/metrics"
@@ -117,8 +118,21 @@ var (
 
 // Init resets all port routers and the request correlation counter.
 func Init() {
+	lock.Lock()
+	defer lock.Unlock()
 	PortRouters = map[int]*PortRouter{}
-	RequestCorrelationID = atomic.Int64{}
+	RequestCorrelationID.Store(0)
+}
+
+// getPortRouters returns a copy of the map of the port routers.
+func getPortRouters() map[int]*PortRouter {
+	lock.RLock()
+	defer lock.RUnlock()
+	routers := make(map[int]*PortRouter, len(PortRouters))
+	for port, pr := range PortRouters {
+		routers[port] = pr
+	}
+	return routers
 }
 
 // WillRoute returns the handler of the route that matches the request on the port, or nil if the request is not to be rerouted.
@@ -134,6 +148,12 @@ func WillRoute(port int, r *http.Request) http.Handler {
 
 // GetPortRouter returns the router of the port, creating it on first use.
 func GetPortRouter(port int) *PortRouter {
+	lock.RLock()
+	pr := PortRouters[port]
+	lock.RUnlock()
+	if pr != nil {
+		return pr
+	}
 	lock.Lock()
 	defer lock.Unlock()
 	if PortRouters[port] == nil {
@@ -163,6 +183,29 @@ func newPortRouter(port int) *PortRouter {
 	pr.responseHandler = intercept.IntereceptMiddleware(nil, response.Middleware.MiddlewareHandler.Middleware(nil))(pr.proxy)
 	pr.requestResponseHandler = intercept.IntereceptMiddleware(request.Middleware.MiddlewareHandler.Middleware(nil), response.Middleware.MiddlewareHandler.Middleware(nil))(pr.proxy)
 	return pr
+}
+
+// MarshalJSON encodes the routes and the traffic of the port router as of one moment: they are copied under the lock of the
+// router, which the traffic is recorded under, and encoded after it is released.
+func (pr *PortRouter) MarshalJSON() ([]byte, error) {
+	view := struct {
+		ID           string                   `json:"id"`
+		Port         int                      `json:"port"`
+		Routes       map[string]*Route        `json:"routes"`
+		RouteTraffic map[string]*RouteTraffic `json:"traffic"`
+	}{ID: pr.ID, Port: pr.Port}
+	pr.lock.RLock()
+	view.Routes = make(map[string]*Route, len(pr.Routes))
+	for label, route := range pr.Routes {
+		view.Routes[label] = route
+	}
+	view.RouteTraffic = make(map[string]*RouteTraffic, len(pr.RouteTraffic))
+	for id, rt := range pr.RouteTraffic {
+		cp := *rt
+		view.RouteTraffic[id] = &cp
+	}
+	pr.lock.RUnlock()
+	return json.Marshal(view)
 }
 
 // Clear removes all routes and recorded traffic of the port router.
@@ -198,6 +241,12 @@ func (pr *PortRouter) AddRoute(r *Route) {
 
 // AddRouteTraffic records the details of a request routed by the route under the given ID.
 func (pr *PortRouter) AddRouteTraffic(id string, r *Route, req *http.Request) *RouteTraffic {
+	return pr.addRouteTraffic(id, r, req, 0)
+}
+
+// addRouteTraffic records the traffic with all that is known of the request. What is recorded is shared with whatever reports
+// the traffic from then on, so it is not changed after it is added, except by setResponse, under the lock of the router.
+func (pr *PortRouter) addRouteTraffic(id string, r *Route, req *http.Request, requestPayloadSize int) *RouteTraffic {
 	pr.lock.Lock()
 	defer pr.lock.Unlock()
 	sni := ""
@@ -212,13 +261,27 @@ func (pr *PortRouter) AddRouteTraffic(id string, r *Route, req *http.Request) *R
 		RemoteAddr:     req.RemoteAddr,
 		RequestURI:     req.RequestURI,
 		RequestQuery:   req.URL.Query().Encode(),
-		RequestHeaders: req.Header,
+		RequestHeaders: req.Header.Clone(),
 		RequestMethod:  req.Method,
 		RequestProto:   req.Proto,
 		RequestSNI:     sni,
+
+		RequestPayloadSize: requestPayloadSize,
 	}
 	pr.RouteTraffic[id] = a
 	return a
+}
+
+// setResponse records the details of the response on the traffic that was added for the request.
+func (pr *PortRouter) setResponse(rt *RouteTraffic, headers map[string][]string, at time.Time, payloadSize int) {
+	pr.lock.Lock()
+	defer pr.lock.Unlock()
+	rt.ResponseHeaders = headers
+	rt.ResponseAt = at
+	if !rt.RequestAt.IsZero() {
+		rt.Took = at.Sub(rt.RequestAt)
+	}
+	rt.ResponsePayloadSize = payloadSize
 }
 
 // GetRouteTraffic returns the traffic recorded under the ID, or nil.
@@ -263,12 +326,11 @@ func (pr *PortRouter) GetRewriter() func(*httputil.ProxyRequest) {
 			return
 		}
 		proxyReq.Out = req
-		ar := pr.AddRouteTraffic(id, route, proxyReq.In)
 		body := ""
 		if route.LogBody {
 			body = string(rs.ReReader.Content)
-			ar.RequestPayloadSize = len(body)
 		}
+		pr.addRouteTraffic(id, route, proxyReq.In, len(body))
 		log.Printf("Routing ID [%s]: Request URI [%s]: Routing to upstream [%s], URI [%s], Headers [%+v], Body [%s]\n",
 			id, proxyReq.In.RequestURI, route.To.URL, proxyReq.Out.RequestURI, proxyReq.Out.Header, body)
 	}
@@ -297,18 +359,21 @@ func (pr *PortRouter) Intercept(resp *http.Response) error {
 	msg := ""
 	if route != nil {
 		body := ""
-		rt.ResponseHeaders = map[string][]string{}
-		util.CopyHeadersWithPrefix("", resp.Header, rt.ResponseHeaders)
+		responseHeaders := map[string][]string{}
+		util.CopyHeadersWithPrefix("", resp.Header, responseHeaders)
 		prepareHeaders(resp.Header, resp.Header, route.To.ResponseHeaders)
+		responsePayloadSize := 0
 		if route.LogHops || route.LogBody {
 			body = string(rr.Content)
-			rt.ResponsePayloadSize = len(body)
+			responsePayloadSize = len(body)
 		}
 		msg = fmt.Sprintf("Routing ID [%s]: Request URI [%s], Response from upstream URL [%s] sent to downstream. Response Headers [%+v], Response Body [%s]",
 			id, req.RequestURI, route.To.URL, resp.Header, body)
-		rt.ResponseAt = time.Now()
+		responseAt := time.Now()
+		pr.setResponse(rt, responseHeaders, responseAt, responsePayloadSize)
+		took := time.Duration(0)
 		if !rt.RequestAt.IsZero() {
-			rt.Took = rt.ResponseAt.Sub(rt.RequestAt)
+			took = responseAt.Sub(rt.RequestAt)
 		}
 		if route.LogHops {
 			var content any
@@ -316,11 +381,11 @@ func (pr *PortRouter) Intercept(resp *http.Response) error {
 				content = body
 			}
 			selfHeaders := echo.GetEchoResponse(rt.Listener, rt.RemoteAddr, rt.RequestHost, rt.RequestURI, rt.RequestMethod, rt.RequestProto,
-				rt.RequestQuery, rt.RequestSNI, rt.Route.From.Port, rt.RequestPayloadSize, rt.ResponsePayloadSize, rt.RequestHeaders, rs.IsTLS, rs.IsMTLS, rs.ServerCert, rs.ClientCert)
+				rt.RequestQuery, rt.RequestSNI, rt.Route.From.Port, rt.RequestPayloadSize, responsePayloadSize, rt.RequestHeaders, rs.IsTLS, rs.IsMTLS, rs.ServerCert, rs.ClientCert)
 			routeRequestAt := fmt.Sprintf("%s/%s", rt.Listener, rt.RequestAt.Format(time.RFC3339Nano))
-			routeResponseAt := fmt.Sprintf("%s/%s", rt.Listener, rt.ResponseAt.Format(time.RFC3339Nano))
-			routeTook := fmt.Sprintf("%s/%s", rt.Listener, rt.Took.String())
-			selfHeaders["Response-Headers"] = rt.ResponseHeaders
+			routeResponseAt := fmt.Sprintf("%s/%s", rt.Listener, responseAt.Format(time.RFC3339Nano))
+			routeTook := fmt.Sprintf("%s/%s", rt.Listener, took.String())
+			selfHeaders["Response-Headers"] = responseHeaders
 			selfHeaders["Route-Request-At"] = routeRequestAt
 			selfHeaders["Route-Response-At"] = routeResponseAt
 			selfHeaders["Route-Took"] = routeTook
