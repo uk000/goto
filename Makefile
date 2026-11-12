@@ -61,12 +61,19 @@ gen-extauthz:
 clean:
 	rm -rf pkg/server/grpc/pb/*.go
 
+# static linking isn't supported by the macOS toolchain (no static crt0.o), so it's skipped when building for darwin
+TARGET_OS := $(if $(GOOS),$(GOOS),$(shell go env GOOS))
+STATIC_FLAGS := $(if $(filter darwin,$(TARGET_OS)),,-extldflags \"-static\")
+
 build: $(GO_FILES)
-	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -mod=mod -o $(OUT) -ldflags="-extldflags \"-static\" -w -s -X goto/pkg/global.Version=$(VERSION) -X goto/pkg/global.Commit=$(COMMIT)" .
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -mod=mod -o $(OUT) -ldflags="$(STATIC_FLAGS) -w -s -X goto/pkg/global.Version=$(VERSION) -X goto/pkg/global.Commit=$(COMMIT)" .
 	@chmod +x $(OUT)
 
 run: build
 	./$(OUT) --port 8080
+
+test:
+	go test -v ./...
 
 # builds the binary into bin/ and runs all the e2e tests (tests/*/*-e2e-test.py) against it, via the driver in
 # tests/e2e. To run only some of them: make e2e-test E2E_ARGS="registry startup"

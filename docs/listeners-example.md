@@ -249,4 +249,39 @@ $ curl -s localhost:8080/server/listeners
 }
 ```
 
+## Unix Domain Sockets (UDS)
+
+`goto` can serve over a Unix domain socket in two ways.
+
+#### At startup
+`--uds {path}` serves the primary HTTP port's handler on a socket as well, in addition to the TCP ports:
+```
+goto --ports 8080 --uds /tmp/goto.sock
+
+curl --unix-socket /tmp/goto.sock http://localhost/version
+```
+Requests on the socket are handled as requests to the primary port (8080 above).
+
+#### Dynamically, via the listeners API
+Add a `uds` path to the listener payload. The listener binds the socket instead of the TCP port:
+```
+curl -X POST localhost:8080/server/listeners/add \
+  --data '{"port":9092, "protocol":"http", "uds":"/tmp/goto-9092.sock", "open":true}'
+Listener 9092 added and opened on UDS /tmp/goto-9092.sock.
+
+curl --unix-socket /tmp/goto-9092.sock http://localhost/version
+
+# gRPC and TCP listeners work the same way
+curl -X POST localhost:8080/server/listeners/add \
+  --data '{"port":9091, "protocol":"grpc", "uds":"/tmp/goto-9091.sock", "open":true}'
+```
+
+#### Notes
+- `port` is still required: it identifies the listener (for `/server/listeners/{port}/close`, `/open`, `/remove`, listener labels, metrics and logs), but nothing binds that TCP port.
+- Supported for `http`, `https`, `grpc`, `grpcs` and `tcp` listeners, including TLS. Not supported for `udp`.
+- A socket path can only be used by one listener, and can't be the path given to `--uds`. Such requests are rejected.
+- The socket file is created with permissions `0660`. A stale socket file left by a previous run is replaced, but a path that exists and is not a socket is rejected and left untouched.
+- Closing or removing the listener, or stopping the server, removes the socket file. Closing a listener also drops its open connections. The close is logged as `Closing http listener: 9092 (UDS: /tmp/goto-9092.sock)`.
+- Clients on a socket have no IP address, so their remote address shows up empty or as `@` in logs and in TCP proxy/session tracking.
+
 `GET /server/listeners/ports` is a smaller view of the same thing, with the `l8Proto` of each port: `{"8081":"h2c","8082":"h2c","8443":"h2","9000":"tcp","9091":"grpc"}`. (A real instance also lists its bootstrap, JSON-RPC and gRPC ports.)

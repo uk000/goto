@@ -479,6 +479,7 @@ func newGRPCServer() *GRPCServer {
 				PermitWithoutStream: true,
 			}),
 			grpc.StatsHandler(otelgrpc.NewServerHandler()),
+			grpc.StatsHandler(&udsConnTagger{}),
 			grpc.ChainUnaryInterceptor(unaryMiddleware),
 			grpc.ChainStreamInterceptor(streamMiddleware),
 		},

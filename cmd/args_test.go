@@ -133,7 +133,7 @@ func TestEveryFlagIsRegisteredUnderItsNames(t *testing.T) {
 	setupAll()
 	// The flags of the command line, and the short name of each (if it has one).
 	want := map[string]string{
-		"contextFile": "ctxf", "context": "ctx",
+		"contextFile": "ctxf", "context": "ctx", "uds": "",
 		"client": "", "protocol": "pr", "urls": "u", "headers": "h", "reqCount": "req", "parallel": "par", "method": "X",
 		"payload": "data", "autodata": "a", "delay": "d", "retries": "r", "retrydelay": "rd", "retryon": "ro", "persist": "", "verbose": "v",
 		"port": "p", "grpcPort": "gp", "rpcPort": "rpc", "ports": "", "cn": "", "label": "l", "registry": "", "locker": "",

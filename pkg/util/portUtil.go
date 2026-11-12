@@ -58,6 +58,9 @@ func GetPortFromAddress(addr string) int {
 func GetPortValueFromLocalAddressContext(ctx context.Context) string {
 	if val := ctx.Value(http.LocalAddrContextKey); val != nil {
 		srvAddr := ctx.Value(http.LocalAddrContextKey).(net.Addr)
+		if IsUnixAddr(srvAddr) {
+			return ""
+		}
 		if pieces := strings.Split(srvAddr.String(), ":"); len(pieces) > 1 {
 			return pieces[len(pieces)-1]
 		}
@@ -92,7 +95,7 @@ func GetConnectionPortNum(r *http.Request) int {
 		}
 	}
 	if conn := GetConn(r); conn != nil {
-		if addr := conn.LocalAddr(); addr != nil {
+		if addr := conn.LocalAddr(); addr != nil && !IsUnixAddr(addr) {
 			if port := GetPortFromAddress(addr.String()); port > 0 {
 				return port
 			}

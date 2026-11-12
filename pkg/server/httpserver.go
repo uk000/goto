@@ -76,6 +76,7 @@ func RunHttpServer() {
 	if err != nil {
 		log.Fatal(err.Error())
 	}
+	startUDSListener(httpServer, global.ServerConfig.UDSPath)
 	RunJsonRPCServer()
 	global.AddListenersStartWatcher(func() {
 		startup.Start()
@@ -163,6 +164,24 @@ func StartHttpServer(server *http.Server, jsonRPC bool) error {
 	return nil
 }
 
+// startUDSListener serves the HTTP server on a unix domain socket too, as the primary listener does.
+func startUDSListener(server *http.Server, path string) {
+	if path == "" {
+		return
+	}
+	listener, err := util.ListenUDS(path)
+	if err != nil {
+		log.Fatalf("Failed to open UDS listener [%s]: %s", path, err.Error())
+	}
+	util.RegisterUDSPort(path, global.Self.ServerPort)
+	go func() {
+		log.Printf("Starting UDS Listener [%s]", path)
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("UDS Listener [%s]: %s", path, err.Error())
+		}
+	}()
+}
+
 // startListeners waits until the HTTP and JSON-RPC servers are ready and then starts the additional listeners that depend on each.
 func startListeners() {
 	serverCount := 0
@@ -232,6 +251,8 @@ func WaitForHttpServer() {
 	}()
 	StopHttpServer(httpServer)
 	StopHttpServer(jsonRPCServer)
+	// The listeners that the servers don't close are closed too, so as not to leave their socket files behind.
+	listeners.CloseUDSListeners()
 	<-listenersStopped
 }
 
@@ -241,6 +262,9 @@ func StopHttpServer(server *http.Server) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	time.Sleep(time.Second)
+	if path := global.ServerConfig.UDSPath; path != "" && server == httpServer {
+		log.Printf("Closing http listener: %d (UDS: %s)\n", global.Self.ServerPort, path)
+	}
 	server.Shutdown(ctx)
 	log.Printf("HTTP Server %s finished shutting down", server.Addr)
 }

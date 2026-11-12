@@ -34,6 +34,13 @@ Durations (`--startupDelay`, `--shutdownDelay`) are Go durations that need a uni
           <td rowspan="1">8080</td>
         </tr>
         <tr>
+          <td rowspan="2"><pre>--uds {path}</pre></td>
+          <td>Unix domain socket path for an additional HTTP listener, e.g. <pre>--uds /tmp/goto.sock</pre> </td>
+          <td rowspan="2">""</td>
+        </tr>
+        <tr>
+          <td>* Test with: <pre>curl --unix-socket /tmp/goto.sock http://localhost/version</pre> A listener added via the listeners API can also use a socket by setting its <code>uds</code> field. See <a href="../docs/listeners-example.md#unix-domain-sockets-uds">Unix Domain Sockets</a>.</td>
+        </tr>
           <td><pre>--rpcPort, -rpc {port}</pre></td>
           <td>The default RPC port that will be used to serve A2A and MCP JSONRPC protocol traffic. It is always opened: the argument only changes the port number. Additional RPC ports can be opened via ports list above. </td>
           <td>3000</td>
