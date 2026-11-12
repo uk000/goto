@@ -23,6 +23,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -98,6 +99,38 @@ func TestListenUDSReplacesStaleSocket(t *testing.T) {
 	ln.Close()
 }
 
+func TestListenUDSKeepsSocketThatIsInUse(t *testing.T) {
+	path := udsTestPath(t, "live.sock")
+	live, err := ListenUDS(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer live.Close()
+	if ln, err := ListenUDS(path); err == nil {
+		ln.Close()
+		t.Fatal("a socket that is in use must not be replaced")
+	} else if !strings.Contains(err.Error(), "in use") {
+		t.Errorf("error = %q, want it to say that the socket is in use", err.Error())
+	}
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		if c, err := live.Accept(); err == nil {
+			accepted <- c
+		}
+	}()
+	c, err := net.DialTimeout("unix", path, 2*time.Second)
+	if err != nil {
+		t.Fatalf("the socket in use can't be dialed after the attempt to replace it: %v", err)
+	}
+	c.Close()
+	select {
+	case s := <-accepted:
+		s.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("the socket in use no longer gets connections")
+	}
+}
+
 func TestListenUDSRejectsBadPaths(t *testing.T) {
 	if ln, err := ListenUDS(""); err == nil {
 		ln.Close()
@@ -118,6 +151,20 @@ func TestListenUDSRejectsBadPaths(t *testing.T) {
 		ln.Close()
 		t.Error("a path under a file must be rejected")
 	}
+}
+
+func TestUnregisterUDSPort(t *testing.T) {
+	path := udsTestPath(t, "u.sock")
+	RegisterUDSPort(path, 9093)
+	UnregisterUDSPort(path, 9094)
+	if got := GetUDSPort(unixAddr(path)); got != 9093 {
+		t.Errorf("GetUDSPort after the unregistering of another port = %d, want 9093", got)
+	}
+	UnregisterUDSPort(path, 9093)
+	if got := GetUDSPort(unixAddr(path)); got != 0 {
+		t.Errorf("GetUDSPort after the unregistering = %d, want 0", got)
+	}
+	UnregisterUDSPort(path, 9093)
 }
 
 func TestUDSPorts(t *testing.T) {

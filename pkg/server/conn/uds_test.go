@@ -141,6 +141,32 @@ func TestConnStateTracksSocketConnectionsByTheirPort(t *testing.T) {
 	}
 }
 
+func TestConnStateCountsTheCloseOfSocketConnectionsOfAListenerThatIsGone(t *testing.T) {
+	watchConns()
+	cw := newWatcher()
+	l := newUnixListener(t, 59125, true)
+	s, _ := l.pair(t)
+	cw.ConnState(s, http.StateNew)
+	if cw.counted(l.port) != 1 {
+		t.Fatalf("counted = %d, want the connection", cw.counted(l.port))
+	}
+
+	// the port of the socket is forgotten when its listener closes, which is before the connections of it are seen closed
+	util.UnregisterUDSPort(l.path, l.port)
+	cw.ConnState(s, http.StateClosed)
+
+	if cw.tracked(l.port) != 0 || cw.counted(l.port) != 0 {
+		t.Errorf("tracked = %d, counted = %d, want the closed connection to be gone", cw.tracked(l.port), cw.counted(l.port))
+	}
+	if timesClosed(s) != 1 {
+		t.Error("the close watchers must be told of the connection that closed")
+	}
+	cw.ConnState(s, http.StateClosed)
+	if cw.counted(l.port) != 0 || timesClosed(s) != 1 {
+		t.Error("a connection that closed must not be counted as closed again")
+	}
+}
+
 func TestConnStateIgnoresSocketsThatAreNotRegistered(t *testing.T) {
 	watchConns()
 	cw := newWatcher()

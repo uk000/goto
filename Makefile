@@ -1,7 +1,7 @@
 # usage: make VERSION=1.0.0 GOOS=darwin|linux|window release
 
 # always run these targets
-.PHONY: all clean docker-build docker-build-utils docker-build-net docker-build-kube docker-build-perf docker-build-grpc docker-push docker-push-utils docker-push-net docker-push-kube docker-push-perf docker-push-grpc docker-run gen gen-extauthz e2e-test connect-probe connect-probe-build connect-probe-build-all
+.PHONY: all clean docker-build docker-build-utils docker-build-net docker-build-kube docker-build-perf docker-build-grpc docker-push docker-push-utils docker-push-net docker-push-kube docker-push-perf docker-push-grpc docker-run gen gen-extauthz test e2e-test connect-probe connect-probe-build connect-probe-build-all
 
 # variables
 OUT := goto

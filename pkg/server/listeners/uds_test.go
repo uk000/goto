@@ -119,6 +119,9 @@ func TestHTTPListenerOnUDS(t *testing.T) {
 		c.Close()
 		t.Error("the socket accepts connections after the listener was closed")
 	}
+	if got := util.GetUDSPort(&net.UnixAddr{Name: path, Net: "unix"}); got != 0 {
+		t.Errorf("port of the socket after the close = %d, want it forgotten", got)
+	}
 }
 
 func TestTCPListenerOnUDS(t *testing.T) {

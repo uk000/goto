@@ -1008,6 +1008,9 @@ func (l *Listener) Close() {
 	}
 	if l.Listener != nil {
 		l.Listener.Close()
+		if l.UDS != "" {
+			util.UnregisterUDSPort(l.UDS, l.Port)
+		}
 		global.Funcs.CloseConnectionsForPort(l.Port)
 		l.Listener = nil
 	}

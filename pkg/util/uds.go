@@ -17,17 +17,26 @@
 package util
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"sync"
+	"time"
 )
+
+// udsPerm is the permissions of the socket files of the listeners.
+const udsPerm os.FileMode = 0660
+
+// udsProbeTimeout is how long to wait for the connection that checks whether an existing socket file is in use.
+const udsProbeTimeout = time.Second
 
 // udsPorts maps the socket path of each unix domain socket listener to the port that identifies the listener, since the
 // connections accepted on a socket have no port in their local address.
 var udsPorts sync.Map
 
-// ListenUDS opens a unix domain socket listener at the given path, replacing a stale socket file if present.
+// ListenUDS opens a unix domain socket listener at the given path, replacing a stale socket file if present. A socket
+// file that something still accepts connections on is not replaced, as that would take the path from a running process.
 func ListenUDS(path string) (net.Listener, error) {
 	if path == "" {
 		return nil, fmt.Errorf("empty UDS path")
@@ -36,17 +45,34 @@ func ListenUDS(path string) (net.Listener, error) {
 		if fi.Mode()&os.ModeSocket == 0 {
 			return nil, fmt.Errorf("path [%s] exists and is not a socket", path)
 		}
+		if err := checkSocketIsStale(path); err != nil {
+			return nil, err
+		}
 		os.Remove(path)
 	}
-	listener, err := net.Listen("unix", path)
+	listener, err := listenUnixRestricted(path)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(path, 0660); err != nil {
+	if err := os.Chmod(path, udsPerm); err != nil {
 		listener.Close()
 		return nil, err
 	}
 	return listener, nil
+}
+
+// checkSocketIsStale fails if the socket file at the path is, or may be, in use. It's stale only if connecting to it is
+// refused, which is what a socket file that nothing listens on does (the process that had it is gone).
+func checkSocketIsStale(path string) error {
+	c, err := net.DialTimeout("unix", path, udsProbeTimeout)
+	if err == nil {
+		c.Close()
+		return fmt.Errorf("path [%s] is a socket that is in use", path)
+	}
+	if isConnRefused(err) || errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return fmt.Errorf("path [%s] is a socket that can't be told to be stale: %s", path, err.Error())
 }
 
 // IsUnixAddr tells if the address is that of a unix domain socket.
@@ -58,6 +84,11 @@ func IsUnixAddr(addr net.Addr) bool {
 // RegisterUDSPort makes the port the one of the connections accepted on the socket path.
 func RegisterUDSPort(path string, port int) {
 	udsPorts.Store(path, port)
+}
+
+// UnregisterUDSPort forgets the port of the socket path, unless the path has been registered for another port since.
+func UnregisterUDSPort(path string, port int) {
+	udsPorts.CompareAndDelete(path, port)
 }
 
 // GetUDSPort gives the port of the listener on the unix domain socket that the address is of, or 0 if it's not such an address.

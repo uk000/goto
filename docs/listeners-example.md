@@ -280,7 +280,7 @@ curl -X POST localhost:8080/server/listeners/add \
 - `port` is still required: it identifies the listener (for `/server/listeners/{port}/close`, `/open`, `/remove`, listener labels, metrics and logs), but nothing binds that TCP port.
 - Supported for `http`, `https`, `grpc`, `grpcs` and `tcp` listeners, including TLS. Not supported for `udp`.
 - A socket path can only be used by one listener, and can't be the path given to `--uds`. Such requests are rejected.
-- The socket file is created with permissions `0660`. A stale socket file left by a previous run is replaced, but a path that exists and is not a socket is rejected and left untouched.
+- The socket file is created with permissions `0660`. A stale socket file left by a previous run (one that refuses connections) is replaced, but a socket that is still in use by a running process, or a path that exists and is not a socket, is rejected and left untouched.
 - Closing or removing the listener, or stopping the server, removes the socket file. Closing a listener also drops its open connections. The close is logged as `Closing http listener: 9092 (UDS: /tmp/goto-9092.sock)`.
 - Clients on a socket have no IP address, so their remote address shows up empty or as `@` in logs and in TCP proxy/session tracking.
 

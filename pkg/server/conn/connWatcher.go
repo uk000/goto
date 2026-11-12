@@ -28,13 +28,17 @@ import (
 
 type ConnectionWatcher struct {
 	connections map[int]map[net.Conn]struct{}
-	connCounts  map[int]int
-	lock        sync.Mutex
+	// connPorts is the port that each tracked connection was counted under, as the port of a connection that has closed
+	// can't always be found any more (a listener on a unix domain socket has its port forgotten when it closes).
+	connPorts  map[net.Conn]int
+	connCounts map[int]int
+	lock       sync.Mutex
 }
 
 var (
 	ConnWatcher = &ConnectionWatcher{
 		connections: map[int]map[net.Conn]struct{}{},
+		connPorts:   map[net.Conn]int{},
 		connCounts:  map[int]int{},
 	}
 	ConnState = ConnWatcher.ConnState
@@ -75,19 +79,28 @@ func getConnPort(c net.Conn) int {
 func (cw *ConnectionWatcher) ConnState(c net.Conn, state http.ConnState) {
 	cw.lock.Lock()
 	defer cw.lock.Unlock()
-	port := getConnPort(c)
-	if port == 0 {
-		return
-	}
 	switch state {
 	case http.StateNew:
+		port := getConnPort(c)
+		if port == 0 {
+			return
+		}
 		if cw.connections[port] == nil {
 			cw.connections[port] = map[net.Conn]struct{}{}
 		}
+		if cw.connPorts == nil {
+			cw.connPorts = map[net.Conn]int{}
+		}
 		cw.connections[port][c] = struct{}{}
+		cw.connPorts[c] = port
 		cw.connCounts[port]++
 		global.OnConnOpen(c)
 	case http.StateClosed, http.StateHijacked:
+		port, ok := cw.connPorts[c]
+		if !ok {
+			return
+		}
+		delete(cw.connPorts, c)
 		if cw.connections[port] != nil {
 			delete(cw.connections[port], c)
 		}
