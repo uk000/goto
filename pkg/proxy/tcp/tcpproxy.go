@@ -106,6 +106,7 @@ type UpstreamMatch struct {
 	sniRegexp *regexp.Regexp
 }
 
+// newTCPProxy creates an enabled proxy for the port, with no upstreams and a fresh tracker.
 func newTCPProxy(port int) *TCPProxy {
 	p := &TCPProxy{
 		Port:      port,
@@ -124,6 +125,7 @@ func WillProxyTCP(port int) bool {
 	return p != nil && p.isEnabled() && p.hasAnyTargets()
 }
 
+// GetPortProxy returns the TCP proxy of the port, creating and registering it if it doesn't exist.
 func GetPortProxy(port int) *TCPProxy {
 	proxyLock.RLock()
 	proxy := portProxy[port]
@@ -139,6 +141,7 @@ func GetPortProxy(port int) *TCPProxy {
 	return proxy
 }
 
+// snapshotProxies returns a copy of the map of the proxies of all the ports.
 func snapshotProxies() map[int]*TCPProxy {
 	proxyLock.RLock()
 	defer proxyLock.RUnlock()
@@ -149,6 +152,7 @@ func snapshotProxies() map[int]*TCPProxy {
 	return proxies
 }
 
+// ClearAllProxies drops the proxies of all the ports, releasing their CONNECT config.
 func ClearAllProxies() {
 	proxyLock.Lock()
 	old := portProxy
@@ -159,6 +163,7 @@ func ClearAllProxies() {
 	}
 }
 
+// ClearPortProxy replaces the proxy of the port with a new empty one, releasing the CONNECT config of the old one.
 func ClearPortProxy(port int) {
 	proxyLock.Lock()
 	old := portProxy[port]
@@ -178,6 +183,7 @@ func (p *TCPProxy) releaseConnect() {
 	p.HTTP = TCPProxyHTTP{}
 }
 
+// parseUpstreams reads upstreams as JSON from the reader and validates them, turning a panic of the parsers into an error.
 func parseUpstreams(r io.Reader) (upstreams map[string]*TCPUpstream, err error) {
 	// The payload parsers of the shared types can panic on partial values (e.g. a delay with only a min)
 	defer func() {
@@ -195,6 +201,7 @@ func parseUpstreams(r io.Reader) (upstreams map[string]*TCPUpstream, err error) 
 	return upstreams, nil
 }
 
+// ValidateUpstreams checks the upstreams (names, endpoints, addresses, delays, retries, drop percentage and SNI match) and fills in missing names.
 func ValidateUpstreams(upstreams map[string]*TCPUpstream) error {
 	names := make([]string, 0, len(upstreams))
 	for name := range upstreams {
@@ -246,6 +253,7 @@ func ValidateUpstreams(upstreams map[string]*TCPUpstream) error {
 	return nil
 }
 
+// validateAddress checks that the address is a host and a valid port.
 func validateAddress(address string) error {
 	_, port, err := net.SplitHostPort(address)
 	if err != nil {
@@ -257,6 +265,7 @@ func validateAddress(address string) error {
 	return nil
 }
 
+// compileSNIMatch compiles a comma separated list of SNI patterns into one regular expression, or nil if the list is empty.
 func compileSNIMatch(sni string) (*regexp.Regexp, error) {
 	names := []string{}
 	for _, name := range strings.Split(sni, ",") {
@@ -292,24 +301,28 @@ func ProxyTCPConnection(port int, downConn net.Conn) {
 	}
 }
 
+// initTracker replaces the tracker of the proxy with a fresh one.
 func (p *TCPProxy) initTracker() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.Tracker = NewTCPTracker(p.Port)
 }
 
+// isEnabled tells whether the proxy is enabled.
 func (p *TCPProxy) isEnabled() bool {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	return p.Enabled
 }
 
+// hasAnyTargets tells whether the proxy has any upstreams.
 func (p *TCPProxy) hasAnyTargets() bool {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	return len(p.Upstreams) > 0
 }
 
+// hasSNITargets tells whether any upstream of the proxy matches on SNI.
 func (p *TCPProxy) hasSNITargets() bool {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
@@ -321,6 +334,7 @@ func (p *TCPProxy) hasSNITargets() bool {
 	return false
 }
 
+// MarshalJSON serializes the proxy, using copies of the upstreams map and of the connect delay, which are changed concurrently.
 func (p *TCPProxy) MarshalJSON() ([]byte, error) {
 	p.lock.RLock()
 	type proxyJSON struct {
@@ -337,6 +351,7 @@ func (p *TCPProxy) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v)
 }
 
+// copyUpstreams returns a shallow copy of the upstreams map.
 func copyUpstreams(upstreams map[string]*TCPUpstream) map[string]*TCPUpstream {
 	c := make(map[string]*TCPUpstream, len(upstreams))
 	for name, up := range upstreams {
@@ -345,6 +360,7 @@ func copyUpstreams(upstreams map[string]*TCPUpstream) map[string]*TCPUpstream {
 	return c
 }
 
+// getUpstreams returns a copy of the map of the upstreams of the proxy.
 func (p *TCPProxy) getUpstreams() map[string]*TCPUpstream {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
@@ -384,6 +400,7 @@ func (p *TCPProxy) AddUpstreams(upstreams map[string]*TCPUpstream) {
 	p.lock.Unlock()
 }
 
+// addNewUpstream adds an upstream that has the one endpoint at the address, keyed and named by the address.
 func (p *TCPProxy) addNewUpstream(name, address string) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -428,6 +445,7 @@ func (p *TCPProxy) getMatchingTCPUpstream(sni string) *TCPUpstream {
 	return nil
 }
 
+// proxyTCPOpaque proxies a connection to the first upstream that has no SNI match, without reading anything from it.
 func (p *TCPProxy) proxyTCPOpaque(downConn net.Conn, startTime time.Time) {
 	downAddr := downConn.RemoteAddr().String()
 	up := p.getMatchingTCPUpstream("")
@@ -442,6 +460,7 @@ func (p *TCPProxy) proxyTCPOpaque(downConn net.Conn, startTime time.Time) {
 	st.proxyPipe(downConn, up, nil)
 }
 
+// proxyTCPWithSNI reads the SNI of the client hello, routes the connection to the upstream that matches it, and forwards the hello to it.
 func (p *TCPProxy) proxyTCPWithSNI(downConn net.Conn, startTime time.Time) {
 	downAddr := downConn.RemoteAddr().String()
 	sni, hello, err := readClientSNI(downConn)
@@ -482,6 +501,7 @@ func readClientSNI(conn net.Conn) (sni string, hello []byte, err error) {
 	return sni, buff.Bytes(), err
 }
 
+// sortedEndpoints returns the endpoints of the upstream in the order of their names, so the first one is the primary.
 func (t *TCPUpstream) sortedEndpoints() []*TCPEndpoint {
 	t.lock.RLock()
 	defer t.lock.RUnlock()
@@ -499,6 +519,7 @@ func (t *TCPUpstream) sortedEndpoints() []*TCPEndpoint {
 	return endpoints
 }
 
+// MarshalJSON serializes the upstream, using copies of its delays, which count down concurrently.
 func (t *TCPUpstream) MarshalJSON() ([]byte, error) {
 	t.lock.RLock()
 	defer t.lock.RUnlock()
@@ -522,18 +543,21 @@ func nextDelay(d *types.Delay) time.Duration {
 	return d.Claim()
 }
 
+// nextDelay takes the next write delay of the upstream, and uses up a count of it.
 func (t *TCPUpstream) nextDelay() time.Duration {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	return nextDelay(t.Delay)
 }
 
+// nextRetryDelay takes the next delay to wait before retrying a connection, and uses up a count of it.
 func (t *TCPUpstream) nextRetryDelay() time.Duration {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	return nextDelay(t.RetryDelay)
 }
 
+// shouldDrop tells whether the current write is one to skip, which is every 100/DropPct-th write.
 func (t *TCPUpstream) shouldDrop() bool {
 	t.lock.Lock()
 	defer t.lock.Unlock()
@@ -548,6 +572,7 @@ func (t *TCPUpstream) shouldDrop() bool {
 	return false
 }
 
+// debugLogs tells whether the proxy debug logs are enabled.
 func debugLogs() bool {
 	return global.Flags.EnableProxyDebugLogs
 }

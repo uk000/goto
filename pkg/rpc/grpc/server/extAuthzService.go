@@ -28,21 +28,25 @@ import (
 
 var IsExtAuthzServiceRunning = false
 
+// init registers the ext authz service with the gRPC intercept, start and stop watchers.
 func init() {
 	global.AddGRPCIntercept(RegisterExtAuthzServer)
 	global.AddGRPCStartWatcher(OnExtAuthzStart)
 	global.AddGRPCStopWatcher(OnExtAuthzStop)
 }
 
+// OnExtAuthzStart does nothing when the gRPC server starts.
 func OnExtAuthzStart() {
 }
 
+// OnExtAuthzStop clears the running flag so that the service is registered again when the gRPC server starts.
 func OnExtAuthzStop() {
 	servicesLock.Lock()
 	defer servicesLock.Unlock()
 	IsExtAuthzServiceRunning = false
 }
 
+// RegisterExtAuthzServer registers the Envoy ext authz service on the server with the middleware interception, once for each start of the server.
 func RegisterExtAuthzServer(server global.IGRPCManager) {
 	servicesLock.Lock()
 	defer servicesLock.Unlock()
@@ -59,6 +63,7 @@ type ExtAuthzGRPCService struct {
 	extauthz.UnimplementedAuthorizationServer
 }
 
+// Check answers an Envoy authorization check with a denial (403) if the first rule that matches the request headers denies, and an allow otherwise, logging the request and the response.
 func (es *ExtAuthzGRPCService) Check(ctx context.Context, request *extauthz.CheckRequest) (*extauthz.CheckResponse, error) {
 	port := util.GetGRPCPort(ctx)
 	listenerLabel := global.Funcs.GetListenerLabelForPort(port)

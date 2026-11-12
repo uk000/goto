@@ -58,6 +58,7 @@ func renderLockersMarkdown(lockers any) string {
 	return sb.String()
 }
 
+// writeMarkdownParagraph writes a top-level locker key as a bold heading followed by its value as bullets or text.
 func writeMarkdownParagraph(sb *strings.Builder, key string, v any) {
 	if key == markdownTrimKey {
 		fmt.Fprintf(sb, "**%s**\n", key)
@@ -77,6 +78,7 @@ func writeMarkdownParagraph(sb *strings.Builder, key string, v any) {
 	}
 }
 
+// writeMarkdownMap writes a map as nested bullets, printing its own "data" value first and then each key in sorted order.
 func writeMarkdownMap(sb *strings.Builder, m map[string]any, depth int) {
 	indent := strings.Repeat("  ", depth)
 	if d, found := m[markdownDataKey]; found {
@@ -123,6 +125,7 @@ func writeMarkdownData(sb *strings.Builder, v any, depth int) {
 	}
 }
 
+// writeMarkdownList writes the items of a list as bullets, with nested maps and lists as numbered items.
 func writeMarkdownList(sb *strings.Builder, list []any, depth int) {
 	indent := strings.Repeat("  ", depth)
 	for i, item := range list {
@@ -219,11 +222,13 @@ func normalizeMarkdownValue(v any) any {
 	return v
 }
 
+// markdownScalar converts a value to text, with trimmed whitespace and normalized newlines.
 func markdownScalar(v any) string {
 	s := fmt.Sprint(v)
 	return strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n"))
 }
 
+// toGeneric converts any value to generic JSON types (maps, slices, json.Number) through a marshal and unmarshal round trip.
 func toGeneric(v any) any {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -238,6 +243,7 @@ func toGeneric(v any) any {
 	return out
 }
 
+// sortedKeys returns the keys of the map in sorted order.
 func sortedKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {

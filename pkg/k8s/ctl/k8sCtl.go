@@ -30,6 +30,7 @@ import (
 
 var ()
 
+// ApplyYaml applies (or deletes) the stored YAML resources matching the namespace, kind and name filters on the cluster, optionally moving them to the namespace given in to.
 func ApplyYaml(yamlName, namespace, kind, name, to string, delete bool) (rlist []string, errs []error) {
 	resourcesToApply, err := store.Kstore.GetTargetResources(yamlName, namespace, kind, name)
 	if err != nil {
@@ -73,6 +74,7 @@ func ApplyYaml(yamlName, namespace, kind, name, to string, delete bool) (rlist [
 	return
 }
 
+// applyResource server-side applies (or deletes) a single resource and invalidates its cached copy.
 func applyResource(namespace, name string, kr *k8s.K8sResource, delete bool) error {
 	ri, _, err := k8s.GetResourceInterface(kr.GVK, namespace)
 	if err != nil {

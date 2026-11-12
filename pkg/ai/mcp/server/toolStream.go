@@ -26,6 +26,7 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// stream gives the response as a series of messages with delays, and keeps its state to resume later if the tool is resumable.
 func (t *MCPTool) stream(tctx *ToolContext) (result *gomcp.CallToolResult, err error) {
 	result = &gomcp.CallToolResult{}
 	var delay time.Duration

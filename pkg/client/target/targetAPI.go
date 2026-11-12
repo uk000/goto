@@ -33,6 +33,7 @@ var (
 	Middleware = middleware.Middleware{Name: "client", SetRoutes: SetRoutes}
 )
 
+// SetRoutes registers the APIs to manage and invoke targets, to set tracking headers and time buckets, and to read or clear results.
 func SetRoutes(r *mux.Router) {
 	targetsRouter := util.PathRouter(r, "/targets")
 	util.AddRoute(targetsRouter, "/add", addTarget, "POST")
@@ -62,6 +63,7 @@ func SetRoutes(r *mux.Router) {
 	util.AddRoute(r, "/results/clear", clearResults, "POST")
 }
 
+// addTarget adds a target from the JSON payload, responding 400 if it can't be parsed or is invalid.
 func addTarget(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	t := &Target{}
@@ -83,6 +85,7 @@ func addTarget(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// removeTargets removes the targets named in the path, responding 406 while traffic is running.
 func removeTargets(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if targets, present := util.GetListParam(r, "targets"); present {
@@ -103,6 +106,7 @@ func removeTargets(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearTargets clears all targets, responding 406 while traffic is running.
 func clearTargets(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if Client.init() {
@@ -118,21 +122,24 @@ func clearTargets(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getTargets reports the named target, or all targets if none is named.
 func getTargets(w http.ResponseWriter, r *http.Request) {
 	if t, present := util.GetStringParam(r, "target"); present {
-		if Client.targets[t] != nil {
-			util.WriteJsonPayload(w, Client.targets[t])
+		if payload, found := Client.getTargetsPayload(t); found {
+			util.WriteStringJsonPayload(w, payload)
 		} else {
 			util.WriteErrorJson(w, "Target not found: "+t)
 		}
 	} else {
-		util.WriteJsonPayload(w, Client.targets)
+		payload, _ := Client.getTargetsPayload("")
+		util.WriteStringJsonPayload(w, payload)
 	}
 	if global.Flags.EnableClientLogs {
 		util.AddLogMessage("Reporting targets", r)
 	}
 }
 
+// addTrackingHeaders sets the headers given in the path to be tracked in the results.
 func addTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if h, present := util.GetStringParam(r, "headers"); present {
@@ -149,6 +156,7 @@ func addTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearTrackingHeaders clears all tracking headers.
 func clearTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 	Client.clearTrackingHeaders()
 	msg := "All tracking headers cleared"
@@ -158,6 +166,7 @@ func clearTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getTrackingHeaders reports the tracked headers.
 func getTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 	msg := fmt.Sprintf("Tracking headers: %s", strings.Join(Client.getTrackingHeaders(), ","))
 	fmt.Fprintln(w, msg)
@@ -166,6 +175,7 @@ func getTrackingHeaders(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// addTrackingTimeBuckets sets the time buckets given in the path, responding 400 if they are invalid.
 func addTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	b := util.GetStringParamValue(r, "buckets")
@@ -181,6 +191,7 @@ func addTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearTrackingTimeBuckets clears all tracking time buckets.
 func clearTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 	Client.clearTrackingTimeBuckets()
 	msg := "All tracking time buckets cleared"
@@ -190,13 +201,15 @@ func clearTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getTrackingTimeBuckets reports the tracked time buckets as JSON.
 func getTrackingTimeBuckets(w http.ResponseWriter, r *http.Request) {
-	util.WriteJsonPayload(w, Client.trackTimeBuckets)
+	util.WriteJsonPayload(w, Client.getTrackingTimeBuckets())
 	if global.Flags.EnableClientLogs {
 		util.AddLogMessage("Tracking TimeBuckets Reported", r)
 	}
 }
 
+// getInvocationResults reports the per-invocation results as JSON.
 func getInvocationResults(w http.ResponseWriter, r *http.Request) {
 	util.WriteStringJsonPayload(w, results.GetInvocationResultsJSON(false))
 	if global.Flags.EnableClientLogs {
@@ -204,6 +217,7 @@ func getInvocationResults(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getResults reports the per-target results as JSON.
 func getResults(w http.ResponseWriter, r *http.Request) {
 	util.WriteStringJsonPayload(w, results.GetTargetsResultsJSON(false))
 	if global.Flags.EnableClientLogs {
@@ -211,6 +225,7 @@ func getResults(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getActiveTargets reports the count of active targets and the active invocations.
 func getActiveTargets(w http.ResponseWriter, r *http.Request) {
 	if global.Flags.EnableClientLogs {
 		util.AddLogMessage("Reporting active invocations", r)
@@ -224,6 +239,7 @@ func getActiveTargets(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, result)
 }
 
+// clearResults clears all invocation and target results.
 func clearResults(w http.ResponseWriter, r *http.Request) {
 	results.ClearResults()
 	w.WriteHeader(http.StatusOK)
@@ -234,6 +250,7 @@ func clearResults(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// enableAllTargetsResultsCollection turns collection of the results across all targets on or off.
 func enableAllTargetsResultsCollection(w http.ResponseWriter, r *http.Request) {
 	enable := util.GetStringParamValue(r, "enable")
 	results.EnableAllTargetResults(util.IsYes(enable))
@@ -245,6 +262,7 @@ func enableAllTargetsResultsCollection(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// enableInvocationResultsCollection turns collection of per-invocation results on or off.
 func enableInvocationResultsCollection(w http.ResponseWriter, r *http.Request) {
 	enable := util.GetBoolParamValue(r, "enable")
 	results.EnableInvocationResults(enable)
@@ -258,6 +276,7 @@ func enableInvocationResultsCollection(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// stopTargets stops the named targets, or all if none are named.
 func stopTargets(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	c := Client
@@ -276,6 +295,7 @@ func stopTargets(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// invokeTargets starts the named targets, or all if none are named, in the background, responding 406 if there are none.
 func invokeTargets(w http.ResponseWriter, r *http.Request) {
 	c := Client
 	targetsToInvoke := c.getTargetsToInvoke(r)

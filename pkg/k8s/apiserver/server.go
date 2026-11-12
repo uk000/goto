@@ -72,6 +72,7 @@ func isK8sHost(r *http.Request) bool {
 	return label == strings.ToLower(HostKeyword)
 }
 
+// setRoutes registers the mock K8s API server routes for discovery, and for list/get/create/update/patch/delete of core and group resources.
 func setRoutes(r *mux.Router) {
 	// ── Discovery endpoints ────────────────────────────────────────────────────
 	// Each root segment (/api, /apis) is a separate RootRouter entry matched by httpserver.go via

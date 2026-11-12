@@ -21,6 +21,7 @@ import (
 	"strings"
 )
 
+// ParseTrackingHeaders parses a comma-separated list of headers, where "a|b" makes b a cross-header of a, into the unique lower-cased headers and the cross-headers map.
 func ParseTrackingHeaders(headers string) ([]string, map[string][]string) {
 	trackingHeaders := []string{}
 	crossTrackingHeaders := map[string][]string{}
@@ -48,6 +49,7 @@ func ParseTrackingHeaders(headers string) ([]string, map[string][]string) {
 	return trackingHeaders, crossTrackingHeaders
 }
 
+// ParseTimeBuckets parses comma-separated "low-high" ranges into buckets and tells if all of them are valid.
 func ParseTimeBuckets(b string) ([][]int, bool) {
 	pieces := strings.Split(b, ",")
 	buckets := [][]int{}
@@ -72,6 +74,7 @@ func ParseTimeBuckets(b string) ([][]int, bool) {
 	return buckets, !hasError
 }
 
+// BuildCrossHeadersMap inverts the cross-headers map into a lookup from each sub-header to its header.
 func BuildCrossHeadersMap(crossTrackingHeaders map[string][]string) map[string]string {
 	crossHeadersMap := map[string]string{}
 	for header, subheaders := range crossTrackingHeaders {
@@ -82,6 +85,7 @@ func BuildCrossHeadersMap(crossTrackingHeaders map[string][]string) map[string]s
 	return crossHeadersMap
 }
 
+// UpdateTrackingCountsByURIAndID increments the counts of the id, the URI and the URI+id, in whichever of the count maps is not nil.
 func UpdateTrackingCountsByURIAndID(id string, uri string,
 	countsByIDs map[string]int,
 	countsByURIs map[string]int,
@@ -101,6 +105,7 @@ func UpdateTrackingCountsByURIAndID(id string, uri string,
 	}
 }
 
+// UpdateTrackingCountsByURIKeyValuesID increments, for each tracking key that has values, its counts by key, by first value, by URI and by id.
 func UpdateTrackingCountsByURIKeyValuesID(id string, uri string,
 	trackingKeys []string,
 	actualKeyValues map[string][]string,

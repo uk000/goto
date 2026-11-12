@@ -113,17 +113,20 @@ func GetPortHooks(port int) *Hooks {
 	return hooks
 }
 
+// setRoutes registers the GET /hooks route that lists the hooks of all ports.
 func setRoutes(r *mux.Router) {
 	hooksRouter := middleware.RootPath("/hooks")
 	util.AddRoute(hooksRouter, "", getHooks, "GET")
 }
 
+// getHooks writes the hooks of all ports as YAML.
 func getHooks(w http.ResponseWriter, r *http.Request) {
 	lock.RLock()
 	defer lock.RUnlock()
 	util.WriteYaml(w, portHooks)
 }
 
+// newHooks creates the hooks of a port and starts the goroutines that monitor its gRPC client streams, server streams and server headers.
 func newHooks(port int) *Hooks {
 	hooks := &Hooks{
 		port:      port,
@@ -145,6 +148,7 @@ func newHooks(port int) *Hooks {
 	return hooks
 }
 
+// monitorGRPCStreams forever selects on the gRPC client or server stream channels and forwards each message to the listeners of the matching hooks, removing closed streams.
 func (h *Hooks) monitorGRPCStreams(client bool) {
 	for {
 		var streams []reflect.SelectCase
@@ -177,6 +181,7 @@ func (h *Hooks) monitorGRPCStreams(client bool) {
 	}
 }
 
+// monitorGRPCHeaders forever selects on the gRPC server header channels and passes the headers to the listeners of the matching hooks, removing closed streams.
 func (h *Hooks) monitorGRPCHeaders() {
 	for {
 		headersChans := h.grpcHooks.serverHeaders
@@ -200,6 +205,7 @@ func (h *Hooks) monitorGRPCHeaders() {
 	}
 }
 
+// AddGRPCHook registers a hook for a gRPC method URI whose listener receives the messages of the matching streams.
 func (h *Hooks) AddGRPCHook(key, id, methodURI string, grpcListener GRPCListener) error {
 	if methodURI == "" {
 		return fmt.Errorf("URI needed")
@@ -212,6 +218,7 @@ func (h *Hooks) AddGRPCHook(key, id, methodURI string, grpcListener GRPCListener
 	return nil
 }
 
+// AddHTTPHookWithHandler registers an HTTP hook for a URI and/or headers, with a route that serves the URI using the given handler.
 func (h *Hooks) AddHTTPHookWithHandler(key, id, uri string, headers Headers, isJSONRPC bool, httpHandler middleware.MiddlewareFunc) error {
 	if uri == "" && headers == nil {
 		return fmt.Errorf("One of URI and Headers needed")
@@ -224,6 +231,7 @@ func (h *Hooks) AddHTTPHookWithHandler(key, id, uri string, headers Headers, isJ
 	return nil
 }
 
+// AddHTTPHookWithListener registers an HTTP hook for a URI and/or headers that observes the matching requests through the given listener.
 func (h *Hooks) AddHTTPHookWithListener(key, id, uri string, headers Headers, isJSONRPC bool, listener HTTPListener) error {
 	if uri == "" && headers == nil {
 		return fmt.Errorf("One of URI and Headers needed")
@@ -236,6 +244,7 @@ func (h *Hooks) AddHTTPHookWithListener(key, id, uri string, headers Headers, is
 	return nil
 }
 
+// AddHTTPTracking registers an HTTP hook, without handler or listener, for a URI and/or headers to track the matched request headers.
 func (h *Hooks) AddHTTPTracking(key, uri string, headers Headers, isJSONRPC bool) error {
 	if uri == "" && headers == nil {
 		return fmt.Errorf("One of URI and Headers needed")
@@ -248,6 +257,7 @@ func (h *Hooks) AddHTTPTracking(key, uri string, headers Headers, isJSONRPC bool
 	return nil
 }
 
+// registerURI lower-cases the URI and builds its matcher: a route if a handler serves it, otherwise only a regexp to observe the matching requests.
 func (h *Hooks) registerURI(uri string, httpHandler middleware.MiddlewareFunc) (luri, uriPrefix string, re *regexp.Regexp, err error) {
 	luri = strings.ToLower(uri)
 	if httpHandler != nil {
@@ -262,6 +272,7 @@ func (h *Hooks) registerURI(uri string, httpHandler middleware.MiddlewareFunc) (
 	return
 }
 
+// addHTTPHook creates an HTTP hook and stores it by its ID.
 func (h *Hooks) addHTTPHook(key, id, uri, uriPrefix string, reURI *regexp.Regexp, headers Headers, isJSONRPC bool, listener HTTPListener) *Hook {
 	hook := newHook()
 	hook.initHTTP(key, id, uri, uriPrefix, reURI, headers, isJSONRPC, listener)
@@ -271,6 +282,7 @@ func (h *Hooks) addHTTPHook(key, id, uri, uriPrefix string, reURI *regexp.Regexp
 	return hook
 }
 
+// addGRPCHook creates and stores a gRPC hook and attaches its listener to the active streams whose method URI matches.
 func (h *Hooks) addGRPCHook(key, id, uri, uriPrefix string, reURI *regexp.Regexp, grpcListener GRPCListener) *Hook {
 	hook := newHook()
 	hook.init(key, id, uri, uriPrefix, reURI, nil)
@@ -290,6 +302,7 @@ func (h *Hooks) addGRPCHook(key, id, uri, uriPrefix string, reURI *regexp.Regexp
 	return hook
 }
 
+// AddGRPCStream registers the channels of a new gRPC stream and attaches the listeners of the hooks matching its method URI, tracking the matched headers.
 func (h *Hooks) AddGRPCStream(methodURI string, md metadata.MD, clientStream, serverStream chan proto.Message, serverHeaders chan metadata.MD) {
 	h.lock.Lock()
 	defer h.lock.Unlock()
@@ -332,6 +345,7 @@ func (h *Hooks) AddGRPCStream(methodURI string, md metadata.MD, clientStream, se
 	}
 }
 
+// RemoveGRPCStream removes a gRPC stream, found by method URI or index, along with its channels and its indexes in the hooks.
 func (h *Hooks) RemoveGRPCStream(methodURI string, index int) {
 	h.lock.Lock()
 	defer h.lock.Unlock()
@@ -350,6 +364,7 @@ func (h *Hooks) RemoveGRPCStream(methodURI string, index int) {
 	}
 }
 
+// RemoveHook removes the gRPC or HTTP hook with the given ID, detaching a gRPC hook from the active streams.
 func (h *Hooks) RemoveHook(id string) {
 	h.lock.Lock()
 	defer h.lock.Unlock()
@@ -364,30 +379,35 @@ func (h *Hooks) RemoveHook(id string) {
 	}
 }
 
+// MatchHTTPRequest returns the HTTP hooks that match a URI and headers, and the request headers that matched.
 func (h *Hooks) MatchHTTPRequest(uri string, headers map[string][]string) (allMatches map[string]*Hook, matchedHeaders map[string]map[string][]string) {
 	h.lock.RLock()
 	defer h.lock.RUnlock()
 	return matchRequest(uri, headers, h.httpHooks)
 }
 
+// MatchGRPCRequest returns the gRPC hooks that match a method URI.
 func (h *Hooks) MatchGRPCRequest(methodURI string) (allMatches map[string]*Hook, matchedHeaders map[string]map[string][]string) {
 	h.lock.RLock()
 	defer h.lock.RUnlock()
 	return matchRequest(methodURI, nil, h.grpcHooks.hooks)
 }
 
+// newHook creates an empty hook.
 func newHook() *Hook {
 	return &Hook{
 		streamIndexes: map[int]bool{},
 	}
 }
 
+// initHTTP initializes the hook as an HTTP hook with its JSON-RPC flag and listener.
 func (h *Hook) initHTTP(key, id, uri, uriPrefix string, reURI *regexp.Regexp, headers Headers, isJSONRPC bool, listener HTTPListener) {
 	h.init(key, id, uri, uriPrefix, reURI, headers)
 	h.IsJSONRPC = isJSONRPC
 	h.httpListener = listener
 }
 
+// init sets the identity of the hook (generating an ID if empty), its URI matcher, and its case-insensitive header and value regexp matchers, which support globs.
 func (h *Hook) init(key, id, uri, uriPrefix string, reURI *regexp.Regexp, headers Headers) {
 	if id == "" {
 		id = string(hookIdCounter.Add(1))
@@ -428,6 +448,7 @@ func (h *Hook) init(key, id, uri, uriPrefix string, reURI *regexp.Regexp, header
 	}
 }
 
+// matchURI reports whether the URI matches the URI regexp of the hook.
 func (h *Hook) matchURI(uri string) bool {
 	if h.Match.re != nil {
 		if h.Match.re.MatchString(uri) {
@@ -437,6 +458,7 @@ func (h *Hook) matchURI(uri string) bool {
 	return false
 }
 
+// matchHeader reports whether a header, and one of its values if the hook has value matchers, matches the hook, returning the matched value.
 func (h *Hook) matchHeader(header string, values []string) (bool, string) {
 	if h.Match.HeaderMatches == nil {
 		return false, ""
@@ -463,6 +485,7 @@ func (h *Hook) matchHeader(header string, values []string) (bool, string) {
 	return false, ""
 }
 
+// match reports whether the URI matches the hook, recording the hook in allMatches and the matching headers in matchedHeaders.
 func (h *Hook) match(uri string, headers map[string][]string, allMatches map[string]*Hook, matchedHeaders map[string]map[string][]string) bool {
 	if !h.matchURI(uri) {
 		return false
@@ -483,6 +506,7 @@ func (h *Hook) match(uri string, headers map[string][]string, allMatches map[str
 	return true
 }
 
+// matchRequest collects the hooks that match a URI, and the headers that they matched.
 func matchRequest(uri string, headers map[string][]string, hooks map[string]*Hook) (allMatches map[string]*Hook, matchedHeaders map[string]map[string][]string) {
 	allMatches = map[string]*Hook{}
 	matchedHeaders = map[string]map[string][]string{}
@@ -492,6 +516,7 @@ func matchRequest(uri string, headers map[string][]string, hooks map[string]*Hoo
 	return allMatches, matchedHeaders
 }
 
+// middlewareFunc matches the request against the HTTP hooks of its port, calls their listeners with the body, and tracks the matched headers; it calls next if no hook matched, no matched hook has a listener, or a listener returns true.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)
@@ -505,15 +530,23 @@ func middlewareFunc(next http.Handler) http.Handler {
 		callNext := false
 		if len(allMatches) > 0 {
 			body := util.Read(r.Body)
+			hasListener := false
 			for _, hook := range allMatches {
 				util.SetIsJSONRPC(r, hook.IsJSONRPC)
 				if hook.httpListener != nil {
-					callNext = callNext || hook.httpListener(util.GetRequestOrListenerPortNum(r), r.RequestURI, r.Header, io.NopCloser(strings.NewReader(body)))
+					hasListener = true
+					// Every listener is called, whatever the others returned.
+					if hook.httpListener(util.GetRequestOrListenerPortNum(r), r.RequestURI, r.Header, io.NopCloser(strings.NewReader(body))) {
+						callNext = true
+					}
 				}
 			}
 			r.Body = io.NopCloser(strings.NewReader(body))
 			for key, headers := range matchedHeaders {
 				HeaderTrackingFunc(util.GetRequestOrListenerPortNum(r), key, r.RequestURI, headers)
+			}
+			if !hasListener {
+				callNext = true
 			}
 		} else {
 			callNext = true

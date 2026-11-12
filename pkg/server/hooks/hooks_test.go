@@ -120,6 +120,39 @@ func TestHookWithListenerDoesNotSwallowRequests(t *testing.T) {
 	}
 }
 
+// A hook that has no listener, such as one that only tracks headers, matches requests without handling them, so the
+// requests must carry on to the handlers that serve them.
+func TestHookWithoutListenerDoesNotSwallowRequests(t *testing.T) {
+	server, port := newServerRouting(t)
+	if err := GetPortHooks(port).AddHTTPTracking("k", "/track", Headers{{"x-track", ""}}, false); err != nil {
+		t.Fatal(err)
+	}
+	expectServed(t, server, port, "/track")
+	expectServed(t, server, port, "/track", "x-track", "v1")
+	expectServed(t, server, port, "/other")
+}
+
+// Every hook that matches a request reports it to its listener, even after another listener told to carry on, so which
+// listeners get called doesn't depend on the order of the hooks.
+func TestAllMatchingListenersAreCalled(t *testing.T) {
+	server, port := newServerRouting(t)
+	l1, calls1 := listener()
+	l2, calls2 := listener()
+	if err := GetPortHooks(port).AddHTTPHookWithListener("k1", "id1", "/multi", nil, false, l1); err != nil {
+		t.Fatal(err)
+	}
+	if err := GetPortHooks(port).AddHTTPHookWithListener("k2", "id2", "/multi", nil, false, l2); err != nil {
+		t.Fatal(err)
+	}
+	const requests = 20
+	for i := 0; i < requests; i++ {
+		expectServed(t, server, port, "/multi")
+	}
+	if got1, got2 := calls1.Load(), calls2.Load(); got1 != requests || got2 != requests {
+		t.Errorf("listener calls = %d and %d, want %d each", got1, got2, requests)
+	}
+}
+
 // The empty URI matches every request, so a route registered for it would take over all the traffic of the server.
 func TestHeaderOnlyHookDoesNotSwallowRequests(t *testing.T) {
 	server, port := newServerRouting(t)

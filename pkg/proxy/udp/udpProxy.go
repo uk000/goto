@@ -70,6 +70,7 @@ type UDPProxy struct {
 	lock     sync.RWMutex
 }
 
+// newUDPProxy creates an enabled proxy for the port, with no upstreams and a fresh tracker.
 func newUDPProxy(port int) *UDPProxy {
 	return &UDPProxy{
 		Port:       port,
@@ -80,6 +81,7 @@ func newUDPProxy(port int) *UDPProxy {
 	}
 }
 
+// newUDPUpstream creates a UDP upstream with the given name and endpoint address.
 func newUDPUpstream(name, address string) *UDPUpstream {
 	return &UDPUpstream{
 		Name:     name,
@@ -88,6 +90,7 @@ func newUDPUpstream(name, address string) *UDPUpstream {
 	}
 }
 
+// getUDPProxyForPort returns the proxy of the port, creating and registering it if it doesn't exist.
 func getUDPProxyForPort(port int) *UDPProxy {
 	proxyLock.RLock()
 	proxy := udpProxyByPort[port]
@@ -103,6 +106,7 @@ func getUDPProxyForPort(port int) *UDPProxy {
 	return proxy
 }
 
+// findUDPProxy returns the proxy of the port, or nil if there is none.
 func findUDPProxy(port int) *UDPProxy {
 	proxyLock.RLock()
 	defer proxyLock.RUnlock()
@@ -118,6 +122,7 @@ func ProxyUDPUpstream(port int, upstream string, delayMin, delayMax time.Duratio
 	}
 }
 
+// proxyUDPUpstream adds the upstream to the proxy of the port, over the open UDP listener of the port, and fails if there is none.
 func proxyUDPUpstream(port int, upstream string, delayMin, delayMax time.Duration) error {
 	l := listeners.GetListenerForPort(port)
 	if l == nil || l.UDPConn == nil {
@@ -147,18 +152,21 @@ func StopUDPUpstream(port int, upstream string) {
 	}
 }
 
+// initTracker replaces the tracker of the proxy with a fresh one.
 func (p *UDPProxy) initTracker() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.UDPTracker = NewUDPTracker()
 }
 
+// tracker returns the tracker of the proxy.
 func (p *UDPProxy) tracker() *UDPProxyTracker {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	return p.UDPTracker
 }
 
+// setUDPDelay sets the delay of the named upstream, or of all upstreams if none is named, and returns how many it set.
 func (p *UDPProxy) setUDPDelay(upstream string, delayMin, delayMax time.Duration) int {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
@@ -205,6 +213,7 @@ func resolveUpstream(upstream string) (*net.UDPAddr, error) {
 	return addr, nil
 }
 
+// stopUpstream stops the named upstream, if there is one, but keeps it registered.
 func (p *UDPProxy) stopUpstream(upstream string) {
 	p.lock.RLock()
 	up := p.Upstreams[upstream]
@@ -214,6 +223,7 @@ func (p *UDPProxy) stopUpstream(upstream string) {
 	}
 }
 
+// removeUpstream stops the upstream and deletes it from the proxy.
 func (p *UDPProxy) removeUpstream(upstream string) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -242,12 +252,14 @@ func (p *UDPProxy) nextUpstream() *UDPUpstream {
 	return up
 }
 
+// isServing tells whether the proxy reads its packets from the connection.
 func (p *UDPProxy) isServing(conn net.PacketConn) bool {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	return p.conn == conn
 }
 
+// stoppedServing forgets the connection of the proxy, if it is the one that stopped being served.
 func (p *UDPProxy) stoppedServing(conn net.PacketConn) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -342,24 +354,28 @@ func (up *UDPUpstream) nextDelay() time.Duration {
 	return d.Claim()
 }
 
+// addr returns the resolved address of the upstream.
 func (up *UDPUpstream) addr() *net.UDPAddr {
 	up.lock.RLock()
 	defer up.lock.RUnlock()
 	return up.upstreamAddr
 }
 
+// running tells whether the upstream is started and gets packets.
 func (up *UDPUpstream) running() bool {
 	up.lock.RLock()
 	defer up.lock.RUnlock()
 	return up.isRunning
 }
 
+// setUDPDelay replaces the delay of the upstream with one between the given bounds that has no count limit.
 func (up *UDPUpstream) setUDPDelay(delayMin, delayMax time.Duration) {
 	up.lock.Lock()
 	defer up.lock.Unlock()
 	up.Delay = types.NewDelay(delayMin, delayMax, -1)
 }
 
+// start marks the upstream as running at the resolved address, with a delay between the given bounds.
 func (up *UDPUpstream) start(addr *net.UDPAddr, delayMin, delayMax time.Duration) {
 	up.lock.Lock()
 	defer up.lock.Unlock()

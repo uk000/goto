@@ -99,6 +99,7 @@ func (t *Trigger) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*triggerJSON)(t))
 }
 
+// setRoutes registers the trigger management routes under /triggers.
 func setRoutes(r *mux.Router) {
 	triggerRouter := util.PathRouter(r, "/triggers")
 	util.AddRoute(triggerRouter, "/add", addTrigger, "POST")
@@ -112,6 +113,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(triggerRouter, "", getTriggers)
 }
 
+// getPortTrigger returns the triggers of the request's port, creating them if missing.
 func getPortTrigger(r *http.Request) *Trigger {
 	listenerPort := util.GetRequestOrListenerPort(r)
 	triggerLock.RLock()
@@ -132,18 +134,22 @@ func getPortTrigger(r *http.Request) *Trigger {
 	return trigger
 }
 
+// addTrigger adds the trigger target in the request body to the request's port.
 func addTrigger(w http.ResponseWriter, r *http.Request) {
 	getPortTrigger(r).addTrigger(w, r)
 }
 
+// removeTrigger removes the named trigger target from the request's port.
 func removeTrigger(w http.ResponseWriter, r *http.Request) {
 	getPortTrigger(r).removeTrigger(w, r)
 }
 
+// enableOrDisableTrigger enables or disables the named trigger target on the request's port, as the route says.
 func enableOrDisableTrigger(w http.ResponseWriter, r *http.Request) {
 	getPortTrigger(r).enableOrDisableTrigger(w, r)
 }
 
+// clearTriggers replaces the request's port's triggers with an empty set and unregisters its targets.
 func clearTriggers(w http.ResponseWriter, r *http.Request) {
 	listenerPort := util.GetRequestOrListenerPort(r)
 	cleared := &Trigger{}
@@ -173,6 +179,7 @@ func clearTriggers(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getTriggerCounts reports the invocation result counts, by status, of each trigger target of the port.
 func getTriggerCounts(w http.ResponseWriter, r *http.Request) {
 	t := getPortTrigger(r)
 	util.AddLogMessage(fmt.Sprintf("Port [%s] Get trigger counts", util.GetRequestOrListenerPort(r)), r)
@@ -188,6 +195,7 @@ func getTriggerCounts(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, counts)
 }
 
+// getTriggerPipes reports the pipe callbacks registered for each trigger target across ports.
 func getTriggerPipes(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(fmt.Sprintf("Port [%s] Get trigger pipes", util.GetRequestOrListenerPort(r)), r)
 	triggerLock.RLock()
@@ -214,12 +222,14 @@ func getTriggerPipes(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, triggerPipes)
 }
 
+// getTriggers reports the triggers of the request's port as JSON.
 func getTriggers(w http.ResponseWriter, r *http.Request) {
 	t := getPortTrigger(r)
 	util.AddLogMessage(fmt.Sprintf("Port [%s] Get triggers", util.GetRequestOrListenerPort(r)), r)
 	util.WriteJsonPayload(w, t)
 }
 
+// invokeTriggers invokes the HTTP and pipe targets of the named triggers (or of all, if none are named) on demand, reporting the HTTP results; 404 if none are found.
 func invokeTriggers(w http.ResponseWriter, r *http.Request) {
 	t := getPortTrigger(r)
 	targets := t.getRequestedTriggers(r)
@@ -247,6 +257,7 @@ func invokeTriggers(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// init allocates the target registries if they aren't yet.
 func (t *Trigger) init() {
 	t.lock.Lock()
 	defer t.lock.Unlock()
@@ -273,6 +284,7 @@ func buildURIRegexps(uris []string) (map[string]*regexp.Regexp, error) {
 	return regexps, nil
 }
 
+// appendUnique appends the value to the slice unless it is already in it.
 func appendUnique[T comparable](values []T, value T) []T {
 	for _, v := range values {
 		if v == value {
@@ -318,6 +330,7 @@ func (t *Trigger) index(tt *TriggerTarget) {
 	}
 }
 
+// addTrigger validates the target in the request body (name, HTTP target, URIs), then registers and indexes it, replacing any target of the same name; 400 if invalid.
 func (t *Trigger) addTrigger(w http.ResponseWriter, r *http.Request) {
 	tt := &TriggerTarget{}
 	var err error
@@ -387,6 +400,7 @@ func (t *Trigger) unsafeDeleteTrigger(targetName string) *TriggerTarget {
 	return removed
 }
 
+// deleteTrigger removes the target from the port's triggers and from the global target registry.
 func (t *Trigger) deleteTrigger(targetName string) {
 	t.lock.Lock()
 	removed := t.unsafeDeleteTrigger(targetName)
@@ -400,6 +414,7 @@ func (t *Trigger) deleteTrigger(targetName string) {
 	}
 }
 
+// removeTrigger removes the target named in the request; 400 if there is none.
 func (t *Trigger) removeTrigger(w http.ResponseWriter, r *http.Request) {
 	if tt := t.getRequestedTrigger(r); tt != nil {
 		t.deleteTrigger(tt.Name)
@@ -413,6 +428,7 @@ func (t *Trigger) removeTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// enableOrDisableTrigger enables or disables the target named in the request, depending on whether the path ends in /enable; 400 if it isn't found.
 func (t *Trigger) enableOrDisableTrigger(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "trigger")
 	// The action is the last segment of the path. The name of the trigger, or the query, may well have "enable" in it.
@@ -435,6 +451,7 @@ func (t *Trigger) enableOrDisableTrigger(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// getRequestedTrigger returns the target named by the request's trigger param, or nil.
 func (t *Trigger) getRequestedTrigger(r *http.Request) *TriggerTarget {
 	t.lock.RLock()
 	defer t.lock.RUnlock()
@@ -444,6 +461,7 @@ func (t *Trigger) getRequestedTrigger(r *http.Request) *TriggerTarget {
 	return nil
 }
 
+// getRequestedTriggers returns the targets named in the request's comma-separated triggers param, or all targets if the param is absent.
 func (t *Trigger) getRequestedTriggers(r *http.Request) map[string]*TriggerTarget {
 	t.lock.RLock()
 	defer t.lock.RUnlock()
@@ -483,6 +501,7 @@ func (tt *TriggerTarget) prepareTargetHeaders(r *http.Request, responseHeaders h
 	return headers
 }
 
+// toInvocationSpec builds and validates an invocation spec from the target's HTTP target, resolving header placeholders when a request is given.
 func (tt *TriggerTarget) toInvocationSpec(r *http.Request, responseHeaders http.Header) (*invocation.InvocationSpec, error) {
 	is := &invocation.InvocationSpec{}
 	is.Name = tt.Name
@@ -498,6 +517,7 @@ func (tt *TriggerTarget) toInvocationSpec(r *http.Request, responseHeaders http.
 	return is, invocation.ValidateSpec(is)
 }
 
+// invokeHTTPTargets calls the HTTP target of each trigger, counting its triggers and tallying the response statuses (503 when there is none).
 func (t *Trigger) invokeHTTPTargets(targets map[string]*TriggerTarget, port int, responseHeaders http.Header, r *http.Request) []*invocation.InvocationResult {
 	if len(targets) == 0 {
 		return nil
@@ -533,6 +553,7 @@ func (t *Trigger) invokeHTTPTargets(targets map[string]*TriggerTarget, port int,
 	return responses
 }
 
+// invokePipeSources counts the triggers of the pipe targets and runs the pipe callbacks registered for each.
 func (t *Trigger) invokePipeSources(pipeSources map[string]*TriggerTarget, port int, responseHeaders http.Header, r *http.Request, statusCode int) {
 	for name, tt := range pipeSources {
 		tt.lock.Lock()
@@ -551,6 +572,7 @@ func (t *Trigger) invokePipeSources(pipeSources map[string]*TriggerTarget, port 
 	}
 }
 
+// findMatchingTriggers finds the targets matched by the request's URI, status and headers that are due to fire (enabled and within their start/stop range), split into HTTP and pipe targets.
 func (t *Trigger) findMatchingTriggers(r *http.Request, statusCode int) (httpTargets, pipeSources map[string]*TriggerTarget) {
 	uri := strings.ToLower(r.RequestURI)
 	triggerTargets := map[string]*TriggerTarget{}
@@ -633,6 +655,7 @@ func RunTriggers(r *http.Request, w http.ResponseWriter, statusCode int) {
 	}
 }
 
+// RegisterPipeCallback registers a pipe callback for a trigger target, logging if the target doesn't exist.
 func RegisterPipeCallback(target, pipe string, callback PipeCallback) {
 	triggerLock.Lock()
 	defer triggerLock.Unlock()

@@ -50,6 +50,7 @@ type RPCServiceRegistry interface {
 	GetRPCService(name string) RPCService
 }
 
+// CheckService resolves the service (and optional method) named in the request from the registry, writing a 400 with a message when invalid.
 func CheckService(w http.ResponseWriter, r *http.Request, reg RPCServiceRegistry) (service RPCService, method RPCMethod, serviceType string, msg string, ok bool) {
 	s := util.GetStringParamValue(r, "service")
 	m := util.GetStringParamValue(r, "method")
@@ -107,6 +108,7 @@ func checkMethod(w http.ResponseWriter, method RPCMethod) (msg string, ok bool) 
 	return "", true
 }
 
+// ClearServiceResponsePayload clears the RPC response payloads on the port after validating the service and method of the request.
 func ClearServiceResponsePayload(w http.ResponseWriter, r *http.Request, reg RPCServiceRegistry) {
 	service, method, serviceType, msg, ok := CheckService(w, r, reg)
 	if ok {
@@ -122,6 +124,7 @@ func ClearServiceResponsePayload(w http.ResponseWriter, r *http.Request, reg RPC
 	util.AddLogMessage(msg, r)
 }
 
+// SetServiceResponsePayload stores the request body as the response payload of a service method, including stream count, delay, and header/body match criteria.
 func SetServiceResponsePayload(w http.ResponseWriter, r *http.Request, reg RPCServiceRegistry) {
 	service, method, serviceType, msg, ok := CheckService(w, r, reg)
 	if ok {
@@ -160,6 +163,7 @@ func SetServiceResponsePayload(w http.ResponseWriter, r *http.Request, reg RPCSe
 	util.AddLogMessage(msg, r)
 }
 
+// SetServicePayloadTransform reads transforms from the request body and applies them to the response payload of a service method.
 func SetServicePayloadTransform(w http.ResponseWriter, r *http.Request, reg RPCServiceRegistry) {
 	service, method, serviceType, msg, ok := CheckService(w, r, reg)
 	if ok {

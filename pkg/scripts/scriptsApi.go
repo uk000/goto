@@ -31,6 +31,7 @@ var (
 	Middleware = middleware.NewMiddleware("script", setRoutes, nil)
 )
 
+// setRoutes registers the /scripts routes to add, store, remove, run and list scripts.
 func setRoutes(r *mux.Router) {
 	scriptRouter := middleware.RootPath("/scripts")
 	util.AddRoute(scriptRouter, "/add/{name}", addScript, "POST", "PUT")
@@ -43,6 +44,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(scriptRouter, "", getScripts, "GET")
 }
 
+// addScript registers the script in the request body under the name, storing it as a file when the URI is /store/.
 func addScript(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	store := strings.Contains(r.RequestURI, "/store/")
@@ -52,6 +54,7 @@ func addScript(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// removeScript removes the named script, or all scripts for "all".
 func removeScript(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	msg := ""
@@ -66,6 +69,7 @@ func removeScript(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// runScript runs the named script with the request's args, feeding it the request body and streaming its output as the response (404 if unknown).
 func runScript(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	args, _ := util.GetListParam(r, "args")
@@ -85,6 +89,7 @@ func runScript(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// getScripts reports the registered scripts as JSON.
 func getScripts(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add(constants.HeaderContentType, constants.ContentTypeJSON)
 	Scripts.DumpScripts(w)

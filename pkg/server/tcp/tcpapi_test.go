@@ -65,6 +65,8 @@ func TestAdminConfigureRejections(t *testing.T) {
 		{"invalid JSON", "POST", url(port, "/configure"), `{"echo":`, 400, "Failed to parse json"},
 		{"wrong JSON type", "POST", url(port, "/configure"), `{"echo":"yes"}`, 400, "Failed to parse json"},
 		{"negative duration", "POST", url(port, "/configure"), `{"readTimeout":"-1s"}`, 400, "Invalid read timeout"},
+		{"negative expected payload length", "POST", url(port, "/configure"), `{"validatePayloadContent":true,"expectedPayloadLength":-1}`, 400, "Invalid expected payload length: -1"},
+		{"huge expected payload length", "POST", url(port, "/configure"), `{"validatePayloadLength":true,"expectedPayloadLength":1099511627776}`, 400, "Invalid expected payload length: 1099511627776"},
 		{"no listener", "POST", url(port+500, "/configure"), `{}`, 400, "No listener for port"},
 		{"wrong method", "GET", url(port, "/configure"), ``, 404, ""},
 	}
@@ -189,6 +191,37 @@ func TestAdminExpectedPayload(t *testing.T) {
 	adminOK(t, "POST", url(port, "/expect/payload/length=3"), "")
 	if c := storedConfig(t, port); c.ValidatePayloadContent || c.ExpectedPayload != nil || c.ExpectedPayloadLength != 3 {
 		t.Errorf("config after expecting a length again = %+v", c)
+	}
+}
+
+func TestAdminExpectedPayloadRejectsWhatCannotBeServed(t *testing.T) {
+	port := configure(t, &TCPConfig{Echo: true})
+	adminOK(t, "POST", url(port, "/expect/payload/length=12"), "")
+	prev := maxExpectedPayloadLength
+	maxExpectedPayloadLength = 10
+	t.Cleanup(func() { maxExpectedPayloadLength = prev })
+	for _, tc := range []struct{ name, target, body string }{
+		{"negative length", url(port, "/expect/payload/length=-1"), ""},
+		{"length over the maximum", url(port, "/expect/payload/length=11"), ""},
+		{"huge length", url(port, "/expect/payload/length=1099511627776"), ""},
+		{"content over the maximum", url(port, "/expect/payload"), "01234567890"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := admin(t, "POST", tc.target, tc.body)
+			if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Invalid expected payload length") {
+				t.Errorf("POST %s = %d %q, want 400 with the length being invalid", tc.target, rr.Code, rr.Body.String())
+			}
+			if c := storedConfig(t, port); c.ExpectedPayloadLength != 12 || !c.ValidatePayloadLength || c.Echo {
+				t.Errorf("config after the rejection = %+v, want the one that was set before it", c)
+			}
+		})
+	}
+	// the maximum itself, and zero, are served
+	adminOK(t, "POST", url(port, "/expect/payload/length=10"), "")
+	adminOK(t, "POST", url(port, "/expect/payload/length=0"), "")
+	adminOK(t, "POST", url(port, "/expect/payload"), "0123456789")
+	if c := storedConfig(t, port); c.ExpectedPayloadLength != 10 || string(c.ExpectedPayload) != "0123456789" {
+		t.Errorf("config = %+v", c)
 	}
 }
 

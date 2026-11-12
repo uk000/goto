@@ -30,6 +30,7 @@ var (
 	Middleware = middleware.NewMiddleware("mcp", setRoutes, nil)
 )
 
+// setRoutes registers the REST routes that set up an MCP proxy for all tools or for a tool.
 func setRoutes(r *mux.Router) {
 	proxyRouter := middleware.RootPath("/proxy")
 	mcpProxyRouter := util.PathPrefix(proxyRouter, "/mcp")
@@ -38,6 +39,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRouteWithMultiQ(mcpProxyRouter, "/proxy/{tool}", setupMCPProxy, [][]string{{"endpoint"}, {"to"}, {"sni", "headers"}}, "POST")
 }
 
+// setupMCPProxy reads the server, tool, endpoint and headers from the request and sets up the MCP proxy of the port.
 func setupMCPProxy(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	tool := util.GetStringParamValue(r, "tool")

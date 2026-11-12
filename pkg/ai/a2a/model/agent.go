@@ -133,6 +133,7 @@ type HTTPCall struct {
 	Headers   *types.Headers `yaml:"headers,omitempty" json:"headers,omitempty"`
 }
 
+// NewDelegateTracker creates a tracker with no calls or responses counted.
 func NewDelegateTracker() *DelegateTracker {
 	return &DelegateTracker{}
 }
@@ -146,6 +147,7 @@ func (t *DelegateTracker) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// UnmarshalJSON restores the counts and the done state from their JSON form.
 func (t *DelegateTracker) UnmarshalJSON(b []byte) error {
 	v := &delegateTrackerJSON{}
 	if err := json.Unmarshal(b, v); err != nil {
@@ -157,26 +159,32 @@ func (t *DelegateTracker) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// IncrementCall counts a call made to the delegate.
 func (t *DelegateTracker) IncrementCall() {
 	t.CallCount.Add(1)
 }
 
+// IncrementResponse counts a response received from the delegate.
 func (t *DelegateTracker) IncrementResponse() {
 	t.ResponseCount.Add(1)
 }
 
+// Finish marks the delegate as done.
 func (t *DelegateTracker) Finish() {
 	t.done.Store(true)
 }
 
+// IsDone tells whether the delegate is done.
 func (t *DelegateTracker) IsDone() bool {
 	return t.done.Load()
 }
 
+// GetCard returns the card of the agent.
 func (a *Agent) GetCard() *trpcserver.AgentCard {
 	return a.Card
 }
 
+// SetPayload parses the JSON as a payload and sets it as the response payload of the agent, with the lock held.
 func (a *Agent) SetPayload(b []byte) error {
 	p := &payload.Payload{}
 	err := json.Unmarshal(b, p)
@@ -222,6 +230,7 @@ func (a *Agent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(report)
 }
 
+// Serve hands the request to the agent's handler, or responds with 503 if the agent is not ready.
 func (a *Agent) Serve(w http.ResponseWriter, r *http.Request) {
 	if a.Handler == nil {
 		http.Error(w, "agent is not ready to serve", http.StatusServiceUnavailable)

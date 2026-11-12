@@ -55,14 +55,17 @@ var (
 	}()
 )
 
+// RunCommands runs the commands as one script via the global script manager, with output to stdout.
 func RunCommands(label string, lines []string) {
 	Scripts.RunCommands(label, lines)
 }
 
+// RunCommands joins the commands into a single script and runs it with output to stdout.
 func (sm *ScriptManager) RunCommands(label string, commands []string) {
 	newScriptFromCommands(label, commands).RunToStdOut()
 }
 
+// AddScript registers a script by name, either written as an executable .sh file under ScriptsDir (store) or kept in memory as text.
 func (sm *ScriptManager) AddScript(name, content string, store bool) {
 	var script *Script
 	if store {
@@ -88,6 +91,7 @@ func (sm *ScriptManager) AddScript(name, content string, store bool) {
 	sm.scripts[name] = script
 }
 
+// AddMultiCommandScript registers an in-memory script that runs the given lines in sequence.
 func (sm *ScriptManager) AddMultiCommandScript(name string, lines []string) {
 	script := newScriptFromCommands(name, lines)
 	sm.scriptsLock.Lock()
@@ -95,6 +99,7 @@ func (sm *ScriptManager) AddMultiCommandScript(name string, lines []string) {
 	sm.scripts[name] = script
 }
 
+// RemoveScript unregisters the named script and deletes its stored file, if any.
 func (sm *ScriptManager) RemoveScript(name string) {
 	sm.scriptsLock.Lock()
 	defer sm.scriptsLock.Unlock()
@@ -111,6 +116,7 @@ func (sm *ScriptManager) RemoveScript(name string) {
 	}
 }
 
+// RemoveAll unregisters all scripts and deletes their stored files.
 func (sm *ScriptManager) RemoveAll() {
 	sm.scriptsLock.Lock()
 	defer sm.scriptsLock.Unlock()
@@ -127,6 +133,7 @@ func (sm *ScriptManager) RemoveAll() {
 	}
 }
 
+// RunScript runs the named script with the args and the given input and output, writing a not-found message to out if it doesn't exist.
 func (sm *ScriptManager) RunScript(name string, args []string, in io.Reader, out io.Writer) {
 	sm.scriptsLock.RLock()
 	script := sm.scripts[name]
@@ -144,22 +151,26 @@ func (sm *ScriptManager) RunScript(name string, args []string, in io.Reader, out
 	script.Run(args, in, out)
 }
 
+// DumpScripts writes the registered scripts to out as JSON.
 func (sm *ScriptManager) DumpScripts(out io.Writer) {
 	sm.scriptsLock.RLock()
 	defer sm.scriptsLock.RUnlock()
 	util.WriteJson(out, sm.scripts)
 }
 
+// newScriptFromText creates an in-memory script from the text.
 func newScriptFromText(name, text string) *Script {
 	script := &Script{Name: name, Text: text}
 	return script
 }
 
+// newScriptFromCommands creates an in-memory script that runs the lines in sequence, joined with "; ".
 func newScriptFromCommands(name string, lines []string) *Script {
 	script := &Script{Name: name, Text: strings.Join(lines, "; ")}
 	return script
 }
 
+// Run executes the script (its file, or its text via sh -c) with the args, wiring stdin to in and stdout/stderr to out.
 func (s *Script) Run(args []string, in io.Reader, out io.Writer) {
 	var command string
 	if s.FilePath != "" {
@@ -182,10 +193,12 @@ func (s *Script) Run(args []string, in io.Reader, out io.Writer) {
 	}
 }
 
+// RunToStdOut runs the script with os.Stdin as input and os.Stdout as output.
 func (s *Script) RunToStdOut() {
 	s.Run([]string{}, os.Stdin, os.Stdout)
 }
 
+// RunWithStdIn runs the script with os.Stdin as input and the given writer as output.
 func (s *Script) RunWithStdIn(out io.Writer) {
 	s.Run([]string{}, os.Stdin, out)
 }

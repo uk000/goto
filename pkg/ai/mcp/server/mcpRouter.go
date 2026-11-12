@@ -37,6 +37,7 @@ import (
 
 var ()
 
+// MCPHandler returns a handler that serves MCP requests via HandleMCP, and falls back to the HTTP handler if none served it.
 func MCPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)
@@ -47,6 +48,7 @@ func MCPHandler() http.Handler {
 	})
 }
 
+// HandleMCP routes a non-admin MCP request to the matching (or default) MCP server, unless MCP proxying is configured for the port.
 func HandleMCP(w http.ResponseWriter, r *http.Request) {
 	l := listeners.GetCurrentListener(r)
 	rs := util.GetRequestStore(r)
@@ -89,6 +91,7 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// MCPHybridHandler returns a handler that serves the server over streamable HTTP for "/mcp" URIs, and over SSE otherwise.
 func MCPHybridHandler(server *MCPServer) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)
@@ -106,6 +109,7 @@ func MCPHybridHandler(server *MCPServer) http.Handler {
 	})
 }
 
+// Serve runs the MCP handler for a request on the server, applying any configured forced status and tracking the session lifecycle.
 func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler http.Handler) {
 	if r.Header == nil {
 		r.Header = http.Header{}
@@ -202,6 +206,7 @@ func Serve(server *MCPServer, w http.ResponseWriter, r *http.Request, handler ht
 	}
 }
 
+// getServer returns the SDK server that matches the request, or nil if no MCP server matches.
 func getServer(r *http.Request) *gomcp.Server {
 	var server *MCPServer
 	port := util.GetRequestOrListenerPortNum(r)
@@ -220,6 +225,7 @@ func getServer(r *http.Request) *gomcp.Server {
 	return server.server
 }
 
+// serverNameOf returns the name of the server, or "<none>" if it is nil.
 func serverNameOf(server *MCPServer) string {
 	if server == nil {
 		return "<none>"
@@ -227,6 +233,7 @@ func serverNameOf(server *MCPServer) string {
 	return server.Name
 }
 
+// getServerAndTool resolves the MCP server (by URI route, name, or default fallback) and the tool for the request.
 func getServerAndTool(r *http.Request) (*MCPServer, *MCPTool) {
 	var server *MCPServer
 	port := util.GetRequestOrListenerPortNum(r)
@@ -308,6 +315,7 @@ func getMCPServerIfPresent(port int, name string) *MCPServer {
 	return ps.GetMCPServer(name)
 }
 
+// getPortServerToolFromURI parses the port, server name and tool name out of an "/mcp" or "/sse" request URI.
 func getPortServerToolFromURI(uri string) (port int, server, tool string) {
 	isMCP := strings.Contains(uri, "/mcp")
 	isSSE := strings.Contains(uri, "/sse")
@@ -363,6 +371,7 @@ func HandleMCPDefault(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// sendStatus writes the forced status with its remaining count to the response, and logs the request that it was for.
 func sendStatus(id string, status, rem int, w http.ResponseWriter, r *http.Request) {
 	w.Header().Add(constants.HeaderGotoForcedStatus, strconv.Itoa(status))
 	w.Header().Add(constants.HeaderGotoForcedStatusRemaining, strconv.Itoa(rem))

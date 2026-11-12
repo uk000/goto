@@ -38,9 +38,10 @@ var (
 	NotFeatureHint     = regexp.MustCompile(`(?i)\b(hide|without|not|no)\s+(\w+)(\s*)`)
 	DigitRegexp        = regexp.MustCompile(`(\d+)`)
 	DurationRegexp     = regexp.MustCompile(`(?i)(\d+)\s*(s|sec|m|min|h|hour)s?\b`)
-	normalizedDuration = map[string]string{"sec": "s", "min": "s", "hour": "s"}
+	normalizedDuration = map[string]string{"sec": "s", "min": "m", "hour": "h"}
 )
 
+// ExtractEmbeddedJSONs finds flat {...} JSON objects embedded in text, returning the text with them removed and the parsed objects.
 func ExtractEmbeddedJSONs(text string) (input string, jsons []map[string]any) {
 	matches := EmbeddedJSON.FindAll([]byte(text), -1)
 	for _, b := range matches {
@@ -50,6 +51,7 @@ func ExtractEmbeddedJSONs(text string) (input string, jsons []map[string]any) {
 	return
 }
 
+// ExtractPortHint finds a "port N" hint in text and returns the text unchanged along with the port number as a string.
 func ExtractPortHint(text string) (string, string) {
 	matches := PortHint.FindStringSubmatch(text)
 	if len(matches) > 1 {
@@ -60,6 +62,7 @@ func ExtractPortHint(text string) (string, string) {
 	return text, ""
 }
 
+// ExtractStatusHint finds a "status N" hint in text and returns the text unchanged along with the status code.
 func ExtractStatusHint(text string) (string, int) {
 	matches := StatusHint.FindStringSubmatch(text)
 	if len(matches) > 1 {
@@ -70,6 +73,7 @@ func ExtractStatusHint(text string) (string, int) {
 	return text, 0
 }
 
+// ExtractTargetHint finds a "to/on/with <word>" hint, removing it from the text and returning the word as the target.
 func ExtractTargetHint(text string) (string, string) {
 	matches := TargetHint.FindStringSubmatch(text)
 	if len(matches) > 2 {
@@ -79,6 +83,7 @@ func ExtractTargetHint(text string) (string, string) {
 	return text, ""
 }
 
+// ExtractInputHint finds name:[value] inputs in text, replacing each with just the name and returning a map of name to value.
 func ExtractInputHint(text string) (string, map[string]string) {
 	inputs := map[string]string{}
 	matches := InputHint.FindAllStringSubmatch(text, -1)
@@ -90,6 +95,7 @@ func ExtractInputHint(text string) (string, map[string]string) {
 	return text, inputs
 }
 
+// ExtractNumberHint returns the text unchanged along with the first number found in it, or 0.
 func ExtractNumberHint(text string) (string, int) {
 	match := DigitRegexp.FindString(text)
 	if match != "" {
@@ -99,6 +105,7 @@ func ExtractNumberHint(text string) (string, int) {
 	return text, 0
 }
 
+// ExtractDurationHint finds the first duration hint such as "5 min" in text, removes duration hints from the text and returns the parsed duration.
 func ExtractDurationHint(text string) (string, time.Duration) {
 	matches := DurationRegexp.FindAllStringSubmatch(text, -1)
 	if len(matches) == 0 || len(matches[0]) == 0 {
@@ -113,6 +120,7 @@ func ExtractDurationHint(text string) (string, time.Duration) {
 	return text, ParseDuration(val + unit)
 }
 
+// ExtractFeatureHint finds a "show/with/use <word>" (enabled) or "hide/without/not/no <word>" (disabled) hint, removing it from the text and returning the feature word and its flag.
 func ExtractFeatureHint(text string) (string, string, bool) {
 	notMatches := NotFeatureHint.FindStringSubmatch(text)
 	if len(notMatches) > 2 {
@@ -127,6 +135,7 @@ func ExtractFeatureHint(text string) (string, string, bool) {
 	return text, "", false
 }
 
+// SplitTextIntoChunks splits text on word boundaries into chunks of at most chunkSize, falling back to sentence-based splitting if fewer than 3 chunks result.
 func SplitTextIntoChunks(text string, chunkSize int) []string {
 	if len(text) <= chunkSize {
 		return []string{text}
@@ -156,6 +165,8 @@ func SplitTextIntoChunks(text string, chunkSize int) []string {
 	}
 	return chunks
 }
+
+// SplitAtSentenceBoundaries splits text into targetChunks pieces at sentence delimiters, or into equal-sized slices if there aren't enough delimiters.
 func SplitAtSentenceBoundaries(text string, targetChunks int) []string {
 	delimiters := []string{". ", "! ", "? ", "\n\n", "; "}
 	if len(text) < 30 {
@@ -201,6 +212,7 @@ func SplitAtSentenceBoundaries(text string, targetChunks int) []string {
 	return chunks
 }
 
+// ReverseString returns s with its characters in reverse order.
 func ReverseString(s string) string {
 	runes := []rune(s)
 	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
@@ -209,6 +221,7 @@ func ReverseString(s string) string {
 	return string(runes)
 }
 
+// AnyToBool converts a bool, int or string value to a bool, returning false for anything else.
 func AnyToBool(value any) bool {
 	switch v := value.(type) {
 	case bool:
@@ -225,6 +238,7 @@ func AnyToBool(value any) bool {
 	}
 }
 
+// AnyToInt converts an int, int64, float64 or string value to an int, returning 0 for anything else.
 func AnyToInt(value any) int {
 	switch v := value.(type) {
 	case int:
@@ -243,6 +257,7 @@ func AnyToInt(value any) int {
 	}
 }
 
+// FindFirstMatch returns the first element of arr1 that also appears in arr2.
 func FindFirstMatch(arr1, arr2 []string) (string, bool) {
 	for _, v1 := range arr1 {
 		for _, v2 := range arr2 {
@@ -254,6 +269,7 @@ func FindFirstMatch(arr1, arr2 []string) (string, bool) {
 	return "", false
 }
 
+// CompareStringSlices reports whether the two slices hold the same strings with the same counts, regardless of order.
 func CompareStringSlices(a, b []string) bool {
 	if len(a) == 0 && len(b) == 0 {
 		return true
@@ -277,6 +293,7 @@ func CompareStringSlices(a, b []string) bool {
 	return len(counts) == 0
 }
 
+// CleanText returns the printable characters of rawBytes as a string.
 func CleanText(rawBytes []byte) string {
 	sb := &strings.Builder{}
 	for _, b := range rawBytes {
@@ -288,6 +305,7 @@ func CleanText(rawBytes []byte) string {
 	return sb.String()
 }
 
+// GetFilledText replaces each {key} marker in text with the matching capture value.
 func GetFilledText(text string, captures map[string]string) string {
 	for k, v := range captures {
 		text = strings.Replace(text, MarkFiller(k), v, -1)

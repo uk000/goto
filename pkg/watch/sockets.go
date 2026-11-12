@@ -60,12 +60,14 @@ var (
 	}
 )
 
+// HasOpenSockets reports whether any websocket is currently registered.
 func (s *Sockets) HasOpenSockets() bool {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	return len(s.sockets) > 0
 }
 
+// AddSocket registers the websocket connection under the ID, closing any socket it replaces, and starts streaming messages to it.
 func (s *Sockets) AddSocket(id string, conn *websocket.Conn) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -81,6 +83,7 @@ func (s *Sockets) AddSocket(id string, conn *websocket.Conn) {
 	log.Printf("Socket for ID %s is now running\n", id)
 }
 
+// RemoveSocket removes and closes the socket registered under the ID.
 func (s *Sockets) RemoveSocket(id string) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -111,6 +114,8 @@ func closeSocket(socket *Socket) {
 		socket.conn.Close()
 	}
 }
+
+// GetSocket returns the socket registered under the ID, if any.
 func (s *Sockets) GetSocket(id string) (*Socket, bool) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -118,6 +123,7 @@ func (s *Sockets) GetSocket(id string) (*Socket, bool) {
 	return socket, ok
 }
 
+// Run streams messages to the socket of the ID, blocking until it stops; it just logs if there is no such socket.
 func (s *Sockets) Run(id string) {
 	socket, ok := s.GetSocket(id)
 	if !ok {
@@ -127,6 +133,7 @@ func (s *Sockets) Run(id string) {
 	s.run(socket)
 }
 
+// run writes the socket's queued messages to its connection as YAML, pinging after 5s of idleness, until the stream closes or a write fails, then removes the socket.
 func (s *Sockets) run(socket *Socket) {
 	id := socket.id
 	defer s.removeSocket(id, socket)
@@ -158,6 +165,7 @@ func (s *Sockets) run(socket *Socket) {
 	}
 }
 
+// Broadcast queues a snapshot of the request and response to every open socket, skipping any whose stream is full.
 func (s *Sockets) Broadcast(requestURI string, requestHeaders http.Header, statusCode int, responseHeaders http.Header, body []byte) {
 	// The message is written out by the socket after this returns, while the request goes on, and sets the headers of its
 	// response, so the message has the headers as they are now.

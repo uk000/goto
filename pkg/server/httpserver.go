@@ -41,6 +41,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -50,17 +51,19 @@ import (
 )
 
 var (
-	httpServer           *http.Server
-	h2s                  = &http2.Server{}
-	coreRouter           *mux.Router
-	httpHandler          http.Handler
-	h2cHandler           http.Handler
-	mcpHandler           http.Handler
-	httpStarted          bool
-	httpListenersStarted bool
+	httpServer  *http.Server
+	h2s         = &http2.Server{}
+	coreRouter  *mux.Router
+	httpHandler http.Handler
+	h2cHandler  http.Handler
+	mcpHandler  http.Handler
+	// The servers are flagged as started by the timer that runs 2 seconds after they are started, and the flags are read by startListeners.
+	httpStarted          atomic.Bool
+	httpListenersStarted atomic.Bool
 	RootRouter           *mux.Router
 )
 
+// RunHttpServer builds the routers, starts the HTTP and JSON-RPC servers, schedules startup config and extra listeners, and blocks until shutdown.
 func RunHttpServer() {
 	var err error
 	configureHTTPRouter()
@@ -84,6 +87,7 @@ func RunHttpServer() {
 	WaitForHttpServer()
 }
 
+// configureHTTPRouter builds the core router, linking the admin routes and the core, intercepted and unintercepted middleware chains.
 func configureHTTPRouter() {
 	coreRouter = mux.NewRouter()
 	coreRouter.SkipClean(true)
@@ -105,6 +109,7 @@ func configureHTTPRouter() {
 	middleware.LinkUnintercepted(uninterceptedChainRouter)
 }
 
+// httpOnlyHandler returns a handler that serves a request through handleHTTP using the listener of the request's port.
 func httpOnlyHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)
@@ -113,6 +118,7 @@ func httpOnlyHandler() http.Handler {
 	})
 }
 
+// configureAndStartHTTPServer creates the h2c-enabled main HTTP server on the server port, with connection tracking, and starts it.
 func configureAndStartHTTPServer() error {
 	httpServer = &http.Server{
 		Addr:         fmt.Sprintf("0.0.0.0:%d", global.Self.ServerPort),
@@ -133,6 +139,7 @@ func configureAndStartHTTPServer() error {
 	return StartHttpServer(httpServer, false)
 }
 
+// StartHttpServer runs the given server in the background after the configured startup delay and flags it as started 2 seconds later.
 func StartHttpServer(server *http.Server, jsonRPC bool) error {
 	if server == nil {
 		return errors.New("Missing server")
@@ -144,9 +151,9 @@ func StartHttpServer(server *http.Server, jsonRPC bool) error {
 	go func(server *http.Server) {
 		time.AfterFunc(2*time.Second, func() {
 			if jsonRPC {
-				jsonRPCStarted = true
+				jsonRPCStarted.Store(true)
 			} else {
-				httpStarted = true
+				httpStarted.Store(true)
 			}
 		})
 		if err := server.ListenAndServe(); err != nil {
@@ -175,6 +182,7 @@ func startUDSListener(server *http.Server, path string) {
 	}()
 }
 
+// startListeners waits until the HTTP and JSON-RPC servers are ready and then starts the additional listeners that depend on each.
 func startListeners() {
 	serverCount := 0
 	if jsonRPCServer != nil {
@@ -184,23 +192,23 @@ func startListeners() {
 		serverCount++
 	}
 	for i := 0; i < serverCount; {
-		if httpStarted && !httpListenersStarted {
+		if httpStarted.Load() && !httpListenersStarted.Load() {
 			log.Printf("HTTP server [%s] is ready. Starting additional HTTP listeners.", httpServer.Addr)
 			time.Sleep(1 * time.Second)
 			global.OnHTTPStart(httpServer, h2s)
-			httpListenersStarted = true
+			httpListenersStarted.Store(true)
 			i++
-		} else if jsonRPCStarted && !jsonRPCListenersStarted {
+		} else if jsonRPCStarted.Load() && !jsonRPCListenersStarted.Load() {
 			log.Printf("JSONRPC server [%s] is ready. Starting additional JSONRPC listeners.", jsonRPCServer.Addr)
 			time.Sleep(1 * time.Second)
 			global.OnJSONRPCStart(jsonRPCServer, h2s)
-			jsonRPCListenersStarted = true
+			jsonRPCListenersStarted.Store(true)
 			i++
 		} else {
-			if !httpStarted && httpServer != nil {
+			if !httpStarted.Load() && httpServer != nil {
 				log.Printf("Waiting for HTTP server [%s] before starting additional HTTP listeners.", httpServer.Addr)
 			}
-			if !jsonRPCStarted && jsonRPCServer != nil {
+			if !jsonRPCStarted.Load() && jsonRPCServer != nil {
 				log.Printf("Waiting for JSONRPC server [%s] before starting additional JSONRPC listeners.", jsonRPCServer.Addr)
 			}
 		}
@@ -208,6 +216,7 @@ func startListeners() {
 	}
 }
 
+// WaitForHttpServer blocks until a stop signal, honors the shutdown delay, deregisters the peer, and gracefully stops the servers.
 func WaitForHttpServer() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
@@ -230,12 +239,24 @@ func WaitForHttpServer() {
 	log.Printf("Deregistering peer [%s : %s] from registry", global.Self.Name, global.Self.Address)
 	go peer.DeregisterPeer(global.Self.Name, global.Self.Address)
 	startup.Stop()
+	// The listeners that have ALPN handlers of their own are served by servers of their own, which shut down with the others.
+	listenersStopped := make(chan struct{})
+	go func() {
+		defer close(listenersStopped)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		// as StopHttpServer waits before it shuts down, so that they stop accepting connections together
+		time.Sleep(time.Second)
+		listeners.ShutdownServers(ctx)
+	}()
 	StopHttpServer(httpServer)
 	StopHttpServer(jsonRPCServer)
 	// The listeners that the servers don't close are closed too, so as not to leave their socket files behind.
 	listeners.CloseUDSListeners()
+	<-listenersStopped
 }
 
+// StopHttpServer gracefully shuts down the given server with a 10 second timeout.
 func StopHttpServer(server *http.Server) {
 	log.Printf("HTTP Server %s started shutting down", server.Addr)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -248,6 +269,7 @@ func StopHttpServer(server *http.Server) {
 	log.Printf("HTTP Server %s finished shutting down", server.Addr)
 }
 
+// HTTPHandler returns the top-level handler that sets up the request store, picks the route, admin, proxy, AI or HTTP handler, and records metrics and the access log.
 func HTTPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if global.ServerConfig.Stopping && global.Funcs.IsReadinessProbe(r) {
@@ -292,6 +314,7 @@ func HTTPHandler() http.Handler {
 	})
 }
 
+// handleHTTP dispatches the request to the admin router, gRPC server, HTTP/2 handler or the current router based on the request type.
 func handleHTTP(l *listeners.Listener, w http.ResponseWriter, r *http.Request, rs *util.RequestStore) {
 	if rs.IsAdminRequest {
 		rs.CurrentRouter.ServeHTTP(w, r)
@@ -318,6 +341,7 @@ func handleHTTP(l *listeners.Listener, w http.ResponseWriter, r *http.Request, r
 	}
 }
 
+// GRPCHandler returns a handler that serves gRPC requests with the gRPC server and all others with the current router or the given handler.
 func GRPCHandler(httpHandler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)
@@ -331,6 +355,7 @@ func GRPCHandler(httpHandler http.Handler) http.Handler {
 	})
 }
 
+// loadRouter strips a port prefix from the request URI and picks the router for the request: proxy, root URI router, or core router.
 func loadRouter(r *http.Request, rs *util.RequestStore) {
 	portMatch := util.PortRouteRegexp.FindStringSubmatch(r.RequestURI)
 	if len(portMatch) > 1 && portMatch[0] != "" && portMatch[1] != "" {
@@ -363,6 +388,7 @@ func loadRouter(r *http.Request, rs *util.RequestStore) {
 	}
 }
 
+// initRequestStore creates the request store and returns the listener of the request's port, failing if the port isn't configured.
 func initRequestStore(w http.ResponseWriter, r *http.Request) (*http.Request, *util.RequestStore, *listeners.Listener, error) {
 	_, r, rs := util.WithRequestStore(r, w)
 	l := listeners.GetListenerForPort(rs.RequestPortNum)
@@ -374,12 +400,14 @@ func initRequestStore(w http.ResponseWriter, r *http.Request) (*http.Request, *u
 	return r, rs, l, nil
 }
 
+// preIntercept returns a handler that runs before the intercepted chain and checks for tunnel requests.
 func preIntercept() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tunnel.CheckTunnelRequest(r)
 	})
 }
 
+// postIntercept returns a handler that runs after the intercepted chain, completing tunnel CONNECT hijacks and sending goto trailers.
 func postIntercept() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)
@@ -392,10 +420,12 @@ func postIntercept() http.Handler {
 	})
 }
 
+// withConnContext stores the client connection in the request context.
 func withConnContext(ctx context.Context, conn net.Conn) context.Context {
 	return util.WithConn(ctx, conn)
 }
 
+// PrintLogMessages emits the buffered access log of a request if the log flags and request type allow it, then resets the buffer.
 func PrintLogMessages(statusCode, bodyLength int, payload []byte, headers http.Header, rs *util.RequestStore) {
 	if (!rs.IsLockerRequest || global.Flags.EnableRegistryLockerLogs) &&
 		(!rs.IsAdminRequest || global.Flags.EnableAdminLogs) &&

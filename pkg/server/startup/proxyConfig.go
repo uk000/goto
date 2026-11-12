@@ -28,10 +28,12 @@ import (
 	"time"
 )
 
+// removeHTTPProxy clears the HTTP proxy config of the port.
 func removeHTTPProxy(port int) {
 	httpproxy.ClearPortProxy(port)
 }
 
+// loadHTTPProxy sets the responses of the HTTP proxy of the port and adds its targets.
 func loadHTTPProxy(p *httpproxy.Proxy) {
 	if p == nil {
 		return
@@ -81,6 +83,7 @@ func loadTCPProxy(p *tcpproxy.TCPProxy) {
 	}
 }
 
+// loadTCPUpstreams validates the upstreams of a TCP proxy and adds them to the proxy of its port.
 func loadTCPUpstreams(p *tcpproxy.TCPProxy) {
 	if err := tcpproxy.ValidateUpstreams(p.Upstreams); err != nil {
 		log.Printf("[*** ERROR ***] TCP Proxy [%d] Upstreams failed validation: %s\n", p.Port, err.Error())
@@ -131,10 +134,12 @@ func loadConnectProxy(p *tcpproxy.TCPProxy) {
 	log.Println("------------------------------------")
 }
 
+// removeGRPCProxy removes the gRPC proxy of the port.
 func removeGRPCProxy(port int) {
 	grpcproxy.RemovePortProxy(port)
 }
 
+// loadGRPCProxy adds an enabled gRPC proxy and sets up its service proxies, which are validated first.
 func loadGRPCProxy(p *grpcproxy.GRPCProxy) {
 	if p == nil {
 		return

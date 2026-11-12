@@ -26,6 +26,7 @@ import (
 	"log"
 )
 
+// clearMCP removes the MCP servers of an MCP config.
 func clearMCP(mcp *ctl.MCP) {
 	if mcp == nil {
 		return
@@ -37,6 +38,7 @@ func clearMCP(mcp *ctl.MCP) {
 	}
 }
 
+// loadMCP adds the MCP servers of an MCP config with their tools, prompts, resources, templates and server and client payloads.
 func loadMCP(mcp *ctl.MCP) {
 	if mcp == nil {
 		return

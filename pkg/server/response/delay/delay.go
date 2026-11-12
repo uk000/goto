@@ -38,6 +38,7 @@ var (
 	delayLock        sync.RWMutex
 )
 
+// setRoutes registers the delay config routes under /delay, plus the /delay/{delay} and /sleep/{delay} endpoints that delay a single request.
 func setRoutes(r *mux.Router) {
 	delayRouter := util.PathRouter(r, "/delay")
 	util.AddRoute(delayRouter, "/set/{delay}", setDelay, "POST", "PUT")
@@ -50,6 +51,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(sleepRouter, "/{delay}", delay)
 }
 
+// setDelay sets the delay range, with an optional request count, applied to responses on the request's port; a non-positive delay clears it and an invalid one is refused with 400.
 func setDelay(w http.ResponseWriter, r *http.Request) {
 	delayMin, delayMax, delayCount, ok := util.GetDurationParam(r, "delay")
 	if !ok {
@@ -80,6 +82,7 @@ func setDelay(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearDelay removes the response delay configured for the request's port.
 func clearDelay(w http.ResponseWriter, r *http.Request) {
 	listenerPort := util.GetRequestOrListenerPort(r)
 	delayLock.Lock()
@@ -91,6 +94,7 @@ func clearDelay(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// delay sleeps for the delay given in the request (a random pick from a range) before responding 200; 400 if invalid.
 func delay(w http.ResponseWriter, r *http.Request) {
 	metrics.UpdateRequestCount("delay")
 	msg := ""
@@ -118,6 +122,7 @@ func randomDelay(low, high time.Duration) time.Duration {
 	return types.RandomDuration(low, high)
 }
 
+// getDelay reports the response delay and remaining count configured for the request's port as JSON.
 func getDelay(w http.ResponseWriter, r *http.Request) {
 	delayLock.RLock()
 	defer delayLock.RUnlock()
@@ -152,6 +157,7 @@ func takeResponseDelay(r *http.Request) (delay time.Duration, remaining int, app
 	return randomDelay(delayRange[0], delayRange[1]), count, true
 }
 
+// middlewareFunc applies the port's configured response delay to regular traffic requests before calling next.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rs := util.GetRequestStore(r)

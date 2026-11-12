@@ -38,6 +38,7 @@ var (
 	Middleware = middleware.NewMiddleware("k8s", setRoutes, nil)
 )
 
+// setRoutes registers the /k8s APIs for cluster config, context switching, resource lookup, watch and cache clearing.
 func setRoutes(r *mux.Router) {
 	k8sRouter := middleware.RootPath("/k8s")
 
@@ -57,11 +58,13 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(k8sRouter, "/clear", apiClearK8sCache, "POST")
 }
 
+// apiClearK8sCache clears the cached K8s resources.
 func apiClearK8sCache(w http.ResponseWriter, r *http.Request) {
 	store.Cache.Clear()
 	fmt.Fprintln(w, "K8s Cache Cleared")
 }
 
+// apiConfigCluster creates a K8s client from the given name, URL and CA data, and registers it as a named cluster config.
 func apiConfigCluster(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	url := util.GetStringParamValue(r, "url")
@@ -78,6 +81,7 @@ func apiConfigCluster(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// apiSetContext switches the current K8s client to the named context, failing with 400 if it is not known.
 func apiSetContext(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	msg := ""
@@ -91,6 +95,7 @@ func apiSetContext(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// apiGetResource looks up a K8s resource (or a list of them) by kind, namespace and name, optionally filtered by a jq or jsonpath query.
 func apiGetResource(w http.ResponseWriter, r *http.Request) {
 	kind := util.GetStringParamValue(r, "kind")
 	namespace := util.GetStringParamValue(r, "namespace")
@@ -113,6 +118,7 @@ func apiGetResource(w http.ResponseWriter, r *http.Request) {
 	sendResourceResponse(group, version, gvkKind, namespace, name, json, err, w, r)
 }
 
+// sendResourceResponse writes the resource as JSON or YAML based on the Accept header, or a 400/404 status when it failed or was not found.
 func sendResourceResponse(group, version, kind, namespace, name string, json util.JSON, err error, w http.ResponseWriter, r *http.Request) {
 	if json != nil {
 		if util.IsAcceptJSON(r) {

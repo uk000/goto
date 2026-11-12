@@ -17,6 +17,7 @@
 package registry
 
 import (
+	"encoding/json"
 	"fmt"
 	"goto/pkg/client/results"
 	"goto/pkg/global"
@@ -139,10 +140,12 @@ var (
 	}
 )
 
+// init registers GetPeers as the global peers lookup function.
 func init() {
 	global.Funcs.GetPeers = GetPeers
 }
 
+// reset clears all peers, targets, jobs, scripts and files, and replaces the labeled lockers with fresh ones.
 func (registry *Registry) reset() {
 	registry.peersLock.Lock()
 	registry.peers = map[string]*Peers{}
@@ -156,16 +159,24 @@ func (registry *Registry) reset() {
 	registry.lockersLock.Unlock()
 }
 
+// getCurrentLocker returns the currently active locker of the labeled lockers.
 func (registry *Registry) getCurrentLocker() *locker.CombiLocker {
 	registry.lockersLock.RLock()
 	defer registry.lockersLock.RUnlock()
 	return registry.labeledLockers.GetCurrentLocker()
 }
 
+// unsafeAddPeer adds the peer pod with a fresh epoch that keeps its past epochs; the caller must hold peersLock.
 func (registry *Registry) unsafeAddPeer(peer *Peer) {
 	now := time.Now()
 	if registry.peers[peer.Name] == nil {
 		registry.peers[peer.Name] = &Peers{Name: peer.Name, Namespace: peer.Namespace, Pods: map[string]*Pod{}, PodEpochs: map[string][]*PodEpoch{}}
+	}
+	if registry.peers[peer.Name].Pods == nil {
+		registry.peers[peer.Name].Pods = map[string]*Pod{}
+	}
+	if registry.peers[peer.Name].PodEpochs == nil {
+		registry.peers[peer.Name].PodEpochs = map[string][]*PodEpoch{}
 	}
 	pod := &Pod{Name: peer.Pod, Address: peer.Address, URL: "http://" + peer.Address,
 		Node: peer.Node, Cluster: peer.Cluster, Healthy: true,
@@ -192,6 +203,7 @@ func (registry *Registry) unsafeAddPeer(peer *Peer) {
 	}
 }
 
+// addPeer adds the peer under the peers lock and initializes its peer locker in the current locker.
 func (registry *Registry) addPeer(peer *Peer) {
 	registry.peersLock.Lock()
 	defer registry.peersLock.Unlock()
@@ -199,6 +211,7 @@ func (registry *Registry) addPeer(peer *Peer) {
 	registry.getCurrentLocker().InitPeerLocker(peer.Name, peer.Address)
 }
 
+// GetPeer returns the pod registered for the peer name and address, or nil if there is none.
 func (registry *Registry) GetPeer(peerName, peerAddress string) *Pod {
 	registry.peersLock.RLock()
 	defer registry.peersLock.RUnlock()
@@ -208,6 +221,7 @@ func (registry *Registry) GetPeer(peerName, peerAddress string) *Pod {
 	return nil
 }
 
+// rememberPeer refreshes the contact time and health of a known peer pod, or adds the peer if it is not known yet.
 func (registry *Registry) rememberPeer(peer *Peer) {
 	if pod := registry.GetPeer(peer.Name, peer.Address); pod != nil {
 		pod.lock.Lock()
@@ -225,6 +239,7 @@ func (registry *Registry) rememberPeer(peer *Peer) {
 	}
 }
 
+// removePeer removes the peer pod at the address and deactivates its instance locker, returning whether the peer was known.
 func (registry *Registry) removePeer(name string, address string) bool {
 	registry.peersLock.Lock()
 	defer registry.peersLock.Unlock()
@@ -236,6 +251,7 @@ func (registry *Registry) removePeer(name string, address string) bool {
 	return present
 }
 
+// clearPeerEpochs drops the past epochs of all pods, and deletes peers (and their peer lockers) left without pods.
 func (registry *Registry) clearPeerEpochs() {
 	registry.peersLock.Lock()
 	defer registry.peersLock.Unlock()
@@ -256,6 +272,7 @@ func (registry *Registry) clearPeerEpochs() {
 	}
 }
 
+// initHttpClientForPeerPod creates the pooled HTTP client with a 10s timeout that the registry uses to call the pod.
 func (registry *Registry) initHttpClientForPeerPod(pod *Pod) {
 	tr := &http.Transport{
 		MaxIdleConns:        100,
@@ -270,16 +287,79 @@ func (registry *Registry) initHttpClientForPeerPod(pod *Pod) {
 	pod.client = &http.Client{Transport: tr, Timeout: 10 * time.Second}
 }
 
+// getPodsArray returns the pods from the map that have an HTTP client set.
 func getPodsArray(pods map[string]*Pod) []*Pod {
 	copy := []*Pod{}
 	for _, pod := range pods {
-		if pod.client != nil {
+		if pod != nil && pod.client != nil {
 			copy = append(copy, pod)
 		}
 	}
 	return copy
 }
 
+// normalizePeers cleans up peers that were decoded from JSON (a loaded registry dump, or the peers of another
+// registry), which can hold null peers and pods, or peers without the pods and epochs maps, that the peer APIs
+// would otherwise run into. It returns the peers without the null ones, with the maps allocated and the null pods and
+// epochs dropped, and the pods marked offline if asked to (they have no connection to a live peer until the peer
+// registers again).
+func normalizePeers(peers map[string]*Peers, markOffline bool) map[string]*Peers {
+	normalized := map[string]*Peers{}
+	for name, peer := range peers {
+		if peer == nil {
+			continue
+		}
+		if peer.Name == "" {
+			peer.Name = name
+		}
+		if peer.Pods == nil {
+			peer.Pods = map[string]*Pod{}
+		}
+		if peer.PodEpochs == nil {
+			peer.PodEpochs = map[string][]*PodEpoch{}
+		}
+		for address, pod := range peer.Pods {
+			if pod == nil {
+				delete(peer.Pods, address)
+				continue
+			}
+			if pod.Address == "" {
+				pod.Address = address
+			}
+			pod.PastEpochs = dropNilEpochs(pod.PastEpochs)
+			if markOffline {
+				pod.Offline = true
+			}
+		}
+		for address, epochs := range peer.PodEpochs {
+			if epochs = dropNilEpochs(epochs); len(epochs) == 0 {
+				delete(peer.PodEpochs, address)
+			} else {
+				peer.PodEpochs[address] = epochs
+			}
+		}
+		normalized[name] = peer
+	}
+	return normalized
+}
+
+// dropNilEpochs returns the epochs without the nil ones, or the epochs as they are if there are none.
+func dropNilEpochs(epochs []*PodEpoch) []*PodEpoch {
+	for _, e := range epochs {
+		if e == nil {
+			kept := make([]*PodEpoch, 0, len(epochs))
+			for _, e := range epochs {
+				if e != nil {
+					kept = append(kept, e)
+				}
+			}
+			return kept
+		}
+	}
+	return epochs
+}
+
+// loadAllPeerPods returns the callable pods of all peers.
 func (registry *Registry) loadAllPeerPods() PeerPods {
 	registry.peersLock.RLock()
 	defer registry.peersLock.RUnlock()
@@ -290,6 +370,7 @@ func (registry *Registry) loadAllPeerPods() PeerPods {
 	return peerPods
 }
 
+// loadPeerPods returns the callable pods of one peer pod, one peer, or all peers, depending on the peerAddress and peerName given.
 func (registry *Registry) loadPeerPods(peerName string, peerAddress string) PeerPods {
 	registry.peersLock.RLock()
 	defer registry.peersLock.RUnlock()
@@ -316,6 +397,7 @@ func (registry *Registry) loadPeerPods(peerName string, peerAddress string) Peer
 	return peerPods
 }
 
+// loadPodsForPeerWithData returns the pods of the peer if it has targets (or jobs, if asked) saved, or of all peers if none is named.
 func (registry *Registry) loadPodsForPeerWithData(peerName string, jobs ...bool) PeerPods {
 	if peerName != "" {
 		registry.peersLock.RLock()
@@ -336,6 +418,7 @@ func (registry *Registry) loadPodsForPeerWithData(peerName string, jobs ...bool)
 	return registry.loadAllPeerPods()
 }
 
+// callPeer calls the URI on the pods of the peer (or all peers), and returns the responses keyed by peer and pod address.
 func (registry *Registry) callPeer(peerName, uri, method string, headers http.Header, payload []byte) map[string]map[string]interface{} {
 	result := map[string]map[string]interface{}{}
 	resultLock := sync.Mutex{}
@@ -351,6 +434,7 @@ func (registry *Registry) callPeer(peerName, uri, method string, headers http.He
 	return result
 }
 
+// checkPeerHealth calls /health on the peer pods and marks each pod healthy or unhealthy by the outcome.
 func (registry *Registry) checkPeerHealth(peerName string, peerAddress string) PeerResults {
 	return invokeForPods(registry.loadPeerPods(peerName, peerAddress), "GET", "/health", http.StatusOK, 1, true,
 		func(peer string, pod *Pod, response interface{}, err error) {
@@ -365,6 +449,7 @@ func (registry *Registry) checkPeerHealth(peerName string, peerAddress string) P
 		})
 }
 
+// cleanupUnhealthyPeers calls /health on the peer pods, removes the pods that fail it and resets the past epochs of the healthy ones.
 func (registry *Registry) cleanupUnhealthyPeers(peerName string) PeerResults {
 	return invokeForPods(registry.loadPeerPods(peerName, ""), "GET", "/health", http.StatusOK, 1, true,
 		func(peer string, pod *Pod, response interface{}, err error) {
@@ -381,6 +466,7 @@ func (registry *Registry) cleanupUnhealthyPeers(peerName string) PeerResults {
 		})
 }
 
+// clearPeersResults asks the given peer pods to clear their client results.
 func clearPeersResults(peersToClear PeerPods, r *http.Request) PeerResults {
 	result := invokeForPods(peersToClear, "POST", "/client/results/clear", http.StatusOK, 2, false,
 		func(peer string, pod *Pod, response interface{}, err error) {
@@ -394,6 +480,7 @@ func clearPeersResults(peersToClear PeerPods, r *http.Request) PeerResults {
 	return result
 }
 
+// clearLocker clears the locker of a peer instance, a peer, or all peers, and asks the affected pods to clear their client results.
 func (registry *Registry) clearLocker(peerName, peerAddress string, r *http.Request) PeerResults {
 	peersToClear := PeerPods{}
 	if peerName != "" && peerAddress != "" {
@@ -408,6 +495,7 @@ func (registry *Registry) clearLocker(peerName, peerAddress string, r *http.Requ
 	return clearPeersResults(peersToClear, r)
 }
 
+// addPeerTarget saves the target for a peer (or all peers) and pushes it to the peer pods.
 func (registry *Registry) addPeerTarget(peerName string, target *PeerTarget) PeerResults {
 	registry.peersLock.Lock()
 	peerPods := PeerPods{}
@@ -441,6 +529,7 @@ func (registry *Registry) addPeerTarget(peerName string, target *PeerTarget) Pee
 		})
 }
 
+// removePeerTargets removes the targets from the peer pods and then from the registry if all pods succeeded; no targets means clear all.
 func (registry *Registry) removePeerTargets(peerName string, targets []string) PeerResults {
 	if len(targets) == 0 {
 		// The client has no remove-all route (/client/targets//remove is invalid), so removing all means clearing.
@@ -478,6 +567,7 @@ func (registry *Registry) removePeerTargets(peerName string, targets []string) P
 		})
 }
 
+// clearPeerTargets clears the targets on the peer pods and drops them from the registry if all pods succeeded.
 func (registry *Registry) clearPeerTargets(peerName string) PeerResults {
 	cleared := true
 	return invokeForPods(registry.loadPodsForPeerWithData(peerName), "POST", "/client/targets/clear", http.StatusOK, 3, false,
@@ -499,6 +589,7 @@ func (registry *Registry) clearPeerTargets(peerName string) PeerResults {
 		})
 }
 
+// stopPeerTargets asks the peer pods to stop the given targets, or all targets if none are given.
 func (registry *Registry) stopPeerTargets(peerName string, targets string) PeerResults {
 	uri := ""
 	if len(targets) > 0 {
@@ -516,6 +607,7 @@ func (registry *Registry) stopPeerTargets(peerName string, targets string) PeerR
 		})
 }
 
+// enableAllOrInvocationsTargetsResultsCollection toggles results collection for all targets or invocations, locally and on peer pods.
 func (registry *Registry) enableAllOrInvocationsTargetsResultsCollection(enable string, all bool) PeerResults {
 	uri := "/client/results/"
 	if all {
@@ -536,12 +628,31 @@ func (registry *Registry) enableAllOrInvocationsTargetsResultsCollection(enable 
 		})
 }
 
-func (registry *Registry) getPeerTargets(peerName string) PeerTargets {
-	registry.peersLock.Lock()
-	defer registry.peersLock.Unlock()
-	return registry.peerTargets[peerName]
+// encodeUnderPeersLock encodes the value that get returns as indented JSON while holding the peers read lock, and
+// returns the JSON text and whether the value was non-nil. The registry's peer maps (peers, targets, jobs, ...) are
+// updated under the peers lock, so encoding a live map after the lock is released can run into a concurrent map
+// iteration and write, which is a fatal error that cannot be recovered. Callers write the text to the response after
+// the lock is released, so that a slow client cannot hold up writers.
+func (registry *Registry) encodeUnderPeersLock(get func() any) (string, bool) {
+	registry.peersLock.RLock()
+	defer registry.peersLock.RUnlock()
+	return encodeIndentedJSON(get())
 }
 
+// encodeIndentedJSON encodes the value as indented JSON, returning the text and whether the value was non-nil.
+func encodeIndentedJSON(v any) (string, bool) {
+	if util.IsNil(v) {
+		return "", false
+	}
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		log.Printf("Failed to encode registry data: %s\n", err.Error())
+		return "", true
+	}
+	return string(b), true
+}
+
+// addPeerJob saves the job for a peer (or all peers) and pushes it to the peer pods.
 func (registry *Registry) addPeerJob(peerName string, job *PeerJob) PeerResults {
 	registry.peersLock.Lock()
 	peerPods := PeerPods{}
@@ -573,6 +684,7 @@ func (registry *Registry) addPeerJob(peerName string, job *PeerJob) PeerResults 
 		})
 }
 
+// addPeerJobScriptOrFile stores a job script or file for one or all peers and pushes it to their pods.
 func (registry *Registry) addPeerJobScriptOrFile(peerName string, filePath, fileName string, content []byte, script bool) PeerResults {
 	registry.peersLock.Lock()
 	storePeerFile := func(peerName, fileName string) {
@@ -585,7 +697,7 @@ func (registry *Registry) addPeerJobScriptOrFile(peerName string, filePath, file
 			if registry.peerFiles[peerName] == nil {
 				registry.peerFiles[peerName] = PeerFiles{}
 			}
-			registry.peerJobScripts[peerName][fileName] = content
+			registry.peerFiles[peerName][fileName] = content
 		}
 	}
 	nameKey := fileName
@@ -621,6 +733,7 @@ func (registry *Registry) addPeerJobScriptOrFile(peerName string, filePath, file
 		})
 }
 
+// removePeerJobs removes the jobs from the peer pods and then from the registry if all pods succeeded; no jobs means clear all.
 func (registry *Registry) removePeerJobs(peerName string, jobs []string) PeerResults {
 	if len(jobs) == 0 {
 		return registry.clearPeerJobs(peerName)
@@ -653,6 +766,7 @@ func (registry *Registry) removePeerJobs(peerName string, jobs []string) PeerRes
 		})
 }
 
+// stopPeerJobs asks the peer pods to stop the given jobs, or all jobs if none are given.
 func (registry *Registry) stopPeerJobs(peerName string, jobs string) PeerResults {
 	uri := ""
 	if len(jobs) > 0 {
@@ -670,12 +784,7 @@ func (registry *Registry) stopPeerJobs(peerName string, jobs string) PeerResults
 		})
 }
 
-func (registry *Registry) getPeerJobs(peerName string) PeerJobs {
-	registry.peersLock.Lock()
-	defer registry.peersLock.Unlock()
-	return registry.peerJobs[peerName]
-}
-
+// invokePeerTargets asks the peer pods to invoke the given targets, or all targets if none are given.
 func (registry *Registry) invokePeerTargets(peerName string, targets string) PeerResults {
 	uri := ""
 	if len(targets) > 0 {
@@ -693,6 +802,7 @@ func (registry *Registry) invokePeerTargets(peerName string, targets string) Pee
 		})
 }
 
+// invokePeerJobs asks the peer pods to run the given jobs, or all jobs if none are given.
 func (registry *Registry) invokePeerJobs(peerName string, jobs string) PeerResults {
 	uri := ""
 	if len(jobs) > 0 {
@@ -710,6 +820,7 @@ func (registry *Registry) invokePeerJobs(peerName string, jobs string) PeerResul
 		})
 }
 
+// clearPeerJobs clears the jobs on the peer pods and drops them from the registry if all pods succeeded.
 func (registry *Registry) clearPeerJobs(peerName string) PeerResults {
 	cleared := true
 	return invokeForPods(registry.loadPodsForPeerWithData(peerName, true), "POST", "/jobs/clear", http.StatusOK, 3, false,
@@ -731,6 +842,7 @@ func (registry *Registry) clearPeerJobs(peerName string) PeerResults {
 		})
 }
 
+// addPeersTrackingHeaders saves the tracking headers in the registry and pushes them to all peer pods.
 func (registry *Registry) addPeersTrackingHeaders(headers string) PeerResults {
 	registry.peerTrackingHeaders = headers
 	registry.trackingHeaders, registry.crossTrackingHeaders = util.ParseTrackingHeaders(headers)
@@ -744,6 +856,7 @@ func (registry *Registry) addPeersTrackingHeaders(headers string) PeerResults {
 		})
 }
 
+// clearPeersTrackingHeaders clears the tracking headers in the registry and on all peer pods.
 func (registry *Registry) clearPeersTrackingHeaders() PeerResults {
 	registry.peerTrackingHeaders = ""
 	registry.trackingHeaders = []string{}
@@ -758,6 +871,7 @@ func (registry *Registry) clearPeersTrackingHeaders() PeerResults {
 		})
 }
 
+// addPeersTrackingTimeBuckets saves the tracking time buckets and pushes them to all peer pods, returning nil if the buckets are invalid.
 func (registry *Registry) addPeersTrackingTimeBuckets(b string) PeerResults {
 	registry.peerTrackingTimeBuckets = b
 	buckets, ok := util.ParseTimeBuckets(b)
@@ -775,6 +889,7 @@ func (registry *Registry) addPeersTrackingTimeBuckets(b string) PeerResults {
 		})
 }
 
+// clearPeersTrackingTimeBuckets clears the tracking time buckets in the registry and on all peer pods.
 func (registry *Registry) clearPeersTrackingTimeBuckets() PeerResults {
 	registry.peerTrackingTimeBuckets = ""
 	registry.trackingTimeBuckets = [][]int{}
@@ -788,6 +903,7 @@ func (registry *Registry) clearPeersTrackingTimeBuckets() PeerResults {
 		})
 }
 
+// setProbe records the readiness or liveness probe URI and/or status in the registry, defaulting the status to 200.
 func (registry *Registry) setProbe(isReadiness bool, uri string, status int) {
 	registry.peersLock.Lock()
 	defer registry.peersLock.Unlock()
@@ -816,6 +932,7 @@ func (registry *Registry) setProbe(isReadiness bool, uri string, status int) {
 
 }
 
+// sendProbe pushes the probe URI of the given type to all peer pods.
 func (registry *Registry) sendProbe(probeType, uri string) PeerResults {
 	return invokeForPods(registry.loadAllPeerPods(), "POST", fmt.Sprintf("/probes/%s/set?uri=%s", probeType, uri), http.StatusOK, 3, false,
 		func(peer string, pod *Pod, response interface{}, err error) {
@@ -827,6 +944,7 @@ func (registry *Registry) sendProbe(probeType, uri string) PeerResults {
 		})
 }
 
+// sendProbeStatus pushes the probe status of the given type to all peer pods.
 func (registry *Registry) sendProbeStatus(probeType string, status int) PeerResults {
 	return invokeForPods(registry.loadAllPeerPods(), "POST", fmt.Sprintf("/probes/%s/set/status=%d", probeType, status), http.StatusOK, 3, false,
 		func(peer string, pod *Pod, response interface{}, err error) {
@@ -838,6 +956,7 @@ func (registry *Registry) sendProbeStatus(probeType string, status int) PeerResu
 		})
 }
 
+// preparePeerStartupData fills in the targets, jobs, files, tracking settings and probes that a newly registered peer gets at startup.
 func (registry *Registry) preparePeerStartupData(peer *Peer, peerData *PeerData) {
 	peerData.Targets = registry.peerTargets[peer.Name]
 	peerData.Jobs = registry.peerJobs[peer.Name]
@@ -848,15 +967,12 @@ func (registry *Registry) preparePeerStartupData(peer *Peer, peerData *PeerData)
 	peerData.Probes = registry.peerProbes
 }
 
+// clonePeersFrom replaces the peers with those fetched from another registry, marking their pods offline.
 func (registry *Registry) clonePeersFrom(registryURL string) error {
 	if resp, err := http.Get(registryURL + "/registry/peers"); err == nil {
 		peers := map[string]*Peers{}
 		if err := util.ReadJsonPayloadFromBody(resp.Body, &peers); err == nil {
-			for _, peer := range peers {
-				for _, pod := range peer.Pods {
-					pod.Offline = true
-				}
-			}
+			peers = normalizePeers(peers, true)
 			registry.peersLock.Lock()
 			registry.peers = peers
 			registry.peersLock.Unlock()
@@ -869,6 +985,7 @@ func (registry *Registry) clonePeersFrom(registryURL string) error {
 	}
 }
 
+// cloneLockersFrom replaces the lockers with those fetched from another registry.
 func (registry *Registry) cloneLockersFrom(registryURL string) error {
 	if resp, err := http.Get(registryURL + "/registry/lockers?data=y&peers=y&level=0"); err == nil {
 		lockers := map[string]*locker.CombiLocker{}
@@ -885,10 +1002,12 @@ func (registry *Registry) cloneLockersFrom(registryURL string) error {
 	}
 }
 
+// clonePeersTargetsFrom replaces the peer targets with those fetched from another registry.
 func (registry *Registry) clonePeersTargetsFrom(registryURL string) error {
 	if resp, err := http.Get(registryURL + "/registry/peers/targets"); err == nil {
 		peerTargets := map[string]PeerTargets{}
 		if err := util.ReadJsonPayloadFromBody(resp.Body, &peerTargets); err == nil {
+			peerTargets = normalizePeerTargets(peerTargets)
 			registry.peersLock.Lock()
 			registry.peerTargets = peerTargets
 			registry.peersLock.Unlock()
@@ -899,6 +1018,38 @@ func (registry *Registry) clonePeersTargetsFrom(registryURL string) error {
 	} else {
 		return err
 	}
+}
+
+// normalizePeerTargets makes sure that the targets decoded from JSON (a loaded registry dump, or the targets of
+// another registry) have a non-nil map for every peer, and no null targets, since targets are added to the
+// per-peer maps and read from them without checks.
+func normalizePeerTargets(peerTargets map[string]PeerTargets) map[string]PeerTargets {
+	normalized := map[string]PeerTargets{}
+	for peer, targets := range peerTargets {
+		normalized[peer] = PeerTargets{}
+		for name, target := range targets {
+			if target != nil {
+				normalized[peer][name] = target
+			}
+		}
+	}
+	return normalized
+}
+
+// normalizePeerJobs makes sure that the jobs decoded from JSON (a loaded registry dump, or the jobs of another
+// registry) have a non-nil map for every peer, and no null jobs, and fills in the job names.
+func normalizePeerJobs(peerJobs map[string]PeerJobs) map[string]PeerJobs {
+	normalized := map[string]PeerJobs{}
+	for peer, jobs := range peerJobs {
+		normalized[peer] = PeerJobs{}
+		for name, pj := range jobs {
+			if pj != nil {
+				normalized[peer][name] = pj
+			}
+		}
+	}
+	fillJobNames(normalized)
+	return normalized
 }
 
 // fillJobNames sets the name of jobs from their key, for jobs that came from a v0.8.x registry
@@ -913,11 +1064,12 @@ func fillJobNames(peerJobs map[string]PeerJobs) {
 	}
 }
 
+// clonePeersJobsFrom replaces the peer jobs with those fetched from another registry.
 func (registry *Registry) clonePeersJobsFrom(registryURL string) error {
 	if resp, err := http.Get(registryURL + "/registry/peers/jobs"); err == nil {
 		peerJobs := map[string]PeerJobs{}
 		if err := util.ReadJsonPayloadFromBody(resp.Body, &peerJobs); err == nil {
-			fillJobNames(peerJobs)
+			peerJobs = normalizePeerJobs(peerJobs)
 			registry.peersLock.Lock()
 			registry.peerJobs = peerJobs
 			registry.peersLock.Unlock()
@@ -930,6 +1082,7 @@ func (registry *Registry) clonePeersJobsFrom(registryURL string) error {
 	}
 }
 
+// clonePeersTrackingHeadersFrom replaces the peer tracking headers with those fetched from another registry.
 func (registry *Registry) clonePeersTrackingHeadersFrom(registryURL string) error {
 	if resp, err := http.Get(registryURL + "/registry/peers/track/headers"); err == nil {
 		peerTrackingHeaders := ""
@@ -947,6 +1100,7 @@ func (registry *Registry) clonePeersTrackingHeadersFrom(registryURL string) erro
 	}
 }
 
+// clonePeersProbesFrom replaces the peer probes with those fetched from another registry.
 func (registry *Registry) clonePeersProbesFrom(registryURL string) error {
 	if resp, err := http.Get(registryURL + "/registry/peers/probes"); err == nil {
 		peerProbes := &PeerProbes{}
@@ -963,9 +1117,15 @@ func (registry *Registry) clonePeersProbesFrom(registryURL string) error {
 	}
 }
 
+// GetPeers returns a map of pod name to address for the pods of the named peer, empty if the peer is not known.
 func GetPeers(name string, r *http.Request) map[string]string {
-	peers := registry.peers[name]
+	registry.peersLock.RLock()
+	defer registry.peersLock.RUnlock()
 	data := map[string]string{}
+	peers := registry.peers[name]
+	if peers == nil {
+		return data
+	}
 	for _, pod := range peers.Pods {
 		data[pod.Name] = pod.Address
 	}

@@ -24,6 +24,7 @@ import (
 	"strconv"
 )
 
+// init sets the default ports and fills Self with the host, pod, namespace, cluster and node identity derived from the environment.
 func init() {
 	Self.ServerPort = 8080
 	Self.GRPCPort = 1234
@@ -66,6 +67,7 @@ var (
 	Debug bool = false
 )
 
+// GetMaxMTUSize returns the largest MTU among the network interfaces.
 func GetMaxMTUSize() int {
 	var m int = 0
 	if ifs, _ := net.Interfaces(); ifs != nil {
@@ -78,6 +80,7 @@ func GetMaxMTUSize() int {
 	return m
 }
 
+// BuildHostLabel builds the label identifying this instance from its pod, namespace, IP and, when known, node, host IP and cluster.
 func BuildHostLabel() string {
 	hostLabel := ""
 	if Self.NodeName != "" || Self.Cluster != "" || Self.HostIP != "" {
@@ -88,6 +91,7 @@ func BuildHostLabel() string {
 	return hostLabel
 }
 
+// SetNodeName sets the node name from NODE_NAME, defaulting to LocalNode.
 func SetNodeName() {
 	Self.NodeName, _ = os.LookupEnv("NODE_NAME")
 	if Self.NodeName == "" {
@@ -95,6 +99,7 @@ func SetNodeName() {
 	}
 }
 
+// SetPodName sets the pod name from POD_NAME, falling back to the hostname and then "local".
 func SetPodName() {
 	pod, present := os.LookupEnv("POD_NAME")
 	if !present {
@@ -106,6 +111,7 @@ func SetPodName() {
 	Self.PodName = pod
 }
 
+// SetCluster sets the cluster name from CLUSTER, defaulting to LocalCluster.
 func SetCluster() {
 	Self.Cluster, _ = os.LookupEnv("CLUSTER")
 	if Self.Cluster == "" {
@@ -113,6 +119,7 @@ func SetCluster() {
 	}
 }
 
+// SetNamespace sets the namespace from NAMESPACE or the service account namespace file, defaulting to "local".
 func SetNamespace() {
 	ns, present := os.LookupEnv("NAMESPACE")
 	if !present {
@@ -127,6 +134,7 @@ func SetNamespace() {
 	Self.Namespace = ns
 }
 
+// SetPodIP sets the pod IP from POD_IP, else from the local address of an outbound UDP route, else "localhost".
 func SetPodIP() {
 	if ip, present := os.LookupEnv("POD_IP"); present {
 		Self.PodIP = ip
@@ -141,6 +149,7 @@ func SetPodIP() {
 	}
 }
 
+// SetHostIP sets the host IP from HOST_IP, defaulting to 0.0.0.0.
 func SetHostIP() {
 	if ip, present := os.LookupEnv("HOST_IP"); present {
 		Self.HostIP = ip

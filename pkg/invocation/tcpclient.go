@@ -55,12 +55,14 @@ type TCPClient struct {
 	status  *ConnectionStatus
 }
 
+// init attaches the target and tracker to the client and starts a fresh connection status.
 func (t *TCPClient) init(target *InvocationSpec, tracker *InvocationTracker) {
 	t.target = target
 	t.tracker = tracker
 	t.status = &ConnectionStatus{}
 }
 
+// connect dials the target URL over TCP within the connection timeout, keeping the connection and a reader, or logging the failure.
 func (t *TCPClient) connect() {
 	d := net.Dialer{Timeout: t.target.connTimeoutD}
 	if conn, err := d.Dial("tcp", t.target.URL); err == nil {
@@ -71,6 +73,7 @@ func (t *TCPClient) connect() {
 	}
 }
 
+// disconnect closes the TCP connection, if open, and clears the connection and reader.
 func (t *TCPClient) disconnect() {
 	if t.conn != nil {
 		t.conn.Close()
@@ -80,6 +83,7 @@ func (t *TCPClient) disconnect() {
 	log.Printf("Invocation[%d]: Disconnected from [%s]", t.tracker.ID, t.target.URL)
 }
 
+// read reads up to 100 bytes from the connection under the configured read deadline and returns the buffer, or nil if nothing was read.
 func (t *TCPClient) read() []byte {
 	if t.reader != nil {
 		inputBuffer := make([]byte, 100)

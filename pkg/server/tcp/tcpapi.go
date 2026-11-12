@@ -34,6 +34,7 @@ var (
 	Middleware = middleware.NewMiddleware("tcp", setRoutes, nil)
 )
 
+// setRoutes registers the TCP configuration, mode, active-connection and history routes under /server/tcp.
 func setRoutes(r *mux.Router) {
 	// The server hands a request to the router of the first segment of its path, which is /server: a router of a root
 	// path of /server/tcp is never given a request, so the routes are under the /tcp of the router of /server.
@@ -62,6 +63,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(tcpRouter, "/history/clear", clearConnectionHistory, "POST")
 }
 
+// validateTCPListener checks that the request's port is a valid listener that has a TCP config, and responds with an error if not.
 func validateTCPListener(w http.ResponseWriter, r *http.Request) bool {
 	if ok, _ := util.ValidateListener(w, r); !ok {
 		return false
@@ -77,6 +79,7 @@ func validateTCPListener(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// configureTCP applies the TCP config in the request body to the port.
 func configureTCP(w http.ResponseWriter, r *http.Request) {
 	if ok, _ := util.ValidateListener(w, r); !ok {
 		return
@@ -98,6 +101,7 @@ func configureTCP(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// Configure parses the config's timeouts and delays (defaulting the timeouts to 30s and the echo size to 10), configures the stream, and returns the error message of any invalid value.
 func (tcp *TCPConfig) Configure() string {
 	msg := ""
 	if tcp.ReadTimeout != "" {
@@ -152,14 +156,28 @@ func (tcp *TCPConfig) Configure() string {
 	if tcp.EchoResponseSize <= 0 {
 		tcp.EchoResponseSize = 10
 	}
+	if !isValidExpectedPayloadLength(tcp.ExpectedPayloadLength) {
+		msg += invalidExpectedPayloadLengthMessage(tcp.ExpectedPayloadLength)
+	}
 	tcp.configureStream()
 	return msg
 }
 
+// isValidExpectedPayloadLength tells if a port can be set to expect a payload of the length.
+func isValidExpectedPayloadLength(length int) bool {
+	return length >= 0 && length <= maxExpectedPayloadLength
+}
+
+func invalidExpectedPayloadLengthMessage(length int) string {
+	return fmt.Sprintf("[Invalid expected payload length: %d, must be between 0 and %d]", length, maxExpectedPayloadLength)
+}
+
+// configureStream configures the stream params from the config's own stream fields.
 func (tcp *TCPConfig) configureStream() {
 	tcp.configureStreamParams(tcp.StreamPayloadSize, tcp.StreamChunkSize, tcp.StreamDuration, tcp.StreamChunkDelay, tcp.StreamChunkCount)
 }
 
+// configureStreamParams resolves the stream's payload size, chunk size, chunk count, chunk delay and duration from the ones given, computing the missing ones from the others.
 func (tcp *TCPConfig) configureStreamParams(sPayloadSize, sChunkSize, sDuration, sChunkDelay string, chunkCount int) {
 	// A negative value is no value: a stream can't have a negative size, count or time.
 	requestedPayloadSize := max(util.ParseSize(sPayloadSize), 0)
@@ -249,6 +267,7 @@ func delaysIn(streamDuration, chunkDelay time.Duration) int {
 	return int(streamDuration / chunkDelay)
 }
 
+// computeChunkCount computes the chunk count from the payload and chunk sizes, or from the duration and chunk delay.
 func computeChunkCount(payloadSize, chunkSize int, chunkDelay, streamDuration time.Duration) int {
 	if payloadSize > 0 && chunkSize > 0 {
 		return payloadSize / chunkSize
@@ -258,6 +277,7 @@ func computeChunkCount(payloadSize, chunkSize int, chunkDelay, streamDuration ti
 	return 0
 }
 
+// computeChunkDelay computes the chunk delay by dividing the stream duration by the chunk count.
 func computeChunkDelay(payloadSize, chunkSize, chunkCount int, streamDuration time.Duration) time.Duration {
 	if streamDuration > 0 {
 		if chunkCount > 0 {
@@ -269,6 +289,7 @@ func computeChunkDelay(payloadSize, chunkSize, chunkCount int, streamDuration ti
 	return 0
 }
 
+// computeChunkSize computes the chunk size by dividing the payload size by the chunk count.
 func computeChunkSize(payloadSize, chunkCount int, chunkDelay, streamDuration time.Duration) int {
 	if payloadSize > 0 {
 		if chunkCount > 0 {
@@ -282,6 +303,7 @@ func computeChunkSize(payloadSize, chunkCount int, chunkDelay, streamDuration ti
 	return 0
 }
 
+// computePayloadSize computes the payload size as the chunk size times the chunk count.
 func computePayloadSize(chunkSize, chunkCount int, chunkDelay, streamDuration time.Duration) int {
 	if chunkSize > 0 {
 		if chunkCount > 0 {
@@ -293,6 +315,7 @@ func computePayloadSize(chunkSize, chunkCount int, chunkDelay, streamDuration ti
 	return 0
 }
 
+// computeStreamDuration computes the stream duration as the chunk delay times the chunk count.
 func computeStreamDuration(payloadSize, chunkSize, chunkCount int, chunkDelay time.Duration) time.Duration {
 	if chunkDelay > 0 {
 		if chunkCount > 0 {
@@ -304,6 +327,7 @@ func computeStreamDuration(payloadSize, chunkSize, chunkCount int, chunkDelay ti
 	return 0
 }
 
+// setConnectionDurationConfig sets the connection life, read, write or idle timeout, or the echo response delay (as the request's URI says) on the port's config.
 func setConnectionDurationConfig(w http.ResponseWriter, r *http.Request) {
 	if validateTCPListener(w, r) {
 		msg := ""
@@ -349,6 +373,7 @@ func setConnectionDurationConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// setStreamConfig sets the port's stream params from the request and turns on the stream mode.
 func setStreamConfig(w http.ResponseWriter, r *http.Request) {
 	if validateTCPListener(w, r) {
 		msg := ""
@@ -375,39 +400,54 @@ func setStreamConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// setExpectedPayloadLength sets the payload length that the port's connections validate against, and turns on the validation mode.
 func setExpectedPayloadLength(w http.ResponseWriter, r *http.Request) {
 	if validateTCPListener(w, r) {
 		port := util.GetIntParamValue(r, "port")
 		length := util.GetIntParamValue(r, "length")
-		updateTCPConfig(port, func(tcpConfig *TCPConfig) {
-			tcpConfig.ExpectedPayloadLength = length
-			tcpConfig.turnOffAllModes()
-			tcpConfig.ValidatePayloadLength = true
-			tcpConfig.ExpectedPayload = nil
-		})
-		msg := fmt.Sprintf("Stored expected payload length [%d]", length)
+		msg := ""
+		if !isValidExpectedPayloadLength(length) {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = invalidExpectedPayloadLengthMessage(length)
+		} else {
+			updateTCPConfig(port, func(tcpConfig *TCPConfig) {
+				tcpConfig.ExpectedPayloadLength = length
+				tcpConfig.turnOffAllModes()
+				tcpConfig.ValidatePayloadLength = true
+				tcpConfig.ExpectedPayload = nil
+			})
+			msg = fmt.Sprintf("Stored expected payload length [%d]", length)
+		}
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
 	}
 }
 
+// setExpectedPayload sets the request body as the payload (and its length) that the port's connections validate against, and turns on the validation mode.
 func setExpectedPayload(w http.ResponseWriter, r *http.Request) {
 	if validateTCPListener(w, r) {
 		port := util.GetIntParamValue(r, "port")
 		expected := util.ReadBytes(r.Body)
-		updateTCPConfig(port, func(tcpConfig *TCPConfig) {
-			tcpConfig.ExpectedPayload = expected
-			tcpConfig.ExpectedPayloadLength = len(expected)
-			tcpConfig.turnOffAllModes()
-			tcpConfig.ValidatePayloadLength = true
-			tcpConfig.ValidatePayloadContent = true
-		})
-		msg := fmt.Sprintf("Stored expected payload content of length [%d]", len(expected))
+		msg := ""
+		if !isValidExpectedPayloadLength(len(expected)) {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = invalidExpectedPayloadLengthMessage(len(expected))
+		} else {
+			updateTCPConfig(port, func(tcpConfig *TCPConfig) {
+				tcpConfig.ExpectedPayload = expected
+				tcpConfig.ExpectedPayloadLength = len(expected)
+				tcpConfig.turnOffAllModes()
+				tcpConfig.ValidatePayloadLength = true
+				tcpConfig.ValidatePayloadContent = true
+			})
+			msg = fmt.Sprintf("Stored expected payload content of length [%d]", len(expected))
+		}
 		fmt.Fprintln(w, msg)
 		util.AddLogMessage(msg, r)
 	}
 }
 
+// configurePayloadValidation turns the payload validation mode on or off for the port.
 func configurePayloadValidation(w http.ResponseWriter, r *http.Request) {
 	if validateTCPListener(w, r) {
 		msg := ""
@@ -434,6 +474,7 @@ func configurePayloadValidation(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// setModes turns the response payload, stream, echo, conversation, silent life or close-at-first-byte mode on or off for the port, turning off the other modes when enabling one.
 func setModes(w http.ResponseWriter, r *http.Request) {
 	if validateTCPListener(w, r) {
 		msg := ""
@@ -484,6 +525,7 @@ func setModes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getActiveConnections reports the status and config of the active TCP connections of a port, or of all ports.
 func getActiveConnections(w http.ResponseWriter, r *http.Request) {
 	port := util.GetIntParamValue(r, "port")
 	activeConns := map[int]map[int]map[string]interface{}{}
@@ -517,6 +559,7 @@ func getActiveConnections(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Active connections reported", r)
 }
 
+// getConnectionHistory reports the history of the TCP connections of a port, or of all ports, optionally filtered by mode.
 func getConnectionHistory(w http.ResponseWriter, r *http.Request) {
 	port := util.GetIntParamValue(r, "port")
 	mode := util.GetStringParamValue(r, "mode")
@@ -556,6 +599,7 @@ func getConnectionHistory(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Connection history reported", r)
 }
 
+// clearConnectionHistory clears the TCP connection history of a port, or of all ports.
 func clearConnectionHistory(w http.ResponseWriter, r *http.Request) {
 	msg := "TCP Connection History Cleared"
 	port := util.GetIntParamValue(r, "port")
@@ -571,6 +615,7 @@ func clearConnectionHistory(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// turnOffAllModes turns off every mode of the config.
 func (tcpConfig *TCPConfig) turnOffAllModes() {
 	tcpConfig.Payload = false
 	tcpConfig.Conversation = false
@@ -582,6 +627,7 @@ func (tcpConfig *TCPConfig) turnOffAllModes() {
 	tcpConfig.CloseAtFirstByte = false
 }
 
+// isMode tells if the active mode of the config matches the requested mode name, case-insensitively and by substring.
 func isMode(tcpConfig *TCPConfig, mode string) bool {
 	requestedMode := strings.ToLower(mode)
 	actualMode := ""

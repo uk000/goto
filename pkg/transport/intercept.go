@@ -19,7 +19,6 @@ package transport
 import (
 	"context"
 	"crypto/tls"
-	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -79,6 +78,7 @@ type GRPCIntercept struct {
 	dialOpts []grpc.DialOption
 }
 
+// NewHTTPTransportInterceptWithWatch wraps an *http.Transport and hooks its dial, so that new connections are counted by a ConnTracker and announced by label on newConnNotifierChan.
 func NewHTTPTransportInterceptWithWatch(orig any, label string, newConnNotifierChan chan string, watcher IConnWatcher) *HTTPTransportIntercept {
 	ht := orig.(*http.Transport)
 	t := &HTTPTransportIntercept{
@@ -101,10 +101,12 @@ func NewHTTPTransportInterceptWithWatch(orig any, label string, newConnNotifierC
 	return t
 }
 
+// NewHTTPTransportIntercept is NewHTTPTransportInterceptWithWatch without a watcher.
 func NewHTTPTransportIntercept(orig any, label string, newConnNotifierChan chan string) *HTTPTransportIntercept {
 	return NewHTTPTransportInterceptWithWatch(orig, label, newConnNotifierChan, nil)
 }
 
+// NewHTTP2TransportIntercept wraps an *http2.Transport and hooks its dial, so that new connections are counted by a ConnTracker and announced by label on newConnNotifierChan.
 func NewHTTP2TransportIntercept(orig any, label string, newConnNotifierChan chan string) *HTTP2TransportIntercept {
 	ht := orig.(*http2.Transport)
 	t := &HTTP2TransportIntercept{
@@ -127,33 +129,17 @@ func NewHTTP2TransportIntercept(orig any, label string, newConnNotifierChan chan
 	return t
 }
 
-func NewGRPCIntercept(label string, dialOpts []grpc.DialOption, newConnNotifierChan chan string) *GRPCIntercept {
-	g := &GRPCIntercept{
-		dialOpts: dialOpts,
-	}
-	contextDialer := func(ctx context.Context, address string) (net.Conn, error) {
-		if conn, err := g.Dialer.DialContext(ctx, "tcp", address); err == nil {
-			if newConnNotifierChan != nil {
-				newConnNotifierChan <- label
-			}
-			return NewConnTracker(conn, g.BaseTransportIntercept)
-		} else {
-			log.Printf("Failed to dial address [%s] with error: %s\n", address, err.Error())
-			return nil, err
-		}
-	}
-	g.dialOpts = append(dialOpts, grpc.WithContextDialer(contextDialer))
-	return g
-}
-
+// AsHTTP returns the intercept itself as an IHTTPTransportIntercept.
 func (t *HTTPTransportIntercept) AsHTTP() IHTTPTransportIntercept {
 	return t
 }
 
+// Original returns the wrapped *http.Transport.
 func (t *HTTPTransportIntercept) Original() any {
 	return t.Transport
 }
 
+// getDialer returns the dial function that the transport has (DialContext, else Dial), falling back to the dialer of the intercept.
 func (t *HTTPTransportIntercept) getDialer() func(context.Context, string, string) (net.Conn, error) {
 	if t.DialContext != nil {
 		return t.DialContext
@@ -166,6 +152,7 @@ func (t *HTTPTransportIntercept) getDialer() func(context.Context, string, strin
 	return t.Dialer.DialContext
 }
 
+// RoundTrip calls the request intercept, sends the request on the wrapped transport, and calls the response intercept with the response.
 func (t *HTTPTransportIntercept) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.requestIntercept != nil {
 		t.requestIntercept.InterceptRequest(req)
@@ -177,14 +164,17 @@ func (t *HTTPTransportIntercept) RoundTrip(req *http.Request) (*http.Response, e
 	return resp, err
 }
 
+// SetRequestIntercept sets the hook that is called with each request before it is sent.
 func (t *HTTPTransportIntercept) SetRequestIntercept(ri IHTTPRequestIntercept) {
 	t.requestIntercept = ri
 }
 
+// SetResponseIntercept sets the hook that is called with each response that is received.
 func (t *HTTPTransportIntercept) SetResponseIntercept(ri IHTTPResponseIntercept) {
 	t.responseIntercept = ri
 }
 
+// getDialer returns the DialTLSContext of the transport if it has one, falling back to the dialer of the intercept.
 func (t *HTTP2TransportIntercept) getDialer() func(context.Context, string, string, *tls.Config) (net.Conn, error) {
 	if t.DialTLSContext != nil {
 		return t.DialTLSContext
@@ -194,6 +184,7 @@ func (t *HTTP2TransportIntercept) getDialer() func(context.Context, string, stri
 	}
 }
 
+// RoundTrip calls the request intercept, sends the request on the wrapped transport, and calls the response intercept with the response.
 func (t *HTTP2TransportIntercept) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.requestIntercept != nil {
 		t.requestIntercept.InterceptRequest(req)
@@ -205,6 +196,7 @@ func (t *HTTP2TransportIntercept) RoundTrip(req *http.Request) (*http.Response, 
 	return resp, err
 }
 
+// RoundTripOpt is RoundTrip with the given HTTP/2 options, and calls the same intercepts.
 func (t *HTTP2TransportIntercept) RoundTripOpt(req *http.Request, opt http2.RoundTripOpt) (*http.Response, error) {
 	if t.requestIntercept != nil {
 		t.requestIntercept.InterceptRequest(req)
@@ -216,36 +208,44 @@ func (t *HTTP2TransportIntercept) RoundTripOpt(req *http.Request, opt http2.Roun
 	return resp, err
 }
 
+// SetRequestIntercept sets the hook that is called with each request before it is sent.
 func (t *HTTP2TransportIntercept) SetRequestIntercept(ri IHTTPRequestIntercept) {
 	t.requestIntercept = ri
 }
 
+// SetResponseIntercept sets the hook that is called with each response that is received.
 func (t *HTTP2TransportIntercept) SetResponseIntercept(ri IHTTPResponseIntercept) {
 	t.responseIntercept = ri
 }
 
+// Original returns the wrapped *http2.Transport.
 func (t *HTTP2TransportIntercept) Original() any {
 	return t.Transport
 }
 
+// GetOpenConnectionCount returns the number of tracked connections that are open.
 func (t *BaseTransportIntercept) GetOpenConnectionCount() int {
 	t.lock.RLock()
 	defer t.lock.RUnlock()
 	return t.ConnCount
 }
 
+// GetTLSConfig returns the TLS config of the wrapped transport.
 func (t *BaseTransportIntercept) GetTLSConfig() *tls.Config {
 	return *(t.tlsConfigPtr)
 }
 
+// SetTLSConfig replaces the TLS config of the wrapped transport.
 func (t *BaseTransportIntercept) SetTLSConfig(tlsConfig *tls.Config) {
 	*(t.tlsConfigPtr) = tlsConfig
 }
 
+// GetDialer returns the dialer of the intercept.
 func (t *BaseTransportIntercept) GetDialer() *net.Dialer {
 	return &t.Dialer
 }
 
+// AsHTTP returns nil, as a base intercept is not an HTTP transport intercept.
 func (t *BaseTransportIntercept) AsHTTP() IHTTPTransportIntercept {
 	return nil
 }

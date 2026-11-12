@@ -42,6 +42,7 @@ var (
 	importsDir     = filepath.FromSlash(util.GetCwd() + "/protos/")
 )
 
+// Init resets the store and the gRPC service registry to empty.
 func (ps *ProtosStore) Init() *ProtosStore {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
@@ -51,6 +52,7 @@ func (ps *ProtosStore) Init() *ProtosStore {
 	return ps
 }
 
+// parseProto saves the proto content to a file under the protos directory and compiles it, recovering from panics.
 func (ps *ProtosStore) parseProto(name, path string, content []byte) (linker.Files, error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -85,6 +87,7 @@ func (ps *ProtosStore) parseProto(name, path string, content []byte) (linker.Fil
 	}
 }
 
+// AddProto compiles and stores the proto, then registers its descriptors and services unless it is upload only.
 func (ps *ProtosStore) AddProto(name, path string, content []byte, uploadOnly bool) error {
 	files, err := ps.parseProto(name, path, content)
 	if err != nil || uploadOnly {
@@ -107,6 +110,7 @@ func (ps *ProtosStore) AddProto(name, path string, content []byte, uploadOnly bo
 	return nil
 }
 
+// RemoveProto removes the proto's services from the registry and deletes its source file.
 func (ps *ProtosStore) RemoveProto(name string) {
 	if services, ok := ps.servicesByProto[name]; ok {
 		for _, service := range services {
@@ -120,6 +124,7 @@ func (ps *ProtosStore) RemoveProto(name string) {
 	}
 }
 
+// ClearProtos removes all protos and resets the store.
 func (ps *ProtosStore) ClearProtos() {
 	for proto := range ps.fileSources {
 		ps.RemoveProto(proto)
@@ -127,14 +132,17 @@ func (ps *ProtosStore) ClearProtos() {
 	ps.Init()
 }
 
+// GetService looks up a service by name in the gRPC service registry.
 func (ps *ProtosStore) GetService(name string) *grpc.GRPCService {
 	return grpc.ServiceRegistry.GetService(name)
 }
 
+// ListServices returns the services defined by the proto.
 func (ps *ProtosStore) ListServices(proto string) []*grpc.GRPCService {
 	return ps.servicesByProto[proto]
 }
 
+// ListMethods returns the methods of the named service, or nil if the service isn't registered.
 func (ps *ProtosStore) ListMethods(service string) map[string]*grpc.GRPCServiceMethod {
 	if s := grpc.ServiceRegistry.GetService(service); s != nil {
 		return s.Methods

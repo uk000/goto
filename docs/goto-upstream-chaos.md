@@ -7,16 +7,16 @@ Launch goto server with two ports. We want 8080 to be closeable, so first port i
 $ goto --ports 8000,8080
 ```
 
-Call admin API on the correct port (8080) to configure a custom response for a custom API /foo/bar
+Call admin API on the correct port (8080) to configure a custom response for a custom API /foo/bar. The URI is given as the `uri` query param of `/server/response/payload/set` (do not add a `/uri` segment after `set`: any word there selects the gRPC payloads instead of the HTTP ones). The `{somefoo}` and `{somebar}` placeholders are captured from the request URI and filled into the payload. Use `curl -g`, otherwise curl treats the braces as a glob.
 ```
-$ curl -X POST -g localhost:8080/server/response/payload/set/uri?uri=/foo/{somefoo}/bar/{somebar} --data '{"version: "1.0", "foo": "{somefoo}", "bar": "{somebar}"}'
-Port [8080] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [application/x-www-form-urlencoded], length [57]
+$ curl -X POST -g localhost:8080/server/response/payload/set?uri=/foo/{somefoo}/bar/{somebar} --data '{"version": "1.0", "foo": "{somefoo}", "bar": "{somebar}"}'
+Port [8080] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [plain/text], length [58]
 ```
 
 Confirm that goto indeed responds with a valid payload for a given request
 ```
 $ curl -s localhost:8080/foo/f1/bar/b1
-{"version: "1.0", "foo": "f1", "bar": "b1"}
+{"version": "1.0", "foo": "f1", "bar": "b1"}
 ```
 
 At this time, start client application and send requests to port 8080
@@ -34,8 +34,8 @@ curl: (7) Failed to connect to localhost port 8080: Connection refused
 
 Call admin API to reconfigure the API response. Since the port 8080 is closed, we'll ask goto on its main port 8000 to reconfigure port 8080!!
 ```
-$ curl -X POST -g localhost:8000/port=8080/server/response/payload/set/uri?uri=/foo/{somefoo}/bar/{somebar} --data '{"version: "2.0", "foo": "{somefoo}", "bar": "{somebar}"}'
-Port [8080] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [application/x-www-form-urlencoded], length [57]
+$ curl -X POST -g localhost:8000/port=8080/server/response/payload/set?uri=/foo/{somefoo}/bar/{somebar} --data '{"version": "2.0", "foo": "{somefoo}", "bar": "{somebar}"}'
+Port [8080] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [plain/text], length [58]
 ```
 
 Once client traffic is confirmed to be broken and expected client behavior is verified, we'll ask goto to reopen port 8080
@@ -46,7 +46,7 @@ $ curl -X POST localhost:8000/server/listeners/8080/open
 Confirm that goto responds on the reopened port with the new payload v2.0
 ```
 $ curl -s localhost:8080/foo/f2/bar/b2
-{"version: "2.0", "foo": "f2", "bar": "b2"}
+{"version": "2.0", "foo": "f2", "bar": "b2"}
 ```
 
 Verify the client behavior again to ensure that it behaves as expected (whether it's expected to reconnect and resume traffic, or otherwise).
@@ -56,7 +56,7 @@ Verify the client behavior again to ensure that it behaves as expected (whether 
 
 Launch goto server with three ports (we only need two, third is just for fun). 8443 is an HTTPS port and closeable. Goto auto-generates TLS cert for 8443 using the given CN=foo.com.
 ```
-$ goto --ports 8000,8080,8443/https/foo.com
+$ goto --ports 8000,8080,8443/https --cn foo.com
 ```
 
 If you want to test with a real cert because your service validates the cert for authenticity, you can upload the real cert for the port now. If you don't wish to use a custom cert and are fine with the auto-generated cert, skip the next 3 commands and continue.
@@ -77,14 +77,14 @@ $ curl -vk https://localhost:8443/
 
 Call admin API on port 8000 to configure a custom response for a custom API /foo/bar for port 8443. We could configure 8443 directly too, but then our script would have to deal with HTTPS.
 ```
-$ curl -X POST -g localhost:8000/port=8443/server/response/payload/set/uri?uri=/foo/{somefoo}/bar/{somebar} --data '{"version: "1.0", "foo": "{somefoo}", "bar": "{somebar}"}'
-Port [8443] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [application/x-www-form-urlencoded], length [57]
+$ curl -X POST -g localhost:8000/port=8443/server/response/payload/set?uri=/foo/{somefoo}/bar/{somebar} --data '{"version": "1.0", "foo": "{somefoo}", "bar": "{somebar}"}'
+Port [8443] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [plain/text], length [58]
 ```
 
 Confirm that goto indeed responds with a valid payload for a given request
 ```
 $ curl -vk https://localhost:8443/foo/f1/bar/b1
-{"version: "1.0", "foo": "f1", "bar": "b1"}
+{"version": "1.0", "foo": "f1", "bar": "b1"}
 ```
 
 At this time, start client application and send requests to port 8443
@@ -106,14 +106,14 @@ Cert auto-generated for listener 8443
 
 Call admin API to reconfigure the API response with new payload v2.0 so we can confirm the response is new.
 ```
-$ curl -X POST -g localhost:8000/port=8080/server/response/payload/set/uri?uri=/foo/{somefoo}/bar/{somebar} --data '{"version: "2.0", "foo": "{somefoo}", "bar": "{somebar}"}'
-Port [8080] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [application/x-www-form-urlencoded], length [57]
+$ curl -X POST -g localhost:8000/port=8443/server/response/payload/set?uri=/foo/{somefoo}/bar/{somebar} --data '{"version": "2.0", "foo": "{somefoo}", "bar": "{somebar}"}'
+Port [8443] Payload set for URI [/foo/{somefoo}/bar/{somebar}] : content-type [plain/text], length [58]
 ```
 
 Test the client traffic against this reopened port that uses a different cert now.
 ```
 $ curl -vk https://localhost:8443/foo/f1/bar/b1
-{"version: "2.0", "foo": "f1", "bar": "b1"}
+{"version": "2.0", "foo": "f1", "bar": "b1"}
 ```
 
 Verify the client behavior and validate against your hypothesis.

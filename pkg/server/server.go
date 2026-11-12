@@ -67,6 +67,7 @@ import (
 	"goto/pkg/tunnel"
 )
 
+// init wires the goto feature middlewares into the core, intercepted, unintercepted and routes-only middleware chains.
 func init() {
 	middleware.Core = []*middleware.Middleware{conn.Middleware, hooks.Middleware}
 
@@ -98,6 +99,7 @@ func init() {
 	}
 }
 
+// Run starts the HTTP server, blocking until it stops, then shuts down global state and exits the process.
 func Run() {
 	RunHttpServer()
 	global.Shutdown()

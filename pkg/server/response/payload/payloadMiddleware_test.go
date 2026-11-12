@@ -482,3 +482,122 @@ func TestPayloadsAreServedConcurrently(t *testing.T) {
 		t.Errorf("the next handler was called %d times, want none", e.nextCalls.Load())
 	}
 }
+
+// routedGetFor sends a GET request for the port of the other test environment through the router of this one.
+func (e *testEnv) routedGetFor(t *testing.T, other *testEnv, target string, headers ...string) *httptest.ResponseRecorder {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	e.routed.ServeHTTP(rr, other.newRequest("GET", target, "", headers...))
+	return rr
+}
+
+// The payloads of no URI (the default one, and the ones for a header or a query) are served by the payload middleware. They
+// used to be given a route for the empty URI, which matches every request of every port, and which can't be taken back from the
+// router: after one of them was set, and cleared, every request answered an empty 200 instead of reaching the handlers that
+// serve it.
+func TestPayloadsOfNoURIDoNotTakeOverTheRouter(t *testing.T) {
+	e, other := newTestEnv(t), newTestEnv(t)
+	e.useRouter(t)
+	e.set(t, "/set/default", "dflt")
+	e.set(t, "/set/header/x-env=prod", "hdr")
+	e.set(t, "/set/query/mode=fast", "qry")
+	for _, tt := range []struct {
+		target  string
+		headers []string
+		want    string
+	}{
+		{"/foo", nil, "dflt"},
+		{"/foo", []string{"X-Env", "prod"}, "hdr"},
+		{"/foo?mode=fast", nil, "qry"},
+	} {
+		if got := e.routedGet(t, tt.target, tt.headers...).Body.String(); got != tt.want {
+			t.Errorf("GET %s %v = %q, want the payload %q", tt.target, tt.headers, got, tt.want)
+		}
+	}
+	// the port of another environment has no payloads, and is served by the handlers that are behind the router
+	if got := e.routedGetFor(t, other, "/foo").Body.String(); got != "next" {
+		t.Errorf("GET /foo on a port without payloads = %q, want the answer of the next handler", got)
+	}
+	e.configure(t, "POST", "/server/response/payload/clear", "")
+	if got := e.routedGet(t, "/foo").Body.String(); got != "next" {
+		t.Errorf("GET /foo after the payloads were cleared = %q, want the answer of the next handler", got)
+	}
+}
+
+// The route of a payload URI stays in the router when the payload goes away, and when the URI has payloads on another port only,
+// and it must leave the requests that it has nothing to answer with to the handlers that come after it.
+func TestRouteOfAPayloadURILeavesRequestsItHasNothingToAnswerWith(t *testing.T) {
+	e, other := newTestEnv(t), newTestEnv(t)
+	e.useRouter(t)
+	uri := e.uri("/lingering")
+	e.set(t, "/set?uri="+uri, "uri payload")
+	if got := e.routedGet(t, uri).Body.String(); got != "uri payload" {
+		t.Fatalf("GET %s = %q, want the payload", uri, got)
+	}
+	if got := e.routedGetFor(t, other, uri).Body.String(); got != "next" {
+		t.Errorf("GET %s on a port without payloads = %q, want the answer of the next handler", uri, got)
+	}
+	e.configure(t, "POST", "/server/response/payload/clear", "")
+	if got := e.routedGet(t, uri).Body.String(); got != "next" {
+		t.Errorf("GET %s after the payload was cleared = %q, want the answer of the next handler", uri, got)
+	}
+	// set again for the same URI, which is registered once: it is served again
+	e.set(t, "/set?uri="+uri, "again")
+	if got := e.routedGet(t, uri).Body.String(); got != "again" {
+		t.Errorf("GET %s after the payload was set again = %q, want the payload", uri, got)
+	}
+}
+
+// The route of a URI stays when its payload goes away, and a request for that URI is for the handlers behind the router, unless
+// a payload of the port can answer it. A payload of another URI can't.
+func TestRouteOfAPayloadURILeavesRequestsToTheNextHandlerWhenOnlyPayloadsOfOtherURIsRemain(t *testing.T) {
+	e, other := newTestEnv(t), newTestEnv(t)
+	e.useRouter(t)
+	gone, kept := e.uri("/gone"), e.uri("/kept")
+	e.set(t, "/set?uri="+gone, "gone payload")
+	if got := e.routedGet(t, gone).Body.String(); got != "gone payload" {
+		t.Fatalf("GET %s = %q, want the payload", gone, got)
+	}
+	e.configure(t, "POST", "/server/response/payload/clear", "")
+	e.set(t, "/set?uri="+kept, "kept payload")
+	other.set(t, "/set?uri="+gone, "payload of another port")
+	if got := e.routedGet(t, kept).Body.String(); got != "kept payload" {
+		t.Errorf("GET %s = %q, want its payload", kept, got)
+	}
+	if got := e.routedGet(t, gone).Body.String(); got != "next" {
+		t.Errorf("GET %s with the payload of %s only = %q, want the answer of the next handler", gone, kept, got)
+	}
+	// the other port has a payload for the URI, and this one has none for it
+	if got := e.routedGetFor(t, other, gone).Body.String(); got != "payload of another port" {
+		t.Errorf("GET %s on the port that has a payload for it = %q, want the payload", gone, got)
+	}
+	// a payload that is for any request answers it, and so does one of a header that the request has
+	e.set(t, "/set/header/x-env=prod", "hdr")
+	if got := e.routedGet(t, gone).Body.String(); got != "next" {
+		t.Errorf("GET %s with a header payload that its request doesn't have = %q, want the answer of the next handler", gone, got)
+	}
+	if got := e.routedGet(t, gone, "X-Env", "prod").Body.String(); got != "hdr" {
+		t.Errorf("GET %s with the header of a header payload = %q, want that payload", gone, got)
+	}
+	e.set(t, "/set/default", "dflt")
+	if got := e.routedGet(t, gone).Body.String(); got != "dflt" {
+		t.Errorf("GET %s with a default payload = %q, want that payload", gone, got)
+	}
+}
+
+func TestHasPayloadsForCreatesNothingForPortsWithoutPayloads(t *testing.T) {
+	e := newTestEnv(t)
+	if PayloadManager.hasPayloadsFor(e.newRequest("GET", "/x", "")) {
+		t.Error("a port without payloads has payloads")
+	}
+	PayloadManager.lock.RLock()
+	_, created := PayloadManager.payloads[e.port]
+	PayloadManager.lock.RUnlock()
+	if created {
+		t.Error("asking whether a port has payloads created the payloads of the port")
+	}
+	e.set(t, "/set/default", "x")
+	if !PayloadManager.hasPayloadsFor(e.newRequest("GET", "/x", "")) {
+		t.Error("a port with a payload has none")
+	}
+}

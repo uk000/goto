@@ -33,6 +33,7 @@ var (
 	Middleware = middleware.NewMiddleware("response.payload", setRoutes, middlewareFunc)
 )
 
+// setRoutes registers the /payload routes for configuring, clearing, reporting and requesting payloads.
 func setRoutes(r *mux.Router) {
 	payloadRouter := util.PathRouter(r, "/payload")
 	util.AddRoute(payloadRouter, "/set/{grpc}?/matches", setResponsePayloadWithMatches, "POST")
@@ -58,6 +59,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(payloadRouter, "/{size}", respondWithPayload, "GET", "PUT", "POST")
 }
 
+// setResponsePayload reads the request body and sets it as the response payload for the scope (default, URI, header, query, body match or stream) that the route and params select.
 func setResponsePayload(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	port := util.GetRequestOrListenerPort(r)
@@ -177,6 +179,7 @@ func routeHasSegment(r *http.Request, segment string) bool {
 	return false
 }
 
+// setPayloadTransform sets the JSON transforms in the request body as the response payload transform for a URI.
 func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	port := util.GetRequestOrListenerPort(r)
@@ -205,6 +208,7 @@ func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// setResponsePayloadWithMatches registers the response payload (or list of payloads) in the request body, each with its own request matches.
 func setResponsePayloadWithMatches(w http.ResponseWriter, r *http.Request) {
 	var err error
 	msg := ""
@@ -248,6 +252,7 @@ func setResponsePayloadWithMatches(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearResponsePayload clears all payloads configured for the request's port.
 func clearResponsePayload(w http.ResponseWriter, r *http.Request) {
 	PayloadManager.getPortResponse(r).init()
 	msg := fmt.Sprintf("Port [%s] Response Payload Cleared", util.GetRequestOrListenerPort(r))
@@ -256,10 +261,12 @@ func clearResponsePayload(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getResponsePayload reports the payloads configured for the request's port as JSON.
 func getResponsePayload(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, PayloadManager.getPortResponse(r))
 }
 
+// respondWithPayload responds with a random string payload of the requested size (default 100) and sets its length headers.
 func respondWithPayload(w http.ResponseWriter, r *http.Request) {
 	size := util.GetSizeParam(r, "size")
 	if size <= 0 {

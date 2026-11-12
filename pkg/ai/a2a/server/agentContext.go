@@ -115,6 +115,7 @@ type agentOverrides struct {
 	args        map[string]any
 }
 
+// newAgentContext creates the context of a call to the agent, which surfaces data by default.
 func newAgentContext(port int, serverID, listenerLabel string, agent *model.Agent, headers http.Header, rs *util.RequestStore) *AgentContext {
 	ac := &AgentContext{
 		port:             port,
@@ -132,6 +133,7 @@ func newAgentContext(port int, serverID, listenerLabel string, agent *model.Agen
 	return ac
 }
 
+// newDelegateCallContext creates the context of a call to a delegate tool or agent.
 func newDelegateCallContext(tc *mcpclient.ToolCall, ac *a2aclient.AgentCall, tracker *model.DelegateTracker) *DelegateCallContext {
 	dc := &DelegateCallContext{
 		toolCall:  tc,
@@ -149,6 +151,7 @@ func newDelegateCallContext(tc *mcpclient.ToolCall, ac *a2aclient.AgentCall, tra
 	return dc
 }
 
+// setContext binds the task, input and handler of the call to the context, and creates its timeline.
 func (ac *AgentContext) setContext(ctx context.Context, b *AgentBehaviorImpl, task *AgentTask, input *a2aproto.Message, options *taskmanager.ProcessOptions, handler taskmanager.TaskHandler) {
 	ac.ctx = ctx
 	ac.behavior = b
@@ -168,6 +171,7 @@ func (ac *AgentContext) setContext(ctx context.Context, b *AgentBehaviorImpl, ta
 	ac.timeline.AddEvent(ac.agent.ID, fmt.Sprintf("Received Agent Call [%s]", ac.agent.Card.Name))
 }
 
+// detectAndConfigureFeature turns a feature key and value in the input into settings of the timeline and context.
 func (ac *AgentContext) detectAndConfigureFeature(k string, v any) {
 	k = strings.ToLower(k)
 	if strings.Contains(k, "content") || strings.Contains(k, "message") {
@@ -191,6 +195,7 @@ func (ac *AgentContext) detectAndConfigureFeature(k string, v any) {
 	}
 }
 
+// loadInputs reads the text and data parts of the input message, and detects the hints in the text.
 func (ac *AgentContext) loadInputs(input *a2aproto.Message) {
 	s := strings.Builder{}
 	ac.inputData = map[string]any{}
@@ -218,6 +223,7 @@ func (ac *AgentContext) loadInputs(input *a2aproto.Message) {
 	ac.detectHints()
 }
 
+// detectHints extracts the status, delay, input and feature hints from the input text, and applies them.
 func (ac *AgentContext) detectHints() {
 	inputText := ac.inputText
 	inputText, ac.forcedStatus = util.ExtractStatusHint(inputText)
@@ -237,6 +243,7 @@ func (ac *AgentContext) detectHints() {
 	// count, inputText := util.ExtractNumberHint(inputText)
 }
 
+// detectRemoteCalls extracts hints and JSONs from the input text, and matches the delegates that it triggers.
 func (ac *AgentContext) detectRemoteCalls() {
 	inputText := ac.inputText
 	inputText, jsons := util.ExtractEmbeddedJSONs(inputText)
@@ -252,6 +259,7 @@ func (ac *AgentContext) detectRemoteCalls() {
 	ac.inputText = inputText
 }
 
+// sendDelegatesMatchUpdate tells the client which tools and agents were matched.
 func (ac *AgentContext) sendDelegatesMatchUpdate() {
 	toolNames := []string{}
 	agentNames := []string{}
@@ -270,6 +278,7 @@ func (ac *AgentContext) sendDelegatesMatchUpdate() {
 	ac.sendTaskStatusUpdate(a2aproto.TaskStateWorking, msg)
 }
 
+// matchDelegates picks the tools and agents to call by the inputs and triggers that match, up to MaxCalls.
 func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint string, inputs map[string]string) {
 	ac.tools = map[string]map[string]*model.DelegateToolCall{}
 	ac.agents = map[string]map[string]*model.DelegateAgentCall{}
@@ -407,6 +416,7 @@ func (ac *AgentContext) matchDelegates(input string, portHint, delegateHint stri
 	}
 }
 
+// setOverrideParamsFromInput applies the overrides in the input to the matched delegates.
 func (ac *AgentContext) setOverrideParamsFromInput(jsons []map[string]any, inputs map[string]string, forcedStatus int) {
 	overrides := extractJSONValues(jsons)
 	for name, override := range overrides {
@@ -535,6 +545,7 @@ func detach(data any) any {
 	return copied
 }
 
+// sendData sends the data to the client under the key, as an artifact or as a task update.
 func (ac *AgentContext) sendData(key string, data any) error {
 	data = map[string]any{key: detach(data)}
 	if ac.surfaceData {
@@ -558,6 +569,7 @@ func (ac *AgentContext) sendData(key string, data any) error {
 	return nil
 }
 
+// prepareAndSendUpdate sends the data if there is any, or else a text message as a task state update.
 func (ac *AgentContext) prepareAndSendUpdate(msg string, data any, json bool, prefix, suffix string, finish bool) error {
 	if data != nil {
 		return ac.sendData(msg, data)
@@ -579,6 +591,7 @@ func (ac *AgentContext) prepareAndSendUpdate(msg string, data any, json bool, pr
 	return nil
 }
 
+// notifyUpdate sends a progress update to the client, once the task is initialized.
 func (ac *AgentContext) notifyUpdate(msg string, data any, json bool) error {
 	if ac.task == nil || ac.task.handler == nil {
 		return errors.New("Agent not initialized")
@@ -586,6 +599,7 @@ func (ac *AgentContext) notifyUpdate(msg string, data any, json bool) error {
 	return ac.prepareAndSendUpdate(msg, data, json, "", "", false)
 }
 
+// notifyEndSession sends the final update with a success or failure marker, and the timeline if it is to be reported.
 func (ac *AgentContext) notifyEndSession(msg string, data any, success bool) {
 	if ac.task == nil || ac.task.handler == nil {
 		return
@@ -610,6 +624,7 @@ func (ac *AgentContext) notifyEndSession(msg string, data any, success bool) {
 	}
 }
 
+// sendTaskStatusUpdate sends the message to the client as a timestamped task state update.
 func (ac *AgentContext) sendTaskStatusUpdate(state a2aproto.TaskState, msg string) (err error) {
 	if ac.task == nil || ac.task.handler == nil {
 		return errors.New("Agent not initialized")
@@ -625,6 +640,7 @@ func (ac *AgentContext) sendTaskStatusUpdate(state a2aproto.TaskState, msg strin
 	return
 }
 
+// endTask ends the timeline with the status, closes the subscriber and cleans up the task.
 func (ac *AgentContext) endTask(success bool, msg string) {
 	ac.lock.Lock()
 	if len(ac.upstreamStatuses) > 0 {
@@ -640,6 +656,7 @@ func (ac *AgentContext) endTask(success bool, msg string) {
 	ac.cleanTask()
 }
 
+// waitBeforeNextStep waits for the delay, and cancels the task if its context is done first.
 func (ac *AgentContext) waitBeforeNextStep() (time.Duration, error) {
 	select {
 	case <-ac.ctx.Done():
@@ -651,30 +668,35 @@ func (ac *AgentContext) waitBeforeNextStep() (time.Duration, error) {
 	}
 }
 
+// AddEvent adds an event to the timeline of the call.
 func (ac *AgentContext) AddEvent(msg string) {
 	if msg != "" {
 		a2aclient.UpdateTimeline(ac.timeline, func() { ac.timeline.AddEvent(ac.label, msg) })
 	}
 }
 
+// AddData adds the data under the label to the timeline of the call.
 func (ac *AgentContext) AddData(label string, data any, json bool) {
 	if data != nil {
 		a2aclient.UpdateTimeline(ac.timeline, func() { ac.timeline.AddData(label, data, json) })
 	}
 }
 
+// setErr records the error of the call.
 func (ac *AgentContext) setErr(err error) {
 	ac.lock.Lock()
 	defer ac.lock.Unlock()
 	ac.err = err
 }
 
+// getErr returns the error of the call.
 func (ac *AgentContext) getErr() error {
 	ac.lock.Lock()
 	defer ac.lock.Unlock()
 	return ac.err
 }
 
+// setAgentResults records the results of the called agent by its name.
 func (ac *AgentContext) setAgentResults(name string, results map[string][]any) {
 	ac.lock.Lock()
 	defer ac.lock.Unlock()
@@ -727,18 +749,21 @@ func (dc *DelegateCallContext) closeUpstreamProgress() {
 	}
 }
 
+// updateTaskState updates the state of the task, one caller at a time.
 func (ac *AgentContext) updateTaskState(state a2aproto.TaskState, message *a2aproto.Message) error {
 	ac.handlerLock.Lock()
 	defer ac.handlerLock.Unlock()
 	return ac.task.handler.UpdateTaskState(&ac.task.taskID, state, message)
 }
 
+// addArtifact adds the artifact to the task, one caller at a time.
 func (ac *AgentContext) addArtifact(artifact a2aproto.Artifact) error {
 	ac.handlerLock.Lock()
 	defer ac.handlerLock.Unlock()
 	return ac.task.handler.AddArtifact(&ac.task.taskID, artifact, false, false)
 }
 
+// cleanTask cleans up the task in the handler, one caller at a time.
 func (ac *AgentContext) cleanTask() {
 	ac.handlerLock.Lock()
 	defer ac.handlerLock.Unlock()

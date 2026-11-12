@@ -94,3 +94,20 @@ func TestJSONValueThatIsNotAnObjectOrArrayStaysEmpty(t *testing.T) {
 		t.Errorf("ToJSONArray of a string = %v, want the string only", got)
 	}
 }
+
+// The raw of a value found in a JSON is the object that it holds.
+func TestValueGetRawIsTheHeldValue(t *testing.T) {
+	j, ok := JSONFromJSONText(`{"a":{"b":1},"c":"text","d":[1,2]}`)
+	if !ok {
+		t.Fatal("JSON was not parsed")
+	}
+	if got, ok := j.Get("a").GetRaw().(map[string]interface{}); !ok || got["b"] != float64(1) {
+		t.Errorf("GetRaw of an object = %#v, want the object itself", j.Get("a").GetRaw())
+	}
+	if got := j.Get("c").GetRaw(); got != "text" {
+		t.Errorf("GetRaw of a scalar = %#v, want %q", got, "text")
+	}
+	if got, ok := j.Get("d").GetRaw().([]interface{}); !ok || len(got) != 2 {
+		t.Errorf("GetRaw of an array = %#v, want the array itself", j.Get("d").GetRaw())
+	}
+}

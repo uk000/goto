@@ -26,10 +26,12 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// ReadJsonPayload decodes the request body as JSON into t.
 func ReadJsonPayload(r *http.Request, t interface{}) error {
 	return ReadJsonPayloadFromBody(r.Body, t)
 }
 
+// ReadJsonPayloadFromBody reads the body fully and decodes it as JSON into t.
 func ReadJsonPayloadFromBody(body io.Reader, t interface{}) error {
 	if body, err := io.ReadAll(body); err == nil {
 		return json.Unmarshal(body, t)
@@ -38,6 +40,7 @@ func ReadJsonPayloadFromBody(body io.Reader, t interface{}) error {
 	}
 }
 
+// ReadJsonOrYamlPayloadFromBody reads the body fully and decodes it into t as JSON, falling back to YAML.
 func ReadJsonOrYamlPayloadFromBody(body io.Reader, t interface{}) error {
 	if b, err := io.ReadAll(body); err == nil {
 		return ReadJsonOrYamlPayloadFromBytes(b, t)
@@ -46,6 +49,7 @@ func ReadJsonOrYamlPayloadFromBody(body io.Reader, t interface{}) error {
 	}
 }
 
+// ReadJsonOrYamlPayloadFromBytes decodes b into t as JSON, falling back to YAML.
 func ReadJsonOrYamlPayloadFromBytes(b []byte, t interface{}) error {
 	err := json.Unmarshal(b, t)
 	if err != nil {
@@ -54,6 +58,7 @@ func ReadJsonOrYamlPayloadFromBytes(b []byte, t interface{}) error {
 	return err
 }
 
+// JsonOrYamlFromText parses text as JSON, falling back to YAML, into a generic value.
 func JsonOrYamlFromText(text string) (any, error) {
 	var obj any
 	err := json.Unmarshal([]byte(text), &obj)
@@ -63,6 +68,7 @@ func JsonOrYamlFromText(text string) (any, error) {
 	return obj, err
 }
 
+// WriteJsonOrYAMLPayload sets the matching Content-Type header and writes t to the response as YAML or JSON.
 func WriteJsonOrYAMLPayload(w http.ResponseWriter, t interface{}, yaml bool) error {
 	if yaml {
 		w.Header().Add(constants.HeaderContentType, constants.ContentTypeYAML)
@@ -73,16 +79,19 @@ func WriteJsonOrYAMLPayload(w http.ResponseWriter, t interface{}, yaml bool) err
 	}
 }
 
+// WriteJsonPayload sets the JSON Content-Type header and writes t to the response as indented JSON.
 func WriteJsonPayload(w http.ResponseWriter, t interface{}) error {
 	w.Header().Add(constants.HeaderContentType, constants.ContentTypeJSON)
 	return WriteJson(w, t)
 }
 
+// WriteStringJsonPayload sets the JSON Content-Type header and writes the given string to the response as is.
 func WriteStringJsonPayload(w http.ResponseWriter, json string) {
 	w.Header().Add(constants.HeaderContentType, constants.ContentTypeJSON)
 	fmt.Fprintln(w, json)
 }
 
+// WriteJson writes j followed by a newline as indented JSON, with strings written as is and nil written as an empty line.
 func WriteJson(w io.Writer, j interface{}) error {
 	if s, ok := j.(string); ok {
 		fmt.Fprintln(w, s)
@@ -102,6 +111,7 @@ func WriteJson(w io.Writer, j interface{}) error {
 	return nil
 }
 
+// WriteYaml writes t as YAML to w.
 func WriteYaml(w io.Writer, t interface{}) error {
 	data := ToYaml(t)
 	if w != nil {
@@ -112,6 +122,7 @@ func WriteYaml(w io.Writer, t interface{}) error {
 	return nil
 }
 
+// ToYaml marshals t to YAML text, returning an empty string for nil or on error.
 func ToYaml(t interface{}) string {
 	data := ""
 	if !IsNil(t) {
@@ -124,10 +135,12 @@ func ToYaml(t interface{}) string {
 	return data
 }
 
+// WriteErrorJson writes a {"error": ...} JSON body with the given message, without escaping it.
 func WriteErrorJson(w http.ResponseWriter, error string) {
 	fmt.Fprintf(w, "{\"error\":\"%s\"}", error)
 }
 
+// ToJSONBytes marshals v to JSON bytes, returning nil on error.
 func ToJSONBytes(v any) []byte {
 	if b, err := json.Marshal(v); err == nil {
 		return b
@@ -137,23 +150,27 @@ func ToJSONBytes(v any) []byte {
 	return nil
 }
 
+// DiscardRequestBody drains and closes the request body, returning the number of bytes discarded.
 func DiscardRequestBody(r *http.Request) int {
 	defer r.Body.Close()
 	len, _ := io.Copy(io.Discard, r.Body)
 	return int(len)
 }
 
+// DiscardResponseBody drains and closes the response body, returning the number of bytes discarded.
 func DiscardResponseBody(r *http.Response) int {
 	defer r.Body.Close()
 	len, _ := io.Copy(io.Discard, r.Body)
 	return int(len)
 }
 
+// CloseResponse drains and closes the response body so the connection can be reused.
 func CloseResponse(r *http.Response) {
 	defer r.Body.Close()
 	io.Copy(io.Discard, r.Body)
 }
 
+// TransformPayload applies the transforms to a JSON or YAML source payload and returns the first resulting payload, or the source payload unchanged if it can't be parsed or no transform produces output.
 func TransformPayload(sourcePayload string, transforms []*Transform, isYaml bool) string {
 	var sourceJSON JSON
 	var ok bool

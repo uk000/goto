@@ -26,6 +26,7 @@ import (
 	"goto/pkg/util"
 	"log"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -36,10 +37,11 @@ var (
 	jsonRPCServer           *http.Server
 	agentsHandler           http.Handler
 	aiHandler               http.Handler
-	jsonRPCStarted          bool
-	jsonRPCListenersStarted bool
+	jsonRPCStarted          atomic.Bool
+	jsonRPCListenersStarted atomic.Bool
 )
 
+// RunJsonRPCServer builds the MCP and A2A handlers and the AI router, then starts the JSON-RPC server on the configured port.
 func RunJsonRPCServer() {
 	var err error
 	mcpHandler = mcpserver.MCPHandler()
@@ -51,6 +53,7 @@ func RunJsonRPCServer() {
 	}
 }
 
+// RestartJsonRPCServer closes the running JSON-RPC server and starts it again on the configured port.
 func RestartJsonRPCServer() {
 	if jsonRPCServer != nil {
 		_ = jsonRPCServer.Close()
@@ -61,6 +64,7 @@ func RestartJsonRPCServer() {
 	}
 }
 
+// configureAIRouter creates the router that sends MCP requests to the MCP handler and AI requests to the A2A agents handler.
 func configureAIRouter() *mux.Router {
 	aiRouter := mux.NewRouter()
 	aiRouter.SkipClean(true)
@@ -79,6 +83,7 @@ func configureAIRouter() *mux.Router {
 	return aiRouter
 }
 
+// configureAndStartAIServer creates the h2c-enabled JSON-RPC http.Server for the given port and starts it.
 func configureAndStartAIServer(port int) error {
 	jsonRPCServer = &http.Server{
 		Addr:         fmt.Sprintf("0.0.0.0:%d", port),

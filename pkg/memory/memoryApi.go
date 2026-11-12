@@ -30,6 +30,7 @@ var (
 	Middleware = middleware.NewMiddleware("memory", setRoutes, middlewareFunc)
 )
 
+// setRoutes registers the /memory API routes for configuring extraction and reading memory.
 func setRoutes(r *mux.Router) {
 	memoryRouter := middleware.RootPath("/memory")
 
@@ -69,6 +70,7 @@ func setRoutes(r *mux.Router) {
 
 }
 
+// addContext creates a memory context on the request's port.
 func addContext(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	ctx := util.GetStringParamValue(r, "context")
@@ -84,6 +86,7 @@ func addContext(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// addItem stores a key and value (from the path or the body) into a memory context.
 func addItem(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	ctx := util.GetStringParamValue(r, "context")
@@ -106,6 +109,7 @@ func addItem(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// addContextMatch sets the header (or URI) that identifies the context for a context key.
 func addContextMatch(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	ctxkey := util.GetStringParamValue(r, "ctxkey")
@@ -122,6 +126,7 @@ func addContextMatch(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// addHeaderQueryMatch configures a header or query param to extract into memory for a context key.
 func addHeaderQueryMatch(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	ctxkey := util.GetStringParamValue(r, "ctxkey")
@@ -143,6 +148,7 @@ func addHeaderQueryMatch(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// addBodyRegexMatch configures a regex whose body matches are extracted into memory under a key for a context key.
 func addBodyRegexMatch(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	ctxkey := util.GetStringParamValue(r, "ctxkey")
@@ -165,6 +171,7 @@ func addBodyRegexMatch(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// addBodyJSONPathMatch configures JSON paths to extract from the body into memory for a context key.
 func addBodyJSONPathMatch(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	ctxkey := util.GetStringParamValue(r, "ctxkey")
@@ -182,6 +189,7 @@ func addBodyJSONPathMatch(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// setPayloadTransform sets the body transforms, from the request's JSON payload, applied before extraction for a context key.
 func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	msg := ""
@@ -231,6 +239,7 @@ func setPayloadTransform(w http.ResponseWriter, r *http.Request) {
 // 	}
 // }
 
+// getMemoryExtractors reports the extractor of a context key, or all extractors, as JSON.
 func getMemoryExtractors(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	ctxKey := util.GetStringParamValue(r, "ctxkey")
@@ -239,6 +248,7 @@ func getMemoryExtractors(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reported Context Extractors", r)
 }
 
+// getMemory reports a context's memory, a single key's value, or all contexts' memory.
 func getMemory(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	ctx := util.GetStringParamValue(r, "context")

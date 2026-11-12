@@ -28,6 +28,7 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// fetch makes HTTP GET calls to the remote URL as many times as the count, and gives the responses as the result.
 func (t *MCPTool) fetch(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	url := tctx.Config.RemoteTool.URL

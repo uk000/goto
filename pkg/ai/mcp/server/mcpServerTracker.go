@@ -33,12 +33,14 @@ var (
 	trackLock                    = sync.RWMutex{}
 )
 
+// trackPortServer returns the map of the port and server in the tracker, making it if needed.
 func trackPortServer[T any](port int, server string, m TrackerByPortServer[T]) map[string]T {
 	trackLock.Lock()
 	defer trackLock.Unlock()
 	return trackPortServerLocked(port, server, m)
 }
 
+// trackPortServerLocked is trackPortServer for a caller that holds trackLock.
 func trackPortServerLocked[T any](port int, server string, m TrackerByPortServer[T]) map[string]T {
 	if m[port] == nil {
 		m[port] = map[string]map[string]T{}
@@ -49,18 +51,21 @@ func trackPortServerLocked[T any](port int, server string, m TrackerByPortServer
 	return m[port][server]
 }
 
+// trackAndIncrementPortServer increments the count of the key for the port and server.
 func trackAndIncrementPortServer[T int](port int, server, key string, m TrackerByPortServer[T]) {
 	trackLock.Lock()
 	defer trackLock.Unlock()
 	trackPortServerLocked(port, server, m)[key]++
 }
 
+// getPortServerCount returns the count of the key for the port and server, or 0 if there is none.
 func getPortServerCount(port int, server, key string, m TrackerByPortServer[int]) int {
 	trackLock.RLock()
 	defer trackLock.RUnlock()
 	return getPortServerCountLocked(port, server, key, m)
 }
 
+// getPortServerCountLocked is getPortServerCount for a caller that holds trackLock.
 func getPortServerCountLocked(port int, server, key string, m TrackerByPortServer[int]) int {
 	if m[port] != nil && m[port][server] != nil {
 		return m[port][server][key]
@@ -68,10 +73,12 @@ func getPortServerCountLocked(port int, server, key string, m TrackerByPortServe
 	return 0
 }
 
+// TrackInitCall makes sure that the port and server have an entry in the init-calls tracker.
 func TrackInitCall(port int, server, client, protocol string) {
 	trackPortServer(port, server, InitCallsByPortServer)
 }
 
+// TrackToolCall counts a call of the tool, and a call in the session.
 func TrackToolCall(port int, server, sessionID, tool string) {
 	trackAndIncrementPortServer(port, server, tool, ToolCallsByPortServer)
 	trackAndIncrementPortServer(port, server, sessionID, ToolCallsByPortServerSession)

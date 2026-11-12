@@ -26,6 +26,7 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// echo gives back the text and the metadata that it was called with.
 func (t *MCPTool) echo(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	content := []gomcp.Content{}
 	input := ""
@@ -49,6 +50,7 @@ func (t *MCPTool) echo(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	return &gomcp.CallToolResult{Content: content}, nil
 }
 
+// status reports the status that was asked for in the args (200 if none), and forces it on the response.
 func (t *MCPTool) status(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	content := []gomcp.Content{}
 	status := 200
@@ -72,6 +74,7 @@ func (t *MCPTool) status(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	return &gomcp.CallToolResult{Content: content}, nil
 }
 
+// ping pings the client over the session.
 func (t *MCPTool) ping(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	session, err := tctx.session()
 	if err != nil {
@@ -89,6 +92,7 @@ func (t *MCPTool) ping(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	}, nil
 }
 
+// sendTime gives the current time along with the data that the client sent.
 func (t *MCPTool) sendTime(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	content := []gomcp.Content{&gomcp.TextContent{Text: fmt.Sprintf("Time: %s", time.Now().Format(time.RFC3339))}}
 	content = append(content, &gomcp.TextContent{Text: fmt.Sprintf("Client Data: %s", tctx.req.Params.Arguments)})
@@ -97,6 +101,7 @@ func (t *MCPTool) sendTime(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	return &gomcp.CallToolResult{Content: content}, nil
 }
 
+// listRoots asks the client for its roots, and gives them as the result.
 func (t *MCPTool) listRoots(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	session, err := tctx.session()
 	if err != nil {
@@ -124,6 +129,7 @@ func (t *MCPTool) listRoots(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	return result, nil
 }
 
+// serverDetails gives the details of the server that has the tool.
 func (t *MCPTool) serverDetails(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	result.Content = append(result.Content, &gomcp.TextContent{Text: util.ToJSONText(tctx.MCPTool.Server)})
@@ -131,6 +137,7 @@ func (t *MCPTool) serverDetails(tctx *ToolContext) (*gomcp.CallToolResult, error
 	return result, nil
 }
 
+// listServers gives all the servers of the port of the tool.
 func (t *MCPTool) listServers(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	result.Content = append(result.Content, &gomcp.TextContent{Text: util.ToJSONText(tctx.MCPTool.Server.ps.AllServers())})
@@ -138,6 +145,7 @@ func (t *MCPTool) listServers(tctx *ToolContext) (*gomcp.CallToolResult, error) 
 	return result, nil
 }
 
+// serverPaths gives the URI routes of the servers.
 func (t *MCPTool) serverPaths(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	result.Content = append(result.Content, &gomcp.TextContent{Text: util.ToJSONText(snapshotServerRoutes())})
@@ -145,6 +153,7 @@ func (t *MCPTool) serverPaths(tctx *ToolContext) (*gomcp.CallToolResult, error) 
 	return result, nil
 }
 
+// listComponents gives all the components of the servers.
 func (t *MCPTool) listComponents(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{}
 	result.Content = append(result.Content, &gomcp.TextContent{Text: util.ToJSONText(currentComponents())})
@@ -152,6 +161,7 @@ func (t *MCPTool) listComponents(tctx *ToolContext) (*gomcp.CallToolResult, erro
 	return result, nil
 }
 
+// addTool adds the tool that is defined in the args to the server that has this tool.
 func (t *MCPTool) addTool(tctx *ToolContext) (result *gomcp.CallToolResult, err error) {
 	content := []gomcp.Content{}
 	var tool *MCPTool

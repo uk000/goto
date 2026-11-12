@@ -131,6 +131,7 @@ var (
 	DefaultRequestStore = &RequestStore{}
 )
 
+// GetRequestStore returns the request store of the request, creating one if it has none (the default store for a nil request).
 func GetRequestStore(r *http.Request) *RequestStore {
 	if r == nil {
 		return DefaultRequestStore
@@ -142,6 +143,7 @@ func GetRequestStore(r *http.Request) *RequestStore {
 	return rs
 }
 
+// GetRequestStoreFromContext returns the request store of the context along with the context, creating a store (and a context for it) if there is none.
 func GetRequestStoreFromContext(ctx context.Context) (context.Context, *RequestStore) {
 	if val := ctx.Value(RequestStoreKey); val != nil {
 		return ctx, val.(*RequestStore)
@@ -149,6 +151,7 @@ func GetRequestStoreFromContext(ctx context.Context) (context.Context, *RequestS
 	return WithRequestStoreForContext(ctx)
 }
 
+// GetRequestStoreIfPresent returns the request store of the request, or nil if it has none.
 func GetRequestStoreIfPresent(r *http.Request) *RequestStore {
 	if val := r.Context().Value(RequestStoreKey); val != nil {
 		return val.(*RequestStore)
@@ -156,6 +159,7 @@ func GetRequestStoreIfPresent(r *http.Request) *RequestStore {
 	return nil
 }
 
+// GetRequestStoreFromContextIfPresent returns the request store of the context, or nil if it has none.
 func GetRequestStoreFromContextIfPresent(ctx context.Context) *RequestStore {
 	if val := ctx.Value(RequestStoreKey); val != nil {
 		return val.(*RequestStore)
@@ -163,6 +167,7 @@ func GetRequestStoreFromContextIfPresent(ctx context.Context) *RequestStore {
 	return nil
 }
 
+// WithRequestStore creates and populates the request store of the request, and makes its body re-readable.
 func WithRequestStore(r *http.Request, w http.ResponseWriter) (context.Context, *http.Request, *RequestStore) {
 	rs := &RequestStore{}
 	rs.ResponseWriter = w
@@ -182,6 +187,7 @@ func WithRequestStore(r *http.Request, w http.ResponseWriter) (context.Context, 
 	return ctx, r, rs
 }
 
+// populateRequestStore classifies the request (admin, probe, tunnel, gRPC, MCP, AI and the like) and records its details in the request store.
 func populateRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	ctx := r.Context()
 	var rs *RequestStore
@@ -221,12 +227,14 @@ func populateRequestStore(r *http.Request) (context.Context, *RequestStore) {
 	return ctx, rs
 }
 
+// WithRequestStoreForContext attaches an empty request store to the context.
 func WithRequestStoreForContext(ctx context.Context) (context.Context, *RequestStore) {
 	rs := &RequestStore{}
 	ctx = context.WithValue(ctx, RequestStoreKey, rs)
 	return ctx, rs
 }
 
+// Start records the start time of the request, the first time that it is called.
 func (rs *RequestStore) Start() {
 	if rs.startTime.IsZero() {
 		rs.startTime = time.Now()
@@ -239,6 +247,7 @@ func (rs *RequestStore) StartTime() time.Time {
 	return rs.startTime
 }
 
+// ReportTime adds the in-at, out-at and took headers to the response, only once per request.
 func (rs *RequestStore) ReportTime(w http.ResponseWriter) {
 	if !rs.endTime.IsZero() {
 		return
@@ -263,10 +272,12 @@ func (rs *RequestStore) ReportTime(w http.ResponseWriter) {
 	}
 }
 
+// WithPort returns a context with the current port set.
 func WithPort(ctx context.Context, port int) context.Context {
 	return context.WithValue(ctx, CurrentPortKey, port)
 }
 
+// WithConn returns a context that carries the connection, its remote address and its local port as the current port.
 func WithConn(ctx context.Context, conn net.Conn) context.Context {
 	ctx = context.WithValue(ctx, RemoteAddrKey, conn.RemoteAddr().String())
 	ctx = context.WithValue(ctx, ConnectionKey, conn)
@@ -282,6 +293,7 @@ func WithConn(ctx context.Context, conn net.Conn) context.Context {
 	return ctx
 }
 
+// GetRemoteAddr returns the remote address that the context carries, or empty if there is none.
 func GetRemoteAddr(ctx context.Context) string {
 	if addr := ctx.Value(RemoteAddrKey); addr != nil {
 		return addr.(string)
@@ -289,6 +301,7 @@ func GetRemoteAddr(ctx context.Context) string {
 	return ""
 }
 
+// GetConn returns the connection that the context of the request carries, or nil if there is none.
 func GetConn(r *http.Request) net.Conn {
 	if conn := r.Context().Value(ConnectionKey); conn != nil {
 		return conn.(net.Conn)
@@ -296,10 +309,12 @@ func GetConn(r *http.Request) net.Conn {
 	return nil
 }
 
+// SetSSE returns a context that is marked with the SSE protocol.
 func SetSSE(ctx context.Context) context.Context {
 	return context.WithValue(ctx, ProtocolKey, "SSE")
 }
 
+// IsSSE tells if the context is marked with the SSE protocol.
 func IsSSE(ctx context.Context) bool {
 	if val := ctx.Value(ProtocolKey); val != nil {
 		return strings.EqualFold(val.(string), "SSE")
@@ -307,25 +322,32 @@ func IsSSE(ctx context.Context) bool {
 	return false
 }
 
+// SetFilteredRequest marks the request as filtered in its request store.
 func SetFilteredRequest(r *http.Request) {
 	GetRequestStore(r).IsFilteredRequest = true
 }
 
+// GetInterceptResponseWriter returns the intercepting response writer saved in the request store of the request.
 func GetInterceptResponseWriter(r *http.Request) interface{} {
 	return GetRequestStore(r).InterceptResponseWriter
 }
+
+// GetTunnelCount returns the tunnel count recorded in the request store of the request.
 func GetTunnelCount(r *http.Request) int {
 	return GetRequestStore(r).TunnelCount
 }
 
+// SetTunnelCount records the tunnel count in the request store of the request.
 func SetTunnelCount(r *http.Request, count int) {
 	GetRequestStore(r).TunnelCount = count
 }
 
+// SetTunnelRequest marks the request as a tunnel request.
 func SetTunnelRequest(r *http.Request) {
 	GetRequestStore(r).IsTunnelRequest = true
 }
 
+// UnsetTunnelRequest clears the tunnel request mark of the request.
 func UnsetTunnelRequest(r *http.Request) {
 	GetRequestStore(r).IsTunnelRequest = false
 }

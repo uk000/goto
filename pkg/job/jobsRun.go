@@ -26,6 +26,7 @@ import (
 	"github.com/go-co-op/gocron"
 )
 
+// RunJobWithInput runs the named job with the given markers and raw input, returning the run ID or 0 if it couldn't be run.
 func RunJobWithInput(job string, input map[string]string, rawInput []byte) int {
 	if jobRun := Manager.runJobWithInput(job, input, rawInput); jobRun != nil {
 		return jobRun.id
@@ -33,10 +34,12 @@ func RunJobWithInput(job string, input map[string]string, rawInput []byte) int {
 	return 0
 }
 
+// WaitForJob waits up to the timeout for a job run to finish and reports whether it did.
 func WaitForJob(job string, runId int, timeout time.Duration) bool {
 	return Manager.waitForJob(job, runId, timeout)
 }
 
+// RunJobWithInputAndWait runs the named job with the given input and waits up to the timeout for the run to finish.
 func RunJobWithInputAndWait(job string, input map[string]string, rawInput []byte, timeout time.Duration) bool {
 	if jobRun := Manager.runJobWithInput(job, input, rawInput); jobRun != nil {
 		return Manager.waitForJob(job, jobRun.id, timeout)
@@ -44,21 +47,25 @@ func RunJobWithInputAndWait(job string, input map[string]string, rawInput []byte
 	return false
 }
 
+// RunJobs starts the named jobs, or all jobs when none are named.
 func RunJobs(jobs []string) {
 	_, jobsToRun := Manager.getJobsToRun(jobs)
 	Manager.runJobs(jobsToRun)
 }
 
+// StopJob stops the named job's schedule and runs, reporting whether it had any runs to stop.
 func StopJob(job string) bool {
 	return Manager.stopJob(job)
 }
 
+// StopJobs stops each of the named jobs.
 func StopJobs(jobs []string) {
 	for _, job := range jobs {
 		StopJob(job)
 	}
 }
 
+// initJobRun creates and registers a new run context with the next run ID for the job, or nil if the job has no task.
 func (jm *JobManager) initJobRun(job *Job, jobArgs []string, markers map[string]string, rawInput []byte) *JobRunContext {
 	if job == nil || (job.commandTask == nil && job.httpTask == nil) {
 		return nil
@@ -88,6 +95,7 @@ func (jm *JobManager) initJobRun(job *Job, jobArgs []string, markers map[string]
 	return jobRun
 }
 
+// waitForJob waits up to the timeout for the job run to signal completion and reports whether it finished.
 func (jm *JobManager) waitForJob(jobName string, runId int, timeout time.Duration) bool {
 	var jobRun *JobRunContext
 	jm.lock.RLock()
@@ -111,6 +119,7 @@ func (jm *JobManager) waitForJob(jobName string, runId int, timeout time.Duratio
 	return finished
 }
 
+// runJobWithInput runs the named job as a command or HTTP job with the given markers and raw input, or returns nil if it doesn't exist.
 func (jm *JobManager) runJobWithInput(jobName string, markers map[string]string, rawInput []byte) *JobRunContext {
 	jm.lock.RLock()
 	job := jm.jobs[jobName]
@@ -125,6 +134,7 @@ func (jm *JobManager) runJobWithInput(jobName string, markers map[string]string,
 	return nil
 }
 
+// runJob creates a run for the job and executes it, returning the run context.
 func (jm *JobManager) runJob(job *Job, jobArgs []string, markers map[string]string, rawInput []byte) *JobRunContext {
 	jobRun := jm.initJobRun(job, jobArgs, markers, rawInput)
 	if jobRun != nil {
@@ -133,12 +143,14 @@ func (jm *JobManager) runJob(job *Job, jobArgs []string, markers map[string]stri
 	return jobRun
 }
 
+// runJobs starts each of the jobs in its own goroutine.
 func (jm *JobManager) runJobs(jobs []*Job) {
 	for _, job := range jobs {
 		go jm.RunJob(job)
 	}
 }
 
+// executeJobRun runs the job's task for its configured count and delays, then marks the run finished, fires the finish trigger and notifies watchers.
 func (jm *JobManager) executeJobRun(job *Job, jobRun *JobRunContext) {
 	job.lock.Lock()
 	count := job.Count
@@ -209,6 +221,7 @@ func (jm *JobManager) executeJobRun(job *Job, jobRun *JobRunContext) {
 	}
 }
 
+// stopJob removes the job's cron schedule and signals all its unfinished runs to stop, returning false if the job or its runs don't exist.
 func (jm *JobManager) stopJob(j string) bool {
 	jm.lock.RLock()
 	job := jm.jobs[j]
@@ -243,6 +256,7 @@ func (jm *JobManager) stopJob(j string) bool {
 	return true
 }
 
+// getJobsToRun returns the names and jobs for the given job names, or all jobs when no names are given.
 func (jm *JobManager) getJobsToRun(names []string) ([]string, []*Job) {
 	jm.lock.RLock()
 	defer jm.lock.RUnlock()
@@ -264,6 +278,7 @@ func (jm *JobManager) getJobsToRun(names []string) ([]string, []*Job) {
 	return names, jobsToRun
 }
 
+// stopJobs stops each of the named jobs.
 func (jm *JobManager) stopJobs(jobs []string) {
 	for _, job := range jobs {
 		jm.stopJob(job)

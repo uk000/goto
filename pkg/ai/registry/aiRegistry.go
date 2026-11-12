@@ -47,28 +47,33 @@ var (
 	lock              sync.RWMutex
 )
 
+// newAgentRegistry creates an initialized, empty agent registry.
 func newAgentRegistry() *AgentRegistry {
 	r := &AgentRegistry{}
 	r.init()
 	return r
 }
 
+// newMCPRegistry creates an initialized, empty MCP server registry.
 func newMCPRegistry() *MCPRegistry {
 	r := &MCPRegistry{}
 	r.init()
 	return r
 }
 
+// newSkillsRegistry creates an initialized, empty skills registry.
 func newSkillsRegistry() *SkillsRegistry {
 	r := &SkillsRegistry{}
 	r.init()
 	return r
 }
 
+// init resets the registry to an empty agents map.
 func (r *AgentRegistry) init() {
 	r.Agents = map[string]map[int]*a2amodel.Agent{}
 }
 
+// AddAgents registers each of the agents under the given port.
 func (r *AgentRegistry) AddAgents(agents []*a2amodel.Agent, port int) {
 	for _, agent := range agents {
 		r.AddAgent(agent, port)
@@ -121,20 +126,24 @@ func (r *AgentRegistry) clearAll() int {
 	return count
 }
 
+// Clear removes all agents from the registry.
 func (r *AgentRegistry) Clear() {
 	r.clearAll()
 }
 
+// RemoveAgent removes the agents of the given name, on all ports, from the registry.
 func (r *AgentRegistry) RemoveAgent(name string) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	delete(r.Agents, name)
 }
 
+// init resets the registry to an empty servers map.
 func (mr *MCPRegistry) init() {
 	mr.Servers = map[string]*mcpserver.MCPServer{}
 }
 
+// init resets the registry to empty agents-by-skill and tools-by-skill maps.
 func (sr *SkillsRegistry) init() {
 	sr.AgentsBySkill = map[string][]*a2amodel.Agent{}
 	sr.ToolsBySkill = map[string][]*mcpserver.MCPTool{}

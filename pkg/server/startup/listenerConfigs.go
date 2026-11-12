@@ -54,6 +54,7 @@ func removeLiveListener(port int) {
 	}
 }
 
+// clearListeners removes the live listeners of a listeners config, and relinks the forwarding listeners.
 func clearListeners(ll ctl.Listeners) {
 	if ll == nil {
 		return
@@ -68,6 +69,7 @@ func clearListeners(ll ctl.Listeners) {
 	listeners.LinkForwardListeners()
 }
 
+// clearRemovedListeners removes the live listeners of the ports that the old listeners config had and the new one doesn't.
 func clearRemovedListeners(old, new ctl.Listeners) {
 	if old == nil || new == nil {
 		return
@@ -107,6 +109,7 @@ func applyCert(l *listeners.Listener, cert *ctl.CertConfig) {
 	l.AltNames = cert.SAN
 }
 
+// processListeners adds or updates the listeners of a config, skipping the default ports and the listeners that did not change.
 func processListeners(ll ctl.Listeners) {
 	if ll == nil {
 		return

@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
+// GetGRPCPort finds the port that a gRPC call came in on: from the context, then the :authority header, then the default gRPC port.
 func GetGRPCPort(ctx context.Context) int {
 	port := GetContextPort(ctx)
 	if port > 0 {
@@ -43,6 +44,7 @@ func GetGRPCPort(ctx context.Context) int {
 	return global.Self.GRPCPort
 }
 
+// GetPortFromAddress returns the port after the last colon of the address, or 0 if there is none.
 func GetPortFromAddress(addr string) int {
 	if pieces := strings.Split(addr, ":"); len(pieces) > 1 {
 		if port, err := strconv.Atoi(pieces[len(pieces)-1]); err == nil {
@@ -52,6 +54,7 @@ func GetPortFromAddress(addr string) int {
 	return 0
 }
 
+// GetPortValueFromLocalAddressContext returns the port of the local address of the server that the context carries, or empty if there is none.
 func GetPortValueFromLocalAddressContext(ctx context.Context) string {
 	if val := ctx.Value(http.LocalAddrContextKey); val != nil {
 		srvAddr := ctx.Value(http.LocalAddrContextKey).(net.Addr)
@@ -65,6 +68,7 @@ func GetPortValueFromLocalAddressContext(ctx context.Context) string {
 	return ""
 }
 
+// GetContextPort returns the current port set in the context, falling back to the port of the local address, or 0.
 func GetContextPort(ctx context.Context) int {
 	if val := ctx.Value(CurrentPortKey); val != nil {
 		return val.(int)
@@ -77,6 +81,7 @@ func GetContextPort(ctx context.Context) int {
 	return 0
 }
 
+// GetListenerPortNum returns the current port of the context of the request.
 func GetListenerPortNum(r *http.Request) int {
 	return GetContextPort(r.Context())
 }
@@ -99,6 +104,7 @@ func GetConnectionPortNum(r *http.Request) int {
 	return GetListenerPortNum(r)
 }
 
+// checkRequestPort works out the request port from the /port= URI prefix, the port var, or else the listener port, and remembers it in the request store.
 func checkRequestPort(r *http.Request, rs *RequestStore) (port string, portNum int) {
 	uri := r.RequestURI
 	if strings.HasPrefix(uri, "/port=") {
@@ -115,6 +121,7 @@ func checkRequestPort(r *http.Request, rs *RequestStore) (port string, portNum i
 	return rs.RequestPort, rs.RequestPortNum
 }
 
+// getRequestOrListenerPort returns the request port from the request store, working it out first if it was not checked yet.
 func getRequestOrListenerPort(r *http.Request) (port string, portNum int) {
 	rs := GetRequestStoreIfPresent(r)
 	if rs != nil && rs.RequestPortChecked {
@@ -123,19 +130,24 @@ func getRequestOrListenerPort(r *http.Request) (port string, portNum int) {
 	return checkRequestPort(r, rs)
 }
 
+// GetRequestOrListenerPort returns the port that the request is for (from its /port= prefix or port var), or else the listener port, as a string.
 func GetRequestOrListenerPort(r *http.Request) string {
 	port, _ := getRequestOrListenerPort(r)
 	return port
 }
+
+// GetRequestOrListenerPortNum returns the port that the request is for (from its /port= prefix or port var), or else the listener port, as a number.
 func GetRequestOrListenerPortNum(r *http.Request) int {
 	_, port := getRequestOrListenerPort(r)
 	return port
 }
 
+// GetCurrentListenerLabel returns the label of the listener for the port that the request is for.
 func GetCurrentListenerLabel(r *http.Request) string {
 	return global.Funcs.GetListenerLabelForPort(GetRequestStore(r).RequestPortNum)
 }
 
+// ValidateListener checks that a listener exists for the port var of the request, and responds with 400 and a message if not.
 func ValidateListener(w http.ResponseWriter, r *http.Request) (bool, string) {
 	port := GetIntParamValue(r, "port")
 	if !global.Funcs.IsListenerPresent(port) {

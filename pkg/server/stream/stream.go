@@ -35,12 +35,14 @@ var (
 	Middleware = middleware.NewMiddleware("response.payload", setRoutes, nil)
 )
 
+// setRoutes registers the /stream routes, which stream a payload by chunk count or by duration.
 func setRoutes(r *mux.Router) {
 	streamRouter := middleware.RootPath("/stream")
 	util.AddRouteWithMultiQ(streamRouter, "", streamResponse, [][]string{{"count"}, {"delay"}, {"chunksize"}}, "GET", "PUT", "POST")
 	util.AddRouteWithMultiQ(streamRouter, "", streamResponse, [][]string{{}, {"duration"}, {"delay"}, {"chunksize"}}, "GET", "PUT", "POST")
 }
 
+// streamResponse streams a payload (the request body, or a generated one repeated) in delayed chunks for the requested count or duration.
 func streamResponse(w http.ResponseWriter, r *http.Request) {
 	chunkSize := util.GetSizeParam(r, "chunksize")
 	durMin, durMax, _, _ := util.GetDurationParam(r, "duration")

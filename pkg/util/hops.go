@@ -50,30 +50,36 @@ type Hops struct {
 	Steps        []Step `json:"hops"`
 }
 
+// NewHops creates an empty Hops trail for the given host, listener and operation.
 func NewHops(host, listener, operation string) *Hops {
 	return &Hops{Host: host, Listener: listener, Operation: operation, Steps: []Step{}}
 }
 
+// GetCounter returns the step number of the hop.
 func (hs *HopStep) GetCounter() int {
 	return hs.Counter
 }
 
+// GetCounter returns the step number that the remote steps were added at.
 func (rs *RemoteStep) GetCounter() int {
 	return rs.Counter
 }
 
+// AddAt appends a step with the given explicit step number and makes it the current index.
 func (h *Hops) AddAt(step int, msg string) *Hops {
 	h.Steps = append(h.Steps, h.newStep(step, msg))
 	h.currentIndex = step
 	return h
 }
 
+// Add appends a message step numbered after the current index.
 func (h *Hops) Add(msg string) *Hops {
 	h.currentIndex++
 	h.Steps = append(h.Steps, h.newStep(h.currentIndex, msg))
 	return h
 }
 
+// newStep creates a timestamped hop step that carries the host, listener and operation of the trail.
 func (h *Hops) newStep(step int, msg string) *HopStep {
 	return &HopStep{
 		BaseStep: BaseStep{
@@ -87,6 +93,7 @@ func (h *Hops) newStep(step int, msg string) *HopStep {
 	}
 }
 
+// AddRemote appends a step that wraps the hop data reported by a remote goto, at the current index.
 func (h *Hops) AddRemote(data any) *Hops {
 	h.Steps = append(h.Steps, &RemoteStep{
 		BaseStep: BaseStep{
@@ -99,6 +106,7 @@ func (h *Hops) AddRemote(data any) *Hops {
 	return h
 }
 
+// MergeRemoteHops moves the hops found under the "hops" key of the output into this trail as remote steps, and removes them from the output.
 func (h *Hops) MergeRemoteHops(output map[string]any) map[string]any {
 	var remoteSteps []any
 	if hops, ok := output["hops"].(map[string]any); ok {
@@ -116,16 +124,19 @@ func (h *Hops) MergeRemoteHops(output map[string]any) map[string]any {
 	return output
 }
 
+// AddToOutput sets the steps under the "hops" key of the output map.
 func (h *Hops) AddToOutput(output map[string]any) {
 	output["hops"] = h.Steps
 }
 
+// AsOutput returns a new map that holds the steps under the "hops" key.
 func (h *Hops) AsOutput() map[string]any {
 	output := map[string]any{}
 	output["hops"] = h.Steps
 	return output
 }
 
+// AsJSONText returns the steps as JSON text.
 func (h *Hops) AsJSONText() string {
 	return ToJSONText(h.Steps)
 }

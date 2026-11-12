@@ -30,6 +30,7 @@ var (
 	Middleware = middleware.NewMiddleware("routing", setRoutes, nil)
 )
 
+// setRoutes registers the /routing routes to add, clear and list routes.
 func setRoutes(r *mux.Router) {
 	routingRouter := middleware.RootPath("/routing")
 	util.AddRoute(routingRouter, "/add", addRoute, "POST")
@@ -39,6 +40,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(routingRouter, "", getRoutes, "GET")
 }
 
+// addRoute parses a route from the payload and, if valid, adds it to the router of its source port.
 func addRoute(w http.ResponseWriter, r *http.Request) {
 	route := &Route{}
 	err := util.ReadJsonPayload(r, route)
@@ -56,6 +58,7 @@ func addRoute(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// clearRoutes clears the routes of the request's port, or of all ports for the "all" URI.
 func clearRoutes(w http.ResponseWriter, r *http.Request) {
 	all := strings.Contains(r.RequestURI, "all")
 	port := util.GetRequestOrListenerPortNum(r)
@@ -70,13 +73,14 @@ func clearRoutes(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// getRoutes reports the routes and traffic of the request's port, or of all ports for the "all" URI.
 func getRoutes(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	all := strings.Contains(r.RequestURI, "all")
 	var data any
 	msg := ""
 	if all {
-		data = PortRouters
+		data = getPortRouters()
 		msg = "All Routes reported"
 	} else {
 		data = GetPortRouter(port)

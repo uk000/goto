@@ -1269,3 +1269,195 @@ func TestPeerCertInfoStores(t *testing.T) {
 		t.Errorf("finished = %t, status = %v, end = %v, want finished with both statuses", pci.Finished, pci.Status, pci.EndAt)
 	}
 }
+
+// swapHTTPServer makes the server the HTTP server that the listeners are served with, until the test is over.
+func swapHTTPServer(t *testing.T, server *http.Server) {
+	t.Helper()
+	setup(t)
+	serversLock.Lock()
+	saved := httpServer
+	httpServer = server
+	serversLock.Unlock()
+	t.Cleanup(func() {
+		serversLock.Lock()
+		httpServer = saved
+		serversLock.Unlock()
+	})
+}
+
+// The HTTP server is shared by the listeners, and looks up the handler of each TLS connection that it serves in the map of
+// them as the connections come. Preparing the TLS of an mTLS listener, which happens as it is added, updated or reopened, put its
+// ALPN handlers in that map, which is a fatal "concurrent map read and map write" when connections are being served.
+func TestPreparingTLSOfAnMTLSListenerLeavesTheSharedHTTPServerAlone(t *testing.T) {
+	h2Handler := func(*http.Server, *tls.Conn, http.Handler) {}
+	shared := &http.Server{TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){"h2": h2Handler}}
+	swapHTTPServer(t, shared)
+	l := newListener(freePort(t), "https", "l.test", false)
+	l.MTLS, l.IsHTTP2 = true, true
+	l.ALPN = &gototls.ALPN{Protos: []string{"x-custom"}}
+
+	stop := make(chan struct{})
+	var servers sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		servers.Add(1)
+		go func() {
+			defer servers.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				// what net/http does for each TLS connection
+				_ = shared.TLSNextProto["h2"]
+				_ = shared.TLSNextProto["x-custom"]
+			}
+		}()
+	}
+	for i := 0; i < 300; i++ {
+		if l.prepareTLS() == nil {
+			t.Fatal("no TLS config")
+		}
+	}
+	close(stop)
+	servers.Wait()
+	if len(shared.TLSNextProto) != 1 || shared.TLSNextProto["x-custom"] != nil {
+		t.Errorf("the handlers of the shared server have %d protocols, want the one that it had", len(shared.TLSNextProto))
+	}
+}
+
+func TestMTLSListenerIsServedByAServerThatHasItsALPNHandlers(t *testing.T) {
+	setup(t)
+	h2Handler := func(*http.Server, *tls.Conn, http.Handler) {}
+	shared := &http.Server{
+		Addr: "x:1", Handler: http.NotFoundHandler(), ReadTimeout: time.Second, WriteTimeout: 2 * time.Second, IdleTimeout: 3 * time.Second,
+		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){"h2": h2Handler},
+	}
+	h2s := &http2.Server{}
+
+	plain := newListener(freePort(t), "https", "plain.test", false)
+	plain.prepareTLS()
+	if got := plain.serverWithNextProtos(shared, h2s); got != shared {
+		t.Error("a listener that has no ALPN handlers of its own is not served by the shared server")
+	}
+
+	l := newListener(freePort(t), "https", "l.test", false)
+	l.MTLS, l.IsHTTP2 = true, true
+	l.ALPN = &gototls.ALPN{Protos: []string{"x-custom", "h2"}}
+	l.prepareTLS()
+	if want := []string{"h2", "x-custom"}; !reflect.DeepEqual(l.nextProtos, want) {
+		t.Errorf("protocols served with the handlers of the listener = %v, want %v", l.nextProtos, want)
+	}
+	got := l.serverWithNextProtos(shared, h2s)
+	if got == shared {
+		t.Fatal("an mTLS listener with ALPN protocols is served by the shared server")
+	}
+	if got.Addr != shared.Addr || got.ReadTimeout != shared.ReadTimeout || got.WriteTimeout != shared.WriteTimeout ||
+		got.IdleTimeout != shared.IdleTimeout || got.Handler == nil {
+		t.Errorf("the server of the listener is not made like the shared one: %+v", got)
+	}
+	if got.TLSNextProto["h2"] == nil || got.TLSNextProto["x-custom"] == nil {
+		t.Errorf("handlers of the server of the listener = %v, want h2 and x-custom", got.TLSNextProto)
+	}
+	if len(shared.TLSNextProto) != 1 || reflect.ValueOf(shared.TLSNextProto["h2"]).Pointer() != reflect.ValueOf(h2Handler).Pointer() {
+		t.Errorf("the handlers of the shared server changed: %v", shared.TLSNextProto)
+	}
+}
+
+// An mTLS listener that has ALPN protocols of its own serves HTTP/2, with the handlers that its own server has.
+func TestMTLSListenerWithALPNServesHTTP2(t *testing.T) {
+	setup(t)
+	l := newListener(freePort(t), "https", "l.test", true)
+	l.MTLS, l.AutoCert = true, true
+	l.ALPN = &gototls.ALPN{Protos: []string{"x-custom"}}
+	forget(t, l.Port)
+	if err, msg := AddOrUpdateListener(l); err != nil {
+		t.Fatalf("AddOrUpdateListener failed: %s", msg)
+	}
+	clientCert, err := gototls.CreateCertificate([]string{"client.test"}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Timeout: ioTimeout, Transport: &http2.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true, Certificates: []tls.Certificate{*clientCert}},
+	}}
+	resp, err := client.Get(fmt.Sprintf("https://127.0.0.1:%d/", l.Port))
+	if err != nil {
+		t.Fatalf("GET over HTTP/2 with a client cert: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.ProtoMajor != 2 || string(body) != "served" {
+		t.Errorf("response = HTTP/%d %q, want HTTP/2 served", resp.ProtoMajor, body)
+	}
+	if shared, _ := getHTTPServers(); shared.TLSNextProto["x-custom"] != nil {
+		t.Error("the ALPN handler of the listener was put on the shared HTTP server")
+	}
+}
+
+func listenerServerCount() int {
+	listenerServersLock.Lock()
+	defer listenerServersLock.Unlock()
+	return len(listenerServers)
+}
+
+// openMTLSListener opens an mTLS listener that has ALPN protocols, which is served by a server of its own.
+func openMTLSListener(t *testing.T) *Listener {
+	t.Helper()
+	setup(t)
+	l := newListener(freePort(t), "https", "l.test", true)
+	l.MTLS, l.AutoCert = true, true
+	l.ALPN = &gototls.ALPN{Protos: []string{"x-custom"}}
+	forget(t, l.Port)
+	if err, msg := AddOrUpdateListener(l); err != nil {
+		t.Fatalf("AddOrUpdateListener failed: %s", msg)
+	}
+	return l
+}
+
+func waitForListenerServers(t *testing.T, want int) {
+	t.Helper()
+	deadline := time.Now().Add(ioTimeout)
+	for listenerServerCount() != want {
+		if time.Now().After(deadline) {
+			t.Fatalf("servers of the listeners = %d, want %d", listenerServerCount(), want)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// The shared HTTP server shuts down the listeners that it serves, and doesn't know the ones that have servers of their own.
+func TestShutdownServersStopsTheListenersThatHaveServersOfTheirOwn(t *testing.T) {
+	before := listenerServerCount()
+	l := openMTLSListener(t)
+	shared := addAndOpen(t, "http")
+	if got := listenerServerCount(); got != before+1 {
+		t.Fatalf("servers of the listeners = %d, want %d: one for the mTLS listener, none for the one that the shared server serves", got, before+1)
+	}
+	if !isListening(l.Port) {
+		t.Fatalf("the mTLS listener on port %d is not open", l.Port)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), ioTimeout)
+	defer cancel()
+	ShutdownServers(ctx)
+	if isListening(l.Port) {
+		t.Errorf("the mTLS listener on port %d still accepts connections after the shutdown", l.Port)
+	}
+	if !isListening(shared.Port) {
+		t.Errorf("the listener of the shared server on port %d was shut down with the servers of the listeners", shared.Port)
+	}
+	waitForListenerServers(t, before)
+}
+
+func TestServerOfAListenerIsForgottenWhenTheListenerCloses(t *testing.T) {
+	before := listenerServerCount()
+	l := openMTLSListener(t)
+	waitForListenerServers(t, before+1)
+	l.Close()
+	waitForListenerServers(t, before)
+	// nothing is left to shut down
+	ctx, cancel := context.WithTimeout(context.Background(), ioTimeout)
+	defer cancel()
+	ShutdownServers(ctx)
+}

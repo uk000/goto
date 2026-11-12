@@ -61,21 +61,25 @@ var (
 	counter              atomic.Uint64
 )
 
+// init registers the Goto services with the gRPC intercept, start and stop watchers.
 func init() {
 	global.AddGRPCIntercept(RegisterGotoServer)
 	global.AddGRPCStartWatcher(OnGRPCStart)
 	global.AddGRPCStopWatcher(OnGRPCStop)
 }
 
+// OnGRPCStart does nothing when the gRPC server starts.
 func OnGRPCStart() {
 }
 
+// OnGRPCStop clears the running flag so that the Goto services are registered again when the gRPC server starts.
 func OnGRPCStop() {
 	servicesLock.Lock()
 	defer servicesLock.Unlock()
 	IsGotoServiceRunning = false
 }
 
+// RegisterGotoServer registers the Goto, Goto2 and Goto3 services on the server with the middleware interception, once for each start of the server.
 func RegisterGotoServer(server global.IGRPCManager) {
 	servicesLock.Lock()
 	defer servicesLock.Unlock()
@@ -108,6 +112,7 @@ func field(msg protoreflect.Message, name string) (protoreflect.Value, bool) {
 	return msg.Get(fd), true
 }
 
+// stringField gives the string value of the named field of the message, or an empty string if it has no such field.
 func stringField(msg protoreflect.Message, name string) string {
 	if v, ok := field(msg, name); ok {
 		return v.String()
@@ -115,6 +120,7 @@ func stringField(msg protoreflect.Message, name string) string {
 	return ""
 }
 
+// intField gives the int32 value of the named field of the message, or 0 if it has no such field.
 func intField(msg protoreflect.Message, name string) int32 {
 	if v, ok := field(msg, name); ok {
 		return int32(v.Int())
@@ -122,6 +128,7 @@ func intField(msg protoreflect.Message, name string) int32 {
 	return 0
 }
 
+// TransformStreamConfig converts a message of any service to a StreamConfig, from its chunkSize, chunkCount, interval and payload fields.
 func TransformStreamConfig(req proto.Message) proto.Message {
 	if req == nil {
 		return nil
@@ -135,6 +142,7 @@ func TransformStreamConfig(req proto.Message) proto.Message {
 	return req2
 }
 
+// TransformInput converts a message of any service to an Input, with its payload field as the text.
 func TransformInput(req proto.Message) proto.Message {
 	if req == nil {
 		return nil
@@ -144,6 +152,7 @@ func TransformInput(req proto.Message) proto.Message {
 	return req2
 }
 
+// SetHeaders sends the Goto response headers of a call, which include a copy of each request header, and gives back the request and response headers as maps.
 func SetHeaders(ctx context.Context, port int, hostLabel, listenerLabel string, addHeaders map[string]string) (requestHeaders, responseHeaders map[string]string) {
 	remoteAddress := ""
 	if p, ok := peer.FromContext(ctx); ok {
@@ -176,6 +185,7 @@ func SetHeaders(ctx context.Context, port int, hostLabel, listenerLabel string, 
 	return
 }
 
+// createOutput builds an Output of the text with a counter id, the time, the Goto host, port, via and TLS, and the headers.
 func createOutput(ctx context.Context, port int, text string, requestHeaders, responseHeaders map[string]string) *pb.Output {
 	id := counter.Add(1)
 	method, _ := grpc.Method(ctx)
@@ -193,6 +203,7 @@ func createOutput(ctx context.Context, port int, text string, requestHeaders, re
 	}
 }
 
+// Echo answers with the input text, or the payload that is configured for /Goto/echo, in an Output.
 func (gs *GotoGRPCService) Echo(ctx context.Context, input *pb.Input) (*pb.Output, error) {
 	port := util.GetGRPCPort(ctx)
 	listenerLabel := global.Funcs.GetListenerLabelForPort(port)
@@ -220,6 +231,7 @@ func (gs *GotoGRPCService) Echo(ctx context.Context, input *pb.Input) (*pb.Outpu
 	return response, nil
 }
 
+// StreamIn reads the client stream and answers with one Output of the texts of all the inputs, or of the configured payload for each, in brackets.
 func (gs *GotoGRPCService) StreamIn(cs grpc.ClientStreamingServer[pb.Input, pb.Output]) error {
 	ctx := cs.Context()
 	port := util.GetGRPCPort(ctx)
@@ -259,6 +271,7 @@ func (gs *GotoGRPCService) StreamIn(cs grpc.ClientStreamingServer[pb.Input, pb.O
 	return nil
 }
 
+// sendStreamResponse sends the chunk count of Outputs of the config text, or of a random string of the chunk size, with the interval between them, and returns the chunks and payload length.
 func (gs *GotoGRPCService) sendStreamResponse(ctx context.Context, port int, hostLabel, listenerLabel string, requestHeaders, responseHeaders map[string]string, configInput *pb.StreamConfig, ss IGRPCService) (int, int) {
 	SetHeaders(ctx, port, hostLabel, listenerLabel, nil)
 	payload := ""
@@ -281,6 +294,7 @@ func (gs *GotoGRPCService) sendStreamResponse(ctx context.Context, port int, hos
 	return int(configInput.ChunkCount), len(payload)
 }
 
+// StreamOut streams the chunks that the config asks for, with the text of the payload that is configured for /Goto/streamOut when there is one.
 func (gs *GotoGRPCService) StreamOut(configInput *pb.StreamConfig, ss grpc.ServerStreamingServer[pb.Output]) error {
 	ctx := ss.Context()
 	port := util.GetGRPCPort(ctx)
@@ -301,6 +315,7 @@ func (gs *GotoGRPCService) StreamOut(configInput *pb.StreamConfig, ss grpc.Serve
 	return nil
 }
 
+// StreamInOut streams the chunks of each config that is received, as the text builds up from one config to the next and the last one is marked FINAL.
 func (gs *GotoGRPCService) StreamInOut(bidi grpc.BidiStreamingServer[pb.StreamConfig, pb.Output]) error {
 	ctx := bidi.Context()
 	port := util.GetGRPCPort(ctx)

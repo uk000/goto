@@ -22,6 +22,7 @@ import (
 	"log"
 )
 
+// logStartInvocation logs the start of an invocation along with the total number of requests (replicas x request count).
 func (tracker *InvocationTracker) logStartInvocation() {
 	if global.Flags.EnableInvocationLogs {
 		log.Printf("[%s]: Invocation[%d]: Started target [%s] with total requests [%d]\n",
@@ -29,6 +30,7 @@ func (tracker *InvocationTracker) logStartInvocation() {
 	}
 }
 
+// logStoppingWarmup logs that the target is being stopped during warmup, with the number of warmup requests remaining.
 func (tracker *InvocationTracker) logStoppingWarmup(remaining int) {
 	if global.Flags.EnableInvocationLogs {
 		log.Printf("[%s]: Invocation[%d]: Stopping target [%s] during warmup with remaining [%d]\n",
@@ -36,6 +38,7 @@ func (tracker *InvocationTracker) logStoppingWarmup(remaining int) {
 	}
 }
 
+// logStoppingInvocation logs that the invocation is being stopped, with the number of requests left unsent.
 func (tracker *InvocationTracker) logStoppingInvocation() {
 	if global.Flags.EnableInvocationLogs {
 		log.Printf("[%s]: Invocation[%d]: Stopping target [%s] with remaining requests [%d]\n",
@@ -43,6 +46,7 @@ func (tracker *InvocationTracker) logStoppingInvocation() {
 	}
 }
 
+// logFinishedInvocation logs that the invocation finished, with the number of requests remaining.
 func (tracker *InvocationTracker) logFinishedInvocation(remaining int) {
 	if global.Flags.EnableInvocationLogs {
 		log.Printf("[%s]: Invocation[%d]: finished for target [%s] with remaining requests [%d]\n",
@@ -50,6 +54,7 @@ func (tracker *InvocationTracker) logFinishedInvocation(remaining int) {
 	}
 }
 
+// logRequestStart logs the request about to be invoked, including its headers only when request header logging is enabled.
 func (tracker *InvocationTracker) logRequestStart(requestID, targetID, url string) {
 	if global.Flags.EnableInvocationLogs {
 		var headersLog interface{} = ""
@@ -61,6 +66,7 @@ func (tracker *InvocationTracker) logRequestStart(requestID, targetID, url strin
 	}
 }
 
+// logRetryRequired logs that a request needs a retry, with the retry reason and the remaining retry count.
 func (tracker *InvocationTracker) logRetryRequired(result *InvocationResult, remaining int) {
 	if global.Flags.EnableInvocationLogs {
 		log.Printf("[%s]: Invocation[%d]: Request[%s]: Target [%s] url [%s] invocation requires retry due to [%s]. Remaining Retries [%d].",
@@ -68,6 +74,7 @@ func (tracker *InvocationTracker) logRetryRequired(result *InvocationResult, rem
 	}
 }
 
+// logBRequestCreationFailed logs that the request for a fallback B-URL could not be created and the retry continues on the previous URL.
 func (tracker *InvocationTracker) logBRequestCreationFailed(result *InvocationResult, bURL string) {
 	if global.Flags.EnableInvocationLogs {
 		log.Printf("[%s]: Invocation[%d]: Request[%s]: Target [%s] failed to create request for fallback url [%s]. Continuing with retry to previous url [%s] \n",
@@ -75,6 +82,7 @@ func (tracker *InvocationTracker) logBRequestCreationFailed(result *InvocationRe
 	}
 }
 
+// logConnectionFailed logs that the target failed to open a connection, with the error details.
 func (tracker *InvocationTracker) logConnectionFailed(details string) {
 	if global.Flags.EnableInvocationLogs {
 		log.Printf("[%s]: Invocation[%d]: Target [%s] failed to open connection with error [%s].\n",
@@ -82,6 +90,7 @@ func (tracker *InvocationTracker) logConnectionFailed(details string) {
 	}
 }
 
+// logResultChannelBacklog logs the current length of the result channel to flag a backlog of unconsumed results.
 func (tracker *InvocationTracker) logResultChannelBacklog(result *InvocationResult, size int) {
 	if global.Flags.EnableInvocationLogs {
 		log.Printf("[%s]: Invocation[%d]: Target %s ResultChannel length %d\n",
@@ -89,26 +98,35 @@ func (tracker *InvocationTracker) logResultChannelBacklog(result *InvocationResu
 	}
 }
 
+// reportRepeatedResponse logs the last response status code and the number of consecutive times it repeated. It reads
+// them under the status lock, so it must not be called by code that already holds that lock.
 func (tracker *InvocationTracker) reportRepeatedResponse() {
 	tracker.Status.lock.RLock()
 	lastStatusCode := tracker.Status.lastStatusCode
 	lastStatusCount := tracker.Status.lastStatusCount
 	tracker.Status.lock.RUnlock()
-	msg := fmt.Sprintf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Response Status [%d] Repeated x[%d]",
-		global.Self.Name, tracker.ID, tracker.Target.Name, tracker.Target.URL, tracker.Target.BURLS, lastStatusCode, lastStatusCount)
+	tracker.logRepeatedResponse(lastStatusCode, lastStatusCount)
+}
+
+// logRepeatedResponse logs the given response status code and the number of consecutive times it repeated. It doesn't
+// take any lock, so it is safe to call while holding the status lock.
+func (tracker *InvocationTracker) logRepeatedResponse(lastStatusCode, lastStatusCount int) {
 	if global.Flags.EnableInvocationLogs {
-		log.Println(msg)
+		log.Printf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Response Status [%d] Repeated x[%d]",
+			global.Self.Name, tracker.ID, tracker.Target.Name, tracker.Target.URL, tracker.Target.BURLS, lastStatusCode, lastStatusCount)
 	}
 }
 
-func (tracker *InvocationTracker) reportRepeatedFailure() {
-	msg := fmt.Sprintf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Failiure [%s] Repeated x[%d]",
-		global.Self.Name, tracker.ID, tracker.Target.Name, tracker.Target.URL, tracker.Target.BURLS, tracker.Status.lastError, tracker.Status.lastErrorCount)
+// logRepeatedFailure logs the given failure and the number of consecutive times it repeated. It doesn't take any
+// lock, so it is safe to call while holding the status lock.
+func (tracker *InvocationTracker) logRepeatedFailure(lastError string, lastErrorCount int) {
 	if global.Flags.EnableInvocationLogs {
-		log.Println(msg)
+		log.Printf("[%s]: Invocation[%d]: Target [%s], url [%s], burls %+v, Failiure [%s] Repeated x[%d]",
+			global.Self.Name, tracker.ID, tracker.Target.Name, tracker.Target.URL, tracker.Target.BURLS, lastError, lastErrorCount)
 	}
 }
 
+// reportError logs a failed request invocation with its error and the consecutive error repeat count.
 func (tracker *InvocationTracker) reportError(result *InvocationResult) {
 	msg := fmt.Sprintf("[%s]: Invocation[%d]: Request[%s]: Target %s, url [%s] failed to invoke with error: %s, repeat count: [%d]",
 		global.Self.Name, tracker.ID, result.Request.ID, result.TargetID, result.Request.URL, result.err.Error(), tracker.Status.lastErrorCount)

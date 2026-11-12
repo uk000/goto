@@ -24,6 +24,7 @@ import (
 	"log"
 )
 
+// clearA2A removes the agents of an A2A config from their servers and from the agent registry.
 func clearA2A(a2a *ctl.A2A) {
 	if a2a == nil {
 		return
@@ -41,6 +42,7 @@ func clearA2A(a2a *ctl.A2A) {
 	}
 }
 
+// loadA2A adds the agents of an A2A config to the A2A server of their port and to the agent registry.
 func loadA2A(a2a *ctl.A2A) {
 	if a2a == nil {
 		return

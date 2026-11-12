@@ -36,6 +36,7 @@ var (
 	CoreMiddlewares     = []*middleware.Middleware{status.Middleware, delay.Middleware, header.Middleware}
 )
 
+// setRoutes registers the core and response middleware routes under both /server/response and /response.
 func setRoutes(r *mux.Router) {
 	server := middleware.RootPath("/server")
 	responseRouter := util.PathRouter(server, "/response")
@@ -46,6 +47,7 @@ func setRoutes(r *mux.Router) {
 	middleware.AddRoutes(responseRouter, responseMiddlewares...)
 }
 
+// middlewareFunc chains the response middlewares (payload, trigger) around next.
 func middlewareFunc(next http.Handler) http.Handler {
 	return middleware.AddMiddlewares(next, responseMiddlewares...)
 }

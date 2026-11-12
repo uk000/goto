@@ -35,6 +35,7 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
+// init installs the generic unary and stream handlers in the gRPC package.
 func init() {
 	gotogrpc.GRPCUnaryHandler = GRPCUnaryHandler
 	gotogrpc.GRPCStreamHandler = GRPCStreamHandler
@@ -56,10 +57,12 @@ type GRPCStreamInterceptor struct {
 	proxyMethod       *gotogrpc.GRPCServiceMethod
 }
 
+// invokeMiddlewareChain runs the request of a call through the HTTP middleware chain with gRPC adapters, and returns the adapted request and response writer.
 func invokeMiddlewareChain(ctx context.Context, port int, method *gotogrpc.GRPCServiceMethod, md map[string][]string, body []byte) (*middleware.GrpcHTTPRequestAdapter, *middleware.GrpcHTTPResponseWriterAdapter) {
 	return middleware.InvokeMiddlewareChainForGRPC(ctx, port, method.Name, gotogrpc.GetRequestHost(md), method.URI, md, body, method.OutputType())
 }
 
+// unaryHandler serves a unary call by running the request through the middleware chain, using the configured response payload if there is one, and returns the first response.
 func unaryHandler(ctx context.Context, req interface{}) (resp interface{}, err error) {
 	// The context that the common handler gives is not there if it fails, so the one of the call is what is logged to.
 	ctx2, method, port, _, authority, md, err := gotogrpc.CommonHandler(ctx, nil)
@@ -99,6 +102,7 @@ func unaryHandler(ctx context.Context, req interface{}) (resp interface{}, err e
 	return
 }
 
+// GRPCUnaryHandler gives the generic handler of a unary method, which reads the request and serves it with unaryHandler, through the interceptor if there is one.
 func GRPCUnaryHandler(method *gotogrpc.GRPCServiceMethod) grpc.MethodHandler {
 	return func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 		req := gotogrpc.ReadRequest(method, dec)
@@ -113,6 +117,7 @@ func GRPCUnaryHandler(method *gotogrpc.GRPCServiceMethod) grpc.MethodHandler {
 	}
 }
 
+// streamHandler serves a stream by passing each received message through the middleware chain and the configured response payload, sends the responses back, and logs the counts.
 func streamHandler(ctx context.Context, port int, method *gotogrpc.GRPCServiceMethod, authority string, md map[string][]string, stream gotogrpc.GRPCStream) error {
 	var w *middleware.GrpcHTTPResponseWriterAdapter
 
@@ -158,6 +163,7 @@ func streamHandler(ctx context.Context, port int, method *gotogrpc.GRPCServiceMe
 	return err
 }
 
+// GRPCStreamHandler is the generic handler of the stream methods, which wraps the server stream, applies the stream delay of the method, and serves it with streamHandler.
 func GRPCStreamHandler(_ interface{}, ss grpc.ServerStream) error {
 	ctx, method, port, _, authority, md, err := gotogrpc.CommonHandler(ss.Context(), ss)
 	if err != nil {
@@ -172,6 +178,7 @@ func GRPCStreamHandler(_ interface{}, ss grpc.ServerStream) error {
 	return err
 }
 
+// Intercept proxies a unary call if the port is to proxy the method, otherwise delegates to the handler that the method had, or to the generic unary handler.
 func (gi *GRPCMethodInterceptor) Intercept(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	ctx2, method, port, remoteAddr, authority, md, err := gotogrpc.CommonHandler(ctx, nil)
 	if err != nil {
@@ -195,6 +202,7 @@ func (gi *GRPCMethodInterceptor) Intercept(srv any, ctx context.Context, dec fun
 	return GRPCUnaryHandler(method)(srv, ctx, dec, interceptor)
 }
 
+// Intercept proxies a stream call if the port is to proxy the method, otherwise delegates to the handler that the method had, or to the generic stream handler.
 func (gi *GRPCStreamInterceptor) Intercept(srv any, ss grpc.ServerStream) error {
 	ctx2, method, port, remoteAddr, _, md, err := gotogrpc.CommonHandler(ss.Context(), nil)
 	if err != nil {
@@ -220,6 +228,7 @@ func (gi *GRPCStreamInterceptor) Intercept(srv any, ss grpc.ServerStream) error 
 	return GRPCStreamHandler(srv, ss)
 }
 
+// ProxyUnary forwards a unary request upstream, and gives back the first response with the response headers set on the call.
 func ProxyUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceMethod, remoteAddr, authority string, md metadata.MD, req interface{}) (resp interface{}, err error) {
 	// ReadRequest gives no message if the request can't be decoded.
 	msg, ok := req.(*dynamicpb.Message)

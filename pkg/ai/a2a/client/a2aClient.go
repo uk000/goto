@@ -77,6 +77,7 @@ type A2AClient struct {
 	client     *goa2aclient.A2AClient
 }
 
+// NewA2AClient creates an A2AClient with an HTTP client for the given port, protocol and authority, defaulting the request timeout to 1 hour.
 func NewA2AClient(port int, clientId string, h2, tls bool, authority string, requestTimeout time.Duration) *A2AClient {
 	if requestTimeout == 0 {
 		requestTimeout = 1 * time.Hour
@@ -94,6 +95,7 @@ func NewA2AClient(port int, clientId string, h2, tls bool, authority string, req
 	return ac
 }
 
+// newSession creates an A2ASession bound to this client for the given agent card and call.
 func (ac *A2AClient) newSession(ctx context.Context, port int, callerId, authority string, card *goa2aserver.AgentCard, call *AgentCall, inHeaders http.Header, timeline *timeline.Timeline) *A2ASession {
 	return newSession(ac, ctx, port, callerId, authority, card, call, inHeaders, timeline)
 }
@@ -112,6 +114,7 @@ func FetchAgentCard(ctx context.Context, url, authority string, call *AgentCall,
 	return
 }
 
+// CallAgent calls the agent described by the call using a new timeline, and fails if the call is missing.
 func CallAgent(ctx context.Context, port int, call *AgentCall, callback AgentResultsCallback, inHeaders http.Header) (*A2AResult, error) {
 	if call == nil {
 		return nil, fmt.Errorf("Missing Agent Call spec/URL: %+v", call)
@@ -119,6 +122,7 @@ func CallAgent(ctx context.Context, port int, call *AgentCall, callback AgentRes
 	return CallAgentWithTimeline(ctx, port, call, callback, inHeaders, timeline.NewTimeline(port, call.Name, nil, nil, inHeaders, nil, nil, nil))
 }
 
+// CallAgentWithTimeline fetches the agent card from the call's card URL, connects a session, sends the call's message and returns the result along with any *AgentError.
 func CallAgentWithTimeline(ctx context.Context, port int, call *AgentCall, callback AgentResultsCallback, inHeaders http.Header, timeline *timeline.Timeline) (result *A2AResult, err error) {
 	var card *goa2aserver.AgentCard
 	if call == nil || call.CardURL == "" {
@@ -155,6 +159,7 @@ func CallAgentWithTimeline(ctx context.Context, port int, call *AgentCall, callb
 	return result, nil
 }
 
+// loadAgentCard fetches and decodes the agent's .well-known/agent.json card, falling back to the call's URL and authority and forwarding the configured headers.
 func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, call *AgentCall, inHeaders http.Header) (card *goa2aserver.AgentCard, err error) {
 	if call != nil {
 		if url == "" {
@@ -199,6 +204,7 @@ func (ac *A2AClient) loadAgentCard(ctx context.Context, url, authority string, c
 	return card, nil
 }
 
+// ConnectWithAgentCard loads the agent card from the given URL and returns a connected session for it.
 func (ac *A2AClient) ConnectWithAgentCard(ctx context.Context, call *AgentCall, cardURL, authority string, inHeaders http.Header, timeline *timeline.Timeline) (*A2ASession, error) {
 	card, err := ac.loadAgentCard(ctx, cardURL, authority, call, inHeaders)
 	if !util.IsNil(err) {
@@ -210,6 +216,7 @@ func (ac *A2AClient) ConnectWithAgentCard(ctx context.Context, call *AgentCall, 
 	return session, err
 }
 
+// Prepare parses RequestTimeout into RequestTimeoutD, defaulting to 10 hours when it is not set.
 func (ac *AgentCall) Prepare() {
 	if ac.RequestTimeout != "" {
 		ac.RequestTimeoutD = util.ParseDuration(ac.RequestTimeout)
@@ -218,6 +225,7 @@ func (ac *AgentCall) Prepare() {
 	}
 }
 
+// CloneWithUpdate returns a copy of the call with the given non-empty name, URL, authority, message and args overriding the original.
 func (ac *AgentCall) CloneWithUpdate(name, url, authority, message string, data map[string]any) *AgentCall {
 	clone := *ac
 	if name != "" {
@@ -238,6 +246,7 @@ func (ac *AgentCall) CloneWithUpdate(name, url, authority, message string, data 
 	return &clone
 }
 
+// NonNil initializes the nil Args and Headers of the call so that they are safe to use.
 func (ac *AgentCall) NonNil() {
 	if ac.Args == nil {
 		ac.Args = map[string]any{}

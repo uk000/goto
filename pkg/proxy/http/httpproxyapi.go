@@ -32,6 +32,7 @@ var (
 	Middleware = middleware.NewMiddleware("proxy", setRoutes, nil)
 )
 
+// setRoutes registers the REST routes that enable the HTTP proxy, manage its targets, headers and responses, and report or clear its trackers.
 func setRoutes(r *mux.Router) {
 	proxyRouter := middleware.RootPath("/proxy")
 	httpProxyRouter := util.PathPrefix(proxyRouter, "/http")
@@ -56,6 +57,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(proxyRouter, "/trackers/{all}?/clear", clearProxyTrackers, "POST")
 }
 
+// enableProxy enables or disables the HTTP proxy of the port.
 func enableProxy(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	o := util.GetStringParamValue(r, "o")
@@ -66,6 +68,7 @@ func enableProxy(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// setProxyResponses reads the proxy responses from the request body and sets them on the proxy of the port.
 func setProxyResponses(w http.ResponseWriter, r *http.Request) {
 	proxyResponses := []*ProxyResponse{}
 	port := util.GetRequestOrListenerPortNum(r)
@@ -81,6 +84,7 @@ func setProxyResponses(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// getProxyResponses reports the proxy responses of the port.
 func getProxyResponses(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	proxy := GetPortProxy(port)
@@ -88,6 +92,7 @@ func getProxyResponses(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reported proxy responses", r)
 }
 
+// addHTTPTarget parses a target from the request body and adds it to the proxy of its port, or of the request port if it has none.
 func addHTTPTarget(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	msg := ""
@@ -118,10 +123,12 @@ func addHeader(w http.ResponseWriter, r *http.Request) {
 	addRemoveHeader(w, r, false)
 }
 
+// removeHeader makes the proxy remove the header from the upstream call of the target and trigger.
 func removeHeader(w http.ResponseWriter, r *http.Request) {
 	addRemoveHeader(w, r, true)
 }
 
+// addRemoveHeader adds a header to, or removes it from, the upstream call of the target and trigger named in the request.
 func addRemoveHeader(w http.ResponseWriter, r *http.Request, remove bool) {
 	port := util.GetRequestOrListenerPortNum(r)
 	target := util.GetStringParamValue(r, "target")
@@ -142,6 +149,7 @@ func addRemoveHeader(w http.ResponseWriter, r *http.Request, remove bool) {
 	util.AddLogMessage(msg, r)
 }
 
+// clearHeaders clears a header, or all the headers if none is named, of the upstream call of the target and trigger.
 func clearHeaders(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	target := util.GetStringParamValue(r, "target")
@@ -161,6 +169,7 @@ func clearHeaders(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// clearHTTPTarget removes all the targets of the proxy of the port.
 func clearHTTPTarget(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	GetPortProxy(port).clearTargets()
@@ -169,6 +178,7 @@ func clearHTTPTarget(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// removeHTTPTarget removes the named target from the proxy of the port.
 func removeHTTPTarget(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	target := util.GetStringParamValue(r, "target")
@@ -182,6 +192,7 @@ func removeHTTPTarget(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// enableHTTPTarget enables or disables the named target of the proxy of the port.
 func enableHTTPTarget(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	target := util.GetStringParamValue(r, "target")
@@ -197,6 +208,7 @@ func enableHTTPTarget(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// getProxy reports the HTTP proxy of the port, or of all the ports if the URI has "all".
 func getProxy(w http.ResponseWriter, r *http.Request) {
 	all := strings.Contains(r.RequestURI, "all")
 	result := map[string]any{}
@@ -214,6 +226,7 @@ func getProxy(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reported proxy targets", r)
 }
 
+// getProxyTargets reports the targets of the proxy of the port, or of all the ports if the URI has "all".
 func getProxyTargets(w http.ResponseWriter, r *http.Request) {
 	all := strings.Contains(r.RequestURI, "all")
 	result := map[string]any{}
@@ -231,6 +244,7 @@ func getProxyTargets(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reported proxy targets", r)
 }
 
+// checkAndGetTarget returns the target named in the request, or answers with a bad request and returns nil if there is none.
 func checkAndGetTarget(proxy *Proxy, w http.ResponseWriter, r *http.Request) *Target {
 	name := util.GetStringParamValue(r, "target")
 	target := proxy.getTarget(name)
@@ -241,6 +255,7 @@ func checkAndGetTarget(proxy *Proxy, w http.ResponseWriter, r *http.Request) *Ta
 	return target
 }
 
+// getProxyTargetTracker reports a snapshot of the total counts and of the counts of the named target.
 func getProxyTargetTracker(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	proxy := GetPortProxy(port)
@@ -262,6 +277,7 @@ func getProxyTargetTracker(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(fmt.Sprintf("Proxy[%d]: HTTP Target [%s] Reported", port, target.Name), r)
 }
 
+// getProxyTrackers reports a snapshot of the tracker of the proxy of the port, or of all the ports if the URI has "all".
 func getProxyTrackers(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	all := strings.Contains(r.RequestURI, "all")
@@ -284,6 +300,7 @@ func getProxyTrackers(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(fmt.Sprintf("Proxy[%d]: HTTP Tracking Data Reported", port), r)
 }
 
+// clearProxyTrackers resets the tracker of the proxy of the port, or of all the ports if the URI has "all".
 func clearProxyTrackers(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	all := strings.Contains(r.RequestURI, "all")

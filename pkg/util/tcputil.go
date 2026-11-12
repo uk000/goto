@@ -43,22 +43,27 @@ type FirstByteReader struct {
 	At     time.Time
 }
 
+// IsConnectionCloseError tells if the error is about the use of a closed network connection.
 func IsConnectionCloseError(err error) bool {
 	return strings.Contains(err.Error(), "closed network connection")
 }
 
+// IsConnectionTimeoutError tells if the error is a timeout.
 func IsConnectionTimeoutError(err error) bool {
 	return strings.Contains(err.Error(), "timeout")
 }
 
+// CopyInputHeadToOutput copies the first inHead bytes of the read buffer into the write buffer at [outFrom:outTo].
 func CopyInputHeadToOutput(writeBuffer, readBuffer []byte, inHead, outFrom, outTo int) {
 	copy(writeBuffer[outFrom:outTo], readBuffer[:inHead])
 }
 
+// CopyInputTailToOutput copies the read buffer from tail onwards into the write buffer at [outFrom:outTo].
 func CopyInputTailToOutput(writeBuffer, readBuffer []byte, tail, outFrom, outTo int) {
 	copy(writeBuffer[outFrom:outTo], readBuffer[tail:])
 }
 
+// GetConnectionRemainingLife computes how much longer a connection may live, as the least of the limits that are set (24h if none is).
 func GetConnectionRemainingLife(startTime, atTime time.Time, connectionLife, readTimeout, connIdleTimeout time.Duration) time.Duration {
 	now := time.Now()
 	if connectionLife <= 0 && readTimeout <= 0 && connIdleTimeout <= 0 {
@@ -81,19 +86,23 @@ func GetConnectionRemainingLife(startTime, atTime time.Time, connectionLife, rea
 	return remainingLife
 }
 
+// GetConnectionReadWriteTimeout returns the deadline for the next read or write, which is the current time plus the remaining life of the connection.
 func GetConnectionReadWriteTimeout(startTime time.Time, connectionLife, readWriteTimeout, connIdleTimeout time.Duration) time.Time {
 	now := time.Now()
 	return now.Add(GetConnectionRemainingLife(startTime, now, connectionLife, readWriteTimeout, connIdleTimeout))
 }
 
+// UpdateReadDeadline sets the read deadline of the connection from its remaining life and its timeouts.
 func UpdateReadDeadline(conn net.Conn, connStartTime time.Time, connectionLife, readTimeout, connIdleTimeout time.Duration) {
 	conn.SetReadDeadline(GetConnectionReadWriteTimeout(connStartTime, connectionLife, readTimeout, connIdleTimeout))
 }
 
+// UpdateWriteDeadline sets the write deadline of the connection from its remaining life and its timeouts.
 func UpdateWriteDeadline(conn net.Conn, connStartTime time.Time, connectionLife, writeTimeout, connIdleTimeout time.Duration) {
 	conn.SetWriteDeadline(GetConnectionReadWriteTimeout(connStartTime, connectionLife, writeTimeout, connIdleTimeout))
 }
 
+// CheckForReadability probes the connection with a zero-length read and sends the outcome on the channel.
 func CheckForReadability(conn net.Conn, c chan bool) {
 	_, err := conn.Read([]byte{})
 	if err != nil {
@@ -102,6 +111,7 @@ func CheckForReadability(conn net.Conn, c chan bool) {
 	c <- true
 }
 
+// Write writes the whole buffer to the connection, writing the rest once more after a short write, and fails if it is still incomplete.
 func Write(buff []byte, conn net.Conn) error {
 	size := len(buff)
 	n, err := conn.Write(buff)
@@ -121,6 +131,7 @@ func Write(buff []byte, conn net.Conn) error {
 	return nil
 }
 
+// ParseAddress splits an address of the form host:port into the endpoint and the port number, and returns empty values if it has no colon.
 func ParseAddress(address string) (endpoint string, port int) {
 	pieces := strings.Split(address, ":")
 	if len(pieces) > 1 {
@@ -130,6 +141,7 @@ func ParseAddress(address string) (endpoint string, port int) {
 	return
 }
 
+// Read reads from the underlying reader and records the time at which it first gave bytes.
 func (f *FirstByteReader) Read(p []byte) (int, error) {
 	n, err := f.Reader.Read(p)
 	if n > 0 && f.At.IsZero() {

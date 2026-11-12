@@ -52,6 +52,7 @@ func (r ResourcesByName) copy() ResourcesByName {
 	return c
 }
 
+// copy returns a copy of the map of kinds, with the maps of resources under it copied too.
 func (k KindResourcesMap) copy() KindResourcesMap {
 	if k == nil {
 		return nil
@@ -63,6 +64,7 @@ func (k KindResourcesMap) copy() KindResourcesMap {
 	return c
 }
 
+// copy returns a copy of the map of namespaces, with the maps under it copied too.
 func (n NamespaceKindMap) copy() NamespaceKindMap {
 	if n == nil {
 		return nil
@@ -87,6 +89,7 @@ var (
 	decSer = yamlser.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
 )
 
+// Clear drops the stored resources of a YAML unit, of one namespace of it, or all units when no name is given.
 func (k *K8sResourceStore) Clear(yamlName, namespace string) {
 	k.lock.Lock()
 	defer k.lock.Unlock()
@@ -106,6 +109,7 @@ func (k *K8sResourceStore) Clear(yamlName, namespace string) {
 	}
 }
 
+// Get returns a copy of the resources stored for a YAML unit, narrowed to the namespace and kind when given.
 func (k *K8sResourceStore) Get(yamlName, namespace, kind string) interface{} {
 	kind, _, _ = reinterpretResource(kind, "", "")
 	k.lock.Lock()
@@ -130,6 +134,7 @@ func (k *K8sResourceStore) Get(yamlName, namespace, kind string) interface{} {
 	return unitResources.copy()
 }
 
+// StoreYaml parses the multi-document YAML body and stores its resources under the unit by namespace, kind and name, returning a copy of what the unit holds.
 func (k *K8sResourceStore) StoreYaml(yamlName string, body io.ReadCloser) (NamespaceKindMap, []error) {
 	list, errs := readResourceList(body)
 	if len(errs) > 0 {
@@ -171,6 +176,7 @@ func (k *K8sResourceStore) StoreYaml(yamlName string, body io.ReadCloser) (Names
 	return k.YamlResources[yamlName].copy(), nil
 }
 
+// GetTargetResources returns a copy of the resources of a stored YAML unit narrowed by namespace, kind and name, or an error if nothing matches; without a namespace, kind and name are matched in all namespaces.
 func (k *K8sResourceStore) GetTargetResources(yamlName, namespace, kind, name string) (NamespaceKindMap, error) {
 	if yamlName == "" {
 		log.Printf("No unit specified\n")
@@ -284,6 +290,7 @@ func reinterpretResource(resource, namespace, name string) (string, string, stri
 	return resource, namespace, name
 }
 
+// readResourceList decodes each YAML document of the body into an unstructured resource, collecting errors for the ones that fail.
 func readResourceList(body io.ReadCloser) ([]*unstructured.Unstructured, []error) {
 	docs, err := readDocuments(body)
 	if err != nil {
@@ -308,6 +315,7 @@ func readResourceList(body io.ReadCloser) ([]*unstructured.Unstructured, []error
 	return list, errs
 }
 
+// readDocuments splits the YAML stream of the body into its documents.
 func readDocuments(body io.ReadCloser) ([][]byte, error) {
 	docs := [][]byte{}
 	reader := yaml.NewYAMLReader(bufio.NewReader(body))

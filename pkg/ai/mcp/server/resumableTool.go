@@ -37,6 +37,7 @@ func getRegistryClient() *registryclient.RegistryClient {
 	return MCPRegistryClient
 }
 
+// saveState stores the state of the call in the registry, to let a resumable tool continue it later.
 func (tctx *ToolContext) saveState(ts *ToolState) error {
 	rc := getRegistryClient()
 	if lc, err := rc.OpenLocker(tctx.sessionID, tctx.Kind); err != nil {
@@ -47,6 +48,7 @@ func (tctx *ToolContext) saveState(ts *ToolState) error {
 	return nil
 }
 
+// loadState loads the state that a resumable tool stored in the registry for the session.
 func (tctx *ToolContext) loadState() (*ToolState, error) {
 	rc := getRegistryClient()
 	lc, err := rc.OpenLocker(tctx.sessionID, tctx.Kind)

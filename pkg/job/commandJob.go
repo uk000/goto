@@ -28,6 +28,7 @@ import (
 	"time"
 )
 
+// runCommandWithInput runs a command job with its argument fillers replaced by the given marker values.
 func (jm *JobManager) runCommandWithInput(job *Job, markers map[string]string, rawInput []byte) *JobRunContext {
 	job.lock.Lock()
 	args := []string{}
@@ -48,13 +49,19 @@ func (jm *JobManager) runCommandWithInput(job *Job, markers map[string]string, r
 	return jm.runJob(job, args, markers, rawInput)
 }
 
+// runCommandJob executes the job's command or script, storing its output lines as results and enforcing the job's timeout, max results and stop signal.
 func (jm *JobManager) runCommandJob(job *Job, jobRun *JobRunContext, iteration int, last bool) {
+	// The script is looked up under the manager's lock (uploading a script or clearing the jobs updates the scripts
+	// under it), before the job's locks are taken: other code takes the job's locks while holding the manager's lock.
+	job.lock.RLock()
+	scriptName := job.commandTask.Script
+	job.lock.RUnlock()
+	script := jm.getScript(scriptName)
 	job.lock.RLock()
 	jobRun.lock.RLock()
 	commandTask := job.commandTask
 	targetCommand := commandTask.Cmd
 	var args []string
-	script := jm.scripts[commandTask.Script]
 	if targetCommand == "" && script != nil {
 		if script.Shell {
 			targetCommand = "sh"
@@ -190,6 +197,7 @@ Done:
 	}
 }
 
+// prepareCommandMarkers splits a command output line by the task's separator and maps the pieces to filler markers (merged with the run's markers) for the triggered job.
 func prepareCommandMarkers(output string, sourceCommand *CommandJobTask, jobRun *JobRunContext) map[string]string {
 	markers := map[string]string{}
 	outputMarkers := sourceCommand.OutputMarkers

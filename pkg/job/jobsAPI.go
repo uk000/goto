@@ -31,6 +31,7 @@ var (
 	Middleware = middleware.NewMiddleware("jobs", setRoutes, nil)
 )
 
+// setRoutes registers the /jobs API routes for adding, running, stopping, removing and reporting jobs, scripts and results.
 func setRoutes(r *mux.Router) {
 	jobsRouter := middleware.RootPath("/jobs")
 	util.AddRoute(jobsRouter, "/add", addOrUpdateJob, "POST", "PUT")
@@ -51,6 +52,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(jobsRouter, "", getJobs, "GET")
 }
 
+// addOrUpdateJob parses a job from the request body and adds it to the manager, replacing any existing job of that name.
 func addOrUpdateJob(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if job, err := ParseJob(r); err == nil {
@@ -69,6 +71,7 @@ func addOrUpdateJob(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// storeJobScriptOrFile stores the request body as a job script (creating a job for it) or as a plain file at the given path.
 func storeJobScriptOrFile(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	name := util.GetStringParamValue(r, "name")
@@ -98,6 +101,7 @@ func storeJobScriptOrFile(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// removeJob removes the named jobs and their runs from the manager.
 func removeJob(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if jobs, present := util.GetListParam(r, "jobs"); present {
@@ -111,16 +115,19 @@ func removeJob(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// getJobs reports all the jobs as JSON.
 func getJobs(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reporting jobs", r)
 	util.WriteJsonPayload(w, Manager.getJobs())
 }
 
+// getScripts reports all the stored job scripts as JSON.
 func getScripts(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Reporting job scripts ", r)
 	util.WriteJsonPayload(w, Manager.getScripts())
 }
 
+// runJobs starts the named jobs, or all jobs when none are named.
 func runJobs(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	names, _ := util.GetListParam(r, "jobs")
@@ -136,6 +143,7 @@ func runJobs(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// stopJobs stops the named jobs, or all jobs when none are named.
 func stopJobs(w http.ResponseWriter, r *http.Request) {
 	jobs, present := util.GetListParam(r, "jobs")
 	Manager.lock.RLock()
@@ -151,6 +159,7 @@ func stopJobs(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// clearJobs resets the job manager, dropping all jobs, runs, scripts and watchers.
 func clearJobs(w http.ResponseWriter, r *http.Request) {
 	Manager.init()
 	msg := "Jobs Cleared"
@@ -158,6 +167,7 @@ func clearJobs(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// clearJobResults discards the recorded runs, and so the results, of all jobs.
 func clearJobResults(w http.ResponseWriter, r *http.Request) {
 	msg := "Job Results Cleared"
 	Manager.lock.Lock()
@@ -167,6 +177,7 @@ func clearJobResults(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// getJobResults reports the results of the named job, or of all jobs when none is named.
 func getJobResults(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if job, present := util.GetStringParam(r, "job"); present {
@@ -179,6 +190,7 @@ func getJobResults(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// ParseJob parses and validates a job from the request body.
 func ParseJob(r *http.Request) (*Job, error) {
 	return ParseJobFromPayload(util.Read(r.Body))
 }

@@ -35,6 +35,7 @@ var (
 	headersLock                   sync.RWMutex
 )
 
+// setRoutes registers the response header config routes under /headers.
 func setRoutes(r *mux.Router) {
 	headersRouter := util.PathRouter(r, "/headers")
 	util.AddRoute(headersRouter, "/add/{header}={value}", addResponseHeader, "PUT", "POST")
@@ -43,6 +44,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(headersRouter, "", getResponseHeaders, "GET")
 }
 
+// addResponseHeader configures a header value to be added to all responses on the request's port; values accumulate per header.
 func addResponseHeader(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if header, present := util.GetStringParam(r, "header"); present {
@@ -69,6 +71,7 @@ func addResponseHeader(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// removeResponseHeader configures a header to be stripped from all responses on the request's port.
 func removeResponseHeader(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if header, present := util.GetStringParam(r, "header"); present {
@@ -92,6 +95,7 @@ func removeResponseHeader(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearResponseHeader clears the response headers configured to be added or removed on the request's port.
 func clearResponseHeader(w http.ResponseWriter, r *http.Request) {
 	listenerPort := util.GetRequestOrListenerPort(r)
 	headersLock.Lock()
@@ -103,6 +107,7 @@ func clearResponseHeader(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getResponseHeaders reports the port's configured response headers to add (+) and remove (-), and applies them to this response too.
 func getResponseHeaders(w http.ResponseWriter, r *http.Request) {
 	headersLock.RLock()
 	defer headersLock.RUnlock()
@@ -131,6 +136,7 @@ func getResponseHeaders(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// SetResponseHeaders copies the request headers to the response (skipping the ones configured for removal) and adds the configured response headers of the port.
 func SetResponseHeaders(w http.ResponseWriter, r *http.Request) {
 	headersLock.RLock()
 	defer headersLock.RUnlock()
@@ -144,6 +150,7 @@ func SetResponseHeaders(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// middlewareFunc calls next, then applies the configured response headers unless headers were already sent or the request is admin, tunnel or gRPC.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {

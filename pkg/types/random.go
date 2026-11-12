@@ -80,6 +80,7 @@ func RandomFrom(vals []int) int {
 	return vals[Random(len(vals))]
 }
 
+// GenerateRandomPayload returns a payload of the given size that starts with the prefixes and is filled with random alphanumeric characters.
 func GenerateRandomPayload(size int, prefix ...string) []byte {
 	b := bytes.Buffer{}
 	written := 0
@@ -96,10 +97,12 @@ func GenerateRandomPayload(size int, prefix ...string) []byte {
 	return b.Bytes()
 }
 
+// GenerateRandomString returns a random alphanumeric string of the given size.
 func GenerateRandomString(size int) string {
 	return string(GenerateRandomPayload(size))
 }
 
+// ID returns the next value of a counter that is shared by the process.
 func ID() int {
 	return int(IDCounter.Add(1))
 }

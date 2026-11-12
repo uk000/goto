@@ -38,6 +38,7 @@ var (
 	Middleware = middleware.NewMiddleware("echo", setRoutes, nil)
 )
 
+// setRoutes registers the /echo routes: headers, body, ws, stream and the root echo.
 func setRoutes(r *mux.Router) {
 	echoRouter := r.PathPrefix("/echo").Subrouter()
 	util.AddRoute(echoRouter, "/headers", EchoHeaders)
@@ -47,6 +48,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(echoRouter, "", echo)
 }
 
+// EchoHeaders responds with the request headers along with the goto echo info.
 func EchoHeaders(w http.ResponseWriter, r *http.Request) {
 	metrics.UpdateRequestCount("echo")
 	util.AddLogMessage("Echoing headers", r)
@@ -56,18 +58,21 @@ func EchoHeaders(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// echoBody copies the request body back as the response.
 func echoBody(w http.ResponseWriter, r *http.Request) {
 	metrics.UpdateRequestCount("echo")
 	util.AddLogMessage("Echoing Body", r)
 	io.Copy(w, r.Body)
 }
 
+// echo responds with the echo response of the request.
 func echo(w http.ResponseWriter, r *http.Request) {
 	metrics.UpdateRequestCount("echo")
 	util.AddLogMessage("Echoing", r)
 	Echo(w, r)
 }
 
+// echoStream streams the request body back line by line, flushing after each line.
 func echoStream(w http.ResponseWriter, r *http.Request) {
 	metrics.UpdateRequestCount("echo")
 	util.AddLogMessage("Streaming Echo", r)
@@ -103,6 +108,7 @@ func echoStream(w http.ResponseWriter, r *http.Request) {
 	// }
 }
 
+// wsEchoHandler upgrades to a websocket, sends the request headers, and echoes back whatever the client sends.
 func wsEchoHandler(w http.ResponseWriter, r *http.Request) {
 	metrics.UpdateRequestCount("wsecho")
 	headers := util.GetHeadersLog(r.Header)
@@ -113,14 +119,17 @@ func wsEchoHandler(w http.ResponseWriter, r *http.Request) {
 	s.ServeHTTP(w, r)
 }
 
+// Echo writes the echo response of the request as JSON.
 func Echo(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, GetEchoResponseForRequest(w, r))
 }
 
+// GetEchoResponseForRequest builds the echo response from the request's store.
 func GetEchoResponseForRequest(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 	return GetEchoResponseFromRS(util.GetRequestStore(r))
 }
 
+// GetEchoResponseFromRS builds the echo response from a request store, adding the tunnel headers for tunnel requests.
 func GetEchoResponseFromRS(rs *util.RequestStore) map[string]interface{} {
 	if rs.ListenerLabel == "" {
 		rs.ListenerLabel = global.Funcs.GetListenerLabelForPort(rs.RequestPortNum)
@@ -136,6 +145,7 @@ func GetEchoResponseFromRS(rs *util.RequestStore) map[string]interface{} {
 	return response
 }
 
+// GetEchoResponseWithAddendum returns the echo response of a request store merged with the addendum entries.
 func GetEchoResponseWithAddendum(rs *util.RequestStore, addendum map[string]any) map[string]interface{} {
 	response := GetEchoResponseFromRS(rs)
 	for k, v := range addendum {
@@ -144,6 +154,7 @@ func GetEchoResponseWithAddendum(rs *util.RequestStore, addendum map[string]any)
 	return response
 }
 
+// GetEchoResponse builds the echo response map from the request and connection details, with prefixed request headers and TLS/cert info.
 func GetEchoResponse(listenerLabel, downstreamAddr, requestHost, requestURI, requestMethod, requestProto, requestQuery, requestSNI string,
 	requestPortNum, requestPayloadSize, responsePayloadSize int, requestHeaders map[string][]string, isTLS, isMTLS bool, ss, cs string) map[string]interface{} {
 	outputHeaders := map[string][]string{}

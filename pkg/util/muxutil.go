@@ -35,6 +35,7 @@ var (
 	}
 )
 
+// GetIntParam reads an int route var and tells if it was present, returning the default (if given) when it is not.
 func GetIntParam(r *http.Request, param string, defaultVal ...int) (int, bool) {
 	vars := mux.Vars(r)
 	switch {
@@ -48,11 +49,13 @@ func GetIntParam(r *http.Request, param string, defaultVal ...int) (int, bool) {
 	}
 }
 
+// GetIntParamValue returns the int route var, or the default if it is absent.
 func GetIntParamValue(r *http.Request, param string, defaultVal ...int) int {
 	val, _ := GetIntParam(r, param, defaultVal...)
 	return val
 }
 
+// GetStringParam reads a string route var and tells if it was present, returning the default (if given) when it is not.
 func GetStringParam(r *http.Request, param string, defaultVal ...string) (string, bool) {
 	vars := mux.Vars(r)
 	switch {
@@ -65,11 +68,13 @@ func GetStringParam(r *http.Request, param string, defaultVal ...string) (string
 	}
 }
 
+// GetStringParamValue returns the string route var, or the default if it is absent.
 func GetStringParamValue(r *http.Request, param string, defaultVal ...string) string {
 	val, _ := GetStringParam(r, param, defaultVal...)
 	return val
 }
 
+// GetBoolParamValue reads a route var as a boolean using IsYes, falling back to the default (false if none) when it is absent.
 func GetBoolParamValue(r *http.Request, param string, defaultVal ...bool) bool {
 	val, _ := GetStringParam(r, param)
 	if val != "" {
@@ -81,6 +86,7 @@ func GetBoolParamValue(r *http.Request, param string, defaultVal ...bool) bool {
 	return false
 }
 
+// GetListParam reads a query param (or else a route var) as a list, splitting a single value on commas, and tells if any value was given.
 func GetListParam(r *http.Request, param string) ([]string, bool) {
 	values := r.URL.Query()[param]
 	if len(values) == 0 {
@@ -95,6 +101,7 @@ func GetListParam(r *http.Request, param string) ([]string, bool) {
 	return values, len(values) > 0 && len(values[0]) > 0
 }
 
+// GetStatusParam parses the status route var of the form "code[,code]*[:times]" into the codes and the times (-1 if not given).
 func GetStatusParam(r *http.Request) (statusCodes []int, times int, present bool) {
 	vars := mux.Vars(r)
 	status := vars["status"]
@@ -119,6 +126,7 @@ func GetStatusParam(r *http.Request) (statusCodes []int, times int, present bool
 	return statusCodes, times, len(statusCodes) > 0
 }
 
+// ParseSize parses a size such as 10, 5K, 2KB or 1M into bytes, where a bare unit counts as one unit.
 func ParseSize(value string) int {
 	size := 0
 	multiplier := 1
@@ -142,10 +150,12 @@ func ParseSize(value string) int {
 	return size
 }
 
+// GetSizeParam parses the named route var as a size in bytes.
 func GetSizeParam(r *http.Request, name string) int {
 	return ParseSize(mux.Vars(r)[name])
 }
 
+// ParseDuration parses a duration string, and returns 0 if it is not valid.
 func ParseDuration(value string) time.Duration {
 	if d, err := time.ParseDuration(value); err == nil {
 		return d
@@ -153,6 +163,7 @@ func ParseDuration(value string) time.Duration {
 	return 0
 }
 
+// GetDurationParam parses the named route var as a duration range, with a count.
 func GetDurationParam(r *http.Request, name string) (low, high time.Duration, count int, ok bool) {
 	if val := mux.Vars(r)[name]; val != "" {
 		return types.ParseDurationRange(val)
@@ -160,6 +171,7 @@ func GetDurationParam(r *http.Request, name string) (low, high time.Duration, co
 	return 0, 0, 0, false
 }
 
+// RequestHasParam tells if the route vars of the request include the param.
 func RequestHasParam(r *http.Request, param string) bool {
 	if vars := mux.Vars(r); vars != nil {
 		if _, ok := vars[param]; ok {
@@ -169,6 +181,7 @@ func RequestHasParam(r *http.Request, param string) bool {
 	return false
 }
 
+// ParseJSONPathsFromRequest builds JSON paths from the named param, or from the lines of the request body if the param is absent.
 func ParseJSONPathsFromRequest(paramName string, r *http.Request) *JSONPath {
 	paths, ok := GetListParam(r, paramName)
 	if !ok {
@@ -180,6 +193,7 @@ func ParseJSONPathsFromRequest(paramName string, r *http.Request) *JSONPath {
 	return nil
 }
 
+// ParseJQFromRequest builds JQ queries from the named param, or from the lines of the request body if the param is absent.
 func ParseJQFromRequest(paramName string, r *http.Request) *JQ {
 	paths, ok := GetListParam(r, paramName)
 	if !ok {

@@ -49,6 +49,7 @@ type ToolContext struct {
 	log            []string
 }
 
+// NewToolContext creates the context of a tool call, with its timeline that notifies the client of the events.
 func NewToolContext(ms *util.MCPRequestStore, t *MCPTool, req *gomcp.CallToolRequest, args *aicommon.ToolCallArgs, isSSE bool) *ToolContext {
 	requestHeaders := getRequestHeaders(ms.Ctx, req, ms.RS)
 	if args == nil {
@@ -84,11 +85,13 @@ func NewToolContext(ms *util.MCPRequestStore, t *MCPTool, req *gomcp.CallToolReq
 	return tctx
 }
 
+// notifyClientWithError is notifyClient in the form that the timeline calls, and it never fails.
 func (tctx *ToolContext) notifyClientWithError(msg string, data any, json bool) error {
 	tctx.notifyClient(msg, data, json)
 	return nil
 }
 
+// notifyClient sends the message (or the data as JSON) to the client as a progress notification.
 func (tctx *ToolContext) notifyClient(msg string, data any, json bool) {
 	if json {
 		// if msg != "" {
@@ -104,18 +107,21 @@ func (tctx *ToolContext) notifyClient(msg string, data any, json bool) {
 	}
 }
 
+// AddEvent adds the message to the timeline of the call, if it has any.
 func (tctx *ToolContext) AddEvent(msg string) {
 	if msg != "" {
 		tctx.timeline.AddEvent(tctx.Label, msg)
 	}
 }
 
+// AddRemoteEvent adds the message and the data that came from a remote to the timeline of the call.
 func (tctx *ToolContext) AddRemoteEvent(msg string, remoteText string, remoteData any, json bool) {
 	if msg != "" || remoteData != nil {
 		tctx.timeline.AddEventWithRemote(tctx.Label, msg, remoteText, nil, nil, remoteData, json)
 	}
 }
 
+// AddData adds the data to the timeline of the call, if there is any.
 func (tctx *ToolContext) AddData(data any, json bool) {
 	if data != nil {
 		tctx.timeline.AddData(tctx.Label, data, json)
@@ -131,6 +137,7 @@ func (tctx *ToolContext) Log(msg string, args ...any) string {
 	return msg
 }
 
+// Flush returns the messages that the call kept as one text, and optionally logs them and clears them.
 func (tctx *ToolContext) Flush(print, clear bool) string {
 	msg := strings.Join(tctx.log, " --> ")
 	if clear {
@@ -142,6 +149,7 @@ func (tctx *ToolContext) Flush(print, clear bool) string {
 	return msg
 }
 
+// applyDelay logs and applies the delay of the call, if it has one.
 func (tctx *ToolContext) applyDelay() {
 	if tctx.args.Delay != nil {
 		d := tctx.args.Delay.Compute()
@@ -150,6 +158,7 @@ func (tctx *ToolContext) applyDelay() {
 	}
 }
 
+// getRequestHeaders gives the headers of the request that the call came with, which it also saves in the request store.
 func getRequestHeaders(ctx context.Context, req *gomcp.CallToolRequest, rs *util.RequestStore) http.Header {
 	var headers http.Header
 	if req.Extra != nil && req.Extra.Header != nil {
@@ -202,6 +211,7 @@ func (tctx *ToolContext) session() (*gomcp.ServerSession, error) {
 	return tctx.req.Session, nil
 }
 
+// notifyClient sends the message to the client of the session as a progress notification, with the progress token of the request, and does nothing if there is no session.
 func notifyClient(ctx context.Context, params gomcp.Params, msg string, session *gomcp.ServerSession, meta gomcp.Meta) {
 	if session == nil {
 		return

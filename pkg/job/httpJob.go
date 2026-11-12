@@ -24,10 +24,12 @@ import (
 	"time"
 )
 
+// runHttpJobWithInput runs an HTTP job with the given markers and raw input as the request payload.
 func (jm *JobManager) runHttpJobWithInput(job *Job, markers map[string]string, rawInput []byte) *JobRunContext {
 	return jm.runJob(job, nil, markers, rawInput)
 }
 
+// invokeHttpTarget invokes the job's HTTP target, storing its results and triggering the output job, while enforcing the job's timeout, max results and stop signal.
 func (jm *JobManager) invokeHttpTarget(job *Job, jobRun *JobRunContext, iteration int, last bool) {
 	job.lock.RLock()
 	target := &job.httpTask.InvocationSpec

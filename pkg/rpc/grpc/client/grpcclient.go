@@ -73,6 +73,7 @@ type GRPCClient struct {
 	connErrorCount atomic.Int32
 }
 
+// CreateGRPCClient creates a gRPC client and connects it.
 func CreateGRPCClient(label string, clientPort int, service *gotogrpc.GRPCService, targetService, url, authority, serverName string, options *GRPCOptions) (*GRPCClient, error) {
 	client, err := NewGRPCClient(label, clientPort, service, url, authority, serverName, options)
 	if err != nil {
@@ -84,6 +85,7 @@ func CreateGRPCClient(label string, clientPort int, service *gotogrpc.GRPCServic
 	return client, nil
 }
 
+// NewGRPCClient creates an unconnected gRPC client, with TLS configured from the options.
 func NewGRPCClient(label string, clientPort int, service *gotogrpc.GRPCService, url, authority, serverName string, options *GRPCOptions) (*GRPCClient, error) {
 	if options == nil {
 		options = &GRPCOptions{}
@@ -105,6 +107,7 @@ func NewGRPCClient(label string, clientPort int, service *gotogrpc.GRPCService, 
 	return c, nil
 }
 
+// configureTLS builds the TLS config and credentials when TLS is enabled (clearing them otherwise) and refreshes the dial options.
 func (c *GRPCClient) configureTLS() {
 	if c.Options.IsTLS {
 		tlsConfig := &tls.Config{
@@ -129,6 +132,7 @@ func (c *GRPCClient) configureTLS() {
 	c.configureDialOptions()
 }
 
+// SetTLSConfig enables TLS on the client with the given config.
 func (c *GRPCClient) SetTLSConfig(tlsConfig *tls.Config) {
 	c.Options.IsTLS = true
 	c.tlsConfig = tlsConfig
@@ -138,6 +142,7 @@ func (c *GRPCClient) SetTLSConfig(tlsConfig *tls.Config) {
 	}
 }
 
+// UpdateTLSConfig changes the TLS server name, version and verification, and reconfigures TLS.
 func (c *GRPCClient) UpdateTLSConfig(serverName string, tlsVersion uint16, verify bool, alpn *gototls.ALPN) {
 	c.TLSServerName = serverName
 	c.Authority = serverName
@@ -146,9 +151,11 @@ func (c *GRPCClient) UpdateTLSConfig(serverName string, tlsVersion uint16, verif
 	c.configureTLS()
 }
 
+// UpdateTLSCerts is a no-op.
 func (c *GRPCClient) UpdateTLSCerts(rootCAs *x509.CertPool, cert []*tls.Certificate) {
 }
 
+// StorePeerCertInfo records the certificate details of the peer.
 func (c *GRPCClient) StorePeerCertInfo(remoteAddr string, commonName string, dnsNames, uris []string, issuer string) {
 	if c.PeerCertInfo == nil {
 		c.PeerCertInfo = gototls.NewPeerCertInfo(remoteAddr)
@@ -160,6 +167,7 @@ func (c *GRPCClient) StorePeerCertInfo(remoteAddr string, commonName string, dns
 	c.PeerCertInfo.Issuer = issuer
 }
 
+// StoreSNI records the SNI and the negotiated ALPN of the connection.
 func (c *GRPCClient) StoreSNI(remoteAddr string, sni, alpn string) {
 	if c.PeerCertInfo == nil {
 		c.PeerCertInfo = gototls.NewPeerCertInfo(remoteAddr)
@@ -169,6 +177,7 @@ func (c *GRPCClient) StoreSNI(remoteAddr string, sni, alpn string) {
 	c.PeerCertInfo.NegotiatedALPN = alpn
 }
 
+// StoreALPN records the ALPN protocols offered by the peer.
 func (c *GRPCClient) StoreALPN(remoteAddr string, alpn []string) {
 	if c.PeerCertInfo == nil {
 		c.PeerCertInfo = gototls.NewPeerCertInfo(remoteAddr)
@@ -177,6 +186,7 @@ func (c *GRPCClient) StoreALPN(remoteAddr string, alpn []string) {
 	c.PeerCertInfo.ALPN = alpn
 }
 
+// UpdatePeerStatus records the handshake progress and end time of the peer connection.
 func (c *GRPCClient) UpdatePeerStatus(remoteAddr string, finished bool, status string) {
 	if c.PeerCertInfo == nil {
 		c.PeerCertInfo = gototls.NewPeerCertInfo(remoteAddr)
@@ -187,6 +197,7 @@ func (c *GRPCClient) UpdatePeerStatus(remoteAddr string, finished bool, status s
 	c.PeerCertInfo.EndAt = time.Now()
 }
 
+// GetPeerCertInfo returns the recorded peer certificate info.
 func (c *GRPCClient) GetPeerCertInfo() *gototls.PeerCertInfo {
 	return c.PeerCertInfo
 }
@@ -195,13 +206,17 @@ type permanentDialError struct {
 	error
 }
 
+// Temporary reports the dial error as not temporary.
 func (e permanentDialError) Temporary() bool {
 	return false
 }
+
+// Timeout reports the dial error as not a timeout.
 func (e permanentDialError) Timeout() bool {
 	return false
 }
 
+// WithContextDialer gives a dial option that tracks connections and fails permanently after repeated dial errors.
 func (c *GRPCClient) WithContextDialer() grpc.DialOption {
 	return grpc.WithContextDialer(func(ctx context.Context, address string) (net.Conn, error) {
 		if c.connErrorCount.Load() > 1 {
@@ -220,6 +235,7 @@ func (c *GRPCClient) WithContextDialer() grpc.DialOption {
 	})
 }
 
+// configureDialOptions builds the client's dial options from the manager defaults, authority, keepalive and TLS settings.
 func (c *GRPCClient) configureDialOptions() {
 	if c.Options.IdleTimeout == 0 {
 		c.Options.IdleTimeout = 10 * time.Minute
@@ -241,18 +257,22 @@ func (c *GRPCClient) configureDialOptions() {
 	}
 }
 
+// GetOpenConnectionCount returns the number of open connections of the client.
 func (c *GRPCClient) GetOpenConnectionCount() int {
 	return c.ConnCount
 }
 
+// GetDialer returns the dialer that the client uses to connect.
 func (c *GRPCClient) GetDialer() *net.Dialer {
 	return &c.Dialer
 }
 
+// Transport returns the client itself as its transport interceptor.
 func (c *GRPCClient) Transport() transport.ITransportIntercept {
 	return c
 }
 
+// Close closes the client's connection if there is one.
 func (c *GRPCClient) Close() {
 	c.connLock.Lock()
 	conn := c.conn
@@ -262,16 +282,19 @@ func (c *GRPCClient) Close() {
 	}
 }
 
+// HTTP returns nil, as this is not an HTTP client.
 func (c *GRPCClient) HTTP() *http.Client {
 	return nil
 }
 
+// GRPC returns the client's gRPC connection.
 func (c *GRPCClient) GRPC() *grpc.ClientConn {
 	c.connLock.Lock()
 	defer c.connLock.Unlock()
 	return c.conn
 }
 
+// serviceName returns the name of the client's service, or empty if it has none.
 func (c *GRPCClient) serviceName() string {
 	c.connLock.Lock()
 	defer c.connLock.Unlock()
@@ -281,30 +304,36 @@ func (c *GRPCClient) serviceName() string {
 	return ""
 }
 
+// getStub returns the dynamic stub of the connection.
 func (c *GRPCClient) getStub() *grpcdynamic.Stub {
 	c.connLock.Lock()
 	defer c.connLock.Unlock()
 	return c.stub
 }
 
+// requestTimeout returns the request timeout of the client's options.
 func (c *GRPCClient) requestTimeout() time.Duration {
 	c.connLock.Lock()
 	defer c.connLock.Unlock()
 	return c.Options.RequestTimeout
 }
 
+// IsGRPC returns true as this is a gRPC client.
 func (c *GRPCClient) IsGRPC() bool {
 	return true
 }
 
+// IsHTTP returns false as this is not an HTTP client.
 func (c *GRPCClient) IsHTTP() bool {
 	return false
 }
 
+// IsH2 returns false, as the client isn't reported as an HTTP/2 client.
 func (c *GRPCClient) IsH2() bool {
 	return false
 }
 
+// createContext builds the outgoing call context with the given metadata or headers, and defaults the request timeout.
 func (c *GRPCClient) createContext(headers map[string]string, md metadata.MD) (context.Context, metadata.MD) {
 	ctx := context.Background()
 	if md != nil {
@@ -321,6 +350,7 @@ func (c *GRPCClient) createContext(headers map[string]string, md metadata.MD) (c
 	return ctx, md
 }
 
+// Connect creates the gRPC connection and dynamic stub, replacing a connection that has failed or shut down.
 func (c *GRPCClient) Connect() error {
 	c.connLock.Lock()
 	defer c.connLock.Unlock()
@@ -350,6 +380,7 @@ func (c *GRPCClient) Connect() error {
 	return nil
 }
 
+// monitorAndAbort closes the connection if it keeps failing to connect beyond a 5-second retry budget.
 func (c *GRPCClient) monitorAndAbort() {
 	conn := c.GRPC()
 	if conn == nil {
@@ -376,6 +407,7 @@ func (c *GRPCClient) monitorAndAbort() {
 	}()
 }
 
+// ConnectWithHeadersOrMD connects and returns the outgoing call context and metadata built from the given metadata or headers.
 func (c *GRPCClient) ConnectWithHeadersOrMD(headers map[string]string, md metadata.MD) (context.Context, metadata.MD, error) {
 	err := c.Connect()
 	if err != nil {
@@ -385,6 +417,7 @@ func (c *GRPCClient) ConnectWithHeadersOrMD(headers map[string]string, md metada
 	return ctx, md, nil
 }
 
+// LoadServiceMethodFromReflection loads the service and method from the server's reflection (v1, falling back to v1alpha) as the client's service.
 func (c *GRPCClient) LoadServiceMethodFromReflection(serviceName, methodName string) (err error) {
 	conn := c.GRPC()
 	service, err := gotogrpc.LoadRemoteReflectedServiceV1(conn, serviceName, methodName)
@@ -397,6 +430,7 @@ func (c *GRPCClient) LoadServiceMethodFromReflection(serviceName, methodName str
 	return
 }
 
+// LoadRemoteReflectedServices connects to the upstream and registers the services that its reflection exposes.
 func LoadRemoteReflectedServices(upstream string) (err error) {
 	c, err := CreateGRPCClient("Reflect", global.Self.ServerPort, nil, "", upstream, "", "", &GRPCOptions{IsTLS: false, VerifyTLS: false})
 	if err != nil {

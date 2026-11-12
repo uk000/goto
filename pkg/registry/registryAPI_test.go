@@ -910,6 +910,13 @@ func TestGetPeersExportedHelper(t *testing.T) {
 	assertEqual(t, "pod name -> address", GetPeers("p1", nil), map[string]string{"pod-a": "10.0.0.1:8080", "pod-b": "10.0.0.2:8080"})
 }
 
+// An unknown peer has no pods, and asking for it must not panic.
+func TestGetPeersOfUnknownPeerIsEmpty(t *testing.T) {
+	h := newHarness(t)
+	h.addPeer("p1", "10.0.0.1:8080", "pod-a")
+	assertEqual(t, "pods of unknown peer", GetPeers("nosuchpeer", nil), map[string]string{})
+}
+
 // ---------------------------------------------------------------------------------------------
 // Labeled lockers
 // ---------------------------------------------------------------------------------------------
@@ -2544,4 +2551,241 @@ func TestCloneFromRegistry_InvalidAndUnreachable(t *testing.T) {
 	// (the failure message used to be overwritten, so the body claimed success even though the status was 500)
 	assertContains(t, resp.Body, "failed to clone peers data from registry ["+url+"]")
 	assertNotContains(t, resp.Body, "Cloned data from registry")
+}
+
+// opening, or storing in, a locker whose label has an empty segment used to nil out the current locker.
+func TestInvalidLockerLabelsAreRejected(t *testing.T) {
+	h := newHarness(t)
+	for _, target := range []string{
+		"/registry/lockers/,x/open",
+		"/registry/lockers/open/,x",
+		"/registry/lockers/x,/open",
+		"/registry/lockers/x,,y/open",
+		"/registry/context/c1/lockers/,x/open",
+	} {
+		assertStatus(t, h.do("POST", target, ""), http.StatusBadRequest)
+	}
+	for _, target := range []string{
+		"/registry/lockers/,x/store/k",
+		"/registry/lockers/x,,y/store/k",
+		"/registry/lockers/,x/k/store",
+		"/registry/lockers/,x/k/add",
+		"/registry/context/c1/lockers/,x/store/k",
+		"/registry/lockers/,x/remove/k",
+		"/registry/lockers/,x/k/remove",
+	} {
+		assertStatus(t, h.do("POST", target, "v"), http.StatusBadRequest)
+	}
+
+	// the current locker is still the default one, and the APIs that depend on it still work
+	labels := h.get("/registry/lockers/labels").asMap(t)
+	if len(labels) != 1 {
+		t.Errorf("lockers = %v, want just the default locker", labels)
+	}
+	if def, _ := labels["default"].(map[string]interface{}); def == nil || def["current"] != true {
+		t.Errorf("default locker is not current: %v", labels)
+	}
+	h.addPeer("p1", "1.1.1.1:1", "pod1")
+	assertStatus(t, h.do("POST", "/registry/lockers/current/store/k", "v"), http.StatusOK)
+	assertStatus(t, h.get("/registry/lockers/current/get/k"), http.StatusOK)
+
+	// valid labels are not affected
+	assertStatus(t, h.do("POST", "/registry/lockers/ok,sub/open", ""), http.StatusOK)
+	assertStatus(t, h.do("POST", "/registry/lockers/ok,sub/store/k", "v"), http.StatusOK)
+}
+
+// badPeersPayloads are peers, as they might be loaded from a hand-edited dump or cloned from another registry, that
+// the peer APIs used to panic on afterwards.
+var badPeersPayloads = map[string]string{
+	"null peer":        `{"a":null}`,
+	"null pod":         `{"c":{"name":"c","pods":{"x":null}}}`,
+	"no pods or epoch": `{"b":{"name":"b"}}`,
+	"null epochs":      `{"d":{"name":"d","pods":{"1.1.1.1:1":{"name":"d1","address":"1.1.1.1:1","pastEpochs":[null]}},"podEpochs":{"1.1.1.1:1":[null],"2.2.2.2:2":null}}}`,
+	"all of them":      `{"a":null,"b":{"name":"b"},"c":{"name":"c","pods":{"x":null}}}`,
+}
+
+// liveAddress returns the address of a server that answers every request with 200, to register as a peer pod.
+func liveAddress(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	t.Cleanup(srv.Close)
+	return srv.Listener.Addr().String()
+}
+
+// exercisePeerAPIs calls the APIs that go through all the peers, and fails the test if any of them panics.
+func exercisePeerAPIs(h *harness) {
+	h.t.Helper()
+	h.get("/registry/peers")
+	h.get("/registry/peers/health")
+	h.post("/registry/peers/health/cleanup", "")
+	h.post("/registry/peers/targets/invoke/all", "")
+	h.post("/registry/peers/targets/stop/all", "")
+	h.post("/registry/peers/lockers/clear", "")
+	h.post("/registry/peers/clear/epochs", "")
+	h.get("/registry/peers/targets")
+	h.get("/registry/peers/jobs")
+	h.get("/registry/dump")
+}
+
+func TestLoadDumpWithNullOrPartialPeers(t *testing.T) {
+	for name, peers := range badPeersPayloads {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			resp := h.post("/registry/load", fmt.Sprintf(`{"peers":%s}`, peers))
+			assertStatus(t, resp, http.StatusOK)
+			for peer, p := range h.peers() {
+				if p == nil || p.Pods == nil || p.PodEpochs == nil {
+					t.Errorf("peer %q was loaded as %+v, want non-nil pods and epochs", peer, p)
+				}
+				for address, pod := range p.Pods {
+					if pod == nil {
+						t.Errorf("peer %q pod %q was loaded as nil", peer, address)
+					}
+				}
+			}
+			if _, present := h.peers()["a"]; present {
+				t.Errorf("null peer a was loaded")
+			}
+			exercisePeerAPIs(h)
+			// peers that were loaded partially can register again
+			addr := liveAddress(t)
+			for _, peer := range []string{"b", "c", "d"} {
+				h.addPeer(peer, addr, peer+"-pod")
+			}
+			assertStatus(t, h.get("/registry/peers/health"), http.StatusOK)
+			if pods := h.podsOf("b"); pods[addr] == nil {
+				t.Errorf("peer b did not register after a partial load: %v", pods)
+			}
+		})
+	}
+}
+
+func TestLoadDumpWithNullTargetsAndJobs(t *testing.T) {
+	h := newHarness(t)
+	resp := h.post("/registry/load", `{"peerTargets":{"a":null,"b":{"t":null}},"peerJobs":{"a":null,"b":{"j":null}}}`)
+	assertStatus(t, resp, http.StatusOK)
+	exercisePeerAPIs(h)
+	// the peers have no pods, so nothing is pushed anywhere, but the targets and jobs are saved
+	assertStatus(t, h.post("/registry/peers/a/targets/add", targetJSON), http.StatusOK)
+	assertStatus(t, h.post("/registry/peers/b/targets/add", targetJSON), http.StatusOK)
+	assertStatus(t, h.post("/registry/peers/a/jobs/add", jobJSON), http.StatusOK)
+	assertStatus(t, h.post("/registry/peers/b/jobs/add", jobJSON), http.StatusOK)
+	assertContains(t, h.get("/registry/peers/b/targets").Body, `"t1"`)
+	assertContains(t, h.get("/registry/peers/b/jobs").Body, `"j1"`)
+}
+
+// serveRegistryClone serves what another registry reports on the routes that cloneFrom reads.
+func serveRegistryClone(t *testing.T, peers, targets, jobs string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/registry/peers":
+			fmt.Fprint(w, peers)
+		case "/registry/lockers":
+			fmt.Fprint(w, `{"default":{"label":"default","current":true}}`)
+		case "/registry/peers/targets":
+			fmt.Fprint(w, targets)
+		case "/registry/peers/jobs":
+			fmt.Fprint(w, jobs)
+		case "/registry/peers/track/headers":
+			fmt.Fprint(w, `""`)
+		case "/registry/peers/probes":
+			fmt.Fprint(w, `{}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestCloneFromRegistryWithNullOrPartialPeers(t *testing.T) {
+	for name, peers := range badPeersPayloads {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			srv := serveRegistryClone(t, peers, `{"a":null,"b":{"t":null}}`, `{"a":null,"b":{"j":null}}`)
+			assertStatus(t, h.do("POST", "/registry/cloneFrom?url="+srv.URL, ""), http.StatusOK)
+			if _, present := h.peers()["a"]; present {
+				t.Errorf("null peer a was cloned")
+			}
+			for _, p := range h.peers() {
+				for address, pod := range p.Pods {
+					if !pod.Offline {
+						t.Errorf("cloned pod %q is not marked offline", address)
+					}
+				}
+			}
+			exercisePeerAPIs(h)
+			addr := liveAddress(t)
+			for _, peer := range []string{"b", "c", "d"} {
+				h.addPeer(peer, addr, peer+"-pod")
+			}
+		})
+	}
+}
+
+func TestCloneFromRegistryWithNullTopLevelData(t *testing.T) {
+	h := newHarness(t)
+	h.addPeer("p1", "1.1.1.1:1", "pod1")
+	srv := serveRegistryClone(t, `null`, `null`, `null`)
+	assertStatus(t, h.do("POST", "/registry/cloneFrom?url="+srv.URL, ""), http.StatusOK)
+	exercisePeerAPIs(h)
+	// adding a peer, a target or a job writes to the registry's maps, which must not be nil after the clone
+	h.addPeer("p2", liveAddress(t), "pod2")
+	assertStatus(t, h.post("/registry/peers/zz/targets/add", targetJSON), http.StatusOK)
+	assertStatus(t, h.post("/registry/peers/zz/jobs/add", jobJSON), http.StatusOK)
+}
+
+// the targets, jobs, dump and startup data were encoded from the registry's live maps after the lock was
+// released, while writers were updating them (a fatal "concurrent map iteration and map write").
+func TestConcurrentRegistryWritesAndReads(t *testing.T) {
+	h := newHarness(t)
+	// x is not registered as a peer, so no target or job is pushed anywhere, but they are saved
+	var wg sync.WaitGroup
+	var failures sync.Map
+	run := func(count int, f func(i int) (response, interface{})) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < count; i++ {
+				if resp, panicked := f(i); panicked != nil {
+					failures.Store(fmt.Sprint(panicked), true)
+				} else if resp.Code >= 500 {
+					failures.Store(fmt.Sprintf("status %d: %s", resp.Code, resp.Body), true)
+				}
+			}
+		}()
+	}
+	const n = 300
+	run(n, func(i int) (response, interface{}) {
+		return h.serve("POST", "/registry/peers/x/targets/add", fmt.Sprintf(`{"name":"t%d","method":"GET","url":"http://target.test/foo"}`, i))
+	})
+	run(n, func(i int) (response, interface{}) {
+		return h.serve("POST", "/registry/peers/x/jobs/add", fmt.Sprintf(`{"name":"j%d","task":{"cmd":"echo","args":["hi"]}}`, i))
+	})
+	run(n, func(i int) (response, interface{}) {
+		return h.serve("POST", "/registry/peers/add", peerJSON(fmt.Sprintf("n%d", i%10), fmt.Sprintf("10.0.0.%d:80", i%50), "pod"))
+	})
+	run(n, func(i int) (response, interface{}) {
+		return h.serve("POST", "/registry/peers/x/1.1.1.1:1/locker/store/k"+fmt.Sprint(i%10), "v")
+	})
+	for _, target := range []string{
+		"/registry/peers/x/targets", "/registry/peers/targets", "/registry/peers/x/jobs", "/registry/peers/jobs",
+		"/registry/dump", "/registry/peers",
+	} {
+		target := target
+		run(n, func(int) (response, interface{}) { return h.serve("GET", target, "") })
+	}
+	run(n/3, func(i int) (response, interface{}) {
+		return h.serve("POST", "/registry/peers/add", peerJSON("y", fmt.Sprintf("10.1.0.%d:80", i%20), "pod"))
+	})
+	wg.Wait()
+	failures.Range(func(k, _ interface{}) bool {
+		t.Errorf("request failed: %v", k)
+		return true
+	})
+	body := h.get("/registry/peers/x/targets").Body
+	if !strings.Contains(body, `"t0"`) || !strings.Contains(body, fmt.Sprintf(`"t%d"`, n-1)) {
+		t.Errorf("targets of x are missing some of the added ones: %.200s", body)
+	}
 }

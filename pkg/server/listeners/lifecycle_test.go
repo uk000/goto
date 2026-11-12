@@ -16,7 +16,10 @@
 
 package listeners
 
-import "testing"
+import (
+	"sync"
+	"testing"
+)
 
 // These tests look at the flags of the servers that are started, which the listeners keep as atomics.
 
@@ -80,4 +83,50 @@ func TestOnHTTPAndJSONRPCStartStop(t *testing.T) {
 		t.Errorf("jsonRPCStarted = %t, server = %v after OnJSONRPCStop, want stopped", jsonRPCStarted.Load(), jsonRPCServer)
 	}
 	jsonRPCServer = rpc
+}
+
+// The HTTP server is handed over when it starts, and forgotten when it stops, while listeners that are opened pick it up to be
+// served by it.
+func TestOpeningListenersWhileTheHTTPServerStartsAndStops(t *testing.T) {
+	setup(t)
+	savedInitial := initialListeners
+	initialListeners = nil
+	started := initialHTTPStarted
+	initialHTTPStarted = true
+	grpcWas, httpWas := grpcStarted.Load(), httpStarted.Load()
+	grpcStarted.Store(false)
+	shared, h2s := httpServer, h2Server
+	defer func() {
+		serversLock.Lock()
+		httpServer, h2Server = shared, h2s
+		serversLock.Unlock()
+		initialListeners, initialHTTPStarted = savedInitial, started
+		grpcStarted.Store(grpcWas)
+		httpStarted.Store(httpWas)
+	}()
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			OnHTTPStart(shared, h2s)
+			OnHTTPStop()
+		}
+	}()
+	for i := 0; i < 15; i++ {
+		l := newListener(freePort(t), "http", "l.test", true)
+		forget(t, l.Port)
+		if err, msg := AddOrUpdateListener(l); err != nil {
+			t.Errorf("AddOrUpdateListener failed: %s", msg)
+		}
+	}
+	close(stop)
+	wg.Wait()
 }

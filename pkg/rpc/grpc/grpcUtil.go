@@ -33,6 +33,7 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
+// ParseRequest marshals a dynamic message request to JSON bytes.
 func ParseRequest(req interface{}) ([]byte, error) {
 	msg, ok := req.(*dynamicpb.Message)
 	if !ok {
@@ -53,6 +54,7 @@ func ParseRequest(req interface{}) ([]byte, error) {
 // 	}
 // }
 
+// GetRequestHeaders returns the incoming metadata of the context as a header map, or an error if there is none.
 func GetRequestHeaders(ctx context.Context) (map[string][]string, error) {
 	headers := make(map[string][]string)
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
@@ -66,6 +68,7 @@ func GetRequestHeaders(ctx context.Context) (map[string][]string, error) {
 	return headers, nil
 }
 
+// GetRequestHost finds the host of a request from the :authority, host or hostName header, and sets the host header from :authority.
 func GetRequestHost(md map[string][]string) string {
 	host := ""
 	if v, ok := md[":authority"]; ok {
@@ -79,6 +82,7 @@ func GetRequestHost(md map[string][]string) string {
 	return host
 }
 
+// GetRequestRemoteAddr returns the remoteAddr of the request headers, or an empty string.
 func GetRequestRemoteAddr(md map[string][]string) string {
 	remoteAddr := ""
 	if v, ok := md["remoteAddr"]; ok {
@@ -87,6 +91,7 @@ func GetRequestRemoteAddr(md map[string][]string) string {
 	return remoteAddr
 }
 
+// ReadRequest decodes the request with dec into a dynamic message of the input type of the method, or returns nil if it can't be decoded.
 func ReadRequest(method *GRPCServiceMethod, dec func(interface{}) error) *dynamicpb.Message {
 	req := dynamicpb.NewMessage(method.InputType())
 	if err := dec(req); err != nil {
@@ -95,6 +100,7 @@ func ReadRequest(method *GRPCServiceMethod, dec func(interface{}) error) *dynami
 	return req
 }
 
+// SendStreamResponse sends the responses from index from up to to, wrapping around to the first response when it runs past the last.
 func SendStreamResponse(method *GRPCServiceMethod, stream grpc.ServerStream, responses []proto.Message, from, to int) error {
 	if len(responses) == 0 {
 		return nil
@@ -119,6 +125,7 @@ func SendStreamResponse(method *GRPCServiceMethod, stream grpc.ServerStream, res
 	return nil
 }
 
+// SendResponse unmarshals the JSON response into a dynamic message of the descriptor and sends it on the stream.
 func SendResponse(desc protoreflect.MessageDescriptor, stream grpc.ServerStream, resp []byte) error {
 	dmsg := dynamicpb.NewMessage(desc)
 	if err := protojson.Unmarshal(resp, dmsg); err != nil {
@@ -130,6 +137,7 @@ func SendResponse(desc protoreflect.MessageDescriptor, stream grpc.ServerStream,
 	return nil
 }
 
+// CommonHandler gets the port, remote address, method, headers and authority of a gRPC call from its context, and fails if the peer, the method or the metadata can't be found.
 func CommonHandler(ctx context.Context, stream grpc.ServerStream) (ctx2 context.Context, method *GRPCServiceMethod, port int, remoteAddr *net.TCPAddr, authority string, md map[string][]string, err error) {
 	if ctx == nil {
 		ctx = stream.Context()
@@ -173,6 +181,7 @@ func CommonHandler(ctx context.Context, stream grpc.ServerStream) (ctx2 context.
 	return
 }
 
+// LogRequest logs the details of a request when server logs are enabled, with the headers and the mini body as the flags ask.
 func LogRequest(ctx context.Context, port int, service, method, authority string, requestHeaders any, requestCount, requestBodyLength int, requestMiniBody string) {
 	if !global.Flags.EnableServerLogs {
 		return
@@ -194,6 +203,7 @@ func LogRequest(ctx context.Context, port int, service, method, authority string
 	util.LogMessage(ctx, msg)
 }
 
+// LogResponse logs the status and length of a response when server logs are enabled, with the headers if the flag asks.
 func LogResponse(ctx context.Context, responseHeaders any, responseStatus, responseCount, responseLength int, action string) {
 	if !global.Flags.EnableServerLogs {
 		return

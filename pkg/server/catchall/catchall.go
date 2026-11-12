@@ -32,16 +32,19 @@ var (
 	Middleware = middleware.NewMiddleware("catchall", setRoutes, middlewareFunc)
 )
 
+// setRoutes registers the match-everything route that answers with the catchall response.
 func setRoutes(r *mux.Router) {
 	r.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool { return true }).HandlerFunc(respond)
 }
 
+// respond counts the request and sends the default echo response.
 func respond(w http.ResponseWriter, r *http.Request) {
 	metrics.UpdateRequestCount("catchAll")
 	util.AddLogMessage("CatchAll", r)
 	SendDefaultResponse(w, r)
 }
 
+// SendDefaultResponse writes the request's echo response plus timestamp and port as JSON or YAML.
 func SendDefaultResponse(w http.ResponseWriter, r *http.Request) {
 	response := echo.GetEchoResponseForRequest(w, r)
 	response["At"] = time.Now().Local().Format(time.DateTime)
@@ -49,6 +52,7 @@ func SendDefaultResponse(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonOrYAMLPayload(w, response, util.IsAcceptYAML(r))
 }
 
+// middlewareFunc calls the next handler, or at the end of the chain sends the default response unless the request is known non-traffic.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {

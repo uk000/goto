@@ -4,7 +4,7 @@
 
 `Goto` can act as an HTTP, TCP, UDP or MCP proxy that sits between a downstream client and an upstream service, allowing you a point in the network where the communication between the downstream client and upstream service can be observed and affected.
 The HTTP Proxy implementation is lot more comprehensive than other proxies in that it allows for manipulation of requests and responses, and can perform multiplexing to multiple upstreams.
-The TCP and UDP Proxy feature only supports forwarding to a single upstream, with some basic tracking.
+The TCP and UDP Proxy feature forward each connection (TCP) or datagram (UDP) to one upstream, with some basic tracking (TCP routes by TLS SNI if asked to, and can also act as an HTTP CONNECT proxy). The gRPC proxy forwards the calls of a service to an upstream gRPC endpoint, optionally teeing the traffic to another port.
 The MCP proxy feature supports proxying all MCP traffic on a port, or forwarding requests for a specific MCP tool call.
 
 See the following docs for corresponding protocol proxies:
@@ -16,9 +16,9 @@ See the following docs for corresponding protocol proxies:
 
 ### Chaos
 In addition to request routing, the `goto` proxy also offers some chaos features:
-- A `delay` can be configured per target that's applied to all communication in either direction for that target. For HTTP proxy, the delay is applied before sending the request and response. For TCP proxy, the delay is applied to each packet write.
-    > Note that this delay feature is separate from the one offered by `Goto` as a Server, via [URIs](#-uris) and [Response Delay](#-response-delay). The URI delay feature in particular allows for more fine-grained delay configuration that can be used in conjunction with the proxy feature to apply delays to URIs that eventually get routed via proxy.
-- A `drop` percentage can be configured per target that specifies what percentage of writes should be skipped in either direction for that target. If configured, `goto` will skip every `100/{pct}` write to/from this target. For TCP targets, the drop pct gets applied across packets in both directions. For HTTP targets, when it's time to drop a write, it'll choose to drop either of the request or the response based on a random coin flip.
+- A `delay` can be configured that's applied to all communication in either direction. For the HTTP proxy it is the `delay` of the `trafficConfig` of a target or trigger, applied before each upstream request (and reported in the `Goto-Proxy-Delay` response header). For the TCP proxy it is the `delay` of an upstream, applied to each packet write (and the CONNECT mode has its own delay). For the UDP proxy it is applied before sending to the upstream and before sending the answer back. For the gRPC proxy it is applied to each proxied call. The HTTP `trafficConfig` also has `retries`, `retryDelay` and `retryOn` to retry upstream calls on given response statuses.
+    > Note that this delay feature is separate from the one offered by `Goto` as a Server, via [URIs](../server/request/README.md#request-uri-tracking) and [Response Delay](../server/response/delay/README.md#response-delay). The URI delay feature in particular allows for more fine-grained delay configuration that can be used in conjunction with the proxy feature to apply delays to URIs that eventually get routed via proxy.
+- A `dropPct` percentage can be configured on a TCP upstream that specifies what percentage of writes should be skipped in either direction. If configured, `goto` will skip every `100/{pct}` write to/from the upstream, applied across packets in both directions. (The HTTP proxy has no drop setting.)
   > While technically this is not a true network TCP packet drop, it does allow for some interesting chaos testing where data is randomly lost between the two parties.
   > If you want to drop some TCP writes for HTTP traffic, you can configure the port in `goto` as a TCP port and use the TCP features described below while the client and upstream still communicate over HTTP.
   > For TLS traffic, the initial TLS handshake is also subject to the drop, which can create more chaos by randomly failing TLS handshake.
@@ -27,39 +27,34 @@ In addition to request routing, the `goto` proxy also offers some chaos features
 
 
 
-#### Common Proxy Admin APIs
-###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+#### Proxy Admin APIs
+###### <small>* Unless the URI names a port, these APIs apply to the port that the request arrives on, and can be invoked with prefix `/port={port}/...` to configure/read data of one port via another (the port must already be a listener of this `goto`; otherwise the request is answered `200` with `Port [{port}] not configured` and nothing happens).</small>
 
+There is no common `/proxy/targets/...`, `/proxy/enable` or `/proxy/report` API: each proxy type has its own APIs, documented in its own README.
+
+|Proxy|APIs|Details|
+|---|---|---|
+| HTTP | `/proxy/http/...` (targets, headers, enable/disable, proxy responses, trackers) | [HTTP Proxy APIs](http/README.md) |
+| TCP and HTTP CONNECT | `/proxy/tcp/...` (`/proxy/tcp/{port}?address=`, upstreams, report, `http/connect/...`) | [TCP Proxy APIs](tcp/README.md) |
+| UDP | `/proxy/udp/{port}/...` (and the equivalent `/server/udp/{port}/...`) | [UDP Proxy APIs](udp/README.md) |
+| gRPC | `/proxy/grpc/...` | [gRPC Proxy APIs](grpc/README.md) |
+| MCP | `/proxy/mcp/...` | [MCP Proxy](mcp/README.md) |
+
+Proxies can also be configured at startup with the `proxy` section of a config file (list of `http`, `tcp` and `grpc` entries, see [sample-proxy-config.yaml](sample-proxy-config.yaml)). The startup loads only `http`, `tcp` and `grpc` entries; there is no `udp` entry.
+
+#### Tracker APIs shared by the proxies
 |METHOD|URI|Description|
 |---|---|---|
-| POST | /proxy/enable  | Enable proxy feature on the port |
-| POST | /proxy/disable | Disable proxy feature on the port |
-| GET | /proxy/report | Get a report of the activity so far for all targets (HTTP + TCP) |
-| GET | /proxy/all/report | Get a combined report of all proxies (all ports) |
-| POST | /proxy/report/clear | Clear all the accumulated report counts/info |
-| POST | /proxy/all/report/clear | Clear reports of all proxies (all ports)  |
+| GET | /proxy/http/trackers<br/>/proxy/http/trackers/all | HTTP proxy counters of the port (`{"port":N,"enabled":true,"http":{...}}`) or of all the ports |
+| POST | /proxy/trackers/clear | Reset the HTTP proxy tracker of the port. Answers `200` `Proxy[8080]: HTTP Proxy Tracking Info Cleared`. |
+| POST | /proxy/trackers/all/clear | Reset the HTTP proxy trackers of all ports |
+| GET | /proxy/tcp<br/>/proxy/tcp/all | TCP proxy report including its tracker, of the port or of all ports |
+| GET | /proxy/grpc/status | gRPC proxy report including its tracker, of the port |
 
+There is no tracker API for the UDP proxy in this version, and the TCP and gRPC trackers are cleared only by clearing/reconfiguring the proxy (`POST /proxy/grpc/clear`, the startup config).
 
-#### Common Proxy Targets Admin APIs
-###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+The per-target, per-protocol knobs are fields of the targets: HTTP `trafficConfig` (`delay`, `retries`, `retryDelay`, `retryOn`, `transparent`, ...), TCP upstream `delay`, `retries`, `retryDelay` and `dropPct`, gRPC and UDP `delay`.
 
-|METHOD|URI|Description|
-|---|---|---|
-| POST |	/proxy/targets/clear            | Remove all proxy targets |
-| PUT, POST |	/proxy/targets/add  | Add target for proxying requests [see `Proxy Target JSON Schema`](#proxy-target-json-schema) |
-| POST | /proxy/targets<br/>/`{target}`/remove  | Remove a proxy target |
-| POST | /proxy/targets<br/>/`{target}`/enable  | Enable a proxy target |
-| POST | /proxy/targets<br/>/`{target}`/disable | Disable a proxy target |
-| PUT, POST | /proxy/targets<br/>/`{target}`/delay=`{delay}` | Configure a delay to be applied to the requests/responses or tcp packets going to/from the given target |
-| POST | /proxy/targets<br/>/`{target}`/delay/clear | Clears any configured delay for the given target |
-| PUT, POST | /proxy/targets<br/>/`{target}`/drop=`{pct}` | Configure a percentage of writes to be dropped to/from the given target. If configured, `goto` will skip every `100/{pct}` write to/from this target. For TCP, this results in dropping packets in both directions. For HTTP, it'll choose to drop either of the request or the response based on a random coin flip. |
-| POST | /proxy/targets<br/>/`{target}`/drop/clear | Clears any configured drop for the given target so that the traffic can go back to normal |
-| GET |	/proxy/targets                  | List all proxy targets |
-| GET | /proxy/targets<br/>/`{target}`/report | Get a report of the activity so far for the given target |
-
-
-
-</details>
 
 See [Proxy Example](../../docs/proxy-example.md)
 

@@ -110,12 +110,14 @@ var (
 	proxyLock            sync.RWMutex
 )
 
+// init hooks the gRPC proxy into the util and gRPC packages, which call it through function variables.
 func init() {
 	util.WillProxyGRPC = _WillProxyGRPC
 	gotogrpc.ProxyGRPCUnary = ProxyGRPCUnary
 	gotogrpc.ProxyGRPCStream = ProxyGRPCStream
 }
 
+// _WillProxyGRPC adapts WillProxyGRPC to the untyped method that util passes in.
 func _WillProxyGRPC(port int, method any) bool {
 	m, ok := method.(*gotogrpc.GRPCServiceMethod)
 	if !ok {
@@ -124,6 +126,7 @@ func _WillProxyGRPC(port int, method any) bool {
 	return WillProxyGRPC(port, m)
 }
 
+// WillProxyGRPC tells whether calls of the method on the port are proxied, or replayed from a tee log.
 func WillProxyGRPC(port int, method *gotogrpc.GRPCServiceMethod) bool {
 	if method == nil || method.Service == nil {
 		return false
@@ -167,12 +170,14 @@ func (p *GRPCProxy) getTeeLogLocked(service, method string) *GRPCSessionLog {
 	return teeMethods["*"]
 }
 
+// getTeeLog finds the tee session log of the method of the service, or of all the methods of the service, under the lock.
 func (p *GRPCProxy) getTeeLog(service, method string) *GRPCSessionLog {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	return p.getTeeLogLocked(service, method)
 }
 
+// getServiceProxy returns the proxy that the service has on the port, or nil if it has none.
 func (p *GRPCProxy) getServiceProxy(service string) *GRPCServiceProxy {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
@@ -190,6 +195,7 @@ func (p *GRPCProxy) getTargetMethodName(sp *GRPCServiceProxy, method *gotogrpc.G
 	return method.Name
 }
 
+// getTracker returns the tracker of the proxy.
 func (p *GRPCProxy) getTracker() *GRPCProxyTracker {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
@@ -204,6 +210,7 @@ func (p *GRPCProxy) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*plain)(p))
 }
 
+// ProxyGRPCUnary proxies a unary call to the upstream of its service (or replays it from a tee log), and logs and tracks it.
 func ProxyGRPCUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceMethod, md metadata.MD, inputs []proto.Message) (output []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
 	proxy := GetPortProxy(port)
 	if t := proxy.getTeeLog(method.Service.Name, method.Name); t != nil {
@@ -292,6 +299,7 @@ func ProxyGRPCUnary(ctx context.Context, port int, method *gotogrpc.GRPCServiceM
 	return
 }
 
+// ProxyGRPCStream proxies a streaming call to the upstream of its service by opening a session and streaming it, or replays it from a tee log.
 func ProxyGRPCStream(ctx context.Context, port int, method *gotogrpc.GRPCServiceMethod, downstreamAddr string,
 	md metadata.MD, downstream gotogrpc.GRPCStream) (receiveCount, sendCount int, err error) {
 	proxy := GetPortProxy(port)
@@ -307,12 +315,14 @@ func ProxyGRPCStream(ctx context.Context, port int, method *gotogrpc.GRPCService
 	return
 }
 
+// createResponse builds the output message of the method from its JSON form.
 func (p *GRPCProxy) createResponse(method *gotogrpc.GRPCServiceMethod, json any) (msg proto.Message, err error) {
 	msg = dynamicpb.NewMessage(method.OutputType())
 	err = protojson.Unmarshal(util.ToJSONBytes(json), msg)
 	return
 }
 
+// addTeeHeaders adds the headers that tell that a response was replayed by the tee proxy.
 func (p *GRPCProxy) addTeeHeaders(respHeaders metadata.MD) metadata.MD {
 	util.AddHeaderWithPrefixL("TeeProxy-", constants.HeaderGotoHost, global.Self.HostLabel, respHeaders)
 	util.AddHeaderWithPrefixL("TeeProxy-", constants.HeaderGotoPort, strconv.Itoa(p.Port), respHeaders)
@@ -321,6 +331,7 @@ func (p *GRPCProxy) addTeeHeaders(respHeaders metadata.MD) metadata.MD {
 	return respHeaders
 }
 
+// teeProxyGRPCUnary replays the logged server messages and headers as the response of a unary call.
 func (p *GRPCProxy) teeProxyGRPCUnary(method *gotogrpc.GRPCServiceMethod, sessionLog *GRPCSessionLog) (output []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
 	if sessionLog == nil {
 		return
@@ -345,6 +356,7 @@ func (p *GRPCProxy) teeProxyGRPCUnary(method *gotogrpc.GRPCServiceMethod, sessio
 	return
 }
 
+// getLogIDs returns the sorted ids of the messages of the log, and the set of ids that the headers of the log have.
 func (p *GRPCProxy) getLogIDs(sessionLog *GRPCSessionLog) (messageIDs []int, headerIDs map[int]bool) {
 	messageIDs = make([]int, 0, len(sessionLog.ServerMessageLog)+len(sessionLog.ClientMessageLog))
 	for index := range sessionLog.ServerMessageLog {
@@ -364,6 +376,7 @@ func (p *GRPCProxy) getLogIDs(sessionLog *GRPCSessionLog) (messageIDs []int, hea
 	return
 }
 
+// teeProxyGRPCStream replays the logged server messages to the downstream of a streaming call while it reads the messages of the client.
 func (p *GRPCProxy) teeProxyGRPCStream(method *gotogrpc.GRPCServiceMethod, downstream gotogrpc.GRPCStream, sessionLog *GRPCSessionLog) (receiveCount, sendCount int, err error) {
 	if sessionLog == nil {
 		return
@@ -457,6 +470,7 @@ func (p *GRPCProxy) replayTeeBidiStream(method *gotogrpc.GRPCServiceMethod, sess
 	return
 }
 
+// sendTeeProxyMessages sends the logged messages after the last index to the downstream, in the order of their ids, and tells the last index that it sent.
 func (p *GRPCProxy) sendTeeProxyMessages(method *gotogrpc.GRPCServiceMethod, maxMsgId, lastIndex, prevSendCount int, headerIDs map[int]bool, messageLog map[int]any, downstream gotogrpc.GRPCStream) (sendIndex int, sendCount int, err error) {
 	sendCount = prevSendCount
 	sendAll := false
@@ -486,6 +500,7 @@ func (p *GRPCProxy) sendTeeProxyMessages(method *gotogrpc.GRPCServiceMethod, max
 	return
 }
 
+// GetPortProxy returns the gRPC proxy of the port, creating and registering it if it doesn't exist.
 func GetPortProxy(port int) *GRPCProxy {
 	proxyLock.RLock()
 	proxy := portProxy[port]
@@ -502,6 +517,7 @@ func GetPortProxy(port int) *GRPCProxy {
 	return proxy
 }
 
+// AddPortProxy registers the proxy for its port, replacing any, and resets its tracker.
 func AddPortProxy(p *GRPCProxy) {
 	proxyLock.Lock()
 	portProxy[p.Port] = p
@@ -509,12 +525,14 @@ func AddPortProxy(p *GRPCProxy) {
 	p.initTracker()
 }
 
+// RemovePortProxy unregisters the proxy of the port.
 func RemovePortProxy(port int) {
 	proxyLock.Lock()
 	delete(portProxy, port)
 	proxyLock.Unlock()
 }
 
+// newGRPCProxy creates an enabled proxy for the port, with no services and a fresh tracker.
 func newGRPCProxy(port int) *GRPCProxy {
 	p := &GRPCProxy{
 		Port:           port,
@@ -527,6 +545,7 @@ func newGRPCProxy(port int) *GRPCProxy {
 	return p
 }
 
+// newGRPCServiceProxy creates the proxy from a service to a target service (the same service if none) at the upstream endpoint, with a client for it.
 func newGRPCServiceProxy(port int, from, to *gotogrpc.GRPCService, endpoint, authority string, tracker *GRPCProxyTracker) (*GRPCServiceProxy, error) {
 	if from == nil || endpoint == "" {
 		return nil, errors.New("no service/endpoint given")
@@ -556,6 +575,7 @@ func newGRPCServiceProxy(port int, from, to *gotogrpc.GRPCService, endpoint, aut
 	return sp, nil
 }
 
+// Clear removes all the service proxies and tee services of the proxy and resets its tracker.
 func (p *GRPCProxy) Clear() {
 	p.lock.Lock()
 	p.ServiceProxies = map[string]*GRPCServiceProxy{}
@@ -564,12 +584,14 @@ func (p *GRPCProxy) Clear() {
 	p.initTracker()
 }
 
+// initTracker replaces the tracker of the proxy with a fresh one.
 func (p *GRPCProxy) initTracker() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.Tracker = NewGRPCProxyTracker()
 }
 
+// init resets the sessions of the upstream and creates the gRPC client that calls the upstream endpoint.
 func (sp *GRPCServiceProxy) init(tracker *GRPCProxyTracker) error {
 	sp.Upstream.ActiveSessions = map[string]*GRPCSession{}
 	sp.Upstream.PastSessions = map[string]*GRPCSession{}
@@ -586,12 +608,14 @@ func (sp *GRPCServiceProxy) init(tracker *GRPCProxyTracker) error {
 	}
 }
 
+// RemoveServiceProxy deletes the proxy of the service from the proxy.
 func (p *GRPCProxy) RemoveServiceProxy(service string) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	delete(p.ServiceProxies, service)
 }
 
+// SetupGRPCServiceProxy validates and sets up the proxy from a service to a target service at the upstream, and has the gRPC server intercept the service.
 func (p *GRPCProxy) SetupGRPCServiceProxy(from, to string, methods map[string]string, endpoint, authority string, teeport int, delayMin, delayMax time.Duration, delayCount int, sp *GRPCServiceProxy) (err error) {
 	fromService := GRPCServiceRegistry.GetService(from)
 	if reflect.ValueOf(fromService).IsNil() {
@@ -669,6 +693,7 @@ type serviceRefresher interface {
 	RefreshServices()
 }
 
+// updateTeeSessionLog records the session log as the tee log of the method on the proxy of the tee port.
 func (p *GRPCProxy) updateTeeSessionLog(teeport int, service, methodName string, sessionLog *GRPCSessionLog) {
 	if teeport <= 0 || service == "" || methodName == "" || sessionLog == nil {
 		return
@@ -682,6 +707,7 @@ func (p *GRPCProxy) updateTeeSessionLog(teeport int, service, methodName string,
 	teeProxy.TeeServices[service][methodName] = sessionLog
 }
 
+// readClientMessage reads the first message of the client, and converts it for the target method, which it finds along with the tee port.
 func (p *GRPCProxy) readClientMessage(method *gotogrpc.GRPCServiceMethod, toName string, downstream gotogrpc.GRPCStream) (clientMsg proto.Message, toMethod *gotogrpc.GRPCServiceMethod, teeport int, err error) {
 	clientMsg, err = downstream.Receive()
 	if err != nil {
@@ -707,6 +733,7 @@ func (p *GRPCProxy) readClientMessage(method *gotogrpc.GRPCServiceMethod, toName
 	return
 }
 
+// OpenGRPCSession reads the first client message, opens a stream to the upstream with it, and registers the session as an active one.
 func (p *GRPCProxy) OpenGRPCSession(ctx context.Context, method *gotogrpc.GRPCServiceMethod, downstreamAddr string, md metadata.MD, downstream gotogrpc.GRPCStream) (*GRPCSession, error) {
 	p.lock.RLock()
 	sp := p.ServiceProxies[method.Service.Name]
@@ -737,6 +764,7 @@ func (p *GRPCProxy) OpenGRPCSession(ctx context.Context, method *gotogrpc.GRPCSe
 	return session, nil
 }
 
+// Validate checks that the proxied and target services and their methods exist, and fills in the default config.
 func (sp *GRPCServiceProxy) Validate() error {
 	if sp.FromService == "" {
 		return fmt.Errorf("Intercepted Service Name Required")
@@ -773,6 +801,7 @@ func (sp *GRPCServiceProxy) Validate() error {
 	return nil
 }
 
+// newGRPCSession creates a session between the downstream and the upstream streams, with a log if it has a tee port.
 func (sp *GRPCServiceProxy) newGRPCSession(downstreamAddr string, target *GRPCUpstream, method *gotogrpc.GRPCServiceMethod, downstream, upstream gotogrpc.GRPCStream, teeport int) *GRPCSession {
 	session := &GRPCSession{
 		ID:             int(grpcSessionIdCounter.Add(1)),
@@ -791,6 +820,7 @@ func (sp *GRPCServiceProxy) newGRPCSession(downstreamAddr string, target *GRPCUp
 	return session
 }
 
+// hasDelay tells whether the proxy is configured with a delay that is not zero.
 func (sp *GRPCServiceProxy) hasDelay() bool {
 	sp.delayLock.Lock()
 	defer sp.delayLock.Unlock()
@@ -817,10 +847,12 @@ func (sp *GRPCServiceProxy) applyDelay() (delay string) {
 	return delay
 }
 
+// isTee tells whether the session logs its messages for a tee port.
 func (s *GRPCSession) isTee() bool {
 	return s.teeport > 0
 }
 
+// Stream pumps the messages between the downstream and the upstream, with delay and tee hooks if needed, and tracks the counts.
 func (s *GRPCSession) Stream() (receiveCount, sendCount int, err error) {
 	hook1 := gotogrpc.IdentityHook
 	hook2 := gotogrpc.IdentityHook
@@ -857,6 +889,7 @@ func (s *GRPCSession) Stream() (receiveCount, sendCount int, err error) {
 	return
 }
 
+// Close closes both streams of the session, forwarding the closing message of the upstream, and moves the session to the past ones.
 func (g *GRPCSession) Close() (err error) {
 	m, e := g.streamUp.Close()
 	if e != nil {
@@ -879,6 +912,7 @@ func (g *GRPCSession) Close() (err error) {
 	return
 }
 
+// newGRPCSessionLog creates a session log with empty message and header logs and the tee channels.
 func newGRPCSessionLog() *GRPCSessionLog {
 	return &GRPCSessionLog{
 		ClientMessageLog: map[int]any{},
@@ -890,6 +924,7 @@ func newGRPCSessionLog() *GRPCSessionLog {
 	}
 }
 
+// start logs the messages that arrive on the tee channels of the client and the server, as JSON, until both are closed.
 func (s *GRPCSessionLog) start() {
 	// A channel that is closed is left alone, and the log goes on with the other until it is closed too: the session
 	// closes the one of the client first, and what the server still has in its channel is logged after that.
@@ -939,18 +974,22 @@ func (s *GRPCSessionLog) start() {
 	}
 }
 
+// clientStream returns the channel that the messages of the client are teed to.
 func (s *GRPCSessionLog) clientStream() chan proto.Message {
 	return s.clientTeeStream
 }
 
+// serverStream returns the channel that the messages of the server are teed to.
 func (s *GRPCSessionLog) serverStream() chan proto.Message {
 	return s.serverTeeStream
 }
 
+// onClientHeaders logs the headers of the client.
 func (s *GRPCSessionLog) onClientHeaders(md metadata.MD) {
 	s.ClientHeaders[int(s.logCounter.Add(1))] = md
 }
 
+// onServerHeaders logs the headers of the server.
 func (s *GRPCSessionLog) onServerHeaders(md metadata.MD) {
 	s.ServerHeaders[int(s.logCounter.Add(1))] = md
 }

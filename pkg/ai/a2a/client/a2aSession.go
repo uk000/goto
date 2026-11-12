@@ -71,6 +71,7 @@ type errCollector struct {
 	errs map[string]error
 }
 
+// add records the error of the request with the ID.
 func (e *errCollector) add(id string, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -80,6 +81,7 @@ func (e *errCollector) add(id string, err error) {
 	e.errs[id] = err
 }
 
+// all returns a copy of the collected errors by request ID, or nil if there are none.
 func (e *errCollector) all() map[string]error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -120,16 +122,19 @@ var (
 	re = regexp.MustCompile(`(?i)http status\s+(\d+)`)
 )
 
+// NewA2ASession creates a session for the call with a new client and timeline.
 func NewA2ASession(ctx context.Context, port int, card *goa2aserver.AgentCard, call *AgentCall, inHeaders http.Header) *A2ASession {
 	client := NewA2AClient(port, call.Name, call.H2, call.TLS, call.Authority, call.RequestTimeoutD)
 	return newSession(client, ctx, client.port, client.ID, call.Authority, card, call, inHeaders, timeline.NewTimeline(port, call.Name, nil, nil, inHeaders, nil, nil, nil))
 }
 
+// NewA2ASessionWithTimeline creates a session for the call with a new client, that reports to the given timeline.
 func NewA2ASessionWithTimeline(ctx context.Context, port int, card *goa2aserver.AgentCard, call *AgentCall, inHeaders http.Header, timeline *timeline.Timeline) *A2ASession {
 	client := NewA2AClient(port, card.Name, call.H2, call.TLS, call.Authority, call.RequestTimeoutD)
 	return newSession(client, ctx, client.port, client.ID, call.Authority, card, call, inHeaders, timeline)
 }
 
+// newSession creates a session of the client for the call, with a result that tracks it.
 func newSession(ac *A2AClient, ctx context.Context, port int, callerId, authority string, card *goa2aserver.AgentCard, call *AgentCall, inHeaders http.Header, timeline *timeline.Timeline) *A2ASession {
 	call.NonNil()
 	return &A2ASession{
@@ -147,6 +152,7 @@ func newSession(ac *A2AClient, ctx context.Context, port int, callerId, authorit
 	}
 }
 
+// Connect creates the underlying A2A client for the URL of the agent (of the call, else of the card), routing its HTTP requests through the session's Handle.
 func (acs *A2ASession) Connect() error {
 	acs.url = acs.call.AgentURL
 	if acs.url == "" {
@@ -162,6 +168,7 @@ func (acs *A2ASession) Connect() error {
 	return nil
 }
 
+// CallAgent sends the input and data to the agent, streaming or not as its card says, and returns an AgentError of the failed requests with the HTTP status found in it.
 func (acs *A2ASession) CallAgent(input string, inputData map[string]any, callback AgentResultsCallback, localProgress, upstreamProgress chan *types.Pair[string, any]) (err *AgentError) {
 	if input == "" {
 		input = acs.call.Message
@@ -205,6 +212,7 @@ func (acs *A2ASession) CallAgent(input string, inputData map[string]any, callbac
 	return
 }
 
+// configure sets what the requests of the session report to: the callback, the progress channels and the input parts.
 func (acs *A2ASession) configure(callback AgentResultsCallback, localProgress, upstreamProgress chan *types.Pair[string, any], inputParts []a2aproto.Part) {
 	acs.callback = callback
 	acs.localProgress = localProgress
@@ -213,6 +221,7 @@ func (acs *A2ASession) configure(callback AgentResultsCallback, localProgress, u
 	UpdateTimeline(acs.timeline, func() { acs.timeline.SetStreamPreferred(localProgress) })
 }
 
+// InvokeUnary sends the planned requests in rounds of concurrent unary calls, and returns the errors by request ID.
 func (acs *A2ASession) InvokeUnary() map[string]error {
 	requestCount, concurrent, rounds := acs.requestPlan()
 	acs.sendLocalProgress(acs.callerId, fmt.Sprintf("[%s] Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL))
@@ -247,6 +256,7 @@ func (acs *A2ASession) InvokeUnary() map[string]error {
 	return errs.all()
 }
 
+// InvokeStream sends the planned requests in rounds as streaming calls, applying the initial and the per-round delays, and returns the errors by request ID.
 func (acs *A2ASession) InvokeStream() map[string]error {
 	requestCount, concurrent, rounds := acs.requestPlan()
 	acs.sendLocalProgress(acs.callerId, fmt.Sprintf("A2A Client [%s]: Will send %d requests in %d rounds with concurrency %d to agent %s\n", acs.callerId, requestCount, rounds, concurrent, acs.call.AgentURL))
@@ -290,6 +300,7 @@ func (acs *A2ASession) InvokeStream() map[string]error {
 	return errs.all()
 }
 
+// Handle sends the HTTP request of the A2A client, tagged with the goto request headers, and records the request and response headers and statuses on the result.
 func (acs *A2ASession) Handle(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, error) {
 	var err error
 	var resp *http.Response
@@ -333,6 +344,7 @@ func (acs *A2ASession) Handle(ctx context.Context, client *http.Client, req *htt
 	return resp, nil
 }
 
+// updateRequestHeaders applies the configured and the forwarded headers to the outbound request.
 func (acs *A2ASession) updateRequestHeaders(r *http.Request, agent string) {
 	if acs.outHeaders.Request != nil {
 		acs.outHeaders.Request.UpdateHeaders(r.Header)
@@ -345,6 +357,7 @@ func (acs *A2ASession) updateRequestHeaders(r *http.Request, agent string) {
 	log.Println(util.ToJSONText(r.Header))
 }
 
+// updateResponseHeaders applies the configured headers to the response, and records the gotos that it was routed through.
 func (acs *A2ASession) updateResponseHeaders(headers http.Header, agent string) {
 	if headers != nil {
 		if acs.outHeaders.Response != nil {
@@ -355,6 +368,8 @@ func (acs *A2ASession) updateResponseHeaders(headers http.Header, agent string) 
 		log.Println(util.ToJSONText(headers))
 	}
 }
+
+// buildInputParts builds the parts of the input message from the text and the data.
 func buildInputParts(text string, data any) []a2aproto.Part {
 	parts := []a2aproto.Part{}
 	if text != "" {
@@ -366,6 +381,7 @@ func buildInputParts(text string, data any) []a2aproto.Part {
 	return parts
 }
 
+// setPushConfig sets the URL that the agent pushes the notifications of the task to.
 func (acs *A2ASession) setPushConfig(taskID, url string) error {
 	pushConfig := a2aproto.PushNotificationConfig{
 		URL: url,
@@ -382,6 +398,7 @@ func (acs *A2ASession) setPushConfig(taskID, url string) error {
 	return nil
 }
 
+// processStreamResponse processes the events of a stream until it closes or the context ends, recording the error of the latter.
 func (acs *A2ASession) processStreamResponse(id string, eventChan <-chan a2aproto.StreamingMessageEvent, cr *A2ACallResult, e *errCollector, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for {
@@ -405,6 +422,7 @@ func (acs *A2ASession) processStreamResponse(id string, eventChan <-chan a2aprot
 	}
 }
 
+// processResponse processes the message or task that a unary call returned.
 func (acs *A2ASession) processResponse(id string, result *a2aproto.MessageResult, cr *A2ACallResult) {
 	switch r := result.Result.(type) {
 	case *a2aproto.Message:
@@ -419,6 +437,7 @@ func (acs *A2ASession) processResponse(id string, result *a2aproto.MessageResult
 	}
 }
 
+// processEventResult processes an event of a stream (message, task, status or artifact), reporting its progress and recording a failed task and the remote timeline.
 func (acs *A2ASession) processEventResult(id string, event *a2aproto.StreamingMessageEvent, cr *A2ACallResult) {
 	switch e := event.Result.(type) {
 	case *a2aproto.Message:
@@ -463,6 +482,7 @@ func (acs *A2ASession) processEventResult(id string, event *a2aproto.StreamingMe
 	}
 }
 
+// processParts reports each part of a message by its type, as text or as data.
 func (acs *A2ASession) processParts(id string, parts []a2aproto.Part, cr *A2ACallResult) {
 	for _, p := range parts {
 		var part any = p
@@ -490,12 +510,14 @@ func (acs *A2ASession) processParts(id string, parts []a2aproto.Part, cr *A2ACal
 	}
 }
 
+// sendLocalProgress sends the text to the local progress channel, if there is one.
 func (acs *A2ASession) sendLocalProgress(id, text string) {
 	if text != "" && acs.localProgress != nil {
 		acs.localProgress <- types.NewPair[string, any](id, text)
 	}
 }
 
+// sendResponse records a response on the call result as content, data, headers, result or timeline, and reports it to the callback and the upstream progress channel.
 func (acs *A2ASession) sendResponse(id, text string, data any, cr *A2ACallResult) {
 	dataKey := text
 	if dataKey == "" {
@@ -547,6 +569,7 @@ func (acs *A2ASession) sendResponse(id, text string, data any, cr *A2ACallResult
 	}
 }
 
+// reportInitiateCall builds the client info of the call and adds the event of initiating it to the timeline.
 func (as *A2ASession) reportInitiateCall() {
 	msg := fmt.Sprintf("%s [%s] Initiating Agent Call [%s] on URL [%s], Request Count [%d], Concurrent [%d]",
 		as.callerId, as.client.ID, as.call.Name, as.call.AgentURL, as.call.RequestCount, as.call.Concurrent)

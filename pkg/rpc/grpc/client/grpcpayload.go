@@ -38,6 +38,7 @@ type GRPCPayloads struct {
 type UnaryCallHandler func(md metadata.MD, payload []byte, wg *sync.WaitGroup)
 type StreamCallHandler func(md metadata.MD, payload [][]byte, wg *sync.WaitGroup)
 
+// Count returns the number of messages or calls that the payload stands for.
 func (gp *GRPCPayload) Count() int {
 	if len(gp.Linear) > 0 {
 		return len(gp.Linear)
@@ -49,6 +50,7 @@ func (gp *GRPCPayload) Count() int {
 	return 0
 }
 
+// Process sends the payload (recursing into linear payloads, applying its headers) through the unary or stream handler.
 func (gp *GRPCPayload) Process(call *GRPCCall, md metadata.MD, uCall UnaryCallHandler, sCall StreamCallHandler, wg *sync.WaitGroup) {
 	finalMD := md
 	if gp.Headers != nil {
@@ -88,6 +90,7 @@ func (gp *GRPCPayload) Process(call *GRPCCall, md metadata.MD, uCall UnaryCallHa
 	}
 }
 
+// Process runs the linear payloads in order, or the concurrent payloads in parallel and waits for them.
 func (gp *GRPCPayloads) Process(call *GRPCCall, md metadata.MD, uCall UnaryCallHandler, sCall StreamCallHandler) {
 	if len(gp.Linear) > 0 {
 		for _, gp2 := range gp.Linear {

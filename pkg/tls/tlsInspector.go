@@ -50,6 +50,7 @@ type PeerCertInfo struct {
 	Issuer         string    `json:"issuer,omitempty"`
 }
 
+// NewTLSInspector wraps the listener so that each accepted connection is TLS-terminated with tlsConfig only if it starts with a TLS handshake.
 func NewTLSInspector(port int, label string, l net.Listener, tlsConfig *tls.Config) net.Listener {
 	return &TLSInspector{
 		Listener:  l,
@@ -59,6 +60,7 @@ func NewTLSInspector(port int, label string, l net.Listener, tlsConfig *tls.Conf
 	}
 }
 
+// Accept accepts a connection and peeks its first byte, returning a TLS server connection for a TLS handshake and the plain buffered connection otherwise; connections that send nothing are dropped.
 func (t *TLSInspector) Accept() (net.Conn, error) {
 	for {
 		c, err := t.Listener.Accept()
@@ -87,6 +89,7 @@ type PeekedConn struct {
 	r *bufio.Reader
 }
 
+// newPeekedConn wraps the connection with a buffered reader so that its first bytes can be peeked without being consumed.
 func newPeekedConn(c net.Conn) *PeekedConn {
 	return &PeekedConn{
 		Conn: c,
@@ -94,14 +97,17 @@ func newPeekedConn(c net.Conn) *PeekedConn {
 	}
 }
 
+// Read reads from the buffered reader, so bytes that were peeked are still returned.
 func (b *PeekedConn) Read(p []byte) (int, error) {
 	return b.r.Read(p)
 }
 
+// Peek returns the next n bytes of the connection without consuming them.
 func (b *PeekedConn) Peek(n int) ([]byte, error) {
 	return b.r.Peek(n)
 }
 
+// ExtractSNI returns a VerifyConnection callback that stores the SNI, negotiated ALPN and any client cert info of the connection, and never rejects it.
 func ExtractSNI(port, label string, remoteAddr string, storeSNI func(string, string, string),
 	storeCertInfo func(remoteAddr string, commonName string, dnsNames, uris []string, issuer string),
 	updatePeerStatus func(remoteAddr string, success bool, e string)) func(tls.ConnectionState) error {
@@ -129,6 +135,7 @@ func ExtractSNI(port, label string, remoteAddr string, storeSNI func(string, str
 	}
 }
 
+// ExtractPeerCertInfo returns a VerifyPeerCertificate callback that fails the handshake if the client presented no certificate.
 func ExtractPeerCertInfo(port, label string, remoteAddr string,
 	storeCertInfo func(remoteAddr string, commonName string, dnsNames, uris []string, issuer string),
 	updatePeerStatus func(remoteAddr string, success bool, e string)) func([][]byte, [][]*x509.Certificate) error {
@@ -161,6 +168,7 @@ func ExtractPeerCertInfo(port, label string, remoteAddr string,
 	}
 }
 
+// HandleClientHello returns a GetConfigForClient callback that stores the ALPN and SNI of the client hello and gives the connection a clone of the TLS config with the SNI and peer cert callbacks installed.
 func HandleClientHello(port, label string, tlsConfig *tls.Config,
 	storeALPN func(string, []string),
 	storeCertInfo func(remoteAddr string, commonName string, dnsNames, uris []string, issuer string),
@@ -185,14 +193,17 @@ func HandleClientHello(port, label string, tlsConfig *tls.Config,
 	}
 }
 
+// SubjectToString formats the organization, country and common name of the cert subject.
 func SubjectToString(cert *x509.Certificate) string {
 	return fmt.Sprintf("org=%s,co=%s,cn=[%s]", cert.Subject.Organization, cert.Subject.Country, cert.Subject.CommonName)
 }
 
+// IssuerToString formats the organization, country and serial number of the cert issuer.
 func IssuerToString(cert *x509.Certificate) string {
 	return fmt.Sprintf("org=%s,co=%s,sn=[%s]", cert.Issuer.Organization, cert.Issuer.Country, cert.Issuer.SerialNumber)
 }
 
+// IdentifyLeaf returns the leaf certificate of the first cert, parsing it from the raw chain and caching it on the cert if needed.
 func IdentifyLeaf(certs []*tls.Certificate) *x509.Certificate {
 	var leaf *x509.Certificate
 	var err error
@@ -209,6 +220,7 @@ func IdentifyLeaf(certs []*tls.Certificate) *x509.Certificate {
 	return leaf
 }
 
+// NewPeerCertInfo creates peer cert info for the remote address, starting now.
 func NewPeerCertInfo(remoteAddr string) *PeerCertInfo {
 	return &PeerCertInfo{
 		StartAt:    time.Now(),
@@ -216,6 +228,7 @@ func NewPeerCertInfo(remoteAddr string) *PeerCertInfo {
 	}
 }
 
+// Summary marks the peer cert info as finished and returns a one-line summary of what was captured.
 func (pci *PeerCertInfo) Summary() string {
 	pci.Finished = true
 	pci.Status = append(pci.Status, "Peer Cert Reported")

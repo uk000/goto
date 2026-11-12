@@ -40,6 +40,7 @@ type AgentBehaviorFederate struct {
 	triggers DelegateTriggers
 }
 
+// DoUnary runs the tools and agents that the input triggers and responds with a message of all their results.
 func (ab *AgentBehaviorFederate) DoUnary(aCtx *AgentContext) (*taskmanager.MessageProcessingResult, error) {
 	aCtx.triggers = ab.triggers
 	aCtx.detectRemoteCalls()
@@ -77,6 +78,7 @@ func (ab *AgentBehaviorFederate) DoUnary(aCtx *AgentContext) (*taskmanager.Messa
 	}, nil
 }
 
+// DoStream runs the tools and agents that the input triggers, and relays their progress to the client until they are done.
 func (ab *AgentBehaviorFederate) DoStream(aCtx *AgentContext) (string, error) {
 	aCtx.triggers = ab.triggers
 	aCtx.detectRemoteCalls()
@@ -113,6 +115,7 @@ func (ab *AgentBehaviorFederate) DoStream(aCtx *AgentContext) (string, error) {
 	return "Agent federation done \U000026F3", nil
 }
 
+// runTools calls the triggered tools, in parallel if configured, and tracks their calls; it signals runWG when done.
 func (ab *AgentBehaviorFederate) runTools(aCtx *AgentContext, runWG, resultsWG *sync.WaitGroup) {
 	parallel := ab.agent.Config.Delegates.Parallel
 	toolsWG := &sync.WaitGroup{}
@@ -148,6 +151,7 @@ func (ab *AgentBehaviorFederate) runTools(aCtx *AgentContext, runWG, resultsWG *
 	}
 }
 
+// runAgents calls the triggered agents, in parallel if configured, and signals runWG when done.
 func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentContext, runWG, resultsWG *sync.WaitGroup) {
 	parallel := ab.agent.Config.Delegates.Parallel
 	agentsWG := &sync.WaitGroup{}
@@ -188,6 +192,7 @@ func (ab *AgentBehaviorFederate) runAgents(aCtx *AgentContext, runWG, resultsWG 
 	}
 }
 
+// callAgent invokes an agent delegate, records its error and events, and sends its result and what the upstream reported.
 func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentContext, dCtx *DelegateCallContext, agentsWG *sync.WaitGroup) {
 	defer agentsWG.Done()
 	result, err := ab.invokeAgent(aCtx, dCtx)
@@ -209,6 +214,7 @@ func (ab *AgentBehaviorFederate) callAgent(aCtx *AgentContext, dCtx *DelegateCal
 	}
 }
 
+// callTool invokes an MCP tool delegate, records its error and events, and sends its result and what the upstream reported.
 func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCallContext, toolsWG *sync.WaitGroup) {
 	defer toolsWG.Done()
 	result, respHeaders, err := ab.invokeMCP(aCtx, dCtx)
@@ -233,6 +239,7 @@ func (ab *AgentBehaviorFederate) callTool(aCtx *AgentContext, dCtx *DelegateCall
 	}
 }
 
+// prepareArgs makes the args of a tool call from its configured args and the input args.
 func (ab *AgentBehaviorFederate) prepareArgs(args map[string]any, tcArgs *aicommon.ToolCallArgs, forwardHeaders []string) *aicommon.ToolCallArgs {
 	newArgs := aicommon.NewCallArgs()
 	newArgs.UpdateFrom(tcArgs)
@@ -241,6 +248,7 @@ func (ab *AgentBehaviorFederate) prepareArgs(args map[string]any, tcArgs *aicomm
 	return newArgs
 }
 
+// invokeAgent connects to the agent delegate by its card and calls it with the message.
 func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateCallContext) (result *a2aclient.A2AResult, err error) {
 	msg := fmt.Sprintf("Agent [%s] Invoking Agent [%s] at URL [%s] with input [%s]", aCtx.agent.ID, dCtx.agentCall.Name, dCtx.agentCall.AgentURL, dCtx.agentCall.Message)
 	aCtx.AddEvent(msg)
@@ -290,6 +298,7 @@ func (ab *AgentBehaviorFederate) invokeAgent(aCtx *AgentContext, dCtx *DelegateC
 	return
 }
 
+// invokeMCP calls the MCP tool delegate with the args from the input, and returns its result and response headers.
 func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCallContext) (mcpResult *mcpclient.MCPResult, respHeaders http.Header, err error) {
 	if aCtx.timeline.ResultOnly {
 		dCtx.toolCall.ResultOnly = true
@@ -311,6 +320,7 @@ func (ab *AgentBehaviorFederate) invokeMCP(aCtx *AgentContext, dCtx *DelegateCal
 	return
 }
 
+// processLocalUpdates relays the local progress to the client until it ends, the task is cancelled or sending fails.
 func (ab *AgentBehaviorFederate) processLocalUpdates(aCtx *AgentContext, resultsWG *sync.WaitGroup) {
 	processResult := func(pair *types.Pair[string, any]) error {
 		if pair != nil && pair.Right != nil {
@@ -353,6 +363,7 @@ outer:
 	}
 }
 
+// processUpstreamUpdates relays an agent call's progress to the client until it ends, the task is cancelled or sending fails.
 func (ab *AgentBehaviorFederate) processUpstreamUpdates(aCtx *AgentContext, dCtx *DelegateCallContext, resultsWG *sync.WaitGroup) {
 outer:
 	for {
@@ -391,6 +402,7 @@ outer:
 	}
 }
 
+// processMCPCallResults puts the timeline and call results of an MCP result in the output, or the channel if streamed.
 func processMCPCallResults(key string, mcpResult *mcpclient.MCPResult, output map[string]any, resultsChan chan *types.Pair[string, any], isStreamed bool) {
 	if mcpResult != nil {
 		if isStreamed {
@@ -419,6 +431,7 @@ func processMCPCallResults(key string, mcpResult *mcpclient.MCPResult, output ma
 	}
 }
 
+// processRemoteContent turns remote result content into text or data, sent to the channel if there is one, else the output.
 func processRemoteContent(callId string, remoteContent any, output map[string]any, resultsChan chan *types.Pair[string, any]) {
 	if remoteContent == nil {
 		return
@@ -485,6 +498,7 @@ func processRemoteContent(callId string, remoteContent any, output map[string]an
 	}
 }
 
+// processRemoteOtherData sends each entry of the remote result to the channel if there is one, else adds it to the output.
 func processRemoteOtherData(callId string, remoteResult map[string]any, output map[string]any, resultsChan chan *types.Pair[string, any]) {
 	for k, v := range remoteResult {
 		if resultsChan != nil {
@@ -495,6 +509,7 @@ func processRemoteOtherData(callId string, remoteResult map[string]any, output m
 	}
 }
 
+// prepareDelegates validates the delegates, gives them trackers, and indexes the tools and agents by their triggers.
 func (ab *AgentBehaviorFederate) prepareDelegates() error {
 	if ab.agent.Config == nil || ab.agent.Config.Delegates == nil {
 		return nil

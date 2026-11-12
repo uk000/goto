@@ -36,6 +36,7 @@ type MCPResourceTemplate struct {
 	Text             string                  `json:"text"`
 }
 
+// NewMCPResource creates a resource with the given details and text.
 func NewMCPResource(name, desc, mimeType, uri string, size int, text string) *MCPResource {
 	return &MCPResource{
 		Resource: &gomcp.Resource{
@@ -70,6 +71,7 @@ func componentText(definition any, what string) (string, error) {
 	return text, nil
 }
 
+// ParseResource parses a JSON resource, and returns nil if the payload has no resource in it.
 func ParseResource(payload []byte) (*MCPResource, error) {
 	data := map[string]any{}
 	if err := json.Unmarshal(payload, &data); err != nil {
@@ -92,6 +94,7 @@ func ParseResource(payload []byte) (*MCPResource, error) {
 	return resource, nil
 }
 
+// Handle answers a read of the resource with its response payload if it has one, or else its text.
 func (r *MCPResource) Handle(ctx context.Context, req *gomcp.ReadResourceRequest) (*gomcp.ReadResourceResult, error) {
 	result := &gomcp.ReadResourceResult{}
 	if r.Response != nil && r.Response.JSON != nil {
@@ -102,6 +105,7 @@ func (r *MCPResource) Handle(ctx context.Context, req *gomcp.ReadResourceRequest
 	return result, nil
 }
 
+// NewMCPResourceTemplate creates a resource template with the given details and text.
 func NewMCPResourceTemplate(name, desc, mimeType, uri string, size int, text string) *MCPResourceTemplate {
 	return &MCPResourceTemplate{
 		ResourceTemplate: &gomcp.ResourceTemplate{
@@ -117,6 +121,7 @@ func NewMCPResourceTemplate(name, desc, mimeType, uri string, size int, text str
 	}
 }
 
+// ParseResourceTemplate parses a JSON resource template, and returns nil if the payload has no template in it.
 func ParseResourceTemplate(payload []byte) (*MCPResourceTemplate, error) {
 	data := map[string]any{}
 	if err := json.Unmarshal(payload, &data); err != nil {
@@ -139,6 +144,7 @@ func ParseResourceTemplate(payload []byte) (*MCPResourceTemplate, error) {
 	return template, nil
 }
 
+// Handle answers a read of the resource template with its response payload if it has one, or else its text.
 func (r *MCPResourceTemplate) Handle(ctx context.Context, req *gomcp.ReadResourceRequest) (*gomcp.ReadResourceResult, error) {
 	result := &gomcp.ReadResourceResult{}
 	if r.Response != nil && r.Response.JSON != nil {

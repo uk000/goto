@@ -37,6 +37,7 @@ var (
 	statusManager = status.NewStatusManager()
 )
 
+// setRoutes registers the /a2a admin routes and the /agent/{agent} route that serves agent calls.
 func setRoutes(r *mux.Router) {
 	a2a := middleware.RootPath("/a2a")
 	agentsRouter := util.PathRouter(a2a, "/agents")
@@ -80,21 +81,25 @@ func getRegistryAgents(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("All agents sent", r)
 }
 
+// getAllServerAgents reports the servers of all ports, with their agents.
 func getAllServerAgents(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonOrYAMLPayload(w, snapshotServers(), util.IsAcceptYAML(r))
 	util.AddLogMessage("Details sent for all agents", r)
 }
 
+// getAgentNames reports the names of the agents and their delegates on the port of the request.
 func getAgentNames(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonOrYAMLPayload(w, GetAgentNames(util.GetRequestOrListenerPortNum(r)), util.IsAcceptYAML(r))
 	util.AddLogMessage("Names sent for all agents and delegates", r)
 }
 
+// getAllAgentNames reports the names of the agents and their delegates on all ports.
 func getAllAgentNames(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonOrYAMLPayload(w, GetAgentNames(0), util.IsAcceptYAML(r))
 	util.AddLogMessage("Names sent for all agents and delegates", r)
 }
 
+// getAgent reports the named agent of the port, with a 400 if there is no such agent.
 func getAgent(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "agent")
@@ -120,6 +125,7 @@ const (
 	delegatesAgents
 )
 
+// getAgentDelegates returns a handler that reports an agent's delegates, all, by kind, or one by name.
 func getAgentDelegates(kind delegatesKind) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		port := util.GetRequestOrListenerPortNum(r)
@@ -179,11 +185,13 @@ func getAgentDelegates(kind delegatesKind) http.HandlerFunc {
 	}
 }
 
+// getServers reports the A2A servers of all ports.
 func getServers(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonOrYAMLPayload(w, snapshotServers(), util.IsAcceptYAML(r))
 	util.AddLogMessage("All A2A servers reported", r)
 }
 
+// addAgents adds the agents in the request body to the port's server and the registry.
 func addAgents(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	port := util.GetRequestOrListenerPortNum(r)
@@ -222,6 +230,7 @@ func addAgents(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// setAgentPayload sets the payload that the named agent responds or streams with, from the request body.
 func setAgentPayload(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	port := util.GetRequestOrListenerPortNum(r)
@@ -248,6 +257,7 @@ func setAgentPayload(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// clearServers clears the server of the port of the request.
 func clearServers(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	ClearServer(port)
@@ -256,6 +266,7 @@ func clearServers(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// clearAgents clears the servers of all ports and the agent registry.
 func clearAgents(w http.ResponseWriter, r *http.Request) {
 	ClearAllServers()
 	registry.TheAgentRegistry.Clear()
@@ -264,6 +275,7 @@ func clearAgents(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// configureStatus parses a status config from the request body and applies it for the port.
 func configureStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	sc, err := statusManager.ParseAndApplyStatusConfig(port, r.Body)
@@ -279,6 +291,7 @@ func configureStatus(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// setStatus sets a forced status for an agent, for the requests that have the header if the route gives one.
 func setStatus(w http.ResponseWriter, r *http.Request) {
 	setAgentStatus(w, r, true)
 }
@@ -288,6 +301,7 @@ func setStatusWithoutHeader(w http.ResponseWriter, r *http.Request) {
 	setAgentStatus(w, r, false)
 }
 
+// setAgentStatus sets a forced status for the agent's URI, by header and methods (POST by default).
 func setAgentStatus(w http.ResponseWriter, r *http.Request, headerPresent bool) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "agent")
@@ -325,6 +339,7 @@ func setAgentStatus(w http.ResponseWriter, r *http.Request, headerPresent bool) 
 	fmt.Fprintln(w, msg)
 }
 
+// clearStatus clears the statuses of the port of the request.
 func clearStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	statusManager.Clear(port, "", "")
@@ -333,11 +348,13 @@ func clearStatus(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// getStatuses reports the statuses that are set.
 func getStatuses(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, statusManager.Snapshot())
 	util.AddLogMessage("Delivered statuses", r)
 }
 
+// sendStatus responds with the forced status, and with headers for the status and the count of it that remains.
 func sendStatus(id string, status, rem int, w http.ResponseWriter, r *http.Request) {
 	w.Header().Add(constants.HeaderGotoForcedStatus, strconv.Itoa(status))
 	w.Header().Add(constants.HeaderGotoForcedStatusRemaining, strconv.Itoa(rem))
@@ -349,6 +366,7 @@ func sendStatus(id string, status, rem int, w http.ResponseWriter, r *http.Reque
 	util.AddLogMessage(msg, r)
 }
 
+// serveAgent serves a call to an agent of the port, or responds with its forced status if it has one.
 func serveAgent(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "agent")
@@ -404,10 +422,12 @@ func forcedStatusFor(port int, agent *model.Agent, r *http.Request) (status, rem
 	return status, rem
 }
 
+// errAgentNotFound makes the error for an agent that the server doesn't have.
 func errAgentNotFound(name string, s *A2AServer) error {
 	return fmt.Errorf("agent [%s] not found on server [%s] port [%d]", name, s.ID, s.Port)
 }
 
+// AgentsHandler returns the HTTP handler that serves the calls to agents.
 func AgentsHandler() http.Handler {
 	return http.HandlerFunc(serveAgent)
 }

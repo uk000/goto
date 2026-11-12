@@ -59,20 +59,24 @@ type Funcs struct {
 
 type ListArg []string
 
+// String returns the values joined by spaces.
 func (l *ListArg) String() string {
 	return strings.Join(*l, " ")
 }
 
+// Set appends the value, so that a flag given repeatedly collects all its values.
 func (l *ListArg) Set(value string) error {
 	*l = append(*l, value)
 	return nil
 }
 
+// SetAt appends the value, whatever the index is.
 func (l *ListArg) SetAt(index int, value string) error {
 	*l = append(*l, value)
 	return nil
 }
 
+// NewPair creates a pair of the left and right values.
 func NewPair[L any, R any](left L, right R) *Pair[L, R] {
 	return &Pair[L, R]{
 		Left:  left,
@@ -80,6 +84,7 @@ func NewPair[L any, R any](left L, right R) *Pair[L, R] {
 	}
 }
 
+// NewStringAnyPair creates a pair of a string and any value.
 func NewStringAnyPair(left string, right any) *Pair[string, any] {
 	return &Pair[string, any]{
 		Left:  left,
@@ -87,6 +92,7 @@ func NewStringAnyPair(left string, right any) *Pair[string, any] {
 	}
 }
 
+// NewStringPair creates a pair of two strings.
 func NewStringPair(left, right string) *StringPair {
 	return &StringPair{
 		Left:  left,
@@ -94,14 +100,17 @@ func NewStringPair(left, right string) *StringPair {
 	}
 }
 
+// String formats the pair as "left: right".
 func (p *Pair[L, R]) String() string {
 	return fmt.Sprintf("%+v: %+v", p.Left, p.Right)
 }
 
+// LeftS returns the left value as text.
 func (p *Pair[L, R]) LeftS() string {
 	return fmt.Sprintf("%+v", p.Left)
 }
 
+// RightS returns the right value as text.
 func (p *Pair[L, R]) RightS() string {
 	return fmt.Sprintf("%+v", p.Right)
 }
@@ -120,6 +129,7 @@ func (p *Pair[L, R]) MarshalJSON() ([]byte, error) {
 	return []byte(fmt.Sprintf("{%s: %s}", left, right)), nil
 }
 
+// NewTriple creates a triple of the first, second and third values.
 func NewTriple[F any, S any, T any](first F, second S, third T) *Triple[F, S, T] {
 	return &Triple[F, S, T]{
 		First:  first,
@@ -128,24 +138,29 @@ func NewTriple[F any, S any, T any](first F, second S, third T) *Triple[F, S, T]
 	}
 }
 
+// String formats the triple as "first:second:third".
 func (t *Triple[F, S, T]) String() string {
 	return fmt.Sprintf("%+v:%+v:%+v", t.First, t.Second, t.Third)
 }
 
+// FirstS returns the first value as text.
 func (t *Triple[F, S, T]) FirstS() string {
 	return fmt.Sprintf("%+v", t.First)
 }
 
+// SecondS returns the second value as text.
 func (t *Triple[F, S, T]) SecondS() string {
 	return fmt.Sprintf("%+v", t.Second)
 }
 
+// ThirdS returns the third value as text.
 func (t *Triple[F, S, T]) ThirdS() string {
 	return fmt.Sprintf("%+v", t.Third)
 }
 
 type RawBytes []byte
 
+// UnmarshalJSON keeps the raw bytes of the value, without the quotes if it is a JSON string.
 func (r *RawBytes) UnmarshalJSON(data []byte) error {
 	if len(data) >= 2 && data[0] == '"' && data[len(data)-1] == '"' {
 		*r = data[1 : len(data)-1]
@@ -154,6 +169,8 @@ func (r *RawBytes) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
+
+// MarshalJSON writes the bytes as a JSON string.
 func (r RawBytes) MarshalJSON() ([]byte, error) {
 	return json.Marshal(string(r))
 }

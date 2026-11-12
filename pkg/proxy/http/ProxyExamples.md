@@ -1,6 +1,13 @@
 
 # HTTP Proxy Examples
 
+The examples below are the `http` entries of the `proxy` list of a startup config file (see the [HTTP Proxy README](README.md) for all the fields). The same target definitions, as JSON or YAML, can be sent at run time to `POST /proxy/http/targets/add`, and a proxy is switched on with `POST /proxy/http/enable`. Notes that apply to all the examples:
+- A proxy and its targets are disabled unless `enabled: true` is set on them, as in the examples.
+- A request is proxied by every enabled target that has a trigger matching it. Within one target a trigger with an exact `uri` is tried before triggers with a `uriPrefix`.
+- The response to the caller is a JSON envelope of the upstream responses, keyed by target and endpoint names, unless the traffic config sets `transparent`, `jsonPayload` or `yamlPayload`.
+- Names of URI variables (`{version}`) must be lower case. The URI of a trigger is lower-cased when it is registered, so a variable such as `{userId}` is never filled in.
+- `vars` constraints on header variables work. Constraints on variables captured from the URI path are not satisfied at present, so the triggers of the examples that use them do not match (see the notes under those examples).
+
 ### Simple Proxy with a single endpoint and match on all traffic
 ```
 proxy:
@@ -28,7 +35,7 @@ proxy:
                 - ep1
 
 ```
-This target will be triggered for all requests and the request will be forwarded to the target as-is by just changing the host URL but retaining the URI, headers and queries.
+This target is triggered for requests whose URI starts with `/foo`, or is exactly `/bar`, and the request is forwarded to the upstream as-is by just changing the host URL but retaining the URI, headers and queries. Use `uriPrefix: /` to match all traffic, but be aware that a catch-all trigger also matches the admin API calls to that port (also the ones sent with the `/port={port}/` prefix), which are then proxied instead of served, so the target can no longer be disabled or removed through the APIs; prefer specific prefixes on a port that you still want to configure. Requests that match no trigger are served by goto as usual.
 
 
 
@@ -68,6 +75,8 @@ proxy:
 
 ```
 This target will be triggered for requests with URI pattern `/foo/<foovalue>/<anything else>`, where `<foovalue>` must be either `1` or `2`, and the request must also carry a header `bar` with value matching regex pattern `aa.`. For example, a request `GET /foo/1/something` with header `bar: aab` will match, while `GET /foo/3/something` will not.
+
+Note: the constraint on `foo`, a variable of the URI path, is not satisfied by any request at present, so this trigger does not match anything. Without the `foo` constraint (keeping `uriPrefix: /foo/{foo}` and the `bar` header constraint) the trigger matches as described for the header.
 
 ---
 
@@ -176,7 +185,7 @@ proxy:
                 - mcp2
 
 ```
-A single target can define multiple endpoints and multiple triggers. Each trigger routes to different endpoints based on the matched URI. Requests to `/api/users/*` go to `user-service:9091` and requests to `/api/orders/*` go to `order-service:9092`.
+A single target can define multiple endpoints and multiple triggers. Each trigger routes to different endpoints based on the matched URI. Only one trigger of a target is used for a request, and an exact `uri` trigger is tried before the `uriPrefix` ones: a request to `/mcp/server1` goes to `order-service:9092` only (`orderTrigger`), and any other request under `/mcp`, e.g. `/mcp/tools`, goes to `user-service:9091` (`userTrigger`). If two triggers of a target match a request by prefix, which one is used is not predictable.
 
 ---
 
@@ -203,7 +212,7 @@ proxy:
                 - mirror
 
 ```
-A trigger listing multiple endpoints fans out the proxied request to all listed endpoints concurrently. The response from all endpoints is collected and returned to the caller as a JSON envelope keyed by target and endpoint names.
+A trigger listing multiple endpoints fans out the proxied request to all listed endpoints concurrently. The response from all endpoints is collected and returned to the caller as a JSON envelope keyed by target and endpoint names (`{"target1":{"primary":[...],"mirror":[...]}}`), and the `Goto-Proxy-Upstream-Status` response header lists the status of each, e.g. `{"target1":{"mirror":200,"primary":200}}`. The status of the proxy response is the status of the response that was collected last.
 
 ---
 
@@ -222,12 +231,12 @@ proxy:
           triggers:
             trigger1:
               matchAny:
-                - uriPrefix: /api/{version}/resources/{resourceId}
+                - uriPrefix: /api/{version}/resources/{resourceid}
               endpoints:
                 - ep1
 
 ```
-Path variables `{version}` and `{resourceId}` are captured by the router. Since no transform is defined, the request is forwarded to the upstream with the same URI path. A request `GET /api/v2/resources/42/details` matches and is forwarded as `GET http://upstream-service:9090/api/v2/resources/42/details`.
+Path variables `{version}` and `{resourceid}` are captured by the router (use lower case names). Since no transform is defined, the request is forwarded to the upstream with the same URI path. A request `GET /api/v2/resources/42/details` matches and is forwarded as `GET http://upstream-service:9090/api/v2/resources/42/details`.
 
 ---
 
@@ -256,6 +265,8 @@ proxy:
 ```
 The `vars` block validates the captured path variable `version` against an exact value. Only requests where `{version}` is exactly `v2` will match. A request to `/api/v2/data` matches, while `/api/v1/data` does not.
 
+Note: at present a constraint on a variable of the URI path is not satisfied by any request, so this trigger does not match `/api/v2/data` either. Constraints on variables captured from headers (see the header example below) work.
+
 ---
 
 ### URI variable with inRegex validation (multiple patterns)
@@ -273,14 +284,14 @@ proxy:
           triggers:
             trigger1:
               matchAny:
-                - uriPrefix: /api/{version}/resources/{resourceId}
+                - uriPrefix: /api/{version}/resources/{resourceid}
                   vars:
                     version:
                       in:
                         - "v1"
                         - "v2"
                         - "v3"
-                    resourceId:
+                    resourceid:
                       inRegex:
                         - "^[0-9]+$"
                         - "^[a-f0-9-]{36}$"
@@ -288,7 +299,9 @@ proxy:
                 - ep1
 
 ```
-The `in` constraint allows the `version` variable to be one of `v1`, `v2`, or `v3`. The `inRegex` constraint allows the `resourceId` to match any of the listed patterns—here, either a numeric ID or a UUID. A request to `/api/v2/resources/123/info` matches, as does `/api/v1/resources/550e8400-e29b-41d4-a716-446655440000/info`.
+The `in` constraint allows the `version` variable to be one of `v1`, `v2`, or `v3`. The `inRegex` constraint allows the `resourceid` to match any of the listed patterns—here, either a numeric ID or a UUID. A request to `/api/v2/resources/123/info` matches, as does `/api/v1/resources/550e8400-e29b-41d4-a716-446655440000/info`.
+
+Note: as with the exact validation above, constraints on URI path variables are not satisfied at present, so this trigger does not match.
 
 ---
 
@@ -320,7 +333,7 @@ proxy:
                 - ep1
 
 ```
-Header values wrapped in `{varName}` syntax are captured as variables and validated using the `vars` block. The `x-tenant-id` header value must match `^tenant-[a-z]+$` and the `x-api-key` must be a 32-character alphanumeric string. Both headers must be present and valid for the trigger to match.
+Header values wrapped in `{varName}` syntax are captured as variables and validated using the `vars` block. The `x-tenant-id` header value must match `^tenant-[a-z]+$` and the `x-api-key` must be a 32-character alphanumeric string. Both headers must be present and valid for the trigger to match. The captured header values are checked against `vars` but are not available to the transforms (a `{tenantId}` in a header or query transform stays literal).
 
 ---
 
@@ -349,7 +362,7 @@ proxy:
               /api/v1/accounts: /internal/account-service/accounts
 
 ```
-The `uriMap` rewrites the downstream URI to a different upstream URI. A request to `/api/v1/users` is forwarded to `http://upstream-service:9090/internal/user-service/users`. The mapping is keyed on the `uriPrefix` value from the match.
+The `uriMap` rewrites the downstream URI to a different upstream URI. A request to `/api/v1/users` is forwarded to `http://upstream-service:9090/internal/user-service/users`. The mapping is keyed on the `uriPrefix` (or `uri`) value of the match, and the whole request path is replaced by the mapped value: a request to `/api/v1/users/42` is also forwarded to `/internal/user-service/users`, the rest of its path is not appended. The lookup order is the full request URI, then the matched URI, then the matched URI followed by `*`. `uriMap` is ignored when `stripURI` is set.
 
 ---
 
@@ -373,10 +386,10 @@ proxy:
                 - ep1
           transform:
             uriMap:
-              /api/v1/users/*: /backend/users
+              /api/v1/users*: /backend/users
 
 ```
-When the exact `uriMap` key does not match, the proxy tries the key with `/*` appended. A request to `/api/v1/users/42/profile` will match the trigger via `uriPrefix: /api/v1/users`, and the uriMap wildcard entry `/api/v1/users/*` remaps the URI to `/backend/users`.
+When the full request URI and the matched URI are not keys of the `uriMap`, the proxy tries the matched URI with `*` appended (`/api/v1/users*` here; a key with `/*`, such as `/api/v1/users/*`, is never looked up). A request to `/api/v1/users/42/profile` will match the trigger via `uriPrefix: /api/v1/users`, and the wildcard entry `/api/v1/users*` remaps the whole URI to `/backend/users`.
 
 ---
 
@@ -453,17 +466,17 @@ proxy:
           triggers:
             trigger1:
               matchAny:
-                - uriPrefix: /api/{version}/tenants/{tenantId}
+                - uriPrefix: /api/{version}/tenants/{tenantid}
               endpoints:
                 - ep1
           transform:
             headers:
               add:
                 x-api-version: "{version}"
-                x-tenant-id: "{tenantId}"
+                x-tenant-id: "{tenantid}"
 
 ```
-Header `add` values can reference captured URI variables using `{varName}` syntax. A request to `/api/v2/tenants/acme/resources` results in the upstream request carrying headers `x-api-version: v2` and `x-tenant-id: acme`, injected from the captured path variables.
+Header `add` values can reference captured URI variables using `{varName}` syntax. A request to `/api/v2/tenants/acme/resources` results in the upstream request carrying headers `x-api-version: v2` and `x-tenant-id: acme`, injected from the captured path variables. The variable names have to be in lower case: a variable declared as `{tenantId}` is not filled in and the upstream would get the literal text `{tenantId}`.
 
 ---
 
@@ -603,7 +616,7 @@ proxy:
               - 504
 
 ```
-The `trafficConfig` adds a random delay between 100ms and 500ms before each upstream request. If the upstream responds with 502, 503, or 504, the proxy retries up to 3 times with a random delay between 1s and 2s between retries.
+The `trafficConfig` adds a delay between 100ms and 500ms before the upstream requests. The delay is picked once, at random, when the target is added, so every request of the target gets that same delay (the `count` of a delay is not applied). If the upstream responds with 502, 503, or 504, the proxy retries up to 3 times, waiting between retries for a delay picked from 1s to 2s the same way. The delay that was applied is returned in the `Goto-Proxy-Delay` response header.
 
 ---
 
@@ -676,10 +689,10 @@ proxy:
                 - ep1
           trafficConfig:
             payload: true
-            clean: true
+            transparent: true
 
 ```
-Setting `payload: true` causes the proxy to collect the upstream response body. When `clean: true`, the proxy returns the first upstream endpoint's response payload directly to the caller instead of wrapping all responses in a JSON envelope keyed by target and endpoint names. This is useful when you want the proxy to act transparently.
+Setting `payload: true` causes the proxy to collect the upstream response body (into the `payload` of each response in the JSON envelope). When `transparent: true`, the proxy returns the first upstream endpoint's response headers and payload as they are to the caller instead of wrapping all responses in a JSON envelope keyed by target and endpoint names (the proxy's own `Goto-Proxy-*` headers are added). This is useful when you want the proxy to act transparently. There is no `clean` flag; `jsonPayload: true` and `yamlPayload: true` return the first upstream payload re-written as JSON or YAML.
 
 ---
 
@@ -708,7 +721,7 @@ proxy:
                 - ep1
 
 ```
-The `proxyResponses` array defines rules that map upstream response status codes to proxy response status codes. If the upstream returns any 5xx status, the proxy returns 502 to the caller. If the upstream returns any 4xx status, the proxy returns 200. The first matching rule wins.
+The `proxyResponses` array defines rules that map upstream response status codes to proxy response status codes. If the upstream returns any 5xx status, the proxy returns 502 to the caller. If the upstream returns any 4xx status, the proxy returns 200. The first matching rule wins, and a status that no rule matches is returned as it is. A range of one value (`[404]`) matches that status only, and `[0, 0]` matches the calls where the upstream could not be reached at all (without a rule for it the proxy answers 200 with an upstream status of 0). The rules can also be set at run time with `POST /proxy/http/responses/set`.
 
 ---
 
@@ -743,7 +756,7 @@ proxy:
                 - backend
 
 ```
-Multiple targets can match the same incoming request. When both `loggingTarget` and `backendTarget` match a request to `/api/data`, the proxy invokes both targets concurrently. The response is a JSON envelope containing responses from all matched targets keyed by target name and endpoint name.
+Multiple targets can match the same incoming request. When both `loggingTarget` and `backendTarget` match a request to `/api/data`, the proxy invokes both targets concurrently. The response is a JSON envelope containing responses from all matched targets keyed by target name and endpoint name, and the status of the proxy response is that of the response collected last.
 
 ---
 
@@ -769,7 +782,7 @@ proxy:
                 - ep1
 
 ```
-Setting `requestCount: 3` sends 3 sequential requests to the upstream, and `concurrent: 2` runs 2 of those in parallel. This is useful for load testing or warming up upstream caches.
+Setting `concurrent: 2` runs 2 parallel replicas of the upstream call, and each replica sends `requestCount: 3` requests one after the other, so each request to the proxy results in 6 upstream requests and 6 responses (all listed under `ep1` of the response envelope). This is useful for load testing or warming up upstream caches.
 
 ---
 
@@ -822,7 +835,7 @@ proxy:
           triggers:
             userTrigger:
               matchAny:
-                - uriPrefix: /gateway/{version}/users/{userId}
+                - uriPrefix: /gateway/{version}/users/{userid}
                   headers:
                     x-tenant: "{tenant}"
                   vars:
@@ -830,7 +843,7 @@ proxy:
                       in:
                         - "v1"
                         - "v2"
-                    userId:
+                    userid:
                       regex: "^[0-9]+$"
                     tenant:
                       inRegex:
@@ -843,7 +856,7 @@ proxy:
                 headers:
                   add:
                     x-api-version: "{version}"
-                    x-user-id: "{userId}"
+                    x-user-id: "{userid}"
                     x-tenant-id: "{tenant}"
                     x-forwarded-by: "goto-proxy"
                   remove:
@@ -869,7 +882,7 @@ proxy:
                   - 502
                   - 503
                 payload: true
-                clean: true
+                transparent: true
             orderTrigger:
               matchAny:
                 - uriPrefix: /gateway/{version}/orders
@@ -892,13 +905,15 @@ proxy:
 
 ```
 This comprehensive example demonstrates:
-- **URI variables** (`{version}`, `{userId}`) with `in`, `regex`, and `inRegex` validation
+- **URI variables** (`{version}`, `{userid}`) with `in`, `regex`, and `inRegex` validation
 - **Header variable capture** (`{tenant}`) validated against multiple regex patterns
 - **stripURI** to remove `/gateway` prefix before forwarding
 - **Header transforms** that inject captured variables and static values, and remove debug headers
 - **Query transforms** that add a source param and remove verbose
 - **requestId** generation with UUID in a custom header
-- **Traffic config** with random delay, retries on specific status codes, and clean payload passthrough
+- **Traffic config** with a delay, retries on specific status codes, and transparent passthrough of the upstream response
 - **URI mapping** on a separate trigger to rewrite the entire path
 - **Proxy response mapping** to translate upstream 5xx errors to 503
 - **Multiple triggers** routing to different endpoints based on URI patterns
+
+Notes on this example as the proxy runs today: the `vars` constraints on the URI variables (`version` and `userid` of `userTrigger`, `version` of `orderTrigger`) are not satisfied, so neither trigger matches as written; the `tenant` header constraint would be enforced, but `{tenant}` is not filled into `x-tenant-id` (it is sent as the literal text), while `{version}` and `{userid}` are filled in. Remove the URI `vars` constraints to have the triggers match.

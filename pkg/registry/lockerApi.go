@@ -29,6 +29,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// addLockerMaintenanceRoutes adds the routes to open, close and clear lockers, and to clear peer lockers.
 func addLockerMaintenanceRoutes(registryRouter, peersRouter *mux.Router) {
 	util.AddRoute(registryRouter, "/lockers/{label}/open", openLabeledLocker, "POST")
 	util.AddRoute(registryRouter, "/lockers/open/{label}", openLabeledLocker, "POST")
@@ -43,6 +44,7 @@ func addLockerMaintenanceRoutes(registryRouter, peersRouter *mux.Router) {
 	util.AddRoute(peersRouter, "/{peer}/{peerlabel}/locker/clear", clearLocker, "POST")
 }
 
+// addLockerStoreRoutes adds the routes to store and remove data in labeled lockers and peer lockers.
 func addLockerStoreRoutes(registryRouter, peersRouter *mux.Router) {
 	util.AddRoute(registryRouter, "/lockers/{label}/store/{path}", storeInLabeledLocker, "POST")
 	util.AddRoute(registryRouter, "/lockers/{label}/{path}/store", storeInLabeledLocker, "POST")
@@ -54,6 +56,7 @@ func addLockerStoreRoutes(registryRouter, peersRouter *mux.Router) {
 
 }
 
+// addPeerLockerReadRoutes adds the routes to read peer locker data and the client results of peers.
 func addPeerLockerReadRoutes(peersRouter *mux.Router) {
 	util.AddRouteWithMultiQ(peersRouter, "/{peer}/{peerlabel}?/locker/get/{path}", getFromPeerLocker, [][]string{{}, {"data", "level"}}, "GET")
 	util.AddRoute(peersRouter, "/{peer}?/instances/client/results/targets={targets}?", getPeersClientResults, "GET")
@@ -70,6 +73,7 @@ func addPeerResultsCompatRoutes(router *mux.Router) {
 	util.AddRouteWithMultiQ(router, "/{peer}?/targets/results", getTargetsResultsCompat, [][]string{{}, {"detailed"}}, "GET")
 }
 
+// addLockerReadRoutes adds the routes to list, search and read the labeled lockers and their data.
 func addLockerReadRoutes(registryRouter *mux.Router) {
 	util.AddRouteWithMultiQ(registryRouter, "/lockers", getAllLockers, [][]string{{}, {"data", "peers", "level"}}, "GET")
 	util.AddRoute(registryRouter, "/lockers/all", getAllLockers, "GET")
@@ -84,6 +88,7 @@ func addLockerReadRoutes(registryRouter *mux.Router) {
 	util.AddRouteWithMultiQ(registryRouter, "/lockers/{label}", getLabeledLocker, [][]string{{}, {"data", "peers", "level"}, {"md"}}, "GET")
 }
 
+// addContextLockerRoutes adds the routes to open, close, clear, store to and read from lockers within a context.
 func addContextLockerRoutes(registryRouter *mux.Router) {
 	util.AddRoute(registryRouter, "/context/{context}/lockers/{label}/open", openLabeledLocker, "POST")
 	util.AddRoute(registryRouter, "/context/{context}/lockers/{label}/close", closeOrClearLabeledLocker, "POST")
@@ -112,6 +117,7 @@ func addLockerPeerRoutes(registryRouter *mux.Router) {
 // Query params to report peer lockers.
 var peerLockerQueryParams = [][]string{{}, {"data", "level"}}
 
+// openLabeledLocker opens the labeled locker, within the context if given, and makes it the current one.
 func openLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")
@@ -125,9 +131,13 @@ func openLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	}
 	registry.lockersLock.Unlock()
 	if label != "" {
-		ll.OpenLocker(label)
-		w.WriteHeader(http.StatusOK)
-		msg = fmt.Sprintf("[Context: %s] Locker %s is open and active", context, label)
+		if err := ll.OpenLocker(label); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = fmt.Sprintf("[Context: %s] Locker not opened: %s", context, err.Error())
+		} else {
+			w.WriteHeader(http.StatusOK)
+			msg = fmt.Sprintf("[Context: %s] Locker %s is open and active", context, label)
+		}
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "Locker label needed"
@@ -138,6 +148,7 @@ func openLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// closeOrClearLabeledLocker closes (never the default) or clears a labeled locker; with no label, resets all lockers and peer results.
 func closeOrClearLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")
@@ -178,6 +189,7 @@ func closeOrClearLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getLabeledLocker reports a labeled locker (the current one if no label), trimmed by level, as JSON or markdown.
 func getLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")
@@ -218,6 +230,7 @@ func getLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getDataLockers reports the data lockers of the labeled lockers, with or without data, as JSON or markdown.
 func getDataLockers(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")
@@ -254,6 +267,7 @@ func getDataLockers(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getAllLockers reports all the labeled and context lockers, optionally with data and peer lockers.
 func getAllLockers(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	getAll := strings.Contains(r.RequestURI, "/all")
@@ -280,6 +294,7 @@ func getAllLockers(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getLockerLabels reports the labels of the lockers.
 func getLockerLabels(w http.ResponseWriter, r *http.Request) {
 	registry.lockersLock.RLock()
 	labeledLockers := registry.labeledLockers
@@ -290,6 +305,7 @@ func getLockerLabels(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getDataLockerPaths reports the keys, or the URI paths, of the data stored in the data lockers.
 func getDataLockerPaths(w http.ResponseWriter, r *http.Request) {
 	label := util.GetStringParamValue(r, "label")
 	paths := strings.Contains(r.RequestURI, "paths")
@@ -302,6 +318,7 @@ func getDataLockerPaths(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// searchInDataLockers reports the data locker paths whose keys match the given case-insensitive regex.
 func searchInDataLockers(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")
@@ -327,6 +344,7 @@ func searchInDataLockers(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// storeInLabeledLocker stores the payload at the path in a labeled locker, creating it if needed; appends to the data for /add routes.
 func storeInLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")
@@ -343,9 +361,14 @@ func storeInLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	registry.lockersLock.Unlock()
 	if label != "" && len(path) > 0 {
 		data := util.Read(r.Body)
-		ll.GetOrCreateLocker(label).Store(path, data, add)
-		w.WriteHeader(http.StatusOK)
-		msg = fmt.Sprintf("Data stored in [Context: %s] labeled locker %s for path %+v", context, label, path)
+		if cl := ll.GetOrCreateLocker(label); cl != nil {
+			cl.Store(path, data, add)
+			w.WriteHeader(http.StatusOK)
+			msg = fmt.Sprintf("Data stored in [Context: %s] labeled locker %s for path %+v", context, label, path)
+		} else {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = fmt.Sprintf("Data not stored. Invalid locker label: %s", label)
+		}
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "Not enough parameters to access locker"
@@ -356,14 +379,23 @@ func storeInLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// removeFromLabeledLocker removes the data at the path from a labeled locker.
 func removeFromLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")
 	path, _ := util.GetListParam(r, "path")
 	if label != "" && len(path) > 0 {
-		registry.labeledLockers.GetOrCreateLocker(label).Remove(path)
-		w.WriteHeader(http.StatusOK)
-		msg = fmt.Sprintf("Data removed from labeled locker %s for path %+v", label, path)
+		registry.lockersLock.RLock()
+		ll := registry.labeledLockers
+		registry.lockersLock.RUnlock()
+		if cl := ll.GetOrCreateLocker(label); cl != nil {
+			cl.Remove(path)
+			w.WriteHeader(http.StatusOK)
+			msg = fmt.Sprintf("Data removed from labeled locker %s for path %+v", label, path)
+		} else {
+			w.WriteHeader(http.StatusBadRequest)
+			msg = fmt.Sprintf("Data not removed. Invalid locker label: %s", label)
+		}
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		msg = "Not enough parameters to access locker"
@@ -374,6 +406,7 @@ func removeFromLabeledLocker(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getFromDataLocker reports the data at the path in a data locker, as JSON or markdown.
 func getFromDataLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")
@@ -418,6 +451,7 @@ func getFromDataLocker(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// storeInPeerLocker stores the payload at the path in the peer's locker (or its instance locker) in the current locker.
 func storeInPeerLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	peerName := util.GetStringParamValue(r, "peer")
@@ -438,6 +472,7 @@ func storeInPeerLocker(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// removeFromPeerLocker removes the data at the path from the peer's locker (or its instance locker) in the current locker.
 func removeFromPeerLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	peerName := util.GetStringParamValue(r, "peer")
@@ -457,6 +492,7 @@ func removeFromPeerLocker(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearLocker clears the locker of a peer instance, a peer, or all peers, and asks the pods to clear their client results.
 func clearLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	peerName := util.GetStringParamValue(r, "peer")
@@ -478,6 +514,7 @@ func clearLocker(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getFromPeerLocker reports the data at the path from the peer's locker (or instance locker) of a labeled locker.
 func getFromPeerLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label", constants.LockerCurrent)
@@ -510,6 +547,7 @@ func getFromPeerLocker(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getPeerLocker reports the peer lockers of a labeled locker (or the current one), trimmed by level.
 func getPeerLocker(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")
@@ -545,6 +583,7 @@ func getPeerLocker(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getPeersClientResults reports the client results of peers as a summary or details, optionally by instances.
 func getPeersClientResults(w http.ResponseWriter, r *http.Request) {
 	detailed := strings.Contains(r.RequestURI, "details")
 	byInstances := strings.Contains(r.RequestURI, "instances")
@@ -561,6 +600,7 @@ func getTargetsResultsCompat(w http.ResponseWriter, r *http.Request) {
 	reportPeersClientResults(w, r, peerName, util.GetBoolParamValue(r, "detailed"), false)
 }
 
+// reportPeersClientResults aggregates the client results that peers stored in a locker, as a summary or details, optionally by instances.
 func reportPeersClientResults(w http.ResponseWriter, r *http.Request, peerName string, detailed, byInstances bool) {
 	msg := ""
 	label := util.GetStringParamValue(r, "label")

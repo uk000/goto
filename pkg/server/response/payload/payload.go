@@ -60,15 +60,18 @@ func (pr *PortResponsePayloads) MarshalJSON() ([]byte, error) {
 	}{port, httpPayloads, rpcPayloads})
 }
 
+// init allocates the per-port payload map and returns the manager.
 func (pm *ResponsePayloadManager) init() *ResponsePayloadManager {
 	pm.payloads = map[int]*PortResponsePayloads{}
 	return pm
 }
 
+// ClearRPCResponsePayloads resets all the payloads (HTTP and RPC) configured for the port.
 func (pm *ResponsePayloadManager) ClearRPCResponsePayloads(port int) {
 	pm.GetPortResponse(port).init()
 }
 
+// SetRPCResponsePayload sets an RPC response payload for the port, keyed by stream, default, URI, header or URI with header/body match, whichever of those the arguments give; errors if the payload is empty.
 func (pm *ResponsePayloadManager) SetRPCResponsePayload(port int, isStream bool, payload []byte, contentType, uri, header, value, regexes, paths string, count int, delayMin, delayMax time.Duration) (err error) {
 	if len(payload) == 0 {
 		return fmt.Errorf("No payload")
@@ -97,10 +100,12 @@ func (pm *ResponsePayloadManager) SetRPCResponsePayload(port int, isStream bool,
 	return
 }
 
+// SetRPCResponsePayloadTransform sets RPC response payload transforms for a URI on the port.
 func (pm *ResponsePayloadManager) SetRPCResponsePayloadTransform(port int, isStream bool, contentType, uri string, transforms []*util.Transform, delayMin, delayMax time.Duration) error {
 	return pm.GetPortResponse(port).setURIResponsePayload(true, isStream, nil, false, uri, contentType, transforms, delayMin, delayMax)
 }
 
+// SetURIResponsePayloadWithMatches validates a response payload and registers it for the URI prefix of each of its request matches on the port.
 func (pm *ResponsePayloadManager) SetURIResponsePayloadWithMatches(port int, rp *ResponsePayload, isGRPC bool) error {
 	if rp == nil {
 		return errors.New("missing payload")
@@ -121,15 +126,36 @@ func (pm *ResponsePayloadManager) SetURIResponsePayloadWithMatches(port int, rp 
 	return nil
 }
 
+// GetResponsePayload finds the response payload configured for the port that matches the request URI, headers, query and body.
 func (pm *ResponsePayloadManager) GetResponsePayload(port int, isGRPC bool, requestURI string, header http.Header, query url.Values, body io.ReadCloser) (newBodyReader io.ReadCloser, responsePayload *ResponsePayload, captures map[string]string, found bool) {
 	pr := pm.GetPortResponse(port)
 	return pr.protoPayload(isGRPC).GetMatchingResponsePayload(requestURI, header, query, body)
 }
 
+// getPortResponse returns the payloads of the request's port.
 func (pm *ResponsePayloadManager) getPortResponse(r *http.Request) *PortResponsePayloads {
 	return pm.GetPortResponse(util.GetRequestOrListenerPortNum(r))
 }
 
+// hasPayloadsFor tells whether handleURI has anything to do for the request: its port has a payload that can answer it, and
+// the request is not one that asks for a payload of its own. It is the condition of the routes of the payload URIs (a route
+// stays for good once it is registered, while the payloads of its URI don't), and it creates nothing for a port that has no payloads.
+func (pm *ResponsePayloadManager) hasPayloadsFor(r *http.Request) bool {
+	pm.lock.RLock()
+	pr := pm.payloads[util.GetRequestOrListenerPortNum(r)]
+	pm.lock.RUnlock()
+	if pr == nil || util.IsPayloadRequest(r) {
+		return false
+	}
+	return pr.protoPayload(util.IsGRPC(r) || util.IsJSONRPC(r)).HasPayloadFor(r.RequestURI, r.Header, r.URL.Query())
+}
+
+// payloadsApplyTo is the condition of the routes of the payload URIs. It looks the manager up as it is called.
+func payloadsApplyTo(r *http.Request) bool {
+	return PayloadManager.hasPayloadsFor(r)
+}
+
+// GetPortResponse returns the payloads of the port, creating them if missing.
 func (pm *ResponsePayloadManager) GetPortResponse(port int) *PortResponsePayloads {
 	pm.lock.Lock()
 	defer pm.lock.Unlock()
@@ -142,6 +168,7 @@ func (pm *ResponsePayloadManager) GetPortResponse(port int) *PortResponsePayload
 	return pr
 }
 
+// init resets the HTTP and RPC payloads of the port to empty.
 func (pr *PortResponsePayloads) init() {
 	pr.lock.Lock()
 	defer pr.lock.Unlock()
@@ -151,12 +178,14 @@ func (pr *PortResponsePayloads) init() {
 	pr.RPCPayloads.init()
 }
 
+// GetGRPCPayloads returns the RPC payloads of the port.
 func (pr *PortResponsePayloads) GetGRPCPayloads() *ProtoPayloads {
 	pr.lock.Lock()
 	defer pr.lock.Unlock()
 	return pr.RPCPayloads
 }
 
+// protoPayload returns the RPC payloads if isGRPC, else the HTTP payloads.
 func (pr *PortResponsePayloads) protoPayload(isGRPC bool) *ProtoPayloads {
 	pr.lock.Lock()
 	defer pr.lock.Unlock()
@@ -166,6 +195,7 @@ func (pr *PortResponsePayloads) protoPayload(isGRPC bool) *ProtoPayloads {
 	return pr.HTTPPayloads
 }
 
+// setStreamResponsePayload sets a stream payload (split into count parts) for the default, URI, header or URI with header scope; an empty payload removes the URI's.
 func (pr *PortResponsePayloads) setStreamResponsePayload(isGRPC bool, payload []byte, contentType, uri, header, value string, count int, delayMin, delayMax time.Duration) error {
 	uri = strings.ToLower(uri)
 	header = strings.ToLower(header)
@@ -193,6 +223,7 @@ func (pr *PortResponsePayloads) setStreamResponsePayload(isGRPC bool, payload []
 	return nil
 }
 
+// setDefaultResponsePayload sets the payload used when nothing more specific matches, padded or trimmed to size if given.
 func (pr *PortResponsePayloads) setDefaultResponsePayload(isGRPC bool, payload []byte, contentType string, size int, delayMin, delayMax time.Duration) error {
 	if size > 0 {
 		payload = FixPayload(payload, size)
@@ -205,6 +236,7 @@ func (pr *PortResponsePayloads) setDefaultResponsePayload(isGRPC bool, payload [
 	}
 }
 
+// setURIResponsePayload sets the payload or transforms for a URI; an empty payload with no transforms removes the URI's payload.
 func (pr *PortResponsePayloads) setURIResponsePayload(isGRPC, isStream bool, payload []byte, binary bool, uri, contentType string, transforms []*util.Transform, delayMin, delayMax time.Duration) error {
 	pp := pr.protoPayload(isGRPC)
 	uri = strings.ToLower(uri)
@@ -220,6 +252,7 @@ func (pr *PortResponsePayloads) setURIResponsePayload(isGRPC, isStream bool, pay
 	return nil
 }
 
+// setHeaderResponsePayload sets the payload for a request header (and value); an empty payload removes it.
 func (pr *PortResponsePayloads) setHeaderResponsePayload(isGRPC bool, payload []byte, binary bool, header, value, contentType string, delayMin, delayMax time.Duration) error {
 	pp := pr.protoPayload(isGRPC)
 	header = strings.ToLower(header)
@@ -236,6 +269,7 @@ func (pr *PortResponsePayloads) setHeaderResponsePayload(isGRPC bool, payload []
 	return nil
 }
 
+// setQueryResponsePayload sets the payload for a request query param (and value); an empty payload removes it.
 func (pr *PortResponsePayloads) setQueryResponsePayload(isGRPC bool, payload []byte, binary bool, query, value, contentType string, delayMin, delayMax time.Duration) error {
 	pp := pr.protoPayload(isGRPC)
 	query = strings.ToLower(query)
@@ -252,6 +286,7 @@ func (pr *PortResponsePayloads) setQueryResponsePayload(isGRPC bool, payload []b
 	return nil
 }
 
+// setResponsePayloadForURIWithHeader sets the payload for a URI combined with a request header (and value); an empty payload removes it.
 func (pr *PortResponsePayloads) setResponsePayloadForURIWithHeader(isGRPC bool, payload []byte, binary bool, uri, header, value, contentType string, delayMin, delayMax time.Duration) error {
 	pp := pr.protoPayload(isGRPC)
 	uri = strings.ToLower(uri)
@@ -269,6 +304,7 @@ func (pr *PortResponsePayloads) setResponsePayloadForURIWithHeader(isGRPC bool, 
 	return nil
 }
 
+// setResponsePayloadForURIWithQuery sets the payload for a URI combined with a request query param (and value); an empty payload removes it.
 func (pr *PortResponsePayloads) setResponsePayloadForURIWithQuery(isGRPC bool, payload []byte, binary bool, uri, query, value, contentType string, delayMin, delayMax time.Duration) error {
 	pp := pr.protoPayload(isGRPC)
 	uri = strings.ToLower(uri)
@@ -286,6 +322,7 @@ func (pr *PortResponsePayloads) setResponsePayloadForURIWithQuery(isGRPC bool, p
 	return nil
 }
 
+// setResponsePayloadForURIWithBodyMatch sets the payload for a URI combined with comma-separated body regexes or JSON paths; an empty payload removes it.
 func (pr *PortResponsePayloads) setResponsePayloadForURIWithBodyMatch(isGRPC bool, payload []byte, binary bool, uri, match, contentType string, isPaths bool, delayMin, delayMax time.Duration) error {
 	pp := pr.protoPayload(isGRPC)
 	uri = strings.ToLower(uri)

@@ -36,6 +36,7 @@ var (
 	Middleware = middleware.NewMiddleware("rpc", setRoutes, nil)
 )
 
+// setRoutes registers the gRPC client call routes under both /grpc/client and /client/grpc.
 func setRoutes(r *mux.Router) {
 	grpcRouter := middleware.RootPath("/grpc")
 	clientRouter := middleware.RootPath("/client")
@@ -45,12 +46,14 @@ func setRoutes(r *mux.Router) {
 	setRoutesWithRouter(clientGRPCRouter)
 }
 
+// setRoutesWithRouter adds the call, call-with-stream and generic call routes to the given router.
 func setRoutesWithRouter(r *mux.Router) {
 	util.AddRoute(r, "/call/{service}/{method}/{endpoint}", callServiceMethod, "POST")
 	util.AddRoute(r, "/call/{service}/{method}/{endpoint}/stream", callServiceMethodStream, "POST")
 	util.AddRoute(r, "/call", call, "POST")
 }
 
+// call invokes a gRPC method as described by the JSON or YAML GRPCCall in the request body.
 func call(w http.ResponseWriter, r *http.Request) {
 	call := &GRPCCall{}
 	err := util.ReadJsonOrYamlPayloadFromBody(r.Body, &call)
@@ -65,10 +68,12 @@ func call(w http.ResponseWriter, r *http.Request) {
 	doCall(call, r, w)
 }
 
+// callServiceMethod invokes a gRPC method named in the URI, sending the request body as its payload.
 func callServiceMethod(w http.ResponseWriter, r *http.Request) {
 	callServiceMethodWithPush(w, r, false)
 }
 
+// callServiceMethodStream invokes a gRPC method named in the URI, pushing the response messages as they arrive.
 func callServiceMethodStream(w http.ResponseWriter, r *http.Request) {
 	callServiceMethodWithPush(w, r, true)
 }
@@ -93,6 +98,7 @@ func callServiceMethodWithPush(w http.ResponseWriter, r *http.Request, stream bo
 	doCall(call, r, w)
 }
 
+// doCall connects to the endpoint, loads the method via reflection, invokes it, and writes the response headers and payloads.
 func doCall(call *GRPCCall, r *http.Request, w http.ResponseWriter) {
 	msg := ""
 	defer func() {

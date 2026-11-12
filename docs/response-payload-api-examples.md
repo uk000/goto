@@ -1,24 +1,64 @@
 #### Response Payload API Examples
 
+(All `/server/response/payload/...` URIs below can equally be written as `/response/payload/...`. See the [Response Payload README](../pkg/server/response/payload/README.md) for the full API tables and schemas. Use `curl -g` whenever the URL contains `{...}`, otherwise curl treats the braces as a URL glob.)
+
 ```
 curl -X POST localhost:8080/server/response/payload/set/default --data '{"test": "default payload"}'
 
 curl -X POST localhost:8080/server/response/payload/set/default/10K
 
-curl -X POST -g localhost:8080/server/response/payload/set/uri?uri=/foo/{f}/bar{b} --data '{"test": "uri was /foo/{}/bar/{}"}'
+# URI payload with captures {f} and {b}. Note: the URI is passed as a query param of /payload/set (not /payload/set/uri)
+curl -X POST -g 'localhost:8080/server/response/payload/set?uri=/foo/{f}/bar{b}' --data '{"test": "uri was /foo/{f}/bar{b}"}'
 
-curl -X POST -g localhost:8080/server/response/payload/set/header/foo/{f} --data '{"test": "header was foo with value {f}"}'
+# header name with a captured value {f} (header name = foo)
+curl -X POST -g 'localhost:8080/server/response/payload/set/header/foo={f}' --data '{"test": "header was foo with value {f}"}'
 
 curl -X POST localhost:8080/server/response/payload/set/header/foo=bar --data '{"test": "header was foo with value bar"}'
 
-curl -g -X POST localhost:8080/server/response/payload/set/body~AA,BB,CC?uri=/foo --data '{"test": "body contains AA,BB,CC"}' -HContent-Type:application/json
+# header + URI
+curl -X POST -g 'localhost:8080/server/response/payload/set/header/bar={y}?uri=/foo/{x}' --data '{"result": "URI foo with {x} and header bar with {y}"}'
+
+# query param + URI
+curl -X POST -g 'localhost:8080/server/response/payload/set/query/qq={v}?uri=/q' --data '{"test": "query qq was set to {v}"}'
+
+curl -g -X POST 'localhost:8080/server/response/payload/set/body~AA,BB,CC?uri=/foo' --data '{"test": "body contains AA,BB,CC"}' -HContent-Type:application/json
 
 curl -v -g -XPOST localhost:8080/response/payload/set/body/paths/.foo.bar={a},.foo.baz={b}\?uri=/foo --data '{"bar":"{a}", "baz":"{b}", "message": "{a} is {b}"}' -HContent-Type:application/json
+
+# set the content type of the payload with the ResponseContent-Type header (not Content-Type)
+curl -X POST -H 'ResponseContent-Type: application/xml' 'localhost:8080/response/payload/set?uri=/xml' --data '<a/>'
+
+# stream payload: JSON array items repeated up to count (written back-to-back; the delay is not applied for HTTP)
+curl -X POST -g 'localhost:8080/response/payload/set/stream/count=5/delay=500ms?uri=/st' --data '[{"a":1},{"a":2}]'
+
+# payload with its own match rules (see the README for the full schema)
+curl -X POST localhost:8080/response/payload/set/matches -d '{"payload":"hello","matches":[{"uriPrefix":"/hi"}]}'
+
+# an empty body removes the payload of a URI
+curl -X POST 'localhost:8080/response/payload/set?uri=/xml'
+
+# random payload of a given size (no config needed)
+curl localhost:8080/response/payload/2K
 
 curl -X POST localhost:8080/server/response/payload/clear
 
 curl localhost:8080/server/response/payload
 ```
+
+Sample replies:
+```
+$ curl -X POST -g 'localhost:8080/response/payload/set?uri=/foo/{f}/bar{b}' --data '{"result": "uri had foo={f}, bar={b}"}'
+Port [8080] Payload set for URI [/foo/{f}/bar{b}] : content-type [plain/text], length [38]
+$ curl localhost:8080/foo/hi/bar123
+{"result": "uri had foo=hi, bar=123"}
+
+$ curl -X POST -g 'localhost:8080/response/payload/set/body/paths/.foo.bar={a},.foo.baz={b}?uri=/foo' ...
+Port [8080] Payload set for URI [/foo] and match [.foo.bar={a},.foo.baz={b}] : content-type [plain/text], length [51]
+$ curl localhost:8080/foo --data '{"foo": {"bar": "hi", "baz": "hello"}}'
+{"bar":"hi", "baz":"hello", "message": "hi is hello"}
+```
+
+> Caution: a `set` call without `?uri=` (default, header-only or query-only payloads) leaves a route behind that can't be removed, which makes non-matching requests return an empty `200` until goto is restarted (see the README's note and bug report REQ-03). Prefer URI-scoped payloads.
 
 #### Response Payload Transformation Examples
 

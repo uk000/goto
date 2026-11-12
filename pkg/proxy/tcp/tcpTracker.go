@@ -81,6 +81,7 @@ type TCPProxyTracker struct {
 	lock              sync.RWMutex
 }
 
+// NewTCPTracker creates a tracker of the TCP proxy of the port, with empty counters.
 func NewTCPTracker(port int) *TCPProxyTracker {
 	return &TCPProxyTracker{
 		ProxyPort:         port,
@@ -90,6 +91,7 @@ func NewTCPTracker(port int) *TCPProxyTracker {
 	}
 }
 
+// NewTCPTargetTracker creates a tracker of the target of the proxy, with empty counters and no sessions.
 func NewTCPTargetTracker(port int, upstream, downAddr string) *TCPTargetTracker {
 	return &TCPTargetTracker{
 		ProxyPort:         port,
@@ -100,6 +102,7 @@ func NewTCPTargetTracker(port int, upstream, downAddr string) *TCPTargetTracker 
 	}
 }
 
+// NewTCPSessionTracker creates a tracker of the session of a downstream address, with a tracker for the downstream connection.
 func NewTCPSessionTracker(port int, upstream, downAddr string) *TCPSessionTracker {
 	return &TCPSessionTracker{
 		ProxyPort:       port,
@@ -110,16 +113,19 @@ func NewTCPSessionTracker(port int, upstream, downAddr string) *TCPSessionTracke
 	}
 }
 
+// snapshot returns a copy of the tracked data, taken under the lock.
 func (ct *ConnTracker) snapshot() connTrackerData {
 	ct.lock.Lock()
 	defer ct.lock.Unlock()
 	return ct.connTrackerData
 }
 
+// MarshalJSON serializes a snapshot of the tracked data.
 func (ct *ConnTracker) MarshalJSON() ([]byte, error) {
 	return json.Marshal(ct.snapshot())
 }
 
+// init resets the tracked data for a connection that starts at the given time.
 func (ct *ConnTracker) init(port int, upstream, remoteAddr string, startTime time.Time) {
 	ct.lock.Lock()
 	defer ct.lock.Unlock()
@@ -142,6 +148,7 @@ func (ct *ConnTracker) recordPreRead(n int, at time.Time) {
 	ct.LastByteInAt = at
 }
 
+// recordRead counts a read of n bytes, and notes its time as that of the first and last byte in.
 func (ct *ConnTracker) recordRead(n int, at time.Time) {
 	ct.lock.Lock()
 	defer ct.lock.Unlock()
@@ -153,6 +160,7 @@ func (ct *ConnTracker) recordRead(n int, at time.Time) {
 	ct.LastByteInAt = at
 }
 
+// recordWrite counts a write of n bytes, and notes its time as that of the first and last byte out.
 func (ct *ConnTracker) recordWrite(n int, at time.Time) {
 	ct.lock.Lock()
 	defer ct.lock.Unlock()
@@ -164,42 +172,49 @@ func (ct *ConnTracker) recordWrite(n int, at time.Time) {
 	ct.LastByteOutAt = at
 }
 
+// recordDelay counts a delayed write.
 func (ct *ConnTracker) recordDelay() {
 	ct.lock.Lock()
 	defer ct.lock.Unlock()
 	ct.DelayCount++
 }
 
+// recordDrop counts a dropped packet.
 func (ct *ConnTracker) recordDrop() {
 	ct.lock.Lock()
 	defer ct.lock.Unlock()
 	ct.DropCount++
 }
 
+// markRemoteClosed notes that the remote side closed the connection.
 func (ct *ConnTracker) markRemoteClosed() {
 	ct.lock.Lock()
 	defer ct.lock.Unlock()
 	ct.RemoteClosed = true
 }
 
+// markReadError notes that reading from the connection failed.
 func (ct *ConnTracker) markReadError() {
 	ct.lock.Lock()
 	defer ct.lock.Unlock()
 	ct.ReadError = true
 }
 
+// markWriteError notes that writing to the connection failed.
 func (ct *ConnTracker) markWriteError() {
 	ct.lock.Lock()
 	defer ct.lock.Unlock()
 	ct.WriteError = true
 }
 
+// markConnectFailed notes that connecting failed.
 func (ct *ConnTracker) markConnectFailed() {
 	ct.lock.Lock()
 	defer ct.lock.Unlock()
 	ct.ConnectFailed = true
 }
 
+// markClosed notes that the connection is closed, and when it was, the first time that it is called.
 func (ct *ConnTracker) markClosed(at time.Time) {
 	ct.lock.Lock()
 	defer ct.lock.Unlock()
@@ -209,6 +224,7 @@ func (ct *ConnTracker) markClosed(at time.Time) {
 	}
 }
 
+// MarshalJSON serializes the session without the lock held while the connection trackers are written.
 func (st *TCPSessionTracker) MarshalJSON() ([]byte, error) {
 	st.lock.RLock()
 	type sessionJSON struct {
@@ -243,18 +259,21 @@ func (st *TCPSessionTracker) begin(downConn string, startTime time.Time) {
 	st.UpConnTracker = []*ConnTracker{}
 }
 
+// setSNI records the SNI of the session.
 func (st *TCPSessionTracker) setSNI(sni string) {
 	st.lock.Lock()
 	defer st.lock.Unlock()
 	st.SNI = sni
 }
 
+// downTracker returns the tracker of the downstream connection of the session.
 func (st *TCPSessionTracker) downTracker() *ConnTracker {
 	st.lock.RLock()
 	defer st.lock.RUnlock()
 	return st.DownConnTracker
 }
 
+// addUpTracker creates a tracker for a connection to an upstream endpoint, adds it to the session and returns it.
 func (st *TCPSessionTracker) addUpTracker(upstream, remoteAddr string, startTime time.Time) *ConnTracker {
 	t := &ConnTracker{}
 	t.init(st.ProxyPort, upstream, remoteAddr, startTime)
@@ -264,6 +283,7 @@ func (st *TCPSessionTracker) addUpTracker(upstream, remoteAddr string, startTime
 	return t
 }
 
+// MarshalJSON serializes the target tracker under the read lock.
 func (tt *TCPTargetTracker) MarshalJSON() ([]byte, error) {
 	tt.lock.RLock()
 	defer tt.lock.RUnlock()
@@ -285,6 +305,7 @@ func (tt *TCPTargetTracker) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// MarshalJSON serializes the proxy tracker under the read lock.
 func (pt *TCPProxyTracker) MarshalJSON() ([]byte, error) {
 	pt.lock.RLock()
 	defer pt.lock.RUnlock()
@@ -304,6 +325,7 @@ func (pt *TCPProxyTracker) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// GetOrAddTargetSessionTracker returns the session tracker of the downstream address under the target, creating the target tracker and the session tracker if needed.
 func (pt *TCPProxyTracker) GetOrAddTargetSessionTracker(port int, targetName, downAddr string) *TCPSessionTracker {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
@@ -313,6 +335,7 @@ func (pt *TCPProxyTracker) GetOrAddTargetSessionTracker(port int, targetName, do
 	return pt.TargetTrackers[targetName].GetOrAddSessionTracker(port, targetName, downAddr)
 }
 
+// IncrementMatchCounts counts a connection for the proxy, the SNI and the target.
 func (pt *TCPProxyTracker) IncrementMatchCounts(port int, targetName, downAddr, sni string) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
@@ -325,6 +348,7 @@ func (pt *TCPProxyTracker) IncrementMatchCounts(port int, targetName, downAddr, 
 	}
 }
 
+// IncrementRejectCount counts a connection that was rejected for its SNI.
 func (pt *TCPProxyTracker) IncrementRejectCount(sni string) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
@@ -332,6 +356,7 @@ func (pt *TCPProxyTracker) IncrementRejectCount(sni string) {
 	pt.RejectCountsBySNI[sni]++
 }
 
+// GetOrAddSessionTracker returns the session tracker of the downstream address, creating it if it doesn't exist.
 func (tt *TCPTargetTracker) GetOrAddSessionTracker(port int, targetName, downAddr string) *TCPSessionTracker {
 	tt.lock.Lock()
 	defer tt.lock.Unlock()
@@ -341,6 +366,7 @@ func (tt *TCPTargetTracker) GetOrAddSessionTracker(port int, targetName, downAdd
 	return tt.TCPSessionTracker[downAddr]
 }
 
+// IncrementMatchCounts counts a connection for the target and its SNI.
 func (tt *TCPTargetTracker) IncrementMatchCounts(sni string) {
 	tt.lock.Lock()
 	defer tt.lock.Unlock()

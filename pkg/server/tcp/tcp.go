@@ -126,6 +126,10 @@ type ConnectionHistory struct {
 	Status *ConnectionStatus `json:"status"`
 }
 
+// maxExpectedPayloadLength is the longest payload that a port can be set to expect (64 MiB): the connections that validate
+// the content keep what they receive, and the length is what a client can make them keep.
+var maxExpectedPayloadLength = 64 << 20
+
 const HelloMessage string = "HELLO"
 const GoodByeMessage string = "GOODBYE"
 const Response string = "Response"
@@ -143,6 +147,7 @@ var (
 	lock              sync.RWMutex
 )
 
+// InitTCPConfig configures the TCP config of a port and stores it if valid, otherwise it returns the error message.
 func InitTCPConfig(port int, tcpConfig *TCPConfig) (*TCPConfig, string) {
 	if tcpConfig == nil {
 		tcpConfig = &TCPConfig{Port: port}
@@ -156,6 +161,7 @@ func InitTCPConfig(port int, tcpConfig *TCPConfig) (*TCPConfig, string) {
 	return tcpConfig, msg
 }
 
+// storeTCPConfig stores the config of a port, defaulting to echo (or silent life) mode if no mode is set.
 func storeTCPConfig(tcpConfig *TCPConfig) {
 	lock.Lock()
 	defer lock.Unlock()
@@ -179,6 +185,7 @@ func storeTCPConfig(tcpConfig *TCPConfig) {
 	}
 }
 
+// getTCPConfig gives the stored TCP config of a port, if any.
 func getTCPConfig(port int) *TCPConfig {
 	lock.RLock()
 	defer lock.RUnlock()

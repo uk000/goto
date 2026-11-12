@@ -72,12 +72,14 @@ func forRPC(rpcType string, f func(http.ResponseWriter, *http.Request)) func(htt
 	}
 }
 
+// setRoutes registers the service admin routes for both the grpc and jsonrpc types on their root routers.
 func setRoutes(r *mux.Router) {
 	for _, rpcType := range []string{"grpc", "jsonrpc"} {
 		setRPCRoutes(rpcType, RootRouter(rpcType))
 	}
 }
 
+// setRPCRoutes adds the /server routes of one rpc type for listing services, tracking calls, and configuring method response payloads.
 func setRPCRoutes(rpcType string, rpcRouter *mux.Router) {
 	rpcServiceRouter := util.PathRouter(rpcRouter, "/server")
 	add := func(path string, f func(http.ResponseWriter, *http.Request), methods ...string) {
@@ -112,12 +114,14 @@ func serviceRegistry(rpcType string, port int) RPCServiceRegistry {
 	return nil
 }
 
+// getServices lists all services registered for the rpc type of the request as YAML.
 func getServices(w http.ResponseWriter, r *http.Request) {
 	rpcType := util.GetStringParamValue(r, "rpc")
 	util.WriteYaml(w, serviceRegistry(rpcType, util.GetRequestOrListenerPortNum(r)))
 	util.AddLogMessage(fmt.Sprintf("All %s services listed", rpcType), r)
 }
 
+// getService serves the details of the requested service as YAML, or an error message if the service isn't found.
 func getService(w http.ResponseWriter, r *http.Request) {
 	rpcType := util.GetStringParamValue(r, "rpc")
 	rs, _, _, msg, ok := CheckService(w, r, serviceRegistry(rpcType, util.GetRequestOrListenerPortNum(r)))
@@ -130,6 +134,7 @@ func getService(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// trackService starts tracking calls to the requested service, optionally by the given request headers.
 func trackService(w http.ResponseWriter, r *http.Request) {
 	rpcType := util.GetStringParamValue(r, "rpc")
 	port := util.GetRequestOrListenerPortNum(r)
@@ -146,6 +151,7 @@ func trackService(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// getServiceTracking serves the call counts and port tracking of the requested service, or 404 if it isn't tracked.
 func getServiceTracking(w http.ResponseWriter, r *http.Request) {
 	rpcType := util.GetStringParamValue(r, "rpc")
 	port := util.GetRequestOrListenerPortNum(r)
@@ -164,16 +170,19 @@ func getServiceTracking(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// clearServiceResponsePayload clears the response payloads configured for a service method on the port.
 func clearServiceResponsePayload(w http.ResponseWriter, r *http.Request) {
 	rpcType := util.GetStringParamValue(r, "rpc")
 	ClearServiceResponsePayload(w, r, serviceRegistry(rpcType, util.GetRequestOrListenerPortNum(r)))
 }
 
+// setServiceResponsePayload configures the response payload (unary or stream, optionally header or body matched) of a service method.
 func setServiceResponsePayload(w http.ResponseWriter, r *http.Request) {
 	rpcType := util.GetStringParamValue(r, "rpc")
 	SetServiceResponsePayload(w, r, serviceRegistry(rpcType, util.GetRequestOrListenerPortNum(r)))
 }
 
+// setServicePayloadTransform configures payload transformations for the responses of a service method.
 func setServicePayloadTransform(w http.ResponseWriter, r *http.Request) {
 	rpcType := util.GetStringParamValue(r, "rpc")
 	SetServicePayloadTransform(w, r, serviceRegistry(rpcType, util.GetRequestOrListenerPortNum(r)))

@@ -34,6 +34,7 @@ type GRPCProxyTracker struct {
 	lock                     sync.RWMutex
 }
 
+// NewGRPCProxyTracker creates a tracker with empty counters.
 func NewGRPCProxyTracker() *GRPCProxyTracker {
 	return &GRPCProxyTracker{
 		ConnCount:                0,
@@ -48,6 +49,7 @@ func NewGRPCProxyTracker() *GRPCProxyTracker {
 	}
 }
 
+// IncrementConnCounts counts a connection, and one for the upstream if it is given.
 func (pt *GRPCProxyTracker) IncrementConnCounts(upstream string) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
@@ -57,6 +59,7 @@ func (pt *GRPCProxyTracker) IncrementConnCounts(upstream string) {
 	}
 }
 
+// AddMatchCounts adds the request and response counts to those of the upstream, the service, the method and the message types.
 func (pt *GRPCProxyTracker) AddMatchCounts(upstream, service, method, requestMessageType string, requestCount int, responseMessageType string, responseCount int) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()

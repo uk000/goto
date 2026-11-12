@@ -48,6 +48,7 @@ type Middleware struct {
 	MiddlewareHandler mux.MiddlewareFunc
 }
 
+// NewMiddleware creates a middleware from a name, a function that registers its routes, and a handler that wraps the next handler.
 func NewMiddleware(name string, setRoutes func(r *mux.Router), middlewareHandler mux.MiddlewareFunc) *Middleware {
 	m := &Middleware{
 		Name:              name,
@@ -57,6 +58,7 @@ func NewMiddleware(name string, setRoutes func(r *mux.Router), middlewareHandler
 	return m
 }
 
+// AddMiddlewares wraps next with the handlers of the middlewares so that the first middleware runs outermost.
 func AddMiddlewares(next http.Handler, middlewares ...*Middleware) http.Handler {
 	handler := next
 	for i := len(middlewares) - 1; i >= 0; i-- {
@@ -67,6 +69,7 @@ func AddMiddlewares(next http.Handler, middlewares ...*Middleware) http.Handler 
 	return handler
 }
 
+// AddRoutes registers the routes of the given middlewares on the router.
 func AddRoutes(r *mux.Router, handlers ...*Middleware) {
 	for _, h := range handlers {
 		if h.SetRoutes != nil {
@@ -90,6 +93,7 @@ func BaseHandlerFunc(getHandler func() http.Handler) http.Handler {
 	})
 }
 
+// SetRoutesOnly registers the routes of the routes-only middlewares on the router.
 func SetRoutesOnly(r *mux.Router) {
 	for _, m := range RoutesOnly {
 		if m.SetRoutes != nil {
@@ -98,6 +102,7 @@ func SetRoutesOnly(r *mux.Router) {
 	}
 }
 
+// LinkCore registers the routes of the core middlewares on the router and installs their handlers.
 func LinkCore(r *mux.Router) {
 	for _, m := range Core {
 		if m.SetRoutes != nil {
@@ -107,6 +112,7 @@ func LinkCore(r *mux.Router) {
 	UseCore(r)
 }
 
+// UseCore installs the handlers of the core middlewares on the router.
 func UseCore(r *mux.Router) {
 	for _, m := range Core {
 		if m.MiddlewareHandler != nil {
@@ -115,6 +121,7 @@ func UseCore(r *mux.Router) {
 	}
 }
 
+// UseInterceptedCore installs the handlers of the intercepted core middlewares on the router.
 func UseInterceptedCore(r *mux.Router) {
 	for _, m := range InterceptedCore {
 		if m.MiddlewareHandler != nil {
@@ -123,6 +130,7 @@ func UseInterceptedCore(r *mux.Router) {
 	}
 }
 
+// LinkUnintercepted registers the routes and handlers of the unintercepted middlewares on the router and builds the middleware chain used for gRPC requests.
 func LinkUnintercepted(r *mux.Router) {
 	for _, m := range Unintercepted {
 		if m.SetRoutes != nil {
@@ -157,6 +165,7 @@ func LinkUnintercepted(r *mux.Router) {
 	}
 }
 
+// LinkIntercepted registers the routes and handlers of the intercepted middlewares on the router and sets the head of the intercepted chain.
 func LinkIntercepted(r *mux.Router) {
 	for _, m := range Intercepted {
 		if m.SetRoutes != nil {
@@ -175,6 +184,7 @@ func LinkIntercepted(r *mux.Router) {
 	}
 }
 
+// InvokeMiddlewareChainForGRPC runs a gRPC call through the HTTP middleware chain by adapting it to an HTTP request and response writer, which it returns.
 func InvokeMiddlewareChainForGRPC(ctx context.Context, port int, method, host, uri string, headers map[string][]string, body []byte, desc protoreflect.MessageDescriptor) (*GrpcHTTPRequestAdapter, *GrpcHTTPResponseWriterAdapter) {
 	ctx = util.WithPort(ctx, port)
 	ra := NewGrpcHTTPRequestAdapter(ctx, method, host, uri, headers, body)
@@ -193,6 +203,7 @@ func InvokeMiddlewareChainForGRPC(ctx context.Context, port int, method, host, u
 	return ra, wa
 }
 
+// RootPath returns the router of a root path, creating it with the core and intercept middlewares on first use.
 func RootPath(path string) *mux.Router {
 	if RootRouters[path] == nil {
 		r := mux.NewRouter().SkipClean(true).PathPrefix(path).Subrouter()
@@ -227,6 +238,7 @@ func RootRouterFor(rootURI string, r *http.Request) *mux.Router {
 	return router
 }
 
+// postIntercept returns a handler that sends the goto trailers once the intercepted chain is done.
 func postIntercept() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		util.SendGotoTrailers(w, r)

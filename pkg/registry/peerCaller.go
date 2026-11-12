@@ -31,6 +31,7 @@ import (
 type OnPodDone func(string, *Pod, interface{}, error)
 type OnPeerDone func(string)
 
+// invokePeerAPI calls the pod API and returns the parsed response, with an error if the status is not the expected one.
 func invokePeerAPI(pod *Pod, method, uri string, headers http.Header, payload []byte, expectedStatus int) (bool, interface{}, error) {
 	if req, err := transport.CreateRequest(method, pod.URL+uri, headers, payload, nil); err == nil {
 		if resp, err := pod.client.Do(req); err == nil {
@@ -57,6 +58,7 @@ func invokePeerAPI(pod *Pod, method, uri string, headers http.Header, payload []
 	}
 }
 
+// invokePod calls the pod, retrying on timeouts and marking it unhealthy if they persist, and reports the outcome to onPodDone.
 func invokePod(peer string, pod *Pod, method string, uri string, headers http.Header,
 	payload []byte, expectedStatus int, retryCount int, onPodDone OnPodDone) bool {
 	if pod.client == nil || pod.Offline {
@@ -92,6 +94,7 @@ func invokePod(peer string, pod *Pod, method string, uri string, headers http.He
 	return success
 }
 
+// invokeForPodsWithHeadersAndPayload calls the peer pods concurrently, skipping unhealthy ones by default, and returns per-pod success.
 func invokeForPodsWithHeadersAndPayload(peerPods PeerPods, method string, uri string, headers http.Header,
 	payload []byte, expectedStatus int, retryCount int, useUnhealthy bool, onPodDone OnPodDone, onPeerDone ...OnPeerDone) PeerResults {
 	result := PeerResults{}
@@ -136,12 +139,14 @@ func invokeForPodsWithHeadersAndPayload(peerPods PeerPods, method string, uri st
 	return result
 }
 
+// invokeForPodsWithPayload calls all the peer pods with a string payload and no headers.
 func invokeForPodsWithPayload(peerPods PeerPods, method string, uri string, payload string, expectedStatus int,
 	retryCount int, useUnhealthy bool, onPodDone OnPodDone, onPeerDone ...OnPeerDone) PeerResults {
 	return invokeForPodsWithHeadersAndPayload(peerPods, method, uri, nil, []byte(payload), expectedStatus, retryCount, useUnhealthy,
 		onPodDone, onPeerDone...)
 }
 
+// invokeForPods calls all the peer pods with no headers and no payload.
 func invokeForPods(peerPods PeerPods, method string, uri string, expectedStatus int, retryCount int, useUnhealthy bool,
 	onPodDone OnPodDone, onPeerDone ...OnPeerDone) PeerResults {
 	return invokeForPodsWithHeadersAndPayload(peerPods, method, uri, nil, nil, expectedStatus, retryCount, useUnhealthy,

@@ -60,14 +60,17 @@ type tcpEndpointConn struct {
 	queue   chan []byte
 }
 
+// touch records the current time as the last time that the pump moved data.
 func (pm *tcpPump) touch() {
 	pm.lastActive.Store(time.Now().UnixNano())
 }
 
+// idleFor tells how long the pump has been without moving data.
 func (pm *tcpPump) idleFor() time.Duration {
 	return time.Since(time.Unix(0, pm.lastActive.Load()))
 }
 
+// readBufferSize returns the size of the buffer to read connections with, which is the max MTU size but at least a minimum.
 func readBufferSize() int {
 	if n := global.ServerConfig.MaxMTUSize; n > minReadBuffer {
 		return n
@@ -75,6 +78,7 @@ func readBufferSize() int {
 	return minReadBuffer
 }
 
+// isTimeout tells whether the error is a network timeout.
 func isTimeout(err error) bool {
 	var ne net.Error
 	return errors.As(err, &ne) && ne.Timeout()
@@ -146,6 +150,7 @@ func (pm *tcpPump) connect(st *TCPSessionTracker, endpoints []*TCPEndpoint) []*t
 	return eps
 }
 
+// dial connects to the address, retrying a failed attempt after the retry delay of the upstream, until it connects or the pump is done.
 func (pm *tcpPump) dial(address string) (net.Conn, error) {
 	attempts := pm.up.Retries + 1
 	var err error
@@ -168,6 +173,7 @@ func (pm *tcpPump) dial(address string) (net.Conn, error) {
 	return nil, err
 }
 
+// run starts the goroutines that write to and read from the endpoints and the downstream, and waits for all of them to finish.
 func (pm *tcpPump) run(eps []*tcpEndpointConn, pendingData []byte) {
 	// Closing the connections is what gets the goroutines out of their blocking reads and writes.
 	pm.wg.Add(1)
@@ -210,6 +216,7 @@ func (pm *tcpPump) read(conn net.Conn, buff []byte) (n int, err error) {
 	}
 }
 
+// noteReadError classifies the error of a read (closed, reset, timeout or other) and marks it on the tracker, unless the pump is closing.
 func (pm *tcpPump) noteReadError(err error, t *ConnTracker, label, address string) {
 	if pm.ctx.Err() != nil {
 		log.Printf("TCP Proxy[%d]: [READ] [%s] connection [%s] session closed\n", pm.port, label, address)
@@ -231,6 +238,7 @@ func (pm *tcpPump) noteReadError(err error, t *ConnTracker, label, address strin
 	}
 }
 
+// readDownstream reads the downstream and queues each chunk for every endpoint, and closes the queues if the downstream is done or cancels the pump if it fails.
 func (pm *tcpPump) readDownstream(eps []*tcpEndpointConn) {
 	defer pm.wg.Done()
 	address := pm.down.RemoteAddr().String()
@@ -267,6 +275,7 @@ func (pm *tcpPump) readDownstream(eps []*tcpEndpointConn) {
 	}
 }
 
+// writeUpstream writes the pending data and then the queued chunks of the downstream to the endpoint, with the drops and the delays of the upstream.
 func (pm *tcpPump) writeUpstream(ep *tcpEndpointConn, primary bool, pendingData []byte) {
 	defer pm.wg.Done()
 	failed := false

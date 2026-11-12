@@ -82,6 +82,7 @@ var (
 	lock          = sync.RWMutex{}
 )
 
+// init generates the default CA signing key and its JWKS at startup.
 func init() {
 	var err error
 	if DefaultCAKey, DefaultCAJWKS, err = createDefaultCAKeys(); err != nil {
@@ -92,6 +93,7 @@ func init() {
 // The parsed certs in X509Certs are built from the raw cert and key of a name, so they are dropped whenever the raw
 // cert or key of the name changes. Otherwise a cert that was uploaded again (or removed) would keep being served.
 
+// AddCert stores the raw cert PEM under the name and drops the parsed cert so it is rebuilt on next use.
 func AddCert(name string, cert []byte) {
 	lock.Lock()
 	defer lock.Unlock()
@@ -99,6 +101,7 @@ func AddCert(name string, cert []byte) {
 	delete(X509Certs, name)
 }
 
+// RemoveCert removes the raw cert of the name along with its parsed cert.
 func RemoveCert(name string) {
 	lock.Lock()
 	defer lock.Unlock()
@@ -106,6 +109,7 @@ func RemoveCert(name string) {
 	delete(X509Certs, name)
 }
 
+// AddKey stores the raw key PEM under the name and drops the parsed cert so it is rebuilt on next use.
 func AddKey(name string, cert []byte) {
 	lock.Lock()
 	defer lock.Unlock()
@@ -113,6 +117,7 @@ func AddKey(name string, cert []byte) {
 	delete(X509Certs, name)
 }
 
+// RemoveKey removes the raw key of the name along with its parsed cert.
 func RemoveKey(name string) {
 	lock.Lock()
 	defer lock.Unlock()
@@ -120,6 +125,7 @@ func RemoveKey(name string) {
 	delete(X509Certs, name)
 }
 
+// GetCerts returns the cert for the key, parsing and caching it from the uploaded raw cert and key pair on first use.
 func GetCerts(key string) (certs []*tls.Certificate, err error) {
 	lock.Lock()
 	defer lock.Unlock()
@@ -141,6 +147,7 @@ func GetCerts(key string) (certs []*tls.Certificate, err error) {
 	return certs, nil
 }
 
+// AddCACert stores a CA cert (base64 or PEM) under the name for the domain, and reloads the root CA pool.
 func AddCACert(name, domain string, cert []byte) {
 	if len(cert) > 0 {
 		if d, err := base64.StdEncoding.DecodeString(string(cert)); err == nil {
@@ -161,6 +168,7 @@ func AddCACert(name, domain string, cert []byte) {
 	loadCerts()
 }
 
+// RemoveCACert removes the named CA cert and reloads the root CA pool.
 func RemoveCACert(name string) {
 	lock.Lock()
 	defer lock.Unlock()
@@ -168,6 +176,7 @@ func RemoveCACert(name string) {
 	loadCerts()
 }
 
+// AddCAKey stores a CA private key (base64 or PEM) under the name for the domain.
 func AddCAKey(name, domain string, key []byte) {
 	if len(key) > 0 {
 		if d, err := base64.StdEncoding.DecodeString(string(key)); err == nil {
@@ -187,12 +196,14 @@ func AddCAKey(name, domain string, key []byte) {
 	}
 }
 
+// RemoveCAKey removes the named CA key.
 func RemoveCAKey(name string) {
 	lock.Lock()
 	defer lock.Unlock()
 	delete(CAKeys, name)
 }
 
+// SetDefaultCA makes the named CA RSA key the default signing key, and rebuilds the default JWKS from it and its cert.
 func SetDefaultCA(name string) {
 	lock.Lock()
 	defer lock.Unlock()
@@ -221,6 +232,7 @@ func SetDefaultCA(name string) {
 	DefaultCAJWKS = buildRSAJWKS(rsaKey, certDER)
 }
 
+// AddAutoCert generates a certificate for the common name and alt names (signed by a matching CA if there is one) and registers it under the name.
 func AddAutoCert(name string, commonName string, altNames []string, spiffeID string) error {
 	domains := []string{commonName}
 	domains = append(domains, altNames...)
@@ -234,6 +246,7 @@ func AddAutoCert(name string, commonName string, altNames []string, spiffeID str
 	return nil
 }
 
+// Add records the name and domain whose cert is to be loaded for the SPIFFE ID.
 func (s *SpiffeCerts) Add(name, domain, spiffeID string) {
 	lock.Lock()
 	defer lock.Unlock()
@@ -243,12 +256,14 @@ func (s *SpiffeCerts) Add(name, domain, spiffeID string) {
 	s.ByIDNameDomain[spiffeID] = types.NewPair(name, domain)
 }
 
+// IsEmpty tells if no SPIFFE IDs are registered.
 func (s *SpiffeCerts) IsEmpty() bool {
 	lock.RLock()
 	defer lock.RUnlock()
 	return len(s.ByIDNameDomain) == 0
 }
 
+// LoadSpiffeCerts fetches the X509 SVIDs from the SPIFFE workload API socket and registers the ones of known SPIFFE IDs as certs under their name and domain.
 func (s *SpiffeCerts) LoadSpiffeCerts(socketAddr string) error {
 	log.Printf("Loading Spiffe certs from socket: %s", socketAddr)
 	client, err := spiffe.New(context.Background(), spiffe.WithAddr(socketAddr))
@@ -296,6 +311,7 @@ func (s *SpiffeCerts) LoadSpiffeCerts(socketAddr string) error {
 	return nil
 }
 
+// loadCerts rebuilds the root CA pool from the *.crt and *.pem files in the cert path and the registered CA certs.
 func loadCerts() {
 	RootCAs = x509.NewCertPool()
 	if certs, err := filepath.Glob(global.ServerConfig.CertPath + "/*.crt"); err == nil {
@@ -317,6 +333,7 @@ func loadCerts() {
 	}
 }
 
+// CreateCertificate issues a cert for the domains, signed by the CA registered for the first domain, or self-signed if there is none.
 func CreateCertificate(domains []string, spiffeID, saveWithPrefix string) (outCert *tls.Certificate, err error) {
 	if len(domains) == 0 {
 		return nil, fmt.Errorf("no domains")
@@ -340,6 +357,7 @@ func CreateCertificate(domains []string, spiffeID, saveWithPrefix string) (outCe
 	return CreateCertificateWithCA(rawCACert, rawCAKey, domains, spiffeID, saveWithPrefix, false)
 }
 
+// CreateCertificateWithCA issues a one-year ECDSA (or RSA) server and client cert signed by the given CA cert and key, or self-signed if there is none, optionally saving the cert and key as PEM files in the work dir.
 func CreateCertificateWithCA(rawCACert, rawCAKey []byte, domains []string, spiffeID, saveWithPrefix string, useRSA bool) (outCert *tls.Certificate, err error) {
 	var spiffeURL *url.URL
 	if spiffeID != "" {
@@ -512,6 +530,7 @@ func parsePrivateKeyPEM(rawKey []byte) (any, error) {
 	return nil, fmt.Errorf("failed to parse private key: unsupported format")
 }
 
+// buildRSAJWKS builds a JWKS with the RSA public key for RS256 signing, keyed by the cert thumbprint when a cert is given.
 func buildRSAJWKS(priv *rsa.PrivateKey, certDER []byte) *JWKS {
 	pub := &priv.PublicKey
 	// Encode the public exponent as minimal big-endian bytes.
@@ -548,6 +567,7 @@ func buildRSAJWKS(priv *rsa.PrivateKey, certDER []byte) *JWKS {
 	}
 }
 
+// createDefaultCAKeys generates the default RSA signing key with a self-signed cert, and the JWKS for it.
 func createDefaultCAKeys() (*rsa.PrivateKey, *JWKS, error) {
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -569,6 +589,7 @@ func createDefaultCAKeys() (*rsa.PrivateKey, *JWKS, error) {
 	return privKey, buildRSAJWKS(privKey, certDER), nil
 }
 
+// EncodeX509Cert PEM-encodes the whole certificate chain of the cert.
 func EncodeX509Cert(cert *tls.Certificate) ([]byte, error) {
 	if cert == nil {
 		return nil, fmt.Errorf("No cert")
@@ -584,6 +605,7 @@ func EncodeX509Cert(cert *tls.Certificate) ([]byte, error) {
 	return buff.Bytes(), nil
 }
 
+// EncodeX509Key PEM-encodes the private key of the cert as PKCS8.
 func EncodeX509Key(cert *tls.Certificate) ([]byte, error) {
 	if cert == nil {
 		return nil, fmt.Errorf("No cert")
@@ -599,6 +621,7 @@ func EncodeX509Key(cert *tls.Certificate) ([]byte, error) {
 	return buff.Bytes(), nil
 }
 
+// pemBlockForKey returns the PEM block for an RSA or ECDSA private key, or nil for other types.
 func pemBlockForKey(priv interface{}) *pem.Block {
 	switch k := priv.(type) {
 	case *rsa.PrivateKey:
@@ -619,6 +642,7 @@ func pemBlockForKey(priv interface{}) *pem.Block {
 // hello that can be parsed. Errors of reading the connection, and of data that is not a TLS handshake at all, are not it.
 var ErrMalformedClientHello = errors.New("malformed TLS client hello")
 
+// ReadTLSSNIFromConn reads the TLS client hello from the connection and returns the SNI hostname in it, along with the bytes read so they can be replayed.
 func ReadTLSSNIFromConn(conn net.Conn) (sni string, buff bytes.Buffer, err error) {
 	r := io.TeeReader(conn, &buff)
 	tlsBuff, err := readTLSHandshake(r)
@@ -644,6 +668,7 @@ func ReadTLSSNIFromConn(conn net.Conn) (sni string, buff bytes.Buffer, err error
 	return
 }
 
+// readTLSHandshake reads one TLS handshake record, failing if the data is not a TLS handshake.
 func readTLSHandshake(r io.Reader) (buff []byte, err error) {
 	var hs struct {
 		Type, VersionMajor, VersionMinor uint8
@@ -661,6 +686,7 @@ func readTLSHandshake(r io.Reader) (buff []byte, err error) {
 	return
 }
 
+// getClientHelloData validates the ClientHello message and skips its fixed header and session ID, returning the cipher suites onward.
 func getClientHelloData(tlsBuff []byte) ([]byte, error) {
 	if len(tlsBuff) == 0 || tlsBuff[0] != 0x01 {
 		return nil, errors.New("Invalid ClientHello")
@@ -680,6 +706,7 @@ func getClientHelloData(tlsBuff []byte) ([]byte, error) {
 	return buff, nil
 }
 
+// getClientCipherSuites decodes the cipher suites offered in the ClientHello into their names.
 func getClientCipherSuites(tlsBuff []byte) ([]string, error) {
 	buff, _, err := parseByteRecordOfSize(tlsBuff, 2, "Cipher Suites")
 	if err != nil {
@@ -755,6 +782,7 @@ func getClientCipherSuites(tlsBuff []byte) ([]string, error) {
 	return cipherSuites, nil
 }
 
+// getClientHelloExtensions skips the cipher suites and compression methods and returns the extensions of the ClientHello.
 func getClientHelloExtensions(tlsBuff []byte) ([]byte, error) {
 	_, buff, err := parseByteRecordOfSize(tlsBuff, 2, "Cipher Suites")
 	if err != nil {
@@ -788,6 +816,7 @@ func nextExtension(extensions []byte) (extType uint16, extData, rest []byte, err
 	return
 }
 
+// getSNIExtensionEntries finds the server name extension in the ClientHello extensions and returns the DNS hostname in it.
 func getSNIExtensionEntries(extensions []byte) (sni string, err error) {
 	found := false
 	var extData []byte
@@ -818,6 +847,7 @@ func getSNIExtensionEntries(extensions []byte) (sni string, err error) {
 	return
 }
 
+// getSignatureAlgorithms finds the signature algorithms extension in the ClientHello extensions and decodes them into names.
 func getSignatureAlgorithms(extensions []byte) (algos []string, err error) {
 	found := false
 	var extData []byte
@@ -903,6 +933,7 @@ func getSignatureAlgorithms(extensions []byte) (algos []string, err error) {
 	return
 }
 
+// parseByteRecordOfSize reads a record prefixed by a big-endian length of sizeLen bytes, and returns the record and the remaining bytes.
 func parseByteRecordOfSize(buff []byte, sizeLen int, what string) ([]byte, []byte, error) {
 	if len(buff) < sizeLen {
 		return nil, nil, fmt.Errorf("Buffer doesn't have enough bytes to read size for [%s]", what)
@@ -917,6 +948,7 @@ func parseByteRecordOfSize(buff []byte, sizeLen int, what string) ([]byte, []byt
 	return buff[sizeLen : size+sizeLen], buff[size+sizeLen:], nil
 }
 
+// GetTLSVersion returns the TLS version of the connection state as a string like 1.3, or ??? if unknown.
 func GetTLSVersion(tlsState *tls.ConnectionState) string {
 	switch tlsState.Version {
 	case tls.VersionTLS13:

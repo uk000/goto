@@ -55,6 +55,7 @@ func GetGVRMapping(gvk *schema.GroupVersionKind) (*meta.RESTMapping, error) {
 	return restMapping(k8sClient.Active(), gvk)
 }
 
+// restMapping maps the GVK to its REST mapping using the discovery mapper of the client, failing if the client is not configured.
 func restMapping(c *k8sClient.K8sClient, gvk *schema.GroupVersionKind) (*meta.RESTMapping, error) {
 	// There is no default client when no kube config or cluster is found at startup.
 	if c == nil || c.Mapper == nil {
@@ -93,6 +94,7 @@ func GetWatchInterface(gvk *schema.GroupVersionKind, namespace string) (dynamic.
 	return resourceInterface(streamClient, gvr, namespace), gvr, nil
 }
 
+// resourceInterface returns the namespaced resource interface for namespaced kinds, else the cluster-scoped one.
 func resourceInterface(client dynamic.Interface, gvr *meta.RESTMapping, namespace string) dynamic.ResourceInterface {
 	if gvr.Scope.Name() == meta.RESTScopeNameNamespace {
 		return client.Resource(gvr.Resource).Namespace(namespace)

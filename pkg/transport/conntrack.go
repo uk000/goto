@@ -32,6 +32,7 @@ type ConnTracker struct {
 	watcher            IConnWatcher
 }
 
+// NewConnTrackerWithWatch wraps the connection in a tracker that counts it among the open connections of the transport intercept.
 func NewConnTrackerWithWatch(conn net.Conn, t *BaseTransportIntercept, watcher IConnWatcher) (net.Conn, error) {
 	t.lock.Lock()
 	t.ConnCount++
@@ -44,10 +45,12 @@ func NewConnTrackerWithWatch(conn net.Conn, t *BaseTransportIntercept, watcher I
 	return ct, nil
 }
 
+// NewConnTracker is NewConnTrackerWithWatch without a watcher.
 func NewConnTracker(conn net.Conn, t *BaseTransportIntercept) (net.Conn, error) {
 	return NewConnTrackerWithWatch(conn, t, nil)
 }
 
+// Close closes the connection and, once only, takes it off the open connection count of the transport intercept.
 func (ct *ConnTracker) Close() (err error) {
 	err = ct.Conn.Close()
 	ct.closeSync.Do(func() {

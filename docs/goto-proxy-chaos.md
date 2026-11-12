@@ -5,19 +5,26 @@ Launch a goto server that'll act as an intermediate proxy on port 8080.
 ```
 $ goto --ports 8000,8080
 ```
-Add an upstream service endpoint that'll be used as proxy's upstream destination. Adding a URI routing rule for this upstream endpoint that'll route all inbound requests on this port transparently to the upstream. Here we use URI `/` to represent all traffic
+Add a proxy target with an upstream service endpoint that'll be used as proxy's upstream destination, and a trigger that routes the matching inbound requests on this port to the upstream. Here we match the URI prefixes `/foo` and `/bar`, and ask the proxy to return the upstream response as it is (`transparent`). The target is created enabled; targets are disabled unless `enabled` is set.
 ```
-$ curl -X POST localhost:8000/port=8080/proxy/http/targets/add/serviceXYZ\?url=localhost:8081\&from=/
-Port [8080]: Added HTTP proxy target [serviceXYZ] with upstream URL [localhost:8081] Protocol [HTTP/1.1] With Route[from=/*, to=]
+$ curl -X POST localhost:8000/port=8080/proxy/http/targets/add --data '{
+  "name": "serviceXYZ", "enabled": true,
+  "endpoints": {"ep1": {"url": "http://localhost:8081"}},
+  "triggers": {"t1": {"matchAny": [{"uriPrefix": "/foo"}, {"uriPrefix": "/bar"}], "endpoints": ["ep1"]}},
+  "trafficConfig": {"transparent": true}
+}'
 ```
+The response is the added target, as YAML. The port `8080` must already be a listener, as it was started with `goto --ports 8000,8080`.
 
-At this point, all traffic on port 8080 should get routed to upstream endpoint 'localhost:8081', and the response from the upstream endpoint should get sent back to the downstream client. Send some client calls to confirm (assuming some service is listening on localhost:8081)
+> &#x1F4DD; Avoid a catch-all trigger (`uriPrefix: /`) on a port that you keep configuring: the proxy would also capture the admin calls to that port (including the ones above that use `/port=8080/...`), which are then forwarded to the upstream and not executed.
+
+At this point, requests on port 8080 with URIs starting with `/foo` or `/bar` should get routed to upstream endpoint 'localhost:8081', and the response from the upstream endpoint should get sent back to the downstream client. Send some client calls to confirm (assuming some service is listening on localhost:8081)
 ```
 $ curl -v localhost:8080/foo
 $ curl -v localhost:8080/bar
 ```
 
-Goto as a proxy add its own response headers to the response too in addition to sending the upstream response headers back to the downstream client. These headers can be useful to confirm on the client when the request reached the proxy, etc.
+Goto as a proxy add its own response headers to the response too in addition to sending the upstream response headers back to the downstream client: `Goto-Proxy-Upstream-Status` (the status of each upstream call, e.g. `{"serviceXYZ":{"ep1":200}}`), `Goto-Proxy-Response-Status`, `Goto-Proxy-In-At`, `Goto-Proxy-Out-At`, `Goto-Proxy-Head-Took` and, as a trailer, `Goto-Proxy-Took`. These headers can be useful to confirm on the client when the request reached the proxy, etc. Without `transparent`, the proxy answers with a JSON envelope of the upstream responses keyed by target and endpoint name instead.
 
 Now we can introduce some chaos in the proxy. We can start by shutting down the port to mimic network outage.
 ```
@@ -38,11 +45,10 @@ $ curl -X POST localhost:8000/port=8080/server/request/uri/set/delay=1s?uri=/foo
 Port [8080] will delay all requests for URI [/foo] by [1s] forever
 ```
 
-> &#x1F4DD; Alternately, you can set a delay per target using proxy API `/proxy/targets/{target}/delay/set/{delay}`. The proxy delay API allows setting a delay per target, whereas the URI delay API used above allows setting a delay per URI.
+> &#x1F4DD; Alternately, you can set a delay per target in its traffic config, by adding `"trafficConfig": {"delay": {"min": "1s", "max": "1s"}, "transparent": true}` to the target (or its trigger). The delay is applied before the upstream call, and is reported in the `Goto-Proxy-Delay` response header. The value is picked once, when the target is added (for a range such as `100ms`-`1s`, every request of the target then gets that same value), so add the target again to pick a new one. The traffic config delay applies to a target, whereas the URI delay API used above allows setting a delay per URI.
 
-Now the client requests should start seeing an additional delay of 1s on top of the processing time taken for the normal calls. This delay will be applied by goto acting as a proxy, and the goto response headers should show the response time of the upstream service as well as for itself. Looks for these response headers from goto proxy:
+Now the client requests should start seeing an additional delay of 1s on top of the processing time taken for the normal calls. This delay will be applied by goto acting as a proxy, and the goto response headers should show the time taken by goto before the response headers were sent. Look for this response header from goto proxy:
 ```
-Goto-Proxy-Upstream-Took-t1: 868.7µs
 Goto-Proxy-Head-Took: 1.0046516s
 ```
 
@@ -61,14 +67,24 @@ $ curl -v localhost:8080/foo
 ...
 < HTTP/1.1 502 Bad Gateway
 ...
-Goto-Upstream-Status_t1: 200 OK
-Goto-Proxy-Response-Status: 502
+< Goto-Proxy-Upstream-Status: {"serviceXYZ":{"ep1":200}}
+< Goto-Proxy-Response-Status: 502
 ...
+```
+
+Another way to make the proxy answer with other statuses is the proxy response mapping, which translates the upstream's statuses. For example, to answer 503 when the upstream returns any 5xx status, or when the upstream can't be reached at all (the status range `[0, 0]`; without it the proxy answers 200 with an upstream status of 0):
+```
+$ curl -X POST localhost:8000/port=8080/proxy/http/responses/set --data '[
+  {"upResponseRange": [500, 599], "proxyResponse": 503},
+  {"upResponseRange": [0, 0], "proxyResponse": 503}
+]'
 ```
 
 You can check proxy report at this point for validation
 ```
-$ curl -s localhost:8000/port=8080/proxy/report | jq
+$ curl -s localhost:8000/port=8080/proxy/http | jq
+$ curl -s localhost:8000/port=8080/proxy/http/trackers | jq
+$ curl -s localhost:8000/port=8080/proxy/http/targets/serviceXYZ/tracker | jq
 ```
 
 The above few examples should give you an idea of what you can achieve using `goto` as a proxy for chaos testing.
@@ -85,9 +101,11 @@ $ goto --ports 8000,9000/tcp
 
 Now we need to add an upstream TCP service endpoint. We assume there is a TCP service available on port 7000. If you don't have one handy, you could very well run another `goto` that listens on `7000/tcp`!
 ```
-$ curl -X POST localhost:8000/port=9000/proxy/tcp/targets/add/SomeTCPService\?address=localhost:7000
-Port [9000]: Added TCP proxy target [SomeTCPService] with upstream address [localhost:7000]
+$ curl -X POST localhost:8000/port=9000/proxy/tcp/upstreams/add --data '{
+  "SomeTCPService": {"endpoints": {"ep1": {"address": "localhost:7000"}}}
+}'
 ```
+The response is the upstreams of the port as YAML. The given upstreams replace the ones that the port had. (A shortcut that also opens the TCP port if it is not open yet: `curl -X POST "localhost:8000/proxy/tcp/9000?address=localhost:7000"`.)
 
 At this point, `goto` will happily accept TCP connections on port `9000` and proxy it to port `7000`. Feel free to try it out.
 ```
@@ -98,26 +116,31 @@ $ telnet localhost 9000
 $ curl -v http://localhost:9000
 ```
 
-Now it's time to introduce some TCP chaos. We can ask `goto` proxy to apply some delay to the TCP packets going to/from this endpoint.
+Now it's time to introduce some TCP chaos. We can ask `goto` proxy to apply some delay to the TCP packets going to/from this endpoint. The delay is a field of the upstream, so we add the upstream again with a delay (this replaces the upstream of the same name):
 ```
-$ curl -X POST localhost:8000/port=9000/proxy/targets/SomeTCPService/delay=1s
-Proxy[9000]: Target [SomeTCPService] Delay set to [Min=1s, Max=1s, Count=0]
+$ curl -X POST localhost:8000/port=9000/proxy/tcp/upstreams/add --data '{
+  "SomeTCPService": {"endpoints": {"ep1": {"address": "localhost:7000"}}, "delay": {"min": "1s", "max": "1s"}}
+}'
 ```
 
-The response from `goto` above gives us some ideas. We could have set the delay to be a probabilistic range. E.g. let's change it to apply delay between 1s and 3s, and do it only for next 5 requests.
+We could have set the delay to be a probabilistic range. E.g. let's change it to apply delay between 1s and 3s, and do it only for next 5 writes (the `count`).
 ```
-$ curl -X POST localhost:8000/port=9000/proxy/targets/SomeTCPService/delay=1s-3s:5
-Proxy[9000]: Target [SomeTCPService] Delay set to [Min=1s, Max=3s, Count=5]
+$ curl -X POST localhost:8000/port=9000/proxy/tcp/upstreams/add --data '{
+  "SomeTCPService": {"endpoints": {"ep1": {"address": "localhost:7000"}}, "delay": {"min": "1s", "max": "3s", "count": 5}}
+}'
 ```
 
 Go ahead and run the TCP traffic again, and see the delay in action. `Goto` logs on the proxy instance should also show how much delay it applied, which would be some random value between 1s-3s and would only do it for next 5 packets.
 
+> &#x1F4DD; A TCP connection that stays silent for more than 5 seconds in both directions is closed by the proxy, so a delay above that on an idle connection ends the connection.
+
 > &#x1F4DD; Note that the math can only be approximate at best for `Goto` as a TCP proxy, since it simply applies the delays to packet writes. The number of packets `goto` proxy writes may not be 1-to-1 with the number of requests/responses client/service sends.
 
-Now let's ask `goto` proxy to drop a certain percentage of packets.
+Now let's ask `goto` proxy to drop a certain percentage of packets, with the `dropPct` field of the upstream.
 ```
-$ curl -X POST localhost:8000/port=9000/proxy/targets/SomeTCPService/drop=25
-Proxy[9000]: Will drop [25]% packets for Target [SomeTCPService]
+$ curl -X POST localhost:8000/port=9000/proxy/tcp/upstreams/add --data '{
+  "SomeTCPService": {"endpoints": {"ep1": {"address": "localhost:7000"}}, "dropPct": 25}
+}'
 ```
 
 Now run the traffic again and observe that some requests/responses simply disappear and the client/service are left waiting. Now you can verify the behavior of your client/service if it was left hanging dry like this.
@@ -135,17 +158,17 @@ $ goto --ports 8000,9000/tcp
 
 Now we'll add two upstream TCP service endpoints each with an SNI hostname match.
 ```
-$ curl -X POST localhost:8000/port=9000/proxy/tcp/targets/add/ServiceA\?address=localhost:8081\&sni=a.com
-Port [9000]: Added TCP proxy target [ServiceA] with upstream address [localhost:8081] SNI [a.com]
-
-$ curl -X POST localhost:8000/port=9000/proxy/tcp/targets/add/ServiceB\?address=localhost:8082\&sni=b.com
-Port [9000]: Added TCP proxy target [ServiceB] with upstream address [localhost:8082] SNI [b.com]
+$ curl -X POST localhost:8000/port=9000/proxy/tcp/upstreams/add --data '{
+  "ServiceA": {"endpoints": {"ep1": {"address": "localhost:8081"}}, "match": {"sni": "a.com"}},
+  "ServiceB": {"endpoints": {"ep1": {"address": "localhost:8082"}}, "match": {"sni": "b.com"}}
+}'
 ```
+Both upstreams have to be given in one call, as the call replaces the upstreams that the port had. The `sni` is a comma-separated list of server names or regular expressions.
 
 Now all that's left to do is send two TLS requests, one with server name set to `a.com` and another with `b.com`. We could use some TCP service and openssl client, but for now curl will give us what we want. We assume that there are two HTTPS services running on ports `8081` and `8082`. If not, you know which app to use to spin one up! Let's spin those up anyway for fun.
 ```
-$ goto --ports 8001,8081/https/a.com
-$ goto --ports 8002,8082/https/b.com
+$ goto --ports 8001,8081/https --cn a.com
+$ goto --ports 8002,8082/https --cn b.com
 ```
 
 Now we have our upstream services running too. Let's send two curl requests to the proxy.
@@ -179,6 +202,6 @@ The response shows it came from the second `goto` instance with the appropriate 
 
 This shows that the proxy was able to route to the correct upstream endpoints based on the SNI received from the client TLS handshake while still letting the upstream services do the real handshake.
 
-Beyond this point, the two upstream targets can be configured with their corresponding chaos params (delay, drops, etc) and multiple clients can be tested against two upstream services.
+Beyond this point, the two upstreams can be configured with their corresponding chaos params (`delay`, `dropPct`, `retries`, etc, set in the same `upstreams/add` call) and multiple clients can be tested against two upstream services. The report of the proxy has the tracker of its sessions and connections: `curl -s localhost:8000/port=9000/proxy/tcp | jq`.
 
 See more [Proxy Examples](proxy-example.md)

@@ -121,6 +121,7 @@ func Install(t *testing.T) *API {
 	return a
 }
 
+// URL returns the base URL of the fake API server.
 func (a *API) URL() string { return a.Server.URL }
 
 // FailResources makes the API server answer every request for a resource with the status, until it is called with 0.
@@ -161,6 +162,7 @@ func (a *API) Watchers() int {
 	return len(a.watchers)
 }
 
+// find returns the served resource definition for the apiVersion and kind, or nil if it is not served.
 func find(apiVersion, kind string) *resource {
 	for i := range resources {
 		r := &resources[i]
@@ -171,6 +173,7 @@ func find(apiVersion, kind string) *resource {
 	return nil
 }
 
+// gv returns the group/version string of the resource, which is just the version for the core group.
 func (r *resource) gv() string {
 	if r.group == "" {
 		return r.version
@@ -178,6 +181,7 @@ func (r *resource) gv() string {
 	return r.group + "/" + r.version
 }
 
+// prefix returns the URL path prefix of the resource's group, /api/{version} for core and /apis/{group}/{version} otherwise.
 func (r *resource) prefix() string {
 	if r.group == "" {
 		return "/api/" + r.version
@@ -185,6 +189,7 @@ func (r *resource) prefix() string {
 	return "/apis/" + r.group + "/" + r.version
 }
 
+// collection returns the key under which the objects of the resource in the namespace are stored.
 func (r *resource) collection(namespace string) string {
 	return r.gv() + "|" + r.plural + "|" + namespace
 }
@@ -242,6 +247,7 @@ func (a *API) Get(apiVersion, kind, namespace, name string) map[string]interface
 	return a.objects[r.collection(namespace)][name]
 }
 
+// store saves the object, bumps the version and tells the watches that it was ADDED or MODIFIED; the caller must hold the lock.
 func (a *API) store(r *resource, namespace, name string, obj map[string]interface{}) {
 	key := r.collection(namespace)
 	if a.objects[key] == nil {
@@ -270,16 +276,19 @@ func (a *API) emit(r *resource, namespace, name, eventType string, obj map[strin
 	}
 }
 
+// accepts tells if the watch is for the resource and covers the namespace, name and label selector of the object.
 func (w *watcher) accepts(r *resource, namespace, name string, obj map[string]interface{}) bool {
 	return w.res == r && (w.namespace == "" || w.namespace == namespace) && (w.name == "" || w.name == name) && matches(obj, w.selector)
 }
 
+// writeJSON writes v as a JSON response with the status code.
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(v)
 }
 
+// writeStatus writes a Kubernetes Status object, which is a Failure for codes of 400 and above.
 func writeStatus(w http.ResponseWriter, code int, reason, message string) {
 	status := "Failure"
 	if code < 400 {
@@ -290,6 +299,7 @@ func writeStatus(w http.ResponseWriter, code int, reason, message string) {
 	})
 }
 
+// serve is the HTTP handler of the fake server, which answers discovery, hands watches to serveWatch, and records and routes the requests for resources.
 func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	switch path {
@@ -378,6 +388,7 @@ func parse(res *resource, rest string) (namespace, name string, ok bool) {
 	return "", "", false
 }
 
+// handle serves GET (get or list), PATCH/POST/PUT (store) and DELETE of a resource or collection from the in-memory objects.
 func (a *API) handle(w http.ResponseWriter, r *http.Request, res *resource, namespace, name string, body []byte) {
 	key := res.collection(namespace)
 	switch r.Method {

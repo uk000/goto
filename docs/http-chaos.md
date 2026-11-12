@@ -11,16 +11,17 @@ Sure. Here's how `Goto` can help.
 
 1. Take a brand new shiny, sealed new in box, Goto (or reuse one).
 
-2. Add a TCP listener via startup args --ports 8080,8081/tcp or via [APIs](../README.md#-listeners)
+2. Add a TCP listener via startup args --ports 8080,8081/tcp or via [APIs](../pkg/server/README.md#listeners)
 
-3. In `Goto`, any listener can be reconfigured on the fly via [APIs](../README.md#-tcp-server). A TCP listener port can be configured to send any arbitrary content (among other things you can do with TCP listeners in goto). We’ll configure this port 8081 to respond with HTTP response as text. Note that Goto allows you to configure one port via another port. Below we’re configuring 8081 via 8080
+3. In `Goto`, any listener can be reconfigured on the fly via [APIs](../pkg/server/tcp/README.md). A TCP listener port can be configured to send any arbitrary content (among other things you can do with TCP listeners in goto). We’ll configure this port 8081 to respond with HTTP response as text. Note that Goto allows you to configure one port via another port. Below we’re configuring 8081 via 8080
 
     ```json
-    curl -s goto.goto:8080/tcp/8081/configure --data '{"payload": true, "responsePayloads": [ "HTTP/1.1 200 OK\r\nGoto: goto\r\nContent-Type: text/plain\r\nConnection: Keep-Alive\r\nGoto-Transfer-Encoding: Chunked+Chunked\r\ntransfer-encoding:chunked\r\ntransfer-encoding:chunked\r\n\r\n6\r\nHello \r\n8\r\nGoto 1!\n\r\n", "6\r\nHello \r\n8\r\nGoto 2!\n\r\n", "6\r\nHello \r\n8\r\nGoto 3!\n\r\n0\r\n\r\n"], "responseDelay":"3s", "respondAfterRead": false, "keepOpen": false, "connectionLife": "10s"}'
+    curl -s goto.goto:8080/server/tcp/8081/configure --data '{"payload": true, "responsePayloads": [ "HTTP/1.1 200 OK\r\nGoto: goto\r\nContent-Type: text/plain\r\nConnection: Keep-Alive\r\nGoto-Transfer-Encoding: Chunked+Chunked\r\ntransfer-encoding:chunked\r\ntransfer-encoding:chunked\r\n\r\n6\r\nHello \r\n8\r\nGoto 1!\n\r\n", "6\r\nHello \r\n8\r\nGoto 2!\n\r\n", "6\r\nHello \r\n8\r\nGoto 3!\n\r\n0\r\n\r\n"], "responseDelay":"3s", "respondAfterRead": false, "keepOpen": false, "connectionLife": "10s"}'
     ```
 
     > NOTE: that `goto.goto` FQDN in the above curl script should be replaced with the host fqdn where your goto instance is running (or localhost). 
     > The above curl command can be executed manually, but we can also ask `goto` to configure itself at startup using the above curl command. `Goto` supports startup parameter named `--startupScript` , which allows passing one or more commands to be executed via shell at startup. See the K8S deployment example in the next step for an example.
+    > **Known issue:** in the current version `--startupScript` is accepted but the commands are **not executed** (the call is disabled in `pkg/server/startup/startup.go`), so the K8S example below will not configure port 8081 by itself. Until that is fixed, run the curl command from an init/sidecar container or a `postStart` lifecycle hook, or invoke it manually once the pod is up.
 4. If you're running `Goto` in K8S setup, configure your K8S deployment and service to expose 8081.
 
     ```yaml
@@ -70,7 +71,7 @@ Sure. Here's how `Goto` can help.
               - --label
               - goto
               - --startupScript
-              - "curl localhost:8080/tcp/8081/configure --data '{\"payload\": true, \"responsePayloads\": [ \"HTTP/1.1 200 OK\\r\\nGoto: goto@${CLUSTER_ID}\\r\\nContent-Type: text/plain\\r\\nConnection: Keep-Alive\\r\\nGoto-Transfer-Encoding: Chunked+Chunked\\r\\ntransfer-encoding:chunked\\r\\ntransfer-encoding:chunked\\r\\n\\r\\n6\\r\\nHello \\r\\n8\\r\\nGoto 1!\\n\\r\\n\", \"6\\r\\nHello \\r\\n8\\r\\nGoto 2!\\n\\r\\n\", \"6\\r\\nHello \\r\\n8\\r\\nGoto 3!\\n\\r\\n0\\r\\n\\r\\n\"], \"responseDelay\":\"3s\", \"respondAfterRead\": false, \"keepOpen\": false, \"connectionLife\": \"10s\"}'"
+              - "curl localhost:8080/server/tcp/8081/configure --data '{\"payload\": true, \"responsePayloads\": [ \"HTTP/1.1 200 OK\\r\\nGoto: goto@${CLUSTER_ID}\\r\\nContent-Type: text/plain\\r\\nConnection: Keep-Alive\\r\\nGoto-Transfer-Encoding: Chunked+Chunked\\r\\ntransfer-encoding:chunked\\r\\ntransfer-encoding:chunked\\r\\n\\r\\n6\\r\\nHello \\r\\n8\\r\\nGoto 1!\\n\\r\\n\", \"6\\r\\nHello \\r\\n8\\r\\nGoto 2!\\n\\r\\n\", \"6\\r\\nHello \\r\\n8\\r\\nGoto 3!\\n\\r\\n0\\r\\n\\r\\n\"], \"responseDelay\":\"3s\", \"respondAfterRead\": false, \"keepOpen\": false, \"connectionLife\": \"10s\"}'"
               name: goto
               ports:
                 - containerPort: 8080

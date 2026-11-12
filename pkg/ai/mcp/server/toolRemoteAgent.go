@@ -28,6 +28,7 @@ import (
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// callRemoteAgent calls a remote A2A agent, relays its progress to the client, and gives its result as the result.
 func (t *MCPTool) callRemoteAgent(tctx *ToolContext) (*gomcp.CallToolResult, error) {
 	result := &gomcp.CallToolResult{
 		Content: []gomcp.Content{},

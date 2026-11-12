@@ -35,6 +35,7 @@ var (
 	Middleware = middleware.NewMiddleware("ui", setRoutes, middlewareFunc)
 )
 
+// setRoutes registers the /ui routes for the UI, its websocket and the API console.
 func setRoutes(r *mux.Router) {
 	uiRouter := middleware.RootPath("/ui")
 	util.AddRoute(uiRouter, "", showUI, "GET")
@@ -42,14 +43,17 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(uiRouter, "/api", showAPIConsole, "GET")
 }
 
+// showUI serves the embedded UI page.
 func showUI(w http.ResponseWriter, r *http.Request) {
 	http.ServeFileFS(w, r, staticUI, "static/index.html")
 }
 
+// showAPIConsole serves the embedded API console page.
 func showAPIConsole(w http.ResponseWriter, r *http.Request) {
 	http.ServeFileFS(w, r, staticUI, "static/api-console.html")
 }
 
+// handleWebsocket upgrades the request to a websocket and registers it to receive the broadcast requests.
 func handleWebsocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := watch.Upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -59,6 +63,7 @@ func handleWebsocket(w http.ResponseWriter, r *http.Request) {
 	watch.WebSockets.AddSocket(r.RemoteAddr, conn)
 }
 
+// middlewareFunc intercepts the response of each request when websockets are open, and broadcasts the request and response to them.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var irw *intercept.InterceptResponseWriter

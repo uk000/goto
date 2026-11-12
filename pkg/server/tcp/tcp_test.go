@@ -449,6 +449,23 @@ func TestInitTCPConfigRejectsInvalidDurations(t *testing.T) {
 	}
 }
 
+func TestInitTCPConfigRejectsInvalidExpectedPayloadLength(t *testing.T) {
+	stubOnce.Do(stubGlobalFuncs)
+	for _, tc := range []struct {
+		length int
+		valid  bool
+	}{{-1, false}, {-1 << 40, false}, {maxExpectedPayloadLength + 1, false}, {1 << 40, false}, {0, true}, {1, true}, {maxExpectedPayloadLength, true}} {
+		port := newPort(t)
+		_, msg := InitTCPConfig(port, &TCPConfig{ValidatePayloadContent: true, ExpectedPayloadLength: tc.length})
+		if tc.valid != (msg == "") {
+			t.Errorf("expected payload length %d: message = %q, want it to be valid: %v", tc.length, msg, tc.valid)
+		}
+		if tc.valid != (getTCPConfig(port) != nil) {
+			t.Errorf("expected payload length %d: config stored = %v, want %v", tc.length, getTCPConfig(port) != nil, tc.valid)
+		}
+	}
+}
+
 func TestInitTCPConfigAccumulatesAllRejections(t *testing.T) {
 	stubOnce.Do(stubGlobalFuncs)
 	port := newPort(t)

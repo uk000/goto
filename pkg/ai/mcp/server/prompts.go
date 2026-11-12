@@ -29,6 +29,7 @@ type MCPPrompt struct {
 	Prompt *gomcp.Prompt `json:"prompt"`
 }
 
+// NewMCPPrompt creates a prompt with the given name and description.
 func NewMCPPrompt(name, desc string) *MCPPrompt {
 	return &MCPPrompt{
 		Prompt: &gomcp.Prompt{
@@ -41,6 +42,7 @@ func NewMCPPrompt(name, desc string) *MCPPrompt {
 	}
 }
 
+// ParsePrompt parses a JSON prompt.
 func ParsePrompt(payload []byte) (*MCPPrompt, error) {
 	prompt := &MCPPrompt{}
 	if err := json.Unmarshal(payload, prompt); err != nil {
@@ -50,6 +52,7 @@ func ParsePrompt(payload []byte) (*MCPPrompt, error) {
 	return prompt, nil
 }
 
+// Handle answers a prompt request with the arguments as the user message, and the configured response (or "<No payload>") as the assistant message.
 func (p *MCPPrompt) Handle(ctx context.Context, req *gomcp.GetPromptRequest) (*gomcp.GetPromptResult, error) {
 	result := &gomcp.GetPromptResult{}
 	result.Messages = append(result.Messages, &gomcp.PromptMessage{Content: &gomcp.TextContent{Text: util.ToJSONText(req.Params.Arguments)}, Role: gomcp.Role("user")})

@@ -59,7 +59,7 @@ Let's see the APIs involved to achieve this scenario:
    $ curl http://goto-peer1/client/results
    ``` 
    If all goes as planned (which it usually does with `goto`), you should see some traffic results.
-5. Any new config you add on the registry for is automatically pushed to all worker instances in real-time as well as upon worker startup. And not just client traffic configs, but also jobs. What are jobs? Well, that's the story for another scenario. Or checkout [Job feature documentation](../README.md#jobs-features)
+5. Any new config you add on the registry for is automatically pushed to all worker instances in real-time as well as upon worker startup. And not just client traffic configs, but also jobs. What are jobs? Well, that's the story for another scenario. Or checkout [Job feature documentation](../pkg/job/README.md)
 
 
 # <a name="k8s-transient-pods"></a> Scenario: Deal with transient pods

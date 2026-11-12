@@ -30,6 +30,7 @@ var (
 	Middleware = middleware.NewMiddleware("udpproxy", setRoutes, nil)
 )
 
+// setRoutes registers the REST routes that proxy a UDP port to an upstream and that set the delay of a port.
 func setRoutes(r *mux.Router) {
 	proxyRouter := middleware.RootPath("/proxy")
 	udpProxyRouter := util.PathPrefix(proxyRouter, "/udp")
@@ -38,6 +39,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(udpProxyRouter, "/{port}/delay/{delay}", setUDPDelay, "POST")
 }
 
+// proxyUDP opens a UDP listener on the port and starts proxying its packets to the upstream endpoint, with an optional delay.
 func proxyUDP(w http.ResponseWriter, r *http.Request) {
 	port := util.GetIntParamValue(r, "port")
 	endpoint := util.GetStringParamValue(r, "endpoint")

@@ -35,6 +35,7 @@ type MCPProxyTracker struct {
 	lock                      sync.RWMutex
 }
 
+// NewMCPProxyTracker creates a tracker with empty counters, including those of the embedded HTTP tracker.
 func NewMCPProxyTracker() *MCPProxyTracker {
 	return &MCPProxyTracker{
 		HTTPProxyTracker:          httpproxy.NewHTTPTracker(),
@@ -50,6 +51,7 @@ func NewMCPProxyTracker() *MCPProxyTracker {
 	}
 }
 
+// IncrementConnCounts counts a connection, and one for the upstream if it is given.
 func (pt *MCPProxyTracker) IncrementConnCounts(upstream string) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
@@ -59,6 +61,7 @@ func (pt *MCPProxyTracker) IncrementConnCounts(upstream string) {
 	}
 }
 
+// AddMatchCounts adds the request and response counts to those of the upstream, the server, the tool and the message types.
 func (pt *MCPProxyTracker) AddMatchCounts(upstream, server, tool, requestMessageType string, requestCount int, responseMessageType string, responseCount int) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()

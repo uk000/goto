@@ -124,6 +124,7 @@ type JobManager struct {
 	lock          sync.RWMutex
 }
 
+// newJobManager creates an initialized job manager and starts its job watcher goroutine.
 func newJobManager() *JobManager {
 	j := &JobManager{}
 	j.init()
@@ -131,6 +132,7 @@ func newJobManager() *JobManager {
 	return j
 }
 
+// init resets the manager's jobs, runs, scripts and watchers with a fresh cron scheduler, and asynchronously shuts down the previous one.
 func (jm *JobManager) init() {
 	jm.lock.Lock()
 	defer jm.lock.Unlock()
@@ -156,16 +158,19 @@ func (jm *JobManager) init() {
 	}
 }
 
+// getCronScheduler returns the manager's current cron scheduler.
 func (jm *JobManager) getCronScheduler() *gocron.Scheduler {
 	jm.lock.RLock()
 	defer jm.lock.RUnlock()
 	return jm.cronScheduler
 }
 
+// StopJobWatch signals the job watcher goroutine to stop.
 func (jm *JobManager) StopJobWatch() {
 	jm.stopJobWatch <- true
 }
 
+// AddJobWatcher registers a named watcher to be called with the results of a job's finished runs.
 func (jm *JobManager) AddJobWatcher(job, name string, watcher JobWatcher) {
 	jm.lock.Lock()
 	defer jm.lock.Unlock()
@@ -175,6 +180,7 @@ func (jm *JobManager) AddJobWatcher(job, name string, watcher JobWatcher) {
 	jm.watchers[job][name] = watcher
 }
 
+// RemoveJobWatcher removes a named watcher of a job.
 func (jm *JobManager) RemoveJobWatcher(job, name string) {
 	jm.lock.Lock()
 	defer jm.lock.Unlock()
@@ -186,12 +192,14 @@ func (jm *JobManager) RemoveJobWatcher(job, name string) {
 	}
 }
 
+// ClearJobWatchers removes all watchers of a job.
 func (jm *JobManager) ClearJobWatchers(job string) {
 	jm.lock.Lock()
 	defer jm.lock.Unlock()
 	delete(jm.watchers, job)
 }
 
+// WatchJobs notifies a job's registered watchers with the run's results as runs complete, until StopJobWatch is called.
 func (jm *JobManager) WatchJobs() {
 WatchLoop:
 	for {
@@ -217,6 +225,7 @@ WatchLoop:
 	}
 }
 
+// RunJob schedules the job if it has a cron, otherwise runs it right away.
 func (jm *JobManager) RunJob(job *Job) {
 	if job.Cron != "" {
 		if err := jm.schedule(job); err != nil {
@@ -227,6 +236,7 @@ func (jm *JobManager) RunJob(job *Job) {
 	}
 }
 
+// StoreJobScriptOrFile stores the content as a file, registers it as a script, and optionally creates a job that runs it.
 func (jm *JobManager) StoreJobScriptOrFile(filePath, fileName string, content []byte, scriptJob bool) (string, string, bool) {
 	if fileName == "" {
 		fmt.Printf("Jobs: Failed to store job file [%s] without a name\n", filePath)
@@ -256,6 +266,7 @@ func (jm *JobManager) StoreJobScriptOrFile(filePath, fileName string, content []
 	return "", "", false
 }
 
+// removeJobs removes the named jobs, their cron schedules and their runs.
 func (jm *JobManager) removeJobs(jobs []string) {
 	jm.lock.Lock()
 	defer jm.lock.Unlock()
@@ -269,6 +280,7 @@ func (jm *JobManager) removeJobs(jobs []string) {
 	}
 }
 
+// AddJob adds or replaces a job, returning whether it already existed, and auto-runs or schedules it if it is an auto or cron job.
 func (jm *JobManager) AddJob(job *Job) (bool, error) {
 	jm.lock.Lock()
 	defer jm.lock.Unlock()
@@ -300,6 +312,14 @@ func (jm *JobManager) getJobs() map[string]*Job {
 	return jobs
 }
 
+// getScript returns the stored script of the name, or nil if there is none.
+func (jm *JobManager) getScript(name string) *Script {
+	jm.lock.RLock()
+	defer jm.lock.RUnlock()
+	return jm.scripts[name]
+}
+
+// getScripts returns a copy of the stored scripts.
 func (jm *JobManager) getScripts() map[string]*Script {
 	jm.lock.RLock()
 	defer jm.lock.RUnlock()
@@ -338,6 +358,7 @@ func validateTransforms(transforms []*util.Transform) error {
 	return nil
 }
 
+// ParseJobFromPayload parses a job from JSON, applying defaults and validating its task as either an HTTP task or a command task.
 func ParseJobFromPayload(payload string) (*Job, error) {
 	job := &Job{}
 	if err := util.ReadJson(payload, job); err == nil {

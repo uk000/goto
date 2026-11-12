@@ -42,6 +42,7 @@ var (
 	routesLock     sync.Mutex
 )
 
+// setRoutes registers the /goto routes for the version and for listing the routes/APIs.
 func setRoutes(r *mux.Router) {
 	infoRouter := middleware.RootPath("/goto")
 	util.AddRoute(infoRouter, "/version", showVersion, "GET")
@@ -50,10 +51,12 @@ func setRoutes(r *mux.Router) {
 	util.AddRouteWithMultiQ(infoRouter, "/{k:routes|apis}", printRoutes, [][]string{{}, {"q"}, {"url"}}, "GET")
 }
 
+// showVersion responds with the goto version and commit.
 func showVersion(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, map[string]string{"version": global.Version, "commit": global.Commit})
 }
 
+// printRoutes reads the level, query, url and refresh options of the request and reports the routes/APIs as text, JSON or YAML.
 func printRoutes(w http.ResponseWriter, r *http.Request) {
 	level := util.GetIntParamValue(r, "level")
 	q := util.GetStringParamValue(r, "q")
@@ -65,6 +68,7 @@ func printRoutes(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage("Routes/APIs reported", r)
 }
 
+// PrintRoutes writes the selected routes/APIs either as a sorted plain text list or as JSON or YAML.
 func PrintRoutes(w http.ResponseWriter, level int, query, baseURL string, refresh, text, yaml bool) {
 	outputRoutes := selectRoutes(level, query, baseURL, refresh)
 	if text {
@@ -123,10 +127,12 @@ func selectRoutes(level int, query, baseURL string, refresh bool) APIRoutes {
 	return outputRoutes
 }
 
+// filterAPIs returns the cached routes that match the query.
 func filterAPIs(query string) APIRoutes {
 	return filterRoutes(routes, query)
 }
 
+// filterRoutes returns the part of source whose root, sub root or sub path contains the query, where an empty query selects everything.
 func filterRoutes(source APIRoutes, query string) APIRoutes {
 	outputRoutes := APIRoutes{}
 	for r, subRoutes := range source {
@@ -160,6 +166,7 @@ func filterRoutes(source APIRoutes, query string) APIRoutes {
 	return outputRoutes
 }
 
+// trimAPIs returns a copy of the routes cut to the given nesting level: 1 for roots, 2 for sub roots, 3 for sub paths.
 func trimAPIs(matches APIRoutes, level int) APIRoutes {
 	outputRoutes := APIRoutes{}
 	for k1, v1 := range matches {
@@ -226,6 +233,7 @@ func loadAPIs() {
 	}
 }
 
+// loadAPIsFromRouter walks a router and records its routes by root, sub root and sub path, with their methods and curl commands, skipping duplicates.
 func loadAPIsFromRouter(r *mux.Router) {
 	// The core router is not there until the server is set up.
 	if r == nil {

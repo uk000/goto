@@ -30,6 +30,7 @@ var (
 	Middleware = middleware.NewMiddleware("protos", setRoutes, nil)
 )
 
+// setRoutes registers the routes under /grpc/protos to store, add, remove, clear and list protos.
 func setRoutes(r *mux.Router) {
 	grpcRouter := middleware.RootPath("/grpc")
 	protosRouter := util.PathPrefix(grpcRouter, "/protos")
@@ -44,6 +45,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(protosRouter, "", getProtos, "GET")
 }
 
+// addProto stores the proto from the request body, and registers its services unless the route is for upload only.
 func addProto(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	name := util.GetStringParamValue(r, "name")
@@ -62,6 +64,7 @@ func addProto(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// removeProto removes the named proto and the services it defined.
 func removeProto(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	name := util.GetStringParamValue(r, "name")
@@ -76,6 +79,7 @@ func removeProto(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// listServices serves the service found under the {proto} name as JSON, or reports that there are none.
 func listServices(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	proto := util.GetStringParamValue(r, "proto")
@@ -92,6 +96,7 @@ func listServices(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// listMethods serves the methods of the requested service as JSON.
 func listMethods(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	proto := util.GetStringParamValue(r, "proto")
@@ -106,6 +111,7 @@ func listMethods(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// clearProtos removes all protos and their services.
 func clearProtos(w http.ResponseWriter, r *http.Request) {
 	msg := "Protos cleared"
 	ProtosRegistry.ClearProtos()
@@ -113,6 +119,7 @@ func clearProtos(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// getProtos serves the registered services grouped by proto.
 func getProtos(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, ProtosRegistry.servicesByProto)
 	util.AddLogMessage("Protos reported", r)

@@ -145,12 +145,14 @@ type JSONTransform struct {
 	notCotainsRegexp *regexp.Regexp
 }
 
+// NewJSON creates an empty JSONValue stamped with the current time.
 func NewJSON() JSON {
 	return &JSONValue{
 		at: time.Now(),
 	}
 }
 
+// NewJSONWithRaw creates an empty JSONValue that carries raw as the original object returned by GetRaw.
 func NewJSONWithRaw(raw any) JSON {
 	return &JSONValue{
 		at:  time.Now(),
@@ -158,39 +160,46 @@ func NewJSONWithRaw(raw any) JSON {
 	}
 }
 
+// JSONFromJSONText parses JSON text into a JSON value and reports whether parsing succeeded.
 func JSONFromJSONText(text string) (JSON, bool) {
 	json := NewJSON()
 	ok := json.ParseJSON(text, true)
 	return json, ok
 }
 
+// JSONFromJSON wraps an already decoded JSON map or array (see Store for supported types) in a JSON value.
 func JSONFromJSON(j any) JSON {
 	json := NewJSON()
 	json.Store(j)
 	return json
 }
 
+// JSONFromYAML parses YAML text into a JSON value and reports whether parsing succeeded.
 func JSONFromYAML(y string) (JSON, bool) {
 	json := NewJSON()
 	ok := json.ParseYAML(y)
 	return json, ok
 }
 
+// JSONFromObject converts any Go value to a JSON value by marshaling it to text and parsing it back.
 func JSONFromObject(o any) JSON {
 	j, _ := JSONFromJSONText(ToJSONText(o))
 	return j
 }
 
+// JSONFromMap wraps the given map, without copying it, as a JSON object value.
 func JSONFromMap(o map[string]any) JSON {
 	j := NewJSON().(*JSONValue)
 	j.JsonMap = o
 	return j
 }
 
+// JSONFromStringArray wraps a string slice as a JSON value whose map holds the slice under the empty key.
 func JSONFromStringArray(a []string) JSON {
 	return JSONFromMap(map[string]any{"": a})
 }
 
+// JSONFromReader reads r fully and parses the content as JSON, returning nil if the read fails.
 func JSONFromReader(r io.Reader) JSON {
 	if b, err := io.ReadAll(r); err == nil {
 		return JSONFromBytes(b)
@@ -198,12 +207,14 @@ func JSONFromReader(r io.Reader) JSON {
 	return nil
 }
 
+// JSONFromBytes decodes JSON bytes into a JSON value, ignoring decode errors.
 func JSONFromBytes(b []byte) JSON {
 	var j interface{}
 	json.Unmarshal(b, &j)
 	return JSONFromJSON(j)
 }
 
+// ToJSONArray splits JSON array bytes into one JSON byte slice per element, or returns the input as the only element if it isn't an array.
 func ToJSONArray(b []byte) [][]byte {
 	j := JSONFromBytes(b)
 	out := [][]byte{}
@@ -220,6 +231,7 @@ func ToJSONArray(b []byte) [][]byte {
 	return out
 }
 
+// ToJSONValue wraps a decoded value as a JSONValue holding it as a map, array or scalar depending on its type.
 func ToJSONValue(v interface{}) *JSONValue {
 	jsonValue := &JSONValue{}
 	if vv, ok := v.(map[string]interface{}); ok {
@@ -232,12 +244,14 @@ func ToJSONValue(v interface{}) *JSONValue {
 	return jsonValue
 }
 
+// Clone returns a new JSONValue over the same underlying value (shallow copy), keeping the recorded patterns.
 func (j *JSONValue) Clone() JSON {
 	clone := ToJSONValue(j.Value())
 	clone.jsonPatterns = j.jsonPatterns
 	return clone
 }
 
+// Store stores a decoded map, array or Kubernetes unstructured object into the value; other types are ignored.
 func (j *JSONValue) Store(i interface{}) {
 	switch v := i.(type) {
 	case map[string]interface{}:
@@ -256,10 +270,12 @@ func (j *JSONValue) Store(i interface{}) {
 	}
 }
 
+// Value returns the underlying map of JSON values.
 func (j JSONObject) Value() interface{} {
 	return j.JSONMap
 }
 
+// Object returns the object contents as a plain map, wrapping a non-map value under the empty key.
 func (j JSONObject) Object() (obj map[string]interface{}) {
 	if m, ok := j.Value().(map[string]interface{}); ok {
 		obj = m
@@ -279,22 +295,27 @@ func (j JSONObject) Object() (obj map[string]interface{}) {
 	return data
 }
 
+// Array always returns nil since a JSONObject is not an array.
 func (j JSONObject) Array() []interface{} {
 	return nil
 }
 
+// JSONObject returns the receiver itself.
 func (j JSONObject) JSONObject() JSONObject {
 	return j
 }
 
+// JSONArray always returns nil since a JSONObject is not an array.
 func (j *JSONObject) JSONArray() []JSON {
 	return nil
 }
 
+// At returns the time at which the value was created.
 func (j *JSONValue) At() *time.Time {
 	return &j.at
 }
 
+// Value returns the underlying object, scalar or array held by the value, in that order of preference.
 func (j *JSONValue) Value() interface{} {
 	if j.JsonMap != nil {
 		return j.JsonMap
@@ -305,10 +326,12 @@ func (j *JSONValue) Value() interface{} {
 	return j.JsonArr
 }
 
+// Object returns the underlying object map, which is nil if the value is not an object.
 func (j *JSONValue) Object() map[string]interface{} {
 	return j.JsonMap
 }
 
+// JSONObject wraps each entry of the object map as a JSONValue inside a JSONObject.
 func (j *JSONValue) JSONObject() *JSONObject {
 	jsonObject := map[string]JSON{}
 	for k, v := range j.JsonMap {
@@ -317,10 +340,12 @@ func (j *JSONValue) JSONObject() *JSONObject {
 	return &JSONObject{JSONMap: jsonObject}
 }
 
+// Array returns the underlying array, which is nil if the value is not an array.
 func (j *JSONValue) Array() []interface{} {
 	return j.JsonArr
 }
 
+// JSONArray wraps each array element as a JSONValue.
 func (j *JSONValue) JSONArray() []JSON {
 	jsonArr := []JSON{}
 	for _, v := range j.JsonArr {
@@ -329,6 +354,7 @@ func (j *JSONValue) JSONArray() []JSON {
 	return jsonArr
 }
 
+// ToJSONArray returns the array elements as JSON values, or the value itself as a single element if it is not an array.
 func (j *JSONValue) ToJSONArray() []JSON {
 	if j.JsonArr != nil {
 		return j.JSONArray()
@@ -336,6 +362,7 @@ func (j *JSONValue) ToJSONArray() []JSON {
 	return []JSON{j}
 }
 
+// ParseJSON parses JSON text into the value and reports success, printing the parse error unless noerror is set.
 func (j *JSONValue) ParseJSON(text string, noerror bool) bool {
 	var o interface{}
 	if err := json.Unmarshal([]byte(text), &o); err == nil {
@@ -347,6 +374,7 @@ func (j *JSONValue) ParseJSON(text string, noerror bool) bool {
 	return false
 }
 
+// ParseYAML converts YAML text to JSON and parses it into the value, reporting success.
 func (j *JSONValue) ParseYAML(y string) bool {
 	if o, err := yaml.YAMLToJSON([]byte(y)); err == nil {
 		return j.ParseJSON(string(o), false)
@@ -356,6 +384,7 @@ func (j *JSONValue) ParseYAML(y string) bool {
 	return false
 }
 
+// ToJSONText marshals the value to compact JSON text, returning an empty string on error.
 func (j *JSONValue) ToJSONText() string {
 	if output, err := json.Marshal(j.Value()); err == nil {
 		return string(output)
@@ -365,6 +394,7 @@ func (j *JSONValue) ToJSONText() string {
 	return ""
 }
 
+// ToYAML marshals the value to YAML text, returning an empty string on error.
 func (j *JSONValue) ToYAML() string {
 	if b, err := yaml.Marshal(j.Value()); err == nil {
 		return string(b)
@@ -374,6 +404,7 @@ func (j *JSONValue) ToYAML() string {
 	return ""
 }
 
+// ToBytes marshals the value to JSON bytes, returning nil on error.
 func (j *JSONValue) ToBytes() []byte {
 	if output, err := json.Marshal(j.Value()); err == nil {
 		return output
@@ -383,18 +414,22 @@ func (j *JSONValue) ToBytes() []byte {
 	return nil
 }
 
+// IsEmpty reports whether the value holds neither an object nor an array.
 func (j *JSONValue) IsEmpty() bool {
 	return j.JsonArr == nil && j.JsonMap == nil
 }
 
+// IsObject reports whether the value holds a JSON object.
 func (j *JSONValue) IsObject() bool {
 	return j.JsonMap != nil
 }
 
+// IsArray reports whether the value holds a JSON array.
 func (j *JSONValue) IsArray() bool {
 	return j.JsonArr != nil
 }
 
+// View returns a map of the given dot-separated paths to the values found at them.
 func (j *JSONValue) View(paths ...string) map[string]interface{} {
 	view := map[string]interface{}{}
 	values := j.FindPaths(paths)
@@ -404,10 +439,12 @@ func (j *JSONValue) View(paths ...string) map[string]interface{} {
 	return view
 }
 
+// Get looks up a dot-separated path in the value (same as FindPath).
 func (j *JSONValue) Get(path string) *Value {
 	return j.FindPath(path)
 }
 
+// GetText returns the value at a dot-separated path as text (JSON text for objects and arrays), or empty if not found.
 func (j *JSONValue) GetText(path string) string {
 	if value := j.FindPath(path); value != nil {
 		if value.IsJSON {
@@ -421,6 +458,7 @@ func (j *JSONValue) GetText(path string) string {
 	return ""
 }
 
+// GetRaw returns the raw object supplied at creation if there is one, otherwise the JSONValue itself.
 func (j *JSONValue) GetRaw() any {
 	if j.Raw != nil {
 		return j.Raw
@@ -428,29 +466,32 @@ func (j *JSONValue) GetRaw() any {
 	return j
 }
 
+// JSON wraps the held value as a JSON value.
 func (v *Value) JSON() JSON {
 	return JSONFromJSON(v.Value)
 }
 
+// Get looks up a dot-separated path within the held value.
 func (v *Value) Get(path string) *Value {
 	return v.JSON().Get(path)
 }
 
+// GetText returns the text of the value found at a dot-separated path within the held value.
 func (v *Value) GetText(path string) string {
 	return v.JSON().GetText(path)
 }
 
+// GetRaw returns the underlying value held by the Value.
 func (v *Value) GetRaw() any {
-	if v.JSON().GetRaw() != nil {
-		v.JSON().GetRaw()
-	}
-	return v
+	return v.Value
 }
 
+// String formats the held value with fmt.Sprint.
 func (v *Value) String() string {
 	return fmt.Sprint(v.Value)
 }
 
+// FindPaths resolves each dot-separated path and returns the results keyed by path, with nil for paths not found.
 func (j *JSONValue) FindPaths(paths []string) map[string]*Value {
 	data := map[string]*Value{}
 	for _, path := range paths {
@@ -459,6 +500,7 @@ func (j *JSONValue) FindPaths(paths []string) map[string]*Value {
 	return data
 }
 
+// FindPath walks a dot-separated path through nested objects and numeric array indexes, returning nil if any segment is missing.
 func (j *JSONValue) FindPath(path string) *Value {
 	value := &Value{Value: j.Value()}
 	currMap := j.JsonMap
@@ -494,6 +536,7 @@ func (j *JSONValue) FindPath(path string) *Value {
 	return value
 }
 
+// FindTransformPath walks a dot-separated path and returns an updatable field (map key or array slot) for it, or nil if an intermediate segment is missing.
 func (j *JSONValue) FindTransformPath(path string, join, replace, push bool) JSONField {
 	currMap := j.JsonMap
 	currArr := j.JsonArr
@@ -560,6 +603,7 @@ func (j *JSONValue) FindTransformPath(path string, join, replace, push bool) JSO
 	return jsonField
 }
 
+// Transform applies the mappings to copy values from source into this JSON (or into filler patterns), honoring the contains filters, and reports whether anything was transformed.
 func (j *JSONValue) Transform(ts []*JSONTransform, source JSON) bool {
 	transformed := false
 	for i, t := range ts {
@@ -603,6 +647,7 @@ func (j *JSONValue) Transform(ts []*JSONTransform, source JSON) bool {
 	return transformed
 }
 
+// TransformPatterns replaces the filler patterns recorded by Transform in text.
 func (j *JSONValue) TransformPatterns(text string) string {
 	if j.jsonPatterns == nil {
 		return text
@@ -616,6 +661,7 @@ func (j *JSONValue) TransformPatterns(text string) string {
 	return text
 }
 
+// addPatterns records filler replacement patterns under a mapping id for later use by TransformPatterns.
 func (j *JSONValue) addPatterns(id int, patterns ...string) {
 	if j.jsonPatterns == nil {
 		j.jsonPatterns = &JSONPatterns{patterns: map[int][]string{}}
@@ -623,6 +669,7 @@ func (j *JSONValue) addPatterns(id int, patterns ...string) {
 	j.jsonPatterns.patterns[id] = patterns
 }
 
+// Init derives the join, replace or push mode flags from Mode and compiles the case-insensitive contains and not-contains regexps.
 func (j *JSONTransform) Init() {
 	if strings.EqualFold(j.Mode, "join") {
 		j.join = true
@@ -639,22 +686,27 @@ func (j *JSONTransform) Init() {
 	}
 }
 
+// Exists reports whether the path resolved to an existing array element.
 func (j *JSONArrayField) Exists() bool {
 	return j.exists
 }
 
+// Exists reports whether the path resolved to an existing map key.
 func (j *JSONMapField) Exists() bool {
 	return j.exists
 }
 
+// Read returns the array element at the field's index.
 func (j *JSONArrayField) Read() interface{} {
 	return j.arrayField[j.index]
 }
 
+// Read returns the map value at the field's key.
 func (j *JSONMapField) Read() interface{} {
 	return j.mapField[j.key]
 }
 
+// Update sets or joins the element in replace/join mode, otherwise inserts value next to it (before it if push) and propagates the new array to the grandparent field.
 func (j *JSONArrayField) Update(value interface{}) {
 	if j.replace || j.join {
 		if len(j.arrayField) > j.index {
@@ -676,6 +728,7 @@ func (j *JSONArrayField) Update(value interface{}) {
 	}
 }
 
+// Update sets or joins the key in replace/join mode, otherwise appends value to the existing value as an array (prepending if push).
 func (j *JSONMapField) Update(value interface{}) {
 	if j.replace || j.join {
 		if _, present := j.mapField[j.key]; present {
@@ -706,6 +759,7 @@ func (j *JSONMapField) Update(value interface{}) {
 	}
 }
 
+// AddToArray returns a new array with value inserted after index at (before it if push), where a negative at means the last element.
 func AddToArray(arr []interface{}, value interface{}, at int, push bool) []interface{} {
 	newArr := []interface{}{}
 	if at < 0 {
@@ -725,6 +779,7 @@ func AddToArray(arr []interface{}, value interface{}, at int, push bool) []inter
 	return newArr
 }
 
+// GetEmptyCopy returns an empty map or slice of the same kind as v, or nil for other types.
 func GetEmptyCopy(v interface{}) interface{} {
 	switch v.(type) {
 	case map[string]interface{}:
@@ -735,12 +790,14 @@ func GetEmptyCopy(v interface{}) interface{} {
 	return nil
 }
 
+// Clone returns a deep copy of v made by a JSON marshal and unmarshal round trip.
 func Clone(v interface{}) interface{} {
 	var copy interface{}
 	ReadJson(ToJSONText(v), &copy)
 	return copy
 }
 
+// CleanJSONBytes strips newlines and escaped newlines, unescapes quotes and trims NUL bytes so the content can be parsed as JSON.
 func CleanJSONBytes(json []byte) []byte {
 	s := string(json)
 	s = strings.ReplaceAll(s, "\\\n", "")
@@ -753,6 +810,7 @@ func CleanJSONBytes(json []byte) []byte {
 	return json
 }
 
+// CleanJSON recursively replaces string values holding embedded JSON objects or arrays with their parsed form.
 func CleanJSON(data any) any {
 	switch v := data.(type) {
 	case map[string]any:
@@ -778,14 +836,17 @@ func CleanJSON(data any) any {
 	return data
 }
 
+// ReadJson unmarshals JSON text into t.
 func ReadJson(s string, t interface{}) error {
 	return json.Unmarshal([]byte(s), t)
 }
 
+// ReadJsonFromBytes unmarshals JSON bytes into t.
 func ReadJsonFromBytes(b []byte, t interface{}) error {
 	return json.Unmarshal(b, t)
 }
 
+// ReadJsonFromAny converts any value into t by marshaling it to JSON and unmarshaling the result.
 func ReadJsonFromAny(a any, t interface{}) error {
 	b, err := json.Marshal(a)
 	if err == nil {
@@ -794,6 +855,7 @@ func ReadJsonFromAny(a any, t interface{}) error {
 	return err
 }
 
+// ReadStringArray parses JSON bytes as a string array, or treats the whole content as a single-element array if it isn't one.
 func ReadStringArray(b []byte) []string {
 	arr := []string{}
 	if err := json.Unmarshal(b, &arr); err != nil {
@@ -802,6 +864,7 @@ func ReadStringArray(b []byte) []string {
 	return arr
 }
 
+// ToJSONText marshals o to JSON text, returning an empty string for nil or on panic and a %+v rendering if marshaling fails.
 func ToJSONText(o interface{}) (result string) {
 	if IsNil(o) {
 		return ""
@@ -820,6 +883,7 @@ func ToJSONText(o interface{}) (result string) {
 	return
 }
 
+// ToPrettyJSONText marshals o to JSON text indented with two spaces, falling back to a %+v rendering on error.
 func ToPrettyJSONText(o interface{}) string {
 	if output, err := json.MarshalIndent(o, "", "  "); err == nil {
 		return string(output)
@@ -827,6 +891,7 @@ func ToPrettyJSONText(o interface{}) string {
 	return fmt.Sprintf("%+v", o)
 }
 
+// RemoveEmpty returns arr without its empty strings.
 func RemoveEmpty(arr []string) []string {
 	var values []string
 	for _, item := range arr {
@@ -837,6 +902,7 @@ func RemoveEmpty(arr []string) []string {
 	return values
 }
 
+// ProtoToJSON2 decodes protobuf bytes as a structpb.Struct and returns it as a JSON value.
 func ProtoToJSON2(b []byte) (JSON, error) {
 	pbStruct := &structpb.Struct{}
 	err := proto.Unmarshal(b, pbStruct)
@@ -853,6 +919,7 @@ func ProtoToJSON2(b []byte) (JSON, error) {
 	return JSONFromBytes(jsonBytes), nil
 }
 
+// ProtoToJSON decodes protobuf bytes without a schema into a JSON map, reading each length-delimited field as a key (field 1) and value (field 2) string pair.
 func ProtoToJSON(b []byte) JSON {
 	resultMap := map[string]any{}
 
@@ -919,6 +986,7 @@ func ProtoToJSON(b []byte) JSON {
 	return JSONFromMap(resultMap)
 }
 
+// parseNestedBytes recursively walks protobuf bytes and collects the printable strings found in length-delimited fields.
 func parseNestedBytes(data []byte, stringsFound *[]string) {
 	b := data
 	for len(b) > 0 {
@@ -966,6 +1034,7 @@ func isProtobufStructure(data []byte) bool {
 	return n > 0
 }
 
+// cleanPrintableString returns data with everything but printable ASCII characters removed.
 func cleanPrintableString(data []byte) string {
 	var sb strings.Builder
 	for _, b := range data {

@@ -63,6 +63,7 @@ type GRPCResponse struct {
 	ServerStreamCount        int
 }
 
+// Invoke runs the call's payloads against its method, picking the unary or streaming invocation by the method type, and collects the result.
 func (c *GRPCClient) Invoke(call *GRPCCall, callback func(proto.Message, metadata.MD)) (result *GRPCResult) {
 	result = newGRPCResult()
 	if c.Service == nil || c.Service.Methods == nil {
@@ -102,6 +103,7 @@ func (c *GRPCClient) Invoke(call *GRPCCall, callback func(proto.Message, metadat
 	return
 }
 
+// InvokeRaw invokes the method with the given proto messages by its type, returning the responses, headers and trailers.
 func (c *GRPCClient) InvokeRaw(method *gotogrpc.GRPCServiceMethod, inMD metadata.MD, inputs []proto.Message) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
 	ctx, md, err := c.ConnectWithHeadersOrMD(nil, inMD)
 	if err != nil {
@@ -136,6 +138,7 @@ func (c *GRPCClient) InvokeRaw(method *gotogrpc.GRPCServiceMethod, inMD metadata
 	return
 }
 
+// OpenStream opens a client, server or bidi stream for the method, sending the input first if given.
 func (c *GRPCClient) OpenStream(port int, method *gotogrpc.GRPCServiceMethod, md metadata.MD, input proto.Message) (stream gotogrpc.GRPCStream, err error) {
 	if !method.IsClientStream && !method.IsServerStream {
 		return nil, fmt.Errorf("GRPCClient.OpenStream: method [%s] is not a streaming method", method.Name)
@@ -173,6 +176,7 @@ func (c *GRPCClient) OpenStream(port int, method *gotogrpc.GRPCServiceMethod, md
 	return
 }
 
+// InvokeUnary makes a unary call for each payload of the call, adding the responses and errors to the result.
 func (c *GRPCClient) InvokeUnary(call *GRPCCall, m *gotogrpc.GRPCServiceMethod, md metadata.MD, ctx context.Context, result *GRPCResult) {
 	if call == nil || call.Payloads == nil {
 		result.AddError(fmt.Errorf("No payload"))
@@ -210,6 +214,7 @@ func (c *GRPCClient) InvokeUnary(call *GRPCCall, m *gotogrpc.GRPCServiceMethod, 
 	call.Payloads.Process(call, md, invokeUnary, nil)
 }
 
+// InvokeUnaryRaw makes a unary call with the given input, returning the response, headers and trailers.
 func (c *GRPCClient) InvokeUnaryRaw(ctx context.Context, m *gotogrpc.GRPCServiceMethod, input proto.Message) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
 	respHeaders = metadata.MD{}
 	respTrailers = metadata.MD{}
@@ -219,6 +224,7 @@ func (c *GRPCClient) InvokeUnaryRaw(ctx context.Context, m *gotogrpc.GRPCService
 	return
 }
 
+// InvokeClientStream streams the payloads of the call to the server, adding the single response to the result.
 func (c *GRPCClient) InvokeClientStream(call *GRPCCall, m *gotogrpc.GRPCServiceMethod, md metadata.MD, keepOpen time.Duration, result *GRPCResult) {
 	invokeCS := func(md metadata.MD, payload [][]byte, wg *sync.WaitGroup) {
 		if wg != nil {
@@ -236,10 +242,12 @@ func (c *GRPCClient) InvokeClientStream(call *GRPCCall, m *gotogrpc.GRPCServiceM
 	call.Payloads.Process(call, md, nil, invokeCS)
 }
 
+// InvokeClientStreamRaw streams the given messages to the server and returns its response, headers and trailers.
 func (c *GRPCClient) InvokeClientStreamRaw(m *gotogrpc.GRPCServiceMethod, md metadata.MD, messages []proto.Message) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
 	return c.internalInvokeClientStream(m, md, messages, nil, 0)
 }
 
+// internalInvokeClientStream opens a client stream, sends the messages or payloads on it, and returns the server's response.
 func (c *GRPCClient) internalInvokeClientStream(m *gotogrpc.GRPCServiceMethod, md metadata.MD, messages []proto.Message, payloads [][]byte, keepOpen time.Duration) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
 	var input proto.Message
 	input, messages, payloads, err = c.createFirstInput(m, messages, payloads)
@@ -270,6 +278,7 @@ func (c *GRPCClient) internalInvokeClientStream(m *gotogrpc.GRPCServiceMethod, m
 
 }
 
+// InvokeServerStream sends each payload of the call and collects the messages that the server streams back into the result.
 func (c *GRPCClient) InvokeServerStream(call *GRPCCall, m *gotogrpc.GRPCServiceMethod, md metadata.MD, callback func(proto.Message, metadata.MD), result *GRPCResult) {
 	invokeSS := func(md metadata.MD, payload []byte, wg *sync.WaitGroup) {
 		if wg != nil {
@@ -294,6 +303,7 @@ func (c *GRPCClient) InvokeServerStream(call *GRPCCall, m *gotogrpc.GRPCServiceM
 	call.Payloads.Process(call, md, invokeSS, nil)
 }
 
+// InvokeServerStreamRaw sends the input, then receives the server's stream until it ends, passing each message to the callback.
 func (c *GRPCClient) InvokeServerStreamRaw(m *gotogrpc.GRPCServiceMethod, md metadata.MD, input proto.Message, callback func(proto.Message, metadata.MD)) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
 	stream, err := c.OpenStream(0, m, md, input)
 	if err != nil {
@@ -326,6 +336,7 @@ func (c *GRPCClient) InvokeServerStreamRaw(m *gotogrpc.GRPCServiceMethod, md met
 	return
 }
 
+// InvokeBidiStream sends the payloads of the call on a bidi stream and collects the responses into the result.
 func (c *GRPCClient) InvokeBidiStream(call *GRPCCall, m *gotogrpc.GRPCServiceMethod, md metadata.MD, keepOpen time.Duration, callback func(proto.Message, metadata.MD), result *GRPCResult) {
 	invokeBS := func(md metadata.MD, payload [][]byte, wg *sync.WaitGroup) {
 		if wg != nil {
@@ -343,10 +354,12 @@ func (c *GRPCClient) InvokeBidiStream(call *GRPCCall, m *gotogrpc.GRPCServiceMet
 	call.Payloads.Process(call, md, nil, invokeBS)
 }
 
+// InvokeBidiStreamRaw sends the given messages on a bidi stream and returns the received responses, headers and trailers.
 func (c *GRPCClient) InvokeBidiStreamRaw(m *gotogrpc.GRPCServiceMethod, md metadata.MD, messages []proto.Message, callback func(proto.Message, metadata.MD)) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
 	return c.internalInvokeBidiStream(m, md, messages, nil, 0, callback)
 }
 
+// internalInvokeBidiStream sends and receives on a bidi stream concurrently, and returns the responses along with any send or receive error.
 func (c *GRPCClient) internalInvokeBidiStream(m *gotogrpc.GRPCServiceMethod, md metadata.MD, messages []proto.Message, payloads [][]byte, keepOpen time.Duration, callback func(proto.Message, metadata.MD)) (responses []proto.Message, respHeaders metadata.MD, respTrailers metadata.MD, err error) {
 	stream, err := c.OpenStream(0, m, md, nil)
 	if err != nil {
@@ -414,6 +427,7 @@ func (c *GRPCClient) internalInvokeBidiStream(m *gotogrpc.GRPCServiceMethod, md 
 	return
 }
 
+// UpdateHeaders applies the call's request headers, including those forwarded from the incoming request, to the headers.
 func (call *GRPCCall) UpdateHeaders(headers types.MutatingHeaders) {
 	if call.Headers != nil && call.Headers.Request != nil {
 		call.Headers.Request.UpdateHeaders(headers)
@@ -423,6 +437,7 @@ func (call *GRPCCall) UpdateHeaders(headers types.MutatingHeaders) {
 	}
 }
 
+// UpdateStreamHeaders applies the headers of a payload, including forwarded request headers, to the headers.
 func (call *GRPCCall) UpdateStreamHeaders(headers types.MutatingHeaders, p *GRPCPayload) {
 	if p.Headers != nil && p.Headers.Request != nil {
 		p.Headers.Request.UpdateHeaders(headers)
@@ -432,22 +447,26 @@ func (call *GRPCCall) UpdateStreamHeaders(headers types.MutatingHeaders, p *GRPC
 	}
 }
 
+// newGRPCResult creates an empty result.
 func newGRPCResult() *GRPCResult {
 	return &GRPCResult{}
 }
 
+// AddError appends an error to the result.
 func (r *GRPCResult) AddError(err error) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	r.Errors = append(r.Errors, err)
 }
 
+// AddResponse appends a response to the result.
 func (r *GRPCResult) AddResponse(response *GRPCResponse) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	r.Responses = append(r.Responses, response)
 }
 
+// GetErrors returns the errors of the result as newline-separated text, tolerating a nil result.
 func (r *GRPCResult) GetErrors() string {
 	if r == nil {
 		return ""
@@ -462,6 +481,7 @@ func (r *GRPCResult) GetErrors() string {
 	return b.String()
 }
 
+// createFirstInput takes the first message or payload as the stream's opening input, returning the remainder.
 func (c *GRPCClient) createFirstInput(m *gotogrpc.GRPCServiceMethod, messages []proto.Message, payloads [][]byte) (proto.Message, []proto.Message, [][]byte, error) {
 	var input proto.Message
 	if len(messages) > 0 {
@@ -478,6 +498,7 @@ func (c *GRPCClient) createFirstInput(m *gotogrpc.GRPCServiceMethod, messages []
 	return input, messages, payloads, nil
 }
 
+// fillInput unmarshals the JSON payload into the input message.
 func fillInput(input *dynamicpb.Message, payload []byte) error {
 	if err := protojson.Unmarshal(payload, input); err != nil {
 		log.Printf("GRPCClient.newInput: Failed to unmarshal payload into method input type [%s] with error: %s\n", input.Descriptor().FullName(), err.Error())
@@ -486,6 +507,7 @@ func fillInput(input *dynamicpb.Message, payload []byte) error {
 	return nil
 }
 
+// newGRPCResponse builds a response from the headers, trailers and stream counts, with the messages encoded as JSON.
 func newGRPCResponse(respHeaders metadata.MD, respTrailers metadata.MD, responsePayloads []proto.Message, clientStreamCount, serverStreamCount int) *GRPCResponse {
 	r := &GRPCResponse{
 		ResponseHeaders:  respHeaders,
@@ -503,6 +525,7 @@ func newGRPCResponse(respHeaders metadata.MD, respTrailers metadata.MD, response
 	return r
 }
 
+// processResponseStatus sets the response's gRPC status and equivalent HTTP code from the call error, returning false if the error isn't a gRPC status.
 func processResponseStatus(m *gotogrpc.GRPCServiceMethod, r *GRPCResponse, err error) bool {
 	if status, ok := status.FromError(err); ok {
 		r.Status = int(status.Code())

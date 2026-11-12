@@ -31,17 +31,20 @@ var (
 	Middleware = middleware.NewMiddleware("tracking", setRoutes, nil)
 )
 
+// setRoutes registers the tracking routes for requests and responses under /server.
 func setRoutes(r *mux.Router) {
 	serverRouter := middleware.RootPath("/server")
 	configureRoutes(util.PathRouter(serverRouter, "/request"))
 	configureRoutes(util.PathRouter(serverRouter, "/response"))
 }
 
+// configureRoutes registers the tracking routes for both the downstream and the upstream messages.
 func configureRoutes(r *mux.Router) {
 	configureTrackingRoutes(util.PathRouter(r, "/track"))
 	configureTrackingRoutes(util.PathRouter(r, "/upstream/track"))
 }
 
+// configureTrackingRoutes registers the routes to add URI and header tracking, clear it, and get its counts.
 func configureTrackingRoutes(r *mux.Router) {
 	router := util.PathRouter(r, "/uri")
 	util.AddRouteWithMultiQ(router, "", trackURIAndHeaders, [][]string{{"key", "uri"}}, "POST")
@@ -56,6 +59,7 @@ func configureTrackingRoutes(r *mux.Router) {
 	util.AddRouteQ(router, "/counts", getCounts, "key", "GET")
 }
 
+// trackURIAndHeaders starts tracking the request (or upstream request) URI and headers, and registers the tracking in the port's hooks.
 func trackURIAndHeaders(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	key := util.GetStringParamValue(r, "key")
@@ -79,6 +83,7 @@ func trackURIAndHeaders(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// trackURIAndHeaderValue starts tracking a URI with a specific header value, and registers the tracking in the port's hooks.
 func trackURIAndHeaderValue(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	key := util.GetStringParamValue(r, "key")
@@ -103,6 +108,7 @@ func trackURIAndHeaderValue(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// clear drops the tracking of the port and key.
 func clear(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	key := util.GetStringParamValue(r, "key")
@@ -113,6 +119,7 @@ func clear(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearCounts zeroes the tracking counts of the port and key.
 func clearCounts(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	key := util.GetStringParamValue(r, "key")
@@ -122,6 +129,7 @@ func clearCounts(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getCounts reports the tracking data as JSON.
 func getCounts(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(fmt.Sprintf("Port [%s] reporting tracking data", util.GetRequestOrListenerPort(r)), r)
 	util.WriteJsonPayload(w, Tracker)

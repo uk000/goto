@@ -135,12 +135,14 @@ func (pp *ProtoPayloads) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*protoPayloadsJSON)(pp))
 }
 
+// NewRequestMatch creates a request match for the given URI prefix.
 func NewRequestMatch(uriPrefix string) *RequestMatch {
 	return &RequestMatch{
 		URIPrefix: uriPrefix,
 	}
 }
 
+// newResponsePayload builds a payload for the given URI, header, query and body (regex or JSON path) match scope, compiling and validating the matchers and registering the URI route before anything is stored.
 func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, header, query, value string,
 	bodyRegexes []string, paths []string, transforms []*util.Transform, delayMin, delayMax time.Duration) (*ResponsePayload, error) {
 	if contentType == "" {
@@ -157,7 +159,7 @@ func newResponsePayload(payload []byte, stream, binary bool, contentType, uri, h
 			return nil, err
 		}
 	}
-	_, uriRegExp, responseRouter, err := util.BuildURIMatcher(uri, true, handleURI)
+	_, uriRegExp, responseRouter, err := util.BuildURIMatcherWhen(uri, true, handleURI, payloadsApplyTo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add URI match %s with error: %s\n", uri, err.Error())
 	}
@@ -242,6 +244,7 @@ func compileBodyMatch(keywords []string) (*regexp.Regexp, error) {
 	return re, nil
 }
 
+// NewResponsePayload creates a payload with the given request matches, captures and encoding options.
 func NewResponsePayload(payload []byte, matches []*RequestMatch, capture *RequestCapture, contentType string, base64Encode, base64Decode, detectJSON, escapeJSON bool) *ResponsePayload {
 	return &ResponsePayload{
 		RequestMatches: matches,
@@ -255,6 +258,7 @@ func NewResponsePayload(payload []byte, matches []*RequestMatch, capture *Reques
 	}
 }
 
+// Process validates the payload and prepares it for use: compiles the body match, URI matchers and header/query captures of its request matches; errors if matches or payload are missing.
 func (rp *ResponsePayload) Process() error {
 	if len(rp.RequestMatches) == 0 {
 		return fmt.Errorf("Matches required")
@@ -305,7 +309,7 @@ func (rp *ResponsePayload) Process() error {
 			return fmt.Errorf("URI match is required")
 		}
 		match.URIPrefix = strings.ToLower(match.URIPrefix)
-		_, uriRE, rr, err := util.BuildURIMatcher(match.URIPrefix, true, handleURI)
+		_, uriRE, rr, err := util.BuildURIMatcherWhen(match.URIPrefix, true, handleURI, payloadsApplyTo)
 		if err != nil {
 			return fmt.Errorf("failed to add URI match %s with error: %s\n", match.URIPrefix, err.Error())
 		}
@@ -351,6 +355,7 @@ func (rp *ResponsePayload) Process() error {
 	return nil
 }
 
+// PrepareJSONStreamPayload builds a stream of count items from the JSON array in the payload, repeating its elements as needed.
 func (rp *ResponsePayload) PrepareJSONStreamPayload(count int) {
 	rp.StreamCount = count
 	j, ok := util.JSONFromJSONText(string(rp.Payload))
@@ -372,6 +377,7 @@ func (rp *ResponsePayload) PrepareJSONStreamPayload(count int) {
 	}
 }
 
+// init resets all the payload registries.
 func (pp *ProtoPayloads) init() {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
@@ -386,12 +392,14 @@ func (pp *ProtoPayloads) init() {
 	pp.allURIResponsePayloads = map[string]*ResponsePayload{}
 }
 
+// setDefaultResponsePayload sets the payload used when nothing else matches.
 func (pp *ProtoPayloads) setDefaultResponsePayload(rp *ResponsePayload) {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
 	pp.DefaultPayload = rp
 }
 
+// setURIResponsePayload registers the payload for a URI.
 func (pp *ProtoPayloads) setURIResponsePayload(uri string, rp *ResponsePayload) {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
@@ -401,6 +409,7 @@ func (pp *ProtoPayloads) setURIResponsePayload(uri string, rp *ResponsePayload) 
 	}
 }
 
+// setURIResponsePayloadWithMatches adds a payload that has its own request matches under a URI prefix.
 func (pp *ProtoPayloads) setURIResponsePayloadWithMatches(uri string, rp *ResponsePayload) {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
@@ -409,6 +418,7 @@ func (pp *ProtoPayloads) setURIResponsePayloadWithMatches(uri string, rp *Respon
 	}
 }
 
+// removeURIResponsePayload removes the payloads registered for a URI, and tracks it no further if nothing else uses it.
 func (pp *ProtoPayloads) removeURIResponsePayload(uri string) {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
@@ -417,6 +427,7 @@ func (pp *ProtoPayloads) removeURIResponsePayload(uri string) {
 	pp.unsafeRemoveUntrackedURI(uri)
 }
 
+// unsafeRemoveUntrackedURI stops tracking a URI once no payload registry has an entry for it; the caller must hold the lock.
 func (pp *ProtoPayloads) unsafeRemoveUntrackedURI(uri string) {
 	if !(pp.PayloadByURIs[uri] != nil || pp.PayloadByURIAndHeaders[uri] != nil ||
 		pp.PayloadByURIAndQuery[uri] != nil || pp.PayloadByURIAndBody[uri] != nil) {
@@ -424,6 +435,7 @@ func (pp *ProtoPayloads) unsafeRemoveUntrackedURI(uri string) {
 	}
 }
 
+// setHeaderResponsePayload registers the payload for a request header and its value match.
 func (pp *ProtoPayloads) setHeaderResponsePayload(header string, rp *ResponsePayload) {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
@@ -435,6 +447,7 @@ func (pp *ProtoPayloads) setHeaderResponsePayload(header string, rp *ResponsePay
 	}
 }
 
+// removeHeaderResponsePayload removes the payload of a request header and value (a filler value means any value).
 func (pp *ProtoPayloads) removeHeaderResponsePayload(header, value string) {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
@@ -447,6 +460,7 @@ func (pp *ProtoPayloads) removeHeaderResponsePayload(header, value string) {
 	}
 }
 
+// setURIWithHeaderResponsePayload registers the payload for a URI combined with a request header and its value match.
 func (pp *ProtoPayloads) setURIWithHeaderResponsePayload(uri, header string, rp *ResponsePayload) {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
@@ -462,6 +476,7 @@ func (pp *ProtoPayloads) setURIWithHeaderResponsePayload(uri, header string, rp 
 	}
 }
 
+// removeURIWithHeaderResponsePayload removes the payload of a URI with header and value, pruning emptied entries.
 func (pp *ProtoPayloads) removeURIWithHeaderResponsePayload(uri, header, value string) {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
@@ -482,6 +497,7 @@ func (pp *ProtoPayloads) removeURIWithHeaderResponsePayload(uri, header, value s
 	}
 }
 
+// setQueryResponsePayload registers the payload for a request query param and its value match.
 func (pp *ProtoPayloads) setQueryResponsePayload(query string, rp *ResponsePayload) {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
@@ -493,6 +509,7 @@ func (pp *ProtoPayloads) setQueryResponsePayload(query string, rp *ResponsePaylo
 	}
 }
 
+// removeQueryResponsePayload removes the payload of a query param and value (a filler value means any value).
 func (pp *ProtoPayloads) removeQueryResponsePayload(query, value string) {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
@@ -505,6 +522,7 @@ func (pp *ProtoPayloads) removeQueryResponsePayload(query, value string) {
 	}
 }
 
+// setURIWithQueryResponsePayload registers the payload for a URI combined with a request query param and its value match.
 func (pp *ProtoPayloads) setURIWithQueryResponsePayload(uri, query string, rp *ResponsePayload) {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
@@ -520,6 +538,7 @@ func (pp *ProtoPayloads) setURIWithQueryResponsePayload(uri, query string, rp *R
 	}
 }
 
+// removeURIWithQueryResponsePayload removes the payload of a URI with query and value, pruning emptied entries.
 func (pp *ProtoPayloads) removeURIWithQueryResponsePayload(uri, query, value string) {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
@@ -540,6 +559,7 @@ func (pp *ProtoPayloads) removeURIWithQueryResponsePayload(uri, query, value str
 	}
 }
 
+// setURIWithBodyMatchResponsePayload registers the payload for a URI combined with a body match.
 func (pp *ProtoPayloads) setURIWithBodyMatchResponsePayload(uri, match string, rp *ResponsePayload) {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
@@ -552,6 +572,7 @@ func (pp *ProtoPayloads) setURIWithBodyMatchResponsePayload(uri, match string, r
 	}
 }
 
+// removeURIWithBodyMatchResponsePayload removes the payload of a URI with body match, pruning emptied entries.
 func (pp *ProtoPayloads) removeURIWithBodyMatchResponsePayload(uri, match string) {
 	pp.lock.Lock()
 	defer pp.lock.Unlock()
@@ -564,11 +585,39 @@ func (pp *ProtoPayloads) removeURIWithBodyMatchResponsePayload(uri, match string
 	}
 }
 
+// HasAnyPayload tells if any payload (URI, matches, header, query or default) is configured.
 func (pp *ProtoPayloads) HasAnyPayload() bool {
 	pp.lock.RLock()
 	defer pp.lock.RUnlock()
 	return len(pp.allURIResponsePayloads) > 0 || len(pp.PayloadByURIWithMatches) > 0 ||
 		len(pp.PayloadByHeaders) > 0 || len(pp.PayloadByQuery) > 0 || pp.DefaultPayload != nil
+}
+
+// HasPayloadFor tells if the payloads that are configured have something to do with a request with the URI, headers and
+// queries, the body left out: the request has a payload that answers it (the one that GetMatchingResponsePayload finds, or
+// one of a URI that the request has, that the body chooses), or has the URI of a payload that its headers, queries or body
+// don't match, which is answered by the echo of the request.
+func (pp *ProtoPayloads) HasPayloadFor(requestURI string, header http.Header, query url.Values) bool {
+	if _, _, _, found := pp.GetMatchingResponsePayload(requestURI, header, query, nil); found {
+		return true
+	}
+	pp.lock.RLock()
+	defer pp.lock.RUnlock()
+	for _, rp := range pp.allURIResponsePayloads {
+		if rp.uriRegexp != nil && rp.uriRegexp.MatchString(requestURI) {
+			return true
+		}
+	}
+	for _, rps := range pp.PayloadByURIWithMatches {
+		for _, rp := range rps {
+			for _, m := range rp.RequestMatches {
+				if m.uriRegexp != nil && m.uriRegexp.MatchString(requestURI) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // sortedURIs orders URIs so that the more specific one (the longer one) comes first, and the order of URIs of the same
@@ -660,6 +709,7 @@ func (pp *ProtoPayloads) GetMatchingResponsePayload(requestURI string, header ht
 	return newBodyReader, nil, nil, false
 }
 
+// match tells if the request URI, headers and queries satisfy the match; headers and queries must be present, and equal their configured values where one is set.
 func (m *RequestMatch) match(requestURI string, headers http.Header, query url.Values) bool {
 	if m.uriRegexp != nil && !m.uriRegexp.MatchString(requestURI) {
 		return false
@@ -683,6 +733,7 @@ func (m *RequestMatch) match(requestURI string, headers http.Header, query url.V
 	return matched
 }
 
+// matchKV tells if a header or query value is present and equals the configured value for that name, if any (case-insensitively).
 func matchKV(k string, valueMatches map[string]string, v string) bool {
 	if len(v) == 0 {
 		return false
@@ -696,6 +747,7 @@ func matchKV(k string, valueMatches map[string]string, v string) bool {
 	return true
 }
 
+// newRequestCapture creates a request capture with empty capture maps.
 func newRequestCapture() *RequestCapture {
 	return &RequestCapture{
 		uriCaptureKeys:    []string{},
@@ -704,6 +756,7 @@ func newRequestCapture() *RequestCapture {
 	}
 }
 
+// NonNil ensures the header and query capture maps are allocated.
 func (rc *RequestCapture) NonNil() {
 	if rc.headerCaptureKeys == nil {
 		rc.headerCaptureKeys = map[string]*types.Pair[*regexp.Regexp, []string]{}
@@ -713,12 +766,14 @@ func (rc *RequestCapture) NonNil() {
 	}
 }
 
+// encodePayload returns the payload base64 (raw URL) encoded.
 func (rp *ResponsePayload) encodePayload(payload []byte) []byte {
 	encoded := make([]byte, base64.RawURLEncoding.EncodedLen(len(payload)))
 	base64.RawURLEncoding.Encode(encoded, []byte(payload))
 	return encoded
 }
 
+// decodePayload returns the base64 (raw URL) decoded payload, cleaned and re-marshaled if the payload is JSON; logs and returns it unchanged if decoding fails.
 func (rp *ResponsePayload) decodePayload(payload []byte) []byte {
 	decoded := make([]byte, base64.RawURLEncoding.DecodedLen(len(payload)))
 	if _, err := base64.RawURLEncoding.Decode(decoded, payload); err != nil {
@@ -741,6 +796,7 @@ func (rp *ResponsePayload) decodePayload(payload []byte) []byte {
 	return payload
 }
 
+// encodeDecodeParts base64 encodes or decodes each part according to the per-part encode and decode flags.
 func (rp *ResponsePayload) encodeDecodeParts(parts [][]byte, encode []bool, decode []bool) [][]byte {
 	processedParts := [][]byte{}
 	for i, part := range parts {
@@ -755,6 +811,7 @@ func (rp *ResponsePayload) encodeDecodeParts(parts [][]byte, encode []bool, deco
 	return processedParts
 }
 
+// preProcess splits the payload into parts and applies the pre-processing base64 encode/decode, if parts are configured.
 func (rp *ResponsePayload) preProcess() [][]byte {
 	var rawParts [][]byte
 	if rp.Parts != nil && rp.Parts.Pre != nil {
@@ -771,6 +828,7 @@ func (rp *ResponsePayload) preProcess() [][]byte {
 	return rawParts
 }
 
+// joinSplit concatenates the parts and splits the result again on the separator.
 func joinSplit(parts [][]byte, sep []byte) [][]byte {
 	joined := []byte{}
 	for _, b := range parts {
@@ -779,6 +837,7 @@ func joinSplit(parts [][]byte, sep []byte) [][]byte {
 	return bytes.Split(joined, sep)
 }
 
+// signParts signs the parts flagged for signing with the CA key (RSA SHA-256) and substitutes the base64 signature for the [SIGNATURE] marker.
 func (rp *ResponsePayload) signParts(parts [][]byte) {
 	signableParts := [][]byte{}
 	for i, p := range parts {
@@ -803,6 +862,7 @@ func (rp *ResponsePayload) signParts(parts [][]byte) {
 	}
 }
 
+// postProcess applies the post-processing of parts (re-split, keep, base64 encode/decode, sign, join) and returns the final payload bytes.
 func (rp *ResponsePayload) postProcess(parts [][]byte) []byte {
 	var payload []byte
 	if rp.Parts != nil && rp.Parts.Post != nil {
@@ -840,6 +900,7 @@ func (rp *ResponsePayload) postProcess(parts [][]byte) []byte {
 	return payload
 }
 
+// getFilledPayload returns the payload with its markers filled from the request URI vars, headers, queries, body transforms and body-match captures, then post-processed and with the configured replacements applied.
 func (rp *ResponsePayload) getFilledPayload(r *http.Request, captures map[string]string) []byte {
 	vars := mux.Vars(r)
 	query := r.URL.Query()
@@ -883,6 +944,7 @@ func (rp *ResponsePayload) getFilledPayload(r *http.Request, captures map[string
 	return rawPayload
 }
 
+// processCaptures replaces the capture keys in the payload with the values captured from the given header or query value, quoting JSON-looking values as configured.
 func processCaptures(payload string, value string, pair *types.Pair[*regexp.Regexp, []string], detectJSON, escapteJSON bool) string {
 	if value != "" && pair.Left != nil {
 		captures := util.GetCaptureGroupValues(pair.Left, pair.Right, value)

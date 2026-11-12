@@ -102,6 +102,7 @@ type InvocationStatus struct {
 	lock              sync.RWMutex
 }
 
+// newInvocationResult creates the result for a request, seeded with the request ID and headers and the tracker's transport client.
 func newInvocationResult(request *InvocationRequest) *InvocationResult {
 	return &InvocationResult{
 		TargetName: request.tracker.Target.Name,
@@ -118,20 +119,26 @@ func newInvocationResult(request *InvocationRequest) *InvocationResult {
 	}
 }
 
+// SendResult puts a result directly on the tracker's result channel, if it has channels.
 func (t *InvocationTracker) SendResult(r *InvocationResult) {
 	if t.Channels != nil {
 		t.Channels.Lock.Lock()
 		defer t.Channels.Lock.Unlock()
-		t.Channels.ResultChannel <- r
+		// the channel is nil once the invocation is done, and sending on a nil channel blocks forever
+		if t.Channels.ResultChannel != nil {
+			t.Channels.ResultChannel <- r
+		}
 	}
 }
 
+// publishResult hands the result to the tracker's channels, if it has any.
 func (tracker *InvocationTracker) publishResult(result *InvocationResult) {
 	if tracker.Channels != nil {
 		tracker.Channels.publish(result)
 	}
 }
 
+// publish delivers the result to all registered sinks, or to the result channel when there are no sinks.
 func (c *InvocationChannels) publish(result *InvocationResult) {
 	c.Lock.Lock()
 	defer c.Lock.Unlock()
@@ -147,6 +154,7 @@ func (c *InvocationChannels) publish(result *InvocationResult) {
 	}
 }
 
+// processResponse validates the result against any assertions and records the successful response in the invocation status.
 func (tracker *InvocationTracker) processResponse(result *InvocationResult) {
 	if len(tracker.Target.Assertions) > 0 {
 		result.validateResponse()
@@ -154,6 +162,7 @@ func (tracker *InvocationTracker) processResponse(result *InvocationResult) {
 	tracker.Status.trackStatus(result)
 }
 
+// processError validates the result against any assertions, records the failure in the status, and bumps the target failure metric.
 func (tracker *InvocationTracker) processError(result *InvocationResult) {
 	if len(tracker.Target.Assertions) > 0 {
 		result.validateResponse()
@@ -163,6 +172,7 @@ func (tracker *InvocationTracker) processError(result *InvocationResult) {
 	metrics.UpdateTargetFailureCount(tracker.Target.Name)
 }
 
+// processHTTPResponse records the HTTP response or error on the result, reading the payload and notifying OnHeaders on success.
 func (result *InvocationResult) processHTTPResponse(req *InvocationRequest, r *http.Response, err error) {
 	result.httpResponse = r
 	result.err = err
@@ -185,6 +195,7 @@ func (result *InvocationResult) processHTTPResponse(req *InvocationRequest, r *h
 	}
 }
 
+// processGRPCResponse records the gRPC response status, payload size and stream counts on the result, or the error on failure.
 func (result *InvocationResult) processGRPCResponse(req *InvocationRequest, responseStatus int, responseHeaders map[string][]string,
 	responsePayload []string, clientStreamCount, serverStreamCount int, err error) {
 	result.err = err
@@ -198,6 +209,7 @@ func (result *InvocationResult) processGRPCResponse(req *InvocationRequest, resp
 	}
 }
 
+// readHTTPResponsePayload reads and tracks the response body when payload tracking, collection or a response writer is set, otherwise discards it.
 func (result *InvocationResult) readHTTPResponsePayload() {
 	if result.httpResponse != nil && result.httpResponse.Body != nil {
 		defer result.httpResponse.Body.Close()
@@ -221,6 +233,7 @@ func (result *InvocationResult) readHTTPResponsePayload() {
 	}
 }
 
+// updateResult copies the response headers (optionally lowercased), status, and request URL/URI into the result.
 func (result *InvocationResult) updateResult(url, uri, status string, statusCode int, headers map[string][]string) {
 	for header, values := range headers {
 		if result.tracker.Target.LowerHeaders {
@@ -239,6 +252,7 @@ func (result *InvocationResult) updateResult(url, uri, status string, statusCode
 	result.Request.URL = url
 }
 
+// retryReason returns the last segment of the error message, or the HTTP status, as the reason a request needs a retry.
 func (result *InvocationResult) retryReason() string {
 	if result.err != nil {
 		pieces := strings.Split(result.err.Error(), ":")
@@ -250,6 +264,7 @@ func (result *InvocationResult) retryReason() string {
 	return ""
 }
 
+// shouldRetry reports whether the request failed with an error or returned one of the target's retriable status codes.
 func (result *InvocationResult) shouldRetry() bool {
 	if result.err != nil {
 		return true
@@ -266,6 +281,7 @@ func (result *InvocationResult) shouldRetry() bool {
 	return false
 }
 
+// validateResponse checks the response against the target's assertions in order, recording the first one that fully matches or the errors of all that don't.
 func (result *InvocationResult) validateResponse() {
 	allErrors := []map[string]interface{}{}
 	for i, assert := range result.tracker.Target.Assertions {
@@ -305,6 +321,7 @@ func (result *InvocationResult) validateResponse() {
 	result.Errors = allErrors
 }
 
+// trackRequest records the request duration and its first and last request times.
 func (ir *InvocationResult) trackRequest(start, end time.Time) {
 	ir.TookNanos = end.Sub(start)
 	ir.Request.LastRequestAt = end
@@ -313,6 +330,7 @@ func (ir *InvocationResult) trackRequest(start, end time.Time) {
 	}
 }
 
+// trackRequest increments the total request count and updates the first and last request times.
 func (is *InvocationStatus) trackRequest(at time.Time) {
 	when := at.UTC().String()
 	is.lock.Lock()
@@ -324,23 +342,26 @@ func (is *InvocationStatus) trackRequest(at time.Time) {
 	}
 }
 
+// incrementRetriesCount increments the retries count under the status lock.
 func (is *InvocationStatus) incrementRetriesCount() {
 	is.lock.Lock()
 	defer is.lock.Unlock()
 	is.RetriesCount++
 }
 
+// incrementABCount increments the A/B call count under the status lock.
 func (is *InvocationStatus) incrementABCount() {
 	is.lock.Lock()
 	defer is.lock.Unlock()
 	is.ABCount++
 }
 
+// trackStatus records a successful response, tracking consecutive repeats of the status code, clearing error counters, and optionally logging the result.
 func (is *InvocationStatus) trackStatus(result *InvocationResult) {
 	is.lock.Lock()
 	isRepeatStatus := is.lastStatusCode == result.Response.StatusCode
 	if !isRepeatStatus && is.lastStatusCount > 1 || is.lastErrorCount > 1 {
-		is.reportRepeatedResponse()
+		is.unsafeReportRepeatedResponse()
 		is.lastStatusCode = -1
 	}
 	if is.lastStatusCode >= 0 && isRepeatStatus {
@@ -362,6 +383,7 @@ func (is *InvocationStatus) trackStatus(result *InvocationResult) {
 	}
 }
 
+// trackError records a failed request: logs the error, resets the status repeat counters, and updates the last error and failure count.
 func (is *InvocationStatus) trackError(result *InvocationResult) {
 	is.lock.Lock()
 	defer is.lock.Unlock()
@@ -373,19 +395,27 @@ func (is *InvocationStatus) trackError(result *InvocationResult) {
 	is.FailureCount++
 }
 
+// reportRepeatedResponse reports and resets the repeated response and failure counters that repeated more than once.
+// It takes the status lock, so it must not be called by code that already holds it (use unsafeReportRepeatedResponse).
 func (is *InvocationStatus) reportRepeatedResponse() {
 	is.lock.Lock()
 	defer is.lock.Unlock()
+	is.unsafeReportRepeatedResponse()
+}
+
+// unsafeReportRepeatedResponse is reportRepeatedResponse for callers that already hold the status lock. sync.RWMutex
+// is not reentrant, so nothing here (including the logging helpers it calls) may take the status lock again.
+func (is *InvocationStatus) unsafeReportRepeatedResponse() {
 	if is.lastStatusCount <= 0 {
 		return
 	}
 	if is.lastStatusCount > 1 {
-		is.tracker.reportRepeatedResponse()
+		is.tracker.logRepeatedResponse(is.lastStatusCode, is.lastStatusCount)
 		is.lastStatusCount = 0
 		is.lastStatusCode = -1
 	}
 	if is.lastErrorCount > 1 {
-		is.tracker.reportRepeatedFailure()
+		is.tracker.logRepeatedFailure(is.lastError, is.lastErrorCount)
 		is.lastErrorCount = 0
 		is.lastError = ""
 	}

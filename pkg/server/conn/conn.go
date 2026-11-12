@@ -38,6 +38,7 @@ var (
 	Middleware = middleware.NewMiddleware("connection", nil, middlewareFunc)
 )
 
+// captureTLSInfo records the TLS version, server name and peer certs of a completed TLS handshake into the request store.
 func captureTLSInfo(r *http.Request) {
 	var conn net.Conn
 	if conn = util.GetConn(r); conn == nil {
@@ -72,6 +73,7 @@ func captureTLSInfo(r *http.Request) {
 	rs.TLSVersion = gototls.GetTLSVersion(&tlsState)
 }
 
+// middlewareFunc logs the request's connection details, sets goto headers (or per-tunnel headers) and client/protocol metrics, then calls the next handler.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		l := listeners.GetCurrentListener(r)

@@ -69,6 +69,7 @@ var (
 
 type ChangeLog map[string]any
 
+// Start loads the startup configs from the configured config paths, once, on the first call.
 func Start() {
 	lock.Lock()
 	first := !loaded
@@ -80,6 +81,7 @@ func Start() {
 	//runStartupScript()
 }
 
+// Stop closes the file watchers that were set on the config paths.
 func Stop() {
 	watchersLock.Lock()
 	watchers := configWatchers
@@ -94,6 +96,7 @@ func Stop() {
 	}
 }
 
+// loadStartupConfigs loads the configs from the config paths and sets a file watcher on each path to reload on changes.
 func loadStartupConfigs() {
 	if len(global.ServerConfig.ConfigPaths) > 0 {
 		loadConfigsFromPaths(nil)
@@ -120,6 +123,7 @@ func isAtomicUpdateEntry(path string) bool {
 	return strings.HasPrefix(filepath.Base(path), "..")
 }
 
+// watchStartupConfig reacts to the events of a config path watcher: removals clean up the configs, other changes are loaded after a delay.
 func watchStartupConfig(configWatcher fswatcher.Watcher) {
 	interval := configDebounce
 	debounceReconcile := util.Debounce(interval)
@@ -227,6 +231,7 @@ func loadedConfigFiles() []string {
 	return files
 }
 
+// removeAllConfigs clears every loaded config of every kind, and forgets them.
 func removeAllConfigs() {
 	configLock.Lock()
 	defer configLock.Unlock()
@@ -285,6 +290,7 @@ func removeAllConfigs() {
 	}
 }
 
+// removeConfigs clears and forgets all the configs of every kind that were loaded from the given file.
 func removeConfigs(filePath string) {
 	parts := strings.Split(filePath, string(os.PathSeparator))
 	filename := parts[len(parts)-1]
@@ -349,6 +355,7 @@ func removeConfigs(filePath string) {
 	}
 }
 
+// Contains tells if the log has the given path, or a path that contains it or is contained by it.
 func (c ChangeLog) Contains(v string) bool {
 	if _, ok := c[v]; ok {
 		return true
@@ -361,6 +368,7 @@ func (c ChangeLog) Contains(v string) bool {
 	return false
 }
 
+// loadConfigsFromPaths reads the files of the config paths (only the changed ones if a change log is given) and loads them in the order of their configs.
 func loadConfigsFromPaths(changeLog ChangeLog) {
 	loadLock.Lock()
 	defer loadLock.Unlock()
@@ -403,6 +411,7 @@ func loadConfigsFromPaths(changeLog ChangeLog) {
 	}
 }
 
+// loadChanges collects the changed paths from the channel and loads them once the changes stop coming, after the debounce interval.
 func loadChanges(changeChan chan string, interval time.Duration) {
 	debounce := util.Debounce(interval)
 	lock := sync.Mutex{}
@@ -418,6 +427,8 @@ func loadChanges(changeChan chan string, interval time.Duration) {
 		})
 	}
 }
+
+// getFileConfig reads the config of a YAML file, or of the output of a shell script, and ignores any other file.
 func getFileConfig(filePath string) *ctl.GotoConfig {
 	if strings.HasSuffix(filePath, ".yaml") || strings.HasSuffix(filePath, ".yml") {
 		log.Printf("Reading YAML config from file: %s\n", filePath)
@@ -431,6 +442,7 @@ func getFileConfig(filePath string) *ctl.GotoConfig {
 	return nil
 }
 
+// readConfigFromScript runs the script and parses its output as a config.
 func readConfigFromScript(filePath string) *ctl.GotoConfig {
 	script := &scripts.Script{
 		Name:     "GotoConfig",
@@ -443,6 +455,7 @@ func readConfigFromScript(filePath string) *ctl.GotoConfig {
 	return ctl.ParseConfig(filePath, buff.Bytes())
 }
 
+// loadConfig loads each section of a config (TLS, listeners, MCP, A2A, HTTP, gRPC, proxies), one section failing not stopping the others.
 func loadConfig(config *ctl.GotoConfig) {
 	if config == nil {
 		log.Println("No config loaded")
@@ -473,6 +486,7 @@ func guarded(section, filename string, load func()) {
 	load()
 }
 
+// loadTLSConfig loads the TLS section of a config, replacing only the certs that changed since the file was last loaded.
 func loadTLSConfig(filename string, config *ctl.GotoConfig) {
 	if config.TLS != nil {
 		old := tlsConfigs[filename]
@@ -490,6 +504,7 @@ func loadTLSConfig(filename string, config *ctl.GotoConfig) {
 	}
 }
 
+// loadListenersConfig loads the listeners section of a config, removing the listeners that the file no longer has.
 func loadListenersConfig(filename string, config *ctl.GotoConfig) {
 	if config.Listeners != nil {
 		old := listenerConfigs[filename]
@@ -503,6 +518,7 @@ func loadListenersConfig(filename string, config *ctl.GotoConfig) {
 	}
 }
 
+// loadMCPConfig loads the MCP section of a config, replacing the servers that the file loaded before.
 func loadMCPConfig(filename string, config *ctl.GotoConfig) {
 	if config.MCP != nil {
 		if mcpConfigs[filename] != nil {
@@ -515,6 +531,7 @@ func loadMCPConfig(filename string, config *ctl.GotoConfig) {
 	}
 }
 
+// loadA2AConfig loads the A2A section of a config, replacing the agents that the file loaded before.
 func loadA2AConfig(filename string, config *ctl.GotoConfig) {
 	if config.A2A != nil {
 		if a2aConfigs[filename] != nil {
@@ -527,6 +544,7 @@ func loadA2AConfig(filename string, config *ctl.GotoConfig) {
 	}
 }
 
+// loadHTTPConfig loads the HTTP section of a config, replacing the response payloads that the file loaded before.
 func loadHTTPConfig(filename string, config *ctl.GotoConfig) {
 	if config.HTTP != nil {
 		if httpConfigs[filename] != nil {
@@ -539,6 +557,7 @@ func loadHTTPConfig(filename string, config *ctl.GotoConfig) {
 	}
 }
 
+// loadGRPCConfig loads the gRPC section of a config, replacing the protos and services that the file loaded before.
 func loadGRPCConfig(filename string, config *ctl.GotoConfig) {
 	if config.GRPC != nil {
 		if grpcConfigs[filename] != nil {
@@ -551,6 +570,7 @@ func loadGRPCConfig(filename string, config *ctl.GotoConfig) {
 	}
 }
 
+// loadProxyConfig loads the HTTP, TCP and gRPC proxies of a config, replacing the proxy that a file had loaded before on the same port.
 func loadProxyConfig(filename string, config *ctl.GotoConfig) {
 	if config.Proxies != nil {
 		for _, proxy := range config.Proxies {
@@ -609,6 +629,7 @@ func loadProxyConfig(filename string, config *ctl.GotoConfig) {
 	}
 }
 
+// runStartupScript runs the startup script commands of the server config, if any.
 func runStartupScript() {
 	if len(global.ServerConfig.StartupScript) > 0 {
 		scripts.RunCommands("startup", global.ServerConfig.StartupScript)

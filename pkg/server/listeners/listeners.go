@@ -107,7 +107,10 @@ type Listener struct {
 	UDPConn          *net.UDPConn                     `json:"-"`
 	Restarted        bool                             `json:"-"`
 	peerCertInfos    map[string]*gototls.PeerCertInfo `json:"-"`
-	lock             sync.RWMutex                     `json:"-"`
+	// nextProtos are the ALPN protocols that the connections of the listener are served with the handlers of the listener
+	// for (an mTLS listener has them), which the HTTP server of the listener is made with (guarded by lock).
+	nextProtos []string     `json:"-"`
+	lock       sync.RWMutex `json:"-"`
 }
 
 // listenerJSON has the fields of a listener, and none of its methods, so that it is marshaled as the struct that it is.
@@ -133,17 +136,23 @@ var (
 	initialJSONRPCStarted = false
 	initialTCPStarted     = false
 	// The flags of the servers that are started are set by the watchers of the servers, and read as listeners open.
-	grpcStarted     atomic.Bool
-	httpStarted     atomic.Bool
-	jsonRPCStarted  atomic.Bool
-	httpServer      *http.Server
-	h2Server        *http2.Server
-	jsonRPCServer   *http.Server
-	serveTCP        func(string, int, net.Listener) error
-	serveXDS        func(*grpc.Server)
-	DefaultLabel    string
-	listenersLock   sync.RWMutex
-	generationsLock sync.Mutex
+	grpcStarted    atomic.Bool
+	httpStarted    atomic.Bool
+	jsonRPCStarted atomic.Bool
+	// The servers are set as they start and stop, and read as listeners open (guarded by serversLock).
+	httpServer    *http.Server
+	h2Server      *http2.Server
+	jsonRPCServer *http.Server
+	serversLock   sync.RWMutex
+	// listenerServers are the servers that listeners with ALPN handlers of their own are served by, as long as they serve
+	// (guarded by listenerServersLock). The shared HTTP server shuts down the listeners that it serves, and not these.
+	listenerServers     = map[*http.Server]string{}
+	listenerServersLock sync.Mutex
+	serveTCP            func(string, int, net.Listener) error
+	serveXDS            func(*grpc.Server)
+	DefaultLabel        string
+	listenersLock       sync.RWMutex
+	generationsLock     sync.Mutex
 	// reopenRetryDelay is how long ReopenListener waits before it tries again to open a port that is still in use, and
 	// initialListenersDelay is how long the initial HTTP/JSONRPC listeners wait for the servers to be ready to serve.
 	reopenRetryDelay      = 5 * time.Second
@@ -155,6 +164,7 @@ var (
 // were defined as.
 var initialDefs = map[int]*PortProtoConfig{}
 
+// Init registers the listener lookups in the global funcs, sets up the default listener, and subscribes to the server start and stop watchers.
 func Init() {
 	global.Funcs.IsListenerPresent = IsListenerPresent
 	global.Funcs.IsListenerOpen = IsListenerOpen
@@ -180,6 +190,7 @@ func Init() {
 	global.AddTCPServeWatcher(ConfigureTCPServer)
 }
 
+// OnGRPCStart marks the gRPC server as started and starts the initial HTTP listeners if the HTTP server is also up.
 func OnGRPCStart() {
 	grpcStarted.Store(true)
 	if httpStarted.Load() {
@@ -187,6 +198,7 @@ func OnGRPCStart() {
 	}
 }
 
+// OnGRPCStop marks the gRPC server as stopped and closes all gRPC listeners.
 func OnGRPCStop() {
 	grpcStarted.Store(false)
 	// The listeners are closed outside of the lock: closing takes the lock of the listener, and closing the connections
@@ -202,40 +214,69 @@ func OnGRPCStop() {
 	}
 }
 
+// OnHTTPStart records the started HTTP and HTTP/2 servers and starts the initial HTTP listeners if the gRPC server is also up.
 func OnHTTPStart(s *http.Server, h2s *http2.Server) {
-	httpStarted.Store(true)
+	serversLock.Lock()
 	httpServer = s
 	h2Server = h2s
+	serversLock.Unlock()
+	httpStarted.Store(true)
 	if grpcStarted.Load() {
 		startInitialHTTPListeners(false)
 	}
 }
 
+// OnHTTPStop marks the HTTP server as stopped and forgets it.
 func OnHTTPStop() {
 	httpStarted.Store(false)
+	serversLock.Lock()
 	httpServer = nil
+	serversLock.Unlock()
 }
 
+// OnJSONRPCStart records the started JSON-RPC server and starts the initial JSON-RPC listeners.
 func OnJSONRPCStart(s *http.Server, h2s *http2.Server) {
-	jsonRPCStarted.Store(true)
+	serversLock.Lock()
 	jsonRPCServer = s
+	serversLock.Unlock()
+	jsonRPCStarted.Store(true)
 	startInitialHTTPListeners(true)
 }
 
+// OnJSONRPCStop marks the JSON-RPC server as stopped and forgets it.
 func OnJSONRPCStop() {
 	jsonRPCStarted.Store(false)
+	serversLock.Lock()
 	jsonRPCServer = nil
+	serversLock.Unlock()
 }
 
+// getHTTPServers returns the HTTP server and the HTTP/2 server that the listeners are served with, which are nil when they are not running.
+func getHTTPServers() (*http.Server, *http2.Server) {
+	serversLock.RLock()
+	defer serversLock.RUnlock()
+	return httpServer, h2Server
+}
+
+// getJSONRPCServer returns the server that the JSON-RPC listeners are served with, which is nil when it is not running.
+func getJSONRPCServer() *http.Server {
+	serversLock.RLock()
+	defer serversLock.RUnlock()
+	return jsonRPCServer
+}
+
+// ConfigureTCPServer sets the function that serves TCP listeners and starts the initial TCP listeners.
 func ConfigureTCPServer(serve func(string, int, net.Listener) error) {
 	serveTCP = serve
 	startInitialTCPListeners()
 }
 
+// ConfigureXDSServer sets the function that serves XDS on a gRPC server.
 func ConfigureXDSServer(serve func(*grpc.Server)) {
 	serveXDS = serve
 }
 
+// newListener creates an initialized listener for a port with the given protocol, common name and open state.
 func newListener(port int, protocol string, cn string, open bool) *Listener {
 	l := &Listener{
 		Port:       port,
@@ -247,17 +288,20 @@ func newListener(port int, protocol string, cn string, open bool) *Listener {
 	return l
 }
 
+// Init resets the certificate cache and the peer cert infos of the listener.
 func (l *Listener) Init() {
 	l.CertsCache = map[string]*tls.Certificate{}
 	l.peerCertInfos = map[string]*gototls.PeerCertInfo{}
 }
 
+// InitDefaultGRPCListener adds or updates the default gRPC listener on the configured gRPC port.
 func InitDefaultGRPCListener() {
 	DefaultGRPCListener.HostLabel = global.Self.HostLabel
 	DefaultGRPCListener.Port = global.Self.GRPCPort
 	AddOrUpdateListener(DefaultGRPCListener)
 }
 
+// AddInitialGRPCListeners adds or updates the initial listeners that are gRPC, panicking on failure.
 func AddInitialGRPCListeners() {
 	for _, l := range initialListeners {
 		if l.IsGRPC {
@@ -268,6 +312,7 @@ func AddInitialGRPCListeners() {
 	}
 }
 
+// startInitialHTTPListeners opens the initial HTTP or JSON-RPC listeners once their server is up, and signals when all initial listeners have started.
 func startInitialHTTPListeners(jsonRPC bool) {
 	if jsonRPC && !initialJSONRPCStarted || !jsonRPC && !initialHTTPStarted {
 		time.Sleep(initialListenersDelay)
@@ -289,6 +334,7 @@ func startInitialHTTPListeners(jsonRPC bool) {
 	}
 }
 
+// startInitialTCPListeners opens the initial TCP listeners and signals when all initial listeners have started.
 func startInitialTCPListeners() {
 	for _, l := range initialListeners {
 		if l.IsTCP {
@@ -303,11 +349,13 @@ func startInitialTCPListeners() {
 	}
 }
 
+// allInitialListenersStarted links the forward listeners and notifies that all initial listeners have started.
 func allInitialListenersStarted() {
 	LinkForwardListeners()
 	global.OnListenersStarted()
 }
 
+// assignProtocol derives the protocol flags, L8 protocol and TLS settings of the listener from its protocol string.
 func (l *Listener) assignProtocol() {
 	isHTTP := strings.EqualFold(l.Protocol, PROTOL_HTTP)
 	isHTTPSS := strings.EqualFold(l.Protocol, PROTOL_STRICT_HTTPS)
@@ -385,6 +433,7 @@ func (l *Listener) assignProtocol() {
 	l.ProtoAssigned = true
 }
 
+// parseListenerPorts parses the port/protocol/mtls-or-forward specs into port configs, exiting on an invalid port; the first port is the HTTP server port.
 func parseListenerPorts(portList []string) []*PortProtoConfig {
 	portProtos := []*PortProtoConfig{}
 	for i, p := range portList {
@@ -432,6 +481,7 @@ type PortProtoConfig struct {
 	Verify  bool
 }
 
+// AddInitialListeners creates the JSON-RPC, default and additional initial listeners from the startup port list.
 func AddInitialListeners(portList []string) {
 	portProtos := parseListenerPorts(portList)
 	if len(portProtos) == 0 {
@@ -455,6 +505,7 @@ func AddInitialListeners(portList []string) {
 	}
 }
 
+// addInitialListener creates a listener from a port config and records it as an initial listener.
 func addInitialListener(pp *PortProtoConfig, existing map[int]bool) *Listener {
 	l := createPortListener(pp.Port, pp.Forward, pp.Proto, pp.MTLS, pp.Verify, existing)
 	if l != nil {
@@ -512,6 +563,7 @@ func RestoreInitialListener(port int) bool {
 	return true
 }
 
+// createPortListener creates a listener for a port unless the port is already in existing, in which case it logs a duplicate and returns nil.
 func createPortListener(port, forward int, protocol string, mtls, verify bool, existing map[int]bool) *Listener {
 	if !existing[port] {
 		existing[port] = true
@@ -535,6 +587,7 @@ func createPortListener(port, forward int, protocol string, mtls, verify bool, e
 	return nil
 }
 
+// LinkForwardListeners resolves the forward port of each listener to its listener.
 func LinkForwardListeners() {
 	listenersLock.Lock()
 	defer listenersLock.Unlock()
@@ -565,9 +618,10 @@ func (l *Listener) describeTLS() string {
 	return msg
 }
 
+// serveJSONRPC serves the listener with the JSON-RPC server in the background.
 func (l *Listener) serveJSONRPC() {
 	// The server is the one that is there when the listener opens, and not the one that is there when the goroutine runs.
-	server := jsonRPCServer
+	server := getJSONRPCServer()
 	if server == nil {
 		log.Printf("JSONRPC Listener [%s] is open, but the JSONRPC server is not running to serve it", l.ListenerID)
 		return
@@ -582,22 +636,40 @@ func (l *Listener) serveJSONRPC() {
 	}()
 }
 
+// serveHTTP serves the listener with the HTTP server in the background.
 func (l *Listener) serveHTTP() {
-	server := httpServer
+	server, h2s := getHTTPServers()
 	if server == nil {
 		log.Printf("HTTP Listener [%s] is open, but the HTTP server is not running to serve it", l.ListenerID)
 		return
 	}
-	ln, port := l.Listener, l.Port
+	shared := server
+	server = l.serverWithNextProtos(shared, h2s)
+	ln, port, id := l.Listener, l.Port, l.ListenerID
+	ownServer := server != shared
+	if ownServer {
+		listenerServersLock.Lock()
+		listenerServers[server] = id
+		listenerServersLock.Unlock()
+	}
 	msg := fmt.Sprintf("Starting HTTP Listener [%s]", l.ListenerID) + l.describeTLS()
 	go func() {
 		log.Println(msg)
+		if ownServer {
+			// the server is not served any more once its listener is closed, and is not to be shut down then
+			defer func() {
+				listenerServersLock.Lock()
+				delete(listenerServers, server)
+				listenerServersLock.Unlock()
+			}()
+		}
 		if err := server.Serve(ln); err != nil {
 			log.Printf("HTTP Listener [%d]: %s", port, err.Error())
 		}
 	}()
 }
 
+// serveGRPC serves the listener with the gRPC server now, or queues it if the gRPC server hasn't started yet.
 func (l *Listener) serveGRPC() {
 	server := global.GRPCServer
 	if server == nil {
@@ -615,6 +687,7 @@ func (l *Listener) serveGRPC() {
 	}
 }
 
+// serveTCP serves the connections of the listener with the TCP serving function in the background.
 func (l *Listener) serveTCP() {
 	serve := serveTCP
 	if serve == nil {
@@ -632,6 +705,7 @@ func (l *Listener) serveTCP() {
 	}()
 }
 
+// SetCertificates sets the certificates of the listener and records the info of the leaf cert.
 func (l *Listener) SetCertificates(certs []*tls.Certificate) {
 	if len(certs) > 0 {
 		l.Certificates = certs
@@ -657,6 +731,7 @@ func (l *Listener) SetCertificates(certs []*tls.Certificate) {
 	}
 }
 
+// GetCertificate returns the cached certificate for the server name of a client hello, generating one on first use.
 func (l *Listener) GetCertificate(chi *tls.ClientHelloInfo) (cert *tls.Certificate, err error) {
 	// Handshakes run concurrently, so the cache is accessed with the lock of the listener.
 	l.lock.RLock()
@@ -676,8 +751,65 @@ func (l *Listener) GetCertificate(chi *tls.ClientHelloInfo) (cert *tls.Certifica
 	return
 }
 
-func (l *Listener) alpnHandler(alpn string) func(s *http.Server, conn *tls.Conn, h http.Handler) {
-	h2s := h2Server
+// ShutdownServers shuts down the servers of the listeners that have ALPN handlers of their own, which the shared HTTP server
+// doesn't know of: they stop accepting connections, and the active ones are waited for until the context ends.
+func ShutdownServers(ctx context.Context) {
+	listenerServersLock.Lock()
+	servers := make(map[*http.Server]string, len(listenerServers))
+	for server, id := range listenerServers {
+		servers[server] = id
+	}
+	listenerServersLock.Unlock()
+	var wg sync.WaitGroup
+	for server, id := range servers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := server.Shutdown(ctx); err != nil {
+				log.Printf("Listener [%s]: server didn't shut down cleanly: %s", id, err.Error())
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// serverWithNextProtos returns the server that the listener is served with: the HTTP server that is shared by the listeners, or
+// a server of its own, made like it, if the listener serves ALPN protocols with handlers of its own. The handlers are not
+// added to the shared server, as it looks up the handler of each TLS connection that it serves in its map of them, which
+// can't be changed while it serves.
+func (l *Listener) serverWithNextProtos(shared *http.Server, h2s *http2.Server) *http.Server {
+	if len(l.nextProtos) == 0 {
+		return shared
+	}
+	server := &http.Server{
+		Addr:                         shared.Addr,
+		Handler:                      shared.Handler,
+		DisableGeneralOptionsHandler: shared.DisableGeneralOptionsHandler,
+		TLSConfig:                    shared.TLSConfig,
+		ReadTimeout:                  shared.ReadTimeout,
+		ReadHeaderTimeout:            shared.ReadHeaderTimeout,
+		WriteTimeout:                 shared.WriteTimeout,
+		IdleTimeout:                  shared.IdleTimeout,
+		MaxHeaderBytes:               shared.MaxHeaderBytes,
+		ConnState:                    shared.ConnState,
+		ErrorLog:                     shared.ErrorLog,
+		BaseContext:                  shared.BaseContext,
+		ConnContext:                  shared.ConnContext,
+		HTTP2:                        shared.HTTP2,
+		Protocols:                    shared.Protocols,
+		TLSNextProto:                 make(map[string]func(*http.Server, *tls.Conn, http.Handler), len(shared.TLSNextProto)+len(l.nextProtos)),
+	}
+	for proto, handler := range shared.TLSNextProto {
+		server.TLSNextProto[proto] = handler
+	}
+	for _, proto := range l.nextProtos {
+		server.TLSNextProto[proto] = l.alpnHandler(proto, h2s)
+	}
+	return server
+}
+
+// alpnHandler returns a TLS next-proto handler that serves the connections that negotiated the ALPN protocol with the HTTP/2 server.
+func (l *Listener) alpnHandler(alpn string, h2s *http2.Server) func(s *http.Server, conn *tls.Conn, h http.Handler) {
 	return func(s *http.Server, conn *tls.Conn, h http.Handler) {
 		if h2s == nil {
 			log.Printf("Listener %s: No HTTP2 server to serve negotiated ALPN: %s", l.Label, alpn)
@@ -699,6 +831,8 @@ func (l *Listener) alpnHandler(alpn string) func(s *http.Server, conn *tls.Conn,
 	}
 }
 
+// prepareMTLS sets the client auth mode and CA pool for mTLS, and the ALPN protocols that the listener serves with handlers
+// of its own (see serverWithNextProtos).
 func (l *Listener) prepareMTLS(tlsConfig *tls.Config) {
 	if l.VerifyClientCert {
 		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
@@ -706,25 +840,18 @@ func (l *Listener) prepareMTLS(tlsConfig *tls.Config) {
 		tlsConfig.ClientAuth = tls.RequireAnyClientCert
 	}
 	tlsConfig.ClientCAs = l.CACerts
-	server := httpServer
-	if server == nil {
-		return
-	}
-	if server.TLSNextProto == nil {
-		server.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler))
-	}
+	protos := []string{}
 	if l.ALPN != nil {
-		for _, alpn := range l.ALPN.Protos {
-			server.TLSNextProto[alpn] = l.alpnHandler(alpn)
-		}
+		protos = append(protos, l.ALPN.Protos...)
 	}
-	for _, alpn := range tlsConfig.NextProtos {
-		server.TLSNextProto[alpn] = l.alpnHandler(alpn)
-	}
+	protos = append(protos, tlsConfig.NextProtos...)
+	l.nextProtos = slices.Compact(slices.Sorted(slices.Values(protos)))
 }
 
+// prepareTLS builds the TLS config of the listener from its certs, auto SNI, ALPN and client auth settings, returning nil if its cert and key are invalid.
 func (l *Listener) prepareTLS() *tls.Config {
 	tlsConfig := &tls.Config{}
+	l.nextProtos = nil
 	if l.AutoSNI {
 		tlsConfig.GetCertificate = l.GetCertificate
 	} else if l.Certificates != nil {
@@ -830,6 +957,7 @@ func (l *Listener) InitListener() (opened bool) {
 	}
 }
 
+// openListener binds the port of the listener, assigns it a new generation and listener ID, and optionally starts serving it.
 func (l *Listener) openListener(serve bool) bool {
 	if l.InitListener() {
 		l.lock.Lock()
@@ -862,12 +990,14 @@ func (l *Listener) openListener(serve bool) bool {
 	return false
 }
 
+// isOpen reports whether the listener is open.
 func (l *Listener) isOpen() bool {
 	l.lock.RLock()
 	defer l.lock.RUnlock()
 	return l.Open
 }
 
+// Close closes the TCP or UDP socket of the listener, closing the connections of its port, and marks it not open.
 func (l *Listener) Close() {
 	l.lock.Lock()
 	defer l.lock.Unlock()
@@ -888,6 +1018,7 @@ func (l *Listener) Close() {
 	l.Open = false
 }
 
+// ReopenListener closes the old listener of the port and opens this one, retrying up to 5 times while the port is still in use.
 func (l *Listener) ReopenListener() bool {
 	listenersLock.RLock()
 	old := listeners[l.Port]
@@ -911,6 +1042,7 @@ func (l *Listener) ReopenListener() bool {
 	return false
 }
 
+// validateListener returns the listener of the request's port, or responds with 400 and returns nil if there is none.
 func validateListener(w http.ResponseWriter, r *http.Request) *Listener {
 	port := util.GetIntParamValue(r, "port")
 	listenersLock.Lock()
@@ -924,6 +1056,7 @@ func validateListener(w http.ResponseWriter, r *http.Request) *Listener {
 	return l
 }
 
+// ValidateUDPListener checks that the port of the request is a UDP listener, responding with 400 if it isn't.
 func ValidateUDPListener(w http.ResponseWriter, r *http.Request) bool {
 	if ok, _ := util.ValidateListener(w, r); !ok {
 		return false
@@ -940,6 +1073,7 @@ func ValidateUDPListener(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// AddGRPCListener returns the gRPC listener of the port, opening it if needed or replacing a non-gRPC listener, and optionally serving it.
 func AddGRPCListener(port int, serve bool) (*Listener, error) {
 	l := GetListenerForPort(port)
 	if l != nil {
@@ -962,6 +1096,7 @@ func AddGRPCListener(port int, serve bool) (*Listener, error) {
 	return l, nil
 }
 
+// AddListener ensures an open TCP or UDP listener on the port, replacing a listener of the other kind.
 func AddListener(port int, isTCP, isUDP bool, sni string) error {
 	l := GetListenerForPort(port)
 	if l != nil {
@@ -987,6 +1122,7 @@ func AddListener(port int, isTCP, isUDP bool, sni string) error {
 	return nil
 }
 
+// addOrUpdateListenerAndRespond adds or updates a listener from the JSON request body and responds with the result.
 func addOrUpdateListenerAndRespond(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	var err error
@@ -1007,6 +1143,7 @@ func addOrUpdateListenerAndRespond(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// AddOrUpdateListener validates and initializes the listener, then adds it or restarts the one on its port, returning an error and a status message.
 func AddOrUpdateListener(l *Listener) (error, string) {
 	msg := ""
 	l.Init()
@@ -1126,12 +1263,14 @@ func RemoveListener(l *Listener) {
 	}
 }
 
+// store registers the listener for its port.
 func (l *Listener) store() {
 	listenersLock.Lock()
 	defer listenersLock.Unlock()
 	listeners[l.Port] = l
 }
 
+// addListenerCertOrKey adds the request body as the cert or key of the request's listener and responds with the result.
 func addListenerCertOrKey(w http.ResponseWriter, r *http.Request, isKey bool) {
 	if l := validateListener(w, r); l != nil {
 		msg := ""
@@ -1155,6 +1294,7 @@ func addListenerCertOrKey(w http.ResponseWriter, r *http.Request, isKey bool) {
 	}
 }
 
+// AddListenerCert sets the raw cert and/or key of the listener on the port, turning off auto cert, and optionally reopens it.
 func AddListenerCert(port int, key []byte, cert []byte, reopen bool) error {
 	l := GetListenerForPort(port)
 	if l == nil {
@@ -1182,6 +1322,7 @@ func AddListenerCert(port int, key []byte, cert []byte, reopen bool) error {
 	return nil
 }
 
+// RemoveListenerCert clears the cert, key and TLS settings of the listener on the port and reopens it.
 func RemoveListenerCert(port int) error {
 	l := GetListenerForPort(port)
 	if l == nil {
@@ -1201,6 +1342,7 @@ func RemoveListenerCert(port int) error {
 	return nil
 }
 
+// GetListeners returns a copy of the listeners by port, including the default listener.
 func GetListeners() map[int]*Listener {
 	listenersLock.RLock()
 	defer listenersLock.RUnlock()
@@ -1212,6 +1354,7 @@ func GetListeners() map[int]*Listener {
 	return listenersView
 }
 
+// GetListenerPorts returns the protocol of each listener by port, including the default listener.
 func GetListenerPorts() map[int]string {
 	listenersLock.RLock()
 	defer listenersLock.RUnlock()
@@ -1223,6 +1366,7 @@ func GetListenerPorts() map[int]string {
 	return listenersView
 }
 
+// GetListenerForPort returns the default listener or the listener of the port, or nil if there is none.
 func GetListenerForPort(port int) *Listener {
 	listenersLock.RLock()
 	defer listenersLock.RUnlock()
@@ -1232,10 +1376,12 @@ func GetListenerForPort(port int) *Listener {
 	return listeners[port]
 }
 
+// GetRequestedListener returns the listener of the request's port.
 func GetRequestedListener(r *http.Request) *Listener {
 	return GetListenerForPort(util.GetRequestOrListenerPortNum(r))
 }
 
+// GetCurrentListener returns the listener that received the request, falling back to the default listener.
 func GetCurrentListener(r *http.Request) *Listener {
 	l := GetListenerForPort(util.GetListenerPortNum(r))
 	if l == nil {
@@ -1244,12 +1390,14 @@ func GetCurrentListener(r *http.Request) *Listener {
 	return l
 }
 
+// IsListenerPresent reports whether a listener exists on the port.
 func IsListenerPresent(port int) bool {
 	listenersLock.RLock()
 	defer listenersLock.RUnlock()
 	return listeners[port] != nil
 }
 
+// IsListenerOpen reports whether a listener exists on the port and is open.
 func IsListenerOpen(port int) bool {
 	listenersLock.RLock()
 	defer listenersLock.RUnlock()
@@ -1257,6 +1405,7 @@ func IsListenerOpen(port int) bool {
 	return l != nil && l.Open
 }
 
+// IsListenerTLS reports whether a listener exists on the port and uses TLS.
 func IsListenerTLS(port int) bool {
 	listenersLock.RLock()
 	defer listenersLock.RUnlock()
@@ -1264,6 +1413,7 @@ func IsListenerTLS(port int) bool {
 	return l != nil && l.TLS
 }
 
+// GetListenerID returns the ID of the listener on the port, or an empty string if there is none.
 func GetListenerID(port int) string {
 	listenersLock.RLock()
 	defer listenersLock.RUnlock()
@@ -1273,10 +1423,12 @@ func GetListenerID(port int) string {
 	return ""
 }
 
+// GetListenerLabel returns the label of the listener of the request's port.
 func GetListenerLabel(r *http.Request) string {
 	return GetListenerLabelForPort(util.GetRequestOrListenerPortNum(r))
 }
 
+// GetListenerLabelForPort returns the label of the listener on the port, falling back to the default label or a generated one.
 func GetListenerLabelForPort(port int) string {
 	listenersLock.RLock()
 	l := listeners[port]
@@ -1293,6 +1445,7 @@ func GetListenerLabelForPort(port int) string {
 	return util.BuildListenerLabel(port)
 }
 
+// SetListenerLabel sets the label of the request's listener, or the default label if there is none, from the request and returns it.
 func SetListenerLabel(r *http.Request) string {
 	port := util.GetRequestOrListenerPortNum(r)
 	label := util.GetStringParamValue(r, "label")
@@ -1321,6 +1474,7 @@ func (l *Listener) getPeerCertInfo(remoteAddr string) *gototls.PeerCertInfo {
 	return pci
 }
 
+// StorePeerCertInfo records the cert subject, SANs and issuer of a peer by its remote address.
 func (l *Listener) StorePeerCertInfo(remoteAddr string, subject string, dnsNames, uris []string, issuer string) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
@@ -1331,6 +1485,7 @@ func (l *Listener) StorePeerCertInfo(remoteAddr string, subject string, dnsNames
 	pci.Issuer = issuer
 }
 
+// StoreSNI records the SNI and the negotiated ALPN of a peer.
 func (l *Listener) StoreSNI(remoteAddr string, sni, alpn string) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
@@ -1339,6 +1494,7 @@ func (l *Listener) StoreSNI(remoteAddr string, sni, alpn string) {
 	pci.NegotiatedALPN = alpn
 }
 
+// StoreALPN records the ALPN protocols that a peer offered.
 func (l *Listener) StoreALPN(remoteAddr string, alpn []string) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
@@ -1346,6 +1502,7 @@ func (l *Listener) StoreALPN(remoteAddr string, alpn []string) {
 	pci.ALPN = alpn
 }
 
+// UpdatePeerStatus appends a handshake status to the info of a peer and updates its finished flag and end time.
 func (l *Listener) UpdatePeerStatus(remoteAddr string, finished bool, status string) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
@@ -1376,6 +1533,7 @@ func GetPeerCert(port int, remoteAddr string) (string, string) {
 	return serverCert, clientCert
 }
 
+// ClearPeerCerts clears the peer cert infos of the listener on the port, or of all listeners if port is 0.
 func ClearPeerCerts(port int) {
 	listenersLock.RLock()
 	defer listenersLock.RUnlock()
@@ -1411,6 +1569,7 @@ func GetPeerCerts(port int) map[int]map[string]*gototls.PeerCertInfo {
 	return output
 }
 
+// Diff reports whether two listeners differ in port, forward port, protocol, ALPN, open state or TLS settings.
 func Diff(l1, l2 *Listener) bool {
 	if l1 == nil || l2 == nil {
 		return l1 != l2

@@ -202,6 +202,7 @@ func updateNamedClientPayload(name string, update func(np *MCPNamedClientPayload
 	}
 }
 
+// getNamedClientPayload returns the payload registered for the named client, falling back to the default payload.
 func getNamedClientPayload(name string) *MCPNamedClientPayload {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -219,6 +220,7 @@ func namedClientPayloadsSnapshot() map[string]*MCPNamedClientPayload {
 	return maps.Clone(NamedClientPayloads)
 }
 
+// AddPayload parses the JSON payload and stores it as the elicit or sample payload (by kind) of the named client.
 func AddPayload(name, kind string, b []byte) error {
 	payload := &MCPClientPayload{}
 	if err := json.Unmarshal(b, &payload); err != nil {
@@ -234,6 +236,7 @@ func AddPayload(name, kind string, b []byte) error {
 	return nil
 }
 
+// SetRoots parses the JSON roots and stores them as the roots that the named client advertises.
 func SetRoots(name string, payload []byte) error {
 	var roots []*gomcp.Root
 	if err := util.ReadJsonFromBytes(payload, &roots); err != nil {
@@ -245,6 +248,7 @@ func SetRoots(name string, payload []byte) error {
 	return nil
 }
 
+// NewClient creates an MCPClient named after the listener port and transport (SSE or streamable).
 func NewClient(port int, sse, h2, tls bool, callerId, listener, authority string, requestTimeout time.Duration, stream chan *types.Pair[string, any], updateCallback timeline.TimelineUpdateNotifierFunc, endCallback timeline.TimelineEndNotifierFunc) *MCPClient {
 	name := fmt.Sprintf("GotoMCP[%s]", global.Funcs.GetListenerLabelForPort(port))
 	if sse {
@@ -253,6 +257,7 @@ func NewClient(port int, sse, h2, tls bool, callerId, listener, authority string
 	return newMCPClient(port, sse, h2, tls, name, callerId, listener, authority, requestTimeout, stream, updateCallback, endCallback)
 }
 
+// newMCPClient creates an MCPClient with its own HTTP client, and registers itself to intercept the requests and responses of the transport.
 func newMCPClient(port int, sse, h2, tls bool, name, callerId, listener, authority string, requestTimeout time.Duration, stream chan *types.Pair[string, any], updateCallback timeline.TimelineUpdateNotifierFunc, endCallback timeline.TimelineEndNotifierFunc) *MCPClient {
 	//httpClient := transport.CreateSimpleHTTPClient()
 	if requestTimeout <= 0 {
@@ -284,6 +289,7 @@ func newMCPClient(port int, sse, h2, tls bool, name, callerId, listener, authori
 	return mcpClient
 }
 
+// newMCPTransport creates the SSE or streamable HTTP transport (per the client's SSE flag) for the URL, using the client's intercepting HTTP client.
 func (c *MCPClient) newMCPTransport(label, url string) gomcp.Transport {
 	mcpTransport := &MCPClientInterceptTransport{}
 	if c.SSE {
@@ -296,6 +302,7 @@ func (c *MCPClient) newMCPTransport(label, url string) gomcp.Transport {
 	return mcpTransport
 }
 
+// ParseToolCall reads a JSON or YAML tool call from the body, requires a tool and a URL, and prepares it.
 func ParseToolCall(r io.ReadCloser) (*ToolCall, error) {
 	tc := &ToolCall{}
 	err := util.ReadJsonOrYamlPayloadFromBody(r, tc)
@@ -308,12 +315,14 @@ func ParseToolCall(r io.ReadCloser) (*ToolCall, error) {
 	return tc, err
 }
 
+// GetSession returns the active session with the ID, or nil.
 func (c *MCPClient) GetSession(sessionID string) *MCPSession {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	return c.ActiveSessions[sessionID]
 }
 
+// addSession registers the session as an active session of the client.
 func (c *MCPClient) addSession(s *MCPSession) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -323,12 +332,14 @@ func (c *MCPClient) addSession(s *MCPSession) {
 	c.ActiveSessions[s.ID] = s
 }
 
+// RemoveSession removes the session from the active sessions of the client.
 func (c *MCPClient) RemoveSession(sessionID string) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	delete(c.ActiveSessions, sessionID)
 }
 
+// OnConnClose drops all the active sessions of the client when a connection is closed.
 func (c *MCPClient) OnConnClose() {
 	log.Println("Received connection close notification")
 	c.lock.Lock()
@@ -356,10 +367,12 @@ func (c *MCPClient) sessionOf(r *http.Request) *MCPSession {
 	return nil
 }
 
+// CreateSession creates a session for the URL that records to a new timeline of the client.
 func (c *MCPClient) CreateSession(ctx context.Context, url, operLabel string, tc *ToolCall, inHeaders http.Header) *MCPSession {
 	return c.CreateSessionWithTimeline(ctx, url, operLabel, tc, inHeaders, timeline.NewTimeline(c.Port, operLabel, nil, nil, inHeaders, c.stream, c.updateCallback, c.endCallback))
 }
 
+// CreateSessionWithTimeline creates a session that records to the given timeline, defaulting the URL to the tool call's and adding a missing http(s) scheme.
 func (c *MCPClient) CreateSessionWithTimeline(ctx context.Context, url, operLabel string, tc *ToolCall, inHeaders http.Header, timeline *timeline.Timeline) *MCPSession {
 	if url == "" {
 		url = tc.URL
@@ -374,6 +387,7 @@ func (c *MCPClient) CreateSessionWithTimeline(ctx context.Context, url, operLabe
 	return c.newMCPSession(ctx, operLabel, url, tc, inHeaders, timeline)
 }
 
+// addSessionIDQuery appends the session ID to the URL as a query param, so that the requests of the session can be matched to it.
 func addSessionIDQuery(url, id string) string {
 	if !strings.Contains(url, "?") {
 		url = fmt.Sprintf("%s?%s=%s", url, constants.HeaderGotoMCPSessionID, id)
@@ -383,6 +397,7 @@ func addSessionIDQuery(url, id string) string {
 	return url
 }
 
+// newMCPSession creates a session with a unique ID, its transport and its outgoing headers from the tool call, and registers it with the client.
 func (c *MCPClient) newMCPSession(ctx context.Context, operLabel, url string, tc *ToolCall, inHeaders http.Header, t *timeline.Timeline) *MCPSession {
 	id := fmt.Sprintf("%s.%d", c.ID, c.sessionCounter.Add(1))
 	url = addSessionIDQuery(url, id)
@@ -419,6 +434,7 @@ func (c *MCPClient) newMCPSession(ctx context.Context, operLabel, url string, tc
 	return s
 }
 
+// prepareClient creates the MCP client of the session with its callback handlers and middleware, and adds the roots of the client payload.
 func (s *MCPSession) prepareClient() {
 	s.client = gomcp.NewClient(&gomcp.Implementation{Name: s.Name, Version: "2.0"}, &gomcp.ClientOptions{
 		KeepAlive:                   10 * time.Second,
@@ -448,6 +464,7 @@ func (s *MCPSession) sessionContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, constants.HeaderGotoMCPSessionID, s.ID)
 }
 
+// connect registers the session with the client and connects its MCP client over the session's transport.
 func (s *MCPSession) connect() error {
 	// A session that was closed by an earlier operation (listing closes it) has to be known to the client again, since
 	// that's how its requests are matched to it.
@@ -462,6 +479,7 @@ func (s *MCPSession) connect() error {
 	return err
 }
 
+// newToolCallContext creates the context of a call, which works on its own copy of the given (or the tool call's) args.
 func (s *MCPSession) newToolCallContext(args *aicommon.ToolCallArgs) *ToolCallContext {
 	tctx := &ToolCallContext{
 		ctx:      s.Ctx,
@@ -487,6 +505,7 @@ func (s *MCPSession) newToolCallContext(args *aicommon.ToolCallArgs) *ToolCallCo
 	return tctx
 }
 
+// CallTool connects the session and calls the configured tool, returning the result.
 func (s *MCPSession) CallTool(args *aicommon.ToolCallArgs) (*MCPResult, error) {
 	if s.tc == nil {
 		return nil, errors.New("no tool call is configured for the session")
@@ -498,6 +517,7 @@ func (s *MCPSession) CallTool(args *aicommon.ToolCallArgs) (*MCPResult, error) {
 	return tctx.call()
 }
 
+// addOngoingCall records the call that a request ID belongs to, until the response of the request is received.
 func (s *MCPSession) addOngoingCall(requestID string, tctx *ToolCallContext) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -516,12 +536,14 @@ func (s *MCPSession) takeOngoingCall(requestID string) *ToolCallContext {
 	return tctx
 }
 
+// setCurrentRequest records the method of the request that is being sent or received.
 func (s *MCPSession) setCurrentRequest(method string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.currentRequest = method
 }
 
+// getCurrentRequest returns the method of the request that is being sent or received.
 func (s *MCPSession) getCurrentRequest() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -599,6 +621,7 @@ func (s *MCPSession) waitForResponses(timeout time.Duration) {
 	}
 }
 
+// prepare fills in the headers, args and defaults of the call, and works out how many rounds of concurrent requests are made.
 func (tctx *ToolCallContext) prepare() {
 	if tctx.ctx == nil {
 		tctx.ctx = context.Background()
@@ -638,6 +661,7 @@ func (tctx *ToolCallContext) prepare() {
 	tctx.rounds = (tctx.tc.RequestCount + tctx.concurrent - 1) / tctx.concurrent
 }
 
+// reportInitiateToolCall adds the timeline event that the call is starting, and builds the client info of the call.
 func (tctx *ToolCallContext) reportInitiateToolCall() {
 	msg := fmt.Sprintf("%s [%s] Initiating Tool Call [%s] on URL [%s], Request Count [%d], Concurrent [%d]",
 		tctx.callerId, tctx.session.Operation, tctx.tc.Tool, tctx.tc.URL, tctx.tc.RequestCount, tctx.tc.Concurrent)
@@ -648,28 +672,33 @@ func (tctx *ToolCallContext) reportInitiateToolCall() {
 	tctx.session.Timeline.AddEventWithClient(tctx.callerId, msg, tctx.clientInfo)
 }
 
+// reportToolCallRequest adds the timeline event for a request that is about to be made.
 func (tctx *ToolCallContext) reportToolCallRequest(index int, args *aicommon.ToolCallArgs) {
 	msg := fmt.Sprintf("%s [%s] Calling Tool [%s] on URL [%s], Request# [%d/%d], Args: %+v",
 		tctx.callerId, tctx.session.Operation, tctx.tc.Tool, tctx.tc.URL, index, tctx.tc.RequestCount, args)
 	tctx.AddEvent(msg)
 }
 
+// reportToolCallFailure adds the timeline event for a request that failed.
 func (tctx *ToolCallContext) reportToolCallFailure(index int, err string) {
 	msg := fmt.Sprintf("%s [%s] Request# [%d/%d], Failed to call tool [%s] on URL [%s] with error [%s]",
 		tctx.callerId, tctx.session.Operation, index, tctx.tc.RequestCount, tctx.tc.Tool, tctx.tc.URL, err)
 	tctx.AddEvent(msg)
 }
 
+// reportToolCallSuccess adds the timeline event for a request that succeeded.
 func (tctx *ToolCallContext) reportToolCallSuccess(index int) {
 	msg := fmt.Sprintf("%s [%s] Request# [%d/%d], Tool [%s] called successfully on URL [%s]",
 		tctx.callerId, tctx.session.Operation, index, tctx.tc.RequestCount, tctx.tc.Tool, tctx.tc.URL)
 	tctx.AddEvent(msg)
 }
 
+// reportToolCallResult adds the result of the tool call to the timeline as a remote event.
 func (tctx *ToolCallContext) reportToolCallResult(toolResult *gomcp.CallToolResult) {
 	tctx.AddRemoteEvent(fmt.Sprintf("%s->%s", tctx.callerId, tctx.tc.Tool), "Result", toolResult, true)
 }
 
+// call makes the configured requests in rounds of concurrent requests, honoring the delays and timeouts, stores their results, and closes the session.
 func (tctx *ToolCallContext) call() (*MCPResult, error) {
 	defer tctx.session.close()
 	tctx.prepare()
@@ -735,6 +764,7 @@ func (tctx *ToolCallContext) call() (*MCPResult, error) {
 	return tctx.result, tctx.result.lastError()
 }
 
+// InterceptRequest adds the session's headers, the goto MCP headers and the host to an outgoing request of the client.
 func (c *MCPClient) InterceptRequest(r *http.Request) {
 	var tool, callerId, currentRequest string
 	s := c.sessionOf(r)
@@ -766,6 +796,7 @@ func (c *MCPClient) InterceptRequest(r *http.Request) {
 	}
 }
 
+// InterceptResponse applies the session's response headers to a response, and starts tracking the response of a tool call request.
 func (c *MCPClient) InterceptResponse(r *http.Response) {
 	var tool, callerId, currentRequest string
 	var s *MCPSession
@@ -838,6 +869,7 @@ func (tctx *ToolCallContext) processHeaders(requestID string, h http.Header, rs 
 	tctx.result.storeResponseDone(requestID, h, remoteGotos, util.GetUpstreamStatuses(h), rs)
 }
 
+// SendingMiddleware records the method of each request that the client sends, and tags the tool call args with the goto client.
 func (s *MCPSession) SendingMiddleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
 		s.setCurrentRequest(method)
@@ -858,6 +890,7 @@ func (s *MCPSession) SendingMiddleware(next gomcp.MethodHandler) gomcp.MethodHan
 	}
 }
 
+// ReceivingMiddleware records the method of each request that the client receives.
 func (s *MCPSession) ReceivingMiddleware(next gomcp.MethodHandler) gomcp.MethodHandler {
 	return func(ctx context.Context, method string, req gomcp.Request) (result gomcp.Result, err error) {
 		s.setCurrentRequest(method)
@@ -872,6 +905,7 @@ func (s *MCPSession) ReceivingMiddleware(next gomcp.MethodHandler) gomcp.MethodH
 	}
 }
 
+// Connect connects the wrapped SSE or streamable transport.
 func (t *MCPClientInterceptTransport) Connect(ctx context.Context) (gomcp.Connection, error) {
 	return t.Transport.Connect(ctx)
 }
@@ -887,6 +921,7 @@ func (s *MCPSession) SetAuthority(authority string) {
 	}
 }
 
+// close closes the MCP session and removes the session from the client.
 func (s *MCPSession) close() {
 	if s.session != nil {
 		s.session.Close()
@@ -897,6 +932,7 @@ func (s *MCPSession) close() {
 	}
 }
 
+// listContext creates the context of a list operation, which carries the session ID and the authority as the Host header.
 func (s *MCPSession) listContext() context.Context {
 	s.mu.Lock()
 	authority := s.Authority
@@ -904,6 +940,7 @@ func (s *MCPSession) listContext() context.Context {
 	return s.sessionContext(util.WithRequestHeaders(context.Background(), map[string][]string{"Host": []string{authority}}))
 }
 
+// ListTools connects the session and lists the tools of the server, closing the session after.
 func (s *MCPSession) ListTools() (*gomcp.ListToolsResult, error) {
 	if err := s.connect(); err != nil {
 		return nil, err
@@ -912,6 +949,7 @@ func (s *MCPSession) ListTools() (*gomcp.ListToolsResult, error) {
 	return s.session.ListTools(s.listContext(), &gomcp.ListToolsParams{})
 }
 
+// ListPrompts connects the session and lists the prompts of the server, closing the session after.
 func (s *MCPSession) ListPrompts() (*gomcp.ListPromptsResult, error) {
 	if err := s.connect(); err != nil {
 		return nil, err
@@ -920,6 +958,7 @@ func (s *MCPSession) ListPrompts() (*gomcp.ListPromptsResult, error) {
 	return s.session.ListPrompts(s.listContext(), &gomcp.ListPromptsParams{})
 }
 
+// ListResources connects the session and lists the resources of the server, closing the session after.
 func (s *MCPSession) ListResources() (*gomcp.ListResourcesResult, error) {
 	if err := s.connect(); err != nil {
 		return nil, err
@@ -928,6 +967,7 @@ func (s *MCPSession) ListResources() (*gomcp.ListResourcesResult, error) {
 	return s.session.ListResources(s.listContext(), &gomcp.ListResourcesParams{})
 }
 
+// Prepare normalizes the tool call: trims the quotes of the tool name, defaults the server and args, and parses the delay and the request timeout (defaulting the timeout).
 func (tc *ToolCall) Prepare() {
 	tc.Tool = strings.Trim(strings.Trim(tc.Tool, "\""), "'")
 	if tc.Server == "" {
@@ -950,6 +990,7 @@ func (tc *ToolCall) Prepare() {
 	}
 }
 
+// UpdateAndClone returns a copy of the tool call in which the given non-empty values replace its own, and the headers and args are merged.
 func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, headers *types.Headers, args *aicommon.ToolCallArgs) *ToolCall {
 	clone := *tc
 	if tool != "" {
@@ -981,12 +1022,14 @@ func (tc *ToolCall) UpdateAndClone(tool, url, server, authority, delay string, h
 	return &clone
 }
 
+// AddEvent adds a message to the timeline of the call's session, unless events are disabled.
 func (tctx *ToolCallContext) AddEvent(msg string) {
 	if msg != "" && (tctx.args == nil || !tctx.args.NoEvents) {
 		tctx.session.Timeline.AddEvent(tctx.callerId, msg)
 	}
 }
 
+// AddRemoteEvent adds an event with the data from the remote to the timeline of the call's session.
 func (tctx *ToolCallContext) AddRemoteEvent(msg string, remoteText string, remoteData any, json bool) {
 	if msg != "" || remoteData != nil {
 		tctx.session.Timeline.AddEventWithRemote(tctx.callerId, msg, remoteText, nil, nil, remoteData, json)

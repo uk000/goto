@@ -45,10 +45,12 @@ var (
 	DefaultClient *RegistryClient
 )
 
+// InitRegistryClient creates the DefaultClient registry client.
 func InitRegistryClient() {
 	DefaultClient = NewRegistryClient()
 }
 
+// NewRegistryClient creates a client for the registry URL configured in global.Self and this peer's URL under it.
 func NewRegistryClient() *RegistryClient {
 	baseURL := fmt.Sprintf("%s/registry", global.Self.RegistryURL)
 	basePeerURL := fmt.Sprintf("%s/peers/%s/%s", baseURL, global.Self.Name, global.Self.Address)
@@ -59,6 +61,7 @@ func NewRegistryClient() *RegistryClient {
 	}
 }
 
+// OpenLocker opens the locker, within the context if given, on the registry and returns a client scoped to it.
 func (rc *RegistryClient) OpenLocker(context, locker string) (*RegistryLockerClient, error) {
 	if err := rc.checkRegistry(); err != nil {
 		return nil, err
@@ -76,18 +79,22 @@ func (rc *RegistryClient) OpenLocker(context, locker string) (*RegistryLockerCli
 	return &RegistryLockerClient{RegistryClient: rc, context: context, locker: locker}, nil
 }
 
+// Store stores the data at the keys in the locker.
 func (rc *RegistryLockerClient) Store(keys []string, data any) error {
 	return rc.putDataInLocker(false, keys, data)
 }
 
+// StorePeer stores the data at the keys in this peer's locker.
 func (rc *RegistryLockerClient) StorePeer(keys []string, data any) error {
 	return rc.putDataInLocker(true, keys, data)
 }
 
+// GetJSON reads the data at the keys in the locker as a JSON map.
 func (rc *RegistryLockerClient) GetJSON(keys []string) (map[string]any, error) {
 	return rc.getJSONFromLocker(false, keys)
 }
 
+// LoadJSON reads the data at the keys in the locker and unmarshals it into j.
 func (rc *RegistryLockerClient) LoadJSON(keys []string, j any) error {
 	b, err := rc.getDataFromLocker(false, keys)
 	if err != nil {
@@ -97,18 +104,22 @@ func (rc *RegistryLockerClient) LoadJSON(keys []string, j any) error {
 	return err
 }
 
+// GetData reads the raw data at the keys in the locker.
 func (rc *RegistryLockerClient) GetData(keys []string) ([]byte, error) {
 	return rc.getDataFromLocker(false, keys)
 }
 
+// GetPeerJSON reads the data at the keys in this peer's locker as a JSON map.
 func (rc *RegistryLockerClient) GetPeerJSON(keys []string) (map[string]any, error) {
 	return rc.getJSONFromLocker(true, keys)
 }
 
+// GetPeerData reads the raw data at the keys in this peer's locker.
 func (rc *RegistryLockerClient) GetPeerData(keys []string) ([]byte, error) {
 	return rc.getDataFromLocker(true, keys)
 }
 
+// getJSONFromLocker reads the data at the keys from the locker or this peer's locker, and parses it as a JSON map.
 func (rc *RegistryLockerClient) getJSONFromLocker(peer bool, keys []string) (map[string]any, error) {
 	b, err := rc.getDataFromLocker(peer, keys)
 	if err != nil {
@@ -121,6 +132,7 @@ func (rc *RegistryLockerClient) getJSONFromLocker(peer bool, keys []string) (map
 	return j, nil
 }
 
+// getDataFromLocker fetches the data at the keys from the locker or this peer's locker, if the registry is configured.
 func (rc *RegistryLockerClient) getDataFromLocker(peer bool, keys []string) ([]byte, error) {
 	if err := rc.checkRegistry(); err != nil {
 		return nil, err
@@ -137,6 +149,7 @@ func (rc *RegistryLockerClient) getDataFromLocker(peer bool, keys []string) ([]b
 	return rc.get(url)
 }
 
+// putDataInLocker posts the data to the keys in the locker or this peer's locker, if the registry is configured.
 func (rc *RegistryLockerClient) putDataInLocker(peer bool, keys []string, data any) error {
 	if err := rc.checkRegistry(); err != nil {
 		return err
@@ -153,6 +166,7 @@ func (rc *RegistryLockerClient) putDataInLocker(peer bool, keys []string, data a
 	return rc.postWithInput(url, data)
 }
 
+// checkRegistry returns an error if the registry URL is not set or locker use is disabled.
 func (rc *RegistryClient) checkRegistry() error {
 	if !global.Flags.UseLocker || global.Self.RegistryURL == "" {
 		return errors.New("Registry not configured or locker use disabled")
@@ -160,6 +174,7 @@ func (rc *RegistryClient) checkRegistry() error {
 	return nil
 }
 
+// postWithInputAndOutput posts the input as JSON and passes the response body to the callback, failing on a status of 400 or above.
 func (rc *RegistryClient) postWithInputAndOutput(url string, input any, callback func([]byte)) (err error) {
 	var body io.Reader
 	if input != nil {
@@ -191,14 +206,17 @@ func (rc *RegistryClient) postWithInputAndOutput(url string, input any, callback
 	return nil
 }
 
+// postWithInput posts the input as JSON and ignores the response body.
 func (rc *RegistryClient) postWithInput(url string, input any) (err error) {
 	return rc.postWithInputAndOutput(url, input, nil)
 }
 
+// post posts with an empty body and ignores the response body.
 func (rc *RegistryClient) post(url string) (err error) {
 	return rc.postWithInputAndOutput(url, nil, nil)
 }
 
+// get gets the URL and returns the response body, failing on a status of 400 or above.
 func (rc *RegistryClient) get(url string) (data []byte, err error) {
 	resp, err := rc.client.HTTP().Get(url)
 	if err != nil {

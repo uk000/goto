@@ -105,11 +105,13 @@ var (
 	ProxyGRPCStream   ProxyGRPCStreamFunc
 )
 
+// init creates the empty registry and publishes it as the "grpc" service registry of the rpc package.
 func init() {
 	ServiceRegistry.Init()
 	rpc.GetServiceRegistry["grpc"] = func(_ int) rpc.RPCServiceRegistry { return ServiceRegistry }
 }
 
+// Init resets the registry to empty service, active service, proxy and tee maps.
 func (gsr *GRPCServiceRegistry) Init() {
 	gsr.lock.Lock()
 	defer gsr.lock.Unlock()
@@ -119,6 +121,7 @@ func (gsr *GRPCServiceRegistry) Init() {
 	gsr.TeeServices = map[int]*types.Pair[*GRPCService, *GRPCService]{}
 }
 
+// GetService returns the registered service of the full name, or nil.
 func (gsr *GRPCServiceRegistry) GetService(name string) *GRPCService {
 	gsr.lock.RLock()
 	defer gsr.lock.RUnlock()
@@ -140,6 +143,7 @@ func (gsr *GRPCServiceRegistry) GetOrCreateService(gsd *grpc.ServiceDesc) *GRPCS
 	return service
 }
 
+// GetActiveService returns the service of the name if it is being served, or nil.
 func (gsr *GRPCServiceRegistry) GetActiveService(name string) *GRPCService {
 	gsr.lock.RLock()
 	defer gsr.lock.RUnlock()
@@ -173,6 +177,7 @@ func (gsr *GRPCServiceRegistry) ServicesToRegister() []*GRPCService {
 	return services
 }
 
+// GetProxyService returns the source and target services and the tee port of the proxy configured for the service name, or nils.
 func (gsr *GRPCServiceRegistry) GetProxyService(name string) (*GRPCService, *GRPCService, int) {
 	gsr.lock.RLock()
 	defer gsr.lock.RUnlock()
@@ -183,6 +188,7 @@ func (gsr *GRPCServiceRegistry) GetProxyService(name string) (*GRPCService, *GRP
 	return nil, nil, 0
 }
 
+// GetTeeServices returns the source and target services that are tee'd on the port, or nils.
 func (gsr *GRPCServiceRegistry) GetTeeServices(port int) (*GRPCService, *GRPCService) {
 	gsr.lock.RLock()
 	defer gsr.lock.RUnlock()
@@ -193,12 +199,14 @@ func (gsr *GRPCServiceRegistry) GetTeeServices(port int) (*GRPCService, *GRPCSer
 	return nil, nil
 }
 
+// AddActiveService marks the service as served.
 func (gsr *GRPCServiceRegistry) AddActiveService(s *GRPCService) {
 	gsr.lock.Lock()
 	defer gsr.lock.Unlock()
 	gsr.ActiveServices[s.Name] = s
 }
 
+// AddProxyService registers a proxy of one service to another, along with a tee pair on teeport when it is positive.
 func (gsr *GRPCServiceRegistry) AddProxyService(from, to *GRPCService, teeport int) {
 	gsr.lock.Lock()
 	defer gsr.lock.Unlock()
@@ -208,24 +216,28 @@ func (gsr *GRPCServiceRegistry) AddProxyService(from, to *GRPCService, teeport i
 	}
 }
 
+// RemoveActiveService stops the named service from being served.
 func (gsr *GRPCServiceRegistry) RemoveActiveService(name string) {
 	gsr.lock.Lock()
 	defer gsr.lock.Unlock()
 	delete(gsr.ActiveServices, name)
 }
 
+// RemoveProxyService removes the proxy configured for the named service.
 func (gsr *GRPCServiceRegistry) RemoveProxyService(name string) {
 	gsr.lock.Lock()
 	defer gsr.lock.Unlock()
 	delete(gsr.ProxyServices, name)
 }
 
+// RemoveTeeService removes the tee pair of the port.
 func (gsr *GRPCServiceRegistry) RemoveTeeService(port int) {
 	gsr.lock.Lock()
 	defer gsr.lock.Unlock()
 	delete(gsr.TeeServices, port)
 }
 
+// GetRPCService returns the named service as an rpc.RPCService, or a nil interface if it isn't registered.
 func (gsr *GRPCServiceRegistry) GetRPCService(name string) rpc.RPCService {
 	if s := gsr.GetService(name); s != nil {
 		return s
@@ -255,12 +267,14 @@ func (s *GRPCService) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*plain)(s))
 }
 
+// RemoveService unregisters the named service.
 func (gsr *GRPCServiceRegistry) RemoveService(name string) {
 	gsr.lock.Lock()
 	defer gsr.lock.Unlock()
 	delete(gsr.Services, name)
 }
 
+// TrackService registers the named service, if it is registered, with the RPC tracker of the port.
 func (gsr *GRPCServiceRegistry) TrackService(port int, name string, headers []string, header, value string) {
 	gsr.lock.Lock()
 	defer gsr.lock.Unlock()
@@ -269,6 +283,7 @@ func (gsr *GRPCServiceRegistry) TrackService(port int, name string, headers []st
 	}
 }
 
+// NewGRPCServiceFromSD loads the protobuf descriptor of a grpc.ServiceDesc and registers a service built from it, or returns nil if it can't be loaded.
 func (gsr *GRPCServiceRegistry) NewGRPCServiceFromSD(sd *grpc.ServiceDesc) *GRPCService {
 	psd, err := grpcreflect.LoadServiceDescriptor(sd)
 	if err != nil || psd == nil {
@@ -278,6 +293,7 @@ func (gsr *GRPCServiceRegistry) NewGRPCServiceFromSD(sd *grpc.ServiceDesc) *GRPC
 	return gsr.NewGRPCService(psd)
 }
 
+// NewGRPCServiceFromDescriptors registers a service built from existing grpc and protobuf descriptors, linking each method to the descriptor's own unary or stream entry.
 func (gsr *GRPCServiceRegistry) NewGRPCServiceFromDescriptors(sd *grpc.ServiceDesc, psd protoreflect.ServiceDescriptor) *GRPCService {
 	serviceName := string(psd.FullName())
 	sd.HandlerType = (*DynamicServiceInterface)(nil)
@@ -318,6 +334,7 @@ func (gsr *GRPCServiceRegistry) NewGRPCServiceFromDescriptors(sd *grpc.ServiceDe
 	return &service
 }
 
+// NewGRPCService registers a service built from a protobuf descriptor, creating its grpc.ServiceDesc with the generic unary and stream handlers for each method.
 func (gsr *GRPCServiceRegistry) NewGRPCService(psd protoreflect.ServiceDescriptor) *GRPCService {
 	serviceName := string(psd.FullName())
 	gsd := &grpc.ServiceDesc{
@@ -369,6 +386,7 @@ func (gsr *GRPCServiceRegistry) NewGRPCService(psd protoreflect.ServiceDescripto
 	return &service
 }
 
+// ConvertToTargetService copies the service descriptor under the target service name and loads the protobuf descriptor of the copy.
 func (gsr *GRPCServiceRegistry) ConvertToTargetService(gsd *grpc.ServiceDesc, target string) (*grpc.ServiceDesc, protoreflect.ServiceDescriptor, error) {
 	gsd2 := *gsd
 	gsd2.ServiceName = target
@@ -379,6 +397,7 @@ func (gsr *GRPCServiceRegistry) ConvertToTargetService(gsd *grpc.ServiceDesc, ta
 	return &gsd2, psd2, nil
 }
 
+// CloneService returns the registered service of the target name, or else an unregistered copy of the service renamed to target that has its own copies of the methods and handlers.
 func (gsr *GRPCServiceRegistry) CloneService(service *GRPCService, target string) (targetService *GRPCService, err error) {
 	targetService = gsr.GetService(target)
 	if targetService != nil {
@@ -429,6 +448,7 @@ func (gsr *GRPCServiceRegistry) CloneService(service *GRPCService, target string
 	return
 }
 
+// ParseGRPCServiceMethod finds the registered method that the gRPC call of the context is for, or nil.
 func (gsr *GRPCServiceRegistry) ParseGRPCServiceMethod(ctx context.Context) *GRPCServiceMethod {
 	methodName, ok := grpc.Method(ctx)
 	if !ok || methodName == "" {
@@ -449,54 +469,66 @@ func (gsr *GRPCServiceRegistry) ParseGRPCServiceMethod(ctx context.Context) *GRP
 	return method
 }
 
+// IsGRPC reports true, as this is a gRPC service.
 func (s *GRPCService) IsGRPC() bool {
 	return true
 }
 
+// IsJSONRPC reports false, as this is not a JSON-RPC service.
 func (s *GRPCService) IsJSONRPC() bool {
 	return false
 }
 
+// GetName returns the full name of the service.
 func (s *GRPCService) GetName() string {
 	return s.Name
 }
 
+// GetURI returns the lowercased URI path of the service.
 func (s *GRPCService) GetURI() string {
 	return s.URI
 }
 
+// HasMethod tells if the service has the named method.
 func (s *GRPCService) HasMethod(m string) bool {
 	return s.Methods != nil && s.Methods[m] != nil
 }
 
+// GetMethodCount returns the number of methods of the service.
 func (s *GRPCService) GetMethodCount() int {
 	return len(s.Methods)
 }
 
+// ForEachMethod calls f for each method of the service.
 func (s *GRPCService) ForEachMethod(f func(rpc.RPCMethod)) {
 	for _, m := range s.Methods {
 		f(m)
 	}
 }
 
+// GetMethod returns the named method; a method that isn't there comes back as a nil *GRPCServiceMethod inside a non-nil interface.
 func (s *GRPCService) GetMethod(name string) rpc.RPCMethod {
 	return s.Methods[name]
 }
 
+// GetName returns the name of the method.
 func (m *GRPCServiceMethod) GetName() string {
 	return m.Name
 }
 
+// GetURI returns the lowercased URI path of the method.
 func (m *GRPCServiceMethod) GetURI() string {
 	return m.URI
 }
 
+// SetStreamCount sets the number of responses of a stream, with the methods lock held.
 func (m *GRPCServiceMethod) SetStreamCount(count int) {
 	methodLock.Lock()
 	defer methodLock.Unlock()
 	m.StreamCount = count
 }
 
+// SetStreamDelay sets the delay range and the count of the messages to delay in a stream, with the methods lock held.
 func (m *GRPCServiceMethod) SetStreamDelay(min, max time.Duration, count int) {
 	methodLock.Lock()
 	defer methodLock.Unlock()
@@ -505,6 +537,7 @@ func (m *GRPCServiceMethod) SetStreamDelay(min, max time.Duration, count int) {
 	m.StreamDelayCount = count
 }
 
+// SetResponsePayload sets the response payload of the method, with the methods lock held.
 func (m *GRPCServiceMethod) SetResponsePayload(payload []byte) {
 	methodLock.Lock()
 	defer methodLock.Unlock()
@@ -525,6 +558,7 @@ func (m *GRPCServiceMethod) GetResponsePayload() GRPCResponsePayload {
 	return m.ResponsePayload
 }
 
+// ProcessAndSetPayload registers the payload as the RPC response payload of the method on the port with the payload manager, and on success applies the payload and the stream delay to the method.
 func (m *GRPCServiceMethod) ProcessAndSetPayload(port int, data any, matches []*payload.RequestMatch, capture *payload.RequestCapture, contentType, delay string, streamCount int) error {
 	content := util.ToJSONBytes(data)
 	isStream := m.IsServerStream || m.IsBidiStream
@@ -547,6 +581,7 @@ func (m *GRPCServiceMethod) ProcessAndSetPayload(port int, data any, matches []*
 	return nil
 }
 
+// InputType returns the protobuf descriptor of the input message of the method, or nil.
 func (m *GRPCServiceMethod) InputType() protoreflect.MessageDescriptor {
 	if m.PMD != nil {
 		return m.PMD.Input()
@@ -554,6 +589,7 @@ func (m *GRPCServiceMethod) InputType() protoreflect.MessageDescriptor {
 	return nil
 }
 
+// OutputType returns the protobuf descriptor of the output message of the method, or nil.
 func (m *GRPCServiceMethod) OutputType() protoreflect.MessageDescriptor {
 	if m.PMD != nil {
 		return m.PMD.Output()
@@ -561,26 +597,32 @@ func (m *GRPCServiceMethod) OutputType() protoreflect.MessageDescriptor {
 	return nil
 }
 
+// PayloadsToInputs converts JSON payloads into dynamic messages of the input type of the method.
 func (m *GRPCServiceMethod) PayloadsToInputs(payloads [][]byte) (messages []proto.Message, err error) {
 	return payloadsToMessages(payloads, m.PMD.Input())
 }
 
+// JSONsToInputs converts JSON values into dynamic messages of the input type of the method.
 func (m *GRPCServiceMethod) JSONsToInputs(jsons []any) (messages []proto.Message, err error) {
 	return jsonsToMessages(jsons, m.PMD.Input())
 }
 
+// PayloadsToOutputs converts JSON payloads into dynamic messages of the output type of the method.
 func (m *GRPCServiceMethod) PayloadsToOutputs(payloads [][]byte) (messages []proto.Message, err error) {
 	return payloadsToMessages(payloads, m.PMD.Output())
 }
 
+// JSONsToOutputs converts JSON values into dynamic messages of the output type of the method.
 func (m *GRPCServiceMethod) JSONsToOutputs(jsons []any) (messages []proto.Message, err error) {
 	return jsonsToMessages(jsons, m.PMD.Output())
 }
 
+// MarshalJSON encodes the payload bytes as a JSON string.
 func (p GRPCResponsePayload) MarshalJSON() ([]byte, error) {
 	return json.Marshal(string(p))
 }
 
+// payloadsToMessages decodes each JSON payload into a dynamic message of the descriptor type.
 func payloadsToMessages(payloads [][]byte, desc protoreflect.MessageDescriptor) (messages []proto.Message, err error) {
 	for _, payload := range payloads {
 		json := util.JSONFromBytes(payload)
@@ -595,6 +637,7 @@ func payloadsToMessages(payloads [][]byte, desc protoreflect.MessageDescriptor) 
 	return
 }
 
+// jsonsToMessages decodes each JSON value into a dynamic message of the descriptor type.
 func jsonsToMessages(jsons []any, desc protoreflect.MessageDescriptor) (messages []proto.Message, err error) {
 	for _, json := range jsons {
 		msg := dynamicpb.NewMessage(desc)
@@ -607,6 +650,7 @@ func jsonsToMessages(jsons []any, desc protoreflect.MessageDescriptor) (messages
 	return
 }
 
+// fillInput unmarshals the JSON payload into the dynamic message, and logs the failure if it can't.
 func fillInput(input *dynamicpb.Message, payload []byte) error {
 	if err := protojson.Unmarshal(payload, input); err != nil {
 		log.Printf("GRPCServiceRegistry.fillInput: [ERROR] Failed to unmarshal payload into method input type [%s] with error: %s\n", input.Descriptor().FullName(), err.Error())
@@ -615,6 +659,7 @@ func fillInput(input *dynamicpb.Message, payload []byte) error {
 	return nil
 }
 
+// LoadRemoteReflectedServices lists the services that a remote server exposes through reflection and registers each one whose descriptor can be fetched.
 func LoadRemoteReflectedServices(conn *grpc.ClientConn) (err error) {
 	client := grpcreflect.NewClientAuto(context.Background(), conn)
 	services, err := client.ListServices()
@@ -639,6 +684,7 @@ func LoadRemoteReflectedServices(conn *grpc.ClientConn) (err error) {
 	return
 }
 
+// LoadRemoteReflectedService fetches a service from a reflection client, checks that it has the method if one is given, and registers it.
 func LoadRemoteReflectedService(client *grpcreflect.Client, serviceName, methodName string) (*GRPCService, error) {
 	symbol := serviceName
 	if methodName != "" {
@@ -677,10 +723,12 @@ func LoadRemoteReflectedService(client *grpcreflect.Client, serviceName, methodN
 	return service, nil
 }
 
+// LoadRemoteReflectedServiceV1 loads a service from the connection using the v1 reflection API.
 func LoadRemoteReflectedServiceV1(conn *grpc.ClientConn, serviceName, methodName string) (*GRPCService, error) {
 	return LoadRemoteReflectedService(grpcreflect.NewClientV1(context.Background(), grpc_reflection_v1.NewServerReflectionClient(conn)), serviceName, methodName)
 }
 
+// LoadRemoteReflectedServiceV1Alpha loads a service from the connection using the v1alpha reflection API.
 func LoadRemoteReflectedServiceV1Alpha(conn *grpc.ClientConn, serviceName, methodName string) (*GRPCService, error) {
 	return LoadRemoteReflectedService(grpcreflect.NewClientV1Alpha(context.Background(), grpc_reflection_v1alpha.NewServerReflectionClient(conn)), serviceName, methodName)
 }

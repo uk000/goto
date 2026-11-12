@@ -30,6 +30,7 @@ var (
 	Middleware = middleware.NewMiddleware("jsonrpc", setRoutes, nil)
 )
 
+// setRoutes registers the routes under /jsonrpc/services to add, remove and clear services.
 func setRoutes(r *mux.Router) {
 	// The server hands a request to the router of the first segment of its path, so the routes are on the router of
 	// /jsonrpc: a router of a longer root path is never given a request.
@@ -41,6 +42,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(jsonrpc, "/clear", removeAllServices, "POST")
 }
 
+// addService registers a JSONRPC service from the request body, or from an existing gRPC service when fromGRPC is set.
 func addService(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	name := util.GetStringParamValue(r, "service")
@@ -69,6 +71,7 @@ func addService(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// removeService removes the named JSONRPC service.
 func removeService(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	name := util.GetStringParamValue(r, "service")
@@ -84,6 +87,7 @@ func removeService(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// removeAllServices clears all JSONRPC services of the port.
 func removeAllServices(w http.ResponseWriter, r *http.Request) {
 	msg := "All services removed"
 	GetJSONRPCRegistry(r).Init()

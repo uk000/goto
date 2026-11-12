@@ -39,6 +39,7 @@ type JSONKeyValue struct {
 }
 type OrderedJSON []*JSONKeyValue
 
+// MarshalJSON marshals the array after unwrapping nested JSONValues and arrays so they serialize by their underlying value.
 func (j *JSONArrayMarshal) MarshalJSON() ([]byte, error) {
 	var data []interface{}
 	for _, v := range j.Values {
@@ -58,6 +59,7 @@ func (j *JSONArrayMarshal) MarshalJSON() ([]byte, error) {
 	return json.Marshal(data)
 }
 
+// MarshalJSON marshals the map after unwrapping nested JSONValues and arrays so they serialize by their underlying value.
 func (j *JSONMapMarshal) MarshalJSON() ([]byte, error) {
 	data := map[string]interface{}{}
 	for k, v := range j.Values {
@@ -77,6 +79,7 @@ func (j *JSONMapMarshal) MarshalJSON() ([]byte, error) {
 	return json.Marshal(data)
 }
 
+// MarshalJSON marshals the wrapped value, unwrapping JSONValues and recursing into nested maps and arrays.
 func (j *JSONValueMarshal) MarshalJSON() ([]byte, error) {
 	switch v := j.Value.(type) {
 	case *JSONValue:
@@ -92,10 +95,12 @@ func (j *JSONValueMarshal) MarshalJSON() ([]byte, error) {
 	}
 }
 
+// MarshalJSON marshals the value's underlying object, array or scalar rather than the struct fields.
 func (j *JSONValue) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&JSONValueMarshal{Value: j.Value()})
 }
 
+// MarshalJSON marshals the key/value pairs as a JSON object whose keys keep their slice order.
 func (j OrderedJSON) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	buf.WriteByte('{')
@@ -119,6 +124,7 @@ func (j OrderedJSON) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// TryUnmarshalString attempts to parse s as JSON, returning the parsed value and whether it succeeded.
 func TryUnmarshalString(s string) (interface{}, bool) {
 	var v interface{}
 	if err := json.Unmarshal([]byte(s), &v); err != nil {
@@ -127,6 +133,7 @@ func TryUnmarshalString(s string) (interface{}, bool) {
 	return v, true
 }
 
+// Normalize recursively replaces JSON-encoded strings inside maps and slices with their parsed values, modifying them in place.
 func Normalize(v interface{}) interface{} {
 	switch val := v.(type) {
 

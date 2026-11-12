@@ -27,6 +27,7 @@ import (
 	"time"
 )
 
+// GetLatestJobResults returns the results of the latest run of the named job from the global job manager.
 func GetLatestJobResults(name string) []*JobResult {
 	return Manager.GetLatestJobResults(name)
 }
@@ -45,6 +46,7 @@ func (jr *JobRunContext) getResults() []*JobResult {
 	return append([]*JobResult{}, jr.jobResults...)
 }
 
+// getJobResults returns the results of every run of the named job, keyed by run ID.
 func (jm *JobManager) getJobResults(name string) map[int][]interface{} {
 	results := map[int][]interface{}{}
 
@@ -66,6 +68,7 @@ func (jm *JobManager) getJobResults(name string) map[int][]interface{} {
 	return results
 }
 
+// GetLatestJobResults returns a copy of the results of the run with the highest ID for the named job, or nil if it has none.
 func (jm *JobManager) GetLatestJobResults(name string) []*JobResult {
 	var latestJobRun *JobRunContext
 	jm.lock.RLock()
@@ -85,6 +88,7 @@ func (jm *JobManager) GetLatestJobResults(name string) []*JobResult {
 	return nil
 }
 
+// getAllJobsResults returns the results of every run of every job, keyed by job name and run ID.
 func (jm *JobManager) getAllJobsResults() map[string]map[int][]interface{} {
 	results := map[string]map[int][]interface{}{}
 	jm.lock.RLock()
@@ -108,6 +112,7 @@ func (jm *JobManager) getAllJobsResults() map[string]map[int][]interface{} {
 // registryClient doesn't wait for a registry that doesn't answer for longer than this
 var registryClient = &http.Client{Timeout: 30 * time.Second}
 
+// storeJobResultsInRegistryLocker posts a run's kept results to the registry locker when the locker is enabled and a registry is configured.
 func storeJobResultsInRegistryLocker(jobID string, runIndex int, jobResults []*JobResult) {
 	if global.Flags.UseLocker && global.Self.RegistryURL != "" {
 		key := "job_" + jobID + "_" + strconv.Itoa(runIndex)
@@ -119,6 +124,7 @@ func storeJobResultsInRegistryLocker(jobID string, runIndex int, jobResults []*J
 	}
 }
 
+// storeJobResult appends a result to the run, trimming it to the job's keep-results limit (optionally keeping the first), and mirrors the kept results to the registry locker.
 func storeJobResult(job *Job, jobRun *JobRunContext, iteration int, data interface{}, last bool) {
 	job.lock.RLock()
 	jobID := job.Name
@@ -145,6 +151,7 @@ func storeJobResult(job *Job, jobRun *JobRunContext, iteration int, data interfa
 	storeJobResultsInRegistryLocker(jobID, runID, kept)
 }
 
+// storeHttpResult stores an invocation result as a job result if it belongs to the job's HTTP task target.
 func storeHttpResult(result *invocation.InvocationResult, job *Job, iteration int, jobRun *JobRunContext, last bool) {
 	job.lock.RLock()
 	httpTask := job.httpTask

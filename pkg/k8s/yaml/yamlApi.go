@@ -31,6 +31,7 @@ var (
 	Middleware = middleware.NewMiddleware("k8s", setRoutes, nil)
 )
 
+// setRoutes registers the /k8s/yaml APIs to store, apply or delete, get and clear YAML units.
 func setRoutes(r *mux.Router) {
 	// The server hands a request to the router of the first segment of its path, which is /k8s: a router of a root path of
 	// /k8s/yaml is never given a request, so the routes are under the /yaml of the router of /k8s.
@@ -54,6 +55,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(k8sYamlRouter, "/clear/{yamlName}/{namespace}", apiClearResources, "POST")
 }
 
+// apiStoreYaml stores the resources of the YAML in the request body under the unit name.
 func apiStoreYaml(w http.ResponseWriter, r *http.Request) {
 	yamlName := util.GetStringParamValue(r, "yamlName")
 	if list, errs := store.Kstore.StoreYaml(yamlName, r.Body); len(errs) == 0 {
@@ -64,6 +66,7 @@ func apiStoreYaml(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// apiApplyYaml applies or deletes the stored resources of a unit on the cluster, narrowed by namespace, kind and name, and optionally moved to another namespace.
 func apiApplyYaml(w http.ResponseWriter, r *http.Request) {
 	action := util.GetStringParamValue(r, "a")
 	yamlName := util.GetStringParamValue(r, "yamlName")
@@ -90,6 +93,7 @@ func apiApplyYaml(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// apiGetResources returns the stored resources of a unit as JSON or YAML, or 404 if there are none.
 func apiGetResources(w http.ResponseWriter, r *http.Request) {
 	yamlName := util.GetStringParamValue(r, "yamlName")
 	namespace := util.GetStringParamValue(r, "namespace")
@@ -107,6 +111,7 @@ func apiGetResources(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// apiClearResources clears the stored resources of a unit, of one namespace of it, or of all units.
 func apiClearResources(w http.ResponseWriter, r *http.Request) {
 	yamlName := util.GetStringParamValue(r, "yamlName")
 	namespace := util.GetStringParamValue(r, "namespace")

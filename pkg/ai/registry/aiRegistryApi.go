@@ -41,6 +41,7 @@ func isAgentsRequest(r *http.Request) bool {
 	return uri == "/ai/agents" || strings.HasPrefix(uri, "/ai/agents/")
 }
 
+// setRoutes registers the GET /agents, POST /agents/add and POST /agents/clear routes of the agent registry API.
 func setRoutes(r *mux.Router) {
 	// The server hands a request to the router of the first segment of its path, which is /ai: a router of a root path
 	// of /ai/agents is never given a request, so the routes are under the /agents of the router of /ai, which is given
@@ -51,12 +52,14 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(agentRouter, "/clear", clearAgents, "POST")
 }
 
+// getAgents reports the registered agents, by name and port, as JSON or YAML.
 func getAgents(w http.ResponseWriter, r *http.Request) {
 	agents := TheAgentRegistry.snapshot()
 	util.WriteJsonOrYAMLPayload(w, agents, util.IsAcceptYAML(r))
 	util.AddLogMessage(fmt.Sprintf("Reported [%d] agents from registry", len(agents)), r)
 }
 
+// addAgents registers the agents in the request payload on the request's port, rejecting payloads with unnamed agent cards.
 func addAgents(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	agents := []*model.Agent{}
@@ -90,6 +93,7 @@ func addAgents(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// clearAgents removes all agents from the registry and reports how many names were removed.
 func clearAgents(w http.ResponseWriter, r *http.Request) {
 	count := TheAgentRegistry.clearAll()
 	msg := fmt.Sprintf("%d Agents removed from registry", count)

@@ -116,10 +116,12 @@ var (
 	tunnelLock             sync.RWMutex
 )
 
+// init registers WillTunnel with util so the request pipeline can ask whether a request will be tunneled.
 func init() {
 	util.WillTunnel = WillTunnel
 }
 
+// newPortTunnel creates an initialized PortTunnel for the port.
 func newPortTunnel(port int) *PortTunnel {
 	return (&PortTunnel{Port: port}).init()
 }
@@ -137,6 +139,7 @@ func hasScheme(pieces []string) bool {
 	return false
 }
 
+// newEndpoint parses an endpoint address (optionally prefixed with http, https, h2 or h2c) into an Endpoint, defaulting to the request's protocol when no scheme is given.
 func newEndpoint(address string, tls, transparent bool) *Endpoint {
 	id := address
 	proto := ""
@@ -178,6 +181,7 @@ func newEndpoint(address string, tls, transparent bool) *Endpoint {
 	return &Endpoint{ID: id, URL: proto + address, Address: address, Host: pieces[0], Port: port, IsTLS: tls, IsH2: h2, UseRequestProto: useRequestProto, Transparent: transparent}
 }
 
+// GetOrCreatePortTunnel returns the tunnel config of the port, creating it on first use.
 func GetOrCreatePortTunnel(port int) *PortTunnel {
 	tunnelLock.Lock()
 	defer tunnelLock.Unlock()
@@ -187,6 +191,7 @@ func GetOrCreatePortTunnel(port int) *PortTunnel {
 	return tunnels[port]
 }
 
+// GetTunnelID builds the endpoint ID of the form protocol:host, where the protocol is h2, h2c, https or http.
 func GetTunnelID(isH2, isH2C, isTLS bool, host string) string {
 	protocol := "http"
 	if isH2 {
@@ -199,6 +204,7 @@ func GetTunnelID(isH2, isH2C, isTLS bool, host string) string {
 	return fmt.Sprintf("%s:%s", protocol, host)
 }
 
+// CheckTunnelRequest flags the request as a tunnel request, and records the endpoints it asks for, when it is a CONNECT, comes over a proxy-connect tunnel, or carries the goto tunnel or proxy connection header.
 func CheckTunnelRequest(r *http.Request) {
 	rs := util.GetRequestStore(r)
 	if r.Method == http.MethodConnect {
@@ -240,6 +246,7 @@ func CheckTunnelRequest(r *http.Request) {
 	return
 }
 
+// WillTunnel tells whether the request matches a tunnel of its port, and records the matched endpoints in the request store.
 func WillTunnel(r *http.Request, rs *util.RequestStore) bool {
 	port := util.GetRequestOrListenerPortNum(r)
 	tunnelLock.RLock()
@@ -256,6 +263,7 @@ func WillTunnel(r *http.Request, rs *util.RequestStore) bool {
 	return false
 }
 
+// HijackConnect takes over the client connection of a CONNECT request and pipes it to the server itself as a proxy tunnel, closing it if that fails.
 func HijackConnect(r *http.Request, w http.ResponseWriter) bool {
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
@@ -283,6 +291,7 @@ func pipeData(dest io.WriteCloser, source io.ReadCloser, wg *sync.WaitGroup) {
 	io.Copy(dest, source)
 }
 
+// RegisterPipeCallback registers a callback, by name, that is invoked with the response of each request tunneled to the given tunnel endpoint.
 func RegisterPipeCallback(tunnel, pipe string, callback PipeCallback) {
 	tunnelLock.Lock()
 	defer tunnelLock.Unlock()
@@ -292,6 +301,7 @@ func RegisterPipeCallback(tunnel, pipe string, callback PipeCallback) {
 	pipeCallbacksByTunnels[tunnel][pipe] = callback
 }
 
+// init resets all the tunnels, proxy tunnels and tracking state of the port tunnel.
 func (pt *PortTunnel) init() *PortTunnel {
 	pt.Tunnels = map[string]*Endpoint{}
 	pt.ProxyTunnels = map[string]*ProxyTunnel{}
@@ -303,6 +313,7 @@ func (pt *PortTunnel) init() *PortTunnel {
 	return pt
 }
 
+// initTracking resets the tracking headers, queries and traffic counts of the port tunnel under its lock.
 func (pt *PortTunnel) initTracking() {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
@@ -335,6 +346,7 @@ func (pt *PortTunnel) initTrackingLocked() {
 	}
 }
 
+// checkTunnelsForRequest finds the endpoints the request is tunneled to, trying URI+header, URI, header and then broad tunnels in that order; goto tunnel and proxy connection requests always tunnel.
 func (pt *PortTunnel) checkTunnelsForRequest(r *http.Request) (willTunnel bool, endpoints []string) {
 	uri := r.RequestURI
 	if strings.HasPrefix(r.RequestURI, "/tunnel=") || r.Header.Get(HeaderGotoTunnel) != "" || r.Header.Get(HeaderProxyConnection) != "" {
@@ -384,6 +396,7 @@ func (pt *PortTunnel) checkTunnelsForRequest(r *http.Request) (willTunnel bool, 
 	return len(endpoints) > 0, endpoints
 }
 
+// openProxyTunnel dials the server's own port and pipes the client connection to it in both directions, registering the connection as a proxy tunnel until both pipes finish.
 func (pt *PortTunnel) openProxyTunnel(fromAddress, toAddress string, isH2, isH2C, isTLS bool, clientConn net.Conn) bool {
 	selfAddress := net.JoinHostPort(global.Self.PodIP, strconv.Itoa(pt.Port))
 	if selfConn, err := net.DialTimeout("tcp", selfAddress, 10*time.Second); err == nil {
@@ -409,6 +422,7 @@ func (pt *PortTunnel) openProxyTunnel(fromAddress, toAddress string, isH2, isH2C
 	return false
 }
 
+// addTunnel registers an endpoint as a tunnel for all requests, or only those with the given URI, header and value.
 func (pt *PortTunnel) addTunnel(endpoint string, tls, transparent bool, uri, header, value string) {
 	ep := newEndpoint(endpoint, tls, transparent)
 	pt.lock.Lock()
@@ -457,6 +471,7 @@ func removeID(ids []string, id string) (kept []string, removed bool) {
 	return kept, removed
 }
 
+// removeTunnel removes an endpoint (or all endpoints when it is empty) from the tunnel registered for the given URI, header and value, and reports whether something was removed.
 func (pt *PortTunnel) removeTunnel(endpoint, uri, header, value string) (exists bool) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
@@ -533,6 +548,7 @@ func (pt *PortTunnel) removeTunnel(endpoint, uri, header, value string) (exists 
 	return
 }
 
+// addTracking adds the headers and query params whose values are counted in the tunnel traffic.
 func (pt *PortTunnel) addTracking(headers, queryParams []string) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
@@ -544,18 +560,21 @@ func (pt *PortTunnel) addTracking(headers, queryParams []string) {
 	}
 }
 
+// clear resets all the tunnels and tracking of the port tunnel.
 func (pt *PortTunnel) clear() {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
 	pt.init()
 }
 
+// captureTunnelTraffic turns the capture of per-request tunnel traffic logs on or off.
 func (pt *PortTunnel) captureTunnelTraffic(flag bool) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
 	pt.CaptureTrafficLog = flag
 }
 
+// trackRequest counts the request in the tunnel traffic by endpoint, URI, and the tracked headers and query params.
 func (pt *PortTunnel) trackRequest(r *http.Request, ep *Endpoint) {
 	uri := strings.ToLower(r.RequestURI)
 	pt.lock.Lock()
@@ -568,6 +587,7 @@ func (pt *PortTunnel) trackRequest(r *http.Request, ep *Endpoint) {
 		c.ByRequestQueries, c.ByRequestQueryValues, c.ByURIRequestQueries, c.ByRequestQueryEndpoints)
 }
 
+// trackResponse counts the response in the tunnel traffic by status, and by the tracked response headers.
 func (pt *PortTunnel) trackResponse(uri string, r *http.Response, ep *Endpoint) {
 	pt.lock.Lock()
 	defer pt.lock.Unlock()
@@ -583,6 +603,7 @@ func (pt *PortTunnel) trackResponse(uri string, r *http.Response, ep *Endpoint) 
 		c.ByResponseHeaders, c.ByResponseHeaderValues, c.ByURIResponseHeaders, c.ByResponseHeaderEndpoints)
 }
 
+// sendTunnelResponse writes the first response received from the tunneled endpoints (body, headers, status) to the client and runs the pipe callbacks, discarding the responses of any other endpoints.
 func (ep *Endpoint) sendTunnelResponse(viaTunnelLabel, uri string, r *http.Request, w http.ResponseWriter, resp *http.Response) {
 	defer resp.Body.Close()
 	rs := util.GetRequestStore(r)
@@ -650,6 +671,7 @@ func addLogMessage(msg string, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// tunnelToEndpoint sends a copy of the request to one endpoint with the tunnel headers, tracks the response, and writes it to the client; it runs as one goroutine per endpoint.
 func (pt *PortTunnel) tunnelToEndpoint(ep *Endpoint, uri, tunnelHostLabel, viaTunnelLabel string, r *http.Request, w http.ResponseWriter, wg *sync.WaitGroup, trafficLog *TunnelTrafficLog) {
 	defer wg.Done()
 	url := ep.URL + uri
@@ -737,6 +759,7 @@ func (pt *PortTunnel) tunnelToEndpoint(ep *Endpoint, uri, tunnelHostLabel, viaTu
 	}
 }
 
+// tunnel resolves the endpoints (given addresses or the ones matched for the request), tunnels the request to all of them concurrently and waits, logging the traffic if capture is on.
 func (pt *PortTunnel) tunnel(addresses []string, uri string, r *http.Request, w http.ResponseWriter) {
 	if global.Debug {
 		log.Printf("Tunnel: Enter [%s] - %+v\n", uri, addresses)
@@ -808,6 +831,7 @@ func (pt *PortTunnel) tunnel(addresses []string, uri string, r *http.Request, w 
 	}
 }
 
+// tunnel is the handler of tunnel requests, which works out the addresses to tunnel to from the URL or the requested tunnels, and hands the request to the tunnel of the port.
 func tunnel(w http.ResponseWriter, r *http.Request) {
 	addressPath := util.GetStringParamValue(r, "address")
 	addresses, present := util.GetListParam(r, "address")
@@ -845,6 +869,7 @@ func tunnelHostName(headerValue string) string {
 	return headerValue
 }
 
+// middlewareFunc tunnels the tunnel requests, stopping with a message if a loop is detected through the tunnel host header, and passes the rest on.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if util.IsTunnelRequest(r) {
@@ -866,6 +891,7 @@ func middlewareFunc(next http.Handler) http.Handler {
 	})
 }
 
+// TunnelCountHandler sets the tunnel count of a tunnel request to one more than the count in the via-tunnel-count header.
 func TunnelCountHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if util.IsTunnelRequest(r) {

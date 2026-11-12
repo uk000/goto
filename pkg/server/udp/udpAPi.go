@@ -31,6 +31,7 @@ var (
 	Middleware = middleware.NewMiddleware("udp", setRoutes, nil)
 )
 
+// setRoutes registers the UDP proxy routes under /server/udp.
 func setRoutes(r *mux.Router) {
 	// The server hands a request to the router of the first segment of its path, which is /server: a router of a root
 	// path of /server/udp is never given a request, so the routes are under the /udp of the router of /server.
@@ -41,6 +42,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(udpRouter, "/{port}/delay/{upstream}/{delay}", setDelay, "POST")
 }
 
+// setDelay sets the delay of the UDP proxy of a port's upstream.
 func setDelay(w http.ResponseWriter, r *http.Request) {
 	if !listeners.ValidateUDPListener(w, r) {
 		return
@@ -59,6 +61,7 @@ func setDelay(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// proxyUDP opens a UDP listener on the port and proxies it to the upstream, with an optional delay.
 func proxyUDP(w http.ResponseWriter, r *http.Request) {
 	port := util.GetIntParamValue(r, "port")
 	upstream := util.GetStringParamValue(r, "upstream")
@@ -80,6 +83,7 @@ func proxyUDP(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// stopUDPProxy stops proxying the UDP port to the upstream.
 func stopUDPProxy(w http.ResponseWriter, r *http.Request) {
 	if !listeners.ValidateUDPListener(w, r) {
 		return

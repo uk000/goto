@@ -36,6 +36,7 @@ var (
 	Middleware = middleware.NewMiddleware("mcp", setRoutes, nil)
 )
 
+// setRoutes registers the /mcpapi admin routes to manage MCP servers, their components, payloads and statuses.
 func setRoutes(r *mux.Router) {
 	mcpapi := middleware.RootPath("/mcpapi")
 	mcpServers := util.PathRouter(mcpapi, "/servers")
@@ -89,6 +90,7 @@ func pathEndsWith(r *http.Request, route string) bool {
 	return strings.HasSuffix(strings.TrimRight(r.URL.Path, "/"), route)
 }
 
+// getServers returns the server names, all servers, one server, or the servers of the port, as JSON or YAML.
 func getServers(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	all := pathEndsWith(r, "/servers/all")
@@ -118,6 +120,8 @@ func getServers(w http.ResponseWriter, r *http.Request) {
 		util.WriteJsonOrYAMLPayload(w, GetPortMCPServers(port), yaml)
 	}
 }
+
+// addServers adds the MCP servers in the payload to the port, after checking their names and URI regexes.
 func addServers(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	payloads := []*MCPServerPayload{}
@@ -159,6 +163,7 @@ func addServers(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// setServerRoute makes the server be served over the given URI.
 func setServerRoute(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	serverName := util.GetStringParamValue(r, "server")
@@ -176,6 +181,7 @@ func setServerRoute(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// configureStatus applies the status config given in the body to the URI of the server.
 func configureStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	serverName := util.GetStringParamValue(r, "server")
@@ -203,6 +209,8 @@ func configureStatus(w http.ResponseWriter, r *http.Request) {
 	util.WriteJsonPayload(w, sc)
 	util.AddLogMessage(fmt.Sprintf("Applied status config: %s", sc.Log("MCP", port)), r)
 }
+
+// setStatus sets a forced response status for the server or one of its tools, optionally matched by header and methods.
 func setStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	serverName := util.GetStringParamValue(r, "server")
@@ -253,6 +261,7 @@ func setStatus(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearStatus clears the statuses of the port, or only the ones of the given server.
 func clearStatus(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	serverName := util.GetStringParamValue(r, "server")
@@ -301,6 +310,8 @@ func clearServerStatus(port int, server *MCPServer) {
 		StatusManager.Clear(port, c.exact, c.prefix)
 	}
 }
+
+// getStatuses returns all statuses, or reports the current status of the given server.
 func getStatuses(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	serverName := util.GetStringParamValue(r, "server")
@@ -320,6 +331,8 @@ func getStatuses(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
+
+// clearServers clears all MCP servers, the given server, or the servers of the port.
 func clearServers(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	all := pathEndsWith(r, "/servers/clear/all")
@@ -345,6 +358,8 @@ func clearServers(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
+
+// startServer starts the given MCP server, or all the servers of the port.
 func startServer(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "server")
@@ -362,6 +377,8 @@ func startServer(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
+
+// stopServer stops the given MCP server, or all the servers of the port.
 func stopServer(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "server")
@@ -379,6 +396,8 @@ func stopServer(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
+
+// getComponent maps a component kind name to its kind flag.
 func getComponent(kind string) (isTools, isPrompts, isResources, isTemplates bool) {
 	switch kind {
 	case "tools":
@@ -393,6 +412,7 @@ func getComponent(kind string) (isTools, isPrompts, isResources, isTemplates boo
 	return
 }
 
+// getComponents returns the components of a kind from the given server, from the servers of the port, or from all servers.
 func getComponents(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	q := util.GetStringParamValue(r, "q")
@@ -421,6 +441,7 @@ func getComponents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// addComponent adds the tools, prompts, resources or templates in the body to the server.
 func addComponent(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	kind := util.GetStringParamValue(r, "kind")
@@ -444,6 +465,7 @@ func addComponent(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// addToolSchemas registers the named tool schemas given in the body, for the tools that refer to them.
 func addToolSchemas(w http.ResponseWriter, r *http.Request) {
 	b, _ := io.ReadAll(r.Body)
 	names, err := AddToolSchemas(b)
@@ -455,6 +477,8 @@ func addToolSchemas(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
+
+// addCompletionPayload sets the completion payload of the given type (with an optional delay) for the server.
 func addCompletionPayload(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	name := util.GetStringParamValue(r, "server")
@@ -477,6 +501,7 @@ func addCompletionPayload(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// addComponentPayload sets the response payload of a component, as JSON or text, optionally streamed with count and delay.
 func addComponentPayload(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	serverName := util.GetStringParamValue(r, "server")
@@ -511,12 +536,14 @@ func addComponentPayload(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// sendBadRequest responds with 400 and the message, and logs it.
 func sendBadRequest(msg string, w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusBadRequest)
 	fmt.Fprintln(w, msg)
 	util.AddLogMessage(msg, r)
 }
 
+// callTool invokes a tool of the server directly from the admin API, with the body as args, and returns the result.
 func callTool(w http.ResponseWriter, r *http.Request) {
 	port := util.GetRequestOrListenerPortNum(r)
 	serverName := util.GetStringParamValue(r, "server")

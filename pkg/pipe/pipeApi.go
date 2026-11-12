@@ -29,6 +29,7 @@ var (
 	Middleware = middleware.NewMiddleware("pipe", setRoutes, nil)
 )
 
+// setRoutes registers the /pipes admin API routes for managing, running and inspecting pipes and their sources.
 func setRoutes(r *mux.Router) {
 	pipeRouter := middleware.RootPath("/pipes")
 
@@ -52,10 +53,12 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(pipeRouter, "/{name}", getPipelineRuns, "GET")
 }
 
+// getPipelines reports all pipes as JSON.
 func getPipelines(w http.ResponseWriter, r *http.Request) {
 	util.WriteStringJsonPayload(w, Manager.DumpPipes())
 }
 
+// createPipeline creates an empty pipe from the name in the URL, or adds a full pipe parsed from the request body.
 func createPipeline(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	name := util.GetStringParamValue(r, "name")
@@ -77,6 +80,7 @@ func createPipeline(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// clearPipeline clears the named pipe, or all pipes if no name is given.
 func clearPipeline(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	Manager.ClearPipe(name)
@@ -90,6 +94,7 @@ func clearPipeline(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// removePipeline removes the named pipe.
 func removePipeline(w http.ResponseWriter, r *http.Request) {
 	name := util.GetStringParamValue(r, "name")
 	Manager.RemovePipe(name)
@@ -97,6 +102,8 @@ func removePipeline(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 	fmt.Fprintln(w, msg)
 }
+
+// addSource adds a source parsed from the request body to the pipe named in the URL.
 func addSource(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	pipe := util.GetStringParamValue(r, "pipe")
@@ -114,6 +121,7 @@ func addSource(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// removeSource removes the named source from the named pipe.
 func removeSource(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	pipe := util.GetStringParamValue(r, "pipe")
@@ -132,6 +140,7 @@ func removeSource(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// addK8sSource adds a K8s source, with the resource ID taken from the spec query param, to the named pipe.
 func addK8sSource(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	pipe := util.GetStringParamValue(r, "pipe")
@@ -151,6 +160,7 @@ func addK8sSource(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// addScriptSource adds a script source to the pipe, using the request body as the script content.
 func addScriptSource(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	pipe := util.GetStringParamValue(r, "pipe")
@@ -166,6 +176,7 @@ func addScriptSource(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// runPipeline runs the named pipe and writes its output as the response, as YAML or JSON per the Accept header.
 func runPipeline(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	name := util.GetStringParamValue(r, "name")
@@ -185,6 +196,7 @@ func runPipeline(w http.ResponseWriter, r *http.Request) {
 	util.AddLogMessage(msg, r)
 }
 
+// getPipelineRuns reports the named pipe and its recorded runs as JSON.
 func getPipelineRuns(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	name := util.GetStringParamValue(r, "name")

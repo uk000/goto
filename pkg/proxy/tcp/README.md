@@ -1,11 +1,12 @@
 
 # TCP Proxy
 - Any TCP listener can act as a TCP proxy if a proxy target is defined for that listener.
-- A TCP proxy only supports routing to a single upstream target, except for SNI based routing for TLS connections. This is unlike an HTTP proxy that can route a single request to multiple upstream targets.
+- A TCP proxy routes each client connection to a single upstream (a named set of endpoints), picked by SNI for TLS connections, or the first upstream without an SNI match otherwise. This is unlike an HTTP proxy that can route a single request to multiple upstream targets. An upstream can have several endpoints: whatever the client sends goes to all of them, and only the responses of the first endpoint (by endpoint name, the primary) go back to the client.
 - TCP proxy is a passthrough proxy as it transmits bytes opaquely between the downstream and upstream parties. The only time the TCP proxy inspects the bytes is if you configure it to perform SNI based routing.
-- You can optionally add SNI match criteria to a TCP proxy target (see the relevant APIs further below in the doc). In this case, `goto` will inspect the client TLS handshake packets to read SNI information and match it against the defined server names. The connection will be routed to the first target for which the defined server name matches client's requested SNI.
-
-- TCP targets support SNI based matching if the communication is over TLS. Otherwise TCP proxy only supports a single upstream service.
+- You can optionally add SNI match criteria to a TCP proxy upstream (the `match.sni` field, see the APIs further below in the doc). In this case, `goto` will inspect the client TLS handshake packets to read SNI information and match it against the defined server names (comma-separated list of names or regular expressions). The connection will be routed to the first upstream, in the order of upstream names, for which the defined server name matches client's requested SNI. A connection whose SNI matches no upstream is closed and counted in `rejectCountsBySNI`.
+- Upstreams support SNI based matching if the communication is over TLS. A port with no SNI-matching upstream does not read anything from the client and just pipes the bytes to the first upstream (by name).
+- A proxied connection that is silent in both directions for 5 seconds is closed by the proxy (`idleTimeout`, not configurable), and connecting to an endpoint times out after 5 seconds. Reading the TLS client hello for SNI also times out after 5 seconds. The HTTP CONNECT mode (below) has its own 5 minute tunnel idle timeout.
+- The TCP proxy needs the port to be a TCP (or TLS) listener. The `POST /proxy/tcp/{port}?address=` API opens one if the port is not open yet. For any other API, add the listener first (`--ports 9000/tcp`, or `POST /server/listeners/add` with `"protocol":"tcp"`). Using the `/port={port}/...` prefix on a port with no listener is answered with HTTP 200 and the text `Port [{port}] not configured`, and nothing is configured.
 
   <details>
   <summary>More details about SNI matching</summary>
@@ -20,37 +21,61 @@
   </details>
   
 ### TCP Proxy Operations
-- **POST** `/proxy/tcp/{port}/{endpoint}?sni={sni}`
-- **POST** `/proxy/tcp/{port}/{endpoint}/retries/{retries}?sni={sni}`
+- **POST** `/proxy/tcp/{port}?address={address}`
+- **PUT, POST** `/proxy/tcp/upstreams/add`
+- **GET** `/proxy/tcp`, `/proxy/tcp/all`, `/proxy/tcp/upstreams`, `/proxy/tcp/upstreams/all`
+- **PUT, POST** `/proxy/tcp/http/connect/{enable|disable}`, `/proxy/tcp/http/connect/delay/{delay}`
 
 #### TCP Proxy APIs
-###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another (the port must already have a listener). Without the prefix they apply to the port that the request arrives on. The `{port}` of `/proxy/tcp/{port}` is an explicit port number and takes no prefix.</small>
 
 |METHOD|URI|Description|
 |---|---|---|
-| PUT, POST |	/proxy/tcp/targets<br/>/add/`{name}`<br/>?<br/>address=`{address}`<br/>&sni=`{sni}` | Add a new TCP upstream target with the given name and address, where the address is in the format `hostname:port`. The optional `sni` param can be a comma-separated list of host names to perform SNI based routing. The presence of `sni` param indicates that the TCP traffic for this proxy port is encrypted. |
-| POST |	/proxy/tcp/{port}/{endpoint}?sni={sni}           | Setup TCP proxy on the given port, forwarding to the given endpoint. Optionally specify an SNI match for TLS traffic. |
-| POST |	/proxy/tcp/{port}/{endpoint}/retries/{retries}?sni={sni}   | Setup TCP proxy on the given port, forwarding to the given endpoint, and retry failed connections as well as failed packet writes up to the given number of retries |
-| GET | /proxy/report/tcp | Get a report of the activity so far for all TCP targets |
+| POST | /proxy/tcp/`{port}`<br/>?address=`{address}` | Open a TCP listener on `{port}` (if it is not open already) and add `{address}` (format `host:port`) as an upstream of the proxy of that port. The upstream is named and keyed by the address, and has one endpoint named `default`; other upstreams of the port are kept. The `address` query param is required: without it the route is not matched (`404`). Responses: `200` `Proxying TCP on port [25078] to upstream [localhost:25093]`; `400` `Invalid upstream address: invalid address [bad], expected host:port`; `400` `Failed to open listener on port [25086] with error: ...` if the port is held by something else. |
+| PUT, POST | /proxy/tcp/upstreams/add | Set the upstreams of the proxy of the port from the request body (JSON or YAML map of upstream name to upstream, see [TCP Proxy Upstream JSON Schema](#tcp-proxy-upstream-json-schema)). **The given upstreams replace the ones that the port had.** Response `200` with the upstreams as YAML (names and endpoint names filled in), or `400` `Failed to parse proxy target with error: ...` for an invalid payload (a single upstream object instead of a map gives `json: cannot unmarshal string into Go struct field .name of type tcpproxy.TCPUpstream`). The port must already be a TCP/TLS listener. |
+| GET | /proxy/tcp<br/>/proxy/tcp/all | Report the TCP proxy of the port (`{"port":N,"tcp":{port, enabled, upstreams, http, tracker}}`), or of all the ports (keyed by port number) with `/all`. The `tracker` is the [TCP Proxy Tracker](#tcp-proxy-tracker-json-schema) of the port. |
+| GET | /proxy/tcp/upstreams<br/>/proxy/tcp/upstreams/all | Report only the upstreams of the port (`{"port":N,"tcp":{name: upstream}}`) or of all the ports. |
 | PUT, POST | /proxy/tcp/http/connect<br/>/`{enable\|disable}` | Enable or disable the HTTP CONNECT proxy mode on the port. See [HTTP CONNECT Proxy](#http-connect-proxy) below. |
 | PUT, POST | /proxy/tcp/http/connect<br/>/delay/`{delay}` | Set a delay for the HTTP CONNECT proxy of the port, for its connections and for every transfer of its tunnels. `{delay}` is a duration (`1s`), or a range (`100ms-1s`), and may have a count (`1s:5`). `0s` or `clear` takes it away. See [HTTP CONNECT Proxy](#http-connect-proxy) below. |
 
-#### Common Proxy Targets Admin APIs
-###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
+The report of a port (`GET /proxy/tcp`) has these fields under `tcp`: `port` (int), `enabled` (bool), `upstreams` (map of [upstream](#tcp-proxy-upstream-json-schema)), `http` (`{"connect": bool, "connectDelay": {"min","max","count"}}`, `connectDelay` is left out when none is set; see [HTTP CONNECT Proxy](#http-connect-proxy)) and `tracker` ([tracker](#tcp-proxy-tracker-json-schema)).
 
-|METHOD|URI|Description|
+There are no `enable`/`disable`, `delay=` or `drop=` routes for individual TCP upstreams, and no route that clears the tracker: the delay, retries, retry delay and drop percentage of an upstream are fields of the upstream (below), set with `/proxy/tcp/upstreams/add` or the startup config.
+
+#### TCP Proxy Upstream JSON Schema
+The body of `/proxy/tcp/upstreams/add` is a map keyed by upstream name.
+
+|Field|Data Type|Description|
 |---|---|---|
-| POST |	/proxy/targets/clear            | Remove all proxy targets |
-| PUT, POST |	/proxy/targets/add  | Add target for proxying requests [see `Proxy Target JSON Schema`](#proxy-target-json-schema) |
-| POST | /proxy/targets<br/>/`{target}`/remove  | Remove a proxy target |
-| POST | /proxy/targets<br/>/`{target}`/enable  | Enable a proxy target |
-| POST | /proxy/targets<br/>/`{target}`/disable | Disable a proxy target |
-| PUT, POST | /proxy/targets<br/>/`{target}`/delay=`{delay}` | Configure a delay to be applied to the requests/responses or tcp packets going to/from the given target |
-| POST | /proxy/targets<br/>/`{target}`/delay/clear | Clears any configured delay for the given target |
-| PUT, POST | /proxy/targets<br/>/`{target}`/drop=`{pct}` | Configure a percentage of writes to be dropped to/from the given target. If configured, `goto` will skip every `100/{pct}` write to/from this target. For TCP, this results in dropping packets in both directions. For HTTP, it'll choose to drop either of the request or the response based on a random coin flip. |
-| POST | /proxy/targets<br/>/`{target}`/drop/clear | Clears any configured drop for the given target so that the traffic can go back to normal |
-| GET |	/proxy/targets                  | List all proxy targets |
-| GET | /proxy/targets<br/>/`{target}`/report | Get a report of the activity so far for the given target |
+| name | string | Optional, defaults to the key |
+| endpoints | map[string]Endpoint | Required, at least one. The key is the endpoint name; an `Endpoint` has `name` (defaults to the key) and `address` (`host:port`, required). The first endpoint by name is the primary: its responses go to the client. The client's data goes to all endpoints, and the responses of the other endpoints are discarded. |
+| match.sni | string | Comma-separated list of server names or regular expressions, matched against the SNI of the client's TLS hello. An upstream without `match` takes the connections that don't ask for an SNI. |
+| delay | Delay | `min` and `max` (both required if the delay is given, e.g. `"10ms"`) and `count` (the number of writes it applies to, unlimited if omitted). Applied before each write to the client or to the upstream. |
+| retries | int | Number of times a failed connection to an endpoint is retried after the first attempt (>= 0, default 0). |
+| retryDelay | Delay | Delay between retries (`min` and `max` required if given). |
+| dropPct | int | 0-100. The proxy skips every `100/dropPct`-th write, in either direction. |
+
+Validation errors come back as `400`: `upstream endpoints missing`, `target endpoint [a]: invalid address [nohostport], expected host:port`, `upstream [x] has invalid dropPct [150], expected 0-100`, `upstream [x] has negative retries [-1]`, `upstream [x] has a delay without min or max`, or an SNI pattern that does not compile.
+
+Minimal example (one endpoint, no match) and a richer one (two upstreams chosen by SNI, with delay, retries and drop):
+
+```
+# the port must be a TCP listener, here 9000 is started as --ports 8000,9000/tcp
+curl -X POST localhost:8000/port=9000/proxy/tcp/upstreams/add --data '{"svc":{"endpoints":{"ep1":{"address":"localhost:7000"}}}}'
+
+curl -X POST localhost:8000/port=9000/proxy/tcp/upstreams/add --data '{
+  "a": {"endpoints": {"ep1": {"address": "localhost:8081"}}, "match": {"sni": "a.com"}, "delay": {"min": "100ms", "max": "300ms", "count": 5}},
+  "b": {"endpoints": {"ep1": {"address": "localhost:8082"}, "ep2": {"address": "localhost:8083"}}, "match": {"sni": "b.com,.*\\.b\\.org"}, "retries": 2, "retryDelay": {"min": "50ms", "max": "100ms"}, "dropPct": 10}
+}'
+
+# one-shot form: open the TCP listener 9100 and proxy it to localhost:7000
+curl -X POST "localhost:8000/proxy/tcp/9100?address=localhost:7000"
+
+# report
+curl -s localhost:8000/port=9000/proxy/tcp | jq
+curl -s localhost:8000/proxy/tcp/all | jq
+curl -s localhost:8000/port=9000/proxy/tcp/upstreams | jq
+```
 
 ### HTTP CONNECT Proxy
 - A TCP port can also act as an HTTP CONNECT proxy: clients send `CONNECT host:port HTTP/1.1`, `goto` connects to the destination, answers `200 Connection Established`, and then relays bytes opaquely in both directions until either side is done. This is how HTTPS (or any TCP protocol) is tunneled through an HTTP proxy.
@@ -66,7 +91,7 @@
 - Tunnels are tracked like proxied TCP connections, per destination and client address, and are reported by the TCP proxy tracker APIs. Requests that get rejected are counted as rejects.
 - Don't configure a custom ALPN handshake preamble on a CONNECT proxy port: it is read from the client before the CONNECT request is.
 - A delay can be set for the proxy of a port (`/proxy/tcp/http/connect/delay/{delay}`). It is applied to the connection of a client, before the proxy connects to the destination (requests that are rejected are not delayed), and to every transfer of the tunnels of the port, in both directions: what is read from the client or from the destination in one go is held back for the delay before it is passed on. A range (`100ms-1s`) picks a delay at random for each event. A count (`1s:5`) makes the delay apply to the next 5 of these events of the port, connections and transfers altogether, and it is used up by whichever of them come first, on any tunnel; without a count the delay is unlimited. The delay is also applied to the tunnels that are already open, and a tunnel is not idle (see the idle timeout above) while it waits. Delayed events are counted in the `delayCount` of the trackers. The delay is part of the report of the port as `http.connectDelay`, with the count that is left.
-- Anyone who can reach the port can tunnel to any destination that `goto` can reach.
+- There is no proxy authentication. A `Proxy-Authorization` header (what `curl -x http://user:pass@host:port` sends) is neither required nor checked: the tunnel is set up the same with or without it (verified). Anyone who can reach the port can tunnel to any destination that `goto` can reach.
 - To see where the time of a call through the proxy goes (DNS, connecting, the CONNECT exchange, TLS, the response), as a client that uses the resolver and dialer of Go gets it, run the [connectprobe](../../../tools/connectprobe/README.md) tool where the client runs (`make connect-probe`).
 - The `goto` client can send its calls through the port, to `http` and `https` targets: set `proxy` in the call of the [client API](../../client/README.md#calling-via-a-proxy) to the URL of the port. The responses to calls to an `http` target have the `Via-Goto` of the proxy.
 
@@ -98,6 +123,8 @@ proxy:
 - When the file changes the proxy of the port is set up again from the new content, and when the file is removed the CONNECT mode and the delay of its ports are taken away. The TCP listener that was opened for the mode stays, as it does when the mode is disabled with the API.
 - `goto ctl apply` sends the delay, and then the mode, of a port to the remote `goto` with the `/port={port}/proxy/tcp/http/connect/...` APIs, so the admin port of the remote is never the one that becomes the proxy. It sends the `upstreams` of a TCP proxy as well, to the port of the proxy.
 
+Note for the `curl` examples below: `curl` skips the proxy for the hosts of the `no_proxy` environment variable, which often has `localhost` in it. If the exchange doesn't show the proxy (no `CONNECT` line and no `Goto-Connect-Proxy-*` headers with `-v`), add `--noproxy ''` to the command.
+
 ```
 # Enable CONNECT mode on port 9000 (from the admin port), and use it
 curl -X POST localhost:8080/port=9000/proxy/tcp/http/connect/enable
@@ -114,33 +141,61 @@ curl -X POST localhost:8080/port=9000/proxy/tcp/http/connect/delay/clear
 curl -X POST localhost:8080/port=9000/proxy/tcp/http/connect/disable
 ```
 
+CONNECT API responses (all `text/plain`):
+
+|Request|Status|Body|
+|---|---|---|
+| `connect/enable` on another port, e.g. `/port=9000/...` | 200 | `Port [9000]: CONNECT proxy mode enabled, and the port is a TCP port` |
+| `connect/enable` on the port of the request itself or the main port of the server | 400 | `Port [8080] can't be a CONNECT proxy port, as it has to serve HTTP requests. Use another port, which can be configured via this one with the prefix /port={port}` |
+| `connect/enable` failing to convert the listener | 400 | `Port [9000] failed to enable CONNECT proxy mode: ...` |
+| `connect/disable` | 200 | `Port [9000]: CONNECT proxy mode disabled` |
+| `connect/delay/100ms-200ms:3` | 200 | `Port [9000]: CONNECT proxy delay set to [100ms-200ms], count [3]` (with `, which applies once CONNECT proxy mode is enabled on the port` appended if the mode is off) |
+| `connect/delay/clear` or `0s` | 200 | `Port [9000]: CONNECT proxy delay cleared` |
+| `connect/delay/bogus` | 400 | `Invalid delay value [bogus], expected a duration or a range of durations, with an optional count (e.g. 1s, 100ms-1s, 1s:5)` |
+
+The port in the `/port={port}/...` prefix must already be a listener of the server (add it with `POST /server/listeners/add`, e.g. `{"port":9000,"protocol":"http","open":true}`; enabling the mode then turns it into a TCP listener). For a port that is not known, the prefix middleware answers `200` with `Port [9000] not configured` and the mode is not enabled.
+
+A client talks to a port in this mode as to an HTTP proxy. Verified exchange (`curl -p -x http://localhost:9000 -i http://localhost:8083/via/connect`): the tunnel is answered `HTTP/1.1 200 Connection Established` with `Via-Goto: [...:9000][...](Proxy)(HTTP)` and `Goto-Connect-Proxy-Took`, `Goto-Connect-Proxy-Delay`, `Goto-Connect-Proxy-DNS-Took`, `Goto-Connect-Proxy-Dial-Took` headers; the destination's `200 OK` response that follows carries, in addition to its own headers, `Via-Goto` (a second line with the proxy's value), `Goto-Connect-Proxy-Host`, `Goto-Connect-Proxy-Port`, `Goto-Connect-Proxy-Remote-Address`, `Goto-Connect-Proxy-Upstream-Status: {"localhost:8083":{"localhost:8083":200}}`, `Goto-Connect-Proxy-Took` and `Goto-Connect-Proxy-Delay`. A plain `curl -x http://localhost:9000 http://localhost:8083/` (no `-p`) is answered `405 Method Not Allowed` with `Allow: CONNECT`, and `Connection: close`.
+
 #### TCP Proxy Tracker JSON Schema
+The tracker is part of the report of the port (`GET /proxy/tcp`, field `tracker`).
+
 |Field|Data Type|Description|
 |---|---|---|
+| proxyPort | int  | Port of the proxy |
 | connCount | int  | Number of downstream connections received  |
 | connCountsBySNI | map[string]int  | Number of downstream connections received for SNI match, grouped by SNI server names |
-| rejectCountsBySNI | map[string]int  | Number of downstream connections rejected due to SNI mismatch, grouped by SNI server names |
-| targetTrackers |  map[string]TCPTargetTracker  | Tracking details per target. See `TCP Target Tracker JSON Schema` below.  |
+| rejectCountsBySNI | map[string]int  | Number of downstream connections rejected because no upstream matched (or the TLS hello was malformed), grouped by SNI server names (empty name for no SNI). Connections rejected by the CONNECT mode are counted here too. |
+| targetTrackers |  map[string]TCPTargetTracker  | Tracking details per upstream, keyed by upstream name. See `TCP Target Tracker JSON Schema` below.  |
 
 
 #### TCP Target Tracker JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
+| proxyPort | int  | Port of the proxy |
+| upstream | string  | Upstream name |
+| downAddress | string  | Address of the last downstream client |
 | connCount | int  | Number of downstream connections received  |
 | connCountsBySNI | map[string]int  | Number of downstream connections received for SNI match, grouped by SNI server names |
-| tcpSessions |  map[string]TCPSessionTracker  | Tracking details per client session. See `TCP Session Tracker JSON Schema` below.  |
+| tcpSessions |  map[string]TCPSessionTracker  | Tracking details per client session, keyed by the downstream client address. See `TCP Session Tracker JSON Schema` below.  |
 
 
 #### TCP Session Tracker JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
-| sni | string  | SNI server name if one was used to match target for this session |
-| downstream |  map[string]ConnTracker  | Downstream connection tracking details for this session. See `Connection Tracker JSON Schema` below. |
-| upstream |  map[string]ConnTracker  | Upstream connection tracking details for this session. See `Connection Tracker JSON Schema` below. |
+| proxyPort | int  | Port of the proxy |
+| upstream | string  | Upstream name |
+| downAddress | string  | Address of the downstream client |
+| sni | string  | SNI server name if one was used to match the upstream for this session |
+| downConn |  ConnTracker  | Downstream (client) connection tracking details for this session. See `Connection Tracker JSON Schema` below. |
+| upConn |  []ConnTracker  | Tracking details of the upstream connections of this session, one for each endpoint of the upstream that the proxy connected to (including failed attempts). See `Connection Tracker JSON Schema` below. |
 
 #### TCP Connection Tracker JSON Schema
 |Field|Data Type|Description|
 |---|---|---|
+| proxyPort | int  | Port of the proxy |
+| upstream | string  | Upstream name |
+| remoteAddress | string  | Address of the remote party of this connection (the client for `downConn`, the endpoint for `upConn`) |
 | startTime | string  | Connection start time |
 | endTime | string  | Connection end time |
 | firstByteInAt | string  | Time of receipt of the first byte of data |
@@ -157,6 +212,7 @@ curl -X POST localhost:8080/port=9000/proxy/tcp/http/connect/disable
 | remoteClosed | bool  | Whether the connection was closed by remote party |
 | readError | bool  | Whether the connection was closed due to a read error |
 | writeError | bool  | Whether the connection was closed due a write error |
+| connectFailed | bool  | Whether connecting to the endpoint failed (upstream connections only) |
 
 #### TCP Proxy Startup Config Example
 

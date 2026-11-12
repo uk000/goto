@@ -46,6 +46,7 @@ var (
 	background sync.WaitGroup
 )
 
+// RegisterPeer registers this instance as a peer with the registry, retrying up to maxRegisterAttempts times.
 func RegisterPeer(peerName, peerAddress string) {
 	peer := &registry.Peer{
 		Name:      peerName,
@@ -101,6 +102,7 @@ func registerWithRegistry(peerName string, peer *registry.Peer) bool {
 	return true
 }
 
+// DeregisterPeer stops the reminders and tells the registry to remove this instance as a peer.
 func DeregisterPeer(peerName, peerAddress string) {
 	if global.Self.RegistryURL != "" {
 		stopReminders()
@@ -140,6 +142,7 @@ func stopReminders() {
 	reminderLock.Unlock()
 }
 
+// startRegistryReminder periodically tells the registry that the peer is still alive, until stop is closed.
 func startRegistryReminder(peer *registry.Peer, stop <-chan struct{}) {
 	ticker := time.NewTicker(reminderInterval)
 	defer ticker.Stop()
@@ -161,6 +164,7 @@ func startRegistryReminder(peer *registry.Peer, stop <-chan struct{}) {
 	}
 }
 
+// setupStartupTasks applies the startup data from the registry: tracking, probes, files, job scripts, jobs and targets.
 func setupStartupTasks(peerData *registry.PeerData) {
 	log.Printf("Got %d targets, %d jobs, %d job scripts\n", len(peerData.Targets), len(peerData.Jobs), len(peerData.JobScripts))
 

@@ -17,7 +17,9 @@
 package job
 
 import (
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -269,5 +271,64 @@ func TestCommandJobFinishTriggersAnotherJob(t *testing.T) {
 	}
 	if got := outputs(first); !equal(got, []string{"first ran"}) {
 		t.Errorf("outputs of the first job = %v", got)
+	}
+}
+
+// A script job finds its script among the ones that the manager stores, which are added by other calls while jobs are running.
+// Reading a map that another call is writing is a fatal error of the runtime, which takes the whole server down.
+func TestScriptJobRunsWhileScriptsAreStored(t *testing.T) {
+	const runners, writers, rounds = 4, 3, 12
+	setup(t)
+	dir := t.TempDir()
+	script := jobName(t, "script")
+	if _, _, ok := Manager.StoreJobScriptOrFile(dir, script+".sh", []byte("echo running $1\n"), true); !ok {
+		t.Fatal("StoreJobScriptOrFile of a script failed")
+	}
+	job := Manager.jobs[script]
+	job.initialDelayD, job.delayD, job.MaxResults, job.Timeout = time.Millisecond, time.Millisecond, 10, 10*time.Second
+	job.commandTask.Args = []string{"x"}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for r := 0; r < runners; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for i := 0; i < rounds; i++ {
+				RunJobWithInput(script, nil, nil)
+			}
+		}()
+	}
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			<-start
+			for i := 0; i < rounds*4; i++ {
+				if _, _, ok := Manager.StoreJobScriptOrFile(dir, fmt.Sprintf("%s-%d-%d.sh", script, w, i), []byte("echo other\n"), false); !ok {
+					t.Errorf("StoreJobScriptOrFile of script %d-%d failed", w, i)
+				}
+				Manager.getScripts()
+			}
+		}(w)
+	}
+	close(start)
+	ended := make(chan struct{})
+	go func() { wg.Wait(); close(ended) }()
+	select {
+	case <-ended:
+	case <-time.After(60 * time.Second):
+		t.Fatal("running the script job while scripts are stored did not end in time")
+	}
+
+	got := allOutputs(script)
+	if len(got) != runners*rounds {
+		t.Fatalf("outputs = %d, want %d: one for each run", len(got), runners*rounds)
+	}
+	for _, out := range got {
+		if out != "running x" {
+			t.Fatalf("output = %q, want the output of the script", out)
+		}
 	}
 }

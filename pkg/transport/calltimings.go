@@ -44,11 +44,13 @@ type phaseTime struct {
 	set bool
 }
 
+// add accumulates the duration into the phase and marks the phase as one that the call went through.
 func (p *phaseTime) add(d time.Duration) {
 	p.d += d
 	p.set = true
 }
 
+// String returns the duration of the phase, or "-" if the call didn't go through it.
 func (p phaseTime) String() string {
 	if !p.set {
 		return "-"

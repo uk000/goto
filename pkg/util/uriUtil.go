@@ -29,6 +29,7 @@ import (
 	"github.com/gorilla/reverse"
 )
 
+// matchPieces tells if two lists of URI pieces are of the same length and match piece by piece, where a {var} piece on either side matches anything.
 func matchPieces(pieces1 []string, pieces2 []string) bool {
 	if len(pieces1) != len(pieces2) {
 		return false
@@ -44,15 +45,18 @@ func matchPieces(pieces1 []string, pieces2 []string) bool {
 	return true
 }
 
+// getURIPieces lower-cases the URI and splits its path, without the query, into pieces.
 func getURIPieces(uri string) []string {
 	uri = strings.ToLower(uri)
 	return strings.Split(strings.Split(uri, "?")[0], "/")
 }
 
+// MatchURI tells if two URIs match piece by piece, where {var} pieces are wildcards, ignoring the case and the query.
 func MatchURI(uri1 string, uri2 string) bool {
 	return matchPieces(getURIPieces(uri1), getURIPieces(uri2))
 }
 
+// FindURIInMap returns the key of the map that matches the URI (with {var} wildcards), or empty if none does.
 func FindURIInMap(uri string, i interface{}) string {
 	if m := reflect.ValueOf(i); m.Kind() == reflect.Map {
 		uriPieces1 := getURIPieces(uri)
@@ -67,6 +71,7 @@ func FindURIInMap(uri string, i interface{}) string {
 	return ""
 }
 
+// IsURIInMap tells if a key of the map matches the URI.
 func IsURIInMap(uri string, m map[string]interface{}) bool {
 	return FindURIInMap(uri, m) != ""
 }
@@ -93,6 +98,7 @@ type registeredRoute struct {
 	subRouter *mux.Router
 }
 
+// GetURIRegexpAndRoute builds the regexp for the URI, along with a route on the router, holding the registry lock if a router is given.
 func GetURIRegexpAndRoute(uri string, prefix bool, router *mux.Router) (string, *regexp.Regexp, *mux.Router, *mux.Route, error) {
 	if router != nil {
 		routeRegistry.lock.Lock()
@@ -179,6 +185,7 @@ func getURIRegexpAndRoute(uri string, router *mux.Router, prefixRegexp string, p
 	}
 }
 
+// GetURIRegexp builds the prefix matching regexp for the URI without registering any route.
 func GetURIRegexp(uri string) (string, *regexp.Regexp, error) {
 	if uri != "" {
 		if prefixURI, re, _, _, err := getURIRegexpAndRoute(uri, nil, RoutePrefixRegexp, true, true); err == nil {
@@ -190,8 +197,26 @@ func GetURIRegexp(uri string) (string, *regexp.Regexp, error) {
 	return uri, nil, fmt.Errorf("no uri")
 }
 
+// BuildURIMatcher registers a route with the handler for the URI on MatchRouter, and returns its prefix URI, regexp and subrouter.
+// See BuildURIMatcherWhen for what the route takes over, and for the URI that gets no route.
 func BuildURIMatcher(uri string, prefix bool, handlerFunc func(w http.ResponseWriter, r *http.Request)) (string, *regexp.Regexp, *mux.Router, error) {
-	if prefixURI, re, rr, err := registerURIRouteAndGetRegex(uri, prefix, handlerFunc, MatchRouter); err == nil {
+	return BuildURIMatcherWhen(uri, prefix, handlerFunc, nil)
+}
+
+// BuildURIMatcherWhen is BuildURIMatcher with a condition that the requests have to meet, besides having the URI, for the
+// route to take them over: a request that doesn't meet it goes on to the handlers that come after the route, as if the route
+// wasn't there. A route can't be removed from MatchRouter once it is registered, so a caller that serves the URI from state
+// that can go away (e.g. a payload that is cleared) gives a condition that looks at that state. The route of a URI that
+// is registered again is the one that was registered first, along with its condition.
+//
+// The empty URI matches every request of every port, so it gets no route at all: only its regexp is returned (with no
+// subrouter), for the callers that match the URI themselves. A route like that would answer every request, whatever it is for.
+func BuildURIMatcherWhen(uri string, prefix bool, handlerFunc func(w http.ResponseWriter, r *http.Request), applies func(r *http.Request) bool) (string, *regexp.Regexp, *mux.Router, error) {
+	if uri == "" {
+		prefixURI, re, err := BuildURIRegexp(uri, prefix)
+		return prefixURI, re, nil, err
+	}
+	if prefixURI, re, rr, err := registerURIRouteAndGetRegex(uri, prefix, handlerFunc, applies, MatchRouter); err == nil {
 		return prefixURI, re, rr, nil
 	} else {
 		return uri, nil, nil, err
@@ -216,15 +241,17 @@ func BuildURIRegexp(uri string, prefix bool) (string, *regexp.Regexp, error) {
 	return prefixURI, re, nil
 }
 
+// BuildURIMatcherForRouter registers a route with the handler for the URI on the given router, and returns its regexp.
 func BuildURIMatcherForRouter(uri string, prefix bool, handlerFunc func(w http.ResponseWriter, r *http.Request), router *mux.Router) (*regexp.Regexp, error) {
-	if _, re, _, err := registerURIRouteAndGetRegex(uri, prefix, handlerFunc, router); err == nil {
+	if _, re, _, err := registerURIRouteAndGetRegex(uri, prefix, handlerFunc, nil, router); err == nil {
 		return re, nil
 	} else {
 		return nil, err
 	}
 }
 
-func registerURIRouteAndGetRegex(uri string, prefix bool, handler func(http.ResponseWriter, *http.Request), router *mux.Router) (string, *regexp.Regexp, *mux.Router, error) {
+// registerURIRouteAndGetRegex registers the route for the URI on the router the first time, and gives the same result when the URI is registered again.
+func registerURIRouteAndGetRegex(uri string, prefix bool, handler func(http.ResponseWriter, *http.Request), applies func(*http.Request) bool, router *mux.Router) (string, *regexp.Regexp, *mux.Router, error) {
 	if router == nil {
 		return uri, nil, nil, fmt.Errorf("no router to register uri [%s] on", uri)
 	}
@@ -236,7 +263,7 @@ func registerURIRouteAndGetRegex(uri string, prefix bool, handler func(http.Resp
 	}
 	if prefixURI, re, subRouter, route, err := getURIRegexpAndRoute(uri, router, "", prefix, false); err == nil {
 		route = route.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
-			return re.MatchString(r.URL.Path)
+			return re.MatchString(r.URL.Path) && (applies == nil || applies(r))
 		}).HandlerFunc(handler)
 		routeRegistry.routes[key] = &registeredRoute{prefixURI: prefixURI, re: re, subRouter: subRouter}
 		return prefixURI, re, subRouter, nil
@@ -245,6 +272,7 @@ func registerURIRouteAndGetRegex(uri string, prefix bool, handler func(http.Resp
 	}
 }
 
+// TransposeURI builds the URI to forward to from the target template, filling in vars and headers and adjusting the query params.
 func TransposeURI(requestURI, sourceURI, targetURI string, vars, headers, queries map[string]string, addQuery map[string]string, removeQuery []string) string {
 	path := requestURI
 	if targetURI == "" {

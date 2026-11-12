@@ -43,6 +43,7 @@ var (
 	lock        sync.RWMutex
 )
 
+// GetRPCTracker returns the tracker of the port, creating it on first use.
 func GetRPCTracker(port int) *RPCTracker {
 	lock.Lock()
 	defer lock.Unlock()
@@ -55,16 +56,19 @@ func GetRPCTracker(port int) *RPCTracker {
 	return PortTracker[port]
 }
 
+// Clear drops all service trackers.
 func (r *RPCTracker) Clear() {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	r.ServiceTrackers = map[string]*ServiceTracker{}
 }
 
+// TrackService tracks calls to a service and all of its methods.
 func (r *RPCTracker) TrackService(port int, s RPCService, headers []string, header, value string) {
 	r.TrackServiceMethod(port, s, nil, headers, header, value)
 }
 
+// TrackServiceMethod registers request tracking and call-counting hooks for a service and one method (or all methods when nil).
 func (r *RPCTracker) TrackServiceMethod(port int, s RPCService, m RPCMethod, headers []string, header, value string) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
@@ -111,10 +115,12 @@ func anyValueHeaders(headers []string) hooks.Headers {
 	return hookHeaders
 }
 
+// methodHookID builds a hook id unique to the method within its service.
 func methodHookID(serviceName string, m RPCMethod) string {
 	return fmt.Sprintf("%s:%s", serviceName, m.GetURI())
 }
 
+// canonicalHeaderNames converts header names to their canonical HTTP form.
 func canonicalHeaderNames(headers []string) []string {
 	if len(headers) == 0 {
 		return headers
@@ -126,6 +132,7 @@ func canonicalHeaderNames(headers []string) []string {
 	return names
 }
 
+// IncrementServiceCount counts a call to a tracked service and to the methods that the request URI falls under.
 func (r *RPCTracker) IncrementServiceCount(s RPCService, requestURI string) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
@@ -196,6 +203,7 @@ func hasURIPrefix(requestURI, uri string) bool {
 	return false
 }
 
+// trackCallCounts returns a hook listener that counts each matching request against the service.
 func trackCallCounts(s RPCService) func(port int, uri string, requestHeaders map[string][]string, body io.Reader) bool {
 	return func(port int, uri string, requestHeaders map[string][]string, body io.Reader) bool {
 		uri = strings.ToLower(uri)

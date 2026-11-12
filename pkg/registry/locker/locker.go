@@ -96,10 +96,12 @@ func hasData(data any) bool {
 	return true
 }
 
+// newLockerData creates an empty locker entry at the level, with FirstReported set to now.
 func newLockerData(now time.Time, level int) *LockerData {
 	return &LockerData{SubKeys: Locker{}, FirstReported: now, level: level}
 }
 
+// createOrGetLockerData returns the locker entry for the key, creating it if absent.
 func createOrGetLockerData(locker Locker, key string, now time.Time, level int) *LockerData {
 	lockerData := locker[key]
 	if lockerData == nil {
@@ -109,6 +111,7 @@ func createOrGetLockerData(locker Locker, key string, now time.Time, level int) 
 	return lockerData
 }
 
+// unsafeStoreKeysInLocker stores the value at the key path, creating entries as needed; appends to a list of values if add is set.
 func unsafeStoreKeysInLocker(locker Locker, keys []string, value string, add bool) {
 	if len(keys) == 0 {
 		return
@@ -138,6 +141,7 @@ func unsafeStoreKeysInLocker(locker Locker, keys []string, value string, add boo
 	}
 }
 
+// unsafeRemoveSubKeys recursively removes the sub-key path, pruning the entries that are left without sub-keys.
 func unsafeRemoveSubKeys(lockerData *LockerData, keys []string, index int) {
 	if len(keys) == 0 || index >= len(keys) {
 		return
@@ -152,6 +156,7 @@ func unsafeRemoveSubKeys(lockerData *LockerData, keys []string, index int) {
 	}
 }
 
+// unsafeRemoveKeysFromLocker removes the key path from the locker, pruning the entries that are left without sub-keys.
 func unsafeRemoveKeysFromLocker(locker Locker, keys []string) {
 	if len(keys) == 0 {
 		return
@@ -166,6 +171,7 @@ func unsafeRemoveKeysFromLocker(locker Locker, keys []string) {
 	}
 }
 
+// unsafeReadKeys looks up the key path, returning the data if the entry has any, otherwise a view of it, plus found and data-at-key flags.
 func unsafeReadKeys(locker Locker, keys []string, data bool, level int) (interface{}, bool, bool) {
 	if len(keys) > 0 && locker[keys[0]] != nil {
 		lockerData := locker[keys[0]]
@@ -191,13 +197,33 @@ func unsafeReadKeys(locker Locker, keys []string, data bool, level int) (interfa
 				}
 				return ldView, true, false
 			} else {
-				return lockerData, true, false
+				// A copy, not the live entry: callers encode what is returned after the data locker's lock is released
+				ldCopy := newLockerData(lockerData.FirstReported, lockerData.level)
+				ldCopy.LastReported = lockerData.LastReported
+				unsafeCopyLocker(lockerData.SubKeys, ldCopy.SubKeys)
+				return ldCopy, true, false
 			}
 		}
 	}
 	return "", false, false
 }
 
+// unsafeCopyLocker deep-copies the locker entries into lockerCopy as they are, with their data left unparsed.
+func unsafeCopyLocker(locker, lockerCopy Locker) {
+	for key, ld := range locker {
+		if ld == nil {
+			lockerCopy[key] = nil
+			continue
+		}
+		ldCopy := newLockerData(ld.FirstReported, ld.level)
+		ldCopy.Data = ld.Data
+		ldCopy.LastReported = ld.LastReported
+		unsafeCopyLocker(ld.SubKeys, ldCopy.SubKeys)
+		lockerCopy[key] = ldCopy
+	}
+}
+
+// unsafeSearchOrGetPaths collects the key paths that hold data, as a flat list or a nested map, keeping only keys that match the pattern.
 func unsafeSearchOrGetPaths(locker Locker, pathPrefix string, isTop, flat bool, pattern *regexp.Regexp) interface{} {
 	var paths interface{}
 	mapPaths := map[string]interface{}{}
@@ -240,6 +266,7 @@ func unsafeSearchOrGetPaths(locker Locker, pathPrefix string, isTop, flat bool, 
 	return paths
 }
 
+// unsafeGetLockerView copies the locker into lockerView, parsing string data as JSON if data is set and replacing it with "..." otherwise.
 func unsafeGetLockerView(locker, lockerView Locker, data bool) {
 	if locker != nil && lockerView != nil {
 		for key, ld := range locker {
@@ -271,6 +298,7 @@ func unsafeGetLockerView(locker, lockerView Locker, data bool) {
 	}
 }
 
+// unsafeTrimLocker copies the locker into lockerView down to the given level, marking deeper sub-keys with a "..." placeholder.
 func unsafeTrimLocker(locker, lockerView Locker, level int) {
 	if locker != nil && lockerView != nil && level > 0 {
 		for key, ld := range locker {
@@ -295,6 +323,7 @@ func unsafeTrimLocker(locker, lockerView Locker, level int) {
 	}
 }
 
+// MarshalJSON flattens the sub-keys next to "data", adding the reported times only for top-level entries.
 func (ld *LockerData) MarshalJSON() ([]byte, error) {
 	data := map[string]interface{}{}
 	if ld.level == 1 {
@@ -316,12 +345,14 @@ func (ld *LockerData) MarshalJSON() ([]byte, error) {
 	return json.Marshal(data)
 }
 
+// newDataLocker creates an initialized, active data locker.
 func newDataLocker() *DataLocker {
 	dataLocker := &DataLocker{}
 	dataLocker.init()
 	return dataLocker
 }
 
+// init resets the data locker to empty and active.
 func (dl *DataLocker) init() {
 	dl.lock.Lock()
 	defer dl.lock.Unlock()
@@ -329,10 +360,24 @@ func (dl *DataLocker) init() {
 	dl.Active = true
 }
 
+// MarshalJSON marshals just the locker map, under the data locker's read lock so that it is safe against concurrent stores.
 func (dl *DataLocker) MarshalJSON() ([]byte, error) {
+	dl.lock.RLock()
+	defer dl.lock.RUnlock()
 	return json.Marshal(dl.Locker)
 }
 
+// view returns a copy of the data locker with the data shown or hidden, read under the data locker's read lock.
+func (dl *DataLocker) view(data bool) *DataLocker {
+	dl.lock.RLock()
+	defer dl.lock.RUnlock()
+	dataView := newDataLocker()
+	dataView.Active = dl.Active
+	unsafeGetLockerView(dl.Locker, dataView.Locker, data)
+	return dataView
+}
+
+// Store stores the value at the key path, appending to a list of values if add is set.
 func (dl *DataLocker) Store(keys []string, value string, add bool) {
 	if len(keys) == 0 {
 		return
@@ -342,18 +387,21 @@ func (dl *DataLocker) Store(keys []string, value string, add bool) {
 	unsafeStoreKeysInLocker(dl.Locker, keys, value, add)
 }
 
+// Remove removes the key path from the data locker.
 func (dl *DataLocker) Remove(keys []string) {
 	dl.lock.Lock()
 	defer dl.lock.Unlock()
 	unsafeRemoveKeysFromLocker(dl.Locker, keys)
 }
 
+// Get reads the key path from the data locker; see unsafeReadKeys for the returned values.
 func (dl *DataLocker) Get(keys []string, data bool, level int) (interface{}, bool, bool) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 	return unsafeReadKeys(dl.Locker, keys, data, level)
 }
 
+// Trim returns a copy of the data locker trimmed down to the given level.
 func (dl *DataLocker) Trim(level int) *DataLocker {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
@@ -363,16 +411,21 @@ func (dl *DataLocker) Trim(level int) *DataLocker {
 	return dataView
 }
 
+// Deactivate marks the data locker as inactive.
 func (dl *DataLocker) Deactivate() {
+	dl.lock.Lock()
+	defer dl.lock.Unlock()
 	dl.Active = false
 }
 
+// newPeerLocker creates an initialized peer locker.
 func newPeerLocker() *PeerLocker {
 	peerLocker := &PeerLocker{}
 	peerLocker.init()
 	return peerLocker
 }
 
+// init resets the peer locker and its instance lockers to empty.
 func (pl *PeerLocker) init() {
 	pl.lock.Lock()
 	defer pl.lock.Unlock()
@@ -380,12 +433,17 @@ func (pl *PeerLocker) init() {
 	pl.DataLocker.init()
 }
 
+// MarshalJSON flattens the peer's own locker keys and adds the instance lockers under "instanceLockers".
+// The peer locker's lock, then its data locker's lock, are held in the same order that stores take them, and the
+// instance lockers lock themselves while they are marshaled, so this is safe against concurrent stores.
 func (pl *PeerLocker) MarshalJSON() ([]byte, error) {
+	pl.lock.RLock()
+	defer pl.lock.RUnlock()
+	pl.DataLocker.lock.RLock()
+	defer pl.DataLocker.lock.RUnlock()
 	data := map[string]interface{}{}
-	if len(pl.DataLocker.Locker) > 0 {
-		for k, v := range pl.DataLocker.Locker {
-			data[k] = v
-		}
+	for k, v := range pl.DataLocker.Locker {
+		data[k] = v
 	}
 	if len(pl.InstanceLockers) > 0 {
 		data["instanceLockers"] = pl.InstanceLockers
@@ -393,6 +451,7 @@ func (pl *PeerLocker) MarshalJSON() ([]byte, error) {
 	return json.Marshal(data)
 }
 
+// createOrGetInstanceLocker returns the data locker of the peer instance, creating it if absent.
 func (pl *PeerLocker) createOrGetInstanceLocker(peerLabel string) *DataLocker {
 	pl.lock.RLock()
 	il := pl.InstanceLockers[peerLabel]
@@ -406,6 +465,7 @@ func (pl *PeerLocker) createOrGetInstanceLocker(peerLabel string) *DataLocker {
 	return il
 }
 
+// clearInstanceLocker replaces the instance's data locker with an empty one, returning whether the instance was present.
 func (pl *PeerLocker) clearInstanceLocker(peerLabel string) bool {
 	pl.lock.RLock()
 	_, present := pl.InstanceLockers[peerLabel]
@@ -418,60 +478,76 @@ func (pl *PeerLocker) clearInstanceLocker(peerLabel string) bool {
 	return present
 }
 
+// removeInstanceLocker deletes the data locker of the peer instance.
 func (pl *PeerLocker) removeInstanceLocker(peerLabel string) {
 	pl.lock.Lock()
 	defer pl.lock.Unlock()
 	delete(pl.InstanceLockers, peerLabel)
 }
 
+// Store stores the value at the key path in the peer's own data locker.
 func (pl *PeerLocker) Store(keys []string, value string) {
 	pl.lock.Lock()
 	defer pl.lock.Unlock()
 	pl.DataLocker.Store(keys, value, false)
 }
 
+// Remove removes the key path from the peer's own data locker.
 func (pl *PeerLocker) Remove(keys []string) {
 	pl.lock.Lock()
 	defer pl.lock.Unlock()
 	pl.DataLocker.Remove(keys)
 }
 
+// GetLockerView returns a copy of the peer locker and its instance lockers, with data shown or hidden.
 func (pl *PeerLocker) GetLockerView(data bool) *PeerLocker {
 	pl.lock.RLock()
 	defer pl.lock.RUnlock()
 	plView := newPeerLocker()
-	plView.Active = pl.Active
-	unsafeGetLockerView(pl.Locker, plView.Locker, data)
+	// Each data locker (the peer's own and those of the instances) is read under its own lock, since stores into
+	// them take just that lock and not the peer locker's.
+	ownView := pl.DataLocker.view(data)
+	plView.DataLocker.Locker = ownView.Locker
+	plView.DataLocker.Active = ownView.Active
 	for label, il := range pl.InstanceLockers {
-		ilView := newDataLocker()
-		plView.InstanceLockers[label] = ilView
-		unsafeGetLockerView(il.Locker, ilView.Locker, data)
-		ilView.Active = il.Active
+		if il == nil {
+			plView.InstanceLockers[label] = newDataLocker()
+		} else {
+			plView.InstanceLockers[label] = il.view(data)
+		}
 	}
 	return plView
 }
 
+// Trim returns a copy of the peer locker and its instance lockers trimmed down to the given level.
 func (pl *PeerLocker) Trim(level int) *PeerLocker {
 	pl.lock.RLock()
 	defer pl.lock.RUnlock()
 	plView := newPeerLocker()
-	unsafeTrimLocker(pl.DataLocker.Locker, plView.DataLocker.Locker, level)
-	plView.DataLocker.Active = pl.DataLocker.Active
+	// DataLocker.Trim reads under the data locker's own lock.
+	ownView := pl.DataLocker.Trim(level)
+	plView.DataLocker.Locker = ownView.Locker
+	plView.DataLocker.Active = ownView.Active
 	for label, il := range pl.InstanceLockers {
-		ilView := newDataLocker()
-		plView.InstanceLockers[label] = ilView
-		unsafeTrimLocker(il.Locker, ilView.Locker, level)
-		ilView.Active = il.Active
+		if il == nil {
+			plView.InstanceLockers[label] = newDataLocker()
+		} else {
+			plView.InstanceLockers[label] = il.Trim(level)
+		}
 	}
 	return plView
 }
 
+// SearchOrGetDataLockerPaths returns the data paths in the peer's own locker that match the pattern, flat if there is no URI prefix.
 func (pl *PeerLocker) SearchOrGetDataLockerPaths(uriPrefix string, pattern *regexp.Regexp) interface{} {
 	pl.lock.RLock()
 	defer pl.lock.RUnlock()
+	pl.DataLocker.lock.RLock()
+	defer pl.DataLocker.lock.RUnlock()
 	return unsafeSearchOrGetPaths(pl.DataLocker.Locker, uriPrefix, true, uriPrefix == "", pattern)
 }
 
+// NewCombiLocker creates and opens a locker with the label, whose path label extends that of the parent.
 func NewCombiLocker(label string, parent *CombiLocker) *CombiLocker {
 	pathLabel := label
 	if parent != nil {
@@ -482,6 +558,7 @@ func NewCombiLocker(label string, parent *CombiLocker) *CombiLocker {
 	return cl
 }
 
+// Clone copies the locker and its sub-lockers, with peer lockers if peers is set and data hidden unless data is set.
 func (cl *CombiLocker) Clone(peers, data, raw bool) *CombiLocker {
 	pathLabel := cl.Label
 	if cl.parent != nil {
@@ -495,30 +572,43 @@ func (cl *CombiLocker) Clone(peers, data, raw bool) *CombiLocker {
 	if raw {
 		cl2.DataLocker = cl.DataLocker
 	} else {
-		cl2.DataLocker.Active = cl.DataLocker.Active
-		unsafeGetLockerView(cl.DataLocker.Locker, cl2.DataLocker.Locker, data)
+		// The data locker is read under its own lock, since stores take just that lock and not the locker's.
+		cl2.DataLocker = cl.DataLocker.view(data)
 	}
 	for label, sub := range cl.SubLockers {
-		cl2.SubLockers[label] = sub.GetLockerView(data)
+		if sub != nil {
+			cl2.SubLockers[label] = sub.GetLockerView(data)
+		}
 	}
 	if peers {
 		for peer, pl := range cl.PeerLockers {
-			cl2.PeerLockers[peer] = pl.GetLockerView(data)
+			if pl != nil {
+				cl2.PeerLockers[peer] = pl.GetLockerView(data)
+			}
 		}
 	}
 	return cl2
 }
 
+// Init resets the peer lockers, data locker and sub-lockers to empty, and opens the locker.
 func (cl *CombiLocker) Init() {
 	cl.lock.Lock()
 	defer cl.lock.Unlock()
 	cl.PeerLockers = map[string]*PeerLocker{}
 	cl.DataLocker = newDataLocker()
 	cl.SubLockers = map[string]*CombiLocker{}
-	cl.Open()
+	cl.unsafeOpen()
 }
 
+// Open marks the locker as current and records its opened times.
 func (cl *CombiLocker) Open() {
+	cl.lock.Lock()
+	defer cl.lock.Unlock()
+	cl.unsafeOpen()
+}
+
+// unsafeOpen is Open for callers that already hold the locker's lock.
+func (cl *CombiLocker) unsafeOpen() {
 	if !cl.Current {
 		now := time.Now()
 		if cl.FirstOpened.IsZero() {
@@ -529,19 +619,70 @@ func (cl *CombiLocker) Open() {
 	}
 }
 
+// isCurrent tells whether the locker is flagged as current.
+func (cl *CombiLocker) isCurrent() bool {
+	cl.lock.RLock()
+	defer cl.lock.RUnlock()
+	return cl.Current
+}
+
+// setCurrent sets or clears the current flag of the locker.
+func (cl *CombiLocker) setCurrent(current bool) {
+	cl.lock.Lock()
+	defer cl.lock.Unlock()
+	cl.Current = current
+}
+
+// getSubLockers returns a copy of the sub-lockers map, so that it can be iterated without holding the locker's lock.
+func (cl *CombiLocker) getSubLockers() CombiLockers {
+	cl.lock.RLock()
+	defer cl.lock.RUnlock()
+	subs := make(CombiLockers, len(cl.SubLockers))
+	for label, sub := range cl.SubLockers {
+		subs[label] = sub
+	}
+	return subs
+}
+
+// MarshalJSON marshals the label, data locker, peer lockers, sub-lockers and opened times. The locker's own fields
+// and maps are copied under its read lock, and the data locker and peer lockers lock themselves while they are
+// marshaled, so this is safe to call on a locker that is being updated.
 func (cl *CombiLocker) MarshalJSON() ([]byte, error) {
+	cl.lock.RLock()
+	label, current, firstOpened, lastOpened := cl.Label, cl.Current, cl.FirstOpened, cl.LastOpened
+	dl := cl.DataLocker
+	var peerLockers map[string]*PeerLocker
+	if cl.PeerLockers != nil {
+		peerLockers = make(map[string]*PeerLocker, len(cl.PeerLockers))
+		for peer, pl := range cl.PeerLockers {
+			peerLockers[peer] = pl
+		}
+	}
+	var subLockers CombiLockers
+	if cl.SubLockers != nil {
+		subLockers = make(CombiLockers, len(cl.SubLockers))
+		for subLabel, sub := range cl.SubLockers {
+			subLockers[subLabel] = sub
+		}
+	}
+	cl.lock.RUnlock()
+	var dataLocker interface{} = Locker{}
+	if dl != nil {
+		dataLocker = dl
+	}
 	data := map[string]interface{}{
-		"label":       cl.Label,
-		"dataLocker":  cl.DataLocker.Locker,
-		"peerLockers": cl.PeerLockers,
-		"subLockers":  cl.SubLockers,
-		"current":     cl.Current,
-		"firstOpened": cl.FirstOpened,
-		"lastOpened":  cl.LastOpened,
+		"label":       label,
+		"dataLocker":  dataLocker,
+		"peerLockers": peerLockers,
+		"subLockers":  subLockers,
+		"current":     current,
+		"firstOpened": firstOpened,
+		"lastOpened":  lastOpened,
 	}
 	return json.Marshal(data)
 }
 
+// GetLabels returns the path labels of the locker and its sub-lockers with their opened times and current flag.
 func (cl *CombiLocker) GetLabels() map[string]interface{} {
 	cl.lock.Lock()
 	defer cl.lock.Unlock()
@@ -566,6 +707,7 @@ func (cl *CombiLocker) GetLabels() map[string]interface{} {
 	return labels
 }
 
+// GetSubLocker returns the sub-locker at the label path, or nil if there is none.
 func (cl *CombiLocker) GetSubLocker(labels []string) *CombiLocker {
 	if len(labels) == 0 {
 		return nil
@@ -579,6 +721,7 @@ func (cl *CombiLocker) GetSubLocker(labels []string) *CombiLocker {
 	return sub
 }
 
+// InitPeerLocker resets the peer's locker (or just one instance's) or all peer lockers if no peer is named, and always returns true.
 func (cl *CombiLocker) InitPeerLocker(peerName string, peerLabel string) bool {
 	if peerName != "" {
 		peerName = strings.ToLower(peerName)
@@ -591,11 +734,14 @@ func (cl *CombiLocker) InitPeerLocker(peerName string, peerLabel string) bool {
 		}
 		cl.lock.Unlock()
 	} else {
+		cl.lock.Lock()
 		cl.PeerLockers = map[string]*PeerLocker{}
+		cl.lock.Unlock()
 	}
 	return true
 }
 
+// createOrGetPeerLocker returns the peer's locker (the name is case-insensitive), creating it if absent.
 func (cl *CombiLocker) createOrGetPeerLocker(peerName string) *PeerLocker {
 	peerName = strings.ToLower(peerName)
 	cl.lock.Lock()
@@ -608,6 +754,7 @@ func (cl *CombiLocker) createOrGetPeerLocker(peerName string) *PeerLocker {
 	return peerLocker
 }
 
+// getPeerLocker returns the peer's locker, or nil if there is none.
 func (cl *CombiLocker) getPeerLocker(peerName string) *PeerLocker {
 	peerName = strings.ToLower(peerName)
 	cl.lock.Lock()
@@ -615,6 +762,7 @@ func (cl *CombiLocker) getPeerLocker(peerName string) *PeerLocker {
 	return cl.PeerLockers[peerName]
 }
 
+// getPeerLockers collects the lockers of the peer (or all peers) from this locker and its sub-lockers, by peer and locker path label.
 func (cl *CombiLocker) getPeerLockers(peerName string) PeerMultiLockers {
 	peerName = strings.ToLower(peerName)
 	lockers := PeerMultiLockers{}
@@ -648,14 +796,17 @@ func (cl *CombiLocker) getPeerLockers(peerName string) PeerMultiLockers {
 	return lockers
 }
 
+// createOrGetInstanceLocker returns the data locker of the peer instance, creating the peer and instance lockers if absent.
 func (cl *CombiLocker) createOrGetInstanceLocker(peerName string, peerLabel string) *DataLocker {
 	return cl.createOrGetPeerLocker(peerName).createOrGetInstanceLocker(peerLabel)
 }
 
+// DeactivateInstanceLocker marks the data locker of the peer instance as inactive, creating it if absent.
 func (cl *CombiLocker) DeactivateInstanceLocker(peerName string, peerLabel string) {
 	cl.createOrGetPeerLocker(peerName).createOrGetInstanceLocker(peerLabel).Deactivate()
 }
 
+// StorePeerData stores the value at the key path in the peer's locker, or in the instance's locker if peerLabel is given.
 func (cl *CombiLocker) StorePeerData(peerName, peerLabel string, keys []string, value string) {
 	if len(keys) == 0 {
 		return
@@ -667,6 +818,7 @@ func (cl *CombiLocker) StorePeerData(peerName, peerLabel string, keys []string, 
 	}
 }
 
+// RemovePeerData removes the key path from the peer's locker, or from the instance's locker if peerLabel is given.
 func (cl *CombiLocker) RemovePeerData(peerName, peerLabel string, keys []string) {
 	if len(keys) == 0 {
 		return
@@ -678,6 +830,7 @@ func (cl *CombiLocker) RemovePeerData(peerName, peerLabel string, keys []string)
 	}
 }
 
+// Store stores the value at the key path in the locker's own data locker.
 func (cl *CombiLocker) Store(keys []string, value string, add bool) {
 	cl.lock.Lock()
 	dl := cl.DataLocker
@@ -685,6 +838,7 @@ func (cl *CombiLocker) Store(keys []string, value string, add bool) {
 	dl.Store(keys, value, add)
 }
 
+// Remove removes the key path from the locker's own data locker.
 func (cl *CombiLocker) Remove(keys []string) {
 	cl.lock.Lock()
 	dl := cl.DataLocker
@@ -692,12 +846,16 @@ func (cl *CombiLocker) Remove(keys []string) {
 	dl.Remove(keys)
 }
 
+// GetFromSubLockers reads the key path from all nested sub-lockers, returning the values found by sub-locker path label.
 func (cl *CombiLocker) GetFromSubLockers(keys []string, data bool, level int) map[string]interface{} {
 	if len(keys) == 0 {
 		return nil
 	}
 	result := map[string]interface{}{}
-	for _, sub := range cl.SubLockers {
+	for _, sub := range cl.getSubLockers() {
+		if sub == nil {
+			continue
+		}
 		if subData, present, _ := sub.Get(keys, data, level); present {
 			result[sub.PathLabel] = subData
 		}
@@ -710,6 +868,7 @@ func (cl *CombiLocker) GetFromSubLockers(keys []string, data bool, level int) ma
 	return result
 }
 
+// Get reads the key path from the locker's own data locker, wrapping non-data results in a map keyed by the path.
 func (cl *CombiLocker) Get(keys []string, data bool, level int) (interface{}, bool, bool) {
 	if len(keys) == 0 {
 		return nil, false, false
@@ -727,6 +886,7 @@ func (cl *CombiLocker) Get(keys []string, data bool, level int) (interface{}, bo
 	return nil, false, false
 }
 
+// ClearInstanceLocker clears the data locker of the peer instance, returning whether it was present.
 func (cl *CombiLocker) ClearInstanceLocker(peerName, peerLabel string) bool {
 	peerName = strings.ToLower(peerName)
 	cl.lock.Lock()
@@ -738,6 +898,7 @@ func (cl *CombiLocker) ClearInstanceLocker(peerName, peerLabel string) bool {
 	return false
 }
 
+// RemovePeerLocker deletes the peer's locker.
 func (cl *CombiLocker) RemovePeerLocker(peerName string) {
 	peerName = strings.ToLower(peerName)
 	cl.lock.Lock()
@@ -745,6 +906,7 @@ func (cl *CombiLocker) RemovePeerLocker(peerName string) {
 	delete(cl.PeerLockers, peerName)
 }
 
+// GetFromPeerInstanceLocker reads the key path from the peer's locker and instance lockers, keyed by instance when several have it.
 func (cl *CombiLocker) GetFromPeerInstanceLocker(peerName, peerLabel string, keys []string, data bool, level int) (interface{}, bool, bool) {
 	if len(keys) == 0 || peerName == "" {
 		return nil, false, false
@@ -800,6 +962,7 @@ func (cl *CombiLocker) GetFromPeerInstanceLocker(peerName, peerLabel string, key
 	return result, true, false
 }
 
+// GetPeerLockers returns the peer lockers (or the instance's locker) of this locker and its sub-lockers, by peer and path label.
 func (cl *CombiLocker) GetPeerLockers(peerName, peerLabel string) map[string]map[string]interface{} {
 	peerName = strings.ToLower(peerName)
 	peerLockers := cl.getPeerLockers(peerName)
@@ -822,6 +985,7 @@ func (cl *CombiLocker) GetPeerLockers(peerName, peerLabel string) map[string]map
 	return lockers
 }
 
+// GetPeerLockersView is like GetPeerLockers, but returns views of the peer lockers with data shown or hidden.
 func (cl *CombiLocker) GetPeerLockersView(peerName, peerLabel string, data bool) map[string]map[string]interface{} {
 	peerName = strings.ToLower(peerName)
 	peerLockers := cl.getPeerLockers(peerName)
@@ -845,6 +1009,7 @@ func (cl *CombiLocker) GetPeerLockersView(peerName, peerLabel string, data bool)
 	return lockers
 }
 
+// GetDataLockers returns the data lockers of this locker and its sub-lockers, keyed by path label.
 func (cl *CombiLocker) GetDataLockers() DataLockers {
 	cl.lock.Lock()
 	defer cl.lock.Unlock()
@@ -858,43 +1023,49 @@ func (cl *CombiLocker) GetDataLockers() DataLockers {
 	return dataLockers
 }
 
+// GetLockerView returns a copy of the locker with its peer lockers, and with data shown or hidden.
 func (cl *CombiLocker) GetLockerView(data bool) *CombiLocker {
 	cl.lock.RLock()
 	defer cl.lock.RUnlock()
 	return cl.Clone(true, data, false)
 }
 
+// GetLockerWithoutPeers returns a copy of the locker with its data but without peer lockers.
 func (cl *CombiLocker) GetLockerWithoutPeers() *CombiLocker {
 	cl.lock.RLock()
 	defer cl.lock.RUnlock()
 	return cl.Clone(false, true, false)
 }
 
+// GetDataLockerView returns a copy of the locker's own data locker with the data hidden.
 func (cl *CombiLocker) GetDataLockerView() *DataLocker {
 	cl.lock.RLock()
-	defer cl.lock.RUnlock()
-	dataView := newDataLocker()
-	dataView.Active = cl.DataLocker.Active
-	unsafeGetLockerView(cl.DataLocker.Locker, dataView.Locker, false)
-	return dataView
+	dl := cl.DataLocker
+	cl.lock.RUnlock()
+	return dl.view(false)
 }
 
+// Trim returns a copy of the locker, its peer lockers and its sub-lockers trimmed down to the given level.
 func (cl *CombiLocker) Trim(level int) *CombiLocker {
 	cl.lock.RLock()
 	defer cl.lock.RUnlock()
 	combiView := NewCombiLocker(cl.Label, cl.parent)
 	for label, sub := range cl.SubLockers {
-		combiView.SubLockers[label] = sub.Trim(level)
+		if sub != nil {
+			combiView.SubLockers[label] = sub.Trim(level)
+		}
 	}
 	for peer, pl := range cl.PeerLockers {
-		combiView.PeerLockers[peer] = pl.Trim(level)
+		if pl != nil {
+			combiView.PeerLockers[peer] = pl.Trim(level)
+		}
 	}
 	combiView.DataLocker = cl.DataLocker.Trim(level)
-	combiView.DataLocker.Active = cl.DataLocker.Active
 	combiView.Current = cl.Current
 	return combiView
 }
 
+// searchOrGetPathsFromSubLockers collects the data paths of the sub-lockers, keyed by sub-locker label.
 func (cl *CombiLocker) searchOrGetPathsFromSubLockers(uriPrefix string, pattern *regexp.Regexp) map[string]map[string]interface{} {
 	subPaths := map[string]map[string]interface{}{}
 	for _, sub := range cl.SubLockers {
@@ -909,6 +1080,7 @@ func (cl *CombiLocker) searchOrGetPathsFromSubLockers(uriPrefix string, pattern 
 	return subPaths
 }
 
+// searchOrGetPathsFromPeerLockers collects the data paths of the peer lockers, keyed by peer.
 func (cl *CombiLocker) searchOrGetPathsFromPeerLockers(uriPrefix string, pattern *regexp.Regexp) map[string]interface{} {
 	peerPaths := map[string]interface{}{}
 	for peer, pl := range cl.PeerLockers {
@@ -919,6 +1091,7 @@ func (cl *CombiLocker) searchOrGetPathsFromPeerLockers(uriPrefix string, pattern
 	return peerPaths
 }
 
+// SearchOrGetDataLockerPaths collects the matching data paths of the locker, its peers and sub-lockers, as URIs if uriPrefix is set.
 func (cl *CombiLocker) SearchOrGetDataLockerPaths(uriPrefix string, pattern *regexp.Regexp, isTop bool) map[string]interface{} {
 	cl.lock.RLock()
 	defer cl.lock.RUnlock()
@@ -930,8 +1103,12 @@ func (cl *CombiLocker) SearchOrGetDataLockerPaths(uriPrefix string, pattern *reg
 	if uriPrefix != "" {
 		lockerGetURI = uriPrefix + cl.PathLabel + "/get/"
 	}
-	if cl.DataLocker != nil && cl.DataLocker.Locker != nil && len(cl.DataLocker.Locker) > 0 {
-		dataPaths["data"] = unsafeSearchOrGetPaths(cl.DataLocker.Locker, lockerGetURI, true, uriPrefix == "", pattern)
+	if cl.DataLocker != nil {
+		cl.DataLocker.lock.RLock()
+		if len(cl.DataLocker.Locker) > 0 {
+			dataPaths["data"] = unsafeSearchOrGetPaths(cl.DataLocker.Locker, lockerGetURI, true, uriPrefix == "", pattern)
+		}
+		cl.DataLocker.lock.RUnlock()
 	}
 	if cl.PeerLockers != nil {
 		dataPaths["peerLockers"] = cl.searchOrGetPathsFromPeerLockers(lockerGetURI, pattern)
@@ -942,6 +1119,7 @@ func (cl *CombiLocker) SearchOrGetDataLockerPaths(uriPrefix string, pattern *reg
 	return dataPaths
 }
 
+// getPeersClientResults aggregates the target results that peer instances stored under the client key, by peer or by instance.
 func (cl *CombiLocker) getPeersClientResults(peerName string, targets []string, trackingHeaders []string, crossTrackingHeaders map[string][]string,
 	trackingTimeBuckets [][]int, detailed, byInstances bool) (PeersClientResults, PeersInstanceClientResults) {
 	peersClientResults := PeersClientResults{}
@@ -1007,6 +1185,7 @@ func (cl *CombiLocker) getPeersClientResults(peerName string, targets []string, 
 	return peersClientResults, peersInstanceClientResults
 }
 
+// GetPeersClientResults returns the aggregated client results of peers, as a summary or with details, optionally by instance.
 func (cl *CombiLocker) GetPeersClientResults(peerName string, targets []string, trackingHeaders []string, crossTrackingHeaders map[string][]string,
 	trackingTimeBuckets [][]int, detailed, byInstances bool) interface{} {
 
@@ -1056,12 +1235,14 @@ func (cl *CombiLocker) GetPeersClientResults(peerName string, targets []string, 
 	return summaryResults
 }
 
+// NewLabeledLockers creates labeled lockers with the default locker as the current one.
 func NewLabeledLockers() *LabeledLockers {
 	ll := &LabeledLockers{}
 	ll.Init()
 	return ll
 }
 
+// Init resets to just the default locker, which is the current one.
 func (ll *LabeledLockers) Init() {
 	ll.lock.Lock()
 	defer ll.lock.Unlock()
@@ -1073,12 +1254,25 @@ func (ll *LabeledLockers) Init() {
 	ll.currentLocker.Current = true
 }
 
+// ValidateLabel checks that the comma-separated label path is usable as a locker label, i.e. that none of its
+// segments is empty (so ",x", "x," and "x,,y" are rejected).
+func ValidateLabel(label string) error {
+	for _, l := range strings.Split(label, ",") {
+		if l == "" {
+			return fmt.Errorf("invalid locker label [%s]: label segments cannot be empty", label)
+		}
+	}
+	return nil
+}
+
+// unsafeCreateOrGetLocker returns the locker for the comma-separated label path and its parent, creating the missing
+// lockers. It returns nil lockers, and creates nothing, if the label has an empty segment.
 func (ll *LabeledLockers) unsafeCreateOrGetLocker(label string) (*CombiLocker, *CombiLocker) {
-	labels := strings.Split(label, ",")
-	l := labels[0]
-	if l == "" {
+	if ValidateLabel(label) != nil {
 		return nil, nil
 	}
+	labels := strings.Split(label, ",")
+	l := labels[0]
 	locker := ll.lockers[l]
 	var parent *CombiLocker
 	if locker == nil {
@@ -1091,39 +1285,59 @@ func (ll *LabeledLockers) unsafeCreateOrGetLocker(label string) (*CombiLocker, *
 		parent = locker
 		l := labels[i]
 		pathLabel += "," + l
-		if locker.SubLockers[l] == nil {
-			locker.SubLockers[l] = NewCombiLocker(l, parent)
-			ll.allLockers[pathLabel] = locker.SubLockers[l]
+		// The sub-lockers map is read by lockers' own views and marshaling under the locker's lock, so it is
+		// updated under that lock too (ll.lock alone doesn't cover those readers).
+		parent.lock.Lock()
+		locker = parent.SubLockers[l]
+		if locker == nil {
+			locker = NewCombiLocker(l, parent)
+			parent.SubLockers[l] = locker
+			ll.allLockers[pathLabel] = locker
 		}
-		locker = locker.SubLockers[l]
+		parent.lock.Unlock()
 	}
 	return locker, parent
 }
 
-func (ll *LabeledLockers) OpenLocker(label string) {
+// OpenLocker makes the locker for the label, created if needed, the current one. An invalid label (see
+// ValidateLabel) is rejected with an error, leaving the current locker as it was.
+func (ll *LabeledLockers) OpenLocker(label string) error {
+	if err := ValidateLabel(label); err != nil {
+		return err
+	}
 	ll.lock.Lock()
 	defer ll.lock.Unlock()
-	if ll.currentLocker != nil {
-		ll.currentLocker.lock.Lock()
-		ll.currentLocker.Current = false
-		ll.currentLocker.lock.Unlock()
+	locker, _ := ll.unsafeCreateOrGetLocker(label)
+	if locker == nil {
+		return fmt.Errorf("invalid locker label [%s]", label)
 	}
-	ll.currentLocker, _ = ll.unsafeCreateOrGetLocker(label)
+	if ll.currentLocker != nil {
+		ll.currentLocker.setCurrent(false)
+	}
+	ll.currentLocker = locker
 	ll.currentLocker.Open()
+	return nil
 }
 
+// deleteLocker removes the locker and its sub-lockers from the lockers and their index.
 func (ll *LabeledLockers) deleteLocker(locker *CombiLocker) {
 	if locker.parent == nil {
 		delete(ll.lockers, locker.Label)
 	} else {
+		locker.parent.lock.Lock()
 		delete(locker.parent.SubLockers, locker.Label)
+		locker.parent.lock.Unlock()
 	}
 	delete(ll.allLockers, locker.PathLabel)
-	for _, subLocker := range locker.SubLockers {
-		ll.deleteLocker(subLocker)
+	// Iterate a copy, since deleting a sub-locker removes it from the locker's sub-lockers map
+	for _, subLocker := range locker.getSubLockers() {
+		if subLocker != nil {
+			ll.deleteLocker(subLocker)
+		}
 	}
 }
 
+// ClearLocker deletes the locker if close is set (the default becomes current if it, or a locker under it, was), otherwise empties it and deletes its sub-lockers.
 func (ll *LabeledLockers) ClearLocker(label string, close bool) {
 	ll.lock.Lock()
 	defer ll.lock.Unlock()
@@ -1131,20 +1345,27 @@ func (ll *LabeledLockers) ClearLocker(label string, close bool) {
 	if locker != nil {
 		if close {
 			ll.deleteLocker(locker)
-			if locker == ll.currentLocker {
-				ll.currentLocker = ll.lockers[constants.LockerDefaultLabel]
-				ll.currentLocker.Current = true
+			// The current locker is gone if it was the closed locker or one of its sub-lockers
+			if ll.currentLocker == nil || ll.allLockers[ll.currentLocker.PathLabel] != ll.currentLocker {
+				defaultLocker := ll.lockers[constants.LockerDefaultLabel]
+				if defaultLocker == nil {
+					defaultLocker = NewCombiLocker(constants.LockerDefaultLabel, nil)
+					ll.lockers[constants.LockerDefaultLabel] = defaultLocker
+					ll.allLockers[constants.LockerDefaultLabel] = defaultLocker
+				}
+				ll.currentLocker = defaultLocker
+				ll.currentLocker.setCurrent(true)
 			}
 		} else {
-			for _, subLocker := range locker.SubLockers {
+			for _, subLocker := range locker.getSubLockers() {
 				if subLocker != nil {
 					ll.deleteLocker(subLocker)
 				}
 			}
-			wasCurrent := locker.Current
+			wasCurrent := locker.isCurrent()
 			locker.Init()
 			// Init opens the locker, which must not make a non-current locker current
-			locker.Current = wasCurrent
+			locker.setCurrent(wasCurrent)
 		}
 	}
 }
@@ -1223,6 +1444,7 @@ func (ll *LabeledLockers) ReplaceLockers(lockers CombiLockers) {
 	ll.currentLocker = current
 }
 
+// GetLocker returns the locker for the label, or the current locker for "current".
 func (ll *LabeledLockers) GetLocker(label string) *CombiLocker {
 	ll.lock.Lock()
 	defer ll.lock.Unlock()
@@ -1232,6 +1454,8 @@ func (ll *LabeledLockers) GetLocker(label string) *CombiLocker {
 	return ll.allLockers[label]
 }
 
+// GetOrCreateLocker returns the locker for the label, or the current locker for "current", creating the locker if absent.
+// It returns nil, creating nothing, if the label is invalid (see ValidateLabel), so callers must check for nil.
 func (ll *LabeledLockers) GetOrCreateLocker(label string) *CombiLocker {
 	ll.lock.Lock()
 	defer ll.lock.Unlock()
@@ -1242,6 +1466,7 @@ func (ll *LabeledLockers) GetOrCreateLocker(label string) *CombiLocker {
 	return locker
 }
 
+// GetLockerLabels returns the path labels of all the lockers with their opened times and current flag.
 func (ll *LabeledLockers) GetLockerLabels() map[string]interface{} {
 	ll.lock.RLock()
 	defer ll.lock.RUnlock()
@@ -1254,6 +1479,7 @@ func (ll *LabeledLockers) GetLockerLabels() map[string]interface{} {
 	return labels
 }
 
+// getLockers returns all (or only top-level) lockers, the current locker, or the named locker, depending on the label.
 func (ll *LabeledLockers) getLockers(locker string, topOnly bool) CombiLockers {
 	ll.lock.RLock()
 	defer ll.lock.RUnlock()
@@ -1269,25 +1495,31 @@ func (ll *LabeledLockers) getLockers(locker string, topOnly bool) CombiLockers {
 			lockers[lname] = l
 		}
 	} else if strings.EqualFold(locker, constants.LockerCurrent) {
-		lockers[ll.currentLocker.Label] = ll.currentLocker
+		if ll.currentLocker != nil {
+			lockers[ll.currentLocker.Label] = ll.currentLocker
+		}
 	} else if ll.allLockers[locker] != nil {
 		lockers[locker] = ll.allLockers[locker]
 	}
 	return lockers
 }
 
+// isAllLockers tells whether the label stands for all lockers (empty or "all").
 func isAllLockers(label string) bool {
 	return label == "" || strings.EqualFold(label, constants.LockerAll)
 }
 
+// getMatchingOrTopLockers returns the named locker, or all top-level lockers if the label is empty or "all".
 func (ll *LabeledLockers) getMatchingOrTopLockers(locker string) CombiLockers {
 	return ll.getLockers(locker, true)
 }
 
+// getMatchingOrAllLockers returns the named locker, or all lockers including sub-lockers if the label is empty or "all".
 func (ll *LabeledLockers) getMatchingOrAllLockers(locker string) CombiLockers {
 	return ll.getLockers(locker, false)
 }
 
+// GetDataLockerPaths returns the data paths, optionally as URIs, of the matching lockers keyed by label.
 func (ll *LabeledLockers) GetDataLockerPaths(locker string, pathURIs bool) map[string]map[string]interface{} {
 	lockers := ll.getMatchingOrTopLockers(locker)
 	lockerPathsByLabels := map[string]map[string]interface{}{}
@@ -1301,6 +1533,7 @@ func (ll *LabeledLockers) GetDataLockerPaths(locker string, pathURIs bool) map[s
 	return lockerPathsByLabels
 }
 
+// SearchInDataLockers returns the data paths whose keys match the case-insensitive pattern, for the matching lockers keyed by label.
 func (ll *LabeledLockers) SearchInDataLockers(locker string, key string) map[string]map[string]interface{} {
 	lockersToSearch := ll.getMatchingOrTopLockers(locker)
 	dataPaths := map[string]map[string]interface{}{}
@@ -1312,12 +1545,14 @@ func (ll *LabeledLockers) SearchInDataLockers(locker string, key string) map[str
 	return dataPaths
 }
 
+// GetCurrentLocker returns the current locker.
 func (ll *LabeledLockers) GetCurrentLocker() *CombiLocker {
 	ll.lock.RLock()
 	defer ll.lock.RUnlock()
 	return ll.currentLocker
 }
 
+// GetPeerLockers collects the lockers of the peer (or all peers) from all top-level lockers, by peer and locker path label.
 func (ll *LabeledLockers) GetPeerLockers(peerName string) PeerMultiLockers {
 	result := PeerMultiLockers{}
 	ll.lock.RLock()
@@ -1339,6 +1574,7 @@ func (ll *LabeledLockers) GetPeerLockers(peerName string) PeerMultiLockers {
 	return result
 }
 
+// GetAllLockers returns the top-level lockers, trimmed down to the level, with peer lockers and data as requested.
 func (ll *LabeledLockers) GetAllLockers(peers, data bool, level int) CombiLockers {
 	sourceLockers := ll.getMatchingOrTopLockers("")
 	lockers := CombiLockers{}
@@ -1371,6 +1607,7 @@ func (ll *LabeledLockers) GetAllLockers(peers, data bool, level int) CombiLocker
 	return lockers
 }
 
+// GetDataLockers returns the data locker of the matching locker, or those of all lockers and sub-lockers by path label.
 func (ll *LabeledLockers) GetDataLockers(label string) DataLockers {
 	sourceLockers := ll.getMatchingOrTopLockers(label)
 	dataLockers := map[string]*DataLocker{}
@@ -1394,6 +1631,7 @@ func (ll *LabeledLockers) GetDataLockers(label string) DataLockers {
 	return dataLockers
 }
 
+// GetDataLockersView returns views of the data lockers of the matching lockers, with the data hidden.
 func (ll *LabeledLockers) GetDataLockersView(label string) map[string]*DataLocker {
 	sourceLockers := ll.getMatchingOrTopLockers(label)
 	view := map[string]*DataLocker{}
@@ -1413,6 +1651,7 @@ func (ll *LabeledLockers) GetDataLockersView(label string) map[string]*DataLocke
 	return view
 }
 
+// Get reads the key path from the matching lockers, directly for one named locker, otherwise keyed by locker path label.
 func (ll *LabeledLockers) Get(label string, keys []string, data bool, level int) (interface{}, bool) {
 	if len(keys) == 0 {
 		return nil, false
@@ -1454,6 +1693,7 @@ func (ll *LabeledLockers) Get(label string, keys []string, data bool, level int)
 	return result, false
 }
 
+// GetFromPeerInstanceLocker reads the key path from the peer instance lockers of the matching lockers.
 func (ll *LabeledLockers) GetFromPeerInstanceLocker(label, peerName, peerLabel string, keys []string, data bool, level int) (interface{}, bool) {
 	if len(keys) == 0 {
 		return nil, false
@@ -1482,16 +1722,19 @@ func (ll *LabeledLockers) GetFromPeerInstanceLocker(label, peerName, peerLabel s
 	return result, false
 }
 
+// NewContextLockers creates empty context lockers.
 func NewContextLockers() *ContextLockers {
 	return &ContextLockers{labeledLockers: map[string]*LabeledLockers{}}
 }
 
+// Init resets the context lockers to empty.
 func (cl *ContextLockers) Init() {
 	cl.lock.Lock()
 	defer cl.lock.Unlock()
 	cl.labeledLockers = map[string]*LabeledLockers{}
 }
 
+// GetContextLocker returns the labeled lockers of the context, creating them if absent.
 func (cl *ContextLockers) GetContextLocker(context string) *LabeledLockers {
 	cl.lock.Lock()
 	defer cl.lock.Unlock()
@@ -1501,6 +1744,7 @@ func (cl *ContextLockers) GetContextLocker(context string) *LabeledLockers {
 	return cl.labeledLockers[context]
 }
 
+// ClearContextLocker replaces the labeled lockers of the context with fresh ones.
 func (cl *ContextLockers) ClearContextLocker(context string) *LabeledLockers {
 	cl.lock.Lock()
 	defer cl.lock.Unlock()
@@ -1508,38 +1752,21 @@ func (cl *ContextLockers) ClearContextLocker(context string) *LabeledLockers {
 	return cl.labeledLockers[context]
 }
 
+// GetAllLockers returns the top-level lockers of each context keyed by context, with the options of LabeledLockers.GetAllLockers.
 func (cl *ContextLockers) GetAllLockers(peers, data bool, level int) map[string]CombiLockers {
-	result := map[string]CombiLockers{}
+	// The contexts are copied under the lock, since GetContextLocker adds to the map under it, and each context's
+	// lockers are then read outside it (they have their own locks).
+	cl.lock.RLock()
+	contexts := make(map[string]*LabeledLockers, len(cl.labeledLockers))
 	for context, ll := range cl.labeledLockers {
-		sourceLockers := ll.getMatchingOrTopLockers("")
-		lockers := CombiLockers{}
-		if peers && data {
-			for label, cl := range sourceLockers {
-				if cl != nil {
-					if level > 0 {
-						lockers[label] = cl.Trim(level)
-					} else {
-						lockers[label] = cl
-					}
-				}
-			}
-		} else {
-			for label, cl := range sourceLockers {
-				if cl != nil {
-					if level > 0 {
-						cl = cl.Trim(level)
-					}
-					if !data {
-						cl = cl.GetLockerView(data)
-					}
-					if !peers {
-						cl = cl.GetLockerWithoutPeers()
-					}
-					lockers[label] = cl
-				}
-			}
+		contexts[context] = ll
+	}
+	cl.lock.RUnlock()
+	result := map[string]CombiLockers{}
+	for context, ll := range contexts {
+		if ll != nil {
+			result[context] = ll.GetAllLockers(peers, data, level)
 		}
-		result[context] = lockers
 	}
 	return result
 }

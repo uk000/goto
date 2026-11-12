@@ -50,19 +50,23 @@ var (
 	Tracker = &RequestTracking{KeyPort: map[string]map[int]*TrackingData{}}
 )
 
+// init registers Track as the hook header-tracking function.
 func init() {
 	hooks.HeaderTrackingFunc = Track
 }
 
+// Init sets up tracking of a URI and its headers for the port and key.
 func (rt *RequestTracking) Init(port int, key, uri string, headers []string) {
 	rt.initURIAndHeaders(port, key, uri, headers)
 }
 
+// TrackCall counts a request for the tracked URI and its tracked headers on the port and key.
 func (rt *RequestTracking) TrackCall(port int, key, uri string, headers map[string][]string) {
 	rtd := rt.getPortRequestTrackingData(port, key)
 	rtd.track(uri, headers)
 }
 
+// getPortRequestTrackingData returns the tracking data for the key and port, creating it if missing.
 func (rt *RequestTracking) getPortRequestTrackingData(port int, key string) *TrackingData {
 	rt.lock.Lock()
 	defer rt.lock.Unlock()
@@ -78,25 +82,30 @@ func (rt *RequestTracking) getPortRequestTrackingData(port int, key string) *Tra
 	return keyData[port]
 }
 
+// getRequestTrackingData returns the tracking data of the key for the request's port.
 func (rt *RequestTracking) getRequestTrackingData(key string, r *http.Request) *TrackingData {
 	return rt.getPortRequestTrackingData(util.GetRequestOrListenerPortNum(r), key)
 }
 
+// initHeaders starts tracking the given headers for the port and key.
 func (rt *RequestTracking) initHeaders(port int, key string, headers []string) {
 	rtd := rt.getPortRequestTrackingData(port, key)
 	rtd.initHeaders(headers)
 }
 
+// initURI starts tracking the given URI for the port and key.
 func (rt *RequestTracking) initURI(port int, key, uri string) {
 	rtd := rt.getPortRequestTrackingData(port, key)
 	rtd.initURI(uri)
 }
 
+// initURIAndHeaders starts tracking the URI, and the given headers for it, for the port and key.
 func (rt *RequestTracking) initURIAndHeaders(port int, key, uri string, headers []string) {
 	rtd := rt.getPortRequestTrackingData(port, key)
 	rtd.initURIAndHeaders(uri, headers)
 }
 
+// initRequestHeaders starts tracking the headers in the request's headers param and returns them (nil if absent).
 func (rt *RequestTracking) initRequestHeaders(key string, r *http.Request) []string {
 	if headers, present := util.GetListParam(r, "headers"); present {
 		rtd := rt.getRequestTrackingData(key, r)
@@ -106,6 +115,7 @@ func (rt *RequestTracking) initRequestHeaders(key string, r *http.Request) []str
 	return nil
 }
 
+// removeHeaders stops tracking the headers in the request's headers param, returning them and whether any were given.
 func (rt *RequestTracking) removeHeaders(key string, r *http.Request) (headers []string, present bool) {
 	if headers, present := util.GetListParam(r, "headers"); present {
 		rtd := rt.getRequestTrackingData(key, r)
@@ -118,10 +128,12 @@ func (rt *RequestTracking) removeHeaders(key string, r *http.Request) (headers [
 	}
 }
 
+// clear resets all tracking data of the key on the request's port.
 func (rt *RequestTracking) clear(key string, r *http.Request) {
 	rt.getRequestTrackingData(key, r).init()
 }
 
+// clearHeaderCounts resets the counts of the headers in the request's headers param, or of all tracked headers if none are given; returns the headers or nil.
 func (rt *RequestTracking) clearHeaderCounts(key string, r *http.Request) []string {
 	rtd := rt.getRequestTrackingData(key, r)
 	if headersP, hp := util.GetStringParam(r, "headers"); hp {
@@ -133,10 +145,12 @@ func (rt *RequestTracking) clearHeaderCounts(key string, r *http.Request) []stri
 	return nil
 }
 
+// getHeaders returns the tracked headers of the key on the request's port.
 func (rt *RequestTracking) getHeaders(key string, r *http.Request) []string {
 	return rt.getRequestTrackingData(key, r).getHeaders()
 }
 
+// init resets all header and URI tracking data.
 func (rtd *TrackingData) init() {
 	rtd.lock.Lock()
 	defer rtd.lock.Unlock()
@@ -145,6 +159,7 @@ func (rtd *TrackingData) init() {
 	rtd.ByURIAndHeader = map[string]map[string]*HeaderData{}
 }
 
+// initURI starts tracking the URI with a zero count and no headers.
 func (rtd *TrackingData) initURI(uri string) {
 	rtd.lock.Lock()
 	defer rtd.lock.Unlock()
@@ -152,6 +167,7 @@ func (rtd *TrackingData) initURI(uri string) {
 	rtd.ByURIAndHeader[uri] = map[string]*HeaderData{}
 }
 
+// initURIAndHeaders starts tracking the URI with a zero count and the given headers tracked for it.
 func (rtd *TrackingData) initURIAndHeaders(uri string, headers []string) {
 	rtd.lock.Lock()
 	defer rtd.lock.Unlock()
@@ -163,6 +179,7 @@ func (rtd *TrackingData) initURIAndHeaders(uri string, headers []string) {
 	}
 }
 
+// initHeaders starts tracking those of the given headers that aren't tracked yet.
 func (rtd *TrackingData) initHeaders(headers []string) {
 	rtd.lock.Lock()
 	defer rtd.lock.Unlock()
@@ -175,6 +192,7 @@ func (rtd *TrackingData) initHeaders(headers []string) {
 	}
 }
 
+// removeHeader stops tracking the header, returning whether it was tracked.
 func (rtd *TrackingData) removeHeader(header string) bool {
 	rtd.lock.Lock()
 	defer rtd.lock.Unlock()
@@ -199,6 +217,7 @@ func (rtd *TrackingData) clearHeaderCounts(headers []string) {
 	}
 }
 
+// clearCounts resets the counts of all tracked headers.
 func (rtd *TrackingData) clearCounts() {
 	rtd.lock.Lock()
 	defer rtd.lock.Unlock()
@@ -207,12 +226,14 @@ func (rtd *TrackingData) clearCounts() {
 	}
 }
 
+// getHeaderData returns the tracking data of a header, or nil if it isn't tracked.
 func (rtd *TrackingData) getHeaderData(header string) *HeaderData {
 	rtd.lock.RLock()
 	defer rtd.lock.RUnlock()
 	return rtd.ByHeader[header]
 }
 
+// getHeaders returns the names of the tracked headers.
 func (rtd *TrackingData) getHeaders() []string {
 	rtd.lock.RLock()
 	defer rtd.lock.RUnlock()
@@ -262,6 +283,7 @@ func headerValues(headers map[string][]string, name string) []string {
 	return http.Header(headers).Values(name)
 }
 
+// init resets the request counts of the header.
 func (hd *HeaderData) init() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -280,6 +302,7 @@ func (hd *HeaderData) MarshalJSON() ([]byte, error) {
 	}{hd.RequestCountsByHeader, hd.RequestCountsByHeaderValue})
 }
 
+// MarshalJSON encodes the tracking data while holding its read lock.
 func (rtd *TrackingData) MarshalJSON() ([]byte, error) {
 	rtd.lock.RLock()
 	defer rtd.lock.RUnlock()
@@ -290,6 +313,7 @@ func (rtd *TrackingData) MarshalJSON() ([]byte, error) {
 	}{rtd.ByHeader, rtd.ByURI, rtd.ByURIAndHeader})
 }
 
+// MarshalJSON encodes the per-port tracking data while holding its read lock.
 func (rt *RequestTracking) MarshalJSON() ([]byte, error) {
 	rt.lock.RLock()
 	defer rt.lock.RUnlock()
@@ -298,6 +322,7 @@ func (rt *RequestTracking) MarshalJSON() ([]byte, error) {
 	}{rt.KeyPort})
 }
 
+// trackRequest counts a request for the header, and for the given header value if it isn't empty.
 func (hd *HeaderData) trackRequest(headerValue string) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -322,6 +347,7 @@ func track(port string, headers http.Header, uri string, rtd *TrackingData) {
 	}
 }
 
+// Track counts a request for a URI and its matched headers on the port and key, and updates the header metrics; for hooks that have a key of their own.
 func Track(port int, key, uri string, matchedHeaders map[string][]string) {
 	rtd := Tracker.getPortRequestTrackingData(port, key)
 	rtd.lock.Lock()
@@ -348,6 +374,7 @@ func Track(port int, key, uri string, matchedHeaders map[string][]string) {
 	}
 }
 
+// middlewareFunc calls next, then counts the tracked headers of the request in the background unless it is known non-traffic.
 func middlewareFunc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if next != nil {

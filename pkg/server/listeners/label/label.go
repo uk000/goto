@@ -31,6 +31,7 @@ var (
 	Middleware = middleware.NewMiddleware("label", setRoutes, nil)
 )
 
+// setRoutes registers the /server/label routes to set, clear and get the label of a listener.
 func setRoutes(r *mux.Router) {
 	server := middleware.RootPath("/server")
 	labelRouter := util.PathRouter(server, "/label")
@@ -39,6 +40,7 @@ func setRoutes(r *mux.Router) {
 	util.AddRoute(labelRouter, "", getLabel)
 }
 
+// setLabel sets or clears the label of the request's listener and reports it.
 func setLabel(w http.ResponseWriter, r *http.Request) {
 	msg := ""
 	if label := listeners.SetListenerLabel(r); label == "" {
@@ -50,6 +52,7 @@ func setLabel(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, msg)
 }
 
+// getLabel responds with the label of the request's listener.
 func getLabel(w http.ResponseWriter, r *http.Request) {
 	label := listeners.GetListenerLabel(r)
 	msg := fmt.Sprintf("Port [%s] Label [%s]", util.GetRequestOrListenerPort(r), label)
