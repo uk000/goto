@@ -808,28 +808,87 @@ func (l *Listener) serverWithNextProtos(shared *http.Server, h2s *http2.Server) 
 	return server
 }
 
-// alpnHandler returns a TLS next-proto handler that serves the connections that negotiated the ALPN protocol with the HTTP/2 server.
+// alpnHandler returns a TLS next-proto handler that serves the connections that negotiated the ALPN protocol: with HTTP/1.x
+// if the ALPN protocol carries HTTP/1.x (e.g. Istio's "istio-http/1.1"), else with the HTTP/2 server.
 func (l *Listener) alpnHandler(alpn string, h2s *http2.Server) func(s *http.Server, conn *tls.Conn, h http.Handler) {
 	return func(s *http.Server, conn *tls.Conn, h http.Handler) {
-		if h2s == nil {
-			log.Printf("Listener %s: No HTTP2 server to serve negotiated ALPN: %s", l.Label, alpn)
-			conn.Close()
-			return
-		}
-		log.Printf("Listener %s: Serving negotiated ALPN: %s ---", l.Label, alpn)
 		var ctx context.Context
 		if s.BaseContext != nil {
 			ctx = s.BaseContext(l.Listener)
 		} else {
 			ctx = context.Background()
 		}
+		ctx = util.WithConn(ctx, conn)
+		if isHTTP1ALPN(alpn) {
+			log.Printf("Listener %s: Serving negotiated ALPN: %s with HTTP/1.x ---", l.Label, alpn)
+			serveHTTP1(ctx, s, conn, h)
+			return
+		}
+		if h2s == nil {
+			log.Printf("Listener %s: No HTTP2 server to serve negotiated ALPN: %s", l.Label, alpn)
+			conn.Close()
+			return
+		}
+		log.Printf("Listener %s: Serving negotiated ALPN: %s ---", l.Label, alpn)
 		h2s.ServeConn(conn, &http2.ServeConnOpts{
 			BaseConfig: s,
-			Context:    util.WithConn(ctx, conn),
+			Context:    ctx,
 			Handler:    h,
 		})
 	}
 }
+
+// isHTTP1ALPN reports whether the ALPN protocol carries HTTP/1.x, e.g. Istio's "istio-http/1.0" and "istio-http/1.1".
+func isHTTP1ALPN(alpn string) bool {
+	return strings.HasSuffix(alpn, "http/1.0") || strings.HasSuffix(alpn, "http/1.1")
+}
+
+// serveHTTP1 serves HTTP/1.x on a TLS connection whose handshake is done, and returns once the connection is closed.
+// The connection is wrapped so that net/http doesn't see it as a *tls.Conn and hand it to the next-proto handler again.
+func serveHTTP1(ctx context.Context, s *http.Server, conn *tls.Conn, h http.Handler) {
+	c := &notifyCloseConn{Conn: conn, closed: make(chan struct{})}
+	server := &http.Server{
+		Handler:           h,
+		ReadTimeout:       s.ReadTimeout,
+		ReadHeaderTimeout: s.ReadHeaderTimeout,
+		WriteTimeout:      s.WriteTimeout,
+		IdleTimeout:       s.IdleTimeout,
+		MaxHeaderBytes:    s.MaxHeaderBytes,
+		ErrorLog:          s.ErrorLog,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+	}
+	server.Serve(&singleConnListener{conn: c})
+}
+
+// notifyCloseConn closes its channel when the connection is closed.
+type notifyCloseConn struct {
+	net.Conn
+	once   sync.Once
+	closed chan struct{}
+}
+
+func (c *notifyCloseConn) Close() error {
+	c.once.Do(func() { close(c.closed) })
+	return c.Conn.Close()
+}
+
+// singleConnListener accepts its one connection, and then blocks until that connection is closed.
+type singleConnListener struct {
+	conn     *notifyCloseConn
+	accepted bool
+}
+
+func (l *singleConnListener) Accept() (net.Conn, error) {
+	if !l.accepted {
+		l.accepted = true
+		return l.conn, nil
+	}
+	<-l.conn.closed
+	return nil, net.ErrClosed
+}
+
+func (l *singleConnListener) Close() error   { return nil }
+func (l *singleConnListener) Addr() net.Addr { return l.conn.LocalAddr() }
 
 // prepareMTLS sets the client auth mode and CA pool for mTLS, and the ALPN protocols that the listener serves with handlers
 // of its own (see serverWithNextProtos).
