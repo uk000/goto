@@ -103,10 +103,14 @@ func configureHTTPRouter() {
 	interceptedChainRouter.Use(intercept.IntereceptMiddleware(preIntercept(), postIntercept()))
 
 	middleware.UseInterceptedCore(interceptedChainRouter)
+	// The unintercepted middlewares (tunnels, probes, memory, metrics, request body) are linked on the same router as the
+	// intercepted ones, and before them: the catch-all route of the intercepted middlewares takes every request that no
+	// route before it took, and mux runs the middlewares of the router that matched, so the unintercepted middlewares
+	// would never run for the requests on a router of their own that comes after it. This is also the order of the
+	// chain that is run for the gRPC calls: the core ones, the intercepted core ones, the unintercepted ones, and then
+	// the intercepted ones.
+	middleware.LinkUnintercepted(interceptedChainRouter)
 	middleware.LinkIntercepted(interceptedChainRouter)
-
-	uninterceptedChainRouter := RootRouter.PathPrefix("").Subrouter()
-	middleware.LinkUnintercepted(uninterceptedChainRouter)
 }
 
 // httpOnlyHandler returns a handler that serves a request through handleHTTP using the listener of the request's port.

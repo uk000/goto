@@ -27,7 +27,7 @@
 
 A metric has no sample until the first event that it counts, so a fresh instance shows only the ones that have been hit.
 
-> &#x1F4DD; <small><i>Known issues: the per-request counters of the `metrics` middleware (the `all`, `admin` and `metrics` values of `goto_requests_by_type`) are not recorded for HTTP requests on this version, because the middleware is not invoked for them; the other types, and every other metric, are. Every distinct URI (with its query string) adds a label value that is never removed until `/metrics/clear`, so traffic with many distinct URIs grows the memory use and the size of the `/metrics` response.</i></small>
+> &#x1F4DD; <small><i>Known issues: the `metrics` middleware counts only the requests that are not served by the admin routes: the `all` value of `goto_requests_by_type` counts those, and the `admin` and `metrics` values are not recorded for HTTP requests, because the admin routes do not run that middleware (`/metrics` and the other API calls are not counted in `all` either). Every distinct URI (with its query string) adds a label value that is never removed until `/metrics/clear`, so traffic with many distinct URIs grows the memory use and the size of the `/metrics` response.</i></small>
 
 </details>
 <br/>

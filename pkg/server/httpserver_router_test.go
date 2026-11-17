@@ -86,3 +86,76 @@ func TestLoadRouterLeavesTheRequestsThatAGuardDoesNotAllowToTheCoreRouter(t *tes
 		}
 	}
 }
+
+// The unintercepted middlewares (probes, tunnels, memory, metrics, request body) are for the regular traffic, which is
+// what the catch-all route takes. mux runs the middlewares of the router that matched, so they have to be on the router
+// of the catch-all, and ahead of the intercepted ones: on a router of their own that comes after the catch-all they never
+// ran for an HTTP request (a probe URI was answered by the catch-all, whatever status was set for it).
+func TestUninterceptedMiddlewaresRunForTheRequestsOfTheCatchAll(t *testing.T) {
+	global.Funcs.IsReadinessProbe = func(*http.Request) bool { return false }
+	global.Funcs.IsLivenessProbe = func(*http.Request) bool { return false }
+	global.Funcs.IsListenerPresent = func(int) bool { return false }
+	global.Funcs.IsListenerOpen = func(int) bool { return false }
+	global.Funcs.GetListenerID = func(int) string { return "" }
+	global.Funcs.GetListenerLabel = func(*http.Request) string { return "" }
+	global.Funcs.GetListenerLabelForPort = func(int) string { return "" }
+	util.WillTunnel = func(*http.Request, *util.RequestStore) bool { return false }
+
+	oldCore, oldRoot := coreRouter, RootRouter
+	oldCoreMW, oldInterceptedCore, oldUnintercepted, oldIntercepted, oldRoutesOnly :=
+		middleware.Core, middleware.InterceptedCore, middleware.Unintercepted, middleware.Intercepted, middleware.RoutesOnly
+	oldGRPCHead, oldHead := middleware.MiddlewareGRPCChainHead, middleware.MiddlewareChainHead
+	oldUtilCore, oldUtilRoot, oldUtilPort, oldUtilMatch, oldPrefix := util.CoreRouter, util.RootRouter, util.PortRouter, util.MatchRouter, util.RoutePrefixRegexp
+	t.Cleanup(func() {
+		coreRouter, RootRouter = oldCore, oldRoot
+		middleware.Core, middleware.InterceptedCore, middleware.Unintercepted, middleware.Intercepted, middleware.RoutesOnly =
+			oldCoreMW, oldInterceptedCore, oldUnintercepted, oldIntercepted, oldRoutesOnly
+		middleware.MiddlewareGRPCChainHead, middleware.MiddlewareChainHead = oldGRPCHead, oldHead
+		util.CoreRouter, util.RootRouter, util.PortRouter, util.MatchRouter, util.RoutePrefixRegexp = oldUtilCore, oldUtilRoot, oldUtilPort, oldUtilMatch, oldPrefix
+	})
+
+	var ran []string
+	marker := func(name string) mux.MiddlewareFunc {
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ran = append(ran, name)
+				next.ServeHTTP(w, r)
+			})
+		}
+	}
+	handler := func(name string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) { ran = append(ran, name) }
+	}
+	middleware.Core, middleware.InterceptedCore, middleware.RoutesOnly = nil, nil, nil
+	middleware.Unintercepted = []*middleware.Middleware{
+		middleware.NewMiddleware("unintercepted", func(r *mux.Router) { r.HandleFunc("/unroute", handler("unroute")) }, marker("unintercepted")),
+	}
+	middleware.Intercepted = []*middleware.Middleware{
+		middleware.NewMiddleware("intercepted", func(r *mux.Router) {
+			r.MatcherFunc(func(*http.Request, *mux.RouteMatch) bool { return true }).HandlerFunc(handler("catchall"))
+		}, marker("intercepted")),
+	}
+	configureHTTPRouter()
+
+	serve := func(uri string) {
+		req := httptest.NewRequest("GET", uri, nil)
+		req = req.WithContext(context.WithValue(req.Context(), util.CurrentPortKey, 8080))
+		rec := httptest.NewRecorder()
+		_, req, _ = util.WithRequestStore(req, rec)
+		coreRouter.ServeHTTP(rec, req)
+	}
+	for _, tc := range []struct {
+		uri  string
+		want []string
+	}{
+		{"/anything", []string{"unintercepted", "intercepted", "catchall"}},
+		// the routes of the unintercepted middlewares are tried before the catch-all, and go through the same chain
+		{"/unroute", []string{"unintercepted", "intercepted", "unroute"}},
+	} {
+		ran = nil
+		serve(tc.uri)
+		if strings.Join(ran, ",") != strings.Join(tc.want, ",") {
+			t.Errorf("%s ran %v, want %v", tc.uri, ran, tc.want)
+		}
+	}
+}

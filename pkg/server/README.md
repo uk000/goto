@@ -10,77 +10,122 @@
 ## HTTP Headers
 #### Server response headers
 
-`Goto` adds the following common response headers to all http responses it sends:
+`Goto` adds the following common response headers to the http responses it sends (the cases where some of them are missing or replaced are listed after the list):
 
 - `Goto-Host`: identifies the `goto` instance via an auto-generated identity in the format: <PodName>.<Namespace>[<PodIP>](<NodeName>[<HostIP>]@<Cluster>). `Goto` reads the identity of the instance from these environment variables: `POD_NAME` (falls back to the host name, then `local`), `POD_IP` (falls back to the IP address of the local outbound interface, then `localhost`), `NAMESPACE` (falls back to the service account namespace file in a K8s pod, then `local`), `NODE_NAME` (default `LocalNode`), `HOST_IP` (default `0.0.0.0`) and `CLUSTER` (default `LocalCluster`).
 
   Example, with none of the variables set: `myhost.local[10.0.0.5](LocalNode[0.0.0.0]@LocalCluster)`.
-- `Via-Goto`: carries the label of the listener that served the request. By default the label is `[{ip}:{port}][{pod}@{namespace}@{cluster}]`; when `goto` is given the `--label` startup argument, that value takes the place of `{ip}` (`--label foo --ports 8080` gives `[foo:8080][{pod}@{namespace}@{cluster}]`). On the response headers it is followed by the protocol of the instance, e.g. `[foo:8080][...](HTTP)`.
+- `Via-Goto`: carries the label of the listener that served the request. By default the label is `[{ip}:{port}][{pod}@{namespace}@{cluster}]`; when `goto` is given the `--label` startup argument, that value takes the place of `{ip}` (`--label foo --ports 8080` gives `[foo:8080][{pod}@{namespace}@{cluster}]`). On the response headers the label is followed by a marker of the kind of request that was served, e.g. `[foo:8080][...](HTTP)`: `(HTTP)` for a regular request (also on a TLS listener), `(Proxy)(HTTP)` for a request served by the HTTP proxy, `(Client)(HTTP)` for the `/client/...` APIs, `(MCP)` for MCP requests and `(A2A)` for A2A requests. `Via-Goto` is also declared as a response trailer: on the responses that `goto` builds from calls to other `goto` instances (HTTP proxy, client invoke API, MCP/A2A clients), it carries one value for `goto` itself and one for each `goto` instance that those calls went through.
 - `Goto-Port`: carries the port number on which the request was received
-- `Goto-Protocol`: identifies whether the request was received over `HTTP` or `HTTPS`
+- `Goto-Protocol`: identifies the protocol over which the request was received: `HTTP/1.1`, `HTTPS` (TLS with HTTP/1.1), `H2C` (HTTP/2 without TLS), `HTTP/2` (HTTP/2 over TLS) or `GRPC`
 - `Goto-Remote-Address`: remote client's address as visible to `goto`
+- `Goto-TLS`, `Goto-mTLS`: `true` or `false`, telling whether the request was received over TLS, and whether the listener requires the client to present a certificate (mTLS)
+- `Goto-SNI`: the server name that the client presented via SNI (can be empty); sent for requests received over TLS
+- `Goto-Client-Cert`, `Goto-Server-Cert`: sent for requests received over TLS. `Goto-Client-Cert` has the details of the client certificate recorded for the connection (the details of the TLS session if the client presented none), and `Goto-Server-Cert` has the subject, DNS names and issuer of the certificate that the listener served
 - `Goto-Response-Status`: HTTP response status code that `goto` responded with. This additional header is useful to verify if the final response code got changed by an intermediary proxy/gateway. 
 - `Goto-In-At`: UTC timestamp when the request was received by `goto`
 - `Goto-Out-At`: UTC timestamp when `goto` finished processing the request and sent a response
 - `Goto-Took`: Total processing time taken by `goto` to process the request
+- `Goto-Upstream-Status`: statuses of the calls that `goto` made to other targets while serving the request. The client invoke API sends a JSON array with the status of each call; the HTTP proxy collects the `Goto-Upstream-Status` values sent by the `goto` upstreams (and it is also declared as a response trailer). It is not sent when there were no such calls
+- `Request-*`: the request headers are sent back as response headers with the `Request-` prefix (e.g. `Request-User-Agent`), along with `Request-Method`, `Request-Host`, `Request-URI`, `Request-TLS-SNI` and `Request-TLS-Version` (the last two only for TLS requests). Request headers that have `content` in their name (`Content-Type`, `Content-Length`, ...) are not echoed, nor are the headers that were excluded via the [log headers API](../log/README.md) or marked for removal via the [response headers API](response/header/README.md)
+
+Header names are case-insensitive. Over HTTP/1.1 they are sent in canonical form: for example `Goto-TLS`, `Goto-mTLS`, `Goto-SNI` and `Goto-URI-Status` show up as `Goto-Tls`, `Goto-Mtls`, `Goto-Sni` and `Goto-Uri-Status` in the output of `curl`. Over HTTP/2 (and h2c) all header names are in lower case.
+
+The common headers are not sent, or are replaced, in these cases:
+- Streaming responses (for example `/stream`) are flushed in chunks before `goto` is done processing the request, so they carry no `Goto-In-At`, `Goto-Out-At`, `Goto-Took` or `Goto-Response-Status`.
+- A request served by the HTTP proxy gets the `Goto-Proxy-In-At`, `Goto-Proxy-Out-At`, `Goto-Proxy-Head-Took` and `Goto-Proxy-Response-Status` headers (see below) in place of `Goto-In-At`, `Goto-Out-At`, `Goto-Took` and `Goto-Response-Status`. The ones that the upstream `goto` sent are only passed through when the proxy target is `transparent`.
+- A request that is tunneled is answered with the response of the tunnel endpoint, and the `goto` instances that tunneled it add the per-hop headers described under tunnel response headers.
+- gRPC calls get their response headers as metadata, see gRPC response headers.
+- A readiness probe received while the server is shutting down is answered with `404` and only the `Stopping-Readiness-Request-*` headers (see probe response headers).
 
 The following response headers are added conditionally under different scenarios:
 
 #### Client request headers:
+These are request headers that `goto` sends to its targets. They are not response headers, but a `goto` target echoes them back in its response as `Request-*` headers (e.g. `Request-Goto-Target-Id`).
 
 - `From-Goto`, `From-Goto-Host`: Sent by `goto` client with each traffic invocation, passing the label and host id of the client `goto` instance
-- `Goto-Request-ID`, `Goto-Target-ID`, `Goto-Target-URL`: Sent by `goto` client with each traffic invocation. RequestID and TargetID are auto-generated from the target name and request counters. TargetURL header identifies the URL that `goto` invoked, which can be useful when an intermediate proxy rewrites the URL.
+- `Goto-Request-Id`, `Goto-Target-ID`, `Goto-Target-URL`: Sent by `goto` client with each traffic invocation (`Goto-Target-ID` and `Goto-Target-URL` are also sent on the upstream calls made by the HTTP proxy). RequestID and TargetID are auto-generated from the target name and request counters; the request id is sent only for targets that are configured to send one (the header name is configurable). TargetURL header identifies the URL that `goto` invoked, which can be useful when an intermediate proxy rewrites the URL.
 - `Goto-Retry-Count`: Sent by `goto` client instance when traffic invocations are retried (if a target was configured for retries)
+- `Goto-Client-TLS`, `Goto-Client-mTLS`: Sent by the `goto` client call APIs: `Goto-Client-TLS` tells whether the call is made over TLS, and `Goto-Client-mTLS` (sent only for TLS calls) tells whether the client presents a certificate
+- `Goto-MCP-Server`, `Goto-MCP-Tool`, `Goto-MCP-Request-ID`: Sent by the MCP client with the tool calls that it makes, naming the target MCP server and tool, and the request that the call is a part of
+- `Goto-A2A-Server`, `Goto-A2A-Agent`, `Goto-A2A-Request-ID`: Sent by the A2A client with its calls, naming the target server URL and agent, and the request that the call is a part of
 
 #### Proxy response headers
-- `Goto-Proxy-Host`: identifies the `goto` instance that acted as a proxy for this request
-- `Proxy-Via-Goto`: label of the `goto` instance that acted as a proxy for this request
-- `Goto-Proxy-Port`: port number on which the `goto` proxy instance received this request, which may be different than the upstream service port
-- `Goto-Proxy-Protocol`: Protocol over which the `goto` proxy instance served this request, which may be different than the protocol used for the upstream service call
+These are sent by the HTTP proxy, which also sends the common headers above (`Goto-Host`, `Goto-Port`, `Via-Goto` and so on, which are those of the proxy). Apart from `Via-Goto` and the status headers listed below, the headers of the upstream responses are not passed on, except those of the first upstream response for a `transparent` target.
+
 - `Goto-Proxy-Response-Status`: HTTP response status code that `goto` proxy instance responded with. Upstream's response status code is preserved in another header listed below.
 - `Goto-Proxy-In-At`: UTC timestamp when the request was received by the `goto` proxy instance
 - `Goto-Proxy-Out-At`: UTC timestamp when the `goto` proxy instance finished processing the request and sent a response
 - `Goto-Proxy-Head-Took`: Time taken by the `goto` proxy instance from receiving the request to sending the head of the response
-- `Goto-Proxy-Took`: Time taken by the `goto` proxy instance from the first byte of the request to the last byte of the response. It is a trailer, so it is only there if the response has no `Content-Length` and the body is read to the end
-- `Goto-Proxy-Upstream-Status_<upstream-name>`: status the `goto` proxy's upstream service responded with, which may be different than the status `goto` responded with to the downstream client
-- `Goto-Proxy-Upstream-Took_<upstream-name>`: Total roundtrip time the proxy's upstream call took
+- `Goto-Proxy-Took`: Time taken by the `goto` proxy instance from the first byte of the request to the last byte of the response. It is sent as a response header, and is also declared in `Trailer` and repeated after the body when the response is chunked
+- `Goto-Proxy-Upstream-Status`: the statuses that the proxy's upstream services responded with, as JSON by target and endpoint (e.g. `{"t1":{"ep1":200}}`), which may be different than the status `goto` responded with to the downstream client. When an upstream is itself a `goto` proxy, the `Goto-Proxy-Upstream-Status` that it returned is included as an additional value
 - `Goto-Proxy-Delay`: any delay added to the request/response by `goto` as a proxy
-- `Goto-Proxy-Request-Dropped`: sent back with response when the proxy drops the downstream request based on the drop percentage defined for the upstream target (see proxy feature)
-- `Goto-Proxy-Response-Dropped`: sent back with response when the proxy drops the upstream response based on the drop percentage defined for the upstream target (see proxy feature)
+- `Goto-Client-Cert`: set by the proxy to the details of the certificates presented by the upstreams that it called over TLS (one JSON value per call), replacing the common header of that name
+
+The following are sent only by the gRPC proxy (as response headers of the calls that it proxies); the HTTP proxy does not send them:
+- `Goto-Proxy-Host`: identifies the `goto` instance that acted as a proxy for this call
+- `Goto-Proxy-Port`: port number on which the `goto` proxy instance received this call
+- `Proxy-Via-Goto`: label of the `goto` listener that acted as a proxy for this call. The `Via-Goto` header of the call also gets a value with the `(Proxy)` suffix (`(proxy)` for streaming calls)
+- `Goto-Proxy-Upstream-Took`: Total roundtrip time the proxy's upstream call took (unary calls only)
+- `Goto-Proxy-Delay`: any delay added to the call by the proxy (unary calls only)
+- `TeeProxy-Goto-Host`, `TeeProxy-Goto-Port`, `TeeProxy-Via-Goto`: sent when a response is replayed by the gRPC tee proxy
 
 #### CONNECT proxy response headers
-A port in CONNECT mode (see the [CONNECT proxy](../proxy/tcp/README.md#http-connect-proxy)) has headers of its own, which are none of the ones above, so the two proxies can be told apart. The proxy sends them to any client, `curl -x` included (`-v` shows the answer to the CONNECT request).
+A port in CONNECT mode (see the [CONNECT proxy](../proxy/tcp/README.md#http-connect-proxy)) has headers of its own, which are none of the `Goto-Proxy-*` ones above, so the two proxies can be told apart. The proxy sends them to any client, `curl -x` included (`-v` shows the answer to the CONNECT request). The one header that it shares with the other proxy is `Via-Goto`, which has the label of the listener followed by `(Proxy)(HTTP)`, in the answer to the CONNECT request and in the responses of a tunnel that carries HTTP.
 - `Goto-Connect-Proxy-Took`: time taken by the proxy from the first byte of the request to the answer to the CONNECT request, and, in the responses of a tunnel that carries HTTP, to the head of each response
 - `Goto-Connect-Proxy-Delay`: any delay that the proxy added, in the same two places
 - `Goto-Connect-Proxy-DNS-Took`, `Goto-Connect-Proxy-Dial-Took`: how much of the time of the answer to the CONNECT request went to resolving the name of the destination, and to connecting to it (only in the answer)
-- `Goto-Connect-Proxy-Host`, `Goto-Connect-Proxy-Port`, `Goto-Connect-Proxy-Remote-Address`, `Goto-Connect-Proxy-Upstream-Status`: the identity of the proxy, the address of the client, and the status that the destination answered with (only in the responses of a tunnel that carries HTTP)
+- `Goto-Connect-Proxy-Host`, `Goto-Connect-Proxy-Port`, `Goto-Connect-Proxy-Remote-Address`, `Goto-Connect-Proxy-Upstream-Status`: the identity of the proxy, the address of the client, and the status that the destination answered with, as JSON by target and endpoint (both are the destination), like `Goto-Proxy-Upstream-Status` (only in the responses of a tunnel that carries HTTP)
 
 #### Tunnel response headers:
-- `Goto-Tunnel-Host-<seq>`: identifies `goto` instance hosts through which this request was tunneled along with the sequence number of each instance in the tunnel chain.
-- `Via-Goto-Tunnel-<seq>`: identifies `goto` instance labels through which this request was tunneled along with the sequence number of each instance in the tunnel chain.
-- `Goto-In-At-<seq>`: UTC timestamp when the request was received by each `goto` in the tunnel chain
+A request that goes through a `goto` tunnel (see [Tunnels](../tunnel/README.md)) is answered with the response of the tunnel endpoint, which has the common headers of the endpoint, and the `goto` instances that tunneled the request add headers that are named for their position in the tunnel chain. The identity headers of the tunneling instance have the position after an underscore (`_0` for the first one), and the timing headers have the number of the hop after a dash, counting from `1`:
+- `Goto-Tunnel-Host_<seq>`: identifies the `goto` instance host through which this request was tunneled
+- `Via-Goto-Tunnel_<seq>`: identifies the `goto` instance label through which this request was tunneled
+- `Goto-Port_<seq>`, `Goto-Protocol_<seq>`, `Goto-Remote-Address_<seq>`, `Goto-SNI_<seq>`: the port, protocol, remote address and SNI of the request as received by the tunneling `goto` instance
+- `Goto-In-At-<seq>`: UTC timestamp when the request was received by a `goto` in the tunnel chain
 - `Goto-Out-At-<seq>`: UTC timestamp when the request finished processing by the `goto` tunnel instance
 - `Goto-Took-<seq>`: Total processing time taken by the `goto` tunnel instance
+- `Goto-Tunnel`: sent when the request was tunneled by the `Goto-Tunnel` request header, carrying the tunnel endpoints that the request asked for
 
 #### Use-case based response headers:
-- `Goto-Response-Delay`: set if `goto` applied a configured delay to the response.
-- `Goto-Payload-Length`, `Goto-Payload-Content-Type`: set if `goto` sent a configured response payload
-- `Goto-Chunk-Count`, `Goto-Chunk-Length`, `Goto-Chunk-Delay`, `Goto-Stream-Length`, `Goto-Stream-Duration`: set when client requests a streaming response
+- `Goto-Response-Delay`: set if `goto` applied a delay to the response: the configured response delay, a URI-specific delay, or a delay requested via the `/delay` or `/status` APIs. The value is the delay that was applied.
+- `Goto-Payload-Content-Type`: set if `goto` sent a configured response payload
+- `Goto-Payload-Length`: set if `goto` sent a configured response payload as raw bytes (it is not set for a payload sent as JSON or as a stream), and for the random payload sent by `/response/payload/{size}`
+- `Goto-Payload-Count`: set if the configured response payload is a stream, carrying the number of chunks in the payload
+- `Goto-Chunk-Count`, `Goto-Chunk-Length`, `Goto-Chunk-Delay`, `Goto-Stream-Length`, `Goto-Stream-Duration`: set when client requests a streaming response (`Goto-Stream-Duration` only when a duration is requested)
 - `Goto-Requested-Status`: set when `/status` API request is made requesting a specific status
-- `Goto-Forced-Status`, `Goto-Forced-Status-Remaining`: set when a configured custom response status is applied to a response that didn't have a URI-specific response status
-- `Goto-URI-Status`, `Goto-URI-Status-Remaining`: set when a configured custom response status is applied to a uri
-- `Goto-Status-Flip`: set when a flip-flop status request resulted in a status change from the previous response's status (see the feature to understand it better)
-- `Goto-Filtered-Request`: set when a request is filtered due to a configured `ignore` or `bypass` filter
-- `Request-*`: prefix is added to all request headers and the request headers are sent back as response headers
+- `Goto-Forced-Status`, `Goto-Forced-Status-Remaining`: set when a configured custom response status is applied to a response that didn't have a URI-specific response status. `Goto-Forced-Status-Remaining` is the number of calls left after this one while a count runs, and `-1` for a status that was set without a count; it is not sent for the call that uses the count up (for gRPC, MCP and A2A calls it is always sent, `0` included)
+- `Goto-URI-Status`, `Goto-URI-Status-Remaining`: set when a configured custom response status is applied to a uri. `Goto-URI-Status-Remaining` is only there while more calls are left
+- `Goto-Status-Flip`: set when a flip-flop status request resulted in a status change from the previous response's status (the value is the previous status; see the feature to understand it better)
+- `Goto-Filtered-Request`: set (to `true`) when a request is filtered due to a configured `ignore` or `bypass` filter
+- Custom headers: the headers that were configured with the [response headers API](response/header/README.md) (`/response/headers/add/{header}={value}`) are added to all the responses of the port, with the names and values that were configured
+
+#### MCP and A2A response headers
+- `Goto-MCP-Server`: ID of the MCP server that served the request
+- `Goto-Server`: also carries the ID of the MCP server, sent for the MCP servers that were added via the MCP APIs (not for the default servers)
+- `Goto-MCP-Tool`: name of the tool, when the request URI addresses a tool of the MCP server
+- `Goto-A2A-Server`, `Goto-A2A-Agent`: ID of the A2A server and of the agent that served the request
+- `Goto-Forced-Status`, `Goto-Forced-Status-Remaining`: set when a forced status is applied to an MCP or A2A call, as described above
+
+#### gRPC response headers
+A call to the `Goto` gRPC services gets these headers as response metadata:
+- `Goto-Host`, `Via-Goto` (the label of the listener, without the `(HTTP)` marker), `Goto-Port`, `Goto-Remote-Address`
+- `Goto-Protocol`: `gRPC`
+- `Goto-RPC-Method`: the full method that was called
+- `Request-<name>`: each request metadata entry, with the `Request-` prefix (the `:` of pseudo headers such as `:authority` is dropped)
+- `Goto-Forced-Status`, `Goto-Forced-Status-Remaining`: set when a forced status is applied to the call, which then fails with `Internal` and the message `Goto-Forced-Status={status}`
+
+The calls to the other gRPC services that `goto` serves (the generic gRPC server) are run through the same middleware chain as the HTTP requests, and the response headers that the chain sets are sent back as the response metadata of the call.
 
 #### Probe response headers
-- `Readiness-Request-*`: prefix is added to all request headers for Readiness probe requests
-- `Liveness-Request-*`: prefix is added to all request headers for Liveness probe requests
+The responses to the readiness and liveness probe URIs carry the common headers too, and the following ones:
+- `Readiness-Request-*`: prefix is added to all request headers for Readiness probe requests (along with `Readiness-Request-Method`, `Readiness-Request-Host` and `Readiness-Request-URI`)
+- `Liveness-Request-*`: prefix is added to all request headers for Liveness probe requests (along with `Liveness-Request-Method`, `Liveness-Request-Host` and `Liveness-Request-URI`)
 - `Readiness-Request-Count`: header added to readiness probe responses, carrying the number of readiness requests received so far
 - `Readiness-Overflow-Count`: header added to readiness probe responses, carrying the number of times readiness request count has overflown
 - `Liveness-Request-Count`: header added to liveness probe responses, carrying the number of liveness requests received so far
 - `Liveness-Overflow-Count`: header added to liveness probe responses, carrying the number of times liveness request count has overflown
-- `Stopping-Readiness-Request-*`: set when a readiness probe is received while `goto` server is shutting down
+- `Stopping-Readiness-Request-*`: set when a readiness probe is received while `goto` server is shutting down (after the stop signal, during the shutdown delay). The response has status `404` and only these headers (`Stopping-Readiness-Request-Method`, `-Host`, `-URI` and one for each request header), without any of the common headers. The other requests are served as usual during the shutdown delay.
 
 
 ###### <small> [Back to TOC](#toc) </small>
@@ -422,7 +467,7 @@ See [Listeners Example](../../docs/listeners-example.md)
 
 ## Listener Label
 
-By default, each listener adds a header `Via-Goto: <port>` to each response it sends, where `<port>` is the port on which the listener is running (default being 8080). A custom label can be added to a listener using the label APIs described below. In addition to `Via-Goto`, each listener also adds another header `Goto-Host` that carries the pod/host name, pod namespace (or `local` if not running as a K8s pod), and pod/host IP address to identify where the response came from.
+By default, each listener adds a header `Via-Goto: [{ip}:{port}][{pod}@{namespace}@{cluster}](HTTP)` to each response it sends (see the `Via-Goto` header above for the format and the marker that follows the label), where `{port}` is the port on which the listener is running (default being 8080). A custom label can be added to a listener using the label APIs described below, and it then replaces the whole label: `Via-Goto: Server-8080(HTTP)`. In addition to `Via-Goto`, each listener also adds another header `Goto-Host` that carries the pod/host name, pod namespace (or `local` if not running as a K8s pod), pod/host IP address, node and cluster to identify where the response came from.
 
 #### Listener Label APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>
@@ -514,7 +559,7 @@ line1
 line2
 ```
 
-> Known issue: `Request-PayloadSize` is 0 in the echo response even when the request has a body, because the request body size is recorded by a middleware that is not running for HTTP requests.
+> `Request-PayloadSize` is 0 in the response of the echo URIs even when the request has a body: the request body size is recorded by the request body middleware, which the echo URIs (like the other `goto` APIs) don't go through. The [catch-all](#catch-all) response, which is the same echo response, reports it.
 </details>
 
 ###### <small> [Back to TOC](#toc) </small>

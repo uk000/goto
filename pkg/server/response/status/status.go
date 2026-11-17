@@ -395,7 +395,8 @@ func middlewareFunc(next http.Handler) http.Handler {
 			msg := ""
 			if overriddenStatus {
 				w.Header().Add(HeaderGotoForcedStatus, strconv.Itoa(irw.StatusCode))
-				if remaining > 0 {
+				// Sent while calls remain, and as -1 for a status that has no count. Not sent for the last counted call.
+				if remaining > 0 || remaining == -1 {
 					w.Header().Add(HeaderGotoForcedStatusRemaining, strconv.Itoa(remaining))
 				}
 				msg = fmt.Sprintf("Reporting status: [%d] for URI [%s]. Remaining status count [%d].",

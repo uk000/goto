@@ -24,7 +24,7 @@ Notes:
 * `set` and `clear` are `POST` only (the earlier doc also listed `PUT`).
 * A forced status applies to every response of a non-admin request (a URI/`uriPrefix` status applies to matching requests only), including requests for `/status/{status}`: the forced status wins over the requested one.
 * When several statuses are configured, the ones with a URI/header/method match are tried before the ones that match all requests (regardless of the order they were set in); among those in a group, the first one that was set and still has remaining count is used. A used-up status is skipped. A status set to `0` for specific requests shields them from the status that is set for all requests.
-* Responses carry `Goto-Forced-Status` and (when a count was given) `Goto-Forced-Status-Remaining`.
+* Responses that get a forced status carry `Goto-Forced-Status`, and `Goto-Forced-Status-Remaining`: the number of calls left after this one while a count runs, and `-1` for a status that was set without a count. The call that uses the count up carries `Goto-Forced-Status` only.
 * `GET .../counts` and `.../counts/{status}` return `204` with `{}` if the port has not seen any status request yet.
 
 <details>

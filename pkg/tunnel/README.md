@@ -8,8 +8,6 @@
 - Send a request on a multi-hop journey, routing via multiple goto tunnels, in order to observe latency or other network behaviors.
 - Test a client and/or service's behavior if the other party that's communicating with it changed its protocol from HTTP/1 to HTTP/2 without having to change the real applications' code.
 
-> **Status note.** On the current code the tunnel middleware is not invoked for HTTP requests (it is on the `Unintercepted` middleware list of `pkg/server/server.go`, whose handlers never run for requests that reach the catch-all; bug INF-01 in the scan report). The `/tunnels/...` configuration and report APIs below work, but a request is not tunneled by any of the four ways until that wiring is fixed. The tunnel behavior described below, and the outputs shown, were run on a build with the wiring fixed.
-
 There are four different ways in which requests can be tunneled via `Goto`:
 
 #### 1. Configured Tunnels
@@ -131,6 +129,8 @@ The URI match is an exact, case-sensitive match of the request URI. Requests for
 | `Via-Goto-Tunnel` | request to the endpoint | Added by configured tunnels: the label of this listener and the tunnel count. |
 | `Goto-Tunnel` | request | The endpoints to tunnel to (see above). Removed when it was the last one. |
 | `Goto-Port_0`, `Goto-Protocol_0`, `Goto-Sni_0`, `Goto-Tunnel-Host_0`, `Via-Goto-Tunnel_0`, ... | response | The `Goto-*` headers of the tunneling instance are added to the response with a hop suffix `_0` (`_1`, ... when there are more), next to the ones of the endpoint. |
+| `Goto-In-At-<n>`, `Goto-Out-At-<n>`, `Goto-Took-<n>` | response | When the tunneling instance received the request, when it finished, and how long it took. `<n>` counts the hops from 1. |
+| `Goto-Tunnel` | response | Sent back when the request was tunneled by the `Goto-Tunnel` request header: the endpoints that the request asked for. |
 
 The tunnels that are made by the `/tunnel=` prefix and the `Goto-Tunnel` header are transparent: the request headers that have `tunnel` in their name (other than `Goto-Tunnel` itself) are not forwarded, and `Goto-Tunnel-Host` and `Via-Goto-Tunnel` are not added, so the loop detection works for configured tunnels only. Transparent configured tunnels (`/transparent`) behave the same.
 

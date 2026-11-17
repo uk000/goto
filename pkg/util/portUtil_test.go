@@ -21,6 +21,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"goto/pkg/global"
@@ -49,6 +50,46 @@ func TestGetConnectionPortNum(t *testing.T) {
 				t.Errorf("GetConnectionPortNum = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+// A request that has no request store yet (the server checks for a readiness probe before it makes the store, while it is
+// stopping) is still told its port, and the check does not need a store to remember it in.
+func TestRequestPortOfARequestWithoutARequestStore(t *testing.T) {
+	ctx := context.WithValue(context.Background(), CurrentPortKey, 7070)
+	tests := []struct {
+		name     string
+		uri      string
+		wantPort string
+	}{
+		{"listener port", "/x", "7070"},
+		{"port prefix", "/port=7000/x", "7000"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("GET", tc.uri, nil).WithContext(ctx)
+			if GetRequestStoreIfPresent(r) != nil {
+				t.Fatal("the request must not have a request store")
+			}
+			if got := GetRequestOrListenerPort(r); got != tc.wantPort {
+				t.Errorf("GetRequestOrListenerPort = %q, want %q", got, tc.wantPort)
+			}
+			if got := GetRequestOrListenerPortNum(r); strconv.Itoa(got) != tc.wantPort {
+				t.Errorf("GetRequestOrListenerPortNum = %d, want %s", got, tc.wantPort)
+			}
+		})
+	}
+}
+
+// With a request store the port is remembered in it, and not worked out again.
+func TestRequestPortIsRememberedInTheRequestStore(t *testing.T) {
+	r := httptest.NewRequest("GET", "/port=7000/x", nil)
+	rs := &RequestStore{}
+	if port, num := checkRequestPort(r, rs); port != "7000" || num != 7000 {
+		t.Fatalf("checkRequestPort = %q, %d, want 7000", port, num)
+	}
+	if rs.RequestPort != "7000" || rs.RequestPortNum != 7000 || !rs.RequestPortChecked {
+		t.Errorf("request store = %q, %d, checked %t, want the port remembered", rs.RequestPort, rs.RequestPortNum, rs.RequestPortChecked)
 	}
 }
 

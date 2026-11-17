@@ -1,7 +1,10 @@
+# Prefix of the registry path of the base images (golang, alpine), e.g. a mirror of Docker Hub. It has to end with a /, if it
+# is set. Set with --build-arg BASE_IMAGE_PREFIX=... The images come from Docker Hub when it is empty.
+ARG BASE_IMAGE_PREFIX=
 # Set with --build-arg grpc=1 to include grpcurl, see the grpcurl stages below
 ARG grpc
 
-FROM golang:1.25-alpine AS builder-base
+FROM ${BASE_IMAGE_PREFIX}golang:1.25-alpine AS builder-base
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -27,7 +30,7 @@ RUN --mount=type=secret,id=apk_repositories,target=/etc/apk/repositories \
 
 # Behind a TLS-intercepting corporate proxy (https_proxy/HTTPS_PROXY build args, see PROXY_ARGS in the Makefile), connect
 # through the proxy and trust the self-signed root CA at the top of the chain it presents. Without a proxy, fetch each
-# host's cert directly.
+# host's cert directly. A cert that can't be fetched is only a warning, as the build may not need that host (e.g. with mirrors).
 RUN proxy="${https_proxy:-$HTTPS_PROXY}"; proxy="${proxy#*://}"; proxy="${proxy%/}"; \
 	if [ -n "$proxy" ]; then \
 		openssl s_client -proxy "$proxy" -servername github.com -showcerts -connect github.com:443 </dev/null 2>/dev/null \
@@ -40,11 +43,11 @@ RUN proxy="${https_proxy:-$HTTPS_PROXY}"; proxy="${proxy#*://}"; proxy="${proxy%
 		fi; \
 		rm -f /tmp/proxy-root.crt; \
 	else \
-		openssl s_client -showcerts -connect github.com:443 </dev/null 2>/dev/null | openssl x509 -outform PEM > /usr/local/share/ca-certificates/github.crt \
-		&& openssl s_client -showcerts -connect proxy.golang.org:443 </dev/null 2>/dev/null | openssl x509 -outform PEM >  /usr/local/share/ca-certificates/golang-proxy.crt \
-		&& openssl s_client -showcerts -connect sum.golang.org:443 </dev/null 2>/dev/null | openssl x509 -outform PEM >  /usr/local/share/ca-certificates/golang-sum.crt \
-		&& openssl s_client -showcerts -connect dl-cdn.alpinelinux.org:443 </dev/null 2>/dev/null | openssl x509 -outform PEM > /usr/local/share/ca-certificates/alpine.crt \
-		&& update-ca-certificates; \
+		for host in github.com proxy.golang.org sum.golang.org dl-cdn.alpinelinux.org; do \
+			openssl s_client -showcerts -connect "$host:443" </dev/null 2>/dev/null | openssl x509 -outform PEM > "/usr/local/share/ca-certificates/$host.crt" \
+				|| { echo "WARNING: could not get the cert of $host, not adding it to trusted certs"; rm -f "/usr/local/share/ca-certificates/$host.crt"; }; \
+		done; \
+		update-ca-certificates; \
 	fi
 
 
@@ -91,7 +94,7 @@ FROM scratch AS grpcurl-0
 FROM grpcurl-${grpc:-0} AS grpcurl
 
 
-FROM alpine:3.22 AS release-base-core
+FROM ${BASE_IMAGE_PREFIX}alpine:3.22 AS release-base-core
 
 ARG utils
 

@@ -231,6 +231,55 @@ func TestForcedStatusAndURIStatusAreBothCounted(t *testing.T) {
 	s.expectCounts(t, map[int]int{418: 2, 503: 2})
 }
 
+// Goto-Forced-Status-Remaining is -1 for a status that has no count, the calls left while a count runs, and is not sent
+// for the call that uses the count up.
+func TestForcedStatusRemainingHeader(t *testing.T) {
+	remainingOf := func(p *served) (string, bool) {
+		v := p.rr.Header().Values(constants.HeaderGotoForcedStatusRemaining)
+		if len(v) == 0 {
+			return "", false
+		}
+		return v[0], true
+	}
+	t.Run("no count", func(t *testing.T) {
+		s := newTestServer(t)
+		s.forceStatus(503)
+		for i := 0; i < 3; i++ {
+			p := s.serve("/plain")
+			if got, ok := remainingOf(p); !ok || got != "-1" {
+				t.Errorf("call %d: %s = %q (sent %t), want -1", i+1, constants.HeaderGotoForcedStatusRemaining, got, ok)
+			}
+			if got := p.rr.Header().Get(constants.HeaderGotoForcedStatus); got != "503" {
+				t.Errorf("call %d: %s = %q, want 503", i+1, constants.HeaderGotoForcedStatus, got)
+			}
+		}
+	})
+	t.Run("with a count", func(t *testing.T) {
+		s := newTestServer(t)
+		TheStatusManager.SetStatusFor(s.port, "", "", "", "", nil, []int{503}, 3, true)
+		want := []struct {
+			status, remaining string
+			remainingSent     bool
+		}{{"503", "2", true}, {"503", "1", true}, {"503", "", false}, {"", "", false}}
+		for i, w := range want {
+			p := s.serve("/plain")
+			if got := p.rr.Header().Get(constants.HeaderGotoForcedStatus); got != w.status {
+				t.Errorf("call %d: %s = %q, want %q", i+1, constants.HeaderGotoForcedStatus, got, w.status)
+			}
+			if got, ok := remainingOf(p); ok != w.remainingSent || got != w.remaining {
+				t.Errorf("call %d: %s = %q (sent %t), want %q (sent %t)", i+1, constants.HeaderGotoForcedStatusRemaining, got, ok, w.remaining, w.remainingSent)
+			}
+		}
+	})
+	t.Run("not applied", func(t *testing.T) {
+		s := newTestServer(t)
+		p := s.serve("/plain")
+		if _, ok := remainingOf(p); ok || p.rr.Header().Get(constants.HeaderGotoForcedStatus) != "" {
+			t.Errorf("forced status headers sent without a forced status: %v", p.rr.Header())
+		}
+	})
+}
+
 func TestForcedStatusIsNotUsedUpByRequestsWithURIStatus(t *testing.T) {
 	s := newTestServer(t)
 	TheStatusManager.SetStatusFor(s.port, "", "", "", "", nil, []int{503}, 2, true)

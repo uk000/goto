@@ -34,6 +34,12 @@ PROXY_BUILD_ARGS := $(if $(HTTP_PROXY),--build-arg http_proxy='$(HTTP_PROXY)' --
 	$(if $(NO_PROXY),--build-arg no_proxy='$(NO_PROXY)' --build-arg NO_PROXY='$(NO_PROXY)')
 PROXY_ARGS := $(if $(filter-out false False FALSE 0 no No NO,$(DOCKER_PROXY)),$(PROXY_BUILD_ARGS))
 
+# Prefix of the registry path of the base images of the docker builds (golang, alpine), e.g. a mirror of Docker Hub. It has
+# to end with a /. make docker-build VERSION=1.0.0 BASE_IMAGE_PREFIX=registry.example.com/mirror/library/
+# When not set, the images come from Docker Hub.
+BASE_IMAGE_PREFIX ?=
+BASE_ARGS := $(if $(BASE_IMAGE_PREFIX),--build-arg BASE_IMAGE_PREFIX='$(BASE_IMAGE_PREFIX)')
+
 # File with the Alpine package repos (one URL per line, like /etc/apk/repositories) to use for the docker builds instead of
 # the public ones, e.g. a mirror. Passed as a secret (not a build arg), so that it is not in the image history or layers.
 # make docker-build VERSION=1.0.0 APK_REPOSITORIES_FILE=/path/to/repositories
@@ -101,40 +107,40 @@ connect-probe-build-all:
 	$(MAKE) connect-probe-build PROBE_OS=linux PROBE_ARCH=arm64
 
 docker-build: Dockerfile $(GO_FILES)
-	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) --load --build-arg utils=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) .
+	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) $(BASE_ARGS) --load --build-arg utils=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) .
 
 docker-build-utils: Dockerfile $(GO_FILES)
-	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) --load --build-arg utils=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-utils .
+	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) $(BASE_ARGS) --load --build-arg utils=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-utils .
 
 docker-build-net: Dockerfile $(GO_FILES)
-	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) --load --build-arg utils=1 --build-arg net=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-net .
+	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) $(BASE_ARGS) --load --build-arg utils=1 --build-arg net=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-net .
 
 docker-build-kube: Dockerfile $(GO_FILES)
-	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) --load --build-arg utils=1 --build-arg net=1 --build-arg kube=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-kube .
+	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) $(BASE_ARGS) --load --build-arg utils=1 --build-arg net=1 --build-arg kube=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-kube .
 
 docker-build-perf: Dockerfile $(GO_FILES)
-	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) --load --build-arg utils=1 --build-arg net=1 --build-arg perf=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-perf .
+	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) $(BASE_ARGS) --load --build-arg utils=1 --build-arg net=1 --build-arg perf=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-perf .
 
 docker-build-grpc: Dockerfile $(GO_FILES)
-	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) --load --build-arg utils=1 --build-arg net=1 --build-arg grpc=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-grpc .
+	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) $(BASE_ARGS) --load --build-arg utils=1 --build-arg net=1 --build-arg grpc=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-grpc .
 
 docker-push: Dockerfile $(GO_FILES)
-	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) --push --platform linux/amd64,linux/arm64 --build-arg utils=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) .
+	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) $(BASE_ARGS) --push --platform linux/amd64,linux/arm64 --build-arg utils=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) .
 
 docker-push-utils: Dockerfile $(GO_FILES)
-	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) --push --platform linux/amd64,linux/arm64 --build-arg utils=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-utils .
+	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) $(BASE_ARGS) --push --platform linux/amd64,linux/arm64 --build-arg utils=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-utils .
 
 docker-push-net: Dockerfile $(GO_FILES)
-	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) --push --platform linux/amd64,linux/arm64 --build-arg utils=1 --build-arg net=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-net .
+	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) $(BASE_ARGS) --push --platform linux/amd64,linux/arm64 --build-arg utils=1 --build-arg net=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-net .
 
 docker-push-kube: Dockerfile $(GO_FILES)
-	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) --push --platform linux/amd64,linux/arm64 --build-arg utils=1 --build-arg net=1 --build-arg kube=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-kube .
+	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) $(BASE_ARGS) --push --platform linux/amd64,linux/arm64 --build-arg utils=1 --build-arg net=1 --build-arg kube=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-kube .
 
 docker-push-perf: Dockerfile $(GO_FILES)
-	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) --push --platform linux/amd64,linux/arm64 --build-arg utils=1 --build-arg net=1 --build-arg perf=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-perf .
+	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) $(BASE_ARGS) --push --platform linux/amd64,linux/arm64 --build-arg utils=1 --build-arg net=1 --build-arg perf=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-perf .
 
 docker-push-grpc: Dockerfile $(GO_FILES)
-	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) --push --platform linux/amd64,linux/arm64 --build-arg utils=1 --build-arg net=1 --build-arg grpc=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-grpc .
+	docker buildx build $(PROXY_ARGS) $(APK_ARGS) $(GO_ARGS) $(BASE_ARGS) --push --platform linux/amd64,linux/arm64 --build-arg utils=1 --build-arg net=1 --build-arg grpc=1 --build-arg COMMIT=$(COMMIT) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION)-grpc .
 
 docker-run: docker-build
 	docker run -d --rm --name goto -p8080:8080 -it $(IMAGE):$(VERSION) /app/goto --port 8080

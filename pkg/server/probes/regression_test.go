@@ -17,12 +17,16 @@
 package probes
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"sync"
 	"testing"
 
 	"goto/pkg/constants"
+	"goto/pkg/util"
 )
 
 // The count that a probe reported was read after the lock was released, so probes that came together reported the
@@ -86,4 +90,26 @@ func TestChangingTheProbesWhileProbingDoesNotRace(t *testing.T) {
 		}
 	}()
 	wg.Wait()
+}
+
+// The server asks whether a request is a readiness probe before it has made the request store of the request, while it is
+// stopping. That used to be a nil pointer in the check of the port of the request, which took down every request of the
+// server that was stopping, and not just the probes.
+func TestProbeCheckOfARequestWithoutARequestStore(t *testing.T) {
+	newReq := func(uri string) *http.Request {
+		r := httptest.NewRequest("GET", uri, nil)
+		return r.WithContext(context.WithValue(r.Context(), util.CurrentPortKey, 8080))
+	}
+	ready, live, other := newReq("/ready"), newReq("/live"), newReq("/other")
+	for _, r := range []*http.Request{ready, live, other} {
+		if util.GetRequestStoreIfPresent(r) != nil {
+			t.Fatal("the request must not have a request store")
+		}
+	}
+	if !IsReadinessProbe(ready) || IsReadinessProbe(live) || IsReadinessProbe(other) {
+		t.Error("only /ready must be told as the readiness probe")
+	}
+	if !IsLivenessProbe(live) || IsLivenessProbe(ready) || IsLivenessProbe(other) {
+		t.Error("only /live must be told as the liveness probe")
+	}
 }

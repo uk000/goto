@@ -104,21 +104,27 @@ func GetConnectionPortNum(r *http.Request) int {
 	return GetListenerPortNum(r)
 }
 
-// checkRequestPort works out the request port from the /port= URI prefix, the port var, or else the listener port, and remembers it in the request store.
+// checkRequestPort works out the request port from the /port= URI prefix, the port var, or else the listener port, and
+// remembers it in the request store. A request that has no store yet (e.g. one that is checked before its store is
+// made) gets the port worked out all the same, and there is nothing to remember it in.
 func checkRequestPort(r *http.Request, rs *RequestStore) (port string, portNum int) {
 	uri := r.RequestURI
 	if strings.HasPrefix(uri, "/port=") {
-		rs.RequestPort = strings.Split(strings.Split(uri, "/port=")[1], "/")[0]
-		rs.RequestPortNum, _ = strconv.Atoi(rs.RequestPort)
-	} else if port := GetStringParamValue(r, "port"); port != "" {
-		rs.RequestPortNum, _ = strconv.Atoi(port)
-		rs.RequestPort = port
+		port = strings.Split(strings.Split(uri, "/port=")[1], "/")[0]
+		portNum, _ = strconv.Atoi(port)
+	} else if p := GetStringParamValue(r, "port"); p != "" {
+		portNum, _ = strconv.Atoi(p)
+		port = p
 	} else {
-		rs.RequestPortNum = GetListenerPortNum(r)
-		rs.RequestPort = strconv.Itoa(rs.RequestPortNum)
+		portNum = GetListenerPortNum(r)
+		port = strconv.Itoa(portNum)
 	}
-	rs.RequestPortChecked = true
-	return rs.RequestPort, rs.RequestPortNum
+	if rs != nil {
+		rs.RequestPort = port
+		rs.RequestPortNum = portNum
+		rs.RequestPortChecked = true
+	}
+	return port, portNum
 }
 
 // getRequestOrListenerPort returns the request port from the request store, working it out first if it was not checked yet.

@@ -12,9 +12,7 @@ The probe URIs response includes the request headers echoed back with `Readiness
 
 By default, liveness probe URI is set to `/live` and readiness probe URI is set to `/ready`.
 
-When the server receives a stop signal, it waits for the shutdown delay (`--shutdownDelay` [startup argument](../../../cmd/README.md), default `1s`) to serve existing traffic. During this period, a request to the readiness probe URI of its port is answered with status `404` and with the request headers echoed back as `Stopping-Readiness-Request-*`.
-
-> &#x1F4DD; <small><i>Known issue: on the HTTP listeners of this version, a request to a probe URI is not intercepted by the probe middleware. `GET /ready` is answered by the catch-all (status 200, the echo body) whatever status was configured, the `Readiness-Request-*`, `...-Count` and `...-Overflow-Count` headers are not added, and the counts in `GET /probes` stay `0`. The configuration APIs below work and their values are reported correctly; the configured status and the counting are applied to gRPC calls only.</i></small>
+When the server receives a stop signal, it waits for the shutdown delay (`--shutdownDelay` [startup argument](../../../cmd/README.md), default `1s`) to serve existing traffic. During this period, a request to the readiness probe URI of its port is answered with status `404` and with the request headers echoed back as `Stopping-Readiness-Request-*`. The other requests, liveness probes included, are served as usual during the shutdown delay.
 
 #### Probes APIs
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read data of one port via another.</small>

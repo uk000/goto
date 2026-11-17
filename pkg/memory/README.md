@@ -6,8 +6,6 @@
 
 This is not a memory allocator or a cache: there are no APIs to allocate, free, clear or limit memory, and the contexts are never expired or bounded in size (see the notes at the end). A context is reset only by `POST /memory/contexts/add/{context}`.
 
-> **Status note.** On the current code the extraction part does not run for HTTP requests: the memory middleware is on the `Unintercepted` middleware list of `pkg/server/server.go`, whose handlers are never invoked for requests that reach the catch-all (bug INF-01 in the scan report). The configuration and reading APIs below work as described. The extraction examples and their outputs below were run on a build with that wiring fixed, and are marked "(extraction)". Until it is fixed, a request with the context header leaves the memory unchanged.
-
 ###### <small>* These APIs can be invoked with prefix `/port={port}/...` to configure/read the memory of one port via another. Each port has its own memory.</small>
 
 ## Concepts
@@ -18,7 +16,7 @@ This is not a memory allocator or a cache: there are no APIs to allocate, free, 
 | context key (`ctxkey`) | The name of an **extractor**: a set of rules that says how to recognize the context of a request and what to extract from it. Not the same as the context name. |
 | context header | The request header that tells which context a request belongs to. When the extractor `ctxA` has context header `X-Ctx`, a request with `X-Ctx: user1` is extracted into the context `user1`. |
 
-How a request is processed (extraction):
+How a request is processed:
 1. The request must be traffic. Calls to goto's own API URIs (including `/echo`) are known non-traffic and are skipped; use any other URI, which is served by the catch-all.
 2. The port's memory must have at least one extraction rule configured.
 3. The first extractor (in unspecified order, if you have several) whose context header is present on the request is selected. The header value is the context name. The context is created if it doesn't exist.
@@ -94,7 +92,7 @@ JSON request bodies are transformed as JSON, bodies with a YAML content type are
 
 ## Examples
 
-Create and read a context (verified on `orig` and the patched build):
+Create and read a context:
 ```
 curl -X POST localhost:8080/memory/contexts/add/session1
 Added Context [session1] to memory of port [8080]
@@ -135,7 +133,7 @@ curl -g -X POST 'localhost:8080/memory/context/ctxA/memory/from/body/regex/num=[
 curl -g -X POST 'localhost:8080/memory/context/ctxA/memory/from/body/paths/id={.id},nm={.user.name},second={.list[1]}'
 ```
 
-Send a request (any URI that is not an API URI), then read what was extracted (extraction):
+Send a request (any URI that is not an API URI), then read what was extracted:
 ```
 curl -s -o /dev/null 'localhost:8080/foo?q1=qv' -H 'X-Ctx: user1' -H 'X-User: bob' \
      -H 'Content-Type: application/json' \
@@ -162,7 +160,7 @@ curl -s localhost:8080/memory/contexts/memory
 ```
 (The default context `""` is listed because reading `/memory/contexts/memory` creates it. `num` is `456`, the last of the two regex matches.)
 
-Transform the body with a template before the JSON paths are applied (extraction):
+Transform the body with a template before the JSON paths are applied:
 ```
 curl -X POST localhost:8080/memory/context/ctxA/memory/from/body/transform \
      -d '[{"payload":{"customer":"","kind":"order"},"mappings":[{"source":"user.name","target":"customer","mode":"replace"}]}]'
