@@ -47,29 +47,18 @@ It can act as:
 ## How to use it?
 
 ### Grab or Build
-#### Docker images (Alpine Linux based)
+#### Docker images (Alpine Linux based, multi-platform)
   #### core
-  - `docker.io/uk0000/goto:0.9.8`, `docker.io/uk0000/goto:0.9.8-arm64`
+  - `docker.io/uk0000/goto:0.9.23`
   - Includes `bash, curl, jq`
   #### net
-  - `docker.io/uk0000/goto:0.9.8-net`, `docker.io/uk0000/goto:0.9.8-net-arm64`
+  - `docker.io/uk0000/goto:0.9.23-net`
   - Includes core pack
   - Includes network utilities like `ncat, nc, nmap, socat, tcpdump, dig, nslookup, iptables, ipvsadm, openssl`
   #### gRPC
-  - `docker.io/uk0000/goto:0.9.8-grpc`, `docker.io/uk0000/goto:0.9.8-grpc-arm64`
+  - `docker.io/uk0000/goto:0.9.23-grpc`
   - Includes core and net packs
   - Includes `grpcurl`
-
-#### Additional optional docker images
-  #### kube
-  - `docker.io/uk0000/goto:0.9.8-kube`, `docker.io/uk0000/goto:0.9.8-kube-arm64`
-  - Includes core and net packs
-  - Includes `kubectl and etcdctl`
-  #### perf
-  - `docker.io/uk0000/goto:0.9.8-perf`, `docker.io/uk0000/goto:0.9.8-perf-arm64`
-  - Includes core and net packs
-  - Includes `hey and iftop`
-
 
 <br/>
 Or, build it locally on your machine
