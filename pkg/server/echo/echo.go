@@ -38,9 +38,13 @@ var (
 	Middleware = middleware.NewMiddleware("echo", setRoutes, nil)
 )
 
-// setRoutes registers the /echo routes: headers, body, ws, stream and the root echo.
+// setRoutes registers the /echo routes: headers, body, ws, stream and the root echo. The routes are registered on the
+// router of the routes-only middlewares, which doesn't run the core middlewares, so the echo router runs them itself: that's
+// what sends the goto headers (Via-Goto and the Trailer declaration for it, so the Via-Goto values that are merged in the end
+// reach the caller as a trailer too) with the response of /echo, like those of any other URI have.
 func setRoutes(r *mux.Router) {
 	echoRouter := r.PathPrefix("/echo").Subrouter()
+	middleware.UseCore(echoRouter)
 	util.AddRoute(echoRouter, "/headers", EchoHeaders)
 	util.AddRoute(echoRouter, "/body", echoBody)
 	util.AddRoute(echoRouter, "/ws", wsEchoHandler)
@@ -82,8 +86,11 @@ func echoStream(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Cannot stream")
 		return
 	}
-	util.CopyHeaders("Request", r, w, r.Header, true, true, false)
-	util.SetHeadersSent(r, true)
+	// the core middlewares send the goto headers, which have the request headers echoed, before the handler is called
+	if !util.IsHeadersSent(r) {
+		util.CopyHeaders("Request", r, w, r.Header, true, true, false)
+		util.SetHeadersSent(r, true)
+	}
 	fw.Flush()
 	reader := bufio.NewReader(r.Body)
 	for {

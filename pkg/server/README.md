@@ -507,7 +507,7 @@ Port [8080] Label Cleared
 
 # <a name="echo-api"></a>
 # Echo API
-This URI echoes back the headers and payload sent by the client. The responses carry the usual `Goto-*` headers. A forced response status (`/response/status/set`) does not apply to the echo URIs: they keep answering `200` (checked with a forced `503` on the port).
+This URI echoes back the headers and payload sent by the client. The responses carry the usual `Goto-*` headers, including `Via-Goto` (also declared and sent as a trailer), so a `goto` client that calls an echo URI on another `goto` adds the `Via-Goto` of the echoing instance to its own. A forced response status (`/response/status/set`) does not apply to the echo URIs: they keep answering `200` (checked with a forced `503` on the port).
 
 #### API
 |METHOD|URI|Description|

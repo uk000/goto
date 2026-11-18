@@ -32,6 +32,7 @@ import (
 
 	"goto/pkg/constants"
 	"goto/pkg/global"
+	"goto/pkg/server/middleware"
 	"goto/pkg/util"
 
 	"github.com/gorilla/mux"
@@ -439,6 +440,83 @@ func TestEchoBodyOfConcurrentRequestsIsOfEachRequest(t *testing.T) {
 		if want := strings.Repeat(fmt.Sprint(i%10), 1000+i); got != want {
 			t.Errorf("request %d got %d bytes back, want its own %d", i, len(got), len(want))
 		}
+	}
+}
+
+// withCoreMiddleware makes the middleware the only core middleware for the routers that are made after this call, which is
+// when the echo router takes the core middlewares to run.
+func withCoreMiddleware(t *testing.T, handler mux.MiddlewareFunc) {
+	t.Helper()
+	old := middleware.Core
+	middleware.Core = []*middleware.Middleware{middleware.NewMiddleware("core-test", nil, handler)}
+	t.Cleanup(func() { middleware.Core = old })
+}
+
+// sendGotoHeadersMiddleware is what the conn middleware does for the requests that it serves: it sends the goto headers.
+func sendGotoHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		util.SendGotoHeaders(w, r)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// The echo routes are on a router that the core middlewares don't run for, so each of them has to run them itself.
+func TestEchoRoutesRunTheCoreMiddlewares(t *testing.T) {
+	var ran []string
+	withCoreMiddleware(t, func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ran = append(ran, r.URL.Path)
+			next.ServeHTTP(w, r)
+		})
+	})
+	r := newRouter()
+	for _, path := range []string{"/echo", "/echo/headers", "/echo/body", "/echo/stream"} {
+		ran = nil
+		if rr := serve(r, "POST", path, "x\n"); rr.Code != http.StatusOK {
+			t.Errorf("%s: status = %d, want 200", path, rr.Code)
+		}
+		if len(ran) != 1 || ran[0] != path {
+			t.Errorf("%s: the core middleware ran for %v, want it to run once for the request", path, ran)
+		}
+	}
+	ran = nil
+	if rr := serve(r, "GET", "/notecho", ""); rr.Code != http.StatusNotFound || len(ran) != 0 {
+		t.Errorf("/notecho: status = %d, core middleware ran for %v, want 404 without it", rr.Code, ran)
+	}
+}
+
+// What /echo sends has to tell the caller that the Via-Goto values are final only after the body: the Via-Goto header
+// that says which goto answered, and the declaration of it as a trailer, which is what the Via-Goto values of the calls that
+// the request made are merged into at the end of the request. The goto client that calls /echo takes the Via-Goto header of
+// the response to add it to its own.
+func TestEchoSendsTheViaGotoHeaderAndDeclaresItAsTrailer(t *testing.T) {
+	withCoreMiddleware(t, sendGotoHeadersMiddleware)
+	r := newRouter()
+	for _, path := range []string{"/echo", "/echo/headers", "/echo/body", "/echo/stream"} {
+		h := serve(r, "POST", path, "x\n").Result().Header
+		if got := h.Values(constants.HeaderViaGoto); len(got) != 1 || got[0] != testLabel+"(HTTP)" {
+			t.Errorf("%s: %s = %v, want [%s(HTTP)]", path, constants.HeaderViaGoto, got, testLabel)
+		}
+		if got := strings.Join(h.Values("Trailer"), ","); !strings.Contains(got, constants.HeaderViaGoto) {
+			t.Errorf("%s: Trailer = %q, want it to declare %s", path, got, constants.HeaderViaGoto)
+		}
+	}
+}
+
+// The goto headers have the request echoed, as the stream does when it sends its headers, so it does that only once.
+func TestEchoStreamEchoesTheRequestInTheHeadersOnce(t *testing.T) {
+	withCoreMiddleware(t, sendGotoHeadersMiddleware)
+	r := newRouter()
+	rr := serve(r, "POST", "/echo/stream", "one\ntwo\n", "X-Test", "v")
+	h := rr.Result().Header
+	for _, name := range []string{"Request-URI", "Request-Method", "Request-Host", "Request-X-Test"} {
+		// the echoed headers are set under the names as they are, which are not the canonical ones that Values looks up
+		if got := h[name]; len(got) != 1 {
+			t.Errorf("%s = %v, want it once", name, got)
+		}
+	}
+	if rr.Body.String() != "one\ntwo\n" || !rr.Flushed {
+		t.Errorf("body = %q, flushed = %v, want the body given back and flushed", rr.Body.String(), rr.Flushed)
 	}
 }
 

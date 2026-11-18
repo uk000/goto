@@ -109,9 +109,8 @@ RUN --mount=type=secret,id=apk_repositories,target=/etc/apk/repositories \
 FROM release-base-core AS release-base-net
 
 ARG net
-
 RUN --mount=type=secret,id=apk_repositories,target=/etc/apk/repositories \
-	if [[ -n "$net" ]] ; then apk add nmap nmap-ncat netcat-openbsd socat tcpdump bind-tools iptables ipvsadm openssl && echo "net=$net"; fi
+	if [[ -n "$net" ]] ; then apk add nmap nmap-ncat netcat-openbsd socat tcpdump bind-tools iptables iptables-legacy ipvsadm openssl && echo "net=$net"; fi
 
 
 FROM release-base-net AS release-base
